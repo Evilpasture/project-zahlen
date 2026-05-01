@@ -48,11 +48,10 @@ endforeach()
 
 
 # Collect source files
-file(GLOB_RECURSE PROJECT_SOURCES
-    ${CMAKE_SOURCE_DIR}/src/*.cpp
-    ${CMAKE_SOURCE_DIR}/src/*.c
-    ${CMAKE_SOURCE_DIR}/src/engine/*.c
-    ${CMAKE_SOURCE_DIR}/src/engine/*.cpp
+set(PROJECT_SOURCES
+    src/main.cpp
+    src/engine/AssertHandler.cpp
+    src/engine/Render.cpp
 )
 
 add_executable(zahlen ${PROJECT_SOURCES})
