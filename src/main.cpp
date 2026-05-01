@@ -31,6 +31,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 
 			renderer.BeginFrame();
 			renderer.Clear(background);
+			renderer.DrawTriangle();
 			renderer.EndFrame();
 		}
 	}
