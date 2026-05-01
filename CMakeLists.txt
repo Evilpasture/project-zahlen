@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(zahlen LANGUAGES C CXX)
+project(zahlen LANGUAGES C CXX OBJC OBJCXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,20 +16,64 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
 endif()
 
+# Disable LLGL examples/tests in the superproject build.
+set(LLGL_BUILD_TESTS OFF CACHE BOOL "Disable LLGL tests" FORCE)
+set(LLGL_BUILD_EXAMPLES OFF CACHE BOOL "Disable LLGL examples" FORCE)
+set(LLGL_BUILD_WRAPPER_C99 OFF CACHE BOOL "Disable LLGL C wrapper" FORCE)
+set(LLGL_BUILD_WRAPPER_CSHARP OFF CACHE BOOL "Disable LLGL C# wrapper" FORCE)
+
+add_subdirectory(${CMAKE_SOURCE_DIR}/extern/LLGL SYSTEM)
+
+# --- Jolt Physics Configuration ---
+set(DOUBLE_PRECISION ON CACHE BOOL "" FORCE)
+set(USE_SSE OFF CACHE BOOL "" FORCE)
+set(USE_NEON ON CACHE BOOL "" FORCE)
+set(INTERPROCEDURAL_OPTIMIZATION ON CACHE BOOL "" FORCE)
+set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+
+# Add Jolt source
+add_subdirectory(${CMAKE_SOURCE_DIR}/extern/JoltPhysics/Build SYSTEM)
+
+foreach(dep_target LLGL LLGL_Metal LLGL_OpenGL Jolt)
+    if(TARGET ${dep_target})
+        if(MSVC)
+            target_compile_options(${dep_target} PRIVATE /W0)
+        else()
+            # -w suppresses ALL warnings for these specific targets
+            target_compile_options(${dep_target} PRIVATE -w)
+        endif()
+    endif()
+endforeach()
+
+
 # Collect source files
 file(GLOB_RECURSE PROJECT_SOURCES
     ${CMAKE_SOURCE_DIR}/src/*.cpp
     ${CMAKE_SOURCE_DIR}/src/*.c
+    ${CMAKE_SOURCE_DIR}/src/engine/*.c
+    ${CMAKE_SOURCE_DIR}/src/engine/*.cpp
 )
 
 add_executable(zahlen ${PROJECT_SOURCES})
+target_compile_definitions(zahlen PRIVATE 
+    JPH_DOUBLE_PRECISION
+    JPH_NO_CUSTOM_DETERMINISTIC_OPERATIONS
+    $<$<CONFIG:Debug>:JPH_DEBUG>
+    $<$<CONFIG:Release>:JPH_RELEASE>
+    $<$<CONFIG:RelWithDebInfo>:JPH_RELEASE>
+)
+target_link_libraries(zahlen PRIVATE LLGL Jolt)
+target_include_directories(zahlen SYSTEM PRIVATE
+    ${CMAKE_SOURCE_DIR}/extern/JoltPhysics
+    ${CMAKE_SOURCE_DIR}/extern/LLGL/include
+)
 
 target_include_directories(zahlen PRIVATE
     ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/extern/JoltPhysics
+    ${CMAKE_SOURCE_DIR}/src
 )
 
-# Example: enable warnings and sanitizer options for debugging
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-  target_compile_options(zahlen PRIVATE -Wall -Wextra -Wpedantic)
+  target_compile_options(zahlen PRIVATE -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti)
 endif()
