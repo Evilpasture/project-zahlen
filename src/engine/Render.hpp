@@ -2,6 +2,7 @@
 #include "engine/detail/String.hpp"
 
 #include <Jolt/Jolt.h>
+#include <Jolt/Math/Mat44.h> // New: For 4x4 Matrices
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
 #include <LLGL/LLGL.h>
@@ -10,8 +11,13 @@
 namespace ZHLN {
 
 struct Vertex {
-	JPH::Vec3 position; // SIMD optimized
-	JPH::Vec4 color;	// SIMD optimized
+	JPH::Vec3 position;
+	JPH::Vec4 color;
+};
+
+// New: CPU-side representation of the shader's constant buffer
+struct FrameConstants {
+	JPH::Mat44 transform;
 };
 
 class Renderer {
@@ -24,7 +30,9 @@ class Renderer {
 
 	void BeginFrame();
 	void Clear(const JPH::Vec4& color);
-	void DrawTriangle(); // The new race winner
+
+	// Updated: Now takes a transform matrix
+	void DrawTriangle(const JPH::Mat44& transform);
 	void EndFrame();
 
 	enum class ColorComponent : size_t { R = 0, G = 1, B = 2, A = 3 };
@@ -37,9 +45,14 @@ class Renderer {
 	LLGL::SwapChain* _swapChain = nullptr;
 	LLGL::CommandQueue* _commandQueue = nullptr;
 
-	// New GPU Resources
+	// GPU Resources
 	LLGL::Buffer* _vertexBuffer = nullptr;
 	LLGL::PipelineState* _pipeline = nullptr;
+
+	// New: GPU Constant Buffer Resources
+	LLGL::Buffer* _constantBuffer = nullptr;
+	LLGL::PipelineLayout* _pipelineLayout = nullptr;
+	LLGL::ResourceHeap* _resourceHeap = nullptr;
 
 	void CreatePipeline();
 };
