@@ -55,7 +55,7 @@ struct MemoryStats {
 	static inline ZHLN::Atomic<size_t> TotalAllocated{0};
 	static inline ZHLN::Atomic<size_t> TotalFreed{0};
 
-	static size_t GetCurrentUsage() { return TotalAllocated.load() - TotalFreed.load(); }
+	static size_t GetCurrentUsage() { return TotalAllocated - TotalFreed; }
 };
 
 } // namespace ZHLN
