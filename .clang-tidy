@@ -6,7 +6,7 @@ Checks: >
   readability-*,
   cppcoreguidelines-*,
   misc-*
-WarningsAsErrors: ''
+WarningsAsErrors: 'bugprone-*,performance-*,clang-analyzer-*'
 HeaderFilterRegex: 'include/|src/'
 AnalyzeTemporaryDtors: true
 FormatStyle: none
