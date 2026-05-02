@@ -27,15 +27,21 @@ Engine::Engine() {
 }
 
 Engine::~Engine() {
-	// Free all GPU assets in reverse order of creation
-	for (auto it = _cleanupQueue.rbegin(); it != _cleanupQueue.rend(); ++it) {
-		(*it)();
-	}
-	_context.reset(); // Destroy GPU connection
+	// 1. The _cleanupQueue is gone!
+	// Assets (Mesh/Material) owned by the user (main.cpp) now handle their own
+	// destruction via the LLGLDeleter. As long as the assets are declared
+	// AFTER the engine in main(), they will be destroyed BEFORE the engine.
 
-	// Destroy Physics
+	// 2. Destroy the RenderContext (GPU Connection & Window)
+	_context.reset();
+
+	// 3. Destroy Jolt Physics Globals
 	JPH::UnregisterTypes();
-	delete JPH::Factory::sInstance;
+
+	if (JPH::Factory::sInstance != nullptr) {
+		delete JPH::Factory::sInstance;
+		JPH::Factory::sInstance = nullptr;
+	}
 }
 
 bool Engine::IsRunning() const {
@@ -52,6 +58,7 @@ void Engine::EndFrame() {
 }
 
 Mesh Engine::CreateTetrahedron() {
+	LLGL::RenderSystem* sys = _context->GetSystem();
 	Vertex data[] = {{{0.0f, 0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
 					 {{0.5f, -0.5f, 0.5f}, {1.0f, 0.0f, 0.0f, 1.0f}},
 					 {{-0.5f, -0.5f, 0.5f}, {1.0f, 0.0f, 0.0f, 1.0f}},
@@ -65,28 +72,28 @@ Mesh Engine::CreateTetrahedron() {
 					 {{0.5f, -0.5f, 0.5f}, {1.0f, 1.0f, 0.0f, 1.0f}},
 					 {{0.0f, -0.5f, -0.5f}, {1.0f, 1.0f, 0.0f, 1.0f}}};
 
-	LLGL::BufferDescriptor vboDesc;
-	vboDesc.size = sizeof(data);
-	vboDesc.bindFlags = LLGL::BindFlags::VertexBuffer;
+	LLGL::BufferDescriptor vboDesc{
+		.size = sizeof(data), .bindFlags = LLGL::BindFlags::VertexBuffer, .vertexAttribs = {}};
 
-	LLGL::Buffer* vbo = _context->GetSystem()->CreateBuffer(vboDesc, data);
+	// Create raw, then wrap in smart pointer
+	auto* rawVbo = sys->CreateBuffer(vboDesc, data);
 
-	_cleanupQueue.push_back([sys = _context->GetSystem(), vbo]() { sys->Release(*vbo); });
-
-	return Mesh{.vertexBuffer = vbo, .vertexCount = 12};
+	return Mesh{.vertexBuffer = BufferPtr(rawVbo, LLGLDeleter{sys}), .vertexCount = 12};
 }
 
 Material Engine::CreateMaterial() {
 	LLGL::RenderSystem* system = _context->GetSystem();
-	Material mat;
+	LLGLDeleter deleter{system};
 
 	// 1. Constant Buffer
 	LLGL::BufferDescriptor cboDesc;
 	cboDesc.size = sizeof(FrameConstants);
 	cboDesc.bindFlags = LLGL::BindFlags::ConstantBuffer;
-	mat.constantBuffer = system->CreateBuffer(cboDesc);
 
-	// 2. Layout (Manual Assignment fixes non-aggregate error)
+	auto* rawCbo = system->CreateBuffer(cboDesc);
+	BufferPtr constantBuffer(rawCbo, deleter);
+
+	// 2. Layout (Manual Assignment for Non-Aggregate)
 	LLGL::BindingDescriptor bindingDesc;
 	bindingDesc.name = "Constants";
 	bindingDesc.type = LLGL::ResourceType::Buffer;
@@ -96,17 +103,21 @@ Material Engine::CreateMaterial() {
 
 	LLGL::PipelineLayoutDescriptor layoutDesc;
 	layoutDesc.heapBindings = {bindingDesc};
-	mat.layout = system->CreatePipelineLayout(layoutDesc);
 
-	// 3. Heap (Manual Assignment)
+	auto* rawLayout = system->CreatePipelineLayout(layoutDesc);
+	LayoutPtr layout(rawLayout, deleter);
+
+	// 3. Heap (Manual Assignment for Non-Aggregate)
 	LLGL::ResourceViewDescriptor viewDesc;
-	viewDesc.resource = mat.constantBuffer;
+	viewDesc.resource = constantBuffer.get(); // Use .get() for the raw pointer
 
 	LLGL::ResourceHeapDescriptor heapDesc;
-	heapDesc.pipelineLayout = mat.layout;
-	mat.resourceHeap = system->CreateResourceHeap(heapDesc, {&viewDesc, 1});
+	heapDesc.pipelineLayout = layout.get();
 
-	// 4. Shaders (Hardcoded for now)
+	auto* rawHeap = system->CreateResourceHeap(heapDesc, {&viewDesc, 1});
+	HeapPtr resourceHeap(rawHeap, deleter);
+
+	// 4. Shaders (Hardcoded MSL)
 	const char* mslSource = R"(
 	#include <metal_stdlib>
 	using namespace metal;
@@ -141,7 +152,7 @@ Material Engine::CreateMaterial() {
 
 	// 5. Pipeline State
 	LLGL::GraphicsPipelineDescriptor psoDesc;
-	psoDesc.pipelineLayout = mat.layout;
+	psoDesc.pipelineLayout = layout.get();
 	psoDesc.renderPass = _context->GetSwapChain()->GetRenderPass();
 	psoDesc.vertexShader = vs;
 	psoDesc.fragmentShader = fs;
@@ -149,20 +160,19 @@ Material Engine::CreateMaterial() {
 	psoDesc.depth.testEnabled = true;
 	psoDesc.depth.writeEnabled = true;
 	psoDesc.depth.compareOp = LLGL::CompareOp::Less;
-	mat.pipeline = system->CreatePipelineState(psoDesc);
 
+	auto* rawPso = system->CreatePipelineState(psoDesc);
+	PipelinePtr pipeline(rawPso, deleter);
+
+	// Temporary shaders can be released immediately
 	system->Release(*vs);
 	system->Release(*fs);
 
-	// Register Cleanup
-	_cleanupQueue.push_back([system, mat]() {
-		system->Release(*mat.constantBuffer);
-		system->Release(*mat.layout);
-		system->Release(*mat.resourceHeap);
-		system->Release(*mat.pipeline);
-	});
-
-	return mat;
+	// Return everything moved into the Material struct
+	return Material{.pipeline = std::move(pipeline),
+					.layout = std::move(layout),
+					.resourceHeap = std::move(resourceHeap),
+					.constantBuffer = std::move(constantBuffer)};
 }
 
 } // namespace ZHLN

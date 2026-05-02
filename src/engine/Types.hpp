@@ -1,18 +1,37 @@
 #pragma once
 #include <LLGL/LLGL.h>
+#include <memory>
 
 namespace ZHLN {
 
+struct LLGLDeleter {
+	LLGL::RenderSystem* system = nullptr;
+
+	template <typename T> void operator()(T* resource) const {
+		if (system && resource) {
+			system->Release(*resource);
+		}
+	}
+};
+
+template <typename T> using LLGLPtr = std::unique_ptr<T, LLGLDeleter>;
+
+using BufferPtr = LLGLPtr<LLGL::Buffer>;
+using PipelinePtr = LLGLPtr<LLGL::PipelineState>;
+using LayoutPtr = LLGLPtr<LLGL::PipelineLayout>;
+using HeapPtr = LLGLPtr<LLGL::ResourceHeap>;
+using ShaderPtr = LLGLPtr<LLGL::Shader>;
+
 struct Mesh {
-	LLGL::Buffer* vertexBuffer = nullptr;
+	BufferPtr vertexBuffer;
 	uint32_t vertexCount = 0;
 };
 
 struct Material {
-	LLGL::PipelineState* pipeline = nullptr;
-	LLGL::PipelineLayout* layout = nullptr;
-	LLGL::ResourceHeap* resourceHeap = nullptr;
-	LLGL::Buffer* constantBuffer = nullptr;
+	PipelinePtr pipeline;
+	LayoutPtr layout;
+	HeapPtr resourceHeap;
+	BufferPtr constantBuffer;
 };
 
 } // namespace ZHLN

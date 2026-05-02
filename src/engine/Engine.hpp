@@ -2,9 +2,6 @@
 #include "engine/Render.hpp"
 #include "engine/Types.hpp"
 
-#include <functional>
-#include <vector>
-
 namespace ZHLN {
 
 class Engine {
@@ -25,9 +22,6 @@ class Engine {
 
   private:
 	std::unique_ptr<RenderContext> _context;
-
-	// A simple garbage collector: when the engine dies, it calls these to free GPU memory
-	std::vector<std::function<void()>> _cleanupQueue;
 };
 
 } // namespace ZHLN

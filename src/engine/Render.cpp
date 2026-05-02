@@ -85,17 +85,13 @@ void UpdateBuffer(RenderContext& ctx, LLGL::Buffer* buffer, const void* data, si
 
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 		  const JPH::Mat44& transform) {
-	// 1. Update Uniforms
-	FrameConstants constants{.transform = transform};
-	UpdateBuffer(ctx, material.constantBuffer, constants);
+	UpdateBuffer(ctx, material.constantBuffer.get(), transform); // .get() for raw pointer
 
-	// 2. Bind Pipeline State
 	auto* cmd = ctx.GetCommandBuffer();
 	cmd->SetPipelineState(*material.pipeline);
 	cmd->SetResourceHeap(*material.resourceHeap);
-
-	// 3. Bind Geometry and Draw
 	cmd->SetVertexBuffer(*mesh.vertexBuffer);
+
 	cmd->Draw(mesh.vertexCount, 0);
 }
 
