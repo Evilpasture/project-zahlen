@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(zahlen LANGUAGES C CXX OBJC OBJCXX)
+project(zahlen LANGUAGES C CXX OBJC OBJCXX ASM)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -90,6 +90,9 @@ set(PROJECT_SOURCES
     src/engine/AssetFactory.cpp
     src/engine/Window.cpp
     src/engine/Window.mm
+    src/engine/Mutex.cpp
+    src/engine/Thread.cpp
+    src/engine/Thread.S
 )
 
 add_executable(zahlen ${PROJECT_SOURCES})

@@ -4,6 +4,7 @@
 #include <Jolt/RegisterTypes.h>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/Thread.hpp>
 // clang-format on
 
 namespace ZHLN {
@@ -13,6 +14,8 @@ extern bool JoltAssertBridge(const char* inExpression, const char* inMessage, co
 							 uint32_t inLine) noexcept;
 
 Engine::Engine() {
+	// 0. Initialize Fiber System
+	ZHLN::Fiber::InitMainThread();
 	// 1. Initialize Physics Globals
 	JPH::RegisterDefaultAllocator();
 	JPH::Trace = JoltTraceBridge;

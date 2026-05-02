@@ -287,8 +287,6 @@ PhysicsContext::PhysicsContext() : _impl(std::make_unique<Impl>()) {
 	_impl->world.tempAllocator = &_impl->tempAllocator;
 	_impl->world.maxJoltBodies = maxBodies;
 
-	_impl->world.shadowLock.clear();
-
 	// Allocate Bucket 2 & ECS Mapping Arrays
 	// CRITICAL: Multiply by 4 (not 3) to allow safe 128/256-bit SIMD stores
 	_impl->world.capacity = maxBodies;
@@ -329,40 +327,39 @@ void PhysicsContext::Step(float deltaTime) {
 	// 1. Physics Step
 	_impl->physicsSystem.Update(deltaTime, 1, &_impl->tempAllocator, &_impl->jobSystem);
 
-	// 2. Sync Lock
-	while (world.shadowLock.test_and_set(std::memory_order_acquire)) {
+	// 2. Sync Lock (Replaces the while loop and the manual .clear() at the end)
+	{
+		std::lock_guard<ZHLN::Mutex> lock(world.shadowLock);
+
+		// 3. Setup Structs
+		Physics::Sync::WorldDataCreateInfo syncWorld = {
+			.shadow_pos = std::assume_aligned<32>(
+				reinterpret_cast<Physics::Sync::PosStride*>(world.positions)),
+			.shadow_ppos = std::assume_aligned<32>(
+				reinterpret_cast<Physics::Sync::PosStride*>(world.prevPositions)),
+			.shadow_rot = std::assume_aligned<16>(
+				reinterpret_cast<Physics::Sync::AuxStride*>(world.rotations)),
+			.shadow_prot = std::assume_aligned<16>(
+				reinterpret_cast<Physics::Sync::AuxStride*>(world.prevRotations)),
+			.shadow_lvel = std::assume_aligned<16>(
+				reinterpret_cast<Physics::Sync::AuxStride*>(world.linearVelocities)),
+			.shadow_avel = std::assume_aligned<16>(
+				reinterpret_cast<Physics::Sync::AuxStride*>(world.angularVelocities)),
+		};
+
+		Physics::Sync::MappingDataCreateInfo mapData = {
+			.body_ptrs = world.joltBodyPtrs,
+			.generations = world.generations,
+			.slot_capacity = world.slotCapacity,
+			.slot_to_dense = world.slotToDense,
+		};
+
+		// 4. Run Sync
+		const uint32_t activeRigids =
+			_impl->physicsSystem.GetNumActiveBodies(JPH::EBodyType::RigidBody);
+		Physics::Sync::ExecuteSyncPass<JPH::EBodyType::RigidBody>(
+			activeRigids, &_impl->physicsSystem, mapData, syncWorld);
 	}
-
-	// 3. Setup Structs
-	Physics::Sync::WorldDataCreateInfo syncWorld = {
-		.shadow_pos =
-			std::assume_aligned<32>(reinterpret_cast<Physics::Sync::PosStride*>(world.positions)),
-		.shadow_ppos = std::assume_aligned<32>(
-			reinterpret_cast<Physics::Sync::PosStride*>(world.prevPositions)),
-		.shadow_rot =
-			std::assume_aligned<16>(reinterpret_cast<Physics::Sync::AuxStride*>(world.rotations)),
-		.shadow_prot = std::assume_aligned<16>(
-			reinterpret_cast<Physics::Sync::AuxStride*>(world.prevRotations)),
-		.shadow_lvel = std::assume_aligned<16>(
-			reinterpret_cast<Physics::Sync::AuxStride*>(world.linearVelocities)),
-		.shadow_avel = std::assume_aligned<16>(
-			reinterpret_cast<Physics::Sync::AuxStride*>(world.angularVelocities)),
-	};
-
-	Physics::Sync::MappingDataCreateInfo mapData = {
-		.body_ptrs = world.joltBodyPtrs,
-		.generations = world.generations,
-		.slot_capacity = world.slotCapacity,
-		.slot_to_dense = world.slotToDense,
-	};
-
-	// 4. Run Sync
-	const uint32_t activeRigids =
-		_impl->physicsSystem.GetNumActiveBodies(JPH::EBodyType::RigidBody);
-	Physics::Sync::ExecuteSyncPass<JPH::EBodyType::RigidBody>(activeRigids, &_impl->physicsSystem,
-															  mapData, syncWorld);
-
-	world.shadowLock.clear(std::memory_order_release);
 	world.isStepping.store(false, std::memory_order_release);
 }
 

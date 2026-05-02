@@ -2,6 +2,7 @@
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/PhysicsSystem.h>
+#include <Zahlen/Mutex.hpp>
 #include <Zahlen/Physics.hpp>
 #include <Zahlen/detail/Platform.hpp>
 #include <atomic>
@@ -58,7 +59,7 @@ struct PhysicsWorld {
 	// ========================================================================
 	// BUCKET 3: COMMAND QUEUE & MUTEXES (The War Zone)
 	// ========================================================================
-	alignas(CACHE_LINE) std::atomic_flag shadowLock;
+	alignas(CACHE_LINE) ZHLN::Mutex shadowLock;
 
 	void* commandQueue;
 	void* commandQueueSpare;
