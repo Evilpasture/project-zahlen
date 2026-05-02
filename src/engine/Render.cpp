@@ -30,13 +30,23 @@ RenderContext::RenderContext(Window& window, const String32& preferredAPI) {
 
 	_swapChain = _system->CreateSwapChain(swapChainDesc, window.GetNative());
 	_commandQueue = _system->GetCommandQueue();
-	_cmdBuffer = std::unique_ptr<LLGL::CommandBuffer>(_system->CreateCommandBuffer());
+	_cmdBuffer = LLGLPtr<LLGL::CommandBuffer>(
+        _system->CreateCommandBuffer(), 
+        LLGLDeleter{_system.get()} 
+    );
 }
 
 RenderContext::~RenderContext() {
-	if (_system) {
-		LLGL::RenderSystem::Unload(std::move(_system));
-	}
+    if (_system) {
+        // 1. Manually kill the command buffer first while the system is alive
+        _cmdBuffer.reset();
+        
+        // 2. The SwapChain is owned by the system, so we don't reset it, 
+        // but we ensure no one else is using it.
+        
+        // 3. Now it is safe to unload the system
+        LLGL::RenderSystem::Unload(std::move(_system));
+    }
 }
 
 void RenderContext::BeginFrame() {

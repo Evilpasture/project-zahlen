@@ -27,8 +27,8 @@ class RenderContext {
 	LLGL::SwapChain* GetSwapChain() const { return _swapChain; }
 
   private:
-	LLGL::RenderSystemPtr _system;
-	std::unique_ptr<LLGL::CommandBuffer> _cmdBuffer;
+	LLGLPtr<LLGL::CommandBuffer> _cmdBuffer; 
+	LLGL::RenderSystemPtr _system; // System declared LAST, dies LAST
 	LLGL::SwapChain* _swapChain = nullptr;
 	LLGL::CommandQueue* _commandQueue = nullptr;
 };
