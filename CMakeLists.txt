@@ -24,6 +24,39 @@ set(LLGL_BUILD_WRAPPER_CSHARP OFF CACHE BOOL "Disable LLGL C# wrapper" FORCE)
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/LLGL SYSTEM)
 
+include(ExternalProject)
+find_program(LUAJIT_MAKE NAMES gmake make REQUIRED)
+
+set(LUAJIT_SOURCE_DIR ${CMAKE_SOURCE_DIR}/extern/LuaJIT)
+set(LUAJIT_SRC_DIR ${LUAJIT_SOURCE_DIR}/src)
+
+if(APPLE)
+  if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET OR CMAKE_OSX_DEPLOYMENT_TARGET STREQUAL "")
+    set(LUAJIT_MACOSX_DEPLOYMENT_TARGET 10.15)
+  else()
+    set(LUAJIT_MACOSX_DEPLOYMENT_TARGET ${CMAKE_OSX_DEPLOYMENT_TARGET})
+  endif()
+  set(LUAJIT_BUILD_COMMAND ${CMAKE_COMMAND} -E env "MACOSX_DEPLOYMENT_TARGET=${LUAJIT_MACOSX_DEPLOYMENT_TARGET}" ${LUAJIT_MAKE})
+else()
+  set(LUAJIT_BUILD_COMMAND ${LUAJIT_MAKE})
+endif()
+
+ExternalProject_Add(LuaJITProject
+    SOURCE_DIR ${LUAJIT_SOURCE_DIR}
+    BINARY_DIR ${LUAJIT_SRC_DIR}
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ${LUAJIT_BUILD_COMMAND}
+    INSTALL_COMMAND ""
+    BUILD_BYPRODUCTS ${LUAJIT_SRC_DIR}/libluajit.a
+)
+
+add_library(LuaJIT STATIC IMPORTED GLOBAL)
+set_target_properties(LuaJIT PROPERTIES
+    IMPORTED_LOCATION ${LUAJIT_SRC_DIR}/libluajit.a
+    INTERFACE_INCLUDE_DIRECTORIES ${LUAJIT_SRC_DIR}
+)
+add_dependencies(LuaJIT LuaJITProject)
+
 # --- Jolt Physics Configuration ---
 set(DOUBLE_PRECISION ON CACHE BOOL "" FORCE)
 set(USE_SSE OFF CACHE BOOL "" FORCE)
@@ -67,7 +100,7 @@ target_compile_definitions(zahlen PRIVATE
     $<$<CONFIG:Release>:JPH_RELEASE>
     $<$<CONFIG:RelWithDebInfo>:JPH_RELEASE>
 )
-target_link_libraries(zahlen PRIVATE LLGL Jolt)
+target_link_libraries(zahlen PRIVATE LLGL Jolt LuaJIT)
 target_include_directories(zahlen SYSTEM PRIVATE
     ${CMAKE_SOURCE_DIR}/extern/JoltPhysics
     ${CMAKE_SOURCE_DIR}/extern/LLGL/include
@@ -76,6 +109,7 @@ target_include_directories(zahlen SYSTEM PRIVATE
 target_include_directories(zahlen PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/extern/LuaJIT/src
 )
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")

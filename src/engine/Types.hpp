@@ -4,6 +4,7 @@
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
 #include <LLGL/LLGL.h>
+#include <lua.hpp>
 #include <memory>
 
 namespace ZHLN {
@@ -35,6 +36,15 @@ using BufferPtr = LLGLPtr<LLGL::Buffer>;
 using PipelinePtr = LLGLPtr<LLGL::PipelineState>;
 using LayoutPtr = LLGLPtr<LLGL::PipelineLayout>;
 using HeapPtr = LLGLPtr<LLGL::ResourceHeap>;
+
+struct LuaDeleter {
+	void operator()(lua_State* L) const {
+		if (L)
+			lua_close(L);
+	}
+};
+
+using LuaPtr = std::unique_ptr<lua_State, LuaDeleter>;
 
 struct Mesh {
 	BufferPtr vertexBuffer;
