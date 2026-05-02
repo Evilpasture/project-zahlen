@@ -1,6 +1,6 @@
 #pragma once
 
-#if __cplusplus < 202302L
+#if (__cplusplus < 202302L) && (!defined(_MSVC_LANG) || _MSVC_LANG < 202302L)
 #error Project-Zahlen requires a compiler that supports C++23.
 #endif
 

@@ -2,9 +2,7 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp> // For our ZHLN::Log
 #include <Zahlen/Math3D.hpp>
-
 #include <lua.hpp>
-#include <vector>
 
 using namespace ZHLN;
 
@@ -45,7 +43,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	const Material basic = AssetFactory::CreateBasicMaterial(engine.GetRenderContext());
 
 	Physics::CreateStaticFloor(engine.GetPhysicsContext(), 20.0f);
-	std::vector<JPH::BodyID> boxes;
+	JPH::Array<JPH::BodyID> boxes;
 	boxes.push_back(
 		Physics::CreateDynamicBox(engine.GetPhysicsContext(), {0, 8, 0}, {0.5f, 0.5f, 0.5f}));
 	boxes.push_back(

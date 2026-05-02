@@ -24,6 +24,8 @@ struct EntityHandle {
 	}
 };
 
+static_assert(std::is_trivially_copyable<EntityHandle>());
+
 class PhysicsContext {
   public:
 	PhysicsContext();
