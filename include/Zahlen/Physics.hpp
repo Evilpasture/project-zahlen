@@ -8,7 +8,9 @@
 #include <memory>
 
 namespace ZHLN {
-
+namespace Physics {
+struct PhysicsWorld;
+}
 // --- ECS Handle for UserData ---
 struct EntityHandle {
 	uint32_t index = 0;
@@ -38,6 +40,8 @@ class PhysicsContext {
 
 	struct Impl;
 	Impl* GetImpl() const { return _impl.get(); }
+
+	const Physics::PhysicsWorld& GetWorld() const;
 
   private:
 	std::unique_ptr<Impl> _impl;

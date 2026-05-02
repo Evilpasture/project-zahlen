@@ -93,6 +93,7 @@ set(PROJECT_SOURCES
     src/engine/Mutex.cpp
     src/engine/Thread.cpp
     src/engine/Thread.S
+    src/engine/Input.cpp
 )
 
 add_executable(zahlen ${PROJECT_SOURCES})

@@ -363,6 +363,10 @@ void PhysicsContext::Step(float deltaTime) {
 	world.isStepping.store(false, std::memory_order_release);
 }
 
+const Physics::PhysicsWorld& PhysicsContext::GetWorld() const {
+	return _impl->world;
+}
+
 // =================================================================================================
 // PROCEDURAL API
 // =================================================================================================

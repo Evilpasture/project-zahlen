@@ -43,11 +43,7 @@ struct alignas(128) Fiber {
 };
 
 // Global Linker Satellites for Mutex.cpp
-inline Fiber* GetCurrentFiber() noexcept {
-	return Fiber::GetCurrent();
-}
-inline void YieldFiber() noexcept {
-	Fiber::Yield();
-}
+Fiber* GetCurrentFiber() noexcept;
+void YieldFiber() noexcept;
 
 } // namespace ZHLN

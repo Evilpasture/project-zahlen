@@ -164,4 +164,12 @@ void Fiber::Destroy(Fiber* fiber) noexcept {
 #endif
 }
 
+Fiber* GetCurrentFiber() noexcept {
+	return Fiber::GetCurrent();
+}
+
+void YieldFiber() noexcept {
+	Fiber::Yield();
+}
+
 } // namespace ZHLN

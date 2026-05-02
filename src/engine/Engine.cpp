@@ -5,6 +5,8 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Thread.hpp>
+#include <LLGL/Window.h>
+#include <LLGL/Key.h>
 // clang-format on
 
 namespace ZHLN {
@@ -28,10 +30,16 @@ Engine::Engine() {
 	// 2. Initialize OS Window
 	_window = std::make_unique<Window>("Project-Zahlen Engine", 1280, 720);
 
-	// 3. Initialize Graphics (Now takes the window reference)
+	// 3. Create the InputContext as a shared_ptr
+	_input = std::make_shared<InputContext>();
+
+	// 4. Attach it to the LLGL window
+	_window->GetNative()->AddEventListener(_input);
+
+	// 5. Initialize Graphics (Now takes the window reference)
 	_renderContext = std::make_unique<RenderContext>(*_window, "Metal");
 
-	// 4. Initialize Physics System
+	// 6. Initialize Physics System
 	_physicsContext = std::make_unique<PhysicsContext>();
 }
 
@@ -55,7 +63,12 @@ bool Engine::IsRunning() const {
 }
 
 void Engine::ProcessEvents() {
-	_window->ProcessEvents();
+	// 3. Clear deltas before processing new events
+	_input->ResetDeltas();
+
+	// 4. Pump the OS message queue.
+	// This will internally call your OnKeyDown, OnLocalMouseMove, etc.
+	LLGL::Surface::ProcessEvents();
 }
 
 void Engine::BeginFrame() {
