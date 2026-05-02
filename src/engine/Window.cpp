@@ -1,5 +1,10 @@
 #include <Zahlen/Window.hpp>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+
 namespace ZHLN {
 
 Window::Window(const String32& title, uint32_t width, uint32_t height) {
@@ -21,6 +26,21 @@ bool Window::IsRunning() const {
 
 void Window::ProcessEvents() {
 	_native->ProcessEvents();
+}
+
+void Window::Focus() {
+#ifdef _WIN32
+    // Fetch the native HWND from LLGL
+    LLGL::WindowDescriptor desc;
+    _native->GetNativeHandle(&desc, sizeof(desc));
+    HWND hwnd = (HWND)desc.windowContext; 
+    
+    if (hwnd) {
+        // Bring to front and grab input focus
+        SetForegroundWindow(hwnd);
+        SetFocus(hwnd);
+    }
+#endif
 }
 
 } // namespace ZHLN

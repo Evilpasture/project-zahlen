@@ -6,5 +6,5 @@
 	url = https://github.com/LukasBanana/LLGL.git
 [submodule "extern/LuaJIT"]
 	path = extern/LuaJIT
-	url = https://github.com/LuaJIT/LuaJIT.git
+	url = https://github.com/Evilpasture/LuaJIT.git
 	branch = v2.1
