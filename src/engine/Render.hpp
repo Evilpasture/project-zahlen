@@ -1,4 +1,5 @@
 #pragma once
+#include "engine/Types.hpp"
 #include "engine/detail/String.hpp"
 
 #include <Jolt/Jolt.h>
@@ -53,7 +54,7 @@ class RenderContext {
 namespace Renderer {
 enum class ColorComponent : size_t { R = 0, G = 1, B = 2, A = 3 };
 
-void Clear(RenderContext& ctx, const JPH::Vec4& color);
+void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth = 1.0f);
 
 // Fast memory upload
 void UpdateBuffer(RenderContext& ctx, LLGL::Buffer* buffer, const void* data, size_t size);
@@ -63,9 +64,9 @@ inline void UpdateBuffer(RenderContext& ctx, LLGL::Buffer* buffer, const T& data
 	UpdateBuffer(ctx, buffer, static_cast<const void*>(&data), sizeof(T));
 }
 
-// Stateless draw command
-void Draw(RenderContext& ctx, LLGL::PipelineState* pipeline, LLGL::ResourceHeap* resources,
-		  LLGL::Buffer* vertexBuffer, uint32_t vertexCount);
+// NEW: High-level draw command
+void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
+		  const JPH::Mat44& transform);
 } // namespace Renderer
 
 } // namespace ZHLN

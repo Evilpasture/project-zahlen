@@ -30,8 +30,8 @@ RenderContext::RenderContext(const String32& preferredAPI, uint32_t width, uint3
 							   .size = {width, height},
 							   .flags = LLGL::WindowFlags::Visible | LLGL::WindowFlags::Centered});
 
-	_swapChain =
-		_system->CreateSwapChain({.resolution = _window->GetSize(), .samples = 8}, _window);
+	_swapChain = _system->CreateSwapChain(
+		{.resolution = _window->GetSize(), .depthBits = 32, .samples = 8}, _window);
 	_commandQueue = _system->GetCommandQueue();
 	_cmdBuffer = std::unique_ptr<LLGL::CommandBuffer>(_system->CreateCommandBuffer());
 }
@@ -66,31 +66,37 @@ void RenderContext::EndFrame() {
 
 namespace Renderer {
 
-void Clear(RenderContext& ctx, const JPH::Vec4& color) {
+void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
 	LLGL::ClearValue val;
 	using Ch = ColorComponent;
 	val.color[std::to_underlying(Ch::R)] = color.GetX();
 	val.color[std::to_underlying(Ch::G)] = color.GetY();
 	val.color[std::to_underlying(Ch::B)] = color.GetZ();
 	val.color[std::to_underlying(Ch::A)] = color.GetW();
-	ctx.GetCommandBuffer()->Clear(LLGL::ClearFlags::Color, val);
+	val.depth = depth; // Set the depth clear value (1.0 is the farthest)
+
+	// Clear BOTH color and depth buffers
+	ctx.GetCommandBuffer()->Clear(LLGL::ClearFlags::Color | LLGL::ClearFlags::Depth, val);
 }
 
 void UpdateBuffer(RenderContext& ctx, LLGL::Buffer* buffer, const void* data, size_t size) {
 	ctx.GetSystem()->WriteBuffer(*buffer, 0, data, size);
 }
 
-void Draw(RenderContext& ctx, LLGL::PipelineState* pipeline, LLGL::ResourceHeap* resources,
-		  LLGL::Buffer* vertexBuffer, uint32_t vertexCount) {
+void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
+		  const JPH::Mat44& transform) {
+	// 1. Update Uniforms
+	FrameConstants constants{.transform = transform};
+	UpdateBuffer(ctx, material.constantBuffer, constants);
+
+	// 2. Bind Pipeline State
 	auto* cmd = ctx.GetCommandBuffer();
-	cmd->SetVertexBuffer(*vertexBuffer);
-	cmd->SetPipelineState(*pipeline);
+	cmd->SetPipelineState(*material.pipeline);
+	cmd->SetResourceHeap(*material.resourceHeap);
 
-	if (resources) {
-		cmd->SetResourceHeap(*resources);
-	}
-
-	cmd->Draw(vertexCount, 0);
+	// 3. Bind Geometry and Draw
+	cmd->SetVertexBuffer(*mesh.vertexBuffer);
+	cmd->Draw(mesh.vertexCount, 0);
 }
 
 } // namespace Renderer
