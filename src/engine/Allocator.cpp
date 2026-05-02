@@ -45,8 +45,7 @@ void* LinearAllocator::do_allocate(size_t bytes, size_t alignment) {
 	return reinterpret_cast<void*>(alignedAddr);
 }
 
-void LinearAllocator::do_deallocate([[maybe_unused]] void* p, [[maybe_unused]] size_t bytes,
-									[[maybe_unused]] size_t alignment) {
+void LinearAllocator::do_deallocate(void* /*p*/, size_t /*bytes*/, size_t /*alignment*/) {
 	// No-op: Linear allocators reset all at once
 }
 

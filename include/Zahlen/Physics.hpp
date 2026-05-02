@@ -1,9 +1,12 @@
 #pragma once
 
+#include "Zahlen/Buffer.hpp"
+
 #include <Jolt/Jolt.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Physics/Body/BodyID.h>
+#include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <cstdint>
 #include <memory>
 
@@ -48,6 +51,7 @@ class PhysicsContext {
 };
 
 namespace Physics {
+
 // position is RVec3Arg (Double if JPH_DOUBLE_PRECISION is on)
 // halfExtents is Vec3Arg (Always float)
 JPH::BodyID CreateStaticFloor(PhysicsContext& ctx, float extent, EntityHandle handle = {});
@@ -55,10 +59,18 @@ JPH::BodyID CreateDynamicBox(PhysicsContext& ctx, JPH::RVec3Arg position, JPH::V
 							 EntityHandle handle = {});
 void DestroyBody(PhysicsContext& ctx, JPH::BodyID bodyID, EntityHandle handle);
 JPH::RVec3 GetPosition(const PhysicsContext& ctx, JPH::BodyID bodyID);
+auto GetPositionBuffer(const PhysicsContext& ctx) -> BufferView;
 JPH::Quat GetRotation(const PhysicsContext& ctx, JPH::BodyID bodyID);
 
 // NEW: Read the handle back from a collision event or query
 EntityHandle GetEntityHandle(const PhysicsContext& ctx, JPH::BodyID bodyID);
+
+// Returns the same handle for convenience
+EntityHandle CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position, EntityHandle handle);
+
+// Commands now take the Handle
+void SetCharacterVelocity(PhysicsContext& ctx, EntityHandle handle, JPH::Vec3Arg linearVelocity);
+bool IsCharacterOnGround(const PhysicsContext& ctx, EntityHandle handle);
 } // namespace Physics
 
 } // namespace ZHLN

@@ -1,5 +1,6 @@
 // clang-format off
 #include <Jolt/Jolt.h>
+#include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
@@ -7,6 +8,7 @@
 #include <Jolt/Core/JobSystemThreadPool.h>
 
 #include <Zahlen/Physics.hpp>
+#include <Zahlen/Buffer.hpp>
 #include <Zahlen/PhysicsWorld.hpp>
 #include <Zahlen/Log.hpp>
 
@@ -271,6 +273,18 @@ struct PhysicsContext::Impl {
 	ObjectLayerPairFilterImpl objVsObjFilter;
 
 	Physics::PhysicsWorld world{};
+
+	// Map: Entity Index -> Character Object
+	// We use JPH::Ref to keep the character alive
+	JPH::Array<JPH::Ref<JPH::CharacterVirtual>> characterMap;
+
+	// Fast list for the Step() function to iterate over
+	JPH::Array<JPH::CharacterVirtual*> activeCharacters;
+
+	// We need a listener for character-specific interactions
+	class CharacterListener : public JPH::CharacterContactListener {
+		// Implement if you need character-specific collision logic
+	} characterListener;
 };
 
 PhysicsContext::PhysicsContext() : _impl(std::make_unique<Impl>()) {
@@ -327,6 +341,12 @@ void PhysicsContext::Step(float deltaTime) {
 
 	// 1. Physics Step
 	_impl->physicsSystem.Update(deltaTime, 1, &_impl->tempAllocator, &_impl->jobSystem);
+	for (auto* character : _impl->activeCharacters) {
+		character->Update(deltaTime, _impl->physicsSystem.GetGravity(),
+						  _impl->physicsSystem.GetDefaultBroadPhaseLayerFilter(Layers::MOVING),
+						  _impl->physicsSystem.GetDefaultLayerFilter(Layers::MOVING), {}, {},
+						  _impl->tempAllocator);
+	}
 
 	// 2. Sync Lock (Replaces the while loop and the manual .clear() at the end)
 	{
@@ -360,6 +380,25 @@ void PhysicsContext::Step(float deltaTime) {
 			_impl->physicsSystem.GetNumActiveBodies(JPH::EBodyType::RigidBody);
 		Physics::Sync::ExecuteSyncPass<JPH::EBodyType::RigidBody>(
 			activeRigids, &_impl->physicsSystem, mapData, syncWorld);
+
+		// 5. Manually sync Character transforms to SoA
+		for (auto* character : _impl->activeCharacters) {
+			EntityHandle h = EntityHandle::Unpack(character->GetUserData());
+			uint32_t denseIdx = world.slotToDense[h.index];
+
+			JPH::RVec3 pos = character->GetPosition();
+			JPH::Quat rot = character->GetRotation();
+
+			// Write to SoA (Padded for SIMD)
+			world.positions[denseIdx * 4 + 0] = pos.GetX();
+			world.positions[denseIdx * 4 + 1] = pos.GetY();
+			world.positions[denseIdx * 4 + 2] = pos.GetZ();
+
+			world.rotations[denseIdx * 4 + 0] = rot.GetX();
+			world.rotations[denseIdx * 4 + 1] = rot.GetY();
+			world.rotations[denseIdx * 4 + 2] = rot.GetZ();
+			world.rotations[denseIdx * 4 + 3] = rot.GetW();
+		}
 	}
 	world.isStepping.store(false, std::memory_order_release);
 }
@@ -488,8 +527,59 @@ JPH::BodyID CreateDynamicBox(PhysicsContext& ctx, JPH::RVec3Arg position, JPH::V
 	return id;
 }
 
+EntityHandle CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position, EntityHandle handle) {
+	auto* impl = ctx.GetImpl();
+
+	// 1. Setup Settings
+	JPH::CharacterVirtualSettings settings;
+	settings.mShape = new JPH::CapsuleShape(0.5f, 0.3f);
+
+	// 2. Create
+	auto character = new JPH::CharacterVirtual(&settings, position, JPH::Quat::sIdentity(),
+											   &impl->physicsSystem);
+	character->SetUserData(handle.Pack());
+
+	// 3. Store in the generational map
+	if (handle.index >= impl->characterMap.size()) {
+		impl->characterMap.resize(handle.index + 1);
+	}
+	impl->characterMap[handle.index] = character;
+	impl->activeCharacters.push_back(character);
+
+	// 4. Register in SoA (Passing Invalid BodyID to signify it's a Character)
+	RegisterBodyToWorld(impl->world, JPH::BodyID(), handle);
+
+	return handle;
+}
+
+void SetCharacterVelocity(PhysicsContext& ctx, EntityHandle handle, JPH::Vec3Arg velocity) {
+	auto* impl = ctx.GetImpl();
+
+	// Generational Safety Check
+	if (handle.index < impl->characterMap.size()) {
+		auto& character = impl->characterMap[handle.index];
+		if (character &&
+			EntityHandle::Unpack(character->GetUserData()).generation == handle.generation) {
+			character->SetLinearVelocity(velocity);
+		}
+	}
+}
+
 JPH::RVec3 GetPosition(const PhysicsContext& ctx, JPH::BodyID bodyID) {
 	return ctx.GetImpl()->world.bodyInterface->GetPosition(bodyID);
+}
+
+auto GetPositionBuffer(const PhysicsContext& ctx) -> ZHLN::BufferView {
+	const auto& world = ctx.GetWorld();
+	BufferView view;
+	view.buf = world.positions;
+	view.itemsize = sizeof(JPH::Real);
+	// Stride is 4 * itemsize because our SoA is packed [x,y,z,w]
+	view.strides[0] = sizeof(JPH::Real) * 4;
+	view.shape[0] = world.count.load();
+	view.ndim = 1;
+	view.format[0] = (sizeof(JPH::Real) == 8) ? 'd' : 'f';
+	return view;
 }
 
 JPH::Quat GetRotation(const PhysicsContext& ctx, JPH::BodyID bodyID) {
