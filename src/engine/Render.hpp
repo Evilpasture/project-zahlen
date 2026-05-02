@@ -2,7 +2,7 @@
 #include "engine/detail/String.hpp"
 
 #include <Jolt/Jolt.h>
-#include <Jolt/Math/Mat44.h> // New: For 4x4 Matrices
+#include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
 #include <LLGL/LLGL.h>
@@ -10,32 +10,35 @@
 
 namespace ZHLN {
 
+// Standard Engine Formats
 struct Vertex {
 	JPH::Vec3 position;
 	JPH::Vec4 color;
 };
 
-// New: CPU-side representation of the shader's constant buffer
 struct FrameConstants {
 	JPH::Mat44 transform;
 };
 
-class Renderer {
+// 1. The Global State Group (Hardware & OS)
+class RenderContext {
   public:
-	Renderer(const String32& preferredAPI, uint32_t width, uint32_t height);
-	~Renderer();
+	RenderContext(const String32& preferredAPI, uint32_t width, uint32_t height);
+	~RenderContext();
+
+	RenderContext(const RenderContext&) = delete;
+	RenderContext& operator=(const RenderContext&) = delete;
 
 	bool IsRunning() const;
 	void ProcessEvents();
 
 	void BeginFrame();
-	void Clear(const JPH::Vec4& color);
-
-	// Updated: Now takes a transform matrix
-	void DrawTriangle(const JPH::Mat44& transform);
 	void EndFrame();
 
-	enum class ColorComponent : size_t { R = 0, G = 1, B = 2, A = 3 };
+	// Expose for external resource creation
+	LLGL::RenderSystem* GetSystem() const { return _system.get(); }
+	LLGL::CommandBuffer* GetCommandBuffer() const { return _cmdBuffer.get(); }
+	LLGL::SwapChain* GetSwapChain() const { return _swapChain; }
 
   private:
 	LLGL::RenderSystemPtr _system;
@@ -44,17 +47,25 @@ class Renderer {
 
 	LLGL::SwapChain* _swapChain = nullptr;
 	LLGL::CommandQueue* _commandQueue = nullptr;
-
-	// GPU Resources
-	LLGL::Buffer* _vertexBuffer = nullptr;
-	LLGL::PipelineState* _pipeline = nullptr;
-
-	// New: GPU Constant Buffer Resources
-	LLGL::Buffer* _constantBuffer = nullptr;
-	LLGL::PipelineLayout* _pipelineLayout = nullptr;
-	LLGL::ResourceHeap* _resourceHeap = nullptr;
-
-	void CreatePipeline();
 };
+
+// 2. Procedural Renderer Service
+namespace Renderer {
+enum class ColorComponent : size_t { R = 0, G = 1, B = 2, A = 3 };
+
+void Clear(RenderContext& ctx, const JPH::Vec4& color);
+
+// Fast memory upload
+void UpdateBuffer(RenderContext& ctx, LLGL::Buffer* buffer, const void* data, size_t size);
+
+template <typename T>
+inline void UpdateBuffer(RenderContext& ctx, LLGL::Buffer* buffer, const T& data) {
+	UpdateBuffer(ctx, buffer, static_cast<const void*>(&data), sizeof(T));
+}
+
+// Stateless draw command
+void Draw(RenderContext& ctx, LLGL::PipelineState* pipeline, LLGL::ResourceHeap* resources,
+		  LLGL::Buffer* vertexBuffer, uint32_t vertexCount);
+} // namespace Renderer
 
 } // namespace ZHLN
