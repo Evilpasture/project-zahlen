@@ -116,6 +116,8 @@ struct WorldDataCreateInfo {
 	PosStride* const ZHLN_RESTRICT shadow_ppos;
 	AuxStride* const ZHLN_RESTRICT shadow_rot;
 	AuxStride* const ZHLN_RESTRICT shadow_prot;
+	AuxStride* const ZHLN_RESTRICT shadow_lvel;
+	AuxStride* const ZHLN_RESTRICT shadow_avel;
 };
 
 struct MappingDataCreateInfo {
@@ -139,7 +141,7 @@ template <JPH::EBodyType TType>
 inline void ProcessItem(const uint32_t D, const JPH::Body* const ZHLN_RESTRICT b,
 						const WorldDataCreateInfo world) noexcept {
 
-	// 1. Snapshot previous state
+	// 1. Snapshot previous state (Center of Mass & Rotation)
 	world.shadow_ppos[D] = world.shadow_pos[D];
 	world.shadow_prot[D] = world.shadow_rot[D];
 
@@ -161,8 +163,17 @@ inline void ProcessItem(const uint32_t D, const JPH::Body* const ZHLN_RESTRICT b
 	[[clang::always_inline]] rotation.GetXYZW().StoreFloat4(
 		reinterpret_cast<AuxPointerType>(&world.shadow_rot[D]));
 
-	// Note: Linear/Angular velocity updates omitted for brevity, add them following the same
-	// pattern!
+	// 4. Write Velocities (Rigid Body Only)
+	if constexpr (TType == JPH::EBodyType::RigidBody) {
+		const auto& linVel = b->GetLinearVelocity();
+		const auto& angVel = b->GetAngularVelocity();
+
+		[[clang::always_inline]] JPH::Vec4(linVel, 0.0f)
+			.StoreFloat4(reinterpret_cast<AuxPointerType>(&world.shadow_lvel[D]));
+
+		[[clang::always_inline]] JPH::Vec4(angVel, 0.0f)
+			.StoreFloat4(reinterpret_cast<AuxPointerType>(&world.shadow_avel[D]));
+	}
 }
 
 template <JPH::EBodyType TType>
@@ -287,6 +298,8 @@ PhysicsContext::PhysicsContext() : _impl(std::make_unique<Impl>()) {
 	_impl->world.prevPositions = new JPH::Real[maxBodies * 4]();
 	_impl->world.rotations = new float[maxBodies * 4]();
 	_impl->world.prevRotations = new float[maxBodies * 4]();
+	_impl->world.linearVelocities = new float[maxBodies * 4]();
+	_impl->world.angularVelocities = new float[maxBodies * 4]();
 	_impl->world.bodyIDs = new JPH::BodyID[maxBodies]();
 
 	_impl->world.joltBodyPtrs = new const void*[maxBodies]();
@@ -301,6 +314,8 @@ PhysicsContext::~PhysicsContext() {
 	delete[] _impl->world.prevPositions;
 	delete[] _impl->world.rotations;
 	delete[] _impl->world.prevRotations;
+	delete[] _impl->world.linearVelocities;
+	delete[] _impl->world.angularVelocities;
 	delete[] _impl->world.bodyIDs;
 	delete[] _impl->world.joltBodyPtrs;
 	delete[] _impl->world.slotToDense;
@@ -309,19 +324,16 @@ PhysicsContext::~PhysicsContext() {
 
 void PhysicsContext::Step(float deltaTime) {
 	auto& world = _impl->world;
-
 	world.isStepping.store(true, std::memory_order_release);
 
-	// 1. Step Physics
-	const int collisionSteps = 1;
-	_impl->physicsSystem.Update(deltaTime, collisionSteps, &_impl->tempAllocator,
-								&_impl->jobSystem);
+	// 1. Physics Step
+	_impl->physicsSystem.Update(deltaTime, 1, &_impl->tempAllocator, &_impl->jobSystem);
 
-	// 2. Lock Shadow Buffer
+	// 2. Sync Lock
 	while (world.shadowLock.test_and_set(std::memory_order_acquire)) {
 	}
 
-	// 3. Setup Structs for Sync Pass
+	// 3. Setup Structs
 	Physics::Sync::WorldDataCreateInfo syncWorld = {
 		.shadow_pos =
 			std::assume_aligned<32>(reinterpret_cast<Physics::Sync::PosStride*>(world.positions)),
@@ -331,6 +343,10 @@ void PhysicsContext::Step(float deltaTime) {
 			std::assume_aligned<16>(reinterpret_cast<Physics::Sync::AuxStride*>(world.rotations)),
 		.shadow_prot = std::assume_aligned<16>(
 			reinterpret_cast<Physics::Sync::AuxStride*>(world.prevRotations)),
+		.shadow_lvel = std::assume_aligned<16>(
+			reinterpret_cast<Physics::Sync::AuxStride*>(world.linearVelocities)),
+		.shadow_avel = std::assume_aligned<16>(
+			reinterpret_cast<Physics::Sync::AuxStride*>(world.angularVelocities)),
 	};
 
 	Physics::Sync::MappingDataCreateInfo mapData = {
@@ -340,7 +356,7 @@ void PhysicsContext::Step(float deltaTime) {
 		.slot_to_dense = world.slotToDense,
 	};
 
-	// 4. Execute Hyper-Fast SIMD Sync
+	// 4. Run Sync
 	const uint32_t activeRigids =
 		_impl->physicsSystem.GetNumActiveBodies(JPH::EBodyType::RigidBody);
 	Physics::Sync::ExecuteSyncPass<JPH::EBodyType::RigidBody>(activeRigids, &_impl->physicsSystem,
