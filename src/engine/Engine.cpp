@@ -16,9 +16,7 @@ extern bool JoltAssertBridge(const char* inExpression, const char* inMessage, co
 							 uint32_t inLine) noexcept;
 
 Engine::Engine() {
-	// 0. Initialize Fiber System
 	ZHLN::Fiber::InitMainThread();
-	// 1. Initialize Physics Globals
 	JPH::RegisterDefaultAllocator();
 	JPH::Trace = JoltTraceBridge;
 #ifdef JPH_ENABLE_ASSERTS
@@ -27,19 +25,19 @@ Engine::Engine() {
 	JPH::Factory::sInstance = new JPH::Factory();
 	JPH::RegisterTypes();
 
-	// 2. Initialize OS Window
 	_window = std::make_unique<Window>("Project-Zahlen Engine", 1280, 720);
-
-	// 3. Create the InputContext as a shared_ptr
 	_input = std::make_shared<InputContext>();
-
-	// 4. Attach it to the LLGL window
 	_window->GetNative()->AddEventListener(_input);
 
-	// 5. Initialize Graphics (Now takes the window reference)
+	// --- CROSS PLATFORM API SELECTION ---
+#if defined(_WIN32)
+	_renderContext = std::make_unique<RenderContext>(*_window, "Direct3D11"); // or Direct3D12
+#elif defined(__APPLE__)
 	_renderContext = std::make_unique<RenderContext>(*_window, "Metal");
+#else
+	_renderContext = std::make_unique<RenderContext>(*_window, "Vulkan");
+#endif
 
-	// 6. Initialize Physics System
 	_physicsContext = std::make_unique<PhysicsContext>();
 }
 

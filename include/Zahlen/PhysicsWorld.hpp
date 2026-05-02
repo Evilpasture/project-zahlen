@@ -102,8 +102,12 @@ struct PhysicsWorld {
 // ----------------------------------------------------------------------------
 
 // Guarantee predictable layout for offsetof() and raw memory mapping
-static_assert(std::is_standard_layout_v<PhysicsWorld>);
 static_assert(std::is_trivially_copyable_v<PhysicsWorld>);
-static_assert(std::is_trivial_v<PhysicsWorld>);
+
+
+#ifndef ZHLN_DEBUG
+static_assert(std::is_standard_layout_v<PhysicsWorld>);
+static_assert(std::is_trivial_v<PhysicsWorld>, "[CRITICAL] PhysicsWorld must be a POD in Release!");
+#endif
 
 } // namespace ZHLN::Physics

@@ -6,7 +6,11 @@
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/PhysicsWorld.hpp>
 #include <algorithm>
-#include <lua.hpp>
+extern "C" {
+	#include <lua.h>
+	#include <lualib.h>
+	#include <lauxlib.h>
+}
 
 using namespace ZHLN;
 

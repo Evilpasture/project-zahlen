@@ -1,6 +1,7 @@
 #include <Zahlen/AssetFactory.hpp>
-
 #include <Zahlen/Render.hpp> // For RenderContext access
+#include <Zahlen/Log.hpp>
+
 
 namespace ZHLN::AssetFactory {
 
@@ -105,24 +106,11 @@ Material CreateBasicMaterial(RenderContext& ctx) {
 	LLGL::RenderSystem* sys = ctx.GetSystem();
 	LLGLDeleter deleter{sys};
 
-	const char* mslSource = R"(
-	#include <metal_stdlib>
-	using namespace metal;
-	struct Constants { float4x4 transform; };
-	struct VertexIn  { float3 position [[attribute(0)]]; float4 color [[attribute(1)]]; };
-	struct VertexOut { float4 position [[position]]; float4 color; };
-	vertex VertexOut vsMain(VertexIn in [[stage_in]], constant Constants& cBuffer [[buffer(1)]]) {
-		VertexOut out; out.position = cBuffer.transform * float4(in.position, 1.0); out.color = in.color; return out;
-	}
-	fragment float4 fsMain(VertexOut in [[stage_in]]) { return in.color; }
-	)";
-
 	// 1. Constant Buffer
 	LLGL::BufferDescriptor cboDesc;
 	cboDesc.size = sizeof(FrameConstants);
 	cboDesc.bindFlags = LLGL::BindFlags::ConstantBuffer;
-	auto* rawCbo = sys->CreateBuffer(cboDesc);
-	BufferPtr cbo(rawCbo, deleter);
+	BufferPtr cbo(sys->CreateBuffer(cboDesc), deleter);
 
 	// 2. Layout
 	LLGL::BindingDescriptor bind;
@@ -134,38 +122,52 @@ Material CreateBasicMaterial(RenderContext& ctx) {
 
 	LLGL::PipelineLayoutDescriptor layoutDesc;
 	layoutDesc.heapBindings = {bind};
-	auto* rawLayout = sys->CreatePipelineLayout(layoutDesc);
-	LayoutPtr layout(rawLayout, deleter);
+	LayoutPtr layout(sys->CreatePipelineLayout(layoutDesc), deleter);
 
-	// 3. Heap (Manual assignment to satisfy non-aggregate)
+	// 3. Heap
 	LLGL::ResourceViewDescriptor view;
 	view.resource = cbo.get();
-
 	LLGL::ResourceHeapDescriptor heapDesc;
 	heapDesc.pipelineLayout = layout.get();
-	auto* rawHeap = sys->CreateResourceHeap(heapDesc, {&view, 1});
-	HeapPtr heap(rawHeap, deleter);
+	HeapPtr heap(sys->CreateResourceHeap(heapDesc, {&view, 1}), deleter);
 
-	// 4. Shaders
+	// --- 4. SHADER LOADING (CROSS PLATFORM) ---
 	LLGL::ShaderDescriptor vsDesc;
 	vsDesc.type = LLGL::ShaderType::Vertex;
-	vsDesc.source = mslSource;
-	vsDesc.sourceType = LLGL::ShaderSourceType::CodeString;
+	vsDesc.sourceType = LLGL::ShaderSourceType::CodeFile; // Load from disk!
 	vsDesc.entryPoint = "vsMain";
-	vsDesc.profile = "1.1";
 	vsDesc.vertex.inputAttribs = {
 		{"position", LLGL::Format::RGB32Float, 0, offsetof(Vertex, position), sizeof(Vertex)},
 		{"color", LLGL::Format::RGBA32Float, 1, offsetof(Vertex, color), sizeof(Vertex)}};
 
 	LLGL::ShaderDescriptor fsDesc;
 	fsDesc.type = LLGL::ShaderType::Fragment;
-	fsDesc.source = mslSource;
-	fsDesc.sourceType = LLGL::ShaderSourceType::CodeString;
+	fsDesc.sourceType = LLGL::ShaderSourceType::CodeFile;
 	fsDesc.entryPoint = "fsMain";
-	fsDesc.profile = "1.1";
+
+	if (sys->GetRendererID() == LLGL::RendererID::Metal) {
+		vsDesc.source = "resources/shaders/Basic.metal";
+		vsDesc.profile = "1.1";
+		fsDesc.source = "resources/shaders/Basic.metal";
+		fsDesc.profile = "1.1";
+	} else if (sys->GetRendererID() == LLGL::RendererID::Direct3D11 ||
+			   sys->GetRendererID() == LLGL::RendererID::Direct3D12) {
+		vsDesc.source = "resources/shaders/Basic.hlsl";
+		vsDesc.profile = "vs_5_0";
+		fsDesc.source = "resources/shaders/Basic.hlsl";
+		fsDesc.profile = "ps_5_0";
+	}
 
 	auto* vs = sys->CreateShader(vsDesc);
 	auto* fs = sys->CreateShader(fsDesc);
+
+	// Error checking - extremely helpful if you have a typo in your shader file
+	if (vs->GetReport() && vs->GetReport()->HasErrors()) {
+        ZHLN::Log("Vertex Shader Error: {}\n", vs->GetReport()->GetText());
+    }
+    if (fs->GetReport() && fs->GetReport()->HasErrors()) {
+        ZHLN::Log("Fragment Shader Error: {}\n", fs->GetReport()->GetText());
+    }
 
 	// 5. Pipeline
 	LLGL::GraphicsPipelineDescriptor psoDesc;
@@ -178,14 +180,11 @@ Material CreateBasicMaterial(RenderContext& ctx) {
 	psoDesc.depth.writeEnabled = true;
 	psoDesc.depth.compareOp = LLGL::CompareOp::Less;
 
-	auto* rawPso = sys->CreatePipelineState(psoDesc);
+	PipelinePtr pipeline(sys->CreatePipelineState(psoDesc), deleter);
 	sys->Release(*vs);
 	sys->Release(*fs);
 
-	return Material{.pipeline = PipelinePtr(rawPso, deleter),
-					.layout = std::move(layout),
-					.resourceHeap = std::move(heap),
-					.constantBuffer = std::move(cbo)};
+	return Material{std::move(pipeline), std::move(layout), std::move(heap), std::move(cbo)};
 }
 
 } // namespace ZHLN::AssetFactory
