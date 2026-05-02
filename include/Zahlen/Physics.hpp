@@ -53,7 +53,7 @@ namespace Physics {
 JPH::BodyID CreateStaticFloor(PhysicsContext& ctx, float extent, EntityHandle handle = {});
 JPH::BodyID CreateDynamicBox(PhysicsContext& ctx, JPH::RVec3Arg position, JPH::Vec3Arg halfExtents,
 							 EntityHandle handle = {});
-
+void DestroyBody(PhysicsContext& ctx, JPH::BodyID bodyID, EntityHandle handle);
 JPH::RVec3 GetPosition(const PhysicsContext& ctx, JPH::BodyID bodyID);
 JPH::Quat GetRotation(const PhysicsContext& ctx, JPH::BodyID bodyID);
 

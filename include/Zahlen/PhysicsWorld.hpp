@@ -5,7 +5,6 @@
 #include <Zahlen/Mutex.hpp>
 #include <Zahlen/Physics.hpp>
 #include <Zahlen/detail/Platform.hpp>
-#include <atomic>
 #include <cstdint>
 #include <type_traits>
 
@@ -41,10 +40,10 @@ struct PhysicsWorld {
 	// BUCKET 2: HOT SIMULATION STATE (The Stepper's Workspace)
 	// ========================================================================
 	alignas(CACHE_LINE) double time;
-	std::atomic<size_t> count;
+	ZHLN::Atomic<size_t> count;
 	size_t capacity;
 	size_t slotCapacity;
-	std::atomic<size_t> freeCount;
+	ZHLN::Atomic<size_t> freeCount;
 
 	// SoA Buffers (Shadow State Arrays)
 	JPH::Real* positions; // [x, y, z] layout or SIMD padded
@@ -70,15 +69,15 @@ struct PhysicsWorld {
 	// ========================================================================
 	// BUCKET 4: VOLATILE ATOMIC FLAGS (Polling Targets)
 	// ========================================================================
-	alignas(CACHE_LINE) std::atomic<bool> isStepping;
-	std::atomic<bool> stepRequested;
-	std::atomic<int> waitingThreads;
+	alignas(CACHE_LINE) ZHLN::Atomic<bool> isStepping;
+	ZHLN::Atomic<bool> stepRequested;
+	ZHLN::Atomic<int> waitingThreads;
 
 	// ========================================================================
 	// BUCKET 5: QUERIES & COUNTERS
 	// ========================================================================
-	alignas(CACHE_LINE) std::atomic<int> activeQueries;
-	std::atomic<int> viewExportCount;
+	alignas(CACHE_LINE) ZHLN::Atomic<int> activeQueries;
+	ZHLN::Atomic<int> viewExportCount;
 	bool needsOptimization;
 
 	// ========================================================================
@@ -94,8 +93,8 @@ struct PhysicsWorld {
 	uint32_t* categories;
 	uint32_t* masks;
 
-	std::atomic<uint8_t>* slotStates;
-	std::atomic<uint32_t>* generations;
+	ZHLN::Atomic<uint8_t>* slotStates;
+	ZHLN::Atomic<uint32_t>* generations;
 };
 
 // ----------------------------------------------------------------------------
@@ -103,7 +102,8 @@ struct PhysicsWorld {
 // ----------------------------------------------------------------------------
 
 // Guarantee predictable layout for offsetof() and raw memory mapping
-static_assert(std::is_standard_layout_v<PhysicsWorld>,
-			  "[CRITICAL] PhysicsWorld must maintain Standard Layout!");
+static_assert(std::is_standard_layout_v<PhysicsWorld>);
+static_assert(std::is_trivially_copyable_v<PhysicsWorld>);
+static_assert(std::is_trivial_v<PhysicsWorld>);
 
 } // namespace ZHLN::Physics

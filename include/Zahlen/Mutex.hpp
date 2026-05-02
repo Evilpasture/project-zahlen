@@ -1,6 +1,6 @@
 #pragma once
 
-#include <atomic>
+#include <Zahlen/detail/Atomic.hpp>
 #include <cstdint>
 
 #ifndef NDEBUG
@@ -85,15 +85,15 @@ class Mutex {
 	static constexpr uint8_t HAS_WAITERS = 0x02;
 	static constexpr uint8_t POISONED = 0x04;
 
-	std::atomic<uint8_t> _bits{UNLOCKED};
+	ZHLN::Atomic<uint8_t> _bits;
 
 	[[gnu::cold, gnu::noinline]] void LockSlow() noexcept;
 	[[gnu::cold, gnu::noinline]] void UnlockSlow() noexcept;
 
 	// --- Debug Variables & Helpers ---
 #ifdef ZHLN_DEBUG
-	alignas(32) std::atomic<bool> _hasOwner{false};
-	std::atomic<uintptr_t> _owner{0};
+	alignas(32) ZHLN::Atomic<bool> _hasOwner{false};
+	ZHLN::Atomic<uintptr_t> _owner{0};
 
 	void CheckPreLock() noexcept;
 	void PostLock() noexcept;
@@ -110,5 +110,8 @@ class Mutex {
 // Guarantee 1-byte footprint in Release builds
 static_assert(kIsDebugMutex || sizeof(Mutex) == 1,
 			  "ZHLN::Mutex must be exactly 1 byte in Release mode!");
+
+// Guarantee it's a perfect POD
+static_assert(kIsDebugMutex || std::is_trivial_v<Mutex>, "Mutex MUST be trivial in Release mode!");
 
 } // namespace ZHLN

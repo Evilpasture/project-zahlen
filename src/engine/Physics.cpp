@@ -122,7 +122,7 @@ struct WorldDataCreateInfo {
 
 struct MappingDataCreateInfo {
 	const void* ZHLN_RESTRICT* const ZHLN_RESTRICT body_ptrs;
-	const std::atomic<uint32_t>* const ZHLN_RESTRICT generations;
+	const ZHLN::Atomic<uint32_t>* const ZHLN_RESTRICT generations;
 	const size_t slot_capacity;
 	const uint32_t* const ZHLN_RESTRICT slot_to_dense;
 };
@@ -302,7 +302,8 @@ PhysicsContext::PhysicsContext() : _impl(std::make_unique<Impl>()) {
 
 	_impl->world.joltBodyPtrs = new const void*[maxBodies]();
 	_impl->world.slotToDense = new uint32_t[maxBodies]();
-	_impl->world.generations = new std::atomic<uint32_t>[maxBodies]();
+	_impl->world.denseToSlot = new uint32_t[maxBodies]();
+	_impl->world.generations = new ZHLN::Atomic<uint32_t>[maxBodies]();
 
 	_impl->world.count.store(0, std::memory_order_relaxed);
 }
@@ -379,9 +380,80 @@ static void RegisterBodyToWorld(PhysicsWorld& world, JPH::BodyID id, EntityHandl
 
 	if (dense_idx < world.capacity && handle.index < world.slotCapacity) {
 		world.bodyIDs[dense_idx] = id;
-		world.slotToDense[handle.index] = dense_idx;
+		world.slotToDense[handle.index] = static_cast<uint32_t>(dense_idx);
+		world.denseToSlot[dense_idx] = handle.index;
 		world.generations[handle.index].store(handle.generation, std::memory_order_relaxed);
 	}
+}
+
+void DestroyBody(PhysicsContext& ctx, JPH::BodyID bodyID, EntityHandle handle) {
+	auto& world = ctx.GetImpl()->world;
+
+	// 1. Remove from Jolt Physics
+	world.bodyInterface->RemoveBody(bodyID);
+	world.bodyInterface->DestroyBody(bodyID);
+
+	// 2. Clear from pointer tracking (Prevents Sync pass from reading it)
+	const uint32_t joltIdx = bodyID.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
+	if (joltIdx < world.maxJoltBodies) {
+		world.joltBodyPtrs[joltIdx] = nullptr;
+	}
+
+	// 3. Swap-and-Pop in the SoA Arrays
+	// We MUST lock the shadow buffer because the Renderer might be reading it right now!
+	std::lock_guard<Mutex> lock(world.shadowLock);
+
+	const uint32_t slot = handle.index;
+	if (slot >= world.slotCapacity)
+		return;
+
+	// Verify handle generation (ensure we aren't deleting a stale handle)
+	const uint32_t expectedGen = world.generations[slot].load(std::memory_order_acquire);
+	if (expectedGen != handle.generation)
+		return;
+
+	const uint32_t denseIdx = world.slotToDense[slot];
+	const uint32_t lastDense =
+		static_cast<uint32_t>(world.count.load(std::memory_order_acquire)) - 1;
+
+	// Perform the Dense Pack if it's not already the last item
+	if (denseIdx != lastDense) {
+		// --- 3A: Move Physics Data ---
+		// Positions (Stride of 4)
+		world.positions[denseIdx * 4 + 0] = world.positions[lastDense * 4 + 0];
+		world.positions[denseIdx * 4 + 1] = world.positions[lastDense * 4 + 1];
+		world.positions[denseIdx * 4 + 2] = world.positions[lastDense * 4 + 2];
+		world.positions[denseIdx * 4 + 3] = world.positions[lastDense * 4 + 3];
+
+		world.prevPositions[denseIdx * 4 + 0] = world.prevPositions[lastDense * 4 + 0];
+		world.prevPositions[denseIdx * 4 + 1] = world.prevPositions[lastDense * 4 + 1];
+		world.prevPositions[denseIdx * 4 + 2] = world.prevPositions[lastDense * 4 + 2];
+		world.prevPositions[denseIdx * 4 + 3] = world.prevPositions[lastDense * 4 + 3];
+
+		// Rotations & Velocities (Stride of 4)
+		for (int i = 0; i < 4; ++i) {
+			world.rotations[denseIdx * 4 + i] = world.rotations[lastDense * 4 + i];
+			world.prevRotations[denseIdx * 4 + i] = world.prevRotations[lastDense * 4 + i];
+			world.linearVelocities[denseIdx * 4 + i] = world.linearVelocities[lastDense * 4 + i];
+			world.angularVelocities[denseIdx * 4 + i] = world.angularVelocities[lastDense * 4 + i];
+		}
+
+		// --- 3B: Move Metadata ---
+		world.bodyIDs[denseIdx] = world.bodyIDs[lastDense];
+
+		// --- 3C: Rewire Indirection Map ---
+		// We need to find which "Slot" the last item belonged to so we can update its map
+		// Note: You don't currently have `denseToSlot` in ZHLN, so we must add it!
+		const uint32_t moverSlot = world.denseToSlot[lastDense];
+		world.slotToDense[moverSlot] = denseIdx;
+		world.denseToSlot[denseIdx] = moverSlot;
+	}
+
+	// 4. Invalidate Handle Generation & Decrement Count
+	world.generations[slot].fetch_add(1, std::memory_order_release);
+	world.count.fetch_sub(1, std::memory_order_release);
+
+	// Optional: Push `slot` to a `freeSlots` stack if you want to reuse ECS indices.
 }
 
 JPH::BodyID CreateStaticFloor(PhysicsContext& ctx, float extent, EntityHandle handle) {

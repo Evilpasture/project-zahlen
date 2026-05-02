@@ -158,7 +158,7 @@ struct alignas(CACHE_LINE) Waiter {
 	Fiber* fiber;
 	Waiter* next;
 	std::condition_variable cond;
-	std::atomic<bool> signaled{false};
+	ZHLN::Atomic<bool> signaled{false};
 };
 
 struct alignas(128) Bucket {
