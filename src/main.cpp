@@ -1,36 +1,38 @@
+#include "engine/AssetFactory.hpp"
 #include "engine/Engine.hpp"
+#include "engine/Math3D.hpp"
 
 using namespace ZHLN;
 
-auto main([[maybe_unused]] const int argc, [[maybe_unused]] const char* const argv[]) -> int {
+auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	Engine engine;
 
-	// Abstracted Asset Loading
-	const Mesh tetrahedron = engine.CreateTetrahedron();
-	const Material flatColor = engine.CreateMaterial();
+	// Focus the window (now that the engine owns it)
+	engine.GetWindow().Focus();
 
-	const JPH::Vec4 background(0.12f, 0.14f, 0.16f, 1.0f);
-	float rotation = 0.0f;
+	const Mesh tetra = AssetFactory::CreateTetrahedron(engine.GetRenderContext());
+	const Material basic = AssetFactory::CreateBasicMaterial(engine.GetRenderContext());
 
-	// View Matrices
+	Physics::CreateStaticFloor(engine.GetPhysicsContext(), 50.0f);
+	JPH::BodyID box =
+		Physics::CreateDynamicBox(engine.GetPhysicsContext(), {0, 10, 0}, {0.5, 0.5, 0.5});
+
 	JPH::Mat44 proj =
-		JPH::Mat44::sPerspective(JPH::DegreesToRadians(45.0f), 1280.0f / 720.0f, 0.1f, 100.0f);
-	JPH::Mat44 view = JPH::Mat44::sTranslation({0.0f, -0.2f, -3.0f});
+		Math::CreatePerspective(JPH::DegreesToRadians(45.0f), 1280.0f / 720.0f, 0.1f, 1000.0f);
+	JPH::Mat44 view = Math::CreateLookAt({10, 10, 20}, {0, 2, 0}, JPH::Vec3::sAxisY());
 
 	while (engine.IsRunning()) {
 		engine.ProcessEvents();
+		engine.GetPhysicsContext().Step(1.0f / 60.0f);
 
-		// Game Logic / Simulation
-		rotation += 0.02f;
-		JPH::Mat44 model =
-			JPH::Mat44::sRotationY(rotation) * JPH::Mat44::sRotationX(rotation * 0.5f);
-		JPH::Mat44 transform = proj * view * model;
-
-		// Render Pass
 		engine.BeginFrame();
+		Renderer::Clear(engine.GetRenderContext(), {0.1f, 0.12f, 0.15f, 1.0f});
 
-		Renderer::Clear(engine.GetContext(), background);
-		Renderer::Draw(engine.GetContext(), flatColor, tetrahedron, transform);
+		JPH::Mat44 model = JPH::Mat44::sRotationTranslation(
+			Physics::GetRotation(engine.GetPhysicsContext(), box),
+			JPH::Vec3(Physics::GetPosition(engine.GetPhysicsContext(), box)));
+
+		Renderer::Draw(engine.GetRenderContext(), basic, tetra, proj * view * model);
 
 		engine.EndFrame();
 	}

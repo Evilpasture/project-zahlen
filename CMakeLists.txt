@@ -53,6 +53,10 @@ set(PROJECT_SOURCES
     src/engine/AssertHandler.cpp
     src/engine/Render.cpp
     src/engine/Engine.cpp
+    src/engine/Physics.cpp
+    src/engine/AssetFactory.cpp
+    src/engine/Window.cpp
+    src/engine/Window.mm
 )
 
 add_executable(zahlen ${PROJECT_SOURCES})

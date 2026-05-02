@@ -6,9 +6,7 @@
 
 namespace ZHLN {
 
-// --- RenderContext Implementation ---
-
-RenderContext::RenderContext(const String32& preferredAPI, uint32_t width, uint32_t height) {
+RenderContext::RenderContext(Window& window, const String32& preferredAPI) {
 	auto modules = LLGL::RenderSystem::FindModules();
 	String32 selected = "OpenGL";
 	for (const auto& m : modules) {
@@ -24,14 +22,13 @@ RenderContext::RenderContext(const String32& preferredAPI, uint32_t width, uint3
 	if (!_system)
 		return;
 
-	_window = LLGL::Window::Create(
-		LLGL::WindowDescriptor{.title = "Project-Zahlen Engine",
-							   .position = {},
-							   .size = {width, height},
-							   .flags = LLGL::WindowFlags::Visible | LLGL::WindowFlags::Centered});
+	// The SwapChain connects the RenderSystem to the Window's Native Surface
+	LLGL::SwapChainDescriptor swapChainDesc;
+	swapChainDesc.resolution = window.GetSize();
+	swapChainDesc.depthBits = 32;
+	swapChainDesc.samples = 8;
 
-	_swapChain = _system->CreateSwapChain(
-		{.resolution = _window->GetSize(), .depthBits = 32, .samples = 8}, _window);
+	_swapChain = _system->CreateSwapChain(swapChainDesc, window.GetNative());
 	_commandQueue = _system->GetCommandQueue();
 	_cmdBuffer = std::unique_ptr<LLGL::CommandBuffer>(_system->CreateCommandBuffer());
 }
@@ -40,14 +37,6 @@ RenderContext::~RenderContext() {
 	if (_system) {
 		LLGL::RenderSystem::Unload(std::move(_system));
 	}
-}
-
-bool RenderContext::IsRunning() const {
-	return _window && !_window->HasQuit();
-}
-
-void RenderContext::ProcessEvents() {
-	_window->ProcessEvents();
 }
 
 void RenderContext::BeginFrame() {
@@ -62,8 +51,6 @@ void RenderContext::EndFrame() {
 	_swapChain->Present();
 }
 
-// --- Procedural Renderer Service ---
-
 namespace Renderer {
 
 void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
@@ -73,9 +60,8 @@ void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
 	val.color[std::to_underlying(Ch::G)] = color.GetY();
 	val.color[std::to_underlying(Ch::B)] = color.GetZ();
 	val.color[std::to_underlying(Ch::A)] = color.GetW();
-	val.depth = depth; // Set the depth clear value (1.0 is the farthest)
+	val.depth = depth;
 
-	// Clear BOTH color and depth buffers
 	ctx.GetCommandBuffer()->Clear(LLGL::ClearFlags::Color | LLGL::ClearFlags::Depth, val);
 }
 
@@ -85,13 +71,12 @@ void UpdateBuffer(RenderContext& ctx, LLGL::Buffer* buffer, const void* data, si
 
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 		  const JPH::Mat44& transform) {
-	UpdateBuffer(ctx, material.constantBuffer.get(), transform); // .get() for raw pointer
+	UpdateBuffer(ctx, material.constantBuffer.get(), transform);
 
 	auto* cmd = ctx.GetCommandBuffer();
 	cmd->SetPipelineState(*material.pipeline);
 	cmd->SetResourceHeap(*material.resourceHeap);
 	cmd->SetVertexBuffer(*mesh.vertexBuffer);
-
 	cmd->Draw(mesh.vertexCount, 0);
 }
 

@@ -1,6 +1,9 @@
 #pragma once
+#include "engine/Physics.hpp"
 #include "engine/Render.hpp"
-#include "engine/Types.hpp"
+#include "engine/Window.hpp" // New include
+
+#include <memory>
 
 namespace ZHLN {
 
@@ -15,13 +18,15 @@ class Engine {
 	void BeginFrame();
 	void EndFrame();
 
-	Mesh CreateTetrahedron();
-	Material CreateMaterial();
-
-	RenderContext& GetContext() { return *_context; }
+	RenderContext& GetRenderContext() { return *_renderContext; }
+	PhysicsContext& GetPhysicsContext() { return *_physicsContext; }
+	Window& GetWindow() { return *_window; }
 
   private:
-	std::unique_ptr<RenderContext> _context;
+	// Order is critical: Window must exist for the RenderContext to link to it
+	std::unique_ptr<Window> _window;
+	std::unique_ptr<RenderContext> _renderContext;
+	std::unique_ptr<PhysicsContext> _physicsContext;
 };
 
 } // namespace ZHLN
