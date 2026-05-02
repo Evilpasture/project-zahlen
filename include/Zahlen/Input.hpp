@@ -30,7 +30,16 @@ class InputContext : public LLGL::Window::EventListener {
 	void OnLocalMotion(LLGL::Window& sender, const LLGL::Offset2D& position) override;
 	void OnWheelMotion(LLGL::Window& sender, int delta) override;
 
+	bool NeedsResize() const { return _needsResize; }
+    LLGL::Extent2D GetNewSize() const { return _newSize; }
+    void ClearResizeFlag() { _needsResize = false; }
+
+    // Add this override
+    void OnResize(LLGL::Window& sender, const LLGL::Extent2D& extent) override;
+
   private:
+  	bool _needsResize = false;
+    LLGL::Extent2D _newSize;
 	std::bitset<256> _keys;
 	MouseState _mouse;
 	float _lastX = 0, _lastY = 0;

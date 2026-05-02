@@ -2,6 +2,7 @@
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/PhysicsSystem.h>
+#include <Zahlen/detail/Atomic.hpp>
 #include <Zahlen/Mutex.hpp>
 #include <Zahlen/Physics.hpp>
 #include <Zahlen/detail/Platform.hpp>

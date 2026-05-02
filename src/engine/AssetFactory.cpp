@@ -1,13 +1,17 @@
 #include <Zahlen/AssetFactory.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
+#include <Zahlen/Resources.hpp>
 #include <fstream>
 #include <sstream>
 
+
 namespace ZHLN::AssetFactory {
 
-static std::string LoadShaderRuntime(const std::string& path) {
+[[maybe_unused]] std::string LoadShaderRuntime(const std::string& path) {
 	std::ifstream file(path);
-	if (!file.is_open()) return "";
+	if (!file.is_open())
+		return "";
 	std::stringstream buffer;
 	buffer << file.rdbuf();
 	return buffer.str();
@@ -55,25 +59,15 @@ Mesh CreateBox(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& co
 	const float z = halfExtents.GetZ();
 
 	Vertex data[] = {
-        // Front
-        {{-x, -y, z}, color}, {{x, -y, z}, color}, {{x, y, z}, color},
-        {{-x, -y, z}, color}, {{x, y, z}, color}, {{-x, y, z}, color},
-        // Back
-        {{x, -y, -z}, color}, {{-x, -y, -z}, color}, {{-x, y, -z}, color},
-        {{x, -y, -z}, color}, {{-x, y, -z}, color}, {{x, y, -z}, color},
-        // Left
-        {{-x, -y, -z}, color}, {{-x, -y, z}, color}, {{-x, y, z}, color},
-        {{-x, -y, -z}, color}, {{-x, y, z}, color}, {{-x, y, -z}, color},
-        // Right
-        {{x, -y, z}, color}, {{x, -y, -z}, color}, {{x, y, -z}, color},
-        {{x, -y, z}, color}, {{x, y, -z}, color}, {{x, y, z}, color},
-        // Top
-        {{-x, y, z}, color}, {{x, y, z}, color}, {{x, y, -z}, color},
-        {{-x, y, z}, color}, {{x, y, -z}, color}, {{-x, y, -z}, color},
-        // Bottom
-        {{-x, -y, -z}, color}, {{x, -y, -z}, color}, {{x, -y, z}, color},
-        {{-x, -y, -z}, color}, {{x, -y, z}, color}, {{-x, -y, z}, color}
-    };
+		{{-x, -y, z}, color},  {{x, -y, z}, color},	  {{x, y, z}, color},	 {{-x, -y, z}, color},
+		{{x, y, z}, color},	   {{-x, y, z}, color},	  {{x, -y, -z}, color},	 {{-x, -y, -z}, color},
+		{{-x, y, -z}, color},  {{x, -y, -z}, color},  {{-x, y, -z}, color},	 {{x, y, -z}, color},
+		{{-x, -y, -z}, color}, {{-x, -y, z}, color},  {{-x, y, z}, color},	 {{-x, -y, -z}, color},
+		{{-x, y, z}, color},   {{-x, y, -z}, color},  {{x, -y, z}, color},	 {{x, -y, -z}, color},
+		{{x, y, -z}, color},   {{x, -y, z}, color},	  {{x, y, -z}, color},	 {{x, y, z}, color},
+		{{-x, y, z}, color},   {{x, y, z}, color},	  {{x, y, -z}, color},	 {{-x, y, z}, color},
+		{{x, y, -z}, color},   {{-x, y, -z}, color},  {{-x, -y, -z}, color}, {{x, -y, -z}, color},
+		{{x, -y, z}, color},   {{-x, -y, -z}, color}, {{x, -y, z}, color},	 {{-x, -y, z}, color}};
 
 	LLGL::BufferDescriptor vboDesc;
 	vboDesc.size = sizeof(data);
@@ -85,32 +79,19 @@ Mesh CreateBox(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& co
 Material CreateBasicMaterial(RenderContext& ctx) {
 	LLGL::RenderSystem* sys = ctx.GetSystem();
 	LLGLDeleter deleter{sys};
-	
-	std::string shaderSource;
-	bool isMetal = (sys->GetRendererID() == LLGL::RendererID::Metal);
 
-	if (isMetal) {
-#if defined(__cpp_embed)
-		static const char data[] = { #embed "../../resources/shaders/basic.metal" , 0 };
-		shaderSource = data;
-#else
-		shaderSource = LoadShaderRuntime("resources/shaders/basic.metal");
-#endif
-	} else {
-#if defined(__cpp_embed)
-		static const char data[] = { #embed "../../resources/shaders/basic.glsl" , 0 };
-		shaderSource = data;
-#else
-		shaderSource = LoadShaderRuntime("resources/shaders/basic.glsl");
-#endif
-	}
+	const auto renderer = sys->GetRendererID();
+	const bool isVulkan = (renderer == LLGL::RendererID::Vulkan);
+	const bool isMetal = (renderer == LLGL::RendererID::Metal);
 
+	// 1. Constant Buffer
 	LLGL::BufferDescriptor cboDesc;
 	cboDesc.size = sizeof(FrameConstants);
 	cboDesc.bindFlags = LLGL::BindFlags::ConstantBuffer;
 	auto* rawCbo = sys->CreateBuffer(cboDesc);
 	BufferPtr cbo(rawCbo, deleter);
 
+	// 2. Layout
 	LLGL::BindingDescriptor bind;
 	bind.name = "Constants";
 	bind.type = LLGL::ResourceType::Buffer;
@@ -122,32 +103,50 @@ Material CreateBasicMaterial(RenderContext& ctx) {
 	layoutDesc.heapBindings = {bind};
 	LayoutPtr layout(sys->CreatePipelineLayout(layoutDesc), deleter);
 
+	// 3. Heap
 	LLGL::ResourceViewDescriptor view;
 	view.resource = cbo.get();
 	LLGL::ResourceHeapDescriptor heapDesc;
 	heapDesc.pipelineLayout = layout.get();
 	HeapPtr heap(sys->CreateResourceHeap(heapDesc, {&view, 1}), deleter);
 
-	LLGL::ShaderDescriptor vsDesc;
+	// 4. Shader Selection and Loading
+	LLGL::ShaderDescriptor vsDesc, fsDesc;
 	vsDesc.type = LLGL::ShaderType::Vertex;
-	vsDesc.source = shaderSource.c_str();
-	vsDesc.sourceType = LLGL::ShaderSourceType::CodeString;
-	vsDesc.entryPoint = isMetal ? "vsMain" : "main";
-	vsDesc.profile = isMetal ? "1.1" : "450";
+	fsDesc.type = LLGL::ShaderType::Fragment;
+
+	if (isVulkan) {
+		// Use reinterpret_cast to bridge the unsigned/signed char gap for binary data
+		vsDesc.source = reinterpret_cast<const char*>(ZHLN_Resource_BasicVertSpv);
+		vsDesc.sourceSize = ZHLN_Resource_BasicVertSpv_Len;
+		vsDesc.sourceType = LLGL::ShaderSourceType::BinaryBuffer;
+
+		fsDesc.source = reinterpret_cast<const char*>(ZHLN_Resource_BasicFragSpv);
+		fsDesc.sourceSize = ZHLN_Resource_BasicFragSpv_Len;
+		fsDesc.sourceType = LLGL::ShaderSourceType::BinaryBuffer;
+
+		vsDesc.entryPoint = "main";
+		fsDesc.entryPoint = "main";
+	} else if (isMetal) {
+		// Metal is already const char[] in Resources.hpp, so no cast is needed here
+		vsDesc.source = ZHLN_Resource_BasicMetal;
+		vsDesc.sourceType = LLGL::ShaderSourceType::CodeString;
+
+		fsDesc.source = ZHLN_Resource_BasicMetal;
+		fsDesc.sourceType = LLGL::ShaderSourceType::CodeString;
+
+		vsDesc.entryPoint = "vsMain";
+		fsDesc.entryPoint = "fsMain";
+	}
+
 	vsDesc.vertex.inputAttribs = {
 		{"position", LLGL::Format::RGB32Float, 0, offsetof(Vertex, position), sizeof(Vertex)},
 		{"color", LLGL::Format::RGBA32Float, 1, offsetof(Vertex, color), sizeof(Vertex)}};
 
-	LLGL::ShaderDescriptor fsDesc;
-	fsDesc.type = LLGL::ShaderType::Fragment;
-	fsDesc.source = shaderSource.c_str();
-	fsDesc.sourceType = LLGL::ShaderSourceType::CodeString;
-	fsDesc.entryPoint = isMetal ? "fsMain" : "main";
-	fsDesc.profile = isMetal ? "1.1" : "450";
-
 	auto* vs = sys->CreateShader(vsDesc);
 	auto* fs = sys->CreateShader(fsDesc);
 
+	// 5. Graphics Pipeline
 	LLGL::GraphicsPipelineDescriptor psoDesc;
 	psoDesc.pipelineLayout = layout.get();
 	psoDesc.renderPass = ctx.GetSwapChain()->GetRenderPass();
@@ -158,11 +157,18 @@ Material CreateBasicMaterial(RenderContext& ctx) {
 	psoDesc.depth.writeEnabled = true;
 	psoDesc.depth.compareOp = LLGL::CompareOp::Less;
 
-	PipelinePtr pipeline(sys->CreatePipelineState(psoDesc), deleter);
+	auto* rawPso = sys->CreatePipelineState(psoDesc);
+	if (!rawPso) {
+		if (auto* report = sys->GetReport()) {
+			ZHLN::Log("Pipeline State Error:\n{}\n", report->GetText());
+		}
+	}
+
+	// Shaders are now baked into the PSO, we can release them
 	sys->Release(*vs);
 	sys->Release(*fs);
 
-	return Material{.pipeline = std::move(pipeline),
+	return Material{.pipeline = PipelinePtr(rawPso, deleter),
 					.layout = std::move(layout),
 					.resourceHeap = std::move(heap),
 					.constantBuffer = std::move(cbo)};

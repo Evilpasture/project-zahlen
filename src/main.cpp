@@ -53,7 +53,27 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	JPH::Vec3 playerPos = {0, 0, 0};
 
 	while (engine.IsRunning()) {
-		engine.ProcessEvents();
+        // 1. Pump OS Events
+        engine.ProcessEvents();
+
+        // 2. CRITICAL: If the user clicked 'X', stop before we try to render
+        if (!engine.IsRunning()) break;
+
+        // 3. Handle Minimization
+        auto windowSize = engine.GetWindow().GetSize();
+        if (windowSize.width == 0 || windowSize.height == 0) {
+            // Window is minimized. Don't render, just sleep to save CPU.
+            std::this_thread::sleep_for(std::chrono::milliseconds(16));
+            continue;
+        }
+
+        // 4. Handle Resize (Safe from 0,0 now)
+        if (input.NeedsResize()) {
+            renderCtx.SetResolution(input.GetNewSize());
+            input.ClearResizeFlag();
+            // Important: Let the resize settle before drawing
+            continue; 
+        }
 
 		// --- 6. CHARACTER CONTROL LOGIC ---
 		// Determine movement direction based on Camera Yaw

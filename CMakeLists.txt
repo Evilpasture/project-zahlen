@@ -12,6 +12,10 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(CMAKE_C_STANDARD 23)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # --- 2. GLOBAL SANITIZER CONFIG ---
@@ -59,6 +63,7 @@ set(PROJECT_SOURCES
     src/engine/Thread.cpp
     src/engine/Thread.S
     src/engine/Input.cpp
+    src/engine/Resources.c
 )
 
 add_executable(zahlen ${PROJECT_SOURCES})
@@ -89,6 +94,37 @@ target_include_directories(zahlen PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/extern/LuaJIT/src
 )
+
+# --- Find glslangValidator in Vulkan SDK ---
+find_program(GLSL_VALIDATOR NAMES glslangValidator 
+             PATHS "$ENV{VULKAN_SDK}/bin" "D:/Vulkan-SDK/1.4.341.1/bin")
+
+if(GLSL_VALIDATOR)
+    message(STATUS "Found glslangValidator: ${GLSL_VALIDATOR}")
+    
+    set(SHADER_SOURCES 
+        "${CMAKE_SOURCE_DIR}/resources/shaders/basic.vert"
+        "${CMAKE_SOURCE_DIR}/resources/shaders/basic.frag"
+    )
+    
+    foreach(SHADER ${SHADER_SOURCES})
+        get_filename_component(FILE_NAME ${SHADER} NAME)
+        set(OUTPUT_SPV "${CMAKE_SOURCE_DIR}/resources/shaders/${FILE_NAME}.spv")
+        
+        # This command runs glslangValidator during the build
+        add_custom_command(
+            OUTPUT ${OUTPUT_SPV}
+            COMMAND ${GLSL_VALIDATOR} -V ${SHADER} -o ${OUTPUT_SPV}
+            DEPENDS ${SHADER}
+            COMMENT "Compiling ${FILE_NAME} to SPIR-V"
+        )
+        list(APPEND SPV_OUTPUTS ${OUTPUT_SPV})
+    endforeach()
+    
+    # Add the SPV files as a dependency to the main executable
+    add_custom_target(compile_shaders DEPENDS ${SPV_OUTPUTS})
+    add_dependencies(zahlen compile_shaders)
+endif()
 
 # --- Compiler Flags ---
 if(NOT MSVC)

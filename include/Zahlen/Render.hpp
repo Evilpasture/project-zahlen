@@ -25,6 +25,7 @@ class RenderContext {
 	LLGL::RenderSystem* GetSystem() const { return _system.get(); }
 	LLGL::CommandBuffer* GetCommandBuffer() const { return _cmdBuffer.get(); }
 	LLGL::SwapChain* GetSwapChain() const { return _swapChain; }
+	void SetResolution(const LLGL::Extent2D& resolution);
 
   private:
 	LLGLPtr<LLGL::CommandBuffer> _cmdBuffer; 

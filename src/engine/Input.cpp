@@ -39,4 +39,9 @@ void InputContext::OnWheelMotion(LLGL::Window& /*sender*/, int delta) {
 	_mouse.wheel = static_cast<float>(delta);
 }
 
+void InputContext::OnResize(LLGL::Window& /*sender*/, const LLGL::Extent2D& extent) {
+    _newSize = extent;
+    _needsResize = true;
+}
+
 } // namespace ZHLN

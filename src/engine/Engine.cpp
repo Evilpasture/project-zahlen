@@ -24,6 +24,13 @@ Engine::Engine() {
 #ifdef JPH_ENABLE_ASSERTS
 	JPH::AssertFailed = JoltAssertBridge;
 #endif
+#if defined(_WIN32)
+	const char* preferredAPI = "Vulkan";
+#elif defined(__APPLE__)
+	const char* preferredAPI = "Metal";
+#else
+	const char* preferredAPI = "OpenGL"; // Linux fallback
+#endif
 	JPH::Factory::sInstance = new JPH::Factory();
 	JPH::RegisterTypes();
 
@@ -37,7 +44,7 @@ Engine::Engine() {
 	_window->GetNative()->AddEventListener(_input);
 
 	// 5. Initialize Graphics (Now takes the window reference)
-	_renderContext = std::make_unique<RenderContext>(*_window, "Metal");
+	_renderContext = std::make_unique<RenderContext>(*_window, preferredAPI);
 
 	// 6. Initialize Physics System
 	_physicsContext = std::make_unique<PhysicsContext>();

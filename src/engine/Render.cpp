@@ -7,18 +7,31 @@
 namespace ZHLN {
 
 RenderContext::RenderContext(Window& window, const String32& preferredAPI) {
-	auto modules = LLGL::RenderSystem::FindModules();
-	String32 selected = "OpenGL";
-	for (const auto& m : modules) {
-		if (m == preferredAPI.c_str()) {
-			selected = m.c_str();
-			break;
-		}
-	}
+    auto modules = LLGL::RenderSystem::FindModules();
+    String32 selected = "";
 
-	ZHLN::Log("Loading RenderContext: {}\n", selected);
+    // 1. Try to find the one we actually want
+    for (const auto& m : modules) {
+        if (m == preferredAPI.c_str()) {
+            selected = m.c_str();
+            break;
+        }
+    }
 
-	_system = LLGL::RenderSystem::Load(LLGL::RenderSystemDescriptor{selected.c_str()});
+    // 2. Fallback: If preferred is missing, pick the first available one
+    if (selected.empty() && !modules.empty()) {
+        selected = modules[0].c_str();
+        ZHLN::Log("WARNING: Preferred API '{}' not found. Falling back to '{}'\n", 
+                  preferredAPI.c_str(), selected.c_str());
+    }
+
+    if (selected.empty()) {
+        ZHLN::Log("FATAL: No RenderSystem modules found!\n");
+        return;
+    }
+
+    ZHLN::Log("Loading RenderContext: {}\n", selected.c_str());
+    _system = LLGL::RenderSystem::Load(LLGL::RenderSystemDescriptor{selected.c_str()});
 	if (!_system)
 		return;
 
@@ -59,6 +72,18 @@ void RenderContext::EndFrame() {
 	_cmdBuffer->End();
 	_commandQueue->Submit(*_cmdBuffer);
 	_swapChain->Present();
+}
+
+void RenderContext::SetResolution(const LLGL::Extent2D& resolution) {
+    // Vulkan cannot create a swapchain with 0 width or height (minimization)
+    if (resolution.width == 0 || resolution.height == 0) {
+        return;
+    }
+
+    if (_swapChain) {
+        _swapChain->ResizeBuffers(resolution);
+        ZHLN::Log("Vulkan Swapchain resized to {}x{}\n", resolution.width, resolution.height);
+    }
 }
 
 namespace Renderer {

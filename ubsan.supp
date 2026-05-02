@@ -1,0 +1,7 @@
+# LuaJIT shifts and pointer casts
+shift:lj_buf.c
+shift:lj_bcread.c
+function:lj_gc.c
+
+# LLGL OpenGL misaligned stores
+alignment:GLResourceHeap.cpp
