@@ -30,6 +30,77 @@ Mesh CreateTetrahedron(RenderContext& ctx) {
 	return Mesh{.vertexBuffer = BufferPtr(rawVbo, LLGLDeleter{sys}), .vertexCount = 12};
 }
 
+Mesh CreatePlane(RenderContext& ctx, float extent, const JPH::Vec4& color) {
+	LLGL::RenderSystem* sys = ctx.GetSystem();
+
+	Vertex data[] = {{{-extent, 0.0f, -extent}, color}, {{extent, 0.0f, -extent}, color},
+					 {{extent, 0.0f, extent}, color},	{{-extent, 0.0f, -extent}, color},
+					 {{extent, 0.0f, extent}, color},	{{-extent, 0.0f, extent}, color}};
+
+	LLGL::BufferDescriptor vboDesc;
+	vboDesc.size = sizeof(data);
+	vboDesc.bindFlags = LLGL::BindFlags::VertexBuffer;
+	auto* rawVbo = sys->CreateBuffer(vboDesc, data);
+	return Mesh{.vertexBuffer = BufferPtr(rawVbo, LLGLDeleter{sys}), .vertexCount = 6};
+}
+
+Mesh CreateBox(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& color) {
+	LLGL::RenderSystem* sys = ctx.GetSystem();
+
+	const float x = halfExtents.GetX();
+	const float y = halfExtents.GetY();
+	const float z = halfExtents.GetZ();
+
+	Vertex data[] = {// Front
+					 {{-x, -y, z}, color},
+					 {{x, -y, z}, color},
+					 {{x, y, z}, color},
+					 {{-x, -y, z}, color},
+					 {{x, y, z}, color},
+					 {{-x, y, z}, color},
+					 // Back
+					 {{x, -y, -z}, color},
+					 {{-x, -y, -z}, color},
+					 {{-x, y, -z}, color},
+					 {{x, -y, -z}, color},
+					 {{-x, y, -z}, color},
+					 {{x, y, -z}, color},
+					 // Left
+					 {{-x, -y, -z}, color},
+					 {{-x, -y, z}, color},
+					 {{-x, y, z}, color},
+					 {{-x, -y, -z}, color},
+					 {{-x, y, z}, color},
+					 {{-x, y, -z}, color},
+					 // Right
+					 {{x, -y, z}, color},
+					 {{x, -y, -z}, color},
+					 {{x, y, -z}, color},
+					 {{x, -y, z}, color},
+					 {{x, y, -z}, color},
+					 {{x, y, z}, color},
+					 // Top
+					 {{-x, y, z}, color},
+					 {{x, y, z}, color},
+					 {{x, y, -z}, color},
+					 {{-x, y, z}, color},
+					 {{x, y, -z}, color},
+					 {{-x, y, -z}, color},
+					 // Bottom
+					 {{-x, -y, -z}, color},
+					 {{x, -y, -z}, color},
+					 {{x, -y, z}, color},
+					 {{-x, -y, -z}, color},
+					 {{x, -y, z}, color},
+					 {{-x, -y, z}, color}};
+
+	LLGL::BufferDescriptor vboDesc;
+	vboDesc.size = sizeof(data);
+	vboDesc.bindFlags = LLGL::BindFlags::VertexBuffer;
+	auto* rawVbo = sys->CreateBuffer(vboDesc, data);
+	return Mesh{.vertexBuffer = BufferPtr(rawVbo, LLGLDeleter{sys}), .vertexCount = 36};
+}
+
 Material CreateBasicMaterial(RenderContext& ctx) {
 	LLGL::RenderSystem* sys = ctx.GetSystem();
 	LLGLDeleter deleter{sys};
