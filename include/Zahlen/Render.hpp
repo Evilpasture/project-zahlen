@@ -1,7 +1,7 @@
 #pragma once
-#include "engine/Types.hpp"
-#include "engine/Window.hpp"
-#include "engine/detail/String.hpp"
+#include <Zahlen/Types.hpp>
+#include <Zahlen/Window.hpp>
+#include <Zahlen/detail/String.hpp>
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Math/Mat44.h>

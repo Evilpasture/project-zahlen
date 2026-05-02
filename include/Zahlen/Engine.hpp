@@ -1,7 +1,7 @@
 #pragma once
-#include "engine/Physics.hpp"
-#include "engine/Render.hpp"
-#include "engine/Window.hpp" // New include
+#include <Zahlen/Physics.hpp>
+#include <Zahlen/Render.hpp>
+#include <Zahlen/Window.hpp> // New include
 
 #include <memory>
 

@@ -108,7 +108,6 @@ target_include_directories(zahlen SYSTEM PRIVATE
 
 target_include_directories(zahlen PRIVATE
     ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/extern/LuaJIT/src
 )
 

@@ -1,5 +1,5 @@
 #pragma once
-#include "engine/detail/String.hpp"
+#include <Zahlen/detail/String.hpp>
 
 #include <LLGL/LLGL.h>
 #include <memory>

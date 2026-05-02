@@ -2,8 +2,8 @@
 #include <Jolt/Jolt.h>
 #include <Jolt/Core/Factory.h>
 #include <Jolt/RegisterTypes.h>
-#include "engine/Engine.hpp"
-#include "engine/Log.hpp"
+#include <Zahlen/Engine.hpp>
+#include <Zahlen/Log.hpp>
 // clang-format on
 
 namespace ZHLN {
