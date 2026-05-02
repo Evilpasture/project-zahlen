@@ -257,6 +257,49 @@ inline void ExecuteSyncPass(const uint32_t active_count,
 	}
 }
 
+/**
+ * @brief Optimized SIMD sync for CharacterVirtual objects.
+ * Handles Position, Rotation, and Linear Velocity.
+ */
+[[gnu::always_inline]]
+inline void SyncCharacters(const JPH::Array<JPH::CharacterVirtual*>& characters,
+						   const MappingDataCreateInfo& map,
+						   const WorldDataCreateInfo& world) noexcept {
+	for (auto* character : characters) {
+		const EntityHandle h = EntityHandle::Unpack(character->GetUserData());
+
+		// In-loop validation (similar to rigid body pass)
+		const uint32_t slot = h.index;
+		if (slot >= map.slot_capacity) [[unlikely]]
+			continue;
+
+		const uint32_t D = map.slot_to_dense[slot];
+
+		// 1. Snapshot previous state
+		world.shadow_ppos[D] = world.shadow_pos[D];
+		world.shadow_prot[D] = world.shadow_rot[D];
+
+		// 2. Optimized Position Store
+		const JPH::RVec3 pos = character->GetPosition();
+		auto* const targetPos = &world.shadow_pos[D];
+		if constexpr (IS_DOUBLE) {
+			pos.StoreDouble3(reinterpret_cast<PosPointerType>(targetPos));
+			targetPos->w = 0.0;
+		} else {
+			JPH::Vec4(JPH::Vec3(pos), 0.0f)
+				.StoreFloat4(reinterpret_cast<AuxPointerType>(targetPos));
+		}
+
+		// 3. Optimized Rotation Store
+		const JPH::Quat rot = character->GetRotation();
+		rot.GetXYZW().StoreFloat4(reinterpret_cast<AuxPointerType>(&world.shadow_rot[D]));
+
+		// 4. Optimized Velocity Store
+		const JPH::Vec3 vel = character->GetLinearVelocity();
+		JPH::Vec4(vel, 0.0f).StoreFloat4(reinterpret_cast<AuxPointerType>(&world.shadow_lvel[D]));
+	}
+}
+
 } // namespace Physics::Sync
 
 // =================================================================================================
@@ -339,8 +382,9 @@ void PhysicsContext::Step(float deltaTime) {
 	auto& world = _impl->world;
 	world.isStepping.store(true, std::memory_order_release);
 
-	// 1. Physics Step
+	// 1. Jolt Update Pass
 	_impl->physicsSystem.Update(deltaTime, 1, &_impl->tempAllocator, &_impl->jobSystem);
+
 	for (auto* character : _impl->activeCharacters) {
 		character->Update(deltaTime, _impl->physicsSystem.GetGravity(),
 						  _impl->physicsSystem.GetDefaultBroadPhaseLayerFilter(Layers::MOVING),
@@ -348,11 +392,11 @@ void PhysicsContext::Step(float deltaTime) {
 						  _impl->tempAllocator);
 	}
 
-	// 2. Sync Lock (Replaces the while loop and the manual .clear() at the end)
+	// 2. Data Synchronization Pass
 	{
 		std::lock_guard<ZHLN::Mutex> lock(world.shadowLock);
 
-		// 3. Setup Structs
+		// Prepare Sync Descriptors (Pointers aligned to 16/32 bytes)
 		Physics::Sync::WorldDataCreateInfo syncWorld = {
 			.shadow_pos = std::assume_aligned<32>(
 				reinterpret_cast<Physics::Sync::PosStride*>(world.positions)),
@@ -375,31 +419,16 @@ void PhysicsContext::Step(float deltaTime) {
 			.slot_to_dense = world.slotToDense,
 		};
 
-		// 4. Run Sync
+		// 3. Batch Sync Rigid Bodies
 		const uint32_t activeRigids =
 			_impl->physicsSystem.GetNumActiveBodies(JPH::EBodyType::RigidBody);
 		Physics::Sync::ExecuteSyncPass<JPH::EBodyType::RigidBody>(
 			activeRigids, &_impl->physicsSystem, mapData, syncWorld);
 
-		// 5. Manually sync Character transforms to SoA
-		for (auto* character : _impl->activeCharacters) {
-			EntityHandle h = EntityHandle::Unpack(character->GetUserData());
-			uint32_t denseIdx = world.slotToDense[h.index];
-
-			JPH::RVec3 pos = character->GetPosition();
-			JPH::Quat rot = character->GetRotation();
-
-			// Write to SoA (Padded for SIMD)
-			world.positions[denseIdx * 4 + 0] = pos.GetX();
-			world.positions[denseIdx * 4 + 1] = pos.GetY();
-			world.positions[denseIdx * 4 + 2] = pos.GetZ();
-
-			world.rotations[denseIdx * 4 + 0] = rot.GetX();
-			world.rotations[denseIdx * 4 + 1] = rot.GetY();
-			world.rotations[denseIdx * 4 + 2] = rot.GetZ();
-			world.rotations[denseIdx * 4 + 3] = rot.GetW();
-		}
+		// 4. SIMD Sync Characters
+		Physics::Sync::SyncCharacters(_impl->activeCharacters, mapData, syncWorld);
 	}
+
 	world.isStepping.store(false, std::memory_order_release);
 }
 
