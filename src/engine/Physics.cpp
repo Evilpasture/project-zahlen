@@ -7,11 +7,18 @@
 #include <Jolt/Core/JobSystemThreadPool.h>
 
 #include <Zahlen/Physics.hpp>
-#include <Zahlen/PhysicsWorld.hpp> // <-- New Include
+#include <Zahlen/PhysicsWorld.hpp>
 #include <Zahlen/Log.hpp>
+
+// ZHLN Detail Utilities
+#include <Zahlen/detail/Prefetch.hpp>
+#include <Zahlen/detail/Span.hpp>
+#include <Zahlen/detail/Loop.hpp>
 // clang-format on
 
+#include <array>
 #include <cstring>
+#include <memory>
 
 namespace ZHLN {
 
@@ -81,7 +88,168 @@ class ObjectLayerPairFilterImpl : public JPH::ObjectLayerPairFilter {
 	}
 };
 
-// --- Context Implementation (Pimpl) ---
+// =================================================================================================
+// UNIFIED SYNC PASS IMPLEMENTATION
+// =================================================================================================
+namespace Physics::Sync {
+
+struct alignas(32) PosStride {
+	JPH::Real x, y, z, w;
+};
+struct alignas(16) AuxStride {
+	float x, y, z, w;
+};
+
+static_assert(sizeof(PosStride) == sizeof(JPH::Real) * 4);
+static_assert(sizeof(AuxStride) == sizeof(float) * 4);
+static_assert(sizeof(PosStride) % 32 == 0);
+
+constexpr uint32_t BATCH_SIZE = 128;
+
+struct SyncWorkItem {
+	const JPH::Body* body;
+	uint32_t dense_idx;
+};
+
+struct WorldDataCreateInfo {
+	PosStride* const ZHLN_RESTRICT shadow_pos;
+	PosStride* const ZHLN_RESTRICT shadow_ppos;
+	AuxStride* const ZHLN_RESTRICT shadow_rot;
+	AuxStride* const ZHLN_RESTRICT shadow_prot;
+};
+
+struct MappingDataCreateInfo {
+	const void* ZHLN_RESTRICT* const ZHLN_RESTRICT body_ptrs;
+	const std::atomic<uint32_t>* const ZHLN_RESTRICT generations;
+	const size_t slot_capacity;
+	const uint32_t* const ZHLN_RESTRICT slot_to_dense;
+};
+
+#ifdef JPH_DOUBLE_PRECISION
+inline constexpr bool IS_DOUBLE = true;
+using PosPointerType = JPH::Double3* const ZHLN_RESTRICT;
+#else
+inline constexpr bool IS_DOUBLE = false;
+#endif
+
+using AuxPointerType = JPH::Float4* const ZHLN_RESTRICT;
+
+template <JPH::EBodyType TType>
+[[gnu::always_inline, gnu::nonnull(2)]]
+inline void ProcessItem(const uint32_t D, const JPH::Body* const ZHLN_RESTRICT b,
+						const WorldDataCreateInfo world) noexcept {
+
+	// 1. Snapshot previous state
+	world.shadow_ppos[D] = world.shadow_pos[D];
+	world.shadow_prot[D] = world.shadow_rot[D];
+
+	// 2. Write Current COM Position
+	auto* const targetPos = &world.shadow_pos[D];
+	const auto& translation = b->GetCenterOfMassPosition();
+
+	if constexpr (IS_DOUBLE) {
+		[[clang::always_inline]] translation.StoreDouble3(
+			reinterpret_cast<PosPointerType>(targetPos));
+		targetPos->w = 0.0;
+	} else {
+		[[clang::always_inline]] JPH::Vec4(JPH::Vec3(translation), 0.0f)
+			.StoreFloat4(reinterpret_cast<JPH::Float4* const ZHLN_RESTRICT>(targetPos));
+	}
+
+	// 3. Write Current Rotation
+	const auto& rotation = b->GetRotation();
+	[[clang::always_inline]] rotation.GetXYZW().StoreFloat4(
+		reinterpret_cast<AuxPointerType>(&world.shadow_rot[D]));
+
+	// Note: Linear/Angular velocity updates omitted for brevity, add them following the same
+	// pattern!
+}
+
+template <JPH::EBodyType TType>
+[[gnu::always_inline, gnu::hot, gnu::flatten]]
+inline void ProcessBatch(const WorldDataCreateInfo world,
+						 RestrictSpan<const SyncWorkItem> items) noexcept {
+
+	const size_t count = items.size();
+	[[assume(count > 0)]];
+	[[assume(count <= BATCH_SIZE)]];
+
+	ZHLN::UnrollLoop<4>(count, [&](auto j) {
+		if (j + 2 < count) {
+			const uint32_t next_idx = items[j + 2].dense_idx;
+			ZHLN::Prefetch<AccessType::Write>(&world.shadow_pos[next_idx]);
+			ZHLN::Prefetch<AccessType::Write>(&world.shadow_rot[next_idx]);
+		}
+		ProcessItem<TType>(items[j].dense_idx, items[j].body, world);
+	});
+}
+
+template <JPH::EBodyType TType>
+[[gnu::always_inline, gnu::flatten, gnu::nonnull(2)]]
+inline void ExecuteSyncPass(const uint32_t active_count,
+							const JPH::PhysicsSystem* const ZHLN_RESTRICT system,
+							MappingDataCreateInfo map, const WorldDataCreateInfo world) noexcept {
+	if (active_count == 0)
+		return;
+
+	const JPH::BodyID* const ZHLN_RESTRICT active_ids = system->GetActiveBodiesUnsafe(TType);
+	if (active_ids == nullptr) [[unlikely]]
+		return;
+
+	const auto* const ZHLN_RESTRICT lock_iface = &system->GetBodyLockInterfaceNoLock();
+
+	alignas(64) std::array<SyncWorkItem, BATCH_SIZE> worklist;
+	uint32_t work_ptr = 0;
+
+	for (uint32_t i = 0; i < active_count; i++) {
+		const uint32_t raw_jolt_id = active_ids[i].GetIndexAndSequenceNumber();
+		const uint32_t j_idx = raw_jolt_id & JPH::BodyID::cMaxBodyIndex;
+
+		const auto* ZHLN_RESTRICT b =
+			static_cast<const JPH::Body * ZHLN_RESTRICT>(map.body_ptrs[j_idx]);
+
+		[[clang::always_inline]]
+		if (b == nullptr || b->GetID().GetIndexAndSequenceNumber() != raw_jolt_id) [[unlikely]] {
+			b = lock_iface->TryGetBody(JPH::BodyID(raw_jolt_id));
+			map.body_ptrs[j_idx] = b;
+		}
+		[[assume(b != nullptr)]];
+
+		// ECS Handle decoding
+		const uint64_t handle = b->GetUserData();
+		const uint32_t slot = static_cast<uint32_t>(handle & 0xFFFFFFFF);
+		const uint32_t gen = static_cast<uint32_t>(handle >> 32);
+
+		const uint32_t safe_slot = (slot < map.slot_capacity) ? slot : 0;
+		const uint32_t current_gen = map.generations[safe_slot].load(std::memory_order_relaxed);
+
+		// Branchless Validation
+		const uint32_t bad = static_cast<uint32_t>(slot >= map.slot_capacity) | (current_gen ^ gen);
+		const uint32_t d_idx = map.slot_to_dense[safe_slot];
+		const uint32_t is_valid = static_cast<uint32_t>(bad == 0);
+
+		[[assume(work_ptr < BATCH_SIZE)]];
+		worklist[work_ptr].body = b;
+		worklist[work_ptr].dense_idx = d_idx;
+		work_ptr += is_valid;
+
+		if (work_ptr == BATCH_SIZE) {
+			ProcessBatch<TType>(world, RestrictSpan(worklist));
+			work_ptr = 0;
+		}
+	}
+
+	if (work_ptr > 0) {
+		ProcessBatch<TType>(world, RestrictSpan(worklist).first(work_ptr));
+	}
+}
+
+} // namespace Physics::Sync
+
+// =================================================================================================
+// CONTEXT IMPLEMENTATION
+// =================================================================================================
+
 struct PhysicsContext::Impl {
 	JPH::PhysicsSystem physicsSystem;
 	JPH::TempAllocatorImpl tempAllocator{10 * 1024 * 1024};
@@ -91,101 +259,111 @@ struct PhysicsContext::Impl {
 	ObjectVsBroadPhaseLayerFilterImpl objVsBpFilter;
 	ObjectLayerPairFilterImpl objVsObjFilter;
 
-	// The flat, POD SoA World that we expose to Lua / Render / Logic
 	Physics::PhysicsWorld world{};
 };
 
 PhysicsContext::PhysicsContext() : _impl(std::make_unique<Impl>()) {
-	// 1. Initialize Jolt Systems
 	const uint32_t maxBodies = 1024;
+
 	_impl->physicsSystem.Init(maxBodies, 0, maxBodies, maxBodies, _impl->bpLayerInterface,
 							  _impl->objVsBpFilter, _impl->objVsObjFilter);
 
-	// 2. Zero-Initialize the POD SoA World memory explicitly
-	// (Since we removed default initializers, this guarantees safety)
 	std::memset(&_impl->world, 0, sizeof(Physics::PhysicsWorld));
 
-	// 3. Link Bucket 1 (Cold Data Pointers)
 	_impl->world.system = &_impl->physicsSystem;
 	_impl->world.bodyInterface = &_impl->physicsSystem.GetBodyInterface();
 	_impl->world.jobSystem = &_impl->jobSystem;
 	_impl->world.tempAllocator = &_impl->tempAllocator;
 	_impl->world.maxJoltBodies = maxBodies;
 
-	// Clear the spinlock
 	_impl->world.shadowLock.clear();
 
-	// 4. Allocate Initial Capacity for Bucket 2 (Shadow State)
-	_impl->world.capacity = maxBodies; // Simple 1:1 mapping for demonstration
-	_impl->world.positions = new JPH::Real[maxBodies * 3]();
+	// Allocate Bucket 2 & ECS Mapping Arrays
+	// CRITICAL: Multiply by 4 (not 3) to allow safe 128/256-bit SIMD stores
+	_impl->world.capacity = maxBodies;
+	_impl->world.slotCapacity = maxBodies;
+
+	_impl->world.positions = new JPH::Real[maxBodies * 4]();
+	_impl->world.prevPositions = new JPH::Real[maxBodies * 4]();
 	_impl->world.rotations = new float[maxBodies * 4]();
+	_impl->world.prevRotations = new float[maxBodies * 4]();
 	_impl->world.bodyIDs = new JPH::BodyID[maxBodies]();
 
-	_impl->world.count.store(0, std::memory_order_relaxed);
+	_impl->world.joltBodyPtrs = new const void*[maxBodies]();
+	_impl->world.slotToDense = new uint32_t[maxBodies]();
+	_impl->world.generations = new std::atomic<uint32_t>[maxBodies]();
 
-	ZHLN::Log("PhysicsContext & SoA PhysicsWorld initialized.\n");
+	_impl->world.count.store(0, std::memory_order_relaxed);
 }
 
 PhysicsContext::~PhysicsContext() {
-	// Clean up Bucket 2 SoA arrays
 	delete[] _impl->world.positions;
+	delete[] _impl->world.prevPositions;
 	delete[] _impl->world.rotations;
+	delete[] _impl->world.prevRotations;
 	delete[] _impl->world.bodyIDs;
+	delete[] _impl->world.joltBodyPtrs;
+	delete[] _impl->world.slotToDense;
+	delete[] _impl->world.generations;
 }
 
 void PhysicsContext::Step(float deltaTime) {
 	auto& world = _impl->world;
 
-	// Flag that we are stepping (useful if another thread polls)
 	world.isStepping.store(true, std::memory_order_release);
 
-	// 1. Execute Jolt Physics Step
+	// 1. Step Physics
 	const int collisionSteps = 1;
 	_impl->physicsSystem.Update(deltaTime, collisionSteps, &_impl->tempAllocator,
 								&_impl->jobSystem);
 
-	// 2. Synchronization Phase: Pull hot data from Jolt into our SoA buffers.
-	// This is where the magic happens for your Python/Lua Data-Oriented consumers!
-	size_t activeCount = world.count.load(std::memory_order_acquire);
-
-	// Lock the shadow buffer to prevent reader collisions (e.g., Render Thread)
+	// 2. Lock Shadow Buffer
 	while (world.shadowLock.test_and_set(std::memory_order_acquire)) {
-		// Spin
 	}
 
-	for (size_t i = 0; i < activeCount; ++i) {
-		JPH::BodyID id = world.bodyIDs[i];
+	// 3. Setup Structs for Sync Pass
+	Physics::Sync::WorldDataCreateInfo syncWorld = {
+		.shadow_pos =
+			std::assume_aligned<32>(reinterpret_cast<Physics::Sync::PosStride*>(world.positions)),
+		.shadow_ppos = std::assume_aligned<32>(
+			reinterpret_cast<Physics::Sync::PosStride*>(world.prevPositions)),
+		.shadow_rot =
+			std::assume_aligned<16>(reinterpret_cast<Physics::Sync::AuxStride*>(world.rotations)),
+		.shadow_prot = std::assume_aligned<16>(
+			reinterpret_cast<Physics::Sync::AuxStride*>(world.prevRotations)),
+	};
 
-		// If body is sleeping or invalid, skip (optimizations omitted here for brevity)
-		if (!world.bodyInterface->IsActive(id))
-			continue;
+	Physics::Sync::MappingDataCreateInfo mapData = {
+		.body_ptrs = world.joltBodyPtrs,
+		.generations = world.generations,
+		.slot_capacity = world.slotCapacity,
+		.slot_to_dense = world.slotToDense,
+	};
 
-		JPH::RVec3 pos = world.bodyInterface->GetPosition(id);
-		JPH::Quat rot = world.bodyInterface->GetRotation(id);
-
-		// Write to SoA Array
-		world.positions[i * 3 + 0] = pos.GetX();
-		world.positions[i * 3 + 1] = pos.GetY();
-		world.positions[i * 3 + 2] = pos.GetZ();
-
-		world.rotations[i * 4 + 0] = rot.GetX();
-		world.rotations[i * 4 + 1] = rot.GetY();
-		world.rotations[i * 4 + 2] = rot.GetZ();
-		world.rotations[i * 4 + 3] = rot.GetW();
-	}
+	// 4. Execute Hyper-Fast SIMD Sync
+	const uint32_t activeRigids =
+		_impl->physicsSystem.GetNumActiveBodies(JPH::EBodyType::RigidBody);
+	Physics::Sync::ExecuteSyncPass<JPH::EBodyType::RigidBody>(activeRigids, &_impl->physicsSystem,
+															  mapData, syncWorld);
 
 	world.shadowLock.clear(std::memory_order_release);
 	world.isStepping.store(false, std::memory_order_release);
 }
 
-// --- Procedural API ---
+// =================================================================================================
+// PROCEDURAL API
+// =================================================================================================
+
 namespace Physics {
 
-// Quick helper to append to the SoA tracking
-static void RegisterBodyToWorld(PhysicsWorld& world, JPH::BodyID id) {
-	size_t index = world.count.fetch_add(1, std::memory_order_relaxed);
-	if (index < world.capacity) {
-		world.bodyIDs[index] = id;
+// Simple wrapper to wire up the Body -> SoA mapping correctly
+static void RegisterBodyToWorld(PhysicsWorld& world, JPH::BodyID id, EntityHandle handle) {
+	size_t dense_idx = world.count.fetch_add(1, std::memory_order_relaxed);
+
+	if (dense_idx < world.capacity && handle.index < world.slotCapacity) {
+		world.bodyIDs[dense_idx] = id;
+		world.slotToDense[handle.index] = dense_idx;
+		world.generations[handle.index].store(handle.generation, std::memory_order_relaxed);
 	}
 }
 
@@ -201,7 +379,7 @@ JPH::BodyID CreateStaticFloor(PhysicsContext& ctx, float extent, EntityHandle ha
 
 	JPH::BodyID id =
 		world.bodyInterface->CreateAndAddBody(settings, JPH::EActivation::DontActivate);
-	RegisterBodyToWorld(world, id);
+	RegisterBodyToWorld(world, id, handle);
 	return id;
 }
 
@@ -217,13 +395,11 @@ JPH::BodyID CreateDynamicBox(PhysicsContext& ctx, JPH::RVec3Arg position, JPH::V
 	settings.mUserData = handle.Pack();
 
 	JPH::BodyID id = world.bodyInterface->CreateAndAddBody(settings, JPH::EActivation::Activate);
-	RegisterBodyToWorld(world, id);
+	RegisterBodyToWorld(world, id, handle);
 	return id;
 }
 
 JPH::RVec3 GetPosition(const PhysicsContext& ctx, JPH::BodyID bodyID) {
-	// Now you can optionally grab this from Jolt directly OR from the SoA arrays
-	// (ctx.GetImpl()->world.positions), depending on your thread context!
 	return ctx.GetImpl()->world.bodyInterface->GetPosition(bodyID);
 }
 
