@@ -29,6 +29,7 @@ endif()
 # --- 3. LLGL Static Setup (FIXED FLAGS) ---
 set(LLGL_BUILD_STATIC_LIB ON CACHE BOOL "" FORCE)
 set(LLGL_BUILD_RENDERER_VULKAN ON CACHE BOOL "" FORCE)
+set(LLGL_VK_ENABLE_SPIRV_REFLECT ON CACHE BOOL "" FORCE)
 set(LLGL_BUILD_RENDERER_OPENGL ON CACHE BOOL "" FORCE)
 set(LLGL_BUILD_RENDERER_DIRECT3D11 OFF CACHE BOOL "" FORCE)
 set(LLGL_BUILD_RENDERER_DIRECT3D12 OFF CACHE BOOL "" FORCE) # FIXED: Removed extra "OFF"
@@ -64,6 +65,7 @@ set(PROJECT_SOURCES
     src/engine/Thread.S
     src/engine/Input.cpp
     src/engine/Resources.c
+    src/engine/Platform.cpp
 )
 
 add_executable(zahlen ${PROJECT_SOURCES})
