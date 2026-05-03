@@ -62,6 +62,8 @@ HeadlessCtx MakeHeadlessCtx() {
     ZHLN_DeviceSelectDesc sel = {
         .instance = ctx.instance,
         .surface  = VK_NULL_HANDLE,   // headless
+        .score_fn = nullptr,
+        .score_userdata = nullptr,
     };
     ctx.physical = ZHLN_SelectPhysicalDevice(&sel);
     if (ctx.physical.handle == VK_NULL_HANDLE) return {};

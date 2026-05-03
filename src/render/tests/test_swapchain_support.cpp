@@ -98,6 +98,8 @@ void test_swapchain_support() {
     ZHLN_DeviceSelectDesc sel = {
         .instance = instance,
         .surface = surface,
+        .score_fn = nullptr,
+        .score_userdata = nullptr,
     };
     ZHLN_PhysicalDeviceInfo physical = ZHLN_SelectPhysicalDevice(&sel);
     if (physical.handle == VK_NULL_HANDLE) {

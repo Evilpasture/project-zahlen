@@ -64,6 +64,9 @@ class Allocator {
         .vkBindBufferMemory2KHR = &vkBindBufferMemory2,
         .vkBindImageMemory2KHR = &vkBindImageMemory2,
         .vkGetPhysicalDeviceMemoryProperties2KHR = &vkGetPhysicalDeviceMemoryProperties2,
+        .vkGetDeviceBufferMemoryRequirements = &vkGetDeviceBufferMemoryRequirements,
+        .vkGetDeviceImageMemoryRequirements = &vkGetDeviceImageMemoryRequirements,
+        .vkGetMemoryWin32HandleKHR = nullptr,
         // Buffer Device Address is NOT a field in the struct; 
         // VMA loads it via GetDeviceProcAddr internally.
     };
@@ -88,7 +91,7 @@ class Allocator {
 	}
 
 	[[nodiscard]] bool Init(const Context& ctx) noexcept {
-		return Init(ctx.instance, ctx.Physical(), ctx.Device());
+		return Init(ctx.Instance(), ctx.Physical(), ctx.Device());
 	}
 
 	[[nodiscard]] VmaAllocator Get() const noexcept { return _handle; }
