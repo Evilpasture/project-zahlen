@@ -150,20 +150,23 @@ class Context {
 										const ZHLN_DeviceDesc& device_desc) noexcept {
 		Context ctx;
 		ctx._instance = ZHLN_CreateInstance(&instance_desc);
-		if (!ctx._instance)
-			return {};
 
-		// Surface is generally owned by the Window (GLFW/SDL), so Context just references it
+		// CRITICAL FIX: Bail out if instance creation failed
+		if (ctx._instance == VK_NULL_HANDLE) {
+			return {};
+		}
+
 		ctx._surface = select_desc.surface;
 
-		// Override instance in select_desc just in case caller forgot
 		ZHLN_DeviceSelectDesc safe_select = select_desc;
 		safe_select.instance = ctx._instance;
 		ctx._physical = ZHLN_SelectPhysicalDevice(&safe_select);
-		if (!ctx._physical.handle)
-			return {};
 
-		// Override physical in device_desc just in case
+		// CRITICAL FIX: Bail out if no GPU found
+		if (ctx._physical.handle == VK_NULL_HANDLE) {
+			return {};
+		}
+
 		ZHLN_DeviceDesc safe_device = device_desc;
 		safe_device.physical = &ctx._physical;
 		ctx._device = ZHLN_CreateDevice(&safe_device);
@@ -362,48 +365,50 @@ class CommandPools {
 };
 
 class CommandPool {
-public:
-    CommandPool() = default;
+  public:
+	CommandPool() = default;
 
-    CommandPool(VkDevice device, uint32_t queue_family) : _device(nullptr) {
-        // Fix: Capture the return value. 
-        // Only assign _device if the pool was actually created.
-        if (ZHLN_CreateCommandPool(device, queue_family, &_raw)) {
-            _device = device;
-        }
-    }
+	CommandPool(VkDevice device, uint32_t queue_family) : _device(nullptr) {
+		// Fix: Capture the return value.
+		// Only assign _device if the pool was actually created.
+		if (ZHLN_CreateCommandPool(device, queue_family, &_raw)) {
+			_device = device;
+		}
+	}
 
-    ~CommandPool() { 
-        if (_device) ZHLN_DestroyCommandPool(_device, &_raw); 
-    }
+	~CommandPool() {
+		if (_device)
+			ZHLN_DestroyCommandPool(_device, &_raw);
+	}
 
-    // Move only
-    CommandPool(CommandPool&& other) noexcept 
-        : _device(std::exchange(other._device, nullptr)), 
-          _raw(std::exchange(other._raw, {})) {}
+	// Move only
+	CommandPool(CommandPool&& other) noexcept
+		: _device(std::exchange(other._device, nullptr)), _raw(std::exchange(other._raw, {})) {}
 
-    CommandPool& operator=(CommandPool&& other) noexcept {
-        if (this != &other) {
-            if (_device) ZHLN_DestroyCommandPool(_device, &_raw);
-            _device = std::exchange(other._device, nullptr);
-            _raw = std::exchange(other._raw, {});
-        }
-        return *this;
-    }
-    
-    [[nodiscard]] bool Valid() const noexcept { return _device != nullptr; }
-    explicit operator bool() const noexcept { return Valid(); }
+	CommandPool& operator=(CommandPool&& other) noexcept {
+		if (this != &other) {
+			if (_device)
+				ZHLN_DestroyCommandPool(_device, &_raw);
+			_device = std::exchange(other._device, nullptr);
+			_raw = std::exchange(other._raw, {});
+		}
+		return *this;
+	}
 
-    [[nodiscard]] bool Allocate(uint32_t count) { 
-        if (!Valid()) return false;
-        return ZHLN_AllocateCommandBuffers(_device, &_raw, count); 
-    }
+	[[nodiscard]] bool Valid() const noexcept { return _device != nullptr; }
+	explicit operator bool() const noexcept { return Valid(); }
 
-    VkCommandBuffer operator[](uint32_t i) const { return _raw.buffers[i]; }
+	[[nodiscard]] bool Allocate(uint32_t count) {
+		if (!Valid())
+			return false;
+		return ZHLN_AllocateCommandBuffers(_device, &_raw, count);
+	}
 
-private:
-    VkDevice _device = nullptr;
-    ZHLN_CommandPool _raw{};
+	VkCommandBuffer operator[](uint32_t i) const { return _raw.buffers[i]; }
+
+  private:
+	VkDevice _device = nullptr;
+	ZHLN_CommandPool _raw{};
 };
 
 // ============================================================================
@@ -559,6 +564,42 @@ ZHLN_FrameResult DrawFrame(const Context& ctx, Swapchain& swapchain, FrameSync<N
 	frame_index = (frame_index + 1) % N;
 	return result;
 }
+
+// ============================================================================
+// Surface helpers
+// ============================================================================
+
+class Surface {
+  public:
+	Surface() = default;
+	Surface(VkInstance instance, VkSurfaceKHR surface) : _instance(instance), _handle(surface) {}
+
+	~Surface() {
+		if (_handle != VK_NULL_HANDLE)
+			vkDestroySurfaceKHR(_instance, _handle, nullptr);
+	}
+
+	// Move only
+	Surface(const Surface&) = delete;
+	Surface(Surface&& other) noexcept
+		: _instance(std::exchange(other._instance, VK_NULL_HANDLE)),
+		  _handle(std::exchange(other._handle, VK_NULL_HANDLE)) {}
+	Surface& operator=(Surface&& other) noexcept {
+		if (this != &other) {
+			if (_handle != VK_NULL_HANDLE)
+				vkDestroySurfaceKHR(_instance, _handle, nullptr);
+			_instance = std::exchange(other._instance, VK_NULL_HANDLE);
+			_handle = std::exchange(other._handle, VK_NULL_HANDLE);
+		}
+		return *this;
+	}
+
+	[[nodiscard]] VkSurfaceKHR Get() const { return _handle; }
+
+  private:
+	VkInstance _instance = VK_NULL_HANDLE;
+	VkSurfaceKHR _handle = VK_NULL_HANDLE;
+};
 
 // ============================================================================
 // Error Helpers

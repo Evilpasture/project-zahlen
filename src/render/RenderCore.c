@@ -346,7 +346,8 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* desc) {
 
 	VkSwapchainCreateInfoKHR create_info = {
 		.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-		.flags = 0, 
+		.pNext = nullptr, // 1. Explicitly NULL (Fixes the Ghost Flag)
+		.flags = 0,		  // 2. Explicitly 0
 		.surface = desc->surface,
 		.minImageCount = image_count,
 		.imageFormat = format.format,
@@ -695,8 +696,8 @@ VkPipeline ZHLN_CreateGraphicsPipeline(VkDevice device, const ZHLN_GraphicsPipel
 	// --- Rasterizer ---
 	VkPipelineRasterizationStateCreateInfo rasterizer = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-		.polygonMode = desc->polygon_mode ? desc->polygon_mode : VK_POLYGON_MODE_FILL,
-		.cullMode = desc->cull_mode ? desc->cull_mode : VK_CULL_MODE_BACK_BIT,
+		.polygonMode = desc->polygon_mode, // Just use the value directly
+		.cullMode = desc->cull_mode,	   // Just use the value directly
 		.frontFace = desc->front_face ? desc->front_face : VK_FRONT_FACE_COUNTER_CLOCKWISE,
 		.lineWidth = 1.0f,
 	};
