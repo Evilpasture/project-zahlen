@@ -1,5 +1,53 @@
-.venv/
-.cache/
+# ==========================================
+# ZHLN Project - Master Ignore
+# ==========================================
+
+# --- Compiled Shaders (Vulkan) ---
+*.spv
+*.vert.spv
+*.frag.spv
+*.comp.spv
+*.slang-module
+
+# --- Build Artifacts ---
 build/
+bin/
+obj/
+out/
+*.exe
+*.dll
+*.so
+*.a
+*.lib
+*.pdb
+*.ilk
+*.exp
+
+# --- C++ / MSVC / GCC Artifacts ---
+.vs/
+*.user
+*.suo
+*.sln.doccache
+ipch/
+*.pch
+*.tlog
+*.lastbuildstate
+*.log
+*.db
+*.opendb
+
+# --- Dependencies & Environment ---
+.venv/
+env/
+node_modules/
+
+# --- Cache & OS ---
+.cache/
+.pytest_cache/
+__pycache__/
 .DS_Store
-.spv
+Thumbs.db
+
+# --- Shader Hot-Reload / Temp ---
+*.tmp
+*.bak
