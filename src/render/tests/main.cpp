@@ -2,10 +2,12 @@
 
 #include "HeadlessCtx.hpp"
 #include "RenderCore.h"
-#include "RenderCore.hpp"
-#include <cstdio>
-#include <cstring>
+
+#include <array>
 #include <cstdlib>
+#include <print>
+#include <string>
+#include <string_view>
 
 // ----------------------------------------------------------------------------
 // Minimal test framework — no dependencies
@@ -14,27 +16,22 @@
 int s_passed = 0;
 int s_failed = 0;
 
-#define EXPECT(cond) do {                                           \
-    if (!(cond)) {                                                  \
-        std::printf("  FAIL: %s  (%s:%d)\n", #cond,               \
-                    __FILE__, __LINE__);                            \
-        ++s_failed;                                                 \
-    } else {                                                        \
-        ++s_passed;                                                 \
-    }                                                               \
-} while(0)
-
-#define EXPECT_EQ(a, b) EXPECT((a) == (b))
-#define EXPECT_NE(a, b) EXPECT((a) != (b))
-#define EXPECT_TRUE(a)  EXPECT((a))
-#define EXPECT_FALSE(a) EXPECT(!(a))
+#define EXPECT(cond)                                                                               \
+	do {                                                                                           \
+		if (!(cond)) {                                                                             \
+			std::println(stderr, "  FAIL: {}  ({}:{})", #cond, __FILE__, __LINE__);                \
+			++s_failed;                                                                            \
+		} else {                                                                                   \
+			++s_passed;                                                                            \
+		}                                                                                          \
+	} while (0)
 
 static void PrintSummary() {
-    std::printf("\n%d passed, %d failed\n", s_passed, s_failed);
+	std::println("\n{} passed, {} failed", s_passed, s_failed);
 }
 
 // ----------------------------------------------------------------------------
-// Forward declarations — one per test file
+// Forward declarations
 // ----------------------------------------------------------------------------
 
 void test_utils();
@@ -44,82 +41,114 @@ void test_buffer();
 void test_sync();
 void test_pipeline();
 void test_swapchain_support();
+void test_upload();
+void test_raii();
+void test_image();
 
 // ----------------------------------------------------------------------------
 // Headless Vulkan fixture
-// Creates an instance + device with no surface for GPU tests.
-// Returns false if no suitable device exists — callers return 77 to skip.
 // ----------------------------------------------------------------------------
 
-HeadlessCtx MakeHeadlessCtx() {
-    HeadlessCtx ctx;
+ZHLN::Vk::Context MakeHeadlessCtx() {
+	ZHLN_InstanceDesc inst_desc = ZHLN_DEFAULT_INSTANCE_DESC;
+	inst_desc.enable_validation = true;
 
-    ZHLN_InstanceDesc inst_desc = ZHLN_DEFAULT_INSTANCE_DESC;
-    inst_desc.enable_validation = false; // no messenger needed in tests
-    ctx.instance = ZHLN_CreateInstance(&inst_desc);
-    if (ctx.instance == VK_NULL_HANDLE) return {};
-
-    ZHLN_DeviceSelectDesc sel = {
-        .instance = ctx.instance,
-        .surface  = VK_NULL_HANDLE,   // headless
+	ZHLN_DeviceSelectDesc sel = {
+        .instance = VK_NULL_HANDLE, // Context::Create fills this in automatically
+        .surface = VK_NULL_HANDLE,
         .score_fn = nullptr,
-        .score_userdata = nullptr,
+        .score_userdata = nullptr
     };
-    ctx.physical = ZHLN_SelectPhysicalDevice(&sel);
-    if (ctx.physical.handle == VK_NULL_HANDLE) return {};
 
-    ZHLN_DeviceDesc dev_desc = {
-        .physical         = &ctx.physical,
-        .extensions       = nullptr,
-        .extension_count  = 0,
-        .features         = nullptr,
-        .enable_validation = false,
+	VkPhysicalDeviceVulkan13Features features13 = {
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+		.pNext = nullptr,
+		.synchronization2 = VK_TRUE,
+	};
+
+	VkPhysicalDeviceVulkan12Features features12 = {
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+		.pNext = &features13,
+		.bufferDeviceAddress = VK_TRUE,
+	};
+
+	VkPhysicalDeviceFeatures2 features2 = {
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+		.pNext = &features12,
+		.features = {}, 
+	};
+
+	ZHLN_DeviceDesc dev_desc = {
+        .physical = nullptr, // Context::Create fills this in automatically
+        .extensions = nullptr,
+        .extension_count = 0,
+        .features = &features2,
+        .enable_validation = true
     };
-    ctx.device = ZHLN_CreateDevice(&dev_desc);
-    return ctx;
+
+	return ZHLN::Vk::Context::Create(inst_desc, sel, dev_desc);
 }
 
 // ----------------------------------------------------------------------------
-// Entry point — dispatches by suite name
+// Entry point
 // ----------------------------------------------------------------------------
 
 int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        std::printf("Usage: zahlen_render_tests <suite>\n");
-        std::printf("Suites: utils errors device buffer sync pipeline swapchain all\n");
-        return 1;
-    }
+	if (argc < 2) {
+		std::println("Usage: zahlen_render_tests <suite>");
+		std::println("Suites: utils errors device buffer sync pipeline swapchain all");
+		return 1;
+	}
 
-    const char* suite = argv[1];
+	const std::string_view suite{argv[1]};
 
-    if (std::strcmp(suite, "utils")    == 0) { test_utils();    }
-    else if (std::strcmp(suite, "errors")   == 0) { test_errors();   }
-    else if (std::strcmp(suite, "device")   == 0) { test_device();   }
-    else if (std::strcmp(suite, "buffer")   == 0) { test_buffer();   }
-    else if (std::strcmp(suite, "sync")     == 0) { test_sync();     }
-    else if (std::strcmp(suite, "pipeline") == 0) { test_pipeline(); }
-    else if (std::strcmp(suite, "swapchain") == 0) { test_swapchain_support(); }
-    else if (std::strcmp(suite, "all") == 0) {
-        const char* suites[] = {"utils", "errors", "device", "buffer", "sync", "pipeline", "swapchain"};
-        int final_code = 0;
-        for (const char* s : suites) {
-            std::printf("\n=== running suite: %s ===\n", s);
-            std::string command = std::string("\"") + argv[0] + "\" " + s;
-            int code = std::system(command.c_str());
-            if (code == 77)
-                std::printf("  SKIP: %s\n", s);
-            else if (code != 0) {
-                final_code = code;
-                std::printf("  FAIL: suite %s returned %d\n", s, code);
-            }
-        }
-        return final_code;
-    }
-    else {
-        std::printf("Unknown suite: %s\n", suite);
-        return 1;
-    }
+	if (suite == "utils") {
+		test_utils();
+	} else if (suite == "errors") {
+		test_errors();
+	} else if (suite == "device") {
+		test_device();
+	} else if (suite == "buffer") {
+		test_buffer();
+	} else if (suite == "sync") {
+		test_sync();
+	} else if (suite == "pipeline") {
+		test_pipeline();
+	} else if (suite == "swapchain") {
+		test_swapchain_support();
+	} else if (suite == "upload") {
+		test_upload();
+	} else if (suite == "raii") {
+		test_raii();
+	} else if (suite == "image") {
+		test_image();
+	} else if (suite == "all") {
+		constexpr auto suites =
+			std::to_array<std::string_view>({"utils", "errors", "device", "buffer", "sync",
+											 "pipeline", "swapchain", "upload", "raii", "image"});
 
-    PrintSummary();
-    return (s_failed > 0) ? 1 : 0;
+		int final_code = 0;
+		for (auto s : suites) {
+			std::println("\n=== running suite: {} ===", s);
+
+			// Modern string formatting
+			std::string command = std::format("\"{}\" {}", argv[0], s);
+
+			int code = std::system(command.c_str());
+
+			if (code == 77) {
+				std::println("  SKIP: {}", s);
+			} else if (code != 0) {
+				final_code = code;
+				std::println("  FAIL: suite {} returned {}", s, code);
+			}
+		}
+		return final_code;
+	} else {
+		std::println("Unknown suite: {}", suite);
+		return 1;
+	}
+
+	PrintSummary();
+	return (s_failed > 0) ? 1 : 0;
 }

@@ -2,12 +2,12 @@
 
 #include "HeadlessCtx.hpp"
 #include "RenderCore.h"
-#include <cstdio>
+#include <print>
 #include <cstdlib>
 
 extern int s_passed, s_failed;
 #define EXPECT(cond) do { \
-    if (!(cond)) { std::printf("  FAIL: %s  (%s:%d)\n", #cond, __FILE__, __LINE__); ++s_failed; } \
+    if (!(cond)) { std::println("  FAIL: {}  ({}:{})", #cond, __FILE__, __LINE__); ++s_failed; } \
     else { ++s_passed; } \
 } while(0)
 
@@ -30,28 +30,26 @@ void test_pipeline() {
     std::printf("=== pipeline ===\n");
 
     auto ctx = MakeHeadlessCtx();
-    if (!ctx.valid()) {
+    if (!ctx.Valid()) {
         std::printf("  SKIP: no Vulkan device available\n");
         std::exit(77);
     }
 
     // Empty pipeline layout
     ZHLN_PipelineLayoutDesc layout_desc = {};
-    VkPipelineLayout layout = ZHLN_CreatePipelineLayout(ctx.device.handle, &layout_desc);
+    VkPipelineLayout layout = ZHLN_CreatePipelineLayout(ctx.Device(), &layout_desc);
     EXPECT(layout != VK_NULL_HANDLE);
 
     // Shader module creation — invalid bytecode should fail cleanly
     ZHLN_ShaderDesc bad_desc = { .code = nullptr, .size = 0 };
-    VkShaderModule bad = ZHLN_CreateShaderModule(ctx.device.handle, &bad_desc);
+    VkShaderModule bad = ZHLN_CreateShaderModule(ctx.Device(), &bad_desc);
     EXPECT(bad == VK_NULL_HANDLE);
 
     // Misaligned size should also fail
     static const uint32_t dummy[4] = {0x07230203, 0, 0, 0};
     ZHLN_ShaderDesc misaligned = { .code = dummy, .size = 7 }; // not % 4
-    VkShaderModule mis = ZHLN_CreateShaderModule(ctx.device.handle, &misaligned);
+    VkShaderModule mis = ZHLN_CreateShaderModule(ctx.Device(), &misaligned);
     EXPECT(mis == VK_NULL_HANDLE);
 
-    ZHLN_DestroyPipelineLayout(ctx.device.handle, layout);
-    vkDestroyDevice(ctx.device.handle, nullptr);
-    vkDestroyInstance(ctx.instance, nullptr);
+    ZHLN_DestroyPipelineLayout(ctx.Device(), layout);
 }

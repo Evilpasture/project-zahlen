@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RenderCore.h"
+
 #include <array>
 #include <concepts>
 #include <functional>
@@ -126,13 +127,15 @@ class Context {
 	Context(Context&& other) noexcept
 		: _instance(std::exchange(other._instance, VK_NULL_HANDLE)),
 		  _surface(std::exchange(other._surface, VK_NULL_HANDLE)),
-		  _physical(std::exchange(other._physical, {})),
-		  _device(std::exchange(other._device, {})) {}
+		  _physical(std::exchange(other._physical, {})), _device(std::exchange(other._device, {})) {
+	}
 
 	Context& operator=(Context&& other) noexcept {
 		if (this != &other) {
-			if (_device.handle != VK_NULL_HANDLE) vkDestroyDevice(_device.handle, nullptr);
-			if (_instance != VK_NULL_HANDLE) vkDestroyInstance(_instance, nullptr);
+			if (_device.handle != VK_NULL_HANDLE)
+				vkDestroyDevice(_device.handle, nullptr);
+			if (_instance != VK_NULL_HANDLE)
+				vkDestroyInstance(_instance, nullptr);
 
 			_instance = std::exchange(other._instance, VK_NULL_HANDLE);
 			_surface = std::exchange(other._surface, VK_NULL_HANDLE);
@@ -147,32 +150,34 @@ class Context {
 										const ZHLN_DeviceDesc& device_desc) noexcept {
 		Context ctx;
 		ctx._instance = ZHLN_CreateInstance(&instance_desc);
-		if (!ctx._instance) return {};
+		if (!ctx._instance)
+			return {};
 
 		// Surface is generally owned by the Window (GLFW/SDL), so Context just references it
-		ctx._surface = select_desc.surface; 
+		ctx._surface = select_desc.surface;
 
 		// Override instance in select_desc just in case caller forgot
 		ZHLN_DeviceSelectDesc safe_select = select_desc;
 		safe_select.instance = ctx._instance;
 		ctx._physical = ZHLN_SelectPhysicalDevice(&safe_select);
-		if (!ctx._physical.handle) return {};
+		if (!ctx._physical.handle)
+			return {};
 
 		// Override physical in device_desc just in case
 		ZHLN_DeviceDesc safe_device = device_desc;
 		safe_device.physical = &ctx._physical;
 		ctx._device = ZHLN_CreateDevice(&safe_device);
-		
+
 		return ctx;
 	}
 
-	[[nodiscard]] VkInstance      Instance()      const noexcept { return _instance; }
-	[[nodiscard]] VkDevice        Device()        const noexcept { return _device.handle; }
-	[[nodiscard]] VkQueue         GraphicsQueue() const noexcept { return _device.graphics_queue; }
-	[[nodiscard]] VkQueue         PresentQueue()  const noexcept { return _device.present_queue; }
-	[[nodiscard]] VkPhysicalDevice Physical()     const noexcept { return _physical.handle; }
+	[[nodiscard]] VkInstance Instance() const noexcept { return _instance; }
+	[[nodiscard]] VkDevice Device() const noexcept { return _device.handle; }
+	[[nodiscard]] VkQueue GraphicsQueue() const noexcept { return _device.graphics_queue; }
+	[[nodiscard]] VkQueue PresentQueue() const noexcept { return _device.present_queue; }
+	[[nodiscard]] VkPhysicalDevice Physical() const noexcept { return _physical.handle; }
 	[[nodiscard]] const ZHLN_PhysicalDeviceInfo& PhysicalInfo() const noexcept { return _physical; }
-	
+
 	[[nodiscard]] bool Valid() const noexcept { return _device.handle != VK_NULL_HANDLE; }
 	explicit operator bool() const noexcept { return Valid(); }
 
@@ -198,7 +203,8 @@ struct SwapchainSupport {
 	}
 };
 
-[[nodiscard]] inline SwapchainSupport QuerySwapchainSupport(VkPhysicalDevice physical, VkSurfaceKHR surface) noexcept {
+[[nodiscard]] inline SwapchainSupport QuerySwapchainSupport(VkPhysicalDevice physical,
+															VkSurfaceKHR surface) noexcept {
 	ZHLN_SwapchainSupportDesc desc = {.physical = physical, .surface = surface};
 	return {ZHLN_QuerySwapchainSupport(&desc)};
 }
@@ -214,7 +220,8 @@ class Swapchain {
 	Swapchain& operator=(const Swapchain&) = delete;
 
 	Swapchain(Swapchain&& other) noexcept
-		: _device(std::exchange(other._device, VK_NULL_HANDLE)), _raw(std::exchange(other._raw, {})) {}
+		: _device(std::exchange(other._device, VK_NULL_HANDLE)),
+		  _raw(std::exchange(other._raw, {})) {}
 
 	Swapchain& operator=(Swapchain&& other) noexcept {
 		if (this != &other) {
@@ -233,7 +240,8 @@ class Swapchain {
 		ZHLN_SwapchainDesc rebuilt = desc;
 		rebuilt.old_swapchain = _raw.handle;
 		ZHLN_Swapchain next = ZHLN_CreateSwapchain(&rebuilt);
-		if (!next.handle) return false;
+		if (!next.handle)
+			return false;
 		_Destroy();
 		_raw = next;
 		return true;
@@ -253,7 +261,8 @@ class Swapchain {
 // Sync & Pools
 // ============================================================================
 
-template <uint32_t N> requires(N > 0 && N <= 8)
+template <uint32_t N>
+	requires(N > 0 && N <= 8)
 class FrameSync {
   public:
 	FrameSync() noexcept = default;
@@ -264,15 +273,32 @@ class FrameSync {
 	FrameSync(const FrameSync&) = delete;
 	FrameSync& operator=(const FrameSync&) = delete;
 
+	FrameSync(FrameSync&& other) noexcept
+		: _device(std::exchange(other._device, VK_NULL_HANDLE)),
+		  _frames(std::exchange(other._frames, {})) {}
+
+	FrameSync& operator=(FrameSync&& other) noexcept {
+		if (this != &other) {
+			if (_device != VK_NULL_HANDLE)
+				ZHLN_DestroyFrameSync(_device, _frames.data(), N);
+			_device = std::exchange(other._device, VK_NULL_HANDLE);
+			_frames = std::exchange(other._frames, {});
+		}
+		return *this;
+	}
+
 	[[nodiscard]] static FrameSync Create(VkDevice device) noexcept {
 		FrameSync fs;
 		ZHLN_FrameSyncDesc desc = {.device = device, .frame_count = N};
-		if (!ZHLN_CreateFrameSync(&desc, fs._frames.data())) return {};
+		if (!ZHLN_CreateFrameSync(&desc, fs._frames.data()))
+			return {};
 		fs._device = device;
 		return fs;
 	}
 
-	[[nodiscard]] const ZHLN_FrameSync& operator[](uint32_t frame) const noexcept { return _frames[frame % N]; }
+	[[nodiscard]] const ZHLN_FrameSync& operator[](uint32_t frame) const noexcept {
+		return _frames[frame % N];
+	}
 	[[nodiscard]] static constexpr uint32_t Count() noexcept { return N; }
 	[[nodiscard]] bool Valid() const noexcept { return _device != VK_NULL_HANDLE; }
 
@@ -281,34 +307,103 @@ class FrameSync {
 	std::array<ZHLN_FrameSync, N> _frames = {};
 };
 
-template <uint32_t N> requires(N > 0 && N <= 8)
+template <uint32_t N>
+	requires(N > 0 && N <= 8)
 class CommandPools {
   public:
 	CommandPools() noexcept = default;
 	~CommandPools() noexcept {
 		if (_device != VK_NULL_HANDLE)
-			for (auto& pool : _pools) ZHLN_DestroyCommandPool(_device, &pool);
+			for (auto& pool : _pools)
+				ZHLN_DestroyCommandPool(_device, &pool);
 	}
 	CommandPools(const CommandPools&) = delete;
 	CommandPools& operator=(const CommandPools&) = delete;
 
-	[[nodiscard]] static CommandPools Create(VkDevice device, uint32_t queue_family, uint32_t buffers_per_pool = 1) noexcept {
+	CommandPools(CommandPools&& other) noexcept
+		: _device(std::exchange(other._device, VK_NULL_HANDLE)),
+		  _pools(std::exchange(other._pools, {})) {}
+
+	CommandPools& operator=(CommandPools&& other) noexcept {
+		if (this != &other) {
+			if (_device != VK_NULL_HANDLE) {
+				for (auto& pool : _pools)
+					ZHLN_DestroyCommandPool(_device, &pool);
+			}
+			_device = std::exchange(other._device, VK_NULL_HANDLE);
+			_pools = std::exchange(other._pools, {});
+		}
+		return *this;
+	}
+
+	[[nodiscard]] static CommandPools Create(VkDevice device, uint32_t queue_family,
+											 uint32_t buffers_per_pool = 1) noexcept {
 		CommandPools cp;
 		cp._device = device;
 		for (auto& pool : cp._pools) {
 			if (!ZHLN_CreateCommandPool(device, queue_family, &pool) ||
-			    !ZHLN_AllocateCommandBuffers(device, &pool, buffers_per_pool)) return {};
+				!ZHLN_AllocateCommandBuffers(device, &pool, buffers_per_pool))
+				return {};
 		}
 		return cp;
 	}
 
-	[[nodiscard]] ZHLN_CommandPool& operator[](uint32_t frame) noexcept { return _pools[frame % N]; }
-	[[nodiscard]] VkCommandBuffer Cmd(uint32_t frame) const noexcept { return _pools[frame % N].buffers[0]; }
+	[[nodiscard]] ZHLN_CommandPool& operator[](uint32_t frame) noexcept {
+		return _pools[frame % N];
+	}
+	[[nodiscard]] VkCommandBuffer Cmd(uint32_t frame) const noexcept {
+		return _pools[frame % N].buffers[0];
+	}
 	[[nodiscard]] bool Valid() const noexcept { return _device != VK_NULL_HANDLE; }
 
   private:
 	VkDevice _device = VK_NULL_HANDLE;
 	std::array<ZHLN_CommandPool, N> _pools = {};
+};
+
+class CommandPool {
+public:
+    CommandPool() = default;
+
+    CommandPool(VkDevice device, uint32_t queue_family) : _device(nullptr) {
+        // Fix: Capture the return value. 
+        // Only assign _device if the pool was actually created.
+        if (ZHLN_CreateCommandPool(device, queue_family, &_raw)) {
+            _device = device;
+        }
+    }
+
+    ~CommandPool() { 
+        if (_device) ZHLN_DestroyCommandPool(_device, &_raw); 
+    }
+
+    // Move only
+    CommandPool(CommandPool&& other) noexcept 
+        : _device(std::exchange(other._device, nullptr)), 
+          _raw(std::exchange(other._raw, {})) {}
+
+    CommandPool& operator=(CommandPool&& other) noexcept {
+        if (this != &other) {
+            if (_device) ZHLN_DestroyCommandPool(_device, &_raw);
+            _device = std::exchange(other._device, nullptr);
+            _raw = std::exchange(other._raw, {});
+        }
+        return *this;
+    }
+    
+    [[nodiscard]] bool Valid() const noexcept { return _device != nullptr; }
+    explicit operator bool() const noexcept { return Valid(); }
+
+    [[nodiscard]] bool Allocate(uint32_t count) { 
+        if (!Valid()) return false;
+        return ZHLN_AllocateCommandBuffers(_device, &_raw, count); 
+    }
+
+    VkCommandBuffer operator[](uint32_t i) const { return _raw.buffers[i]; }
+
+private:
+    VkDevice _device = nullptr;
+    ZHLN_CommandPool _raw{};
 };
 
 // ============================================================================
@@ -320,17 +415,21 @@ class ShaderStages {
 	ShaderStages() noexcept = default;
 	ShaderStages(VkDevice device, ZHLN_ShaderStages raw) noexcept : _device(device), _raw(raw) {}
 	~ShaderStages() noexcept {
-		if (_device != VK_NULL_HANDLE) ZHLN_DestroyShaderStages(_device, &_raw);
+		if (_device != VK_NULL_HANDLE)
+			ZHLN_DestroyShaderStages(_device, &_raw);
 	}
 	ShaderStages(const ShaderStages&) = delete;
 	ShaderStages& operator=(const ShaderStages&) = delete;
 	ShaderStages(ShaderStages&& other) noexcept
-		: _device(std::exchange(other._device, VK_NULL_HANDLE)), _raw(std::exchange(other._raw, {})) {}
+		: _device(std::exchange(other._device, VK_NULL_HANDLE)),
+		  _raw(std::exchange(other._raw, {})) {}
 
-	[[nodiscard]] static ShaderStages Create(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) noexcept {
+	[[nodiscard]] static ShaderStages Create(VkDevice device, const ZHLN_ShaderDesc& vert,
+											 const ZHLN_ShaderDesc& frag) noexcept {
 		ZHLN_ShaderStagesDesc desc = {.device = device, .vert = vert, .frag = frag};
 		ZHLN_ShaderStages stages{};
-		if (!ZHLN_CreateShaderStages(&desc, &stages)) return {};
+		if (!ZHLN_CreateShaderStages(&desc, &stages))
+			return {};
 		return {device, stages};
 	}
 
@@ -353,9 +452,10 @@ class ScopedRendering {
 		ZHLN_BeginRendering(_cmd, &desc);
 	}
 	~ScopedRendering() noexcept { ZHLN_EndRendering(_cmd); }
-	
+
 	ScopedRendering(const ScopedRendering&) = delete;
 	ScopedRendering& operator=(const ScopedRendering&) = delete;
+
   private:
 	VkCommandBuffer _cmd;
 };
@@ -364,7 +464,8 @@ inline void ImageBarrier(VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc& desc)
 	ZHLN_CmdImageBarrier(cmd, &desc);
 }
 
-inline void TransitionLayout(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout,
+inline void TransitionLayout(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout,
+							 VkImageLayout new_layout,
 							 VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) noexcept {
 	VkAccessFlags2 src_access = 0;
 	VkPipelineStageFlags2 src_stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
@@ -380,7 +481,8 @@ inline void TransitionLayout(VkCommandBuffer cmd, VkImage image, VkImageLayout o
 		src_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
 	} else if (old_layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
 		src_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-		src_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+		src_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+					VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
 	}
 
 	ZHLN_ImageBarrierDesc barrier = {
@@ -410,7 +512,8 @@ inline void CopyBufferToImage(VkCommandBuffer cmd, const ZHLN_BufferImageCopyDes
 
 // Typed wrapper around Push Constants
 template <GpuTriviallyCopyable T>
-inline void Push(VkCommandBuffer cmd, VkPipelineLayout layout, VkShaderStageFlags stages, const T& value) noexcept {
+inline void Push(VkCommandBuffer cmd, VkPipelineLayout layout, VkShaderStageFlags stages,
+				 const T& value) noexcept {
 	ZHLN_PushConstants(cmd, layout, stages, &value, sizeof(T));
 }
 
@@ -420,8 +523,8 @@ inline void Push(VkCommandBuffer cmd, VkPipelineLayout layout, VkShaderStageFlag
 
 template <uint32_t N, RecordFn Record, RebuildFn Rebuild>
 ZHLN_FrameResult DrawFrame(const Context& ctx, Swapchain& swapchain, FrameSync<N>& sync,
-						   CommandPools<N>& pools, uint32_t& frame_index,
-						   Record&& record, Rebuild&& rebuild) noexcept {
+						   CommandPools<N>& pools, uint32_t& frame_index, Record&& record,
+						   Rebuild&& rebuild) noexcept {
 
 	const ZHLN_FrameSync& s = sync[frame_index];
 	ZHLN_CommandPool& pool = pools[frame_index];
@@ -430,9 +533,14 @@ ZHLN_FrameResult DrawFrame(const Context& ctx, Swapchain& swapchain, FrameSync<N
 	ZHLN_WaitAndResetFrame(ctx.Device(), s.in_flight, &pool);
 
 	uint32_t image_index = 0;
-	ZHLN_AcquireDesc acquire_desc = {.swapchain = swapchain.Get().handle, .image_available = s.image_available, .timeout_ns = UINT64_MAX};
+	ZHLN_AcquireDesc acquire_desc = {.swapchain = swapchain.Get().handle,
+									 .image_available = s.image_available,
+									 .timeout_ns = UINT64_MAX};
 	auto result = ZHLN_AcquireImage(ctx.Device(), &acquire_desc, &image_index);
-	if (result == ZHLN_FrameResult_OutOfDate) { rebuild(); return result; }
+	if (result == ZHLN_FrameResult_OutOfDate) {
+		rebuild();
+		return result;
+	}
 
 	ZHLN_BeginCommandBuffer(cmd);
 	std::invoke(std::forward<Record>(record), cmd, image_index);
@@ -440,9 +548,13 @@ ZHLN_FrameResult DrawFrame(const Context& ctx, Swapchain& swapchain, FrameSync<N
 
 	ZHLN_SubmitFrame(ctx.GraphicsQueue(), &s, cmd);
 
-	ZHLN_PresentDesc present_desc = {.present_queue = ctx.PresentQueue(), .swapchain = swapchain.Get().handle, .render_finished = s.render_finished, .image_index = image_index};
+	ZHLN_PresentDesc present_desc = {.present_queue = ctx.PresentQueue(),
+									 .swapchain = swapchain.Get().handle,
+									 .render_finished = s.render_finished,
+									 .image_index = image_index};
 	result = ZHLN_PresentFrame(&present_desc);
-	if (result == ZHLN_FrameResult_OutOfDate || result == ZHLN_FrameResult_Suboptimal) rebuild();
+	if (result == ZHLN_FrameResult_OutOfDate || result == ZHLN_FrameResult_Suboptimal)
+		rebuild();
 
 	frame_index = (frame_index + 1) % N;
 	return result;
@@ -452,13 +564,15 @@ ZHLN_FrameResult DrawFrame(const Context& ctx, Swapchain& swapchain, FrameSync<N
 // Error Helpers
 // ============================================================================
 
-[[nodiscard]] inline const char* ResultString(VkResult result) noexcept { return ZHLN_VkResultString(result); }
+[[nodiscard]] inline const char* ResultString(VkResult result) noexcept {
+	return ZHLN_VkResultString(result);
+}
 
-inline void CheckResult(VkResult result, const char* context = "", const std::source_location location = std::source_location::current()) {
+inline void CheckResult(VkResult result, const char* context = "",
+						const std::source_location location = std::source_location::current()) {
 	if (result != VK_SUCCESS) {
-		std::print(stderr, "[Vk Error] {}:{} in {}: {} failed with {}\n",
-				   location.file_name(), location.line(), location.function_name(),
-				   context, ResultString(result));
+		std::print(stderr, "[Vk Error] {}:{} in {}: {} failed with {}\n", location.file_name(),
+				   location.line(), location.function_name(), context, ResultString(result));
 	}
 }
 

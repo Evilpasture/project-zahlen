@@ -1,13 +1,5 @@
 #pragma once
+#include "RenderCore.hpp"
 
-#include "RenderCore.h"
-
-struct HeadlessCtx {
-    VkInstance              instance = VK_NULL_HANDLE;
-    ZHLN_PhysicalDeviceInfo physical = {};
-    ZHLN_Device             device   = {};
-
-    bool valid() const { return device.handle != VK_NULL_HANDLE; }
-};
-
-HeadlessCtx MakeHeadlessCtx();
+// Returns a fully managed, RAII Context ready for headless testing.
+ZHLN::Vk::Context MakeHeadlessCtx();

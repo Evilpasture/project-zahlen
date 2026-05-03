@@ -1,38 +1,22 @@
-// src/render/tests/test_device.cpp
-
 #include "HeadlessCtx.hpp"
-#include "RenderCore.h"
-#include <cstdio>
+#include <print>
 #include <cstdlib>
 
 extern int s_passed, s_failed;
-#define EXPECT(cond) do { \
-    if (!(cond)) { std::printf("  FAIL: %s  (%s:%d)\n", #cond, __FILE__, __LINE__); ++s_failed; } \
-    else { ++s_passed; } \
-} while(0)
+#define EXPECT(cond) do { if (!(cond)) { std::println(stderr, "  FAIL: {}  ({}:{})", #cond, __FILE__, __LINE__); ++s_failed; } else { ++s_passed; } } while(0)
 
 void test_device() {
-    std::printf("=== device ===\n");
-
+    std::println("=== device ===");
     auto ctx = MakeHeadlessCtx();
-    if (!ctx.valid()) {
-        std::printf("  SKIP: no Vulkan device available\n");
-        std::exit(77);
-    }
+    if (!ctx) { std::exit(77); }
 
-    EXPECT(ctx.instance                    != VK_NULL_HANDLE);
-    EXPECT(ctx.physical.handle             != VK_NULL_HANDLE);
-    EXPECT(ctx.physical.has_graphics       == true);
-    EXPECT(ctx.physical.graphics_family    != UINT32_MAX);
-    EXPECT(ctx.device.handle               != VK_NULL_HANDLE);
-    EXPECT(ctx.device.graphics_queue       != VK_NULL_HANDLE);
+    EXPECT(ctx.Instance() != VK_NULL_HANDLE);
+    EXPECT(ctx.Physical() != VK_NULL_HANDLE);
+    EXPECT(ctx.PhysicalInfo().has_graphics == true);
+    EXPECT(ctx.Device() != VK_NULL_HANDLE);
 
-    // Properties should be populated
-    EXPECT(ctx.physical.properties.properties.deviceName[0] != '\0');
+    EXPECT(ctx.PhysicalInfo().properties.properties.deviceName[0] != '\0');
+    std::println("  Device: {}", ctx.PhysicalInfo().properties.properties.deviceName);
 
-    std::printf("  Device: %s\n",
-                ctx.physical.properties.properties.deviceName);
-
-    vkDestroyDevice(ctx.device.handle, nullptr);
-    vkDestroyInstance(ctx.instance, nullptr);
+    // NO vkDestroy... Context destructor handles it!
 }

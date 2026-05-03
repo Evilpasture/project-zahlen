@@ -3,17 +3,17 @@
 
 #include "Utils.h"
 #include "RenderCore.h"
-#include <cstdio>
+#include <print>
 #include <cstdint>
 
 extern int s_passed, s_failed;
 #define EXPECT(cond) do { \
-    if (!(cond)) { std::printf("  FAIL: %s  (%s:%d)\n", #cond, __FILE__, __LINE__); ++s_failed; } \
+    if (!(cond)) { std::println("  FAIL: {}  ({}:{})", #cond, __FILE__, __LINE__); ++s_failed; } \
     else { ++s_passed; } \
 } while(0)
 
 void test_utils() {
-    std::printf("=== utils ===\n");
+    std::println("=== utils ===");
 
     // Clamp — float
     EXPECT(ZHLN_Clamp(0.5f, 0.0f, 1.0f) == 0.5f);
@@ -30,7 +30,7 @@ void test_utils() {
 }
 
 void test_errors() {
-    std::printf("=== errors ===\n");
+    std::println("=== errors ===");
 
     EXPECT(ZHLN_VkResultString(VK_SUCCESS)                  != nullptr);
     EXPECT(ZHLN_VkResultString(VK_ERROR_OUT_OF_DATE_KHR)    != nullptr);

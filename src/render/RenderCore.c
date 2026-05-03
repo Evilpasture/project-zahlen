@@ -3,6 +3,7 @@
 #include "Utils.h"
 
 #include <stdio.h>
+#include <string.h>
 
 static VkBool32 VKAPI_CALL _DebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
 										  [[maybe_unused]] VkDebugUtilsMessageTypeFlagsEXT type,
@@ -22,11 +23,27 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* desc) {
 
 	static const char* const VALIDATION_LAYERS[] = {"VK_LAYER_KHRONOS_validation"};
 
+	// We need to merge the user extensions with the debug extension if validation is on
+	const char* final_extensions[32];
+	uint32_t final_count = desc->extension_count;
+	for (uint32_t i = 0; i < desc->extension_count; ++i)
+		final_extensions[i] = desc->extensions[i];
+
+	if (desc->enable_validation) {
+		bool has_debug_ext = false;
+		for (uint32_t i = 0; i < final_count; ++i) {
+			if (strcmp(final_extensions[i], VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0)
+				has_debug_ext = true;
+		}
+		if (!has_debug_ext)
+			final_extensions[final_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+	}
+
 	VkInstanceCreateInfo create_info = {
 		.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
 		.pApplicationInfo = &app_info,
-		.enabledExtensionCount = desc->extension_count,
-		.ppEnabledExtensionNames = desc->extensions,
+		.enabledExtensionCount = final_count,
+		.ppEnabledExtensionNames = final_extensions,
 		.enabledLayerCount = desc->enable_validation ? 1u : 0u,
 		.ppEnabledLayerNames =
 			desc->enable_validation ? VALIDATION_LAYERS : nullptr, // Compound literal
@@ -104,53 +121,53 @@ static void _QueryQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface,
 		}
 	}
 
-    if (surface == VK_NULL_HANDLE && *out_graphics != UINT32_MAX)
-        *out_present = *out_graphics;
+	if (surface == VK_NULL_HANDLE && *out_graphics != UINT32_MAX)
+		*out_present = *out_graphics;
 }
 
 ZHLN_PhysicalDeviceInfo ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* desc) {
-    ZHLN_PhysicalDeviceInfo null_result = {};
+	ZHLN_PhysicalDeviceInfo null_result = {};
 
-    uint32_t count = 0;
-    vkEnumeratePhysicalDevices(desc->instance, &count, nullptr);
-    if (count == 0)
-        return null_result;
-    if (count > 16)
-        count = 16; // clamp; stack only
+	uint32_t count = 0;
+	vkEnumeratePhysicalDevices(desc->instance, &count, nullptr);
+	if (count == 0)
+		return null_result;
+	if (count > 16)
+		count = 16; // clamp; stack only
 
-    VkPhysicalDevice devices[16] = {};
-    vkEnumeratePhysicalDevices(desc->instance, &count, devices);
+	VkPhysicalDevice devices[16] = {};
+	vkEnumeratePhysicalDevices(desc->instance, &count, devices);
 
-    ZHLN_DeviceScoreFn score_fn = desc->score_fn ? desc->score_fn : _DefaultScoreFn;
+	ZHLN_DeviceScoreFn score_fn = desc->score_fn ? desc->score_fn : _DefaultScoreFn;
 
-    ZHLN_PhysicalDeviceInfo best = {};
-    int32_t best_score = -1;
+	ZHLN_PhysicalDeviceInfo best = {};
+	int32_t best_score = -1;
 
-    for (uint32_t i = 0; i < count; ++i) {
-        ZHLN_PhysicalDeviceInfo info = {
-            .handle = devices[i],
-            .properties = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2},
-            .features = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2},
-            .memory = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2},
-        };
+	for (uint32_t i = 0; i < count; ++i) {
+		ZHLN_PhysicalDeviceInfo info = {
+			.handle = devices[i],
+			.properties = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2},
+			.features = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2},
+			.memory = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2},
+		};
 
-        vkGetPhysicalDeviceProperties2(devices[i], &info.properties);
-        vkGetPhysicalDeviceFeatures2(devices[i], &info.features);
-        vkGetPhysicalDeviceMemoryProperties2(devices[i], &info.memory);
+		vkGetPhysicalDeviceProperties2(devices[i], &info.properties);
+		vkGetPhysicalDeviceFeatures2(devices[i], &info.features);
+		vkGetPhysicalDeviceMemoryProperties2(devices[i], &info.memory);
 
-        _QueryQueueFamilies(devices[i], desc->surface, &info.graphics_family, &info.present_family);
+		_QueryQueueFamilies(devices[i], desc->surface, &info.graphics_family, &info.present_family);
 
-        info.has_graphics = (info.graphics_family != UINT32_MAX);
-        info.has_present = (info.present_family != UINT32_MAX);
+		info.has_graphics = (info.graphics_family != UINT32_MAX);
+		info.has_present = (info.present_family != UINT32_MAX);
 
-        int32_t score = score_fn(&info, desc->score_userdata);
-        if (score > best_score) {
-            best_score = score;
-            best = info;
-        }
-    }
+		int32_t score = score_fn(&info, desc->score_userdata);
+		if (score > best_score) {
+			best_score = score;
+			best = info;
+		}
+	}
 
-    return best_score >= 0 ? best : null_result;
+	return best_score >= 0 ? best : null_result;
 }
 
 ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* desc) {
@@ -230,19 +247,19 @@ ZHLN_SwapchainSupport ZHLN_QuerySwapchainSupport(const ZHLN_SwapchainSupportDesc
 	vkGetPhysicalDeviceSurfaceFormatsKHR(desc->physical, desc->surface, &hardware_count, nullptr);
 	result.format_count = (hardware_count > 64) ? 64 : hardware_count;
 	if (result.format_count > 0) {
-		vkGetPhysicalDeviceSurfaceFormatsKHR(desc->physical, desc->surface,
-							&result.format_count, result.formats);
+		vkGetPhysicalDeviceSurfaceFormatsKHR(desc->physical, desc->surface, &result.format_count,
+											 result.formats);
 	}
 
 	uint32_t present_count = 0;
-	vkGetPhysicalDeviceSurfacePresentModesKHR(desc->physical, desc->surface,
-							&present_count, nullptr);
+	vkGetPhysicalDeviceSurfacePresentModesKHR(desc->physical, desc->surface, &present_count,
+											  nullptr);
 	result.present_mode_count = (present_count > 8) ? 8 : present_count;
 	if (result.present_mode_count > 0) {
 		vkGetPhysicalDeviceSurfacePresentModesKHR(desc->physical, desc->surface,
-							&result.present_mode_count, result.present_modes);
+												  &result.present_mode_count, result.present_modes);
 	}
-    return result;
+	return result;
 }
 
 static VkSurfaceFormatKHR _ChooseFormat(const ZHLN_SwapchainSupport* support) {

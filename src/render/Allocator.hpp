@@ -39,39 +39,39 @@ class Allocator {
 		// Explicitly map Vulkan functions to VMA.
 		// This prevents VMA from trying to "guess" or "dynamically load" them.
 		VmaVulkanFunctions vfuncs = {
-        .vkGetInstanceProcAddr = &vkGetInstanceProcAddr,
-        .vkGetDeviceProcAddr = &vkGetDeviceProcAddr,
-        .vkGetPhysicalDeviceProperties = &vkGetPhysicalDeviceProperties,
-        .vkGetPhysicalDeviceMemoryProperties = &vkGetPhysicalDeviceMemoryProperties,
-        .vkAllocateMemory = &vkAllocateMemory,
-        .vkFreeMemory = &vkFreeMemory,
-        .vkMapMemory = &vkMapMemory,
-        .vkUnmapMemory = &vkUnmapMemory,
-        .vkFlushMappedMemoryRanges = &vkFlushMappedMemoryRanges,
-        .vkInvalidateMappedMemoryRanges = &vkInvalidateMappedMemoryRanges,
-        .vkBindBufferMemory = &vkBindBufferMemory,
-        .vkBindImageMemory = &vkBindImageMemory,
-        .vkGetBufferMemoryRequirements = &vkGetBufferMemoryRequirements,
-        .vkGetImageMemoryRequirements = &vkGetImageMemoryRequirements,
-        .vkCreateBuffer = &vkCreateBuffer,
-        .vkDestroyBuffer = &vkDestroyBuffer,
-        .vkCreateImage = &vkCreateImage,
-        .vkDestroyImage = &vkDestroyImage,
-        .vkCmdCopyBuffer = &vkCmdCopyBuffer,
-        // Even in Vulkan 1.3, VMA names these fields with KHR for compatibility
-        .vkGetBufferMemoryRequirements2KHR = &vkGetBufferMemoryRequirements2,
-        .vkGetImageMemoryRequirements2KHR = &vkGetImageMemoryRequirements2,
-        .vkBindBufferMemory2KHR = &vkBindBufferMemory2,
-        .vkBindImageMemory2KHR = &vkBindImageMemory2,
-        .vkGetPhysicalDeviceMemoryProperties2KHR = &vkGetPhysicalDeviceMemoryProperties2,
-        .vkGetDeviceBufferMemoryRequirements = &vkGetDeviceBufferMemoryRequirements,
-        .vkGetDeviceImageMemoryRequirements = &vkGetDeviceImageMemoryRequirements,
-        .vkGetMemoryWin32HandleKHR = nullptr,
-        // Buffer Device Address is NOT a field in the struct; 
-        // VMA loads it via GetDeviceProcAddr internally.
-    };
+			.vkGetInstanceProcAddr = &vkGetInstanceProcAddr,
+			.vkGetDeviceProcAddr = &vkGetDeviceProcAddr,
+			.vkGetPhysicalDeviceProperties = &vkGetPhysicalDeviceProperties,
+			.vkGetPhysicalDeviceMemoryProperties = &vkGetPhysicalDeviceMemoryProperties,
+			.vkAllocateMemory = &vkAllocateMemory,
+			.vkFreeMemory = &vkFreeMemory,
+			.vkMapMemory = &vkMapMemory,
+			.vkUnmapMemory = &vkUnmapMemory,
+			.vkFlushMappedMemoryRanges = &vkFlushMappedMemoryRanges,
+			.vkInvalidateMappedMemoryRanges = &vkInvalidateMappedMemoryRanges,
+			.vkBindBufferMemory = &vkBindBufferMemory,
+			.vkBindImageMemory = &vkBindImageMemory,
+			.vkGetBufferMemoryRequirements = &vkGetBufferMemoryRequirements,
+			.vkGetImageMemoryRequirements = &vkGetImageMemoryRequirements,
+			.vkCreateBuffer = &vkCreateBuffer,
+			.vkDestroyBuffer = &vkDestroyBuffer,
+			.vkCreateImage = &vkCreateImage,
+			.vkDestroyImage = &vkDestroyImage,
+			.vkCmdCopyBuffer = &vkCmdCopyBuffer,
+			// Even in Vulkan 1.3, VMA names these fields with KHR for compatibility
+			.vkGetBufferMemoryRequirements2KHR = &vkGetBufferMemoryRequirements2,
+			.vkGetImageMemoryRequirements2KHR = &vkGetImageMemoryRequirements2,
+			.vkBindBufferMemory2KHR = &vkBindBufferMemory2,
+			.vkBindImageMemory2KHR = &vkBindImageMemory2,
+			.vkGetPhysicalDeviceMemoryProperties2KHR = &vkGetPhysicalDeviceMemoryProperties2,
+			.vkGetDeviceBufferMemoryRequirements = &vkGetDeviceBufferMemoryRequirements,
+			.vkGetDeviceImageMemoryRequirements = &vkGetDeviceImageMemoryRequirements,
+			.vkGetMemoryWin32HandleKHR = nullptr,
+			// Buffer Device Address is NOT a field in the struct;
+			// VMA loads it via GetDeviceProcAddr internally.
+		};
 
-		VmaAllocatorCreateInfo info = {.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
+		VmaAllocatorCreateInfo info = {.flags = 0,
 									   .physicalDevice = physical,
 									   .device = device,
 									   .preferredLargeHeapBlockSize = 0, // 0 = default (256 MiB)
@@ -249,5 +249,52 @@ inline Buffer UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer
 	// The caller must keep 'staging' alive until the command buffer submit fence is signaled.
 	return staging;
 }
+
+// ============================================================================
+// Image RAII
+// ============================================================================
+
+class Image {
+  public:
+	Image() = default;
+	~Image() {
+		if (_handle)
+			vmaDestroyImage(_allocator, _handle, _allocation);
+	}
+
+	// Move only
+	Image(Image&& other) noexcept
+		: _allocator(other._allocator), _handle(std::exchange(other._handle, nullptr)),
+		  _allocation(std::exchange(other._allocation, nullptr)) {}
+	Image& operator=(Image&& other) noexcept {
+		if (this != &other) {
+			if (_handle)
+				vmaDestroyImage(_allocator, _handle, _allocation);
+			_allocator = other._allocator;
+			_handle = std::exchange(other._handle, nullptr);
+			_allocation = std::exchange(other._allocation, nullptr);
+		}
+		return *this;
+	}
+
+	static Image Create(VmaAllocator allocator, const VkImageCreateInfo& info,
+						VmaMemoryUsage mem_usage) {
+		Image img;
+		img._allocator = allocator;
+		VmaAllocationCreateInfo alloc_info = {};
+		alloc_info.usage = mem_usage;
+		if (vmaCreateImage(allocator, &info, &alloc_info, &img._handle, &img._allocation,
+						   nullptr) != VK_SUCCESS)
+			return {};
+		return img;
+	}
+
+	[[nodiscard]] VkImage Handle() const { return _handle; }
+
+  private:
+	VmaAllocator _allocator = nullptr;
+	VkImage _handle = VK_NULL_HANDLE;
+	VmaAllocation _allocation = nullptr;
+};
 
 } // namespace ZHLN::Vk

@@ -14,6 +14,9 @@ add_executable(zahlen_render_tests
     test_buffer.cpp          # Buffer::Create, Map, UploadToBuffer
     test_sync.cpp            # ZHLN_CreateFrameSync, destroy
     test_pipeline.cpp        # shader module creation, pipeline layout
+    test_upload.cpp    # New
+    test_raii.cpp      # New
+    test_image.cpp     # New
 )
 
 target_link_libraries(zahlen_render_tests PRIVATE
@@ -49,6 +52,10 @@ add_test(NAME render.buffer   COMMAND zahlen_render_tests buffer)
 add_test(NAME render.sync     COMMAND zahlen_render_tests sync)
 add_test(NAME render.pipeline COMMAND zahlen_render_tests pipeline)
 add_test(NAME render.swapchain COMMAND zahlen_render_tests swapchain)
+add_test(NAME render.upload    COMMAND zahlen_render_tests upload)
+add_test(NAME render.raii      COMMAND zahlen_render_tests raii)
+add_test(NAME render.image     COMMAND zahlen_render_tests image)
+
 
 # Mark device tests as optional so CI doesn't fail on headless runners
 set_tests_properties(
@@ -57,5 +64,8 @@ set_tests_properties(
     render.sync
     render.pipeline
     render.swapchain
+    render.upload      # New
+    render.raii        # New
+    render.image       # New
     PROPERTIES SKIP_RETURN_CODE 77
 )

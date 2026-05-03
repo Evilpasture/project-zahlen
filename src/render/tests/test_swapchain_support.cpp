@@ -1,7 +1,7 @@
 // src/render/tests/test_swapchain_support.cpp
 
 #include "RenderCore.h"
-#include <cstdio>
+#include <print>
 #include <cstdlib>
 
 #ifdef _WIN32
@@ -13,7 +13,7 @@
 
 extern int s_passed, s_failed;
 #define EXPECT(cond) do { \
-    if (!(cond)) { std::printf("  FAIL: %s  (%s:%d)\n", #cond, __FILE__, __LINE__); ++s_failed; } \
+    if (!(cond)) { std::println("  FAIL: {}  ({}:{})", #cond, __FILE__, __LINE__); ++s_failed; } \
     else { ++s_passed; } \
 } while(0)
 
@@ -52,7 +52,7 @@ static HWND CreateHiddenWindow(HINSTANCE instance) {
 #endif
 
 void test_swapchain_support() {
-    std::printf("=== swapchain ===\n");
+    std::println("=== swapchain ===");
 
 #ifdef _WIN32
     const char* extensions[] = {
@@ -67,14 +67,14 @@ void test_swapchain_support() {
 
     VkInstance instance = ZHLN_CreateInstance(&inst_desc);
     if (instance == VK_NULL_HANDLE) {
-        std::printf("  SKIP: failed to create Vulkan instance\n");
+        std::println("  SKIP: failed to create Vulkan instance");
         std::exit(77);
     }
 
     HINSTANCE module = GetModuleHandleW(nullptr);
     HWND hwnd = CreateHiddenWindow(module);
     if (hwnd == nullptr) {
-        std::printf("  SKIP: failed to create hidden Win32 window\n");
+        std::println("  SKIP: failed to create hidden Win32 window");
         vkDestroyInstance(instance, nullptr);
         std::exit(77);
     }
@@ -89,7 +89,7 @@ void test_swapchain_support() {
     };
 
     if (vkCreateWin32SurfaceKHR(instance, &surface_info, nullptr, &surface) != VK_SUCCESS) {
-        std::printf("  SKIP: failed to create Win32 surface\n");
+        std::println("  SKIP: failed to create Win32 surface");
         DestroyWindow(hwnd);
         vkDestroyInstance(instance, nullptr);
         std::exit(77);
@@ -103,7 +103,7 @@ void test_swapchain_support() {
     };
     ZHLN_PhysicalDeviceInfo physical = ZHLN_SelectPhysicalDevice(&sel);
     if (physical.handle == VK_NULL_HANDLE) {
-        std::printf("  SKIP: no physical device supports the test surface\n");
+        std::println("  SKIP: no physical device supports the test surface");
         vkDestroySurfaceKHR(instance, surface, nullptr);
         DestroyWindow(hwnd);
         vkDestroyInstance(instance, nullptr);
@@ -138,7 +138,7 @@ void test_swapchain_support() {
         else if (present_mode == VK_PRESENT_MODE_SHARED_CONTINUOUS_REFRESH_KHR) { name = "SHARED_CONTINUOUS_REFRESH"; known = true; }
         else if (present_mode == VK_PRESENT_MODE_FIFO_LATEST_READY_KHR) { name = "FIFO_LATEST_READY"; known = true; }
 
-        std::printf("  present mode[%u] = %u (%s)\n", i, (unsigned)present_mode, name);
+        std::println("  present mode[{}] = {} ({})", i, (unsigned)present_mode, name);
         EXPECT(known);
     }
 
@@ -146,7 +146,7 @@ void test_swapchain_support() {
     DestroyWindow(hwnd);
     vkDestroyInstance(instance, nullptr);
 #else
-    std::printf("  SKIP: swapchain support test is only implemented on Win32 in this repository\n");
+    std::println("  SKIP: swapchain support test is only implemented on Win32 in this repository");
     std::exit(77);
 #endif
 }
