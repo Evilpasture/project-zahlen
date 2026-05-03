@@ -26,22 +26,13 @@ if(USE_SANITIZERS AND WIN32)
     add_definitions(-D__ASAN_ENABLED__)
 endif()
 
-# --- 3. LLGL Static Setup (FIXED FLAGS) ---
-set(LLGL_BUILD_STATIC_LIB ON CACHE BOOL "" FORCE)
-set(LLGL_BUILD_RENDERER_VULKAN ON CACHE BOOL "" FORCE)
-set(LLGL_VK_ENABLE_SPIRV_REFLECT ON CACHE BOOL "" FORCE)
-set(LLGL_BUILD_RENDERER_OPENGL ON CACHE BOOL "" FORCE)
-set(LLGL_BUILD_RENDERER_DIRECT3D11 OFF CACHE BOOL "" FORCE)
-set(LLGL_BUILD_RENDERER_DIRECT3D12 OFF CACHE BOOL "" FORCE) # FIXED: Removed extra "OFF"
-set(LLGL_BUILD_RENDERER_METAL OFF CACHE BOOL "" FORCE)
-set(LLGL_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(LLGL_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+# --- 3. GLFW Setup ---
+set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+add_subdirectory(${CMAKE_SOURCE_DIR}/extern/glfw SYSTEM)
 
-# Force the internal LLGL toggles to OFF to stop the Static Registry from looking for them
-set(LLGL_ENABLE_DIRECT3D11 OFF CACHE BOOL "" FORCE)
-set(LLGL_ENABLE_DIRECT3D12 OFF CACHE BOOL "" FORCE)
 
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/LLGL SYSTEM)
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/LuaJIT SYSTEM)
 
 # --- 4. Jolt Physics ---
@@ -87,21 +78,16 @@ target_compile_definitions(zahlen PRIVATE
     $<$<CONFIG:Release>:JPH_RELEASE>
 )
 
-# 5. Correct Static Linking order
-# REMOVED: vulkan-1.lib (LLGL already brings it in with the full path)
+# 5. Static Linking order
 target_link_libraries(zahlen PRIVATE 
     zahlen_render
-    LLGL_Vulkan
-    LLGL_OpenGL
-    LLGL_Null
-    LLGL
+    glfw
     Jolt 
     LuaJIT
 )
 
 target_include_directories(zahlen SYSTEM PRIVATE
     ${CMAKE_SOURCE_DIR}/extern/JoltPhysics
-    ${CMAKE_SOURCE_DIR}/extern/LLGL/include
 )
 target_include_directories(zahlen PRIVATE
     ${CMAKE_SOURCE_DIR}/include

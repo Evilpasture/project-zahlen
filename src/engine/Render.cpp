@@ -1,211 +1,372 @@
-#include <Zahlen/Render.hpp>
+#include "Allocator.hpp"
+#include "RenderCore.hpp"
+
+#include <GLFW/glfw3.h>
 #include <Zahlen/Log.hpp>
-#include <LLGL/LLGL.h>
-#include <Jolt/Core/Core.h> // For JPH::Array
-#include <memory>
+#include <Zahlen/Render.hpp>
+#include <vector>
+
 
 namespace ZHLN {
 
-struct RenderContext::Impl {
-	LLGL::RenderSystemPtr system;
-	LLGL::CommandBuffer* cmdBuffer = nullptr; // Managed manually in ~Impl
-	LLGL::SwapChain* swapChain = nullptr;
-	LLGL::CommandQueue* commandQueue = nullptr;
-
-	// Deletion Queue
-	JPH::Array<LLGL::Buffer*> buffers;
-	JPH::Array<LLGL::PipelineLayout*> layouts;
-	JPH::Array<LLGL::ResourceHeap*> heaps;
-	JPH::Array<LLGL::PipelineState*> pipelines;
-
-	~Impl() {
-		// Must release the command buffer before unloading the system
-		if (cmdBuffer) system->Release(*cmdBuffer);
-		
-		for(auto* p : pipelines) system->Release(*p);
-		for(auto* h : heaps) system->Release(*h);
-		for(auto* l : layouts) system->Release(*l);
-		for(auto* b : buffers) system->Release(*b);
-		
-		LLGL::RenderSystem::Unload(std::move(system));
-	}
+// Define internal structs to hide Vulkan types from the header
+struct NativeMesh {
+	Vk::Buffer buffer;
+	uint32_t vertexCount;
 };
 
-RenderContext::RenderContext(Window& window, const String32& preferredAPI) : _impl(std::make_unique<Impl>()) {
-	auto modules = LLGL::RenderSystem::FindModules();
-	String32 selected = "";
-	for (const auto& m : modules) if (m == preferredAPI.c_str()) { selected = m.c_str(); break; }
-	if (selected.empty() && !modules.empty()) selected = modules[0].c_str();
+struct NativeMaterial {
+	Vk::Pipeline pipeline;
+	Vk::PipelineLayout layout;
+};
 
-	_impl->system = LLGL::RenderSystem::Load(LLGL::RenderSystemDescriptor{selected.c_str()});
-	
-	// Retrieve the native OS window safely without violating the Pimpl boundary
-	auto* rawNative = static_cast<LLGL::Surface*>(window.GetNativeHandle());
-	auto nativeWin = std::shared_ptr<LLGL::Surface>(rawNative, [](LLGL::Surface*){});
+struct RenderContext::Impl {
+	Vk::Context ctx;
+	Vk::Allocator allocator;
+	Vk::Surface surface;
+	Vk::Swapchain swapchain;
+	Vk::FrameSync<2> sync;
+	Vk::CommandPools<2> pools;
+	Vk::SemaphorePool present_semaphores;
 
-	LLGL::SwapChainDescriptor swapChainDesc;
-	swapChainDesc.resolution = { window.GetSize().width, window.GetSize().height };
-	swapChainDesc.depthBits = 32;
-	swapChainDesc.samples = 8;
-	swapChainDesc.resizable = true;
+	uint32_t frame_index = 0;
+	bool resized = true; // Force initial rebuild
 
-	_impl->swapChain = _impl->system->CreateSwapChain(swapChainDesc, nativeWin);
-	_impl->commandQueue = _impl->system->GetCommandQueue();
-	_impl->cmdBuffer = _impl->system->CreateCommandBuffer();
+	// Active Frame State
+	VkCommandBuffer current_cmd = VK_NULL_HANDLE;
+	uint32_t current_image_index = 0;
+
+	// Resource Storage (Simplistic deletion tracking for now)
+	std::vector<std::unique_ptr<NativeMesh>> meshes;
+	std::vector<std::unique_ptr<NativeMaterial>> materials;
+};
+
+RenderContext::RenderContext(Window& window, const String32& preferredAPI)
+	: _impl(std::make_unique<Impl>()) {
+	// 1. Get extensions required by GLFW
+	uint32_t glfwExtensionCount = 0;
+	const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+
+	// Merge with our required extensions
+	std::vector<const char*> inst_exts(glfwExtensions, glfwExtensions + glfwExtensionCount);
+	inst_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+	inst_exts.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
+	inst_exts.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+
+	ZHLN_InstanceDesc inst_desc = ZHLN_DEFAULT_INSTANCE_DESC;
+	inst_desc.extensions = inst_exts.data();
+	inst_desc.extension_count = static_cast<uint32_t>(inst_exts.size());
+
+	// 2. Setup Device Features
+	VkPhysicalDeviceVulkan13Features feat13 = {
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+	feat13.synchronization2 = VK_TRUE;
+	feat13.dynamicRendering = VK_TRUE;
+
+	VkPhysicalDeviceVulkan12Features feat12 = {
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &feat13};
+	feat12.bufferDeviceAddress = VK_TRUE;
+
+	VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swap_maint = {
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR,
+		.swapchainMaintenance1 = VK_TRUE};
+	feat13.pNext = &swap_maint;
+
+	VkPhysicalDeviceFeatures2 feat2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+									   .pNext = &feat12};
+
+	const char* dev_exts[] = {
+		VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
+		VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME // Anti-overlay protection
+	};
+
+	ZHLN_DeviceDesc dev_desc = {.extensions = dev_exts,
+								.extension_count = 3,
+								.features = &feat2,
+								.enable_validation = true};
+
+	// 3. Create Context
+	_impl->ctx = Vk::Context::Create(inst_desc, {VK_NULL_HANDLE, VK_NULL_HANDLE, nullptr, nullptr},
+									 dev_desc);
+	if (!_impl->ctx) {
+		ZHLN::Log("FATAL: Vulkan Context Creation Failed\n");
+		std::abort();
+	}
+
+	// 4. Create Surface via GLFW
+	GLFWwindow* glfwWin = static_cast<GLFWwindow*>(window.GetNativeHandle());
+	VkSurfaceKHR raw_surface;
+	if (glfwCreateWindowSurface(_impl->ctx.Instance(), glfwWin, nullptr, &raw_surface) !=
+		VK_SUCCESS) {
+		std::abort();
+	}
+	_impl->surface = Vk::Surface(_impl->ctx.Instance(), raw_surface);
+
+	// 5. Initialize Subsystems
+	if (!_impl->allocator.Init(_impl->ctx)) {
+		ZHLN::Log("FATAL: Vulkan Memory Allocator (VMA) failed to initialize\n");
+		std::abort();
+	}
+
+	_impl->swapchain = Vk::Swapchain(_impl->ctx.Device(), {});
+
+	_impl->sync = Vk::FrameSync<2>::Create(_impl->ctx.Device());
+	if (!_impl->sync.Valid()) {
+		ZHLN::Log("FATAL: Failed to create Vulkan Frame Sync primitives\n");
+		std::abort();
+	}
+
+	_impl->pools =
+		Vk::CommandPools<2>::Create(_impl->ctx.Device(), _impl->ctx.PhysicalInfo().graphics_family);
+	if (!_impl->pools.Valid()) {
+		ZHLN::Log("FATAL: Failed to create Vulkan Command Pools\n");
+		std::abort();
+	}
+
+	_impl->present_semaphores = Vk::SemaphorePool(); // Initial state is fine
 }
 
-RenderContext::~RenderContext() = default;
+RenderContext::~RenderContext() {
+	if (_impl->ctx.Device()) {
+		vkDeviceWaitIdle(_impl->ctx.Device());
+	}
+}
 
 const char* RenderContext::GetRendererName() const {
-    return _impl->system->GetName();
-}
-
-void RenderContext::BeginFrame() {
-	_impl->cmdBuffer->Begin();
-	_impl->cmdBuffer->BeginRenderPass(*_impl->swapChain);
-	const auto& res = _impl->swapChain->GetResolution();
-	_impl->cmdBuffer->SetViewport(LLGL::Viewport{0, 0, static_cast<float>(res.width), static_cast<float>(res.height)});
-	_impl->cmdBuffer->SetScissor(LLGL::Scissor{0, 0, static_cast<long>(res.width), static_cast<long>(res.height)});
-}
-
-void RenderContext::EndFrame() {
-	_impl->cmdBuffer->EndRenderPass();
-	_impl->cmdBuffer->End();
-	_impl->commandQueue->Submit(*_impl->cmdBuffer);
-	_impl->swapChain->Present();
+	return "Vulkan 1.3 (ZHLN)";
 }
 
 void RenderContext::SetResolution(const Extent2D& res) {
-	if (res.width > 0 && res.height > 0) {
-		_impl->swapChain->ResizeBuffers({res.width, res.height});
-	}
+	_impl->resized = true;
 }
 
-// --- Resource Creation ---
+// ----------------------------------------------------------------------------
+// Resource Creation
+// ----------------------------------------------------------------------------
 
 BufferHandle RenderContext::CreateVertexBuffer(const void* data, size_t size) {
-	LLGL::BufferDescriptor desc;
-	desc.size = size;
-	desc.bindFlags = LLGL::BindFlags::VertexBuffer;
-	auto* buf = _impl->system->CreateBuffer(desc, data);
-	_impl->buffers.push_back(buf);
-	return static_cast<BufferHandle>(reinterpret_cast<uint64_t>(buf));
+	// 1. Allocate GPU memory
+	auto gpu_buf =
+		Vk::Buffer::Create(_impl->allocator.Get(), size,
+						   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+						   VMA_MEMORY_USAGE_GPU_ONLY);
+
+	// 2. Perform Immediate Upload (Simplistic for now, using a temporary command buffer)
+	VkCommandBuffer cmd = _impl->pools.Cmd(0); // Borrow a cmd buffer temporarily
+	ZHLN_BeginCommandBuffer(cmd);
+	auto staging = Vk::UploadToBuffer(_impl->allocator.Get(), cmd, gpu_buf, data, size);
+	ZHLN_EndCommandBuffer(cmd);
+
+	// Force wait for upload to complete (Slow but works for initial setup)
+	VkSubmitInfo submit = {
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cmd};
+	vkQueueSubmit(_impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
+	vkQueueWaitIdle(_impl->ctx.GraphicsQueue());
+
+	auto* mesh = new NativeMesh{std::move(gpu_buf), 0};
+	_impl->meshes.emplace_back(mesh);
+	return static_cast<BufferHandle>(reinterpret_cast<uint64_t>(mesh));
 }
 
 BufferHandle RenderContext::CreateConstantBuffer(size_t size) {
-	LLGL::BufferDescriptor desc;
-	desc.size = size;
-	desc.bindFlags = LLGL::BindFlags::ConstantBuffer;
-	auto* buf = _impl->system->CreateBuffer(desc);
-	_impl->buffers.push_back(buf);
-	return static_cast<BufferHandle>(reinterpret_cast<uint64_t>(buf));
+	// We are migrating to Push Constants, so we don't strictly need this right now.
+	return BufferHandle::Invalid;
 }
 
 Material RenderContext::CreateMaterial(const PipelineDesc& desc) {
-	Material mat;
+	ZHLN_ShaderDesc v_desc = {static_cast<const uint32_t*>(desc.vertexShaderData),
+							  desc.vertexShaderSize};
+	ZHLN_ShaderDesc f_desc = {static_cast<const uint32_t*>(desc.fragShaderData),
+							  desc.fragShaderSize};
+	auto shaders = Vk::ShaderStages::Create(_impl->ctx.Device(), v_desc, f_desc);
 
-	// Constant Buffer
-	mat.constantBuffer = CreateConstantBuffer(sizeof(FrameConstants));
-	auto* rawCbo = reinterpret_cast<LLGL::Buffer*>(mat.constantBuffer);
-
-	// Layout
-	LLGL::BindingDescriptor bind{"Constants", LLGL::ResourceType::Buffer, LLGL::BindFlags::ConstantBuffer, LLGL::StageFlags::VertexStage, 1};
-	LLGL::PipelineLayoutDescriptor layoutDesc;
-	layoutDesc.heapBindings = {bind};
-	layoutDesc.uniforms = { LLGL::UniformDescriptor{"model", LLGL::UniformType::Float4x4} };
-	auto* layout = _impl->system->CreatePipelineLayout(layoutDesc);
-	_impl->layouts.push_back(layout);
-
-	// Heap (ResourceGroup)
-	LLGL::ResourceViewDescriptor view{rawCbo};
-	LLGL::ResourceHeapDescriptor heapDesc{layout};
-	auto* heap = _impl->system->CreateResourceHeap(heapDesc, {&view, 1});
-	_impl->heaps.push_back(heap);
-	mat.resourceGroup = static_cast<ResourceGroupHandle>(reinterpret_cast<uint64_t>(heap));
-
-	// Shaders
-	LLGL::ShaderDescriptor vsDesc, fsDesc;
-	vsDesc.type = LLGL::ShaderType::Vertex; fsDesc.type = LLGL::ShaderType::Fragment;
-	vsDesc.entryPoint = "main"; fsDesc.entryPoint = "main";
-
-	if (desc.isMetal) {
-		vsDesc.sourceType = LLGL::ShaderSourceType::CodeString;
-		fsDesc.sourceType = LLGL::ShaderSourceType::CodeString;
-		vsDesc.entryPoint = "vsMain"; fsDesc.entryPoint = "fsMain";
-	} else {
-		vsDesc.sourceType = LLGL::ShaderSourceType::BinaryBuffer;
-		fsDesc.sourceType = LLGL::ShaderSourceType::BinaryBuffer;
-	}
-
-	vsDesc.source = reinterpret_cast<const char*>(desc.vertexShaderData);
-	vsDesc.sourceSize = desc.vertexShaderSize;
-	fsDesc.source = reinterpret_cast<const char*>(desc.fragShaderData);
-	fsDesc.sourceSize = desc.fragShaderSize;
-
-	vsDesc.vertex.inputAttribs = {
-		{"position", LLGL::Format::RGB32Float, 0, offsetof(Vertex, position), sizeof(Vertex)},
-		{"color", LLGL::Format::RGBA32Float, 1, offsetof(Vertex, color), sizeof(Vertex)}
+	// Push Constants Layout: ViewProj (64 bytes) + Model (64 bytes) = 128 bytes total
+	VkPushConstantRange pc_range = {
+		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+		.offset = 0,
+		.size = sizeof(FrameConstants) // Assuming FrameConstants has viewProj and model
 	};
 
-	auto* vs = _impl->system->CreateShader(vsDesc);
-	auto* fs = _impl->system->CreateShader(fsDesc);
+	ZHLN_PipelineLayoutDesc layout_desc = {.push_constants = &pc_range, .push_constant_count = 1};
+	auto layout = Vk::PipelineLayout(_impl->ctx.Device(),
+									 ZHLN_CreatePipelineLayout(_impl->ctx.Device(), &layout_desc));
 
-	if (!vs || !fs || !layout) {
-		ZHLN::Log("CreateMaterial failed during shader/layout creation: vs={}, fs={}, layout={}\n",
-			reinterpret_cast<std::uintptr_t>(vs), reinterpret_cast<std::uintptr_t>(fs), reinterpret_cast<std::uintptr_t>(layout));
+	ZHLN_GraphicsPipelineDesc pipe_desc = {
+		.stages = const_cast<ZHLN_ShaderStages*>(shaders.Get()),
+		.layout = layout.Get(),
+		.color_format = VK_FORMAT_B8G8R8A8_SRGB,
+		.depth_format = VK_FORMAT_UNDEFINED, // Switch to D32 if you add depth buffers
+		.cull_mode = VK_CULL_MODE_BACK_BIT};
+	auto pipeline = Vk::Pipeline(_impl->ctx.Device(),
+								 ZHLN_CreateGraphicsPipeline(_impl->ctx.Device(), &pipe_desc));
+
+	auto* mat = new NativeMaterial{std::move(pipeline), std::move(layout)};
+	_impl->materials.emplace_back(mat);
+
+	Material m;
+	m.pipeline = static_cast<PipelineHandle>(reinterpret_cast<uint64_t>(mat));
+	return m;
+}
+
+// ----------------------------------------------------------------------------
+// Frame Execution
+// ----------------------------------------------------------------------------
+
+void RenderContext::BeginFrame() {
+	auto rebuild_cb = [&]() {
+    vkDeviceWaitIdle(_impl->ctx.Device());
+    
+    // 1. Get the actual window size from the OS/GLFW
+    int w, h;
+    GLFWwindow* glfwWin = static_cast<GLFWwindow*>(window.GetNativeHandle());
+    glfwGetFramebufferSize(glfwWin, &w, &h);
+
+    ZHLN_Device raw_dev = {_impl->ctx.Device(), _impl->ctx.GraphicsQueue(), _impl->ctx.PresentQueue()};
+    ZHLN_PhysicalDeviceInfo raw_phys = _impl->ctx.PhysicalInfo();
+
+    ZHLN_SwapchainSupportDesc sdesc = {raw_phys.handle, _impl->surface.Get()};
+    auto support = ZHLN_QuerySwapchainSupport(&sdesc);
+    auto& caps = support.capabilities;
+
+    // 2. This handles the 0xFFFFFFFF case where Vulkan doesn't know the size yet.
+    uint32_t final_w, final_h;
+    if (caps.currentExtent.width != 0xFFFFFFFF) {
+        final_w = caps.currentExtent.width;
+        final_h = caps.currentExtent.height;
+    } else {
+        final_w = JPH::Clamp((uint32_t)w, caps.minImageExtent.width, caps.maxImageExtent.width);
+        final_h = JPH::Clamp((uint32_t)h, caps.minImageExtent.height, caps.maxImageExtent.height);
+    }
+
+    ZHLN_SwapchainDesc s_desc = {
+        .device = &raw_dev,
+        .physical = &raw_phys,
+        .surface = _impl->surface.Get(),
+        .width = final_w,
+        .height = final_h,
+        .vsync = true
+    };
+
+    _impl->swapchain.Rebuild(s_desc);
+    _impl->present_semaphores.Rebuild(_impl->ctx.Device(), _impl->swapchain.Get().image_count);
+    _impl->resized = false;
+};
+
+	if (_impl->resized)
+		rebuild_cb();
+
+	const ZHLN_FrameSync& s = _impl->sync[_impl->frame_index];
+	ZHLN_WaitAndResetFrame(_impl->ctx.Device(), s.in_flight, &_impl->pools[_impl->frame_index]);
+
+	ZHLN_AcquireDesc acq = {_impl->swapchain.Get().handle, s.image_available, UINT64_MAX};
+	auto res = ZHLN_AcquireImage(_impl->ctx.Device(), &acq, &_impl->current_image_index);
+	if (res == ZHLN_FrameResult_OutOfDate) {
+		rebuild_cb();
+		return; // Skip this frame
 	}
 
-	// Pipeline
-	LLGL::GraphicsPipelineDescriptor psoDesc;
-	psoDesc.pipelineLayout = layout;
-	psoDesc.renderPass = _impl->swapChain->GetRenderPass();
-	psoDesc.vertexShader = vs;
-	psoDesc.fragmentShader = fs;
-	psoDesc.primitiveTopology = LLGL::PrimitiveTopology::TriangleList;
-	psoDesc.depth.testEnabled = true; psoDesc.depth.writeEnabled = true;
-	psoDesc.depth.compareOp = LLGL::CompareOp::Less;
+	_impl->current_cmd = _impl->pools.Cmd(_impl->frame_index);
+	ZHLN_BeginCommandBuffer(_impl->current_cmd);
 
-	auto* pso = _impl->system->CreatePipelineState(psoDesc);
-	if (!pso) {
-		ZHLN::Log("CreateMaterial failed during pipeline creation: pso={}\n",
-			reinterpret_cast<std::uintptr_t>(pso));
+	// Transition Swapchain Image
+	VkImage img = _impl->swapchain.Get().images[_impl->current_image_index];
+	Vk::TransitionLayout(_impl->current_cmd, img, VK_IMAGE_LAYOUT_UNDEFINED,
+						 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+}
+
+void RenderContext::EndFrame() {
+	if (_impl->current_cmd == VK_NULL_HANDLE)
+		return; // Skipped frame
+
+	// Transition Swapchain Image for Presentation
+	VkImage img = _impl->swapchain.Get().images[_impl->current_image_index];
+	Vk::TransitionLayout(_impl->current_cmd, img, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+						 VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+	ZHLN_EndCommandBuffer(_impl->current_cmd);
+
+	const ZHLN_FrameSync& s = _impl->sync[_impl->frame_index];
+
+	VkCommandBufferSubmitInfo cmd_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+										  .commandBuffer = _impl->current_cmd};
+	VkSemaphoreSubmitInfo wait_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+									   .semaphore = s.image_available,
+									   .stageMask =
+										   VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT};
+	VkSemaphoreSubmitInfo signal_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+										 .semaphore =
+											 _impl->present_semaphores[_impl->current_image_index],
+										 .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT};
+
+	VkSubmitInfo2 submit = {
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+		.waitSemaphoreInfoCount = 1,
+		.pWaitSemaphoreInfos = &wait_info,
+		.commandBufferInfoCount = 1,
+		.pCommandBufferInfos = &cmd_info,
+		.signalSemaphoreInfoCount = 1,
+		.pSignalSemaphoreInfos = &signal_info,
+	};
+
+	vkQueueSubmit2(_impl->ctx.GraphicsQueue(), 1, &submit, s.in_flight);
+
+	ZHLN_PresentDesc pres = {.present_queue = _impl->ctx.PresentQueue(),
+							 .swapchain = _impl->swapchain.Get().handle,
+							 .render_finished =
+								 _impl->present_semaphores[_impl->current_image_index],
+							 .image_index = _impl->current_image_index};
+
+	if (ZHLN_PresentFrame(&pres) != ZHLN_FrameResult_Ok) {
+		_impl->resized = true;
 	}
-	_impl->pipelines.push_back(pso);
-	mat.pipeline = static_cast<PipelineHandle>(reinterpret_cast<uint64_t>(pso));
 
-	_impl->system->Release(*vs);
-	_impl->system->Release(*fs);
-
-	return mat;
+	_impl->frame_index = (_impl->frame_index + 1) % 2;
+	_impl->current_cmd = VK_NULL_HANDLE;
 }
 
 namespace Renderer {
-	void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
-		LLGL::ClearValue val;
-		val.color[0] = color.GetX(); val.color[1] = color.GetY(); val.color[2] = color.GetZ(); val.color[3] = color.GetW();
-		val.depth = depth;
-		ctx.GetImpl()->cmdBuffer->Clear(LLGL::ClearFlags::Color | LLGL::ClearFlags::Depth, val);
-	}
+void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
+	auto* impl = ctx.GetImpl();
+	if (impl->current_cmd == VK_NULL_HANDLE)
+		return;
 
-	void UpdateBuffer(RenderContext& ctx, BufferHandle buffer, const void* data, size_t size) {
-		if (buffer == BufferHandle::Invalid) {
-			return;
-		}
-		auto* raw = reinterpret_cast<LLGL::Buffer*>(static_cast<uint64_t>(buffer));
-		ctx.GetImpl()->system->WriteBuffer(*raw, 0, data, size);
-	}
+	ZHLN_RenderPassDesc pass = {
+		.target_view = impl->swapchain.Get().views[impl->current_image_index],
+		.depth_view = VK_NULL_HANDLE,
+		.extent = impl->swapchain.Get().extent,
+		.clear_color = {color.GetX(), color.GetY(), color.GetZ(), color.GetW()}};
 
-	void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const JPH::Mat44& transform) {
-		if (material.pipeline == PipelineHandle::Invalid || material.resourceGroup == ResourceGroupHandle::Invalid || mesh.vertexBuffer == BufferHandle::Invalid) {
-			return;
-		}
-		auto* cmd = ctx.GetImpl()->cmdBuffer;
-		cmd->SetPipelineState(*reinterpret_cast<LLGL::PipelineState*>(static_cast<uint64_t>(material.pipeline)));
-		cmd->SetResourceHeap(*reinterpret_cast<LLGL::ResourceHeap*>(static_cast<uint64_t>(material.resourceGroup)));
-		cmd->SetVertexBuffer(*reinterpret_cast<LLGL::Buffer*>(static_cast<uint64_t>(mesh.vertexBuffer)));
-		cmd->SetUniforms(0, &transform, sizeof(transform));
-		cmd->Draw(mesh.vertexCount, 0);
-	}
+	// Note: For actual drawing, you need to BeginRendering, Draw, EndRendering.
+	// If you just want to clear, doing Begin/End rendering with CLEAR ops is the Vulkan 1.3 way.
+	ZHLN_BeginRendering(impl->current_cmd, &pass);
+	// We will leave the RenderPass open here so Draw() can append commands.
+	// In a real engine, Clear/Draw flow needs careful management of BeginRendering/EndRendering.
 }
+
+void UpdateBuffer(RenderContext& ctx, BufferHandle buffer, const void* data, size_t size) {
+	// If transitioning to Push Constants for Transforms, this might not be used anymore.
+}
+
+void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
+		  const JPH::Mat44& transform) {
+	auto* impl = ctx.GetImpl();
+	if (impl->current_cmd == VK_NULL_HANDLE)
+		return;
+
+	auto* mat = reinterpret_cast<NativeMaterial*>(static_cast<uint64_t>(material.pipeline));
+	auto* msh = reinterpret_cast<NativeMesh*>(static_cast<uint64_t>(mesh.vertexBuffer));
+
+	vkCmdBindPipeline(impl->current_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mat->pipeline.Get());
+
+	VkDeviceSize offset = 0;
+	VkBuffer buf = msh->buffer.Handle();
+	vkCmdBindVertexBuffers(impl->current_cmd, 0, 1, &buf, &offset);
+
+	// Push constants for Matrix
+	vkCmdPushConstants(impl->current_cmd, mat->layout.Get(), VK_SHADER_STAGE_VERTEX_BIT, 0,
+					   sizeof(JPH::Mat44), &transform);
+
+	vkCmdDraw(impl->current_cmd, msh->vertexCount, 1, 0, 0);
+}
+} // namespace Renderer
 
 } // namespace ZHLN

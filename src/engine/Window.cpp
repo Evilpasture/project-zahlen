@@ -1,69 +1,93 @@
 #include <Zahlen/Window.hpp>
 #include <Zahlen/Input.hpp>
-#include <LLGL/LLGL.h>
 #include <Zahlen/Platform.hpp>
+#include <GLFW/glfw3.h> // NEW
 
 namespace ZHLN {
 
-static KeyCode MapLLGLKey(LLGL::Key k) {
-	switch(k) {
-		case LLGL::Key::W: return KeyCode::W;
-		case LLGL::Key::A: return KeyCode::A;
-		case LLGL::Key::S: return KeyCode::S;
-		case LLGL::Key::D: return KeyCode::D;
-		case LLGL::Key::LShift: return KeyCode::LShift;
-		case LLGL::Key::RButton: return KeyCode::RButton;
-		default: return KeyCode::Unknown;
-	}
+static KeyCode MapGLFWKey(int key) {
+    switch(key) {
+        case GLFW_KEY_W: return KeyCode::W;
+        case GLFW_KEY_A: return KeyCode::A;
+        case GLFW_KEY_S: return KeyCode::S;
+        case GLFW_KEY_D: return KeyCode::D;
+        case GLFW_KEY_LEFT_SHIFT: return KeyCode::LShift;
+        default: return KeyCode::Unknown;
+    }
 }
 
-class WindowEventListener : public LLGL::Window::EventListener {
-	InputContext* _input;
-public:
-	WindowEventListener(InputContext* ctx) : _input(ctx) {}
-	void OnKeyDown(LLGL::Window&, LLGL::Key key) override { _input->InjectKeyDown(MapLLGLKey(key)); }
-	void OnKeyUp(LLGL::Window&, LLGL::Key key) override { _input->InjectKeyUp(MapLLGLKey(key)); }
-	void OnLocalMotion(LLGL::Window&, const LLGL::Offset2D& pos) override { _input->InjectLocalMotion((float)pos.x, (float)pos.y); }
-	void OnWheelMotion(LLGL::Window&, int delta) override { _input->InjectWheelMotion((float)delta); }
-	void OnResize(LLGL::Window&, const LLGL::Extent2D& ext) override { _input->InjectResize({ext.width, ext.height}); }
-};
-
 struct Window::Impl {
-	std::shared_ptr<LLGL::Window> native;
-	std::shared_ptr<WindowEventListener> listener;
+    GLFWwindow* handle = nullptr;
+    InputContext* input = nullptr;
 };
 
 Window::Window(const String32& title, uint32_t width, uint32_t height, InputContext* input) 
-	: _impl(std::make_unique<Impl>()) {
-	
-	LLGL::WindowDescriptor desc;
-	desc.title = title.c_str();
-	desc.size = {width, height};
-	desc.flags = LLGL::WindowFlags::Visible | LLGL::WindowFlags::Centered | LLGL::WindowFlags::Resizable;
+    : _impl(std::make_unique<Impl>()) {
+    
+    _impl->input = input;
 
-	_impl->native = LLGL::Window::Create(desc);
-	
-	if (input) {
-		_impl->listener = std::make_shared<WindowEventListener>(input);
-		_impl->native->AddEventListener(_impl->listener);
-	}
+    // Tell GLFW NOT to create an OpenGL context
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    _impl->handle = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
+    
+    // Store 'this' pointer in GLFW so callbacks can access the InputContext
+    glfwSetWindowUserPointer(_impl->handle, this);
+
+    if (input) {
+        glfwSetKeyCallback(_impl->handle, [](GLFWwindow* win, int key, int scancode, int action, int mods) {
+            auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
+            KeyCode mapped = MapGLFWKey(key);
+            if (action == GLFW_PRESS) self->_impl->input->InjectKeyDown(mapped);
+            else if (action == GLFW_RELEASE) self->_impl->input->InjectKeyUp(mapped);
+        });
+
+        glfwSetMouseButtonCallback(_impl->handle, [](GLFWwindow* win, int button, int action, int mods) {
+            auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
+            if (button == GLFW_MOUSE_BUTTON_RIGHT) {
+                if (action == GLFW_PRESS) self->_impl->input->InjectKeyDown(KeyCode::RButton);
+                else if (action == GLFW_RELEASE) self->_impl->input->InjectKeyUp(KeyCode::RButton);
+            }
+        });
+
+        glfwSetCursorPosCallback(_impl->handle, [](GLFWwindow* win, double xpos, double ypos) {
+            auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
+            self->_impl->input->InjectLocalMotion(static_cast<float>(xpos), static_cast<float>(ypos));
+        });
+
+        glfwSetFramebufferSizeCallback(_impl->handle, [](GLFWwindow* win, int width, int height) {
+            auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
+            self->_impl->input->InjectResize({static_cast<uint32_t>(width), static_cast<uint32_t>(height)});
+        });
+    }
 }
 
-Window::~Window() = default;
+Window::~Window() {
+    if (_impl->handle) {
+        glfwDestroyWindow(_impl->handle);
+    }
+}
 
-bool Window::IsRunning() const { return _impl->native && !_impl->native->HasQuit(); }
-void Window::ProcessEvents() { _impl->native->ProcessEvents(); }
+bool Window::IsRunning() const { 
+    return !glfwWindowShouldClose(_impl->handle); 
+}
+
+void Window::ProcessEvents() { 
+    // Engine::ProcessEvents handles glfwPollEvents now
+}
+
 Extent2D Window::GetSize() const { 
-	auto s = _impl->native->GetSize(); 
-	return {s.width, s.height}; 
+    int w, h;
+    glfwGetFramebufferSize(_impl->handle, &w, &h);
+    return {static_cast<uint32_t>(w), static_cast<uint32_t>(h)}; 
 }
 
 void Window::Focus() {
-    Platform::FocusWindow(*this);
+    // We can just use GLFW's built-in focus!
+    glfwFocusWindow(_impl->handle);
 }
 
 void* Window::GetNativeHandle() const {
-    return _impl->native.get();
+    return _impl->handle; // Return GLFWwindow*
 }
 
 } // namespace ZHLN
