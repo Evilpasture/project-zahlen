@@ -346,6 +346,7 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* desc) {
 
 	VkSwapchainCreateInfoKHR create_info = {
 		.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+		.flags = 0, 
 		.surface = desc->surface,
 		.minImageCount = image_count,
 		.imageFormat = format.format,
