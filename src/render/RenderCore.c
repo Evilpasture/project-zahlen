@@ -28,7 +28,8 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* desc) {
 		.enabledExtensionCount = desc->extension_count,
 		.ppEnabledExtensionNames = desc->extensions,
 		.enabledLayerCount = desc->enable_validation ? 1u : 0u,
-		.ppEnabledLayerNames = desc->enable_validation ? VALIDATION_LAYERS : nullptr, // Compound literal
+		.ppEnabledLayerNames =
+			desc->enable_validation ? VALIDATION_LAYERS : nullptr, // Compound literal
 	};
 
 	VkDebugUtilsMessengerCreateInfoEXT debug_info = {};
@@ -475,7 +476,8 @@ void ZHLN_ResetCommandPool(VkDevice device, ZHLN_CommandPool* pool) {
 
 void ZHLN_DestroyCommandPool(VkDevice device, ZHLN_CommandPool* pool) {
 	// Implicitly frees all command buffers allocated from it
-	vkDestroyCommandPool(device, pool->pool, nullptr);
+	if (pool->pool != VK_NULL_HANDLE)
+		vkDestroyCommandPool(device, pool->pool, nullptr);
 	*pool = (ZHLN_CommandPool){};
 }
 
@@ -904,82 +906,77 @@ const char* ZHLN_VkResultString(VkResult result) {
 	}
 }
 
-
 void ZHLN_CmdCopyBuffer(VkCommandBuffer cmd, const ZHLN_BufferCopyDesc* desc) {
-    // Vulkan 1.3 Copy 2 API
-    VkBufferCopy2 region = {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_COPY_2,
-        .srcOffset = desc->src_offset,
-        .dstOffset = desc->dst_offset,
-        .size = desc->size
-    };
+	// Vulkan 1.3 Copy 2 API
+	VkBufferCopy2 region = {.sType = VK_STRUCTURE_TYPE_BUFFER_COPY_2,
+							.srcOffset = desc->src_offset,
+							.dstOffset = desc->dst_offset,
+							.size = desc->size};
 
-    VkCopyBufferInfo2 copy_info = {
-        .sType = VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2,
-        .srcBuffer = desc->src,
-        .dstBuffer = desc->dst,
-        .regionCount = 1,
-        .pRegions = &region
-    };
+	VkCopyBufferInfo2 copy_info = {.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2,
+								   .srcBuffer = desc->src,
+								   .dstBuffer = desc->dst,
+								   .regionCount = 1,
+								   .pRegions = &region};
 
-    vkCmdCopyBuffer2(cmd, &copy_info);
+	vkCmdCopyBuffer2(cmd, &copy_info);
 }
 
 void ZHLN_CmdImageBarrier(VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc* desc) {
-    // Vulkan 1.3 Synchronization 2 API
-    VkImageMemoryBarrier2 barrier = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = desc->src_stage,
-        .srcAccessMask = desc->src_access,
-        .dstStageMask = desc->dst_stage,
-        .dstAccessMask = desc->dst_access,
-        .oldLayout = desc->src_layout,
-        .newLayout = desc->dst_layout,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = desc->image,
-        .subresourceRange = {
-            .aspectMask = desc->aspect,
-            .baseMipLevel = 0,
-            .levelCount = VK_REMAINING_MIP_LEVELS,
-            .baseArrayLayer = 0,
-            .layerCount = VK_REMAINING_ARRAY_LAYERS,
-        },
-    };
+	// Vulkan 1.3 Synchronization 2 API
+	VkImageMemoryBarrier2 barrier = {
+		.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+		.srcStageMask = desc->src_stage,
+		.srcAccessMask = desc->src_access,
+		.dstStageMask = desc->dst_stage,
+		.dstAccessMask = desc->dst_access,
+		.oldLayout = desc->src_layout,
+		.newLayout = desc->dst_layout,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.image = desc->image,
+		.subresourceRange =
+			{
+				.aspectMask = desc->aspect,
+				.baseMipLevel = 0,
+				.levelCount = VK_REMAINING_MIP_LEVELS,
+				.baseArrayLayer = 0,
+				.layerCount = VK_REMAINING_ARRAY_LAYERS,
+			},
+	};
 
-    VkDependencyInfo dependency_info = {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &barrier
-    };
+	VkDependencyInfo dependency_info = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+										.imageMemoryBarrierCount = 1,
+										.pImageMemoryBarriers = &barrier};
 
-    vkCmdPipelineBarrier2(cmd, &dependency_info);
+	vkCmdPipelineBarrier2(cmd, &dependency_info);
 }
 
 void ZHLN_CmdCopyBufferToImage(VkCommandBuffer cmd, const ZHLN_BufferImageCopyDesc* desc) {
-    VkBufferImageCopy2 region = {
-        .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
-        .bufferOffset      = desc->buffer_offset,
-        .bufferRowLength   = 0,   // tightly packed
-        .bufferImageHeight = 0,   // tightly packed
-        .imageSubresource  = {
-            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
-            .mipLevel       = desc->mip_level,
-            .baseArrayLayer = desc->base_array_layer,
-            .layerCount     = 1,
-        },
-        .imageOffset = {0, 0, 0},
-        .imageExtent = {desc->width, desc->height, 1},
-    };
+	VkBufferImageCopy2 region = {
+		.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
+		.bufferOffset = desc->buffer_offset,
+		.bufferRowLength = 0,	// tightly packed
+		.bufferImageHeight = 0, // tightly packed
+		.imageSubresource =
+			{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.mipLevel = desc->mip_level,
+				.baseArrayLayer = desc->base_array_layer,
+				.layerCount = 1,
+			},
+		.imageOffset = {0, 0, 0},
+		.imageExtent = {desc->width, desc->height, 1},
+	};
 
-    VkCopyBufferToImageInfo2 copy_info = {
-        .sType          = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
-        .srcBuffer      = desc->buffer,
-        .dstImage       = desc->image,
-        .dstImageLayout = desc->layout,
-        .regionCount    = 1,
-        .pRegions       = &region,
-    };
+	VkCopyBufferToImageInfo2 copy_info = {
+		.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
+		.srcBuffer = desc->buffer,
+		.dstImage = desc->image,
+		.dstImageLayout = desc->layout,
+		.regionCount = 1,
+		.pRegions = &region,
+	};
 
-    vkCmdCopyBufferToImage2(cmd, &copy_info);
+	vkCmdCopyBufferToImage2(cmd, &copy_info);
 }

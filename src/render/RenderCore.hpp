@@ -1,11 +1,11 @@
 #pragma once
 
 #include "RenderCore.h"
-
-#include <Zahlen/Log.hpp>
+#include <print>
 #include <array>
 #include <concepts>
 #include <functional>
+#include <source_location>
 #include <type_traits>
 #include <utility>
 
@@ -381,9 +381,14 @@ inline void Push(VkCommandBuffer cmd, VkPipelineLayout layout, VkShaderStageFlag
 	return ZHLN_VkResultString(result);
 }
 
-inline void CheckResult(VkResult result, const char* context = "") {
-	if (result != VK_SUCCESS)
-		Log("[Vk] {} failed: {}\n", context, ResultString(result));
+inline void CheckResult(VkResult result, 
+                        const char* context = "", 
+                        const std::source_location location = std::source_location::current()) {
+    if (result != VK_SUCCESS) {
+        std::print("[Vk Error] {}:{} in {}: {} failed with {}\n", 
+                   location.file_name(), location.line(), location.function_name(),
+                   context, ResultString(result));
+    }
 }
 
 } // namespace ZHLN::Vk

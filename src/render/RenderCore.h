@@ -305,7 +305,6 @@ typedef struct {
     VkImageAspectFlags aspect; // e.g. VK_IMAGE_ASPECT_COLOR_BIT
 } ZHLN_ImageBarrierDesc;
 
-void ZHLN_TransitionImage(VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc* desc);
 void ZHLN_BeginRendering(VkCommandBuffer cmd, const ZHLN_RenderPassDesc* desc);
 void ZHLN_EndRendering(VkCommandBuffer cmd);
 
