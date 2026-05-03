@@ -10,6 +10,10 @@
 #include <vulkan/vulkan.h>
 #include <stdbool.h> // We use booleans as keyword but good to include nevertheless
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* --- INSTANCE MANAGEMENT --- */
 
 /**
@@ -366,3 +370,7 @@ typedef struct {
  * @brief Copies buffer data into an image (e.g. texture upload).
  */
 void ZHLN_CmdCopyBufferToImage(VkCommandBuffer cmd, const ZHLN_BufferImageCopyDesc* desc);
+
+#ifdef __cplusplus
+}
+#endif

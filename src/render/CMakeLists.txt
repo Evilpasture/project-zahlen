@@ -7,6 +7,7 @@ find_package(Vulkan REQUIRED)
 
 add_library(zahlen_render STATIC
     RenderCore.c
+    VmaImplementation.cpp
     RenderCore.h
     RenderCore.hpp
     Allocator.hpp
@@ -43,4 +44,9 @@ if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
         $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Wpedantic -Wno-unused-parameter>
         $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
     )
+endif()
+
+# At the bottom of src/render/CMakeLists.txt
+if(BUILD_TESTING)
+    add_subdirectory(tests)
 endif()

@@ -54,6 +54,12 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/extern/JoltPhysics/Build SYSTEM)
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/VulkanMemoryAllocator SYSTEM)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/render)
 
+option(BUILD_TESTING "Build the render module test suite" OFF)
+if(BUILD_TESTING)
+    message("Building test suites for render backend")
+    enable_testing()
+endif()
+
 # Collect source files
 set(PROJECT_SOURCES
     src/main.cpp

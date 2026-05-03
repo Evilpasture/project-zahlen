@@ -36,6 +36,38 @@ class Allocator {
 
 	[[nodiscard]] bool Init(VkInstance instance, VkPhysicalDevice physical,
 							VkDevice device) noexcept {
+		// Explicitly map Vulkan functions to VMA.
+		// This prevents VMA from trying to "guess" or "dynamically load" them.
+		VmaVulkanFunctions vfuncs = {
+        .vkGetInstanceProcAddr = &vkGetInstanceProcAddr,
+        .vkGetDeviceProcAddr = &vkGetDeviceProcAddr,
+        .vkGetPhysicalDeviceProperties = &vkGetPhysicalDeviceProperties,
+        .vkGetPhysicalDeviceMemoryProperties = &vkGetPhysicalDeviceMemoryProperties,
+        .vkAllocateMemory = &vkAllocateMemory,
+        .vkFreeMemory = &vkFreeMemory,
+        .vkMapMemory = &vkMapMemory,
+        .vkUnmapMemory = &vkUnmapMemory,
+        .vkFlushMappedMemoryRanges = &vkFlushMappedMemoryRanges,
+        .vkInvalidateMappedMemoryRanges = &vkInvalidateMappedMemoryRanges,
+        .vkBindBufferMemory = &vkBindBufferMemory,
+        .vkBindImageMemory = &vkBindImageMemory,
+        .vkGetBufferMemoryRequirements = &vkGetBufferMemoryRequirements,
+        .vkGetImageMemoryRequirements = &vkGetImageMemoryRequirements,
+        .vkCreateBuffer = &vkCreateBuffer,
+        .vkDestroyBuffer = &vkDestroyBuffer,
+        .vkCreateImage = &vkCreateImage,
+        .vkDestroyImage = &vkDestroyImage,
+        .vkCmdCopyBuffer = &vkCmdCopyBuffer,
+        // Even in Vulkan 1.3, VMA names these fields with KHR for compatibility
+        .vkGetBufferMemoryRequirements2KHR = &vkGetBufferMemoryRequirements2,
+        .vkGetImageMemoryRequirements2KHR = &vkGetImageMemoryRequirements2,
+        .vkBindBufferMemory2KHR = &vkBindBufferMemory2,
+        .vkBindImageMemory2KHR = &vkBindImageMemory2,
+        .vkGetPhysicalDeviceMemoryProperties2KHR = &vkGetPhysicalDeviceMemoryProperties2,
+        // Buffer Device Address is NOT a field in the struct; 
+        // VMA loads it via GetDeviceProcAddr internally.
+    };
+
 		VmaAllocatorCreateInfo info = {.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
 									   .physicalDevice = physical,
 									   .device = device,
@@ -44,7 +76,7 @@ class Allocator {
 									   .pDeviceMemoryCallbacks = nullptr,
 									   .pHeapSizeLimit = nullptr,
 									   .pVulkanFunctions =
-										   nullptr, // VMA will fetch functions internally
+										   &vfuncs, // VMA will fetch functions internally
 									   .instance = instance,
 									   .vulkanApiVersion = VK_API_VERSION_1_3,
 #if VMA_EXTERNAL_MEMORY
