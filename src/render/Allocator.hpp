@@ -6,7 +6,6 @@
 #include <utility>
 #include <vk_mem_alloc.h>
 
-
 namespace ZHLN::Vk {
 
 // ============================================================================
@@ -37,13 +36,22 @@ class Allocator {
 
 	[[nodiscard]] bool Init(VkInstance instance, VkPhysicalDevice physical,
 							VkDevice device) noexcept {
-		VmaAllocatorCreateInfo info = {
-			.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
-			.physicalDevice = physical,
-			.device = device,
-			.instance = instance,
-			.vulkanApiVersion = VK_API_VERSION_1_3,
+		VmaAllocatorCreateInfo info = {.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
+									   .physicalDevice = physical,
+									   .device = device,
+									   .preferredLargeHeapBlockSize = 0, // 0 = default (256 MiB)
+									   .pAllocationCallbacks = nullptr,
+									   .pDeviceMemoryCallbacks = nullptr,
+									   .pHeapSizeLimit = nullptr,
+									   .pVulkanFunctions =
+										   nullptr, // VMA will fetch functions internally
+									   .instance = instance,
+									   .vulkanApiVersion = VK_API_VERSION_1_3,
+#if VMA_EXTERNAL_MEMORY
+									   .pTypeExternalMemoryHandleTypes = nullptr
+#endif
 		};
+
 		return vmaCreateAllocator(&info, &_handle) == VK_SUCCESS;
 	}
 
@@ -97,16 +105,33 @@ class Buffer {
 		Buffer b;
 		b._allocator = allocator;
 
-		VkBufferCreateInfo buffer_info = {
-			.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-			.size = size,
-			.usage = usage,
+		// Fully explicit VkBufferCreateInfo (Vulkan 1.3)
+		VkBufferCreateInfo buffer_info = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+										  .pNext = nullptr,
+										  .flags = 0,
+										  .size = size,
+										  .usage = usage,
+										  .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+										  .queueFamilyIndexCount = 0,
+										  .pQueueFamilyIndices = nullptr};
+
+		// Fully explicit VmaAllocationCreateInfo (VMA 3.x)
+		VmaAllocationCreateInfo alloc_info = {
+			.flags = 0,
+			.usage = mem_usage,
+			.requiredFlags = 0,
+			.preferredFlags = 0,
+			.memoryTypeBits = 0,
+			.pool = nullptr,
+			.pUserData = nullptr,
+			.priority = 0.0f,
+			.minAlignment = 0 // 0 = Use default Vulkan requirements
 		};
-		VmaAllocationCreateInfo alloc_info = {.usage = mem_usage};
 
 		if (vmaCreateBuffer(allocator, &buffer_info, &alloc_info, &b._handle, &b._allocation,
-							&b._info) != VK_SUCCESS)
+							&b._info) != VK_SUCCESS) {
 			return {};
+		}
 
 		return b;
 	}
@@ -115,7 +140,7 @@ class Buffer {
 
 	struct MappedRegion {
 		MappedRegion(VmaAllocator alloc, VmaAllocation allocation, void* ptr) noexcept
-			: _alloc(alloc), _allocation(allocation), data(ptr) {}
+			: data(ptr), _alloc(alloc), _allocation(allocation) {}
 
 		~MappedRegion() noexcept { vmaUnmapMemory(_alloc, _allocation); }
 
@@ -158,25 +183,35 @@ class Buffer {
 [[nodiscard]]
 inline Buffer UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst,
 							 const void* data, size_t size) noexcept {
+	// 1. Create staging buffer
 	Buffer staging = Buffer::Create(allocator, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
 									VMA_MEMORY_USAGE_CPU_ONLY);
 	if (!staging.Valid())
 		return {};
 
+	// 2. Map and copy data
 	{
 		auto mapped = staging.Map();
-		memcpy(mapped.data, data, size);
+		if (mapped.data) {
+			memcpy(mapped.data, data, size);
+		}
 	}
 
+	// 3. Define the copy with explicit offsets
 	ZHLN_BufferCopyDesc copy = {
 		.src = staging.Handle(),
 		.dst = dst.Handle(),
 		.size = static_cast<VkDeviceSize>(size),
+		.src_offset = 0, // Explicitly start at the beginning of staging
+		.dst_offset = 0	 // Explicitly start at the beginning of dst
 	};
-    // dst must have been created with VK_BUFFER_USAGE_TRANSFER_DST_BIT
+
+	// 4. Record the command (Dumb C Execution)
 	ZHLN_CmdCopyBuffer(cmd, &copy);
 
-	// Return staging so caller controls its lifetime relative to submit
+	// 5. Return staging buffer.
+	// This is vital: the GPU hasn't executed the copy yet.
+	// The caller must keep 'staging' alive until the command buffer submit fence is signaled.
 	return staging;
 }
 
