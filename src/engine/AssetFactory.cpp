@@ -101,6 +101,9 @@ Material CreateBasicMaterial(RenderContext& ctx) {
 
 	LLGL::PipelineLayoutDescriptor layoutDesc;
 	layoutDesc.heapBindings = {bind};
+	layoutDesc.uniforms = {
+		LLGL::UniformDescriptor{ "model", LLGL::UniformType::Float4x4 }
+	};
 	LayoutPtr layout(sys->CreatePipelineLayout(layoutDesc), deleter);
 
 	// 3. Heap
