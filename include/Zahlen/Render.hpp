@@ -2,14 +2,17 @@
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/detail/String.hpp>
-
-#include <Jolt/Jolt.h>
-#include <Jolt/Math/Mat44.h>
-#include <Jolt/Math/Vec4.h>
-#include <LLGL/LLGL.h>
 #include <memory>
 
 namespace ZHLN {
+
+struct PipelineDesc {
+	const void* vertexShaderData = nullptr;
+	size_t vertexShaderSize = 0;
+	const void* fragShaderData = nullptr;
+	size_t fragShaderSize = 0;
+	bool isMetal = false; 
+};
 
 class RenderContext {
   public:
@@ -21,32 +24,31 @@ class RenderContext {
 
 	void BeginFrame();
 	void EndFrame();
+	void SetResolution(const Extent2D& resolution);
+	const char* GetRendererName() const;
 
-	LLGL::RenderSystem* GetSystem() const { return _system.get(); }
-	LLGL::CommandBuffer* GetCommandBuffer() const { return _cmdBuffer.get(); }
-	LLGL::SwapChain* GetSwapChain() const { return _swapChain; }
-	void SetResolution(const LLGL::Extent2D& resolution);
+	// --- Opaque Resource Creation API ---
+	BufferHandle CreateVertexBuffer(const void* data, size_t size);
+	BufferHandle CreateConstantBuffer(size_t size);
+	Material CreateMaterial(const PipelineDesc& desc);
+
+	struct Impl;
+	Impl* GetImpl() const { return _impl.get(); }
 
   private:
-	LLGLPtr<LLGL::CommandBuffer> _cmdBuffer; 
-	LLGL::RenderSystemPtr _system; // System declared LAST, dies LAST
-	LLGL::SwapChain* _swapChain = nullptr;
-	LLGL::CommandQueue* _commandQueue = nullptr;
+	std::unique_ptr<Impl> _impl;
 };
 
 namespace Renderer {
-enum class ColorComponent : size_t { R = 0, G = 1, B = 2, A = 3 };
+	void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth = 1.0f);
+	void UpdateBuffer(RenderContext& ctx, BufferHandle buffer, const void* data, size_t size);
 
-void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth = 1.0f);
-void UpdateBuffer(RenderContext& ctx, LLGL::Buffer* buffer, const void* data, size_t size);
+	template <typename T>
+	inline void UpdateBuffer(RenderContext& ctx, BufferHandle buffer, const T& data) {
+		UpdateBuffer(ctx, buffer, static_cast<const void*>(&data), sizeof(T));
+	}
 
-template <typename T>
-inline void UpdateBuffer(RenderContext& ctx, LLGL::Buffer* buffer, const T& data) {
-	UpdateBuffer(ctx, buffer, static_cast<const void*>(&data), sizeof(T));
-}
-
-void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
-		  const JPH::Mat44& transform);
-} // namespace Renderer
+	void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const JPH::Mat44& transform);
+} 
 
 } // namespace ZHLN

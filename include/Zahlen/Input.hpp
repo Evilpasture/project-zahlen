@@ -1,45 +1,45 @@
 #pragma once
 
-#include <LLGL/Key.h>
-#include <LLGL/Window.h>
-#include <Zahlen/detail/Platform.hpp>
+#include <Zahlen/Types.hpp>
 #include <bitset>
 
 namespace ZHLN {
 
+enum class KeyCode : uint8_t {
+	Unknown = 0, W, A, S, D, LShift, RButton, MaxKeys
+};
+
 struct MouseState {
 	float x = 0, y = 0;
 	float deltaX = 0, deltaY = 0;
-	std::bitset<256> buttons; // Buttons are keys in this version
+	std::bitset<8> buttons;
 	float wheel = 0;
 };
 
-class InputContext : public LLGL::Window::EventListener {
+class InputContext {
   public:
 	InputContext() = default;
 
-	bool IsKeyDown(LLGL::Key key) const noexcept { return _keys[static_cast<size_t>(key)]; }
-	bool IsMouseButtonDown(LLGL::Key key) const noexcept { return _keys[static_cast<size_t>(key)]; }
+	bool IsKeyDown(KeyCode key) const noexcept { return _keys[static_cast<size_t>(key)]; }
+	bool IsMouseButtonDown(KeyCode key) const noexcept { return _keys[static_cast<size_t>(key)]; }
 	const MouseState& GetMouse() const noexcept { return _mouse; }
 
 	void ResetDeltas();
 
-	// --- LLGL Window::EventListener Overrides ---
-	void OnKeyDown(LLGL::Window& sender, LLGL::Key key) override;
-	void OnKeyUp(LLGL::Window& sender, LLGL::Key key) override;
-	void OnLocalMotion(LLGL::Window& sender, const LLGL::Offset2D& position) override;
-	void OnWheelMotion(LLGL::Window& sender, int delta) override;
-
 	bool NeedsResize() const { return _needsResize; }
-    LLGL::Extent2D GetNewSize() const { return _newSize; }
-    void ClearResizeFlag() { _needsResize = false; }
+	Extent2D GetNewSize() const { return _newSize; }
+	void ClearResizeFlag() { _needsResize = false; }
 
-    // Add this override
-    void OnResize(LLGL::Window& sender, const LLGL::Extent2D& extent) override;
+	// --- Injection API (Called by the hidden OS Window implementation) ---
+	void InjectKeyDown(KeyCode key);
+	void InjectKeyUp(KeyCode key);
+	void InjectLocalMotion(float x, float y);
+	void InjectWheelMotion(float delta);
+	void InjectResize(const Extent2D& extent);
 
   private:
-  	bool _needsResize = false;
-    LLGL::Extent2D _newSize;
+	bool _needsResize = false;
+	Extent2D _newSize{0, 0};
 	std::bitset<256> _keys;
 	MouseState _mouse;
 	float _lastX = 0, _lastY = 0;

@@ -3,13 +3,14 @@
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
-#include <LLGL/LLGL.h>
-#include <lua.hpp>
-#include <memory>
+#include <cstdint>
 
 namespace ZHLN {
 
-// --- Core Data Layouts ---
+// --- Core Math/Spatial Types ---
+
+struct Extent2D { uint32_t width, height; };
+struct Offset2D { int32_t x, y; };
 
 struct Vertex {
 	JPH::Vec3 position;
@@ -20,42 +21,22 @@ struct FrameConstants {
 	JPH::Mat44 transform;
 };
 
-// --- Resource Management ---
+// --- Opaque Resource Handles ---
+// These abstract away Vulkan/LLGL objects completely.
 
-struct LLGLDeleter {
-	LLGL::RenderSystem* system = nullptr;
-	template <typename T> void operator()(T* resource) const {
-		if (system && resource)
-			system->Release(*resource);
-	}
-};
-
-template <typename T> using LLGLPtr = std::unique_ptr<T, LLGLDeleter>;
-
-using BufferPtr = LLGLPtr<LLGL::Buffer>;
-using PipelinePtr = LLGLPtr<LLGL::PipelineState>;
-using LayoutPtr = LLGLPtr<LLGL::PipelineLayout>;
-using HeapPtr = LLGLPtr<LLGL::ResourceHeap>;
-
-struct LuaDeleter {
-	void operator()(lua_State* L) const {
-		if (L)
-			lua_close(L);
-	}
-};
-
-using LuaPtr = std::unique_ptr<lua_State, LuaDeleter>;
+enum class BufferHandle : uint64_t { Invalid = 0 };
+enum class PipelineHandle : uint64_t { Invalid = 0 };
+enum class ResourceGroupHandle : uint64_t { Invalid = 0 };
 
 struct Mesh {
-	BufferPtr vertexBuffer;
+	BufferHandle vertexBuffer = BufferHandle::Invalid;
 	uint32_t vertexCount = 0;
 };
 
 struct Material {
-	PipelinePtr pipeline;
-	LayoutPtr layout;
-	HeapPtr resourceHeap;
-	BufferPtr constantBuffer;
+	PipelineHandle pipeline = PipelineHandle::Invalid;
+	ResourceGroupHandle resourceGroup = ResourceGroupHandle::Invalid;
+	BufferHandle constantBuffer = BufferHandle::Invalid;
 };
 
 } // namespace ZHLN

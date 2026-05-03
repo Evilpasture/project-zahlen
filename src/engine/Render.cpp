@@ -1,151 +1,211 @@
 #include <Zahlen/Render.hpp>
-
 #include <Zahlen/Log.hpp>
-
-#include <utility>
+#include <LLGL/LLGL.h>
+#include <Jolt/Core/Core.h> // For JPH::Array
+#include <memory>
 
 namespace ZHLN {
 
-RenderContext::RenderContext(Window& window, const String32& preferredAPI) {
-    auto modules = LLGL::RenderSystem::FindModules();
-    String32 selected = "";
+struct RenderContext::Impl {
+	LLGL::RenderSystemPtr system;
+	LLGL::CommandBuffer* cmdBuffer = nullptr; // Managed manually in ~Impl
+	LLGL::SwapChain* swapChain = nullptr;
+	LLGL::CommandQueue* commandQueue = nullptr;
 
-    // 1. Try to find the one we actually want
-    for (const auto& m : modules) {
-        if (m == preferredAPI.c_str()) {
-            selected = m.c_str();
-            break;
-        }
-    }
+	// Deletion Queue
+	JPH::Array<LLGL::Buffer*> buffers;
+	JPH::Array<LLGL::PipelineLayout*> layouts;
+	JPH::Array<LLGL::ResourceHeap*> heaps;
+	JPH::Array<LLGL::PipelineState*> pipelines;
 
-    // 2. Fallback: If preferred is missing, pick the first available one
-    if (selected.empty() && !modules.empty()) {
-        selected = modules[0].c_str();
-        ZHLN::Log("WARNING: Preferred API '{}' not found. Falling back to '{}'\n", 
-                  preferredAPI.c_str(), selected.c_str());
-    }
+	~Impl() {
+		// Must release the command buffer before unloading the system
+		if (cmdBuffer) system->Release(*cmdBuffer);
+		
+		for(auto* p : pipelines) system->Release(*p);
+		for(auto* h : heaps) system->Release(*h);
+		for(auto* l : layouts) system->Release(*l);
+		for(auto* b : buffers) system->Release(*b);
+		
+		LLGL::RenderSystem::Unload(std::move(system));
+	}
+};
 
-    if (selected.empty()) {
-        ZHLN::Log("FATAL: No RenderSystem modules found!\n");
-        return;
-    }
+RenderContext::RenderContext(Window& window, const String32& preferredAPI) : _impl(std::make_unique<Impl>()) {
+	auto modules = LLGL::RenderSystem::FindModules();
+	String32 selected = "";
+	for (const auto& m : modules) if (m == preferredAPI.c_str()) { selected = m.c_str(); break; }
+	if (selected.empty() && !modules.empty()) selected = modules[0].c_str();
 
-    ZHLN::Log("Loading RenderContext: {}\n", selected.c_str());
-    _system = LLGL::RenderSystem::Load(LLGL::RenderSystemDescriptor{selected.c_str()});
-	if (!_system)
-		return;
+	_impl->system = LLGL::RenderSystem::Load(LLGL::RenderSystemDescriptor{selected.c_str()});
+	
+	// Retrieve the native OS window safely without violating the Pimpl boundary
+	auto* rawNative = static_cast<LLGL::Surface*>(window.GetNativeHandle());
+	auto nativeWin = std::shared_ptr<LLGL::Surface>(rawNative, [](LLGL::Surface*){});
 
-	// The SwapChain connects the RenderSystem to the Window's Native Surface
 	LLGL::SwapChainDescriptor swapChainDesc;
-    // Query the window's resolution—LLGL's window->GetSize() usually 
-    // returns logical units. Check if LLGL has a physical size query.
-    swapChainDesc.resolution = window.GetNative()->GetSize(); 
-    swapChainDesc.depthBits  = 32;
-    swapChainDesc.samples    = 8;
-    swapChainDesc.resizable  = true; // Helpful for Vulkan
+	swapChainDesc.resolution = { window.GetSize().width, window.GetSize().height };
+	swapChainDesc.depthBits = 32;
+	swapChainDesc.samples = 8;
+	swapChainDesc.resizable = true;
 
-    _swapChain = _system->CreateSwapChain(swapChainDesc, window.GetNative());
-    
-    // LOG the actual size to the console to debug tiny views
-    auto actualRes = _swapChain->GetResolution();
-    ZHLN::Log("Vulkan Surface Initialized: {}x{}\n", actualRes.width, actualRes.height);
-	_commandQueue = _system->GetCommandQueue();
-	_cmdBuffer = LLGLPtr<LLGL::CommandBuffer>(
-        _system->CreateCommandBuffer(), 
-        LLGLDeleter{_system.get()} 
-    );
+	_impl->swapChain = _impl->system->CreateSwapChain(swapChainDesc, nativeWin);
+	_impl->commandQueue = _impl->system->GetCommandQueue();
+	_impl->cmdBuffer = _impl->system->CreateCommandBuffer();
 }
 
-RenderContext::~RenderContext() {
-    if (_system) {
-        // 1. Manually kill the command buffer first while the system is alive
-        _cmdBuffer.reset();
-        
-        // 2. The SwapChain is owned by the system, so we don't reset it, 
-        // but we ensure no one else is using it.
-        
-        // 3. Now it is safe to unload the system
-        LLGL::RenderSystem::Unload(std::move(_system));
-    }
+RenderContext::~RenderContext() = default;
+
+const char* RenderContext::GetRendererName() const {
+    return _impl->system->GetName();
 }
 
 void RenderContext::BeginFrame() {
-    _cmdBuffer->Begin();
-    _cmdBuffer->BeginRenderPass(*_swapChain);
-
-    const auto& res = _swapChain->GetResolution();
-    
-    // 1. Viewport: Defines the coordinate mapping
-    LLGL::Viewport viewport{ 0.0f, 0.0f, 
-        static_cast<float>(res.width), 
-        static_cast<float>(res.height) };
-    _cmdBuffer->SetViewport(viewport);
-
-    // 2. Scissor: Defines the clipping region (MANDATORY for Vulkan)
-    LLGL::Scissor scissor{ 0, 0, 
-        static_cast<long>(res.width), 
-        static_cast<long>(res.height) };
-    _cmdBuffer->SetScissor(scissor);
+	_impl->cmdBuffer->Begin();
+	_impl->cmdBuffer->BeginRenderPass(*_impl->swapChain);
+	const auto& res = _impl->swapChain->GetResolution();
+	_impl->cmdBuffer->SetViewport(LLGL::Viewport{0, 0, static_cast<float>(res.width), static_cast<float>(res.height)});
+	_impl->cmdBuffer->SetScissor(LLGL::Scissor{0, 0, static_cast<long>(res.width), static_cast<long>(res.height)});
 }
 
 void RenderContext::EndFrame() {
-	_cmdBuffer->EndRenderPass();
-	_cmdBuffer->End();
-	_commandQueue->Submit(*_cmdBuffer);
-	_swapChain->Present();
+	_impl->cmdBuffer->EndRenderPass();
+	_impl->cmdBuffer->End();
+	_impl->commandQueue->Submit(*_impl->cmdBuffer);
+	_impl->swapChain->Present();
 }
 
-void RenderContext::SetResolution(const LLGL::Extent2D& resolution) {
-    // Vulkan cannot create a swapchain with 0 width or height (minimization)
-    if (resolution.width == 0 || resolution.height == 0) {
-        return;
-    }
+void RenderContext::SetResolution(const Extent2D& res) {
+	if (res.width > 0 && res.height > 0) {
+		_impl->swapChain->ResizeBuffers({res.width, res.height});
+	}
+}
 
-    if (_swapChain) {
-        _swapChain->ResizeBuffers(resolution);
-        ZHLN::Log("Vulkan Swapchain resized to {}x{}\n", resolution.width, resolution.height);
-    }
+// --- Resource Creation ---
+
+BufferHandle RenderContext::CreateVertexBuffer(const void* data, size_t size) {
+	LLGL::BufferDescriptor desc;
+	desc.size = size;
+	desc.bindFlags = LLGL::BindFlags::VertexBuffer;
+	auto* buf = _impl->system->CreateBuffer(desc, data);
+	_impl->buffers.push_back(buf);
+	return static_cast<BufferHandle>(reinterpret_cast<uint64_t>(buf));
+}
+
+BufferHandle RenderContext::CreateConstantBuffer(size_t size) {
+	LLGL::BufferDescriptor desc;
+	desc.size = size;
+	desc.bindFlags = LLGL::BindFlags::ConstantBuffer;
+	auto* buf = _impl->system->CreateBuffer(desc);
+	_impl->buffers.push_back(buf);
+	return static_cast<BufferHandle>(reinterpret_cast<uint64_t>(buf));
+}
+
+Material RenderContext::CreateMaterial(const PipelineDesc& desc) {
+	Material mat;
+
+	// Constant Buffer
+	mat.constantBuffer = CreateConstantBuffer(sizeof(FrameConstants));
+	auto* rawCbo = reinterpret_cast<LLGL::Buffer*>(mat.constantBuffer);
+
+	// Layout
+	LLGL::BindingDescriptor bind{"Constants", LLGL::ResourceType::Buffer, LLGL::BindFlags::ConstantBuffer, LLGL::StageFlags::VertexStage, 1};
+	LLGL::PipelineLayoutDescriptor layoutDesc;
+	layoutDesc.heapBindings = {bind};
+	layoutDesc.uniforms = { LLGL::UniformDescriptor{"model", LLGL::UniformType::Float4x4} };
+	auto* layout = _impl->system->CreatePipelineLayout(layoutDesc);
+	_impl->layouts.push_back(layout);
+
+	// Heap (ResourceGroup)
+	LLGL::ResourceViewDescriptor view{rawCbo};
+	LLGL::ResourceHeapDescriptor heapDesc{layout};
+	auto* heap = _impl->system->CreateResourceHeap(heapDesc, {&view, 1});
+	_impl->heaps.push_back(heap);
+	mat.resourceGroup = static_cast<ResourceGroupHandle>(reinterpret_cast<uint64_t>(heap));
+
+	// Shaders
+	LLGL::ShaderDescriptor vsDesc, fsDesc;
+	vsDesc.type = LLGL::ShaderType::Vertex; fsDesc.type = LLGL::ShaderType::Fragment;
+	vsDesc.entryPoint = "main"; fsDesc.entryPoint = "main";
+
+	if (desc.isMetal) {
+		vsDesc.sourceType = LLGL::ShaderSourceType::CodeString;
+		fsDesc.sourceType = LLGL::ShaderSourceType::CodeString;
+		vsDesc.entryPoint = "vsMain"; fsDesc.entryPoint = "fsMain";
+	} else {
+		vsDesc.sourceType = LLGL::ShaderSourceType::BinaryBuffer;
+		fsDesc.sourceType = LLGL::ShaderSourceType::BinaryBuffer;
+	}
+
+	vsDesc.source = reinterpret_cast<const char*>(desc.vertexShaderData);
+	vsDesc.sourceSize = desc.vertexShaderSize;
+	fsDesc.source = reinterpret_cast<const char*>(desc.fragShaderData);
+	fsDesc.sourceSize = desc.fragShaderSize;
+
+	vsDesc.vertex.inputAttribs = {
+		{"position", LLGL::Format::RGB32Float, 0, offsetof(Vertex, position), sizeof(Vertex)},
+		{"color", LLGL::Format::RGBA32Float, 1, offsetof(Vertex, color), sizeof(Vertex)}
+	};
+
+	auto* vs = _impl->system->CreateShader(vsDesc);
+	auto* fs = _impl->system->CreateShader(fsDesc);
+
+	if (!vs || !fs || !layout) {
+		ZHLN::Log("CreateMaterial failed during shader/layout creation: vs={}, fs={}, layout={}\n",
+			reinterpret_cast<std::uintptr_t>(vs), reinterpret_cast<std::uintptr_t>(fs), reinterpret_cast<std::uintptr_t>(layout));
+	}
+
+	// Pipeline
+	LLGL::GraphicsPipelineDescriptor psoDesc;
+	psoDesc.pipelineLayout = layout;
+	psoDesc.renderPass = _impl->swapChain->GetRenderPass();
+	psoDesc.vertexShader = vs;
+	psoDesc.fragmentShader = fs;
+	psoDesc.primitiveTopology = LLGL::PrimitiveTopology::TriangleList;
+	psoDesc.depth.testEnabled = true; psoDesc.depth.writeEnabled = true;
+	psoDesc.depth.compareOp = LLGL::CompareOp::Less;
+
+	auto* pso = _impl->system->CreatePipelineState(psoDesc);
+	if (!pso) {
+		ZHLN::Log("CreateMaterial failed during pipeline creation: pso={}\n",
+			reinterpret_cast<std::uintptr_t>(pso));
+	}
+	_impl->pipelines.push_back(pso);
+	mat.pipeline = static_cast<PipelineHandle>(reinterpret_cast<uint64_t>(pso));
+
+	_impl->system->Release(*vs);
+	_impl->system->Release(*fs);
+
+	return mat;
 }
 
 namespace Renderer {
+	void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
+		LLGL::ClearValue val;
+		val.color[0] = color.GetX(); val.color[1] = color.GetY(); val.color[2] = color.GetZ(); val.color[3] = color.GetW();
+		val.depth = depth;
+		ctx.GetImpl()->cmdBuffer->Clear(LLGL::ClearFlags::Color | LLGL::ClearFlags::Depth, val);
+	}
 
-void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
-	LLGL::ClearValue val;
-	using Ch = ColorComponent;
-	val.color[std::to_underlying(Ch::R)] = color.GetX();
-	val.color[std::to_underlying(Ch::G)] = color.GetY();
-	val.color[std::to_underlying(Ch::B)] = color.GetZ();
-	val.color[std::to_underlying(Ch::A)] = color.GetW();
-	val.depth = depth;
+	void UpdateBuffer(RenderContext& ctx, BufferHandle buffer, const void* data, size_t size) {
+		if (buffer == BufferHandle::Invalid) {
+			return;
+		}
+		auto* raw = reinterpret_cast<LLGL::Buffer*>(static_cast<uint64_t>(buffer));
+		ctx.GetImpl()->system->WriteBuffer(*raw, 0, data, size);
+	}
 
-	ctx.GetCommandBuffer()->Clear(LLGL::ClearFlags::Color | LLGL::ClearFlags::Depth, val);
+	void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const JPH::Mat44& transform) {
+		if (material.pipeline == PipelineHandle::Invalid || material.resourceGroup == ResourceGroupHandle::Invalid || mesh.vertexBuffer == BufferHandle::Invalid) {
+			return;
+		}
+		auto* cmd = ctx.GetImpl()->cmdBuffer;
+		cmd->SetPipelineState(*reinterpret_cast<LLGL::PipelineState*>(static_cast<uint64_t>(material.pipeline)));
+		cmd->SetResourceHeap(*reinterpret_cast<LLGL::ResourceHeap*>(static_cast<uint64_t>(material.resourceGroup)));
+		cmd->SetVertexBuffer(*reinterpret_cast<LLGL::Buffer*>(static_cast<uint64_t>(mesh.vertexBuffer)));
+		cmd->SetUniforms(0, &transform, sizeof(transform));
+		cmd->Draw(mesh.vertexCount, 0);
+	}
 }
 
-void UpdateBuffer(RenderContext& ctx, LLGL::Buffer* buffer, const void* data, size_t size) {
-	ctx.GetSystem()->WriteBuffer(*buffer, 0, data, size);
-}
-
-void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
-		  const JPH::Mat44& transform) {
-	auto* cmd = ctx.GetCommandBuffer();
-
-	// 1. Bind the pipeline state (Shaders, Blend, Depth, etc.)
-	cmd->SetPipelineState(*material.pipeline);
-
-	// 2. Bind the resource heap (Contains the Global View-Proj Constant Buffer)
-	cmd->SetResourceHeap(*material.resourceHeap);
-
-	// 3. Bind the vertex geometry
-	cmd->SetVertexBuffer(*mesh.vertexBuffer);
-
-	// 4. Update the "model" matrix via Push Constants (Vulkan) / Uniforms (GL)
-	// This replaces 'UpdateBuffer' and is legal to call inside a Render Pass.
-	// Index 0 corresponds to the UniformDescriptor{"model", ...} in your layout.
-	cmd->SetUniforms(0, &transform, sizeof(transform));
-
-	// 5. Draw the mesh
-	cmd->Draw(mesh.vertexCount, 0);
-}
-
-} // namespace Renderer
 } // namespace ZHLN

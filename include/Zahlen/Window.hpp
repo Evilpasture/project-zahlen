@@ -1,14 +1,15 @@
 #pragma once
+#include <Zahlen/Types.hpp>
 #include <Zahlen/detail/String.hpp>
-
-#include <LLGL/LLGL.h>
 #include <memory>
 
 namespace ZHLN {
 
+class InputContext;
+
 class Window {
   public:
-	Window(const String32& title, uint32_t width, uint32_t height);
+	Window(const String32& title, uint32_t width, uint32_t height, InputContext* input);
 	~Window();
 
 	Window(const Window&) = delete;
@@ -16,14 +17,18 @@ class Window {
 
 	bool IsRunning() const;
 	void ProcessEvents();
-	void Focus(); // Implemented in Window.mm
+	void Focus(); 
 
-	// Accessors for the RenderContext
-	[[nodiscard]] auto GetNative() const -> const std::shared_ptr<LLGL::Window>& { return _native; }
-	[[nodiscard]] auto GetSize() const -> LLGL::Extent2D { return _native->GetSize(); }
+	Extent2D GetSize() const;
+
+	struct Impl;
+	Impl* GetImpl() const { return _impl.get(); }
+
+	// Returns the underlying LLGL::Window* as a void* to keep headers clean
+    void* GetNativeHandle() const; 
 
   private:
-	std::shared_ptr<LLGL::Window> _native;
+	std::unique_ptr<Impl> _impl;
 };
 
 } // namespace ZHLN

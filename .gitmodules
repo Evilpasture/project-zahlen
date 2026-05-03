@@ -8,3 +8,6 @@
 	path = extern/LuaJIT
 	url = https://github.com/Evilpasture/LuaJIT.git
 	branch = v2.1
+[submodule "extern/VulkanMemoryAllocator"]
+	path = extern/VulkanMemoryAllocator
+	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git

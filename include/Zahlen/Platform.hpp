@@ -1,7 +1,8 @@
+// Abstracts OS specifics for you.
+
 #pragma once
 #include <Zahlen/detail/Platform.hpp>
 #include <LLGL/Window.h>
-#include <string_view>
 
 namespace ZHLN::Platform {
 

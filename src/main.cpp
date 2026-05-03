@@ -18,16 +18,12 @@ static void UpdatePlayerController(const InputContext& input, const Camera& cam,
 	JPH::Vec3 right = {-std::sin(yawRad), 0.0f, std::cos(yawRad)};
 
 	JPH::Vec3 move = JPH::Vec3::sZero();
-	if (input.IsKeyDown(LLGL::Key::W))
-		move += forward;
-	if (input.IsKeyDown(LLGL::Key::S))
-		move -= forward;
-	if (input.IsKeyDown(LLGL::Key::A))
-		move -= right;
-	if (input.IsKeyDown(LLGL::Key::D))
-		move += right;
+	if (input.IsKeyDown(KeyCode::W)) move += forward;
+	if (input.IsKeyDown(KeyCode::S)) move -= forward;
+	if (input.IsKeyDown(KeyCode::A)) move -= right;
+	if (input.IsKeyDown(KeyCode::D)) move += right;
 
-	float speed = input.IsKeyDown(LLGL::Key::LShift) ? 12.0f : 5.0f;
+	float speed = input.IsKeyDown(KeyCode::LShift) ? 12.0f : 5.0f;
 	Physics::SetCharacterVelocity(
 		ctx, player, (move.LengthSq() > 0.01f) ? move.Normalized() * speed : JPH::Vec3::sZero());
 }
@@ -76,19 +72,21 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 		if (!engine.IsRunning())
 			break;
 
-		auto res = rc.GetSwapChain()->GetResolution();
-		if (res.width == 0 || res.height == 0) {
-			Platform::Sleep(16);
-			continue;
-		}
-		if (input.NeedsResize()) {
-			rc.SetResolution(input.GetNewSize());
-			input.ClearResizeFlag();
-			continue;
-		}
+		 // Fix: Use the Window to get resolution, not the SwapChain (which is now hidden)
+        auto res = engine.GetWindow().GetSize();
+        if (res.width == 0 || res.height == 0) {
+            Platform::Sleep(16);
+            continue;
+        }
+
+        if (input.NeedsResize()) {
+            rc.SetResolution(input.GetNewSize());
+            input.ClearResizeFlag();
+            continue;
+        }
 
 		UpdatePlayerController(input, cam, pc, scene.playerHandle);
-		if (input.IsMouseButtonDown(LLGL::Key::RButton)) {
+		if (input.IsMouseButtonDown(KeyCode::RButton)) {
 			cam.yaw += input.GetMouse().deltaX * 0.2f;
 			cam.pitch = std::clamp(cam.pitch - input.GetMouse().deltaY * 0.2f, -40.0f, 40.0f);
 		}
@@ -114,7 +112,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 		JPH::Mat44 vp =
 			cam.GetProjectionMatrix((float)res.width / res.height) *
 			Math::CreateLookAt(cam.position, pPos + JPH::Vec3(0, 1, 0), JPH::Vec3::sAxisY());
-		Renderer::UpdateBuffer(rc, scene.material.constantBuffer.get(), vp);
+		Renderer::UpdateBuffer(rc, scene.material.constantBuffer, vp);
 
 		// 3. Render
 		engine.BeginFrame();

@@ -15,7 +15,6 @@ class Engine {
 
 	bool IsRunning() const;
 	void ProcessEvents();
-
 	void BeginFrame();
 	void EndFrame();
 
@@ -26,11 +25,10 @@ class Engine {
 	Camera& GetCamera() { return _mainCamera; }
 
   private:
-	// Order is critical: Window must exist for the RenderContext to link to it
+	std::unique_ptr<InputContext> _input;
 	std::unique_ptr<Window> _window;
 	std::unique_ptr<RenderContext> _renderContext;
 	std::unique_ptr<PhysicsContext> _physicsContext;
-	std::shared_ptr<InputContext> _input;
 	Camera _mainCamera;
 };
 
