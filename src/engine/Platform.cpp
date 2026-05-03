@@ -1,10 +1,12 @@
 #include <Zahlen/Platform.hpp>
+#include <Zahlen/Window.hpp>
 #include <thread>
 #include <chrono>
 
 #ifdef _WIN32
 // Use the "plumbing" to get access to Win32 functions safely
 #include <Zahlen/detail/Platform.hpp>
+#include <LLGL/Window.h>
 #pragma comment(lib, "Shcore.lib")
 #endif
 
@@ -17,11 +19,12 @@ void Init() {
 #endif
 }
 
-void FocusWindow(LLGL::Window& window) {
+void FocusWindow(Window& window) {
 #ifdef _WIN32
+    auto* native = static_cast<LLGL::Window*>(window.GetNativeHandle());
     LLGL::WindowDescriptor desc;
-    window.GetNativeHandle(&desc, sizeof(desc));
-    HWND hwnd = (HWND)desc.windowContext; 
+    native->GetNativeHandle(&desc, sizeof(desc));
+    HWND hwnd = (HWND)desc.windowContext;
     if (hwnd) {
         SetForegroundWindow(hwnd);
         SetFocus(hwnd);
@@ -29,10 +32,11 @@ void FocusWindow(LLGL::Window& window) {
 #endif
 }
 
-float GetDisplayScale(LLGL::Window& window) {
+float GetDisplayScale(Window& window) {
 #ifdef _WIN32
+    auto* native = static_cast<LLGL::Window*>(window.GetNativeHandle());
     LLGL::WindowDescriptor desc;
-    window.GetNativeHandle(&desc, sizeof(desc));
+    native->GetNativeHandle(&desc, sizeof(desc));
     HWND hwnd = (HWND)desc.windowContext;
     return static_cast<float>(GetDpiForWindow(hwnd)) / 96.0f;
 #else

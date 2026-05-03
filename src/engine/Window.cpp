@@ -59,7 +59,7 @@ Extent2D Window::GetSize() const {
 }
 
 void Window::Focus() {
-    Platform::FocusWindow(*_impl->native);
+    Platform::FocusWindow(*this);
 }
 
 void* Window::GetNativeHandle() const {

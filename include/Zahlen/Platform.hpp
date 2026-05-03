@@ -1,8 +1,12 @@
 // Abstracts OS specifics for you.
 
 #pragma once
+#include <cstdint>
 #include <Zahlen/detail/Platform.hpp>
-#include <LLGL/Window.h>
+
+namespace ZHLN {
+class Window;
+}
 
 namespace ZHLN::Platform {
 
@@ -14,12 +18,12 @@ void Init();
 /**
  * @brief Brings the specified native window to the foreground.
  */
-void FocusWindow(LLGL::Window& window);
+void FocusWindow(Window& window);
 
 /**
  * @brief Returns the physical scale factor (1.0 = 100%, 2.0 = 200%).
  */
-float GetDisplayScale(LLGL::Window& window);
+float GetDisplayScale(Window& window);
 
 /**
  * @brief High-precision sleep (wraps std::this_thread or OS-specific).
