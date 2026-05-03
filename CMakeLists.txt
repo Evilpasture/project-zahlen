@@ -50,6 +50,10 @@ set(DOUBLE_PRECISION ON CACHE BOOL "" FORCE)
 set(USE_STD_INCLUDES ON CACHE BOOL "" FORCE) 
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/JoltPhysics/Build SYSTEM)
 
+
+add_subdirectory(${CMAKE_SOURCE_DIR}/extern/VulkanMemoryAllocator SYSTEM)
+add_subdirectory(${CMAKE_SOURCE_DIR}/src/render)
+
 # Collect source files
 set(PROJECT_SOURCES
     src/main.cpp
@@ -80,6 +84,7 @@ target_compile_definitions(zahlen PRIVATE
 # 5. Correct Static Linking order
 # REMOVED: vulkan-1.lib (LLGL already brings it in with the full path)
 target_link_libraries(zahlen PRIVATE 
+    zahlen_render
     LLGL_Vulkan
     LLGL_OpenGL
     LLGL_Null
