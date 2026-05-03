@@ -99,7 +99,7 @@ int main() {
 	ZHLN_InstanceDesc inst_desc = ZHLN_DEFAULT_INSTANCE_DESC;
 	const char* inst_exts[] = {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
 							   VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
-							   VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME, 
+							   VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
 							   VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME};
 	inst_desc.extensions = inst_exts;
 	inst_desc.extension_count = 5;
@@ -119,13 +119,13 @@ int main() {
 
 	// MANDATORY: Device Extensions for Swapchain
 	const char* dev_exts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-							  VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME};
+							  VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
+							  VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME};
 
 	VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swap_maint = {
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR,
 		.pNext = nullptr,
-		.swapchainMaintenance1 = VK_TRUE
-	};
+		.swapchainMaintenance1 = VK_TRUE};
 
 	feat13.pNext = &swap_maint;
 
@@ -135,7 +135,7 @@ int main() {
 									  .score_userdata = nullptr};
 	ZHLN_DeviceDesc dev_desc = {.physical = nullptr,
 								.extensions = dev_exts,
-								.extension_count = 2,
+								.extension_count = 3,
 								.features = &feat2,
 								.enable_validation = true};
 
