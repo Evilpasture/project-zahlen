@@ -8,6 +8,7 @@
 
 #pragma once
 #include <vulkan/vulkan.h>
+#include <stdbool.h> // We use booleans as keyword but good to include nevertheless
 
 /* --- INSTANCE MANAGEMENT --- */
 
@@ -301,6 +302,7 @@ typedef struct {
     VkImageLayout   dst_layout;
     VkPipelineStageFlags2 src_stage;
     VkPipelineStageFlags2 dst_stage;
+    VkImageAspectFlags aspect; // e.g. VK_IMAGE_ASPECT_COLOR_BIT
 } ZHLN_ImageBarrierDesc;
 
 void ZHLN_TransitionImage(VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc* desc);
@@ -320,10 +322,48 @@ void ZHLN_EndCommandBuffer(VkCommandBuffer cmd);
 void ZHLN_PushConstants(VkCommandBuffer cmd, VkPipelineLayout layout,
                         VkShaderStageFlags stages, const void* data, uint32_t size);
 
-// Typed convenience macro so C++ doesn't spell out sizeof every time
+// Typed convenience macro so C doesn't spell out sizeof every time
+#ifndef __cplusplus
 #define ZHLN_Push(cmd, layout, stages, value) \
     ZHLN_PushConstants(cmd, layout, stages, &(value), sizeof(value))
+#endif
 
 /* --- ERROR HELPERS --- */
 
 const char* ZHLN_VkResultString(VkResult result);
+
+/* --- EXECUTION HELPERS --- */
+
+typedef struct {
+    VkBuffer src;
+    VkBuffer dst;
+    VkDeviceSize size;
+    VkDeviceSize src_offset;
+    VkDeviceSize dst_offset;
+} ZHLN_BufferCopyDesc;
+
+/**
+ * @brief Executes a buffer-to-buffer copy.
+ */
+void ZHLN_CmdCopyBuffer(VkCommandBuffer cmd, const ZHLN_BufferCopyDesc* desc);
+
+/**
+ * @brief Injects a pipeline barrier for an image (Sync 2).
+ */
+void ZHLN_CmdImageBarrier(VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc* desc);
+
+typedef struct {
+    VkBuffer        buffer;
+    VkImage         image;
+    VkImageLayout   layout;
+    uint32_t        width;
+    uint32_t        height;
+    VkDeviceSize    buffer_offset;      // 0 for tightly packed
+    uint32_t        mip_level;          // 0 for base
+    uint32_t        base_array_layer;   // 0 for non-array
+} ZHLN_BufferImageCopyDesc;
+
+/**
+ * @brief Copies buffer data into an image (e.g. texture upload).
+ */
+void ZHLN_CmdCopyBufferToImage(VkCommandBuffer cmd, const ZHLN_BufferImageCopyDesc* desc);
