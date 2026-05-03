@@ -2,7 +2,7 @@
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h>
+#include <Zahlen/Platform.hpp>
 #endif
 
 namespace ZHLN {
@@ -29,18 +29,7 @@ void Window::ProcessEvents() {
 }
 
 void Window::Focus() {
-#ifdef _WIN32
-    // Fetch the native HWND from LLGL
-    LLGL::WindowDescriptor desc;
-    _native->GetNativeHandle(&desc, sizeof(desc));
-    HWND hwnd = (HWND)desc.windowContext; 
-    
-    if (hwnd) {
-        // Bring to front and grab input focus
-        SetForegroundWindow(hwnd);
-        SetFocus(hwnd);
-    }
-#endif
+    Platform::FocusWindow(*_native);
 }
 
 } // namespace ZHLN

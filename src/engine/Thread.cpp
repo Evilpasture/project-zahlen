@@ -2,18 +2,8 @@
 #include <cstdlib>
 #include <cstring>
 
-#if defined(_WIN32)
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#define NOUSER
-#define NOWINMESSAGES
-#define NOUSER
-#include <windows.h>
-#undef Yield
-#else
-#include <sys/mman.h>
-#include <unistd.h>
-#endif
+#include <Zahlen/detail/Platform.hpp>
+
 
 // Defined in mag_asm.S
 extern "C" void ZHLN_Switch(void** old_sp, void* new_sp);
