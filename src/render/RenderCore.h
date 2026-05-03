@@ -371,6 +371,12 @@ typedef struct {
  */
 void ZHLN_CmdCopyBufferToImage(VkCommandBuffer cmd, const ZHLN_BufferImageCopyDesc* desc);
 
+/* --- SEMAPHORE HELPERS --- */
+
+[[nodiscard]]
+VkSemaphore ZHLN_CreateSemaphore(VkDevice device);
+void ZHLN_DestroySemaphore(VkDevice device, VkSemaphore semaphore);
+
 #ifdef __cplusplus
 }
 #endif

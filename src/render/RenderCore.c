@@ -1009,3 +1009,16 @@ void ZHLN_CmdCopyBufferToImage(VkCommandBuffer cmd, const ZHLN_BufferImageCopyDe
 
 	vkCmdCopyBufferToImage2(cmd, &copy_info);
 }
+
+VkSemaphore ZHLN_CreateSemaphore(VkDevice device) {
+    VkSemaphoreCreateInfo info = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+    VkSemaphore semaphore = VK_NULL_HANDLE;
+    vkCreateSemaphore(device, &info, nullptr, &semaphore);
+    return semaphore;
+}
+
+void ZHLN_DestroySemaphore(VkDevice device, VkSemaphore semaphore) {
+    if (semaphore != VK_NULL_HANDLE) {
+        vkDestroySemaphore(device, semaphore, nullptr);
+    }
+}

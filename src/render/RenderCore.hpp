@@ -104,6 +104,7 @@ template <typename T, auto DeleterFn> class DeviceHandle {
 using ShaderModule = DeviceHandle<VkShaderModule, ZHLN_DestroyShaderModule>;
 using PipelineLayout = DeviceHandle<VkPipelineLayout, ZHLN_DestroyPipelineLayout>;
 using Pipeline = DeviceHandle<VkPipeline, ZHLN_DestroyPipeline>;
+using Semaphore = DeviceHandle<VkSemaphore, ZHLN_DestroySemaphore>;
 
 // ============================================================================
 // Context RAII
@@ -599,6 +600,33 @@ class Surface {
   private:
 	VkInstance _instance = VK_NULL_HANDLE;
 	VkSurfaceKHR _handle = VK_NULL_HANDLE;
+};
+
+// ============================================================================
+// Semaphore Helpers
+// ============================================================================
+
+// Add a helper for the "One Semaphore Per Swapchain Image" pattern
+class SemaphorePool {
+public:
+    SemaphorePool() = default;
+    
+    void Rebuild(VkDevice device, uint32_t count) {
+        _semaphores.clear(); // RAII handles destroy themselves
+        _semaphores.reserve(count);
+        for (uint32_t i = 0; i < count; ++i) {
+            _semaphores.emplace_back(device, ZHLN_CreateSemaphore(device));
+        }
+    }
+
+    VkSemaphore operator[](uint32_t index) const {
+        return _semaphores[index % _semaphores.size()].Get();
+    }
+
+    size_t Size() const { return _semaphores.size(); }
+
+private:
+    std::vector<Semaphore> _semaphores;
 };
 
 // ============================================================================
