@@ -42,7 +42,7 @@ struct Scene {
 		Physics::CreateStaticFloor(pc, 100.0f);
 		for (int i = 0; i < 25; ++i) {
 			Physics::CreateDynamicBox(
-				pc, {(float)(i % 5) * 4.0f - 10.0f, 5.0f, (float)(i / 5) * 4.0f - 10.0f},
+				pc, {(float)(i % 5) * 4.0f - 10.0f, 5.0f, (float)(i / 5.0f) * 4.0f - 10.0f},
 				{0.5f, 0.5f, 0.5f});
 		}
 		playerHandle = {.index = 500, .generation = 1};
