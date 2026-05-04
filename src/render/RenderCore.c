@@ -469,9 +469,7 @@ bool ZHLN_CreateCommandPool(VkDevice device, uint32_t queue_family, ZHLN_Command
 	VkCommandPoolCreateInfo info = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
 		.queueFamilyIndex = queue_family,
-		// No RESET_COMMAND_BUFFER_BIT: we reset the whole pool per-frame,
-		// which is cheaper than resetting individual buffers
-		.flags = 0,
+		.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
 	};
 
 	if (vkCreateCommandPool(device, &info, nullptr, &out_pool->pool) != VK_SUCCESS)
@@ -674,9 +672,12 @@ VkPipeline ZHLN_CreateGraphicsPipeline(VkDevice device, const ZHLN_GraphicsPipel
 	ZHLN_PopulateShaderStageInfos(desc->stages, shader_stages);
 
 	// --- Vertex Input ---
-	// No vertex buffers: position is generated from gl_VertexIndex in the shader
 	VkPipelineVertexInputStateCreateInfo vertex_input = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+		.vertexBindingDescriptionCount = desc->vertex_binding_count,
+		.pVertexBindingDescriptions = desc->vertex_bindings,
+		.vertexAttributeDescriptionCount = desc->vertex_attribute_count,
+		.pVertexAttributeDescriptions = desc->vertex_attributes,
 	};
 
 	// --- Input Assembly ---
@@ -1011,14 +1012,14 @@ void ZHLN_CmdCopyBufferToImage(VkCommandBuffer cmd, const ZHLN_BufferImageCopyDe
 }
 
 VkSemaphore ZHLN_CreateSemaphore(VkDevice device) {
-    VkSemaphoreCreateInfo info = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
-    VkSemaphore semaphore = VK_NULL_HANDLE;
-    vkCreateSemaphore(device, &info, nullptr, &semaphore);
-    return semaphore;
+	VkSemaphoreCreateInfo info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+	VkSemaphore semaphore = VK_NULL_HANDLE;
+	vkCreateSemaphore(device, &info, nullptr, &semaphore);
+	return semaphore;
 }
 
 void ZHLN_DestroySemaphore(VkDevice device, VkSemaphore semaphore) {
-    if (semaphore != VK_NULL_HANDLE) {
-        vkDestroySemaphore(device, semaphore, nullptr);
-    }
+	if (semaphore != VK_NULL_HANDLE) {
+		vkDestroySemaphore(device, semaphore, nullptr);
+	}
 }

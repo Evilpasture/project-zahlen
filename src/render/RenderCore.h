@@ -272,6 +272,12 @@ void ZHLN_DestroyPipelineLayout(VkDevice device, VkPipelineLayout layout);
 typedef struct {
     ZHLN_ShaderStages*      stages;
     VkPipelineLayout        layout;
+
+	uint32_t                vertex_binding_count;
+    const VkVertexInputBindingDescription* vertex_bindings;
+    uint32_t                vertex_attribute_count;
+    const VkVertexInputAttributeDescription* vertex_attributes;
+
     VkFormat                color_format;
     VkFormat                depth_format;   // VK_FORMAT_UNDEFINED = no depth
     VkPrimitiveTopology     topology;       // default: VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST

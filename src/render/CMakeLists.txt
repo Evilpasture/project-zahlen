@@ -85,6 +85,30 @@ target_link_libraries(zahlen_triangle PRIVATE zahlen_render Vulkan::Vulkan)
 target_include_directories(zahlen_triangle PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(zahlen_triangle PRIVATE cxx_std_23)
 
+add_custom_command(
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/cube.vert.spv"
+    COMMAND ${GLSL_COMPILER} -V ${CMAKE_CURRENT_SOURCE_DIR}/cube_app/cube.vert -o "${CMAKE_CURRENT_BINARY_DIR}/cube.vert.spv"
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/cube_app/cube.vert
+)
+
+add_custom_command(
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/cube.frag.spv"
+    COMMAND ${GLSL_COMPILER} -V ${CMAKE_CURRENT_SOURCE_DIR}/cube_app/cube.frag -o "${CMAKE_CURRENT_BINARY_DIR}/cube.frag.spv"
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/cube_app/cube.frag
+)
+
+add_executable(zahlen_cube
+    cube_app/main.cpp
+    "${CMAKE_CURRENT_BINARY_DIR}/cube.vert.spv"
+    "${CMAKE_CURRENT_BINARY_DIR}/cube.frag.spv"
+)
+
+target_link_libraries(zahlen_cube PRIVATE zahlen_render Vulkan::Vulkan)
+target_include_directories(zahlen_cube PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(zahlen_cube PRIVATE cxx_std_23)
+
+target_link_libraries(zahlen_cube PRIVATE user32.lib kernel32.lib)
+
 if(MSVC) # Required for Win32 subsystem API links
     target_link_libraries(zahlen_triangle PRIVATE user32.lib kernel32.lib)
 endif()

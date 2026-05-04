@@ -508,6 +508,10 @@ inline void TransitionLayout(VkCommandBuffer cmd, VkImage image, VkImageLayout o
 	} else if (new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
 		barrier.dst_access = VK_ACCESS_2_SHADER_READ_BIT;
 		barrier.dst_stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+	} else if (new_layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL) {
+		barrier.dst_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+		barrier.dst_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+			VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
 	}
 	ZHLN_CmdImageBarrier(cmd, &barrier);
 }
