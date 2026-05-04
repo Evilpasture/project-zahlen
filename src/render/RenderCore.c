@@ -456,7 +456,7 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* desc) {
 	return swapchain;
 }
 
-void ZHLN_DestroySwapchain(VkDevice device, ZHLN_Swapchain* swapchain) {
+void ZHLN_DestroySwapchain(const VkDevice device, ZHLN_Swapchain* const swapchain) {
 	for (uint32_t i = 0; i < swapchain->image_count; ++i) {
 		vkDestroyImageView(device, swapchain->views[i], nullptr);
 	}
@@ -465,13 +465,13 @@ void ZHLN_DestroySwapchain(VkDevice device, ZHLN_Swapchain* swapchain) {
 }
 
 [[nodiscard]]
-bool ZHLN_CreateFrameSync(const ZHLN_FrameSyncDesc* desc, ZHLN_FrameSync* out_sync) {
-	VkSemaphoreCreateInfo sem_info = {
+bool ZHLN_CreateFrameSync(const ZHLN_FrameSyncDesc* const desc, ZHLN_FrameSync* const out_sync) {
+	constexpr VkSemaphoreCreateInfo sem_info = {
 		.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
 	};
 
 	// Fence starts signaled so the first frame doesn't wait forever
-	VkFenceCreateInfo fence_info = {
+	constexpr VkFenceCreateInfo fence_info = {
 		.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
 		.flags = VK_FENCE_CREATE_SIGNALED_BIT,
 	};
@@ -494,7 +494,8 @@ bool ZHLN_CreateFrameSync(const ZHLN_FrameSyncDesc* desc, ZHLN_FrameSync* out_sy
 	return true;
 }
 
-void ZHLN_DestroyFrameSync(VkDevice device, ZHLN_FrameSync* sync, uint32_t frame_count) {
+void ZHLN_DestroyFrameSync(const VkDevice device, ZHLN_FrameSync* const sync,
+						   const uint32_t frame_count) {
 	for (uint32_t i = 0; i < frame_count; ++i) {
 		if (sync[i].image_available != VK_NULL_HANDLE) {
 			vkDestroySemaphore(device, sync[i].image_available, nullptr);
@@ -509,7 +510,8 @@ void ZHLN_DestroyFrameSync(VkDevice device, ZHLN_FrameSync* sync, uint32_t frame
 	}
 }
 
-bool ZHLN_CreateCommandPool(VkDevice device, uint32_t queue_family, ZHLN_CommandPool* out_pool) {
+bool ZHLN_CreateCommandPool(const VkDevice device, const uint32_t queue_family,
+							ZHLN_CommandPool* const restrict out_pool) {
 	VkCommandPoolCreateInfo info = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
 		.queueFamilyIndex = queue_family,
@@ -524,7 +526,8 @@ bool ZHLN_CreateCommandPool(VkDevice device, uint32_t queue_family, ZHLN_Command
 	return true;
 }
 
-bool ZHLN_AllocateCommandBuffers(VkDevice device, ZHLN_CommandPool* pool, uint32_t count) {
+bool ZHLN_AllocateCommandBuffers(const VkDevice device, ZHLN_CommandPool* const restrict pool,
+								 const uint32_t count) {
 	if (count > 8) {
 		return false;
 	}
@@ -544,11 +547,12 @@ bool ZHLN_AllocateCommandBuffers(VkDevice device, ZHLN_CommandPool* pool, uint32
 	return true;
 }
 
-void ZHLN_ResetCommandPool(VkDevice device, ZHLN_CommandPool* pool) {
+void ZHLN_ResetCommandPool(const VkDevice device,
+						   const ZHLN_CommandPool* const ZHLN_RESTRICT pool) {
 	vkResetCommandPool(device, pool->pool, 0);
 }
 
-void ZHLN_DestroyCommandPool(VkDevice device, ZHLN_CommandPool* pool) {
+void ZHLN_DestroyCommandPool(const VkDevice device, ZHLN_CommandPool* const ZHLN_RESTRICT pool) {
 	// Implicitly frees all command buffers allocated from it
 	if (pool->pool != VK_NULL_HANDLE) {
 		vkDestroyCommandPool(device, pool->pool, nullptr);
@@ -556,15 +560,16 @@ void ZHLN_DestroyCommandPool(VkDevice device, ZHLN_CommandPool* pool) {
 	*pool = (ZHLN_CommandPool){};
 }
 
-void ZHLN_WaitAndResetFence(VkDevice device, VkFence fence) {
+void ZHLN_WaitAndResetFence(const VkDevice device, const VkFence fence) {
 	vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
 	vkResetFences(device, 1, &fence);
 }
 
-ZHLN_FrameResult ZHLN_AcquireImage(VkDevice device, const ZHLN_AcquireDesc* desc,
-								   uint32_t* out_image_index) {
-	VkResult result = vkAcquireNextImageKHR(device, desc->swapchain, desc->timeout_ns,
-											desc->image_available, VK_NULL_HANDLE, out_image_index);
+ZHLN_FrameResult ZHLN_AcquireImage(const VkDevice device, const ZHLN_AcquireDesc* const desc,
+								   uint32_t* const out_image_index) {
+	const VkResult result =
+		vkAcquireNextImageKHR(device, desc->swapchain, desc->timeout_ns, desc->image_available,
+							  VK_NULL_HANDLE, out_image_index);
 	switch (result) {
 		case VK_SUCCESS:
 			return ZHLN_FrameResult_Ok;
@@ -577,7 +582,8 @@ ZHLN_FrameResult ZHLN_AcquireImage(VkDevice device, const ZHLN_AcquireDesc* desc
 	}
 }
 
-void ZHLN_SubmitFrame(VkQueue graphics_queue, const ZHLN_FrameSync* sync, VkCommandBuffer cmd) {
+void ZHLN_SubmitFrame(const VkQueue graphics_queue, const ZHLN_FrameSync* const sync,
+					  const VkCommandBuffer cmd) {
 	VkCommandBufferSubmitInfo cmd_info = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
 		.commandBuffer = cmd,

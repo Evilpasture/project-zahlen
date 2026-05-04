@@ -7,8 +7,10 @@
  */
 
 #pragma once
-#include <vulkan/vulkan.h>
 #include <stdbool.h> // We use booleans as keyword but good to include nevertheless
+#include <vulkan/vulkan.h>
+
+#define ZHLN_RESTRICT __restrict
 
 #ifdef __cplusplus
 extern "C" {
@@ -149,7 +151,7 @@ ZHLN_SwapchainSupport ZHLN_QuerySwapchainSupport(const ZHLN_SwapchainSupportDesc
 [[nodiscard]]
 ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* desc);
 
-void ZHLN_DestroySwapchain(VkDevice device, ZHLN_Swapchain* swapchain);
+void ZHLN_DestroySwapchain(const VkDevice device, ZHLN_Swapchain* const swapchain);
 
 /* --- SYNC PRIMITIVES --- */
 
@@ -166,9 +168,10 @@ typedef struct {
 
 // out_sync must point to an array of at least desc->frame_count
 [[nodiscard]]
-bool ZHLN_CreateFrameSync(const ZHLN_FrameSyncDesc* desc, ZHLN_FrameSync* out_sync);
+bool ZHLN_CreateFrameSync(const ZHLN_FrameSyncDesc* const desc, ZHLN_FrameSync* const out_sync);
 
-void ZHLN_DestroyFrameSync(VkDevice device, ZHLN_FrameSync* sync, uint32_t frame_count);
+void ZHLN_DestroyFrameSync(const VkDevice device, ZHLN_FrameSync* const sync,
+						   const uint32_t frame_count);
 
 /* --- COMMAND POOL AND BUFFERS --- */
 
@@ -179,12 +182,14 @@ typedef struct {
 } ZHLN_CommandPool;
 
 [[nodiscard]]
-bool ZHLN_CreateCommandPool(VkDevice device, uint32_t queue_family, ZHLN_CommandPool* out_pool);
+bool ZHLN_CreateCommandPool(const VkDevice device, const uint32_t queue_family,
+							ZHLN_CommandPool* const ZHLN_RESTRICT out_pool);
 
 [[nodiscard]]
-bool ZHLN_AllocateCommandBuffers(VkDevice device, ZHLN_CommandPool* pool, uint32_t count);
+bool ZHLN_AllocateCommandBuffers(const VkDevice device, ZHLN_CommandPool* const ZHLN_RESTRICT pool,
+								 const uint32_t count);
 
-void ZHLN_ResetCommandPool(VkDevice device, ZHLN_CommandPool* pool);
+void ZHLN_ResetCommandPool(const VkDevice device, const ZHLN_CommandPool* const ZHLN_RESTRICT pool);
 void ZHLN_DestroyCommandPool(VkDevice device, ZHLN_CommandPool* pool);
 
 /* --- FRAME LOOP STRUCTURE --- */
@@ -256,10 +261,10 @@ void ZHLN_PopulateShaderStageInfos(const ZHLN_ShaderStages* stages,
 /* --- PIPELINE LAYOUT --- */
 
 typedef struct {
-    VkDescriptorSetLayout*  set_layouts;
-    uint32_t                set_layout_count;
-    VkPushConstantRange*    push_constants;
-    uint32_t                push_constant_count;
+	VkDescriptorSetLayout* set_layouts;
+	uint32_t set_layout_count;
+	VkPushConstantRange* push_constants;
+	uint32_t push_constant_count;
 } ZHLN_PipelineLayoutDesc;
 
 [[nodiscard]]
@@ -270,23 +275,23 @@ void ZHLN_DestroyPipelineLayout(VkDevice device, VkPipelineLayout layout);
 /* --- GRAPHICS PIPELINE --- */
 
 typedef struct {
-    ZHLN_ShaderStages*      stages;
-    VkPipelineLayout        layout;
+	ZHLN_ShaderStages* stages;
+	VkPipelineLayout layout;
 
-	uint32_t                vertex_binding_count;
-    const VkVertexInputBindingDescription* vertex_bindings;
-    uint32_t                vertex_attribute_count;
-    const VkVertexInputAttributeDescription* vertex_attributes;
+	uint32_t vertex_binding_count;
+	const VkVertexInputBindingDescription* vertex_bindings;
+	uint32_t vertex_attribute_count;
+	const VkVertexInputAttributeDescription* vertex_attributes;
 
-    VkFormat                color_format;
-    VkFormat                depth_format;   // VK_FORMAT_UNDEFINED = no depth
-    VkPrimitiveTopology     topology;       // default: VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
-    VkPolygonMode           polygon_mode;   // default: VK_POLYGON_MODE_FILL
-    VkCullModeFlags         cull_mode;      // default: VK_CULL_MODE_BACK_BIT
-    VkFrontFace             front_face;     // default: VK_FRONT_FACE_COUNTER_CLOCKWISE
-    bool                    depth_test;
-    bool                    depth_write;
-    bool                    blend_enable;   // basic src_alpha / one_minus_src_alpha if true
+	VkFormat color_format;
+	VkFormat depth_format;		  // VK_FORMAT_UNDEFINED = no depth
+	VkPrimitiveTopology topology; // default: VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+	VkPolygonMode polygon_mode;	  // default: VK_POLYGON_MODE_FILL
+	VkCullModeFlags cull_mode;	  // default: VK_CULL_MODE_BACK_BIT
+	VkFrontFace front_face;		  // default: VK_FRONT_FACE_COUNTER_CLOCKWISE
+	bool depth_test;
+	bool depth_write;
+	bool blend_enable; // basic src_alpha / one_minus_src_alpha if true
 } ZHLN_GraphicsPipelineDesc;
 
 [[nodiscard]]
@@ -297,22 +302,22 @@ void ZHLN_DestroyPipeline(VkDevice device, VkPipeline pipeline);
 /* --- RENDERING --- */
 
 typedef struct {
-    VkImageView     target_view;
-    VkImageView     depth_view;     // VK_NULL_HANDLE = no depth
-    VkExtent2D      extent;
-    float           clear_color[4];
-    float           clear_depth;    // default 1.0f
+	VkImageView target_view;
+	VkImageView depth_view; // VK_NULL_HANDLE = no depth
+	VkExtent2D extent;
+	float clear_color[4];
+	float clear_depth; // default 1.0f
 } ZHLN_RenderPassDesc;
 
 typedef struct {
-    VkImage         image;
-    VkAccessFlags2  src_access;
-    VkAccessFlags2  dst_access;
-    VkImageLayout   src_layout;
-    VkImageLayout   dst_layout;
-    VkPipelineStageFlags2 src_stage;
-    VkPipelineStageFlags2 dst_stage;
-    VkImageAspectFlags aspect; // e.g. VK_IMAGE_ASPECT_COLOR_BIT
+	VkImage image;
+	VkAccessFlags2 src_access;
+	VkAccessFlags2 dst_access;
+	VkImageLayout src_layout;
+	VkImageLayout dst_layout;
+	VkPipelineStageFlags2 src_stage;
+	VkPipelineStageFlags2 dst_stage;
+	VkImageAspectFlags aspect; // e.g. VK_IMAGE_ASPECT_COLOR_BIT
 } ZHLN_ImageBarrierDesc;
 
 void ZHLN_BeginRendering(VkCommandBuffer cmd, const ZHLN_RenderPassDesc* desc);
@@ -328,13 +333,13 @@ void ZHLN_EndCommandBuffer(VkCommandBuffer cmd);
 
 /* --- PUSH CONSTANT HELPERS --- */
 
-void ZHLN_PushConstants(VkCommandBuffer cmd, VkPipelineLayout layout,
-                        VkShaderStageFlags stages, const void* data, uint32_t size);
+void ZHLN_PushConstants(VkCommandBuffer cmd, VkPipelineLayout layout, VkShaderStageFlags stages,
+						const void* data, uint32_t size);
 
 // Typed convenience macro so C doesn't spell out sizeof every time
 #ifndef __cplusplus
-#define ZHLN_Push(cmd, layout, stages, value) \
-    ZHLN_PushConstants(cmd, layout, stages, &(value), sizeof(value))
+#define ZHLN_Push(cmd, layout, stages, value)                                                      \
+	ZHLN_PushConstants(cmd, layout, stages, &(value), sizeof(value))
 #endif
 
 /* --- ERROR HELPERS --- */
@@ -344,11 +349,11 @@ const char* ZHLN_VkResultString(VkResult result);
 /* --- EXECUTION HELPERS --- */
 
 typedef struct {
-    VkBuffer src;
-    VkBuffer dst;
-    VkDeviceSize size;
-    VkDeviceSize src_offset;
-    VkDeviceSize dst_offset;
+	VkBuffer src;
+	VkBuffer dst;
+	VkDeviceSize size;
+	VkDeviceSize src_offset;
+	VkDeviceSize dst_offset;
 } ZHLN_BufferCopyDesc;
 
 /**
@@ -362,14 +367,14 @@ void ZHLN_CmdCopyBuffer(VkCommandBuffer cmd, const ZHLN_BufferCopyDesc* desc);
 void ZHLN_CmdImageBarrier(VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc* desc);
 
 typedef struct {
-    VkBuffer        buffer;
-    VkImage         image;
-    VkImageLayout   layout;
-    uint32_t        width;
-    uint32_t        height;
-    VkDeviceSize    buffer_offset;      // 0 for tightly packed
-    uint32_t        mip_level;          // 0 for base
-    uint32_t        base_array_layer;   // 0 for non-array
+	VkBuffer buffer;
+	VkImage image;
+	VkImageLayout layout;
+	uint32_t width;
+	uint32_t height;
+	VkDeviceSize buffer_offset; // 0 for tightly packed
+	uint32_t mip_level;			// 0 for base
+	uint32_t base_array_layer;	// 0 for non-array
 } ZHLN_BufferImageCopyDesc;
 
 /**
