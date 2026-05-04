@@ -21,6 +21,7 @@ struct NativeMaterial {
 };
 
 struct RenderContext::Impl {
+	Window& window;
 	Vk::Context ctx;
 	Vk::Allocator allocator;
 	Vk::Surface surface;
@@ -39,10 +40,12 @@ struct RenderContext::Impl {
 	// Resource Storage (Simplistic deletion tracking for now)
 	std::vector<std::unique_ptr<NativeMesh>> meshes;
 	std::vector<std::unique_ptr<NativeMaterial>> materials;
+
+	Impl(Window& win) : window(win) {}
 };
 
 RenderContext::RenderContext(Window& window, const String32& preferredAPI)
-	: _impl(std::make_unique<Impl>()) {
+	: _impl(std::make_unique<Impl>(window)) {
 	// 1. Get extensions required by GLFW
 	uint32_t glfwExtensionCount = 0;
 	const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
@@ -218,7 +221,7 @@ void RenderContext::BeginFrame() {
     
     // 1. Get the actual window size from the OS/GLFW
     int w, h;
-    GLFWwindow* glfwWin = static_cast<GLFWwindow*>(window.GetNativeHandle());
+    GLFWwindow* glfwWin = static_cast<GLFWwindow*>(_impl->window.GetNativeHandle());
     glfwGetFramebufferSize(glfwWin, &w, &h);
 
     ZHLN_Device raw_dev = {_impl->ctx.Device(), _impl->ctx.GraphicsQueue(), _impl->ctx.PresentQueue()};

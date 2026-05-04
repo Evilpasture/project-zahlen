@@ -1,6 +1,5 @@
 #include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Resources.hpp>
-#include <LLGL/LLGL.h>
 #include <Jolt/Core/Core.h> // For JPH::Array
 #include <cstring>
 
@@ -39,14 +38,18 @@ Mesh CreateBox(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& co
 Material CreateBasicMaterial(RenderContext& ctx) {
 	PipelineDesc desc;
 
+    // Check for Metal (macOS) vs Vulkan (Windows/Linux)
 	const char* rendererName = ctx.GetRendererName();
-	bool isMetalRenderer = (rendererName && std::strcmp(rendererName, "Metal") == 0);
+	bool isMetalRenderer = (rendererName && std::strstr(rendererName, "Metal") != nullptr);
 	desc.isMetal = isMetalRenderer;
 
 	if (desc.isMetal) {
 		desc.vertexShaderData = ZHLN_Resource_BasicMetal;
+        desc.vertexShaderSize = ZHLN_Resource_BasicMetal_Len;
 		desc.fragShaderData   = ZHLN_Resource_BasicMetal;
+        desc.fragShaderSize   = ZHLN_Resource_BasicMetal_Len;
 	} else {
+        // Pass the embedded SPIR-V blobs directly
 		desc.vertexShaderData = ZHLN_Resource_BasicVertSpv;
 		desc.vertexShaderSize = ZHLN_Resource_BasicVertSpv_Len;
 		desc.fragShaderData   = ZHLN_Resource_BasicFragSpv;
