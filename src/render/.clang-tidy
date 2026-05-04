@@ -1,0 +1,53 @@
+---
+Checks: >
+  bugprone-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  portability-*,
+  -modernize-use-trailing-return-type,
+  -modernize-use-c-headers,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -bugprone-easily-swappable-parameters,
+  -readability-implicit-bool-conversion
+
+WarningsAsErrors: "*"
+
+CheckOptions:
+  # --- PUBLIC FUNCTIONS (ZHLN_CreateDevice) ---
+  - key:             readability-identifier-naming.FunctionCase
+    value:           'PascalCase'
+  - key:             readability-identifier-naming.FunctionPrefix
+    value:           'ZHLN_'
+
+  # --- INTERNAL FUNCTIONS (ZHLN_Internal_DebugCallback) ---
+  - key:             readability-identifier-naming.StaticFunctionCase
+    value:           'PascalCase'
+  - key:             readability-identifier-naming.StaticFunctionPrefix
+    value:           'ZHLN_Internal_'
+
+  # --- CONSTANTS (ZHLN_DEFAULT_DESC) ---
+  - key:             readability-identifier-naming.GlobalConstantCase
+    value:           'UPPER_CASE'
+  - key:             readability-identifier-naming.GlobalConstantPrefix
+    value:           'ZHLN_'
+
+  # --- TYPES (ZHLN_InstanceDesc) ---
+  - key:             readability-identifier-naming.StructCase
+    value:           'PascalCase'
+  - key:             readability-identifier-naming.StructPrefix
+    value:           'ZHLN_'
+  - key:             readability-identifier-naming.TypedefCase
+    value:           'PascalCase'
+  - key:             readability-identifier-naming.TypedefPrefix
+    value:           'ZHLN_'
+
+  # --- VARIABLES (Local variables should be snake_case) ---
+  - key:             readability-identifier-naming.VariableCase
+    value:           'lower_case'
+  
+  # --- STRUCT MEMBERS (sType, pNext - Vulkan style) ---
+  - key:             readability-identifier-naming.StructMemberCase
+    value:           'camelBack'
+---
