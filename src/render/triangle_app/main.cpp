@@ -60,16 +60,27 @@ int main() {
 	VkPhysicalDeviceFeatures2 feat2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
 									   .pNext = &feat12};
 
+#ifdef __APPLE__
+	const char* dev_exts[] = {
+		VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
+		VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME,
+		"VK_KHR_portability_subset" // <-- MANDATORY FOR MAC
+	};
+	const uint32_t dev_ext_count = 4;
+#else
 	const char* dev_exts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME,
 							  VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
 							  VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME};
+	const uint32_t dev_ext_count = 3;
+#endif
 
-	ZHLN_DeviceSelectDesc sel_desc = {.instance = VK_NULL_HANDLE, .surface = VK_NULL_HANDLE};
 	ZHLN_DeviceDesc dev_desc = {.physical = nullptr,
 								.extensions = dev_exts,
-								.extension_count = 3,
+								.extension_count = dev_ext_count, // Use the count variable
 								.features = &feat2,
 								.enable_validation = true};
+
+	ZHLN_DeviceSelectDesc sel_desc = {.instance = VK_NULL_HANDLE, .surface = VK_NULL_HANDLE};
 
 	auto ctx = ZHLN::Vk::Context::Create(inst_desc, sel_desc, dev_desc);
 	if (!ctx)
