@@ -70,7 +70,7 @@ template <typename T, auto DeleterFn> class Handle {
 template <typename T, auto DeleterFn> class DeviceHandle {
   public:
 	DeviceHandle() noexcept = default;
-	DeviceHandle(VkDevice device, T raw) noexcept : _device(device), _raw(raw) {}
+	DeviceHandle(const VkDevice device, const T raw) noexcept : _device(device), _raw(raw) {}
 
 	~DeviceHandle() noexcept {
 		if (_raw != VK_NULL_HANDLE) {
@@ -96,10 +96,10 @@ template <typename T, auto DeleterFn> class DeviceHandle {
 		return *this;
 	}
 
-	[[nodiscard]] T Get() const noexcept { return _raw; }
-	[[nodiscard]] bool Valid() const noexcept { return _raw != VK_NULL_HANDLE; }
-	explicit operator bool() const noexcept { return Valid(); }
-	[[nodiscard]] T Release() noexcept { return std::exchange(_raw, VK_NULL_HANDLE); }
+	[[nodiscard]] constexpr T Get() const noexcept { return _raw; }
+	[[nodiscard]] constexpr bool Valid() const noexcept { return _raw != VK_NULL_HANDLE; }
+	constexpr explicit operator bool() const noexcept { return Valid(); }
+	[[nodiscard]] constexpr T Release() noexcept { return std::exchange(_raw, VK_NULL_HANDLE); }
 
   private:
 	VkDevice _device = VK_NULL_HANDLE;
@@ -228,16 +228,17 @@ struct SwapchainSupport {
 	}
 };
 
-[[nodiscard]] inline SwapchainSupport QuerySwapchainSupport(VkPhysicalDevice physical,
-															VkSurfaceKHR surface) noexcept {
-	ZHLN_SwapchainSupportDesc desc = {.physical = physical, .surface = surface};
+[[nodiscard]] inline SwapchainSupport QuerySwapchainSupport(const VkPhysicalDevice physical,
+															const VkSurfaceKHR surface) noexcept {
+	const ZHLN_SwapchainSupportDesc desc = {.physical = physical, .surface = surface};
 	return {ZHLN_QuerySwapchainSupport(&desc)};
 }
 
 class Swapchain {
   public:
 	Swapchain() noexcept = default;
-	Swapchain(VkDevice device, ZHLN_Swapchain raw) noexcept : _device(device), _raw(raw) {}
+	Swapchain(const VkDevice device, const ZHLN_Swapchain raw) noexcept
+		: _device(device), _raw(raw) {}
 
 	~Swapchain() noexcept { Destroy(); }
 
@@ -257,9 +258,9 @@ class Swapchain {
 		return *this;
 	}
 
-	[[nodiscard]] const ZHLN_Swapchain& Get() const noexcept { return _raw; }
-	[[nodiscard]] bool Valid() const noexcept { return _raw.handle != VK_NULL_HANDLE; }
-	explicit operator bool() const noexcept { return Valid(); }
+	[[nodiscard]] constexpr const ZHLN_Swapchain& Get() const noexcept { return _raw; }
+	[[nodiscard]] constexpr bool Valid() const noexcept { return _raw.handle != VK_NULL_HANDLE; }
+	constexpr explicit operator bool() const noexcept { return Valid(); }
 
 	bool Rebuild(const ZHLN_SwapchainDesc& desc) noexcept {
 		// We create a copy of the descriptor 'snapshot'
@@ -275,7 +276,7 @@ class Swapchain {
 			.old_swapchain = _raw.handle // The one dynamic change
 		};
 
-		ZHLN_Swapchain next = ZHLN_CreateSwapchain(&rebuilt);
+		const ZHLN_Swapchain next = ZHLN_CreateSwapchain(&rebuilt);
 		if (!next.handle) {
 			return false;
 		}
@@ -331,9 +332,9 @@ class FrameSync {
 		return *this;
 	}
 
-	[[nodiscard]] static FrameSync Create(VkDevice device) noexcept {
+	[[nodiscard]] static FrameSync Create(const VkDevice device) noexcept {
 		FrameSync fs;
-		ZHLN_FrameSyncDesc desc = {.device = device, .frame_count = N};
+		const ZHLN_FrameSyncDesc desc = {.device = device, .frame_count = N};
 		if (!ZHLN_CreateFrameSync(&desc, fs._frames.data())) {
 			return {};
 		}
@@ -341,7 +342,7 @@ class FrameSync {
 		return fs;
 	}
 
-	[[nodiscard]] constexpr const ZHLN_FrameSync& operator[](uint32_t frame) const noexcept {
+	[[nodiscard]] constexpr const ZHLN_FrameSync& operator[](const uint32_t frame) const noexcept {
 		return _frames[frame % N];
 	}
 	[[nodiscard]] static constexpr uint32_t Count() noexcept { return N; }
@@ -384,8 +385,8 @@ class CommandPools {
 		return *this;
 	}
 
-	[[nodiscard]] static CommandPools Create(VkDevice device, uint32_t queue_family,
-											 uint32_t buffers_per_pool = 1) noexcept {
+	[[nodiscard]] static CommandPools Create(const VkDevice device, const uint32_t queue_family,
+											 const uint32_t buffers_per_pool = 1) noexcept {
 		CommandPools cp;
 		cp._device = device;
 		for (auto& pool : cp._pools) {
@@ -397,10 +398,10 @@ class CommandPools {
 		return cp;
 	}
 
-	[[nodiscard]] constexpr ZHLN_CommandPool& operator[](uint32_t frame) noexcept {
+	[[nodiscard]] constexpr ZHLN_CommandPool& operator[](const uint32_t frame) noexcept {
 		return _pools[frame % N];
 	}
-	[[nodiscard]] constexpr VkCommandBuffer Cmd(uint32_t frame) const noexcept {
+	[[nodiscard]] constexpr VkCommandBuffer Cmd(const uint32_t frame) const noexcept {
 		return _pools[frame % N].buffers[0];
 	}
 	[[nodiscard]] constexpr bool Valid() const noexcept { return _device != VK_NULL_HANDLE; }
@@ -414,7 +415,7 @@ class CommandPool {
   public:
 	CommandPool() = default;
 
-	CommandPool(VkDevice device, uint32_t queue_family) {
+	CommandPool(const VkDevice device, const uint32_t queue_family) {
 		if (ZHLN_CreateCommandPool(device, queue_family, &_raw)) {
 			_device = device;
 		}
@@ -444,14 +445,16 @@ class CommandPool {
 	[[nodiscard]] constexpr bool Valid() const noexcept { return _device != nullptr; }
 	[[nodiscard]] constexpr explicit operator bool() const noexcept { return Valid(); }
 
-	[[nodiscard]] bool Allocate(uint32_t count) {
+	[[nodiscard]] bool Allocate(const uint32_t count) {
 		if (!Valid()) {
 			return false;
 		}
 		return ZHLN_AllocateCommandBuffers(_device, &_raw, count);
 	}
 
-	[[nodiscard]] constexpr VkCommandBuffer operator[](uint32_t i) const { return _raw.buffers[i]; }
+	[[nodiscard]] constexpr VkCommandBuffer operator[](const uint32_t i) const {
+		return _raw.buffers[i];
+	}
 
   private:
 	VkDevice _device = nullptr;
@@ -468,7 +471,7 @@ class ShaderStages {
 	constexpr ShaderStages() noexcept = default;
 
 	// Simple handle copying is constexpr-safe
-	constexpr ShaderStages(VkDevice device, ZHLN_ShaderStages raw) noexcept
+	constexpr ShaderStages(const VkDevice device, const ZHLN_ShaderStages raw) noexcept
 		: _device(device), _raw(raw) {}
 
 	// Calls ZHLN_DestroyShaderStages (C-backend)
@@ -487,9 +490,9 @@ class ShaderStages {
 		  _raw(std::exchange(other._raw, {})) {}
 
 	// Calls ZHLN_CreateShaderStages (C-backend)
-	[[nodiscard]] static ShaderStages Create(VkDevice device, const ZHLN_ShaderDesc& vert,
+	[[nodiscard]] static ShaderStages Create(const VkDevice device, const ZHLN_ShaderDesc& vert,
 											 const ZHLN_ShaderDesc& frag) noexcept {
-		ZHLN_ShaderStagesDesc desc = {.device = device, .vert = vert, .frag = frag};
+		const ZHLN_ShaderStagesDesc desc = {.device = device, .vert = vert, .frag = frag};
 		ZHLN_ShaderStages stages{};
 		if (!ZHLN_CreateShaderStages(&desc, &stages)) {
 			return {};
@@ -517,7 +520,8 @@ class ShaderStages {
 // Scoped RAII for Dynamic Rendering
 class ScopedRendering {
   public:
-	ScopedRendering(VkCommandBuffer cmd, const ZHLN_RenderPassDesc& desc) noexcept : _cmd(cmd) {
+	ScopedRendering(const VkCommandBuffer cmd, const ZHLN_RenderPassDesc& desc) noexcept
+		: _cmd(cmd) {
 		ZHLN_BeginRendering(_cmd, &desc);
 	}
 	~ScopedRendering() noexcept { ZHLN_EndRendering(_cmd); }
@@ -529,7 +533,7 @@ class ScopedRendering {
 	VkCommandBuffer _cmd;
 };
 
-inline void ImageBarrier(VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc& desc) noexcept {
+inline void ImageBarrier(const VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc& desc) noexcept {
 	ZHLN_CmdImageBarrier(cmd, &desc);
 }
 
@@ -583,8 +587,8 @@ template <> struct LayoutTraits<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL> {
 };
 
 template <VkImageLayout OldLayout, VkImageLayout NewLayout>
-inline void TransitionLayout(VkCommandBuffer cmd, VkImage image,
-							 VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) noexcept {
+inline void TransitionLayout(const VkCommandBuffer cmd, const VkImage image,
+							 const VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) noexcept {
 
 	using Src = LayoutTraits<OldLayout>;
 	using Dst = LayoutTraits<NewLayout>;
@@ -605,14 +609,15 @@ inline void TransitionLayout(VkCommandBuffer cmd, VkImage image,
 	ZHLN_CmdImageBarrier(cmd, &barrier);
 }
 
-inline void CopyBufferToImage(VkCommandBuffer cmd, const ZHLN_BufferImageCopyDesc& desc) noexcept {
+inline void CopyBufferToImage(const VkCommandBuffer cmd,
+							  const ZHLN_BufferImageCopyDesc& desc) noexcept {
 	ZHLN_CmdCopyBufferToImage(cmd, &desc);
 }
 
 // Typed wrapper around Push Constants
 template <GpuTriviallyCopyable T>
-inline void Push(VkCommandBuffer cmd, VkPipelineLayout layout, VkShaderStageFlags stages,
-				 const T& value) noexcept {
+inline void Push(const VkCommandBuffer cmd, const VkPipelineLayout layout,
+				 const VkShaderStageFlags stages, const T& value) noexcept {
 	ZHLN_PushConstants(cmd, layout, stages, &value, sizeof(T));
 }
 
@@ -621,9 +626,9 @@ inline void Push(VkCommandBuffer cmd, VkPipelineLayout layout, VkShaderStageFlag
 // ============================================================================
 
 template <uint32_t N, RecordFn Record, RebuildFn Rebuild>
-ZHLN_FrameResult DrawFrame(const Context& ctx, Swapchain& swapchain, FrameSync<N>& sync,
-						   CommandPools<N>& pools, uint32_t& frame_index, Record&& record,
-						   Rebuild&& rebuild) noexcept {
+ZHLN_FrameResult DrawFrame(const Context& ctx, const Swapchain& swapchain, const FrameSync<N>& sync,
+						   const CommandPools<N>& pools, uint32_t& frame_index,
+						   const Record&& record, const Rebuild&& rebuild) noexcept {
 
 	const ZHLN_FrameSync& s = sync[frame_index];
 	const ZHLN_CommandPool& pool = pools[frame_index];
@@ -632,9 +637,9 @@ ZHLN_FrameResult DrawFrame(const Context& ctx, Swapchain& swapchain, FrameSync<N
 	ZHLN_WaitAndResetFrame(ctx.Device(), s.in_flight, &pool);
 
 	uint32_t image_index = 0;
-	ZHLN_AcquireDesc acquire_desc = {.swapchain = swapchain.Get().handle,
-									 .image_available = s.image_available,
-									 .timeout_ns = UINT64_MAX};
+	const ZHLN_AcquireDesc acquire_desc = {.swapchain = swapchain.Get().handle,
+										   .image_available = s.image_available,
+										   .timeout_ns = UINT64_MAX};
 	auto result = ZHLN_AcquireImage(ctx.Device(), &acquire_desc, &image_index);
 	if (result == ZHLN_FrameResult_OutOfDate) {
 		rebuild();
@@ -647,10 +652,10 @@ ZHLN_FrameResult DrawFrame(const Context& ctx, Swapchain& swapchain, FrameSync<N
 
 	ZHLN_SubmitFrame(ctx.GraphicsQueue(), &s, cmd);
 
-	ZHLN_PresentDesc present_desc = {.present_queue = ctx.PresentQueue(),
-									 .swapchain = swapchain.Get().handle,
-									 .render_finished = s.render_finished,
-									 .image_index = image_index};
+	const ZHLN_PresentDesc present_desc = {.present_queue = ctx.PresentQueue(),
+										   .swapchain = swapchain.Get().handle,
+										   .render_finished = s.render_finished,
+										   .image_index = image_index};
 	result = ZHLN_PresentFrame(&present_desc);
 	if (result == ZHLN_FrameResult_OutOfDate || result == ZHLN_FrameResult_Suboptimal) {
 		rebuild();
@@ -707,29 +712,67 @@ class SemaphorePool {
   public:
 	SemaphorePool() noexcept = default;
 
-	// We don't need clear/reserve logic anymore
-	void Rebuild(VkDevice device, uint32_t count) noexcept {
+	~SemaphorePool() noexcept {
+		if (_device != VK_NULL_HANDLE) {
+			for (uint32_t i = 0; i < _count; ++i) {
+				ZHLN_DestroySemaphore(_device, _semaphores[i]);
+			}
+		}
+	}
+
+	// Move-only semantics
+	SemaphorePool(const SemaphorePool&) = delete;
+	SemaphorePool& operator=(const SemaphorePool&) = delete;
+
+	SemaphorePool(SemaphorePool&& other) noexcept
+		: _device(std::exchange(other._device, VK_NULL_HANDLE)),
+		  _count(std::exchange(other._count, 0)) {
+		for (uint32_t i = 0; i < 8; ++i) {
+			_semaphores[i] = std::exchange(other._semaphores[i], VK_NULL_HANDLE);
+		}
+	}
+
+	SemaphorePool& operator=(SemaphorePool&& other) noexcept {
+		if (this != &other) {
+			if (_device != VK_NULL_HANDLE) {
+				for (uint32_t i = 0; i < _count; ++i) {
+					ZHLN_DestroySemaphore(_device, _semaphores[i]);
+				}
+			}
+			_device = std::exchange(other._device, VK_NULL_HANDLE);
+			_count = std::exchange(other._count, 0);
+			for (uint32_t i = 0; i < 8; ++i) {
+				_semaphores[i] = std::exchange(other._semaphores[i], VK_NULL_HANDLE);
+			}
+		}
+		return *this;
+	}
+
+	void Rebuild(const VkDevice device, const uint32_t count) noexcept {
 		// Destroy existing if necessary
-		for (uint32_t i = 0; i < _count; ++i) {
-			ZHLN_DestroySemaphore(device, _semaphores[i]);
+		if (_device != VK_NULL_HANDLE) {
+			for (uint32_t i = 0; i < _count; ++i) {
+				ZHLN_DestroySemaphore(_device, _semaphores[i]);
+			}
 		}
 
+		_device = device;
 		// Clamp to our architectural limit
 		_count = Clamp(count, 0U, 8U);
 
 		for (uint32_t i = 0; i < _count; ++i) {
-			_semaphores[i] = ZHLN_CreateSemaphore(device);
+			_semaphores[i] = ZHLN_CreateSemaphore(_device);
 		}
 	}
 
-	// Still provides the safety you want
-	[[nodiscard]] VkSemaphore operator[](uint32_t index) const noexcept {
+	[[nodiscard]] constexpr VkSemaphore operator[](const uint32_t index) const noexcept {
 		return _semaphores[index % _count];
 	}
 
-	[[nodiscard]] uint32_t Size() const noexcept { return _count; }
+	[[nodiscard]] constexpr uint32_t Size() const noexcept { return _count; }
 
   private:
+	VkDevice _device = VK_NULL_HANDLE;
 	VkSemaphore _semaphores[8] = {}; // Fixed stack-adjacent array
 	uint32_t _count = 0;
 };
@@ -738,15 +781,15 @@ class SemaphorePool {
 // Error Helpers
 // ============================================================================
 
-[[nodiscard]] inline const char* ResultString(VkResult result) noexcept {
+[[nodiscard]] inline const char* ResultString(const VkResult result) noexcept {
 	return ZHLN_VkResultString(result);
 }
 
-inline void CheckResult(VkResult result, const char* context = "",
+inline void CheckResult(const VkResult result, const char* context = "",
 						const std::source_location location = std::source_location::current()) {
 	if (result != VK_SUCCESS) {
-		std::print(stderr, "[Vk Error] {}:{} in {}: {} failed with {}\n", location.file_name(),
-				   location.line(), location.function_name(), context, ResultString(result));
+		std::println(stderr, "[Vk Error] {}:{} in {}: {} failed with {}", location.file_name(),
+					 location.line(), location.function_name(), context, ResultString(result));
 	}
 }
 
