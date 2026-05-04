@@ -20,7 +20,6 @@ option(ZHLN_ENABLE_CLANG_TIDY "Run Clang-Tidy analysis during compilation" OFF)
 if(ZHLN_ENABLE_CLANG_TIDY)
     find_program(CLANG_TIDY_EXE NAMES clang-tidy)
     if(CLANG_TIDY_EXE)
-        # CMake will now automatically look for the .clang-tidy file in the directory
         set_target_properties(zahlen_render PROPERTIES
             C_CLANG_TIDY "${CLANG_TIDY_EXE}"
             CXX_CLANG_TIDY "${CLANG_TIDY_EXE}"
@@ -62,9 +61,32 @@ if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
     )
 endif()
 
-# At the bottom of src/render/CMakeLists.txt
 if(BUILD_TESTING)
     add_subdirectory(tests)
+endif()
+
+# ----------------------------------------------------------------------------
+# Demo Utilities (Shared PIMPL Window Abstraction)
+# ----------------------------------------------------------------------------
+
+set(DEMO_UTILS_SRCS demo_utils/DemoWindow.hpp)
+
+if(APPLE)
+    list(APPEND DEMO_UTILS_SRCS demo_utils/DemoWindow_mac.mm)
+elseif(WIN32)
+    list(APPEND DEMO_UTILS_SRCS demo_utils/DemoWindow_win32.cpp)
+endif()
+
+add_library(zahlen_demo_utils STATIC ${DEMO_UTILS_SRCS})
+target_link_libraries(zahlen_demo_utils PRIVATE zahlen_render Vulkan::Vulkan)
+target_include_directories(zahlen_demo_utils PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+if(APPLE)
+    # Compile .mm files as Objective-C++
+    set_source_files_properties(demo_utils/DemoWindow_mac.mm PROPERTIES LANGUAGE OBJCXX)
+    target_link_libraries(zahlen_demo_utils PUBLIC "-framework Cocoa" "-framework QuartzCore")
+elseif(WIN32)
+    target_link_libraries(zahlen_demo_utils PUBLIC user32.lib kernel32.lib)
 endif()
 
 # ----------------------------------------------------------------------------
@@ -73,7 +95,6 @@ endif()
 
 find_program(GLSL_COMPILER glslangValidator HINTS $ENV{VULKAN_SDK}/Bin)
 
-# Shaders
 function(compile_shader SHADER_PATH OUTPUT_VAR)
     get_filename_component(FILE_NAME ${SHADER_PATH} NAME)
     set(SPV_OUT "${CMAKE_CURRENT_BINARY_DIR}/${FILE_NAME}.spv")
@@ -93,16 +114,20 @@ compile_shader("${CMAKE_CURRENT_SOURCE_DIR}/cube_app/cube.frag" CUBE_FRAG_SPV)
 
 # Triangle Executable
 add_executable(zahlen_triangle triangle_app/main.cpp ${TRI_VERT_SPV} ${TRI_FRAG_SPV})
-target_link_libraries(zahlen_triangle PRIVATE zahlen_render Vulkan::Vulkan)
+target_link_libraries(zahlen_triangle PRIVATE 
+    zahlen_render 
+    Vulkan::Vulkan 
+    zahlen_demo_utils
+)
 target_include_directories(zahlen_triangle PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(zahlen_triangle PRIVATE cxx_std_23)
 
 # Cube Executable
 add_executable(zahlen_cube cube_app/main.cpp ${CUBE_VERT_SPV} ${CUBE_FRAG_SPV})
-target_link_libraries(zahlen_cube PRIVATE zahlen_render Vulkan::Vulkan)
+target_link_libraries(zahlen_cube PRIVATE 
+    zahlen_render 
+    Vulkan::Vulkan 
+    zahlen_demo_utils
+)
 target_include_directories(zahlen_cube PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(zahlen_cube PRIVATE cxx_std_23)
-
-# Windows dependencies
-target_link_libraries(zahlen_triangle PRIVATE user32.lib kernel32.lib)
-target_link_libraries(zahlen_cube PRIVATE user32.lib kernel32.lib)

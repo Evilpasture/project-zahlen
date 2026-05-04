@@ -1,42 +1,19 @@
-#include <filesystem>
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-
-#define VK_USE_PLATFORM_WIN32_KHR
 #include "RenderCore.hpp"
+#include "demo_utils/DemoWindow.hpp"
 
+#include <filesystem>
 #include <fstream>
 #include <vector>
 
 // ----------------------------------------------------------------------------
-// Window State
-// ----------------------------------------------------------------------------
-static bool g_running = true;
-static bool g_resized = false;
-static uint32_t g_width = 800;
-static uint32_t g_height = 600;
-
-auto CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) -> LRESULT {
-	if (msg == WM_CLOSE) {
-		g_running = false;
-		return 0;
-	}
-	if (msg == WM_SIZE) {
-		g_width = LOWORD(lp);
-		g_height = HIWORD(lp);
-		g_resized = true;
-		return 0;
-	}
-	return DefWindowProcW(hwnd, msg, wp, lp);
-}
-
-// ----------------------------------------------------------------------------
 // Helpers
 // ----------------------------------------------------------------------------
-[[nodiscard]] auto LoadSpirv(const std::filesystem::path& path) -> std::vector<uint32_t> {
-	if (!std::filesystem::exists(path)) return {};
+[[nodiscard]] static auto LoadSpirv(const std::filesystem::path& path) -> std::vector<uint32_t> {
+	if (!std::filesystem::exists(path))
+		return {};
 	std::ifstream file(path, std::ios::ate | std::ios::binary);
-	if (!file.is_open()) return {};
+	if (!file.is_open())
+		return {};
 	const size_t fileSize = static_cast<size_t>(file.tellg());
 	std::vector<uint32_t> buffer(fileSize / sizeof(uint32_t));
 	file.seekg(0);
@@ -45,79 +22,69 @@ auto CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) -> LRESULT {
 }
 
 int main() {
-	// 1. Win32 Window
-	const HINSTANCE hInstance = GetModuleHandleW(nullptr);
-	const WNDCLASSEXW wc = {
-		.cbSize = sizeof(WNDCLASSEXW),
-		.style = CS_OWNDC,
-		.lpfnWndProc = WndProc,
-		.hInstance = hInstance,
-		.hCursor = LoadCursor(nullptr, IDC_ARROW),
-		.lpszClassName = L"ZHLNTriangle"
-	};
-	RegisterClassExW(&wc);
-	const HWND hwnd = CreateWindowExW(0, L"ZHLNTriangle", L"ZHLN Engine - Triangle",
-									  WS_OVERLAPPEDWINDOW | WS_VISIBLE, 100, 100, (int)g_width,
-									  (int)g_height, nullptr, nullptr, hInstance, nullptr);
+	// 1. OS Window Creation (Platform Agnostic)
+	ZHLN::Demo::WindowState win = ZHLN::Demo::InitWindow(800, 600, "ZHLN Engine - Triangle");
 
 	// 2. Vulkan Context Setup
 	ZHLN_InstanceDesc inst_desc = ZHLN_DEFAULT_INSTANCE_DESC;
-	const char* inst_exts[] = {
-		VK_KHR_SURFACE_EXTENSION_NAME, 
-		VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
-		VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
-		VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
-		VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME
-	};
-	inst_desc.extensions = inst_exts;
-	inst_desc.extension_count = 5;
 
-	// Vulkan 1.3 Features
-	VkPhysicalDeviceVulkan13Features feat13 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
-	feat13.synchronization2 = VK_TRUE;
-	feat13.dynamicRendering = VK_TRUE;
+	auto required_exts = ZHLN::Demo::GetRequiredInstanceExtensions();
+	required_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+	required_exts.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
+	required_exts.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
 
-	VkPhysicalDeviceVulkan12Features feat12 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &feat13 };
-	feat12.bufferDeviceAddress = VK_TRUE;
+#ifdef __APPLE__
+	required_exts.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+#endif
 
-	VkPhysicalDeviceFeatures2 feat2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &feat12 };
+	inst_desc.extensions = required_exts.data();
+	inst_desc.extension_count = static_cast<uint32_t>(required_exts.size());
 
-	// Device Extensions (Including Mutable Format for Overlay support)
-	const char* dev_exts[] = {
-		VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-		VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
-		VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME
-	};
+	VkPhysicalDeviceVulkan13Features feat13 = {
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+		.pNext = nullptr,
+		.synchronization2 = VK_TRUE,
+		.dynamicRendering = VK_TRUE};
+
+	VkPhysicalDeviceVulkan12Features feat12 = {
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+		.pNext = &feat13,
+		.bufferDeviceAddress = VK_TRUE};
 
 	VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swap_maint = {
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR,
-		.swapchainMaintenance1 = VK_TRUE
-	};
+		.pNext = nullptr,
+		.swapchainMaintenance1 = VK_TRUE};
 	feat13.pNext = &swap_maint;
 
-	ZHLN_DeviceSelectDesc sel_desc = { .instance = VK_NULL_HANDLE, .surface = VK_NULL_HANDLE };
-	ZHLN_DeviceDesc dev_desc = { 
-		.extensions = dev_exts, .extension_count = 3, .features = &feat2, .enable_validation = true 
-	};
+	VkPhysicalDeviceFeatures2 feat2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+									   .pNext = &feat12};
+
+	const char* dev_exts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+							  VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
+							  VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME};
+
+	ZHLN_DeviceSelectDesc sel_desc = {.instance = VK_NULL_HANDLE, .surface = VK_NULL_HANDLE};
+	ZHLN_DeviceDesc dev_desc = {.physical = nullptr,
+								.extensions = dev_exts,
+								.extension_count = 3,
+								.features = &feat2,
+								.enable_validation = true};
 
 	auto ctx = ZHLN::Vk::Context::Create(inst_desc, sel_desc, dev_desc);
-	if (!ctx) return -1;
+	if (!ctx)
+		return -1;
 
-	// 3. Surface (RAII)
-	VkSurfaceKHR raw_surface;
-	VkWin32SurfaceCreateInfoKHR surf_info = {
-		.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
-		.hinstance = hInstance,
-		.hwnd = hwnd
-	};
-	if (vkCreateWin32SurfaceKHR(ctx.Instance(), &surf_info, nullptr, &raw_surface) != VK_SUCCESS) return -1;
+	// 3. Surface Creation (Platform Agnostic)
+	VkSurfaceKHR raw_surface = ZHLN::Demo::CreateSurface(ctx.Instance(), win);
 	ZHLN::Vk::Surface surface(ctx.Instance(), raw_surface);
 
 	// 4. Resources
 	ZHLN::Vk::Swapchain swapchain(ctx.Device(), {});
 	auto sync = ZHLN::Vk::FrameSync<3>::Create(ctx.Device());
-	auto pools = ZHLN::Vk::CommandPools<3>::Create(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-	ZHLN::Vk::SemaphorePool present_semaphores; // NEW RAII POOL
+	auto pools =
+		ZHLN::Vk::CommandPools<3>::Create(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+	ZHLN::Vk::SemaphorePool present_semaphores;
 
 	// 5. Pipeline
 	auto vert_code = LoadSpirv("triangle.vert.spv");
@@ -126,61 +93,79 @@ int main() {
 	ZHLN_ShaderDesc f_desc = {frag_code.data(), frag_code.size() * 4};
 	auto shaders = ZHLN::Vk::ShaderStages::Create(ctx.Device(), v_desc, f_desc);
 
-	ZHLN_PipelineLayoutDesc layout_desc = {0};
-	ZHLN::Vk::PipelineLayout layout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &layout_desc));
+	ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = nullptr,
+										   .set_layout_count = 0,
+										   .push_constants = nullptr,
+										   .push_constant_count = 0};
+	ZHLN::Vk::PipelineLayout layout(ctx.Device(),
+									ZHLN_CreatePipelineLayout(ctx.Device(), &layout_desc));
 
-	ZHLN_GraphicsPipelineDesc pipe_desc = {
-		.stages = const_cast<ZHLN_ShaderStages*>(shaders.Get()),
-		.layout = layout.Get(),
-		.color_format = VK_FORMAT_B8G8R8A8_SRGB,
-		.cull_mode = VK_CULL_MODE_NONE,
-	};
-	ZHLN::Vk::Pipeline pipeline(ctx.Device(), ZHLN_CreateGraphicsPipeline(ctx.Device(), &pipe_desc));
+	ZHLN_GraphicsPipelineDesc pipe_desc = {.stages = const_cast<ZHLN_ShaderStages*>(shaders.Get()),
+										   .layout = layout.Get(),
+										   .vertex_binding_count = 0,
+										   .vertex_bindings = nullptr,
+										   .vertex_attribute_count = 0,
+										   .vertex_attributes = nullptr,
+										   .color_format = VK_FORMAT_B8G8R8A8_SRGB,
+										   .depth_format = VK_FORMAT_UNDEFINED,
+										   .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+										   .polygon_mode = VK_POLYGON_MODE_FILL,
+										   .cull_mode = VK_CULL_MODE_NONE,
+										   .front_face = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+										   .depth_test = false,
+										   .depth_write = false,
+										   .blend_enable = false};
+	ZHLN::Vk::Pipeline pipeline(ctx.Device(),
+								ZHLN_CreateGraphicsPipeline(ctx.Device(), &pipe_desc));
 
 	// 6. Loop
 	uint32_t frame_index = 0;
-	g_resized = true;
+	win.resized = true;
 
-	while (g_running) {
-		MSG msg;
-		while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
-			TranslateMessage(&msg);
-			DispatchMessageW(&msg);
-		}
-		if (g_width == 0 || g_height == 0) { Sleep(10); continue; }
+	while (win.running) {
+		ZHLN::Demo::ProcessEvents(win);
+
+		if (win.width == 0 || win.height == 0)
+			continue;
 
 		auto rebuild_cb = [&]() {
 			vkDeviceWaitIdle(ctx.Device());
 			ZHLN_Device raw_dev = {ctx.Device(), ctx.GraphicsQueue(), ctx.PresentQueue()};
 			ZHLN_PhysicalDeviceInfo raw_phys = ctx.PhysicalInfo();
 
-			ZHLN_SwapchainDesc s_desc = {
-				.device = &raw_dev, .physical = &raw_phys, .surface = surface.Get(),
-				.width = g_width, .height = g_height, .vsync = true
-			};
+			ZHLN_SwapchainDesc s_desc = {.device = &raw_dev,
+										 .physical = &raw_phys,
+										 .surface = surface.Get(),
+										 .width = win.width,
+										 .height = win.height,
+										 .vsync = true,
+										 .old_swapchain = VK_NULL_HANDLE};
 
 			swapchain.Rebuild(s_desc);
-			present_semaphores.Rebuild(ctx.Device(), swapchain.Get().image_count); // RAII REBUILD
-			g_resized = false;
+			present_semaphores.Rebuild(ctx.Device(), swapchain.Get().image_count);
+			win.resized = false;
 		};
 
-		if (g_resized) rebuild_cb();
+		if (win.resized)
+			rebuild_cb();
 
 		auto record_cb = [&](VkCommandBuffer cmd, uint32_t image_index) {
 			VkImage img = swapchain.Get().images[image_index];
-			ZHLN::Vk::TransitionLayout(cmd, img, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-			
-			ZHLN_RenderPassDesc pass = {
-				.target_view = swapchain.Get().views[image_index],
-				.extent = swapchain.Get().extent,
-				.clear_color = {0.01f, 0.01f, 0.02f, 1.0f}
-			};
+			ZHLN::Vk::TransitionLayout(cmd, img, VK_IMAGE_LAYOUT_UNDEFINED,
+									   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+			ZHLN_RenderPassDesc pass = {.target_view = swapchain.Get().views[image_index],
+										.depth_view = VK_NULL_HANDLE,
+										.extent = swapchain.Get().extent,
+										.clear_color = {0.01f, 0.01f, 0.02f, 1.0f},
+										.clear_depth = 1.0f};
 			{
 				ZHLN::Vk::ScopedRendering render(cmd, pass);
 				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
 				vkCmdDraw(cmd, 3, 1, 0, 0);
 			}
-			ZHLN::Vk::TransitionLayout(cmd, img, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+			ZHLN::Vk::TransitionLayout(cmd, img, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+									   VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 		};
 
 		const ZHLN_FrameSync& frame_sync = sync[frame_index];
@@ -190,39 +175,60 @@ int main() {
 		ZHLN_WaitAndResetFrame(ctx.Device(), frame_sync.in_flight, &pool);
 
 		uint32_t image_index = 0;
-		ZHLN_AcquireDesc acq = { .swapchain = swapchain.Get().handle, .image_available = frame_sync.image_available, .timeout_ns = UINT64_MAX };
-		auto acq_res = ZHLN_AcquireImage(ctx.Device(), &acq, &image_index);
-
-		if (acq_res == ZHLN_FrameResult_OutOfDate) { rebuild_cb(); continue; }
+		ZHLN_AcquireDesc acq = {.swapchain = swapchain.Get().handle,
+								.image_available = frame_sync.image_available,
+								.timeout_ns = UINT64_MAX};
+		if (ZHLN_AcquireImage(ctx.Device(), &acq, &image_index) == ZHLN_FrameResult_OutOfDate) {
+			win.resized = true;
+			continue;
+		}
 
 		ZHLN_BeginCommandBuffer(cmd);
 		record_cb(cmd, image_index);
 		ZHLN_EndCommandBuffer(cmd);
 
-		VkCommandBufferSubmitInfo cmd_info = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cmd };
-		VkSemaphoreSubmitInfo wait_info = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = frame_sync.image_available, .stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT };
-		VkSemaphoreSubmitInfo signal_info = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = present_semaphores[image_index], .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT };
+		VkCommandBufferSubmitInfo cmd_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+											  .pNext = nullptr,
+											  .commandBuffer = cmd,
+											  .deviceMask = 0};
+		VkSemaphoreSubmitInfo wait_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+										   .pNext = nullptr,
+										   .semaphore = frame_sync.image_available,
+										   .value = 0,
+										   .stageMask =
+											   VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+										   .deviceIndex = 0};
+		VkSemaphoreSubmitInfo signal_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+											 .pNext = nullptr,
+											 .semaphore = present_semaphores[image_index],
+											 .value = 0,
+											 .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
+											 .deviceIndex = 0};
 
 		VkSubmitInfo2 submit = {
 			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-			.waitSemaphoreInfoCount = 1, .pWaitSemaphoreInfos = &wait_info,
-			.commandBufferInfoCount = 1, .pCommandBufferInfos = &cmd_info,
-			.signalSemaphoreInfoCount = 1, .pSignalSemaphoreInfos = &signal_info,
+			.pNext = nullptr,
+			.flags = 0,
+			.waitSemaphoreInfoCount = 1,
+			.pWaitSemaphoreInfos = &wait_info,
+			.commandBufferInfoCount = 1,
+			.pCommandBufferInfos = &cmd_info,
+			.signalSemaphoreInfoCount = 1,
+			.pSignalSemaphoreInfos = &signal_info,
 		};
-
 		vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, frame_sync.in_flight);
 
-		ZHLN_PresentDesc pres = { 
-			.present_queue = ctx.PresentQueue(), .swapchain = swapchain.Get().handle, 
-			.render_finished = present_semaphores[image_index], .image_index = image_index 
-		};
-		
-		if (ZHLN_PresentFrame(&pres) != ZHLN_FrameResult_Ok) rebuild_cb();
+		ZHLN_PresentDesc pres = {.present_queue = ctx.PresentQueue(),
+								 .swapchain = swapchain.Get().handle,
+								 .render_finished = present_semaphores[image_index],
+								 .image_index = image_index};
+		if (ZHLN_PresentFrame(&pres) != ZHLN_FrameResult_Ok)
+			win.resized = true;
 
 		frame_index = (frame_index + 1) % 3;
 	}
 
 	vkDeviceWaitIdle(ctx.Device());
-	DestroyWindow(hwnd);
+	ZHLN::Demo::DestroyWindow(win);
 	return 0;
 }

@@ -52,7 +52,13 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* desc) {
 		.enabledLayerCount = desc->enable_validation ? 1U : 0U,
 		.ppEnabledLayerNames =
 			desc->enable_validation ? validation_layers : nullptr, // Compound literal
+		.flags = 0,
 	};
+
+#ifdef __APPLE__
+	// Required to see MoltenVK/KosmicKrisp devices
+	create_info.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
 
 	VkDebugUtilsMessengerCreateInfoEXT debug_info = {};
 	if (desc->enable_validation) {
