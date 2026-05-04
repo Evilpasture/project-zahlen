@@ -80,9 +80,9 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* desc) {
 	}
 	return instance;
 }
-
-static int32_t ZHLN_Internal_DefaultScoreFn(const ZHLN_PhysicalDeviceInfo* info,
-											[[maybe_unused]] void* userdata) {
+[[nodiscard]]
+static int32_t ZHLN_Internal_DefaultScoreFn(const ZHLN_PhysicalDeviceInfo* const restrict info,
+											[[maybe_unused]] const void* const restrict userdata) {
 	// Reject anything missing required queues
 	if (!info->has_graphics) {
 		return -1;
@@ -103,7 +103,7 @@ static int32_t ZHLN_Internal_DefaultScoreFn(const ZHLN_PhysicalDeviceInfo* info,
 
 	// Reward VRAM (in MB, capped to avoid overflow)
 	for (uint32_t i = 0; i < info->memory.memoryProperties.memoryHeapCount; ++i) {
-		VkMemoryHeap heap = info->memory.memoryProperties.memoryHeaps[i];
+		const VkMemoryHeap heap = info->memory.memoryProperties.memoryHeaps[i];
 		if (heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
 			score += (int32_t)(heap.size / ((VkDeviceSize)1024U * 1024U));
 		}
@@ -112,8 +112,10 @@ static int32_t ZHLN_Internal_DefaultScoreFn(const ZHLN_PhysicalDeviceInfo* info,
 	return score;
 }
 
-static void ZHLN_Internal_QueryQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface,
-											 uint32_t* out_graphics, uint32_t* out_present) {
+static void ZHLN_Internal_QueryQueueFamilies(const VkPhysicalDevice device,
+											 const VkSurfaceKHR surface,
+											 uint32_t* const restrict out_graphics,
+											 uint32_t* const restrict out_present) {
 	*out_graphics = UINT32_MAX;
 	*out_present = UINT32_MAX;
 
@@ -144,8 +146,9 @@ static void ZHLN_Internal_QueryQueueFamilies(VkPhysicalDevice device, VkSurfaceK
 		*out_present = *out_graphics;
 	}
 }
-
-ZHLN_PhysicalDeviceInfo ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* desc) {
+[[nodiscard]]
+ZHLN_PhysicalDeviceInfo
+ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* const restrict desc) {
 	ZHLN_PhysicalDeviceInfo null_result = {};
 
 	uint32_t count = 0;
@@ -160,7 +163,8 @@ ZHLN_PhysicalDeviceInfo ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* d
 	VkPhysicalDevice devices[16] = {};
 	vkEnumeratePhysicalDevices(desc->instance, &count, devices);
 
-	ZHLN_DeviceScoreFn score_fn = desc->score_fn ? desc->score_fn : ZHLN_Internal_DefaultScoreFn;
+	const ZHLN_DeviceScoreFn score_fn =
+		desc->score_fn ? desc->score_fn : ZHLN_Internal_DefaultScoreFn;
 
 	ZHLN_PhysicalDeviceInfo best = {};
 	int32_t best_score = -1;
@@ -183,7 +187,7 @@ ZHLN_PhysicalDeviceInfo ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* d
 		info.has_graphics = (info.graphics_family != UINT32_MAX);
 		info.has_present = (info.present_family != UINT32_MAX);
 
-		int32_t score = score_fn(&info, desc->score_userdata);
+		const int32_t score = score_fn(&info, desc->score_userdata);
 		if (score > best_score) {
 			best_score = score;
 			best = info;
@@ -192,19 +196,19 @@ ZHLN_PhysicalDeviceInfo ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* d
 
 	return best_score >= 0 ? best : null_result;
 }
-
-ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* desc) {
+[[nodiscard]]
+ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
 	ZHLN_Device null_result = {};
 
 	// --- Queue Creation ---
 	// Deduplicate: if graphics and present are the same family, only create one queue
-	uint32_t unique_families[2] = {
+	const uint32_t unique_families[2] = {
 		desc->physical->graphics_family,
 		desc->physical->present_family,
 	};
-	uint32_t unique_count = (unique_families[0] == unique_families[1]) ? 1U : 2U;
+	const uint32_t unique_count = (unique_families[0] == unique_families[1]) ? 1U : 2U;
 
-	float priority = 1.0F;
+	const float priority = 1.0F;
 	VkDeviceQueueCreateInfo queue_infos[2] = {};
 	for (uint32_t i = 0; i < unique_count; ++i) {
 		queue_infos[i] = (VkDeviceQueueCreateInfo){
@@ -218,26 +222,26 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* desc) {
 	// --- Feature Chain ---
 	// If the caller passed a features2 chain, use it directly as pNext.
 	// Otherwise wire in a plain zero-initialized one so sType is always set.
-	VkPhysicalDeviceFeatures2 default_features = {
+	const VkPhysicalDeviceFeatures2 default_features = {
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
 	};
-	VkPhysicalDeviceFeatures2* features = desc->features ? desc->features : &default_features;
+	const VkPhysicalDeviceFeatures2* features = desc->features ? desc->features : &default_features;
 
-	VkDeviceCreateInfo create_info = {.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-									  .pNext = features, // The modern, extensible way
-									  .pEnabledFeatures =
-										  nullptr, // Explicitly null to avoid dual-source conflict
+	const VkDeviceCreateInfo create_info = {
+		.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+		.pNext = features,			 // The modern, extensible way
+		.pEnabledFeatures = nullptr, // Explicitly null to avoid dual-source conflict
 
-									  .queueCreateInfoCount = unique_count,
-									  .pQueueCreateInfos = queue_infos,
+		.queueCreateInfoCount = unique_count,
+		.pQueueCreateInfos = queue_infos,
 
-									  .enabledExtensionCount = desc->extension_count,
-									  .ppEnabledExtensionNames = desc->extensions,
+		.enabledExtensionCount = desc->extension_count,
+		.ppEnabledExtensionNames = desc->extensions,
 
-									  // Explicitly zero these out.
-									  // It's cleaner than pretending they do something.
-									  .enabledLayerCount = 0,
-									  .ppEnabledLayerNames = nullptr};
+		// Explicitly zero these out.
+		// It's cleaner than pretending they do something.
+		.enabledLayerCount = 0,
+		.ppEnabledLayerNames = nullptr};
 
 	VkDevice handle;
 	if (vkCreateDevice(desc->physical->handle, &create_info, nullptr, &handle) != VK_SUCCESS) {
@@ -262,8 +266,9 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* desc) {
 		.present_queue = present_queue,
 	};
 }
-
-ZHLN_SwapchainSupport ZHLN_QuerySwapchainSupport(const ZHLN_SwapchainSupportDesc* desc) {
+[[nodiscard]]
+ZHLN_SwapchainSupport
+ZHLN_QuerySwapchainSupport(const ZHLN_SwapchainSupportDesc* const restrict desc) {
 	ZHLN_SwapchainSupport result = {};
 
 	vkGetPhysicalDeviceSurfaceCapabilitiesKHR(desc->physical, desc->surface, &result.capabilities);
@@ -287,9 +292,10 @@ ZHLN_SwapchainSupport ZHLN_QuerySwapchainSupport(const ZHLN_SwapchainSupportDesc
 	return result;
 }
 
-static VkSurfaceFormatKHR ZHLN_Internal_ChooseFormat(const ZHLN_SwapchainSupport* support) {
+static VkSurfaceFormatKHR
+ZHLN_Internal_ChooseFormat(const ZHLN_SwapchainSupport* const restrict support) {
 	for (uint32_t i = 0; i < support->format_count; ++i) {
-		VkSurfaceFormatKHR f = support->formats[i];
+		const VkSurfaceFormatKHR f = support->formats[i];
 		if (f.format == VK_FORMAT_B8G8R8A8_SRGB &&
 			f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
 			return f;
@@ -298,9 +304,9 @@ static VkSurfaceFormatKHR ZHLN_Internal_ChooseFormat(const ZHLN_SwapchainSupport
 	// Fallback: whatever the driver gives us first
 	return support->formats[0];
 }
-
-static VkPresentModeKHR ZHLN_Internal_ChoosePresentMode(const ZHLN_SwapchainSupport* support,
-														bool vsync) {
+[[nodiscard]]
+static VkPresentModeKHR
+ZHLN_Internal_ChoosePresentMode(const ZHLN_SwapchainSupport* const restrict support, bool vsync) {
 	if (!vsync) {
 		for (uint32_t i = 0; i < support->present_mode_count; ++i) {
 			if (support->present_modes[i] == VK_PRESENT_MODE_MAILBOX_KHR) {
@@ -317,9 +323,9 @@ static VkPresentModeKHR ZHLN_Internal_ChoosePresentMode(const ZHLN_SwapchainSupp
 	// FIFO is always guaranteed by the spec
 	return VK_PRESENT_MODE_FIFO_KHR;
 }
-
-static VkExtent2D ZHLN_Internal_ChooseExtent(const VkSurfaceCapabilitiesKHR* caps, uint32_t width,
-											 uint32_t height) {
+[[nodiscard]]
+static VkExtent2D ZHLN_Internal_ChooseExtent(const VkSurfaceCapabilitiesKHR* const restrict caps,
+											 const uint32_t width, const uint32_t height) {
 	// UINT32_MAX signals the surface lets us pick freely
 	if (caps->currentExtent.width != UINT32_MAX) {
 		return caps->currentExtent;
@@ -330,9 +336,9 @@ static VkExtent2D ZHLN_Internal_ChooseExtent(const VkSurfaceCapabilitiesKHR* cap
 		.height = ZHLN_Clamp(height, caps->minImageExtent.height, caps->maxImageExtent.height),
 	};
 }
-
+[[nodiscard]]
 static VkCompositeAlphaFlagBitsKHR
-ZHLN_Internal_ChooseCompositeAlpha(VkCompositeAlphaFlagsKHR supported) {
+ZHLN_Internal_ChooseCompositeAlpha(const VkCompositeAlphaFlagsKHR supported) {
 	static const VkCompositeAlphaFlagBitsKHR preferred[] = {
 		VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
 		VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
@@ -347,41 +353,49 @@ ZHLN_Internal_ChooseCompositeAlpha(VkCompositeAlphaFlagsKHR supported) {
 	// Spec guarantees at least one bit is set, so this is unreachable
 	return VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 }
-
-ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* desc) {
+[[nodiscard]]
+ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict desc) {
 	ZHLN_Swapchain null_result = {};
 
-	ZHLN_SwapchainSupportDesc support_desc = {
+	const ZHLN_SwapchainSupportDesc support_desc = {
 		.physical = desc->physical->handle,
 		.surface = desc->surface,
 	};
-	ZHLN_SwapchainSupport support = ZHLN_QuerySwapchainSupport(&support_desc);
+	const ZHLN_SwapchainSupport support = ZHLN_QuerySwapchainSupport(&support_desc);
 	if (support.format_count == 0 || support.present_mode_count == 0) {
 		return null_result;
 	}
 
-	VkSurfaceFormatKHR format = ZHLN_Internal_ChooseFormat(&support);
-	VkPresentModeKHR present_mode = ZHLN_Internal_ChoosePresentMode(&support, desc->vsync);
-	VkExtent2D extent =
+	const VkSurfaceFormatKHR format = ZHLN_Internal_ChooseFormat(&support);
+	const VkPresentModeKHR present_mode = ZHLN_Internal_ChoosePresentMode(&support, desc->vsync);
+	const VkExtent2D extent =
 		ZHLN_Internal_ChooseExtent(&support.capabilities, desc->width, desc->height);
 
-	// Request one extra image to avoid stalling on driver internal ops
+	if (support.capabilities.minImageCount > 8) {
+		return null_result;
+	}
+
+	// Determine ideal count (min + 1 for triple buffering/stalling avoidance)
 	uint32_t image_count = support.capabilities.minImageCount + 1;
+
+	// Clamp to hardware maximum (maxImageCount == 0 means no limit)
 	if (support.capabilities.maxImageCount > 0 &&
 		image_count > support.capabilities.maxImageCount) {
 		image_count = support.capabilities.maxImageCount;
 	}
+
+	// Clamp to library capacity
 	if (image_count > 8) {
-		image_count = 8; // clamp to our stack array
+		image_count = 8;
 	}
 
-	uint32_t queue_families[2] = {
+	const uint32_t queue_families[2] = {
 		desc->physical->graphics_family,
 		desc->physical->present_family,
 	};
-	bool shared = (queue_families[0] == queue_families[1]);
+	const bool shared = (queue_families[0] == queue_families[1]);
 
-	VkSwapchainCreateInfoKHR create_info = {
+	const VkSwapchainCreateInfoKHR create_info = {
 		.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
 		.pNext = nullptr, // 1. Explicitly NULL (Fixes the Ghost Flag)
 		.flags = 0,		  // 2. Explicitly 0
@@ -420,7 +434,7 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* desc) {
 
 	// --- Image Views ---
 	for (uint32_t i = 0; i < swapchain.image_count; ++i) {
-		VkImageViewCreateInfo view_info = {
+		const VkImageViewCreateInfo view_info = {
 			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
 			.image = swapchain.images[i],
 			.viewType = VK_IMAGE_VIEW_TYPE_2D,
@@ -465,7 +479,8 @@ void ZHLN_DestroySwapchain(const VkDevice device, ZHLN_Swapchain* const swapchai
 }
 
 [[nodiscard]]
-bool ZHLN_CreateFrameSync(const ZHLN_FrameSyncDesc* const desc, ZHLN_FrameSync* const out_sync) {
+bool ZHLN_CreateFrameSync(const ZHLN_FrameSyncDesc* const desc,
+						  ZHLN_FrameSync* const restrict out_sync) {
 	constexpr VkSemaphoreCreateInfo sem_info = {
 		.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
 	};
@@ -494,7 +509,7 @@ bool ZHLN_CreateFrameSync(const ZHLN_FrameSyncDesc* const desc, ZHLN_FrameSync* 
 	return true;
 }
 
-void ZHLN_DestroyFrameSync(const VkDevice device, ZHLN_FrameSync* const sync,
+void ZHLN_DestroyFrameSync(const VkDevice device, ZHLN_FrameSync* const restrict sync,
 						   const uint32_t frame_count) {
 	for (uint32_t i = 0; i < frame_count; ++i) {
 		if (sync[i].image_available != VK_NULL_HANDLE) {
@@ -509,7 +524,7 @@ void ZHLN_DestroyFrameSync(const VkDevice device, ZHLN_FrameSync* const sync,
 		sync[i] = (ZHLN_FrameSync){};
 	}
 }
-
+[[nodiscard]]
 bool ZHLN_CreateCommandPool(const VkDevice device, const uint32_t queue_family,
 							ZHLN_CommandPool* const restrict out_pool) {
 	VkCommandPoolCreateInfo info = {
@@ -525,14 +540,14 @@ bool ZHLN_CreateCommandPool(const VkDevice device, const uint32_t queue_family,
 	out_pool->count = 0;
 	return true;
 }
-
+[[nodiscard]]
 bool ZHLN_AllocateCommandBuffers(const VkDevice device, ZHLN_CommandPool* const restrict pool,
 								 const uint32_t count) {
 	if (count > 8) {
 		return false;
 	}
 
-	VkCommandBufferAllocateInfo info = {
+	const VkCommandBufferAllocateInfo info = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
 		.commandPool = pool->pool,
 		.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
@@ -547,12 +562,11 @@ bool ZHLN_AllocateCommandBuffers(const VkDevice device, ZHLN_CommandPool* const 
 	return true;
 }
 
-void ZHLN_ResetCommandPool(const VkDevice device,
-						   const ZHLN_CommandPool* const ZHLN_RESTRICT pool) {
+void ZHLN_ResetCommandPool(const VkDevice device, const ZHLN_CommandPool* const restrict pool) {
 	vkResetCommandPool(device, pool->pool, 0);
 }
 
-void ZHLN_DestroyCommandPool(const VkDevice device, ZHLN_CommandPool* const ZHLN_RESTRICT pool) {
+void ZHLN_DestroyCommandPool(const VkDevice device, ZHLN_CommandPool* const restrict pool) {
 	// Implicitly frees all command buffers allocated from it
 	if (pool->pool != VK_NULL_HANDLE) {
 		vkDestroyCommandPool(device, pool->pool, nullptr);
@@ -564,9 +578,10 @@ void ZHLN_WaitAndResetFence(const VkDevice device, const VkFence fence) {
 	vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
 	vkResetFences(device, 1, &fence);
 }
-
-ZHLN_FrameResult ZHLN_AcquireImage(const VkDevice device, const ZHLN_AcquireDesc* const desc,
-								   uint32_t* const out_image_index) {
+[[nodiscard]]
+ZHLN_FrameResult ZHLN_AcquireImage(const VkDevice device,
+								   const ZHLN_AcquireDesc* const restrict desc,
+								   uint32_t* const restrict out_image_index) {
 	const VkResult result =
 		vkAcquireNextImageKHR(device, desc->swapchain, desc->timeout_ns, desc->image_available,
 							  VK_NULL_HANDLE, out_image_index);
@@ -582,26 +597,26 @@ ZHLN_FrameResult ZHLN_AcquireImage(const VkDevice device, const ZHLN_AcquireDesc
 	}
 }
 
-void ZHLN_SubmitFrame(const VkQueue graphics_queue, const ZHLN_FrameSync* const sync,
+void ZHLN_SubmitFrame(const VkQueue graphics_queue, const ZHLN_FrameSync* const restrict sync,
 					  const VkCommandBuffer cmd) {
-	VkCommandBufferSubmitInfo cmd_info = {
+	const VkCommandBufferSubmitInfo cmd_info = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
 		.commandBuffer = cmd,
 	};
 
-	VkSemaphoreSubmitInfo wait_info = {
+	const VkSemaphoreSubmitInfo wait_info = {
 		.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
 		.semaphore = sync->image_available,
 		.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
 	};
 
-	VkSemaphoreSubmitInfo signal_info = {
+	const VkSemaphoreSubmitInfo signal_info = {
 		.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
 		.semaphore = sync->render_finished,
 		.stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
 	};
 
-	VkSubmitInfo2 submit = {
+	const VkSubmitInfo2 submit = {
 		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
 		.waitSemaphoreInfoCount = 1,
 		.pWaitSemaphoreInfos = &wait_info,
@@ -613,9 +628,9 @@ void ZHLN_SubmitFrame(const VkQueue graphics_queue, const ZHLN_FrameSync* const 
 
 	vkQueueSubmit2(graphics_queue, 1, &submit, sync->in_flight);
 }
-
-ZHLN_FrameResult ZHLN_PresentFrame(const ZHLN_PresentDesc* desc) {
-	VkPresentInfoKHR info = {
+[[nodiscard]]
+ZHLN_FrameResult ZHLN_PresentFrame(const ZHLN_PresentDesc* const restrict desc) {
+	const VkPresentInfoKHR info = {
 		.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
 		.waitSemaphoreCount = 1,
 		.pWaitSemaphores = &desc->render_finished,
@@ -624,7 +639,7 @@ ZHLN_FrameResult ZHLN_PresentFrame(const ZHLN_PresentDesc* desc) {
 		.pImageIndices = &desc->image_index,
 	};
 
-	VkResult result = vkQueuePresentKHR(desc->present_queue, &info);
+	const VkResult result = vkQueuePresentKHR(desc->present_queue, &info);
 	switch (result) {
 		case VK_SUCCESS:
 			return ZHLN_FrameResult_Ok;
@@ -637,12 +652,13 @@ ZHLN_FrameResult ZHLN_PresentFrame(const ZHLN_PresentDesc* desc) {
 	}
 }
 
-VkShaderModule ZHLN_CreateShaderModule(VkDevice device, const ZHLN_ShaderDesc* desc) {
+VkShaderModule ZHLN_CreateShaderModule(const VkDevice device,
+									   const ZHLN_ShaderDesc* const restrict desc) {
 	if (!desc->code || desc->size == 0 || desc->size % 4 != 0) {
 		return VK_NULL_HANDLE;
 	}
 
-	VkShaderModuleCreateInfo info = {
+	const VkShaderModuleCreateInfo info = {
 		.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
 		.codeSize = desc->size,
 		.pCode = desc->code,
@@ -656,7 +672,8 @@ VkShaderModule ZHLN_CreateShaderModule(VkDevice device, const ZHLN_ShaderDesc* d
 	return module;
 }
 
-bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* desc, ZHLN_ShaderStages* out) {
+bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* const desc,
+							 ZHLN_ShaderStages* const out) {
 	out->vert.handle = ZHLN_CreateShaderModule(desc->device, &desc->vert);
 	if (out->vert.handle == VK_NULL_HANDLE) {
 		return false;
@@ -674,28 +691,28 @@ bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* desc, ZHLN_ShaderStage
 	return true;
 }
 
-void ZHLN_DestroyShaderModule(VkDevice device, VkShaderModule module) {
+void ZHLN_DestroyShaderModule(const VkDevice device, const VkShaderModule module) {
 	if (module != VK_NULL_HANDLE) {
 		vkDestroyShaderModule(device, module, nullptr);
 	}
 }
 
-void ZHLN_DestroyShaderStages(VkDevice device, ZHLN_ShaderStages* stages) {
+void ZHLN_DestroyShaderStages(const VkDevice device, ZHLN_ShaderStages* const restrict stages) {
 	ZHLN_DestroyShaderModule(device, stages->vert.handle);
 	ZHLN_DestroyShaderModule(device, stages->frag.handle);
 	*stages = (ZHLN_ShaderStages){};
 }
 
-void ZHLN_PopulateShaderStageInfos(const ZHLN_ShaderStages* stages,
-								   VkPipelineShaderStageCreateInfo* out_stages) {
-	out_stages[0] = (VkPipelineShaderStageCreateInfo){
+void ZHLN_PopulateShaderStageInfos(const ZHLN_ShaderStages* const restrict stages,
+								   VkPipelineShaderStageCreateInfo* const restrict out_stages) {
+	out_stages[0] = (const VkPipelineShaderStageCreateInfo){
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
 		.stage = VK_SHADER_STAGE_VERTEX_BIT,
 		.module = stages->vert.handle,
 		.pName = "main",
 	};
 
-	out_stages[1] = (VkPipelineShaderStageCreateInfo){
+	out_stages[1] = (const VkPipelineShaderStageCreateInfo){
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
 		.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
 		.module = stages->frag.handle,
@@ -703,8 +720,9 @@ void ZHLN_PopulateShaderStageInfos(const ZHLN_ShaderStages* stages,
 	};
 }
 
-VkPipelineLayout ZHLN_CreatePipelineLayout(VkDevice device, const ZHLN_PipelineLayoutDesc* desc) {
-	VkPipelineLayoutCreateInfo info = {
+VkPipelineLayout ZHLN_CreatePipelineLayout(const VkDevice device,
+										   const ZHLN_PipelineLayoutDesc* const restrict desc) {
+	const VkPipelineLayoutCreateInfo info = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
 		.setLayoutCount = desc->set_layout_count,
 		.pSetLayouts = desc->set_layouts,
@@ -719,20 +737,21 @@ VkPipelineLayout ZHLN_CreatePipelineLayout(VkDevice device, const ZHLN_PipelineL
 	return layout;
 }
 
-void ZHLN_DestroyPipelineLayout(VkDevice device, VkPipelineLayout layout) {
+void ZHLN_DestroyPipelineLayout(const VkDevice device, const VkPipelineLayout layout) {
 	if (layout != VK_NULL_HANDLE) {
 		vkDestroyPipelineLayout(device, layout, nullptr);
 	}
 }
-
-VkPipeline ZHLN_CreateGraphicsPipeline(VkDevice device, const ZHLN_GraphicsPipelineDesc* desc) {
+[[nodiscard]]
+VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device,
+									   const ZHLN_GraphicsPipelineDesc* const restrict desc) {
 
 	// --- Shader Stages ---
 	VkPipelineShaderStageCreateInfo shader_stages[2];
 	ZHLN_PopulateShaderStageInfos(desc->stages, shader_stages);
 
 	// --- Vertex Input ---
-	VkPipelineVertexInputStateCreateInfo vertex_input = {
+	const VkPipelineVertexInputStateCreateInfo vertex_input = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
 		.vertexBindingDescriptionCount = desc->vertex_binding_count,
 		.pVertexBindingDescriptions = desc->vertex_bindings,
@@ -741,21 +760,21 @@ VkPipeline ZHLN_CreateGraphicsPipeline(VkDevice device, const ZHLN_GraphicsPipel
 	};
 
 	// --- Input Assembly ---
-	VkPipelineInputAssemblyStateCreateInfo input_assembly = {
+	const VkPipelineInputAssemblyStateCreateInfo input_assembly = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
 		.topology = desc->topology ? desc->topology : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
 		.primitiveRestartEnable = VK_FALSE,
 	};
 
 	// --- Viewport & Scissor (fully dynamic, no hardcoded resolution) ---
-	VkPipelineViewportStateCreateInfo viewport_state = {
+	const VkPipelineViewportStateCreateInfo viewport_state = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
 		.viewportCount = 1,
 		.scissorCount = 1,
 	};
 
 	// --- Rasterizer ---
-	VkPipelineRasterizationStateCreateInfo rasterizer = {
+	const VkPipelineRasterizationStateCreateInfo rasterizer = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
 		.polygonMode = desc->polygon_mode, // Just use the value directly
 		.cullMode = desc->cull_mode,	   // Just use the value directly
@@ -764,13 +783,13 @@ VkPipeline ZHLN_CreateGraphicsPipeline(VkDevice device, const ZHLN_GraphicsPipel
 	};
 
 	// --- Multisampling ---
-	VkPipelineMultisampleStateCreateInfo multisampling = {
+	const VkPipelineMultisampleStateCreateInfo multisampling = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
 		.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
 	};
 
 	// --- Depth/Stencil ---
-	VkPipelineDepthStencilStateCreateInfo depth_stencil = {
+	const VkPipelineDepthStencilStateCreateInfo depth_stencil = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
 		.depthTestEnable = desc->depth_test ? VK_TRUE : VK_FALSE,
 		.depthWriteEnable = desc->depth_write ? VK_TRUE : VK_FALSE,
@@ -778,7 +797,7 @@ VkPipeline ZHLN_CreateGraphicsPipeline(VkDevice device, const ZHLN_GraphicsPipel
 	};
 
 	// --- Color Blend ---
-	VkPipelineColorBlendAttachmentState blend_attachment = {
+	const VkPipelineColorBlendAttachmentState blend_attachment = {
 		.blendEnable = desc->blend_enable ? VK_TRUE : VK_FALSE,
 		.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
 		.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
@@ -790,33 +809,33 @@ VkPipeline ZHLN_CreateGraphicsPipeline(VkDevice device, const ZHLN_GraphicsPipel
 						  VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
 	};
 
-	VkPipelineColorBlendStateCreateInfo color_blend = {
+	const VkPipelineColorBlendStateCreateInfo color_blend = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
 		.attachmentCount = 1,
 		.pAttachments = &blend_attachment,
 	};
 
 	// --- Dynamic State ---
-	VkDynamicState dynamic_states[] = {
+	const VkDynamicState dynamic_states[] = {
 		VK_DYNAMIC_STATE_VIEWPORT,
 		VK_DYNAMIC_STATE_SCISSOR,
 	};
 
-	VkPipelineDynamicStateCreateInfo dynamic_state = {
+	const VkPipelineDynamicStateCreateInfo dynamic_state = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
 		.dynamicStateCount = 2,
 		.pDynamicStates = dynamic_states,
 	};
 
 	// --- Dynamic Rendering (Vulkan 1.3, no VkRenderPass needed) ---
-	VkPipelineRenderingCreateInfo rendering = {
+	const VkPipelineRenderingCreateInfo rendering = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
 		.colorAttachmentCount = 1,
 		.pColorAttachmentFormats = &desc->color_format,
 		.depthAttachmentFormat = desc->depth_format,
 	};
 
-	VkGraphicsPipelineCreateInfo pipeline_info = {
+	const VkGraphicsPipelineCreateInfo pipeline_info = {
 		.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
 		.pNext = &rendering,
 		.stageCount = 2,
@@ -840,14 +859,15 @@ VkPipeline ZHLN_CreateGraphicsPipeline(VkDevice device, const ZHLN_GraphicsPipel
 	return pipeline;
 }
 
-void ZHLN_DestroyPipeline(VkDevice device, VkPipeline pipeline) {
+void ZHLN_DestroyPipeline(const VkDevice device, const VkPipeline pipeline) {
 	if (pipeline != VK_NULL_HANDLE) {
 		vkDestroyPipeline(device, pipeline, nullptr);
 	}
 }
 
-void ZHLN_BeginRendering(VkCommandBuffer cmd, const ZHLN_RenderPassDesc* desc) {
-	VkRenderingAttachmentInfo color_attachment = {
+void ZHLN_BeginRendering(const VkCommandBuffer cmd,
+						 const ZHLN_RenderPassDesc* const restrict desc) {
+	const VkRenderingAttachmentInfo color_attachment = {
 		.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
 		.imageView = desc->target_view,
 		.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -862,7 +882,7 @@ void ZHLN_BeginRendering(VkCommandBuffer cmd, const ZHLN_RenderPassDesc* desc) {
 									 }}},
 	};
 
-	VkRenderingAttachmentInfo depth_attachment = {
+	const VkRenderingAttachmentInfo depth_attachment = {
 		.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
 		.imageView = desc->depth_view,
 		.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
@@ -871,7 +891,7 @@ void ZHLN_BeginRendering(VkCommandBuffer cmd, const ZHLN_RenderPassDesc* desc) {
 		.clearValue = {.depthStencil = {.depth = desc->clear_depth ? desc->clear_depth : 1.0F}},
 	};
 
-	VkRenderingInfo rendering_info = {
+	const VkRenderingInfo rendering_info = {
 		.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
 		.renderArea = {.offset = {0, 0}, .extent = desc->extent},
 		.layerCount = 1,
@@ -882,7 +902,7 @@ void ZHLN_BeginRendering(VkCommandBuffer cmd, const ZHLN_RenderPassDesc* desc) {
 
 	vkCmdBeginRendering(cmd, &rendering_info);
 
-	VkViewport viewport = {
+	const VkViewport viewport = {
 		.x = 0.0F,
 		.y = 0.0F,
 		.width = (float)desc->extent.width,
@@ -890,7 +910,7 @@ void ZHLN_BeginRendering(VkCommandBuffer cmd, const ZHLN_RenderPassDesc* desc) {
 		.minDepth = 0.0F,
 		.maxDepth = 1.0F,
 	};
-	VkRect2D scissor = {{0, 0}, desc->extent};
+	const VkRect2D scissor = {{0, 0}, desc->extent};
 
 	vkCmdSetViewport(cmd, 0, 1, &viewport);
 	vkCmdSetScissor(cmd, 0, 1, &scissor);
@@ -902,34 +922,36 @@ void ZHLN_EndRendering(VkCommandBuffer cmd) {
 
 /* --- FRAME HELPERS --- */
 
-void ZHLN_WaitAndResetFrame(VkDevice device, VkFence in_flight_fence, ZHLN_CommandPool* pool) {
+void ZHLN_WaitAndResetFrame(const VkDevice device, const VkFence in_flight_fence,
+							const ZHLN_CommandPool* const restrict pool) {
 	vkWaitForFences(device, 1, &in_flight_fence, VK_TRUE, UINT64_MAX);
 	vkResetFences(device, 1, &in_flight_fence);
 	ZHLN_ResetCommandPool(device, pool);
 }
 
-void ZHLN_BeginCommandBuffer(VkCommandBuffer cmd) {
-	VkCommandBufferBeginInfo info = {
+void ZHLN_BeginCommandBuffer(const VkCommandBuffer cmd) {
+	const VkCommandBufferBeginInfo info = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
 		.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
 	};
 	vkBeginCommandBuffer(cmd, &info);
 }
 
-void ZHLN_EndCommandBuffer(VkCommandBuffer cmd) {
+void ZHLN_EndCommandBuffer(const VkCommandBuffer cmd) {
 	vkEndCommandBuffer(cmd);
 }
 
 /* --- PUSH CONSTANT HELPERS --- */
 
-void ZHLN_PushConstants(VkCommandBuffer cmd, VkPipelineLayout layout, VkShaderStageFlags stages,
-						const void* data, uint32_t size) {
+void ZHLN_PushConstants(const VkCommandBuffer cmd, const VkPipelineLayout layout,
+						const VkShaderStageFlags stages, const void* const restrict data,
+						const uint32_t size) {
 	vkCmdPushConstants(cmd, layout, stages, 0, size, data);
 }
 
 /* --- ERROR HELPERS --- */
 
-const char* ZHLN_VkResultString(VkResult result) {
+const char* ZHLN_VkResultString(const VkResult result) {
 	switch (result) {
 		case VK_SUCCESS:
 			return "VK_SUCCESS";
@@ -998,25 +1020,26 @@ const char* ZHLN_VkResultString(VkResult result) {
 	}
 }
 
-void ZHLN_CmdCopyBuffer(VkCommandBuffer cmd, const ZHLN_BufferCopyDesc* desc) {
+void ZHLN_CmdCopyBuffer(const VkCommandBuffer cmd, const ZHLN_BufferCopyDesc* const restrict desc) {
 	// Vulkan 1.3 Copy 2 API
-	VkBufferCopy2 region = {.sType = VK_STRUCTURE_TYPE_BUFFER_COPY_2,
-							.srcOffset = desc->src_offset,
-							.dstOffset = desc->dst_offset,
-							.size = desc->size};
+	const VkBufferCopy2 region = {.sType = VK_STRUCTURE_TYPE_BUFFER_COPY_2,
+								  .srcOffset = desc->src_offset,
+								  .dstOffset = desc->dst_offset,
+								  .size = desc->size};
 
-	VkCopyBufferInfo2 copy_info = {.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2,
-								   .srcBuffer = desc->src,
-								   .dstBuffer = desc->dst,
-								   .regionCount = 1,
-								   .pRegions = &region};
+	const VkCopyBufferInfo2 copy_info = {.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2,
+										 .srcBuffer = desc->src,
+										 .dstBuffer = desc->dst,
+										 .regionCount = 1,
+										 .pRegions = &region};
 
 	vkCmdCopyBuffer2(cmd, &copy_info);
 }
 
-void ZHLN_CmdImageBarrier(VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc* desc) {
+void ZHLN_CmdImageBarrier(const VkCommandBuffer cmd,
+						  const ZHLN_ImageBarrierDesc* const restrict desc) {
 	// Vulkan 1.3 Synchronization 2 API
-	VkImageMemoryBarrier2 barrier = {
+	const VkImageMemoryBarrier2 barrier = {
 		.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
 		.srcStageMask = desc->src_stage,
 		.srcAccessMask = desc->src_access,
@@ -1037,15 +1060,16 @@ void ZHLN_CmdImageBarrier(VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc* desc
 			},
 	};
 
-	VkDependencyInfo dependency_info = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-										.imageMemoryBarrierCount = 1,
-										.pImageMemoryBarriers = &barrier};
+	const VkDependencyInfo dependency_info = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+											  .imageMemoryBarrierCount = 1,
+											  .pImageMemoryBarriers = &barrier};
 
 	vkCmdPipelineBarrier2(cmd, &dependency_info);
 }
 
-void ZHLN_CmdCopyBufferToImage(VkCommandBuffer cmd, const ZHLN_BufferImageCopyDesc* desc) {
-	VkBufferImageCopy2 region = {
+void ZHLN_CmdCopyBufferToImage(const VkCommandBuffer cmd,
+							   const ZHLN_BufferImageCopyDesc* const restrict desc) {
+	const VkBufferImageCopy2 region = {
 		.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
 		.bufferOffset = desc->buffer_offset,
 		.bufferRowLength = 0,	// tightly packed
@@ -1061,7 +1085,7 @@ void ZHLN_CmdCopyBufferToImage(VkCommandBuffer cmd, const ZHLN_BufferImageCopyDe
 		.imageExtent = {desc->width, desc->height, 1},
 	};
 
-	VkCopyBufferToImageInfo2 copy_info = {
+	const VkCopyBufferToImageInfo2 copy_info = {
 		.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
 		.srcBuffer = desc->buffer,
 		.dstImage = desc->image,
@@ -1072,15 +1096,15 @@ void ZHLN_CmdCopyBufferToImage(VkCommandBuffer cmd, const ZHLN_BufferImageCopyDe
 
 	vkCmdCopyBufferToImage2(cmd, &copy_info);
 }
-
-VkSemaphore ZHLN_CreateSemaphore(VkDevice device) {
-	VkSemaphoreCreateInfo info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+[[nodiscard]]
+VkSemaphore ZHLN_CreateSemaphore(const VkDevice device) {
+	const VkSemaphoreCreateInfo info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
 	VkSemaphore semaphore = VK_NULL_HANDLE;
 	vkCreateSemaphore(device, &info, nullptr, &semaphore);
 	return semaphore;
 }
 
-void ZHLN_DestroySemaphore(VkDevice device, VkSemaphore semaphore) {
+void ZHLN_DestroySemaphore(const VkDevice device, const VkSemaphore semaphore) {
 	if (semaphore != VK_NULL_HANDLE) {
 		vkDestroySemaphore(device, semaphore, nullptr);
 	}

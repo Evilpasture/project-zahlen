@@ -307,8 +307,8 @@ void RenderContext::BeginFrame() {
 
 	// Transition Swapchain Image
 	VkImage img = _impl->swapchain.Get().images[_impl->current_image_index];
-	Vk::TransitionLayout(_impl->current_cmd, img, VK_IMAGE_LAYOUT_UNDEFINED,
-						 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+	Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+		_impl->current_cmd, img);
 }
 
 void RenderContext::EndFrame() {
@@ -320,8 +320,8 @@ void RenderContext::EndFrame() {
 
 	// Transition Swapchain Image for Presentation
 	VkImage img = _impl->swapchain.Get().images[_impl->current_image_index];
-	Vk::TransitionLayout(_impl->current_cmd, img, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-						 VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+	Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(
+		_impl->current_cmd, img);
 	ZHLN_EndCommandBuffer(_impl->current_cmd);
 
 	const ZHLN_FrameSync& s = _impl->sync[_impl->frame_index];

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RenderCore.h"
+#include "Utils.hpp"
 
 #include <array>
 #include <concepts>
@@ -158,26 +159,38 @@ class Context {
 										const ZHLN_DeviceSelectDesc& select_desc,
 										const ZHLN_DeviceDesc& device_desc) noexcept {
 		Context ctx;
-		ctx._instance = ZHLN_CreateInstance(&instance_desc);
 
-		// CRITICAL FIX: Bail out if instance creation failed
+		// 1. Create Instance
+		ctx._instance = ZHLN_CreateInstance(&instance_desc);
 		if (ctx._instance == VK_NULL_HANDLE) {
 			return {};
 		}
 
 		ctx._surface = select_desc.surface;
 
-		ZHLN_DeviceSelectDesc safe_select = select_desc;
-		safe_select.instance = ctx._instance;
+		// 2. Select Physical Device
+		// Create a local const descriptor to inject the newly created instance handle
+		const ZHLN_DeviceSelectDesc safe_select = {
+			.instance = ctx._instance,
+			.surface = select_desc.surface,
+			.score_fn = select_desc.score_fn,
+			.score_userdata = select_desc.score_userdata,
+		};
 		ctx._physical = ZHLN_SelectPhysicalDevice(&safe_select);
 
-		// CRITICAL FIX: Bail out if no GPU found
 		if (ctx._physical.handle == VK_NULL_HANDLE) {
 			return {};
 		}
 
-		ZHLN_DeviceDesc safe_device = device_desc;
-		safe_device.physical = &ctx._physical;
+		// 3. Create Logical Device
+		// Create a local const descriptor to inject the physical device snapshot
+		const ZHLN_DeviceDesc safe_device = {
+			.physical = &ctx._physical,
+			.extensions = device_desc.extensions,
+			.extension_count = device_desc.extension_count,
+			.features = device_desc.features,
+			.enable_validation = device_desc.enable_validation,
+		};
 		ctx._device = ZHLN_CreateDevice(&safe_device);
 
 		return ctx;
@@ -249,12 +262,27 @@ class Swapchain {
 	explicit operator bool() const noexcept { return Valid(); }
 
 	bool Rebuild(const ZHLN_SwapchainDesc& desc) noexcept {
-		ZHLN_SwapchainDesc rebuilt = desc;
-		rebuilt.old_swapchain = _raw.handle;
+		// We create a copy of the descriptor 'snapshot'
+		// and explicitly override the 'old_swapchain' field.
+		// In C++20/23, this is an aggregate initialization.
+		const ZHLN_SwapchainDesc rebuilt = {
+			.device = desc.device,
+			.physical = desc.physical,
+			.surface = desc.surface,
+			.width = desc.width,
+			.height = desc.height,
+			.vsync = desc.vsync,
+			.old_swapchain = _raw.handle // The one dynamic change
+		};
+
 		ZHLN_Swapchain next = ZHLN_CreateSwapchain(&rebuilt);
 		if (!next.handle) {
 			return false;
 		}
+
+		// In Vulkan, the 'old_swapchain' is often retired by the driver
+		// during the creation of 'next'.
+		// Manually destroying it here.
 		Destroy();
 		_raw = next;
 		return true;
@@ -436,48 +464,50 @@ class CommandPool {
 
 class ShaderStages {
   public:
-    // Default constructor is pure state initialization
-    constexpr ShaderStages() noexcept = default;
+	// Default constructor is pure state initialization
+	constexpr ShaderStages() noexcept = default;
 
-    // Simple handle copying is constexpr-safe
-    constexpr ShaderStages(VkDevice device, ZHLN_ShaderStages raw) noexcept 
-        : _device(device), _raw(raw) {}
+	// Simple handle copying is constexpr-safe
+	constexpr ShaderStages(VkDevice device, ZHLN_ShaderStages raw) noexcept
+		: _device(device), _raw(raw) {}
 
-    // Calls ZHLN_DestroyShaderStages (C-backend)
-    ~ShaderStages() noexcept {
-        if (_device != VK_NULL_HANDLE) {
-            ZHLN_DestroyShaderStages(_device, &_raw);
-        }
-    }
+	// Calls ZHLN_DestroyShaderStages (C-backend)
+	~ShaderStages() noexcept {
+		if (_device != VK_NULL_HANDLE) {
+			ZHLN_DestroyShaderStages(_device, &_raw);
+		}
+	}
 
-    ShaderStages(const ShaderStages&) = delete;
-    ShaderStages& operator=(const ShaderStages&) = delete;
+	ShaderStages(const ShaderStages&) = delete;
+	ShaderStages& operator=(const ShaderStages&) = delete;
 
-    // std::exchange on handles is constexpr since C++20
-    constexpr ShaderStages(ShaderStages&& other) noexcept
-        : _device(std::exchange(other._device, VK_NULL_HANDLE)),
-          _raw(std::exchange(other._raw, {})) {}
+	// std::exchange on handles is constexpr since C++20
+	constexpr ShaderStages(ShaderStages&& other) noexcept
+		: _device(std::exchange(other._device, VK_NULL_HANDLE)),
+		  _raw(std::exchange(other._raw, {})) {}
 
-    // Calls ZHLN_CreateShaderStages (C-backend)
-    [[nodiscard]] static ShaderStages Create(VkDevice device, const ZHLN_ShaderDesc& vert,
-                                             const ZHLN_ShaderDesc& frag) noexcept {
-        ZHLN_ShaderStagesDesc desc = {.device = device, .vert = vert, .frag = frag};
-        ZHLN_ShaderStages stages{};
-        if (!ZHLN_CreateShaderStages(&desc, &stages)) {
-            return {};
-        }
-        return {device, stages};
-    }
+	// Calls ZHLN_CreateShaderStages (C-backend)
+	[[nodiscard]] static ShaderStages Create(VkDevice device, const ZHLN_ShaderDesc& vert,
+											 const ZHLN_ShaderDesc& frag) noexcept {
+		ZHLN_ShaderStagesDesc desc = {.device = device, .vert = vert, .frag = frag};
+		ZHLN_ShaderStages stages{};
+		if (!ZHLN_CreateShaderStages(&desc, &stages)) {
+			return {};
+		}
+		return {device, stages};
+	}
 
-    // Just returning an address
-    [[nodiscard]] constexpr const ZHLN_ShaderStages* Get() const noexcept { return &_raw; }
+	// Just returning an address
+	[[nodiscard]] constexpr const ZHLN_ShaderStages* Get() const noexcept { return &_raw; }
 
-    // Simple handle comparison
-    [[nodiscard]] constexpr bool Valid() const noexcept { return _raw.vert.handle != VK_NULL_HANDLE; }
+	// Simple handle comparison
+	[[nodiscard]] constexpr bool Valid() const noexcept {
+		return _raw.vert.handle != VK_NULL_HANDLE;
+	}
 
   private:
-    VkDevice _device = VK_NULL_HANDLE;
-    ZHLN_ShaderStages _raw{};
+	VkDevice _device = VK_NULL_HANDLE;
+	ZHLN_ShaderStages _raw{};
 };
 
 // ============================================================================
@@ -503,49 +533,75 @@ inline void ImageBarrier(VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc& desc)
 	ZHLN_CmdImageBarrier(cmd, &desc);
 }
 
-inline void TransitionLayout(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout,
-							 VkImageLayout new_layout,
+template <VkImageLayout Layout> struct LayoutTraits;
+
+template <> struct LayoutTraits<VK_IMAGE_LAYOUT_UNDEFINED> {
+	// No access needed because we are discarding the contents
+	static constexpr VkAccessFlags2 access = 0;
+
+	// TOP_OF_PIPE means the transition can happen immediately,
+	// without waiting for any previous GPU work to finish.
+	static constexpr VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+};
+
+// Specialization for Color Attachment
+template <> struct LayoutTraits<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {
+	static constexpr VkAccessFlags2 access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+	static constexpr VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+};
+
+// Specialization for Shader Read
+template <> struct LayoutTraits<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
+	static constexpr VkAccessFlags2 access = VK_ACCESS_2_SHADER_READ_BIT;
+	static constexpr VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+};
+
+// Specialization for Presentation (The hand-off to the OS)
+template <> struct LayoutTraits<VK_IMAGE_LAYOUT_PRESENT_SRC_KHR> {
+	// We aren't doing anything to the image; we're just giving it away.
+	static constexpr VkAccessFlags2 access = VK_ACCESS_2_NONE;
+
+	// Presentation happens after the color attachment output is finished.
+	static constexpr VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+};
+
+// Specialization for Depth Attachment
+template <> struct LayoutTraits<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> {
+	static constexpr VkAccessFlags2 access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+	static constexpr VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT;
+};
+
+// For Transfer (Blitting / Copying)
+template <> struct LayoutTraits<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL> {
+	static constexpr VkAccessFlags2 access = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+	static constexpr VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+};
+
+template <> struct LayoutTraits<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL> {
+	static constexpr VkAccessFlags2 access = VK_ACCESS_2_TRANSFER_READ_BIT;
+	static constexpr VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+};
+
+template <VkImageLayout OldLayout, VkImageLayout NewLayout>
+inline void TransitionLayout(VkCommandBuffer cmd, VkImage image,
 							 VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) noexcept {
-	VkAccessFlags2 src_access = 0;
-	VkPipelineStageFlags2 src_stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
 
-	if (old_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-		src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-		src_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-	} else if (old_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-		src_access = VK_ACCESS_2_SHADER_READ_BIT;
-		src_stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-	} else if (old_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
-		src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-		src_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-	} else if (old_layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
-		src_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-		src_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-					VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
-	}
+	using Src = LayoutTraits<OldLayout>;
+	using Dst = LayoutTraits<NewLayout>;
 
-	ZHLN_ImageBarrierDesc barrier = {
+	// This entire struct is populated with static constants.
+	// The compiler will fold this into a single block of immediate values.
+	const ZHLN_ImageBarrierDesc barrier = {
 		.image = image,
-		.src_access = src_access,
-		.dst_access = 0,
-		.src_layout = old_layout,
-		.dst_layout = new_layout,
-		.src_stage = src_stage,
-		.dst_stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+		.src_access = Src::access,
+		.dst_access = Dst::access,
+		.src_layout = OldLayout,
+		.dst_layout = NewLayout,
+		.src_stage = Src::stage,
+		.dst_stage = Dst::stage,
 		.aspect = aspect,
 	};
 
-	if (new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-		barrier.dst_access = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-		barrier.dst_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-	} else if (new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-		barrier.dst_access = VK_ACCESS_2_SHADER_READ_BIT;
-		barrier.dst_stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-	} else if (new_layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL) {
-		barrier.dst_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-		barrier.dst_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-							VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
-	}
 	ZHLN_CmdImageBarrier(cmd, &barrier);
 }
 
@@ -570,8 +626,8 @@ ZHLN_FrameResult DrawFrame(const Context& ctx, Swapchain& swapchain, FrameSync<N
 						   Rebuild&& rebuild) noexcept {
 
 	const ZHLN_FrameSync& s = sync[frame_index];
-	ZHLN_CommandPool& pool = pools[frame_index];
-	VkCommandBuffer cmd = pools.Cmd(frame_index);
+	const ZHLN_CommandPool& pool = pools[frame_index];
+	const VkCommandBuffer cmd = pools.Cmd(frame_index);
 
 	ZHLN_WaitAndResetFrame(ctx.Device(), s.in_flight, &pool);
 
@@ -649,24 +705,33 @@ class Surface {
 // Add a helper for the "One Semaphore Per Swapchain Image" pattern
 class SemaphorePool {
   public:
-	SemaphorePool() = default;
+	SemaphorePool() noexcept = default;
 
-	void Rebuild(VkDevice device, uint32_t count) {
-		_semaphores.clear(); // RAII handles destroy themselves
-		_semaphores.reserve(count);
-		for (uint32_t i = 0; i < count; ++i) {
-			_semaphores.emplace_back(device, ZHLN_CreateSemaphore(device));
+	// We don't need clear/reserve logic anymore
+	void Rebuild(VkDevice device, uint32_t count) noexcept {
+		// Destroy existing if necessary
+		for (uint32_t i = 0; i < _count; ++i) {
+			ZHLN_DestroySemaphore(device, _semaphores[i]);
+		}
+
+		// Clamp to our architectural limit
+		_count = Clamp(count, 0U, 8U);
+
+		for (uint32_t i = 0; i < _count; ++i) {
+			_semaphores[i] = ZHLN_CreateSemaphore(device);
 		}
 	}
 
-	VkSemaphore operator[](uint32_t index) const {
-		return _semaphores[index % _semaphores.size()].Get();
+	// Still provides the safety you want
+	[[nodiscard]] VkSemaphore operator[](uint32_t index) const noexcept {
+		return _semaphores[index % _count];
 	}
 
-	[[nodiscard]] size_t Size() const { return _semaphores.size(); }
+	[[nodiscard]] uint32_t Size() const noexcept { return _count; }
 
   private:
-	std::vector<Semaphore> _semaphores;
+	VkSemaphore _semaphores[8] = {}; // Fixed stack-adjacent array
+	uint32_t _count = 0;
 };
 
 // ============================================================================

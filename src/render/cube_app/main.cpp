@@ -345,13 +345,13 @@ int main() {
 
 		auto record_cb = [&](VkCommandBuffer cmd, uint32_t image_index) {
 			VkImage img = swapchain.Get().images[image_index];
-			ZHLN::Vk::TransitionLayout(cmd, img, VK_IMAGE_LAYOUT_UNDEFINED,
-									   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+			ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED,
+									   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, img);
 
 			if (depth_view != VK_NULL_HANDLE && !depth_initialized) {
-				ZHLN::Vk::TransitionLayout(cmd, depth_image.Handle(), VK_IMAGE_LAYOUT_UNDEFINED,
-										   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-										   VK_IMAGE_ASPECT_DEPTH_BIT);
+				ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED,
+										   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+					cmd, depth_image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
 				depth_initialized = true;
 			}
 
@@ -370,8 +370,8 @@ int main() {
 				vkCmdDraw(cmd, static_cast<uint32_t>(cube_indices.size()), 1, 0, 0);
 			}
 
-			ZHLN::Vk::TransitionLayout(cmd, img, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-									   VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+			ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+									   VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, img);
 		};
 
 		const ZHLN_FrameSync& frame_sync = sync[frame_index];

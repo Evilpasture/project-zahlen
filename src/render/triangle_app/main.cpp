@@ -162,8 +162,8 @@ int main() {
 
 		auto record_cb = [&](VkCommandBuffer cmd, uint32_t image_index) {
 			VkImage img = swapchain.Get().images[image_index];
-			ZHLN::Vk::TransitionLayout(cmd, img, VK_IMAGE_LAYOUT_UNDEFINED,
-									   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+			ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED,
+									   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, img);
 
 			ZHLN_RenderPassDesc pass = {.target_view = swapchain.Get().views[image_index],
 										.depth_view = VK_NULL_HANDLE,
@@ -175,8 +175,8 @@ int main() {
 				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
 				vkCmdDraw(cmd, 3, 1, 0, 0);
 			}
-			ZHLN::Vk::TransitionLayout(cmd, img, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-									   VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+			ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+									   VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, img);
 		};
 
 		const ZHLN_FrameSync& frame_sync = sync[frame_index];
