@@ -16,8 +16,9 @@ class Allocator {
   public:
 	Allocator() = default;
 	~Allocator() noexcept {
-		if (_handle)
+		if (_handle) {
 			vmaDestroyAllocator(_handle);
+		}
 	}
 
 	Allocator(const Allocator&) = delete;
@@ -27,8 +28,9 @@ class Allocator {
 
 	Allocator& operator=(Allocator&& other) noexcept {
 		if (this != &other) {
-			if (_handle)
+			if (_handle) {
 				vmaDestroyAllocator(_handle);
+			}
 			_handle = std::exchange(other._handle, nullptr);
 		}
 		return *this;
@@ -111,8 +113,9 @@ class Buffer {
 	Buffer() = default;
 
 	~Buffer() noexcept {
-		if (_handle != VK_NULL_HANDLE)
+		if (_handle != VK_NULL_HANDLE) {
 			vmaDestroyBuffer(_allocator, _handle, _allocation);
+		}
 	}
 
 	Buffer(const Buffer&) = delete;
@@ -124,8 +127,9 @@ class Buffer {
 
 	Buffer& operator=(Buffer&& other) noexcept {
 		if (this != &other) {
-			if (_handle != VK_NULL_HANDLE)
+			if (_handle != VK_NULL_HANDLE) {
 				vmaDestroyBuffer(_allocator, _handle, _allocation);
+			}
 			_allocator = other._allocator;
 			_handle = std::exchange(other._handle, VK_NULL_HANDLE);
 			_allocation = std::exchange(other._allocation, nullptr);
@@ -159,7 +163,7 @@ class Buffer {
 			.memoryTypeBits = 0,
 			.pool = nullptr,
 			.pUserData = nullptr,
-			.priority = 0.0f,
+			.priority = 0.0F,
 			.minAlignment = 0 // 0 = Use default Vulkan requirements
 		};
 
@@ -221,8 +225,9 @@ inline Buffer UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer
 	// 1. Create staging buffer
 	Buffer staging = Buffer::Create(allocator, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
 									VMA_MEMORY_USAGE_CPU_ONLY);
-	if (!staging.Valid())
+	if (!staging.Valid()) {
 		return {};
+	}
 
 	// 2. Map and copy data
 	{
@@ -258,8 +263,9 @@ class Image {
   public:
 	Image() = default;
 	~Image() {
-		if (_handle)
+		if (_handle) {
 			vmaDestroyImage(_allocator, _handle, _allocation);
+		}
 	}
 
 	// Move only
@@ -268,8 +274,9 @@ class Image {
 		  _allocation(std::exchange(other._allocation, nullptr)) {}
 	Image& operator=(Image&& other) noexcept {
 		if (this != &other) {
-			if (_handle)
+			if (_handle) {
 				vmaDestroyImage(_allocator, _handle, _allocation);
+			}
 			_allocator = other._allocator;
 			_handle = std::exchange(other._handle, nullptr);
 			_allocation = std::exchange(other._allocation, nullptr);
@@ -284,8 +291,9 @@ class Image {
 		VmaAllocationCreateInfo alloc_info = {};
 		alloc_info.usage = mem_usage;
 		if (vmaCreateImage(allocator, &info, &alloc_info, &img._handle, &img._allocation,
-						   nullptr) != VK_SUCCESS)
+						   nullptr) != VK_SUCCESS) {
 			return {};
+		}
 		return img;
 	}
 

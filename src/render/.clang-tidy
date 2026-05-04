@@ -10,44 +10,85 @@ Checks: >
   -readability-magic-numbers,
   -readability-identifier-length,
   -bugprone-easily-swappable-parameters,
-  -readability-implicit-bool-conversion
+  -readability-implicit-bool-conversion,
+  -readability-function-cognitive-complexity
 
+# Treat all warnings as errors to ensure Zero-Overhead quality
 WarningsAsErrors: "*"
 
 CheckOptions:
-  # --- PUBLIC FUNCTIONS (ZHLN_CreateDevice) ---
+  # --- C PUBLIC API (ZHLN_CreateDevice) ---
+  # Enforces the library prefix for global visibility
   - key:             readability-identifier-naming.FunctionCase
     value:           'PascalCase'
   - key:             readability-identifier-naming.FunctionPrefix
-    value:           'ZHLN_'
-
-  # --- INTERNAL FUNCTIONS (ZHLN_Internal_DebugCallback) ---
-  - key:             readability-identifier-naming.StaticFunctionCase
-    value:           'PascalCase'
-  - key:             readability-identifier-naming.StaticFunctionPrefix
-    value:           'ZHLN_Internal_'
-
-  # --- CONSTANTS (ZHLN_DEFAULT_DESC) ---
-  - key:             readability-identifier-naming.GlobalConstantCase
-    value:           'UPPER_CASE'
-  - key:             readability-identifier-naming.GlobalConstantPrefix
-    value:           'ZHLN_'
-
-  # --- TYPES (ZHLN_InstanceDesc) ---
-  - key:             readability-identifier-naming.StructCase
-    value:           'PascalCase'
-  - key:             readability-identifier-naming.StructPrefix
     value:           'ZHLN_'
   - key:             readability-identifier-naming.TypedefCase
     value:           'PascalCase'
   - key:             readability-identifier-naming.TypedefPrefix
     value:           'ZHLN_'
+  - key:             readability-identifier-naming.GlobalConstantCase
+    value:           'UPPER_CASE'
+  - key:             readability-identifier-naming.GlobalConstantPrefix
+    value:           'ZHLN_'
 
-  # --- VARIABLES (Local variables should be snake_case) ---
+  # --- C INTERNAL LOGIC (ZHLN_Internal_DebugCallback) ---
+  # Forces static helpers to be clearly marked as private
+  - key:             readability-identifier-naming.StaticFunctionCase
+    value:           'PascalCase'
+  - key:             readability-identifier-naming.StaticFunctionPrefix
+    value:           'ZHLN_Internal_'
+
+  # --- C++ RAII LAYER (ZHLN::Vk::Handle) ---
+  # Classes and Aliases in namespaces do NOT require the ZHLN_ prefix
+  - key:             readability-identifier-naming.NamespaceCase
+    value:           'PascalCase'
+  - key:             readability-identifier-naming.ClassCase
+    value:           'PascalCase'
+  - key:             readability-identifier-naming.StructCase
+    value:           'PascalCase'
+  - key:             readability-identifier-naming.TypeAliasCase
+    value:           'PascalCase'
+  - key:             readability-identifier-naming.TemplateParameterCase
+    value:           'PascalCase'
+
+  # --- C++ MEMBER FUNCTIONS (Handle::Get) ---
+  # Methods inside classes should be PascalCase but have NO prefix
+  - key:             readability-identifier-naming.MethodCase
+    value:           'PascalCase'
+  - key:             readability-identifier-naming.MethodPrefix
+    value:           ''
+
+  # --- C++ HELPER FUNCTIONS (Inside namespaces) ---
+  # Functions like ZHLN::Vk::QuerySwapchainSupport skip the prefix
+  - key:             readability-identifier-naming.NamespaceFunctionCase
+    value:           'PascalCase'
+  - key:             readability-identifier-naming.NamespaceFunctionPrefix
+    value:           ''
+
+  - key:             readability-identifier-naming.InlineFunctionCase
+    value:           'PascalCase'
+  - key:             readability-identifier-naming.InlineFunctionPrefix
+    value:           ''
+
+  - key:             readability-identifier-naming.ConstexprFunctionCase
+    value:           'PascalCase'
+  - key:             readability-identifier-naming.ConstexprFunctionPrefix
+    value:           ''
+
+  # --- LOCAL HYGIENE ---
   - key:             readability-identifier-naming.VariableCase
     value:           'lower_case'
+  - key:             readability-identifier-naming.ParameterCase
+    value:           'lower_case'
   
-  # --- STRUCT MEMBERS (sType, pNext - Vulkan style) ---
+  # --- VULKAN COMPATIBILITY (sType, pNext) ---
+  # Allows camelBack to match the Vulkan SDK naming
   - key:             readability-identifier-naming.StructMemberCase
     value:           'camelBack'
+
+  # --- READABILITY ---
+  # Forces braces even for single-line 'if' statements (security best practice)
+  - key:             readability-braces-around-statements.ShortStatementLines
+    value:           '1'
 ---

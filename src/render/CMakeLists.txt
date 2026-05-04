@@ -14,6 +14,22 @@ add_library(zahlen_render STATIC
     Utils.h
 )
 
+# --- OPTIONAL CLANG-TIDY SUPPORT ---
+option(ZHLN_ENABLE_CLANG_TIDY "Run Clang-Tidy analysis during compilation" OFF)
+
+if(ZHLN_ENABLE_CLANG_TIDY)
+    find_program(CLANG_TIDY_EXE NAMES clang-tidy)
+    if(CLANG_TIDY_EXE)
+        # CMake will now automatically look for the .clang-tidy file in the directory
+        set_target_properties(zahlen_render PROPERTIES
+            C_CLANG_TIDY "${CLANG_TIDY_EXE}"
+            CXX_CLANG_TIDY "${CLANG_TIDY_EXE}"
+        )
+    else()
+        message(WARNING "zahlen_render: Clang-Tidy requested but executable not found.")
+    endif()
+endif()
+
 set_source_files_properties(RenderCore.c PROPERTIES
     LANGUAGE C
     C_STANDARD 23
@@ -52,63 +68,41 @@ if(BUILD_TESTING)
 endif()
 
 # ----------------------------------------------------------------------------
-# Triangle App
+# Triangle and Cube Apps
 # ----------------------------------------------------------------------------
 
-# Find the glslangValidator compiler included in the Vulkan SDK
 find_program(GLSL_COMPILER glslangValidator HINTS $ENV{VULKAN_SDK}/Bin)
 
-set(SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/triangle_app")
-set(VERT_SRC "${SHADER_DIR}/triangle.vert")
-set(FRAG_SRC "${SHADER_DIR}/triangle.frag")
+# Shaders
+function(compile_shader SHADER_PATH OUTPUT_VAR)
+    get_filename_component(FILE_NAME ${SHADER_PATH} NAME)
+    set(SPV_OUT "${CMAKE_CURRENT_BINARY_DIR}/${FILE_NAME}.spv")
+    add_custom_command(
+        OUTPUT "${SPV_OUT}"
+        COMMAND ${GLSL_COMPILER} -V "${SHADER_PATH}" -o "${SPV_OUT}"
+        DEPENDS "${SHADER_PATH}"
+        COMMENT "Compiling ${FILE_NAME}"
+    )
+    set(${OUTPUT_VAR} "${SPV_OUT}" PARENT_SCOPE)
+endfunction()
 
-# Define custom commands to compile the shaders to .spv
-add_custom_command(
-    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/triangle.vert.spv"
-    COMMAND ${GLSL_COMPILER} -V ${VERT_SRC} -o "${CMAKE_CURRENT_BINARY_DIR}/triangle.vert.spv"
-    DEPENDS ${VERT_SRC}
-)
+compile_shader("${CMAKE_CURRENT_SOURCE_DIR}/triangle_app/triangle.vert" TRI_VERT_SPV)
+compile_shader("${CMAKE_CURRENT_SOURCE_DIR}/triangle_app/triangle.frag" TRI_FRAG_SPV)
+compile_shader("${CMAKE_CURRENT_SOURCE_DIR}/cube_app/cube.vert" CUBE_VERT_SPV)
+compile_shader("${CMAKE_CURRENT_SOURCE_DIR}/cube_app/cube.frag" CUBE_FRAG_SPV)
 
-add_custom_command(
-    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/triangle.frag.spv"
-    COMMAND ${GLSL_COMPILER} -V ${FRAG_SRC} -o "${CMAKE_CURRENT_BINARY_DIR}/triangle.frag.spv"
-    DEPENDS ${FRAG_SRC}
-)
-
-add_executable(zahlen_triangle
-    triangle_app/main.cpp
-    "${CMAKE_CURRENT_BINARY_DIR}/triangle.vert.spv"
-    "${CMAKE_CURRENT_BINARY_DIR}/triangle.frag.spv"
-)
-
+# Triangle Executable
+add_executable(zahlen_triangle triangle_app/main.cpp ${TRI_VERT_SPV} ${TRI_FRAG_SPV})
 target_link_libraries(zahlen_triangle PRIVATE zahlen_render Vulkan::Vulkan)
 target_include_directories(zahlen_triangle PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(zahlen_triangle PRIVATE cxx_std_23)
 
-add_custom_command(
-    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/cube.vert.spv"
-    COMMAND ${GLSL_COMPILER} -V ${CMAKE_CURRENT_SOURCE_DIR}/cube_app/cube.vert -o "${CMAKE_CURRENT_BINARY_DIR}/cube.vert.spv"
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/cube_app/cube.vert
-)
-
-add_custom_command(
-    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/cube.frag.spv"
-    COMMAND ${GLSL_COMPILER} -V ${CMAKE_CURRENT_SOURCE_DIR}/cube_app/cube.frag -o "${CMAKE_CURRENT_BINARY_DIR}/cube.frag.spv"
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/cube_app/cube.frag
-)
-
-add_executable(zahlen_cube
-    cube_app/main.cpp
-    "${CMAKE_CURRENT_BINARY_DIR}/cube.vert.spv"
-    "${CMAKE_CURRENT_BINARY_DIR}/cube.frag.spv"
-)
-
+# Cube Executable
+add_executable(zahlen_cube cube_app/main.cpp ${CUBE_VERT_SPV} ${CUBE_FRAG_SPV})
 target_link_libraries(zahlen_cube PRIVATE zahlen_render Vulkan::Vulkan)
 target_include_directories(zahlen_cube PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(zahlen_cube PRIVATE cxx_std_23)
 
+# Windows dependencies
+target_link_libraries(zahlen_triangle PRIVATE user32.lib kernel32.lib)
 target_link_libraries(zahlen_cube PRIVATE user32.lib kernel32.lib)
-
-if(MSVC) # Required for Win32 subsystem API links
-    target_link_libraries(zahlen_triangle PRIVATE user32.lib kernel32.lib)
-endif()

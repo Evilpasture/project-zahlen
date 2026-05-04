@@ -38,8 +38,9 @@ template <typename T, auto DeleterFn> class Handle {
 	explicit Handle(T raw) noexcept : _raw(raw) {}
 
 	~Handle() noexcept {
-		if (_raw != VK_NULL_HANDLE)
+		if (_raw != VK_NULL_HANDLE) {
 			DeleterFn(_raw);
+		}
 	}
 
 	Handle(const Handle&) = delete;
@@ -48,8 +49,9 @@ template <typename T, auto DeleterFn> class Handle {
 	Handle(Handle&& other) noexcept : _raw(std::exchange(other._raw, VK_NULL_HANDLE)) {}
 	Handle& operator=(Handle&& other) noexcept {
 		if (this != &other) {
-			if (_raw != VK_NULL_HANDLE)
+			if (_raw != VK_NULL_HANDLE) {
 				DeleterFn(_raw);
+			}
 			_raw = std::exchange(other._raw, VK_NULL_HANDLE);
 		}
 		return *this;
@@ -70,8 +72,9 @@ template <typename T, auto DeleterFn> class DeviceHandle {
 	DeviceHandle(VkDevice device, T raw) noexcept : _device(device), _raw(raw) {}
 
 	~DeviceHandle() noexcept {
-		if (_raw != VK_NULL_HANDLE)
+		if (_raw != VK_NULL_HANDLE) {
 			DeleterFn(_device, _raw);
+		}
 	}
 
 	DeviceHandle(const DeviceHandle&) = delete;
@@ -83,8 +86,9 @@ template <typename T, auto DeleterFn> class DeviceHandle {
 
 	DeviceHandle& operator=(DeviceHandle&& other) noexcept {
 		if (this != &other) {
-			if (_raw != VK_NULL_HANDLE)
+			if (_raw != VK_NULL_HANDLE) {
 				DeleterFn(_device, _raw);
+			}
 			_device = std::exchange(other._device, VK_NULL_HANDLE);
 			_raw = std::exchange(other._raw, VK_NULL_HANDLE);
 		}
@@ -116,10 +120,12 @@ class Context {
 	Context() noexcept = default;
 
 	~Context() noexcept {
-		if (_device.handle != VK_NULL_HANDLE)
+		if (_device.handle != VK_NULL_HANDLE) {
 			vkDestroyDevice(_device.handle, nullptr);
-		if (_instance != VK_NULL_HANDLE)
+		}
+		if (_instance != VK_NULL_HANDLE) {
 			vkDestroyInstance(_instance, nullptr);
+		}
 	}
 
 	Context(const Context&) = delete;
@@ -133,10 +139,12 @@ class Context {
 
 	Context& operator=(Context&& other) noexcept {
 		if (this != &other) {
-			if (_device.handle != VK_NULL_HANDLE)
+			if (_device.handle != VK_NULL_HANDLE) {
 				vkDestroyDevice(_device.handle, nullptr);
-			if (_instance != VK_NULL_HANDLE)
+			}
+			if (_instance != VK_NULL_HANDLE) {
 				vkDestroyInstance(_instance, nullptr);
+			}
 
 			_instance = std::exchange(other._instance, VK_NULL_HANDLE);
 			_surface = std::exchange(other._surface, VK_NULL_HANDLE);
@@ -218,7 +226,7 @@ class Swapchain {
 	Swapchain() noexcept = default;
 	Swapchain(VkDevice device, ZHLN_Swapchain raw) noexcept : _device(device), _raw(raw) {}
 
-	~Swapchain() noexcept { _Destroy(); }
+	~Swapchain() noexcept { Destroy(); }
 
 	Swapchain(const Swapchain&) = delete;
 	Swapchain& operator=(const Swapchain&) = delete;
@@ -229,7 +237,7 @@ class Swapchain {
 
 	Swapchain& operator=(Swapchain&& other) noexcept {
 		if (this != &other) {
-			_Destroy();
+			Destroy();
 			_device = std::exchange(other._device, VK_NULL_HANDLE);
 			_raw = std::exchange(other._raw, {});
 		}
@@ -244,17 +252,19 @@ class Swapchain {
 		ZHLN_SwapchainDesc rebuilt = desc;
 		rebuilt.old_swapchain = _raw.handle;
 		ZHLN_Swapchain next = ZHLN_CreateSwapchain(&rebuilt);
-		if (!next.handle)
+		if (!next.handle) {
 			return false;
-		_Destroy();
+		}
+		Destroy();
 		_raw = next;
 		return true;
 	}
 
   private:
-	void _Destroy() noexcept {
-		if (_raw.handle != VK_NULL_HANDLE)
+	void Destroy() noexcept {
+		if (_raw.handle != VK_NULL_HANDLE) {
 			ZHLN_DestroySwapchain(_device, &_raw);
+		}
 	}
 
 	VkDevice _device = VK_NULL_HANDLE;
@@ -271,8 +281,9 @@ class FrameSync {
   public:
 	FrameSync() noexcept = default;
 	~FrameSync() noexcept {
-		if (_device != VK_NULL_HANDLE)
+		if (_device != VK_NULL_HANDLE) {
 			ZHLN_DestroyFrameSync(_device, _frames.data(), N);
+		}
 	}
 	FrameSync(const FrameSync&) = delete;
 	FrameSync& operator=(const FrameSync&) = delete;
@@ -283,8 +294,9 @@ class FrameSync {
 
 	FrameSync& operator=(FrameSync&& other) noexcept {
 		if (this != &other) {
-			if (_device != VK_NULL_HANDLE)
+			if (_device != VK_NULL_HANDLE) {
 				ZHLN_DestroyFrameSync(_device, _frames.data(), N);
+			}
 			_device = std::exchange(other._device, VK_NULL_HANDLE);
 			_frames = std::exchange(other._frames, {});
 		}
@@ -294,17 +306,18 @@ class FrameSync {
 	[[nodiscard]] static FrameSync Create(VkDevice device) noexcept {
 		FrameSync fs;
 		ZHLN_FrameSyncDesc desc = {.device = device, .frame_count = N};
-		if (!ZHLN_CreateFrameSync(&desc, fs._frames.data()))
+		if (!ZHLN_CreateFrameSync(&desc, fs._frames.data())) {
 			return {};
+		}
 		fs._device = device;
 		return fs;
 	}
 
-	[[nodiscard]] const ZHLN_FrameSync& operator[](uint32_t frame) const noexcept {
+	[[nodiscard]] constexpr const ZHLN_FrameSync& operator[](uint32_t frame) const noexcept {
 		return _frames[frame % N];
 	}
 	[[nodiscard]] static constexpr uint32_t Count() noexcept { return N; }
-	[[nodiscard]] bool Valid() const noexcept { return _device != VK_NULL_HANDLE; }
+	[[nodiscard]] constexpr bool Valid() const noexcept { return _device != VK_NULL_HANDLE; }
 
   private:
 	VkDevice _device = VK_NULL_HANDLE;
@@ -317,22 +330,25 @@ class CommandPools {
   public:
 	CommandPools() noexcept = default;
 	~CommandPools() noexcept {
-		if (_device != VK_NULL_HANDLE)
-			for (auto& pool : _pools)
+		if (_device != VK_NULL_HANDLE) {
+			for (auto& pool : _pools) {
 				ZHLN_DestroyCommandPool(_device, &pool);
+			}
+		}
 	}
 	CommandPools(const CommandPools&) = delete;
 	CommandPools& operator=(const CommandPools&) = delete;
 
-	CommandPools(CommandPools&& other) noexcept
+	constexpr CommandPools(CommandPools&& other) noexcept
 		: _device(std::exchange(other._device, VK_NULL_HANDLE)),
 		  _pools(std::exchange(other._pools, {})) {}
 
 	CommandPools& operator=(CommandPools&& other) noexcept {
 		if (this != &other) {
 			if (_device != VK_NULL_HANDLE) {
-				for (auto& pool : _pools)
+				for (auto& pool : _pools) {
 					ZHLN_DestroyCommandPool(_device, &pool);
+				}
 			}
 			_device = std::exchange(other._device, VK_NULL_HANDLE);
 			_pools = std::exchange(other._pools, {});
@@ -346,19 +362,20 @@ class CommandPools {
 		cp._device = device;
 		for (auto& pool : cp._pools) {
 			if (!ZHLN_CreateCommandPool(device, queue_family, &pool) ||
-				!ZHLN_AllocateCommandBuffers(device, &pool, buffers_per_pool))
+				!ZHLN_AllocateCommandBuffers(device, &pool, buffers_per_pool)) {
 				return {};
+			}
 		}
 		return cp;
 	}
 
-	[[nodiscard]] ZHLN_CommandPool& operator[](uint32_t frame) noexcept {
+	[[nodiscard]] constexpr ZHLN_CommandPool& operator[](uint32_t frame) noexcept {
 		return _pools[frame % N];
 	}
-	[[nodiscard]] VkCommandBuffer Cmd(uint32_t frame) const noexcept {
+	[[nodiscard]] constexpr VkCommandBuffer Cmd(uint32_t frame) const noexcept {
 		return _pools[frame % N].buffers[0];
 	}
-	[[nodiscard]] bool Valid() const noexcept { return _device != VK_NULL_HANDLE; }
+	[[nodiscard]] constexpr bool Valid() const noexcept { return _device != VK_NULL_HANDLE; }
 
   private:
 	VkDevice _device = VK_NULL_HANDLE;
@@ -369,43 +386,44 @@ class CommandPool {
   public:
 	CommandPool() = default;
 
-	CommandPool(VkDevice device, uint32_t queue_family) : _device(nullptr) {
-		// Fix: Capture the return value.
-		// Only assign _device if the pool was actually created.
+	CommandPool(VkDevice device, uint32_t queue_family) {
 		if (ZHLN_CreateCommandPool(device, queue_family, &_raw)) {
 			_device = device;
 		}
 	}
 
 	~CommandPool() {
-		if (_device)
+		if (_device) {
 			ZHLN_DestroyCommandPool(_device, &_raw);
+		}
 	}
 
 	// Move only
-	CommandPool(CommandPool&& other) noexcept
+	constexpr CommandPool(CommandPool&& other) noexcept
 		: _device(std::exchange(other._device, nullptr)), _raw(std::exchange(other._raw, {})) {}
 
 	CommandPool& operator=(CommandPool&& other) noexcept {
 		if (this != &other) {
-			if (_device)
+			if (_device) {
 				ZHLN_DestroyCommandPool(_device, &_raw);
+			}
 			_device = std::exchange(other._device, nullptr);
 			_raw = std::exchange(other._raw, {});
 		}
 		return *this;
 	}
 
-	[[nodiscard]] bool Valid() const noexcept { return _device != nullptr; }
-	explicit operator bool() const noexcept { return Valid(); }
+	[[nodiscard]] constexpr bool Valid() const noexcept { return _device != nullptr; }
+	[[nodiscard]] constexpr explicit operator bool() const noexcept { return Valid(); }
 
 	[[nodiscard]] bool Allocate(uint32_t count) {
-		if (!Valid())
+		if (!Valid()) {
 			return false;
+		}
 		return ZHLN_AllocateCommandBuffers(_device, &_raw, count);
 	}
 
-	VkCommandBuffer operator[](uint32_t i) const { return _raw.buffers[i]; }
+	[[nodiscard]] constexpr VkCommandBuffer operator[](uint32_t i) const { return _raw.buffers[i]; }
 
   private:
 	VkDevice _device = nullptr;
@@ -418,33 +436,48 @@ class CommandPool {
 
 class ShaderStages {
   public:
-	ShaderStages() noexcept = default;
-	ShaderStages(VkDevice device, ZHLN_ShaderStages raw) noexcept : _device(device), _raw(raw) {}
-	~ShaderStages() noexcept {
-		if (_device != VK_NULL_HANDLE)
-			ZHLN_DestroyShaderStages(_device, &_raw);
-	}
-	ShaderStages(const ShaderStages&) = delete;
-	ShaderStages& operator=(const ShaderStages&) = delete;
-	ShaderStages(ShaderStages&& other) noexcept
-		: _device(std::exchange(other._device, VK_NULL_HANDLE)),
-		  _raw(std::exchange(other._raw, {})) {}
+    // Default constructor is pure state initialization
+    constexpr ShaderStages() noexcept = default;
 
-	[[nodiscard]] static ShaderStages Create(VkDevice device, const ZHLN_ShaderDesc& vert,
-											 const ZHLN_ShaderDesc& frag) noexcept {
-		ZHLN_ShaderStagesDesc desc = {.device = device, .vert = vert, .frag = frag};
-		ZHLN_ShaderStages stages{};
-		if (!ZHLN_CreateShaderStages(&desc, &stages))
-			return {};
-		return {device, stages};
-	}
+    // Simple handle copying is constexpr-safe
+    constexpr ShaderStages(VkDevice device, ZHLN_ShaderStages raw) noexcept 
+        : _device(device), _raw(raw) {}
 
-	[[nodiscard]] const ZHLN_ShaderStages* Get() const noexcept { return &_raw; }
-	[[nodiscard]] bool Valid() const noexcept { return _raw.vert.handle != VK_NULL_HANDLE; }
+    // Calls ZHLN_DestroyShaderStages (C-backend)
+    ~ShaderStages() noexcept {
+        if (_device != VK_NULL_HANDLE) {
+            ZHLN_DestroyShaderStages(_device, &_raw);
+        }
+    }
+
+    ShaderStages(const ShaderStages&) = delete;
+    ShaderStages& operator=(const ShaderStages&) = delete;
+
+    // std::exchange on handles is constexpr since C++20
+    constexpr ShaderStages(ShaderStages&& other) noexcept
+        : _device(std::exchange(other._device, VK_NULL_HANDLE)),
+          _raw(std::exchange(other._raw, {})) {}
+
+    // Calls ZHLN_CreateShaderStages (C-backend)
+    [[nodiscard]] static ShaderStages Create(VkDevice device, const ZHLN_ShaderDesc& vert,
+                                             const ZHLN_ShaderDesc& frag) noexcept {
+        ZHLN_ShaderStagesDesc desc = {.device = device, .vert = vert, .frag = frag};
+        ZHLN_ShaderStages stages{};
+        if (!ZHLN_CreateShaderStages(&desc, &stages)) {
+            return {};
+        }
+        return {device, stages};
+    }
+
+    // Just returning an address
+    [[nodiscard]] constexpr const ZHLN_ShaderStages* Get() const noexcept { return &_raw; }
+
+    // Simple handle comparison
+    [[nodiscard]] constexpr bool Valid() const noexcept { return _raw.vert.handle != VK_NULL_HANDLE; }
 
   private:
-	VkDevice _device = VK_NULL_HANDLE;
-	ZHLN_ShaderStages _raw{};
+    VkDevice _device = VK_NULL_HANDLE;
+    ZHLN_ShaderStages _raw{};
 };
 
 // ============================================================================
@@ -511,7 +544,7 @@ inline void TransitionLayout(VkCommandBuffer cmd, VkImage image, VkImageLayout o
 	} else if (new_layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL) {
 		barrier.dst_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 		barrier.dst_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-			VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+							VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
 	}
 	ZHLN_CmdImageBarrier(cmd, &barrier);
 }
@@ -563,8 +596,9 @@ ZHLN_FrameResult DrawFrame(const Context& ctx, Swapchain& swapchain, FrameSync<N
 									 .render_finished = s.render_finished,
 									 .image_index = image_index};
 	result = ZHLN_PresentFrame(&present_desc);
-	if (result == ZHLN_FrameResult_OutOfDate || result == ZHLN_FrameResult_Suboptimal)
+	if (result == ZHLN_FrameResult_OutOfDate || result == ZHLN_FrameResult_Suboptimal) {
 		rebuild();
+	}
 
 	frame_index = (frame_index + 1) % N;
 	return result;
@@ -580,8 +614,9 @@ class Surface {
 	Surface(VkInstance instance, VkSurfaceKHR surface) : _instance(instance), _handle(surface) {}
 
 	~Surface() {
-		if (_handle != VK_NULL_HANDLE)
+		if (_handle != VK_NULL_HANDLE) {
 			vkDestroySurfaceKHR(_instance, _handle, nullptr);
+		}
 	}
 
 	// Move only
@@ -591,8 +626,9 @@ class Surface {
 		  _handle(std::exchange(other._handle, VK_NULL_HANDLE)) {}
 	Surface& operator=(Surface&& other) noexcept {
 		if (this != &other) {
-			if (_handle != VK_NULL_HANDLE)
+			if (_handle != VK_NULL_HANDLE) {
 				vkDestroySurfaceKHR(_instance, _handle, nullptr);
+			}
 			_instance = std::exchange(other._instance, VK_NULL_HANDLE);
 			_handle = std::exchange(other._handle, VK_NULL_HANDLE);
 		}
@@ -612,25 +648,25 @@ class Surface {
 
 // Add a helper for the "One Semaphore Per Swapchain Image" pattern
 class SemaphorePool {
-public:
-    SemaphorePool() = default;
-    
-    void Rebuild(VkDevice device, uint32_t count) {
-        _semaphores.clear(); // RAII handles destroy themselves
-        _semaphores.reserve(count);
-        for (uint32_t i = 0; i < count; ++i) {
-            _semaphores.emplace_back(device, ZHLN_CreateSemaphore(device));
-        }
-    }
+  public:
+	SemaphorePool() = default;
 
-    VkSemaphore operator[](uint32_t index) const {
-        return _semaphores[index % _semaphores.size()].Get();
-    }
+	void Rebuild(VkDevice device, uint32_t count) {
+		_semaphores.clear(); // RAII handles destroy themselves
+		_semaphores.reserve(count);
+		for (uint32_t i = 0; i < count; ++i) {
+			_semaphores.emplace_back(device, ZHLN_CreateSemaphore(device));
+		}
+	}
 
-    size_t Size() const { return _semaphores.size(); }
+	VkSemaphore operator[](uint32_t index) const {
+		return _semaphores[index % _semaphores.size()].Get();
+	}
 
-private:
-    std::vector<Semaphore> _semaphores;
+	[[nodiscard]] size_t Size() const { return _semaphores.size(); }
+
+  private:
+	std::vector<Semaphore> _semaphores;
 };
 
 // ============================================================================

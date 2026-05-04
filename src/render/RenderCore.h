@@ -1,6 +1,6 @@
 /**
  * @file RenderCore.h
- * @brief Zero-overHead vuLkan abstractioN layer (ZHLN)
+ * @brief Project-Zahlen's Zero-overHead vuLkan abstractioN layer (ZHLN)
  *
  * Provides a C23-compliant interface for Vulkan instance management
  * and hardware selection using a data-oriented library approach.
