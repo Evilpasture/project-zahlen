@@ -2,22 +2,27 @@ import subprocess
 import os
 import difflib
 from datetime import datetime
+import argparse
 
-def get_git_tracked_files():
-    """Returns a list of git-tracked files with specific extensions."""
+def get_git_tracked_files(target_dir="."):
+    """Returns a list of git-tracked files with specific extensions within a target directory."""
     extensions = {'.cpp', '.hpp', '.mm', '.c', '.h', '.S', '.glsl', '.vert', '.frag', '.metal'}
     try:
-        output = subprocess.check_output(['git', 'ls-files'], text=True)
+        # git ls-files natively filters by path if provided
+        output = subprocess.check_output(['git', 'ls-files', target_dir], text=True)
         files = output.splitlines()
         return [f for f in files if os.path.splitext(f)[1] in extensions]
     except subprocess.CalledProcessError:
         print("Error: This directory is not a git repository.")
         return []
 
-def generate_snapshot_string(tracked_files):
+def generate_snapshot_string(tracked_files, target_dir):
     """Generates the entire snapshot as a single string."""
     lines = []
-    lines.append(f"# Project Snapshot: Zahlen")
+    
+    # Add a little context to the header so the LLM knows what scope it's looking at
+    scope = "Root" if target_dir == "." else target_dir
+    lines.append(f"# Project Snapshot: Zahlen (Scope: {scope})")
     lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append(f"Total files dumped: {len(tracked_files)}\n")
     lines.append("---\n")
@@ -43,14 +48,25 @@ def generate_snapshot_string(tracked_files):
     
     return "\n".join(lines)
 
-def run_project_manager(snapshot_file="project_snapshot.md", diff_file="project_diff.md"):
-    tracked_files = get_git_tracked_files()
+def run_project_manager(target_dir="."):
+    tracked_files = get_git_tracked_files(target_dir)
     if not tracked_files:
-        print("No matching tracked files found.")
+        print(f"No matching tracked files found in '{target_dir}'.")
         return
 
+    # Determine filenames based on the target directory
+    if target_dir in (".", "", "./"):
+        snapshot_file = "project_snapshot.md"
+        diff_file = "project_diff.md"
+    else:
+        # Normalize the path (e.g., 'src/render/' -> 'src/render') and replace slashes
+        clean_path = os.path.normpath(target_dir).strip(os.sep)
+        prefix = clean_path.replace(os.sep, '_') + "_"
+        snapshot_file = f"{prefix}project_snapshot.md"
+        diff_file = f"{prefix}project_diff.md"
+
     # 1. Generate new content
-    new_content = generate_snapshot_string(tracked_files)
+    new_content = generate_snapshot_string(tracked_files, target_dir)
     
     # 2. Try to read old content for comparison
     old_content = ""
@@ -71,7 +87,7 @@ def run_project_manager(snapshot_file="project_snapshot.md", diff_file="project_
 
         if diff:
             with open(diff_file, 'w', encoding='utf-8') as df:
-                df.write(f"# Project Diff: Zahlen\n")
+                df.write(f"# Project Diff: Zahlen (Scope: {target_dir})\n")
                 df.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
                 df.write("```diff\n")
                 df.write("\n".join(diff))
@@ -80,7 +96,7 @@ def run_project_manager(snapshot_file="project_snapshot.md", diff_file="project_
         else:
             if os.path.exists(diff_file):
                 os.remove(diff_file)
-            print("No changes detected since last snapshot.")
+            print(f"No changes detected in '{target_dir}' since last snapshot.")
     else:
         print("Initial snapshot created. No previous version to diff against.")
 
@@ -91,4 +107,13 @@ def run_project_manager(snapshot_file="project_snapshot.md", diff_file="project_
     print(f"Successfully dumped {len(tracked_files)} files to {snapshot_file}")
 
 if __name__ == "__main__":
-    run_project_manager()
+    parser = argparse.ArgumentParser(description="Dump git-tracked context for LLMs.")
+    parser.add_argument(
+        "target", 
+        nargs="?", 
+        default=".", 
+        help="Target directory to dump (e.g., src/render). Defaults to the root directory."
+    )
+    
+    args = parser.parse_args()
+    run_project_manager(args.target)
