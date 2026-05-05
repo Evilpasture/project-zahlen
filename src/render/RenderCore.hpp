@@ -484,6 +484,19 @@ class ShaderStages {
 	ShaderStages(const ShaderStages&) = delete;
 	ShaderStages& operator=(const ShaderStages&) = delete;
 
+	ShaderStages& operator=(ShaderStages&& other) noexcept {
+		if (this != &other) {
+			// 1. Clean up our own existing resources first!
+			if (_device != VK_NULL_HANDLE) {
+				ZHLN_DestroyShaderStages(_device, &_raw);
+			}
+			// 2. Transfer ownership from the other object
+			_device = std::exchange(other._device, VK_NULL_HANDLE);
+			_raw = std::exchange(other._raw, {});
+		}
+		return *this;
+	}
+
 	// std::exchange on handles is constexpr since C++20
 	constexpr ShaderStages(ShaderStages&& other) noexcept
 		: _device(std::exchange(other._device, VK_NULL_HANDLE)),
