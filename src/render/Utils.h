@@ -24,9 +24,15 @@ static inline double zhln_clamp_d(double v, double lo, double hi) {
 } // extern "C"
 
 // C++ Overloads: Don't use this, only anything inside render/ can. Use ZHLN::Clamp.
-static inline int32_t ZHLN_Clamp(int32_t v, int32_t lo, int32_t hi) { return zhln_clamp_i32(v, lo, hi); }
-static inline float   ZHLN_Clamp(float v, float lo, float hi)     { return zhln_clamp_f(v, lo, hi); }
-static inline double  ZHLN_Clamp(double v, double lo, double hi)    { return zhln_clamp_d(v, lo, hi); }
+static inline int32_t ZHLN_Clamp(int32_t v, int32_t lo, int32_t hi) {
+	return zhln_clamp_i32(v, lo, hi);
+}
+static inline float ZHLN_Clamp(float v, float lo, float hi) {
+	return zhln_clamp_f(v, lo, hi);
+}
+static inline double ZHLN_Clamp(double v, double lo, double hi) {
+	return zhln_clamp_d(v, lo, hi);
+}
 
 #else
 
