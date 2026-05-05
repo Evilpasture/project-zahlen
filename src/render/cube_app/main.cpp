@@ -517,6 +517,8 @@ int main() {
 		frame_index = (frame_index + 1) % 3;
 	}
 
+	vkDeviceWaitIdle(ctx.Device());
+
 	if (depth_view != VK_NULL_HANDLE)
 		vkDestroyImageView(ctx.Device(), depth_view, nullptr);
 	// NEW: Destroy cube texture resources
@@ -526,7 +528,6 @@ int main() {
 	vkDestroyDescriptorSetLayout(ctx.Device(), cube_desc_layout, nullptr);
 	// Note: cube_texture_image is RAII, so its destructor will handle vmaDestroyImage
 
-	vkDeviceWaitIdle(ctx.Device());
 	ZHLN::Demo::DestroyWindow(win);
 	return 0;
 }
