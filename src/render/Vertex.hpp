@@ -8,6 +8,12 @@
 
 namespace ZHLN::Vk {
 
+struct Vertex {
+	std::array<float, 3> pos;
+	std::array<float, 3> norm;
+	std::array<float, 2> uv;
+};
+
 // ============================================================================
 // Compile-Time Type to Vulkan Format Mapping (C++23)
 // ============================================================================
