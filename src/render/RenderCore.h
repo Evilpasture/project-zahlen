@@ -239,7 +239,7 @@ typedef const struct {
 typedef struct {
 	VkShaderModule handle;
 	VkShaderStageFlagBits stage;
-	const char* entry_point;
+	char entry_point[64];
 } ZHLN_Shader;
 
 typedef struct {

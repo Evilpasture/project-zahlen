@@ -2,6 +2,7 @@
 
 #include "Utils.h"
 
+#include <spirv_reflect.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -696,26 +697,44 @@ VkShaderModule ZHLN_CreateShaderModule(const VkDevice device,
 
 	return module;
 }
+
 [[nodiscard]]
 bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* const restrict desc,
 							 ZHLN_ShaderStages* const restrict out) {
 	out->vert.handle = ZHLN_CreateShaderModule(desc->device, &desc->vert);
-	if (out->vert.handle == VK_NULL_HANDLE) {
-		return false;
-	}
-
 	out->frag.handle = ZHLN_CreateShaderModule(desc->device, &desc->frag);
-	if (out->frag.handle == VK_NULL_HANDLE) {
-		ZHLN_DestroyShaderModule(desc->device, out->vert.handle);
-		*out = (ZHLN_ShaderStages){};
+
+	if (out->vert.handle == VK_NULL_HANDLE || out->frag.handle == VK_NULL_HANDLE) {
+		ZHLN_DestroyShaderStages(desc->device, out);
 		return false;
 	}
 
 	out->vert.stage = VK_SHADER_STAGE_VERTEX_BIT;
-	out->vert.entry_point = desc->vert.entry_point ? desc->vert.entry_point : "main";
-
 	out->frag.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-	out->frag.entry_point = desc->frag.entry_point ? desc->frag.entry_point : "main";
+
+	// --- NEW: AUTO-REFLECTION LOGIC ---
+	const ZHLN_ShaderDesc* descs[2] = {&desc->vert, &desc->frag};
+	ZHLN_Shader* targets[2] = {&out->vert, &out->frag};
+
+	for (int i = 0; i < 2; ++i) {
+		if (descs[i]->entry_point) {
+			// Use provided name
+			strncpy(targets[i]->entry_point, descs[i]->entry_point, 63);
+		} else {
+			// Auto-reflect name from SPIR-V
+			SpvReflectShaderModule module;
+			if (spvReflectCreateShaderModule(descs[i]->size, descs[i]->code, &module) ==
+				SPV_REFLECT_RESULT_SUCCESS) {
+				if (module.entry_point_count > 0) {
+					strncpy(targets[i]->entry_point, module.entry_points[0].name, 63);
+				}
+				spvReflectDestroyShaderModule(&module);
+			} else {
+				// Fallback to main if reflection fails
+				strncpy(targets[i]->entry_point, "main", 63);
+			}
+		}
+	}
 	return true;
 }
 
@@ -735,14 +754,14 @@ void ZHLN_PopulateShaderStageInfos(const ZHLN_ShaderStages* const restrict stage
 								   VkPipelineShaderStageCreateInfo* const restrict out_stages) {
 	out_stages[0] = (const VkPipelineShaderStageCreateInfo){
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-		.stage = VK_SHADER_STAGE_VERTEX_BIT,
+		.stage = stages->vert.stage,
 		.module = stages->vert.handle,
 		.pName = stages->vert.entry_point,
 	};
 
 	out_stages[1] = (const VkPipelineShaderStageCreateInfo){
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-		.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+		.stage = stages->frag.stage,
 		.module = stages->frag.handle,
 		.pName = stages->frag.entry_point,
 	};
