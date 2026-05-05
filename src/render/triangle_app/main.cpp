@@ -21,7 +21,7 @@
 	return buffer;
 }
 
-int main() {
+auto main() -> int {
 	// 1. OS Window Creation (Platform Agnostic)
 	ZHLN::Demo::WindowState win = ZHLN::Demo::InitWindow(800, 600, "ZHLN Engine - Triangle");
 
@@ -66,13 +66,14 @@ int main() {
 		VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME,
 		"VK_KHR_portability_subset" // <-- MANDATORY FOR MAC
 	};
-	const uint32_t dev_ext_count = 4;
 #else
 	const char* dev_exts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME,
 							  VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
 							  VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME};
-	const uint32_t dev_ext_count = 3;
+
 #endif
+
+	constexpr uint32_t dev_ext_count = static_cast<uint32_t>(std::size(dev_exts));
 
 	ZHLN_DeviceDesc dev_desc = {.physical = nullptr,
 								.extensions = dev_exts,
@@ -113,10 +114,10 @@ int main() {
 
 	ZHLN_GraphicsPipelineDesc pipe_desc = {.stages = const_cast<ZHLN_ShaderStages*>(shaders.Get()),
 										   .layout = layout.Get(),
-										   .vertex_binding_count = 0,
 										   .vertex_bindings = nullptr,
-										   .vertex_attribute_count = 0,
 										   .vertex_attributes = nullptr,
+										   .vertex_binding_count = 0,
+										   .vertex_attribute_count = 0,
 										   .color_format = VK_FORMAT_B8G8R8A8_SRGB,
 										   .depth_format = VK_FORMAT_UNDEFINED,
 										   .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,

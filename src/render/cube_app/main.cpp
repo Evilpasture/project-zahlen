@@ -127,7 +127,7 @@ int main() {
 	const uint32_t TEX_W = 256; // Smaller texture for simple cube
 	const uint32_t TEX_H = 256;
 	static const auto cube_pixels =
-		ZHLN::GenerateTVInterruptTexture<TEX_W, TEX_H>(); // Or GenerateTestTexture
+		ZHLN::Texture::GenerateMarbleCrisp<TEX_W, TEX_H>(); // Or GenerateTestTexture
 
 	VkImageCreateInfo tex_info = {
 		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
