@@ -6,10 +6,7 @@
 #include <Zahlen/Platform.hpp>
 #include <algorithm>
 
-
 using namespace ZHLN;
-
-// --- Logic Helpers ---
 
 static void UpdatePlayerController(const InputContext& input, const Camera& cam,
 								   PhysicsContext& ctx, EntityHandle player) {
@@ -18,10 +15,14 @@ static void UpdatePlayerController(const InputContext& input, const Camera& cam,
 	JPH::Vec3 right = {-std::sin(yawRad), 0.0f, std::cos(yawRad)};
 
 	JPH::Vec3 move = JPH::Vec3::sZero();
-	if (input.IsKeyDown(KeyCode::W)) move += forward;
-	if (input.IsKeyDown(KeyCode::S)) move -= forward;
-	if (input.IsKeyDown(KeyCode::A)) move -= right;
-	if (input.IsKeyDown(KeyCode::D)) move += right;
+	if (input.IsKeyDown(KeyCode::W))
+		move += forward;
+	if (input.IsKeyDown(KeyCode::S))
+		move -= forward;
+	if (input.IsKeyDown(KeyCode::A))
+		move -= right;
+	if (input.IsKeyDown(KeyCode::D))
+		move += right;
 
 	float speed = input.IsKeyDown(KeyCode::LShift) ? 12.0f : 5.0f;
 	Physics::SetCharacterVelocity(
@@ -50,8 +51,6 @@ struct Scene {
 	}
 };
 
-// --- Main ---
-
 auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	Platform::Init();
 	Engine engine;
@@ -72,28 +71,29 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 		if (!engine.IsRunning())
 			break;
 
-		 // Fix: Use the Window to get resolution, not the SwapChain (which is now hidden)
-        auto res = engine.GetWindow().GetSize();
-        if (res.width == 0 || res.height == 0) {
-            Platform::Sleep(16);
-            continue;
-        }
+		auto res = engine.GetWindow().GetSize();
+		if (res.width == 0 || res.height == 0) {
+			Platform::Sleep(16);
+			continue;
+		}
 
-        if (input.NeedsResize()) {
-            rc.SetResolution(input.GetNewSize());
-            input.ClearResizeFlag();
-            continue;
-        }
+		if (input.NeedsResize()) {
+			rc.SetResolution(input.GetNewSize());
+			input.ClearResizeFlag();
+			continue;
+		}
 
 		UpdatePlayerController(input, cam, pc, scene.playerHandle);
+
+		// Handle Camera Orbit (Right Click Drag)
 		if (input.IsMouseButtonDown(KeyCode::RButton)) {
 			cam.yaw += input.GetMouse().deltaX * 0.2f;
-			cam.pitch = std::clamp(cam.pitch - input.GetMouse().deltaY * 0.2f, -40.0f, 40.0f);
+			cam.pitch = std::clamp(cam.pitch - input.GetMouse().deltaY * 0.2f, -89.0f, 89.0f);
 		}
 
 		pc.Step(dt);
 
-		// 1. Sync & Camera logic
+		// 1. Sync Physics & Compute Camera Position
 		const auto& world = pc.GetWorld();
 		JPH::Vec3 pPos;
 		{
@@ -103,15 +103,18 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			pPos = {(float)p[0], (float)p[1], (float)p[2]};
 		}
 
-		float pR = JPH::DegreesToRadians(cam.pitch), yR = JPH::DegreesToRadians(cam.yaw);
-		cam.position =
-			pPos + JPH::Vec3(std::cos(yR) * std::cos(pR) * -10.0f, std::sin(pR) * -10.0f + 5.0f,
-							 std::sin(yR) * std::cos(pR) * -10.0f);
+		// Compute Orbit Position
+		float yR = JPH::DegreesToRadians(cam.yaw);
+		float pR = JPH::DegreesToRadians(cam.pitch);
+		JPH::Vec3 direction(JPH::Cos(yR) * JPH::Cos(pR), JPH::Sin(pR), JPH::Sin(yR) * JPH::Cos(pR));
+		JPH::Vec3 target = pPos + JPH::Vec3(0.0f, 1.0f, 0.0f);
 
-		// 2. Prepare Frame
+		// Camera pushes backward out from the target along the direction
+		cam.position = target - (direction.Normalized() * 10.0f);
+
+		// 2. Prepare Frame (Upload correct View-Projection)
 		JPH::Mat44 vp =
-			cam.GetProjectionMatrix((float)res.width / res.height) *
-			Math::CreateLookAt(cam.position, pPos + JPH::Vec3(0, 1, 0), JPH::Vec3::sAxisY());
+			cam.GetProjectionMatrix((float)res.width / res.height) * cam.GetViewMatrix();
 		Renderer::UpdateBuffer(rc, scene.material.constantBuffer, vp);
 
 		// 3. Render

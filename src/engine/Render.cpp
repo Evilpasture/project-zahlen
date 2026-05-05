@@ -8,7 +8,6 @@
 
 namespace ZHLN {
 
-// Define internal structs to hide Vulkan types from the header
 struct NativeMesh {
 	Vk::Buffer buffer;
 	uint32_t vertexCount;
@@ -29,16 +28,18 @@ struct RenderContext::Impl {
 	Vk::CommandPools<2> pools;
 	Vk::SemaphorePool present_semaphores;
 
-	uint32_t frame_index = 0;
-	bool resized = true; // Force initial rebuild
+	// Depth Buffer Management
+	Vk::Image depth_image;
+	VkImageView depth_view = VK_NULL_HANDLE;
 
-	// Active Frame State
+	uint32_t frame_index = 0;
+	bool resized = true;
+
 	VkCommandBuffer current_cmd = VK_NULL_HANDLE;
 	uint32_t current_image_index = 0;
 
 	JPH::Mat44 current_view_proj;
 
-	// Resource Storage (Simplistic deletion tracking for now)
 	std::vector<std::unique_ptr<NativeMesh>> meshes;
 	std::vector<std::unique_ptr<NativeMaterial>> materials;
 
@@ -47,28 +48,26 @@ struct RenderContext::Impl {
 
 RenderContext::RenderContext(Window& window, const String32& preferredAPI)
 	: _impl(std::make_unique<Impl>(window)) {
-	// 1. Get extensions required by GLFW
+
 	uint32_t glfwExtensionCount = 0;
 	const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
 
-	// Merge with our required extensions
 	std::vector<const char*> inst_exts(glfwExtensions, glfwExtensions + glfwExtensionCount);
 	inst_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 	inst_exts.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
 	inst_exts.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
 
+#ifdef __APPLE__
+	inst_exts.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+#endif
+
 	ZHLN_InstanceDesc inst_desc = ZHLN_DEFAULT_INSTANCE_DESC;
 	inst_desc.extensions = inst_exts.data();
 	inst_desc.extension_count = static_cast<uint32_t>(inst_exts.size());
 
-	// 2. Setup Device Features
-	VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swap_maint = {
-		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR,
-		.pNext = nullptr,
-		.swapchainMaintenance1 = VK_TRUE};
 	VkPhysicalDeviceVulkan13Features feat13 = {
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-		.pNext = &swap_maint,
+		.pNext = nullptr,
 		.synchronization2 = VK_TRUE,
 		.dynamicRendering = VK_TRUE};
 
@@ -77,29 +76,40 @@ RenderContext::RenderContext(Window& window, const String32& preferredAPI)
 		.pNext = &feat13,
 		.bufferDeviceAddress = VK_TRUE};
 
+	VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swap_maint = {
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR,
+		.pNext = nullptr,
+		.swapchainMaintenance1 = VK_TRUE};
+	feat13.pNext = &swap_maint;
+
 	VkPhysicalDeviceFeatures2 feat2 = {
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &feat12, .features = {}};
 
+#ifdef __APPLE__
 	const char* dev_exts[] = {
 		VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
-		VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME // Anti-overlay protection
-	};
+		VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME, "VK_KHR_portability_subset"};
+	const uint32_t dev_ext_count = 4;
+#else
+	const char* dev_exts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+							  VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
+							  VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME};
+	const uint32_t dev_ext_count = 3;
+#endif
 
-	ZHLN_DeviceDesc dev_desc = {.physical = nullptr, // Anchor
+	ZHLN_DeviceDesc dev_desc = {.physical = nullptr,
 								.extensions = dev_exts,
-								.extension_count = 3,
+								.extension_count = dev_ext_count,
 								.features = &feat2,
 								.enable_validation = true};
 
-	// 3. Create Context
 	_impl->ctx = Vk::Context::Create(inst_desc, {VK_NULL_HANDLE, VK_NULL_HANDLE, nullptr, nullptr},
 									 dev_desc);
 	if (!_impl->ctx) {
-		ZHLN::Log("FATAL: Vulkan Context Creation Failed\n");
+		ZHLN::Log("FATAL: Vulkan Context Creation Failed");
 		std::abort();
 	}
 
-	// 4. Create Surface via GLFW
 	GLFWwindow* glfwWin = static_cast<GLFWwindow*>(window.GetNativeHandle());
 	VkSurfaceKHR raw_surface;
 	if (glfwCreateWindowSurface(_impl->ctx.Instance(), glfwWin, nullptr, &raw_surface) !=
@@ -108,81 +118,58 @@ RenderContext::RenderContext(Window& window, const String32& preferredAPI)
 	}
 	_impl->surface = Vk::Surface(_impl->ctx.Instance(), raw_surface);
 
-	// 5. Initialize Subsystems
 	if (!_impl->allocator.Init(_impl->ctx)) {
-		ZHLN::Log("FATAL: Vulkan Memory Allocator (VMA) failed to initialize\n");
+		ZHLN::Log("FATAL: Vulkan Memory Allocator (VMA) failed to initialize");
 		std::abort();
 	}
 
 	_impl->swapchain = Vk::Swapchain(_impl->ctx.Device(), {});
-
 	_impl->sync = Vk::FrameSync<2>::Create(_impl->ctx.Device());
-	if (!_impl->sync.Valid()) {
-		ZHLN::Log("FATAL: Failed to create Vulkan Frame Sync primitives\n");
-		std::abort();
-	}
-
 	_impl->pools =
 		Vk::CommandPools<2>::Create(_impl->ctx.Device(), _impl->ctx.PhysicalInfo().graphics_family);
-	if (!_impl->pools.Valid()) {
-		ZHLN::Log("FATAL: Failed to create Vulkan Command Pools\n");
-		std::abort();
-	}
-
-	_impl->present_semaphores = Vk::SemaphorePool(); // Initial state is fine
 }
 
 RenderContext::~RenderContext() {
 	if (_impl->ctx.Device()) {
 		vkDeviceWaitIdle(_impl->ctx.Device());
+		if (_impl->depth_view != VK_NULL_HANDLE) {
+			vkDestroyImageView(_impl->ctx.Device(), _impl->depth_view, nullptr);
+		}
 	}
 }
 
 const char* RenderContext::GetRendererName() const {
 	return "Vulkan 1.3 (ZHLN)";
 }
-
 void RenderContext::SetResolution(const Extent2D& res) {
 	_impl->resized = true;
 }
 
-// ----------------------------------------------------------------------------
-// Resource Creation
-// ----------------------------------------------------------------------------
-
 BufferHandle RenderContext::CreateVertexBuffer(const void* data, size_t size) {
-	// 1. Allocate GPU memory
 	auto gpu_buf =
 		Vk::Buffer::Create(_impl->allocator.Get(), size,
 						   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 						   VMA_MEMORY_USAGE_GPU_ONLY);
 
-	// 2. Perform Immediate Upload (Simplistic for now, using a temporary command buffer)
-	VkCommandBuffer cmd = _impl->pools.Cmd(0); // Borrow a cmd buffer temporarily
+	VkCommandBuffer cmd = _impl->pools.Cmd(0);
 	ZHLN_BeginCommandBuffer(cmd);
 	auto staging = Vk::UploadToBuffer(_impl->allocator.Get(), cmd, gpu_buf, data, size);
 	ZHLN_EndCommandBuffer(cmd);
 
-	// Force wait for upload to complete (Slow but works for initial setup)
-	VkSubmitInfo submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-						   .pNext = nullptr,
-						   .waitSemaphoreCount = 0,
-						   .pWaitSemaphores = nullptr,
-						   .pWaitDstStageMask = nullptr,
-						   .commandBufferCount = 1,
-						   .pCommandBuffers = &cmd,
-						   .signalSemaphoreCount = 0,
-						   .pSignalSemaphores = nullptr};
-	vkQueueSubmit(_impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
+	VkCommandBufferSubmitInfo cmd_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+										  .commandBuffer = cmd};
+	VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+							.commandBufferInfoCount = 1,
+							.pCommandBufferInfos = &cmd_info};
+	vkQueueSubmit2(_impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
 	vkQueueWaitIdle(_impl->ctx.GraphicsQueue());
 
-	auto* mesh = new NativeMesh{std::move(gpu_buf), 0};
+	auto* mesh = new NativeMesh{std::move(gpu_buf), static_cast<uint32_t>(size / sizeof(Vertex))};
 	_impl->meshes.emplace_back(mesh);
 	return static_cast<BufferHandle>(reinterpret_cast<uint64_t>(mesh));
 }
 
 BufferHandle RenderContext::CreateConstantBuffer(size_t size) {
-	// We are migrating to Push Constants, so we don't strictly need this right now.
 	return BufferHandle::Invalid;
 }
 
@@ -193,20 +180,14 @@ Material RenderContext::CreateMaterial(const PipelineDesc& desc) {
 							  desc.fragShaderSize};
 	auto shaders = Vk::ShaderStages::Create(_impl->ctx.Device(), v_desc, f_desc);
 
-	// Only 64 bytes needed since we multiply on the CPU
 	VkPushConstantRange pc_range = {
 		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .offset = 0, .size = sizeof(JPH::Mat44)};
-
-	ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = nullptr,
-										   .set_layout_count = 0,
-										   .push_constants = &pc_range,
-										   .push_constant_count = 1};
+	ZHLN_PipelineLayoutDesc layout_desc = {.push_constants = &pc_range, .push_constant_count = 1};
 	auto layout = Vk::PipelineLayout(_impl->ctx.Device(),
 									 ZHLN_CreatePipelineLayout(_impl->ctx.Device(), &layout_desc));
 
 	VkVertexInputBindingDescription binding = {
 		.binding = 0, .stride = sizeof(Vertex), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX};
-
 	VkVertexInputAttributeDescription attrs[2] = {{.location = 0,
 												   .binding = 0,
 												   .format = VK_FORMAT_R32G32B32_SFLOAT,
@@ -216,65 +197,52 @@ Material RenderContext::CreateMaterial(const PipelineDesc& desc) {
 												   .format = VK_FORMAT_R32G32B32A32_SFLOAT,
 												   .offset = (uint32_t)offsetof(Vertex, color)}};
 
-	ZHLN_GraphicsPipelineDesc pipe_desc = {
-		.stages = const_cast<ZHLN_ShaderStages*>(shaders.Get()),
-		.layout = layout.Get(),
-		.vertex_binding_count = 1,
-		.vertex_bindings = &binding,
-		.vertex_attribute_count = 2,
-		.vertex_attributes = attrs,
-		.color_format = VK_FORMAT_B8G8R8A8_SRGB,
-		.depth_format = VK_FORMAT_UNDEFINED,
-		.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, // Added
-		.polygon_mode = VK_POLYGON_MODE_FILL,			 // Added
-		.cull_mode = VK_CULL_MODE_BACK_BIT,
-		.front_face = VK_FRONT_FACE_COUNTER_CLOCKWISE, // Added
-		.depth_test = false,						   // Added
-		.depth_write = false,						   // Added
-		.blend_enable = false						   // Added
-	};
+	ZHLN_GraphicsPipelineDesc pipe_desc = {.stages = const_cast<ZHLN_ShaderStages*>(shaders.Get()),
+										   .layout = layout.Get(),
+										   .vertex_bindings = &binding,
+										   .vertex_attributes = attrs,
+										   .vertex_binding_count = 1,
+										   .vertex_attribute_count = 2,
+										   .color_format = VK_FORMAT_B8G8R8A8_SRGB,
+										   .depth_format =
+											   VK_FORMAT_D32_SFLOAT, // DEPTH FORMAT ENABLED
+										   .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+										   .polygon_mode = VK_POLYGON_MODE_FILL,
+										   .cull_mode = VK_CULL_MODE_BACK_BIT, // CULLING ENABLED
+										   .front_face = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+										   .depth_test = true,	// DEPTH TEST ENABLED
+										   .depth_write = true, // DEPTH WRITE ENABLED
+										   .blend_enable = false};
 	auto pipeline = Vk::Pipeline(_impl->ctx.Device(),
 								 ZHLN_CreateGraphicsPipeline(_impl->ctx.Device(), &pipe_desc));
 
 	auto* mat = new NativeMaterial{std::move(pipeline), std::move(layout)};
 	_impl->materials.emplace_back(mat);
-
-	Material m;
-	m.pipeline = static_cast<PipelineHandle>(reinterpret_cast<uint64_t>(mat));
-	return m;
+	return Material{.pipeline = static_cast<PipelineHandle>(reinterpret_cast<uint64_t>(mat))};
 }
-
-// ----------------------------------------------------------------------------
-// Frame Execution
-// ----------------------------------------------------------------------------
 
 void RenderContext::BeginFrame() {
 	auto rebuild_cb = [&]() {
 		vkDeviceWaitIdle(_impl->ctx.Device());
 
-		// 1. Get the actual window size from the OS/GLFW
 		int w, h;
-		GLFWwindow* glfwWin = static_cast<GLFWwindow*>(_impl->window.GetNativeHandle());
-		glfwGetFramebufferSize(glfwWin, &w, &h);
+		glfwGetFramebufferSize(static_cast<GLFWwindow*>(_impl->window.GetNativeHandle()), &w, &h);
 
 		ZHLN_Device raw_dev = {_impl->ctx.Device(), _impl->ctx.GraphicsQueue(),
 							   _impl->ctx.PresentQueue()};
 		ZHLN_PhysicalDeviceInfo raw_phys = _impl->ctx.PhysicalInfo();
 
 		ZHLN_SwapchainSupportDesc sdesc = {raw_phys.handle, _impl->surface.Get()};
-		auto support = ZHLN_QuerySwapchainSupport(&sdesc);
-		auto& caps = support.capabilities;
+		auto caps = ZHLN_QuerySwapchainSupport(&sdesc).capabilities;
 
-		// 2. This handles the 0xFFFFFFFF case where Vulkan doesn't know the size yet.
-		uint32_t final_w, final_h;
-		if (caps.currentExtent.width != 0xFFFFFFFF) {
-			final_w = caps.currentExtent.width;
-			final_h = caps.currentExtent.height;
-		} else {
-			final_w = JPH::Clamp((uint32_t)w, caps.minImageExtent.width, caps.maxImageExtent.width);
-			final_h =
-				JPH::Clamp((uint32_t)h, caps.minImageExtent.height, caps.maxImageExtent.height);
-		}
+		uint32_t final_w =
+			(caps.currentExtent.width != 0xFFFFFFFF)
+				? caps.currentExtent.width
+				: JPH::Clamp((uint32_t)w, caps.minImageExtent.width, caps.maxImageExtent.width);
+		uint32_t final_h =
+			(caps.currentExtent.height != 0xFFFFFFFF)
+				? caps.currentExtent.height
+				: JPH::Clamp((uint32_t)h, caps.minImageExtent.height, caps.maxImageExtent.height);
 
 		ZHLN_SwapchainDesc s_desc = {.device = &raw_dev,
 									 .physical = &raw_phys,
@@ -283,9 +251,36 @@ void RenderContext::BeginFrame() {
 									 .height = final_h,
 									 .vsync = true,
 									 .old_swapchain = VK_NULL_HANDLE};
-
 		_impl->swapchain.Rebuild(s_desc);
 		_impl->present_semaphores.Rebuild(_impl->ctx.Device(), _impl->swapchain.Get().image_count);
+
+		// Depth Buffer Rebuild
+		if (_impl->depth_view) {
+			vkDestroyImageView(_impl->ctx.Device(), _impl->depth_view, nullptr);
+		}
+		VkImageCreateInfo d_info = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+									.imageType = VK_IMAGE_TYPE_2D,
+									.format = VK_FORMAT_D32_SFLOAT,
+									.extent = {final_w, final_h, 1},
+									.mipLevels = 1,
+									.arrayLayers = 1,
+									.samples = VK_SAMPLE_COUNT_1_BIT,
+									.tiling = VK_IMAGE_TILING_OPTIMAL,
+									.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+									.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+									.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+		_impl->depth_image =
+			Vk::Image::Create(_impl->allocator.Get(), d_info, VMA_MEMORY_USAGE_GPU_ONLY);
+
+		VkImageViewCreateInfo v_info = {
+			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+			.image = _impl->depth_image.Handle(),
+			.viewType = VK_IMAGE_VIEW_TYPE_2D,
+			.format = VK_FORMAT_D32_SFLOAT,
+			.subresourceRange = {
+				.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .levelCount = 1, .layerCount = 1}};
+		vkCreateImageView(_impl->ctx.Device(), &v_info, nullptr, &_impl->depth_view);
+
 		_impl->resized = false;
 	};
 
@@ -296,64 +291,51 @@ void RenderContext::BeginFrame() {
 	ZHLN_WaitAndResetFrame(_impl->ctx.Device(), s.in_flight, &_impl->pools[_impl->frame_index]);
 
 	ZHLN_AcquireDesc acq = {_impl->swapchain.Get().handle, s.image_available, UINT64_MAX};
-	auto res = ZHLN_AcquireImage(_impl->ctx.Device(), &acq, &_impl->current_image_index);
-	if (res == ZHLN_FrameResult_OutOfDate) {
+	if (ZHLN_AcquireImage(_impl->ctx.Device(), &acq, &_impl->current_image_index) ==
+		ZHLN_FrameResult_OutOfDate) {
 		rebuild_cb();
-		return; // Skip this frame
+		return;
 	}
 
 	_impl->current_cmd = _impl->pools.Cmd(_impl->frame_index);
 	ZHLN_BeginCommandBuffer(_impl->current_cmd);
 
-	// Transition Swapchain Image
-	VkImage img = _impl->swapchain.Get().images[_impl->current_image_index];
 	Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-		_impl->current_cmd, img);
+		_impl->current_cmd, _impl->swapchain.Get().images[_impl->current_image_index]);
+
+	// Transition Depth
+	Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+		_impl->current_cmd, _impl->depth_image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
 }
 
 void RenderContext::EndFrame() {
 	if (_impl->current_cmd == VK_NULL_HANDLE)
-		return; // Skipped frame
+		return;
 
-	// MUST End Rendering before inserting image barriers!
 	ZHLN_EndRendering(_impl->current_cmd);
-
-	// Transition Swapchain Image for Presentation
-	VkImage img = _impl->swapchain.Get().images[_impl->current_image_index];
 	Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(
-		_impl->current_cmd, img);
+		_impl->current_cmd, _impl->swapchain.Get().images[_impl->current_image_index]);
 	ZHLN_EndCommandBuffer(_impl->current_cmd);
 
 	const ZHLN_FrameSync& s = _impl->sync[_impl->frame_index];
-
 	VkCommandBufferSubmitInfo cmd_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-										  .pNext = nullptr,
-										  .commandBuffer = _impl->current_cmd,
-										  .deviceMask = 0};
+										  .commandBuffer = _impl->current_cmd};
 	VkSemaphoreSubmitInfo wait_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-									   .pNext = nullptr,
 									   .semaphore = s.image_available,
-									   .value = 0,
-									   .stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-									   .deviceIndex = 0};
+									   .stageMask =
+										   VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT};
 	VkSemaphoreSubmitInfo signal_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-										 .pNext = nullptr,
 										 .semaphore =
 											 _impl->present_semaphores[_impl->current_image_index],
-										 .value = 0,
-										 .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
-										 .deviceIndex = 0};
+										 .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT};
 
 	VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-							.pNext = nullptr,
-							.flags = 0,
 							.waitSemaphoreInfoCount = 1,
 							.pWaitSemaphoreInfos = &wait_info,
 							.commandBufferInfoCount = 1,
 							.pCommandBufferInfos = &cmd_info,
 							.signalSemaphoreInfoCount = 1,
 							.pSignalSemaphoreInfos = &signal_info};
-
 	vkQueueSubmit2(_impl->ctx.GraphicsQueue(), 1, &submit, s.in_flight);
 
 	ZHLN_PresentDesc pres = {.present_queue = _impl->ctx.PresentQueue(),
@@ -361,10 +343,8 @@ void RenderContext::EndFrame() {
 							 .render_finished =
 								 _impl->present_semaphores[_impl->current_image_index],
 							 .image_index = _impl->current_image_index};
-
-	if (ZHLN_PresentFrame(&pres) != ZHLN_FrameResult_Ok) {
+	if (ZHLN_PresentFrame(&pres) != ZHLN_FrameResult_Ok)
 		_impl->resized = true;
-	}
 
 	_impl->frame_index = (_impl->frame_index + 1) % 2;
 	_impl->current_cmd = VK_NULL_HANDLE;
@@ -378,24 +358,16 @@ void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
 
 	ZHLN_RenderPassDesc pass = {
 		.target_view = impl->swapchain.Get().views[impl->current_image_index],
-		.depth_view = VK_NULL_HANDLE,
+		.depth_view = impl->depth_view, // BIND DEPTH VIEW
 		.extent = impl->swapchain.Get().extent,
 		.clear_color = {color.GetX(), color.GetY(), color.GetZ(), color.GetW()},
-		.clear_depth = 1.0f // Added
-	};
-
-	// Note: For actual drawing, you need to BeginRendering, Draw, EndRendering.
-	// If you just want to clear, doing Begin/End rendering with CLEAR ops is the Vulkan 1.3 way.
+		.clear_depth = depth};
 	ZHLN_BeginRendering(impl->current_cmd, &pass);
-	// We will leave the RenderPass open here so Draw() can append commands.
-	// In a real engine, Clear/Draw flow needs careful management of BeginRendering/EndRendering.
 }
 
 void UpdateBuffer(RenderContext& ctx, BufferHandle buffer, const void* data, size_t size) {
-	// Intercept the matrix upload and cache it (Simulating the Constant Buffer)
-	if (size == sizeof(JPH::Mat44)) {
+	if (size == sizeof(JPH::Mat44))
 		ctx.GetImpl()->current_view_proj = *static_cast<const JPH::Mat44*>(data);
-	}
 }
 
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
@@ -413,7 +385,6 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 	VkBuffer buf = msh->buffer.Handle();
 	vkCmdBindVertexBuffers(impl->current_cmd, 0, 1, &buf, &offset);
 
-	// Multiply the cached ViewProj with the object's Model transform
 	JPH::Mat44 final_transform = impl->current_view_proj * transform;
 	vkCmdPushConstants(impl->current_cmd, mat->layout.Get(), VK_SHADER_STAGE_VERTEX_BIT, 0,
 					   sizeof(JPH::Mat44), &final_transform);

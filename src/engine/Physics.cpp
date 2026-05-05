@@ -21,21 +21,18 @@
 #include <array>
 #include <cstring>
 #include <memory>
-
 #include <new> // Required for std::align_val_t
 
 namespace ZHLN {
-template <typename T>
-[[nodiscard]] static T* AllocateAligned(size_t count, size_t alignment) {
-    // operator new(size, alignment) ensures the base pointer is aligned
-    return static_cast<T*>(::operator new[](count * sizeof(T), std::align_val_t{alignment}));
+template <typename T> [[nodiscard]] static T* AllocateAligned(size_t count, size_t alignment) {
+	// operator new(size, alignment) ensures the base pointer is aligned
+	return static_cast<T*>(::operator new[](count * sizeof(T), std::align_val_t{alignment}));
 }
 
-template <typename T>
-static void DeallocateAligned(T* ptr, size_t alignment) {
-    if (ptr) {
-        ::operator delete[](ptr, std::align_val_t{alignment});
-    }
+template <typename T> static void DeallocateAligned(T* ptr, size_t alignment) {
+	if (ptr) {
+		::operator delete[](ptr, std::align_val_t{alignment});
+	}
 }
 
 // --- Jolt Boilerplate: Layers & Filters ---
@@ -358,48 +355,47 @@ PhysicsContext::PhysicsContext() : _impl(std::make_unique<Impl>()) {
 	world.tempAllocator = &_impl->tempAllocator;
 	world.maxJoltBodies = maxBodies;
 
-	
-    world.capacity = maxBodies;
-    world.slotCapacity = maxBodies;
+	world.capacity = maxBodies;
+	world.slotCapacity = maxBodies;
 
-    // 32-byte alignment for Position Strides (Double3 or Float4 + padding)
-    world.positions     = AllocateAligned<JPH::Real>(maxBodies * 4, 32);
-    world.prevPositions = AllocateAligned<JPH::Real>(maxBodies * 4, 32);
+	// 32-byte alignment for Position Strides (Double3 or Float4 + padding)
+	world.positions = AllocateAligned<JPH::Real>(maxBodies * 4, 32);
+	world.prevPositions = AllocateAligned<JPH::Real>(maxBodies * 4, 32);
 
-    // 16-byte alignment for Rotation/Velocity Strides (Float4)
-    world.rotations         = AllocateAligned<float>(maxBodies * 4, 16);
-    world.prevRotations      = AllocateAligned<float>(maxBodies * 4, 16);
-    world.linearVelocities  = AllocateAligned<float>(maxBodies * 4, 16);
-    world.angularVelocities = AllocateAligned<float>(maxBodies * 4, 16);
+	// 16-byte alignment for Rotation/Velocity Strides (Float4)
+	world.rotations = AllocateAligned<float>(maxBodies * 4, 16);
+	world.prevRotations = AllocateAligned<float>(maxBodies * 4, 16);
+	world.linearVelocities = AllocateAligned<float>(maxBodies * 4, 16);
+	world.angularVelocities = AllocateAligned<float>(maxBodies * 4, 16);
 
-    // Standard alignment is fine for these
-    world.bodyIDs       = new JPH::BodyID[maxBodies]();
-    world.joltBodyPtrs  = new const void*[maxBodies]();
-    world.slotToDense   = new uint32_t[maxBodies]();
-    world.denseToSlot   = new uint32_t[maxBodies]();
-    world.generations   = new ZHLN::Atomic<uint32_t>[maxBodies]();
+	// Standard alignment is fine for these
+	world.bodyIDs = new JPH::BodyID[maxBodies]();
+	world.joltBodyPtrs = new const void*[maxBodies]();
+	world.slotToDense = new uint32_t[maxBodies]();
+	world.denseToSlot = new uint32_t[maxBodies]();
+	world.generations = new ZHLN::Atomic<uint32_t>[maxBodies]();
 
-    world.count.store(0, std::memory_order_relaxed);
+	world.count.store(0, std::memory_order_relaxed);
 }
 
 PhysicsContext::~PhysicsContext() {
-    auto& world = _impl->world;
+	auto& world = _impl->world;
 
-    // Use the matching alignment values
-    DeallocateAligned(world.positions, 32);
-    DeallocateAligned(world.prevPositions, 32);
+	// Use the matching alignment values
+	DeallocateAligned(world.positions, 32);
+	DeallocateAligned(world.prevPositions, 32);
 
-    DeallocateAligned(world.rotations, 16);
-    DeallocateAligned(world.prevRotations, 16);
-    DeallocateAligned(world.linearVelocities, 16);
-    DeallocateAligned(world.angularVelocities, 16);
+	DeallocateAligned(world.rotations, 16);
+	DeallocateAligned(world.prevRotations, 16);
+	DeallocateAligned(world.linearVelocities, 16);
+	DeallocateAligned(world.angularVelocities, 16);
 
-    // Normal delete[] for standard allocations
-    delete[] world.bodyIDs;
-    delete[] world.joltBodyPtrs;
-    delete[] world.slotToDense;
-    delete[] world.denseToSlot;
-    delete[] world.generations;
+	// Normal delete[] for standard allocations
+	delete[] world.bodyIDs;
+	delete[] world.joltBodyPtrs;
+	delete[] world.slotToDense;
+	delete[] world.denseToSlot;
+	delete[] world.generations;
 }
 
 void PhysicsContext::Step(float deltaTime) {

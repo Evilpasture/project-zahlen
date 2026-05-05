@@ -11,23 +11,31 @@
 namespace ZHLN::Math {
 
 /**
- * @brief View Matrix (LookAt).
+ * @brief View Matrix (LookAt). Right-Handed.
  */
 inline JPH::Mat44 CreateLookAt(JPH::Vec3Arg eye, JPH::Vec3Arg target, JPH::Vec3Arg up) {
 	return JPH::Mat44::sLookAt(eye, target, up);
 }
 
 /**
- * @brief Perspective Projection Matrix (Right-Handed).
- * Targets Clip-Space Z [0, 1] for modern APIs like Metal.
+ * @brief Perspective Projection Matrix.
+ * Enforces Right-Handed coordinates.
+ * Flips the Y-axis to map to Vulkan's Y-Down Clip Space.
+ * Maps Z to [0, 1] for modern graphics APIs.
  */
 inline JPH::Mat44 CreatePerspective(float fovRadians, float aspect, float nearZ, float farZ) {
-	return JPH::Mat44::sPerspective(fovRadians, aspect, nearZ, farZ);
+	float f = 1.0f / JPH::Tan(fovRadians * 0.5f);
+	return JPH::Mat44(JPH::Vec4(f / aspect, 0.0f, 0.0f, 0.0f),
+					  JPH::Vec4(0.0f, -f, 0.0f, 0.0f), // FLIP Y FOR VULKAN
+					  JPH::Vec4(0.0f, 0.0f, farZ / (nearZ - farZ), -1.0f),
+					  JPH::Vec4(0.0f, 0.0f, (nearZ * farZ) / (nearZ - farZ), 0.0f));
 }
 
 /**
  * @brief Orthographic Projection Matrix.
- * Manually assembled for Metal/Vulkan/D3D12 Z-range [0, 1].
+ * Enforces Right-Handed coordinates.
+ * Flips the Y-axis to map to Vulkan's Y-Down Clip Space.
+ * Maps Z to [0, 1] for modern graphics APIs.
  */
 inline JPH::Mat44 CreateOrtho(float left, float right, float bottom, float top, float nearZ,
 							  float farZ) {
@@ -35,12 +43,10 @@ inline JPH::Mat44 CreateOrtho(float left, float right, float bottom, float top, 
 	float t_b = top - bottom;
 	float f_n = farZ - nearZ;
 
-	return JPH::Mat44(
-		JPH::Vec4(2.0f / r_l, 0.0f, 0.0f, 0.0f),  // Column 0
-		JPH::Vec4(0.0f, 2.0f / t_b, 0.0f, 0.0f),  // Column 1
-		JPH::Vec4(0.0f, 0.0f, -1.0f / f_n, 0.0f), // Column 2 (Metal Z [0, 1])
-		JPH::Vec4(-(right + left) / r_l, -(top + bottom) / t_b, -nearZ / f_n, 1.0f) // Column 3
-	);
+	return JPH::Mat44(JPH::Vec4(2.0f / r_l, 0.0f, 0.0f, 0.0f),
+					  JPH::Vec4(0.0f, -2.0f / t_b, 0.0f, 0.0f), // FLIP Y FOR VULKAN
+					  JPH::Vec4(0.0f, 0.0f, -1.0f / f_n, 0.0f),
+					  JPH::Vec4(-(right + left) / r_l, -(top + bottom) / t_b, -nearZ / f_n, 1.0f));
 }
 
 /**
@@ -48,9 +54,7 @@ inline JPH::Mat44 CreateOrtho(float left, float right, float bottom, float top, 
  */
 inline JPH::Mat44 CreateTransform(JPH::Vec3Arg translation, JPH::QuatArg rotation,
 								  JPH::Vec3Arg scale) {
-	// Start with Rotation + Translation
 	JPH::Mat44 m = JPH::Mat44::sRotationTranslation(rotation, translation);
-	// Apply Scale (Post-multiply in Jolt is m * scale_matrix)
 	return m.PreScaled(scale);
 }
 
@@ -63,19 +67,15 @@ inline JPH::Mat44 CreateTransform(JPH::Vec3Arg translation, JPH::QuatArg rotatio
 
 /**
  * @brief Converts Euler angles (in Radians) to a Quaternion.
- * @param radians A Vec3 where X=Pitch, Y=Yaw, Z=Roll.
  */
 inline JPH::Quat EulerToQuat(JPH::Vec3Arg radians) {
-	// Jolt provides this SIMD-optimized conversion directly.
 	return JPH::Quat::sEulerAngles(radians);
 }
 
 /**
  * @brief Converts a Quaternion to Euler angles (in Radians).
- * @return A Vec3 where X=Pitch, Y=Yaw, Z=Roll.
  */
 inline JPH::Vec3 QuatToEuler(JPH::QuatArg quat) {
-	// Returns Euler angles in Radians.
 	return quat.GetEulerAngles();
 }
 
