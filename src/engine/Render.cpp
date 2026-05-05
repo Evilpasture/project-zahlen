@@ -28,9 +28,9 @@ struct RenderContext::Impl {
 	Vk::CommandPools<2> pools;
 	Vk::SemaphorePool present_semaphores;
 
-	// Depth Buffer Management
 	Vk::Image depth_image;
 	VkImageView depth_view = VK_NULL_HANDLE;
+	bool depth_initialized = false; // Fix: Track depth state
 
 	uint32_t frame_index = 0;
 	bool resized = true;
@@ -131,11 +131,25 @@ RenderContext::RenderContext(Window& window, const String32& preferredAPI)
 
 RenderContext::~RenderContext() {
 	if (_impl->ctx.Device()) {
+		// 1. Wait for GPU to finish work
 		vkDeviceWaitIdle(_impl->ctx.Device());
-		if (_impl->depth_view != VK_NULL_HANDLE) {
+
+		// 2. Nuke resources while Allocator/Device are still alive
+		_impl->meshes.clear();
+		_impl->materials.clear();
+
+		// 3. Explicitly kill the depth buffer and swapchain
+		_impl->depth_image = Vk::Image(); // RAII release
+		if (_impl->depth_view) {
 			vkDestroyImageView(_impl->ctx.Device(), _impl->depth_view, nullptr);
+			_impl->depth_view = VK_NULL_HANDLE;
 		}
+
+		// 4. Kill the swapchain and allocator
+		_impl->swapchain = Vk::Swapchain();
+		_impl->allocator = Vk::Allocator();
 	}
+	// Now ctx destructs and kills the Device/Instance.
 }
 
 const char* RenderContext::GetRendererName() const {
@@ -204,14 +218,13 @@ Material RenderContext::CreateMaterial(const PipelineDesc& desc) {
 										   .vertex_binding_count = 1,
 										   .vertex_attribute_count = 2,
 										   .color_format = VK_FORMAT_B8G8R8A8_SRGB,
-										   .depth_format =
-											   VK_FORMAT_D32_SFLOAT, // DEPTH FORMAT ENABLED
+										   .depth_format = VK_FORMAT_D32_SFLOAT,
 										   .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
 										   .polygon_mode = VK_POLYGON_MODE_FILL,
-										   .cull_mode = VK_CULL_MODE_BACK_BIT, // CULLING ENABLED
+										   .cull_mode = VK_CULL_MODE_BACK_BIT,
 										   .front_face = VK_FRONT_FACE_COUNTER_CLOCKWISE,
-										   .depth_test = true,	// DEPTH TEST ENABLED
-										   .depth_write = true, // DEPTH WRITE ENABLED
+										   .depth_test = true,
+										   .depth_write = true,
 										   .blend_enable = false};
 	auto pipeline = Vk::Pipeline(_impl->ctx.Device(),
 								 ZHLN_CreateGraphicsPipeline(_impl->ctx.Device(), &pipe_desc));
@@ -254,10 +267,12 @@ void RenderContext::BeginFrame() {
 		_impl->swapchain.Rebuild(s_desc);
 		_impl->present_semaphores.Rebuild(_impl->ctx.Device(), _impl->swapchain.Get().image_count);
 
-		// Depth Buffer Rebuild
 		if (_impl->depth_view) {
 			vkDestroyImageView(_impl->ctx.Device(), _impl->depth_view, nullptr);
 		}
+
+		// Move assignment destroys the old allocation safely
+		_impl->depth_image = Vk::Image();
 		VkImageCreateInfo d_info = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 									.imageType = VK_IMAGE_TYPE_2D,
 									.format = VK_FORMAT_D32_SFLOAT,
@@ -281,6 +296,7 @@ void RenderContext::BeginFrame() {
 				.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .levelCount = 1, .layerCount = 1}};
 		vkCreateImageView(_impl->ctx.Device(), &v_info, nullptr, &_impl->depth_view);
 
+		_impl->depth_initialized = false; // Fix: Require layout transition for the new depth buffer
 		_impl->resized = false;
 	};
 
@@ -303,9 +319,12 @@ void RenderContext::BeginFrame() {
 	Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
 		_impl->current_cmd, _impl->swapchain.Get().images[_impl->current_image_index]);
 
-	// Transition Depth
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-		_impl->current_cmd, _impl->depth_image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+	// Fix: Only transition depth once per resize/allocation to prevent WRITE_AFTER_WRITE
+	if (!_impl->depth_initialized) {
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+			_impl->current_cmd, _impl->depth_image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+		_impl->depth_initialized = true;
+	}
 }
 
 void RenderContext::EndFrame() {
@@ -358,7 +377,7 @@ void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
 
 	ZHLN_RenderPassDesc pass = {
 		.target_view = impl->swapchain.Get().views[impl->current_image_index],
-		.depth_view = impl->depth_view, // BIND DEPTH VIEW
+		.depth_view = impl->depth_view,
 		.extent = impl->swapchain.Get().extent,
 		.clear_color = {color.GetX(), color.GetY(), color.GetZ(), color.GetW()},
 		.clear_depth = depth};
