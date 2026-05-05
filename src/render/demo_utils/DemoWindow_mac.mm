@@ -63,6 +63,7 @@ WindowState InitWindow(uint32_t width, uint32_t height, const char* title) {
     [window center];
     [window makeKeyAndOrderFront:nil];
     [NSApp activateIgnoringOtherApps:YES];
+    [window makeFirstResponder:[window contentView]];
     [NSApp finishLaunching];
     
     state.os_window = (__bridge void*)window;
