@@ -1,8 +1,8 @@
 #pragma once
 
 #include "RenderCore.h"
-#include "Utils.hpp"
 
+#include <algorithm>
 #include <array>
 #include <concepts>
 #include <functional>
@@ -707,74 +707,88 @@ class Surface {
 // Semaphore Helpers
 // ============================================================================
 
-// Add a helper for the "One Semaphore Per Swapchain Image" pattern
-class SemaphorePool {
+#include <algorithm>
+#include <array>
+#include <cstdlib>
+#include <print>
+
+// Perfect 64-byte structure (1 Cache Line)
+class alignas(64) SemaphorePool {
   public:
 	SemaphorePool() noexcept = default;
+	~SemaphorePool() noexcept { Cleanup(); }
 
-	~SemaphorePool() noexcept {
-		if (_device != VK_NULL_HANDLE) {
-			for (uint32_t i = 0; i < _count; ++i) {
-				ZHLN_DestroySemaphore(_device, _semaphores[i]);
-			}
-		}
-	}
-
-	// Move-only semantics
+	// Move-only
 	SemaphorePool(const SemaphorePool&) = delete;
 	SemaphorePool& operator=(const SemaphorePool&) = delete;
 
 	SemaphorePool(SemaphorePool&& other) noexcept
 		: _device(std::exchange(other._device, VK_NULL_HANDLE)),
 		  _count(std::exchange(other._count, 0)) {
-		for (uint32_t i = 0; i < 8; ++i) {
-			_semaphores[i] = std::exchange(other._semaphores[i], VK_NULL_HANDLE);
-		}
+		std::ranges::move(other._semaphores, _semaphores.begin());
+		other._semaphores.fill(VK_NULL_HANDLE);
 	}
 
 	SemaphorePool& operator=(SemaphorePool&& other) noexcept {
 		if (this != &other) {
-			if (_device != VK_NULL_HANDLE) {
-				for (uint32_t i = 0; i < _count; ++i) {
-					ZHLN_DestroySemaphore(_device, _semaphores[i]);
-				}
-			}
+			Cleanup();
 			_device = std::exchange(other._device, VK_NULL_HANDLE);
 			_count = std::exchange(other._count, 0);
-			for (uint32_t i = 0; i < 8; ++i) {
-				_semaphores[i] = std::exchange(other._semaphores[i], VK_NULL_HANDLE);
-			}
+			std::ranges::move(other._semaphores, _semaphores.begin());
+			other._semaphores.fill(VK_NULL_HANDLE);
 		}
 		return *this;
 	}
 
 	void Rebuild(const VkDevice device, const uint32_t count) noexcept {
-		// Destroy existing if necessary
-		if (_device != VK_NULL_HANDLE) {
-			for (uint32_t i = 0; i < _count; ++i) {
-				ZHLN_DestroySemaphore(_device, _semaphores[i]);
+		Cleanup();
+		_device = device;
+		// Cap at 6 to ensure 64-byte struct size
+		_count = std::min(count, 6u);
+
+		for (uint32_t i = 0; i < _count; ++i)
+			_semaphores[i] = ZHLN_CreateSemaphore(_device);
+	}
+
+	[[nodiscard]] VkSemaphore operator[](const uint32_t index) const noexcept {
+		// Hot path check: unlikely() keeps the branch away from the main logic flow
+		if (index >= _count) [[unlikely]] {
+			std::println(stderr,
+						 "[ZHLN::Vk] FATAL: SemaphorePool index {} out of bounds (Size: {})", index,
+						 _count);
+			std::abort();
+		}
+		return _semaphores[index];
+	}
+
+	[[nodiscard]] uint32_t Count() const noexcept { return _count; }
+	[[nodiscard]] bool Valid() const noexcept { return _device != VK_NULL_HANDLE; }
+
+  private:
+	void Cleanup() noexcept {
+		if (_device == VK_NULL_HANDLE)
+			return;
+
+		// Locally cache device handle for the loop
+		const auto d = _device;
+		for (uint32_t i = 0; i < _count; ++i) {
+			// Local null check prevents expensive driver thunk if slot is empty
+			if (_semaphores[i]) {
+				vkDestroySemaphore(d, _semaphores[i], nullptr);
 			}
 		}
 
-		_device = device;
-		// Clamp to our architectural limit
-		_count = Clamp(count, 0U, 8U);
-
-		for (uint32_t i = 0; i < _count; ++i) {
-			_semaphores[i] = ZHLN_CreateSemaphore(_device);
-		}
+		_semaphores.fill(VK_NULL_HANDLE);
+		_count = 0;
+		_device = VK_NULL_HANDLE;
 	}
 
-	[[nodiscard]] constexpr VkSemaphore operator[](const uint32_t index) const noexcept {
-		return _semaphores[index % _count];
-	}
-
-	[[nodiscard]] constexpr uint32_t Size() const noexcept { return _count; }
-
-  private:
-	VkDevice _device = VK_NULL_HANDLE;
-	VkSemaphore _semaphores[8] = {}; // Fixed stack-adjacent array
-	uint32_t _count = 0;
+	// Order matters for packing:
+	VkDevice _device = VK_NULL_HANDLE;			 // 8 bytes
+	uint32_t _count = 0;						 // 4 bytes
+	uint32_t _padding = 0;						 // 4 bytes (Explicit padding for 64-bit alignment)
+	std::array<VkSemaphore, 6> _semaphores = {}; // 48 bytes
+												 // Total: Exactly 64 bytes.
 };
 
 // ============================================================================
