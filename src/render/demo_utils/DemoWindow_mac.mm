@@ -111,5 +111,10 @@ VkSurfaceKHR CreateSurface(VkInstance instance, const WindowState& state) {
     return surface;
 }
 
+void UpdateWindowTitle(ZHLN::Demo::WindowState& win, const char* title) {
+    NSWindow* nswin = (__bridge NSWindow*)win.os_window;
+    [nswin setTitle:[NSString stringWithUTF8String:title]];
+}
+
 } // namespace ZHLN::Demo
 #endif

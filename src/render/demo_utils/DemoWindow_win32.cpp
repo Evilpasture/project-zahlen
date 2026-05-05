@@ -84,5 +84,9 @@ VkSurfaceKHR CreateSurface(VkInstance instance, const WindowState& state) {
 	return surface;
 }
 
+void UpdateWindowTitle(ZHLN::Demo::WindowState& win, const char* title) {
+	SetWindowTextA((HWND)win.os_window, title);
+}
+
 } // namespace ZHLN::Demo
 #endif

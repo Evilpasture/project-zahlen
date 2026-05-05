@@ -34,4 +34,6 @@ std::vector<const char*> GetRequiredInstanceExtensions();
 // Creates the Vulkan Surface from the OS Window
 VkSurfaceKHR CreateSurface(VkInstance instance, const WindowState& state);
 
+void UpdateWindowTitle(ZHLN::Demo::WindowState& win, const char* title);
+
 } // namespace ZHLN::Demo
