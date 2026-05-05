@@ -20,12 +20,7 @@
 // ----------------------------------------------------------------------------
 // Vertex Definition & Reflection
 // ----------------------------------------------------------------------------
-struct Vertex {
-	std::array<float, 3> pos;
-	std::array<float, 3> norm;
-	std::array<float, 2> uv;
-};
-ZHLN_REFLECT_VERTEX(Vertex, pos, norm, uv);
+ZHLN_REFLECT_VERTEX(ZHLN::Vk::Vertex, pos, norm, uv);
 
 // ----------------------------------------------------------------------------
 // Types
@@ -49,6 +44,12 @@ struct TextureAsset {
 
 struct MaterialAsset {
 	VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+};
+
+struct SponzaPushConstants {
+	Mat4 mvp;
+	Mat4 lightSpaceMatrix;
+	float camPos[4]; // Add this
 };
 
 // ----------------------------------------------------------------------------
@@ -199,7 +200,7 @@ auto main() -> int {
 		return -1;
 	}
 
-	std::vector<Vertex> vertices;
+	std::vector<ZHLN::Vk::Vertex> vertices;
 	std::vector<uint32_t> indices;
 	std::vector<MeshPrimitive> gpu_primitives;
 	std::vector<DrawCall> scene_draw_calls;
@@ -283,7 +284,7 @@ auto main() -> int {
 	ZHLN_BeginCommandBuffer(setupCmd);
 
 	// VBO / IBO
-	auto vbo = ZHLN::Vk::Buffer::Create(allocator.Get(), vertices.size() * sizeof(Vertex),
+	auto vbo = ZHLN::Vk::Buffer::Create(allocator.Get(), vertices.size() * sizeof(ZHLN::Vk::Vertex),
 										VK_BUFFER_USAGE_TRANSFER_DST_BIT |
 											VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
 										VMA_MEMORY_USAGE_GPU_ONLY);
@@ -293,7 +294,7 @@ auto main() -> int {
 										VMA_MEMORY_USAGE_GPU_ONLY);
 
 	auto stagingVBO = ZHLN::Vk::UploadToBuffer(allocator.Get(), setupCmd, vbo, vertices.data(),
-											   vertices.size() * sizeof(Vertex));
+											   vertices.size() * sizeof(ZHLN::Vk::Vertex));
 	auto stagingIBO = ZHLN::Vk::UploadToBuffer(allocator.Get(), setupCmd, ibo, indices.data(),
 											   indices.size() * sizeof(uint32_t));
 
@@ -421,6 +422,36 @@ auto main() -> int {
 									   VK_IMAGE_ASPECT_COLOR_BIT);
 	}
 
+	constexpr uint32_t SHADOW_RES = 4096;
+	VkImageCreateInfo shadow_info = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+									 .imageType = VK_IMAGE_TYPE_2D,
+									 .format = VK_FORMAT_D32_SFLOAT,
+									 .extent = {SHADOW_RES, SHADOW_RES, 1},
+									 .mipLevels = 1,
+									 .arrayLayers = 1,
+									 .samples = VK_SAMPLE_COUNT_1_BIT,
+									 .tiling = VK_IMAGE_TILING_OPTIMAL,
+									 .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+											  VK_IMAGE_USAGE_SAMPLED_BIT,
+									 .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+									 .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+	auto shadowImage =
+		ZHLN::Vk::Image::Create(allocator.Get(), shadow_info, VMA_MEMORY_USAGE_GPU_ONLY);
+	VkImageView shadowView = CreateImageView(ctx.Device(), shadowImage.Handle(),
+											 VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT);
+
+	// Special Sampler for Shadows (Compare mode enabled)
+	VkSamplerCreateInfo shadow_samp_info = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+											.magFilter = VK_FILTER_LINEAR,
+											.minFilter = VK_FILTER_LINEAR,
+											.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+											.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+											.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE,
+											.compareEnable = VK_TRUE, // Hardware depth comparison!
+											.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL};
+	VkSampler shadowSampler;
+	vkCreateSampler(ctx.Device(), &shadow_samp_info, nullptr, &shadowSampler);
+
 	VkSamplerCreateInfo sampler_info = {
 		.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
 		.magFilter = VK_FILTER_LINEAR,
@@ -436,24 +467,34 @@ auto main() -> int {
 	vkCreateSampler(ctx.Device(), &sampler_info, nullptr, &defaultSampler);
 
 	// --- 4. Descriptor Sets ---
-	VkDescriptorSetLayoutBinding bindings[2] = {{.binding = 0,
-												 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-												 .descriptorCount = 1,
-												 .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT},
-												{.binding = 1,
-												 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
-												 .descriptorCount = 1,
-												 .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT}};
-	VkDescriptorSetLayoutCreateInfo layoutInfo = {
+	const VkDescriptorSetLayoutBinding bindings[4] = {
+		{.binding = 0,
+		 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+		 .descriptorCount = 1,
+		 .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT},
+		{.binding = 1,
+		 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
+		 .descriptorCount = 1,
+		 .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT},
+		{.binding = 2,
+		 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+		 .descriptorCount = 1,
+		 .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT}, // Shadow Map
+		{.binding = 3,
+		 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
+		 .descriptorCount = 1,
+		 .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT} // Shadow Sampler
+	};
+	const VkDescriptorSetLayoutCreateInfo layoutInfo = {
 		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-		.bindingCount = 2,
+		.bindingCount = 4,
 		.pBindings = bindings};
 	VkDescriptorSetLayout descLayout;
 	vkCreateDescriptorSetLayout(ctx.Device(), &layoutInfo, nullptr, &descLayout);
 
 	uint32_t matCount = static_cast<uint32_t>(data->materials_count) + 1; // +1 for fallback
-	VkDescriptorPoolSize poolSizes[2] = {{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, matCount},
-										 {VK_DESCRIPTOR_TYPE_SAMPLER, matCount}};
+	VkDescriptorPoolSize poolSizes[2] = {{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, matCount * 2},
+										 {VK_DESCRIPTOR_TYPE_SAMPLER, matCount * 2}};
 	VkDescriptorPoolCreateInfo poolInfo = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
 										   .maxSets = matCount,
 										   .poolSizeCount = 2,
@@ -474,7 +515,11 @@ auto main() -> int {
 		VkDescriptorImageInfo imageInfo = {.imageView = view,
 										   .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 		VkDescriptorImageInfo samplerDescInfo = {.sampler = defaultSampler};
-		VkWriteDescriptorSet writes[2] = {{.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+		VkDescriptorImageInfo shadowInfo = {
+			.imageView = shadowView, .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+		VkDescriptorImageInfo shadowSampInfo = {.sampler = shadowSampler};
+
+		VkWriteDescriptorSet writes[4] = {{.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 										   .dstSet = set,
 										   .dstBinding = 0,
 										   .descriptorCount = 1,
@@ -485,8 +530,20 @@ auto main() -> int {
 										   .dstBinding = 1,
 										   .descriptorCount = 1,
 										   .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
-										   .pImageInfo = &samplerDescInfo}};
-		vkUpdateDescriptorSets(ctx.Device(), 2, writes, 0, nullptr);
+										   .pImageInfo = &samplerDescInfo},
+										  {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+										   .dstSet = set,
+										   .dstBinding = 2,
+										   .descriptorCount = 1,
+										   .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+										   .pImageInfo = &shadowInfo},
+										  {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+										   .dstSet = set,
+										   .dstBinding = 3,
+										   .descriptorCount = 1,
+										   .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
+										   .pImageInfo = &shadowSampInfo}};
+		vkUpdateDescriptorSets(ctx.Device(), 4, writes, 0, nullptr);
 	};
 
 	// Fallback Material
@@ -520,7 +577,7 @@ auto main() -> int {
 	auto shaders = ZHLN::Vk::ShaderStages::Create(ctx.Device(), v_desc, f_desc);
 
 	VkPushConstantRange push_range = {
-		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .offset = 0, .size = sizeof(Mat4)};
+		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .offset = 0, .size = sizeof(SponzaPushConstants)};
 	ZHLN_PipelineLayoutDesc pLayoutDesc = {.set_layouts = &descLayout,
 										   .set_layout_count = 1,
 										   .push_constants = &push_range,
@@ -528,8 +585,8 @@ auto main() -> int {
 	ZHLN::Vk::PipelineLayout pipelineLayout(ctx.Device(),
 											ZHLN_CreatePipelineLayout(ctx.Device(), &pLayoutDesc));
 
-	auto vertex_bindings = ZHLN::Vk::VertexTraits<Vertex>::Bindings();
-	auto vertex_attributes = ZHLN::Vk::VertexTraits<Vertex>::Attributes();
+	auto vertex_bindings = ZHLN::Vk::VertexTraits<ZHLN::Vk::Vertex>::Bindings();
+	auto vertex_attributes = ZHLN::Vk::VertexTraits<ZHLN::Vk::Vertex>::Attributes();
 
 	ZHLN_GraphicsPipelineDesc pipe_desc = {
 		.stages = const_cast<ZHLN_ShaderStages*>(shaders.Get()),
@@ -549,6 +606,40 @@ auto main() -> int {
 		.blend_enable = false};
 	ZHLN::Vk::Pipeline pipeline(ctx.Device(),
 								ZHLN_CreateGraphicsPipeline(ctx.Device(), &pipe_desc));
+
+	auto shadow_v_code = LoadSpirv(shader_prefix + "shadow.hlsl.VSMain.spv");
+	auto shadow_f_code = LoadSpirv(shader_prefix + "shadow.hlsl.PSMain.spv");
+	ZHLN_ShaderDesc sv_desc = {shadow_v_code.data(), shadow_v_code.size() * 4, "VSMain"};
+	ZHLN_ShaderDesc sf_desc = {shadow_f_code.data(), shadow_f_code.size() * 4, "PSMain"};
+	auto shadowShaders = ZHLN::Vk::ShaderStages::Create(ctx.Device(), sv_desc, sf_desc);
+
+	VkPushConstantRange shadow_push = {
+		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .offset = 0, .size = sizeof(Mat4)};
+	ZHLN_PipelineLayoutDesc sLayoutDesc = {.set_layouts = nullptr,
+										   .set_layout_count = 0,
+										   .push_constants = &shadow_push,
+										   .push_constant_count = 1};
+	ZHLN::Vk::PipelineLayout shadowLayout(ctx.Device(),
+										  ZHLN_CreatePipelineLayout(ctx.Device(), &sLayoutDesc));
+
+	ZHLN_GraphicsPipelineDesc shadow_pipe_desc = {
+		.stages = shadowShaders.Get(),
+		.layout = shadowLayout.Get(),
+		.vertex_bindings = vertex_bindings.data(),
+		.vertex_attributes = vertex_attributes.data(),
+		.vertex_binding_count = static_cast<uint32_t>(vertex_bindings.size()),
+		.vertex_attribute_count = static_cast<uint32_t>(vertex_attributes.size()),
+		.color_format = VK_FORMAT_UNDEFINED,
+		.depth_format = VK_FORMAT_D32_SFLOAT,
+		.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+		.polygon_mode = VK_POLYGON_MODE_FILL,
+		.cull_mode = VK_CULL_MODE_BACK_BIT,
+		.front_face = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+		.depth_test = true,
+		.depth_write = true,
+		.blend_enable = false};
+	ZHLN::Vk::Pipeline shadowPipeline(ctx.Device(),
+									  ZHLN_CreateGraphicsPipeline(ctx.Device(), &shadow_pipe_desc));
 
 	// --- 6. Render Loop Resources ---
 	ZHLN::Vk::Swapchain swapchain(ctx.Device(), {});
@@ -604,7 +695,12 @@ auto main() -> int {
 
 	std::println("Rendering Started...");
 
+	auto lastFPSUpdate = std::chrono::high_resolution_clock::now();
+	uint32_t framesThisSecond = 0;
+	float frameTimeMs = 0.0f;
+
 	while (win.running) {
+		auto frameStart = std::chrono::high_resolution_clock::now();
 		ZHLN::Demo::ProcessEvents(win);
 		if (win.width == 0 || win.height == 0)
 			continue;
@@ -619,12 +715,13 @@ auto main() -> int {
 		float eyeHeight = 2.5f;
 
 		// 2. The Long Axis is X in this model.
-		// The atrium is roughly 40 units long in X (-20 to +20)
-		float camX = std::sin(time * 0.1f) * 18.0f;
+		float maxDist = 12.0f;
+		float camX = std::sin(time * 0.1f) * maxDist;
 		float camZ = 0.0f; // Stay in the center of the hallway
 
 		// 3. Direction logic: Look toward the end of the hall we are walking toward
-		float lookTargetX = camX + (std::cos(time * 0.1f) > 0 ? 5.0f : -5.0f);
+		float velocity = std::cos(time * 0.1f);
+		float lookTargetX = camX + (velocity * 2.0f); // Look 2 units ahead of where you're moving
 
 		Mat4 view =
 			LookAt({camX, eyeHeight, camZ}, {lookTargetX, eyeHeight, 0.0f}, {0.0f, 1.0f, 0.0f});
@@ -665,27 +762,93 @@ auto main() -> int {
 									.extent = swapchain.Get().extent,
 									.clear_color = {0.5f, 0.7f, 1.0f, 1.0f},
 									.clear_depth = 1.0f}; // Sky Blue clear
+
+		// --- FPS CALCULATION ---
+		framesThisSecond++;
+		auto currentTime = std::chrono::high_resolution_clock::now();
+		std::chrono::duration<float> elapsed = currentTime - lastFPSUpdate;
+
+		if (elapsed.count() >= 1.0f) { // Update once per second
+			float fps = static_cast<float>(framesThisSecond) / elapsed.count();
+			frameTimeMs = 1000.0f / fps;
+
+			// Create the title string
+			std::string title =
+				std::format("ZHLN Engine | FPS: {:.1f} ({:.2f} ms) | Triangles: {}", fps,
+							frameTimeMs, scene_draw_calls.size() * 2); // Simple est.
+
+			// Update the window title
+			ZHLN::Demo::UpdateWindowTitle(win, title.c_str());
+
+			// Reset counters
+			framesThisSecond = 0;
+			lastFPSUpdate = currentTime;
+		}
+		// 1. Math Setup
+		Mat4 lightProj = Ortho(-25.0f, 25.0f, -25.0f, 25.0f, -50.0f, 100.0f);
+		Mat4 lightView = LookAt({15.0f, 30.0f, 9.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f});
+		Mat4 lightSpaceMatrix = Multiply(lightProj, lightView);
+
+		VkBuffer vboHandle = vbo.Handle();
+		VkDeviceSize offset = 0;
+
+		// === PASS 1: SHADOWS ===
+		ZHLN_ImageBarrierDesc shadowWriteBarrier = {
+			.image = shadowImage.Handle(),
+			.src_access = VK_ACCESS_2_NONE,
+			.dst_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+			.src_layout = VK_IMAGE_LAYOUT_UNDEFINED, // Accept anything (prevents the error)
+			.dst_layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+			.src_stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+			.dst_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+			.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
+		ZHLN_CmdImageBarrier(cmd, &shadowWriteBarrier);
+		ZHLN_RenderPassDesc shadowPass = {.target_view = VK_NULL_HANDLE,
+										  .depth_view = shadowView,
+										  .extent = {SHADOW_RES, SHADOW_RES},
+										  .clear_depth = 1.0f};
+
+		{
+			ZHLN::Vk::ScopedRendering render(cmd, shadowPass);
+			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline.Get());
+			vkCmdBindVertexBuffers(cmd, 0, 1, &vboHandle, &offset);
+			vkCmdBindIndexBuffer(cmd, ibo.Handle(), 0, VK_INDEX_TYPE_UINT32);
+
+			for (const auto& draw : scene_draw_calls) {
+				Mat4 shadowMVP = Multiply(lightSpaceMatrix, draw.worldMatrix);
+				ZHLN::Vk::Push(cmd, shadowLayout.Get(), VK_SHADER_STAGE_VERTEX_BIT, shadowMVP);
+				vkCmdDrawIndexed(cmd, draw.mesh->indexCount, 1, draw.mesh->firstIndex, 0, 0);
+			}
+		}
+		// === AFTER PASS 1 (Shadows) ===
+		// Explicitly wait for ALL depth writes to finish before the main shader starts reading
+		ZHLN_ImageBarrierDesc shadowReadBarrier = {
+			.image = shadowImage.Handle(),
+			.src_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+			.dst_access = VK_ACCESS_2_SHADER_READ_BIT,
+			.src_layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+			.dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			.src_stage = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, // Wait for end of render
+			.dst_stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,	  // Block fragment shader
+			.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
+		ZHLN_CmdImageBarrier(cmd, &shadowReadBarrier);
+
+		// === PASS 2: MAIN SCENE ===
 		{
 			ZHLN::Vk::ScopedRendering render(cmd, pass);
 			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
-
-			VkBuffer vboHandle = vbo.Handle();
-			VkDeviceSize offset = 0;
 			vkCmdBindVertexBuffers(cmd, 0, 1, &vboHandle, &offset);
 			vkCmdBindIndexBuffer(cmd, ibo.Handle(), 0, VK_INDEX_TYPE_UINT32);
 
 			int current_mat = -2;
-
-			// Iterate over the ASSEMBLED draw calls, not the raw primitives
 			for (const auto& draw : scene_draw_calls) {
+				SponzaPushConstants pc = {.mvp = Multiply(viewProj, draw.worldMatrix),
+										  .lightSpaceMatrix =
+											  Multiply(lightSpaceMatrix, draw.worldMatrix),
+										  .camPos = {camX, eyeHeight, camZ, 1.0f}};
 
-				// Calculate Node-Specific MVP: MVP = (Proj * View) * Model
-				Mat4 nodeMVP = Multiply(viewProj, draw.worldMatrix);
+				ZHLN::Vk::Push(cmd, pipelineLayout.Get(), VK_SHADER_STAGE_VERTEX_BIT, pc);
 
-				// Push THIS node's matrix to the GPU
-				ZHLN::Vk::Push(cmd, pipelineLayout.Get(), VK_SHADER_STAGE_VERTEX_BIT, nodeMVP);
-
-				// Bind material if it changed
 				if (draw.mesh->materialIndex != current_mat) {
 					current_mat = draw.mesh->materialIndex;
 					VkDescriptorSet dSet = (current_mat >= 0) ? materials[current_mat].descriptorSet
@@ -693,14 +856,9 @@ auto main() -> int {
 					vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
 											pipelineLayout.Get(), 0, 1, &dSet, 0, nullptr);
 				}
-
-				// Draw using the mesh data pointed to by this draw call
 				vkCmdDrawIndexed(cmd, draw.mesh->indexCount, 1, draw.mesh->firstIndex, 0, 0);
 			}
 		}
-
-		ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-								   VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, img);
 		ZHLN_EndCommandBuffer(cmd);
 
 		VkCommandBufferSubmitInfo cmd_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
@@ -733,15 +891,20 @@ auto main() -> int {
 
 	vkDeviceWaitIdle(ctx.Device());
 
-	// Cleanup
+	// Cleanup - Each object destroyed exactly ONCE
 	vkDestroySampler(ctx.Device(), defaultSampler, nullptr);
+	vkDestroySampler(ctx.Device(), shadowSampler, nullptr);
+
 	vkDestroyImageView(ctx.Device(), dummyTex.view, nullptr);
 	for (auto& tex : textures) {
 		if (tex.view)
 			vkDestroyImageView(ctx.Device(), tex.view, nullptr);
 	}
+
 	if (depth_view)
 		vkDestroyImageView(ctx.Device(), depth_view, nullptr);
+	if (shadowView)
+		vkDestroyImageView(ctx.Device(), shadowView, nullptr);
 
 	vkDestroyDescriptorPool(ctx.Device(), descPool, nullptr);
 	vkDestroyDescriptorSetLayout(ctx.Device(), descLayout, nullptr);
