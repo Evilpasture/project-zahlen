@@ -72,7 +72,14 @@ set(PROJECT_SOURCES
     src/engine/Platform.cpp
 )
 
-add_executable(zahlen ${PROJECT_SOURCES})
+add_executable(zahlen)
+
+target_sources(zahlen PRIVATE ${PROJECT_SOURCES})
+
+target_sources(zahlen PRIVATE 
+    ${CMAKE_SOURCE_DIR}/extern/stbi_impl.c 
+    ${CMAKE_SOURCE_DIR}/extern/cgltf_impl.c
+)
 
 target_compile_definitions(zahlen PRIVATE 
     JPH_DOUBLE_PRECISION
@@ -95,7 +102,11 @@ target_include_directories(zahlen SYSTEM PRIVATE
 )
 target_include_directories(zahlen PRIVATE
     ${CMAKE_SOURCE_DIR}/include
+
     ${CMAKE_SOURCE_DIR}/extern/LuaJIT/src
+
+    ${CMAKE_SOURCE_DIR}/extern/cgltf
+    ${CMAKE_SOURCE_DIR}/extern/stb
 )
 
 # DXC is bundled with Vulkan SDK and is the best tool for HLSL -> SPIR-V
