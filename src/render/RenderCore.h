@@ -23,11 +23,13 @@ extern "C" {
  * @brief Configuration for Vulkan Instance initialization.
  */
 typedef struct {
-	char app_name[64];			   /**< Application name embedded to satisfy C23 constexpr */
-	uint32_t version;			   /**< Application-specific version (VK_MAKE_API_VERSION) */
-	bool enable_validation;		   /**< Toggle for Khronos Validation Layers */
-	uint32_t extension_count;	   /**< Number of additional extensions to enable */
+	char app_name[64];		  /**< Application name embedded to satisfy C23 constexpr */
+	uint32_t version;		  /**< Application-specific version (VK_MAKE_API_VERSION) */
+	uint32_t extension_count; /**< Number of additional extensions to enable */
+	const VkDebugUtilsMessageSeverityFlagsEXT
+		severity_flags;			   /**< Severity flags for the validation layer */
 	const char* const* extensions; /**< Pointer to list of extension name strings */
+	bool enable_validation;		   /**< Toggle for Khronos Validation Layers */
 } ZHLN_InstanceDesc;
 
 /**
@@ -39,7 +41,22 @@ static constexpr ZHLN_InstanceDesc ZHLN_DEFAULT_INSTANCE_DESC = {
 	.version = VK_MAKE_API_VERSION(0, 1, 0, 0),
 	.enable_validation = true,
 	.extension_count = 0,
-	.extensions = nullptr};
+	.extensions = nullptr,
+	.severity_flags = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+					  VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+};
+
+static constexpr ZHLN_InstanceDesc ZHLN_VERBOSE_INSTANCE_DESC = {
+	.app_name = "ZHLN Engine",
+	.version = VK_MAKE_API_VERSION(0, 1, 0, 0),
+	.enable_validation = true,
+	.extension_count = 0,
+	.extensions = nullptr,
+	.severity_flags = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+					  VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT |
+					  VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+					  VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT,
+};
 
 /**
  * @brief Creates a Vulkan Instance with debug messenger attached to pNext.
@@ -231,9 +248,10 @@ ZHLN_FrameResult ZHLN_PresentFrame(const ZHLN_PresentDesc* const ZHLN_RESTRICT d
 /* --- SHADER MANAGEMENT --- */
 
 typedef const struct {
-	const uint32_t* code;	 /**< SPIR-V bytecode */
-	const size_t size;		 /**< Size in bytes */
-	const char* entry_point; /**< Optional: defaults to "main" if NULL */
+	const uint32_t* code;					  /**< SPIR-V bytecode */
+	const size_t size;						  /**< Size in bytes */
+	[[maybe_unused]] const char* entry_point; /**< Optional: defaults to SPIRV-Reflect, if fails
+												 then defaults to "main" if NULL */
 } ZHLN_ShaderDesc;
 
 typedef struct {
