@@ -1,121 +1,15 @@
 #include "Allocator.hpp"
 #include "RenderCore.hpp"
+#include "TextureUtils.hpp" // <--- NEW: Assuming this contains GenerateTVInterruptTexture
 #include "demo_utils/DemoWindow.hpp"
+#include "math.hpp"
 
 #include <array>
 #include <chrono>
-#include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <print> // For error messages
 #include <vector>
-
-// ----------------------------------------------------------------------------
-// Column-Major, Column-Vector Math Library (P * V * M)
-// ----------------------------------------------------------------------------
-struct Mat4 {
-	std::array<float, 16> data;
-};
-
-static Mat4 Identity() noexcept {
-	Mat4 m{};
-	m.data[0 * 4 + 0] = 1.0f;
-	m.data[1 * 4 + 1] = 1.0f;
-	m.data[2 * 4 + 2] = 1.0f;
-	m.data[3 * 4 + 3] = 1.0f;
-	return m;
-}
-
-static Mat4 Multiply(const Mat4& a, const Mat4& b) noexcept {
-	Mat4 result{};
-	for (int c = 0; c < 4; ++c) {
-		for (int r = 0; r < 4; ++r) {
-			float sum = 0.0f;
-			for (int k = 0; k < 4; ++k)
-				sum += a.data[k * 4 + r] * b.data[c * 4 + k];
-			result.data[c * 4 + r] = sum;
-		}
-	}
-	return result;
-}
-
-static Mat4 Perspective(float fov, float aspect, float znear, float zfar) noexcept {
-	const float f = 1.0f / std::tan(fov * 0.5f);
-	Mat4 m{};
-	m.data[0 * 4 + 0] = f / aspect;
-	m.data[1 * 4 + 1] = -f; // Vulkan Y-Flip
-	m.data[2 * 4 + 2] = zfar / (znear - zfar);
-	m.data[2 * 4 + 3] = -1.0f;
-	m.data[3 * 4 + 2] = (znear * zfar) / (znear - zfar);
-	m.data[3 * 4 + 3] = 0.0f;
-	return m;
-}
-
-static Mat4 RotateX(float radians) noexcept {
-	const float s = std::sin(radians);
-	const float c = std::cos(radians);
-	Mat4 m = Identity();
-	m.data[1 * 4 + 1] = c;
-	m.data[1 * 4 + 2] = s;
-	m.data[2 * 4 + 1] = -s;
-	m.data[2 * 4 + 2] = c;
-	return m;
-}
-
-static Mat4 RotateY(float radians) noexcept {
-	const float s = std::sin(radians);
-	const float c = std::cos(radians);
-	Mat4 m = Identity();
-	m.data[0 * 4 + 0] = c;
-	m.data[0 * 4 + 2] = -s;
-	m.data[2 * 4 + 0] = s;
-	m.data[2 * 4 + 2] = c;
-	return m;
-}
-
-static Mat4 LookAt(const std::array<float, 3>& eye, const std::array<float, 3>& center,
-				   const std::array<float, 3>& up) noexcept {
-	const std::array<float, 3> f = {center[0] - eye[0], center[1] - eye[1], center[2] - eye[2]};
-	const float f_len = std::sqrt(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
-	const std::array<float, 3> f_norm = {f[0] / f_len, f[1] / f_len, f[2] / f_len};
-
-	const std::array<float, 3> s = {f_norm[1] * up[2] - f_norm[2] * up[1],
-									f_norm[2] * up[0] - f_norm[0] * up[2],
-									f_norm[0] * up[1] - f_norm[1] * up[0]};
-	const float s_len = std::sqrt(s[0] * s[0] + s[1] * s[1] + s[2] * s[2]);
-	const std::array<float, 3> s_norm = {s[0] / s_len, s[1] / s_len, s[2] / s_len};
-
-	const std::array<float, 3> u = {s_norm[1] * f_norm[2] - s_norm[2] * f_norm[1],
-									s_norm[2] * f_norm[0] - s_norm[0] * f_norm[2],
-									s_norm[0] * f_norm[1] - s_norm[1] * f_norm[0]};
-
-	Mat4 m = Identity();
-	m.data[0 * 4 + 0] = s_norm[0];
-	m.data[1 * 4 + 0] = s_norm[1];
-	m.data[2 * 4 + 0] = s_norm[2];
-	m.data[0 * 4 + 1] = u[0];
-	m.data[1 * 4 + 1] = u[1];
-	m.data[2 * 4 + 1] = u[2];
-	m.data[0 * 4 + 2] = -f_norm[0];
-	m.data[1 * 4 + 2] = -f_norm[1];
-	m.data[2 * 4 + 2] = -f_norm[2];
-
-	m.data[3 * 4 + 0] = -(s_norm[0] * eye[0] + s_norm[1] * eye[1] + s_norm[2] * eye[2]);
-	m.data[3 * 4 + 1] = -(u[0] * eye[0] + u[1] * eye[1] + u[2] * eye[2]);
-	m.data[3 * 4 + 2] = (f_norm[0] * eye[0] + f_norm[1] * eye[1] + f_norm[2] * eye[2]);
-	return m;
-}
-
-// ----------------------------------------------------------------------------
-// CCW Cube Data
-// ----------------------------------------------------------------------------
-static const std::array<int, 36> cube_indices = {
-	0,	1,	2,	2,	3,	0,	// Front
-	4,	5,	6,	6,	7,	4,	// Back
-	8,	9,	10, 10, 11, 8,	// Top
-	12, 13, 14, 14, 15, 12, // Bottom
-	16, 17, 18, 18, 19, 16, // Right
-	20, 21, 22, 22, 23, 20	// Left
-};
 
 // ----------------------------------------------------------------------------
 // Vulkan App
@@ -227,31 +121,213 @@ int main() {
 		ZHLN::Vk::CommandPools<3>::Create(ctx.Device(), ctx.PhysicalInfo().graphics_family);
 	ZHLN::Vk::SemaphorePool present_semaphores;
 
-	// 4. Pipeline Setup
-	auto vert_code = LoadSpirv("cube.vert.spv");
-	auto frag_code = LoadSpirv("cube.frag.spv");
-	if (vert_code.empty() || frag_code.empty())
-		return -1;
+	// =========================================================================
+	// NEW: 4. Cube Texture Creation & Upload (using TextureUtils.hpp)
+	// =========================================================================
+	const uint32_t TEX_W = 256; // Smaller texture for simple cube
+	const uint32_t TEX_H = 256;
+	static const auto cube_pixels =
+		ZHLN::GenerateTVInterruptTexture<TEX_W, TEX_H>(); // Or GenerateTestTexture
 
-	ZHLN_ShaderDesc v_desc = {vert_code.data(), vert_code.size() * sizeof(uint32_t)};
-	ZHLN_ShaderDesc f_desc = {frag_code.data(), frag_code.size() * sizeof(uint32_t)};
+	VkImageCreateInfo tex_info = {
+		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+		.imageType = VK_IMAGE_TYPE_2D,
+		.format = VK_FORMAT_R8G8B8A8_UNORM, // Match texture format
+		.extent = {TEX_W, TEX_H, 1},
+		.mipLevels = 1,
+		.arrayLayers = 1,
+		.samples = VK_SAMPLE_COUNT_1_BIT,
+		.tiling = VK_IMAGE_TILING_OPTIMAL,
+		.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+	};
+	ZHLN::Vk::Image cube_texture_image =
+		ZHLN::Vk::Image::Create(allocator.Get(), tex_info, VMA_MEMORY_USAGE_GPU_ONLY);
+	if (!cube_texture_image.Valid()) {
+		std::println(stderr, "FATAL: Failed to create cube texture image.");
+		return -1;
+	}
+
+	ZHLN::Vk::CommandPool setupPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+	if (!setupPool.Allocate(1))
+		return -1; // Added missing error check
+	VkCommandBuffer setupCmd = setupPool[0];
+
+	ZHLN_BeginCommandBuffer(setupCmd);
+	ZHLN::Vk::Buffer stagingBuffer =
+		ZHLN::Vk::Buffer::Create(allocator.Get(), cube_pixels.size() * sizeof(uint32_t),
+								 VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+	if (!stagingBuffer.Valid()) {
+		std::println(stderr, "FATAL: Failed to create staging buffer for cube texture.");
+		return -1;
+	}
+	memcpy(stagingBuffer.Map().data, cube_pixels.data(), cube_pixels.size() * sizeof(uint32_t));
+
+	ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
+		setupCmd, cube_texture_image.Handle());
+
+	ZHLN_BufferImageCopyDesc copyDesc = {.buffer = stagingBuffer.Handle(),
+										 .image = cube_texture_image.Handle(),
+										 .layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+										 .width = TEX_W,
+										 .height = TEX_H,
+										 .buffer_offset = 0,
+										 .mip_level = 0,
+										 .base_array_layer = 0};
+	ZHLN::Vk::CopyBufferToImage(setupCmd, copyDesc);
+
+	ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+							   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+		setupCmd, cube_texture_image.Handle());
+	ZHLN_EndCommandBuffer(setupCmd);
+
+	VkCommandBufferSubmitInfo setupCmdInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+											  .commandBuffer = setupCmd};
+	VkSubmitInfo2 setupSubmit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+								 .commandBufferInfoCount = 1,
+								 .pCommandBufferInfos = &setupCmdInfo};
+	vkQueueSubmit2(ctx.GraphicsQueue(), 1, &setupSubmit, VK_NULL_HANDLE);
+	vkQueueWaitIdle(ctx.GraphicsQueue()); // Wait for upload
+
+	// Image View & Sampler for the Cube Texture
+	VkImageViewCreateInfo cube_view_info = {
+		.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+		.image = cube_texture_image.Handle(),
+		.viewType = VK_IMAGE_VIEW_TYPE_2D,
+		.format = VK_FORMAT_R8G8B8A8_UNORM,
+		.subresourceRange = {
+			.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1}};
+	VkImageView cube_texture_view;
+	if (vkCreateImageView(ctx.Device(), &cube_view_info, nullptr, &cube_texture_view) !=
+		VK_SUCCESS) {
+		std::println(stderr, "FATAL: Failed to create cube texture image view.");
+		return -1;
+	}
+
+	VkSamplerCreateInfo cube_sampler_info = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+											 .magFilter = VK_FILTER_LINEAR,
+											 .minFilter = VK_FILTER_LINEAR,
+											 .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+											 .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+											 .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT};
+	VkSampler cube_sampler;
+	if (vkCreateSampler(ctx.Device(), &cube_sampler_info, nullptr, &cube_sampler) != VK_SUCCESS) {
+		std::println(stderr, "FATAL: Failed to create cube texture sampler.");
+		return -1;
+	}
+
+	// =========================================================================
+	// NEW: 5. Descriptor Sets for Cube Texture
+	// =========================================================================
+	// Bindings match HLSL: [[vk::binding(0, 0)]] Texture2D cubeTexture; [[vk::binding(1, 0)]]
+	// SamplerState cubeSampler;
+	VkDescriptorSetLayoutBinding cube_bindings[2] = {
+		{.binding = 0,
+		 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+		 .descriptorCount = 1,
+		 .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT},
+		{.binding = 1,
+		 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
+		 .descriptorCount = 1,
+		 .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT}};
+	VkDescriptorSetLayoutCreateInfo cube_layout_info = {
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+		.bindingCount = 2,
+		.pBindings = cube_bindings};
+	VkDescriptorSetLayout cube_desc_layout;
+	if (vkCreateDescriptorSetLayout(ctx.Device(), &cube_layout_info, nullptr, &cube_desc_layout) !=
+		VK_SUCCESS) {
+		std::println(stderr, "FATAL: Failed to create cube descriptor set layout.");
+		return -1;
+	}
+
+	// One descriptor set for the cube
+	VkDescriptorPoolSize cube_pool_sizes[2] = {{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1},
+											   {VK_DESCRIPTOR_TYPE_SAMPLER, 1}};
+	VkDescriptorPoolCreateInfo cube_pool_info = {.sType =
+													 VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+												 .maxSets = 1,
+												 .poolSizeCount = 2,
+												 .pPoolSizes = cube_pool_sizes};
+	VkDescriptorPool cube_desc_pool;
+	if (vkCreateDescriptorPool(ctx.Device(), &cube_pool_info, nullptr, &cube_desc_pool) !=
+		VK_SUCCESS) {
+		std::println(stderr, "FATAL: Failed to create cube descriptor pool.");
+		return -1;
+	}
+
+	VkDescriptorSetAllocateInfo cube_alloc_info = {
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+		.descriptorPool = cube_desc_pool,
+		.descriptorSetCount = 1,
+		.pSetLayouts = &cube_desc_layout};
+	VkDescriptorSet cube_descriptor_set;
+	if (vkAllocateDescriptorSets(ctx.Device(), &cube_alloc_info, &cube_descriptor_set) !=
+		VK_SUCCESS) {
+		std::println(stderr, "FATAL: Failed to allocate cube descriptor set.");
+		return -1;
+	}
+
+	VkDescriptorImageInfo cube_image_info = {
+		.imageView = cube_texture_view, .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+	VkDescriptorImageInfo cube_sampler_desc_info = {.sampler = cube_sampler};
+
+	VkWriteDescriptorSet cube_writes[2] = {{.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+											.dstSet = cube_descriptor_set,
+											.dstBinding = 0,
+											.descriptorCount = 1,
+											.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+											.pImageInfo = &cube_image_info},
+										   {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+											.dstSet = cube_descriptor_set,
+											.dstBinding = 1,
+											.descriptorCount = 1,
+											.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
+											.pImageInfo = &cube_sampler_desc_info}};
+	vkUpdateDescriptorSets(ctx.Device(), 2, cube_writes, 0, nullptr);
+
+	// =========================================================================
+	// OLD: 6. Pipeline Setup (Now uses Descriptor Set Layout)
+	// =========================================================================
+	auto vert_code = LoadSpirv("cube.hlsl.VSMain.spv"); // <--- Corrected shader names
+	auto frag_code = LoadSpirv("cube.hlsl.PSMain.spv"); // <--- Corrected shader names
+	if (vert_code.empty() || frag_code.empty()) {
+		std::println(stderr, "FATAL: Failed to load cube shader SPIR-V.");
+		return -1;
+	}
+
+	// Pass the explicit HLSL entry points
+	ZHLN_ShaderDesc v_desc = {vert_code.data(), vert_code.size() * sizeof(uint32_t), "VSMain"};
+	ZHLN_ShaderDesc f_desc = {frag_code.data(), frag_code.size() * sizeof(uint32_t), "PSMain"};
 	auto shaders = ZHLN::Vk::ShaderStages::Create(ctx.Device(), v_desc, f_desc);
+	if (!shaders.Valid()) {
+		std::println(stderr, "FATAL: Failed to create cube shader stages.");
+		return -1;
+	}
 
 	VkPushConstantRange push_range = {
 		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .offset = 0, .size = sizeof(Mat4)};
-	ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = nullptr,
-										   .set_layout_count = 0,
-										   .push_constants = &push_range,
-										   .push_constant_count = 1};
+
+	// Provide the cube_desc_layout here!
+	ZHLN_PipelineLayoutDesc layout_desc = {
+		.set_layouts = &cube_desc_layout, // <--- NEW: Provide descriptor set layout
+		.set_layout_count = 1,			  // <--- NEW: One descriptor set
+		.push_constants = &push_range,
+		.push_constant_count = 1};
 	ZHLN::Vk::PipelineLayout layout(ctx.Device(),
 									ZHLN_CreatePipelineLayout(ctx.Device(), &layout_desc));
+	if (!layout.Valid()) {
+		std::println(stderr, "FATAL: Failed to create cube pipeline layout.");
+		return -1;
+	}
 
 	ZHLN_GraphicsPipelineDesc pipe_desc = {.stages = const_cast<ZHLN_ShaderStages*>(shaders.Get()),
 										   .layout = layout.Get(),
-										   .vertex_binding_count = 0,
 										   .vertex_bindings = nullptr,
-										   .vertex_attribute_count = 0,
 										   .vertex_attributes = nullptr,
+										   .vertex_binding_count = 0,
+										   .vertex_attribute_count = 0,
 										   .color_format = VK_FORMAT_B8G8R8A8_SRGB,
 										   .depth_format = VK_FORMAT_D32_SFLOAT,
 										   .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
@@ -264,6 +340,10 @@ int main() {
 
 	ZHLN::Vk::Pipeline pipeline(ctx.Device(),
 								ZHLN_CreateGraphicsPipeline(ctx.Device(), &pipe_desc));
+	if (!pipeline.Valid()) {
+		std::println(stderr, "FATAL: Failed to create cube graphics pipeline.");
+		return -1;
+	}
 
 	ZHLN::Vk::Image depth_image;
 	VkImageView depth_view = VK_NULL_HANDLE;
@@ -321,7 +401,7 @@ int main() {
 	win.resized = true;
 	uint32_t frame_index = 0;
 
-	// 5. Main Loop
+	// 7. Main Loop
 	while (win.running) {
 		ZHLN::Demo::ProcessEvents(win);
 
@@ -366,6 +446,9 @@ int main() {
 			{
 				ZHLN::Vk::ScopedRendering render(cmd, pass);
 				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
+				// Bind descriptor sets for the texture
+				vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout.Get(), 0, 1,
+										&cube_descriptor_set, 0, nullptr); // <--- NEW
 				ZHLN::Vk::Push(cmd, layout.Get(), VK_SHADER_STAGE_VERTEX_BIT, mvp);
 				vkCmdDraw(cmd, static_cast<uint32_t>(cube_indices.size()), 1, 0, 0);
 			}
@@ -436,6 +519,13 @@ int main() {
 
 	if (depth_view != VK_NULL_HANDLE)
 		vkDestroyImageView(ctx.Device(), depth_view, nullptr);
+	// NEW: Destroy cube texture resources
+	vkDestroySampler(ctx.Device(), cube_sampler, nullptr);
+	vkDestroyImageView(ctx.Device(), cube_texture_view, nullptr);
+	vkDestroyDescriptorPool(ctx.Device(), cube_desc_pool, nullptr);
+	vkDestroyDescriptorSetLayout(ctx.Device(), cube_desc_layout, nullptr);
+	// Note: cube_texture_image is RAII, so its destructor will handle vmaDestroyImage
+
 	vkDeviceWaitIdle(ctx.Device());
 	ZHLN::Demo::DestroyWindow(win);
 	return 0;

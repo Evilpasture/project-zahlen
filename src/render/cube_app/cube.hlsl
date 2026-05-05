@@ -1,6 +1,8 @@
 // ----------------------------------------------------------------------------
 // Structures
 // ----------------------------------------------------------------------------
+[[vk::binding(0, 0)]] Texture2D cubeTexture;
+[[vk::binding(1, 0)]] SamplerState cubeSampler;
 
 struct PushConstants {
     float4x4 mvp;
@@ -16,6 +18,7 @@ struct VSInput {
 
 struct PSInput {
     float4 position : SV_Position;
+    float2 uv       : TEXCOORD0;
     float3 color    : COLOR0;
 };
 
@@ -47,6 +50,16 @@ static const uint indices[36] = {
     20, 21, 22, 22, 23, 20
 };
 
+static const float2 uvs[24] = {
+    // Each face: BL, BR, TR, TL
+    float2(0,1), float2(1,1), float2(1,0), float2(0,0), // Front
+    float2(0,1), float2(1,1), float2(1,0), float2(0,0), // Back
+    float2(0,1), float2(1,1), float2(1,0), float2(0,0), // Top
+    float2(0,1), float2(1,1), float2(1,0), float2(0,0), // Bottom
+    float2(0,1), float2(1,1), float2(1,0), float2(0,0), // Right
+    float2(0,1), float2(1,1), float2(1,0), float2(0,0), // Left
+};
+
 // ----------------------------------------------------------------------------
 // Vertex Shader
 // ----------------------------------------------------------------------------
@@ -56,13 +69,13 @@ PSInput VSMain(VSInput input) {
 
     uint index = indices[input.vertexID];
     float3 pos = positions[index];
-
-    // HLSL mul(matrix, vector) handles column-major/row-major based on compiler settings.
-    // Given your C++ code is Column-Major, this works exactly like GLSL.
+    
     output.position = mul(pc.mvp, float4(pos, 1.0));
     
     // Color calculation
     output.color = normalize(pos) * 0.5f + 0.5f;
+
+    output.uv = uvs[index];
 
     return output;
 }
@@ -72,5 +85,5 @@ PSInput VSMain(VSInput input) {
 // ----------------------------------------------------------------------------
 
 float4 PSMain(PSInput input) : SV_Target0 {
-    return float4(input.color, 1.0f);
+    return cubeTexture.Sample(cubeSampler, input.uv);
 }
