@@ -39,23 +39,24 @@ typedef struct {
 static constexpr ZHLN_InstanceDesc ZHLN_DEFAULT_INSTANCE_DESC = {
 	.app_name = "ZHLN Engine",
 	.version = VK_MAKE_API_VERSION(0, 1, 0, 0),
-	.enable_validation = true,
 	.extension_count = 0,
-	.extensions = nullptr,
 	.severity_flags = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
 					  VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+	.extensions = nullptr,
+	.enable_validation = true,
 };
 
 static constexpr ZHLN_InstanceDesc ZHLN_VERBOSE_INSTANCE_DESC = {
 	.app_name = "ZHLN Engine",
 	.version = VK_MAKE_API_VERSION(0, 1, 0, 0),
-	.enable_validation = true,
+
 	.extension_count = 0,
-	.extensions = nullptr,
 	.severity_flags = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
 					  VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT |
 					  VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
 					  VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT,
+	.extensions = nullptr,
+	.enable_validation = true,
 };
 
 /**
