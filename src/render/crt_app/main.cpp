@@ -44,10 +44,17 @@ int main() {
 	inst_desc.extensions = required_exts.data();
 	inst_desc.extension_count = static_cast<uint32_t>(required_exts.size());
 
+	VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swap_maint = {
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR,
+		.pNext = nullptr,
+		.swapchainMaintenance1 = VK_TRUE};
+
 	VkPhysicalDeviceVulkan13Features feat13 = {
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+		.pNext = &swap_maint,
 		.synchronization2 = VK_TRUE,
-		.dynamicRendering = VK_TRUE};
+		.dynamicRendering = VK_TRUE,
+	};
 	VkPhysicalDeviceVulkan12Features feat12 = {
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
 		.pNext = &feat13,
@@ -109,6 +116,7 @@ int main() {
 									  VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
 								  .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
 								  .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+
 	auto textureImage =
 		ZHLN::Vk::Image::Create(allocator.Get(), img_info, VMA_MEMORY_USAGE_GPU_ONLY);
 
@@ -370,6 +378,7 @@ int main() {
 	}
 
 	vkDeviceWaitIdle(ctx.Device());
+
 	vkDestroySampler(ctx.Device(), sampler, nullptr);
 	vkDestroyImageView(ctx.Device(), textureView, nullptr);
 	vkDestroyDescriptorPool(ctx.Device(), descPool, nullptr);
