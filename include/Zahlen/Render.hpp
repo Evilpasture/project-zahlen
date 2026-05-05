@@ -11,7 +11,6 @@ struct PipelineDesc {
 	size_t vertexShaderSize = 0;
 	const void* fragShaderData = nullptr;
 	size_t fragShaderSize = 0;
-	bool isMetal = false; 
 };
 
 class RenderContext {
@@ -40,15 +39,16 @@ class RenderContext {
 };
 
 namespace Renderer {
-	void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth = 1.0f);
-	void UpdateBuffer(RenderContext& ctx, BufferHandle buffer, const void* data, size_t size);
+void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth = 1.0f);
+void UpdateBuffer(RenderContext& ctx, BufferHandle buffer, const void* data, size_t size);
 
-	template <typename T>
-	inline void UpdateBuffer(RenderContext& ctx, BufferHandle buffer, const T& data) {
-		UpdateBuffer(ctx, buffer, static_cast<const void*>(&data), sizeof(T));
-	}
+template <typename T>
+inline void UpdateBuffer(RenderContext& ctx, BufferHandle buffer, const T& data) {
+	UpdateBuffer(ctx, buffer, static_cast<const void*>(&data), sizeof(T));
+}
 
-	void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const JPH::Mat44& transform);
-} 
+void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
+		  const JPH::Mat44& transform);
+} // namespace Renderer
 
 } // namespace ZHLN

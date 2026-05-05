@@ -98,36 +98,39 @@ target_include_directories(zahlen PRIVATE
     ${CMAKE_SOURCE_DIR}/extern/LuaJIT/src
 )
 
-# --- Find glslangValidator in Vulkan SDK ---
-find_program(GLSL_VALIDATOR NAMES glslangValidator 
+# DXC is bundled with Vulkan SDK and is the best tool for HLSL -> SPIR-V
+find_program(DXC_EXECUTABLE NAMES dxc 
              PATHS "$ENV{VULKAN_SDK}/bin" "D:/Vulkan-SDK/1.4.341.1/bin")
 
-if(GLSL_VALIDATOR)
-    message(STATUS "Found glslangValidator: ${GLSL_VALIDATOR}")
+if(DXC_EXECUTABLE)
+    message(STATUS "Found DXC: ${DXC_EXECUTABLE}")
     
-    set(SHADER_SOURCES 
-        "${CMAKE_SOURCE_DIR}/resources/shaders/basic.vert"
-        "${CMAKE_SOURCE_DIR}/resources/shaders/basic.frag"
+    set(HLSL_SRC "${CMAKE_SOURCE_DIR}/resources/shaders/basic.hlsl")
+    set(VS_SPV   "${CMAKE_SOURCE_DIR}/resources/shaders/basic.hlsl.VSMain.spv")
+    set(PS_SPV   "${CMAKE_SOURCE_DIR}/resources/shaders/basic.hlsl.PSMain.spv")
+
+    # Compile Vertex Shader
+    add_custom_command(
+        OUTPUT ${VS_SPV}
+        COMMAND ${DXC_EXECUTABLE} -T vs_6_0 -E VSMain -spirv ${HLSL_SRC} -Fo ${VS_SPV}
+        DEPENDS ${HLSL_SRC}
+        COMMENT "DXC: Compiling HLSL Vertex Shader (VSMain)"
+    )
+
+    # Compile Pixel Shader
+    add_custom_command(
+        OUTPUT ${PS_SPV}
+        COMMAND ${DXC_EXECUTABLE} -T ps_6_0 -E PSMain -spirv ${HLSL_SRC} -Fo ${PS_SPV}
+        DEPENDS ${HLSL_SRC}
+        COMMENT "DXC: Compiling HLSL Pixel Shader (PSMain)"
     )
     
-    foreach(SHADER ${SHADER_SOURCES})
-        get_filename_component(FILE_NAME ${SHADER} NAME)
-        set(OUTPUT_SPV "${CMAKE_SOURCE_DIR}/resources/shaders/${FILE_NAME}.spv")
-        
-        # This command runs glslangValidator during the build
-        add_custom_command(
-            OUTPUT ${OUTPUT_SPV}
-            COMMAND ${GLSL_VALIDATOR} -V ${SHADER} -o ${OUTPUT_SPV}
-            DEPENDS ${SHADER}
-            COMMENT "Compiling ${FILE_NAME} to SPIR-V"
-        )
-        list(APPEND SPV_OUTPUTS ${OUTPUT_SPV})
-    endforeach()
-    
-    # Add the SPV files as a dependency to the main executable
-    add_custom_target(compile_shaders DEPENDS ${SPV_OUTPUTS})
+    add_custom_target(compile_shaders DEPENDS ${VS_SPV} ${PS_SPV})
     add_dependencies(zahlen compile_shaders)
+else()
+    message(WARNING "DXC not found. Shaders will not be recompiled!")
 endif()
+
 
 # --- Compiler Flags ---
 if(NOT MSVC)
