@@ -7,11 +7,28 @@ import argparse
 def get_git_tracked_files(target_dir="."):
     """Returns a list of git-tracked files with specific extensions within a target directory."""
     extensions = {'.cpp', '.hpp', '.mm', '.c', '.h', '.S', '.glsl', '.vert', '.frag', '.metal'}
+    
+    # Add any directories you want to completely ignore here
+    ignore_paths = {'third_party/', 'extern/'}
+    
     try:
         # git ls-files natively filters by path if provided
         output = subprocess.check_output(['git', 'ls-files', target_dir], text=True)
         files = output.splitlines()
-        return [f for f in files if os.path.splitext(f)[1] in extensions]
+        
+        valid_files = []
+        for f in files:
+            # Normalize slashes for cross-platform matching
+            normalized_path = f.replace('\\', '/')
+            
+            # Skip file if it lives inside an ignored directory
+            if any(ignored in normalized_path for ignored in ignore_paths):
+                continue
+                
+            if os.path.splitext(f)[1] in extensions:
+                valid_files.append(f)
+                
+        return valid_files
     except subprocess.CalledProcessError:
         print("Error: This directory is not a git repository.")
         return []
