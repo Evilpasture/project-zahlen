@@ -58,7 +58,9 @@ float IGN(float2 uv) {
 }
 
 float hash1(float n) {
-    return frac(sin(n) * 43758.5453);
+    // The fractional part of (n * Golden Ratio)
+    // 0.61803398875 is the fractional part of Phi
+    return frac(n * 0.61803398875);
 }
 
 // ============================================================
