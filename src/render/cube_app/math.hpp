@@ -97,6 +97,17 @@ static Mat4 LookAt(const std::array<float, 3>& eye, const std::array<float, 3>& 
 	return m;
 }
 
+static Mat4 Ortho(float left, float right, float bottom, float top, float znear, float zfar) {
+	Mat4 m = Identity();
+	m.data[0 * 4 + 0] = 2.0f / (right - left);
+	m.data[1 * 4 + 1] = 2.0f / (bottom - top); // Vulkan Y-flip
+	m.data[2 * 4 + 2] = 1.0f / (znear - zfar);
+	m.data[3 * 4 + 0] = (left + right) / (left - right);
+	m.data[3 * 4 + 1] = (top + bottom) / (top - bottom);
+	m.data[3 * 4 + 2] = znear / (znear - zfar);
+	return m;
+}
+
 // ----------------------------------------------------------------------------
 // CCW Cube Data
 // ----------------------------------------------------------------------------
