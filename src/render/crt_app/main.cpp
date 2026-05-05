@@ -14,6 +14,7 @@ struct CRTPushConstants {
 	float res_x;
 	float res_y;
 	float background[4];
+	float mousePos[2];
 };
 
 [[nodiscard]] static auto LoadSpirv(const std::filesystem::path& path) -> std::vector<uint32_t> {
@@ -470,12 +471,18 @@ int main() {
 			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
 			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout.Get(), 0,
 									1, &descriptorSet, 0, nullptr);
+			// Normalize the mouse position (0.0 to 1.0)
+			float mx = win.width > 0 ? (win.mouse_x / (float)win.width) : 0.5f;
+			float my = win.height > 0 ? (win.mouse_y / (float)win.height) : 0.5f;
 
-			CRTPushConstants pc = {.time = time,
-								   .scale = 1.0f,
-								   .res_x = (float)win.width,
-								   .res_y = (float)win.height,
-								   .background = {0, 0, 0, 1}};
+			CRTPushConstants pc = {
+				.time = time,
+				.scale = 1.0f,
+				.res_x = (float)win.width,
+				.res_y = (float)win.height,
+				.background = {0, 0, 0, 1},
+				.mousePos = {(float)mx, (float)my},
+			};
 			ZHLN::Vk::Push(cmd, pipelineLayout.Get(), VK_SHADER_STAGE_FRAGMENT_BIT, pc);
 
 			vkCmdDraw(cmd, 3, 1, 0, 0); // Draw fullscreen triangle

@@ -8,6 +8,8 @@ namespace ZHLN::Demo {
 struct WindowState {
 	uint32_t width = 800;
 	uint32_t height = 600;
+	float mouse_x = 0.0f;
+	float mouse_y = 0.0f;
 	bool running = true;
 	bool resized = false;
 

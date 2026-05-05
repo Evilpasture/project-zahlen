@@ -20,6 +20,11 @@ static auto CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) -> LRESU
 		state->resized = true;
 		return 0;
 	}
+	if (msg == WM_MOUSEMOVE && state) {
+		state->mouse_x = static_cast<float>((short)LOWORD(lp));
+		state->mouse_y = static_cast<float>((short)HIWORD(lp));
+		return 0;
+	}
 	return DefWindowProcW(hwnd, msg, wp, lp);
 }
 

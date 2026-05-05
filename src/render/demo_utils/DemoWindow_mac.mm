@@ -56,7 +56,9 @@ WindowState InitWindow(uint32_t width, uint32_t height, const char* title) {
     NSView* view = [window contentView];
     [view setWantsLayer:YES];
     CAMetalLayer* metalLayer = [CAMetalLayer layer];
-    [view setLayer:metalLayer];
+	[view setLayer:metalLayer];
+
+	[window setAcceptsMouseMovedEvents:YES];
     
     [window center];
     [window makeKeyAndOrderFront:nil];
@@ -72,6 +74,18 @@ void ProcessEvents(WindowState& state) {
     @autoreleasepool {
         NSEvent* event;
         while ((event = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:nil inMode:NSDefaultRunLoopMode dequeue:YES])) {
+            
+            if (event.type == NSEventTypeMouseMoved || event.type == NSEventTypeLeftMouseDragged) {
+                NSWindow* win = [event window];
+                if (win) {
+                    NSPoint loc = [event locationInWindow];
+                    CGFloat scale = [win backingScaleFactor];
+                    state.mouse_x = (float)(loc.x * scale);
+                    // Invert Y: Cocoa is Bottom-Left, Vulkan is Top-Left
+                    state.mouse_y = (float)(state.height - (loc.y * scale)); 
+                }
+            }
+
             [NSApp sendEvent:event];
             [NSApp updateWindows];
         }
