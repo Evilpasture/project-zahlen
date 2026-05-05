@@ -42,6 +42,7 @@ set_target_properties(zahlen_render PROPERTIES CXX_EXTENSIONS OFF)
 target_link_libraries(zahlen_render PUBLIC
     Vulkan::Vulkan
     GPUOpen::VulkanMemoryAllocator
+    spirv_reflect
 )
 
 target_include_directories(zahlen_render PUBLIC

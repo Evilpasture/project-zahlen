@@ -40,7 +40,7 @@ class Allocator {
 							VkDevice device) noexcept {
 		// Explicitly map Vulkan functions to VMA.
 		// This prevents VMA from trying to "guess" or "dynamically load" them.
-		VmaVulkanFunctions vfuncs = {
+		const VmaVulkanFunctions vfuncs = {
 			.vkGetInstanceProcAddr = &vkGetInstanceProcAddr,
 			.vkGetDeviceProcAddr = &vkGetDeviceProcAddr,
 			.vkGetPhysicalDeviceProperties = &vkGetPhysicalDeviceProperties,
@@ -73,19 +73,19 @@ class Allocator {
 			// VMA loads it via GetDeviceProcAddr internally.
 		};
 
-		VmaAllocatorCreateInfo info = {.flags = 0,
-									   .physicalDevice = physical,
-									   .device = device,
-									   .preferredLargeHeapBlockSize = 0, // 0 = default (256 MiB)
-									   .pAllocationCallbacks = nullptr,
-									   .pDeviceMemoryCallbacks = nullptr,
-									   .pHeapSizeLimit = nullptr,
-									   .pVulkanFunctions =
-										   &vfuncs, // VMA will fetch functions internally
-									   .instance = instance,
-									   .vulkanApiVersion = VK_API_VERSION_1_3,
+		const VmaAllocatorCreateInfo info = {
+			.flags = 0,
+			.physicalDevice = physical,
+			.device = device,
+			.preferredLargeHeapBlockSize = 0, // 0 = default (256 MiB)
+			.pAllocationCallbacks = nullptr,
+			.pDeviceMemoryCallbacks = nullptr,
+			.pHeapSizeLimit = nullptr,
+			.pVulkanFunctions = &vfuncs, // VMA will fetch functions internally
+			.instance = instance,
+			.vulkanApiVersion = VK_API_VERSION_1_3,
 #if VMA_EXTERNAL_MEMORY
-									   .pTypeExternalMemoryHandleTypes = nullptr
+			.pTypeExternalMemoryHandleTypes = nullptr
 #endif
 		};
 
@@ -145,17 +145,17 @@ class Buffer {
 		b._allocator = allocator;
 
 		// Fully explicit VkBufferCreateInfo (Vulkan 1.3)
-		VkBufferCreateInfo buffer_info = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-										  .pNext = nullptr,
-										  .flags = 0,
-										  .size = size,
-										  .usage = usage,
-										  .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-										  .queueFamilyIndexCount = 0,
-										  .pQueueFamilyIndices = nullptr};
+		const VkBufferCreateInfo buffer_info = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+												.pNext = nullptr,
+												.flags = 0,
+												.size = size,
+												.usage = usage,
+												.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+												.queueFamilyIndexCount = 0,
+												.pQueueFamilyIndices = nullptr};
 
 		// Fully explicit VmaAllocationCreateInfo (VMA 3.x)
-		VmaAllocationCreateInfo alloc_info = {
+		const VmaAllocationCreateInfo alloc_info = {
 			.flags = 0,
 			.usage = mem_usage,
 			.requiredFlags = 0,
@@ -238,7 +238,7 @@ inline Buffer UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer
 	}
 
 	// 3. Define the copy with explicit offsets
-	ZHLN_BufferCopyDesc copy = {
+	const ZHLN_BufferCopyDesc copy = {
 		.src = staging.Handle(),
 		.dst = dst.Handle(),
 		.size = static_cast<VkDeviceSize>(size),

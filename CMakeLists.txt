@@ -43,6 +43,9 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/extern/JoltPhysics/Build SYSTEM)
 
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/VulkanMemoryAllocator SYSTEM)
+
+add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/SPIRV-Reflect)
+
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/render)
 
 option(BUILD_TESTING "Build the render module test suite" OFF)
@@ -84,6 +87,7 @@ target_link_libraries(zahlen PRIVATE
     glfw
     Jolt 
     LuaJIT
+    spirv_reflect
 )
 
 target_include_directories(zahlen SYSTEM PRIVATE
