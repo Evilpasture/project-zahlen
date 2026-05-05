@@ -28,7 +28,7 @@ struct CRTPushConstants {
 }
 
 // Generates a Test Pattern (Grid with a colorful center)
-static std::vector<uint32_t> GenerateTestTexture(uint32_t width, uint32_t height) {
+static consteval std::vector<uint32_t> GenerateTestTexture(uint32_t width, uint32_t height) {
 	std::vector<uint32_t> pixels(width * height);
 
 	auto Pack = [](uint8_t r, uint8_t g, uint8_t b) -> uint32_t {
@@ -126,55 +126,53 @@ static std::vector<uint32_t> GenerateTestTexture(uint32_t width, uint32_t height
 	return pixels;
 }
 
-static std::vector<uint32_t> GenerateTVInterruptTexture(uint32_t width, uint32_t height) {
-	std::vector<uint32_t> pixels(width * height);
+template <uint32_t Width, uint32_t Height>
+static const std::array<uint32_t, Width * Height> GenerateTVInterruptTexture() {
+	std::array<uint32_t, Width * Height> pixels{};
 
 	auto Pack = [](uint8_t r, uint8_t g, uint8_t b) -> uint32_t {
-		return 0xFF000000 | (b << 16) | (g << 8) | r;
+		return 0xFF000000u | (uint32_t(b) << 16) | (uint32_t(g) << 8) | uint32_t(r);
 	};
 
-	// Standard 75% SMPTE Colors
-	uint32_t colors[] = {
+	// Standard 75% SMPTE colors
+	const uint32_t colors[7] = {
 		Pack(192, 192, 192), // Gray
 		Pack(192, 192, 0),	 // Yellow
 		Pack(0, 192, 192),	 // Cyan
 		Pack(0, 192, 0),	 // Green
 		Pack(192, 0, 192),	 // Magenta
 		Pack(192, 0, 0),	 // Red
-		Pack(0, 0, 192)		 // Blue
+		Pack(0, 0, 192),	 // Blue
 	};
 
-	for (uint32_t y = 0; y < height; ++y) {
-		float v = (float)y / height;
-		for (uint32_t x = 0; x < width; ++x) {
-			float u = (float)x / width;
-			int barIndex = (int)(u * 7);
+	for (uint32_t y = 0; y < Height; ++y) {
+		float v = float(y) / float(Height);
+		for (uint32_t x = 0; x < Width; ++x) {
+			float u = float(x) / float(Width);
+			int barIndex = int(u * 7);
 			if (barIndex > 6)
 				barIndex = 6;
 
 			uint32_t finalColor;
 
 			if (v < 0.67f) {
-				// Top Section: Main Bars
 				finalColor = colors[barIndex];
 			} else if (v < 0.75f) {
-				// Middle Section: Reverse Bars (Blue, Black, Magenta, Black, Cyan, Black, Gray)
-				uint32_t rev[] = {colors[6], Pack(16, 16, 16), colors[4], Pack(16, 16, 16),
-								  colors[2], Pack(16, 16, 16), colors[0]};
+				const uint32_t rev[7] = {colors[6], Pack(16, 16, 16), colors[4], Pack(16, 16, 16),
+										 colors[2], Pack(16, 16, 16), colors[0]};
 				finalColor = rev[barIndex];
 			} else {
-				// Bottom Section: Simplified PLUGE/Blocks
-				if (u < (1.0f / 6.0f))
-					finalColor = Pack(0, 33, 76); // I-signal Blue
-				else if (u < (2.0f / 6.0f))
+				if (u < 1.0f / 6.0f)
+					finalColor = Pack(0, 33, 76); // I-signal blue
+				else if (u < 2.0f / 6.0f)
 					finalColor = Pack(255, 255, 255); // White
-				else if (u < (3.0f / 6.0f))
-					finalColor = Pack(50, 0, 106); // Q-signal Purple
+				else if (u < 3.0f / 6.0f)
+					finalColor = Pack(50, 0, 106); // Q-signal purple
 				else
 					finalColor = Pack(16, 16, 16); // Black
 			}
 
-			pixels[y * width + x] = finalColor;
+			pixels[y * Width + x] = finalColor;
 		}
 	}
 	return pixels;
@@ -246,7 +244,7 @@ int main() {
 	// 2. Texture Creation & Upload
 	// =========================================================================
 	const uint32_t TEX_W = 512, TEX_H = 512;
-	auto pixels = GenerateTVInterruptTexture(TEX_W, TEX_H);
+	auto pixels = GenerateTVInterruptTexture<TEX_W, TEX_H>();
 
 	VkImageCreateInfo img_info = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 								  .imageType = VK_IMAGE_TYPE_2D,
