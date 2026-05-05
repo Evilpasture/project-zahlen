@@ -297,6 +297,9 @@ class Image {
 		return img;
 	}
 
+	[[nodiscard]] bool Valid() const noexcept { return _handle != VK_NULL_HANDLE; }
+	explicit operator bool() const noexcept { return Valid(); }
+
 	[[nodiscard]] VkImage Handle() const { return _handle; }
 
   private:
