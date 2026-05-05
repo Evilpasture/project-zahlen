@@ -671,9 +671,9 @@ VkShaderModule ZHLN_CreateShaderModule(const VkDevice device,
 
 	return module;
 }
-
-bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* const desc,
-							 ZHLN_ShaderStages* const out) {
+[[nodiscard]]
+bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* const restrict desc,
+							 ZHLN_ShaderStages* const restrict out) {
 	out->vert.handle = ZHLN_CreateShaderModule(desc->device, &desc->vert);
 	if (out->vert.handle == VK_NULL_HANDLE) {
 		return false;
@@ -687,7 +687,10 @@ bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* const desc,
 	}
 
 	out->vert.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	out->vert.entry_point = desc->vert.entry_point ? desc->vert.entry_point : "main";
+
 	out->frag.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	out->frag.entry_point = desc->frag.entry_point ? desc->frag.entry_point : "main";
 	return true;
 }
 
@@ -709,14 +712,14 @@ void ZHLN_PopulateShaderStageInfos(const ZHLN_ShaderStages* const restrict stage
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
 		.stage = VK_SHADER_STAGE_VERTEX_BIT,
 		.module = stages->vert.handle,
-		.pName = "main",
+		.pName = stages->vert.entry_point,
 	};
 
 	out_stages[1] = (const VkPipelineShaderStageCreateInfo){
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
 		.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
 		.module = stages->frag.handle,
-		.pName = "main",
+		.pName = stages->frag.entry_point,
 	};
 }
 

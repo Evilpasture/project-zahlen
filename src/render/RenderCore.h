@@ -231,13 +231,15 @@ ZHLN_FrameResult ZHLN_PresentFrame(const ZHLN_PresentDesc* const ZHLN_RESTRICT d
 /* --- SHADER MANAGEMENT --- */
 
 typedef struct {
-	const uint32_t* code; /**< SPIR-V bytecode */
-	const size_t size;	  /**< Size in bytes */
+	const uint32_t* code;	 /**< SPIR-V bytecode */
+	const size_t size;		 /**< Size in bytes */
+	const char* entry_point; /**< Optional: defaults to "main" if NULL */
 } ZHLN_ShaderDesc;
 
 typedef struct {
 	VkShaderModule handle;
-	VkShaderStageFlagBits stage; // Carried so pipeline builder doesn't need to track it separately
+	VkShaderStageFlagBits stage;
+	const char* entry_point;
 } ZHLN_Shader;
 
 typedef struct {
@@ -257,7 +259,8 @@ VkShaderModule ZHLN_CreateShaderModule(const VkDevice device,
 
 // Convenience: creates both stages and returns them paired, destroys both on any failure
 [[nodiscard]]
-bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* const desc, ZHLN_ShaderStages* const out);
+bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* const ZHLN_RESTRICT desc,
+							 ZHLN_ShaderStages* const ZHLN_RESTRICT out);
 
 void ZHLN_DestroyShaderModule(const VkDevice device, const VkShaderModule module);
 void ZHLN_DestroyShaderStages(const VkDevice device, ZHLN_ShaderStages* const ZHLN_RESTRICT stages);
