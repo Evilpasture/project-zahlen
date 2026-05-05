@@ -30,21 +30,151 @@ struct CRTPushConstants {
 // Generates a Test Pattern (Grid with a colorful center)
 static std::vector<uint32_t> GenerateTestTexture(uint32_t width, uint32_t height) {
 	std::vector<uint32_t> pixels(width * height);
+
+	auto Pack = [](uint8_t r, uint8_t g, uint8_t b) -> uint32_t {
+		return 0xFF000000 | (b << 16) | (g << 8) | r; // ABGR little-endian
+	};
+
+	const uint32_t cx = width / 2;
+	const uint32_t cy = height / 2;
+	const float radius = std::min(width, height) * 0.15625f; // ~80px at 512
+	const uint32_t cornerSize = std::max(width, height) / 16;
+	const uint32_t bandHalf = std::max(height / 16u, 1u);
+	const uint32_t checkSize = std::max(width / 64u, 1u);
+
 	for (uint32_t y = 0; y < height; ++y) {
 		for (uint32_t x = 0; x < width; ++x) {
-			bool gridX = (x % 64 < 4);
-			bool gridY = (y % 64 < 4);
+			float u = float(x) / float(width - 1);
+			float v = float(y) / float(height - 1);
 
-			uint8_t r = (x * 255) / width;
-			uint8_t g = (y * 255) / height;
-			uint8_t b = 128;
+			// Base UV gradient
+			uint8_t r = uint8_t(u * 255.f);
+			uint8_t g = uint8_t(v * 255.f);
+			uint8_t b = uint8_t((1.f - u * 0.5f - v * 0.5f) * 200.f + 55.f);
 
-			if (gridX || gridY) {
-				pixels[y * width + x] = 0xFFFFFFFF; // White Grid
-			} else {
-				// ABGR format for little-endian
-				pixels[y * width + x] = 0xFF000000 | (b << 16) | (g << 8) | r;
+			// Corner markers (orientation test)
+			bool inTL = x < cornerSize && y < cornerSize;
+			bool inTR = x >= width - cornerSize && y < cornerSize;
+			bool inBL = x < cornerSize && y >= height - cornerSize;
+			bool inBR = x >= width - cornerSize && y >= height - cornerSize;
+
+			if (inTL) {
+				r = 255;
+				g = 0;
+				b = 0;
+			} // Red
+			else if (inTR) {
+				r = 0;
+				g = 255;
+				b = 0;
+			} // Green
+			else if (inBL) {
+				r = 0;
+				g = 0;
+				b = 255;
+			} // Blue
+			else if (inBR) {
+				r = 255;
+				g = 255;
+				b = 0;
+			} // Yellow
+
+			// Sub-grid every 16px (subtle darkening)
+			bool gridMajX = (x % 64 == 0);
+			bool gridMajY = (y % 64 == 0);
+			bool gridMinX = (x % 16 == 0);
+			bool gridMinY = (y % 16 == 0);
+
+			if ((gridMinX || gridMinY) && !gridMajX && !gridMajY) {
+				r = uint8_t(std::max(0, int(r) - 20));
+				g = uint8_t(std::max(0, int(g) - 20));
+				b = uint8_t(std::max(0, int(b) - 20));
 			}
+
+			// Major grid: every 64px (black lines)
+			if (gridMajX || gridMajY) {
+				r = g = b = 0;
+			}
+
+			// Checkerboard band across center (texel-density / UV test)
+			bool inBand = (y + bandHalf >= cy) && (y < cy + bandHalf);
+			if (inBand && !gridMajX && !gridMajY) {
+				bool check = ((x / checkSize) + ((y - (cy - bandHalf)) / checkSize)) % 2 == 0;
+				r = g = b = check ? 255 : 0;
+			}
+
+			// Circle outline at center (distortion test)
+			float dx = float(x) - float(cx);
+			float dy = float(y) - float(cy);
+			float dist = std::sqrt(dx * dx + dy * dy);
+			if (std::abs(dist - radius) < 1.5f && !inBand) {
+				r = g = b = 255;
+			}
+
+			// Center crosshair
+			bool onH = std::abs(int(y) - int(cy)) <= 1 &&
+					   std::abs(int(x) - int(cx)) < int(cornerSize * 0.75f);
+			bool onV = std::abs(int(x) - int(cx)) <= 1 &&
+					   std::abs(int(y) - int(cy)) < int(cornerSize * 0.75f);
+			if (onH || onV) {
+				r = g = b = 255;
+			}
+
+			pixels[y * width + x] = Pack(r, g, b);
+		}
+	}
+	return pixels;
+}
+
+static std::vector<uint32_t> GenerateTVInterruptTexture(uint32_t width, uint32_t height) {
+	std::vector<uint32_t> pixels(width * height);
+
+	auto Pack = [](uint8_t r, uint8_t g, uint8_t b) -> uint32_t {
+		return 0xFF000000 | (b << 16) | (g << 8) | r;
+	};
+
+	// Standard 75% SMPTE Colors
+	uint32_t colors[] = {
+		Pack(192, 192, 192), // Gray
+		Pack(192, 192, 0),	 // Yellow
+		Pack(0, 192, 192),	 // Cyan
+		Pack(0, 192, 0),	 // Green
+		Pack(192, 0, 192),	 // Magenta
+		Pack(192, 0, 0),	 // Red
+		Pack(0, 0, 192)		 // Blue
+	};
+
+	for (uint32_t y = 0; y < height; ++y) {
+		float v = (float)y / height;
+		for (uint32_t x = 0; x < width; ++x) {
+			float u = (float)x / width;
+			int barIndex = (int)(u * 7);
+			if (barIndex > 6)
+				barIndex = 6;
+
+			uint32_t finalColor;
+
+			if (v < 0.67f) {
+				// Top Section: Main Bars
+				finalColor = colors[barIndex];
+			} else if (v < 0.75f) {
+				// Middle Section: Reverse Bars (Blue, Black, Magenta, Black, Cyan, Black, Gray)
+				uint32_t rev[] = {colors[6], Pack(16, 16, 16), colors[4], Pack(16, 16, 16),
+								  colors[2], Pack(16, 16, 16), colors[0]};
+				finalColor = rev[barIndex];
+			} else {
+				// Bottom Section: Simplified PLUGE/Blocks
+				if (u < (1.0f / 6.0f))
+					finalColor = Pack(0, 33, 76); // I-signal Blue
+				else if (u < (2.0f / 6.0f))
+					finalColor = Pack(255, 255, 255); // White
+				else if (u < (3.0f / 6.0f))
+					finalColor = Pack(50, 0, 106); // Q-signal Purple
+				else
+					finalColor = Pack(16, 16, 16); // Black
+			}
+
+			pixels[y * width + x] = finalColor;
 		}
 	}
 	return pixels;
@@ -116,7 +246,7 @@ int main() {
 	// 2. Texture Creation & Upload
 	// =========================================================================
 	const uint32_t TEX_W = 512, TEX_H = 512;
-	auto pixels = GenerateTestTexture(TEX_W, TEX_H);
+	auto pixels = GenerateTVInterruptTexture(TEX_W, TEX_H);
 
 	VkImageCreateInfo img_info = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 								  .imageType = VK_IMAGE_TYPE_2D,
