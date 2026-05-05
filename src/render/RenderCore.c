@@ -7,21 +7,29 @@
 #include <string.h>
 
 static VkBool32 VKAPI_CALL ZHLN_Internal_DebugCallback(
-	VkDebugUtilsMessageSeverityFlagBitsEXT severity,
-	[[maybe_unused]] VkDebugUtilsMessageTypeFlagsEXT type,
-	const VkDebugUtilsMessengerCallbackDataEXT* data, [[maybe_unused]] void* userdata) {
-	if (severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
-		fprintf(stderr, "[Vulkan] %s\n", data->pMessage);
-	}
+	VkDebugUtilsMessageSeverityFlagBitsEXT severity, VkDebugUtilsMessageTypeFlagsEXT type,
+	const VkDebugUtilsMessengerCallbackDataEXT* data, void* userdata) {
+
+	// Check if it's an Error or Warning
+	const char* prefix = "VULKAN";
+	if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
+		prefix = "VULKAN ERROR";
+	else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+		prefix = "VULKAN WARNING";
+	else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)
+		prefix = "VULKAN INFO";
+
+	fprintf(stderr, "[%s] %s\n", prefix, data->pMessage);
+
 	return VK_FALSE;
 }
 
 VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* desc) {
 	// C23: We can initialize the Vulkan structs directly inside the call
-	VkApplicationInfo app_info = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-								  .pApplicationName = desc->app_name,
-								  .applicationVersion = desc->version,
-								  .apiVersion = VK_API_VERSION_1_3};
+	const VkApplicationInfo app_info = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+										.pApplicationName = desc->app_name,
+										.applicationVersion = desc->version,
+										.apiVersion = VK_API_VERSION_1_3};
 
 	static const char* const validation_layers[] = {"VK_LAYER_KHRONOS_validation"};
 
@@ -61,16 +69,25 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* desc) {
 #endif
 
 	VkDebugUtilsMessengerCreateInfoEXT debug_info = {};
+	const VkValidationFeatureEnableEXT enables[] = {
+		VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT,
+		VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT};
+	const VkValidationFeaturesEXT features = {.sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT,
+											  .enabledValidationFeatureCount = 2,
+											  .pEnabledValidationFeatures = enables};
 	if (desc->enable_validation) {
 		debug_info = (VkDebugUtilsMessengerCreateInfoEXT){
 			.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
-			.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+			.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+							   VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
+							   VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
 							   VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
 			.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
 						   VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
 						   VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
 			.pfnUserCallback = ZHLN_Internal_DebugCallback,
 		};
+		debug_info.pNext = &features;
 		create_info.pNext = &debug_info;
 	}
 
@@ -395,10 +412,18 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
 	};
 	const bool shared = (queue_families[0] == queue_families[1]);
 
+	// Define the present modes we are "aware" of to satisfy Maintenance1
+	// We provide the modes found during query support.
+	const VkSwapchainPresentModesCreateInfoKHR present_modes_info = {
+		.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODES_CREATE_INFO_KHR,
+		.pNext = nullptr,
+		.presentModeCount = support.present_mode_count,
+		.pPresentModes = support.present_modes};
+
 	const VkSwapchainCreateInfoKHR create_info = {
 		.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-		.pNext = nullptr, // 1. Explicitly NULL (Fixes the Ghost Flag)
-		.flags = 0,		  // 2. Explicitly 0
+		.pNext = &present_modes_info,
+		.flags = 0,
 		.surface = desc->surface,
 		.minImageCount = image_count,
 		.imageFormat = format.format,
@@ -481,12 +506,12 @@ void ZHLN_DestroySwapchain(const VkDevice device, ZHLN_Swapchain* const swapchai
 [[nodiscard]]
 bool ZHLN_CreateFrameSync(const ZHLN_FrameSyncDesc* const desc,
 						  ZHLN_FrameSync* const restrict out_sync) {
-	constexpr VkSemaphoreCreateInfo sem_info = {
+	static constexpr VkSemaphoreCreateInfo sem_info = {
 		.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
 	};
 
 	// Fence starts signaled so the first frame doesn't wait forever
-	constexpr VkFenceCreateInfo fence_info = {
+	static constexpr VkFenceCreateInfo fence_info = {
 		.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
 		.flags = VK_FENCE_CREATE_SIGNALED_BIT,
 	};

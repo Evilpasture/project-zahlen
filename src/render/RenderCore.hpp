@@ -543,9 +543,9 @@ template <> struct LayoutTraits<VK_IMAGE_LAYOUT_UNDEFINED> {
 	// No access needed because we are discarding the contents
 	static constexpr VkAccessFlags2 access = 0;
 
-	// TOP_OF_PIPE means the transition can happen immediately,
-	// without waiting for any previous GPU work to finish.
-	static constexpr VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+	// By waiting at COLOR_ATTACHMENT_OUTPUT_BIT, this transition properly synchronizes
+	// with the vkAcquireNextImageKHR semaphore which is signaled at this exact stage.
+	static constexpr VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
 };
 
 // Specialization for Color Attachment
