@@ -95,7 +95,7 @@ int main() {
 	// 2. Texture Creation & Upload
 	// =========================================================================
 	const uint32_t TEX_W = 512, TEX_H = 512;
-	auto pixels = GenerateTVInterruptTexture<TEX_W, TEX_H>();
+	auto pixels = ZHLN::GenerateTVInterruptTexture<TEX_W, TEX_H>();
 
 	VkImageCreateInfo img_info = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 								  .imageType = VK_IMAGE_TYPE_2D,
