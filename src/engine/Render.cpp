@@ -188,10 +188,12 @@ BufferHandle RenderContext::CreateConstantBuffer(size_t size) {
 }
 
 Material RenderContext::CreateMaterial(const PipelineDesc& desc) {
-	ZHLN_ShaderDesc v_desc = {static_cast<const uint32_t*>(desc.vertexShaderData),
-							  desc.vertexShaderSize};
-	ZHLN_ShaderDesc f_desc = {static_cast<const uint32_t*>(desc.fragShaderData),
-							  desc.fragShaderSize};
+	ZHLN_ShaderDesc v_desc = {.code = static_cast<const uint32_t*>(desc.vertexShaderData),
+							  .size = desc.vertexShaderSize,
+							  .entry_point = nullptr};
+	ZHLN_ShaderDesc f_desc = {.code = static_cast<const uint32_t*>(desc.fragShaderData),
+							  .size = desc.fragShaderSize,
+							  .entry_point = nullptr};
 	auto shaders = Vk::ShaderStages::Create(_impl->ctx.Device(), v_desc, f_desc);
 
 	VkPushConstantRange pc_range = {
@@ -384,7 +386,8 @@ void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
 	ZHLN_BeginRendering(impl->current_cmd, &pass);
 }
 
-void UpdateBuffer(RenderContext& ctx, BufferHandle buffer, const void* data, size_t size) {
+void UpdateBuffer(RenderContext& ctx, [[maybe_unused]] BufferHandle buffer, const void* data,
+				  size_t size) {
 	if (size == sizeof(JPH::Mat44))
 		ctx.GetImpl()->current_view_proj = *static_cast<const JPH::Mat44*>(data);
 }
