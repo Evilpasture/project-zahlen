@@ -134,6 +134,14 @@ set(TRI_HLSL "${CMAKE_CURRENT_SOURCE_DIR}/triangle_app/triangle.hlsl")
 compile_hlsl("${TRI_HLSL}" VSMain vs TRI_VERT_SPV)
 compile_hlsl("${TRI_HLSL}" PSMain ps TRI_FRAG_SPV)
 
+set(CRT_HLSL "${CMAKE_CURRENT_SOURCE_DIR}/crt_app/crt.hlsl")
+compile_hlsl("${CRT_HLSL}" VSMain vs CRT_VERT_SPV)
+compile_hlsl("${CRT_HLSL}" PSMain ps CRT_FRAG_SPV)
+
+set(SPONZA_HLSL "${CMAKE_CURRENT_SOURCE_DIR}/sponza_app/sponza.hlsl")
+compile_hlsl("${SPONZA_HLSL}" VSMain vs SPONZA_VERT_SPV)
+compile_hlsl("${SPONZA_HLSL}" PSMain ps SPONZA_FRAG_SPV)
+
 # 4. Triangle Executable
 add_executable(zahlen_triangle triangle_app/main.cpp ${TRI_VERT_SPV} ${TRI_FRAG_SPV})
 target_link_libraries(zahlen_triangle PRIVATE zahlen_render Vulkan::Vulkan zahlen_demo_utils)
@@ -146,12 +154,18 @@ target_link_libraries(zahlen_cube PRIVATE zahlen_render Vulkan::Vulkan zahlen_de
 target_include_directories(zahlen_cube PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(zahlen_cube PRIVATE cxx_std_23)
 
-# --- CRT App ---
-set(CRT_HLSL "${CMAKE_CURRENT_SOURCE_DIR}/crt_app/crt.hlsl")
-compile_hlsl("${CRT_HLSL}" VSMain vs CRT_VERT_SPV)
-compile_hlsl("${CRT_HLSL}" PSMain ps CRT_FRAG_SPV)
-
+# 6. CRT Executable
 add_executable(zahlen_crt crt_app/main.cpp ${CRT_VERT_SPV} ${CRT_FRAG_SPV})
 target_link_libraries(zahlen_crt PRIVATE zahlen_render Vulkan::Vulkan zahlen_demo_utils)
 target_include_directories(zahlen_crt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(zahlen_crt PRIVATE cxx_std_23)
+
+# 7. Sponza Executable
+add_executable(zahlen_sponza sponza_app/main.cpp ${SPONZA_VERT_SPV} ${SPONZA_FRAG_SPV})
+target_link_libraries(zahlen_sponza PRIVATE zahlen_render Vulkan::Vulkan zahlen_demo_utils)
+target_include_directories(zahlen_sponza PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR} 
+    ${CMAKE_SOURCE_DIR}/extern/cgltf
+    ${CMAKE_SOURCE_DIR}/extern/stb
+)
 target_compile_features(zahlen_crt PRIVATE cxx_std_23)
