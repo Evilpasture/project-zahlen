@@ -786,7 +786,7 @@ class alignas(64) SemaphorePool {
 	// Order matters for packing:
 	VkDevice _device = VK_NULL_HANDLE;			 // 8 bytes
 	uint32_t _count = 0;						 // 4 bytes
-	uint32_t _padding = 0;						 // 4 bytes (Explicit padding for 64-bit alignment)
+	[[maybe_unused]] uint32_t _padding = 0;		 // 4 bytes (Explicit padding for 64-bit alignment)
 	std::array<VkSemaphore, 6> _semaphores = {}; // 48 bytes
 												 // Total: Exactly 64 bytes.
 };
