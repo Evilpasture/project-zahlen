@@ -3,6 +3,7 @@
 #include "DescriptorLayout.hpp"
 #include "PipelineBuilder.hpp"
 #include "RenderCore.hpp"
+#include "SamplerBuilder.hpp" // NEW
 #include "Vertex.hpp"
 #include "demo_utils/DemoWindow.hpp"
 // clang-format off
@@ -14,7 +15,6 @@
 #include <array>
 #include <chrono>
 #include <filesystem>
-#include <fstream>
 #include <print>
 #include <vector>
 
@@ -60,17 +60,6 @@ using MaterialLayout = ZHLN::Vk::DescriptorLayout<ZHLN::Vk::SampledImageSlot<0>,
 // ============================================================================
 // Helpers
 // ============================================================================
-
-static std::vector<uint32_t> LoadSpirv(const std::filesystem::path& path) {
-	std::ifstream file(path, std::ios::ate | std::ios::binary);
-	if (!file.is_open())
-		return {};
-	size_t size = static_cast<size_t>(file.tellg());
-	std::vector<uint32_t> buffer(size / sizeof(uint32_t));
-	file.seekg(0);
-	file.read(reinterpret_cast<char*>(buffer.data()), size);
-	return buffer;
-}
 
 [[nodiscard]] static bool FileExists(const std::string& path) {
 	bool exists = std::filesystem::exists(path);
@@ -124,113 +113,6 @@ static AssetPaths ResolvePaths() {
 // Scene loading
 // ============================================================================
 
-struct SceneGeometry {
-	std::vector<ZHLN::Vk::Vertex> vertices;
-	std::vector<uint32_t> indices;
-	std::vector<DrawCall> drawCalls;
-};
-
-static SceneGeometry LoadScene(cgltf_data* data) {
-	SceneGeometry scene;
-	std::vector<std::vector<MeshPrimitive>> meshToPrims(data->meshes_count);
-
-	for (cgltf_size i = 0; i < data->meshes_count; ++i) {
-		for (cgltf_size j = 0; j < data->meshes[i].primitives_count; ++j) {
-			cgltf_primitive* prim = &data->meshes[i].primitives[j];
-
-			uint32_t firstIndex = static_cast<uint32_t>(scene.indices.size());
-			uint32_t vertexOffset = static_cast<uint32_t>(scene.vertices.size());
-
-			for (cgltf_size k = 0; k < prim->indices->count; ++k)
-				scene.indices.push_back(cgltf_accessor_read_index(prim->indices, k) + vertexOffset);
-
-			size_t vertexCount = prim->attributes[0].data->count;
-			size_t startVert = scene.vertices.size();
-			scene.vertices.resize(scene.vertices.size() + vertexCount);
-
-			for (cgltf_size a = 0; a < prim->attributes_count; ++a) {
-				cgltf_attribute* attr = &prim->attributes[a];
-				for (cgltf_size v = 0; v < vertexCount; ++v) {
-					if (attr->type == cgltf_attribute_type_position)
-						cgltf_accessor_read_float(attr->data, v,
-												  scene.vertices[startVert + v].pos.data(), 3);
-					else if (attr->type == cgltf_attribute_type_normal)
-						cgltf_accessor_read_float(attr->data, v,
-												  scene.vertices[startVert + v].norm.data(), 3);
-					else if (attr->type == cgltf_attribute_type_texcoord)
-						cgltf_accessor_read_float(attr->data, v,
-												  scene.vertices[startVert + v].uv.data(), 2);
-				}
-			}
-
-			meshToPrims[i].push_back({
-				.indexCount = static_cast<uint32_t>(prim->indices->count),
-				.firstIndex = firstIndex,
-				.materialIndex =
-					prim->material ? static_cast<int>(prim->material - data->materials) : -1,
-			});
-		}
-	}
-
-	// Flatten nodes → draw calls (stores a stable pointer into meshToPrims)
-	// We need the primitives to outlive this function — move them into a
-	// flat vector owned by SceneGeometry and point into that.
-	std::vector<MeshPrimitive> flatPrims;
-	for (auto& v : meshToPrims)
-		for (auto& p : v)
-			flatPrims.push_back(p);
-
-	// Rebuild meshToPrims with pointers into flatPrims
-	size_t primOffset = 0;
-	std::vector<size_t> meshPrimStart(data->meshes_count);
-	for (cgltf_size i = 0; i < data->meshes_count; ++i) {
-		meshPrimStart[i] = primOffset;
-		primOffset += meshToPrims[i].size();
-	}
-
-	// Store flat prims in a static-lifetime vector via the scene struct
-	// (add a field for ownership)
-	struct SceneGeometryFull : SceneGeometry {
-		std::vector<MeshPrimitive> ownedPrims;
-	};
-
-	// Simpler: just re-walk nodes after building the flat array
-	// Store owned primitives separately; DrawCall holds raw pointer into it.
-	// Since SceneGeometry owns both, lifetime is correct.
-	scene.drawCalls.clear();
-
-	// We need to re-walk nodes — refactor: return owned prims embedded in struct
-	// For now replicate the walk here with the final flat index
-	for (cgltf_size i = 0; i < data->nodes_count; ++i) {
-		cgltf_node* node = &data->nodes[i];
-		if (!node->mesh)
-			continue;
-
-		float matrix[16];
-		cgltf_node_transform_world(node, matrix);
-		Mat4 worldMat;
-		std::copy(matrix, matrix + 16, worldMat.data.begin());
-
-		size_t meshIdx = node->mesh - data->meshes;
-		for (size_t pi = 0; pi < meshToPrims[meshIdx].size(); ++pi) {
-			// Point into the heap-allocated flat list
-			scene.drawCalls.push_back({&flatPrims[meshPrimStart[meshIdx] + pi], worldMat});
-		}
-	}
-
-	// flatPrims is about to die — the DrawCall pointers would dangle.
-	// The clean fix: embed owned storage in SceneGeometry.
-	// Add the field and move flatPrims into it before returning.
-	// (See the struct addition below — this is intentional to keep it readable)
-
-	return scene; // ← pointer fixup needed, see note below
-}
-
-// ============================================================================
-// SceneGeometry (revised — owns its primitives)
-// ============================================================================
-
-// Replace the forward declaration above with this complete version:
 struct Scene {
 	std::vector<ZHLN::Vk::Vertex> vertices;
 	std::vector<uint32_t> indices;
@@ -435,33 +317,38 @@ struct FrameResources {
 // Frame recording
 // ============================================================================
 
-struct FrameRecordDesc {
-	VkCommandBuffer cmd;
-	VkImage swapchainImage;
-	VkImageView swapchainView;
-	VkExtent2D extent;
-	VkImageView depthView;
-	bool& depthInitialized;
-	VkImage depthImage;
+struct PipelineSet {
+	VkPipeline pipeline, shadowPipeline;
+	VkPipelineLayout pipelineLayout, shadowLayout;
+};
 
-	// Shadow
-	VkImage shadowImage;
-	VkImageView shadowView;
-
-	// Pipelines + layouts
-	VkPipeline pipeline;
-	VkPipelineLayout pipelineLayout;
-	VkPipeline shadowPipeline;
-	VkPipelineLayout shadowLayout;
-
-	// Geometry
-	VkBuffer vbo;
-	VkBuffer ibo;
+struct SceneBuffers {
+	VkBuffer vbo, ibo;
 	const std::vector<DrawCall>& drawCalls;
 	const std::vector<MaterialAsset>& materials;
 	const MaterialAsset& fallbackMat;
+};
 
-	// Per-frame matrices
+struct FrameRecordDesc {
+	VkCommandBuffer cmd;
+
+	// Dynamic Frame Targets
+	VkImage swapchainImage;
+	VkImageView swapchainView;
+	VkExtent2D extent;
+
+	VkImage depthImage;
+	VkImageView depthView;
+	bool& depthInitialized;
+
+	VkImage shadowImage;
+	VkImageView shadowView;
+
+	// State
+	const PipelineSet& pipelines;
+	const SceneBuffers& scene;
+
+	// Transforms
 	Mat4 viewProj;
 	Mat4 lightSpaceMatrix;
 	float camPos[3];
@@ -480,7 +367,7 @@ static void RecordFrame(const FrameRecordDesc& d) {
 		d.depthInitialized = true;
 	}
 
-	VkBuffer vboHandle = d.vbo;
+	VkBuffer vboHandle = d.scene.vbo;
 	VkDeviceSize offset = 0;
 
 	// --- Pass 1: shadow ---
@@ -501,13 +388,13 @@ static void RecordFrame(const FrameRecordDesc& d) {
 										  .extent = {4096, 4096},
 										  .clear_depth = 1.0f};
 		ZHLN::Vk::ScopedRendering render(d.cmd, shadowPass);
-		vkCmdBindPipeline(d.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d.shadowPipeline);
+		vkCmdBindPipeline(d.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d.pipelines.shadowPipeline);
 		vkCmdBindVertexBuffers(d.cmd, 0, 1, &vboHandle, &offset);
-		vkCmdBindIndexBuffer(d.cmd, d.ibo, 0, VK_INDEX_TYPE_UINT32);
+		vkCmdBindIndexBuffer(d.cmd, d.scene.ibo, 0, VK_INDEX_TYPE_UINT32);
 
-		for (const auto& draw : d.drawCalls) {
+		for (const auto& draw : d.scene.drawCalls) {
 			Mat4 shadowMVP = Multiply(d.lightSpaceMatrix, draw.worldMatrix);
-			ZHLN::Vk::Push(d.cmd, d.shadowLayout, VK_SHADER_STAGE_VERTEX_BIT, shadowMVP);
+			ZHLN::Vk::Push(d.cmd, d.pipelines.shadowLayout, VK_SHADER_STAGE_VERTEX_BIT, shadowMVP);
 			vkCmdDrawIndexed(d.cmd, draw.mesh->indexCount, 1, draw.mesh->firstIndex, 0, 0);
 		}
 	}
@@ -532,31 +419,32 @@ static void RecordFrame(const FrameRecordDesc& d) {
 										.clear_color = {0.5f, 0.7f, 1.0f, 1.0f},
 										.clear_depth = 1.0f};
 		ZHLN::Vk::ScopedRendering render(d.cmd, mainPass);
-		vkCmdBindPipeline(d.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d.pipeline);
+		vkCmdBindPipeline(d.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d.pipelines.pipeline);
 		vkCmdBindVertexBuffers(d.cmd, 0, 1, &vboHandle, &offset);
-		vkCmdBindIndexBuffer(d.cmd, d.ibo, 0, VK_INDEX_TYPE_UINT32);
+		vkCmdBindIndexBuffer(d.cmd, d.scene.ibo, 0, VK_INDEX_TYPE_UINT32);
 
 		int current_mat = -2;
-		for (const auto& draw : d.drawCalls) {
+		for (const auto& draw : d.scene.drawCalls) {
 			SponzaPushConstants pc = {
 				.mvp = Multiply(d.viewProj, draw.worldMatrix),
 				.lightSpaceMatrix = Multiply(d.lightSpaceMatrix, draw.worldMatrix),
 				.camPos = {d.camPos[0], d.camPos[1], d.camPos[2], 1.0f},
 			};
-			ZHLN::Vk::Push(d.cmd, d.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, pc);
+			ZHLN::Vk::Push(d.cmd, d.pipelines.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, pc);
 
 			if (draw.mesh->materialIndex != current_mat) {
 				current_mat = draw.mesh->materialIndex;
-				VkDescriptorSet dSet = (current_mat >= 0) ? d.materials[current_mat].descriptorSet
-														  : d.fallbackMat.descriptorSet;
-				vkCmdBindDescriptorSets(d.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d.pipelineLayout, 0,
-										1, &dSet, 0, nullptr);
+				VkDescriptorSet dSet = (current_mat >= 0)
+										   ? d.scene.materials[current_mat].descriptorSet
+										   : d.scene.fallbackMat.descriptorSet;
+				vkCmdBindDescriptorSets(d.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+										d.pipelines.pipelineLayout, 0, 1, &dSet, 0, nullptr);
 			}
 			vkCmdDrawIndexed(d.cmd, draw.mesh->indexCount, 1, draw.mesh->firstIndex, 0, 0);
 		}
 	}
 
-	// *** THE FIX: transition to PRESENT_SRC_KHR before handing off ***
+	// Transition to PRESENT_SRC_KHR before handing off
 	ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 							   VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(d.cmd, d.swapchainImage);
 }
@@ -710,12 +598,14 @@ auto main() -> int {
 
 	// --- Textures Loop ---
 	std::vector<TextureAsset> textures(data->images_count);
+	std::println("Uploading {} textures...", data->images_count);
 	for (cgltf_size i = 0; i < data->images_count; ++i) {
 		ZHLN::Demo::ProcessEvents(win);
 		std::string fullPath = paths.asset_prefix + data->images[i].uri;
 		textures[i] = UploadTexture(allocator, win, ctx, texBaseInfo, fullPath);
 		std::println("  [{}/{}] {}", i + 1, data->images_count, data->images[i].uri);
 	}
+
 	// --- Shadow map ---
 	constexpr uint32_t SHADOW_RES = 4096;
 	VkImageCreateInfo shadowInfo = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -732,45 +622,29 @@ auto main() -> int {
 									.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
 	auto shadowImage =
 		ZHLN::Vk::Image::Create(allocator.Get(), shadowInfo, VMA_MEMORY_USAGE_GPU_ONLY);
-	// TMP deduces VK_IMAGE_ASPECT_DEPTH_BIT automatically
 	auto shadowView =
 		ZHLN::Vk::CreateView<VK_FORMAT_D32_SFLOAT>(ctx.Device(), shadowImage.Handle());
 
-	// --- Samplers ---
-	VkSamplerCreateInfo samplerInfo = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-									   .magFilter = VK_FILTER_LINEAR,
-									   .minFilter = VK_FILTER_LINEAR,
-									   .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
-									   .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-									   .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-									   .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-									   .anisotropyEnable = VK_TRUE,
-									   .maxAnisotropy = 8.0f};
-	VkSampler defaultSampler;
-	vkCreateSampler(ctx.Device(), &samplerInfo, nullptr, &defaultSampler);
-
-	VkSamplerCreateInfo shadowSampInfo = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-										  .magFilter = VK_FILTER_LINEAR,
-										  .minFilter = VK_FILTER_LINEAR,
-										  .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
-										  .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
-										  .compareEnable = VK_TRUE,
-										  .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
-										  .borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE};
-	VkSampler shadowSampler;
-	vkCreateSampler(ctx.Device(), &shadowSampInfo, nullptr, &shadowSampler);
+	// --- Samplers (Via Builder) ---
+	auto defaultSampler =
+		ZHLN::Vk::SamplerBuilder{}.Linear().Repeat().Anisotropy(8.0f).Build(ctx.Device());
+	auto shadowSampler = ZHLN::Vk::SamplerBuilder{}
+							 .Linear()
+							 .ClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE)
+							 .DepthCompare()
+							 .Build(ctx.Device());
 
 	// --- Descriptor layout + pool (via TMP) ---
 	uint32_t matCount = static_cast<uint32_t>(data->materials_count) + 1;
-	VkDescriptorSetLayout descLayout = MaterialLayout::CreateLayout(ctx.Device());
-	VkDescriptorPool descPool = MaterialLayout::CreatePool(ctx.Device(), matCount);
+	auto descLayout = MaterialLayout::CreateLayout(ctx.Device());
+	auto descPool = MaterialLayout::CreatePool(ctx.Device(), matCount);
 
 	auto AllocateMaterial = [&](VkImageView view, VkDescriptorSet& set) -> void {
-		set = MaterialLayout::Allocate(ctx.Device(), descPool, descLayout);
-		MaterialLayout::Write(ctx.Device(), set, ZHLN::Vk::ImageWrite{view}, // Already raw now
-							  ZHLN::Vk::SamplerWrite{defaultSampler},
-							  ZHLN::Vk::ImageWrite{shadowView.Get()}, // Use .Get() here
-							  ZHLN::Vk::SamplerWrite{shadowSampler});
+		set = MaterialLayout::Allocate(ctx.Device(), descPool.Get(), descLayout.Get());
+		MaterialLayout::Write(ctx.Device(), set, ZHLN::Vk::ImageWrite{view},
+							  ZHLN::Vk::SamplerWrite{defaultSampler.Get()},
+							  ZHLN::Vk::ImageWrite{shadowView.Get()},
+							  ZHLN::Vk::SamplerWrite{shadowSampler.Get()});
 	};
 
 	MaterialAsset fallbackMat;
@@ -779,14 +653,14 @@ auto main() -> int {
 	std::vector<MaterialAsset> materials(data->materials_count);
 	for (cgltf_size i = 0; i < data->materials_count; ++i) {
 		cgltf_material* mat = &data->materials[i];
-		VkImageView view = dummyTex.view.Get(); // ADD .Get()
+		VkImageView view = dummyTex.view.Get();
 		if (mat->has_pbr_metallic_roughness &&
 			mat->pbr_metallic_roughness.base_color_texture.texture) {
 			cgltf_texture* tex = mat->pbr_metallic_roughness.base_color_texture.texture;
 			if (tex->image) {
 				int idx = static_cast<int>(tex->image - data->images);
-				if (textures[idx].view) {			 // REMOVE != VK_NULL_HANDLE
-					view = textures[idx].view.Get(); // ADD .Get()
+				if (textures[idx].view) {
+					view = textures[idx].view.Get();
 				}
 			}
 		}
@@ -795,23 +669,20 @@ auto main() -> int {
 
 	cgltf_free(data);
 
-	// --- Pipelines (via builder) ---
-	auto vertCode = LoadSpirv(paths.vert_spv);
-	auto fragCode = LoadSpirv(paths.frag_spv);
-	auto sVertCode = LoadSpirv(paths.shadow_vert_spv);
-	auto sFragCode = LoadSpirv(paths.shadow_frag_spv);
-
-	auto shaders = ZHLN::Vk::ShaderStages::Create(ctx.Device(),
-												  {vertCode.data(), vertCode.size() * 4, "VSMain"},
-												  {fragCode.data(), fragCode.size() * 4, "PSMain"});
-	auto shadowShaders = ZHLN::Vk::ShaderStages::Create(
-		ctx.Device(), {sVertCode.data(), sVertCode.size() * 4, "VSMain"},
-		{sFragCode.data(), sFragCode.size() * 4, "PSMain"});
+	// --- Pipelines (Via Factory & Builder) ---
+	auto shaders = ZHLN::Vk::ShaderStages::FromFiles(ctx.Device(), paths.vert_spv, paths.frag_spv,
+													 "VSMain", "PSMain");
+	auto shadowShaders = ZHLN::Vk::ShaderStages::FromFiles(
+		ctx.Device(), paths.shadow_vert_spv, paths.shadow_frag_spv, "VSMain", "PSMain");
 
 	VkPushConstantRange mainPush = {VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(SponzaPushConstants)};
 	VkPushConstantRange shadowPush = {VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Mat4)};
 
-	ZHLN_PipelineLayoutDesc mainLayoutDesc = {&descLayout, 1, &mainPush, 1};
+	// Create a local variable to hold the raw handle
+	VkDescriptorSetLayout rawLayout = descLayout.Get();
+
+	// Pass the address of the local variable
+	ZHLN_PipelineLayoutDesc mainLayoutDesc = {&rawLayout, 1, &mainPush, 1};
 	ZHLN_PipelineLayoutDesc shadowLayoutDesc = {nullptr, 0, &shadowPush, 1};
 
 	ZHLN::Vk::PipelineLayout pipelineLayout(
@@ -835,6 +706,17 @@ auto main() -> int {
 							  .DepthOnly()
 							  .CullBack()
 							  .Build(ctx.Device());
+
+	PipelineSet activePipelines = {.pipeline = pipeline.Get(),
+								   .shadowPipeline = shadowPipeline.Get(),
+								   .pipelineLayout = pipelineLayout.Get(),
+								   .shadowLayout = shadowLayout.Get()};
+
+	SceneBuffers sceneBuffers = {.vbo = vbo.Handle(),
+								 .ibo = ibo.Handle(),
+								 .drawCalls = scene.drawCalls,
+								 .materials = materials,
+								 .fallbackMat = fallbackMat};
 
 	// --- Frame loop resources ---
 	FrameResources frame;
@@ -899,20 +781,13 @@ auto main() -> int {
 			.swapchainImage = frame.swapchain.Get().images[image_index],
 			.swapchainView = frame.swapchain.Get().views[image_index],
 			.extent = frame.swapchain.Get().extent,
+			.depthImage = frame.depthImage.Handle(),
 			.depthView = frame.depthView.Get(),
 			.depthInitialized = frame.depthInitialized,
-			.depthImage = frame.depthImage.Handle(),
 			.shadowImage = shadowImage.Handle(),
 			.shadowView = shadowView.Get(),
-			.pipeline = pipeline.Get(),
-			.pipelineLayout = pipelineLayout.Get(),
-			.shadowPipeline = shadowPipeline.Get(),
-			.shadowLayout = shadowLayout.Get(),
-			.vbo = vbo.Handle(),
-			.ibo = ibo.Handle(),
-			.drawCalls = scene.drawCalls,
-			.materials = materials,
-			.fallbackMat = fallbackMat,
+			.pipelines = activePipelines,
+			.scene = sceneBuffers,
 			.viewProj = viewProj,
 			.lightSpaceMatrix = lightSpace,
 			.camPos = {camX, camY, camZ},
@@ -949,12 +824,7 @@ auto main() -> int {
 
 	vkDeviceWaitIdle(ctx.Device());
 
-	// Cleanup
-	vkDestroySampler(ctx.Device(), defaultSampler, nullptr);
-	vkDestroySampler(ctx.Device(), shadowSampler, nullptr);
-	vkDestroyDescriptorPool(ctx.Device(), descPool, nullptr);
-	vkDestroyDescriptorSetLayout(ctx.Device(), descLayout, nullptr);
-
+	// All Vulkan resources automatically destroyed via RAII wrappers
 	ZHLN::Demo::DestroyWindow(win);
 	return 0;
 }
