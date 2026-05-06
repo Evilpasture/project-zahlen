@@ -20,15 +20,31 @@ inline auto GetPoorMansStacktrace() -> std::string {
 	char** strs = backtrace_symbols(callstack, frames);
 
 	for (int i = 0; i < frames; ++i) {
-		// backtrace_symbols gives us strings like:
-		// 0   zahlen   0x0000000100003f44 _Z5Panicv + 20
-		// We can try to demangle if it looks like a C++ symbol
-		out += strs[i];
-		out += "\n";
+		std::string line = strs[i];
+
+		// Try to find the mangled name in the string
+		// macOS format: "index  binary  address  mangled_name + offset"
+		size_t name_start = line.find("_Z");
+		size_t name_end = line.find(" + ", name_start);
+
+		if (name_start != std::string::npos && name_end != std::string::npos) {
+			std::string mangled = line.substr(name_start, name_end - name_start);
+			int status = 0;
+			char* demangled = abi::__cxa_demangle(mangled.c_str(), nullptr, nullptr, &status);
+
+			if (status == 0) {
+				out += line.substr(0, name_start) + demangled + line.substr(name_end) + "\n";
+			} else {
+				out += line + "\n";
+			}
+			std::free(demangled);
+		} else {
+			out += line + "\n";
+		}
 	}
 	std::free(strs);
 #else
-	out = "Stacktrace not implemented for this OS.\n";
+	out = "Stacktrace not implemented.\n";
 #endif
 	return out;
 }
@@ -83,8 +99,9 @@ template <typename... Args> [[noreturn]] void Panic(LogContext ctx, Args&&... ar
 }
 
 struct DumpOptions {
-	size_t bytes_per_line = 4;
-	bool interpret_as_float = true;
+	size_t bytes_per_line = 16; // Standard hex dump width
+	bool show_ascii = true;		// Show readable characters
+	bool show_interpret = true; // Show float/int guesses
 };
 
 #if defined(__clang__)
@@ -101,42 +118,117 @@ template <typename T> inline void TraceStruct(const T& obj) {
 }
 #endif
 
-inline void MemoryDump(const void* ptr, size_t size, std::string_view label,
-					   LogContext ctx, // Move this to after the mandatory args
+// ANSI Color Helpers
+namespace Color {
+inline const char* Reset = "\033[0m";
+inline const char* Gray = "\033[90m";
+inline const char* Cyan = "\033[36m";
+inline const char* Yellow = "\033[33m";
+inline const char* Green = "\033[32m";
+inline const char* Red = "\033[31m";
+} // namespace Color
+
+inline void MemoryDump(const void* ptr, size_t size, std::string_view label, LogContext ctx,
 					   DumpOptions opts = {}) {
 	const uint8_t* byte_ptr = static_cast<const uint8_t*>(ptr);
 
-	std::println(stderr, "[{}:{}] Dumping '{}' at {}", ctx.loc.file_name(), ctx.loc.line(), label,
-				 ptr);
+	std::println(stderr, "{}┌─── DUMP: {} ({}) ───{}", Color::Cyan, label, ctx.fmt, Color::Reset);
+	std::println(stderr, "│ Source:  {}:{}", ctx.loc.file_name(), ctx.loc.line());
+	std::println(stderr, "│ Address: {}{}{} ({} bytes)", Color::Yellow, ptr, Color::Reset, size);
+	std::println(stderr, "├────────────┬────────────────────────────────────────────────┬──────────"
+						 "────────┬─────────────────────────┐");
+	std::println(stderr, "│  Address   │ Hex Data                                       │ ASCII    "
+						 "        │ Interpretation          │");
+	std::println(stderr, "├────────────┼────────────────────────────────────────────────┼──────────"
+						 "────────┼─────────────────────────┤");
 
 	for (size_t i = 0; i < size; i += opts.bytes_per_line) {
-		// 1. Print Address Offset
-		std::print(stderr, "{:#010x} | ", reinterpret_cast<uintptr_t>(byte_ptr + i));
+		// 1. Address
+		std::print(stderr, "│ {}{:#010x}{} │ ", Color::Cyan,
+				   reinterpret_cast<uintptr_t>(byte_ptr + i), Color::Reset);
 
-		// 2. Print Hex Bytes
+		// 2. Hex Data (with color for non-zero)
 		for (size_t j = 0; j < opts.bytes_per_line; ++j) {
-			if (i + j < size)
-				std::print(stderr, "{:02X} ", byte_ptr[i + j]);
-			else
+			if (i + j < size) {
+				uint8_t b = byte_ptr[i + j];
+				if (b == 0)
+					std::print(stderr, "{}00{} ", Color::Gray, Color::Reset);
+				else
+					std::print(stderr, "{:02X} ", b);
+			} else {
 				std::print(stderr, "   ");
+			}
+			if ((j + 1) % 4 == 0 && j + 1 < opts.bytes_per_line)
+				std::print(stderr, " ");
 		}
 
-		// 3. Optional Type Interpretation (e.g., Float)
-		if (opts.interpret_as_float && i + 4 <= size) {
-			float val;
-			std::memcpy(&val, byte_ptr + i, 4);
-			std::print(stderr, "| [float: {:>8.3f}] ", val);
+		// 3. ASCII
+		std::print(stderr, "│ ");
+		for (size_t j = 0; j < opts.bytes_per_line; ++j) {
+			if (i + j < size) {
+				uint8_t c = byte_ptr[i + j];
+				if (std::isprint(c))
+					std::print(stderr, "{}", (char)c);
+				else
+					std::print(stderr, "{}·{}", Color::Gray, Color::Reset);
+			} else
+				std::print(stderr, " ");
 		}
 
-		// 4. Label (Only on the first line of the object)
-		if (i == 0)
-			std::print(stderr, " <-- {}", label);
+		// 4. Smart Interpretation
+		std::print(stderr, " │ ");
+		if (i + 8 <= size) { // Check for 64-bit Pointer/Long first
+			uint64_t val64;
+			std::memcpy(&val64, byte_ptr + i, 8);
 
-		std::println(stderr, "");
+			// Heuristic: Does it look like a 64-bit pointer?
+			// On macOS/Linux, pointers usually start with 0x00007 or 0x00000001
+			if (val64 > 0x100000000 && val64 < 0x00007FFFFFFFFFFF) {
+				std::print(stderr, "{}ptr: {:#014x}{}", Color::Green, val64, Color::Reset);
+			} else {
+				// Fallback to 32-bit float/int logic
+				float f32;
+				std::memcpy(&f32, byte_ptr + i, 4);
+				if (!std::isnan(f32) && std::abs(f32) > 0.00001f && std::abs(f32) < 1000000.0f)
+					std::print(stderr, "flt: {:<12.4f}", f32);
+				else
+					std::print(stderr, "int: {:<12}", *(int32_t*)(byte_ptr + i));
+			}
+		}
+
+		std::println(stderr, " │");
+	}
+
+	std::println(stderr,
+				 "{}"
+				 "└────────────┴────────────────────────────────────────────────┴──────────────────"
+				 "┴─────────────────────────┘{}",
+				 Color::Cyan, Color::Reset);
+}
+
+template <typename T>
+concept HasData = requires(T a) {
+	a.data();
+	a.size();
+};
+
+template <typename T> void SmartDumpInternal(const T& var, std::string_view name, LogContext ctx) {
+	// Inside a template, if constexpr TRULY discards the code
+	if constexpr (requires {
+					  var.data();
+					  var.size();
+				  }) {
+		// It's a container (vector, string, array)
+		MemoryDump(var.data(), var.size() * sizeof(var[0]), name, ctx);
+	} else {
+		// It's just a regular object or struct
+		MemoryDump(&var, sizeof(var), name, ctx);
 	}
 }
 
-#define ZHLN_DUMP(var) ZHLN::MemoryDump(&var, sizeof(var), #var, #var)
+// Updated macro: uses the 'fmt' field of LogContext to pass a custom sub-label
+#define ZHLN_DUMP(var) ZHLN::SmartDumpInternal(var, #var, "Manual Dump")
+#define ZHLN_DUMP_EXT(var, label) ZHLN::SmartDumpInternal(&var, sizeof(var), #var, label)
 
 /**
  * @brief The bridge for Jolt Physics (C-Style variadic)
