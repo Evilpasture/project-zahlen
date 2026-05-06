@@ -960,7 +960,7 @@ void ZHLN_BeginRendering(const VkCommandBuffer cmd,
 	vkCmdSetScissor(cmd, 0, 1, &scissor);
 }
 
-void ZHLN_EndRendering(VkCommandBuffer cmd) {
+void ZHLN_EndRendering(const VkCommandBuffer cmd) {
 	vkCmdEndRendering(cmd);
 }
 
@@ -1176,4 +1176,10 @@ VkImageView ZHLN_CreateImageView(const VkDevice device,
 		return VK_NULL_HANDLE;
 	}
 	return view;
+}
+
+void ZHLN_DestroyImageView(const VkDevice device, const VkImageView view) {
+	if (view == VK_NULL_HANDLE)
+		return;
+	vkDestroyImageView(device, view, nullptr);
 }

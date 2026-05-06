@@ -832,14 +832,15 @@ ZHLN_FORMAT_ASPECT(VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT)
 ZHLN_FORMAT_ASPECT(VK_FORMAT_D24_UNORM_S8_UINT,
 				   VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)
 
-using ImageView = DeviceHandle<VkImageView, vkDestroyImageView>;
+using ImageView = DeviceHandle<VkImageView, ZHLN_DestroyImageView>;
 
 template <VkFormat F>
 [[nodiscard]] static ImageView CreateView(const VkDevice device, const VkImage image,
+										  VkImageAspectFlags aspect = FormatTraits<F>::aspect,
 										  const uint32_t mips = 1) {
 	ZHLN_ImageViewDesc desc = {.image = image,
 							   .format = F,
-							   .aspect = FormatTraits<F>::aspect, // Deduced via TMP!
+							   .aspect = aspect, // Deduced via TMP!
 							   .mip_levels = mips};
 	return ImageView(device, ZHLN_CreateImageView(device, &desc));
 }

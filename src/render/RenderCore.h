@@ -442,6 +442,8 @@ typedef const struct {
 VkImageView ZHLN_CreateImageView(const VkDevice device,
 								 const ZHLN_ImageViewDesc* ZHLN_RESTRICT desc);
 
+void ZHLN_DestroyImageView(const VkDevice device, const VkImageView view);
+
 #ifdef __cplusplus
 }
 #endif
