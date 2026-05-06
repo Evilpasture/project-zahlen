@@ -215,6 +215,32 @@ ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* const restrict desc) {
 ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
 	ZHLN_Device null_result = {};
 
+	// --- Filter Device Extensions ---
+	uint32_t available_count = 0;
+	vkEnumerateDeviceExtensionProperties(desc->physical->handle, nullptr, &available_count, nullptr);
+	VkExtensionProperties available_exts[available_count];
+	vkEnumerateDeviceExtensionProperties(desc->physical->handle, nullptr, &available_count,
+										 available_exts);
+
+	const char* active_exts[32];
+	uint32_t active_count = 0;
+
+	for (uint32_t i = 0; i < desc->extension_count; ++i) {
+		bool found = false;
+		for (uint32_t j = 0; j < available_count; ++j) {
+			if (strcmp(desc->extensions[i], available_exts[j].extensionName) == 0) {
+				found = true;
+				break;
+			}
+		}
+		if (found) {
+			active_exts[active_count++] = desc->extensions[i];
+		} else {
+			fprintf(stderr, "[VULKAN] Skipping unsupported extension: %s\n",
+					desc->extensions[i]);
+		}
+	}
+
 	// --- Queue Creation ---
 	// Deduplicate: if graphics and present are the same family, only create one queue
 	const uint32_t unique_families[2] = {
@@ -250,8 +276,8 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
 		.queueCreateInfoCount = unique_count,
 		.pQueueCreateInfos = queue_infos,
 
-		.enabledExtensionCount = desc->extension_count,
-		.ppEnabledExtensionNames = desc->extensions,
+		.enabledExtensionCount = active_count,
+		.ppEnabledExtensionNames = active_exts,
 
 		// Explicitly zero these out.
 		// It's cleaner than pretending they do something.
@@ -410,6 +436,10 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
 	};
 	const bool shared = (queue_families[0] == queue_families[1]);
 
+    // If this function pointer exists, the extension was enabled during device creation.
+    const auto maint1_fn = vkGetDeviceProcAddr(desc->device->handle, "vkReleaseSwapchainImagesKHR");
+    const bool has_maint1 = (maint1_fn != nullptr);
+
 	// Define the present modes we are "aware" of to satisfy Maintenance1
 	// We provide the modes found during query support.
 	const VkSwapchainPresentModesCreateInfoKHR present_modes_info = {
@@ -420,7 +450,7 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
 
 	const VkSwapchainCreateInfoKHR create_info = {
 		.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-		.pNext = &present_modes_info,
+		.pNext = has_maint1 ? &present_modes_info : nullptr, 
 		.flags = 0,
 		.surface = desc->surface,
 		.minImageCount = image_count,

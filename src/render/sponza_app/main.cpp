@@ -3,7 +3,7 @@
 #include "DescriptorLayout.hpp"
 #include "PipelineBuilder.hpp"
 #include "RenderCore.hpp"
-#include "SamplerBuilder.hpp" // NEW
+#include "SamplerBuilder.hpp"
 #include "Vertex.hpp"
 #include "demo_utils/DemoWindow.hpp"
 // clang-format off
@@ -21,8 +21,32 @@
 ZHLN_REFLECT_VERTEX(ZHLN::Vk::Vertex, pos, norm, uv);
 
 // ============================================================================
-// Types
+// Types & RAII Wrappers
 // ============================================================================
+
+struct GltfData {
+	cgltf_data* ptr = nullptr;
+	~GltfData() {
+		if (ptr)
+			cgltf_free(ptr);
+	}
+
+	[[nodiscard]] static GltfData Load(const std::string& path) {
+		GltfData d;
+		cgltf_options opts{};
+		if (cgltf_parse_file(&opts, path.c_str(), &d.ptr) != cgltf_result_success ||
+			cgltf_load_buffers(&opts, d.ptr, path.c_str()) != cgltf_result_success) {
+			if (d.ptr) {
+				cgltf_free(d.ptr);
+				d.ptr = nullptr;
+			}
+		}
+		return d;
+	}
+
+	[[nodiscard]] bool Valid() const { return ptr != nullptr; }
+	cgltf_data* operator->() const { return ptr; }
+};
 
 struct MeshPrimitive {
 	uint32_t indexCount;
@@ -58,8 +82,19 @@ using MaterialLayout = ZHLN::Vk::DescriptorLayout<ZHLN::Vk::SampledImageSlot<0>,
 												  >;
 
 // ============================================================================
-// Helpers
+// Helpers & Path Resolution
 // ============================================================================
+
+static std::vector<uint32_t> LoadSpirv(const std::filesystem::path& path) {
+	std::ifstream file(path, std::ios::ate | std::ios::binary);
+	if (!file.is_open())
+		return {};
+	size_t size = static_cast<size_t>(file.tellg());
+	std::vector<uint32_t> buffer(size / sizeof(uint32_t));
+	file.seekg(0);
+	file.read(reinterpret_cast<char*>(buffer.data()), size);
+	return buffer;
+}
 
 [[nodiscard]] static bool FileExists(const std::string& path) {
 	bool exists = std::filesystem::exists(path);
@@ -67,10 +102,6 @@ using MaterialLayout = ZHLN::Vk::DescriptorLayout<ZHLN::Vk::SampledImageSlot<0>,
 		std::println(stderr, "ERROR: File not found: {}", std::filesystem::absolute(path).string());
 	return exists;
 }
-
-// ============================================================================
-// Path resolution
-// ============================================================================
 
 struct AssetPaths {
 	std::string asset_prefix;
@@ -163,7 +194,6 @@ static Scene BuildScene(cgltf_data* data) {
 		}
 	}
 
-	// Walk nodes — primitives vector won't reallocate anymore
 	for (cgltf_size i = 0; i < data->nodes_count; ++i) {
 		cgltf_node* node = &data->nodes[i];
 		if (!node->mesh)
@@ -186,42 +216,37 @@ static Scene BuildScene(cgltf_data* data) {
 // Texture upload
 // ============================================================================
 
-static TextureAsset UploadTexture(ZHLN::Vk::Allocator& allocator, ZHLN::Demo::WindowState& win,
-								  const ZHLN::Vk::Context& ctx, const VkImageCreateInfo& baseInfo,
-								  const std::string& fullPath) {
+// Memory-based Uploader
+static TextureAsset UploadTexture(ZHLN::Vk::Allocator& allocator, const ZHLN::Vk::Context& ctx,
+								  const VkImageCreateInfo& baseInfo, const void* pixelData,
+								  uint32_t tw, uint32_t th) {
 	TextureAsset result;
-	int tw, th, tc;
-	stbi_uc* pixels = stbi_load(fullPath.c_str(), &tw, &th, &tc, STBI_rgb_alpha);
-	if (!pixels)
-		return result;
-
 	ZHLN::Vk::CommandPool batchPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-	if (!batchPool.Allocate(1)) {
-		stbi_image_free(pixels);
+	if (!batchPool.Allocate(1))
 		return result;
-	}
 	VkCommandBuffer cmd = batchPool[0];
 	ZHLN_BeginCommandBuffer(cmd);
 
 	VkImageCreateInfo texInfo = baseInfo;
-	texInfo.extent = {static_cast<uint32_t>(tw), static_cast<uint32_t>(th), 1};
+	texInfo.extent = {tw, th, 1};
 	result.image = ZHLN::Vk::Image::Create(allocator.Get(), texInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 
 	size_t imageSize = tw * th * 4;
 	auto staging = ZHLN::Vk::Buffer::Create(
 		allocator.Get(), imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
-	memcpy(staging.Map().data, pixels, imageSize);
+	memcpy(staging.Map().data, pixelData, imageSize);
 
 	ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
 		cmd, result.image.Handle());
 	ZHLN::Vk::CopyBufferToImage(cmd, {.buffer = staging.Handle(),
 									  .image = result.image.Handle(),
 									  .layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-									  .width = (uint32_t)tw,
-									  .height = (uint32_t)th});
+									  .width = tw,
+									  .height = th});
 	ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 							   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd,
 																		 result.image.Handle());
+
 	ZHLN_EndCommandBuffer(cmd);
 
 	VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
@@ -232,11 +257,23 @@ static TextureAsset UploadTexture(ZHLN::Vk::Allocator& allocator, ZHLN::Demo::Wi
 	vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
 	vkQueueWaitIdle(ctx.GraphicsQueue());
 
-	stbi_image_free(pixels);
-	// staging and batchPool destroyed here
-
 	result.view =
 		ZHLN::Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(ctx.Device(), result.image.Handle());
+	return result;
+}
+
+// File-based wrapper
+static TextureAsset UploadTexture(ZHLN::Vk::Allocator& allocator, ZHLN::Demo::WindowState& win,
+								  const ZHLN::Vk::Context& ctx, const VkImageCreateInfo& baseInfo,
+								  const std::string& fullPath) {
+	int tw, th, tc;
+	stbi_uc* pixels = stbi_load(fullPath.c_str(), &tw, &th, &tc, STBI_rgb_alpha);
+	if (!pixels)
+		return {};
+
+	TextureAsset result = UploadTexture(allocator, ctx, baseInfo, pixels, static_cast<uint32_t>(tw),
+										static_cast<uint32_t>(th));
+	stbi_image_free(pixels);
 	return result;
 }
 
@@ -249,7 +286,6 @@ struct FpsCounter {
 		std::chrono::high_resolution_clock::now();
 	uint32_t frames = 0;
 
-	// Returns a formatted title string once per second, empty otherwise
 	std::string Tick(size_t drawCallCount) {
 		++frames;
 		auto now = std::chrono::high_resolution_clock::now();
@@ -289,7 +325,7 @@ struct FrameResources {
 								   .width = win.width,
 								   .height = win.height,
 								   .vsync = true,
-								   .old_swapchain = VK_NULL_HANDLE};
+								   .old_swapchain = swapchain.Get().handle};
 		swapchain.Rebuild(desc);
 		presentSemaphores.Rebuild(ctx.Device(), swapchain.Get().image_count);
 
@@ -331,8 +367,6 @@ struct SceneBuffers {
 
 struct FrameRecordDesc {
 	VkCommandBuffer cmd;
-
-	// Dynamic Frame Targets
 	VkImage swapchainImage;
 	VkImageView swapchainView;
 	VkExtent2D extent;
@@ -344,22 +378,18 @@ struct FrameRecordDesc {
 	VkImage shadowImage;
 	VkImageView shadowView;
 
-	// State
 	const PipelineSet& pipelines;
 	const SceneBuffers& scene;
 
-	// Transforms
 	Mat4 viewProj;
 	Mat4 lightSpaceMatrix;
 	float camPos[3];
 };
 
 static void RecordFrame(const FrameRecordDesc& d) {
-	// Swapchain image → color attachment
 	ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
 		d.cmd, d.swapchainImage);
 
-	// Depth image — one-time transition on first use
 	if (!d.depthInitialized) {
 		ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED,
 								   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
@@ -444,9 +474,54 @@ static void RecordFrame(const FrameRecordDesc& d) {
 		}
 	}
 
-	// Transition to PRESENT_SRC_KHR before handing off
 	ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 							   VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(d.cmd, d.swapchainImage);
+}
+
+static std::vector<const char*> FilterExtensions(const std::vector<const char*>& requested) {
+	uint32_t count;
+	vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
+	std::vector<VkExtensionProperties> available(count);
+	vkEnumerateInstanceExtensionProperties(nullptr, &count, available.data());
+
+	std::vector<const char*> active;
+	for (auto req : requested) {
+		bool found = false;
+		for (const auto& avail : available) {
+			if (strcmp(req, avail.extensionName) == 0) {
+				found = true;
+				break;
+			}
+		}
+		if (found) {
+			active.push_back(req);
+		} else {
+			std::println(stderr, "[VULKAN] Extension not supported, skipping: {}", req);
+		}
+	}
+	return active;
+}
+
+static std::vector<const char*> FilterDeviceExtensions(VkPhysicalDevice physical,
+													   const std::vector<const char*>& requested) {
+	uint32_t count;
+	vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, nullptr);
+	std::vector<VkExtensionProperties> available(count);
+	vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, available.data());
+
+	std::vector<const char*> active;
+	for (auto req : requested) {
+		bool found = false;
+		for (const auto& avail : available) {
+			if (strcmp(req, avail.extensionName) == 0) {
+				found = true;
+				break;
+			}
+		}
+		if (found)
+			active.push_back(req);
+	}
+	return active;
 }
 
 // ============================================================================
@@ -455,37 +530,68 @@ static void RecordFrame(const FrameRecordDesc& d) {
 
 auto main() -> int {
 	const AssetPaths paths = ResolvePaths();
-
 	ZHLN::Demo::WindowState win = ZHLN::Demo::InitWindow(1280, 720, "ZHLN Engine - Sponza Atrium");
 
 	// --- Vulkan context ---
 	ZHLN_InstanceDesc inst_desc = ZHLN_VERBOSE_INSTANCE_DESC;
-	auto required_exts = ZHLN::Demo::GetRequiredInstanceExtensions();
-	required_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-	required_exts.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
-	required_exts.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+	auto required = ZHLN::Demo::GetRequiredInstanceExtensions();
+	required.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+	required.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
+	required.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
 #ifdef __APPLE__
-	required_exts.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+	required.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
 #endif
-	inst_desc.extensions = required_exts.data();
-	inst_desc.extension_count = static_cast<uint32_t>(required_exts.size());
 
+	// NEW: Filter out unsupported extensions
+	auto active_exts = FilterExtensions(required);
+	inst_desc.extensions = active_exts.data();
+	inst_desc.extension_count = static_cast<uint32_t>(active_exts.size());
+
+	// --- Feature chain setup ---
 	VkPhysicalDeviceVulkan13Features feat13 = {
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
 		.synchronization2 = VK_TRUE,
 		.dynamicRendering = VK_TRUE,
 		.shaderDemoteToHelperInvocation = VK_TRUE};
+
 	VkPhysicalDeviceVulkan12Features feat12 = {
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
 		.pNext = &feat13,
 		.bufferDeviceAddress = VK_TRUE};
+
+	// Check for Maintenance1 support (Instance side)
+	bool has_maint1 = false;
+	for (auto e : active_exts)
+		if (strcmp(e, VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME) == 0)
+			has_maint1 = true;
+
 	VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swap_maint = {
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR,
 		.swapchainMaintenance1 = VK_TRUE};
-	feat13.pNext = &swap_maint;
+
+	// ONLY link the maintenance features if the extension is present
+	if (has_maint1) {
+		feat13.pNext = &swap_maint;
+	} else {
+		feat13.pNext = nullptr;
+	}
+
 	VkPhysicalDeviceFeatures2 feat2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
 									   .pNext = &feat12,
 									   .features = {.samplerAnisotropy = VK_TRUE}};
+
+	// --- Device Extensions ---
+	std::vector<const char*> dev_req = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+
+	// Only add these if they are likely to be supported
+	if (has_maint1) {
+		dev_req.push_back(VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME);
+		dev_req.push_back(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME);
+	}
+
+#ifdef __APPLE__
+	dev_req.push_back("VK_KHR_portability_subset");
+#endif
 
 #ifdef __APPLE__
 	const char* dev_exts[] = {
@@ -504,35 +610,39 @@ auto main() -> int {
 								.features = &feat2,
 								.enable_validation = true};
 	auto ctx = ZHLN::Vk::Context::Create(inst_desc, {VK_NULL_HANDLE, VK_NULL_HANDLE}, dev_desc);
-	if (!ctx)
+	if (!ctx) {
+		std::println("Context creation failed");
 		return -1;
+	}
 
 	VkSurfaceKHR raw_surface = ZHLN::Demo::CreateSurface(ctx.Instance(), win);
 	ZHLN::Vk::Surface surface(ctx.Instance(), raw_surface);
 
 	ZHLN::Vk::Allocator allocator;
-	if (!allocator.Init(ctx))
+	if (!allocator.Init(ctx)) {
+		std::println("Allocator creation failed");
 		return -1;
-
-	if (!paths.Validate())
-		return -1;
-
-	// --- Load glTF ---
-	std::println("Loading Sponza...");
-	cgltf_options options = {};
-	cgltf_data* data = nullptr;
-	if (cgltf_parse_file(&options, paths.gltf.c_str(), &data) != cgltf_result_success ||
-		cgltf_load_buffers(&options, data, paths.gltf.c_str()) != cgltf_result_success) {
-		std::println(stderr, "FATAL: Failed to load glTF.");
+	}
+	if (!paths.Validate()) {
+		std::println("Path validation unsatisfied");
 		return -1;
 	}
 
-	Scene scene = BuildScene(data);
+	// --- Load glTF ---
+	std::println("Loading Sponza...");
+	auto gltf = GltfData::Load(paths.gltf);
+	if (!gltf.Valid()) {
+		std::println(stderr, "FATAL: Failed to load glTF.");
+		return -1;
+	}
+	Scene scene = BuildScene(gltf.ptr);
 
 	// --- GPU buffers ---
 	ZHLN::Vk::CommandPool setupPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-	if (!setupPool.Allocate(1))
+	if (!setupPool.Allocate(1)) {
+		std::println("Command pool allocation failed");
 		return -1;
+	}
 	VkCommandBuffer setupCmd = setupPool[0];
 	ZHLN_BeginCommandBuffer(setupCmd);
 
@@ -551,39 +661,6 @@ auto main() -> int {
 	auto stagingIBO = ZHLN::Vk::UploadToBuffer(allocator.Get(), setupCmd, ibo, scene.indices.data(),
 											   scene.indices.size() * sizeof(uint32_t));
 
-	// Dummy 1x1 white texture
-	uint32_t white_pixel = 0xFFFFFFFF;
-	VkImageCreateInfo texBaseInfo = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-									 .imageType = VK_IMAGE_TYPE_2D,
-									 .format = VK_FORMAT_R8G8B8A8_UNORM,
-									 .extent = {1, 1, 1},
-									 .mipLevels = 1,
-									 .arrayLayers = 1,
-									 .samples = VK_SAMPLE_COUNT_1_BIT,
-									 .tiling = VK_IMAGE_TILING_OPTIMAL,
-									 .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-											  VK_IMAGE_USAGE_SAMPLED_BIT,
-									 .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-									 .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
-
-	TextureAsset dummyTex;
-	dummyTex.image =
-		ZHLN::Vk::Image::Create(allocator.Get(), texBaseInfo, VMA_MEMORY_USAGE_GPU_ONLY);
-	auto stagingDummy = ZHLN::Vk::Buffer::Create(
-		allocator.Get(), 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
-	memcpy(stagingDummy.Map().data, &white_pixel, 4);
-
-	ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
-		setupCmd, dummyTex.image.Handle());
-	ZHLN::Vk::CopyBufferToImage(setupCmd, {.buffer = stagingDummy.Handle(),
-										   .image = dummyTex.image.Handle(),
-										   .layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-										   .width = 1,
-										   .height = 1});
-	ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-							   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(setupCmd,
-																		 dummyTex.image.Handle());
-
 	ZHLN_EndCommandBuffer(setupCmd);
 	VkCommandBufferSubmitInfo setupCmdInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
 											  .commandBuffer = setupCmd};
@@ -593,17 +670,30 @@ auto main() -> int {
 	vkQueueSubmit2(ctx.GraphicsQueue(), 1, &setupSubmit, VK_NULL_HANDLE);
 	vkQueueWaitIdle(ctx.GraphicsQueue());
 
-	dummyTex.view =
-		ZHLN::Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(ctx.Device(), dummyTex.image.Handle());
+	// --- Dummy 1x1 white texture ---
+	VkImageCreateInfo texBaseInfo = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+									 .imageType = VK_IMAGE_TYPE_2D,
+									 .format = VK_FORMAT_R8G8B8A8_UNORM,
+									 .mipLevels = 1,
+									 .arrayLayers = 1,
+									 .samples = VK_SAMPLE_COUNT_1_BIT,
+									 .tiling = VK_IMAGE_TILING_OPTIMAL,
+									 .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+											  VK_IMAGE_USAGE_SAMPLED_BIT,
+									 .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+									 .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+
+	uint32_t white_pixel = 0xFFFFFFFF;
+	TextureAsset dummyTex = UploadTexture(allocator, ctx, texBaseInfo, &white_pixel, 1, 1);
 
 	// --- Textures Loop ---
-	std::vector<TextureAsset> textures(data->images_count);
-	std::println("Uploading {} textures...", data->images_count);
-	for (cgltf_size i = 0; i < data->images_count; ++i) {
+	std::vector<TextureAsset> textures(gltf->images_count);
+	std::println("Uploading {} textures...", gltf->images_count);
+	for (cgltf_size i = 0; i < gltf->images_count; ++i) {
 		ZHLN::Demo::ProcessEvents(win);
-		std::string fullPath = paths.asset_prefix + data->images[i].uri;
+		std::string fullPath = paths.asset_prefix + gltf->images[i].uri;
 		textures[i] = UploadTexture(allocator, win, ctx, texBaseInfo, fullPath);
-		std::println("  [{}/{}] {}", i + 1, data->images_count, data->images[i].uri);
+		std::println("  [{}/{}] {}", i + 1, gltf->images_count, gltf->images[i].uri);
 	}
 
 	// --- Shadow map ---
@@ -635,7 +725,7 @@ auto main() -> int {
 							 .Build(ctx.Device());
 
 	// --- Descriptor layout + pool (via TMP) ---
-	uint32_t matCount = static_cast<uint32_t>(data->materials_count) + 1;
+	uint32_t matCount = static_cast<uint32_t>(gltf->materials_count) + 1;
 	auto descLayout = MaterialLayout::CreateLayout(ctx.Device());
 	auto descPool = MaterialLayout::CreatePool(ctx.Device(), matCount);
 
@@ -650,15 +740,15 @@ auto main() -> int {
 	MaterialAsset fallbackMat;
 	AllocateMaterial(dummyTex.view.Get(), fallbackMat.descriptorSet);
 
-	std::vector<MaterialAsset> materials(data->materials_count);
-	for (cgltf_size i = 0; i < data->materials_count; ++i) {
-		cgltf_material* mat = &data->materials[i];
+	std::vector<MaterialAsset> materials(gltf->materials_count);
+	for (cgltf_size i = 0; i < gltf->materials_count; ++i) {
+		cgltf_material* mat = &gltf->materials[i];
 		VkImageView view = dummyTex.view.Get();
 		if (mat->has_pbr_metallic_roughness &&
 			mat->pbr_metallic_roughness.base_color_texture.texture) {
 			cgltf_texture* tex = mat->pbr_metallic_roughness.base_color_texture.texture;
 			if (tex->image) {
-				int idx = static_cast<int>(tex->image - data->images);
+				int idx = static_cast<int>(tex->image - gltf->images);
 				if (textures[idx].view) {
 					view = textures[idx].view.Get();
 				}
@@ -666,8 +756,6 @@ auto main() -> int {
 		}
 		AllocateMaterial(view, materials[i].descriptorSet);
 	}
-
-	cgltf_free(data);
 
 	// --- Pipelines (Via Factory & Builder) ---
 	auto shaders = ZHLN::Vk::ShaderStages::FromFiles(ctx.Device(), paths.vert_spv, paths.frag_spv,
@@ -678,10 +766,7 @@ auto main() -> int {
 	VkPushConstantRange mainPush = {VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(SponzaPushConstants)};
 	VkPushConstantRange shadowPush = {VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Mat4)};
 
-	// Create a local variable to hold the raw handle
 	VkDescriptorSetLayout rawLayout = descLayout.Get();
-
-	// Pass the address of the local variable
 	ZHLN_PipelineLayoutDesc mainLayoutDesc = {&rawLayout, 1, &mainPush, 1};
 	ZHLN_PipelineLayoutDesc shadowLayoutDesc = {nullptr, 0, &shadowPush, 1};
 
@@ -795,36 +880,24 @@ auto main() -> int {
 
 		ZHLN_EndCommandBuffer(cmd);
 
-		VkCommandBufferSubmitInfo cmdInfo = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, nullptr,
-											 cmd};
-		VkSemaphoreSubmitInfo waitInfo = {VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
-										  frame_sync.image_available, 0,
-										  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT};
-		VkSemaphoreSubmitInfo signalInfo = {VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
-											frame.presentSemaphores[image_index], 0,
-											VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT};
-		VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-								.waitSemaphoreInfoCount = 1,
-								.pWaitSemaphoreInfos = &waitInfo,
-								.commandBufferInfoCount = 1,
-								.pCommandBufferInfos = &cmdInfo,
-								.signalSemaphoreInfoCount = 1,
-								.pSignalSemaphoreInfos = &signalInfo};
-		vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, frame_sync.in_flight);
+		ZHLN_FrameSubmitDesc submitDesc = {.graphicsQueue = ctx.GraphicsQueue(),
+										   .presentQueue = ctx.PresentQueue(),
+										   .cmd = cmd,
+										   .imageAvailable = frame_sync.image_available,
+										   .renderFinished = frame.presentSemaphores[image_index],
+										   .inFlight = frame_sync.in_flight,
+										   .swapchain = frame.swapchain.Get().handle,
+										   .imageIndex = image_index};
 
-		ZHLN_PresentDesc pres = {.present_queue = ctx.PresentQueue(),
-								 .swapchain = frame.swapchain.Get().handle,
-								 .render_finished = frame.presentSemaphores[image_index],
-								 .image_index = image_index};
-		if (ZHLN_PresentFrame(&pres) != ZHLN_FrameResult_Ok)
+		if (ZHLN::Vk::SubmitAndPresent(submitDesc) != ZHLN_FrameResult_Ok) {
 			win.resized = true;
+		}
 
 		frame_index = (frame_index + 1) % 3;
 	}
 
 	vkDeviceWaitIdle(ctx.Device());
 
-	// All Vulkan resources automatically destroyed via RAII wrappers
 	ZHLN::Demo::DestroyWindow(win);
 	return 0;
 }

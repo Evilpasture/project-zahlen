@@ -52,6 +52,11 @@ WindowState InitWindow(uint32_t width, uint32_t height, const char* title) {
 	HWND hwnd = CreateWindowExA(0, "ZHLNDemo", title, WS_OVERLAPPEDWINDOW | WS_VISIBLE, 100, 100,
 								width, height, nullptr, nullptr, hInstance, nullptr);
 
+    if (!hwnd) {
+        std::println(stderr, "Win32: Failed to create window. Error: {}", GetLastError());
+        return state;
+    }
+
 	state.os_window = hwnd;
 	state.os_instance = hInstance;
 	SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&state));
