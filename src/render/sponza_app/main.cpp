@@ -37,7 +37,7 @@ struct DrawCall {
 
 struct TextureAsset {
 	ZHLN::Vk::Image image;
-	VkImageView view = VK_NULL_HANDLE;
+	ZHLN::Vk::ImageView view;
 };
 
 struct MaterialAsset {
@@ -70,20 +70,6 @@ static std::vector<uint32_t> LoadSpirv(const std::filesystem::path& path) {
 	file.seekg(0);
 	file.read(reinterpret_cast<char*>(buffer.data()), size);
 	return buffer;
-}
-
-static VkImageView CreateImageView(VkDevice device, VkImage image, VkFormat format,
-								   VkImageAspectFlags aspect) {
-	VkImageViewCreateInfo info = {
-		.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-		.image = image,
-		.viewType = VK_IMAGE_VIEW_TYPE_2D,
-		.format = format,
-		.subresourceRange = {.aspectMask = aspect, .levelCount = 1, .layerCount = 1},
-	};
-	VkImageView view;
-	vkCreateImageView(device, &info, nullptr, &view);
-	return view;
 }
 
 [[nodiscard]] static bool FileExists(const std::string& path) {
@@ -366,6 +352,9 @@ static TextureAsset UploadTexture(ZHLN::Vk::Allocator& allocator, ZHLN::Demo::Wi
 
 	stbi_image_free(pixels);
 	// staging and batchPool destroyed here
+
+	result.view =
+		ZHLN::Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(ctx.Device(), result.image.Handle());
 	return result;
 }
 
@@ -402,7 +391,7 @@ struct FrameResources {
 	ZHLN::Vk::Swapchain swapchain;
 	ZHLN::Vk::SemaphorePool presentSemaphores;
 	ZHLN::Vk::Image depthImage;
-	VkImageView depthView = VK_NULL_HANDLE;
+	ZHLN::Vk::ImageView depthView;
 	bool depthInitialized = false;
 
 	void Rebuild(const ZHLN::Vk::Context& ctx, ZHLN::Vk::Allocator& allocator,
@@ -422,9 +411,6 @@ struct FrameResources {
 		swapchain.Rebuild(desc);
 		presentSemaphores.Rebuild(ctx.Device(), swapchain.Get().image_count);
 
-		if (depthView)
-			vkDestroyImageView(ctx.Device(), depthView, nullptr);
-
 		VkImageCreateInfo depthInfo = {
 			.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 			.imageType = VK_IMAGE_TYPE_2D,
@@ -439,8 +425,8 @@ struct FrameResources {
 			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
 		};
 		depthImage = ZHLN::Vk::Image::Create(allocator.Get(), depthInfo, VMA_MEMORY_USAGE_GPU_ONLY);
-		depthView = CreateImageView(ctx.Device(), depthImage.Handle(), VK_FORMAT_D32_SFLOAT,
-									VK_IMAGE_ASPECT_DEPTH_BIT);
+		depthView = ZHLN::Vk::CreateView<VK_FORMAT_D32_SFLOAT>(ctx.Device(), depthImage.Handle());
+
 		win.resized = false;
 	}
 };
@@ -719,22 +705,17 @@ auto main() -> int {
 	vkQueueSubmit2(ctx.GraphicsQueue(), 1, &setupSubmit, VK_NULL_HANDLE);
 	vkQueueWaitIdle(ctx.GraphicsQueue());
 
-	dummyTex.view = CreateImageView(ctx.Device(), dummyTex.image.Handle(), VK_FORMAT_R8G8B8A8_UNORM,
-									VK_IMAGE_ASPECT_COLOR_BIT);
+	dummyTex.view =
+		ZHLN::Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(ctx.Device(), dummyTex.image.Handle());
 
-	// --- Textures ---
+	// --- Textures Loop ---
 	std::vector<TextureAsset> textures(data->images_count);
-	std::println("Uploading {} textures...", data->images_count);
 	for (cgltf_size i = 0; i < data->images_count; ++i) {
 		ZHLN::Demo::ProcessEvents(win);
 		std::string fullPath = paths.asset_prefix + data->images[i].uri;
 		textures[i] = UploadTexture(allocator, win, ctx, texBaseInfo, fullPath);
-		if (textures[i].image.Valid())
-			textures[i].view = CreateImageView(ctx.Device(), textures[i].image.Handle(),
-											   VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
 		std::println("  [{}/{}] {}", i + 1, data->images_count, data->images[i].uri);
 	}
-
 	// --- Shadow map ---
 	constexpr uint32_t SHADOW_RES = 4096;
 	VkImageCreateInfo shadowInfo = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -751,8 +732,9 @@ auto main() -> int {
 									.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
 	auto shadowImage =
 		ZHLN::Vk::Image::Create(allocator.Get(), shadowInfo, VMA_MEMORY_USAGE_GPU_ONLY);
-	VkImageView shadowView = CreateImageView(ctx.Device(), shadowImage.Handle(),
-											 VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT);
+	// TMP deduces VK_IMAGE_ASPECT_DEPTH_BIT automatically
+	auto shadowView =
+		ZHLN::Vk::CreateView<VK_FORMAT_D32_SFLOAT>(ctx.Device(), shadowImage.Handle());
 
 	// --- Samplers ---
 	VkSamplerCreateInfo samplerInfo = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
@@ -783,29 +765,29 @@ auto main() -> int {
 	VkDescriptorSetLayout descLayout = MaterialLayout::CreateLayout(ctx.Device());
 	VkDescriptorPool descPool = MaterialLayout::CreatePool(ctx.Device(), matCount);
 
-	auto AllocateMaterial = [&](VkImageView view, VkDescriptorSet& set) {
+	auto AllocateMaterial = [&](VkImageView view, VkDescriptorSet& set) -> void {
 		set = MaterialLayout::Allocate(ctx.Device(), descPool, descLayout);
-		MaterialLayout::Write(
-			ctx.Device(), set, ZHLN::Vk::ImageWrite{view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-			ZHLN::Vk::SamplerWrite{defaultSampler},
-			ZHLN::Vk::ImageWrite{shadowView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-			ZHLN::Vk::SamplerWrite{shadowSampler});
+		MaterialLayout::Write(ctx.Device(), set, ZHLN::Vk::ImageWrite{view}, // Already raw now
+							  ZHLN::Vk::SamplerWrite{defaultSampler},
+							  ZHLN::Vk::ImageWrite{shadowView.Get()}, // Use .Get() here
+							  ZHLN::Vk::SamplerWrite{shadowSampler});
 	};
 
 	MaterialAsset fallbackMat;
-	AllocateMaterial(dummyTex.view, fallbackMat.descriptorSet);
+	AllocateMaterial(dummyTex.view.Get(), fallbackMat.descriptorSet);
 
 	std::vector<MaterialAsset> materials(data->materials_count);
 	for (cgltf_size i = 0; i < data->materials_count; ++i) {
 		cgltf_material* mat = &data->materials[i];
-		VkImageView view = dummyTex.view;
+		VkImageView view = dummyTex.view.Get(); // ADD .Get()
 		if (mat->has_pbr_metallic_roughness &&
 			mat->pbr_metallic_roughness.base_color_texture.texture) {
 			cgltf_texture* tex = mat->pbr_metallic_roughness.base_color_texture.texture;
 			if (tex->image) {
 				int idx = static_cast<int>(tex->image - data->images);
-				if (textures[idx].view != VK_NULL_HANDLE)
-					view = textures[idx].view;
+				if (textures[idx].view) {			 // REMOVE != VK_NULL_HANDLE
+					view = textures[idx].view.Get(); // ADD .Get()
+				}
 			}
 		}
 		AllocateMaterial(view, materials[i].descriptorSet);
@@ -917,11 +899,11 @@ auto main() -> int {
 			.swapchainImage = frame.swapchain.Get().images[image_index],
 			.swapchainView = frame.swapchain.Get().views[image_index],
 			.extent = frame.swapchain.Get().extent,
-			.depthView = frame.depthView,
+			.depthView = frame.depthView.Get(),
 			.depthInitialized = frame.depthInitialized,
 			.depthImage = frame.depthImage.Handle(),
 			.shadowImage = shadowImage.Handle(),
-			.shadowView = shadowView,
+			.shadowView = shadowView.Get(),
 			.pipeline = pipeline.Get(),
 			.pipelineLayout = pipelineLayout.Get(),
 			.shadowPipeline = shadowPipeline.Get(),
@@ -970,16 +952,6 @@ auto main() -> int {
 	// Cleanup
 	vkDestroySampler(ctx.Device(), defaultSampler, nullptr);
 	vkDestroySampler(ctx.Device(), shadowSampler, nullptr);
-	vkDestroyImageView(ctx.Device(), dummyTex.view, nullptr);
-	for (auto& tex : textures)
-		if (tex.view)
-			vkDestroyImageView(ctx.Device(), tex.view, nullptr);
-	if (frame.depthView) {
-		vkDestroyImageView(ctx.Device(), frame.depthView, nullptr);
-		frame.depthView = VK_NULL_HANDLE;
-	}
-	if (shadowView)
-		vkDestroyImageView(ctx.Device(), shadowView, nullptr);
 	vkDestroyDescriptorPool(ctx.Device(), descPool, nullptr);
 	vkDestroyDescriptorSetLayout(ctx.Device(), descLayout, nullptr);
 
