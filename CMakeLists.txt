@@ -6,7 +6,11 @@ if(WIN32 AND NOT DEFINED CMAKE_C_COMPILER)
     set(CMAKE_CXX_COMPILER clang++)
 endif()
 
-project(zahlen LANGUAGES C CXX ASM OBJCXX)
+project(zahlen LANGUAGES C CXX ASM)
+
+if(APPLE)
+    enable_language(OBJCXX)
+endif()
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
