@@ -88,6 +88,7 @@ target_sources(zahlen PRIVATE
 target_compile_definitions(zahlen PRIVATE 
     JPH_DOUBLE_PRECISION
     JPH_NO_CUSTOM_DETERMINISTIC_OPERATIONS
+    _CRT_SECURE_NO_WARNINGS
     $<$<CONFIG:Debug>:JPH_DEBUG>
     $<$<CONFIG:Release>:JPH_RELEASE>
 )
@@ -118,32 +119,31 @@ find_program(DXC_EXECUTABLE NAMES dxc
              PATHS "$ENV{VULKAN_SDK}/bin" "D:/Vulkan-SDK/1.4.341.1/bin")
 
 if(DXC_EXECUTABLE)
-    message(STATUS "Found DXC: ${DXC_EXECUTABLE}")
-    
     set(HLSL_SRC "${CMAKE_SOURCE_DIR}/resources/shaders/basic.hlsl")
-    set(VS_SPV   "${CMAKE_SOURCE_DIR}/resources/shaders/basic.hlsl.VSMain.spv")
-    set(PS_SPV   "${CMAKE_SOURCE_DIR}/resources/shaders/basic.hlsl.PSMain.spv")
+    
+    # Change these to CURRENT_BINARY_DIR so they don't pollute your GIT repo
+    set(VS_SPV   "${CMAKE_CURRENT_BINARY_DIR}/basic.hlsl.VSMain.spv")
+    set(PS_SPV   "${CMAKE_CURRENT_BINARY_DIR}/basic.hlsl.PSMain.spv")
 
-    # Compile Vertex Shader
     add_custom_command(
         OUTPUT ${VS_SPV}
         COMMAND ${DXC_EXECUTABLE} -T vs_6_0 -E VSMain -spirv ${HLSL_SRC} -Fo ${VS_SPV}
         DEPENDS ${HLSL_SRC}
-        COMMENT "DXC: Compiling HLSL Vertex Shader (VSMain)"
+        COMMENT "DXC: Compiling Vertex Shader to build directory"
     )
 
-    # Compile Pixel Shader
     add_custom_command(
         OUTPUT ${PS_SPV}
         COMMAND ${DXC_EXECUTABLE} -T ps_6_0 -E PSMain -spirv ${HLSL_SRC} -Fo ${PS_SPV}
         DEPENDS ${HLSL_SRC}
-        COMMENT "DXC: Compiling HLSL Pixel Shader (PSMain)"
+        COMMENT "DXC: Compiling Pixel Shader to build directory"
     )
     
     add_custom_target(compile_shaders DEPENDS ${VS_SPV} ${PS_SPV})
     add_dependencies(zahlen compile_shaders)
-else()
-    message(WARNING "DXC not found. Shaders will not be recompiled!")
+
+    # Pass the shader directory to the engine as a macro so it knows where to look
+    target_compile_definitions(zahlen PRIVATE SHADER_DIR="${CMAKE_CURRENT_BINARY_DIR}/")
 endif()
 
 
@@ -158,12 +158,26 @@ if(NOT MSVC)
   endif()
 endif()
 
-# --- 6. RESOURCES & SANITIZER DLL ---
-add_custom_command(TARGET zahlen POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/resources" "$<TARGET_FILE_DIR:zahlen>/resources"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/scripts" "$<TARGET_FILE_DIR:zahlen>/scripts"
-    COMMENT "Copying resources and scripts..."
-)
+# --- 6. RESOURCE LINKING (Zero-Copy) ---
+# We use symlinks instead of copy_directory to avoid duplicating heavy assets like Sponza.
+if(WIN32)
+    add_custom_command(TARGET zahlen POST_BUILD
+        # Remove physical directory if it exists (so we can replace it with a link)
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:zahlen>/resources"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:zahlen>/scripts"
+        # Create the symlink
+        COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_SOURCE_DIR}/resources" "$<TARGET_FILE_DIR:zahlen>/resources"
+        COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_SOURCE_DIR}/scripts" "$<TARGET_FILE_DIR:zahlen>/scripts"
+        COMMENT "Linking resources and scripts (Zero-Copy)..."
+    )
+else()
+    # Unix/macOS logic
+    add_custom_command(TARGET zahlen POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_SOURCE_DIR}/resources" "$<TARGET_FILE_DIR:zahlen>/resources"
+        COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_SOURCE_DIR}/scripts" "$<TARGET_FILE_DIR:zahlen>/scripts"
+        COMMENT "Linking resources and scripts..."
+    )
+endif()
 
 if(USE_SANITIZERS AND WIN32)
     get_filename_component(CLANG_BIN_DIR ${CMAKE_CXX_COMPILER} DIRECTORY)
