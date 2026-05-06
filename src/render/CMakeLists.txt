@@ -55,6 +55,8 @@ target_compile_definitions(zahlen_render PRIVATE
     VMA_DYNAMIC_VULKAN_FUNCTIONS=1
 )
 
+add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+
 if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(zahlen_render PRIVATE
         $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Wpedantic -Wno-unused-parameter>

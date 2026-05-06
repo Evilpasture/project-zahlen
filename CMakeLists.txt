@@ -88,10 +88,11 @@ target_sources(zahlen PRIVATE
 target_compile_definitions(zahlen PRIVATE 
     JPH_DOUBLE_PRECISION
     JPH_NO_CUSTOM_DETERMINISTIC_OPERATIONS
-    _CRT_SECURE_NO_WARNINGS
     $<$<CONFIG:Debug>:JPH_DEBUG>
     $<$<CONFIG:Release>:JPH_RELEASE>
 )
+
+add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 
 # 5. Static Linking order
 target_link_libraries(zahlen PRIVATE 
