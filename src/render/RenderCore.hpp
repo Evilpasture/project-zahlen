@@ -263,27 +263,22 @@ class Swapchain {
 	constexpr explicit operator bool() const noexcept { return Valid(); }
 
 	bool Rebuild(const ZHLN_SwapchainDesc& desc) noexcept {
-		// We create a copy of the descriptor 'snapshot'
-		// and explicitly override the 'old_swapchain' field.
-		// In C++20/23, this is an aggregate initialization.
-		const ZHLN_SwapchainDesc rebuilt = {
-			.device = desc.device,
-			.physical = desc.physical,
-			.surface = desc.surface,
-			.width = desc.width,
-			.height = desc.height,
-			.vsync = desc.vsync,
-			.old_swapchain = _raw.handle // The one dynamic change
-		};
+		// Update our internal device handle so destructors work later
+		_device = desc.device->handle;
+
+		const ZHLN_SwapchainDesc rebuilt = {.device = desc.device,
+											.physical = desc.physical,
+											.surface = desc.surface,
+											.width = desc.width,
+											.height = desc.height,
+											.vsync = desc.vsync,
+											.old_swapchain = _raw.handle};
 
 		const ZHLN_Swapchain next = ZHLN_CreateSwapchain(&rebuilt);
 		if (!next.handle) {
 			return false;
 		}
 
-		// In Vulkan, the 'old_swapchain' is often retired by the driver
-		// during the creation of 'next'.
-		// Manually destroying it here.
 		Destroy();
 		_raw = next;
 		return true;

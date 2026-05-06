@@ -46,7 +46,7 @@ template <typename... Slots> class DescriptorLayout {
 	static constexpr uint32_t kCount = sizeof...(Slots);
 
 	// Builds the VkDescriptorSetLayoutBinding array at compile time
-	static consteval auto MakeBindings() noexcept {
+	static constexpr auto MakeBindings() noexcept {
 		std::array<VkDescriptorSetLayoutBinding, kCount> b{};
 		uint32_t i = 0;
 		((b[i++] =
@@ -62,7 +62,7 @@ template <typename... Slots> class DescriptorLayout {
 
 	// Pool size: one entry per unique descriptor type.
 	// Simple approach: one entry per slot, driver merges duplicates.
-	static consteval auto MakePoolSizes(uint32_t setCount) noexcept {
+	static constexpr auto MakePoolSizes(uint32_t setCount) noexcept {
 		std::array<VkDescriptorPoolSize, kCount> ps{};
 		uint32_t i = 0;
 		((ps[i++] =
@@ -135,30 +135,30 @@ template <typename... Slots> class DescriptorLayout {
 	template <typename... Args>
 		requires(sizeof...(Args) == kCount)
 	static void Write(VkDevice device, VkDescriptorSet set, Args&&... args) noexcept {
-		// Pack args into a tuple so we can index them alongside the slot list
+		// 1. Pack args into a tuple
 		auto argTuple = std::forward_as_tuple(std::forward<Args>(args)...);
 
+		// 2. Prepare arrays for Vulkan structures
 		std::array<VkDescriptorImageInfo, kCount> imageInfos{};
 		std::array<VkWriteDescriptorSet, kCount> writes{};
 
-		uint32_t i = 0;
-		(WriteOne<Slots>(device, set, std::get<i>(argTuple), imageInfos[i], writes[i], i), ...);
-
-		// i is incremented by the fold — pass by ref trick using comma operator
-		// Simpler: just use an index sequence
+		// 3. Call the helper that uses index_sequence (compile-time indices)
 		WriteAll(device, set, argTuple, imageInfos, writes, std::make_index_sequence<kCount>{});
 	}
 
   private:
-	// Index-sequence based Write: pairs Slot[I] with arg[I]
+	// This helper correctly uses 'I' as a template parameter for std::get
 	template <typename ArgTuple, size_t... I>
 	static void WriteAll(VkDevice device, VkDescriptorSet set, ArgTuple& args,
 						 std::array<VkDescriptorImageInfo, kCount>& imageInfos,
 						 std::array<VkWriteDescriptorSet, kCount>& writes,
 						 std::index_sequence<I...>) noexcept {
-		// Expands: for each I, call WriteSlot<Slot[I]>(args[I], ...)
-		(WriteSlot<I, std::tuple_element_t<I, std::tuple<Slots...>>>(set, std::get<I>(args),
-																	 imageInfos[I], writes[I]),
+
+		// Expand the fold expression using the compile-time index I
+		(WriteSlot<I, std::tuple_element_t<I, std::tuple<Slots...>>>(
+			 set,
+			 std::get<I>(args), // This now works because I is a constant
+			 imageInfos[I], writes[I]),
 		 ...);
 
 		vkUpdateDescriptorSets(device, kCount, writes.data(), 0, nullptr);
