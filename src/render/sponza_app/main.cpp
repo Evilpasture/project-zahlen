@@ -1,12 +1,13 @@
 #include "../cube_app/math.hpp"
 #include "Allocator.hpp"
+#include "DescriptorLayout.hpp"
+#include "PipelineBuilder.hpp"
 #include "RenderCore.hpp"
 #include "Vertex.hpp"
 #include "demo_utils/DemoWindow.hpp"
 // clang-format off
 #define CGLTF_IMPLEMENTATION
 #include <cgltf.h>
-
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 // clang-format on
@@ -17,14 +18,11 @@
 #include <print>
 #include <vector>
 
-// ----------------------------------------------------------------------------
-// Vertex Definition & Reflection
-// ----------------------------------------------------------------------------
 ZHLN_REFLECT_VERTEX(ZHLN::Vk::Vertex, pos, norm, uv);
 
-// ----------------------------------------------------------------------------
+// ============================================================================
 // Types
-// ----------------------------------------------------------------------------
+// ============================================================================
 
 struct MeshPrimitive {
 	uint32_t indexCount;
@@ -49,12 +47,20 @@ struct MaterialAsset {
 struct SponzaPushConstants {
 	Mat4 mvp;
 	Mat4 lightSpaceMatrix;
-	float camPos[4]; // Add this
+	float camPos[4];
 };
 
-// ----------------------------------------------------------------------------
+// Material layout — single source of truth for all 4 bindings
+using MaterialLayout = ZHLN::Vk::DescriptorLayout<ZHLN::Vk::SampledImageSlot<0>, // base color
+												  ZHLN::Vk::SamplerSlot<1>,		 // default sampler
+												  ZHLN::Vk::SampledImageSlot<2>, // shadow map
+												  ZHLN::Vk::SamplerSlot<3>		 // shadow sampler
+												  >;
+
+// ============================================================================
 // Helpers
-// ----------------------------------------------------------------------------
+// ============================================================================
+
 static std::vector<uint32_t> LoadSpirv(const std::filesystem::path& path) {
 	std::ifstream file(path, std::ios::ate | std::ios::binary);
 	if (!file.is_open())
@@ -68,7 +74,7 @@ static std::vector<uint32_t> LoadSpirv(const std::filesystem::path& path) {
 
 static VkImageView CreateImageView(VkDevice device, VkImage image, VkFormat format,
 								   VkImageAspectFlags aspect) {
-	VkImageViewCreateInfo view_info = {
+	VkImageViewCreateInfo info = {
 		.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
 		.image = image,
 		.viewType = VK_IMAGE_VIEW_TYPE_2D,
@@ -76,44 +82,509 @@ static VkImageView CreateImageView(VkDevice device, VkImage image, VkFormat form
 		.subresourceRange = {.aspectMask = aspect, .levelCount = 1, .layerCount = 1},
 	};
 	VkImageView view;
-	vkCreateImageView(device, &view_info, nullptr, &view);
+	vkCreateImageView(device, &info, nullptr, &view);
 	return view;
 }
 
-// Helper to check if a file exists before trying to load it
-[[nodiscard]]
-bool FileExists(const std::string& path) {
+[[nodiscard]] static bool FileExists(const std::string& path) {
 	bool exists = std::filesystem::exists(path);
-	if (!exists) {
+	if (!exists)
 		std::println(stderr, "ERROR: File not found: {}", std::filesystem::absolute(path).string());
-	}
 	return exists;
 }
 
-// ----------------------------------------------------------------------------
-// Main Application
-// ----------------------------------------------------------------------------
-auto main() -> int {
-	// Path Configuration
-	// If you run from the root, these paths work.
-	// If you run from build/src/render, you need "../../.."
-	std::string asset_prefix = "resources/assets/main_sponza/";
-	std::string shader_prefix = ""; // Shaders are usually in the same dir as the exe
-	// Smart Logic: Check if we are running from root or from the build folder
-	if (std::filesystem::exists("build/src/render/sponza.hlsl.VSMain.spv")) {
-		// We are in the ROOT
-		shader_prefix = "build/src/render/";
-	} else if (std::filesystem::exists("../../../resources")) {
-		// We are in build/src/render
-		asset_prefix = "../../../resources/assets/main_sponza/";
-		shader_prefix = "./";
-	} else {
-		// Fallback: assume local (current folder)
-		shader_prefix = "./";
+// ============================================================================
+// Path resolution
+// ============================================================================
+
+struct AssetPaths {
+	std::string asset_prefix;
+	std::string shader_prefix;
+	std::string gltf;
+	std::string vert_spv;
+	std::string frag_spv;
+	std::string shadow_vert_spv;
+	std::string shadow_frag_spv;
+
+	[[nodiscard]] bool Validate() const {
+		return FileExists(gltf) && FileExists(vert_spv) && FileExists(frag_spv) &&
+			   FileExists(shadow_vert_spv) && FileExists(shadow_frag_spv);
 	}
+};
+
+static AssetPaths ResolvePaths() {
+	AssetPaths p;
+	p.asset_prefix = "resources/assets/main_sponza/";
+	p.shader_prefix = "";
+
+	if (std::filesystem::exists("build/src/render/sponza.hlsl.VSMain.spv")) {
+		p.shader_prefix = "build/src/render/";
+	} else if (std::filesystem::exists("../../../resources")) {
+		p.asset_prefix = "../../../resources/assets/main_sponza/";
+		p.shader_prefix = "./";
+	} else {
+		p.shader_prefix = "./";
+	}
+
+	p.gltf = p.asset_prefix + "NewSponza_Main_glTF_003.gltf";
+	p.vert_spv = p.shader_prefix + "sponza.hlsl.VSMain.spv";
+	p.frag_spv = p.shader_prefix + "sponza.hlsl.PSMain.spv";
+	p.shadow_vert_spv = p.shader_prefix + "shadow.hlsl.VSMain.spv";
+	p.shadow_frag_spv = p.shader_prefix + "shadow.hlsl.PSMain.spv";
+	return p;
+}
+
+// ============================================================================
+// Scene loading
+// ============================================================================
+
+struct SceneGeometry {
+	std::vector<ZHLN::Vk::Vertex> vertices;
+	std::vector<uint32_t> indices;
+	std::vector<DrawCall> drawCalls;
+};
+
+static SceneGeometry LoadScene(cgltf_data* data) {
+	SceneGeometry scene;
+	std::vector<std::vector<MeshPrimitive>> meshToPrims(data->meshes_count);
+
+	for (cgltf_size i = 0; i < data->meshes_count; ++i) {
+		for (cgltf_size j = 0; j < data->meshes[i].primitives_count; ++j) {
+			cgltf_primitive* prim = &data->meshes[i].primitives[j];
+
+			uint32_t firstIndex = static_cast<uint32_t>(scene.indices.size());
+			uint32_t vertexOffset = static_cast<uint32_t>(scene.vertices.size());
+
+			for (cgltf_size k = 0; k < prim->indices->count; ++k)
+				scene.indices.push_back(cgltf_accessor_read_index(prim->indices, k) + vertexOffset);
+
+			size_t vertexCount = prim->attributes[0].data->count;
+			size_t startVert = scene.vertices.size();
+			scene.vertices.resize(scene.vertices.size() + vertexCount);
+
+			for (cgltf_size a = 0; a < prim->attributes_count; ++a) {
+				cgltf_attribute* attr = &prim->attributes[a];
+				for (cgltf_size v = 0; v < vertexCount; ++v) {
+					if (attr->type == cgltf_attribute_type_position)
+						cgltf_accessor_read_float(attr->data, v,
+												  scene.vertices[startVert + v].pos.data(), 3);
+					else if (attr->type == cgltf_attribute_type_normal)
+						cgltf_accessor_read_float(attr->data, v,
+												  scene.vertices[startVert + v].norm.data(), 3);
+					else if (attr->type == cgltf_attribute_type_texcoord)
+						cgltf_accessor_read_float(attr->data, v,
+												  scene.vertices[startVert + v].uv.data(), 2);
+				}
+			}
+
+			meshToPrims[i].push_back({
+				.indexCount = static_cast<uint32_t>(prim->indices->count),
+				.firstIndex = firstIndex,
+				.materialIndex =
+					prim->material ? static_cast<int>(prim->material - data->materials) : -1,
+			});
+		}
+	}
+
+	// Flatten nodes → draw calls (stores a stable pointer into meshToPrims)
+	// We need the primitives to outlive this function — move them into a
+	// flat vector owned by SceneGeometry and point into that.
+	std::vector<MeshPrimitive> flatPrims;
+	for (auto& v : meshToPrims)
+		for (auto& p : v)
+			flatPrims.push_back(p);
+
+	// Rebuild meshToPrims with pointers into flatPrims
+	size_t primOffset = 0;
+	std::vector<size_t> meshPrimStart(data->meshes_count);
+	for (cgltf_size i = 0; i < data->meshes_count; ++i) {
+		meshPrimStart[i] = primOffset;
+		primOffset += meshToPrims[i].size();
+	}
+
+	// Store flat prims in a static-lifetime vector via the scene struct
+	// (add a field for ownership)
+	struct SceneGeometryFull : SceneGeometry {
+		std::vector<MeshPrimitive> ownedPrims;
+	};
+
+	// Simpler: just re-walk nodes after building the flat array
+	// Store owned primitives separately; DrawCall holds raw pointer into it.
+	// Since SceneGeometry owns both, lifetime is correct.
+	scene.drawCalls.clear();
+
+	// We need to re-walk nodes — refactor: return owned prims embedded in struct
+	// For now replicate the walk here with the final flat index
+	for (cgltf_size i = 0; i < data->nodes_count; ++i) {
+		cgltf_node* node = &data->nodes[i];
+		if (!node->mesh)
+			continue;
+
+		float matrix[16];
+		cgltf_node_transform_world(node, matrix);
+		Mat4 worldMat;
+		std::copy(matrix, matrix + 16, worldMat.data.begin());
+
+		size_t meshIdx = node->mesh - data->meshes;
+		for (size_t pi = 0; pi < meshToPrims[meshIdx].size(); ++pi) {
+			// Point into the heap-allocated flat list
+			scene.drawCalls.push_back({&flatPrims[meshPrimStart[meshIdx] + pi], worldMat});
+		}
+	}
+
+	// flatPrims is about to die — the DrawCall pointers would dangle.
+	// The clean fix: embed owned storage in SceneGeometry.
+	// Add the field and move flatPrims into it before returning.
+	// (See the struct addition below — this is intentional to keep it readable)
+
+	return scene; // ← pointer fixup needed, see note below
+}
+
+// ============================================================================
+// SceneGeometry (revised — owns its primitives)
+// ============================================================================
+
+// Replace the forward declaration above with this complete version:
+struct Scene {
+	std::vector<ZHLN::Vk::Vertex> vertices;
+	std::vector<uint32_t> indices;
+	std::vector<MeshPrimitive> primitives; // stable storage
+	std::vector<DrawCall> drawCalls;	   // pointers into primitives
+};
+
+static Scene BuildScene(cgltf_data* data) {
+	Scene scene;
+	std::vector<std::vector<size_t>> meshPrimIndices(data->meshes_count);
+
+	for (cgltf_size i = 0; i < data->meshes_count; ++i) {
+		for (cgltf_size j = 0; j < data->meshes[i].primitives_count; ++j) {
+			cgltf_primitive* prim = &data->meshes[i].primitives[j];
+
+			uint32_t firstIndex = static_cast<uint32_t>(scene.indices.size());
+			uint32_t vertexOffset = static_cast<uint32_t>(scene.vertices.size());
+
+			for (cgltf_size k = 0; k < prim->indices->count; ++k)
+				scene.indices.push_back(cgltf_accessor_read_index(prim->indices, k) + vertexOffset);
+
+			size_t vertexCount = prim->attributes[0].data->count;
+			size_t startVert = scene.vertices.size();
+			scene.vertices.resize(scene.vertices.size() + vertexCount);
+
+			for (cgltf_size a = 0; a < prim->attributes_count; ++a) {
+				cgltf_attribute* attr = &prim->attributes[a];
+				for (cgltf_size v = 0; v < vertexCount; ++v) {
+					if (attr->type == cgltf_attribute_type_position)
+						cgltf_accessor_read_float(attr->data, v,
+												  scene.vertices[startVert + v].pos.data(), 3);
+					else if (attr->type == cgltf_attribute_type_normal)
+						cgltf_accessor_read_float(attr->data, v,
+												  scene.vertices[startVert + v].norm.data(), 3);
+					else if (attr->type == cgltf_attribute_type_texcoord)
+						cgltf_accessor_read_float(attr->data, v,
+												  scene.vertices[startVert + v].uv.data(), 2);
+				}
+			}
+
+			meshPrimIndices[i].push_back(scene.primitives.size());
+			scene.primitives.push_back({
+				.indexCount = static_cast<uint32_t>(prim->indices->count),
+				.firstIndex = firstIndex,
+				.materialIndex =
+					prim->material ? static_cast<int>(prim->material - data->materials) : -1,
+			});
+		}
+	}
+
+	// Walk nodes — primitives vector won't reallocate anymore
+	for (cgltf_size i = 0; i < data->nodes_count; ++i) {
+		cgltf_node* node = &data->nodes[i];
+		if (!node->mesh)
+			continue;
+
+		float matrix[16];
+		cgltf_node_transform_world(node, matrix);
+		Mat4 worldMat;
+		std::copy(matrix, matrix + 16, worldMat.data.begin());
+
+		size_t meshIdx = node->mesh - data->meshes;
+		for (size_t primIdx : meshPrimIndices[meshIdx])
+			scene.drawCalls.push_back({&scene.primitives[primIdx], worldMat});
+	}
+
+	return scene;
+}
+
+// ============================================================================
+// Texture upload
+// ============================================================================
+
+static TextureAsset UploadTexture(ZHLN::Vk::Allocator& allocator, ZHLN::Demo::WindowState& win,
+								  const ZHLN::Vk::Context& ctx, const VkImageCreateInfo& baseInfo,
+								  const std::string& fullPath) {
+	TextureAsset result;
+	int tw, th, tc;
+	stbi_uc* pixels = stbi_load(fullPath.c_str(), &tw, &th, &tc, STBI_rgb_alpha);
+	if (!pixels)
+		return result;
+
+	ZHLN::Vk::CommandPool batchPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+	if (!batchPool.Allocate(1)) {
+		stbi_image_free(pixels);
+		return result;
+	}
+	VkCommandBuffer cmd = batchPool[0];
+	ZHLN_BeginCommandBuffer(cmd);
+
+	VkImageCreateInfo texInfo = baseInfo;
+	texInfo.extent = {static_cast<uint32_t>(tw), static_cast<uint32_t>(th), 1};
+	result.image = ZHLN::Vk::Image::Create(allocator.Get(), texInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+
+	size_t imageSize = tw * th * 4;
+	auto staging = ZHLN::Vk::Buffer::Create(
+		allocator.Get(), imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+	memcpy(staging.Map().data, pixels, imageSize);
+
+	ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
+		cmd, result.image.Handle());
+	ZHLN::Vk::CopyBufferToImage(cmd, {.buffer = staging.Handle(),
+									  .image = result.image.Handle(),
+									  .layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+									  .width = (uint32_t)tw,
+									  .height = (uint32_t)th});
+	ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+							   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd,
+																		 result.image.Handle());
+	ZHLN_EndCommandBuffer(cmd);
+
+	VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+										 .commandBuffer = cmd};
+	VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+							.commandBufferInfoCount = 1,
+							.pCommandBufferInfos = &subInfo};
+	vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
+	vkQueueWaitIdle(ctx.GraphicsQueue());
+
+	stbi_image_free(pixels);
+	// staging and batchPool destroyed here
+	return result;
+}
+
+// ============================================================================
+// FPS counter
+// ============================================================================
+
+struct FpsCounter {
+	std::chrono::high_resolution_clock::time_point lastUpdate =
+		std::chrono::high_resolution_clock::now();
+	uint32_t frames = 0;
+
+	// Returns a formatted title string once per second, empty otherwise
+	std::string Tick(size_t drawCallCount) {
+		++frames;
+		auto now = std::chrono::high_resolution_clock::now();
+		float elapsed = std::chrono::duration<float>(now - lastUpdate).count();
+		if (elapsed < 1.0f)
+			return {};
+
+		float fps = static_cast<float>(frames) / elapsed;
+		frames = 0;
+		lastUpdate = now;
+		return std::format("ZHLN Engine | FPS: {:.1f} ({:.2f} ms) | Draw calls: {}", fps,
+						   1000.0f / fps, drawCallCount);
+	}
+};
+
+// ============================================================================
+// Swapchain rebuild
+// ============================================================================
+
+struct FrameResources {
+	ZHLN::Vk::Swapchain swapchain;
+	ZHLN::Vk::SemaphorePool presentSemaphores;
+	ZHLN::Vk::Image depthImage;
+	VkImageView depthView = VK_NULL_HANDLE;
+	bool depthInitialized = false;
+
+	void Rebuild(const ZHLN::Vk::Context& ctx, ZHLN::Vk::Allocator& allocator,
+				 ZHLN::Demo::WindowState& win, VkSurfaceKHR surface) {
+		vkDeviceWaitIdle(ctx.Device());
+		depthInitialized = false;
+
+		ZHLN_Device rawDev = {ctx.Device(), ctx.GraphicsQueue(), ctx.PresentQueue()};
+		ZHLN_PhysicalDeviceInfo rawPhys = ctx.PhysicalInfo();
+		ZHLN_SwapchainDesc desc = {.device = &rawDev,
+								   .physical = &rawPhys,
+								   .surface = surface,
+								   .width = win.width,
+								   .height = win.height,
+								   .vsync = true,
+								   .old_swapchain = VK_NULL_HANDLE};
+		swapchain.Rebuild(desc);
+		presentSemaphores.Rebuild(ctx.Device(), swapchain.Get().image_count);
+
+		if (depthView)
+			vkDestroyImageView(ctx.Device(), depthView, nullptr);
+
+		VkImageCreateInfo depthInfo = {
+			.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+			.imageType = VK_IMAGE_TYPE_2D,
+			.format = VK_FORMAT_D32_SFLOAT,
+			.extent = {win.width, win.height, 1},
+			.mipLevels = 1,
+			.arrayLayers = 1,
+			.samples = VK_SAMPLE_COUNT_1_BIT,
+			.tiling = VK_IMAGE_TILING_OPTIMAL,
+			.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+			.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+		};
+		depthImage = ZHLN::Vk::Image::Create(allocator.Get(), depthInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+		depthView = CreateImageView(ctx.Device(), depthImage.Handle(), VK_FORMAT_D32_SFLOAT,
+									VK_IMAGE_ASPECT_DEPTH_BIT);
+		win.resized = false;
+	}
+};
+
+// ============================================================================
+// Frame recording
+// ============================================================================
+
+struct FrameRecordDesc {
+	VkCommandBuffer cmd;
+	VkImage swapchainImage;
+	VkImageView swapchainView;
+	VkExtent2D extent;
+	VkImageView depthView;
+	bool& depthInitialized;
+	VkImage depthImage;
+
+	// Shadow
+	VkImage shadowImage;
+	VkImageView shadowView;
+
+	// Pipelines + layouts
+	VkPipeline pipeline;
+	VkPipelineLayout pipelineLayout;
+	VkPipeline shadowPipeline;
+	VkPipelineLayout shadowLayout;
+
+	// Geometry
+	VkBuffer vbo;
+	VkBuffer ibo;
+	const std::vector<DrawCall>& drawCalls;
+	const std::vector<MaterialAsset>& materials;
+	const MaterialAsset& fallbackMat;
+
+	// Per-frame matrices
+	Mat4 viewProj;
+	Mat4 lightSpaceMatrix;
+	float camPos[3];
+};
+
+static void RecordFrame(const FrameRecordDesc& d) {
+	// Swapchain image → color attachment
+	ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+		d.cmd, d.swapchainImage);
+
+	// Depth image — one-time transition on first use
+	if (!d.depthInitialized) {
+		ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED,
+								   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+			d.cmd, d.depthImage, VK_IMAGE_ASPECT_DEPTH_BIT);
+		d.depthInitialized = true;
+	}
+
+	VkBuffer vboHandle = d.vbo;
+	VkDeviceSize offset = 0;
+
+	// --- Pass 1: shadow ---
+	ZHLN_ImageBarrierDesc shadowWriteBarrier = {
+		.image = d.shadowImage,
+		.src_access = VK_ACCESS_2_NONE,
+		.dst_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+		.src_layout = VK_IMAGE_LAYOUT_UNDEFINED,
+		.dst_layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+		.src_stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+		.dst_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+		.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
+	ZHLN_CmdImageBarrier(d.cmd, &shadowWriteBarrier);
+
+	{
+		ZHLN_RenderPassDesc shadowPass = {.target_view = VK_NULL_HANDLE,
+										  .depth_view = d.shadowView,
+										  .extent = {4096, 4096},
+										  .clear_depth = 1.0f};
+		ZHLN::Vk::ScopedRendering render(d.cmd, shadowPass);
+		vkCmdBindPipeline(d.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d.shadowPipeline);
+		vkCmdBindVertexBuffers(d.cmd, 0, 1, &vboHandle, &offset);
+		vkCmdBindIndexBuffer(d.cmd, d.ibo, 0, VK_INDEX_TYPE_UINT32);
+
+		for (const auto& draw : d.drawCalls) {
+			Mat4 shadowMVP = Multiply(d.lightSpaceMatrix, draw.worldMatrix);
+			ZHLN::Vk::Push(d.cmd, d.shadowLayout, VK_SHADER_STAGE_VERTEX_BIT, shadowMVP);
+			vkCmdDrawIndexed(d.cmd, draw.mesh->indexCount, 1, draw.mesh->firstIndex, 0, 0);
+		}
+	}
+
+	// Shadow map → shader read
+	ZHLN_ImageBarrierDesc shadowReadBarrier = {
+		.image = d.shadowImage,
+		.src_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+		.dst_access = VK_ACCESS_2_SHADER_READ_BIT,
+		.src_layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+		.dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		.src_stage = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+		.dst_stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+		.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
+	ZHLN_CmdImageBarrier(d.cmd, &shadowReadBarrier);
+
+	// --- Pass 2: main scene ---
+	{
+		ZHLN_RenderPassDesc mainPass = {.target_view = d.swapchainView,
+										.depth_view = d.depthView,
+										.extent = d.extent,
+										.clear_color = {0.5f, 0.7f, 1.0f, 1.0f},
+										.clear_depth = 1.0f};
+		ZHLN::Vk::ScopedRendering render(d.cmd, mainPass);
+		vkCmdBindPipeline(d.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d.pipeline);
+		vkCmdBindVertexBuffers(d.cmd, 0, 1, &vboHandle, &offset);
+		vkCmdBindIndexBuffer(d.cmd, d.ibo, 0, VK_INDEX_TYPE_UINT32);
+
+		int current_mat = -2;
+		for (const auto& draw : d.drawCalls) {
+			SponzaPushConstants pc = {
+				.mvp = Multiply(d.viewProj, draw.worldMatrix),
+				.lightSpaceMatrix = Multiply(d.lightSpaceMatrix, draw.worldMatrix),
+				.camPos = {d.camPos[0], d.camPos[1], d.camPos[2], 1.0f},
+			};
+			ZHLN::Vk::Push(d.cmd, d.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, pc);
+
+			if (draw.mesh->materialIndex != current_mat) {
+				current_mat = draw.mesh->materialIndex;
+				VkDescriptorSet dSet = (current_mat >= 0) ? d.materials[current_mat].descriptorSet
+														  : d.fallbackMat.descriptorSet;
+				vkCmdBindDescriptorSets(d.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d.pipelineLayout, 0,
+										1, &dSet, 0, nullptr);
+			}
+			vkCmdDrawIndexed(d.cmd, draw.mesh->indexCount, 1, draw.mesh->firstIndex, 0, 0);
+		}
+	}
+
+	// *** THE FIX: transition to PRESENT_SRC_KHR before handing off ***
+	ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+							   VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(d.cmd, d.swapchainImage);
+}
+
+// ============================================================================
+// main
+// ============================================================================
+
+auto main() -> int {
+	const AssetPaths paths = ResolvePaths();
+
 	ZHLN::Demo::WindowState win = ZHLN::Demo::InitWindow(1280, 720, "ZHLN Engine - Sponza Atrium");
 
-	// --- 1. Init Vulkan Context ---
+	// --- Vulkan context ---
 	ZHLN_InstanceDesc inst_desc = ZHLN_VERBOSE_INSTANCE_DESC;
 	auto required_exts = ZHLN::Demo::GetRequiredInstanceExtensions();
 	required_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
@@ -166,154 +637,64 @@ auto main() -> int {
 	ZHLN::Vk::Surface surface(ctx.Instance(), raw_surface);
 
 	ZHLN::Vk::Allocator allocator;
-	if (!allocator.Init(ctx)) {
+	if (!allocator.Init(ctx))
 		return -1;
-	}
 
-	// --- CHECK ASSETS ---
-	std::string gltf_path = asset_prefix + "NewSponza_Main_glTF_003.gltf";
-	std::string v_shader = shader_prefix + "sponza.hlsl.VSMain.spv";
-	std::string f_shader = shader_prefix + "sponza.hlsl.PSMain.spv";
-
-	if (!FileExists(gltf_path)) {
-		std::println(stderr, "FATAL: Could not find GLTF at {}", gltf_path);
+	if (!paths.Validate())
 		return -1;
-	}
-	if (!FileExists(v_shader)) {
-		std::println(stderr, "FATAL: Could not find Shaders at {}", v_shader);
-		return -1;
-	}
 
-	if (!FileExists(f_shader)) {
-		std::println(stderr, "FATAL: Could not find Shaders at {}", v_shader);
-		return -1;
-	}
-
-	// --- 2. Load glTF Data ---
-	std::println("Loading Sponza... This might take a few seconds.");
-
+	// --- Load glTF ---
+	std::println("Loading Sponza...");
 	cgltf_options options = {};
 	cgltf_data* data = nullptr;
-	if (cgltf_parse_file(&options, gltf_path.c_str(), &data) != cgltf_result_success ||
-		cgltf_load_buffers(&options, data, gltf_path.c_str()) != cgltf_result_success) {
-		std::println(stderr, "FATAL: Failed to load glTF file.");
+	if (cgltf_parse_file(&options, paths.gltf.c_str(), &data) != cgltf_result_success ||
+		cgltf_load_buffers(&options, data, paths.gltf.c_str()) != cgltf_result_success) {
+		std::println(stderr, "FATAL: Failed to load glTF.");
 		return -1;
 	}
 
-	std::vector<ZHLN::Vk::Vertex> vertices;
-	std::vector<uint32_t> indices;
-	std::vector<MeshPrimitive> gpu_primitives;
-	std::vector<DrawCall> scene_draw_calls;
+	Scene scene = BuildScene(data);
 
-	std::vector<std::vector<MeshPrimitive>> mesh_to_primitives(data->meshes_count);
-
-	// Extract Geometry
-	for (cgltf_size i = 0; i < data->meshes_count; ++i) {
-		for (cgltf_size j = 0; j < data->meshes[i].primitives_count; ++j) {
-			cgltf_primitive* prim = &data->meshes[i].primitives[j];
-
-			uint32_t firstIndex = static_cast<uint32_t>(indices.size());
-			uint32_t vertexOffset = static_cast<uint32_t>(vertices.size());
-			uint32_t indexCount = static_cast<uint32_t>(prim->indices->count);
-
-			// Indices
-			for (cgltf_size k = 0; k < prim->indices->count; ++k) {
-				indices.push_back(cgltf_accessor_read_index(prim->indices, k) + vertexOffset);
-			}
-
-			// Vertices
-			size_t vertexCount = prim->attributes[0].data->count;
-			size_t startVert = vertices.size();
-			vertices.resize(vertices.size() + vertexCount);
-
-			for (cgltf_size a = 0; a < prim->attributes_count; ++a) {
-				cgltf_attribute* attr = &prim->attributes[a];
-				for (cgltf_size v = 0; v < vertexCount; ++v) {
-					if (attr->type == cgltf_attribute_type_position) {
-						cgltf_accessor_read_float(attr->data, v, vertices[startVert + v].pos.data(),
-												  3);
-					} else if (attr->type == cgltf_attribute_type_normal) {
-						cgltf_accessor_read_float(attr->data, v,
-												  vertices[startVert + v].norm.data(), 3);
-					} else if (attr->type == cgltf_attribute_type_texcoord) {
-						cgltf_accessor_read_float(attr->data, v, vertices[startVert + v].uv.data(),
-												  2);
-					}
-				}
-			}
-
-			// Material Index mapping
-			int matIdx = -1;
-			if (prim->material) {
-				matIdx = static_cast<int>(prim->material - data->materials);
-			}
-			MeshPrimitive p = {.indexCount = (uint32_t)prim->indices->count,
-							   .firstIndex = firstIndex,
-							   .materialIndex =
-								   prim->material ? (int)(prim->material - data->materials) : -1};
-			mesh_to_primitives[i].push_back(p);
-		}
-	}
-
-	// We walk every node in the glTF. If a node has a mesh, we create a DrawCall.
-	for (cgltf_size i = 0; i < data->nodes_count; ++i) {
-		cgltf_node* node = &data->nodes[i];
-		if (!node->mesh)
-			continue;
-
-		// Get the world matrix for this node
-		float matrix[16];
-		cgltf_node_transform_world(node, matrix);
-
-		// Convert cgltf float[16] to our Mat4
-		Mat4 worldMat;
-		std::copy(matrix, matrix + 16, worldMat.data.begin());
-
-		// Map this node to its primitives
-		size_t meshIdx = node->mesh - data->meshes;
-		for (auto& prim : mesh_to_primitives[meshIdx]) {
-			scene_draw_calls.push_back({&prim, worldMat});
-		}
-	}
-
-	// --- 3. Upload Buffers & Textures ---
+	// --- GPU buffers ---
 	ZHLN::Vk::CommandPool setupPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
 	if (!setupPool.Allocate(1))
 		return -1;
 	VkCommandBuffer setupCmd = setupPool[0];
 	ZHLN_BeginCommandBuffer(setupCmd);
 
-	// VBO / IBO
-	auto vbo = ZHLN::Vk::Buffer::Create(allocator.Get(), vertices.size() * sizeof(ZHLN::Vk::Vertex),
-										VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-											VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-										VMA_MEMORY_USAGE_GPU_ONLY);
-	auto ibo = ZHLN::Vk::Buffer::Create(allocator.Get(), indices.size() * sizeof(uint32_t),
+	auto vbo = ZHLN::Vk::Buffer::Create(
+		allocator.Get(), scene.vertices.size() * sizeof(ZHLN::Vk::Vertex),
+		VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+		VMA_MEMORY_USAGE_GPU_ONLY);
+	auto ibo = ZHLN::Vk::Buffer::Create(allocator.Get(), scene.indices.size() * sizeof(uint32_t),
 										VK_BUFFER_USAGE_TRANSFER_DST_BIT |
 											VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
 										VMA_MEMORY_USAGE_GPU_ONLY);
 
-	auto stagingVBO = ZHLN::Vk::UploadToBuffer(allocator.Get(), setupCmd, vbo, vertices.data(),
-											   vertices.size() * sizeof(ZHLN::Vk::Vertex));
-	auto stagingIBO = ZHLN::Vk::UploadToBuffer(allocator.Get(), setupCmd, ibo, indices.data(),
-											   indices.size() * sizeof(uint32_t));
+	auto stagingVBO =
+		ZHLN::Vk::UploadToBuffer(allocator.Get(), setupCmd, vbo, scene.vertices.data(),
+								 scene.vertices.size() * sizeof(ZHLN::Vk::Vertex));
+	auto stagingIBO = ZHLN::Vk::UploadToBuffer(allocator.Get(), setupCmd, ibo, scene.indices.data(),
+											   scene.indices.size() * sizeof(uint32_t));
 
-	// Default Dummy Texture (1x1 White)
+	// Dummy 1x1 white texture
 	uint32_t white_pixel = 0xFFFFFFFF;
-	VkImageCreateInfo tex_info = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-								  .imageType = VK_IMAGE_TYPE_2D,
-								  .format = VK_FORMAT_R8G8B8A8_UNORM,
-								  .extent = {1, 1, 1},
-								  .mipLevels = 1,
-								  .arrayLayers = 1,
-								  .samples = VK_SAMPLE_COUNT_1_BIT,
-								  .tiling = VK_IMAGE_TILING_OPTIMAL,
-								  .usage =
-									  VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-								  .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-								  .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+	VkImageCreateInfo texBaseInfo = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+									 .imageType = VK_IMAGE_TYPE_2D,
+									 .format = VK_FORMAT_R8G8B8A8_UNORM,
+									 .extent = {1, 1, 1},
+									 .mipLevels = 1,
+									 .arrayLayers = 1,
+									 .samples = VK_SAMPLE_COUNT_1_BIT,
+									 .tiling = VK_IMAGE_TILING_OPTIMAL,
+									 .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+											  VK_IMAGE_USAGE_SAMPLED_BIT,
+									 .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+									 .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+
 	TextureAsset dummyTex;
-	dummyTex.image = ZHLN::Vk::Image::Create(allocator.Get(), tex_info, VMA_MEMORY_USAGE_GPU_ONLY);
+	dummyTex.image =
+		ZHLN::Vk::Image::Create(allocator.Get(), texBaseInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 	auto stagingDummy = ZHLN::Vk::Buffer::Create(
 		allocator.Get(), 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 	memcpy(stagingDummy.Map().data, &white_pixel, 4);
@@ -329,82 +710,7 @@ auto main() -> int {
 							   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(setupCmd,
 																		 dummyTex.image.Handle());
 
-	// Load Actual Textures
-	std::vector<TextureAsset> textures(data->images_count);
-
-	std::println("Uploading {} textures...", data->images_count);
-
-	for (cgltf_size i = 0; i < data->images_count; ++i) {
-		// 1. Process OS Events every texture to prevent Watchdog Timeout
-		ZHLN::Demo::ProcessEvents(win);
-
-		std::string uri = data->images[i].uri;
-		std::string full_path = asset_prefix + uri;
-
-		int tw, th, tc;
-		stbi_uc* pixels = stbi_load(full_path.c_str(), &tw, &th, &tc, STBI_rgb_alpha);
-		if (!pixels) {
-			std::println(stderr, "  Warning: Failed to load {}", uri);
-			continue;
-		}
-
-		// 2. Create a fresh command pool/buffer just for this batch
-		// This prevents the command buffer from becoming a multi-gigabyte monster
-		ZHLN::Vk::CommandPool batchPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-		if (!batchPool.Allocate(1)) {
-			std::println("Failed to allocate batch pool");
-			return -1;
-		}
-		VkCommandBuffer cmd = batchPool[0];
-		ZHLN_BeginCommandBuffer(cmd);
-
-		// 3. Create GPU Image
-		VkImageCreateInfo batch_tex_info = tex_info;
-		batch_tex_info.extent = {static_cast<uint32_t>(tw), static_cast<uint32_t>(th), 1};
-		textures[i].image =
-			ZHLN::Vk::Image::Create(allocator.Get(), batch_tex_info, VMA_MEMORY_USAGE_GPU_ONLY);
-
-		// 4. Create Staging Buffer
-		size_t imageSize = tw * th * 4;
-		auto staging =
-			ZHLN::Vk::Buffer::Create(allocator.Get(), imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-									 VMA_MEMORY_USAGE_CPU_ONLY);
-		memcpy(staging.Map().data, pixels, imageSize);
-
-		// 5. Record Upload
-		ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
-			cmd, textures[i].image.Handle());
-		ZHLN::Vk::CopyBufferToImage(cmd, {.buffer = staging.Handle(),
-										  .image = textures[i].image.Handle(),
-										  .layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-										  .width = (uint32_t)tw,
-										  .height = (uint32_t)th});
-		ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-								   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-			cmd, textures[i].image.Handle());
-
-		ZHLN_EndCommandBuffer(cmd);
-
-		// 6. Submit and Wait immediately for this texture
-		VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-											 .commandBuffer = cmd};
-		VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-								.commandBufferInfoCount = 1,
-								.pCommandBufferInfos = &subInfo};
-		vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
-
-		// We wait here so we can safely destroy the 'staging' buffer in the next line
-		vkQueueWaitIdle(ctx.GraphicsQueue());
-
-		stbi_image_free(pixels);
-		std::println("  [{}/{}] Loaded: {}", i + 1, data->images_count, uri);
-
-		// 'staging' and 'batchPool' go out of scope and are destroyed here, freeing RAM
-	}
-
 	ZHLN_EndCommandBuffer(setupCmd);
-
-	// Submit and wait for all uploads
 	VkCommandBufferSubmitInfo setupCmdInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
 											  .commandBuffer = setupCmd};
 	VkSubmitInfo2 setupSubmit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
@@ -413,155 +719,93 @@ auto main() -> int {
 	vkQueueSubmit2(ctx.GraphicsQueue(), 1, &setupSubmit, VK_NULL_HANDLE);
 	vkQueueWaitIdle(ctx.GraphicsQueue());
 
-	// Create Views & Sampler
 	dummyTex.view = CreateImageView(ctx.Device(), dummyTex.image.Handle(), VK_FORMAT_R8G8B8A8_UNORM,
 									VK_IMAGE_ASPECT_COLOR_BIT);
-	for (auto& tex : textures) {
-		if (tex.image.Valid())
-			tex.view = CreateImageView(ctx.Device(), tex.image.Handle(), VK_FORMAT_R8G8B8A8_UNORM,
-									   VK_IMAGE_ASPECT_COLOR_BIT);
+
+	// --- Textures ---
+	std::vector<TextureAsset> textures(data->images_count);
+	std::println("Uploading {} textures...", data->images_count);
+	for (cgltf_size i = 0; i < data->images_count; ++i) {
+		ZHLN::Demo::ProcessEvents(win);
+		std::string fullPath = paths.asset_prefix + data->images[i].uri;
+		textures[i] = UploadTexture(allocator, win, ctx, texBaseInfo, fullPath);
+		if (textures[i].image.Valid())
+			textures[i].view = CreateImageView(ctx.Device(), textures[i].image.Handle(),
+											   VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
+		std::println("  [{}/{}] {}", i + 1, data->images_count, data->images[i].uri);
 	}
 
+	// --- Shadow map ---
 	constexpr uint32_t SHADOW_RES = 4096;
-	VkImageCreateInfo shadow_info = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-									 .imageType = VK_IMAGE_TYPE_2D,
-									 .format = VK_FORMAT_D32_SFLOAT,
-									 .extent = {SHADOW_RES, SHADOW_RES, 1},
-									 .mipLevels = 1,
-									 .arrayLayers = 1,
-									 .samples = VK_SAMPLE_COUNT_1_BIT,
-									 .tiling = VK_IMAGE_TILING_OPTIMAL,
-									 .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
-											  VK_IMAGE_USAGE_SAMPLED_BIT,
-									 .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-									 .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+	VkImageCreateInfo shadowInfo = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+									.imageType = VK_IMAGE_TYPE_2D,
+									.format = VK_FORMAT_D32_SFLOAT,
+									.extent = {SHADOW_RES, SHADOW_RES, 1},
+									.mipLevels = 1,
+									.arrayLayers = 1,
+									.samples = VK_SAMPLE_COUNT_1_BIT,
+									.tiling = VK_IMAGE_TILING_OPTIMAL,
+									.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+											 VK_IMAGE_USAGE_SAMPLED_BIT,
+									.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+									.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
 	auto shadowImage =
-		ZHLN::Vk::Image::Create(allocator.Get(), shadow_info, VMA_MEMORY_USAGE_GPU_ONLY);
+		ZHLN::Vk::Image::Create(allocator.Get(), shadowInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 	VkImageView shadowView = CreateImageView(ctx.Device(), shadowImage.Handle(),
 											 VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT);
 
-	// Special Sampler for Shadows (Compare mode enabled)
-	VkSamplerCreateInfo shadow_samp_info = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-											.magFilter = VK_FILTER_LINEAR,
-											.minFilter = VK_FILTER_LINEAR,
-											.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
-											.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
-											.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE,
-											.compareEnable = VK_TRUE, // Hardware depth comparison!
-											.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL};
-	VkSampler shadowSampler;
-	vkCreateSampler(ctx.Device(), &shadow_samp_info, nullptr, &shadowSampler);
-
-	VkSamplerCreateInfo sampler_info = {
-		.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-		.magFilter = VK_FILTER_LINEAR,
-		.minFilter = VK_FILTER_LINEAR,
-		.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
-		.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-		.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-		.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-		.anisotropyEnable = VK_TRUE,
-		.maxAnisotropy = 8.0f // Makes Sponza look way better
-	};
+	// --- Samplers ---
+	VkSamplerCreateInfo samplerInfo = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+									   .magFilter = VK_FILTER_LINEAR,
+									   .minFilter = VK_FILTER_LINEAR,
+									   .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+									   .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+									   .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+									   .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+									   .anisotropyEnable = VK_TRUE,
+									   .maxAnisotropy = 8.0f};
 	VkSampler defaultSampler;
-	vkCreateSampler(ctx.Device(), &sampler_info, nullptr, &defaultSampler);
+	vkCreateSampler(ctx.Device(), &samplerInfo, nullptr, &defaultSampler);
 
-	// --- 4. Descriptor Sets ---
-	const VkDescriptorSetLayoutBinding bindings[4] = {
-		{.binding = 0,
-		 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-		 .descriptorCount = 1,
-		 .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT},
-		{.binding = 1,
-		 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
-		 .descriptorCount = 1,
-		 .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT},
-		{.binding = 2,
-		 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-		 .descriptorCount = 1,
-		 .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT}, // Shadow Map
-		{.binding = 3,
-		 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
-		 .descriptorCount = 1,
-		 .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT} // Shadow Sampler
-	};
-	const VkDescriptorSetLayoutCreateInfo layoutInfo = {
-		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-		.bindingCount = 4,
-		.pBindings = bindings};
-	VkDescriptorSetLayout descLayout;
-	vkCreateDescriptorSetLayout(ctx.Device(), &layoutInfo, nullptr, &descLayout);
+	VkSamplerCreateInfo shadowSampInfo = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+										  .magFilter = VK_FILTER_LINEAR,
+										  .minFilter = VK_FILTER_LINEAR,
+										  .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+										  .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+										  .compareEnable = VK_TRUE,
+										  .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+										  .borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE};
+	VkSampler shadowSampler;
+	vkCreateSampler(ctx.Device(), &shadowSampInfo, nullptr, &shadowSampler);
 
-	uint32_t matCount = static_cast<uint32_t>(data->materials_count) + 1; // +1 for fallback
-	VkDescriptorPoolSize poolSizes[2] = {{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, matCount * 2},
-										 {VK_DESCRIPTOR_TYPE_SAMPLER, matCount * 2}};
-	VkDescriptorPoolCreateInfo poolInfo = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-										   .maxSets = matCount,
-										   .poolSizeCount = 2,
-										   .pPoolSizes = poolSizes};
-	VkDescriptorPool descPool;
-	vkCreateDescriptorPool(ctx.Device(), &poolInfo, nullptr, &descPool);
-
-	std::vector<MaterialAsset> materials(data->materials_count);
+	// --- Descriptor layout + pool (via TMP) ---
+	uint32_t matCount = static_cast<uint32_t>(data->materials_count) + 1;
+	VkDescriptorSetLayout descLayout = MaterialLayout::CreateLayout(ctx.Device());
+	VkDescriptorPool descPool = MaterialLayout::CreatePool(ctx.Device(), matCount);
 
 	auto AllocateMaterial = [&](VkImageView view, VkDescriptorSet& set) {
-		VkDescriptorSetAllocateInfo allocInfo = {.sType =
-													 VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-												 .descriptorPool = descPool,
-												 .descriptorSetCount = 1,
-												 .pSetLayouts = &descLayout};
-		vkAllocateDescriptorSets(ctx.Device(), &allocInfo, &set);
-
-		VkDescriptorImageInfo imageInfo = {.imageView = view,
-										   .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-		VkDescriptorImageInfo samplerDescInfo = {.sampler = defaultSampler};
-		VkDescriptorImageInfo shadowInfo = {
-			.imageView = shadowView, .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-		VkDescriptorImageInfo shadowSampInfo = {.sampler = shadowSampler};
-
-		VkWriteDescriptorSet writes[4] = {{.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-										   .dstSet = set,
-										   .dstBinding = 0,
-										   .descriptorCount = 1,
-										   .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-										   .pImageInfo = &imageInfo},
-										  {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-										   .dstSet = set,
-										   .dstBinding = 1,
-										   .descriptorCount = 1,
-										   .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
-										   .pImageInfo = &samplerDescInfo},
-										  {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-										   .dstSet = set,
-										   .dstBinding = 2,
-										   .descriptorCount = 1,
-										   .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-										   .pImageInfo = &shadowInfo},
-										  {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-										   .dstSet = set,
-										   .dstBinding = 3,
-										   .descriptorCount = 1,
-										   .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
-										   .pImageInfo = &shadowSampInfo}};
-		vkUpdateDescriptorSets(ctx.Device(), 4, writes, 0, nullptr);
+		set = MaterialLayout::Allocate(ctx.Device(), descPool, descLayout);
+		MaterialLayout::Write(
+			ctx.Device(), set, ZHLN::Vk::ImageWrite{view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+			ZHLN::Vk::SamplerWrite{defaultSampler},
+			ZHLN::Vk::ImageWrite{shadowView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+			ZHLN::Vk::SamplerWrite{shadowSampler});
 	};
 
-	// Fallback Material
 	MaterialAsset fallbackMat;
 	AllocateMaterial(dummyTex.view, fallbackMat.descriptorSet);
 
+	std::vector<MaterialAsset> materials(data->materials_count);
 	for (cgltf_size i = 0; i < data->materials_count; ++i) {
 		cgltf_material* mat = &data->materials[i];
-		VkImageView view = dummyTex.view; // default
-
+		VkImageView view = dummyTex.view;
 		if (mat->has_pbr_metallic_roughness &&
 			mat->pbr_metallic_roughness.base_color_texture.texture) {
 			cgltf_texture* tex = mat->pbr_metallic_roughness.base_color_texture.texture;
 			if (tex->image) {
-				int imgIdx = static_cast<int>(tex->image - data->images);
-				if (textures[imgIdx].view != VK_NULL_HANDLE) {
-					view = textures[imgIdx].view;
-				}
+				int idx = static_cast<int>(tex->image - data->images);
+				if (textures[idx].view != VK_NULL_HANDLE)
+					view = textures[idx].view;
 			}
 		}
 		AllocateMaterial(view, materials[i].descriptorSet);
@@ -569,175 +813,96 @@ auto main() -> int {
 
 	cgltf_free(data);
 
-	// --- 5. Pipelines ---
-	auto vert_code = LoadSpirv("sponza.hlsl.VSMain.spv");
-	auto frag_code = LoadSpirv("sponza.hlsl.PSMain.spv");
-	ZHLN_ShaderDesc v_desc = {vert_code.data(), vert_code.size() * 4, "VSMain"};
-	ZHLN_ShaderDesc f_desc = {frag_code.data(), frag_code.size() * 4, "PSMain"};
-	auto shaders = ZHLN::Vk::ShaderStages::Create(ctx.Device(), v_desc, f_desc);
+	// --- Pipelines (via builder) ---
+	auto vertCode = LoadSpirv(paths.vert_spv);
+	auto fragCode = LoadSpirv(paths.frag_spv);
+	auto sVertCode = LoadSpirv(paths.shadow_vert_spv);
+	auto sFragCode = LoadSpirv(paths.shadow_frag_spv);
 
-	VkPushConstantRange push_range = {
-		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .offset = 0, .size = sizeof(SponzaPushConstants)};
-	ZHLN_PipelineLayoutDesc pLayoutDesc = {.set_layouts = &descLayout,
-										   .set_layout_count = 1,
-										   .push_constants = &push_range,
-										   .push_constant_count = 1};
-	ZHLN::Vk::PipelineLayout pipelineLayout(ctx.Device(),
-											ZHLN_CreatePipelineLayout(ctx.Device(), &pLayoutDesc));
+	auto shaders = ZHLN::Vk::ShaderStages::Create(ctx.Device(),
+												  {vertCode.data(), vertCode.size() * 4, "VSMain"},
+												  {fragCode.data(), fragCode.size() * 4, "PSMain"});
+	auto shadowShaders = ZHLN::Vk::ShaderStages::Create(
+		ctx.Device(), {sVertCode.data(), sVertCode.size() * 4, "VSMain"},
+		{sFragCode.data(), sFragCode.size() * 4, "PSMain"});
 
-	auto vertex_bindings = ZHLN::Vk::VertexTraits<ZHLN::Vk::Vertex>::Bindings();
-	auto vertex_attributes = ZHLN::Vk::VertexTraits<ZHLN::Vk::Vertex>::Attributes();
+	VkPushConstantRange mainPush = {VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(SponzaPushConstants)};
+	VkPushConstantRange shadowPush = {VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Mat4)};
 
-	ZHLN_GraphicsPipelineDesc pipe_desc = {
-		.stages = const_cast<ZHLN_ShaderStages*>(shaders.Get()),
-		.layout = pipelineLayout.Get(),
-		.vertex_bindings = vertex_bindings.data(),
-		.vertex_attributes = vertex_attributes.data(),
-		.vertex_binding_count = static_cast<uint32_t>(vertex_bindings.size()),
-		.vertex_attribute_count = static_cast<uint32_t>(vertex_attributes.size()),
-		.color_format = VK_FORMAT_B8G8R8A8_SRGB,
-		.depth_format = VK_FORMAT_D32_SFLOAT,
-		.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-		.polygon_mode = VK_POLYGON_MODE_FILL,
-		.cull_mode = VK_CULL_MODE_BACK_BIT,
-		.front_face = VK_FRONT_FACE_COUNTER_CLOCKWISE,
-		.depth_test = true,
-		.depth_write = true,
-		.blend_enable = false};
-	ZHLN::Vk::Pipeline pipeline(ctx.Device(),
-								ZHLN_CreateGraphicsPipeline(ctx.Device(), &pipe_desc));
+	ZHLN_PipelineLayoutDesc mainLayoutDesc = {&descLayout, 1, &mainPush, 1};
+	ZHLN_PipelineLayoutDesc shadowLayoutDesc = {nullptr, 0, &shadowPush, 1};
 
-	auto shadow_v_code = LoadSpirv(shader_prefix + "shadow.hlsl.VSMain.spv");
-	auto shadow_f_code = LoadSpirv(shader_prefix + "shadow.hlsl.PSMain.spv");
-	ZHLN_ShaderDesc sv_desc = {shadow_v_code.data(), shadow_v_code.size() * 4, "VSMain"};
-	ZHLN_ShaderDesc sf_desc = {shadow_f_code.data(), shadow_f_code.size() * 4, "PSMain"};
-	auto shadowShaders = ZHLN::Vk::ShaderStages::Create(ctx.Device(), sv_desc, sf_desc);
+	ZHLN::Vk::PipelineLayout pipelineLayout(
+		ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &mainLayoutDesc));
+	ZHLN::Vk::PipelineLayout shadowLayout(
+		ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &shadowLayoutDesc));
 
-	VkPushConstantRange shadow_push = {
-		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .offset = 0, .size = sizeof(Mat4)};
-	ZHLN_PipelineLayoutDesc sLayoutDesc = {.set_layouts = nullptr,
-										   .set_layout_count = 0,
-										   .push_constants = &shadow_push,
-										   .push_constant_count = 1};
-	ZHLN::Vk::PipelineLayout shadowLayout(ctx.Device(),
-										  ZHLN_CreatePipelineLayout(ctx.Device(), &sLayoutDesc));
+	auto pipeline = ZHLN::Vk::PipelineBuilder{}
+						.Shaders(shaders)
+						.Layout(pipelineLayout.Get())
+						.Vertex<ZHLN::Vk::Vertex>()
+						.ColorFormat(VK_FORMAT_B8G8R8A8_SRGB)
+						.DepthFormat(VK_FORMAT_D32_SFLOAT)
+						.CullBack()
+						.Build(ctx.Device());
 
-	ZHLN_GraphicsPipelineDesc shadow_pipe_desc = {
-		.stages = shadowShaders.Get(),
-		.layout = shadowLayout.Get(),
-		.vertex_bindings = vertex_bindings.data(),
-		.vertex_attributes = vertex_attributes.data(),
-		.vertex_binding_count = static_cast<uint32_t>(vertex_bindings.size()),
-		.vertex_attribute_count = static_cast<uint32_t>(vertex_attributes.size()),
-		.color_format = VK_FORMAT_UNDEFINED,
-		.depth_format = VK_FORMAT_D32_SFLOAT,
-		.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-		.polygon_mode = VK_POLYGON_MODE_FILL,
-		.cull_mode = VK_CULL_MODE_BACK_BIT,
-		.front_face = VK_FRONT_FACE_COUNTER_CLOCKWISE,
-		.depth_test = true,
-		.depth_write = true,
-		.blend_enable = false};
-	ZHLN::Vk::Pipeline shadowPipeline(ctx.Device(),
-									  ZHLN_CreateGraphicsPipeline(ctx.Device(), &shadow_pipe_desc));
+	auto shadowPipeline = ZHLN::Vk::PipelineBuilder{}
+							  .Shaders(shadowShaders)
+							  .Layout(shadowLayout.Get())
+							  .Vertex<ZHLN::Vk::Vertex>()
+							  .DepthOnly()
+							  .CullBack()
+							  .Build(ctx.Device());
 
-	// --- 6. Render Loop Resources ---
-	ZHLN::Vk::Swapchain swapchain(ctx.Device(), {});
+	// --- Frame loop resources ---
+	FrameResources frame;
 	auto sync = ZHLN::Vk::FrameSync<3>::Create(ctx.Device());
 	auto pools =
 		ZHLN::Vk::CommandPools<3>::Create(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-	ZHLN::Vk::SemaphorePool present_semaphores;
 
-	ZHLN::Vk::Image depth_image;
-	VkImageView depth_view = VK_NULL_HANDLE;
-	bool depth_initialized = false;
-
-	auto rebuild = [&]() {
-		vkDeviceWaitIdle(ctx.Device());
-		depth_initialized = false;
-		ZHLN_Device raw_dev = {ctx.Device(), ctx.GraphicsQueue(), ctx.PresentQueue()};
-		ZHLN_PhysicalDeviceInfo raw_phys = ctx.PhysicalInfo();
-		ZHLN_SwapchainDesc s_desc = {.device = &raw_dev,
-									 .physical = &raw_phys,
-									 .surface = surface.Get(),
-									 .width = win.width,
-									 .height = win.height,
-									 .vsync = true,
-									 .old_swapchain = VK_NULL_HANDLE};
-		swapchain.Rebuild(s_desc);
-		present_semaphores.Rebuild(ctx.Device(), swapchain.Get().image_count);
-
-		if (depth_view)
-			vkDestroyImageView(ctx.Device(), depth_view, nullptr);
-		VkImageCreateInfo img_info = {
-			.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-			.imageType = VK_IMAGE_TYPE_2D,
-			.format = VK_FORMAT_D32_SFLOAT,
-			.extent = {win.width, win.height, 1},
-			.mipLevels = 1,
-			.arrayLayers = 1,
-			.samples = VK_SAMPLE_COUNT_1_BIT,
-			.tiling = VK_IMAGE_TILING_OPTIMAL,
-			.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-			.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-		};
-		depth_image = ZHLN::Vk::Image::Create(allocator.Get(), img_info, VMA_MEMORY_USAGE_GPU_ONLY);
-		depth_view = CreateImageView(ctx.Device(), depth_image.Handle(), VK_FORMAT_D32_SFLOAT,
-									 VK_IMAGE_ASPECT_DEPTH_BIT);
-		win.resized = false;
-	};
-
-	// --- 7. Main Loop ---
 	uint32_t frame_index = 0;
 	win.resized = true;
+	FpsCounter fpsCounter;
 	auto startTime = std::chrono::high_resolution_clock::now();
 
-	std::println("Rendering Started...");
-
-	auto lastFPSUpdate = std::chrono::high_resolution_clock::now();
-	uint32_t framesThisSecond = 0;
-	float frameTimeMs = 0.0f;
+	std::println("Rendering started.");
 
 	while (win.running) {
-		auto frameStart = std::chrono::high_resolution_clock::now();
 		ZHLN::Demo::ProcessEvents(win);
 		if (win.width == 0 || win.height == 0)
 			continue;
 		if (win.resized)
-			rebuild();
+			frame.Rebuild(ctx, allocator, win, surface.Get());
 
 		float time =
 			std::chrono::duration<float>(std::chrono::high_resolution_clock::now() - startTime)
 				.count();
 
-		// 1. Human eye-level (1.7 is a bit low for this scale, try 2.0 or 3.0)
-		float eyeHeight = 2.5f;
+		// Camera
+		float camX = std::sin(time * 0.1f) * 12.0f;
+		float camY = 2.5f;
+		float camZ = 0.0f;
+		float lookX = camX + std::cos(time * 0.1f) * 2.0f;
 
-		// 2. The Long Axis is X in this model.
-		float maxDist = 12.0f;
-		float camX = std::sin(time * 0.1f) * maxDist;
-		float camZ = 0.0f; // Stay in the center of the hallway
-
-		// 3. Direction logic: Look toward the end of the hall we are walking toward
-		float velocity = std::cos(time * 0.1f);
-		float lookTargetX = camX + (velocity * 2.0f); // Look 2 units ahead of where you're moving
-
-		Mat4 view =
-			LookAt({camX, eyeHeight, camZ}, {lookTargetX, eyeHeight, 0.0f}, {0.0f, 1.0f, 0.0f});
-
-		// 4. Projection
+		Mat4 view = LookAt({camX, camY, camZ}, {lookX, camY, 0.0f}, {0.0f, 1.0f, 0.0f});
 		Mat4 proj = Perspective(1.0472f, (float)win.width / (float)win.height, 0.1f, 1000.0f);
-
 		Mat4 viewProj = Multiply(proj, view);
-		const ZHLN_FrameSync& frame_sync = sync[frame_index];
-		ZHLN_CommandPool& pool = pools[frame_index];
-		VkCommandBuffer cmd = pools.Cmd(frame_index);
 
-		ZHLN_WaitAndResetFrame(ctx.Device(), frame_sync.in_flight, &pool);
+		Mat4 lightView = LookAt({15.f, 30.f, 9.f}, {0.f, 0.f, 0.f}, {0.f, 1.f, 0.f});
+		Mat4 lightProj = Ortho(-25.f, 25.f, -25.f, 25.f, -50.f, 100.f);
+		Mat4 lightSpace = Multiply(lightProj, lightView);
+
+		// FPS
+		if (auto title = fpsCounter.Tick(scene.drawCalls.size()); !title.empty())
+			ZHLN::Demo::UpdateWindowTitle(win, title.c_str());
+
+		// Frame sync
+		const ZHLN_FrameSync& frame_sync = sync[frame_index];
+		VkCommandBuffer cmd = pools.Cmd(frame_index);
+		ZHLN_WaitAndResetFrame(ctx.Device(), frame_sync.in_flight, &pools[frame_index]);
 
 		uint32_t image_index = 0;
-		ZHLN_AcquireDesc acq = {.swapchain = swapchain.Get().handle,
+		ZHLN_AcquireDesc acq = {.swapchain = frame.swapchain.Get().handle,
 								.image_available = frame_sync.image_available,
 								.timeout_ns = UINT64_MAX};
 		if (ZHLN_AcquireImage(ctx.Device(), &acq, &image_index) == ZHLN_FrameResult_OutOfDate) {
@@ -746,142 +911,53 @@ auto main() -> int {
 		}
 
 		ZHLN_BeginCommandBuffer(cmd);
-		VkImage img = swapchain.Get().images[image_index];
-		ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED,
-								   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, img);
 
-		if (!depth_initialized) {
-			ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED,
-									   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-				cmd, depth_image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
-			depth_initialized = true;
-		}
+		RecordFrame({
+			.cmd = cmd,
+			.swapchainImage = frame.swapchain.Get().images[image_index],
+			.swapchainView = frame.swapchain.Get().views[image_index],
+			.extent = frame.swapchain.Get().extent,
+			.depthView = frame.depthView,
+			.depthInitialized = frame.depthInitialized,
+			.depthImage = frame.depthImage.Handle(),
+			.shadowImage = shadowImage.Handle(),
+			.shadowView = shadowView,
+			.pipeline = pipeline.Get(),
+			.pipelineLayout = pipelineLayout.Get(),
+			.shadowPipeline = shadowPipeline.Get(),
+			.shadowLayout = shadowLayout.Get(),
+			.vbo = vbo.Handle(),
+			.ibo = ibo.Handle(),
+			.drawCalls = scene.drawCalls,
+			.materials = materials,
+			.fallbackMat = fallbackMat,
+			.viewProj = viewProj,
+			.lightSpaceMatrix = lightSpace,
+			.camPos = {camX, camY, camZ},
+		});
 
-		ZHLN_RenderPassDesc pass = {.target_view = swapchain.Get().views[image_index],
-									.depth_view = depth_view,
-									.extent = swapchain.Get().extent,
-									.clear_color = {0.5f, 0.7f, 1.0f, 1.0f},
-									.clear_depth = 1.0f}; // Sky Blue clear
-
-		// --- FPS CALCULATION ---
-		framesThisSecond++;
-		auto currentTime = std::chrono::high_resolution_clock::now();
-		std::chrono::duration<float> elapsed = currentTime - lastFPSUpdate;
-
-		if (elapsed.count() >= 1.0f) { // Update once per second
-			float fps = static_cast<float>(framesThisSecond) / elapsed.count();
-			frameTimeMs = 1000.0f / fps;
-
-			// Create the title string
-			std::string title =
-				std::format("ZHLN Engine | FPS: {:.1f} ({:.2f} ms) | Triangles: {}", fps,
-							frameTimeMs, scene_draw_calls.size() * 2); // Simple est.
-
-			// Update the window title
-			ZHLN::Demo::UpdateWindowTitle(win, title.c_str());
-
-			// Reset counters
-			framesThisSecond = 0;
-			lastFPSUpdate = currentTime;
-		}
-		// 1. Math Setup
-		Mat4 lightProj = Ortho(-25.0f, 25.0f, -25.0f, 25.0f, -50.0f, 100.0f);
-		Mat4 lightView = LookAt({15.0f, 30.0f, 9.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f});
-		Mat4 lightSpaceMatrix = Multiply(lightProj, lightView);
-
-		VkBuffer vboHandle = vbo.Handle();
-		VkDeviceSize offset = 0;
-
-		// === PASS 1: SHADOWS ===
-		ZHLN_ImageBarrierDesc shadowWriteBarrier = {
-			.image = shadowImage.Handle(),
-			.src_access = VK_ACCESS_2_NONE,
-			.dst_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-			.src_layout = VK_IMAGE_LAYOUT_UNDEFINED, // Accept anything (prevents the error)
-			.dst_layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-			.src_stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-			.dst_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-			.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
-		ZHLN_CmdImageBarrier(cmd, &shadowWriteBarrier);
-		ZHLN_RenderPassDesc shadowPass = {.target_view = VK_NULL_HANDLE,
-										  .depth_view = shadowView,
-										  .extent = {SHADOW_RES, SHADOW_RES},
-										  .clear_depth = 1.0f};
-
-		{
-			ZHLN::Vk::ScopedRendering render(cmd, shadowPass);
-			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline.Get());
-			vkCmdBindVertexBuffers(cmd, 0, 1, &vboHandle, &offset);
-			vkCmdBindIndexBuffer(cmd, ibo.Handle(), 0, VK_INDEX_TYPE_UINT32);
-
-			for (const auto& draw : scene_draw_calls) {
-				Mat4 shadowMVP = Multiply(lightSpaceMatrix, draw.worldMatrix);
-				ZHLN::Vk::Push(cmd, shadowLayout.Get(), VK_SHADER_STAGE_VERTEX_BIT, shadowMVP);
-				vkCmdDrawIndexed(cmd, draw.mesh->indexCount, 1, draw.mesh->firstIndex, 0, 0);
-			}
-		}
-		// === AFTER PASS 1 (Shadows) ===
-		// Explicitly wait for ALL depth writes to finish before the main shader starts reading
-		ZHLN_ImageBarrierDesc shadowReadBarrier = {
-			.image = shadowImage.Handle(),
-			.src_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-			.dst_access = VK_ACCESS_2_SHADER_READ_BIT,
-			.src_layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-			.dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-			.src_stage = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, // Wait for end of render
-			.dst_stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,	  // Block fragment shader
-			.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
-		ZHLN_CmdImageBarrier(cmd, &shadowReadBarrier);
-
-		// === PASS 2: MAIN SCENE ===
-		{
-			ZHLN::Vk::ScopedRendering render(cmd, pass);
-			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
-			vkCmdBindVertexBuffers(cmd, 0, 1, &vboHandle, &offset);
-			vkCmdBindIndexBuffer(cmd, ibo.Handle(), 0, VK_INDEX_TYPE_UINT32);
-
-			int current_mat = -2;
-			for (const auto& draw : scene_draw_calls) {
-				SponzaPushConstants pc = {.mvp = Multiply(viewProj, draw.worldMatrix),
-										  .lightSpaceMatrix =
-											  Multiply(lightSpaceMatrix, draw.worldMatrix),
-										  .camPos = {camX, eyeHeight, camZ, 1.0f}};
-
-				ZHLN::Vk::Push(cmd, pipelineLayout.Get(), VK_SHADER_STAGE_VERTEX_BIT, pc);
-
-				if (draw.mesh->materialIndex != current_mat) {
-					current_mat = draw.mesh->materialIndex;
-					VkDescriptorSet dSet = (current_mat >= 0) ? materials[current_mat].descriptorSet
-															  : fallbackMat.descriptorSet;
-					vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-											pipelineLayout.Get(), 0, 1, &dSet, 0, nullptr);
-				}
-				vkCmdDrawIndexed(cmd, draw.mesh->indexCount, 1, draw.mesh->firstIndex, 0, 0);
-			}
-		}
 		ZHLN_EndCommandBuffer(cmd);
 
-		VkCommandBufferSubmitInfo cmd_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-											  .commandBuffer = cmd};
-		VkSemaphoreSubmitInfo wait_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-										   .semaphore = frame_sync.image_available,
-										   .stageMask =
-											   VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT};
-		VkSemaphoreSubmitInfo signal_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-											 .semaphore = present_semaphores[image_index],
-											 .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT};
+		VkCommandBufferSubmitInfo cmdInfo = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, nullptr,
+											 cmd};
+		VkSemaphoreSubmitInfo waitInfo = {VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
+										  frame_sync.image_available, 0,
+										  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT};
+		VkSemaphoreSubmitInfo signalInfo = {VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
+											frame.presentSemaphores[image_index], 0,
+											VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT};
 		VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
 								.waitSemaphoreInfoCount = 1,
-								.pWaitSemaphoreInfos = &wait_info,
+								.pWaitSemaphoreInfos = &waitInfo,
 								.commandBufferInfoCount = 1,
-								.pCommandBufferInfos = &cmd_info,
+								.pCommandBufferInfos = &cmdInfo,
 								.signalSemaphoreInfoCount = 1,
-								.pSignalSemaphoreInfos = &signal_info};
+								.pSignalSemaphoreInfos = &signalInfo};
 		vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, frame_sync.in_flight);
 
 		ZHLN_PresentDesc pres = {.present_queue = ctx.PresentQueue(),
-								 .swapchain = swapchain.Get().handle,
-								 .render_finished = present_semaphores[image_index],
+								 .swapchain = frame.swapchain.Get().handle,
+								 .render_finished = frame.presentSemaphores[image_index],
 								 .image_index = image_index};
 		if (ZHLN_PresentFrame(&pres) != ZHLN_FrameResult_Ok)
 			win.resized = true;
@@ -891,21 +967,19 @@ auto main() -> int {
 
 	vkDeviceWaitIdle(ctx.Device());
 
-	// Cleanup - Each object destroyed exactly ONCE
+	// Cleanup
 	vkDestroySampler(ctx.Device(), defaultSampler, nullptr);
 	vkDestroySampler(ctx.Device(), shadowSampler, nullptr);
-
 	vkDestroyImageView(ctx.Device(), dummyTex.view, nullptr);
-	for (auto& tex : textures) {
+	for (auto& tex : textures)
 		if (tex.view)
 			vkDestroyImageView(ctx.Device(), tex.view, nullptr);
+	if (frame.depthView) {
+		vkDestroyImageView(ctx.Device(), frame.depthView, nullptr);
+		frame.depthView = VK_NULL_HANDLE;
 	}
-
-	if (depth_view)
-		vkDestroyImageView(ctx.Device(), depth_view, nullptr);
 	if (shadowView)
 		vkDestroyImageView(ctx.Device(), shadowView, nullptr);
-
 	vkDestroyDescriptorPool(ctx.Device(), descPool, nullptr);
 	vkDestroyDescriptorSetLayout(ctx.Device(), descLayout, nullptr);
 
