@@ -1,48 +1,41 @@
+#include "PipelineBuilder.hpp"
 #include "RenderCore.hpp"
 #include "demo_utils/DemoWindow.hpp"
 
 #include <filesystem>
-#include <fstream>
 #include <vector>
 
-// ----------------------------------------------------------------------------
-// Helpers
-// ----------------------------------------------------------------------------
-[[nodiscard]] static auto LoadSpirv(const std::filesystem::path& path) -> std::vector<uint32_t> {
-	if (!std::filesystem::exists(path))
-		return {};
-	std::ifstream file(path, std::ios::ate | std::ios::binary);
-	if (!file.is_open())
-		return {};
-	const size_t fileSize = static_cast<size_t>(file.tellg());
-	std::vector<uint32_t> buffer(fileSize / sizeof(uint32_t));
-	file.seekg(0);
-	file.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(fileSize));
-	return buffer;
-}
-
 auto main() -> int {
-	// 1. OS Window Creation (Platform Agnostic)
+	// 1. OS Window Creation
 	ZHLN::Demo::WindowState win = ZHLN::Demo::InitWindow(800, 600, "ZHLN Engine - Triangle");
+	if (!win.os_window)
+		return -1;
 
-	// 2. Vulkan Context Setup
+	// 2. Context Setup
 	ZHLN_InstanceDesc inst_desc = ZHLN_DEFAULT_INSTANCE_DESC;
+	auto inst_exts = ZHLN::Demo::GetRequiredInstanceExtensions();
+	inst_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+	inst_exts.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
 
-	auto required_exts = ZHLN::Demo::GetRequiredInstanceExtensions();
-	required_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-	required_exts.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
-	required_exts.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+	bool has_maint1 =
+		ZHLN::Vk::IsInstanceExtensionSupported(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+	if (has_maint1) {
+		inst_exts.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+	}
 
 #ifdef __APPLE__
-	required_exts.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+	inst_exts.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
 #endif
+	inst_desc.extensions = inst_exts.data();
+	inst_desc.extension_count = static_cast<uint32_t>(inst_exts.size());
 
-	inst_desc.extensions = required_exts.data();
-	inst_desc.extension_count = static_cast<uint32_t>(required_exts.size());
+	VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swap_maint = {
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR,
+		.swapchainMaintenance1 = VK_TRUE};
 
 	VkPhysicalDeviceVulkan13Features feat13 = {
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-		.pNext = nullptr,
+		.pNext = has_maint1 ? &swap_maint : nullptr,
 		.synchronization2 = VK_TRUE,
 		.dynamicRendering = VK_TRUE};
 
@@ -51,84 +44,75 @@ auto main() -> int {
 		.pNext = &feat13,
 		.bufferDeviceAddress = VK_TRUE};
 
-	VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swap_maint = {
-		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR,
-		.pNext = nullptr,
-		.swapchainMaintenance1 = VK_TRUE};
-	feat13.pNext = &swap_maint;
-
 	VkPhysicalDeviceFeatures2 feat2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
 									   .pNext = &feat12};
 
+	std::vector<const char*> dev_exts = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+	if (has_maint1) {
+		dev_exts.push_back(VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME);
+		dev_exts.push_back(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME);
+	}
 #ifdef __APPLE__
-	const char* dev_exts[] = {
-		VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
-		VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME,
-		"VK_KHR_portability_subset" // <-- MANDATORY FOR MAC
-	};
-#else
-	const char* dev_exts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-							  VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
-							  VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME};
-
+	dev_exts.push_back("VK_KHR_portability_subset");
 #endif
 
-	constexpr uint32_t dev_ext_count = static_cast<uint32_t>(std::size(dev_exts));
-
-	ZHLN_DeviceDesc dev_desc = {.physical = nullptr,
-								.extensions = dev_exts,
-								.extension_count = dev_ext_count, // Use the count variable
+	ZHLN_DeviceDesc dev_desc = {.extensions = dev_exts.data(),
+								.extension_count = static_cast<uint32_t>(dev_exts.size()),
 								.features = &feat2,
 								.enable_validation = true};
 
-	ZHLN_DeviceSelectDesc sel_desc = {.instance = VK_NULL_HANDLE, .surface = VK_NULL_HANDLE};
-
-	auto ctx = ZHLN::Vk::Context::Create(inst_desc, sel_desc, dev_desc);
+	auto ctx = ZHLN::Vk::Context::Create(inst_desc, {VK_NULL_HANDLE, VK_NULL_HANDLE}, dev_desc);
 	if (!ctx)
 		return -1;
 
-	// 3. Surface Creation (Platform Agnostic)
+	// 3. Surface & RAII Resources
 	VkSurfaceKHR raw_surface = ZHLN::Demo::CreateSurface(ctx.Instance(), win);
 	ZHLN::Vk::Surface surface(ctx.Instance(), raw_surface);
 
-	// 4. Resources
 	ZHLN::Vk::Swapchain swapchain(ctx.Device(), {});
 	auto sync = ZHLN::Vk::FrameSync<3>::Create(ctx.Device());
 	auto pools =
 		ZHLN::Vk::CommandPools<3>::Create(ctx.Device(), ctx.PhysicalInfo().graphics_family);
 	ZHLN::Vk::SemaphorePool present_semaphores;
 
-	// 5. Pipeline
-	auto vert_code = LoadSpirv("triangle.vert.spv");
-	auto frag_code = LoadSpirv("triangle.frag.spv");
-	ZHLN_ShaderDesc v_desc = {vert_code.data(), vert_code.size() * 4};
-	ZHLN_ShaderDesc f_desc = {frag_code.data(), frag_code.size() * 4};
-	auto shaders = ZHLN::Vk::ShaderStages::Create(ctx.Device(), v_desc, f_desc);
+	// 4. Pipeline Setup (Updated with HLSL filenames and entry points)
+	auto shaders = ZHLN::Vk::ShaderStages::FromFiles(
+		ctx.Device(), "triangle.hlsl.VSMain.spv", "triangle.hlsl.PSMain.spv", "VSMain", "PSMain");
 
-	ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = nullptr,
-										   .set_layout_count = 0,
-										   .push_constants = nullptr,
-										   .push_constant_count = 0};
+	if (!shaders.Valid())
+		return -1;
+
+	ZHLN_PipelineLayoutDesc layout_desc = {};
 	ZHLN::Vk::PipelineLayout layout(ctx.Device(),
 									ZHLN_CreatePipelineLayout(ctx.Device(), &layout_desc));
 
-	ZHLN_GraphicsPipelineDesc pipe_desc = {.stages = const_cast<ZHLN_ShaderStages*>(shaders.Get()),
-										   .layout = layout.Get(),
-										   .vertex_bindings = nullptr,
-										   .vertex_attributes = nullptr,
-										   .vertex_binding_count = 0,
-										   .vertex_attribute_count = 0,
-										   .color_format = VK_FORMAT_B8G8R8A8_SRGB,
-										   .depth_format = VK_FORMAT_UNDEFINED,
-										   .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-										   .polygon_mode = VK_POLYGON_MODE_FILL,
-										   .cull_mode = VK_CULL_MODE_NONE,
-										   .front_face = VK_FRONT_FACE_COUNTER_CLOCKWISE,
-										   .depth_test = false,
-										   .depth_write = false,
-										   .blend_enable = false};
-	ZHLN::Vk::Pipeline pipeline(ctx.Device(),
-								ZHLN_CreateGraphicsPipeline(ctx.Device(), &pipe_desc));
+	auto pipeline = ZHLN::Vk::PipelineBuilder{}
+						.Shaders(shaders)
+						.Layout(layout.Get())
+						.ColorFormat(VK_FORMAT_B8G8R8A8_SRGB)
+						.NoDepth()
+						.CullNone()
+						.Build(ctx.Device());
+
+	if (!pipeline.Valid())
+		return -1;
+
+	// 5. Rebuild Helper
+	auto rebuild = [&]() {
+		vkDeviceWaitIdle(ctx.Device());
+		ZHLN_Device raw_dev = {ctx.Device(), ctx.GraphicsQueue(), ctx.PresentQueue()};
+		ZHLN_PhysicalDeviceInfo raw_phys = ctx.PhysicalInfo();
+		ZHLN_SwapchainDesc s_desc = {.device = &raw_dev,
+									 .physical = &raw_phys,
+									 .surface = surface.Get(),
+									 .width = win.width,
+									 .height = win.height,
+									 .vsync = true,
+									 .old_swapchain = swapchain.Get().handle};
+		swapchain.Rebuild(s_desc);
+		present_semaphores.Rebuild(ctx.Device(), swapchain.Get().image_count);
+		win.resized = false;
+	};
 
 	// 6. Loop
 	uint32_t frame_index = 0;
@@ -136,49 +120,12 @@ auto main() -> int {
 
 	while (win.running) {
 		ZHLN::Demo::ProcessEvents(win);
-
 		if (win.width == 0 || win.height == 0)
 			continue;
-
-		auto rebuild_cb = [&]() {
-			vkDeviceWaitIdle(ctx.Device());
-			ZHLN_Device raw_dev = {ctx.Device(), ctx.GraphicsQueue(), ctx.PresentQueue()};
-			ZHLN_PhysicalDeviceInfo raw_phys = ctx.PhysicalInfo();
-
-			ZHLN_SwapchainDesc s_desc = {.device = &raw_dev,
-										 .physical = &raw_phys,
-										 .surface = surface.Get(),
-										 .width = win.width,
-										 .height = win.height,
-										 .vsync = true,
-										 .old_swapchain = VK_NULL_HANDLE};
-
-			swapchain.Rebuild(s_desc);
-			present_semaphores.Rebuild(ctx.Device(), swapchain.Get().image_count);
-			win.resized = false;
-		};
-
 		if (win.resized)
-			rebuild_cb();
-
-		auto record_cb = [&](VkCommandBuffer cmd, uint32_t image_index) {
-			VkImage img = swapchain.Get().images[image_index];
-			ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED,
-									   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, img);
-
-			ZHLN_RenderPassDesc pass = {.target_view = swapchain.Get().views[image_index],
-										.depth_view = VK_NULL_HANDLE,
-										.extent = swapchain.Get().extent,
-										.clear_color = {0.01f, 0.01f, 0.02f, 1.0f},
-										.clear_depth = 1.0f};
-			{
-				ZHLN::Vk::ScopedRendering render(cmd, pass);
-				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
-				vkCmdDraw(cmd, 3, 1, 0, 0);
-			}
-			ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-									   VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, img);
-		};
+			rebuild();
+		if (!swapchain.Valid() || swapchain.Get().extent.width == 0)
+			continue;
 
 		const ZHLN_FrameSync& frame_sync = sync[frame_index];
 		ZHLN_CommandPool& pool = pools[frame_index];
@@ -196,47 +143,35 @@ auto main() -> int {
 		}
 
 		ZHLN_BeginCommandBuffer(cmd);
-		record_cb(cmd, image_index);
+		VkImage img = swapchain.Get().images[image_index];
+		ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED,
+								   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, img);
+
+		ZHLN_RenderPassDesc pass = {.target_view = swapchain.Get().views[image_index],
+									.depth_view = VK_NULL_HANDLE,
+									.extent = swapchain.Get().extent,
+									.clear_color = {0.01f, 0.01f, 0.02f, 1.0f}};
+		{
+			ZHLN::Vk::ScopedRendering render(cmd, pass);
+			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
+			vkCmdDraw(cmd, 3, 1, 0, 0);
+		}
+		ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+								   VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, img);
 		ZHLN_EndCommandBuffer(cmd);
 
-		VkCommandBufferSubmitInfo cmd_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-											  .pNext = nullptr,
-											  .commandBuffer = cmd,
-											  .deviceMask = 0};
-		VkSemaphoreSubmitInfo wait_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-										   .pNext = nullptr,
-										   .semaphore = frame_sync.image_available,
-										   .value = 0,
-										   .stageMask =
-											   VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-										   .deviceIndex = 0};
-		VkSemaphoreSubmitInfo signal_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-											 .pNext = nullptr,
-											 .semaphore = present_semaphores[image_index],
-											 .value = 0,
-											 .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
-											 .deviceIndex = 0};
+		ZHLN_FrameSubmitDesc submitDesc = {.graphicsQueue = ctx.GraphicsQueue(),
+										   .presentQueue = ctx.PresentQueue(),
+										   .cmd = cmd,
+										   .imageAvailable = frame_sync.image_available,
+										   .renderFinished = present_semaphores[image_index],
+										   .inFlight = frame_sync.in_flight,
+										   .swapchain = swapchain.Get().handle,
+										   .imageIndex = image_index};
 
-		VkSubmitInfo2 submit = {
-			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-			.pNext = nullptr,
-			.flags = 0,
-			.waitSemaphoreInfoCount = 1,
-			.pWaitSemaphoreInfos = &wait_info,
-			.commandBufferInfoCount = 1,
-			.pCommandBufferInfos = &cmd_info,
-			.signalSemaphoreInfoCount = 1,
-			.pSignalSemaphoreInfos = &signal_info,
-		};
-		vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, frame_sync.in_flight);
-
-		ZHLN_PresentDesc pres = {.present_queue = ctx.PresentQueue(),
-								 .swapchain = swapchain.Get().handle,
-								 .render_finished = present_semaphores[image_index],
-								 .image_index = image_index};
-		if (ZHLN_PresentFrame(&pres) != ZHLN_FrameResult_Ok)
+		if (ZHLN::Vk::SubmitAndPresent(submitDesc) != ZHLN_FrameResult_Ok) {
 			win.resized = true;
-
+		}
 		frame_index = (frame_index + 1) % 3;
 	}
 
