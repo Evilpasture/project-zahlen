@@ -118,6 +118,7 @@ RenderContext::RenderContext(Window& window, const String32& preferredAPI)
 	_impl->surface = Vk::Surface(_impl->ctx.Instance(), raw_surface);
 
 	if (!_impl->allocator.Init(_impl->ctx)) {
+		ZHLN_TRACE(_impl);
 		ZHLN::Panic("FATAL: Vulkan Memory Allocator (VMA) failed to initialize");
 	}
 
