@@ -39,6 +39,21 @@ template <typename... Args> void Log(LogContext ctx, Args&&... args) {
 }
 
 /**
+ * @brief Log a fatal error and terminate immediately.
+ * Use this for unrecoverable state (e.g., Vulkan device lost).
+ */
+template <typename... Args> [[noreturn]] void Panic(LogContext ctx, Args&&... args) {
+	// 1. Log the failure
+	Log(ctx, std::forward<Args>(args)...);
+
+	// 2. Ensure stderr is flushed so the message actually hits the console/file
+	std::fflush(stderr);
+
+	// 3. Hard exit
+	std::abort();
+}
+
+/**
  * @brief The bridge for Jolt Physics (C-Style variadic)
  */
 auto JoltTraceBridge(const char* inFMT, ...) noexcept -> void;
