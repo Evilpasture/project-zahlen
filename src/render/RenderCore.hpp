@@ -5,12 +5,15 @@
 #include <algorithm>
 #include <array>
 #include <concepts>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <print>
 #include <source_location>
 #include <span>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace ZHLN::Vk {
 
@@ -516,6 +519,37 @@ class ShaderStages {
 		return _raw.vert.handle != VK_NULL_HANDLE;
 	}
 
+	[[nodiscard]] static ShaderStages FromFiles(const VkDevice device,
+												const std::filesystem::path& vert_path,
+												const std::filesystem::path& frag_path,
+												const char* vert_entry = "main",
+												const char* frag_entry = "main") noexcept {
+		auto load = [](const std::filesystem::path& path) -> std::vector<uint32_t> {
+			std::ifstream file(path, std::ios::ate | std::ios::binary);
+			if (!file.is_open())
+				return {};
+			const size_t size = static_cast<size_t>(file.tellg());
+			std::vector<uint32_t> buffer(size / sizeof(uint32_t));
+			file.seekg(0);
+			file.read(reinterpret_cast<char*>(buffer.data()), size);
+			return buffer;
+		};
+
+		auto vert_spv = load(vert_path);
+		auto frag_spv = load(frag_path);
+
+		if (vert_spv.empty() || frag_spv.empty()) {
+			std::println(stderr, "[ZHLN::Vk] Failed to load shader files: {} or {}",
+						 vert_path.string(), frag_path.string());
+			return {};
+		}
+
+		const ZHLN_ShaderDesc v_desc = {vert_spv.data(), vert_spv.size() * 4, vert_entry};
+		const ZHLN_ShaderDesc f_desc = {frag_spv.data(), frag_spv.size() * 4, frag_entry};
+
+		return Create(device, v_desc, f_desc);
+	}
+
   private:
 	VkDevice _device = VK_NULL_HANDLE;
 	ZHLN_ShaderStages _raw{};
@@ -844,5 +878,9 @@ template <VkFormat F>
 							   .mip_levels = mips};
 	return ImageView(device, ZHLN_CreateImageView(device, &desc));
 }
+
+using Sampler = DeviceHandle<VkSampler, ZHLN_DestroySampler>;
+using DescriptorSetLayout = DeviceHandle<VkDescriptorSetLayout, ZHLN_DestroyDescriptorSetLayout>;
+using DescriptorPool = DeviceHandle<VkDescriptorPool, ZHLN_DestroyDescriptorPool>;
 
 } // namespace ZHLN::Vk

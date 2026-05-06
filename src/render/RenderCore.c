@@ -1183,3 +1183,13 @@ void ZHLN_DestroyImageView(const VkDevice device, const VkImageView view) {
 		return;
 	vkDestroyImageView(device, view, nullptr);
 }
+
+void ZHLN_DestroySampler(const VkDevice device, const VkSampler sampler) {
+	vkDestroySampler(device, sampler, nullptr);
+}
+void ZHLN_DestroyDescriptorSetLayout(const VkDevice device, const VkDescriptorSetLayout layout) {
+	vkDestroyDescriptorSetLayout(device, layout, nullptr);
+}
+void ZHLN_DestroyDescriptorPool(const VkDevice device, const VkDescriptorPool pool) {
+	vkDestroyDescriptorPool(device, pool, nullptr);
+}

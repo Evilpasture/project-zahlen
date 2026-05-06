@@ -444,6 +444,12 @@ VkImageView ZHLN_CreateImageView(const VkDevice device,
 
 void ZHLN_DestroyImageView(const VkDevice device, const VkImageView view);
 
+/* --- SAMPLER HELPERS --- */
+
+void ZHLN_DestroySampler(const VkDevice device, const VkSampler sampler);
+void ZHLN_DestroyDescriptorSetLayout(const VkDevice device, const VkDescriptorSetLayout layout);
+void ZHLN_DestroyDescriptorPool(const VkDevice device, const VkDescriptorPool pool);
+
 #ifdef __cplusplus
 }
 #endif

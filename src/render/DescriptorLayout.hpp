@@ -1,4 +1,6 @@
 #pragma once
+#include "RenderCore.hpp"
+
 #include <array>
 #include <tuple>
 #include <vulkan/vulkan.h>
@@ -78,22 +80,23 @@ template <typename... Slots> class DescriptorLayout {
 	// -------------------------------------------------------------------------
 	// CreateLayout — one-shot VkDescriptorSetLayout from the slot list
 	// -------------------------------------------------------------------------
-	[[nodiscard]] static VkDescriptorSetLayout CreateLayout(VkDevice device) noexcept {
+	[[nodiscard]] static ZHLN::Vk::DescriptorSetLayout CreateLayout(VkDevice device) noexcept {
 		static constexpr auto bindings = MakeBindings();
 		const VkDescriptorSetLayoutCreateInfo info = {
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
 			.bindingCount = kCount,
 			.pBindings = bindings.data(),
 		};
-		VkDescriptorSetLayout layout;
+		VkDescriptorSetLayout layout = VK_NULL_HANDLE;
 		vkCreateDescriptorSetLayout(device, &info, nullptr, &layout);
-		return layout;
+		return ZHLN::Vk::DescriptorSetLayout(device, layout); // RAII wrap
 	}
 
 	// -------------------------------------------------------------------------
 	// CreatePool — pool sized for maxSets descriptor sets of this layout
 	// -------------------------------------------------------------------------
-	[[nodiscard]] static VkDescriptorPool CreatePool(VkDevice device, uint32_t maxSets) noexcept {
+	[[nodiscard]] static ZHLN::Vk::DescriptorPool CreatePool(VkDevice device,
+															 uint32_t maxSets) noexcept {
 		auto poolSizes = MakePoolSizes(maxSets);
 		const VkDescriptorPoolCreateInfo info = {
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
@@ -101,9 +104,9 @@ template <typename... Slots> class DescriptorLayout {
 			.poolSizeCount = kCount,
 			.pPoolSizes = poolSizes.data(),
 		};
-		VkDescriptorPool pool;
+		VkDescriptorPool pool = VK_NULL_HANDLE;
 		vkCreateDescriptorPool(device, &info, nullptr, &pool);
-		return pool;
+		return ZHLN::Vk::DescriptorPool(device, pool); // RAII wrap
 	}
 
 	// -------------------------------------------------------------------------
