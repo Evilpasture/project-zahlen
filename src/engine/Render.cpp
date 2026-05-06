@@ -106,8 +106,7 @@ RenderContext::RenderContext(Window& window, const String32& preferredAPI)
 	_impl->ctx = Vk::Context::Create(inst_desc, {VK_NULL_HANDLE, VK_NULL_HANDLE, nullptr, nullptr},
 									 dev_desc);
 	if (!_impl->ctx) {
-		ZHLN::Log("FATAL: Vulkan Context Creation Failed");
-		std::abort();
+		ZHLN::Panic("FATAL: Vulkan Context Creation Failed");
 	}
 
 	GLFWwindow* glfwWin = static_cast<GLFWwindow*>(window.GetNativeHandle());
@@ -119,8 +118,7 @@ RenderContext::RenderContext(Window& window, const String32& preferredAPI)
 	_impl->surface = Vk::Surface(_impl->ctx.Instance(), raw_surface);
 
 	if (!_impl->allocator.Init(_impl->ctx)) {
-		ZHLN::Log("FATAL: Vulkan Memory Allocator (VMA) failed to initialize");
-		std::abort();
+		ZHLN::Panic("FATAL: Vulkan Memory Allocator (VMA) failed to initialize");
 	}
 
 	_impl->swapchain = Vk::Swapchain(_impl->ctx.Device(), {});

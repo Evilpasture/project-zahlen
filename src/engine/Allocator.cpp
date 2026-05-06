@@ -10,8 +10,7 @@ LinearAllocator::LinearAllocator(size_t capacity) noexcept : _capacity(capacity)
 	void* raw = ::operator new(capacity, std::align_val_t{64}, std::nothrow);
 
 	if (!raw) [[unlikely]] {
-		ZHLN::Log("FATAL: LinearAllocator failed to allocate {} bytes\n", capacity);
-		std::abort();
+		ZHLN::Panic("FATAL: LinearAllocator failed to allocate {} bytes\n", capacity);
 	}
 
 	_buffer = static_cast<std::byte*>(raw);
