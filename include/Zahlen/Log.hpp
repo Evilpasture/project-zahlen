@@ -99,24 +99,10 @@ template <typename... Args> [[noreturn]] void Panic(LogContext ctx, Args&&... ar
 }
 
 struct DumpOptions {
-	size_t bytes_per_line = 16; // Standard hex dump width
-	bool show_ascii = true;		// Show readable characters
-	bool show_interpret = true; // Show float/int guesses
+	size_t bytes_per_line = 16;
+	bool show_ascii = true;
+	bool show_interpret = true;
 };
-
-#if defined(__clang__)
-template <typename T> inline void TraceStruct(const T& obj) {
-	// Clang's magic intrinsic that prints member names and values
-	// It requires a printf-style callback
-	__builtin_dump_struct(&obj, [](const char* fmt, ...) {
-		va_list args;
-		va_start(args, fmt);
-		std::vprintf(fmt, args);
-		va_end(args);
-		return 0;
-	});
-}
-#endif
 
 // ANSI Color Helpers
 namespace Color {
@@ -127,6 +113,55 @@ inline const char* Yellow = "\033[33m";
 inline const char* Green = "\033[32m";
 inline const char* Red = "\033[31m";
 } // namespace Color
+
+#if defined(__clang__)
+// Callback used by __builtin_dump_struct
+// We route it to stderr so it matches ZHLN::Log and ZHLN::MemoryDump
+inline int TraceStructCallback(const char* fmt, ...) {
+	va_list args;
+	va_start(args, fmt);
+	int ret = std::vfprintf(stderr, fmt, args);
+	va_end(args);
+	return ret;
+}
+
+template <typename T>
+inline void TraceStructInternal(const T& obj, std::string_view name, LogContext ctx) {
+	std::println(stderr, "{}┌─── STRUCT TRACE: {} ({}) ───{}", Color::Cyan, name, ctx.fmt,
+				 Color::Reset);
+	std::println(stderr, "│ Source:  {}:{}", ctx.loc.file_name(), ctx.loc.line());
+	std::println(stderr,
+				 "├──────────────────────────────────────────────────────────────────────────────");
+
+	// Smart detection: If you pass a pointer, we dereference it automatically!
+	if constexpr (std::is_pointer_v<T>) {
+		if (obj)
+			__builtin_dump_struct(obj, &TraceStructCallback);
+		else
+			std::println(stderr, "  (null pointer)");
+	} else if constexpr (requires { obj.get(); }) { // Detects std::unique_ptr / std::shared_ptr
+		if (obj.get())
+			__builtin_dump_struct(obj.get(), &TraceStructCallback);
+		else
+			std::println(stderr, "  (null smart pointer)");
+	} else {
+		__builtin_dump_struct(&obj, &TraceStructCallback);
+	}
+
+	std::println(
+		stderr,
+		"{}└──────────────────────────────────────────────────────────────────────────────{}",
+		Color::Cyan, Color::Reset);
+}
+#else
+template <typename T>
+inline void TraceStructInternal(const T& obj, std::string_view name, LogContext ctx) {
+	std::println(stderr,
+				 "[{}:{}] TraceStruct not supported on this compiler. Falling back to MemoryDump.",
+				 ctx.loc.file_name(), ctx.loc.line());
+	SmartDumpInternal(obj, name, ctx);
+}
+#endif
 
 inline void MemoryDump(const void* ptr, size_t size, std::string_view label, LogContext ctx,
 					   DumpOptions opts = {}) {
@@ -236,6 +271,7 @@ template <typename T> void SmartDumpInternal(const T& var, std::string_view name
 // Updated macro: uses the 'fmt' field of LogContext to pass a custom sub-label
 #define ZHLN_DUMP(var) ZHLN::SmartDumpInternal(var, #var, "Manual Dump")
 #define ZHLN_DUMP_EXT(var, label) ZHLN::SmartDumpInternal(&var, sizeof(var), #var, label)
+#define ZHLN_TRACE(var) ZHLN::TraceStructInternal(var, #var, "Struct Reflection")
 
 /**
  * @brief The bridge for Jolt Physics (C-Style variadic)
