@@ -121,7 +121,11 @@ struct AssetPaths {
 static AssetPaths ResolvePaths() {
 	AssetPaths p;
 	p.asset_prefix = "resources/assets/main_sponza/";
-	p.shader_prefix = "";
+#ifdef SHADER_DIR
+	p.shader_prefix = SHADER_DIR;
+#else
+	p.shader_prefix = "./";
+#endif
 
 	if (std::filesystem::exists("build/src/render/sponza.hlsl.VSMain.spv")) {
 		p.shader_prefix = "build/src/render/";
@@ -531,6 +535,11 @@ static std::vector<const char*> FilterDeviceExtensions(VkPhysicalDevice physical
 auto main() -> int {
 	const AssetPaths paths = ResolvePaths();
 	ZHLN::Demo::WindowState win = ZHLN::Demo::InitWindow(1280, 720, "ZHLN Engine - Sponza Atrium");
+
+	if (!win.os_window) {
+		std::println(stderr, "Failed to create OS window. Exiting.");
+		return -1;
+	}
 
 	// --- Vulkan context ---
 	ZHLN_InstanceDesc inst_desc = ZHLN_VERBOSE_INSTANCE_DESC;
