@@ -377,10 +377,10 @@ struct FrameRecordDesc {
 
 	VkImage depthImage;
 	VkImageView depthView;
-	bool& depthInitialized;
 
 	const VkImage shadowImage;
 	VkImageView shadowView;
+    VkExtent2D shadowExtent;
 
 	const PipelineSet& pipelines;
 	const SceneBuffers& scene;
@@ -409,7 +409,7 @@ static ZHLN::Vk::PassDesc BuildShadowPass(const FrameRecordDesc& d) {
 	pass.record = [d](VkCommandBuffer cmd) {
 		ZHLN_RenderPassDesc shadowPass = {.target_view = VK_NULL_HANDLE,
 										  .depth_view = d.shadowView,
-										  .extent = {4096, 4096},
+										  .extent = d.shadowExtent,
 										  .clear_depth = 1.0f};
 		ZHLN::Vk::ScopedRendering render(cmd, shadowPass);
 
@@ -433,43 +433,49 @@ static ZHLN::Vk::PassDesc BuildMainPass(const FrameRecordDesc& d) {
 	pass.name = "Main Scene Pass";
 
 	// 1. Transition Swapchain to be drawable
-	pass.transitions.push_back(
-		{.name = "swapchain: UNDEFINED -> COLOR_ATTACHMENT",
-		 .barrier = {.image = d.swapchainImage,
-					 .src_access = VK_ACCESS_2_NONE,
-					 .dst_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-					 .src_layout = VK_IMAGE_LAYOUT_UNDEFINED,
-					 .dst_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-					 .src_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-					 .dst_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-					 .aspect = VK_IMAGE_ASPECT_COLOR_BIT}});
+	pass.transitions.push_back({
+		.name = "swapchain: UNDEFINED -> COLOR_ATTACHMENT",
+		.barrier = {
+			.image = d.swapchainImage,
+			.src_access = VK_ACCESS_2_NONE,
+			.dst_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+			.src_layout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.dst_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+			.src_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+			.dst_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+			.aspect = VK_IMAGE_ASPECT_COLOR_BIT
+		}
+	});
 
-	// 2. Initialize the Depth Buffer layout (only happens on first frame / resize)
-	if (!d.depthInitialized) {
-		pass.transitions.push_back(
-			{.name = "main_depth: UNDEFINED -> DEPTH_ATTACHMENT",
-			 .barrier = {.image = d.depthImage,
-						 .src_access = VK_ACCESS_2_NONE,
-						 .dst_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-						 .src_layout = VK_IMAGE_LAYOUT_UNDEFINED,
-						 .dst_layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-						 .src_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-						 .dst_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-						 .aspect = VK_IMAGE_ASPECT_DEPTH_BIT}});
-		d.depthInitialized = true;
-	}
+	// 2. Unconditionally discard last frame's depth and prepare for writing
+	pass.transitions.push_back({
+		.name = "main_depth: UNDEFINED -> DEPTH_ATTACHMENT",
+		.barrier = {
+			.image = d.depthImage,
+			.src_access = VK_ACCESS_2_NONE, // We don't care what touched it last
+			.dst_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+			.src_layout = VK_IMAGE_LAYOUT_UNDEFINED, // Discard previous contents
+			.dst_layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+			.src_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+			.dst_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+			.aspect = VK_IMAGE_ASPECT_DEPTH_BIT
+		}
+	});
 
 	// 3. Transition the Shadow Map we just drew so the Fragment Shader can read it
-	pass.transitions.push_back(
-		{.name = "shadow_depth: DEPTH_ATTACHMENT -> SHADER_READ",
-		 .barrier = {.image = d.shadowImage,
-					 .src_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-					 .dst_access = VK_ACCESS_2_SHADER_READ_BIT,
-					 .src_layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-					 .dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-					 .src_stage = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-					 .dst_stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-					 .aspect = VK_IMAGE_ASPECT_DEPTH_BIT}});
+	pass.transitions.push_back({
+		.name = "shadow_depth: DEPTH_ATTACHMENT -> SHADER_READ",
+		.barrier = {
+			.image = d.shadowImage,
+			.src_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+			.dst_access = VK_ACCESS_2_SHADER_READ_BIT,
+			.src_layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+			.dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			.src_stage = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+			.dst_stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+			.aspect = VK_IMAGE_ASPECT_DEPTH_BIT
+		}
+	});
 
 	pass.record = [d](VkCommandBuffer cmd) {
 		ZHLN_RenderPassDesc mainPass = {.target_view = d.swapchainView,
@@ -478,7 +484,7 @@ static ZHLN::Vk::PassDesc BuildMainPass(const FrameRecordDesc& d) {
 										.clear_color = {0.5f, 0.7f, 1.0f, 1.0f},
 										.clear_depth = 1.0f};
 		ZHLN::Vk::ScopedRendering render(cmd, mainPass);
-
+		
 		VkBuffer vboHandle = d.scene.vbo;
 		VkDeviceSize offset = 0;
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d.pipelines.pipeline);
@@ -865,7 +871,6 @@ auto main() -> int {
 			.extent = frame.swapchain.Get().extent,
 			.depthImage = frame.depthImage.Handle(),
 			.depthView = frame.depthView.Get(),
-			.depthInitialized = frame.depthInitialized,
 			.shadowImage = shadowImage.Handle(),
 			.shadowView = shadowView.Get(),
 			.pipelines = activePipelines,
