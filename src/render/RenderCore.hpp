@@ -889,4 +889,28 @@ using Sampler = DeviceHandle<VkSampler, ZHLN_DestroySampler>;
 using DescriptorSetLayout = DeviceHandle<VkDescriptorSetLayout, ZHLN_DestroyDescriptorSetLayout>;
 using DescriptorPool = DeviceHandle<VkDescriptorPool, ZHLN_DestroyDescriptorPool>;
 
+// ============================================================================
+// Extension Query Utilities
+// ============================================================================
+
+[[nodiscard]] inline bool IsInstanceExtensionSupported(std::string_view extension) noexcept {
+    uint32_t count = 0;
+    vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
+    std::vector<VkExtensionProperties> available(count);
+    vkEnumerateInstanceExtensionProperties(nullptr, &count, available.data());
+    return std::ranges::any_of(available, [&](const auto& prop) {
+        return prop.extensionName == extension;
+    });
+}
+
+[[nodiscard]] inline bool IsDeviceExtensionSupported(VkPhysicalDevice physical, std::string_view extension) noexcept {
+    uint32_t count = 0;
+    vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, nullptr);
+    std::vector<VkExtensionProperties> available(count);
+    vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, available.data());
+    return std::ranges::any_of(available, [&](const auto& prop) {
+        return prop.extensionName == extension;
+    });
+}
+
 } // namespace ZHLN::Vk

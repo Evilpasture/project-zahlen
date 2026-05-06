@@ -482,52 +482,6 @@ static void RecordFrame(const FrameRecordDesc& d) {
 							   VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(d.cmd, d.swapchainImage);
 }
 
-static std::vector<const char*> FilterExtensions(const std::vector<const char*>& requested) {
-	uint32_t count;
-	vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
-	std::vector<VkExtensionProperties> available(count);
-	vkEnumerateInstanceExtensionProperties(nullptr, &count, available.data());
-
-	std::vector<const char*> active;
-	for (auto req : requested) {
-		bool found = false;
-		for (const auto& avail : available) {
-			if (strcmp(req, avail.extensionName) == 0) {
-				found = true;
-				break;
-			}
-		}
-		if (found) {
-			active.push_back(req);
-		} else {
-			std::println(stderr, "[VULKAN] Extension not supported, skipping: {}", req);
-		}
-	}
-	return active;
-}
-
-static std::vector<const char*> FilterDeviceExtensions(VkPhysicalDevice physical,
-													   const std::vector<const char*>& requested) {
-	uint32_t count;
-	vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, nullptr);
-	std::vector<VkExtensionProperties> available(count);
-	vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, available.data());
-
-	std::vector<const char*> active;
-	for (auto req : requested) {
-		bool found = false;
-		for (const auto& avail : available) {
-			if (strcmp(req, avail.extensionName) == 0) {
-				found = true;
-				break;
-			}
-		}
-		if (found)
-			active.push_back(req);
-	}
-	return active;
-}
-
 // ============================================================================
 // main
 // ============================================================================
@@ -541,24 +495,33 @@ auto main() -> int {
 		return -1;
 	}
 
-	// --- Vulkan context ---
+	// --- 1. Instance Setup ---
 	ZHLN_InstanceDesc inst_desc = ZHLN_VERBOSE_INSTANCE_DESC;
-	auto required = ZHLN::Demo::GetRequiredInstanceExtensions();
-	required.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-	required.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
-	required.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+	std::vector<const char*> inst_exts = ZHLN::Demo::GetRequiredInstanceExtensions();
+	inst_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+	inst_exts.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
+	inst_exts.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
 #ifdef __APPLE__
-	required.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+	inst_exts.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
 #endif
 
-	// NEW: Filter out unsupported extensions
-	auto active_exts = FilterExtensions(required);
-	inst_desc.extensions = active_exts.data();
-	inst_desc.extension_count = static_cast<uint32_t>(active_exts.size());
+	inst_desc.extensions = inst_exts.data();
+	inst_desc.extension_count = static_cast<uint32_t>(inst_exts.size());
 
-	// --- Feature chain setup ---
+	// --- 2. Feature & Extension Negotiation ---
+	// We check if the instance supports Maintenance1 before linking it to the feature chain.
+	// The backend will filter the extension itself, but we need this boolean for the pNext
+	// pointers.
+	bool has_maint1 =
+		ZHLN::Vk::IsInstanceExtensionSupported(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+
+	VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swap_maint = {
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR,
+		.swapchainMaintenance1 = VK_TRUE};
+
 	VkPhysicalDeviceVulkan13Features feat13 = {
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+		.pNext = has_maint1 ? &swap_maint : nullptr, // Link only if extension is available
 		.synchronization2 = VK_TRUE,
 		.dynamicRendering = VK_TRUE,
 		.shaderDemoteToHelperInvocation = VK_TRUE};
@@ -568,59 +531,33 @@ auto main() -> int {
 		.pNext = &feat13,
 		.bufferDeviceAddress = VK_TRUE};
 
-	// Check for Maintenance1 support (Instance side)
-	bool has_maint1 = false;
-	for (auto e : active_exts)
-		if (strcmp(e, VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME) == 0)
-			has_maint1 = true;
-
-	VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swap_maint = {
-		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR,
-		.swapchainMaintenance1 = VK_TRUE};
-
-	// ONLY link the maintenance features if the extension is present
-	if (has_maint1) {
-		feat13.pNext = &swap_maint;
-	} else {
-		feat13.pNext = nullptr;
-	}
-
 	VkPhysicalDeviceFeatures2 feat2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
 									   .pNext = &feat12,
 									   .features = {.samplerAnisotropy = VK_TRUE}};
 
-	// --- Device Extensions ---
-	std::vector<const char*> dev_req = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+	// --- 3. Device Setup ---
+	std::vector<const char*> dev_exts = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
-	// Only add these if they are likely to be supported
 	if (has_maint1) {
-		dev_req.push_back(VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME);
-		dev_req.push_back(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME);
+		dev_exts.push_back(VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME);
+		dev_exts.push_back(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME);
 	}
-
 #ifdef __APPLE__
-	dev_req.push_back("VK_KHR_portability_subset");
+	dev_exts.push_back("VK_KHR_portability_subset");
 #endif
 
-#ifdef __APPLE__
-	const char* dev_exts[] = {
-		VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
-		VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME, "VK_KHR_portability_subset"};
-	const uint32_t dev_ext_count = 4;
-#else
-	const char* dev_exts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-							  VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
-							  VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME};
-	const uint32_t dev_ext_count = 3;
-#endif
-
-	ZHLN_DeviceDesc dev_desc = {.extensions = dev_exts,
-								.extension_count = dev_ext_count,
+	ZHLN_DeviceDesc dev_desc = {.extensions = dev_exts.data(),
+								.extension_count = static_cast<uint32_t>(dev_exts.size()),
 								.features = &feat2,
 								.enable_validation = true};
+
+	// --- 4. Context Creation ---
+	// Note: We pass VK_NULL_HANDLE for surface here; ZHLN_SelectPhysicalDevice
+	// handles headless or windowed selection gracefully.
 	auto ctx = ZHLN::Vk::Context::Create(inst_desc, {VK_NULL_HANDLE, VK_NULL_HANDLE}, dev_desc);
+
 	if (!ctx) {
-		std::println("Context creation failed");
+		std::println(stderr, "Context creation failed. Check if your GPU supports Vulkan 1.3.");
 		return -1;
 	}
 

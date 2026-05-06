@@ -24,9 +24,8 @@ static VkBool32 VKAPI_CALL ZHLN_Internal_DebugCallback(
 
 	return VK_FALSE;
 }
-
-VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* desc) {
-	// C23: We can initialize the Vulkan structs directly inside the call
+[[nodiscard]]
+VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
 	const VkApplicationInfo app_info = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
 										.pApplicationName = desc->app_name,
 										.applicationVersion = desc->version,
@@ -34,22 +33,54 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* desc) {
 
 	static const char* const validation_layers[] = {"VK_LAYER_KHRONOS_validation"};
 
-	// We need to merge the user extensions with the debug extension if validation is on
+	// --- Query available instance extensions to filter out unsupported ones ---
+	uint32_t available_count = 0;
+	vkEnumerateInstanceExtensionProperties(NULL, &available_count, NULL);
+	if (available_count > 128) {
+		available_count = 128; // safe clamp for stack-only allocation
+	}
+	VkExtensionProperties available_exts[128];
+	vkEnumerateInstanceExtensionProperties(NULL, &available_count, available_exts);
+
 	const char* final_extensions[32];
-	uint32_t final_count = desc->extension_count;
+	uint32_t final_count = 0;
+
 	for (uint32_t i = 0; i < desc->extension_count; ++i) {
-		final_extensions[i] = desc->extensions[i];
+		bool found = false;
+		for (uint32_t j = 0; j < available_count; ++j) {
+			if (strcmp(desc->extensions[i], available_exts[j].extensionName) == 0) {
+				found = true;
+				break;
+			}
+		}
+		if (found) {
+			if (final_count < 32) {
+				final_extensions[final_count++] = desc->extensions[i];
+			}
+		} else {
+			fprintf(stderr, "[VULKAN] Skipping unsupported instance extension: %s\n",
+					desc->extensions[i]);
+		}
 	}
 
+	// Auto-inject debug utils if validation is requested and supported
 	if (desc->enable_validation) {
 		bool has_debug_ext = false;
 		for (uint32_t i = 0; i < final_count; ++i) {
 			if (strcmp(final_extensions[i], VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0) {
 				has_debug_ext = true;
+				break;
 			}
 		}
 		if (!has_debug_ext) {
-			final_extensions[final_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+			// Verify if system actually supports debug utils before force-injecting
+			for (uint32_t j = 0; j < available_count; ++j) {
+				if (strcmp(VK_EXT_DEBUG_UTILS_EXTENSION_NAME, available_exts[j].extensionName) ==
+					0) {
+					final_extensions[final_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+					break;
+				}
+			}
 		}
 	}
 
@@ -59,13 +90,11 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* desc) {
 		.enabledExtensionCount = final_count,
 		.ppEnabledExtensionNames = final_extensions,
 		.enabledLayerCount = desc->enable_validation ? 1U : 0U,
-		.ppEnabledLayerNames =
-			desc->enable_validation ? validation_layers : nullptr, // Compound literal
+		.ppEnabledLayerNames = desc->enable_validation ? validation_layers : NULL,
 		.flags = 0,
 	};
 
 #ifdef __APPLE__
-	// Required to see MoltenVK/KosmicKrisp devices
 	create_info.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 #endif
 
@@ -217,7 +246,8 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
 
 	// --- Filter Device Extensions ---
 	uint32_t available_count = 0;
-	vkEnumerateDeviceExtensionProperties(desc->physical->handle, nullptr, &available_count, nullptr);
+	vkEnumerateDeviceExtensionProperties(desc->physical->handle, nullptr, &available_count,
+										 nullptr);
 	VkExtensionProperties available_exts[available_count];
 	vkEnumerateDeviceExtensionProperties(desc->physical->handle, nullptr, &available_count,
 										 available_exts);
@@ -236,8 +266,7 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
 		if (found) {
 			active_exts[active_count++] = desc->extensions[i];
 		} else {
-			fprintf(stderr, "[VULKAN] Skipping unsupported extension: %s\n",
-					desc->extensions[i]);
+			fprintf(stderr, "[VULKAN] Skipping unsupported extension: %s\n", desc->extensions[i]);
 		}
 	}
 
@@ -436,9 +465,9 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
 	};
 	const bool shared = (queue_families[0] == queue_families[1]);
 
-    // If this function pointer exists, the extension was enabled during device creation.
-    const auto maint1_fn = vkGetDeviceProcAddr(desc->device->handle, "vkReleaseSwapchainImagesKHR");
-    const bool has_maint1 = (maint1_fn != nullptr);
+	// If this function pointer exists, the extension was enabled during device creation.
+	const auto maint1_fn = vkGetDeviceProcAddr(desc->device->handle, "vkReleaseSwapchainImagesKHR");
+	const bool has_maint1 = (maint1_fn != nullptr);
 
 	// Define the present modes we are "aware" of to satisfy Maintenance1
 	// We provide the modes found during query support.
@@ -450,7 +479,7 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
 
 	const VkSwapchainCreateInfoKHR create_info = {
 		.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-		.pNext = has_maint1 ? &present_modes_info : nullptr, 
+		.pNext = has_maint1 ? &present_modes_info : nullptr,
 		.flags = 0,
 		.surface = desc->surface,
 		.minImageCount = image_count,
