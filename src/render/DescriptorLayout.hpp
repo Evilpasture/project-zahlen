@@ -17,15 +17,21 @@ template <uint32_t Binding, VkDescriptorType Type, VkShaderStageFlags Stages> st
 	static constexpr VkShaderStageFlags stages = Stages;
 };
 
-// Convenience aliases matching your existing usage patterns
+// Convenience aliases
 template <uint32_t B, VkShaderStageFlags S = VK_SHADER_STAGE_FRAGMENT_BIT>
 using SampledImageSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, S>;
 
 template <uint32_t B, VkShaderStageFlags S = VK_SHADER_STAGE_FRAGMENT_BIT>
 using SamplerSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_SAMPLER, S>;
 
+template <uint32_t B, VkShaderStageFlags S = VK_SHADER_STAGE_COMPUTE_BIT>
+using StorageImageSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, S>;
+
 template <uint32_t B, VkShaderStageFlags S = VK_SHADER_STAGE_VERTEX_BIT>
 using UniformSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, S>;
+
+template <uint32_t B, VkShaderStageFlags S = VK_SHADER_STAGE_COMPUTE_BIT>
+using StorageBufferSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, S>;
 
 // ============================================================================
 // DescriptorWrite — typed wrapper so Write() knows what VkDescriptorImageInfo
@@ -38,6 +44,12 @@ struct ImageWrite {
 };
 struct SamplerWrite {
 	VkSampler sampler;
+};
+
+struct BufferWrite {
+	VkBuffer buffer;
+	VkDeviceSize offset = 0;
+	VkDeviceSize range = VK_WHOLE_SIZE;
 };
 
 // ============================================================================
@@ -143,10 +155,12 @@ template <typename... Slots> class DescriptorLayout {
 
 		// 2. Prepare arrays for Vulkan structures
 		std::array<VkDescriptorImageInfo, kCount> imageInfos{};
+		std::array<VkDescriptorBufferInfo, kCount> bufferInfos{};
 		std::array<VkWriteDescriptorSet, kCount> writes{};
 
 		// 3. Call the helper that uses index_sequence (compile-time indices)
-		WriteAll(device, set, argTuple, imageInfos, writes, std::make_index_sequence<kCount>{});
+		WriteAll(device, set, argTuple, imageInfos, bufferInfos, writes,
+				 std::make_index_sequence<kCount>{});
 	}
 
   private:
@@ -154,14 +168,12 @@ template <typename... Slots> class DescriptorLayout {
 	template <typename ArgTuple, size_t... I>
 	static void WriteAll(VkDevice device, VkDescriptorSet set, ArgTuple& args,
 						 std::array<VkDescriptorImageInfo, kCount>& imageInfos,
+						 std::array<VkDescriptorBufferInfo, kCount>& bufferInfos,
 						 std::array<VkWriteDescriptorSet, kCount>& writes,
 						 std::index_sequence<I...>) noexcept {
 
-		// Expand the fold expression using the compile-time index I
 		(WriteSlot<I, std::tuple_element_t<I, std::tuple<Slots...>>>(
-			 set,
-			 std::get<I>(args), // This now works because I is a constant
-			 imageInfos[I], writes[I]),
+			 set, std::get<I>(args), imageInfos[I], bufferInfos[I], writes[I]),
 		 ...);
 
 		vkUpdateDescriptorSets(device, kCount, writes.data(), 0, nullptr);
@@ -169,6 +181,7 @@ template <typename... Slots> class DescriptorLayout {
 
 	template <size_t I, typename Slot, typename Arg>
 	static void WriteSlot(VkDescriptorSet set, Arg&& arg, VkDescriptorImageInfo& imageInfo,
+						  VkDescriptorBufferInfo& bufferInfo,
 						  VkWriteDescriptorSet& write) noexcept {
 		write = {
 			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -180,19 +193,32 @@ template <typename... Slots> class DescriptorLayout {
 
 		if constexpr (Slot::type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE) {
 			static_assert(std::is_same_v<std::remove_cvref_t<Arg>, ImageWrite>,
-						  "Binding expects ImageWrite { view, layout }");
+						  "Binding expects ImageWrite");
 			imageInfo = {.imageView = arg.view, .imageLayout = arg.layout};
+			write.pImageInfo = &imageInfo;
+
+		} else if constexpr (Slot::type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
+			static_assert(std::is_same_v<std::remove_cvref_t<Arg>, ImageWrite>,
+						  "Binding expects ImageWrite");
+			// Storage images require GENERAL layout
+			imageInfo = {.imageView = arg.view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
 			write.pImageInfo = &imageInfo;
 
 		} else if constexpr (Slot::type == VK_DESCRIPTOR_TYPE_SAMPLER) {
 			static_assert(std::is_same_v<std::remove_cvref_t<Arg>, SamplerWrite>,
-						  "Binding expects SamplerWrite { sampler }");
+						  "Binding expects SamplerWrite");
 			imageInfo = {.sampler = arg.sampler};
 			write.pImageInfo = &imageInfo;
 
+		} else if constexpr (Slot::type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ||
+							 Slot::type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
+			static_assert(std::is_same_v<std::remove_cvref_t<Arg>, BufferWrite>,
+						  "Binding expects BufferWrite");
+			bufferInfo = {.buffer = arg.buffer, .offset = arg.offset, .range = arg.range};
+			write.pBufferInfo = &bufferInfo;
+
 		} else {
-			static_assert(sizeof(Slot) == 0,
-						  "Unhandled descriptor type — add a specialization in WriteSlot");
+			static_assert(sizeof(Slot) == 0, "Unhandled descriptor type");
 		}
 	}
 };

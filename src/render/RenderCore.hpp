@@ -628,6 +628,12 @@ template <> struct LayoutTraits<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL> {
 	static constexpr VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
 };
 
+// Specialization for Compute Shader Storage Image Read/Write
+template <> struct LayoutTraits<VK_IMAGE_LAYOUT_GENERAL> {
+	static constexpr VkAccessFlags2 access = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
+	static constexpr VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+};
+
 template <VkImageLayout OldLayout, VkImageLayout NewLayout>
 inline void TransitionLayout(const VkCommandBuffer cmd, const VkImage image,
 							 const VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) noexcept {
@@ -971,6 +977,22 @@ inline void ExecutePasses(VkCommandBuffer cmd, std::span<const PassDesc> passes)
 			pass.record(cmd);
 		}
 	}
+}
+
+// Typed dispatch helper — computes group count from total invocations and local size
+inline void Dispatch(VkCommandBuffer cmd,
+                     uint32_t totalX, uint32_t totalY, uint32_t totalZ,
+                     uint32_t localX, uint32_t localY, uint32_t localZ) noexcept {
+    ZHLN_CmdDispatch(cmd,
+        (totalX + localX - 1) / localX,
+        (totalY + localY - 1) / localY,
+        (totalZ + localZ - 1) / localZ);
+}
+
+// Direct group count version when you're managing it yourself
+inline void DispatchGroups(VkCommandBuffer cmd,
+                           uint32_t gX, uint32_t gY, uint32_t gZ) noexcept {
+    ZHLN_CmdDispatch(cmd, gX, gY, gZ);
 }
 
 } // namespace ZHLN::Vk

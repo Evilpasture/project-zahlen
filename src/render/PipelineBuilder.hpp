@@ -189,4 +189,67 @@ class PipelineBuilder {
 	PipelineConfig _cfg;
 };
 
+// ============================================================================
+// ComputePipelineBuilder — builder for compute pipelines
+// ============================================================================
+
+class ComputePipelineBuilder {
+  public:
+	// Store individual fields rather than the const struct to allow mutation during "building"
+	ComputePipelineBuilder& Shader(const uint32_t* code, size_t size, const char* entry = "main") noexcept {
+		_code = code;
+		_size = size;
+		_entry = entry;
+		return *this;
+	}
+
+	// Overload if you already have a descriptor from elsewhere
+	ComputePipelineBuilder& Shader(const ZHLN_ShaderDesc& desc) noexcept {
+		_code = desc.code;
+		_size = desc.size;
+		_entry = desc.entry_point;
+		return *this;
+	}
+
+	ComputePipelineBuilder& Layout(const VkPipelineLayout l) noexcept {
+		_layout = l;
+		return *this;
+	}
+
+	[[nodiscard]] Pipeline Build(const VkDevice device) const noexcept {
+		if (!Validate()) return {};
+
+		// Aggregate initialization: We construct the 'const struct' locally.
+		// This is valid C++ for 'const' typedefs.
+		const ZHLN_ComputePipelineDesc desc = {
+			.shader = {
+				.code = _code,
+				.size = _size,
+				.entry_point = _entry
+			},
+			.layout = _layout,
+		};
+
+		return Pipeline(device, ZHLN_CreateComputePipeline(device, &desc));
+	}
+
+  private:
+	[[nodiscard]] bool Validate() const noexcept {
+		if (!_code || _size == 0) {
+			std::println(stderr, "[ComputePipelineBuilder] Missing or invalid shader code.");
+			return false;
+		}
+		if (_layout == VK_NULL_HANDLE) {
+			std::println(stderr, "[ComputePipelineBuilder] Missing pipeline layout.");
+			return false;
+		}
+		return true;
+	}
+
+	const uint32_t* _code = nullptr;
+	size_t _size = 0;
+	const char* _entry = nullptr;
+	VkPipelineLayout _layout = VK_NULL_HANDLE;
+};
+
 } // namespace ZHLN::Vk

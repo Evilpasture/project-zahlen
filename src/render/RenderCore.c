@@ -1285,3 +1285,49 @@ void ZHLN_DestroyDescriptorSetLayout(const VkDevice device, const VkDescriptorSe
 void ZHLN_DestroyDescriptorPool(const VkDevice device, const VkDescriptorPool pool) {
 	vkDestroyDescriptorPool(device, pool, nullptr);
 }
+[[nodiscard]]
+VkPipeline ZHLN_CreateComputePipeline(const VkDevice device,
+                                      const ZHLN_ComputePipelineDesc* const restrict desc) {
+	const VkShaderModule comp_module = ZHLN_CreateShaderModule(device, &desc->shader);
+	if (comp_module == VK_NULL_HANDLE) {
+		return VK_NULL_HANDLE;
+	}
+
+	char entry_name[64] = "main";
+	if (desc->shader.entry_point) {
+		strncpy(entry_name, desc->shader.entry_point, 63);
+	} else {
+		SpvReflectShaderModule ref_mod;
+		if (spvReflectCreateShaderModule(desc->shader.size, desc->shader.code, &ref_mod) ==
+		    SPV_REFLECT_RESULT_SUCCESS) {
+			if (ref_mod.entry_point_count > 0) {
+				strncpy(entry_name, ref_mod.entry_points[0].name, 63);
+			}
+			spvReflectDestroyShaderModule(&ref_mod);
+		}
+	}
+
+	const VkPipelineShaderStageCreateInfo stage_info = {
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+		.stage = VK_SHADER_STAGE_COMPUTE_BIT,
+		.module = comp_module,
+		.pName = entry_name,
+	};
+
+	const VkComputePipelineCreateInfo pipeline_info = {
+		.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+		.stage = stage_info,
+		.layout = desc->layout,
+	};
+
+	VkPipeline pipeline = VK_NULL_HANDLE;
+	vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline);
+
+	vkDestroyShaderModule(device, comp_module, nullptr);
+	return pipeline;
+}
+
+void ZHLN_CmdDispatch(const VkCommandBuffer cmd, const uint32_t groupCountX,
+                      const uint32_t groupCountY, const uint32_t groupCountZ) {
+	vkCmdDispatch(cmd, groupCountX, groupCountY, groupCountZ);
+}

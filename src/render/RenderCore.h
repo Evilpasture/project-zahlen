@@ -464,6 +464,20 @@ void ZHLN_DestroySampler(const VkDevice device, const VkSampler sampler);
 void ZHLN_DestroyDescriptorSetLayout(const VkDevice device, const VkDescriptorSetLayout layout);
 void ZHLN_DestroyDescriptorPool(const VkDevice device, const VkDescriptorPool pool);
 
+/* --- COMPUTE PIPELINE --- */
+
+typedef const struct {
+	const ZHLN_ShaderDesc shader;
+	const VkPipelineLayout layout;
+} ZHLN_ComputePipelineDesc;
+
+[[nodiscard]]
+VkPipeline ZHLN_CreateComputePipeline(const VkDevice device,
+									  const ZHLN_ComputePipelineDesc* const ZHLN_RESTRICT desc);
+
+void ZHLN_CmdDispatch(const VkCommandBuffer cmd, const uint32_t groupCountX,
+					  const uint32_t groupCountY, const uint32_t groupCountZ);
+                      
 #ifdef __cplusplus
 }
 #endif
