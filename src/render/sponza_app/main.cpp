@@ -573,9 +573,10 @@ auto main() -> int {
 	VkPhysicalDeviceVulkan13Features feat13 = {
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
 		.pNext = has_maint1 ? &swap_maint : nullptr, // Link only if extension is available
-		.synchronization2 = VK_TRUE,
+		.shaderDemoteToHelperInvocation = VK_TRUE,
+        .synchronization2 = VK_TRUE,
 		.dynamicRendering = VK_TRUE,
-		.shaderDemoteToHelperInvocation = VK_TRUE};
+	};
 
 	VkPhysicalDeviceVulkan12Features feat12 = {
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
@@ -712,7 +713,7 @@ auto main() -> int {
 	auto shadowView =
 		ZHLN::Vk::CreateView<VK_FORMAT_D32_SFLOAT>(ctx.Device(), shadowImage.Handle());
 
-    VkExtent2D shadowExtent = { SHADOW_RES, SHADOW_RES };
+	VkExtent2D shadowExtent = {SHADOW_RES, SHADOW_RES};
 
 	// --- Samplers (Via Builder) ---
 	auto defaultSampler =
@@ -869,7 +870,7 @@ auto main() -> int {
 			.depthView = frame.depthView.Get(),
 			.shadowImage = shadowImage.Handle(),
 			.shadowView = shadowView.Get(),
-            .shadowExtent = shadowExtent,
+			.shadowExtent = shadowExtent,
 			.pipelines = activePipelines,
 			.scene = sceneBuffers,
 			.viewProj = viewProj,
