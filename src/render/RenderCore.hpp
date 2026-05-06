@@ -815,4 +815,33 @@ inline void CheckResult(const VkResult result, const char* context = "",
 	}
 }
 
+// ============================================================================
+// Image View Helpers
+// ============================================================================
+template <VkFormat F> struct FormatTraits;
+
+// Macro to avoid typing the same boilerplate for common formats
+#define ZHLN_FORMAT_ASPECT(Format, Aspect)                                                         \
+	template <> struct FormatTraits<Format> {                                                      \
+		static constexpr VkImageAspectFlags aspect = Aspect;                                       \
+	};
+
+ZHLN_FORMAT_ASPECT(VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT)
+ZHLN_FORMAT_ASPECT(VK_FORMAT_B8G8R8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT)
+ZHLN_FORMAT_ASPECT(VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT)
+ZHLN_FORMAT_ASPECT(VK_FORMAT_D24_UNORM_S8_UINT,
+				   VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)
+
+using ImageView = DeviceHandle<VkImageView, vkDestroyImageView>;
+
+template <VkFormat F>
+[[nodiscard]] static ImageView CreateView(const VkDevice device, const VkImage image,
+										  const uint32_t mips = 1) {
+	ZHLN_ImageViewDesc desc = {.image = image,
+							   .format = F,
+							   .aspect = FormatTraits<F>::aspect, // Deduced via TMP!
+							   .mip_levels = mips};
+	return ImageView(device, ZHLN_CreateImageView(device, &desc));
+}
+
 } // namespace ZHLN::Vk
