@@ -428,6 +428,20 @@ void ZHLN_CmdCopyBufferToImage(const VkCommandBuffer cmd,
 VkSemaphore ZHLN_CreateSemaphore(const VkDevice device);
 void ZHLN_DestroySemaphore(const VkDevice device, const VkSemaphore semaphore);
 
+/* --- IMAGE VIEW HELPERS --- */
+
+typedef const struct {
+	const VkImage image;
+	const VkFormat format;
+	const VkImageAspectFlags aspect;
+	const uint32_t mip_levels;	 // default 1
+	const uint32_t array_layers; // default 1
+} ZHLN_ImageViewDesc;
+
+[[nodiscard]]
+VkImageView ZHLN_CreateImageView(const VkDevice device,
+								 const ZHLN_ImageViewDesc* ZHLN_RESTRICT desc);
+
 #ifdef __cplusplus
 }
 #endif

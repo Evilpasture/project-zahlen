@@ -1153,3 +1153,27 @@ void ZHLN_DestroySemaphore(const VkDevice device, const VkSemaphore semaphore) {
 		vkDestroySemaphore(device, semaphore, nullptr);
 	}
 }
+[[nodiscard]]
+VkImageView ZHLN_CreateImageView(const VkDevice device,
+								 const ZHLN_ImageViewDesc* const restrict desc) {
+	const VkImageViewCreateInfo info = {
+		.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+		.image = desc->image,
+		.viewType = (desc->array_layers > 1) ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D,
+		.format = desc->format,
+		.subresourceRange =
+			{
+				.aspectMask = desc->aspect,
+				.baseMipLevel = 0,
+				.levelCount = desc->mip_levels ? desc->mip_levels : 1,
+				.baseArrayLayer = 0,
+				.layerCount = desc->array_layers ? desc->array_layers : 1,
+			},
+	};
+
+	VkImageView view;
+	if (vkCreateImageView(device, &info, nullptr, &view) != VK_SUCCESS) {
+		return VK_NULL_HANDLE;
+	}
+	return view;
+}
