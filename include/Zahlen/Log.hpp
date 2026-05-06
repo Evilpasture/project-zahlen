@@ -177,22 +177,29 @@ inline void MemoryDump(const void* ptr, size_t size, std::string_view label, Log
 
 		// 4. Smart Interpretation
 		std::print(stderr, " │ ");
-		if (i + 8 <= size) { // Check for 64-bit Pointer/Long first
+		if (i + 8 <= size) {
 			uint64_t val64;
 			std::memcpy(&val64, byte_ptr + i, 8);
 
-			// Heuristic: Does it look like a 64-bit pointer?
-			// On macOS/Linux, pointers usually start with 0x00007 or 0x00000001
-			if (val64 > 0x100000000 && val64 < 0x00007FFFFFFFFFFF) {
-				std::print(stderr, "{}ptr: {:#014x}{}", Color::Green, val64, Color::Reset);
+			if (val64 != 0) {
+				// Valid pointer range for macOS Silicon / Linux x64
+				if (val64 > 0x100000000 && val64 < 0x00007FFFFFFFFFFF) {
+					std::print(stderr, "{}ptr: {:#014x}{}", Color::Green, val64, Color::Reset);
+				} else {
+					// If not a pointer, try 32-bit interpretations
+					float f32;
+					int32_t i32;
+					std::memcpy(&f32, byte_ptr + i, 4);
+					std::memcpy(&i32, byte_ptr + i, 4);
+
+					if (!std::isnan(f32) && std::abs(f32) > 0.0001f && std::abs(f32) < 1000000.0f)
+						std::print(stderr, "flt: {:<12.4f}", f32);
+					else
+						std::print(stderr, "int: {:<12}", i32);
+				}
 			} else {
-				// Fallback to 32-bit float/int logic
-				float f32;
-				std::memcpy(&f32, byte_ptr + i, 4);
-				if (!std::isnan(f32) && std::abs(f32) > 0.00001f && std::abs(f32) < 1000000.0f)
-					std::print(stderr, "flt: {:<12.4f}", f32);
-				else
-					std::print(stderr, "int: {:<12}", *(int32_t*)(byte_ptr + i));
+				std::print(stderr, "{}---{}", Color::Gray,
+						   Color::Reset); // Just show a dash for zero
 			}
 		}
 
