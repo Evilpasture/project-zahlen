@@ -379,7 +379,7 @@ struct FrameRecordDesc {
 	VkImageView depthView;
 	bool& depthInitialized;
 
-	VkImage shadowImage;
+	const VkImage shadowImage;
 	VkImageView shadowView;
 
 	const PipelineSet& pipelines;
@@ -390,72 +390,100 @@ struct FrameRecordDesc {
 	float camPos[3];
 };
 
-static void RecordFrame(const FrameRecordDesc& d) {
-	ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-		d.cmd, d.swapchainImage);
+static ZHLN::Vk::PassDesc BuildShadowPass(const FrameRecordDesc& d) {
+	ZHLN::Vk::PassDesc pass;
+	pass.name = "Shadow Map Pass";
 
-	if (!d.depthInitialized) {
-		ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED,
-								   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-			d.cmd, d.depthImage, VK_IMAGE_ASPECT_DEPTH_BIT);
-		d.depthInitialized = true;
-	}
+	// Transition Shadow Map for Writing
+	pass.transitions.push_back(
+		{.name = "shadow_depth: UNDEFINED -> DEPTH_ATTACHMENT",
+		 .barrier = {.image = d.shadowImage,
+					 .src_access = VK_ACCESS_2_NONE,
+					 .dst_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+					 .src_layout = VK_IMAGE_LAYOUT_UNDEFINED,
+					 .dst_layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+					 .src_stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+					 .dst_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+					 .aspect = VK_IMAGE_ASPECT_DEPTH_BIT}});
 
-	VkBuffer vboHandle = d.scene.vbo;
-	VkDeviceSize offset = 0;
-
-	// --- Pass 1: shadow ---
-	ZHLN_ImageBarrierDesc shadowWriteBarrier = {
-		.image = d.shadowImage,
-		.src_access = VK_ACCESS_2_NONE,
-		.dst_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-		.src_layout = VK_IMAGE_LAYOUT_UNDEFINED,
-		.dst_layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-		.src_stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-		.dst_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-		.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
-	ZHLN_CmdImageBarrier(d.cmd, &shadowWriteBarrier);
-
-	{
+	pass.record = [d](VkCommandBuffer cmd) {
 		ZHLN_RenderPassDesc shadowPass = {.target_view = VK_NULL_HANDLE,
 										  .depth_view = d.shadowView,
 										  .extent = {4096, 4096},
 										  .clear_depth = 1.0f};
-		ZHLN::Vk::ScopedRendering render(d.cmd, shadowPass);
-		vkCmdBindPipeline(d.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d.pipelines.shadowPipeline);
-		vkCmdBindVertexBuffers(d.cmd, 0, 1, &vboHandle, &offset);
-		vkCmdBindIndexBuffer(d.cmd, d.scene.ibo, 0, VK_INDEX_TYPE_UINT32);
+		ZHLN::Vk::ScopedRendering render(cmd, shadowPass);
+
+		VkBuffer vboHandle = d.scene.vbo;
+		VkDeviceSize offset = 0;
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d.pipelines.shadowPipeline);
+		vkCmdBindVertexBuffers(cmd, 0, 1, &vboHandle, &offset);
+		vkCmdBindIndexBuffer(cmd, d.scene.ibo, 0, VK_INDEX_TYPE_UINT32);
 
 		for (const auto& draw : d.scene.drawCalls) {
 			Mat4 shadowMVP = Multiply(d.lightSpaceMatrix, draw.worldMatrix);
-			ZHLN::Vk::Push(d.cmd, d.pipelines.shadowLayout, VK_SHADER_STAGE_VERTEX_BIT, shadowMVP);
-			vkCmdDrawIndexed(d.cmd, draw.mesh->indexCount, 1, draw.mesh->firstIndex, 0, 0);
+			ZHLN::Vk::Push(cmd, d.pipelines.shadowLayout, VK_SHADER_STAGE_VERTEX_BIT, shadowMVP);
+			vkCmdDrawIndexed(cmd, draw.mesh->indexCount, 1, draw.mesh->firstIndex, 0, 0);
 		}
+	};
+	return pass;
+}
+
+static ZHLN::Vk::PassDesc BuildMainPass(const FrameRecordDesc& d) {
+	ZHLN::Vk::PassDesc pass;
+	pass.name = "Main Scene Pass";
+
+	// 1. Transition Swapchain to be drawable
+	pass.transitions.push_back(
+		{.name = "swapchain: UNDEFINED -> COLOR_ATTACHMENT",
+		 .barrier = {.image = d.swapchainImage,
+					 .src_access = VK_ACCESS_2_NONE,
+					 .dst_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+					 .src_layout = VK_IMAGE_LAYOUT_UNDEFINED,
+					 .dst_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+					 .src_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+					 .dst_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+					 .aspect = VK_IMAGE_ASPECT_COLOR_BIT}});
+
+	// 2. Initialize the Depth Buffer layout (only happens on first frame / resize)
+	if (!d.depthInitialized) {
+		pass.transitions.push_back(
+			{.name = "main_depth: UNDEFINED -> DEPTH_ATTACHMENT",
+			 .barrier = {.image = d.depthImage,
+						 .src_access = VK_ACCESS_2_NONE,
+						 .dst_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+						 .src_layout = VK_IMAGE_LAYOUT_UNDEFINED,
+						 .dst_layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+						 .src_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+						 .dst_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+						 .aspect = VK_IMAGE_ASPECT_DEPTH_BIT}});
+		d.depthInitialized = true;
 	}
 
-	// Shadow map → shader read
-	ZHLN_ImageBarrierDesc shadowReadBarrier = {
-		.image = d.shadowImage,
-		.src_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-		.dst_access = VK_ACCESS_2_SHADER_READ_BIT,
-		.src_layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-		.dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-		.src_stage = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-		.dst_stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-		.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
-	ZHLN_CmdImageBarrier(d.cmd, &shadowReadBarrier);
+	// 3. Transition the Shadow Map we just drew so the Fragment Shader can read it
+	pass.transitions.push_back(
+		{.name = "shadow_depth: DEPTH_ATTACHMENT -> SHADER_READ",
+		 .barrier = {.image = d.shadowImage,
+					 .src_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+					 .dst_access = VK_ACCESS_2_SHADER_READ_BIT,
+					 .src_layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+					 .dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+					 .src_stage = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+					 .dst_stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+					 .aspect = VK_IMAGE_ASPECT_DEPTH_BIT}});
 
-	// --- Pass 2: main scene ---
-	{
+	pass.record = [d](VkCommandBuffer cmd) {
 		ZHLN_RenderPassDesc mainPass = {.target_view = d.swapchainView,
 										.depth_view = d.depthView,
 										.extent = d.extent,
 										.clear_color = {0.5f, 0.7f, 1.0f, 1.0f},
 										.clear_depth = 1.0f};
-		ZHLN::Vk::ScopedRendering render(d.cmd, mainPass);
-		vkCmdBindPipeline(d.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d.pipelines.pipeline);
-		vkCmdBindVertexBuffers(d.cmd, 0, 1, &vboHandle, &offset);
-		vkCmdBindIndexBuffer(d.cmd, d.scene.ibo, 0, VK_INDEX_TYPE_UINT32);
+		ZHLN::Vk::ScopedRendering render(cmd, mainPass);
+
+		VkBuffer vboHandle = d.scene.vbo;
+		VkDeviceSize offset = 0;
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d.pipelines.pipeline);
+		vkCmdBindVertexBuffers(cmd, 0, 1, &vboHandle, &offset);
+		vkCmdBindIndexBuffer(cmd, d.scene.ibo, 0, VK_INDEX_TYPE_UINT32);
 
 		int current_mat = -2;
 		for (const auto& draw : d.scene.drawCalls) {
@@ -464,22 +492,45 @@ static void RecordFrame(const FrameRecordDesc& d) {
 				.lightSpaceMatrix = Multiply(d.lightSpaceMatrix, draw.worldMatrix),
 				.camPos = {d.camPos[0], d.camPos[1], d.camPos[2], 1.0f},
 			};
-			ZHLN::Vk::Push(d.cmd, d.pipelines.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, pc);
+			ZHLN::Vk::Push(cmd, d.pipelines.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, pc);
 
 			if (draw.mesh->materialIndex != current_mat) {
 				current_mat = draw.mesh->materialIndex;
 				VkDescriptorSet dSet = (current_mat >= 0)
 										   ? d.scene.materials[current_mat].descriptorSet
 										   : d.scene.fallbackMat.descriptorSet;
-				vkCmdBindDescriptorSets(d.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+				vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
 										d.pipelines.pipelineLayout, 0, 1, &dSet, 0, nullptr);
 			}
-			vkCmdDrawIndexed(d.cmd, draw.mesh->indexCount, 1, draw.mesh->firstIndex, 0, 0);
+			vkCmdDrawIndexed(cmd, draw.mesh->indexCount, 1, draw.mesh->firstIndex, 0, 0);
 		}
-	}
+	};
+	return pass;
+}
 
-	ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-							   VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(d.cmd, d.swapchainImage);
+static ZHLN::Vk::PassDesc BuildPresentPass(const FrameRecordDesc& d) {
+	ZHLN::Vk::PassDesc pass;
+	pass.name = "Present Handoff Pass";
+
+	pass.transitions.push_back(
+		{.name = "swapchain: COLOR_ATTACHMENT -> PRESENT",
+		 .barrier = {.image = d.swapchainImage,
+					 .src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+					 .dst_access = VK_ACCESS_2_NONE,
+					 .src_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+					 .dst_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+					 .src_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+					 .dst_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+					 .aspect = VK_IMAGE_ASPECT_COLOR_BIT}});
+
+	// No record function needed for present transition
+	return pass;
+}
+
+static void RecordFrame(const FrameRecordDesc& d) {
+	std::array passes = {BuildShadowPass(d), BuildMainPass(d), BuildPresentPass(d)};
+
+	ZHLN::Vk::ExecutePasses(d.cmd, passes);
 }
 
 // ============================================================================

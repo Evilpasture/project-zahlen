@@ -913,4 +913,64 @@ using DescriptorPool = DeviceHandle<VkDescriptorPool, ZHLN_DestroyDescriptorPool
     });
 }
 
+// ============================================================================
+// Render Graph (Linear Pass Execution)
+// ============================================================================
+
+struct PassResource {
+	const char* name = "unnamed_resource";
+	ZHLN_ImageBarrierDesc barrier;
+};
+
+struct PassDesc {
+	const char* name = "Unnamed Pass";
+	std::vector<PassResource> transitions;
+	std::function<void(VkCommandBuffer)> record;
+};
+
+inline void ExecutePasses(VkCommandBuffer cmd, std::span<const PassDesc> passes) noexcept {
+	for (const auto& pass : passes) {
+		
+		// 1. Batch all image transitions into a single pipeline barrier
+		std::vector<VkImageMemoryBarrier2> vk_barriers;
+		vk_barriers.reserve(pass.transitions.size());
+		
+		for (const auto& res : pass.transitions) {
+			vk_barriers.push_back({
+				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+				.srcStageMask = res.barrier.src_stage,
+				.srcAccessMask = res.barrier.src_access,
+				.dstStageMask = res.barrier.dst_stage,
+				.dstAccessMask = res.barrier.dst_access,
+				.oldLayout = res.barrier.src_layout,
+				.newLayout = res.barrier.dst_layout,
+				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.image = res.barrier.image,
+				.subresourceRange = {
+					.aspectMask = res.barrier.aspect,
+					.baseMipLevel = 0,
+					.levelCount = VK_REMAINING_MIP_LEVELS,
+					.baseArrayLayer = 0,
+					.layerCount = VK_REMAINING_ARRAY_LAYERS,
+				}
+			});
+		}
+
+		if (!vk_barriers.empty()) {
+			const VkDependencyInfo dep_info = {
+				.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+				.imageMemoryBarrierCount = static_cast<uint32_t>(vk_barriers.size()),
+				.pImageMemoryBarriers = vk_barriers.data()
+			};
+			vkCmdPipelineBarrier2(cmd, &dep_info);
+		}
+
+		// 2. Execute the draw commands
+		if (pass.record) {
+			pass.record(cmd);
+		}
+	}
+}
+
 } // namespace ZHLN::Vk
