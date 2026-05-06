@@ -95,9 +95,9 @@ endif()
 # ----------------------------------------------------------------------------
 
 # 1. Locate DXC
-find_program(DXC_COMPILER dxc HINTS $ENV{VULKAN_SDK}/bin $ENV{VULKAN_SDK}/Bin)
+find_program(DXC_EXECUTABLE dxc HINTS $ENV{VULKAN_SDK}/bin $ENV{VULKAN_SDK}/Bin)
 
-if(NOT DXC_COMPILER)
+if(NOT DXC_EXECUTABLE)
     message(FATAL_ERROR "zahlen_render: DXC compiler not found! Ensure VULKAN_SDK is set in your environment.")
 endif()
 
@@ -111,7 +111,7 @@ function(compile_hlsl SHADER_PATH ENTRY STAGE OUTPUT_VAR)
     
     add_custom_command(
         OUTPUT "${SPV_OUT}"
-        COMMAND ${DXC_COMPILER} 
+        COMMAND ${DXC_EXECUTABLE} 
                 -T ${STAGE}_6_0   # Target Profile: vs_6_0 or ps_6_0
                 -E ${ENTRY}       # Entry Point name
                 -spirv            # Output SPIR-V
