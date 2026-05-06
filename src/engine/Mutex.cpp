@@ -8,6 +8,7 @@
 #ifdef ZHLN_DEBUG
 #include <print>
 #endif
+#include <new>
 #include <thread>
 
 // Hardware-specific CPU yield for adaptive backoff
