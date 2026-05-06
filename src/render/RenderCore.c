@@ -964,6 +964,39 @@ void ZHLN_EndRendering(const VkCommandBuffer cmd) {
 	vkCmdEndRendering(cmd);
 }
 
+[[nodiscard]]
+ZHLN_FrameResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* const restrict desc) {
+	// Accessing via -> (Pointer access)
+	const VkCommandBufferSubmitInfo cmdInfo = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = desc->cmd};
+
+	const VkSemaphoreSubmitInfo waitInfo = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+											.semaphore = desc->imageAvailable,
+											.stageMask =
+												VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT};
+
+	const VkSemaphoreSubmitInfo signalInfo = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+											  .semaphore = desc->renderFinished,
+											  .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT};
+
+	const VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+								  .waitSemaphoreInfoCount = 1,
+								  .pWaitSemaphoreInfos = &waitInfo,
+								  .commandBufferInfoCount = 1,
+								  .pCommandBufferInfos = &cmdInfo,
+								  .signalSemaphoreInfoCount = 1,
+								  .pSignalSemaphoreInfos = &signalInfo};
+
+	vkQueueSubmit2(desc->graphicsQueue, 1, &submit, desc->inFlight);
+
+	const ZHLN_PresentDesc pres = {.present_queue = desc->presentQueue,
+								   .swapchain = desc->swapchain,
+								   .render_finished = desc->renderFinished,
+								   .image_index = desc->imageIndex};
+
+	return ZHLN_PresentFrame(&pres);
+}
+
 /* --- FRAME HELPERS --- */
 
 void ZHLN_WaitAndResetFrame(const VkDevice device, const VkFence in_flight_fence,

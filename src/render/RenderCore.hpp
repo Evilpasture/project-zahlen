@@ -707,6 +707,12 @@ ZHLN_FrameResult DrawFrame(const Context& ctx, const Swapchain& swapchain, const
 	return result;
 }
 
+[[nodiscard]]
+inline ZHLN_FrameResult SubmitAndPresent(const ZHLN_FrameSubmitDesc& desc) noexcept {
+	// Simply pass the address of the reference to the C function
+	return ZHLN_SubmitAndPresent(&desc);
+}
+
 // ============================================================================
 // Surface helpers
 // ============================================================================

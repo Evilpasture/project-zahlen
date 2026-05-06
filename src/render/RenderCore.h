@@ -358,6 +358,20 @@ void ZHLN_BeginRendering(const VkCommandBuffer cmd,
 						 const ZHLN_RenderPassDesc* const ZHLN_RESTRICT desc);
 void ZHLN_EndRendering(const VkCommandBuffer cmd);
 
+typedef const struct {
+	const VkQueue graphicsQueue;
+	const VkQueue presentQueue;
+	const VkCommandBuffer cmd;
+	const VkSemaphore imageAvailable;
+	const VkSemaphore renderFinished;
+	const VkFence inFlight;
+	const VkSwapchainKHR swapchain;
+	const uint32_t imageIndex;
+} ZHLN_FrameSubmitDesc;
+
+[[nodiscard]]
+ZHLN_FrameResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* const ZHLN_RESTRICT desc);
+
 /* --- FRAME HELPERS --- */
 
 void ZHLN_WaitAndResetFrame(const VkDevice device, const VkFence in_flight_fence,
