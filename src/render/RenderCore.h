@@ -352,6 +352,8 @@ typedef const struct {
 	const VkPipelineStageFlags2 src_stage;
 	const VkPipelineStageFlags2 dst_stage;
 	const VkImageAspectFlags aspect; // e.g. VK_IMAGE_ASPECT_COLOR_BIT
+	const uint32_t base_mip;
+	const uint32_t mip_count; //  (use VK_REMAINING_MIP_LEVELS for all)
 } ZHLN_ImageBarrierDesc;
 
 void ZHLN_BeginRendering(const VkCommandBuffer cmd,
@@ -477,7 +479,7 @@ VkPipeline ZHLN_CreateComputePipeline(const VkDevice device,
 
 void ZHLN_CmdDispatch(const VkCommandBuffer cmd, const uint32_t groupCountX,
 					  const uint32_t groupCountY, const uint32_t groupCountZ);
-                      
+
 #ifdef __cplusplus
 }
 #endif

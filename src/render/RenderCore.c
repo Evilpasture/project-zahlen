@@ -1192,8 +1192,8 @@ void ZHLN_CmdImageBarrier(const VkCommandBuffer cmd,
 		.subresourceRange =
 			{
 				.aspectMask = desc->aspect,
-				.baseMipLevel = 0,
-				.levelCount = VK_REMAINING_MIP_LEVELS,
+				.baseMipLevel = desc->base_mip,
+				.levelCount = desc->mip_count,
 				.baseArrayLayer = 0,
 				.layerCount = VK_REMAINING_ARRAY_LAYERS,
 			},
