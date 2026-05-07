@@ -480,6 +480,15 @@ VkPipeline ZHLN_CreateComputePipeline(const VkDevice device,
 void ZHLN_CmdDispatch(const VkCommandBuffer cmd, const uint32_t groupCountX,
 					  const uint32_t groupCountY, const uint32_t groupCountZ);
 
+/* --- MIPMAPPING --- */
+
+/**
+ * @brief Generates mipmaps for a color image using linear blits.
+ * Transitions image to VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL.
+ */
+void ZHLN_GenerateMipmaps(VkCommandBuffer cmd, VkImage image, int32_t width, int32_t height,
+						  uint32_t mip_levels);
+
 #ifdef __cplusplus
 }
 #endif

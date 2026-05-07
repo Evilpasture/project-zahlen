@@ -1045,4 +1045,14 @@ inline void DispatchGroups(VkCommandBuffer cmd, uint32_t gX, uint32_t gY, uint32
 	ZHLN_CmdDispatch(cmd, gX, gY, gZ);
 }
 
+// ============================================================================
+// Mipmapping
+// ============================================================================
+
+inline void GenerateMipmaps(VkCommandBuffer cmd, VkImage image, uint32_t width, uint32_t height) {
+	uint32_t levels = static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
+	ZHLN_GenerateMipmaps(cmd, image, static_cast<int32_t>(width), static_cast<int32_t>(height),
+						 levels);
+}
+
 } // namespace ZHLN::Vk

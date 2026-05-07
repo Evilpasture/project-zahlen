@@ -1334,3 +1334,72 @@ void ZHLN_CmdDispatch(const VkCommandBuffer cmd, const uint32_t groupCountX,
 					  const uint32_t groupCountY, const uint32_t groupCountZ) {
 	vkCmdDispatch(cmd, groupCountX, groupCountY, groupCountZ);
 }
+
+void ZHLN_GenerateMipmaps(VkCommandBuffer cmd, VkImage image, int32_t width, int32_t height,
+						  uint32_t mip_levels) {
+	int32_t mip_w = width;
+	int32_t mip_h = height;
+
+	for (uint32_t i = 1; i < mip_levels; i++) {
+		// 1. Transition previous level to TRANSFER_SRC
+		const ZHLN_ImageBarrierDesc barrier_src = {
+			.image = image,
+			.src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+			.dst_access = VK_ACCESS_2_TRANSFER_READ_BIT,
+			.src_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			.dst_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			.src_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+			.dst_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+			.aspect = VK_IMAGE_ASPECT_COLOR_BIT,
+			.base_mip = i - 1,
+			.mip_count = 1};
+		ZHLN_CmdImageBarrier(cmd, &barrier_src);
+
+		// 2. Blit from i-1 to i
+		const VkImageBlit blit = {
+			.srcSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+							   .mipLevel = i - 1,
+							   .layerCount = 1},
+			.srcOffsets = {{0, 0, 0}, {mip_w, mip_h, 1}},
+			.dstSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+							   .mipLevel = i,
+							   .layerCount = 1},
+			.dstOffsets = {{0, 0, 0}, {mip_w > 1 ? mip_w / 2 : 1, mip_h > 1 ? mip_h / 2 : 1, 1}}};
+
+		vkCmdBlitImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image,
+					   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+
+		// 3. Transition previous level to SHADER_READ_ONLY
+		const ZHLN_ImageBarrierDesc barrier_read = {
+			.image = image,
+			.src_access = VK_ACCESS_2_TRANSFER_READ_BIT,
+			.dst_access = VK_ACCESS_2_SHADER_READ_BIT,
+			.src_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			.dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			.src_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+			.dst_stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+			.aspect = VK_IMAGE_ASPECT_COLOR_BIT,
+			.base_mip = i - 1,
+			.mip_count = 1};
+		ZHLN_CmdImageBarrier(cmd, &barrier_read);
+
+		if (mip_w > 1)
+			mip_w /= 2;
+		if (mip_h > 1)
+			mip_h /= 2;
+	}
+
+	// 4. Transition the very last mip level to SHADER_READ_ONLY
+	const ZHLN_ImageBarrierDesc barrier_last = {
+		.image = image,
+		.src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+		.dst_access = VK_ACCESS_2_SHADER_READ_BIT,
+		.src_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		.dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		.src_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+		.dst_stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+		.aspect = VK_IMAGE_ASPECT_COLOR_BIT,
+		.base_mip = mip_levels - 1,
+		.mip_count = 1};
+	ZHLN_CmdImageBarrier(cmd, &barrier_last);
+}

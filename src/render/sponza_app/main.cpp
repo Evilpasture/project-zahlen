@@ -231,81 +231,6 @@ static Scene BuildScene(cgltf_data* data) {
 }
 
 // ============================================================================
-// Mipmapping
-// ============================================================================
-
-void GenerateMipmaps(VkCommandBuffer cmd, VkImage image, int32_t width, int32_t height,
-					 uint32_t mipLevels) {
-	int32_t mipWidth = width;
-	int32_t mipHeight = height;
-
-	for (uint32_t i = 1; i < mipLevels; i++) {
-		// 1. Transition previous level to TRANSFER_SRC
-		ZHLN_ImageBarrierDesc barrierSrc = {.image = image,
-											.src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-											.dst_access = VK_ACCESS_2_TRANSFER_READ_BIT,
-											.src_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-											.dst_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-											.src_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-											.dst_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-											.aspect = VK_IMAGE_ASPECT_COLOR_BIT,
-											.base_mip = i - 1,
-											.mip_count = 1};
-		ZHLN_CmdImageBarrier(cmd, &barrierSrc);
-
-		// 2. Blit from i-1 to i
-		VkImageBlit blit{};
-		blit.srcOffsets[0] = {0, 0, 0};
-		blit.srcOffsets[1] = {mipWidth, mipHeight, 1};
-		blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		blit.srcSubresource.mipLevel = i - 1;
-		blit.srcSubresource.baseArrayLayer = 0;
-		blit.srcSubresource.layerCount = 1;
-		blit.dstOffsets[0] = {0, 0, 0};
-		blit.dstOffsets[1] = {mipWidth > 1 ? mipWidth / 2 : 1, mipHeight > 1 ? mipHeight / 2 : 1,
-							  1};
-		blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		blit.dstSubresource.mipLevel = i;
-		blit.dstSubresource.baseArrayLayer = 0;
-		blit.dstSubresource.layerCount = 1;
-
-		vkCmdBlitImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image,
-					   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
-
-		// 3. Transition previous level to SHADER_READ_ONLY
-		ZHLN_ImageBarrierDesc barrierRead = {.image = image,
-											 .src_access = VK_ACCESS_2_TRANSFER_READ_BIT,
-											 .dst_access = VK_ACCESS_2_SHADER_READ_BIT,
-											 .src_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-											 .dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-											 .src_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-											 .dst_stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-											 .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
-											 .base_mip = i - 1,
-											 .mip_count = 1};
-		ZHLN_CmdImageBarrier(cmd, &barrierRead);
-
-		if (mipWidth > 1)
-			mipWidth /= 2;
-		if (mipHeight > 1)
-			mipHeight /= 2;
-	}
-
-	// 4. Transition the very last mip level to SHADER_READ_ONLY
-	ZHLN_ImageBarrierDesc barrierLast = {.image = image,
-										 .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-										 .dst_access = VK_ACCESS_2_SHADER_READ_BIT,
-										 .src_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-										 .dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-										 .src_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-										 .dst_stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-										 .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
-										 .base_mip = mipLevels - 1,
-										 .mip_count = 1};
-	ZHLN_CmdImageBarrier(cmd, &barrierLast);
-}
-
-// ============================================================================
 // Texture upload
 // ============================================================================
 
@@ -357,7 +282,7 @@ static TextureAsset UploadTexture(ZHLN::Vk::Allocator& allocator, const ZHLN::Vk
 									  .height = th});
 
 	// Generate the Mips! (This handles transitions to SHADER_READ_ONLY)
-	GenerateMipmaps(cmd, result.image.Handle(), tw, th, mipLevels);
+	ZHLN::Vk::GenerateMipmaps(cmd, result.image.Handle(), tw, th);
 
 	ZHLN_EndCommandBuffer(cmd);
 
