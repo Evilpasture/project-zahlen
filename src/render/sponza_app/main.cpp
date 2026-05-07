@@ -64,22 +64,26 @@ struct TextureAsset {
 	ZHLN::Vk::ImageView view;
 };
 
+// With bindless, a material no longer holds a descriptor set.
+// It just holds the integer index into the global texture array.
 struct MaterialAsset {
-	VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+	uint32_t textureIndex = 0;
 };
 
 struct SponzaPushConstants {
 	Mat4 mvp;
 	Mat4 lightSpaceMatrix;
-	float camPos[4];
+	float camPos[3];
+	uint32_t textureIndex; // Replaces the 4th float of camPos to maintain 16-byte alignment
 };
 
-// Material layout — single source of truth for all 4 bindings
-using MaterialLayout = ZHLN::Vk::DescriptorLayout<ZHLN::Vk::SampledImageSlot<0>, // base color
-												  ZHLN::Vk::SamplerSlot<1>,		 // default sampler
-												  ZHLN::Vk::SampledImageSlot<2>, // shadow map
-												  ZHLN::Vk::SamplerSlot<3>		 // shadow sampler
-												  >;
+// Bindless Scene Layout
+using SceneLayout =
+	ZHLN::Vk::DescriptorLayout<ZHLN::Vk::BindlessSampledImageSlot<0, 4096>, // Global Textures Array
+							   ZHLN::Vk::SamplerSlot<1>,	  // Global Default Sampler
+							   ZHLN::Vk::SampledImageSlot<2>, // Shadow Map
+							   ZHLN::Vk::SamplerSlot<3>		  // Shadow Sampler
+							   >;
 
 // ============================================================================
 // Helpers & Path Resolution
@@ -367,6 +371,7 @@ struct SceneBuffers {
 	const std::vector<DrawCall>& drawCalls;
 	const std::vector<MaterialAsset>& materials;
 	const MaterialAsset& fallbackMat;
+	VkDescriptorSet globalSet; // Passed from main
 };
 
 struct FrameRecordDesc {
@@ -398,13 +403,12 @@ static ZHLN::Vk::PassDesc BuildShadowPass(const FrameRecordDesc& d) {
 	pass.transitions.push_back(
 		{.name = "shadow_depth: UNDEFINED -> DEPTH_ATTACHMENT",
 		 .barrier = {.image = d.shadowImage,
-					 // Sync Fix: Wait for the PREVIOUS frame to finish its depth tests
 					 .src_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
 					 .dst_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
 					 .src_layout = VK_IMAGE_LAYOUT_UNDEFINED,
 					 .dst_layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-					 .src_stage = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,	// Wait for N-1
-					 .dst_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT, // Start N
+					 .src_stage = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+					 .dst_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
 					 .aspect = VK_IMAGE_ASPECT_DEPTH_BIT}});
 
 	pass.record = [d](VkCommandBuffer cmd) {
@@ -433,7 +437,6 @@ static ZHLN::Vk::PassDesc BuildMainPass(const FrameRecordDesc& d) {
 	ZHLN::Vk::PassDesc pass;
 	pass.name = "Main Scene Pass";
 
-	// 1. Transition Swapchain to be drawable
 	pass.transitions.push_back(
 		{.name = "swapchain: UNDEFINED -> COLOR_ATTACHMENT",
 		 .barrier = {.image = d.swapchainImage,
@@ -445,21 +448,17 @@ static ZHLN::Vk::PassDesc BuildMainPass(const FrameRecordDesc& d) {
 					 .dst_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
 					 .aspect = VK_IMAGE_ASPECT_COLOR_BIT}});
 
-	// 2. Unconditionally discard last frame's depth and prepare for writing
 	pass.transitions.push_back(
 		{.name = "main_depth: UNDEFINED -> DEPTH_ATTACHMENT",
 		 .barrier = {.image = d.depthImage,
-					 // Wait for the PREVIOUS frame's depth tests to finish
 					 .src_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
 					 .dst_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
 					 .src_layout = VK_IMAGE_LAYOUT_UNDEFINED,
 					 .dst_layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-					 // Wait for LATE (previous frame) before starting EARLY (this frame)
 					 .src_stage = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
 					 .dst_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
 					 .aspect = VK_IMAGE_ASPECT_DEPTH_BIT}});
 
-	// 3. Transition the Shadow Map we just drew so the Fragment Shader can read it
 	pass.transitions.push_back(
 		{.name = "shadow_depth: DEPTH_ATTACHMENT -> SHADER_READ",
 		 .barrier = {.image = d.shadowImage,
@@ -485,23 +484,26 @@ static ZHLN::Vk::PassDesc BuildMainPass(const FrameRecordDesc& d) {
 		vkCmdBindVertexBuffers(cmd, 0, 1, &vboHandle, &offset);
 		vkCmdBindIndexBuffer(cmd, d.scene.ibo, 0, VK_INDEX_TYPE_UINT32);
 
-		int current_mat = -2;
+		// Bindless: Bind the global descriptor set ONCE outside the loop
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d.pipelines.pipelineLayout, 0,
+								1, &d.scene.globalSet, 0, nullptr);
+
 		for (const auto& draw : d.scene.drawCalls) {
+			uint32_t texIdx = (draw.mesh->materialIndex >= 0)
+								  ? d.scene.materials[draw.mesh->materialIndex].textureIndex
+								  : d.scene.fallbackMat.textureIndex;
+
 			SponzaPushConstants pc = {
 				.mvp = Multiply(d.viewProj, draw.worldMatrix),
 				.lightSpaceMatrix = Multiply(d.lightSpaceMatrix, draw.worldMatrix),
-				.camPos = {d.camPos[0], d.camPos[1], d.camPos[2], 1.0f},
+				.camPos = {d.camPos[0], d.camPos[1], d.camPos[2]},
+				.textureIndex = texIdx,
 			};
-			ZHLN::Vk::Push(cmd, d.pipelines.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, pc);
 
-			if (draw.mesh->materialIndex != current_mat) {
-				current_mat = draw.mesh->materialIndex;
-				VkDescriptorSet dSet = (current_mat >= 0)
-										   ? d.scene.materials[current_mat].descriptorSet
-										   : d.scene.fallbackMat.descriptorSet;
-				vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-										d.pipelines.pipelineLayout, 0, 1, &dSet, 0, nullptr);
-			}
+			// We need VK_SHADER_STAGE_FRAGMENT_BIT so the fragment shader can read textureIndex
+			ZHLN::Vk::Push(cmd, d.pipelines.pipelineLayout,
+						   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, pc);
+
 			vkCmdDrawIndexed(cmd, draw.mesh->indexCount, 1, draw.mesh->firstIndex, 0, 0);
 		}
 	};
@@ -523,13 +525,11 @@ static ZHLN::Vk::PassDesc BuildPresentPass(const FrameRecordDesc& d) {
 					 .dst_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
 					 .aspect = VK_IMAGE_ASPECT_COLOR_BIT}});
 
-	// No record function needed for present transition
 	return pass;
 }
 
 static void RecordFrame(const FrameRecordDesc& d) {
 	std::array passes = {BuildShadowPass(d), BuildMainPass(d), BuildPresentPass(d)};
-
 	ZHLN::Vk::ExecutePasses(d.cmd, passes);
 }
 
@@ -539,7 +539,8 @@ static void RecordFrame(const FrameRecordDesc& d) {
 
 auto main() -> int {
 	const AssetPaths paths = ResolvePaths();
-	ZHLN::Demo::WindowState win = ZHLN::Demo::InitWindow(1280, 720, "ZHLN Engine - Sponza Atrium");
+	ZHLN::Demo::WindowState win =
+		ZHLN::Demo::InitWindow(1280, 720, "ZHLN Engine - Sponza Bindless");
 
 	if (!win.os_window) {
 		std::println(stderr, "Failed to create OS window. Exiting.");
@@ -560,9 +561,6 @@ auto main() -> int {
 	inst_desc.extension_count = static_cast<uint32_t>(inst_exts.size());
 
 	// --- 2. Feature & Extension Negotiation ---
-	// We check if the instance supports Maintenance1 before linking it to the feature chain.
-	// The backend will filter the extension itself, but we need this boolean for the pNext
-	// pointers.
 	bool has_maint1 =
 		ZHLN::Vk::IsInstanceExtensionSupported(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
 
@@ -572,15 +570,21 @@ auto main() -> int {
 
 	VkPhysicalDeviceVulkan13Features feat13 = {
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-		.pNext = has_maint1 ? &swap_maint : nullptr, // Link only if extension is available
+		.pNext = has_maint1 ? &swap_maint : nullptr,
 		.shaderDemoteToHelperInvocation = VK_TRUE,
-        .synchronization2 = VK_TRUE,
+		.synchronization2 = VK_TRUE,
 		.dynamicRendering = VK_TRUE,
 	};
 
+	// Bindless Feature Enablement
 	VkPhysicalDeviceVulkan12Features feat12 = {
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
 		.pNext = &feat13,
+		.descriptorIndexing = VK_TRUE,
+		.shaderSampledImageArrayNonUniformIndexing = VK_TRUE,
+		.descriptorBindingPartiallyBound = VK_TRUE,
+		.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE,
+		.runtimeDescriptorArray = VK_TRUE,
 		.bufferDeviceAddress = VK_TRUE};
 
 	VkPhysicalDeviceFeatures2 feat2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
@@ -589,7 +593,6 @@ auto main() -> int {
 
 	// --- 3. Device Setup ---
 	std::vector<const char*> dev_exts = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
-
 	if (has_maint1) {
 		dev_exts.push_back(VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME);
 		dev_exts.push_back(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME);
@@ -604,12 +607,11 @@ auto main() -> int {
 								.enable_validation = true};
 
 	// --- 4. Context Creation ---
-	// Note: We pass VK_NULL_HANDLE for surface here; ZHLN_SelectPhysicalDevice
-	// handles headless or windowed selection gracefully.
 	auto ctx = ZHLN::Vk::Context::Create(inst_desc, {VK_NULL_HANDLE, VK_NULL_HANDLE}, dev_desc);
 
 	if (!ctx) {
-		std::println(stderr, "Context creation failed. Check if your GPU supports Vulkan 1.3.");
+		std::println(stderr, "Context creation failed. Check if your GPU supports Vulkan 1.3 and "
+							 "Descriptor Indexing.");
 		return -1;
 	}
 
@@ -637,10 +639,8 @@ auto main() -> int {
 
 	// --- GPU buffers ---
 	ZHLN::Vk::CommandPool setupPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-	if (!setupPool.Allocate(1)) {
-		std::println("Command pool allocation failed");
+	if (!setupPool.Allocate(1))
 		return -1;
-	}
 	VkCommandBuffer setupCmd = setupPool[0];
 	ZHLN_BeginCommandBuffer(setupCmd);
 
@@ -696,23 +696,15 @@ auto main() -> int {
 
 	// --- Shadow map ---
 	constexpr uint32_t SHADOW_RES = 4096;
-	VkImageCreateInfo shadowInfo = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-									.imageType = VK_IMAGE_TYPE_2D,
-									.format = VK_FORMAT_D32_SFLOAT,
-									.extent = {SHADOW_RES, SHADOW_RES, 1},
-									.mipLevels = 1,
-									.arrayLayers = 1,
-									.samples = VK_SAMPLE_COUNT_1_BIT,
-									.tiling = VK_IMAGE_TILING_OPTIMAL,
-									.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
-											 VK_IMAGE_USAGE_SAMPLED_BIT,
-									.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-									.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+	VkImageCreateInfo shadowInfo = texBaseInfo;
+	shadowInfo.format = VK_FORMAT_D32_SFLOAT;
+	shadowInfo.extent = {SHADOW_RES, SHADOW_RES, 1};
+	shadowInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+
 	auto shadowImage =
 		ZHLN::Vk::Image::Create(allocator.Get(), shadowInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 	auto shadowView =
 		ZHLN::Vk::CreateView<VK_FORMAT_D32_SFLOAT>(ctx.Device(), shadowImage.Handle());
-
 	VkExtent2D shadowExtent = {SHADOW_RES, SHADOW_RES};
 
 	// --- Samplers (Via Builder) ---
@@ -724,38 +716,50 @@ auto main() -> int {
 							 .DepthCompare()
 							 .Build(ctx.Device());
 
-	// --- Descriptor layout + pool (via TMP) ---
-	uint32_t matCount = static_cast<uint32_t>(gltf->materials_count) + 1;
-	auto descLayout = MaterialLayout::CreateLayout(ctx.Device());
-	auto descPool = MaterialLayout::CreatePool(ctx.Device(), matCount);
+	// --- Global Descriptor Set Layout & Allocation ---
+	auto descLayout = SceneLayout::CreateLayout(ctx.Device());
+	auto descPool = SceneLayout::CreatePool(ctx.Device(), 1); // Only 1 set needed for Bindless!
 
-	auto AllocateMaterial = [&](VkImageView view, VkDescriptorSet& set) -> void {
-		set = MaterialLayout::Allocate(ctx.Device(), descPool.Get(), descLayout.Get());
-		MaterialLayout::Write(ctx.Device(), set, ZHLN::Vk::ImageWrite{view},
-							  ZHLN::Vk::SamplerWrite{defaultSampler.Get()},
-							  ZHLN::Vk::ImageWrite{shadowView.Get()},
-							  ZHLN::Vk::SamplerWrite{shadowSampler.Get()});
-	};
+	VkDescriptorSet globalSet =
+		SceneLayout::Allocate(ctx.Device(), descPool.Get(), descLayout.Get());
 
-	MaterialAsset fallbackMat;
-	AllocateMaterial(dummyTex.view.Get(), fallbackMat.descriptorSet);
+	// Write static descriptors (Skip bindless array for now)
+	SceneLayout::Write(
+		ctx.Device(), globalSet, ZHLN::Vk::SkipWrite{}, // Skip Binding 0 (Bindless array)
+		ZHLN::Vk::SamplerWrite{defaultSampler.Get()}, ZHLN::Vk::ImageWrite{shadowView.Get()},
+		ZHLN::Vk::SamplerWrite{shadowSampler.Get()});
 
+	// --- Bindless Registry Population ---
+	ZHLN::Vk::BindlessRegistry bindless;
+	bindless.Init(ctx.Device(), globalSet, 0); // Binding 0 is our bindless array
+
+	// Register dummy as index 0
+	uint32_t fallbackTexIdx = bindless.RegisterImage(dummyTex.view.Get());
+
+	// Register loaded gltf images
+	std::vector<uint32_t> bindlessTextureIndices(gltf->images_count, fallbackTexIdx);
+	for (cgltf_size i = 0; i < gltf->images_count; ++i) {
+		if (textures[i].view) {
+			bindlessTextureIndices[i] = bindless.RegisterImage(textures[i].view.Get());
+		}
+	}
+
+	// Setup materials to point to correct bindless index
 	std::vector<MaterialAsset> materials(gltf->materials_count);
 	for (cgltf_size i = 0; i < gltf->materials_count; ++i) {
 		cgltf_material* mat = &gltf->materials[i];
-		VkImageView view = dummyTex.view.Get();
+		materials[i].textureIndex = fallbackTexIdx;
+
 		if (mat->has_pbr_metallic_roughness &&
 			mat->pbr_metallic_roughness.base_color_texture.texture) {
 			cgltf_texture* tex = mat->pbr_metallic_roughness.base_color_texture.texture;
 			if (tex->image) {
 				int idx = static_cast<int>(tex->image - gltf->images);
-				if (textures[idx].view) {
-					view = textures[idx].view.Get();
-				}
+				materials[i].textureIndex = bindlessTextureIndices[idx];
 			}
 		}
-		AllocateMaterial(view, materials[i].descriptorSet);
 	}
+	MaterialAsset fallbackMat = {fallbackTexIdx};
 
 	// --- Pipelines (Via Factory & Builder) ---
 	auto shaders = ZHLN::Vk::ShaderStages::FromFiles(ctx.Device(), paths.vert_spv, paths.frag_spv,
@@ -763,7 +767,9 @@ auto main() -> int {
 	auto shadowShaders = ZHLN::Vk::ShaderStages::FromFiles(
 		ctx.Device(), paths.shadow_vert_spv, paths.shadow_frag_spv, "VSMain", "PSMain");
 
-	VkPushConstantRange mainPush = {VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(SponzaPushConstants)};
+	// Note: mainPush now needs FRAGMENT bit to read textureIndex
+	VkPushConstantRange mainPush = {VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+									sizeof(SponzaPushConstants)};
 	VkPushConstantRange shadowPush = {VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Mat4)};
 
 	VkDescriptorSetLayout rawLayout = descLayout.Get();
@@ -801,7 +807,8 @@ auto main() -> int {
 								 .ibo = ibo.Handle(),
 								 .drawCalls = scene.drawCalls,
 								 .materials = materials,
-								 .fallbackMat = fallbackMat};
+								 .fallbackMat = fallbackMat,
+								 .globalSet = globalSet};
 
 	// --- Frame loop resources ---
 	FrameResources frame;
@@ -814,7 +821,7 @@ auto main() -> int {
 	FpsCounter fpsCounter;
 	auto startTime = std::chrono::high_resolution_clock::now();
 
-	std::println("Rendering started.");
+	std::println("Rendering started (Bindless Architecture).");
 
 	while (win.running) {
 		ZHLN::Demo::ProcessEvents(win);
