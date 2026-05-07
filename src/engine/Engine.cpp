@@ -34,7 +34,7 @@ Engine::Engine() {
 	_window = std::make_unique<Window>("Project-Zahlen Engine", 1280, 720, _input.get());
 
 	// We just pass Vulkan now. The renderer internally handles the rest.
-	_renderContext = std::make_unique<RenderContext>(*_window, "Vulkan");
+	_renderContext = std::make_unique<RenderContext>(*_window);
 	_physicsContext = std::make_unique<PhysicsContext>();
 }
 

@@ -46,8 +46,7 @@ struct RenderContext::Impl {
 	Impl(Window& win) : window(win) {}
 };
 
-RenderContext::RenderContext(Window& window, const String32& preferredAPI)
-	: _impl(std::make_unique<Impl>(window)) {
+RenderContext::RenderContext(Window& window) : _impl(std::make_unique<Impl>(window)) {
 
 	uint32_t glfwExtensionCount = 0;
 	const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
