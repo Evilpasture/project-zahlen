@@ -2,8 +2,10 @@
 #include "Allocator.hpp"
 #include "DescriptorLayout.hpp"
 #include "PipelineBuilder.hpp"
+#include "PresentationContext.hpp"
 #include "RenderCore.hpp"
 #include "RenderGraph.hpp"
+#include "RenderTarget.hpp"
 #include "SamplerBuilder.hpp"
 #include "Texture.hpp"
 #include "Vertex.hpp"
@@ -277,64 +279,6 @@ struct FpsCounter {
 };
 
 // ============================================================================
-// Swapchain rebuild
-// ============================================================================
-
-struct FrameResources {
-	ZHLN::Vk::Swapchain swapchain;
-	ZHLN::Vk::SemaphorePool presentSemaphores;
-	// THE PHYSICAL RESOURCES
-	ZHLN::Vk::Image depthImage;
-	ZHLN::Vk::ImageView depthView;
-	ZHLN::Vk::Image shadowImage; // Move shadow here too
-	ZHLN::Vk::ImageView shadowView;
-	// THE TRACKERS (New)
-	ZHLN::Vk::GraphImage shadowTracker;
-	ZHLN::Vk::GraphImage depthTracker;
-	bool depthInitialized = false;
-
-	void Rebuild(const ZHLN::Vk::Context& ctx, ZHLN::Vk::Allocator& allocator,
-				 ZHLN::Demo::WindowState& win, VkSurfaceKHR surface) {
-		vkDeviceWaitIdle(ctx.Device());
-		depthInitialized = false;
-
-		ZHLN_Device rawDev = {ctx.Device(), ctx.GraphicsQueue(), ctx.PresentQueue()};
-		ZHLN_PhysicalDeviceInfo rawPhys = ctx.PhysicalInfo();
-		ZHLN_SwapchainDesc desc = {.device = &rawDev,
-								   .physical = &rawPhys,
-								   .surface = surface,
-								   .width = win.width,
-								   .height = win.height,
-								   .vsync = true,
-								   .old_swapchain = swapchain.Get().handle};
-		swapchain.Rebuild(desc);
-		presentSemaphores.Rebuild(ctx.Device(), swapchain.Get().image_count);
-
-		VkImageCreateInfo depthInfo = {
-			.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-			.imageType = VK_IMAGE_TYPE_2D,
-			.format = VK_FORMAT_D32_SFLOAT,
-			.extent = {win.width, win.height, 1},
-			.mipLevels = 1,
-			.arrayLayers = 1,
-			.samples = VK_SAMPLE_COUNT_1_BIT,
-			.tiling = VK_IMAGE_TILING_OPTIMAL,
-			.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-			.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-		};
-		depthImage = ZHLN::Vk::Image::Create(allocator.Get(), depthInfo, VMA_MEMORY_USAGE_GPU_ONLY);
-		depthView = ZHLN::Vk::CreateView<VK_FORMAT_D32_SFLOAT>(ctx.Device(), depthImage.Handle());
-		// Initialize/Reset the persistent trackers
-		depthTracker =
-			ZHLN::Vk::GraphImage::Create(depthImage.Handle(), depthView.Get(),
-										 {win.width, win.height}, VK_IMAGE_ASPECT_DEPTH_BIT);
-
-		win.resized = false;
-	}
-};
-
-// ============================================================================
 // Frame recording
 // ============================================================================
 
@@ -352,21 +296,8 @@ struct SceneBuffers {
 };
 
 struct FrameRecordDesc {
-	VkCommandBuffer cmd;
-	VkImage swapchainImage;
-	VkImageView swapchainView;
-	VkExtent2D extent;
-
-	VkImage depthImage;
-	VkImageView depthView;
-
-	const VkImage shadowImage;
-	VkImageView shadowView;
-	VkExtent2D shadowExtent;
-
 	const PipelineSet& pipelines;
 	const SceneBuffers& scene;
-
 	Mat4 viewProj;
 	Mat4 lightSpaceMatrix;
 	float camPos[3];
@@ -426,30 +357,23 @@ static void RecordMainPass(VkCommandBuffer cmd, const void* pUserData) {
 	}
 }
 
-// Change signature to accept the persistent trackers
-static void RecordFrame(const FrameRecordDesc& d, ZHLN::Vk::GraphImage& shadowTracker,
-						ZHLN::Vk::GraphImage& depthTracker) {
+static void RecordFrame(VkCommandBuffer cmd, ZHLN::Vk::GraphImage& swapchainRes,
+						ZHLN::Vk::GraphImage& shadowTracker, ZHLN::Vk::GraphImage& depthTracker,
+						const FrameRecordDesc& d) {
 	using namespace ZHLN::Vk;
-
-	// 1. Swapchain image tracker (This is the only one created on the stack
-	// because the handle changes every frame)
-	GraphImage colorTracker =
-		GraphImage::Create(d.swapchainImage, d.swapchainView, d.extent, VK_IMAGE_ASPECT_COLOR_BIT);
-
 	RenderGraph Graph;
 
-	// 2. Use the persistent trackers passed in
 	Graph.AddPass("Shadow Map").WriteDepth(shadowTracker).Record(RecordShadowPass, &d);
 
 	Graph.AddPass("Main Scene")
 		.Read(shadowTracker)
-		.WriteColor(colorTracker)
+		.WriteColor(swapchainRes)
 		.WriteDepth(depthTracker)
 		.Record(RecordMainPass, &d);
 
-	Graph.AddPass("Handoff").Present(colorTracker);
+	Graph.AddPass("Handoff").Present(swapchainRes);
 
-	Graph.Execute(d.cmd);
+	Graph.Execute(cmd);
 }
 
 // ============================================================================
@@ -626,17 +550,18 @@ auto main() -> int {
 		std::println("  [{}/{}] {}", i + 1, gltf->images_count, gltf->images[i].uri);
 	}
 
-	// --- Shadow map ---
-	constexpr uint32_t SHADOW_RES = 4096;
-	VkImageCreateInfo shadowInfo = texBaseInfo;
-	shadowInfo.format = VK_FORMAT_D32_SFLOAT;
-	shadowInfo.extent = {SHADOW_RES, SHADOW_RES, 1};
-	shadowInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+	// --- Infrastructure Setup ---
+	ZHLN::Vk::PresentationContext presentation;
+	if (!presentation.Init(ctx, allocator, surface.Get(), win.width, win.height)) {
+		std::println(stderr, "Failed to init Presentation Context.");
+		return -1;
+	}
 
-	auto shadowImage =
-		ZHLN::Vk::Image::Create(allocator.Get(), shadowInfo, VMA_MEMORY_USAGE_GPU_ONLY);
-	auto shadowView =
-		ZHLN::Vk::CreateView<VK_FORMAT_D32_SFLOAT>(ctx.Device(), shadowImage.Handle());
+	// --- Technique-Specific Targets ---
+	constexpr uint32_t SHADOW_RES = 4096;
+	auto shadowMap = ZHLN::Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+		allocator, ctx, {SHADOW_RES, SHADOW_RES},
+		VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 
 	VkExtent2D shadowExtent = {SHADOW_RES, SHADOW_RES};
 
@@ -658,7 +583,7 @@ auto main() -> int {
 
 	SceneLayout::Write(ctx.Device(), globalSet, ZHLN::Vk::SkipWrite{},
 					   ZHLN::Vk::SamplerWrite{defaultSampler.Get()},
-					   ZHLN::Vk::ImageWrite{shadowView.Get()},
+					   ZHLN::Vk::ImageWrite{shadowMap.view.Get()}, // <--- Updated reference
 					   ZHLN::Vk::SamplerWrite{shadowSampler.Get()});
 
 	// 1. Define the Registry tied to the Layout and specific Binding Index (0)
@@ -774,13 +699,9 @@ auto main() -> int {
 								 .globalSet = globalSet};
 
 	// --- Frame loop resources ---
-	FrameResources frame;
 	auto sync = ZHLN::Vk::FrameSync<3>::Create(ctx.Device());
 	auto pools =
 		ZHLN::Vk::CommandPools<3>::Create(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-
-	frame.shadowTracker = ZHLN::Vk::GraphImage::Create(shadowImage.Handle(), shadowView.Get(),
-													   shadowExtent, VK_IMAGE_ASPECT_DEPTH_BIT);
 
 	uint32_t frame_index = 0;
 	win.resized = true;
@@ -793,8 +714,15 @@ auto main() -> int {
 		ZHLN::Demo::ProcessEvents(win);
 		if (win.width == 0 || win.height == 0)
 			continue;
-		if (win.resized)
-			frame.Rebuild(ctx, allocator, win, surface.Get());
+
+		if (win.resized) {
+			if (!presentation.Rebuild(win.width, win.height))
+				continue;
+			win.resized = false;
+		}
+
+		if (!presentation.swapchain.Valid() || presentation.swapchain.Get().extent.width == 0)
+			continue;
 
 		float time =
 			std::chrono::duration<float>(std::chrono::high_resolution_clock::now() - startTime)
@@ -830,7 +758,7 @@ auto main() -> int {
 		ZHLN_WaitAndResetFrame(ctx.Device(), frame_sync.in_flight, &pools[frame_index]);
 
 		uint32_t image_index = 0;
-		ZHLN_AcquireDesc acq = {.swapchain = frame.swapchain.Get().handle,
+		ZHLN_AcquireDesc acq = {.swapchain = presentation.swapchain.Get().handle,
 								.image_available = frame_sync.image_available,
 								.timeout_ns = UINT64_MAX};
 		if (ZHLN_AcquireImage(ctx.Device(), &acq, &image_index) == ZHLN_FrameResult_OutOfDate) {
@@ -840,24 +768,20 @@ auto main() -> int {
 
 		ZHLN_BeginCommandBuffer(cmd);
 
-		RecordFrame(
-			{
-				.cmd = cmd,
-				.swapchainImage = frame.swapchain.Get().images[image_index],
-				.swapchainView = frame.swapchain.Get().views[image_index],
-				.extent = frame.swapchain.Get().extent,
-				.depthImage = frame.depthImage.Handle(),
-				.depthView = frame.depthView.Get(),
-				.shadowImage = shadowImage.Handle(),
-				.shadowView = shadowView.Get(),
-				.shadowExtent = shadowExtent,
-				.pipelines = activePipelines,
-				.scene = sceneBuffers,
-				.viewProj = viewProj,
-				.lightSpaceMatrix = lightSpace,
-				.camPos = {camX, camY, camZ},
-			},
-			frame.shadowTracker, frame.depthTracker);
+		// Transient tracker for this specific frame's swapchain image
+		ZHLN::Vk::GraphImage swapchainRes = ZHLN::Vk::GraphImage::Create(
+			presentation.swapchain.Get().images[image_index],
+			presentation.swapchain.Get().views[image_index], presentation.swapchain.Get().extent,
+			VK_IMAGE_ASPECT_COLOR_BIT);
+
+		RecordFrame(cmd, swapchainRes, shadowMap.tracker, presentation.depthTarget.tracker,
+					{
+						.pipelines = activePipelines,
+						.scene = sceneBuffers,
+						.viewProj = viewProj,
+						.lightSpaceMatrix = lightSpace,
+						.camPos = {camX, camY, camZ},
+					});
 
 		ZHLN_EndCommandBuffer(cmd);
 
@@ -865,9 +789,10 @@ auto main() -> int {
 										   .presentQueue = ctx.PresentQueue(),
 										   .cmd = cmd,
 										   .imageAvailable = frame_sync.image_available,
-										   .renderFinished = frame.presentSemaphores[image_index],
+										   .renderFinished =
+											   presentation.presentSemaphores[image_index],
 										   .inFlight = frame_sync.in_flight,
-										   .swapchain = frame.swapchain.Get().handle,
+										   .swapchain = presentation.swapchain.Get().handle,
 										   .imageIndex = image_index};
 
 		if (ZHLN::Vk::SubmitAndPresent(submitDesc) != ZHLN_FrameResult_Ok) {
@@ -878,7 +803,6 @@ auto main() -> int {
 	}
 
 	vkDeviceWaitIdle(ctx.Device());
-
 	ZHLN::Demo::DestroyWindow(win);
 	return 0;
 }
