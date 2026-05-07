@@ -113,7 +113,8 @@ RenderContext::RenderContext(Window& window, const String32& preferredAPI)
 	VkSurfaceKHR raw_surface;
 	if (glfwCreateWindowSurface(_impl->ctx.Instance(), glfwWin, nullptr, &raw_surface) !=
 		VK_SUCCESS) {
-		std::abort();
+		ZHLN_TRACE(_impl);
+		ZHLN::Panic("GLFW surface creation failed");
 	}
 	_impl->surface = Vk::Surface(_impl->ctx.Instance(), raw_surface);
 
