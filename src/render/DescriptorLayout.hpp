@@ -85,7 +85,9 @@ struct GetSlot<B, Head, Tail...>
 	: std::conditional_t<Head::binding == B, Head, GetSlot<B, Tail...>> {};
 
 template <uint32_t B> struct GetSlot<B> {
-	static_assert(B == 0xFFFFFFFF, "Binding ID not found in DescriptorLayout");
+	// Dependent false for cleaner static_assert
+	static_assert(sizeof(std::integral_constant<uint32_t, B>) == 0,
+				  "The requested Binding ID was not found in the DescriptorLayout definition.");
 };
 
 // ============================================================================
@@ -330,6 +332,11 @@ template <typename... Slots> class DescriptorLayout {
 
 		// 1. If the user passes SkipWrite{}, early out and set count to 0
 		if constexpr (std::is_same_v<T, SkipWrite>) {
+			// Enforce that SkipWrite is only used for slots intended for deferred bindless updates
+			static_assert((Slot::flags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) != 0,
+						  "SkipWrite{} can only be used for slots with the UPDATE_AFTER_BIND flag "
+						  "(Bindless).");
+
 			write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .descriptorCount = 0};
 		}
 		// 2. Otherwise, perform the type-checked write
