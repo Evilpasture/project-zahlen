@@ -67,14 +67,17 @@ struct TextureAsset {
 // With bindless, a material no longer holds a descriptor set.
 // It just holds the integer index into the global texture array.
 struct MaterialAsset {
-	uint32_t textureIndex = 0;
+	uint32_t albedoIdx;
+	uint32_t normalIdx; // NEW
 };
 
 struct SponzaPushConstants {
 	Mat4 mvp;
 	Mat4 lightSpaceMatrix;
-	float camPos[3];
-	uint32_t textureIndex; // Perfectly pads camPos to a 16-byte aligned vector (float3 + uint)
+	float camPos[4];	// 16-byte aligned
+	uint32_t albedoIdx; // 4 bytes
+	uint32_t normalIdx; // 4 bytes
+	float _padding[2];	// Pad to 16 bytes
 };
 
 // Bindless Scene Layout
@@ -442,15 +445,17 @@ static void RecordMainPass(VkCommandBuffer cmd, const void* pUserData) {
 							&d.scene.globalSet, 0, nullptr);
 
 	for (const auto& draw : d.scene.drawCalls) {
-		const uint32_t texIdx = (draw.mesh->materialIndex >= 0)
-									? d.scene.materials[draw.mesh->materialIndex].textureIndex
-									: d.scene.fallbackMat.textureIndex;
+		// Fetch the material (or fallback if none assigned)
+		const auto& mat = (draw.mesh->materialIndex >= 0)
+							  ? d.scene.materials[draw.mesh->materialIndex]
+							  : d.scene.fallbackMat;
 
 		SponzaPushConstants pc = {
 			.mvp = Multiply(d.viewProj, draw.worldMatrix),
 			.lightSpaceMatrix = Multiply(d.lightSpaceMatrix, draw.worldMatrix),
-			.camPos = {d.camPos[0], d.camPos[1], d.camPos[2]},
-			.textureIndex = texIdx,
+			.camPos = {d.camPos[0], d.camPos[1], d.camPos[2], 1.0f}, // Set W to 1.0
+			.albedoIdx = mat.albedoIdx,
+			.normalIdx = mat.normalIdx,
 		};
 
 		ZHLN::Vk::Push(cmd, d.pipelines.pipelineLayout,
@@ -494,12 +499,16 @@ static void RecordFrame(const FrameRecordDesc& d) {
 					 .aspect = VK_IMAGE_ASPECT_DEPTH_BIT}},
 		{.barrier = {.image = d.shadowImage,
 					 .src_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-					 .dst_access = VK_ACCESS_2_SHADER_READ_BIT,
+					 .dst_access = VK_ACCESS_2_SHADER_READ_BIT, // Keep this
 					 .src_layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
 					 .dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-					 .src_stage = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+					 .src_stage =
+						 VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, // After shadow pass finishes
+					 // FIX: Change this stage to FRAGMENT_SHADER.
+					 // This is the stage where we actually perform the read.
 					 .dst_stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-					 .aspect = VK_IMAGE_ASPECT_DEPTH_BIT}}};
+					 .aspect = VK_IMAGE_ASPECT_DEPTH_BIT}},
+	};
 
 	const PassResource presentBarriers[] = {
 		{.barrier = {.image = d.swapchainImage,
@@ -748,18 +757,31 @@ auto main() -> int {
 	std::vector<MaterialAsset> materials(gltf->materials_count);
 	for (cgltf_size i = 0; i < gltf->materials_count; ++i) {
 		cgltf_material* mat = &gltf->materials[i];
-		materials[i].textureIndex = fallbackTexIdx;
 
+		// Default both to fallback (white 1x1)
+		materials[i].albedoIdx = fallbackTexIdx;
+		materials[i].normalIdx = fallbackTexIdx;
+
+		// 1. Assign Albedo (Base Color)
 		if (mat->has_pbr_metallic_roughness &&
 			mat->pbr_metallic_roughness.base_color_texture.texture) {
 			cgltf_texture* tex = mat->pbr_metallic_roughness.base_color_texture.texture;
 			if (tex->image) {
-				int idx = static_cast<int>(tex->image - gltf->images);
-				materials[i].textureIndex = bindlessTextureIndices[idx];
+				int imgIdx = static_cast<int>(tex->image - gltf->images);
+				materials[i].albedoIdx = bindlessTextureIndices[imgIdx];
+			}
+		}
+
+		// 2. Assign Normal Map
+		if (mat->normal_texture.texture) {
+			cgltf_texture* tex = mat->normal_texture.texture;
+			if (tex->image) {
+				int imgIdx = static_cast<int>(tex->image - gltf->images);
+				materials[i].normalIdx = bindlessTextureIndices[imgIdx];
 			}
 		}
 	}
-	MaterialAsset fallbackMat = {fallbackTexIdx};
+	MaterialAsset fallbackMat = {.albedoIdx = fallbackTexIdx, .normalIdx = fallbackTexIdx};
 
 	// --- Pipelines (Via Factory & Builder) ---
 	auto shaders = ZHLN::Vk::ShaderStages::FromFiles(ctx.Device(), paths.vert_spv, paths.frag_spv,
@@ -795,7 +817,7 @@ auto main() -> int {
 							  .Layout(shadowLayout.Get())
 							  .Vertex<ZHLN::Vk::Vertex>()
 							  .DepthOnly()
-							  .CullBack()
+							  .CullNone()
 							  .Build(ctx.Device());
 
 	PipelineSet activePipelines = {.pipeline = pipeline.Get(),
@@ -844,8 +866,14 @@ auto main() -> int {
 		Mat4 proj = Perspective(1.0472f, (float)win.width / (float)win.height, 0.1f, 1000.0f);
 		Mat4 viewProj = Multiply(proj, view);
 
-		Mat4 lightView = LookAt({15.f, 30.f, 9.f}, {0.f, 0.f, 0.f}, {0.f, 1.f, 0.f});
-		Mat4 lightProj = Ortho(-25.f, 25.f, -25.f, 25.f, -50.f, 100.f);
+		// 1. Move the sun further away so it sees the whole scene
+		// Eye = (40, 60, 40), Center = (0, 10, 0)
+		Mat4 lightView = LookAt({40.f, 60.f, 40.f}, {0.f, 10.f, 0.f}, {0.f, 1.f, 0.f});
+
+		// 2. Huge Ortho box (160 units wide, 300 units deep)
+		Mat4 lightProj = Ortho(-80.f, 80.f, -80.f, 80.f, 0.1f, 300.f);
+
+		// 3. Matrix order (Proj * View)
 		Mat4 lightSpace = Multiply(lightProj, lightView);
 
 		// FPS

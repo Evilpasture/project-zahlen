@@ -1,10 +1,19 @@
-struct VSInput { [[vk::location(0)]] float3 pos : POSITION; };
-struct PushConstants { float4x4 mvp; };
-[[vk::push_constant]] PushConstants pc;
+#pragma pack_matrix(column_major)
 
-float4 VSMain(VSInput input) : SV_Position {
+struct ShadowPush {
+    float4x4 mvp; // This is the lightSpaceMatrix passed from C++
+};
+
+[[vk::push_constant]] ShadowPush pc;
+
+struct VSInput {
+    [[vk::location(0)]] float3 pos : POSITION;
+};
+
+float4 VSMain(VSInput input) : SV_POSITION {
+    // Transform vertex to light-clip-space
     return mul(pc.mvp, float4(input.pos, 1.0));
 }
 
-// Dummy pixel shader because our engine expects 2 stages for graphics pipelines
+// Pixel shader is empty; hardware handles depth write automatically
 void PSMain() {}

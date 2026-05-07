@@ -1,93 +1,72 @@
-struct VSInput {
-    [[vk::location(0)]] float3 pos : POSITION;
-    [[vk::location(1)]] float3 norm : NORMAL;
-    [[vk::location(2)]] float2 uv : TEXCOORD0;
-};
+#pragma pack_matrix(column_major)
 
-struct PSInput {
-    float4 pos : SV_Position; 
-    float3 worldNorm : NORMAL;
-    float2 uv : TEXCOORD0;
-    float3 viewDir : TEXCOORD1; 
-    float4 lightSpacePos : EXTRA;
-};
-
-// ============================================================================
-// Push Constants (Updated to match C++ SponzaPushConstants)
-// ============================================================================
 struct PushConstants {
     float4x4 mvp;
     float4x4 lightSpaceMatrix;
-    float3 camPos;      // 12 bytes
-    uint textureIndex;  // 4 bytes -> Total 16 bytes for this register
+    float4 camPos;
+    uint albedoIdx;
+    uint normalIdx;
 };
 
 [[vk::push_constant]] PushConstants pc;
 
-// ============================================================================
-// Bindless Resources
-// ============================================================================
-
-// Binding 0 is now a giant array of all textures in the scene
-[[vk::binding(0, 0)]] Texture2D globalTextures[]; 
-
-[[vk::binding(1, 0)]] SamplerState baseColorSampler;
+[[vk::binding(0, 0)]] Texture2D globalTextures[];
+[[vk::binding(1, 0)]] SamplerState defaultSampler;
 [[vk::binding(2, 0)]] Texture2D shadowMap;
-[[vk::binding(3, 0)]] SamplerComparisonState shadowSampler; 
+[[vk::binding(3, 0)]] SamplerComparisonState shadowSampler;
 
-// ============================================================================
-// Shaders
-// ============================================================================
+struct PSInput {
+    float4 pos : SV_POSITION;
+    float3 worldPos : POSITION;
+    float3 normal : NORMAL;
+    float2 uv : TEXCOORD;
+    float4 shadowPos : TEXCOORD1; 
+};
 
-PSInput VSMain(VSInput input) {
+// ACES Filmic Tonemapping
+float3 ACESFilm(float3 x) {
+    float a = 2.51f; float b = 0.03f; float c = 2.43f; float d = 0.59f; float e = 0.14f;
+    return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
+}
+
+PSInput VSMain([[vk::location(0)]] float3 pos : POSITION, [[vk::location(1)]] float3 normal : NORMAL, [[vk::location(2)]] float2 uv : TEXCOORD) {
     PSInput output;
-    float4 worldPos = float4(input.pos, 1.0);
-    
-    output.pos = mul(pc.mvp, worldPos);
-    output.lightSpacePos = mul(pc.lightSpaceMatrix, worldPos); 
-    output.worldNorm = input.norm;
-    output.uv = input.uv;
-    
-    // Using the corrected camPos.xyz
-    output.viewDir = normalize(pc.camPos - input.pos);
+    output.pos = mul(pc.mvp, float4(pos, 1.0));
+    output.worldPos = pos; 
+    output.normal = normal;
+    output.uv = uv;
+    output.shadowPos = mul(pc.lightSpaceMatrix, float4(pos, 1.0));
     return output;
 }
 
-float3 ACESFilm(float3 x) {
-    float a = 2.51f; float b = 0.03f; float c = 2.43f; float d = 0.59f; float e = 0.14f;
-    return saturate((x*(a*x+b))/(x*(c*x+d)+e));
-}
-
 float4 PSMain(PSInput input) : SV_Target {
-    // 1. Shadow Logic
-    float3 projCoords = input.lightSpacePos.xyz / input.lightSpacePos.w;
-    float2 shadowUV = projCoords.xy * 0.5 + 0.5;
-    float currentDepth = projCoords.z;
-    float shadow = shadowMap.SampleCmpLevelZero(shadowSampler, shadowUV, currentDepth - 0.001).r;
+    float4 albedoSample = globalTextures[pc.albedoIdx].Sample(defaultSampler, input.uv);
+    if (albedoSample.a < 0.5) discard;
 
-    // 2. Bindless Texture Sampling
-    // NonUniformResourceIndex is required when indexing a descriptor array with
-    // a value that isn't compile-time constant (even if it's uniform across the draw).
-    uint texIdx = NonUniformResourceIndex(pc.textureIndex);
-    float4 albedo = globalTextures[texIdx].Sample(baseColorSampler, input.uv);
-    
-    if (albedo.a < 0.5) discard;
+    // 1. Normal Mapping
+    float3 N = normalize(input.normal);
+    float3 mapN = globalTextures[pc.normalIdx].Sample(defaultSampler, input.uv).rgb * 2.0 - 1.0;
+    N = normalize(N + mapN * 0.5); // Simple detail injection
 
-    // 3. Simple Lighting
-    float3 N = normalize(input.worldNorm);
-    float3 L = normalize(float3(0.5, 1.0, 0.3));
-    float3 V = normalize(input.viewDir);
+    // 2. Shadows
+    float3 proj = input.shadowPos.xyz / input.shadowPos.w;
+    float2 uv = proj.xy * 0.5 + 0.5;
+    float shadow = 1.0;
+    if (all(uv >= 0.0) && all(uv <= 1.0) && proj.z <= 1.0) {
+        shadow = shadowMap.SampleCmpLevelZero(shadowSampler, uv, proj.z - 0.001).r;
+    }
+
+    // 3. Lighting
+    float3 L = normalize(float3(40.0, 60.0, 40.0)); // Match lightView Eye
+    float3 V = normalize(pc.camPos.xyz - input.worldPos);
     float3 H = normalize(L + V);
 
-    float hemi = dot(N, float3(0, 1, 0)) * 0.5 + 0.5;
-    float3 ambient = lerp(float3(0.3, 0.2, 0.1), float3(0.2, 0.5, 1.0), hemi) * 0.2;
-    
-    float ndotl = max(dot(N, L), 0.0);
+    float diff = max(dot(N, L), 0.0);
     float spec = pow(max(dot(N, H), 0.0), 32.0);
-    
-    float3 direct = (ndotl * float3(1.0, 0.9, 0.7) * 4.0) + (spec * 2.0);
-    float3 finalColor = (ambient + direct * shadow) * albedo.rgb;
 
-    // 4. Tonemapping
-    return float4(pow(ACESFilm(finalColor), 1.0/2.2), albedo.a);
+    float3 lighting = albedoSample.rgb * (0.05 + shadow * (diff + spec * 0.15));
+
+    // 4. Final Polish
+    float3 color = ACESFilm(lighting);
+    return float4(pow(color, 1.0 / 2.2), 1.0);
 }

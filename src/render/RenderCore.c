@@ -931,10 +931,12 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device,
 	};
 
 	// --- Dynamic Rendering (Vulkan 1.3, no VkRenderPass needed) ---
+	const uint32_t color_count = (desc->color_format != VK_FORMAT_UNDEFINED) ? 1U : 0U;
+
 	const VkPipelineRenderingCreateInfo rendering = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-		.colorAttachmentCount = 1,
-		.pColorAttachmentFormats = &desc->color_format,
+		.colorAttachmentCount = color_count, // Use the dynamic count
+		.pColorAttachmentFormats = color_count > 0 ? &desc->color_format : NULL,
 		.depthAttachmentFormat = desc->depth_format,
 	};
 
@@ -990,7 +992,7 @@ void ZHLN_BeginRendering(const VkCommandBuffer cmd,
 		.imageView = desc->depth_view,
 		.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
 		.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-		.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE, // don't need depth after the frame
+		.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
 		.clearValue = {.depthStencil = {.depth = desc->clear_depth ? desc->clear_depth : 1.0F}},
 	};
 
@@ -998,9 +1000,10 @@ void ZHLN_BeginRendering(const VkCommandBuffer cmd,
 		.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
 		.renderArea = {.offset = {0, 0}, .extent = desc->extent},
 		.layerCount = 1,
-		.colorAttachmentCount = 1,
-		.pColorAttachments = &color_attachment,
-		.pDepthAttachment = desc->depth_view != VK_NULL_HANDLE ? &depth_attachment : nullptr,
+		// FIX: Only set count/pointer if target_view exists
+		.colorAttachmentCount = (desc->target_view != VK_NULL_HANDLE) ? 1U : 0U,
+		.pColorAttachments = (desc->target_view != VK_NULL_HANDLE) ? &color_attachment : nullptr,
+		.pDepthAttachment = (desc->depth_view != VK_NULL_HANDLE) ? &depth_attachment : nullptr,
 	};
 
 	vkCmdBeginRendering(cmd, &rendering_info);
