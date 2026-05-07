@@ -1,5 +1,6 @@
 #include "../cube_app/math.hpp"
 #include "Allocator.hpp"
+#include "Commands.hpp"
 #include "DescriptorLayout.hpp"
 #include "PipelineBuilder.hpp"
 #include "PresentationContext.hpp"
@@ -306,55 +307,47 @@ struct FrameRecordDesc {
 static void RecordShadowPass(VkCommandBuffer cmd, const void* pUserData) {
 	const auto& d = *static_cast<const FrameRecordDesc*>(pUserData);
 
-	// DELETED: ZHLN_RenderPassDesc and ScopedRendering. The Graph handles this now!
-
-	VkBuffer vboHandle = d.scene.vbo;
-	VkDeviceSize offset = 0;
-	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d.pipelines.shadowPipeline);
-	vkCmdBindVertexBuffers(cmd, 0, 1, &vboHandle, &offset);
-	vkCmdBindIndexBuffer(cmd, d.scene.ibo, 0, VK_INDEX_TYPE_UINT32);
-
-	for (const auto& draw : d.scene.drawCalls) {
-		Mat4 shadowMVP = Multiply(d.lightSpaceMatrix, draw.worldMatrix);
-		ZHLN::Vk::Push(cmd, d.pipelines.shadowLayout, VK_SHADER_STAGE_VERTEX_BIT, shadowMVP);
-		vkCmdDrawIndexed(cmd, draw.mesh->indexCount, 1, draw.mesh->firstIndex, 0, 0);
-	}
+	using namespace ZHLN::Vk;
+	DrawBatch<Mat4>(cmd,
+					{d.pipelines.shadowPipeline, d.pipelines.shadowLayout, d.scene.vbo, d.scene.ibo,
+					 VK_NULL_HANDLE, VK_SHADER_STAGE_VERTEX_BIT},
+					[&](auto draw) {
+						for (const auto& call : d.scene.drawCalls) {
+							draw(Multiply(d.lightSpaceMatrix, call.worldMatrix),
+								 call.mesh->indexCount, call.mesh->firstIndex);
+						}
+					});
 }
 
 static void RecordMainPass(VkCommandBuffer cmd, const void* pUserData) {
 	const auto& d = *static_cast<const FrameRecordDesc*>(pUserData);
 
-	// DELETED: ZHLN_RenderPassDesc and ScopedRendering. The Graph handles this now!
+	using namespace ZHLN::Vk;
+	DrawBatch<SponzaPushConstants>(
+		cmd,
+		{d.pipelines.pipeline, d.pipelines.pipelineLayout, d.scene.vbo, d.scene.ibo,
+		 d.scene.globalSet, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT},
+		[&](auto draw) {
+			for (const auto& call : d.scene.drawCalls) {
+				const auto& mat = (call.mesh->materialIndex >= 0)
+									  ? d.scene.materials[call.mesh->materialIndex]
+									  : d.scene.fallbackMat;
 
-	VkBuffer vboHandle = d.scene.vbo;
-	VkDeviceSize offset = 0;
-	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d.pipelines.pipeline);
-	vkCmdBindVertexBuffers(cmd, 0, 1, &vboHandle, &offset);
-	vkCmdBindIndexBuffer(cmd, d.scene.ibo, 0, VK_INDEX_TYPE_UINT32);
+				SponzaPushConstants pc = {.mvp = Multiply(d.viewProj, call.worldMatrix),
+										  .lightSpaceMatrix =
+											  Multiply(d.lightSpaceMatrix, call.worldMatrix),
+										  .camPos = {d.camPos[0], d.camPos[1], d.camPos[2], 1.0f},
 
-	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d.pipelines.pipelineLayout, 0, 1,
-							&d.scene.globalSet, 0, nullptr);
+										  // FIX: Direction from the sun to the scene (Downwards)
+										  .lightDir = {0.5f, -1.0f, 0.5f, 0.0f},
 
-	for (const auto& draw : d.scene.drawCalls) {
-		// Fetch the material (or fallback if none assigned)
-		const auto& mat = (draw.mesh->materialIndex >= 0)
-							  ? d.scene.materials[draw.mesh->materialIndex]
-							  : d.scene.fallbackMat;
+										  .albedoIdx = mat.albedoIdx,
+										  .normalIdx = mat.normalIdx,
+										  .pbrIdx = mat.pbrIdx};
 
-		SponzaPushConstants pc = {
-			.mvp = Multiply(d.viewProj, draw.worldMatrix),
-			.lightSpaceMatrix = Multiply(d.lightSpaceMatrix, draw.worldMatrix),
-			.camPos = {d.camPos[0], d.camPos[1], d.camPos[2], 1.0f}, // Set W to 1.0
-			.lightDir = {-0.5f, -1.0f, -0.3f, 0.0f}, // Pointing down and slightly to the side
-			.albedoIdx = mat.albedoIdx,
-			.normalIdx = mat.normalIdx,
-		};
-
-		ZHLN::Vk::Push(cmd, d.pipelines.pipelineLayout,
-					   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, pc);
-
-		vkCmdDrawIndexed(cmd, draw.mesh->indexCount, 1, draw.mesh->firstIndex, 0, 0);
-	}
+				draw(pc, call.mesh->indexCount, call.mesh->firstIndex);
+			}
+		});
 }
 
 static void RecordFrame(VkCommandBuffer cmd, ZHLN::Vk::GraphImage& swapchainRes,
