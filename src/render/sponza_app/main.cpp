@@ -74,13 +74,17 @@ struct SponzaPushConstants {
 	Mat4 mvp;
 	Mat4 lightSpaceMatrix;
 	float camPos[3];
-	uint32_t textureIndex; // Replaces the 4th float of camPos to maintain 16-byte alignment
+	uint32_t textureIndex; // Perfectly pads camPos to a 16-byte aligned vector (float3 + uint)
 };
 
 // Bindless Scene Layout
 using SceneLayout =
 	ZHLN::Vk::DescriptorLayout<ZHLN::Vk::BindlessSampledImageSlot<0, 4096>, // Global Textures Array
-							   ZHLN::Vk::SamplerSlot<1>,	  // Global Default Sampler
+							   ZHLN::Vk::SamplerSlot<1>, // Global Default Sampler
+
+							   // Note: Shadow mapping is intentionally kept outside the bindless
+							   // array because it uses a SamplerComparisonState (depth compare) and
+							   // is a unique render target rather than a generic material property.
 							   ZHLN::Vk::SampledImageSlot<2>, // Shadow Map
 							   ZHLN::Vk::SamplerSlot<3>		  // Shadow Sampler
 							   >;
@@ -718,23 +722,26 @@ auto main() -> int {
 
 	// --- Global Descriptor Set Layout & Allocation ---
 	auto descLayout = SceneLayout::CreateLayout(ctx.Device());
-	auto descPool = SceneLayout::CreatePool(ctx.Device(), 1); // Only 1 set needed for Bindless!
+	auto descPool = SceneLayout::CreatePool(ctx.Device(), 1);
 
 	VkDescriptorSet globalSet =
 		SceneLayout::Allocate(ctx.Device(), descPool.Get(), descLayout.Get());
 
-	// Write static descriptors (Skip bindless array for now)
-	SceneLayout::Write(
-		ctx.Device(), globalSet, ZHLN::Vk::SkipWrite{}, // Skip Binding 0 (Bindless array)
-		ZHLN::Vk::SamplerWrite{defaultSampler.Get()}, ZHLN::Vk::ImageWrite{shadowView.Get()},
-		ZHLN::Vk::SamplerWrite{shadowSampler.Get()});
+	SceneLayout::Write(ctx.Device(), globalSet, ZHLN::Vk::SkipWrite{},
+					   ZHLN::Vk::SamplerWrite{defaultSampler.Get()},
+					   ZHLN::Vk::ImageWrite{shadowView.Get()},
+					   ZHLN::Vk::SamplerWrite{shadowSampler.Get()});
 
-	// --- Bindless Registry Population ---
-	ZHLN::Vk::BindlessRegistry bindless;
-	bindless.Init(ctx.Device(), globalSet, 0); // Binding 0 is our bindless array
+	// 1. Define the Registry tied to the Layout and specific Binding Index (0)
+	ZHLN::Vk::BindlessRegistry<SceneLayout, 0> bindless;
 
-	// Register dummy as index 0
+	// 2. Initialize (Binding index and capacity are deduced from the template)
+	bindless.Init(ctx.Device(), globalSet);
+
+	// 3. Registering remains runtime-dynamic but type-safe
 	uint32_t fallbackTexIdx = bindless.RegisterImage(dummyTex.view.Get());
+
+	std::println("Bindless Registry Initialized. Capacity: {}", bindless.Capacity());
 
 	// Register loaded gltf images
 	std::vector<uint32_t> bindlessTextureIndices(gltf->images_count, fallbackTexIdx);

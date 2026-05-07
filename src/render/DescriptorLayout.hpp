@@ -75,63 +75,90 @@ struct BufferWrite {
 struct SkipWrite {};
 
 // ============================================================================
-// Bindless Registry Helper
+// TMP Helper: Extract Slot Info by Binding ID
 // ============================================================================
 
-struct BindlessRegistry {
-	VkDevice _device = VK_NULL_HANDLE;
-	VkDescriptorSet _set = VK_NULL_HANDLE;
-	uint32_t _binding = 0;
-	uint32_t _nextSlot = 0;
+template <uint32_t B, typename... Slots> struct GetSlot;
 
-	void Init(VkDevice device, VkDescriptorSet set, uint32_t binding = 0) {
+template <uint32_t B, typename Head, typename... Tail>
+struct GetSlot<B, Head, Tail...>
+	: std::conditional_t<Head::binding == B, Head, GetSlot<B, Tail...>> {};
+
+template <uint32_t B> struct GetSlot<B> {
+	static_assert(B == 0xFFFFFFFF, "Binding ID not found in DescriptorLayout");
+};
+
+// ============================================================================
+// Type-Safe Bindless Registry
+// ============================================================================
+
+template <typename Layout, uint32_t BindingID> class BindlessRegistry {
+	// 1. Proof of Correctness: Extract the specific slot definition at compile-time
+	using Slot = typename Layout::template SlotInfo<BindingID>;
+
+	static_assert((Slot::flags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) != 0,
+				  "BindlessRegistry can only be used with UPDATE_AFTER_BIND slots.");
+
+  public:
+	BindlessRegistry() = default;
+
+	// No longer need to pass Binding or MaxSlots; they are baked into the Type.
+	void Init(const VkDevice device, const VkDescriptorSet set) {
 		_device = device;
 		_set = set;
-		_binding = binding;
 		_nextSlot = 0;
 	}
 
-	uint32_t RegisterCombined(VkImageView view, VkSampler sampler,
-							  VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-		uint32_t slot = _nextSlot++;
-		VkDescriptorImageInfo imageInfo = {
-			.sampler = sampler,
-			.imageView = view,
-			.imageLayout = layout,
-		};
-		VkWriteDescriptorSet write = {
-			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-			.dstSet = _set,
-			.dstBinding = _binding,
-			.dstArrayElement = slot,
-			.descriptorCount = 1,
-			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-			.pImageInfo = &imageInfo,
-		};
-		vkUpdateDescriptorSets(_device, 1, &write, 0, nullptr);
-		return slot;
+	// Only compiled if the Slot type is actually a Sampled Image
+	uint32_t RegisterImage(const VkImageView view,
+						   const VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+		requires(Slot::type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE)
+	{
+		return UpdateDescriptor(view, VK_NULL_HANDLE, layout);
 	}
 
-	uint32_t RegisterImage(VkImageView view,
-						   VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+	// Only compiled if the Slot type is a Combined Image Sampler
+	uint32_t RegisterCombined(const VkImageView view, const VkSampler sampler,
+							  const VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+		requires(Slot::type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+	{
+		return UpdateDescriptor(view, sampler, layout);
+	}
+
+	[[nodiscard]] constexpr uint32_t Capacity() const noexcept { return Slot::count; }
+	[[nodiscard]] uint32_t Size() const noexcept { return _nextSlot; }
+
+  private:
+	uint32_t UpdateDescriptor(VkImageView view, VkSampler sampler, VkImageLayout layout) {
+		// 2. Proof of Correctness: Runtime bounds check against compile-time limit
+		if (_nextSlot >= Slot::count) [[unlikely]] {
+			std::println(stderr, "[BindlessRegistry<{}>] FATAL: Exceeded capacity of {} slots.",
+						 BindingID, Slot::count);
+			std::abort();
+		}
+
 		const uint32_t slot = _nextSlot++;
 		const VkDescriptorImageInfo imageInfo = {
-			.sampler = VK_NULL_HANDLE,
+			.sampler = sampler,
 			.imageView = view,
 			.imageLayout = layout,
 		};
 		const VkWriteDescriptorSet write = {
 			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 			.dstSet = _set,
-			.dstBinding = _binding,
+			.dstBinding = Slot::binding,
 			.dstArrayElement = slot,
 			.descriptorCount = 1,
-			.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+			.descriptorType = Slot::type,
 			.pImageInfo = &imageInfo,
 		};
 		vkUpdateDescriptorSets(_device, 1, &write, 0, nullptr);
 		return slot;
 	}
+
+	VkDevice _device = VK_NULL_HANDLE;
+	VkDescriptorSet _set = VK_NULL_HANDLE;
+	uint32_t _nextSlot = 0;
 };
 
 // ============================================================================
@@ -185,6 +212,7 @@ template <typename... Slots> class DescriptorLayout {
 	}
 
   public:
+	template <uint32_t B> using SlotInfo = GetSlot<B, Slots...>;
 	// -------------------------------------------------------------------------
 	// CreateLayout
 	// -------------------------------------------------------------------------
