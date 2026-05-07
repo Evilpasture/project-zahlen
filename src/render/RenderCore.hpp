@@ -1,10 +1,13 @@
 #pragma once
 
 #include "RenderCore.h"
+#include "Utils.hpp"
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <concepts>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -784,12 +787,7 @@ class Surface {
 // ============================================================================
 // Semaphore Helpers
 // ============================================================================
-
-#include <algorithm>
-#include <array>
-#include <cstdlib>
-#include <print>
-
+//
 // Perfect 64-byte structure (1 Cache Line)
 class alignas(64) SemaphorePool {
   public:
@@ -1049,8 +1047,23 @@ inline void DispatchGroups(VkCommandBuffer cmd, uint32_t gX, uint32_t gY, uint32
 // Mipmapping
 // ============================================================================
 
-inline void GenerateMipmaps(VkCommandBuffer cmd, VkImage image, uint32_t width, uint32_t height) {
-	uint32_t levels = static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
+/**
+ * @brief TMP helper to calculate mip levels at compile-time.
+ */
+template <uint32_t Width, uint32_t Height> consteval uint32_t GetMipLevels() noexcept {
+	return std::bit_width(ZHLN::Max(Width, Height));
+}
+
+/**
+ * @brief Runtime/Compile-time hybrid mipmap generator.
+ * Uses std::bit_width for O(1) level calculation instead of log2.
+ */
+inline void GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const uint32_t width,
+							const uint32_t height) {
+	// std::bit_width(n) returns 1 + floor(log2(n)).
+	// It's constexpr and maps to a single CPU instruction (BSR/CLZ).
+	uint32_t levels = std::bit_width(ZHLN::Max(width, height));
+
 	ZHLN_GenerateMipmaps(cmd, image, static_cast<int32_t>(width), static_cast<int32_t>(height),
 						 levels);
 }
