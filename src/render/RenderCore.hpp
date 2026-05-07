@@ -630,7 +630,8 @@ template <> struct LayoutTraits<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL> {
 
 // Specialization for Compute Shader Storage Image Read/Write
 template <> struct LayoutTraits<VK_IMAGE_LAYOUT_GENERAL> {
-	static constexpr VkAccessFlags2 access = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
+	static constexpr VkAccessFlags2 access =
+		VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
 	static constexpr VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
 };
 
@@ -900,99 +901,125 @@ using DescriptorPool = DeviceHandle<VkDescriptorPool, ZHLN_DestroyDescriptorPool
 // ============================================================================
 
 [[nodiscard]] inline bool IsInstanceExtensionSupported(std::string_view extension) noexcept {
-    uint32_t count = 0;
-    vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
-    std::vector<VkExtensionProperties> available(count);
-    vkEnumerateInstanceExtensionProperties(nullptr, &count, available.data());
-    return std::ranges::any_of(available, [&](const auto& prop) {
-        return prop.extensionName == extension;
-    });
+	uint32_t count = 0;
+	vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
+	std::vector<VkExtensionProperties> available(count);
+	vkEnumerateInstanceExtensionProperties(nullptr, &count, available.data());
+	return std::ranges::any_of(available,
+							   [&](const auto& prop) { return prop.extensionName == extension; });
 }
 
-[[nodiscard]] inline bool IsDeviceExtensionSupported(VkPhysicalDevice physical, std::string_view extension) noexcept {
-    uint32_t count = 0;
-    vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, nullptr);
-    std::vector<VkExtensionProperties> available(count);
-    vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, available.data());
-    return std::ranges::any_of(available, [&](const auto& prop) {
-        return prop.extensionName == extension;
-    });
+[[nodiscard]] inline bool IsDeviceExtensionSupported(VkPhysicalDevice physical,
+													 std::string_view extension) noexcept {
+	uint32_t count = 0;
+	vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, nullptr);
+	std::vector<VkExtensionProperties> available(count);
+	vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, available.data());
+	return std::ranges::any_of(available,
+							   [&](const auto& prop) { return prop.extensionName == extension; });
 }
 
 // ============================================================================
-// Render Graph (Linear Pass Execution)
+// Zero-Allocation Render Graph
 // ============================================================================
 
 struct PassResource {
-	const char* name = "unnamed_resource";
 	ZHLN_ImageBarrierDesc barrier;
 };
 
+// Use a raw function pointer and a void* for state.
+// This is exactly what std::function does, but without the heap allocation
+// and with a trivial, predictable call site.
+using PassRecordFn = void (*)(VkCommandBuffer, const void* userData);
+
 struct PassDesc {
 	const char* name = "Unnamed Pass";
-	std::vector<PassResource> transitions;
-	std::function<void(VkCommandBuffer)> record;
+
+	// Use std::span instead of std::vector to avoid copying/allocation.
+	// The transitions must live as long as ExecutePasses is running.
+	std::span<const PassResource> transitions;
+
+	PassRecordFn record = nullptr;
+	const void* pUserData = nullptr;
 };
 
+/**
+ * @brief Executes a sequence of render passes.
+ *
+ * @tparam MaxStackBarriers The number of image barriers to allocate on the stack before
+ *                          falling back to the heap. Defaults to 16.
+ * @param cmd The command buffer to record into.
+ * @param passes A span of pass descriptions to execute.
+ */
+template <size_t MaxStackBarriers = 16>
 inline void ExecutePasses(VkCommandBuffer cmd, std::span<const PassDesc> passes) noexcept {
-	for (const auto& pass : passes) {
-		
-		// 1. Batch all image transitions into a single pipeline barrier
-		std::vector<VkImageMemoryBarrier2> vk_barriers;
-		vk_barriers.reserve(pass.transitions.size());
-		
-		for (const auto& res : pass.transitions) {
-			vk_barriers.push_back({
-				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-				.srcStageMask = res.barrier.src_stage,
-				.srcAccessMask = res.barrier.src_access,
-				.dstStageMask = res.barrier.dst_stage,
-				.dstAccessMask = res.barrier.dst_access,
-				.oldLayout = res.barrier.src_layout,
-				.newLayout = res.barrier.dst_layout,
-				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-				.image = res.barrier.image,
-				.subresourceRange = {
-					.aspectMask = res.barrier.aspect,
-					.baseMipLevel = 0,
-					.levelCount = VK_REMAINING_MIP_LEVELS,
-					.baseArrayLayer = 0,
-					.layerCount = VK_REMAINING_ARRAY_LAYERS,
-				}
-			});
-		}
+	// Stack-allocated buffer for barriers to avoid heap allocation in the hot loop.
+	VkImageMemoryBarrier2 stack_barriers[MaxStackBarriers];
 
-		if (!vk_barriers.empty()) {
-			const VkDependencyInfo dep_info = {
-				.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-				.imageMemoryBarrierCount = static_cast<uint32_t>(vk_barriers.size()),
-				.pImageMemoryBarriers = vk_barriers.data()
-			};
+	for (const auto& pass : passes) {
+		const uint32_t transitionCount = static_cast<uint32_t>(pass.transitions.size());
+
+		if (transitionCount > 0) {
+			VkImageMemoryBarrier2* pBarriers = stack_barriers;
+
+			// We only define the vector here; it won't allocate unless transitionCount >
+			// MaxStackBarriers.
+			std::vector<VkImageMemoryBarrier2> heap_barriers;
+
+			if (transitionCount > MaxStackBarriers) [[unlikely]] {
+				heap_barriers.resize(transitionCount);
+				pBarriers = heap_barriers.data();
+			}
+
+			for (uint32_t i = 0; i < transitionCount; ++i) {
+				const auto& res = pass.transitions[i];
+				pBarriers[i] = {
+					.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+					.pNext = nullptr,
+					.srcStageMask = res.barrier.src_stage,
+					.srcAccessMask = res.barrier.src_access,
+					.dstStageMask = res.barrier.dst_stage,
+					.dstAccessMask = res.barrier.dst_access,
+					.oldLayout = res.barrier.src_layout,
+					.newLayout = res.barrier.dst_layout,
+					.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.image = res.barrier.image,
+					.subresourceRange =
+						{
+							.aspectMask = res.barrier.aspect,
+							.baseMipLevel = 0,
+							.levelCount = VK_REMAINING_MIP_LEVELS,
+							.baseArrayLayer = 0,
+							.layerCount = VK_REMAINING_ARRAY_LAYERS,
+						},
+				};
+			}
+
+			const VkDependencyInfo dep_info = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+											   .pNext = nullptr,
+											   .imageMemoryBarrierCount = transitionCount,
+											   .pImageMemoryBarriers = pBarriers};
 			vkCmdPipelineBarrier2(cmd, &dep_info);
 		}
 
-		// 2. Execute the draw commands
+		// Execute the recording callback (Function pointer + UserData)
 		if (pass.record) {
-			pass.record(cmd);
+			pass.record(cmd, pass.pUserData);
 		}
 	}
 }
 
 // Typed dispatch helper — computes group count from total invocations and local size
-inline void Dispatch(VkCommandBuffer cmd,
-                     uint32_t totalX, uint32_t totalY, uint32_t totalZ,
-                     uint32_t localX, uint32_t localY, uint32_t localZ) noexcept {
-    ZHLN_CmdDispatch(cmd,
-        (totalX + localX - 1) / localX,
-        (totalY + localY - 1) / localY,
-        (totalZ + localZ - 1) / localZ);
+inline void Dispatch(VkCommandBuffer cmd, uint32_t totalX, uint32_t totalY, uint32_t totalZ,
+					 uint32_t localX, uint32_t localY, uint32_t localZ) noexcept {
+	ZHLN_CmdDispatch(cmd, (totalX + localX - 1) / localX, (totalY + localY - 1) / localY,
+					 (totalZ + localZ - 1) / localZ);
 }
 
 // Direct group count version when you're managing it yourself
-inline void DispatchGroups(VkCommandBuffer cmd,
-                           uint32_t gX, uint32_t gY, uint32_t gZ) noexcept {
-    ZHLN_CmdDispatch(cmd, gX, gY, gZ);
+inline void DispatchGroups(VkCommandBuffer cmd, uint32_t gX, uint32_t gY, uint32_t gZ) noexcept {
+	ZHLN_CmdDispatch(cmd, gX, gY, gZ);
 }
 
 } // namespace ZHLN::Vk

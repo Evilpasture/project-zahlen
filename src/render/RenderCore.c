@@ -1287,7 +1287,7 @@ void ZHLN_DestroyDescriptorPool(const VkDevice device, const VkDescriptorPool po
 }
 [[nodiscard]]
 VkPipeline ZHLN_CreateComputePipeline(const VkDevice device,
-                                      const ZHLN_ComputePipelineDesc* const restrict desc) {
+									  const ZHLN_ComputePipelineDesc* const restrict desc) {
 	const VkShaderModule comp_module = ZHLN_CreateShaderModule(device, &desc->shader);
 	if (comp_module == VK_NULL_HANDLE) {
 		return VK_NULL_HANDLE;
@@ -1299,7 +1299,7 @@ VkPipeline ZHLN_CreateComputePipeline(const VkDevice device,
 	} else {
 		SpvReflectShaderModule ref_mod;
 		if (spvReflectCreateShaderModule(desc->shader.size, desc->shader.code, &ref_mod) ==
-		    SPV_REFLECT_RESULT_SUCCESS) {
+			SPV_REFLECT_RESULT_SUCCESS) {
 			if (ref_mod.entry_point_count > 0) {
 				strncpy(entry_name, ref_mod.entry_points[0].name, 63);
 			}
@@ -1328,6 +1328,6 @@ VkPipeline ZHLN_CreateComputePipeline(const VkDevice device,
 }
 
 void ZHLN_CmdDispatch(const VkCommandBuffer cmd, const uint32_t groupCountX,
-                      const uint32_t groupCountY, const uint32_t groupCountZ) {
+					  const uint32_t groupCountY, const uint32_t groupCountZ) {
 	vkCmdDispatch(cmd, groupCountX, groupCountY, groupCountZ);
 }
