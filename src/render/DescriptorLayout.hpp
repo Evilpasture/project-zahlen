@@ -219,9 +219,9 @@ template <typename... Slots> class DescriptorLayout {
 	// CreateLayout
 	// -------------------------------------------------------------------------
 	[[nodiscard]] static ZHLN::Vk::DescriptorSetLayout CreateLayout(VkDevice device) noexcept {
-		static constexpr auto bindings = MakeBindings();
-		static constexpr auto flags = MakeBindingFlags();
-		static constexpr bool updateAfterBind = HasUpdateAfterBind();
+		constexpr auto bindings = MakeBindings();
+		constexpr auto flags = MakeBindingFlags();
+		constexpr bool updateAfterBind = HasUpdateAfterBind();
 
 		const VkDescriptorSetLayoutBindingFlagsCreateInfo flagsInfo = {
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
