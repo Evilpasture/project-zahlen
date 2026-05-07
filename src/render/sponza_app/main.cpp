@@ -95,6 +95,9 @@ using SceneLayout =
 							   ZHLN::Vk::SamplerSlot<3>		  // Shadow Sampler
 							   >;
 
+using FXAALayout =
+	ZHLN::Vk::DescriptorLayout<ZHLN::Vk::SampledImageSlot<0>, ZHLN::Vk::SamplerSlot<1>>;
+
 // ============================================================================
 // Helpers & Path Resolution
 // ============================================================================
@@ -299,6 +302,9 @@ struct SceneBuffers {
 struct FrameRecordDesc {
 	const PipelineSet& pipelines;
 	const SceneBuffers& scene;
+	VkPipeline fxaaPipeline;
+	VkPipelineLayout fxaaLayout;
+	VkDescriptorSet fxaaSet;
 	Mat4 viewProj;
 	Mat4 lightSpaceMatrix;
 	float camPos[3];
@@ -351,18 +357,34 @@ static void RecordMainPass(VkCommandBuffer cmd, const void* pUserData) {
 }
 
 static void RecordFrame(VkCommandBuffer cmd, ZHLN::Vk::GraphImage& swapchainRes,
-						ZHLN::Vk::GraphImage& shadowTracker, ZHLN::Vk::GraphImage& depthTracker,
-						const FrameRecordDesc& d) {
+						ZHLN::Vk::GraphImage& sceneColor, ZHLN::Vk::GraphImage& shadowTracker,
+						ZHLN::Vk::GraphImage& depthTracker, const FrameRecordDesc& d) {
 	using namespace ZHLN::Vk;
 	RenderGraph Graph;
 
+	// 1. Shadow Pass
 	Graph.AddPass("Shadow Map").WriteDepth(shadowTracker).Record(RecordShadowPass, &d);
 
+	// 2. Main Pass (Writes to intermediate sceneColor)
 	Graph.AddPass("Main Scene")
 		.Read(shadowTracker)
-		.WriteColor(swapchainRes)
+		.WriteColor(sceneColor)
 		.WriteDepth(depthTracker)
 		.Record(RecordMainPass, &d);
+
+	// 3. FXAA Pass (Reads sceneColor, writes to final swapchain)
+	Graph.AddPass("FXAA")
+		.Read(sceneColor)
+		.WriteColor(swapchainRes)
+		.Record(
+			[](VkCommandBuffer cmd, const void* pUserData) {
+				const auto& d = *static_cast<const FrameRecordDesc*>(pUserData);
+				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d.fxaaPipeline);
+				vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d.fxaaLayout, 0, 1,
+										&d.fxaaSet, 0, nullptr); // Accessed via struct
+				vkCmdDraw(cmd, 3, 1, 0, 0);
+			},
+			&d);
 
 	Graph.AddPass("Handoff").Present(swapchainRes);
 
@@ -550,6 +572,10 @@ auto main() -> int {
 		return -1;
 	}
 
+	auto sceneColor = ZHLN::Vk::RenderTarget<VK_FORMAT_B8G8R8A8_SRGB>::Create(
+		allocator, ctx, presentation.swapchain.Get().extent,
+		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+
 	// --- Technique-Specific Targets ---
 	constexpr uint32_t SHADOW_RES = 4096;
 	auto shadowMap = ZHLN::Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
@@ -642,6 +668,36 @@ auto main() -> int {
 	}
 	MaterialAsset fallbackMat = {.albedoIdx = fallbackTexIdx, .normalIdx = fallbackTexIdx};
 
+	// --- Post processing ---
+
+	// --- 1. FXAA Descriptor Setup ---
+
+	auto fxaaDescLayout = FXAALayout::CreateLayout(ctx.Device());
+	auto fxaaDescPool = FXAALayout::CreatePool(ctx.Device(), 1);
+	VkDescriptorSet fxaaSet =
+		FXAALayout::Allocate(ctx.Device(), fxaaDescPool.Get(), fxaaDescLayout.Get());
+
+	// --- 2. FXAA Pipeline Layout ---
+	VkDescriptorSetLayout rawFxaaLayout = fxaaDescLayout.Get();
+	ZHLN_PipelineLayoutDesc fxaaLayoutDesc = {.set_layouts = &rawFxaaLayout,
+											  .set_layout_count = 1,
+											  .push_constants = nullptr,
+											  .push_constant_count = 0};
+	ZHLN::Vk::PipelineLayout fxaaPipelineLayout(
+		ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &fxaaLayoutDesc));
+
+	// --- 3. FXAA Shader and Pipeline ---
+	auto fxaaShaders = ZHLN::Vk::ShaderStages::FromFiles(
+		ctx.Device(), "fxaa.hlsl.VSMain.spv", "fxaa.hlsl.PSMain.spv", "VSMain", "PSMain");
+
+	auto fxaaPipeline = ZHLN::Vk::PipelineBuilder{}
+							.Shaders(fxaaShaders)
+							.Layout(fxaaPipelineLayout.Get())
+							.ColorFormat(VK_FORMAT_B8G8R8A8_SRGB) // Output to swapchain
+							.NoDepth()
+							.CullNone()
+							.Build(ctx.Device());
+
 	// --- Pipelines (Via Factory & Builder) ---
 	auto shaders = ZHLN::Vk::ShaderStages::FromFiles(ctx.Device(), paths.vert_spv, paths.frag_spv,
 													 "VSMain", "PSMain");
@@ -711,6 +767,16 @@ auto main() -> int {
 		if (win.resized) {
 			if (!presentation.Rebuild(win.width, win.height))
 				continue;
+
+			// FIX: Change R8G8B8A8 to B8G8R8A8 to match the variable type
+			sceneColor = ZHLN::Vk::RenderTarget<VK_FORMAT_B8G8R8A8_SRGB>::Create(
+				allocator, ctx, presentation.swapchain.Get().extent,
+				VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+
+			// Update the FXAA descriptor set to point to the new image
+			FXAALayout::Write(ctx.Device(), fxaaSet, ZHLN::Vk::ImageWrite{sceneColor.view.Get()},
+							  ZHLN::Vk::SamplerWrite{defaultSampler.Get()});
+
 			win.resized = false;
 		}
 
@@ -767,10 +833,16 @@ auto main() -> int {
 			presentation.swapchain.Get().views[image_index], presentation.swapchain.Get().extent,
 			VK_IMAGE_ASPECT_COLOR_BIT);
 
-		RecordFrame(cmd, swapchainRes, shadowMap.tracker, presentation.depthTarget.tracker,
+		RecordFrame(cmd, swapchainRes, sceneColor.tracker, shadowMap.tracker,
+					presentation.depthTarget.tracker,
 					{
 						.pipelines = activePipelines,
 						.scene = sceneBuffers,
+						// Pass the FXAA handles here
+						.fxaaPipeline = fxaaPipeline.Get(),
+						.fxaaLayout = fxaaPipelineLayout.Get(),
+						.fxaaSet = fxaaSet,
+
 						.viewProj = viewProj,
 						.lightSpaceMatrix = lightSpace,
 						.camPos = {camX, camY, camZ},
