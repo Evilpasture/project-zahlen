@@ -674,43 +674,66 @@ inline void Push(const VkCommandBuffer cmd, const VkPipelineLayout layout,
 // Frame Execution
 // ============================================================================
 
-template <uint32_t N, RecordFn Record, RebuildFn Rebuild>
-ZHLN_FrameResult DrawFrame(const Context& ctx, const Swapchain& swapchain, const FrameSync<N>& sync,
-						   const CommandPools<N>& pools, uint32_t& frame_index,
-						   const Record&& record, const Rebuild&& rebuild) noexcept {
+template <uint32_t N, typename Record, typename Rebuild>
+	requires RecordFn<Record> && RebuildFn<Rebuild>
+inline ZHLN_FrameResult DrawFrame(const Context& ctx, const Swapchain& swapchain,
+								  const FrameSync<N>& sync, const CommandPools<N>& pools,
+								  uint32_t& frame_index, Record&& record,
+								  Rebuild&& rebuild) noexcept {
 
 	const ZHLN_FrameSync& s = sync[frame_index];
 	const ZHLN_CommandPool& pool = pools[frame_index];
 	const VkCommandBuffer cmd = pools.Cmd(frame_index);
 
+	// 1. Synchronize: Wait for this frame's previous command buffer to finish
 	ZHLN_WaitAndResetFrame(ctx.Device(), s.in_flight, &pool);
 
+	// 2. Acquire: Get next image from swapchain
 	uint32_t image_index = 0;
 	const ZHLN_AcquireDesc acquire_desc = {.swapchain = swapchain.Get().handle,
 										   .image_available = s.image_available,
 										   .timeout_ns = UINT64_MAX};
+
 	auto result = ZHLN_AcquireImage(ctx.Device(), &acquire_desc, &image_index);
 	if (result == ZHLN_FrameResult_OutOfDate) {
-		rebuild();
+		std::invoke(std::forward<Rebuild>(rebuild));
 		return result;
 	}
 
+	// 3. Record: perfectly forward the callable to ensure inlining
 	ZHLN_BeginCommandBuffer(cmd);
 	std::invoke(std::forward<Record>(record), cmd, image_index);
 	ZHLN_EndCommandBuffer(cmd);
 
+	// 4. Submit
 	ZHLN_SubmitFrame(ctx.GraphicsQueue(), &s, cmd);
 
+	// 5. Present
 	const ZHLN_PresentDesc present_desc = {.present_queue = ctx.PresentQueue(),
 										   .swapchain = swapchain.Get().handle,
 										   .render_finished = s.render_finished,
 										   .image_index = image_index};
+
 	result = ZHLN_PresentFrame(&present_desc);
-	if (result == ZHLN_FrameResult_OutOfDate || result == ZHLN_FrameResult_Suboptimal) {
-		rebuild();
+	if (result == ZHLN_FrameResult_OutOfDate || result == ZHLN_FrameResult_Suboptimal)
+		[[unlikely]] {
+		std::invoke(std::forward<Rebuild>(rebuild));
 	}
 
-	frame_index = (frame_index + 1) % N;
+	// --- 6. Optimized Frame Index Increment ---
+	if constexpr ((N & (N - 1)) == 0) {
+		// Optimization for power-of-two N (e.g., 2, 4, 8)
+		// Uses bitwise AND instead of division/modulo
+		frame_index = (frame_index + 1) & (N - 1);
+	} else if constexpr (N == 3) {
+		// Optimization for common Triple Buffering case
+		// Avoids division entirely with a simple comparison
+		frame_index = (frame_index == 2) ? 0 : frame_index + 1;
+	} else {
+		// Fallback for non-standard counts
+		frame_index = (frame_index + 1) % N;
+	}
+
 	return result;
 }
 
