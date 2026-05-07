@@ -283,8 +283,14 @@ struct FpsCounter {
 struct FrameResources {
 	ZHLN::Vk::Swapchain swapchain;
 	ZHLN::Vk::SemaphorePool presentSemaphores;
+	// THE PHYSICAL RESOURCES
 	ZHLN::Vk::Image depthImage;
 	ZHLN::Vk::ImageView depthView;
+	ZHLN::Vk::Image shadowImage; // Move shadow here too
+	ZHLN::Vk::ImageView shadowView;
+	// THE TRACKERS (New)
+	ZHLN::Vk::GraphImage shadowTracker;
+	ZHLN::Vk::GraphImage depthTracker;
 	bool depthInitialized = false;
 
 	void Rebuild(const ZHLN::Vk::Context& ctx, ZHLN::Vk::Allocator& allocator,
@@ -319,6 +325,10 @@ struct FrameResources {
 		};
 		depthImage = ZHLN::Vk::Image::Create(allocator.Get(), depthInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 		depthView = ZHLN::Vk::CreateView<VK_FORMAT_D32_SFLOAT>(ctx.Device(), depthImage.Handle());
+		// Initialize/Reset the persistent trackers
+		depthTracker =
+			ZHLN::Vk::GraphImage::Create(depthImage.Handle(), depthView.Get(),
+										 {win.width, win.height}, VK_IMAGE_ASPECT_DEPTH_BIT);
 
 		win.resized = false;
 	}
@@ -365,11 +375,7 @@ struct FrameRecordDesc {
 static void RecordShadowPass(VkCommandBuffer cmd, const void* pUserData) {
 	const auto& d = *static_cast<const FrameRecordDesc*>(pUserData);
 
-	ZHLN_RenderPassDesc shadowPass = {.target_view = VK_NULL_HANDLE,
-									  .depth_view = d.shadowView,
-									  .extent = d.shadowExtent,
-									  .clear_depth = 1.0f};
-	ZHLN::Vk::ScopedRendering render(cmd, shadowPass);
+	// DELETED: ZHLN_RenderPassDesc and ScopedRendering. The Graph handles this now!
 
 	VkBuffer vboHandle = d.scene.vbo;
 	VkDeviceSize offset = 0;
@@ -387,12 +393,7 @@ static void RecordShadowPass(VkCommandBuffer cmd, const void* pUserData) {
 static void RecordMainPass(VkCommandBuffer cmd, const void* pUserData) {
 	const auto& d = *static_cast<const FrameRecordDesc*>(pUserData);
 
-	ZHLN_RenderPassDesc mainPass = {.target_view = d.swapchainView,
-									.depth_view = d.depthView,
-									.extent = d.extent,
-									.clear_color = {0.5f, 0.7f, 1.0f, 1.0f},
-									.clear_depth = 1.0f};
-	ZHLN::Vk::ScopedRendering render(cmd, mainPass);
+	// DELETED: ZHLN_RenderPassDesc and ScopedRendering. The Graph handles this now!
 
 	VkBuffer vboHandle = d.scene.vbo;
 	VkDeviceSize offset = 0;
@@ -400,7 +401,6 @@ static void RecordMainPass(VkCommandBuffer cmd, const void* pUserData) {
 	vkCmdBindVertexBuffers(cmd, 0, 1, &vboHandle, &offset);
 	vkCmdBindIndexBuffer(cmd, d.scene.ibo, 0, VK_INDEX_TYPE_UINT32);
 
-	// Bindless: Global set bound once
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d.pipelines.pipelineLayout, 0, 1,
 							&d.scene.globalSet, 0, nullptr);
 
@@ -426,31 +426,28 @@ static void RecordMainPass(VkCommandBuffer cmd, const void* pUserData) {
 	}
 }
 
-static void RecordFrame(const FrameRecordDesc& d) {
+// Change signature to accept the persistent trackers
+static void RecordFrame(const FrameRecordDesc& d, ZHLN::Vk::GraphImage& shadowTracker,
+						ZHLN::Vk::GraphImage& depthTracker) {
 	using namespace ZHLN::Vk;
 
-	// Wrappers for your existing resources
-	static GraphImage shadowRes =
-		GraphImage::Create(d.shadowImage, d.shadowView, d.shadowExtent, VK_IMAGE_ASPECT_DEPTH_BIT);
-	GraphImage colorRes =
+	// 1. Swapchain image tracker (This is the only one created on the stack
+	// because the handle changes every frame)
+	GraphImage colorTracker =
 		GraphImage::Create(d.swapchainImage, d.swapchainView, d.extent, VK_IMAGE_ASPECT_COLOR_BIT);
-	GraphImage depthRes =
-		GraphImage::Create(d.depthImage, d.depthView, d.extent, VK_IMAGE_ASPECT_DEPTH_BIT);
 
 	RenderGraph Graph;
 
-	// 1. Shadow Pass
-	Graph.AddPass("Shadow Map").WriteDepth(shadowRes).Record(RecordShadowPass, &d);
+	// 2. Use the persistent trackers passed in
+	Graph.AddPass("Shadow Map").WriteDepth(shadowTracker).Record(RecordShadowPass, &d);
 
-	// 2. Main Pass
 	Graph.AddPass("Main Scene")
-		.Read(shadowRes)	  // INFERRED: DEPTH_ATTACHMENT -> SHADER_READ_ONLY
-		.WriteColor(colorRes) // INFERRED: UNDEFINED -> COLOR_ATTACHMENT
-		.WriteDepth(depthRes) // INFERRED: UNDEFINED -> DEPTH_ATTACHMENT
+		.Read(shadowTracker)
+		.WriteColor(colorTracker)
+		.WriteDepth(depthTracker)
 		.Record(RecordMainPass, &d);
 
-	// 3. Post-Processing / Present
-	Graph.AddPass("Handoff").Present(colorRes); // INFERRED: COLOR_ATTACHMENT -> PRESENT_SRC_KHR
+	Graph.AddPass("Handoff").Present(colorTracker);
 
 	Graph.Execute(d.cmd);
 }
@@ -640,6 +637,7 @@ auto main() -> int {
 		ZHLN::Vk::Image::Create(allocator.Get(), shadowInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 	auto shadowView =
 		ZHLN::Vk::CreateView<VK_FORMAT_D32_SFLOAT>(ctx.Device(), shadowImage.Handle());
+
 	VkExtent2D shadowExtent = {SHADOW_RES, SHADOW_RES};
 
 	// --- Samplers (Via Builder) ---
@@ -781,6 +779,9 @@ auto main() -> int {
 	auto pools =
 		ZHLN::Vk::CommandPools<3>::Create(ctx.Device(), ctx.PhysicalInfo().graphics_family);
 
+	frame.shadowTracker = ZHLN::Vk::GraphImage::Create(shadowImage.Handle(), shadowView.Get(),
+													   shadowExtent, VK_IMAGE_ASPECT_DEPTH_BIT);
+
 	uint32_t frame_index = 0;
 	win.resized = true;
 	FpsCounter fpsCounter;
@@ -839,22 +840,24 @@ auto main() -> int {
 
 		ZHLN_BeginCommandBuffer(cmd);
 
-		RecordFrame({
-			.cmd = cmd,
-			.swapchainImage = frame.swapchain.Get().images[image_index],
-			.swapchainView = frame.swapchain.Get().views[image_index],
-			.extent = frame.swapchain.Get().extent,
-			.depthImage = frame.depthImage.Handle(),
-			.depthView = frame.depthView.Get(),
-			.shadowImage = shadowImage.Handle(),
-			.shadowView = shadowView.Get(),
-			.shadowExtent = shadowExtent,
-			.pipelines = activePipelines,
-			.scene = sceneBuffers,
-			.viewProj = viewProj,
-			.lightSpaceMatrix = lightSpace,
-			.camPos = {camX, camY, camZ},
-		});
+		RecordFrame(
+			{
+				.cmd = cmd,
+				.swapchainImage = frame.swapchain.Get().images[image_index],
+				.swapchainView = frame.swapchain.Get().views[image_index],
+				.extent = frame.swapchain.Get().extent,
+				.depthImage = frame.depthImage.Handle(),
+				.depthView = frame.depthView.Get(),
+				.shadowImage = shadowImage.Handle(),
+				.shadowView = shadowView.Get(),
+				.shadowExtent = shadowExtent,
+				.pipelines = activePipelines,
+				.scene = sceneBuffers,
+				.viewProj = viewProj,
+				.lightSpaceMatrix = lightSpace,
+				.camPos = {camX, camY, camZ},
+			},
+			frame.shadowTracker, frame.depthTracker);
 
 		ZHLN_EndCommandBuffer(cmd);
 

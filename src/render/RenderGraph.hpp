@@ -26,10 +26,11 @@ struct GraphImage {
 		img.view = view;
 		img.extent = extent;
 		img.aspect = aspect;
-		// Start with default "unknown" state
+
 		img.layout = VK_IMAGE_LAYOUT_UNDEFINED;
 		img.access = VK_ACCESS_2_NONE;
-		img.stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+		// FIX: Match the Wait Semaphore stage so the layout transition waits for the image!
+		img.stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
 		return img;
 	}
 };
