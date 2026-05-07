@@ -3,6 +3,7 @@
 #include "DescriptorLayout.hpp"
 #include "PipelineBuilder.hpp"
 #include "RenderCore.hpp"
+#include "RenderGraph.hpp"
 #include "SamplerBuilder.hpp"
 #include "Texture.hpp"
 #include "Vertex.hpp"
@@ -428,75 +429,30 @@ static void RecordMainPass(VkCommandBuffer cmd, const void* pUserData) {
 static void RecordFrame(const FrameRecordDesc& d) {
 	using namespace ZHLN::Vk;
 
-	// --- 1. Define all transitions on the stack ---
+	// Wrappers for your existing resources
+	static GraphImage shadowRes =
+		GraphImage::Create(d.shadowImage, d.shadowView, d.shadowExtent, VK_IMAGE_ASPECT_DEPTH_BIT);
+	GraphImage colorRes =
+		GraphImage::Create(d.swapchainImage, d.swapchainView, d.extent, VK_IMAGE_ASPECT_COLOR_BIT);
+	GraphImage depthRes =
+		GraphImage::Create(d.depthImage, d.depthView, d.extent, VK_IMAGE_ASPECT_DEPTH_BIT);
 
-	const PassResource shadowBarriers[] = {
-		{.barrier = {.image = d.shadowImage,
-					 .src_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-					 .dst_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-					 .src_layout = VK_IMAGE_LAYOUT_UNDEFINED,
-					 .dst_layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-					 .src_stage = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-					 .dst_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-					 .aspect = VK_IMAGE_ASPECT_DEPTH_BIT}}};
+	RenderGraph Graph;
 
-	const PassResource mainBarriers[] = {
-		{.barrier = {.image = d.swapchainImage,
-					 .src_access = VK_ACCESS_2_NONE,
-					 .dst_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-					 .src_layout = VK_IMAGE_LAYOUT_UNDEFINED,
-					 .dst_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-					 .src_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-					 .dst_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-					 .aspect = VK_IMAGE_ASPECT_COLOR_BIT}},
-		{.barrier = {.image = d.depthImage,
-					 .src_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-					 .dst_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-					 .src_layout = VK_IMAGE_LAYOUT_UNDEFINED,
-					 .dst_layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-					 .src_stage = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-					 .dst_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-					 .aspect = VK_IMAGE_ASPECT_DEPTH_BIT}},
-		{.barrier = {.image = d.shadowImage,
-					 .src_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-					 .dst_access = VK_ACCESS_2_SHADER_READ_BIT, // Keep this
-					 .src_layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-					 .dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-					 .src_stage =
-						 VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, // After shadow pass finishes
-					 // FIX: Change this stage to FRAGMENT_SHADER.
-					 // This is the stage where we actually perform the read.
-					 .dst_stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-					 .aspect = VK_IMAGE_ASPECT_DEPTH_BIT}},
-	};
+	// 1. Shadow Pass
+	Graph.AddPass("Shadow Map").WriteDepth(shadowRes).Record(RecordShadowPass, &d);
 
-	const PassResource presentBarriers[] = {
-		{.barrier = {.image = d.swapchainImage,
-					 .src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-					 .dst_access = VK_ACCESS_2_NONE,
-					 .src_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-					 .dst_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-					 .src_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-					 .dst_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-					 .aspect = VK_IMAGE_ASPECT_COLOR_BIT}}};
+	// 2. Main Pass
+	Graph.AddPass("Main Scene")
+		.Read(shadowRes)	  // INFERRED: DEPTH_ATTACHMENT -> SHADER_READ_ONLY
+		.WriteColor(colorRes) // INFERRED: UNDEFINED -> COLOR_ATTACHMENT
+		.WriteDepth(depthRes) // INFERRED: UNDEFINED -> DEPTH_ATTACHMENT
+		.Record(RecordMainPass, &d);
 
-	// --- 2. Define the passes on the stack ---
+	// 3. Post-Processing / Present
+	Graph.AddPass("Handoff").Present(colorRes); // INFERRED: COLOR_ATTACHMENT -> PRESENT_SRC_KHR
 
-	const PassDesc passes[] = {{.name = "Shadow Map Pass",
-								.transitions = shadowBarriers,
-								.record = RecordShadowPass,
-								.pUserData = &d},
-							   {.name = "Main Scene Pass",
-								.transitions = mainBarriers,
-								.record = RecordMainPass,
-								.pUserData = &d},
-							   {.name = "Present Handoff Pass",
-								.transitions = presentBarriers,
-								.record = nullptr, // Transition only
-								.pUserData = nullptr}};
-
-	// --- 3. Execute ---
-	ZHLN::Vk::ExecutePasses(d.cmd, passes);
+	Graph.Execute(d.cmd);
 }
 
 // ============================================================================
