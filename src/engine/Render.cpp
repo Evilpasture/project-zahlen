@@ -171,6 +171,7 @@ BufferHandle RenderContext::CreateVertexBuffer(const void* data, size_t size) {
 	ZHLN_EndCommandBuffer(cmd);
 
 	VkCommandBufferSubmitInfo cmd_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+										  .pNext = nullptr,
 										  .commandBuffer = cmd};
 	VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
 							.commandBufferInfoCount = 1,
