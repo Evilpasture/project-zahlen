@@ -4,6 +4,7 @@
 #include "PipelineBuilder.hpp"
 #include "RenderCore.hpp"
 #include "SamplerBuilder.hpp"
+#include "Texture.hpp"
 #include "Vertex.hpp"
 #include "demo_utils/DemoWindow.hpp"
 // clang-format off
@@ -57,11 +58,6 @@ struct MeshPrimitive {
 struct DrawCall {
 	MeshPrimitive* mesh;
 	Mat4 worldMatrix;
-};
-
-struct TextureAsset {
-	ZHLN::Vk::Image image;
-	ZHLN::Vk::ImageView view;
 };
 
 // With bindless, a material no longer holds a descriptor set.
@@ -230,87 +226,28 @@ static Scene BuildScene(cgltf_data* data) {
 	return scene;
 }
 
-// ============================================================================
-// Texture upload
-// ============================================================================
-
-// Memory-based Uploader
-static TextureAsset UploadTexture(ZHLN::Vk::Allocator& allocator, const ZHLN::Vk::Context& ctx,
-								  const VkImageCreateInfo& baseInfo, const void* pixelData,
-								  uint32_t tw, uint32_t th) {
-	TextureAsset result;
-
-	// 1. Calculate Mip Levels
-	uint32_t mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(tw, th)))) + 1;
-
-	ZHLN::Vk::CommandPool batchPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-	if (!batchPool.Allocate(1))
-		return result;
-	VkCommandBuffer cmd = batchPool[0];
-	ZHLN_BeginCommandBuffer(cmd);
-
-	VkImageCreateInfo texInfo = baseInfo;
-	texInfo.extent = {tw, th, 1};
-	texInfo.mipLevels = mipLevels; // Set the calculated levels
-	// Add SRC bit so we can read from levels to blit them
-	texInfo.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-
-	result.image = ZHLN::Vk::Image::Create(allocator.Get(), texInfo, VMA_MEMORY_USAGE_GPU_ONLY);
-
-	size_t imageSize = tw * th * 4;
-	auto staging = ZHLN::Vk::Buffer::Create(
-		allocator.Get(), imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
-	memcpy(staging.Map().data, pixelData, imageSize);
-
-	// Transition ALL levels to DST_OPTIMAL initially
-	ZHLN_ImageBarrierDesc initialBarrier = {.image = result.image.Handle(),
-											.src_access = 0,
-											.dst_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-											.src_layout = VK_IMAGE_LAYOUT_UNDEFINED,
-											.dst_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-											.src_stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-											.dst_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-											.aspect = VK_IMAGE_ASPECT_COLOR_BIT,
-											.base_mip = 0,
-											.mip_count = mipLevels};
-	ZHLN_CmdImageBarrier(cmd, &initialBarrier);
-
-	ZHLN::Vk::CopyBufferToImage(cmd, {.buffer = staging.Handle(),
-									  .image = result.image.Handle(),
-									  .layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-									  .width = tw,
-									  .height = th});
-
-	// Generate the Mips! (This handles transitions to SHADER_READ_ONLY)
-	ZHLN::Vk::GenerateMipmaps(cmd, result.image.Handle(), tw, th);
-
-	ZHLN_EndCommandBuffer(cmd);
-
-	VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-										 .commandBuffer = cmd};
-	VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-							.commandBufferInfoCount = 1,
-							.pCommandBufferInfos = &subInfo};
-	vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
-	vkQueueWaitIdle(ctx.GraphicsQueue());
-
-	result.view = ZHLN::Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(
-		ctx.Device(), result.image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
-	return result;
-}
-
 // File-based wrapper
-static TextureAsset UploadTexture(ZHLN::Vk::Allocator& allocator, ZHLN::Demo::WindowState& win,
-								  const ZHLN::Vk::Context& ctx, const VkImageCreateInfo& baseInfo,
-								  const std::string& fullPath) {
+template <VkFormat F>
+static ZHLN::Vk::TextureAsset
+UploadTextureFromFile(ZHLN::Vk::Allocator& allocator, const ZHLN::Vk::Context& ctx,
+					  const VkImageCreateInfo& baseInfo, const std::string& fullPath) {
 	int tw, th, tc;
+	// Force 4 channels (RGBA) to match our buffer size logic
 	stbi_uc* pixels = stbi_load(fullPath.c_str(), &tw, &th, &tc, STBI_rgb_alpha);
-	if (!pixels)
+	if (!pixels) {
+		std::println(stderr, "Failed to load: {}", fullPath);
 		return {};
+	}
 
-	TextureAsset result = UploadTexture(allocator, ctx, baseInfo, pixels, static_cast<uint32_t>(tw),
-										static_cast<uint32_t>(th));
+	VkImageCreateInfo info = baseInfo;
+	info.extent = {static_cast<uint32_t>(tw), static_cast<uint32_t>(th), 1};
+
+	// Specify <F> here!
+	ZHLN::Vk::TextureAsset result = ZHLN::Vk::UploadTexture<F>(allocator, ctx, info, pixels);
+
 	stbi_image_free(pixels);
+
+	// We return result; C++ handles the move automatically here
 	return result;
 }
 
@@ -711,15 +648,28 @@ auto main() -> int {
 									 .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
 
 	uint32_t white_pixel = 0xFFFFFFFF;
-	TextureAsset dummyTex = UploadTexture(allocator, ctx, texBaseInfo, &white_pixel, 1, 1);
+	VkImageCreateInfo dummyInfo = texBaseInfo;
+	dummyInfo.extent = {1, 1, 1};
+
+	ZHLN::Vk::TextureAsset dummyTex =
+		ZHLN::Vk::UploadTexture<VK_FORMAT_R8G8B8A8_UNORM>(allocator, ctx, dummyInfo, &white_pixel);
 
 	// --- Textures Loop ---
-	std::vector<TextureAsset> textures(gltf->images_count);
+	std::vector<ZHLN::Vk::TextureAsset> textures(gltf->images_count);
 	std::println("Uploading {} textures...", gltf->images_count);
 	for (cgltf_size i = 0; i < gltf->images_count; ++i) {
 		ZHLN::Demo::ProcessEvents(win);
 		std::string fullPath = paths.asset_prefix + gltf->images[i].uri;
-		textures[i] = UploadTexture(allocator, win, ctx, texBaseInfo, fullPath);
+
+		// Sponza uses "BaseColor" in the filenames for Albedo maps
+		if (fullPath.find("BaseColor") != std::string::npos) {
+			textures[i] = UploadTextureFromFile<VK_FORMAT_R8G8B8A8_SRGB>(allocator, ctx,
+																		 texBaseInfo, fullPath);
+		} else {
+			// Normals and Roughness/Metallic maps must be Linear (UNORM)
+			textures[i] = UploadTextureFromFile<VK_FORMAT_R8G8B8A8_UNORM>(allocator, ctx,
+																		  texBaseInfo, fullPath);
+		}
 		std::println("  [{}/{}] {}", i + 1, gltf->images_count, gltf->images[i].uri);
 	}
 
@@ -771,8 +721,12 @@ auto main() -> int {
 	// Register loaded gltf images
 	std::vector<uint32_t> bindlessTextureIndices(gltf->images_count, fallbackTexIdx);
 	for (cgltf_size i = 0; i < gltf->images_count; ++i) {
-		if (textures[i].view) {
+		// FIX: Only register if the view is valid!
+		if (textures[i].view.Valid()) {
 			bindlessTextureIndices[i] = bindless.RegisterImage(textures[i].view.Get());
+		} else {
+			// If it failed to load, point this image index to the dummy white texture
+			bindlessTextureIndices[i] = fallbackTexIdx;
 		}
 	}
 
