@@ -68,16 +68,19 @@ struct TextureAsset {
 // It just holds the integer index into the global texture array.
 struct MaterialAsset {
 	uint32_t albedoIdx;
-	uint32_t normalIdx; // NEW
+	uint32_t normalIdx;
+	uint32_t pbrIdx;
 };
 
 struct SponzaPushConstants {
 	Mat4 mvp;
 	Mat4 lightSpaceMatrix;
-	float camPos[4];	// 16-byte aligned
+	float camPos[4]; // 16-byte aligned
+	float lightDir[4];
 	uint32_t albedoIdx; // 4 bytes
 	uint32_t normalIdx; // 4 bytes
-	float _padding[2];	// Pad to 16 bytes
+	uint32_t pbrIdx;
+	float _padding; // Pad to 16 bytes
 };
 
 // Bindless Scene Layout
@@ -454,6 +457,7 @@ static void RecordMainPass(VkCommandBuffer cmd, const void* pUserData) {
 			.mvp = Multiply(d.viewProj, draw.worldMatrix),
 			.lightSpaceMatrix = Multiply(d.lightSpaceMatrix, draw.worldMatrix),
 			.camPos = {d.camPos[0], d.camPos[1], d.camPos[2], 1.0f}, // Set W to 1.0
+			.lightDir = {-0.5f, -1.0f, -0.3f, 0.0f}, // Pointing down and slightly to the side
 			.albedoIdx = mat.albedoIdx,
 			.normalIdx = mat.normalIdx,
 		};
@@ -761,6 +765,7 @@ auto main() -> int {
 		// Default both to fallback (white 1x1)
 		materials[i].albedoIdx = fallbackTexIdx;
 		materials[i].normalIdx = fallbackTexIdx;
+		materials[i].pbrIdx = fallbackTexIdx;
 
 		// 1. Assign Albedo (Base Color)
 		if (mat->has_pbr_metallic_roughness &&
@@ -769,6 +774,15 @@ auto main() -> int {
 			if (tex->image) {
 				int imgIdx = static_cast<int>(tex->image - gltf->images);
 				materials[i].albedoIdx = bindlessTextureIndices[imgIdx];
+			}
+		}
+
+		if (mat->has_pbr_metallic_roughness &&
+			mat->pbr_metallic_roughness.metallic_roughness_texture.texture) {
+			cgltf_texture* tex = mat->pbr_metallic_roughness.metallic_roughness_texture.texture;
+			if (tex->image) {
+				int imgIdx = static_cast<int>(tex->image - gltf->images);
+				materials[i].pbrIdx = bindlessTextureIndices[imgIdx];
 			}
 		}
 
