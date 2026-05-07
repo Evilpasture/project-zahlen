@@ -103,14 +103,12 @@ PSInput VSMain([[vk::location(0)]] float3 pos : POSITION,
 }
 
 float4 PSMain(PSInput input) : SV_TARGET {
-    // 1. SAMPLE BINDLESS
+    // 1. Sample Bindless
     float4 albedoSample = globalTextures[pc.albedoIdx].Sample(defaultSampler, input.uv);
-    // Discard pixels that are meant to be transparent (Standard for Sponza decorations)
     if (albedoSample.a < 0.5) discard; 
-    float3 albedo = ToLinear(albedoSample.rgb);
-    float3 normalSample = globalTextures[pc.normalIdx].Sample(defaultSampler, input.uv).rgb * 2.0 - 1.0;
+    float3 albedo = albedoSample.rgb; 
     
-    // IMPORTANT: PBR textures are DATA. Do NOT use ToLinear here.
+    float3 normalSample = globalTextures[pc.normalIdx].Sample(defaultSampler, input.uv).rgb * 2.0 - 1.0;
     float4 pbrSample = globalTextures[pc.pbrIdx].Sample(defaultSampler, input.uv);
     
     // Intel Sponza GLTF Packing: R = AO, G = Roughness, B = Metallic
@@ -131,7 +129,7 @@ float4 PSMain(PSInput input) : SV_TARGET {
 
     // 3. Vectors
     float3 V = normalize(pc.camPos.xyz - input.worldPos);
-    float3 L = normalize(-pc.lightDir.xyz);
+    float3 L = normalize(-pc.lightDir.xyz); 
     float3 H = normalize(V + L);
     float NdotV = max(dot(worldNormal, V), 0.0001);
     float NdotL = max(dot(worldNormal, L), 0.0001);
@@ -149,28 +147,34 @@ float4 PSMain(PSInput input) : SV_TARGET {
     float3 kD = (float3(1.0, 1.0, 1.0) - kS) * (1.0 - metallic);
     
     // 5. SHADOWS
-    float shadow = CalculateShadow(input.shadowPos, worldNormal, -L);
+    float shadow = CalculateShadow(input.shadowPos, worldNormal, L);
 
     // 6. LIGHTING COMPOSITION
-    // Direct Light (Sun)
-    float3 directLight = (kD * albedo / 3.14159 + specular) * float3(1.0, 0.95, 0.8) * 4.0 * NdotL * shadow;
+    // Direct Light (Sun) - High intensity for HDR
+    float3 sunColor = float3(1.0, 0.98, 0.9);
+    float3 directLight = (kD * albedo / 3.14159 + specular) * sunColor * 12.0 * NdotL * shadow;
 
-    // 7. ENHANCED AMBIENT (Fixes the "plastic" look)
-    // Use a 'Fake IBL' gradient: Sky is blue-ish, Ground is brown-ish
+    // 7. ENHANCED AMBIENT
     float up = worldNormal.y * 0.5 + 0.5;
-    float3 skyColor = float3(0.1, 0.2, 0.3);
-    float3 groundColor = float3(0.05, 0.04, 0.02);
+    float3 skyColor = float3(0.5, 0.7, 1.0) * 1.5;    
+    float3 groundColor = float3(0.2, 0.18, 0.15) * 1.2;
     float3 ambientEnv = lerp(groundColor, skyColor, up);
     
-    // Apply Ambient Occlusion (AO) from the PBR texture to the ambient term
-    // This is vital for the Lion statue to look "grounded" and deep
-    float3 ambient = ambientEnv * albedo * ao; 
+    // --- THE AO FIX ---
+    // Instead of: ambient = env * albedo * ao
+    // Use a lerp to "soften" the AO. 
+    // 0.5 means the shadows will never be darker than 50% of the ambient light.
+    float aoStrength = 0.5; 
+    float aoSafe = lerp(1.0, ao, aoStrength);
+    
+    float3 ambient = ambientEnv * albedo * aoSafe * 1.8;
     
     float3 color = ambient + directLight;
 
     // 8. FINAL TOUCHES
-    color = ACESFilm(color); // Better than simple tonemapping
-    color = pow(color, 1.0/2.2);
+    color *= 0.8;            // Exposure / Global Brightness adjustment
+    color = ACESFilm(color); // HDR -> LDR
+    color = pow(color, 1.0/2.2); // Gamma correction
 
     return float4(color, 1.0);
 }
