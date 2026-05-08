@@ -74,18 +74,6 @@ struct MaterialAsset {
 	uint32_t emissiveIdx;
 };
 
-struct Light {
-	float position[3];
-	uint32_t type; // 0=Dir, 1=Point, 2=Spot
-	float color[3];
-	float intensity;
-	float direction[3];
-	float range;
-	float innerConeCos;
-	float outerConeCos;
-	float _pad[2];
-};
-
 struct AppFrameData {
 	ZHLN::Vk::Passes::ShadowConfig shadowData;
 	ZHLN::Vk::Passes::PBRMainConfig pbrData;
@@ -404,41 +392,46 @@ auto main() -> int {
 	}
 	Scene scene = BuildScene(gltf.ptr);
 
-	std::vector<Light> sceneLights;
+	std::vector<ZHLN::Vk::Passes::Light> sceneLights;
+	std::array<float, 3> sunPos = {0, 0, 0};
 
 	for (cgltf_size i = 0; i < gltf->nodes_count; ++i) {
 		cgltf_node* node = &gltf->nodes[i];
 		if (!node->light)
 			continue;
 
+		std::string name = node->name ? node->name : "";
+
+		// 1. SKIP the Sun (it's handled by pc.lightDir)
+		if (node->light->type == cgltf_light_type_directional ||
+			name.find("SUN") != std::string::npos) {
+			// Calculate sunPos for the shadow matrix, then skip adding to buffer
+			sunPos = {node->translation[0], node->translation[1], node->translation[2]};
+			continue;
+		}
+
+		// 2. SKIP the HDRI Sky (this is the "Blue Splotch")
+		if (name.find("HDRI") != std::string::npos || name.find("SKY") != std::string::npos) {
+			continue;
+		}
+
+		// 2. Only add ACTUAL point/spot lights (lamps) to the buffer
 		float matrix[16];
 		cgltf_node_transform_world(node, matrix);
 
-		Light l{};
+		ZHLN::Vk::Passes::Light l{};
 		l.type = (uint32_t)node->light->type;
-
-		// FIX: Fallback to 1.0 if intensity is 0, otherwise it will be pitch black
-		l.intensity = (node->light->intensity <= 0.0f) ? 1.0f : node->light->intensity;
-
-		l.range = (node->light->range <= 0.0f) ? 20.0f : node->light->range;
 		l.color[0] = node->light->color[0];
 		l.color[1] = node->light->color[1];
 		l.color[2] = node->light->color[2];
 
-		// Extract Position from world matrix
+		// Sponza lamps are physically small; they need high intensity but low range
+		l.intensity = (node->light->intensity <= 0.0f) ? 2.0f : node->light->intensity;
+		l.range = (node->light->range <= 0.0f) ? 10.0f : node->light->range;
+
 		l.position[0] = matrix[12];
-		l.position[1] = matrix[13];
+		l.position[1] = matrix[13] - 0.5f;
 		l.position[2] = matrix[14];
-
-		// Extract Direction (Forward vector is -Z in glTF)
-		l.direction[0] = -matrix[8];
-		l.direction[1] = -matrix[9];
-		l.direction[2] = -matrix[10];
-
-		if (node->light->type == cgltf_light_type_spot) {
-			l.innerConeCos = std::cos(node->light->spot_inner_cone_angle);
-			l.outerConeCos = std::cos(node->light->spot_outer_cone_angle);
-		}
 
 		sceneLights.push_back(l);
 	}
@@ -465,14 +458,14 @@ auto main() -> int {
 	auto stagingIBO = ZHLN::Vk::UploadToBuffer(allocator.Get(), setupCmd, ibo, scene.indices.data(),
 											   scene.indices.size() * sizeof(uint32_t));
 
-	auto lightBuffer = ZHLN::Vk::Buffer::Create(allocator.Get(), sceneLights.size() * sizeof(Light),
-												VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-													VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-												VMA_MEMORY_USAGE_GPU_ONLY);
+	auto lightBuffer = ZHLN::Vk::Buffer::Create(
+		allocator.Get(), sceneLights.size() * sizeof(ZHLN::Vk::Passes::Light),
+		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+		VMA_MEMORY_USAGE_GPU_ONLY);
 
 	auto stagingLights =
 		ZHLN::Vk::UploadToBuffer(allocator.Get(), setupCmd, lightBuffer, sceneLights.data(),
-								 sceneLights.size() * sizeof(Light));
+								 sceneLights.size() * sizeof(ZHLN::Vk::Passes::Light));
 
 	ZHLN_EndCommandBuffer(setupCmd);
 	VkCommandBufferSubmitInfo setupCmdInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
@@ -608,7 +601,22 @@ auto main() -> int {
 		materials[i].normalIdx = fallbackTexIdx;
 		materials[i].pbrIdx = fallbackTexIdx;
 		materials[i].lightmapIdx = fallbackTexIdx;
-		materials[i].emissiveIdx = blackTexIdx;
+		materials[i].emissiveIdx = blackTexIdx; // Default to black
+
+		// Only assign emissive if it actually exists in the glTF
+		if (mat->has_emissive_strength || (mat->emissive_texture.texture)) {
+			if (mat->emissive_texture.texture && mat->emissive_texture.texture->image) {
+				int imgIdx = static_cast<int>(mat->emissive_texture.texture->image - gltf->images);
+				materials[i].emissiveIdx = bindlessTextureIndices[imgIdx];
+			}
+		}
+
+		// FIX for the Green Tile:
+		// Sponza's master_material or floor-markers often have a pure-green emissive factor.
+		// If the emissive index is fallback white, and the color is green, it glows.
+		if (mat->name && std::string(mat->name).find("master") != std::string::npos) {
+			materials[i].emissiveIdx = blackTexIdx;
+		}
 
 		// 1. Assign Albedo (Base Color)
 		if (mat->has_pbr_metallic_roughness &&
@@ -775,16 +783,24 @@ auto main() -> int {
 		Mat4 proj = Perspective(1.0472f, (float)win.width / (float)win.height, 0.1f, 1000.0f);
 		Mat4 viewProj = Multiply(proj, view);
 
-		// 1. Move the sun further away
-		Mat4 lightView = LookAt({40.f, 60.f, 40.f}, {0.f, 10.f, 0.f}, {0.f, 1.f, 0.f});
-		Mat4 lightProj = Ortho(-80.f, 80.f, -80.f, 80.f, 0.1f, 300.f);
+		// Use the glTF sun position, but look deeper into the floor (0, 2, 0)
+		// This allows the "beams" to penetrate the corridors.
+		Mat4 lightView =
+			LookAt({sunPos[0], sunPos[1], sunPos[2]}, {0.f, 2.f, 0.f}, {0.f, 1.f, 0.f});
+		Mat4 lightProj = Ortho(-100.f, 100.f, -100.f, 100.f, 0.1f,
+							   400.f); // Wider box for full building coverage
 
-		// 2. NEW: Bias Matrix to convert Vulkan NDC [-1, 1] to Texture UV [0, 1]
-		Mat4 biasMatrix = {{0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
-							0.5f, 0.5f, 0.0f, 1.0f}};
+		// 1. This is for the Shadow Pass (Writing)
+		Mat4 shadowProjView = Multiply(lightProj, lightView);
 
-		// 3. Update the final lightSpace matrix
-		Mat4 lightSpace = Multiply(biasMatrix, Multiply(lightProj, lightView));
+		// 2. This is for the PBR Pass (Reading/Sampling)
+		Mat4 biasMatrix = {{
+			0.5f, 0.0f, 0.0f, 0.0f, // Col 0
+			0.0f, 0.5f, 0.0f, 0.0f, // Col 1
+			0.0f, 0.0f, 1.0f, 0.0f, // Col 2 (Z is already [0, 1] from your Ortho)
+			0.5f, 0.5f, 0.0f, 1.0f	// Col 3
+		}};
+		Mat4 lightSpaceBiased = Multiply(biasMatrix, shadowProjView);
 
 		// FPS
 		if (auto title = fpsCounter.Tick(scene.drawCalls.size()); !title.empty())
@@ -841,9 +857,10 @@ auto main() -> int {
 		// 2. Pack the Scene Context
 		ZHLN::Vk::Passes::PBRSceneContext sceneCtx = {
 			.viewProj = viewProj.data,
-			.lightSpaceMatrix = lightSpace.data,
+			.lightSpaceMatrix = lightSpaceBiased.data, // Biased
+			.shadowProjView = shadowProjView.data,	   // Unbiased
 			.camPos = {camX, camY, camZ, 1.0f},
-			.lightDir = {dirX / len, dirY / len, dirZ / len, 0.0f}, // Set your sun direction
+			.lightDir = {dirX / len, dirY / len, dirZ / len, 0.0f},
 			.lightCount = static_cast<uint32_t>(sceneLights.size()),
 			.globalSet = globalSet,
 			.vbo = vbo.Handle(),

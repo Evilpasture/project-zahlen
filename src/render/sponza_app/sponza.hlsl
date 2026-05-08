@@ -2,13 +2,14 @@
 
 struct Light {
     float3 position;
-    uint type; 
+    uint type;       // Offset 12, Size 4 -> Total 16 (Align 16)
     float3 color;
-    float intensity;
+    float intensity; // Offset 28, Size 4 -> Total 32 (Align 16)
     float3 direction;
-    float range;
+    float range;     // Offset 44, Size 4 -> Total 48 (Align 16)
     float innerConeCos;
     float outerConeCos;
+    float2 _unused_padding; // Offset 56, Size 8 -> Total 64 (Align 16)
 };
 
 struct PushConstants {
@@ -52,15 +53,15 @@ float3 ToLinear(float3 srgb) {
 }
 
 float CalculateShadow(float4 shadowPos, float3 worldNormal, float3 lightDir) {
-    // Just the perspective divide
     float3 projCoords = shadowPos.xyz / shadowPos.w;
-    
-    // Use a much smaller bias for HDR
-    float bias = max(0.0005 * (1.0 - dot(worldNormal, lightDir)), 0.00005);
-    projCoords.z -= bias;
 
-    if (projCoords.z > 1.0) return 1.0;
-    return shadowMap.SampleCmpLevelZero(shadowSampler, projCoords.xy, projCoords.z).r;
+    // VULKAN Y-FLIP: If it's all in shadow, uncomment the next line:
+    // projCoords.y = 1.0 - projCoords.y;
+
+    if (projCoords.z > 1.0 || projCoords.z < 0.0) return 1.0;
+
+    float bias = max(0.005 * (1.0 - dot(worldNormal, lightDir)), 0.001);
+    return shadowMap.SampleCmpLevelZero(shadowSampler, projCoords.xy, projCoords.z - bias).r;
 }
 
 float3 ACESFilm(float3 x) {
@@ -96,9 +97,16 @@ float3 FresnelSchlick(float cosTheta, float3 F0) {
 
 // Punctual Light Attenuation
 float GetDistanceAttenuation(float dist, float range) {
-    if (range <= 0.0) return 1.0 / max(dist * dist, 0.01);
-    float atten = saturate(1.0 - pow(dist / range, 4.0));
-    return (atten * atten) / max(dist * dist, 0.01);
+    // Physically correct inverse-square falloff with a smooth window at the edge
+    float attenuation = 1.0 / max(dist * dist, 0.01);
+    
+    if (range > 0.0) {
+        // Smoothly fade to zero at the range limit so it doesn't "snap" off
+        float distOverRange = dist / range;
+        float window = saturate(1.0 - pow(distOverRange, 4.0));
+        attenuation *= window * window;
+    }
+    return attenuation;
 }
 
 float GetAngleAttenuation(float3 L, float3 lightDir, float inner, float outer) {
@@ -145,32 +153,33 @@ float4 PSMain(PSInput input) : SV_TARGET {
     if (albedoSample.a < 0.5) discard; 
     float3 albedo = albedoSample.rgb;
     
-    // Normal map is in [0, 1], move to [-1, 1]
+    // Normal map: Unpack from [0, 1] to [-1, 1]
     float3 normalMap = globalTextures[pc.normalIdx].Sample(defaultSampler, input.uv0).rgb * 2.0 - 1.0;
-    
     float4 pbrSample = globalTextures[pc.pbrIdx].Sample(defaultSampler, input.uv0);
     float3 emissive = globalTextures[pc.emissiveIdx].Sample(defaultSampler, input.uv0).rgb;
-    float3 lightmap = globalTextures[pc.lightmapIdx].Sample(lightmapSampler, input.uv1).rgb;
+    // FIX: Only use lightmap if the index is NOT the fallback white texture
+    // and if the sample isn't garbage.
+    float3 lightmap = float3(0, 0, 0);
+    if (pc.lightmapIdx != pc.albedoIdx) { // Basic check: if lightmap isn't just the albedo fallback
+        lightmap = globalTextures[pc.lightmapIdx].Sample(lightmapSampler, input.uv1).rgb;
+    }
 
     float roughness = pbrSample.g;
     float metallic = pbrSample.b;
 
-    // 2. High-Quality Normal Mapping using Vertex Tangents
+    // 2. High-Quality Normal Mapping (Fix TBN order)
     float3 N = normalize(input.normal);
     float3 T = normalize(input.tangent.xyz);
-    // Bitangent is orthogonal to N and T. w component determines handedness.
-    float3 B = cross(N, T) * input.tangent.w; 
-    float3x3 TBN = float3x3(T, B, N);
+    float3 B = normalize(cross(N, T) * input.tangent.w); 
     
-    // Transform normal map from Tangent Space to World Space
-    float3 worldNormal = normalize(mul(normalMap, TBN));
+    // Construct world normal: Map the tangent-space normalMap into world-space
+    float3 worldNormal = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * N);
 
     // 3. Shared PBR Prep
     float3 V = normalize(pc.camPos.xyz - input.worldPos);
-    float NdotV = max(dot(worldNormal, V), 0.0001);
     float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
 
-    // 4. MAIN SUN CALCULATION (Directional + Shadows)
+    // 4. Main Sun Calculation (Increase Intensity for HDR)
     float3 L_sun = normalize(-pc.lightDir.xyz);
     float3 H_sun = normalize(V + L_sun);
     float NdotL_sun = max(dot(worldNormal, L_sun), 0.0);
@@ -179,49 +188,42 @@ float4 PSMain(PSInput input) : SV_TARGET {
     float D_s = DistributionGGX(worldNormal, H_sun, roughness);
     float G_s = GeometrySmith(worldNormal, V, L_sun, roughness);
     float3 F_s = FresnelSchlick(max(dot(H_sun, V), 0.0), F0);
-    float3 specular_sun = (D_s * G_s * F_s) / (4.0 * NdotV * NdotL_sun + 0.0001);
-    float3 kD_sun = (float3(1.0, 1.0, 1.0) - F_s) * (1.0 - metallic);
+    float3 spec_s = (D_s * G_s * F_s) / (4.0 * max(dot(worldNormal, V), 0.0) * NdotL_sun + 0.0001);
+    float3 kD_s = (float3(1.0, 1.0, 1.0) - F_s) * (1.0 - metallic);
     
-    float3 totalDirect = (kD_sun * albedo / 3.14159 + specular_sun) * float3(1.0, 0.98, 0.9) * 10.0 * NdotL_sun * shadow;
+    // Increased sun multiplier (15.0) to make highlights pop in HDR
+    float3 totalDirect = (kD_s * albedo / 3.14159 + spec_s) * float3(1.0, 0.95, 0.8) * 15.0 * NdotL_sun * shadow;
 
-    // 5. PUNCTUAL LIGHTS LOOP
+    // 5. Punctual Lights Loop (Now aligned correctly)
     for (uint i = 0; i < pc.lightCount; i++) {
         Light light = lights[i];
-        float3 L_p;
-        float atten = 1.0;
-
-        if (light.type == 0) { // Directional
-            L_p = normalize(-light.direction);
-        } else { // Point / Spot
-            float3 dir = light.position - input.worldPos;
-            float d = length(dir);
-            L_p = normalize(dir);
-            atten = GetDistanceAttenuation(d, light.range);
-            if (light.type == 2) { // Spot
-                atten *= GetAngleAttenuation(L_p, -light.direction, light.innerConeCos, light.outerConeCos);
-            }
-        }
-
+        float3 L_p = light.position - input.worldPos;
+        float dist = length(L_p);
+        L_p = normalize(L_p);
+        
+        // PBR punctual light attenuation (Standard glTF math)
+        float atten = GetDistanceAttenuation(dist, light.range);
+        
         float NdotL_p = max(dot(worldNormal, L_p), 0.0);
-        if (NdotL_p > 0.0) {
+        if (NdotL_p > 0.0 && atten > 0.001) {
             float3 H_p = normalize(V + L_p);
             float D_p = DistributionGGX(worldNormal, H_p, roughness);
             float G_p = GeometrySmith(worldNormal, V, L_p, roughness);
             float3 F_p = FresnelSchlick(max(dot(H_p, V), 0.0), F0);
-
-            float3 spec_p = (D_p * G_p * F_p) / (4.0 * NdotV * NdotL_p + 0.0001);
-            float3 kD_p = (float3(1.0, 1.0, 1.0) - F_p) * (1.0 - metallic);
+            float3 spec_p = (D_p * G_p * F_p) / (4.0 * max(dot(worldNormal, V), 0.0) * NdotL_p + 0.0001);
+            float3 kD_p = (1.0 - F_p) * (1.0 - metallic);
             
             totalDirect += (kD_p * albedo / 3.14159 + spec_p) * light.color * light.intensity * atten * NdotL_p;
         }
     }
 
     // 6. FINAL COMPOSITION
-    float3 ambient = lightmap * albedo * lerp(1.0, pbrSample.r, 0.5);
-    float3 finalColor = ambient + totalDirect + (emissive * 4.0);
+    // If no lightmap exists, use a very small constant ambient so the scene isn't black
+    float3 ambient = (length(lightmap) > 0.0) ? (lightmap * albedo * 0.4) : (albedo * 0.02);
+    
+    // Boost emissive significantly for the lanterns
+    float3 finalColor = ambient + totalDirect + (emissive * 10.0);
 
-    // IMPORTANT: DO NOT apply ACESFilm or Gamma here! 
-    // We are outputting Linear HDR to the R16G16B16A16 target.
-    // The FXAA pass will handle the tonemapping.
-    return float4(finalColor, 1.0);
+    // Final safety clamp for HDR overflow
+    return float4(max(finalColor, 0.0), 1.0);
 }

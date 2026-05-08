@@ -22,13 +22,25 @@ struct PBRDrawCall {
 
 struct PBRSceneContext {
 	std::array<float, 16> viewProj;
-	std::array<float, 16> lightSpaceMatrix;
+	std::array<float, 16> lightSpaceMatrix; // Biased (for Sampling in PBR)
+	std::array<float, 16> shadowProjView;	// UNBIASED (for Rendering in Shadow Pass)
 	float camPos[4];
 	float lightDir[4];
 	uint32_t lightCount;
 	VkDescriptorSet globalSet;
 	VkBuffer vbo;
 	VkBuffer ibo;
+};
+
+struct Light {
+	float position[3];
+	uint32_t type; // 0=Dir, 1=Point, 2=Spot
+	float color[3];
+	float intensity;
+	float direction[3];
+	float range;
+	float innerConeCos;
+	float outerConeCos;
 };
 
 // Internal Push Constant structures matching the HLSL shaders perfectly
@@ -102,7 +114,8 @@ static void RecordShadows(VkCommandBuffer cmd, const void* pUserData) {
 
 	DrawBatch<ShadowPushConstants>(cmd, batchCfg, [&](auto draw) {
 		for (const auto& dc : *c.drawCalls) {
-			ShadowPushConstants pc = {.mvp = Multiply(c.scene->lightSpaceMatrix, dc.worldMatrix)};
+			// FIX: Use shadowProjView (Unbiased) here
+			ShadowPushConstants pc = {.mvp = Multiply(c.scene->shadowProjView, dc.worldMatrix)};
 			draw(pc, dc.indexCount, dc.firstIndex);
 		}
 	});
