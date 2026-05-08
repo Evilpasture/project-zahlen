@@ -1,6 +1,5 @@
 #include "../cube_app/math.hpp"
 #include "Allocator.hpp"
-#include "Commands.hpp"
 #include "DescriptorLayout.hpp"
 #include "PipelineBuilder.hpp"
 #include "PresentationContext.hpp"
@@ -8,6 +7,7 @@
 #include "RenderGraph.hpp"
 #include "RenderTarget.hpp"
 #include "SamplerBuilder.hpp"
+#include "StandardPasses.hpp"
 #include "Texture.hpp"
 #include "Vertex.hpp"
 #include "demo_utils/DemoWindow.hpp"
@@ -86,18 +86,10 @@ struct Light {
 	float _pad[2];
 };
 
-struct SponzaPushConstants {
-	Mat4 mvp;
-	Mat4 lightSpaceMatrix;
-	float camPos[4]; // 16-byte aligned
-	float lightDir[4];
-	uint32_t albedoIdx; // 4 bytes
-	uint32_t normalIdx; // 4 bytes
-	uint32_t pbrIdx;
-	uint32_t lightmapIdx;
-	uint32_t emissiveIdx;
-	uint32_t lightCount;
-	uint32_t _pad[2];
+struct AppFrameData {
+	ZHLN::Vk::Passes::PBRMainConfig mainPass;
+	ZHLN::Vk::Passes::ShadowConfig shadowPass;
+	ZHLN::Vk::Passes::FXAAConfig fxaaPass;
 };
 
 // Bindless Scene Layout
@@ -309,111 +301,23 @@ struct FpsCounter {
 // Frame recording
 // ============================================================================
 
-struct PipelineSet {
-	VkPipeline pipeline, shadowPipeline;
-	VkPipelineLayout pipelineLayout, shadowLayout;
-};
-
-struct SceneBuffers {
-	VkBuffer vbo, ibo;
-	VkBuffer lightBuffer;
-	uint32_t lightCount;
-	const std::vector<DrawCall>& drawCalls;
-	const std::vector<MaterialAsset>& materials;
-	const MaterialAsset& fallbackMat;
-	VkDescriptorSet globalSet; // Passed from main
-};
-
-struct FrameRecordDesc {
-	const PipelineSet& pipelines;
-	const SceneBuffers& scene;
-	VkPipeline fxaaPipeline;
-	VkPipelineLayout fxaaLayout;
-	VkDescriptorSet fxaaSet;
-	Mat4 viewProj;
-	Mat4 lightSpaceMatrix;
-	float camPos[3];
-};
-
-static void RecordShadowPass(VkCommandBuffer cmd, const void* pUserData) {
-	const auto& d = *static_cast<const FrameRecordDesc*>(pUserData);
-
-	using namespace ZHLN::Vk;
-	DrawBatch<Mat4>(cmd,
-					{d.pipelines.shadowPipeline, d.pipelines.shadowLayout, d.scene.vbo, d.scene.ibo,
-					 VK_NULL_HANDLE, VK_SHADER_STAGE_VERTEX_BIT},
-					[&](auto draw) {
-						for (const auto& call : d.scene.drawCalls) {
-							draw(Multiply(d.lightSpaceMatrix, call.worldMatrix),
-								 call.mesh->indexCount, call.mesh->firstIndex);
-						}
-					});
-}
-
-static void RecordMainPass(VkCommandBuffer cmd, const void* pUserData) {
-	const auto& d = *static_cast<const FrameRecordDesc*>(pUserData);
-
-	using namespace ZHLN::Vk;
-	DrawBatch<SponzaPushConstants>(
-		cmd,
-		{d.pipelines.pipeline, d.pipelines.pipelineLayout, d.scene.vbo, d.scene.ibo,
-		 d.scene.globalSet, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT},
-		[&](auto draw) {
-			for (const auto& call : d.scene.drawCalls) {
-				const auto& mat = (call.mesh->materialIndex >= 0)
-									  ? d.scene.materials[call.mesh->materialIndex]
-									  : d.scene.fallbackMat;
-
-				SponzaPushConstants pc = {.mvp = Multiply(d.viewProj, call.worldMatrix),
-										  .lightSpaceMatrix =
-											  Multiply(d.lightSpaceMatrix, call.worldMatrix),
-										  .camPos = {d.camPos[0], d.camPos[1], d.camPos[2], 1.0f},
-
-										  // FIX: Direction from the sun to the scene (Downwards)
-										  .lightDir = {0.5f, -1.0f, 0.5f, 0.0f},
-
-										  .albedoIdx = mat.albedoIdx,
-										  .normalIdx = mat.normalIdx,
-										  .pbrIdx = mat.pbrIdx,
-										  .lightmapIdx = mat.lightmapIdx,
-										  .emissiveIdx = mat.emissiveIdx,
-										  .lightCount = d.scene.lightCount};
-
-				draw(pc, call.mesh->indexCount, call.mesh->firstIndex);
-			}
-		});
-}
-
 static void RecordFrame(VkCommandBuffer cmd, ZHLN::Vk::GraphImage& swapchainRes,
-						ZHLN::Vk::GraphImage& sceneColor, ZHLN::Vk::GraphImage& shadowTracker,
-						ZHLN::Vk::GraphImage& depthTracker, const FrameRecordDesc& d) {
+						ZHLN::Vk::RenderTarget<VK_FORMAT_B8G8R8A8_SRGB>& sceneColor,
+						ZHLN::Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>& shadowMap,
+						ZHLN::Vk::GraphImage& depthTracker, const AppFrameData& d) {
 	using namespace ZHLN::Vk;
 	RenderGraph Graph;
 
-	// 1. Shadow Pass
-	Graph.AddPass("Shadow Map").WriteDepth(shadowTracker).Record(RecordShadowPass, &d);
+	// 1. Shadows
+	Passes::AddShadowPass(Graph, shadowMap.tracker, d.shadowPass);
 
-	// 2. Main Pass (Writes to intermediate sceneColor)
-	Graph.AddPass("Main Scene")
-		.Read(shadowTracker)
-		.WriteColor(sceneColor)
-		.WriteDepth(depthTracker)
-		.Record(RecordMainPass, &d);
+	// 2. PBR Scene
+	Passes::AddPBRMainPass(Graph, sceneColor.tracker, depthTracker, shadowMap.tracker, d.mainPass);
 
-	// 3. FXAA Pass (Reads sceneColor, writes to final swapchain)
-	Graph.AddPass("FXAA")
-		.Read(sceneColor)
-		.WriteColor(swapchainRes)
-		.Record(
-			[](VkCommandBuffer cmd, const void* pUserData) {
-				const auto& d = *static_cast<const FrameRecordDesc*>(pUserData);
-				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d.fxaaPipeline);
-				vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, d.fxaaLayout, 0, 1,
-										&d.fxaaSet, 0, nullptr); // Accessed via struct
-				vkCmdDraw(cmd, 3, 1, 0, 0);
-			},
-			&d);
+	// 3. FXAA
+	Passes::AddFXAAPass(Graph, sceneColor.tracker, swapchainRes, d.fxaaPass);
 
+	// 4. Final Handoff
 	Graph.AddPass("Handoff").Present(swapchainRes);
 
 	Graph.Execute(cmd);
@@ -523,6 +427,42 @@ auto main() -> int {
 	}
 	Scene scene = BuildScene(gltf.ptr);
 
+	std::vector<Light> sceneLights;
+
+	for (cgltf_size i = 0; i < gltf->nodes_count; ++i) {
+		cgltf_node* node = &gltf->nodes[i];
+		if (!node->light)
+			continue;
+
+		float matrix[16];
+		cgltf_node_transform_world(node, matrix);
+
+		Light l{};
+		l.type = (uint32_t)node->light->type; // Matches cgltf_light_type
+		l.intensity = node->light->intensity;
+		l.range = node->light->range;
+		l.color[0] = node->light->color[0];
+		l.color[1] = node->light->color[1];
+		l.color[2] = node->light->color[2];
+
+		// Extract Position from world matrix
+		l.position[0] = matrix[12];
+		l.position[1] = matrix[13];
+		l.position[2] = matrix[14];
+
+		// Extract Direction (Forward vector is -Z in glTF)
+		l.direction[0] = -matrix[8];
+		l.direction[1] = -matrix[9];
+		l.direction[2] = -matrix[10];
+
+		if (node->light->type == cgltf_light_type_spot) {
+			l.innerConeCos = std::cos(node->light->spot_inner_cone_angle);
+			l.outerConeCos = std::cos(node->light->spot_outer_cone_angle);
+		}
+
+		sceneLights.push_back(l);
+	}
+
 	// --- GPU buffers ---
 	ZHLN::Vk::CommandPool setupPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
 	if (!setupPool.Allocate(1))
@@ -544,6 +484,15 @@ auto main() -> int {
 								 scene.vertices.size() * sizeof(ZHLN::Vk::Vertex));
 	auto stagingIBO = ZHLN::Vk::UploadToBuffer(allocator.Get(), setupCmd, ibo, scene.indices.data(),
 											   scene.indices.size() * sizeof(uint32_t));
+
+	auto lightBuffer = ZHLN::Vk::Buffer::Create(allocator.Get(), sceneLights.size() * sizeof(Light),
+												VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+													VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+												VMA_MEMORY_USAGE_GPU_ONLY);
+
+	auto stagingLights =
+		ZHLN::Vk::UploadToBuffer(allocator.Get(), setupCmd, lightBuffer, sceneLights.data(),
+								 sceneLights.size() * sizeof(Light));
 
 	ZHLN_EndCommandBuffer(setupCmd);
 	VkCommandBufferSubmitInfo setupCmdInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
@@ -600,50 +549,6 @@ auto main() -> int {
 		}
 		std::println("  [{}/{}] {}", i + 1, gltf->images_count, gltf->images[i].uri);
 	}
-
-	std::vector<Light> sceneLights;
-
-	for (cgltf_size i = 0; i < gltf->nodes_count; ++i) {
-		cgltf_node* node = &gltf->nodes[i];
-		if (!node->light)
-			continue;
-
-		float matrix[16];
-		cgltf_node_transform_world(node, matrix);
-
-		Light l{};
-		l.type = (uint32_t)node->light->type; // Matches cgltf_light_type
-		l.intensity = node->light->intensity;
-		l.range = node->light->range;
-		l.color[0] = node->light->color[0];
-		l.color[1] = node->light->color[1];
-		l.color[2] = node->light->color[2];
-
-		// Extract Position from world matrix
-		l.position[0] = matrix[12];
-		l.position[1] = matrix[13];
-		l.position[2] = matrix[14];
-
-		// Extract Direction (Forward vector is -Z in glTF)
-		l.direction[0] = -matrix[8];
-		l.direction[1] = -matrix[9];
-		l.direction[2] = -matrix[10];
-
-		if (node->light->type == cgltf_light_type_spot) {
-			l.innerConeCos = std::cos(node->light->spot_inner_cone_angle);
-			l.outerConeCos = std::cos(node->light->spot_outer_cone_angle);
-		}
-
-		sceneLights.push_back(l);
-	}
-
-	auto lightBuffer = ZHLN::Vk::Buffer::Create(allocator.Get(), sceneLights.size() * sizeof(Light),
-												VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-													VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-												VMA_MEMORY_USAGE_GPU_ONLY);
-	auto stagingLights =
-		ZHLN::Vk::UploadToBuffer(allocator.Get(), setupCmd, lightBuffer, sceneLights.data(),
-								 sceneLights.size() * sizeof(Light));
 	// --- Infrastructure Setup ---
 	ZHLN::Vk::PresentationContext presentation;
 	if (!presentation.Init(ctx, allocator, surface.Get(), win.width, win.height)) {
@@ -811,7 +716,7 @@ auto main() -> int {
 
 	// Note: mainPush now needs FRAGMENT bit to read textureIndex
 	VkPushConstantRange mainPush = {VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-									sizeof(SponzaPushConstants)};
+									sizeof(ZHLN::Vk::Passes::PBRPushConstants)};
 	VkPushConstantRange shadowPush = {VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Mat4)};
 
 	VkDescriptorSetLayout rawLayout = descLayout.Get();
@@ -839,18 +744,6 @@ auto main() -> int {
 							  .DepthOnly()
 							  .CullNone()
 							  .Build(ctx.Device());
-
-	PipelineSet activePipelines = {.pipeline = pipeline.Get(),
-								   .shadowPipeline = shadowPipeline.Get(),
-								   .pipelineLayout = pipelineLayout.Get(),
-								   .shadowLayout = shadowLayout.Get()};
-
-	SceneBuffers sceneBuffers = {.vbo = vbo.Handle(),
-								 .ibo = ibo.Handle(),
-								 .drawCalls = scene.drawCalls,
-								 .materials = materials,
-								 .fallbackMat = fallbackMat,
-								 .globalSet = globalSet};
 
 	// --- Frame loop resources ---
 	auto sync = ZHLN::Vk::FrameSync<3>::Create(ctx.Device());
@@ -938,20 +831,43 @@ auto main() -> int {
 			presentation.swapchain.Get().views[image_index], presentation.swapchain.Get().extent,
 			VK_IMAGE_ASPECT_COLOR_BIT);
 
-		RecordFrame(cmd, swapchainRes, sceneColor.tracker, shadowMap.tracker,
-					presentation.depthTarget.tracker,
-					{
-						.pipelines = activePipelines,
-						.scene = sceneBuffers,
-						// Pass the FXAA handles here
-						.fxaaPipeline = fxaaPipeline.Get(),
-						.fxaaLayout = fxaaPipelineLayout.Get(),
-						.fxaaSet = fxaaSet,
+		// 1. Prepare Draw Call Data for this frame
+		std::vector<ZHLN::Vk::Passes::PBRDrawCall> pbrCalls;
+		pbrCalls.reserve(scene.drawCalls.size());
 
-						.viewProj = viewProj,
-						.lightSpaceMatrix = lightSpace,
-						.camPos = {camX, camY, camZ},
-					});
+		for (const auto& dc : scene.drawCalls) {
+			const auto& mat =
+				(dc.mesh->materialIndex >= 0) ? materials[dc.mesh->materialIndex] : fallbackMat;
+			pbrCalls.push_back({.worldMatrix = dc.worldMatrix.data, // Map Mat4 to std::array
+								.albedoIdx = mat.albedoIdx,
+								.normalIdx = mat.normalIdx,
+								.pbrIdx = mat.pbrIdx,
+								.lightmapIdx = mat.lightmapIdx,
+								.emissiveIdx = mat.emissiveIdx,
+								.indexCount = dc.mesh->indexCount,
+								.firstIndex = dc.mesh->firstIndex});
+		}
+
+		// 2. Pack the Scene Context
+		ZHLN::Vk::Passes::PBRSceneContext sceneCtx = {
+			.viewProj = viewProj.data,
+			.lightSpaceMatrix = lightSpace.data,
+			.camPos = {camX, camY, camZ, 1.0f},
+			.lightDir = {0.5f, -1.0f, 0.5f, 0.0f}, // Set your sun direction
+			.lightCount = static_cast<uint32_t>(sceneLights.size()),
+			.globalSet = globalSet,
+			.vbo = vbo.Handle(),
+			.ibo = ibo.Handle()};
+
+		// 3. Define the Pass Configurations
+		AppFrameData frameData = {
+			.mainPass = {pipeline.Get(), pipelineLayout.Get(), &pbrCalls, &sceneCtx},
+			.shadowPass = {shadowPipeline.Get(), shadowLayout.Get(), &pbrCalls, &sceneCtx},
+			.fxaaPass = {fxaaPipeline.Get(), fxaaPipelineLayout.Get(), fxaaSet}};
+
+		// 4. Execute (RecordFrame now uses the backend presets)
+		RecordFrame(cmd, swapchainRes, sceneColor, shadowMap, presentation.depthTarget.tracker,
+					frameData);
 
 		ZHLN_EndCommandBuffer(cmd);
 
