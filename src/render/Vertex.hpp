@@ -4,6 +4,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 #include <vulkan/vulkan.h>
 
 namespace ZHLN::Vk {
@@ -11,8 +12,11 @@ namespace ZHLN::Vk {
 struct Vertex {
 	std::array<float, 3> pos;
 	std::array<float, 3> norm;
-	std::array<float, 2> uv;
+	std::array<float, 2> uv0; // For Albedo/Normal
+	std::array<float, 2> uv1; // For Lightmaps
 };
+
+static_assert(std::is_trivial_v<Vertex>);
 
 // ============================================================================
 // Compile-Time Type to Vulkan Format Mapping (C++23)

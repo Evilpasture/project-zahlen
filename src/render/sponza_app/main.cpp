@@ -23,7 +23,7 @@
 #include <print>
 #include <vector>
 
-ZHLN_REFLECT_VERTEX(ZHLN::Vk::Vertex, pos, norm, uv);
+ZHLN_REFLECT_VERTEX(ZHLN::Vk::Vertex, pos, norm, uv0, uv1);
 
 // ============================================================================
 // Types & RAII Wrappers
@@ -70,6 +70,7 @@ struct MaterialAsset {
 	uint32_t albedoIdx;
 	uint32_t normalIdx;
 	uint32_t pbrIdx;
+	uint32_t lightmapIdx;
 };
 
 struct SponzaPushConstants {
@@ -80,7 +81,7 @@ struct SponzaPushConstants {
 	uint32_t albedoIdx; // 4 bytes
 	uint32_t normalIdx; // 4 bytes
 	uint32_t pbrIdx;
-	float _padding; // Pad to 16 bytes
+	uint32_t lightmapIdx;
 };
 
 // Bindless Scene Layout
@@ -199,9 +200,14 @@ static Scene BuildScene(cgltf_data* data) {
 					else if (attr->type == cgltf_attribute_type_normal)
 						cgltf_accessor_read_float(attr->data, v,
 												  scene.vertices[startVert + v].norm.data(), 3);
-					else if (attr->type == cgltf_attribute_type_texcoord)
-						cgltf_accessor_read_float(attr->data, v,
-												  scene.vertices[startVert + v].uv.data(), 2);
+					else if (attr->type == cgltf_attribute_type_texcoord) {
+						if (attr->index == 0) // UV0
+							cgltf_accessor_read_float(attr->data, v,
+													  scene.vertices[startVert + v].uv0.data(), 2);
+						else if (attr->index == 1) // UV1
+							cgltf_accessor_read_float(attr->data, v,
+													  scene.vertices[startVert + v].uv1.data(), 2);
+					}
 				}
 			}
 
@@ -557,6 +563,10 @@ auto main() -> int {
 		if (fullPath.find("BaseColor") != std::string::npos) {
 			textures[i] = UploadTextureFromFile<VK_FORMAT_R8G8B8A8_SRGB>(allocator, ctx,
 																		 texBaseInfo, fullPath);
+		} else if (fullPath.find("Lightmap") != std::string::npos) {
+			// Lightmaps should ALWAYS be UNORM (they are data)
+			textures[i] = UploadTextureFromFile<VK_FORMAT_R8G8B8A8_UNORM>(allocator, ctx,
+																		  texBaseInfo, fullPath);
 		} else {
 			// Normals and Roughness/Metallic maps must be Linear (UNORM)
 			textures[i] = UploadTextureFromFile<VK_FORMAT_R8G8B8A8_UNORM>(allocator, ctx,
@@ -637,6 +647,7 @@ auto main() -> int {
 		materials[i].albedoIdx = fallbackTexIdx;
 		materials[i].normalIdx = fallbackTexIdx;
 		materials[i].pbrIdx = fallbackTexIdx;
+		materials[i].lightmapIdx = fallbackTexIdx;
 
 		// 1. Assign Albedo (Base Color)
 		if (mat->has_pbr_metallic_roughness &&
