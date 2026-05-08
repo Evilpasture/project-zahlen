@@ -23,7 +23,7 @@
 #include <print>
 #include <vector>
 
-ZHLN_REFLECT_VERTEX(ZHLN::Vk::Vertex, pos, norm, uv0, uv1);
+ZHLN_REFLECT_VERTEX(ZHLN::Vk::Vertex, pos, norm, tangent, uv0, uv1);
 
 // ============================================================================
 // Types & RAII Wrappers
@@ -209,6 +209,9 @@ static Scene BuildScene(cgltf_data* data) {
 					else if (attr->type == cgltf_attribute_type_normal)
 						cgltf_accessor_read_float(attr->data, v,
 												  scene.vertices[startVert + v].norm.data(), 3);
+					else if (attr->type == cgltf_attribute_type_tangent)
+						cgltf_accessor_read_float(attr->data, v,
+												  scene.vertices[startVert + v].tangent.data(), 4);
 					else if (attr->type == cgltf_attribute_type_texcoord) {
 						if (attr->index == 0) // UV0
 							cgltf_accessor_read_float(attr->data, v,
@@ -412,9 +415,12 @@ auto main() -> int {
 		cgltf_node_transform_world(node, matrix);
 
 		Light l{};
-		l.type = (uint32_t)node->light->type; // Matches cgltf_light_type
-		l.intensity = node->light->intensity;
-		l.range = node->light->range;
+		l.type = (uint32_t)node->light->type;
+
+		// FIX: Fallback to 1.0 if intensity is 0, otherwise it will be pitch black
+		l.intensity = (node->light->intensity <= 0.0f) ? 1.0f : node->light->intensity;
+
+		l.range = (node->light->range <= 0.0f) ? 20.0f : node->light->range;
 		l.color[0] = node->light->color[0];
 		l.color[1] = node->light->color[1];
 		l.color[2] = node->light->color[2];
@@ -769,15 +775,16 @@ auto main() -> int {
 		Mat4 proj = Perspective(1.0472f, (float)win.width / (float)win.height, 0.1f, 1000.0f);
 		Mat4 viewProj = Multiply(proj, view);
 
-		// 1. Move the sun further away so it sees the whole scene
-		// Eye = (40, 60, 40), Center = (0, 10, 0)
+		// 1. Move the sun further away
 		Mat4 lightView = LookAt({40.f, 60.f, 40.f}, {0.f, 10.f, 0.f}, {0.f, 1.f, 0.f});
-
-		// 2. Huge Ortho box (160 units wide, 300 units deep)
 		Mat4 lightProj = Ortho(-80.f, 80.f, -80.f, 80.f, 0.1f, 300.f);
 
-		// 3. Matrix order (Proj * View)
-		Mat4 lightSpace = Multiply(lightProj, lightView);
+		// 2. NEW: Bias Matrix to convert Vulkan NDC [-1, 1] to Texture UV [0, 1]
+		Mat4 biasMatrix = {{0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
+							0.5f, 0.5f, 0.0f, 1.0f}};
+
+		// 3. Update the final lightSpace matrix
+		Mat4 lightSpace = Multiply(biasMatrix, Multiply(lightProj, lightView));
 
 		// FPS
 		if (auto title = fpsCounter.Tick(scene.drawCalls.size()); !title.empty())
@@ -812,7 +819,7 @@ auto main() -> int {
 		for (const auto& dc : scene.drawCalls) {
 			const auto& mat =
 				(dc.mesh->materialIndex >= 0) ? materials[dc.mesh->materialIndex] : fallbackMat;
-			pbrCalls.push_back({.worldMatrix = dc.worldMatrix.data, // Map Mat4 to std::array
+			pbrCalls.push_back({.worldMatrix = dc.worldMatrix.data,
 								.albedoIdx = mat.albedoIdx,
 								.normalIdx = mat.normalIdx,
 								.pbrIdx = mat.pbrIdx,

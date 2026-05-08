@@ -12,6 +12,7 @@ namespace ZHLN::Vk {
 struct Vertex {
 	std::array<float, 3> pos;
 	std::array<float, 3> norm;
+	std::array<float, 4> tangent;
 	std::array<float, 2> uv0; // For Albedo/Normal
 	std::array<float, 2> uv1; // For Lightmaps
 };

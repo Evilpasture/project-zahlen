@@ -2,7 +2,7 @@
 
 struct Light {
     float3 position;
-    uint type; // 0=Dir, 1=Point, 2=Spot
+    uint type; 
     float3 color;
     float intensity;
     float3 direction;
@@ -14,6 +14,7 @@ struct Light {
 struct PushConstants {
     float4x4 mvp;
     float4x4 lightSpaceMatrix;
+    float4x4 worldMatrix; // NEW: Added to transform local vertex data to world space
     float4 camPos;
     float4 lightDir;
     uint albedoIdx;
@@ -21,8 +22,8 @@ struct PushConstants {
     uint pbrIdx;
     uint lightmapIdx;
     uint emissiveIdx;
-    uint lightCount; // Added to control the loop
-    uint _pad[2];    // Maintained 16-byte alignment
+    uint lightCount; 
+    uint _pad[1];   
 };
 
 [[vk::push_constant]] PushConstants pc;
@@ -38,6 +39,7 @@ struct PSInput {
     float4 pos : SV_POSITION;
     float3 worldPos : POSITION;
     float3 normal : NORMAL;
+    float4 tangent : TANGENT; // NEW: glTF Tangents are float4 (w is bitangent sign)
     float2 uv0 : TEXCOORD0; 
     float2 uv1 : TEXCOORD1; 
     float4 shadowPos : TEXCOORD2; 
@@ -108,25 +110,42 @@ float GetAngleAttenuation(float3 L, float3 lightDir, float inner, float outer) {
 PSInput VSMain(
     [[vk::location(0)]] float3 pos : POSITION, 
     [[vk::location(1)]] float3 normal : NORMAL, 
-    [[vk::location(2)]] float2 uv0 : TEXCOORD0,
-    [[vk::location(3)]] float2 uv1 : TEXCOORD1
+    [[vk::location(2)]] float4 tangent : TANGENT, // Updated to float4
+    [[vk::location(3)]] float2 uv0 : TEXCOORD0,
+    [[vk::location(4)]] float2 uv1 : TEXCOORD1
 ) {
     PSInput output;
+    // 1. Transform to Clip Space for the GPU
     output.pos = mul(pc.mvp, float4(pos, 1.0));
-    output.worldPos = pos; 
-    output.normal = normal;
+
+    // 2. Transform to World Space for Lighting (The fix)
+    output.worldPos = mul(pc.worldMatrix, float4(pos, 1.0)).xyz;
+    
+    // 3. Transform Vectors to World Space (using 3x3 part of world matrix)
+    float3x3 world3x3 = (float3x3)pc.worldMatrix;
+    output.normal = normalize(mul(world3x3, normal));
+    output.tangent.xyz = normalize(mul(world3x3, tangent.xyz));
+    output.tangent.w = tangent.w; // Carry the sign bit for bitangent calculation
+
     output.uv0 = uv0;
     output.uv1 = uv1;
+    
+    // 4. Transform to Light Space for Shadows
     output.shadowPos = mul(pc.lightSpaceMatrix, float4(pos, 1.0));
+    
     return output;
 }
+
 
 float4 PSMain(PSInput input) : SV_TARGET {
     // 1. Samples
     float4 albedoSample = globalTextures[pc.albedoIdx].Sample(defaultSampler, input.uv0);
     if (albedoSample.a < 0.5) discard; 
     float3 albedo = albedoSample.rgb;
-    float3 normalSample = globalTextures[pc.normalIdx].Sample(defaultSampler, input.uv0).rgb * 2.0 - 1.0;
+    
+    // Normal map is in [0, 1], move to [-1, 1]
+    float3 normalMap = globalTextures[pc.normalIdx].Sample(defaultSampler, input.uv0).rgb * 2.0 - 1.0;
+    
     float4 pbrSample = globalTextures[pc.pbrIdx].Sample(defaultSampler, input.uv0);
     float3 emissive = globalTextures[pc.emissiveIdx].Sample(defaultSampler, input.uv0).rgb;
     float3 lightmap = globalTextures[pc.lightmapIdx].Sample(lightmapSampler, input.uv1).rgb;
@@ -134,13 +153,15 @@ float4 PSMain(PSInput input) : SV_TARGET {
     float roughness = pbrSample.g;
     float metallic = pbrSample.b;
 
-    // 2. Normal Mapping
-    float3 Q1 = ddx(input.worldPos), Q2 = ddy(input.worldPos);
-    float2 st1 = ddx(input.uv0), st2 = ddy(input.uv0);
+    // 2. High-Quality Normal Mapping using Vertex Tangents
     float3 N = normalize(input.normal);
-    float3 T = normalize(Q1 * st2.y - Q2 * st1.y);
-    float3 B = -normalize(cross(N, T));
-    float3 worldNormal = normalize(mul(normalSample, float3x3(T, B, N)));
+    float3 T = normalize(input.tangent.xyz);
+    // Bitangent is orthogonal to N and T. w component determines handedness.
+    float3 B = cross(N, T) * input.tangent.w; 
+    float3x3 TBN = float3x3(T, B, N);
+    
+    // Transform normal map from Tangent Space to World Space
+    float3 worldNormal = normalize(mul(normalMap, TBN));
 
     // 3. Shared PBR Prep
     float3 V = normalize(pc.camPos.xyz - input.worldPos);
@@ -197,8 +218,8 @@ float4 PSMain(PSInput input) : SV_TARGET {
     float3 ambient = lightmap * albedo * lerp(1.0, pbrSample.r, 0.5);
     float3 finalColor = ambient + totalDirect + (emissive * 4.0);
 
-    finalColor = ACESFilm(finalColor); 
-    finalColor = pow(finalColor, 1.0/2.2); 
-
+    // IMPORTANT: DO NOT apply ACESFilm or Gamma here! 
+    // We are outputting Linear HDR to the R16G16B16A16 target.
+    // The FXAA pass will handle the tonemapping.
     return float4(finalColor, 1.0);
 }

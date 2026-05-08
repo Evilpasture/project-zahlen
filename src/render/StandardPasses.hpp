@@ -35,6 +35,7 @@ struct PBRSceneContext {
 struct PBRPushConstants {
 	std::array<float, 16> mvp;
 	std::array<float, 16> lightSpaceMatrix;
+	std::array<float, 16> worldMatrix;
 	float camPos[4];
 	float lightDir[4];
 	uint32_t albedoIdx;
@@ -43,7 +44,7 @@ struct PBRPushConstants {
 	uint32_t lightmapIdx;
 	uint32_t emissiveIdx;
 	uint32_t lightCount;
-	uint32_t _pad[2];
+	uint32_t _pad[1];
 };
 
 struct ShadowPushConstants {
