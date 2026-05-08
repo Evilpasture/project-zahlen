@@ -121,6 +121,7 @@ static void RecordPBR(VkCommandBuffer cmd, const void* pUserData) {
 			PBRPushConstants pc = {
 				.mvp = Multiply(c.scene->viewProj, dc.worldMatrix),
 				.lightSpaceMatrix = Multiply(c.scene->lightSpaceMatrix, dc.worldMatrix),
+				.worldMatrix = dc.worldMatrix,
 				.camPos = {c.scene->camPos[0], c.scene->camPos[1], c.scene->camPos[2], 1.0f},
 				.lightDir = {c.scene->lightDir[0], c.scene->lightDir[1], c.scene->lightDir[2],
 							 0.0f},

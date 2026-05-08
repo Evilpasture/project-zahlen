@@ -52,11 +52,13 @@ float3 ToLinear(float3 srgb) {
 }
 
 float CalculateShadow(float4 shadowPos, float3 worldNormal, float3 lightDir) {
+    // Just the perspective divide
     float3 projCoords = shadowPos.xyz / shadowPos.w;
-    projCoords.xy = projCoords.xy * 0.5 + 0.5;
-    projCoords.y = 1.0 - projCoords.y;
-    float bias = max(0.005 * (1.0 - dot(worldNormal, lightDir)), 0.0005);
+    
+    // Use a much smaller bias for HDR
+    float bias = max(0.0005 * (1.0 - dot(worldNormal, lightDir)), 0.00005);
     projCoords.z -= bias;
+
     if (projCoords.z > 1.0) return 1.0;
     return shadowMap.SampleCmpLevelZero(shadowSampler, projCoords.xy, projCoords.z).r;
 }
