@@ -486,8 +486,8 @@ void ZHLN_CmdDispatch(const VkCommandBuffer cmd, const uint32_t groupCountX,
  * @brief Generates mipmaps for a color image using linear blits.
  * Transitions image to VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL.
  */
-void ZHLN_GenerateMipmaps(VkCommandBuffer cmd, VkImage image, int32_t width, int32_t height,
-						  uint32_t mip_levels);
+void ZHLN_GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const int32_t width,
+						  const int32_t height, const uint32_t mip_levels);
 
 #ifdef __cplusplus
 }
