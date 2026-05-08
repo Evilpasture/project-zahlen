@@ -71,6 +71,19 @@ struct MaterialAsset {
 	uint32_t normalIdx;
 	uint32_t pbrIdx;
 	uint32_t lightmapIdx;
+	uint32_t emissiveIdx;
+};
+
+struct Light {
+	float position[3];
+	uint32_t type; // 0=Dir, 1=Point, 2=Spot
+	float color[3];
+	float intensity;
+	float direction[3];
+	float range;
+	float innerConeCos;
+	float outerConeCos;
+	float _pad[2];
 };
 
 struct SponzaPushConstants {
@@ -82,6 +95,9 @@ struct SponzaPushConstants {
 	uint32_t normalIdx; // 4 bytes
 	uint32_t pbrIdx;
 	uint32_t lightmapIdx;
+	uint32_t emissiveIdx;
+	uint32_t lightCount;
+	uint32_t _pad[2];
 };
 
 // Bindless Scene Layout
@@ -94,7 +110,8 @@ using SceneLayout =
 							   // is a unique render target rather than a generic material property.
 							   ZHLN::Vk::SampledImageSlot<2>, // Shadow Map
 							   ZHLN::Vk::SamplerSlot<3>,	  // Shadow Sampler
-							   ZHLN::Vk::SamplerSlot<4>>;
+							   ZHLN::Vk::SamplerSlot<4>,
+							   ZHLN::Vk::StorageBufferSlot<5, VK_SHADER_STAGE_FRAGMENT_BIT>>;
 
 using FXAALayout =
 	ZHLN::Vk::DescriptorLayout<ZHLN::Vk::SampledImageSlot<0>, ZHLN::Vk::SamplerSlot<1>>;
@@ -299,6 +316,8 @@ struct PipelineSet {
 
 struct SceneBuffers {
 	VkBuffer vbo, ibo;
+	VkBuffer lightBuffer;
+	uint32_t lightCount;
 	const std::vector<DrawCall>& drawCalls;
 	const std::vector<MaterialAsset>& materials;
 	const MaterialAsset& fallbackMat;
@@ -356,7 +375,9 @@ static void RecordMainPass(VkCommandBuffer cmd, const void* pUserData) {
 										  .albedoIdx = mat.albedoIdx,
 										  .normalIdx = mat.normalIdx,
 										  .pbrIdx = mat.pbrIdx,
-										  .lightmapIdx = mat.lightmapIdx};
+										  .lightmapIdx = mat.lightmapIdx,
+										  .emissiveIdx = mat.emissiveIdx,
+										  .lightCount = d.scene.lightCount};
 
 				draw(pc, call.mesh->indexCount, call.mesh->firstIndex);
 			}
@@ -553,6 +574,10 @@ auto main() -> int {
 	ZHLN::Vk::TextureAsset dummyTex =
 		ZHLN::Vk::UploadTexture<VK_FORMAT_R8G8B8A8_UNORM>(allocator, ctx, dummyInfo, &white_pixel);
 
+	uint32_t black_pixel = 0xFF000000; // Alpha 1.0, RGB 0.0
+	ZHLN::Vk::TextureAsset blackTex =
+		ZHLN::Vk::UploadTexture<VK_FORMAT_R8G8B8A8_UNORM>(allocator, ctx, dummyInfo, &black_pixel);
+
 	// --- Textures Loop ---
 	std::vector<ZHLN::Vk::TextureAsset> textures(gltf->images_count);
 	std::println("Uploading {} textures...", gltf->images_count);
@@ -576,6 +601,49 @@ auto main() -> int {
 		std::println("  [{}/{}] {}", i + 1, gltf->images_count, gltf->images[i].uri);
 	}
 
+	std::vector<Light> sceneLights;
+
+	for (cgltf_size i = 0; i < gltf->nodes_count; ++i) {
+		cgltf_node* node = &gltf->nodes[i];
+		if (!node->light)
+			continue;
+
+		float matrix[16];
+		cgltf_node_transform_world(node, matrix);
+
+		Light l{};
+		l.type = (uint32_t)node->light->type; // Matches cgltf_light_type
+		l.intensity = node->light->intensity;
+		l.range = node->light->range;
+		l.color[0] = node->light->color[0];
+		l.color[1] = node->light->color[1];
+		l.color[2] = node->light->color[2];
+
+		// Extract Position from world matrix
+		l.position[0] = matrix[12];
+		l.position[1] = matrix[13];
+		l.position[2] = matrix[14];
+
+		// Extract Direction (Forward vector is -Z in glTF)
+		l.direction[0] = -matrix[8];
+		l.direction[1] = -matrix[9];
+		l.direction[2] = -matrix[10];
+
+		if (node->light->type == cgltf_light_type_spot) {
+			l.innerConeCos = std::cos(node->light->spot_inner_cone_angle);
+			l.outerConeCos = std::cos(node->light->spot_outer_cone_angle);
+		}
+
+		sceneLights.push_back(l);
+	}
+
+	auto lightBuffer = ZHLN::Vk::Buffer::Create(allocator.Get(), sceneLights.size() * sizeof(Light),
+												VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+													VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+												VMA_MEMORY_USAGE_GPU_ONLY);
+	auto stagingLights =
+		ZHLN::Vk::UploadToBuffer(allocator.Get(), setupCmd, lightBuffer, sceneLights.data(),
+								 sceneLights.size() * sizeof(Light));
 	// --- Infrastructure Setup ---
 	ZHLN::Vk::PresentationContext presentation;
 	if (!presentation.Init(ctx, allocator, surface.Get(), win.width, win.height)) {
@@ -618,7 +686,8 @@ auto main() -> int {
 	SceneLayout::Write(
 		ctx.Device(), globalSet, ZHLN::Vk::SkipWrite{},
 		ZHLN::Vk::SamplerWrite{defaultSampler.Get()}, ZHLN::Vk::ImageWrite{shadowMap.view.Get()},
-		ZHLN::Vk::SamplerWrite{shadowSampler.Get()}, ZHLN::Vk::SamplerWrite{lightmapSampler.Get()});
+		ZHLN::Vk::SamplerWrite{shadowSampler.Get()}, ZHLN::Vk::SamplerWrite{lightmapSampler.Get()},
+		ZHLN::Vk::BufferWrite{lightBuffer.Handle()});
 
 	// 1. Define the Registry tied to the Layout and specific Binding Index (0)
 	ZHLN::Vk::BindlessRegistry<SceneLayout, 0> bindless;
@@ -628,6 +697,7 @@ auto main() -> int {
 
 	// 3. Registering remains runtime-dynamic but type-safe
 	uint32_t fallbackTexIdx = bindless.RegisterImage(dummyTex.view.Get());
+	uint32_t blackTexIdx = bindless.RegisterImage(blackTex.view.Get());
 
 	std::println("Bindless Registry Initialized. Capacity: {}", bindless.Capacity());
 
@@ -648,11 +718,12 @@ auto main() -> int {
 	for (cgltf_size i = 0; i < gltf->materials_count; ++i) {
 		cgltf_material* mat = &gltf->materials[i];
 
-		// Default both to fallback (white 1x1)
+		// Default
 		materials[i].albedoIdx = fallbackTexIdx;
 		materials[i].normalIdx = fallbackTexIdx;
 		materials[i].pbrIdx = fallbackTexIdx;
 		materials[i].lightmapIdx = fallbackTexIdx;
+		materials[i].emissiveIdx = blackTexIdx;
 
 		// 1. Assign Albedo (Base Color)
 		if (mat->has_pbr_metallic_roughness &&
@@ -693,6 +764,11 @@ auto main() -> int {
 				materials[i].lightmapIdx = bindlessTextureIndices[t];
 				break;
 			}
+		}
+		// Standard GLTF Emissive slot
+		if (mat->emissive_texture.texture && mat->emissive_texture.texture->image) {
+			int imgIdx = static_cast<int>(mat->emissive_texture.texture->image - gltf->images);
+			materials[i].emissiveIdx = bindlessTextureIndices[imgIdx];
 		}
 	}
 	MaterialAsset fallbackMat = {.albedoIdx = fallbackTexIdx, .normalIdx = fallbackTexIdx};

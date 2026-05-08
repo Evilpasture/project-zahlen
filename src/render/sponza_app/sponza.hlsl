@@ -1,5 +1,16 @@
 #pragma pack_matrix(column_major)
 
+struct Light {
+    float3 position;
+    uint type; // 0=Dir, 1=Point, 2=Spot
+    float3 color;
+    float intensity;
+    float3 direction;
+    float range;
+    float innerConeCos;
+    float outerConeCos;
+};
+
 struct PushConstants {
     float4x4 mvp;
     float4x4 lightSpaceMatrix;
@@ -8,7 +19,10 @@ struct PushConstants {
     uint albedoIdx;
     uint normalIdx;
     uint pbrIdx;
-    uint lightmapIdx; // Successfully mapped from C++
+    uint lightmapIdx;
+    uint emissiveIdx;
+    uint lightCount; // Added to control the loop
+    uint _pad[2];    // Maintained 16-byte alignment
 };
 
 [[vk::push_constant]] PushConstants pc;
@@ -18,13 +32,14 @@ struct PushConstants {
 [[vk::binding(2, 0)]] Texture2D shadowMap;
 [[vk::binding(3, 0)]] SamplerComparisonState shadowSampler;
 [[vk::binding(4, 0)]] SamplerState lightmapSampler;
+[[vk::binding(5, 0)]] StructuredBuffer<Light> lights; // Punctual lights buffer
 
 struct PSInput {
     float4 pos : SV_POSITION;
     float3 worldPos : POSITION;
     float3 normal : NORMAL;
-    float2 uv0 : TEXCOORD0; // For Albedo/Normal/PBR
-    float2 uv1 : TEXCOORD1; // For Prebaked Lightmaps
+    float2 uv0 : TEXCOORD0; 
+    float2 uv1 : TEXCOORD1; 
     float4 shadowPos : TEXCOORD2; 
 };
 
@@ -38,10 +53,8 @@ float CalculateShadow(float4 shadowPos, float3 worldNormal, float3 lightDir) {
     float3 projCoords = shadowPos.xyz / shadowPos.w;
     projCoords.xy = projCoords.xy * 0.5 + 0.5;
     projCoords.y = 1.0 - projCoords.y;
-
     float bias = max(0.005 * (1.0 - dot(worldNormal, lightDir)), 0.0005);
     projCoords.z -= bias;
-
     if (projCoords.z > 1.0) return 1.0;
     return shadowMap.SampleCmpLevelZero(shadowSampler, projCoords.xy, projCoords.z).r;
 }
@@ -51,8 +64,7 @@ float3 ACESFilm(float3 x) {
     return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
 }
 
-// --- PBR Math ---
-
+// PBR Math Functions
 float DistributionGGX(float3 N, float3 H, float roughness) {
     float a = roughness * roughness;
     float a2 = a * a;
@@ -78,13 +90,26 @@ float3 FresnelSchlick(float cosTheta, float3 F0) {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
-// --- Entry Points ---
+// Punctual Light Attenuation
+float GetDistanceAttenuation(float dist, float range) {
+    if (range <= 0.0) return 1.0 / max(dist * dist, 0.01);
+    float atten = saturate(1.0 - pow(dist / range, 4.0));
+    return (atten * atten) / max(dist * dist, 0.01);
+}
+
+float GetAngleAttenuation(float3 L, float3 lightDir, float inner, float outer) {
+    float cd = dot(lightDir, L);
+    float atten = saturate((cd - outer) / (inner - outer));
+    return atten * atten;
+}
+
+// --- Main Entry ---
 
 PSInput VSMain(
     [[vk::location(0)]] float3 pos : POSITION, 
     [[vk::location(1)]] float3 normal : NORMAL, 
     [[vk::location(2)]] float2 uv0 : TEXCOORD0,
-    [[vk::location(3)]] float2 uv1 : TEXCOORD1 // Added location 3 for lightmap UVs
+    [[vk::location(3)]] float2 uv1 : TEXCOORD1
 ) {
     PSInput output;
     output.pos = mul(pc.mvp, float4(pos, 1.0));
@@ -97,73 +122,83 @@ PSInput VSMain(
 }
 
 float4 PSMain(PSInput input) : SV_TARGET {
-    // 1. Sample Bindless Material Textures (UV0)
+    // 1. Samples
     float4 albedoSample = globalTextures[pc.albedoIdx].Sample(defaultSampler, input.uv0);
     if (albedoSample.a < 0.5) discard; 
-    float3 albedo = albedoSample.rgb; // Hardware _SRGB format handles linearization
-    
+    float3 albedo = albedoSample.rgb;
     float3 normalSample = globalTextures[pc.normalIdx].Sample(defaultSampler, input.uv0).rgb * 2.0 - 1.0;
     float4 pbrSample = globalTextures[pc.pbrIdx].Sample(defaultSampler, input.uv0);
-    
-    // Intel Sponza GLTF Packing: R = AO, G = Roughness, B = Metallic
-    float ao = pbrSample.r;
+    float3 emissive = globalTextures[pc.emissiveIdx].Sample(defaultSampler, input.uv0).rgb;
+    float3 lightmap = globalTextures[pc.lightmapIdx].Sample(lightmapSampler, input.uv1).rgb;
+
     float roughness = pbrSample.g;
     float metallic = pbrSample.b;
 
-    // 2. Sample Prebaked Lightmap (UV1)
-    // This provides high-quality indirect bounce light (Global Illumination)
-    float3 lightmap = globalTextures[pc.lightmapIdx].Sample(lightmapSampler, input.uv1).rgb;
-
-    // 3. TBN Normal Mapping
-    float3 Q1 = ddx(input.worldPos);
-    float3 Q2 = ddy(input.worldPos);
-    float2 st1 = ddx(input.uv0);
-    float2 st2 = ddy(input.uv0);
+    // 2. Normal Mapping
+    float3 Q1 = ddx(input.worldPos), Q2 = ddy(input.worldPos);
+    float2 st1 = ddx(input.uv0), st2 = ddy(input.uv0);
     float3 N = normalize(input.normal);
     float3 T = normalize(Q1 * st2.y - Q2 * st1.y);
     float3 B = -normalize(cross(N, T));
-    float3x3 TBN = float3x3(T, B, N);
-    float3 worldNormal = normalize(mul(normalSample, TBN));
+    float3 worldNormal = normalize(mul(normalSample, float3x3(T, B, N)));
 
-    // 4. Vectors
+    // 3. Shared PBR Prep
     float3 V = normalize(pc.camPos.xyz - input.worldPos);
-    float3 L = normalize(-pc.lightDir.xyz); 
-    float3 H = normalize(V + L);
     float NdotV = max(dot(worldNormal, V), 0.0001);
-    float NdotL = max(dot(worldNormal, L), 0.0001);
+    float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
 
-    // 5. PBR MATH
-    float3 F0 = float3(0.04, 0.04, 0.04); 
-    F0 = lerp(F0, albedo, metallic);
-
-    float D = DistributionGGX(worldNormal, H, roughness);
-    float G = GeometrySmith(worldNormal, V, L, roughness);
-    float3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
-
-    float3 specular = (D * G * F) / (4.0 * NdotV * NdotL + 0.0001);
-    float3 kS = F;
-    float3 kD = (float3(1.0, 1.0, 1.0) - kS) * (1.0 - metallic);
+    // 4. MAIN SUN CALCULATION (Directional + Shadows)
+    float3 L_sun = normalize(-pc.lightDir.xyz);
+    float3 H_sun = normalize(V + L_sun);
+    float NdotL_sun = max(dot(worldNormal, L_sun), 0.0);
+    float shadow = CalculateShadow(input.shadowPos, worldNormal, L_sun);
     
-    // 6. SHADOWS (Direct Sun only)
-    float shadow = CalculateShadow(input.shadowPos, worldNormal, L);
-
-    // 7. LIGHTING COMPOSITION
-    // Direct Light (Sun)
-    float3 sunColor = float3(1.0, 0.98, 0.9);
-    float3 directLight = (kD * albedo / 3.14159 + specular) * sunColor * 10.0 * NdotL * shadow;
-
-    // 8. INDIRECT LIGHT (Using the Lightmap)
-    // The lightmap already contains the "Sky" and "Bounce" colors.
-    // We soften the AO here as well.
-    float aoSafe = lerp(1.0, ao, 0.5);
-    float3 ambient = lightmap * albedo * aoSafe;
+    float D_s = DistributionGGX(worldNormal, H_sun, roughness);
+    float G_s = GeometrySmith(worldNormal, V, L_sun, roughness);
+    float3 F_s = FresnelSchlick(max(dot(H_sun, V), 0.0), F0);
+    float3 specular_sun = (D_s * G_s * F_s) / (4.0 * NdotV * NdotL_sun + 0.0001);
+    float3 kD_sun = (float3(1.0, 1.0, 1.0) - F_s) * (1.0 - metallic);
     
-    float3 color = ambient + directLight;
+    float3 totalDirect = (kD_sun * albedo / 3.14159 + specular_sun) * float3(1.0, 0.98, 0.9) * 10.0 * NdotL_sun * shadow;
 
-    // 9. FINAL TOUCHES
-    color *= 1.0; 
-    color = ACESFilm(color); 
-    color = pow(color, 1.0/2.2); 
+    // 5. PUNCTUAL LIGHTS LOOP
+    for (uint i = 0; i < pc.lightCount; i++) {
+        Light light = lights[i];
+        float3 L_p;
+        float atten = 1.0;
 
-    return float4(color, 1.0);
+        if (light.type == 0) { // Directional
+            L_p = normalize(-light.direction);
+        } else { // Point / Spot
+            float3 dir = light.position - input.worldPos;
+            float d = length(dir);
+            L_p = normalize(dir);
+            atten = GetDistanceAttenuation(d, light.range);
+            if (light.type == 2) { // Spot
+                atten *= GetAngleAttenuation(L_p, -light.direction, light.innerConeCos, light.outerConeCos);
+            }
+        }
+
+        float NdotL_p = max(dot(worldNormal, L_p), 0.0);
+        if (NdotL_p > 0.0) {
+            float3 H_p = normalize(V + L_p);
+            float D_p = DistributionGGX(worldNormal, H_p, roughness);
+            float G_p = GeometrySmith(worldNormal, V, L_p, roughness);
+            float3 F_p = FresnelSchlick(max(dot(H_p, V), 0.0), F0);
+
+            float3 spec_p = (D_p * G_p * F_p) / (4.0 * NdotV * NdotL_p + 0.0001);
+            float3 kD_p = (float3(1.0, 1.0, 1.0) - F_p) * (1.0 - metallic);
+            
+            totalDirect += (kD_p * albedo / 3.14159 + spec_p) * light.color * light.intensity * atten * NdotL_p;
+        }
+    }
+
+    // 6. FINAL COMPOSITION
+    float3 ambient = lightmap * albedo * lerp(1.0, pbrSample.r, 0.5);
+    float3 finalColor = ambient + totalDirect + (emissive * 4.0);
+
+    finalColor = ACESFilm(finalColor); 
+    finalColor = pow(finalColor, 1.0/2.2); 
+
+    return float4(finalColor, 1.0);
 }
