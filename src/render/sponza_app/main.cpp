@@ -93,8 +93,8 @@ using SceneLayout =
 							   // array because it uses a SamplerComparisonState (depth compare) and
 							   // is a unique render target rather than a generic material property.
 							   ZHLN::Vk::SampledImageSlot<2>, // Shadow Map
-							   ZHLN::Vk::SamplerSlot<3>		  // Shadow Sampler
-							   >;
+							   ZHLN::Vk::SamplerSlot<3>,	  // Shadow Sampler
+							   ZHLN::Vk::SamplerSlot<4>>;
 
 using FXAALayout =
 	ZHLN::Vk::DescriptorLayout<ZHLN::Vk::SampledImageSlot<0>, ZHLN::Vk::SamplerSlot<1>>;
@@ -355,7 +355,8 @@ static void RecordMainPass(VkCommandBuffer cmd, const void* pUserData) {
 
 										  .albedoIdx = mat.albedoIdx,
 										  .normalIdx = mat.normalIdx,
-										  .pbrIdx = mat.pbrIdx};
+										  .pbrIdx = mat.pbrIdx,
+										  .lightmapIdx = mat.lightmapIdx};
 
 				draw(pc, call.mesh->indexCount, call.mesh->firstIndex);
 			}
@@ -602,6 +603,10 @@ auto main() -> int {
 							 .ClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE)
 							 .DepthCompare()
 							 .Build(ctx.Device());
+	auto lightmapSampler = ZHLN::Vk::SamplerBuilder{}
+							   .Linear()
+							   .ClampToEdge() // Lightmaps MUST NOT wrap/repeat
+							   .Build(ctx.Device());
 
 	// --- Global Descriptor Set Layout & Allocation ---
 	auto descLayout = SceneLayout::CreateLayout(ctx.Device());
@@ -610,10 +615,10 @@ auto main() -> int {
 	VkDescriptorSet globalSet =
 		SceneLayout::Allocate(ctx.Device(), descPool.Get(), descLayout.Get());
 
-	SceneLayout::Write(ctx.Device(), globalSet, ZHLN::Vk::SkipWrite{},
-					   ZHLN::Vk::SamplerWrite{defaultSampler.Get()},
-					   ZHLN::Vk::ImageWrite{shadowMap.view.Get()}, // <--- Updated reference
-					   ZHLN::Vk::SamplerWrite{shadowSampler.Get()});
+	SceneLayout::Write(
+		ctx.Device(), globalSet, ZHLN::Vk::SkipWrite{},
+		ZHLN::Vk::SamplerWrite{defaultSampler.Get()}, ZHLN::Vk::ImageWrite{shadowMap.view.Get()},
+		ZHLN::Vk::SamplerWrite{shadowSampler.Get()}, ZHLN::Vk::SamplerWrite{lightmapSampler.Get()});
 
 	// 1. Define the Registry tied to the Layout and specific Binding Index (0)
 	ZHLN::Vk::BindlessRegistry<SceneLayout, 0> bindless;
@@ -674,6 +679,19 @@ auto main() -> int {
 			if (tex->image) {
 				int imgIdx = static_cast<int>(tex->image - gltf->images);
 				materials[i].normalIdx = bindlessTextureIndices[imgIdx];
+			}
+		}
+		// Intel Sponza often names lightmaps similarly to the material.
+		// We search the texture array for anything with "Lightmap" and the material's name.
+		for (uint32_t t = 0; t < gltf->images_count; ++t) {
+			std::string imgName = gltf->images[t].uri;
+			// Check if this image is a lightmap
+			if (imgName.find("Lightmap") != std::string::npos) {
+				// Basic heuristic: many Sponza versions map 1:1 by index or name
+				// For now, let's assume the first lightmap found is the global one
+				// or check for material name matches.
+				materials[i].lightmapIdx = bindlessTextureIndices[t];
+				break;
 			}
 		}
 	}

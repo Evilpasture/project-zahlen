@@ -17,6 +17,7 @@ struct PushConstants {
 [[vk::binding(1, 0)]] SamplerState defaultSampler;
 [[vk::binding(2, 0)]] Texture2D shadowMap;
 [[vk::binding(3, 0)]] SamplerComparisonState shadowSampler;
+[[vk::binding(4, 0)]] SamplerState lightmapSampler;
 
 struct PSInput {
     float4 pos : SV_POSITION;
@@ -111,7 +112,7 @@ float4 PSMain(PSInput input) : SV_TARGET {
 
     // 2. Sample Prebaked Lightmap (UV1)
     // This provides high-quality indirect bounce light (Global Illumination)
-    float3 lightmap = globalTextures[pc.lightmapIdx].Sample(defaultSampler, input.uv1).rgb;
+    float3 lightmap = globalTextures[pc.lightmapIdx].Sample(lightmapSampler, input.uv1).rgb;
 
     // 3. TBN Normal Mapping
     float3 Q1 = ddx(input.worldPos);
@@ -160,6 +161,7 @@ float4 PSMain(PSInput input) : SV_TARGET {
     float3 color = ambient + directLight;
 
     // 9. FINAL TOUCHES
+    color *= 1.0; 
     color = ACESFilm(color); 
     color = pow(color, 1.0/2.2); 
 
