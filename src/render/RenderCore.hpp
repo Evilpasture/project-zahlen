@@ -895,7 +895,8 @@ template <VkFormat F> struct FormatTraits;
 	template <> struct FormatTraits<Format> {                                                      \
 		static constexpr VkImageAspectFlags aspect = Aspect;                                       \
 	};
-
+ZHLN_FORMAT_ASPECT(VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT)
+ZHLN_FORMAT_ASPECT(VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT)
 ZHLN_FORMAT_ASPECT(VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT)
 ZHLN_FORMAT_ASPECT(VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT)
 ZHLN_FORMAT_ASPECT(VK_FORMAT_B8G8R8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT)

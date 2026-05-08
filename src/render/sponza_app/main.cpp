@@ -302,7 +302,7 @@ struct FpsCounter {
 // ============================================================================
 
 static void RecordFrame(VkCommandBuffer cmd, ZHLN::Vk::GraphImage& swapchainRes,
-						ZHLN::Vk::RenderTarget<VK_FORMAT_B8G8R8A8_SRGB>& sceneColor,
+						ZHLN::Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& sceneColor,
 						ZHLN::Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>& shadowMap,
 						ZHLN::Vk::GraphImage& depthTracker, const AppFrameData& d) {
 	using namespace ZHLN::Vk;
@@ -556,7 +556,7 @@ auto main() -> int {
 		return -1;
 	}
 
-	auto sceneColor = ZHLN::Vk::RenderTarget<VK_FORMAT_B8G8R8A8_SRGB>::Create(
+	auto sceneColor = ZHLN::Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
 		allocator, ctx, presentation.swapchain.Get().extent,
 		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 
@@ -732,7 +732,7 @@ auto main() -> int {
 						.Shaders(shaders)
 						.Layout(pipelineLayout.Get())
 						.Vertex<ZHLN::Vk::Vertex>()
-						.ColorFormat(VK_FORMAT_B8G8R8A8_SRGB)
+						.ColorFormat(VK_FORMAT_R16G16B16A16_SFLOAT)
 						.DepthFormat(VK_FORMAT_D32_SFLOAT)
 						.CullBack()
 						.Build(ctx.Device());
@@ -767,7 +767,7 @@ auto main() -> int {
 				continue;
 
 			// FIX: Change R8G8B8A8 to B8G8R8A8 to match the variable type
-			sceneColor = ZHLN::Vk::RenderTarget<VK_FORMAT_B8G8R8A8_SRGB>::Create(
+			sceneColor = ZHLN::Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
 				allocator, ctx, presentation.swapchain.Get().extent,
 				VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 
@@ -848,12 +848,21 @@ auto main() -> int {
 								.firstIndex = dc.mesh->firstIndex});
 		}
 
+		std::array<float, 3> lightPos = {40.f, 60.f, 40.f};
+		std::array<float, 3> lightTarget = {0.f, 10.f, 0.f};
+
+		// Vector = Target - Position
+		float dirX = lightTarget[0] - lightPos[0];
+		float dirY = lightTarget[1] - lightPos[1];
+		float dirZ = lightTarget[2] - lightPos[2];
+		float len = std::sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ);
+
 		// 2. Pack the Scene Context
 		ZHLN::Vk::Passes::PBRSceneContext sceneCtx = {
 			.viewProj = viewProj.data,
 			.lightSpaceMatrix = lightSpace.data,
 			.camPos = {camX, camY, camZ, 1.0f},
-			.lightDir = {0.5f, -1.0f, 0.5f, 0.0f}, // Set your sun direction
+			.lightDir = {dirX / len, dirY / len, dirZ / len, 0.0f}, // Set your sun direction
 			.lightCount = static_cast<uint32_t>(sceneLights.size()),
 			.globalSet = globalSet,
 			.vbo = vbo.Handle(),
