@@ -166,4 +166,13 @@ class RenderGraph {
 	}
 };
 
+/**
+ * @brief Base concept for a RenderNode.
+ * A Node encapsulates a specific technique (PBR, Shadows, FXAA).
+ */
+template <typename T>
+concept is_render_node = requires(T node, RenderGraph& g) {
+	{ T::Execute(g, node.config) };
+};
+
 } // namespace ZHLN::Vk

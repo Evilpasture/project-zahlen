@@ -87,9 +87,9 @@ struct Light {
 };
 
 struct AppFrameData {
-	ZHLN::Vk::Passes::PBRMainConfig mainPass;
-	ZHLN::Vk::Passes::ShadowConfig shadowPass;
-	ZHLN::Vk::Passes::FXAAConfig fxaaPass;
+	ZHLN::Vk::Passes::ShadowConfig shadowData;
+	ZHLN::Vk::Passes::PBRMainConfig pbrData;
+	ZHLN::Vk::Passes::FXAAConfig fxaaData;
 };
 
 // Bindless Scene Layout
@@ -296,32 +296,6 @@ struct FpsCounter {
 						   1000.0f / fps, drawCallCount);
 	}
 };
-
-// ============================================================================
-// Frame recording
-// ============================================================================
-
-static void RecordFrame(VkCommandBuffer cmd, ZHLN::Vk::GraphImage& swapchainRes,
-						ZHLN::Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& sceneColor,
-						ZHLN::Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>& shadowMap,
-						ZHLN::Vk::GraphImage& depthTracker, const AppFrameData& d) {
-	using namespace ZHLN::Vk;
-	RenderGraph Graph;
-
-	// 1. Shadows
-	Passes::AddShadowPass(Graph, shadowMap.tracker, d.shadowPass);
-
-	// 2. PBR Scene
-	Passes::AddPBRMainPass(Graph, sceneColor.tracker, depthTracker, shadowMap.tracker, d.mainPass);
-
-	// 3. FXAA
-	Passes::AddFXAAPass(Graph, sceneColor.tracker, swapchainRes, d.fxaaPass);
-
-	// 4. Final Handoff
-	Graph.AddPass("Handoff").Present(swapchainRes);
-
-	Graph.Execute(cmd);
-}
 
 // ============================================================================
 // main
@@ -870,13 +844,35 @@ auto main() -> int {
 
 		// 3. Define the Pass Configurations
 		AppFrameData frameData = {
-			.mainPass = {pipeline.Get(), pipelineLayout.Get(), &pbrCalls, &sceneCtx},
-			.shadowPass = {shadowPipeline.Get(), shadowLayout.Get(), &pbrCalls, &sceneCtx},
-			.fxaaPass = {fxaaPipeline.Get(), fxaaPipelineLayout.Get(), fxaaSet}};
+			.shadowData = {shadowPipeline.Get(), shadowLayout.Get(), &pbrCalls, &sceneCtx},
+			.pbrData = {pipeline.Get(), pipelineLayout.Get(), &pbrCalls, &sceneCtx},
+			.fxaaData = {fxaaPipeline.Get(), fxaaPipelineLayout.Get(), fxaaSet}};
 
-		// 4. Execute (RecordFrame now uses the backend presets)
-		RecordFrame(cmd, swapchainRes, sceneColor, shadowMap, presentation.depthTarget.tracker,
-					frameData);
+		// 4. Node-Based Pipeline Assembly
+		using namespace ZHLN::Vk;
+		RenderGraph Graph;
+
+		// Pass 1: Shadows (D32)
+		Nodes::ShadowMap<VK_FORMAT_D32_SFLOAT>::Execute(
+			Graph, {.shadowMap = shadowMap.tracker, .data = frameData.shadowData});
+
+		// Pass 2: Main PBR (HDR Color + Depth)
+		Nodes::ForwardPBR<VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_D32_SFLOAT>::Execute(
+			Graph, {.color = sceneColor.tracker,
+					.depth = presentation.depthTarget.tracker,
+					.shadowMap = shadowMap.tracker,
+					.data = frameData.pbrData});
+
+		// Pass 3: Post Process (LDR Swapchain Output)
+		Nodes::FXAA<VK_FORMAT_B8G8R8A8_SRGB>::Execute(
+			Graph,
+			{.input = sceneColor.tracker, .output = swapchainRes, .data = frameData.fxaaData});
+
+		// Pass 4: Final Hand-off to OS
+		Graph.AddPass("Present").Present(swapchainRes);
+
+		// Recording and Automatic Barrier Generation
+		Graph.Execute(cmd);
 
 		ZHLN_EndCommandBuffer(cmd);
 

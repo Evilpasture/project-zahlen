@@ -89,29 +89,65 @@ inline constexpr std::array<float, 16> Multiply(const std::array<float, 16>& a,
 }
 
 // ============================================================================
-// Pass Builders
+// Internal Recording Functions
+// These must match the PassRecordFn signature: void(*)(VkCommandBuffer, const void*)
+// ============================================================================
+
+static void RecordShadows(VkCommandBuffer cmd, const void* pUserData) {
+	const auto& c = *static_cast<const ShadowConfig*>(pUserData);
+
+	DrawBatchConfig batchCfg = {c.pipeline,	  c.layout,		  c.scene->vbo,
+								c.scene->ibo, VK_NULL_HANDLE, VK_SHADER_STAGE_VERTEX_BIT};
+
+	DrawBatch<ShadowPushConstants>(cmd, batchCfg, [&](auto draw) {
+		for (const auto& dc : *c.drawCalls) {
+			ShadowPushConstants pc = {.mvp = Multiply(c.scene->lightSpaceMatrix, dc.worldMatrix)};
+			draw(pc, dc.indexCount, dc.firstIndex);
+		}
+	});
+}
+
+static void RecordPBR(VkCommandBuffer cmd, const void* pUserData) {
+	const auto& c = *static_cast<const PBRMainConfig*>(pUserData);
+
+	DrawBatchConfig batchCfg = {
+		c.pipeline,			c.layout,
+		c.scene->vbo,		c.scene->ibo,
+		c.scene->globalSet, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT};
+
+	DrawBatch<PBRPushConstants>(cmd, batchCfg, [&](auto draw) {
+		for (const auto& dc : *c.drawCalls) {
+			PBRPushConstants pc = {
+				.mvp = Multiply(c.scene->viewProj, dc.worldMatrix),
+				.lightSpaceMatrix = Multiply(c.scene->lightSpaceMatrix, dc.worldMatrix),
+				.camPos = {c.scene->camPos[0], c.scene->camPos[1], c.scene->camPos[2], 1.0f},
+				.lightDir = {c.scene->lightDir[0], c.scene->lightDir[1], c.scene->lightDir[2],
+							 0.0f},
+				.albedoIdx = dc.albedoIdx,
+				.normalIdx = dc.normalIdx,
+				.pbrIdx = dc.pbrIdx,
+				.lightmapIdx = dc.lightmapIdx,
+				.emissiveIdx = dc.emissiveIdx,
+				.lightCount = c.scene->lightCount};
+			draw(pc, dc.indexCount, dc.firstIndex);
+		}
+	});
+}
+
+static void RecordFXAA(VkCommandBuffer cmd, const void* pUserData) {
+	const auto& c = *static_cast<const FXAAConfig*>(pUserData);
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, c.pipeline);
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, c.layout, 0, 1, &c.set, 0,
+							nullptr);
+	vkCmdDraw(cmd, 3, 1, 0, 0); // Fullscreen Triangle
+}
+
+// ============================================================================
+// Standard Pass Builders (Refactored to use named functions)
 // ============================================================================
 
 inline void AddShadowPass(RenderGraph& graph, GraphImage& shadowMap, const ShadowConfig& cfg) {
-	graph.AddPass("Shadow Map Pass")
-		.WriteDepth(shadowMap)
-		.Record(
-			[](VkCommandBuffer cmd, const void* pUserData) {
-				const auto& c = *static_cast<const ShadowConfig*>(pUserData);
-
-				DrawBatchConfig batchCfg = {c.pipeline,		c.layout,
-											c.scene->vbo,	c.scene->ibo,
-											VK_NULL_HANDLE, VK_SHADER_STAGE_VERTEX_BIT};
-
-				DrawBatch<ShadowPushConstants>(cmd, batchCfg, [&](auto draw) {
-					for (const auto& dc : *c.drawCalls) {
-						ShadowPushConstants pc = {
-							.mvp = Multiply(c.scene->lightSpaceMatrix, dc.worldMatrix)};
-						draw(pc, dc.indexCount, dc.firstIndex);
-					}
-				});
-			},
-			&cfg);
+	graph.AddPass("Shadow Map Pass").WriteDepth(shadowMap).Record(RecordShadows, &cfg);
 }
 
 inline void AddPBRMainPass(RenderGraph& graph, GraphImage& color, GraphImage& depth,
@@ -120,51 +156,71 @@ inline void AddPBRMainPass(RenderGraph& graph, GraphImage& color, GraphImage& de
 		.Read(shadowMap)
 		.WriteColor(color)
 		.WriteDepth(depth)
-		.Record(
-			[](VkCommandBuffer cmd, const void* pUserData) {
-				const auto& c = *static_cast<const PBRMainConfig*>(pUserData);
-
-				DrawBatchConfig batchCfg = {
-					c.pipeline,			c.layout,
-					c.scene->vbo,		c.scene->ibo,
-					c.scene->globalSet, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT};
-
-				DrawBatch<PBRPushConstants>(cmd, batchCfg, [&](auto draw) {
-					for (const auto& dc : *c.drawCalls) {
-						PBRPushConstants pc = {
-							.mvp = Multiply(c.scene->viewProj, dc.worldMatrix),
-							.lightSpaceMatrix = Multiply(c.scene->lightSpaceMatrix, dc.worldMatrix),
-							.camPos = {c.scene->camPos[0], c.scene->camPos[1], c.scene->camPos[2],
-									   1.0f},
-							.lightDir = {c.scene->lightDir[0], c.scene->lightDir[1],
-										 c.scene->lightDir[2], 0.0f},
-							.albedoIdx = dc.albedoIdx,
-							.normalIdx = dc.normalIdx,
-							.pbrIdx = dc.pbrIdx,
-							.lightmapIdx = dc.lightmapIdx,
-							.emissiveIdx = dc.emissiveIdx,
-							.lightCount = c.scene->lightCount};
-						draw(pc, dc.indexCount, dc.firstIndex);
-					}
-				});
-			},
-			&cfg);
+		.Record(RecordPBR, &cfg);
 }
 
 inline void AddFXAAPass(RenderGraph& graph, GraphImage& input, GraphImage& output,
 						const FXAAConfig& cfg) {
-	graph.AddPass("FXAA Anti-Aliasing")
-		.Read(input)
-		.WriteColor(output)
-		.Record(
-			[](VkCommandBuffer cmd, const void* pUserData) {
-				const auto& c = *static_cast<const FXAAConfig*>(pUserData);
-				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, c.pipeline);
-				vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, c.layout, 0, 1,
-										&c.set, 0, nullptr);
-				vkCmdDraw(cmd, 3, 1, 0, 0); // Fullscreen Triangle
-			},
-			&cfg);
+	graph.AddPass("FXAA Anti-Aliasing").Read(input).WriteColor(output).Record(RecordFXAA, &cfg);
 }
 
 } // namespace ZHLN::Vk::Passes
+
+namespace ZHLN::Vk::Nodes {
+
+/**
+ * @brief Shadow Map Node
+ * Templated by format to allow the compiler to optimize for D16, D32, etc.
+ */
+template <VkFormat Format> struct ShadowMap {
+	struct Config {
+		GraphImage& shadowMap;
+		const Passes::ShadowConfig& data;
+	} config;
+
+	static void Execute(RenderGraph& g, const Config& c) {
+		g.AddPass("Shadow Pass")
+			.WriteDepth(c.shadowMap)
+			.Record(Passes::RecordShadows, &c.data); // Reference standard record fn
+	}
+};
+
+/**
+ * @brief Main Forward PBR Node
+ */
+template <VkFormat ColorFmt, VkFormat DepthFmt> struct ForwardPBR {
+	struct Config {
+		GraphImage& color;
+		GraphImage& depth;
+		GraphImage& shadowMap;
+		const Passes::PBRMainConfig& data;
+	} config;
+
+	static void Execute(RenderGraph& g, const Config& c) {
+		g.AddPass("PBR Main Pass")
+			.Read(c.shadowMap)
+			.WriteColor(c.color)
+			.WriteDepth(c.depth)
+			.Record(Passes::RecordPBR, &c.data);
+	}
+};
+
+/**
+ * @brief FXAA Post-Process Node
+ */
+template <VkFormat OutputFmt> struct FXAA {
+	struct Config {
+		GraphImage& input;
+		GraphImage& output;
+		const Passes::FXAAConfig& data;
+	} config;
+
+	static void Execute(RenderGraph& g, const Config& c) {
+		g.AddPass("FXAA Pass")
+			.Read(c.input)
+			.WriteColor(c.output)
+			.Record(Passes::RecordFXAA, &c.data);
+	}
+};
+
+} // namespace ZHLN::Vk::Nodes
