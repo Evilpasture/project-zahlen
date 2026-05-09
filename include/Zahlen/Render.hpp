@@ -1,17 +1,9 @@
 #pragma once
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
-#include <Zahlen/detail/String.hpp>
 #include <memory>
 
 namespace ZHLN {
-
-struct PipelineDesc {
-	const void* vertexShaderData = nullptr;
-	size_t vertexShaderSize = 0;
-	const void* fragShaderData = nullptr;
-	size_t fragShaderSize = 0;
-};
 
 class RenderContext {
   public:
@@ -26,10 +18,18 @@ class RenderContext {
 	void SetResolution(const Extent2D& resolution);
 	const char* GetRendererName() const;
 
-	// --- Opaque Resource Creation API ---
-	BufferHandle CreateVertexBuffer(const void* data, size_t size);
-	BufferHandle CreateConstantBuffer(size_t size);
-	Material CreateMaterial(const PipelineDesc& desc);
+	// --- Scene Setup API ---
+	void SetCamera(const JPH::Mat44& viewProj, const JPH::Vec3& cameraPosition);
+	void SetSunlight(const JPH::Vec3& direction, const JPH::Vec3& color, float intensity);
+
+	// --- Resource Creation API ---
+	Mesh CreateMesh(const Vertex* vertices, size_t vertexCount, const uint32_t* indices, size_t indexCount);
+	
+	// Uploads an image and returns its Bindless Registry Index
+	uint32_t CreateTexture(const void* pixels, uint32_t width, uint32_t height);
+	
+	// Creates a default material pointing to fallback textures
+	Material CreateMaterial();
 
 	struct Impl;
 	Impl* GetImpl() const { return _impl.get(); }
@@ -39,16 +39,8 @@ class RenderContext {
 };
 
 namespace Renderer {
-void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth = 1.0f);
-void UpdateBuffer(RenderContext& ctx, BufferHandle buffer, const void* data, size_t size);
-
-template <typename T>
-inline void UpdateBuffer(RenderContext& ctx, BufferHandle buffer, const T& data) {
-	UpdateBuffer(ctx, buffer, static_cast<const void*>(&data), sizeof(T));
+	// Queues a mesh to be drawn in the PBR Render Graph
+	void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const JPH::Mat44& transform);
 }
-
-void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
-		  const JPH::Mat44& transform);
-} // namespace Renderer
 
 } // namespace ZHLN

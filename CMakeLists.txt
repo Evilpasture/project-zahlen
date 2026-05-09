@@ -120,31 +120,49 @@ find_program(DXC_EXECUTABLE NAMES dxc
              PATHS "$ENV{VULKAN_SDK}/bin" "D:/Vulkan-SDK/1.4.341.1/bin")
 
 if(DXC_EXECUTABLE)
-    set(HLSL_SRC "${CMAKE_SOURCE_DIR}/resources/shaders/basic.hlsl")
-    
-    # 1. Output to the BUILD directory (CMAKE_CURRENT_BINARY_DIR)
-    set(VS_SPV   "${CMAKE_CURRENT_BINARY_DIR}/basic.hlsl.VSMain.spv")
-    set(PS_SPV   "${CMAKE_CURRENT_BINARY_DIR}/basic.hlsl.PSMain.spv")
+    # Define standard engine shaders
+    # standard.hlsl has two vertex/pixel pairs
+    set(HLSL_STD "${CMAKE_SOURCE_DIR}/resources/shaders/standard.hlsl")
+    set(HLSL_FXA "${CMAKE_SOURCE_DIR}/resources/shaders/fxaa.hlsl")
 
-    add_custom_command(
-        OUTPUT ${VS_SPV}
-        COMMAND ${DXC_EXECUTABLE} -T vs_6_0 -E VSMain -spirv ${HLSL_SRC} -Fo ${VS_SPV}
-        DEPENDS ${HLSL_SRC}
-        COMMENT "DXC: Compiling Vertex Shader to build directory"
+    # 1. Main PBR Pass
+    add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/standard.hlsl.VSMain.spv"
+        COMMAND ${DXC_EXECUTABLE} -T vs_6_0 -E VSMain -spirv ${HLSL_STD} -Fo "${CMAKE_CURRENT_BINARY_DIR}/standard.hlsl.VSMain.spv"
+        DEPENDS ${HLSL_STD})
+    add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/standard.hlsl.PSMain.spv"
+        COMMAND ${DXC_EXECUTABLE} -T ps_6_0 -E PSMain -spirv ${HLSL_STD} -Fo "${CMAKE_CURRENT_BINARY_DIR}/standard.hlsl.PSMain.spv"
+        DEPENDS ${HLSL_STD})
+
+    # 2. Shadow Pass (Reuses same .hlsl file with different entry points)
+    add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/standard.hlsl.VSShadow.spv"
+        COMMAND ${DXC_EXECUTABLE} -T vs_6_0 -E VSShadow -spirv ${HLSL_STD} -Fo "${CMAKE_CURRENT_BINARY_DIR}/standard.hlsl.VSShadow.spv"
+        DEPENDS ${HLSL_STD})
+    add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/standard.hlsl.PSShadow.spv"
+        COMMAND ${DXC_EXECUTABLE} -T ps_6_0 -E PSShadow -spirv ${HLSL_STD} -Fo "${CMAKE_CURRENT_BINARY_DIR}/standard.hlsl.PSShadow.spv"
+        DEPENDS ${HLSL_STD})
+
+    # 3. FXAA Pass
+    add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/fxaa.hlsl.VSMain.spv"
+        COMMAND ${DXC_EXECUTABLE} -T vs_6_0 -E VSMain -spirv ${HLSL_FXA} -Fo "${CMAKE_CURRENT_BINARY_DIR}/fxaa.hlsl.VSMain.spv"
+        DEPENDS ${HLSL_FXA})
+    add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/fxaa.hlsl.PSMain.spv"
+        COMMAND ${DXC_EXECUTABLE} -T ps_6_0 -E PSMain -spirv ${HLSL_FXA} -Fo "${CMAKE_CURRENT_BINARY_DIR}/fxaa.hlsl.PSMain.spv"
+        DEPENDS ${HLSL_FXA})
+
+    set(SHADER_OUTPUTS 
+        "${CMAKE_CURRENT_BINARY_DIR}/standard.hlsl.VSMain.spv" "${CMAKE_CURRENT_BINARY_DIR}/standard.hlsl.PSMain.spv"
+        "${CMAKE_CURRENT_BINARY_DIR}/standard.hlsl.VSShadow.spv" "${CMAKE_CURRENT_BINARY_DIR}/standard.hlsl.PSShadow.spv"
+        "${CMAKE_CURRENT_BINARY_DIR}/fxaa.hlsl.VSMain.spv" "${CMAKE_CURRENT_BINARY_DIR}/fxaa.hlsl.PSMain.spv"
     )
 
-    add_custom_command(
-        OUTPUT ${PS_SPV}
-        COMMAND ${DXC_EXECUTABLE} -T ps_6_0 -E PSMain -spirv ${HLSL_SRC} -Fo ${PS_SPV}
-        DEPENDS ${HLSL_SRC}
-        COMMENT "DXC: Compiling Pixel Shader to build directory"
-    )
-    
-    add_custom_target(compile_shaders DEPENDS ${VS_SPV} ${PS_SPV})
+    add_custom_target(compile_shaders DEPENDS ${SHADER_OUTPUTS})
     add_dependencies(zahlen compile_shaders)
 
-    # 2. Tell the compiler to search the build directory for #embed files
-    target_include_directories(zahlen PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+    # Automatically copy the SPVs to the folder where the EXE runs
+    add_custom_command(TARGET zahlen POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy ${SHADER_OUTPUTS} "$<TARGET_FILE_DIR:zahlen>"
+        COMMENT "Deploying engine shaders to runtime directory"
+    )
 endif()
 
 

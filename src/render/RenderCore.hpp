@@ -402,6 +402,10 @@ class CommandPools {
 	[[nodiscard]] constexpr ZHLN_CommandPool& operator[](const uint32_t frame) noexcept {
 		return _pools[frame % N];
 	}
+	[[nodiscard]] constexpr const ZHLN_CommandPool&
+	operator[](const uint32_t frame) const noexcept {
+		return _pools[frame % N];
+	}
 	[[nodiscard]] constexpr VkCommandBuffer Cmd(const uint32_t frame) const noexcept {
 		return _pools[frame % N].buffers[0];
 	}
@@ -916,7 +920,13 @@ template <VkFormat F>
 [[nodiscard]] static ImageView CreateView(VkDevice device, VkImage image,
 										  VkImageAspectFlags aspect = FormatTraits<F>::aspect,
 										  uint32_t mips = 1) {
-	ZHLN_ImageViewDesc desc = {.image = image, .format = F, .aspect = aspect, .mip_levels = mips};
+	ZHLN_ImageViewDesc desc = {
+		.image = image,
+		.format = F,
+		.aspect = aspect,
+		.mip_levels = mips,
+		.array_layers = 1 // Explicitly add this to fix warning
+	};
 
 	// Braced initializer list avoids repeating 'ImageView'
 	return {device, ZHLN_CreateImageView(device, &desc)};
@@ -1027,7 +1037,12 @@ inline void ExecutePasses(VkCommandBuffer cmd, std::span<const PassDesc> passes)
 			}
 
 			const VkDependencyInfo dep_info = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-											   .pNext = nullptr,
+											   .pNext = nullptr,	 // Explicitly add
+											   .dependencyFlags = 0, // Explicitly add
+											   .memoryBarrierCount = 0,
+											   .pMemoryBarriers = nullptr,
+											   .bufferMemoryBarrierCount = 0,
+											   .pBufferMemoryBarriers = nullptr,
 											   .imageMemoryBarrierCount = transition_count,
 											   .pImageMemoryBarriers = p_barriers};
 			vkCmdPipelineBarrier2(cmd, &dep_info);
