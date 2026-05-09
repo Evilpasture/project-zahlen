@@ -529,9 +529,10 @@ class ShaderStages {
 												const char* frag_entry = "main") noexcept {
 		auto load = [](const std::filesystem::path& path) -> std::vector<uint32_t> {
 			std::ifstream file(path, std::ios::ate | std::ios::binary);
-			if (!file.is_open())
+			if (!file.is_open()) {
 				return {};
-			const size_t size = static_cast<size_t>(file.tellg());
+			}
+			const std::streamsize size = file.tellg();
 			std::vector<uint32_t> buffer(size / sizeof(uint32_t));
 			file.seekg(0);
 			file.read(reinterpret_cast<char*>(buffer.data()), size);
@@ -547,8 +548,10 @@ class ShaderStages {
 			return {};
 		}
 
-		const ZHLN_ShaderDesc v_desc = {vert_spv.data(), vert_spv.size() * 4, vert_entry};
-		const ZHLN_ShaderDesc f_desc = {frag_spv.data(), frag_spv.size() * 4, frag_entry};
+		const ZHLN_ShaderDesc v_desc = {
+			.code = vert_spv.data(), .size = vert_spv.size() * 4, .entry_point = vert_entry};
+		const ZHLN_ShaderDesc f_desc = {
+			.code = frag_spv.data(), .size = frag_spv.size() * 4, .entry_point = frag_entry};
 
 		return Create(device, v_desc, f_desc);
 	}
@@ -647,8 +650,6 @@ inline void TransitionLayout(const VkCommandBuffer cmd, const VkImage image,
 	using Src = LayoutTraits<OldLayout>;
 	using Dst = LayoutTraits<NewLayout>;
 
-	// This entire struct is populated with static constants.
-	// The compiler will fold this into a single block of immediate values.
 	const ZHLN_ImageBarrierDesc barrier = {
 		.image = image,
 		.src_access = Src::access,
@@ -658,6 +659,9 @@ inline void TransitionLayout(const VkCommandBuffer cmd, const VkImage image,
 		.src_stage = Src::stage,
 		.dst_stage = Dst::stage,
 		.aspect = aspect,
+		.base_mip = 0, // Added
+		.mip_count =
+			VK_REMAINING_MIP_LEVELS // Added: Fixes VUID-VkImageSubresourceRange-levelCount-01720
 	};
 
 	ZHLN_CmdImageBarrier(cmd, &barrier);
@@ -822,10 +826,11 @@ class alignas(64) SemaphorePool {
 		Cleanup();
 		_device = device;
 		// Cap at 6 to ensure 64-byte struct size
-		_count = std::min(count, 6u);
+		_count = std::min(count, 6U);
 
-		for (uint32_t i = 0; i < _count; ++i)
+		for (uint32_t i = 0; i < _count; ++i) {
 			_semaphores[i] = ZHLN_CreateSemaphore(_device);
+		}
 	}
 
 	[[nodiscard]] VkSemaphore operator[](const uint32_t index) const noexcept {
@@ -844,11 +849,12 @@ class alignas(64) SemaphorePool {
 
   private:
 	void Cleanup() noexcept {
-		if (_device == VK_NULL_HANDLE)
+		if (_device == VK_NULL_HANDLE) {
 			return;
+		}
 
 		// Locally cache device handle for the loop
-		const auto d = _device;
+		auto* const d = _device;
 		for (uint32_t i = 0; i < _count; ++i) {
 			// Local null check prevents expensive driver thunk if slot is empty
 			if (_semaphores[i]) {
@@ -907,14 +913,13 @@ ZHLN_FORMAT_ASPECT(VK_FORMAT_D24_UNORM_S8_UINT,
 using ImageView = DeviceHandle<VkImageView, ZHLN_DestroyImageView>;
 
 template <VkFormat F>
-[[nodiscard]] static ImageView CreateView(const VkDevice device, const VkImage image,
+[[nodiscard]] static ImageView CreateView(VkDevice device, VkImage image,
 										  VkImageAspectFlags aspect = FormatTraits<F>::aspect,
-										  const uint32_t mips = 1) {
-	ZHLN_ImageViewDesc desc = {.image = image,
-							   .format = F,
-							   .aspect = aspect, // Deduced via TMP!
-							   .mip_levels = mips};
-	return ImageView(device, ZHLN_CreateImageView(device, &desc));
+										  uint32_t mips = 1) {
+	ZHLN_ImageViewDesc desc = {.image = image, .format = F, .aspect = aspect, .mip_levels = mips};
+
+	// Braced initializer list avoids repeating 'ImageView'
+	return {device, ZHLN_CreateImageView(device, &desc)};
 }
 
 using Sampler = DeviceHandle<VkSampler, ZHLN_DestroySampler>;
@@ -979,26 +984,26 @@ struct PassDesc {
 template <size_t MaxStackBarriers = 16>
 inline void ExecutePasses(VkCommandBuffer cmd, std::span<const PassDesc> passes) noexcept {
 	// Stack-allocated buffer for barriers to avoid heap allocation in the hot loop.
-	VkImageMemoryBarrier2 stack_barriers[MaxStackBarriers];
+	std::array<VkImageMemoryBarrier2, MaxStackBarriers> stack_barriers;
 
 	for (const auto& pass : passes) {
-		const uint32_t transitionCount = static_cast<uint32_t>(pass.transitions.size());
+		const auto transition_count = static_cast<uint32_t>(pass.transitions.size());
 
-		if (transitionCount > 0) {
-			VkImageMemoryBarrier2* pBarriers = stack_barriers;
+		if (transition_count > 0) {
+			VkImageMemoryBarrier2* p_barriers = stack_barriers.data();
 
 			// We only define the vector here; it won't allocate unless transitionCount >
 			// MaxStackBarriers.
 			std::vector<VkImageMemoryBarrier2> heap_barriers;
 
-			if (transitionCount > MaxStackBarriers) [[unlikely]] {
-				heap_barriers.resize(transitionCount);
-				pBarriers = heap_barriers.data();
+			if (transition_count > MaxStackBarriers) [[unlikely]] {
+				heap_barriers.resize(transition_count);
+				p_barriers = heap_barriers.data();
 			}
 
-			for (uint32_t i = 0; i < transitionCount; ++i) {
+			for (uint32_t i = 0; i < transition_count; ++i) {
 				const auto& res = pass.transitions[i];
-				pBarriers[i] = {
+				p_barriers[i] = {
 					.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
 					.pNext = nullptr,
 					.srcStageMask = res.barrier.src_stage,
@@ -1023,8 +1028,8 @@ inline void ExecutePasses(VkCommandBuffer cmd, std::span<const PassDesc> passes)
 
 			const VkDependencyInfo dep_info = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
 											   .pNext = nullptr,
-											   .imageMemoryBarrierCount = transitionCount,
-											   .pImageMemoryBarriers = pBarriers};
+											   .imageMemoryBarrierCount = transition_count,
+											   .pImageMemoryBarriers = p_barriers};
 			vkCmdPipelineBarrier2(cmd, &dep_info);
 		}
 
