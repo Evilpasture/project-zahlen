@@ -240,7 +240,7 @@ ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* const restrict desc) {
 
 	return best_score >= 0 ? best : null_result;
 }
-[[nodiscard]]
+// [[nodiscard]] // line 243
 ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
 	ZHLN_Device null_result = {};
 
@@ -465,20 +465,25 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
 	};
 	const bool shared = (queue_families[0] == queue_families[1]);
 
-	// If this function pointer exists, the extension was enabled during device creation.
+	// --- Maintenance 1 Logic ---
+
+	// Check if the extension was enabled during device creation
 	const auto maint1_fn = vkGetDeviceProcAddr(desc->device->handle, "vkReleaseSwapchainImagesKHR");
 	const bool has_maint1 = (maint1_fn != nullptr);
 
-	// Define the present modes we are "aware" of to satisfy Maintenance1
-	// We provide the modes found during query support.
+	// Prepare the "Handshake" struct
+	// We only pass the ONE mode we actually chose. This satisfies the validation
+	// warning without including unsupported advanced modes like LATEST_READY.
+	const VkPresentModeKHR active_mode = present_mode;
 	const VkSwapchainPresentModesCreateInfoKHR present_modes_info = {
 		.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODES_CREATE_INFO_KHR,
 		.pNext = nullptr,
-		.presentModeCount = support.present_mode_count,
-		.pPresentModes = support.present_modes};
+		.presentModeCount = 1,
+		.pPresentModes = &active_mode};
 
 	const VkSwapchainCreateInfoKHR create_info = {
 		.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+		// Attach the struct only if the extension is active
 		.pNext = has_maint1 ? &present_modes_info : nullptr,
 		.flags = 0,
 		.surface = desc->surface,
@@ -494,7 +499,7 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
 		.preTransform = support.capabilities.currentTransform,
 		.compositeAlpha =
 			ZHLN_Internal_ChooseCompositeAlpha(support.capabilities.supportedCompositeAlpha),
-		.presentMode = present_mode,
+		.presentMode = present_mode, // Still set the actual mode here
 		.clipped = VK_TRUE,
 		.oldSwapchain = desc->old_swapchain,
 	};
