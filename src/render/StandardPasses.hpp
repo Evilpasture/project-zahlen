@@ -42,25 +42,29 @@ struct Light {
 	float innerConeCos;
 	float outerConeCos;
 };
-
-// Internal Push Constant structures matching the HLSL shaders perfectly
 struct PBRPushConstants {
-	std::array<float, 16> mvp;
-	std::array<float, 16> lightSpaceMatrix;
-	std::array<float, 16> worldMatrix;
-	float camPos[4];
-	float lightDir[4];
-	uint32_t albedoIdx;
-	uint32_t normalIdx;
-	uint32_t pbrIdx;
-	uint32_t lightmapIdx;
-	uint32_t emissiveIdx;
-	uint32_t lightCount;
-	uint32_t _pad[1];
+    std::array<float, 16> mvp;              // Offset 0
+    std::array<float, 16> lightSpaceMatrix; // Offset 64
+    std::array<float, 16> worldMatrix;      // Offset 128
+    
+    // Use float4 for camPos and lightDir to force 16-byte alignment
+    std::array<float, 4> camPos;                        // Offset 192
+    std::array<float, 4> lightDir;                      // Offset 208
+    
+    // Indices: 4 bytes each = 16 bytes total. This block is now perfectly aligned.
+    uint32_t albedoIdx;   // Offset 224
+    uint32_t normalIdx;   // Offset 228
+    uint32_t pbrIdx;      // Offset 232
+    uint32_t lightmapIdx; // Offset 236
+    
+    uint32_t emissiveIdx; // Offset 240
+    uint32_t lightCount;  // Offset 244
+    float _padding[2];    // Offset 248 -> Total 256 bytes (Multiple of 16)
 };
 
 struct ShadowPushConstants {
-	std::array<float, 16> mvp;
+    std::array<float, 16> mvp;
+    float _padding[48]; // Pad to 256 bytes to match the Shadow Layout size
 };
 
 // --- Configurations ---
@@ -143,7 +147,9 @@ static void RecordPBR(VkCommandBuffer cmd, const void* pUserData) {
 				.pbrIdx = dc.pbrIdx,
 				.lightmapIdx = dc.lightmapIdx,
 				.emissiveIdx = dc.emissiveIdx,
-				.lightCount = c.scene->lightCount};
+				.lightCount = c.scene->lightCount
+				// ._pad is omitted, so the compiler zeroes it!
+			};
 			draw(pc, dc.indexCount, dc.firstIndex);
 		}
 	});

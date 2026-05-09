@@ -1,5 +1,7 @@
+#pragma pack_matrix(column_major)
+
 // --- Constant Buffer (Push Constants) ---
-struct PushConstants {
+struct PBRPushConstants {
     float4x4 mvp;
     float4x4 lightSpaceMatrix;
     float4x4 worldMatrix;
@@ -12,7 +14,7 @@ struct PushConstants {
     uint emissiveIdx;
     uint lightCount;
 };
-[[vk::push_constant]] PushConstants pc;
+[[vk::push_constant]] PBRPushConstants pc;
 
 // --- Bindings ---
 [[vk::binding(0, 0)]] Texture2D globalTextures[];

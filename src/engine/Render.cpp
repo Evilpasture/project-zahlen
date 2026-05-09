@@ -30,12 +30,18 @@ using SceneLayout =
 using FXAALayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SamplerSlot<1>>;
 
 // Local helper to load SPIR-V from disk instead of using C++26 #embed
-static std::vector<uint32_t> LoadSpirv(const std::string& path) {
-	if (!std::filesystem::exists(path))
+static std::vector<uint32_t> LoadSpirv(const std::string& filename) {
+	std::string path = SHADER_DIR + filename;
+	if (!std::filesystem::exists(path)) {
+		path = "build/" + path;
+	}
+
+	if (!std::filesystem::exists(path)) {
+		ZHLN::Log("ERROR: Shader not found at {}", path);
 		return {};
+	}
+
 	std::ifstream file(path, std::ios::ate | std::ios::binary);
-	if (!file.is_open())
-		return {};
 	size_t size = static_cast<size_t>(file.tellg());
 	std::vector<uint32_t> buffer(size / sizeof(uint32_t));
 	file.seekg(0);
@@ -48,7 +54,6 @@ struct NativeMesh {
 	Vk::Buffer ibo;
 };
 
-// Groups draw calls by mesh to minimize VBO/IBO re-binding
 struct MeshDrawGroup {
 	std::vector<Vk::Passes::PBRDrawCall> calls;
 };
@@ -57,6 +62,7 @@ struct RenderContext::Impl {
 	Window& window;
 	Vk::Context ctx;
 	Vk::Allocator allocator;
+	Vk::Surface surface;
 	Vk::PresentationContext presentation;
 
 	Vk::FrameSync<2> sync;
@@ -77,7 +83,7 @@ struct RenderContext::Impl {
 	Vk::Sampler defaultSampler, shadowSampler, lightmapSampler;
 
 	Vk::Buffer lightBuffer;
-	std::unordered_map<NativeMesh*, MeshDrawGroup> drawGroups; // Dynamic draw queue
+	std::unordered_map<NativeMesh*, MeshDrawGroup> drawGroups;
 	std::vector<Vk::Passes::Light> lights;
 
 	JPH::Mat44 viewProj;
@@ -94,12 +100,17 @@ struct RenderContext::Impl {
 };
 
 RenderContext::RenderContext(Window& window) : _impl(std::make_unique<Impl>(window)) {
+	bool has_maint = Vk::IsInstanceExtensionSupported(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+
 	uint32_t glfwExtCount = 0;
 	const char** glfwExts = glfwGetRequiredInstanceExtensions(&glfwExtCount);
 	std::vector<const char*> inst_exts(glfwExts, glfwExts + glfwExtCount);
 	inst_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 	inst_exts.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
-	inst_exts.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+
+	if (has_maint) {
+		inst_exts.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+	}
 
 #ifdef __APPLE__
 	inst_exts.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
@@ -109,14 +120,13 @@ RenderContext::RenderContext(Window& window) : _impl(std::make_unique<Impl>(wind
 	inst_desc.extensions = inst_exts.data();
 	inst_desc.extension_count = static_cast<uint32_t>(inst_exts.size());
 
-	// C++ struct defaults fix all compiler warnings about missing designated fields
 	VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swap_maint{};
 	swap_maint.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR;
 	swap_maint.swapchainMaintenance1 = VK_TRUE;
 
 	VkPhysicalDeviceVulkan13Features feat13{};
 	feat13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
-	feat13.pNext = &swap_maint;
+	feat13.pNext = has_maint ? &swap_maint : nullptr;
 	feat13.synchronization2 = VK_TRUE;
 	feat13.dynamicRendering = VK_TRUE;
 
@@ -124,51 +134,47 @@ RenderContext::RenderContext(Window& window) : _impl(std::make_unique<Impl>(wind
 	feat12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
 	feat12.pNext = &feat13;
 	feat12.descriptorIndexing = VK_TRUE;
-	feat12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+	feat12.bufferDeviceAddress = VK_TRUE;
 	feat12.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
 	feat12.descriptorBindingPartiallyBound = VK_TRUE;
 	feat12.runtimeDescriptorArray = VK_TRUE;
-	feat12.bufferDeviceAddress = VK_TRUE;
 
 	VkPhysicalDeviceFeatures2 feat2{};
 	feat2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
 	feat2.pNext = &feat12;
 	feat2.features.samplerAnisotropy = VK_TRUE;
 
+	std::vector<const char*> dev_exts = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+	if (has_maint) {
+		dev_exts.push_back(VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME);
+		dev_exts.push_back(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME);
+	}
 #ifdef __APPLE__
-	const char* dev_exts[] = {
-		VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
-		VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME, "VK_KHR_portability_subset"};
-#else
-	const char* dev_exts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-							  VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
-							  VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME};
+	dev_exts.push_back("VK_KHR_portability_subset");
 #endif
 
 	ZHLN_DeviceDesc dev_desc = {.physical = nullptr,
-								.extensions = dev_exts,
-								.extension_count = (uint32_t)std::size(dev_exts),
+								.extensions = dev_exts.data(),
+								.extension_count = (uint32_t)dev_exts.size(),
 								.features = &feat2,
 								.enable_validation = true};
-	_impl->ctx = Vk::Context::Create(inst_desc, {VK_NULL_HANDLE, VK_NULL_HANDLE, nullptr, nullptr},
-									 dev_desc);
+
+	_impl->ctx = Vk::Context::Create(inst_desc, {VK_NULL_HANDLE, VK_NULL_HANDLE}, dev_desc);
+	if (!_impl->ctx)
+		ZHLN::Panic("Context creation failed.");
 
 	VkSurfaceKHR raw_surface;
-	glfwCreateWindowSurface(_impl->ctx.Instance(),
-							static_cast<GLFWwindow*>(window.GetNativeHandle()), nullptr,
-							&raw_surface);
-	// 1. Initialize Allocator (Handles VMA)
-    if (!_impl->allocator.Init(_impl->ctx)) {
-        ZHLN::Panic("FATAL: Failed to initialize Vulkan Memory Allocator. "
-                    "This usually indicates the system is out of GPU memory (OOM).");
-    }
+	if (glfwCreateWindowSurface(_impl->ctx.Instance(),
+								static_cast<GLFWwindow*>(window.GetNativeHandle()), nullptr,
+								&raw_surface) != VK_SUCCESS) {
+		ZHLN::Panic("Surface creation failed.");
+	}
+	_impl->surface = Vk::Surface(_impl->ctx.Instance(), raw_surface);
 
-    // 2. Initialize Presentation Context (Handles Swapchain and Window Depth Buffer)
-    // If this fails, it's likely due to an incompatible window size or surface loss.
-    if (!_impl->presentation.Init(_impl->ctx, _impl->allocator, raw_surface, 1280, 720)) {
-        ZHLN::Panic("FATAL: Failed to initialize Presentation Context. "
-                    "Check if the window surface is valid and GPU supports the requested resolution.");
-    }
+	if (!_impl->allocator.Init(_impl->ctx))
+		ZHLN::Panic("VMA Init failed.");
+	if (!_impl->presentation.Init(_impl->ctx, _impl->allocator, raw_surface, 1280, 720))
+		ZHLN::Panic("Presentation Init failed.");
 
 	_impl->sync = Vk::FrameSync<2>::Create(_impl->ctx.Device());
 	_impl->pools =
@@ -212,7 +218,6 @@ RenderContext::RenderContext(Window& window) : _impl(std::make_unique<Impl>(wind
 	_impl->fxaaSet =
 		FXAALayout::Allocate(_impl->ctx.Device(), _impl->fxaaPool.Get(), _impl->fxaaLayout.Get());
 
-	// Shaders loaded dynamically from disk
 	auto pbr_v = LoadSpirv("standard.hlsl.VSMain.spv");
 	auto pbr_f = LoadSpirv("standard.hlsl.PSMain.spv");
 	auto shd_v = LoadSpirv("standard.hlsl.VSShadow.spv");
@@ -220,39 +225,41 @@ RenderContext::RenderContext(Window& window) : _impl(std::make_unique<Impl>(wind
 	auto fxa_v = LoadSpirv("fxaa.hlsl.VSMain.spv");
 	auto fxa_f = LoadSpirv("fxaa.hlsl.PSMain.spv");
 
-	if (pbr_v.empty() || pbr_f.empty())
-		ZHLN::Panic("Missing core shaders! Ensure SPV files exist in the working directory.");
-
 	auto pbrShaders =
 		Vk::ShaderStages::Create(_impl->ctx.Device(), {pbr_v.data(), pbr_v.size() * 4, "VSMain"},
 								 {pbr_f.data(), pbr_f.size() * 4, "PSMain"});
-
 	auto shdShaders =
 		Vk::ShaderStages::Create(_impl->ctx.Device(), {shd_v.data(), shd_v.size() * 4, "VSShadow"},
 								 {shd_f.data(), shd_f.size() * 4, "PSShadow"});
-
 	auto fxaShaders =
 		Vk::ShaderStages::Create(_impl->ctx.Device(), {fxa_v.data(), fxa_v.size() * 4, "VSMain"},
 								 {fxa_f.data(), fxa_f.size() * 4, "PSMain"});
 
+	// FIX 2: Separate Push Constant Layouts to conform to Vulkan specification
 	VkPushConstantRange pbrPush = {VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
 								   sizeof(Vk::Passes::PBRPushConstants)};
-	VkPushConstantRange shdPush = {VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(JPH::Mat44)};
+	// Even though it's just the Vertex stage, it must match the block size
+	// defined in standard.hlsl (PBRPushConstants).
+	VkPushConstantRange shdPush = {
+		VK_SHADER_STAGE_VERTEX_BIT, 0,
+		sizeof(Vk::Passes::PBRPushConstants) // <--- Changed from ShadowPushConstants
+	};
+
 	VkDescriptorSetLayout glbRaw = _impl->globalLayout.Get();
 	VkDescriptorSetLayout fxaRaw = _impl->fxaaLayout.Get();
 
-	ZHLN_PipelineLayoutDesc pbrLD = {.set_layouts = &glbRaw,
-									 .set_layout_count = 1,
-									 .push_constants = &pbrPush,
-									 .push_constant_count = 1};
-	ZHLN_PipelineLayoutDesc shdLD = {.set_layouts = nullptr,
-									 .set_layout_count = 0,
-									 .push_constants = &shdPush,
-									 .push_constant_count = 1};
-	ZHLN_PipelineLayoutDesc fxaLD = {.set_layouts = &fxaRaw,
-									 .set_layout_count = 1,
-									 .push_constants = nullptr,
-									 .push_constant_count = 0};
+	const ZHLN_PipelineLayoutDesc pbrLD = {.set_layouts = &glbRaw,
+										   .set_layout_count = 1,
+										   .push_constants = &pbrPush,
+										   .push_constant_count = 1};
+	const ZHLN_PipelineLayoutDesc shdLD = {.set_layouts = nullptr,
+										   .set_layout_count = 0,
+										   .push_constants = &shdPush,
+										   .push_constant_count = 1};
+	const ZHLN_PipelineLayoutDesc fxaLD = {.set_layouts = &fxaRaw,
+										   .set_layout_count = 1,
+										   .push_constants = nullptr,
+										   .push_constant_count = 0};
 
 	_impl->pbrPipeLayout = Vk::PipelineLayout(
 		_impl->ctx.Device(), ZHLN_CreatePipelineLayout(_impl->ctx.Device(), &pbrLD));
@@ -307,7 +314,7 @@ void RenderContext::SetSunlight(const JPH::Vec3& dir, const JPH::Vec3& color, fl
 	_impl->lights.clear();
 	_impl->lights.push_back(
 		{.position = {0, 0, 0},
-		 .type = 0, // 0 = Directional
+		 .type = 0,
 		 .color = {color.GetX(), color.GetY(), color.GetZ()},
 		 .intensity = intensity,
 		 .direction = {_impl->sunDir.GetX(), _impl->sunDir.GetY(), _impl->sunDir.GetZ()},
@@ -317,10 +324,18 @@ void RenderContext::SetSunlight(const JPH::Vec3& dir, const JPH::Vec3& color, fl
 }
 
 uint32_t RenderContext::CreateTexture(const void* pixels, uint32_t width, uint32_t height) {
+	// FIX 1: Provide full initialization for the Image creation struct
 	VkImageCreateInfo info{};
 	info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 	info.imageType = VK_IMAGE_TYPE_2D;
 	info.extent = {width, height, 1};
+	info.mipLevels = 1;
+	info.arrayLayers = 1;
+	info.samples = VK_SAMPLE_COUNT_1_BIT;
+	info.tiling = VK_IMAGE_TILING_OPTIMAL;
+	info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+	info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
 	auto tex = std::make_unique<Vk::TextureAsset>(
 		Vk::UploadTexture<VK_FORMAT_R8G8B8A8_UNORM>(_impl->allocator, _impl->ctx, info, pixels));
@@ -380,11 +395,17 @@ void RenderContext::BeginFrame() {
 	if (_impl->resized) {
 		int w, h;
 		glfwGetFramebufferSize(static_cast<GLFWwindow*>(_impl->window.GetNativeHandle()), &w, &h);
-		_impl->presentation.Rebuild(w, h);
+		if (w == 0 || h == 0)
+			return;
+		if (!_impl->presentation.Rebuild(w, h))
+			return;
 
 		_impl->sceneColor = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
 			_impl->allocator, _impl->ctx, _impl->presentation.swapchain.Get().extent,
 			VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+
+		if (!_impl->sceneColor.Valid())
+			ZHLN::Panic("FATAL: Failed to create HDR SceneColor target. Check VRAM.");
 
 		FXAALayout::Write(_impl->ctx.Device(), _impl->fxaaSet,
 						  Vk::ImageWrite{_impl->sceneColor.view.Get()},
@@ -441,23 +462,19 @@ void RenderContext::EndFrame() {
 			_impl->presentation.swapchain.Get().views[image_index],
 			_impl->presentation.swapchain.Get().extent, VK_IMAGE_ASPECT_COLOR_BIT);
 
-		// 1. Create a context struct to pass into the lambdas
 		struct PassContext {
 			RenderContext::Impl* impl;
 			const Vk::Passes::PBRSceneContext* scene;
 		} pCtx = {_impl.get(), &sceneCtx};
 
 		Vk::RenderGraph graph;
-
-		// SHADOW PASS
 		graph.AddPass("Shadows")
 			.WriteDepth(_impl->shadowMap.tracker)
 			.Record(
-				[](VkCommandBuffer c, const void* data) { // Capture list MUST be empty []
+				[](VkCommandBuffer c, const void* data) {
 					auto* ctx = static_cast<const PassContext*>(data);
 					vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS,
 									  ctx->impl->shadowPipeline.Get());
-
 					for (auto& [msh, group] : ctx->impl->drawGroups) {
 						VkBuffer vbo = msh->vbo.Handle();
 						VkDeviceSize offset = 0;
@@ -474,15 +491,14 @@ void RenderContext::EndFrame() {
 						}
 					}
 				},
-				&pCtx); // Pass the struct pointer here
+				&pCtx);
 
-		// PBR MAIN PASS
 		graph.AddPass("PBR")
 			.Read(_impl->shadowMap.tracker)
 			.WriteColor(_impl->sceneColor.tracker)
 			.WriteDepth(_impl->presentation.depthTarget.tracker)
 			.Record(
-				[](VkCommandBuffer c, const void* data) { // Capture list MUST be empty []
+				[](VkCommandBuffer c, const void* data) {
 					auto* ctx = static_cast<const PassContext*>(data);
 					vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS,
 									  ctx->impl->pbrPipeline.Get());
@@ -520,12 +536,11 @@ void RenderContext::EndFrame() {
 				},
 				&pCtx);
 
-		// FXAA PASS
 		graph.AddPass("FXAA")
 			.Read(_impl->sceneColor.tracker)
 			.WriteColor(swapRes)
 			.Record(
-				[](VkCommandBuffer c, const void* data) { // Capture list MUST be empty []
+				[](VkCommandBuffer c, const void* data) {
 					auto* ctx = static_cast<const PassContext*>(data);
 					vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS,
 									  ctx->impl->fxaaPipeline.Get());
@@ -540,21 +555,51 @@ void RenderContext::EndFrame() {
 		graph.Execute(cmd);
 	};
 
-	auto result =
-		Vk::DrawFrame(_impl->ctx, _impl->presentation.swapchain, _impl->sync, _impl->pools,
-					  _impl->frame_index, record_cb, [&]() { _impl->resized = true; });
-	if (result != ZHLN_FrameResult_Ok)
+	// FIX 3: Unroll frame submission to sync 1:1 with swapchain indices
+	const ZHLN_FrameSync& frame_sync = _impl->sync[_impl->frame_index];
+	ZHLN_CommandPool& pool = _impl->pools[_impl->frame_index];
+	VkCommandBuffer cmd = _impl->pools.Cmd(_impl->frame_index);
+
+	ZHLN_WaitAndResetFrame(_impl->ctx.Device(), frame_sync.in_flight, &pool);
+
+	uint32_t image_index = 0;
+	ZHLN_AcquireDesc acq = {.swapchain = _impl->presentation.swapchain.Get().handle,
+							.image_available = frame_sync.image_available,
+							.timeout_ns = UINT64_MAX};
+
+	if (ZHLN_AcquireImage(_impl->ctx.Device(), &acq, &image_index) == ZHLN_FrameResult_OutOfDate) {
 		_impl->resized = true;
+		return;
+	}
+
+	ZHLN_BeginCommandBuffer(cmd);
+	record_cb(cmd, image_index);
+	ZHLN_EndCommandBuffer(cmd);
+
+	ZHLN_FrameSubmitDesc submitDesc = {
+		.graphicsQueue = _impl->ctx.GraphicsQueue(),
+		.presentQueue = _impl->ctx.PresentQueue(),
+		.cmd = cmd,
+		.imageAvailable = frame_sync.image_available,
+		.renderFinished =
+			_impl->presentation.presentSemaphores[image_index], // <--- Now tied to the image!
+		.inFlight = frame_sync.in_flight,
+		.swapchain = _impl->presentation.swapchain.Get().handle,
+		.imageIndex = image_index};
+
+	if (ZHLN_SubmitAndPresent(&submitDesc) != ZHLN_FrameResult_Ok) {
+		_impl->resized = true;
+	}
+
+	_impl->frame_index = (_impl->frame_index + 1) % 2;
 }
 
 namespace Renderer {
 void Draw(RenderContext& ctx, const Material& mat, const Mesh& mesh, const JPH::Mat44& tf) {
 	auto* msh = reinterpret_cast<NativeMesh*>(static_cast<uint64_t>(mesh.vertexBuffer));
-
 	std::array<float, 16> matData;
 	std::memcpy(matData.data(), &tf, 64);
 
-	// Group the call by the mesh pointer, minimizing Vulkan binds
 	ctx.GetImpl()->drawGroups[msh].calls.push_back({.worldMatrix = matData,
 													.albedoIdx = mat.albedoIdx,
 													.normalIdx = mat.normalIdx,
@@ -565,5 +610,4 @@ void Draw(RenderContext& ctx, const Material& mat, const Mesh& mesh, const JPH::
 													.firstIndex = mesh.firstIndex});
 }
 } // namespace Renderer
-
 } // namespace ZHLN
