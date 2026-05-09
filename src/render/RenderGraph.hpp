@@ -62,7 +62,7 @@ class RenderGraph {
 		}
 
 		// Transitions image to COLOR_ATTACHMENT_OPTIMAL and sets as render target
-		PassBuilder& WriteColor(GraphImage& img, bool clear = true) {
+		PassBuilder& WriteColor(GraphImage& img, [[maybe_unused]] bool clear = true) {
 			pass.transitions.push_back({&img, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
 			pass.colorTarget = img.view;
 			pass.extent = img.extent;
@@ -70,7 +70,7 @@ class RenderGraph {
 		}
 
 		// Transitions image to DEPTH_ATTACHMENT_OPTIMAL and sets as depth target
-		PassBuilder& WriteDepth(GraphImage& img, bool clear = true) {
+		PassBuilder& WriteDepth(GraphImage& img, [[maybe_unused]] bool clear = true) {
 			pass.transitions.push_back({&img, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL});
 			pass.depthTarget = img.view;
 			pass.extent = img.extent;

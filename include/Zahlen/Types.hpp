@@ -9,13 +9,34 @@ namespace ZHLN {
 
 // --- Core Math/Spatial Types ---
 
-struct Extent2D { uint32_t width, height; };
-struct Offset2D { int32_t x, y; };
+struct Extent2D {
+	uint32_t width, height;
+};
+struct Offset2D {
+	int32_t x, y;
+};
+
+// Semantic types to help the Renderer choose the right Vulkan Format
+struct Packed1010102 {
+	uint32_t data;
+}; // Normals/Tangents
+struct PackedHalf2 {
+	uint32_t data;
+}; // UVs (2x 16-bit floats)
+struct PackedRGBA8 {
+	uint32_t data;
+}; // Color
 
 struct Vertex {
-	JPH::Vec3 position;
-	JPH::Vec4 color;
+	float position[3];	   // 12B - Full precision
+	Packed1010102 normal;  // 4B  - 10-bit per axis
+	Packed1010102 tangent; // 4B  - 10-bit + sign
+	PackedHalf2 uv;		   // 4B  - 16-bit UVs
+	PackedRGBA8 color;	   // 4B  - RGBA8
+	uint32_t _padding;	   // 4B  - Power of two alignment
 };
+
+static_assert(sizeof(Vertex) == 32, "Vertex must be exactly 32 bytes!");
 
 struct FrameConstants {
 	JPH::Mat44 transform;
