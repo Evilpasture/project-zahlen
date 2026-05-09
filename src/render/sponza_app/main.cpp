@@ -32,8 +32,9 @@ ZHLN_REFLECT_VERTEX(ZHLN::Vk::Vertex, pos, norm, tangent, uv0, uv1);
 struct GltfData {
 	cgltf_data* ptr = nullptr;
 	~GltfData() {
-		if (ptr)
+		if (ptr) {
 			cgltf_free(ptr);
+		}
 	}
 
 	[[nodiscard]] static GltfData Load(const std::string& path) {
@@ -102,9 +103,10 @@ using FXAALayout =
 
 static std::vector<uint32_t> LoadSpirv(const std::filesystem::path& path) {
 	std::ifstream file(path, std::ios::ate | std::ios::binary);
-	if (!file.is_open())
+	if (!file.is_open()) {
 		return {};
-	size_t size = static_cast<size_t>(file.tellg());
+	}
+	std::streamsize size = file.tellg();
 	std::vector<uint32_t> buffer(size / sizeof(uint32_t));
 	file.seekg(0);
 	file.read(reinterpret_cast<char*>(buffer.data()), size);
@@ -113,8 +115,9 @@ static std::vector<uint32_t> LoadSpirv(const std::filesystem::path& path) {
 
 [[nodiscard]] static bool FileExists(const std::string& path) {
 	bool exists = std::filesystem::exists(path);
-	if (!exists)
+	if (!exists) {
 		std::println(stderr, "ERROR: File not found: {}", std::filesystem::absolute(path).string());
+	}
 	return exists;
 }
 
@@ -178,11 +181,12 @@ static Scene BuildScene(cgltf_data* data) {
 		for (cgltf_size j = 0; j < data->meshes[i].primitives_count; ++j) {
 			cgltf_primitive* prim = &data->meshes[i].primitives[j];
 
-			uint32_t firstIndex = static_cast<uint32_t>(scene.indices.size());
-			uint32_t vertexOffset = static_cast<uint32_t>(scene.vertices.size());
+			auto firstIndex = static_cast<uint32_t>(scene.indices.size());
+			auto vertexOffset = static_cast<uint32_t>(scene.vertices.size());
 
-			for (cgltf_size k = 0; k < prim->indices->count; ++k)
+			for (cgltf_size k = 0; k < prim->indices->count; ++k) {
 				scene.indices.push_back(cgltf_accessor_read_index(prim->indices, k) + vertexOffset);
+			}
 
 			size_t vertexCount = prim->attributes[0].data->count;
 			size_t startVert = scene.vertices.size();
@@ -337,8 +341,8 @@ auto main() -> int {
 		.pNext = &feat13,
 		.descriptorIndexing = VK_TRUE,
 		.shaderSampledImageArrayNonUniformIndexing = VK_TRUE,
-		.descriptorBindingPartiallyBound = VK_TRUE,
 		.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE,
+		.descriptorBindingPartiallyBound = VK_TRUE,
 		.runtimeDescriptorArray = VK_TRUE,
 		.bufferDeviceAddress = VK_TRUE};
 
