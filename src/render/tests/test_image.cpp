@@ -73,8 +73,8 @@ void test_image() {
 
 	// 5. Use the Helper
 	ZHLN_BeginCommandBuffer(cmd);
-	ZHLN::Vk::TransitionLayout(cmd, image.Handle(), VK_IMAGE_LAYOUT_UNDEFINED,
-							   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED,
+							   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
 	ZHLN_EndCommandBuffer(cmd);
 
 	std::println("  Recorded transition for image handle: {}", (void*)image.Handle());
