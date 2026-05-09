@@ -7,7 +7,7 @@
 #include "RenderGraph.hpp"
 #include "RenderTarget.hpp"
 #include "SamplerBuilder.hpp"
-#include "StandardPasses.hpp"
+#include "SponzaSpecifics.hpp"
 #include "Texture.hpp"
 #include "Vertex.hpp"
 #include "demo_utils/DemoWindow.hpp"
