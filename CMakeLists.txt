@@ -23,7 +23,7 @@ set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # --- 2. GLOBAL SANITIZER CONFIG ---
-option(USE_SANITIZERS "Enable ASan and UBSan" ON)
+option(USE_SANITIZERS "Enable ASan and UBSan" OFF)
 if(USE_SANITIZERS AND WIN32)
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
     add_link_options(-fsanitize=address,undefined)
@@ -122,7 +122,7 @@ find_program(DXC_EXECUTABLE NAMES dxc
 if(DXC_EXECUTABLE)
     set(HLSL_SRC "${CMAKE_SOURCE_DIR}/resources/shaders/basic.hlsl")
     
-    # Change these to CURRENT_BINARY_DIR so they don't pollute your GIT repo
+    # 1. Output to the BUILD directory (CMAKE_CURRENT_BINARY_DIR)
     set(VS_SPV   "${CMAKE_CURRENT_BINARY_DIR}/basic.hlsl.VSMain.spv")
     set(PS_SPV   "${CMAKE_CURRENT_BINARY_DIR}/basic.hlsl.PSMain.spv")
 
@@ -143,8 +143,8 @@ if(DXC_EXECUTABLE)
     add_custom_target(compile_shaders DEPENDS ${VS_SPV} ${PS_SPV})
     add_dependencies(zahlen compile_shaders)
 
-    # Pass the shader directory to the engine as a macro so it knows where to look
-    target_compile_definitions(zahlen PRIVATE SHADER_DIR="${CMAKE_CURRENT_BINARY_DIR}/")
+    # 2. Tell the compiler to search the build directory for #embed files
+    target_include_directories(zahlen PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 endif()
 
 

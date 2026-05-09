@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdio>
+#include <cstdarg>
 #include <format>
 #include <print>
 #include <source_location>
