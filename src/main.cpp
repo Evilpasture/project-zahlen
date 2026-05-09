@@ -1,109 +1,141 @@
 #include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Camera.hpp>
-#include <Zahlen/Clock.hpp> // Added for timing
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/PhysicsWorld.hpp>
 #include <Zahlen/Platform.hpp>
+#include <algorithm>
 
 using namespace ZHLN;
 
-auto main() -> int {
+static void UpdatePlayerController(const InputContext& input, const Camera& cam,
+								   PhysicsContext& ctx, EntityHandle player) {
+	float yawRad = JPH::DegreesToRadians(cam.yaw);
+	JPH::Vec3 forward = {std::cos(yawRad), 0.0f, std::sin(yawRad)};
+	JPH::Vec3 right = {-std::sin(yawRad), 0.0f, std::cos(yawRad)};
+
+	JPH::Vec3 move = JPH::Vec3::sZero();
+	if (input.IsKeyDown(KeyCode::W))
+		move += forward;
+	if (input.IsKeyDown(KeyCode::S))
+		move -= forward;
+	if (input.IsKeyDown(KeyCode::A))
+		move -= right;
+	if (input.IsKeyDown(KeyCode::D))
+		move += right;
+
+	float speed = input.IsKeyDown(KeyCode::LShift) ? 12.0f : 5.0f;
+	Physics::SetCharacterVelocity(
+		ctx, player, (move.LengthSq() > 0.01f) ? move.Normalized() * speed : JPH::Vec3::sZero());
+}
+
+struct Scene {
+	Mesh floor, box, player;
+	Material material;
+	EntityHandle playerHandle;
+
+	void Setup(RenderContext& rc, PhysicsContext& pc) {
+		floor = AssetFactory::CreatePlane(rc, 100.0f, {0.1f, 0.1f, 0.12f, 1.0f});
+		box = AssetFactory::CreateBox(rc, {0.5f, 0.5f, 0.5f}, {0.8f, 0.3f, 0.2f, 1.0f});
+		player = AssetFactory::CreateBox(rc, {0.5f, 0.9f, 0.5f}, {0.2f, 0.6f, 0.9f, 1.0f});
+		material = AssetFactory::CreateBasicMaterial(rc);
+
+		Physics::CreateStaticFloor(pc, 100.0f);
+		for (int i = 0; i < 25; ++i) {
+			Physics::CreateDynamicBox(
+				pc, {(float)(i % 5) * 4.0f - 10.0f, 5.0f, (float)(i / 5.0f) * 4.0f - 10.0f},
+				{0.5f, 0.5f, 0.5f});
+		}
+		playerHandle = {.index = 500, .generation = 1};
+		Physics::CreateCharacter(pc, {0, 2, 0}, playerHandle);
+	}
+};
+
+auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	Platform::Init();
 	Engine engine;
-    ZHLN::Math::TestMathStack();
 	engine.GetWindow().Focus();
 
 	auto& rc = engine.GetRenderContext();
 	auto& pc = engine.GetPhysicsContext();
 	auto& input = engine.GetInput();
 	auto& cam = engine.GetCamera();
-	Clock clock; // Engine clock to measure real time
 
-	// --- Asset & Physics Initialization ---
-	Mesh floorMesh = AssetFactory::CreatePlane(rc, 100.0f, {1, 1, 1, 1});
-	Mesh boxMesh = AssetFactory::CreateBox(rc, {0.5f, 0.5f, 0.5f}, {1, 1, 1, 1});
-	Material material = AssetFactory::CreateBasicMaterial(rc);
+	Scene scene;
+	scene.Setup(rc, pc);
 
-	Physics::CreateStaticFloor(pc, 100.0f, {.index = 0, .generation = 1});
-	for (uint32_t i = 0; i < 25; ++i) {
-		JPH::RVec3 pos((float)(i % 5) * 4.0f - 10.0f, 5.0f, (float)(i / 5.0f) * 4.0f - 10.0f);
-		Physics::CreateDynamicBox(pc, pos, {0.5f, 0.5f, 0.5f}, {.index = i + 1, .generation = 1});
-	}
-	EntityHandle player = Physics::CreateCharacter(pc, {0, 2, 0}, {.index = 500, .generation = 1});
-
-	// --- Timing Configuration ---
-	const float physicsRate = 1.0f / 60.0f; // Fixed 60Hz update
-	float accumulator = 0.0f;
+	const float dt = 1.0f / 60.0f;
 
 	while (engine.IsRunning()) {
 		engine.ProcessEvents();
-		if (!engine.IsRunning()) break;
-		if (engine.GetWindow().GetSize().width == 0) { Platform::Sleep(16); continue; }
+		if (!engine.IsRunning())
+			break;
 
-		// --- 1. Timing & Physics (The Accumulator Fix) ---
-		float frameTime = clock.GetDeltaTime();
-		if (frameTime > 0.25f) frameTime = 0.25f; // "Spiral of death" protection
-		accumulator += frameTime;
-
-		// --- 2. Input & Character Logic ---
-		const auto& mouse = input.GetMouse();
-		
-		// Fix Inversion:
-		// Right is usually +, Up is usually - in screen space. 
-		// We add to Yaw and subtract from Pitch to match the Camera.hpp math.
-		cam.yaw   += mouse.deltaX * 0.15f;
-		cam.pitch -= mouse.deltaY * 0.15f; 
-		cam.pitch = JPH::Clamp(cam.pitch, -89.0f, 89.0f);
-
-		// Calculate movement vectors matching the Camera's View Matrix
-		float radYaw = JPH::DegreesToRadians(cam.yaw);
-		JPH::Vec3 forward(JPH::Cos(radYaw), 0, JPH::Sin(radYaw));
-		JPH::Vec3 right(JPH::Sin(radYaw), 0, -JPH::Cos(radYaw));
-
-		JPH::Vec3 moveDir = JPH::Vec3::sZero();
-		if (input.IsKeyDown(KeyCode::W)) moveDir += forward;
-		if (input.IsKeyDown(KeyCode::S)) moveDir -= forward;
-		if (input.IsKeyDown(KeyCode::A)) moveDir -= right;
-		if (input.IsKeyDown(KeyCode::D)) moveDir += right;
-
-		if (moveDir.LengthSq() > 0.001f) {
-			Physics::SetCharacterVelocity(pc, player, moveDir.Normalized() * 8.0f);
-		} else {
-			Physics::SetCharacterVelocity(pc, player, JPH::Vec3::sZero());
+		auto res = engine.GetWindow().GetSize();
+		if (res.width == 0 || res.height == 0) {
+			Platform::Sleep(16);
+			continue;
 		}
 
-		// Step physics at a fixed rate, regardless of framerate
-		while (accumulator >= physicsRate) {
-			pc.Step(physicsRate);
-			accumulator -= physicsRate;
+		if (input.NeedsResize()) {
+			rc.SetResolution(input.GetNewSize());
+			input.ClearResizeFlag();
+			continue;
 		}
 
-		// --- 3. Data-Oriented Extraction & Render ---
+		UpdatePlayerController(input, cam, pc, scene.playerHandle);
+
+		// Handle Camera Orbit (Right Click Drag)
+		if (input.IsMouseButtonDown(KeyCode::RButton)) {
+			cam.yaw += input.GetMouse().deltaX * 0.2f;
+			cam.pitch = std::clamp(cam.pitch - input.GetMouse().deltaY * 0.2f, -89.0f, 89.0f);
+		}
+
+		pc.Step(dt);
+
+		// 1. Sync Physics & Compute Camera Position
 		const auto& world = pc.GetWorld();
+		JPH::Vec3 pPos;
 		{
 			std::lock_guard lock(const_cast<Mutex&>(world.shadowLock));
+			uint32_t idx = world.slotToDense[scene.playerHandle.index];
+			JPH::Real* p = &world.positions[idx * 4];
+			pPos = {(float)p[0], (float)p[1], (float)p[2]};
+		}
 
-			// Extract Player position for Camera (with 1:1 sync)
-			uint32_t playerDense = world.slotToDense[player.index];
-			JPH::Real* pPos = &world.positions[playerDense * 4];
-			cam.position = { (float)pPos[0], (float)pPos[1] + 0.9f, (float)pPos[2] };
+		// Compute Orbit Position
+		float yR = JPH::DegreesToRadians(cam.yaw);
+		float pR = JPH::DegreesToRadians(cam.pitch);
+		JPH::Vec3 direction(JPH::Cos(yR) * JPH::Cos(pR), JPH::Sin(pR), JPH::Sin(yR) * JPH::Cos(pR));
+		JPH::Vec3 target = pPos + JPH::Vec3(0.0f, 1.0f, 0.0f);
 
-			auto res = engine.GetWindow().GetSize();
-			JPH::Mat44 vp = cam.GetProjectionMatrix((float)res.width / res.height) * cam.GetViewMatrix();
-			rc.SetCamera(vp, cam.position);
-			rc.SetSunlight({-0.5f, -1.0f, 0.5f}, {1.0f, 0.95f, 0.8f}, 4.0f);
+		// Camera pushes backward out from the target along the direction
+		cam.position = target - (direction.Normalized() * 10.0f);
 
-			engine.BeginFrame();
-			for (size_t i = 0; i < world.count.load(); ++i) {
+		// 2. Prepare Frame (Upload correct View-Projection)
+		JPH::Mat44 vp =
+			cam.GetProjectionMatrix((float)res.width / res.height) * cam.GetViewMatrix();
+		Renderer::UpdateBuffer(rc, scene.material.constantBuffer, vp);
+
+		// 3. Render
+		engine.BeginFrame();
+		Renderer::Clear(rc, {0.08f, 0.09f, 0.12f, 1.0f});
+		Renderer::Draw(rc, scene.material, scene.floor, JPH::Mat44::sIdentity());
+
+		{
+			std::lock_guard lock(const_cast<Mutex&>(world.shadowLock));
+			for (size_t i = 1; i < world.count.load(std::memory_order_acquire); ++i) {
 				JPH::Real* p = &world.positions[i * 4];
 				float* r = &world.rotations[i * 4];
-				JPH::Mat44 transform = Math::CreateTransform({(float)p[0], (float)p[1], (float)p[2]}, {r[0], r[1], r[2], r[3]});
-
-				if (i == 0) Renderer::Draw(rc, material, floorMesh, transform);
-				else        Renderer::Draw(rc, material, boxMesh, transform);
+				JPH::Mat44 model = Math::CreateTransform({(float)p[0], (float)p[1], (float)p[2]},
+														 {r[0], r[1], r[2], r[3]});
+				Renderer::Draw(
+					rc, scene.material,
+					(world.denseToSlot[i] == scene.playerHandle.index ? scene.player : scene.box),
+					model);
 			}
-			engine.EndFrame(); 
 		}
+		engine.EndFrame();
 	}
 	return 0;
 }

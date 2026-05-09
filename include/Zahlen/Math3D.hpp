@@ -94,6 +94,4 @@ inline JPH::Vec3 QuatToEulerDegrees(JPH::QuatArg quat) {
 	return quat.GetEulerAngles() * (180.0f / JPH::JPH_PI);
 }
 
-void TestMathStack();
-
 } // namespace ZHLN::Math
