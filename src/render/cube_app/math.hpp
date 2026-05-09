@@ -1,5 +1,6 @@
 #include <array>
 #include <cmath>
+#include <limits>
 
 // ----------------------------------------------------------------------------
 // Column-Major, Column-Vector Math Library (P * V * M)
@@ -66,6 +67,7 @@ static Mat4 RotateY(float radians) noexcept {
 
 // Simple Newton-Raphson for constexpr sqrt
 static constexpr float ConstSqrt(float x) {
+	if (x == 0.0f) return 0.0f;
 	if (x >= 0 && x < std::numeric_limits<float>::infinity()) {
 		float curr = x, prev = 0;
 		while (curr != prev) {
@@ -86,7 +88,6 @@ static constexpr float BetterSqrt(float x) {
 		return std::sqrt(x);
 	}
 }
-
 static constexpr Mat4 LookAt(const std::array<float, 3>& eye, const std::array<float, 3>& center,
 							 const std::array<float, 3>& up) noexcept {
 	const std::array<float, 3> f = {center[0] - eye[0], center[1] - eye[1], center[2] - eye[2]};
