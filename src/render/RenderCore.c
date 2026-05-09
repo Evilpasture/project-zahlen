@@ -13,12 +13,13 @@ static VkBool32 VKAPI_CALL ZHLN_Internal_DebugCallback(
 
 	// Check if it's an Error or Warning
 	const char* prefix = "VULKAN";
-	if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
+	if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
 		prefix = "VULKAN ERROR";
-	else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+	} else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
 		prefix = "VULKAN WARNING";
-	else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)
+	} else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) {
 		prefix = "VULKAN INFO";
+	}
 
 	fprintf(stderr, "[%s] %s\n", prefix, data->pMessage);
 
@@ -35,12 +36,12 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
 
 	// --- Query available instance extensions to filter out unsupported ones ---
 	uint32_t available_count = 0;
-	vkEnumerateInstanceExtensionProperties(NULL, &available_count, NULL);
+	vkEnumerateInstanceExtensionProperties(nullptr, &available_count, nullptr);
 	if (available_count > 128) {
 		available_count = 128; // safe clamp for stack-only allocation
 	}
 	VkExtensionProperties available_exts[128];
-	vkEnumerateInstanceExtensionProperties(NULL, &available_count, available_exts);
+	vkEnumerateInstanceExtensionProperties(nullptr, &available_count, available_exts);
 
 	const char* final_extensions[32];
 	uint32_t final_count = 0;
@@ -90,7 +91,7 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
 		.enabledExtensionCount = final_count,
 		.ppEnabledExtensionNames = final_extensions,
 		.enabledLayerCount = desc->enable_validation ? 1U : 0U,
-		.ppEnabledLayerNames = desc->enable_validation ? validation_layers : NULL,
+		.ppEnabledLayerNames = desc->enable_validation ? validation_layers : nullptr,
 		.flags = 0,
 	};
 
@@ -941,7 +942,7 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device,
 	const VkPipelineRenderingCreateInfo rendering = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
 		.colorAttachmentCount = color_count, // Use the dynamic count
-		.pColorAttachmentFormats = color_count > 0 ? &desc->color_format : NULL,
+		.pColorAttachmentFormats = color_count > 0 ? &desc->color_format : nullptr,
 		.depthAttachmentFormat = desc->depth_format,
 	};
 
@@ -1034,25 +1035,25 @@ void ZHLN_EndRendering(const VkCommandBuffer cmd) {
 [[nodiscard]]
 ZHLN_FrameResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* const restrict desc) {
 	// Accessing via -> (Pointer access)
-	const VkCommandBufferSubmitInfo cmdInfo = {
+	const VkCommandBufferSubmitInfo cmd_info = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = desc->cmd};
 
-	const VkSemaphoreSubmitInfo waitInfo = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-											.semaphore = desc->imageAvailable,
-											.stageMask =
-												VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT};
+	const VkSemaphoreSubmitInfo wait_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+											 .semaphore = desc->imageAvailable,
+											 .stageMask =
+												 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT};
 
-	const VkSemaphoreSubmitInfo signalInfo = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-											  .semaphore = desc->renderFinished,
-											  .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT};
+	const VkSemaphoreSubmitInfo signal_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+											   .semaphore = desc->renderFinished,
+											   .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT};
 
 	const VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
 								  .waitSemaphoreInfoCount = 1,
-								  .pWaitSemaphoreInfos = &waitInfo,
+								  .pWaitSemaphoreInfos = &wait_info,
 								  .commandBufferInfoCount = 1,
-								  .pCommandBufferInfos = &cmdInfo,
+								  .pCommandBufferInfos = &cmd_info,
 								  .signalSemaphoreInfoCount = 1,
-								  .pSignalSemaphoreInfos = &signalInfo};
+								  .pSignalSemaphoreInfos = &signal_info};
 
 	vkQueueSubmit2(desc->graphicsQueue, 1, &submit, desc->inFlight);
 
@@ -1279,8 +1280,9 @@ VkImageView ZHLN_CreateImageView(const VkDevice device,
 }
 
 void ZHLN_DestroyImageView(const VkDevice device, const VkImageView view) {
-	if (view == VK_NULL_HANDLE)
+	if (view == VK_NULL_HANDLE) {
 		return;
+	}
 	vkDestroyImageView(device, view, nullptr);
 }
 
@@ -1335,9 +1337,9 @@ VkPipeline ZHLN_CreateComputePipeline(const VkDevice device,
 	return pipeline;
 }
 
-void ZHLN_CmdDispatch(const VkCommandBuffer cmd, const uint32_t groupCountX,
-					  const uint32_t groupCountY, const uint32_t groupCountZ) {
-	vkCmdDispatch(cmd, groupCountX, groupCountY, groupCountZ);
+void ZHLN_CmdDispatch(const VkCommandBuffer cmd, const uint32_t group_count_x,
+					  const uint32_t group_count_y, const uint32_t group_count_z) {
+	vkCmdDispatch(cmd, group_count_x, group_count_y, group_count_z);
 }
 
 void ZHLN_GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const int32_t width,
@@ -1388,10 +1390,12 @@ void ZHLN_GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const 
 			.mip_count = 1};
 		ZHLN_CmdImageBarrier(cmd, &barrier_read);
 
-		if (mip_w > 1)
+		if (mip_w > 1) {
 			mip_w /= 2;
-		if (mip_h > 1)
+		}
+		if (mip_h > 1) {
 			mip_h /= 2;
+		}
 	}
 
 	// 4. Transition the very last mip level to SHADER_READ_ONLY
