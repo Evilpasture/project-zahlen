@@ -80,9 +80,9 @@ ScriptRunner::ScriptRunner() {
 	L = luaL_newstate();
 	luaL_openlibs(L);
 	lua_getglobal(L, "require");
-	lua_pushstring(L, "scripts.core.memory");
+	lua_pushstring(L, "scripts.core.memoryview");
 	if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
-		Panic("Failed to load core script: scripts/core/memory.lua. Error: {}",
+		Panic("Failed to load core script: scripts/core/memoryview.lua. Error: {}",
 			  lua_tostring(L, -1));
 	}
 	lua_pop(L, 1);

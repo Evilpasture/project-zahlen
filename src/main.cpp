@@ -1,3 +1,5 @@
+#include "imgui.h"
+
 #include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Engine.hpp>
@@ -125,6 +127,13 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 		JPH::Mat44 vp =
 			cam.GetProjectionMatrix((float)res.width / res.height) * cam.GetViewMatrix();
 		Renderer::UpdateBuffer(rc, scene.material.constantBuffer, vp);
+
+		ImGui::Begin("Zahlen Debug");
+		ImGui::Text("Physics Objects: %zu", pc.GetWorld().count.load());
+		if (ImGui::Button("Reset Camera")) {
+			cam.position = {0, 2, 10};
+		}
+		ImGui::End();
 
 		// 3. Render
 		engine.BeginFrame();

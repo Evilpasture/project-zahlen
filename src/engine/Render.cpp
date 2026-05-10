@@ -5,10 +5,14 @@
 #include "RenderGraph.hpp"
 #include "RenderTarget.hpp"
 #include "Vertex.hpp"
+#include "imgui_impl_glfw.h"
 
 #include <GLFW/glfw3.h>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <imgui_impl_vulkan.h>
 #include <vector>
 
 namespace ZHLN::Vk {
@@ -67,6 +71,70 @@ struct RenderContext::Impl {
 
 	Impl(Window& win) : window(win) {}
 	bool depth_ready = false;
+	VkDescriptorPool uiPool = VK_NULL_HANDLE;
+
+	void SetupUI(GLFWwindow* window) {
+		// 1. Create a robust pool for ImGui.
+		// We use the "Kitchen Sink" approach because different versions of ImGui
+		// and different platforms may request different descriptor types.
+		const VkDescriptorPoolSize pool_sizes[] = {
+			{VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
+			{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
+			{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000},
+			{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000},
+			{VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000},
+			{VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000},
+			{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000},
+			{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000},
+			{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000},
+			{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000},
+			{VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000}};
+
+		const VkDescriptorPoolCreateInfo pool_info = {
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+			.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+			.maxSets = 1000,
+			.poolSizeCount = (uint32_t)std::size(pool_sizes),
+			.pPoolSizes = pool_sizes,
+		};
+
+		if (vkCreateDescriptorPool(ctx.Device(), &pool_info, nullptr, &uiPool) != VK_SUCCESS) {
+			ZHLN::Panic("FATAL: Failed to create ImGui Descriptor Pool");
+		}
+
+		// 2. Standard ImGui Init
+		IMGUI_CHECKVERSION();
+		ImGui::CreateContext();
+		ImGui_ImplGlfw_InitForVulkan(window, true);
+
+		// 3. Init Vulkan for Dynamic Rendering (Vulkan 1.3)
+		VkFormat swapchainFormat = presentation.swapchain.Get().format;
+
+		ImGui_ImplVulkan_InitInfo init_info = {
+			.ApiVersion = VK_API_VERSION_1_3,
+			.Instance = ctx.Instance(),
+			.PhysicalDevice = ctx.Physical(),
+			.Device = ctx.Device(),
+			.QueueFamily = ctx.PhysicalInfo().graphics_family,
+			.Queue = ctx.GraphicsQueue(),
+			.DescriptorPool = uiPool,
+			.MinImageCount = 2,
+			.ImageCount = 2,
+			.PipelineInfoMain =
+				{
+					.MSAASamples = VK_SAMPLE_COUNT_1_BIT,
+					.PipelineRenderingCreateInfo =
+						{
+							.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+							.colorAttachmentCount = 1,
+							.pColorAttachmentFormats = &swapchainFormat,
+							.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT,
+						},
+				},
+			.UseDynamicRendering = true,
+		};
+		ImGui_ImplVulkan_Init(&init_info);
+	}
 };
 
 RenderContext::RenderContext(Window& window) : _impl(std::make_unique<Impl>(window)) {
@@ -153,6 +221,7 @@ RenderContext::RenderContext(Window& window) : _impl(std::make_unique<Impl>(wind
 	_impl->sync = Vk::FrameSync<2>::Create(_impl->ctx.Device());
 	_impl->pools =
 		Vk::CommandPools<2>::Create(_impl->ctx.Device(), _impl->ctx.PhysicalInfo().graphics_family);
+	_impl->SetupUI(static_cast<GLFWwindow*>(window.GetNativeHandle()));
 }
 
 RenderContext::~RenderContext() {
@@ -257,19 +326,35 @@ void RenderContext::EndFrame() {
 	if (_impl->current_cmd == VK_NULL_HANDLE)
 		return;
 
+	// 1. Finalize engine rendering
 	ZHLN_EndRendering(_impl->current_cmd);
 
-	// Use a transient graph image for the swapchain so RenderGraph can handle the presentation
-	// transition
-	Vk::GraphImage swapchainRes = Vk::GraphImage::Create(
-		_impl->presentation.swapchain.Get().images[_impl->current_image_index],
-		_impl->presentation.swapchain.Get().views[_impl->current_image_index],
-		_impl->presentation.swapchain.Get().extent, VK_IMAGE_ASPECT_COLOR_BIT);
+	// 2. Render ImGui with LOAD_OP_LOAD
+	ImGui::Render();
 
-	// We manually transition to PRESENT because this is a simplified engine bridge,
-	// but RenderGraph logic ensures it's safe.
+	const VkRenderingAttachmentInfo colorAttachment = {
+		.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+		.imageView = _impl->presentation.swapchain.Get().views[_impl->current_image_index],
+		.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+		.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD, // <--- IMPORTANT: KEEP THE SCENE!
+		.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+	};
+
+	const VkRenderingInfo renderingInfo = {
+		.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+		.renderArea = {{0, 0}, _impl->presentation.swapchain.Get().extent},
+		.layerCount = 1,
+		.colorAttachmentCount = 1,
+		.pColorAttachments = &colorAttachment,
+	};
+
+	vkCmdBeginRendering(_impl->current_cmd, &renderingInfo);
+	ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), _impl->current_cmd);
+	vkCmdEndRendering(_impl->current_cmd);
+
+	// 3. Normal transition to PRESENT
 	Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(
-		_impl->current_cmd, swapchainRes.handle);
+		_impl->current_cmd, _impl->presentation.swapchain.Get().images[_impl->current_image_index]);
 
 	ZHLN_EndCommandBuffer(_impl->current_cmd);
 

@@ -50,6 +50,8 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/extern/VulkanMemoryAllocator SYSTEM)
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/SPIRV-Reflect)
 
+add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/imgui)
+
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/render)
 
 option(BUILD_TESTING "Build the render module test suite" OFF)
@@ -104,6 +106,7 @@ target_link_libraries(zahlen PRIVATE
     Jolt 
     LuaJIT
     spirv_reflect
+    imgui
 )
 
 target_include_directories(zahlen SYSTEM PRIVATE

@@ -4,6 +4,10 @@
 #include <Jolt/Core/Factory.h>
 #include <Jolt/RegisterTypes.h>
 // clang-format on
+#include "backends/imgui_impl_glfw.h"
+#include "backends/imgui_impl_vulkan.h"
+#include "imgui.h"
+
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Thread.hpp>
@@ -59,11 +63,16 @@ bool Engine::IsRunning() const {
 
 void Engine::ProcessEvents() {
 	_input->ResetDeltas();
-	// 3. Pump GLFW events
 	glfwPollEvents();
+
+	// Start the ImGui Frame immediately after polling events
+	ImGui_ImplVulkan_NewFrame();
+	ImGui_ImplGlfw_NewFrame();
+	ImGui::NewFrame();
 }
 
 void Engine::BeginFrame() {
+	// This now only handles the GPU side
 	_renderContext->BeginFrame();
 }
 
