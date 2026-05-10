@@ -1,5 +1,5 @@
 -- scripts/gameplay.lua
-local mem = require("scripts.core.memory")
+local mem = require("scripts.core.memoryview")
 local ffi = require("ffi")
 
 print("-----------------------------------------")
