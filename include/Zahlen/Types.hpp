@@ -40,6 +40,7 @@ static_assert(sizeof(Vertex) == 32, "Vertex must be exactly 32 bytes!");
 
 struct FrameConstants {
 	JPH::Mat44 transform;
+	uint32_t textureIndex;
 };
 
 // --- Opaque Resource Handles ---
@@ -58,6 +59,7 @@ struct Material {
 	PipelineHandle pipeline = PipelineHandle::Invalid;
 	ResourceGroupHandle resourceGroup = ResourceGroupHandle::Invalid;
 	BufferHandle constantBuffer = BufferHandle::Invalid;
+	uint32_t textureIndex = 0;
 };
 
 } // namespace ZHLN

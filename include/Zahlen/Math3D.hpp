@@ -27,7 +27,7 @@ inline JPH::Mat44 CreateLookAt(JPH::Vec3Arg eye, JPH::Vec3Arg target, JPH::Vec3A
 inline JPH::Mat44 CreatePerspective(float fovRadians, float aspect, float nearZ, float farZ) {
 	float f = 1.0f / JPH::Tan(fovRadians * 0.5f);
 	return JPH::Mat44(JPH::Vec4(f / aspect, 0.0f, 0.0f, 0.0f),
-					  JPH::Vec4(0.0f, -f, 0.0f, 0.0f), // FLIP Y FOR VULKAN
+					  JPH::Vec4(0.0f, f, 0.0f, 0.0f), // POSITIVE F: No winding flip!
 					  JPH::Vec4(0.0f, 0.0f, farZ / (nearZ - farZ), -1.0f),
 					  JPH::Vec4(0.0f, 0.0f, (nearZ * farZ) / (nearZ - farZ), 0.0f));
 }
@@ -45,7 +45,7 @@ inline JPH::Mat44 CreateOrtho(float left, float right, float bottom, float top, 
 	float f_n = farZ - nearZ;
 
 	return JPH::Mat44(JPH::Vec4(2.0f / r_l, 0.0f, 0.0f, 0.0f),
-					  JPH::Vec4(0.0f, -2.0f / t_b, 0.0f, 0.0f), // FLIP Y FOR VULKAN
+					  JPH::Vec4(0.0f, 2.0f / t_b, 0.0f, 0.0f), // POSITIVE: Keep RH-CCW
 					  JPH::Vec4(0.0f, 0.0f, -1.0f / f_n, 0.0f),
 					  JPH::Vec4(-(right + left) / r_l, -(top + bottom) / t_b, -nearZ / f_n, 1.0f));
 }

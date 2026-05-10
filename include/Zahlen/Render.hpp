@@ -31,6 +31,8 @@ class RenderContext {
 	BufferHandle CreateConstantBuffer(size_t size);
 	Material CreateMaterial(const PipelineDesc& desc);
 
+	uint32_t CreateTexture(const void* data, uint32_t width, uint32_t height);
+
 	struct Impl;
 	Impl* GetImpl() const { return _impl.get(); }
 
@@ -49,6 +51,7 @@ inline void UpdateBuffer(RenderContext& ctx, BufferHandle buffer, const T& data)
 
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 		  const JPH::Mat44& transform);
+
 } // namespace Renderer
 
 } // namespace ZHLN

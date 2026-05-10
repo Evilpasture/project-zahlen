@@ -1015,12 +1015,12 @@ void ZHLN_BeginRendering(const VkCommandBuffer cmd,
 	vkCmdBeginRendering(cmd, &rendering_info);
 
 	const VkViewport viewport = {
-		.x = 0.0F,
-		.y = 0.0F,
+		.x = 0.0f,
+		.y = (float)desc->extent.height, // Start at the bottom
 		.width = (float)desc->extent.width,
-		.height = (float)desc->extent.height,
-		.minDepth = 0.0F,
-		.maxDepth = 1.0F,
+		.height = -(float)desc->extent.height, // Grow "upwards"
+		.minDepth = 0.0f,
+		.maxDepth = 1.0f,
 	};
 	const VkRect2D scissor = {{0, 0}, desc->extent};
 
@@ -1199,7 +1199,7 @@ void ZHLN_CmdImageBarrier(const VkCommandBuffer cmd,
 			{
 				.aspectMask = desc->aspect,
 				.baseMipLevel = desc->base_mip,
-				.levelCount = desc->mip_count ? desc->mip_count : VK_REMAINING_MIP_LEVELS, 
+				.levelCount = desc->mip_count ? desc->mip_count : VK_REMAINING_MIP_LEVELS,
 				.baseArrayLayer = 0,
 				.layerCount = VK_REMAINING_ARRAY_LAYERS,
 			},

@@ -85,14 +85,33 @@ Mesh CreateBox(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& co
 	return Mesh{.vertexBuffer = vbo, .vertexCount = static_cast<uint32_t>(data.size())};
 }
 
+auto CreateProceduralCheckerboard(RenderContext& ctx) {
+	const uint32_t size = 256;
+	std::vector<uint32_t> pixels(size * size);
+	for (uint32_t y = 0; y < size; y++) {
+		for (uint32_t x = 0; x < size; x++) {
+			// XOR logic creates a perfect grid
+			bool isWhite = ((x / 32) + (y / 32)) % 2 == 0;
+			pixels[y * size + x] = isWhite ? 0xFFFFFFFF : 0xFF333333;
+		}
+	}
+	// Upload this to your Bindless Registry
+	return ctx.CreateTexture(pixels.data(), size, size);
+}
+
 Material CreateBasicMaterial(RenderContext& ctx) {
-	// Unchanged from before
 	PipelineDesc desc;
 	desc.vertexShaderData = ZHLN_Resource_BasicVertSpv;
 	desc.vertexShaderSize = ZHLN_Resource_BasicVertSpv_Len;
 	desc.fragShaderData = ZHLN_Resource_BasicFragSpv;
 	desc.fragShaderSize = ZHLN_Resource_BasicFragSpv_Len;
-	return ctx.CreateMaterial(desc);
+
+	Material mat = ctx.CreateMaterial(desc);
+
+	// Generate the procedural texture and save its index!
+	mat.textureIndex = CreateProceduralCheckerboard(ctx);
+
+	return mat;
 }
 
 } // namespace ZHLN::AssetFactory

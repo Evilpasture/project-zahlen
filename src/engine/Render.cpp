@@ -1,4 +1,5 @@
 #include "Allocator.hpp"
+#include "DescriptorLayout.hpp"
 #include "PipelineBuilder.hpp"
 #include "PresentationContext.hpp"
 #include "RenderCore.hpp"
@@ -36,6 +37,12 @@ namespace ZHLN {
 // Reflect the engine's Vertex type for the PipelineBuilder (Skip _padding)
 ZHLN_REFLECT_VERTEX(::ZHLN::Vertex, position, normal, tangent, uv, color);
 
+// Define the layout of your global bindless set
+// Binding 0: Array of 4096 textures
+using GlobalBindlessLayout = Vk::DescriptorLayout<Vk::BindlessSampledImageSlot<0, 4096>,
+												  Vk::SamplerSlot<1> // Global sampler at binding 1
+												  >;
+
 struct NativeMesh {
 	Vk::Buffer buffer;
 	uint32_t vertexCount;
@@ -72,6 +79,45 @@ struct RenderContext::Impl {
 	Impl(Window& win) : window(win) {}
 	bool depth_ready = false;
 	VkDescriptorPool uiPool = VK_NULL_HANDLE;
+
+	// --- Bindless Resources ---
+	Vk::DescriptorSetLayout bindlessLayout;
+	Vk::DescriptorPool bindlessPool;
+	VkDescriptorSet bindlessSet = VK_NULL_HANDLE;
+	Vk::Sampler globalSampler;
+
+	uint32_t nextTextureIndex = 0;
+
+	// Resource tracking (RAII keeps them alive)
+	std::vector<Vk::Image> textureImages;
+	std::vector<Vk::ImageView> textureViews;
+
+	void InitBindless() {
+		bindlessLayout = GlobalBindlessLayout::CreateLayout(ctx.Device());
+		bindlessPool = GlobalBindlessLayout::CreatePool(ctx.Device(), 1);
+		bindlessSet =
+			GlobalBindlessLayout::Allocate(ctx.Device(), bindlessPool.Get(), bindlessLayout.Get());
+
+		VkSamplerCreateInfo samplerInfo = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+		samplerInfo.magFilter = VK_FILTER_LINEAR;
+		samplerInfo.minFilter = VK_FILTER_LINEAR;
+		samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+		samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+		samplerInfo.anisotropyEnable = VK_TRUE;
+		samplerInfo.maxAnisotropy =
+			ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy;
+
+		// FIX: Create raw handle first
+		VkSampler rawSampler;
+		if (vkCreateSampler(ctx.Device(), &samplerInfo, nullptr, &rawSampler) != VK_SUCCESS) {
+			ZHLN::Panic("Failed to create Global Sampler");
+		}
+		// Wrap it in RAII
+		globalSampler = Vk::Sampler(ctx.Device(), rawSampler);
+
+		GlobalBindlessLayout::Write(ctx.Device(), bindlessSet, Vk::SkipWrite{},
+									Vk::SamplerWrite{globalSampler.Get()});
+	}
 
 	void SetupUI(GLFWwindow* window) {
 		// 1. Create a robust pool for ImGui.
@@ -163,6 +209,12 @@ RenderContext::RenderContext(Window& window) : _impl(std::make_unique<Impl>(wind
 	VkPhysicalDeviceVulkan12Features feat12 = {
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
 		.pNext = &feat13,
+		// ENABLE BINDLESS FEATURES
+		.descriptorIndexing = VK_TRUE,
+		.shaderSampledImageArrayNonUniformIndexing = VK_TRUE,
+		.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE,
+		.descriptorBindingPartiallyBound = VK_TRUE,
+		.runtimeDescriptorArray = VK_TRUE,
 		.bufferDeviceAddress = VK_TRUE};
 
 	VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swap_maint = {
@@ -172,7 +224,8 @@ RenderContext::RenderContext(Window& window) : _impl(std::make_unique<Impl>(wind
 	feat13.pNext = &swap_maint;
 
 	VkPhysicalDeviceFeatures2 feat2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-									   .pNext = &feat12};
+									   .pNext = &feat12,
+									   .features = {.samplerAnisotropy = VK_TRUE}};
 
 #ifdef __APPLE__
 	const char* dev_exts[] = {
@@ -200,6 +253,7 @@ RenderContext::RenderContext(Window& window) : _impl(std::make_unique<Impl>(wind
 	if (!_impl->ctx) {
 		ZHLN::Panic("FATAL: Vulkan Context Creation Failed");
 	}
+	_impl->InitBindless();
 
 	GLFWwindow* glfwWin = static_cast<GLFWwindow*>(window.GetNativeHandle());
 	VkSurfaceKHR raw_surface;
@@ -221,15 +275,31 @@ RenderContext::RenderContext(Window& window) : _impl(std::make_unique<Impl>(wind
 	_impl->sync = Vk::FrameSync<2>::Create(_impl->ctx.Device());
 	_impl->pools =
 		Vk::CommandPools<2>::Create(_impl->ctx.Device(), _impl->ctx.PhysicalInfo().graphics_family);
+
 	_impl->SetupUI(static_cast<GLFWwindow*>(window.GetNativeHandle()));
 }
 
 RenderContext::~RenderContext() {
-	if (_impl->ctx.Device()) {
+	if (_impl && _impl->ctx.Device()) {
 		vkDeviceWaitIdle(_impl->ctx.Device());
+
+		// 1. Shut down ImGui (Frees the leaking buffers/images/fonts)
+		ImGui_ImplVulkan_Shutdown();
+		ImGui_ImplGlfw_Shutdown();
+		ImGui::DestroyContext();
+
+		// 2. Destroy the raw Descriptor Pool we made for the UI
+		if (_impl->uiPool != VK_NULL_HANDLE) {
+			vkDestroyDescriptorPool(_impl->ctx.Device(), _impl->uiPool, nullptr);
+			_impl->uiPool = VK_NULL_HANDLE;
+		}
+
+		// 3. Clear engine resources
 		_impl->meshes.clear();
 		_impl->materials.clear();
-		// PresentationContext, Sync, Pools, Allocator, and Context all self-destruct via RAII
+
+		// C++ unique_ptr will now safely destroy the rest of the RAII members
+		// (allocator, bindless pool, presentation, device, instance) automatically.
 	}
 }
 
@@ -273,26 +343,43 @@ Material RenderContext::CreateMaterial(const PipelineDesc& desc) {
 							  nullptr};
 	ZHLN_ShaderDesc f_desc = {(const uint32_t*)desc.fragShaderData, desc.fragShaderSize, nullptr};
 	auto shaders = Vk::ShaderStages::Create(_impl->ctx.Device(), v_desc, f_desc);
+	auto* impl = _impl.get();
 
-	// 2. Setup Layout
+	// Ensure layout is valid
+	if (!impl->bindlessLayout.Valid()) {
+		ZHLN::Panic("Attempted to create material before Bindless was initialized!");
+	}
+
+	// 1. Define Push Constant Range using the Struct
 	VkPushConstantRange pc_range = {
-		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .offset = 0, .size = sizeof(JPH::Mat44)};
-	ZHLN_PipelineLayoutDesc layout_desc = {.push_constants = &pc_range, .push_constant_count = 1};
-	auto layout = Vk::PipelineLayout(_impl->ctx.Device(),
-									 ZHLN_CreatePipelineLayout(_impl->ctx.Device(), &layout_desc));
+		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+		.offset = 0,
+		.size = sizeof(ZHLN::FrameConstants) // No more manual math!
+	};
 
-	// 3. Use the new PipelineBuilder
+	// 2. Use the valid Bindless Layout
+	VkDescriptorSetLayout layouts[] = {impl->bindlessLayout.Get()};
+	ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = layouts,
+										   .set_layout_count = 1,
+										   .push_constants = &pc_range,
+										   .push_constant_count = 1};
+
+	auto layout = Vk::PipelineLayout(impl->ctx.Device(),
+									 ZHLN_CreatePipelineLayout(impl->ctx.Device(), &layout_desc));
+
+	// 3. Build Pipeline (existing code)
 	auto pipeline = Vk::PipelineBuilder{}
 						.Shaders(shaders)
 						.Layout(layout.Get())
-						.Vertex<Vertex>() // Uses the ZHLN_REFLECT_VERTEX we defined at the top
+						.Vertex<Vertex>()
 						.ColorFormat(VK_FORMAT_B8G8R8A8_SRGB)
 						.DepthFormat(VK_FORMAT_D32_SFLOAT)
-						.Build(_impl->ctx.Device());
+						.Build(impl->ctx.Device());
 
 	auto mat = std::make_unique<NativeMaterial>(std::move(pipeline), std::move(layout));
 	auto handle = static_cast<PipelineHandle>(reinterpret_cast<uintptr_t>(mat.get()));
-	_impl->materials.push_back(std::move(mat));
+	impl->materials.push_back(std::move(mat));
+
 	return Material{.pipeline = handle};
 }
 
@@ -378,6 +465,94 @@ void RenderContext::EndFrame() {
 	_impl->current_cmd = VK_NULL_HANDLE;
 }
 
+uint32_t RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t height) {
+	auto* impl = _impl.get();
+	const VkDevice device = impl->ctx.Device();
+	const size_t imageSize = static_cast<size_t>(width) * height * 4;
+
+	// 1. Create the GPU Image
+	VkImageCreateInfo imgInfo = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+								 .imageType = VK_IMAGE_TYPE_2D,
+								 .format = VK_FORMAT_R8G8B8A8_UNORM,
+								 .extent = {width, height, 1},
+								 .mipLevels = 1,
+								 .arrayLayers = 1,
+								 .samples = VK_SAMPLE_COUNT_1_BIT,
+								 .tiling = VK_IMAGE_TILING_OPTIMAL,
+								 .usage =
+									 VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+								 .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+
+	auto gpuImage = Vk::Image::Create(impl->allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+
+	// 2. Staging & Synchronous Upload
+	Vk::CommandPool tempPool(device, impl->ctx.PhysicalInfo().graphics_family);
+	if (!tempPool.Allocate(1)) {
+		ZHLN::Panic("Allocation failed for texture");
+	}
+	VkCommandBuffer cmd = tempPool[0];
+
+	ZHLN_BeginCommandBuffer(cmd);
+
+	// Create staging buffer and copy CPU data
+	auto staging = Vk::Buffer::Create(impl->allocator.Get(), imageSize,
+									  VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+	std::memcpy(staging.Map().data, data, imageSize);
+
+	// Transition: Undefined -> Transfer Dst
+	Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
+		cmd, gpuImage.Handle());
+
+	// Copy
+	ZHLN_BufferImageCopyDesc copyRegion = {.buffer = staging.Handle(),
+										   .image = gpuImage.Handle(),
+										   .layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+										   .width = width,
+										   .height = height};
+	ZHLN_CmdCopyBufferToImage(cmd, &copyRegion);
+
+	// Transition: Transfer Dst -> Shader Read
+	Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+						 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
+
+	ZHLN_EndCommandBuffer(cmd);
+
+	// Submit and block (Init-time upload)
+	VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+										 .commandBuffer = cmd};
+	VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+							.commandBufferInfoCount = 1,
+							.pCommandBufferInfos = &subInfo};
+	vkQueueSubmit2(impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
+	vkQueueWaitIdle(impl->ctx.GraphicsQueue());
+
+	// 3. Create View and Register in Bindless Set
+	auto gpuView = Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle());
+
+	uint32_t index = impl->nextTextureIndex++;
+
+	VkDescriptorImageInfo bindlessUpdate = {
+		.sampler = VK_NULL_HANDLE, // Not needed for SAMPLED_IMAGE
+		.imageView = gpuView.Get(),
+		.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+
+	VkWriteDescriptorSet write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+								  .dstSet = impl->bindlessSet,
+								  .dstBinding = 0,
+								  .dstArrayElement = index,
+								  .descriptorCount = 1,
+								  .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+								  .pImageInfo = &bindlessUpdate};
+
+	vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+
+	// 4. Track resources to prevent destruction
+	impl->textureImages.push_back(std::move(gpuImage));
+	impl->textureViews.push_back(std::move(gpuView));
+
+	return index;
+}
+
 namespace Renderer {
 void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
 	auto* impl = ctx.GetImpl();
@@ -429,19 +604,25 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 		return;
 
 	auto* mat = reinterpret_cast<NativeMaterial*>(material.pipeline);
-	auto* msh = reinterpret_cast<NativeMesh*>(mesh.vertexBuffer);
 
 	vkCmdBindPipeline(impl->current_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mat->pipeline.Get());
+	vkCmdBindDescriptorSets(impl->current_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mat->layout.Get(),
+							0, 1, &impl->bindlessSet, 0, nullptr);
+
+	// FIX: Multiply the Camera's View-Projection by the Object's Model Transform
+	JPH::Mat44 final_transform = impl->current_view_proj * transform;
+
+	FrameConstants constants = {.transform = final_transform,
+								.textureIndex = material.textureIndex};
+
+	vkCmdPushConstants(impl->current_cmd, mat->layout.Get(),
+					   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+					   sizeof(FrameConstants), &constants);
 
 	VkDeviceSize offset = 0;
-	VkBuffer buf = msh->buffer.Handle();
-	vkCmdBindVertexBuffers(impl->current_cmd, 0, 1, &buf, &offset);
-
-	JPH::Mat44 final_transform = impl->current_view_proj * transform;
-	vkCmdPushConstants(impl->current_cmd, mat->layout.Get(), VK_SHADER_STAGE_VERTEX_BIT, 0,
-					   sizeof(JPH::Mat44), &final_transform);
-
-	vkCmdDraw(impl->current_cmd, msh->vertexCount, 1, 0, 0);
+	VkBuffer vbo = reinterpret_cast<NativeMesh*>(mesh.vertexBuffer)->buffer.Handle();
+	vkCmdBindVertexBuffers(impl->current_cmd, 0, 1, &vbo, &offset);
+	vkCmdDraw(impl->current_cmd, mesh.vertexCount, 1, 0, 0);
 }
 } // namespace Renderer
 } // namespace ZHLN
