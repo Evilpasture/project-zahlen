@@ -1,9 +1,9 @@
 #pragma once
 #include <Utils.hpp>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <vector>
-
 
 namespace ZHLN::Texture {
 
@@ -219,27 +219,18 @@ template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> Generate
 template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> GenerateMarble() {
 	std::vector<uint32_t> pixels(Width * Height);
 
-	auto Pack = [](uint8_t r, uint8_t g, uint8_t b) -> uint32_t {
-		return 0xFF000000u | (uint32_t(b) << 16) | (uint32_t(g) << 8) | uint32_t(r);
-	};
-
-	auto noise = [](float x, float y) -> float {
-		return std::sin(x * 1.7f + std::sin(y * 2.3f + std::sin(x * 0.9f))) +
-			   std::sin(y * 2.1f + std::sin(x * 3.1f)) * 0.5f;
-	};
-
 	for (uint32_t y = 0; y < Height; ++y) {
 		for (uint32_t x = 0; x < Width; ++x) {
 			float u = float(x) / float(Width);
 			float v = float(y) / float(Height);
 
-			float n = noise(u * 6.0f, v * 6.0f);
+			float n = Noise(u * 6.0f, v * 6.0f);
 			float vein = std::abs(std::sin(u * 3.14159f * 3.0f + n * 2.5f));
 
 			uint8_t base = uint8_t(180.0f + vein * 75.0f);
 			uint8_t grey = uint8_t(160.0f + vein * 90.0f);
 
-			pixels[y * Width + x] = Pack(base, grey, base);
+			pixels[y * Width + x] = PackColor(base, grey, base);
 		}
 	}
 	return pixels;
@@ -247,41 +238,6 @@ template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> Generate
 
 template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> GenerateMarbleCrisp() {
 	std::vector<uint32_t> pixels(Width * Height);
-
-	auto Pack = [](uint8_t r, uint8_t g, uint8_t b) -> uint32_t {
-		return 0xFF000000u | (uint32_t(b) << 16) | (uint32_t(g) << 8) | uint32_t(r);
-	};
-
-	// --- Math Core ---
-	auto Hash = [](float x, float y) {
-		float d = x * 12.9898f + y * 78.233f;
-		return ZHLN::Fract(std::sin(d) * 43758.5453123f);
-	};
-
-	auto Noise = [&](float x, float y) {
-		float ix = std::floor(x);
-		float iy = std::floor(y);
-		float fx = ZHLN::Fract(x);
-		float fy = ZHLN::Fract(y);
-
-		float ux = fx * fx * fx * (fx * (fx * 6.0f - 15.0f) + 10.0f);
-		float uy = fy * fy * fy * (fy * (fy * 6.0f - 15.0f) + 10.0f);
-
-		return ZHLN::Mix(ZHLN::Mix(Hash(ix, iy), Hash(ix + 1.0f, iy), ux),
-						 ZHLN::Mix(Hash(ix, iy + 1.0f), Hash(ix + 1.0f, iy + 1.0f), ux), uy);
-	};
-
-	auto FBM = [&](float x, float y, int octaves) {
-		float val = 0.0f;
-		float amp = 0.5f;
-		for (int i = 0; i < octaves; i++) {
-			val += amp * Noise(x, y);
-			x *= 2.1f;
-			y *= 2.15f;
-			amp *= 0.5f;
-		}
-		return val;
-	};
 
 	// --- Main Generator ---
 	for (uint32_t y = 0; y < Height; ++y) {
@@ -298,26 +254,180 @@ template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> Generate
 			float pattern = FBM(u + 4.0f * rx, v + 4.0f * ry, 4);
 
 			float veinBase = FBM(u * 2.0f + rx, v * 2.0f + ry, 3);
-			float vein = 1.0f - std::abs(std::sin(veinBase * 10.0f + pattern * 2.0f));
-			vein = std::pow(vein, 12.0f);
+			float vein = 1.0f - Abs(Sin(veinBase * 10.0f + pattern * 2.0f));
+			vein = Power(vein, 12.0f);
 
 			float grain = Hash((float)x, (float)y) * 0.12f;
 
-			float r_map = ZHLN::Mix(0.95f, 0.40f, pattern);
-			float g_map = ZHLN::Mix(0.95f, 0.42f, pattern);
-			float b_map = ZHLN::Mix(0.98f, 0.45f, pattern);
+			float r_map = Mix(0.95f, 0.40f, pattern);
+			float g_map = Mix(0.95f, 0.42f, pattern);
+			float b_map = Mix(0.98f, 0.45f, pattern);
 
-			r_map = ZHLN::Mix(r_map, 0.1f, vein);
-			g_map = ZHLN::Mix(g_map, 0.1f, vein);
-			b_map = ZHLN::Mix(b_map, 0.12f, vein);
+			r_map = Mix(r_map, 0.1f, vein);
+			g_map = Mix(g_map, 0.1f, vein);
+			b_map = Mix(b_map, 0.12f, vein);
 
 			r_map += grain;
 			g_map += grain;
 			b_map += grain;
 
-			pixels[y * Width + x] = Pack((uint8_t)(ZHLN::Clamp(r_map, 0, 1) * 255),
-										 (uint8_t)(ZHLN::Clamp(g_map, 0, 1) * 255),
-										 (uint8_t)(ZHLN::Clamp(b_map, 0, 1) * 255));
+			pixels[y * Width + x] =
+				PackColor((uint8_t)(Clamp(r_map, 0, 1) * 255), (uint8_t)(Clamp(g_map, 0, 1) * 255),
+						  (uint8_t)(Clamp(b_map, 0, 1) * 255));
+		}
+	}
+	return pixels;
+}
+
+struct Blade {
+	float rootX, rootY;
+	float height;
+	float halfWidth;
+	float tilt;
+	float bend;
+	float shade;
+	float vitality; // 1.0 = lush green, 0.0 = dead/brown
+};
+
+// Helper for alpha blending 32-bit colors (Assuming ARGB or XRGB format)
+inline uint32_t BlendColors(uint32_t bg, float r, float g, float b, float alpha) {
+	uint8_t bgR = (bg >> 16) & 0xFF;
+	uint8_t bgG = (bg >> 8) & 0xFF;
+	uint8_t bgB = bg & 0xFF;
+
+	uint8_t outR = (uint8_t)(r * alpha * 255.0f + bgR * (1.0f - alpha));
+	uint8_t outG = (uint8_t)(g * alpha * 255.0f + bgG * (1.0f - alpha));
+	uint8_t outB = (uint8_t)(b * alpha * 255.0f + bgB * (1.0f - alpha));
+
+	return PackColor(outR, outG, outB);
+}
+
+static std::vector<Blade> GenerateOrganicBlades(uint32_t W, uint32_t H) {
+	std::vector<Blade> blades;
+	float density = 1.5f; // Adjust for thicker/thinner grass fields
+
+	// We still iterate over a grid to ensure coverage, but we place RANDOM amounts
+	// of blades per cell based on noise, destroying the "grid" look.
+	int cellSize = 8;
+
+	for (int cy = -cellSize; cy < (int)H + cellSize; cy += cellSize) {
+		for (int cx = -cellSize; cx < (int)W + cellSize; cx += cellSize) {
+
+			// Clumping noise: High values = dense tufts, Low values = sparse/dirt
+			float clumpNoise = FBM((float)cx * 0.005f, (float)cy * 0.005f, 3);
+			int bladesInCell = (int)(clumpNoise * clumpNoise * 15.0f * density);
+
+			for (int i = 0; i < bladesInCell; ++i) {
+				float px = (float)cx + Hash((float)cx + i, (float)cy) * cellSize;
+				float py = (float)cy + Hash((float)cx, (float)cy + i) * cellSize;
+
+				// Wind Flow: Grass bends in cohesive waves, not randomly
+				float windTilt = (FBM(px * 0.01f, py * 0.01f, 2) - 0.5f) * 2.0f;
+				float windBend = (FBM(px * 0.015f + 10.0f, py * 0.015f, 2) - 0.5f) * 1.5f;
+
+				Blade b;
+				b.rootX = px;
+				b.rootY = py;
+
+				// Vitality: 1.0 = alive, 0.0 = dead. Driven by noise so patches die together.
+				b.vitality = Clamp(FBM(px * 0.02f, py * 0.02f, 2) + 0.2f, 0.0f, 1.0f);
+
+				// Dead grass is usually shorter and thinner
+				float baseHeight = 20.0f + Hash(px, py) * 25.0f;
+				b.height = baseHeight * (0.5f + b.vitality * 0.5f);
+				b.halfWidth = (1.5f + Hash(px * 2.0f, py * 2.0f)) * (0.6f + b.vitality * 0.4f);
+
+				b.tilt =
+					windTilt + (Hash(px, py * 3.0f) - 0.5f) * 0.3f; // Macro wind + micro jitter
+				b.bend = windBend + (Hash(px * 3.0f, py) - 0.5f) * 0.3f;
+				b.shade = 0.7f + Hash(px, py) * 0.3f; // Slight lightness variation
+
+				blades.push_back(b);
+			}
+		}
+	}
+	return blades;
+}
+
+template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> GenerateGrassTexture() {
+	std::vector<uint32_t> pixels(Width * Height);
+
+	// 1. Fill background with an organic dirt/moss base (prevents spotty black holes)
+	for (uint32_t py = 0; py < Height; ++py) {
+		for (uint32_t px = 0; px < Width; ++px) {
+			float dirtNoise = FBM(px * 0.02f, py * 0.02f, 3);
+			float r = Lerp(0.15f, 0.10f, dirtNoise);
+			float g = Lerp(0.12f, 0.08f, dirtNoise);
+			float b = Lerp(0.08f, 0.05f, dirtNoise);
+			pixels[py * Width + px] =
+				PackColor((uint8_t)(r * 255), (uint8_t)(g * 255), (uint8_t)(b * 255));
+		}
+	}
+
+	// 2. Generate and sort blades (Back to Front)
+	std::vector<Blade> blades = GenerateOrganicBlades(Width, Height);
+	std::sort(blades.begin(), blades.end(),
+			  [](const Blade& a, const Blade& b) { return a.rootY < b.rootY; });
+
+	// 3. Paint blades
+	for (const auto& b : blades) {
+		int startY = Clamp((int)(b.rootY - b.height * 1.5f), 0, (int)Height - 1);
+		int endY = Clamp((int)(b.rootY + 2), 0, (int)Height - 1);
+
+		float maxOffset = Abs(b.tilt * b.height) + Abs(b.bend * b.height) + b.halfWidth;
+		int startX = Clamp((int)(b.rootX - maxOffset - 2), 0, (int)Width - 1);
+		int endX = Clamp((int)(b.rootX + maxOffset + 2), 0, (int)Width - 1);
+
+		for (int py = startY; py <= endY; ++py) {
+			float relY = (float)py - b.rootY;
+			if (relY > 0)
+				continue;
+
+			float t = Clamp(-relY / b.height, 0.0f, 1.0f); // 0.0 at root, 1.0 at tip
+
+			// Organic droop using t^2 and t^3
+			float tiltOffset = b.tilt * (-relY);
+			float bendOffset = b.bend * (t * t) * b.height * 0.8f;
+			float centerX = b.rootX + tiltOffset + bendOffset;
+
+			// Taper: Sharp point at the tip
+			float halfW = b.halfWidth * (1.0f - t * t);
+
+			for (int px = startX; px <= endX; ++px) {
+				float dist = Abs((float)px - centerX);
+
+				// Soft edges for anti-aliasing
+				float alpha = Smoothstep(halfW + 0.5f, halfW - 0.5f, dist);
+				if (alpha <= 0.0f)
+					continue;
+
+				// --- ORGANIC COLORING ---
+
+				// Root is dark (ambient occlusion), tip is bright (sunlight translucent)
+				float ao = Lerp(0.2f, 1.0f, t);
+
+				// Alive Color (Vibrant Green)
+				float aliveR = Lerp(0.05f, 0.30f, t);
+				float aliveG = Lerp(0.15f, 0.75f, t);
+				float aliveB = Lerp(0.05f, 0.15f, t);
+
+				// Dead Color (Dry Yellow/Brown)
+				float deadR = Lerp(0.20f, 0.60f, t);
+				float deadG = Lerp(0.15f, 0.50f, t);
+				float deadB = Lerp(0.05f, 0.20f, t);
+
+				// Blend based on blade's vitality
+				float finalR = Lerp(deadR, aliveR, b.vitality) * b.shade * ao;
+				float finalG = Lerp(deadG, aliveG, b.vitality) * b.shade * ao;
+				float finalB = Lerp(deadB, aliveB, b.vitality) * b.shade * ao;
+
+				// Fake drop shadow at the very root to anchor it to the dirt
+				if (t < 0.1f)
+					alpha *= (t / 0.1f);
+
+				pixels[py * Width + px] =
+					BlendColors(pixels[py * Width + px], finalR, finalG, finalB, alpha);
+			}
 		}
 	}
 	return pixels;
