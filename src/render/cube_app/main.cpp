@@ -31,10 +31,9 @@ static std::vector<uint32_t> LoadSpirv(const std::filesystem::path& path) {
 }
 
 // Define the Descriptor Layout using the TMP Builder
-using CubeLayout = ZHLN::Vk::DescriptorLayout<
-	ZHLN::Vk::SampledImageSlot<0>, // Texture
-	ZHLN::Vk::SamplerSlot<1>       // Sampler
->;
+using CubeLayout = ZHLN::Vk::DescriptorLayout<ZHLN::Vk::SampledImageSlot<0>, // Texture
+											  ZHLN::Vk::SamplerSlot<1>		 // Sampler
+											  >;
 
 int main() {
 	// 1. OS Window Creation
@@ -51,7 +50,8 @@ int main() {
 	inst_exts.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
 
 	// Safely query and enable Maintenance 1 only if supported
-	bool has_maint1 = ZHLN::Vk::IsInstanceExtensionSupported(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+	bool has_maint1 =
+		ZHLN::Vk::IsInstanceExtensionSupported(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
 	if (has_maint1) {
 		inst_exts.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
 	}
@@ -77,9 +77,8 @@ int main() {
 		.pNext = &feat13,
 		.bufferDeviceAddress = VK_TRUE};
 
-	VkPhysicalDeviceFeatures2 feat2 = {
-		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-		.pNext = &feat12};
+	VkPhysicalDeviceFeatures2 feat2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+									   .pNext = &feat12};
 
 	std::vector<const char*> dev_exts = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 	if (has_maint1) {
@@ -106,19 +105,21 @@ int main() {
 	ZHLN::Vk::Surface surface(ctx.Instance(), raw_surface);
 
 	ZHLN::Vk::Allocator allocator;
-	if (!allocator.Init(ctx)) return -1;
+	if (!allocator.Init(ctx))
+		return -1;
 
 	ZHLN::Vk::Swapchain swapchain(ctx.Device(), {});
 	auto sync = ZHLN::Vk::FrameSync<3>::Create(ctx.Device());
-	auto pools = ZHLN::Vk::CommandPools<3>::Create(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+	auto pools =
+		ZHLN::Vk::CommandPools<3>::Create(ctx.Device(), ctx.PhysicalInfo().graphics_family);
 	ZHLN::Vk::SemaphorePool present_semaphores;
 
 	// =========================================================================
 	// 4. Cube Texture Creation & Upload
 	// =========================================================================
-	const uint32_t TEX_W = 256; 
+	const uint32_t TEX_W = 256;
 	const uint32_t TEX_H = 256;
-	static const auto cube_pixels = ZHLN::Texture::GenerateMarbleCrisp<TEX_W, TEX_H>();
+	static const auto cube_pixels = ZHLN::Texture::GenerateGrassTexture<TEX_W, TEX_H>();
 
 	VkImageCreateInfo tex_info = {
 		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -133,22 +134,27 @@ int main() {
 		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
 		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
 	};
-	
-	ZHLN::Vk::Image cube_texture_image = ZHLN::Vk::Image::Create(allocator.Get(), tex_info, VMA_MEMORY_USAGE_GPU_ONLY);
-	if (!cube_texture_image.Valid()) return -1;
+
+	ZHLN::Vk::Image cube_texture_image =
+		ZHLN::Vk::Image::Create(allocator.Get(), tex_info, VMA_MEMORY_USAGE_GPU_ONLY);
+	if (!cube_texture_image.Valid())
+		return -1;
 
 	ZHLN::Vk::CommandPool setupPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-	if (!setupPool.Allocate(1)) return -1;
-	
+	if (!setupPool.Allocate(1))
+		return -1;
+
 	VkCommandBuffer setupCmd = setupPool[0];
 
 	ZHLN_BeginCommandBuffer(setupCmd);
-	
-	ZHLN::Vk::Buffer stagingBuffer = ZHLN::Vk::Buffer::Create(allocator.Get(), cube_pixels.size() * sizeof(uint32_t),
+
+	ZHLN::Vk::Buffer stagingBuffer =
+		ZHLN::Vk::Buffer::Create(allocator.Get(), cube_pixels.size() * sizeof(uint32_t),
 								 VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 	memcpy(stagingBuffer.Map().data, cube_pixels.data(), cube_pixels.size() * sizeof(uint32_t));
 
-	ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(setupCmd, cube_texture_image.Handle());
+	ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
+		setupCmd, cube_texture_image.Handle());
 
 	ZHLN_BufferImageCopyDesc copyDesc = {.buffer = stagingBuffer.Handle(),
 										 .image = cube_texture_image.Handle(),
@@ -157,16 +163,22 @@ int main() {
 										 .height = TEX_H};
 	ZHLN::Vk::CopyBufferToImage(setupCmd, copyDesc);
 
-	ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(setupCmd, cube_texture_image.Handle());
+	ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+							   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+		setupCmd, cube_texture_image.Handle());
 	ZHLN_EndCommandBuffer(setupCmd);
 
-	VkCommandBufferSubmitInfo setupCmdInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = setupCmd};
-	VkSubmitInfo2 setupSubmit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2, .commandBufferInfoCount = 1, .pCommandBufferInfos = &setupCmdInfo};
+	VkCommandBufferSubmitInfo setupCmdInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+											  .commandBuffer = setupCmd};
+	VkSubmitInfo2 setupSubmit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+								 .commandBufferInfoCount = 1,
+								 .pCommandBufferInfos = &setupCmdInfo};
 	vkQueueSubmit2(ctx.GraphicsQueue(), 1, &setupSubmit, VK_NULL_HANDLE);
-	vkQueueWaitIdle(ctx.GraphicsQueue()); 
+	vkQueueWaitIdle(ctx.GraphicsQueue());
 
 	// Image View & Sampler via RAII Helpers
-	auto cube_texture_view = ZHLN::Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(ctx.Device(), cube_texture_image.Handle());
+	auto cube_texture_view =
+		ZHLN::Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(ctx.Device(), cube_texture_image.Handle());
 	auto cube_sampler = ZHLN::Vk::SamplerBuilder{}.Linear().Repeat().Build(ctx.Device());
 
 	// =========================================================================
@@ -174,31 +186,33 @@ int main() {
 	// =========================================================================
 	auto cube_desc_layout = CubeLayout::CreateLayout(ctx.Device());
 	auto cube_desc_pool = CubeLayout::CreatePool(ctx.Device(), 1);
-	
-	VkDescriptorSet cube_descriptor_set = CubeLayout::Allocate(ctx.Device(), cube_desc_pool.Get(), cube_desc_layout.Get());
+
+	VkDescriptorSet cube_descriptor_set =
+		CubeLayout::Allocate(ctx.Device(), cube_desc_pool.Get(), cube_desc_layout.Get());
 	CubeLayout::Write(ctx.Device(), cube_descriptor_set,
-		ZHLN::Vk::ImageWrite{cube_texture_view.Get()},
-		ZHLN::Vk::SamplerWrite{cube_sampler.Get()}
-	);
+					  ZHLN::Vk::ImageWrite{cube_texture_view.Get()},
+					  ZHLN::Vk::SamplerWrite{cube_sampler.Get()});
 
 	// =========================================================================
-	// 6. Pipeline Setup 
+	// 6. Pipeline Setup
 	// =========================================================================
-	auto shaders = ZHLN::Vk::ShaderStages::FromFiles(ctx.Device(), "cube.hlsl.VSMain.spv", "cube.hlsl.PSMain.spv", "VSMain", "PSMain");
+	auto shaders = ZHLN::Vk::ShaderStages::FromFiles(ctx.Device(), "cube.hlsl.VSMain.spv",
+													 "cube.hlsl.PSMain.spv", "VSMain", "PSMain");
 	if (!shaders.Valid()) {
 		std::println(stderr, "FATAL: Failed to create cube shader stages.");
 		return -1;
 	}
 
-	VkPushConstantRange push_range = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .offset = 0, .size = sizeof(Mat4)};
+	VkPushConstantRange push_range = {
+		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .offset = 0, .size = sizeof(Mat4)};
 
 	VkDescriptorSetLayout rawLayout = cube_desc_layout.Get();
-	ZHLN_PipelineLayoutDesc layout_desc = {
-		.set_layouts = &rawLayout, 
-		.set_layout_count = 1,
-		.push_constants = &push_range,
-		.push_constant_count = 1};
-	ZHLN::Vk::PipelineLayout layout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &layout_desc));
+	ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = &rawLayout,
+										   .set_layout_count = 1,
+										   .push_constants = &push_range,
+										   .push_constant_count = 1};
+	ZHLN::Vk::PipelineLayout layout(ctx.Device(),
+									ZHLN_CreatePipelineLayout(ctx.Device(), &layout_desc));
 
 	auto pipeline = ZHLN::Vk::PipelineBuilder{}
 						.Shaders(shaders)
@@ -222,7 +236,7 @@ int main() {
 	auto rebuild = [&]() -> bool {
 		vkDeviceWaitIdle(ctx.Device());
 		depth_initialized = false;
-		
+
 		ZHLN_Device raw_dev = {ctx.Device(), ctx.GraphicsQueue(), ctx.PresentQueue()};
 		ZHLN_PhysicalDeviceInfo raw_phys = ctx.PhysicalInfo();
 		ZHLN_SwapchainDesc s_desc = {.device = &raw_dev,
@@ -232,7 +246,8 @@ int main() {
 									 .height = win.height,
 									 .vsync = true,
 									 .old_swapchain = swapchain.Get().handle};
-		if (!swapchain.Rebuild(s_desc)) return false;
+		if (!swapchain.Rebuild(s_desc))
+			return false;
 
 		present_semaphores.Rebuild(ctx.Device(), swapchain.Get().image_count);
 
@@ -263,28 +278,34 @@ int main() {
 	while (win.running) {
 		ZHLN::Demo::ProcessEvents(win);
 
-		if (win.width == 0 || win.height == 0) continue;
+		if (win.width == 0 || win.height == 0)
+			continue;
 		if (win.resized) {
-			if (!rebuild()) break;
+			if (!rebuild())
+				break;
 			win.resized = false;
 		}
 
-		if (!swapchain.Valid() || swapchain.Get().extent.width == 0) continue;
+		if (!swapchain.Valid() || swapchain.Get().extent.width == 0)
+			continue;
 
 		const auto now = std::chrono::high_resolution_clock::now();
 		const float elapsed = std::chrono::duration<float>(now - when).count();
 
 		const Mat4 model = Multiply(RotateY(elapsed * 0.75f), RotateX(elapsed * 0.45f));
 		const Mat4 view = LookAt({2.5f, 2.0f, 2.5f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f});
-		const Mat4 proj = Perspective(1.0472f, static_cast<float>(win.width) / static_cast<float>(win.height), 0.1f, 10.0f);
+		const Mat4 proj = Perspective(
+			1.0472f, static_cast<float>(win.width) / static_cast<float>(win.height), 0.1f, 10.0f);
 		const Mat4 mvp = Multiply(proj, Multiply(view, model));
 
 		auto record_cb = [&](VkCommandBuffer cmd, uint32_t image_index) {
 			VkImage img = swapchain.Get().images[image_index];
-			ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, img);
+			ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED,
+									   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, img);
 
 			if (depth_view.Valid() && !depth_initialized) {
-				ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+				ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED,
+										   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
 					cmd, depth_image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
 				depth_initialized = true;
 			}
@@ -300,15 +321,16 @@ int main() {
 			{
 				ZHLN::Vk::ScopedRendering render(cmd, pass);
 				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
-				
+
 				vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout.Get(), 0, 1,
-										&cube_descriptor_set, 0, nullptr); 
-										
+										&cube_descriptor_set, 0, nullptr);
+
 				ZHLN::Vk::Push(cmd, layout.Get(), VK_SHADER_STAGE_VERTEX_BIT, mvp);
 				vkCmdDraw(cmd, static_cast<uint32_t>(cube_indices.size()), 1, 0, 0);
 			}
 
-			ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, img);
+			ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+									   VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, img);
 		};
 
 		const ZHLN_FrameSync& frame_sync = sync[frame_index];
@@ -330,16 +352,14 @@ int main() {
 		record_cb(cmd, image_index);
 		ZHLN_EndCommandBuffer(cmd);
 
-		ZHLN_FrameSubmitDesc submitDesc = {
-			.graphicsQueue = ctx.GraphicsQueue(),
-			.presentQueue = ctx.PresentQueue(),
-			.cmd = cmd,
-			.imageAvailable = frame_sync.image_available,
-			.renderFinished = present_semaphores[image_index],
-			.inFlight = frame_sync.in_flight,
-			.swapchain = swapchain.Get().handle,
-			.imageIndex = image_index
-		};
+		ZHLN_FrameSubmitDesc submitDesc = {.graphicsQueue = ctx.GraphicsQueue(),
+										   .presentQueue = ctx.PresentQueue(),
+										   .cmd = cmd,
+										   .imageAvailable = frame_sync.image_available,
+										   .renderFinished = present_semaphores[image_index],
+										   .inFlight = frame_sync.in_flight,
+										   .swapchain = swapchain.Get().handle,
+										   .imageIndex = image_index};
 
 		if (ZHLN::Vk::SubmitAndPresent(submitDesc) != ZHLN_FrameResult_Ok) {
 			win.resized = true;
@@ -350,7 +370,7 @@ int main() {
 
 	vkDeviceWaitIdle(ctx.Device());
 
-	// All RAII handles (Device, Instance, Views, Images, Pipelines, Pools, Allocator) 
+	// All RAII handles (Device, Instance, Views, Images, Pipelines, Pools, Allocator)
 	// will cleanly self-destruct here without leaking or requiring explicit vkDestroy calls.
 	ZHLN::Demo::DestroyWindow(win);
 	return 0;
