@@ -2,9 +2,9 @@
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/PhysicsSystem.h>
-#include <Zahlen/detail/Atomic.hpp>
 #include <Zahlen/Mutex.hpp>
 #include <Zahlen/Physics.hpp>
+#include <Zahlen/detail/Atomic.hpp>
 #include <Zahlen/detail/Platform.hpp>
 #include <cstdint>
 #include <type_traits>
@@ -59,7 +59,7 @@ struct PhysicsWorld {
 	// ========================================================================
 	// BUCKET 3: COMMAND QUEUE & MUTEXES (The War Zone)
 	// ========================================================================
-	alignas(CACHE_LINE) ZHLN::Mutex shadowLock;
+	alignas(CACHE_LINE) mutable ZHLN::Mutex shadowLock;
 
 	void* commandQueue;
 	void* commandQueueSpare;
@@ -78,7 +78,7 @@ struct PhysicsWorld {
 	// BUCKET 5: QUERIES & COUNTERS
 	// ========================================================================
 	alignas(CACHE_LINE) ZHLN::Atomic<int> activeQueries;
-	ZHLN::Atomic<int> viewExportCount;
+	mutable ZHLN::Atomic<int> viewExportCount;
 	bool needsOptimization;
 
 	// ========================================================================

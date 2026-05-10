@@ -4,6 +4,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/PhysicsWorld.hpp>
 #include <Zahlen/Platform.hpp>
+#include <Zahlen/Scripting.hpp>
 #include <algorithm>
 
 using namespace ZHLN;
@@ -61,6 +62,9 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	auto& input = engine.GetInput();
 	auto& cam = engine.GetCamera();
 
+	ScriptRunner scriptRunner;
+	scriptRunner.RunFile("scripts/gameplay.lua");
+
 	Scene scene;
 	scene.Setup(rc, pc);
 
@@ -84,6 +88,11 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 		}
 
 		UpdatePlayerController(input, cam, pc, scene.playerHandle);
+
+		// --- SCRIPTING UPDATE ---
+		// We call Lua before the physics step so the script can influence
+		// the velocities/positions for the next frame.
+		scriptRunner.CallUpdate(&engine, dt);
 
 		// Handle Camera Orbit (Right Click Drag)
 		if (input.IsMouseButtonDown(KeyCode::RButton)) {

@@ -1,12 +1,13 @@
 #pragma once
 
-#include "Zahlen/Buffer.hpp"
-
+#include <Zahlen/Buffer.h>
+// clang-format off
 #include <Jolt/Jolt.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Physics/Body/BodyID.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
+// clang-format on
 #include <cstdint>
 #include <memory>
 
@@ -29,7 +30,7 @@ struct EntityHandle {
 	}
 };
 
-static_assert(std::is_trivially_copyable<EntityHandle>());
+static_assert(std::is_trivially_copyable_v<EntityHandle>);
 
 class PhysicsContext {
   public:

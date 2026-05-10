@@ -6,7 +6,7 @@ import argparse
 
 def get_git_tracked_files(target_dir="."):
     """Returns a list of git-tracked files with specific extensions within a target directory."""
-    extensions = {'.cpp', '.hpp', '.mm', '.c', '.h', '.S', '.glsl', '.vert', '.frag', '.metal'}
+    extensions = {'.cpp', '.hpp', '.mm', '.c', '.h', '.S', '.glsl', '.vert', '.frag', '.metal', '.lua'}
     
     # Add any directories you want to completely ignore here
     ignore_paths = {'third_party/', 'extern/'}

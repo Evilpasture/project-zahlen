@@ -8,7 +8,7 @@
 #include <Jolt/Core/JobSystemThreadPool.h>
 
 #include <Zahlen/Physics.hpp>
-#include <Zahlen/Buffer.hpp>
+#include <Zahlen/Buffer.h>
 #include <Zahlen/PhysicsWorld.hpp>
 #include <Zahlen/Log.hpp>
 

@@ -74,9 +74,12 @@ set(PROJECT_SOURCES
     src/engine/Input.cpp
     src/engine/Resources.c
     src/engine/Platform.cpp
+    src/engine/Scripting.cpp
 )
 
 add_executable(zahlen)
+
+set_target_properties(zahlen PROPERTIES ENABLE_EXPORTS ON)
 
 target_sources(zahlen PRIVATE ${PROJECT_SOURCES})
 
