@@ -1,9 +1,8 @@
-#include "PhysicsWorld.hpp"
-
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Scripting.h>
 #include <Zahlen/Scripting.hpp>
 #include <cstring>
+#include <physics/PhysicsWorld.hpp>
 
 extern "C" {
 #include <lauxlib.h>

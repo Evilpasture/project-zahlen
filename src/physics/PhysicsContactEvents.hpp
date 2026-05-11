@@ -1,6 +1,5 @@
+#include "Physics.hpp"
 #include "PhysicsWorld.hpp"
-
-#include <Zahlen/Physics.hpp>
 
 namespace ZHLN::Physics {
 

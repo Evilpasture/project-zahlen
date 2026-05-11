@@ -1,13 +1,13 @@
 #pragma once
 
-#include "Mutex.hpp"
+#include "Physics.hpp"
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/PhysicsSystem.h>
-#include <Zahlen/Physics.hpp>
 #include <cstdint>
 #include <detail/Atomic.hpp>
 #include <detail/Platform.hpp>
+#include <threading/Mutex.hpp>
 #include <type_traits>
 
 namespace ZHLN::Physics {

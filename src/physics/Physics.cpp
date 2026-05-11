@@ -10,11 +10,12 @@
 #include <Jolt/Physics/Collision/Shape/CylinderShape.h>
 #include <Jolt/Physics/Collision/Shape/PlaneShape.h>
 
-#include <Zahlen/Physics.hpp>
+#include "Physics.hpp"
 #include <Zahlen/Buffer.h>
 #include "PhysicsWorld.hpp"
 #include <Zahlen/Log.hpp>
 #include "PhysicsContactEvents.hpp"
+#include "threading/Mutex.hpp"
 
 // ZHLN Detail Utilities
 #include <detail/Prefetch.hpp>

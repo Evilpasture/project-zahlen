@@ -1,5 +1,3 @@
-#include "engine/Mutex.hpp"
-#include "engine/PhysicsWorld.hpp"
 #include "engine/Platform.hpp"
 #include "imgui.h"
 
@@ -10,6 +8,8 @@
 #include <Zahlen/Scripting.hpp>
 #include <algorithm>
 #include <mutex>
+#include <physics/PhysicsWorld.hpp>
+#include <threading/Mutex.hpp>
 
 using namespace ZHLN;
 

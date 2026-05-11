@@ -53,6 +53,8 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/SPIRV-Reflect)
 add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/imgui)
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/render)
+add_subdirectory(${CMAKE_SOURCE_DIR}/src/threading) # NEW
+add_subdirectory(${CMAKE_SOURCE_DIR}/src/physics)   # NEW
 
 option(BUILD_TESTING "Build the render module test suite" OFF)
 if(BUILD_TESTING)
@@ -67,12 +69,8 @@ set(PROJECT_SOURCES
     src/engine/AssertHandler.cpp
     src/engine/Render.cpp
     src/engine/Engine.cpp
-    src/engine/Physics.cpp
     src/engine/AssetFactory.cpp
     src/engine/Window.cpp
-    src/engine/Mutex.cpp
-    src/engine/Thread.cpp
-    src/engine/Thread.S
     src/engine/Input.cpp
     src/engine/Resources.c
     src/engine/Platform.cpp
@@ -92,9 +90,6 @@ target_sources(zahlen PRIVATE
 
 target_compile_definitions(zahlen PRIVATE 
     JPH_DOUBLE_PRECISION
-    JPH_NO_CUSTOM_DETERMINISTIC_OPERATIONS
-    $<$<CONFIG:Debug>:JPH_DEBUG>
-    $<$<CONFIG:Release>:JPH_RELEASE>
 )
 
 add_definitions(-D_CRT_SECURE_NO_WARNINGS)
@@ -102,6 +97,8 @@ add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 # 5. Static Linking order
 target_link_libraries(zahlen PRIVATE 
     zahlen_render
+    zahlen_physics    # NEW
+    zahlen_threading  # NEW
     glfw
     Jolt 
     LuaJIT

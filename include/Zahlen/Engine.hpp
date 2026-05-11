@@ -1,10 +1,10 @@
 #pragma once
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Input.hpp>
-#include <Zahlen/Physics.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Window.hpp>
 #include <memory>
+#include <physics/Physics.hpp>
 
 namespace ZHLN {
 
