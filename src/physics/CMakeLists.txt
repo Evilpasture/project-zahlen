@@ -4,6 +4,8 @@ add_library(zahlen_physics STATIC
     PhysicsWorld.hpp
     PhysicsWorld.cpp
     PhysicsContactEvents.hpp
+    PhysicsSync.cpp
+    PhysicsSync.hpp
 )
 
 target_link_libraries(zahlen_physics 
