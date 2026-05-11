@@ -121,7 +121,8 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 
 		auto res = engine.GetWindow().GetSize();
 		if (res.width == 0 || res.height == 0) {
-			Platform::Sleep(16);
+			ZHLN::Log("Window size is 0,0. Waiting...");
+			Platform::Sleep(100);
 			continue;
 		}
 

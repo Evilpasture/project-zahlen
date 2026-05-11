@@ -788,12 +788,11 @@ EntityHandle CreateRigidBody(PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::RVe
 EntityHandle CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position) {
 	auto* impl = ctx.GetImpl();
 	auto& world = impl->world;
+	// Using the cache for the character shape
+	JPH::ShapeRefC charShape = GetOrCreateShape(ctx, ShapeType::Capsule, 0.5f, 0.3f);
 	std::lock_guard<Mutex> lock(world.shadowLock);
 
 	EntityHandle handle = AllocateHandle(world);
-
-	// Using the cache for the character shape
-	JPH::ShapeRefC charShape = GetOrCreateShape(ctx, ShapeType::Capsule, 0.5f, 0.3f);
 
 	JPH::CharacterVirtualSettings settings;
 	settings.mShape = charShape;
