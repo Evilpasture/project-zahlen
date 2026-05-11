@@ -57,10 +57,6 @@ struct alignas(128) ContactEvent {
 static_assert(sizeof(ContactEvent) == 128,
 			  "ContactEvent must be exactly 128 bytes for L1/L2 cache isolation!");
 
-// --- Queries ---
-// Returns a read-only view of the collision events from the LAST frame.
-std::pair<const ContactEvent*, size_t> GetContactEvents(const PhysicsContext& ctx);
-
 /**
  * @brief Thread-Safe, Cache-Isolated Structure of Arrays (SoA) Physics World.
  * No default initializers allowed to maintain Standard Layout / Triviality rules.
