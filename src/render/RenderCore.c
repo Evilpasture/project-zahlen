@@ -241,7 +241,7 @@ ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* const restrict desc) {
 
 	return best_score >= 0 ? best : null_result;
 }
-// [[nodiscard]] // line 243
+[[nodiscard]]
 ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
 	ZHLN_Device null_result = {};
 
