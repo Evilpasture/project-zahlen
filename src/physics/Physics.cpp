@@ -252,38 +252,7 @@ void PhysicsContext::Step(float deltaTime) {
 	// 2. Data Synchronization Pass
 	{
 		std::lock_guard<ZHLN::Mutex> lock(world.shadowLock);
-
-		// Prepare Sync Descriptors (Pointers aligned to 16/32 bytes)
-		Physics::Sync::WorldDataCreateInfo syncWorld = {
-			.shadow_pos = std::assume_aligned<32>(
-				reinterpret_cast<Physics::Sync::PosStride*>(world.positions)),
-			.shadow_ppos = std::assume_aligned<32>(
-				reinterpret_cast<Physics::Sync::PosStride*>(world.prevPositions)),
-			.shadow_rot = std::assume_aligned<16>(
-				reinterpret_cast<Physics::Sync::AuxStride*>(world.rotations)),
-			.shadow_prot = std::assume_aligned<16>(
-				reinterpret_cast<Physics::Sync::AuxStride*>(world.prevRotations)),
-			.shadow_lvel = std::assume_aligned<16>(
-				reinterpret_cast<Physics::Sync::AuxStride*>(world.linearVelocities)),
-			.shadow_avel = std::assume_aligned<16>(
-				reinterpret_cast<Physics::Sync::AuxStride*>(world.angularVelocities)),
-		};
-
-		Physics::Sync::MappingDataCreateInfo mapData = {
-			.body_ptrs = world.joltBodyPtrs,
-			.generations = world.generations,
-			.slot_capacity = world.slotCapacity,
-			.slot_to_dense = world.slotToDense,
-		};
-
-		// 3. Batch Sync Rigid Bodies
-		const uint32_t activeRigids =
-			_impl->physicsSystem.GetNumActiveBodies(JPH::EBodyType::RigidBody);
-		Physics::Sync::ExecuteSyncPass<JPH::EBodyType::RigidBody>(
-			activeRigids, &_impl->physicsSystem, mapData, syncWorld);
-
-		// 4. SIMD Sync Characters
-		Physics::Sync::SyncCharacters(_impl->activeCharacters, mapData, syncWorld);
+		Physics::Sync::Execute(world, &_impl->physicsSystem, _impl->activeCharacters);
 	}
 
 	world.isStepping.store(false, std::memory_order_release);
