@@ -14,6 +14,7 @@
 #include <Zahlen/Buffer.h>
 #include "PhysicsWorld.hpp"
 #include <Zahlen/Log.hpp>
+#include "PhysicsContactEvents.hpp"
 
 // ZHLN Detail Utilities
 #include <detail/Prefetch.hpp>
@@ -468,6 +469,8 @@ struct PhysicsContext::Impl {
 
 	Physics::PhysicsWorld world{};
 
+	Physics::ContactListener contactListener{&world};
+
 	// Map: Entity Index -> Character Object
 	// We use JPH::Ref to keep the character alive
 	JPH::Array<JPH::Ref<JPH::CharacterVirtual>> characterMap;
@@ -538,6 +541,16 @@ PhysicsContext::PhysicsContext() : _impl(std::make_unique<Impl>()) {
 
 	world.count.store(0, std::memory_order_relaxed);
 	world.freeCount.store(maxBodies, std::memory_order_relaxed);
+
+	// --- 5. Allocate Command Queues ---
+	world.commandCapacity = 64;
+	world.commandCount = 0;
+	world.commandQueue = new Physics::Command[world.commandCapacity]();
+	world.commandQueueSpare = new Physics::Command[world.commandCapacity]();
+
+	world.contactBuffer = static_cast<Physics::ContactEvent*>(
+		::operator new[](world.contactCapacity * sizeof(Physics::ContactEvent),
+						 std::align_val_t{sizeof(Physics::ContactEvent)}));
 }
 
 PhysicsContext::~PhysicsContext() {
@@ -566,13 +579,71 @@ PhysicsContext::~PhysicsContext() {
 	delete[] world.generations;
 	delete[] world.idToHandleMap;
 	delete[] world.joltBodyPtrs;
+
+	// 4. Delete Command Queues
+	delete[] world.commandQueue;
+	delete[] world.commandQueueSpare;
 }
 
 void PhysicsContext::Step(float deltaTime) {
 	auto& world = _impl->world;
+
+	// --- 1. COMMAND FLUSH (Structural Phase) ---
+	Physics::Command* capturedQueue = nullptr;
+	size_t capturedCount = 0;
+
+	{
+		// Fast pointer swap lock
+		std::lock_guard<ZHLN::Mutex> lock(world.shadowLock);
+		capturedQueue = world.commandQueue;
+		capturedCount = world.commandCount;
+
+		// Swap active and spare pointers
+		world.commandQueue = world.commandQueueSpare;
+		world.commandQueueSpare = capturedQueue;
+		world.commandCount = 0;
+	}
+
+	// Execute commands WITHOUT holding the shadow lock!
+	if (capturedCount > 0) {
+		std::lock_guard<ZHLN::Mutex> lock(world.shadowLock); // Lock again for safe data moves
+
+		for (size_t i = 0; i < capturedCount; i++) {
+			const auto& cmd = capturedQueue[i];
+
+			if (cmd.type == Physics::CommandType::DestroyBody) {
+				const uint32_t slot = cmd.handle.index;
+
+				// Final check in case of overlapping logic
+				if (world.generations[slot].load(std::memory_order_acquire) !=
+					cmd.handle.generation)
+					continue;
+
+				uint32_t dense = world.slotToDense[slot];
+				JPH::BodyID bodyID = world.bodyIDs[dense];
+
+				// 1. Unmap Jolt ID from Handle
+				const uint32_t joltIdx =
+					bodyID.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
+				world.idToHandleMap[joltIdx].store(0, std::memory_order_release);
+				world.joltBodyPtrs[joltIdx] = nullptr;
+
+				// 2. Physical Removal
+				world.bodyInterface->RemoveBody(bodyID);
+				world.bodyInterface->DestroyBody(bodyID);
+
+				// 3. Compact the SoA (This resets state to SLOT_EMPTY)
+				Physics::RemoveBodySlot(world, slot);
+			}
+		}
+	}
+
+	// Resets the counter so Jolt overwrites last frame's collisions
+	world.contactCount.store(0, std::memory_order_relaxed);
+
+	// --- 2. JOLT UPDATE PHASE ---
 	world.isStepping.store(true, std::memory_order_release);
 
-	// 1. Jolt Update Pass
 	_impl->physicsSystem.Update(deltaTime, 1, &_impl->tempAllocator, &_impl->jobSystem);
 
 	for (auto* character : _impl->activeCharacters) {
@@ -711,33 +782,38 @@ JPH::BodyID GetBodyID(const PhysicsWorld& world, EntityHandle handle) {
 
 void DestroyBody(PhysicsContext& ctx, EntityHandle handle) {
 	auto& world = ctx.GetImpl()->world;
-
-	// Lock the shadow buffer so the renderer doesn't read half-moved data
-	std::lock_guard<Mutex> lock(world.shadowLock);
-
 	const uint32_t slot = handle.index;
+
 	if (slot >= world.slotCapacity)
 		return;
 
-	// Generational safety (The Culverin Way)
+	// Source-of-truth generational check
 	if (world.generations[slot].load(std::memory_order_acquire) != handle.generation)
 		return;
 
-	// Resolve internal Jolt ID
-	uint32_t dense = world.slotToDense[handle.index];
-	JPH::BodyID bodyID = world.bodyIDs[dense];
+	// Immediately mark as doomed so queries ignore it
+	world.slotStates[slot].store(SLOT_PENDING_DESTROY, std::memory_order_release);
 
-	// 1. Unmap Jolt ID from Handle
-	const uint32_t joltIdx = bodyID.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
-	world.idToHandleMap[joltIdx].store(0, std::memory_order_release);
-	world.joltBodyPtrs[joltIdx] = nullptr;
+	// Lock the shadow buffer to queue the command
+	std::lock_guard<Mutex> lock(world.shadowLock);
 
-	// 2. Physical Removal
-	world.bodyInterface->RemoveBody(bodyID);
-	world.bodyInterface->DestroyBody(bodyID);
+	// Expand raw queue if needed
+	if (world.commandCount >= world.commandCapacity) {
+		size_t newCap = world.commandCapacity * 2;
+		auto* newQ = new Physics::Command[newCap];
+		auto* newQS = new Physics::Command[newCap];
 
-	// 3. Compact the SoA
-	RemoveBodySlot(world, slot);
+		std::memcpy(newQ, world.commandQueue, world.commandCount * sizeof(Physics::Command));
+
+		delete[] world.commandQueue;
+		delete[] world.commandQueueSpare;
+
+		world.commandQueue = newQ;
+		world.commandQueueSpare = newQS;
+		world.commandCapacity = newCap;
+	}
+
+	world.commandQueue[world.commandCount++] = {CommandType::DestroyBody, handle};
 }
 
 /**
@@ -871,6 +947,18 @@ JPH::Quat GetRotation(const PhysicsContext& ctx, JPH::BodyID bodyID) {
 EntityHandle GetEntityHandle(const PhysicsContext& ctx, JPH::BodyID bodyID) {
 	uint64_t rawData = ctx.GetImpl()->world.bodyInterface->GetUserData(bodyID);
 	return EntityHandle::Unpack(rawData);
+}
+
+std::pair<const ContactEvent*, size_t> GetContactEvents(const PhysicsContext& ctx) {
+	const auto& world = ctx.GetImpl()->world;
+
+	// Clamp the count to capacity in case the buffer overflowed
+	size_t count = world.contactCount.load(std::memory_order_acquire);
+	if (count > world.contactCapacity) {
+		count = world.contactCapacity;
+	}
+
+	return {world.contactBuffer, count};
 }
 
 } // namespace Physics
