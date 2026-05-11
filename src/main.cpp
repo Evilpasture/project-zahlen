@@ -12,11 +12,12 @@
 using namespace ZHLN;
 
 static void UpdatePlayerController(const InputContext& input, const Camera& cam,
-								   PhysicsContext& ctx, EntityHandle player) {
+								   PhysicsContext& ctx, EntityHandle player, float dt) {
 	float yawRad = JPH::DegreesToRadians(cam.yaw);
 	JPH::Vec3 forward = {std::cos(yawRad), 0.0f, std::sin(yawRad)};
 	JPH::Vec3 right = {-std::sin(yawRad), 0.0f, std::cos(yawRad)};
 
+	// 1. Calculate desired horizontal movement from input
 	JPH::Vec3 move = JPH::Vec3::sZero();
 	if (input.IsKeyDown(KeyCode::W))
 		move += forward;
@@ -28,29 +29,68 @@ static void UpdatePlayerController(const InputContext& input, const Camera& cam,
 		move += right;
 
 	float speed = input.IsKeyDown(KeyCode::LShift) ? 12.0f : 5.0f;
-	Physics::SetCharacterVelocity(
-		ctx, player, (move.LengthSq() > 0.01f) ? move.Normalized() * speed : JPH::Vec3::sZero());
+	JPH::Vec3 horizontalVel =
+		(move.LengthSq() > 0.01f) ? move.Normalized() * speed : JPH::Vec3::sZero();
+
+	// 2. Retrieve existing vertical velocity from the physics object
+	JPH::Vec3 currentVel = Physics::GetCharacterVelocity(ctx, player);
+	float verticalVel = currentVel.GetY();
+
+	if (Physics::IsCharacterOnGround(ctx, player)) {
+		verticalVel = 0.0f;
+
+		// Optional: Jump logic! (Holding Left Shift + Space)
+		if (input.IsKeyDown(KeyCode::LShift) && input.IsKeyDown(KeyCode::Unknown)) {
+			// You can map a proper Spacebar KeyCode later
+		}
+	} else {
+		// Apply gravity manually to the vertical component
+		verticalVel -= 9.81f * dt;
+	}
+
+	// 3. Combine and apply
+	JPH::Vec3 finalVel = horizontalVel;
+	finalVel.SetY(verticalVel);
+	Physics::SetCharacterVelocity(ctx, player, finalVel);
 }
 
 struct Scene {
-	Mesh floor, box, player;
+	Mesh floor;
+	Mesh box;
+	Mesh player;
 	Material material;
 	EntityHandle playerHandle;
 
 	void Setup(RenderContext& rc, PhysicsContext& pc) {
+		// --- Render Meshes Setup ---
 		floor = AssetFactory::CreatePlane(rc, 100.0f, {0.1f, 0.1f, 0.12f, 1.0f});
 		box = AssetFactory::CreateBox(rc, {0.5f, 0.5f, 0.5f}, {0.8f, 0.3f, 0.2f, 1.0f});
 		player = AssetFactory::CreateBox(rc, {0.5f, 0.9f, 0.5f}, {0.2f, 0.6f, 0.9f, 1.0f});
 		material = AssetFactory::CreateBasicMaterial(rc);
 
-		Physics::CreateStaticFloor(pc, 100.0f);
-		for (int i = 0; i < 25; ++i) {
-			Physics::CreateDynamicBox(
-				pc, {(float)(i % 5) * 4.0f - 10.0f, 5.0f, (float)(i / 5.0f) * 4.0f - 10.0f},
-				{0.5f, 0.5f, 0.5f});
+		// --- Physics Setup ---
+		// 1. Get Cached Shapes (Zero Heap Allocations on reuse!)
+		auto floorShape =
+			Physics::GetOrCreateShape(pc, Physics::ShapeType::Box, 100.0f, 1.0f, 100.0f);
+		auto boxShape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Box, 0.5f, 0.5f, 0.5f);
+
+		// 2. Spawn Static Floor (Engine automatically assigns index 0)
+		// Layer 0 = Static
+		Physics::CreateRigidBody(pc, floorShape, {0.0f, -1.0f, 0.0f}, JPH::Quat::sIdentity(),
+								 JPH::EMotionType::Static, 0);
+
+		// 3. Spawn a Wall of Props
+		// Layer 1 = Dynamic
+		for (int row = 0; row < 5; ++row) {
+			for (int col = 0; col < 5; ++col) {
+				Physics::CreateRigidBody(pc, boxShape,
+										 {(float)col - 2.5f, (float)row + 0.5f, -5.0f},
+										 JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, 1);
+			}
 		}
-		playerHandle = {.index = 500, .generation = 1};
-		Physics::CreateCharacter(pc, {0, 2, 0}, playerHandle);
+
+		// 4. Setup Player (Capture the handle the engine creates!)
+		playerHandle = Physics::CreateCharacter(pc, {0.0f, 2.0f, 0.0f});
 	}
 };
 
@@ -89,11 +129,9 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			continue;
 		}
 
-		UpdatePlayerController(input, cam, pc, scene.playerHandle);
+		UpdatePlayerController(input, cam, pc, scene.playerHandle, dt);
 
 		// --- SCRIPTING UPDATE ---
-		// We call Lua before the physics step so the script can influence
-		// the velocities/positions for the next frame.
 		scriptRunner.CallUpdate(&engine, dt);
 
 		// Handle Camera Orbit (Right Click Drag)
@@ -109,6 +147,8 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 		JPH::Vec3 pPos;
 		{
 			std::lock_guard lock(const_cast<Mutex&>(world.shadowLock));
+
+			// Use the Engine's SoA mapping to safely find the player's memory!
 			uint32_t idx = world.slotToDense[scene.playerHandle.index];
 			JPH::Real* p = &world.positions[idx * 4];
 			pPos = {(float)p[0], (float)p[1], (float)p[2]};
@@ -123,7 +163,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 		// Camera pushes backward out from the target along the direction
 		cam.position = target - (direction.Normalized() * 10.0f);
 
-		// 2. Prepare Frame (Upload correct View-Projection)
+		// 2. Prepare Frame
 		JPH::Mat44 vp =
 			cam.GetProjectionMatrix((float)res.width / res.height) * cam.GetViewMatrix();
 		Renderer::UpdateBuffer(rc, scene.material.constantBuffer, vp);
@@ -138,19 +178,27 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 		// 3. Render
 		engine.BeginFrame();
 		Renderer::Clear(rc, {0.08f, 0.09f, 0.12f, 1.0f});
+
+		// Draw static floor manually (It is at the world origin)
 		Renderer::Draw(rc, scene.material, scene.floor, JPH::Mat44::sIdentity());
 
 		{
 			std::lock_guard lock(const_cast<Mutex&>(world.shadowLock));
+
+			// Loop over the dense array.
+			// We start at i=1 because i=0 is the floor we just drew.
 			for (size_t i = 1; i < world.count.load(std::memory_order_acquire); ++i) {
 				JPH::Real* p = &world.positions[i * 4];
 				float* r = &world.rotations[i * 4];
+
 				JPH::Mat44 model = Math::CreateTransform({(float)p[0], (float)p[1], (float)p[2]},
 														 {r[0], r[1], r[2], r[3]});
-				Renderer::Draw(
-					rc, scene.material,
-					(world.denseToSlot[i] == scene.playerHandle.index ? scene.player : scene.box),
-					model);
+
+				// Select Mesh based on whether this slot belongs to the player
+				Mesh& meshToDraw =
+					(world.denseToSlot[i] == scene.playerHandle.index) ? scene.player : scene.box;
+
+				Renderer::Draw(rc, scene.material, meshToDraw, model);
 			}
 		}
 		engine.EndFrame();

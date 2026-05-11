@@ -1,8 +1,9 @@
 #pragma once
 
+#include "Mutex.hpp"
+
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/PhysicsSystem.h>
-#include <Zahlen/Mutex.hpp>
 #include <Zahlen/Physics.hpp>
 #include <Zahlen/detail/Atomic.hpp>
 #include <Zahlen/detail/Platform.hpp>
@@ -17,13 +18,15 @@ inline constexpr std::size_t CACHE_LINE = std::hardware_destructive_interference
 inline constexpr std::size_t CACHE_LINE = 64;
 #endif
 
+enum SlotState : uint8_t { SLOT_EMPTY = 0, SLOT_ALIVE = 1, SLOT_CHARACTER = 2 };
+
 /**
  * @brief Thread-Safe, Cache-Isolated Structure of Arrays (SoA) Physics World.
  * No default initializers allowed to maintain Standard Layout / Triviality rules.
  */
 struct PhysicsWorld {
 	// ========================================================================
-	// BUCKET 1: READ-ONLY / COLD DATA
+	// BUCKET 1: JOLT CORE (Cold)
 	// ========================================================================
 	alignas(CACHE_LINE) JPH::PhysicsSystem* system;
 	JPH::BodyInterface* bodyInterface;
@@ -35,10 +38,9 @@ struct PhysicsWorld {
 	JPH::TempAllocator* tempAllocator;
 
 	uint32_t maxJoltBodies;
-	size_t contactMaxCapacity;
 
 	// ========================================================================
-	// BUCKET 2: HOT SIMULATION STATE (The Stepper's Workspace)
+	// BUCKET 2: HOT SIMULATION STATE
 	// ========================================================================
 	alignas(CACHE_LINE) double time;
 	ZHLN::Atomic<size_t> count;
@@ -46,47 +48,32 @@ struct PhysicsWorld {
 	size_t slotCapacity;
 	ZHLN::Atomic<size_t> freeCount;
 
-	// SoA Buffers (Shadow State Arrays)
-	JPH::Real* positions; // [x, y, z] layout or SIMD padded
+	// SIMD-Aligned SoA Buffers [Stride 4]
+	JPH::Real* positions;
 	JPH::Real* prevPositions;
-	float* rotations; // Quaternions [x, y, z, w]
+	float* rotations;
 	float* prevRotations;
 	float* linearVelocities;
 	float* angularVelocities;
+
+	// Standard SoA Buffers
 	JPH::BodyID* bodyIDs;
 	uint32_t* materialIDs;
+	uint64_t* userData;
 
 	// ========================================================================
-	// BUCKET 3: COMMAND QUEUE & MUTEXES (The War Zone)
+	// BUCKET 3: SYNCHRONIZATION
 	// ========================================================================
 	alignas(CACHE_LINE) mutable ZHLN::Mutex shadowLock;
-
-	void* commandQueue;
-	void* commandQueueSpare;
-	size_t commandCount;
-	size_t commandCapacity;
-	size_t spareCapacity;
-
-	// ========================================================================
-	// BUCKET 4: VOLATILE ATOMIC FLAGS (Polling Targets)
-	// ========================================================================
-	alignas(CACHE_LINE) ZHLN::Atomic<bool> isStepping;
-	ZHLN::Atomic<bool> stepRequested;
-	ZHLN::Atomic<int> waitingThreads;
-
-	// ========================================================================
-	// BUCKET 5: QUERIES & COUNTERS
-	// ========================================================================
-	alignas(CACHE_LINE) ZHLN::Atomic<int> activeQueries;
+	ZHLN::Atomic<bool> isStepping;
 	mutable ZHLN::Atomic<int> viewExportCount;
-	bool needsOptimization;
 
 	// ========================================================================
-	// BUCKET 6: MAPPINGS & FILTERS (ECS Indirection Arrays)
+	// BUCKET 4: MAPPINGS & FILTERS (The ECS Engine)
 	// ========================================================================
 	alignas(CACHE_LINE) const void** joltBodyPtrs;
 
-	EntityHandle* idToHandleMap;
+	ZHLN::Atomic<uint64_t>* idToHandleMap; // Maps JPH::BodyID.GetIndex() -> EntityHandle
 	uint32_t* slotToDense;
 	uint32_t* denseToSlot;
 	uint32_t* freeSlots;
@@ -94,15 +81,11 @@ struct PhysicsWorld {
 	uint32_t* categories;
 	uint32_t* masks;
 
-	ZHLN::Atomic<uint8_t>* slotStates;
+	ZHLN::Atomic<uint8_t>* slotStates; // Uses SlotState enum
 	ZHLN::Atomic<uint32_t>* generations;
 };
 
-// ----------------------------------------------------------------------------
-// Compile-Time Guarantees
-// ----------------------------------------------------------------------------
-
-// Guarantee predictable layout for offsetof() and raw memory mapping
+// Guarantee predictable layout for raw memory mapping and SIMD logic
 static_assert(std::is_standard_layout_v<PhysicsWorld>);
 static_assert(std::is_trivially_copyable_v<PhysicsWorld>);
 static_assert(std::is_trivial_v<PhysicsWorld>);

@@ -1,49 +1,34 @@
 -- scripts/gameplay.lua
 local mem = require("scripts.core.memoryview")
-local ffi = require("ffi")
 
-print("-----------------------------------------")
-print(" Project-Zahlen: Scripting Engine Active ")
-print("-----------------------------------------")
-
--- This runs every frame
 function update(engine_ptr, dt)
-    -- 1. Acquire the Positions and Velocities
-    -- C++ side: Locks shadowLock, increments viewExportCount
     local positions = mem.C.ZHLN_GetPhysicsPositions(engine_ptr)
     local velocities = mem.C.ZHLN_GetPhysicsLinearVelocities(engine_ptr)
-
     local count = #positions
-    
-    -- 2. "NumPy style" loop
-    for i = 0, count - 1 do
-        -- Read a position (Python memoryview style)
-        -- __index handles the stride (skipping the 'w' component automatically)
+
+    for i = 1, count - 1 do -- Start at 1 to skip the floor
         local pos = positions[i]
         local vel = velocities[i]
 
-        -- Logic: If a box falls too low, teleport it back up and zero its velocity
-        if pos.y < -5.0 then
-            pos.y = 20.0
-            pos.x = (math.random() * 10) - 5
-            pos.z = (math.random() * 10) - 5
-            
-            positions[i] = pos -- Teleport! (__newindex handles writing)
-            
-            vel.x, vel.y, vel.z = 0, 0, 0
-            velocities[i] = vel
+        -- 1. Calculate direction to center (0,0,0)
+        local dirX = -pos.x
+        local dirZ = -pos.z
+        local dist = math.sqrt(dirX*dirX + dirZ*dirZ)
+
+        if dist > 0.1 then
+            -- 2. Apply a "Centripetal" force (Pull to center)
+            vel.x = vel.x + (dirX / dist) * 2.0 * dt
+            vel.z = vel.z + (dirZ / dist) * 2.0 * dt
+
+            -- 3. Apply a "Tangential" force (Spinning around center)
+            -- The vector (-z, x) is perpendicular to (x, z)
+            vel.x = vel.x + (-pos.z) * 1.5 * dt
+            vel.z = vel.z + (pos.x) * 1.5 * dt
         end
 
-        -- Logic: Apply a subtle "vortex" force to all moving objects
-        if i > 0 then -- Don't move the floor (if floor is at index 0)
-            vel.x = vel.x + (pos.z * 0.1)
-            vel.z = vel.z - (pos.x * 0.1)
-            velocities[i] = vel
-        end
+        velocities[i] = vel
     end
 
-    -- 3. Cleanup
-    -- Explicitly releasing prevents the C++ Render loop from waiting for GC
     positions:release()
     velocities:release()
 end

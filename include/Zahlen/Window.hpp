@@ -1,6 +1,6 @@
 #pragma once
 #include <Zahlen/Types.hpp>
-#include <Zahlen/detail/String.hpp>
+#include <detail/String.hpp>
 #include <memory>
 
 namespace ZHLN {
@@ -17,7 +17,7 @@ class Window {
 
 	bool IsRunning() const;
 	void ProcessEvents();
-	void Focus(); 
+	void Focus();
 
 	Extent2D GetSize() const;
 
@@ -25,7 +25,7 @@ class Window {
 	Impl* GetImpl() const { return _impl.get(); }
 
 	// Returns the underlying LLGL::Window* as a void* to keep headers clean
-    void* GetNativeHandle() const; 
+	void* GetNativeHandle() const;
 
   private:
 	std::unique_ptr<Impl> _impl;

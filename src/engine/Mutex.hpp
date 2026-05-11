@@ -1,7 +1,7 @@
 #pragma once
 
-#include <Zahlen/detail/Atomic.hpp>
 #include <cstdint>
+#include <detail/Atomic.hpp>
 
 #ifndef NDEBUG
 #define ZHLN_DEBUG 1

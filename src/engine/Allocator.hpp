@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Zahlen/detail/Atomic.hpp>
+#include </detail/Atomic.hpp>
 #include <cstddef>
 #include <memory_resource>
 

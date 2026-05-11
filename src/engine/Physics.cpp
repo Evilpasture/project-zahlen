@@ -6,33 +6,74 @@
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Core/JobSystemThreadPool.h>
+#include <Jolt/Physics/Collision/Shape/SphereShape.h>
+#include <Jolt/Physics/Collision/Shape/CylinderShape.h>
+#include <Jolt/Physics/Collision/Shape/PlaneShape.h>
 
 #include <Zahlen/Physics.hpp>
 #include <Zahlen/Buffer.h>
-#include <Zahlen/PhysicsWorld.hpp>
+#include "PhysicsWorld.hpp"
 #include <Zahlen/Log.hpp>
 
 // ZHLN Detail Utilities
-#include <Zahlen/detail/Prefetch.hpp>
-#include <Zahlen/detail/Span.hpp>
-#include <Zahlen/detail/Loop.hpp>
+#include <detail/Prefetch.hpp>
+#include <detail/Span.hpp>
+#include <detail/Loop.hpp>
 // clang-format on
 
 #include <array>
 #include <cstring>
 #include <memory>
-#include <new> // Required for std::align_val_t
+#include <new>
 
 namespace ZHLN {
+
+struct ShapeKey {
+	uint32_t type;
+	float p1, p2, p3, p4;
+};
+
+struct ShapeEntry {
+	ShapeKey key;
+	JPH::ShapeRefC shape;
+};
+
+enum SlotState : uint8_t { SLOT_EMPTY = 0, SLOT_ALIVE = 1, SLOT_CHARACTER = 2 };
+
+// =================================================================================================
+// MEMORY UTILITIES
+// =================================================================================================
+
 template <typename T> [[nodiscard]] static T* AllocateAligned(size_t count, size_t alignment) {
-	// operator new(size, alignment) ensures the base pointer is aligned
 	return static_cast<T*>(::operator new[](count * sizeof(T), std::align_val_t{alignment}));
 }
 
 template <typename T> static void DeallocateAligned(T* ptr, size_t alignment) {
-	if (ptr) {
+	if (ptr)
 		::operator delete[](ptr, std::align_val_t{alignment});
+}
+
+template <typename T>
+static void ReallocateAligned(T*& ptr, size_t old_count, size_t new_count, size_t alignment) {
+	T* new_ptr = AllocateAligned<T>(new_count, alignment);
+	if (ptr && old_count > 0) {
+		std::memcpy(new_ptr, ptr, old_count * sizeof(T));
+		DeallocateAligned(ptr, alignment);
+	} else if (ptr) {
+		DeallocateAligned(ptr, alignment);
 	}
+	ptr = new_ptr;
+}
+
+template <typename T> static void ReallocateStandard(T*& ptr, size_t old_count, size_t new_count) {
+	T* new_ptr = new T[new_count]();
+	if (ptr && old_count > 0) {
+		std::memcpy(new_ptr, ptr, old_count * sizeof(T));
+		delete[] ptr;
+	} else if (ptr) {
+		delete[] ptr;
+	}
+	ptr = new_ptr;
 }
 
 // --- Jolt Boilerplate: Layers & Filters ---
@@ -314,6 +355,105 @@ inline void SyncCharacters(const JPH::Array<JPH::CharacterVirtual*>& characters,
 } // namespace Physics::Sync
 
 // =================================================================================================
+// CULVERIN-STYLE LIFECYCLE (SOA Plumbing)
+// =================================================================================================
+
+namespace Physics {
+
+static void ResizeBuffers(PhysicsWorld& world, size_t newCapacity) {
+	if (newCapacity <= world.capacity)
+		return;
+
+	size_t oldCap = world.capacity;
+	world.capacity = newCapacity;
+	world.slotCapacity = newCapacity;
+
+	// 1. SIMD Aligned Buffers
+	ReallocateAligned(world.positions, oldCap * 4, newCapacity * 4, 32);
+	ReallocateAligned(world.prevPositions, oldCap * 4, newCapacity * 4, 32);
+	ReallocateAligned(world.rotations, oldCap * 4, newCapacity * 4, 16);
+	ReallocateAligned(world.prevRotations, oldCap * 4, newCapacity * 4, 16);
+	ReallocateAligned(world.linearVelocities, oldCap * 4, newCapacity * 4, 16);
+	ReallocateAligned(world.angularVelocities, oldCap * 4, newCapacity * 4, 16);
+
+	// 2. Standard Buffers
+	ReallocateStandard(world.bodyIDs, oldCap, newCapacity);
+	ReallocateStandard(world.materialIDs, oldCap, newCapacity);
+	ReallocateStandard(world.userData, oldCap, newCapacity);
+	ReallocateStandard(world.slotToDense, oldCap, newCapacity);
+	ReallocateStandard(world.denseToSlot, oldCap, newCapacity);
+	ReallocateStandard(world.freeSlots, oldCap, newCapacity);
+	ReallocateStandard(world.categories, oldCap, newCapacity);
+	ReallocateStandard(world.masks, oldCap, newCapacity);
+	ReallocateStandard(world.generations, oldCap, newCapacity);
+	ReallocateStandard(world.slotStates, oldCap, newCapacity);
+
+	// 3. Populate new free slots
+	size_t freeIdx = world.freeCount.load(std::memory_order_relaxed);
+	for (size_t i = oldCap; i < newCapacity; i++) {
+		world.generations[i].store(1, std::memory_order_relaxed);
+		world.slotStates[i].store(SLOT_EMPTY, std::memory_order_relaxed);
+		world.freeSlots[freeIdx++] = static_cast<uint32_t>(i);
+	}
+	world.freeCount.store(freeIdx, std::memory_order_release);
+}
+
+static EntityHandle AllocateHandle(PhysicsWorld& world) {
+	size_t available = world.freeCount.load(std::memory_order_acquire);
+	if (available == 0) {
+		ResizeBuffers(world, world.capacity * 2);
+		available = world.freeCount.load(std::memory_order_acquire);
+	}
+
+	uint32_t slot = world.freeSlots[--available];
+	world.freeCount.store(available, std::memory_order_release);
+
+	uint32_t gen = world.generations[slot].load(std::memory_order_relaxed);
+	return EntityHandle{.index = slot, .generation = gen};
+}
+
+static void RemoveBodySlot(PhysicsWorld& world, uint32_t slot) {
+	const uint32_t denseIdx = world.slotToDense[slot];
+	const uint32_t lastDense =
+		static_cast<uint32_t>(world.count.load(std::memory_order_acquire)) - 1;
+
+	// THE SWAP-TO-DELETE (Dense Pack)
+	if (denseIdx != lastDense) {
+		// --- Move SIMD Data (Stride 4) ---
+		for (int i = 0; i < 4; ++i) {
+			world.positions[denseIdx * 4 + i] = world.positions[lastDense * 4 + i];
+			world.prevPositions[denseIdx * 4 + i] = world.prevPositions[lastDense * 4 + i];
+			world.rotations[denseIdx * 4 + i] = world.rotations[lastDense * 4 + i];
+			world.prevRotations[denseIdx * 4 + i] = world.prevRotations[lastDense * 4 + i];
+			world.linearVelocities[denseIdx * 4 + i] = world.linearVelocities[lastDense * 4 + i];
+			world.angularVelocities[denseIdx * 4 + i] = world.angularVelocities[lastDense * 4 + i];
+		}
+
+		// --- Move Metadata ---
+		world.bodyIDs[denseIdx] = world.bodyIDs[lastDense];
+		world.userData[denseIdx] = world.userData[lastDense];
+		world.categories[denseIdx] = world.categories[lastDense];
+		world.masks[denseIdx] = world.masks[lastDense];
+		world.materialIDs[denseIdx] = world.materialIDs[lastDense];
+
+		// --- The Map Rewire ---
+		const uint32_t moverSlot = world.denseToSlot[lastDense];
+		world.slotToDense[moverSlot] = denseIdx;
+		world.denseToSlot[denseIdx] = moverSlot;
+	}
+
+	// HOUSEKEEPING
+	world.generations[slot].fetch_add(1, std::memory_order_relaxed);
+	world.slotStates[slot].store(SLOT_EMPTY, std::memory_order_release);
+
+	size_t fIdx = world.freeCount.fetch_add(1, std::memory_order_relaxed);
+	world.freeSlots[fIdx] = slot;
+	world.count.fetch_sub(1, std::memory_order_release);
+}
+
+} // namespace Physics
+
+// =================================================================================================
 // CONTEXT IMPLEMENTATION
 // =================================================================================================
 
@@ -339,6 +479,8 @@ struct PhysicsContext::Impl {
 	class CharacterListener : public JPH::CharacterContactListener {
 		// Implement if you need character-specific collision logic
 	} characterListener;
+
+	std::vector<ShapeEntry> shapeCache;
 };
 
 PhysicsContext::PhysicsContext() : _impl(std::make_unique<Impl>()) {
@@ -358,44 +500,72 @@ PhysicsContext::PhysicsContext() : _impl(std::make_unique<Impl>()) {
 	world.capacity = maxBodies;
 	world.slotCapacity = maxBodies;
 
-	// 32-byte alignment for Position Strides (Double3 or Float4 + padding)
+	// --- 1. SIMD Aligned Buffers (Shadow State) ---
 	world.positions = AllocateAligned<JPH::Real>(maxBodies * 4, 32);
 	world.prevPositions = AllocateAligned<JPH::Real>(maxBodies * 4, 32);
-
-	// 16-byte alignment for Rotation/Velocity Strides (Float4)
 	world.rotations = AllocateAligned<float>(maxBodies * 4, 16);
 	world.prevRotations = AllocateAligned<float>(maxBodies * 4, 16);
 	world.linearVelocities = AllocateAligned<float>(maxBodies * 4, 16);
 	world.angularVelocities = AllocateAligned<float>(maxBodies * 4, 16);
 
-	// Standard alignment is fine for these
+	// --- 2. Standard ECS Mapping Tables ---
 	world.bodyIDs = new JPH::BodyID[maxBodies]();
-	world.joltBodyPtrs = new const void*[maxBodies]();
+	world.materialIDs = new uint32_t[maxBodies]();
+	world.userData = new uint64_t[maxBodies]();
+
 	world.slotToDense = new uint32_t[maxBodies]();
 	world.denseToSlot = new uint32_t[maxBodies]();
+	world.freeSlots = new uint32_t[maxBodies]();
+
+	world.categories = new uint32_t[maxBodies]();
+	world.masks = new uint32_t[maxBodies]();
+
+	// --- 3. Atomic State & Handle Tables ---
+	world.slotStates = new ZHLN::Atomic<uint8_t>[maxBodies]();
 	world.generations = new ZHLN::Atomic<uint32_t>[maxBodies]();
 
+	// idToHandleMap is sized to Jolt's body limit + 1
+	world.idToHandleMap = new ZHLN::Atomic<uint64_t>[maxBodies + 1]();
+	world.joltBodyPtrs = new const void*[maxBodies + 1]();
+
+	// --- 4. Initialize Free Stack (Culverin Style) ---
+	for (uint32_t i = 0; i < maxBodies; ++i) {
+		world.generations[i].store(1, std::memory_order_relaxed);
+		world.slotStates[i].store(SLOT_EMPTY, std::memory_order_relaxed);
+		// Push indices in reverse so we pop 0, 1, 2...
+		world.freeSlots[i] = (maxBodies - 1) - i;
+	}
+
 	world.count.store(0, std::memory_order_relaxed);
+	world.freeCount.store(maxBodies, std::memory_order_relaxed);
 }
 
 PhysicsContext::~PhysicsContext() {
 	auto& world = _impl->world;
 
-	// Use the matching alignment values
+	// 1. Deallocate Aligned SIMD Buffers
 	DeallocateAligned(world.positions, 32);
 	DeallocateAligned(world.prevPositions, 32);
-
 	DeallocateAligned(world.rotations, 16);
 	DeallocateAligned(world.prevRotations, 16);
 	DeallocateAligned(world.linearVelocities, 16);
 	DeallocateAligned(world.angularVelocities, 16);
 
-	// Normal delete[] for standard allocations
+	// 2. Delete Standard ECS Tables
 	delete[] world.bodyIDs;
-	delete[] world.joltBodyPtrs;
+	delete[] world.materialIDs;
+	delete[] world.userData;
 	delete[] world.slotToDense;
 	delete[] world.denseToSlot;
+	delete[] world.freeSlots;
+	delete[] world.categories;
+	delete[] world.masks;
+
+	// 3. Delete Atomic State & Handle Tables
+	delete[] world.slotStates;
 	delete[] world.generations;
+	delete[] world.idToHandleMap;
+	delete[] world.joltBodyPtrs;
 }
 
 void PhysicsContext::Step(float deltaTime) {
@@ -456,147 +626,193 @@ const Physics::PhysicsWorld& PhysicsContext::GetWorld() const {
 	return _impl->world;
 }
 
+namespace Physics {
+
+// =================================================================================================
+// CULVERIN SHAPE CACHING
+// =================================================================================================
+
+JPH::ShapeRefC GetOrCreateShape(PhysicsContext& ctx, Physics::ShapeType type, float p1, float p2,
+								float p3, float p4) {
+	auto* impl = ctx.GetImpl();
+	std::lock_guard<Mutex> lock(impl->world.shadowLock);
+
+	// 1. Normalization (Matches Culverin logic for maximum cache hits)
+	const float np1 = (p1 < 1e-3f && type != Physics::ShapeType::Plane) ? 1e-3f : p1;
+	const float np2 = (p2 < 1e-3f && type != Physics::ShapeType::Plane) ? 1e-3f : p2;
+	const float np3 = (p3 < 1e-3f && type != Physics::ShapeType::Plane) ? 1e-3f : p3;
+	const float np4 = (type == Physics::ShapeType::Plane) ? p4 : 0.0f;
+
+	// 2. Cache Lookup
+	for (const auto& entry : impl->shapeCache) {
+		if (entry.key.type == static_cast<uint32_t>(type) && entry.key.p1 == np1 &&
+			entry.key.p2 == np2 && entry.key.p3 == np3 && entry.key.p4 == np4) {
+			return entry.shape;
+		}
+	}
+
+	// 3. Jolt Creation
+	JPH::ShapeRefC shape;
+	switch (type) {
+		case Physics::ShapeType::Box: {
+			JPH::BoxShapeSettings s(JPH::Vec3(np1, np2, np3), 0.05f);
+			shape = s.Create().Get();
+			break;
+		}
+		case Physics::ShapeType::Sphere: {
+			JPH::SphereShapeSettings s(np1);
+			shape = s.Create().Get();
+			break;
+		}
+		case Physics::ShapeType::Capsule: {
+			JPH::CapsuleShapeSettings s(np1, np2);
+			shape = s.Create().Get();
+			break;
+		}
+		case Physics::ShapeType::Cylinder: {
+			JPH::CylinderShapeSettings s(np1, np2, 0.05f);
+			shape = s.Create().Get();
+			break;
+		}
+		case Physics::ShapeType::Plane: {
+			JPH::Plane plane(JPH::Vec3(np1, np2, np3), np4);
+			JPH::PlaneShapeSettings s(plane, nullptr, 1000.0f);
+			shape = s.Create().Get();
+			break;
+		}
+	}
+
+	if (!shape) {
+		ZHLN::Panic("Failed to create Jolt Shape! Degenerate parameters?");
+	}
+
+	// 4. Store in cache
+	impl->shapeCache.push_back({ShapeKey{static_cast<uint32_t>(type), np1, np2, np3, np4}, shape});
+
+	return shape;
+}
+
 // =================================================================================================
 // PROCEDURAL API
 // =================================================================================================
 
-namespace Physics {
+JPH::BodyID GetBodyID(const PhysicsWorld& world, EntityHandle handle) {
+	if (handle.index >= world.slotCapacity)
+		return JPH::BodyID();
 
-// Simple wrapper to wire up the Body -> SoA mapping correctly
-static void RegisterBodyToWorld(PhysicsWorld& world, JPH::BodyID id, EntityHandle handle) {
-	size_t dense_idx = world.count.fetch_add(1, std::memory_order_relaxed);
-
-	if (dense_idx < world.capacity && handle.index < world.slotCapacity) {
-		world.bodyIDs[dense_idx] = id;
-		world.slotToDense[handle.index] = static_cast<uint32_t>(dense_idx);
-		world.denseToSlot[dense_idx] = handle.index;
-		world.generations[handle.index].store(handle.generation, std::memory_order_relaxed);
+	// Check generation: Source of Truth check
+	if (world.generations[handle.index].load(std::memory_order_acquire) != handle.generation) {
+		return JPH::BodyID(); // Stale handle
 	}
+
+	uint32_t dense = world.slotToDense[handle.index];
+	return world.bodyIDs[dense];
 }
 
-void DestroyBody(PhysicsContext& ctx, JPH::BodyID bodyID, EntityHandle handle) {
+void DestroyBody(PhysicsContext& ctx, EntityHandle handle) {
 	auto& world = ctx.GetImpl()->world;
 
-	// 1. Remove from Jolt Physics
-	world.bodyInterface->RemoveBody(bodyID);
-	world.bodyInterface->DestroyBody(bodyID);
-
-	// 2. Clear from pointer tracking (Prevents Sync pass from reading it)
-	const uint32_t joltIdx = bodyID.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
-	if (joltIdx < world.maxJoltBodies) {
-		world.joltBodyPtrs[joltIdx] = nullptr;
-	}
-
-	// 3. Swap-and-Pop in the SoA Arrays
-	// We MUST lock the shadow buffer because the Renderer might be reading it right now!
+	// Lock the shadow buffer so the renderer doesn't read half-moved data
 	std::lock_guard<Mutex> lock(world.shadowLock);
 
 	const uint32_t slot = handle.index;
 	if (slot >= world.slotCapacity)
 		return;
 
-	// Verify handle generation (ensure we aren't deleting a stale handle)
-	const uint32_t expectedGen = world.generations[slot].load(std::memory_order_acquire);
-	if (expectedGen != handle.generation)
+	// Generational safety (The Culverin Way)
+	if (world.generations[slot].load(std::memory_order_acquire) != handle.generation)
 		return;
 
-	const uint32_t denseIdx = world.slotToDense[slot];
-	const uint32_t lastDense =
-		static_cast<uint32_t>(world.count.load(std::memory_order_acquire)) - 1;
+	// Resolve internal Jolt ID
+	uint32_t dense = world.slotToDense[handle.index];
+	JPH::BodyID bodyID = world.bodyIDs[dense];
 
-	// Perform the Dense Pack if it's not already the last item
-	if (denseIdx != lastDense) {
-		// --- 3A: Move Physics Data ---
-		// Positions (Stride of 4)
-		world.positions[denseIdx * 4 + 0] = world.positions[lastDense * 4 + 0];
-		world.positions[denseIdx * 4 + 1] = world.positions[lastDense * 4 + 1];
-		world.positions[denseIdx * 4 + 2] = world.positions[lastDense * 4 + 2];
-		world.positions[denseIdx * 4 + 3] = world.positions[lastDense * 4 + 3];
+	// 1. Unmap Jolt ID from Handle
+	const uint32_t joltIdx = bodyID.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
+	world.idToHandleMap[joltIdx].store(0, std::memory_order_release);
+	world.joltBodyPtrs[joltIdx] = nullptr;
 
-		world.prevPositions[denseIdx * 4 + 0] = world.prevPositions[lastDense * 4 + 0];
-		world.prevPositions[denseIdx * 4 + 1] = world.prevPositions[lastDense * 4 + 1];
-		world.prevPositions[denseIdx * 4 + 2] = world.prevPositions[lastDense * 4 + 2];
-		world.prevPositions[denseIdx * 4 + 3] = world.prevPositions[lastDense * 4 + 3];
+	// 2. Physical Removal
+	world.bodyInterface->RemoveBody(bodyID);
+	world.bodyInterface->DestroyBody(bodyID);
 
-		// Rotations & Velocities (Stride of 4)
-		for (int i = 0; i < 4; ++i) {
-			world.rotations[denseIdx * 4 + i] = world.rotations[lastDense * 4 + i];
-			world.prevRotations[denseIdx * 4 + i] = world.prevRotations[lastDense * 4 + i];
-			world.linearVelocities[denseIdx * 4 + i] = world.linearVelocities[lastDense * 4 + i];
-			world.angularVelocities[denseIdx * 4 + i] = world.angularVelocities[lastDense * 4 + i];
-		}
-
-		// --- 3B: Move Metadata ---
-		world.bodyIDs[denseIdx] = world.bodyIDs[lastDense];
-
-		// --- 3C: Rewire Indirection Map ---
-		// We need to find which "Slot" the last item belonged to so we can update its map
-		// Note: You don't currently have `denseToSlot` in ZHLN, so we must add it!
-		const uint32_t moverSlot = world.denseToSlot[lastDense];
-		world.slotToDense[moverSlot] = denseIdx;
-		world.denseToSlot[denseIdx] = moverSlot;
-	}
-
-	// 4. Invalidate Handle Generation & Decrement Count
-	world.generations[slot].fetch_add(1, std::memory_order_release);
-	world.count.fetch_sub(1, std::memory_order_release);
-
-	// Optional: Push `slot` to a `freeSlots` stack if you want to reuse ECS indices.
+	// 3. Compact the SoA
+	RemoveBodySlot(world, slot);
 }
 
-JPH::BodyID CreateStaticFloor(PhysicsContext& ctx, float extent, EntityHandle handle) {
+/**
+ * @brief Generalized Rigid Body creation.
+ */
+EntityHandle CreateRigidBody(PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::RVec3Arg pos,
+							 JPH::QuatArg rot, JPH::EMotionType motion, JPH::ObjectLayer layer) {
 	auto& world = ctx.GetImpl()->world;
+	std::lock_guard<Mutex> lock(world.shadowLock);
 
-	JPH::BoxShapeSettings shapeSettings(JPH::Vec3(extent, 1.0f, extent));
-	JPH::ShapeRefC shape = shapeSettings.Create().Get();
+	// Engine allocates the identity!
+	EntityHandle handle = AllocateHandle(world);
 
-	JPH::BodyCreationSettings settings(shape, JPH::RVec3(0.0, -1.0, 0.0), JPH::Quat::sIdentity(),
-									   JPH::EMotionType::Static, Layers::NON_MOVING);
+	JPH::BodyCreationSettings settings(shape, pos, rot, motion, layer);
 	settings.mUserData = handle.Pack();
+	if (motion == JPH::EMotionType::Dynamic)
+		settings.mAllowSleeping = true;
 
-	JPH::BodyID id =
-		world.bodyInterface->CreateAndAddBody(settings, JPH::EActivation::DontActivate);
-	RegisterBodyToWorld(world, id, handle);
-	return id;
+	JPH::BodyID id = world.bodyInterface->CreateAndAddBody(
+		settings, (motion == JPH::EMotionType::Static) ? JPH::EActivation::DontActivate
+													   : JPH::EActivation::Activate);
+
+	// Map into the Dense SoA
+	uint32_t dense = static_cast<uint32_t>(world.count.fetch_add(1, std::memory_order_relaxed));
+	world.bodyIDs[dense] = id;
+	world.slotToDense[handle.index] = dense;
+	world.denseToSlot[dense] = handle.index;
+	world.slotStates[handle.index].store(SLOT_ALIVE, std::memory_order_release);
+
+	// Update Fast-Mapping for callbacks
+	const uint32_t j_idx = id.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
+	world.idToHandleMap[j_idx].store(handle.Pack(), std::memory_order_release);
+
+	// Warm up shadow buffers so the very first render frame is correct
+	world.positions[dense * 4 + 0] = pos.GetX();
+	world.positions[dense * 4 + 1] = pos.GetY();
+	world.positions[dense * 4 + 2] = pos.GetZ();
+	world.positions[dense * 4 + 3] = 0.0;
+
+	world.rotations[dense * 4 + 0] = rot.GetX();
+	world.rotations[dense * 4 + 1] = rot.GetY();
+	world.rotations[dense * 4 + 2] = rot.GetZ();
+	world.rotations[dense * 4 + 3] = rot.GetW();
+
+	return handle;
 }
 
-JPH::BodyID CreateDynamicBox(PhysicsContext& ctx, JPH::RVec3Arg position, JPH::Vec3Arg halfExtents,
-							 EntityHandle handle) {
-	auto& world = ctx.GetImpl()->world;
-
-	JPH::BoxShapeSettings shapeSettings(halfExtents);
-	JPH::ShapeRefC shape = shapeSettings.Create().Get();
-
-	JPH::BodyCreationSettings settings(shape, position, JPH::Quat::sIdentity(),
-									   JPH::EMotionType::Dynamic, Layers::MOVING);
-	settings.mUserData = handle.Pack();
-
-	JPH::BodyID id = world.bodyInterface->CreateAndAddBody(settings, JPH::EActivation::Activate);
-	RegisterBodyToWorld(world, id, handle);
-	return id;
-}
-
-EntityHandle CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position, EntityHandle handle) {
+EntityHandle CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position) {
 	auto* impl = ctx.GetImpl();
+	auto& world = impl->world;
+	std::lock_guard<Mutex> lock(world.shadowLock);
 
-	// 1. Setup Settings
+	EntityHandle handle = AllocateHandle(world);
+
+	// Using the cache for the character shape
+	JPH::ShapeRefC charShape = GetOrCreateShape(ctx, ShapeType::Capsule, 0.5f, 0.3f);
+
 	JPH::CharacterVirtualSettings settings;
-	settings.mShape = new JPH::CapsuleShape(0.5f, 0.3f);
-
-	// 2. Create
+	settings.mShape = charShape;
 	auto character = new JPH::CharacterVirtual(&settings, position, JPH::Quat::sIdentity(),
 											   &impl->physicsSystem);
 	character->SetUserData(handle.Pack());
 
-	// 3. Store in the generational map
-	if (handle.index >= impl->characterMap.size()) {
+	// Character Management
+	if (handle.index >= impl->characterMap.size())
 		impl->characterMap.resize(handle.index + 1);
-	}
 	impl->characterMap[handle.index] = character;
 	impl->activeCharacters.push_back(character);
 
-	// 4. Register in SoA (Passing Invalid BodyID to signify it's a Character)
-	RegisterBodyToWorld(impl->world, JPH::BodyID(), handle);
+	// SoA Sync
+	uint32_t dense = static_cast<uint32_t>(world.count.fetch_add(1, std::memory_order_relaxed));
+	world.slotToDense[handle.index] = dense;
+	world.denseToSlot[dense] = handle.index;
+	world.bodyIDs[dense] = JPH::BodyID(); // Characters don't have Jolt BodyIDs
+	world.slotStates[handle.index].store(SLOT_CHARACTER, std::memory_order_release);
 
 	return handle;
 }
@@ -614,8 +830,26 @@ void SetCharacterVelocity(PhysicsContext& ctx, EntityHandle handle, JPH::Vec3Arg
 	}
 }
 
-JPH::RVec3 GetPosition(const PhysicsContext& ctx, JPH::BodyID bodyID) {
-	return ctx.GetImpl()->world.bodyInterface->GetPosition(bodyID);
+JPH::Vec3 GetCharacterVelocity(const PhysicsContext& ctx, EntityHandle handle) {
+	auto* impl = ctx.GetImpl();
+	if (handle.index < impl->characterMap.size()) {
+		auto& character = impl->characterMap[handle.index];
+		if (character)
+			return character->GetLinearVelocity();
+	}
+	return JPH::Vec3::sZero();
+}
+
+bool IsCharacterOnGround(const PhysicsContext& ctx, EntityHandle handle) {
+	auto* impl = ctx.GetImpl();
+	if (handle.index < impl->characterMap.size()) {
+		auto& character = impl->characterMap[handle.index];
+		if (character) {
+			// Jolt returns "Supported" if we are standing on something
+			return character->GetGroundState() == JPH::CharacterVirtual::EGroundState::OnGround;
+		}
+	}
+	return false;
 }
 
 auto GetPositionBuffer(const PhysicsContext& ctx) -> ZHLN::BufferView {
