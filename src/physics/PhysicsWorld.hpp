@@ -65,6 +65,8 @@ std::pair<const ContactEvent*, size_t> GetContactEvents(const PhysicsContext& ct
  * @brief Thread-Safe, Cache-Isolated Structure of Arrays (SoA) Physics World.
  * No default initializers allowed to maintain Standard Layout / Triviality rules.
  */
+std::pair<const ContactEvent*, size_t> GetContactEvents(const PhysicsContext& ctx);
+
 struct PhysicsWorld {
 	// ========================================================================
 	// BUCKET 1: JOLT CORE (Cold)
@@ -89,7 +91,6 @@ struct PhysicsWorld {
 	size_t slotCapacity;
 	ZHLN::Atomic<size_t> freeCount;
 
-	// SIMD-Aligned SoA Buffers [Stride 4]
 	JPH::Real* positions;
 	JPH::Real* prevPositions;
 	float* rotations;
@@ -97,7 +98,6 @@ struct PhysicsWorld {
 	float* linearVelocities;
 	float* angularVelocities;
 
-	// Standard SoA Buffers
 	JPH::BodyID* bodyIDs;
 	uint32_t* materialIDs;
 	uint64_t* userData;
@@ -109,9 +109,8 @@ struct PhysicsWorld {
 	ZHLN::Atomic<bool> isStepping;
 	mutable ZHLN::Atomic<int> viewExportCount;
 
-	// --- Raw Double-Buffered Command Queue ---
-	Physics::Command* commandQueue;
-	Physics::Command* commandQueueSpare;
+	Command* commandQueue;
+	Command* commandQueueSpare;
 	size_t commandCount;
 	size_t commandCapacity;
 
@@ -120,7 +119,7 @@ struct PhysicsWorld {
 	// ========================================================================
 	alignas(CACHE_LINE) const void** joltBodyPtrs;
 
-	ZHLN::Atomic<uint64_t>* idToHandleMap; // Maps JPH::BodyID.GetIndex() -> EntityHandle
+	ZHLN::Atomic<uint64_t>* idToHandleMap;
 	uint32_t* slotToDense;
 	uint32_t* denseToSlot;
 	uint32_t* freeSlots;
@@ -128,7 +127,7 @@ struct PhysicsWorld {
 	uint32_t* categories;
 	uint32_t* masks;
 
-	ZHLN::Atomic<uint8_t>* slotStates; // Uses SlotState enum
+	ZHLN::Atomic<uint8_t>* slotStates;
 	ZHLN::Atomic<uint32_t>* generations;
 
 	// ========================================================================
@@ -137,6 +136,20 @@ struct PhysicsWorld {
 	alignas(CACHE_LINE) ContactEvent* contactBuffer;
 	ZHLN::Atomic<size_t> contactCount;
 	size_t contactCapacity;
+
+	// ========================================================================
+	// METHODS
+	// ========================================================================
+
+	// Explicit lifecycle methods (keeps struct Trivial)
+	void Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem, JPH::JobSystem* inJobSystem,
+			  JPH::TempAllocator* inTempAlloc);
+	void Shutdown();
+
+	// Data Management
+	void ResizeBuffers(size_t newCapacity);
+	EntityHandle AllocateHandle();
+	void RemoveBodySlot(uint32_t slot);
 };
 
 // Guarantee predictable layout for raw memory mapping and SIMD logic

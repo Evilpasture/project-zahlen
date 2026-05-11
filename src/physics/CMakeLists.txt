@@ -2,6 +2,7 @@ add_library(zahlen_physics STATIC
     Physics.cpp
     Physics.hpp
     PhysicsWorld.hpp
+    PhysicsWorld.cpp
     PhysicsContactEvents.hpp
 )
 

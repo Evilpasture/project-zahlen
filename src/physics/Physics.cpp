@@ -357,103 +357,8 @@ inline void SyncCharacters(const JPH::Array<JPH::CharacterVirtual*>& characters,
 } // namespace Physics::Sync
 
 // =================================================================================================
-// CULVERIN-STYLE LIFECYCLE (SOA Plumbing)
+// CONTEXT IMPLEMENTATION
 // =================================================================================================
-
-namespace Physics {
-
-static void ResizeBuffers(PhysicsWorld& world, size_t newCapacity) {
-	if (newCapacity <= world.capacity)
-		return;
-
-	size_t oldCap = world.capacity;
-	world.capacity = newCapacity;
-	world.slotCapacity = newCapacity;
-
-	// 1. SIMD Aligned Buffers
-	ReallocateAligned(world.positions, oldCap * 4, newCapacity * 4, 32);
-	ReallocateAligned(world.prevPositions, oldCap * 4, newCapacity * 4, 32);
-	ReallocateAligned(world.rotations, oldCap * 4, newCapacity * 4, 16);
-	ReallocateAligned(world.prevRotations, oldCap * 4, newCapacity * 4, 16);
-	ReallocateAligned(world.linearVelocities, oldCap * 4, newCapacity * 4, 16);
-	ReallocateAligned(world.angularVelocities, oldCap * 4, newCapacity * 4, 16);
-
-	// 2. Standard Buffers
-	ReallocateStandard(world.bodyIDs, oldCap, newCapacity);
-	ReallocateStandard(world.materialIDs, oldCap, newCapacity);
-	ReallocateStandard(world.userData, oldCap, newCapacity);
-	ReallocateStandard(world.slotToDense, oldCap, newCapacity);
-	ReallocateStandard(world.denseToSlot, oldCap, newCapacity);
-	ReallocateStandard(world.freeSlots, oldCap, newCapacity);
-	ReallocateStandard(world.categories, oldCap, newCapacity);
-	ReallocateStandard(world.masks, oldCap, newCapacity);
-	ReallocateStandard(world.generations, oldCap, newCapacity);
-	ReallocateStandard(world.slotStates, oldCap, newCapacity);
-
-	// 3. Populate new free slots
-	size_t freeIdx = world.freeCount.load(std::memory_order_relaxed);
-	for (size_t i = oldCap; i < newCapacity; i++) {
-		world.generations[i].store(1, std::memory_order_relaxed);
-		world.slotStates[i].store(SLOT_EMPTY, std::memory_order_relaxed);
-		world.freeSlots[freeIdx++] = static_cast<uint32_t>(i);
-	}
-	world.freeCount.store(freeIdx, std::memory_order_release);
-}
-
-static EntityHandle AllocateHandle(PhysicsWorld& world) {
-	size_t available = world.freeCount.load(std::memory_order_acquire);
-	if (available == 0) {
-		ResizeBuffers(world, world.capacity * 2);
-		available = world.freeCount.load(std::memory_order_acquire);
-	}
-
-	uint32_t slot = world.freeSlots[--available];
-	world.freeCount.store(available, std::memory_order_release);
-
-	uint32_t gen = world.generations[slot].load(std::memory_order_relaxed);
-	return EntityHandle{.index = slot, .generation = gen};
-}
-
-static void RemoveBodySlot(PhysicsWorld& world, uint32_t slot) {
-	const uint32_t denseIdx = world.slotToDense[slot];
-	const uint32_t lastDense =
-		static_cast<uint32_t>(world.count.load(std::memory_order_acquire)) - 1;
-
-	// THE SWAP-TO-DELETE (Dense Pack)
-	if (denseIdx != lastDense) {
-		// --- Move SIMD Data (Stride 4) ---
-		for (int i = 0; i < 4; ++i) {
-			world.positions[denseIdx * 4 + i] = world.positions[lastDense * 4 + i];
-			world.prevPositions[denseIdx * 4 + i] = world.prevPositions[lastDense * 4 + i];
-			world.rotations[denseIdx * 4 + i] = world.rotations[lastDense * 4 + i];
-			world.prevRotations[denseIdx * 4 + i] = world.prevRotations[lastDense * 4 + i];
-			world.linearVelocities[denseIdx * 4 + i] = world.linearVelocities[lastDense * 4 + i];
-			world.angularVelocities[denseIdx * 4 + i] = world.angularVelocities[lastDense * 4 + i];
-		}
-
-		// --- Move Metadata ---
-		world.bodyIDs[denseIdx] = world.bodyIDs[lastDense];
-		world.userData[denseIdx] = world.userData[lastDense];
-		world.categories[denseIdx] = world.categories[lastDense];
-		world.masks[denseIdx] = world.masks[lastDense];
-		world.materialIDs[denseIdx] = world.materialIDs[lastDense];
-
-		// --- The Map Rewire ---
-		const uint32_t moverSlot = world.denseToSlot[lastDense];
-		world.slotToDense[moverSlot] = denseIdx;
-		world.denseToSlot[denseIdx] = moverSlot;
-	}
-
-	// HOUSEKEEPING
-	world.generations[slot].fetch_add(1, std::memory_order_relaxed);
-	world.slotStates[slot].store(SLOT_EMPTY, std::memory_order_release);
-
-	size_t fIdx = world.freeCount.fetch_add(1, std::memory_order_relaxed);
-	world.freeSlots[fIdx] = slot;
-	world.count.fetch_sub(1, std::memory_order_release);
-}
-
-} // namespace Physics
 
 // =================================================================================================
 // CONTEXT IMPLEMENTATION
@@ -472,18 +377,11 @@ struct PhysicsContext::Impl {
 
 	Physics::ContactListener contactListener{&world};
 
-	// Map: Entity Index -> Character Object
-	// We use JPH::Ref to keep the character alive
 	JPH::Array<JPH::Ref<JPH::CharacterVirtual>> characterMap;
-
-	// Fast list for the Step() function to iterate over
 	JPH::Array<JPH::CharacterVirtual*> activeCharacters;
 
-	// We need a listener for character-specific interactions
 	class CharacterListener : public JPH::CharacterContactListener {
-		// Implement if you need character-specific collision logic
 	} characterListener;
-
 	std::vector<ShapeEntry> shapeCache;
 };
 
@@ -492,98 +390,14 @@ PhysicsContext::PhysicsContext() : _impl(std::make_unique<Impl>()) {
 
 	_impl->physicsSystem.Init(maxBodies, 0, maxBodies, maxBodies, _impl->bpLayerInterface,
 							  _impl->objVsBpFilter, _impl->objVsObjFilter);
-	auto& world = _impl->world;
-	std::memset(&world, 0, sizeof(Physics::PhysicsWorld));
 
-	world.system = &_impl->physicsSystem;
-	world.bodyInterface = &_impl->physicsSystem.GetBodyInterface();
-	world.jobSystem = &_impl->jobSystem;
-	world.tempAllocator = &_impl->tempAllocator;
-	world.maxJoltBodies = maxBodies;
-
-	world.capacity = maxBodies;
-	world.slotCapacity = maxBodies;
-
-	// --- 1. SIMD Aligned Buffers (Shadow State) ---
-	world.positions = AllocateAligned<JPH::Real>(maxBodies * 4, 32);
-	world.prevPositions = AllocateAligned<JPH::Real>(maxBodies * 4, 32);
-	world.rotations = AllocateAligned<float>(maxBodies * 4, 16);
-	world.prevRotations = AllocateAligned<float>(maxBodies * 4, 16);
-	world.linearVelocities = AllocateAligned<float>(maxBodies * 4, 16);
-	world.angularVelocities = AllocateAligned<float>(maxBodies * 4, 16);
-
-	// --- 2. Standard ECS Mapping Tables ---
-	world.bodyIDs = new JPH::BodyID[maxBodies]();
-	world.materialIDs = new uint32_t[maxBodies]();
-	world.userData = new uint64_t[maxBodies]();
-
-	world.slotToDense = new uint32_t[maxBodies]();
-	world.denseToSlot = new uint32_t[maxBodies]();
-	world.freeSlots = new uint32_t[maxBodies]();
-
-	world.categories = new uint32_t[maxBodies]();
-	world.masks = new uint32_t[maxBodies]();
-
-	// --- 3. Atomic State & Handle Tables ---
-	world.slotStates = new ZHLN::Atomic<uint8_t>[maxBodies]();
-	world.generations = new ZHLN::Atomic<uint32_t>[maxBodies]();
-
-	// idToHandleMap is sized to Jolt's body limit + 1
-	world.idToHandleMap = new ZHLN::Atomic<uint64_t>[maxBodies + 1]();
-	world.joltBodyPtrs = new const void*[maxBodies + 1]();
-
-	// --- 4. Initialize Free Stack (Culverin Style) ---
-	for (uint32_t i = 0; i < maxBodies; ++i) {
-		world.generations[i].store(1, std::memory_order_relaxed);
-		world.slotStates[i].store(SLOT_EMPTY, std::memory_order_relaxed);
-		// Push indices in reverse so we pop 0, 1, 2...
-		world.freeSlots[i] = (maxBodies - 1) - i;
-	}
-
-	world.count.store(0, std::memory_order_relaxed);
-	world.freeCount.store(maxBodies, std::memory_order_relaxed);
-
-	// --- 5. Allocate Command Queues ---
-	world.commandCapacity = 64;
-	world.commandCount = 0;
-	world.commandQueue = new Physics::Command[world.commandCapacity]();
-	world.commandQueueSpare = new Physics::Command[world.commandCapacity]();
-
-	world.contactBuffer = static_cast<Physics::ContactEvent*>(
-		::operator new[](world.contactCapacity * sizeof(Physics::ContactEvent),
-						 std::align_val_t{sizeof(Physics::ContactEvent)}));
+	// One-liner Initialization!
+	_impl->world.Init(maxBodies, &_impl->physicsSystem, &_impl->jobSystem, &_impl->tempAllocator);
 }
 
 PhysicsContext::~PhysicsContext() {
-	auto& world = _impl->world;
-
-	// 1. Deallocate Aligned SIMD Buffers
-	DeallocateAligned(world.positions, 32);
-	DeallocateAligned(world.prevPositions, 32);
-	DeallocateAligned(world.rotations, 16);
-	DeallocateAligned(world.prevRotations, 16);
-	DeallocateAligned(world.linearVelocities, 16);
-	DeallocateAligned(world.angularVelocities, 16);
-
-	// 2. Delete Standard ECS Tables
-	delete[] world.bodyIDs;
-	delete[] world.materialIDs;
-	delete[] world.userData;
-	delete[] world.slotToDense;
-	delete[] world.denseToSlot;
-	delete[] world.freeSlots;
-	delete[] world.categories;
-	delete[] world.masks;
-
-	// 3. Delete Atomic State & Handle Tables
-	delete[] world.slotStates;
-	delete[] world.generations;
-	delete[] world.idToHandleMap;
-	delete[] world.joltBodyPtrs;
-
-	// 4. Delete Command Queues
-	delete[] world.commandQueue;
-	delete[] world.commandQueueSpare;
+	// One-liner Shutdown!
+	_impl->world.Shutdown();
 }
 
 void PhysicsContext::Step(float deltaTime) {
@@ -614,8 +428,6 @@ void PhysicsContext::Step(float deltaTime) {
 
 			if (cmd.type == Physics::CommandType::DestroyBody) {
 				const uint32_t slot = cmd.handle.index;
-
-				// Final check in case of overlapping logic
 				if (world.generations[slot].load(std::memory_order_acquire) !=
 					cmd.handle.generation)
 					continue;
@@ -623,18 +435,16 @@ void PhysicsContext::Step(float deltaTime) {
 				uint32_t dense = world.slotToDense[slot];
 				JPH::BodyID bodyID = world.bodyIDs[dense];
 
-				// 1. Unmap Jolt ID from Handle
 				const uint32_t joltIdx =
 					bodyID.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
 				world.idToHandleMap[joltIdx].store(0, std::memory_order_release);
 				world.joltBodyPtrs[joltIdx] = nullptr;
 
-				// 2. Physical Removal
 				world.bodyInterface->RemoveBody(bodyID);
 				world.bodyInterface->DestroyBody(bodyID);
 
-				// 3. Compact the SoA (This resets state to SLOT_EMPTY)
-				Physics::RemoveBodySlot(world, slot);
+				// Replaced static call with member function
+				world.RemoveBodySlot(slot);
 			}
 		}
 	}
@@ -826,7 +636,7 @@ EntityHandle CreateRigidBody(PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::RVe
 	std::lock_guard<Mutex> lock(world.shadowLock);
 
 	// Engine allocates the identity!
-	EntityHandle handle = AllocateHandle(world);
+	EntityHandle handle = world.AllocateHandle();
 
 	JPH::BodyCreationSettings settings(shape, pos, rot, motion, layer);
 	settings.mUserData = handle.Pack();
@@ -869,7 +679,7 @@ EntityHandle CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position) {
 	JPH::ShapeRefC charShape = GetOrCreateShape(ctx, ShapeType::Capsule, 0.5f, 0.3f);
 	std::lock_guard<Mutex> lock(world.shadowLock);
 
-	EntityHandle handle = AllocateHandle(world);
+	EntityHandle handle = world.AllocateHandle();
 
 	JPH::CharacterVirtualSettings settings;
 	settings.mShape = charShape;
