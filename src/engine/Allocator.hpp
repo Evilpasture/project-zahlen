@@ -1,7 +1,7 @@
 #pragma once
 
-#include </detail/Atomic.hpp>
 #include <cstddef>
+#include <detail/Atomic.hpp>
 #include <memory_resource>
 
 namespace ZHLN {

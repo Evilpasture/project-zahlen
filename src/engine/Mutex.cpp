@@ -1,5 +1,7 @@
-#include <Zahlen/Mutex.hpp>
-#include <Zahlen/Thread.hpp>
+#include "Mutex.hpp"
+
+#include "Thread.hpp"
+
 #include <bit>
 #include <cassert>
 #include <condition_variable>

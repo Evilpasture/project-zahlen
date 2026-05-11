@@ -1,7 +1,7 @@
 #pragma once
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
-#include <Zahlen/detail/String.hpp>
+#include <detail/String.hpp>
 #include <memory>
 
 namespace ZHLN {

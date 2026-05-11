@@ -1,6 +1,7 @@
+#include "Platform.hpp"
+
 #include <GLFW/glfw3.h> // NEW
 #include <Zahlen/Input.hpp>
-#include <Zahlen/Platform.hpp>
 #include <Zahlen/Window.hpp>
 
 namespace ZHLN {

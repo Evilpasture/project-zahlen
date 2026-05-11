@@ -1,9 +1,8 @@
-#include <Zahlen/Thread.hpp>
+#include "Thread.hpp"
+
 #include <cstdlib>
 #include <cstring>
-
-#include <Zahlen/detail/Platform.hpp>
-
+#include <detail/Platform.hpp>
 
 // Defined in mag_asm.S
 extern "C" void ZHLN_Switch(void** old_sp, void* new_sp);

@@ -1,6 +1,7 @@
+#include "Resources.hpp"
+
 #include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Math3D.hpp> // For PackNormal, PackColor, etc.
-#include <Zahlen/Resources.hpp>
 #include <vector>
 
 namespace ZHLN::AssetFactory {

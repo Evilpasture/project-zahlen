@@ -5,9 +5,9 @@
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Zahlen/Physics.hpp>
-#include <Zahlen/detail/Atomic.hpp>
-#include <Zahlen/detail/Platform.hpp>
 #include <cstdint>
+#include <detail/Atomic.hpp>
+#include <detail/Platform.hpp>
 #include <type_traits>
 
 namespace ZHLN::Physics {

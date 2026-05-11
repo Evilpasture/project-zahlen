@@ -1,4 +1,5 @@
-#include <Zahlen/Platform.hpp>
+#include "Platform.hpp"
+
 #include <Zahlen/Window.hpp>
 #include <chrono>
 #include <thread>
@@ -7,7 +8,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 // 2. Win32-specific plumbing (internally handles ifdef logic)
-#include <Zahlen/detail/Platform.hpp>
+#include <detail/Platform.hpp>
 
 #ifdef _WIN32
 
