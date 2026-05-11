@@ -73,11 +73,46 @@ void DestroyBody(PhysicsContext& ctx, EntityHandle handle);
 void SetLinearVelocity(PhysicsContext& ctx, EntityHandle handle, JPH::Vec3Arg velocity);
 void SetCharacterVelocity(PhysicsContext& ctx, EntityHandle handle, JPH::Vec3Arg velocity);
 
-// --- Queries ---
 JPH::Vec3 GetCharacterVelocity(const PhysicsContext& ctx, EntityHandle handle);
 bool IsCharacterOnGround(const PhysicsContext& ctx, EntityHandle handle);
 auto GetPositionBuffer(const PhysicsContext& ctx) -> BufferView;
 JPH::Quat GetRotation(const PhysicsContext& ctx, JPH::BodyID bodyID);
+
+// --- Data Structures ---
+struct RaycastResult {
+	EntityHandle handle{};
+	float fraction = 1.0f;
+	JPH::Vec3 normal = JPH::Vec3::sZero();
+	JPH::RVec3 position = JPH::RVec3::sZero();
+	bool hasHit = false;
+};
+
+struct ShapeCastResult {
+	EntityHandle handle{};
+	float fraction = 1.0f;
+	JPH::RVec3 contactPoint = JPH::RVec3::sZero();
+	JPH::Vec3 contactNormal = JPH::Vec3::sZero();
+	bool hasHit = false;
+};
+
+// --- Queries ---
+[[nodiscard]] RaycastResult Raycast(const PhysicsContext& ctx, JPH::RVec3Arg origin,
+									JPH::Vec3Arg direction, float maxDistance = 1000.0f,
+									EntityHandle ignore = {});
+
+[[nodiscard]] ShapeCastResult Shapecast(const PhysicsContext& ctx, JPH::ShapeRefC shape,
+										JPH::RVec3Arg pos, JPH::QuatArg rot, JPH::Vec3Arg direction,
+										float maxDistance = 1000.0f, EntityHandle ignore = {});
+
+void OverlapSphere(const PhysicsContext& ctx, JPH::RVec3Arg center, float radius,
+				   std::vector<EntityHandle>& outResults);
+
+void OverlapAABB(const PhysicsContext& ctx, JPH::RVec3Arg minBox, JPH::RVec3Arg maxBox,
+				 std::vector<EntityHandle>& outResults);
+
+// --- Internal Mapping Helpers (Now visible to Query module) ---
+JPH::BodyID GetBodyID(const PhysicsWorld& world, EntityHandle handle);
+EntityHandle GetEntityHandle(const PhysicsContext& ctx, JPH::BodyID bodyID);
 
 } // namespace Physics
 } // namespace ZHLN

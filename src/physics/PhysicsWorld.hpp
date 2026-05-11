@@ -163,4 +163,22 @@ static_assert(std::is_standard_layout_v<PhysicsWorld>);
 static_assert(std::is_trivially_copyable_v<PhysicsWorld>);
 static_assert(std::is_trivial_v<PhysicsWorld>);
 
+// --- Slot Predication Logic ---
+
+// Simplified masks for C++
+static constexpr uint32_t MASK_ACTIVE = (1U << SLOT_ALIVE) | (1U << SLOT_CHARACTER);
+static constexpr uint32_t MASK_DESTRUCTIBLE = (1U << SLOT_ALIVE) | (1U << SLOT_CHARACTER);
+
+struct SlotPredicate {
+	bool isActive;		 // Alive in Jolt right now and safe to query
+	bool isDestructible; // Can be queued for destruction
+};
+
+[[nodiscard]] inline SlotPredicate GetSlotPredicate(uint8_t state) noexcept {
+	const uint32_t stateBit = 1U << (state & 0x7);
+	bool active = (stateBit & MASK_ACTIVE) != 0;
+	bool destructible = (stateBit & MASK_DESTRUCTIBLE) != 0;
+	return {active, destructible};
+}
+
 } // namespace ZHLN::Physics

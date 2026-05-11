@@ -354,10 +354,18 @@ void DestroyBody(PhysicsContext& ctx, EntityHandle handle) {
 	if (world.generations[slot].load(std::memory_order_acquire) != handle.generation)
 		return;
 
+	const uint8_t state = world.slotStates[slot].load(std::memory_order_acquire);
+	const SlotPredicate pred = GetSlotPredicate(state);
+
+	// If it's already EMPTY or PENDING_DESTROY, don't queue it again
+	if (!pred.isDestructible) {
+		return;
+	}
+
 	// Immediately mark as doomed so queries ignore it
 	world.slotStates[slot].store(SLOT_PENDING_DESTROY, std::memory_order_release);
 
-	// Lock the shadow buffer to queue the command
+	// Lock the shadow buffer to queue the command safely
 	std::lock_guard<Mutex> lock(world.shadowLock);
 
 	// Expand raw queue if needed
