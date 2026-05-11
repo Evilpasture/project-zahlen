@@ -10,6 +10,8 @@ namespace ZHLN {
  */
 template <typename T> struct Atomic {
 	static_assert(std::is_trivially_copyable_v<T>);
+	static_assert(std::is_standard_layout_v<T>);
+	static_assert(std::is_scalar_v<T>);
 	static_assert(std::is_trivial_v<T>);
 
 	// Raw storage aligned to hardware requirements
