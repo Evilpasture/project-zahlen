@@ -94,6 +94,16 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem,
 	contactCapacity = 4096;
 	contactBuffer = static_cast<ContactEvent*>(::operator new[](
 		contactCapacity * sizeof(ContactEvent), std::align_val_t{sizeof(ContactEvent)}));
+
+	// Initialize Material Registry
+	materialCapacity = 16;
+	materialCount = 0;
+	materials = new MaterialData[materialCapacity]();
+	constraintGenerations = new ZHLN::Atomic<uint32_t>[constraintCapacity]();
+	for (uint32_t i = 0; i < constraintCapacity; ++i) {
+		constraintGenerations[i].store(1, std::memory_order_relaxed);
+		freeConstraintSlots[i] = (constraintCapacity - 1) - i;
+	}
 }
 
 void PhysicsWorld::Shutdown() {
@@ -124,6 +134,9 @@ void PhysicsWorld::Shutdown() {
 	if (contactBuffer) {
 		::operator delete[](contactBuffer, std::align_val_t{sizeof(ContactEvent)});
 	}
+
+	delete[] materials;
+	delete[] constraintGenerations;
 }
 
 void PhysicsWorld::ResizeBuffers(size_t newCapacity) {

@@ -64,9 +64,13 @@ JPH::ShapeRefC GetOrCreateShape(PhysicsContext& ctx, ShapeType type, float p1, f
 
 // --- Creation (Engine allocates and returns Handle) ---
 EntityHandle CreateRigidBody(PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::RVec3Arg pos,
-							 JPH::QuatArg rot, JPH::EMotionType motion, JPH::ObjectLayer layer);
+							 JPH::QuatArg rot, JPH::EMotionType motion, JPH::ObjectLayer layer,
+							 uint32_t materialID = 0);
 
 EntityHandle CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position);
+
+// --- Materials ---
+void RegisterMaterial(PhysicsContext& ctx, uint32_t id, float friction, float restitution);
 
 // --- Actions ---
 void DestroyBody(PhysicsContext& ctx, EntityHandle handle);

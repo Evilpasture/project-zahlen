@@ -18,12 +18,58 @@ inline constexpr std::size_t CACHE_LINE = std::hardware_destructive_interference
 inline constexpr std::size_t CACHE_LINE = 64;
 #endif
 
-enum class CommandType : uint8_t { DestroyBody };
+struct ConstraintHandle {
+	uint32_t index;
+	uint32_t generation;
+	[[nodiscard]] constexpr uint64_t Pack() const noexcept {
+		return (static_cast<uint64_t>(generation) << 32) | index;
+	}
+};
+
+enum class ConstraintType : uint8_t { Fixed, Point, Hinge, Slider, Cone, Distance };
+
+struct ConstraintParams {
+	JPH::Vec3 pivot;
+	JPH::Vec3 axis;
+	float limitMin;
+	float limitMax;
+	// Motor/Spring
+	bool hasMotor;
+	float target; // Angle or Position
+	float frequency;
+	float damping;
+	float maxForce;
+};
+
+// Protects struct Command from being non-trivial
+static_assert(std::is_trivial_v<ConstraintParams>);
+
+enum class CommandType : uint8_t {
+	DestroyBody,
+	CreateConstraint,
+	DestroyConstraint,
+	SetConstraintTarget
+};
 
 struct Command {
 	CommandType type;
-	EntityHandle handle;
+	union {
+		EntityHandle handle;	  // For DestroyBody
+		ConstraintHandle cHandle; // For DestroyConstraint
+		struct {				  // For CreateConstraint
+			ConstraintType cType;
+			EntityHandle b1;
+			EntityHandle b2;
+			ConstraintParams params;
+		} createC;
+		struct { // For SetConstraintTarget
+			ConstraintHandle targetCHandle;
+			float targetValue;
+		} setTarget;
+	};
 };
+
+static_assert(std::is_trivial_v<Command>); // Must be trivial
 
 enum SlotState : uint8_t {
 	SLOT_EMPTY = 0,
@@ -55,6 +101,17 @@ struct alignas(128) ContactEvent {
 
 static_assert(sizeof(ContactEvent) == 128,
 			  "ContactEvent must be exactly 128 bytes for L1/L2 cache isolation!");
+
+static_assert(std::is_trivial_v<ContactEvent>);
+
+// Simple container for materials
+struct MaterialData {
+	uint32_t id;
+	float friction;
+	float restitution;
+};
+
+static_assert(std::is_trivial_v<MaterialData>);
 
 /**
  * @brief Thread-Safe, Cache-Isolated Structure of Arrays (SoA) Physics World.
@@ -133,6 +190,24 @@ struct PhysicsWorld {
 	size_t contactCapacity;
 
 	// ========================================================================
+	// BUCKET 6: REGISTRIES
+	// ========================================================================
+	alignas(CACHE_LINE) MaterialData* materials;
+	size_t materialCount;
+	size_t materialCapacity;
+
+	// ========================================================================
+	// BUCKET 7: CONSTRAINTS (SoA)
+	// ========================================================================
+	alignas(CACHE_LINE) JPH::Constraint** constraints;
+	ZHLN::Atomic<uint32_t>* constraintGenerations;
+	uint8_t* constraintStates;
+	uint32_t* freeConstraintSlots;
+	size_t constraintCount;
+	size_t constraintCapacity;
+	size_t freeConstraintCount;
+
+	// ========================================================================
 	// METHODS
 	// ========================================================================
 
@@ -145,6 +220,10 @@ struct PhysicsWorld {
 	void ResizeBuffers(size_t newCapacity);
 	EntityHandle AllocateHandle();
 	void RemoveBodySlot(uint32_t slot);
+
+	// Constraints
+	ConstraintHandle AllocateConstraintHandle();
+	void RemoveConstraintSlot(uint32_t slot);
 
 	/**
 	 * @brief Synchronizes all Jolt state to the SoA World.
@@ -180,5 +259,9 @@ struct SlotPredicate {
 	bool destructible = (stateBit & MASK_DESTRUCTIBLE) != 0;
 	return {active, destructible};
 }
+
+// --- Constraints ---
+JPH::Constraint* CreateNativeConstraint(const ConstraintType type, JPH::Body* b1, JPH::Body* b2,
+										const ConstraintParams& p);
 
 } // namespace ZHLN::Physics

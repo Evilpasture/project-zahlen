@@ -209,25 +209,44 @@ void PhysicsContext::Step(float deltaTime) {
 		for (size_t i = 0; i < capturedCount; i++) {
 			const auto& cmd = capturedQueue[i];
 
-			if (cmd.type == Physics::CommandType::DestroyBody) {
-				const uint32_t slot = cmd.handle.index;
-				if (world.generations[slot].load(std::memory_order_acquire) !=
-					cmd.handle.generation)
-					continue;
+			if (cmd.type == Physics::CommandType::CreateConstraint) {
+				// 1. Resolve Bodies
+				JPH::BodyID id1 = GetBodyID(world, cmd.createC.b1);
+				JPH::BodyID id2 = GetBodyID(world, cmd.createC.b2);
 
-				uint32_t dense = world.slotToDense[slot];
-				JPH::BodyID bodyID = world.bodyIDs[dense];
+				// Use NoLock interface because we are in the Step pre-update or post-update
+				JPH::BodyLockWrite lock1(world.system->GetBodyLockInterface(), id1);
+				JPH::BodyLockWrite lock2(world.system->GetBodyLockInterface(), id2);
 
-				const uint32_t joltIdx =
-					bodyID.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
-				world.idToHandleMap[joltIdx].store(0, std::memory_order_release);
-				world.joltBodyPtrs[joltIdx] = nullptr;
+				if (lock1.Succeeded() && lock2.Succeeded()) {
+					auto* joltConstraint = CreateNativeConstraint(
+						cmd.createC.cType, &lock1.GetBody(), &lock2.GetBody(), cmd.createC.params);
 
-				world.bodyInterface->RemoveBody(bodyID);
-				world.bodyInterface->DestroyBody(bodyID);
+					if (joltConstraint) {
+						world.system->AddConstraint(joltConstraint);
 
-				// Replaced static call with member function
-				world.RemoveBodySlot(slot);
+						// Store in SoA
+						uint32_t slot = cmd.cHandle.index; // Pre-allocated in API call
+						world.constraints[slot] = joltConstraint;
+						world.constraintStates[slot] = SLOT_ALIVE;
+					}
+				}
+			} else if (cmd.type == Physics::CommandType::DestroyConstraint) {
+				const uint32_t slot = cmd.cHandle.index;
+
+				// Fix: Explicitly load the atomic value for the comparison
+				if (world.constraintGenerations[slot].load(std::memory_order_acquire) ==
+					cmd.cHandle.generation) {
+					if (world.constraints[slot]) {
+						// Remove from the Jolt simulation
+						world.system->RemoveConstraint(world.constraints[slot]);
+
+						world.constraints[slot] = nullptr;
+
+						// Reclaims the slot and increments the generation
+						world.RemoveConstraintSlot(slot);
+					}
+				}
 			}
 		}
 	}
@@ -387,12 +406,67 @@ void DestroyBody(PhysicsContext& ctx, EntityHandle handle) {
 	world.commandQueue[world.commandCount++] = {CommandType::DestroyBody, handle};
 }
 
+void RegisterMaterial(PhysicsContext& ctx, uint32_t id, float friction, float restitution) {
+	auto& world = ctx.GetImpl()->world;
+	std::lock_guard<Mutex> lock(world.shadowLock);
+
+	// 1. Update if exists
+	for (size_t i = 0; i < world.materialCount; ++i) {
+		if (world.materials[i].id == id) {
+			world.materials[i].friction = friction;
+			world.materials[i].restitution = restitution;
+			return;
+		}
+	}
+
+	// 2. Grow if needed
+	if (world.materialCount >= world.materialCapacity) {
+		size_t oldCap = world.materialCapacity;
+		size_t newCap = oldCap * 2;
+
+		MaterialData* newMaterials = new MaterialData[newCap]();
+		if (world.materials && oldCap > 0) {
+			std::memcpy(newMaterials, world.materials, oldCap * sizeof(MaterialData));
+			delete[] world.materials;
+		}
+		world.materials = newMaterials;
+		world.materialCapacity = newCap;
+	}
+
+	// 3. Insert new
+	world.materials[world.materialCount++] = {id, friction, restitution};
+}
+
+/**
+ * @brief Resolves physics parameters from the registry.
+ * This is a 'Cold' lookup used only during CreateRigidBody.
+ */
+static MaterialData ResolveMaterial(const PhysicsWorld& world, uint32_t id) {
+	constexpr auto materialDefault = MaterialData{0, 0.2f, 0.0f};
+	if (id == 0) {
+		return materialDefault; // Default
+	}
+
+	for (size_t i = 0; i < world.materialCount; ++i) {
+		if (world.materials[i].id == id) {
+			return world.materials[i];
+		}
+	}
+	return materialDefault; // Fallback
+}
+
 /**
  * @brief Generalized Rigid Body creation.
  */
 EntityHandle CreateRigidBody(PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::RVec3Arg pos,
-							 JPH::QuatArg rot, JPH::EMotionType motion, JPH::ObjectLayer layer) {
+							 JPH::QuatArg rot, JPH::EMotionType motion, JPH::ObjectLayer layer,
+							 uint32_t materialID) {
 	auto& world = ctx.GetImpl()->world;
+	MaterialData mat;
+	{
+		std::lock_guard<Mutex> lock(world.shadowLock);
+		mat = ResolveMaterial(world, materialID);
+	}
 	std::lock_guard<Mutex> lock(world.shadowLock);
 
 	// Engine allocates the identity!
@@ -400,6 +474,9 @@ EntityHandle CreateRigidBody(PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::RVe
 
 	JPH::BodyCreationSettings settings(shape, pos, rot, motion, layer);
 	settings.mUserData = handle.Pack();
+	settings.mFriction = mat.friction;
+	settings.mRestitution = mat.restitution;
+
 	if (motion == JPH::EMotionType::Dynamic)
 		settings.mAllowSleeping = true;
 
@@ -428,6 +505,9 @@ EntityHandle CreateRigidBody(PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::RVe
 	world.rotations[dense * 4 + 1] = rot.GetY();
 	world.rotations[dense * 4 + 2] = rot.GetZ();
 	world.rotations[dense * 4 + 3] = rot.GetW();
+
+	// Store Material ID in the SoA for fast callback lookup
+	world.materialIDs[dense] = materialID;
 
 	return handle;
 }
@@ -532,5 +612,39 @@ std::pair<const ContactEvent*, size_t> GetContactEvents(const PhysicsContext& ct
 	return {world.contactBuffer, count};
 }
 
+ConstraintHandle CreateConstraint(PhysicsContext& ctx, ConstraintType type, EntityHandle b1,
+								  EntityHandle b2, const ConstraintParams& params) {
+	auto& world = ctx.GetImpl()->world;
+	std::lock_guard<Mutex> lock(world.shadowLock);
+
+	// 1. Allocate handle immediately so we can return it
+	ConstraintHandle handle = world.AllocateConstraintHandle();
+
+	// 2. Queue Command
+	Command cmd;
+	cmd.type = CommandType::CreateConstraint;
+	cmd.cHandle = handle;
+	cmd.createC.cType = type;
+	cmd.createC.b1 = b1;
+	cmd.createC.b2 = b2;
+	cmd.createC.params = params;
+
+	// Push to queue (using your existing grow logic)
+	world.commandQueue[world.commandCount++] = cmd;
+
+	return handle;
+}
+
+void SetConstraintTarget(PhysicsContext& ctx, ConstraintHandle handle, float value) {
+	auto& world = ctx.GetImpl()->world;
+	std::lock_guard<Mutex> lock(world.shadowLock);
+
+	// Motors are often updated every frame, so we use a specialized command
+	Command cmd;
+	cmd.type = CommandType::SetConstraintTarget;
+	cmd.setTarget.targetCHandle = handle;
+	cmd.setTarget.targetValue = value;
+	world.commandQueue[world.commandCount++] = cmd;
+}
 } // namespace Physics
 } // namespace ZHLN
