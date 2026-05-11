@@ -23,8 +23,6 @@
 #include <detail/Loop.hpp>
 // clang-format on
 
-#include "PhysicsSync.hpp"
-
 #include <cstring>
 #include <memory>
 #include <new>
@@ -252,7 +250,7 @@ void PhysicsContext::Step(float deltaTime) {
 	// 2. Data Synchronization Pass
 	{
 		std::lock_guard<ZHLN::Mutex> lock(world.shadowLock);
-		Physics::Sync::Execute(world, &_impl->physicsSystem, _impl->activeCharacters);
+		world.Execute(&_impl->physicsSystem, _impl->activeCharacters);
 	}
 
 	world.isStepping.store(false, std::memory_order_release);

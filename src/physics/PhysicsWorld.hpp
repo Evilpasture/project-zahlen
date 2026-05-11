@@ -145,6 +145,17 @@ struct PhysicsWorld {
 	void ResizeBuffers(size_t newCapacity);
 	EntityHandle AllocateHandle();
 	void RemoveBodySlot(uint32_t slot);
+
+	/**
+	 * @brief Synchronizes all Jolt state to the SoA World.
+	 * Handles Rigid Bodies, Characters, and executes optimized SIMD batch copies.
+	 *
+	 * @param world The SoA PhysicsWorld to write to.
+	 * @param system The active Jolt PhysicsSystem.
+	 * @param activeCharacters The array of active CharacterVirtuals.
+	 */
+	void Execute(const JPH::PhysicsSystem* const system,
+				 const JPH::Array<JPH::CharacterVirtual*>& activeCharacters) noexcept;
 };
 
 // Guarantee predictable layout for raw memory mapping and SIMD logic

@@ -1,5 +1,3 @@
-#include "PhysicsSync.hpp"
-
 #include "PhysicsWorld.hpp"
 
 #include <Jolt/Jolt.h>
@@ -11,7 +9,7 @@
 #include <detail/Prefetch.hpp>
 #include <detail/Span.hpp>
 
-namespace ZHLN::Physics::Sync {
+namespace ZHLN::Physics {
 
 namespace { // --- INTERNAL OPTIMIZED IMPLEMENTATION ---
 
@@ -221,8 +219,8 @@ inline void SyncCharacters(const JPH::Array<JPH::CharacterVirtual*>& characters,
 // =================================================================================================
 
 [[gnu::flatten, gnu::hot, gnu::nonnull(2)]]
-void Execute(PhysicsWorld& world, const JPH::PhysicsSystem* const system,
-			 const JPH::Array<JPH::CharacterVirtual*>& activeCharacters) noexcept {
+void PhysicsWorld::Execute(const JPH::PhysicsSystem* const system,
+						   const JPH::Array<JPH::CharacterVirtual*>& activeCharacters) noexcept {
 
 	const uint32_t activeRigids = system->GetNumActiveBodies(JPH::EBodyType::RigidBody);
 
@@ -231,25 +229,25 @@ void Execute(PhysicsWorld& world, const JPH::PhysicsSystem* const system,
 	}
 
 	const WorldDataCreateInfo worldInfo = {
-		.shadow_pos = std::assume_aligned<32>(
-			reinterpret_cast<PosStride* const ZHLN_RESTRICT>(world.positions)),
+		.shadow_pos =
+			std::assume_aligned<32>(reinterpret_cast<PosStride* const ZHLN_RESTRICT>(positions)),
 		.shadow_ppos = std::assume_aligned<32>(
-			reinterpret_cast<PosStride* const ZHLN_RESTRICT>(world.prevPositions)),
-		.shadow_rot = std::assume_aligned<16>(
-			reinterpret_cast<AuxStride* const ZHLN_RESTRICT>(world.rotations)),
+			reinterpret_cast<PosStride* const ZHLN_RESTRICT>(prevPositions)),
+		.shadow_rot =
+			std::assume_aligned<16>(reinterpret_cast<AuxStride* const ZHLN_RESTRICT>(rotations)),
 		.shadow_prot = std::assume_aligned<16>(
-			reinterpret_cast<AuxStride* const ZHLN_RESTRICT>(world.prevRotations)),
+			reinterpret_cast<AuxStride* const ZHLN_RESTRICT>(prevRotations)),
 		.shadow_lvel = std::assume_aligned<16>(
-			reinterpret_cast<AuxStride* const ZHLN_RESTRICT>(world.linearVelocities)),
+			reinterpret_cast<AuxStride* const ZHLN_RESTRICT>(linearVelocities)),
 		.shadow_avel = std::assume_aligned<16>(
-			reinterpret_cast<AuxStride* const ZHLN_RESTRICT>(world.angularVelocities)),
+			reinterpret_cast<AuxStride* const ZHLN_RESTRICT>(angularVelocities)),
 	};
 
 	const MappingDataCreateInfo mapInfo = {
-		.body_ptrs = const_cast<const void* ZHLN_RESTRICT* const ZHLN_RESTRICT>(world.joltBodyPtrs),
-		.generations = world.generations,
-		.slot_capacity = world.slotCapacity,
-		.slot_to_dense = const_cast<const uint32_t* const ZHLN_RESTRICT>(world.slotToDense),
+		.body_ptrs = const_cast<const void* ZHLN_RESTRICT* const ZHLN_RESTRICT>(joltBodyPtrs),
+		.generations = generations,
+		.slot_capacity = slotCapacity,
+		.slot_to_dense = const_cast<const uint32_t* const ZHLN_RESTRICT>(slotToDense),
 	};
 
 	ExecuteSyncPass<JPH::EBodyType::RigidBody>(activeRigids, system, mapInfo, worldInfo);
@@ -259,4 +257,4 @@ void Execute(PhysicsWorld& world, const JPH::PhysicsSystem* const system,
 	}
 }
 
-} // namespace ZHLN::Physics::Sync
+} // namespace ZHLN::Physics
