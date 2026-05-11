@@ -53,12 +53,12 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem,
 	capacity = inMaxBodies;
 	slotCapacity = inMaxBodies;
 
-	positions = AllocateAligned<JPH::Real>(capacity * 4, 32);
-	prevPositions = AllocateAligned<JPH::Real>(capacity * 4, 32);
-	rotations = AllocateAligned<float>(capacity * 4, 16);
-	prevRotations = AllocateAligned<float>(capacity * 4, 16);
-	linearVelocities = AllocateAligned<float>(capacity * 4, 16);
-	angularVelocities = AllocateAligned<float>(capacity * 4, 16);
+	positions = AllocateAligned<JPH::Real>(capacity * 4, sizeof(JPH::Real) * 4);
+	prevPositions = AllocateAligned<JPH::Real>(capacity * 4, sizeof(JPH::Real) * 4);
+	rotations = AllocateAligned<float>(capacity * 4, sizeof(float) * 4);
+	prevRotations = AllocateAligned<float>(capacity * 4, sizeof(float) * 4);
+	linearVelocities = AllocateAligned<float>(capacity * 4, sizeof(float) * 4);
+	angularVelocities = AllocateAligned<float>(capacity * 4, sizeof(float) * 4);
 
 	bodyIDs = new JPH::BodyID[capacity]();
 	materialIDs = new uint32_t[capacity]();
@@ -97,12 +97,12 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem,
 }
 
 void PhysicsWorld::Shutdown() {
-	DeallocateAligned(positions, 32);
-	DeallocateAligned(prevPositions, 32);
-	DeallocateAligned(rotations, 16);
-	DeallocateAligned(prevRotations, 16);
-	DeallocateAligned(linearVelocities, 16);
-	DeallocateAligned(angularVelocities, 16);
+	DeallocateAligned(positions, sizeof(JPH::Real) * 4);
+	DeallocateAligned(prevPositions, sizeof(JPH::Real) * 4);
+	DeallocateAligned(rotations, sizeof(float) * 4);
+	DeallocateAligned(prevRotations, sizeof(float) * 4);
+	DeallocateAligned(linearVelocities, sizeof(float) * 4);
+	DeallocateAligned(angularVelocities, sizeof(float) * 4);
 
 	delete[] bodyIDs;
 	delete[] materialIDs;
@@ -130,16 +130,16 @@ void PhysicsWorld::ResizeBuffers(size_t newCapacity) {
 	if (newCapacity <= capacity)
 		return;
 
-	size_t oldCap = capacity;
+	const size_t oldCap = capacity;
 	capacity = newCapacity;
 	slotCapacity = newCapacity;
 
-	ReallocateAligned(positions, oldCap * 4, newCapacity * 4, 32);
-	ReallocateAligned(prevPositions, oldCap * 4, newCapacity * 4, 32);
-	ReallocateAligned(rotations, oldCap * 4, newCapacity * 4, 16);
-	ReallocateAligned(prevRotations, oldCap * 4, newCapacity * 4, 16);
-	ReallocateAligned(linearVelocities, oldCap * 4, newCapacity * 4, 16);
-	ReallocateAligned(angularVelocities, oldCap * 4, newCapacity * 4, 16);
+	ReallocateAligned(positions, oldCap * 4, newCapacity * 4, sizeof(JPH::Real) * 4);
+	ReallocateAligned(prevPositions, oldCap * 4, newCapacity * 4, sizeof(JPH::Real) * 4);
+	ReallocateAligned(rotations, oldCap * 4, newCapacity * 4, sizeof(float) * 4);
+	ReallocateAligned(prevRotations, oldCap * 4, newCapacity * 4, sizeof(float) * 4);
+	ReallocateAligned(linearVelocities, oldCap * 4, newCapacity * 4, sizeof(float) * 4);
+	ReallocateAligned(angularVelocities, oldCap * 4, newCapacity * 4, sizeof(float) * 4);
 
 	ReallocateStandard(bodyIDs, oldCap, newCapacity);
 	ReallocateStandard(materialIDs, oldCap, newCapacity);
