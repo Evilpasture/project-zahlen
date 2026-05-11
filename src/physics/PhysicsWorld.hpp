@@ -50,8 +50,7 @@ struct alignas(128) ContactEvent {
 	uint32_t mat1, mat2; // 8  (Material IDs for sound/FX)
 	uint32_t sub1, sub2; // 8  (Sub-shape IDs for bone-specific hits)
 
-	// Remaining padding to hit exactly 128 bytes
-	uint8_t _padding[128 - (16 + sizeof(JPH::Real) * 3 + 24 + 4 + 12 + 8 + 8)];
+	// We LET the compiler do the padding.
 };
 
 static_assert(sizeof(ContactEvent) == 128,

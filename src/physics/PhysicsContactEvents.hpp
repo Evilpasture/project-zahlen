@@ -20,11 +20,34 @@ class ContactListener final : public JPH::ContactListener {
 	}
 
 	virtual void OnContactRemoved(const JPH::SubShapeIDPair& inSubShapePair) override {
-		// Removal provides less data (no manifold).
-		// We could decode the Jolt IDs to Handles via the idToHandleMap here if needed,
-		// but typically, knowing *that* a collision ended is enough.
-		// For brevity, we skip populating the removal event payload here,
-		// but the architecture fully supports it via _world->idToHandleMap.
+		size_t idx = _world->contactCount.fetch_add(1, std::memory_order_relaxed);
+		if (idx >= _world->contactCapacity)
+			return;
+
+		ContactEvent& ev = _world->contactBuffer[idx];
+		ev.type = ContactType::Removed;
+
+		// Decode Handles from Jolt BodyIDs using the fast-map
+		auto getHandle = [&](JPH::BodyID id) {
+			uint32_t j_idx = id.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
+			return EntityHandle::Unpack(
+				_world->idToHandleMap[j_idx].load(std::memory_order_relaxed));
+		};
+
+		EntityHandle h1 = getHandle(inSubShapePair.GetBody1ID());
+		EntityHandle h2 = getHandle(inSubShapePair.GetBody2ID());
+
+		// Sort to maintain consistency
+		if (h1.Pack() > h2.Pack()) {
+			ev.body1 = h2;
+			ev.body2 = h1;
+		} else {
+			ev.body1 = h1;
+			ev.body2 = h2;
+		}
+
+		ev.sub1 = inSubShapePair.GetSubShapeID1().GetValue();
+		ev.sub2 = inSubShapePair.GetSubShapeID2().GetValue();
 	}
 
   private:
@@ -84,9 +107,21 @@ class ContactListener final : public JPH::ContactListener {
 		// Sliding speed = length of the velocity vector projected onto the contact plane
 		ev.slidingSpeed = (dv - n * normalVel).LengthSq();
 
-		// 4. Metadata (Placeholder for your material system)
-		ev.mat1 = 0; // Populate from b1.GetShape()->GetMaterial(sub1)...
-		ev.mat2 = 0;
+		// 4. Metadata Extraction
+		ev.sub1 = manifold.mSubShapeID1.GetValue();
+		ev.sub2 = manifold.mSubShapeID2.GetValue();
+
+		// Map Jolt Material to an integer ID (requires a custom Material class or hashing)
+		auto getMatId = [](const JPH::Body& b, const JPH::SubShapeID& sub) {
+			const JPH::Shape* shape = b.GetShape();
+			const JPH::PhysicsMaterial* mat = shape->GetMaterial(sub);
+			return (mat != nullptr)
+					   ? static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mat) & 0xFFFFFFFF)
+					   : 0;
+		};
+
+		ev.mat1 = getMatId(b1, manifold.mSubShapeID1);
+		ev.mat2 = getMatId(b2, manifold.mSubShapeID2);
 	}
 };
 

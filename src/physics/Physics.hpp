@@ -20,8 +20,8 @@ struct PhysicsWorld;
 
 // --- ECS Handle for UserData ---
 struct EntityHandle {
-	uint32_t index = 0;
-	uint32_t generation = 0;
+	uint32_t index;
+	uint32_t generation;
 
 	[[nodiscard]] constexpr uint64_t Pack() const noexcept {
 		return (static_cast<uint64_t>(generation) << 32) | index;
@@ -34,6 +34,7 @@ struct EntityHandle {
 };
 
 static_assert(std::is_trivially_copyable_v<EntityHandle>);
+static_assert(std::is_trivial_v<EntityHandle>);
 
 class PhysicsContext {
   public:
