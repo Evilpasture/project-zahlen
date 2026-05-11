@@ -1,6 +1,9 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
+#include <Jolt/Physics/Constraints/HingeConstraint.h>
+#include <Jolt/Physics/Constraints/MotorSettings.h>
+#include <Jolt/Physics/Constraints/SliderConstraint.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
@@ -191,64 +194,17 @@ void PhysicsContext::Step(float deltaTime) {
 	size_t capturedCount = 0;
 
 	{
-		// Fast pointer swap lock
 		std::lock_guard<ZHLN::Mutex> lock(world.shadowLock);
 		capturedQueue = world.commandQueue;
 		capturedCount = world.commandCount;
 
-		// Swap active and spare pointers
+		// Double-buffer swap
 		world.commandQueue = world.commandQueueSpare;
 		world.commandQueueSpare = capturedQueue;
 		world.commandCount = 0;
-	}
 
-	// Execute commands WITHOUT holding the shadow lock!
-	if (capturedCount > 0) {
-		std::lock_guard<ZHLN::Mutex> lock(world.shadowLock); // Lock again for safe data moves
-
-		for (size_t i = 0; i < capturedCount; i++) {
-			const auto& cmd = capturedQueue[i];
-
-			if (cmd.type == Physics::CommandType::CreateConstraint) {
-				// 1. Resolve Bodies
-				JPH::BodyID id1 = GetBodyID(world, cmd.createC.b1);
-				JPH::BodyID id2 = GetBodyID(world, cmd.createC.b2);
-
-				// Use NoLock interface because we are in the Step pre-update or post-update
-				JPH::BodyLockWrite lock1(world.system->GetBodyLockInterface(), id1);
-				JPH::BodyLockWrite lock2(world.system->GetBodyLockInterface(), id2);
-
-				if (lock1.Succeeded() && lock2.Succeeded()) {
-					auto* joltConstraint = CreateNativeConstraint(
-						cmd.createC.cType, &lock1.GetBody(), &lock2.GetBody(), cmd.createC.params);
-
-					if (joltConstraint) {
-						world.system->AddConstraint(joltConstraint);
-
-						// Store in SoA
-						uint32_t slot = cmd.cHandle.index; // Pre-allocated in API call
-						world.constraints[slot] = joltConstraint;
-						world.constraintStates[slot] = SLOT_ALIVE;
-					}
-				}
-			} else if (cmd.type == Physics::CommandType::DestroyConstraint) {
-				const uint32_t slot = cmd.cHandle.index;
-
-				// Fix: Explicitly load the atomic value for the comparison
-				if (world.constraintGenerations[slot].load(std::memory_order_acquire) ==
-					cmd.cHandle.generation) {
-					if (world.constraints[slot]) {
-						// Remove from the Jolt simulation
-						world.system->RemoveConstraint(world.constraints[slot]);
-
-						world.constraints[slot] = nullptr;
-
-						// Reclaims the slot and increments the generation
-						world.RemoveConstraintSlot(slot);
-					}
-				}
-			}
-		}
+		// Execute the specialized flusher
+		world.FlushCommands(capturedQueue, capturedCount);
 	}
 
 	// Resets the counter so Jolt overwrites last frame's collisions
@@ -266,7 +222,7 @@ void PhysicsContext::Step(float deltaTime) {
 						  _impl->tempAllocator);
 	}
 
-	// 2. Data Synchronization Pass
+	// 3. Data Synchronization Pass (Jolt SoA -> Engine Shadow SoA)
 	{
 		std::lock_guard<ZHLN::Mutex> lock(world.shadowLock);
 		world.Execute(&_impl->physicsSystem, _impl->activeCharacters);
@@ -349,17 +305,17 @@ JPH::ShapeRefC GetOrCreateShape(PhysicsContext& ctx, Physics::ShapeType type, fl
 // PROCEDURAL API
 // =================================================================================================
 
-JPH::BodyID GetBodyID(const PhysicsWorld& world, EntityHandle handle) {
-	if (handle.index >= world.slotCapacity)
+JPH::BodyID PhysicsWorld::GetBodyID(EntityHandle handle) {
+	if (handle.index >= slotCapacity)
 		return JPH::BodyID();
 
 	// Check generation: Source of Truth check
-	if (world.generations[handle.index].load(std::memory_order_acquire) != handle.generation) {
+	if (generations[handle.index].load(std::memory_order_acquire) != handle.generation) {
 		return JPH::BodyID(); // Stale handle
 	}
 
-	uint32_t dense = world.slotToDense[handle.index];
-	return world.bodyIDs[dense];
+	uint32_t dense = slotToDense[handle.index];
+	return bodyIDs[dense];
 }
 
 void DestroyBody(PhysicsContext& ctx, EntityHandle handle) {

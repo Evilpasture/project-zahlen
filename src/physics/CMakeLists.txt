@@ -6,6 +6,7 @@ add_library(zahlen_physics STATIC
     PhysicsContactEvents.hpp
     PhysicsSync.cpp
     PhysicsQuery.cpp
+    PhysicsCommand.cpp
 )
 
 target_link_libraries(zahlen_physics 

@@ -39,6 +39,7 @@ struct ConstraintParams {
 	float frequency;
 	float damping;
 	float maxForce;
+	bool disableCollisions;
 };
 
 // Protects struct Command from being non-trivial
@@ -220,10 +221,16 @@ struct PhysicsWorld {
 	void ResizeBuffers(size_t newCapacity);
 	EntityHandle AllocateHandle();
 	void RemoveBodySlot(uint32_t slot);
+	void ResizeConstraintBuffers(size_t newCapacity);
+
+	JPH::BodyID GetBodyID(EntityHandle handle);
 
 	// Constraints
 	ConstraintHandle AllocateConstraintHandle();
 	void RemoveConstraintSlot(uint32_t slot);
+
+	// Flush command buffer
+	void FlushCommands(Command* capturedQueue, size_t capturedCount);
 
 	/**
 	 * @brief Synchronizes all Jolt state to the SoA World.

@@ -99,11 +99,23 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem,
 	materialCapacity = 16;
 	materialCount = 0;
 	materials = new MaterialData[materialCapacity]();
+
+	// Constraints
+	constraintCapacity = inMaxBodies;
+
+	constraints = new JPH::Constraint*[constraintCapacity]();
+	constraintStates = new uint8_t[constraintCapacity]();
 	constraintGenerations = new ZHLN::Atomic<uint32_t>[constraintCapacity]();
+	freeConstraintSlots = new uint32_t[constraintCapacity]();
+
 	for (uint32_t i = 0; i < constraintCapacity; ++i) {
 		constraintGenerations[i].store(1, std::memory_order_relaxed);
+		constraintStates[i] = SLOT_EMPTY;
 		freeConstraintSlots[i] = (constraintCapacity - 1) - i;
 	}
+
+	constraintCount = 0;
+	freeConstraintCount = constraintCapacity;
 }
 
 void PhysicsWorld::Shutdown() {
@@ -136,7 +148,11 @@ void PhysicsWorld::Shutdown() {
 	}
 
 	delete[] materials;
+
+	delete[] constraints;
+	delete[] constraintStates;
 	delete[] constraintGenerations;
+	delete[] freeConstraintSlots;
 }
 
 void PhysicsWorld::ResizeBuffers(size_t newCapacity) {
@@ -172,6 +188,26 @@ void PhysicsWorld::ResizeBuffers(size_t newCapacity) {
 		freeSlots[freeIdx++] = static_cast<uint32_t>(i);
 	}
 	freeCount.store(freeIdx, std::memory_order_release);
+}
+
+void PhysicsWorld::ResizeConstraintBuffers(size_t newCapacity) {
+	if (newCapacity <= constraintCapacity)
+		return;
+
+	const size_t oldCap = constraintCapacity;
+	constraintCapacity = newCapacity;
+
+	ReallocateStandard(constraints, oldCap, newCapacity);
+	ReallocateStandard(constraintStates, oldCap, newCapacity);
+	ReallocateStandard(constraintGenerations, oldCap, newCapacity);
+	ReallocateStandard(freeConstraintSlots, oldCap, newCapacity);
+
+	// Initialize the newly expanded slots
+	for (size_t i = oldCap; i < newCapacity; i++) {
+		constraintGenerations[i].store(1, std::memory_order_relaxed);
+		constraintStates[i] = SLOT_EMPTY;
+		freeConstraintSlots[freeConstraintCount++] = static_cast<uint32_t>(i);
+	}
 }
 
 EntityHandle PhysicsWorld::AllocateHandle() {
@@ -219,6 +255,26 @@ void PhysicsWorld::RemoveBodySlot(uint32_t slot) {
 	size_t fIdx = freeCount.fetch_add(1, std::memory_order_relaxed);
 	freeSlots[fIdx] = slot;
 	count.fetch_sub(1, std::memory_order_release);
+}
+
+ConstraintHandle PhysicsWorld::AllocateConstraintHandle() {
+	// If we are out of slots, double the capacity
+	if (freeConstraintCount == 0) {
+		ResizeConstraintBuffers(constraintCapacity * 2);
+	}
+
+	uint32_t slot = freeConstraintSlots[--freeConstraintCount];
+	uint32_t gen = constraintGenerations[slot].load(std::memory_order_relaxed);
+	return ConstraintHandle{.index = slot, .generation = gen};
+}
+
+void PhysicsWorld::RemoveConstraintSlot(uint32_t slot) {
+	// Increment generation so old handles become invalid
+	constraintGenerations[slot].fetch_add(1, std::memory_order_relaxed);
+	constraintStates[slot] = SLOT_EMPTY;
+
+	// Return slot to free list
+	freeConstraintSlots[freeConstraintCount++] = slot;
 }
 
 } // namespace ZHLN::Physics
