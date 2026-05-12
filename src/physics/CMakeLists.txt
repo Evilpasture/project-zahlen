@@ -7,6 +7,7 @@ add_library(zahlen_physics STATIC
     PhysicsSync.cpp
     PhysicsQuery.cpp
     PhysicsCommand.cpp
+    ConstraintFactory.cpp
 )
 
 target_link_libraries(zahlen_physics 
