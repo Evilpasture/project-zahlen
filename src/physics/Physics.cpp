@@ -225,7 +225,7 @@ void PhysicsContext::Step(float deltaTime) {
 	// 3. Data Synchronization Pass (Jolt SoA -> Engine Shadow SoA)
 	{
 		std::lock_guard<ZHLN::Mutex> lock(world.shadowLock);
-		world.Execute(&_impl->physicsSystem, _impl->activeCharacters);
+		world.Synchronize(&_impl->physicsSystem, _impl->activeCharacters);
 	}
 
 	world.isStepping.store(false, std::memory_order_release);

@@ -219,8 +219,9 @@ inline void SyncCharacters(const JPH::Array<JPH::CharacterVirtual*>& characters,
 // =================================================================================================
 
 [[gnu::flatten, gnu::hot, gnu::nonnull(2)]]
-void PhysicsWorld::Execute(const JPH::PhysicsSystem* const system,
-						   const JPH::Array<JPH::CharacterVirtual*>& activeCharacters) noexcept {
+void PhysicsWorld::Synchronize(
+	const JPH::PhysicsSystem* const system,
+	const JPH::Array<JPH::CharacterVirtual*>& activeCharacters) noexcept {
 
 	const uint32_t activeRigids = system->GetNumActiveBodies(JPH::EBodyType::RigidBody);
 
