@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Zahlen/Math3D.hpp>
+#include "Math3D.hpp"
 
 namespace ZHLN {
 
