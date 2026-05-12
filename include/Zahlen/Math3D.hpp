@@ -1,7 +1,7 @@
 #pragma once
 
 // clang-format off
-#include "Zahlen/Types.hpp"
+#include "Types.hpp"
 #include <Jolt/Jolt.h>
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Quat.h>
@@ -112,17 +112,49 @@ constexpr PackedRGBA8 PackColor(float r, float g, float b, float a = 1.0f) {
 	return {(as << 24) | (bs << 16) | (gs << 8) | rs};
 }
 
-// Float to Half conversion (IEEE 754-2008)
-// This is a "dumb" version but it works for 0.0-1.0 UV ranges
-inline uint16_t FloatToHalf(float f) {
-	uint32_t x = *(uint32_t*)&f;
-	uint32_t sign = (x >> 16) & 0x8000;
-	uint32_t exponent = ((x >> 23) & 0xFF) - 127;
-	uint32_t mantissa = x & 0x007FFFFF;
+// Packs 4 floats into 4 halves
+inline void PackFloatsToHalf(const float* src, uint16_t* dst) {
+#if defined(__F16C__) || defined(__AVX2__)
+	// x86_64 with F16C support
+	__m128 f_vec = _mm_loadu_ps(src);
+	// 0 = Round to nearest even
+	__m128i h_vec = _mm_cvtps_ph(f_vec, 0);
+	// Store the lower 64 bits (4 halves)
+	_mm_storel_epi64((__m128i*)dst, h_vec);
 
-	if (exponent == 0)
-		return (uint16_t)sign;
-	return (uint16_t)(sign | ((exponent + 15) << 10) | (mantissa >> 13));
+#elif defined(__aarch64__)
+	// ARM64 NEON
+	float32x4_t f_vec = vld1q_f32(src);
+	float16x4_t h_vec = vcvt_f16_f32(f_vec);
+	vst1_u16(dst, (uint16x4_t)h_vec);
+
+#else
+	// Fallback: Use your scalar version (ideally fixed)
+	for (int i = 0; i < 4; ++i) {
+		dst[i] = ScalarFloatToHalf(src[i]);
+	}
+#endif
+}
+
+inline uint16_t FloatToHalf(float f) {
+	// Use memcpy to avoid strict aliasing issues
+	uint32_t i;
+	std::memcpy(&i, &f, 4);
+
+	uint32_t s = (i >> 16) & 0x8000;
+	int32_t e = ((i >> 23) & 0xFF) - 127;
+	uint32_t m = i & 0x007FFFFF;
+
+	// Handle Zero or extremely small denormals
+	if (e <= -15)
+		return (uint16_t)s;
+
+	// Handle Exponent overflow (for values > 65504)
+	if (e > 15)
+		return (uint16_t)(s | 0x7C00);
+
+	// Re-bias exponent and pack
+	return (uint16_t)(s | ((e + 15) << 10) | (m >> 13));
 }
 
 inline PackedHalf2 PackUV(float u, float v) {
