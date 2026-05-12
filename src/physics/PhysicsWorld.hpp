@@ -51,7 +51,10 @@ enum class CommandType : uint8_t {
 	DestroyConstraint,
 	SetConstraintTarget
 };
-
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnested-anon-types"
+#endif
 struct Command {
 	CommandType type;
 	union {
@@ -69,6 +72,9 @@ struct Command {
 		} setTarget;
 	};
 };
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 static_assert(std::is_trivial_v<Command>); // Must be trivial
 
@@ -240,8 +246,8 @@ struct PhysicsWorld {
 	 * @param system The active Jolt PhysicsSystem.
 	 * @param activeCharacters The array of active CharacterVirtuals.
 	 */
-	void Execute(const JPH::PhysicsSystem* const system,
-				 const JPH::Array<JPH::CharacterVirtual*>& activeCharacters) noexcept;
+	void Synchronize(const JPH::PhysicsSystem* const system,
+					 const JPH::Array<JPH::CharacterVirtual*>& activeCharacters) noexcept;
 };
 
 // Guarantee predictable layout for raw memory mapping and SIMD logic
