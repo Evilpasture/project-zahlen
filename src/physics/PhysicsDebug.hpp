@@ -2,7 +2,6 @@
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Renderer/DebugRendererSimple.h>
-#include <vector>
 
 namespace ZHLN::Physics {
 
@@ -32,8 +31,8 @@ class PhysicsDebugRenderer final : public JPH::DebugRendererSimple {
 
 	void Clear();
 
-	std::vector<DebugVertex> lines;
-	std::vector<DebugVertex> triangles;
+	JPH::Array<DebugVertex> lines;
+	JPH::Array<DebugVertex> triangles;
 };
 
 } // namespace ZHLN::Physics

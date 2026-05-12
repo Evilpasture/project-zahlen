@@ -12,6 +12,15 @@
 
 namespace ZHLN::Physics {
 
+struct WorldStateHeader {
+	static constexpr uint64_t ZHLN = 0x5A484C4E;
+	const uint64_t magic = ZHLN;
+	const uint32_t version = 1;
+	uint32_t bodyCount;
+	uint32_t slotCapacity;
+	double worldTime;
+};
+
 #if defined(__cpp_lib_hardware_interference_size)
 inline constexpr std::size_t CACHE_LINE = std::hardware_destructive_interference_size;
 #else
@@ -254,6 +263,9 @@ struct PhysicsWorld {
 	 */
 	void Synchronize(const JPH::PhysicsSystem* const system,
 					 const JPH::Array<JPH::CharacterVirtual*>& activeCharacters) noexcept;
+
+	JPH::Array<std::byte> SaveState() const;
+	bool LoadState(const uint8_t* data, size_t size);
 };
 
 // Guarantee predictable layout for raw memory mapping and SIMD logic

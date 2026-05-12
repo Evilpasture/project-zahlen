@@ -277,4 +277,147 @@ void PhysicsWorld::RemoveConstraintSlot(uint32_t slot) {
 	freeConstraintSlots[freeConstraintCount++] = slot;
 }
 
+JPH::Array<std::byte> PhysicsWorld::SaveState() const {
+	std::lock_guard<ZHLN::Mutex> lock(shadowLock);
+
+	size_t currentCount = count.load(std::memory_order_acquire);
+	size_t slotCap = slotCapacity;
+
+	// 1. Calculate Sizes
+	size_t posSize = currentCount * sizeof(JPH::Real) * 4;
+	size_t rotSize = currentCount * sizeof(float) * 4;
+	size_t velSize = currentCount * sizeof(float) * 4; // linear + angular
+
+	// Mappings: gen (u32), s2d (u32), d2s (u32), states (u8)
+	size_t mappingSize = slotCap * (sizeof(uint32_t) * 3 + sizeof(uint8_t));
+
+	size_t totalSize = sizeof(WorldStateHeader) + posSize + rotSize + (velSize * 2) + mappingSize;
+
+	JPH::Array<std::byte> buffer(totalSize);
+	auto* ptr = buffer.data();
+
+	// 2. Write Header
+	WorldStateHeader header;
+	header.bodyCount = (uint32_t)currentCount;
+	header.slotCapacity = (uint32_t)slotCap;
+	header.worldTime = time;
+	std::memcpy(ptr, &header, sizeof(WorldStateHeader));
+	ptr += sizeof(WorldStateHeader);
+
+	// 3. Write SoA Hot Buffers (Positions, Rotations, Velocities)
+	std::memcpy(ptr, positions, posSize);
+	ptr += posSize;
+	std::memcpy(ptr, rotations, rotSize);
+	ptr += rotSize;
+	std::memcpy(ptr, linearVelocities, velSize);
+	ptr += velSize;
+	std::memcpy(ptr, angularVelocities, velSize);
+	ptr += velSize;
+
+	// 4. Write Mapping Tables (Atomics must be loaded)
+	for (size_t i = 0; i < slotCap; ++i) {
+		uint32_t g = generations[i].load(std::memory_order_relaxed);
+		std::memcpy(ptr, &g, sizeof(uint32_t));
+		ptr += sizeof(uint32_t);
+	}
+	std::memcpy(ptr, slotToDense, slotCap * sizeof(uint32_t));
+	ptr += (slotCap * sizeof(uint32_t));
+	std::memcpy(ptr, denseToSlot, slotCap * sizeof(uint32_t));
+	ptr += (slotCap * sizeof(uint32_t));
+
+	for (size_t i = 0; i < slotCap; ++i) {
+		auto s = static_cast<std::byte>(slotStates[i].load(std::memory_order_relaxed));
+		*ptr = s;
+		ptr += 1;
+	}
+
+	return buffer;
+}
+
+bool PhysicsWorld::LoadState(const uint8_t* data, size_t size) {
+	if (size < sizeof(WorldStateHeader)) {
+		return false;
+	}
+	const WorldStateHeader* header = reinterpret_cast<const WorldStateHeader*>(data);
+	if (header->magic != WorldStateHeader::ZHLN) {
+		return false;
+	}
+	if (header->slotCapacity != slotCapacity) {
+		return false;
+	} // Safety: must match current allocation
+
+	const uint8_t* ptr = data + sizeof(WorldStateHeader);
+	size_t savedCount = header->bodyCount;
+
+	{
+		std::lock_guard<ZHLN::Mutex> lock(shadowLock);
+
+		// 1. Restore SoA Buffers
+		size_t posSize = savedCount * sizeof(JPH::Real) * 4;
+		size_t rotSize = savedCount * sizeof(float) * 4;
+		size_t velSize = savedCount * sizeof(float) * 4;
+
+		std::memcpy(positions, ptr, posSize);
+		ptr += posSize;
+		std::memcpy(rotations, ptr, rotSize);
+		ptr += rotSize;
+		std::memcpy(linearVelocities, ptr, velSize);
+		ptr += velSize;
+		std::memcpy(angularVelocities, ptr, velSize);
+		ptr += velSize;
+
+		// 2. Restore Mapping Tables
+		for (size_t i = 0; i < slotCapacity; ++i) {
+			uint32_t g;
+			std::memcpy(&g, ptr, sizeof(uint32_t));
+			generations[i].store(g, std::memory_order_relaxed);
+			ptr += sizeof(uint32_t);
+		}
+		std::memcpy(slotToDense, ptr, slotCapacity * sizeof(uint32_t));
+		ptr += (slotCapacity * sizeof(uint32_t));
+		std::memcpy(denseToSlot, ptr, slotCapacity * sizeof(uint32_t));
+		ptr += (slotCapacity * sizeof(uint32_t));
+
+		for (size_t i = 0; i < slotCapacity; ++i) {
+			slotStates[i].store(*ptr, std::memory_order_relaxed);
+			ptr += 1;
+		}
+
+		// 3. Reset Free List Logic
+		size_t newFreeCount = 0;
+		for (uint32_t i = 0; i < slotCapacity; ++i) {
+			if (slotStates[i].load() == SLOT_EMPTY) {
+				freeSlots[newFreeCount++] = i;
+			}
+		}
+		freeCount.store(newFreeCount, std::memory_order_release);
+		count.store(savedCount, std::memory_order_release);
+		time = header->worldTime;
+	}
+
+	// 4. SYNC TO JOLT: Push SoA data back to the actual Jolt bodies
+	// This part happens outside the shadow lock but while isStepping is ideally false
+	for (size_t i = 0; i < savedCount; i++) {
+		JPH::BodyID bid = bodyIDs[i];
+		if (bid.IsInvalid()) {
+			continue;
+		}
+
+		// Extract from SoA
+		JPH::RVec3 p(positions[i * 4 + 0], positions[i * 4 + 1], positions[i * 4 + 2]);
+		JPH::Quat q(rotations[i * 4 + 0], rotations[i * 4 + 1], rotations[i * 4 + 2],
+					rotations[i * 4 + 3]);
+		JPH::Vec3 lv(linearVelocities[i * 4 + 0], linearVelocities[i * 4 + 1],
+					 linearVelocities[i * 4 + 2]);
+		JPH::Vec3 av(angularVelocities[i * 4 + 0], angularVelocities[i * 4 + 1],
+					 angularVelocities[i * 4 + 2]);
+
+		bodyInterface->SetPositionAndRotation(bid, p, q, JPH::EActivation::Activate);
+		bodyInterface->SetLinearVelocity(bid, lv);
+		bodyInterface->SetAngularVelocity(bid, av);
+	}
+
+	return true;
+}
+
 } // namespace ZHLN::Physics
