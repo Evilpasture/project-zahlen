@@ -14,6 +14,7 @@
 #include <Jolt/Physics/Collision/Shape/PlaneShape.h>
 
 #include "Physics.hpp"
+#include "PhysicsDebug.hpp"
 #include <Zahlen/Buffer.h>
 #include "PhysicsWorld.hpp"
 #include <Zahlen/Log.hpp>
@@ -111,7 +112,6 @@ class BPLayerInterfaceImpl final : public JPH::BroadPhaseLayerInterface {
 			case BroadPhaseLayers::MOVING:
 				return "MOVING";
 			default:
-				JPH_ASSERT(false);
 				return "INVALID";
 		}
 	}
@@ -163,19 +163,26 @@ struct PhysicsContext::Impl {
 
 	Physics::ContactListener contactListener{&world};
 
+	std::unique_ptr<Physics::PhysicsDebugRenderer> debugRenderer;
+
 	JPH::Array<JPH::Ref<JPH::CharacterVirtual>> characterMap;
 	JPH::Array<JPH::CharacterVirtual*> activeCharacters;
 
-	class CharacterListener : public JPH::CharacterContactListener {
-	} characterListener;
+	// Character contact listener needs to be stored
+	Physics::CharacterListener characterListener{&world};
 	std::vector<ShapeEntry> shapeCache;
 };
+
+std::unique_ptr<Physics::PhysicsDebugRenderer> debugRenderer;
 
 PhysicsContext::PhysicsContext() : _impl(std::make_unique<Impl>()) {
 	const uint32_t maxBodies = 1024;
 	_impl->physicsSystem.SetContactListener(&_impl->contactListener);
 	_impl->physicsSystem.Init(maxBodies, 0, maxBodies, maxBodies, _impl->bpLayerInterface,
 							  _impl->objVsBpFilter, _impl->objVsObjFilter);
+
+	_impl->debugRenderer = std::make_unique<Physics::PhysicsDebugRenderer>();
+	_impl->characterListener = Physics::CharacterListener(&_impl->world);
 
 	// One-liner Initialization!
 	_impl->world.Init(maxBodies, &_impl->physicsSystem, &_impl->jobSystem, &_impl->tempAllocator);
@@ -416,7 +423,7 @@ static MaterialData ResolveMaterial(const PhysicsWorld& world, uint32_t id) {
  */
 EntityHandle CreateRigidBody(PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::RVec3Arg pos,
 							 JPH::QuatArg rot, JPH::EMotionType motion, JPH::ObjectLayer layer,
-							 uint32_t materialID) {
+							 uint32_t materialID, uint32_t category, uint32_t mask) {
 	auto& world = ctx.GetImpl()->world;
 	MaterialData mat;
 	{
@@ -464,11 +471,14 @@ EntityHandle CreateRigidBody(PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::RVe
 
 	// Store Material ID in the SoA for fast callback lookup
 	world.materialIDs[dense] = materialID;
+	world.categories[dense] = category;
+	world.masks[dense] = mask;
 
 	return handle;
 }
 
-EntityHandle CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position) {
+EntityHandle CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position, uint32_t category,
+							 uint32_t mask) {
 	auto* impl = ctx.GetImpl();
 	auto& world = impl->world;
 	// Using the cache for the character shape
@@ -479,8 +489,11 @@ EntityHandle CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position) {
 
 	JPH::CharacterVirtualSettings settings;
 	settings.mShape = charShape;
+	settings.mMaxStrength = 100.0f;
+
 	auto character = new JPH::CharacterVirtual(&settings, position, JPH::Quat::sIdentity(),
 											   &impl->physicsSystem);
+	character->SetListener(&impl->characterListener);
 	character->SetUserData(handle.Pack());
 
 	// Character Management
@@ -495,8 +508,47 @@ EntityHandle CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position) {
 	world.denseToSlot[dense] = handle.index;
 	world.bodyIDs[dense] = JPH::BodyID(); // Characters don't have Jolt BodyIDs
 	world.slotStates[handle.index].store(SLOT_CHARACTER, std::memory_order_release);
+	world.categories[dense] = category;
+	world.masks[dense] = mask;
 
 	return handle;
+}
+
+void SetCollisionFilter(PhysicsContext& ctx, EntityHandle handle, uint32_t category,
+						uint32_t mask) {
+	auto& world = ctx.GetImpl()->world;
+	std::lock_guard<Mutex> lock(world.shadowLock);
+
+	Command cmd;
+	cmd.type = CommandType::SetCollisionFilter;
+	cmd.setFilter.handle = handle;
+	cmd.setFilter.category = category;
+	cmd.setFilter.mask = mask;
+	world.commandQueue[world.commandCount++] = cmd;
+}
+
+DebugDrawData GetDebugDrawData(PhysicsContext& ctx, bool drawShapes, bool drawConstraints) {
+	auto* impl = ctx.GetImpl();
+	auto& world = impl->world;
+
+	impl->debugRenderer->Clear();
+
+	JPH::BodyManager::DrawSettings settings;
+	settings.mDrawShape = drawShapes;
+	settings.mDrawBoundingBox = false;
+	settings.mDrawCenterOfMassTransform = false;
+
+	if (drawShapes) {
+		impl->physicsSystem.DrawBodies(settings, impl->debugRenderer.get());
+	}
+	if (drawConstraints) {
+		impl->physicsSystem.DrawConstraints(impl->debugRenderer.get());
+	}
+
+	return {reinterpret_cast<const DebugVertex*>(impl->debugRenderer->lines.data()),
+			impl->debugRenderer->lines.size(),
+			reinterpret_cast<const DebugVertex*>(impl->debugRenderer->triangles.data()),
+			impl->debugRenderer->triangles.size()};
 }
 
 void SetCharacterVelocity(PhysicsContext& ctx, EntityHandle handle, JPH::Vec3Arg velocity) {

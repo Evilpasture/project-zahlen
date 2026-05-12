@@ -96,6 +96,17 @@ void PhysicsWorld::FlushCommands(Command* capturedQueue, size_t capturedCount) {
 				}
 				break;
 			}
+
+			case CommandType::SetCollisionFilter: {
+				const uint32_t slot = cmd.setFilter.handle.index;
+				if (generations[slot].load(std::memory_order_acquire) ==
+					cmd.setFilter.handle.generation) {
+					uint32_t dense = slotToDense[slot];
+					categories[dense] = cmd.setFilter.category;
+					masks[dense] = cmd.setFilter.mask;
+				}
+				break;
+			}
 		}
 	}
 }

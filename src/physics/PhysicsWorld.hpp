@@ -49,7 +49,8 @@ enum class CommandType : uint8_t {
 	DestroyBody,
 	CreateConstraint,
 	DestroyConstraint,
-	SetConstraintTarget
+	SetConstraintTarget,
+	SetCollisionFilter
 };
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -70,6 +71,11 @@ struct Command {
 			ConstraintHandle targetCHandle;
 			float targetValue;
 		} setTarget;
+		struct { // For SetCollisionFilter
+			EntityHandle handle;
+			uint32_t category;
+			uint32_t mask;
+		} setFilter;
 	};
 };
 #if defined(__clang__) || defined(__GNUC__)

@@ -8,7 +8,9 @@
 #include <Jolt/Physics/Body/BodyID.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/Shape/Shape.h> // For ShapeRefC
+
 // clang-format on
+
 #include <cstdint>
 #include <memory>
 
@@ -16,7 +18,8 @@ namespace ZHLN {
 
 namespace Physics {
 struct PhysicsWorld;
-}
+struct DebugDrawData;
+} // namespace Physics
 
 // --- ECS Handle for UserData ---
 struct EntityHandle {
@@ -65,9 +68,16 @@ JPH::ShapeRefC GetOrCreateShape(PhysicsContext& ctx, ShapeType type, float p1, f
 // --- Creation (Engine allocates and returns Handle) ---
 EntityHandle CreateRigidBody(PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::RVec3Arg pos,
 							 JPH::QuatArg rot, JPH::EMotionType motion, JPH::ObjectLayer layer,
-							 uint32_t materialID = 0);
+							 uint32_t materialID = 0, uint32_t category = 0xFFFFFFFF,
+							 uint32_t mask = 0xFFFFFFFF);
 
-EntityHandle CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position);
+EntityHandle CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position,
+							 uint32_t category = 0xFFFFFFFF, uint32_t mask = 0xFFFFFFFF);
+
+// --- Actions & Settings ---
+void SetCollisionFilter(PhysicsContext& ctx, EntityHandle handle, uint32_t category, uint32_t mask);
+DebugDrawData GetDebugDrawData(PhysicsContext& ctx, bool drawShapes = true,
+							   bool drawConstraints = true);
 
 // --- Materials ---
 void RegisterMaterial(PhysicsContext& ctx, uint32_t id, float friction, float restitution);

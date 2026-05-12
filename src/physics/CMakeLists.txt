@@ -8,6 +8,8 @@ add_library(zahlen_physics STATIC
     PhysicsQuery.cpp
     PhysicsCommand.cpp
     ConstraintFactory.cpp
+    PhysicsDebug.cpp
+    PhysicsDebug.hpp
 )
 
 target_link_libraries(zahlen_physics 
