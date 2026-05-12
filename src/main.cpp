@@ -149,7 +149,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 		const auto& world = pc.GetWorld();
 		JPH::Vec3 pPos;
 		{
-			std::lock_guard lock(const_cast<Mutex&>(world.shadowLock));
+			std::lock_guard lock(world.shadowLock);
 
 			// Use the Engine's SoA mapping to safely find the player's memory!
 			uint32_t idx = world.slotToDense[scene.playerHandle.index];

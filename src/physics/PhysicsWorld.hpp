@@ -257,7 +257,6 @@ struct PhysicsWorld {
 	 * @brief Synchronizes all Jolt state to the SoA World.
 	 * Handles Rigid Bodies, Characters, and executes optimized SIMD batch copies.
 	 *
-	 * @param world The SoA PhysicsWorld to write to.
 	 * @param system The active Jolt PhysicsSystem.
 	 * @param activeCharacters The array of active CharacterVirtuals.
 	 */
