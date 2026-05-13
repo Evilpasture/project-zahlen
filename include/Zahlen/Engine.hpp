@@ -3,6 +3,7 @@
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Window.hpp>
+#include <ecs/ECS.hpp>
 #include <memory>
 #include <physics/Physics.hpp>
 
@@ -24,12 +25,15 @@ class Engine {
 	InputContext& GetInput() { return *_input; }
 	Camera& GetCamera() { return _mainCamera; }
 
+	ECS::Registry& GetRegistry() { return _registry; }
+
   private:
 	std::unique_ptr<InputContext> _input;
 	std::unique_ptr<Window> _window;
 	std::unique_ptr<RenderContext> _renderContext;
 	std::unique_ptr<PhysicsContext> _physicsContext;
 	Camera _mainCamera;
+	ECS::Registry _registry;
 };
 
 } // namespace ZHLN

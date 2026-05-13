@@ -4,6 +4,7 @@
 #include <Zahlen/Entity.hpp>
 #include <cstddef>
 #include <detail/Span.hpp>
+#include <span>
 #include <threading/Mutex.hpp>
 #include <type_traits>
 #include <vector>
@@ -121,6 +122,16 @@ class Registry {
 	template <typename T> ZHLN::RestrictSpan<T> GetRawArray() const noexcept {
 		auto* set = _components[ComponentFamily::GetTypeID<T>()];
 		return ZHLN::RestrictSpan<T>(reinterpret_cast<T*>(set->GetDataArray()), set->Count());
+	}
+
+	/* Get a span of all Entities that have this component.
+	We use std::span here because this is mostly for reading */
+	template <typename T> std::span<const Entity> GetEntitiesWith() const noexcept {
+		uint32_t id = ComponentFamily::GetTypeID<T>();
+		if (id >= _components.size() || !_components[id]) {
+			return {};
+		}
+		return std::span<const Entity>(_components[id]->GetDenseArray(), _components[id]->Count());
 	}
 
 	// Bridge for FFI
