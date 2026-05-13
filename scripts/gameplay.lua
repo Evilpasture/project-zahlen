@@ -1,60 +1,47 @@
-local mem = require("scripts.core.memoryview")
+local zhln = require("scripts.core.zhln")
+local playerYVel = 0.0
 
--- KeyCodes from Input.hpp
-local KEY = { W = 1, A = 2, S = 3, D = 4, SHIFT = 5 }
+function update(ptr, dt)
+    local engine = zhln.wrap(ptr)
+    local world = engine:world()
 
-function update(engine, dt)
-    -- 1. Get Physics Data
-    local physBuffer = mem.C.ZHLN_GetECSBuffer(engine, "PhysicsComponent")
-    local entities = mem.C.ZHLN_GetECSEntities(engine, "PhysicsComponent")
+    local entities = world:get_entities()
+    local phys_buffer = world:get_component_buffer()
     
-    -- The player is the last entity spawned in our scene setup
-    local playerCount = #entities
-    local playerEntityIdx = playerCount - 1 
-    local playerPhysHandle = physBuffer[playerEntityIdx]
+    local p_idx = #entities - 1
+    local p_handle = phys_buffer[p_idx]
 
-    -- 2. Player Controller Logic (Native Lua!)
-    local speed = 5.0
-    if mem.C.ZHLN_IsKeyDown(engine, KEY.SHIFT) == 1 then speed = 12.0 end
+    -- Camera-relative math
+    local yaw = math.rad(engine:get_camera_yaw())
+    local fwd = { x = math.cos(yaw), z = math.sin(yaw) }
+    local right = { x = -math.sin(yaw), z = math.cos(yaw) }
 
-    local vx, vz = 0, 0
-    if mem.C.ZHLN_IsKeyDown(engine, KEY.W) == 1 then vz = vz + 1 end
-    if mem.C.ZHLN_IsKeyDown(engine, KEY.S) == 1 then vz = vz - 1 end
-    if mem.C.ZHLN_IsKeyDown(engine, KEY.A) == 1 then vx = vx - 1 end
-    if mem.C.ZHLN_IsKeyDown(engine, KEY.D) == 1 then vx = vx + 1 end
+    local mx, mz = 0, 0
+    if engine:is_key_down("W") then mx, mz = mx + fwd.x, mz + fwd.z end
+    if engine:is_key_down("S") then mx, mz = mx - fwd.x, mz - fwd.z end
+    if engine:is_key_down("A") then mx, mz = mx - right.x, mz - right.z end
+    if engine:is_key_down("D") then mx, mz = mx + right.x, mz + right.z end
 
-    -- Very basic camera-relative movement (assuming yaw=-90 is forward)
-    -- You can pass cam.yaw into this function later for better math
-    local finalVx = vx * speed
-    local finalVz = vz * speed
+    -- Normalization
+    local len = math.sqrt(mx*mx + mz*mz)
+    if len > 0.01 then mx, mz = (mx/len), (mz/len) end
 
-    -- Vertical velocity (Gravity)
-    -- Note: We are just overriding the horizontal, Jolt handles vertical if we let it,
-    -- but CharacterVirtual usually needs manual gravity if we use SetVelocity.
-    local curOnGround = mem.C.ZHLN_IsCharacterOnGround(engine, playerPhysHandle)
-    local vy = curOnGround == 1 and 0 or -9.81 * dt
+    local speed = engine:is_key_down("SHIFT") and 12.0 or 5.0
 
-    mem.C.ZHLN_SetCharacterVelocity(engine, playerPhysHandle, finalVx, vy, finalVz)
-
-    -- 3. Prop Logic (The spinning boxes)
-    -- Loop through all entities WITH physics, excluding the floor (0) and player (last)
-    local positions = mem.C.ZHLN_GetPhysicsPositions(engine)
-    local velocities = mem.C.ZHLN_GetPhysicsLinearVelocities(engine)
-
-    for i = 1, playerCount - 2 do
-        local pos = positions[i]
-        local vel = velocities[i]
-
-        -- Pull boxes to center
-        vel.x = vel.x - pos.x * dt
-        vel.z = vel.z - pos.z * dt
-        
-        velocities[i] = vel
+    -- Gravity
+    if world:is_on_ground(p_handle) then
+        playerYVel = 0.0
+    else
+        playerYVel = playerYVel - (30.0 * dt)
     end
 
-    -- Cleanup views
-    entities:release()
-    physBuffer:release()
-    positions:release()
-    velocities:release()
+    world:set_character_velocity(p_handle, mx * speed, playerYVel, mz * speed)
+
+    -- swarming boxes
+    local pos = world.positions
+    local vel = world.velocities
+    for i = 1, #entities - 2 do
+        local p, v, h = pos[i], vel[i], phys_buffer[i]
+        world:set_linear_velocity(h, v.x - p.x * dt, v.y, v.z - p.z * dt)
+    end
 end

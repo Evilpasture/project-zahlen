@@ -564,6 +564,14 @@ void SetCharacterVelocity(PhysicsContext& ctx, ZHLN::Entity handle, JPH::Vec3Arg
 	}
 }
 
+void SetLinearVelocity(PhysicsContext& ctx, ZHLN::Entity handle, JPH::Vec3Arg velocity) {
+	auto* impl = ctx.GetImpl();
+	JPH::BodyID id = impl->world.GetBodyID(handle);
+	if (!id.IsInvalid()) {
+		impl->world.bodyInterface->SetLinearVelocity(id, velocity);
+	}
+}
+
 JPH::Vec3 GetCharacterVelocity(const PhysicsContext& ctx, ZHLN::Entity handle) {
 	auto* impl = ctx.GetImpl();
 	if (handle.index < impl->characterMap.size()) {

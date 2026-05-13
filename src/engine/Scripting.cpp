@@ -108,15 +108,19 @@ void ScriptRunner::CallUpdate(Engine* engine, float dt) {
 	lua_pushnumber(L, dt);
 
 	if (lua_pcall(L, 2, 0, 0) != LUA_OK) {
-		Log("Lua Error in update(): {}", lua_tostring(L, -1));
-		// Emergency Recovery
-		const auto& world = engine->GetPhysicsContext().GetWorld();
-		if (world.sync.viewExportCount.load() > 0) {
-			world.sync.viewExportCount.store(0);
-			world.sync.shadowLock.unlock();
-		}
+		Log("Lua Error: {}", lua_tostring(L, -1));
 		lua_pop(L, 1);
 	}
+
+	// --- NEW: FORCED CLEANUP ---
+	// This calls zhln.cleanup() which releases the C++ Mutexes
+	// before the C++ Physics Step starts.
+	lua_getglobal(L, "require");
+	lua_pushstring(L, "scripts.core.zhln");
+	lua_pcall(L, 1, 1, 0);
+	lua_getfield(L, -1, "cleanup");
+	lua_pcall(L, 0, 0, 0);
+	lua_pop(L, 1); // pop zhln table
 }
 
 } // namespace ZHLN
@@ -194,5 +198,16 @@ int ZHLN_IsCharacterOnGround(ZHLN_Engine* engine_handle, uint64_t physicsHandleR
 	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
 	ZHLN::Entity handle = ZHLN::Entity::Unpack(physicsHandleRaw);
 	return ZHLN::Physics::IsCharacterOnGround(engine->GetPhysicsContext(), handle) ? 1 : 0;
+}
+
+void ZHLN_SetLinearVelocity(ZHLN_Engine* engine_handle, uint64_t physicsHandleRaw, float x, float y,
+							float z) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	ZHLN::Entity handle = ZHLN::Entity::Unpack(physicsHandleRaw);
+	ZHLN::Physics::SetLinearVelocity(engine->GetPhysicsContext(), handle, {x, y, z});
+}
+float ZHLN_GetCameraYaw(ZHLN_Engine* engine_handle) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	return engine->GetCamera().yaw;
 }
 }

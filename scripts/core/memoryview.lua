@@ -2,10 +2,10 @@ local ffi = require("ffi")
 
 local ok = pcall(ffi.typeof, "ZHLN_BufferView")
 if not ok then
-    ffi.cdef[[
+    ffi.cdef [[
         typedef struct ZHLN_BufferView {
             void*    buf;
-            void*    obj;      
+            void*    obj;
             size_t   len;
             uint32_t itemsize;
             char     format[8];
@@ -26,10 +26,12 @@ if not ok then
         void ZHLN_GetMouseDelta(ZHLN_Engine* engine, float* outX, float* outY);
         void ZHLN_SetCharacterVelocity(ZHLN_Engine* engine, uint64_t physicsHandle, float x, float y, float z);
         int ZHLN_IsCharacterOnGround(ZHLN_Engine* engine, uint64_t physicsHandle);
+        void ZHLN_SetLinearVelocity(ZHLN_Engine* engine, uint64_t physicsHandle, float x, float y, float z);
+        float ZHLN_GetCameraYaw(struct ZHLN_Engine* engine);
     ]]
 end
 
-local CODE_TO_TYPE = { f = "float", d = "double", i = "int32_t", I = "uint32_t" }
+local CODE_TO_TYPE = { f = "float", d = "double", i = "int32_t", I = "uint32_t", Q = "uint64_t" }
 local BufferMT = {}
 local TypeCache = {}
 
@@ -56,7 +58,7 @@ function BufferMT:__index(i)
     -- 2. Recursive Slicing (ndim > 1)
     if self.ndim > 1 then
         local sub = ffi.new("ZHLN_BufferView")
-        sub.obj = self.obj
+        sub.obj = nil -- Prevent GC from releasing the C++ buffer prematurely
         sub.itemsize = self.itemsize
         sub.readonly = self.readonly
         ffi.copy(sub.format, self.format, 8)
