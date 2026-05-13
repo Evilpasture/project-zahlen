@@ -1,10 +1,9 @@
 #pragma once
 
-#include "detail/Span.hpp"
-
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Entity.hpp>
 #include <cstddef>
+#include <detail/Span.hpp>
 #include <threading/Mutex.hpp>
 #include <type_traits>
 #include <vector>

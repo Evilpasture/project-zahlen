@@ -53,8 +53,9 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/SPIRV-Reflect)
 add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/imgui)
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/render)
-add_subdirectory(${CMAKE_SOURCE_DIR}/src/threading) # NEW
-add_subdirectory(${CMAKE_SOURCE_DIR}/src/physics)   # NEW
+add_subdirectory(${CMAKE_SOURCE_DIR}/src/threading)
+add_subdirectory(${CMAKE_SOURCE_DIR}/src/physics)  
+add_subdirectory(${CMAKE_SOURCE_DIR}/src/ecs)
 
 option(BUILD_TESTING "Build the render module test suite" OFF)
 if(BUILD_TESTING)
@@ -97,8 +98,9 @@ add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 # 5. Static Linking order
 target_link_libraries(zahlen PRIVATE 
     zahlen_render
-    zahlen_physics    # NEW
-    zahlen_threading  # NEW
+    zahlen_physics  
+    zahlen_threading
+    zahlen_ecs 
     glfw
     Jolt 
     LuaJIT
