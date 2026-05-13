@@ -1,5 +1,3 @@
-#include "Zahlen/Components.hpp"
-
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Scripting.h>
 #include <Zahlen/Scripting.hpp>

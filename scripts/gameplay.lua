@@ -44,9 +44,24 @@ function update(ptr, dt)
         local strength = 0.5 -- Much lower value for impulses
         local nudgeX = -p.x * strength
         local nudgeZ = -p.z * strength
-        
+
         -- Apply the nudge. This feels like a "wind" or "magnet"
         -- but allows them to bounce and fall naturally.
         world:apply_impulse(h, nudgeX, 0, nudgeZ)
+    end
+    -- 3. Collision Events
+    local contacts = world.contacts
+    
+    -- Using #contacts asks the C++ BufferView exactly how many events occurred this frame
+    for i = 0, #contacts - 1 do
+        local evt = contacts[i]
+        
+        -- Filter for heavy impacts (e.g. falling boxes hitting the floor)
+        if evt.impulse > 10.0 then
+            zahlen.log(
+                "HEAVY IMPACT: Impulse " .. tostring(evt.impulse) .. 
+                " | Pos: (" .. tostring(evt.px) .. ", " .. tostring(evt.py) .. ")"
+            )
+        end
     end
 end

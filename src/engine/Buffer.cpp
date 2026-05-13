@@ -101,7 +101,8 @@ ZHLN_BufferView ZHLN_GetECSBuffer(struct ZHLN_Engine* engine_handle, const char*
 	return {};
 }
 
-ZHLN_BufferView ZHLN_GetECSEntities(struct ZHLN_Engine* engine_handle, const char* componentName) {
+ZHLN_BufferView ZHLN_GetECSEntities(struct ZHLN_Engine* engine_handle,
+									const char* /*componentName*/) {
 	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
 	auto& reg = engine->GetRegistry();
 
@@ -109,5 +110,16 @@ ZHLN_BufferView ZHLN_GetECSEntities(struct ZHLN_Engine* engine_handle, const cha
 	auto entities = reg.GetEntitiesWith<ZHLN::PhysicsComponent>();
 	return ZHLN::ViewComposer::Build(&reg, const_cast<ZHLN::Entity*>(entities.data()), "Q",
 									 entities.size());
+}
+
+ZHLN_BufferView ZHLN_GetPhysicsContactEvents(ZHLN_Engine* engine_handle) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	auto events = ZHLN::Physics::GetContactEvents(engine->GetPhysicsContext());
+
+	// Choose format string based on Jolt precision
+	const char* fmt = (sizeof(JPH::Real) == 8) ? "EvtD" : "EvtF";
+
+	return ZHLN::ViewComposer::Build(&engine->GetPhysicsContext().GetWorld(), events.first, fmt,
+									 events.second);
 }
 }

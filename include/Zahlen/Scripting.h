@@ -12,6 +12,7 @@ ZHLN_EXPORT void ZHLN_ReleaseBuffer(void* sync_ptr);
 // ECS Access
 ZHLN_EXPORT ZHLN_BufferView ZHLN_GetECSBuffer(struct ZHLN_Engine* engine, const char* name);
 ZHLN_EXPORT ZHLN_BufferView ZHLN_GetECSEntities(struct ZHLN_Engine* engine, const char* name);
+ZHLN_EXPORT ZHLN_BufferView ZHLN_GetPhysicsContactEvents(struct ZHLN_Engine* engine);
 
 // Input & Camera
 ZHLN_EXPORT int ZHLN_IsKeyDown(struct ZHLN_Engine* engine, uint8_t key);

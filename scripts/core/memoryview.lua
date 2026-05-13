@@ -30,10 +30,43 @@ if not ok then
         float ZHLN_GetCameraYaw(struct ZHLN_Engine* engine);
         void ZHLN_AddImpulse(struct ZHLN_Engine* engine, uint64_t entityHandle, float x,
 								 float y, float z);
+
+        typedef struct ZHLN_ContactEventF {
+            uint64_t body1;
+            uint64_t body2;
+            float px, py, pz;
+            float nx, ny, nz;
+            float impulse;
+            uint32_t type;
+            uint32_t flags;
+            float slidingSpeed;
+            float rvx, rvy, rvz;
+            uint32_t mat1, mat2;
+            uint32_t sub1, sub2;
+        } __attribute__((aligned(128))) ZHLN_ContactEventF;
+
+        typedef struct ZHLN_ContactEventD {
+            uint64_t body1;
+            uint64_t body2;
+            double px, py, pz;
+            float nx, ny, nz;
+            float impulse;
+            uint32_t type;
+            uint32_t flags;
+            float slidingSpeed;
+            float rvx, rvy, rvz;
+            uint32_t mat1, mat2;
+            uint32_t sub1, sub2;
+        } __attribute__((aligned(128))) ZHLN_ContactEventD;
+
+        ZHLN_BufferView ZHLN_GetPhysicsContactEvents(ZHLN_Engine* engine);
     ]]
 end
 
-local CODE_TO_TYPE = { f = "float", d = "double", i = "int32_t", I = "uint32_t", Q = "uint64_t" }
+local CODE_TO_TYPE = { 
+    f = "float", d = "double", i = "int32_t", I = "uint32_t", Q = "uint64_t",
+    EvtF = "ZHLN_ContactEventF", EvtD = "ZHLN_ContactEventD" 
+}
 local BufferMT = {}
 local TypeCache = {}
 

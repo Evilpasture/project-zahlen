@@ -24,6 +24,7 @@ local World = {}
 World.__index = function(self, key)
     if key == "positions"  then return track(mem.C.ZHLN_GetPhysicsPositions(self.engine)) end
     if key == "velocities" then return track(mem.C.ZHLN_GetPhysicsLinearVelocities(self.engine)) end
+    if key == "contacts"   then return track(mem.C.ZHLN_GetPhysicsContactEvents(self.engine)) end
     return World[key]
 end
 
