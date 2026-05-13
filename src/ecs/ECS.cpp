@@ -4,7 +4,6 @@
 
 #include <Zahlen/Log.hpp>
 #include <cstring>
-#include <mutex>
 #include <new>
 
 namespace ZHLN::ECS {
@@ -171,8 +170,9 @@ BufferView SparseSet::GetBufferView(const void* owner, const char* format) const
 	view.strides[0] = _elementSize;
 	view.flags = ZHLN_BUFFER_CONTIGUOUS | ZHLN_BUFFER_WRITABLE;
 
-	if (reinterpret_cast<uintptr_t>(_data) % 32 == 0)
+	if (reinterpret_cast<uintptr_t>(_data) % 32 == 0) {
 		view.flags |= ZHLN_BUFFER_ALIGNED_32;
+	}
 
 	return view;
 }
@@ -199,8 +199,8 @@ Entity Registry::Create() {
 	ZHLN_LOCK(_lock) {
 
 		if (_freeCount == 0) {
-			size_t newCap = _generations.empty() ? 1024 : _generations.size() * 2;
-			size_t oldSize = _generations.size();
+			const size_t newCap = _generations.empty() ? 1024 : _generations.size() * 2;
+			const size_t oldSize = _generations.size();
 
 			_generations.resize(newCap, 1);
 			_freeIndices.resize(newCap);
@@ -209,50 +209,55 @@ Entity Registry::Create() {
 				_freeIndices[_freeCount++] = static_cast<uint32_t>((newCap - 1) - (i - oldSize));
 			}
 		}
-	}
-	uint32_t index = _freeIndices[--_freeCount];
-	uint32_t gen = _generations[index];
-	_activeEntities++;
+		const uint32_t index = _freeIndices[--_freeCount];
+		const uint32_t gen = _generations[index];
+		_activeEntities++;
 
-	return Entity{index, gen};
+		return Entity{index, gen};
+	}
 }
 
 void Registry::Destroy(Entity entity) {
-	std::lock_guard<Mutex> guard(_lock);
+	ZHLN_LOCK(_lock) {
 
-	if (entity.index >= _generations.size() || _generations[entity.index] != entity.generation) {
-		return; // Already dead
+		if (entity.index >= _generations.size() ||
+			_generations[entity.index] != entity.generation) {
+			return; // Already dead
+		}
+
+		// 1. Remove from all active sparse sets
+		for (auto* set : _components) {
+			if (set)
+				set->Remove(entity);
+		}
+
+		// 2. Kill Entity
+		_generations[entity.index]++;
+		_freeIndices[_freeCount++] = entity.index;
+		_activeEntities--;
 	}
-
-	// 1. Remove from all active sparse sets
-	for (auto* set : _components) {
-		if (set)
-			set->Remove(entity);
-	}
-
-	// 2. Kill Entity
-	_generations[entity.index]++;
-	_freeIndices[_freeCount++] = entity.index;
-	_activeEntities--;
 }
 
 bool Registry::IsAlive(Entity entity) const noexcept {
-	std::lock_guard<Mutex> guard(_lock);
-	return entity.index < _generations.size() && _generations[entity.index] == entity.generation;
+	ZHLN_LOCK(_lock) {
+		return entity.index < _generations.size() &&
+			   _generations[entity.index] == entity.generation;
+	}
 }
 
 void Registry::Clear() {
-	std::lock_guard<Mutex> guard(_lock);
-	for (auto* set : _components) {
-		if (set)
-			set->Clear();
+	ZHLN_LOCK(_lock) {
+		for (auto* set : _components) {
+			if (set)
+				set->Clear();
+		}
+		for (size_t i = 0; i < _generations.size(); ++i) {
+			_freeIndices[i] = static_cast<uint32_t>((_generations.size() - 1) - i);
+			_generations[i]++; // Invalidate all existing handles
+		}
+		_freeCount = _generations.size();
+		_activeEntities = 0;
 	}
-	for (size_t i = 0; i < _generations.size(); ++i) {
-		_freeIndices[i] = static_cast<uint32_t>((_generations.size() - 1) - i);
-		_generations[i]++; // Invalidate all existing handles
-	}
-	_freeCount = _generations.size();
-	_activeEntities = 0;
 }
 
 } // namespace ZHLN::ECS

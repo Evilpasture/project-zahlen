@@ -68,12 +68,12 @@ enum class CommandType : uint8_t {
 struct Command {
 	CommandType type;
 	union {
-		EntityHandle handle;	  // For DestroyBody
+		ZHLN::Entity handle;	  // For DestroyBody
 		ConstraintHandle cHandle; // For DestroyConstraint
 		struct {				  // For CreateConstraint
 			ConstraintType cType;
-			EntityHandle b1;
-			EntityHandle b2;
+			ZHLN::Entity b1;
+			ZHLN::Entity b2;
 			ConstraintParams params;
 		} createC;
 		struct { // For SetConstraintTarget
@@ -81,7 +81,7 @@ struct Command {
 			float targetValue;
 		} setTarget;
 		struct { // For SetCollisionFilter
-			EntityHandle handle;
+			ZHLN::Entity handle;
 			uint32_t category;
 			uint32_t mask;
 		} setFilter;
@@ -104,8 +104,8 @@ enum class ContactType : uint32_t { Added = 0, Persisted = 1, Removed = 2 };
 
 struct alignas(128) ContactEvent {
 	// --- Block 1: Identity & Spatial (Offset 0-63) ---
-	EntityHandle body1;	  // 8
-	EntityHandle body2;	  // 8
+	ZHLN::Entity body1;	  // 8
+	ZHLN::Entity body2;	  // 8
 	JPH::Real px, py, pz; // 12 or 24 (Double-ready)
 	float nx, ny, nz;	  // 12
 	float impulse;		  // 4
@@ -240,11 +240,11 @@ struct PhysicsWorld {
 
 	// Data Management
 	void ResizeBuffers(size_t newCapacity);
-	EntityHandle AllocateHandle();
+	ZHLN::Entity AllocateHandle();
 	void RemoveBodySlot(uint32_t slot);
 	void ResizeConstraintBuffers(size_t newCapacity);
 
-	JPH::BodyID GetBodyID(EntityHandle handle);
+	JPH::BodyID GetBodyID(ZHLN::Entity handle);
 
 	// Constraints
 	ConstraintHandle AllocateConstraintHandle();

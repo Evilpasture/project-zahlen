@@ -114,4 +114,16 @@ static_assert(kIsDebugMutex || sizeof(Mutex) == 1,
 // Guarantee it's a perfect POD
 static_assert(kIsDebugMutex || std::is_trivial_v<Mutex>, "Mutex MUST be trivial in Release mode!");
 
+/**
+ * @brief Trivial RAII guard to avoid including <mutex> in interface headers.
+ */
+struct MutexGuard {
+	Mutex& _m;
+	inline explicit MutexGuard(Mutex& m) noexcept : _m(m) { _m.lock(); }
+	inline ~MutexGuard() noexcept { _m.unlock(); }
+
+	MutexGuard(const MutexGuard&) = delete;
+	MutexGuard& operator=(const MutexGuard&) = delete;
+};
+
 } // namespace ZHLN

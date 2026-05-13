@@ -12,7 +12,8 @@
  * @brief Standard Mutex Lock Macro.
  * Usage: ZHLN_LOCK(myMutex) { ... }
  */
-#define ZHLN_LOCK(mutex_ref) ZHLN_SCOPE_BLOCK(std::lock_guard<::ZHLN::Mutex> _zhln_guard(mutex_ref))
+#define ZHLN_LOCK(mutex_ref)                                                                       \
+	ZHLN_SCOPE_BLOCK(::ZHLN::MutexGuard _zhln_guard_no_recursive_and_nesting(mutex_ref))
 
 /**
  * @brief ECS-Specific Safety Macro.
@@ -31,7 +32,7 @@ namespace ZHLN::Internal {
 struct FFISafetyGuard {
 	// We forward declare the Registry logic here to keep this header clean
 	void* _reg;
-	FFISafetyGuard(void* reg) : _reg(reg) {
+	explicit FFISafetyGuard(void* reg) : _reg(reg) {
 		// Logic: If (reg->view_export_count > 0) Panic("FFI Memory Violation");
 		// We'll implement this properly in ECS.cpp
 	}

@@ -179,7 +179,7 @@ inline void SyncCharacters(const JPH::Array<JPH::CharacterVirtual*>& characters,
 						   const MappingDataCreateInfo& map,
 						   const WorldDataCreateInfo& world) noexcept {
 	for (auto* character : characters) {
-		const EntityHandle h = EntityHandle::Unpack(character->GetUserData());
+		const ZHLN::Entity h = ZHLN::Entity::Unpack(character->GetUserData());
 
 		// In-loop validation (similar to rigid body pass)
 		const uint32_t slot = h.index;

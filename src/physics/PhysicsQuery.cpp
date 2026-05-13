@@ -23,13 +23,13 @@ class QueryFilter final : public JPH::BodyFilter {
 };
 
 static bool TryGetValidHandle(const PhysicsWorld& world, JPH::BodyID bodyID,
-							  EntityHandle& outHandle) {
+							  ZHLN::Entity& outHandle) {
 	if (bodyID.IsInvalid()) [[unlikely]] {
 		return false;
 	}
 
 	const uint64_t rawData = world.bodyInterface->GetUserData(bodyID);
-	const EntityHandle handle = EntityHandle::Unpack(rawData);
+	const ZHLN::Entity handle = ZHLN::Entity::Unpack(rawData);
 
 	if (handle.index >= world.slotCapacity) [[unlikely]] {
 		return false;
@@ -51,7 +51,7 @@ static bool TryGetValidHandle(const PhysicsWorld& world, JPH::BodyID bodyID,
 } // namespace
 
 RaycastResult Raycast(const PhysicsContext& ctx, JPH::RVec3Arg origin, JPH::Vec3Arg direction,
-					  float maxDistance, EntityHandle ignore) {
+					  float maxDistance, ZHLN::Entity ignore) {
 	const auto& world = ctx.GetWorld();
 
 	if (world.isStepping.load(std::memory_order_relaxed))
@@ -95,7 +95,7 @@ RaycastResult Raycast(const PhysicsContext& ctx, JPH::RVec3Arg origin, JPH::Vec3
 
 ShapeCastResult Shapecast(const PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::RVec3Arg pos,
 						  JPH::QuatArg rot, JPH::Vec3Arg direction, float maxDistance,
-						  EntityHandle ignore) {
+						  ZHLN::Entity ignore) {
 	const auto& world = ctx.GetWorld();
 	if (world.isStepping.load(std::memory_order_relaxed))
 		return {};
@@ -140,7 +140,7 @@ ShapeCastResult Shapecast(const PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::
 }
 
 void OverlapSphere(const PhysicsContext& ctx, JPH::RVec3Arg center, float radius,
-				   std::vector<EntityHandle>& outResults) {
+				   std::vector<ZHLN::Entity>& outResults) {
 	const auto& world = ctx.GetWorld();
 	if (world.isStepping.load(std::memory_order_relaxed))
 		return;
@@ -155,7 +155,7 @@ void OverlapSphere(const PhysicsContext& ctx, JPH::RVec3Arg center, float radius
 	query->CollideShape(shape, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sTranslation(center), {},
 						JPH::RVec3::sZero(), collector);
 
-	EntityHandle handle;
+	ZHLN::Entity handle;
 	for (const auto& hit : collector.mHits) {
 		if (TryGetValidHandle(world, hit.mBodyID2, handle)) {
 			outResults.push_back(handle);
@@ -164,7 +164,7 @@ void OverlapSphere(const PhysicsContext& ctx, JPH::RVec3Arg center, float radius
 }
 
 void OverlapAABB(const PhysicsContext& ctx, JPH::RVec3Arg minBox, JPH::RVec3Arg maxBox,
-				 std::vector<EntityHandle>& outResults) {
+				 std::vector<ZHLN::Entity>& outResults) {
 	const auto& world = ctx.GetWorld();
 	if (world.isStepping.load(std::memory_order_relaxed))
 		return;
@@ -175,7 +175,7 @@ void OverlapAABB(const PhysicsContext& ctx, JPH::RVec3Arg minBox, JPH::RVec3Arg 
 
 	query->CollideAABox(box, collector);
 
-	EntityHandle handle;
+	ZHLN::Entity handle;
 	for (const auto& hitID : collector.mHits) {
 		if (TryGetValidHandle(world, hitID, handle)) {
 			outResults.push_back(handle);

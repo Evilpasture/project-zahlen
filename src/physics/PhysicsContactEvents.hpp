@@ -49,14 +49,14 @@ class ContactListener final : public JPH::ContactListener {
 
 	uint32_t GetDense(JPH::BodyID id) {
 		uint32_t j_idx = id.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
-		EntityHandle h =
-			EntityHandle::Unpack(_world->idToHandleMap[j_idx].load(std::memory_order_relaxed));
+		ZHLN::Entity h =
+			ZHLN::Entity::Unpack(_world->idToHandleMap[j_idx].load(std::memory_order_relaxed));
 		return (h.index < _world->slotCapacity) ? _world->slotToDense[h.index] : 0xFFFFFFFF;
 	}
 
-	EntityHandle GetHandle(JPH::BodyID id) {
+	ZHLN::Entity GetHandle(JPH::BodyID id) {
 		uint32_t j_idx = id.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
-		return EntityHandle::Unpack(_world->idToHandleMap[j_idx].load(std::memory_order_relaxed));
+		return ZHLN::Entity::Unpack(_world->idToHandleMap[j_idx].load(std::memory_order_relaxed));
 	}
 
 	void Record(ContactType type, const JPH::Body& b1, const JPH::Body& b2,
@@ -73,12 +73,12 @@ class ContactListener final : public JPH::ContactListener {
 		JPH::Vec3 n = manifold.mWorldSpaceNormal;
 
 		if (r1 > r2) {
-			ev.body1 = EntityHandle::Unpack(r2);
-			ev.body2 = EntityHandle::Unpack(r1);
+			ev.body1 = ZHLN::Entity::Unpack(r2);
+			ev.body2 = ZHLN::Entity::Unpack(r1);
 			n = -n;
 		} else {
-			ev.body1 = EntityHandle::Unpack(r1);
-			ev.body2 = EntityHandle::Unpack(r2);
+			ev.body1 = ZHLN::Entity::Unpack(r1);
+			ev.body2 = ZHLN::Entity::Unpack(r2);
 		}
 
 		const JPH::RVec3 p = manifold.GetWorldSpaceContactPointOn1(0);
@@ -151,15 +151,15 @@ class CharacterListener final : public JPH::CharacterContactListener {
 		if (u2 == 0)
 			return true;
 
-		uint32_t d1 = _world->slotToDense[EntityHandle::Unpack(u1).index];
-		uint32_t d2 = _world->slotToDense[EntityHandle::Unpack(u2).index];
+		uint32_t d1 = _world->slotToDense[ZHLN::Entity::Unpack(u1).index];
+		uint32_t d2 = _world->slotToDense[ZHLN::Entity::Unpack(u2).index];
 		return (_world->categories[d1] & _world->masks[d2]) &&
 			   (_world->categories[d2] & _world->masks[d1]);
 	}
 
 	bool Filter(uint64_t u1, uint64_t u2) {
-		uint32_t d1 = _world->slotToDense[EntityHandle::Unpack(u1).index];
-		uint32_t d2 = _world->slotToDense[EntityHandle::Unpack(u2).index];
+		uint32_t d1 = _world->slotToDense[ZHLN::Entity::Unpack(u1).index];
+		uint32_t d2 = _world->slotToDense[ZHLN::Entity::Unpack(u2).index];
 		return (_world->categories[d1] & _world->masks[d2]) &&
 			   (_world->categories[d2] & _world->masks[d1]);
 	}

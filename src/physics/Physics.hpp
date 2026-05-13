@@ -8,6 +8,7 @@
 #include <Jolt/Physics/Body/BodyID.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/Shape/Shape.h> // For ShapeRefC
+#include <Zahlen/Entity.hpp>
 
 // clang-format on
 
@@ -21,23 +22,8 @@ struct PhysicsWorld;
 struct DebugDrawData;
 } // namespace Physics
 
-// --- ECS Handle for UserData ---
-struct EntityHandle {
-	uint32_t index;
-	uint32_t generation;
-
-	[[nodiscard]] constexpr uint64_t Pack() const noexcept {
-		return (static_cast<uint64_t>(generation) << 32) | index;
-	}
-
-	[[nodiscard]] static constexpr EntityHandle Unpack(uint64_t userData) noexcept {
-		return {.index = static_cast<uint32_t>(userData & 0xFFFFFFFF),
-				.generation = static_cast<uint32_t>(userData >> 32)};
-	}
-};
-
-static_assert(std::is_trivially_copyable_v<EntityHandle>);
-static_assert(std::is_trivial_v<EntityHandle>);
+static_assert(std::is_trivially_copyable_v<ZHLN::Entity>);
+static_assert(std::is_trivial_v<ZHLN::Entity>);
 
 class PhysicsContext {
   public:
@@ -66,16 +52,16 @@ JPH::ShapeRefC GetOrCreateShape(PhysicsContext& ctx, ShapeType type, float p1, f
 								float p3 = 0.0f, float p4 = 0.0f);
 
 // --- Creation (Engine allocates and returns Handle) ---
-EntityHandle CreateRigidBody(PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::RVec3Arg pos,
+ZHLN::Entity CreateRigidBody(PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::RVec3Arg pos,
 							 JPH::QuatArg rot, JPH::EMotionType motion, JPH::ObjectLayer layer,
 							 uint32_t materialID = 0, uint32_t category = 0xFFFFFFFF,
 							 uint32_t mask = 0xFFFFFFFF);
 
-EntityHandle CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position,
+ZHLN::Entity CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position,
 							 uint32_t category = 0xFFFFFFFF, uint32_t mask = 0xFFFFFFFF);
 
 // --- Actions & Settings ---
-void SetCollisionFilter(PhysicsContext& ctx, EntityHandle handle, uint32_t category, uint32_t mask);
+void SetCollisionFilter(PhysicsContext& ctx, ZHLN::Entity handle, uint32_t category, uint32_t mask);
 DebugDrawData GetDebugDrawData(PhysicsContext& ctx, bool drawShapes = true,
 							   bool drawConstraints = true);
 
@@ -83,18 +69,18 @@ DebugDrawData GetDebugDrawData(PhysicsContext& ctx, bool drawShapes = true,
 void RegisterMaterial(PhysicsContext& ctx, uint32_t id, float friction, float restitution);
 
 // --- Actions ---
-void DestroyBody(PhysicsContext& ctx, EntityHandle handle);
-void SetLinearVelocity(PhysicsContext& ctx, EntityHandle handle, JPH::Vec3Arg velocity);
-void SetCharacterVelocity(PhysicsContext& ctx, EntityHandle handle, JPH::Vec3Arg velocity);
+void DestroyBody(PhysicsContext& ctx, ZHLN::Entity handle);
+void SetLinearVelocity(PhysicsContext& ctx, ZHLN::Entity handle, JPH::Vec3Arg velocity);
+void SetCharacterVelocity(PhysicsContext& ctx, ZHLN::Entity handle, JPH::Vec3Arg velocity);
 
-JPH::Vec3 GetCharacterVelocity(const PhysicsContext& ctx, EntityHandle handle);
-bool IsCharacterOnGround(const PhysicsContext& ctx, EntityHandle handle);
+JPH::Vec3 GetCharacterVelocity(const PhysicsContext& ctx, ZHLN::Entity handle);
+bool IsCharacterOnGround(const PhysicsContext& ctx, ZHLN::Entity handle);
 auto GetPositionBuffer(const PhysicsContext& ctx) -> BufferView;
 JPH::Quat GetRotation(const PhysicsContext& ctx, JPH::BodyID bodyID);
 
 // --- Data Structures ---
 struct RaycastResult {
-	EntityHandle handle{};
+	ZHLN::Entity handle{};
 	float fraction = 1.0f;
 	JPH::Vec3 normal = JPH::Vec3::sZero();
 	JPH::RVec3 position = JPH::RVec3::sZero();
@@ -102,7 +88,7 @@ struct RaycastResult {
 };
 
 struct ShapeCastResult {
-	EntityHandle handle{};
+	ZHLN::Entity handle{};
 	float fraction = 1.0f;
 	JPH::RVec3 contactPoint = JPH::RVec3::sZero();
 	JPH::Vec3 contactNormal = JPH::Vec3::sZero();
@@ -112,21 +98,21 @@ struct ShapeCastResult {
 // --- Queries ---
 [[nodiscard]] RaycastResult Raycast(const PhysicsContext& ctx, JPH::RVec3Arg origin,
 									JPH::Vec3Arg direction, float maxDistance = 1000.0f,
-									EntityHandle ignore = {});
+									ZHLN::Entity ignore = {});
 
 [[nodiscard]] ShapeCastResult Shapecast(const PhysicsContext& ctx, JPH::ShapeRefC shape,
 										JPH::RVec3Arg pos, JPH::QuatArg rot, JPH::Vec3Arg direction,
-										float maxDistance = 1000.0f, EntityHandle ignore = {});
+										float maxDistance = 1000.0f, ZHLN::Entity ignore = {});
 
 void OverlapSphere(const PhysicsContext& ctx, JPH::RVec3Arg center, float radius,
-				   std::vector<EntityHandle>& outResults);
+				   std::vector<ZHLN::Entity>& outResults);
 
 void OverlapAABB(const PhysicsContext& ctx, JPH::RVec3Arg minBox, JPH::RVec3Arg maxBox,
-				 std::vector<EntityHandle>& outResults);
+				 std::vector<ZHLN::Entity>& outResults);
 
 // --- Internal Mapping Helpers (Now visible to Query module) ---
-JPH::BodyID GetBodyID(const PhysicsWorld& world, EntityHandle handle);
-EntityHandle GetEntityHandle(const PhysicsContext& ctx, JPH::BodyID bodyID);
+JPH::BodyID GetBodyID(const PhysicsWorld& world, ZHLN::Entity handle);
+ZHLN::Entity GetEntityHandle(const PhysicsContext& ctx, JPH::BodyID bodyID);
 
 } // namespace Physics
 } // namespace ZHLN

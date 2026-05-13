@@ -210,7 +210,7 @@ void PhysicsWorld::ResizeConstraintBuffers(size_t newCapacity) {
 	}
 }
 
-EntityHandle PhysicsWorld::AllocateHandle() {
+ZHLN::Entity PhysicsWorld::AllocateHandle() {
 	size_t available = freeCount.load(std::memory_order_acquire);
 	if (available == 0) {
 		ResizeBuffers(capacity * 2);
@@ -221,7 +221,7 @@ EntityHandle PhysicsWorld::AllocateHandle() {
 	freeCount.store(available, std::memory_order_release);
 
 	uint32_t gen = generations[slot].load(std::memory_order_relaxed);
-	return EntityHandle{.index = slot, .generation = gen};
+	return ZHLN::Entity{.index = slot, .generation = gen};
 }
 
 void PhysicsWorld::RemoveBodySlot(uint32_t slot) {

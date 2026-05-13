@@ -315,7 +315,7 @@ JPH::ShapeRefC GetOrCreateShape(PhysicsContext& ctx, Physics::ShapeType type, fl
 // PROCEDURAL API
 // =================================================================================================
 
-JPH::BodyID PhysicsWorld::GetBodyID(EntityHandle handle) {
+JPH::BodyID PhysicsWorld::GetBodyID(ZHLN::Entity handle) {
 	if (handle.index >= slotCapacity)
 		return JPH::BodyID();
 
@@ -328,7 +328,7 @@ JPH::BodyID PhysicsWorld::GetBodyID(EntityHandle handle) {
 	return bodyIDs[dense];
 }
 
-void DestroyBody(PhysicsContext& ctx, EntityHandle handle) {
+void DestroyBody(PhysicsContext& ctx, ZHLN::Entity handle) {
 	auto& world = ctx.GetImpl()->world;
 	const uint32_t slot = handle.index;
 
@@ -424,7 +424,7 @@ static MaterialData ResolveMaterial(const PhysicsWorld& world, uint32_t id) {
 /**
  * @brief Generalized Rigid Body creation.
  */
-EntityHandle CreateRigidBody(PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::RVec3Arg pos,
+ZHLN::Entity CreateRigidBody(PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::RVec3Arg pos,
 							 JPH::QuatArg rot, JPH::EMotionType motion, JPH::ObjectLayer layer,
 							 uint32_t materialID, uint32_t category, uint32_t mask) {
 	auto& world = ctx.GetImpl()->world;
@@ -436,7 +436,7 @@ EntityHandle CreateRigidBody(PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::RVe
 	std::lock_guard<Mutex> lock(world.shadowLock);
 
 	// Engine allocates the identity!
-	EntityHandle handle = world.AllocateHandle();
+	ZHLN::Entity handle = world.AllocateHandle();
 
 	JPH::BodyCreationSettings settings(shape, pos, rot, motion, layer);
 	settings.mUserData = handle.Pack();
@@ -480,7 +480,7 @@ EntityHandle CreateRigidBody(PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::RVe
 	return handle;
 }
 
-EntityHandle CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position, uint32_t category,
+ZHLN::Entity CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position, uint32_t category,
 							 uint32_t mask) {
 	auto* impl = ctx.GetImpl();
 	auto& world = impl->world;
@@ -488,7 +488,7 @@ EntityHandle CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position, uint32
 	JPH::ShapeRefC charShape = GetOrCreateShape(ctx, ShapeType::Capsule, 0.5f, 0.3f);
 	std::lock_guard<Mutex> lock(world.shadowLock);
 
-	EntityHandle handle = world.AllocateHandle();
+	ZHLN::Entity handle = world.AllocateHandle();
 
 	JPH::CharacterVirtualSettings settings;
 	settings.mShape = charShape;
@@ -517,7 +517,7 @@ EntityHandle CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position, uint32
 	return handle;
 }
 
-void SetCollisionFilter(PhysicsContext& ctx, EntityHandle handle, uint32_t category,
+void SetCollisionFilter(PhysicsContext& ctx, ZHLN::Entity handle, uint32_t category,
 						uint32_t mask) {
 	auto& world = ctx.GetImpl()->world;
 	std::lock_guard<Mutex> lock(world.shadowLock);
@@ -554,20 +554,20 @@ DebugDrawData GetDebugDrawData(PhysicsContext& ctx, bool drawShapes, bool drawCo
 			impl->debugRenderer->triangles.size()};
 }
 
-void SetCharacterVelocity(PhysicsContext& ctx, EntityHandle handle, JPH::Vec3Arg velocity) {
+void SetCharacterVelocity(PhysicsContext& ctx, ZHLN::Entity handle, JPH::Vec3Arg velocity) {
 	auto* impl = ctx.GetImpl();
 
 	// Generational Safety Check
 	if (handle.index < impl->characterMap.size()) {
 		auto& character = impl->characterMap[handle.index];
 		if (character &&
-			EntityHandle::Unpack(character->GetUserData()).generation == handle.generation) {
+			ZHLN::Entity::Unpack(character->GetUserData()).generation == handle.generation) {
 			character->SetLinearVelocity(velocity);
 		}
 	}
 }
 
-JPH::Vec3 GetCharacterVelocity(const PhysicsContext& ctx, EntityHandle handle) {
+JPH::Vec3 GetCharacterVelocity(const PhysicsContext& ctx, ZHLN::Entity handle) {
 	auto* impl = ctx.GetImpl();
 	if (handle.index < impl->characterMap.size()) {
 		auto& character = impl->characterMap[handle.index];
@@ -577,7 +577,7 @@ JPH::Vec3 GetCharacterVelocity(const PhysicsContext& ctx, EntityHandle handle) {
 	return JPH::Vec3::sZero();
 }
 
-bool IsCharacterOnGround(const PhysicsContext& ctx, EntityHandle handle) {
+bool IsCharacterOnGround(const PhysicsContext& ctx, ZHLN::Entity handle) {
 	auto* impl = ctx.GetImpl();
 	if (handle.index < impl->characterMap.size()) {
 		auto& character = impl->characterMap[handle.index];
@@ -606,9 +606,9 @@ JPH::Quat GetRotation(const PhysicsContext& ctx, JPH::BodyID bodyID) {
 	return ctx.GetImpl()->world.bodyInterface->GetRotation(bodyID);
 }
 
-EntityHandle GetEntityHandle(const PhysicsContext& ctx, JPH::BodyID bodyID) {
+ZHLN::Entity GetEntityHandle(const PhysicsContext& ctx, JPH::BodyID bodyID) {
 	uint64_t rawData = ctx.GetImpl()->world.bodyInterface->GetUserData(bodyID);
-	return EntityHandle::Unpack(rawData);
+	return ZHLN::Entity::Unpack(rawData);
 }
 
 std::pair<const ContactEvent*, size_t> GetContactEvents(const PhysicsContext& ctx) {
@@ -623,8 +623,8 @@ std::pair<const ContactEvent*, size_t> GetContactEvents(const PhysicsContext& ct
 	return {world.contactBuffer, count};
 }
 
-ConstraintHandle CreateConstraint(PhysicsContext& ctx, ConstraintType type, EntityHandle b1,
-								  EntityHandle b2, const ConstraintParams& params) {
+ConstraintHandle CreateConstraint(PhysicsContext& ctx, ConstraintType type, ZHLN::Entity b1,
+								  ZHLN::Entity b2, const ConstraintParams& params) {
 	auto& world = ctx.GetImpl()->world;
 	std::lock_guard<Mutex> lock(world.shadowLock);
 

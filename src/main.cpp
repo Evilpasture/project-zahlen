@@ -14,7 +14,7 @@
 using namespace ZHLN;
 
 static void UpdatePlayerController(const InputContext& input, const Camera& cam,
-								   PhysicsContext& ctx, EntityHandle player, float dt) {
+								   PhysicsContext& ctx, ZHLN::Entity player, float dt) {
 	float yawRad = JPH::DegreesToRadians(cam.yaw);
 	JPH::Vec3 forward = {std::cos(yawRad), 0.0f, std::sin(yawRad)};
 	JPH::Vec3 right = {-std::sin(yawRad), 0.0f, std::cos(yawRad)};
@@ -61,7 +61,7 @@ struct Scene {
 	Mesh box;
 	Mesh player;
 	Material material;
-	EntityHandle playerHandle;
+	ZHLN::Entity playerHandle;
 
 	void Setup(RenderContext& rc, PhysicsContext& pc) {
 		// --- Render Meshes Setup ---
