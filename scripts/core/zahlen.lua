@@ -1,7 +1,7 @@
 local mem = require("scripts.core.memoryview")
 local ffi = require("ffi")
 
-local zhln = {}
+local zahlen = {}
 local tracked_views = {}
 
 -- Internal: Tracks a view so it can be forced-released at end of frame
@@ -11,7 +11,7 @@ local function track(v)
 end
 
 -- Force-releases all buffers tracked this frame
-function zhln.cleanup()
+function zahlen.cleanup()
     for i = 1, #tracked_views do
         tracked_views[i]:release()
         tracked_views[i] = nil
@@ -64,20 +64,20 @@ function Engine:is_key_down(key)
     return mem.C.ZHLN_IsKeyDown(self.raw, map[key:upper()] or 0) == 1
 end
 
-function zhln.wrap(ptr)
+function zahlen.wrap(ptr)
     return setmetatable({ raw = ptr }, Engine)
 end
 
 -- Redefine standard logging to feel like Python
-function zhln.log(...)
+function zahlen.log(...)
     -- Calling the C-function registered in Step 2
-    -- It will automatically find the file/line of the person calling zhln.log
+    -- It will automatically find the file/line of the person calling zahlen.log
 ---@diagnostic disable-next-line: undefined-field
-    _G.zhln.log(...)
+    _G.zahlen.log(...)
 end
 
 function World:apply_impulse(handle, x, y, z)
     mem.C.ZHLN_AddImpulse(self.engine, handle, x, y, z)
 end
 
-return zhln
+return zahlen

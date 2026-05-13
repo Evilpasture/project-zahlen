@@ -1,8 +1,8 @@
-local zhln = require("scripts.core.zhln")
+local zahlen = require("scripts.core.zahlen")
 local playerYVel = 0.0
 
 function update(ptr, dt)
-    local engine = zhln.wrap(ptr)
+    local engine = zahlen.wrap(ptr)
     local world = engine:world()
 
     local entities = world:get_entities()
