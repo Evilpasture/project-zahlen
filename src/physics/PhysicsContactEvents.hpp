@@ -170,14 +170,23 @@ class CharacterListener final : public JPH::CharacterContactListener {
 			return;
 
 		JPH::Vec3 charVel = inChar->GetLinearVelocity();
+		// Normal points from Box -> Character.
+		// Dot < 0 means character is moving toward the box.
 		float dot = charVel.Dot(inContact.mContactNormal);
 
-		// Normal points towards character, so dot < 0 means moving into object
 		if (dot < -0.01f) {
-			JPH::Vec3 impulse =
-				inContact.mContactNormal * (dot * 100.0f); // 100.0f is push strength
-			impulse.SetY(std::max(0.0f, impulse.GetY()));  // Don't push objects into the floor
-			_world->bodyInterface->AddImpulse(inContact.mBodyB, -impulse);
+			// Calculate magnitude: how hard are we hitting?
+			// We use -dot because dot is negative.
+			float pushMagnitude = -dot * 50.0f; // Adjusted strength
+
+			// Apply impulse to Box in direction: -ContactNormal (Away from character)
+			JPH::Vec3 impulse = -inContact.mContactNormal * pushMagnitude;
+
+			// Prevent pushing boxes into the floor (optional but recommended)
+			if (impulse.GetY() < 0.0f)
+				impulse.SetY(0.0f);
+
+			_world->bodyInterface->AddImpulse(inContact.mBodyB, impulse);
 		}
 	}
 };
