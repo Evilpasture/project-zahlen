@@ -105,10 +105,10 @@ struct ShapeCastResult {
 										float maxDistance = 1000.0f, ZHLN::Entity ignore = {});
 
 void OverlapSphere(const PhysicsContext& ctx, JPH::RVec3Arg center, float radius,
-				   std::vector<ZHLN::Entity>& outResults);
+				   JPH::Array<ZHLN::Entity>& outResults);
 
 void OverlapAABB(const PhysicsContext& ctx, JPH::RVec3Arg minBox, JPH::RVec3Arg maxBox,
-				 std::vector<ZHLN::Entity>& outResults);
+				 JPH::Array<ZHLN::Entity>& outResults);
 
 // --- Internal Mapping Helpers (Now visible to Query module) ---
 JPH::BodyID GetBodyID(const PhysicsWorld& world, ZHLN::Entity handle);

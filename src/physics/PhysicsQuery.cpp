@@ -140,7 +140,7 @@ ShapeCastResult Shapecast(const PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::
 }
 
 void OverlapSphere(const PhysicsContext& ctx, JPH::RVec3Arg center, float radius,
-				   std::vector<ZHLN::Entity>& outResults) {
+				   JPH::Array<ZHLN::Entity>& outResults) {
 	const auto& world = ctx.GetWorld();
 	if (world.isStepping.load(std::memory_order_relaxed))
 		return;
@@ -164,7 +164,7 @@ void OverlapSphere(const PhysicsContext& ctx, JPH::RVec3Arg center, float radius
 }
 
 void OverlapAABB(const PhysicsContext& ctx, JPH::RVec3Arg minBox, JPH::RVec3Arg maxBox,
-				 std::vector<ZHLN::Entity>& outResults) {
+				 JPH::Array<ZHLN::Entity>& outResults) {
 	const auto& world = ctx.GetWorld();
 	if (world.isStepping.load(std::memory_order_relaxed))
 		return;

@@ -64,7 +64,7 @@ JPH::Constraint* CreateNativeConstraint(const ConstraintType type, JPH::Body* b1
 			if (lenSq < 1e-6f) {
 				axis = JPH::Vec3::sAxisY();
 			} else {
-				axis /= sqrt(lenSq);
+				axis /= JPH::Sqrt(lenSq);
 			}
 
 			settings.mTwistAxis1 = settings.mTwistAxis2 = axis;

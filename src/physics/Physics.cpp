@@ -173,7 +173,7 @@ struct PhysicsContext::Impl {
 
 	// Character contact listener needs to be stored
 	Physics::CharacterListener characterListener{&world};
-	std::vector<ShapeEntry> shapeCache;
+	JPH::Array<ShapeEntry> shapeCache;
 };
 
 std::unique_ptr<Physics::PhysicsDebugRenderer> debugRenderer;
