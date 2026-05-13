@@ -1,3 +1,5 @@
+#include "Zahlen/Components.hpp"
+
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Scripting.h>
 #include <Zahlen/Scripting.hpp>
@@ -17,38 +19,32 @@ namespace ZHLN {
  * The template T allows the compiler to see the actual struct members.
  */
 struct SyncPolicy {
-	template <typename T> static void Acquire(const T* obj) {
-		// Because T is now the actual type (e.g. PhysicsWorld), members are visible.
-		if (obj->viewExportCount.fetch_add(1, std::memory_order_acquire) == 0) {
-			obj->shadowLock.lock();
+	// The "Universal" entry point
+	static void Acquire(BufferSync* sync) {
+		if (sync->viewExportCount.fetch_add(1, std::memory_order_acquire) == 0) {
+			sync->shadowLock.lock();
 		}
 	}
 
-	template <typename T> static void Release(const T* obj) {
-		if (obj->viewExportCount.fetch_sub(1, std::memory_order_release) == 1) {
-			obj->shadowLock.unlock();
+	static void Release(BufferSync* sync) {
+		if (sync->viewExportCount.fetch_sub(1, std::memory_order_release) == 1) {
+			sync->shadowLock.unlock();
 		}
 	}
 };
 
 struct ViewComposer {
-	/**
-	 * @brief The "Universal Builder".
-	 *
-	 * @tparam TOwner The engine struct type (e.g., PhysicsWorld)
-	 * @tparam TData  The primitive type (e.g., float)
-	 * @tparam Dims   Variadic pack of dimensions
-	 */
 	template <typename TOwner, typename TData, typename... Dims>
 	static ZHLN_BufferView Build(const TOwner* owner, TData* data, const char* format,
 								 Dims... dims) {
-
 		// 1. Thread Synchronization via Policy
-		SyncPolicy::Acquire(owner);
+		// Since sync is the first member, we can safely cast the owner to BufferSync
+		auto* sync = reinterpret_cast<BufferSync*>(const_cast<TOwner*>(owner));
+		SyncPolicy::Acquire(sync);
 
 		ZHLN_BufferView view = {};
-		view.buf = (void*)data; // data is Real*, Real* const when world is const. Safe.
-		view.obj = (void*)owner;
+		view.buf = (void*)data;
+		view.obj = (void*)sync; // Store the SYNC pointer, not the object pointer
 		view.itemsize = sizeof(TData);
 		std::strncpy(view.format, format, 7);
 		view.readonly = 0;
@@ -115,9 +111,9 @@ void ScriptRunner::CallUpdate(Engine* engine, float dt) {
 		Log("Lua Error in update(): {}", lua_tostring(L, -1));
 		// Emergency Recovery
 		const auto& world = engine->GetPhysicsContext().GetWorld();
-		if (world.viewExportCount.load() > 0) {
-			world.viewExportCount.store(0);
-			world.shadowLock.unlock();
+		if (world.sync.viewExportCount.load() > 0) {
+			world.sync.viewExportCount.store(0);
+			world.sync.shadowLock.unlock();
 		}
 		lua_pop(L, 1);
 	}
@@ -147,8 +143,56 @@ ZHLN_BufferView ZHLN_GetPhysicsLinearVelocities(ZHLN_Engine* engine_handle) {
 	return ZHLN::ViewComposer::Build(&world, world.linearVelocities, "f", world.count.load(), 4);
 }
 
-void ZHLN_ReleaseBuffer(void* owner) {
-	// Uses the same policy to ensure symmetric locking
-	ZHLN::SyncPolicy::Release(static_cast<const ZHLN::Physics::PhysicsWorld*>(owner));
+void ZHLN_ReleaseBuffer(void* sync_ptr) {
+	// We know for a fact this is a BufferSync* because
+	// ViewComposer put it there.
+	ZHLN::SyncPolicy::Release(static_cast<ZHLN::BufferSync*>(sync_ptr));
+}
+
+ZHLN_BufferView ZHLN_GetECSBuffer(struct ZHLN_Engine* engine_handle, const char* componentName) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	auto& reg = engine->GetRegistry();
+	std::string_view name(componentName);
+
+	if (name == "PhysicsComponent") {
+		auto raw = reg.GetRawArray<ZHLN::PhysicsComponent>();
+		// Use the Composer to handle the Acquire() call automatically
+		return ZHLN::ViewComposer::Build(&reg, raw.data(), "Q", raw.size());
+	}
+	return {};
+}
+
+ZHLN_BufferView ZHLN_GetECSEntities(struct ZHLN_Engine* engine_handle, const char* componentName) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	auto& reg = engine->GetRegistry();
+
+	// Simplified: All components use the same entity dense array logic
+	auto entities = reg.GetEntitiesWith<ZHLN::PhysicsComponent>();
+	return ZHLN::ViewComposer::Build(&reg, const_cast<ZHLN::Entity*>(entities.data()), "Q",
+									 entities.size());
+}
+
+int ZHLN_IsKeyDown(ZHLN_Engine* engine_handle, uint8_t key) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	return engine->GetInput().IsKeyDown(static_cast<ZHLN::KeyCode>(key)) ? 1 : 0;
+}
+
+void ZHLN_GetMouseDelta(ZHLN_Engine* engine_handle, float* outX, float* outY) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	*outX = engine->GetInput().GetMouse().deltaX;
+	*outY = engine->GetInput().GetMouse().deltaY;
+}
+
+void ZHLN_SetCharacterVelocity(ZHLN_Engine* engine_handle, uint64_t physicsHandleRaw, float x,
+							   float y, float z) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	ZHLN::Entity handle = ZHLN::Entity::Unpack(physicsHandleRaw);
+	ZHLN::Physics::SetCharacterVelocity(engine->GetPhysicsContext(), handle, {x, y, z});
+}
+
+int ZHLN_IsCharacterOnGround(ZHLN_Engine* engine_handle, uint64_t physicsHandleRaw) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	ZHLN::Entity handle = ZHLN::Entity::Unpack(physicsHandleRaw);
+	return ZHLN::Physics::IsCharacterOnGround(engine->GetPhysicsContext(), handle) ? 1 : 0;
 }
 }

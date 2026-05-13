@@ -13,6 +13,12 @@
 
 namespace ZHLN {
 
+/**
+ * @brief Bridge function forward-declared here, implemented in Thread.cpp.
+ * This prevents Log.hpp from needing to include the heavy Thread.hpp.
+ */
+auto GetCurrentFiberID() -> uint64_t;
+
 inline auto GetPoorMansStacktrace() -> std::string {
 	std::string out = "";
 #if defined(__APPLE__) || defined(__linux__)
@@ -23,8 +29,6 @@ inline auto GetPoorMansStacktrace() -> std::string {
 	for (int i = 0; i < frames; ++i) {
 		std::string line = strs[i];
 
-		// Try to find the mangled name in the string
-		// macOS format: "index  binary  address  mangled_name + offset"
 		size_t name_start = line.find("_Z");
 		size_t name_end = line.find(" + ", name_start);
 
@@ -50,52 +54,46 @@ inline auto GetPoorMansStacktrace() -> std::string {
 	return out;
 }
 
-/**
- * @brief Captures both the format string and the caller's source location.
- * Being a non-template struct prevents the deduction failures you encountered.
- */
 struct LogContext {
 	std::string_view fmt;
 	std::source_location loc;
 
-	// This constructor captures the location at the call-site
 	template <typename T>
 	consteval LogContext(const T& s, std::source_location l = std::source_location::current())
 		: fmt(s), loc(l) {}
 
-	// For runtime labels (like from a macro)
 	constexpr LogContext(std::string_view s,
 						 std::source_location l = std::source_location::current())
 		: fmt(s), loc(l) {}
 };
 
 /**
- * @brief Modern C++23 Engine Logger
- * Usage: ZHLN::Log("Player {} moved to {}", name, position);
+ * @brief Modern C++23 Engine Logger with Fiber awareness
  */
 template <typename... Args> void Log(LogContext ctx, Args&&... args) {
-	// Extract filename from path
 	std::string_view file = ctx.loc.file_name();
 	if (auto pos = file.find_last_of("/\\"); pos != std::string_view::npos)
 		file.remove_prefix(pos + 1);
 
-	// Use vformat to handle the type-erased arguments
-	// std::println to stderr is the modern C++23 way
-	std::println(stderr, "[{}:{}] {}", file, ctx.loc.line(),
+	uint64_t fid = GetCurrentFiberID();
+
+	// If fid is 0, it means we are on a raw OS thread or the fiber system isn't init yet.
+	// If fid is 1, it's usually the Main thread/fiber.
+	std::string fiberTag;
+	if (fid == 0)
+		fiberTag = "Thread";
+	else if (fid == 1)
+		fiberTag = "Main";
+	else
+		fiberTag = std::format("{:#x}", fid);
+
+	std::println(stderr, "[{}:{}] [Fiber:{}] {}", file, ctx.loc.line(), fiberTag,
 				 std::vformat(ctx.fmt, std::make_format_args(args...)));
 }
 
-/**
- * @brief Log a fatal error and terminate immediately.
- * Use this for unrecoverable state (e.g., Vulkan device lost).
- */
 template <typename... Args> [[noreturn]] void Panic(LogContext ctx, Args&&... args) {
-	// Log the actual error message
 	Log(ctx, std::forward<Args>(args)...);
-
-	// Use std::println to stderr (standard in C++23)
 	std::println(stderr, "Stack Trace:\n{}", GetPoorMansStacktrace());
-
 	std::abort();
 }
 

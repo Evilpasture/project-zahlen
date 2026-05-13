@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Physics.hpp"
+#include "Zahlen/Sync.hpp"
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/PhysicsSystem.h>
@@ -142,6 +143,7 @@ static_assert(std::is_trivial_v<MaterialData>);
 std::pair<const ContactEvent*, size_t> GetContactEvents(const PhysicsContext& ctx);
 
 struct PhysicsWorld {
+	mutable BufferSync sync;
 	// ========================================================================
 	// BUCKET 1: JOLT CORE (Cold)
 	// ========================================================================
@@ -179,9 +181,7 @@ struct PhysicsWorld {
 	// ========================================================================
 	// BUCKET 3: SYNCHRONIZATION
 	// ========================================================================
-	alignas(CACHE_LINE) mutable ZHLN::Mutex shadowLock;
-	ZHLN::Atomic<bool> isStepping;
-	mutable ZHLN::Atomic<int> viewExportCount;
+	alignas(CACHE_LINE) ZHLN::Atomic<bool> isStepping;
 
 	Command* commandQueue;
 	Command* commandQueueSpare;

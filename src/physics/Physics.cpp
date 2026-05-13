@@ -19,6 +19,7 @@
 #include "PhysicsWorld.hpp"
 #include <Zahlen/Log.hpp>
 #include "PhysicsContactEvents.hpp"
+#include "detail/ControlFlow.hpp"
 #include "threading/Mutex.hpp"
 
 // ZHLN Detail Utilities
@@ -203,8 +204,8 @@ void PhysicsContext::Step(float deltaTime) {
 	Physics::Command* capturedQueue = nullptr;
 	size_t capturedCount = 0;
 
-	{
-		std::lock_guard<ZHLN::Mutex> lock(world.shadowLock);
+	ZHLN_LOCK(world.sync.shadowLock) {
+
 		capturedQueue = world.commandQueue;
 		capturedCount = world.commandCount;
 
@@ -233,8 +234,7 @@ void PhysicsContext::Step(float deltaTime) {
 	}
 
 	// 3. Data Synchronization Pass (Jolt SoA -> Engine Shadow SoA)
-	{
-		std::lock_guard<ZHLN::Mutex> lock(world.shadowLock);
+	ZHLN_LOCK(world.sync.shadowLock) {
 		world.Synchronize(&_impl->physicsSystem, _impl->activeCharacters);
 	}
 
@@ -254,7 +254,6 @@ namespace Physics {
 JPH::ShapeRefC GetOrCreateShape(PhysicsContext& ctx, Physics::ShapeType type, float p1, float p2,
 								float p3, float p4) {
 	auto* impl = ctx.GetImpl();
-	std::lock_guard<Mutex> lock(impl->world.shadowLock);
 
 	// 1. Normalization (Matches Culverin logic for maximum cache hits)
 	const float np1 = (p1 < 1e-3f && type != Physics::ShapeType::Plane) ? 1e-3f : p1;
@@ -272,42 +271,45 @@ JPH::ShapeRefC GetOrCreateShape(PhysicsContext& ctx, Physics::ShapeType type, fl
 
 	// 3. Jolt Creation
 	JPH::ShapeRefC shape;
-	switch (type) {
-		case Physics::ShapeType::Box: {
-			JPH::BoxShapeSettings s(JPH::Vec3(np1, np2, np3), 0.05f);
-			shape = s.Create().Get();
-			break;
+
+	ZHLN_LOCK(impl->world.sync.shadowLock) {
+		switch (type) {
+			case Physics::ShapeType::Box: {
+				JPH::BoxShapeSettings s(JPH::Vec3(np1, np2, np3), 0.05f);
+				shape = s.Create().Get();
+				break;
+			}
+			case Physics::ShapeType::Sphere: {
+				JPH::SphereShapeSettings s(np1);
+				shape = s.Create().Get();
+				break;
+			}
+			case Physics::ShapeType::Capsule: {
+				JPH::CapsuleShapeSettings s(np1, np2);
+				shape = s.Create().Get();
+				break;
+			}
+			case Physics::ShapeType::Cylinder: {
+				JPH::CylinderShapeSettings s(np1, np2, 0.05f);
+				shape = s.Create().Get();
+				break;
+			}
+			case Physics::ShapeType::Plane: {
+				JPH::Plane plane(JPH::Vec3(np1, np2, np3), np4);
+				JPH::PlaneShapeSettings s(plane, nullptr, 1000.0f);
+				shape = s.Create().Get();
+				break;
+			}
 		}
-		case Physics::ShapeType::Sphere: {
-			JPH::SphereShapeSettings s(np1);
-			shape = s.Create().Get();
-			break;
+
+		if (!shape) {
+			ZHLN::Panic("Failed to create Jolt Shape! Degenerate parameters?");
 		}
-		case Physics::ShapeType::Capsule: {
-			JPH::CapsuleShapeSettings s(np1, np2);
-			shape = s.Create().Get();
-			break;
-		}
-		case Physics::ShapeType::Cylinder: {
-			JPH::CylinderShapeSettings s(np1, np2, 0.05f);
-			shape = s.Create().Get();
-			break;
-		}
-		case Physics::ShapeType::Plane: {
-			JPH::Plane plane(JPH::Vec3(np1, np2, np3), np4);
-			JPH::PlaneShapeSettings s(plane, nullptr, 1000.0f);
-			shape = s.Create().Get();
-			break;
-		}
+
+		// 4. Store in cache
+		impl->shapeCache.push_back(
+			{ShapeKey{static_cast<uint32_t>(type), np1, np2, np3, np4}, shape});
 	}
-
-	if (!shape) {
-		ZHLN::Panic("Failed to create Jolt Shape! Degenerate parameters?");
-	}
-
-	// 4. Store in cache
-	impl->shapeCache.push_back({ShapeKey{static_cast<uint32_t>(type), np1, np2, np3, np4}, shape});
-
 	return shape;
 }
 
@@ -351,56 +353,56 @@ void DestroyBody(PhysicsContext& ctx, ZHLN::Entity handle) {
 	world.slotStates[slot].store(SLOT_PENDING_DESTROY, std::memory_order_release);
 
 	// Lock the shadow buffer to queue the command safely
-	std::lock_guard<Mutex> lock(world.shadowLock);
+	ZHLN_LOCK(world.sync.shadowLock) {
+		// Expand raw queue if needed
+		if (world.commandCount >= world.commandCapacity) {
+			size_t newCap = world.commandCapacity * 2;
+			auto* newQ = new Physics::Command[newCap];
+			auto* newQS = new Physics::Command[newCap];
 
-	// Expand raw queue if needed
-	if (world.commandCount >= world.commandCapacity) {
-		size_t newCap = world.commandCapacity * 2;
-		auto* newQ = new Physics::Command[newCap];
-		auto* newQS = new Physics::Command[newCap];
+			std::memcpy(newQ, world.commandQueue, world.commandCount * sizeof(Physics::Command));
 
-		std::memcpy(newQ, world.commandQueue, world.commandCount * sizeof(Physics::Command));
+			delete[] world.commandQueue;
+			delete[] world.commandQueueSpare;
 
-		delete[] world.commandQueue;
-		delete[] world.commandQueueSpare;
+			world.commandQueue = newQ;
+			world.commandQueueSpare = newQS;
+			world.commandCapacity = newCap;
+		}
 
-		world.commandQueue = newQ;
-		world.commandQueueSpare = newQS;
-		world.commandCapacity = newCap;
+		world.commandQueue[world.commandCount++] = {CommandType::DestroyBody, handle};
 	}
-
-	world.commandQueue[world.commandCount++] = {CommandType::DestroyBody, handle};
 }
 
 void RegisterMaterial(PhysicsContext& ctx, uint32_t id, float friction, float restitution) {
 	auto& world = ctx.GetImpl()->world;
-	std::lock_guard<Mutex> lock(world.shadowLock);
-
-	// 1. Update if exists
-	for (size_t i = 0; i < world.materialCount; ++i) {
-		if (world.materials[i].id == id) {
-			world.materials[i].friction = friction;
-			world.materials[i].restitution = restitution;
-			return;
+	ZHLN_LOCK(world.sync.shadowLock) {
+		// 1. Update if exists
+		for (size_t i = 0; i < world.materialCount; ++i) {
+			if (world.materials[i].id == id) {
+				world.materials[i].friction = friction;
+				world.materials[i].restitution = restitution;
+				return;
+			}
 		}
-	}
 
-	// 2. Grow if needed
-	if (world.materialCount >= world.materialCapacity) {
-		size_t oldCap = world.materialCapacity;
-		size_t newCap = oldCap * 2;
+		// 2. Grow if needed
+		if (world.materialCount >= world.materialCapacity) {
+			size_t oldCap = world.materialCapacity;
+			size_t newCap = oldCap * 2;
 
-		MaterialData* newMaterials = new MaterialData[newCap]();
-		if (world.materials && oldCap > 0) {
-			std::memcpy(newMaterials, world.materials, oldCap * sizeof(MaterialData));
-			delete[] world.materials;
+			MaterialData* newMaterials = new MaterialData[newCap]();
+			if (world.materials && oldCap > 0) {
+				std::memcpy(newMaterials, world.materials, oldCap * sizeof(MaterialData));
+				delete[] world.materials;
+			}
+			world.materials = newMaterials;
+			world.materialCapacity = newCap;
 		}
-		world.materials = newMaterials;
-		world.materialCapacity = newCap;
-	}
 
-	// 3. Insert new
-	world.materials[world.materialCount++] = {id, friction, restitution};
+		// 3. Insert new
+		world.materials[world.materialCount++] = {id, friction, restitution};
+	}
 }
 
 /**
@@ -429,54 +431,50 @@ ZHLN::Entity CreateRigidBody(PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::RVe
 							 uint32_t materialID, uint32_t category, uint32_t mask) {
 	auto& world = ctx.GetImpl()->world;
 	MaterialData mat;
-	{
-		std::lock_guard<Mutex> lock(world.shadowLock);
-		mat = ResolveMaterial(world, materialID);
-	}
-	std::lock_guard<Mutex> lock(world.shadowLock);
 
 	// Engine allocates the identity!
 	ZHLN::Entity handle = world.AllocateHandle();
+	ZHLN_LOCK(world.sync.shadowLock) {
+		mat = ResolveMaterial(world, materialID);
+		JPH::BodyCreationSettings settings(shape, pos, rot, motion, layer);
+		settings.mUserData = handle.Pack();
+		settings.mFriction = mat.friction;
+		settings.mRestitution = mat.restitution;
 
-	JPH::BodyCreationSettings settings(shape, pos, rot, motion, layer);
-	settings.mUserData = handle.Pack();
-	settings.mFriction = mat.friction;
-	settings.mRestitution = mat.restitution;
+		if (motion == JPH::EMotionType::Dynamic)
+			settings.mAllowSleeping = true;
 
-	if (motion == JPH::EMotionType::Dynamic)
-		settings.mAllowSleeping = true;
+		JPH::BodyID id = world.bodyInterface->CreateAndAddBody(
+			settings, (motion == JPH::EMotionType::Static) ? JPH::EActivation::DontActivate
+														   : JPH::EActivation::Activate);
 
-	JPH::BodyID id = world.bodyInterface->CreateAndAddBody(
-		settings, (motion == JPH::EMotionType::Static) ? JPH::EActivation::DontActivate
-													   : JPH::EActivation::Activate);
+		// Map into the Dense SoA
+		uint32_t dense = static_cast<uint32_t>(world.count.fetch_add(1, std::memory_order_relaxed));
+		world.bodyIDs[dense] = id;
+		world.slotToDense[handle.index] = dense;
+		world.denseToSlot[dense] = handle.index;
+		world.slotStates[handle.index].store(SLOT_ALIVE, std::memory_order_release);
 
-	// Map into the Dense SoA
-	uint32_t dense = static_cast<uint32_t>(world.count.fetch_add(1, std::memory_order_relaxed));
-	world.bodyIDs[dense] = id;
-	world.slotToDense[handle.index] = dense;
-	world.denseToSlot[dense] = handle.index;
-	world.slotStates[handle.index].store(SLOT_ALIVE, std::memory_order_release);
+		// Update Fast-Mapping for callbacks
+		const uint32_t j_idx = id.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
+		world.idToHandleMap[j_idx].store(handle.Pack(), std::memory_order_release);
 
-	// Update Fast-Mapping for callbacks
-	const uint32_t j_idx = id.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
-	world.idToHandleMap[j_idx].store(handle.Pack(), std::memory_order_release);
+		// Warm up shadow buffers so the very first render frame is correct
+		world.positions[dense * 4 + 0] = pos.GetX();
+		world.positions[dense * 4 + 1] = pos.GetY();
+		world.positions[dense * 4 + 2] = pos.GetZ();
+		world.positions[dense * 4 + 3] = 0.0;
 
-	// Warm up shadow buffers so the very first render frame is correct
-	world.positions[dense * 4 + 0] = pos.GetX();
-	world.positions[dense * 4 + 1] = pos.GetY();
-	world.positions[dense * 4 + 2] = pos.GetZ();
-	world.positions[dense * 4 + 3] = 0.0;
+		world.rotations[dense * 4 + 0] = rot.GetX();
+		world.rotations[dense * 4 + 1] = rot.GetY();
+		world.rotations[dense * 4 + 2] = rot.GetZ();
+		world.rotations[dense * 4 + 3] = rot.GetW();
 
-	world.rotations[dense * 4 + 0] = rot.GetX();
-	world.rotations[dense * 4 + 1] = rot.GetY();
-	world.rotations[dense * 4 + 2] = rot.GetZ();
-	world.rotations[dense * 4 + 3] = rot.GetW();
-
-	// Store Material ID in the SoA for fast callback lookup
-	world.materialIDs[dense] = materialID;
-	world.categories[dense] = category;
-	world.masks[dense] = mask;
-
+		// Store Material ID in the SoA for fast callback lookup
+		world.materialIDs[dense] = materialID;
+		world.categories[dense] = category;
+		world.masks[dense] = mask;
+	}
 	return handle;
 }
 
@@ -486,48 +484,47 @@ ZHLN::Entity CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position, uint32
 	auto& world = impl->world;
 	// Using the cache for the character shape
 	JPH::ShapeRefC charShape = GetOrCreateShape(ctx, ShapeType::Capsule, 0.5f, 0.3f);
-	std::lock_guard<Mutex> lock(world.shadowLock);
 
 	ZHLN::Entity handle = world.AllocateHandle();
+	ZHLN_LOCK(world.sync.shadowLock) {
+		JPH::CharacterVirtualSettings settings;
+		settings.mShape = charShape;
+		settings.mMaxStrength = 100.0f;
 
-	JPH::CharacterVirtualSettings settings;
-	settings.mShape = charShape;
-	settings.mMaxStrength = 100.0f;
+		auto character = new JPH::CharacterVirtual(&settings, position, JPH::Quat::sIdentity(),
+												   &impl->physicsSystem);
+		character->SetListener(&impl->characterListener);
+		character->SetUserData(handle.Pack());
 
-	auto character = new JPH::CharacterVirtual(&settings, position, JPH::Quat::sIdentity(),
-											   &impl->physicsSystem);
-	character->SetListener(&impl->characterListener);
-	character->SetUserData(handle.Pack());
+		// Character Management
+		if (handle.index >= impl->characterMap.size())
+			impl->characterMap.resize(handle.index + 1);
+		impl->characterMap[handle.index] = character;
+		impl->activeCharacters.push_back(character);
 
-	// Character Management
-	if (handle.index >= impl->characterMap.size())
-		impl->characterMap.resize(handle.index + 1);
-	impl->characterMap[handle.index] = character;
-	impl->activeCharacters.push_back(character);
-
-	// SoA Sync
-	uint32_t dense = static_cast<uint32_t>(world.count.fetch_add(1, std::memory_order_relaxed));
-	world.slotToDense[handle.index] = dense;
-	world.denseToSlot[dense] = handle.index;
-	world.bodyIDs[dense] = JPH::BodyID(); // Characters don't have Jolt BodyIDs
-	world.slotStates[handle.index].store(SLOT_CHARACTER, std::memory_order_release);
-	world.categories[dense] = category;
-	world.masks[dense] = mask;
-
+		// SoA Sync
+		uint32_t dense = static_cast<uint32_t>(world.count.fetch_add(1, std::memory_order_relaxed));
+		world.slotToDense[handle.index] = dense;
+		world.denseToSlot[dense] = handle.index;
+		world.bodyIDs[dense] = JPH::BodyID(); // Characters don't have Jolt BodyIDs
+		world.slotStates[handle.index].store(SLOT_CHARACTER, std::memory_order_release);
+		world.categories[dense] = category;
+		world.masks[dense] = mask;
+	}
 	return handle;
 }
 
 void SetCollisionFilter(PhysicsContext& ctx, ZHLN::Entity handle, uint32_t category,
 						uint32_t mask) {
 	auto& world = ctx.GetImpl()->world;
-	std::lock_guard<Mutex> lock(world.shadowLock);
-
-	Command cmd;
-	cmd.type = CommandType::SetCollisionFilter;
-	cmd.setFilter.handle = handle;
-	cmd.setFilter.category = category;
-	cmd.setFilter.mask = mask;
-	world.commandQueue[world.commandCount++] = cmd;
+	ZHLN_LOCK(world.sync.shadowLock) {
+		Command cmd;
+		cmd.type = CommandType::SetCollisionFilter;
+		cmd.setFilter.handle = handle;
+		cmd.setFilter.category = category;
+		cmd.setFilter.mask = mask;
+		world.commandQueue[world.commandCount++] = cmd;
+	}
 }
 
 DebugDrawData GetDebugDrawData(PhysicsContext& ctx, bool drawShapes, bool drawConstraints) {
@@ -626,36 +623,35 @@ std::pair<const ContactEvent*, size_t> GetContactEvents(const PhysicsContext& ct
 ConstraintHandle CreateConstraint(PhysicsContext& ctx, ConstraintType type, ZHLN::Entity b1,
 								  ZHLN::Entity b2, const ConstraintParams& params) {
 	auto& world = ctx.GetImpl()->world;
-	std::lock_guard<Mutex> lock(world.shadowLock);
 
 	// 1. Allocate handle immediately so we can return it
 	ConstraintHandle handle = world.AllocateConstraintHandle();
 
-	// 2. Queue Command
-	Command cmd;
-	cmd.type = CommandType::CreateConstraint;
-	cmd.cHandle = handle;
-	cmd.createC.cType = type;
-	cmd.createC.b1 = b1;
-	cmd.createC.b2 = b2;
-	cmd.createC.params = params;
+	ZHLN_LOCK(world.sync.shadowLock) { // 2. Queue Command
+		Command cmd;
+		cmd.type = CommandType::CreateConstraint;
+		cmd.cHandle = handle;
+		cmd.createC.cType = type;
+		cmd.createC.b1 = b1;
+		cmd.createC.b2 = b2;
+		cmd.createC.params = params;
 
-	// Push to queue (using your existing grow logic)
-	world.commandQueue[world.commandCount++] = cmd;
+		world.commandQueue[world.commandCount++] = cmd;
+	}
 
 	return handle;
 }
 
 void SetConstraintTarget(PhysicsContext& ctx, ConstraintHandle handle, float value) {
 	auto& world = ctx.GetImpl()->world;
-	std::lock_guard<Mutex> lock(world.shadowLock);
-
-	// Motors are often updated every frame, so we use a specialized command
-	Command cmd;
-	cmd.type = CommandType::SetConstraintTarget;
-	cmd.setTarget.targetCHandle = handle;
-	cmd.setTarget.targetValue = value;
-	world.commandQueue[world.commandCount++] = cmd;
+	ZHLN_LOCK(world.sync.shadowLock) {
+		// Motors are often updated every frame, so we use a specialized command
+		Command cmd;
+		cmd.type = CommandType::SetConstraintTarget;
+		cmd.setTarget.targetCHandle = handle;
+		cmd.setTarget.targetValue = value;
+		world.commandQueue[world.commandCount++] = cmd;
+	}
 }
 } // namespace Physics
 } // namespace ZHLN

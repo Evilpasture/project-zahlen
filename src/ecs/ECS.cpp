@@ -26,8 +26,8 @@ template <typename T> static void DeallocateAligned(T* ptr, size_t alignment) {
 // SparseSet
 // ============================================================================
 
-SparseSet::SparseSet(size_t elementSize, size_t alignment)
-	: _elementSize(elementSize), _alignment(alignment) {}
+SparseSet::SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr)
+	: _elementSize(elementSize), _alignment(alignment), _sync(syncPtr) {}
 
 SparseSet::~SparseSet() {
 	DeallocateAligned(_sparse, alignof(uint32_t));
@@ -54,6 +54,12 @@ void SparseSet::EnsureSparseCapacity(uint32_t required) {
 	if (_sparseCapacity > required)
 		return;
 
+	// Check if Lua is holding a pointer before we reallocate!
+	if (_sync && _sync->viewExportCount.load(std::memory_order_acquire) > 0) {
+		ZHLN::Panic(
+			"FFI MEMORY VIOLATION: Attempted to resize SparseSet while Lua holds a BufferView!");
+	}
+
 	size_t newCap = _sparseCapacity == 0 ? 1024 : _sparseCapacity * 2;
 	while (newCap <= required)
 		newCap *= 2;
@@ -77,6 +83,12 @@ void SparseSet::EnsureSparseCapacity(uint32_t required) {
 void SparseSet::EnsureDenseCapacity() {
 	if (_count < _denseCapacity)
 		return;
+
+	// Check if Lua is holding a pointer before we reallocate!
+	if (_sync && _sync->viewExportCount.load(std::memory_order_acquire) > 0) {
+		ZHLN::Panic(
+			"FFI MEMORY VIOLATION: Attempted to resize Dense Array while Lua holds a BufferView!");
+	}
 
 	size_t newCap = _denseCapacity == 0 ? 64 : _denseCapacity * 2;
 
@@ -196,7 +208,7 @@ BufferView SparseSet::GetEntityView(const void* owner) const noexcept {
 // ============================================================================
 
 Entity Registry::Create() {
-	ZHLN_LOCK(_lock) {
+	ZHLN_LOCK(sync.shadowLock) {
 
 		if (_freeCount == 0) {
 			const size_t newCap = _generations.empty() ? 1024 : _generations.size() * 2;
@@ -218,7 +230,7 @@ Entity Registry::Create() {
 }
 
 void Registry::Destroy(Entity entity) {
-	ZHLN_LOCK(_lock) {
+	ZHLN_LOCK(sync.shadowLock) {
 
 		if (entity.index >= _generations.size() ||
 			_generations[entity.index] != entity.generation) {
@@ -239,14 +251,14 @@ void Registry::Destroy(Entity entity) {
 }
 
 bool Registry::IsAlive(Entity entity) const noexcept {
-	ZHLN_LOCK(_lock) {
+	ZHLN_LOCK(sync.shadowLock) {
 		return entity.index < _generations.size() &&
 			   _generations[entity.index] == entity.generation;
 	}
 }
 
 void Registry::Clear() {
-	ZHLN_LOCK(_lock) {
+	ZHLN_LOCK(sync.shadowLock) {
 		for (auto* set : _components) {
 			if (set)
 				set->Clear();

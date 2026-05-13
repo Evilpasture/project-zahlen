@@ -14,6 +14,16 @@ namespace ZHLN {
 static thread_local Fiber t_mainFiber;
 static thread_local Fiber* t_currentFiber = nullptr;
 
+auto GetCurrentFiberID() -> uint64_t {
+	if (!t_currentFiber)
+		return 0; // Not a fiber-managed thread
+	if (t_currentFiber->isMain)
+		return 1; // Friendly ID for main thread
+
+	// For worker fibers, return the memory address as a unique ID
+	return reinterpret_cast<uint64_t>(t_currentFiber);
+}
+
 /**
  * @brief The bridge between Assembly and C++.
  * This is the first code executed on a new fiber's stack.

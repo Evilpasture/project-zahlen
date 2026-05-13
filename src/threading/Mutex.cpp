@@ -244,12 +244,15 @@ void Mutex::LockSlow() noexcept {
 			}
 		}
 
-		Fiber* current_fiber = GetCurrentFiber();
-		bool is_fiber = (current_fiber != nullptr);
+		Fiber* self = GetCurrentFiber();
+
+		// A fiber can only yield if it has a caller (meaning it's a worker)
+		// If self->isMain is true, we are on the OS root stack.
+		bool is_worker_fiber = (self != nullptr && !self->isMain);
 
 		Waiter node;
 		node.address = this;
-		node.fiber = is_fiber ? current_fiber : nullptr;
+		node.fiber = is_worker_fiber ? self : nullptr;
 		node.next = nullptr;
 		node.signaled.store(false, std::memory_order_relaxed);
 
@@ -264,10 +267,12 @@ void Mutex::LockSlow() noexcept {
 		node.next = bucket->head;
 		bucket->head = &node;
 
-		if (!is_fiber) {
+		if (!is_worker_fiber) {
+			// Main Thread / OS Thread: Block using Condition Variable
 			node.cond.wait(lock, [&]() { return node.signaled.load(std::memory_order_acquire); });
 		} else {
-			lock.unlock(); // Drop lock so others can enqueue while this fiber yields
+			// worker Fiber: Yield back to the parent
+			lock.unlock();
 			while (!node.signaled.load(std::memory_order_acquire)) {
 				YieldFiber();
 			}

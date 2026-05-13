@@ -2,6 +2,7 @@
 
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/Sync.hpp>
 #include <cstddef>
 #include <detail/Span.hpp>
 #include <span>
@@ -16,7 +17,7 @@ namespace ZHLN::ECS {
 // ============================================================================
 class SparseSet {
   public:
-	SparseSet(size_t elementSize, size_t alignment);
+	SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr);
 	~SparseSet();
 
 	// Non-copyable to prevent accidental massive allocations
@@ -54,6 +55,8 @@ class SparseSet {
 	size_t _denseCapacity = 0;
 	size_t _sparseCapacity = 0;
 
+	BufferSync* _sync = nullptr;
+
 	void EnsureSparseCapacity(uint32_t required);
 	void EnsureDenseCapacity();
 };
@@ -76,7 +79,14 @@ class ComponentFamily {
 // ============================================================================
 class Registry {
   public:
-	Registry() = default;
+	mutable BufferSync sync;
+	Registry() {
+		// We must manually zero the POD sync block because Atomic has no constructor
+		sync.viewExportCount.store(0, std::memory_order_relaxed);
+
+		// Ensure the mutex is in a valid state
+		std::memset(&sync.shadowLock, 0, sizeof(sync.shadowLock));
+	}
 	~Registry() = default;
 
 	Entity Create();
@@ -93,14 +103,29 @@ class Registry {
 			_components.resize(id + 1, nullptr);
 		}
 		if (!_components[id]) {
-			_components[id] = new SparseSet(sizeof(T), alignof(T));
+			_components[id] = new SparseSet(sizeof(T), alignof(T), &this->sync);
 		}
 	}
 
-	template <typename T> T& Add(Entity entity, const T& component) {
-		uint32_t id = ComponentFamily::GetTypeID<T>();
+	// Single Component Add
+	template <typename T> T& Add(Entity entity, T&& component) {
+		using ComponentType = std::decay_t<T>;
+		uint32_t id = ComponentFamily::GetTypeID<ComponentType>();
+
+		// Auto-register if user forgot
+		if (id >= _components.size())
+			_components.resize(id + 1, nullptr);
+		if (!_components[id])
+			_components[id] =
+				new SparseSet(sizeof(ComponentType), alignof(ComponentType), &this->sync);
+
 		_components[id]->Insert(entity, &component);
-		return *static_cast<T*>(_components[id]->Get(entity));
+		return *static_cast<ComponentType*>(_components[id]->Get(entity));
+	}
+
+	// Variadic Multi-Component Add (C++17 Fold Expression)
+	template <typename... Ts> void Add(Entity entity, Ts&&... components) {
+		(Add(entity, std::forward<Ts>(components)), ...);
 	}
 
 	template <typename T> void Remove(Entity entity) {
@@ -139,6 +164,14 @@ class Registry {
 		return _components[ComponentFamily::GetTypeID<T>()]->GetBufferView(this, format);
 	}
 
+	// Bridge for FFI - Get the Entity Handles associated with the data
+	template <typename T> BufferView GetEntityView() const noexcept {
+		uint32_t id = ComponentFamily::GetTypeID<T>();
+		if (id >= _components.size() || !_components[id])
+			return {};
+		return _components[id]->GetEntityView(this);
+	}
+
   private:
 	std::vector<uint32_t> _generations;
 	std::vector<uint32_t> _freeIndices;
@@ -146,9 +179,6 @@ class Registry {
 	size_t _activeEntities = 0;
 
 	std::vector<SparseSet*> _components;
-
-	// Keeps structural changes thread-safe
-	mutable Mutex _lock;
 };
 
 } // namespace ZHLN::ECS

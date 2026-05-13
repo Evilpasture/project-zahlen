@@ -19,6 +19,13 @@ if not ok then
         ZHLN_BufferView ZHLN_GetPhysicsPositions(ZHLN_Engine* engine);
         ZHLN_BufferView ZHLN_GetPhysicsLinearVelocities(ZHLN_Engine* engine);
         void ZHLN_ReleaseBuffer(void* owner);
+
+        ZHLN_BufferView ZHLN_GetECSBuffer(ZHLN_Engine* engine, const char* componentName);
+        ZHLN_BufferView ZHLN_GetECSEntities(ZHLN_Engine* engine, const char* componentName);
+        int ZHLN_IsKeyDown(ZHLN_Engine* engine, uint8_t key);
+        void ZHLN_GetMouseDelta(ZHLN_Engine* engine, float* outX, float* outY);
+        void ZHLN_SetCharacterVelocity(ZHLN_Engine* engine, uint64_t physicsHandle, float x, float y, float z);
+        int ZHLN_IsCharacterOnGround(ZHLN_Engine* engine, uint64_t physicsHandle);
     ]]
 end
 
@@ -115,7 +122,12 @@ function BufferMT:__newindex(i, val)
 end
 
 function BufferMT:__len() return tonumber(self.shape[0]) end
-function BufferMT:release() if self.obj ~= nil then ffi.C.ZHLN_ReleaseBuffer(self.obj) self.obj = nil end end
+function BufferMT:release() 
+    if self.obj ~= nil then 
+        ffi.C.ZHLN_ReleaseBuffer(self.obj) -- Pass the pointer stored in .obj
+        self.obj = nil 
+    end 
+end
 function BufferMT:__gc() self:release() end
 
 if not ok then ffi.metatype("ZHLN_BufferView", BufferMT) end

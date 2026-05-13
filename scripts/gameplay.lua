@@ -1,34 +1,60 @@
--- scripts/gameplay.lua
 local mem = require("scripts.core.memoryview")
 
-function update(engine_ptr, dt)
-    local positions = mem.C.ZHLN_GetPhysicsPositions(engine_ptr)
-    local velocities = mem.C.ZHLN_GetPhysicsLinearVelocities(engine_ptr)
-    local count = #positions
+-- KeyCodes from Input.hpp
+local KEY = { W = 1, A = 2, S = 3, D = 4, SHIFT = 5 }
 
-    for i = 1, count - 1 do -- Start at 1 to skip the floor
+function update(engine, dt)
+    -- 1. Get Physics Data
+    local physBuffer = mem.C.ZHLN_GetECSBuffer(engine, "PhysicsComponent")
+    local entities = mem.C.ZHLN_GetECSEntities(engine, "PhysicsComponent")
+    
+    -- The player is the last entity spawned in our scene setup
+    local playerCount = #entities
+    local playerEntityIdx = playerCount - 1 
+    local playerPhysHandle = physBuffer[playerEntityIdx]
+
+    -- 2. Player Controller Logic (Native Lua!)
+    local speed = 5.0
+    if mem.C.ZHLN_IsKeyDown(engine, KEY.SHIFT) == 1 then speed = 12.0 end
+
+    local vx, vz = 0, 0
+    if mem.C.ZHLN_IsKeyDown(engine, KEY.W) == 1 then vz = vz + 1 end
+    if mem.C.ZHLN_IsKeyDown(engine, KEY.S) == 1 then vz = vz - 1 end
+    if mem.C.ZHLN_IsKeyDown(engine, KEY.A) == 1 then vx = vx - 1 end
+    if mem.C.ZHLN_IsKeyDown(engine, KEY.D) == 1 then vx = vx + 1 end
+
+    -- Very basic camera-relative movement (assuming yaw=-90 is forward)
+    -- You can pass cam.yaw into this function later for better math
+    local finalVx = vx * speed
+    local finalVz = vz * speed
+
+    -- Vertical velocity (Gravity)
+    -- Note: We are just overriding the horizontal, Jolt handles vertical if we let it,
+    -- but CharacterVirtual usually needs manual gravity if we use SetVelocity.
+    local curOnGround = mem.C.ZHLN_IsCharacterOnGround(engine, playerPhysHandle)
+    local vy = curOnGround == 1 and 0 or -9.81 * dt
+
+    mem.C.ZHLN_SetCharacterVelocity(engine, playerPhysHandle, finalVx, vy, finalVz)
+
+    -- 3. Prop Logic (The spinning boxes)
+    -- Loop through all entities WITH physics, excluding the floor (0) and player (last)
+    local positions = mem.C.ZHLN_GetPhysicsPositions(engine)
+    local velocities = mem.C.ZHLN_GetPhysicsLinearVelocities(engine)
+
+    for i = 1, playerCount - 2 do
         local pos = positions[i]
         local vel = velocities[i]
 
-        -- 1. Calculate direction to center (0,0,0)
-        local dirX = -pos.x
-        local dirZ = -pos.z
-        local dist = math.sqrt(dirX*dirX + dirZ*dirZ)
-
-        if dist > 0.1 then
-            -- 2. Apply a "Centripetal" force (Pull to center)
-            vel.x = vel.x + (dirX / dist) * 2.0 * dt
-            vel.z = vel.z + (dirZ / dist) * 2.0 * dt
-
-            -- 3. Apply a "Tangential" force (Spinning around center)
-            -- The vector (-z, x) is perpendicular to (x, z)
-            vel.x = vel.x + (-pos.z) * 1.5 * dt
-            vel.z = vel.z + (pos.x) * 1.5 * dt
-        end
-
+        -- Pull boxes to center
+        vel.x = vel.x - pos.x * dt
+        vel.z = vel.z - pos.z * dt
+        
         velocities[i] = vel
     end
 
+    -- Cleanup views
+    entities:release()
+    physBuffer:release()
     positions:release()
     velocities:release()
 end
