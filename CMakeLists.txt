@@ -76,6 +76,7 @@ set(PROJECT_SOURCES
     src/engine/Resources.c
     src/engine/Platform.cpp
     src/engine/Scripting.cpp
+    src/engine/Physics_C.cpp
 )
 
 add_executable(zahlen)

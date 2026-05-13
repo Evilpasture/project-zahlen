@@ -1,4 +1,5 @@
 #pragma once
+#include <Zahlen/Common.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -37,6 +38,10 @@ typedef struct ZHLN_BufferView {
 	uint32_t flags;
 	uint32_t owner_type;
 } ZHLN_BufferView;
+
+// SoA Access
+ZHLN_EXPORT ZHLN_BufferView ZHLN_GetPhysicsPositions(struct ZHLN_Engine* engine);
+ZHLN_EXPORT ZHLN_BufferView ZHLN_GetPhysicsLinearVelocities(struct ZHLN_Engine* engine);
 
 #ifdef __cplusplus
 } // extern "C"

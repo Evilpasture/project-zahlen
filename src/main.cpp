@@ -43,7 +43,7 @@ struct Scene {
 
 		for (int i = 0; i < 25; ++i) {
 			float x = (float)(i % 5) - 2.5f;
-			float y = (float)(i / 5) + 0.5f;
+			float y = (float)(i / 5.0f) + 0.5f;
 			Entity propPhys = Physics::CreateRigidBody(
 				pc, boxShape, {x, y, -5.0f}, JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, 1);
 			reg.Add(reg.Create(), MeshComponent{boxMesh, material}, PhysicsComponent{propPhys});
