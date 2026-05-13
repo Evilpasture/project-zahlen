@@ -3,6 +3,8 @@
 
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Components.hpp>
+#include <Zahlen/Scripting.h>
+#include <physics/PhysicsWorld.hpp>
 namespace ZHLN {
 /**
  * @brief Policy that defines how to "lock" an engine object for script access.
@@ -60,6 +62,26 @@ struct ViewComposer {
 };
 } // namespace ZHLN
 extern "C" {
+
+ZHLN_BufferView ZHLN_GetPhysicsPositions(ZHLN_Engine* engine_handle) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	const auto& world = engine->GetPhysicsContext().GetWorld();
+
+	// No hardcoding '4' or 'ndim=2'. We just describe the logic:
+	// A 2D array of [CurrentCount] by [4 components]
+	return ZHLN::ViewComposer::Build(&world, world.positions, (sizeof(JPH::Real) == 8) ? "d" : "f",
+									 world.count.load(), 4);
+}
+
+ZHLN_BufferView ZHLN_GetPhysicsLinearVelocities(ZHLN_Engine* engine_handle) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	const auto& world = engine->GetPhysicsContext().GetWorld();
+
+	// If you ever change velocities to be 3-wide (x,y,z),
+	// you just change '4' to '3' here. The composer handles the rest.
+	return ZHLN::ViewComposer::Build(&world, world.linearVelocities, "f", world.count.load(), 4);
+}
+
 void ZHLN_ReleaseBuffer(void* sync_ptr) {
 	// We know for a fact this is a BufferSync* because
 	// ViewComposer put it there.

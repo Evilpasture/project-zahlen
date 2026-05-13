@@ -19,7 +19,7 @@ namespace ZHLN {
 
 extern "C" {
 /**
- * @brief Internal C-Function registered to Lua: zhln.log(...)
+ * @brief Internal C-Function registered to Lua: zahlen.log(...)
  */
 static int LuaBridge_Log(lua_State* L) {
 	// 1. Get Lua Source Info
@@ -71,7 +71,7 @@ static int LuaBridge_Log(lua_State* L) {
 }
 
 /**
- * @brief Internal C-Function registered to Lua: zhln.log(...)
+ * @brief Internal C-Function registered to Lua: zahlen.log(...)
  */
 static int LuaBridge_Warn(lua_State* L) {
 	// 1. Get Lua Source Info
@@ -126,13 +126,13 @@ ScriptRunner::ScriptRunner() {
 	L = luaL_newstate();
 	luaL_openlibs(L);
 
-	// Register our specialized logging into the global 'zhln' table
+	// Register our specialized logging into the global 'zahlen' table
 	lua_newtable(L);
 	lua_pushcfunction(L, LuaBridge_Log);
 	lua_setfield(L, -2, "log");
 	lua_pushcfunction(L, LuaBridge_Warn); // Re-use for now or make Warn
 	lua_setfield(L, -2, "warn");
-	lua_setglobal(L, "zhln");
+	lua_setglobal(L, "zahlen");
 
 	// Override global print to use our engine logger
 	lua_pushcfunction(L, LuaBridge_Log);
@@ -175,14 +175,14 @@ void ScriptRunner::CallUpdate(Engine* engine, float dt) {
 	}
 
 	// --- NEW: FORCED CLEANUP ---
-	// This calls zhln.cleanup() which releases the C++ Mutexes
+	// This calls zahlen.cleanup() which releases the C++ Mutexes
 	// before the C++ Physics Step starts.
 	lua_getglobal(L, "require");
-	lua_pushstring(L, "scripts.core.zhln");
+	lua_pushstring(L, "scripts.core.zahlen");
 	lua_pcall(L, 1, 1, 0);
 	lua_getfield(L, -1, "cleanup");
 	lua_pcall(L, 0, 0, 0);
-	lua_pop(L, 1); // pop zhln table
+	lua_pop(L, 1); // pop zahlen table
 }
 
 } // namespace ZHLN
