@@ -105,13 +105,30 @@ struct DumpOptions {
 
 // ANSI Color Helpers
 namespace Color {
-inline const char* Reset = "\033[0m";
-inline const char* Gray = "\033[90m";
-inline const char* Cyan = "\033[36m";
-inline const char* Yellow = "\033[33m";
-inline const char* Green = "\033[32m";
-inline const char* Red = "\033[31m";
+constexpr char Reset[] = "\033[0m";
+constexpr char Gray[] = "\033[90m";
+constexpr char Cyan[] = "\033[36m";
+constexpr char Yellow[] = "\033[33m";
+constexpr char Green[] = "\033[32m";
+constexpr char Red[] = "\033[31m";
 } // namespace Color
+
+/**
+ * @brief Manual override for Log (Used by Scripting/Lua)
+ */
+inline void LogManual(std::string_view file, int line, std::string_view message,
+					  const char* color = "") {
+	uint64_t fid = GetCurrentFiberID();
+	std::string fiberTag = (fid == 0) ? "Thread" : (fid == 1) ? "Main" : std::format("{:#x}", fid);
+
+	// If a color is provided, wrap the message
+	if (color[0] != '\0') {
+		std::println(stderr, "{}[{}:{}] [Fiber:{}] [LUA] {}{}", color, file, line, fiberTag,
+					 message, Color::Reset);
+	} else {
+		std::println(stderr, "[{}:{}] [Fiber:{}] [LUA] {}", file, line, fiberTag, message);
+	}
+}
 
 #if defined(__clang__)
 // Callback used by __builtin_dump_struct

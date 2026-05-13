@@ -68,4 +68,16 @@ function zhln.wrap(ptr)
     return setmetatable({ raw = ptr }, Engine)
 end
 
+-- Redefine standard logging to feel like Python
+function zhln.log(...)
+    -- Calling the C-function registered in Step 2
+    -- It will automatically find the file/line of the person calling zhln.log
+---@diagnostic disable-next-line: undefined-field
+    _G.zhln.log(...)
+end
+
+function World:apply_impulse(handle, x, y, z)
+    mem.C.ZHLN_AddImpulse(self.engine, handle, x, y, z)
+end
+
 return zhln

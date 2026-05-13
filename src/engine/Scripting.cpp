@@ -72,9 +72,126 @@ struct ViewComposer {
 
 // --- ScriptRunner Implementation ---
 
+extern "C" {
+/**
+ * @brief Internal C-Function registered to Lua: zhln.log(...)
+ */
+static int LuaBridge_Log(lua_State* L) {
+	// 1. Get Lua Source Info
+	lua_Debug ar;
+	std::memset(&ar, 0, sizeof(lua_Debug));
+
+	// Level 1 is the function that called this C bridge
+	if (lua_getstack(L, 1, &ar)) {
+		lua_getinfo(L, "Sl", &ar);
+	} else {
+		// Fix: Use strncpy for fixed-size char arrays
+		std::strncpy(ar.short_src, "unknown", sizeof(ar.short_src) - 1);
+		ar.currentline = 0;
+	}
+
+	// 2. Concatenate all arguments into a single string
+	int n = lua_gettop(L);
+	std::string msg;
+
+	// We get the global "tostring" function once to use it for all arguments
+	// this ensures we respect Lua metamethods for tables/userdata.
+	lua_getglobal(L, "tostring");
+
+	for (int i = 1; i <= n; i++) {
+		lua_pushvalue(L, -1); // Push the 'tostring' function
+		lua_pushvalue(L, i);  // Push the argument
+		lua_call(L, 1, 1);	  // Call tostring(arg)
+
+		size_t len;
+		const char* s = lua_tolstring(L, -1, &len);
+		if (i > 1)
+			msg += "\t";
+		if (s)
+			msg += std::string(s, len);
+
+		lua_pop(L, 1); // Pop the string result
+	}
+	lua_pop(L, 1); // Pop the 'tostring' function
+
+	// 3. Hand off to our manual C++ Logger
+	std::string_view file = ar.short_src;
+	if (auto pos = file.find_last_of("/\\"); pos != std::string_view::npos)
+		file.remove_prefix(pos + 1);
+
+	// Call your Engine's LogManual (defined in Log.hpp)
+	LogManual(file, ar.currentline, msg, Color::Green);
+
+	return 0;
+}
+
+/**
+ * @brief Internal C-Function registered to Lua: zhln.log(...)
+ */
+static int LuaBridge_Warn(lua_State* L) {
+	// 1. Get Lua Source Info
+	lua_Debug ar;
+	std::memset(&ar, 0, sizeof(lua_Debug));
+
+	// Level 1 is the function that called this C bridge
+	if (lua_getstack(L, 1, &ar)) {
+		lua_getinfo(L, "Sl", &ar);
+	} else {
+		// Fix: Use strncpy for fixed-size char arrays
+		std::strncpy(ar.short_src, "unknown", sizeof(ar.short_src) - 1);
+		ar.currentline = 0;
+	}
+
+	// 2. Concatenate all arguments into a single string
+	int n = lua_gettop(L);
+	std::string msg;
+
+	// We get the global "tostring" function once to use it for all arguments
+	// this ensures we respect Lua metamethods for tables/userdata.
+	lua_getglobal(L, "tostring");
+
+	for (int i = 1; i <= n; i++) {
+		lua_pushvalue(L, -1); // Push the 'tostring' function
+		lua_pushvalue(L, i);  // Push the argument
+		lua_call(L, 1, 1);	  // Call tostring(arg)
+
+		size_t len;
+		const char* s = lua_tolstring(L, -1, &len);
+		if (i > 1)
+			msg += "\t";
+		if (s)
+			msg += std::string(s, len);
+
+		lua_pop(L, 1); // Pop the string result
+	}
+	lua_pop(L, 1); // Pop the 'tostring' function
+
+	// 3. Hand off to our manual C++ Logger
+	std::string_view file = ar.short_src;
+	if (auto pos = file.find_last_of("/\\"); pos != std::string_view::npos)
+		file.remove_prefix(pos + 1);
+
+	LogManual(file, ar.currentline, msg, Color::Yellow);
+
+	return 0;
+}
+}
+
 ScriptRunner::ScriptRunner() {
 	L = luaL_newstate();
 	luaL_openlibs(L);
+
+	// Register our specialized logging into the global 'zhln' table
+	lua_newtable(L);
+	lua_pushcfunction(L, LuaBridge_Log);
+	lua_setfield(L, -2, "log");
+	lua_pushcfunction(L, LuaBridge_Warn); // Re-use for now or make Warn
+	lua_setfield(L, -2, "warn");
+	lua_setglobal(L, "zhln");
+
+	// Override global print to use our engine logger
+	lua_pushcfunction(L, LuaBridge_Log);
+	lua_setglobal(L, "print");
 	lua_getglobal(L, "require");
 	lua_pushstring(L, "scripts.core.memoryview");
 	if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
@@ -209,5 +326,14 @@ void ZHLN_SetLinearVelocity(ZHLN_Engine* engine_handle, uint64_t physicsHandleRa
 float ZHLN_GetCameraYaw(ZHLN_Engine* engine_handle) {
 	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
 	return engine->GetCamera().yaw;
+}
+
+void ZHLN_AddImpulse(ZHLN_Engine* engine_handle, uint64_t physicsHandleRaw, float x, float y,
+					 float z) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	ZHLN::Entity handle = ZHLN::Entity::Unpack(physicsHandleRaw);
+
+	// Call the implementation we just added to Physics.cpp
+	ZHLN::Physics::AddImpulse(engine->GetPhysicsContext(), handle, JPH::Vec3(x, y, z));
 }
 }

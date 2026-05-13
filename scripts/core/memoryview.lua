@@ -28,6 +28,8 @@ if not ok then
         int ZHLN_IsCharacterOnGround(ZHLN_Engine* engine, uint64_t physicsHandle);
         void ZHLN_SetLinearVelocity(ZHLN_Engine* engine, uint64_t physicsHandle, float x, float y, float z);
         float ZHLN_GetCameraYaw(struct ZHLN_Engine* engine);
+        void ZHLN_AddImpulse(struct ZHLN_Engine* engine, uint64_t entityHandle, float x,
+								 float y, float z);
     ]]
 end
 

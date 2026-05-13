@@ -77,6 +77,7 @@ JPH::Vec3 GetCharacterVelocity(const PhysicsContext& ctx, ZHLN::Entity handle);
 bool IsCharacterOnGround(const PhysicsContext& ctx, ZHLN::Entity handle);
 auto GetPositionBuffer(const PhysicsContext& ctx) -> BufferView;
 JPH::Quat GetRotation(const PhysicsContext& ctx, JPH::BodyID bodyID);
+void AddImpulse(PhysicsContext& ctx, ZHLN::Entity handle, JPH::Vec3Arg impulse);
 
 // --- Data Structures ---
 struct RaycastResult {

@@ -661,5 +661,18 @@ void SetConstraintTarget(PhysicsContext& ctx, ConstraintHandle handle, float val
 		world.commandQueue[world.commandCount++] = cmd;
 	}
 }
+
+void AddImpulse(PhysicsContext& ctx, ZHLN::Entity handle, JPH::Vec3Arg impulse) {
+	auto* impl = ctx.GetImpl();
+
+	// Use the world mapping to get the Jolt BodyID
+	JPH::BodyID id = impl->world.GetBodyID(handle);
+
+	if (!id.IsInvalid()) {
+		// Apply the impulse through Jolt's BodyInterface
+		impl->world.bodyInterface->AddImpulse(id, impulse);
+	}
+}
+
 } // namespace Physics
 } // namespace ZHLN

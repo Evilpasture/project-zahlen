@@ -37,6 +37,9 @@ ZHLN_EXPORT int ZHLN_IsCharacterOnGround(struct ZHLN_Engine* engine, uint64_t en
 ZHLN_EXPORT void ZHLN_SetLinearVelocity(struct ZHLN_Engine* engine, uint64_t entityHandle, float x,
 										float y, float z);
 ZHLN_EXPORT float ZHLN_GetCameraYaw(struct ZHLN_Engine* engine);
+
+ZHLN_EXPORT void ZHLN_AddImpulse(struct ZHLN_Engine* engine, uint64_t entityHandle, float x,
+								 float y, float z);
 #ifdef __cplusplus
 }
 #endif
