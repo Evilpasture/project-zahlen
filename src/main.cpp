@@ -61,22 +61,6 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	Platform::Init();
 	ZHLN::SetupSignalHandler();
 	TaskSystem::Init();
-	/* --- Testing task system --- */
-	TaskSystem::Counter sync;
-	std::vector<TaskSystem::Task> jobs;
-
-	for (int i = 0; i < 100; ++i) {
-		jobs.push_back({[](void* arg) {
-							int id = static_cast<int>(reinterpret_cast<intptr_t>(arg));
-							ZHLN::Log("Hello from Job {} on Fiber {:#x}", id,
-									  ZHLN::GetCurrentFiberID());
-						},
-						reinterpret_cast<void*>(static_cast<intptr_t>(i))});
-	}
-
-	ZHLN::TaskSystem::Dispatch(jobs, &sync);
-	ZHLN::TaskSystem::Wait(&sync);
-	ZHLN::Log("All jobs finished!");
 	// 1. Setup the specific needs for THIS game
 	ZHLN::EngineConfig config{
 		.physics =
