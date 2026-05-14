@@ -71,7 +71,7 @@ RaycastResult Raycast(const PhysicsContext& ctx, JPH::RVec3Arg origin, JPH::Vec3
 	const auto* query = &world.system->GetNarrowPhaseQuery();
 	bool hasHit = query->CastRay(ray, hit, {}, {}, filter);
 
-	RaycastResult result;
+	RaycastResult result{};
 	if (hasHit) {
 		if (TryGetValidHandle(world, hit.mBodyID, result.handle)) {
 			result.hasHit = true;
@@ -122,7 +122,7 @@ ShapeCastResult Shapecast(const PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::
 
 	query->CastShape(cast, settings, JPH::RVec3::sZero(), collector, {}, {}, filter);
 
-	ShapeCastResult result;
+	ShapeCastResult result{};
 	if (collector.HadHit()) {
 		if (TryGetValidHandle(world, collector.mHit.mBodyID2, result.handle)) {
 			result.hasHit = true;
