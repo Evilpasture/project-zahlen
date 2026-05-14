@@ -1,15 +1,20 @@
 #pragma once
 
-#include "Physics.hpp"
+#include "Zahlen/Entity.hpp"
 #include "Zahlen/Sync.hpp"
 
 #include <Jolt/Jolt.h>
+#include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <cstdint>
 #include <detail/Atomic.hpp>
 #include <detail/Platform.hpp>
 #include <threading/Mutex.hpp>
 #include <type_traits>
+
+namespace ZHLN {
+class PhysicsContext;
+}
 
 namespace ZHLN::Physics {
 
@@ -35,6 +40,8 @@ struct ConstraintHandle {
 		return (static_cast<uint64_t>(generation) << 32) | index;
 	}
 };
+
+static_assert(std::is_trivial_v<ConstraintHandle>);
 
 enum class ConstraintType : uint8_t { Fixed, Point, Hinge, Slider, Cone, Distance };
 

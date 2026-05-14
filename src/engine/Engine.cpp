@@ -11,15 +11,16 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <threading/Thread.hpp>
-
 namespace ZHLN {
 thread_local Engine* g_CurrentEngine = nullptr;
+static Engine* s_GlobalEngine = nullptr;
 extern void JoltTraceBridge(const char* inFMT, ...) noexcept;
 extern bool JoltAssertBridge(const char* inExpression, const char* inMessage, const char* inFile,
 							 uint32_t inLine) noexcept;
 
 Engine::Engine(const EngineConfig& cfg) {
 	g_CurrentEngine = this;
+	s_GlobalEngine = this;
 	ZHLN::Fiber::InitMainThread();
 
 	JPH::RegisterDefaultAllocator();
@@ -66,6 +67,7 @@ bool Engine::IsRunning() const {
 }
 
 void Engine::ProcessEvents() {
+	CheckForCrashes(this);
 	_input->ResetDeltas();
 	glfwPollEvents();
 
@@ -82,6 +84,12 @@ void Engine::BeginFrame() {
 
 void Engine::EndFrame() {
 	_renderContext->EndFrame();
+}
+
+Engine* GetEngineContext() {
+	if (g_CurrentEngine)
+		return g_CurrentEngine;
+	return s_GlobalEngine; // If worker doesn't have it, use the global singleton
 }
 
 } // namespace ZHLN

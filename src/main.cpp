@@ -59,6 +59,7 @@ struct Scene {
 
 auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	Platform::Init();
+	ZHLN::SetupSignalHandler();
 	TaskSystem::Init();
 	/* --- Testing task system --- */
 	TaskSystem::Counter sync;
@@ -87,8 +88,8 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			},
 		.render =
 			{
-				.width = 1920,
-				.height = 1080,
+				.width = 1280,
+				.height = 720,
 			},
 	};
 

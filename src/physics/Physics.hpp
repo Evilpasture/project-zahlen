@@ -10,6 +10,7 @@
 #include <Jolt/Physics/Collision/Shape/Shape.h> // For ShapeRefC
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Entity.hpp>
+#include <physics/PhysicsWorld.hpp>
 
 // clang-format on
 

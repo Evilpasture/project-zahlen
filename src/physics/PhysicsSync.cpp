@@ -8,6 +8,7 @@
 #include <detail/Platform.hpp>
 #include <detail/Prefetch.hpp>
 #include <detail/Span.hpp>
+#include <memory>
 
 namespace ZHLN::Physics {
 
