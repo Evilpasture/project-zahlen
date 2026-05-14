@@ -1,3 +1,5 @@
+#include "Zahlen/Engine.hpp"
+
 #include <Zahlen/Log.hpp>
 #include <cstdarg>
 #include <cstdio>
@@ -8,8 +10,10 @@ auto JoltTraceBridge(const char* inFMT, ...) noexcept -> void {
 	va_list list;
 	va_start(list, inFMT);
 
+	Engine* engine = ZHLN::GetEngineContext();
+
 	// Use a local buffer for the C-style string formatting
-	char buffer[1024];
+	char buffer[1024]{};
 	int result = std::vsnprintf(buffer, sizeof(buffer), inFMT, list);
 
 	va_end(list);
@@ -17,6 +21,7 @@ auto JoltTraceBridge(const char* inFMT, ...) noexcept -> void {
 	if (result > 0) {
 		// Hand off the formatted string to our modern Log system
 		// We use "{}" to ensure we don't re-parse the Jolt output for format specifiers
+		ZHLN_TRACE(engine);
 		ZHLN::Panic("{}", buffer);
 	}
 }

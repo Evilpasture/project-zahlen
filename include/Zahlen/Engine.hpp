@@ -9,7 +9,11 @@
 #include <physics/Physics.hpp>
 
 namespace ZHLN {
-
+class Engine;
+extern thread_local Engine* g_CurrentEngine;
+inline Engine* GetEngineContext() {
+	return g_CurrentEngine;
+}
 class Engine {
   public:
 	Engine();

@@ -13,13 +13,15 @@
 #include <threading/Thread.hpp>
 
 namespace ZHLN {
-
+thread_local Engine* g_CurrentEngine = nullptr;
 extern void JoltTraceBridge(const char* inFMT, ...) noexcept;
 extern bool JoltAssertBridge(const char* inExpression, const char* inMessage, const char* inFile,
 							 uint32_t inLine) noexcept;
 
 Engine::Engine(const EngineConfig& cfg) {
+	g_CurrentEngine = this;
 	ZHLN::Fiber::InitMainThread();
+
 	JPH::RegisterDefaultAllocator();
 	JPH::Trace = JoltTraceBridge;
 #ifdef JPH_ENABLE_ASSERTS
