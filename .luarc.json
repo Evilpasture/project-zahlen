@@ -1,0 +1,13 @@
+{
+    "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
+    "runtime": {
+        "version": "LuaJIT",
+        "nonstandardSymbol": ["0ULL", "0LL"]
+    },
+    "diagnostics": {
+        "globals": ["ffi", "bit"]
+    },
+    "workspace": {
+        "checkThirdParty": false
+    }
+}
