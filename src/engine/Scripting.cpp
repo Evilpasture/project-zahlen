@@ -1,3 +1,4 @@
+#include <Zahlen/Console.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Scripting.h>
 #include <Zahlen/Scripting.hpp>
@@ -64,6 +65,7 @@ static int LuaBridge_Log(lua_State* L) {
 
 	// Call your Engine's LogManual (defined in Log.hpp)
 	LogManual(file, ar.currentline, msg, Color::Green);
+	ZHLN::GameConsole::Log(msg, {0.4f, 1.0f, 0.4f, 1.0f});
 
 	return 0;
 }
@@ -181,6 +183,14 @@ void ScriptRunner::CallUpdate(Engine* engine, float dt) {
 	lua_getfield(L, -1, "cleanup");
 	lua_pcall(L, 0, 0, 0);
 	lua_pop(L, 1); // pop zahlen table
+}
+
+void ScriptRunner::ExecuteString(std::string_view code) {
+	if (luaL_dostring(L, code.data()) != LUA_OK) {
+		std::string err = lua_tostring(L, -1);
+		ZHLN::GameConsole::Log("Lua Error: " + err, {1.0f, 0.4f, 0.4f, 1.0f});
+		lua_pop(L, 1);
+	}
 }
 
 } // namespace ZHLN

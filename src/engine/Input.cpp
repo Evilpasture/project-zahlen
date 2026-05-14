@@ -9,6 +9,8 @@ void InputContext::ResetDeltas() {
 }
 
 void InputContext::InjectKeyDown(KeyCode key) {
+	if (key == KeyCode::Unknown)
+		return; // Never track the "Unknown" bit
 	_keys[static_cast<size_t>(key)] = true;
 }
 

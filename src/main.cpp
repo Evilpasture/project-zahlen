@@ -12,7 +12,9 @@
 #include <physics/PhysicsWorld.hpp>
 #include <threading/Mutex.hpp>
 #include <threading/TaskSystem.hpp>
-
+namespace ZHLN {
+void DrawConsole(ScriptRunner& runner);
+}
 using namespace ZHLN;
 
 struct Scene {
@@ -95,6 +97,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 
 	while (engine.IsRunning()) {
 		engine.ProcessEvents();
+		ZHLN::DrawConsole(scriptRunner);
 		if (!engine.IsRunning())
 			break;
 
@@ -103,10 +106,18 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			engine.GetInput().ClearResizeFlag();
 			continue;
 		}
-
+		// Only run input-based logic if the Console/UI isn't stealing focus
+		bool keyboardCaptured = ImGui::GetIO().WantCaptureKeyboard;
 		// 1. Logic Phase (Lua)
 		// Runs outside of locks. Lua uses the FFI bridge to queue forces/velocities.
-		scriptRunner.CallUpdate(&engine, dt);
+
+		if (!keyboardCaptured) {
+			scriptRunner.CallUpdate(&engine, dt);
+		} else {
+			// If UI is focused, we still call update but pass dt=0
+			// or a flag so physics doesn't jitter, OR just skip input checks.
+			scriptRunner.CallUpdate(&engine, 0.0f);
+		}
 
 		// 2. Physics Phase
 		pc.Step(dt);

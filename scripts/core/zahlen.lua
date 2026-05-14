@@ -109,8 +109,15 @@ function Engine:get_camera_yaw()
 end
 
 function Engine:is_key_down(key)
-    local map = { W=1, A=2, S=3, D=4, SHIFT=5 }
-    return mem.C.ZHLN_IsKeyDown(self.raw, map[key:upper()] or 0) == 1
+    -- Add RBUTTON (index 6) to the map
+    local map = { W=1, A=2, S=3, D=4, SHIFT=5, RBUTTON=6 }
+    local code = map[key:upper()]
+    
+    -- If the key isn't in our map, return false immediately 
+    -- instead of checking index 0 (Unknown)
+    if not code then return false end
+    
+    return mem.C.ZHLN_IsKeyDown(self.raw, code) == 1
 end
 
 function zahlen.wrap(ptr)

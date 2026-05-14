@@ -1,9 +1,9 @@
 local zahlen = require("scripts.core.zahlen")
-local playerYVel = 0.0
+playerYVel = 0.0
 
 function update(ptr, dt)
-    local engine = zahlen.wrap(ptr)
-    local world = engine:world()
+    engine = engine or zahlen.wrap(ptr) 
+    world = world or engine:world()
 
     local entities = world:get_entities()
     local phys_buffer = world:get_component_buffer()

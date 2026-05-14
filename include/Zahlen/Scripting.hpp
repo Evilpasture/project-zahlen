@@ -31,6 +31,8 @@ class ScriptRunner {
 	 */
 	void CallUpdate(Engine* engine, float dt);
 
+	void ExecuteString(std::string_view code);
+
   private:
 	lua_State* L;
 };
