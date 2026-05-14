@@ -11,6 +11,7 @@
 #include <detail/ControlFlow.hpp>
 #include <physics/PhysicsWorld.hpp>
 #include <threading/Mutex.hpp>
+#include <threading/TaskSystem.hpp>
 
 using namespace ZHLN;
 
@@ -57,6 +58,24 @@ struct Scene {
 
 auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	Platform::Init();
+	TaskSystem::Init();
+	/* --- Testing task system --- */
+	TaskSystem::Counter sync;
+	std::vector<TaskSystem::Task> jobs;
+
+	for (int i = 0; i < 100; ++i) {
+		jobs.push_back({[](void* arg) {
+							int id = static_cast<int>(reinterpret_cast<intptr_t>(arg));
+							ZHLN::Log("Hello from Job {} on Fiber {:#x}", id,
+									  ZHLN::GetCurrentFiberID());
+						},
+						reinterpret_cast<void*>(static_cast<intptr_t>(i))});
+	}
+
+	ZHLN::TaskSystem::Dispatch(jobs, &sync);
+	ZHLN::TaskSystem::Wait(&sync);
+	ZHLN::Log("All jobs finished!");
+
 	Engine engine;
 	engine.GetWindow().Focus();
 
@@ -146,5 +165,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 		}
 		engine.EndFrame();
 	}
+	ZHLN::Log("Shutting down engine...");
+	// Fibers shutdown automatically with RAII.
 	return 0;
 }

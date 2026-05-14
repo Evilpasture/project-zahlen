@@ -3,6 +3,9 @@ local ffi = require("ffi")
 local ok = pcall(ffi.typeof, "ZHLN_BufferView")
 if not ok then
     ffi.cdef [[
+        typedef struct { float x, y, z; } vec3;
+
+
         typedef struct ZHLN_BufferView {
             void*    buf;
             void*    obj;
@@ -75,6 +78,7 @@ if not ok then
                                         float maxDist, uint64_t ignoreEntity);
     ]]
 end
+
 
 local CODE_TO_TYPE = { 
     f = "float", d = "double", i = "int32_t", I = "uint32_t", Q = "uint64_t",

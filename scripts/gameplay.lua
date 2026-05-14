@@ -66,21 +66,24 @@ function update(ptr, dt)
     end
     
     if engine:is_key_down("RBUTTON") then
-        local p = pos_view[playerCount - 1] -- Player pos
+        local p = pos_view[playerCount - 1]
         
-        -- We calculate the forward direction from the camera yaw
-        local hit = world:raycast(
-            p.x, p.y + 0.5, p.z, -- Origin (Player chest height)
-            fwd.x, 0, fwd.z,     -- Direction
-            50.0,                -- Max Distance
-            p_handle             -- Ignore player body!
-        )
+        -- Raycast forward
+        local hit = world:raycast(p.x, p.y + 0.5, p.z, fwd.x, 0, fwd.z, 50.0, p_handle)
         
         if hit then
-            zahlen.log("Pew! Hit entity " .. tostring(hit.entity) .. " at fraction " .. tostring(hit.fraction))
+            -- 1. Use the view direction as the push direction
+            local push_dir = zahlen.vec3(fwd.x, 0, fwd.z):normalized()
             
-            -- Push the object we hit!
-            world:apply_impulse(hit.entity, fwd.x * 1000, 100, fwd.z * 1000)
+            -- 2. Add a tiny bit of the surface normal to prevent the box 
+            -- from getting "stuck" in the floor or walls when hit
+            local final_dir = (push_dir + (hit.n * 0.2)):normalized()
+            
+            -- 3. Apply the impulse
+            local impulse = final_dir * 1500.0 + zahlen.vec3(0, 300, 0) -- Added 'Up' pop
+            world:apply_impulse(hit.entity, impulse)
+            
+            zahlen.log("Pushing object! Direction: " .. tostring(final_dir))
         end
     end
 end

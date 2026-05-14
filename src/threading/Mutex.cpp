@@ -1,5 +1,6 @@
 #include "Mutex.hpp"
 
+#include "TaskSystem.hpp"
 #include "Thread.hpp"
 
 #include <bit>
@@ -326,6 +327,9 @@ void Mutex::UnlockSlow() noexcept {
 		to_wake->signaled.store(true, std::memory_order_release);
 		if (!to_wake->fiber) {
 			to_wake->cond.notify_one();
+		} else {
+			// Push the fiber back into the OS Thread Ready Queue!
+			ZHLN::TaskSystem::WakeUp(to_wake->fiber);
 		}
 	}
 }

@@ -4,6 +4,8 @@ add_library(zahlen_threading STATIC
     Mutex.cpp
     Mutex.hpp
     Thread.hpp
+    TaskSystem.cpp
+    TaskSystem.hpp
 )
 
 # Allow other modules to find the headers
