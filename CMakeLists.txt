@@ -80,7 +80,7 @@ set(PROJECT_SOURCES
     src/engine/Buffer.cpp
     src/engine/ConsoleUI.cpp
     src/engine/ProfilerUI.cpp
-    src/engine/system/PlayerSystem.cpp
+    src/engine/system/MovementSystem.cpp
 )
 
 add_executable(zahlen)

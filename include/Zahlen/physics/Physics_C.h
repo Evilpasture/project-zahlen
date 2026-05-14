@@ -29,8 +29,8 @@ ZHLN_EXPORT ZHLN_RaycastResult ZHLN_Raycast(struct ZHLN_Engine* engine, double o
 											double oz, float dx, float dy, float dz, float maxDist,
 											uint64_t ignoreEntity);
 
-ZHLN_EXPORT void ZHLN_PlayerMove(struct ZHLN_Engine* engine, uint64_t entity, float x, float z);
-ZHLN_EXPORT void ZHLN_PlayerJump(struct ZHLN_Engine* engine, uint64_t entity);
+ZHLN_EXPORT void ZHLN_SetMovementInput(ZHLN_Engine* handle, uint64_t entityRaw, float x, float z);
+ZHLN_EXPORT void ZHLN_SetJumpIntent(ZHLN_Engine* handle, uint64_t entityRaw);
 
 #ifdef __cplusplus
 }

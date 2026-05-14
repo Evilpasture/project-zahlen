@@ -19,13 +19,16 @@ struct PhysicsComponent {
 	Entity physicsHandle; // Note: This is the PhysicsWorld handle, NOT the ECS Entity!
 };
 
-struct PlayerControllerComponent {
-	float moveX = 0.0f;
-	float moveZ = 0.0f;
+struct MovementComponent {
+	// Input Intents (Set by Lua)
+	float inputX = 0.0f;
+	float inputZ = 0.0f;
 	bool jumpRequested = false;
-	float speed = 5.0f;
-	float jumpForce = 15.0f;
+
+	// Current State (Managed by C++)
 	float currentYVel = 0.0f;
+	float speed = 7.0f;
+	float jumpForce = 12.0f;
 };
 
 } // namespace ZHLN

@@ -17,7 +17,7 @@
 namespace ZHLN {
 void DrawConsole(ScriptRunner& runner);
 void DrawProfiler(Engine& engine);
-void UpdatePlayerControllers(Engine& engine, float dt);
+void MovementSystem(Engine& engine, float dt);
 } // namespace ZHLN
 using namespace ZHLN;
 
@@ -31,6 +31,7 @@ struct Scene {
 
 		reg.RegisterComponent<MeshComponent>();
 		reg.RegisterComponent<PhysicsComponent>();
+		reg.RegisterComponent<MovementComponent>();
 
 		// --- Assets ---
 		Mesh floorMesh = AssetFactory::CreatePlane(rc, 100.0f, {0.1f, 0.1f, 0.12f, 1.0f});
@@ -60,6 +61,7 @@ struct Scene {
 		playerEntity = reg.Create();
 		reg.Add(playerEntity, MeshComponent{playerMesh, material});
 		reg.Add(playerEntity, PhysicsComponent{Physics::CreateCharacter(pc, {0.0f, 2.0f, 0.0f})});
+		reg.Add(playerEntity, MovementComponent{.speed = 8.0f});
 	}
 };
 
@@ -131,7 +133,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			}
 		}
 
-		UpdatePlayerControllers(engine, frameTime);
+		MovementSystem(engine, frameTime);
 
 		// 2. Physics Phase
 		while (accumulator >= targetDt) {

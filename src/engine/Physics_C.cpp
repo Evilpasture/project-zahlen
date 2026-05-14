@@ -63,20 +63,20 @@ ZHLN_RaycastResult ZHLN_Raycast(ZHLN_Engine* engine_handle, double ox, double oy
 	return out;
 }
 
-void ZHLN_PlayerMove(ZHLN_Engine* handle, uint64_t entityRaw, float x, float z) {
+void ZHLN_SetMovementInput(ZHLN_Engine* handle, uint64_t entityRaw, float x, float z) {
 	auto* engine = reinterpret_cast<ZHLN::Engine*>(handle);
-	ZHLN::Entity entity = ZHLN::Entity::Unpack(entityRaw);
-	if (auto* ctrl = engine->GetRegistry().Get<ZHLN::PlayerControllerComponent>(entity)) {
-		ctrl->moveX = x;
-		ctrl->moveZ = z;
+	auto entity = ZHLN::Entity::Unpack(entityRaw);
+	if (auto* move = engine->GetRegistry().Get<ZHLN::MovementComponent>(entity)) {
+		move->inputX = x;
+		move->inputZ = z;
 	}
 }
 
-void ZHLN_PlayerJump(ZHLN_Engine* handle, uint64_t entityRaw) {
+void ZHLN_SetJumpIntent(ZHLN_Engine* handle, uint64_t entityRaw) {
 	auto* engine = reinterpret_cast<ZHLN::Engine*>(handle);
-	ZHLN::Entity entity = ZHLN::Entity::Unpack(entityRaw);
-	if (auto* ctrl = engine->GetRegistry().Get<ZHLN::PlayerControllerComponent>(entity)) {
-		ctrl->jumpRequested = true;
+	auto entity = ZHLN::Entity::Unpack(entityRaw);
+	if (auto* move = engine->GetRegistry().Get<ZHLN::MovementComponent>(entity)) {
+		move->jumpRequested = true;
 	}
 }
 }

@@ -160,12 +160,12 @@ function World:raycast(ox, oy, oz, dx, dy, dz, max_dist, ignore_handle)
 end
 
 
-function World:player_move(handle, x, z)
-    mem.C.ZHLN_PlayerMove(self.engine, handle, x, z)
+function World:set_movement_input(handle, x, z)
+    mem.C.ZHLN_SetMovementInput(self.engine, handle, x, z)
 end
 
-function World:player_jump(handle)
-    mem.C.ZHLN_PlayerJump(self.engine, handle)
+function World:set_jump_intent(handle)
+    mem.C.ZHLN_SetJumpIntent(self.engine, handle)
 end
 
 return zahlen
