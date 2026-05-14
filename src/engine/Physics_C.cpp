@@ -1,4 +1,5 @@
 #include <Zahlen/Common.h>
+#include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/physics/Physics_C.h>
 #include <physics/Physics.hpp>
@@ -60,5 +61,22 @@ ZHLN_RaycastResult ZHLN_Raycast(ZHLN_Engine* engine_handle, double ox, double oy
 		out.fraction = res.fraction;
 	}
 	return out;
+}
+
+void ZHLN_PlayerMove(ZHLN_Engine* handle, uint64_t entityRaw, float x, float z) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(handle);
+	ZHLN::Entity entity = ZHLN::Entity::Unpack(entityRaw);
+	if (auto* ctrl = engine->GetRegistry().Get<ZHLN::PlayerControllerComponent>(entity)) {
+		ctrl->moveX = x;
+		ctrl->moveZ = z;
+	}
+}
+
+void ZHLN_PlayerJump(ZHLN_Engine* handle, uint64_t entityRaw) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(handle);
+	ZHLN::Entity entity = ZHLN::Entity::Unpack(entityRaw);
+	if (auto* ctrl = engine->GetRegistry().Get<ZHLN::PlayerControllerComponent>(entity)) {
+		ctrl->jumpRequested = true;
+	}
 }
 }

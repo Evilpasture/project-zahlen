@@ -76,6 +76,9 @@ if not ok then
                                         double ox, double oy, double oz, 
                                         float dx, float dy, float dz, 
                                         float maxDist, uint64_t ignoreEntity);
+
+        void ZHLN_PlayerMove(struct ZHLN_Engine* engine, uint64_t entity, float x, float z);
+        void ZHLN_PlayerJump(struct ZHLN_Engine* engine, uint64_t entity);
     ]]
 end
 

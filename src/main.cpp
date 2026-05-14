@@ -17,6 +17,7 @@
 namespace ZHLN {
 void DrawConsole(ScriptRunner& runner);
 void DrawProfiler(Engine& engine);
+void UpdatePlayerControllers(Engine& engine, float dt);
 } // namespace ZHLN
 using namespace ZHLN;
 
@@ -129,6 +130,8 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 				scriptRunner.CallUpdate(&engine, 0.0f);
 			}
 		}
+
+		UpdatePlayerControllers(engine, frameTime);
 
 		// 2. Physics Phase
 		while (accumulator >= targetDt) {

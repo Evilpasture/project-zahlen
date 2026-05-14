@@ -18,6 +18,8 @@ static KeyCode MapGLFWKey(int key) {
 			return KeyCode::D;
 		case GLFW_KEY_LEFT_SHIFT:
 			return KeyCode::LShift;
+		case GLFW_KEY_SPACE:
+			return KeyCode::Space;
 		default:
 			return KeyCode::Unknown;
 	}
@@ -93,6 +95,8 @@ void Window::ProcessEvents() {
 
 Extent2D Window::GetSize() const {
 	int w, h;
+	// glfwGetWindowSize returns logical points
+	// glfwGetFramebufferSize returns actual pixels
 	glfwGetFramebufferSize(_impl->handle, &w, &h);
 	return {static_cast<uint32_t>(w), static_cast<uint32_t>(h)};
 }
