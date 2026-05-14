@@ -156,7 +156,7 @@ class ObjectLayerPairFilterImpl : public JPH::ObjectLayerPairFilter {
 
 struct PhysicsContext::Impl {
 	JPH::PhysicsSystem physicsSystem;
-	JPH::TempAllocatorImpl tempAllocator{10 * 1024 * 1024};
+	std::unique_ptr<JPH::TempAllocatorImpl> tempAllocator;
 	JPH::JobSystemThreadPool jobSystem{JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers, 1};
 
 	BPLayerInterfaceImpl bpLayerInterface;
@@ -179,17 +179,18 @@ struct PhysicsContext::Impl {
 
 std::unique_ptr<Physics::PhysicsDebugRenderer> debugRenderer;
 
-PhysicsContext::PhysicsContext() : _impl(std::make_unique<Impl>()) {
-	const uint32_t maxBodies = 1024;
+PhysicsContext::PhysicsContext(const PhysicsConfig& cfg) : _impl(std::make_unique<Impl>()) {
+	_impl->tempAllocator = std::make_unique<JPH::TempAllocatorImpl>(cfg.tempAllocatorSize);
+
 	_impl->physicsSystem.SetContactListener(&_impl->contactListener);
-	_impl->physicsSystem.Init(maxBodies, 0, maxBodies, maxBodies, _impl->bpLayerInterface,
-							  _impl->objVsBpFilter, _impl->objVsObjFilter);
+	_impl->physicsSystem.Init(cfg.maxBodies, 0, cfg.maxBodyPairs, cfg.maxContactConstraints,
+							  _impl->bpLayerInterface, _impl->objVsBpFilter, _impl->objVsObjFilter);
 
 	_impl->debugRenderer = std::make_unique<Physics::PhysicsDebugRenderer>();
 	_impl->characterListener = Physics::CharacterListener(&_impl->world);
 
-	// One-liner Initialization!
-	_impl->world.Init(maxBodies, &_impl->physicsSystem, &_impl->jobSystem, &_impl->tempAllocator);
+	_impl->world.Init(cfg.maxBodies, &_impl->physicsSystem, &_impl->jobSystem,
+					  _impl->tempAllocator.get());
 }
 
 PhysicsContext::~PhysicsContext() {
@@ -224,13 +225,13 @@ void PhysicsContext::Step(float deltaTime) {
 	// --- 2. JOLT UPDATE PHASE ---
 	world.isStepping.store(true, std::memory_order_release);
 
-	_impl->physicsSystem.Update(deltaTime, 1, &_impl->tempAllocator, &_impl->jobSystem);
+	_impl->physicsSystem.Update(deltaTime, 2, _impl->tempAllocator.get(), &_impl->jobSystem);
 
 	for (auto* character : _impl->activeCharacters) {
 		character->Update(deltaTime, _impl->physicsSystem.GetGravity(),
 						  _impl->physicsSystem.GetDefaultBroadPhaseLayerFilter(Layers::MOVING),
 						  _impl->physicsSystem.GetDefaultLayerFilter(Layers::MOVING), {}, {},
-						  _impl->tempAllocator);
+						  *_impl->tempAllocator);
 	}
 
 	// 3. Data Synchronization Pass (Jolt SoA -> Engine Shadow SoA)

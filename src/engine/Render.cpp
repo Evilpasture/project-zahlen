@@ -16,8 +16,11 @@
 #include <imgui_impl_vulkan.h>
 #include <vector>
 
+// NEW: Threading Support
+#include <atomic>
+#include <threading/TaskSystem.hpp>
+
 namespace ZHLN::Vk {
-// Map Engine Semantic Types -> Hardware Vulkan Formats
 template <> struct FormatOf<float[3]> {
 	static constexpr auto value = VK_FORMAT_R32G32B32_SFLOAT;
 };
@@ -34,14 +37,10 @@ template <> struct FormatOf<::ZHLN::PackedRGBA8> {
 
 namespace ZHLN {
 
-// Reflect the engine's Vertex type for the PipelineBuilder (Skip _padding)
 ZHLN_REFLECT_VERTEX(::ZHLN::Vertex, position, normal, tangent, uv, color);
 
-// Define the layout of your global bindless set
-// Binding 0: Array of 4096 textures
-using GlobalBindlessLayout = Vk::DescriptorLayout<Vk::BindlessSampledImageSlot<0, 4096>,
-												  Vk::SamplerSlot<1> // Global sampler at binding 1
-												  >;
+using GlobalBindlessLayout =
+	Vk::DescriptorLayout<Vk::BindlessSampledImageSlot<0, 4096>, Vk::SamplerSlot<1>>;
 
 struct NativeMesh {
 	Vk::Buffer buffer;
@@ -53,15 +52,27 @@ struct NativeMaterial {
 	Vk::PipelineLayout layout;
 };
 
+// NEW: Internal Draw Command struct to queue up draw calls
+struct DrawCommand {
+	NativeMaterial* material;
+	NativeMesh* mesh;
+	JPH::Mat44 transform;
+	uint32_t textureIndex;
+};
+
+// NEW: Worker Pool state for Secondary Command Buffers
+struct WorkerCmdContext {
+	Vk::CommandPool pools[2]; // One for each frame in flight
+	ZHLN::Atomic<uint32_t> cmdCount[2];
+};
+
 struct RenderContext::Impl {
 	Window& window;
 	Vk::Context ctx;
 	Vk::Allocator allocator;
 	Vk::Surface surface;
 
-	// New Abstraction: Orchestrates Swapchain + Depth + Semaphores
 	Vk::PresentationContext presentation;
-
 	Vk::FrameSync<2> sync;
 	Vk::CommandPools<2> pools;
 
@@ -76,19 +87,20 @@ struct RenderContext::Impl {
 	std::vector<std::unique_ptr<NativeMesh>> meshes;
 	std::vector<std::unique_ptr<NativeMaterial>> materials;
 
+	// NEW: Threading data
+	std::vector<DrawCommand> drawQueue;
+	std::vector<WorkerCmdContext> workerCmds;
+
 	Impl(Window& win) : window(win) {}
 	bool depth_ready = false;
 	VkDescriptorPool uiPool = VK_NULL_HANDLE;
 
-	// --- Bindless Resources ---
 	Vk::DescriptorSetLayout bindlessLayout;
 	Vk::DescriptorPool bindlessPool;
 	VkDescriptorSet bindlessSet = VK_NULL_HANDLE;
 	Vk::Sampler globalSampler;
 
 	uint32_t nextTextureIndex = 0;
-
-	// Resource tracking (RAII keeps them alive)
 	std::vector<Vk::Image> textureImages;
 	std::vector<Vk::ImageView> textureViews;
 
@@ -107,12 +119,10 @@ struct RenderContext::Impl {
 		samplerInfo.maxAnisotropy =
 			ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy;
 
-		// FIX: Create raw handle first
 		VkSampler rawSampler;
 		if (vkCreateSampler(ctx.Device(), &samplerInfo, nullptr, &rawSampler) != VK_SUCCESS) {
 			ZHLN::Panic("Failed to create Global Sampler");
 		}
-		// Wrap it in RAII
 		globalSampler = Vk::Sampler(ctx.Device(), rawSampler);
 
 		GlobalBindlessLayout::Write(ctx.Device(), bindlessSet, Vk::SkipWrite{},
@@ -120,9 +130,6 @@ struct RenderContext::Impl {
 	}
 
 	void SetupUI(GLFWwindow* window) {
-		// 1. Create a robust pool for ImGui.
-		// We use the "Kitchen Sink" approach because different versions of ImGui
-		// and different platforms may request different descriptor types.
 		const VkDescriptorPoolSize pool_sizes[] = {
 			{VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
 			{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
@@ -148,12 +155,10 @@ struct RenderContext::Impl {
 			ZHLN::Panic("FATAL: Failed to create ImGui Descriptor Pool");
 		}
 
-		// 2. Standard ImGui Init
 		IMGUI_CHECKVERSION();
 		ImGui::CreateContext();
 		ImGui_ImplGlfw_InitForVulkan(window, true);
 
-		// 3. Init Vulkan for Dynamic Rendering (Vulkan 1.3)
 		VkFormat swapchainFormat = presentation.swapchain.Get().format;
 
 		ImGui_ImplVulkan_InitInfo init_info = {
@@ -277,6 +282,30 @@ RenderContext::RenderContext(Window& window) : _impl(std::make_unique<Impl>(wind
 		Vk::CommandPools<2>::Create(_impl->ctx.Device(), _impl->ctx.PhysicalInfo().graphics_family);
 
 	_impl->SetupUI(static_cast<GLFWwindow*>(window.GetNativeHandle()));
+
+	// NEW: Initialize Worker pools based on the detected CPU threads
+	uint32_t workerCount = TaskSystem::GetWorkerCount();
+	// Fallback if TaskSystem wasn't initialized yet
+	if (workerCount == 0) {
+		ZHLN::Log(
+			"WARNING: RenderContext initialized before TaskSystem. Falling back to 1 worker.");
+		workerCount = 1;
+	}
+
+	_impl->workerCmds.resize(workerCount);
+	for (auto& w : _impl->workerCmds) {
+		for (int i = 0; i < 2; ++i) {
+			w.pools[i] =
+				Vk::CommandPool(_impl->ctx.Device(), _impl->ctx.PhysicalInfo().graphics_family);
+			// Pre-allocate secondary command buffers for chunking
+			if (!w.pools[i].AllocateSecondary(256)) {
+				ZHLN::Panic(
+					"FATAL: Failed to pre-allocate secondary command buffers for worker threads. "
+					"Check if your GPU supports {} command buffers per pool.",
+					256);
+			}
+		}
+	}
 }
 
 RenderContext::~RenderContext() {
@@ -397,6 +426,10 @@ void RenderContext::BeginFrame() {
 	const ZHLN_FrameSync& s = _impl->sync[_impl->frame_index];
 	ZHLN_WaitAndResetFrame(_impl->ctx.Device(), s.in_flight, &_impl->pools[_impl->frame_index]);
 
+	for (auto& w : _impl->workerCmds) {
+		w.cmdCount[_impl->frame_index].store(0, std::memory_order_relaxed);
+	}
+
 	ZHLN_AcquireDesc acq = {_impl->presentation.swapchain.Get().handle, s.image_available,
 							UINT64_MAX};
 	if (ZHLN_AcquireImage(_impl->ctx.Device(), &acq, &_impl->current_image_index) ==
@@ -413,17 +446,92 @@ void RenderContext::EndFrame() {
 	if (_impl->current_cmd == VK_NULL_HANDLE)
 		return;
 
-	// 1. Finalize engine rendering
+	// ========================================================================
+	// NEW: Parallel Rendering Dispatch
+	// ========================================================================
+	if (!_impl->drawQueue.empty()) {
+		uint32_t numChunks = (_impl->drawQueue.size() + 255) / 256;
+		std::vector<VkCommandBuffer> secondaries(numChunks);
+
+		ZHLN_SecondaryCmdDesc secDesc = {.color_format = _impl->presentation.swapchain.Get().format,
+										 .depth_format = VK_FORMAT_D32_SFLOAT};
+
+		TaskSystem::ParallelFor(
+			_impl->drawQueue.size(), 256, [&](uint32_t start, uint32_t end, uint32_t chunkIdx) {
+				uint32_t wIdx = TaskSystem::GetWorkerIndex();
+
+				// Atomically grab a secondary command buffer from THIS thread's pool
+				uint32_t localCmdIdx =
+					_impl->workerCmds[wIdx].cmdCount[_impl->frame_index].fetch_add(
+						1, std::memory_order_relaxed);
+				VkCommandBuffer sec_cmd =
+					_impl->workerCmds[wIdx].pools[_impl->frame_index][localCmdIdx];
+
+				ZHLN_BeginSecondaryCommandBuffer(sec_cmd, &secDesc);
+
+				// ================================================================
+				// SETUP DYNAMIC STATE FOR SECONDARY BUFFER
+				// ================================================================
+				VkExtent2D extent = _impl->presentation.swapchain.Get().extent;
+				const VkViewport viewport = {
+					.x = 0.0f,
+					.y = (float)extent.height, // Start at bottom
+					.width = (float)extent.width,
+					.height = -(float)extent.height, // Negative height for Y-flip
+					.minDepth = 0.0f,
+					.maxDepth = 1.0f,
+				};
+				const VkRect2D scissor = {{0, 0}, extent};
+
+				vkCmdSetViewport(sec_cmd, 0, 1, &viewport);
+				vkCmdSetScissor(sec_cmd, 0, 1, &scissor);
+
+				// Record this chunk's draw calls
+				for (uint32_t i = start; i < end; ++i) {
+					const auto& cmd = _impl->drawQueue[i];
+					vkCmdBindPipeline(sec_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+									  cmd.material->pipeline.Get());
+					vkCmdBindDescriptorSets(sec_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+											cmd.material->layout.Get(), 0, 1, &_impl->bindlessSet,
+											0, nullptr);
+
+					JPH::Mat44 final_transform = _impl->current_view_proj * cmd.transform;
+					FrameConstants constants = {.transform = final_transform,
+												.textureIndex = cmd.textureIndex};
+
+					vkCmdPushConstants(sec_cmd, cmd.material->layout.Get(),
+									   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+									   sizeof(FrameConstants), &constants);
+
+					VkDeviceSize offset = 0;
+					VkBuffer vbo = cmd.mesh->buffer.Handle();
+					vkCmdBindVertexBuffers(sec_cmd, 0, 1, &vbo, &offset);
+					vkCmdDraw(sec_cmd, cmd.mesh->vertexCount, 1, 0, 0);
+				}
+
+				ZHLN_EndCommandBuffer(sec_cmd);
+				secondaries[chunkIdx] = sec_cmd; // Store in the thread-safe ordered list
+			});
+
+		// Execute all chunks at once!
+		Vk::ExecuteCommands(_impl->current_cmd, secondaries);
+		_impl->drawQueue.clear();
+	}
+
+	// Finalize scene rendering
 	ZHLN_EndRendering(_impl->current_cmd);
 
-	// 2. Render ImGui with LOAD_OP_LOAD
+	// ========================================================================
+	// UI & Present Logic
+	// ========================================================================
 	ImGui::Render();
 
 	const VkRenderingAttachmentInfo colorAttachment = {
 		.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+		.pNext = nullptr,
 		.imageView = _impl->presentation.swapchain.Get().views[_impl->current_image_index],
 		.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-		.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD, // <--- IMPORTANT: KEEP THE SCENE!
+		.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
 		.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
 	};
 
@@ -439,7 +547,6 @@ void RenderContext::EndFrame() {
 	ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), _impl->current_cmd);
 	vkCmdEndRendering(_impl->current_cmd);
 
-	// 3. Normal transition to PRESENT
 	Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(
 		_impl->current_cmd, _impl->presentation.swapchain.Get().images[_impl->current_image_index]);
 
@@ -586,7 +693,8 @@ void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
 		.depth_view = impl->presentation.depthTarget.view.Get(),
 		.extent = impl->presentation.swapchain.Get().extent,
 		.clear_color = {color.GetX(), color.GetY(), color.GetZ(), color.GetW()},
-		.clear_depth = depth};
+		.clear_depth = depth,
+		.use_secondaries = true};
 
 	ZHLN_BeginRendering(impl->current_cmd, &pass);
 }
@@ -603,26 +711,10 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 	if (impl->current_cmd == VK_NULL_HANDLE)
 		return;
 
-	auto* mat = reinterpret_cast<NativeMaterial*>(material.pipeline);
-
-	vkCmdBindPipeline(impl->current_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mat->pipeline.Get());
-	vkCmdBindDescriptorSets(impl->current_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mat->layout.Get(),
-							0, 1, &impl->bindlessSet, 0, nullptr);
-
-	// FIX: Multiply the Camera's View-Projection by the Object's Model Transform
-	JPH::Mat44 final_transform = impl->current_view_proj * transform;
-
-	FrameConstants constants = {.transform = final_transform,
-								.textureIndex = material.textureIndex};
-
-	vkCmdPushConstants(impl->current_cmd, mat->layout.Get(),
-					   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-					   sizeof(FrameConstants), &constants);
-
-	VkDeviceSize offset = 0;
-	VkBuffer vbo = reinterpret_cast<NativeMesh*>(mesh.vertexBuffer)->buffer.Handle();
-	vkCmdBindVertexBuffers(impl->current_cmd, 0, 1, &vbo, &offset);
-	vkCmdDraw(impl->current_cmd, mesh.vertexCount, 1, 0, 0);
+	// Just push to the queue!
+	impl->drawQueue.push_back({reinterpret_cast<NativeMaterial*>(material.pipeline),
+							   reinterpret_cast<NativeMesh*>(mesh.vertexBuffer), transform,
+							   material.textureIndex});
 }
 } // namespace Renderer
 } // namespace ZHLN

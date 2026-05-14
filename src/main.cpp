@@ -42,11 +42,12 @@ struct Scene {
 														  JPH::Quat::sIdentity(),
 														  JPH::EMotionType::Static, 0)});
 
-		for (int i = 0; i < 25; ++i) {
-			float x = (float)(i % 5) - 2.5f;
-			float y = (float)(i / 5.0f) + 0.5f;
-			Entity propPhys = Physics::CreateRigidBody(
-				pc, boxShape, {x, y, -5.0f}, JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, 1);
+		for (int i = 0; i < 2000; ++i) {
+			float x = (float)(i % 45) - 22.5f;
+			float z = (float)(i / 45.0f) - 22.5f;
+			Entity propPhys =
+				Physics::CreateRigidBody(pc, boxShape, {x, 5.0f + (i * 0.1f), z},
+										 JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, 1);
 			reg.Add(reg.Create(), MeshComponent{boxMesh, material}, PhysicsComponent{propPhys});
 		}
 
@@ -75,8 +76,23 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	ZHLN::TaskSystem::Dispatch(jobs, &sync);
 	ZHLN::TaskSystem::Wait(&sync);
 	ZHLN::Log("All jobs finished!");
+	// 1. Setup the specific needs for THIS game
+	ZHLN::EngineConfig config{
+		.physics =
+			{
+				.maxBodies = 10000,
+				.maxBodyPairs = 20000,
+				.maxContactConstraints = 20000,
+				.tempAllocatorSize = 64 * 1024 * 1024,
+			},
+		.render =
+			{
+				.width = 1920,
+				.height = 1080,
+			},
+	};
 
-	Engine engine;
+	Engine engine(config);
 	engine.GetWindow().Focus();
 
 	auto& rc = engine.GetRenderContext();

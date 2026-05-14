@@ -46,6 +46,7 @@ class RenderGraph {
 		VkImageView depthTarget = VK_NULL_HANDLE;
 		VkExtent2D extent = {0, 0};
 		float clearColor[4] = {0, 0, 0, 1};
+		bool useSecondaries = false;
 	};
 
 	std::vector<Pass> _passes;
@@ -80,6 +81,11 @@ class RenderGraph {
 		// Final handoff to the OS
 		PassBuilder& Present(GraphImage& img) {
 			pass.transitions.push_back({&img, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR});
+			return *this;
+		}
+
+		PassBuilder& UseSecondaries() {
+			pass.useSecondaries = true;
 			return *this;
 		}
 
@@ -153,7 +159,8 @@ class RenderGraph {
 											  .depth_view = pass.depthTarget,
 											  .extent = pass.extent,
 											  .clear_color = {0.05f, 0.05f, 0.07f, 1.0f},
-											  .clear_depth = 1.0f};
+											  .clear_depth = 1.0f,
+											  .use_secondaries = pass.useSecondaries};
 					ZHLN_BeginRendering(cmd, &rp);
 					pass.record(cmd, pass.userData);
 					ZHLN_EndRendering(cmd);

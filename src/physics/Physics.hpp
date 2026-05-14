@@ -8,6 +8,7 @@
 #include <Jolt/Physics/Body/BodyID.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/Shape/Shape.h> // For ShapeRefC
+#include <Zahlen/Config.hpp>
 #include <Zahlen/Entity.hpp>
 
 // clang-format on
@@ -32,6 +33,8 @@ class PhysicsContext {
 
 	PhysicsContext(const PhysicsContext&) = delete;
 	PhysicsContext& operator=(const PhysicsContext&) = delete;
+
+	PhysicsContext(const PhysicsConfig& cfg);
 
 	void Step(float deltaTime);
 

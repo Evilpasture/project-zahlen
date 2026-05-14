@@ -59,6 +59,8 @@ static WorkQueue s_freeQueue;
 static std::vector<Fiber*> s_fiberPool;
 static std::vector<FiberData> s_fiberData;
 static std::vector<std::thread> s_threads;
+static thread_local uint32_t t_workerIndex = 0;
+static uint32_t s_workerCount = 0;
 struct TaskSystemDeinitGuard {
 	~TaskSystemDeinitGuard() { Shutdown(); }
 };
@@ -89,16 +91,15 @@ static void FiberMain(void* arg) {
 }
 
 // --- The Infinite Loop every OS Thread runs ---
-static void WorkerMain() {
-	Fiber::InitMainThread(); // Every OS thread needs a backing Fiber
+static void WorkerMain(uint32_t index) {
+	Fiber::InitMainThread();
+	t_workerIndex = index; // Store it in thread_local
 
 	while (true) {
-		// Sleep if no work, wake up when Dispatch() pushes a Fiber
 		Fiber* f = s_readyQueue.PopOrWait();
-		if (!f)
-			break; // Quit signal
-
-		// Execute the Fiber!
+		if (!f) {
+			break;
+		}
 		Fiber::Resume(f);
 	}
 }
@@ -114,6 +115,9 @@ void Init(uint32_t numThreads, uint32_t numFibers, size_t stackSize) {
 			numThreads -= 1; // Leave 1 core for the main loop
 	}
 
+	s_workerCount = numThreads + 1;
+	t_workerIndex = numThreads;
+
 	s_fiberPool.resize(numFibers);
 	s_fiberData.resize(numFibers);
 
@@ -125,8 +129,15 @@ void Init(uint32_t numThreads, uint32_t numFibers, size_t stackSize) {
 	}
 
 	for (uint32_t i = 0; i < numThreads; i++) {
-		s_threads.emplace_back(WorkerMain);
+		s_threads.emplace_back(WorkerMain, i);
 	}
+}
+
+uint32_t GetWorkerIndex() {
+	return t_workerIndex;
+}
+uint32_t GetWorkerCount() {
+	return s_workerCount;
 }
 
 void Shutdown() {

@@ -1,5 +1,4 @@
 #include <Zahlen/Log.hpp>
-
 #include <cstdarg>
 #include <cstdio>
 
@@ -18,7 +17,7 @@ auto JoltTraceBridge(const char* inFMT, ...) noexcept -> void {
 	if (result > 0) {
 		// Hand off the formatted string to our modern Log system
 		// We use "{}" to ensure we don't re-parse the Jolt output for format specifiers
-		ZHLN::Log("{}", buffer);
+		ZHLN::Panic("{}", buffer);
 	}
 }
 

@@ -1,5 +1,6 @@
 #pragma once
 #include <Zahlen/Camera.hpp>
+#include <Zahlen/Config.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Window.hpp>
@@ -18,6 +19,8 @@ class Engine {
 	void ProcessEvents();
 	void BeginFrame();
 	void EndFrame();
+
+	Engine(const EngineConfig& cfg = EngineConfig{});
 
 	RenderContext& GetRenderContext() { return *_renderContext; }
 	PhysicsContext& GetPhysicsContext() { return *_physicsContext; }

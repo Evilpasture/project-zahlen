@@ -199,7 +199,7 @@ void ZHLN_DestroyFrameSync(VkDevice device, ZHLN_FrameSync* ZHLN_RESTRICT sync,
 typedef struct {
 	VkCommandPool pool;
 	uint32_t count;
-	VkCommandBuffer buffers[8]; // matches max frames in flight
+	VkCommandBuffer buffers[256];
 } ZHLN_CommandPool;
 
 [[nodiscard]]
@@ -337,6 +337,7 @@ typedef const struct {
 	const VkExtent2D extent;
 	const float clear_color[4];
 	const float clear_depth; // default 1.0f
+	const bool use_secondaries;
 } ZHLN_RenderPassDesc;
 
 typedef const struct {
@@ -370,6 +371,16 @@ typedef const struct {
 ZHLN_FrameResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* ZHLN_RESTRICT desc);
 
 /* --- FRAME HELPERS --- */
+
+typedef const struct {
+	const VkFormat color_format;
+	const VkFormat depth_format;
+} ZHLN_SecondaryCmdDesc;
+
+void ZHLN_BeginSecondaryCommandBuffer(VkCommandBuffer cmd,
+									  const ZHLN_SecondaryCmdDesc* ZHLN_RESTRICT desc);
+bool ZHLN_AllocateSecondaryCommandBuffers(VkDevice device, ZHLN_CommandPool* ZHLN_RESTRICT pool,
+										  uint32_t count);
 
 void ZHLN_WaitAndResetFrame(VkDevice device, VkFence in_flight_fence,
 							const ZHLN_CommandPool* ZHLN_RESTRICT pool);

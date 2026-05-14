@@ -457,6 +457,12 @@ class CommandPool {
 		return _raw.buffers[i];
 	}
 
+	[[nodiscard]] bool AllocateSecondary(const uint32_t count) {
+		if (!Valid())
+			return false;
+		return ZHLN_AllocateSecondaryCommandBuffers(_device, &_raw, count);
+	}
+
   private:
 	VkDevice _device = nullptr;
 	ZHLN_CommandPool _raw{};
@@ -752,6 +758,14 @@ inline ZHLN_FrameResult SubmitAndPresent(const ZHLN_FrameSubmitDesc& desc) noexc
 	return ZHLN_SubmitAndPresent(&desc);
 }
 
+inline void ExecuteCommands(const VkCommandBuffer primary,
+							const std::span<const VkCommandBuffer> secondaries) noexcept {
+	if (!secondaries.empty()) {
+		vkCmdExecuteCommands(primary, static_cast<uint32_t>(secondaries.size()),
+							 secondaries.data());
+	}
+}
+
 // ============================================================================
 // Surface helpers
 // ============================================================================
@@ -793,7 +807,7 @@ class Surface {
 // ============================================================================
 // Semaphore Helpers
 // ============================================================================
-//
+
 // Perfect 64-byte structure (1 Cache Line)
 class alignas(64) SemaphorePool {
   public:

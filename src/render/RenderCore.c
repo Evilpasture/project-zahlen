@@ -1004,9 +1004,10 @@ void ZHLN_BeginRendering(const VkCommandBuffer cmd,
 
 	const VkRenderingInfo rendering_info = {
 		.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+		.flags = desc->use_secondaries ? VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT : 0,
 		.renderArea = {.offset = {0, 0}, .extent = desc->extent},
 		.layerCount = 1,
-		// FIX: Only set count/pointer if target_view exists
+		// Only set count/pointer if target_view exists
 		.colorAttachmentCount = (desc->target_view != VK_NULL_HANDLE) ? 1U : 0U,
 		.pColorAttachments = (desc->target_view != VK_NULL_HANDLE) ? &color_attachment : nullptr,
 		.pDepthAttachment = (desc->depth_view != VK_NULL_HANDLE) ? &depth_attachment : nullptr,
@@ -1066,6 +1067,48 @@ ZHLN_FrameResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* const restric
 }
 
 /* --- FRAME HELPERS --- */
+
+void ZHLN_BeginSecondaryCommandBuffer(const VkCommandBuffer cmd,
+									  const ZHLN_SecondaryCmdDesc* restrict desc) {
+	const VkCommandBufferInheritanceRenderingInfo inheritance_rendering = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
+		.flags = 0,
+		.colorAttachmentCount = (desc->color_format != VK_FORMAT_UNDEFINED) ? 1U : 0U,
+		.pColorAttachmentFormats = &desc->color_format,
+		.depthAttachmentFormat = desc->depth_format,
+		.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+	};
+
+	const VkCommandBufferInheritanceInfo inheritance = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO,
+		.pNext = &inheritance_rendering,
+	};
+
+	const VkCommandBufferBeginInfo info = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		.flags = VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT |
+				 VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+		.pInheritanceInfo = &inheritance,
+	};
+	vkBeginCommandBuffer(cmd, &info);
+}
+
+bool ZHLN_AllocateSecondaryCommandBuffers(const VkDevice device,
+										  ZHLN_CommandPool* const restrict pool,
+										  const uint32_t count) {
+	if (count > 256)
+		return false;
+	const VkCommandBufferAllocateInfo info = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+		.commandPool = pool->pool,
+		.level = VK_COMMAND_BUFFER_LEVEL_SECONDARY,
+		.commandBufferCount = count,
+	};
+	if (vkAllocateCommandBuffers(device, &info, pool->buffers) != VK_SUCCESS)
+		return false;
+	pool->count = count;
+	return true;
+}
 
 void ZHLN_WaitAndResetFrame(const VkDevice device, const VkFence in_flight_fence,
 							const ZHLN_CommandPool* const restrict pool) {

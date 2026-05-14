@@ -18,7 +18,7 @@ extern void JoltTraceBridge(const char* inFMT, ...) noexcept;
 extern bool JoltAssertBridge(const char* inExpression, const char* inMessage, const char* inFile,
 							 uint32_t inLine) noexcept;
 
-Engine::Engine() {
+Engine::Engine(const EngineConfig& cfg) {
 	ZHLN::Fiber::InitMainThread();
 	JPH::RegisterDefaultAllocator();
 	JPH::Trace = JoltTraceBridge;
@@ -35,11 +35,13 @@ Engine::Engine() {
 	}
 
 	_input = std::make_unique<InputContext>();
-	_window = std::make_unique<Window>("Project-Zahlen Engine", 1280, 720, _input.get());
+	_window = std::make_unique<Window>("Project-Zahlen Engine", cfg.render.width, cfg.render.height,
+									   _input.get());
 
 	// We just pass Vulkan now. The renderer internally handles the rest.
 	_renderContext = std::make_unique<RenderContext>(*_window);
-	_physicsContext = std::make_unique<PhysicsContext>();
+
+	_physicsContext = std::make_unique<PhysicsContext>(cfg.physics);
 }
 
 Engine::~Engine() {

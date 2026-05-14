@@ -38,15 +38,12 @@ function update(ptr, dt)
         local p = pos_view[i]
         local h = phys_buffer[i]
 
-        -- Calculate a nudge toward the center
-        -- We don't need to read 'vel' or calculate gravity anymore!
-        -- Jolt handles all of that.
-        local strength = 0.5 -- Much lower value for impulses
-        local nudgeX = -p.x * strength
-        local nudgeZ = -p.z * strength
+        -- Scale by dt to make it feel like a gentle "wind" 
+        -- 0.05 * 1/60 is much more stable than 0.5
+        local strength = 0.1 
+        local nudgeX = -p.x * strength * dt
+        local nudgeZ = -p.z * strength * dt
 
-        -- Apply the nudge. This feels like a "wind" or "magnet"
-        -- but allows them to bounce and fall naturally.
         world:apply_impulse(h, nudgeX, 0, nudgeZ)
     end
     -- 3. Collision Events
