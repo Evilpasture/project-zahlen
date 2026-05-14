@@ -23,13 +23,13 @@ extern "C" {
  * @brief Configuration for Vulkan Instance initialization.
  */
 typedef struct {
-	char app_name[64];		  /**< Application name embedded to satisfy C23 constexpr */
-	uint32_t version;		  /**< Application-specific version (VK_MAKE_API_VERSION) */
+	const char app_name[64];  /**< Application name embedded to satisfy C23 constexpr */
+	const uint32_t version;	  /**< Application-specific version (VK_MAKE_API_VERSION) */
 	uint32_t extension_count; /**< Number of additional extensions to enable */
 	const VkDebugUtilsMessageSeverityFlagsEXT
 		severity_flags;			   /**< Severity flags for the validation layer */
 	const char* const* extensions; /**< Pointer to list of extension name strings */
-	bool enable_validation;		   /**< Toggle for Khronos Validation Layers */
+	const bool enable_validation;  /**< Toggle for Khronos Validation Layers */
 } ZHLN_InstanceDesc;
 
 /**

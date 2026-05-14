@@ -19,6 +19,7 @@
 #include "PhysicsWorld.hpp"
 #include <Zahlen/Log.hpp>
 #include "PhysicsContactEvents.hpp"
+#include "Zahlen/Profiler.hpp"
 #include "detail/ControlFlow.hpp"
 #include "threading/Mutex.hpp"
 
@@ -199,6 +200,7 @@ PhysicsContext::~PhysicsContext() {
 }
 
 void PhysicsContext::Step(float deltaTime) {
+	ZHLN_PROFILE_SCOPE("Physics (Jolt)");
 	auto& world = _impl->world;
 
 	// --- 1. COMMAND FLUSH (Structural Phase) ---
@@ -244,6 +246,16 @@ void PhysicsContext::Step(float deltaTime) {
 
 const Physics::PhysicsWorld& PhysicsContext::GetWorld() const {
 	return _impl->world;
+}
+
+uint32_t PhysicsContext::GetActiveBodyCount() const {
+	return _impl->physicsSystem.GetNumActiveBodies(JPH::EBodyType::RigidBody);
+}
+
+size_t PhysicsContext::GetMemoryUsage() const {
+	// Jolt doesn't have a single "Total" call, but we can track
+	// the TempAllocator usage which is the most "active" memory.
+	return _impl->tempAllocator->GetSize();
 }
 
 namespace Physics {

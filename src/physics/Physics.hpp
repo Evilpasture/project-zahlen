@@ -38,6 +38,8 @@ class PhysicsContext {
 	PhysicsContext(const PhysicsConfig& cfg);
 
 	void Step(float deltaTime);
+	uint32_t GetActiveBodyCount() const;
+	size_t GetMemoryUsage() const;
 
 	struct Impl;
 	Impl* GetImpl() const { return _impl.get(); }

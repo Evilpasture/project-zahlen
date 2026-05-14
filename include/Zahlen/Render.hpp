@@ -25,6 +25,7 @@ class RenderContext {
 	void EndFrame();
 	void SetResolution(const Extent2D& resolution);
 	const char* GetRendererName() const;
+	const char* GetGPUName() const;
 
 	// --- Opaque Resource Creation API ---
 	BufferHandle CreateVertexBuffer(const void* data, size_t size);

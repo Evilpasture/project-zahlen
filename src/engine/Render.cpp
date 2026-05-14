@@ -6,6 +6,7 @@
 #include "RenderGraph.hpp"
 #include "RenderTarget.hpp"
 #include "Vertex.hpp"
+#include "Zahlen/Profiler.hpp"
 #include "imgui_impl_glfw.h"
 
 #include <GLFW/glfw3.h>
@@ -201,9 +202,14 @@ RenderContext::RenderContext(Window& window) : _impl(std::make_unique<Impl>(wind
 	inst_exts.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
 #endif
 
-	ZHLN_InstanceDesc inst_desc = ZHLN_DEFAULT_INSTANCE_DESC;
-	inst_desc.extensions = inst_exts.data();
-	inst_desc.extension_count = static_cast<uint32_t>(inst_exts.size());
+	const ZHLN_InstanceDesc inst_desc = {.app_name = "ZHLN Engine",
+										 .version = VK_MAKE_API_VERSION(0, 1, 0, 0),
+										 .extension_count = static_cast<uint32_t>(inst_exts.size()),
+										 .severity_flags =
+											 VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+											 VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+										 .extensions = inst_exts.data(),
+										 .enable_validation = false};
 
 	// Setup features using Vulkan 1.3 standards
 	VkPhysicalDeviceVulkan13Features feat13 = {
@@ -247,7 +253,7 @@ RenderContext::RenderContext(Window& window) : _impl(std::make_unique<Impl>(wind
 								.extension_count =
 									(uint32_t)(sizeof(dev_exts) / sizeof(const char*)),
 								.features = &feat2,
-								.enable_validation = true};
+								.enable_validation = false};
 
 	ZHLN_DeviceSelectDesc select_desc = {.instance = VK_NULL_HANDLE,
 										 .surface = VK_NULL_HANDLE,
@@ -443,6 +449,7 @@ void RenderContext::BeginFrame() {
 }
 
 void RenderContext::EndFrame() {
+	ZHLN_PROFILE_SCOPE("Render (CPU Record)");
 	if (_impl->current_cmd == VK_NULL_HANDLE)
 		return;
 
@@ -455,6 +462,13 @@ void RenderContext::EndFrame() {
 
 		ZHLN_SecondaryCmdDesc secDesc = {.color_format = _impl->presentation.swapchain.Get().format,
 										 .depth_format = VK_FORMAT_D32_SFLOAT};
+
+		std::stable_sort(_impl->drawQueue.begin(), _impl->drawQueue.end(),
+						 [](const DrawCommand& a, const DrawCommand& b) {
+							 if (a.material != b.material)
+								 return a.material < b.material;
+							 return a.mesh < b.mesh;
+						 });
 
 		TaskSystem::ParallelFor(
 			_impl->drawQueue.size(), 256, [&](uint32_t start, uint32_t end, uint32_t chunkIdx) {
@@ -658,6 +672,10 @@ uint32_t RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t
 	impl->textureViews.push_back(std::move(gpuView));
 
 	return index;
+}
+
+const char* RenderContext::GetGPUName() const {
+	return _impl->ctx.PhysicalInfo().properties.properties.deviceName;
 }
 
 namespace Renderer {

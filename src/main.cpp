@@ -3,9 +3,11 @@
 
 #include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Camera.hpp>
+#include <Zahlen/Clock.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/Profiler.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <algorithm>
 #include <detail/ControlFlow.hpp>
@@ -14,7 +16,8 @@
 #include <threading/TaskSystem.hpp>
 namespace ZHLN {
 void DrawConsole(ScriptRunner& runner);
-}
+void DrawProfiler(Engine& engine);
+} // namespace ZHLN
 using namespace ZHLN;
 
 struct Scene {
@@ -63,6 +66,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	Platform::Init();
 	ZHLN::SetupSignalHandler();
 	TaskSystem::Init();
+	Clock clock;
 	// 1. Setup the specific needs for THIS game
 	ZHLN::EngineConfig config{
 		.physics =
@@ -93,11 +97,16 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	Scene scene;
 	scene.Setup(engine);
 
-	const float dt = 1.0f / 60.0f;
+	float accumulator = 0.0f;
+	const float targetDt = 1.0f / 60.0f;
 
 	while (engine.IsRunning()) {
+		float frameTime = clock.GetDeltaTime(); // Get actual time since last frame
+		accumulator += frameTime;
+
 		engine.ProcessEvents();
 		ZHLN::DrawConsole(scriptRunner);
+		ZHLN::DrawProfiler(engine);
 		if (!engine.IsRunning())
 			break;
 
@@ -110,17 +119,22 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 		bool keyboardCaptured = ImGui::GetIO().WantCaptureKeyboard;
 		// 1. Logic Phase (Lua)
 		// Runs outside of locks. Lua uses the FFI bridge to queue forces/velocities.
-
-		if (!keyboardCaptured) {
-			scriptRunner.CallUpdate(&engine, dt);
-		} else {
-			// If UI is focused, we still call update but pass dt=0
-			// or a flag so physics doesn't jitter, OR just skip input checks.
-			scriptRunner.CallUpdate(&engine, 0.0f);
+		{
+			ZHLN_PROFILE_SCOPE("Logic (Lua)");
+			if (!keyboardCaptured) {
+				scriptRunner.CallUpdate(&engine, frameTime);
+			} else {
+				// If UI is focused, we still call update but pass dt=0
+				// or a flag so physics doesn't jitter, OR just skip input checks.
+				scriptRunner.CallUpdate(&engine, 0.0f);
+			}
 		}
 
 		// 2. Physics Phase
-		pc.Step(dt);
+		while (accumulator >= targetDt) {
+			pc.Step(targetDt);
+			accumulator -= targetDt;
+		}
 
 		// 3. Camera System
 		if (engine.GetInput().IsMouseButtonDown(KeyCode::RButton)) {
