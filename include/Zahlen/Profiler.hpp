@@ -11,6 +11,12 @@ struct ProfileData {
 	std::vector<float> history;
 };
 
+struct CullingStats {
+	static inline uint32_t TotalObjects = 0;
+	static inline uint32_t CulledObjects = 0;
+	static inline bool EnableCulling = true; // Toggle for testing!
+};
+
 class Profiler {
   public:
 	static void Record(const std::string& name, float timeMS) {

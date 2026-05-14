@@ -51,6 +51,27 @@ void DrawProfiler(Engine& engine) {
 			ImGui::Text("Resolution: %ux%u", size.width, size.height);
 		}
 
+		// --- NEW: CULLING STATS SECTION ---
+		if (ImGui::CollapsingHeader("Frustum Culling", ImGuiTreeNodeFlags_DefaultOpen)) {
+			ImGui::Checkbox("Enable Culling", &CullingStats::EnableCulling);
+
+			ImGui::Text("Total Objects:    %u", CullingStats::TotalObjects);
+			ImGui::Text("Objects Rendered: %u",
+						CullingStats::TotalObjects - CullingStats::CulledObjects);
+			ImGui::Text("Objects Culled:   %u", CullingStats::CulledObjects);
+
+			float culledRatio =
+				(CullingStats::TotalObjects > 0)
+					? (float)CullingStats::CulledObjects / (float)CullingStats::TotalObjects
+					: 0.0f;
+
+			// Visual bar showing how much of the scene is being skipped
+			ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.2f, 0.7f, 0.2f, 1.0f));
+			ImGui::ProgressBar(culledRatio, ImVec2(-1, 0),
+							   std::format("{:.1f}%% Culled", culledRatio * 100.0f).c_str());
+			ImGui::PopStyleColor();
+		}
+
 		float totalTime = 0.0f;
 		for (auto const& [name, data] : Profiler::GetMetrics()) {
 			totalTime += data.cpuTimeMS;

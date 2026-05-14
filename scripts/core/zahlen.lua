@@ -110,7 +110,7 @@ end
 
 function Engine:is_key_down(key)
     -- Add RBUTTON (index 6) to the map
-    local map = { W=1, A=2, S=3, D=4, SHIFT=5, RBUTTON=6 }
+    local map = { W=1, A=2, S=3, D=4, SHIFT=5, RBUTTON=6, SPACE = 7 }
     local code = map[key:upper()]
     
     -- If the key isn't in our map, return false immediately 

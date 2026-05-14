@@ -1,6 +1,6 @@
 #pragma once
-#include <Zahlen/Entity.hpp>
-#include <Zahlen/Types.hpp>
+#include "Entity.hpp"
+#include "Types.hpp"
 
 namespace ZHLN {
 
@@ -10,6 +10,7 @@ namespace ZHLN {
 struct MeshComponent {
 	Mesh mesh;
 	Material material;
+	float cullRadius = 1.0f;
 };
 
 /**

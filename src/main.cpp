@@ -44,7 +44,7 @@ struct Scene {
 		auto boxShape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Box, 0.5f, 0.5f, 0.5f);
 
 		// --- Spawn ---
-		reg.Add(reg.Create(), MeshComponent{floorMesh, material},
+		reg.Add(reg.Create(), MeshComponent{floorMesh, material, 150.0f},
 				PhysicsComponent{Physics::CreateRigidBody(pc, floorShape, {0.0f, -1.0f, 0.0f},
 														  JPH::Quat::sIdentity(),
 														  JPH::EMotionType::Static, 0)});
@@ -55,11 +55,14 @@ struct Scene {
 			Entity propPhys =
 				Physics::CreateRigidBody(pc, boxShape, {x, 5.0f + (i * 0.1f), z},
 										 JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, 1);
-			reg.Add(reg.Create(), MeshComponent{boxMesh, material}, PhysicsComponent{propPhys});
+
+			// 2. Give the small boxes a tight radius
+			reg.Add(reg.Create(), MeshComponent{boxMesh, material, 1.0f},
+					PhysicsComponent{propPhys});
 		}
 
 		playerEntity = reg.Create();
-		reg.Add(playerEntity, MeshComponent{playerMesh, material});
+		reg.Add(playerEntity, MeshComponent{playerMesh, material, 1.5f});
 		reg.Add(playerEntity, PhysicsComponent{Physics::CreateCharacter(pc, {0.0f, 2.0f, 0.0f})});
 		reg.Add(playerEntity, MovementComponent{.speed = 8.0f});
 	}
@@ -83,6 +86,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			{
 				.width = 1280,
 				.height = 720,
+				.vsync = false,
 			},
 	};
 
@@ -167,6 +171,9 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 		JPH::Mat44 vp =
 			cam.GetProjectionMatrix((float)res.width / res.height) * cam.GetViewMatrix();
 
+		Frustum frustum;
+		frustum.Update(vp);
+
 		engine.BeginFrame();
 		Renderer::Clear(rc, {0.08f, 0.09f, 0.12f, 1.0f});
 
@@ -177,22 +184,47 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 					rc, reg.Get<MeshComponent>(entities.front())->material.constantBuffer, vp);
 			}
 
+			uint32_t frameTotal = 0;
+			uint32_t frameCulled = 0;
+
 			for (Entity e : entities) {
 				auto* meshComp = reg.Get<MeshComponent>(e);
 				auto* physComp = reg.Get<PhysicsComponent>(e);
+				frameTotal++; // Count every mesh in the ECS
+
 				JPH::Mat44 model = JPH::Mat44::sIdentity();
+				JPH::Vec3 pos = JPH::Vec3::sZero();
 
 				if (physComp) {
 					uint32_t slot = physComp->physicsHandle.index;
 					uint32_t dense = world.slotToDense[slot];
-					model = Math::CreateTransform(
-						{(float)world.positions[dense * 4], (float)world.positions[dense * 4 + 1],
-						 (float)world.positions[dense * 4 + 2]},
-						{world.rotations[dense * 4], world.rotations[dense * 4 + 1],
-						 world.rotations[dense * 4 + 2], world.rotations[dense * 4 + 3]});
+					pos = {(float)world.positions[dense * 4], (float)world.positions[dense * 4 + 1],
+						   (float)world.positions[dense * 4 + 2]};
 				}
+
+				// --- CULLING CHECK ---
+				if (CullingStats::EnableCulling) {
+					if (!frustum.IsSphereVisible(pos, meshComp->cullRadius)) {
+						frameCulled++;
+						continue; // Skip this object
+					}
+				}
+
+				// --- TRANSFORMATION (Only happens if visible) ---
+				if (physComp) {
+					uint32_t slot = physComp->physicsHandle.index;
+					uint32_t dense = world.slotToDense[slot];
+					model = Math::CreateTransform(
+						pos, {world.rotations[dense * 4], world.rotations[dense * 4 + 1],
+							  world.rotations[dense * 4 + 2], world.rotations[dense * 4 + 3]});
+				}
+
 				Renderer::Draw(rc, meshComp->material, meshComp->mesh, model);
 			}
+
+			// Update global stats for ImGui to read
+			CullingStats::TotalObjects = frameTotal;
+			CullingStats::CulledObjects = frameCulled;
 		}
 		engine.EndFrame();
 	}
