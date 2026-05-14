@@ -55,13 +55,32 @@ function update(ptr, dt)
     -- Using #contacts asks the C++ BufferView exactly how many events occurred this frame
     for i = 0, #contacts - 1 do
         local evt = contacts[i]
-        
+
         -- Filter for heavy impacts (e.g. falling boxes hitting the floor)
         if evt.impulse > 10.0 then
             zahlen.log(
-                "HEAVY IMPACT: Impulse " .. tostring(evt.impulse) .. 
+                "HEAVY IMPACT: Impulse " .. tostring(evt.impulse) ..
                 " | Pos: (" .. tostring(evt.px) .. ", " .. tostring(evt.py) .. ")"
             )
+        end
+    end
+    
+    if engine:is_key_down("RBUTTON") then
+        local p = pos_view[playerCount - 1] -- Player pos
+        
+        -- We calculate the forward direction from the camera yaw
+        local hit = world:raycast(
+            p.x, p.y + 0.5, p.z, -- Origin (Player chest height)
+            fwd.x, 0, fwd.z,     -- Direction
+            50.0,                -- Max Distance
+            p_handle             -- Ignore player body!
+        )
+        
+        if hit then
+            zahlen.log("Pew! Hit entity " .. tostring(hit.entity) .. " at fraction " .. tostring(hit.fraction))
+            
+            -- Push the object we hit!
+            world:apply_impulse(hit.entity, fwd.x * 1000, 100, fwd.z * 1000)
         end
     end
 end

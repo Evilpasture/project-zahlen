@@ -330,6 +330,18 @@ JPH::BodyID PhysicsWorld::GetBodyID(ZHLN::Entity handle) {
 	return bodyIDs[dense];
 }
 
+JPH::BodyID GetBodyID(const PhysicsWorld& world, ZHLN::Entity handle) {
+	if (handle.index >= world.slotCapacity)
+		return JPH::BodyID();
+
+	if (world.generations[handle.index].load(std::memory_order_acquire) != handle.generation) {
+		return JPH::BodyID();
+	}
+
+	uint32_t dense = world.slotToDense[handle.index];
+	return world.bodyIDs[dense];
+}
+
 void DestroyBody(PhysicsContext& ctx, ZHLN::Entity handle) {
 	auto& world = ctx.GetImpl()->world;
 	const uint32_t slot = handle.index;
@@ -664,13 +676,15 @@ void SetConstraintTarget(PhysicsContext& ctx, ConstraintHandle handle, float val
 
 void AddImpulse(PhysicsContext& ctx, ZHLN::Entity handle, JPH::Vec3Arg impulse) {
 	auto* impl = ctx.GetImpl();
-
-	// Use the world mapping to get the Jolt BodyID
 	JPH::BodyID id = impl->world.GetBodyID(handle);
 
 	if (!id.IsInvalid()) {
-		// Apply the impulse through Jolt's BodyInterface
+		// 1. Apply the force
 		impl->world.bodyInterface->AddImpulse(id, impulse);
+
+		// 2. IMPORTANT: Wake the body up!
+		// Without this, impulses on stationary (sleeping) objects do nothing.
+		impl->world.bodyInterface->ActivateBody(id);
 	}
 }
 

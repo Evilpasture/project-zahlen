@@ -81,4 +81,23 @@ function World:apply_impulse(handle, x, y, z)
     mem.C.ZHLN_AddImpulse(self.engine, handle, x, y, z)
 end
 
+function World:raycast(ox, oy, oz, dx, dy, dz, max_dist, ignore_handle)
+    max_dist = max_dist or 1000.0
+    ignore_handle = ignore_handle or 0ULL
+    
+    -- The C function returns the struct BY VALUE, which is insanely fast
+    local res = mem.C.ZHLN_Raycast(self.engine, ox, oy, oz, dx, dy, dz, max_dist, ignore_handle)
+    
+    if res.hasHit == 1 then
+        return {
+            entity = res.entity,
+            p = { x = res.px, y = res.py, z = res.pz },
+            n = { x = res.nx, y = res.ny, z = res.nz },
+            fraction = res.fraction
+        }
+    end
+    
+    return nil -- No hit
+end
+
 return zahlen

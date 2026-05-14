@@ -17,6 +17,18 @@ ZHLN_EXPORT void ZHLN_SetLinearVelocity(struct ZHLN_Engine* engine, uint64_t ent
 ZHLN_EXPORT void ZHLN_AddImpulse(struct ZHLN_Engine* engine, uint64_t entityHandle, float x,
 								 float y, float z);
 
+typedef struct ZHLN_RaycastResult {
+	uint64_t entity;
+	double px, py, pz;
+	float nx, ny, nz;
+	float fraction;
+	int hasHit;
+} ZHLN_RaycastResult;
+
+ZHLN_EXPORT ZHLN_RaycastResult ZHLN_Raycast(struct ZHLN_Engine* engine, double ox, double oy,
+											double oz, float dx, float dy, float dz, float maxDist,
+											uint64_t ignoreEntity);
+
 #ifdef __cplusplus
 }
 #endif

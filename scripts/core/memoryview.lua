@@ -60,6 +60,19 @@ if not ok then
         } __attribute__((aligned(128))) ZHLN_ContactEventD;
 
         ZHLN_BufferView ZHLN_GetPhysicsContactEvents(ZHLN_Engine* engine);
+
+        typedef struct ZHLN_RaycastResult {
+            uint64_t entity;
+            double px, py, pz;
+            float nx, ny, nz;
+            float fraction;
+            int hasHit;
+        } ZHLN_RaycastResult;
+
+        ZHLN_RaycastResult ZHLN_Raycast(ZHLN_Engine* engine, 
+                                        double ox, double oy, double oz, 
+                                        float dx, float dy, float dz, 
+                                        float maxDist, uint64_t ignoreEntity);
     ]]
 end
 
@@ -69,6 +82,17 @@ local CODE_TO_TYPE = {
 }
 local BufferMT = {}
 local TypeCache = {}
+
+---@class ZHLN_BufferView
+---@field obj any
+---@field itemsize number
+---@field readonly boolean
+---@field format any
+---@field buf any
+---@field ndim number
+---@field shape number[]
+---@field strides number[]
+local ZHLN_BufferView -- Dummy local just to anchor the class
 
 local function get_ctype(format_ptr)
     local fmt = ffi.string(format_ptr)
@@ -89,9 +113,10 @@ function BufferMT:__index(i)
         if idx then return self[idx] end
         return BufferMT[i]
     end
-
     -- 2. Recursive Slicing (ndim > 1)
     if self.ndim > 1 then
+---@type ZHLN_BufferView
+---@diagnostic disable-next-line: assign-type-mismatch
         local sub = ffi.new("ZHLN_BufferView")
         sub.obj = nil -- Prevent GC from releasing the C++ buffer prematurely
         sub.itemsize = self.itemsize

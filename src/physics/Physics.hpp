@@ -81,20 +81,22 @@ void AddImpulse(PhysicsContext& ctx, ZHLN::Entity handle, JPH::Vec3Arg impulse);
 
 // --- Data Structures ---
 struct RaycastResult {
-	ZHLN::Entity handle{};
-	float fraction = 1.0f;
-	JPH::Vec3 normal = JPH::Vec3::sZero();
-	JPH::RVec3 position = JPH::RVec3::sZero();
-	bool hasHit = false;
+	ZHLN::Entity handle;
+	JPH::Vec3 normal;
+	JPH::RVec3 position;
+	float fraction;
+	bool hasHit;
 };
 
 struct ShapeCastResult {
-	ZHLN::Entity handle{};
-	float fraction = 1.0f;
-	JPH::RVec3 contactPoint = JPH::RVec3::sZero();
-	JPH::Vec3 contactNormal = JPH::Vec3::sZero();
-	bool hasHit = false;
+	ZHLN::Entity handle;
+	JPH::RVec3 contactPoint;
+	JPH::Vec3 contactNormal;
+	float fraction;
+	bool hasHit;
 };
+
+static_assert(std::is_trivial_v<RaycastResult> && std::is_trivial_v<ShapeCastResult>);
 
 // --- Queries ---
 [[nodiscard]] RaycastResult Raycast(const PhysicsContext& ctx, JPH::RVec3Arg origin,
