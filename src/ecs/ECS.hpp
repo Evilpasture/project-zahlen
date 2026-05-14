@@ -8,23 +8,16 @@
 #include <span>
 #include <threading/Mutex.hpp>
 #include <type_traits>
-#include <vector>
 
 namespace ZHLN::ECS {
 
-// ============================================================================
-// Type-Erased Sparse Set (The Data Backend)
-// ============================================================================
 class SparseSet {
   public:
 	SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr);
 	~SparseSet();
 
-	// Non-copyable to prevent accidental massive allocations
 	SparseSet(const SparseSet&) = delete;
 	SparseSet& operator=(const SparseSet&) = delete;
-	SparseSet(SparseSet&&) noexcept;
-	SparseSet& operator=(SparseSet&&) noexcept;
 
 	void Insert(Entity entity, const void* data);
 	void Remove(Entity entity);
@@ -32,11 +25,9 @@ class SparseSet {
 	void* Get(Entity entity) const noexcept;
 	void Clear() noexcept;
 
-	// FFI Bridges
 	BufferView GetBufferView(const void* owner, const char* format) const noexcept;
 	BufferView GetEntityView(const void* owner) const noexcept;
 
-	// Direct Access (Careful!)
 	[[nodiscard]] size_t Count() const noexcept { return _count; }
 	[[nodiscard]] Entity* GetDenseArray() const noexcept { return _dense; }
 	[[nodiscard]] std::byte* GetDataArray() const noexcept { return _data; }
@@ -48,22 +39,18 @@ class SparseSet {
 	Entity* _dense = nullptr;
 	std::byte* _data = nullptr;
 
-	size_t _elementSize = 0;
-	size_t _alignment = 0;
-
+	size_t _elementSize;
+	size_t _alignment;
 	size_t _count = 0;
 	size_t _denseCapacity = 0;
 	size_t _sparseCapacity = 0;
 
-	BufferSync* _sync = nullptr;
+	BufferSync* _sync;
 
-	void EnsureSparseCapacity(uint32_t required);
-	void EnsureDenseCapacity();
+	void ResizeSparse(uint32_t required);
+	void ResizeDense();
 };
 
-// ============================================================================
-// Component ID Generator
-// ============================================================================
 class ComponentFamily {
 	static inline uint32_t _typeCounter = 0;
 
@@ -74,111 +61,77 @@ class ComponentFamily {
 	}
 };
 
-// ============================================================================
-// The Registry
-// ============================================================================
 class Registry {
   public:
 	mutable BufferSync sync;
-	Registry() {
-		// We must manually zero the POD sync block because Atomic has no constructor
-		sync.viewExportCount.store(0, std::memory_order_relaxed);
 
-		// Ensure the mutex is in a valid state
-		std::memset(&sync.shadowLock, 0, sizeof(sync.shadowLock));
-	}
-	~Registry() = default;
+	Registry();
+	~Registry();
 
 	Entity Create();
 	void Destroy(Entity entity);
 	bool IsAlive(Entity entity) const noexcept;
 	void Clear();
 
-	// Type-safe Component API
 	template <typename T> void RegisterComponent() {
-		static_assert(std::is_trivially_copyable_v<T>,
-					  "ECS Components must be trivial for FFI safety!");
 		uint32_t id = ComponentFamily::GetTypeID<T>();
-		if (id >= _components.size()) {
-			_components.resize(id + 1, nullptr);
-		}
+		EnsureComponentCapacity(id);
 		if (!_components[id]) {
 			_components[id] = new SparseSet(sizeof(T), alignof(T), &this->sync);
 		}
 	}
 
-	// Single Component Add
 	template <typename T> T& Add(Entity entity, T&& component) {
-		using ComponentType = std::decay_t<T>;
-		uint32_t id = ComponentFamily::GetTypeID<ComponentType>();
-
-		// Auto-register if user forgot
-		if (id >= _components.size())
-			_components.resize(id + 1, nullptr);
-		if (!_components[id])
-			_components[id] =
-				new SparseSet(sizeof(ComponentType), alignof(ComponentType), &this->sync);
-
+		uint32_t id = ComponentFamily::GetTypeID<T>();
+		EnsureComponentCapacity(id);
+		if (!_components[id]) {
+			_components[id] = new SparseSet(sizeof(T), alignof(T), &this->sync);
+		}
 		_components[id]->Insert(entity, &component);
-		return *static_cast<ComponentType*>(_components[id]->Get(entity));
+		return *static_cast<T*>(_components[id]->Get(entity));
 	}
 
-	// Variadic Multi-Component Add (C++17 Fold Expression)
 	template <typename... Ts> void Add(Entity entity, Ts&&... components) {
 		(Add(entity, std::forward<Ts>(components)), ...);
 	}
 
 	template <typename T> void Remove(Entity entity) {
-		_components[ComponentFamily::GetTypeID<T>()]->Remove(entity);
-	}
-
-	template <typename T> bool Has(Entity entity) const noexcept {
-		return _components[ComponentFamily::GetTypeID<T>()]->Contains(entity);
+		uint32_t id = ComponentFamily::GetTypeID<T>();
+		if (id < _compCapacity && _components[id])
+			_components[id]->Remove(entity);
 	}
 
 	template <typename T> T* Get(Entity entity) const noexcept {
 		uint32_t id = ComponentFamily::GetTypeID<T>();
-		if (id >= _components.size() || !_components[id])
+		if (id >= _compCapacity || !_components[id])
 			return nullptr;
 		return static_cast<T*>(_components[id]->Get(entity));
 	}
 
-	// Advanced: Get the raw C++ array of a component for high-speed loops
 	template <typename T> ZHLN::RestrictSpan<T> GetRawArray() const noexcept {
 		auto* set = _components[ComponentFamily::GetTypeID<T>()];
 		return ZHLN::RestrictSpan<T>(reinterpret_cast<T*>(set->GetDataArray()), set->Count());
 	}
 
-	/* Get a span of all Entities that have this component.
-	We use std::span here because this is mostly for reading */
 	template <typename T> std::span<const Entity> GetEntitiesWith() const noexcept {
 		uint32_t id = ComponentFamily::GetTypeID<T>();
-		if (id >= _components.size() || !_components[id]) {
+		if (id >= _compCapacity || !_components[id])
 			return {};
-		}
 		return std::span<const Entity>(_components[id]->GetDenseArray(), _components[id]->Count());
 	}
 
-	// Bridge for FFI
-	template <typename T> BufferView GetBufferView(const char* format) const noexcept {
-		return _components[ComponentFamily::GetTypeID<T>()]->GetBufferView(this, format);
-	}
-
-	// Bridge for FFI - Get the Entity Handles associated with the data
-	template <typename T> BufferView GetEntityView() const noexcept {
-		uint32_t id = ComponentFamily::GetTypeID<T>();
-		if (id >= _components.size() || !_components[id])
-			return {};
-		return _components[id]->GetEntityView(this);
-	}
-
   private:
-	std::vector<uint32_t> _generations;
-	std::vector<uint32_t> _freeIndices;
+	uint32_t* _generations = nullptr;
+	uint32_t* _freeIndices = nullptr;
+	size_t _entityCount = 0;
+	size_t _entityCapacity = 0;
 	size_t _freeCount = 0;
-	size_t _activeEntities = 0;
 
-	std::vector<SparseSet*> _components;
+	SparseSet** _components = nullptr;
+	size_t _compCapacity = 0;
+
+	void EnsureEntityCapacity(uint32_t index);
+	void EnsureComponentCapacity(uint32_t id);
 };
 
 } // namespace ZHLN::ECS
