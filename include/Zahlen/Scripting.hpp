@@ -33,6 +33,8 @@ class ScriptRunner {
 
 	void ExecuteString(std::string_view code);
 
+	void ReloadFile(std::string_view path);
+
   private:
 	lua_State* L;
 };

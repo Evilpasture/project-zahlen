@@ -1,3 +1,4 @@
+#include "engine/FileWatcher.hpp"
 #include "engine/Platform.hpp"
 #include "imgui.h"
 
@@ -102,6 +103,9 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	ScriptRunner scriptRunner;
 	scriptRunner.RunFile("scripts/gameplay.lua");
 
+	FileWatcher gameplayWatcher("scripts/gameplay.lua");
+	uint32_t frameCounter = 0;
+
 	Scene scene;
 	scene.Setup(engine);
 
@@ -123,6 +127,14 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			engine.GetInput().ClearResizeFlag();
 			continue;
 		}
+
+		// Only check the disk every 60 frames to save CPU cycles
+		if (++frameCounter % 60 == 0) {
+			if (gameplayWatcher.CheckModified()) {
+				scriptRunner.ReloadFile("scripts/gameplay.lua");
+			}
+		}
+
 		// Only run input-based logic if the Console/UI isn't stealing focus
 		bool keyboardCaptured = ImGui::GetIO().WantCaptureKeyboard;
 		// 1. Logic Phase (Lua)

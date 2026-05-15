@@ -193,6 +193,26 @@ void ScriptRunner::ExecuteString(std::string_view code) {
 	}
 }
 
+void ScriptRunner::ReloadFile(std::string_view path) {
+	// 1. Force Lua to forget the module
+	// This allows 'require' to actually hit the disk again
+	std::string moduleName = std::string(path);
+
+	// Convert "scripts/gameplay.lua" -> "scripts.gameplay"
+	if (size_t pos = moduleName.find(".lua"); pos != std::string::npos)
+		moduleName.erase(pos);
+	std::replace(moduleName.begin(), moduleName.end(), '/', '.');
+
+	std::string resetCode = std::format("package.loaded['{}'] = nil", moduleName);
+	luaL_dostring(L, resetCode.c_str());
+
+	// 2. Re-run the entry file
+	RunFile(path);
+
+	Log("Script Hot-Reloaded: {}", path);
+	ZHLN::GameConsole::Log("Hot-Reloaded: " + std::string(path), {0.2f, 0.8f, 1.0f, 1.0f});
+}
+
 } // namespace ZHLN
 
 // --- C-API Exports ---
