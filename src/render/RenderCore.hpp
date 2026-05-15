@@ -3,7 +3,6 @@
 #include "RenderCore.h"
 #include "Utils.hpp"
 
-#include <algorithm>
 #include <array>
 #include <bit>
 #include <concepts>
@@ -818,20 +817,28 @@ class alignas(64) SemaphorePool {
 	SemaphorePool(const SemaphorePool&) = delete;
 	SemaphorePool& operator=(const SemaphorePool&) = delete;
 
-	SemaphorePool(SemaphorePool&& other) noexcept
-		: _device(std::exchange(other._device, VK_NULL_HANDLE)),
-		  _count(std::exchange(other._count, 0)) {
-		std::ranges::move(other._semaphores, _semaphores.begin());
-		other._semaphores.fill(VK_NULL_HANDLE);
+	SemaphorePool(SemaphorePool&& other) noexcept : _device(other._device), _count(other._count) {
+		for (uint32_t i = 0; i < 6; ++i) {
+			_semaphores[i] = other._semaphores[i];
+			other._semaphores[i] = VK_NULL_HANDLE;
+		}
+		other._device = VK_NULL_HANDLE;
+		other._count = 0;
 	}
 
 	SemaphorePool& operator=(SemaphorePool&& other) noexcept {
 		if (this != &other) {
 			Cleanup();
-			_device = std::exchange(other._device, VK_NULL_HANDLE);
-			_count = std::exchange(other._count, 0);
-			std::ranges::move(other._semaphores, _semaphores.begin());
-			other._semaphores.fill(VK_NULL_HANDLE);
+			_device = other._device;
+			_count = other._count;
+
+			for (uint32_t i = 0; i < 6; ++i) {
+				_semaphores[i] = other._semaphores[i];
+				other._semaphores[i] = VK_NULL_HANDLE;
+			}
+
+			other._device = VK_NULL_HANDLE;
+			other._count = 0;
 		}
 		return *this;
 	}
@@ -840,7 +847,7 @@ class alignas(64) SemaphorePool {
 		Cleanup();
 		_device = device;
 		// Cap at 6 to ensure 64-byte struct size
-		_count = std::min(count, 6U);
+		_count = ZHLN::Min(count, 6U);
 
 		for (uint32_t i = 0; i < _count; ++i) {
 			_semaphores[i] = ZHLN_CreateSemaphore(_device);
@@ -947,20 +954,38 @@ using DescriptorPool = DeviceHandle<VkDescriptorPool, ZHLN_DestroyDescriptorPool
 [[nodiscard]] inline bool IsInstanceExtensionSupported(std::string_view extension) noexcept {
 	uint32_t count = 0;
 	vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
-	std::vector<VkExtensionProperties> available(count);
-	vkEnumerateInstanceExtensionProperties(nullptr, &count, available.data());
-	return std::ranges::any_of(available,
-							   [&](const auto& prop) { return prop.extensionName == extension; });
+
+	// Most systems have < 128 extensions.
+	// VkExtensionProperties is ~260 bytes, so 128 * 260 = ~33KB on stack.
+	VkExtensionProperties available[128];
+	if (count > 128)
+		count = 128; // Cap to buffer size
+
+	vkEnumerateInstanceExtensionProperties(nullptr, &count, available);
+
+	for (uint32_t i = 0; i < count; ++i) {
+		if (extension == available[i].extensionName)
+			return true;
+	}
+	return false;
 }
 
 [[nodiscard]] inline bool IsDeviceExtensionSupported(VkPhysicalDevice physical,
 													 std::string_view extension) noexcept {
 	uint32_t count = 0;
 	vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, nullptr);
-	std::vector<VkExtensionProperties> available(count);
-	vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, available.data());
-	return std::ranges::any_of(available,
-							   [&](const auto& prop) { return prop.extensionName == extension; });
+
+	VkExtensionProperties available[128];
+	if (count > 128)
+		count = 128;
+
+	vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, available);
+
+	for (uint32_t i = 0; i < count; ++i) {
+		if (extension == available[i].extensionName)
+			return true;
+	}
+	return false;
 }
 
 // ============================================================================
@@ -1005,14 +1030,12 @@ inline void ExecutePasses(VkCommandBuffer cmd, std::span<const PassDesc> passes)
 
 		if (transition_count > 0) {
 			VkImageMemoryBarrier2* p_barriers = stack_barriers.data();
+			VkImageMemoryBarrier2* heap_allocated = nullptr;
 
-			// We only define the vector here; it won't allocate unless transitionCount >
-			// MaxStackBarriers.
-			std::vector<VkImageMemoryBarrier2> heap_barriers;
-
+			// Fallback to manual heap allocation if stack is too small
 			if (transition_count > MaxStackBarriers) [[unlikely]] {
-				heap_barriers.resize(transition_count);
-				p_barriers = heap_barriers.data();
+				heap_allocated = new VkImageMemoryBarrier2[transition_count];
+				p_barriers = heap_allocated;
 			}
 
 			for (uint32_t i = 0; i < transition_count; ++i) {
@@ -1045,6 +1068,10 @@ inline void ExecutePasses(VkCommandBuffer cmd, std::span<const PassDesc> passes)
 											   .imageMemoryBarrierCount = transition_count,
 											   .pImageMemoryBarriers = p_barriers};
 			vkCmdPipelineBarrier2(cmd, &dep_info);
+
+			if (heap_allocated) [[unlikely]] {
+				delete[] heap_allocated;
+			}
 		}
 
 		// Execute the recording callback (Function pointer + UserData)
