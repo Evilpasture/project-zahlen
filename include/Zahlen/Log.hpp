@@ -16,16 +16,12 @@
 // --- FIX: Restore tokens required by dbghelp.h ---
 #define IN
 #define OUT
-#ifndef VOID
-#define VOID void
-#endif
 
 #include <dbghelp.h>
 
 // --- Re-sanitize so these don't leak into your engine ---
 #undef IN
 #undef OUT
-#undef VOID
 
 #pragma comment(lib, "dbghelp.lib")
 #endif
@@ -41,7 +37,7 @@ void CheckForCrashes(Engine* engine);
 auto GetCurrentFiberID() -> uint64_t;
 
 inline auto GetPoorMansStacktrace() -> std::string {
-	std::string out = "";
+	std::string out = "Not implemented";
 #if defined(__APPLE__) || defined(__linux__)
 	void* callstack[128];
 	int frames = backtrace(callstack, 128);
@@ -71,19 +67,19 @@ inline auto GetPoorMansStacktrace() -> std::string {
 	std::free(strs);
 #else
 	void* stack[100];
-    unsigned short frames = CaptureStackBackTrace(0, 100, stack, nullptr);
-    HANDLE process = GetCurrentProcess();
-    SymInitialize(process, nullptr, true);
+	unsigned short frames = CaptureStackBackTrace(0, 100, stack, nullptr);
+	HANDLE process = GetCurrentProcess();
+	SymInitialize(process, nullptr, true);
 
-    char buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)];
-    PSYMBOL_INFO symbol = (PSYMBOL_INFO)buffer;
-    symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
-    symbol->MaxNameLen = MAX_SYM_NAME;
+	char buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)];
+	PSYMBOL_INFO symbol = (PSYMBOL_INFO)buffer;
+	symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+	symbol->MaxNameLen = MAX_SYM_NAME;
 
-    for (unsigned int i = 0; i < frames; i++) {
-        SymFromAddr(process, (DWORD64)(stack[i]), 0, symbol);
-        out += std::format("{}: {} - {:#x}\n", i, symbol->Name, symbol->Address);
-    }
+	for (unsigned int i = 0; i < frames; i++) {
+		SymFromAddr(process, (DWORD64)(stack[i]), 0, symbol);
+		out += std::format("{}: {} - {:#x}\n", i, symbol->Name, symbol->Address);
+	}
 #endif
 	return out;
 }
