@@ -1,11 +1,21 @@
 #include "TaskSystem.hpp"
 
 #include "Thread.hpp"
+#include "engine/Platform.hpp"
 
 #include <condition_variable>
 #include <mutex>
 #include <thread>
 #include <vector>
+
+#if defined(__x86_64__) || defined(_M_X64)
+#include <immintrin.h>
+#define RELAX_CPU() _mm_pause()
+#elif defined(__aarch64__)
+#define RELAX_CPU() __asm__ __volatile__("yield" ::: "memory")
+#else
+#define RELAX_CPU()
+#endif
 
 namespace ZHLN::TaskSystem {
 
@@ -92,6 +102,7 @@ static void FiberMain(void* arg) {
 
 // --- The Infinite Loop every OS Thread runs ---
 static void WorkerMain(uint32_t index) {
+	Platform::SetHighPriority();
 	Fiber::InitMainThread();
 	t_workerIndex = index; // Store it in thread_local
 
@@ -105,6 +116,7 @@ static void WorkerMain(uint32_t index) {
 }
 
 void Init(uint32_t numThreads, uint32_t numFibers, size_t stackSize) {
+	Platform::SetHighPriority();
 	// The thread that calls Init() (the main thread) must be a Fiber to use Wait()
 	Fiber::InitMainThread();
 	if (numThreads == 0) {
@@ -185,20 +197,37 @@ void Wait(Counter* counter) {
 		return;
 
 	Fiber* self = Fiber::GetCurrent();
+	uint32_t spinCount = 0;
 
 	while (counter->value.load(std::memory_order_acquire) > 0) {
-		// If we are on a raw thread not managed by our fiber system,
-		// just helping out as a main thread is the safest bet.
 		bool isMain = (self == nullptr || self->isMain);
 
 		if (isMain) {
 			Fiber* f = s_readyQueue.TryPop();
 			if (f) {
 				Fiber::Resume(f);
+				spinCount = 0;
 			} else {
-				std::this_thread::yield();
+				// On macOS, we DO NOT YIELD here.
+				// We spin to keep the P-core "Hot" so the OS doesn't
+				// context switch us for a trackpad interrupt.
+				if (spinCount < 100) {
+					RELAX_CPU();
+				} else if (spinCount < 1000) {
+					// Small backoff but still no OS yield
+					for (int i = 0; i < 10; ++i) {
+						RELAX_CPU();
+					}
+				} else {
+					// Only after 1000 failures do we finally give the OS
+					// a tiny bit of breathing room.
+					std::this_thread::yield();
+					spinCount = 0; // Reset to start hot again
+				}
+				spinCount++;
 			}
 		} else {
+			// Workers should just push themselves back and yield to the scheduler
 			s_readyQueue.Push(self);
 			Fiber::Yield();
 		}

@@ -37,7 +37,7 @@ void CheckForCrashes(Engine* engine);
 auto GetCurrentFiberID() -> uint64_t;
 
 inline auto GetPoorMansStacktrace() -> std::string {
-	std::string out = "Not implemented";
+	std::string out = "";
 #if defined(__APPLE__) || defined(__linux__)
 	void* callstack[128];
 	int frames = backtrace(callstack, 128);
@@ -81,6 +81,9 @@ inline auto GetPoorMansStacktrace() -> std::string {
 		out += std::format("{}: {} - {:#x}\n", i, symbol->Name, symbol->Address);
 	}
 #endif
+	if (out.length() < 1) {
+		out += "Not implemented";
+	}
 	return out;
 }
 

@@ -465,12 +465,12 @@ void RenderContext::EndFrame() {
 		ZHLN_SecondaryCmdDesc secDesc = {.color_format = _impl->presentation.swapchain.Get().format,
 										 .depth_format = VK_FORMAT_D32_SFLOAT};
 
-		std::stable_sort(_impl->drawQueue.begin(), _impl->drawQueue.end(),
-						 [](const DrawCommand& a, const DrawCommand& b) {
-							 if (a.material != b.material)
-								 return a.material < b.material;
-							 return a.mesh < b.mesh;
-						 });
+		std::sort(_impl->drawQueue.begin(), _impl->drawQueue.end(),
+				  [](const DrawCommand& a, const DrawCommand& b) {
+					  if (a.material != b.material)
+						  return a.material < b.material;
+					  return a.mesh < b.mesh;
+				  });
 
 		TaskSystem::ParallelFor(
 			_impl->drawQueue.size(), 256, [&](uint32_t start, uint32_t end, uint32_t chunkIdx) {

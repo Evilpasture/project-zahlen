@@ -1,8 +1,9 @@
 #pragma once
-
-// clang-format off
 #include "Types.hpp"
+// clang-format off
+
 #include <Jolt/Jolt.h>
+#include <Jolt/Geometry/AABox.h>
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
@@ -91,6 +92,31 @@ inline auto EulerDegreesToQuat(JPH::Vec3Arg degrees) {
  */
 inline auto QuatToEulerDegrees(JPH::QuatArg quat) {
 	return quat.GetEulerAngles() * (180.0f / JPH::JPH_PI);
+}
+
+/**
+ * @brief Generates a world-space AABB from a View-Projection matrix.
+ * Used to query Jolt's Broadphase.
+ */
+inline JPH::AABox CalculateFrustumAABB(const JPH::Mat44& viewProj) {
+	JPH::Mat44 invVP = viewProj.Inversed();
+	JPH::AABox bounds;
+
+	for (float z : {0.0f, 1.0f}) {
+		for (float y : {-1.0f, 1.0f}) {
+			for (float x : {-1.0f, 1.0f}) {
+				JPH::Vec4 worldPos = invVP * JPH::Vec4(x, y, z, 1.0f);
+				float w = worldPos.GetW();
+				if (std::abs(w) < 1e-6f)
+					continue;
+				bounds.Encapsulate(
+					JPH::Vec3(worldPos.GetX() / w, worldPos.GetY() / w, worldPos.GetZ() / w));
+			}
+		}
+	}
+	// Stability: Inflate the box so we don't query every single frame
+	bounds.ExpandBy(JPH::Vec3::sReplicate(2.0f));
+	return bounds;
 }
 
 constexpr Packed1010102 PackNormal(float x, float y, float z, float w = 0.0f) {

@@ -183,4 +183,77 @@ void OverlapAABB(const PhysicsContext& ctx, JPH::RVec3Arg minBox, JPH::RVec3Arg 
 	}
 }
 
+void QueryAABB(const PhysicsContext& ctx, JPH::Vec3Arg min, JPH::Vec3Arg max,
+			   JPH::Array<ZHLN::Entity>& outEntities) {
+	const auto& world = ctx.GetWorld();
+	if (world.isStepping.load(std::memory_order_relaxed))
+		return;
+
+	JPH::AABox box(min, max);
+
+	// collector that just dumps everything into the array
+	struct SimpleCollector : public JPH::CollideShapeBodyCollector {
+		const PhysicsWorld& world;
+		JPH::Array<ZHLN::Entity>& out;
+
+		SimpleCollector(const PhysicsWorld& w, JPH::Array<ZHLN::Entity>& o) : world(w), out(o) {}
+
+		void AddHit(const JPH::BodyID& inBodyID) override {
+			ZHLN::Entity handle;
+			if (TryGetValidHandle(world, inBodyID, handle)) {
+				out.push_back(handle);
+			}
+		}
+	};
+
+	SimpleCollector collector(world, outEntities);
+	world.system->GetBroadPhaseQuery().CollideAABox(box, collector);
+}
+
+void FrustumCull(const PhysicsContext& ctx, const JPH::Mat44& viewProj, const Frustum& frustum,
+				 JPH::Array<ZHLN::Entity>& outEntities) {
+	const auto& world = ctx.GetWorld();
+
+	if (world.isStepping.load(std::memory_order_relaxed)) {
+		return;
+	}
+
+	JPH::AABox frustumAABB = Math::CalculateFrustumAABB(viewProj);
+
+	struct CullCollector : public JPH::CollideShapeBodyCollector {
+		const PhysicsWorld& world;
+		const Frustum& frustum;
+		JPH::Array<ZHLN::Entity>& out;
+
+		CullCollector(const PhysicsWorld& w, const Frustum& f, JPH::Array<ZHLN::Entity>& o)
+			: world(w), frustum(f), out(o) {}
+
+		void AddHit(const JPH::BodyID& inBodyID) override {
+			ZHLN::Entity handle;
+			if (TryGetValidHandle(world, inBodyID, handle)) {
+
+				// FIX: Fetch the ACTUAL bounds from Jolt instead of a hardcoded 2.0f sphere!
+				// Because world.isStepping is false, using NoLock is thread-safe here.
+				JPH::BodyLockRead lock(world.system->GetBodyLockInterfaceNoLock(), inBodyID);
+
+				if (lock.Succeeded()) {
+					JPH::AABox bounds = lock.GetBody().GetWorldSpaceBounds();
+
+					// Calculate the circumscribed sphere of the object's actual AABB
+					JPH::Vec3 center = bounds.GetCenter();
+					float radius = bounds.GetExtent().Length(); // Distance from center to corner
+
+					// The floor will have a massive radius, so it will never be incorrectly culled.
+					if (frustum.IsSphereVisible(center, radius)) {
+						out.push_back(handle);
+					}
+				}
+			}
+		}
+	};
+
+	CullCollector collector(world, frustum, outEntities);
+	world.system->GetBroadPhaseQuery().CollideAABox(frustumAABB, collector);
+}
+
 } // namespace ZHLN::Physics

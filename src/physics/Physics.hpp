@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Zahlen/Camera.hpp"
+
 #include <Zahlen/Buffer.h>
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -44,6 +46,8 @@ class PhysicsContext {
 	struct Impl;
 	Impl* GetImpl() const { return _impl.get(); }
 	const Physics::PhysicsWorld& GetWorld() const;
+
+	void OptimizeBroadphase();
 
   private:
 	std::unique_ptr<Impl> _impl;
@@ -102,7 +106,18 @@ struct ShapeCastResult {
 	bool hasHit;
 };
 
-static_assert(std::is_trivial_v<RaycastResult> && std::is_trivial_v<ShapeCastResult>);
+struct CullResult {
+	ZHLN::Entity* results;
+	uint32_t count;
+};
+/**
+ * @brief Uses Jolt's Broadphase to find all entities within a frustum.
+ */
+void FrustumCull(const PhysicsContext& ctx, const JPH::Mat44& viewProj, const Frustum& frustum,
+				 JPH::Array<ZHLN::Entity>& outEntities);
+
+static_assert(std::is_trivial_v<RaycastResult> && std::is_trivial_v<ShapeCastResult> &&
+			  std::is_trivial_v<CullResult>);
 
 // --- Queries ---
 [[nodiscard]] RaycastResult Raycast(const PhysicsContext& ctx, JPH::RVec3Arg origin,
@@ -118,6 +133,9 @@ void OverlapSphere(const PhysicsContext& ctx, JPH::RVec3Arg center, float radius
 
 void OverlapAABB(const PhysicsContext& ctx, JPH::RVec3Arg minBox, JPH::RVec3Arg maxBox,
 				 JPH::Array<ZHLN::Entity>& outResults);
+
+void QueryAABB(const PhysicsContext& ctx, JPH::Vec3Arg min, JPH::Vec3Arg max,
+			   JPH::Array<ZHLN::Entity>& outEntities);
 
 // --- Internal Mapping Helpers (Now visible to Query module) ---
 JPH::BodyID GetBodyID(const PhysicsWorld& world, ZHLN::Entity handle);

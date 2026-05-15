@@ -4,6 +4,73 @@
 
 namespace ZHLN {
 
+struct Frustum {
+	// SIMD SoA Layout
+	JPH::Vec4 mX[2], mY[2], mZ[2], mW[2];
+
+	void Update(const JPH::Mat44& vp) {
+		// 1. Manually extract rows from the Column-Major matrix
+		// vp(row, column)
+		JPH::Vec4 r0(vp(0, 0), vp(0, 1), vp(0, 2), vp(0, 3));
+		JPH::Vec4 r1(vp(1, 0), vp(1, 1), vp(1, 2), vp(1, 3));
+		JPH::Vec4 r2(vp(2, 0), vp(2, 1), vp(2, 2), vp(2, 3));
+		JPH::Vec4 r3(vp(3, 0), vp(3, 1), vp(3, 2), vp(3, 3));
+
+		JPH::Vec4 planes[6];
+		// Left/Right
+		planes[0] = r3 + r0;
+		planes[1] = r3 - r0;
+		// Top/Bottom (Vulkan Y is Down, so r3 + r1 is Top)
+		planes[2] = r3 + r1;
+		planes[3] = r3 - r1;
+		// Near/Far (Vulkan Z is 0..1)
+		planes[4] = r2;
+		planes[5] = r3 - r2;
+
+		for (int i = 0; i < 6; ++i) {
+			// Normalize planes to ensure distance checks are in world units
+			float len = JPH::Vec3(planes[i].GetX(), planes[i].GetY(), planes[i].GetZ()).Length();
+			if (len > 1e-6f)
+				planes[i] /= len;
+		}
+
+		// 2. Transpose to SIMD SoA
+		mX[0] = JPH::Vec4(planes[0].GetX(), planes[1].GetX(), planes[2].GetX(), planes[3].GetX());
+		mY[0] = JPH::Vec4(planes[0].GetY(), planes[1].GetY(), planes[2].GetY(), planes[3].GetY());
+		mZ[0] = JPH::Vec4(planes[0].GetZ(), planes[1].GetZ(), planes[2].GetZ(), planes[3].GetZ());
+		mW[0] = JPH::Vec4(planes[0].GetW(), planes[1].GetW(), planes[2].GetW(), planes[3].GetW());
+
+		mX[1] = JPH::Vec4(planes[4].GetX(), planes[5].GetX(), 0.0f, 0.0f);
+		mY[1] = JPH::Vec4(planes[4].GetY(), planes[5].GetY(), 0.0f, 0.0f);
+		mZ[1] = JPH::Vec4(planes[4].GetZ(), planes[5].GetZ(), 0.0f, 0.0f);
+		// Lane 3 & 4 of block 1 are "always true" planes (W = large positive)
+		mW[1] = JPH::Vec4(planes[4].GetW(), planes[5].GetW(), 1e10f, 1e10f);
+	}
+
+	[[nodiscard]] JPH_INLINE bool IsSphereVisible(JPH::Vec3Arg center, float radius) const {
+		// Stability Fix: Inflate radius by a small margin (0.5m)
+		// This prevents "flicker" culling which causes renderer command spikes
+		float inflatedRadius = -(radius + 0.5f);
+
+		JPH::Vec4 cX = JPH::Vec4::sReplicate(center.GetX());
+		JPH::Vec4 cY = JPH::Vec4::sReplicate(center.GetY());
+		JPH::Vec4 cZ = JPH::Vec4::sReplicate(center.GetZ());
+		JPH::Vec4 negR = JPH::Vec4::sReplicate(inflatedRadius);
+
+		// block 0 (Planes 0-3)
+		JPH::Vec4 dist0 = mX[0] * cX + mY[0] * cY + mZ[0] * cZ + mW[0];
+		if (JPH::Vec4::sLess(dist0, negR).TestAnyTrue())
+			return false;
+
+		// block 1 (Planes 4-5)
+		JPH::Vec4 dist1 = mX[1] * cX + mY[1] * cY + mZ[1] * cZ + mW[1];
+		if (JPH::Vec4::sLess(dist1, negR).TestAnyTrue())
+			return false;
+
+		return true;
+	}
+};
+
 struct Camera {
 	JPH::Vec3 position = {0, 2, 10};
 	float yaw = -90.0f;
@@ -12,6 +79,8 @@ struct Camera {
 	float fov = 45.0f;
 	float nearZ = 0.1f;
 	float farZ = 1000.0f;
+
+	Frustum frustum{};
 
 	[[nodiscard]] JPH::Mat44 GetViewMatrix() const {
 		JPH::Vec3 direction;
@@ -26,52 +95,6 @@ struct Camera {
 
 	[[nodiscard]] JPH::Mat44 GetProjectionMatrix(float aspectRatio) const {
 		return Math::CreatePerspective(JPH::DegreesToRadians(fov), aspectRatio, nearZ, farZ);
-	}
-};
-
-struct Frustum {
-	JPH::Vec4 planes[6];
-
-	// Extracts the 6 planes from a Vulkan View-Projection matrix
-	void Update(const JPH::Mat44& vp) {
-		JPH::Vec4 c0 = vp.GetColumn4(0);
-		JPH::Vec4 c1 = vp.GetColumn4(1);
-		JPH::Vec4 c2 = vp.GetColumn4(2);
-		JPH::Vec4 c3 = vp.GetColumn4(3);
-
-		JPH::Vec4 r0(c0.GetX(), c1.GetX(), c2.GetX(), c3.GetX());
-		JPH::Vec4 r1(c0.GetY(), c1.GetY(), c2.GetY(), c3.GetY());
-		JPH::Vec4 r2(c0.GetZ(), c1.GetZ(), c2.GetZ(), c3.GetZ());
-		JPH::Vec4 r3(c0.GetW(), c1.GetW(), c2.GetW(), c3.GetW());
-
-		planes[0] = r3 + r0; // Left
-		planes[1] = r3 - r0; // Right
-		planes[2] = r3 - r1; // Top
-		planes[3] = r3 + r1; // Bottom
-		planes[4] = r2;		 // Near (Vulkan uses [0, 1] clip space)
-		planes[5] = r3 - r2; // Far
-
-		// Normalize the planes so we can calculate true distances
-		for (int i = 0; i < 6; ++i) {
-			float length = JPH::Vec3(planes[i].GetX(), planes[i].GetY(), planes[i].GetZ()).Length();
-			if (length > 0.0001f) {
-				planes[i] /= length;
-			}
-		}
-	}
-
-	// Fast check: is the sphere inside the 6 planes?
-	[[nodiscard]] bool IsSphereVisible(JPH::Vec3Arg center, float radius) const {
-		for (int i = 0; i < 6; ++i) {
-			float distance = planes[i].GetX() * center.GetX() + planes[i].GetY() * center.GetY() +
-							 planes[i].GetZ() * center.GetZ() + planes[i].GetW();
-
-			// If the sphere is further "outside" the plane than its radius, it is invisible
-			if (distance < -radius) {
-				return false;
-			}
-		}
-		return true;
 	}
 };
 

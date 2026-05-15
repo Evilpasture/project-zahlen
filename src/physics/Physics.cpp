@@ -21,7 +21,6 @@
 #include "PhysicsContactEvents.hpp"
 #include "Zahlen/Profiler.hpp"
 #include "detail/ControlFlow.hpp"
-#include "threading/Mutex.hpp"
 
 // ZHLN Detail Utilities
 #include <detail/Prefetch.hpp>
@@ -256,6 +255,10 @@ size_t PhysicsContext::GetMemoryUsage() const {
 	// Jolt doesn't have a single "Total" call, but we can track
 	// the TempAllocator usage which is the most "active" memory.
 	return _impl->tempAllocator->GetSize();
+}
+
+void PhysicsContext::OptimizeBroadphase() {
+	_impl->physicsSystem.OptimizeBroadPhase();
 }
 
 namespace Physics {

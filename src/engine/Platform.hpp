@@ -10,6 +10,8 @@ class Window;
 
 namespace ZHLN::Platform {
 
+void SetHighPriority();
+
 /**
  * @brief Performs one-time OS initialization (DPI awareness, etc.)
  */

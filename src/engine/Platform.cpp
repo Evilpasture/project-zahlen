@@ -19,7 +19,21 @@
 #pragma comment(lib, "Shcore.lib")
 #endif
 
+#ifdef __APPLE__
+#include <pthread.h>
+#include <pthread/qos.h>
+#endif
+
 namespace ZHLN::Platform {
+
+void SetHighPriority() {
+#ifdef __APPLE__
+	// This is the magic command for macOS.
+	// QOS_CLASS_USER_INTERACTIVE tells the scheduler to prioritize P-Cores
+	// and ignore power-saving E-core migration.
+	pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+#endif
+}
 
 void Init() {
 #ifdef _WIN32
