@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <cstdint>
 #include <detail/Platform.hpp>
 
 // Defined in mag_asm.S

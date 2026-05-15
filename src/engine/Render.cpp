@@ -189,7 +189,8 @@ struct RenderContext::Impl {
 	}
 };
 
-RenderContext::RenderContext(Window& window) : _impl(std::make_unique<Impl>(window)) {
+RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
+	: _impl(std::make_unique<Impl>(window)) {
 	uint32_t glfwExtensionCount = 0;
 	const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
 
@@ -209,7 +210,7 @@ RenderContext::RenderContext(Window& window) : _impl(std::make_unique<Impl>(wind
 											 VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
 											 VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
 										 .extensions = inst_exts.data(),
-										 .enable_validation = false};
+										 .enable_validation = cfg.enableValidation};
 
 	// Setup features using Vulkan 1.3 standards
 	VkPhysicalDeviceVulkan13Features feat13 = {
@@ -253,7 +254,7 @@ RenderContext::RenderContext(Window& window) : _impl(std::make_unique<Impl>(wind
 								.extension_count =
 									(uint32_t)(sizeof(dev_exts) / sizeof(const char*)),
 								.features = &feat2,
-								.enable_validation = false};
+								.enable_validation = cfg.enableValidation};
 
 	ZHLN_DeviceSelectDesc select_desc = {.instance = VK_NULL_HANDLE,
 										 .surface = VK_NULL_HANDLE,
@@ -279,7 +280,7 @@ RenderContext::RenderContext(Window& window) : _impl(std::make_unique<Impl>(wind
 	int w, h;
 	glfwGetFramebufferSize(glfwWin, &w, &h);
 	if (!_impl->presentation.Init(_impl->ctx, _impl->allocator, _impl->surface.Get(), (uint32_t)w,
-								  (uint32_t)h)) {
+								  (uint32_t)h, cfg.vsync)) {
 		ZHLN::Panic("FATAL: Presentation Context initialization failed");
 	}
 
@@ -290,7 +291,7 @@ RenderContext::RenderContext(Window& window) : _impl(std::make_unique<Impl>(wind
 	_impl->SetupUI(static_cast<GLFWwindow*>(window.GetNativeHandle()));
 
 	// NEW: Initialize Worker pools based on the detected CPU threads
-	uint32_t workerCount = TaskSystem::GetWorkerCount();
+	uint32_t workerCount = TaskSystem::GetWorkerCount() + 1;
 	// Fallback if TaskSystem wasn't initialized yet
 	if (workerCount == 0) {
 		ZHLN::Log(
@@ -299,6 +300,7 @@ RenderContext::RenderContext(Window& window) : _impl(std::make_unique<Impl>(wind
 	}
 
 	_impl->workerCmds.resize(workerCount);
+
 	for (auto& w : _impl->workerCmds) {
 		for (int i = 0; i < 2; ++i) {
 			w.pools[i] =
@@ -473,6 +475,10 @@ void RenderContext::EndFrame() {
 		TaskSystem::ParallelFor(
 			_impl->drawQueue.size(), 256, [&](uint32_t start, uint32_t end, uint32_t chunkIdx) {
 				uint32_t wIdx = TaskSystem::GetWorkerIndex();
+
+				if (wIdx >= _impl->workerCmds.size()) {
+					wIdx = (uint32_t)(_impl->workerCmds.size() - 1);
+				}
 
 				// Atomically grab a secondary command buffer from THIS thread's pool
 				uint32_t localCmdIdx =

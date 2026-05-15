@@ -6,9 +6,28 @@
 #include <print>
 #include <source_location>
 #include <string_view>
+
 #if defined(__APPLE__) || defined(__linux__)
 #include <cxxabi.h>
 #include <execinfo.h>
+#else
+#include <detail/Platform.hpp>
+
+// --- FIX: Restore tokens required by dbghelp.h ---
+#define IN
+#define OUT
+#ifndef VOID
+#define VOID void
+#endif
+
+#include <dbghelp.h>
+
+// --- Re-sanitize so these don't leak into your engine ---
+#undef IN
+#undef OUT
+#undef VOID
+
+#pragma comment(lib, "dbghelp.lib")
 #endif
 
 namespace ZHLN {
@@ -51,7 +70,20 @@ inline auto GetPoorMansStacktrace() -> std::string {
 	}
 	std::free(strs);
 #else
-	out = "Stacktrace not implemented.\n";
+	void* stack[100];
+    unsigned short frames = CaptureStackBackTrace(0, 100, stack, nullptr);
+    HANDLE process = GetCurrentProcess();
+    SymInitialize(process, nullptr, true);
+
+    char buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)];
+    PSYMBOL_INFO symbol = (PSYMBOL_INFO)buffer;
+    symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+    symbol->MaxNameLen = MAX_SYM_NAME;
+
+    for (unsigned int i = 0; i < frames; i++) {
+        SymFromAddr(process, (DWORD64)(stack[i]), 0, symbol);
+        out += std::format("{}: {} - {:#x}\n", i, symbol->Name, symbol->Address);
+    }
 #endif
 	return out;
 }

@@ -42,7 +42,7 @@ Engine::Engine(const EngineConfig& cfg) {
 									   _input.get());
 
 	// We just pass Vulkan now. The renderer internally handles the rest.
-	_renderContext = std::make_unique<RenderContext>(*_window);
+	_renderContext = std::make_unique<RenderContext>(*_window, cfg.render);
 
 	_physicsContext = std::make_unique<PhysicsContext>(cfg.physics);
 }

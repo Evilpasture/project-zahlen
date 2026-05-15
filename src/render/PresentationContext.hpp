@@ -26,32 +26,40 @@ class PresentationContext {
 	PresentationContext& operator=(PresentationContext&&) noexcept = default;
 
 	[[nodiscard]] bool Init(const Context& ctx, Allocator& alloc, VkSurfaceKHR surface,
-							uint32_t width, uint32_t height) {
+							uint32_t width, uint32_t height, bool vsync = true) {
 		_ctx = &ctx;
 		_alloc = &alloc;
 		_surface = surface;
+		_vsync = vsync;
 		return Rebuild(width, height);
 	}
 
 	[[nodiscard]] bool Rebuild(uint32_t width, uint32_t height) {
-		if (!_ctx || !_alloc)
+		if (!_ctx || !_alloc) {
 			return false;
+		}
 
 		vkDeviceWaitIdle(_ctx->Device());
 
-		ZHLN_Device rawDev = {_ctx->Device(), _ctx->GraphicsQueue(), _ctx->PresentQueue()};
-		ZHLN_PhysicalDeviceInfo rawPhys = _ctx->PhysicalInfo();
-		ZHLN_SwapchainDesc s_desc = {.device = &rawDev,
-									 .physical = &rawPhys,
-									 .surface = _surface,
-									 .width = width,
-									 .height = height,
-									 .vsync = true,
-									 .old_swapchain = swapchain.Get().handle};
+		const ZHLN_Device rawDev = {
+			.handle = _ctx->Device(),
+			.graphics_queue = _ctx->GraphicsQueue(),
+			.present_queue = _ctx->PresentQueue(),
+		};
+		const ZHLN_PhysicalDeviceInfo rawPhys = _ctx->PhysicalInfo();
+		ZHLN_SwapchainDesc s_desc = {
+			.device = &rawDev,
+			.physical = &rawPhys,
+			.surface = _surface,
+			.width = width,
+			.height = height,
+			.vsync = _vsync,
+			.old_swapchain = swapchain.Get().handle,
+		};
 
-		if (!swapchain.Rebuild(s_desc))
+		if (!swapchain.Rebuild(s_desc)) {
 			return false;
-
+		}
 		presentSemaphores.Rebuild(_ctx->Device(), swapchain.Get().image_count);
 
 		// Automatically recreate the depth buffer to match the new swapchain extent
@@ -65,6 +73,7 @@ class PresentationContext {
 	const Context* _ctx = nullptr;
 	Allocator* _alloc = nullptr;
 	VkSurfaceKHR _surface = VK_NULL_HANDLE;
+	bool _vsync = true;
 };
 
 } // namespace ZHLN::Vk

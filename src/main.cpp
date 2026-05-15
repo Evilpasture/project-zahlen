@@ -87,6 +87,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 				.width = 1280,
 				.height = 720,
 				.vsync = false,
+				.enableValidation = false,
 			},
 	};
 
@@ -168,6 +169,10 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 
 		// 4. Render Phase
 		auto res = engine.GetWindow().GetSize();
+		if (res.width == 0 || res.height == 0) {
+			Platform::Sleep(10); // Don't burn CPU while minimized
+			continue;
+		}
 		JPH::Mat44 vp =
 			cam.GetProjectionMatrix((float)res.width / res.height) * cam.GetViewMatrix();
 

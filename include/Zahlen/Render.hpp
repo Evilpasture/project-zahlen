@@ -1,4 +1,5 @@
 #pragma once
+#include <Zahlen/Config.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
 #include <detail/String.hpp>
@@ -15,7 +16,7 @@ struct PipelineDesc {
 
 class RenderContext {
   public:
-	RenderContext(Window& window);
+	RenderContext(Window& window, const RenderConfig& config);
 	~RenderContext();
 
 	RenderContext(const RenderContext&) = delete;
