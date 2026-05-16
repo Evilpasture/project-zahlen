@@ -56,6 +56,7 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/src/render)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/threading)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/physics)  
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/ecs)
+add_subdirectory(${CMAKE_SOURCE_DIR}/src/reporter)
 
 option(BUILD_TESTING "Build the render module test suite" OFF)
 if(BUILD_TESTING)
