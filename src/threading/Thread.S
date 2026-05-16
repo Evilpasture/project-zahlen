@@ -1,39 +1,99 @@
 #include "AssemblyDefinitions.h"
 
-// ----------------------------------------------------------------------------
-// ZHLN_Switch(void **old_sp, void *new_sp)
-// ----------------------------------------------------------------------------
-    .global CSYM(ZHLN_Switch)
-    .text
-    .p2align 4
+/* 
+ * ZHLN_Switch(void **old_sp, void *new_sp)
+ * 
+ * Windows x64: old_sp = rcx, new_sp = rdx
+ * System V x64: old_sp = rdi, new_sp = rsi
+ * ARM64:       old_sp = x0,  new_sp = x1
+ */
+
+.text
+.p2align 4
+.global CSYM(ZHLN_Switch)
+
 CSYM(ZHLN_Switch):
-#if defined(OS_WIN) && defined(ARCH_X64)
-    push %rax
-    push %rbp; push %rbx; push %rdi; push %rsi
-    push %r12; push %r13; push %r14; push %r15
-    sub $160, %rsp
-    movaps %xmm6,   0(%rsp);  movaps %xmm7,  16(%rsp);  movaps %xmm8,  32(%rsp)
-    movaps %xmm9,  48(%rsp);  movaps %xmm10, 64(%rsp);  movaps %xmm11, 80(%rsp)
-    movaps %xmm12, 96(%rsp);  movaps %xmm13,112(%rsp);  movaps %xmm14,128(%rsp)
-    movaps %xmm15,144(%rsp)
-    mov %rsp, (%rcx)
-    mov %rdx, %rsp
-    movaps 0(%rsp),  %xmm6;   movaps 16(%rsp),  %xmm7;  movaps 32(%rsp),  %xmm8
-    movaps 48(%rsp), %xmm9;   movaps 64(%rsp), %xmm10;  movaps 80(%rsp), %xmm11
-    movaps 96(%rsp),%xmm12;   movaps 112(%rsp),%xmm13;  movaps 128(%rsp),%xmm14
-    movaps 144(%rsp),%xmm15
-    add $160, %rsp
-    pop %r15; pop %r14; pop %r13; pop %r12
-    pop %rsi; pop %rdi; pop %rbx; pop %rbp
-    pop %rax
+#if defined(ARCH_X64)
+    .intel_syntax noprefix
+
+#if defined(OS_WIN)
+    /* 1. Save Windows Non-Volatile GPRs */
+    push rax
+    push rbp
+    push rbx
+    push rdi
+    push rsi
+    push r12
+    push r13
+    push r14
+    push r15
+
+    /* 2. Save Windows Non-Volatile XMMs (16-byte aligned) */
+    sub rsp, 160
+    movaps [rsp + 0],   xmm6
+    movaps [rsp + 16],  xmm7
+    movaps [rsp + 32],  xmm8
+    movaps [rsp + 48],  xmm9
+    movaps [rsp + 64],  xmm10
+    movaps [rsp + 80],  xmm11
+    movaps [rsp + 96],  xmm12
+    movaps [rsp + 112], xmm13
+    movaps [rsp + 128], xmm14
+    movaps [rsp + 144], xmm15
+
+    /* 3. Switch Stacks */
+    mov [rcx], rsp      /* Save old RSP into *old_sp */
+    mov rsp, rdx        /* Load new RSP from new_sp */
+
+    /* 4. Restore Windows Non-Volatile XMMs */
+    movaps xmm6,  [rsp + 0]
+    movaps xmm7,  [rsp + 16]
+    movaps xmm8,  [rsp + 32]
+    movaps xmm9,  [rsp + 48]
+    movaps xmm10, [rsp + 64]
+    movaps xmm11, [rsp + 80]
+    movaps xmm12, [rsp + 96]
+    movaps xmm13, [rsp + 112]
+    movaps xmm14, [rsp + 128]
+    movaps xmm15, [rsp + 144]
+    add rsp, 160
+
+    /* 5. Restore GPRs */
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rsi
+    pop rdi
+    pop rbx
+    pop rbp
+    pop rax
     ret
-#elif defined(ARCH_X64)
-    push %rbp; push %rbx; push %r12; push %r13; push %r14; push %r15
-    mov %rsp, (%rdi)
-    mov %rsi, %rsp
-    pop %r15; pop %r14; pop %r13; pop %r12; pop %rbx; pop %rbp
+
+#else /* System V (Linux/macOS) x64 */
+    push rbp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+
+    mov [rdi], rsp      /* Save old RSP */
+    mov rsp, rsi        /* Load new RSP */
+
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
     ret
+#endif
+
+    .att_syntax /* Reset to default for safety */
+
 #elif defined(ARCH_ARM64)
+    /* ARM64 is already "Intel-like" in style */
     sub sp, sp, #160
     stp x19, x20, [sp, #0x00]
     stp x21, x22, [sp, #0x10]
@@ -45,9 +105,11 @@ CSYM(ZHLN_Switch):
     stp d10, d11, [sp, #0x70]
     stp d12, d13, [sp, #0x80]
     stp d14, d15, [sp, #0x90]
+
     mov x10, sp
-    str x10, [x0]
-    mov sp, x1
+    str x10, [x0]       /* *old_sp = current_sp */
+    mov sp, x1          /* current_sp = new_sp */
+
     ldp x19, x20, [sp, #0x00]
     ldp x21, x22, [sp, #0x10]
     ldp x23, x24, [sp, #0x20]
@@ -61,6 +123,7 @@ CSYM(ZHLN_Switch):
     add sp, sp, #160
     ret
 #endif
+
 #if defined(OS_LINUX)
     .size CSYM(ZHLN_Switch), .- CSYM(ZHLN_Switch)
 #endif
@@ -68,23 +131,27 @@ CSYM(ZHLN_Switch):
 // ----------------------------------------------------------------------------
 // ZHLN_TrampolineAsm
 // ----------------------------------------------------------------------------
-    .global CSYM(ZHLN_TrampolineAsm)
-    .text
-    .p2align 4
+.global CSYM(ZHLN_TrampolineAsm)
+.p2align 4
+
 CSYM(ZHLN_TrampolineAsm):
-#if defined(OS_WIN) && defined(ARCH_X64)
-    sub $32, %rsp
+#if defined(ARCH_X64)
+    .intel_syntax noprefix
+#if defined(OS_WIN)
+    sub rsp, 32         /* Shadow space for Win64 ABI */
     call CSYM(ZHLN_Trampoline)
-    add $32, %rsp
-    ret
-#elif defined(ARCH_X64)
-    sub $8, %rsp
+    add rsp, 32
+#else
+    sub rsp, 8          /* Align stack for System V */
     call CSYM(ZHLN_Trampoline)
-    add $8, %rsp
+    add rsp, 8
+#endif
     ret
+    .att_syntax
 #elif defined(ARCH_ARM64)
     b CSYM(ZHLN_Trampoline)
 #endif
+
 #if defined(OS_LINUX)
     .size CSYM(ZHLN_TrampolineAsm), .- CSYM(ZHLN_TrampolineAsm)
 #endif
