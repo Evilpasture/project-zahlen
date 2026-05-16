@@ -1,5 +1,6 @@
 #include "Allocator.hpp" // For MemoryStats
 #include "Zahlen/Components.hpp"
+#include "engine/RenderState.hpp"
 
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Profiler.hpp>
@@ -72,45 +73,54 @@ void DrawProfiler(Engine& engine) {
 			ImGui::PopStyleColor();
 		}
 
+		if (ImGui::CollapsingHeader("Anti-Aliasing", ImGuiTreeNodeFlags_DefaultOpen)) {
+			ImGui::Checkbox("Enable TAA", &g_TAAState.enabled);
+			if (g_TAAState.enabled) {
+				ImGui::SliderFloat("TAA Blend", &g_TAAState.feedback, 0.8f, 0.99f);
+			}
+		}
+
 		float totalTime = 0.0f;
 		for (auto const& [name, data] : Profiler::GetMetrics()) {
 			totalTime += data.cpuTimeMS;
 		}
 
 		// --- FPS AND FRAME BUDGET ---
-        ImGui::SeparatorText("Performance Overview");
+		ImGui::SeparatorText("Performance Overview");
 
-        // Use ImGui's built-in FPS tracker (rolling average)
-        float fps = ImGui::GetIO().Framerate;
-        float frameTime = 1000.0f / fps;
+		// Use ImGui's built-in FPS tracker (rolling average)
+		float fps = ImGui::GetIO().Framerate;
+		float frameTime = 1000.0f / fps;
 
-        // Display FPS and Wall-Clock Frame Time
-        ImGui::Text("FPS: %.1f", fps);
-        ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "(%.2f ms/frame)", frameTime);
+		// Display FPS and Wall-Clock Frame Time
+		ImGui::Text("FPS: %.1f", fps);
+		ImGui::SameLine();
+		ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "(%.2f ms/frame)", frameTime);
 
-        // Budget Bar
-        float budgetPercent = totalTime / 16.66f;
-        ImVec4 budgetColor = budgetPercent > 0.9f ? ImVec4(1, 0, 0, 1) : ImVec4(0, 1, 0, 1);
-        
-        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, budgetColor);
-        // We use std::format to show the profiled CPU time vs the 16.6ms target
-        ImGui::ProgressBar(budgetPercent, ImVec2(-1, 25),
-                           std::format("Profiled: {:.2f} ms / 16.6ms", totalTime).c_str());
-        ImGui::PopStyleColor();
+		// Budget Bar
+		float budgetPercent = totalTime / 16.66f;
+		ImVec4 budgetColor = budgetPercent > 0.9f ? ImVec4(1, 0, 0, 1) : ImVec4(0, 1, 0, 1);
+
+		ImGui::PushStyleColor(ImGuiCol_PlotHistogram, budgetColor);
+		// We use std::format to show the profiled CPU time vs the 16.6ms target
+		ImGui::ProgressBar(budgetPercent, ImVec2(-1, 25),
+						   std::format("Profiled: {:.2f} ms / 16.6ms", totalTime).c_str());
+		ImGui::PopStyleColor();
 
 		static float fps_history[100] = {};
 		static int offset = 0;
 		fps_history[offset] = fps;
 		offset = (offset + 1) % 100;
 
-		ImGui::PlotHistogram("##FPS", fps_history, 100, offset, nullptr, 0.0f, 165.0f, ImVec2(-1, 40));
+		ImGui::PlotHistogram("##FPS", fps_history, 100, offset, nullptr, 0.0f, 165.0f,
+							 ImVec2(-1, 40));
 
-        // Optional: Tooltip to explain the difference
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Profiled time is the sum of instrumented code.\n"
-                              "Wall-clock time (%.2fms) includes driver overhead and VSync wait.", frameTime);
-        }
+		// Optional: Tooltip to explain the difference
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Profiled time is the sum of instrumented code.\n"
+							  "Wall-clock time (%.2fms) includes driver overhead and VSync wait.",
+							  frameTime);
+		}
 	}
 	ImGui::End();
 }

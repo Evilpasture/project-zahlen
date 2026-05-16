@@ -311,7 +311,8 @@ typedef const struct {
 	const uint32_t vertex_binding_count;
 	const uint32_t vertex_attribute_count;
 
-	const VkFormat color_format;
+	const VkFormat* const ZHLN_RESTRICT color_formats;
+	const uint32_t color_format_count;
 	const VkFormat depth_format;		// VK_FORMAT_UNDEFINED = no depth
 	const VkPrimitiveTopology topology; // default: VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
 	const VkPolygonMode polygon_mode;	// default: VK_POLYGON_MODE_FILL
@@ -332,11 +333,12 @@ void ZHLN_DestroyPipeline(VkDevice device, VkPipeline pipeline);
 /* --- RENDERING --- */
 
 typedef const struct {
-	const VkImageView target_view;
-	const VkImageView depth_view; // VK_NULL_HANDLE = no depth
+	const VkImageView target_views[4]; // Array instead of single view
+	const uint32_t target_count;	   // How many targets are we writing to?
+	const VkImageView depth_view;
 	const VkExtent2D extent;
 	const float clear_color[4];
-	const float clear_depth; // default 1.0f
+	const float clear_depth;
 	const bool use_secondaries;
 } ZHLN_RenderPassDesc;
 

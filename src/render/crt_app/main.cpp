@@ -217,7 +217,7 @@ int main() {
 	auto pipeline = ZHLN::Vk::PipelineBuilder{}
 						.Shaders(shaders)
 						.Layout(pipelineLayout.Get())
-						.ColorFormat(VK_FORMAT_B8G8R8A8_SRGB)
+						.ColorFormats({VK_FORMAT_B8G8R8A8_SRGB})
 						.NoDepth() // <-- Fullscreen quad, no depth required
 						.CullNone()
 						.Build(ctx.Device());
@@ -282,7 +282,7 @@ int main() {
 		ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED,
 								   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, img);
 
-		ZHLN_RenderPassDesc pass = {.target_view = swapchain.Get().views[image_index],
+		ZHLN_RenderPassDesc pass = {.target_views = {swapchain.Get().views[image_index]},
 									.depth_view = VK_NULL_HANDLE,
 									.extent = swapchain.Get().extent,
 									.clear_color = {0, 0, 0, 1}};

@@ -21,7 +21,7 @@ struct PipelineConfig {
 	uint32_t attributeCount = 0;
 
 	// Formats
-	VkFormat color_format = VK_FORMAT_B8G8R8A8_SRGB;
+	std::vector<VkFormat> color_formats = {VK_FORMAT_B8G8R8A8_SRGB};
 	VkFormat depth_format = VK_FORMAT_D32_SFLOAT;
 
 	// Rasterization
@@ -70,8 +70,8 @@ class PipelineBuilder {
 
 	// --- Formats ---
 
-	PipelineBuilder& ColorFormat(VkFormat f) noexcept {
-		_cfg.color_format = f;
+	PipelineBuilder& ColorFormats(std::initializer_list<VkFormat> formats) noexcept {
+		_cfg.color_formats = formats;
 		return *this;
 	}
 
@@ -82,7 +82,7 @@ class PipelineBuilder {
 
 	// Convenience: shadow pass (depth-only, no color attachment)
 	PipelineBuilder& DepthOnly() noexcept {
-		_cfg.color_format = VK_FORMAT_UNDEFINED;
+		_cfg.color_formats.clear();
 		return *this;
 	}
 
@@ -159,7 +159,8 @@ class PipelineBuilder {
 			.vertex_attributes = _cfg.attributes,
 			.vertex_binding_count = _cfg.bindingCount,
 			.vertex_attribute_count = _cfg.attributeCount,
-			.color_format = _cfg.color_format,
+			.color_formats = _cfg.color_formats.data(),
+			.color_format_count = static_cast<uint32_t>(_cfg.color_formats.size()),
 			.depth_format = _cfg.depth_format,
 			.topology = _cfg.topology,
 			.polygon_mode = _cfg.polygon_mode,
@@ -196,7 +197,8 @@ class PipelineBuilder {
 class ComputePipelineBuilder {
   public:
 	// Store individual fields rather than the const struct to allow mutation during "building"
-	ComputePipelineBuilder& Shader(const uint32_t* code, size_t size, const char* entry = "main") noexcept {
+	ComputePipelineBuilder& Shader(const uint32_t* code, size_t size,
+								   const char* entry = "main") noexcept {
 		_code = code;
 		_size = size;
 		_entry = entry;
@@ -217,16 +219,13 @@ class ComputePipelineBuilder {
 	}
 
 	[[nodiscard]] Pipeline Build(const VkDevice device) const noexcept {
-		if (!Validate()) return {};
+		if (!Validate())
+			return {};
 
 		// Aggregate initialization: We construct the 'const struct' locally.
 		// This is valid C++ for 'const' typedefs.
 		const ZHLN_ComputePipelineDesc desc = {
-			.shader = {
-				.code = _code,
-				.size = _size,
-				.entry_point = _entry
-			},
+			.shader = {.code = _code, .size = _size, .entry_point = _entry},
 			.layout = _layout,
 		};
 

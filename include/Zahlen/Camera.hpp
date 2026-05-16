@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Math3D.hpp"
+#include "engine/RenderState.hpp"
 
 namespace ZHLN {
 
@@ -95,6 +96,29 @@ struct Camera {
 
 	[[nodiscard]] JPH::Mat44 GetProjectionMatrix(float aspectRatio) const {
 		return Math::CreatePerspective(JPH::DegreesToRadians(fov), aspectRatio, nearZ, farZ);
+	}
+
+	static constexpr float Halton_2[16] = {0.5f,	0.25f,	 0.75f,	  0.125f,  0.625f,	0.375f,
+										   0.875f,	0.0625f, 0.5625f, 0.3125f, 0.8125f, 0.1875f,
+										   0.6875f, 0.4375f, 0.9375f, 0.03125f};
+	static constexpr float Halton_3[16] = {0.333f, 0.666f, 0.111f, 0.444f, 0.777f, 0.222f,
+										   0.555f, 0.888f, 0.037f, 0.370f, 0.703f, 0.148f,
+										   0.481f, 0.814f, 0.259f, 0.592f};
+
+	[[nodiscard]] JPH::Mat44 GetJitteredProjectionMatrix(float aspectRatio, uint32_t width,
+														 uint32_t height) const {
+		JPH::Mat44 proj = GetProjectionMatrix(aspectRatio);
+
+		if (g_TAAState.enabled) {
+			// Map Halton sequence [-0.5, 0.5] to Sub-Pixel NDC space
+			float jitterX = (Halton_2[g_TAAState.frameIndex % 16] - 0.5f) / (float)width;
+			float jitterY = (Halton_3[g_TAAState.frameIndex % 16] - 0.5f) / (float)height;
+
+			// Apply jitter (Elements 3,0 and 3,1 control X/Y NDC translation)
+			JPH::Vec4 col3 = proj.GetColumn4(3);
+			proj.SetColumn4(3, col3 + JPH::Vec4(jitterX, jitterY, 0.0f, 0.0f));
+		}
+		return proj;
 	}
 };
 

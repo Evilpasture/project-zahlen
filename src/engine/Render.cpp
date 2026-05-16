@@ -409,7 +409,7 @@ Material RenderContext::CreateMaterial(const PipelineDesc& desc) {
 						.Shaders(shaders)
 						.Layout(layout.Get())
 						.Vertex<Vertex>()
-						.ColorFormat(VK_FORMAT_B8G8R8A8_SRGB)
+						.ColorFormats({VK_FORMAT_B8G8R8A8_SRGB})
 						.DepthFormat(VK_FORMAT_D32_SFLOAT)
 						.Build(impl->ctx.Device());
 
@@ -713,7 +713,8 @@ void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
 	}
 
 	ZHLN_RenderPassDesc pass = {
-		.target_view = impl->presentation.swapchain.Get().views[impl->current_image_index],
+		.target_views = {impl->presentation.swapchain.Get().views[impl->current_image_index]},
+		.target_count = 1,
 		.depth_view = impl->presentation.depthTarget.view.Get(),
 		.extent = impl->presentation.swapchain.Get().extent,
 		.clear_color = {color.GetX(), color.GetY(), color.GetZ(), color.GetW()},

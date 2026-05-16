@@ -217,7 +217,7 @@ int main() {
 	auto pipeline = ZHLN::Vk::PipelineBuilder{}
 						.Shaders(shaders)
 						.Layout(layout.Get())
-						.ColorFormat(VK_FORMAT_B8G8R8A8_SRGB)
+						.ColorFormats({VK_FORMAT_B8G8R8A8_SRGB})
 						.DepthFormat(VK_FORMAT_D32_SFLOAT)
 						.DepthTest(true)
 						.DepthWrite(true)
@@ -311,7 +311,7 @@ int main() {
 			}
 
 			ZHLN_RenderPassDesc pass = {
-				.target_view = swapchain.Get().views[image_index],
+				.target_views = {swapchain.Get().views[image_index]},
 				.depth_view = depth_view.Get(),
 				.extent = swapchain.Get().extent,
 				.clear_color = {0.05f, 0.05f, 0.08f, 1.0f},

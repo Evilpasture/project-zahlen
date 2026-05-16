@@ -937,12 +937,10 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device,
 	};
 
 	// --- Dynamic Rendering (Vulkan 1.3, no VkRenderPass needed) ---
-	const uint32_t color_count = (desc->color_format != VK_FORMAT_UNDEFINED) ? 1U : 0U;
-
 	const VkPipelineRenderingCreateInfo rendering = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-		.colorAttachmentCount = color_count, // Use the dynamic count
-		.pColorAttachmentFormats = color_count > 0 ? &desc->color_format : nullptr,
+		.colorAttachmentCount = desc->color_format_count,
+		.pColorAttachmentFormats = desc->color_format_count > 0 ? desc->color_formats : nullptr,
 		.depthAttachmentFormat = desc->depth_format,
 	};
 
@@ -978,20 +976,18 @@ void ZHLN_DestroyPipeline(const VkDevice device, const VkPipeline pipeline) {
 
 void ZHLN_BeginRendering(const VkCommandBuffer cmd,
 						 const ZHLN_RenderPassDesc* const restrict desc) {
-	const VkRenderingAttachmentInfo color_attachment = {
-		.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-		.imageView = desc->target_view,
-		.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-		.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-		.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-		.clearValue = {.color = {.float32 =
-									 {
-										 desc->clear_color[0],
-										 desc->clear_color[1],
-										 desc->clear_color[2],
-										 desc->clear_color[3],
-									 }}},
-	};
+	VkRenderingAttachmentInfo color_attachments[4] = {};
+	for (uint32_t i = 0; i < desc->target_count; ++i) {
+		color_attachments[i] = (VkRenderingAttachmentInfo){
+			.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+			.imageView = desc->target_views[i],
+			.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+			.clearValue = {.color = {.float32 = {desc->clear_color[0], desc->clear_color[1],
+												 desc->clear_color[2], desc->clear_color[3]}}},
+		};
+	}
 
 	const VkRenderingAttachmentInfo depth_attachment = {
 		.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
@@ -1007,9 +1003,8 @@ void ZHLN_BeginRendering(const VkCommandBuffer cmd,
 		.flags = desc->use_secondaries ? VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT : 0,
 		.renderArea = {.offset = {0, 0}, .extent = desc->extent},
 		.layerCount = 1,
-		// Only set count/pointer if target_view exists
-		.colorAttachmentCount = (desc->target_view != VK_NULL_HANDLE) ? 1U : 0U,
-		.pColorAttachments = (desc->target_view != VK_NULL_HANDLE) ? &color_attachment : nullptr,
+		.colorAttachmentCount = desc->target_count,
+		.pColorAttachments = desc->target_count > 0 ? color_attachments : nullptr,
 		.pDepthAttachment = (desc->depth_view != VK_NULL_HANDLE) ? &depth_attachment : nullptr,
 	};
 

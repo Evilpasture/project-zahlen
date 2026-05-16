@@ -42,7 +42,8 @@ class RenderGraph {
 		const void* userData = nullptr;
 
 		// Pass-specific rendering info
-		VkImageView colorTarget = VK_NULL_HANDLE;
+		std::array<VkImageView, 4> colorTargets = {VK_NULL_HANDLE};
+		uint32_t colorTargetCount = 0;
 		VkImageView depthTarget = VK_NULL_HANDLE;
 		VkExtent2D extent = {0, 0};
 		float clearColor[4] = {0, 0, 0, 1};
@@ -65,7 +66,9 @@ class RenderGraph {
 		// Transitions image to COLOR_ATTACHMENT_OPTIMAL and sets as render target
 		PassBuilder& WriteColor(GraphImage& img, [[maybe_unused]] bool clear = true) {
 			pass.transitions.push_back({&img, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
-			pass.colorTarget = img.view;
+			if (pass.colorTargetCount < 4) {
+				pass.colorTargets[pass.colorTargetCount++] = img.view;
+			}
 			pass.extent = img.extent;
 			return *this;
 		}
@@ -153,14 +156,17 @@ class RenderGraph {
 
 			// 2. Pass Execution
 			if (pass.record) {
-				// If the pass has render targets, wrap in BeginRendering
-				if (pass.colorTarget != VK_NULL_HANDLE || pass.depthTarget != VK_NULL_HANDLE) {
-					ZHLN_RenderPassDesc rp = {.target_view = pass.colorTarget,
-											  .depth_view = pass.depthTarget,
-											  .extent = pass.extent,
-											  .clear_color = {0.05f, 0.05f, 0.07f, 1.0f},
-											  .clear_depth = 1.0f,
-											  .use_secondaries = pass.useSecondaries};
+				if (pass.colorTargetCount > 0 || pass.depthTarget != VK_NULL_HANDLE) {
+					ZHLN_RenderPassDesc rp = {
+						// Unroll into designated initializer
+						.target_views = {pass.colorTargets[0], pass.colorTargets[1],
+										 pass.colorTargets[2], pass.colorTargets[3]},
+						.target_count = pass.colorTargetCount,
+						.depth_view = pass.depthTarget,
+						.extent = pass.extent,
+						.clear_color = {0.05f, 0.05f, 0.07f, 1.0f},
+						.clear_depth = 1.0f,
+						.use_secondaries = pass.useSecondaries};
 					ZHLN_BeginRendering(cmd, &rp);
 					pass.record(cmd, pass.userData);
 					ZHLN_EndRendering(cmd);

@@ -695,7 +695,7 @@ auto main() -> int {
 	auto fxaaPipeline = ZHLN::Vk::PipelineBuilder{}
 							.Shaders(fxaaShaders)
 							.Layout(fxaaPipelineLayout.Get())
-							.ColorFormat(VK_FORMAT_B8G8R8A8_SRGB) // Output to swapchain
+							.ColorFormats({VK_FORMAT_B8G8R8A8_SRGB}) // Output to swapchain
 							.NoDepth()
 							.CullNone()
 							.Build(ctx.Device());
@@ -724,7 +724,7 @@ auto main() -> int {
 						.Shaders(shaders)
 						.Layout(pipelineLayout.Get())
 						.Vertex<ZHLN::Vk::Vertex>()
-						.ColorFormat(VK_FORMAT_R16G16B16A16_SFLOAT)
+						.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
 						.DepthFormat(VK_FORMAT_D32_SFLOAT)
 						.WindingCW()
 						.CullBack()
