@@ -318,7 +318,7 @@ template <typename T> void SmartDumpInternal(const T& var, std::string_view name
 
 // Updated macro: uses the 'fmt' field of LogContext to pass a custom sub-label
 #define ZHLN_DUMP(var) ZHLN::SmartDumpInternal(var, #var, "Manual Dump")
-#define ZHLN_DUMP_EXT(var, label) ZHLN::SmartDumpInternal(&var, sizeof(var), #var, label)
+#define ZHLN_DUMP_EXT(var, label) ZHLN::SmartDumpInternal(var, #var, label)
 #define ZHLN_TRACE(var) ZHLN::TraceStructInternal(var, #var, "Struct Reflection")
 
 /**
