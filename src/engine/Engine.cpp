@@ -67,6 +67,7 @@ bool Engine::IsRunning() const {
 }
 
 void Engine::ProcessEvents() {
+	ZHLN::CheckForCrashes(this);
 	_input->ResetDeltas();
 	glfwPollEvents();
 

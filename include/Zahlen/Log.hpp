@@ -29,6 +29,7 @@
 namespace ZHLN {
 class Engine;
 void SetupSignalHandler();
+void CheckForCrashes(Engine* engine);
 /**
  * @brief Bridge function forward-declared here, implemented in Thread.cpp.
  * This prevents Log.hpp from needing to include the heavy Thread.hpp.

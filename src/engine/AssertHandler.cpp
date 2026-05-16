@@ -1,135 +1,132 @@
+#include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
+#include <atomic>
 #include <csignal>
-#include <detail/Atomic.hpp>
-#include <detail/Platform.hpp>
+#include <detail/Platform.hpp>		// This handles windows.h and includes unistd.h on Unix
+#include <physics/PhysicsWorld.hpp> // Required to fully define PhysicsWorld for ZHLN_TRACE
+#include <print>
 
 #ifdef _WIN32
-#include <io.h>
-#include <process.h>
+#include <io.h>		 // For _write
+#include <process.h> // For _exit
 #define WRITE_STDOUT(msg, len) _write(2, msg, (unsigned int)len)
 #define HALT_THREAD() Sleep(INFINITE)
 #else
-#include <sys/wait.h>
-#include <unistd.h>
+#include <unistd.h> // Included via Platform.hpp, but here for clarity
 #define WRITE_STDOUT(msg, len) write(STDERR_FILENO, msg, len)
 #define HALT_THREAD() pause()
 #endif
 
 namespace ZHLN {
 
-static ZHLN::Atomic<int> s_PendingSignal{0};
-
-// --- Async-Signal-Safe Utilities ---
-// We cannot use std::to_string or std::format in a signal handler!
+static std::atomic<int> s_PendingSignal{0};
+static std::atomic<void*> s_FaultAddr{nullptr};
 
 static void WriteSafe(const char* msg) {
 	size_t len = 0;
-	while (msg[len])
+	while (msg[len]) {
 		len++;
+	}
 	[[maybe_unused]] auto _ = WRITE_STDOUT(msg, len);
 }
 
-// Converts a positive integer to a string in a pre-allocated buffer
-static void UtoaSafe(uint64_t val, char* buf, int base = 10) {
-	if (val == 0) {
-		buf[0] = '0';
-		buf[1] = '\0';
-		return;
-	}
-	char temp[64];
-	int i = 0;
-	while (val != 0) {
-		uint64_t rem = val % base;
-		temp[i++] = (rem > 9) ? (char)(rem - 10 + 'A') : (char)(rem + '0');
-		val /= base;
-	}
-	int j = 0;
-	while (i > 0) {
-		buf[j++] = temp[--i];
-	}
-	buf[j] = '\0';
-}
-
-static void SpawnReporterProcess(int sig, void* addr) {
-	// Prepare buffers for the arguments
-	char sigBuf[32];
-	char addrBuf[64];
-	char pidBuf[32];
-
-	UtoaSafe(static_cast<uint64_t>(sig), sigBuf, 10);
-	addrBuf[0] = '0';
-	addrBuf[1] = 'x';
-	UtoaSafe(reinterpret_cast<uint64_t>(addr), addrBuf + 2, 16);
-
-#ifdef _WIN32
-	UtoaSafe(GetCurrentProcessId(), pidBuf, 10);
-
-	// Windows CreateProcess requires a mutable command line string
-	char cmdLine[512];
-	int i = 0;
-	auto append = [&](const char* str) {
-		while (*str && i < 510)
-			cmdLine[i++] = *str++;
-	};
-
-	append("ZahlenReporter.exe --sig ");
-	append(sigBuf);
-	append(" --addr ");
-	append(addrBuf);
-	append(" --pid ");
-	append(pidBuf);
-	cmdLine[i] = '\0';
-
-	STARTUPINFOA si = {sizeof(si)};
-	PROCESS_INFORMATION pi = {0};
-
-	// Launch the reporter as a detached process
-	if (CreateProcessA("ZahlenReporter.exe", cmdLine, nullptr, nullptr, FALSE, CREATE_NEW_CONSOLE,
-					   nullptr, nullptr, &si, &pi)) {
-		CloseHandle(pi.hProcess);
-		CloseHandle(pi.hThread);
-	} else {
-		WriteSafe("FATAL: Failed to launch ZahlenReporter.exe\n");
-	}
-#else
-	UtoaSafe(getpid(), pidBuf, 10);
-
-	pid_t pid = fork();
-	if (pid == 0) {
-		// Child Process: Exec the reporter
-		const char* args[] = {
-			"./ZahlenReporter", "--sig", sigBuf, "--addr", addrBuf, "--pid", pidBuf, nullptr};
-		execvp(args[0], const_cast<char**>(args));
-
-		// If execvp returns, it failed to find the reporter
-		WriteSafe("FATAL: Failed to execute ./ZahlenReporter\n");
-		_exit(1);
-	}
+static void PerformDiagnosticDump(int sig, void* addr, Engine* engine) {
+	const char* sigName = "UNKNOWN";
+	switch (sig) {
+		case SIGSEGV:
+			sigName = "SIGSEGV (Access Violation)";
+			break;
+		case SIGILL:
+			sigName = "SIGILL (Illegal Instruction)";
+			break;
+		case SIGFPE:
+			sigName = "SIGFPE (Math Error)";
+			break;
+		case SIGABRT:
+			sigName = "SIGABRT (Abort)";
+			break;
+#ifndef _WIN32
+		case SIGBUS:
+			sigName = "SIGBUS (Bus Error)";
+			break;
 #endif
+	}
+
+	std::println(stderr, "\n{}DIAGNOSTIC REPORT FOR SIGNAL: {}{}", Color::Red, sigName,
+				 Color::Reset);
+	std::println(stderr, "Faulting Address: {}{}{}", Color::Yellow, addr, Color::Reset);
+
+	if (engine) {
+		// 1. High-level structure trace
+		ZHLN_TRACE(*engine);
+
+		// 2. Camera Deep State
+		auto& cam = engine->GetCamera();
+		std::println(stderr, "\n{}--- CAMERA DEEP STATE ---{}", Color::Cyan, Color::Reset);
+		std::println(stderr, "  Position:  ({:.4f}, {:.4f}, {:.4f})", cam.position.GetX(),
+					 cam.position.GetY(), cam.position.GetZ());
+		std::println(stderr, "  Direction: Yaw: {:.2f}, Pitch: {:.2f}", cam.yaw, cam.pitch);
+
+		// 3. Frustum "Crawl" (SIMD Decode)
+		auto& f = cam.frustum;
+		std::println(stderr, "\n{}--- FRUSTUM PLANE EQUATIONS (SIMD DECODED) ---{}", Color::Cyan,
+					 Color::Reset);
+		const char* names[] = {"Left  ", "Right ", "Top   ", "Bottom", "Near  ", "Far   "};
+
+		for (int i = 0; i < 6; ++i) {
+			int block = i / 4;
+			int lane = i % 4;
+			// Crawling into the mF32 union of the Vec4 block
+			std::println(stderr, "  Plane {}: [{:>10.4f}x {:>10.4f}y {:>10.4f}z] offset: {:>10.4f}",
+						 names[i], f.mX[block].mF32[lane], f.mY[block].mF32[lane],
+						 f.mZ[block].mF32[lane], f.mW[block].mF32[lane]);
+		}
+
+		// 4. Raw Memory Dump of the Frustum structure
+		ZHLN_DUMP(cam.frustum);
+
+		// 5. Physics Trace
+		if (engine->GetPhysicsContext().GetImpl()) {
+			ZHLN_TRACE(engine->GetPhysicsContext().GetWorld());
+		}
+	}
+
+	std::println(stderr, "\nStack Trace:\n{}", GetPoorMansStacktrace());
 }
 
+// --- Shared Internal Logic ---
 static void ProcessCrash(int sig, void* addr) {
+	// DOUBLE-FAULT GUARD:
+	// If s_PendingSignal is -1, it means we crashed WHILE reporting a crash.
+	// If it's anything else > 0, a crash is already being reported by another thread.
 	int expected = 0;
-	// Ensure only ONE thread processes the crash
 	if (!s_PendingSignal.compare_exchange_strong(expected, sig)) {
-		while (true)
-			HALT_THREAD();
+		if (expected == -1) {
+			WriteSafe("!! SECONDARY CRASH DURING DIAGNOSTICS. ABORTING !!\n");
+		}
+		_exit(sig);
 	}
 
-	WriteSafe("\n[ZHLN] FATAL EXCEPTION INTERCEPTED. Launching Crash Reporter...\n");
+	s_FaultAddr.store(addr);
 
-	// Safely spawn the out-of-process reporter
-	SpawnReporterProcess(sig, addr);
+	if (ZHLN::GetCurrentFiberID() == 1) {
+		WriteSafe("\n[ZHLN] Terminal signal on Main Thread. Attempting emergency dump...\n");
 
-	// Give the OS a moment to schedule the new process, then kill the engine.
-	// Do NOT return from this function, or the corrupted thread will resume.
-#ifdef _WIN32
-	Sleep(2000);
-	TerminateProcess(GetCurrentProcess(), sig);
-#else
-	sleep(2);
-	_exit(sig);
-#endif
+		// Mark that we are now in the "Emergency Dump" phase
+		s_PendingSignal.store(-1);
+
+		// Try the dump. If this crashes/deadlocks, the OS will eventually kill us,
+		// or a timeout would trigger.
+		PerformDiagnosticDump(sig, addr, ZHLN::GetEngineContext());
+
+		_exit(sig);
+	} else {
+		WriteSafe("\n[ZHLN] Signal intercepted in Worker. Main Thread will dump soon...\n");
+		// Worker thread halts here. Main thread will see s_PendingSignal in ProcessEvents().
+		while (true) {
+			HALT_THREAD();
+		}
+	}
 }
 
 // --- Platform Specific Entry Points ---
@@ -161,6 +158,16 @@ static void PosixCrashHandler(int sig, siginfo_t* info, [[maybe_unused]] void* c
 }
 #endif
 
+void CheckForCrashes(Engine* engine) {
+	int sig = s_PendingSignal.load();
+	if (sig <= 0)
+		return;
+
+	s_PendingSignal.store(-1);
+	PerformDiagnosticDump(sig, s_FaultAddr.load(), engine);
+	std::abort();
+}
+
 void SetupSignalHandler() {
 #ifdef _WIN32
 	AddVectoredExceptionHandler(1, VectoredCrashHandler);
@@ -182,15 +189,12 @@ auto JoltTraceBridge(const char* inFMT, ...) noexcept -> void {
 	va_list list;
 	va_start(list, inFMT);
 
-	// Use a local buffer for the C-style string formatting
 	char buffer[1024]{};
 	int result = std::vsnprintf(buffer, sizeof(buffer), inFMT, list);
 
 	va_end(list);
 
 	if (result > 0) {
-		// Hand off the formatted string to our modern Log system
-		// We use "{}" to ensure we don't re-parse the Jolt output for format specifiers
 		ZHLN::Panic("{}", buffer);
 	}
 }
