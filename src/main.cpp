@@ -145,32 +145,6 @@ void UpdateCulling(Engine& engine) {
 	s_LastCullYaw = cam.yaw;
 }
 
-void DrawVisibleScene(RenderContext& rc, ECS::Registry& reg, const Physics::PhysicsWorld& world,
-					  const JPH::Mat44& vp) {
-	if (s_VisibleEntities.empty())
-		return;
-
-	auto* first = reg.Get<MeshComponent>(s_VisibleEntities[0]);
-	if (first) {
-		Renderer::UpdateBuffer(rc, first->material.constantBuffer, vp);
-	}
-
-	for (Entity e : s_VisibleEntities) {
-		auto* mesh = reg.Get<MeshComponent>(e);
-		auto* phys = reg.Get<PhysicsComponent>(e);
-		if (!mesh || !phys)
-			continue;
-
-		uint32_t dense = world.slotToDense[phys->physicsHandle.index];
-		JPH::Vec3 pos((float)world.positions[dense * 4], (float)world.positions[dense * 4 + 1],
-					  (float)world.positions[dense * 4 + 2]);
-		JPH::Quat rot(world.rotations[dense * 4], world.rotations[dense * 4 + 1],
-					  world.rotations[dense * 4 + 2], world.rotations[dense * 4 + 3]);
-
-		Renderer::Draw(rc, mesh->material, mesh->mesh, Math::CreateTransform(pos, rot));
-	}
-}
-
 auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	Platform::Init();
 	ZHLN::SetupSignalHandler();
@@ -237,18 +211,52 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 		auto res = engine.GetWindow().GetSize();
 
 		if (res.width > 0 && res.height > 0) {
+			g_TAAState.frameIndex++; // Tick TAA jitter
+
 			UpdateCameraSystem(cam, engine.GetInput(), scene.playerEntity, reg, world);
 
-			JPH::Mat44 vp =
-				cam.GetProjectionMatrix((float)res.width / res.height) * cam.GetViewMatrix();
+			// 1. UNJITTERED (Used as the "Previous Frame" matrix to find velocity)
+			JPH::Mat44 unjitteredProj = cam.GetProjectionMatrix((float)res.width / res.height);
+			JPH::Mat44 unjitteredVp = unjitteredProj * cam.GetViewMatrix();
+
+			// 2. JITTERED (Used for the actual render this frame)
+			JPH::Mat44 jitteredProj = cam.GetJitteredProjectionMatrix((float)res.width / res.height,
+																	  res.width, res.height);
+			JPH::Mat44 vp = jitteredProj * cam.GetViewMatrix();
+
 			cam.frustum.Update(vp);
 			UpdateCulling(engine);
 
 			engine.BeginFrame();
 			Renderer::Clear(rc, {0.08f, 0.09f, 0.12f, 1.0f});
 
+			// Pass both matrices to the RenderContext
+			Renderer::SetMatrices(rc, vp, unjitteredVp);
+
 			ZHLN_LOCK(world.sync.shadowLock) {
-				DrawVisibleScene(rc, reg, world, vp);
+				// Update DrawVisibleScene inline here (or pass reg/world to it)
+				for (Entity e : s_VisibleEntities) {
+					auto* mesh = reg.Get<MeshComponent>(e);
+					auto* phys = reg.Get<PhysicsComponent>(e);
+					if (!mesh || !phys)
+						continue;
+
+					uint32_t dense = world.slotToDense[phys->physicsHandle.index];
+					JPH::Vec3 pos((float)world.positions[dense * 4],
+								  (float)world.positions[dense * 4 + 1],
+								  (float)world.positions[dense * 4 + 2]);
+					JPH::Quat rot(world.rotations[dense * 4], world.rotations[dense * 4 + 1],
+								  world.rotations[dense * 4 + 2], world.rotations[dense * 4 + 3]);
+
+					JPH::Mat44 currentTransform = Math::CreateTransform(pos, rot);
+
+					// Pass BOTH current and prev transforms
+					Renderer::Draw(rc, mesh->material, mesh->mesh, currentTransform,
+								   mesh->prevTransform);
+
+					// Save this frame's transform for next frame
+					mesh->prevTransform = currentTransform;
+				}
 			}
 
 			CullingStats::TotalObjects = (uint32_t)reg.GetEntitiesWith<MeshComponent>().size();

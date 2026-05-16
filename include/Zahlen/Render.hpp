@@ -44,15 +44,9 @@ class RenderContext {
 
 namespace Renderer {
 void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth = 1.0f);
-void UpdateBuffer(RenderContext& ctx, BufferHandle buffer, const void* data, size_t size);
-
-template <typename T>
-inline void UpdateBuffer(RenderContext& ctx, BufferHandle buffer, const T& data) {
-	UpdateBuffer(ctx, buffer, static_cast<const void*>(&data), sizeof(T));
-}
-
+void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj, const JPH::Mat44& prevViewProj);
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
-		  const JPH::Mat44& transform);
+		  const JPH::Mat44& transform, const JPH::Mat44& prevTransform);
 
 } // namespace Renderer
 

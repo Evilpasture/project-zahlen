@@ -40,6 +40,7 @@ static_assert(sizeof(Vertex) == 32, "Vertex must be exactly 32 bytes!");
 
 struct FrameConstants {
 	JPH::Mat44 transform;
+	JPH::Mat44 prevTransform;
 	uint32_t textureIndex;
 };
 

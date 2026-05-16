@@ -1,10 +1,15 @@
 #pragma once
 #include <cstdint>
 
-extern "C" {
-extern const uint8_t ZHLN_Resource_BasicVertSpv[];
-extern const uint32_t ZHLN_Resource_BasicVertSpv_Len;
+#define DECLARE_RESOURCE(name)                                                                     \
+	extern const uint8_t name[];                                                                   \
+	extern const uint32_t name##_Len;
 
-extern const uint8_t ZHLN_Resource_BasicFragSpv[];
-extern const uint32_t ZHLN_Resource_BasicFragSpv_Len;
+extern "C" {
+DECLARE_RESOURCE(ZHLN_Resource_BasicVertSpv)
+DECLARE_RESOURCE(ZHLN_Resource_BasicFragSpv)
+DECLARE_RESOURCE(ZHLN_Resource_BlitVertSpv)
+DECLARE_RESOURCE(ZHLN_Resource_BlitFragSpv)
+DECLARE_RESOURCE(ZHLN_Resource_TaaVertSpv)
+DECLARE_RESOURCE(ZHLN_Resource_TaaFragSpv)
 }
