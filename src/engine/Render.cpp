@@ -39,9 +39,11 @@ template <> struct FormatTraits<VK_FORMAT_R16G16_SFLOAT> {
 };
 } // namespace ZHLN::Vk
 
+ZHLN_REFLECT_VERTEX(::ZHLN::Vertex, position, normal, tangent, uv, color);
+
 namespace ZHLN {
 
-ZHLN_REFLECT_VERTEX(::ZHLN::Vertex, position, normal, tangent, uv, color);
+
 
 using GlobalBindlessLayout =
 	Vk::DescriptorLayout<Vk::BindlessSampledImageSlot<0, 4096>, Vk::SamplerSlot<1>>;
