@@ -1,6 +1,7 @@
 #include "Allocator.hpp"
 #include "DescriptorLayout.hpp"
 #include "PipelineBuilder.hpp"
+#include "Postprocessing.hpp"
 #include "PresentationContext.hpp"
 #include "RenderCore.hpp"
 #include "RenderTarget.hpp"
@@ -47,16 +48,12 @@ namespace ZHLN {
 using GlobalBindlessLayout =
 	Vk::DescriptorLayout<Vk::BindlessSampledImageSlot<0, 4096>, Vk::SamplerSlot<1>>;
 
-// FIX: DescriptorLayout requires matching SamplerWrite and ImageWrite arguments.
-// Separate Image and Sampler slots prevent the template constraint errors.
-using TAALayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // Current Color
-									   Vk::SampledImageSlot<1>, // History
-									   Vk::SampledImageSlot<2>, // Velocity
-									   Vk::SamplerSlot<3>		// Sampler
-									   >;
-using BlitLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // Input
-										Vk::SamplerSlot<1>		 // Sampler
-										>;
+// TAA Layout: Current Color, History, Velocity, Sampler
+using TAALayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SampledImageSlot<1>,
+									   Vk::SampledImageSlot<2>, Vk::SamplerSlot<3>>;
+
+// Blit Layout: Input, Sampler
+using BlitLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SamplerSlot<1>>;
 
 struct NativeMesh {
 	Vk::Buffer buffer;
@@ -89,23 +86,16 @@ struct RenderContext::Impl {
 	Vk::FrameSync<2> sync;
 	Vk::CommandPools<2> pools;
 
-	// --- TAA RENDER TARGETS ---
+	// --- RENDER TARGETS ---
 	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> sceneColor;
 	Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT> velocityBuffer;
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> accumulationBuffers[2];
-	uint32_t historyIndex = 0;
 
-	Vk::DescriptorSetLayout taaLayout;
-	Vk::DescriptorPool taaPool;
-	VkDescriptorSet taaSets[2];
-	Vk::PipelineLayout taaPipelineLayout;
-	Vk::Pipeline taaPipeline;
+	// Double buffered target for TAA Accumulation
+	DoubleBuffered<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumBuffers;
 
-	Vk::DescriptorSetLayout blitLayout;
-	Vk::DescriptorPool blitPool;
-	VkDescriptorSet blitSets[2];
-	Vk::PipelineLayout blitPipelineLayout;
-	Vk::Pipeline blitPipeline;
+	// --- POST PROCESSING PASSES ---
+	Vk::PostProcessPass<TAALayout> taaPass;
+	Vk::PostProcessPass<BlitLayout> blitPass;
 
 	Vk::Sampler defaultSampler;
 
@@ -162,68 +152,22 @@ struct RenderContext::Impl {
 	void InitPostProcessing() {
 		defaultSampler = Vk::SamplerBuilder{}.Linear().ClampToEdge().Build(ctx.Device());
 
-		// 1. TAA Layouts
-		taaLayout = TAALayout::CreateLayout(ctx.Device());
-		taaPool = TAALayout::CreatePool(ctx.Device(), 2);
-		taaSets[0] = TAALayout::Allocate(ctx.Device(), taaPool.Get(), taaLayout.Get());
-		taaSets[1] = TAALayout::Allocate(ctx.Device(), taaPool.Get(), taaLayout.Get());
-
+		// 1. Setup TAA
 		VkPushConstantRange taaPush = {VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float)};
-		VkDescriptorSetLayout rawTaaLayout = taaLayout.Get();
-		ZHLN_PipelineLayoutDesc taaLDesc = {.set_layouts = &rawTaaLayout,
-											.set_layout_count = 1,
-											.push_constants = &taaPush,
-											.push_constant_count = 1};
-		taaPipelineLayout =
-			Vk::PipelineLayout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &taaLDesc));
+		auto taaShaders = Vk::ShaderStages::Create(
+			ctx.Device(),
+			{(const uint32_t*)ZHLN_Resource_TaaVertSpv, ZHLN_Resource_TaaVertSpv_Len, "VSMain"},
+			{(const uint32_t*)ZHLN_Resource_TaaFragSpv, ZHLN_Resource_TaaFragSpv_Len, "PSMain"});
 
-		// 2. Blit (Tonemapping) Layouts
-		blitLayout = BlitLayout::CreateLayout(ctx.Device());
-		blitPool = BlitLayout::CreatePool(ctx.Device(), 2);
-		blitSets[0] = BlitLayout::Allocate(ctx.Device(), blitPool.Get(), blitLayout.Get());
-		blitSets[1] = BlitLayout::Allocate(ctx.Device(), blitPool.Get(), blitLayout.Get());
+		taaPass.Build(ctx.Device(), taaShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &taaPush, 1);
 
-		VkDescriptorSetLayout rawBlitLayout = blitLayout.Get();
-		ZHLN_PipelineLayoutDesc blitLDesc = {.set_layouts = &rawBlitLayout,
-											 .set_layout_count = 1,
-											 .push_constants = nullptr,
-											 .push_constant_count = 0};
-		blitPipelineLayout =
-			Vk::PipelineLayout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &blitLDesc));
+		// 2. Setup Blit
+		auto blitShaders = Vk::ShaderStages::Create(
+			ctx.Device(),
+			{(const uint32_t*)ZHLN_Resource_BlitVertSpv, ZHLN_Resource_BlitVertSpv_Len, "VSMain"},
+			{(const uint32_t*)ZHLN_Resource_BlitFragSpv, ZHLN_Resource_BlitFragSpv_Len, "PSMain"});
 
-		// LOAD EMBEDDED TAA SHADERS
-		ZHLN_ShaderDesc taa_v = {(const uint32_t*)ZHLN_Resource_TaaVertSpv,
-								 ZHLN_Resource_TaaVertSpv_Len, "VSMain"};
-		ZHLN_ShaderDesc taa_f = {(const uint32_t*)ZHLN_Resource_TaaFragSpv,
-								 ZHLN_Resource_TaaFragSpv_Len, "PSMain"};
-		auto taaShaders = Vk::ShaderStages::Create(ctx.Device(), taa_v, taa_f);
-
-		if (taaShaders.Valid()) {
-			taaPipeline = Vk::PipelineBuilder{}
-							  .Shaders(taaShaders)
-							  .Layout(taaPipelineLayout.Get())
-							  .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
-							  .NoDepth()
-							  .CullNone()
-							  .Build(ctx.Device());
-		}
-
-		// LOAD EMBEDDED BLIT SHADERS
-		ZHLN_ShaderDesc blit_v = {(const uint32_t*)ZHLN_Resource_BlitVertSpv,
-								  ZHLN_Resource_BlitVertSpv_Len, "VSMain"};
-		ZHLN_ShaderDesc blit_f = {(const uint32_t*)ZHLN_Resource_BlitFragSpv,
-								  ZHLN_Resource_BlitFragSpv_Len, "PSMain"};
-		auto blitShaders = Vk::ShaderStages::Create(ctx.Device(), blit_v, blit_f);
-
-		if (blitShaders.Valid()) {
-			blitPipeline = Vk::PipelineBuilder{}
-							   .Shaders(blitShaders)
-							   .Layout(blitPipelineLayout.Get())
-							   .ColorFormats({VK_FORMAT_B8G8R8A8_SRGB})
-							   .NoDepth()
-							   .CullNone()
-							   .Build(ctx.Device());
-		}
+		blitPass.Build(ctx.Device(), blitShaders, {VK_FORMAT_B8G8R8A8_SRGB});
 	}
 
 	void SetupUI(GLFWwindow* window) {
@@ -502,10 +446,10 @@ void RenderContext::BeginFrame() {
 		_impl->velocityBuffer = Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT>::Create(
 			_impl->allocator, _impl->ctx, ext,
 			VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
-		_impl->accumulationBuffers[0] = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
+		_impl->accumBuffers[0] = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
 			_impl->allocator, _impl->ctx, ext,
 			VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
-		_impl->accumulationBuffers[1] = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
+		_impl->accumBuffers[1] = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
 			_impl->allocator, _impl->ctx, ext,
 			VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 
@@ -536,16 +480,16 @@ void RenderContext::BeginFrame() {
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
 			_impl->current_cmd, _impl->velocityBuffer.image.Handle());
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-			_impl->current_cmd, _impl->accumulationBuffers[0].image.Handle());
+			_impl->current_cmd, _impl->accumBuffers[0].image.Handle());
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-			_impl->current_cmd, _impl->accumulationBuffers[1].image.Handle());
+			_impl->current_cmd, _impl->accumBuffers[1].image.Handle());
 
 		// Clear them
 		VkClearValue clearColor = {{{0, 0, 0, 1}}};
 		VkRenderingAttachmentInfo attachments[4] = {};
 		VkImageView views[4] = {_impl->sceneColor.view.Get(), _impl->velocityBuffer.view.Get(),
-								_impl->accumulationBuffers[0].view.Get(),
-								_impl->accumulationBuffers[1].view.Get()};
+								_impl->accumBuffers[0].view.Get(),
+								_impl->accumBuffers[1].view.Get()};
 		for (int i = 0; i < 4; ++i)
 			attachments[i] = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
 							  .imageView = views[i],
@@ -571,21 +515,21 @@ void RenderContext::BeginFrame() {
 			_impl->current_cmd, _impl->velocityBuffer.image.Handle());
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-			_impl->current_cmd, _impl->accumulationBuffers[0].image.Handle());
+			_impl->current_cmd, _impl->accumBuffers[0].image.Handle());
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-			_impl->current_cmd, _impl->accumulationBuffers[1].image.Handle());
+			_impl->current_cmd, _impl->accumBuffers[1].image.Handle());
 
-		// Update Descriptors immediately
+		// Update Descriptors immediately (Write to both sets in the double buffer)
 		for (int i = 0; i < 2; ++i) {
-			TAALayout::Write(_impl->ctx.Device(), _impl->taaSets[i],
-							 Vk::ImageWrite{_impl->sceneColor.view.Get(),
-											VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-							 Vk::ImageWrite{_impl->accumulationBuffers[1 - i].view.Get(),
-											VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-							 Vk::ImageWrite{_impl->velocityBuffer.view.Get(),
-											VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-							 Vk::SamplerWrite{_impl->defaultSampler.Get()});
+			_impl->taaPass.WriteIndex(_impl->ctx.Device(), i,
+									  Vk::ImageWrite{_impl->sceneColor.view.Get(),
+													 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+									  Vk::ImageWrite{_impl->accumBuffers[1 - i].view.Get(),
+													 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+									  Vk::ImageWrite{_impl->velocityBuffer.view.Get(),
+													 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+									  Vk::SamplerWrite{_impl->defaultSampler.Get()});
 		}
 
 		_impl->needsInitialClear = false;
@@ -701,17 +645,14 @@ void RenderContext::EndFrame() {
 	ZHLN_EndRendering(_impl->current_cmd);
 
 	// --- 2. Synchronize Scene Results for Post-Processing ---
-	uint32_t currHistory = _impl->historyIndex;
-	uint32_t nextHistory = 1 - _impl->historyIndex;
 	VkExtent2D extent = _impl->presentation.swapchain.Get().extent;
 
-	if (!_impl->sceneColor.image.Valid() || !_impl->accumulationBuffers[0].image.Valid()) {
+	if (!_impl->sceneColor.image.Valid() || !_impl->accumBuffers.Current().image.Valid()) {
 		ZHLN_EndCommandBuffer(_impl->current_cmd);
 		_impl->current_cmd = VK_NULL_HANDLE;
 		return;
 	}
 
-	// Transition from ATTACHMENT to SHADER_READ so the TAA/Blit shaders can sample them
 	Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 						 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
 		_impl->current_cmd, _impl->sceneColor.image.Handle());
@@ -720,21 +661,18 @@ void RenderContext::EndFrame() {
 		_impl->current_cmd, _impl->velocityBuffer.image.Handle());
 
 	// --- 3. TAA Pass ---
-	bool useTAA = g_TAAState.enabled && _impl->taaPipeline.Valid();
+	bool useTAA = g_TAAState.enabled && _impl->taaPass.pipeline.Valid();
 	if (useTAA) {
-		// Transition accumulation targets:
-		// History: Sampled (Read)
-		// Current: Attachment (Write)
+		// History (Current) transitions to READ. Output (Next) transitions to WRITE.
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-			_impl->current_cmd, _impl->accumulationBuffers[currHistory].image.Handle());
+			_impl->current_cmd, _impl->accumBuffers.Current().image.Handle());
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 							 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-			_impl->current_cmd, _impl->accumulationBuffers[nextHistory].image.Handle());
+			_impl->current_cmd, _impl->accumBuffers.Next().image.Handle());
 
 		VkRenderingAttachmentInfo col = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-										 .imageView =
-											 _impl->accumulationBuffers[nextHistory].view.Get(),
+										 .imageView = _impl->accumBuffers.Next().view.Get(),
 										 .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 										 .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 										 .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
@@ -746,20 +684,23 @@ void RenderContext::EndFrame() {
 									.pColorAttachments = &col};
 
 		vkCmdBeginRendering(_impl->current_cmd, &ri);
-		vkCmdBindPipeline(_impl->current_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-						  _impl->taaPipeline.Get());
-		vkCmdBindDescriptorSets(_impl->current_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-								_impl->taaPipelineLayout.Get(), 0, 1, &_impl->taaSets[nextHistory],
-								0, nullptr);
-		vkCmdPushConstants(_impl->current_cmd, _impl->taaPipelineLayout.Get(),
-						   VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float), &g_TAAState.feedback);
-		vkCmdDraw(_impl->current_cmd, 3, 1, 0, 0);
+
+		// Safely write the ping-ponging target descriptors
+		_impl->taaPass.WriteNext(
+			_impl->ctx.Device(),
+			Vk::ImageWrite{_impl->sceneColor.view.Get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+			Vk::ImageWrite{_impl->accumBuffers.Current().view.Get(),
+						   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+			Vk::ImageWrite{_impl->velocityBuffer.view.Get(),
+						   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+			Vk::SamplerWrite{_impl->defaultSampler.Get()});
+
+		_impl->taaPass.Execute(_impl->current_cmd, g_TAAState.feedback);
 		ZHLN_EndRendering(_impl->current_cmd);
 
-		// Transition result back to SHADER_READ for the final blit
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-			_impl->current_cmd, _impl->accumulationBuffers[nextHistory].image.Handle());
+			_impl->current_cmd, _impl->accumBuffers.Next().image.Handle());
 	}
 
 	// --- 4. Final Blit (To Swapchain) ---
@@ -768,12 +709,13 @@ void RenderContext::EndFrame() {
 		_impl->current_cmd, swapImg);
 
 	VkImageView blitSource =
-		useTAA ? _impl->accumulationBuffers[nextHistory].view.Get() : _impl->sceneColor.view.Get();
-	BlitLayout::Write(_impl->ctx.Device(), _impl->blitSets[nextHistory],
-					  Vk::ImageWrite{blitSource, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-					  Vk::SamplerWrite{_impl->defaultSampler.Get()});
+		useTAA ? _impl->accumBuffers.Next().view.Get() : _impl->sceneColor.view.Get();
 
-	if (_impl->blitPipeline.Valid()) {
+	_impl->blitPass.WriteNext(_impl->ctx.Device(),
+							  Vk::ImageWrite{blitSource, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+							  Vk::SamplerWrite{_impl->defaultSampler.Get()});
+
+	if (_impl->blitPass.pipeline.Valid()) {
 		VkRenderingAttachmentInfo col = {
 			.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
 			.imageView = _impl->presentation.swapchain.Get().views[_impl->current_image_index],
@@ -788,12 +730,7 @@ void RenderContext::EndFrame() {
 									.pColorAttachments = &col};
 
 		vkCmdBeginRendering(_impl->current_cmd, &ri);
-		vkCmdBindPipeline(_impl->current_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-						  _impl->blitPipeline.Get());
-		vkCmdBindDescriptorSets(_impl->current_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-								_impl->blitPipelineLayout.Get(), 0, 1,
-								&_impl->blitSets[nextHistory], 0, nullptr);
-		vkCmdDraw(_impl->current_cmd, 3, 1, 0, 0);
+		_impl->blitPass.Execute(_impl->current_cmd);
 
 		ImGui::Render();
 		ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), _impl->current_cmd);
@@ -819,8 +756,12 @@ void RenderContext::EndFrame() {
 	if (Vk::SubmitAndPresent(submitDesc) != ZHLN_FrameResult_Ok)
 		_impl->resized = true;
 
+	// FLIP THE BUFFERS
+	_impl->accumBuffers.Flip();
+	_impl->taaPass.sets.Flip();
+	_impl->blitPass.sets.Flip();
+
 	_impl->frame_index = (_impl->frame_index + 1) % 2;
-	_impl->historyIndex = nextHistory;
 	_impl->current_cmd = VK_NULL_HANDLE;
 }
 

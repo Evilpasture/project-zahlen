@@ -17,6 +17,33 @@
 #include <utility>
 #include <vector>
 
+namespace ZHLN {
+
+/**
+ * @brief Thread-safe-ish ping-pong buffer for temporal rendering state.
+ */
+template <typename T> class DoubleBuffered {
+	std::array<T, 2> _data{};
+	uint32_t _index = 0;
+
+  public:
+	DoubleBuffered() = default;
+
+	[[nodiscard]] T& Current() noexcept { return _data[_index]; }
+	[[nodiscard]] const T& Current() const noexcept { return _data[_index]; }
+
+	[[nodiscard]] T& Next() noexcept { return _data[1 - _index]; }
+	[[nodiscard]] const T& Next() const noexcept { return _data[1 - _index]; }
+
+	// Direct access for initialization loops
+	[[nodiscard]] T& operator[](uint32_t i) noexcept { return _data[i % 2]; }
+	[[nodiscard]] const T& operator[](uint32_t i) const noexcept { return _data[i % 2]; }
+
+	void Flip() noexcept { _index = 1 - _index; }
+};
+
+} // namespace ZHLN
+
 namespace ZHLN::Vk {
 
 // ============================================================================
