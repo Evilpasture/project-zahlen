@@ -149,7 +149,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 
 	ZHLN::EngineConfig config{
 		.physics = {.maxBodies = 10000, .maxBodyPairs = 20000, .maxContactConstraints = 20000},
-		.render = {.width = 1280, .height = 720, .vsync = false, .enableValidation = true},
+		.render = {.width = 1280, .height = 720, .vsync = false, .enableValidation = false},
 	};
 
 	Engine engine(config);
