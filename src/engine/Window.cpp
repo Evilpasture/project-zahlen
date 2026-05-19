@@ -20,6 +20,8 @@ static KeyCode MapGLFWKey(int key) {
 			return KeyCode::LShift;
 		case GLFW_KEY_SPACE:
 			return KeyCode::Space;
+		case GLFW_KEY_ESCAPE:
+			return KeyCode::Escape;
 		default:
 			return KeyCode::Unknown;
 	}
@@ -108,6 +110,10 @@ void Window::Focus() {
 
 void* Window::GetNativeHandle() const {
 	return _impl->handle; // Return GLFWwindow*
+}
+
+void Window::Close() {
+	glfwSetWindowShouldClose(_impl->handle, GLFW_TRUE);
 }
 
 } // namespace ZHLN

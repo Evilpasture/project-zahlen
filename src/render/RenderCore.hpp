@@ -462,6 +462,12 @@ class CommandPool {
 		return ZHLN_AllocateSecondaryCommandBuffers(_device, &_raw, count);
 	}
 
+	void Reset() noexcept {
+		if (Valid()) {
+			ZHLN_ResetCommandPool(_device, &_raw);
+		}
+	}
+
   private:
 	VkDevice _device = nullptr;
 	ZHLN_CommandPool _raw{};

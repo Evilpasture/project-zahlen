@@ -111,6 +111,7 @@ struct RenderContext::Impl {
 
 	uint32_t frame_index = 0;
 	bool resized = true;
+	bool needsInitialClear = true;
 	VkCommandBuffer current_cmd = VK_NULL_HANDLE;
 	uint32_t current_image_index = 0;
 
@@ -471,43 +472,30 @@ Material RenderContext::CreateMaterial(const PipelineDesc& desc) {
 }
 
 void RenderContext::BeginFrame() {
-	// 1. Get sync primitives for the current frame slot
 	const ZHLN_FrameSync& s = _impl->sync[_impl->frame_index];
 
-	// 2. Wait for the GPU to finish the previous work for this frame slot
-	// and reset the command pool so we can record new commands.
+	// 1. Synchronize
 	ZHLN_WaitAndResetFrame(_impl->ctx.Device(), s.in_flight, &_impl->pools[_impl->frame_index]);
 
-	// Reset worker counters
-	for (auto& w : _impl->workerCmds)
+	// Reset worker command pools and counters
+	for (auto& w : _impl->workerCmds) {
 		w.cmdCount[_impl->frame_index].store(0, std::memory_order_relaxed);
-
-	// 3. Acquire the next available swapchain image
-	ZHLN_AcquireDesc acq = {_impl->presentation.swapchain.Get().handle, s.image_available,
-							UINT64_MAX};
-	if (ZHLN_AcquireImage(_impl->ctx.Device(), &acq, &_impl->current_image_index) ==
-		ZHLN_FrameResult_OutOfDate) {
-		_impl->resized = true;
+		w.pools[_impl->frame_index].Reset();
 	}
 
-	// 4. Start the command buffer NOW
-	_impl->current_cmd = _impl->pools.Cmd(_impl->frame_index);
-	ZHLN_BeginCommandBuffer(_impl->current_cmd);
-
-	// 5. Now handle the resize/initialization logic
+	// 2. Handle Resize (Allocation Only)
 	if (_impl->resized) {
 		int w, h;
 		glfwGetFramebufferSize(static_cast<GLFWwindow*>(_impl->window.GetNativeHandle()), &w, &h);
+		if (w == 0 || h == 0)
+			return;
 
-		// If Rebuild fails (e.g. window minimized), we stop here
 		if (!_impl->presentation.Rebuild((uint32_t)w, (uint32_t)h))
 			return;
 
-		_impl->depth_ready = false;
-		_impl->resized = false;
-
-		// Recreate TAA Render Targets
 		VkExtent2D ext = _impl->presentation.swapchain.Get().extent;
+
+		// Re-create textures
 		_impl->sceneColor = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
 			_impl->allocator, _impl->ctx, ext,
 			VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
@@ -521,6 +509,74 @@ void RenderContext::BeginFrame() {
 			_impl->allocator, _impl->ctx, ext,
 			VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 
+		_impl->needsInitialClear = true; // Mark that these need a transition/clear
+		_impl->depth_ready = false;
+		_impl->resized = false;
+	}
+
+	// 3. Acquire Swapchain Image
+	ZHLN_AcquireDesc acq = {_impl->presentation.swapchain.Get().handle, s.image_available,
+							UINT64_MAX};
+	if (ZHLN_AcquireImage(_impl->ctx.Device(), &acq, &_impl->current_image_index) ==
+		ZHLN_FrameResult_OutOfDate) {
+		_impl->resized = true;
+		_impl->current_cmd = VK_NULL_HANDLE;
+		return;
+	}
+
+	// 4. Start Command Buffer
+	_impl->current_cmd = _impl->pools.Cmd(_impl->frame_index);
+	ZHLN_BeginCommandBuffer(_impl->current_cmd);
+
+	// 5. THE FIX: Initialize new textures if needed, right here in the main stream
+	if (_impl->needsInitialClear) {
+		// Barriers: Undefined -> Color Attachment
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+			_impl->current_cmd, _impl->sceneColor.image.Handle());
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+			_impl->current_cmd, _impl->velocityBuffer.image.Handle());
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+			_impl->current_cmd, _impl->accumulationBuffers[0].image.Handle());
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+			_impl->current_cmd, _impl->accumulationBuffers[1].image.Handle());
+
+		// Clear them
+		VkClearValue clearColor = {{{0, 0, 0, 1}}};
+		VkRenderingAttachmentInfo attachments[4] = {};
+		VkImageView views[4] = {_impl->sceneColor.view.Get(), _impl->velocityBuffer.view.Get(),
+								_impl->accumulationBuffers[0].view.Get(),
+								_impl->accumulationBuffers[1].view.Get()};
+		for (int i = 0; i < 4; ++i)
+			attachments[i] = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+							  .imageView = views[i],
+							  .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+							  .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+							  .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+							  .clearValue = clearColor};
+
+		VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+							  .renderArea = {{0, 0}, _impl->presentation.swapchain.Get().extent},
+							  .layerCount = 1,
+							  .colorAttachmentCount = 4,
+							  .pColorAttachments = attachments};
+		vkCmdBeginRendering(_impl->current_cmd, &ri);
+		vkCmdEndRendering(_impl->current_cmd);
+
+		// Transition: Color Attachment -> Shader Read (To match descriptors)
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+			_impl->current_cmd, _impl->sceneColor.image.Handle());
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+			_impl->current_cmd, _impl->velocityBuffer.image.Handle());
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+			_impl->current_cmd, _impl->accumulationBuffers[0].image.Handle());
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+			_impl->current_cmd, _impl->accumulationBuffers[1].image.Handle());
+
+		// Update Descriptors immediately
 		for (int i = 0; i < 2; ++i) {
 			TAALayout::Write(_impl->ctx.Device(), _impl->taaSets[i],
 							 Vk::ImageWrite{_impl->sceneColor.view.Get(),
@@ -532,11 +588,7 @@ void RenderContext::BeginFrame() {
 							 Vk::SamplerWrite{_impl->defaultSampler.Get()});
 		}
 
-		// 6. BOOTSTRAP: Now current_cmd is valid and open!
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-			_impl->current_cmd, _impl->accumulationBuffers[0].image.Handle());
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-			_impl->current_cmd, _impl->accumulationBuffers[1].image.Handle());
+		_impl->needsInitialClear = false;
 	}
 }
 
@@ -645,51 +697,55 @@ void RenderContext::EndFrame() {
 		_impl->drawQueue.clear();
 	}
 
+	// Close the main rendering pass (Color + Velocity + Depth)
 	ZHLN_EndRendering(_impl->current_cmd);
 
-	// ========================================================================
-	// TAA & BLIT PASSES
-	// ========================================================================
+	// --- 2. Synchronize Scene Results for Post-Processing ---
 	uint32_t currHistory = _impl->historyIndex;
 	uint32_t nextHistory = 1 - _impl->historyIndex;
 	VkExtent2D extent = _impl->presentation.swapchain.Get().extent;
 
+	if (!_impl->sceneColor.image.Valid() || !_impl->accumulationBuffers[0].image.Valid()) {
+		ZHLN_EndCommandBuffer(_impl->current_cmd);
+		_impl->current_cmd = VK_NULL_HANDLE;
+		return;
+	}
+
+	// Transition from ATTACHMENT to SHADER_READ so the TAA/Blit shaders can sample them
 	Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 						 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
 		_impl->current_cmd, _impl->sceneColor.image.Handle());
 	Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 						 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
 		_impl->current_cmd, _impl->velocityBuffer.image.Handle());
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-						 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-		_impl->current_cmd, _impl->accumulationBuffers[currHistory].image.Handle());
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-		_impl->current_cmd, _impl->accumulationBuffers[nextHistory].image.Handle());
 
-	if (_impl->taaPipeline.Valid() && g_TAAState.enabled) {
+	// --- 3. TAA Pass ---
+	bool useTAA = g_TAAState.enabled && _impl->taaPipeline.Valid();
+	if (useTAA) {
+		// Transition accumulation targets:
+		// History: Sampled (Read)
+		// Current: Attachment (Write)
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+			_impl->current_cmd, _impl->accumulationBuffers[currHistory].image.Handle());
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+							 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+			_impl->current_cmd, _impl->accumulationBuffers[nextHistory].image.Handle());
+
 		VkRenderingAttachmentInfo col = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-										 .pNext = nullptr,
 										 .imageView =
 											 _impl->accumulationBuffers[nextHistory].view.Get(),
 										 .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-										 .resolveMode = VK_RESOLVE_MODE_NONE,
-										 .resolveImageView = VK_NULL_HANDLE,
-										 .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
 										 .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-										 .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-										 .clearValue = {}};
+										 .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
+
 		const VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-									.pNext = nullptr,
-									.flags = 0,
 									.renderArea = {{0, 0}, extent},
 									.layerCount = 1,
-									.viewMask = 0,
 									.colorAttachmentCount = 1,
-									.pColorAttachments = &col,
-									.pDepthAttachment = nullptr,
-									.pStencilAttachment = nullptr};
-		vkCmdBeginRendering(_impl->current_cmd, &ri);
+									.pColorAttachments = &col};
 
+		vkCmdBeginRendering(_impl->current_cmd, &ri);
 		vkCmdBindPipeline(_impl->current_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
 						  _impl->taaPipeline.Get());
 		vkCmdBindDescriptorSets(_impl->current_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -699,48 +755,39 @@ void RenderContext::EndFrame() {
 						   VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float), &g_TAAState.feedback);
 		vkCmdDraw(_impl->current_cmd, 3, 1, 0, 0);
 		ZHLN_EndRendering(_impl->current_cmd);
+
+		// Transition result back to SHADER_READ for the final blit
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+			_impl->current_cmd, _impl->accumulationBuffers[nextHistory].image.Handle());
 	}
 
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-						 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-		_impl->current_cmd, _impl->accumulationBuffers[nextHistory].image.Handle());
-
-	// Write dynamic descriptor for the blit (TAA output OR raw scene)
-	BlitLayout::Write(_impl->ctx.Device(), _impl->blitSets[nextHistory],
-					  Vk::ImageWrite{g_TAAState.enabled
-										 ? _impl->accumulationBuffers[nextHistory].view.Get()
-										 : _impl->sceneColor.view.Get(),
-									 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-					  Vk::SamplerWrite{_impl->defaultSampler.Get()});
-
+	// --- 4. Final Blit (To Swapchain) ---
 	VkImage swapImg = _impl->presentation.swapchain.Get().images[_impl->current_image_index];
 	Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
 		_impl->current_cmd, swapImg);
 
+	VkImageView blitSource =
+		useTAA ? _impl->accumulationBuffers[nextHistory].view.Get() : _impl->sceneColor.view.Get();
+	BlitLayout::Write(_impl->ctx.Device(), _impl->blitSets[nextHistory],
+					  Vk::ImageWrite{blitSource, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+					  Vk::SamplerWrite{_impl->defaultSampler.Get()});
+
 	if (_impl->blitPipeline.Valid()) {
 		VkRenderingAttachmentInfo col = {
 			.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-			.pNext = nullptr,
 			.imageView = _impl->presentation.swapchain.Get().views[_impl->current_image_index],
 			.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-			.resolveMode = VK_RESOLVE_MODE_NONE,
-			.resolveImageView = VK_NULL_HANDLE,
-			.resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
 			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-			.clearValue = {}};
+			.storeOp = VK_ATTACHMENT_STORE_OP_STORE};
+
 		const VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-									.pNext = nullptr,
-									.flags = 0,
 									.renderArea = {{0, 0}, extent},
 									.layerCount = 1,
-									.viewMask = 0,
 									.colorAttachmentCount = 1,
-									.pColorAttachments = &col,
-									.pDepthAttachment = nullptr,
-									.pStencilAttachment = nullptr};
-		vkCmdBeginRendering(_impl->current_cmd, &ri);
+									.pColorAttachments = &col};
 
+		vkCmdBeginRendering(_impl->current_cmd, &ri);
 		vkCmdBindPipeline(_impl->current_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
 						  _impl->blitPipeline.Get());
 		vkCmdBindDescriptorSets(_impl->current_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -757,6 +804,7 @@ void RenderContext::EndFrame() {
 		_impl->current_cmd, swapImg);
 	ZHLN_EndCommandBuffer(_impl->current_cmd);
 
+	// --- 5. Submit ---
 	const ZHLN_FrameSync& s = _impl->sync[_impl->frame_index];
 	ZHLN_FrameSubmitDesc submitDesc = {
 		.graphicsQueue = _impl->ctx.GraphicsQueue(),
@@ -767,6 +815,7 @@ void RenderContext::EndFrame() {
 		.inFlight = s.in_flight,
 		.swapchain = _impl->presentation.swapchain.Get().handle,
 		.imageIndex = _impl->current_image_index};
+
 	if (Vk::SubmitAndPresent(submitDesc) != ZHLN_FrameResult_Ok)
 		_impl->resized = true;
 

@@ -101,40 +101,36 @@ void UpdateCameraSystem(Camera& cam, InputContext& input, Entity player, ECS::Re
 void UpdateCulling(Engine& engine) {
 	ZHLN_PROFILE_SCOPE("Culling (ECS O(N))");
 	auto& cam = engine.GetCamera();
-	auto& pc = engine.GetPhysicsContext();
 	auto& reg = engine.GetRegistry();
-	const auto& world = pc.GetWorld();
+	const auto& world = engine.GetPhysicsContext().GetWorld();
+
+	auto entities = reg.GetEntitiesWith<MeshComponent>();
+
+	// If culling is disabled, just render everything
+	if (!CullingStats::EnableCulling) {
+		s_VisibleEntities.assign(entities.begin(), entities.end());
+		return;
+	}
 
 	bool moved = (cam.position - s_LastCullPos).LengthSq() > 0.01f ||
 				 std::abs(cam.yaw - s_LastCullYaw) > 0.5f;
-
 	if (!moved && !s_VisibleEntities.empty())
 		return;
 
-	// 1. Get raw, contiguous memory spans from your ECS
-	auto entities = reg.GetEntitiesWith<MeshComponent>();
+	s_VisibleEntities.clear();
 	auto meshes = reg.GetRawArray<MeshComponent>();
 
-	s_VisibleEntities.clear();
-	s_VisibleEntities.reserve(entities.size());
-
-	// 2. Lock the physics shadow buffers once
 	ZHLN_LOCK(world.sync.shadowLock) {
-		// 3. Blazing fast linear scan over contiguous memory
 		for (size_t i = 0; i < entities.size(); ++i) {
 			Entity e = entities[i];
 			auto* phys = reg.Get<PhysicsComponent>(e);
 			if (!phys)
 				continue;
 
-			// Fetch position directly from your ultra-fast SoA physics cache
 			uint32_t dense = world.slotToDense[phys->physicsHandle.index];
-			JPH::Vec3 pos((float)world.positions[dense * 4 + 0],
-						  (float)world.positions[dense * 4 + 1],
+			JPH::Vec3 pos((float)world.positions[dense * 4], (float)world.positions[dense * 4 + 1],
 						  (float)world.positions[dense * 4 + 2]);
 
-			// meshes[i] is guaranteed to match entities[i] because of SparseSet design
-			// This correctly uses the 150.0f radius you defined for the floor!
 			if (cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius)) {
 				s_VisibleEntities.push_back(e);
 			}
@@ -180,6 +176,11 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 		accumulator += frameTime;
 
 		engine.ProcessEvents();
+
+		if (engine.GetInput().IsKeyDown(KeyCode::Escape)) {
+			engine.GetWindow().Close();
+		}
+
 		ZHLN::DrawConsole(scriptRunner);
 		ZHLN::DrawProfiler(engine);
 
@@ -211,18 +212,26 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 		auto res = engine.GetWindow().GetSize();
 
 		if (res.width > 0 && res.height > 0) {
-			g_TAAState.frameIndex++; // Tick TAA jitter
+			if (g_TAAState.enabled) {
+				g_TAAState.frameIndex++;
+			} else {
+				g_TAAState.frameIndex = 0; // Freeze jitter when disabled
+			}
 
 			UpdateCameraSystem(cam, engine.GetInput(), scene.playerEntity, reg, world);
 
-			// 1. UNJITTERED (Used as the "Previous Frame" matrix to find velocity)
 			JPH::Mat44 unjitteredProj = cam.GetProjectionMatrix((float)res.width / res.height);
 			JPH::Mat44 unjitteredVp = unjitteredProj * cam.GetViewMatrix();
 
-			// 2. JITTERED (Used for the actual render this frame)
-			JPH::Mat44 jitteredProj = cam.GetJitteredProjectionMatrix((float)res.width / res.height,
-																	  res.width, res.height);
-			JPH::Mat44 vp = jitteredProj * cam.GetViewMatrix();
+			// Check toggle before jittering
+			JPH::Mat44 vp;
+			if (g_TAAState.enabled) {
+				vp = cam.GetJitteredProjectionMatrix((float)res.width / res.height, res.width,
+													 res.height) *
+					 cam.GetViewMatrix();
+			} else {
+				vp = unjitteredVp;
+			}
 
 			cam.frustum.Update(vp);
 			UpdateCulling(engine);

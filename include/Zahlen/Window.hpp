@@ -27,6 +27,8 @@ class Window {
 	// Returns the underlying LLGL::Window* as a void* to keep headers clean
 	void* GetNativeHandle() const;
 
+	void Close();
+
   private:
 	std::unique_ptr<Impl> _impl;
 };
