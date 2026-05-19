@@ -1,7 +1,7 @@
 #pragma once
 
+#include <atomic>
 #include <cstddef>
-
 namespace ZHLN {
 
 using FiberFunc = void (*)(void*);
@@ -25,6 +25,7 @@ struct alignas(128) Fiber {
 
 	bool isFinished;
 	bool isMain;
+	std::atomic<bool> isRunning;
 
 	// Static API for Mutex/Scheduler access
 	static Fiber* GetCurrent() noexcept;

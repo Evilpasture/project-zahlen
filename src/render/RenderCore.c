@@ -905,23 +905,28 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device,
 		.depthCompareOp = VK_COMPARE_OP_LESS,
 	};
 
-	// --- Color Blend ---
-	const VkPipelineColorBlendAttachmentState blend_attachment = {
-		.blendEnable = desc->blend_enable ? VK_TRUE : VK_FALSE,
-		.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
-		.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-		.colorBlendOp = VK_BLEND_OP_ADD,
-		.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
-		.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
-		.alphaBlendOp = VK_BLEND_OP_ADD,
-		.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-						  VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
-	};
+	// --- Color Blend (FIX: Dynamic Attachment Count) ---
+	VkPipelineColorBlendAttachmentState blend_attachments[8];
+	uint32_t safe_color_count = desc->color_format_count > 8 ? 8 : desc->color_format_count;
+
+	for (uint32_t i = 0; i < safe_color_count; ++i) {
+		blend_attachments[i] = (VkPipelineColorBlendAttachmentState){
+			.blendEnable = desc->blend_enable ? VK_TRUE : VK_FALSE,
+			.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+			.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+			.colorBlendOp = VK_BLEND_OP_ADD,
+			.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+			.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+			.alphaBlendOp = VK_BLEND_OP_ADD,
+			.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+							  VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+		};
+	}
 
 	const VkPipelineColorBlendStateCreateInfo color_blend = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-		.attachmentCount = 1,
-		.pAttachments = &blend_attachment,
+		.attachmentCount = desc->color_format_count,
+		.pAttachments = desc->color_format_count > 0 ? blend_attachments : nullptr,
 	};
 
 	// --- Dynamic State ---

@@ -4,6 +4,7 @@
 #include "PresentationContext.hpp"
 #include "RenderCore.hpp"
 #include "RenderTarget.hpp"
+#include "Resources.hpp"
 #include "SamplerBuilder.hpp"
 #include "Vertex.hpp"
 #include "Zahlen/Profiler.hpp"
@@ -42,8 +43,6 @@ template <> struct FormatTraits<VK_FORMAT_R16G16_SFLOAT> {
 ZHLN_REFLECT_VERTEX(::ZHLN::Vertex, position, normal, tangent, uv, color);
 
 namespace ZHLN {
-
-
 
 using GlobalBindlessLayout =
 	Vk::DescriptorLayout<Vk::BindlessSampledImageSlot<0, 4096>, Vk::SamplerSlot<1>>;
@@ -191,9 +190,13 @@ struct RenderContext::Impl {
 		blitPipelineLayout =
 			Vk::PipelineLayout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &blitLDesc));
 
-		// Load Optional Compiled Shaders
-		auto taaShaders = Vk::ShaderStages::FromFiles(ctx.Device(), "taa.hlsl.VSMain.spv",
-													  "taa.hlsl.PSMain.spv", "VSMain", "PSMain");
+		// LOAD EMBEDDED TAA SHADERS
+		ZHLN_ShaderDesc taa_v = {(const uint32_t*)ZHLN_Resource_TaaVertSpv,
+								 ZHLN_Resource_TaaVertSpv_Len, "VSMain"};
+		ZHLN_ShaderDesc taa_f = {(const uint32_t*)ZHLN_Resource_TaaFragSpv,
+								 ZHLN_Resource_TaaFragSpv_Len, "PSMain"};
+		auto taaShaders = Vk::ShaderStages::Create(ctx.Device(), taa_v, taa_f);
+
 		if (taaShaders.Valid()) {
 			taaPipeline = Vk::PipelineBuilder{}
 							  .Shaders(taaShaders)
@@ -204,8 +207,13 @@ struct RenderContext::Impl {
 							  .Build(ctx.Device());
 		}
 
-		auto blitShaders = Vk::ShaderStages::FromFiles(ctx.Device(), "blit.hlsl.VSMain.spv",
-													   "blit.hlsl.PSMain.spv", "VSMain", "PSMain");
+		// LOAD EMBEDDED BLIT SHADERS
+		ZHLN_ShaderDesc blit_v = {(const uint32_t*)ZHLN_Resource_BlitVertSpv,
+								  ZHLN_Resource_BlitVertSpv_Len, "VSMain"};
+		ZHLN_ShaderDesc blit_f = {(const uint32_t*)ZHLN_Resource_BlitFragSpv,
+								  ZHLN_Resource_BlitFragSpv_Len, "PSMain"};
+		auto blitShaders = Vk::ShaderStages::Create(ctx.Device(), blit_v, blit_f);
+
 		if (blitShaders.Valid()) {
 			blitPipeline = Vk::PipelineBuilder{}
 							   .Shaders(blitShaders)
@@ -463,11 +471,38 @@ Material RenderContext::CreateMaterial(const PipelineDesc& desc) {
 }
 
 void RenderContext::BeginFrame() {
+	// 1. Get sync primitives for the current frame slot
+	const ZHLN_FrameSync& s = _impl->sync[_impl->frame_index];
+
+	// 2. Wait for the GPU to finish the previous work for this frame slot
+	// and reset the command pool so we can record new commands.
+	ZHLN_WaitAndResetFrame(_impl->ctx.Device(), s.in_flight, &_impl->pools[_impl->frame_index]);
+
+	// Reset worker counters
+	for (auto& w : _impl->workerCmds)
+		w.cmdCount[_impl->frame_index].store(0, std::memory_order_relaxed);
+
+	// 3. Acquire the next available swapchain image
+	ZHLN_AcquireDesc acq = {_impl->presentation.swapchain.Get().handle, s.image_available,
+							UINT64_MAX};
+	if (ZHLN_AcquireImage(_impl->ctx.Device(), &acq, &_impl->current_image_index) ==
+		ZHLN_FrameResult_OutOfDate) {
+		_impl->resized = true;
+	}
+
+	// 4. Start the command buffer NOW
+	_impl->current_cmd = _impl->pools.Cmd(_impl->frame_index);
+	ZHLN_BeginCommandBuffer(_impl->current_cmd);
+
+	// 5. Now handle the resize/initialization logic
 	if (_impl->resized) {
 		int w, h;
 		glfwGetFramebufferSize(static_cast<GLFWwindow*>(_impl->window.GetNativeHandle()), &w, &h);
+
+		// If Rebuild fails (e.g. window minimized), we stop here
 		if (!_impl->presentation.Rebuild((uint32_t)w, (uint32_t)h))
 			return;
+
 		_impl->depth_ready = false;
 		_impl->resized = false;
 
@@ -496,24 +531,13 @@ void RenderContext::BeginFrame() {
 											VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
 							 Vk::SamplerWrite{_impl->defaultSampler.Get()});
 		}
+
+		// 6. BOOTSTRAP: Now current_cmd is valid and open!
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+			_impl->current_cmd, _impl->accumulationBuffers[0].image.Handle());
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+			_impl->current_cmd, _impl->accumulationBuffers[1].image.Handle());
 	}
-
-	const ZHLN_FrameSync& s = _impl->sync[_impl->frame_index];
-	ZHLN_WaitAndResetFrame(_impl->ctx.Device(), s.in_flight, &_impl->pools[_impl->frame_index]);
-
-	for (auto& w : _impl->workerCmds)
-		w.cmdCount[_impl->frame_index].store(0, std::memory_order_relaxed);
-
-	ZHLN_AcquireDesc acq = {_impl->presentation.swapchain.Get().handle, s.image_available,
-							UINT64_MAX};
-	if (ZHLN_AcquireImage(_impl->ctx.Device(), &acq, &_impl->current_image_index) ==
-		ZHLN_FrameResult_OutOfDate) {
-		_impl->resized = true;
-		return;
-	}
-
-	_impl->current_cmd = _impl->pools.Cmd(_impl->frame_index);
-	ZHLN_BeginCommandBuffer(_impl->current_cmd);
 }
 
 void RenderContext::EndFrame() {
@@ -587,6 +611,10 @@ void RenderContext::EndFrame() {
 
 				for (uint32_t i = start; i < end; ++i) {
 					const auto& cmd = _impl->drawQueue[i];
+
+					if (!cmd.material->pipeline.Valid())
+						continue;
+
 					vkCmdBindPipeline(sec_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
 									  cmd.material->pipeline.Get());
 					vkCmdBindDescriptorSets(sec_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,

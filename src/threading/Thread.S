@@ -142,9 +142,7 @@ CSYM(ZHLN_TrampolineAsm):
     call CSYM(ZHLN_Trampoline)
     add rsp, 32
 #else
-    sub rsp, 8          /* Align stack for System V */
     call CSYM(ZHLN_Trampoline)
-    add rsp, 8
 #endif
     ret
     .att_syntax

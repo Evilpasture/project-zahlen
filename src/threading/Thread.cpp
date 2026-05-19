@@ -1,10 +1,13 @@
 #include "Thread.hpp"
 
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <cstdint>
 #include <detail/Platform.hpp>
 
+#if defined(__x86_64__) || defined(_M_X64)
+#include <emmintrin.h>
+#endif
 // Defined in mag_asm.S
 extern "C" void ZHLN_Switch(void** old_sp, void* new_sp);
 extern "C" void ZHLN_TrampolineAsm(void);
@@ -140,12 +143,29 @@ Fiber* Fiber::Create(size_t stackSize, FiberFunc func, void* arg) noexcept {
 }
 
 void Fiber::Resume(Fiber* target) noexcept {
+	// FIX: Ensure the target OS thread has fully vacated this stack before we jump into it!
+	while (target->isRunning.load(std::memory_order_acquire)) {
+#if defined(__x86_64__) || defined(_M_X64)
+		_mm_pause();
+#elif defined(__aarch64__)
+		__asm__ __volatile__("yield" ::: "memory");
+#else
+		std::this_thread::yield();
+#endif
+	}
+
 	Fiber* self = t_currentFiber;
 	target->caller = self;
+	target->isRunning.store(true, std::memory_order_release);
 
 	SwapTEB(target);
 	t_currentFiber = target;
+
+	// Execute Assembly Context Switch
 	ZHLN_Switch(&self->stackPointer, target->stackPointer);
+
+	// WE ARE BACK! The target has yielded to us, meaning it is safely off its stack!
+	target->isRunning.store(false, std::memory_order_release);
 }
 
 void Fiber::Yield() noexcept {
