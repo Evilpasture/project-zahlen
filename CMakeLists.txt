@@ -126,37 +126,60 @@ target_include_directories(zahlen PRIVATE
     ${CMAKE_SOURCE_DIR}/extern/stb
 )
 
-# DXC is bundled with Vulkan SDK and is the best tool for HLSL -> SPIR-V
-find_program(DXC_EXECUTABLE NAMES dxc 
-             PATHS "$ENV{VULKAN_SDK}/bin" "D:/Vulkan-SDK/1.4.341.1/bin")
+# --- Shader Compilation Helper ---
+function(compile_shaders TARGET_NAME)
+    # 1. Collect all files passed to the function
+    set(SHADER_FILES ${ARGN})
 
-if(DXC_EXECUTABLE)
-    set(HLSL_SRC "${CMAKE_SOURCE_DIR}/resources/shaders/basic.hlsl")
+    # 2. Find DXC
+    find_program(DXC_EXECUTABLE NAMES dxc PATHS "$ENV{VULKAN_SDK}/bin" "D:/Vulkan-SDK/1.4.341.1/bin")
+    if(NOT DXC_EXECUTABLE)
+        message(WARNING "DXC not found! Shaders will not be compiled.")
+        return()
+    endif()
+
+    set(ALL_SPV_OUTPUTS "")
+
+    # 3. Define our stages clearly
+    set(STAGE_EXTS    "VS"      "PS"    )
+    set(STAGE_ENTRIES "VSMain"  "PSMain")
+    set(STAGE_PROFILES "vs_6_0" "ps_6_0")
+
+    foreach(HLSL_SRC IN LISTS SHADER_FILES)
+        get_filename_component(FILE_NAME ${HLSL_SRC} NAME)
+
+        foreach(i RANGE 1)  # 0 and 1
+            list(GET STAGE_EXTS     ${i} EXT)
+            list(GET STAGE_ENTRIES  ${i} ENTRY)
+            list(GET STAGE_PROFILES ${i} PROFILE)
+
+            set(OUTPUT_SPV "${CMAKE_CURRENT_BINARY_DIR}/${FILE_NAME}.${EXT}.spv")
+
+            add_custom_command(
+                OUTPUT ${OUTPUT_SPV}
+                COMMAND ${DXC_EXECUTABLE} -T ${PROFILE} -E ${ENTRY} -spirv ${HLSL_SRC} -Fo ${OUTPUT_SPV}
+                DEPENDS ${HLSL_SRC}
+                COMMENT "DXC: ${FILE_NAME} [${ENTRY}] -> ${FILE_NAME}.${EXT}.spv"
+                VERBATIM
+            )
+            list(APPEND ALL_SPV_OUTPUTS ${OUTPUT_SPV})
+        endforeach()
+    endforeach()
+
+    # 4. Create the custom target
+    add_custom_target(${TARGET_NAME}_shader_gen ALL DEPENDS ${ALL_SPV_OUTPUTS})
+    add_dependencies(${TARGET_NAME} ${TARGET_NAME}_shader_gen)
     
-    # 1. Output to the BUILD directory (CMAKE_CURRENT_BINARY_DIR)
-    set(VS_SPV   "${CMAKE_CURRENT_BINARY_DIR}/basic.hlsl.VSMain.spv")
-    set(PS_SPV   "${CMAKE_CURRENT_BINARY_DIR}/basic.hlsl.PSMain.spv")
+    # 5. Let the C++ compiler find the .spv files in the build folder
+    target_include_directories(${TARGET_NAME} PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+endfunction()
 
-    add_custom_command(
-        OUTPUT ${VS_SPV}
-        COMMAND ${DXC_EXECUTABLE} -T vs_6_0 -E VSMain -spirv ${HLSL_SRC} -Fo ${VS_SPV}
-        DEPENDS ${HLSL_SRC}
-        COMMENT "DXC: Compiling Vertex Shader to build directory"
-    )
-
-    add_custom_command(
-        OUTPUT ${PS_SPV}
-        COMMAND ${DXC_EXECUTABLE} -T ps_6_0 -E PSMain -spirv ${HLSL_SRC} -Fo ${PS_SPV}
-        DEPENDS ${HLSL_SRC}
-        COMMENT "DXC: Compiling Pixel Shader to build directory"
-    )
-    
-    add_custom_target(compile_shaders DEPENDS ${VS_SPV} ${PS_SPV})
-    add_dependencies(zahlen compile_shaders)
-
-    # 2. Tell the compiler to search the build directory for #embed files
-    target_include_directories(zahlen PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
-endif()
+# --- Usage ---
+compile_shaders(zahlen
+    "${CMAKE_SOURCE_DIR}/resources/shaders/basic.hlsl"
+    "${CMAKE_SOURCE_DIR}/resources/shaders/blit.hlsl"
+    "${CMAKE_SOURCE_DIR}/resources/shaders/taa.hlsl"
+)
 
 
 # --- Compiler Flags ---
