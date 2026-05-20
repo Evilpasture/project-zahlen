@@ -21,12 +21,12 @@ class PresentationContext {
 
 	// Move-only
 	PresentationContext(const PresentationContext&) = delete;
-	PresentationContext& operator=(const PresentationContext&) = delete;
+	auto operator=(const PresentationContext&) -> PresentationContext& = delete;
 	PresentationContext(PresentationContext&&) noexcept = default;
-	PresentationContext& operator=(PresentationContext&&) noexcept = default;
+	auto operator=(PresentationContext&&) noexcept -> PresentationContext& = default;
 
-	[[nodiscard]] bool Init(const Context& ctx, Allocator& alloc, VkSurfaceKHR surface,
-							uint32_t width, uint32_t height, bool vsync = true) {
+	[[nodiscard]] auto Init(const Context& ctx, Allocator& alloc, VkSurfaceKHR surface,
+							uint32_t width, uint32_t height, bool vsync = true) -> bool {
 		_ctx = &ctx;
 		_alloc = &alloc;
 		_surface = surface;
@@ -34,8 +34,8 @@ class PresentationContext {
 		return Rebuild(width, height);
 	}
 
-	[[nodiscard]] bool Rebuild(uint32_t width, uint32_t height) {
-		if (!_ctx || !_alloc) {
+	[[nodiscard]] auto Rebuild(uint32_t width, uint32_t height) -> bool {
+		if ((_ctx == nullptr) || (_alloc == nullptr)) {
 			return false;
 		}
 

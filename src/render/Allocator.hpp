@@ -5,6 +5,7 @@
 #include <cstring>
 #include <utility>
 #include <vk_mem_alloc.h>
+#include <vulkan/vulkan.h>
 
 namespace ZHLN::Vk {
 
@@ -16,19 +17,19 @@ class Allocator {
   public:
 	Allocator() = default;
 	~Allocator() noexcept {
-		if (_handle) {
+		if (_handle != nullptr) {
 			vmaDestroyAllocator(_handle);
 		}
 	}
 
 	Allocator(const Allocator&) = delete;
-	Allocator& operator=(const Allocator&) = delete;
+	auto operator=(const Allocator&) -> Allocator& = delete;
 
 	Allocator(Allocator&& other) noexcept : _handle(std::exchange(other._handle, nullptr)) {}
 
-	Allocator& operator=(Allocator&& other) noexcept {
+	auto operator=(Allocator&& other) noexcept -> Allocator& {
 		if (this != &other) {
-			if (_handle) {
+			if (_handle != nullptr) {
 				vmaDestroyAllocator(_handle);
 			}
 			_handle = std::exchange(other._handle, nullptr);
@@ -36,8 +37,8 @@ class Allocator {
 		return *this;
 	}
 
-	[[nodiscard]] bool Init(VkInstance instance, VkPhysicalDevice physical,
-							VkDevice device) noexcept {
+	[[nodiscard]] auto Init(VkInstance instance, VkPhysicalDevice physical,
+							VkDevice device) noexcept -> bool {
 		// Explicitly map Vulkan functions to VMA.
 		// This prevents VMA from trying to "guess" or "dynamically load" them.
 		const VmaVulkanFunctions vfuncs = {
@@ -92,12 +93,12 @@ class Allocator {
 		return vmaCreateAllocator(&info, &_handle) == VK_SUCCESS;
 	}
 
-	[[nodiscard]] bool Init(const Context& ctx) noexcept {
+	[[nodiscard]] auto Init(const Context& ctx) noexcept -> bool {
 		return Init(ctx.Instance(), ctx.Physical(), ctx.Device());
 	}
 
-	[[nodiscard]] VmaAllocator Get() const noexcept { return _handle; }
-	[[nodiscard]] bool Valid() const noexcept { return _handle != nullptr; }
+	[[nodiscard]] auto Get() const noexcept -> VmaAllocator { return _handle; }
+	[[nodiscard]] auto Valid() const noexcept -> bool { return _handle != nullptr; }
 	explicit operator bool() const noexcept { return Valid(); }
 
   private:
@@ -119,13 +120,13 @@ class Buffer {
 	}
 
 	Buffer(const Buffer&) = delete;
-	Buffer& operator=(const Buffer&) = delete;
+	auto operator=(const Buffer&) -> Buffer& = delete;
 
 	Buffer(Buffer&& other) noexcept
 		: _allocator(other._allocator), _handle(std::exchange(other._handle, VK_NULL_HANDLE)),
 		  _allocation(std::exchange(other._allocation, nullptr)), _info(other._info) {}
 
-	Buffer& operator=(Buffer&& other) noexcept {
+	auto operator=(Buffer&& other) noexcept -> Buffer& {
 		if (this != &other) {
 			if (_handle != VK_NULL_HANDLE) {
 				vmaDestroyBuffer(_allocator, _handle, _allocation);
@@ -138,9 +139,8 @@ class Buffer {
 		return *this;
 	}
 
-	[[nodiscard]] static Buffer Create(VmaAllocator allocator, size_t size,
-									   VkBufferUsageFlags usage,
-									   VmaMemoryUsage mem_usage) noexcept {
+	[[nodiscard]] static auto Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage,
+									 VmaMemoryUsage mem_usage) noexcept -> Buffer {
 		Buffer b;
 		b._allocator = allocator;
 
@@ -181,29 +181,59 @@ class Buffer {
 		MappedRegion(VmaAllocator alloc, VmaAllocation allocation, void* ptr) noexcept
 			: data(ptr), _alloc(alloc), _allocation(allocation) {}
 
-		~MappedRegion() noexcept { vmaUnmapMemory(_alloc, _allocation); }
+		~MappedRegion() noexcept {
+			if (_alloc != VK_NULL_HANDLE) {
+				vmaUnmapMemory(_alloc, _allocation);
+			}
+		}
 
+		// Disable copying
 		MappedRegion(const MappedRegion&) = delete;
-		MappedRegion& operator=(const MappedRegion&) = delete;
+		auto operator=(const MappedRegion&) -> MappedRegion& = delete;
 
-		template <typename T> T* As() noexcept { return static_cast<T*>(data); }
+		// Enable moving
+		MappedRegion(MappedRegion&& other) noexcept
+			: data(other.data), _alloc(other._alloc), _allocation(other._allocation) {
+			// Nullify the source so the destructor doesn't unmap the memory we just moved
+			other.data = nullptr;
+			other._alloc = VK_NULL_HANDLE;
+		}
+
+		auto operator=(MappedRegion&& other) noexcept -> MappedRegion& {
+			if (this != &other) {
+				// Clean up our current resource before taking the new one
+				if (_alloc != VK_NULL_HANDLE) {
+					vmaUnmapMemory(_alloc, _allocation);
+				}
+
+				data = other.data;
+				_alloc = other._alloc;
+				_allocation = other._allocation;
+
+				other.data = nullptr;
+				other._alloc = VK_NULL_HANDLE;
+			}
+			return *this;
+		}
+
+		template <typename T> auto As() noexcept -> T* { return static_cast<T*>(data); }
 
 		void* data = nullptr;
 
 	  private:
-		VmaAllocator _alloc;
-		VmaAllocation _allocation;
+		VmaAllocator _alloc = VK_NULL_HANDLE;
+		VmaAllocation _allocation = VK_NULL_HANDLE;
 	};
 
-	[[nodiscard]] MappedRegion Map() noexcept {
+	[[nodiscard]] auto Map() noexcept -> MappedRegion {
 		void* ptr = nullptr;
 		vmaMapMemory(_allocator, _allocation, &ptr);
 		return {_allocator, _allocation, ptr};
 	}
 
-	[[nodiscard]] VkBuffer Handle() const noexcept { return _handle; }
-	[[nodiscard]] size_t Size() const noexcept { return _info.size; }
-	[[nodiscard]] bool Valid() const noexcept { return _handle != VK_NULL_HANDLE; }
+	[[nodiscard]] auto Handle() const noexcept -> VkBuffer { return _handle; }
+	[[nodiscard]] auto Size() const noexcept -> size_t { return _info.size; }
+	[[nodiscard]] auto Valid() const noexcept -> bool { return _handle != VK_NULL_HANDLE; }
 	explicit operator bool() const noexcept { return Valid(); }
 
   private:
@@ -220,8 +250,8 @@ class Buffer {
 // ============================================================================
 
 [[nodiscard]]
-inline Buffer UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst,
-							 const void* data, size_t size) noexcept {
+inline auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst,
+						   const void* data, size_t size) noexcept -> Buffer {
 	// 1. Create staging buffer
 	Buffer staging = Buffer::Create(allocator, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
 									VMA_MEMORY_USAGE_CPU_ONLY);
@@ -232,7 +262,7 @@ inline Buffer UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer
 	// 2. Map and copy data
 	{
 		auto mapped = staging.Map();
-		if (mapped.data) {
+		if (mapped.data != nullptr) {
 			memcpy(mapped.data, data, size);
 		}
 	}
@@ -262,8 +292,10 @@ inline Buffer UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer
 class Image {
   public:
 	Image() = default;
+	Image(const Image&) = delete;
+    auto operator=(const Image&) -> Image& = delete;
 	~Image() {
-		if (_handle) {
+		if (_handle != VK_NULL_HANDLE) {
 			vmaDestroyImage(_allocator, _handle, _allocation);
 		}
 	}
@@ -272,9 +304,9 @@ class Image {
 	Image(Image&& other) noexcept
 		: _allocator(other._allocator), _handle(std::exchange(other._handle, nullptr)),
 		  _allocation(std::exchange(other._allocation, nullptr)) {}
-	Image& operator=(Image&& other) noexcept {
+	auto operator=(Image&& other) noexcept -> Image& {
 		if (this != &other) {
-			if (_handle) {
+			if (_handle != VK_NULL_HANDLE) {
 				vmaDestroyImage(_allocator, _handle, _allocation);
 			}
 			_allocator = other._allocator;
@@ -284,8 +316,8 @@ class Image {
 		return *this;
 	}
 
-	static Image Create(VmaAllocator allocator, const VkImageCreateInfo& info,
-						VmaMemoryUsage mem_usage) {
+	static auto Create(VmaAllocator allocator, const VkImageCreateInfo& info,
+					   VmaMemoryUsage mem_usage) -> Image {
 		Image img;
 		img._allocator = allocator;
 		VmaAllocationCreateInfo alloc_info = {};
@@ -297,10 +329,10 @@ class Image {
 		return img;
 	}
 
-	[[nodiscard]] bool Valid() const noexcept { return _handle != VK_NULL_HANDLE; }
+	[[nodiscard]] auto Valid() const noexcept -> bool { return _handle != VK_NULL_HANDLE; }
 	explicit operator bool() const noexcept { return Valid(); }
 
-	[[nodiscard]] VkImage Handle() const { return _handle; }
+	[[nodiscard]] auto Handle() const -> VkImage { return _handle; }
 
   private:
 	VmaAllocator _allocator = nullptr;

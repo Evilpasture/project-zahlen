@@ -14,6 +14,7 @@
 #include <span>
 #include <type_traits>
 #include <utility>
+#include <vulkan/vulkan_core.h>
 
 namespace ZHLN {
 
@@ -314,7 +315,7 @@ class Swapchain {
 											.old_swapchain = _raw.handle};
 
 		const ZHLN_Swapchain next = ZHLN_CreateSwapchain(&rebuilt);
-		if (next.handle == nullptr) {
+		if (next.handle == VK_NULL_HANDLE) {
 			return false;
 		}
 
@@ -461,7 +462,7 @@ class CommandPool {
 	}
 
 	~CommandPool() {
-		if (_device != nullptr) {
+		if (_device != VK_NULL_HANDLE) {
 			ZHLN_DestroyCommandPool(_device, &_raw);
 		}
 	}
@@ -472,7 +473,7 @@ class CommandPool {
 
 	auto operator=(CommandPool&& other) noexcept -> CommandPool& {
 		if (this != &other) {
-			if (_device != nullptr) {
+			if (_device != VK_NULL_HANDLE) {
 				ZHLN_DestroyCommandPool(_device, &_raw);
 			}
 			_device = std::exchange(other._device, nullptr);
@@ -512,7 +513,7 @@ class CommandPool {
 	}
 
   private:
-	VkDevice _device = nullptr;
+	VkDevice _device = VK_NULL_HANDLE;
 	ZHLN_CommandPool _raw{};
 };
 

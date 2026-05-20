@@ -5,6 +5,7 @@
 #include <tuple>
 #include <type_traits>
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_core.h>
 
 namespace ZHLN::Vk {
 
@@ -58,14 +59,14 @@ using StorageBufferSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, S>;
 // ============================================================================
 
 struct ImageWrite {
-	VkImageView view;
+	VkImageView view = VK_NULL_HANDLE;
 	VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 };
 struct SamplerWrite {
-	VkSampler sampler;
+	VkSampler sampler = VK_NULL_HANDLE;
 };
 struct BufferWrite {
-	VkBuffer buffer;
+	VkBuffer buffer = VK_NULL_HANDLE;
 	VkDeviceSize offset = 0;
 	VkDeviceSize range = VK_WHOLE_SIZE;
 };
@@ -112,26 +113,28 @@ template <typename Layout, uint32_t BindingID> class BindlessRegistry {
 	}
 
 	// Only compiled if the Slot type is actually a Sampled Image
-	uint32_t RegisterImage(const VkImageView view,
-						   const VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+	auto RegisterImage(const VkImageView view,
+					   const VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+		-> uint32_t
 		requires(Slot::type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE)
 	{
 		return UpdateDescriptor(view, VK_NULL_HANDLE, layout);
 	}
 
 	// Only compiled if the Slot type is a Combined Image Sampler
-	uint32_t RegisterCombined(const VkImageView view, const VkSampler sampler,
-							  const VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+	auto RegisterCombined(const VkImageView view, const VkSampler sampler,
+						  const VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+		-> uint32_t
 		requires(Slot::type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
 	{
 		return UpdateDescriptor(view, sampler, layout);
 	}
 
-	[[nodiscard]] constexpr uint32_t Capacity() const noexcept { return Slot::count; }
-	[[nodiscard]] uint32_t Size() const noexcept { return _nextSlot; }
+	[[nodiscard]] constexpr auto Capacity() const noexcept -> uint32_t { return Slot::count; }
+	[[nodiscard]] auto Size() const noexcept -> uint32_t { return _nextSlot; }
 
   private:
-	uint32_t UpdateDescriptor(VkImageView view, VkSampler sampler, VkImageLayout layout) {
+	auto UpdateDescriptor(VkImageView view, VkSampler sampler, VkImageLayout layout) -> uint32_t {
 		// 2. Proof of Correctness: Runtime bounds check against compile-time limit
 		if (_nextSlot >= Slot::count) [[unlikely]] {
 			std::println(stderr, "[BindlessRegistry<{}>] FATAL: Exceeded capacity of {} slots.",
@@ -194,7 +197,7 @@ template <typename... Slots> class DescriptorLayout {
 	}
 
 	// Detect if ANY slot requires UPDATE_AFTER_BIND logic
-	static constexpr bool HasUpdateAfterBind() noexcept {
+	static constexpr auto HasUpdateAfterBind() noexcept -> bool {
 		bool has = false;
 		((has |= ((Slots::flags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) != 0)), ...);
 		return has;
@@ -218,7 +221,8 @@ template <typename... Slots> class DescriptorLayout {
 	// -------------------------------------------------------------------------
 	// CreateLayout
 	// -------------------------------------------------------------------------
-	[[nodiscard]] static ZHLN::Vk::DescriptorSetLayout CreateLayout(VkDevice device) noexcept {
+	[[nodiscard]] static auto CreateLayout(VkDevice device) noexcept
+		-> ZHLN::Vk::DescriptorSetLayout {
 		constexpr auto bindings = MakeBindings();
 		constexpr auto flags = MakeBindingFlags();
 		constexpr bool updateAfterBind = HasUpdateAfterBind();
@@ -233,28 +237,28 @@ template <typename... Slots> class DescriptorLayout {
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
 			.pNext = &flagsInfo, // Bindless Flags attached here
 			.flags = updateAfterBind ? VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT
-									 : (VkDescriptorSetLayoutCreateFlags)0,
+									 : static_cast<VkDescriptorSetLayoutCreateFlagBits>(0),
 			.bindingCount = kCount,
 			.pBindings = bindings.data(),
 		};
 
 		VkDescriptorSetLayout layout = VK_NULL_HANDLE;
 		vkCreateDescriptorSetLayout(device, &info, nullptr, &layout);
-		return ZHLN::Vk::DescriptorSetLayout(device, layout); // RAII wrap
+		return {device, layout}; // RAII wrap
 	}
 
 	// -------------------------------------------------------------------------
 	// CreatePool
 	// -------------------------------------------------------------------------
-	[[nodiscard]] static ZHLN::Vk::DescriptorPool CreatePool(VkDevice device,
-															 uint32_t maxSets) noexcept {
+	[[nodiscard]] static auto CreatePool(VkDevice device, uint32_t maxSets) noexcept
+		-> ZHLN::Vk::DescriptorPool {
 		const auto poolSizes = MakePoolSizes(maxSets);
 		static constexpr bool updateAfterBind = HasUpdateAfterBind();
 
 		const VkDescriptorPoolCreateInfo info = {
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
 			.flags = updateAfterBind ? VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT
-									 : (VkDescriptorPoolCreateFlags)0,
+									 : static_cast<VkDescriptorPoolCreateFlagBits>(0),
 			.maxSets = maxSets,
 			.poolSizeCount = kCount,
 			.pPoolSizes = poolSizes.data(),
@@ -262,21 +266,21 @@ template <typename... Slots> class DescriptorLayout {
 
 		VkDescriptorPool pool = VK_NULL_HANDLE;
 		vkCreateDescriptorPool(device, &info, nullptr, &pool);
-		return ZHLN::Vk::DescriptorPool(device, pool); // RAII wrap
+		return {device, pool}; // RAII wrap
 	}
 
 	// -------------------------------------------------------------------------
 	// Allocate
 	// -------------------------------------------------------------------------
-	[[nodiscard]] static VkDescriptorSet Allocate(VkDevice device, VkDescriptorPool pool,
-												  VkDescriptorSetLayout layout) noexcept {
+	[[nodiscard]] static auto Allocate(VkDevice device, VkDescriptorPool pool,
+									   VkDescriptorSetLayout layout) noexcept -> VkDescriptorSet {
 		const VkDescriptorSetAllocateInfo info = {
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
 			.descriptorPool = pool,
 			.descriptorSetCount = 1,
 			.pSetLayouts = &layout,
 		};
-		VkDescriptorSet set;
+		VkDescriptorSet set = VK_NULL_HANDLE;
 		vkAllocateDescriptorSets(device, &info, &set);
 		return set;
 	}
@@ -303,7 +307,7 @@ template <typename... Slots> class DescriptorLayout {
 						 std::array<VkDescriptorImageInfo, kCount>& imageInfos,
 						 std::array<VkDescriptorBufferInfo, kCount>& bufferInfos,
 						 std::array<VkWriteDescriptorSet, kCount>& writes,
-						 std::index_sequence<I...>) noexcept {
+						 std::index_sequence<I...> /*unused*/) noexcept {
 
 		(WriteSlot<I, std::tuple_element_t<I, std::tuple<Slots...>>>(
 			 set, std::get<I>(args), imageInfos[I], bufferInfos[I], writes[I]),

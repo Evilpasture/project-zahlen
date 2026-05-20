@@ -16,7 +16,7 @@ struct PipelineDesc {
 
 class RenderContext {
   public:
-	RenderContext(Window& window, const RenderConfig& config);
+	RenderContext(Window& window, const RenderConfig& cfg);
 	~RenderContext();
 
 	RenderContext(const RenderContext&) = delete;

@@ -46,19 +46,19 @@ class PipelineBuilder {
   public:
 	// --- Required ---
 
-	PipelineBuilder& Shaders(const ShaderStages& s) noexcept {
+	auto Shaders(const ShaderStages& s) noexcept -> PipelineBuilder& {
 		_cfg.stages = s.Get();
 		return *this;
 	}
 
-	PipelineBuilder& Layout(VkPipelineLayout l) noexcept {
+	auto Layout(VkPipelineLayout l) noexcept -> PipelineBuilder& {
 		_cfg.layout = l;
 		return *this;
 	}
 
 	// TMP: pulls bindings/attributes directly from your VertexTraits<T>
 	// The arrays are constexpr statics so their lifetime is the program's.
-	template <IsVertex V> PipelineBuilder& Vertex() noexcept {
+	template <IsVertex V> auto Vertex() noexcept -> PipelineBuilder& {
 		static constexpr auto bindings = VertexTraits<V>::Bindings();
 		static constexpr auto attributes = VertexTraits<V>::Attributes();
 		_cfg.bindings = bindings.data();
@@ -70,67 +70,67 @@ class PipelineBuilder {
 
 	// --- Formats ---
 
-	PipelineBuilder& ColorFormats(std::initializer_list<VkFormat> formats) noexcept {
+	auto ColorFormats(std::initializer_list<VkFormat> formats) noexcept -> PipelineBuilder& {
 		_cfg.color_formats = formats;
 		return *this;
 	}
 
-	PipelineBuilder& DepthFormat(VkFormat f) noexcept {
+	auto DepthFormat(VkFormat f) noexcept -> PipelineBuilder& {
 		_cfg.depth_format = f;
 		return *this;
 	}
 
 	// Convenience: shadow pass (depth-only, no color attachment)
-	PipelineBuilder& DepthOnly() noexcept {
+	auto DepthOnly() noexcept -> PipelineBuilder& {
 		_cfg.color_formats.clear();
 		return *this;
 	}
 
 	// --- Rasterization ---
 
-	PipelineBuilder& Topology(VkPrimitiveTopology t) noexcept {
+	auto Topology(VkPrimitiveTopology t) noexcept -> PipelineBuilder& {
 		_cfg.topology = t;
 		return *this;
 	}
 
-	PipelineBuilder& Wireframe() noexcept {
+	auto Wireframe() noexcept -> PipelineBuilder& {
 		_cfg.polygon_mode = VK_POLYGON_MODE_LINE;
 		return *this;
 	}
 
-	PipelineBuilder& CullNone() noexcept {
+	auto CullNone() noexcept -> PipelineBuilder& {
 		_cfg.cull_mode = VK_CULL_MODE_NONE;
 		return *this;
 	}
 
-	PipelineBuilder& CullFront() noexcept {
+	auto CullFront() noexcept -> PipelineBuilder& {
 		_cfg.cull_mode = VK_CULL_MODE_FRONT_BIT;
 		return *this;
 	}
 
-	PipelineBuilder& CullBack() noexcept {
+	auto CullBack() noexcept -> PipelineBuilder& {
 		_cfg.cull_mode = VK_CULL_MODE_BACK_BIT;
 		return *this;
 	}
 
-	PipelineBuilder& WindingCW() noexcept {
+	auto WindingCW() noexcept -> PipelineBuilder& {
 		_cfg.front_face = VK_FRONT_FACE_CLOCKWISE;
 		return *this;
 	}
 
 	// --- Depth ---
 
-	PipelineBuilder& DepthTest(bool v) noexcept {
+	auto DepthTest(bool v) noexcept -> PipelineBuilder& {
 		_cfg.depth_test = v;
 		return *this;
 	}
 
-	PipelineBuilder& DepthWrite(bool v) noexcept {
+	auto DepthWrite(bool v) noexcept -> PipelineBuilder& {
 		_cfg.depth_write = v;
 		return *this;
 	}
 
-	PipelineBuilder& NoDepth() noexcept {
+	auto NoDepth() noexcept -> PipelineBuilder& {
 		_cfg.depth_test = false;
 		_cfg.depth_write = false;
 		_cfg.depth_format = VK_FORMAT_UNDEFINED;
@@ -139,7 +139,7 @@ class PipelineBuilder {
 
 	// --- Blending ---
 
-	PipelineBuilder& AlphaBlend() noexcept {
+	auto AlphaBlend() noexcept -> PipelineBuilder& {
 		_cfg.blend_enable = true;
 		return *this;
 	}
@@ -148,12 +148,13 @@ class PipelineBuilder {
 
 	// Validate and hand off to your existing C backend.
 	// Returns an empty Pipeline on misconfiguration so callers can check .Valid().
-	[[nodiscard]] Pipeline Build(VkDevice device) const noexcept {
-		if (!Validate())
+	[[nodiscard]] auto Build(VkDevice device) const noexcept -> Pipeline {
+		if (!Validate()) {
 			return {};
+		}
 
 		const ZHLN_GraphicsPipelineDesc desc = {
-			.stages = const_cast<ZHLN_ShaderStages*>(_cfg.stages),
+			.stages = _cfg.stages,
 			.layout = _cfg.layout,
 			.vertex_bindings = _cfg.bindings,
 			.vertex_attributes = _cfg.attributes,
@@ -171,12 +172,12 @@ class PipelineBuilder {
 			.blend_enable = _cfg.blend_enable,
 		};
 
-		return Pipeline(device, ZHLN_CreateGraphicsPipeline(device, &desc));
+		return {device, ZHLN_CreateGraphicsPipeline(device, &desc)};
 	}
 
   private:
-	[[nodiscard]] bool Validate() const noexcept {
-		if (!_cfg.stages) {
+	[[nodiscard]] auto Validate() const noexcept -> bool {
+		if (_cfg.stages == nullptr) {
 			std::println(stderr, "[PipelineBuilder] Missing shader stages.");
 			return false;
 		}
@@ -197,8 +198,8 @@ class PipelineBuilder {
 class ComputePipelineBuilder {
   public:
 	// Store individual fields rather than the const struct to allow mutation during "building"
-	ComputePipelineBuilder& Shader(const uint32_t* code, size_t size,
-								   const char* entry = "main") noexcept {
+	auto Shader(const uint32_t* code, size_t size, const char* entry = "main") noexcept
+		-> ComputePipelineBuilder& {
 		_code = code;
 		_size = size;
 		_entry = entry;
@@ -206,21 +207,22 @@ class ComputePipelineBuilder {
 	}
 
 	// Overload if you already have a descriptor from elsewhere
-	ComputePipelineBuilder& Shader(const ZHLN_ShaderDesc& desc) noexcept {
+	auto Shader(const ZHLN_ShaderDesc& desc) noexcept -> ComputePipelineBuilder& {
 		_code = desc.code;
 		_size = desc.size;
 		_entry = desc.entry_point;
 		return *this;
 	}
 
-	ComputePipelineBuilder& Layout(const VkPipelineLayout l) noexcept {
+	auto Layout(const VkPipelineLayout l) noexcept -> ComputePipelineBuilder& {
 		_layout = l;
 		return *this;
 	}
 
-	[[nodiscard]] Pipeline Build(const VkDevice device) const noexcept {
-		if (!Validate())
+	[[nodiscard]] auto Build(const VkDevice device) const noexcept -> Pipeline {
+		if (!Validate()) {
 			return {};
+		}
 
 		// Aggregate initialization: We construct the 'const struct' locally.
 		// This is valid C++ for 'const' typedefs.
@@ -229,12 +231,12 @@ class ComputePipelineBuilder {
 			.layout = _layout,
 		};
 
-		return Pipeline(device, ZHLN_CreateComputePipeline(device, &desc));
+		return {device, ZHLN_CreateComputePipeline(device, &desc)};
 	}
 
   private:
-	[[nodiscard]] bool Validate() const noexcept {
-		if (!_code || _size == 0) {
+	[[nodiscard]] auto Validate() const noexcept -> bool {
+		if ((_code == nullptr) || _size == 0) {
 			std::println(stderr, "[ComputePipelineBuilder] Missing or invalid shader code.");
 			return false;
 		}

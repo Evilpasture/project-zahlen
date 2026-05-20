@@ -21,6 +21,7 @@
 #include <ranges>
 #include <threading/TaskSystem.hpp>
 #include <vector>
+#include <vulkan/vulkan_core.h>
 
 namespace ZHLN::Vk {
 template <> struct FormatOf<float[3]> {
@@ -150,7 +151,7 @@ struct RenderContext::Impl {
 			.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
 			.unnormalizedCoordinates = VK_FALSE,
 		};
-		VkSampler rawSampler = nullptr;
+		VkSampler rawSampler = VK_NULL_HANDLE;
 		vkCreateSampler(ctx.Device(), &samplerInfo, nullptr, &rawSampler);
 		globalSampler = Vk::Sampler(ctx.Device(), rawSampler);
 
@@ -1019,6 +1020,7 @@ void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
 		.pColorAttachments = cols.data(),
 		.pDepthAttachment = &depthAtt,
 		.pStencilAttachment = nullptr};
+		
 
 	vkCmdBeginRendering(impl->current_cmd, &renderInfo);
 

@@ -9,10 +9,10 @@ namespace ZHLN::Vk {
  * @brief Configuration for a generic draw batch.
  */
 struct DrawBatchConfig {
-	VkPipeline pipeline;
-	VkPipelineLayout layout;
-	VkBuffer vbo;
-	VkBuffer ibo;
+	VkPipeline pipeline = VK_NULL_HANDLE;
+	VkPipelineLayout layout = VK_NULL_HANDLE;
+	VkBuffer vbo = VK_NULL_HANDLE;
+	VkBuffer ibo = VK_NULL_HANDLE;
 	VkDescriptorSet set = VK_NULL_HANDLE;
 	VkShaderStageFlags pushStages = 0;
 };
@@ -37,17 +37,19 @@ inline void DrawBatch(const VkCommandBuffer cmd, const DrawBatchConfig& cfg, Loo
 		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, cfg.layout, 0, 1, &cfg.set, 0,
 								nullptr);
 	}
+	
 
 	// 2. Dynamic Recording
 	// We provide a 'binder' lambda back to the user to record individual instances
-	auto record = [&](const PushT& pc, uint32_t indexCount, uint32_t firstIndex) {
+	auto record = [&](const PushT& pc, uint32_t indexCount, uint32_t firstIndex) -> auto {
 		if constexpr (!std::is_same_v<PushT, std::monostate>) {
 			ZHLN::Vk::Push(cmd, cfg.layout, cfg.pushStages, pc);
 		}
 		vkCmdDrawIndexed(cmd, indexCount, 1, firstIndex, 0, 0);
 	};
 
-	loop(record);
+	// Forward the loop to ensure the caller's value category is preserved
+    std::forward<LoopFn>(loop)(record); 
 }
 
 } // namespace ZHLN::Vk
