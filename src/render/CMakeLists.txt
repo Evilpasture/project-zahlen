@@ -12,7 +12,6 @@ add_library(zahlen_render STATIC
     RenderCore.hpp
     RenderCore.cpp
     Allocator.hpp
-    Utils.h
 )
 
 # --- OPTIONAL CLANG-TIDY SUPPORT ---
