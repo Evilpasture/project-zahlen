@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <print>
 #include <vector>
+#include <fstream>
 
 ZHLN_REFLECT_VERTEX(ZHLN::Vk::Vertex, pos, norm, tangent, uv0, uv1);
 
