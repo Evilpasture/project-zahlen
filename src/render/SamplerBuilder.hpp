@@ -29,35 +29,35 @@ class SamplerBuilder {
 		};
 	}
 
-	SamplerBuilder& Linear() noexcept {
+	auto Linear() noexcept -> SamplerBuilder& {
 		_info.magFilter = VK_FILTER_LINEAR;
 		_info.minFilter = VK_FILTER_LINEAR;
 		_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
 		return *this;
 	}
 
-	SamplerBuilder& Nearest() noexcept {
+	auto Nearest() noexcept -> SamplerBuilder& {
 		_info.magFilter = VK_FILTER_NEAREST;
 		_info.minFilter = VK_FILTER_NEAREST;
 		_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
 		return *this;
 	}
 
-	SamplerBuilder& Repeat() noexcept {
+	auto Repeat() noexcept -> SamplerBuilder& {
 		_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
 		_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
 		_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
 		return *this;
 	}
 
-	SamplerBuilder& ClampToEdge() noexcept {
+	auto ClampToEdge() noexcept -> SamplerBuilder& {
 		_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 		_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 		_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 		return *this;
 	}
 
-	SamplerBuilder& ClampToBorder(VkBorderColor color) noexcept {
+	auto ClampToBorder(VkBorderColor color) noexcept -> SamplerBuilder& {
 		_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
 		_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
 		_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
@@ -65,26 +65,26 @@ class SamplerBuilder {
 		return *this;
 	}
 
-	SamplerBuilder& Anisotropy(float maxAniso = 16.0f) noexcept {
+	auto Anisotropy(float maxAniso = 16.0f) noexcept -> SamplerBuilder& {
 		_info.anisotropyEnable = VK_TRUE;
 		_info.maxAnisotropy = maxAniso;
 		return *this;
 	}
 
-	SamplerBuilder& DepthCompare(VkCompareOp op = VK_COMPARE_OP_LESS_OR_EQUAL) noexcept {
+	auto DepthCompare(VkCompareOp op = VK_COMPARE_OP_LESS_OR_EQUAL) noexcept -> SamplerBuilder& {
 		_info.compareEnable = VK_TRUE;
 		_info.compareOp = op;
 		return *this;
 	}
 
-	[[nodiscard]] Sampler Build(VkDevice device) const noexcept {
+	[[nodiscard]] auto Build(VkDevice device) const noexcept -> Sampler {
 		VkSampler sampler = VK_NULL_HANDLE;
 		vkCreateSampler(device, &_info, nullptr, &sampler);
-		return Sampler(device, sampler);
+		return {device, sampler};
 	}
 
   private:
-	VkSamplerCreateInfo _info;
+	VkSamplerCreateInfo _info{};
 };
 
 } // namespace ZHLN::Vk

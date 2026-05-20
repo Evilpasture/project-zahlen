@@ -8,18 +8,18 @@ namespace ZHLN::Vk {
 
 // Tracks the persistent state of an image across passes
 struct GraphImage {
-	VkImage handle;
-	VkImageView view;
-	VkExtent2D extent;
-	VkImageAspectFlags aspect;
+	VkImage handle{};
+	VkImageView view{};
+	VkExtent2D extent{};
+	VkImageAspectFlags aspect{};
 
 	// Internal state tracking
 	VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
 	VkAccessFlags2 access = VK_ACCESS_2_NONE;
 	VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
 
-	static GraphImage Create(VkImage handle, VkImageView view, VkExtent2D extent,
-							 VkImageAspectFlags aspect) {
+	static auto Create(VkImage handle, VkImageView view, VkExtent2D extent,
+					   VkImageAspectFlags aspect) -> GraphImage {
 		GraphImage img;
 		img.handle = handle;
 		img.view = view;
@@ -45,7 +45,7 @@ class RenderGraph {
 		std::array<VkImageView, 4> colorTargets = {VK_NULL_HANDLE};
 		uint32_t colorTargetCount = 0;
 		VkImageView depthTarget = VK_NULL_HANDLE;
-		VkExtent2D extent = {0, 0};
+		VkExtent2D extent = {.width = 0, .height = 0};
 		float clearColor[4] = {0, 0, 0, 1};
 		bool useSecondaries = false;
 	};
@@ -58,14 +58,14 @@ class RenderGraph {
 		Pass& pass;
 
 		// Transitions image to SHADER_READ_ONLY_OPTIMAL
-		PassBuilder& Read(GraphImage& img) {
-			pass.transitions.push_back({&img, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
+		auto Read(GraphImage& img) -> PassBuilder& {
+			pass.transitions.emplace_back(&img, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 			return *this;
 		}
 
 		// Transitions image to COLOR_ATTACHMENT_OPTIMAL and sets as render target
-		PassBuilder& WriteColor(GraphImage& img, [[maybe_unused]] bool clear = true) {
-			pass.transitions.push_back({&img, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
+		auto WriteColor(GraphImage& img, [[maybe_unused]] bool clear = true) -> PassBuilder& {
+			pass.transitions.emplace_back(&img, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 			if (pass.colorTargetCount < 4) {
 				pass.colorTargets[pass.colorTargetCount++] = img.view;
 			}
@@ -74,20 +74,20 @@ class RenderGraph {
 		}
 
 		// Transitions image to DEPTH_ATTACHMENT_OPTIMAL and sets as depth target
-		PassBuilder& WriteDepth(GraphImage& img, [[maybe_unused]] bool clear = true) {
-			pass.transitions.push_back({&img, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL});
+		auto WriteDepth(GraphImage& img, [[maybe_unused]] bool clear = true) -> PassBuilder& {
+			pass.transitions.emplace_back(&img, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 			pass.depthTarget = img.view;
 			pass.extent = img.extent;
 			return *this;
 		}
 
 		// Final handoff to the OS
-		PassBuilder& Present(GraphImage& img) {
-			pass.transitions.push_back({&img, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR});
+		auto Present(GraphImage& img) -> PassBuilder& {
+			pass.transitions.emplace_back(&img, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 			return *this;
 		}
 
-		PassBuilder& UseSecondaries() {
+		auto UseSecondaries() -> PassBuilder& {
 			pass.useSecondaries = true;
 			return *this;
 		}
@@ -98,9 +98,9 @@ class RenderGraph {
 		}
 	};
 
-	PassBuilder AddPass(std::string_view name) {
+	auto AddPass(std::string_view name) -> PassBuilder {
 		_passes.push_back({.name = name});
-		return {*this, _passes.back()};
+		return {.graph = *this, .pass = _passes.back()};
 	}
 
 	void Execute(VkCommandBuffer cmd) {
@@ -109,8 +109,8 @@ class RenderGraph {
 			std::vector<VkImageMemoryBarrier2> barriers;
 			for (auto& [img, nextLayout] : pass.transitions) {
 				// Get flags from ZHLN LayoutTraits based on the requested layout
-				VkAccessFlags2 nextAccess;
-				VkPipelineStageFlags2 nextStage;
+				VkAccessFlags2 nextAccess = 0;
+				VkPipelineStageFlags2 nextStage = 0;
 
 				// Simple internal switch to map layout to ZHLN traits
 				if (nextLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
@@ -129,16 +129,19 @@ class RenderGraph {
 
 				// Only add barrier if state actually changes
 				if (img->layout != nextLayout) {
-					barriers.push_back(
-						{.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-						 .srcStageMask = img->stage,
-						 .srcAccessMask = img->access,
-						 .dstStageMask = nextStage,
-						 .dstAccessMask = nextAccess,
-						 .oldLayout = img->layout,
-						 .newLayout = nextLayout,
-						 .image = img->handle,
-						 .subresourceRange = {img->aspect, 0, VK_REMAINING_MIP_LEVELS, 0, 1}});
+					barriers.push_back({.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+										.srcStageMask = img->stage,
+										.srcAccessMask = img->access,
+										.dstStageMask = nextStage,
+										.dstAccessMask = nextAccess,
+										.oldLayout = img->layout,
+										.newLayout = nextLayout,
+										.image = img->handle,
+										.subresourceRange = {.aspectMask = img->aspect,
+															 .baseMipLevel = 0,
+															 .levelCount = VK_REMAINING_MIP_LEVELS,
+															 .baseArrayLayer = 0,
+															 .layerCount = 1}});
 
 					// Update tracker
 					img->layout = nextLayout;
@@ -155,7 +158,7 @@ class RenderGraph {
 			}
 
 			// 2. Pass Execution
-			if (pass.record) {
+			if (pass.record != nullptr) {
 				if (pass.colorTargetCount > 0 || pass.depthTarget != VK_NULL_HANDLE) {
 					ZHLN_RenderPassDesc rp = {
 						// Unroll into designated initializer

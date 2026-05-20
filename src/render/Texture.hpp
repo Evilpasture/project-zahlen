@@ -13,10 +13,11 @@ struct TextureAsset {
 	// Explicitly Move-Only
 	TextureAsset() = default;
 	TextureAsset(const TextureAsset&) = delete;
-	TextureAsset& operator=(const TextureAsset&) = delete;
+	auto operator=(const TextureAsset&) -> TextureAsset& = delete;
 
 	TextureAsset(TextureAsset&&) noexcept = default;
-	TextureAsset& operator=(TextureAsset&&) noexcept = default;
+	auto operator=(TextureAsset&&) noexcept -> TextureAsset& = default;
+	~TextureAsset() = default; 
 
 	// Helper to check validity
 	explicit operator bool() const { return image.Valid() && view.Valid(); }
@@ -28,8 +29,9 @@ struct TextureAsset {
  */
 template <VkFormat F>
 [[nodiscard]]
-inline TextureAsset UploadTexture(Allocator& allocator, const Context& ctx,
-								  const VkImageCreateInfo& baseInfo, const void* pixelData) {
+inline auto UploadTexture(Allocator& allocator, const Context& ctx,
+						  const VkImageCreateInfo& baseInfo, const void* pixelData)
+	-> TextureAsset {
 	// TMP Safety Check: Prevent Apple/Metal R8G8B8 errors at compile-time
 	if constexpr (F == VK_FORMAT_R8G8B8_UNORM || F == VK_FORMAT_B8G8R8_UNORM) {
 		static_assert(F != VK_FORMAT_R8G8B8_UNORM && F != VK_FORMAT_B8G8R8_UNORM,
@@ -38,14 +40,15 @@ inline TextureAsset UploadTexture(Allocator& allocator, const Context& ctx,
 	}
 
 	TextureAsset result;
-	const uint32_t tw = baseInfo.extent.width;
-	const uint32_t th = baseInfo.extent.height;
+	const uint32_t textureW = baseInfo.extent.width;
+	const uint32_t textureH = baseInfo.extent.height;
 
-	const uint32_t mipLevels = std::bit_width(std::max(tw, th));
+	const uint32_t mipLevels = std::bit_width(std::max(textureW, textureH));
 
 	CommandPool batchPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-	if (!batchPool.Allocate(1))
+	if (!batchPool.Allocate(1)) {
 		return {};
+	}
 	VkCommandBuffer cmd = batchPool[0];
 
 	VkImageCreateInfo texInfo = baseInfo;
@@ -54,10 +57,11 @@ inline TextureAsset UploadTexture(Allocator& allocator, const Context& ctx,
 	texInfo.usage |= (VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
 	result.image = Image::Create(allocator.Get(), texInfo, VMA_MEMORY_USAGE_GPU_ONLY);
-	if (!result.image)
+	if (!result.image) {
 		return {};
+	}
 
-	const size_t imageSize = static_cast<size_t>(tw) * th * 4;
+	const size_t imageSize = static_cast<size_t>(textureW) * textureH * 4;
 	Buffer staging = Buffer::Create(allocator.Get(), imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
 									VMA_MEMORY_USAGE_CPU_ONLY);
 	if (auto mapped = staging.Map(); mapped.data) {
@@ -82,13 +86,13 @@ inline TextureAsset UploadTexture(Allocator& allocator, const Context& ctx,
 	CopyBufferToImage(cmd, {.buffer = staging.Handle(),
 							.image = result.image.Handle(),
 							.layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-							.width = tw,
-							.height = th,
+							.width = textureW,
+							.height = textureH,
 							.buffer_offset = 0,
 							.mip_level = 0,
 							.base_array_layer = 0});
 
-	ZHLN_GenerateMipmaps(cmd, result.image.Handle(), (int32_t)tw, (int32_t)th, mipLevels);
+	ZHLN_GenerateMipmaps(cmd, result.image.Handle(), (int32_t)textureW, (int32_t)textureH, mipLevels);
 
 	ZHLN_EndCommandBuffer(cmd);
 
@@ -101,8 +105,7 @@ inline TextureAsset UploadTexture(Allocator& allocator, const Context& ctx,
 	vkQueueWaitIdle(ctx.GraphicsQueue());
 
 	// Final View Creation
-	result.view =
-		CreateView<F>(ctx.Device(), result.image.Handle(), GetFormatAspect(F), mipLevels);
+	result.view = CreateView<F>(ctx.Device(), result.image.Handle(), GetFormatAspect(F), mipLevels);
 
 	return result;
 }

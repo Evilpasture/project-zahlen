@@ -1,8 +1,8 @@
 // src/render/tests/test_utils.cpp
 // Pure logic — no Vulkan device needed
 
-#include "Utils.h"
 #include "RenderCore.h"
+#include "Utils.hpp"
 #include <print>
 #include <cstdint>
 
@@ -16,17 +16,17 @@ void test_utils() {
     std::println("=== utils ===");
 
     // Clamp — float
-    EXPECT(ZHLN_Clamp(0.5f, 0.0f, 1.0f) == 0.5f);
-    EXPECT(ZHLN_Clamp(-1.0f, 0.0f, 1.0f) == 0.0f);
-    EXPECT(ZHLN_Clamp(2.0f, 0.0f, 1.0f) == 1.0f);
+    EXPECT(ZHLN::Clamp(0.5f, 0.0f, 1.0f) == 0.5f);
+    EXPECT(ZHLN::Clamp(-1.0f, 0.0f, 1.0f) == 0.0f);
+    EXPECT(ZHLN::Clamp(2.0f, 0.0f, 1.0f) == 1.0f);
 
     // Clamp — int32
-    EXPECT(ZHLN_Clamp((int32_t)5, (int32_t)0, (int32_t)10) == 5);
-    EXPECT(ZHLN_Clamp((int32_t)-1, (int32_t)0, (int32_t)10) == 0);
-    EXPECT(ZHLN_Clamp((int32_t)11, (int32_t)0, (int32_t)10) == 10);
+    EXPECT(ZHLN::Clamp((int32_t)5, (int32_t)0, (int32_t)10) == 5);
+    EXPECT(ZHLN::Clamp((int32_t)-1, (int32_t)0, (int32_t)10) == 0);
+    EXPECT(ZHLN::Clamp((int32_t)11, (int32_t)0, (int32_t)10) == 10);
 
     // Clamp — double
-    EXPECT(ZHLN_Clamp(0.5, 0.0, 1.0) == 0.5);
+    EXPECT(ZHLN::Clamp(0.5, 0.0, 1.0) == 0.5);
 }
 
 void test_errors() {

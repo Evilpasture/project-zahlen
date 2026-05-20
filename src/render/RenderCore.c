@@ -1,11 +1,80 @@
 #include "RenderCore.h"
 
-#include "Utils.h"
-
+#include <math.h>
 #include <spirv_reflect.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <vulkan/vulkan_core.h>
+
+// NOLINTBEGIN(misc-misplaced-const, readability-identifier-length)
+
+/* --- Basic helpers --- */
+
+static inline int32_t zhln_clamp_i32(int32_t v, int32_t lo, int32_t hi) {
+	return (v < lo) ? lo : (v > hi) ? hi : v;
+}
+
+static inline float zhln_clamp_f(float v, float lo, float hi) {
+	return fminf(fmaxf(v, lo), hi);
+}
+
+static inline double zhln_clamp_d(double v, double lo, double hi) {
+	return fmin(fmax(v, lo), hi);
+}
+
+#define ZHLN_Clamp(v, lo, hi)                                                                      \
+	_Generic((v),                                                                                  \
+		float: zhln_clamp_f,                                                                       \
+		double: zhln_clamp_d,                                                                      \
+		int32_t: zhln_clamp_i32,                                                                   \
+		default: zhln_clamp_i32)(v, lo, hi)
+
+static inline int32_t zhln_min_i32(int32_t a, int32_t b) {
+	return (a < b) ? a : b;
+}
+static inline uint32_t zhln_min_u32(uint32_t a, uint32_t b) {
+	return (a < b) ? a : b;
+}
+static inline int64_t zhln_min_i64(int64_t a, int64_t b) {
+	return (a < b) ? a : b;
+}
+static inline uint64_t zhln_min_u64(uint64_t a, uint64_t b) {
+	return (a < b) ? a : b;
+}
+
+#define ZHLN_Min(a, b)                                                                             \
+	_Generic((a),                                                                                  \
+		int32_t: zhln_min_i32,                                                                     \
+		uint32_t: zhln_min_u32,                                                                    \
+		int64_t: zhln_min_i64,                                                                     \
+		uint64_t: zhln_min_u64,                                                                    \
+		default: zhln_min_i64)((a), (b))
+
+static inline int32_t zhln_max_i32(int32_t a, int32_t b) {
+	return (a > b) ? a : b;
+}
+static inline uint32_t zhln_max_u32(uint32_t a, uint32_t b) {
+	return (a > b) ? a : b;
+}
+static inline int64_t zhln_max_i64(int64_t a, int64_t b) {
+	return (a > b) ? a : b;
+}
+static inline uint64_t zhln_max_u64(uint64_t a, uint64_t b) {
+	return (a > b) ? a : b;
+}
+
+#define ZHLN_Max(a, b)                                                                             \
+	_Generic((a),                                                                                  \
+		int32_t: zhln_max_i32,                                                                     \
+		uint32_t: zhln_max_u32,                                                                    \
+		int64_t: zhln_max_i64,                                                                     \
+		uint64_t: zhln_max_u64,                                                                    \
+		default: zhln_max_i64)((a), (b))
+
+
+
+/* --- Start of procedural logic --- */
 
 static VkBool32 VKAPI_CALL ZHLN_Internal_DebugCallback(
 	VkDebugUtilsMessageSeverityFlagBitsEXT severity, VkDebugUtilsMessageTypeFlagsEXT type,
@@ -37,10 +106,9 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
 	// --- Query available instance extensions to filter out unsupported ones ---
 	uint32_t available_count = 0;
 	vkEnumerateInstanceExtensionProperties(nullptr, &available_count, nullptr);
-	if (available_count > 128) {
-		available_count = 128; // safe clamp for stack-only allocation
-	}
-	VkExtensionProperties available_exts[128];
+	available_count =
+		ZHLN_Min(available_count, maxInstanceExtensions); // safe clamp for stack-only allocation
+	VkExtensionProperties available_exts[maxInstanceExtensions];
 	vkEnumerateInstanceExtensionProperties(nullptr, &available_count, available_exts);
 
 	const char* final_extensions[32];
@@ -59,7 +127,7 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
 				final_extensions[final_count++] = desc->extensions[i];
 			}
 		} else {
-			fprintf(stderr, "[VULKAN] Skipping unsupported instance extension: %s\n",
+			fprintf(stderr, "Zahlen: [VULKAN] Skipping unsupported instance extension: %s\n",
 					desc->extensions[i]);
 		}
 	}
@@ -90,7 +158,7 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
 		.pApplicationInfo = &app_info,
 		.enabledExtensionCount = final_count,
 		.ppEnabledExtensionNames = final_extensions,
-		.enabledLayerCount = desc->enable_validation ? 1U : 0U,
+		.enabledLayerCount = desc->enable_validation ? VK_TRUE : VK_FALSE,
 		.ppEnabledLayerNames = desc->enable_validation ? validation_layers : nullptr,
 		.flags = 0,
 	};
@@ -119,7 +187,7 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
 		create_info.pNext = &debug_info;
 	}
 
-	VkInstance instance;
+	VkInstance instance = VK_NULL_HANDLE;
 	if (vkCreateInstance(&create_info, nullptr, &instance) != VK_SUCCESS) {
 		return VK_NULL_HANDLE;
 	}
@@ -168,9 +236,7 @@ static void ZHLN_Internal_QueryQueueFamilies(const VkPhysicalDevice device,
 	vkGetPhysicalDeviceQueueFamilyProperties(device, &count, nullptr);
 
 	VkQueueFamilyProperties families[64] = {};
-	if (count > 64) {
-		count = 64; // clamp; no heap alloc in C layer
-	}
+	count = ZHLN_Min(count, 64); // clamp; no heap alloc in C layer
 	vkGetPhysicalDeviceQueueFamilyProperties(device, &count, families);
 
 	for (uint32_t i = 0; i < count; ++i) {
@@ -191,6 +257,7 @@ static void ZHLN_Internal_QueryQueueFamilies(const VkPhysicalDevice device,
 		*out_present = *out_graphics;
 	}
 }
+
 [[nodiscard]]
 ZHLN_PhysicalDeviceInfo
 ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* const restrict desc) {
@@ -201,9 +268,8 @@ ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* const restrict desc) {
 	if (count == 0) {
 		return null_result;
 	}
-	if (count > 16) {
-		count = 16; // clamp; stack only
-	}
+
+	count = ZHLN_Min(count, 16); // clamp; stack only
 
 	VkPhysicalDevice devices[16] = {};
 	vkEnumeratePhysicalDevices(desc->instance, &count, devices);
@@ -241,6 +307,7 @@ ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* const restrict desc) {
 
 	return best_score >= 0 ? best : null_result;
 }
+
 [[nodiscard]]
 ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
 	ZHLN_Device null_result = {};
@@ -314,14 +381,14 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
 		.enabledLayerCount = 0,
 		.ppEnabledLayerNames = nullptr};
 
-	VkDevice handle;
+	VkDevice handle = VK_NULL_HANDLE;
 	if (vkCreateDevice(desc->physical->handle, &create_info, nullptr, &handle) != VK_SUCCESS) {
 		return null_result;
 	}
 
 	// --- Queue Retrieval ---
-	VkQueue graphics_queue;
-	VkQueue present_queue;
+	VkQueue graphics_queue = VK_NULL_HANDLE;
+	VkQueue present_queue = VK_NULL_HANDLE;
 	vkGetDeviceQueue(handle, desc->physical->graphics_family, 0, &graphics_queue);
 
 	// If families are the same, present_queue is just an alias — no second call needed
@@ -337,6 +404,7 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
 		.present_queue = present_queue,
 	};
 }
+
 [[nodiscard]]
 ZHLN_SwapchainSupport
 ZHLN_QuerySwapchainSupport(const ZHLN_SwapchainSupportDesc* const restrict desc) {
@@ -346,7 +414,7 @@ ZHLN_QuerySwapchainSupport(const ZHLN_SwapchainSupportDesc* const restrict desc)
 
 	uint32_t hardware_count = 0;
 	vkGetPhysicalDeviceSurfaceFormatsKHR(desc->physical, desc->surface, &hardware_count, nullptr);
-	result.format_count = (hardware_count > 64) ? 64 : hardware_count;
+	result.format_count = ZHLN_Min(hardware_count, 64);
 	if (result.format_count > 0) {
 		vkGetPhysicalDeviceSurfaceFormatsKHR(desc->physical, desc->surface, &result.format_count,
 											 result.formats);
@@ -355,7 +423,7 @@ ZHLN_QuerySwapchainSupport(const ZHLN_SwapchainSupportDesc* const restrict desc)
 	uint32_t present_count = 0;
 	vkGetPhysicalDeviceSurfacePresentModesKHR(desc->physical, desc->surface, &present_count,
 											  nullptr);
-	result.present_mode_count = (present_count > 8) ? 8 : present_count;
+	result.present_mode_count = ZHLN_Min(present_count, 8);
 	if (result.present_mode_count > 0) {
 		vkGetPhysicalDeviceSurfacePresentModesKHR(desc->physical, desc->surface,
 												  &result.present_mode_count, result.present_modes);
@@ -375,6 +443,7 @@ ZHLN_Internal_ChooseFormat(const ZHLN_SwapchainSupport* const restrict support) 
 	// Fallback: whatever the driver gives us first
 	return support->formats[0];
 }
+
 [[nodiscard]]
 static VkPresentModeKHR
 ZHLN_Internal_ChoosePresentMode(const ZHLN_SwapchainSupport* const restrict support, bool vsync) {
@@ -394,6 +463,7 @@ ZHLN_Internal_ChoosePresentMode(const ZHLN_SwapchainSupport* const restrict supp
 	// FIFO is always guaranteed by the spec
 	return VK_PRESENT_MODE_FIFO_KHR;
 }
+
 [[nodiscard]]
 static VkExtent2D ZHLN_Internal_ChooseExtent(const VkSurfaceCapabilitiesKHR* const restrict caps,
 											 const uint32_t width, const uint32_t height) {
@@ -424,6 +494,7 @@ ZHLN_Internal_ChooseCompositeAlpha(const VkCompositeAlphaFlagsKHR supported) {
 	// Spec guarantees at least one bit is set, so this is unreachable
 	return VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 }
+
 [[nodiscard]]
 ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict desc) {
 	ZHLN_Swapchain null_result = {};
@@ -456,9 +527,7 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
 	}
 
 	// Clamp to library capacity
-	if (image_count > 8) {
-		image_count = 8;
-	}
+	image_count = ZHLN_Min(image_count, 8);
 
 	const uint32_t queue_families[2] = {
 		desc->physical->graphics_family,
@@ -505,7 +574,7 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
 		.oldSwapchain = desc->old_swapchain,
 	};
 
-	VkSwapchainKHR handle;
+	VkSwapchainKHR handle = VK_NULL_HANDLE;
 	if (vkCreateSwapchainKHR(desc->device->handle, &create_info, nullptr, &handle) != VK_SUCCESS) {
 		return null_result;
 	}
@@ -580,12 +649,12 @@ bool ZHLN_CreateFrameSync(const ZHLN_FrameSyncDesc* const desc,
 	};
 
 	for (uint32_t i = 0; i < desc->frame_count; ++i) {
-		bool ok =
-			vkCreateSemaphore(desc->device, &sem_info, nullptr, &out_sync[i].image_available) ==
-				VK_SUCCESS &&
-			vkCreateSemaphore(desc->device, &sem_info, nullptr, &out_sync[i].render_finished) ==
-				VK_SUCCESS &&
-			vkCreateFence(desc->device, &fence_info, nullptr, &out_sync[i].in_flight) == VK_SUCCESS;
+		bool ok = (vkCreateSemaphore(desc->device, &sem_info, nullptr,
+									 &out_sync[i].image_available) == VK_SUCCESS &&
+				   vkCreateSemaphore(desc->device, &sem_info, nullptr,
+									 &out_sync[i].render_finished) == VK_SUCCESS &&
+				   vkCreateFence(desc->device, &fence_info, nullptr, &out_sync[i].in_flight) ==
+					   VK_SUCCESS) != 0;
 
 		if (!ok) {
 			// Destroy everything successfully created up to and including this frame
@@ -612,6 +681,7 @@ void ZHLN_DestroyFrameSync(const VkDevice device, ZHLN_FrameSync* const restrict
 		sync[i] = (ZHLN_FrameSync){};
 	}
 }
+
 [[nodiscard]]
 bool ZHLN_CreateCommandPool(const VkDevice device, const uint32_t queue_family,
 							ZHLN_CommandPool* const restrict out_pool) {
@@ -628,6 +698,7 @@ bool ZHLN_CreateCommandPool(const VkDevice device, const uint32_t queue_family,
 	out_pool->count = 0;
 	return true;
 }
+
 [[nodiscard]]
 bool ZHLN_AllocateCommandBuffers(const VkDevice device, ZHLN_CommandPool* const restrict pool,
 								 const uint32_t count) {
@@ -666,6 +737,7 @@ void ZHLN_WaitAndResetFence(const VkDevice device, const VkFence fence) {
 	vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
 	vkResetFences(device, 1, &fence);
 }
+
 [[nodiscard]]
 ZHLN_FrameResult ZHLN_AcquireImage(const VkDevice device,
 								   const ZHLN_AcquireDesc* const restrict desc,
@@ -716,6 +788,7 @@ void ZHLN_SubmitFrame(const VkQueue graphics_queue, const ZHLN_FrameSync* const 
 
 	vkQueueSubmit2(graphics_queue, 1, &submit, sync->in_flight);
 }
+
 [[nodiscard]]
 ZHLN_FrameResult ZHLN_PresentFrame(const ZHLN_PresentDesc* const restrict desc) {
 	const VkPresentInfoKHR info = {
@@ -752,7 +825,7 @@ VkShaderModule ZHLN_CreateShaderModule(const VkDevice device,
 		.pCode = desc->code,
 	};
 
-	VkShaderModule module;
+	VkShaderModule module = VK_NULL_HANDLE;
 	if (vkCreateShaderModule(device, &info, nullptr, &module) != VK_SUCCESS) {
 		return VK_NULL_HANDLE;
 	}
@@ -839,7 +912,7 @@ VkPipelineLayout ZHLN_CreatePipelineLayout(const VkDevice device,
 		.pPushConstantRanges = desc->push_constants,
 	};
 
-	VkPipelineLayout layout;
+	VkPipelineLayout layout = VK_NULL_HANDLE;
 	if (vkCreatePipelineLayout(device, &info, nullptr, &layout) != VK_SUCCESS) {
 		return VK_NULL_HANDLE;
 	}
@@ -851,6 +924,7 @@ void ZHLN_DestroyPipelineLayout(const VkDevice device, const VkPipelineLayout la
 		vkDestroyPipelineLayout(device, layout, nullptr);
 	}
 }
+
 [[nodiscard]]
 VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device,
 									   const ZHLN_GraphicsPipelineDesc* const restrict desc) {
@@ -907,7 +981,7 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device,
 
 	// --- Color Blend (FIX: Dynamic Attachment Count) ---
 	VkPipelineColorBlendAttachmentState blend_attachments[8];
-	uint32_t safe_color_count = desc->color_format_count > 8 ? 8 : desc->color_format_count;
+	uint32_t safe_color_count = ZHLN_Min(desc->color_format_count , 8);
 
 	for (uint32_t i = 0; i < safe_color_count; ++i) {
 		blend_attachments[i] = (VkPipelineColorBlendAttachmentState){
@@ -965,7 +1039,7 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device,
 		.layout = desc->layout,
 	};
 
-	VkPipeline pipeline;
+	VkPipeline pipeline = VK_NULL_HANDLE;
 	if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline) !=
 		VK_SUCCESS) {
 		return VK_NULL_HANDLE;
@@ -1073,7 +1147,7 @@ void ZHLN_BeginSecondaryCommandBuffer(const VkCommandBuffer cmd,
 	const VkCommandBufferInheritanceRenderingInfo inheritance_rendering = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
 		.flags = 0,
-		.colorAttachmentCount = (desc->color_format != VK_FORMAT_UNDEFINED) ? 1U : 0U,
+		.colorAttachmentCount = (desc->color_format != VK_FORMAT_UNDEFINED) ? VK_TRUE : VK_FALSE,
 		.pColorAttachmentFormats = &desc->color_format,
 		.depthAttachmentFormat = desc->depth_format,
 		.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
@@ -1096,16 +1170,18 @@ void ZHLN_BeginSecondaryCommandBuffer(const VkCommandBuffer cmd,
 bool ZHLN_AllocateSecondaryCommandBuffers(const VkDevice device,
 										  ZHLN_CommandPool* const restrict pool,
 										  const uint32_t count) {
-	if (count > 256)
+	if (count > 256) {
 		return false;
+	}
 	const VkCommandBufferAllocateInfo info = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
 		.commandPool = pool->pool,
 		.level = VK_COMMAND_BUFFER_LEVEL_SECONDARY,
 		.commandBufferCount = count,
 	};
-	if (vkAllocateCommandBuffers(device, &info, pool->buffers) != VK_SUCCESS)
+	if (vkAllocateCommandBuffers(device, &info, pool->buffers) != VK_SUCCESS) {
 		return false;
+	}
 	pool->count = count;
 	return true;
 }
@@ -1333,7 +1409,7 @@ VkImageView ZHLN_CreateImageView(const VkDevice device,
 			},
 	};
 
-	VkImageView view;
+	VkImageView view = VK_NULL_HANDLE;
 	if (vkCreateImageView(device, &info, nullptr, &view) != VK_SUCCESS) {
 		return VK_NULL_HANDLE;
 	}
@@ -1473,3 +1549,4 @@ void ZHLN_GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const 
 		.mip_count = 1};
 	ZHLN_CmdImageBarrier(cmd, &barrier_last);
 }
+// NOLINTEND(misc-misplaced-const, readability-identifier-length)

@@ -2,22 +2,23 @@
 #include <Utils.hpp>
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
 namespace ZHLN::Texture {
 
 // Generates a Test Pattern (Grid with a colorful center)
-template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> GenerateTest() {
-	std::vector<uint32_t> pixels(Width * Height);
+template <uint32_t Width, uint32_t Height> inline auto GenerateTest() -> std::vector<uint32_t> {
+	std::vector<uint32_t> pixels(static_cast<size_t>(Width * Height));
 
 	auto Pack = [](uint8_t r, uint8_t g, uint8_t b) -> uint32_t {
 		// ABGR little-endian (matches VK_FORMAT_R8G8B8A8_UNORM on Apple/Windows)
 		return 0xFF000000u | (uint32_t(b) << 16) | (uint32_t(g) << 8) | uint32_t(r);
 	};
 
-	const float fW = static_cast<float>(Width);
-	const float fH = static_cast<float>(Height);
+	const auto fW = static_cast<float>(Width);
+	const auto fH = static_cast<float>(Height);
 	const float cx = fW * 0.5f;
 	const float cy = fH * 0.5f;
 
@@ -34,9 +35,9 @@ template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> Generate
 			float v = float(y) / (fH - 1.0f);
 
 			// 1. Base UV gradient
-			uint8_t r = static_cast<uint8_t>(u * 255.0f);
-			uint8_t g = static_cast<uint8_t>(v * 255.0f);
-			uint8_t b = static_cast<uint8_t>((1.0f - u * 0.5f - v * 0.5f) * 200.0f + 55.0f);
+			auto r = static_cast<uint8_t>(u * 255.0f);
+			auto g = static_cast<uint8_t>(v * 255.0f);
+			auto b = static_cast<uint8_t>((1.0f - u * 0.5f - v * 0.5f) * 200.0f + 55.0f);
 
 			// 2. Orientation Corner Markers
 			bool inTL = x < cornerSize && y < cornerSize;
@@ -94,7 +95,7 @@ template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> Generate
 			// 5. Circle outline (Using squared distance to avoid sqrt in constexpr)
 			float dx = float(x) - cx;
 			float dy = float(y) - cy;
-			float dSq = dx * dx + dy * dy;
+			float dSq = (dx * dx) + (dy * dy);
 
 			float diff = dSq - radiusSq;
 			if (diff * diff < (radiusSq * 4.0f) && !inBand) {
@@ -113,14 +114,15 @@ template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> Generate
 				r = g = b = 255;
 			}
 
-			pixels[y * Width + x] = Pack(r, g, b);
+			pixels[(y * Width) + x] = Pack(r, g, b);
 		}
 	}
 	return pixels;
 }
 
-template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> GenerateTVInterrupt() {
-	std::vector<uint32_t> pixels(Width * Height);
+template <uint32_t Width, uint32_t Height>
+inline auto GenerateTVInterrupt() -> std::vector<uint32_t> {
+	std::vector<uint32_t> pixels(static_cast<size_t>(Width * Height));
 
 	auto Pack = [](uint8_t r, uint8_t g, uint8_t b) -> uint32_t {
 		return 0xFF000000u | (uint32_t(b) << 16) | (uint32_t(g) << 8) | uint32_t(r);
@@ -142,10 +144,11 @@ template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> Generate
 		for (uint32_t x = 0; x < Width; ++x) {
 			float u = float(x) / float(Width);
 			int barIndex = int(u * 7);
-			if (barIndex > 6)
+			if (barIndex > 6) {
 				barIndex = 6;
+			}
 
-			uint32_t finalColor;
+			uint32_t finalColor = 0;
 
 			if (v < 0.67f) {
 				finalColor = colors[barIndex];
@@ -164,15 +167,16 @@ template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> Generate
 					finalColor = Pack(16, 16, 16); // Black
 			}
 
-			pixels[y * Width + x] = finalColor;
+			pixels[(y * Width) + x] = finalColor;
 		}
 	}
 	return pixels;
 }
 
 // Tests normal map sampling & tangent-space lighting pipelines.
-template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> GenerateBrickNormalMap() {
-	std::vector<uint32_t> pixels(Width * Height);
+template <uint32_t Width, uint32_t Height>
+inline auto GenerateBrickNormalMap() -> std::vector<uint32_t> {
+	std::vector<uint32_t> pixels(static_cast<size_t>(Width * Height));
 
 	auto Pack = [](uint8_t r, uint8_t g, uint8_t b) -> uint32_t {
 		return 0xFF000000u | (uint32_t(b) << 16) | (uint32_t(g) << 8) | uint32_t(r);
@@ -194,30 +198,35 @@ template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> Generate
 			bool inMortarY = localY < mortarH || localY >= brickH - mortarH;
 			bool inMortar = inMortarX || inMortarY;
 
-			uint8_t nx = 128, ny = 128, nz = 255;
+			uint8_t nx = 128;
+			uint8_t ny = 128;
+			uint8_t nz = 255;
 
 			if (inMortar) {
-				float bevelX = 0.0f, bevelY = 0.0f;
-				if (inMortarX)
+				float bevelX = 0.0f;
+				float bevelY = 0.0f;
+				if (inMortarX) {
 					bevelX = (localX < mortarW) ? +1.0f : -1.0f;
-				if (inMortarY)
+				}
+				if (inMortarY) {
 					bevelY = (localY < mortarH) ? +1.0f : -1.0f;
+				}
 
-				float len = std::sqrt(bevelX * bevelX + bevelY * bevelY + 1.0f);
-				nx = uint8_t((bevelX / len) * 127.0f + 128.0f);
-				ny = uint8_t((bevelY / len) * 127.0f + 128.0f);
-				nz = uint8_t((1.0f / len) * 127.0f + 128.0f);
+				float len = std::sqrt((bevelX * bevelX) + (bevelY * bevelY) + 1.0f);
+				nx = uint8_t(((bevelX / len) * 127.0f) + 128.0f);
+				ny = uint8_t(((bevelY / len) * 127.0f) + 128.0f);
+				nz = uint8_t(((1.0f / len) * 127.0f) + 128.0f);
 			}
 
-			pixels[y * Width + x] = Pack(nx, ny, nz);
+			pixels[(y * Width) + x] = Pack(nx, ny, nz);
 		}
 	}
 	return pixels;
 }
 
 // Procedural marble — tests smooth noise blending and color gradient sampling.
-template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> GenerateMarble() {
-	std::vector<uint32_t> pixels(Width * Height);
+template <uint32_t Width, uint32_t Height> inline auto GenerateMarble() -> std::vector<uint32_t> {
+	std::vector<uint32_t> pixels(static_cast<size_t>(Width * Height));
 
 	for (uint32_t y = 0; y < Height; ++y) {
 		for (uint32_t x = 0; x < Width; ++x) {
@@ -225,19 +234,19 @@ template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> Generate
 			float v = float(y) / float(Height);
 
 			float n = Noise(u * 6.0f, v * 6.0f);
-			float vein = std::abs(std::sin(u * 3.14159f * 3.0f + n * 2.5f));
+			float vein = Abs(Sin((u * 3.14159f * 3.0f) + (n * 2.5f)));
 
-			uint8_t base = uint8_t(180.0f + vein * 75.0f);
-			uint8_t grey = uint8_t(160.0f + vein * 90.0f);
+			auto base = uint8_t(180.0f + vein * 75.0f);
+			auto grey = uint8_t(160.0f + vein * 90.0f);
 
-			pixels[y * Width + x] = PackColor(base, grey, base);
+			pixels[(y * Width) + x] = PackColor(base, grey, base);
 		}
 	}
 	return pixels;
 }
 
 template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> GenerateMarbleCrisp() {
-	std::vector<uint32_t> pixels(Width * Height);
+	std::vector<uint32_t> pixels(static_cast<size_t>(Width * Height));
 
 	// --- Main Generator ---
 	for (uint32_t y = 0; y < Height; ++y) {
@@ -248,13 +257,13 @@ template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> Generate
 			float qx = FBM(u, v, 4);
 			float qy = FBM(u + 1.2f, v + 3.1f, 4);
 
-			float rx = FBM(u + 4.0f * qx + 1.7f, v + 4.0f * qy + 9.2f, 4);
-			float ry = FBM(u + 4.0f * qx + 8.3f, v + 4.0f * qy + 2.8f, 4);
+			float rx = FBM(u + (4.0f * qx) + 1.7f, v + (4.0f * qy) + 9.2f, 4);
+			float ry = FBM(u + (4.0f * qx) + 8.3f, v + (4.0f * qy) + 2.8f, 4);
 
-			float pattern = FBM(u + 4.0f * rx, v + 4.0f * ry, 4);
+			float pattern = FBM(u + (4.0f * rx), v + (4.0f * ry), 4);
 
-			float veinBase = FBM(u * 2.0f + rx, v * 2.0f + ry, 3);
-			float vein = 1.0f - Abs(Sin(veinBase * 10.0f + pattern * 2.0f));
+			float veinBase = FBM((u * 2.0f) + rx, (v * 2.0f) + ry, 3);
+			float vein = 1.0f - Abs(Sin((veinBase * 10.0f) + (pattern * 2.0f)));
 			vein = Power(vein, 12.0f);
 
 			float grain = Hash((float)x, (float)y) * 0.12f;
@@ -271,7 +280,7 @@ template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> Generate
 			g_map += grain;
 			b_map += grain;
 
-			pixels[y * Width + x] =
+			pixels[(y * Width) + x] =
 				PackColor((uint8_t)(Clamp(r_map, 0, 1) * 255), (uint8_t)(Clamp(g_map, 0, 1) * 255),
 						  (uint8_t)(Clamp(b_map, 0, 1) * 255));
 		}
@@ -290,19 +299,19 @@ struct Blade {
 };
 
 // Helper for alpha blending 32-bit colors (Assuming ARGB or XRGB format)
-inline uint32_t BlendColors(uint32_t bg, float r, float g, float b, float alpha) {
+inline auto BlendColors(uint32_t bg, float r, float g, float b, float alpha) -> uint32_t {
 	uint8_t bgR = (bg >> 16) & 0xFF;
 	uint8_t bgG = (bg >> 8) & 0xFF;
 	uint8_t bgB = bg & 0xFF;
 
-	uint8_t outR = (uint8_t)(r * alpha * 255.0f + bgR * (1.0f - alpha));
-	uint8_t outG = (uint8_t)(g * alpha * 255.0f + bgG * (1.0f - alpha));
-	uint8_t outB = (uint8_t)(b * alpha * 255.0f + bgB * (1.0f - alpha));
+	auto outR = (uint8_t)((r * alpha * 255.0f) + (bgR * (1.0f - alpha)));
+	auto outG = (uint8_t)((g * alpha * 255.0f) + (bgG * (1.0f - alpha)));
+	auto outB = (uint8_t)((b * alpha * 255.0f) + (bgB * (1.0f - alpha)));
 
 	return PackColor(outR, outG, outB);
 }
 
-static std::vector<Blade> GenerateOrganicBlades(uint32_t W, uint32_t H) {
+static auto GenerateOrganicBlades(uint32_t W, uint32_t H) -> std::vector<Blade> {
 	std::vector<Blade> blades;
 	float density = 1.5f; // Adjust for thicker/thinner grass fields
 
@@ -350,7 +359,7 @@ static std::vector<Blade> GenerateOrganicBlades(uint32_t W, uint32_t H) {
 }
 
 template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> GenerateGrassTexture() {
-	std::vector<uint32_t> pixels(Width * Height);
+	std::vector<uint32_t> pixels(static_cast<size_t>(Width * Height));
 
 	// 1. Fill background with an organic dirt/moss base (prevents spotty black holes)
 	for (uint32_t py = 0; py < Height; ++py) {
@@ -380,8 +389,9 @@ template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> Generate
 
 		for (int py = startY; py <= endY; ++py) {
 			float relY = (float)py - b.rootY;
-			if (relY > 0)
+			if (relY > 0) {
 				continue;
+			}
 
 			float t = Clamp(-relY / b.height, 0.0f, 1.0f); // 0.0 at root, 1.0 at tip
 
@@ -398,8 +408,9 @@ template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> Generate
 
 				// Soft edges for anti-aliasing
 				float alpha = Smoothstep(halfW + 0.5f, halfW - 0.5f, dist);
-				if (alpha <= 0.0f)
+				if (alpha <= 0.0f) {
 					continue;
+				}
 
 				// --- ORGANIC COLORING ---
 
@@ -434,8 +445,9 @@ template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> Generate
 }
 
 // Mandelbrot set — stress-tests texture coordinate precision & mip filtering.
-template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> GenerateMandelbrot() {
-	std::vector<uint32_t> pixels(Width * Height);
+template <uint32_t Width, uint32_t Height>
+inline auto GenerateMandelbrot() -> std::vector<uint32_t> {
+	std::vector<uint32_t> pixels(static_cast<size_t>(Width * Height));
 
 	auto Pack = [](uint8_t r, uint8_t g, uint8_t b) -> uint32_t {
 		return 0xFF000000u | (uint32_t(b) << 16) | (uint32_t(g) << 8) | uint32_t(r);
@@ -474,8 +486,9 @@ template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> Generate
 }
 
 // Radial colour wheel — tests hue/saturation rendering and polar UV math.
-template <uint32_t Width, uint32_t Height> inline std::vector<uint32_t> GenerateColorWheel() {
-	std::vector<uint32_t> pixels(Width * Height);
+template <uint32_t Width, uint32_t Height>
+inline auto GenerateColorWheel() -> std::vector<uint32_t> {
+	std::vector<uint32_t> pixels(static_cast<size_t>(Width * Height));
 
 	auto Pack = [](uint8_t r, uint8_t g, uint8_t b) -> uint32_t {
 		return 0xFF000000u | (uint32_t(b) << 16) | (uint32_t(g) << 8) | uint32_t(r);

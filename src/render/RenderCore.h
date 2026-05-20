@@ -18,6 +18,8 @@ extern "C" {
 
 /* --- INSTANCE MANAGEMENT --- */
 
+static constexpr auto maxInstanceExtensions = 128;
+
 /**
  * @struct ZHLN_InstanceDesc
  * @brief Configuration for Vulkan Instance initialization.

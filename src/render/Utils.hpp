@@ -1,5 +1,6 @@
 #pragma once
 #include <cmath>
+#include <cstdint>
 #include <initializer_list>
 #include <type_traits>
 namespace ZHLN {

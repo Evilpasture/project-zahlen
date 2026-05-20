@@ -769,9 +769,12 @@ class Surface {
 
 	// Move only
 	Surface(const Surface&) = delete;
+	auto operator=(const Surface&) -> Surface& = delete; // <-- Explicitly deleted to satisfy Rule of Five
+
 	Surface(Surface&& other) noexcept
 		: _instance(std::exchange(other._instance, VK_NULL_HANDLE)),
 		  _handle(std::exchange(other._handle, VK_NULL_HANDLE)) {}
+		  
 	auto operator=(Surface&& other) noexcept -> Surface& {
 		if (this != &other) {
 			if (_handle != VK_NULL_HANDLE) {
@@ -947,8 +950,6 @@ using DescriptorPool = DeviceHandle<VkDescriptorPool, ZHLN_DestroyDescriptorPool
 // ============================================================================
 // Extension Query Utilities
 // ============================================================================
-
-static constexpr auto maxInstanceExtensions = 128;
 
 [[nodiscard]] inline auto IsInstanceExtensionSupported(std::string_view extension) noexcept
 	-> bool {
