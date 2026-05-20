@@ -150,13 +150,13 @@ concept IsVertex = requires {
  * @param ...  The members, in the exact order they map to layout(location = X).
  */
 #define ZHLN_REFLECT_VERTEX(Type, ...)                                                             \
-    namespace ZHLN::Vk {                                                                           \
-        template <> struct VertexTraits<Type> {                                                    \
-            static consteval auto Bindings() {                                                     \
-                return std::array{::ZHLN::Vk::DefaultBinding<Type>(0)};                            \
-            }                                                                                      \
-            static consteval auto Attributes() {                                                   \
-                return ::ZHLN::Vk::MakeAttributeArray(ZHLN_MAP_MEMBERS(Type, __VA_ARGS__));        \
-            }                                                                                      \
-        };                                                                                         \
-    }
+	namespace ZHLN::Vk {                                                                           \
+	template <> struct VertexTraits<Type> {                                                        \
+		static consteval auto Bindings() {                                                         \
+			return std::array{::ZHLN::Vk::DefaultBinding<Type>(0)};                                \
+		}                                                                                          \
+		static consteval auto Attributes() {                                                       \
+			return ::ZHLN::Vk::MakeAttributeArray(ZHLN_MAP_MEMBERS(Type, __VA_ARGS__));            \
+		}                                                                                          \
+	};                                                                                             \
+	}

@@ -24,7 +24,7 @@ template <VkFormat F> struct RenderTarget {
 
 	[[nodiscard]] static RenderTarget Create(Allocator& allocator, const Context& ctx,
 											 VkExtent2D extent, VkImageUsageFlags usage,
-											 VkImageAspectFlags aspect = FormatTraits<F>::aspect) {
+											 VkImageAspectFlags aspect = GetFormatAspect(F)) {
 		RenderTarget rt;
 
 		const VkImageCreateInfo info = {

@@ -391,6 +391,17 @@ void ZHLN_WaitAndResetFrame(VkDevice device, VkFence in_flight_fence,
 void ZHLN_BeginCommandBuffer(VkCommandBuffer cmd);
 void ZHLN_EndCommandBuffer(VkCommandBuffer cmd);
 
+/* --- FRAME LOOP COHESION --- */
+
+/**
+ * @brief Waits for the in-flight fence, resets it, and acquires the next swapchain image.
+ */
+[[nodiscard]]
+ZHLN_FrameResult ZHLN_WaitAndAcquireImage(VkDevice device, VkSwapchainKHR swapchain,
+                                          const ZHLN_FrameSync* ZHLN_RESTRICT sync,
+                                          const ZHLN_CommandPool* ZHLN_RESTRICT pool,
+                                          uint32_t* out_image_index);
+
 /* --- PUSH CONSTANT HELPERS --- */
 
 void ZHLN_PushConstants(VkCommandBuffer cmd, VkPipelineLayout layout, VkShaderStageFlags stages,

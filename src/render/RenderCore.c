@@ -1129,6 +1129,24 @@ void ZHLN_EndCommandBuffer(const VkCommandBuffer cmd) {
 	vkEndCommandBuffer(cmd);
 }
 
+[[nodiscard]]
+ZHLN_FrameResult ZHLN_WaitAndAcquireImage(const VkDevice device, const VkSwapchainKHR swapchain,
+										  const ZHLN_FrameSync* const restrict sync,
+										  const ZHLN_CommandPool* const restrict pool,
+										  uint32_t* const restrict out_image_index) {
+	// 1. Synchronize: Wait for this frame's previous command buffer to finish
+	ZHLN_WaitAndResetFrame(device, sync->in_flight, pool);
+
+	// 2. Acquire: Get next image from swapchain
+	ZHLN_AcquireDesc acquire_desc = {
+		.swapchain = swapchain,
+		.image_available = sync->image_available,
+		.timeout_ns = UINT64_MAX,
+	};
+
+	return ZHLN_AcquireImage(device, &acquire_desc, out_image_index);
+}
+
 /* --- PUSH CONSTANT HELPERS --- */
 
 void ZHLN_PushConstants(const VkCommandBuffer cmd, const VkPipelineLayout layout,

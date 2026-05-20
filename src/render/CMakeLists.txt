@@ -10,6 +10,7 @@ add_library(zahlen_render STATIC
     VmaImplementation.cpp
     RenderCore.h
     RenderCore.hpp
+    RenderCore.cpp
     Allocator.hpp
     Utils.h
 )

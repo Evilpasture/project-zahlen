@@ -14,10 +14,11 @@
 #include <GLFW/glfw3.h>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
-#include <atomic>
+#include <bit>
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_vulkan.h>
+#include <ranges>
 #include <threading/TaskSystem.hpp>
 #include <vector>
 
@@ -35,10 +36,6 @@ template <> struct FormatOf<::ZHLN::PackedRGBA8> {
 	static constexpr auto value = VK_FORMAT_R8G8B8A8_UNORM;
 };
 
-// FIX: Inject the missing FormatTraits so RenderTarget.hpp can deduce the Aspect Mask
-template <> struct FormatTraits<VK_FORMAT_R16G16_SFLOAT> {
-	static constexpr VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
-};
 } // namespace ZHLN::Vk
 
 ZHLN_REFLECT_VERTEX(::ZHLN::Vertex, position, normal, tangent, uv, color);
@@ -73,11 +70,12 @@ struct DrawCommand {
 };
 
 struct WorkerCmdContext {
-	Vk::CommandPool pools[2];
-	ZHLN::Atomic<uint32_t> cmdCount[2];
+	std::array<Vk::CommandPool, 2> pools;
+	std::array<ZHLN::Atomic<uint32_t>, 2> cmdCount{};
 };
-
+// NOLINTBEGIN(misc-non-private-member-variables-in-classes)
 struct RenderContext::Impl {
+  public:
 	Window& window;
 	Vk::Context ctx;
 	Vk::Allocator allocator;
@@ -105,8 +103,8 @@ struct RenderContext::Impl {
 	VkCommandBuffer current_cmd = VK_NULL_HANDLE;
 	uint32_t current_image_index = 0;
 
-	JPH::Mat44 current_view_proj;
-	JPH::Mat44 prev_view_proj;
+	JPH::Mat44 current_view_proj{};
+	JPH::Mat44 prev_view_proj{};
 
 	std::vector<std::unique_ptr<NativeMesh>> meshes;
 	std::vector<std::unique_ptr<NativeMaterial>> materials;
@@ -132,16 +130,27 @@ struct RenderContext::Impl {
 		bindlessSet =
 			GlobalBindlessLayout::Allocate(ctx.Device(), bindlessPool.Get(), bindlessLayout.Get());
 
-		VkSamplerCreateInfo samplerInfo = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
-		samplerInfo.magFilter = VK_FILTER_LINEAR;
-		samplerInfo.minFilter = VK_FILTER_LINEAR;
-		samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-		samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-		samplerInfo.anisotropyEnable = VK_TRUE;
-		samplerInfo.maxAnisotropy =
-			ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy;
-
-		VkSampler rawSampler;
+		VkSamplerCreateInfo samplerInfo = {
+			.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+			.pNext = nullptr,
+			.flags = 0,
+			.magFilter = VK_FILTER_LINEAR,
+			.minFilter = VK_FILTER_LINEAR,
+			.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+			.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+			.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+			.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+			.mipLodBias = 0,
+			.anisotropyEnable = VK_TRUE,
+			.maxAnisotropy = ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy,
+			.compareEnable = VK_FALSE,
+			.compareOp = VK_COMPARE_OP_NEVER,
+			.minLod = 0.0f,
+			.maxLod = 0.0f,
+			.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
+			.unnormalizedCoordinates = VK_FALSE,
+		};
+		VkSampler rawSampler = nullptr;
 		vkCreateSampler(ctx.Device(), &samplerInfo, nullptr, &rawSampler);
 		globalSampler = Vk::Sampler(ctx.Device(), rawSampler);
 
@@ -153,42 +162,65 @@ struct RenderContext::Impl {
 		defaultSampler = Vk::SamplerBuilder{}.Linear().ClampToEdge().Build(ctx.Device());
 
 		// 1. Setup TAA
-		VkPushConstantRange taaPush = {VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float)};
-		auto taaShaders = Vk::ShaderStages::Create(
-			ctx.Device(),
-			{(const uint32_t*)ZHLN_Resource_TaaVertSpv, ZHLN_Resource_TaaVertSpv_Len, "VSMain"},
-			{(const uint32_t*)ZHLN_Resource_TaaFragSpv, ZHLN_Resource_TaaFragSpv_Len, "PSMain"});
+		VkPushConstantRange taaPush = {
+			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float)};
+		auto taaShaders =
+			Vk::ShaderStages::Create(ctx.Device(),
+									 {.code = Vk::AsSpirV(&ZHLN_Resource_TaaVertSpv[0]),
+									  .size = ZHLN_Resource_TaaVertSpv_Len,
+									  .entry_point = "VSMain"},
+									 {.code = Vk::AsSpirV(&ZHLN_Resource_TaaFragSpv[0]),
+									  .size = ZHLN_Resource_TaaFragSpv_Len,
+									  .entry_point = "PSMain"});
 
-		taaPass.Build(ctx.Device(), taaShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &taaPush, 1);
+		if (!taaPass.Build(ctx.Device(), taaShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &taaPush,
+						   1)) {
+			ZHLN::Log("TAA pass build failure, continuing...");
+		}
 
 		// 2. Setup Blit
-		auto blitShaders = Vk::ShaderStages::Create(
-			ctx.Device(),
-			{(const uint32_t*)ZHLN_Resource_BlitVertSpv, ZHLN_Resource_BlitVertSpv_Len, "VSMain"},
-			{(const uint32_t*)ZHLN_Resource_BlitFragSpv, ZHLN_Resource_BlitFragSpv_Len, "PSMain"});
+		auto blitShaders =
+			Vk::ShaderStages::Create(ctx.Device(),
+									 {.code = (const uint32_t*)ZHLN_Resource_BlitVertSpv,
+									  .size = ZHLN_Resource_BlitVertSpv_Len,
+									  .entry_point = "VSMain"},
+									 {.code = (const uint32_t*)ZHLN_Resource_BlitFragSpv,
+									  .size = ZHLN_Resource_BlitFragSpv_Len,
+									  .entry_point = "PSMain"});
 
-		blitPass.Build(ctx.Device(), blitShaders, {VK_FORMAT_B8G8R8A8_SRGB});
+		if (!blitPass.Build(ctx.Device(), blitShaders, {VK_FORMAT_B8G8R8A8_SRGB})) {
+			ZHLN::Log("Blit pass build failure, continuing...");
+		}
 	}
 
 	void SetupUI(GLFWwindow* window) {
-		const VkDescriptorPoolSize pool_sizes[] = {
-			{VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
-			{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
-			{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000},
-			{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000},
-			{VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000},
-			{VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000},
-			{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000},
-			{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000},
-			{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000},
-			{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000},
-			{VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000}};
+		const std::array pool_sizes = {
+			VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_SAMPLER, .descriptorCount = 1000},
+			VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+								 .descriptorCount = 1000},
+			VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .descriptorCount = 1000},
+			VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .descriptorCount = 1000},
+			VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,
+								 .descriptorCount = 1000},
+			VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,
+								 .descriptorCount = 1000},
+			VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+								 .descriptorCount = 1000},
+			VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+								 .descriptorCount = 1000},
+			VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+								 .descriptorCount = 1000},
+			VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC,
+								 .descriptorCount = 1000},
+			VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
+								 .descriptorCount = 1000}};
 		const VkDescriptorPoolCreateInfo pool_info = {
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+			.pNext = nullptr,
 			.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
 			.maxSets = 1000,
 			.poolSizeCount = (uint32_t)std::size(pool_sizes),
-			.pPoolSizes = pool_sizes,
+			.pPoolSizes = pool_sizes.data(),
 		};
 		vkCreateDescriptorPool(ctx.Device(), &pool_info, nullptr, &uiPool);
 		IMGUI_CHECKVERSION();
@@ -203,11 +235,17 @@ struct RenderContext::Impl {
 			.QueueFamily = ctx.PhysicalInfo().graphics_family,
 			.Queue = ctx.GraphicsQueue(),
 			.DescriptorPool = uiPool,
+			.DescriptorPoolSize = 0,
 			.MinImageCount = 2,
 			.ImageCount = 2,
+			.PipelineCache = VK_NULL_HANDLE,
 			.PipelineInfoMain =
 				{
+					.RenderPass = VK_NULL_HANDLE,
+					.Subpass = 0,
 					.MSAASamples = VK_SAMPLE_COUNT_1_BIT,
+					.ExtraDynamicStates{},
+
 					.PipelineRenderingCreateInfo =
 						{.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
 						 .pNext = nullptr,
@@ -216,12 +254,20 @@ struct RenderContext::Impl {
 						 .pColorAttachmentFormats = &swapchainFormat,
 						 .depthAttachmentFormat = VK_FORMAT_D32_SFLOAT,
 						 .stencilAttachmentFormat = VK_FORMAT_UNDEFINED},
+
 				},
+
 			.UseDynamicRendering = true,
+			.Allocator = nullptr,
+			.CheckVkResultFn = nullptr,
+			.MinAllocationSize = 0,
+			.CustomShaderVertCreateInfo{},
+			.CustomShaderFragCreateInfo{},
 		};
 		ImGui_ImplVulkan_Init(&init_info);
 	}
 };
+// NOLINTEND(misc-non-private-member-variables-in-classes)
 
 RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	: _impl(std::make_unique<Impl>(window)) {
@@ -274,7 +320,7 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 							  VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME};
 #endif
 	ZHLN_DeviceDesc dev_desc = {.physical = nullptr,
-								.extensions = dev_exts,
+								.extensions = &dev_exts[0],
 								.extension_count =
 									(uint32_t)(sizeof(dev_exts) / sizeof(const char*)),
 								.features = &feat2,
@@ -288,8 +334,8 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	_impl->InitBindless();
 	_impl->InitPostProcessing();
 
-	GLFWwindow* glfwWin = static_cast<GLFWwindow*>(window.GetNativeHandle());
-	VkSurfaceKHR raw_surface;
+	auto* glfwWin = static_cast<GLFWwindow*>(window.GetNativeHandle());
+	VkSurfaceKHR raw_surface = nullptr;
 	glfwCreateWindowSurface(_impl->ctx.Instance(), glfwWin, nullptr, &raw_surface);
 	_impl->surface = Vk::Surface(_impl->ctx.Instance(), raw_surface);
 
@@ -298,10 +344,11 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	}
 
 	// Initialize presentation with current window size
-	int w, h;
-	glfwGetFramebufferSize(glfwWin, &w, &h);
-	if (!_impl->presentation.Init(_impl->ctx, _impl->allocator, _impl->surface.Get(), (uint32_t)w,
-								  (uint32_t)h, cfg.vsync)) {
+	int width = 0;
+	int height = 0;
+	glfwGetFramebufferSize(glfwWin, &width, &height);
+	if (!_impl->presentation.Init(_impl->ctx, _impl->allocator, _impl->surface.Get(),
+								  (uint32_t)width, (uint32_t)height, cfg.vsync)) {
 		ZHLN::Panic("FATAL: Presentation Context initialization failed");
 	}
 
@@ -311,16 +358,18 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	_impl->SetupUI(static_cast<GLFWwindow*>(window.GetNativeHandle()));
 
 	uint32_t workerCount = TaskSystem::GetWorkerCount() + 1;
-	if (workerCount == 0)
+	if (workerCount == 0) {
 		workerCount = 1;
+	}
 	_impl->workerCmds.resize(workerCount);
 
-	for (auto& w : _impl->workerCmds) {
-		for (int i = 0; i < 2; ++i) {
-			w.pools[i] =
-				Vk::CommandPool(_impl->ctx.Device(), _impl->ctx.PhysicalInfo().graphics_family);
-			// Pre-allocate secondary command buffers for chunking
-			if (!w.pools[i].AllocateSecondary(256)) {
+	for (auto& worker : _impl->workerCmds) {
+		// Loop directly over the elements of the pools array
+		for (auto& pool : worker.pools) {
+			pool = Vk::CommandPool(_impl->ctx.Device(), _impl->ctx.PhysicalInfo().graphics_family);
+
+			// Allocate secondary command buffers
+			if (!pool.AllocateSecondary(256)) {
 				ZHLN::Panic(
 					"FATAL: Failed to pre-allocate secondary command buffers for worker threads. "
 					"Check if your GPU supports {} command buffers per pool.",
@@ -331,19 +380,20 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 }
 
 RenderContext::~RenderContext() {
-	if (_impl && _impl->ctx.Device()) {
+	if (_impl && (_impl->ctx.Device() != nullptr)) {
 		vkDeviceWaitIdle(_impl->ctx.Device());
 		ImGui_ImplVulkan_Shutdown();
 		ImGui_ImplGlfw_Shutdown();
 		ImGui::DestroyContext();
-		if (_impl->uiPool != VK_NULL_HANDLE)
+		if (_impl->uiPool != VK_NULL_HANDLE) {
 			vkDestroyDescriptorPool(_impl->ctx.Device(), _impl->uiPool, nullptr);
+		}
 		_impl->meshes.clear();
 		_impl->materials.clear();
 	}
 }
 
-const char* RenderContext::GetRendererName() const {
+auto RenderContext::GetRendererName() const -> const char* {
 	return "ZHLN (Modernized TAA)";
 }
 
@@ -351,7 +401,7 @@ void RenderContext::SetResolution([[maybe_unused]] const Extent2D& res) {
 	_impl->resized = true;
 }
 
-BufferHandle RenderContext::CreateVertexBuffer(const void* data, size_t size) {
+auto RenderContext::CreateVertexBuffer(const void* data, size_t size) -> BufferHandle {
 	auto gpu_buf =
 		Vk::Buffer::Create(_impl->allocator.Get(), size,
 						   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -383,17 +433,22 @@ BufferHandle RenderContext::CreateVertexBuffer(const void* data, size_t size) {
 	return handle;
 }
 
-Material RenderContext::CreateMaterial(const PipelineDesc& desc) {
-	ZHLN_ShaderDesc v_desc = {(const uint32_t*)desc.vertexShaderData, desc.vertexShaderSize,
-							  nullptr};
-	ZHLN_ShaderDesc f_desc = {(const uint32_t*)desc.fragShaderData, desc.fragShaderSize, nullptr};
+auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
+	ZHLN_ShaderDesc v_desc = {.code = Vk::AsSpirV(desc.vertexShaderData),
+							  .size = desc.vertexShaderSize,
+							  .entry_point = nullptr};
+	ZHLN_ShaderDesc f_desc = {.code = Vk::AsSpirV(desc.fragShaderData),
+							  .size = desc.fragShaderSize,
+							  .entry_point = nullptr};
 	auto shaders = Vk::ShaderStages::Create(_impl->ctx.Device(), v_desc, f_desc);
 	auto* impl = _impl.get();
 
-	VkPushConstantRange pc_range = {VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-									sizeof(ZHLN::FrameConstants)};
-	VkDescriptorSetLayout layouts[] = {impl->bindlessLayout.Get()};
-	ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = layouts,
+	VkPushConstantRange pc_range = {.stageFlags =
+										VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+									.offset = 0,
+									.size = sizeof(ZHLN::FrameConstants)};
+	const std::array layouts = {impl->bindlessLayout.Get()};
+	ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = layouts.data(),
 										   .set_layout_count = 1,
 										   .push_constants = &pc_range,
 										   .push_constant_count = 1};
@@ -422,20 +477,24 @@ void RenderContext::BeginFrame() {
 	ZHLN_WaitAndResetFrame(_impl->ctx.Device(), s.in_flight, &_impl->pools[_impl->frame_index]);
 
 	// Reset worker command pools and counters
-	for (auto& w : _impl->workerCmds) {
-		w.cmdCount[_impl->frame_index].store(0, std::memory_order_relaxed);
-		w.pools[_impl->frame_index].Reset();
+	for (auto& worker : _impl->workerCmds) {
+		worker.cmdCount[_impl->frame_index].store(0, std::memory_order_relaxed);
+		worker.pools[_impl->frame_index].Reset();
 	}
 
 	// 2. Handle Resize (Allocation Only)
 	if (_impl->resized) {
-		int w, h;
-		glfwGetFramebufferSize(static_cast<GLFWwindow*>(_impl->window.GetNativeHandle()), &w, &h);
-		if (w == 0 || h == 0)
+		int width = 0;
+		int height = 0;
+		glfwGetFramebufferSize(static_cast<GLFWwindow*>(_impl->window.GetNativeHandle()), &width,
+							   &height);
+		if (width == 0 || height == 0) {
 			return;
+		}
 
-		if (!_impl->presentation.Rebuild((uint32_t)w, (uint32_t)h))
+		if (!_impl->presentation.Rebuild((uint32_t)width, (uint32_t)height)) {
 			return;
+		}
 
 		VkExtent2D ext = _impl->presentation.swapchain.Get().extent;
 
@@ -459,8 +518,9 @@ void RenderContext::BeginFrame() {
 	}
 
 	// 3. Acquire Swapchain Image
-	ZHLN_AcquireDesc acq = {_impl->presentation.swapchain.Get().handle, s.image_available,
-							UINT64_MAX};
+	ZHLN_AcquireDesc acq = {.swapchain = _impl->presentation.swapchain.Get().handle,
+							.image_available = s.image_available,
+							.timeout_ns = UINT64_MAX};
 	if (ZHLN_AcquireImage(_impl->ctx.Device(), &acq, &_impl->current_image_index) ==
 		ZHLN_FrameResult_OutOfDate) {
 		_impl->resized = true;
@@ -485,25 +545,33 @@ void RenderContext::BeginFrame() {
 			_impl->current_cmd, _impl->accumBuffers[1].image.Handle());
 
 		// Clear them
-		VkClearValue clearColor = {{{0, 0, 0, 1}}};
-		VkRenderingAttachmentInfo attachments[4] = {};
-		VkImageView views[4] = {_impl->sceneColor.view.Get(), _impl->velocityBuffer.view.Get(),
-								_impl->accumBuffers[0].view.Get(),
-								_impl->accumBuffers[1].view.Get()};
-		for (int i = 0; i < 4; ++i)
-			attachments[i] = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-							  .imageView = views[i],
-							  .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-							  .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-							  .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-							  .clearValue = clearColor};
+		VkClearValue clearColor = {.color = {.float32 = {0, 0, 0, 1}}};
+		std::array<VkRenderingAttachmentInfo, 4> attachments{};
+		const std::array views = {_impl->sceneColor.view.Get(), _impl->velocityBuffer.view.Get(),
+								  _impl->accumBuffers[0].view.Get(),
+								  _impl->accumBuffers[1].view.Get()};
 
-		VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-							  .renderArea = {{0, 0}, _impl->presentation.swapchain.Get().extent},
-							  .layerCount = 1,
-							  .colorAttachmentCount = 4,
-							  .pColorAttachments = attachments};
-		vkCmdBeginRendering(_impl->current_cmd, &ri);
+		// Zip both collections together into parallel pairs
+		for (auto&& [attachment, view] : std::views::zip(attachments, views)) {
+			attachment = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+						  .pNext = nullptr,
+						  .imageView = view, // Pure reference assignment, no brackets, no pointers!
+						  .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+						  .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+						  .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+						  .clearValue = clearColor};
+		}
+
+		VkRenderingInfo renderInfo = {
+			.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+			.pNext = nullptr,
+			.flags = 0,
+			.renderArea = {.offset = {.x = 0, .y = 0},
+						   .extent = _impl->presentation.swapchain.Get().extent},
+			.layerCount = 1,
+			.colorAttachmentCount = 4,
+			.pColorAttachments = attachments.data()};
+		vkCmdBeginRendering(_impl->current_cmd, &renderInfo);
 		vkCmdEndRendering(_impl->current_cmd);
 
 		// Transition: Color Attachment -> Shader Read (To match descriptors)
@@ -522,14 +590,15 @@ void RenderContext::BeginFrame() {
 
 		// Update Descriptors immediately (Write to both sets in the double buffer)
 		for (int i = 0; i < 2; ++i) {
-			_impl->taaPass.WriteIndex(_impl->ctx.Device(), i,
-									  Vk::ImageWrite{_impl->sceneColor.view.Get(),
-													 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-									  Vk::ImageWrite{_impl->accumBuffers[1 - i].view.Get(),
-													 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-									  Vk::ImageWrite{_impl->velocityBuffer.view.Get(),
-													 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-									  Vk::SamplerWrite{_impl->defaultSampler.Get()});
+			_impl->taaPass.WriteIndex(
+				_impl->ctx.Device(), i,
+				Vk::ImageWrite{.view = _impl->sceneColor.view.Get(),
+							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+				Vk::ImageWrite{.view = _impl->accumBuffers[1 - i].view.Get(),
+							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+				Vk::ImageWrite{.view = _impl->velocityBuffer.view.Get(),
+							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+				Vk::SamplerWrite{.sampler = _impl->defaultSampler.Get()});
 		}
 
 		_impl->needsInitialClear = false;
@@ -538,22 +607,23 @@ void RenderContext::BeginFrame() {
 
 void RenderContext::EndFrame() {
 	ZHLN_PROFILE_SCOPE("Render (CPU Record)");
-	if (_impl->current_cmd == VK_NULL_HANDLE)
+	if (_impl->current_cmd == VK_NULL_HANDLE) {
 		return;
+	}
 
 	if (!_impl->drawQueue.empty()) {
 		uint32_t numChunks = (_impl->drawQueue.size() + 255) / 256;
 		std::vector<VkCommandBuffer> secondaries(numChunks);
 
 		// Tell secondary buffers they are writing to Color and Velocity
-		VkFormat formats[2] = {VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16G16_SFLOAT};
+		std::array<VkFormat, 2> formats = {VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16G16_SFLOAT};
 		const VkCommandBufferInheritanceRenderingInfo inherit = {
 			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
 			.pNext = nullptr,
 			.flags = 0,
 			.viewMask = 0,
 			.colorAttachmentCount = 2,
-			.pColorAttachmentFormats = formats,
+			.pColorAttachmentFormats = formats.data(),
 			.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT,
 			.stencilAttachmentFormat = VK_FORMAT_UNDEFINED,
 			.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT};
@@ -569,16 +639,19 @@ void RenderContext::EndFrame() {
 
 		std::sort(_impl->drawQueue.begin(), _impl->drawQueue.end(),
 				  [](const DrawCommand& a, const DrawCommand& b) {
-					  if (a.material != b.material)
+					  if (a.material != b.material) {
 						  return a.material < b.material;
+					  }
 					  return a.mesh < b.mesh;
 				  });
 
 		TaskSystem::ParallelFor(
-			_impl->drawQueue.size(), 256, [&](uint32_t start, uint32_t end, uint32_t chunkIdx) {
+			_impl->drawQueue.size(), 256,
+			[&](uint32_t start, uint32_t end, uint32_t chunkIdx) -> void {
 				uint32_t wIdx = TaskSystem::GetWorkerIndex();
-				if (wIdx >= _impl->workerCmds.size())
+				if (wIdx >= _impl->workerCmds.size()) {
 					wIdx = (uint32_t)(_impl->workerCmds.size() - 1);
+				}
 
 				uint32_t localCmdIdx =
 					_impl->workerCmds[wIdx].cmdCount[_impl->frame_index].fetch_add(
@@ -601,15 +674,16 @@ void RenderContext::EndFrame() {
 											 .height = -(float)extent.height,
 											 .minDepth = 0.0f,
 											 .maxDepth = 1.0f};
-				const VkRect2D scissor = {{0, 0}, extent};
+				const VkRect2D scissor = {.offset = {.x = 0, .y = 0}, .extent = extent};
 				vkCmdSetViewport(sec_cmd, 0, 1, &viewport);
 				vkCmdSetScissor(sec_cmd, 0, 1, &scissor);
 
 				for (uint32_t i = start; i < end; ++i) {
 					const auto& cmd = _impl->drawQueue[i];
 
-					if (!cmd.material->pipeline.Valid())
+					if (!cmd.material->pipeline.Valid()) {
 						continue;
+					}
 
 					vkCmdBindPipeline(sec_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
 									  cmd.material->pipeline.Get());
@@ -672,28 +746,32 @@ void RenderContext::EndFrame() {
 			_impl->current_cmd, _impl->accumBuffers.Next().image.Handle());
 
 		VkRenderingAttachmentInfo col = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+										 .pNext = nullptr,
 										 .imageView = _impl->accumBuffers.Next().view.Get(),
 										 .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 										 .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 										 .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
 
-		const VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-									.renderArea = {{0, 0}, extent},
-									.layerCount = 1,
-									.colorAttachmentCount = 1,
-									.pColorAttachments = &col};
+		const VkRenderingInfo renderInfo = {
+			.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+			.pNext = nullptr,
+			.flags = 0,
+			.renderArea = {.offset = {.x = 0, .y = 0}, .extent = extent},
+			.layerCount = 1,
+			.colorAttachmentCount = 1,
+			.pColorAttachments = &col};
 
-		vkCmdBeginRendering(_impl->current_cmd, &ri);
+		vkCmdBeginRendering(_impl->current_cmd, &renderInfo);
 
 		// Safely write the ping-ponging target descriptors
-		_impl->taaPass.WriteNext(
-			_impl->ctx.Device(),
-			Vk::ImageWrite{_impl->sceneColor.view.Get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-			Vk::ImageWrite{_impl->accumBuffers.Current().view.Get(),
-						   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-			Vk::ImageWrite{_impl->velocityBuffer.view.Get(),
-						   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-			Vk::SamplerWrite{_impl->defaultSampler.Get()});
+		_impl->taaPass.WriteNext(_impl->ctx.Device(),
+								 Vk::ImageWrite{.view = _impl->sceneColor.view.Get(),
+												.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+								 Vk::ImageWrite{.view = _impl->accumBuffers.Current().view.Get(),
+												.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+								 Vk::ImageWrite{.view = _impl->velocityBuffer.view.Get(),
+												.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+								 Vk::SamplerWrite{.sampler = _impl->defaultSampler.Get()});
 
 		_impl->taaPass.Execute(_impl->current_cmd, g_TAAState.feedback);
 		ZHLN_EndRendering(_impl->current_cmd);
@@ -711,25 +789,34 @@ void RenderContext::EndFrame() {
 	VkImageView blitSource =
 		useTAA ? _impl->accumBuffers.Next().view.Get() : _impl->sceneColor.view.Get();
 
-	_impl->blitPass.WriteNext(_impl->ctx.Device(),
-							  Vk::ImageWrite{blitSource, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-							  Vk::SamplerWrite{_impl->defaultSampler.Get()});
+	if (!useTAA) {
+		Renderer::Clear(*this, {1.0f, 0.0f, 1.0f, 1.0f});
+	}
+
+	_impl->blitPass.WriteNext(
+		_impl->ctx.Device(),
+		Vk::ImageWrite{.view = blitSource, .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+		Vk::SamplerWrite{_impl->defaultSampler.Get()});
 
 	if (_impl->blitPass.pipeline.Valid()) {
 		VkRenderingAttachmentInfo col = {
 			.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+			.pNext = nullptr,
 			.imageView = _impl->presentation.swapchain.Get().views[_impl->current_image_index],
 			.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.storeOp = VK_ATTACHMENT_STORE_OP_STORE};
 
-		const VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-									.renderArea = {{0, 0}, extent},
-									.layerCount = 1,
-									.colorAttachmentCount = 1,
-									.pColorAttachments = &col};
+		const VkRenderingInfo renderInfo = {
+			.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+			.pNext = nullptr,
+			.flags = 0,
+			.renderArea{.offset = {.x = 0, .y = 0}, .extent = extent},
+			.layerCount = 1,
+			.colorAttachmentCount = 1,
+			.pColorAttachments = &col};
 
-		vkCmdBeginRendering(_impl->current_cmd, &ri);
+		vkCmdBeginRendering(_impl->current_cmd, &renderInfo);
 		_impl->blitPass.Execute(_impl->current_cmd);
 
 		ImGui::Render();
@@ -753,8 +840,9 @@ void RenderContext::EndFrame() {
 		.swapchain = _impl->presentation.swapchain.Get().handle,
 		.imageIndex = _impl->current_image_index};
 
-	if (Vk::SubmitAndPresent(submitDesc) != ZHLN_FrameResult_Ok)
+	if (Vk::SubmitAndPresent(submitDesc) != ZHLN_FrameResult_Ok) {
 		_impl->resized = true;
+	}
 
 	// FLIP THE BUFFERS
 	_impl->accumBuffers.Flip();
@@ -765,23 +853,24 @@ void RenderContext::EndFrame() {
 	_impl->current_cmd = VK_NULL_HANDLE;
 }
 
-uint32_t RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t height) {
+auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t height) -> uint32_t {
 	auto* impl = _impl.get();
 	const VkDevice device = impl->ctx.Device();
 	const size_t imageSize = static_cast<size_t>(width) * height * 4;
 
 	// 1. Create the GPU Image
-	VkImageCreateInfo imgInfo = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-								 .imageType = VK_IMAGE_TYPE_2D,
-								 .format = VK_FORMAT_R8G8B8A8_UNORM,
-								 .extent = {width, height, 1},
-								 .mipLevels = 1,
-								 .arrayLayers = 1,
-								 .samples = VK_SAMPLE_COUNT_1_BIT,
-								 .tiling = VK_IMAGE_TILING_OPTIMAL,
-								 .usage =
-									 VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-								 .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+	const VkImageCreateInfo imgInfo = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+									   .pNext = nullptr,
+									   .imageType = VK_IMAGE_TYPE_2D,
+									   .format = VK_FORMAT_R8G8B8A8_UNORM,
+									   .extent{.width = width, .height = height, .depth = 1},
+									   .mipLevels = 1,
+									   .arrayLayers = 1,
+									   .samples = VK_SAMPLE_COUNT_1_BIT,
+									   .tiling = VK_IMAGE_TILING_OPTIMAL,
+									   .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+												VK_IMAGE_USAGE_SAMPLED_BIT,
+									   .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
 
 	auto gpuImage = Vk::Image::Create(impl->allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 
@@ -819,8 +908,10 @@ uint32_t RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t
 
 	// Submit and block (Init-time upload)
 	VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+										 .pNext = nullptr,
 										 .commandBuffer = cmd};
 	VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+							.pNext = nullptr,
 							.commandBufferInfoCount = 1,
 							.pCommandBufferInfos = &subInfo};
 	vkQueueSubmit2(impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
@@ -837,6 +928,7 @@ uint32_t RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t
 		.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 
 	VkWriteDescriptorSet write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+								  .pNext = nullptr,
 								  .dstSet = impl->bindlessSet,
 								  .dstBinding = 0,
 								  .dstArrayElement = index,
@@ -853,15 +945,16 @@ uint32_t RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t
 	return index;
 }
 
-const char* RenderContext::GetGPUName() const {
-	return _impl->ctx.PhysicalInfo().properties.properties.deviceName;
+auto RenderContext::GetGPUName() const -> const char* {
+	return &_impl->ctx.PhysicalInfo().properties.properties.deviceName[0];
 }
 
 namespace Renderer {
 void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
 	auto* impl = ctx.GetImpl();
-	if (impl->current_cmd == VK_NULL_HANDLE)
+	if (impl->current_cmd == VK_NULL_HANDLE) {
 		return;
+	}
 
 	Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
 		impl->current_cmd, impl->sceneColor.image.Handle());
@@ -878,20 +971,22 @@ void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
 							 VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
 			impl->current_cmd, impl->presentation.depthTarget.image.Handle(),
 			VK_IMAGE_ASPECT_DEPTH_BIT);
-	}
+	} 
 
-	VkRenderingAttachmentInfo cols[2] = {
-		{.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-		 .pNext = nullptr,
-		 .imageView = impl->sceneColor.view.Get(),
-		 .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-		 .resolveMode = VK_RESOLVE_MODE_NONE,
-		 .resolveImageView = VK_NULL_HANDLE,
-		 .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-		 .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-		 .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-		 .clearValue = {.color = {.float32 = {color.GetX(), color.GetY(), color.GetZ(),
-											  color.GetW()}}}},
+
+	std::array<VkRenderingAttachmentInfo, 2> cols = {
+		VkRenderingAttachmentInfo{
+			.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+			.pNext = nullptr,
+			.imageView = impl->sceneColor.view.Get(),
+			.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+			.resolveMode = VK_RESOLVE_MODE_NONE,
+			.resolveImageView = VK_NULL_HANDLE,
+			.resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+			.clearValue = {.color = {.float32 = {color.GetX(), color.GetY(), color.GetZ(),
+												 color.GetW()}}}},
 		{.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
 		 .pNext = nullptr,
 		 .imageView = impl->velocityBuffer.view.Get(),
@@ -912,18 +1007,20 @@ void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
 										  .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
 										  .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
 										  .clearValue = {.depthStencil = {.depth = depth}}};
-	const VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-								.pNext = nullptr,
-								.flags = VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT,
-								.renderArea = {{0, 0}, impl->presentation.swapchain.Get().extent},
-								.layerCount = 1,
-								.viewMask = 0,
-								.colorAttachmentCount = 2,
-								.pColorAttachments = cols,
-								.pDepthAttachment = &depthAtt,
-								.pStencilAttachment = nullptr};
+	const VkRenderingInfo renderInfo = {
+		.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+		.pNext = nullptr,
+		.flags = VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT,
+		.renderArea{.offset = {.x = 0, .y = 0},
+					.extent = impl->presentation.swapchain.Get().extent},
+		.layerCount = 1,
+		.viewMask = 0,
+		.colorAttachmentCount = 2,
+		.pColorAttachments = cols.data(),
+		.pDepthAttachment = &depthAtt,
+		.pStencilAttachment = nullptr};
 
-	vkCmdBeginRendering(impl->current_cmd, &ri);
+	vkCmdBeginRendering(impl->current_cmd, &renderInfo);
 
 	const VkViewport viewport = {.x = 0.0f,
 								 .y = (float)impl->presentation.swapchain.Get().extent.height,
@@ -931,7 +1028,8 @@ void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
 								 .height = -(float)impl->presentation.swapchain.Get().extent.height,
 								 .minDepth = 0.0f,
 								 .maxDepth = 1.0f};
-	const VkRect2D scissor = {{0, 0}, impl->presentation.swapchain.Get().extent};
+	const VkRect2D scissor = {.offset = {.x = 0, .y = 0},
+							  .extent = impl->presentation.swapchain.Get().extent};
 	vkCmdSetViewport(impl->current_cmd, 0, 1, &viewport);
 	vkCmdSetScissor(impl->current_cmd, 0, 1, &scissor);
 }
@@ -945,11 +1043,14 @@ void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj, const JPH::Mat4
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 		  const JPH::Mat44& transform, const JPH::Mat44& prevTransform) {
 	auto* impl = ctx.GetImpl();
-	if (impl->current_cmd == VK_NULL_HANDLE)
+	if (impl->current_cmd == VK_NULL_HANDLE) {
 		return;
-	impl->drawQueue.push_back({reinterpret_cast<NativeMaterial*>(material.pipeline),
-							   reinterpret_cast<NativeMesh*>(mesh.vertexBuffer), transform,
-							   prevTransform, material.textureIndex});
+	}
+	impl->drawQueue.push_back({.material = std::bit_cast<NativeMaterial*>(material.pipeline),
+							   .mesh = std::bit_cast<NativeMesh*>(mesh.vertexBuffer),
+							   .transform = transform,
+							   .prevTransform = prevTransform,
+							   .textureIndex = material.textureIndex});
 }
 } // namespace Renderer
 } // namespace ZHLN

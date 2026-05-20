@@ -74,7 +74,7 @@ inline TextureAsset UploadTexture(Allocator& allocator, const Context& ctx,
 													  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 												  .src_stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
 												  .dst_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-												  .aspect = FormatTraits<F>::aspect, // Deduced!
+												  .aspect = GetFormatAspect(F), // Deduced!
 												  .base_mip = 0,
 												  .mip_count = mipLevels};
 	ZHLN_CmdImageBarrier(cmd, &initialBarrier);
@@ -102,7 +102,7 @@ inline TextureAsset UploadTexture(Allocator& allocator, const Context& ctx,
 
 	// Final View Creation
 	result.view =
-		CreateView<F>(ctx.Device(), result.image.Handle(), FormatTraits<F>::aspect, mipLevels);
+		CreateView<F>(ctx.Device(), result.image.Handle(), GetFormatAspect(F), mipLevels);
 
 	return result;
 }
