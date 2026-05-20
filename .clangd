@@ -1,3 +1,9 @@
 CompileFlags:
   CompilationDatabase: "build"
   Add: [-Iinclude]
+
+Diagnostics:
+  ClangTidy:
+    # Remove ["*"] and replace it with empty brackets or omit it entirely.
+    # This forces clangd to search for your local `.clang-tidy` file instead.
+    Add: []

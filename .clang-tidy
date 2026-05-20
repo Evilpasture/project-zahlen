@@ -1,12 +1,26 @@
 Checks: >
+  -*,
   bugprone-*,
   clang-analyzer-*,
-  modernize-*,
   performance-*,
+  modernize-*,
   readability-*,
   cppcoreguidelines-*,
-  misc-*
+  misc-*,
+  
+  # --- EXPLICIT DISABLES (Noise Reduction) ---
+  -modernize-use-trailing-return-type,    # Screams at standard function declarations
+  -readability-identifier-length,         # Screams at short iterator names like i, j, k
+  -cppcoreguidelines-owning-memory,       # Screams at raw pointers (useless for C-style memory architecture)
+  -cppcoreguidelines-no-malloc,           # Screams at malloc/free if you build custom allocators
+  -readability-magic-numbers,             # Screams at array sizes, bitmasks, or color clearances
+  -misc-no-recursion                      # Screams at recursive functions
+
 WarningsAsErrors: 'bugprone-*,performance-*,clang-analyzer-*'
 HeaderFilterRegex: 'include/|src/'
-AnalyzeTemporaryDtors: true
-FormatStyle: none
+
+# Clang-tidy specific option adjustments
+CheckOptions:
+  modernize-use-designated-initializers.IgnoreMacros: false
+  # Prevents readability-implicit-bool-conversion from panicking over VkBool32 assignments
+  readability-implicit-bool-conversion.AllowIntegerConditions: true
