@@ -22,6 +22,7 @@ out/
 *.pdb
 *.ilk
 *.exp
+compile_commands.json
 
 # --- C++ / MSVC / GCC Artifacts ---
 .vs/
