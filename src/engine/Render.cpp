@@ -114,7 +114,7 @@ struct RenderContext::Impl {
 
 	Impl(Window& win) : window(win) {}
 	bool depth_ready = false;
-	VkDescriptorPool uiPool = VK_NULL_HANDLE;
+	Vk::DescriptorPool uiPool;
 
 	Vk::DescriptorSetLayout bindlessLayout;
 	Vk::DescriptorPool bindlessPool;
@@ -223,11 +223,19 @@ struct RenderContext::Impl {
 			.poolSizeCount = (uint32_t)std::size(pool_sizes),
 			.pPoolSizes = pool_sizes.data(),
 		};
-		vkCreateDescriptorPool(ctx.Device(), &pool_info, nullptr, &uiPool);
+
+		// Create the raw handle
+		VkDescriptorPool rawPool = VK_NULL_HANDLE;
+		vkCreateDescriptorPool(ctx.Device(), &pool_info, nullptr, &rawPool);
+
+		// Wrap it using the RAII class (which manages lifetime)
+		uiPool = Vk::DescriptorPool(ctx.Device(), rawPool);
+
 		IMGUI_CHECKVERSION();
 		ImGui::CreateContext();
 		ImGui_ImplGlfw_InitForVulkan(window, true);
 		VkFormat swapchainFormat = presentation.swapchain.Get().format;
+
 		ImGui_ImplVulkan_InitInfo init_info = {
 			.ApiVersion = VK_API_VERSION_1_3,
 			.Instance = ctx.Instance(),
@@ -235,7 +243,8 @@ struct RenderContext::Impl {
 			.Device = ctx.Device(),
 			.QueueFamily = ctx.PhysicalInfo().graphics_family,
 			.Queue = ctx.GraphicsQueue(),
-			.DescriptorPool = uiPool,
+			// Pass the raw handle from the wrapper using Get()
+			.DescriptorPool = uiPool.Get(),
 			.DescriptorPoolSize = 0,
 			.MinImageCount = 2,
 			.ImageCount = 2,
@@ -386,9 +395,6 @@ RenderContext::~RenderContext() {
 		ImGui_ImplVulkan_Shutdown();
 		ImGui_ImplGlfw_Shutdown();
 		ImGui::DestroyContext();
-		if (_impl->uiPool != VK_NULL_HANDLE) {
-			vkDestroyDescriptorPool(_impl->ctx.Device(), _impl->uiPool, nullptr);
-		}
 		_impl->meshes.clear();
 		_impl->materials.clear();
 	}
@@ -972,8 +978,7 @@ void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
 							 VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
 			impl->current_cmd, impl->presentation.depthTarget.image.Handle(),
 			VK_IMAGE_ASPECT_DEPTH_BIT);
-	} 
-
+	}
 
 	std::array<VkRenderingAttachmentInfo, 2> cols = {
 		VkRenderingAttachmentInfo{
@@ -1020,7 +1025,6 @@ void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
 		.pColorAttachments = cols.data(),
 		.pDepthAttachment = &depthAtt,
 		.pStencilAttachment = nullptr};
-		
 
 	vkCmdBeginRendering(impl->current_cmd, &renderInfo);
 
