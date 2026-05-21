@@ -1,6 +1,6 @@
 #include <Zahlen/alife/SpatialGrid.hpp>
-#include <Zahlen/ecs/ECS.hpp>
 #include <cmath>
+#include <ecs/ECS.hpp>
 
 namespace ZHLN::ALife {
 

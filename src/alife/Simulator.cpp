@@ -1,25 +1,25 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/alife/Simulator.hpp>
-#include <Zahlen/ecs/ECS.hpp>
 #include <cmath>
 #include <cstdlib>
+#include <ecs/ECS.hpp>
 #include <fstream>
 #include <threading/TaskSystem.hpp>
 
 namespace ZHLN::ALife {
 
-// --- Internal Math Helper ---
+// --- Package-Safe Math Helper ---
 static JPH::RVec3 MoveTowards(JPH::RVec3Arg current, JPH::RVec3Arg target, float max_dist) {
-	JPH::Vec3 diff = target - current; // RVec3 - RVec3 yields a local float Vec3
-	float d2 = diff.LengthSq();
+	JPH::RVec3 diff = target - current; // Keep as RVec3 to handle single/double precision correctly
+	double d2 = diff.LengthSq();
 
-	if (d2 < (max_dist * max_dist) || d2 < 0.0001f) {
+	if (d2 < (double)(max_dist * max_dist) || d2 < 0.0001) {
 		return target;
 	}
 
-	float d = std::sqrt(d2);
-	return current + (diff / d) * max_dist;
+	double d = std::sqrt(d2);
+	return current + diff / d * (double)max_dist;
 }
 
 // --- Simulator Initialization ---

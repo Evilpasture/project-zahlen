@@ -172,7 +172,8 @@ Plan SolvePlan(const PlanRequest& request, const std::vector<Action>& actions) {
 
 uint32_t WorldStateRegistry::RegisterKey(std::string_view name) {
 	for (uint32_t i = 0; i < static_cast<uint32_t>(_keyNames.size()); ++i) {
-		if (_keyNames[i] == name) {
+		if (std::string_view(_keyNames[i]) ==
+			name) { // Explicitly cast to prevent conversion ambiguity
 			return i;
 		}
 	}
@@ -188,7 +189,8 @@ uint32_t WorldStateRegistry::RegisterKey(std::string_view name) {
 
 uint32_t WorldStateRegistry::GetID(std::string_view name) const {
 	for (uint32_t i = 0; i < static_cast<uint32_t>(_keyNames.size()); ++i) {
-		if (_keyNames[i] == name) {
+		if (std::string_view(_keyNames[i]) ==
+			name) { // Explicitly cast to prevent conversion ambiguity
 			return i;
 		}
 	}
