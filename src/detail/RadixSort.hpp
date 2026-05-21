@@ -2,7 +2,6 @@
 #pragma once
 
 #include <cstdint>
-#include <algorithm>
 
 namespace ZHLN {
 struct SortKey {
@@ -28,6 +27,15 @@ struct SortItem {
 	SortKey key;
 	uint32_t payload; // Index mapping to the original drawQueue slot
 };
+
+// Small swap helper
+
+template <typename T>
+    inline void Swap(T& a, T& b) noexcept {
+        T temp = static_cast<T&&>(a); // Raw move semantics without <utility>
+        a = static_cast<T&&>(b);
+        b = static_cast<T&&>(temp);
+    }
 
 /**
  * @brief Performs a highly optimized, stable Radix Sort over 64-bit keys.
@@ -61,7 +69,7 @@ inline void RadixSort64(SortItem* __restrict items, SortItem* __restrict temp, u
 		}
 
 		// Swap buffer pointers
-		std::swap(in, out);
+		Swap(in, out);
 	}
 
 	// Since we execute exactly 8 passes (even), the final sorted output
