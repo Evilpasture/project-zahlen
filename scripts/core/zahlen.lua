@@ -1,5 +1,6 @@
 local mem = require("scripts.core.memoryview")
 local ffi = require("scripts.core.ffi_cdef")
+local ecs = require("scripts.core.ecs")
 
 -- ============================================================================
 -- Vector3 Math Implementation (Zero-Allocation)
@@ -193,5 +194,7 @@ function zahlen.log(...)
 ---@diagnostic disable-next-line: undefined-field
     _G.zahlen.log(...)
 end
+
+zahlen.ecs = ecs
 
 return zahlen
