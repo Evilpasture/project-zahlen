@@ -36,39 +36,53 @@ struct Scene {
 		reg.RegisterComponent<PhysicsComponent>();
 		reg.RegisterComponent<MovementComponent>();
 
-		// --- Assets ---
-		Mesh floorMesh = AssetFactory::CreatePlane(rc, 100.0f, {0.1f, 0.1f, 0.12f, 1.0f});
+		// --- Procedural Terrain Setup ---
+		int terrainSize = 128;			 // Grid vertices
+		float terrainWorldSize = 250.0f; // Width & Depth in meters
+		float terrainMaxHeight = 25.0f;	 // Maximum peak height
+		std::vector<float> terrainHeights;
+
+		Mesh terrainMesh = AssetFactory::CreateTerrain(rc, terrainSize, terrainWorldSize,
+													   terrainMaxHeight, terrainHeights);
 		Mesh boxMesh = AssetFactory::CreateBox(rc, {0.5f, 0.5f, 0.5f}, {0.8f, 0.3f, 0.2f, 1.0f});
 		Mesh playerMesh = AssetFactory::CreateBox(rc, {0.5f, 0.9f, 0.5f}, {0.2f, 0.6f, 0.9f, 1.0f});
 		Material material = AssetFactory::CreateBasicMaterial(rc);
 
-		auto floorShape =
-			Physics::GetOrCreateShape(pc, Physics::ShapeType::Box, 100.0f, 1.0f, 100.0f);
+		auto terrainShape =
+			Physics::CreateHeightFieldShape(terrainHeights, terrainSize, terrainWorldSize);
 		auto boxShape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Box, 0.5f, 0.5f, 0.5f);
 
-		// --- Spawn ---
-		reg.Add(reg.Create(), MeshComponent{floorMesh, material, 150.0f},
-				PhysicsComponent{Physics::CreateRigidBody(pc, floorShape, {0.0f, -1.0f, 0.0f},
+		// --- Spawn Terrain (Static) ---
+		reg.Add(reg.Create(),
+				MeshComponent{.mesh = terrainMesh, .material = material, .cullRadius = 300.0f},
+				PhysicsComponent{Physics::CreateRigidBody(pc, terrainShape, {0.0f, 0.0f, 0.0f},
 														  JPH::Quat::sIdentity(),
 														  JPH::EMotionType::Static, 0)});
 
+		// --- Spawn Dynamic Cascading Prop Boxes ---
 		for (int i = 0; i < 2000; ++i) {
-			float x = (float)(i % 45) - 22.5f;
-			float z = (float)(i / 45.0f) - 22.5f;
-			Entity propPhys =
-				Physics::CreateRigidBody(pc, boxShape, {x, 5.0f + (i * 0.1f), z},
-										 JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, 1);
+			// Scatter them within [-100, 100] coordinates
+			float x = ((float)(i % 50) - 25.0f) * 4.0f;
+			float z = ((float)(i / 50) - 20.0f) * 5.0f;
 
-			reg.Add(reg.Create(), MeshComponent{boxMesh, material, 1.0f},
+			// Drop them from varying heights above the hills
+			float y = 32.0f + (i * 0.15f);
+
+			Entity propPhys = Physics::CreateRigidBody(
+				pc, boxShape, {x, y, z}, JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, 1);
+
+			reg.Add(reg.Create(),
+					MeshComponent{.mesh = boxMesh, .material = material, .cullRadius = 1.0f},
 					PhysicsComponent{propPhys});
 		}
 
+		// Spawn player safely above peaks so they drop into the landscape
 		playerEntity = reg.Create();
-		reg.Add(playerEntity, MeshComponent{playerMesh, material, 1.5f});
-		reg.Add(playerEntity, PhysicsComponent{Physics::CreateCharacter(pc, {0.0f, 2.0f, 0.0f})});
+		reg.Add(playerEntity,
+				MeshComponent{.mesh = playerMesh, .material = material, .cullRadius = 1.5f});
+		reg.Add(playerEntity, PhysicsComponent{Physics::CreateCharacter(pc, {0.0f, 35.0f, 0.0f})});
 		reg.Add(playerEntity, MovementComponent{.speed = 8.0f});
 
-		// Ensure the spatial tree is ready for the first frame
 		pc.OptimizeBroadphase();
 	}
 };
@@ -149,7 +163,11 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 
 	ZHLN::EngineConfig config{
 		.physics = {.maxBodies = 10000, .maxBodyPairs = 20000, .maxContactConstraints = 20000},
-		.render = {.width = 1280, .height = 720, .vsync = false, .enableValidation = false},
+		.render = {.appName = "ZahlenEngine",
+				   .width = 1280,
+				   .height = 720,
+				   .vsync = false,
+				   .enableValidation = false},
 	};
 
 	Engine engine(config);

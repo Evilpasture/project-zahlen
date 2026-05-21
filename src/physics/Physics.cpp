@@ -12,6 +12,7 @@
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/CylinderShape.h>
 #include <Jolt/Physics/Collision/Shape/PlaneShape.h>
+#include <Jolt/Physics/Collision/Shape/HeightFieldShape.h>
 
 #include "Physics.hpp"
 #include "PhysicsDebug.hpp"
@@ -702,6 +703,29 @@ void AddImpulse(PhysicsContext& ctx, ZHLN::Entity handle, JPH::Vec3Arg impulse) 
 		// Without this, impulses on stationary (sleeping) objects do nothing.
 		impl->world.bodyInterface->ActivateBody(id);
 	}
+}
+
+JPH::ShapeRefC CreateHeightFieldShape(const std::vector<float>& heights, int sampleCount,
+									  float worldSize) {
+	JPH::HeightFieldShapeSettings settings;
+	settings.mSampleCount = sampleCount;
+	settings.mHeightSamples.resize(sampleCount * sampleCount);
+
+	for (int i = 0; i < sampleCount * sampleCount; ++i) {
+		settings.mHeightSamples[i] = heights[i];
+	}
+
+	// Offset to center the terrain over the origin (0, 0, 0)
+	settings.mOffset = JPH::Vec3(-worldSize / 2.0f, 0.0f, -worldSize / 2.0f);
+
+	// Map scale to stretch the local samples grid into world units
+	settings.mScale = JPH::Vec3(worldSize / (sampleCount - 1), 1.0f, worldSize / (sampleCount - 1));
+
+	JPH::Shape::ShapeResult result = settings.Create();
+	if (result.HasError()) {
+		ZHLN::Panic("Failed to build Jolt HeightFieldShape: {}", result.GetError().c_str());
+	}
+	return result.Get();
 }
 
 } // namespace Physics

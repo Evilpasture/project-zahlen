@@ -1,4 +1,5 @@
 #pragma once
+#include <detail/String.hpp>
 #include <cstdint>
 
 namespace ZHLN {
@@ -11,6 +12,7 @@ struct PhysicsConfig {
 };
 
 struct RenderConfig {
+	String64 appName;
 	uint32_t width = 1280;
 	uint32_t height = 720;
 	bool vsync = true;

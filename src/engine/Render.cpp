@@ -52,7 +52,7 @@ using TAALayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SampledImage
 
 // Blit Layout: Input, Sampler
 using BlitLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SamplerSlot<1>>;
-
+namespace {
 struct NativeMesh {
 	Vk::Buffer buffer;
 	uint32_t vertexCount;
@@ -74,10 +74,12 @@ struct WorkerCmdContext {
 	std::array<Vk::CommandPool, 2> pools;
 	std::array<ZHLN::Atomic<uint32_t>, 2> cmdCount{};
 };
+} // namespace
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
 struct RenderContext::Impl {
   public:
 	Window& window;
+	String64 appName;
 	Vk::Context ctx;
 	Vk::Allocator allocator;
 	Vk::Surface surface;
@@ -290,14 +292,17 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 #ifdef __APPLE__
 	inst_exts.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
 #endif
-	const ZHLN_InstanceDesc inst_desc = {.app_name = "ZHLN Engine",
-										 .version = VK_MAKE_API_VERSION(0, 1, 0, 0),
-										 .extension_count = static_cast<uint32_t>(inst_exts.size()),
-										 .severity_flags =
-											 VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-											 VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
-										 .extensions = inst_exts.data(),
-										 .enable_validation = cfg.enableValidation};
+	_impl->appName = cfg.appName;
+	ZHLN_InstanceDesc inst_desc = {.app_name = {},
+								   .version = VK_MAKE_API_VERSION(0, 1, 0, 0),
+								   .extension_count = static_cast<uint32_t>(inst_exts.size()),
+								   .severity_flags =
+									   VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+									   VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+								   .extensions = inst_exts.data(),
+								   .enable_validation = cfg.enableValidation};
+	_impl->appName.copy_to(inst_desc.app_name);
+
 	VkPhysicalDeviceVulkan13Features feat13 = {
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
 		.pNext = nullptr,
@@ -401,7 +406,7 @@ RenderContext::~RenderContext() {
 }
 
 auto RenderContext::GetRendererName() const -> const char* {
-	return "ZHLN (Modernized TAA)";
+	return _impl->appName.data();
 }
 
 void RenderContext::SetResolution([[maybe_unused]] const Extent2D& res) {
@@ -796,10 +801,6 @@ void RenderContext::EndFrame() {
 	VkImageView blitSource =
 		useTAA ? _impl->accumBuffers.Next().view.Get() : _impl->sceneColor.view.Get();
 
-	if (!useTAA) {
-		Renderer::Clear(*this, {1.0f, 0.0f, 1.0f, 1.0f});
-	}
-
 	_impl->blitPass.WriteNext(
 		_impl->ctx.Device(),
 		Vk::ImageWrite{.view = blitSource, .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
@@ -904,7 +905,10 @@ auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t hei
 										   .image = gpuImage.Handle(),
 										   .layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 										   .width = width,
-										   .height = height};
+										   .height = height,
+										   .buffer_offset = 0,
+										   .mip_level = 0,
+										   .base_array_layer = 0};
 	ZHLN_CmdCopyBufferToImage(cmd, &copyRegion);
 
 	// Transition: Transfer Dst -> Shader Read
@@ -919,8 +923,13 @@ auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t hei
 										 .commandBuffer = cmd};
 	VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
 							.pNext = nullptr,
+							.flags = 0,
+							.waitSemaphoreInfoCount = 0,
+							.pWaitSemaphoreInfos = nullptr,
 							.commandBufferInfoCount = 1,
-							.pCommandBufferInfos = &subInfo};
+							.pCommandBufferInfos = &subInfo,
+							.signalSemaphoreInfoCount = 0,
+							.pSignalSemaphoreInfos = nullptr};
 	vkQueueSubmit2(impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
 	vkQueueWaitIdle(impl->ctx.GraphicsQueue());
 
@@ -941,7 +950,8 @@ auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t hei
 								  .dstArrayElement = index,
 								  .descriptorCount = 1,
 								  .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-								  .pImageInfo = &bindlessUpdate};
+								  .pImageInfo = &bindlessUpdate,
+								  .pBufferInfo = nullptr};
 
 	vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
 
@@ -1003,16 +1013,17 @@ void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
 		 .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
 		 .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
 		 .clearValue = {.color = {.float32 = {0.0f, 0.0f, 0.0f, 0.0f}}}}};
-	VkRenderingAttachmentInfo depthAtt = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-										  .pNext = nullptr,
-										  .imageView = impl->presentation.depthTarget.view.Get(),
-										  .imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-										  .resolveMode = VK_RESOLVE_MODE_NONE,
-										  .resolveImageView = VK_NULL_HANDLE,
-										  .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-										  .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-										  .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-										  .clearValue = {.depthStencil = {.depth = depth}}};
+	VkRenderingAttachmentInfo depthAtt = {
+		.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+		.pNext = nullptr,
+		.imageView = impl->presentation.depthTarget.view.Get(),
+		.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+		.resolveMode = VK_RESOLVE_MODE_NONE,
+		.resolveImageView = VK_NULL_HANDLE,
+		.resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+		.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+		.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+		.clearValue = {.depthStencil = {.depth = depth, .stencil = 0}}};
 	const VkRenderingInfo renderInfo = {
 		.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
 		.pNext = nullptr,

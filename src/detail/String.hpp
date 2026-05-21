@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstring>
 #include <format>
 #include <string_view>
 
@@ -21,10 +22,6 @@ template <size_t Capacity> class FixedString {
 
 	constexpr FixedString(std::string_view sv) noexcept { assign(sv); }
 
-	// Explicitly copyable
-	constexpr FixedString(const FixedString&) noexcept = default;
-	constexpr FixedString& operator=(const FixedString&) noexcept = default;
-
 	constexpr void assign(std::string_view sv) noexcept {
 		_len = std::min(sv.size(), Capacity - 1);
 		for (size_t i = 0; i < _len; ++i) {
@@ -43,14 +40,14 @@ template <size_t Capacity> class FixedString {
 		_data[_len] = '\0';
 	}
 
-	[[nodiscard]] constexpr const char* data() const noexcept { return _data; }
-	[[nodiscard]] constexpr const char* c_str() const noexcept { return _data; }
-	[[nodiscard]] constexpr size_t size() const noexcept { return _len; }
-	[[nodiscard]] constexpr bool empty() const noexcept { return _len == 0; }
-	[[nodiscard]] constexpr size_t capacity() const noexcept { return Capacity; }
+	[[nodiscard]] constexpr auto data() const noexcept -> const char* { return _data; }
+	[[nodiscard]] constexpr auto c_str() const noexcept -> const char* { return _data; }
+	[[nodiscard]] constexpr auto size() const noexcept -> size_t { return _len; }
+	[[nodiscard]] constexpr auto empty() const noexcept -> bool { return _len == 0; }
+	[[nodiscard]] constexpr auto capacity() const noexcept -> size_t { return Capacity; }
 
-	constexpr char& operator[](size_t i) noexcept { return _data[i]; }
-	constexpr const char& operator[](size_t i) const noexcept { return _data[i]; }
+	constexpr auto operator[](size_t i) noexcept -> char& { return _data[i]; }
+	constexpr auto operator[](size_t i) const noexcept -> const char& { return _data[i]; }
 
 	// Conversion to std::string_view for compatibility with std::print
 	[[nodiscard]] constexpr operator std::string_view() const noexcept {
@@ -62,13 +59,28 @@ template <size_t Capacity> class FixedString {
 		return std::string_view(*this) <=> std::string_view(other);
 	}
 
-	constexpr bool operator==(const FixedString& other) const noexcept {
+	constexpr auto operator==(const FixedString& other) const noexcept -> bool {
 		return std::string_view(*this) == std::string_view(other);
 	}
 
 	constexpr void clear() noexcept {
 		_len = 0;
 		_data[0] = '\0';
+	}
+
+	/**
+	 * @brief Copies the contents to a destination fixed-size char array.
+	 * @tparam N The size of the destination array.
+	 * @param dest The target char array to copy into.
+	 */
+	template <size_t N> constexpr void copy_to(char (&dest)[N]) const noexcept {
+		size_t to_copy = std::min(_len, N - 1);
+
+		for (size_t i = 0; i < to_copy; ++i) {
+			dest[i] = _data[i];
+		}
+
+		dest[to_copy] = '\0';
 	}
 
   private:

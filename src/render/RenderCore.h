@@ -25,7 +25,7 @@ static constexpr auto maxInstanceExtensions = 128;
  * @brief Configuration for Vulkan Instance initialization.
  */
 typedef struct {
-	const char app_name[64];  /**< Application name embedded to satisfy C23 constexpr */
+	char app_name[64];  /**< Application name embedded to satisfy C23 constexpr */
 	const uint32_t version;	  /**< Application-specific version (VK_MAKE_API_VERSION) */
 	uint32_t extension_count; /**< Number of additional extensions to enable */
 	const VkDebugUtilsMessageSeverityFlagsEXT
