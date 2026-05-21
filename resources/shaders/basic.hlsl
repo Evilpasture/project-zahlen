@@ -32,7 +32,7 @@ VSOutput VSMain(VSInput input) {
     // 2. Previous Unjittered Position
     output.prevClip = mul(pc.prevTransform, float4(input.position, 1.0f));
     
-    output.normal = mul((float3x3)pc.transform, input.normal);
+    output.normal = input.normal; 
     output.uv = input.uv;
     output.color = input.color;
     
