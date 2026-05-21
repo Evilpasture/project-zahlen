@@ -69,7 +69,9 @@ set(PROJECT_SOURCES
     src/main.cpp
     src/engine/Allocator.cpp
     src/engine/AssertHandler.cpp
-    src/engine/Render.cpp
+    src/engine/RenderFrame.cpp
+    src/engine/RenderInit.cpp
+    src/engine/RenderResources.cpp
     src/engine/Engine.cpp
     src/engine/AssetFactory.cpp
     src/engine/Window.cpp
