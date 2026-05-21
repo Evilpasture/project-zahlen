@@ -128,8 +128,9 @@ void UpdateCulling(Engine& engine) {
 
 	bool moved = (cam.position - s_LastCullPos).LengthSq() > 0.01f ||
 				 std::abs(cam.yaw - s_LastCullYaw) > 0.5f;
-	if (!moved && !s_VisibleEntities.empty())
+	if (!moved && !s_VisibleEntities.empty()) {
 		return;
+	}
 
 	s_VisibleEntities.clear();
 	auto meshes = reg.GetRawArray<MeshComponent>();
@@ -138,8 +139,9 @@ void UpdateCulling(Engine& engine) {
 		for (size_t i = 0; i < entities.size(); ++i) {
 			Entity e = entities[i];
 			auto* phys = reg.Get<PhysicsComponent>(e);
-			if (!phys)
+			if (!phys) {
 				continue;
+			}
 
 			uint32_t dense = world.slotToDense[phys->physicsHandle.index];
 			JPH::Vec3 pos((float)world.positions[dense * 4], (float)world.positions[dense * 4 + 1],
@@ -167,7 +169,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 				   .width = 1280,
 				   .height = 720,
 				   .vsync = false,
-				   .enableValidation = false},
+				   .enableValidation = true},
 	};
 
 	Engine engine(config);
@@ -183,7 +185,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	FileWatcher gameplayWatcher("scripts/gameplay.lua");
 	uint32_t frameCounter = 0;
 
-	Scene scene;
+	Scene scene{};
 	scene.Setup(engine);
 
 	float accumulator = 0.0f;
@@ -242,7 +244,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			JPH::Mat44 unjitteredVp = unjitteredProj * cam.GetViewMatrix();
 
 			// Check toggle before jittering
-			JPH::Mat44 vp;
+			JPH::Mat44 vp{};
 			if (g_TAAState.enabled) {
 				vp = cam.GetJitteredProjectionMatrix((float)res.width / res.height, res.width,
 													 res.height) *
@@ -265,9 +267,9 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 				for (Entity e : s_VisibleEntities) {
 					auto* mesh = reg.Get<MeshComponent>(e);
 					auto* phys = reg.Get<PhysicsComponent>(e);
-					if (!mesh || !phys)
+					if (!mesh || !phys) {
 						continue;
-
+					}
 					uint32_t dense = world.slotToDense[phys->physicsHandle.index];
 					JPH::Vec3 pos((float)world.positions[dense * 4],
 								  (float)world.positions[dense * 4 + 1],

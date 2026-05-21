@@ -316,7 +316,24 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 		.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE,
 		.descriptorBindingPartiallyBound = VK_TRUE,
 		.runtimeDescriptorArray = VK_TRUE,
-		.bufferDeviceAddress = VK_TRUE};
+		.bufferDeviceAddress = VK_TRUE,
+		.samplerMirrorClampToEdge = VK_FALSE,
+		.drawIndirectCount = VK_FALSE,
+		.storageBuffer8BitAccess = VK_FALSE,
+		.uniformAndStorageBuffer8BitAccess = VK_FALSE,
+		.storagePushConstant8 = VK_FALSE,
+		.shaderBufferInt64Atomics = VK_FALSE,
+		.shaderSharedInt64Atomics = VK_FALSE,
+		.shaderFloat16 = VK_FALSE,
+		.shaderInt8 = VK_FALSE,
+		.descriptorIndexing = VK_FALSE,
+		.shaderInputAttachmentArrayDynamicIndexing = VK_FALSE,
+		.shaderUniformTexelBufferArrayDynamicIndexing = VK_FALSE,
+		.shaderStorageTexelBufferArrayDynamicIndexing = VK_FALSE,
+		.shaderUniformBufferArrayNonUniformIndexing = VK_FALSE,
+		.shaderSampledImageArrayNonUniformIndexing = VK_FALSE,
+		.shaderStorageBufferArrayNonUniformIndexing = VK_FALSE,
+	};
 	VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swap_maint = {
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR,
 		.pNext = nullptr,
@@ -770,8 +787,11 @@ void RenderContext::EndFrame() {
 			.flags = 0,
 			.renderArea = {.offset = {.x = 0, .y = 0}, .extent = extent},
 			.layerCount = 1,
+			.viewMask = 0,
 			.colorAttachmentCount = 1,
-			.pColorAttachments = &col};
+			.pColorAttachments = &col,
+			.pDepthAttachment = nullptr,
+			.pStencilAttachment = nullptr};
 
 		vkCmdBeginRendering(_impl->current_cmd, &renderInfo);
 
