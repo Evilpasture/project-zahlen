@@ -1,5 +1,7 @@
 // File: src/engine/Render_Init.cpp
 #include "RenderInternal.hpp"
+#include "SamplerBuilder.hpp"
+#include "Resources.hpp"
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_vulkan.h"
 #include "imgui.h"

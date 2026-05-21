@@ -3,16 +3,10 @@
 
 #include "Allocator.hpp"
 #include "DescriptorLayout.hpp"
-#include "PipelineBuilder.hpp"
 #include "Postprocessing.hpp"
 #include "PresentationContext.hpp"
 #include "RenderCore.hpp"
 #include "RenderTarget.hpp"
-#include "Resources.hpp"
-#include "SamplerBuilder.hpp"
-#include "Vertex.hpp"
-#include "Zahlen/Profiler.hpp"
-#include "engine/RenderState.hpp"
 
 #include <GLFW/glfw3.h>
 #include <Zahlen/Log.hpp>
@@ -20,8 +14,6 @@
 #include <vector>
 #include <array>
 #include <memory>
-#include <bit>
-#include <atomic>
 #include <vulkan/vulkan_core.h>
 
 namespace ZHLN {
