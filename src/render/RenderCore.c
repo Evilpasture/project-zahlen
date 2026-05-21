@@ -72,8 +72,6 @@ static inline uint64_t zhln_max_u64(uint64_t a, uint64_t b) {
 		uint64_t: zhln_max_u64,                                                                    \
 		default: zhln_max_i64)((a), (b))
 
-
-
 /* --- Start of procedural logic --- */
 
 static VkBool32 VKAPI_CALL ZHLN_Internal_DebugCallback(
@@ -837,21 +835,33 @@ VkShaderModule ZHLN_CreateShaderModule(const VkDevice device,
 bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* const restrict desc,
 							 ZHLN_ShaderStages* const restrict out) {
 	out->vert.handle = ZHLN_CreateShaderModule(desc->device, &desc->vert);
-	out->frag.handle = ZHLN_CreateShaderModule(desc->device, &desc->frag);
 
-	if (out->vert.handle == VK_NULL_HANDLE || out->frag.handle == VK_NULL_HANDLE) {
-		ZHLN_DestroyShaderStages(desc->device, out);
+	if (out->vert.handle == VK_NULL_HANDLE) {
 		return false;
 	}
-
 	out->vert.stage = VK_SHADER_STAGE_VERTEX_BIT;
-	out->frag.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+	if (desc->frag.code && desc->frag.size > 0) {
+		out->frag.handle = ZHLN_CreateShaderModule(desc->device, &desc->frag);
+		if (out->frag.handle == VK_NULL_HANDLE) {
+			ZHLN_DestroyShaderStages(desc->device, out);
+			return false;
+		}
+		out->frag.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	} else {
+		out->frag.handle = VK_NULL_HANDLE;
+		out->frag.stage = (VkShaderStageFlagBits)0;
+	}
 
 	// --- NEW: AUTO-REFLECTION LOGIC ---
 	const ZHLN_ShaderDesc* descs[2] = {&desc->vert, &desc->frag};
 	ZHLN_Shader* targets[2] = {&out->vert, &out->frag};
 
 	for (int i = 0; i < 2; ++i) {
+		if (targets[i]->handle == VK_NULL_HANDLE) {
+			continue;
+		}
+
 		if (descs[i]->entry_point) {
 			// Use provided name
 			strncpy(targets[i]->entry_point, descs[i]->entry_point, 63);
@@ -885,21 +895,28 @@ void ZHLN_DestroyShaderStages(const VkDevice device, ZHLN_ShaderStages* const re
 	*stages = (ZHLN_ShaderStages){};
 }
 
-void ZHLN_PopulateShaderStageInfos(const ZHLN_ShaderStages* const restrict stages,
-								   VkPipelineShaderStageCreateInfo* const restrict out_stages) {
-	out_stages[0] = (const VkPipelineShaderStageCreateInfo){
-		.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-		.stage = stages->vert.stage,
-		.module = stages->vert.handle,
-		.pName = stages->vert.entry_point,
-	};
+[[nodiscard]]
+uint32_t ZHLN_PopulateShaderStageInfos(const ZHLN_ShaderStages* const restrict stages,
+									   VkPipelineShaderStageCreateInfo* const restrict out_stages) {
+	uint32_t count = 0;
+	if (stages->vert.handle != VK_NULL_HANDLE) {
+		out_stages[count++] = (VkPipelineShaderStageCreateInfo){
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+			.stage = stages->vert.stage,
+			.module = stages->vert.handle,
+			.pName = stages->vert.entry_point,
+		};
+	}
 
-	out_stages[1] = (const VkPipelineShaderStageCreateInfo){
-		.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-		.stage = stages->frag.stage,
-		.module = stages->frag.handle,
-		.pName = stages->frag.entry_point,
-	};
+	if (stages->frag.handle != VK_NULL_HANDLE) {
+		out_stages[count++] = (VkPipelineShaderStageCreateInfo){
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+			.stage = stages->frag.stage,
+			.module = stages->frag.handle,
+			.pName = stages->frag.entry_point,
+		};
+	}
+	return count;
 }
 
 VkPipelineLayout ZHLN_CreatePipelineLayout(const VkDevice device,
@@ -931,7 +948,7 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device,
 
 	// --- Shader Stages ---
 	VkPipelineShaderStageCreateInfo shader_stages[2];
-	ZHLN_PopulateShaderStageInfos(desc->stages, shader_stages);
+	uint32_t stage_count = ZHLN_PopulateShaderStageInfos(desc->stages, shader_stages);
 
 	// --- Vertex Input ---
 	const VkPipelineVertexInputStateCreateInfo vertex_input = {
@@ -981,7 +998,7 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device,
 
 	// --- Color Blend (FIX: Dynamic Attachment Count) ---
 	VkPipelineColorBlendAttachmentState blend_attachments[8];
-	uint32_t safe_color_count = ZHLN_Min(desc->color_format_count , 8);
+	uint32_t safe_color_count = ZHLN_Min(desc->color_format_count, 8);
 
 	for (uint32_t i = 0; i < safe_color_count; ++i) {
 		blend_attachments[i] = (VkPipelineColorBlendAttachmentState){
@@ -1026,7 +1043,7 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device,
 	const VkGraphicsPipelineCreateInfo pipeline_info = {
 		.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
 		.pNext = &rendering,
-		.stageCount = 2,
+		.stageCount = stage_count,
 		.pStages = shader_stages,
 		.pVertexInputState = &vertex_input,
 		.pInputAssemblyState = &input_assembly,

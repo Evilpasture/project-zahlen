@@ -11,6 +11,7 @@
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <algorithm>
+#include <cstddef>
 #include <detail/ControlFlow.hpp>
 #include <physics/PhysicsWorld.hpp>
 #include <threading/Mutex.hpp>
@@ -114,11 +115,12 @@ struct Scene {
 		// =====================================================================
 
 		// Think Callback (Runs when an agent is idle)
-		alife.on_think = [](ALife::Simulator& sim, Entity e) {
+		alife.on_think = [](ALife::Simulator& sim, Entity e) -> void {
 			auto& r = GetEngineContext()->GetRegistry();
 			auto* comp = r.Get<ALife::ALifeComponent>(e);
-			if (!comp)
+			if (!comp) {
 				return;
+			}
 
 			if (comp->current_node == ALife::INVALID_GRAPH_NODE) {
 				comp->current_node = sim.GetGraph().FindClosest(comp->position);
@@ -132,7 +134,7 @@ struct Scene {
 											std::pmr::new_delete_resource());
 
 					comp->path_count =
-						sim.GetGraph().FindPath(comp->current_node, next, comp->path, ws);
+						sim.GetGraph().FindPath(comp->current_node, next, &comp->path[0], ws);
 					comp->path_index = 0;
 					comp->target_node = next;
 				}
@@ -187,8 +189,8 @@ struct Scene {
 					ALife::ALifeComponent{
 						.position = JPH::RVec3(x, y, z),
 						.state = ALife::State::Offline,
-						.travel_speed =
-							3.5f + (std::rand() % 100) * 0.02f, // Slightly randomized patrol speed
+						.travel_speed = 3.5f + ((std::rand() % 100) *
+												0.02f), // Slightly randomized patrol speed
 						.faction_id = static_cast<uint32_t>(i % 3), // Distribute among 3 factions
 						.self_entity = agent});
 		}
@@ -213,7 +215,7 @@ void UpdateCameraSystem(Camera& cam, InputContext& input, Entity player, ECS::Re
 	ZHLN_LOCK(world.sync.shadowLock) {
 		if (auto* pComp = reg.Get<PhysicsComponent>(player)) {
 			uint32_t dense = world.slotToDense[pComp->physicsHandle.index];
-			JPH::Real* p = &world.positions[dense * 4];
+			JPH::Real* p = &world.positions[static_cast<size_t>(dense * 4)];
 			JPH::Vec3 target = {(float)p[0], (float)p[1] + 1.0f, (float)p[2]};
 
 			float yR = JPH::DegreesToRadians(cam.yaw);
@@ -251,13 +253,13 @@ void UpdateCulling(Engine& engine) {
 		for (size_t i = 0; i < entities.size(); ++i) {
 			Entity e = entities[i];
 
-			JPH::Vec3 pos;
+			JPH::Vec3 pos{};
 			auto* phys = reg.Get<PhysicsComponent>(e);
-			if (phys) {
+			if (phys != nullptr) {
 				uint32_t dense = world.slotToDense[phys->physicsHandle.index];
-				pos = JPH::Vec3((float)world.positions[dense * 4],
-								(float)world.positions[dense * 4 + 1],
-								(float)world.positions[dense * 4 + 2]);
+				pos = JPH::Vec3((float)world.positions[static_cast<size_t>(dense * 4)],
+								(float)world.positions[(dense * 4) + 1],
+								(float)world.positions[(dense * 4) + 2]);
 			} else if (auto* alifeComp = reg.Get<ALife::ALifeComponent>(e)) {
 				pos = JPH::Vec3(alifeComp->position);
 			} else {
@@ -378,30 +380,55 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			cam.frustum.Update(vp);
 			UpdateCulling(engine);
 
-			engine.BeginFrame();
-			Renderer::Clear(rc, {0.08f, 0.09f, 0.12f, 1.0f});
+			// Compute Light View-Projection (Shadow) matrix
+			JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f}; // Matching shader sun direction
+			JPH::Mat44 lightView =
+				Math::CreateLookAt(sunDirection * 100.0f, {0.0f, 0.0f, 0.0f}, JPH::Vec3::sAxisY());
+			JPH::Mat44 lightProj = Math::CreateOrtho(-50.0f, 50.0f, -50.0f, 50.0f, 0.1f, 200.0f);
+			JPH::Mat44 shadowProjView = lightProj * lightView;
 
+			// Compute bias matrix for shadow map sampling projection
+			JPH::Mat44 biasMatrix = {
+				JPH::Vec4(0.5f, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, 0.5f, 0.0f, 0.0f),
+				JPH::Vec4(0.0f, 0.0f, 1.0f, 0.0f), JPH::Vec4(0.5f, 0.5f, 0.0f, 1.0f)};
+			JPH::Mat44 lightSpaceBiased = biasMatrix * shadowProjView;
+
+			// Prepare Frame Uniforms payload
+			FrameUniforms uniforms{};
+			uniforms.viewProj = vp;
+			uniforms.prevViewProj = unjitteredVp;
+			uniforms.lightSpaceMatrix = lightSpaceBiased;
+			std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
+			std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);
+			uniforms.lightCount = 0; // Populate this with active dynamic lights from scene query
+
+			// Upload Uniforms and Light lists to the GPU via the public API [c]
+			Renderer::SetFrameData(rc, uniforms, shadowProjView);
+
+			// Renderer call now executes with two internal passes [c]
+			engine.BeginFrame();
 			Renderer::SetMatrices(rc, vp, unjitteredVp);
 
 			// --- Modified Rendering Logic: Support pure simulated positions ---
 			ZHLN_LOCK(world.sync.shadowLock) {
 				for (Entity e : s_VisibleEntities) {
 					auto* mesh = reg.Get<MeshComponent>(e);
-					if (!mesh) {
+					if (mesh == nullptr) {
 						continue;
 					}
 
-					JPH::Mat44 currentTransform;
+					JPH::Mat44 currentTransform{};
 					auto* phys = reg.Get<PhysicsComponent>(e);
 
-					if (phys) {
+					if (phys != nullptr) {
 						uint32_t dense = world.slotToDense[phys->physicsHandle.index];
-						JPH::Vec3 pos((float)world.positions[dense * 4],
-									  (float)world.positions[dense * 4 + 1],
-									  (float)world.positions[dense * 4 + 2]);
-						JPH::Quat rot(world.rotations[dense * 4], world.rotations[dense * 4 + 1],
-									  world.rotations[dense * 4 + 2],
-									  world.rotations[dense * 4 + 3]);
+						JPH::Vec3 pos((float)world.positions[static_cast<size_t>(dense * 4)],
+									  (float)world.positions[(dense * 4) + 1],
+									  (float)world.positions[(dense * 4) + 2]);
+						JPH::Quat rot(world.rotations[static_cast<size_t>(dense * 4)],
+									  world.rotations[(dense * 4) + 1],
+									  world.rotations[(dense * 4) + 2],
+									  world.rotations[(dense * 4) + 3]);
 						currentTransform = Math::CreateTransform(pos, rot);
 					} else if (auto* alifeComp = reg.Get<ALife::ALifeComponent>(e)) {
 						// Render purely simulated ALife agents using their own simulated

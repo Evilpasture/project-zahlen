@@ -43,8 +43,15 @@ ZHLN_REFLECT_VERTEX(::ZHLN::Vertex, position, normal, tangent, uv, color);
 
 namespace ZHLN {
 
-using GlobalBindlessLayout =
-	Vk::DescriptorLayout<Vk::BindlessSampledImageSlot<0, 4096>, Vk::SamplerSlot<1>>;
+using GlobalSceneLayout = Vk::DescriptorLayout<
+	Vk::BindlessSampledImageSlot<0, 4096>, // Bindless textures
+	Vk::SamplerSlot<1>,					   // Default linear sampler
+	Vk::SampledImageSlot<2>,			   // Shadow Map (Depth)
+	Vk::SamplerSlot<3>,					   // Shadow Map comparison sampler
+	Vk::UniformSlot<4, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT>, // FrameUniforms
+																				   // (UBO)
+	Vk::StorageBufferSlot<5, VK_SHADER_STAGE_FRAGMENT_BIT>						   // Lights (SSBO)
+	>;
 
 // TAA Layout: Current Color, History, Velocity, Sampler
 using TAALayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SampledImageSlot<1>,
@@ -67,7 +74,10 @@ struct DrawCommand {
 	NativeMesh* mesh;
 	JPH::Mat44 transform;
 	JPH::Mat44 prevTransform;
-	uint32_t textureIndex;
+	uint32_t albedoIndex;
+	uint32_t normalIndex;
+	uint32_t pbrIndex;
+	uint32_t emissiveIndex;
 };
 
 struct WorkerCmdContext {
@@ -108,6 +118,7 @@ struct RenderContext::Impl {
 
 	JPH::Mat44 current_view_proj{};
 	JPH::Mat44 prev_view_proj{};
+	JPH::Mat44 shadowProjView{};
 
 	std::vector<std::unique_ptr<NativeMesh>> meshes;
 	std::vector<std::unique_ptr<NativeMaterial>> materials;
@@ -127,11 +138,73 @@ struct RenderContext::Impl {
 	std::vector<Vk::Image> textureImages;
 	std::vector<Vk::ImageView> textureViews;
 
+	// Shadow map target
+	static constexpr uint32_t SHADOW_RES = 2048;
+	Vk::RenderTarget<VK_FORMAT_D32_SFLOAT> shadowMap;
+	Vk::Sampler shadowSampler;
+
+	// GPU Buffers
+	Vk::Buffer frameUniformBuffer;
+	Vk::Buffer lightStorageBuffer;
+
+	// Pipelines
+	Vk::Pipeline shadowPipeline;
+	Vk::PipelineLayout shadowPipelineLayout;
+
+	void InitShadowResources() {
+		shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+			allocator, ctx, {.width = SHADOW_RES, .height = SHADOW_RES},
+			VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+
+		shadowSampler = Vk::SamplerBuilder{}
+							.Linear()
+							.ClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE)
+							.DepthCompare() // Enables hardware PCF
+							.Build(ctx.Device());
+
+		frameUniformBuffer =
+			Vk::Buffer::Create(allocator.Get(), sizeof(FrameUniforms),
+							   VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+		lightStorageBuffer = Vk::Buffer::Create(
+			allocator.Get(), sizeof(GPULight) * 128, // Support up to 128 dynamic lights
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	}
+
+	void CompileShadowPipeline(VkDevice device, const void* shaderData, size_t shaderSize) {
+		ZHLN_ShaderDesc v_desc = {.code = Vk::AsSpirV(shaderData), .size = shaderSize};
+		auto shaders = Vk::ShaderStages::Create(device, v_desc, {}); // No fragment shader
+
+		VkPushConstantRange pc_range = {
+			.stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+			.offset = 0,
+			.size = sizeof(FrameConstants) // Match ObjectConstants (144 bytes)
+		};
+
+		const std::array layouts = {bindlessLayout.Get()}; // Include bindless set layout
+		ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = layouts.data(),
+											   .set_layout_count = 1,
+											   .push_constants = &pc_range,
+											   .push_constant_count = 1};
+
+		shadowPipelineLayout =
+			Vk::PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &layout_desc));
+
+		shadowPipeline = Vk::PipelineBuilder{}
+							 .Shaders(shaders)
+							 .Layout(shadowPipelineLayout.Get())
+							 .Vertex<Vertex>()
+							 .DepthOnly() // No color attachments [c]
+							 .DepthFormat(VK_FORMAT_D32_SFLOAT)
+							 .CullBack()
+							 .Build(device);
+	}
+
 	void InitBindless() {
-		bindlessLayout = GlobalBindlessLayout::CreateLayout(ctx.Device());
-		bindlessPool = GlobalBindlessLayout::CreatePool(ctx.Device(), 1);
+		bindlessLayout = GlobalSceneLayout::CreateLayout(ctx.Device());
+		bindlessPool = GlobalSceneLayout::CreatePool(ctx.Device(), 1);
 		bindlessSet =
-			GlobalBindlessLayout::Allocate(ctx.Device(), bindlessPool.Get(), bindlessLayout.Get());
+			GlobalSceneLayout::Allocate(ctx.Device(), bindlessPool.Get(), bindlessLayout.Get());
 
 		VkSamplerCreateInfo samplerInfo = {
 			.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
@@ -157,8 +230,12 @@ struct RenderContext::Impl {
 		vkCreateSampler(ctx.Device(), &samplerInfo, nullptr, &rawSampler);
 		globalSampler = Vk::Sampler(ctx.Device(), rawSampler);
 
-		GlobalBindlessLayout::Write(ctx.Device(), bindlessSet, Vk::SkipWrite{},
-									Vk::SamplerWrite{globalSampler.Get()});
+		// Write our full global frame descriptors to the static bindings [c]
+		GlobalSceneLayout::Write(
+			ctx.Device(), bindlessSet, Vk::SkipWrite{}, Vk::SamplerWrite{globalSampler.Get()},
+			Vk::ImageWrite{shadowMap.view.Get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+			Vk::SamplerWrite{shadowSampler.Get()}, Vk::BufferWrite{frameUniformBuffer.Handle()},
+			Vk::BufferWrite{lightStorageBuffer.Handle()});
 	}
 
 	void InitPostProcessing() {
@@ -317,22 +394,6 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 		.descriptorBindingPartiallyBound = VK_TRUE,
 		.runtimeDescriptorArray = VK_TRUE,
 		.bufferDeviceAddress = VK_TRUE,
-		.samplerMirrorClampToEdge = VK_FALSE,
-		.drawIndirectCount = VK_FALSE,
-		.storageBuffer8BitAccess = VK_FALSE,
-		.uniformAndStorageBuffer8BitAccess = VK_FALSE,
-		.storagePushConstant8 = VK_FALSE,
-		.shaderBufferInt64Atomics = VK_FALSE,
-		.shaderSharedInt64Atomics = VK_FALSE,
-		.shaderFloat16 = VK_FALSE,
-		.shaderInt8 = VK_FALSE,
-		.descriptorIndexing = VK_FALSE,
-		.shaderInputAttachmentArrayDynamicIndexing = VK_FALSE,
-		.shaderUniformTexelBufferArrayDynamicIndexing = VK_FALSE,
-		.shaderStorageTexelBufferArrayDynamicIndexing = VK_FALSE,
-		.shaderUniformBufferArrayNonUniformIndexing = VK_FALSE,
-		.shaderSampledImageArrayNonUniformIndexing = VK_FALSE,
-		.shaderStorageBufferArrayNonUniformIndexing = VK_FALSE,
 	};
 	VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swap_maint = {
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR,
@@ -363,17 +424,24 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 										 .score_userdata = nullptr};
 
 	_impl->ctx = Vk::Context::Create(inst_desc, select_desc, dev_desc);
-	_impl->InitBindless();
+
+	if (!_impl->allocator.Init(_impl->ctx)) {
+		ZHLN::Panic("FATAL: Vulkan Memory Allocator (VMA) failed to initialize");
+	}
+
+	// Create hardware uniform blocks and shaders before bindless setups [c]
+	_impl->InitShadowResources();
+	_impl->InitBindless(); // 1. Init Bindless first so bindlessLayout is ready!
+	_impl->CompileShadowPipeline(
+		_impl->ctx.Device(), &ZHLN_Resource_BasicVertSpv[0],
+		ZHLN_Resource_BasicVertSpv_Len); // 2. Compile Shadow Pipeline next!
+
 	_impl->InitPostProcessing();
 
 	auto* glfwWin = static_cast<GLFWwindow*>(window.GetNativeHandle());
 	VkSurfaceKHR raw_surface = nullptr;
 	glfwCreateWindowSurface(_impl->ctx.Instance(), glfwWin, nullptr, &raw_surface);
 	_impl->surface = Vk::Surface(_impl->ctx.Instance(), raw_surface);
-
-	if (!_impl->allocator.Init(_impl->ctx)) {
-		ZHLN::Panic("FATAL: Vulkan Memory Allocator (VMA) failed to initialize");
-	}
 
 	// Initialize presentation with current window size
 	int width = 0;
@@ -491,6 +559,7 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 						// OUTPUT 2 ATTACHMENTS (Color + Velocity)
 						.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16G16_SFLOAT})
 						.DepthFormat(VK_FORMAT_D32_SFLOAT)
+						.CullBack()
 						.Build(impl->ctx.Device());
 
 	auto mat = std::make_unique<NativeMaterial>(std::move(pipeline), std::move(layout));
@@ -641,6 +710,87 @@ void RenderContext::EndFrame() {
 	}
 
 	if (!_impl->drawQueue.empty()) {
+		// --- 1. SHADOW PASS (Sequential on Primary Command Buffer) ---
+		{
+			// Transition shadow map to depth-write layout
+			Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED,
+								 VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+				_impl->current_cmd, _impl->shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+
+			VkRenderingAttachmentInfo depthAtt = {
+				.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+				.imageView = _impl->shadowMap.view.Get(),
+				.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+				.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+				.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+				.clearValue = {.depthStencil = {.depth = 1.0f, .stencil = 0}}};
+
+			VkRenderingInfo shadowRenderInfo = {
+				.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+				.renderArea = {.offset = {0, 0}, .extent = {_impl->SHADOW_RES, _impl->SHADOW_RES}},
+				.layerCount = 1,
+				.pDepthAttachment = &depthAtt};
+
+			vkCmdBeginRendering(_impl->current_cmd, &shadowRenderInfo);
+
+			vkCmdBindPipeline(_impl->current_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+							  _impl->shadowPipeline.Get());
+
+			// --- FIX 1: Set the dynamic viewport and scissor for the shadow map ---
+			VkViewport shadowViewport = {.x = 0.0f,
+										 .y = (float)_impl->SHADOW_RES,
+										 .width = (float)_impl->SHADOW_RES,
+										 .height = -(float)_impl->SHADOW_RES,
+										 .minDepth = 0.0f,
+										 .maxDepth = 1.0f};
+			VkRect2D shadowScissor = {.offset = {0, 0},
+									  .extent = {_impl->SHADOW_RES, _impl->SHADOW_RES}};
+			vkCmdSetViewport(_impl->current_cmd, 0, 1, &shadowViewport);
+			vkCmdSetScissor(_impl->current_cmd, 0, 1, &shadowScissor);
+
+			// --- FIX 2: Bind the global descriptor set so the pipeline layout matches ---
+			vkCmdBindDescriptorSets(_impl->current_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+									_impl->shadowPipelineLayout.Get(), 0, 1, &_impl->bindlessSet, 0,
+									nullptr);
+
+			// Render every mesh sequentially to the shadow map
+			for (const auto& draw : _impl->drawQueue) {
+				auto* mesh = std::bit_cast<NativeMesh*>(draw.mesh);
+
+				// Calculate Light MVP
+				JPH::Mat44 lightMVP = _impl->shadowProjView * draw.transform;
+
+				// Create full 160-byte constants struct to prevent validation warnings
+				FrameConstants shadowConstants = {
+					.transform = lightMVP,
+					.prevTransform = JPH::Mat44::sIdentity(),
+					.albedoIndex = 0,
+					.normalIndex = 0,
+					.pbrIndex = 0,
+					.emissiveIndex = 0,
+					.isShadowPass = 1, // Let the shader know this is the shadow pass
+					._padding = {0, 0, 0}};
+
+				vkCmdPushConstants(_impl->current_cmd, _impl->shadowPipelineLayout.Get(),
+								   VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(FrameConstants),
+								   &shadowConstants);
+
+				VkDeviceSize offset = 0;
+				VkBuffer vbo = mesh->buffer.Handle();
+				vkCmdBindVertexBuffers(_impl->current_cmd, 0, 1, &vbo, &offset);
+				vkCmdDraw(_impl->current_cmd, mesh->vertexCount, 1, 0, 0);
+			}
+
+			vkCmdEndRendering(_impl->current_cmd);
+
+			// Transition shadow map to shader-read layout so the main pass can sample it
+			Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+								 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+				_impl->current_cmd, _impl->shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+		}
+		// --- 2. BEGIN MAIN COLOR/VELOCITY PASS ---
+		Renderer::Clear(*this, {0.08f, 0.09f, 0.12f, 1.0f});
+
 		uint32_t numChunks = (_impl->drawQueue.size() + 255) / 256;
 		std::vector<VkCommandBuffer> secondaries(numChunks);
 
@@ -720,11 +870,14 @@ void RenderContext::EndFrame() {
 											cmd.material->layout.Get(), 0, 1, &_impl->bindlessSet,
 											0, nullptr);
 
-					JPH::Mat44 final_transform = _impl->current_view_proj * cmd.transform;
-					JPH::Mat44 final_prev_transform = _impl->prev_view_proj * cmd.prevTransform;
-					FrameConstants constants = {.transform = final_transform,
-												.prevTransform = final_prev_transform,
-												.textureIndex = cmd.textureIndex};
+					// Pass only the model (world) matrices directly to the push constants
+					FrameConstants constants = {.transform = cmd.transform, // Model matrix
+												.prevTransform =
+													cmd.prevTransform, // Prev Model matrix
+												.albedoIndex = cmd.albedoIndex,
+												.normalIndex = cmd.normalIndex,
+												.pbrIndex = cmd.pbrIndex,
+												.emissiveIndex = cmd.emissiveIndex};
 
 					vkCmdPushConstants(sec_cmd, cmd.material->layout.Get(),
 									   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
@@ -1077,6 +1230,13 @@ void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj, const JPH::Mat4
 	impl->prev_view_proj = prevViewProj;
 }
 
+void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
+				  const JPH::Mat44& shadowProjView) {
+	auto* impl = ctx.GetImpl();
+	impl->shadowProjView = shadowProjView;
+	std::memcpy(impl->frameUniformBuffer.Map().data, &uniforms, sizeof(FrameUniforms));
+}
+
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 		  const JPH::Mat44& transform, const JPH::Mat44& prevTransform) {
 	auto* impl = ctx.GetImpl();
@@ -1087,7 +1247,10 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 							   .mesh = std::bit_cast<NativeMesh*>(mesh.vertexBuffer),
 							   .transform = transform,
 							   .prevTransform = prevTransform,
-							   .textureIndex = material.textureIndex});
+							   .albedoIndex = material.albedoIndex,
+							   .normalIndex = material.normalIndex,
+							   .pbrIndex = material.pbrIndex,
+							   .emissiveIndex = material.emissiveIndex});
 }
 } // namespace Renderer
 } // namespace ZHLN

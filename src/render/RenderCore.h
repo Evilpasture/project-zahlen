@@ -25,7 +25,7 @@ static constexpr auto maxInstanceExtensions = 128;
  * @brief Configuration for Vulkan Instance initialization.
  */
 typedef struct {
-	char app_name[64];  /**< Application name embedded to satisfy C23 constexpr */
+	char app_name[64];		  /**< Application name embedded to satisfy C23 constexpr */
 	const uint32_t version;	  /**< Application-specific version (VK_MAKE_API_VERSION) */
 	uint32_t extension_count; /**< Number of additional extensions to enable */
 	const VkDebugUtilsMessageSeverityFlagsEXT
@@ -284,8 +284,9 @@ void ZHLN_DestroyShaderStages(VkDevice device, ZHLN_ShaderStages* ZHLN_RESTRICT 
 
 // Populates the two VkPipelineShaderStageCreateInfo entries the pipeline builder needs.
 // out_stages must point to an array of 2.
-void ZHLN_PopulateShaderStageInfos(const ZHLN_ShaderStages* ZHLN_RESTRICT stages,
-								   VkPipelineShaderStageCreateInfo* ZHLN_RESTRICT out_stages);
+[[nodiscard]] uint32_t
+ZHLN_PopulateShaderStageInfos(const ZHLN_ShaderStages* ZHLN_RESTRICT stages,
+							  VkPipelineShaderStageCreateInfo* ZHLN_RESTRICT out_stages);
 
 /* --- PIPELINE LAYOUT --- */
 
@@ -400,9 +401,9 @@ void ZHLN_EndCommandBuffer(VkCommandBuffer cmd);
  */
 [[nodiscard]]
 ZHLN_FrameResult ZHLN_WaitAndAcquireImage(VkDevice device, VkSwapchainKHR swapchain,
-                                          const ZHLN_FrameSync* ZHLN_RESTRICT sync,
-                                          const ZHLN_CommandPool* ZHLN_RESTRICT pool,
-                                          uint32_t* out_image_index);
+										  const ZHLN_FrameSync* ZHLN_RESTRICT sync,
+										  const ZHLN_CommandPool* ZHLN_RESTRICT pool,
+										  uint32_t* out_image_index);
 
 /* --- PUSH CONSTANT HELPERS --- */
 

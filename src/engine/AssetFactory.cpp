@@ -2,7 +2,6 @@
 
 #include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Math3D.hpp> // For PackNormal, PackColor, etc.
-#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <vector>
@@ -314,17 +313,17 @@ Material CreateBasicMaterial(RenderContext& ctx) {
 	Material mat = ctx.CreateMaterial(desc);
 
 	// Generate the procedural texture and save its index!
-	mat.textureIndex = CreateProceduralCheckerboard(ctx);
+	mat.albedoIndex = CreateProceduralCheckerboard(ctx);
 
 	return mat;
 }
 
 Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight,
 				   std::vector<float>& outHeights) {
-	outHeights.resize(sampleCount * sampleCount);
+	outHeights.resize(static_cast<size_t>(sampleCount) * sampleCount);
 
 	// Zero-allocation pseudo-random noise hash
-	auto hash = [](float x, float y) {
+	auto hash = [](float x, float y) -> float {
 		uint32_t ix = 0;
 		std::memcpy(&ix, &x, sizeof(float));
 		uint32_t iy = 0;
