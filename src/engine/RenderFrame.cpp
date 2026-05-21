@@ -2,6 +2,8 @@
 #include "RenderInternal.hpp"
 #include "Zahlen/Profiler.hpp"
 #include "backends/imgui_impl_vulkan.h"
+#include "detail/RadixSort.hpp"
+#include "detail/Ranges.hpp"
 #include "engine/RenderState.hpp"
 #include "imgui.h"
 
@@ -82,15 +84,15 @@ void RenderContext::BeginFrame() {
 			_impl->sceneColor.view.Get(), _impl->velocityBuffer.view.Get(),
 			_impl->accumBuffers[0].view.Get(), _impl->accumBuffers[1].view.Get()};
 
-		// Optimized out std::views::zip instantiation to reduce compile-time layout overhead
-		for (size_t i = 0; i < attachments.size(); ++i) {
-			attachments[i] = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-							  .pNext = nullptr,
-							  .imageView = views[i],
-							  .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-							  .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-							  .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-							  .clearValue = clearColor};
+		// Clean, highly readable, structured zip loop:
+		for (auto&& [attachment, view] : ZHLN::Ranges::Zip(attachments, views)) {
+			attachment = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+						  .pNext = nullptr,
+						  .imageView = view,
+						  .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+						  .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+						  .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+						  .clearValue = clearColor};
 		}
 
 		VkRenderingInfo renderInfo = {
@@ -198,9 +200,36 @@ void RenderContext::Impl::RenderShadowPass(VkCommandBuffer cmd) {
 }
 
 void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd) {
-	Renderer::Clear(ctx, {0.08f, 0.09f, 0.12f, 1.0f}); // Clean, safe context call
+	Renderer::Clear(ctx, {0.08f, 0.09f, 0.12f, 1.0f});
 
-	uint32_t numChunks = (drawQueue.size() + 255) / 256;
+	uint32_t drawCount = static_cast<uint32_t>(drawQueue.size());
+	if (drawCount == 0) {
+		return;
+	}
+
+	// 1. Allocate continuous temporary sort items
+	std::vector<SortItem> items(drawCount);
+	std::vector<SortItem> temp(drawCount);
+
+	for (uint32_t i = 0; i < drawCount; ++i) {
+		items[i] = {
+			.key = SortKey::Pack(drawQueue[i].material, drawQueue[i].mesh),
+			.payload = i
+		};
+	}
+
+	// 2. Perform stable Radix Sort on the packed keys
+	RadixSort64(items.data(), temp.data(), drawCount);
+
+	// 3. Reorder drawQueue elements on-the-fly to preserve cache locality for workers
+	std::vector<DrawCommand> sortedDrawQueue(drawCount);
+	for (uint32_t i = 0; i < drawCount; ++i) {
+		sortedDrawQueue[i] = drawQueue[items[i].payload];
+	}
+	drawQueue = std::move(sortedDrawQueue);
+
+	// 4. Submit draw commands in sorted order across threads
+	uint32_t numChunks = (drawCount + 255) / 256;
 	std::vector<VkCommandBuffer> secondaries(numChunks);
 
 	std::array<VkFormat, 2> formats = {VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16G16_SFLOAT};
@@ -225,24 +254,19 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 		.queryFlags = 0,
 		.pipelineStatistics = 0};
 
-	std::sort(drawQueue.begin(), drawQueue.end(),
-			  [](const DrawCommand& a, const DrawCommand& b) -> bool {
-				  if (a.material != b.material) {
-					  return a.material < b.material;
-				  }
-				  return a.mesh < b.mesh;
-			  });
-
 	TaskSystem::ParallelFor(
-		drawQueue.size(), 256, [&](uint32_t start, uint32_t end, uint32_t chunkIdx) -> void {
+		drawCount, 256,
+		[&](uint32_t start, uint32_t end, uint32_t chunkIdx) -> void {
 			uint32_t wIdx = TaskSystem::GetWorkerIndex();
 			if (wIdx >= workerCmds.size()) {
 				wIdx = (uint32_t)(workerCmds.size() - 1);
 			}
 
 			uint32_t localCmdIdx =
-				workerCmds[wIdx].cmdCount[frame_index].fetch_add(1, std::memory_order_relaxed);
-			VkCommandBuffer sec_cmd = workerCmds[wIdx].pools[frame_index][localCmdIdx];
+				workerCmds[wIdx].cmdCount[frame_index].fetch_add(
+					1, std::memory_order_relaxed);
+			VkCommandBuffer sec_cmd =
+				workerCmds[wIdx].pools[frame_index][localCmdIdx];
 
 			const VkCommandBufferBeginInfo beginInfo = {
 				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -264,7 +288,7 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 			vkCmdSetScissor(sec_cmd, 0, 1, &scissor);
 
 			for (uint32_t i = start; i < end; ++i) {
-				const auto& drawCmd = drawQueue[i];
+				const auto& drawCmd = drawQueue[i]; // Now naturally aligned in memory
 
 				if (!drawCmd.material->pipeline.Valid()) {
 					continue;
@@ -273,8 +297,8 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 				vkCmdBindPipeline(sec_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
 								  drawCmd.material->pipeline.Get());
 				vkCmdBindDescriptorSets(sec_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-										drawCmd.material->layout.Get(), 0, 1, &bindlessSet, 0,
-										nullptr);
+										drawCmd.material->layout.Get(), 0, 1, &bindlessSet,
+										0, nullptr);
 
 				FrameConstants constants = {.transform = drawCmd.transform,
 											.prevTransform = drawCmd.prevTransform,
@@ -300,6 +324,7 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 	Vk::ExecuteCommands(cmd, secondaries);
 	drawQueue.clear();
 }
+
 
 void RenderContext::Impl::ApplyTAAPass(VkCommandBuffer cmd, VkExtent2D extent) {
 	Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
