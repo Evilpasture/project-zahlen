@@ -1,3 +1,4 @@
+#include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/alife/Simulator.hpp>

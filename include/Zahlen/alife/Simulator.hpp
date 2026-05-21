@@ -5,8 +5,12 @@
 #include "SpatialGrid.hpp"
 #include "Types.hpp"
 
-#include <Zahlen/Engine.hpp>
 #include <functional>
+
+// Forward-declare Engine to break the circular dependency loop
+namespace ZHLN {
+class Engine;
+}
 
 namespace ZHLN::ALife {
 
@@ -31,8 +35,8 @@ class Simulator {
   public:
 	explicit Simulator(const SimConfig& config = SimConfig{});
 
-	// Subsystem update hook
-	void Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos);
+	// Subsystem update hook (using fully-qualified forward-declared namespace)
+	void Update(ZHLN::Engine& engine, float dt, JPH::RVec3Arg observer_pos);
 
 	void SetRelation(uint32_t a, uint32_t b, float value);
 	void BroadcastEvent(const Event& event);
