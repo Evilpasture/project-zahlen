@@ -667,7 +667,7 @@ void RenderContext::EndFrame() {
 			.pipelineStatistics = 0};
 
 		std::sort(_impl->drawQueue.begin(), _impl->drawQueue.end(),
-				  [](const DrawCommand& a, const DrawCommand& b) {
+				  [](const DrawCommand& a, const DrawCommand& b) -> bool {
 					  if (a.material != b.material) {
 						  return a.material < b.material;
 					  }

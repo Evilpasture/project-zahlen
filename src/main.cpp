@@ -87,16 +87,18 @@ struct Scene {
 	}
 };
 
+namespace {
+
 // --- Global/Static state for temporal stability ---
-static JPH::Array<ZHLN::Entity> s_VisibleEntities;
-static JPH::Vec3 s_LastCullPos;
-static float s_LastCullYaw = 0.0f;
+JPH::Array<ZHLN::Entity> s_VisibleEntities;
+JPH::Vec3 s_LastCullPos;
+float s_LastCullYaw = 0.0f;
 
 void UpdateCameraSystem(Camera& cam, InputContext& input, Entity player, ECS::Registry& reg,
 						const Physics::PhysicsWorld& world) {
 	if (input.IsMouseButtonDown(KeyCode::RButton)) {
 		cam.yaw += input.GetMouse().deltaX * 0.2f;
-		cam.pitch = std::clamp(cam.pitch - input.GetMouse().deltaY * 0.2f, -89.0f, 89.0f);
+		cam.pitch = std::clamp(cam.pitch - (input.GetMouse().deltaY * 0.2f), -89.0f, 89.0f);
 	}
 
 	ZHLN_LOCK(world.sync.shadowLock) {
@@ -105,7 +107,8 @@ void UpdateCameraSystem(Camera& cam, InputContext& input, Entity player, ECS::Re
 			JPH::Real* p = &world.positions[dense * 4];
 			JPH::Vec3 target = {(float)p[0], (float)p[1] + 1.0f, (float)p[2]};
 
-			float yR = JPH::DegreesToRadians(cam.yaw), pR = JPH::DegreesToRadians(cam.pitch);
+			float yR = JPH::DegreesToRadians(cam.yaw);
+			float pR = JPH::DegreesToRadians(cam.pitch);
 			JPH::Vec3 dir(JPH::Cos(yR) * JPH::Cos(pR), JPH::Sin(pR), JPH::Sin(yR) * JPH::Cos(pR));
 			cam.position = target - (dir.Normalized() * 10.0f);
 		}
@@ -156,6 +159,7 @@ void UpdateCulling(Engine& engine) {
 	s_LastCullPos = cam.position;
 	s_LastCullYaw = cam.yaw;
 }
+} // namespace
 
 auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	Platform::Init();
