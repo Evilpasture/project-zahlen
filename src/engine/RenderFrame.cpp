@@ -7,7 +7,6 @@
 #include "engine/RenderState.hpp"
 #include "imgui.h"
 
-#include <algorithm>
 #include <threading/TaskSystem.hpp>
 
 namespace ZHLN {
@@ -212,10 +211,7 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 	std::vector<SortItem> temp(drawCount);
 
 	for (uint32_t i = 0; i < drawCount; ++i) {
-		items[i] = {
-			.key = SortKey::Pack(drawQueue[i].material, drawQueue[i].mesh),
-			.payload = i
-		};
+		items[i] = {.key = SortKey::Pack(drawQueue[i].material, drawQueue[i].mesh), .payload = i};
 	}
 
 	// 2. Perform stable Radix Sort on the packed keys
@@ -255,18 +251,15 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 		.pipelineStatistics = 0};
 
 	TaskSystem::ParallelFor(
-		drawCount, 256,
-		[&](uint32_t start, uint32_t end, uint32_t chunkIdx) -> void {
+		drawCount, 256, [&](uint32_t start, uint32_t end, uint32_t chunkIdx) -> void {
 			uint32_t wIdx = TaskSystem::GetWorkerIndex();
 			if (wIdx >= workerCmds.size()) {
 				wIdx = (uint32_t)(workerCmds.size() - 1);
 			}
 
 			uint32_t localCmdIdx =
-				workerCmds[wIdx].cmdCount[frame_index].fetch_add(
-					1, std::memory_order_relaxed);
-			VkCommandBuffer sec_cmd =
-				workerCmds[wIdx].pools[frame_index][localCmdIdx];
+				workerCmds[wIdx].cmdCount[frame_index].fetch_add(1, std::memory_order_relaxed);
+			VkCommandBuffer sec_cmd = workerCmds[wIdx].pools[frame_index][localCmdIdx];
 
 			const VkCommandBufferBeginInfo beginInfo = {
 				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -297,8 +290,8 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 				vkCmdBindPipeline(sec_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
 								  drawCmd.material->pipeline.Get());
 				vkCmdBindDescriptorSets(sec_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-										drawCmd.material->layout.Get(), 0, 1, &bindlessSet,
-										0, nullptr);
+										drawCmd.material->layout.Get(), 0, 1, &bindlessSet, 0,
+										nullptr);
 
 				FrameConstants constants = {.transform = drawCmd.transform,
 											.prevTransform = drawCmd.prevTransform,
@@ -324,7 +317,6 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 	Vk::ExecuteCommands(cmd, secondaries);
 	drawQueue.clear();
 }
-
 
 void RenderContext::Impl::ApplyTAAPass(VkCommandBuffer cmd, VkExtent2D extent) {
 	Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,

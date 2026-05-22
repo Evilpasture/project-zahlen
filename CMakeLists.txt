@@ -85,6 +85,7 @@ set(PROJECT_SOURCES
     src/engine/Buffer.cpp
     src/engine/ConsoleUI.cpp
     src/engine/ProfilerUI.cpp
+    src/engine/Text.cpp
     src/engine/system/MovementSystem.cpp
 )
 

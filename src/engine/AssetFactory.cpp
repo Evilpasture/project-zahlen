@@ -1,4 +1,5 @@
 #include "Resources.hpp"
+#include "Zahlen/Font8x8.hpp"
 #include "Zahlen/Log.hpp"
 
 #include <Zahlen/AssetFactory.hpp>
@@ -619,6 +620,35 @@ Mesh LoadGLB(RenderContext& ctx, const std::string& path) {
 		ctx.CreateVertexBuffer(vertexBuffer.data(), vertexBuffer.size() * sizeof(Vertex));
 	Log("Loaded GLB: {} ({} vertices uploaded, world-transforms baked)", path, vertexBuffer.size());
 	return Mesh{.vertexBuffer = vbo, .vertexCount = static_cast<uint32_t>(vertexBuffer.size())};
+}
+
+uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
+	const uint32_t atlasSize = 128;
+	std::vector<uint32_t> pixels(static_cast<size_t>(atlasSize * atlasSize),
+								 0x00000000); // Transparent RGBA8
+
+	for (uint32_t c = 0; c < 128; ++c) {
+		uint32_t gridX = c % 16;
+		uint32_t gridY = c / 16;
+		uint32_t startX = gridX * 8;
+		uint32_t startY = gridY * 8;
+
+		for (uint32_t row = 0; row < 8; ++row) {
+			uint8_t byteVal = Font8x8_Basic[c][row];
+			for (uint32_t col = 0; col < 8; ++col) {
+				// Read bits from Left (MSB) to Right (LSB)
+				bool bit = (byteVal & (0x80 >> col)) != 0;
+				uint32_t pixelX = startX + col;
+				uint32_t pixelY = startY + row;
+
+				// White for letters (0xFFFFFFFF), transparent for empty slots
+				pixels[pixelY * atlasSize + pixelX] = bit ? 0xFFFFFFFF : 0x00000000;
+			}
+		}
+	}
+
+	// Upload using your existing bindless texture engine
+	return ctx.CreateTexture(pixels.data(), atlasSize, atlasSize);
 }
 
 } // namespace ZHLN::AssetFactory

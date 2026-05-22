@@ -1,10 +1,11 @@
 // File: src/engine/Render_Init.cpp
 #include "RenderInternal.hpp"
-#include "SamplerBuilder.hpp"
 #include "Resources.hpp"
+#include "SamplerBuilder.hpp"
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_vulkan.h"
 #include "imgui.h"
+
 #include <threading/TaskSystem.hpp>
 
 namespace ZHLN {
@@ -149,9 +150,9 @@ void RenderContext::Impl::InitShadowResources() {
 		Vk::Buffer::Create(allocator.Get(), sizeof(FrameUniforms),
 						   VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
-	lightStorageBuffer = Vk::Buffer::Create(
-		allocator.Get(), sizeof(GPULight) * 128,
-		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	lightStorageBuffer =
+		Vk::Buffer::Create(allocator.Get(), sizeof(GPULight) * 128,
+						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 }
 
 void RenderContext::Impl::InitBindless() {
@@ -196,27 +197,25 @@ void RenderContext::Impl::InitPostProcessing() {
 
 	VkPushConstantRange taaPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float)};
-	auto taaShaders =
-		Vk::ShaderStages::Create(ctx.Device(),
-								 {.code = Vk::AsSpirV(&ZHLN_Resource_TaaVertSpv[0]),
-								  .size = ZHLN_Resource_TaaVertSpv_Len,
-								  .entry_point = "VSMain"},
-								 {.code = Vk::AsSpirV(&ZHLN_Resource_TaaFragSpv[0]),
-								  .size = ZHLN_Resource_TaaFragSpv_Len,
-								  .entry_point = "PSMain"});
+	auto taaShaders = Vk::ShaderStages::Create(ctx.Device(),
+											   {.code = Vk::AsSpirV(&ZHLN_Resource_TaaVertSpv[0]),
+												.size = ZHLN_Resource_TaaVertSpv_Len,
+												.entry_point = "VSMain"},
+											   {.code = Vk::AsSpirV(&ZHLN_Resource_TaaFragSpv[0]),
+												.size = ZHLN_Resource_TaaFragSpv_Len,
+												.entry_point = "PSMain"});
 
 	if (!taaPass.Build(ctx.Device(), taaShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &taaPush, 1)) {
 		ZHLN::Log("TAA pass build failure, continuing...");
 	}
 
-	auto blitShaders =
-		Vk::ShaderStages::Create(ctx.Device(),
-								 {.code = (const uint32_t*)ZHLN_Resource_BlitVertSpv,
-								  .size = ZHLN_Resource_BlitVertSpv_Len,
-								  .entry_point = "VSMain"},
-								 {.code = (const uint32_t*)ZHLN_Resource_BlitFragSpv,
-								  .size = ZHLN_Resource_BlitFragSpv_Len,
-								  .entry_point = "PSMain"});
+	auto blitShaders = Vk::ShaderStages::Create(ctx.Device(),
+												{.code = (const uint32_t*)ZHLN_Resource_BlitVertSpv,
+												 .size = ZHLN_Resource_BlitVertSpv_Len,
+												 .entry_point = "VSMain"},
+												{.code = (const uint32_t*)ZHLN_Resource_BlitFragSpv,
+												 .size = ZHLN_Resource_BlitFragSpv_Len,
+												 .entry_point = "PSMain"});
 
 	if (!blitPass.Build(ctx.Device(), blitShaders, {VK_FORMAT_B8G8R8A8_SRGB})) {
 		ZHLN::Log("Blit pass build failure, continuing...");
@@ -226,17 +225,22 @@ void RenderContext::Impl::InitPostProcessing() {
 void RenderContext::Impl::SetupUI(GLFWwindow* window) {
 	const std::array pool_sizes = {
 		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_SAMPLER, .descriptorCount = 1000},
-		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1000},
+		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+							 .descriptorCount = 1000},
 		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .descriptorCount = 1000},
 		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .descriptorCount = 1000},
-		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, .descriptorCount = 1000},
-		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, .descriptorCount = 1000},
+		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,
+							 .descriptorCount = 1000},
+		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,
+							 .descriptorCount = 1000},
 		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = 1000},
 		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 1000},
-		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, .descriptorCount = 1000},
-		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, .descriptorCount = 1000},
+		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+							 .descriptorCount = 1000},
+		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC,
+							 .descriptorCount = 1000},
 		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, .descriptorCount = 1000}};
-	
+
 	const VkDescriptorPoolCreateInfo pool_info = {
 		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
 		.pNext = nullptr,
@@ -267,21 +271,21 @@ void RenderContext::Impl::SetupUI(GLFWwindow* window) {
 		.MinImageCount = 2,
 		.ImageCount = 2,
 		.PipelineCache = VK_NULL_HANDLE,
-		.PipelineInfoMain = {
-			.RenderPass = VK_NULL_HANDLE,
-			.Subpass = 0,
-			.MSAASamples = VK_SAMPLE_COUNT_1_BIT,
-			.ExtraDynamicStates{},
-			.PipelineRenderingCreateInfo = {
-				.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-				.pNext = nullptr,
-				.viewMask = 0,
-				.colorAttachmentCount = 1,
-				.pColorAttachmentFormats = &swapchainFormat,
-				.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT,
-				.stencilAttachmentFormat = VK_FORMAT_UNDEFINED
+		.PipelineInfoMain =
+			{
+				.RenderPass = VK_NULL_HANDLE,
+				.Subpass = 0,
+				.MSAASamples = VK_SAMPLE_COUNT_1_BIT,
+				.ExtraDynamicStates{},
+				.PipelineRenderingCreateInfo =
+					{.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+					 .pNext = nullptr,
+					 .viewMask = 0,
+					 .colorAttachmentCount = 1,
+					 .pColorAttachmentFormats = &swapchainFormat,
+					 .depthAttachmentFormat = VK_FORMAT_D32_SFLOAT,
+					 .stencilAttachmentFormat = VK_FORMAT_UNDEFINED},
 			},
-		},
 		.UseDynamicRendering = true,
 		.Allocator = nullptr,
 		.CheckVkResultFn = nullptr,
