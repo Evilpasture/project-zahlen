@@ -27,3 +27,13 @@ const unsigned char ZHLN_Resource_TaaFragSpv[] = {
 #embed SHADER_TAA_HLSL_PS_PATH
 };
 const unsigned int ZHLN_Resource_TaaFragSpv_Len = sizeof(ZHLN_Resource_TaaFragSpv);
+
+const unsigned char ZHLN_Resource_UiVertSpv[] = {
+#embed SHADER_UI_HLSL_VS_PATH
+};
+const unsigned int ZHLN_Resource_UiVertSpv_Len = sizeof(ZHLN_Resource_UiVertSpv);
+
+const unsigned char ZHLN_Resource_UiFragSpv[] = {
+#embed SHADER_UI_HLSL_PS_PATH
+};
+const unsigned int ZHLN_Resource_UiFragSpv_Len = sizeof(ZHLN_Resource_UiFragSpv);

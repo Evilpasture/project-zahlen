@@ -1,5 +1,6 @@
 // File: src/engine/Render_Frame.cpp
 #include "RenderInternal.hpp"
+#include "Zahlen/GUI.hpp"
 #include "Zahlen/Profiler.hpp"
 #include "backends/imgui_impl_vulkan.h"
 #include "detail/RadixSort.hpp"
@@ -397,6 +398,34 @@ void RenderContext::Impl::BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, 
 		vkCmdBeginRendering(cmd, &renderInfo);
 		blitPass.Execute(cmd);
 
+		if (!uiDrawQueue.empty()) {
+			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, uiPipeline.Get());
+			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, uiPipelineLayout.Get(), 0,
+									1, &bindlessSet, 0, nullptr);
+
+			struct UIObjectConstants {
+				JPH::Mat44 orthoMatrix;
+				JPH::Mat44 unused;
+				uint32_t albedoIdx;
+				uint32_t padding[3];
+			} pc{};
+
+			pc.orthoMatrix = GUI::CreateOrthoMatrix((float)extent.width, (float)extent.height);
+
+			for (const auto& draw : uiDrawQueue) {
+				pc.albedoIdx = draw.fontIndex;
+				vkCmdPushConstants(cmd, uiPipelineLayout.Get(),
+								   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+								   sizeof(UIObjectConstants), &pc);
+
+				VkDeviceSize offset = 0;
+				VkBuffer vbo = draw.mesh->buffer.Handle();
+				vkCmdBindVertexBuffers(cmd, 0, 1, &vbo, &offset);
+				vkCmdDraw(cmd, draw.mesh->vertexCount, 1, 0, 0);
+			}
+			uiDrawQueue.clear();
+		}
+
 		ImGui::Render();
 		ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
 		ZHLN_EndRendering(cmd);
@@ -580,6 +609,16 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 							   .normalIndex = material.normalIndex,
 							   .pbrIndex = material.pbrIndex,
 							   .emissiveIndex = material.emissiveIndex});
+}
+
+void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex) {
+	auto* impl = ctx.GetImpl();
+	if (impl->current_cmd == VK_NULL_HANDLE) {
+		return;
+	}
+
+	impl->uiDrawQueue.push_back(
+		{.mesh = std::bit_cast<NativeMesh*>(mesh.vertexBuffer), .fontIndex = fontIndex});
 }
 } // namespace Renderer
 } // namespace ZHLN

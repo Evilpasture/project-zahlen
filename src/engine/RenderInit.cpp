@@ -254,6 +254,36 @@ void RenderContext::Impl::SetupUI(GLFWwindow* window) {
 	vkCreateDescriptorPool(ctx.Device(), &pool_info, nullptr, &rawPool);
 	uiPool = Vk::DescriptorPool(ctx.Device(), rawPool);
 
+	auto uiShaders = Vk::ShaderStages::Create(
+		ctx.Device(),
+		{.code = (const uint32_t*)ZHLN_Resource_UiVertSpv, .size = ZHLN_Resource_UiVertSpv_Len},
+		{.code = (const uint32_t*)ZHLN_Resource_UiFragSpv, .size = ZHLN_Resource_UiFragSpv_Len});
+
+	// 144 bytes matches the exact size of the UIObjectConstants struct in HLSL
+	VkPushConstantRange uiPush = {.stageFlags =
+									  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+								  .offset = 0,
+								  .size = 144};
+	VkDescriptorSetLayout rawLayout = bindlessLayout.Get();
+	ZHLN_PipelineLayoutDesc uiLayoutDesc = {.set_layouts = &rawLayout,
+											.set_layout_count = 1,
+											.push_constants = &uiPush,
+											.push_constant_count = 1};
+
+	uiPipelineLayout =
+		Vk::PipelineLayout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &uiLayoutDesc));
+
+	uiPipeline =
+		Vk::PipelineBuilder{}
+			.Shaders(uiShaders)
+			.Layout(uiPipelineLayout.Get())
+			.Vertex<Vertex>()
+			.ColorFormats({presentation.swapchain.Get().format}) // Render straight to swapchain!
+			.NoDepth()											 // Disable depth testing
+			.AlphaBlend()										 // Enable transparency
+			.CullNone()
+			.Build(ctx.Device());
+
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 	ImGui_ImplGlfw_InitForVulkan(window, true);

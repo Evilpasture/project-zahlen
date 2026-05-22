@@ -13,4 +13,6 @@ Material CreateBasicMaterial(RenderContext& ctx);
 Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight,
 				   std::vector<float>& outHeights);
 Mesh LoadGLB(RenderContext& ctx, const std::string& path);
+
+uint32_t CreateFontAtlasTexture(RenderContext& ctx);
 } // namespace ZHLN::AssetFactory

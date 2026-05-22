@@ -49,6 +49,7 @@ void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
 				  const JPH::Mat44& shadowProjView);
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 		  const JPH::Mat44& transform, const JPH::Mat44& prevTransform);
+void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex);
 
 } // namespace Renderer
 

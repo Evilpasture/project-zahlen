@@ -11,9 +11,9 @@
 #include <GLFW/glfw3.h>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
-#include <vector>
 #include <array>
 #include <memory>
+#include <vector>
 #include <vulkan/vulkan_core.h>
 
 namespace ZHLN {
@@ -22,12 +22,13 @@ namespace ZHLN {
 
 using GlobalSceneLayout = Vk::DescriptorLayout<
 	Vk::BindlessSampledImageSlot<0, 4096>, // Bindless textures
-	Vk::SamplerSlot<1>,                    // Default linear sampler
-	Vk::SampledImageSlot<2>,               // Shadow Map (Depth)
-	Vk::SamplerSlot<3>,                    // Shadow Map comparison sampler
-	Vk::UniformSlot<4, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT>, // FrameUniforms (UBO)
-	Vk::StorageBufferSlot<5, VK_SHADER_STAGE_FRAGMENT_BIT>                         // Lights (SSBO)
->;
+	Vk::SamplerSlot<1>,					   // Default linear sampler
+	Vk::SampledImageSlot<2>,			   // Shadow Map (Depth)
+	Vk::SamplerSlot<3>,					   // Shadow Map comparison sampler
+	Vk::UniformSlot<4, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT>, // FrameUniforms
+																				   // (UBO)
+	Vk::StorageBufferSlot<5, VK_SHADER_STAGE_FRAGMENT_BIT>						   // Lights (SSBO)
+	>;
 
 using TAALayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SampledImageSlot<1>,
 									   Vk::SampledImageSlot<2>, Vk::SamplerSlot<3>>;
@@ -53,6 +54,11 @@ struct DrawCommand {
 	uint32_t normalIndex;
 	uint32_t pbrIndex;
 	uint32_t emissiveIndex;
+};
+
+struct UIDrawCommand {
+	NativeMesh* mesh;
+	uint32_t fontIndex;
 };
 
 struct WorkerCmdContext {
@@ -117,6 +123,10 @@ struct RenderContext::Impl {
 
 	Vk::Pipeline shadowPipeline;
 	Vk::PipelineLayout shadowPipelineLayout;
+
+	std::vector<UIDrawCommand> uiDrawQueue;
+	Vk::Pipeline uiPipeline;
+	Vk::PipelineLayout uiPipelineLayout;
 
 	Impl(Window& win) : window(win) {}
 
