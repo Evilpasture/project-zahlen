@@ -1,4 +1,5 @@
 #pragma once
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Input.hpp>
@@ -29,6 +30,7 @@ class Engine {
 	InputContext& GetInput() { return *_input; }
 	Camera& GetCamera() { return _mainCamera; }
 	ALife::Simulator& GetALife() { return *_alifeSimulator; }
+	AssetManager& GetAssetManager() { return *_assetManager; }
 
 	ECS::Registry& GetRegistry() { return _registry; }
 
@@ -38,6 +40,7 @@ class Engine {
 	std::unique_ptr<RenderContext> _renderContext;
 	std::unique_ptr<PhysicsContext> _physicsContext;
 	std::unique_ptr<ALife::Simulator> _alifeSimulator;
+	std::unique_ptr<AssetManager> _assetManager;
 	Camera _mainCamera;
 	ECS::Registry _registry;
 };

@@ -74,6 +74,8 @@ set(PROJECT_SOURCES
     src/engine/RenderResources.cpp
     src/engine/Engine.cpp
     src/engine/AssetFactory.cpp
+    src/engine/AssetManager.cpp
+    src/engine/LevelLoader.cpp
     src/engine/Window.cpp
     src/engine/Input.cpp
     src/engine/Resources.c
@@ -115,6 +117,7 @@ target_link_libraries(zahlen PRIVATE
     LuaJIT
     spirv_reflect
     imgui
+    zstd
 )
 
 target_include_directories(zahlen SYSTEM PRIVATE
@@ -193,7 +196,7 @@ compile_shaders(zahlen
 
 # --- Compiler Flags ---
 if(NOT MSVC)
-  target_compile_options(zahlen PRIVATE -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti)
+    target_compile_options(zahlen PRIVATE $<$<CXX_COMPILER_ID:GNU>:--param=destructive-interference-size=64> -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti)
   if(WIN32)
     # This might help counteract the -nostdlib being injected by the environment
     target_link_options(zahlen PRIVATE -Xlinker /subsystem:console)

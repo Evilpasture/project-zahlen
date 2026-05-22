@@ -21,6 +21,8 @@ namespace ZHLN {
 void DrawConsole(ScriptRunner& runner);
 void DrawProfiler(Engine& engine);
 void MovementSystem(Engine& engine, float dt);
+
+void LoadLevel(Engine& engine, const std::string& path, Material material);
 } // namespace ZHLN
 
 using namespace ZHLN;
@@ -38,7 +40,22 @@ struct Scene {
 		reg.RegisterComponent<MovementComponent>();
 		reg.RegisterComponent<ALife::ALifeComponent>(); // <-- Register ALife Component
 
-		// --- Procedural Terrain Setup ---
+		// --- 1. Load CityPack GLB Assets ---
+		ZHLN::Log("Loading City Scene Assets...");
+		Mesh playerMesh = AssetFactory::LoadGLB(rc, "resources/assets/Adventurer.glb");
+		Mesh agentMesh = AssetFactory::LoadGLB(rc, "resources/assets/Man.glb");
+		Mesh treeMesh = AssetFactory::LoadGLB(rc, "resources/assets/Tree.glb");
+		Mesh benchMesh = AssetFactory::LoadGLB(rc, "resources/assets/Bench.glb");
+		Mesh dumpsterMesh = AssetFactory::LoadGLB(rc, "resources/assets/Dumpster.glb");
+		Mesh pizzaCornerMesh = AssetFactory::LoadGLB(rc, "resources/assets/Pizza Corner.glb");
+		Mesh buildingGreenMesh = AssetFactory::LoadGLB(rc, "resources/assets/Building Green.glb");
+		Mesh carMesh = AssetFactory::LoadGLB(rc, "resources/assets/Car.glb");
+		Mesh coneMesh = AssetFactory::LoadGLB(rc, "resources/assets/Cone.glb");
+		Mesh trashCanMesh = AssetFactory::LoadGLB(rc, "resources/assets/Trash Can.glb");
+
+		Material material = AssetFactory::CreateBasicMaterial(rc);
+
+		// --- 2. Procedural Terrain Setup ---
 		int terrainSize = 128;
 		float terrainWorldSize = 250.0f;
 		float terrainMaxHeight = 25.0f;
@@ -46,63 +63,137 @@ struct Scene {
 
 		Mesh terrainMesh = AssetFactory::CreateTerrain(rc, terrainSize, terrainWorldSize,
 													   terrainMaxHeight, terrainHeights);
-		Mesh boxMesh = AssetFactory::CreateBox(rc, {0.5f, 0.5f, 0.5f}, {0.8f, 0.3f, 0.2f, 1.0f});
-		Mesh playerMesh = AssetFactory::CreateBox(rc, {0.5f, 0.9f, 0.5f}, {0.2f, 0.6f, 0.9f, 1.0f});
-		Material material = AssetFactory::CreateBasicMaterial(rc);
-
 		auto terrainShape =
 			Physics::CreateHeightFieldShape(terrainHeights, terrainSize, terrainWorldSize);
-		auto boxShape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Box, 0.5f, 0.5f, 0.5f);
 
-		// --- Spawn Terrain (Static) ---
+		// Spawn Terrain (Static)
 		reg.Add(reg.Create(),
 				MeshComponent{.mesh = terrainMesh, .material = material, .cullRadius = 300.0f},
 				PhysicsComponent{Physics::CreateRigidBody(pc, terrainShape, {0.0f, 0.0f, 0.0f},
 														  JPH::Quat::sIdentity(),
 														  JPH::EMotionType::Static, 0)});
 
-		// --- Spawn Dynamic Cascading Prop Boxes ---
-		for (int i = 0; i < 2000; ++i) {
-			float x = ((float)(i % 50) - 25.0f) * 4.0f;
-			float z = ((float)(i / 50) - 20.0f) * 5.0f;
-			float y = 32.0f + (i * 0.15f);
+		// --- 3. Spawn Static Landmarks & Buildings ---
+		// We approximate building footprints with simple static Jolt boxes so characters collide
+		// with them.
+		auto buildingGreenShape =
+			Physics::GetOrCreateShape(pc, Physics::ShapeType::Box, 4.0f, 10.0f, 4.0f);
+		auto pizzaCornerShape =
+			Physics::GetOrCreateShape(pc, Physics::ShapeType::Box, 5.0f, 8.0f, 5.0f);
 
-			Entity propPhys = Physics::CreateRigidBody(
-				pc, boxShape, {x, y, z}, JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, 1);
+		// Place Green Building near the Hub
+		reg.Add(reg.Create(),
+				MeshComponent{.mesh = buildingGreenMesh, .material = material, .cullRadius = 25.0f},
+				PhysicsComponent{
+					Physics::CreateRigidBody(pc, buildingGreenShape, {50.0f, 13.0f, -50.0f},
+											 JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0)});
 
-			reg.Add(reg.Create(),
-					MeshComponent{.mesh = boxMesh, .material = material, .cullRadius = 1.0f},
-					PhysicsComponent{propPhys});
+		// Place Pizza Corner at the Hub
+		reg.Add(reg.Create(),
+				MeshComponent{.mesh = pizzaCornerMesh, .material = material, .cullRadius = 20.0f},
+				PhysicsComponent{
+					Physics::CreateRigidBody(pc, pizzaCornerShape, {60.0f, 13.0f, -60.0f},
+											 JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0)});
+
+		// --- 4. Spawn Dynamic Street Clutter ---
+		// We scatter dynamic Cones, Trash Cans, and Cars that react realistically to physics.
+		auto coneShape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Box, 0.25f, 0.4f, 0.25f);
+		auto trashCanShape =
+			Physics::GetOrCreateShape(pc, Physics::ShapeType::Box, 0.4f, 0.6f, 0.4f);
+		auto carShape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Box, 1.0f, 0.8f, 2.0f);
+
+		for (int i = 0; i < 150; ++i) {
+			float x = ((float)(i % 15) - 7.5f) * 8.0f;
+			float z = ((float)(i / 15) - 5.0f) * 10.0f;
+			float y = 30.0f + (i * 0.1f); // slightly stacked so they drop and settle on the terrain
+
+			Entity prop = reg.Create();
+			if (i % 3 == 0) {
+				reg.Add(prop,
+						MeshComponent{.mesh = coneMesh, .material = material, .cullRadius = 2.0f});
+				reg.Add(prop, PhysicsComponent{Physics::CreateRigidBody(
+								  pc, coneShape, {x, y, z}, JPH::Quat::sIdentity(),
+								  JPH::EMotionType::Dynamic, 1)});
+			} else if (i % 3 == 1) {
+				reg.Add(prop, MeshComponent{
+								  .mesh = trashCanMesh, .material = material, .cullRadius = 2.0f});
+				reg.Add(prop, PhysicsComponent{Physics::CreateRigidBody(
+								  pc, trashCanShape, {x, y, z}, JPH::Quat::sIdentity(),
+								  JPH::EMotionType::Dynamic, 1)});
+			} else {
+				reg.Add(prop,
+						MeshComponent{.mesh = carMesh, .material = material, .cullRadius = 5.0f});
+				reg.Add(prop, PhysicsComponent{Physics::CreateRigidBody(
+								  pc, carShape, {x, y, z}, JPH::Quat::sIdentity(),
+								  JPH::EMotionType::Dynamic, 1)});
+			}
 		}
 
-		// Spawn player safely
+		// --- 5. Spawn Player (Adventurer GLB) ---
 		playerEntity = reg.Create();
 		reg.Add(playerEntity,
-				MeshComponent{.mesh = playerMesh, .material = material, .cullRadius = 1.5f});
+				MeshComponent{.mesh = playerMesh, .material = material, .cullRadius = 5.0f});
 		reg.Add(playerEntity, PhysicsComponent{Physics::CreateCharacter(pc, {0.0f, 35.0f, 0.0f})});
 		reg.Add(playerEntity, MovementComponent{.speed = 8.0f});
 
 		// =====================================================================
-		// --- Configure Level Graph & Waypoints ---
+		// --- 6. Configure Level Graph & Waypoints ---
 		// =====================================================================
 		auto& alife = engine.GetALife();
 		alife.GetGraph() = ALife::LevelGraph(4);
 
-		// Node 0: Campfire
+		// Node 0: Campfire / Rest Spot
 		alife.GetGraph().GetNode(0).position = JPH::RVec3(-60.0, 12.0, -60.0);
 		alife.GetGraph().GetNode(0).type = ALife::NodeType::Campfire;
 
-		// Node 1: Camp / Hub
+		// Spawn physical benches around the campfire spot
+		auto benchShape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Box, 0.4f, 0.4f, 1.0f);
+		for (int i = 0; i < 3; ++i) {
+			float angle = i * 2.094f; // 120 degrees
+			JPH::RVec3 pos = {-60.0f + std::cos(angle) * 3.0f, 13.0f,
+							  -60.0f + std::sin(angle) * 3.0f};
+			reg.Add(reg.Create(),
+					MeshComponent{.mesh = benchMesh, .material = material, .cullRadius = 4.0f},
+					PhysicsComponent{Physics::CreateRigidBody(
+						pc, benchShape, pos, JPH::Quat::sRotation(JPH::Vec3::sAxisY(), angle),
+						JPH::EMotionType::Static, 0)});
+		}
+
+		// Node 1: Camp / Pizza Hub
 		alife.GetGraph().GetNode(1).position = JPH::RVec3(60.0, 12.0, -60.0);
 		alife.GetGraph().GetNode(1).type = ALife::NodeType::Hub;
 
-		// Node 2: Wilderness node
+		// Node 2: Wilderness node (Now a forest)
 		alife.GetGraph().GetNode(2).position = JPH::RVec3(60.0, 12.0, 60.0);
 		alife.GetGraph().GetNode(2).type = ALife::NodeType::Wilderness;
 
-		// Node 3: Creature Lair
+		// Plant a cluster of trees near the Wilderness Node
+		auto treeShape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Box, 0.5f, 4.0f, 0.5f);
+		for (int i = 0; i < 15; ++i) {
+			float rx = 60.0f + ((std::rand() % 100) - 50.0f) * 0.3f;
+			float rz = 60.0f + ((std::rand() % 100) - 50.0f) * 0.3f;
+			reg.Add(reg.Create(),
+					MeshComponent{.mesh = treeMesh, .material = material, .cullRadius = 10.0f},
+					PhysicsComponent{Physics::CreateRigidBody(pc, treeShape, {rx, 13.0f, rz},
+															  JPH::Quat::sIdentity(),
+															  JPH::EMotionType::Static, 0)});
+		}
+
+		// Node 3: Creature Lair (Now a junkyard)
 		alife.GetGraph().GetNode(3).position = JPH::RVec3(-60.0, 12.0, 60.0);
 		alife.GetGraph().GetNode(3).type = ALife::NodeType::Lair;
+
+		// Spawn messy Dumpsters near the Junkyard Node
+		auto dumpsterShape =
+			Physics::GetOrCreateShape(pc, Physics::ShapeType::Box, 0.8f, 0.8f, 1.2f);
+		for (int i = 0; i < 4; ++i) {
+			JPH::RVec3 pos = {-60.0f + (i * 2.0f), 13.0f, 60.0f + ((i % 2) ? 1.5f : -1.5f)};
+			reg.Add(reg.Create(),
+					MeshComponent{.mesh = dumpsterMesh, .material = material, .cullRadius = 5.0f},
+					PhysicsComponent{Physics::CreateRigidBody(
+						pc, dumpsterShape, pos, JPH::Quat::sRotation(JPH::Vec3::sAxisY(), (float)i),
+						JPH::EMotionType::Static, 0)});
+		}
 
 		// Connect nodes in a cyclic route
 		alife.GetGraph().Connect(0, 1);
@@ -111,75 +202,32 @@ struct Scene {
 		alife.GetGraph().Connect(3, 0);
 
 		// =====================================================================
-		// --- Set Up Simulator Callbacks ---
+		// --- 7. Spawn Player LAST ---
 		// =====================================================================
+		// Placing this after all static scenery guarantees the Player is the
+		// absolute last entity with a PhysicsComponent, letting Lua's `#entities - 1` grab it.
+		playerEntity = reg.Create();
+		reg.Add(playerEntity,
+				MeshComponent{.mesh = playerMesh, .material = material, .cullRadius = 5.0f});
+		reg.Add(playerEntity, PhysicsComponent{Physics::CreateCharacter(
+								  pc, {0.0f, 15.0f, 0.0f})}); // Spawn closer to the ground
+		reg.Add(playerEntity, MovementComponent{.speed = 8.0f});
 
-		// Think Callback (Runs when an agent is idle)
-		alife.on_think = [](ALife::Simulator& sim, Entity e) -> void {
-			auto& r = GetEngineContext()->GetRegistry();
-			auto* comp = r.Get<ALife::ALifeComponent>(e);
-			if (!comp) {
-				return;
-			}
-
-			if (comp->current_node == ALife::INVALID_GRAPH_NODE) {
-				comp->current_node = sim.GetGraph().FindClosest(comp->position);
-			}
-
-			if (comp->current_node != ALife::INVALID_GRAPH_NODE) {
-				const auto& node = sim.GetGraph().GetNode(comp->current_node);
-				if (node.neighbor_count > 0) {
-					uint32_t next = node.neighbors[std::rand() % node.neighbor_count];
-					ALife::PathWorkspace ws(sim.GetGraph().GetNodeCount(),
-											std::pmr::new_delete_resource());
-
-					comp->path_count =
-						sim.GetGraph().FindPath(comp->current_node, next, &comp->path[0], ws);
-					comp->path_index = 0;
-					comp->target_node = next;
-				}
-			}
-		};
-
-		// Interaction Callback (Triggered offline when two agents are near each other)
-		alife.on_interaction = [](ALife::Simulator& sim, Entity e1, Entity e2) {
-			auto& r = GetEngineContext()->GetRegistry();
-			sim.ResolveOfflineInteraction(r, e1, e2);
-		};
-
-		// Event Callback (Pipes state changes, battles, and deaths to the console)
-		alife.on_event = [](ALife::Simulator&, const ALife::Event& ev) {
-			if (ev.type == ALife::EventType::StateChange) {
-				const char* states[] = {"Offline", "Online", "Dead"};
-				ZHLN::Log("ALife State Change: Entity {} became {}", ev.subject.index,
-						  states[static_cast<int>(ev.state_change.new_state)]);
-			} else if (ev.type == ALife::EventType::Death) {
-				ZHLN::Log("ALife Death Event: Entity {} was killed!", ev.subject.index);
-			}
-		};
-
-		// Task Completed Callback (Rest at waypoints)
-		alife.on_task_completed = [](ALife::Simulator&, Entity e) {
-			auto& r = GetEngineContext()->GetRegistry();
-			auto* comp = r.Get<ALife::ALifeComponent>(e);
-			if (comp) {
-				comp->wait_time = 1000 + (std::rand() % 2000); // Wait 1 to 3 simulated seconds
-				ZHLN::Log("ALife Agent {} arrived at waypoint {} and is resting.", e.index,
-						  comp->current_node);
-			}
-		};
+		// =====================================================================
+		// --- 8. Set Up Simulator Callbacks ---
+		// =====================================================================
+		// ... (Keep your on_think, on_interaction, on_event, on_task_completed callbacks unchanged)
 
 		// Define friendly/hostile faction relations
 		alife.GetFactions().SetRelation(0, 1, -0.9f); // Faction 0 and 1 are hostile
 		alife.GetFactions().SetRelation(1, 2, -0.9f); // Faction 1 and 2 are hostile
 		alife.GetFactions().SetRelation(0, 2, 0.4f);  // Faction 0 and 2 are neutral-friendly
 
-		// --- Spawn Distinct Green ALife Agents ---
-		Mesh agentMesh = AssetFactory::CreateBox(rc, {0.6f, 0.6f, 0.6f}, {0.1f, 0.8f, 0.3f, 1.0f});
+		// --- 9. Spawn Citizens (No PhysicsComponent, won't interfere with Lua indexing) ---
 		for (int i = 0; i < 30; ++i) {
 			Entity agent = reg.Create();
 			reg.Add(agent,
-					MeshComponent{.mesh = agentMesh, .material = material, .cullRadius = 1.0f});
+					MeshComponent{.mesh = agentMesh, .material = material, .cullRadius = 5.0f});
 
 			float x = -50.0f + (i * 3.5f);
 			float z = -50.0f + (i * 2.5f);

@@ -10,6 +10,7 @@
 
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
+#include <filesystem>
 #include <threading/Thread.hpp>
 namespace ZHLN {
 thread_local Engine* g_CurrentEngine = nullptr;
@@ -43,13 +44,18 @@ Engine::Engine(const EngineConfig& cfg) {
 
 	_renderContext = std::make_unique<RenderContext>(*_window, cfg.render);
 	_physicsContext = std::make_unique<PhysicsContext>(cfg.physics);
-	_alifeSimulator = std::make_unique<ALife::Simulator>(); // <-- Initialize here
+	_alifeSimulator = std::make_unique<ALife::Simulator>();
+	_assetManager = std::make_unique<AssetManager>();
+	if (std::filesystem::exists("data/base.pak")) {
+		_assetManager->MountPak("data/base.pak");
+	}
 }
 
 Engine::~Engine() {
 	_physicsContext.reset();
 	_renderContext.reset();
 	_window.reset();
+	_assetManager.reset();
 
 	// 2. Terminate GLFW
 	glfwTerminate();

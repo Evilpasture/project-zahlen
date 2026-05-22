@@ -1,7 +1,9 @@
 #include "Resources.hpp"
+#include "Zahlen/Log.hpp"
 
 #include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Math3D.hpp> // For PackNormal, PackColor, etc.
+#include <cgltf.h>
 #include <cmath>
 #include <cstddef>
 #include <vector>
@@ -372,13 +374,13 @@ Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float m
 		for (int x = 0; x < sampleCount; ++x) {
 			float posX = -halfSize + x * dx;
 			float posZ = -halfSize + z * dz;
-			outHeights[x + z * sampleCount] = get_height(posX, posZ);
+			outHeights[x + (z * sampleCount)] = get_height(posX, posZ);
 		}
 	}
 
 	// 2. Build non-indexed triangle list
 	std::vector<Vertex> data;
-	data.reserve((sampleCount - 1) * (sampleCount - 1) * 6);
+	data.reserve(static_cast<size_t>((sampleCount - 1)) * (sampleCount - 1) * 6);
 
 	auto get_normal = [&](int x, int z) -> JPH::Vec3 {
 		float posX = -halfSize + x * dx;
@@ -475,6 +477,148 @@ Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float m
 
 	BufferHandle vbo = ctx.CreateVertexBuffer(data.data(), data.size() * sizeof(Vertex));
 	return Mesh{.vertexBuffer = vbo, .vertexCount = static_cast<uint32_t>(data.size())};
+}
+
+Mesh LoadGLB(RenderContext& ctx, const std::string& path) {
+	cgltf_options opts{};
+	cgltf_data* data = nullptr;
+
+	if (cgltf_parse_file(&opts, path.c_str(), &data) != cgltf_result_success) {
+		Log("ERROR: Failed to parse GLB file: {}", path);
+		return {};
+	}
+
+	if (cgltf_load_buffers(&opts, data, path.c_str()) != cgltf_result_success) {
+		Log("ERROR: Failed to load GLB buffers: {}", path);
+		cgltf_free(data);
+		return {};
+	}
+
+	std::vector<Vertex> vertexBuffer;
+
+	// Traverse the glTF node hierarchy to respect scaling, rotation, and translation
+	for (cgltf_size i = 0; i < data->nodes_count; ++i) {
+		const cgltf_node* node = &data->nodes[i];
+		if (!node->mesh) {
+			continue; // Skip nodes that don't contain geometric meshes
+		}
+
+		// Fetch the node's consolidated world transform matrix (Column-Major 4x4)
+		float matrix[16];
+		cgltf_node_transform_world(node, matrix);
+
+		const auto* mesh = node->mesh;
+		for (cgltf_size p = 0; p < mesh->primitives_count; ++p) {
+			const auto& prim = mesh->primitives[p];
+
+			cgltf_accessor* posAcc = nullptr;
+			cgltf_accessor* normAcc = nullptr;
+			cgltf_accessor* tangentAcc = nullptr;
+			cgltf_accessor* uvAcc = nullptr;
+
+			for (cgltf_size a = 0; a < prim.attributes_count; ++a) {
+				const auto& attr = prim.attributes[a];
+				if (attr.type == cgltf_attribute_type_position)
+					posAcc = attr.data;
+				else if (attr.type == cgltf_attribute_type_normal)
+					normAcc = attr.data;
+				else if (attr.type == cgltf_attribute_type_tangent)
+					tangentAcc = attr.data;
+				else if (attr.type == cgltf_attribute_type_texcoord && attr.index == 0)
+					uvAcc = attr.data;
+			}
+
+			if (!posAcc)
+				continue;
+
+			size_t vertexCount = posAcc->count;
+			std::vector<Vertex> primVertices(vertexCount);
+
+			for (size_t vIdx = 0; vIdx < vertexCount; ++vIdx) {
+				Vertex& v = primVertices[vIdx];
+				std::memset(&v, 0, sizeof(Vertex));
+
+				// 1. Read position and transform by the 4x4 world matrix
+				float rawPos[3] = {0.0f, 0.0f, 0.0f};
+				cgltf_accessor_read_float(posAcc, vIdx, rawPos, 3);
+
+				v.position[0] = matrix[0] * rawPos[0] + matrix[4] * rawPos[1] +
+								matrix[8] * rawPos[2] + matrix[12];
+				v.position[1] = matrix[1] * rawPos[0] + matrix[5] * rawPos[1] +
+								matrix[9] * rawPos[2] + matrix[13];
+				v.position[2] = matrix[2] * rawPos[0] + matrix[6] * rawPos[1] +
+								matrix[10] * rawPos[2] + matrix[14];
+
+				// 2. Read normal and transform by the 3x3 normal rotation matrix
+				float rawNorm[3] = {0.0f, 1.0f, 0.0f};
+				if (normAcc) {
+					cgltf_accessor_read_float(normAcc, vIdx, rawNorm, 3);
+				}
+				float nx = matrix[0] * rawNorm[0] + matrix[4] * rawNorm[1] + matrix[8] * rawNorm[2];
+				float ny = matrix[1] * rawNorm[0] + matrix[5] * rawNorm[1] + matrix[9] * rawNorm[2];
+				float nz =
+					matrix[2] * rawNorm[0] + matrix[6] * rawNorm[1] + matrix[10] * rawNorm[2];
+				float nLen = std::sqrt(nx * nx + ny * ny + nz * nz);
+				if (nLen > 1e-6f) {
+					nx /= nLen;
+					ny /= nLen;
+					nz /= nLen;
+				}
+				v.normal = Math::PackNormal(nx, ny, nz);
+
+				// 3. Read tangent and transform by 3x3 normal rotation matrix
+				float rawTangent[4] = {1.0f, 0.0f, 0.0f, 1.0f};
+				if (tangentAcc) {
+					cgltf_accessor_read_float(tangentAcc, vIdx, rawTangent, 4);
+				}
+				float tx = matrix[0] * rawTangent[0] + matrix[4] * rawTangent[1] +
+						   matrix[8] * rawTangent[2];
+				float ty = matrix[1] * rawTangent[0] + matrix[5] * rawTangent[1] +
+						   matrix[9] * rawTangent[2];
+				float tz = matrix[2] * rawTangent[0] + matrix[6] * rawTangent[1] +
+						   matrix[10] * rawTangent[2];
+				float tLen = std::sqrt(tx * tx + ty * ty + tz * tz);
+				if (tLen > 1e-6f) {
+					tx /= tLen;
+					ty /= tLen;
+					tz /= tLen;
+				}
+				v.tangent = Math::PackNormal(tx, ty, tz, rawTangent[3]); // Preserve bitangent sign
+
+				// 4. Read UV
+				float uv[2] = {0.0f, 0.0f};
+				if (uvAcc) {
+					cgltf_accessor_read_float(uvAcc, vIdx, uv, 2);
+				}
+				v.uv = Math::PackUV(uv[0], uv[1]);
+
+				v.color = Math::PackColor(1.0f, 1.0f, 1.0f, 1.0f);
+			}
+
+			// Unroll indices
+			if (prim.indices) {
+				size_t indexCount = prim.indices->count;
+				for (size_t idx = 0; idx < indexCount; ++idx) {
+					size_t originalIdx = cgltf_accessor_read_index(prim.indices, idx);
+					vertexBuffer.push_back(primVertices[originalIdx]);
+				}
+			} else {
+				vertexBuffer.insert(vertexBuffer.end(), primVertices.begin(), primVertices.end());
+			}
+		}
+	}
+
+	cgltf_free(data);
+
+	if (vertexBuffer.empty()) {
+		Log("WARNING: Loaded GLB has no geometry: {}", path);
+		return {};
+	}
+
+	BufferHandle vbo =
+		ctx.CreateVertexBuffer(vertexBuffer.data(), vertexBuffer.size() * sizeof(Vertex));
+	Log("Loaded GLB: {} ({} vertices uploaded, world-transforms baked)", path, vertexBuffer.size());
+	return Mesh{.vertexBuffer = vbo, .vertexCount = static_cast<uint32_t>(vertexBuffer.size())};
 }
 
 } // namespace ZHLN::AssetFactory

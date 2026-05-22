@@ -69,7 +69,7 @@ enum class CommandType : uint8_t {
 	SetConstraintTarget,
 	SetCollisionFilter
 };
-#if defined(__clang__) || defined(__GNUC__)
+#if defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wnested-anon-types"
 #endif

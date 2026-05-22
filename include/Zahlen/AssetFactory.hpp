@@ -12,4 +12,5 @@ Mesh CreateBox(RenderContext& ctx, JPH::Vec3Arg halfExtents,
 Material CreateBasicMaterial(RenderContext& ctx);
 Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight,
 				   std::vector<float>& outHeights);
+Mesh LoadGLB(RenderContext& ctx, const std::string& path);
 } // namespace ZHLN::AssetFactory
