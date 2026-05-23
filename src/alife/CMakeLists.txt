@@ -10,6 +10,7 @@ set(ALIFE_SOURCES
 
 # Create a static library for the ALife subsystem
 add_library(zahlen_alife STATIC ${ALIFE_SOURCES})
+set_target_properties(zahlen_alife PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # Disable MSVC warnings for secure CRT functions if compiling on Windows
 target_compile_definitions(zahlen_alife PRIVATE _CRT_SECURE_NO_WARNINGS)

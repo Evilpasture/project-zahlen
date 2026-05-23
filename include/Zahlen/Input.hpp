@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Zahlen/Types.hpp>
+#include <Zahlen/Common.h>
 #include <bitset>
 
 namespace ZHLN {
@@ -14,7 +15,7 @@ struct MouseState {
 	float wheel = 0;
 };
 
-class InputContext {
+class ZHLN_API InputContext {
   public:
 	InputContext() = default;
 

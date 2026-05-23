@@ -2,7 +2,7 @@ add_library(zahlen_ecs STATIC
     ECS.cpp
     ECS.hpp
 )
-
+set_target_properties(zahlen_ecs PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_include_directories(zahlen_ecs PUBLIC 
     ${CMAKE_SOURCE_DIR}/include

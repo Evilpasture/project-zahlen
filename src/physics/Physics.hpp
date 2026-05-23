@@ -29,7 +29,7 @@ struct DebugDrawData;
 static_assert(std::is_trivially_copyable_v<ZHLN::Entity>);
 static_assert(std::is_trivial_v<ZHLN::Entity>);
 
-class PhysicsContext {
+class ZHLN_API PhysicsContext {
   public:
 	PhysicsContext();
 	~PhysicsContext();
@@ -55,7 +55,7 @@ class PhysicsContext {
 
 namespace Physics {
 
-enum class ShapeType : uint32_t { Box = 0, Sphere = 1, Capsule = 2, Cylinder = 3, Plane = 4 };
+enum class ShapeType : uint8_t { Box = 0, Sphere = 1, Capsule = 2, Cylinder = 3, Plane = 4 };
 
 // --- Shape Caching ---
 JPH::ShapeRefC GetOrCreateShape(PhysicsContext& ctx, ShapeType type, float p1, float p2 = 0.0f,

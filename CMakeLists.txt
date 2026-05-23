@@ -36,21 +36,18 @@ set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/glfw SYSTEM)
 
-
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/LuaJIT SYSTEM)
 
 # --- 4. Jolt Physics ---
 set(DOUBLE_PRECISION ON CACHE BOOL "" FORCE)
-# Ensure Jolt doesn't try to use standard includes if your environment is being weird
-set(USE_STD_INCLUDES ON CACHE BOOL "" FORCE) 
+set(USE_STD_INCLUDES ON CACHE BOOL "" FORCE)
+set(JPH_BUILD_SHARED_LIBS ON CACHE BOOL "Build Jolt as shared library" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/JoltPhysics/Build SYSTEM)
 
-
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/VulkanMemoryAllocator SYSTEM)
-
 add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/SPIRV-Reflect)
-
 add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/imgui)
+set_target_properties(imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/render)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/threading)
@@ -64,9 +61,8 @@ if(BUILD_TESTING)
     enable_testing()
 endif()
 
-# Collect source files
-set(PROJECT_SOURCES
-    src/main.cpp
+# Collect shared engine source files (EXCLUDING src/game_main.cpp)
+set(ENGINE_SOURCES
     src/engine/Allocator.cpp
     src/engine/AssertHandler.cpp
     src/engine/RenderFrame.cpp
@@ -89,52 +85,51 @@ set(PROJECT_SOURCES
     src/engine/system/MovementSystem.cpp
 )
 
-add_executable(zahlen)
+# --- 5. BUILD CORE SHARED LIBRARY ---
+add_library(zahlen_engine SHARED ${ENGINE_SOURCES})
 
-set_target_properties(zahlen PROPERTIES ENABLE_EXPORTS ON)
+# Compile definitions required for DLL exports on Windows [3]
+target_compile_definitions(zahlen_engine PRIVATE 
+    ZHLN_ENGINE_BUILD
+    JPH_DOUBLE_PRECISION
+)
 
-target_sources(zahlen PRIVATE ${PROJECT_SOURCES})
-
-target_sources(zahlen PRIVATE 
+target_sources(zahlen_engine PRIVATE 
     ${CMAKE_SOURCE_DIR}/extern/stbi_impl.c 
     ${CMAKE_SOURCE_DIR}/extern/cgltf_impl.c
 )
 
-target_compile_definitions(zahlen PRIVATE 
-    JPH_DOUBLE_PRECISION
-)
-
-add_definitions(-D_CRT_SECURE_NO_WARNINGS)
-
-# 5. Static Linking order
-target_link_libraries(zahlen PRIVATE 
+target_link_libraries(zahlen_engine PRIVATE 
     zahlen_render
     zahlen_physics  
     zahlen_threading
     zahlen_ecs 
     zahlen_alife 
     glfw
-    Jolt 
     LuaJIT
     spirv_reflect
     imgui
     zstd
 )
+# Jolt is part of the public ABI exposed by engine headers, so propagate its include paths.
+target_link_libraries(zahlen_engine PUBLIC Jolt)
 
-target_include_directories(zahlen SYSTEM PRIVATE
+target_include_directories(zahlen_engine SYSTEM PRIVATE
     ${CMAKE_SOURCE_DIR}/extern/JoltPhysics
 )
-target_include_directories(zahlen PRIVATE
+# Use PUBLIC for the main include directory so dependent targets automatically get it [3]
+target_include_directories(zahlen_engine PUBLIC
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/src
-
+)
+target_include_directories(zahlen_engine PRIVATE
     ${CMAKE_SOURCE_DIR}/extern/LuaJIT/src
-
     ${CMAKE_SOURCE_DIR}/extern/cgltf
     ${CMAKE_SOURCE_DIR}/extern/stb
 )
 
-# --- Shader Compilation Helper ---
+# --- 6. SHADER COMPILATION ---
+# Handled within the shared library target
 function(compile_shaders TARGET_NAME)
     set(SHADER_FILES ${ARGN})
 
@@ -152,7 +147,7 @@ function(compile_shaders TARGET_NAME)
     set(STAGE_PROFILES "vs_6_0" "ps_6_0")
 
     foreach(HLSL_SRC IN LISTS SHADER_FILES)
-        get_filename_component(FILE_NAME_WE ${HLSL_SRC} NAME_WLE) # e.g. "basic.hlsl"
+        get_filename_component(FILE_NAME_WE ${HLSL_SRC} NAME_WLE)
         get_filename_component(FILE_NAME ${HLSL_SRC} NAME)
 
         foreach(i RANGE 1)
@@ -171,12 +166,9 @@ function(compile_shaders TARGET_NAME)
             )
             list(APPEND ALL_SPV_OUTPUTS ${OUTPUT_SPV})
 
-            # NEW: Create a unique macro name for the absolute path
-            # e.g. SHADER_BASIC_HLSL_VS_PATH
             string(MAKE_C_IDENTIFIER "SHADER_${FILE_NAME}_${EXT}_PATH" MACRO_NAME)
             string(TOUPPER ${MACRO_NAME} MACRO_NAME)
             
-            # Pass the absolute path to the compiler as a string literal
             target_compile_definitions(${TARGET_NAME} PRIVATE ${MACRO_NAME}="${OUTPUT_SPV}")
         endforeach()
     endforeach()
@@ -187,47 +179,56 @@ function(compile_shaders TARGET_NAME)
     set_source_files_properties(src/engine/Resources.c PROPERTIES OBJECT_DEPENDS "${ALL_SPV_OUTPUTS}")
 endfunction()
 
-# --- Usage ---
-compile_shaders(zahlen
+compile_shaders(zahlen_engine
     "${CMAKE_SOURCE_DIR}/resources/shaders/basic.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/blit.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/taa.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/ui.hlsl"
 )
 
+# --- 7. EXECUTABLE TARGETS ---
 
-# --- Compiler Flags ---
+# Game Client Executable
+add_executable(zahlen_game src/game_main.cpp)
+target_link_libraries(zahlen_game PRIVATE zahlen_engine imgui)
+target_compile_definitions(zahlen_game PRIVATE JPH_DOUBLE_PRECISION)
+
+# Editor Executable
+add_executable(zahlen_editor src/editor_main.cpp)
+# We also link imgui directly so your editor source code can call raw ImGui functions
+target_link_libraries(zahlen_editor PRIVATE zahlen_engine imgui)
+target_compile_definitions(zahlen_editor PRIVATE JPH_DOUBLE_PRECISION)
+
+# --- 8. COMPILER FLAGS ---
 if(NOT MSVC)
-    target_compile_options(zahlen PRIVATE $<$<CXX_COMPILER_ID:GNU>:--param=destructive-interference-size=64> -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti)
-  if(WIN32)
-    # This might help counteract the -nostdlib being injected by the environment
-    target_link_options(zahlen PRIVATE -Xlinker /subsystem:console)
-    target_compile_options(zahlen PRIVATE -Wno-microsoft-anon-tag -Wno-unknown-pragmas -Wno-unused-parameter)
-    target_compile_options(zahlen PRIVATE -D_CRT_SECURE_NO_WARNINGS)
-  endif()
+    target_compile_options(zahlen_engine PRIVATE $<$<CXX_COMPILER_ID:GNU>:--param=destructive-interference-size=64> -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti)
+    if(WIN32)
+        target_link_options(zahlen_engine PRIVATE -Xlinker /subsystem:console)
+        target_compile_options(zahlen_engine PRIVATE -Wno-microsoft-anon-tag -Wno-unknown-pragmas -Wno-unused-parameter)
+        target_compile_options(zahlen_engine PRIVATE -D_CRT_SECURE_NO_WARNINGS)
+    endif()
 endif()
 
-# --- 6. RESOURCE LINKING (Zero-Copy) ---
-# We use symlinks instead of copy_directory to avoid duplicating heavy assets like Sponza.
-if(WIN32)
-    add_custom_command(TARGET zahlen POST_BUILD
-        # Remove physical directory if it exists (so we can replace it with a link)
-        COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:zahlen>/resources"
-        COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:zahlen>/scripts"
-        # Create the symlink
-        COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_SOURCE_DIR}/resources" "$<TARGET_FILE_DIR:zahlen>/resources"
-        COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_SOURCE_DIR}/scripts" "$<TARGET_FILE_DIR:zahlen>/scripts"
-        COMMENT "Linking resources and scripts (Zero-Copy)..."
-    )
-else()
-    # Unix/macOS logic
-    add_custom_command(TARGET zahlen POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_SOURCE_DIR}/resources" "$<TARGET_FILE_DIR:zahlen>/resources"
-        COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_SOURCE_DIR}/scripts" "$<TARGET_FILE_DIR:zahlen>/scripts"
-        COMMENT "Linking resources and scripts..."
-    )
-endif()
+# --- 9. RESOURCE LINKING (Looping over both executables) ---
+foreach(APP_TARGET zahlen_game zahlen_editor)
+    if(WIN32)
+        add_custom_command(TARGET ${APP_TARGET} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:${APP_TARGET}>/resources"
+            COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:${APP_TARGET}>/scripts"
+            COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_SOURCE_DIR}/resources" "$<TARGET_FILE_DIR:${APP_TARGET}>/resources"
+            COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_SOURCE_DIR}/scripts" "$<TARGET_FILE_DIR:${APP_TARGET}>/scripts"
+            COMMENT "Linking resources and scripts for ${APP_TARGET} (Zero-Copy)..."
+        )
+    else()
+        add_custom_command(TARGET ${APP_TARGET} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_SOURCE_DIR}/resources" "$<TARGET_FILE_DIR:${APP_TARGET}>/resources"
+            COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_SOURCE_DIR}/scripts" "$<TARGET_FILE_DIR:${APP_TARGET}>/scripts"
+            COMMENT "Linking resources and scripts for ${APP_TARGET}..."
+        )
+    endif()
+endforeach()
 
+# --- 10. SANITIZER RUNTIME DISTRIBUTION ---
 if(USE_SANITIZERS AND WIN32)
     get_filename_component(CLANG_BIN_DIR ${CMAKE_CXX_COMPILER} DIRECTORY)
     find_file(ASAN_DLL 
@@ -235,9 +236,11 @@ if(USE_SANITIZERS AND WIN32)
         PATHS "${CLANG_BIN_DIR}/../lib/clang/23/lib/windows" "${CLANG_BIN_DIR}/../lib/clang/22/lib/windows"
     )
     if(ASAN_DLL)
-        add_custom_command(TARGET zahlen POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy "${ASAN_DLL}" "$<TARGET_FILE_DIR:zahlen>"
-            COMMENT "Copying ASan Runtime..."
-        )
+        foreach(APP_TARGET zahlen_game zahlen_editor)
+            add_custom_command(TARGET ${APP_TARGET} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy "${ASAN_DLL}" "$<TARGET_FILE_DIR:${APP_TARGET}>"
+                COMMENT "Copying ASan Runtime for ${APP_TARGET}..."
+            )
+        endforeach()
     endif()
 endif()

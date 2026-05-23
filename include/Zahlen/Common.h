@@ -1,9 +1,16 @@
 #pragma once
 
 #if defined(_WIN32)
-#define ZHLN_EXPORT __declspec(dllexport)
+  #if defined(ZHLN_ENGINE_BUILD)
+    // Exporting symbols while building the shared engine library
+    #define ZHLN_API __declspec(dllexport)
+  #else
+    // Importing symbols in the game or editor executables
+    #define ZHLN_API __declspec(dllimport)
+  #endif
 #else
-#define ZHLN_EXPORT [[gnu::visibility("default"), gnu::used]]
+  // Unix/Apple platforms use GCC-style visibility attributes
+  #define ZHLN_API [[gnu::visibility("default")]]
 #endif
 
 // Forward declaration of the engine handle used across all headers

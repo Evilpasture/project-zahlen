@@ -1,13 +1,14 @@
 #pragma once
 #include <Zahlen/Types.hpp>
 #include <detail/String.hpp>
+#include <Zahlen/Common.h>
 #include <memory>
 
 namespace ZHLN {
 
 class InputContext;
 
-class Window {
+class ZHLN_API Window {
   public:
 	Window(const String32& title, uint32_t width, uint32_t height, InputContext* input);
 	~Window();

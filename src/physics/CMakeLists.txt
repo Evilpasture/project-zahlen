@@ -11,6 +11,7 @@ add_library(zahlen_physics STATIC
     PhysicsDebug.cpp
     PhysicsDebug.hpp
 )
+set_target_properties(zahlen_physics PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_link_libraries(zahlen_physics 
     PRIVATE 

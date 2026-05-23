@@ -12,7 +12,7 @@
 
 namespace ZHLN {
 
-class Engine {
+class ZHLN_API Engine {
   public:
 	Engine();
 	~Engine();

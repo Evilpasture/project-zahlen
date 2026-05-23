@@ -7,14 +7,14 @@ extern "C" {
 #endif
 
 // Character Control
-ZHLN_EXPORT void ZHLN_SetCharacterVelocity(struct ZHLN_Engine* engine, uint64_t entityHandle,
+ZHLN_API void ZHLN_SetCharacterVelocity(struct ZHLN_Engine* engine, uint64_t entityHandle,
 										   float x, float y, float z);
-ZHLN_EXPORT int ZHLN_IsCharacterOnGround(struct ZHLN_Engine* engine, uint64_t entityHandle);
+ZHLN_API int ZHLN_IsCharacterOnGround(struct ZHLN_Engine* engine, uint64_t entityHandle);
 
 // Rigid Body Control
-ZHLN_EXPORT void ZHLN_SetLinearVelocity(struct ZHLN_Engine* engine, uint64_t entityHandle, float x,
+ZHLN_API void ZHLN_SetLinearVelocity(struct ZHLN_Engine* engine, uint64_t entityHandle, float x,
 										float y, float z);
-ZHLN_EXPORT void ZHLN_AddImpulse(struct ZHLN_Engine* engine, uint64_t entityHandle, float x,
+ZHLN_API void ZHLN_AddImpulse(struct ZHLN_Engine* engine, uint64_t entityHandle, float x,
 								 float y, float z);
 
 typedef struct ZHLN_RaycastResult {
@@ -25,12 +25,12 @@ typedef struct ZHLN_RaycastResult {
 	int hasHit;
 } ZHLN_RaycastResult;
 
-ZHLN_EXPORT ZHLN_RaycastResult ZHLN_Raycast(struct ZHLN_Engine* engine, double ox, double oy,
+ZHLN_API ZHLN_RaycastResult ZHLN_Raycast(struct ZHLN_Engine* engine, double ox, double oy,
 											double oz, float dx, float dy, float dz, float maxDist,
 											uint64_t ignoreEntity);
 
-ZHLN_EXPORT void ZHLN_SetMovementInput(ZHLN_Engine* handle, uint64_t entityRaw, float x, float z);
-ZHLN_EXPORT void ZHLN_SetJumpIntent(ZHLN_Engine* handle, uint64_t entityRaw);
+ZHLN_API void ZHLN_SetMovementInput(ZHLN_Engine* handle, uint64_t entityRaw, float x, float z);
+ZHLN_API void ZHLN_SetJumpIntent(ZHLN_Engine* handle, uint64_t entityRaw);
 
 #ifdef __cplusplus
 }

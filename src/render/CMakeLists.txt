@@ -13,6 +13,7 @@ add_library(zahlen_render STATIC
     RenderCore.cpp
     Allocator.hpp
 )
+set_target_properties(zahlen_render PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # --- OPTIONAL CLANG-TIDY SUPPORT ---
 option(ZHLN_ENABLE_CLANG_TIDY "Run Clang-Tidy analysis during compilation" OFF)

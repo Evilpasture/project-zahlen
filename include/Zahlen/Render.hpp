@@ -2,6 +2,7 @@
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
+#include <Zahlen/Common.h>
 #include <detail/String.hpp>
 #include <memory>
 
@@ -14,7 +15,7 @@ struct PipelineDesc {
 	size_t fragShaderSize = 0;
 };
 
-class RenderContext {
+class ZHLN_API RenderContext {
   public:
 	RenderContext(Window& window, const RenderConfig& cfg);
 	~RenderContext();
