@@ -192,6 +192,7 @@ compile_shaders(zahlen
     "${CMAKE_SOURCE_DIR}/resources/shaders/basic.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/blit.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/taa.hlsl"
+    "${CMAKE_SOURCE_DIR}/resources/shaders/ui.hlsl"
 )
 
 

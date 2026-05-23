@@ -6,19 +6,18 @@
 
 namespace ZHLN::GUI {
 
-inline JPH::Mat44 CreateOrthoMatrix(float width, float height) {
-	// Vulkan Y is Down: 0 screen is -1 clip (top), height screen is 1 clip (bottom).
+auto CreateOrthoMatrix(float width, float height) -> JPH::Mat44 {
 	float r = width;
-	float l = 0.0f;
-	float t = 0.0f;
 	float b = height;
 
-	return JPH::Mat44(JPH::Vec4(2.0f / r, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, 2.0f / b, 0.0f, 0.0f),
-					  JPH::Vec4(0.0f, 0.0f, 1.0f, 0.0f), JPH::Vec4(-1.0f, -1.0f, 0.0f, 1.0f));
+	// Invert the Y-scale (-2.0f / b) and Y-translation (+1.0f)
+	// to perfectly compensate for Vulkan's negative-height viewport.
+	return JPH::Mat44(JPH::Vec4(2.0f / r, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, -2.0f / b, 0.0f, 0.0f),
+					  JPH::Vec4(0.0f, 0.0f, 1.0f, 0.0f), JPH::Vec4(-1.0f, 1.0f, 0.0f, 1.0f));
 }
 
-inline Mesh CreateTextMesh(RenderContext& ctx, const std::string& text, float x, float y,
-						   float scale, const JPH::Vec4& color) {
+auto CreateTextMesh(RenderContext& ctx, const std::string& text, float x, float y, float scale,
+					const JPH::Vec4& color) -> Mesh {
 	std::vector<Vertex> vertices;
 	vertices.reserve(text.length() * 6); // 6 vertices per char (2 triangles)
 
@@ -30,7 +29,7 @@ inline Mesh CreateTextMesh(RenderContext& ctx, const std::string& text, float x,
 
 	for (char c : text) {
 		// Fallback for non-ASCII characters
-		uint8_t glyphCode = static_cast<uint8_t>(c);
+		auto glyphCode = static_cast<uint8_t>(c);
 		if (glyphCode > 127) {
 			glyphCode = '?';
 		}
@@ -51,14 +50,30 @@ inline Mesh CreateTextMesh(RenderContext& ctx, const std::string& text, float x,
 		float x1 = currentX + (8.0f * scale);
 		float y1 = y + (8.0f * scale);
 
-		Vertex vTL = {{x0, y0, 0.0f},		dummyNormal, dummyTangent,
-					  Math::PackUV(u0, v0), packedColor, 0};
-		Vertex vTR = {{x1, y0, 0.0f},		dummyNormal, dummyTangent,
-					  Math::PackUV(u1, v0), packedColor, 0};
-		Vertex vBL = {{x0, y1, 0.0f},		dummyNormal, dummyTangent,
-					  Math::PackUV(u0, v1), packedColor, 0};
-		Vertex vBR = {{x1, y1, 0.0f},		dummyNormal, dummyTangent,
-					  Math::PackUV(u1, v1), packedColor, 0};
+		Vertex vTL = {.position = {x0, y0, 0.0f},
+					  .normal = dummyNormal,
+					  .tangent = dummyTangent,
+					  .uv = Math::PackUV(u0, v0),
+					  .color = packedColor,
+					  ._padding = 0};
+		Vertex vTR = {.position = {x1, y0, 0.0f},
+					  .normal = dummyNormal,
+					  .tangent = dummyTangent,
+					  .uv = Math::PackUV(u1, v0),
+					  .color = packedColor,
+					  ._padding = 0};
+		Vertex vBL = {.position = {x0, y1, 0.0f},
+					  .normal = dummyNormal,
+					  .tangent = dummyTangent,
+					  .uv = Math::PackUV(u0, v1),
+					  .color = packedColor,
+					  ._padding = 0};
+		Vertex vBR = {.position = {x1, y1, 0.0f},
+					  .normal = dummyNormal,
+					  .tangent = dummyTangent,
+					  .uv = Math::PackUV(u1, v1),
+					  .color = packedColor,
+					  ._padding = 0};
 
 		// CCW Tri 1 (TL -> BL -> TR)
 		vertices.push_back(vTL);

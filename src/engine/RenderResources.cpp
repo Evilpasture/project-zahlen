@@ -1,35 +1,16 @@
 // File: src/engine/Render_Resources.cpp
 #include "RenderInternal.hpp"
 
-namespace ZHLN::Vk {
-template <> struct FormatOf<float[3]> {
-	static constexpr auto value = VK_FORMAT_R32G32B32_SFLOAT;
-};
-template <> struct FormatOf<::ZHLN::Packed1010102> {
-	static constexpr auto value = VK_FORMAT_A2B10G10R10_UNORM_PACK32;
-};
-template <> struct FormatOf<::ZHLN::PackedHalf2> {
-	static constexpr auto value = VK_FORMAT_R16G16_SFLOAT;
-};
-template <> struct FormatOf<::ZHLN::PackedRGBA8> {
-	static constexpr auto value = VK_FORMAT_R8G8B8A8_UNORM;
-};
-} // namespace ZHLN::Vk
-
-ZHLN_REFLECT_VERTEX(::ZHLN::Vertex, position, normal, tangent, uv, color);
-
 namespace ZHLN {
 
-    // Define CompileShadowPipeline here so it compiles with vertex reflection visible
-void RenderContext::Impl::CompileShadowPipeline(VkDevice device, const void* shaderData, size_t shaderSize) {
+// Define CompileShadowPipeline here so it compiles with vertex reflection visible
+void RenderContext::Impl::CompileShadowPipeline(VkDevice device, const void* shaderData,
+												size_t shaderSize) {
 	ZHLN_ShaderDesc v_desc = {.code = Vk::AsSpirV(shaderData), .size = shaderSize};
 	auto shaders = Vk::ShaderStages::Create(device, v_desc, {});
 
 	VkPushConstantRange pc_range = {
-		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-		.offset = 0,
-		.size = sizeof(FrameConstants)
-	};
+		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .offset = 0, .size = sizeof(FrameConstants)};
 
 	const std::array layouts = {bindlessLayout.Get()};
 	ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = layouts.data(),
@@ -200,10 +181,10 @@ auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t hei
 
 	uint32_t index = impl->nextTextureIndex++;
 
-	VkDescriptorImageInfo bindlessUpdate = {
-		.sampler = VK_NULL_HANDLE,
-		.imageView = gpuView.Get(),
-		.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+	VkDescriptorImageInfo bindlessUpdate = {.sampler = VK_NULL_HANDLE,
+											.imageView = gpuView.Get(),
+											.imageLayout =
+												VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 
 	VkWriteDescriptorSet write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 								  .pNext = nullptr,

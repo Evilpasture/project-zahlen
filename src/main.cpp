@@ -7,6 +7,7 @@
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/GUI.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Scripting.hpp>
@@ -359,6 +360,11 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	float accumulator = 0.0f;
 	const float targetDt = 1.0f / 60.0f;
 
+	uint32_t fontAtlasIdx = AssetFactory::CreateFontAtlasTexture(rc);
+
+	Mesh helloText = GUI::CreateTextMesh(rc, "Hello Custom GUI World!", 25.0f, 25.0f, 3.0f,
+										 {0.2f, 0.8f, 0.4f, 1.0f});
+
 	while (engine.IsRunning()) {
 		float frameTime = clock.GetDeltaTime();
 		accumulator += frameTime;
@@ -497,6 +503,8 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			CullingStats::TotalObjects = (uint32_t)reg.GetEntitiesWith<MeshComponent>().size();
 			CullingStats::CulledObjects =
 				CullingStats::TotalObjects - (uint32_t)s_VisibleEntities.size();
+
+			Renderer::DrawUI(rc, helloText, fontAtlasIdx);
 
 			engine.EndFrame();
 		} else {

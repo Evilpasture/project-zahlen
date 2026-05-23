@@ -7,6 +7,7 @@
 #include "PresentationContext.hpp"
 #include "RenderCore.hpp"
 #include "RenderTarget.hpp"
+#include "Vertex.hpp"
 
 #include <GLFW/glfw3.h>
 #include <Zahlen/Log.hpp>
@@ -145,3 +146,20 @@ struct RenderContext::Impl {
 };
 
 } // namespace ZHLN
+
+namespace ZHLN::Vk {
+template <> struct FormatOf<float[3]> {
+	static constexpr auto value = VK_FORMAT_R32G32B32_SFLOAT;
+};
+template <> struct FormatOf<::ZHLN::Packed1010102> {
+	static constexpr auto value = VK_FORMAT_A2B10G10R10_UNORM_PACK32;
+};
+template <> struct FormatOf<::ZHLN::PackedHalf2> {
+	static constexpr auto value = VK_FORMAT_R16G16_SFLOAT;
+};
+template <> struct FormatOf<::ZHLN::PackedRGBA8> {
+	static constexpr auto value = VK_FORMAT_R8G8B8A8_UNORM;
+};
+} // namespace ZHLN::Vk
+
+ZHLN_REFLECT_VERTEX(::ZHLN::Vertex, position, normal, tangent, uv, color);

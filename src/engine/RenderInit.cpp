@@ -185,11 +185,13 @@ void RenderContext::Impl::InitBindless() {
 	vkCreateSampler(ctx.Device(), &samplerInfo, nullptr, &rawSampler);
 	globalSampler = Vk::Sampler(ctx.Device(), rawSampler);
 
-	GlobalSceneLayout::Write(
-		ctx.Device(), bindlessSet, Vk::SkipWrite{}, Vk::SamplerWrite{globalSampler.Get()},
-		Vk::ImageWrite{shadowMap.view.Get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-		Vk::SamplerWrite{shadowSampler.Get()}, Vk::BufferWrite{frameUniformBuffer.Handle()},
-		Vk::BufferWrite{lightStorageBuffer.Handle()});
+	GlobalSceneLayout::Write(ctx.Device(), bindlessSet, Vk::SkipWrite{},
+							 Vk::SamplerWrite{globalSampler.Get()},
+							 Vk::ImageWrite{.view = shadowMap.view.Get(),
+											.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+							 Vk::SamplerWrite{shadowSampler.Get()},
+							 Vk::BufferWrite{.buffer = frameUniformBuffer.Handle()},
+							 Vk::BufferWrite{.buffer = lightStorageBuffer.Handle()});
 }
 
 void RenderContext::Impl::InitPostProcessing() {
@@ -256,8 +258,10 @@ void RenderContext::Impl::SetupUI(GLFWwindow* window) {
 
 	auto uiShaders = Vk::ShaderStages::Create(
 		ctx.Device(),
-		{.code = (const uint32_t*)ZHLN_Resource_UiVertSpv, .size = ZHLN_Resource_UiVertSpv_Len},
-		{.code = (const uint32_t*)ZHLN_Resource_UiFragSpv, .size = ZHLN_Resource_UiFragSpv_Len});
+		{.code = reinterpret_cast<const uint32_t*>(ZHLN_Resource_UiVertSpv),
+		 .size = ZHLN_Resource_UiVertSpv_Len},
+		{.code = reinterpret_cast<const uint32_t*>(ZHLN_Resource_UiFragSpv),
+		 .size = ZHLN_Resource_UiFragSpv_Len});
 
 	// 144 bytes matches the exact size of the UIObjectConstants struct in HLSL
 	VkPushConstantRange uiPush = {.stageFlags =
