@@ -1,51 +1,56 @@
 import subprocess
 import os
 import difflib
+from pathlib import Path
 from datetime import datetime
 import argparse
 
 
-def get_git_tracked_files(target_dir="."):
-    """Returns a list of git-tracked files with specific extensions within a target directory."""
+def get_git_tracked_files(target_dir=".", ignore_demo=False):
     extensions = {
-        ".cpp",
-        ".hpp",
-        ".mm",
-        ".c",
-        ".h",
-        ".S",
-        ".glsl",
-        ".vert",
-        ".frag",
-        ".metal",
-        ".lua",
-        ".hlsl",
-        ".DEMO",
+        ".cpp", ".hpp", ".mm", ".c", ".h", ".S", 
+        ".glsl", ".vert", ".frag", ".metal", ".lua", ".hlsl"
     }
-
-    # Add any directories you want to completely ignore here
-    ignore_paths = {"third_party/", "extern/"}
+    include_filenames = {"CMakeLists.txt"}
+    ignore_paths = {"third_party", "extern"}
 
     try:
-        # git ls-files natively filters by path if provided
+        # Get all files
         output = subprocess.check_output(["git", "ls-files", target_dir], text=True)
-        files = output.splitlines()
+        all_files = output.splitlines()
+
+        # If --ignore-demo is enabled, find all directories containing a file named ".DEMO"
+        demo_dirs = set()
+        if ignore_demo:
+            # Look for any file named exactly ".DEMO" in the repo
+            for f in all_files:
+                if os.path.basename(f) == ".DEMO":
+                    demo_dirs.add(os.path.dirname(f))
 
         valid_files = []
-        for f in files:
-            # Normalize slashes for cross-platform matching
-            normalized_path = f.replace("\\", "/")
-
-            # Skip file if it lives inside an ignored directory
-            if any(ignored in normalized_path for ignored in ignore_paths):
+        for f in all_files:
+            path_obj = Path(f)
+            
+            # 1. Skip paths containing globally ignored directories
+            if any(part in ignore_paths for part in path_obj.parts):
                 continue
+            
+            # 2. Skip if the file or any of its parent directories are in a .DEMO folder/path
+            if ignore_demo:
+                # Check if any parent of this file is one of the directories we identified
+                if any(str(parent) in demo_dirs for parent in path_obj.parents):
+                    continue
+                # Also check if the file is IN a .DEMO directory
+                if ".DEMO" in path_obj.parts:
+                    continue
 
-            if os.path.splitext(f)[1] in extensions:
+            # 3. Check extensions
+            # Check: Is it an allowed extension OR is it in our include_filenames?
+            if path_obj.suffix in extensions or path_obj.name in include_filenames:
                 valid_files.append(f)
 
         return valid_files
     except subprocess.CalledProcessError:
-        print("Error: This directory is not a git repository.")
         return []
 
 
@@ -61,15 +66,20 @@ def generate_snapshot_string(tracked_files, target_dir):
     lines.append("---\n")
 
     for file_path in tracked_files:
+        filename = os.path.basename(file_path)
         ext = os.path.splitext(file_path)[1]
 
         # Mapping highlighting
-        if ext in {".cpp", ".hpp", ".mm"}:
+        if filename == "CMakeLists.txt":
+            lang = "cmake"
+        elif ext in {".cpp", ".hpp", ".mm"}:
             lang = "cpp"
         elif ext == ".S":
             lang = "asm"
         elif ext in {".glsl", ".vert", ".frag"}:
             lang = "glsl"
+        elif ext == ".hlsl":
+            lang = "hlsl"
         else:
             lang = "c"
 
@@ -86,8 +96,9 @@ def generate_snapshot_string(tracked_files, target_dir):
     return "\n".join(lines)
 
 
-def run_project_manager(target_dir="."):
-    tracked_files = get_git_tracked_files(target_dir)
+def run_project_manager(target_dir=".", ignore_demo=False):
+    # Pass the flag down
+    tracked_files = get_git_tracked_files(target_dir, ignore_demo=ignore_demo)
     if not tracked_files:
         print(f"No matching tracked files found in '{target_dir}'.")
         return
@@ -151,13 +162,10 @@ def run_project_manager(target_dir="."):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Dump git-tracked context for LLMs.")
-    parser.add_argument(
-        "target",
-        nargs="?",
-        default=".",
-        help="Target directory to dump (e.g., src/render). Defaults to the root directory.",
-    )
+    parser.add_argument("target", nargs="?", default=".", help="Target directory to dump.")
+    # Add the new flag
+    parser.add_argument("--ignore-demo", action="store_true", help="Ignore directories containing .DEMO files.")
 
     args = parser.parse_args()
-    run_project_manager(args.target)
-
+    # Pass the new argument into your main function
+    run_project_manager(args.target, ignore_demo=args.ignore_demo)
