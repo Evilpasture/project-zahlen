@@ -12,7 +12,9 @@
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
+#include <string>
 #include <detail/ControlFlow.hpp>
 #include <physics/PhysicsWorld.hpp>
 #include <threading/Mutex.hpp>
@@ -28,8 +30,9 @@ void LoadLevel(Engine& engine, const std::string& path, Material material);
 
 using namespace ZHLN;
 
+namespace {
 struct Scene {
-	ZHLN::Entity playerEntity;
+	ZHLN::Entity playerEntity = ZHLN::NullEntity;
 
 	void Setup(Engine& engine) {
 		auto& rc = engine.GetRenderContext();
@@ -104,9 +107,11 @@ struct Scene {
 		auto carShape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Box, 1.0f, 0.8f, 2.0f);
 
 		for (int i = 0; i < 150; ++i) {
-			float x = ((float)(i % 15) - 7.5f) * 8.0f;
-			float z = ((float)(i / 15) - 5.0f) * 10.0f;
-			float y = 30.0f + (i * 0.1f); // slightly stacked so they drop and settle on the terrain
+			const int col = i % 15;
+			const int row = i / 15;
+			const float x = (static_cast<float>(col) - 7.5f) * 8.0f;
+			const float z = (static_cast<float>(row) - 5.0f) * 10.0f;
+			const float y = 30.0f + (static_cast<float>(i) * 0.1f); // slightly stacked so they drop and settle on the terrain
 
 			Entity prop = reg.Create();
 			if (i % 3 == 0) {
@@ -248,8 +253,6 @@ struct Scene {
 	}
 };
 
-namespace {
-
 JPH::Array<ZHLN::Entity> s_VisibleEntities;
 JPH::Vec3 s_LastCullPos;
 float s_LastCullYaw = 0.0f;
@@ -264,8 +267,9 @@ void UpdateCameraSystem(Camera& cam, InputContext& input, Entity player, ECS::Re
 	ZHLN_LOCK(world.sync.shadowLock) {
 		if (auto* pComp = reg.Get<PhysicsComponent>(player)) {
 			uint32_t dense = world.slotToDense[pComp->physicsHandle.index];
-			JPH::Real* p = &world.positions[static_cast<size_t>(dense * 4)];
-			JPH::Vec3 target = {(float)p[0], (float)p[1] + 1.0f, (float)p[2]};
+			const size_t base = static_cast<size_t>(dense) * 4;
+			JPH::Vec3 target = {(float)world.positions[base], (float)world.positions[base + 1] + 1.0f,
+								(float)world.positions[base + 2]};
 
 			float yR = JPH::DegreesToRadians(cam.yaw);
 			float pR = JPH::DegreesToRadians(cam.pitch);
@@ -306,9 +310,10 @@ void UpdateCulling(Engine& engine) {
 			auto* phys = reg.Get<PhysicsComponent>(e);
 			if (phys != nullptr) {
 				uint32_t dense = world.slotToDense[phys->physicsHandle.index];
-				pos = JPH::Vec3((float)world.positions[static_cast<size_t>(dense * 4)],
-								(float)world.positions[(dense * 4) + 1],
-								(float)world.positions[(dense * 4) + 2]);
+				const size_t base = static_cast<size_t>(dense) * 4;
+				pos = JPH::Vec3((float)world.positions[base],
+								(float)world.positions[base + 1],
+								(float)world.positions[base + 2]);
 			} else if (auto* alifeComp = reg.Get<ALife::ALifeComponent>(e)) {
 				pos = JPH::Vec3(alifeComp->position);
 			} else {
@@ -476,13 +481,14 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 
 					if (phys != nullptr) {
 						uint32_t dense = world.slotToDense[phys->physicsHandle.index];
-						JPH::Vec3 pos((float)world.positions[static_cast<size_t>(dense * 4)],
-									  (float)world.positions[(dense * 4) + 1],
-									  (float)world.positions[(dense * 4) + 2]);
-						JPH::Quat rot(world.rotations[static_cast<size_t>(dense * 4)],
-									  world.rotations[(dense * 4) + 1],
-									  world.rotations[(dense * 4) + 2],
-									  world.rotations[(dense * 4) + 3]);
+						const size_t base = static_cast<size_t>(dense) * 4;
+						JPH::Vec3 pos((float)world.positions[base],
+									  (float)world.positions[base + 1],
+									  (float)world.positions[base + 2]);
+						JPH::Quat rot(world.rotations[base],
+									  world.rotations[base + 1],
+									  world.rotations[base + 2],
+									  world.rotations[base + 3]);
 						currentTransform = Math::CreateTransform(pos, rot);
 					} else if (auto* alifeComp = reg.Get<ALife::ALifeComponent>(e)) {
 						// Render purely simulated ALife agents using their own simulated

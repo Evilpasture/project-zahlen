@@ -1,3 +1,29 @@
+# --- EXPLICIT DISABLES DOCUMENTATION (Noise Reduction) ---
+# -modernize-use-trailing-return-type: Screams at standard function declarations
+# -readability-identifier-length: Screams at short iterator/variable names like i, j, dt, x, y, z
+# -cppcoreguidelines-owning-memory: Screams at raw pointers (useless for custom memory/C-style architectures)
+# -cppcoreguidelines-no-malloc: Screams at malloc/free
+# -readability-magic-numbers: Screams at array sizes, colors, clear values
+# -cppcoreguidelines-avoid-magic-numbers: Same as above but under cppcoreguidelines
+# -readability-uppercase-literal-suffix: Screams at lowercase float suffix 'f' (demanding uppercase 'F')
+# -misc-non-private-member-variables-in-classes: Screams at public member variables in POD structs
+# -cppcoreguidelines-non-private-member-variables-in-classes: Same as above under cppcoreguidelines
+# -readability-convert-member-functions-to-static: Screams at Setup() and other struct/class methods not accessing 'this'
+# -bugprone-branch-clone: Screams at AST-similar branches (e.g. procedural grid spawning branches)
+# -misc-no-recursion: Screams at recursive functions
+# -bugprone-narrowing-conversions: Screams at implicit int-to-float conversions (very common/noisy in game math)
+# -cppcoreguidelines-narrowing-conversions: Same as above under cppcoreguidelines
+# -cppcoreguidelines-avoid-non-const-global-variables: Screams at file-scope static variables used for state/caching
+# -readability-math-missing-parentheses: Screams for parentheses on standard algebraic precedence (e.g., a + b * c)
+# -cppcoreguidelines-pro-bounds-pointer-arithmetic: Screams at raw array indexing (positions[index]) and pointer math
+# -cppcoreguidelines-pro-bounds-array-to-pointer-decay: Screams at array-to-pointer decays (constant in C-style/ImGui APIs)
+# -cppcoreguidelines-pro-bounds-constant-array-index: Screams at non-constant index lookups on arrays
+# -cppcoreguidelines-pro-type-vararg: Screams at C-style vararg functions (like ImGui::Text)
+# -modernize-avoid-c-style-arrays: Screams at C-style arrays (like float posArr[3] used for ImGui sliders)
+# -readability-function-cognitive-complexity: Screams at complex orchestration loops and main loops
+# -bugprone-exception-escape: Screams if functions might throw, which is noise since we build with -fno-exceptions
+# -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access: Screams at operator[] on vectors, demanding exception-throwing .at()
+
 Checks: >
   -*,
   bugprone-*,
@@ -7,14 +33,30 @@ Checks: >
   readability-*,
   cppcoreguidelines-*,
   misc-*,
-  
-  # --- EXPLICIT DISABLES (Noise Reduction) ---
-  -modernize-use-trailing-return-type,    # Screams at standard function declarations
-  -readability-identifier-length,         # Screams at short iterator names like i, j, k
-  -cppcoreguidelines-owning-memory,       # Screams at raw pointers (useless for C-style memory architecture)
-  -cppcoreguidelines-no-malloc,           # Screams at malloc/free if you build custom allocators
-  -readability-magic-numbers,             # Screams at array sizes, bitmasks, or color clearances
-  -misc-no-recursion                      # Screams at recursive functions
+  -modernize-use-trailing-return-type,
+  -readability-identifier-length,
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-no-malloc,
+  -readability-magic-numbers,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -readability-uppercase-literal-suffix,
+  -misc-non-private-member-variables-in-classes,
+  -cppcoreguidelines-non-private-member-variables-in-classes,
+  -readability-convert-member-functions-to-static,
+  -bugprone-branch-clone,
+  -misc-no-recursion,
+  -bugprone-narrowing-conversions,
+  -cppcoreguidelines-narrowing-conversions,
+  -cppcoreguidelines-avoid-non-const-global-variables,
+  -readability-math-missing-parentheses,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-bounds-constant-array-index,
+  -cppcoreguidelines-pro-type-vararg,
+  -modernize-avoid-c-style-arrays,
+  -readability-function-cognitive-complexity,
+  -bugprone-exception-escape,
+  -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access
 
 WarningsAsErrors: 'bugprone-*,performance-*,clang-analyzer-*'
 HeaderFilterRegex: 'include/|src/'

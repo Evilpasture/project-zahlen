@@ -6,17 +6,20 @@ from datetime import datetime
 import argparse
 
 
-def get_git_tracked_files(target_dir=".", ignore_demo=False):
+def get_git_tracked_files(target=".", ignore_demo=False):
     extensions = {
         ".cpp", ".hpp", ".mm", ".c", ".h", ".S", 
-        ".glsl", ".vert", ".frag", ".metal", ".lua", ".hlsl"
+        ".glsl", ".vert", ".frag", ".metal", ".lua", ".hlsl", ".sh"
     }
     include_filenames = {"CMakeLists.txt"}
     ignore_paths = {"third_party", "extern"}
 
+    if os.path.isfile(target):
+        return [target]
+
     try:
         # Get all files
-        output = subprocess.check_output(["git", "ls-files", target_dir], text=True)
+        output = subprocess.check_output(["git", "ls-files", target], text=True)
         all_files = output.splitlines()
 
         # If --ignore-demo is enabled, find all directories containing a file named ".DEMO"
@@ -80,6 +83,12 @@ def generate_snapshot_string(tracked_files, target_dir):
             lang = "glsl"
         elif ext == ".hlsl":
             lang = "hlsl"
+        elif ext == ".log":
+            lang = "txt"
+        elif ext == ".sh":
+            lang = "bash"
+        elif ext == ".md":
+            lang = "markdown"
         else:
             lang = "c"
 
@@ -96,26 +105,30 @@ def generate_snapshot_string(tracked_files, target_dir):
     return "\n".join(lines)
 
 
-def run_project_manager(target_dir=".", ignore_demo=False):
-    # Pass the flag down
-    tracked_files = get_git_tracked_files(target_dir, ignore_demo=ignore_demo)
+def run_project_manager(target=".", ignore_demo=False):
+    tracked_files = get_git_tracked_files(target, ignore_demo=ignore_demo)
     if not tracked_files:
-        print(f"No matching tracked files found in '{target_dir}'.")
+        print(f"No matching files found at '{target}'.")
         return
 
-    # Determine filenames based on the target directory
-    if target_dir in (".", "", "./"):
+    # NEW: Handle naming for single files
+    if os.path.isfile(target):
+        # e.g., src/render/engine.cpp -> engine_snapshot.md
+        name = Path(target).stem
+        snapshot_file = f"{name}_snapshot.md"
+        diff_file = f"{name}_diff.md"
+    elif target in (".", "", "./"):
         snapshot_file = "project_snapshot.md"
         diff_file = "project_diff.md"
     else:
         # Normalize the path (e.g., 'src/render/' -> 'src/render') and replace slashes
-        clean_path = os.path.normpath(target_dir).strip(os.sep)
+        clean_path = os.path.normpath(target).strip(os.sep)
         prefix = clean_path.replace(os.sep, "_") + "_"
         snapshot_file = f"{prefix}project_snapshot.md"
         diff_file = f"{prefix}project_diff.md"
 
     # 1. Generate new content
-    new_content = generate_snapshot_string(tracked_files, target_dir)
+    new_content = generate_snapshot_string(tracked_files, target)
 
     # 2. Try to read old content for comparison
     old_content = ""
@@ -138,7 +151,7 @@ def run_project_manager(target_dir=".", ignore_demo=False):
 
         if diff:
             with open(diff_file, "w", encoding="utf-8") as df:
-                df.write(f"# Project Diff: Zahlen (Scope: {target_dir})\n")
+                df.write(f"# Project Diff: Zahlen (Scope: {target})\n")
                 df.write(
                     f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
                 )
@@ -149,7 +162,7 @@ def run_project_manager(target_dir=".", ignore_demo=False):
         else:
             if os.path.exists(diff_file):
                 os.remove(diff_file)
-            print(f"No changes detected in '{target_dir}' since last snapshot.")
+            print(f"No changes detected in '{target}' since last snapshot.")
     else:
         print("Initial snapshot created. No previous version to diff against.")
 
