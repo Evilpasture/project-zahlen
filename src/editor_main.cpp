@@ -148,8 +148,7 @@ void UpdateEditorCulling(Engine& engine) {
 			if (auto* phys = reg.Get<PhysicsComponent>(e)) {
 				uint32_t dense = world.slotToDense[phys->physicsHandle.index];
 				const size_t base = static_cast<size_t>(dense) * 4;
-				pos = JPH::Vec3((float)world.positions[base],
-								(float)world.positions[base + 1],
+				pos = JPH::Vec3((float)world.positions[base], (float)world.positions[base + 1],
 								(float)world.positions[base + 2]);
 			} else if (auto* alifeComp = reg.Get<ALife::ALifeComponent>(e)) {
 				pos = JPH::Vec3(alifeComp->position);
@@ -234,7 +233,8 @@ void DrawEditorPanels(Engine& engine) {
 					JPH::Quat r = world.bodyInterface->GetRotation(bid);
 					JPH::Vec3 euler = Math::QuatToEulerDegrees(r);
 
-					std::array<float, 3> posArr = {(float)p.GetX(), (float)p.GetY(), (float)p.GetZ()};
+					std::array<float, 3> posArr = {(float)p.GetX(), (float)p.GetY(),
+												   (float)p.GetZ()};
 					std::array<float, 3> rotArr = {euler.GetX(), euler.GetY(), euler.GetZ()};
 
 					bool pMod = ImGui::DragFloat3("Position", posArr.data(), 0.05f);
@@ -298,10 +298,10 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 
 	// Spawn a temporary workspace terrain and basic landmarks (Copying Setup from your old
 	// main.cpp)
-	reg.RegisterComponent<MeshComponent>();
-	reg.RegisterComponent<PhysicsComponent>();
-	reg.RegisterComponent<MovementComponent>();
-	reg.RegisterComponent<ALife::ALifeComponent>();
+	reg.RegisterComponent<MeshComponent>("MeshComponent");
+	reg.RegisterComponent<PhysicsComponent>("PhysicsComponent");
+	reg.RegisterComponent<MovementComponent>("MovementComponent");
+	reg.RegisterComponent<ALife::ALifeComponent>("ALifeComponent");
 
 	ZHLN::Log("Initializing Editor Workspace Scene...");
 	int terrainSize = 128;
@@ -329,8 +329,8 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 								   .material = material,
 								   .cullRadius = 10.f});
 		reg.Add(box, PhysicsComponent{Physics::CreateRigidBody(
-				 pc, boxShape, {(float)i * 6.0f, 15.0f, 0.0f}, JPH::Quat::sIdentity(),
-				 JPH::EMotionType::Dynamic, 1)});
+						 pc, boxShape, {(float)i * 6.0f, 15.0f, 0.0f}, JPH::Quat::sIdentity(),
+						 JPH::EMotionType::Dynamic, 1)});
 	}
 
 	pc.OptimizeBroadphase();
@@ -461,8 +461,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 						JPH::Vec3 pos((float)worldState.positions[base],
 									  (float)worldState.positions[base + 1],
 									  (float)worldState.positions[base + 2]);
-						JPH::Quat rot(worldState.rotations[base],
-									  worldState.rotations[base + 1],
+						JPH::Quat rot(worldState.rotations[base], worldState.rotations[base + 1],
 									  worldState.rotations[base + 2],
 									  worldState.rotations[base + 3]);
 						currentTransform = Math::CreateTransform(pos, rot);
@@ -474,7 +473,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 					}
 
 					Renderer::Draw(rc, mesh->material, mesh->mesh, currentTransform,
-						   mesh->prevTransform, mesh->cullRadius);
+								   mesh->prevTransform, mesh->cullRadius);
 					mesh->prevTransform = currentTransform;
 				}
 			}

@@ -1,15 +1,30 @@
+-- scripts/core/ecs.lua
 local ffi = require("scripts.core.ffi_cdef")
+local mem = require("scripts.core.memoryview")
 
 local Registry = {}
 Registry.__index = Registry
 
-function Registry.new()
+-- List of components managed on the C++ side
+local NATIVE_COMPONENTS = {
+    MovementComponent = true,
+    MeshComponent = true,
+    PhysicsComponent = true,
+    ALifeComponent = true,
+}
+
+function Registry.new(engine_raw)
     return setmetatable({
-        pools = {},      -- componentName -> { entity_id -> component_data }
-        sizes = {},      -- componentName -> count
-        entities = {},   -- entity_id -> true
-        next_id = 1,     -- for purely Lua-created entities
+        engine = engine_raw,
+        pools = {},        -- componentName -> { entity_id -> component_data } (Lua-only)
+        sizes = {},        -- componentName -> count
+        entities = {},     -- entity_id -> true
+        next_id = 1,       -- Fallback for purely Lua-created entities
     }, Registry)
+end
+
+function Registry:is_native(comp_name)
+    return NATIVE_COMPONENTS[comp_name] == true
 end
 
 -- ============================================================================
@@ -50,54 +65,137 @@ end
 -- ============================================================================
 
 function Registry:add(ent, comp_name, data)
-    if not self.entities[ent] then
-        self:create(ent)
-    end
-    
-    local pool = self.pools[comp_name]
-    if not pool then
-        pool = {}
-        self.pools[comp_name] = pool
-        self.sizes[comp_name] = 0
-    end
-    
-    if pool[ent] == nil then
-        self.sizes[comp_name] = self.sizes[comp_name] + 1
-    end
-    
-    -- Assign table or construct it
-    if type(data) == "function" then
-        pool[ent] = data()
+    self.entities[ent] = true
+
+    if self:is_native(comp_name) then
+        -- Native components are added via C++, but we can retrieve and assign fields from Lua
+        local ptr = ffi.C.ZHLN_GetComponent(self.engine, ent, comp_name)
+        if ptr == nil then
+            error("Cannot add native component '" .. comp_name .. "' from Lua. It must be allocated in C++ first.")
+        end
+        local comp = ffi.cast(comp_name .. "*", ptr)
+        if data then
+            for k, v in pairs(data) do comp[k] = v end
+        end
+        return comp
     else
-        pool[ent] = data or {}
+        -- Fallback to standard Lua table allocation
+        local pool = self.pools[comp_name]
+        if not pool then
+            pool = {}
+            self.pools[comp_name] = pool
+            self.sizes[comp_name] = 0
+        end
+        if pool[ent] == nil then
+            self.sizes[comp_name] = self.sizes[comp_name] + 1
+        end
+        
+        if type(data) == "function" then
+            pool[ent] = data()
+        else
+            pool[ent] = data or {}
+        end
+        
+        return pool[ent]
     end
-    
-    return pool[ent]
 end
 
 function Registry:get(ent, comp_name)
-    local pool = self.pools[comp_name]
-    return pool and pool[ent] or nil
+    if self:is_native(comp_name) then
+        local ptr = ffi.C.ZHLN_GetComponent(self.engine, ent, comp_name)
+        if ptr == nil then return nil end
+        return ffi.cast(comp_name .. "*", ptr)
+    else
+        local pool = self.pools[comp_name]
+        return pool and pool[ent] or nil
+    end
 end
 
 function Registry:has(ent, comp_name)
-    local pool = self.pools[comp_name]
-    return (pool and pool[ent] ~= nil) or false
+    if self:is_native(comp_name) then
+        return ffi.C.ZHLN_GetComponent(self.engine, ent, comp_name) ~= nil
+    else
+        local pool = self.pools[comp_name]
+        return (pool and pool[ent] ~= nil) or false
+    end
 end
 
 function Registry:remove(ent, comp_name)
-    local pool = self.pools[comp_name]
-    if pool and pool[ent] ~= nil then
-        pool[ent] = nil
-        self.sizes[comp_name] = self.sizes[comp_name] - 1
+    if self:is_native(comp_name) then
+        -- Native component lifecycles are controlled by C++ structural arrays.
+        -- Removing them from memory is handled at the engine level.
+    else
+        local pool = self.pools[comp_name]
+        if pool and pool[ent] ~= nil then
+            pool[ent] = nil
+            self.sizes[comp_name] = self.sizes[comp_name] - 1
+        end
     end
 end
 
 -- ============================================================================
--- Optimized View Query System (JIT-Friendly)
+-- Unified View System (JIT-Friendly)
 -- ============================================================================
 
 function Registry:view(...)
+    local comps = {...}
+    local n = #comps
+    if n == 0 then return function() end end
+
+    -- Check if we are querying at least one native component
+    local has_native = false
+    local primary_native = nil
+    for i = 1, n do
+        if self:is_native(comps[i]) then
+            has_native = true
+            primary_native = comps[i]
+            break
+        end
+    end
+
+    -- If no native components are queried, fall back to pure Lua view logic
+    if not has_native then
+        return self:pure_lua_view(table.unpack(comps))
+    end
+
+    -- HYBRID PATH: Driven by the contiguous C++ sparse-set arrays
+    local entities_view = ffi.C.ZHLN_GetECSEntities(self.engine, primary_native)
+    local count = tonumber(entities_view.shape[0])
+    local entity_array = ffi.cast("uint64_t*", entities_view.buf)
+    
+    local index = 0
+
+    return function()
+        while index < count do
+            local ent = entity_array[index]
+            index = index + 1
+
+            -- Check if this entity contains all requested components
+            local results = {}
+            local matches = true
+
+            for i = 1, n do
+                local comp_name = comps[i]
+                local comp = self:get(ent, comp_name)
+                if comp == nil then
+                    matches = false
+                    break
+                end
+                results[i] = comp
+            end
+
+            if matches then
+                return ent, table.unpack(results, 1, n)
+            end
+        end
+    end
+end
+
+-- ============================================================================
+-- Pure Lua Optimized View (Re-integrated from your original codebase)
+-- ============================================================================
+
+function Registry:pure_lua_view(...)
     local comps = {...}
     local n = #comps
     if n == 0 then
@@ -193,7 +291,7 @@ function Registry:view(...)
         end
     end
 
-    -- Generic Slow-Path: 4+ components (Uses table unpacked arrays)
+    -- Generic Slow-Path: 4+ components
     local smallest_name = comps[1]
     local smallest_size = self.sizes[smallest_name] or 0
 

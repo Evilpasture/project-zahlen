@@ -6,8 +6,9 @@
 #include <cstddef>
 #include <detail/Span.hpp>
 #include <span>
+#include <string>
 #include <threading/Mutex.hpp>
-#include <type_traits>
+#include <unordered_map>
 
 namespace ZHLN::ECS {
 
@@ -21,8 +22,8 @@ class SparseSet {
 
 	void Insert(Entity entity, const void* data);
 	void Remove(Entity entity);
-	bool Contains(Entity entity) const noexcept;
-	void* Get(Entity entity) const noexcept;
+	[[nodiscard]] bool Contains(Entity entity) const noexcept;
+	[[nodiscard]] void* Get(Entity entity) const noexcept;
 	void Clear() noexcept;
 
 	BufferView GetBufferView(const void* owner, const char* format) const noexcept;
@@ -97,14 +98,16 @@ class Registry {
 
 	template <typename T> void Remove(Entity entity) {
 		uint32_t id = ComponentFamily::GetTypeID<T>();
-		if (id < _compCapacity && _components[id])
+		if (id < _compCapacity && _components[id]) {
 			_components[id]->Remove(entity);
+		}
 	}
 
 	template <typename T> T* Get(Entity entity) const noexcept {
 		uint32_t id = ComponentFamily::GetTypeID<T>();
-		if (id >= _compCapacity || !_components[id])
+		if (id >= _compCapacity || !_components[id]) {
 			return nullptr;
+		}
 		return static_cast<T*>(_components[id]->Get(entity));
 	}
 
@@ -115,9 +118,31 @@ class Registry {
 
 	template <typename T> std::span<const Entity> GetEntitiesWith() const noexcept {
 		uint32_t id = ComponentFamily::GetTypeID<T>();
-		if (id >= _compCapacity || !_components[id])
+		if (id >= _compCapacity || !_components[id]) {
 			return {};
-		return std::span<const Entity>(_components[id]->GetDenseArray(), _components[id]->Count());
+		}
+		return {_components[id]->GetDenseArray(), _components[id]->Count()};
+	}
+
+	// Map component name strings to their unique family IDs
+	inline static std::unordered_map<std::string, uint32_t> s_NameToFamilyID;
+
+	template <typename T> void RegisterComponent(const std::string& name) {
+		uint32_t id = ComponentFamily::GetTypeID<T>();
+		s_NameToFamilyID[name] = id; // Store mapping
+
+		EnsureComponentCapacity(id);
+		if (!_components[id]) {
+			_components[id] = new SparseSet(sizeof(T), alignof(T), &this->sync);
+		}
+	}
+
+	// Direct constant-time pointer fetch
+	void* GetRawByFamily(Entity entity, uint32_t familyID) const noexcept {
+		if (familyID >= _compCapacity || (_components[familyID] == nullptr)) {
+			return nullptr;
+		}
+		return _components[familyID]->Get(entity);
 	}
 
   private:

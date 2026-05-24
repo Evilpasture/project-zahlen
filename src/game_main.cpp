@@ -40,10 +40,10 @@ struct Scene {
 		auto& reg = engine.GetRegistry();
 		auto& assetMgr = engine.GetAssetManager();
 
-		reg.RegisterComponent<MeshComponent>();
-		reg.RegisterComponent<PhysicsComponent>();
-		reg.RegisterComponent<MovementComponent>();
-		reg.RegisterComponent<ALife::ALifeComponent>(); // <-- Register ALife Component
+		reg.RegisterComponent<MeshComponent>("MeshComponent");
+		reg.RegisterComponent<PhysicsComponent>("PhysicsComponent");
+		reg.RegisterComponent<MovementComponent>("MovementComponent");
+		reg.RegisterComponent<ALife::ALifeComponent>("ALifeComponent");
 
 		// --- 1. Load CityPack GLB Assets ---
 		ZHLN::Log("Loading City Scene Assets...");
@@ -501,7 +501,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 					}
 
 					Renderer::Draw(rc, mesh->material, mesh->mesh, currentTransform,
-						   mesh->prevTransform, mesh->cullRadius);
+								   mesh->prevTransform, mesh->cullRadius);
 					mesh->prevTransform = currentTransform;
 				}
 			}

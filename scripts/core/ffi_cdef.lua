@@ -81,6 +81,18 @@ if not ok then
 
         void ZHLN_SetMovementInput(ZHLN_Engine* handle, uint64_t entityRaw, float x, float z);
         void ZHLN_SetJumpIntent(ZHLN_Engine* handle, uint64_t entityRaw);
+
+        typedef struct MovementComponent {
+            float inputX;
+            float inputZ;
+            bool  jumpRequested;
+            float currentYVel;
+            float speed;
+            float jumpForce;
+        } MovementComponent;
+        
+        // Expose our new C-API bridge function
+        void* ZHLN_GetComponent(ZHLN_Engine* engine, uint64_t entityRaw, const char* componentName);
     ]]
 end
 
