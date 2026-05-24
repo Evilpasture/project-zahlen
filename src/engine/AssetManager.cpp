@@ -1,10 +1,9 @@
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Log.hpp>
 #include <cstring>
-#include <fstream>
+#include <engine/Platform.hpp>
 #include <new>
 
-// Conditionally compile Zstandard if the library is available in the build environment
 #if __has_include(<zstd.h>)
 #include <zstd.h>
 #define ZHLN_HAS_ZSTD 1
@@ -15,40 +14,34 @@
 namespace ZHLN {
 
 bool AssetManager::MountPak(const std::string& pakFilePath) {
-	std::ifstream file(pakFilePath, std::ios::binary);
-	if (!file.is_open()) {
-		Log("ERROR: Failed to open PAK file: {}", pakFilePath);
-		return false;
-	}
-
-	PakHeader header{};
-	file.read(reinterpret_cast<char*>(&header), sizeof(PakHeader));
-
-	if (std::memcmp(header.magic, "ZPAK", 4) != 0) {
-		Log("ERROR: Invalid PAK magic signature in: {}", pakFilePath);
-		return false;
-	}
-
-	// Seek to the Table of Contents at the end of the file
-	file.seekg(header.tocOffset, std::ios::beg);
-
-	std::vector<PakEntry> entries(header.entryCount);
-	file.read(reinterpret_cast<char*>(entries.data()), header.entryCount * sizeof(PakEntry));
-
-	// Register the archive
 	auto archive = std::make_unique<PakArchive>();
 	archive->path = pakFilePath;
-	PakArchive* archivePtr = archive.get();
+	archive->mapped = Platform::OpenMappedFile(pakFilePath.c_str());
 
+	if (archive->mapped.data == nullptr) {
+		Log("ERROR: Failed to map PAK file: {}", pakFilePath);
+		return false;
+	}
+
+	const auto* header = static_cast<const PakHeader*>(archive->mapped.data);
+	if (std::memcmp(header->magic, "ZPAK", 4) != 0) {
+		Log("ERROR: Invalid PAK magic signature in: {}", pakFilePath);
+		Platform::CloseMappedFile(archive->mapped);
+		return false;
+	}
+
+	const auto* entries = reinterpret_cast<const PakEntry*>(
+		static_cast<const char*>(archive->mapped.data) + header->tocOffset);
+
+	PakArchive* archivePtr = archive.get();
 	std::lock_guard<std::mutex> lock(_catalogMutex);
 	_archives.push_back(std::move(archive));
 
-	// Populate global catalog
-	for (const auto& entry : entries) {
-		_catalog[entry.pathHash] = {entry, archivePtr};
+	for (uint32_t i = 0; i < header->entryCount; ++i) {
+		_catalog[entries[i].pathHash] = {entries[i], archivePtr};
 	}
 
-	Log("Mounted PAK: {} ({} assets)", pakFilePath, header.entryCount);
+	Log("Mounted PAK: {} ({} assets)", pakFilePath, header->entryCount);
 	return true;
 }
 
@@ -61,19 +54,17 @@ void AssetManager::LoadAsync(std::span<AssetLoadRequest> requests, TaskSystem::C
 	tasks.reserve(requests.size());
 
 	for (auto& req : requests) {
-		// Allocate a small payload for the fiber to execute
 		auto* jobPayload = new std::pair<AssetManager*, AssetLoadRequest*>(this, &req);
 
 		tasks.push_back({.func = [](void* arg) -> void {
 							 auto* payload =
 								 static_cast<std::pair<AssetManager*, AssetLoadRequest*>*>(arg);
 							 payload->first->ExecuteLoad(payload->second);
-							 delete payload; // Cleanup the allocation after execution
+							 delete payload;
 						 },
 						 .arg = jobPayload});
 	}
 
-	// The TaskSystem automatically increments/decrements the counter!
 	TaskSystem::Dispatch(tasks, counter);
 }
 
@@ -82,15 +73,8 @@ bool AssetManager::LoadSync(AssetLoadRequest& request) {
 	return request.success;
 }
 
-void AssetManager::FreeAssetMemory(void* data) {
-	if (data) {
-		// Memory was allocated with 16-byte alignment for GPU transfer safety
-		::operator delete[](data, std::align_val_t{16});
-	}
-}
-
 void AssetManager::ExecuteLoad(AssetLoadRequest* req) {
-	PakEntry entry;
+	PakEntry entry{};
 	PakArchive* archive = nullptr;
 
 	{
@@ -104,58 +88,52 @@ void AssetManager::ExecuteLoad(AssetLoadRequest* req) {
 		archive = it->second.second;
 	}
 
-	// Allocate 16-byte aligned memory to satisfy strict GPU upload requirements
 	req->outSize = entry.uncompressedSize;
+	const char* payloadRaw = static_cast<const char*>(archive->mapped.data) + entry.offset;
+
+	if (entry.compression == 0) {
+		// --- ZERO-COPY FAST PATH ---
+		req->outData = const_cast<char*>(payloadRaw);
+		req->isZeroCopy = true;
+		req->success = true;
+		return;
+	}
+
+	// --- DECOMPRESSION PATH ---
 	req->outData = ::operator new[](entry.uncompressedSize, std::align_val_t{16});
+	req->isZeroCopy = false;
 
-	std::vector<char> compressedBuffer;
-	char* readTarget = static_cast<char*>(req->outData);
-
-	if (entry.compression != 0) {
-		compressedBuffer.resize(entry.compressedSize);
-		readTarget = compressedBuffer.data();
-	}
-
-	// --- Thread-Safe Disk I/O ---
-	// Note: To prevent thrashing the disk head on HDDs, you might eventually replace this
-	// with OS-level async I/O (Overlapped/io_uring), but mutex-protected streams work great for
-	// SSDs.
-	{
-		std::lock_guard<std::mutex> lock(archive->mtx);
-		std::ifstream file(archive->path, std::ios::binary);
-		file.seekg(entry.offset, std::ios::beg);
-		file.read(readTarget, entry.compressedSize);
-	}
-
-	// --- Decompression ---
 	if (entry.compression == 2) { // ZStandard
 #if ZHLN_HAS_ZSTD
-		size_t result = ZSTD_decompress(req->outData, entry.uncompressedSize,
-										compressedBuffer.data(), entry.compressedSize);
-
+		size_t result =
+			ZSTD_decompress(req->outData, entry.uncompressedSize, payloadRaw, entry.compressedSize);
 		if (ZSTD_isError(result)) {
 			Log("ERROR: Zstd decompression failed for asset ID: {:X}", req->assetID);
-			FreeAssetMemory(req->outData);
-			req->outData = nullptr;
+			FreeAssetMemory(*req);
 			req->success = false;
 			return;
 		}
 #else
-		Log("FATAL: Asset requires Zstd decompression, but Engine was built without Zstd support!");
-		FreeAssetMemory(req->outData);
-		req->outData = nullptr;
+		Log("FATAL: Engine built without ZStd support! Cannot decompress Asset.");
+		FreeAssetMemory(*req);
 		req->success = false;
 		return;
 #endif
-	} else if (entry.compression == 1) { // LZ4 placeholder
+	} else if (entry.compression == 1) { // LZ4 Placeholder
 		Log("ERROR: LZ4 compression not currently implemented.");
-		FreeAssetMemory(req->outData);
-		req->outData = nullptr;
+		FreeAssetMemory(*req);
 		req->success = false;
 		return;
 	}
 
 	req->success = true;
+}
+
+void AssetManager::FreeAssetMemory(AssetLoadRequest& req) {
+	if (!req.isZeroCopy && (req.outData != nullptr)) {
+		::operator delete[](req.outData, std::align_val_t{16});
+	}
+	req.outData = nullptr;
 }
 
 } // namespace ZHLN

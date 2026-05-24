@@ -14,9 +14,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <string>
 #include <detail/ControlFlow.hpp>
 #include <physics/PhysicsWorld.hpp>
+#include <string>
 #include <threading/Mutex.hpp>
 #include <threading/TaskSystem.hpp>
 
@@ -38,6 +38,7 @@ struct Scene {
 		auto& rc = engine.GetRenderContext();
 		auto& pc = engine.GetPhysicsContext();
 		auto& reg = engine.GetRegistry();
+		auto& assetMgr = engine.GetAssetManager();
 
 		reg.RegisterComponent<MeshComponent>();
 		reg.RegisterComponent<PhysicsComponent>();
@@ -46,16 +47,16 @@ struct Scene {
 
 		// --- 1. Load CityPack GLB Assets ---
 		ZHLN::Log("Loading City Scene Assets...");
-		Mesh playerMesh = AssetFactory::LoadGLB(rc, "resources/assets/Adventurer.glb");
-		Mesh agentMesh = AssetFactory::LoadGLB(rc, "resources/assets/Man.glb");
-		Mesh treeMesh = AssetFactory::LoadGLB(rc, "resources/assets/Tree.glb");
-		Mesh benchMesh = AssetFactory::LoadGLB(rc, "resources/assets/Bench.glb");
-		Mesh dumpsterMesh = AssetFactory::LoadGLB(rc, "resources/assets/Dumpster.glb");
-		Mesh pizzaCornerMesh = AssetFactory::LoadGLB(rc, "resources/assets/Pizza Corner.glb");
-		Mesh buildingGreenMesh = AssetFactory::LoadGLB(rc, "resources/assets/Building Green.glb");
-		Mesh carMesh = AssetFactory::LoadGLB(rc, "resources/assets/Car.glb");
-		Mesh coneMesh = AssetFactory::LoadGLB(rc, "resources/assets/Cone.glb");
-		Mesh trashCanMesh = AssetFactory::LoadGLB(rc, "resources/assets/Trash Can.glb");
+		Mesh playerMesh = AssetFactory::LoadCookedMesh(rc, assetMgr, "Adventurer.glb");
+		Mesh agentMesh = AssetFactory::LoadCookedMesh(rc, assetMgr, "Man.glb");
+		Mesh treeMesh = AssetFactory::LoadCookedMesh(rc, assetMgr, "Tree.glb");
+		Mesh benchMesh = AssetFactory::LoadCookedMesh(rc, assetMgr, "Bench.glb");
+		Mesh dumpsterMesh = AssetFactory::LoadCookedMesh(rc, assetMgr, "Dumpster.glb");
+		Mesh pizzaCornerMesh = AssetFactory::LoadCookedMesh(rc, assetMgr, "Pizza Corner.glb");
+		Mesh buildingGreenMesh = AssetFactory::LoadCookedMesh(rc, assetMgr, "Building Green.glb");
+		Mesh carMesh = AssetFactory::LoadCookedMesh(rc, assetMgr, "Car.glb");
+		Mesh coneMesh = AssetFactory::LoadCookedMesh(rc, assetMgr, "Cone.glb");
+		Mesh trashCanMesh = AssetFactory::LoadCookedMesh(rc, assetMgr, "Trash Can.glb");
 
 		Material material = AssetFactory::CreateBasicMaterial(rc);
 
@@ -111,7 +112,9 @@ struct Scene {
 			const int row = i / 15;
 			const float x = (static_cast<float>(col) - 7.5f) * 8.0f;
 			const float z = (static_cast<float>(row) - 5.0f) * 10.0f;
-			const float y = 30.0f + (static_cast<float>(i) * 0.1f); // slightly stacked so they drop and settle on the terrain
+			const float y =
+				30.0f + (static_cast<float>(i) *
+						 0.1f); // slightly stacked so they drop and settle on the terrain
 
 			Entity prop = reg.Create();
 			if (i % 3 == 0) {
@@ -268,7 +271,8 @@ void UpdateCameraSystem(Camera& cam, InputContext& input, Entity player, ECS::Re
 		if (auto* pComp = reg.Get<PhysicsComponent>(player)) {
 			uint32_t dense = world.slotToDense[pComp->physicsHandle.index];
 			const size_t base = static_cast<size_t>(dense) * 4;
-			JPH::Vec3 target = {(float)world.positions[base], (float)world.positions[base + 1] + 1.0f,
+			JPH::Vec3 target = {(float)world.positions[base],
+								(float)world.positions[base + 1] + 1.0f,
 								(float)world.positions[base + 2]};
 
 			float yR = JPH::DegreesToRadians(cam.yaw);
@@ -311,8 +315,7 @@ void UpdateCulling(Engine& engine) {
 			if (phys != nullptr) {
 				uint32_t dense = world.slotToDense[phys->physicsHandle.index];
 				const size_t base = static_cast<size_t>(dense) * 4;
-				pos = JPH::Vec3((float)world.positions[base],
-								(float)world.positions[base + 1],
+				pos = JPH::Vec3((float)world.positions[base], (float)world.positions[base + 1],
 								(float)world.positions[base + 2]);
 			} else if (auto* alifeComp = reg.Get<ALife::ALifeComponent>(e)) {
 				pos = JPH::Vec3(alifeComp->position);
@@ -485,10 +488,8 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 						JPH::Vec3 pos((float)world.positions[base],
 									  (float)world.positions[base + 1],
 									  (float)world.positions[base + 2]);
-						JPH::Quat rot(world.rotations[base],
-									  world.rotations[base + 1],
-									  world.rotations[base + 2],
-									  world.rotations[base + 3]);
+						JPH::Quat rot(world.rotations[base], world.rotations[base + 1],
+									  world.rotations[base + 2], world.rotations[base + 3]);
 						currentTransform = Math::CreateTransform(pos, rot);
 					} else if (auto* alifeComp = reg.Get<ALife::ALifeComponent>(e)) {
 						// Render purely simulated ALife agents using their own simulated

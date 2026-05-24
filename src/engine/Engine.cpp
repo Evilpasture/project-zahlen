@@ -48,6 +48,10 @@ Engine::Engine(const EngineConfig& cfg) {
 	_assetManager = std::make_unique<AssetManager>();
 	if (std::filesystem::exists("data/base.pak")) {
 		_assetManager->MountPak("data/base.pak");
+	} else if (std::filesystem::exists("build/data/base.pak")) {
+		_assetManager->MountPak("build/data/base.pak");
+	} else {
+		ZHLN::Log("WARNING: Could not find 'data/base.pak' in working directory or build/ folder!");
 	}
 }
 

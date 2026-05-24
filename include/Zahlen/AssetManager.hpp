@@ -1,5 +1,7 @@
 #pragma once
 
+#include "engine/Platform.hpp"
+
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -79,6 +81,7 @@ struct AssetLoadRequest {
 	void* outData = nullptr;
 	size_t outSize = 0;
 	bool success = false;
+	bool isZeroCopy = false;
 };
 
 class AssetManager {
@@ -111,12 +114,12 @@ class AssetManager {
 	/**
 	 * @brief Safely frees memory allocated by the AssetManager.
 	 */
-	void FreeAssetMemory(void* data);
+	void FreeAssetMemory(AssetLoadRequest& req);
 
   private:
 	struct PakArchive {
 		std::string path;
-		std::mutex mtx; // Protects file seeks/reads across fibers
+		Platform::MappedFile mapped;
 	};
 
 	void ExecuteLoad(AssetLoadRequest* req);

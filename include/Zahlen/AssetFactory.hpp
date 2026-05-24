@@ -1,4 +1,6 @@
 #pragma once
+#include "Zahlen/AssetManager.hpp"
+
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Types.hpp>
 #include <vector>
@@ -15,4 +17,6 @@ Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float m
 Mesh LoadGLB(RenderContext& ctx, const std::string& path);
 
 uint32_t CreateFontAtlasTexture(RenderContext& ctx);
+
+Mesh LoadCookedMesh(RenderContext& ctx, AssetManager& assetMgr, const std::string& virtualPath);
 } // namespace ZHLN::AssetFactory

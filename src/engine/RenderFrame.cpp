@@ -601,6 +601,12 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 	if (impl->current_cmd == VK_NULL_HANDLE) {
 		return;
 	}
+
+	// NEW: Prevent crashing if an asset failed to load
+	if (mesh.vertexBuffer == BufferHandle::Invalid) {
+		return;
+	}
+
 	impl->drawQueue.push_back({.material = std::bit_cast<NativeMaterial*>(material.pipeline),
 							   .mesh = std::bit_cast<NativeMesh*>(mesh.vertexBuffer),
 							   .transform = transform,
@@ -614,6 +620,11 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex) {
 	auto* impl = ctx.GetImpl();
 	if (impl->current_cmd == VK_NULL_HANDLE) {
+		return;
+	}
+
+	// NEW: Prevent crashing
+	if (mesh.vertexBuffer == BufferHandle::Invalid) {
 		return;
 	}
 

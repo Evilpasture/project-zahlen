@@ -10,6 +10,17 @@ class Window;
 
 namespace ZHLN::Platform {
 
+// --- Memory Mapping ---
+struct MappedFile {
+	void* data = nullptr;
+	size_t size = 0;
+	void* osHandle = nullptr;
+	void* osMapping = nullptr; // Used on Windows
+};
+
+MappedFile OpenMappedFile(const char* path);
+void CloseMappedFile(MappedFile& file);
+
 void SetHighPriority();
 
 /**

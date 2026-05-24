@@ -199,9 +199,33 @@ add_executable(zahlen_editor src/editor_main.cpp)
 target_link_libraries(zahlen_editor PRIVATE zahlen_engine imgui)
 target_compile_definitions(zahlen_editor PRIVATE JPH_DOUBLE_PRECISION)
 
+# Offline Asset Cooker
+add_executable(zahlen_cooker src/cooker_main.cpp)
+target_link_libraries(zahlen_cooker PRIVATE zahlen_engine)
+target_include_directories(zahlen_cooker PRIVATE ${CMAKE_SOURCE_DIR}/extern/cgltf)
+
+# --- 7.1 ASSET COOKING AUTOMATION ---
+# Create a custom target that ALWAYS runs the cooker before the game launches.
+# We use generator expressions ($<TARGET_FILE_DIR:...>) to ensure the data folder 
+# is created right next to the actual compiled .exe, regardless of OS/IDE.
+add_custom_target(cook_assets ALL
+    # 1. Make sure the data directory exists
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:zahlen_game>/data"
+    
+    # 2. Run the cooker
+    COMMAND zahlen_cooker "${CMAKE_SOURCE_DIR}/resources/assets" "$<TARGET_FILE_DIR:zahlen_game>/data/base.pak"
+    
+    DEPENDS zahlen_cooker
+    COMMENT "Cooking assets into data/base.pak..."
+)
+
+# Ensure the game and editor wait for the cooking process to finish before they compile/run
+add_dependencies(zahlen_game cook_assets)
+add_dependencies(zahlen_editor cook_assets)
+
 # --- 8. COMPILER FLAGS ---
 if(NOT MSVC)
-    target_compile_options(zahlen_engine PRIVATE $<$<CXX_COMPILER_ID:GNU>:--param=destructive-interference-size=64> -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti)
+    target_compile_options(zahlen_engine PRIVATE $<$<CXX_COMPILER_ID:GNU>:--param=destructive-interference-size=64> -Wall -Wextra -Wpedantic -Wno-interference-size -fno-exceptions -fno-rtti)
     if(WIN32)
         target_link_options(zahlen_engine PRIVATE -Xlinker /subsystem:console)
         target_compile_options(zahlen_engine PRIVATE -Wno-microsoft-anon-tag -Wno-unknown-pragmas -Wno-unused-parameter)
@@ -227,6 +251,8 @@ foreach(APP_TARGET zahlen_game zahlen_editor)
         )
     endif()
 endforeach()
+
+
 
 # --- 10. SANITIZER RUNTIME DISTRIBUTION ---
 if(USE_SANITIZERS AND WIN32)

@@ -651,4 +651,31 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
 	return ctx.CreateTexture(pixels.data(), atlasSize, atlasSize);
 }
 
+Mesh LoadCookedMesh(RenderContext& ctx, AssetManager& assetMgr, const std::string& virtualPath) {
+	AssetLoadRequest req;
+	req.assetID = HashAssetPath(virtualPath);
+
+	if (!assetMgr.LoadSync(req)) {
+		Log("ERROR: Failed to load cooked mesh from PAK: {}", virtualPath);
+		return {};
+	}
+
+	const auto* header = static_cast<const CookedMeshHeader*>(req.outData);
+	if (header->magic != 0x3048534D) { // 'MSH0'
+		Log("ERROR: Invalid CookedMeshHeader magic for: {}", virtualPath);
+		return {};
+	}
+
+	const auto* vertices = reinterpret_cast<const Vertex*>(header + 1);
+
+	// ZERO-COPY UPLOAD: We pass the pointer directly from the memory-mapped file to Vulkan!
+	BufferHandle vbo = ctx.CreateVertexBuffer(vertices, header->vertexCount * sizeof(Vertex));
+
+	// Release memory (If mapped, it's a no-op, if decompressed, it frees)
+	assetMgr.FreeAssetMemory(req);
+
+	Log("Loaded Cooked Mesh: {} ({} vertices)", virtualPath, header->vertexCount);
+	return Mesh{.vertexBuffer = vbo, .vertexCount = header->vertexCount};
+}
+
 } // namespace ZHLN::AssetFactory
