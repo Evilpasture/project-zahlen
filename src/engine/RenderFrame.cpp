@@ -7,8 +7,9 @@
 #include "detail/Ranges.hpp"
 #include "engine/RenderState.hpp"
 #include "imgui.h"
-#include <bit>
+
 #include <algorithm>
+#include <bit>
 #include <threading/TaskSystem.hpp>
 
 namespace ZHLN {
@@ -151,7 +152,8 @@ void RenderContext::Impl::RenderShadowPass(VkCommandBuffer cmd) {
 
 	VkRenderingInfo shadowRenderInfo = {
 		.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-		.renderArea = {.offset = {0, 0}, .extent = {SHADOW_RES, SHADOW_RES}},
+		.renderArea = {.offset = {.x = 0, .y = 0},
+					   .extent = {.width = SHADOW_RES, .height = SHADOW_RES}},
 		.layerCount = 1,
 		.pDepthAttachment = &depthAtt};
 
@@ -164,7 +166,8 @@ void RenderContext::Impl::RenderShadowPass(VkCommandBuffer cmd) {
 								 .height = -(float)SHADOW_RES,
 								 .minDepth = 0.0f,
 								 .maxDepth = 1.0f};
-	VkRect2D shadowScissor = {.offset = {0, 0}, .extent = {SHADOW_RES, SHADOW_RES}};
+	VkRect2D shadowScissor = {.offset = {.x = 0, .y = 0},
+							  .extent = {.width = SHADOW_RES, .height = SHADOW_RES}};
 	vkCmdSetViewport(cmd, 0, 1, &shadowViewport);
 	vkCmdSetScissor(cmd, 0, 1, &shadowScissor);
 
@@ -207,14 +210,14 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 
 	Renderer::Clear(ctx, {0.08f, 0.09f, 0.12f, 1.0f}, 1.0f, true);
 
-	uint32_t drawCount = static_cast<uint32_t>(drawQueue.size());
+	auto drawCount = static_cast<uint32_t>(drawQueue.size());
 	if (drawCount == 0) {
 		return;
 	}
 
 	// 1. Allocate continuous temporary sort items
-	std::vector<SortItem> items(drawCount);
-	std::vector<SortItem> temp(drawCount);
+	JPH::Array<SortItem> items(drawCount);
+	JPH::Array<SortItem> temp(drawCount);
 
 	for (uint32_t i = 0; i < drawCount; ++i) {
 		items[i] = {.key = SortKey::Pack(drawQueue[i].material, drawQueue[i].mesh), .payload = i};
@@ -224,7 +227,7 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 	RadixSort64(items.data(), temp.data(), drawCount);
 
 	// 3. Reorder drawQueue elements on-the-fly to preserve cache locality for workers
-	std::vector<DrawCommand> sortedDrawQueue(drawCount);
+	JPH::Array<DrawCommand> sortedDrawQueue(drawCount);
 	for (uint32_t i = 0; i < drawCount; ++i) {
 		sortedDrawQueue[i] = drawQueue[items[i].payload];
 	}
@@ -232,7 +235,7 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 
 	// 4. Submit draw commands in sorted order across threads
 	uint32_t numChunks = (drawCount + 255) / 256;
-	std::vector<VkCommandBuffer> secondaries(numChunks);
+	JPH::Array<VkCommandBuffer> secondaries(numChunks);
 
 	std::array<VkFormat, 2> formats = {VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16G16_SFLOAT};
 	const VkCommandBufferInheritanceRenderingInfo inherit = {
@@ -325,7 +328,7 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 }
 
 bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& ctx, VkCommandBuffer cmd) {
-	uint32_t drawCount = static_cast<uint32_t>(drawQueue.size());
+	auto drawCount = static_cast<uint32_t>(drawQueue.size());
 	if (drawCount == 0) {
 		return true;
 	}
@@ -339,8 +342,8 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& ctx, VkCommand
 		return false;
 	}
 
-	std::vector<SortItem> items(drawCount);
-	std::vector<SortItem> temp(drawCount);
+	JPH::Array<SortItem> items(drawCount);
+	JPH::Array<SortItem> temp(drawCount);
 
 	for (uint32_t i = 0; i < drawCount; ++i) {
 		items[i] = {.key = SortKey::Pack(drawQueue[i].material, drawQueue[i].mesh), .payload = i};
@@ -348,7 +351,7 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& ctx, VkCommand
 
 	RadixSort64(items.data(), temp.data(), drawCount);
 
-	std::vector<DrawCommand> sortedDrawQueue(drawCount);
+	JPH::Array<DrawCommand> sortedDrawQueue(drawCount);
 	for (uint32_t i = 0; i < drawCount; ++i) {
 		sortedDrawQueue[i] = drawQueue[items[i].payload];
 	}
@@ -361,7 +364,7 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& ctx, VkCommand
 		uint32_t count;
 	};
 
-	std::vector<GroupRange> groups;
+	JPH::Array<GroupRange> groups;
 	groups.reserve((drawCount + 15) / 16);
 
 	InstanceData* mapped = reinterpret_cast<InstanceData*>(instanceDataBuffer.Map().data);

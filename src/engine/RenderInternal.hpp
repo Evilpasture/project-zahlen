@@ -107,10 +107,10 @@ struct RenderContext::Impl {
 	JPH::Mat44 prev_view_proj{};
 	JPH::Mat44 shadowProjView{};
 
-	std::vector<std::unique_ptr<NativeMesh>> meshes;
-	std::vector<std::unique_ptr<NativeMaterial>> materials;
-	std::vector<DrawCommand> drawQueue;
-	std::vector<WorkerCmdContext> workerCmds;
+	JPH::Array<std::unique_ptr<NativeMesh>> meshes;
+	JPH::Array<std::unique_ptr<NativeMaterial>> materials;
+	JPH::Array<DrawCommand> drawQueue;
+	JPH::Array<WorkerCmdContext> workerCmds;
 
 	bool depth_ready = false;
 	Vk::DescriptorPool uiPool;
@@ -121,8 +121,8 @@ struct RenderContext::Impl {
 	Vk::Sampler globalSampler;
 
 	uint32_t nextTextureIndex = 0;
-	std::vector<Vk::Image> textureImages;
-	std::vector<Vk::ImageView> textureViews;
+	JPH::Array<Vk::Image> textureImages;
+	JPH::Array<Vk::ImageView> textureViews;
 
 	Vk::DescriptorSetLayout cullingLayout;
 	Vk::DescriptorPool cullingPool;
@@ -143,7 +143,7 @@ struct RenderContext::Impl {
 	Vk::Pipeline cullingPipeline;
 	Vk::PipelineLayout cullingPipelineLayout;
 
-	std::vector<UIDrawCommand> uiDrawQueue;
+	JPH::Array<UIDrawCommand> uiDrawQueue;
 	Vk::Pipeline uiPipeline;
 	Vk::PipelineLayout uiPipelineLayout;
 
@@ -161,7 +161,7 @@ struct RenderContext::Impl {
 	bool RenderMainPassGpuCulling(RenderContext& ctx, VkCommandBuffer cmd);
 	void RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd);
 	void ApplyTAAPass(VkCommandBuffer cmd, VkExtent2D extent);
-	void BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, uint32_t imageIndex);
+	void BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, uint32_t imageIdx);
 	void SubmitFrame();
 };
 
