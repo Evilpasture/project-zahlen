@@ -8,6 +8,7 @@
 #include "engine/RenderState.hpp"
 #include "imgui.h"
 
+#include <algorithm>
 #include <threading/TaskSystem.hpp>
 
 namespace ZHLN {
@@ -200,7 +201,11 @@ void RenderContext::Impl::RenderShadowPass(VkCommandBuffer cmd) {
 }
 
 void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd) {
-	Renderer::Clear(ctx, {0.08f, 0.09f, 0.12f, 1.0f});
+	if (RenderMainPassGpuCulling(ctx, cmd)) {
+		return;
+	}
+
+	Renderer::Clear(ctx, {0.08f, 0.09f, 0.12f, 1.0f}, 1.0f, true);
 
 	uint32_t drawCount = static_cast<uint32_t>(drawQueue.size());
 	if (drawCount == 0) {
@@ -317,6 +322,145 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 
 	Vk::ExecuteCommands(cmd, secondaries);
 	drawQueue.clear();
+}
+
+bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& ctx, VkCommandBuffer cmd) {
+	uint32_t drawCount = static_cast<uint32_t>(drawQueue.size());
+	if (drawCount == 0) {
+		return true;
+	}
+
+	if (!cullingPipeline.Valid() || !instanceDataBuffer.Valid() ||
+		!indirectCommandsBuffer.Valid()) {
+		return false;
+	}
+
+	if (drawCount > kGpuCullingMaxInstances) {
+		return false;
+	}
+
+	std::vector<SortItem> items(drawCount);
+	std::vector<SortItem> temp(drawCount);
+
+	for (uint32_t i = 0; i < drawCount; ++i) {
+		items[i] = {.key = SortKey::Pack(drawQueue[i].material, drawQueue[i].mesh), .payload = i};
+	}
+
+	RadixSort64(items.data(), temp.data(), drawCount);
+
+	std::vector<DrawCommand> sortedDrawQueue(drawCount);
+	for (uint32_t i = 0; i < drawCount; ++i) {
+		sortedDrawQueue[i] = drawQueue[items[i].payload];
+	}
+	drawQueue = std::move(sortedDrawQueue);
+
+	struct GroupRange {
+		NativeMaterial* material;
+		NativeMesh* mesh;
+		uint32_t start;
+		uint32_t count;
+	};
+
+	std::vector<GroupRange> groups;
+	groups.reserve((drawCount + 15) / 16);
+
+	InstanceData* mapped = reinterpret_cast<InstanceData*>(instanceDataBuffer.Map().data);
+
+	NativeMaterial* currentMaterial = nullptr;
+	NativeMesh* currentMesh = nullptr;
+	for (uint32_t i = 0; i < drawCount; ++i) {
+		const auto& drawCmd = drawQueue[i];
+		mapped[i] = {.world = drawCmd.transform,
+					 .prevWorld = drawCmd.prevTransform,
+					 .albedoIndex = drawCmd.albedoIndex,
+					 .normalIndex = drawCmd.normalIndex,
+					 .pbrIndex = drawCmd.pbrIndex,
+					 .emissiveIndex = drawCmd.emissiveIndex,
+					 .vertexCount = drawCmd.mesh->vertexCount,
+					 .cullRadius = drawCmd.cullRadius,
+					 ._padding = {0, 0}};
+
+		if (i == 0 || drawCmd.material != currentMaterial || drawCmd.mesh != currentMesh) {
+			groups.push_back(
+				{.material = drawCmd.material, .mesh = drawCmd.mesh, .start = i, .count = 1});
+			currentMaterial = drawCmd.material;
+			currentMesh = drawCmd.mesh;
+		} else {
+			groups.back().count++;
+		}
+	}
+
+	struct FrustumPlanes {
+		JPH::Vec4 planes[6];
+		uint32_t drawCount;
+		uint32_t padding[3];
+	};
+	FrustumPlanes planes{};
+
+	const auto& vp = current_view_proj;
+	JPH::Vec4 r0(vp(0, 0), vp(0, 1), vp(0, 2), vp(0, 3));
+	JPH::Vec4 r1(vp(1, 0), vp(1, 1), vp(1, 2), vp(1, 3));
+	JPH::Vec4 r2(vp(2, 0), vp(2, 1), vp(2, 2), vp(2, 3));
+	JPH::Vec4 r3(vp(3, 0), vp(3, 1), vp(3, 2), vp(3, 3));
+
+	auto NormalizePlane = [&](const JPH::Vec4& plane) {
+		float len = JPH::Vec3(plane.GetX(), plane.GetY(), plane.GetZ()).Length();
+		return plane / std::max(len, 1e-6f);
+	};
+
+	planes.planes[0] = NormalizePlane(r3 + r0);
+	planes.planes[1] = NormalizePlane(r3 - r0);
+	planes.planes[2] = NormalizePlane(r3 + r1);
+	planes.planes[3] = NormalizePlane(r3 - r1);
+	planes.planes[4] = NormalizePlane(r2);
+	planes.planes[5] = NormalizePlane(r3 - r2);
+	planes.drawCount = drawCount;
+
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullingPipeline.Get());
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullingPipelineLayout.Get(), 0, 1,
+							&cullingSet, 0, nullptr);
+	vkCmdPushConstants(cmd, cullingPipelineLayout.Get(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
+					   sizeof(FrustumPlanes), &planes);
+
+	uint32_t groupCount = (drawCount + 63) / 64;
+	vkCmdDispatch(cmd, groupCount, 1, 1);
+
+	const VkMemoryBarrier barrier = {
+		.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+		.pNext = nullptr,
+		.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+		.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT,
+	};
+	vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+						 VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT, 0, 1, &barrier, 0, nullptr, 0,
+						 nullptr);
+
+	Renderer::Clear(ctx, {0.08f, 0.09f, 0.12f, 1.0f}, 1.0f, false);
+	
+	const VkDeviceSize stride = sizeof(VkDrawIndirectCommand);
+	for (const auto& group : groups) {
+		if (!group.material->pipeline.Valid()) {
+			continue;
+		}
+
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, group.material->pipeline.Get());
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, group.material->layout.Get(),
+								0, 1, &bindlessSet, 0, nullptr);
+
+		FrameConstants constants{};
+		vkCmdPushConstants(cmd, group.material->layout.Get(),
+						   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+						   sizeof(FrameConstants), &constants);
+
+		VkDeviceSize offset = 0;
+		VkBuffer vbo = group.mesh->buffer.Handle();
+		vkCmdBindVertexBuffers(cmd, 0, 1, &vbo, &offset);
+		vkCmdDrawIndirect(cmd, indirectCommandsBuffer.Handle(), group.start * stride, group.count,
+						  stride);
+	}
+
+	drawQueue.clear();
+	return true;
 }
 
 void RenderContext::Impl::ApplyTAAPass(VkCommandBuffer cmd, VkExtent2D extent) {
@@ -498,7 +642,7 @@ void RenderContext::EndFrame() {
 }
 
 namespace Renderer {
-void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
+void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth, bool useSecondaries) {
 	auto* impl = ctx.GetImpl();
 	if (impl->current_cmd == VK_NULL_HANDLE) {
 		return;
@@ -558,7 +702,8 @@ void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth) {
 	const VkRenderingInfo renderInfo = {
 		.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
 		.pNext = nullptr,
-		.flags = VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT,
+		.flags = static_cast<VkRenderingFlags>(
+			useSecondaries ? VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT : 0),
 		.renderArea{.offset = {.x = 0, .y = 0},
 					.extent = impl->presentation.swapchain.Get().extent},
 		.layerCount = 1,
@@ -596,7 +741,7 @@ void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
 }
 
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
-		  const JPH::Mat44& transform, const JPH::Mat44& prevTransform) {
+		  const JPH::Mat44& transform, const JPH::Mat44& prevTransform, float cullRadius) {
 	auto* impl = ctx.GetImpl();
 	if (impl->current_cmd == VK_NULL_HANDLE) {
 		return;
@@ -614,7 +759,8 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 							   .albedoIndex = material.albedoIndex,
 							   .normalIndex = material.normalIndex,
 							   .pbrIndex = material.pbrIndex,
-							   .emissiveIndex = material.emissiveIndex});
+							   .emissiveIndex = material.emissiveIndex,
+							   .cullRadius = cullRadius});
 }
 
 void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex) {

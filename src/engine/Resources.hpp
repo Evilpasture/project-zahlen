@@ -14,4 +14,5 @@ DECLARE_RESOURCE(ZHLN_Resource_TaaVertSpv)
 DECLARE_RESOURCE(ZHLN_Resource_TaaFragSpv)
 DECLARE_RESOURCE(ZHLN_Resource_UiVertSpv)
 DECLARE_RESOURCE(ZHLN_Resource_UiFragSpv)
+DECLARE_RESOURCE(ZHLN_Resource_CullingCompSpv)
 }

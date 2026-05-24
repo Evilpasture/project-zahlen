@@ -37,3 +37,8 @@ const unsigned char ZHLN_Resource_UiFragSpv[] = {
 #embed SHADER_UI_HLSL_PS_PATH
 };
 const unsigned int ZHLN_Resource_UiFragSpv_Len = sizeof(ZHLN_Resource_UiFragSpv);
+
+const unsigned char ZHLN_Resource_CullingCompSpv[] = {
+#embed SHADER_CULLING_HLSL_CS_PATH
+};
+const unsigned int ZHLN_Resource_CullingCompSpv_Len = sizeof(ZHLN_Resource_CullingCompSpv);

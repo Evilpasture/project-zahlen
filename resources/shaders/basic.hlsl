@@ -32,9 +32,22 @@ struct ObjectConstants {
 	uint isShadowPass;
 };
 
+struct InstanceData {
+	float4x4 world;
+	float4x4 prevWorld;
+	uint albedoIdx;
+	uint normalIdx;
+	uint pbrIdx;
+	uint emissiveIdx;
+	uint vertexCount;
+	float cullRadius;
+	uint padding[2];
+};
+
 [[vk::push_constant]] ObjectConstants obj;
 
 [[vk::binding(0, 0)]] Texture2D globalTextures[];
+[[vk::binding(6, 0)]] StructuredBuffer<InstanceData> g_instances;
 [[vk::binding(1, 0)]] SamplerState defaultSampler;
 [[vk::binding(2, 0)]] Texture2D shadowMap;
 [[vk::binding(3, 0)]] SamplerComparisonState shadowSampler;
@@ -58,12 +71,14 @@ struct VSOutput {
 	float4 tangent : TANGENT;
 	float2 uv : TEXCOORD2;
 	float4 shadowPos : TEXCOORD3;
+	uint4 materialIndices : TEXCOORD4;
 };
 
-VSOutput VSMain(VSInput input) {
+VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 	VSOutput output;
 
-	float4 worldPos = mul(obj.world, float4(input.position, 1.0f));
+	InstanceData inst = g_instances[instanceId];
+	float4 worldPos = mul(inst.world, float4(input.position, 1.0f));
 	output.worldPos = worldPos.xyz;
 
 	if (obj.isShadowPass != 0) {
@@ -79,16 +94,17 @@ VSOutput VSMain(VSInput input) {
 	output.currClip = mul(frame.viewProj, worldPos);
 	output.pos = output.currClip;
 
-	float4 prevWorldPos = mul(obj.prevWorld, float4(input.position, 1.0f));
+	float4 prevWorldPos = mul(inst.prevWorld, float4(input.position, 1.0f));
 	output.prevClip = mul(frame.prevViewProj, prevWorldPos);
 
-	float3x3 world3x3 = (float3x3)obj.world;
+	float3x3 world3x3 = (float3x3)inst.world;
 	output.normal = normalize(mul(world3x3, input.normal));
 	output.tangent.xyz = normalize(mul(world3x3, input.tangent.xyz));
 	output.tangent.w = input.tangent.w;
 
 	output.uv = input.uv;
 	output.shadowPos = mul(frame.lightSpaceMatrix, worldPos);
+	output.materialIndices = uint4(inst.albedoIdx, inst.normalIdx, inst.pbrIdx, inst.emissiveIdx);
 
 	return output;
 }
@@ -132,14 +148,15 @@ PSOutput PSMain(VSOutput input) {
 	PSOutput output;
 
 	// Sample Bindless Textures
-	float4 albedo = globalTextures[obj.albedoIdx].Sample(defaultSampler, input.uv);
+	uint4 indices = input.materialIndices;
+	float4 albedo = globalTextures[indices.x].Sample(defaultSampler, input.uv);
 	if (albedo.a < 0.5)
 		discard;
 
 	float3 normalMap =
-		globalTextures[obj.normalIdx].Sample(defaultSampler, input.uv).rgb * 2.0 - 1.0;
-	float4 pbr = globalTextures[obj.pbrIdx].Sample(defaultSampler, input.uv);
-	float3 emissive = globalTextures[obj.emissiveIdx].Sample(defaultSampler, input.uv).rgb;
+		globalTextures[indices.y].Sample(defaultSampler, input.uv).rgb * 2.0 - 1.0;
+	float4 pbr = globalTextures[indices.z].Sample(defaultSampler, input.uv);
+	float3 emissive = globalTextures[indices.w].Sample(defaultSampler, input.uv).rgb;
 
 	float roughness = pbr.g;
 	float metallic = pbr.b;

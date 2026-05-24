@@ -9,6 +9,7 @@
 #include "RenderTarget.hpp"
 #include "Vertex.hpp"
 
+#include <Zahlen/Types.hpp>
 #include <GLFW/glfw3.h>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
@@ -28,13 +29,15 @@ using GlobalSceneLayout = Vk::DescriptorLayout<
 	Vk::SamplerSlot<3>,					   // Shadow Map comparison sampler
 	Vk::UniformSlot<4, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT>, // FrameUniforms
 																				   // (UBO)
-	Vk::StorageBufferSlot<5, VK_SHADER_STAGE_FRAGMENT_BIT>						   // Lights (SSBO)
+	Vk::StorageBufferSlot<5, VK_SHADER_STAGE_FRAGMENT_BIT>,				   // Lights (SSBO)
+	Vk::StorageBufferSlot<6, VK_SHADER_STAGE_VERTEX_BIT>					   // Instance buffer (SSBO)
 	>;
 
 using TAALayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SampledImageSlot<1>,
 									   Vk::SampledImageSlot<2>, Vk::SamplerSlot<3>>;
 
 using BlitLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SamplerSlot<1>>;
+using CullingLayout = Vk::DescriptorLayout<Vk::StorageBufferSlot<0>, Vk::StorageBufferSlot<1>>;
 
 struct NativeMesh {
 	Vk::Buffer buffer;
@@ -46,6 +49,11 @@ struct NativeMaterial {
 	Vk::PipelineLayout layout;
 };
 
+static constexpr uint32_t kGpuCullingMaxInstances = 8192;
+static constexpr uint32_t kGpuCullingMaxBatches = 256;
+static constexpr uint32_t kGpuCullingMaxVisibleInstances =
+	kGpuCullingMaxInstances * kGpuCullingMaxBatches;
+
 struct DrawCommand {
 	NativeMaterial* material;
 	NativeMesh* mesh;
@@ -55,6 +63,7 @@ struct DrawCommand {
 	uint32_t normalIndex;
 	uint32_t pbrIndex;
 	uint32_t emissiveIndex;
+	float cullRadius;
 };
 
 struct UIDrawCommand {
@@ -115,6 +124,10 @@ struct RenderContext::Impl {
 	std::vector<Vk::Image> textureImages;
 	std::vector<Vk::ImageView> textureViews;
 
+	Vk::DescriptorSetLayout cullingLayout;
+	Vk::DescriptorPool cullingPool;
+	VkDescriptorSet cullingSet = VK_NULL_HANDLE;
+
 	static constexpr uint32_t SHADOW_RES = 2048;
 	Vk::RenderTarget<VK_FORMAT_D32_SFLOAT> shadowMap;
 	Vk::Sampler shadowSampler;
@@ -122,8 +135,13 @@ struct RenderContext::Impl {
 	Vk::Buffer frameUniformBuffer;
 	Vk::Buffer lightStorageBuffer;
 
+	Vk::Buffer instanceDataBuffer;
+	Vk::Buffer indirectCommandsBuffer;
+
 	Vk::Pipeline shadowPipeline;
 	Vk::PipelineLayout shadowPipelineLayout;
+	Vk::Pipeline cullingPipeline;
+	Vk::PipelineLayout cullingPipelineLayout;
 
 	std::vector<UIDrawCommand> uiDrawQueue;
 	Vk::Pipeline uiPipeline;
@@ -132,6 +150,7 @@ struct RenderContext::Impl {
 	Impl(Window& win) : window(win) {}
 
 	void InitShadowResources();
+	void InitCullingResources();
 	void CompileShadowPipeline(VkDevice device, const void* shaderData, size_t shaderSize);
 	void InitBindless();
 	void InitPostProcessing();
@@ -139,6 +158,7 @@ struct RenderContext::Impl {
 
 	// Decomposed Rendering Stage Helpers
 	void RenderShadowPass(VkCommandBuffer cmd);
+	bool RenderMainPassGpuCulling(RenderContext& ctx, VkCommandBuffer cmd);
 	void RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd);
 	void ApplyTAAPass(VkCommandBuffer cmd, VkExtent2D extent);
 	void BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, uint32_t imageIndex);

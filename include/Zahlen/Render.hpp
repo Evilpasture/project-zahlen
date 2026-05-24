@@ -1,8 +1,8 @@
 #pragma once
+#include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
-#include <Zahlen/Common.h>
 #include <detail/String.hpp>
 #include <memory>
 
@@ -44,12 +44,13 @@ class ZHLN_API RenderContext {
 };
 
 namespace Renderer {
-void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth = 1.0f);
+void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth = 1.0f,
+		   bool useSecondaries = true);
 void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj, const JPH::Mat44& prevViewProj);
 void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
 				  const JPH::Mat44& shadowProjView);
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
-		  const JPH::Mat44& transform, const JPH::Mat44& prevTransform);
+		  const JPH::Mat44& transform, const JPH::Mat44& prevTransform, float cullRadius = 1.0f);
 void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex);
 
 } // namespace Renderer

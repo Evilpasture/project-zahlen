@@ -51,6 +51,19 @@ struct FrameConstants {
 
 static_assert(sizeof(FrameConstants) == 160, "FrameConstants must be exactly 160 bytes to match HLSL alignment.");
 
+struct alignas(16) InstanceData {
+	JPH::Mat44 world;
+	JPH::Mat44 prevWorld;
+	uint32_t albedoIndex;
+	uint32_t normalIndex;
+	uint32_t pbrIndex;
+	uint32_t emissiveIndex;
+	uint32_t vertexCount;
+	float cullRadius;
+	uint32_t _padding[2];
+};
+static_assert(sizeof(InstanceData) == 160, "InstanceData must be exactly 160 bytes to match HLSL alignment.");
+
 // --- Opaque Resource Handles ---
 // These abstract away Vulkan/LLGL objects completely.
 

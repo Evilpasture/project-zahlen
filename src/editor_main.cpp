@@ -474,7 +474,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 					}
 
 					Renderer::Draw(rc, mesh->material, mesh->mesh, currentTransform,
-								   mesh->prevTransform);
+						   mesh->prevTransform, mesh->cullRadius);
 					mesh->prevTransform = currentTransform;
 				}
 			}

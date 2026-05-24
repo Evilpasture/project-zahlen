@@ -179,12 +179,37 @@ function(compile_shaders TARGET_NAME)
     set_source_files_properties(src/engine/Resources.c PROPERTIES OBJECT_DEPENDS "${ALL_SPV_OUTPUTS}")
 endfunction()
 
+function(compile_hlsl SHADER_PATH ENTRY STAGE OUTPUT_VAR)
+    find_program(DXC_EXECUTABLE NAMES dxc PATHS "$ENV{VULKAN_SDK}/bin" "D:/Vulkan-SDK/1.4.341.1/bin")
+    if(NOT DXC_EXECUTABLE)
+        message(FATAL_ERROR "DXC not found!")
+    endif()
+
+    get_filename_component(FILE_NAME ${SHADER_PATH} NAME)
+    set(OUTPUT_SPV "${CMAKE_CURRENT_BINARY_DIR}/generated_shaders/${FILE_NAME}.${STAGE}.spv")
+
+    add_custom_command(
+        OUTPUT ${OUTPUT_SPV}
+        COMMAND ${DXC_EXECUTABLE} -T ${STAGE} -E ${ENTRY} -spirv ${SHADER_PATH} -Fo ${OUTPUT_SPV}
+        DEPENDS ${SHADER_PATH}
+        COMMENT "DXC: Generating ${FILE_NAME}.${STAGE}.spv"
+        VERBATIM
+    )
+    set(${OUTPUT_VAR} ${OUTPUT_SPV} PARENT_SCOPE)
+endfunction()
+
 compile_shaders(zahlen_engine
     "${CMAKE_SOURCE_DIR}/resources/shaders/basic.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/blit.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/taa.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/ui.hlsl"
 )
+
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/culling.hlsl" CSMain cs_6_0 CULLING_COMP_SPV)
+add_custom_target(zahlen_engine_culling_shader ALL DEPENDS ${CULLING_COMP_SPV})
+add_dependencies(zahlen_engine zahlen_engine_culling_shader)
+target_compile_definitions(zahlen_engine PRIVATE SHADER_CULLING_HLSL_CS_PATH="${CULLING_COMP_SPV}")
+set_source_files_properties(src/engine/Resources.c PROPERTIES OBJECT_DEPENDS "${CULLING_COMP_SPV}")
 
 # --- 7. EXECUTABLE TARGETS ---
 
@@ -245,6 +270,9 @@ foreach(APP_TARGET zahlen_game zahlen_editor)
         )
     else()
         add_custom_command(TARGET ${APP_TARGET} POST_BUILD
+            # Clean up existing symlinks first to prevent "File exists" errors
+            COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE_DIR:${APP_TARGET}>/resources"
+            COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE_DIR:${APP_TARGET}>/scripts"
             COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_SOURCE_DIR}/resources" "$<TARGET_FILE_DIR:${APP_TARGET}>/resources"
             COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_SOURCE_DIR}/scripts" "$<TARGET_FILE_DIR:${APP_TARGET}>/scripts"
             COMMENT "Linking resources and scripts for ${APP_TARGET}..."

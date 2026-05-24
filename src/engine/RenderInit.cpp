@@ -52,9 +52,10 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 		.pNext = nullptr,
 		.swapchainMaintenance1 = VK_TRUE};
 	feat13.pNext = &swap_maint;
-	VkPhysicalDeviceFeatures2 feat2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-									   .pNext = &feat12,
-									   .features = {.samplerAnisotropy = VK_TRUE}};
+	VkPhysicalDeviceFeatures2 feat2 = {
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+		.pNext = &feat12,
+		.features = {.multiDrawIndirect = VK_TRUE, .samplerAnisotropy = VK_TRUE}};
 #ifdef __APPLE__
 	const char* dev_exts[] = {
 		VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
@@ -82,6 +83,7 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	}
 
 	_impl->InitShadowResources();
+	_impl->InitCullingResources();
 	_impl->InitBindless();
 	_impl->CompileShadowPipeline(_impl->ctx.Device(), &ZHLN_Resource_BasicVertSpv[0],
 								 ZHLN_Resource_BasicVertSpv_Len);
@@ -155,6 +157,47 @@ void RenderContext::Impl::InitShadowResources() {
 						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 }
 
+void RenderContext::Impl::InitCullingResources() {
+	cullingLayout = CullingLayout::CreateLayout(ctx.Device());
+	cullingPool = CullingLayout::CreatePool(ctx.Device(), 1);
+	cullingSet = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
+
+	instanceDataBuffer =
+		Vk::Buffer::Create(allocator.Get(), sizeof(InstanceData) * kGpuCullingMaxInstances,
+						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+	indirectCommandsBuffer =
+		Vk::Buffer::Create(allocator.Get(), sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances,
+						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+						   VMA_MEMORY_USAGE_GPU_ONLY);
+
+	CullingLayout::Write(ctx.Device(), cullingSet,
+						 Vk::BufferWrite{.buffer = instanceDataBuffer.Handle()},
+						 Vk::BufferWrite{.buffer = indirectCommandsBuffer.Handle()});
+
+	constexpr uint32_t kCullingPushSize = sizeof(float) * 4 * 6 + sizeof(uint32_t) * 4;
+	VkPushConstantRange cullingPush = {
+		.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+		.offset = 0,
+		.size = kCullingPushSize,
+	};
+
+	VkDescriptorSetLayout cullingLayouts[] = {cullingLayout.Get()};
+	auto desc = ZHLN_PipelineLayoutDesc{.set_layouts = cullingLayouts,
+										.set_layout_count = 1,
+										.push_constants = &cullingPush,
+										.push_constant_count = 1};
+
+	cullingPipelineLayout =
+		Vk::PipelineLayout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &desc));
+
+	cullingPipeline = Vk::ComputePipelineBuilder{}
+						  .Shader(Vk::AsSpirV(&ZHLN_Resource_CullingCompSpv[0]),
+								  ZHLN_Resource_CullingCompSpv_Len, "CSMain")
+						  .Layout(cullingPipelineLayout.Get())
+						  .Build(ctx.Device());
+}
+
 void RenderContext::Impl::InitBindless() {
 	bindlessLayout = GlobalSceneLayout::CreateLayout(ctx.Device());
 	bindlessPool = GlobalSceneLayout::CreatePool(ctx.Device(), 1);
@@ -191,7 +234,8 @@ void RenderContext::Impl::InitBindless() {
 											.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
 							 Vk::SamplerWrite{shadowSampler.Get()},
 							 Vk::BufferWrite{.buffer = frameUniformBuffer.Handle()},
-							 Vk::BufferWrite{.buffer = lightStorageBuffer.Handle()});
+							 Vk::BufferWrite{.buffer = lightStorageBuffer.Handle()},
+							 Vk::BufferWrite{.buffer = instanceDataBuffer.Handle()});
 }
 
 void RenderContext::Impl::InitPostProcessing() {
