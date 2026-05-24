@@ -71,6 +71,10 @@ enum class BufferHandle : uint64_t { Invalid = 0 };
 enum class PipelineHandle : uint64_t { Invalid = 0 };
 enum class ResourceGroupHandle : uint64_t { Invalid = 0 };
 
+static_assert(sizeof(BufferHandle) == 8, "BufferHandle must be 64 bits!");
+static_assert(sizeof(PipelineHandle) == 8, "PipelineHandle must be 64 bits!");
+static_assert(sizeof(ResourceGroupHandle) == 8, "ResourceGroupHandle must be 64 bits!");
+
 struct Mesh {
 	BufferHandle vertexBuffer = BufferHandle::Invalid;
 	uint32_t vertexCount = 0;

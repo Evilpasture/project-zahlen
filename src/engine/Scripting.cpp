@@ -5,11 +5,48 @@
 #include <Zahlen/physics/Physics_C.h>
 #include <cstring>
 #include <physics/PhysicsWorld.hpp>
+#include <threading/Channel.hpp>
 
 extern "C" {
 #include <lauxlib.h>
 #include <lua.h>
 #include <lualib.h>
+}
+
+
+struct ZHLN_LuaChannel {
+    ZHLN::Channel<int> channel; // Stores the Lua Registry Reference index
+};
+
+
+extern "C" {
+
+ZHLN_LuaChannel* ZHLN_CreateLuaChannel(void) {
+    return new ZHLN_LuaChannel();
+}
+
+void ZHLN_DestroyLuaChannel(ZHLN_LuaChannel* chan) {
+    delete chan;
+}
+
+void ZHLN_PushLuaChannel(ZHLN_Engine* /*engine*/, ZHLN_LuaChannel* chan, lua_State* L) {
+    // 1. Convert the object at the top of the Lua stack into a registry ref
+    int ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    
+    // 2. Safely push the reference into the channel
+    chan->channel.Push(ref);
+}
+
+void ZHLN_PopLuaChannel(ZHLN_Engine* /*engine*/, ZHLN_LuaChannel* chan, lua_State* L) {
+    // 1. Pop the reference (This will block/yield the current Fiber if empty!)
+    int ref = chan->channel.Pop();
+
+    // 2. Fetch the referenced Lua object from the registry back to the Lua stack
+    lua_rawgeti(L, LUA_REGISTRYINDEX, ref);
+
+    // 3. Deallocate the registry index so the GC can clean up the object later
+    luaL_unref(L, LUA_REGISTRYINDEX, ref);
+}
 }
 
 namespace ZHLN {

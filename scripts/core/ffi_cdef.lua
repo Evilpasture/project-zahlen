@@ -93,6 +93,14 @@ if not ok then
         
         // Expose our new C-API bridge function
         void* ZHLN_GetComponent(ZHLN_Engine* engine, uint64_t entityRaw, const char* componentName);
+
+
+        typedef struct ZHLN_LuaChannel ZHLN_LuaChannel;
+
+        ZHLN_LuaChannel* ZHLN_CreateLuaChannel(void);
+        void ZHLN_DestroyLuaChannel(ZHLN_LuaChannel* chan);
+        void ZHLN_PushLuaChannel(ZHLN_Engine* engine, ZHLN_LuaChannel* chan, struct lua_State* L);
+        void ZHLN_PopLuaChannel(ZHLN_Engine* engine, ZHLN_LuaChannel* chan, struct lua_State* L);
     ]]
 end
 

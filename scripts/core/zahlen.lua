@@ -1,3 +1,4 @@
+-- scripts/core/zahlen.lua
 local mem = require("scripts.core.memoryview")
 local ffi = require("scripts.core.ffi_cdef")
 local ecs = require("scripts.core.ecs")
@@ -72,7 +73,6 @@ ffi.metatype("vec3", vec3)
 local zahlen = {}
 function zahlen.vec3(x, y, z) return ffi.new("vec3", x or 0, y or 0, z or 0) end
 
-
 local tracked_views = {}
 
 -- Internal: Tracks a view so it can be forced-released at end of frame
@@ -81,13 +81,56 @@ local function track(v)
     return v
 end
 
--- Force-releases all buffers tracked this frame
+-- ============================================================================
+-- Cooperative Task Scheduler & Channel Updates
+-- ============================================================================
+zahlen.task = {}
+local active_tasks = {}
+local pending_values = {} -- Stores pending channel payloads per suspended task
+
+-- Spawns a cooperative lightweight task
+function zahlen.task.dispatch(fn)
+    local co = coroutine.create(fn)
+    table.insert(active_tasks, co)
+end
+
+-- Ticks tasks once per frame
+function zahlen.task.update()
+    local i = 1
+    while i <= #active_tasks do
+        local co = active_tasks[i]
+        if coroutine.status(co) == "dead" then
+            table.remove(active_tasks, i)
+        else
+            -- Extract and deliver the pending channel value (if any)
+            local val = pending_values[co]
+            pending_values[co] = nil
+
+            local ok, res = coroutine.resume(co, val)
+            if not ok then
+                _G.zahlen.log("Error in Task: " .. tostring(res))
+                table.remove(active_tasks, i)
+            elseif res == "WAIT_CHANNEL" then
+                -- The task is waiting on an empty channel. Remove it from 
+                -- active scheduling so we do not auto-resume it next frame.
+                table.remove(active_tasks, i)
+            else
+                i = i + 1
+            end
+        end
+    end
+end
+
+-- Force-releases all buffers tracked this frame and ticks tasks
 function zahlen.cleanup()
     for i = 1, #tracked_views do
         tracked_views[i]:release()
         tracked_views[i] = nil
     end
     tracked_views = {}
+
+    -- Tick cooperative tasks
+    zahlen.task.update()
 end
 
 -- ============================================================================
@@ -196,5 +239,52 @@ function zahlen.log(...)
 end
 
 zahlen.ecs = ecs
+
+-- ============================================================================
+-- Fiber-Aware Message Channels (Pure Lua Implementation)
+-- ============================================================================
+local Channel = {}
+Channel.__index = Channel
+
+function zahlen.create_channel()
+    return setmetatable({
+        queue = {},
+        waiters = {}
+    }, Channel)
+end
+
+function Channel:destroy()
+    self.queue = {}
+    self.waiters = {}
+end
+
+-- Pushes any object to the channel. Wakes up the first waiting coroutine if any.
+function Channel:push(val)
+    if #self.waiters > 0 then
+        local co = table.remove(self.waiters, 1)
+        -- Store the value to be delivered when scheduled
+        pending_values[co] = val
+        -- Insert back into the active scheduler list so it resumes next frame
+        table.insert(active_tasks, co)
+    else
+        table.insert(self.queue, val)
+    end
+end
+
+-- Suspends the calling coroutine task if empty. Returns the pushed object.
+function Channel:pop()
+    local co = coroutine.running()
+    if not co then
+        error("Channel:pop() can only be called from inside a cooperative task spawned with zahlen.task.dispatch!")
+    end
+
+    if #self.queue > 0 then
+        return table.remove(self.queue, 1)
+    end
+
+    -- No items. Register this coroutine as suspended, and yield the "WAIT_CHANNEL" token
+    table.insert(self.waiters, co)
+    return coroutine.yield("WAIT_CHANNEL")
+end
 
 return zahlen

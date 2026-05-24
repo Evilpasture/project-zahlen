@@ -115,3 +115,35 @@ function test_environmental_damage_simulation(combat)
         combat.hp = 25
     end
 end
+
+-- Create a global trigger volume channel
+collision_channel = collision_channel or zahlen.create_channel()
+
+-- Start a cooperative Citizen AI task
+zahlen.task.dispatch(function()
+    zahlen.log("Citizen AI Fiber started. Awaiting trigger event...")
+    
+    while true do
+        -- 1. This SUSPENDS the Fiber. 
+        -- Zero CPU cycles will be wasted updating this citizen every frame.
+        local event = collision_channel:pop() 
+        
+        -- 2. Woke up! Someone hit our trigger volume.
+        zahlen.log("AI Woke up! Encountered trigger event: " .. event.name)
+        
+        -- Process local AI reactive behavior
+        if event.instigator == player_ent then
+            zahlen.log("Citizen screams: 'Flee from the player!'")
+        end
+    end
+end)
+
+-- This function is called by the C++ Trigger Volume system when an entity steps inside
+function on_trigger_entered(entity_id)
+    -- Push the data to the suspended AI Fiber. 
+    -- It will wake up immediately on an OS worker thread this frame.
+    collision_channel:push({
+        name = "PlayerProximityAlert",
+        instigator = entity_id
+    })
+end

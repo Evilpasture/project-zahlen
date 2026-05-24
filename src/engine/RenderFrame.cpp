@@ -7,7 +7,7 @@
 #include "detail/Ranges.hpp"
 #include "engine/RenderState.hpp"
 #include "imgui.h"
-
+#include <bit>
 #include <algorithm>
 #include <threading/TaskSystem.hpp>
 
@@ -436,7 +436,7 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& ctx, VkCommand
 						 nullptr);
 
 	Renderer::Clear(ctx, {0.08f, 0.09f, 0.12f, 1.0f}, 1.0f, false);
-	
+
 	const VkDeviceSize stride = sizeof(VkDrawIndirectCommand);
 	for (const auto& group : groups) {
 		if (!group.material->pipeline.Valid()) {
