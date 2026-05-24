@@ -1,41 +1,63 @@
-// MovementSystem.cpp
+// src/engine/system/MovementSystem.cpp
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
+#include <threading/TaskSystem.hpp>
+
 namespace ZHLN {
+
 void MovementSystem(Engine& engine, float dt) {
-	auto& reg = engine.GetRegistry();
-	// We only care about entities that have BOTH movement and physics
-	auto entities = reg.GetEntitiesWith<MovementComponent>();
+    auto& reg = engine.GetRegistry();
+    
+    // Obtain the contiguous list of entity IDs that own a MovementComponent
+    auto entities = reg.GetEntitiesWith<MovementComponent>();
+    if (entities.empty()) {
+        return;
+    }
 
-	for (auto e : entities) {
-		auto* move = reg.Get<MovementComponent>(e);
-		auto* phys = reg.Get<PhysicsComponent>(e);
+    // Get the direct contiguous memory span of the component array (extremely cache-friendly)
+    auto movements = reg.GetRawArray<MovementComponent>();
+    auto& pc = engine.GetPhysicsContext();
 
-		if (!move || !phys)
-			continue;
+    // Use your fiber task system to partition the calculations into chunks of 128
+    TaskSystem::ParallelFor(entities.size(), 128, [&](uint32_t start, uint32_t end, uint32_t) {
+        for (uint32_t i = start; i < end; ++i) {
+            MovementComponent& move = movements[i];
+            Entity e = entities[i];
 
-		auto& pc = engine.GetPhysicsContext();
-		bool onGround = Physics::IsCharacterOnGround(pc, phys->physicsHandle);
+            // Cold path: Look up the secondary component (PhysicsComponent)
+            // using the sparse set's constant-time index mapping.
+            auto* phys = reg.Get<PhysicsComponent>(e);
+            if (!phys) {
+                continue;
+            }
 
-		// 1. Calculate Vertical Velocity
-		if (onGround) {
-			if (move->jumpRequested) {
-				move->currentYVel = move->jumpForce;
-			} else {
-				move->currentYVel = -1.0f; // Snap to slopes
-			}
-		} else {
-			move->currentYVel -= 30.0f * dt; // Gravity
-		}
+            // Query Jolt ground state (thread-safe, read-only on distinct indices)
+            bool onGround = Physics::IsCharacterOnGround(pc, phys->physicsHandle);
 
-		// 2. Clear Jump (Consumption)
-		move->jumpRequested = false;
+            // 1. Calculate Vertical Velocity
+            if (onGround) {
+                if (move.jumpRequested) {
+                    move.currentYVel = move.jumpForce;
+                } else {
+                    move.currentYVel = -1.0f; // Snap to slopes
+                }
+            } else {
+                move.currentYVel -= 30.0f * dt; // Gravity
+            }
 
-		// 3. Apply final vector to the physics engine
-		JPH::Vec3 velocity = {move->inputX * move->speed, move->currentYVel,
-							  move->inputZ * move->speed};
+            // 2. Clear Jump (Consumption)
+            move.jumpRequested = false;
 
-		Physics::SetCharacterVelocity(pc, phys->physicsHandle, velocity);
-	}
+            // 3. Assemble and apply final vector directly to the distinct character virtual
+            JPH::Vec3 velocity = {
+                move.inputX * move.speed, 
+                move.currentYVel,
+                move.inputZ * move.speed
+            };
+
+            Physics::SetCharacterVelocity(pc, phys->physicsHandle, velocity);
+        }
+    });
 }
+
 } // namespace ZHLN
