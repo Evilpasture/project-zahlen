@@ -860,6 +860,9 @@ struct DrawState {
 	VkDescriptorSet set = VK_NULL_HANDLE;
 	VkBuffer vbo = VK_NULL_HANDLE;
 	uint32_t vertexCount = 0;
+	uint32_t instanceCount = 1;
+	uint32_t firstVertex = 0;
+	uint32_t firstInstance = 0;
 };
 
 template <GpuTriviallyCopyable T>
@@ -876,7 +879,9 @@ inline void DrawInstanced(VkCommandBuffer cmd, const DrawState& state, const T& 
 	VkDeviceSize offset = 0;
 	VkBuffer vboHandle = state.vbo;
 	vkCmdBindVertexBuffers(cmd, 0, 1, &vboHandle, &offset);
-	vkCmdDraw(cmd, state.vertexCount, 1, 0, 0);
+
+	// True instanced dispatch
+	vkCmdDraw(cmd, state.vertexCount, state.instanceCount, state.firstVertex, state.firstInstance);
 }
 
 // ============================================================================
