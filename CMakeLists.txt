@@ -10,6 +10,7 @@ project(zahlen LANGUAGES C CXX ASM)
 
 if(APPLE)
     enable_language(OBJCXX)
+    set(CMAKE_OBJCXX_FLAGS "${CMAKE_OBJCXX_FLAGS} -fno-rtti -fno-exceptions")
 endif()
 
 set(CMAKE_CXX_STANDARD 23)
@@ -85,6 +86,11 @@ set(ENGINE_SOURCES
     src/engine/system/MovementSystem.cpp
 )
 
+find_library(ZSTD_LIBRARY NAMES zstd zstd_static HINTS "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib")
+if(NOT ZSTD_LIBRARY)
+    message(FATAL_ERROR "Could not find zstd library. Please install it (e.g., 'brew install zstd').")
+endif()
+
 # --- 5. BUILD CORE SHARED LIBRARY ---
 add_library(zahlen_engine SHARED ${ENGINE_SOURCES})
 
@@ -109,7 +115,7 @@ target_link_libraries(zahlen_engine PRIVATE
     LuaJIT
     spirv_reflect
     imgui
-    zstd
+    ${ZSTD_LIBRARY}
 )
 # Jolt is part of the public ABI exposed by engine headers, so propagate its include paths.
 target_link_libraries(zahlen_engine PUBLIC Jolt)
