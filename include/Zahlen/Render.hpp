@@ -42,9 +42,9 @@ class ZHLN_API RenderContext {
   private:
 	std::unique_ptr<Impl> _impl;
 };
-
+struct Color4;
 namespace Renderer {
-void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth = 1.0f,
+void Clear(RenderContext& ctx, const ZHLN::Color4& color, float depth = 1.0f,
 		   bool useSecondaries = true);
 void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj, const JPH::Mat44& prevViewProj);
 void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,

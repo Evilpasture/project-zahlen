@@ -80,34 +80,17 @@ void RenderContext::BeginFrame() {
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
 			_impl->current_cmd, _impl->accumBuffers[1].image.Handle());
 
-		VkClearValue clearColor = {.color = {.float32 = {0, 0, 0, 1}}};
-		std::array<VkRenderingAttachmentInfo, 4> attachments{};
-		const std::array<VkImageView, 4> views = {
-			_impl->sceneColor.view.Get(), _impl->velocityBuffer.view.Get(),
-			_impl->accumBuffers[0].view.Get(), _impl->accumBuffers[1].view.Get()};
-
-		// Clean, highly readable, structured zip loop:
-		for (auto&& [attachment, view] : ZHLN::Ranges::Zip(attachments, views)) {
-			attachment = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-						  .pNext = nullptr,
-						  .imageView = view,
-						  .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-						  .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-						  .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-						  .clearValue = clearColor};
-		}
-
-		VkRenderingInfo renderInfo = {
-			.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-			.pNext = nullptr,
-			.flags = 0,
-			.renderArea = {.offset = {.x = 0, .y = 0},
-						   .extent = _impl->presentation.swapchain.Get().extent},
-			.layerCount = 1,
-			.colorAttachmentCount = 4,
-			.pColorAttachments = attachments.data()};
-		vkCmdBeginRendering(_impl->current_cmd, &renderInfo);
-		vkCmdEndRendering(_impl->current_cmd);
+		// Utilizing the DynamicPass abstraction for the initial framebuffer clear
+		Vk::DynamicPass<4, false>(_impl->presentation.swapchain.Get().extent)
+			.Color(0, _impl->sceneColor.view.Get(), VK_ATTACHMENT_LOAD_OP_CLEAR)
+			.Color(1, _impl->velocityBuffer.view.Get(), VK_ATTACHMENT_LOAD_OP_CLEAR)
+			.Color(2, _impl->accumBuffers[0].view.Get(), VK_ATTACHMENT_LOAD_OP_CLEAR)
+			.Color(3, _impl->accumBuffers[1].view.Get(), VK_ATTACHMENT_LOAD_OP_CLEAR)
+			.ClearColor(0, {0, 0, 0, 1})
+			.ClearColor(1, {0, 0, 0, 1})
+			.ClearColor(2, {0, 0, 0, 1})
+			.ClearColor(3, {0, 0, 0, 1})
+			.Execute(_impl->current_cmd, []() {});
 
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
@@ -142,61 +125,27 @@ void RenderContext::Impl::RenderShadowPass(VkCommandBuffer cmd) {
 	Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
 		cmd, shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
 
-	VkRenderingAttachmentInfo depthAtt = {
-		.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-		.imageView = shadowMap.view.Get(),
-		.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-		.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-		.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-		.clearValue = {.depthStencil = {.depth = 1.0f, .stencil = 0}}};
+	Vk::DynamicPass<0, true>({.width = SHADOW_RES, .height = SHADOW_RES})
+		.Depth(shadowMap.view.Get(), VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+			   1.0f)
+		.Execute(cmd, [&]() {
+			for (const auto& draw : drawQueue) {
+				auto* mesh = std::bit_cast<NativeMesh*>(draw.mesh);
+				JPH::Mat44 lightMVP = shadowProjView * draw.transform;
 
-	VkRenderingInfo shadowRenderInfo = {
-		.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-		.renderArea = {.offset = {.x = 0, .y = 0},
-					   .extent = {.width = SHADOW_RES, .height = SHADOW_RES}},
-		.layerCount = 1,
-		.pDepthAttachment = &depthAtt};
+				FrameConstants shadowConstants = {.transform = lightMVP,
+												  .prevTransform = JPH::Mat44::sIdentity(),
+												  .isShadowPass = 1};
 
-	vkCmdBeginRendering(cmd, &shadowRenderInfo);
-	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline.Get());
-
-	VkViewport shadowViewport = {.x = 0.0f,
-								 .y = (float)SHADOW_RES,
-								 .width = (float)SHADOW_RES,
-								 .height = -(float)SHADOW_RES,
-								 .minDepth = 0.0f,
-								 .maxDepth = 1.0f};
-	VkRect2D shadowScissor = {.offset = {.x = 0, .y = 0},
-							  .extent = {.width = SHADOW_RES, .height = SHADOW_RES}};
-	vkCmdSetViewport(cmd, 0, 1, &shadowViewport);
-	vkCmdSetScissor(cmd, 0, 1, &shadowScissor);
-
-	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipelineLayout.Get(), 0, 1,
-							&bindlessSet, 0, nullptr);
-
-	for (const auto& draw : drawQueue) {
-		auto* mesh = std::bit_cast<NativeMesh*>(draw.mesh);
-		JPH::Mat44 lightMVP = shadowProjView * draw.transform;
-
-		FrameConstants shadowConstants = {.transform = lightMVP,
-										  .prevTransform = JPH::Mat44::sIdentity(),
-										  .albedoIndex = 0,
-										  .normalIndex = 0,
-										  .pbrIndex = 0,
-										  .emissiveIndex = 0,
-										  .isShadowPass = 1,
-										  ._padding = {0, 0, 0}};
-
-		vkCmdPushConstants(cmd, shadowPipelineLayout.Get(), VK_SHADER_STAGE_VERTEX_BIT, 0,
-						   sizeof(FrameConstants), &shadowConstants);
-
-		VkDeviceSize offset = 0;
-		VkBuffer vbo = mesh->buffer.Handle();
-		vkCmdBindVertexBuffers(cmd, 0, 1, &vbo, &offset);
-		vkCmdDraw(cmd, mesh->vertexCount, 1, 0, 0);
-	}
-
-	vkCmdEndRendering(cmd);
+				Vk::DrawInstanced(cmd,
+								  {.pipeline = shadowPipeline.Get(),
+								   .layout = shadowPipelineLayout.Get(),
+								   .set = bindlessSet,
+								   .vbo = mesh->buffer.Handle(),
+								   .vertexCount = mesh->vertexCount},
+								  shadowConstants, VK_SHADER_STAGE_VERTEX_BIT);
+			}
+		});
 
 	Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
 						 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, shadowMap.image.Handle(),
@@ -215,7 +164,6 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 		return;
 	}
 
-	// 1. Allocate continuous temporary sort items
 	JPH::Array<SortItem> items(drawCount);
 	JPH::Array<SortItem> temp(drawCount);
 
@@ -223,17 +171,14 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 		items[i] = {.key = SortKey::Pack(drawQueue[i].material, drawQueue[i].mesh), .payload = i};
 	}
 
-	// 2. Perform stable Radix Sort on the packed keys
 	RadixSort64(items.data(), temp.data(), drawCount);
 
-	// 3. Reorder drawQueue elements on-the-fly to preserve cache locality for workers
 	JPH::Array<DrawCommand> sortedDrawQueue(drawCount);
 	for (uint32_t i = 0; i < drawCount; ++i) {
 		sortedDrawQueue[i] = drawQueue[items[i].payload];
 	}
 	drawQueue = std::move(sortedDrawQueue);
 
-	// 4. Submit draw commands in sorted order across threads
 	uint32_t numChunks = (drawCount + 255) / 256;
 	JPH::Array<VkCommandBuffer> secondaries(numChunks);
 
@@ -279,6 +224,8 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 			vkBeginCommandBuffer(sec_cmd, &beginInfo);
 
 			VkExtent2D extent = presentation.swapchain.Get().extent;
+
+			// Auto-setup dynamic states (Viewport/Scissor) for current secondary pass
 			const VkViewport viewport = {.x = 0.0f,
 										 .y = (float)extent.height,
 										 .width = (float)extent.width,
@@ -290,33 +237,24 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 			vkCmdSetScissor(sec_cmd, 0, 1, &scissor);
 
 			for (uint32_t i = start; i < end; ++i) {
-				const auto& drawCmd = drawQueue[i]; // Now naturally aligned in memory
+				const auto& drawCmd = drawQueue[i];
 
 				if (!drawCmd.material->pipeline.Valid()) {
 					continue;
 				}
 
-				vkCmdBindPipeline(sec_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-								  drawCmd.material->pipeline.Get());
-				vkCmdBindDescriptorSets(sec_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-										drawCmd.material->layout.Get(), 0, 1, &bindlessSet, 0,
-										nullptr);
-
-				FrameConstants constants = {.transform = drawCmd.transform,
-											.prevTransform = drawCmd.prevTransform,
-											.albedoIndex = drawCmd.albedoIndex,
-											.normalIndex = drawCmd.normalIndex,
-											.pbrIndex = drawCmd.pbrIndex,
-											.emissiveIndex = drawCmd.emissiveIndex};
-
-				vkCmdPushConstants(sec_cmd, drawCmd.material->layout.Get(),
-								   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-								   sizeof(FrameConstants), &constants);
-
-				VkDeviceSize offset = 0;
-				VkBuffer vbo = drawCmd.mesh->buffer.Handle();
-				vkCmdBindVertexBuffers(sec_cmd, 0, 1, &vbo, &offset);
-				vkCmdDraw(sec_cmd, drawCmd.mesh->vertexCount, 1, 0, 0);
+				Vk::DrawInstanced(sec_cmd,
+								  {.pipeline = drawCmd.material->pipeline.Get(),
+								   .layout = drawCmd.material->layout.Get(),
+								   .set = bindlessSet,
+								   .vbo = drawCmd.mesh->buffer.Handle(),
+								   .vertexCount = drawCmd.mesh->vertexCount},
+								  FrameConstants{.transform = drawCmd.transform,
+												 .prevTransform = drawCmd.prevTransform,
+												 .albedoIndex = drawCmd.albedoIndex,
+												 .normalIndex = drawCmd.normalIndex,
+												 .pbrIndex = drawCmd.pbrIndex,
+												 .emissiveIndex = drawCmd.emissiveIndex});
 			}
 
 			ZHLN_EndCommandBuffer(sec_cmd);
@@ -474,38 +412,20 @@ void RenderContext::Impl::ApplyTAAPass(VkCommandBuffer cmd, VkExtent2D extent) {
 						 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
 		cmd, accumBuffers.Next().image.Handle());
 
-	VkRenderingAttachmentInfo col = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-									 .pNext = nullptr,
-									 .imageView = accumBuffers.Next().view.Get(),
-									 .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-									 .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-									 .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
+	Vk::DynamicPass<1, false>(extent)
+		.Color(0, accumBuffers.Next().view.Get(), VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+		.Execute(cmd, [&]() {
+			taaPass.WriteNext(ctx.Device(),
+							  Vk::ImageWrite{.view = sceneColor.view.Get(),
+											 .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+							  Vk::ImageWrite{.view = accumBuffers.Current().view.Get(),
+											 .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+							  Vk::ImageWrite{.view = velocityBuffer.view.Get(),
+											 .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+							  Vk::SamplerWrite{.sampler = defaultSampler.Get()});
 
-	const VkRenderingInfo renderInfo = {
-		.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-		.pNext = nullptr,
-		.flags = 0,
-		.renderArea = {.offset = {.x = 0, .y = 0}, .extent = extent},
-		.layerCount = 1,
-		.viewMask = 0,
-		.colorAttachmentCount = 1,
-		.pColorAttachments = &col,
-		.pDepthAttachment = nullptr,
-		.pStencilAttachment = nullptr};
-
-	vkCmdBeginRendering(cmd, &renderInfo);
-
-	taaPass.WriteNext(ctx.Device(),
-					  Vk::ImageWrite{.view = sceneColor.view.Get(),
-									 .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-					  Vk::ImageWrite{.view = accumBuffers.Current().view.Get(),
-									 .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-					  Vk::ImageWrite{.view = velocityBuffer.view.Get(),
-									 .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-					  Vk::SamplerWrite{.sampler = defaultSampler.Get()});
-
-	taaPass.Execute(cmd, g_TAAState.feedback);
-	ZHLN_EndRendering(cmd);
+			taaPass.Execute(cmd, g_TAAState.feedback);
+		});
 
 	Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 						 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
@@ -526,56 +446,39 @@ void RenderContext::Impl::BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, 
 		Vk::SamplerWrite{defaultSampler.Get()});
 
 	if (blitPass.pipeline.Valid()) {
-		VkRenderingAttachmentInfo col = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-										 .pNext = nullptr,
-										 .imageView = presentation.swapchain.Get().views[imageIdx],
-										 .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-										 .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-										 .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
+		Vk::DynamicPass<1, false>(extent)
+			.Color(0, presentation.swapchain.Get().views[imageIdx], VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+			.Execute(cmd, [&]() {
+				blitPass.Execute(cmd);
 
-		const VkRenderingInfo renderInfo = {
-			.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-			.pNext = nullptr,
-			.flags = 0,
-			.renderArea{.offset = {.x = 0, .y = 0}, .extent = extent},
-			.layerCount = 1,
-			.colorAttachmentCount = 1,
-			.pColorAttachments = &col};
+				if (!uiDrawQueue.empty()) {
+					struct UIObjectConstants {
+						JPH::Mat44 orthoMatrix;
+						JPH::Mat44 unused;
+						uint32_t albedoIdx;
+						uint32_t padding[3];
+					} pc{};
 
-		vkCmdBeginRendering(cmd, &renderInfo);
-		blitPass.Execute(cmd);
+					pc.orthoMatrix =
+						GUI::CreateOrthoMatrix((float)extent.width, (float)extent.height);
 
-		if (!uiDrawQueue.empty()) {
-			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, uiPipeline.Get());
-			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, uiPipelineLayout.Get(), 0,
-									1, &bindlessSet, 0, nullptr);
+					for (const auto& draw : uiDrawQueue) {
+						pc.albedoIdx = draw.fontIndex;
 
-			struct UIObjectConstants {
-				JPH::Mat44 orthoMatrix;
-				JPH::Mat44 unused;
-				uint32_t albedoIdx;
-				uint32_t padding[3];
-			} pc{};
+						Vk::DrawInstanced(cmd,
+										  {.pipeline = uiPipeline.Get(),
+										   .layout = uiPipelineLayout.Get(),
+										   .set = bindlessSet,
+										   .vbo = draw.mesh->buffer.Handle(),
+										   .vertexCount = draw.mesh->vertexCount},
+										  pc);
+					}
+					uiDrawQueue.clear();
+				}
 
-			pc.orthoMatrix = GUI::CreateOrthoMatrix((float)extent.width, (float)extent.height);
-
-			for (const auto& draw : uiDrawQueue) {
-				pc.albedoIdx = draw.fontIndex;
-				vkCmdPushConstants(cmd, uiPipelineLayout.Get(),
-								   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-								   sizeof(UIObjectConstants), &pc);
-
-				VkDeviceSize offset = 0;
-				VkBuffer vbo = draw.mesh->buffer.Handle();
-				vkCmdBindVertexBuffers(cmd, 0, 1, &vbo, &offset);
-				vkCmdDraw(cmd, draw.mesh->vertexCount, 1, 0, 0);
-			}
-			uiDrawQueue.clear();
-		}
-
-		ImGui::Render();
-		ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
-		ZHLN_EndRendering(cmd);
+				ImGui::Render();
+				ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+			});
 	}
 
 	Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(
@@ -645,7 +548,7 @@ void RenderContext::EndFrame() {
 }
 
 namespace Renderer {
-void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth, bool useSecondaries) {
+void Clear(RenderContext& ctx, const ZHLN::Color4& color, float depth, bool useSecondaries) {
 	auto* impl = ctx.GetImpl();
 	if (impl->current_cmd == VK_NULL_HANDLE) {
 		return;
@@ -668,66 +571,16 @@ void Clear(RenderContext& ctx, const JPH::Vec4& color, float depth, bool useSeco
 			VK_IMAGE_ASPECT_DEPTH_BIT);
 	}
 
-	std::array<VkRenderingAttachmentInfo, 2> cols = {
-		VkRenderingAttachmentInfo{
-			.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-			.pNext = nullptr,
-			.imageView = impl->sceneColor.view.Get(),
-			.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-			.resolveMode = VK_RESOLVE_MODE_NONE,
-			.resolveImageView = VK_NULL_HANDLE,
-			.resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-			.clearValue = {.color = {.float32 = {color.GetX(), color.GetY(), color.GetZ(),
-												 color.GetW()}}}},
-		{.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-		 .pNext = nullptr,
-		 .imageView = impl->velocityBuffer.view.Get(),
-		 .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-		 .resolveMode = VK_RESOLVE_MODE_NONE,
-		 .resolveImageView = VK_NULL_HANDLE,
-		 .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-		 .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-		 .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-		 .clearValue = {.color = {.float32 = {0.0f, 0.0f, 0.0f, 0.0f}}}}};
-	VkRenderingAttachmentInfo depthAtt = {
-		.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-		.pNext = nullptr,
-		.imageView = impl->presentation.depthTarget.view.Get(),
-		.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-		.resolveMode = VK_RESOLVE_MODE_NONE,
-		.resolveImageView = VK_NULL_HANDLE,
-		.resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-		.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-		.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-		.clearValue = {.depthStencil = {.depth = depth, .stencil = 0}}};
-	const VkRenderingInfo renderInfo = {
-		.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-		.pNext = nullptr,
-		.flags = static_cast<VkRenderingFlags>(
-			useSecondaries ? VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT : 0),
-		.renderArea{.offset = {.x = 0, .y = 0},
-					.extent = impl->presentation.swapchain.Get().extent},
-		.layerCount = 1,
-		.viewMask = 0,
-		.colorAttachmentCount = 2,
-		.pColorAttachments = cols.data(),
-		.pDepthAttachment = &depthAtt,
-		.pStencilAttachment = nullptr};
-
-	vkCmdBeginRendering(impl->current_cmd, &renderInfo);
-
-	const VkViewport viewport = {.x = 0.0f,
-								 .y = (float)impl->presentation.swapchain.Get().extent.height,
-								 .width = (float)impl->presentation.swapchain.Get().extent.width,
-								 .height = -(float)impl->presentation.swapchain.Get().extent.height,
-								 .minDepth = 0.0f,
-								 .maxDepth = 1.0f};
-	const VkRect2D scissor = {.offset = {.x = 0, .y = 0},
-							  .extent = impl->presentation.swapchain.Get().extent};
-	vkCmdSetViewport(impl->current_cmd, 0, 1, &viewport);
-	vkCmdSetScissor(impl->current_cmd, 0, 1, &scissor);
+	// DynamicPass now consumes the clean, decoupled ZHLN::Color4 struct directly
+	Vk::DynamicPass<2, true>(impl->presentation.swapchain.Get().extent)
+		.Color(0, impl->sceneColor.view.Get(), VK_ATTACHMENT_LOAD_OP_CLEAR)
+		.Color(1, impl->velocityBuffer.view.Get(), VK_ATTACHMENT_LOAD_OP_CLEAR)
+		.Depth(impl->presentation.depthTarget.view.Get(), VK_ATTACHMENT_LOAD_OP_CLEAR,
+			   VK_ATTACHMENT_STORE_OP_STORE, depth)
+		.ClearColor(0, color)
+		.ClearColor(1, {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f})
+		.Flags(useSecondaries ? VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT : 0)
+		.Execute(impl->current_cmd, []() {});
 }
 
 void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj, const JPH::Mat44& prevViewProj) {

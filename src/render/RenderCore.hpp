@@ -18,6 +18,10 @@
 
 namespace ZHLN {
 
+struct Color4 {
+	float r, g, b, a;
+};
+
 /**
  * @brief Thread-safe-ish ping-pong buffer for temporal rendering state.
  */
@@ -754,6 +758,120 @@ inline void ExecuteCommands(const VkCommandBuffer primary,
 }
 
 // ============================================================================
+// Type-Safe, Zero-Allocation Dynamic Render Pass Builder
+// ============================================================================
+template <size_t ColorCount = 1, bool HasDepth = false> class DynamicPass {
+  public:
+	constexpr explicit DynamicPass(VkExtent2D extent) noexcept : _extent(extent) {}
+
+	constexpr auto Color(size_t index, VkImageView view,
+						 VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+						 VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE) noexcept
+		-> DynamicPass& {
+		_colors[index] = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+						  .imageView = view,
+						  .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+						  .loadOp = loadOp,
+						  .storeOp = storeOp};
+		return *this;
+	}
+
+	constexpr auto Depth(VkImageView view, VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+						 VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+						 float clearVal = 1.0f) noexcept -> DynamicPass&
+		requires(HasDepth)
+	{
+		_depth = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+				  .imageView = view,
+				  .imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+				  .loadOp = loadOp,
+				  .storeOp = storeOp,
+				  .clearValue = {.depthStencil = {.depth = clearVal, .stencil = 0}}};
+		return *this;
+	}
+
+	// Overload 1: Accepts our decoupled ZHLN::Color4 struct
+	constexpr auto ClearColor(size_t index, const ZHLN::Color4& color) noexcept -> DynamicPass& {
+		_colors[index].clearValue.color = {.float32 = {color.r, color.g, color.b, color.a}};
+		return *this;
+	}
+
+	// Overload 2: Accepts direct floating-point parameters
+	constexpr auto ClearColor(size_t index, float r, float g, float b, float a = 1.0f) noexcept
+		-> DynamicPass& {
+		_colors[index].clearValue.color = {.float32 = {r, g, b, a}};
+		return *this;
+	}
+
+	constexpr auto Flags(VkRenderingFlags flags) noexcept -> DynamicPass& {
+		_flags = flags;
+		return *this;
+	}
+
+	template <typename Func> void Execute(VkCommandBuffer cmd, Func&& func) const {
+		const VkRenderingInfo renderInfo = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+											.flags = _flags,
+											.renderArea = {.offset = {0, 0}, .extent = _extent},
+											.layerCount = 1,
+											.colorAttachmentCount = ColorCount,
+											.pColorAttachments =
+												ColorCount > 0 ? _colors.data() : nullptr,
+											.pDepthAttachment = HasDepth ? &_depth : nullptr};
+
+		vkCmdBeginRendering(cmd, &renderInfo);
+
+		const VkViewport viewport = {.x = 0.0f,
+									 .y = (float)_extent.height,
+									 .width = (float)_extent.width,
+									 .height = -(float)_extent.height,
+									 .minDepth = 0.0f,
+									 .maxDepth = 1.0f};
+		const VkRect2D scissor = {.offset = {0, 0}, .extent = _extent};
+		vkCmdSetViewport(cmd, 0, 1, &viewport);
+		vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+		std::forward<Func>(func)();
+
+		vkCmdEndRendering(cmd);
+	}
+
+  private:
+	VkExtent2D _extent;
+	VkRenderingFlags _flags = 0;
+	std::array<VkRenderingAttachmentInfo, ColorCount> _colors{};
+	[[no_unique_address]] std::conditional_t<HasDepth, VkRenderingAttachmentInfo, std::monostate>
+		_depth{};
+};
+
+// ============================================================================
+// Consolidated Graphics State & Instanced Draw Dispatcher
+// ============================================================================
+struct DrawState {
+	VkPipeline pipeline = VK_NULL_HANDLE;
+	VkPipelineLayout layout = VK_NULL_HANDLE;
+	VkDescriptorSet set = VK_NULL_HANDLE;
+	VkBuffer vbo = VK_NULL_HANDLE;
+	uint32_t vertexCount = 0;
+};
+
+template <GpuTriviallyCopyable T>
+inline void DrawInstanced(VkCommandBuffer cmd, const DrawState& state, const T& pushConstants,
+						  VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT |
+													  VK_SHADER_STAGE_FRAGMENT_BIT) {
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state.pipeline);
+	if (state.set != VK_NULL_HANDLE) {
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state.layout, 0, 1,
+								&state.set, 0, nullptr);
+	}
+	vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
+
+	VkDeviceSize offset = 0;
+	VkBuffer vboHandle = state.vbo;
+	vkCmdBindVertexBuffers(cmd, 0, 1, &vboHandle, &offset);
+	vkCmdDraw(cmd, state.vertexCount, 1, 0, 0);
+}
+
+// ============================================================================
 // Surface helpers
 // ============================================================================
 
@@ -770,12 +888,13 @@ class Surface {
 
 	// Move only
 	Surface(const Surface&) = delete;
-	auto operator=(const Surface&) -> Surface& = delete; // <-- Explicitly deleted to satisfy Rule of Five
+	auto operator=(const Surface&)
+		-> Surface& = delete; // <-- Explicitly deleted to satisfy Rule of Five
 
 	Surface(Surface&& other) noexcept
 		: _instance(std::exchange(other._instance, VK_NULL_HANDLE)),
 		  _handle(std::exchange(other._handle, VK_NULL_HANDLE)) {}
-		  
+
 	auto operator=(Surface&& other) noexcept -> Surface& {
 		if (this != &other) {
 			if (_handle != VK_NULL_HANDLE) {
