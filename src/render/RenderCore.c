@@ -29,16 +29,19 @@ static inline double zhln_clamp_d(double v, double lo, double hi) {
 		double: zhln_clamp_d,                                                                      \
 		int32_t: zhln_clamp_i32,                                                                   \
 		default: zhln_clamp_i32)(v, lo, hi)
-
+[[maybe_unused]]
 static inline int32_t zhln_min_i32(int32_t a, int32_t b) {
 	return (a < b) ? a : b;
 }
+[[maybe_unused]]
 static inline uint32_t zhln_min_u32(uint32_t a, uint32_t b) {
 	return (a < b) ? a : b;
 }
+[[maybe_unused]]
 static inline int64_t zhln_min_i64(int64_t a, int64_t b) {
 	return (a < b) ? a : b;
 }
+[[maybe_unused]]
 static inline uint64_t zhln_min_u64(uint64_t a, uint64_t b) {
 	return (a < b) ? a : b;
 }
@@ -50,16 +53,19 @@ static inline uint64_t zhln_min_u64(uint64_t a, uint64_t b) {
 		int64_t: zhln_min_i64,                                                                     \
 		uint64_t: zhln_min_u64,                                                                    \
 		default: zhln_min_i64)((a), (b))
-
+[[maybe_unused]]
 static inline int32_t zhln_max_i32(int32_t a, int32_t b) {
 	return (a > b) ? a : b;
 }
+[[maybe_unused]]
 static inline uint32_t zhln_max_u32(uint32_t a, uint32_t b) {
 	return (a > b) ? a : b;
 }
+[[maybe_unused]]
 static inline int64_t zhln_max_i64(int64_t a, int64_t b) {
 	return (a > b) ? a : b;
 }
+[[maybe_unused]]
 static inline uint64_t zhln_max_u64(uint64_t a, uint64_t b) {
 	return (a > b) ? a : b;
 }

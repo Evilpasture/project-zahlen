@@ -790,13 +790,11 @@ template <size_t ColorCount = 1, bool HasDepth = false> class DynamicPass {
 		return *this;
 	}
 
-	// Overload 1: Accepts our decoupled ZHLN::Color4 struct
 	constexpr auto ClearColor(size_t index, const ZHLN::Color4& color) noexcept -> DynamicPass& {
 		_colors[index].clearValue.color = {.float32 = {color.r, color.g, color.b, color.a}};
 		return *this;
 	}
 
-	// Overload 2: Accepts direct floating-point parameters
 	constexpr auto ClearColor(size_t index, float r, float g, float b, float a = 1.0f) noexcept
 		-> DynamicPass& {
 		_colors[index].clearValue.color = {.float32 = {r, g, b, a}};
@@ -809,14 +807,15 @@ template <size_t ColorCount = 1, bool HasDepth = false> class DynamicPass {
 	}
 
 	template <typename Func> void Execute(VkCommandBuffer cmd, Func&& func) const {
-		const VkRenderingInfo renderInfo = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-											.flags = _flags,
-											.renderArea = {.offset = {0, 0}, .extent = _extent},
-											.layerCount = 1,
-											.colorAttachmentCount = ColorCount,
-											.pColorAttachments =
-												ColorCount > 0 ? _colors.data() : nullptr,
-											.pDepthAttachment = HasDepth ? &_depth : nullptr};
+		const VkRenderingInfo renderInfo = {
+			.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+			.flags = _flags,
+			.renderArea = {.offset = {0, 0}, .extent = _extent},
+			.layerCount = 1,
+			.colorAttachmentCount = ColorCount,
+			.pColorAttachments = ColorCount > 0 ? _colors.data() : nullptr,
+			.pDepthAttachment = GetDepthPtr() // <-- Safely resolve using the constexpr helper
+		};
 
 		vkCmdBeginRendering(cmd, &renderInfo);
 
@@ -836,6 +835,15 @@ template <size_t ColorCount = 1, bool HasDepth = false> class DynamicPass {
 	}
 
   private:
+	// This constexpr helper safely discards the invalid pointer conversion branch at compile time
+	[[nodiscard]] constexpr auto GetDepthPtr() const noexcept -> const VkRenderingAttachmentInfo* {
+		if constexpr (HasDepth) {
+			return &_depth;
+		} else {
+			return nullptr;
+		}
+	}
+
 	VkExtent2D _extent;
 	VkRenderingFlags _flags = 0;
 	std::array<VkRenderingAttachmentInfo, ColorCount> _colors{};
