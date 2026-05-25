@@ -14,7 +14,6 @@
 #include <span>
 #include <type_traits>
 #include <utility>
-#include <vulkan/vulkan_core.h>
 
 namespace ZHLN {
 
@@ -927,6 +926,25 @@ class Surface {
 };
 
 // ============================================================================
+// Error Helpers
+// ============================================================================
+
+void ReportVkError(VkResult result, const char* context, const std::source_location& location);
+[[noreturn]] void ReportSemaphoreBoundsError(uint32_t index, uint32_t count) noexcept;
+
+[[nodiscard]] inline auto ResultString(const VkResult result) noexcept -> const char* {
+	return ZHLN_VkResultString(result);
+}
+
+inline void CheckResult(const VkResult result, const char* context = "",
+						const std::source_location location = std::source_location::current()) {
+	if (result != VK_SUCCESS) [[unlikely]] {
+		// No printing or formatting is invoked here!
+		ReportVkError(result, context, location);
+	}
+}
+
+// ============================================================================
 // Semaphore Helpers
 // ============================================================================
 
@@ -978,12 +996,9 @@ class alignas(64) SemaphorePool {
 	}
 
 	[[nodiscard]] auto operator[](const uint32_t index) const noexcept -> VkSemaphore {
-		// Hot path check: unlikely() keeps the branch away from the main logic flow
 		if (index >= _count) [[unlikely]] {
-			std::println(stderr,
-						 "[ZHLN::Vk] FATAL: SemaphorePool index {} out of bounds (Size: {})", index,
-						 _count);
-			std::abort();
+			// Dispatches directly to the compilation unit's out-of-line crash reporter
+			ReportSemaphoreBoundsError(index, _count);
 		}
 		return _semaphores[index];
 	}
@@ -1018,22 +1033,6 @@ class alignas(64) SemaphorePool {
 	std::array<VkSemaphore, 6> _semaphores = {}; // 48 bytes
 												 // Total: Exactly 64 bytes.
 };
-
-// ============================================================================
-// Error Helpers
-// ============================================================================
-
-[[nodiscard]] inline auto ResultString(const VkResult result) noexcept -> const char* {
-	return ZHLN_VkResultString(result);
-}
-
-inline void CheckResult(const VkResult result, const char* context = "",
-						const std::source_location location = std::source_location::current()) {
-	if (result != VK_SUCCESS) {
-		std::println(stderr, "[Vk Error] {}:{} in {}: {} failed with {}", location.file_name(),
-					 location.line(), location.function_name(), context, ResultString(result));
-	}
-}
 
 // ============================================================================
 // Image View Helpers

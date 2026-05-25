@@ -1,4 +1,4 @@
-// File: src/engine/Render_Frame.cpp
+// File: src/engine/RenderFrame.cpp
 #include "RenderInternal.hpp"
 #include "Zahlen/GUI.hpp"
 #include "Zahlen/Profiler.hpp"

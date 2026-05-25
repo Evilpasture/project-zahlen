@@ -1,9 +1,21 @@
 #include "RenderCore.hpp"
 
+#include <cstdlib>
 #include <fstream>
 #include <print>
 
 namespace ZHLN::Vk {
+
+void ReportVkError(VkResult result, const char* context, const std::source_location& location) {
+	std::println(stderr, "[Vk Error] {}:{} in {}: {} failed with {}", location.file_name(),
+				 location.line(), location.function_name(), context, ZHLN_VkResultString(result));
+}
+
+[[noreturn]] void ReportSemaphoreBoundsError(uint32_t index, uint32_t count) noexcept {
+	std::println(stderr, "[ZHLN::Vk] FATAL: SemaphorePool index {} out of bounds (Size: {})", index,
+				 count);
+	std::abort();
+}
 
 ShaderStages::~ShaderStages() noexcept {
 	if (_device != VK_NULL_HANDLE) {

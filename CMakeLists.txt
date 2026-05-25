@@ -11,6 +11,8 @@ project(zahlen LANGUAGES C CXX ASM)
 if(APPLE)
     enable_language(OBJCXX)
     set(CMAKE_OBJCXX_FLAGS "${CMAKE_OBJCXX_FLAGS} -fno-rtti -fno-exceptions")
+    execute_process(COMMAND xcrun --show-sdk-path OUTPUT_VARIABLE MACOS_SDK_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
+    set(CMAKE_SYSROOT ${MACOS_SDK_PATH})
 endif()
 
 set(CMAKE_CXX_STANDARD 23)
