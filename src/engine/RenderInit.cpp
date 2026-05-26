@@ -124,6 +124,18 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 			}
 		}
 	}
+
+	// Index 0: Solid Black (Used for Emissive, Metallic, and Roughness fallbacks)
+	uint8_t blackPixel[4] = {0, 0, 0, 0};
+	CreateTexture(blackPixel, 1, 1);
+
+	// Index 1: Solid White (Used for Albedo fallback)
+	uint8_t whitePixel[4] = {255, 255, 255, 255};
+	CreateTexture(whitePixel, 1, 1);
+
+	// Index 2: Flat Tangent-Space Normal Map (R=128, G=128, B=255)
+	uint8_t normalPixel[4] = {128, 128, 255, 255};
+	CreateTexture(normalPixel, 1, 1);
 }
 
 RenderContext::~RenderContext() {

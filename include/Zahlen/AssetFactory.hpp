@@ -1,5 +1,7 @@
 #pragma once
 #include "Zahlen/AssetManager.hpp"
+#include "Zahlen/Entity.hpp"
+#include "ecs/ECS.hpp"
 
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Types.hpp>
@@ -21,4 +23,6 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx);
 Mesh LoadCookedMesh(RenderContext& ctx, AssetManager& assetMgr, const std::string& virtualPath);
 uint32_t LoadCookedTexture(RenderContext& ctx, AssetManager& assetMgr,
 						   const std::string& virtualPath);
+
+std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::string& path);
 } // namespace ZHLN::AssetFactory

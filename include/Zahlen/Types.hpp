@@ -49,7 +49,8 @@ struct FrameConstants {
 	uint32_t _padding[3];
 };
 
-static_assert(sizeof(FrameConstants) == 160, "FrameConstants must be exactly 160 bytes to match HLSL alignment.");
+static_assert(sizeof(FrameConstants) == 160,
+			  "FrameConstants must be exactly 160 bytes to match HLSL alignment.");
 
 struct alignas(16) InstanceData {
 	JPH::Mat44 world;
@@ -62,7 +63,8 @@ struct alignas(16) InstanceData {
 	float cullRadius;
 	uint32_t _padding[2];
 };
-static_assert(sizeof(InstanceData) == 160, "InstanceData must be exactly 160 bytes to match HLSL alignment.");
+static_assert(sizeof(InstanceData) == 160,
+			  "InstanceData must be exactly 160 bytes to match HLSL alignment.");
 
 // --- Opaque Resource Handles ---
 // These abstract away Vulkan/LLGL objects completely.
@@ -117,9 +119,9 @@ struct Material {
 	PipelineHandle pipeline = PipelineHandle::Invalid;
 	ResourceGroupHandle resourceGroup = ResourceGroupHandle::Invalid;
 	BufferHandle constantBuffer = BufferHandle::Invalid;
-	uint32_t albedoIndex = 0;
-	uint32_t normalIndex = 0;
-	uint32_t pbrIndex = 0;
-	uint32_t emissiveIndex = 0;
+	uint32_t albedoIndex = 1;	// Default to Solid White (Index 1)
+	uint32_t normalIndex = 2;	// Default to Flat Normal Map (Index 2)
+	uint32_t pbrIndex = 0;		// Default to Solid Black (Index 0)
+	uint32_t emissiveIndex = 0; // Default to Solid Black (Index 0)
 };
 } // namespace ZHLN

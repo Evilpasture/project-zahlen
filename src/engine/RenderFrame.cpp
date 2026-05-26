@@ -157,6 +157,8 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 		return;
 	}
 
+	ZHLN::Log("RENDERING DIAGNOSTIC: Falling back to CPU Traditional Path!");
+
 	auto drawCount = static_cast<uint32_t>(drawQueue.size());
 	if (drawCount == 0) {
 		return;
@@ -332,7 +334,9 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& ctx, VkCommand
 	JPH::Array<GroupRange> groups;
 	groups.reserve((drawCount + 15) / 16);
 
-	InstanceData* mapped = reinterpret_cast<InstanceData*>(instanceDataBuffer.Map().data);
+	// Keep mapRegion in scope so the destructor unmaps only AFTER the loop ends
+	auto mapRegion = instanceDataBuffer.Map();
+	auto* mapped = reinterpret_cast<InstanceData*>(mapRegion.data);
 
 	NativeMaterial* currentMaterial = nullptr;
 	NativeMesh* currentMesh = nullptr;

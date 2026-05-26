@@ -33,6 +33,12 @@ if(USE_SANITIZERS AND WIN32)
     add_definitions(-D__ASAN_ENABLED__)
 endif()
 
+# --- DUAL-PATH DEV MODE OPTION ---
+option(ZHLN_DEV_MODE "Enable raw loose-file asset loading for development" ON)
+if(ZHLN_DEV_MODE)
+    add_compile_definitions(ZHLN_DEV_MODE)
+endif()
+
 # --- 3. GLFW Setup ---
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)

@@ -71,14 +71,39 @@ struct VSOutput {
 	float4 tangent : TANGENT;
 	float2 uv : TEXCOORD2;
 	float4 shadowPos : TEXCOORD3;
-	uint4 materialIndices : TEXCOORD4;
+	float4 color : COLOR;
+	nointerpolation uint4 materialIndices : TEXCOORD4;
 };
 
 VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 	VSOutput output;
 
-	InstanceData inst = g_instances[instanceId];
-	float4 worldPos = mul(inst.world, float4(input.position, 1.0f));
+	float4x4 worldMatrix;
+	float4x4 prevWorldMatrix;
+	uint albedoIdx, normalIdx, pbrIdx, emissiveIdx;
+
+	// --- FIX: Correct CPU/GPU Path Routing ---
+	// If it is a shadow pass, or we have an active albedo index, use the CPU path.
+	if (obj.isShadowPass != 0 || obj.albedoIdx != 0) {
+		// --- CPU TRADITIONAL PATH ---
+		worldMatrix = obj.world;
+		prevWorldMatrix = obj.prevWorld;
+		albedoIdx = obj.albedoIdx;
+		normalIdx = obj.normalIdx;
+		pbrIdx = obj.pbrIdx;
+		emissiveIdx = obj.emissiveIdx;
+	} else {
+		// --- GPU CULLING PATH ---
+		InstanceData inst = g_instances[instanceId];
+		worldMatrix = inst.world;
+		prevWorldMatrix = inst.prevWorld;
+		albedoIdx = inst.albedoIdx;
+		normalIdx = inst.normalIdx;
+		pbrIdx = inst.pbrIdx;
+		emissiveIdx = inst.emissiveIdx;
+	}
+
+	float4 worldPos = mul(worldMatrix, float4(input.position, 1.0f));
 	output.worldPos = worldPos.xyz;
 
 	if (obj.isShadowPass != 0) {
@@ -91,20 +116,27 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 		output.shadowPos = 0;
 		return output;
 	}
+
 	output.currClip = mul(frame.viewProj, worldPos);
 	output.pos = output.currClip;
 
-	float4 prevWorldPos = mul(inst.prevWorld, float4(input.position, 1.0f));
+	float4 prevWorldPos = mul(prevWorldMatrix, float4(input.position, 1.0f));
 	output.prevClip = mul(frame.prevViewProj, prevWorldPos);
 
-	float3x3 world3x3 = (float3x3)inst.world;
-	output.normal = normalize(mul(world3x3, input.normal));
-	output.tangent.xyz = normalize(mul(world3x3, input.tangent.xyz));
-	output.tangent.w = input.tangent.w;
+	float3x3 world3x3 = (float3x3)worldMatrix;
+
+	// --- NEW: UNPACK NORMALS AND TANGENTS FROM UNORM [0, 1] TO [-1, 1] ---
+	float3 unpackedNormal = input.normal * 2.0f - 1.0f;
+	output.normal = normalize(mul(world3x3, unpackedNormal));
+
+	float3 unpackedTangent = input.tangent.xyz * 2.0f - 1.0f;
+	output.tangent.xyz = normalize(mul(world3x3, unpackedTangent));
+	output.tangent.w = input.tangent.w; // W holds the bitangent sign, no unpack needed
 
 	output.uv = input.uv;
 	output.shadowPos = mul(frame.lightSpaceMatrix, worldPos);
-	output.materialIndices = uint4(inst.albedoIdx, inst.normalIdx, inst.pbrIdx, inst.emissiveIdx);
+	output.color = input.color;
+	output.materialIndices = uint4(albedoIdx, normalIdx, pbrIdx, emissiveIdx);
 
 	return output;
 }
@@ -144,28 +176,77 @@ struct PSOutput {
 	float2 velocity : SV_Target1;
 };
 
+// PSOutput PSMain(VSOutput input) {
+// 	PSOutput output;
+
+// 	uint4 indices = input.materialIndices;
+
+// 	// Sample ONLY the albedo map, completely ignoring lighting/shadows/emissive
+// 	float4 albedo = globalTextures[indices.x].Sample(defaultSampler, input.uv);
+
+// 	output.color = float4(albedo.rgb, 1.0f);
+// 	output.velocity = float2(0.0f, 0.0f);
+
+// 	return output;
+// }
+
+// PSOutput PSMain(VSOutput input) {
+//     PSOutput output;
+
+//     uint4 indices = input.materialIndices;
+
+//     // Color each pixel based on its target Bindless Index (indices.x)
+//     if (indices.x == 0)      output.color = float4(0.0f, 0.0f, 0.0f, 1.0f); // Index 0 (Black
+//     fallback) -> Black else if (indices.x == 1) output.color = float4(1.0f, 1.0f, 1.0f, 1.0f); //
+//     Index 1 (White fallback) -> White else if (indices.x == 2) output.color = float4(0.0f,
+//     0.0f, 1.0f, 1.0f); // Index 2 (Flat Normal)    -> Blue else if (indices.x == 3) output.color
+//     = float4(0.0f, 1.0f, 0.0f, 1.0f); // Index 3 (Font Atlas)     -> Green else if (indices.x ==
+//     4) output.color = float4(1.0f, 1.0f, 0.0f, 1.0f); // Index 4 (Room Atlas)     -> Yellow else
+//     if (indices.x == 5) output.color = float4(0.0f, 1.0f, 1.0f, 1.0f); // Index 5 (Checkerboard)
+//     -> Cyan else if (indices.x == 6) output.color = float4(1.0f, 0.0f, 1.0f, 1.0f); // Index 6
+//     (Pomni Atlas)    -> Magenta else                     output.color = float4(1.0f, 0.5f,
+//     0.0f, 1.0f); // Index > 6 (Garbage)      -> Orange
+
+//     output.velocity = float2(0.0f, 0.0f);
+//     return output;
+// }
+
+// PSOutput PSMain(VSOutput input) {
+//     PSOutput output;
+
+//     // Output UV coordinates as raw colors
+//     output.color = float4(input.uv.x, input.uv.y, 0.0f, 1.0f);
+//     output.velocity = float2(0.0f, 0.0f);
+
+//     return output;
+// }
+
 PSOutput PSMain(VSOutput input) {
 	PSOutput output;
 
 	// Sample Bindless Textures
 	uint4 indices = input.materialIndices;
 	float4 albedo = globalTextures[indices.x].Sample(defaultSampler, input.uv);
+	albedo = albedo * input.color;
 	if (albedo.a < 0.5)
 		discard;
 
-	float3 normalMap =
-		globalTextures[indices.y].Sample(defaultSampler, input.uv).rgb * 2.0 - 1.0;
+	float3 normalMap = globalTextures[indices.y].Sample(defaultSampler, input.uv).rgb * 2.0 - 1.0;
 	float4 pbr = globalTextures[indices.z].Sample(defaultSampler, input.uv);
 	float3 emissive = globalTextures[indices.w].Sample(defaultSampler, input.uv).rgb;
 
 	float roughness = pbr.g;
 	float metallic = pbr.b;
 
-	// Normal Mapping
+	// --- FIX: Safe Tangent Fallback (Prevents NaN division-by-zero) ---
 	float3 N = normalize(input.normal);
-	float3 T = normalize(input.tangent.xyz);
-	float3 B = normalize(cross(N, T) * input.tangent.w);
-	float3 worldNormal = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * N);
+	float3 worldNormal = N;
+
+	if (any(input.tangent.xyz)) {
+		float3 T = normalize(input.tangent.xyz);
+		float3 B = normalize(cross(N, T) * input.tangent.w);
+		worldNormal = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * N);
+	}
 
 	float3 V = normalize(frame.camPos.xyz - input.worldPos);
 	float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo.rgb, metallic);
@@ -209,7 +290,7 @@ PSOutput PSMain(VSOutput input) {
 		}
 	}
 
-	float3 ambient = albedo.rgb * 0.03; // Basic ambient fallback
+	float3 ambient = albedo.rgb * 0.05; // Basic ambient fallback
 	output.color = float4(ambient + directSun + directPunctual + emissive, 1.0f);
 
 	// Calculate Motion Vectors for TAA

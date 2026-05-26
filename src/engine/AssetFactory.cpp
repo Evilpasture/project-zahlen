@@ -1,4 +1,5 @@
 #include "Resources.hpp"
+#include "Zahlen/Components.hpp"
 #include "Zahlen/Font8x8.hpp"
 #include "Zahlen/Log.hpp"
 
@@ -7,6 +8,7 @@
 #include <cgltf.h>
 #include <cmath>
 #include <cstddef>
+#include <filesystem>
 #include <stb_image.h>
 #include <vector>
 
@@ -501,7 +503,7 @@ Mesh LoadGLB(RenderContext& ctx, const std::string& path) {
 	// Traverse the glTF node hierarchy to respect scaling, rotation, and translation
 	for (cgltf_size i = 0; i < data->nodes_count; ++i) {
 		const cgltf_node* node = &data->nodes[i];
-		if (!node->mesh) {
+		if (node->mesh == nullptr) {
 			continue; // Skip nodes that don't contain geometric meshes
 		}
 
@@ -520,18 +522,20 @@ Mesh LoadGLB(RenderContext& ctx, const std::string& path) {
 
 			for (cgltf_size a = 0; a < prim.attributes_count; ++a) {
 				const auto& attr = prim.attributes[a];
-				if (attr.type == cgltf_attribute_type_position)
+				if (attr.type == cgltf_attribute_type_position) {
 					posAcc = attr.data;
-				else if (attr.type == cgltf_attribute_type_normal)
+				} else if (attr.type == cgltf_attribute_type_normal) {
 					normAcc = attr.data;
-				else if (attr.type == cgltf_attribute_type_tangent)
+				} else if (attr.type == cgltf_attribute_type_tangent) {
 					tangentAcc = attr.data;
-				else if (attr.type == cgltf_attribute_type_texcoord && attr.index == 0)
+				} else if (attr.type == cgltf_attribute_type_texcoord && attr.index == 0) {
 					uvAcc = attr.data;
+				}
 			}
 
-			if (!posAcc)
+			if (posAcc == nullptr) {
 				continue;
+			}
 
 			size_t vertexCount = posAcc->count;
 			std::vector<Vertex> primVertices(vertexCount);
@@ -553,7 +557,7 @@ Mesh LoadGLB(RenderContext& ctx, const std::string& path) {
 
 				// 2. Read normal and transform by the 3x3 normal rotation matrix
 				float rawNorm[3] = {0.0f, 1.0f, 0.0f};
-				if (normAcc) {
+				if (normAcc != nullptr) {
 					cgltf_accessor_read_float(normAcc, vIdx, rawNorm, 3);
 				}
 				float nx = matrix[0] * rawNorm[0] + matrix[4] * rawNorm[1] + matrix[8] * rawNorm[2];
@@ -570,7 +574,7 @@ Mesh LoadGLB(RenderContext& ctx, const std::string& path) {
 
 				// 3. Read tangent and transform by 3x3 normal rotation matrix
 				float rawTangent[4] = {1.0f, 0.0f, 0.0f, 1.0f};
-				if (tangentAcc) {
+				if (tangentAcc != nullptr) {
 					cgltf_accessor_read_float(tangentAcc, vIdx, rawTangent, 4);
 				}
 				float tx = matrix[0] * rawTangent[0] + matrix[4] * rawTangent[1] +
@@ -589,7 +593,7 @@ Mesh LoadGLB(RenderContext& ctx, const std::string& path) {
 
 				// 4. Read UV
 				float uv[2] = {0.0f, 0.0f};
-				if (uvAcc) {
+				if (uvAcc != nullptr) {
 					cgltf_accessor_read_float(uvAcc, vIdx, uv, 2);
 				}
 				v.uv = Math::PackUV(uv[0], uv[1]);
@@ -598,7 +602,7 @@ Mesh LoadGLB(RenderContext& ctx, const std::string& path) {
 			}
 
 			// Unroll indices
-			if (prim.indices) {
+			if (prim.indices != nullptr) {
 				size_t indexCount = prim.indices->count;
 				for (size_t idx = 0; idx < indexCount; ++idx) {
 					size_t originalIdx = cgltf_accessor_read_index(prim.indices, idx);
@@ -653,6 +657,12 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
 }
 
 Mesh LoadCookedMesh(RenderContext& ctx, AssetManager& assetMgr, const std::string& virtualPath) {
+#ifdef ZHLN_DEV_MODE
+	// --- DEVELOPMENT PATH: Load baked GLB directly from disk as loose files ---
+	std::string rawPath = "resources/assets/" + virtualPath;
+	return LoadGLB(ctx, rawPath);
+#else
+	// --- RELEASE PATH: Load zero-copy baked mesh from PAK ---
 	AssetLoadRequest req;
 	req.assetID = HashAssetPath(virtualPath);
 
@@ -669,34 +679,46 @@ Mesh LoadCookedMesh(RenderContext& ctx, AssetManager& assetMgr, const std::strin
 
 	const auto* vertices = reinterpret_cast<const Vertex*>(header + 1);
 
-	// ZERO-COPY UPLOAD: We pass the pointer directly from the memory-mapped file to Vulkan!
 	BufferHandle vbo = ctx.CreateVertexBuffer(vertices, header->vertexCount * sizeof(Vertex));
-
-	// Release memory (If mapped, it's a no-op, if decompressed, it frees)
 	assetMgr.FreeAssetMemory(req);
 
 	Log("Loaded Cooked Mesh: {} ({} vertices)", virtualPath, header->vertexCount);
 	return Mesh{.vertexBuffer = vbo, .vertexCount = header->vertexCount};
+#endif
 }
-
 uint32_t LoadCookedTexture(RenderContext& ctx, AssetManager& assetMgr,
 						   const std::string& virtualPath) {
+#ifdef ZHLN_DEV_MODE
+	// --- DEVELOPMENT PATH: Load baked PNG directly from disk as loose files ---
+	std::string rawPath = "resources/assets/" + virtualPath;
+
+	int width = 0, height = 0, channels = 0;
+	unsigned char* pixels =
+		stbi_load(rawPath.c_str(), &width, &height, &channels, 4); // Force RGBA8
+	if (!pixels) {
+		Log("WARNING: Failed to load raw texture in dev mode: {}", rawPath);
+		return 0;
+	}
+
+	uint32_t textureIndex = ctx.CreateTexture(pixels, width, height);
+	stbi_image_free(pixels);
+	return textureIndex;
+#else
+	// --- RELEASE PATH: Load cooked texture from PAK ---
 	AssetLoadRequest req;
 	req.assetID = HashAssetPath(virtualPath);
 
 	if (!assetMgr.LoadSync(req)) {
 		Log("ERROR: Failed to load texture from PAK: {}", virtualPath);
-		return 0; // Returns fallback/default texture (or checkerboard)
+		return 0;
 	}
 
 	int width = 0;
 	int height = 0;
 	int channels = 0;
-	// ZERO-COPY DECODE: Decode PNG bytes directly out of the memory-mapped base.pak!
-	unsigned char* pixels = stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(req.outData),
-												  static_cast<int>(req.outSize), &width, &height,
-												  &channels, 4 // Force RGBA8
-	);
+	unsigned char* pixels =
+		stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(req.outData),
+							  static_cast<int>(req.outSize), &width, &height, &channels, 4);
 
 	if (pixels == nullptr) {
 		Log("ERROR: STB failed to decode image: {}", virtualPath);
@@ -704,14 +726,244 @@ uint32_t LoadCookedTexture(RenderContext& ctx, AssetManager& assetMgr,
 		return 0;
 	}
 
-	// Upload raw pixels to Vulkan
 	uint32_t textureIndex = ctx.CreateTexture(pixels, width, height);
 
 	stbi_image_free(pixels);
-	assetMgr.FreeAssetMemory(req); // Safely release PAK reference
+	assetMgr.FreeAssetMemory(req);
 
 	Log("Loaded Cooked Texture: {} (Bindless Index: {})", virtualPath, textureIndex);
 	return textureIndex;
+#endif
+}
+
+// --- HELPER: Extracts and uploads embedded glTF textures dynamically ---
+static uint32_t LoadEmbeddedTexture(RenderContext& ctx, cgltf_image* img,
+									const std::string& glbPath) {
+	static std::unordered_map<std::string, uint32_t> textureCache;
+	std::string key;
+
+	if (img->uri != nullptr) {
+		key = img->uri;
+	} else if (img->buffer_view != nullptr) {
+		key = std::to_string(reinterpret_cast<uintptr_t>(img->buffer_view));
+	}
+
+	if (textureCache.contains(key)) {
+		return textureCache[key];
+	}
+
+	int width = 0;
+	int height = 0;
+	int channels = 0;
+	unsigned char* pixels = nullptr;
+
+	if (img->buffer_view != nullptr) {
+		// Decode PNG/JPG bytes directly out of the GLB binary buffer view
+		const char* bufferData =
+			(const char*)img->buffer_view->buffer->data + img->buffer_view->offset;
+		pixels = stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(bufferData),
+									   static_cast<int>(img->buffer_view->size), &width, &height,
+									   &channels, 4);
+	} else if (img->uri != nullptr) {
+		// Resolve external relative texture paths
+		std::filesystem::path glbFolder = std::filesystem::path(glbPath).parent_path();
+		std::filesystem::path texPath = glbFolder / img->uri;
+		pixels = stbi_load(texPath.string().c_str(), &width, &height, &channels, 4);
+	}
+
+	if (pixels == nullptr) {
+		return 0; // Return flat fallback if load fails
+	}
+
+	uint32_t index = ctx.CreateTexture(pixels, width, height);
+	stbi_image_free(pixels);
+
+	textureCache[key] = index;
+	return index;
+}
+
+// --- MAIN RUNTIME LOADER: Spawns multi-material GLBs natively ---
+std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::string& path) {
+	cgltf_options opts{};
+	cgltf_data* data = nullptr;
+
+	std::string rawPath = "resources/assets/" + path;
+
+	if (cgltf_parse_file(&opts, rawPath.c_str(), &data) != cgltf_result_success) {
+		Log("ERROR: Failed to parse GLB: {}", rawPath);
+		return {};
+	}
+
+	if (cgltf_load_buffers(&opts, data, rawPath.c_str()) != cgltf_result_success) {
+		Log("ERROR: Failed to load GLB buffers: {}", rawPath);
+		cgltf_free(data);
+		return {};
+	}
+
+	std::vector<Entity> spawnedEntities;
+
+	// Traverse the glTF node hierarchy
+	for (cgltf_size i = 0; i < data->nodes_count; ++i) {
+		const cgltf_node* node = &data->nodes[i];
+		if (node->mesh == nullptr) {
+			continue;
+		}
+
+		// Fetch the node's world transform matrix
+		float matrix[16];
+		cgltf_node_transform_world(node, matrix);
+
+		const auto* mesh = node->mesh;
+		for (cgltf_size p = 0; p < mesh->primitives_count; ++p) {
+			const auto& prim = mesh->primitives[p];
+
+			cgltf_accessor* posAcc = nullptr;
+			cgltf_accessor* normAcc = nullptr;
+			cgltf_accessor* tangentAcc = nullptr;
+			cgltf_accessor* uvAcc = nullptr;
+			cgltf_accessor* colorAcc = nullptr; // <--- 1. ADD COLOR ACCESSOR
+
+			for (cgltf_size a = 0; a < prim.attributes_count; ++a) {
+				const auto& attr = prim.attributes[a];
+				if (attr.type == cgltf_attribute_type_position) {
+					posAcc = attr.data;
+				} else if (attr.type == cgltf_attribute_type_normal) {
+					normAcc = attr.data;
+				} else if (attr.type == cgltf_attribute_type_tangent) {
+					tangentAcc = attr.data;
+				} else if (attr.type == cgltf_attribute_type_texcoord && attr.index == 0) {
+					uvAcc = attr.data;
+				} else if (attr.type == cgltf_attribute_type_color) {
+					colorAcc = attr.data; // <--- 2. EXTRACT COLOR ATTR
+				}
+			}
+
+			if (posAcc == nullptr) {
+				continue;
+			}
+
+			size_t vertexCount = posAcc->count;
+			std::vector<Vertex> primVertices(vertexCount);
+
+			for (size_t vIdx = 0; vIdx < vertexCount; ++vIdx) {
+				Vertex& v = primVertices[vIdx];
+				std::memset(&v, 0, sizeof(Vertex));
+
+				// Transform position
+				float rawPos[3] = {0.0f, 0.0f, 0.0f};
+				cgltf_accessor_read_float(posAcc, vIdx, rawPos, 3);
+				v.position[0] = matrix[0] * rawPos[0] + matrix[4] * rawPos[1] +
+								matrix[8] * rawPos[2] + matrix[12];
+				v.position[1] = matrix[1] * rawPos[0] + matrix[5] * rawPos[1] +
+								matrix[9] * rawPos[2] + matrix[13];
+				v.position[2] = matrix[2] * rawPos[0] + matrix[6] * rawPos[1] +
+								matrix[10] * rawPos[2] + matrix[14];
+
+				// --- NEW: Read, Rotate, and Pack Normal ---
+				float rawNorm[3] = {0.0f, 1.0f, 0.0f};
+				if (normAcc != nullptr) {
+					cgltf_accessor_read_float(normAcc, vIdx, rawNorm, 3);
+				}
+				// Rotate normal direction (ignoring translation)
+				float nx = matrix[0] * rawNorm[0] + matrix[4] * rawNorm[1] + matrix[8] * rawNorm[2];
+				float ny = matrix[1] * rawNorm[0] + matrix[5] * rawNorm[1] + matrix[9] * rawNorm[2];
+				float nz =
+					matrix[2] * rawNorm[0] + matrix[6] * rawNorm[1] + matrix[10] * rawNorm[2];
+				float nLen = std::sqrt(nx * nx + ny * ny + nz * nz);
+				if (nLen > 1e-6f) {
+					nx /= nLen;
+					ny /= nLen;
+					nz /= nLen;
+				}
+				v.normal = Math::PackNormal(nx, ny, nz);
+
+				// Read, Transform, and Pack Tangent
+				float rawTangent[4] = {1.0f, 0.0f, 0.0f, 1.0f};
+				if (tangentAcc != nullptr) {
+					cgltf_accessor_read_float(tangentAcc, vIdx, rawTangent, 4);
+				}
+				float tx = matrix[0] * rawTangent[0] + matrix[4] * rawTangent[1] +
+						   matrix[8] * rawTangent[2];
+				float ty = matrix[1] * rawTangent[0] + matrix[5] * rawTangent[1] +
+						   matrix[9] * rawTangent[2];
+				float tz = matrix[2] * rawTangent[0] + matrix[6] * rawTangent[1] +
+						   matrix[10] * rawTangent[2];
+				float tLen = std::sqrt(tx * tx + ty * ty + tz * tz);
+				if (tLen > 1e-6f) {
+					tx /= tLen;
+					ty /= tLen;
+					tz /= tLen;
+				}
+				v.tangent = Math::PackNormal(tx, ty, tz, rawTangent[3]);
+
+				// Read UV
+				float uv[2] = {0.0f, 0.0f};
+				if (uvAcc != nullptr) {
+					cgltf_accessor_read_float(uvAcc, vIdx, uv, 2);
+				}
+				v.uv = Math::PackUV(uv[0], uv[1]);
+
+				// Read Vertex Color
+				float rawColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+				if (colorAcc != nullptr) {
+					cgltf_accessor_read_float(colorAcc, vIdx, rawColor, 4);
+				}
+				v.color = Math::PackColor(rawColor[0], rawColor[1], rawColor[2], rawColor[3]);
+			}
+			// Resolve Indices (Unroll)
+			std::vector<Vertex> unrolledVertices;
+			if (prim.indices != nullptr) {
+				size_t indexCount = prim.indices->count;
+				unrolledVertices.reserve(indexCount);
+				for (size_t idx = 0; idx < indexCount; ++idx) {
+					size_t originalIdx = cgltf_accessor_read_index(prim.indices, idx);
+					unrolledVertices.push_back(primVertices[originalIdx]);
+				}
+			} else {
+				unrolledVertices = std::move(primVertices);
+			}
+
+			// Create vertex buffer
+			BufferHandle vbo = ctx.CreateVertexBuffer(unrolledVertices.data(),
+													  unrolledVertices.size() * sizeof(Vertex));
+			Mesh subMesh = {.vertexBuffer = vbo,
+							.vertexCount = static_cast<uint32_t>(unrolledVertices.size())};
+
+			// Setup material
+			Material subMaterial = CreateBasicMaterial(ctx);
+			subMaterial.albedoIndex =
+				1; // <--- 4. DEFAULT TO SOLID WHITE FALLBACK (prevent checkerboard multiplication)
+
+			if (prim.material != nullptr) {
+				// Extract PBR Base Color Texture
+				if (prim.material->has_pbr_metallic_roughness) {
+					auto& pbr = prim.material->pbr_metallic_roughness;
+					if ((pbr.base_color_texture.texture != nullptr) &&
+						(pbr.base_color_texture.texture->image != nullptr)) {
+						subMaterial.albedoIndex = LoadEmbeddedTexture(
+							ctx, pbr.base_color_texture.texture->image, rawPath);
+					}
+				}
+				// Extract Normal Map
+				if ((prim.material->normal_texture.texture != nullptr) &&
+					(prim.material->normal_texture.texture->image != nullptr)) {
+					subMaterial.normalIndex = LoadEmbeddedTexture(
+						ctx, prim.material->normal_texture.texture->image, rawPath);
+				}
+			}
+
+			// Spawn separate entity for this submesh
+			Entity part = reg.Create();
+			reg.Add(part,
+					MeshComponent{.mesh = subMesh, .material = subMaterial, .cullRadius = 100.0f});
+			spawnedEntities.push_back(part);
+		}
+	}
+
+	cgltf_free(data);
+	Log("Spawned GLB Model: {} ({} submesh parts/materials loaded dynamically)", path,
+		spawnedEntities.size());
+	return spawnedEntities;
 }
 
 } // namespace ZHLN::AssetFactory

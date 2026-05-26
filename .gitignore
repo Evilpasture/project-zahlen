@@ -55,3 +55,6 @@ Thumbs.db
 
 # Assets
 resources/assets/
+
+# Blender source files and unpacked textures
+blender/

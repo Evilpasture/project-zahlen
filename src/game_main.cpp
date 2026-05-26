@@ -74,63 +74,15 @@ struct Scene {
 	void Setup(Engine& engine) {
 		auto& rc = engine.GetRenderContext();
 		auto& reg = engine.GetRegistry();
-		auto& assetMgr = engine.GetAssetManager();
 
-		reg.RegisterComponent<MeshComponent>("MeshComponent");
+		ZHLN::Log("Assembling TADC Scene with Pure Runtime glTF Parsing...");
 
-		ZHLN::Log("Assembling Circus Dorm Showcase Scene...");
+		// 1. Spawns the entire Room and automatically loads all internal textures natively
+		std::vector<Entity> roomParts = AssetFactory::SpawnGLB(rc, reg, "Pomnis Room V2.glb");
 
-		// --- 1. Load Cooked Geometry meshes ---
-		Mesh roomMesh = AssetFactory::LoadCookedMesh(rc, assetMgr, "Pomnis Room V2.glb");
-		Mesh pomniMesh =
-			AssetFactory::LoadCookedMesh(rc, assetMgr, "tadc_models/Pomni_RELEASE.glb");
-		Mesh caineMesh =
-			AssetFactory::LoadCookedMesh(rc, assetMgr, "tadc_models/Caine_RELEASE.glb");
-		Mesh kingerMesh =
-			AssetFactory::LoadCookedMesh(rc, assetMgr, "tadc_models/Kinger_RELEASE.glb");
-
-		// --- 2. Load and Configure Room ---
-		Material roomMaterial = AssetFactory::CreateBasicMaterial(rc);
-		// Apply a gray carpet texture so the room has floor detailing
-		roomMaterial.albedoIndex = AssetFactory::LoadCookedTexture(
-			rc, assetMgr, "textures/gray-carpet-pbr-texture-06.jpg");
-
-		Entity roomEntity = reg.Create();
-		reg.Add(roomEntity,
-				MeshComponent{.mesh = roomMesh, .material = roomMaterial, .cullRadius = 1000.0f});
-
-		// --- 3. Load and Configure Pomni (Player/Centerpiece) ---
-		Material pomniMaterial = AssetFactory::CreateBasicMaterial(rc);
-		pomniMaterial.albedoIndex = AssetFactory::LoadCookedTexture(
-			rc, assetMgr, "tadc_models/textures/pomnisuit_pomni_suit_2_BaseColor.png");
-		pomniMaterial.normalIndex = AssetFactory::LoadCookedTexture(
-			rc, assetMgr, "tadc_models/textures/pomnisuit_pomni_suit_2_Normal.png");
-
-		Entity pomniEntity = reg.Create();
-		reg.Add(pomniEntity,
-				MeshComponent{.mesh = pomniMesh, .material = pomniMaterial, .cullRadius = 10.0f});
-
-		// --- 4. Load and Configure Caine ---
-		Material caineMaterial = AssetFactory::CreateBasicMaterial(rc);
-		caineMaterial.albedoIndex =
-			AssetFactory::LoadCookedTexture(rc, assetMgr, "tadc_models/textures/caine_color.png");
-		caineMaterial.normalIndex =
-			AssetFactory::LoadCookedTexture(rc, assetMgr, "tadc_models/textures/caine_normals.png");
-
-		Entity caineEntity = reg.Create();
-		reg.Add(caineEntity,
-				MeshComponent{.mesh = caineMesh, .material = caineMaterial, .cullRadius = 10.0f});
-
-		// --- 5. Load and Configure Kinger ---
-		Material kingerMaterial = AssetFactory::CreateBasicMaterial(rc);
-		kingerMaterial.albedoIndex =
-			AssetFactory::LoadCookedTexture(rc, assetMgr, "tadc_models/textures/kinger_color.png");
-		kingerMaterial.normalIndex = AssetFactory::LoadCookedTexture(
-			rc, assetMgr, "tadc_models/textures/kinger_mat_Normal.png");
-
-		Entity kingerEntity = reg.Create();
-		reg.Add(kingerEntity,
-				MeshComponent{.mesh = kingerMesh, .material = kingerMaterial, .cullRadius = 10.0f});
+		// 2. Spawns Pomni and automatically loads her internal textures natively
+		std::vector<Entity> pomniParts =
+			AssetFactory::SpawnGLB(rc, reg, "tadc_models/Pomni_RELEASE.glb");
 	}
 };
 
