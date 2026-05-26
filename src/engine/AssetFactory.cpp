@@ -7,6 +7,7 @@
 #include <cgltf.h>
 #include <cmath>
 #include <cstddef>
+#include <stb_image.h>
 #include <vector>
 
 namespace ZHLN::AssetFactory {
@@ -676,6 +677,41 @@ Mesh LoadCookedMesh(RenderContext& ctx, AssetManager& assetMgr, const std::strin
 
 	Log("Loaded Cooked Mesh: {} ({} vertices)", virtualPath, header->vertexCount);
 	return Mesh{.vertexBuffer = vbo, .vertexCount = header->vertexCount};
+}
+
+uint32_t LoadCookedTexture(RenderContext& ctx, AssetManager& assetMgr,
+						   const std::string& virtualPath) {
+	AssetLoadRequest req;
+	req.assetID = HashAssetPath(virtualPath);
+
+	if (!assetMgr.LoadSync(req)) {
+		Log("ERROR: Failed to load texture from PAK: {}", virtualPath);
+		return 0; // Returns fallback/default texture (or checkerboard)
+	}
+
+	int width = 0;
+	int height = 0;
+	int channels = 0;
+	// ZERO-COPY DECODE: Decode PNG bytes directly out of the memory-mapped base.pak!
+	unsigned char* pixels = stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(req.outData),
+												  static_cast<int>(req.outSize), &width, &height,
+												  &channels, 4 // Force RGBA8
+	);
+
+	if (pixels == nullptr) {
+		Log("ERROR: STB failed to decode image: {}", virtualPath);
+		assetMgr.FreeAssetMemory(req);
+		return 0;
+	}
+
+	// Upload raw pixels to Vulkan
+	uint32_t textureIndex = ctx.CreateTexture(pixels, width, height);
+
+	stbi_image_free(pixels);
+	assetMgr.FreeAssetMemory(req); // Safely release PAK reference
+
+	Log("Loaded Cooked Texture: {} (Bindless Index: {})", virtualPath, textureIndex);
+	return textureIndex;
 }
 
 } // namespace ZHLN::AssetFactory

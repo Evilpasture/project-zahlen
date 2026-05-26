@@ -26,15 +26,16 @@ int main(int argc, char** argv) {
 	std::vector<char> payloadData;
 
 	for (const auto& entry : std::filesystem::recursive_directory_iterator(inputDir)) {
-		if (entry.path().extension() == ".glb") {
-			std::string filepath = entry.path().string();
+		std::string ext = entry.path().extension().string();
+		std::string filepath = entry.path().string();
 
-			// Virtual path format (e.g. "assets/Man.glb" -> "Man.glb")
-			std::string virtualPath = filepath.substr(inputDir.length());
-			if (virtualPath[0] == '/' || virtualPath[0] == '\\') {
-				virtualPath = virtualPath.substr(1);
-			}
-			std::replace(virtualPath.begin(), virtualPath.end(), '\\', '/');
+		// Virtual path format (e.g. "assets/Man.glb" -> "Man.glb")
+		std::string virtualPath = filepath.substr(inputDir.length());
+		if (virtualPath[0] == '/' || virtualPath[0] == '\\') {
+			virtualPath = virtualPath.substr(1);
+		}
+		std::replace(virtualPath.begin(), virtualPath.end(), '\\', '/');
+		if (ext == ".glb") {
 
 			cgltf_options opts{};
 			cgltf_data* data = nullptr;
@@ -190,6 +191,34 @@ int main(int argc, char** argv) {
 
 			std::cout << "Cooked: " << virtualPath << " (" << bakedVertices.size()
 					  << " vertices)\n";
+		} else if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga") {
+			// --- NEW: RAW IMAGE PACKING ---
+			std::ifstream file(filepath, std::ios::binary | std::ios::ate);
+			if (!file.is_open()) {
+				std::cerr << "Failed to read texture file: " << filepath << "\n";
+				continue;
+			}
+			size_t size = file.tellg();
+			std::vector<char> fileData(size);
+			file.seekg(0);
+			file.read(fileData.data(), size);
+			file.close();
+
+			// Align payload offset to 16 bytes
+			size_t padding = (16 - (payloadData.size() % 16)) % 16;
+			payloadData.insert(payloadData.end(), padding, 0);
+
+			PakEntry pakEntry{};
+			pakEntry.pathHash = HashAssetPath(virtualPath);
+			pakEntry.offset = sizeof(PakHeader) + payloadData.size();
+			pakEntry.compressedSize = size;
+			pakEntry.uncompressedSize = size;
+			pakEntry.compression = 0; // Raw, zero-copy payload copy
+
+			entries.push_back(pakEntry);
+			payloadData.insert(payloadData.end(), fileData.begin(), fileData.end());
+
+			std::cout << "Cooked Raw Texture: " << virtualPath << " (" << size << " bytes)\n";
 		}
 	}
 

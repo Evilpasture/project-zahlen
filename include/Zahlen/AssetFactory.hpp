@@ -19,4 +19,6 @@ Mesh LoadGLB(RenderContext& ctx, const std::string& path);
 uint32_t CreateFontAtlasTexture(RenderContext& ctx);
 
 Mesh LoadCookedMesh(RenderContext& ctx, AssetManager& assetMgr, const std::string& virtualPath);
+uint32_t LoadCookedTexture(RenderContext& ctx, AssetManager& assetMgr,
+						   const std::string& virtualPath);
 } // namespace ZHLN::AssetFactory
