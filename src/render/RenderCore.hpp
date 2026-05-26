@@ -185,10 +185,16 @@ class Context {
 				vkDestroyInstance(_instance, nullptr);
 			}
 
+			// Clean primitive exchanges
 			_instance = std::exchange(other._instance, VK_NULL_HANDLE);
 			_surface = std::exchange(other._surface, VK_NULL_HANDLE);
-			_physical = std::exchange(other._physical, {});
-			_device = std::exchange(other._device, {});
+
+			// Fast, flat value assignments for structure states
+			_physical = other._physical;
+			_device = other._device;
+
+			other._physical = {};
+			other._device = {};
 		}
 		return *this;
 	}
@@ -394,66 +400,6 @@ class FrameSync {
 	std::array<ZHLN_FrameSync, N> _frames = {};
 };
 
-template <uint32_t N>
-	requires(N > 0 && N <= 8)
-class CommandPools {
-  public:
-	CommandPools() noexcept = default;
-	~CommandPools() noexcept {
-		if (_device != VK_NULL_HANDLE) {
-			for (auto& pool : _pools) {
-				ZHLN_DestroyCommandPool(_device, &pool);
-			}
-		}
-	}
-	CommandPools(const CommandPools&) = delete;
-	auto operator=(const CommandPools&) -> CommandPools& = delete;
-
-	constexpr CommandPools(CommandPools&& other) noexcept
-		: _device(std::exchange(other._device, VK_NULL_HANDLE)),
-		  _pools(std::exchange(other._pools, {})) {}
-
-	auto operator=(CommandPools&& other) noexcept -> CommandPools& {
-		if (this != &other) {
-			if (_device != VK_NULL_HANDLE) {
-				for (auto& pool : _pools) {
-					ZHLN_DestroyCommandPool(_device, &pool);
-				}
-			}
-			_device = std::exchange(other._device, VK_NULL_HANDLE);
-			_pools = std::exchange(other._pools, {});
-		}
-		return *this;
-	}
-
-	[[nodiscard]] static auto Create(const VkDevice device, const uint32_t queue_family,
-									 const uint32_t buffers_per_pool = 1) noexcept -> CommandPools {
-		CommandPools cp;
-		cp._device = device;
-		for (auto& pool : cp._pools) {
-			if (!ZHLN_CreateCommandPool(device, queue_family, &pool) ||
-				!ZHLN_AllocateCommandBuffers(device, &pool, buffers_per_pool)) {
-				return {};
-			}
-		}
-		return cp;
-	}
-
-	[[nodiscard]] constexpr auto operator[](const uint32_t frame) noexcept -> ZHLN_CommandPool& {
-		return _pools[frame % N];
-	}
-	[[nodiscard]] constexpr auto Cmd(const uint32_t frame) const noexcept -> VkCommandBuffer {
-		return _pools[frame % N].buffers[0];
-	}
-	[[nodiscard]] constexpr auto Valid() const noexcept -> bool {
-		return _device != VK_NULL_HANDLE;
-	}
-
-  private:
-	VkDevice _device = VK_NULL_HANDLE;
-	std::array<ZHLN_CommandPool, N> _pools = {};
-};
-
 class CommandPool {
   public:
 	CommandPool() = default;
@@ -472,40 +418,42 @@ class CommandPool {
 
 	// Move only
 	constexpr CommandPool(CommandPool&& other) noexcept
-		: _device(std::exchange(other._device, nullptr)), _raw(std::exchange(other._raw, {})) {}
+		: _device(std::exchange(other._device, VK_NULL_HANDLE)),
+		  _raw(std::exchange(other._raw, {})) {}
 
 	auto operator=(CommandPool&& other) noexcept -> CommandPool& {
 		if (this != &other) {
 			if (_device != VK_NULL_HANDLE) {
 				ZHLN_DestroyCommandPool(_device, &_raw);
 			}
-			_device = std::exchange(other._device, nullptr);
+			_device = std::exchange(other._device, VK_NULL_HANDLE);
 			_raw = std::exchange(other._raw, {});
 		}
 		return *this;
 	}
 
-	[[nodiscard]] constexpr auto Valid() const noexcept -> bool { return _device != nullptr; }
+	[[nodiscard]] constexpr auto Valid() const noexcept -> bool {
+		return _device != VK_NULL_HANDLE;
+	}
 	[[nodiscard]] constexpr explicit operator bool() const noexcept { return Valid(); }
 
+	// Seamless casting back to the raw C layout structure
+	[[nodiscard]] constexpr operator const ZHLN_CommandPool&() const noexcept { return _raw; }
+	[[nodiscard]] constexpr operator ZHLN_CommandPool&() noexcept { return _raw; }
+
 	[[nodiscard]] auto Allocate(const uint32_t count) -> bool {
-		if (!Valid()) {
+		if (!Valid())
 			return false;
-		}
 		return ZHLN_AllocateCommandBuffers(_device, &_raw, count);
 	}
 
-	[[nodiscard]] constexpr auto extracted(const uint32_t& idx) const -> VkCommandBuffer {
+	[[nodiscard]] constexpr auto operator[](const uint32_t idx) const noexcept -> VkCommandBuffer {
 		return _raw.buffers[idx];
-	}
-	[[nodiscard]] constexpr auto operator[](const uint32_t idx) const -> VkCommandBuffer {
-		return extracted(idx);
 	}
 
 	[[nodiscard]] auto AllocateSecondary(const uint32_t count) -> bool {
-		if (!Valid()) {
+		if (!Valid())
 			return false;
-		}
 		return ZHLN_AllocateSecondaryCommandBuffers(_device, &_raw, count);
 	}
 
@@ -518,6 +466,46 @@ class CommandPool {
   private:
 	VkDevice _device = VK_NULL_HANDLE;
 	ZHLN_CommandPool _raw{};
+};
+
+template <uint32_t N>
+	requires(N > 0 && N <= 8)
+class CommandPools {
+  public:
+	CommandPools() noexcept = default;
+
+	// Rule of Zero: Destructor, Copy, and Move variants are entirely
+	// compiler-synthesized. No redundant tracking code required.
+
+	[[nodiscard]] static auto Create(const VkDevice device, const uint32_t queue_family,
+									 const uint32_t buffers_per_pool = 1) noexcept -> CommandPools {
+		CommandPools cp;
+		for (auto& pool : cp._pools) {
+			pool = CommandPool(device, queue_family);
+			if (!pool || !pool.Allocate(buffers_per_pool)) {
+				return {};
+			}
+		}
+		return cp;
+	}
+
+	[[nodiscard]] constexpr auto operator[](const uint32_t frame) noexcept -> CommandPool& {
+		return _pools[frame % N];
+	}
+
+	[[nodiscard]] constexpr auto operator[](const uint32_t frame) const noexcept
+		-> const CommandPool& {
+		return _pools[frame % N];
+	}
+
+	[[nodiscard]] constexpr auto Cmd(const uint32_t frame) const noexcept -> VkCommandBuffer {
+		return _pools[frame % N][0]; // Uses CommandPool's cleaner indexing
+	}
+
+	[[nodiscard]] constexpr auto Valid() const noexcept -> bool { return _pools[0].Valid(); }
+
+  private:
+	std::array<CommandPool, N> _pools = {};
 };
 
 // ============================================================================
