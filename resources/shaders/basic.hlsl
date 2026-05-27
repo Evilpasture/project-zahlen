@@ -107,7 +107,7 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 	output.worldPos = worldPos.xyz;
 
 	if (obj.isShadowPass != 0) {
-		output.pos = mul(frame.lightSpaceMatrix, worldPos);
+		output.pos = worldPos;
 		output.currClip = 0;
 		output.prevClip = 0;
 		output.normal = 0;

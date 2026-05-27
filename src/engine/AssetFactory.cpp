@@ -738,7 +738,7 @@ uint32_t LoadCookedTexture(RenderContext& ctx, AssetManager& assetMgr,
 
 // --- HELPER: Extracts and uploads embedded glTF textures dynamically ---
 static uint32_t LoadEmbeddedTexture(RenderContext& ctx, cgltf_image* img,
-									const std::string& glbPath) {
+									const std::string& glbPath, bool isSRGB = true) {
 	static std::unordered_map<std::string, uint32_t> textureCache;
 	std::string key;
 
@@ -775,7 +775,7 @@ static uint32_t LoadEmbeddedTexture(RenderContext& ctx, cgltf_image* img,
 		return 0; // Return flat fallback if load fails
 	}
 
-	uint32_t index = ctx.CreateTexture(pixels, width, height);
+	uint32_t index = ctx.CreateTexture(pixels, width, height, isSRGB);
 	stbi_image_free(pixels);
 
 	textureCache[key] = index;
@@ -908,6 +908,14 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 				if (colorAcc != nullptr) {
 					cgltf_accessor_read_float(colorAcc, vIdx, rawColor, 4);
 				}
+
+				if (prim.material != nullptr && prim.material->has_pbr_metallic_roughness) {
+					const float* factor = prim.material->pbr_metallic_roughness.base_color_factor;
+					rawColor[0] *= factor[0];
+					rawColor[1] *= factor[1];
+					rawColor[2] *= factor[2];
+					rawColor[3] *= factor[3];
+				}
 				v.color = Math::PackColor(rawColor[0], rawColor[1], rawColor[2], rawColor[3]);
 			}
 			// Resolve Indices (Unroll)
@@ -935,20 +943,29 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 				1; // <--- 4. DEFAULT TO SOLID WHITE FALLBACK (prevent checkerboard multiplication)
 
 			if (prim.material != nullptr) {
-				// Extract PBR Base Color Texture
+				// Extract PBR Base Color Texture -> sRGB
 				if (prim.material->has_pbr_metallic_roughness) {
 					auto& pbr = prim.material->pbr_metallic_roughness;
 					if ((pbr.base_color_texture.texture != nullptr) &&
 						(pbr.base_color_texture.texture->image != nullptr)) {
 						subMaterial.albedoIndex = LoadEmbeddedTexture(
-							ctx, pbr.base_color_texture.texture->image, rawPath);
+							ctx, pbr.base_color_texture.texture->image, rawPath, true);
 					}
 				}
-				// Extract Normal Map
+				// Extract Normal Map -> Linear (UNORM)
 				if ((prim.material->normal_texture.texture != nullptr) &&
 					(prim.material->normal_texture.texture->image != nullptr)) {
 					subMaterial.normalIndex = LoadEmbeddedTexture(
-						ctx, prim.material->normal_texture.texture->image, rawPath);
+						ctx, prim.material->normal_texture.texture->image, rawPath, false);
+				}
+				// Extract Metallic-Roughness (PBR) Map -> Linear (UNORM)
+				if (prim.material->has_pbr_metallic_roughness) {
+					auto& pbr = prim.material->pbr_metallic_roughness;
+					if ((pbr.metallic_roughness_texture.texture != nullptr) &&
+						(pbr.metallic_roughness_texture.texture->image != nullptr)) {
+						subMaterial.pbrIndex = LoadEmbeddedTexture(
+							ctx, pbr.metallic_roughness_texture.texture->image, rawPath, false);
+					}
 				}
 			}
 

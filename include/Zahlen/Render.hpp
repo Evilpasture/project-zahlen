@@ -34,7 +34,7 @@ class ZHLN_API RenderContext {
 	auto CreateConstantBuffer(size_t size) -> BufferHandle;
 	auto CreateMaterial(const PipelineDesc& desc) -> Material;
 
-	auto CreateTexture(const void* data, uint32_t width, uint32_t height) -> uint32_t;
+	auto CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true) -> uint32_t;
 
 	struct Impl;
 	[[nodiscard]] auto GetImpl() const -> Impl* { return _impl.get(); }

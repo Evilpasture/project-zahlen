@@ -112,27 +112,29 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 	return Material{.pipeline = handle};
 }
 
-auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t height) -> uint32_t {
+auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB)
+	-> uint32_t {
 	auto* impl = _impl.get();
 	const VkDevice device = impl->ctx.Device();
 	const size_t imageSize = static_cast<size_t>(width) * height * 4;
 
-	const VkImageCreateInfo imgInfo = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-									   .pNext = nullptr,
-									   .flags = 0,
-									   .imageType = VK_IMAGE_TYPE_2D,
-									   .format = VK_FORMAT_R8G8B8A8_UNORM,
-									   .extent{.width = width, .height = height, .depth = 1},
-									   .mipLevels = 1,
-									   .arrayLayers = 1,
-									   .samples = VK_SAMPLE_COUNT_1_BIT,
-									   .tiling = VK_IMAGE_TILING_OPTIMAL,
-									   .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-												VK_IMAGE_USAGE_SAMPLED_BIT,
-									   .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-									   .queueFamilyIndexCount = 0,
-									   .pQueueFamilyIndices = nullptr,
-									   .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+	const VkImageCreateInfo imgInfo = {
+		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+		.pNext = nullptr,
+		.flags = 0,
+		.imageType = VK_IMAGE_TYPE_2D,
+		.format = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB
+						 : VK_FORMAT_R8G8B8A8_UNORM, // <--- Dynamically chose format
+		.extent{.width = width, .height = height, .depth = 1},
+		.mipLevels = 1,
+		.arrayLayers = 1,
+		.samples = VK_SAMPLE_COUNT_1_BIT,
+		.tiling = VK_IMAGE_TILING_OPTIMAL,
+		.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+		.queueFamilyIndexCount = 0,
+		.pQueueFamilyIndices = nullptr,
+		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
 
 	auto gpuImage = Vk::Image::Create(impl->allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 
@@ -182,7 +184,9 @@ auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t hei
 	vkQueueSubmit2(impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
 	vkQueueWaitIdle(impl->ctx.GraphicsQueue());
 
-	auto gpuView = Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle());
+	auto gpuView = isSRGB ? Vk::CreateView<VK_FORMAT_R8G8B8A8_SRGB>(device, gpuImage.Handle())
+						  : Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(
+								device, gpuImage.Handle()); // <--- Choose view
 
 	uint32_t index = impl->nextTextureIndex++;
 
