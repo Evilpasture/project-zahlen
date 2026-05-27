@@ -20,9 +20,9 @@
 #include <array>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <print>
 #include <vector>
-#include <fstream>
 
 ZHLN_REFLECT_VERTEX(ZHLN::Vk::Vertex, pos, norm, tangent, uv0, uv1);
 
@@ -741,8 +741,8 @@ auto main() -> int {
 
 	// --- Frame loop resources ---
 	auto sync = ZHLN::Vk::FrameSync<3>::Create(ctx.Device());
-	auto pools =
-		ZHLN::Vk::CommandPools<3>::Create(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+	auto pools = ZHLN::Vk::CommandPools<3>::Create(
+		ctx.Device(), {.queue_family = ctx.PhysicalInfo().graphics_family, .buffers_per_pool = 1});
 
 	uint32_t frame_index = 0;
 	win.resized = true;

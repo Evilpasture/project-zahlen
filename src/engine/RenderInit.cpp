@@ -104,8 +104,9 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	}
 
 	_impl->sync = Vk::FrameSync<2>::Create(_impl->ctx.Device());
-	_impl->pools =
-		Vk::CommandPools<2>::Create(_impl->ctx.Device(), _impl->ctx.PhysicalInfo().graphics_family);
+	_impl->pools = Vk::CommandPools<2>::Create(
+		_impl->ctx.Device(),
+		{.queue_family = _impl->ctx.PhysicalInfo().graphics_family, .buffers_per_pool = 1});
 	_impl->SetupUI(static_cast<GLFWwindow*>(window.GetNativeHandle()));
 
 	uint32_t workerCount = TaskSystem::GetWorkerCount() + 1;

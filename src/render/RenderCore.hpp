@@ -490,18 +490,22 @@ template <uint32_t N>
 	requires(N > 0 && N <= 8)
 class CommandPools {
   public:
+	struct Description {
+        uint32_t queue_family = 0;
+        uint32_t buffers_per_pool = 1;
+    };
+
 	CommandPools() noexcept = default;
 
 	// Rule of Zero: Destructor, Copy, and Move variants are entirely
 	// compiler-synthesized. No redundant tracking code required.
 
 	[[nodiscard("Command pools must be verified before use in command recording")]]
-	static auto Create(const VkDevice device, const uint32_t queue_family,
-						 const uint32_t buffers_per_pool = 1) noexcept -> CommandPools {
+	static auto Create(const VkDevice device, const Description& desc) noexcept -> CommandPools {
 		CommandPools cp;
 		for (auto& pool : cp._pools) {
-			pool = CommandPool(device, queue_family);
-			if (!pool || !pool.Allocate(buffers_per_pool)) {
+			pool = CommandPool(device, desc.queue_family);
+			if (!pool || !pool.Allocate(desc.buffers_per_pool)) {
 				return {};
 			}
 		}
@@ -574,7 +578,7 @@ class ShaderStages {
 };
 
 [[nodiscard]] constexpr auto AsSpirV(const void* data) noexcept -> const uint32_t* {
-	return reinterpret_cast<const uint32_t*>(data);
+    return std::bit_cast<const uint32_t*>(data);
 }
 
 // ============================================================================
@@ -1192,7 +1196,7 @@ inline void ExecutePasses(VkCommandBuffer cmd, std::span<const PassDesc> passes)
 
 			// Fallback to manual heap allocation if stack is too small
 			if (transition_count > MaxStackBarriers) [[unlikely]] {
-				heap_allocated = new VkImageMemoryBarrier2[transition_count];
+				heap_allocated = new(std::nothrow) VkImageMemoryBarrier2[transition_count];
 				p_barriers = heap_allocated;
 			}
 

@@ -71,8 +71,8 @@ auto main() -> int {
 
 	ZHLN::Vk::Swapchain swapchain(ctx.Device(), {});
 	auto sync = ZHLN::Vk::FrameSync<3>::Create(ctx.Device());
-	auto pools =
-		ZHLN::Vk::CommandPools<3>::Create(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+	auto pools = ZHLN::Vk::CommandPools<3>::Create(
+		ctx.Device(), {.queue_family = ctx.PhysicalInfo().graphics_family, .buffers_per_pool = 1});
 	ZHLN::Vk::SemaphorePool present_semaphores;
 
 	// 4. Pipeline Setup (Updated with HLSL filenames and entry points)
