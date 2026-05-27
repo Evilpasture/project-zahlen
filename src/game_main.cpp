@@ -113,15 +113,15 @@ void UpdateCulling(Engine& engine) {
 
 	for (size_t i = 0; i < entities.size(); ++i) {
 		Entity e = entities[i];
-		JPH::Vec3 pos = JPH::Vec3::sZero();
+		JPH::Vec3 pos = meshes[i].localTransform.GetTranslation();
 
 		// Position offsets for inspection layout
 		if (e.index == 2) {
-			pos = JPH::Vec3(0.0f, 0.0f, 0.0f); // Pomni at center
+			pos += JPH::Vec3(0.0f, 0.0f, 0.0f); // Pomni at center
 		} else if (e.index == 3) {
-			pos = JPH::Vec3(2.5f, 0.5f, -1.0f); // Caine hovering right
+			pos += JPH::Vec3(2.5f, 0.5f, -1.0f); // Caine hovering right
 		} else if (e.index == 4) {
-			pos = JPH::Vec3(-2.5f, 0.0f, 1.0f); // Kinger left
+			pos += JPH::Vec3(-2.5f, 0.0f, 1.0f); // Kinger left
 		}
 
 		// The room (index 1) remains at origin
@@ -257,16 +257,19 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 				}
 
 				// Offset character matrices in the world for an organized lineup
-				JPH::Mat44 currentTransform = JPH::Mat44::sIdentity();
+				JPH::Mat44 currentTransform = mesh->localTransform;
 				if (e.index == 2) {
 					currentTransform =
-						Math::CreateTransform(JPH::Vec3(0.0f, 0.0f, 0.0f), JPH::Quat::sIdentity());
+						Math::CreateTransform(JPH::Vec3(0.0f, 0.0f, 0.0f), JPH::Quat::sIdentity()) *
+						mesh->localTransform;
 				} else if (e.index == 3) {
-					currentTransform =
-						Math::CreateTransform(JPH::Vec3(2.5f, 0.5f, -1.0f), JPH::Quat::sIdentity());
+					currentTransform = Math::CreateTransform(JPH::Vec3(2.5f, 0.5f, -1.0f),
+															 JPH::Quat::sIdentity()) *
+									   mesh->localTransform;
 				} else if (e.index == 4) {
-					currentTransform =
-						Math::CreateTransform(JPH::Vec3(-2.5f, 0.0f, 1.0f), JPH::Quat::sIdentity());
+					currentTransform = Math::CreateTransform(JPH::Vec3(-2.5f, 0.0f, 1.0f),
+															 JPH::Quat::sIdentity()) *
+									   mesh->localTransform;
 				}
 
 				Renderer::Draw(rc, mesh->material, mesh->mesh, currentTransform,

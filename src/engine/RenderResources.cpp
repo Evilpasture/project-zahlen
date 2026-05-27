@@ -1,5 +1,6 @@
 // File: src/engine/Render_Resources.cpp
 #include "RenderInternal.hpp"
+#include "Resources.hpp"
 
 namespace ZHLN {
 
@@ -7,10 +8,17 @@ namespace ZHLN {
 void RenderContext::Impl::CompileShadowPipeline(VkDevice device, const void* shaderData,
 												size_t shaderSize) {
 	auto v_desc = Vk::CreateShaderDesc(Vk::AsSpirV(shaderData), shaderSize);
-	auto shaders = Vk::ShaderStages::Create(device, v_desc, {});
+	// Use our specialized non-outputting fragment shader!
+	ZHLN_ShaderDesc f_desc = {.code = Vk::AsSpirV(&ZHLN_Resource_ShadowFragSpv[0]),
+							  .size = ZHLN_Resource_ShadowFragSpv_Len,
+							  .entry_point = "PSShadow"};
 
-	VkPushConstantRange pc_range = {
-		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .offset = 0, .size = sizeof(FrameConstants)};
+	auto shaders = Vk::ShaderStages::Create(device, v_desc, f_desc);
+
+	VkPushConstantRange pc_range = {.stageFlags =
+										VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+									.offset = 0,
+									.size = sizeof(FrameConstants)};
 
 	const std::array layouts = {bindlessLayout.Get()};
 	ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = layouts.data(),
@@ -102,11 +110,21 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 						.Layout(layout.Get())
 						.Vertex<Vertex>()
 						.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16G16_SFLOAT})
-						.DepthFormat(VK_FORMAT_D32_SFLOAT)
-						.CullBack()
-						.Build(impl->ctx.Device());
+						.DepthFormat(VK_FORMAT_D32_SFLOAT);
 
-	auto mat = std::make_unique<NativeMaterial>(std::move(pipeline), std::move(layout));
+	// Toggle hardware culling based on material state
+	if (desc.doubleSided)
+		pipeline.CullNone();
+	else
+		pipeline.CullBack();
+
+	// Toggle hardware alpha blending
+	if (desc.alphaBlend)
+		pipeline.AlphaBlend();
+
+	auto finalPipeline = pipeline.Build(impl->ctx.Device());
+
+	auto mat = std::make_unique<NativeMaterial>(std::move(finalPipeline), std::move(layout));
 	auto handle = static_cast<PipelineHandle>(reinterpret_cast<uintptr_t>(mat.get()));
 	impl->materials.push_back(std::move(mat));
 	return Material{.pipeline = handle};

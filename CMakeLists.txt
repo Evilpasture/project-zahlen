@@ -200,13 +200,13 @@ function(compile_hlsl SHADER_PATH ENTRY STAGE OUTPUT_VAR)
     endif()
 
     get_filename_component(FILE_NAME ${SHADER_PATH} NAME)
-    set(OUTPUT_SPV "${CMAKE_CURRENT_BINARY_DIR}/generated_shaders/${FILE_NAME}.${STAGE}.spv")
+    set(OUTPUT_SPV "${CMAKE_CURRENT_BINARY_DIR}/generated_shaders/${FILE_NAME}.${ENTRY}.spv")
 
     add_custom_command(
         OUTPUT ${OUTPUT_SPV}
         COMMAND ${DXC_EXECUTABLE} -T ${STAGE} -E ${ENTRY} -spirv ${SHADER_PATH} -Fo ${OUTPUT_SPV}
         DEPENDS ${SHADER_PATH}
-        COMMENT "DXC: Generating ${FILE_NAME}.${STAGE}.spv"
+        COMMENT "DXC: Generating ${FILE_NAME}.${ENTRY}.spv"
         VERBATIM
     )
     set(${OUTPUT_VAR} ${OUTPUT_SPV} PARENT_SCOPE)
@@ -224,6 +224,13 @@ add_custom_target(zahlen_engine_culling_shader ALL DEPENDS ${CULLING_COMP_SPV})
 add_dependencies(zahlen_engine zahlen_engine_culling_shader)
 target_compile_definitions(zahlen_engine PRIVATE SHADER_CULLING_HLSL_CS_PATH="${CULLING_COMP_SPV}")
 set_source_files_properties(src/engine/Resources.c PROPERTIES OBJECT_DEPENDS "${CULLING_COMP_SPV}")
+
+# --- SPECIALIZED SHADOW FRAGMENT SHADER (Discards alpha masks without writing to rendering targets) ---
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/basic.hlsl" PSShadow ps_6_0 SHADOW_FRAG_SPV)
+add_custom_target(zahlen_engine_shadow_shader ALL DEPENDS ${SHADOW_FRAG_SPV})
+add_dependencies(zahlen_engine zahlen_engine_shadow_shader)
+target_compile_definitions(zahlen_engine PRIVATE SHADER_SHADOW_HLSL_PS_PATH="${SHADOW_FRAG_SPV}")
+set_source_files_properties(src/engine/Resources.c PROPERTIES OBJECT_DEPENDS "${SHADOW_FRAG_SPV}")
 
 # --- 7. EXECUTABLE TARGETS ---
 
@@ -268,6 +275,7 @@ if(NOT MSVC)
     if(WIN32)
         target_link_options(zahlen_engine PRIVATE -Xlinker /subsystem:console)
         target_compile_options(zahlen_engine PRIVATE -Wno-microsoft-anon-tag -Wno-unknown-pragmas -Wno-unused-parameter)
+        target_compile_options(zahlen_engine PRIVATE -Wno-microsoft-anon-tag -Wno-unknown-pragmas -Wno-unused-parameter -Wno-microsoft-enum-forward-reference)
         target_compile_options(zahlen_engine PRIVATE -D_CRT_SECURE_NO_WARNINGS)
     endif()
 endif()

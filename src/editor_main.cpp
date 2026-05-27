@@ -153,7 +153,7 @@ void UpdateEditorCulling(Engine& engine) {
 			} else if (auto* alifeComp = reg.Get<ALife::ALifeComponent>(e)) {
 				pos = JPH::Vec3(alifeComp->position);
 			} else {
-				continue;
+				pos = meshes[i].localTransform.GetTranslation();
 			}
 
 			if (cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius)) {
@@ -464,12 +464,12 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 						JPH::Quat rot(worldState.rotations[base], worldState.rotations[base + 1],
 									  worldState.rotations[base + 2],
 									  worldState.rotations[base + 3]);
-						currentTransform = Math::CreateTransform(pos, rot);
+						currentTransform = Math::CreateTransform(pos, rot) * mesh->localTransform;
 					} else if (auto* alifeComp = reg.Get<ALife::ALifeComponent>(e)) {
 						currentTransform = Math::CreateTransform(JPH::Vec3(alifeComp->position),
-																 JPH::Quat::sIdentity());
+																 JPH::Quat::sIdentity()) * mesh->localTransform;
 					} else {
-						continue;
+						currentTransform = mesh->localTransform;
 					}
 
 					Renderer::Draw(rc, mesh->material, mesh->mesh, currentTransform,

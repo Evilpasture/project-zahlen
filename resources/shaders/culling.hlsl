@@ -9,7 +9,12 @@ struct InstanceData {
 	uint emissiveIdx;
 	uint vertexCount;
 	float cullRadius;
-	uint padding[2];
+	float metallicFactor;
+	float roughnessFactor;
+	float alphaCutoff;
+	uint alphaMode;
+	uint2 padding; // Explicit 8-byte alignment padding
+	float4 baseColorFactor;
 };
 
 struct DrawIndirectCommand {
@@ -40,8 +45,7 @@ bool SphereVisible(float3 center, float radius) {
 	return true;
 }
 
-[numthreads(64, 1, 1)]
-void CSMain(uint3 dispatchThreadID : SV_DispatchThreadID) {
+[numthreads(64, 1, 1)] void CSMain(uint3 dispatchThreadID : SV_DispatchThreadID) {
 	uint index = dispatchThreadID.x;
 	if (index >= cullConstants.drawCount) {
 		return;

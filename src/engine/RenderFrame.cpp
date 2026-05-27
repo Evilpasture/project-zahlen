@@ -132,14 +132,21 @@ void RenderContext::Impl::RenderShadowPass(VkCommandBuffer cmd) {
 				auto* mesh = std::bit_cast<NativeMesh*>(draw.mesh);
 				JPH::Mat44 lightMVP = shadowProjView * draw.transform;
 
-				FrameConstants shadowConstants = {.transform = lightMVP,
-												  .prevTransform = JPH::Mat44::sIdentity(),
-												  .albedoIndex = 0,
-												  .normalIndex = 0,
-												  .pbrIndex = 0,
-												  .emissiveIndex = 0,
-												  .isShadowPass = 1,
-												  ._padding = {}};
+				FrameConstants shadowConstants = {
+					.transform = lightMVP,
+					.prevTransform = JPH::Mat44::sIdentity(),
+					.albedoIndex = draw.albedoIndex,
+					.normalIndex = 0,
+					.pbrIndex = 0,
+					.emissiveIndex = 0,
+					.isShadowPass = 1,
+					.metallicFactor = 0.0f,
+					.roughnessFactor = 0.0f,
+					.alphaCutoff = draw.alphaCutoff,
+					.alphaMode = draw.alphaMode,
+					._padding = {},
+					.baseColorFactor = {draw.baseColorFactor[0], draw.baseColorFactor[1],
+										draw.baseColorFactor[2], draw.baseColorFactor[3]}};
 
 				Vk::DrawInstanced(cmd,
 								  {.pipeline = shadowPipeline.Get(),
@@ -147,7 +154,8 @@ void RenderContext::Impl::RenderShadowPass(VkCommandBuffer cmd) {
 								   .set = bindlessSet,
 								   .vbo = mesh->buffer.Handle(),
 								   .vertexCount = mesh->vertexCount},
-								  shadowConstants, VK_SHADER_STAGE_VERTEX_BIT);
+								  shadowConstants,
+								  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
 			}
 		});
 
@@ -274,20 +282,29 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 							continue;
 						}
 
-						Vk::DrawInstanced(sec_cmd,
-										  {.pipeline = drawCmd.material->pipeline.Get(),
-										   .layout = drawCmd.material->layout.Get(),
-										   .set = bindlessSet,
-										   .vbo = drawCmd.mesh->buffer.Handle(),
-										   .vertexCount = drawCmd.mesh->vertexCount},
-										  FrameConstants{.transform = drawCmd.transform,
-														 .prevTransform = drawCmd.prevTransform,
-														 .albedoIndex = drawCmd.albedoIndex,
-														 .normalIndex = drawCmd.normalIndex,
-														 .pbrIndex = drawCmd.pbrIndex,
-														 .emissiveIndex = drawCmd.emissiveIndex,
-														 .isShadowPass = 0,
-														 ._padding = {}});
+						Vk::DrawInstanced(
+							sec_cmd,
+							{.pipeline = drawCmd.material->pipeline.Get(),
+							 .layout = drawCmd.material->layout.Get(),
+							 .set = bindlessSet,
+							 .vbo = drawCmd.mesh->buffer.Handle(),
+							 .vertexCount = drawCmd.mesh->vertexCount},
+							FrameConstants{.transform = drawCmd.transform,
+										   .prevTransform = drawCmd.prevTransform,
+										   .albedoIndex = drawCmd.albedoIndex,
+										   .normalIndex = drawCmd.normalIndex,
+										   .pbrIndex = drawCmd.pbrIndex,
+										   .emissiveIndex = drawCmd.emissiveIndex,
+										   .isShadowPass = 0,
+										   .metallicFactor = drawCmd.metallicFactor,
+										   .roughnessFactor = drawCmd.roughnessFactor,
+										   .alphaCutoff = drawCmd.alphaCutoff,
+										   .alphaMode = drawCmd.alphaMode,
+										   ._padding = {},
+										   .baseColorFactor = {drawCmd.baseColorFactor[0],
+															   drawCmd.baseColorFactor[1],
+															   drawCmd.baseColorFactor[2],
+															   drawCmd.baseColorFactor[3]}});
 					}
 
 					ZHLN_EndCommandBuffer(sec_cmd);
@@ -356,7 +373,13 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCom
 					 .emissiveIndex = drawCmd.emissiveIndex,
 					 .vertexCount = drawCmd.mesh->vertexCount,
 					 .cullRadius = drawCmd.cullRadius,
-					 ._padding = {0, 0}};
+					 .metallicFactor = drawCmd.metallicFactor,
+					 .roughnessFactor = drawCmd.roughnessFactor,
+					 .alphaCutoff = drawCmd.alphaCutoff,
+					 .alphaMode = drawCmd.alphaMode,
+					 ._padding = {},
+					 .baseColorFactor = {drawCmd.baseColorFactor[0], drawCmd.baseColorFactor[1],
+										 drawCmd.baseColorFactor[2], drawCmd.baseColorFactor[3]}};
 
 		if (i == 0 || drawCmd.material != currentMaterial || drawCmd.mesh != currentMesh) {
 			groups.push_back(
@@ -636,20 +659,26 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 		return;
 	}
 
-	// NEW: Prevent crashing if an asset failed to load
 	if (mesh.vertexBuffer == BufferHandle::Invalid) {
 		return;
 	}
 
-	impl->drawQueue.push_back({.material = std::bit_cast<NativeMaterial*>(material.pipeline),
-							   .mesh = std::bit_cast<NativeMesh*>(mesh.vertexBuffer),
-							   .transform = transform,
-							   .prevTransform = prevTransform,
-							   .albedoIndex = material.albedoIndex,
-							   .normalIndex = material.normalIndex,
-							   .pbrIndex = material.pbrIndex,
-							   .emissiveIndex = material.emissiveIndex,
-							   .cullRadius = cullRadius});
+	impl->drawQueue.push_back(
+		{.material = std::bit_cast<NativeMaterial*>(material.pipeline),
+		 .mesh = std::bit_cast<NativeMesh*>(mesh.vertexBuffer),
+		 .transform = transform,
+		 .prevTransform = prevTransform,
+		 .albedoIndex = material.albedoIndex,
+		 .normalIndex = material.normalIndex,
+		 .pbrIndex = material.pbrIndex,
+		 .emissiveIndex = material.emissiveIndex,
+		 .cullRadius = cullRadius,
+		 .metallicFactor = material.metallicFactor,
+		 .roughnessFactor = material.roughnessFactor,
+		 .alphaCutoff = material.alphaCutoff,
+		 .alphaMode = material.alphaMode,
+		 .baseColorFactor = {material.baseColorFactor[0], material.baseColorFactor[1],
+							 material.baseColorFactor[2], material.baseColorFactor[3]}});
 }
 
 void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex) {
@@ -658,7 +687,6 @@ void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex) {
 		return;
 	}
 
-	// NEW: Prevent crashing
 	if (mesh.vertexBuffer == BufferHandle::Invalid) {
 		return;
 	}

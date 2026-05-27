@@ -13,6 +13,8 @@ struct PipelineDesc {
 	size_t vertexShaderSize = 0;
 	const void* fragShaderData = nullptr;
 	size_t fragShaderSize = 0;
+	bool doubleSided = false;
+	bool alphaBlend = false;
 };
 
 class ZHLN_API RenderContext {

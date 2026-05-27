@@ -42,3 +42,8 @@ const unsigned char ZHLN_Resource_CullingCompSpv[] = {
 #embed SHADER_CULLING_HLSL_CS_PATH
 };
 const unsigned int ZHLN_Resource_CullingCompSpv_Len = sizeof(ZHLN_Resource_CullingCompSpv);
+
+const unsigned char ZHLN_Resource_ShadowFragSpv[] = {
+#embed SHADER_SHADOW_HLSL_PS_PATH
+};
+const unsigned int ZHLN_Resource_ShadowFragSpv_Len = sizeof(ZHLN_Resource_ShadowFragSpv);

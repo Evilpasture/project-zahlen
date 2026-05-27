@@ -309,12 +309,14 @@ auto CreateProceduralCheckerboard(RenderContext& ctx) {
 	return ctx.CreateTexture(pixels.data(), size, size);
 }
 
-Material CreateBasicMaterial(RenderContext& ctx) {
+Material CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend) {
 	PipelineDesc desc;
 	desc.vertexShaderData = ZHLN_Resource_BasicVertSpv;
 	desc.vertexShaderSize = ZHLN_Resource_BasicVertSpv_Len;
 	desc.fragShaderData = ZHLN_Resource_BasicFragSpv;
 	desc.fragShaderSize = ZHLN_Resource_BasicFragSpv_Len;
+	desc.doubleSided = doubleSided;
+	desc.alphaBlend = alphaBlend;
 
 	Material mat = ctx.CreateMaterial(desc);
 
@@ -772,7 +774,16 @@ static uint32_t LoadEmbeddedTexture(RenderContext& ctx, cgltf_image* img,
 	}
 
 	if (pixels == nullptr) {
-		return 0; // Return flat fallback if load fails
+		const char* reason = stbi_failure_reason();
+		if (img->uri != nullptr) {
+			std::filesystem::path glbFolder = std::filesystem::path(glbPath).parent_path();
+			Log("ERROR: Failed to load texture URI: {} (Path: {}) | Reason: {}", img->uri,
+				(glbFolder / img->uri).string(), reason ? reason : "Unknown");
+		} else {
+			Log("ERROR: Failed to load embedded texture (buffer_view offset: {}) | Reason: {}",
+				img->buffer_view ? img->buffer_view->offset : 0, reason ? reason : "Unknown");
+		}
+		return 1; // <--- CHANGE THIS FROM 0 TO 1 (fallback to Solid White instead of Solid Black)
 	}
 
 	uint32_t index = ctx.CreateTexture(pixels, width, height, isSRGB);
@@ -813,6 +824,11 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 		float matrix[16];
 		cgltf_node_transform_world(node, matrix);
 
+		JPH::Mat44 nodeTransform(JPH::Vec4(matrix[0], matrix[1], matrix[2], matrix[3]),
+								 JPH::Vec4(matrix[4], matrix[5], matrix[6], matrix[7]),
+								 JPH::Vec4(matrix[8], matrix[9], matrix[10], matrix[11]),
+								 JPH::Vec4(matrix[12], matrix[13], matrix[14], matrix[15]));
+
 		const auto* mesh = node->mesh;
 		for (cgltf_size p = 0; p < mesh->primitives_count; ++p) {
 			const auto& prim = mesh->primitives[p];
@@ -821,7 +837,7 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 			cgltf_accessor* normAcc = nullptr;
 			cgltf_accessor* tangentAcc = nullptr;
 			cgltf_accessor* uvAcc = nullptr;
-			cgltf_accessor* colorAcc = nullptr; // <--- 1. ADD COLOR ACCESSOR
+			cgltf_accessor* colorAcc = nullptr;
 
 			for (cgltf_size a = 0; a < prim.attributes_count; ++a) {
 				const auto& attr = prim.attributes[a];
@@ -834,12 +850,48 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 				} else if (attr.type == cgltf_attribute_type_texcoord && attr.index == 0) {
 					uvAcc = attr.data;
 				} else if (attr.type == cgltf_attribute_type_color) {
-					colorAcc = attr.data; // <--- 2. EXTRACT COLOR ATTR
+					colorAcc = attr.data;
 				}
 			}
 
 			if (posAcc == nullptr) {
 				continue;
+			}
+
+			// --- EXTRACT PBR FACTORS & ALPHA STATE ---
+			bool doubleSided = false;
+			bool alphaBlend = false;
+			float baseColorFactor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+			float metallicFactor = 1.0f;
+			float roughnessFactor = 1.0f;
+			float alphaCutoff = 0.5f;
+			uint32_t alphaMode = 0; // 0=Opaque, 1=Mask, 2=Blend
+			bool hasAlbedoTexture = false;
+
+			if (prim.material != nullptr) {
+				doubleSided = prim.material->double_sided;
+				if (prim.material->alpha_mode == cgltf_alpha_mode_mask) {
+					alphaMode = 1;
+					alphaCutoff = prim.material->alpha_cutoff;
+				} else if (prim.material->alpha_mode == cgltf_alpha_mode_blend) {
+					alphaMode = 2;
+					alphaBlend = true;
+				}
+
+				if (prim.material->has_pbr_metallic_roughness) {
+					const float* c = prim.material->pbr_metallic_roughness.base_color_factor;
+					baseColorFactor[0] = c[0];
+					baseColorFactor[1] = c[1];
+					baseColorFactor[2] = c[2];
+					baseColorFactor[3] = c[3];
+					metallicFactor = prim.material->pbr_metallic_roughness.metallic_factor;
+					roughnessFactor = prim.material->pbr_metallic_roughness.roughness_factor;
+
+					if (prim.material->pbr_metallic_roughness.base_color_texture.texture !=
+						nullptr) {
+						hasAlbedoTexture = true;
+					}
+				}
 			}
 
 			size_t vertexCount = posAcc->count;
@@ -852,49 +904,39 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 				// Transform position
 				float rawPos[3] = {0.0f, 0.0f, 0.0f};
 				cgltf_accessor_read_float(posAcc, vIdx, rawPos, 3);
-				v.position[0] = matrix[0] * rawPos[0] + matrix[4] * rawPos[1] +
-								matrix[8] * rawPos[2] + matrix[12];
-				v.position[1] = matrix[1] * rawPos[0] + matrix[5] * rawPos[1] +
-								matrix[9] * rawPos[2] + matrix[13];
-				v.position[2] = matrix[2] * rawPos[0] + matrix[6] * rawPos[1] +
-								matrix[10] * rawPos[2] + matrix[14];
+				v.position[0] = rawPos[0];
+				v.position[1] = rawPos[1];
+				v.position[2] = rawPos[2];
 
-				// --- NEW: Read, Rotate, and Pack Normal ---
+				// --- Read, Rotate, and Pack Normal ---
 				float rawNorm[3] = {0.0f, 1.0f, 0.0f};
 				if (normAcc != nullptr) {
 					cgltf_accessor_read_float(normAcc, vIdx, rawNorm, 3);
 				}
-				// Rotate normal direction (ignoring translation)
-				float nx = matrix[0] * rawNorm[0] + matrix[4] * rawNorm[1] + matrix[8] * rawNorm[2];
-				float ny = matrix[1] * rawNorm[0] + matrix[5] * rawNorm[1] + matrix[9] * rawNorm[2];
-				float nz =
-					matrix[2] * rawNorm[0] + matrix[6] * rawNorm[1] + matrix[10] * rawNorm[2];
-				float nLen = std::sqrt(nx * nx + ny * ny + nz * nz);
+				float nLen = std::sqrt(rawNorm[0] * rawNorm[0] + rawNorm[1] * rawNorm[1] +
+									   rawNorm[2] * rawNorm[2]);
 				if (nLen > 1e-6f) {
-					nx /= nLen;
-					ny /= nLen;
-					nz /= nLen;
+					rawNorm[0] /= nLen;
+					rawNorm[1] /= nLen;
+					rawNorm[2] /= nLen;
 				}
-				v.normal = Math::PackNormal(nx, ny, nz);
+				v.normal = Math::PackNormal(rawNorm[0], rawNorm[1], rawNorm[2]);
 
 				// Read, Transform, and Pack Tangent
 				float rawTangent[4] = {1.0f, 0.0f, 0.0f, 1.0f};
 				if (tangentAcc != nullptr) {
 					cgltf_accessor_read_float(tangentAcc, vIdx, rawTangent, 4);
 				}
-				float tx = matrix[0] * rawTangent[0] + matrix[4] * rawTangent[1] +
-						   matrix[8] * rawTangent[2];
-				float ty = matrix[1] * rawTangent[0] + matrix[5] * rawTangent[1] +
-						   matrix[9] * rawTangent[2];
-				float tz = matrix[2] * rawTangent[0] + matrix[6] * rawTangent[1] +
-						   matrix[10] * rawTangent[2];
-				float tLen = std::sqrt(tx * tx + ty * ty + tz * tz);
+				float tLen =
+					std::sqrt(rawTangent[0] * rawTangent[0] + rawTangent[1] * rawTangent[1] +
+							  rawTangent[2] * rawTangent[2]);
 				if (tLen > 1e-6f) {
-					tx /= tLen;
-					ty /= tLen;
-					tz /= tLen;
+					rawTangent[0] /= tLen;
+					rawTangent[1] /= tLen;
+					rawTangent[2] /= tLen;
 				}
-				v.tangent = Math::PackNormal(tx, ty, tz, rawTangent[3]);
+				v.tangent =
+					Math::PackNormal(rawTangent[0], rawTangent[1], rawTangent[2], rawTangent[3]);
 
 				// Read UV
 				float uv[2] = {0.0f, 0.0f};
@@ -903,21 +945,16 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 				}
 				v.uv = Math::PackUV(uv[0], uv[1]);
 
-				// Read Vertex Color
+				// Read Vertex Color (Cleanly ignore default vertex colors if an image texture is
+				// active!)
 				float rawColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-				if (colorAcc != nullptr) {
+				if (colorAcc != nullptr && !hasAlbedoTexture) {
 					cgltf_accessor_read_float(colorAcc, vIdx, rawColor, 4);
 				}
 
-				if (prim.material != nullptr && prim.material->has_pbr_metallic_roughness) {
-					const float* factor = prim.material->pbr_metallic_roughness.base_color_factor;
-					rawColor[0] *= factor[0];
-					rawColor[1] *= factor[1];
-					rawColor[2] *= factor[2];
-					rawColor[3] *= factor[3];
-				}
 				v.color = Math::PackColor(rawColor[0], rawColor[1], rawColor[2], rawColor[3]);
 			}
+
 			// Resolve Indices (Unroll)
 			std::vector<Vertex> unrolledVertices;
 			if (prim.indices != nullptr) {
@@ -937,10 +974,18 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 			Mesh subMesh = {.vertexBuffer = vbo,
 							.vertexCount = static_cast<uint32_t>(unrolledVertices.size())};
 
-			// Setup material
-			Material subMaterial = CreateBasicMaterial(ctx);
-			subMaterial.albedoIndex =
-				1; // <--- 4. DEFAULT TO SOLID WHITE FALLBACK (prevent checkerboard multiplication)
+			// Setup material with dynamic flags
+			Material subMaterial = CreateBasicMaterial(ctx, doubleSided, alphaBlend);
+			subMaterial.alphaMode = alphaMode;
+			subMaterial.alphaCutoff = alphaCutoff;
+			subMaterial.metallicFactor = metallicFactor;
+			subMaterial.roughnessFactor = roughnessFactor;
+			subMaterial.baseColorFactor[0] = baseColorFactor[0];
+			subMaterial.baseColorFactor[1] = baseColorFactor[1];
+			subMaterial.baseColorFactor[2] = baseColorFactor[2];
+			subMaterial.baseColorFactor[3] = baseColorFactor[3];
+
+			subMaterial.albedoIndex = 1; // Default to Solid White
 
 			if (prim.material != nullptr) {
 				// Extract PBR Base Color Texture -> sRGB
@@ -971,8 +1016,11 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 
 			// Spawn separate entity for this submesh
 			Entity part = reg.Create();
-			reg.Add(part,
-					MeshComponent{.mesh = subMesh, .material = subMaterial, .cullRadius = 100.0f});
+			reg.Add(part, MeshComponent{.mesh = subMesh,
+										.material = subMaterial,
+										.cullRadius = 100.0f,
+										.localTransform = nodeTransform,
+										.prevTransform = nodeTransform});
 			spawnedEntities.push_back(part);
 		}
 	}
@@ -982,5 +1030,4 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 		spawnedEntities.size());
 	return spawnedEntities;
 }
-
 } // namespace ZHLN::AssetFactory

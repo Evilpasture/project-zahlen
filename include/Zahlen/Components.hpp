@@ -11,6 +11,7 @@ struct MeshComponent {
 	Mesh mesh;
 	Material material;
 	float cullRadius = 1.0f;
+	JPH::Mat44 localTransform = JPH::Mat44::sIdentity();
 	JPH::Mat44 prevTransform = JPH::Mat44::sIdentity();
 };
 

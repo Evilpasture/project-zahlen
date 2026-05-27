@@ -46,11 +46,16 @@ struct FrameConstants {
 	uint32_t pbrIndex;
 	uint32_t emissiveIndex;
 	uint32_t isShadowPass;
-	uint32_t _padding[3];
+	float metallicFactor;
+	float roughnessFactor;
+	float alphaCutoff;
+	uint32_t alphaMode;	  // 0=Opaque, 1=Mask, 2=Blend
+	uint32_t _padding[3]; // Explicit padding before 16-byte aligned float4 array
+	float baseColorFactor[4];
 };
 
-static_assert(sizeof(FrameConstants) == 160,
-			  "FrameConstants must be exactly 160 bytes to match HLSL alignment.");
+static_assert(sizeof(FrameConstants) == 192,
+			  "FrameConstants must be exactly 192 bytes to match HLSL alignment.");
 
 struct alignas(16) InstanceData {
 	JPH::Mat44 world;
@@ -61,10 +66,15 @@ struct alignas(16) InstanceData {
 	uint32_t emissiveIndex;
 	uint32_t vertexCount;
 	float cullRadius;
-	uint32_t _padding[2];
+	float metallicFactor;
+	float roughnessFactor;
+	float alphaCutoff;
+	uint32_t alphaMode;
+	uint32_t _padding[2]; // Explicit padding before 16-byte aligned float4 array
+	float baseColorFactor[4];
 };
-static_assert(sizeof(InstanceData) == 160,
-			  "InstanceData must be exactly 160 bytes to match HLSL alignment.");
+static_assert(sizeof(InstanceData) == 192,
+			  "InstanceData must be exactly 192 bytes to match HLSL alignment.");
 
 // --- Opaque Resource Handles ---
 // These abstract away Vulkan objects completely.
@@ -124,5 +134,10 @@ struct Material {
 	uint32_t normalIndex = 2;	// Default to Flat Normal Map (Index 2)
 	uint32_t pbrIndex = 0;		// Default to Solid Black (Index 0)
 	uint32_t emissiveIndex = 0; // Default to Solid Black (Index 0)
+	float baseColorFactor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+	float metallicFactor = 1.0f;
+	float roughnessFactor = 1.0f;
+	float alphaCutoff = 0.5f;
+	uint32_t alphaMode = 0; // 0=Opaque, 1=Mask, 2=Blend
 };
 } // namespace ZHLN

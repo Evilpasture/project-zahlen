@@ -30,6 +30,12 @@ struct ObjectConstants {
 	uint pbrIdx;
 	uint emissiveIdx;
 	uint isShadowPass;
+	float metallicFactor;
+	float roughnessFactor;
+	float alphaCutoff;
+	uint alphaMode;
+	uint3 padding; // Explicit 12-byte alignment padding
+	float4 baseColorFactor;
 };
 
 struct InstanceData {
@@ -41,7 +47,12 @@ struct InstanceData {
 	uint emissiveIdx;
 	uint vertexCount;
 	float cullRadius;
-	uint padding[2];
+	float metallicFactor;
+	float roughnessFactor;
+	float alphaCutoff;
+	uint alphaMode;
+	uint2 padding; // Explicit 8-byte alignment padding
+	float4 baseColorFactor;
 };
 
 [[vk::push_constant]] ObjectConstants obj;
@@ -73,6 +84,9 @@ struct VSOutput {
 	float4 shadowPos : TEXCOORD3;
 	float4 color : COLOR;
 	nointerpolation uint4 materialIndices : TEXCOORD4;
+	nointerpolation float4 baseColorFactor : TEXCOORD5;
+	nointerpolation float3 pbrFactors : TEXCOORD6; // x=metallic, y=roughness, z=alphaCutoff
+	nointerpolation uint alphaMode : TEXCOORD7;
 };
 
 VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
@@ -81,9 +95,11 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 	float4x4 worldMatrix;
 	float4x4 prevWorldMatrix;
 	uint albedoIdx, normalIdx, pbrIdx, emissiveIdx;
+	float4 baseColorFactor;
+	float metallicFactor, roughnessFactor, alphaCutoff;
+	uint alphaMode;
 
 	// --- FIX: Correct CPU/GPU Path Routing ---
-	// If it is a shadow pass, or we have an active albedo index, use the CPU path.
 	if (obj.isShadowPass != 0 || obj.albedoIdx != 0) {
 		// --- CPU TRADITIONAL PATH ---
 		worldMatrix = obj.world;
@@ -92,6 +108,11 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 		normalIdx = obj.normalIdx;
 		pbrIdx = obj.pbrIdx;
 		emissiveIdx = obj.emissiveIdx;
+		baseColorFactor = obj.baseColorFactor;
+		metallicFactor = obj.metallicFactor;
+		roughnessFactor = obj.roughnessFactor;
+		alphaCutoff = obj.alphaCutoff;
+		alphaMode = obj.alphaMode;
 	} else {
 		// --- GPU CULLING PATH ---
 		InstanceData inst = g_instances[instanceId];
@@ -101,6 +122,11 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 		normalIdx = inst.normalIdx;
 		pbrIdx = inst.pbrIdx;
 		emissiveIdx = inst.emissiveIdx;
+		baseColorFactor = inst.baseColorFactor;
+		metallicFactor = inst.metallicFactor;
+		roughnessFactor = inst.roughnessFactor;
+		alphaCutoff = inst.alphaCutoff;
+		alphaMode = inst.alphaMode;
 	}
 
 	float4 worldPos = mul(worldMatrix, float4(input.position, 1.0f));
@@ -108,12 +134,18 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 
 	if (obj.isShadowPass != 0) {
 		output.pos = worldPos;
+		output.uv = input.uv;
+		output.baseColorFactor = baseColorFactor;
+		output.pbrFactors = float3(metallicFactor, roughnessFactor, alphaCutoff);
+		output.alphaMode = alphaMode;
+		output.materialIndices = uint4(albedoIdx, 0, 0, 0);
+
 		output.currClip = 0;
 		output.prevClip = 0;
 		output.normal = 0;
 		output.tangent = 0;
-		output.uv = 0;
 		output.shadowPos = 0;
+		output.color = input.color;
 		return output;
 	}
 
@@ -137,6 +169,9 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 	output.shadowPos = mul(frame.lightSpaceMatrix, worldPos);
 	output.color = input.color;
 	output.materialIndices = uint4(albedoIdx, normalIdx, pbrIdx, emissiveIdx);
+	output.baseColorFactor = baseColorFactor;
+	output.pbrFactors = float3(metallicFactor, roughnessFactor, alphaCutoff);
+	output.alphaMode = alphaMode;
 
 	return output;
 }
@@ -176,67 +211,54 @@ struct PSOutput {
 	float2 velocity : SV_Target1;
 };
 
-// PSOutput PSMain(VSOutput input) {
-// 	PSOutput output;
+// --- SPECIALIZED SHADOW PASS ENTRY POINT ---
+// Since we only evaluate the Alpha Mask discard and return void,
+// this will NEVER trigger a VkCmdDraw() unconsumed target warning!
+void PSShadow(VSOutput input) {
+	uint4 indices = input.materialIndices;
+	float4 baseColorFactor = input.baseColorFactor;
+	float alphaCutoff = input.pbrFactors.z;
+	uint alphaMode = input.alphaMode;
 
-// 	uint4 indices = input.materialIndices;
+	float4 albedo =
+		globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
 
-// 	// Sample ONLY the albedo map, completely ignoring lighting/shadows/emissive
-// 	float4 albedo = globalTextures[indices.x].Sample(defaultSampler, input.uv);
-
-// 	output.color = float4(albedo.rgb, 1.0f);
-// 	output.velocity = float2(0.0f, 0.0f);
-
-// 	return output;
-// }
-
-// PSOutput PSMain(VSOutput input) {
-//     PSOutput output;
-
-//     uint4 indices = input.materialIndices;
-
-//     // Color each pixel based on its target Bindless Index (indices.x)
-//     if (indices.x == 0)      output.color = float4(0.0f, 0.0f, 0.0f, 1.0f); // Index 0 (Black
-//     fallback) -> Black else if (indices.x == 1) output.color = float4(1.0f, 1.0f, 1.0f, 1.0f); //
-//     Index 1 (White fallback) -> White else if (indices.x == 2) output.color = float4(0.0f,
-//     0.0f, 1.0f, 1.0f); // Index 2 (Flat Normal)    -> Blue else if (indices.x == 3) output.color
-//     = float4(0.0f, 1.0f, 0.0f, 1.0f); // Index 3 (Font Atlas)     -> Green else if (indices.x ==
-//     4) output.color = float4(1.0f, 1.0f, 0.0f, 1.0f); // Index 4 (Room Atlas)     -> Yellow else
-//     if (indices.x == 5) output.color = float4(0.0f, 1.0f, 1.0f, 1.0f); // Index 5 (Checkerboard)
-//     -> Cyan else if (indices.x == 6) output.color = float4(1.0f, 0.0f, 1.0f, 1.0f); // Index 6
-//     (Pomni Atlas)    -> Magenta else                     output.color = float4(1.0f, 0.5f,
-//     0.0f, 1.0f); // Index > 6 (Garbage)      -> Orange
-
-//     output.velocity = float2(0.0f, 0.0f);
-//     return output;
-// }
-
-// PSOutput PSMain(VSOutput input) {
-//     PSOutput output;
-
-//     // Output UV coordinates as raw colors
-//     output.color = float4(input.uv.x, input.uv.y, 0.0f, 1.0f);
-//     output.velocity = float2(0.0f, 0.0f);
-
-//     return output;
-// }
+	if (alphaMode == 1) { // MASK
+		if (albedo.a < alphaCutoff) {
+			discard;
+		}
+	}
+}
 
 PSOutput PSMain(VSOutput input) {
 	PSOutput output;
 
 	// Sample Bindless Textures
 	uint4 indices = input.materialIndices;
-	float4 albedo = globalTextures[indices.x].Sample(defaultSampler, input.uv);
-	albedo = albedo * input.color;
-	if (albedo.a < 0.5)
-		discard;
+	float4 baseColorFactor = input.baseColorFactor;
+	float metallicFactor = input.pbrFactors.x;
+	float roughnessFactor = input.pbrFactors.y;
+	float alphaCutoff = input.pbrFactors.z;
+	uint alphaMode = input.alphaMode;
+
+	// glTF PBR Math: Albedo Sample * Base Color Factor * Vertex Color
+	float4 albedo =
+		globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
+
+	// Alpha Masking
+	if (alphaMode == 1) { // MASK
+		if (albedo.a < alphaCutoff) {
+			discard;
+		}
+	}
 
 	float3 normalMap = globalTextures[indices.y].Sample(defaultSampler, input.uv).rgb * 2.0 - 1.0;
 	float4 pbr = globalTextures[indices.z].Sample(defaultSampler, input.uv);
 	float3 emissive = globalTextures[indices.w].Sample(defaultSampler, input.uv).rgb;
 
-	float roughness = pbr.g;
-	float metallic = pbr.b;
+	// glTF PBR Math: PBR Sample * Parameter Factors
+	float roughness = pbr.g * roughnessFactor;
+	float metallic = pbr.b * metallicFactor;
 
 	// --- FIX: Safe Tangent Fallback (Prevents NaN division-by-zero) ---
 	float3 N = normalize(input.normal);
@@ -291,7 +313,9 @@ PSOutput PSMain(VSOutput input) {
 	}
 
 	float3 ambient = albedo.rgb * 0.05; // Basic ambient fallback
-	output.color = float4(ambient + directSun + directPunctual + emissive, 1.0f);
+
+	// Preserve exact base color alpha for BLEND transparency pipelines
+	output.color = float4(ambient + directSun + directPunctual + emissive, albedo.a);
 
 	// Calculate Motion Vectors for TAA
 	float2 ndcCurr = input.currClip.xy / input.currClip.w;

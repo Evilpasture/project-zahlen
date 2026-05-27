@@ -64,6 +64,11 @@ struct DrawCommand {
 	uint32_t pbrIndex;
 	uint32_t emissiveIndex;
 	float cullRadius;
+	float metallicFactor;
+	float roughnessFactor;
+	float alphaCutoff;
+	uint32_t alphaMode;
+	float baseColorFactor[4];
 };
 
 struct UIDrawCommand {
