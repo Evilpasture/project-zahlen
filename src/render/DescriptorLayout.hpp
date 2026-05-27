@@ -152,12 +152,15 @@ template <typename Layout, uint32_t BindingID> class BindlessRegistry {
 		};
 		const VkWriteDescriptorSet write = {
 			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.pNext = nullptr,
 			.dstSet = _set,
 			.dstBinding = Slot::binding,
 			.dstArrayElement = slot,
 			.descriptorCount = 1,
 			.descriptorType = Slot::type,
 			.pImageInfo = &imageInfo,
+			.pBufferInfo = nullptr,
+			.pTexelBufferView = nullptr,
 		};
 		vkUpdateDescriptorSets(_device, 1, &write, 0, nullptr);
 		return slot;
@@ -185,6 +188,7 @@ template <typename... Slots> class DescriptorLayout {
 				  .descriptorType = Slots::type,
 				  .descriptorCount = Slots::count, // Handles arrays
 				  .stageFlags = Slots::stages,
+				  .pImmutableSamplers = nullptr, // Not used in this design
 			  }),
 		 ...);
 		return b;
@@ -231,6 +235,7 @@ template <typename... Slots> class DescriptorLayout {
 
 		const VkDescriptorSetLayoutBindingFlagsCreateInfo flagsInfo = {
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
+			.pNext = nullptr,
 			.bindingCount = kCount,
 			.pBindingFlags = flags.data(),
 		};
@@ -259,6 +264,7 @@ template <typename... Slots> class DescriptorLayout {
 
 		const VkDescriptorPoolCreateInfo info = {
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+			.pNext = nullptr,
 			.flags = updateAfterBind ? VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT
 									 : static_cast<VkDescriptorPoolCreateFlagBits>(0),
 			.maxSets = maxSets,
@@ -278,6 +284,7 @@ template <typename... Slots> class DescriptorLayout {
 									   VkDescriptorSetLayout layout) noexcept -> VkDescriptorSet {
 		const VkDescriptorSetAllocateInfo info = {
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+			.pNext = nullptr,
 			.descriptorPool = pool,
 			.descriptorSetCount = 1,
 			.pSetLayouts = &layout,
@@ -343,36 +350,62 @@ template <typename... Slots> class DescriptorLayout {
 						  "SkipWrite{} can only be used for slots with the UPDATE_AFTER_BIND flag "
 						  "(Bindless).");
 
-			write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .descriptorCount = 0};
+			write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+					 .pNext = nullptr,
+					 .dstSet = VK_NULL_HANDLE, // Not used since count is 0
+					 .dstBinding = 0,		   // Not used since count is 0
+					 .dstArrayElement = 0,	   // Not used since count is 0
+					 .descriptorCount = 0,
+					 .descriptorType = Slot::type,
+					 .pImageInfo = nullptr,
+					 .pBufferInfo = nullptr,
+					 .pTexelBufferView = nullptr};
+			return;
 		}
 		// 2. Otherwise, perform the type-checked write
 		else {
 			write = {
 				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.pNext = nullptr,
 				.dstSet = set,
 				.dstBinding = Slot::binding,
 				.dstArrayElement = 0,
 				.descriptorCount = 1,
 				.descriptorType = Slot::type,
+				.pImageInfo = nullptr,
+				.pBufferInfo = nullptr,
+				.pTexelBufferView = nullptr,
 			};
 
 			if constexpr (Slot::type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ||
 						  Slot::type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
 
 				static_assert(std::is_same_v<T, ImageWrite>, "Binding expects ImageWrite");
-				imageInfo = {.imageView = arg.view, .imageLayout = arg.layout};
+				imageInfo = {
+					.sampler = VK_NULL_HANDLE, // Explicitly initialized to silence warning
+					.imageView = arg.view, 
+					.imageLayout = arg.layout
+				};
 				write.pImageInfo = &imageInfo;
 
 			} else if constexpr (Slot::type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
 
 				static_assert(std::is_same_v<T, ImageWrite>, "Binding expects ImageWrite");
-				imageInfo = {.imageView = arg.view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
+				imageInfo = {
+					.sampler = VK_NULL_HANDLE, // Explicitly initialized to silence warning
+					.imageView = arg.view, 
+					.imageLayout = VK_IMAGE_LAYOUT_GENERAL
+				};
 				write.pImageInfo = &imageInfo;
 
 			} else if constexpr (Slot::type == VK_DESCRIPTOR_TYPE_SAMPLER) {
 
 				static_assert(std::is_same_v<T, SamplerWrite>, "Binding expects SamplerWrite");
-				imageInfo = {.sampler = arg.sampler};
+				imageInfo = {
+					.sampler = arg.sampler,
+					.imageView = VK_NULL_HANDLE,
+					.imageLayout = VK_IMAGE_LAYOUT_UNDEFINED
+				};
 				write.pImageInfo = &imageInfo;
 
 			} else if constexpr (Slot::type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ||

@@ -31,6 +31,8 @@ template <VkFormat F> struct RenderTarget {
 
 		const VkImageCreateInfo info = {
 			.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+			.pNext = nullptr,
+			.flags = 0,
 			.imageType = VK_IMAGE_TYPE_2D,
 			.format = F,
 			.extent = {.width = extent.width, .height = extent.height, .depth = 1},
@@ -40,6 +42,8 @@ template <VkFormat F> struct RenderTarget {
 			.tiling = VK_IMAGE_TILING_OPTIMAL,
 			.usage = usage,
 			.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+			.queueFamilyIndexCount = 0,
+			.pQueueFamilyIndices = nullptr,
 			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
 		};
 

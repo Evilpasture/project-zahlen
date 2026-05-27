@@ -6,7 +6,7 @@ namespace ZHLN {
 // Define CompileShadowPipeline here so it compiles with vertex reflection visible
 void RenderContext::Impl::CompileShadowPipeline(VkDevice device, const void* shaderData,
 												size_t shaderSize) {
-	ZHLN_ShaderDesc v_desc = {.code = Vk::AsSpirV(shaderData), .size = shaderSize};
+	auto v_desc = Vk::CreateShaderDesc(Vk::AsSpirV(shaderData), shaderSize);
 	auto shaders = Vk::ShaderStages::Create(device, v_desc, {});
 
 	VkPushConstantRange pc_range = {
@@ -119,6 +119,7 @@ auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t hei
 
 	const VkImageCreateInfo imgInfo = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 									   .pNext = nullptr,
+									   .flags = 0,
 									   .imageType = VK_IMAGE_TYPE_2D,
 									   .format = VK_FORMAT_R8G8B8A8_UNORM,
 									   .extent{.width = width, .height = height, .depth = 1},
@@ -128,6 +129,9 @@ auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t hei
 									   .tiling = VK_IMAGE_TILING_OPTIMAL,
 									   .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
 												VK_IMAGE_USAGE_SAMPLED_BIT,
+									   .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+									   .queueFamilyIndexCount = 0,
+									   .pQueueFamilyIndices = nullptr,
 									   .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
 
 	auto gpuImage = Vk::Image::Create(impl->allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
@@ -164,7 +168,8 @@ auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t hei
 
 	VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
 										 .pNext = nullptr,
-										 .commandBuffer = cmd};
+										 .commandBuffer = cmd,
+										 .deviceMask = 0};
 	VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
 							.pNext = nullptr,
 							.flags = 0,
@@ -194,7 +199,8 @@ auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t hei
 								  .descriptorCount = 1,
 								  .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
 								  .pImageInfo = &bindlessUpdate,
-								  .pBufferInfo = nullptr};
+								  .pBufferInfo = nullptr,
+								  .pTexelBufferView = nullptr};
 
 	vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
 

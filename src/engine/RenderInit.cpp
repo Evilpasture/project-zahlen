@@ -1,4 +1,5 @@
 // File: src/engine/Render_Init.cpp
+#include "RenderCore.hpp"
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
 #include "SamplerBuilder.hpp"
@@ -6,6 +7,7 @@
 #include "backends/imgui_impl_vulkan.h"
 #include "imgui.h"
 
+#include <Features.hpp>
 #include <threading/TaskSystem.hpp>
 
 namespace ZHLN {
@@ -32,30 +34,35 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 								   .enable_validation = cfg.enableValidation};
 	_impl->appName.copy_to(inst_desc.app_name);
 
-	VkPhysicalDeviceVulkan13Features feat13 = {
-		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-		.pNext = nullptr,
-		.synchronization2 = VK_TRUE,
-		.dynamicRendering = VK_TRUE};
-	VkPhysicalDeviceVulkan12Features feat12 = {
-		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-		.pNext = &feat13,
-		.descriptorIndexing = VK_TRUE,
-		.shaderSampledImageArrayNonUniformIndexing = VK_TRUE,
-		.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE,
-		.descriptorBindingPartiallyBound = VK_TRUE,
-		.runtimeDescriptorArray = VK_TRUE,
-		.bufferDeviceAddress = VK_TRUE,
-	};
-	VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swap_maint = {
-		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR,
-		.pNext = nullptr,
-		.swapchainMaintenance1 = VK_TRUE};
-	feat13.pNext = &swap_maint;
-	VkPhysicalDeviceFeatures2 feat2 = {
-		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-		.pNext = &feat12,
-		.features = {.multiDrawIndirect = VK_TRUE, .samplerAnisotropy = VK_TRUE}};
+	// 1. Declare the leaf node of the chain
+	auto swap_maint = Vk::FeatureFactory::Create<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>(
+		[](auto& f) { f.swapchainMaintenance1 = VK_TRUE; });
+
+	// 2. Point 1.3 to swap_maint
+	auto feat13 =
+		Vk::FeatureFactory::Create<VkPhysicalDeviceVulkan13Features>([&swap_maint](auto& f) {
+			f.pNext = &swap_maint;
+			f.synchronization2 = VK_TRUE;
+			f.dynamicRendering = VK_TRUE;
+		});
+
+	// 3. Point 1.2 to 1.3
+	auto feat12 = Vk::FeatureFactory::Create<VkPhysicalDeviceVulkan12Features>([&feat13](auto& f) {
+		f.pNext = &feat13;
+		f.descriptorIndexing = VK_TRUE;
+		f.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+		f.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+		f.descriptorBindingPartiallyBound = VK_TRUE;
+		f.runtimeDescriptorArray = VK_TRUE;
+		f.bufferDeviceAddress = VK_TRUE;
+	});
+
+	// 4. Point root Features2 to 1.2
+	auto feat2 = Vk::FeatureFactory::Create<VkPhysicalDeviceFeatures2>([&feat12](auto& f) {
+		f.pNext = &feat12;
+		f.features.multiDrawIndirect = VK_TRUE;
+		f.features.samplerAnisotropy = VK_TRUE;
+	});
 #ifdef __APPLE__
 	const char* dev_exts[] = {
 		VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
@@ -315,10 +322,9 @@ void RenderContext::Impl::SetupUI(GLFWwindow* window) {
 
 	auto uiShaders = Vk::ShaderStages::Create(
 		ctx.Device(),
-		{.code = reinterpret_cast<const uint32_t*>(ZHLN_Resource_UiVertSpv),
-		 .size = ZHLN_Resource_UiVertSpv_Len},
-		{.code = reinterpret_cast<const uint32_t*>(ZHLN_Resource_UiFragSpv),
-		 .size = ZHLN_Resource_UiFragSpv_Len});
+		Vk::CreateShaderDesc(Vk::AsSpirV(&ZHLN_Resource_UiVertSpv[0]), ZHLN_Resource_UiVertSpv_Len),
+		Vk::CreateShaderDesc(Vk::AsSpirV(&ZHLN_Resource_UiFragSpv[0]),
+							 ZHLN_Resource_UiFragSpv_Len));
 
 	// 144 bytes matches the exact size of the UIObjectConstants struct in HLSL
 	VkPushConstantRange uiPush = {.stageFlags =
@@ -381,6 +387,8 @@ void RenderContext::Impl::SetupUI(GLFWwindow* window) {
 		.Allocator = nullptr,
 		.CheckVkResultFn = nullptr,
 		.MinAllocationSize = 0,
+		.CustomShaderVertCreateInfo = {},
+		.CustomShaderFragCreateInfo = {},
 	};
 	ImGui_ImplVulkan_Init(&init_info);
 }

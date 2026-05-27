@@ -99,7 +99,8 @@ class RenderGraph {
 	};
 
 	auto AddPass(std::string_view name) -> PassBuilder {
-		_passes.push_back({.name = name});
+		_passes.push_back(
+			{.name = name, .transitions = {}, .record = nullptr, .userData = nullptr});
 		return {.graph = *this, .pass = _passes.back()};
 	}
 
@@ -130,12 +131,15 @@ class RenderGraph {
 				// Only add barrier if state actually changes
 				if (img->layout != nextLayout) {
 					barriers.push_back({.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+										.pNext = nullptr,
 										.srcStageMask = img->stage,
 										.srcAccessMask = img->access,
 										.dstStageMask = nextStage,
 										.dstAccessMask = nextAccess,
 										.oldLayout = img->layout,
 										.newLayout = nextLayout,
+										.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+										.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 										.image = img->handle,
 										.subresourceRange = {.aspectMask = img->aspect,
 															 .baseMipLevel = 0,
@@ -152,7 +156,14 @@ class RenderGraph {
 
 			if (!barriers.empty()) {
 				VkDependencyInfo dep = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-										.imageMemoryBarrierCount = (uint32_t)barriers.size(),
+										.pNext = nullptr,
+										.dependencyFlags = 0,
+										.memoryBarrierCount = 0,
+										.pMemoryBarriers = nullptr,
+										.bufferMemoryBarrierCount = 0,
+										.pBufferMemoryBarriers = nullptr,
+										.imageMemoryBarrierCount =
+											static_cast<uint32_t>(barriers.size()),
 										.pImageMemoryBarriers = barriers.data()};
 				vkCmdPipelineBarrier2(cmd, &dep);
 			}

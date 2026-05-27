@@ -200,10 +200,11 @@ class Context {
 		return *this;
 	}
 
-	[[nodiscard("Vulkan context creation may fail; check validity with Valid() or explicit bool cast")]]
+	[[nodiscard(
+		"Vulkan context creation may fail; check validity with Valid() or explicit bool cast")]]
 	static auto Create(const ZHLN_InstanceDesc& instance_desc,
-						 const ZHLN_DeviceSelectDesc& select_desc,
-						 const ZHLN_DeviceDesc& device_desc) noexcept -> Context {
+					   const ZHLN_DeviceSelectDesc& select_desc,
+					   const ZHLN_DeviceDesc& device_desc) noexcept -> Context {
 		Context ctx;
 
 		// 1. Create Instance
@@ -252,7 +253,9 @@ class Context {
 	}
 
 	[[nodiscard("Always verify context initialization; check Valid() before use")]]
-	auto Valid() const noexcept -> bool { return _device.handle != VK_NULL_HANDLE; }
+	auto Valid() const noexcept -> bool {
+		return _device.handle != VK_NULL_HANDLE;
+	}
 	explicit operator bool() const noexcept { return Valid(); }
 
   private:
@@ -491,9 +494,9 @@ template <uint32_t N>
 class CommandPools {
   public:
 	struct Description {
-        uint32_t queue_family = 0;
-        uint32_t buffers_per_pool = 1;
-    };
+		uint32_t queue_family = 0;
+		uint32_t buffers_per_pool = 1;
+	};
 
 	CommandPools() noexcept = default;
 
@@ -526,7 +529,9 @@ class CommandPools {
 	}
 
 	[[nodiscard("Verify command pools are valid before frame recording")]]
-	constexpr auto Valid() const noexcept -> bool { return _pools[0].Valid(); }
+	constexpr auto Valid() const noexcept -> bool {
+		return _pools[0].Valid();
+	}
 
   private:
 	std::array<CommandPool, N> _pools = {};
@@ -535,6 +540,16 @@ class CommandPools {
 // ============================================================================
 // ShaderStages RAII
 // ============================================================================
+
+[[nodiscard]] constexpr auto CreateShaderDesc(const uint32_t* code, size_t size,
+											  const char* entry = nullptr) noexcept
+	-> ZHLN_ShaderDesc {
+	return ZHLN_ShaderDesc{
+		.code = code,
+		.size = size,
+		.entry_point = entry // Safely initialized to nullptr if omitted
+	};
+}
 
 class ShaderStages {
   public:
@@ -562,9 +577,8 @@ class ShaderStages {
 
 	[[nodiscard("Shader loading from files may fail; verify validity before use")]]
 	static auto FromFiles(VkDevice device, const std::filesystem::path& vert_path,
-						   const std::filesystem::path& frag_path,
-						   const char* vert_entry = "main",
-						   const char* frag_entry = "main") noexcept -> ShaderStages;
+						  const std::filesystem::path& frag_path, const char* vert_entry = "main",
+						  const char* frag_entry = "main") noexcept -> ShaderStages;
 
 	[[nodiscard]] constexpr auto Get() const noexcept -> const ZHLN_ShaderStages* { return &_raw; }
 	[[nodiscard("Always verify shader stages are valid before pipeline creation")]]
@@ -578,7 +592,7 @@ class ShaderStages {
 };
 
 [[nodiscard]] constexpr auto AsSpirV(const void* data) noexcept -> const uint32_t* {
-    return std::bit_cast<const uint32_t*>(data);
+	return std::bit_cast<const uint32_t*>(data);
 }
 
 // ============================================================================
@@ -835,12 +849,15 @@ template <size_t ColorCount = 1, bool HasDepth = false> class DynamicPass {
 	template <typename Func> void Execute(VkCommandBuffer cmd, Func&& func) const {
 		const VkRenderingInfo renderInfo = {
 			.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+			.pNext = nullptr,
 			.flags = _flags,
 			.renderArea = {.offset = {0, 0}, .extent = _extent},
 			.layerCount = 1,
+			.viewMask = 0,
 			.colorAttachmentCount = ColorCount,
 			.pColorAttachments = ColorCount > 0 ? _colors.data() : nullptr,
-			.pDepthAttachment = GetDepthPtr() // <-- Safely resolve using the constexpr helper
+			.pDepthAttachment = GetDepthPtr(), // <-- Safely resolve using the constexpr helper
+			.pStencilAttachment = nullptr,
 		};
 
 		vkCmdBeginRendering(cmd, &renderInfo);
@@ -1033,7 +1050,9 @@ class alignas(64) SemaphorePool {
 
 	[[nodiscard]] auto Count() const noexcept -> uint32_t { return _count; }
 	[[nodiscard("Verify semaphore pool is initialized before use")]]
-	auto Valid() const noexcept -> bool { return _device != VK_NULL_HANDLE; }
+	auto Valid() const noexcept -> bool {
+		return _device != VK_NULL_HANDLE;
+	}
 
   private:
 	void Cleanup() noexcept {
@@ -1100,7 +1119,8 @@ template <VkFormat F>
 	static_assert(GetFormatAspect(F) != VK_IMAGE_ASPECT_NONE,
 				  "The provided VkFormat has no mapped aspect flags. Add it to GetFormatAspect().");
 
-	ZHLN_ImageViewDesc desc = {.image = image, .format = F, .aspect = aspect, .mip_levels = mips};
+	ZHLN_ImageViewDesc desc = {
+		.image = image, .format = F, .aspect = aspect, .mip_levels = mips, .array_layers = 0};
 	return {device, ZHLN_CreateImageView(device, &desc)};
 }
 
@@ -1196,7 +1216,7 @@ inline void ExecutePasses(VkCommandBuffer cmd, std::span<const PassDesc> passes)
 
 			// Fallback to manual heap allocation if stack is too small
 			if (transition_count > MaxStackBarriers) [[unlikely]] {
-				heap_allocated = new(std::nothrow) VkImageMemoryBarrier2[transition_count];
+				heap_allocated = new (std::nothrow) VkImageMemoryBarrier2[transition_count];
 				p_barriers = heap_allocated;
 			}
 
