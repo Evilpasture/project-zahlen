@@ -9,6 +9,9 @@
 
 namespace ZHLN::Vk {
 
+// Reporting helpers for descriptor utilities
+void ReportBindlessRegistryExceeded(uint32_t bindingID, uint32_t capacity) noexcept;
+
 // ============================================================================
 // Binding descriptors — compile-time slot definitions
 // ============================================================================
@@ -137,8 +140,7 @@ template <typename Layout, uint32_t BindingID> class BindlessRegistry {
 	auto UpdateDescriptor(VkImageView view, VkSampler sampler, VkImageLayout layout) -> uint32_t {
 		// 2. Proof of Correctness: Runtime bounds check against compile-time limit
 		if (_nextSlot >= Slot::count) [[unlikely]] {
-			std::println(stderr, "[BindlessRegistry<{}>] FATAL: Exceeded capacity of {} slots.",
-						 BindingID, Slot::count);
+			ReportBindlessRegistryExceeded(BindingID, Slot::count);
 			std::abort();
 		}
 

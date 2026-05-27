@@ -4,7 +4,6 @@
 #include "Zahlen/Profiler.hpp"
 #include "backends/imgui_impl_vulkan.h"
 #include "detail/RadixSort.hpp"
-#include "detail/Ranges.hpp"
 #include "engine/RenderState.hpp"
 #include "imgui.h"
 
@@ -135,7 +134,12 @@ void RenderContext::Impl::RenderShadowPass(VkCommandBuffer cmd) {
 
 				FrameConstants shadowConstants = {.transform = lightMVP,
 												  .prevTransform = JPH::Mat44::sIdentity(),
-												  .isShadowPass = 1};
+												  .albedoIndex = 0,
+												  .normalIndex = 0,
+												  .pbrIndex = 0,
+												  .emissiveIndex = 0,
+												  .isShadowPass = 1,
+												  ._padding = {}};
 
 				Vk::DrawInstanced(cmd,
 								  {.pipeline = shadowPipeline.Get(),
@@ -281,7 +285,9 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 														 .albedoIndex = drawCmd.albedoIndex,
 														 .normalIndex = drawCmd.normalIndex,
 														 .pbrIndex = drawCmd.pbrIndex,
-														 .emissiveIndex = drawCmd.emissiveIndex});
+														 .emissiveIndex = drawCmd.emissiveIndex,
+														 .isShadowPass = 0,
+														 ._padding = {}});
 					}
 
 					ZHLN_EndCommandBuffer(sec_cmd);
@@ -294,7 +300,7 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 	drawQueue.clear();
 }
 
-bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& ctx, VkCommandBuffer cmd) {
+bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCommandBuffer cmd) {
 	auto drawCount = static_cast<uint32_t>(drawQueue.size());
 	if (drawCount == 0) {
 		return true;
@@ -365,7 +371,6 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& ctx, VkCommand
 	struct FrustumPlanes {
 		JPH::Vec4 planes[6];
 		uint32_t drawCount;
-		uint32_t padding[3];
 	};
 	FrustumPlanes planes{};
 
@@ -513,7 +518,6 @@ void RenderContext::Impl::BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, 
 						JPH::Mat44 orthoMatrix;
 						JPH::Mat44 unused;
 						uint32_t albedoIdx;
-						uint32_t padding[3];
 					} pc{};
 
 					pc.orthoMatrix =

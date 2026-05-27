@@ -67,11 +67,12 @@ static_assert(sizeof(InstanceData) == 160,
 			  "InstanceData must be exactly 160 bytes to match HLSL alignment.");
 
 // --- Opaque Resource Handles ---
-// These abstract away Vulkan/LLGL objects completely.
-
+// These abstract away Vulkan objects completely.
+// NOLINTBEGIN(performance-enum-size)
 enum class BufferHandle : uint64_t { Invalid = 0 };
 enum class PipelineHandle : uint64_t { Invalid = 0 };
 enum class ResourceGroupHandle : uint64_t { Invalid = 0 };
+// NOLINTEND(performance-enum-size)
 
 static_assert(sizeof(BufferHandle) == 8, "BufferHandle must be 64 bits!");
 static_assert(sizeof(PipelineHandle) == 8, "PipelineHandle must be 64 bits!");

@@ -8,7 +8,7 @@
 
 #pragma once
 #include <stdbool.h> // We use booleans as keyword but good to include nevertheless
-#include <vulkan/vulkan.h>
+#include <vulkan/vulkan_core.h>
 
 #define ZHLN_RESTRICT __restrict
 
@@ -24,7 +24,7 @@ static constexpr auto maxInstanceExtensions = 128;
  * @struct ZHLN_InstanceDesc
  * @brief Configuration for Vulkan Instance initialization.
  */
-typedef struct {
+typedef struct ZHLN_InstanceDesc {
 	char app_name[64];		  /**< Application name embedded to satisfy C23 constexpr */
 	const uint32_t version;	  /**< Application-specific version (VK_MAKE_API_VERSION) */
 	uint32_t extension_count; /**< Number of additional extensions to enable */
@@ -75,7 +75,7 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* ZHLN_RESTRICT desc);
  * @struct ZHLN_PhysicalDeviceInfo
  * @brief Comprehensive snapshot of a Physical Device's capabilities.
  */
-typedef struct {
+typedef struct ZHLN_PhysicalDeviceInfo {
 	VkPhysicalDevice handle;				  /**< Raw Vulkan handle */
 	VkPhysicalDeviceProperties2 properties;	  /**< Device limits and name */
 	VkPhysicalDeviceFeatures2 features;		  /**< Supported hardware features */
@@ -98,7 +98,7 @@ typedef int32_t (*ZHLN_DeviceScoreFn)(const ZHLN_PhysicalDeviceInfo* const ZHLN_
  * @struct ZHLN_DeviceSelectDesc
  * @brief Constraints and logic for selecting the optimal GPU.
  */
-typedef const struct {
+typedef struct ZHLN_DeviceSelectDesc {
 	const VkInstance instance;	/**< Required: Active Vulkan instance */
 	const VkSurfaceKHR surface; /**< Optional: Surface for present support checks */
 	const ZHLN_DeviceScoreFn
@@ -116,7 +116,7 @@ ZHLN_PhysicalDeviceInfo ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* Z
 
 /* --- DEVICE CREATION --- */
 
-typedef const struct {
+typedef struct ZHLN_DeviceDesc {
 	const ZHLN_PhysicalDeviceInfo* const ZHLN_RESTRICT physical;
 	const char* const* const extensions;
 	const uint32_t extension_count;
@@ -124,7 +124,7 @@ typedef const struct {
 	const bool enable_validation;
 } ZHLN_DeviceDesc;
 
-typedef struct {
+typedef struct ZHLN_Device {
 	VkDevice handle;
 	VkQueue graphics_queue;
 	VkQueue present_queue;
@@ -135,7 +135,7 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* ZHLN_RESTRICT desc);
 
 /* --- SWAPCHAIN --- */
 
-typedef struct {
+typedef struct ZHLN_SwapchainSupport {
 	VkSurfaceCapabilitiesKHR capabilities;
 	VkSurfaceFormatKHR formats[64];
 	VkPresentModeKHR present_modes[8];
@@ -143,12 +143,12 @@ typedef struct {
 	uint32_t present_mode_count;
 } ZHLN_SwapchainSupport;
 
-typedef const struct {
+typedef struct ZHLN_SwapchainSupportDesc {
 	const VkPhysicalDevice physical;
 	const VkSurfaceKHR surface;
 } ZHLN_SwapchainSupportDesc;
 
-typedef const struct {
+typedef struct ZHLN_SwapchainDesc {
 	const ZHLN_Device* const ZHLN_RESTRICT device;
 	const ZHLN_PhysicalDeviceInfo* const ZHLN_RESTRICT physical;
 	const VkSurfaceKHR surface;
@@ -158,7 +158,7 @@ typedef const struct {
 	const VkSwapchainKHR old_swapchain; // VK_NULL_HANDLE on first create
 } ZHLN_SwapchainDesc;
 
-typedef struct {
+typedef struct ZHLN_Swapchain {
 	VkSwapchainKHR handle;
 	VkImage images[8];
 	VkImageView views[8];
@@ -178,13 +178,13 @@ void ZHLN_DestroySwapchain(VkDevice device, ZHLN_Swapchain* ZHLN_RESTRICT swapch
 
 /* --- SYNC PRIMITIVES --- */
 
-typedef struct {
+typedef struct ZHLN_FrameSync {
 	VkSemaphore image_available;
 	VkSemaphore render_finished;
 	VkFence in_flight;
 } ZHLN_FrameSync;
 
-typedef const struct {
+typedef struct ZHLN_FrameSyncDesc {
 	const VkDevice device;
 	const uint32_t frame_count;
 } ZHLN_FrameSyncDesc;
@@ -198,7 +198,7 @@ void ZHLN_DestroyFrameSync(VkDevice device, ZHLN_FrameSync* ZHLN_RESTRICT sync,
 
 /* --- COMMAND POOL AND BUFFERS --- */
 
-typedef struct {
+typedef struct ZHLN_CommandPool {
 	VkCommandPool pool;
 	uint32_t count;
 	VkCommandBuffer buffers[256];
@@ -217,20 +217,20 @@ void ZHLN_DestroyCommandPool(VkDevice device, ZHLN_CommandPool* ZHLN_RESTRICT po
 
 /* --- FRAME LOOP STRUCTURE --- */
 
-typedef enum {
+typedef enum : uint8_t {
 	ZHLN_FrameResult_Ok,
 	ZHLN_FrameResult_Suboptimal,
 	ZHLN_FrameResult_OutOfDate, // C++ must rebuild swapchain
 	ZHLN_FrameResult_Error,
 } ZHLN_FrameResult;
 
-typedef const struct {
+typedef struct ZHLN_AcquireDesc {
 	const VkSwapchainKHR swapchain;
 	const VkSemaphore image_available;
 	const uint64_t timeout_ns; // UINT64_MAX = wait forever
 } ZHLN_AcquireDesc;
 
-typedef const struct {
+typedef struct ZHLN_PresentDesc {
 	const VkQueue present_queue;
 	const VkSwapchainKHR swapchain;
 	const VkSemaphore render_finished;
@@ -247,28 +247,28 @@ ZHLN_FrameResult ZHLN_PresentFrame(const ZHLN_PresentDesc* ZHLN_RESTRICT desc);
 
 /* --- SHADER MANAGEMENT --- */
 
-typedef const struct {
+typedef struct ZHLN_ShaderDesc {
 	const uint32_t* code;					  /**< SPIR-V bytecode */
 	const size_t size;						  /**< Size in bytes */
 	[[maybe_unused]] const char* entry_point; /**< Optional: defaults to SPIRV-Reflect, if fails
-												 then defaults to "main" if NULL */
+											 then defaults to "main" if NULL */
 } ZHLN_ShaderDesc;
 
-typedef struct {
+typedef struct ZHLN_Shader {
 	VkShaderModule handle;
 	VkShaderStageFlagBits stage;
 	char entry_point[64];
 } ZHLN_Shader;
 
-typedef struct {
+typedef struct ZHLN_ShaderStages {
 	ZHLN_Shader vert;
 	ZHLN_Shader frag;
 } ZHLN_ShaderStages;
 
-typedef const struct {
-	const VkDevice device;
-	const ZHLN_ShaderDesc vert;
-	const ZHLN_ShaderDesc frag;
+typedef struct ZHLN_ShaderStagesDesc {
+    const VkDevice device;
+    const ZHLN_ShaderDesc vert;
+    const ZHLN_ShaderDesc frag;
 } ZHLN_ShaderStagesDesc;
 
 [[nodiscard]]
@@ -290,7 +290,7 @@ ZHLN_PopulateShaderStageInfos(const ZHLN_ShaderStages* ZHLN_RESTRICT stages,
 
 /* --- PIPELINE LAYOUT --- */
 
-typedef const struct {
+typedef struct ZHLN_PipelineLayoutDesc {
 	const VkDescriptorSetLayout* const ZHLN_RESTRICT set_layouts;
 	const uint32_t set_layout_count;
 	const VkPushConstantRange* const ZHLN_RESTRICT push_constants;
@@ -305,7 +305,7 @@ void ZHLN_DestroyPipelineLayout(VkDevice device, VkPipelineLayout layout);
 
 /* --- GRAPHICS PIPELINE --- */
 
-typedef const struct {
+typedef struct ZHLN_GraphicsPipelineDesc {
 	const ZHLN_ShaderStages* const ZHLN_RESTRICT stages;
 	const VkPipelineLayout layout;
 
@@ -335,9 +335,9 @@ void ZHLN_DestroyPipeline(VkDevice device, VkPipeline pipeline);
 
 /* --- RENDERING --- */
 
-typedef const struct {
+typedef struct ZHLN_RenderPassDesc {
 	const VkImageView target_views[4]; // Array instead of single view
-	const uint32_t target_count;	   // How many targets are we writing to?
+	const uint32_t target_count; 	   // How many targets are we writing to?
 	const VkImageView depth_view;
 	const VkExtent2D extent;
 	const float clear_color[4];
@@ -345,7 +345,7 @@ typedef const struct {
 	const bool use_secondaries;
 } ZHLN_RenderPassDesc;
 
-typedef const struct {
+typedef struct ZHLN_ImageBarrierDesc {
 	const VkImage image;
 	const VkAccessFlags2 src_access;
 	const VkAccessFlags2 dst_access;
@@ -361,7 +361,7 @@ typedef const struct {
 void ZHLN_BeginRendering(VkCommandBuffer cmd, const ZHLN_RenderPassDesc* ZHLN_RESTRICT desc);
 void ZHLN_EndRendering(VkCommandBuffer cmd);
 
-typedef const struct {
+typedef struct ZHLN_FrameSubmitDesc {
 	const VkQueue graphicsQueue;
 	const VkQueue presentQueue;
 	const VkCommandBuffer cmd;
@@ -377,7 +377,7 @@ ZHLN_FrameResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* ZHLN_RESTRICT
 
 /* --- FRAME HELPERS --- */
 
-typedef const struct {
+typedef struct ZHLN_SecondaryCmdDesc {
 	const VkFormat color_format;
 	const VkFormat depth_format;
 } ZHLN_SecondaryCmdDesc;
@@ -422,7 +422,7 @@ const char* ZHLN_VkResultString(VkResult result);
 
 /* --- EXECUTION HELPERS --- */
 
-typedef const struct {
+typedef struct ZHLN_BufferCopyDesc {
 	const VkBuffer src;
 	const VkBuffer dst;
 	const VkDeviceSize size;
@@ -440,7 +440,7 @@ void ZHLN_CmdCopyBuffer(VkCommandBuffer cmd, const ZHLN_BufferCopyDesc* ZHLN_RES
  */
 void ZHLN_CmdImageBarrier(VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc* ZHLN_RESTRICT desc);
 
-typedef const struct {
+typedef struct ZHLN_BufferImageCopyDesc {
 	const VkBuffer buffer;
 	const VkImage image;
 	const VkImageLayout layout;
@@ -465,7 +465,7 @@ void ZHLN_DestroySemaphore(VkDevice device, VkSemaphore semaphore);
 
 /* --- IMAGE VIEW HELPERS --- */
 
-typedef const struct {
+typedef struct ZHLN_ImageViewDesc {
 	const VkImage image;
 	const VkFormat format;
 	const VkImageAspectFlags aspect;
@@ -486,7 +486,7 @@ void ZHLN_DestroyDescriptorPool(VkDevice device, VkDescriptorPool pool);
 
 /* --- COMPUTE PIPELINE --- */
 
-typedef const struct {
+typedef struct ZHLN_ComputePipelineDesc {
 	const ZHLN_ShaderDesc shader;
 	const VkPipelineLayout layout;
 } ZHLN_ComputePipelineDesc;

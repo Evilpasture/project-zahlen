@@ -9,7 +9,6 @@
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
-#include <print>
 #include <source_location>
 #include <span>
 #include <type_traits>
@@ -20,6 +19,8 @@ namespace ZHLN {
 struct Color4 {
 	float r, g, b, a;
 };
+
+// NOLINTBEGIN(misc-misplaced-const)
 
 /**
  * @brief Thread-safe-ish ping-pong buffer for temporal rendering state.
@@ -199,9 +200,10 @@ class Context {
 		return *this;
 	}
 
-	[[nodiscard]] static auto Create(const ZHLN_InstanceDesc& instance_desc,
-									 const ZHLN_DeviceSelectDesc& select_desc,
-									 const ZHLN_DeviceDesc& device_desc) noexcept -> Context {
+	[[nodiscard("Vulkan context creation may fail; check validity with Valid() or explicit bool cast")]]
+	static auto Create(const ZHLN_InstanceDesc& instance_desc,
+						 const ZHLN_DeviceSelectDesc& select_desc,
+						 const ZHLN_DeviceDesc& device_desc) noexcept -> Context {
 		Context ctx;
 
 		// 1. Create Instance
@@ -249,7 +251,8 @@ class Context {
 		return _physical;
 	}
 
-	[[nodiscard]] auto Valid() const noexcept -> bool { return _device.handle != VK_NULL_HANDLE; }
+	[[nodiscard("Always verify context initialization; check Valid() before use")]]
+	auto Valid() const noexcept -> bool { return _device.handle != VK_NULL_HANDLE; }
 	explicit operator bool() const noexcept { return Valid(); }
 
   private:
@@ -306,7 +309,8 @@ class Swapchain {
 	}
 
 	[[nodiscard]] constexpr auto Get() const noexcept -> const ZHLN_Swapchain& { return _raw; }
-	[[nodiscard]] constexpr auto Valid() const noexcept -> bool {
+	[[nodiscard("Verify swapchain validity before use")]]
+	constexpr auto Valid() const noexcept -> bool {
 		return _raw.handle != VK_NULL_HANDLE;
 	}
 	constexpr explicit operator bool() const noexcept { return Valid(); }
@@ -376,7 +380,8 @@ class FrameSync {
 		return *this;
 	}
 
-	[[nodiscard]] static auto Create(const VkDevice device) noexcept -> FrameSync {
+	[[nodiscard("Frame sync creation may fail; verify validity before use in frame loop")]]
+	static auto Create(const VkDevice device) noexcept -> FrameSync {
 		FrameSync fs;
 		const ZHLN_FrameSyncDesc desc = {.device = device, .frame_count = N};
 		if (!ZHLN_CreateFrameSync(&desc, fs._frames.data())) {
@@ -391,7 +396,8 @@ class FrameSync {
 		return _frames[frame % N];
 	}
 	[[nodiscard]] static constexpr auto Count() noexcept -> uint32_t { return N; }
-	[[nodiscard]] constexpr auto Valid() const noexcept -> bool {
+	[[nodiscard("Check FrameSync validity before use in frame loop")]]
+	constexpr auto Valid() const noexcept -> bool {
 		return _device != VK_NULL_HANDLE;
 	}
 
@@ -416,6 +422,9 @@ class CommandPool {
 		}
 	}
 
+	CommandPool(const CommandPool&) = delete;
+	auto operator=(const CommandPool&) -> CommandPool& = delete;
+
 	// Move only
 	constexpr CommandPool(CommandPool&& other) noexcept
 		: _device(std::exchange(other._device, VK_NULL_HANDLE)),
@@ -432,7 +441,8 @@ class CommandPool {
 		return *this;
 	}
 
-	[[nodiscard]] constexpr auto Valid() const noexcept -> bool {
+	[[nodiscard("Verify command pool validity before allocation")]]
+	constexpr auto Valid() const noexcept -> bool {
 		return _device != VK_NULL_HANDLE;
 	}
 	[[nodiscard]] constexpr explicit operator bool() const noexcept { return Valid(); }
@@ -441,7 +451,8 @@ class CommandPool {
 	[[nodiscard]] constexpr operator const ZHLN_CommandPool&() const noexcept { return _raw; }
 	[[nodiscard]] constexpr operator ZHLN_CommandPool&() noexcept { return _raw; }
 
-	[[nodiscard]] auto Allocate(const uint32_t count) -> bool {
+	[[nodiscard("Check allocation success before using command buffers")]]
+	auto Allocate(const uint32_t count) -> bool {
 		if (!Valid()) {
 			return false;
 		}
@@ -452,7 +463,8 @@ class CommandPool {
 		return _raw.buffers[idx];
 	}
 
-	[[nodiscard]] auto AllocateSecondary(const uint32_t count) -> bool {
+	[[nodiscard("Check allocation success before using secondary command buffers")]]
+	auto AllocateSecondary(const uint32_t count) -> bool {
 		if (!Valid()) {
 			return false;
 		}
@@ -483,8 +495,9 @@ class CommandPools {
 	// Rule of Zero: Destructor, Copy, and Move variants are entirely
 	// compiler-synthesized. No redundant tracking code required.
 
-	[[nodiscard]] static auto Create(const VkDevice device, const uint32_t queue_family,
-									 const uint32_t buffers_per_pool = 1) noexcept -> CommandPools {
+	[[nodiscard("Command pools must be verified before use in command recording")]]
+	static auto Create(const VkDevice device, const uint32_t queue_family,
+						 const uint32_t buffers_per_pool = 1) noexcept -> CommandPools {
 		CommandPools cp;
 		for (auto& pool : cp._pools) {
 			pool = CommandPool(device, queue_family);
@@ -508,7 +521,8 @@ class CommandPools {
 		return _pools[frame % N][0]; // Uses CommandPool's cleaner indexing
 	}
 
-	[[nodiscard]] constexpr auto Valid() const noexcept -> bool { return _pools[0].Valid(); }
+	[[nodiscard("Verify command pools are valid before frame recording")]]
+	constexpr auto Valid() const noexcept -> bool { return _pools[0].Valid(); }
 
   private:
 	std::array<CommandPool, N> _pools = {};
@@ -531,6 +545,7 @@ class ShaderStages {
 	ShaderStages(ShaderStages&& other) noexcept;
 	auto operator=(ShaderStages&& other) noexcept -> ShaderStages&;
 
+	[[nodiscard("Shader creation may fail; verify validity before binding")]]
 	static auto Create(const VkDevice device, const ZHLN_ShaderDesc& vert,
 					   const ZHLN_ShaderDesc& frag) noexcept -> ShaderStages {
 		const ZHLN_ShaderStagesDesc desc = {.device = device, .vert = vert, .frag = frag};
@@ -541,13 +556,15 @@ class ShaderStages {
 		return {device, stages};
 	}
 
-	[[nodiscard]] static auto FromFiles(VkDevice device, const std::filesystem::path& vert_path,
-										const std::filesystem::path& frag_path,
-										const char* vert_entry = "main",
-										const char* frag_entry = "main") noexcept -> ShaderStages;
+	[[nodiscard("Shader loading from files may fail; verify validity before use")]]
+	static auto FromFiles(VkDevice device, const std::filesystem::path& vert_path,
+						   const std::filesystem::path& frag_path,
+						   const char* vert_entry = "main",
+						   const char* frag_entry = "main") noexcept -> ShaderStages;
 
 	[[nodiscard]] constexpr auto Get() const noexcept -> const ZHLN_ShaderStages* { return &_raw; }
-	[[nodiscard]] constexpr auto Valid() const noexcept -> bool {
+	[[nodiscard("Always verify shader stages are valid before pipeline creation")]]
+	constexpr auto Valid() const noexcept -> bool {
 		return _raw.vert.handle != VK_NULL_HANDLE;
 	}
 
@@ -572,6 +589,9 @@ class ScopedRendering {
 		ZHLN_BeginRendering(_cmd, &desc);
 	}
 	~ScopedRendering() noexcept { ZHLN_EndRendering(_cmd); }
+
+	ScopedRendering(ScopedRendering&&) = delete;
+	auto operator=(ScopedRendering&&) -> ScopedRendering& = delete;
 
 	ScopedRendering(const ScopedRendering&) = delete;
 	auto operator=(const ScopedRendering&) -> ScopedRendering& = delete;
@@ -762,10 +782,15 @@ template <size_t ColorCount = 1, bool HasDepth = false> class DynamicPass {
 						 VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE) noexcept
 		-> DynamicPass& {
 		_colors[index] = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+						  .pNext = nullptr,
 						  .imageView = view,
 						  .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+						  .resolveMode = VK_RESOLVE_MODE_NONE,
+						  .resolveImageView = VK_NULL_HANDLE,
+						  .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
 						  .loadOp = loadOp,
-						  .storeOp = storeOp};
+						  .storeOp = storeOp,
+						  .clearValue = {.color = {.float32 = {0.0f, 0.0f, 0.0f, 1.0f}}}};
 		return *this;
 	}
 
@@ -775,8 +800,12 @@ template <size_t ColorCount = 1, bool HasDepth = false> class DynamicPass {
 		requires(HasDepth)
 	{
 		_depth = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+				  .pNext = nullptr,
 				  .imageView = view,
 				  .imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+				  .resolveMode = VK_RESOLVE_MODE_NONE,
+				  .resolveImageView = VK_NULL_HANDLE,
+				  .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
 				  .loadOp = loadOp,
 				  .storeOp = storeOp,
 				  .clearValue = {.depthStencil = {.depth = clearVal, .stencil = 0}}};
@@ -818,7 +847,7 @@ template <size_t ColorCount = 1, bool HasDepth = false> class DynamicPass {
 									 .height = -(float)_extent.height,
 									 .minDepth = 0.0f,
 									 .maxDepth = 1.0f};
-		const VkRect2D scissor = {.offset = {0, 0}, .extent = _extent};
+		const VkRect2D scissor = {.offset = {.x = 0, .y = 0}, .extent = _extent};
 		vkCmdSetViewport(cmd, 0, 1, &viewport);
 		vkCmdSetScissor(cmd, 0, 1, &scissor);
 
@@ -989,7 +1018,8 @@ class alignas(64) SemaphorePool {
 		}
 	}
 
-	[[nodiscard]] auto operator[](const uint32_t index) const noexcept -> VkSemaphore {
+	[[nodiscard("Semaphore access must be checked for bounds; invalid indices will crash")]]
+	auto operator[](const uint32_t index) const noexcept -> VkSemaphore {
 		if (index >= _count) [[unlikely]] {
 			// Dispatches directly to the compilation unit's out-of-line crash reporter
 			ReportSemaphoreBoundsError(index, _count);
@@ -998,7 +1028,8 @@ class alignas(64) SemaphorePool {
 	}
 
 	[[nodiscard]] auto Count() const noexcept -> uint32_t { return _count; }
-	[[nodiscard]] auto Valid() const noexcept -> bool { return _device != VK_NULL_HANDLE; }
+	[[nodiscard("Verify semaphore pool is initialized before use")]]
+	auto Valid() const noexcept -> bool { return _device != VK_NULL_HANDLE; }
 
   private:
 	void Cleanup() noexcept {
@@ -1010,7 +1041,7 @@ class alignas(64) SemaphorePool {
 		auto* const d = _device;
 		for (uint32_t i = 0; i < _count; ++i) {
 			// Local null check prevents expensive driver thunk if slot is empty
-			if (_semaphores[i]) {
+			if (_semaphores[i] != VK_NULL_HANDLE) {
 				vkDestroySemaphore(d, _semaphores[i], nullptr);
 			}
 		}
@@ -1244,5 +1275,7 @@ inline void GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, cons
 	ZHLN_GenerateMipmaps(cmd, image, static_cast<int32_t>(width), static_cast<int32_t>(height),
 						 levels);
 }
+
+// NOLINTEND(misc-misplaced-const)
 
 } // namespace ZHLN::Vk

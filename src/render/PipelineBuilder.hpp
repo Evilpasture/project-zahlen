@@ -6,6 +6,19 @@
 namespace ZHLN::Vk {
 
 // ============================================================================
+// Pipeline Builder Result Codes
+// ============================================================================
+
+enum class PipelineBuilderResult : uint8_t {
+	Succeeded = 0,
+	MissingShaders = 1,
+	MissingLayout = 2,
+};
+
+void ReportPipelineBuilderError(PipelineBuilderResult result) noexcept;
+void ReportComputePipelineBuilderError(PipelineBuilderResult result) noexcept;
+
+// ============================================================================
 // PipelineConfig — compile-time-friendly POD carrying all pipeline state
 // ============================================================================
 
@@ -148,8 +161,11 @@ class PipelineBuilder {
 
 	// Validate and hand off to your existing C backend.
 	// Returns an empty Pipeline on misconfiguration so callers can check .Valid().
-	[[nodiscard]] auto Build(VkDevice device) const noexcept -> Pipeline {
-		if (!Validate()) {
+	[[nodiscard("Pipeline creation may fail; verify validity before use")]]
+	auto Build(VkDevice device) const noexcept -> Pipeline {
+		const auto result = Validate();
+		if (result != PipelineBuilderResult::Succeeded) {
+			ReportPipelineBuilderError(result);
 			return {};
 		}
 
@@ -176,16 +192,14 @@ class PipelineBuilder {
 	}
 
   private:
-	[[nodiscard]] auto Validate() const noexcept -> bool {
+	[[nodiscard]] auto Validate() const noexcept -> PipelineBuilderResult {
 		if (_cfg.stages == nullptr) {
-			std::println(stderr, "[PipelineBuilder] Missing shader stages.");
-			return false;
+			return PipelineBuilderResult::MissingShaders;
 		}
 		if (_cfg.layout == VK_NULL_HANDLE) {
-			std::println(stderr, "[PipelineBuilder] Missing pipeline layout.");
-			return false;
+			return PipelineBuilderResult::MissingLayout;
 		}
-		return true;
+		return PipelineBuilderResult::Succeeded;
 	}
 
 	PipelineConfig _cfg;
@@ -219,8 +233,11 @@ class ComputePipelineBuilder {
 		return *this;
 	}
 
-	[[nodiscard]] auto Build(const VkDevice device) const noexcept -> Pipeline {
-		if (!Validate()) {
+	[[nodiscard("Compute pipeline creation may fail; verify validity before use")]]
+	auto Build(const VkDevice device) const noexcept -> Pipeline {
+		const auto result = Validate();
+		if (result != PipelineBuilderResult::Succeeded) {
+			ReportComputePipelineBuilderError(result);
 			return {};
 		}
 
@@ -235,16 +252,14 @@ class ComputePipelineBuilder {
 	}
 
   private:
-	[[nodiscard]] auto Validate() const noexcept -> bool {
+	[[nodiscard]] auto Validate() const noexcept -> PipelineBuilderResult {
 		if ((_code == nullptr) || _size == 0) {
-			std::println(stderr, "[ComputePipelineBuilder] Missing or invalid shader code.");
-			return false;
+			return PipelineBuilderResult::MissingShaders;
 		}
 		if (_layout == VK_NULL_HANDLE) {
-			std::println(stderr, "[ComputePipelineBuilder] Missing pipeline layout.");
-			return false;
+			return PipelineBuilderResult::MissingLayout;
 		}
-		return true;
+		return PipelineBuilderResult::Succeeded;
 	}
 
 	const uint32_t* _code = nullptr;
