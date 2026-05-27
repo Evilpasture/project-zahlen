@@ -542,7 +542,7 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
 	// --- Maintenance 1 Logic ---
 
 	// Check if the extension was enabled during device creation
-	const auto maint1_fn = vkGetDeviceProcAddr(desc->device->handle, "vkReleaseSwapchainImagesKHR");
+	auto const maint1_fn = vkGetDeviceProcAddr(desc->device->handle, "vkReleaseSwapchainImagesKHR");
 	const bool has_maint1 = (maint1_fn != nullptr);
 
 	// Prepare the "Handshake" struct
