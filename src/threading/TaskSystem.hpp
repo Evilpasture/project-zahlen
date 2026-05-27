@@ -1,9 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <detail/Atomic.hpp>
-#include <functional>
 #include <span>
-#include <vector>
 
 namespace ZHLN {
 struct Fiber;
@@ -54,34 +52,56 @@ void Wait(Counter* counter);
 void WakeUp(ZHLN::Fiber* fiber);
 
 template <typename Func> void ParallelFor(uint32_t count, uint32_t chunkSize, Func&& func) {
-	if (count == 0)
+	if (count == 0) {
 		return;
+	}
 	if (count <= chunkSize) {
-		func(0, count, 0); // start, end, chunkIdx
+		std::forward<Func>(func)(0, count, 0); // start, end, chunkIdx
 		return;
 	}
 
-	uint32_t numChunks = (count + chunkSize - 1) / chunkSize;
-	std::vector<Task> tasks(numChunks);
-	std::vector<std::function<void()>> jobs(numChunks);
+	constexpr uint32_t MaxChunks = 128;
+	uint32_t adjustedChunkSize = chunkSize;
+	uint32_t numChunks = (count + adjustedChunkSize - 1) / adjustedChunkSize;
+
+	// Rescale chunk size to fit our bounds, then dynamically compute
+	// the exact number of active chunks required to avoid launching empty tasks.
+	if (numChunks > MaxChunks) {
+		adjustedChunkSize = (count + MaxChunks - 1) / MaxChunks;
+		numChunks = (count + adjustedChunkSize - 1) / adjustedChunkSize;
+	}
+
+	using DecayedFunc = std::remove_cvref_t<Func>;
+	struct ChunkJob {
+		const DecayedFunc* func;
+		uint32_t start;
+		uint32_t end;
+		uint32_t chunkIdx;
+	};
+
+	std::array<Task, MaxChunks> tasks{};
+	std::array<ChunkJob, MaxChunks> jobs{};
+
+	// Zero-overhead address retrieval (Bypasses any custom operator& overloads)
+	const DecayedFunc* funcPtr = std::addressof(func);
 
 	for (uint32_t i = 0; i < numChunks; ++i) {
-		uint32_t start = i * chunkSize;
-		uint32_t end = std::min(start + chunkSize, count);
+		uint32_t start = i * adjustedChunkSize;
+		uint32_t end = std::min(start + adjustedChunkSize, count);
 
-		// Pass 'i' as the chunkIdx
-		jobs[i] = [&func, start, end, i]() { func(start, end, i); };
+		jobs[i] = {.func = funcPtr, .start = start, .end = end, .chunkIdx = i};
 
-		tasks[i].func = [](void* arg) {
-			auto* job = static_cast<std::function<void()>*>(arg);
-			(*job)();
-		};
-		tasks[i].arg = &jobs[i];
+		tasks[i] = {.func =
+						[](void* arg) {
+							auto* job = static_cast<ChunkJob*>(arg);
+							(*job->func)(job->start, job->end, job->chunkIdx);
+						},
+					.arg = &jobs[i]};
 	}
 
 	Counter sync;
-	Dispatch(tasks, &sync);
-	Wait(&sync);
+	Dispatch(std::span<const Task>(tasks.data(), numChunks), &sync);
+	Wait(&sync); // Fiber yields cleanly; stack frame stays 100% frozen and valid
 }
 
 } // namespace ZHLN::TaskSystem
