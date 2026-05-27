@@ -284,9 +284,9 @@ foreach(APP_TARGET zahlen_game zahlen_editor)
         )
     else()
         add_custom_command(TARGET ${APP_TARGET} POST_BUILD
-            # Clean up existing symlinks first to prevent "File exists" errors
-            COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE_DIR:${APP_TARGET}>/resources"
-            COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE_DIR:${APP_TARGET}>/scripts"
+            # Clean up existing symlinks/directories first to prevent "File exists" errors
+            COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:${APP_TARGET}>/resources"
+            COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:${APP_TARGET}>/scripts"
             COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_SOURCE_DIR}/resources" "$<TARGET_FILE_DIR:${APP_TARGET}>/resources"
             COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_SOURCE_DIR}/scripts" "$<TARGET_FILE_DIR:${APP_TARGET}>/scripts"
             COMMENT "Linking resources and scripts for ${APP_TARGET}..."
