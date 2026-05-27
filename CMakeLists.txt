@@ -272,27 +272,22 @@ if(NOT MSVC)
     endif()
 endif()
 
-# --- 9. RESOURCE LINKING (Looping over both executables) ---
-foreach(APP_TARGET zahlen_game zahlen_editor)
-    if(WIN32)
-        add_custom_command(TARGET ${APP_TARGET} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:${APP_TARGET}>/resources"
-            COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:${APP_TARGET}>/scripts"
-            COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_SOURCE_DIR}/resources" "$<TARGET_FILE_DIR:${APP_TARGET}>/resources"
-            COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_SOURCE_DIR}/scripts" "$<TARGET_FILE_DIR:${APP_TARGET}>/scripts"
-            COMMENT "Linking resources and scripts for ${APP_TARGET} (Zero-Copy)..."
-        )
-    else()
-        add_custom_command(TARGET ${APP_TARGET} POST_BUILD
-            # Clean up existing symlinks/directories first to prevent "File exists" errors
-            COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:${APP_TARGET}>/resources"
-            COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:${APP_TARGET}>/scripts"
-            COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_SOURCE_DIR}/resources" "$<TARGET_FILE_DIR:${APP_TARGET}>/resources"
-            COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_SOURCE_DIR}/scripts" "$<TARGET_FILE_DIR:${APP_TARGET}>/scripts"
-            COMMENT "Linking resources and scripts for ${APP_TARGET}..."
-        )
-    endif()
-endforeach()
+# --- 9. RESOURCE LINKING (Single target to avoid parallel race conditions) ---
+add_custom_target(link_resources ALL
+    COMMAND ${CMAKE_COMMAND} 
+        -D SRC="${CMAKE_SOURCE_DIR}/resources" 
+        -D DST="${CMAKE_CURRENT_BINARY_DIR}/resources" 
+        -P "${CMAKE_SOURCE_DIR}/cmake/CreateSymlinks.cmake"
+    COMMAND ${CMAKE_COMMAND} 
+        -D SRC="${CMAKE_SOURCE_DIR}/scripts" 
+        -D DST="${CMAKE_CURRENT_BINARY_DIR}/scripts" 
+        -P "${CMAKE_SOURCE_DIR}/cmake/CreateSymlinks.cmake"
+    COMMENT "Creating zero-copy symlinks for resources and scripts..."
+)
+
+# Make both executable targets depend on it so they wait for it to finish
+add_dependencies(zahlen_game link_resources)
+add_dependencies(zahlen_editor link_resources)
 
 
 
