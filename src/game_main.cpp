@@ -116,12 +116,13 @@ void UpdateCulling(Engine& engine) {
 		JPH::Vec3 pos = JPH::Vec3::sZero();
 
 		// Position offsets for inspection layout
-		if (e.index == 2)
+		if (e.index == 2) {
 			pos = JPH::Vec3(0.0f, 0.0f, 0.0f); // Pomni at center
-		else if (e.index == 3)
+		} else if (e.index == 3) {
 			pos = JPH::Vec3(2.5f, 0.5f, -1.0f); // Caine hovering right
-		else if (e.index == 4)
+		} else if (e.index == 4) {
 			pos = JPH::Vec3(-2.5f, 0.0f, 1.0f); // Kinger left
+		}
 
 		// The room (index 1) remains at origin
 		if (cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius)) {
