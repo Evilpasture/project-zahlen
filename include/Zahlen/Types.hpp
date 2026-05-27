@@ -34,9 +34,8 @@ struct Vertex {
 	PackedHalf2 uv;		   // 4B  - 16-bit UVs
 	PackedRGBA8 color;	   // 4B  - RGBA8
 	uint16_t joints[4];	   // 8B  - 16-bit Joint indices (Vulkan VK_FORMAT_R16G16B16A16_UINT)
-	float weights[4];	   // 16B - 32-bit float weights (Vulkan VK_FORMAT_R32G32B32_SFLOAT)
-	uint32_t
-		_padding[3]; // 12B - Pad to exactly 64 bytes (1 cache line) for optimal cache-lines fetches
+	float weights[4];	   // 16B - 32-bit float weights (Vulkan VK_FORMAT_R32G32B32A32_SFLOAT)
+	uint32_t _padding[3];  // 12B - Pad to exactly 64 bytes
 };
 
 static_assert(sizeof(Vertex) == 64, "Vertex must be exactly 64 bytes!");
