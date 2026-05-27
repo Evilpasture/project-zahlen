@@ -41,7 +41,7 @@ template <> struct FormatOf<uint16_t[4]> {
 	static constexpr auto value = VK_FORMAT_R16G16B16A16_UINT;
 };
 template <> struct FormatOf<float[4]> {
-	static constexpr auto value = VK_FORMAT_R32G32B32_SFLOAT;
+	static constexpr auto value = VK_FORMAT_R32G32B32A32_SFLOAT;
 };
 
 // std::array mappings (Vec2, Vec3, Vec4)
