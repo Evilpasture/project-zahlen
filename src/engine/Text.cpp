@@ -55,25 +55,33 @@ auto CreateTextMesh(RenderContext& ctx, const std::string& text, float x, float 
 					  .tangent = dummyTangent,
 					  .uv = Math::PackUV(u0, v0),
 					  .color = packedColor,
-					  ._padding = 0};
+					  .joints = {0, 0, 0, 0},
+					  .weights = {0.0f, 0.0f, 0.0f, 0.0f},
+					  ._padding = {}};
 		Vertex vTR = {.position = {x1, y0, 0.0f},
 					  .normal = dummyNormal,
 					  .tangent = dummyTangent,
 					  .uv = Math::PackUV(u1, v0),
 					  .color = packedColor,
-					  ._padding = 0};
+					  .joints = {0, 0, 0, 0},
+					  .weights = {0.0f, 0.0f, 0.0f, 0.0f},
+					  ._padding = {}};
 		Vertex vBL = {.position = {x0, y1, 0.0f},
 					  .normal = dummyNormal,
 					  .tangent = dummyTangent,
 					  .uv = Math::PackUV(u0, v1),
 					  .color = packedColor,
-					  ._padding = 0};
+					  .joints = {0, 0, 0, 0},
+					  .weights = {0.0f, 0.0f, 0.0f, 0.0f},
+					  ._padding = {}};
 		Vertex vBR = {.position = {x1, y1, 0.0f},
 					  .normal = dummyNormal,
 					  .tangent = dummyTangent,
 					  .uv = Math::PackUV(u1, v1),
 					  .color = packedColor,
-					  ._padding = 0};
+					  .joints = {0, 0, 0, 0},
+					  .weights = {0.0f, 0.0f, 0.0f, 0.0f},
+					  ._padding = {}};
 
 		// CCW Tri 1 (TL -> BL -> TR)
 		vertices.push_back(vTL);

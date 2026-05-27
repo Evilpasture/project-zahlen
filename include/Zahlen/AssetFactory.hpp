@@ -25,4 +25,7 @@ uint32_t LoadCookedTexture(RenderContext& ctx, AssetManager& assetMgr,
 						   const std::string& virtualPath);
 
 std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::string& path);
+
+// --- NEW: Expose runtime skeletal animation update loop ---
+void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt);
 } // namespace ZHLN::AssetFactory

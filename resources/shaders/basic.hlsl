@@ -23,36 +23,39 @@ struct FrameUniforms {
 };
 
 struct ObjectConstants {
-	float4x4 world;
-	float4x4 prevWorld;
-	uint albedoIdx;
-	uint normalIdx;
-	uint pbrIdx;
-	uint emissiveIdx;
-	uint isShadowPass;
-	float metallicFactor;
-	float roughnessFactor;
-	float alphaCutoff;
-	uint alphaMode;
-	uint3 padding; // Explicit 12-byte alignment padding
-	float4 baseColorFactor;
+	float4x4 world;			// 64
+	float4x4 prevWorld;		// 64
+	uint albedoIdx;			// 4
+	uint normalIdx;			// 4
+	uint pbrIdx;			// 4
+	uint emissiveIdx;		// 4
+	uint isShadowPass;		// 4
+	float metallicFactor;	// 4
+	float roughnessFactor;	// 4
+	float alphaCutoff;		// 4
+	uint alphaMode;			// 4
+	uint jointOffset;		// 4
+	uint isSkinned;			// 4
+	uint padding;			// 4  (Explicit padding before 16-byte aligned float4)
+	float4 baseColorFactor; // 16
 };
 
 struct InstanceData {
-	float4x4 world;
-	float4x4 prevWorld;
-	uint albedoIdx;
-	uint normalIdx;
-	uint pbrIdx;
-	uint emissiveIdx;
-	uint vertexCount;
-	float cullRadius;
-	float metallicFactor;
-	float roughnessFactor;
-	float alphaCutoff;
-	uint alphaMode;
-	uint2 padding; // Explicit 8-byte alignment padding
-	float4 baseColorFactor;
+	float4x4 world;			// 64
+	float4x4 prevWorld;		// 64
+	uint albedoIdx;			// 4
+	uint normalIdx;			// 4
+	uint pbrIdx;			// 4
+	uint emissiveIdx;		// 4
+	uint vertexCount;		// 4
+	float cullRadius;		// 4
+	float metallicFactor;	// 4
+	float roughnessFactor;	// 4
+	float alphaCutoff;		// 4
+	uint alphaMode;			// 4
+	uint jointOffset;		// 4
+	uint isSkinned;			// 4
+	float4 baseColorFactor; // 16
 };
 
 [[vk::push_constant]] ObjectConstants obj;
@@ -64,6 +67,7 @@ struct InstanceData {
 [[vk::binding(3, 0)]] SamplerComparisonState shadowSampler;
 [[vk::binding(4, 0)]] ConstantBuffer<FrameUniforms> frame;
 [[vk::binding(5, 0)]] StructuredBuffer<Light> lights;
+[[vk::binding(7, 0)]] StructuredBuffer<float4x4> g_joints; // Dynamic Skeletal joint SSBO
 
 struct VSInput {
 	[[vk::location(0)]] float3 position : POSITION;
@@ -71,6 +75,8 @@ struct VSInput {
 	[[vk::location(2)]] float4 tangent : TANGENT;
 	[[vk::location(3)]] float2 uv : TEXCOORD;
 	[[vk::location(4)]] float4 color : COLOR;
+	[[vk::location(5)]] uint4 joints : JOINTS;	  // Dynamic Skeletal Joint Index Attribute
+	[[vk::location(6)]] float4 weights : WEIGHTS; // Dynamic Skeletal Joint Weight Attribute
 };
 
 struct VSOutput {
@@ -98,6 +104,8 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 	float4 baseColorFactor;
 	float metallicFactor, roughnessFactor, alphaCutoff;
 	uint alphaMode;
+	uint jointOffset;
+	uint isSkinned;
 
 	// --- FIX: Correct CPU/GPU Path Routing ---
 	if (obj.isShadowPass != 0 || obj.albedoIdx != 0) {
@@ -113,6 +121,8 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 		roughnessFactor = obj.roughnessFactor;
 		alphaCutoff = obj.alphaCutoff;
 		alphaMode = obj.alphaMode;
+		jointOffset = obj.jointOffset;
+		isSkinned = obj.isSkinned;
 	} else {
 		// --- GPU CULLING PATH ---
 		InstanceData inst = g_instances[instanceId];
@@ -127,9 +137,27 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 		roughnessFactor = inst.roughnessFactor;
 		alphaCutoff = inst.alphaCutoff;
 		alphaMode = inst.alphaMode;
+		jointOffset = inst.jointOffset;
+		isSkinned = inst.isSkinned;
 	}
 
-	float4 worldPos = mul(worldMatrix, float4(input.position, 1.0f));
+	// --- STEP 4B: Evaluate the 4-Bone Skeletal Matrix Blend ---
+	float4 localPos = float4(input.position, 1.0f);
+	float3 localNormal = input.normal * 2.0f - 1.0f;
+	float3 localTangent = input.tangent.xyz * 2.0f - 1.0f;
+
+	if (isSkinned != 0) {
+		float4x4 skinMatrix = g_joints[jointOffset + input.joints.x] * input.weights.x +
+							  g_joints[jointOffset + input.joints.y] * input.weights.y +
+							  g_joints[jointOffset + input.joints.z] * input.weights.z +
+							  g_joints[jointOffset + input.joints.w] * input.weights.w;
+
+		localPos = mul(skinMatrix, localPos);
+		localNormal = mul((float3x3)skinMatrix, localNormal);
+		localTangent = mul((float3x3)skinMatrix, localTangent);
+	}
+
+	float4 worldPos = mul(worldMatrix, localPos);
 	output.worldPos = worldPos.xyz;
 
 	if (obj.isShadowPass != 0) {
@@ -152,18 +180,14 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 	output.currClip = mul(frame.viewProj, worldPos);
 	output.pos = output.currClip;
 
-	float4 prevWorldPos = mul(prevWorldMatrix, float4(input.position, 1.0f));
+	float4 prevWorldPos = mul(prevWorldMatrix, localPos);
 	output.prevClip = mul(frame.prevViewProj, prevWorldPos);
 
 	float3x3 world3x3 = (float3x3)worldMatrix;
 
-	// --- NEW: UNPACK NORMALS AND TANGENTS FROM UNORM [0, 1] TO [-1, 1] ---
-	float3 unpackedNormal = input.normal * 2.0f - 1.0f;
-	output.normal = normalize(mul(world3x3, unpackedNormal));
-
-	float3 unpackedTangent = input.tangent.xyz * 2.0f - 1.0f;
-	output.tangent.xyz = normalize(mul(world3x3, unpackedTangent));
-	output.tangent.w = input.tangent.w; // W holds the bitangent sign, no unpack needed
+	output.normal = normalize(mul(world3x3, localNormal));
+	output.tangent.xyz = normalize(mul(world3x3, localTangent));
+	output.tangent.w = input.tangent.w;
 
 	output.uv = input.uv;
 	output.shadowPos = mul(frame.lightSpaceMatrix, worldPos);
@@ -212,8 +236,6 @@ struct PSOutput {
 };
 
 // --- SPECIALIZED SHADOW PASS ENTRY POINT ---
-// Since we only evaluate the Alpha Mask discard and return void,
-// this will NEVER trigger a VkCmdDraw() unconsumed target warning!
 void PSShadow(VSOutput input) {
 	uint4 indices = input.materialIndices;
 	float4 baseColorFactor = input.baseColorFactor;

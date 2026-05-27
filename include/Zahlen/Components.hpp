@@ -13,6 +13,10 @@ struct MeshComponent {
 	float cullRadius = 1.0f;
 	JPH::Mat44 localTransform = JPH::Mat44::sIdentity();
 	JPH::Mat44 prevTransform = JPH::Mat44::sIdentity();
+	uint32_t jointOffset = 0;
+	bool isSkinned = false;
+	void* gltfNode = nullptr; // Node reference for skeletal animation
+	void* gltfSkin = nullptr; // Skin reference for skeleton deformers
 };
 
 /**

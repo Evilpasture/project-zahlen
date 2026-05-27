@@ -8,7 +8,7 @@ namespace ZHLN {
 void RenderContext::Impl::CompileShadowPipeline(VkDevice device, const void* shaderData,
 												size_t shaderSize) {
 	auto v_desc = Vk::CreateShaderDesc(Vk::AsSpirV(shaderData), shaderSize);
-	// Use our specialized non-outputting fragment shader!
+	// NEW: Include fragment shader in shadow pass so alpha-discard functions correctly!
 	ZHLN_ShaderDesc f_desc = {.code = Vk::AsSpirV(&ZHLN_Resource_ShadowFragSpv[0]),
 							  .size = ZHLN_Resource_ShadowFragSpv_Len,
 							  .entry_point = "PSShadow"};
@@ -230,6 +230,16 @@ auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t hei
 	impl->textureViews.push_back(std::move(gpuView));
 
 	return index;
+}
+
+void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices,
+										uint32_t count) {
+	if (count == 0) {
+		return;
+	}
+	auto mappedRegion = _impl->jointBuffer.Map();
+	auto* gpuJoints = reinterpret_cast<JPH::Mat44*>(mappedRegion.data);
+	std::memcpy(gpuJoints + offset, matrices, count * sizeof(JPH::Mat44));
 }
 
 } // namespace ZHLN

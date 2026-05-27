@@ -13,7 +13,8 @@ struct InstanceData {
 	float roughnessFactor;
 	float alphaCutoff;
 	uint alphaMode;
-	uint2 padding; // Explicit 8-byte alignment padding
+	uint jointOffset;
+	uint isSkinned;
 	float4 baseColorFactor;
 };
 

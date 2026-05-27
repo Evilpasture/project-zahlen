@@ -59,9 +59,14 @@ void RenderContext::BeginFrame() {
 	ZHLN_AcquireDesc acq = {.swapchain = _impl->presentation.swapchain.Get().handle,
 							.image_available = s.image_available,
 							.timeout_ns = UINT64_MAX};
-	if (ZHLN_AcquireImage(_impl->ctx.Device(), &acq, &_impl->current_image_index) ==
-		ZHLN_FrameResult_OutOfDate) {
+
+	// Defensive image acquisition check
+	auto acq_res = ZHLN_AcquireImage(_impl->ctx.Device(), &acq, &_impl->current_image_index);
+	if (acq_res == ZHLN_FrameResult_OutOfDate || acq_res == ZHLN_FrameResult_Suboptimal) {
 		_impl->resized = true;
+		_impl->current_cmd = VK_NULL_HANDLE;
+		return;
+	} else if (acq_res == ZHLN_FrameResult_Error) {
 		_impl->current_cmd = VK_NULL_HANDLE;
 		return;
 	}
@@ -144,6 +149,8 @@ void RenderContext::Impl::RenderShadowPass(VkCommandBuffer cmd) {
 					.roughnessFactor = 0.0f,
 					.alphaCutoff = draw.alphaCutoff,
 					.alphaMode = draw.alphaMode,
+					.jointOffset = draw.jointOffset,
+					.isSkinned = draw.isSkinned,
 					._padding = {},
 					.baseColorFactor = {draw.baseColorFactor[0], draw.baseColorFactor[1],
 										draw.baseColorFactor[2], draw.baseColorFactor[3]}};
@@ -300,6 +307,8 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 										   .roughnessFactor = drawCmd.roughnessFactor,
 										   .alphaCutoff = drawCmd.alphaCutoff,
 										   .alphaMode = drawCmd.alphaMode,
+										   .jointOffset = drawCmd.jointOffset,
+										   .isSkinned = drawCmd.isSkinned,
 										   ._padding = {},
 										   .baseColorFactor = {drawCmd.baseColorFactor[0],
 															   drawCmd.baseColorFactor[1],
@@ -365,21 +374,23 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCom
 	NativeMesh* currentMesh = nullptr;
 	for (uint32_t i = 0; i < drawCount; ++i) {
 		const auto& drawCmd = drawQueue[i];
-		mapped[i] = {.world = drawCmd.transform,
-					 .prevWorld = drawCmd.prevTransform,
-					 .albedoIndex = drawCmd.albedoIndex,
-					 .normalIndex = drawCmd.normalIndex,
-					 .pbrIndex = drawCmd.pbrIndex,
-					 .emissiveIndex = drawCmd.emissiveIndex,
-					 .vertexCount = drawCmd.mesh->vertexCount,
-					 .cullRadius = drawCmd.cullRadius,
-					 .metallicFactor = drawCmd.metallicFactor,
-					 .roughnessFactor = drawCmd.roughnessFactor,
-					 .alphaCutoff = drawCmd.alphaCutoff,
-					 .alphaMode = drawCmd.alphaMode,
-					 ._padding = {},
-					 .baseColorFactor = {drawCmd.baseColorFactor[0], drawCmd.baseColorFactor[1],
-										 drawCmd.baseColorFactor[2], drawCmd.baseColorFactor[3]}};
+		mapped[i] = InstanceData{
+			.world = drawCmd.transform,
+			.prevWorld = drawCmd.prevTransform,
+			.albedoIndex = drawCmd.albedoIndex,
+			.normalIndex = drawCmd.normalIndex,
+			.pbrIndex = drawCmd.pbrIndex,
+			.emissiveIndex = drawCmd.emissiveIndex,
+			.vertexCount = drawCmd.mesh->vertexCount,
+			.cullRadius = drawCmd.cullRadius,
+			.metallicFactor = drawCmd.metallicFactor,
+			.roughnessFactor = drawCmd.roughnessFactor,
+			.alphaCutoff = drawCmd.alphaCutoff,
+			.alphaMode = drawCmd.alphaMode,
+			.jointOffset = drawCmd.jointOffset,
+			.isSkinned = drawCmd.isSkinned,
+			.baseColorFactor = {drawCmd.baseColorFactor[0], drawCmd.baseColorFactor[1],
+								drawCmd.baseColorFactor[2], drawCmd.baseColorFactor[3]}};
 
 		if (i == 0 || drawCmd.material != currentMaterial || drawCmd.mesh != currentMesh) {
 			groups.push_back(
@@ -571,15 +582,17 @@ void RenderContext::Impl::BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, 
 
 void RenderContext::Impl::SubmitFrame() {
 	const ZHLN_FrameSync& s = sync[frame_index];
-	ZHLN_FrameSubmitDesc submitDesc = {.graphicsQueue = ctx.GraphicsQueue(),
-									   .presentQueue = ctx.PresentQueue(),
-									   .cmd = current_cmd,
-									   .imageAvailable = s.image_available,
-									   .renderFinished =
-										   presentation.presentSemaphores[current_image_index],
-									   .inFlight = s.in_flight,
-									   .swapchain = presentation.swapchain.Get().handle,
-									   .imageIndex = current_image_index};
+	ZHLN_FrameSubmitDesc submitDesc = {
+		.graphicsQueue = ctx.GraphicsQueue(),
+		.presentQueue = ctx.PresentQueue(),
+		.cmd = current_cmd,
+		.imageAvailable = s.image_available,
+		.renderFinished =
+			presentation.presentSemaphores[current_image_index], // Safely reverted back to
+																 // swapchain image index tracking
+		.inFlight = s.in_flight,
+		.swapchain = presentation.swapchain.Get().handle,
+		.imageIndex = current_image_index};
 
 	if (Vk::SubmitAndPresent(submitDesc) != ZHLN_FrameResult_Ok) {
 		resized = true;
@@ -653,7 +666,8 @@ void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
 }
 
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
-		  const JPH::Mat44& transform, const JPH::Mat44& prevTransform, float cullRadius) {
+		  const JPH::Mat44& transform, const JPH::Mat44& prevTransform, float cullRadius,
+		  uint32_t jointOffset, bool isSkinned) {
 	auto* impl = ctx.GetImpl();
 	if (impl->current_cmd == VK_NULL_HANDLE) {
 		return;
@@ -677,6 +691,8 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 		 .roughnessFactor = material.roughnessFactor,
 		 .alphaCutoff = material.alphaCutoff,
 		 .alphaMode = material.alphaMode,
+		 .jointOffset = jointOffset,
+		 .isSkinned = isSkinned ? 1u : 0u,
 		 .baseColorFactor = {material.baseColorFactor[0], material.baseColorFactor[1],
 							 material.baseColorFactor[2], material.baseColorFactor[3]}});
 }

@@ -80,9 +80,9 @@ struct Scene {
 		// 1. Spawns the entire Room and automatically loads all internal textures natively
 		std::vector<Entity> roomParts = AssetFactory::SpawnGLB(rc, reg, "Pomnis Room V2.glb");
 
-		// 2. Spawns Pomni and automatically loads her internal textures natively
+		// 2. Spawns Pomni and automatically loads internal textures natively
 		std::vector<Entity> pomniParts =
-			AssetFactory::SpawnGLB(rc, reg, "tadc_models/Pomni_RELEASE.glb");
+			AssetFactory::SpawnGLB(rc, reg, "CesiumMan.glb");
 	}
 };
 
@@ -200,6 +200,9 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 		{
 			ZHLN_PROFILE_SCOPE("Logic");
 			UpdateFreeCamera(cam, engine.GetInput(), frameTime);
+
+			// --- STEP 4C: Play embedded skeletal keyframes over time ---
+			AssetFactory::UpdateAnimations(rc, reg, frameTime);
 		}
 
 		auto res = engine.GetWindow().GetSize();
@@ -273,7 +276,8 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 				}
 
 				Renderer::Draw(rc, mesh->material, mesh->mesh, currentTransform,
-							   mesh->prevTransform, mesh->cullRadius);
+							   mesh->prevTransform, mesh->cullRadius, mesh->jointOffset,
+							   mesh->isSkinned);
 				mesh->prevTransform = currentTransform;
 			}
 

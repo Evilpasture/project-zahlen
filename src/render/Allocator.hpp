@@ -183,6 +183,8 @@ class Buffer {
 
 		~MappedRegion() noexcept {
 			if (_alloc != VK_NULL_HANDLE) {
+				// Dynamic memory flush guarantees GPU coherence on discrete NVIDIA/AMD cards
+				vmaFlushAllocation(_alloc, _allocation, 0, VK_WHOLE_SIZE);
 				vmaUnmapMemory(_alloc, _allocation);
 			}
 		}
@@ -203,6 +205,7 @@ class Buffer {
 			if (this != &other) {
 				// Clean up our current resource before taking the new one
 				if (_alloc != VK_NULL_HANDLE) {
+					vmaFlushAllocation(_alloc, _allocation, 0, VK_WHOLE_SIZE);
 					vmaUnmapMemory(_alloc, _allocation);
 				}
 
@@ -293,7 +296,7 @@ class Image {
   public:
 	Image() = default;
 	Image(const Image&) = delete;
-    auto operator=(const Image&) -> Image& = delete;
+	auto operator=(const Image&) -> Image& = delete;
 	~Image() {
 		if (_handle != VK_NULL_HANDLE) {
 			vmaDestroyImage(_allocator, _handle, _allocation);

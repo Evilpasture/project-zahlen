@@ -134,16 +134,16 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	}
 
 	// Index 0: Solid Black (Used for Emissive, Metallic, and Roughness fallbacks) -> Linear
-    uint8_t blackPixel[4] = {0, 0, 0, 0};
-    CreateTexture(blackPixel, 1, 1, false); 
+	uint8_t blackPixel[4] = {0, 0, 0, 0};
+	CreateTexture(blackPixel, 1, 1, false);
 
-    // Index 1: Solid White (Used for Albedo fallback) -> sRGB
-    uint8_t whitePixel[4] = {255, 255, 255, 255};
-    CreateTexture(whitePixel, 1, 1, true); 
+	// Index 1: Solid White (Used for Albedo fallback) -> sRGB
+	uint8_t whitePixel[4] = {255, 255, 255, 255};
+	CreateTexture(whitePixel, 1, 1, true);
 
-    // Index 2: Flat Tangent-Space Normal Map (R=128, G=128, B=255) -> Linear
-    uint8_t normalPixel[4] = {128, 128, 255, 255};
-    CreateTexture(normalPixel, 1, 1, false);
+	// Index 2: Flat Tangent-Space Normal Map (R=128, G=128, B=255) -> Linear
+	uint8_t normalPixel[4] = {128, 128, 255, 255};
+	CreateTexture(normalPixel, 1, 1, false);
 }
 
 RenderContext::~RenderContext() {
@@ -248,6 +248,11 @@ void RenderContext::Impl::InitBindless() {
 	vkCreateSampler(ctx.Device(), &samplerInfo, nullptr, &rawSampler);
 	globalSampler = Vk::Sampler(ctx.Device(), rawSampler);
 
+	// Allocate our global Joint storage buffer (Supports 8192 dynamic matrices)
+	jointBuffer =
+		Vk::Buffer::Create(allocator.Get(), sizeof(JPH::Mat44) * 8192,
+						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
 	GlobalSceneLayout::Write(ctx.Device(), bindlessSet, Vk::SkipWrite{},
 							 Vk::SamplerWrite{globalSampler.Get()},
 							 Vk::ImageWrite{.view = shadowMap.view.Get(),
@@ -255,7 +260,8 @@ void RenderContext::Impl::InitBindless() {
 							 Vk::SamplerWrite{shadowSampler.Get()},
 							 Vk::BufferWrite{.buffer = frameUniformBuffer.Handle()},
 							 Vk::BufferWrite{.buffer = lightStorageBuffer.Handle()},
-							 Vk::BufferWrite{.buffer = instanceDataBuffer.Handle()});
+							 Vk::BufferWrite{.buffer = instanceDataBuffer.Handle()},
+							 Vk::BufferWrite{.buffer = jointBuffer.Handle()});
 }
 
 void RenderContext::Impl::InitPostProcessing() {

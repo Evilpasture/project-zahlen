@@ -33,10 +33,13 @@ struct Vertex {
 	Packed1010102 tangent; // 4B  - 10-bit + sign
 	PackedHalf2 uv;		   // 4B  - 16-bit UVs
 	PackedRGBA8 color;	   // 4B  - RGBA8
-	uint32_t _padding;	   // 4B  - Power of two alignment
+	uint16_t joints[4];	   // 8B  - 16-bit Joint indices (Vulkan VK_FORMAT_R16G16B16A16_UINT)
+	float weights[4];	   // 16B - 32-bit float weights (Vulkan VK_FORMAT_R32G32B32_SFLOAT)
+	uint32_t
+		_padding[3]; // 12B - Pad to exactly 64 bytes (1 cache line) for optimal cache-lines fetches
 };
 
-static_assert(sizeof(Vertex) == 32, "Vertex must be exactly 32 bytes!");
+static_assert(sizeof(Vertex) == 64, "Vertex must be exactly 64 bytes!");
 
 struct FrameConstants {
 	JPH::Mat44 transform;
@@ -50,7 +53,9 @@ struct FrameConstants {
 	float roughnessFactor;
 	float alphaCutoff;
 	uint32_t alphaMode;	  // 0=Opaque, 1=Mask, 2=Blend
-	uint32_t _padding[3]; // Explicit padding before 16-byte aligned float4 array
+	uint32_t jointOffset; // Offset into the global joint matrix SSBO
+	uint32_t isSkinned;	  // 1 if skinned, 0 otherwise
+	uint32_t _padding[1]; // Explicit padding before 16-byte aligned float4 array
 	float baseColorFactor[4];
 };
 
@@ -70,7 +75,8 @@ struct alignas(16) InstanceData {
 	float roughnessFactor;
 	float alphaCutoff;
 	uint32_t alphaMode;
-	uint32_t _padding[2]; // Explicit padding before 16-byte aligned float4 array
+	uint32_t jointOffset; // Offset into the global joint matrix SSBO
+	uint32_t isSkinned;	  // 1 if skinned, 0 otherwise
 	float baseColorFactor[4];
 };
 static_assert(sizeof(InstanceData) == 192,

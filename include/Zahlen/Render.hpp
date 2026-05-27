@@ -36,7 +36,11 @@ class ZHLN_API RenderContext {
 	auto CreateConstantBuffer(size_t size) -> BufferHandle;
 	auto CreateMaterial(const PipelineDesc& desc) -> Material;
 
-	auto CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true) -> uint32_t;
+	auto CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true)
+		-> uint32_t;
+
+	// Dynamic CPU-to-GPU Joint Matrix transfer hook
+	void UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices, uint32_t count);
 
 	struct Impl;
 	[[nodiscard]] auto GetImpl() const -> Impl* { return _impl.get(); }
@@ -52,7 +56,8 @@ void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj, const JPH::Mat4
 void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
 				  const JPH::Mat44& shadowProjView);
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
-		  const JPH::Mat44& transform, const JPH::Mat44& prevTransform, float cullRadius = 1.0f);
+		  const JPH::Mat44& transform, const JPH::Mat44& prevTransform, float cullRadius = 1.0f,
+		  uint32_t jointOffset = 0, bool isSkinned = false);
 void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex);
 
 } // namespace Renderer

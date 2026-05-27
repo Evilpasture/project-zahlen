@@ -8,6 +8,11 @@ endif()
 
 project(zahlen LANGUAGES C CXX ASM)
 
+# --- FIX FOR LINUX/GCC 16 ASM COMPILATION RULES ---
+if(UNIX OR APPLE)
+    set(CMAKE_ASM_COMPILE_OBJECT "<CMAKE_ASM_COMPILER> <DEFINES> <INCLUDES> <FLAGS> -o <OBJECT> -c <SOURCE>" CACHE STRING "ASM compile command" FORCE)
+endif()
+
 if(APPLE)
     enable_language(OBJCXX)
     set(CMAKE_OBJCXX_FLAGS "${CMAKE_OBJCXX_FLAGS} -fno-rtti -fno-exceptions")
@@ -79,6 +84,9 @@ set(ENGINE_SOURCES
     src/engine/RenderResources.cpp
     src/engine/Engine.cpp
     src/engine/AssetFactory.cpp
+    src/engine/MeshBuilder.cpp
+    src/engine/glTFImporter.cpp
+    src/engine/system/AnimationSystem.cpp
     src/engine/AssetManager.cpp
     src/engine/LevelLoader.cpp
     src/engine/Window.cpp

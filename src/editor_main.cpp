@@ -467,13 +467,15 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 						currentTransform = Math::CreateTransform(pos, rot) * mesh->localTransform;
 					} else if (auto* alifeComp = reg.Get<ALife::ALifeComponent>(e)) {
 						currentTransform = Math::CreateTransform(JPH::Vec3(alifeComp->position),
-																 JPH::Quat::sIdentity()) * mesh->localTransform;
+																 JPH::Quat::sIdentity()) *
+										   mesh->localTransform;
 					} else {
 						currentTransform = mesh->localTransform;
 					}
 
 					Renderer::Draw(rc, mesh->material, mesh->mesh, currentTransform,
-								   mesh->prevTransform, mesh->cullRadius);
+								   mesh->prevTransform, mesh->cullRadius, mesh->jointOffset,
+								   mesh->isSkinned);
 					mesh->prevTransform = currentTransform;
 				}
 			}

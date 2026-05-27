@@ -9,13 +9,12 @@
 #include "RenderTarget.hpp"
 #include "Vertex.hpp"
 
-#include <Zahlen/Types.hpp>
 #include <GLFW/glfw3.h>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
+#include <Zahlen/Types.hpp>
 #include <array>
 #include <memory>
-#include <vector>
 #include <vulkan/vulkan_core.h>
 
 namespace ZHLN {
@@ -29,8 +28,9 @@ using GlobalSceneLayout = Vk::DescriptorLayout<
 	Vk::SamplerSlot<3>,					   // Shadow Map comparison sampler
 	Vk::UniformSlot<4, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT>, // FrameUniforms
 																				   // (UBO)
-	Vk::StorageBufferSlot<5, VK_SHADER_STAGE_FRAGMENT_BIT>,				   // Lights (SSBO)
-	Vk::StorageBufferSlot<6, VK_SHADER_STAGE_VERTEX_BIT>					   // Instance buffer (SSBO)
+	Vk::StorageBufferSlot<5, VK_SHADER_STAGE_FRAGMENT_BIT>,						   // Lights (SSBO)
+	Vk::StorageBufferSlot<6, VK_SHADER_STAGE_VERTEX_BIT>, // Instance buffer (SSBO)
+	Vk::StorageBufferSlot<7, VK_SHADER_STAGE_VERTEX_BIT>  // Joint matrices (SSBO)
 	>;
 
 using TAALayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SampledImageSlot<1>,
@@ -68,6 +68,8 @@ struct DrawCommand {
 	float roughnessFactor;
 	float alphaCutoff;
 	uint32_t alphaMode;
+	uint32_t jointOffset;
+	uint32_t isSkinned;
 	float baseColorFactor[4];
 };
 
@@ -142,6 +144,7 @@ struct RenderContext::Impl {
 
 	Vk::Buffer instanceDataBuffer;
 	Vk::Buffer indirectCommandsBuffer;
+	Vk::Buffer jointBuffer; // Global Joint Transforms SSBO
 
 	Vk::Pipeline shadowPipeline;
 	Vk::PipelineLayout shadowPipelineLayout;
@@ -187,4 +190,4 @@ template <> struct FormatOf<::ZHLN::PackedRGBA8> {
 };
 } // namespace ZHLN::Vk
 
-ZHLN_REFLECT_VERTEX(::ZHLN::Vertex, position, normal, tangent, uv, color);
+ZHLN_REFLECT_VERTEX(::ZHLN::Vertex, position, normal, tangent, uv, color, joints, weights);
