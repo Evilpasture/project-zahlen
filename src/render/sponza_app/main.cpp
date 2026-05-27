@@ -815,7 +815,7 @@ auto main() -> int {
 		// Frame sync
 		const ZHLN_FrameSync& frame_sync = sync[frame_index];
 		VkCommandBuffer cmd = pools.Cmd(frame_index);
-		ZHLN_WaitAndResetFrame(ctx.Device(), frame_sync.in_flight, &pools[frame_index]);
+		ZHLN_WaitAndResetFrame(ctx.Device(), frame_sync.in_flight, pools[frame_index]);
 
 		uint32_t image_index = 0;
 		ZHLN_AcquireDesc acq = {.swapchain = presentation.swapchain.Get().handle,

@@ -442,8 +442,9 @@ class CommandPool {
 	[[nodiscard]] constexpr operator ZHLN_CommandPool&() noexcept { return _raw; }
 
 	[[nodiscard]] auto Allocate(const uint32_t count) -> bool {
-		if (!Valid())
+		if (!Valid()) {
 			return false;
+		}
 		return ZHLN_AllocateCommandBuffers(_device, &_raw, count);
 	}
 
@@ -452,8 +453,9 @@ class CommandPool {
 	}
 
 	[[nodiscard]] auto AllocateSecondary(const uint32_t count) -> bool {
-		if (!Valid())
+		if (!Valid()) {
 			return false;
+		}
 		return ZHLN_AllocateSecondaryCommandBuffers(_device, &_raw, count);
 	}
 
@@ -462,6 +464,10 @@ class CommandPool {
 			ZHLN_ResetCommandPool(_device, &_raw);
 		}
 	}
+
+	// Implicit conversions to raw pointers
+	[[nodiscard]] constexpr operator const ZHLN_CommandPool*() const noexcept { return &_raw; }
+	[[nodiscard]] constexpr operator ZHLN_CommandPool*() noexcept { return &_raw; }
 
   private:
 	VkDevice _device = VK_NULL_HANDLE;

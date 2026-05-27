@@ -17,7 +17,7 @@ namespace ZHLN {
 void RenderContext::BeginFrame() {
 	const ZHLN_FrameSync& s = _impl->sync[_impl->frame_index];
 
-	ZHLN_WaitAndResetFrame(_impl->ctx.Device(), s.in_flight, &_impl->pools[_impl->frame_index]);
+	ZHLN_WaitAndResetFrame(_impl->ctx.Device(), s.in_flight, _impl->pools[_impl->frame_index]);
 
 	for (auto& worker : _impl->workerCmds) {
 		worker.cmdCount[_impl->frame_index].store(0, std::memory_order_relaxed);
