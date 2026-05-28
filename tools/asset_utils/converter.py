@@ -12,6 +12,12 @@ def export_blend_to_glb(blend_path: str, glb_path: str) -> bool:
     # Disabling unreferenced data saves memory before the engine cooks the asset.
     expr = (
         "import bpy; "
+        "rig = bpy.data.objects['POMNI_rig']; "
+        # Force specific UI properties on the custom properties bone
+        "rig.pose.bones['metarig.anim : MENU']['Sunglasses'] = 0.0; " # Off
+        "rig.pose.bones['metarig.anim : MENU']['Possessed Toggle'] = 0.0; " # Off
+        "rig.pose.bones['metarig.anim : MENU']['Outfit'] = 1; " # Standard Outfit
+        # Run the visible-only exporter
         "bpy.ops.export_scene.gltf("
         f"filepath='{glb_path}', "
         "export_format='GLB', "
@@ -21,7 +27,8 @@ def export_blend_to_glb(blend_path: str, glb_path: str) -> bool:
         "export_colors=True, "
         "export_normals=True, "
         "export_apply=True, "
-        "export_attributes=False"  # Excludes unreferenced custom properties
+        "export_attributes=False, "
+        "use_visible=True"
         ")"
     )
 
