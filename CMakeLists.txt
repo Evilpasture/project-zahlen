@@ -179,10 +179,11 @@ function(compile_shaders TARGET_NAME)
 
             set(OUTPUT_SPV "${GEN_INCLUDE_DIR}/${FILE_NAME}.${EXT}.spv")
 
+            # Added: -I flag to resolve include paths, and explicitly tracked the common.hlsl dependency
             add_custom_command(
                 OUTPUT ${OUTPUT_SPV}
-                COMMAND ${DXC_EXECUTABLE} -T ${PROFILE} -E ${ENTRY} -spirv ${HLSL_SRC} -Fo ${OUTPUT_SPV}
-                DEPENDS ${HLSL_SRC}
+                COMMAND ${DXC_EXECUTABLE} -T ${PROFILE} -E ${ENTRY} -spirv -I "${CMAKE_SOURCE_DIR}/resources/shaders" ${HLSL_SRC} -Fo ${OUTPUT_SPV}
+                DEPENDS ${HLSL_SRC} "${CMAKE_SOURCE_DIR}/resources/shaders/common.hlsl"
                 COMMENT "DXC: Generating ${FILE_NAME}.${EXT}.spv"
                 VERBATIM
             )
