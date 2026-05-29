@@ -3,7 +3,7 @@ import subprocess
 import os
 
 def export_blend_to_glb(blend_path: str, glb_path: str) -> bool:
-    """Runs Blender in background mode to bake complex shaders and export to .glb."""
+    """Runs Blender in background mode to prepare and export a pristine .glb."""
     blend_path = os.path.abspath(blend_path)
     glb_path = os.path.abspath(glb_path)
 
@@ -11,7 +11,7 @@ def export_blend_to_glb(blend_path: str, glb_path: str) -> bool:
         print(f"[-] Source blend file not found: {blend_path}")
         return False
 
-    # Standard triple-quoted Python script block
+    # Standard triple-quoted Python script block (Zero baking, pure standard pipelines)
     expr = """
 import bpy
 import os
@@ -34,42 +34,14 @@ if rig:
 
 bpy.context.view_layer.update()
 
-# --- 1. CONVERT BONE-PARENTING / CONSTRAINTS & UNPARENT SKINNED MESHES ---
+# --- 1. PRUNE AUXILIARY FILM HELPERS & SHADOW MESHES ---
+# Deletes helper meshes, widgets, corrective cages, and non-standard film shadow rings
+print("[*] Pruning auxiliary rigging meshes, shadow meshes, and deformer cages...")
 for obj in list(bpy.data.objects):
     if obj.type == 'MESH':
-        target_armature = None
-        target_bone = None
-        if obj.parent and obj.parent_type == 'BONE':
-            target_armature = obj.parent
-            target_bone = obj.parent_bone
-            mw = obj.matrix_world.copy()
-            obj.parent = None
-            obj.matrix_world = mw
-        else:
-            for con in list(obj.constraints):
-                if con.type in ('CHILD_OF', 'COPY_TRANSFORMS', 'COPY_LOCATION') and con.target and con.target.type == 'ARMATURE':
-                    if hasattr(con, 'subtarget') and con.subtarget:
-                        target_armature = con.target
-                        target_bone = con.subtarget
-                        mw = obj.matrix_world.copy()
-                        obj.constraints.remove(con)
-                        obj.matrix_world = mw
-                        break
-        if target_armature and target_bone:
-            arm_mod = next((m for m in obj.modifiers if m.type == 'ARMATURE'), None)
-            if not arm_mod:
-                arm_mod = obj.modifiers.new(name='ArmatureSkin', type='ARMATURE')
-                arm_mod.object = target_armature
-            vg = obj.vertex_groups.get(target_bone) or obj.vertex_groups.new(name=target_bone)
-            vg.add([v.index for v in obj.data.vertices], 1.0, 'REPLACE')
-
-        # Clear parent for any Skinned Mesh (avoids NODE_SKINNED_MESH_NON_ROOT warnings)
-        if obj.parent:
-            has_arm_mod = any(m.type == 'ARMATURE' for m in obj.modifiers)
-            if has_arm_mod:
-                mw = obj.matrix_world.copy()
-                obj.parent = None
-                obj.matrix_world = mw
+        name_lower = obj.name.lower()
+        if any(x in name_lower for x in ["shrink", "helper", "proxy", "cage", "bounds", "corrective", "wgts", "widget", "shadow"]):
+            bpy.data.objects.remove(obj, do_unlink=True)
 
 bpy.context.view_layer.update()
 
@@ -94,34 +66,19 @@ for obj in list(bpy.data.objects):
 
 bpy.context.view_layer.update()
 
-# --- 3. AUTO-BAKE COMPLEX SHADERS TO FLAT PBR ---
-print("[*] Setting up Cycles for automated flat-color baking...")
-bpy.context.scene.render.engine = 'CYCLES'
-bpy.context.scene.cycles.device = 'CPU'      # CPU is safest for background headless server environments
-bpy.context.scene.cycles.samples = 1         # 1 Sample is extremely fast and perfect for flat unlit color maps
-
-# Target only meshes actually selected for export (visible)
+# --- 3. AUTO-SIMPLIFY COMPLEX SHADERS TO STANDARD PBR (NO-BAKE PIPELINE) ---
+# Programmatically scans her original material node graphs and converts them to 
+# clean, standard, glTF-compliant PBR pipelines on the fly.
+print("[*] Automatically simplifying complex shader trees to clean PBR...")
 export_meshes = [o for o in bpy.data.objects if o.type == 'MESH' and not o.hide_viewport]
 baked_materials = {}
 
-# Materials driven purely by Vertex Colors in our engine shader (Skip baking to avoid UV distortion)
-SKIP_BAKE_MATERIALS = ["pomni_mat"]
-
 for obj in export_meshes:
-    # Guard against View Layer exclusion errors during baking
-    try:
-        bpy.ops.object.select_all(action='DESELECT')
-        obj.select_set(True)
-        bpy.context.view_layer.objects.active = obj
-    except RuntimeError:
-        continue # Safely skip if excluded from active View Layer
-    
-    # Check if the mesh actually has UV coordinates
     has_uvs = len(obj.data.uv_layers) > 0
     
     for mat_slot in obj.material_slots:
         mat = mat_slot.material
-        if not mat or not mat.use_nodes:
+        if not mat or not mat.use_nodes or not mat.node_tree:
             continue
             
         # Deduplicate using UV-aware cache key to prevent MESH_PRIMITIVE_TOO_FEW_TEXCOORDS
@@ -147,54 +104,37 @@ for obj in export_meshes:
         pbr_node = new_nodes.new('ShaderNodeBsdfPrincipled')
         output_node = new_nodes.new('ShaderNodeOutputMaterial')
         new_links.new(pbr_node.outputs['BSDF'], output_node.inputs['Surface'])
+        
+        # Scan original nodes
+        nodes = mat.node_tree.nodes
+        tex_node = next((n for n in nodes if n.type == 'TEX_IMAGE'), None)
+        color_node = next((n for n in nodes if n.type in ('VERTEX_COLOR', 'COLOR_ATTRIBUTE')), None)
 
-        # Path A: Mesh has UVs. Perform fast baking.
-        if has_uvs and (mat.name not in SKIP_BAKE_MATERIALS):
-            bake_name = f"Bake_{mat.name}"
-            img = bpy.data.images.new(bake_name, width=2048, height=2048)
-            
-            nodes = mat.node_tree.nodes
-            links = mat.node_tree.links
-            
-            # Inject temporary target bake node
-            tex_node = nodes.new('ShaderNodeTexImage')
-            tex_node.image = img
-            nodes.active = tex_node
-            
-            print(f"[+] Baking material: {mat.name} on {obj.name}...")
-            try:
-                bpy.ops.object.bake(type='DIFFUSE', pass_filter={'COLOR'}, margin=16)
-            except Exception as e:
-                print(f"[-] Bake failed on {mat.name}: {e}")
-                nodes.remove(tex_node)
-                mat_slot.material = new_mat
-                baked_materials[cache_key] = new_mat
-                continue
-                
-            # Save image file to your engine's destination build folder
-            build_dir = os.path.dirname('__GLB_PATH__')
-            img_path = os.path.join(build_dir, f"{bake_name}.png")
-            img.filepath_raw = img_path
-            img.save()
-            
+        # Path A: Material contains a pre-existing Image Texture (face skin, hair, eyes, pupils)
+        if tex_node and tex_node.image:
+            print(f"[+] Re-linking hand-painted texture {tex_node.image.name} for {mat.name}...")
             img_node = new_nodes.new('ShaderNodeTexImage')
-            img_node.image = img
+            img_node.image = tex_node.image
             new_links.new(img_node.outputs['Color'], pbr_node.inputs['Base Color'])
-            
-        # Path B: Mesh has NO UVs or is in the SKIP list. Map direct flat color/vertex color fallback.
-        else:
-            print(f"[*] Skipping bake for {obj.name} (Using flat diffuse/vertex color fallback)...")
-            
-            # Use 'ShaderNodeVertexColor' directly — works on all Blender versions including the latest
-            color_attr = new_nodes.new('ShaderNodeVertexColor')
-            color_attr.layer_name = "Color" # Uses 'layer_name' to select the active Color Attribute
+            new_links.new(img_node.outputs['Alpha'], pbr_node.inputs['Alpha']) # LINK ALPHA FOR TRANSPARENCY
+
+        # Path B: Material is vertex-color driven (jester suit pomni_mat)
+        elif color_node:
+            print(f"[+] Re-linking vertex colors for {mat.name}...")
+            try:
+                color_attr = new_nodes.new('ShaderNodeVertexColor')
+            except RuntimeError:
+                color_attr = new_nodes.new('ShaderNodeVertexColor')
+            color_attr.layer_name = "Color"
             new_links.new(color_attr.outputs['Color'], pbr_node.inputs['Base Color'])
             
-            base_color = mat.diffuse_color # Fallback to viewport color
-            principled_old = next((n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
-            if principled_old:
-                base_color = principled_old.inputs['Base Color'].default_value
-                
+        # Path C: Flat color fallback
+        else:
+            print(f"[*] Assigning flat color for {mat.name}...")
+            base_color = mat.diffuse_color
+            pbr_old = next((n for n in nodes if n.type == 'BSDF_PRINCIPLED'), None)
+            if pbr_old:
+                base_color = pbr_old.inputs['Base Color'].default_value
             pbr_node.inputs['Base Color'].default_value = base_color
             
         mat_slot.material = new_mat
@@ -203,6 +143,7 @@ for obj in export_meshes:
 bpy.context.view_layer.update()
 
 # --- 4. EXPORT TO GLB ---
+print("[*] Exporting to clean GLB...")
 bpy.ops.export_scene.gltf(
     filepath='__GLB_PATH__',
     export_format='GLB',
@@ -235,7 +176,7 @@ bpy.ops.export_scene.gltf(
     env.pop("PYTHONPATH", None)
 
     cmd = ["blender", "-b", blend_path, "--python-expr", expr]
-    print(f"[+] Baking and exporting {os.path.basename(blend_path)} using Blender...")
+    print(f"[+] Formatting and exporting {os.path.basename(blend_path)} using Blender...")
     
     # Inherit parent stdout/stderr to stream execution details live
     result = subprocess.run(cmd, env=env)

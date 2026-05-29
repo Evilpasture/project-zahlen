@@ -314,12 +314,12 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 					tangentAcc = attr.data;
 				} else if (attr.type == cgltf_attribute_type_texcoord && attr.index == 0) {
 					uvAcc = attr.data;
-				} else if (attr.type == cgltf_attribute_type_color) {
-					colorAcc = attr.data;
+				} else if (attr.type == cgltf_attribute_type_color && attr.index == 0) {
+					colorAcc = attr.data; // Matches COLOR_0
 				} else if (attr.type == cgltf_attribute_type_joints && attr.index == 0) {
-					jointsAcc = attr.data;
+					jointsAcc = attr.data; // Matches JOINTS_0
 				} else if (attr.type == cgltf_attribute_type_weights && attr.index == 0) {
-					weightsAcc = attr.data;
+					weightsAcc = attr.data; // Matches WEIGHTS_0
 				}
 			}
 
@@ -451,11 +451,12 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 			Mesh subMesh = {.vertexBuffer = vbo,
 							.vertexCount = static_cast<uint32_t>(unrolledVertices.size())};
 
+			// Check if we are loading character parts to assign the toon material
 			bool isCharacter = (path.contains("POMNI") || path.contains("tadc_models"));
 
-			Material subMaterial = isCharacter 
-				? CreateToonMaterial(ctx, doubleSided, alphaBlend) 
-				: CreateBasicMaterial(ctx, doubleSided, alphaBlend);
+			Material subMaterial = isCharacter ? CreateToonMaterial(ctx, doubleSided, alphaBlend)
+											   : CreateBasicMaterial(ctx, doubleSided, alphaBlend);
+
 			subMaterial.alphaMode = alphaMode;
 			subMaterial.alphaCutoff = alphaCutoff;
 			subMaterial.metallicFactor = metallicFactor;
@@ -464,7 +465,6 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 			subMaterial.baseColorFactor[1] = baseColorFactor[1];
 			subMaterial.baseColorFactor[2] = baseColorFactor[2];
 			subMaterial.baseColorFactor[3] = baseColorFactor[3];
-
 			subMaterial.albedoIndex = 1;
 
 			if (prim.material != nullptr) {
@@ -507,5 +507,4 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 		spawnedEntities.size());
 	return spawnedEntities;
 }
-
 } // namespace ZHLN::AssetFactory
