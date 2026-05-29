@@ -47,3 +47,13 @@ const unsigned char ZHLN_Resource_ShadowFragSpv[] = {
 #embed SHADER_SHADOW_HLSL_PS_PATH
 };
 const unsigned int ZHLN_Resource_ShadowFragSpv_Len = sizeof(ZHLN_Resource_ShadowFragSpv);
+
+const unsigned char ZHLN_Resource_ToonVertSpv[] = {
+#embed SHADER_TOON_HLSL_VS_PATH
+};
+const unsigned int ZHLN_Resource_ToonVertSpv_Len = sizeof(ZHLN_Resource_ToonVertSpv);
+
+const unsigned char ZHLN_Resource_ToonFragSpv[] = {
+#embed SHADER_TOON_HLSL_PS_PATH
+};
+const unsigned int ZHLN_Resource_ToonFragSpv_Len = sizeof(ZHLN_Resource_ToonFragSpv);

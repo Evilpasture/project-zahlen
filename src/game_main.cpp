@@ -82,7 +82,9 @@ struct Scene {
 
 		// 2. Spawns Pomni and automatically loads internal textures natively
 		std::vector<Entity> pomniParts =
-			AssetFactory::SpawnGLB(rc, reg, "tadc_models/Pomni_RELEASE.glb");
+			AssetFactory::SpawnGLB(rc, reg, "tadc_models/POMNI.glb");
+		// std::vector<Entity> cesiumParts =
+		// 	AssetFactory::SpawnGLB(rc, reg, "CesiumMan.glb");
 	}
 };
 

@@ -28,4 +28,6 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 
 // --- NEW: Expose runtime skeletal animation update loop ---
 void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt);
+
+Material CreateToonMaterial(RenderContext& ctx, bool doubleSided = false, bool alphaBlend = false);
 } // namespace ZHLN::AssetFactory

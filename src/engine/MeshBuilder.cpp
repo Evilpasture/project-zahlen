@@ -585,4 +585,18 @@ Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float m
 	return Mesh{.vertexBuffer = vbo, .vertexCount = static_cast<uint32_t>(data.size())};
 }
 
+Material CreateToonMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend) {
+	PipelineDesc desc;
+	desc.vertexShaderData = ZHLN_Resource_ToonVertSpv;
+	desc.vertexShaderSize = ZHLN_Resource_ToonVertSpv_Len;
+	desc.fragShaderData = ZHLN_Resource_ToonFragSpv;
+	desc.fragShaderSize = ZHLN_Resource_ToonFragSpv_Len;
+	desc.doubleSided = doubleSided;
+	desc.alphaBlend = alphaBlend;
+
+	Material mat = ctx.CreateMaterial(desc);
+	mat.albedoIndex = 1; // Default to solid white fallback
+	return mat;
+}
+
 } // namespace ZHLN::AssetFactory

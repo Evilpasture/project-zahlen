@@ -1,3 +1,4 @@
+// src/cooker_main.cpp
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Types.hpp>
@@ -7,7 +8,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
+#include <print> // Replaced <iostream>
 #include <string>
 #include <vector>
 
@@ -15,7 +16,7 @@ using namespace ZHLN;
 
 int main(int argc, char** argv) {
 	if (argc < 3) {
-		std::cerr << "Usage: zahlen_cooker <input_dir> <output.pak>\n";
+		std::println(stderr, "Usage: zahlen_cooker <input_dir> <output.pak>");
 		return 1;
 	}
 
@@ -35,20 +36,20 @@ int main(int argc, char** argv) {
 			virtualPath = virtualPath.substr(1);
 		}
 		std::replace(virtualPath.begin(), virtualPath.end(), '\\', '/');
+		
 		if (ext == ".glb") {
-
 			cgltf_options opts{};
 			cgltf_data* data = nullptr;
 
 			if (cgltf_parse_file(&opts, filepath.c_str(), &data) != cgltf_result_success ||
 				cgltf_load_buffers(&opts, data, filepath.c_str()) != cgltf_result_success) {
-				std::cerr << "Failed to parse: " << filepath << "\n";
+				std::println(stderr, "Failed to parse: {}", filepath);
 				continue;
 			}
 
 			std::vector<Vertex> bakedVertices;
 
-			// Fully implemented extraction loop (Adapted from LoadGLB)
+			// Extraction loop
 			for (cgltf_size i = 0; i < data->nodes_count; ++i) {
 				const cgltf_node* node = &data->nodes[i];
 				if (!node->mesh)
@@ -65,6 +66,7 @@ int main(int argc, char** argv) {
 					cgltf_accessor* normAcc = nullptr;
 					cgltf_accessor* tangentAcc = nullptr;
 					cgltf_accessor* uvAcc = nullptr;
+					cgltf_accessor* colorAcc = nullptr; // Track the color attribute
 
 					for (cgltf_size a = 0; a < prim.attributes_count; ++a) {
 						const auto& attr = prim.attributes[a];
@@ -76,6 +78,8 @@ int main(int argc, char** argv) {
 							tangentAcc = attr.data;
 						else if (attr.type == cgltf_attribute_type_texcoord && attr.index == 0)
 							uvAcc = attr.data;
+						else if (attr.type == cgltf_attribute_type_color && attr.index == 0)
+							colorAcc = attr.data;
 					}
 
 					if (!posAcc)
@@ -140,7 +144,12 @@ int main(int argc, char** argv) {
 							cgltf_accessor_read_float(uvAcc, vIdx, uv, 2);
 						v.uv = Math::PackUV(uv[0], uv[1]);
 
-						v.color = Math::PackColor(1.0f, 1.0f, 1.0f, 1.0f);
+						// Read and pack the color attribute
+						float rawColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+						if (colorAcc) {
+							cgltf_accessor_read_float(colorAcc, vIdx, rawColor, 4);
+						}
+						v.color = Math::PackColor(rawColor[0], rawColor[1], rawColor[2], rawColor[3]);
 					}
 
 					// Resolve Indices
@@ -158,7 +167,7 @@ int main(int argc, char** argv) {
 			}
 			cgltf_free(data);
 
-			// --- PACK THE BLOB ---
+			// Pack the Blob
 			CookedMeshHeader meshHeader{};
 			meshHeader.magic = 0x3048534D; // 'MSH0'
 			meshHeader.version = 1;
@@ -176,7 +185,7 @@ int main(int argc, char** argv) {
 			pakEntry.offset = sizeof(PakHeader) + payloadData.size(); // TOC comes later
 			pakEntry.compressedSize = blobSize;
 			pakEntry.uncompressedSize = blobSize;
-			pakEntry.compression = 0; // ZERO-COPY!
+			pakEntry.compression = 0; // ZERO-COPY
 
 			entries.push_back(pakEntry);
 
@@ -189,13 +198,12 @@ int main(int argc, char** argv) {
 			payloadData.insert(payloadData.end(), vertexBytes,
 							   vertexBytes + (bakedVertices.size() * sizeof(Vertex)));
 
-			std::cout << "Cooked: " << virtualPath << " (" << bakedVertices.size()
-					  << " vertices)\n";
+			std::println("Cooked: {} ({} vertices)", virtualPath, bakedVertices.size());
 		} else if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga") {
-			// --- NEW: RAW IMAGE PACKING ---
+			// Raw image packing
 			std::ifstream file(filepath, std::ios::binary | std::ios::ate);
 			if (!file.is_open()) {
-				std::cerr << "Failed to read texture file: " << filepath << "\n";
+				std::println(stderr, "Failed to read texture file: {}", filepath);
 				continue;
 			}
 			size_t size = file.tellg();
@@ -213,12 +221,12 @@ int main(int argc, char** argv) {
 			pakEntry.offset = sizeof(PakHeader) + payloadData.size();
 			pakEntry.compressedSize = size;
 			pakEntry.uncompressedSize = size;
-			pakEntry.compression = 0; // Raw, zero-copy payload copy
+			pakEntry.compression = 0;
 
 			entries.push_back(pakEntry);
 			payloadData.insert(payloadData.end(), fileData.begin(), fileData.end());
 
-			std::cout << "Cooked Raw Texture: " << virtualPath << " (" << size << " bytes)\n";
+			std::println("Cooked Raw Texture: {} ({} bytes)", virtualPath, size);
 		}
 	}
 
@@ -235,6 +243,6 @@ int main(int argc, char** argv) {
 	out.write(reinterpret_cast<const char*>(entries.data()), entries.size() * sizeof(PakEntry));
 	out.close();
 
-	std::cout << "Successfully cooked " << entries.size() << " assets to " << outputFile << "\n";
+	std::println("Successfully cooked {} assets to {}", entries.size(), outputFile);
 	return 0;
 }

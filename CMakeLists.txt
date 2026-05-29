@@ -225,6 +225,7 @@ compile_shaders(zahlen_engine
     "${CMAKE_SOURCE_DIR}/resources/shaders/blit.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/taa.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/ui.hlsl"
+    "${CMAKE_SOURCE_DIR}/resources/shaders/toon.hlsl"
 )
 
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/culling.hlsl" CSMain cs_6_0 CULLING_COMP_SPV)

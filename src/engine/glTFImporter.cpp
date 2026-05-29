@@ -451,7 +451,11 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 			Mesh subMesh = {.vertexBuffer = vbo,
 							.vertexCount = static_cast<uint32_t>(unrolledVertices.size())};
 
-			Material subMaterial = CreateBasicMaterial(ctx, doubleSided, alphaBlend);
+			bool isCharacter = (path.contains("POMNI") || path.contains("tadc_models"));
+
+			Material subMaterial = isCharacter 
+				? CreateToonMaterial(ctx, doubleSided, alphaBlend) 
+				: CreateBasicMaterial(ctx, doubleSided, alphaBlend);
 			subMaterial.alphaMode = alphaMode;
 			subMaterial.alphaCutoff = alphaCutoff;
 			subMaterial.metallicFactor = metallicFactor;

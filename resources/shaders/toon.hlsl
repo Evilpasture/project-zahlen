@@ -1,4 +1,4 @@
-// resources/shaders/basic.hlsl
+// resources/shaders/toon.hlsl
 #pragma pack_matrix(column_major)
 
 struct Light {
@@ -69,14 +69,13 @@ struct InstanceData {
 [[vk::binding(4, 0)]] ConstantBuffer<FrameUniforms> frame;
 [[vk::binding(5, 0)]] StructuredBuffer<Light> lights;
 
-// --- LAYOUT-INDEPENDENT SKINNING STORAGE ---
 struct GPUJoint {
 	float4 col0;
 	float4 col1;
 	float4 col2;
 	float4 col3;
 };
-[[vk::binding(7, 0)]] StructuredBuffer<GPUJoint> g_joints; // Replaced float4x4 SSBO
+[[vk::binding(7, 0)]] StructuredBuffer<GPUJoint> g_joints;
 
 struct VSInput {
 	[[vk::location(0)]] float3 position : POSITION;
@@ -104,7 +103,7 @@ struct VSOutput {
 	nointerpolation uint alphaMode : TEXCOORD7;
 };
 
-// --- OPTIMIZED MATRIX-FREE SKINNING HELPERS ---
+// --- SKELETAL SKINNING ---
 float4 SkinPosition(float4 position, uint4 joints, float4 weights, uint jointOffset) {
 	GPUJoint j0 = g_joints[jointOffset + joints.x];
 	GPUJoint j1 = g_joints[jointOffset + joints.y];
@@ -189,23 +188,6 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 	float4 worldPos = mul(worldMatrix, localPos);
 	output.worldPos = worldPos.xyz;
 
-	if (obj.isShadowPass != 0) {
-		output.pos = worldPos;
-		output.uv = input.uv;
-		output.baseColorFactor = baseColorFactor;
-		output.pbrFactors = float3(metallicFactor, roughnessFactor, alphaCutoff);
-		output.alphaMode = alphaMode;
-		output.materialIndices = uint4(albedoIdx, 0, 0, 0);
-
-		output.currClip = 0;
-		output.prevClip = 0;
-		output.normal = 0;
-		output.tangent = 0;
-		output.shadowPos = 0;
-		output.color = input.color;
-		return output;
-	}
-
 	output.currClip = mul(frame.viewProj, worldPos);
 	output.pos = output.currClip;
 
@@ -229,28 +211,7 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 	return output;
 }
 
-// --- PBR Helper Functions ---
-float DistributionGGX(float3 N, float3 H, float roughness) {
-	float a = roughness * roughness;
-	float a2 = a * a;
-	float NdotH = max(dot(N, H), 0.0);
-	return a2 / (3.14159 * pow(NdotH * NdotH * (a2 - 1.0) + 1.0, 2.0));
-}
-
-float GeometrySchlickGGX(float NdotV, float roughness) {
-	float k = pow(roughness + 1.0, 2.0) / 8.0;
-	return NdotV / (NdotV * (1.0 - k) + k);
-}
-
-float GeometrySmith(float3 N, float3 V, float3 L, float roughness) {
-	return GeometrySchlickGGX(max(dot(N, V), 0.0), roughness) *
-		   GeometrySchlickGGX(max(dot(N, L), 0.0), roughness);
-}
-
-float3 FresnelSchlick(float cosTheta, float3 F0) {
-	return F0 + (1.0 - F0) * pow(saturate(1.0 - cosTheta), 5.0);
-}
-
+// --- SHADOW CALCULATOR (Now declared before PSMain calls it) ---
 float CalculateShadow(float4 shadowPos, float3 N, float3 L) {
 	float3 projCoords = shadowPos.xyz / shadowPos.w;
 	if (projCoords.z > 1.0 || projCoords.z < 0.0)
@@ -264,52 +225,20 @@ struct PSOutput {
 	float2 velocity : SV_Target1;
 };
 
-// --- SPECIALIZED SHADOW PASS ENTRY POINT ---
-void PSShadow(VSOutput input) {
-	uint4 indices = input.materialIndices;
-	float4 baseColorFactor = input.baseColorFactor;
-	float alphaCutoff = input.pbrFactors.z;
-	uint alphaMode = input.alphaMode;
-
-	float4 albedo =
-		globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
-
-	if (alphaMode == 1) { // MASK
-		if (albedo.a < alphaCutoff) {
-			discard;
-		}
-	}
-}
-
 PSOutput PSMain(VSOutput input) {
 	PSOutput output;
 
-	// Sample Bindless Textures
 	uint4 indices = input.materialIndices;
 	float4 baseColorFactor = input.baseColorFactor;
-	float metallicFactor = input.pbrFactors.x;
-	float roughnessFactor = input.pbrFactors.y;
 	float alphaCutoff = input.pbrFactors.z;
 	uint alphaMode = input.alphaMode;
 
-	// glTF PBR Math: Albedo Sample * Base Color Factor * Vertex Color
-	float4 albedo =
-		globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
+	// Restore texture sampling combined with base color and vertex color attributes!
+	float4 albedo = globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
 
-	// Alpha Masking
-	if (alphaMode == 1) { // MASK
-		if (albedo.a < alphaCutoff) {
-			discard;
-		}
+	if (alphaMode == 1 && albedo.a < alphaCutoff) {
+		discard;
 	}
-
-	float3 normalMap = globalTextures[indices.y].Sample(defaultSampler, input.uv).rgb * 2.0 - 1.0;
-	float4 pbr = globalTextures[indices.z].Sample(defaultSampler, input.uv);
-	float3 emissive = globalTextures[indices.w].Sample(defaultSampler, input.uv).rgb;
-
-	// glTF PBR Math: PBR Sample * Parameter Factors
-	float roughness = pbr.g * roughnessFactor;
-	float metallic = pbr.b * metallicFactor;
 
 	float3 N = normalize(input.normal);
 	float3 worldNormal = N;
@@ -317,57 +246,43 @@ PSOutput PSMain(VSOutput input) {
 	if (any(input.tangent.xyz)) {
 		float3 T = normalize(input.tangent.xyz);
 		float3 B = normalize(cross(N, T) * input.tangent.w);
+		float3 normalMap = globalTextures[indices.y].Sample(defaultSampler, input.uv).rgb * 2.0 - 1.0;
 		worldNormal = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * N);
 	}
 
 	float3 V = normalize(frame.camPos.xyz - input.worldPos);
-	float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo.rgb, metallic);
-
-	// Direct Directional (Sun) Light
 	float3 L_sun = normalize(-frame.lightDir.xyz);
-	float3 H_sun = normalize(V + L_sun);
-	float NdotL_sun = max(dot(worldNormal, L_sun), 0.0);
-	float shadow = CalculateShadow(input.shadowPos, worldNormal, L_sun);
 
-	float D = DistributionGGX(worldNormal, H_sun, roughness);
-	float g_term = GeometrySmith(worldNormal, V, L_sun, roughness);
-	float3 F = FresnelSchlick(max(dot(H_sun, V), 0.0), F0);
+	// --- TOON LIGHTING RAMP ---
+	float NdotL_sun = dot(worldNormal, L_sun);
+	float halfLambert = NdotL_sun * 0.5f + 0.5f;
 
-	float3 spec = (D * g_term * F) / (4.0 * max(dot(worldNormal, V), 0.0) * NdotL_sun + 0.0001);
-	float3 kD = (1.0 - F) * (1.0 - metallic);
-	float3 directSun = (kD * albedo.rgb / 3.14159 + spec) * 10.0 * NdotL_sun * shadow;
-
-	// Process punctual lights (point/spots) in the SSBO
-	float3 directPunctual = float3(0, 0, 0);
-	for (uint i = 0; i < frame.lightCount; i++) {
-		Light light = lights[i];
-		float3 L = light.position - input.worldPos;
-		float dist = length(L);
-		L = normalize(L);
-
-		float NdotL = max(dot(worldNormal, L), 0.0);
-		float atten = 1.0 / (dist * dist + 0.01); // Standard falloff
-
-		if (NdotL > 0.0) {
-			float3 H = normalize(V + L);
-			float D_p = DistributionGGX(worldNormal, H, roughness);
-			float G_p = GeometrySmith(worldNormal, V, L, roughness);
-			float3 F_p = FresnelSchlick(max(dot(H, V), 0.0), F0);
-			float3 spec_p =
-				(D_p * G_p * F_p) / (4.0 * max(dot(worldNormal, V), 0.0) * NdotL + 0.0001);
-			float3 kD_p = (1.0 - F_p) * (1.0 - metallic);
-
-			directPunctual += (kD_p * albedo.rgb / 3.14159 + spec_p) * light.color *
-							  light.intensity * atten * NdotL;
-		}
+	float celIntensity;
+	if (halfLambert < 0.25f) {
+		celIntensity = 0.25f; // Hard shadow band
+	} else if (halfLambert < 0.65f) {
+		celIntensity = 0.65f; // Midtone band
+	} else {
+		celIntensity = 1.0f;  // Bright band
 	}
 
-	float3 ambient = albedo.rgb * 0.05; // Basic ambient fallback
+	float shadow = CalculateShadow(input.shadowPos, worldNormal, L_sun);
+	celIntensity *= shadow;
 
-	// Preserve exact base color alpha for BLEND transparency pipelines
-	output.color = float4(ambient + directSun + directPunctual + emissive, albedo.a);
+	// --- TOON SPECULAR SHAPE ---
+	float3 H_sun = normalize(V + L_sun);
+	float NdotH_sun = max(dot(worldNormal, H_sun), 0.0f);
+	float specular = step(0.98f, NdotH_sun) * 0.35f * shadow;
 
-	// Calculate Motion Vectors for TAA
+	// --- SHARP CONTOUR OUTLINE ---
+	float rim = 1.0f - saturate(dot(worldNormal, V));
+	float rimIntensity = smoothstep(0.6f, 0.75f, rim) * 0.25f * celIntensity;
+
+	float3 ambient = albedo.rgb * 0.15f;
+	float3 finalColor = ambient + (albedo.rgb * celIntensity) + specular + rimIntensity;
+
+	output.color = float4(finalColor, albedo.a);
+
 	float2 ndcCurr = input.currClip.xy / input.currClip.w;
 	float2 ndcPrev = input.prevClip.xy / input.prevClip.w;
 	output.velocity = (ndcCurr - ndcPrev) * 0.5f;
