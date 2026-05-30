@@ -111,6 +111,25 @@ for obj in list(bpy.data.objects):
 bpy.context.view_layer.update()
 
 # ---------------------------------------------------------------------------
+# 3.5 APPLY TRANSFORMS TO SKELETON (PREVENTS GLOBAL SCALE DRIFT)
+#     Applying transforms on the Armature rig resets its scale to 1.0,
+#     preventing global scaling drift in game engines.
+#     We explicitly do NOT apply transforms to skinned meshes themselves,
+#     as doing so breaks their skin weight binding matrices.
+# ---------------------------------------------------------------------------
+print("[*] Applying transforms to skeleton...")
+if rig:
+    # Safely apply scale/rotation to the Armature rig
+    if safe_set_active(rig):
+        try:
+            bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+            print(f"  [+] Applied scale/rotation on Armature: {rig.name}")
+        except Exception as e:
+            print(f"  [-] Failed to apply transforms on Armature: {e}")
+
+bpy.context.view_layer.update()
+
+# ---------------------------------------------------------------------------
 # 3.6 CLAMP COLOR ATTRIBUTE CHANNELS TO ELIMINATE VALIDATION ERRORS
 # ---------------------------------------------------------------------------
 print("[*] Clamping vertex color attributes to [0.0, 1.0] range...")
@@ -158,6 +177,15 @@ for o in bpy.data.objects:
 
 print(f"  [+] Muted {len(muted_bone_constraints)} bone constraints and {len(muted_object_constraints)} object constraints to resolve cycles.")
 
+# 2. Temporarily disable ARMATURE modifiers on ALL objects in the scene
+#    to guarantee a clean, uncontaminated rest-pose evaluation of Lattices
+disabled_armatures = []
+for o in bpy.data.objects:
+    for m in o.modifiers:
+        if m.type == 'ARMATURE' and m.show_viewport:
+            m.show_viewport = False
+            disabled_armatures.append(m)
+
 for obj in list(bpy.data.objects):
     if obj.type != 'MESH':
         continue
@@ -182,13 +210,16 @@ for obj in list(bpy.data.objects):
             if kb.name != 'Basis':
                 kb.value = 0.0
                 
-    # Disable non-deforming modifiers (Armature, Subsurf, etc.) to ensure 1:1 vertex count
+    # Disable non-deforming modifiers (Subsurf, Solidify, etc.) to ensure 1:1 vertex count
+    # Keep ALL deformers active so they can be baked simultaneously in their correct order.
     disabled_mods = []
     for mod in obj.modifiers:
         if mod not in active_deformers:
             if mod.show_viewport:
                 mod.show_viewport = False
                 disabled_mods.append(mod)
+        else:
+            mod.show_viewport = True
                 
     # Update depsgraph to obtain clean shrinkwrapped rest-state coordinates without animation/constraint cycle noise
     bpy.context.view_layer.update()
@@ -232,7 +263,7 @@ for obj in list(bpy.data.objects):
     except Exception as e:
         print(f"  [-] Failed to bake coordinates on '{obj.name}': {e}")
     finally:
-        # Restore non-deforming modifiers (Armature, Subsurf, Data Transfer)
+        # Restore non-deforming modifiers (Subsurf, Data Transfer)
         for mod in disabled_mods:
             mod.show_viewport = True
         # Restore original shape key morph values
@@ -247,14 +278,14 @@ for c in muted_bone_constraints:
 for c in muted_object_constraints:
     c.mute = False
 
+# Re-enable Armature modifiers
+for m in disabled_armatures:
+    m.show_viewport = True
+
 bpy.context.view_layer.update()
 
 # ---------------------------------------------------------------------------
 # 5. APPLY STATIC MODIFIERS (MESHES WITHOUT SHAPE KEYS ONLY)
-#    Meshes that have shape keys (eyelids, mouth, etc.) are skipped entirely —
-#    applying any modifier to a mesh with shape keys destroys the shape key
-#    data in Blender 3.x+. The Armature modifier is also skipped here because
-#    it must remain live for the glTF exporter to write correct skin weights.
 # ---------------------------------------------------------------------------
 SKIP_MOD_TYPES = {'ARMATURE', 'SHRINKWRAP'}  # Shrinkwrap already handled above
 
@@ -354,7 +385,11 @@ for obj in export_meshes:
 bpy.context.view_layer.update()
 
 # ---------------------------------------------------------------------------
-# 6.5 CLEANUP REMAINING HELPERS AND SHRINK TARGETS BEFORE EXPORT
+# 6.5 CLEANUP AND VISIBILITY PASS BEFORE EXPORT
+#     1. Delete helper cages completely so they don't leak.
+#     2. Force-enable visibility for core character meshes (eyes, pupils, lids)
+#        so they are exported, while keeping optional outfits (swimsuit, caps) 
+#        hidden so glTF 'use_visible=True' filters them out.
 # ---------------------------------------------------------------------------
 print("[*] Cleaning up remaining shrinkwrap targets and helper meshes before export...")
 
@@ -365,15 +400,23 @@ for target_name in list(helpers_to_clean):
         print(f"[~] Removing shrinkwrap helper cage: {target_name}")
         bpy.data.objects.remove(target_obj, do_unlink=True)
 
-# Delete any remaining hidden helper meshes matching the prune keywords,
-# explicitly protecting critical character meshes from deletion.
-CRITICAL_CHARACTER_MESHES = {"pomni_arms", "pomni_eyes", "pomni_head.002", "pomni_body"}
+# Force-enable visibility for core character meshes to prevent silent omission
+CORE_CHARACTER_MESHES = {
+    "pomni_eyes", "pomni_pupils", "pomni_eyelidsL", "pomni_eyelidsR", 
+    "pomni_eyelidsTOP", "pomni_head.002", "pomni_body", "pomni_arms", 
+    "pomni_neck", "pomni_collar", "pomni_eyebrows", "pomni_eyelashes", 
+    "pomni_hairFront", "pomni_hairSide", "pomni_hat", "pomni_hatBorder", 
+    "pomni_hip", "pomni_teethbot", "pomni_teethtop", "pomni_tongue",
+    "pomni_mouth", "pomni_gloveballs", "pomni_balls", "pomni_ballsbody",
+    "pomni_ballshat"
+}
 
+# Delete any mesh that is NOT in CORE_CHARACTER_MESHES
+# This completely purges all alternative/optional costumes ( swimsuits, caps, etc.)
 for obj in list(bpy.data.objects):
-    if obj.type == 'MESH' and obj.name not in CRITICAL_CHARACTER_MESHES:
-        name_lower = obj.name.lower()
-        if any(kw in name_lower for kw in PRUNE_KEYWORDS):
-            print(f"[~] Removing remaining helper mesh: {obj.name}")
+    if obj.type == 'MESH':
+        if obj.name not in CORE_CHARACTER_MESHES:
+            print(f"[~] Removing non-core mesh (optional outfit/helper): {obj.name}")
             try:
                 bpy.data.objects.remove(obj, do_unlink=True)
             except Exception as e:
@@ -397,7 +440,9 @@ bpy.ops.export_scene.gltf(
     export_animation_mode='ACTIONS',
     export_def_bones=False,
     export_attributes=True,
-    use_visible=True,
+    use_visible=False,
+    export_cameras=False,
+    export_lights=False,
 )
 print("[+] GLB export complete.")
 """
