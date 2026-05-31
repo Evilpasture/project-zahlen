@@ -47,19 +47,32 @@ for img in bpy.data.images:
             print(f"  [-] Failed to pack image '{img.name}': {e}")
 
 # ---------------------------------------------------------------------------
-# 0.5 FORCE-ENABLE ALL COLLECTIONS IN VIEW LAYER
-#     Production-grade rigs often place helper cages (like 'pomni_headshrink')
-#     in excluded collections to keep the outliner clean. But if excluded, 
-#     Blender's dependency graph will ignore them, causing shrinkwraps to fail 
-#     and mouth/eyelids to deform incorrectly during the bake. 
-#     We force-enable all layer collections so they evaluate perfectly.
+# 0.5 FORCE-ENABLE AND UN-HIDE ALL COLLECTIONS AND OBJECTS
+#     Blender's dependency graph (depsgraph) only evaluates modifiers and 
+#     deformation targets (like Lattices and Shrinkwrap cages) if they, 
+#     their parent collections, and their objects are fully un-excluded and 
+#     visible in the viewport. We un-exclude and un-hide everything at the start.
 # ---------------------------------------------------------------------------
-print("[*] Force-enabling all view layer collections for accurate baking...")
+print("[*] Force-enabling and un-hiding all collections and objects for accurate baking...")
+
+# 1. Un-exclude and un-hide all scene collections
+for col in bpy.data.collections:
+    col.hide_viewport = False
+    col.hide_render = False
+
+# 2. Un-exclude and un-hide all view-layer collections
 layer_collections = [bpy.context.view_layer.layer_collection]
 while layer_collections:
     l_c = layer_collections.pop(0)
     layer_collections.extend(l_c.children)
     l_c.exclude = False
+    l_c.hide_viewport = False
+
+# 3. Force all scene objects to be completely unhidden in the viewport
+for obj in bpy.data.objects:
+    obj.hide_viewport = False
+    obj.hide_render = False
+    obj.hide_set(False)
 
 bpy.context.view_layer.update()
 
@@ -68,7 +81,6 @@ bpy.context.view_layer.update()
 # ---------------------------------------------------------------------------
 rigs = [o for o in bpy.data.objects if o.type == 'ARMATURE']
 
-# Prioritize the main game rig based on name keywords and bone count
 def get_rig_priority(obj):
     name_lower = obj.name.lower()
     score = 0
@@ -100,8 +112,6 @@ if rig:
 
 # ---------------------------------------------------------------------------
 # 1.1 PURGE COMPETITIVE ARMATURES (Rigify Metarigs/Helpers)
-#     Deleting competing armatures ensures that the glTF exporter maps 
-#     actions exclusively to POMNI_rig.
 # ---------------------------------------------------------------------------
 print("[*] Purging competing metarigs and template armatures...")
 for obj in list(bpy.data.objects):
@@ -119,8 +129,6 @@ bpy.context.view_layer.update()
 
 # ---------------------------------------------------------------------------
 # 1.2 AUTOMATICALLY STASH ALL BONE ACTIONS TO SKELETON NLA
-#     This links the actions to the skeleton for the exporter. 
-#     We force mute them so they do not blend or corrupt keyframe values.
 # ---------------------------------------------------------------------------
 print("[*] Stashing bone actions into NLA tracks...")
 if rig:
@@ -157,7 +165,6 @@ if rig:
             print(f"  [+] Stashing bone action to NLA: {action.name}")
             track = rig.animation_data.nla_tracks.new()
             track.name = f"[Stash] {action.name}"
-            # Mute the track to prevent NLA-stack conflicts during baking/export!
             track.mute = True
             start_frame = int(action.frame_range[0])
             track.strips.new(action.name, start_frame, action)
@@ -172,8 +179,6 @@ bpy.context.view_layer.update()
 
 # ---------------------------------------------------------------------------
 # 1.3 SECURE CORE CHARACTER MESH PARENT HIERARCHY
-#     Parents core meshes directly to the skeleton while preserving world 
-#     matrices, preventing eye, lid, and head drift.
 # ---------------------------------------------------------------------------
 print("[*] Securing core character mesh parent hierarchy...")
 if rig:
@@ -245,12 +250,6 @@ bpy.context.view_layer.update()
 
 # ---------------------------------------------------------------------------
 # 3.2 PRESERVE HEAD HOLLOWS (Disable head-flattening shrinkwraps)
-#     The head mesh ('pomni_head.002') has a 'Main Shrinkwrap' modifier that
-#     pulls its vertices into a perfect solid sphere ('pomni_headshrink').
-#     If evaluated during the static bake, it flattens the eye sockets and 
-#     mouth cavities into a solid ball. We delete this modifier from the head
-#     mesh so her face remains hollow, while preserving 'pomni_headshrink' in 
-#     the scene so the rig's face bones can still constraints-sample against it.
 # ---------------------------------------------------------------------------
 print("[*] Preserving head eye sockets and mouth cavities...")
 head_obj = bpy.data.objects.get("pomni_head.002")
@@ -264,10 +263,6 @@ bpy.context.view_layer.update()
 
 # ---------------------------------------------------------------------------
 # 3.5 UNIVERSAL MODIFIER PRUNING ON SHAPE-KEYED MESHES
-#     We safely strip these on all shape-keyed meshes EXCEPT the eyelids,
-#     eyeballs, and pupils, because those are fully baked and cleaned up in Step 4.1.
-#     For baked meshes, we specifically prune only 'CORRECTIVE_SMOOTH' modifiers
-#     to prevent them from failing and blocking subsequent deforming modifiers.
 # ---------------------------------------------------------------------------
 print("[*] Performing universal modifier pruning on non-baked shape-keyed meshes...")
 BAKE_SHAPE_KEYED_MESHES = {
@@ -283,7 +278,7 @@ for obj in list(bpy.data.objects):
                 if m.type == 'CORRECTIVE_SMOOTH':
                     print(f"  [-] Pruning Corrective Smooth modifier {m.name} from baked mesh: {obj.name}")
                     obj.modifiers.remove(m)
-            continue  # Keep SUBSURF and SOLIDIFY on eyelids and eyes for baking
+            continue
             
         for m in list(obj.modifiers):
             if m.type in {'SOLIDIFY', 'SUBSURF', 'DECIMATE', 'BOOLEAN', 'EDGE_SPLIT', 'MIRROR', 'CORRECTIVE_SMOOTH'}:
@@ -312,9 +307,6 @@ bpy.context.view_layer.update()
 
 # ---------------------------------------------------------------------------
 # 4. UNIFIED DEFORMATION BAKING (Supports Shape Key Modifier Baking)
-#    This function evaluates the deforming modifier stack (Lattices and Shrinkwraps)
-#    on the eyelids, pulling fresh context depsgraphs after each update
-#    to prevent stale evaluations and preserve blink animation drivers.
 # ---------------------------------------------------------------------------
 print("[*] Performing Unified Deformation Baking...")
 
@@ -324,10 +316,6 @@ DEFORMERS = {
     'SMOOTH', 'LAPLACIANSMOOTH', 'WARP', 'BOOLEAN'
 }
 
-# Temporarily disable Blender's "Simplify" subdivision clamps during the bakes.
-# If Simplify is active and Max Subdivision is clamped to 0 to prevent lag,
-# Blender will evaluate all subdivisions at level 0 during the viewport bake, 
-# flattening and breaking the eyelids.
 orig_simplify = bpy.context.scene.render.use_simplify
 bpy.context.scene.render.use_simplify = False
 if rig:
@@ -341,6 +329,15 @@ def bake_modifiers_on_shape_keyed_mesh(obj, modifiers_to_bake):
     key_blocks = obj.data.shape_keys.key_blocks
     orig_values = {kb.name: kb.value for kb in key_blocks}
     
+    # 1. Temporarily mute shape key drivers so they do not override our manual
+    #    baking evaluation coordinates of 1.0 back to 0.0 on view_layer updates.
+    muted_drivers = []
+    if obj.data.shape_keys and obj.data.shape_keys.animation_data:
+        for d in obj.data.shape_keys.animation_data.drivers:
+            if not d.mute:
+                d.mute = True
+                muted_drivers.append(d)
+                
     for kb in key_blocks:
         kb.value = 0.0
         
@@ -350,14 +347,16 @@ def bake_modifiers_on_shape_keyed_mesh(obj, modifiers_to_bake):
             m.show_viewport = False
             disabled_mods.append(m)
         elif m in modifiers_to_bake:
-            m.show_viewport = True  # FORCE subdivision/solidify visibility for baking!
+            m.show_viewport = True
             
     bpy.context.view_layer.update()
     depsgraph = bpy.context.evaluated_depsgraph_get()
     
-    # Extract the new base mesh
+    # Extract the new base mesh as a clean, database-linked block
     obj_eval = obj.evaluated_get(depsgraph)
-    new_base_mesh = obj_eval.data.copy()
+    new_base_mesh = bpy.data.meshes.new_from_object(
+        obj_eval, preserve_all_data_layers=True, depsgraph=depsgraph
+    )
     
     # Evaluate each shape key with modifiers applied
     new_shape_meshes = {}
@@ -370,14 +369,33 @@ def bake_modifiers_on_shape_keyed_mesh(obj, modifiers_to_bake):
         # Query a fresh depsgraph so that shape key values of 1.0 are evaluated
         shape_depsgraph = bpy.context.evaluated_depsgraph_get()
         obj_eval_shape = obj.evaluated_get(shape_depsgraph)
-        new_shape_meshes[kb.name] = obj_eval_shape.data.copy()
+        shape_mesh = bpy.data.meshes.new_from_object(
+            obj_eval_shape, preserve_all_data_layers=True, depsgraph=shape_depsgraph
+        )
+            
+        new_shape_meshes[kb.name] = shape_mesh
         kb.value = 0.0
+        
+    # Unmute the original drivers
+    for d in muted_drivers:
+        d.mute = False
         
     for m in disabled_mods:
         m.show_viewport = True
         
     old_mesh = obj.data
+    
+    # 2. Copy materials to prevent mesh-level data assignments from being wiped
+    for mat in old_mesh.materials:
+        new_base_mesh.materials.append(mat)
+        
     obj.data = new_base_mesh
+    
+    # Clear any procedurally copied shape keys on the new database-linked base mesh
+    if obj.data.shape_keys:
+        for kb in list(obj.data.shape_keys.key_blocks):
+            obj.shape_key_remove(kb)
+            
     obj.shape_key_add(name="Basis")
     
     # Reassign the deformed morph key coordinates
@@ -397,12 +415,16 @@ def bake_modifiers_on_shape_keyed_mesh(obj, modifiers_to_bake):
                 new_d = obj.data.shape_keys.animation_data.drivers.new(data_path=d.data_path)
                 new_d.driver.type = d.driver.type
                 new_d.driver.expression = d.driver.expression
+                new_d.mute = False  # Ensure the newly created driver is NOT muted
                 for var in d.driver.variables:
                     new_var = new_d.driver.variables.new()
                     new_var.name = var.name
                     new_var.type = var.type
                     for i, t in enumerate(var.targets):
-                        new_t = new_var.targets[i]
+                        if i < len(new_var.targets):
+                            new_t = new_var.targets[i]
+                        else:
+                            new_t = new_var.targets.new()
                         new_t.id = t.id
                         new_t.data_path = t.data_path
                         if hasattr(t, "bone_target"):
@@ -434,9 +456,6 @@ def bake_modifiers_on_shape_keyed_mesh(obj, modifiers_to_bake):
 
 # ---------------------------------------------------------------------------
 # 4.1 Unified Deformation Baking (Targeted on Eyelids)
-#     Bakes the complete modifier stack (including Subsurf, Solidify, Lattice,
-#     and Shrinkwrap) directly into the shape keys of the eyelids.
-#     This fully preserves subdivision and thickness.
 # ---------------------------------------------------------------------------
 print("[*] Baking deforming and deterministic modifiers on eyelids...")
 for obj in list(bpy.data.objects):
@@ -448,16 +467,16 @@ for obj in list(bpy.data.objects):
 
 bpy.context.view_layer.update()
 
+# ---------------------------------------------------------------------------
 # 4.2 Bake standard meshes (without shape keys)
-#     We ONLY skip Armature skinning. Modifiers like MOUTHINSIDE (Shrinkwrap) and
-#     MOUTHINSIDE.001 (Corrective Smooth) are now fully baked on pomni_head.002
-#     while the rig is in rest space.
+# ---------------------------------------------------------------------------
 SKIP_MOD_TYPES = {'ARMATURE'}
 depsgraph = bpy.context.evaluated_depsgraph_get()
 
 for obj in list(bpy.data.objects):
-    if obj.type != 'MESH' or obj.name in BAKE_SHAPE_KEYED_MESHES:
+    if obj.type != 'MESH':
         continue
+    # Skip shape-keyed meshes processed in Step 4.1
     if obj.data.shape_keys:
         continue
         
@@ -472,13 +491,22 @@ for obj in list(bpy.data.objects):
                 m.show_viewport = False
                 disabled_mods.append(m)
             elif m.type not in SKIP_MOD_TYPES:
-                m.show_viewport = True  # FORCE static subdivisions visibility for baking!
+                m.show_viewport = True
                 
         bpy.context.view_layer.update()
+        
+        # Get evaluated mesh using robust database-linked new_from_object
         obj_eval = obj.evaluated_get(depsgraph)
-        mesh_eval = obj_eval.data.copy()
+        mesh_eval = bpy.data.meshes.new_from_object(
+            obj_eval, preserve_all_data_layers=True, depsgraph=depsgraph
+        )
         
         old_mesh = obj.data
+        
+        # Copy materials to prevent standard meshes from losing data assignments
+        for mat in old_mesh.materials:
+            mesh_eval.materials.append(mat)
+            
         obj.data = mesh_eval
         
         if old_mesh.users == 0:
@@ -538,7 +566,6 @@ for obj in export_meshes:
         # Force OPAQUE blend mode for all materials to prevent WebGL transparency sorting artifacts
         new_mat.blend_method = 'OPAQUE'
 
-        # Enable nodes safely and handle use_nodes forward compatibility
         if hasattr(new_mat, "use_nodes"):
             new_mat.use_nodes = True
         nn    = new_mat.node_tree.nodes
@@ -554,7 +581,6 @@ for obj in export_meshes:
         color_node  = next((n for n in src_nodes if n.type in ('VERTEX_COLOR', 'COLOR_ATTRIBUTE')), None)
         src_pbr     = next((n for n in src_nodes if n.type == 'BSDF_PRINCIPLED'), None)
 
-        # Force Alpha to 1.0 to ensure full depth buffer writing for eyes and eyelids
         pbr_node.inputs['Alpha'].default_value = 1.0
 
         if tex_node and tex_node.image:
@@ -586,11 +612,10 @@ bpy.context.view_layer.update()
 # ---------------------------------------------------------------------------
 print("[*] Cleaning up remaining helper meshes before export...")
 
-# Skip deleting helper meshes that act as shrinkwrap targets
 for obj in list(bpy.data.objects):
     if obj.type == 'MESH':
         if obj.name in shrinkwrap_targets:
-            continue  # Preserve helper targets so bone constraints evaluate correctly during export!
+            continue
         if obj.name not in CORE_CHARACTER_MESHES:
             print(f"[~] Removing non-core mesh (optional outfit/helper): {obj.name}")
             try:
@@ -602,19 +627,34 @@ bpy.context.view_layer.update()
 
 # ---------------------------------------------------------------------------
 # 6.5.5 SKELETAL EXCLUSION FOR HELPER TARGETS BEFORE EXPORT
-#       We explicitly un-exclude and un-hide all scene collections, and then
-#       hide only the helper targets. This ensures that the lower eyelids
-#       (which are inside helper collections) are fully unhidden, evaluated,
-#       and successfully exported under use_visible=True.
+#       We unlink non-core helper cages from all scene collections and clear
+#       their parenting hierarchy (preserving their world coordinates) so they 
+#       are completely omitted from the scene graph. This prevents parent-child
+#       traversal leakage during glTF export.
 # ---------------------------------------------------------------------------
-print("[*] Excluding bone-rig helper meshes from final exported geometry...")
+print("[*] Unlinking and unparenting non-core shrinkwrap helper meshes...")
 
-# 1. Un-exclude all scene collections in Blender's database
+# Unlink and unparent shrinkwrap targets that are not core meshes
+for name in shrinkwrap_targets:
+    if name not in CORE_CHARACTER_MESHES:
+        target_obj = bpy.data.objects.get(name)
+        if target_obj:
+            print(f"  [-] Unlinking and unparenting helper target: {target_obj.name}")
+            # Cache and restore world transform so they don't shift in space
+            world_matrix = target_obj.matrix_world.copy()
+            target_obj.parent = None
+            target_obj.matrix_world = world_matrix
+            
+            # Unlink from all scene collections
+            for col in list(target_obj.users_collection):
+                col.objects.unlink(target_obj)
+
+# Force-enable and un-hide all scene collections recursively
 for col in bpy.data.collections:
     col.hide_viewport = False
     col.hide_render = False
 
-# 2. Un-exclude and un-hide all view layer collections recursively
+# Unlink and unhide layer collections recursively
 layer_collections = [bpy.context.view_layer.layer_collection]
 while layer_collections:
     l_c = layer_collections.pop(0)
@@ -622,19 +662,13 @@ while layer_collections:
     l_c.exclude = False
     l_c.hide_viewport = False
 
-# 3. Explicitly hide only the rigid helper cages
-for name in shrinkwrap_targets:
-    target_obj = bpy.data.objects.get(name)
-    if target_obj:
-        target_obj.hide_viewport = True
-        target_obj.hide_render = True
-
-# 4. Explicitly un-hide and link all actual character meshes
+# Ensure all remaining core character meshes are linked to the scene collection and visible
 for name in CORE_CHARACTER_MESHES:
     obj = bpy.data.objects.get(name)
     if obj:
         obj.hide_viewport = False
         obj.hide_render = False
+        obj.hide_set(False)  # Force eye icon open
         if obj.name not in bpy.context.scene.collection.objects:
             try:
                 bpy.context.scene.collection.objects.link(obj)
@@ -645,14 +679,15 @@ bpy.context.view_layer.update()
 
 # ---------------------------------------------------------------------------
 # 6.6 AUTOMATIC SKELETAL PARENTING RECOVERY
-#     To prevent "Armature must be the parent of skinned mesh" errors and 
-#     ensure skeletal skin animation link bindings render correctly, core 
+#     To prevent "Armature must be the parent of skinned mesh" errors, core
 #     skinned meshes must be parented directly to the Armature rig.
+#     We skip non-core helper cages so they stay unparented and hidden.
 # ---------------------------------------------------------------------------
 print("[*] Performing Skeletal Parenting Recovery...")
 if rig:
     for obj in bpy.data.objects:
-        if obj.type == 'MESH':
+        # Only perform recovery for core character meshes
+        if obj.type == 'MESH' and obj.name in CORE_CHARACTER_MESHES:
             has_armature_mod = any(
                 mod.type == 'ARMATURE' and mod.object == rig 
                 for mod in obj.modifiers
@@ -669,9 +704,6 @@ bpy.context.view_layer.update()
 
 # ---------------------------------------------------------------------------
 # 6.8 DEEP F-CURVE PRUNING (Context-Aware Morph Target Filtering)
-#     Scans and removes orphaned animation curves targeting omitted skeleton 
-#     bones or shape keys. This resolves all validator target-node errors.
-#     Supports legacy (4.x) and modern (5.x+) layered slotted action systems.
 # ---------------------------------------------------------------------------
 print("[*] Performing deep F-curve pruning to clean up export...")
 if rig:
@@ -689,13 +721,11 @@ if rig:
         if hasattr(action, "layers"):
             for layer in action.layers:
                 for strip in layer.strips:
-                    # Clean up based on slots
                     for slot in action.slots:
                         cb = strip.channelbag(slot)
                         if cb and hasattr(cb, "fcurves"):
                             target_id = slot.target if hasattr(slot, "target") else (slot.id if hasattr(slot, "id") else None)
                             
-                            # Check if this slot targets shape keys of a deleted mesh
                             is_valid_slot = True
                             if target_id and isinstance(target_id, bpy.types.Key):
                                 is_valid_slot = any(
@@ -706,15 +736,12 @@ if rig:
                                     cb.fcurves.clear()
                                     continue
                                     
-                            # Check if this slot targets an Object
                             elif target_id and isinstance(target_id, bpy.types.Object):
-                                # If the target object is not a core mesh we are exporting, clear it
                                 if target_id.name not in CORE_CHARACTER_MESHES:
                                     is_valid_slot = False
                                     cb.fcurves.clear()
                                     continue
                                     
-                                # Check individual curves for valid shape keys on this specific object
                                 for fc in list(cb.fcurves):
                                     if "key_blocks" in fc.data_path:
                                         has_valid_key = False
@@ -728,7 +755,6 @@ if rig:
                                             cb.fcurves.remove(fc)
                                             
                             if is_valid_slot:
-                                # Clean individual curves in valid slot
                                 for fc in list(cb.fcurves):
                                     if fc.data_path.startswith("pose.bones"):
                                         parts = fc.data_path.split('"')
@@ -774,10 +800,10 @@ bpy.ops.export_scene.gltf(
     export_normals=True,
     export_apply=False,
     export_animations=True,
-    export_animation_mode='ACTIONS',  # Pulls the stashed animations from the rig
+    export_animation_mode='ACTIONS',
     export_def_bones=False,
     export_attributes=True,
-    use_visible=True,  # ONLY export visible objects (this filters out hidden helpers!)
+    use_visible=False,  # Bypass background-mode viewport evaluation bugs!
     export_cameras=False,
     export_lights=False,
 )
@@ -787,7 +813,6 @@ print("[+] GLB export complete.")
     safe_glb_path = glb_path.replace("\\", "\\\\")
     expr = expr.replace("__GLB_PATH__", safe_glb_path)
 
-    # Write the cached original bytes into the temporary file in the same folder
     try:
         with open(temp_blend_path, "wb") as f:
             f.write(original_bytes)
@@ -812,13 +837,11 @@ print("[+] GLB export complete.")
     print(f"[+] Exporting {os.path.basename(blend_path)} via temporary clone...")
 
     try:
-        # Capture and suppress repetitive output to avoid log duplication noise
         result = subprocess.run(
             cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
         )
         output_text = result.stdout.decode("utf-8", errors="replace")
 
-        # Summary Parsing
         lines = output_text.splitlines()
         counts = {
             "Boolean non-manifold inputs warnings": 0,
@@ -833,14 +856,12 @@ print("[+] GLB export complete.")
 
         for line in lines:
             line_strip = line.strip()
-            # Retain pipeline progress indicators
             if any(
                 line_strip.startswith(prefix) for prefix in ("[*]", "[+]", "[~]", "[-]")
             ):
                 filtered_lines.append(line)
                 continue
 
-            # Count redundant warnings
             if "non-manifold inputs" in line:
                 counts["Boolean non-manifold inputs warnings"] += 1
             elif "Baking animation" in line and "unsupported constraints" in line:
@@ -860,7 +881,6 @@ print("[+] GLB export complete.")
                 ):
                     in_dep_cycle = False
 
-                # Keep errors, exceptions, gltf progress indicators, and timing reports
                 if any(
                     x in line
                     for x in (
@@ -877,7 +897,6 @@ print("[+] GLB export complete.")
                 ):
                     filtered_lines.append(line)
 
-        # Print the cleaned up output
         print("\n--- BLENDER PROCESS OUTPUT SUMMARY ---")
         for f_line in filtered_lines:
             print(f_line)
@@ -888,6 +907,8 @@ print("[+] GLB export complete.")
                 print(f"  - {warn_name}: {count} occurrences")
         print("---------------------------------------\n")
 
+        # Verify if glTF file was actually generated during this specific run
+        # by checking its existence and return code
         export_success = result.returncode == 0 and os.path.exists(glb_path)
     except Exception as e:
         print(f"[-] Blender process execution failed: {e}")
@@ -910,3 +931,4 @@ print("[+] GLB export complete.")
         )
 
     return export_success
+
