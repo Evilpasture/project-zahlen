@@ -32,8 +32,7 @@ CORE_CHARACTER_MESHES = {
     "pomni_neck", "pomni_collar", "pomni_eyebrows", "pomni_eyelashes", 
     "pomni_hairFront", "pomni_hairSide", "pomni_hat", "pomni_hatBorder", 
     "pomni_hip", "pomni_teethbot", "pomni_teethtop", "pomni_tongue",
-    "pomni_mouth", "pomni_gloveballs", "pomni_balls", "pomni_ballsbody",
-    "pomni_ballshat"
+    "pomni_gloveballs", "pomni_balls", "pomni_ballsbody", "pomni_ballshat"
 }
 
 # ---------------------------------------------------------------------------
@@ -92,6 +91,12 @@ for obj in list(bpy.data.objects):
     if obj.type == 'ARMATURE' and obj != rig:
         print(f"  [-] Removing non-essential armature: {obj.name}")
         bpy.data.objects.remove(obj, do_unlink=True)
+
+# Explicitly remove pomni_mouth from the Blender scene as requested
+mouth_obj = bpy.data.objects.get("pomni_mouth")
+if mouth_obj:
+    print("  [-] Removing pomni_mouth mesh object completely from final rig...")
+    bpy.data.objects.remove(mouth_obj, do_unlink=True)
 
 bpy.context.view_layer.update()
 
@@ -222,6 +227,51 @@ for obj in list(bpy.data.objects):
 bpy.context.view_layer.update()
 
 # ---------------------------------------------------------------------------
+# 3.2 PRESERVE HEAD HOLLOWS (Disable head-flattening shrinkwraps)
+#     The head mesh ('pomni_head.002') has a 'Main Shrinkwrap' modifier that
+#     pulls its vertices into a perfect solid sphere ('pomni_headshrink').
+#     We ONLY delete 'Main Shrinkwrap' because it flattens her face.
+#     We do NOT delete 'MOUTHINSIDE' because it is a critical shrinkwrap 
+#     that keeps her mouth cavity shaped and fitted inside her head!
+# ---------------------------------------------------------------------------
+print("[*] Preserving head eye sockets and mouth cavities...")
+head_obj = bpy.data.objects.get("pomni_head.002")
+if head_obj:
+    for m in list(head_obj.modifiers):
+        if m.name == 'Main Shrinkwrap':
+            print(f"  [-] Deleting head-flattening modifier '{m.name}' from {head_obj.name}")
+            head_obj.modifiers.remove(m)
+
+bpy.context.view_layer.update()
+
+# ---------------------------------------------------------------------------
+# 3.5 UNIVERSAL MODIFIER PRUNING ON SHAPE-KEYED MESHES
+#     We safely strip these on all shape-keyed meshes EXCEPT the eyelids,
+#     because those are fully baked and cleaned up in Step 4.1.
+#     For eyelids, we specifically prune only 'CORRECTIVE_SMOOTH' modifiers
+#     to prevent them from failing and blocking subsequent deforming modifiers.
+# ---------------------------------------------------------------------------
+print("[*] Performing universal modifier pruning on non-baked shape-keyed meshes...")
+BAKE_SHAPE_KEYED_MESHES = {"pomni_eyelidsL", "pomni_eyelidsR", "pomni_eyelidsTOP"}
+
+for obj in list(bpy.data.objects):
+    if obj.type == 'MESH' and obj.data.shape_keys:
+        if obj.name in BAKE_SHAPE_KEYED_MESHES:
+            # Prune Corrective Smooth on baked meshes to prevent evaluation blocks
+            for m in list(obj.modifiers):
+                if m.type == 'CORRECTIVE_SMOOTH':
+                    print(f"  [-] Pruning Corrective Smooth modifier {m.name} from baked mesh: {obj.name}")
+                    obj.modifiers.remove(m)
+            continue  # Keep SUBSURF and SOLIDIFY on eyelids for baking
+            
+        for m in list(obj.modifiers):
+            if m.type in {'SOLIDIFY', 'SUBSURF', 'DECIMATE', 'BOOLEAN', 'EDGE_SPLIT', 'MIRROR', 'CORRECTIVE_SMOOTH'}:
+                print(f"  [-] Pruning generative modifier {m.type} from shape-keyed mesh: {obj.name}")
+                obj.modifiers.remove(m)
+
+bpy.context.view_layer.update()
+
+# ---------------------------------------------------------------------------
 # 3.6 CLAMP COLOR ATTRIBUTE CHANNELS TO ELIMINATE VALIDATION ERRORS
 # ---------------------------------------------------------------------------
 print("[*] Clamping vertex color attributes to [0.0, 1.0] range...")
@@ -240,157 +290,166 @@ for obj in bpy.data.objects:
 bpy.context.view_layer.update()
 
 # ---------------------------------------------------------------------------
-# 4. UNIFIED DEFORMATION BAKING (Dependency-Cycle-Proofed)
+# 4. UNIFIED DEFORMATION BAKING (Supports Shape Key Modifier Baking)
+#    This function evaluates the deforming modifier stack (Lattices and Shrinkwraps)
+#    on the eyelids, pulling fresh context depsgraphs after each update
+#    to prevent stale evaluations and preserve blink animation drivers.
 # ---------------------------------------------------------------------------
 print("[*] Performing Unified Deformation Baking...")
-DEFORMERS = {
-    'SHRINKWRAP', 'LATTICE', 'CORRECTIVE_SMOOTH', 'SURFACE_DEFORM', 
-    'SIMPLE_DEFORM', 'MESH_DEFORM', 'CAST', 'WAVE', 'DISPLACE', 
-    'SMOOTH', 'LAPLACIANSMOOTH', 'WARP'
-}
 
-muted_bone_constraints = []
-muted_object_constraints = []
+# Freeze the rig in its REST position during all bakes. This ensures that
+# all lattices, deforming modifiers (like the mouth inside shrinkwrap), 
+# and static modifiers evaluate in rest space without any pose-state contamination.
+orig_simplify = bpy.context.scene.render.use_simplify
+bpy.context.scene.render.use_simplify = False
+if rig:
+    rig.data.pose_position = 'REST'
+bpy.context.view_layer.update()
 
-for o in bpy.data.objects:
-    if o.type == 'ARMATURE':
-        for bone in o.pose.bones:
-            for c in bone.constraints:
-                if not c.mute:
-                    c.mute = True
-                    muted_bone_constraints.append(c)
-    for c in o.constraints:
-        if not c.mute:
-            c.mute = True
-            muted_object_constraints.append(c)
-
-print(f"  [+] Muted {len(muted_bone_constraints)} bone constraints and {len(muted_object_constraints)} object constraints to resolve cycles.")
-
-disabled_armatures = []
-for o in bpy.data.objects:
-    for m in o.modifiers:
-        if m.type == 'ARMATURE' and m.show_viewport:
-            m.show_viewport = False
-            disabled_armatures.append(m)
-
-for obj in list(bpy.data.objects):
-    if obj.type != 'MESH':
-        continue
+def bake_modifiers_on_shape_keyed_mesh(obj, modifiers_to_bake):
+    if not obj.data.shape_keys:
+        return False
         
-    active_deformers = [m for m in obj.modifiers if m.type in DEFORMERS and m.show_viewport]
-    if not active_deformers:
-        continue
-        
-    print(f"[~] Baking deformers mathematically for mesh: {obj.name}")
+    key_blocks = obj.data.shape_keys.key_blocks
+    orig_values = {kb.name: kb.value for kb in key_blocks}
     
-    if obj.data and obj.data.users > 1:
-        obj.data = obj.data.copy()
+    for kb in key_blocks:
+        kb.value = 0.0
         
-    has_shape_keys = bool(obj.data.shape_keys)
-    
-    old_key_values = {}
-    if has_shape_keys:
-        for kb in obj.data.shape_keys.key_blocks:
-            old_key_values[kb.name] = kb.value
-            if kb.name != 'Basis':
-                kb.value = 0.0
-                
     disabled_mods = []
-    for mod in obj.modifiers:
-        if mod not in active_deformers:
-            if mod.show_viewport:
-                mod.show_viewport = False
-                disabled_mods.append(mod)
-        else:
-            mod.show_viewport = True
-                
-    bpy.context.view_layer.update()
-    temp_depsgraph = bpy.context.evaluated_depsgraph_get()
-    
-    try:
-        evaluated_obj = obj.evaluated_get(temp_depsgraph)
-        evaluated_mesh = evaluated_obj.data
-        
-        if len(evaluated_mesh.vertices) == len(obj.data.vertices):
-            new_basis_cos = [v.co.copy() for v in evaluated_mesh.vertices]
+    for m in obj.modifiers:
+        if m not in modifiers_to_bake and m.show_viewport:
+            m.show_viewport = False
+            disabled_mods.append(m)
+        elif m in modifiers_to_bake:
+            m.show_viewport = True  # FORCE subdivision/solidify visibility for baking!
             
-            if has_shape_keys:
-                basis_key = obj.data.shape_keys.key_blocks.get('Basis')
-                if basis_key:
-                    old_basis_cos = [v.co.copy() for v in basis_key.data]
-                    for i, co in enumerate(new_basis_cos):
-                        basis_key.data[i].co = co
-                        
-                    for kb in obj.data.shape_keys.key_blocks:
-                        if kb == basis_key:
-                            continue
-                        rel_key = kb.relative_key if kb.relative_key else basis_key
-                        if rel_key == basis_key:
-                            for i, key_vert in enumerate(kb.data):
-                                offset = key_vert.co - old_basis_cos[i]
-                                key_vert.co = new_basis_cos[i] + offset
-                    print(f"  [+] Overwrote morph 'Basis' coordinates.")
-            else:
-                for i, co in enumerate(new_basis_cos):
-                    obj.data.vertices[i].co = co
-                print(f"  [+] Overwrote base vertex coordinates.")
-                
-            for mod in list(obj.modifiers):
-                if mod in active_deformers:
-                    obj.modifiers.remove(mod)
-        else:
-            print(f"  [-] Vertex count mismatch on '{obj.name}'. Deformers skipped.")
-    except Exception as e:
-        print(f"  [-] Failed to bake coordinates on '{obj.name}': {e}")
-    finally:
-        for mod in disabled_mods:
-            mod.show_viewport = True
-        if has_shape_keys:
-            for kb_name, val in old_key_values.items():
-                kb = obj.data.shape_keys.key_blocks.get(kb_name)
-                if kb: kb.value = val
+    bpy.context.view_layer.update()
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    
+    # Extract the new base mesh
+    obj_eval = obj.evaluated_get(depsgraph)
+    new_base_mesh = obj_eval.data.copy()
+    
+    # Evaluate each shape key with modifiers applied
+    new_shape_meshes = {}
+    for kb in key_blocks:
+        if kb.name == 'Basis':
+            continue
+        kb.value = 1.0
+        bpy.context.view_layer.update()
+        
+        # Query a fresh depsgraph so that shape key values of 1.0 are evaluated
+        shape_depsgraph = bpy.context.evaluated_depsgraph_get()
+        obj_eval_shape = obj.evaluated_get(shape_depsgraph)
+        new_shape_meshes[kb.name] = obj_eval_shape.data.copy()
+        kb.value = 0.0
+        
+    for m in disabled_mods:
+        m.show_viewport = True
+        
+    old_mesh = obj.data
+    obj.data = new_base_mesh
+    obj.shape_key_add(name="Basis")
+    
+    # Reassign the deformed morph key coordinates
+    for name, shape_mesh in new_shape_meshes.items():
+        new_key = obj.shape_key_add(name=name)
+        for i, v in enumerate(shape_mesh.vertices):
+            new_key.data[i].co = v.co.copy()
+        bpy.data.meshes.remove(shape_mesh)
+        
+    # Copy animation data & drivers to preserve blink animations!
+    if old_mesh.shape_keys and old_mesh.shape_keys.animation_data:
+        obj.data.shape_keys.animation_data_create()
+        if old_mesh.shape_keys.animation_data.action:
+            obj.data.shape_keys.animation_data.action = old_mesh.shape_keys.animation_data.action
+        for d in old_mesh.shape_keys.animation_data.drivers:
+            try:
+                new_d = obj.data.shape_keys.animation_data.drivers.new(data_path=d.data_path)
+                new_d.driver.type = d.driver.type
+                new_d.driver.expression = d.driver.expression
+                for var in d.driver.variables:
+                    new_var = new_d.driver.variables.new()
+                    new_var.name = var.name
+                    new_var.type = var.type
+                    for i, t in enumerate(var.targets):
+                        new_t = new_var.targets[i]
+                        new_t.id = t.id
+                        new_t.data_path = t.data_path
+                        if hasattr(t, "bone_target"):
+                            new_t.bone_target = t.bone_target
+                        if hasattr(t, "transform_type"):
+                            new_t.transform_type = t.transform_type
+                        if hasattr(t, "transform_space"):
+                            new_t.transform_space = t.transform_space
+            except Exception as e:
+                print(f"  [-] Failed to copy shape key driver: {e}")
+        
+    for kb_name, val in orig_values.items():
+        kb = obj.data.shape_keys.key_blocks.get(kb_name)
+        if kb: kb.value = val
+            
+    if old_mesh.users == 0:
+        bpy.data.meshes.remove(old_mesh)
+        
+    for m in list(obj.modifiers):
+        if m in modifiers_to_bake:
+            obj.modifiers.remove(m)
+            
+    # Force RNA array flush to prevent GLTF export expected size mismatch errors
+    obj.data.validate(verbose=False)
+    obj.data.update()
+    
+    print(f"  [+] Baked modifiers on shape-keyed mesh: {obj.name}")
+    return True
 
-for c in muted_bone_constraints:
-    c.mute = False
-for c in muted_object_constraints:
-    c.mute = False
-
-for m in disabled_armatures:
-    m.show_viewport = True
+# ---------------------------------------------------------------------------
+# 4.1 Unified Deformation Baking (Targeted on Eyelids)
+#     Bakes the complete modifier stack (including Subsurf, Solidify, Lattice,
+#     and Shrinkwrap) directly into the shape keys of the eyelids.
+#     This fully preserves subdivision and thickness.
+# ---------------------------------------------------------------------------
+print("[*] Baking deforming and deterministic modifiers on eyelids...")
+for obj in list(bpy.data.objects):
+    if obj.type == 'MESH' and obj.data.shape_keys and obj.name in BAKE_SHAPE_KEYED_MESHES:
+        mods_to_bake = [m for m in obj.modifiers if m.type != 'ARMATURE']
+        if mods_to_bake:
+            print(f"  [+] Baking modifiers on shape-keyed mesh: {obj.name}")
+            bake_modifiers_on_shape_keyed_mesh(obj, mods_to_bake)
 
 bpy.context.view_layer.update()
 
-# ---------------------------------------------------------------------------
-# 5. APPLY STATIC MODIFIERS (Double-Deformation-Proofed)
-#    Temporarily disables active deforming modifiers (Armatures/Shrinkwraps)
-#    during static modifier baking to prevent pose coordinates from being 
-#    compounded and baked as base mesh vertices.
-# ---------------------------------------------------------------------------
-SKIP_MOD_TYPES = {'ARMATURE', 'SHRINKWRAP'}
-
-print("[*] Baking static modifiers via low-level data-block swaps...")
+# 4.2 Bake standard meshes (without shape keys)
+#     We ONLY skip Armature skinning. Modifiers like MOUTHINSIDE (Shrinkwrap) and
+#     MOUTHINSIDE.001 (Corrective Smooth) are now fully baked on pomni_head.002
+#     while the rig is in rest space.
+SKIP_MOD_TYPES = {'ARMATURE'}
 depsgraph = bpy.context.evaluated_depsgraph_get()
 
 for obj in list(bpy.data.objects):
-    if obj.type != 'MESH' or obj.data.shape_keys:
+    if obj.type != 'MESH' or obj.name in BAKE_SHAPE_KEYED_MESHES:
         continue
+    if obj.data.shape_keys:
+        continue
+        
     candidate_mods = [m for m in obj.modifiers if m.type not in SKIP_MOD_TYPES]
     if not candidate_mods:
         continue
     
     try:
-        # Disable deforming modifiers prior to evaluation
         disabled_mods = []
         for m in obj.modifiers:
             if m.type in SKIP_MOD_TYPES and m.show_viewport:
                 m.show_viewport = False
                 disabled_mods.append(m)
+            elif m.type not in SKIP_MOD_TYPES:
+                m.show_viewport = True  # FORCE static subdivisions visibility for baking!
                 
         bpy.context.view_layer.update()
         obj_eval = obj.evaluated_get(depsgraph)
         mesh_eval = obj_eval.data.copy()
         
-        # Replace base mesh reference
         old_mesh = obj.data
         obj.data = mesh_eval
         
@@ -406,9 +465,18 @@ for obj in list(bpy.data.objects):
             if m.type not in SKIP_MOD_TYPES:
                 obj.modifiers.remove(m)
                 print(f"  [+] Successfully baked static modifiers on '{obj.name}'")
+                
+        obj.data.validate(verbose=False)
+        obj.data.update()
     except Exception as e:
         print(f"  [-] Failed to bake modifiers on '{obj.name}': {e}")
 
+bpy.context.view_layer.update()
+
+# Restore Blender's original "Simplify" settings and rig pose position
+bpy.context.scene.render.use_simplify = orig_simplify
+if rig:
+    rig.data.pose_position = 'POSE'
 bpy.context.view_layer.update()
 
 # ---------------------------------------------------------------------------
@@ -423,7 +491,7 @@ for obj in export_meshes:
 
     for mat_slot in obj.material_slots:
         mat = mat_slot.material
-        if not mat or not mat.use_nodes or not mat.node_tree:
+        if not mat or not mat.node_tree:
             continue
 
         cache_key = (mat.name, has_uvs)
@@ -439,7 +507,9 @@ for obj in export_meshes:
         new_mat.alpha_threshold    = mat.alpha_threshold
         new_mat.use_backface_culling = mat.use_backface_culling
 
-        new_mat.use_nodes = True
+        # Enable nodes safely and handle use_nodes forward compatibility
+        if hasattr(new_mat, "use_nodes"):
+            new_mat.use_nodes = True
         nn    = new_mat.node_tree.nodes
         nl    = new_mat.node_tree.links
         nn.clear()
@@ -491,22 +561,46 @@ bpy.context.view_layer.update()
 # ---------------------------------------------------------------------------
 # 6.5 CLEANUP AND VISIBILITY PASS BEFORE EXPORT
 # ---------------------------------------------------------------------------
-print("[*] Cleaning up remaining shrinkwrap targets and helper meshes before export...")
+print("[*] Cleaning up remaining helper meshes before export...")
 
-for target_name in list(helpers_to_clean):
-    target_obj = bpy.data.objects.get(target_name)
-    if target_obj:
-        print(f"[~] Removing shrinkwrap helper cage: {target_name}")
-        bpy.data.objects.remove(target_obj, do_unlink=True)
-
+# Skip deleting helper meshes that act as shrinkwrap targets
 for obj in list(bpy.data.objects):
     if obj.type == 'MESH':
+        if obj.name in shrinkwrap_targets:
+            continue  # Preserve helper targets so bone constraints evaluate correctly during export!
         if obj.name not in CORE_CHARACTER_MESHES:
             print(f"[~] Removing non-core mesh (optional outfit/helper): {obj.name}")
             try:
                 bpy.data.objects.remove(obj, do_unlink=True)
             except Exception as e:
                 print(f"  [-] Failed to remove {obj.name}: {e}")
+
+bpy.context.view_layer.update()
+
+# ---------------------------------------------------------------------------
+# 6.5.5 SKELETAL EXCLUSION FOR HELPER TARGETS BEFORE EXPORT
+#       We explicitly hide the helper targets in the viewport and render so
+#       they are not exported as visible geometry under use_visible=True,
+#       but are still evaluated by bone constraints during export.
+# ---------------------------------------------------------------------------
+print("[*] Excluding bone-rig helper meshes from final exported geometry...")
+for name in shrinkwrap_targets:
+    target_obj = bpy.data.objects.get(name)
+    if target_obj:
+        target_obj.hide_viewport = True
+        target_obj.hide_render = True
+
+# Ensure all actual character meshes are unhidden so they are exported cleanly
+for name in CORE_CHARACTER_MESHES:
+    obj = bpy.data.objects.get(name)
+    if obj:
+        obj.hide_viewport = False
+        obj.hide_render = False
+        if obj.name not in bpy.context.scene.collection.objects:
+            try:
+                bpy.context.scene.collection.objects.link(obj)
+            except Exception:
+                pass
 
 bpy.context.view_layer.update()
 
@@ -644,7 +738,7 @@ bpy.ops.export_scene.gltf(
     export_animation_mode='ACTIONS',  # Pulls the stashed animations from the rig
     export_def_bones=False,
     export_attributes=True,
-    use_visible=False,
+    use_visible=True,  # ONLY export visible objects (this filters out hidden helpers!)
     export_cameras=False,
     export_lights=False,
 )
@@ -676,12 +770,85 @@ print("[+] GLB export complete.")
     env.pop("PYTHONPATH", None)
 
     cmd = ["blender", "-b", temp_blend_path, "--python-expr", expr]
-    print(
-        f"[+] Exporting {os.path.basename(blend_path)} via temporary clone (streaming output)..."
-    )
+    print(f"[+] Exporting {os.path.basename(blend_path)} via temporary clone...")
 
     try:
-        result = subprocess.run(cmd, env=env)
+        # Capture and suppress repetitive output to avoid log duplication noise
+        result = subprocess.run(
+            cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+        )
+        output_text = result.stdout.decode("utf-8", errors="replace")
+
+        # Summary Parsing
+        lines = output_text.splitlines()
+        counts = {
+            "Boolean non-manifold inputs warnings": 0,
+            "Bone constraint animation baking warnings": 0,
+            "Multiple rotation mode warnings": 0,
+            "Dependency cycle warnings": 0,
+            "Active Vertex Color not exported warnings": 0,
+        }
+
+        filtered_lines = []
+        in_dep_cycle = False
+
+        for line in lines:
+            line_strip = line.strip()
+            # Retain pipeline progress indicators
+            if any(
+                line_strip.startswith(prefix) for prefix in ("[*]", "[+]", "[~]", "[-]")
+            ):
+                filtered_lines.append(line)
+                continue
+
+            # Count redundant warnings
+            if "non-manifold inputs" in line:
+                counts["Boolean non-manifold inputs warnings"] += 1
+            elif "Baking animation" in line and "unsupported constraints" in line:
+                counts["Bone constraint animation baking warnings"] += 1
+            elif "Multiple rotation mode detected" in line:
+                counts["Multiple rotation mode warnings"] += 1
+            elif "Vertex Color" in line and "not used in the node tree" in line:
+                counts["Active Vertex Color not exported warnings"] += 1
+            elif "Dependency cycle detected" in line:
+                counts["Dependency cycle warnings"] += 1
+                in_dep_cycle = True
+            elif in_dep_cycle and line.startswith("                            |"):
+                pass
+            else:
+                if in_dep_cycle and not line.startswith(
+                    "                            |"
+                ):
+                    in_dep_cycle = False
+
+                # Keep errors, exceptions, gltf progress indicators, and timing reports
+                if any(
+                    x in line
+                    for x in (
+                        "gltf",
+                        "export",
+                        "Finished",
+                        "Starting",
+                        "Error",
+                        "Traceback",
+                        "RuntimeError",
+                        "Exception",
+                        "Location:",
+                    )
+                ):
+                    filtered_lines.append(line)
+
+        # Print the cleaned up output
+        print("\n--- BLENDER PROCESS OUTPUT SUMMARY ---")
+        for f_line in filtered_lines:
+            print(f_line)
+
+        print("\n--- REPETITIVE WARNINGS SUPPRESSED ---")
+        for warn_name, count in counts.items():
+            if count > 0:
+                print(f"  - {warn_name}: {count} occurrences")
+        print("---------------------------------------\n")
+
         export_success = result.returncode == 0 and os.path.exists(glb_path)
     except Exception as e:
         print(f"[-] Blender process execution failed: {e}")
@@ -704,3 +871,4 @@ print("[+] GLB export complete.")
         )
 
     return export_success
+
