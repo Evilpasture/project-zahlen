@@ -247,12 +247,15 @@ bpy.context.view_layer.update()
 # ---------------------------------------------------------------------------
 # 3.5 UNIVERSAL MODIFIER PRUNING ON SHAPE-KEYED MESHES
 #     We safely strip these on all shape-keyed meshes EXCEPT the eyelids,
-#     because those are fully baked and cleaned up in Step 4.1.
-#     For eyelids, we specifically prune only 'CORRECTIVE_SMOOTH' modifiers
+#     eyeballs, and pupils, because those are fully baked and cleaned up in Step 4.1.
+#     For baked meshes, we specifically prune only 'CORRECTIVE_SMOOTH' modifiers
 #     to prevent them from failing and blocking subsequent deforming modifiers.
 # ---------------------------------------------------------------------------
 print("[*] Performing universal modifier pruning on non-baked shape-keyed meshes...")
-BAKE_SHAPE_KEYED_MESHES = {"pomni_eyelidsL", "pomni_eyelidsR", "pomni_eyelidsTOP"}
+BAKE_SHAPE_KEYED_MESHES = {
+    "pomni_eyelidsL", "pomni_eyelidsR", "pomni_eyelidsTOP", 
+    "pomni_eyes", "pomni_pupils"
+}
 
 for obj in list(bpy.data.objects):
     if obj.type == 'MESH' and obj.data.shape_keys:
@@ -262,7 +265,7 @@ for obj in list(bpy.data.objects):
                 if m.type == 'CORRECTIVE_SMOOTH':
                     print(f"  [-] Pruning Corrective Smooth modifier {m.name} from baked mesh: {obj.name}")
                     obj.modifiers.remove(m)
-            continue  # Keep SUBSURF and SOLIDIFY on eyelids for baking
+            continue  # Keep SUBSURF and SOLIDIFY on baked meshes for evaluation
             
         for m in list(obj.modifiers):
             if m.type in {'SOLIDIFY', 'SUBSURF', 'DECIMATE', 'BOOLEAN', 'EDGE_SPLIT', 'MIRROR', 'CORRECTIVE_SMOOTH'}:
