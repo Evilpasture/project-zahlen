@@ -47,6 +47,23 @@ for img in bpy.data.images:
             print(f"  [-] Failed to pack image '{img.name}': {e}")
 
 # ---------------------------------------------------------------------------
+# 0.5 FORCE-ENABLE ALL COLLECTIONS IN VIEW LAYER
+#     Production-grade rigs often place helper cages (like 'pomni_headshrink')
+#     in excluded collections to keep the outliner clean. But if excluded, 
+#     Blender's dependency graph will ignore them, causing shrinkwraps to fail 
+#     and mouth/eyelids to deform incorrectly during the bake. 
+#     We force-enable all layer collections so they evaluate perfectly.
+# ---------------------------------------------------------------------------
+print("[*] Force-enabling all view layer collections for accurate baking...")
+layer_collections = [bpy.context.view_layer.layer_collection]
+while layer_collections:
+    l_c = layer_collections.pop(0)
+    layer_collections.extend(l_c.children)
+    l_c.exclude = False
+
+bpy.context.view_layer.update()
+
+# ---------------------------------------------------------------------------
 # 1. SETUP SKELETON REFERENCE
 # ---------------------------------------------------------------------------
 rigs = [o for o in bpy.data.objects if o.type == 'ARMATURE']
@@ -124,7 +141,7 @@ if rig:
                     for strip in layer.strips:
                         for cb in strip.channelbags:
                             if cb and hasattr(cb, "fcurves"):
-                                if any(fc.data_path.startswith("pose.bones") or "location" in fc.data_path or "rotation" in fc.data_path for fc in cb.fcurves):
+                                if any(fc.data_path.startswith("pose.bones") or "location" in fc.data_path or "rotation" in fc.data_path for cb_fc in cb.fcurves):
                                     is_bone_anim = True
                                     break
                         if is_bone_anim:
@@ -230,9 +247,10 @@ bpy.context.view_layer.update()
 # 3.2 PRESERVE HEAD HOLLOWS (Disable head-flattening shrinkwraps)
 #     The head mesh ('pomni_head.002') has a 'Main Shrinkwrap' modifier that
 #     pulls its vertices into a perfect solid sphere ('pomni_headshrink').
-#     We ONLY delete 'Main Shrinkwrap' because it flattens her face.
-#     We do NOT delete 'MOUTHINSIDE' because it is a critical shrinkwrap 
-#     that keeps her mouth cavity shaped and fitted inside her head!
+#     If evaluated during the static bake, it flattens the eye sockets and 
+#     mouth cavities into a solid ball. We delete this modifier from the head
+#     mesh so her face remains hollow, while preserving 'pomni_headshrink' in 
+#     the scene so the rig's face bones can still constraints-sample against it.
 # ---------------------------------------------------------------------------
 print("[*] Preserving head eye sockets and mouth cavities...")
 head_obj = bpy.data.objects.get("pomni_head.002")
@@ -265,7 +283,7 @@ for obj in list(bpy.data.objects):
                 if m.type == 'CORRECTIVE_SMOOTH':
                     print(f"  [-] Pruning Corrective Smooth modifier {m.name} from baked mesh: {obj.name}")
                     obj.modifiers.remove(m)
-            continue  # Keep SUBSURF and SOLIDIFY on baked meshes for evaluation
+            continue  # Keep SUBSURF and SOLIDIFY on eyelids and eyes for baking
             
         for m in list(obj.modifiers):
             if m.type in {'SOLIDIFY', 'SUBSURF', 'DECIMATE', 'BOOLEAN', 'EDGE_SPLIT', 'MIRROR', 'CORRECTIVE_SMOOTH'}:
@@ -300,9 +318,16 @@ bpy.context.view_layer.update()
 # ---------------------------------------------------------------------------
 print("[*] Performing Unified Deformation Baking...")
 
-# Freeze the rig in its REST position during all bakes. This ensures that
-# all lattices, deforming modifiers (like the mouth inside shrinkwrap), 
-# and static modifiers evaluate in rest space without any pose-state contamination.
+DEFORMERS = {
+    'SHRINKWRAP', 'LATTICE', 'CORRECTIVE_SMOOTH', 'SURFACE_DEFORM', 
+    'SIMPLE_DEFORM', 'MESH_DEFORM', 'CAST', 'WAVE', 'DISPLACE', 
+    'SMOOTH', 'LAPLACIANSMOOTH', 'WARP', 'BOOLEAN'
+}
+
+# Temporarily disable Blender's "Simplify" subdivision clamps during the bakes.
+# If Simplify is active and Max Subdivision is clamped to 0 to prevent lag,
+# Blender will evaluate all subdivisions at level 0 during the viewport bake, 
+# flattening and breaking the eyelids.
 orig_simplify = bpy.context.scene.render.use_simplify
 bpy.context.scene.render.use_simplify = False
 if rig:
@@ -510,6 +535,9 @@ for obj in export_meshes:
         new_mat.alpha_threshold    = mat.alpha_threshold
         new_mat.use_backface_culling = mat.use_backface_culling
 
+        # Force OPAQUE blend mode for all materials to prevent WebGL transparency sorting artifacts
+        new_mat.blend_method = 'OPAQUE'
+
         # Enable nodes safely and handle use_nodes forward compatibility
         if hasattr(new_mat, "use_nodes"):
             new_mat.use_nodes = True
@@ -526,26 +554,20 @@ for obj in export_meshes:
         color_node  = next((n for n in src_nodes if n.type in ('VERTEX_COLOR', 'COLOR_ATTRIBUTE')), None)
         src_pbr     = next((n for n in src_nodes if n.type == 'BSDF_PRINCIPLED'), None)
 
-        is_transparent = src_blend in ('BLEND', 'CLIP', 'HASHED')
+        # Force Alpha to 1.0 to ensure full depth buffer writing for eyes and eyelids
+        pbr_node.inputs['Alpha'].default_value = 1.0
 
         if tex_node and tex_node.image:
             print(f"[+] Path A  | texture  | {mat.name} -> {tex_node.image.name}")
             img_node       = nn.new('ShaderNodeTexImage')
             img_node.image = tex_node.image
             nl.new(img_node.outputs['Color'], pbr_node.inputs['Base Color'])
-            if is_transparent:
-                nl.new(img_node.outputs['Alpha'], pbr_node.inputs['Alpha'])
-            else:
-                pbr_node.inputs['Alpha'].default_value = 1.0
-                new_mat.blend_method = 'OPAQUE'
 
         elif color_node:
             print(f"[+] Path B  | vtx color| {mat.name}")
             col_attr = nn.new('ShaderNodeVertexColor')
             col_attr.layer_name = color_node.layer_name if hasattr(color_node, 'layer_name') else "Color"
             nl.new(col_attr.outputs['Color'], pbr_node.inputs['Base Color'])
-            new_mat.blend_method = 'OPAQUE'
-            pbr_node.inputs['Alpha'].default_value = 1.0
 
         else:
             print(f"[+] Path C  | flat col | {mat.name}")
@@ -553,8 +575,6 @@ for obj in export_meshes:
                 pbr_node.inputs['Base Color'].default_value = src_pbr.inputs['Base Color'].default_value
             else:
                 pbr_node.inputs['Base Color'].default_value = mat.diffuse_color
-            new_mat.blend_method = 'OPAQUE'
-            pbr_node.inputs['Alpha'].default_value = 1.0
 
         mat_slot.material            = new_mat
         converted_cache[cache_key]   = new_mat
@@ -582,18 +602,34 @@ bpy.context.view_layer.update()
 
 # ---------------------------------------------------------------------------
 # 6.5.5 SKELETAL EXCLUSION FOR HELPER TARGETS BEFORE EXPORT
-#       We explicitly hide the helper targets in the viewport and render so
-#       they are not exported as visible geometry under use_visible=True,
-#       but are still evaluated by bone constraints during export.
+#       We explicitly un-exclude and un-hide all scene collections, and then
+#       hide only the helper targets. This ensures that the lower eyelids
+#       (which are inside helper collections) are fully unhidden, evaluated,
+#       and successfully exported under use_visible=True.
 # ---------------------------------------------------------------------------
 print("[*] Excluding bone-rig helper meshes from final exported geometry...")
+
+# 1. Un-exclude all scene collections in Blender's database
+for col in bpy.data.collections:
+    col.hide_viewport = False
+    col.hide_render = False
+
+# 2. Un-exclude and un-hide all view layer collections recursively
+layer_collections = [bpy.context.view_layer.layer_collection]
+while layer_collections:
+    l_c = layer_collections.pop(0)
+    layer_collections.extend(l_c.children)
+    l_c.exclude = False
+    l_c.hide_viewport = False
+
+# 3. Explicitly hide only the rigid helper cages
 for name in shrinkwrap_targets:
     target_obj = bpy.data.objects.get(name)
     if target_obj:
         target_obj.hide_viewport = True
         target_obj.hide_render = True
 
-# Ensure all actual character meshes are unhidden so they are exported cleanly
+# 4. Explicitly un-hide and link all actual character meshes
 for name in CORE_CHARACTER_MESHES:
     obj = bpy.data.objects.get(name)
     if obj:
@@ -874,4 +910,3 @@ print("[+] GLB export complete.")
         )
 
     return export_success
-
