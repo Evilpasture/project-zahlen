@@ -278,6 +278,10 @@ for obj in list(bpy.data.objects):
                 if m.type == 'CORRECTIVE_SMOOTH':
                     print(f"  [-] Pruning Corrective Smooth modifier {m.name} from baked mesh: {obj.name}")
                     obj.modifiers.remove(m)
+                # Prune Subdivision on pupils to keep their vertex-painted outlines crisp
+                elif obj.name == "pomni_pupils" and m.type == 'SUBSURF':
+                    print(f"  [-] Pruning Subdivision modifier from pupils mesh: {obj.name} to keep outlines crisp")
+                    obj.modifiers.remove(m)
             continue
             
         for m in list(obj.modifiers):
@@ -470,19 +474,17 @@ def bake_modifiers_on_shape_keyed_mesh(obj, modifiers_to_bake):
             try:
                 new_d = obj.data.shape_keys.animation_data.drivers.new(data_path=d.data_path)
                 
-                # Force driver type to SCRIPTED to allow our range correction expressions to evaluate.
-                # AVERAGE type ignores expression strings entirely and causes negative clamped bounds.
-                new_d.driver.type = 'SCRIPTED'
-                
-                # Math Correction (Corrects Inversion):
-                # - top keys (Top Eyelids): Location Y ranges [0.1 (open) -> 0.0 (closed)]. Expression: var * 10.0
-                # - bot keys (Bottom Eyelids): Location Y ranges [-0.1 (open) -> 0.0 (closed)]. Expression: var * -10.0
+                # Only force driver type to SCRIPTED for eyelid shape keys requiring custom expressions.
+                # Other drivers (like pupils Key 2) must keep their original type (e.g. AVERAGE) and expression.
                 path = d.data_path
-                if "topL" in path or "topR" in path:
-                    new_d.driver.expression = "var * 10.0"
-                elif "botL" in path or "botR" in path:
-                    new_d.driver.expression = "var * -10.0"
+                if "topL" in path or "topR" in path or "botL" in path or "botR" in path:
+                    new_d.driver.type = 'SCRIPTED'
+                    if "topL" in path or "topR" in path:
+                        new_d.driver.expression = "var * 10.0"
+                    else:
+                        new_d.driver.expression = "var * -10.0"
                 else:
+                    new_d.driver.type = d.driver.type
                     new_d.driver.expression = d.driver.expression
                 
                 new_d.mute = False  # Ensure the newly created driver is NOT muted
@@ -639,13 +641,18 @@ for obj in export_meshes:
         new_mat  = bpy.data.materials.new(name=f"{mat.name}_{suffix}")
 
         src_blend = mat.blend_method
-        new_mat.blend_method       = src_blend
         new_mat.alpha_threshold    = mat.alpha_threshold
         new_mat.use_backface_culling = mat.use_backface_culling
 
-        # Preserve transparent blend method settings to keep pupil outline anti-aliasing smooth.
-        # For solid meshes with no transparency requirements, fallback to OPAQUE to prevent depth sorting bugs.
-        if src_blend in {'BLEND', 'HASHED', 'CLIP'}:
+        # Preserve transparent blend method settings only for materials that require transparency (like pupils/glasses).
+        # For solid meshes (like skin/hair/clothes) which might have been accidentally set to HASHED in the source,
+        # force them to OPAQUE to prevent depth sorting and skeleton-render bugs.
+        SOLID_MATERIALS = {
+            "pomni_mat", "pomni_matNOEVIL", "pomni_head", "pomni_hair", 
+            "pomni_suit", "pomni_shirt", "pomni_swimsuit", "pomni_hat", "Material"
+        }
+
+        if src_blend in {'BLEND', 'HASHED', 'CLIP'} and mat.name not in SOLID_MATERIALS:
             new_mat.blend_method = src_blend
         else:
             new_mat.blend_method = 'OPAQUE'
@@ -956,7 +963,10 @@ print("[+] GLB export complete.")
                 counts["Active Vertex Color not exported warnings"] += 1
             elif "Dependency cycle detected" in line:
                 counts["Dependency cycle warnings"] += 1
-                in_dep_cycle = True
+                if "                            |" in line:
+                    pass
+                else:
+                    in_dep_cycle = True
             elif in_dep_cycle and line.startswith("                            |"):
                 pass
             else:
