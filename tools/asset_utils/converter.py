@@ -539,7 +539,7 @@ bpy.context.view_layer.update()
 # 6. CONVERT COMPLEX SHADER TREES TO GLTF-COMPLIANT PBR
 # ---------------------------------------------------------------------------
 print("[*] Converting shader trees to glTF-compliant PBR...")
-export_meshes = [o for o in bpy.data.objects if o.type == 'MESH' and not o.hide_viewport]
+export_meshes = [o for o in bpy.data.objects if o.type == 'MESH']
 converted_cache = {}
 
 for obj in export_meshes:
