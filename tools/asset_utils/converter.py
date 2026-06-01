@@ -306,6 +306,62 @@ for obj in bpy.data.objects:
 bpy.context.view_layer.update()
 
 # ---------------------------------------------------------------------------
+# 3.7 PRUNE UNUSED SHAPE KEYS FROM EYELIDS
+#     To avoid exporting empty/useless shape keys (morph targets) with active
+#     drivers that do nothing on specific mesh segments, we prune them here.
+#     To prevent dependency graph evaluation crashes (BKE_animsys_eval_driver),
+#     associated drivers are explicitly removed prior to shape key deletion.
+# ---------------------------------------------------------------------------
+print("[*] Pruning unused shape keys and drivers from specific eyelid meshes...")
+EYELID_SHAPE_KEY_PRESERVATION = {
+    "pomni_eyelidsR": {"Basis", "botR"},
+    "pomni_eyelidsL": {"Basis", "botL"},
+    "pomni_eyelidsTOP": {"Basis", "topL", "topR"}
+}
+
+for mesh_name, keys_to_keep in EYELID_SHAPE_KEY_PRESERVATION.items():
+    obj = bpy.data.objects.get(mesh_name)
+    if obj and obj.type == 'MESH':
+        if obj.data.shape_keys:
+            if obj.data.users > 1:
+                print(f"  [~] Making mesh data single-user for {mesh_name}...")
+                obj.data = obj.data.copy()
+            
+            print(f"  [~] Processing shape keys for {mesh_name}...")
+            
+            # 1. Cleanly delete drivers targeting the shape keys we are removing
+            if obj.data.shape_keys.animation_data:
+                drivers = obj.data.shape_keys.animation_data.drivers
+                for d in list(drivers):
+                    path = d.data_path
+                    key_name = None
+                    if "key_blocks[" in path:
+                        start_idx = path.find("key_blocks[") + 11
+                        if start_idx < len(path):
+                            quote_char = path[start_idx]
+                            if quote_char in ('"', "'"):
+                                end_idx = path.find(quote_char, start_idx + 1)
+                                if end_idx != -1:
+                                    key_name = path[start_idx+1:end_idx]
+                    
+                    if key_name and key_name not in keys_to_keep:
+                        print(f"    [-] Removing driver for unused shape key: {key_name} (path: {path})")
+                        drivers.remove(d)
+            
+            # Flush dependency updates after removing drivers
+            obj.data.shape_keys.update_tag()
+            bpy.context.view_layer.update()
+            
+            # 2. Safely remove the actual shape key block now that drivers are detached
+            kb_list = list(obj.data.shape_keys.key_blocks)
+            for kb in kb_list:
+                if kb.name not in keys_to_keep:
+                    print(f"    [-] Removing unused shape key: {kb.name}")
+                    obj.shape_key_remove(kb)
+
+bpy.context.view_layer.update()
+
+# ---------------------------------------------------------------------------
 # 4. UNIFIED DEFORMATION BAKING (Supports Shape Key Modifier Baking)
 # ---------------------------------------------------------------------------
 print("[*] Performing Unified Deformation Baking...")
@@ -413,8 +469,22 @@ def bake_modifiers_on_shape_keyed_mesh(obj, modifiers_to_bake):
         for d in old_mesh.shape_keys.animation_data.drivers:
             try:
                 new_d = obj.data.shape_keys.animation_data.drivers.new(data_path=d.data_path)
-                new_d.driver.type = d.driver.type
-                new_d.driver.expression = d.driver.expression
+                
+                # Force driver type to SCRIPTED to allow our range correction expressions to evaluate.
+                # AVERAGE type ignores expression strings entirely and causes negative clamped bounds.
+                new_d.driver.type = 'SCRIPTED'
+                
+                # Math Correction (Corrects Inversion):
+                # - top keys (Top Eyelids): Location Y ranges [0.1 (open) -> 0.0 (closed)]. Expression: var * 10.0
+                # - bot keys (Bottom Eyelids): Location Y ranges [-0.1 (open) -> 0.0 (closed)]. Expression: var * -10.0
+                path = d.data_path
+                if "topL" in path or "topR" in path:
+                    new_d.driver.expression = "var * 10.0"
+                elif "botL" in path or "botR" in path:
+                    new_d.driver.expression = "var * -10.0"
+                else:
+                    new_d.driver.expression = d.driver.expression
+                
                 new_d.mute = False  # Ensure the newly created driver is NOT muted
                 for var in d.driver.variables:
                     new_var = new_d.driver.variables.new()
@@ -433,6 +503,12 @@ def bake_modifiers_on_shape_keyed_mesh(obj, modifiers_to_bake):
                             new_t.transform_type = t.transform_type
                         if hasattr(t, "transform_space"):
                             new_t.transform_space = t.transform_space
+                
+                # Force-compile the programmatic driver so that the depsgraph links it properly
+                expr = new_d.driver.expression
+                new_d.driver.expression = expr + " "
+                new_d.driver.expression = expr
+                
             except Exception as e:
                 print(f"  [-] Failed to copy shape key driver: {e}")
         
@@ -450,6 +526,10 @@ def bake_modifiers_on_shape_keyed_mesh(obj, modifiers_to_bake):
     # Force RNA array flush to prevent GLTF export expected size mismatch errors
     obj.data.validate(verbose=False)
     obj.data.update()
+    
+    # Tag and update the key blocks to ensure compiled drivers evaluate on export
+    if obj.data.shape_keys:
+        obj.data.shape_keys.update_tag()
     
     print(f"  [+] Baked modifiers on shape-keyed mesh: {obj.name}")
     return True
@@ -563,8 +643,12 @@ for obj in export_meshes:
         new_mat.alpha_threshold    = mat.alpha_threshold
         new_mat.use_backface_culling = mat.use_backface_culling
 
-        # Force OPAQUE blend mode for all materials to prevent WebGL transparency sorting artifacts
-        new_mat.blend_method = 'OPAQUE'
+        # Preserve transparent blend method settings to keep pupil outline anti-aliasing smooth.
+        # For solid meshes with no transparency requirements, fallback to OPAQUE to prevent depth sorting bugs.
+        if src_blend in {'BLEND', 'HASHED', 'CLIP'}:
+            new_mat.blend_method = src_blend
+        else:
+            new_mat.blend_method = 'OPAQUE'
 
         if hasattr(new_mat, "use_nodes"):
             new_mat.use_nodes = True
@@ -931,4 +1015,3 @@ print("[+] GLB export complete.")
         )
 
     return export_success
-
