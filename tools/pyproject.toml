@@ -1,0 +1,13 @@
+# tools/pyproject.toml
+[tool.pyright]
+# Tell pyright the venv directory lives one folder up
+venvPath = ".."
+venv = ".venv"
+
+# Force it to look inside the python site-packages for stubs
+extraPaths = [
+    "../.venv/lib/python3.13/site-packages",
+    "../.venv/lib/python3.12/site-packages" 
+]
+
+typeCheckingMode = "basic"

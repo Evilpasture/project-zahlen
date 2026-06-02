@@ -817,6 +817,163 @@ def deep_fcurve_pruning(rig):
 
     bpy.context.view_layer.update()
 
+def offset_pupil_vertices(obj_name, world_offset_y):
+    """
+    Slightly offsets the vertices of the pupil mesh backward in world space
+    by converting local coordinates to world space, applying the world Y-offset,
+    and converting back using the object's inverse world matrix.
+    This handles any arbitrary object rotation and scale (e.g., scale of 0.04).
+    """
+    obj = bpy.data.objects.get(obj_name)
+    if not obj or obj.type != 'MESH':
+        return
+        
+    print(f"[*] Seating pupil vertices closer to eyeballs (World Y-offset: {world_offset_y}m)...")
+    
+    # Get world matrix and its inverse to handle rotation/scale automatically
+    mat_world = obj.matrix_world.copy()
+    mat_inv = mat_world.inverted()
+    
+    # +Y in Blender's world space points backward (into the head)
+    world_offset = mathutils.Vector((0, world_offset_y, 0))
+    
+    # We must offset the coordinates of all vertex blocks, including shape keys
+    if obj.data.shape_keys:
+        for kb in obj.data.shape_keys.key_blocks:
+            for v in kb.data:
+                # 1. Convert local coordinate to world space
+                v_world = mat_world @ v.co
+                # 2. Move backward along world Y
+                v_world += world_offset
+                # 3. Convert back to local space
+                v.co = mat_inv @ v_world
+    else:
+        for v in obj.data.vertices:
+            v_world = mat_world @ v.co
+            v_world += world_offset
+            v.co = mat_inv @ v_world
+                
+    obj.data.update()
+
+def bake_armature_actions_data_level(rig):
+    """
+    Bakes bone visual transformations across all stashed actions using pure data-level sweeps,
+    completely bypassing context-sensitive bpy.ops operators (like mode set, selection, or nla.bake).
+    To avoid floating pupils, the look bones' Shrinkwrap constraints are retargeted directly
+    to the eyeball sphere mesh ('pomni_eyes') instead of the flat head helper before baking,
+    and we convert to 'LOCAL' space to resolve offset-drift issues.
+    """
+    if not rig or not rig.animation_data:
+        return
+        
+    print("[*] Baking visual armature bone constraints at the data level...")
+    
+    # 1. Identify target bones to bake (strictly only the look bones: eye.l and eye.r)
+    bake_bone_names = {"eye.l", "eye.r"}
+    bake_bones = [rig.pose.bones.get(name) for name in bake_bone_names if rig.pose.bones.get(name)]
+            
+    print(f"  -> Target eye bones identified for data-level visual baking: {[b.name for b in bake_bones]}")
+    if not bake_bones:
+        print("  -> No target eye bones found matching baking criteria. Skipping visual bone bake.")
+        return
+        
+    # 2. Retarget look bones' Shrinkwrap constraints strictly to the eyeball mesh ('pomni_eyes')
+    # This prevents the visual bone trajectories from conforming to the flat face helper, resolving the floating pupils
+    eyeball_obj = bpy.data.objects.get("pomni_eyes")
+    if eyeball_obj:
+        print(f"  [~] Retargeting eye bone Shrinkwrap constraints to '{eyeball_obj.name}' to prevent floating...")
+        for pb in bake_bones:
+            for con in pb.constraints:
+                if con.type == 'SHRINKWRAP':
+                    con.target = eyeball_obj
+                    # 'ABOVE_SURFACE' allows Blender to evaluate negative distance offsets
+                    con.wrap_mode = 'ABOVE_SURFACE'
+                    # Pull the bone slightly inward (inside the eyeball sphere) to seat the pupil mesh
+                    # flush against the eyeball geometry. Adjust this value (e.g., -0.003 to -0.006) 
+                    # to fine-tune the seating depth to your preference.
+                    con.distance = -0.0045
+        
+    # Store original active action to restore at the end
+    orig_action = rig.animation_data.action
+    
+    # Collect all unique actions associated with the rig
+    actions = set()
+    if rig.animation_data.action:
+        actions.add(rig.animation_data.action)
+    for track in rig.animation_data.nla_tracks:
+        for strip in track.strips:
+            if strip.action:
+                actions.add(strip.action)
+                
+    print(f"  -> Found {len(actions)} actions for eye bone visual trajectory baking.")
+    
+    scene = bpy.context.scene
+    
+    for act in list(actions):
+        print(f"  [~] Sweeping and baking target bone tracks for action: '{act.name}'")
+        rig.animation_data.action = act
+        
+        start_frame = int(act.frame_range[0])
+        end_frame = int(act.frame_range[1])
+        
+        # Sweep timeline and record visual parent-relative matrices for target bones only
+        recorded_transforms = {} # {bone_name: {frame_num: (location, rotation, scale)}}
+        for pb in bake_bones:
+            recorded_transforms[pb.name] = {}
+            
+        for f in range(start_frame, end_frame + 1):
+            scene.frame_set(f)
+            bpy.context.view_layer.update()
+            
+            for pb in bake_bones:
+                # Convert the constraint-evaluated world matrix into local space relative to parent
+                # We use 'LOCAL' space instead of 'LOCAL_WITH_PARENT' to match the bone's TRS properties
+                # without edit-bone parent offset distortions.
+                local_matrix = rig.convert_space(
+                    pose_bone=pb,
+                    matrix=pb.matrix,
+                    from_space='POSE',
+                    to_space='LOCAL'
+                )
+                loc, rot, scale = local_matrix.decompose()
+                recorded_transforms[pb.name][f] = (loc, rot, scale)
+                
+        # Re-sweep the timeline and write visual keyframes directly into target bone F-Curves
+        for f in range(start_frame, end_frame + 1):
+            scene.frame_set(f)
+            for pb in bake_bones:
+                loc, rot, scale = recorded_transforms[pb.name][f]
+                
+                # Apply the constraint-free visual transform values to properties
+                pb.location = loc
+                if pb.rotation_mode == 'QUATERNION':
+                    pb.rotation_quaternion = rot
+                elif pb.rotation_mode == 'AXIS_ANGLE':
+                    pb.rotation_axis_angle = rot.to_axis_angle()
+                else:
+                    pb.rotation_euler = rot.to_euler(pb.rotation_mode)
+                pb.scale = scale
+                
+                # Direct keyframe insertion (bypasses operators and UI selections completely)
+                pb.keyframe_insert(data_path="location", frame=f, group=pb.name)
+                if pb.rotation_mode == 'QUATERNION':
+                    pb.keyframe_insert(data_path="rotation_quaternion", frame=f, group=pb.name)
+                elif pb.rotation_mode == 'AXIS_ANGLE':
+                    pb.keyframe_insert(data_path="rotation_axis_angle", frame=f, group=pb.name)
+                else:
+                    pb.keyframe_insert(data_path="rotation_euler", frame=f, group=pb.name)
+                pb.keyframe_insert(data_path="scale", frame=f, group=pb.name)
+                
+    # Cleanly remove constraints ONLY on the target eye bones that we baked
+    print("[*] Purging constraints from baked eye bones at the data level...")
+    for pb in bake_bones:
+        for con in list(pb.constraints):
+            pb.constraints.remove(con)
+        
+    # Restore original action
+    rig.animation_data.action = orig_action
+    bpy.context.view_layer.update()
+    print("[+] Eye bone constraints successfully baked and cleared.")
 
 def run_gltf_export(filepath):
     """Executes the standard scene GLTF/GLB operator."""
@@ -881,6 +1038,15 @@ def main():
     if rig:
         rig.data.pose_position = 'POSE'
     bpy.context.view_layer.update()
+
+    # Fine-tune the pupil vertex coordinates to seat them flush against the eyeball surface.
+    # Because positive Y is backward, 0.003 (3mm) will pull them closer to the eyeballs.
+    # Adjust this value (e.g., 0.002 or 0.004) to fine-tune the seating depth.
+    offset_pupil_vertices("pomni_pupils", 0.00543)
+
+    # Bake Armature Actions at the data level (bypasses mode set/selection context issues)
+    if rig:
+        bake_armature_actions_data_level(rig)
 
     # 4. Materials Conversion & Final Pipeline Pruning
     convert_shaders_to_gltf_pbr()
