@@ -1,7 +1,6 @@
 // resources/shaders/toon.hlsl
 #include "common.hlsl"
 
-
 VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 	VSOutput output;
 
@@ -53,8 +52,10 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 
 	if (isSkinned != 0) {
 		localPos = SkinPosition(localPos, input.joints, input.weights, jointOffset);
-		localNormal = normalize(SkinDirection(localNormal, input.joints, input.weights, jointOffset));
-		localTangent = normalize(SkinDirection(localTangent, input.joints, input.weights, jointOffset));
+		localNormal =
+			normalize(SkinDirection(localNormal, input.joints, input.weights, jointOffset));
+		localTangent =
+			normalize(SkinDirection(localTangent, input.joints, input.weights, jointOffset));
 	}
 
 	float4 worldPos = mul(worldMatrix, localPos);
@@ -92,7 +93,8 @@ PSOutput PSMain(VSOutput input) {
 	uint alphaMode = input.alphaMode;
 
 	// Restore texture sampling combined with base color and vertex color attributes!
-	float4 albedo = globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
+	float4 albedo =
+		globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
 
 	if (alphaMode == 1 && albedo.a < alphaCutoff) {
 		discard;
@@ -104,7 +106,8 @@ PSOutput PSMain(VSOutput input) {
 	if (any(input.tangent.xyz)) {
 		float3 T = normalize(input.tangent.xyz);
 		float3 B = normalize(cross(N, T) * input.tangent.w);
-		float3 normalMap = globalTextures[indices.y].Sample(defaultSampler, input.uv).rgb * 2.0 - 1.0;
+		float3 normalMap =
+			globalTextures[indices.y].Sample(defaultSampler, input.uv).rgb * 2.0 - 1.0;
 		worldNormal = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * N);
 	}
 
@@ -121,8 +124,11 @@ PSOutput PSMain(VSOutput input) {
 	} else if (halfLambert < 0.65f) {
 		celIntensity = 0.65f; // Midtone band
 	} else {
-		celIntensity = 1.0f;  // Bright band
+		celIntensity = 1.0f; // Bright band
 	}
+
+	float3 irradiance = irradianceMap.Sample(defaultSampler, worldNormal).rgb;
+	float3 ambient = albedo.rgb * irradiance * 0.25f; // Soft stylized ambient mapping
 
 	float shadow = CalculateShadow(input.shadowPos, worldNormal, L_sun);
 	celIntensity *= shadow;
@@ -136,7 +142,6 @@ PSOutput PSMain(VSOutput input) {
 	float rim = 1.0f - saturate(dot(worldNormal, V));
 	float rimIntensity = smoothstep(0.6f, 0.75f, rim) * 0.25f * celIntensity;
 
-	float3 ambient = albedo.rgb * 0.15f;
 	float3 finalColor = ambient + (albedo.rgb * celIntensity) + specular + rimIntensity;
 
 	output.color = float4(finalColor, albedo.a);

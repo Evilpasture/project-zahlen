@@ -24,39 +24,39 @@ struct FrameUniforms {
 };
 
 struct ObjectConstants {
-	float4x4 world;			
-	float4x4 prevWorld;		
-	uint albedoIdx;			
-	uint normalIdx;			
-	uint pbrIdx;			
-	uint emissiveIdx;		
-	uint isShadowPass;		
-	float metallicFactor;	
-	float roughnessFactor;	
-	float alphaCutoff;		
-	uint alphaMode;			
-	uint jointOffset;		
-	uint isSkinned;			
-	uint useVertexColor;    
-	float4 baseColorFactor; 
+	float4x4 world;
+	float4x4 prevWorld;
+	uint albedoIdx;
+	uint normalIdx;
+	uint pbrIdx;
+	uint emissiveIdx;
+	uint isShadowPass;
+	float metallicFactor;
+	float roughnessFactor;
+	float alphaCutoff;
+	uint alphaMode;
+	uint jointOffset;
+	uint isSkinned;
+	uint useVertexColor;
+	float4 baseColorFactor;
 };
 
 struct InstanceData {
-	float4x4 world;			
-	float4x4 prevWorld;		
-	uint albedoIdx;			
-	uint normalIdx;			
-	uint pbrIdx;			
-	uint emissiveIdx;		
-	uint vertexCount;		
-	float cullRadius;		
-	float metallicFactor;	
-	float roughnessFactor;	
-	float alphaCutoff;		
-	uint alphaMode;			
-	uint jointOffset;		
-	uint isSkinned;			
-	float4 baseColorFactor; 
+	float4x4 world;
+	float4x4 prevWorld;
+	uint albedoIdx;
+	uint normalIdx;
+	uint pbrIdx;
+	uint emissiveIdx;
+	uint vertexCount;
+	float cullRadius;
+	float metallicFactor;
+	float roughnessFactor;
+	float alphaCutoff;
+	uint alphaMode;
+	uint jointOffset;
+	uint isSkinned;
+	float4 baseColorFactor;
 };
 
 [[vk::push_constant]] ObjectConstants obj;
@@ -77,14 +77,18 @@ struct GPUJoint {
 };
 [[vk::binding(7, 0)]] StructuredBuffer<GPUJoint> g_joints;
 
+[[vk::binding(8, 0)]] TextureCube irradianceMap;
+[[vk::binding(9, 0)]] TextureCube prefilteredMap;
+[[vk::binding(10, 0)]] Texture2D brdfLUT;
+
 struct VSInput {
 	[[vk::location(0)]] float3 position : POSITION;
 	[[vk::location(1)]] float3 normal : NORMAL;
 	[[vk::location(2)]] float4 tangent : TANGENT;
 	[[vk::location(3)]] float2 uv : TEXCOORD;
 	[[vk::location(4)]] float4 color : COLOR;
-	[[vk::location(5)]] uint4 joints : JOINTS;	  
-	[[vk::location(6)]] float4 weights : WEIGHTS; 
+	[[vk::location(5)]] uint4 joints : JOINTS;
+	[[vk::location(6)]] float4 weights : WEIGHTS;
 };
 
 struct VSOutput {
@@ -99,7 +103,7 @@ struct VSOutput {
 	float4 color : COLOR;
 	nointerpolation uint4 materialIndices : TEXCOORD4;
 	nointerpolation float4 baseColorFactor : TEXCOORD5;
-	nointerpolation float3 pbrFactors : TEXCOORD6; 
+	nointerpolation float3 pbrFactors : TEXCOORD6;
 	nointerpolation uint alphaMode : TEXCOORD7;
 };
 
@@ -115,10 +119,18 @@ float4 SkinPosition(float4 position, uint4 joints, float4 weights, uint jointOff
 	GPUJoint j2 = g_joints[jointOffset + joints.z];
 	GPUJoint j3 = g_joints[jointOffset + joints.w];
 
-	float4 pos = (j0.col0 * position.x + j0.col1 * position.y + j0.col2 * position.z + j0.col3 * position.w) * weights.x +
-				 (j1.col0 * position.x + j1.col1 * position.y + j1.col2 * position.z + j1.col3 * position.w) * weights.y +
-				 (j2.col0 * position.x + j2.col1 * position.y + j2.col2 * position.z + j2.col3 * position.w) * weights.z +
-				 (j3.col0 * position.x + j3.col1 * position.y + j3.col2 * position.z + j3.col3 * position.w) * weights.w;
+	float4 pos = (j0.col0 * position.x + j0.col1 * position.y + j0.col2 * position.z +
+				  j0.col3 * position.w) *
+					 weights.x +
+				 (j1.col0 * position.x + j1.col1 * position.y + j1.col2 * position.z +
+				  j1.col3 * position.w) *
+					 weights.y +
+				 (j2.col0 * position.x + j2.col1 * position.y + j2.col2 * position.z +
+				  j2.col3 * position.w) *
+					 weights.z +
+				 (j3.col0 * position.x + j3.col1 * position.y + j3.col2 * position.z +
+				  j3.col3 * position.w) *
+					 weights.w;
 	return pos;
 }
 
@@ -128,10 +140,15 @@ float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint jointO
 	GPUJoint j2 = g_joints[jointOffset + joints.z];
 	GPUJoint j3 = g_joints[jointOffset + joints.w];
 
-	float3 dir = (j0.col0.xyz * direction.x + j0.col1.xyz * direction.y + j0.col2.xyz * direction.z) * weights.x +
-				 (j1.col0.xyz * direction.x + j1.col1.xyz * direction.y + j1.col2.xyz * direction.z) * weights.y +
-				 (j2.col0.xyz * direction.x + j2.col1.xyz * direction.y + j2.col2.xyz * direction.z) * weights.z +
-				 (j3.col0.xyz * direction.x + j3.col1.xyz * direction.y + j3.col2.xyz * direction.z) * weights.w;
+	float3 dir =
+		(j0.col0.xyz * direction.x + j0.col1.xyz * direction.y + j0.col2.xyz * direction.z) *
+			weights.x +
+		(j1.col0.xyz * direction.x + j1.col1.xyz * direction.y + j1.col2.xyz * direction.z) *
+			weights.y +
+		(j2.col0.xyz * direction.x + j2.col1.xyz * direction.y + j2.col2.xyz * direction.z) *
+			weights.z +
+		(j3.col0.xyz * direction.x + j3.col1.xyz * direction.y + j3.col2.xyz * direction.z) *
+			weights.w;
 	return dir;
 }
 
@@ -140,6 +157,12 @@ float CalculateShadow(float4 shadowPos, float3 N, float3 L) {
 	float3 projCoords = shadowPos.xyz / shadowPos.w;
 	if (projCoords.z > 1.0 || projCoords.z < 0.0)
 		return 1.0;
-	float bias = max(0.015 * (1.0 - dot(N, L)), 0.005); 
+	float bias = max(0.015 * (1.0 - dot(N, L)), 0.005);
 	return shadowMap.SampleCmpLevelZero(shadowSampler, projCoords.xy, projCoords.z - bias).r;
+}
+
+// Specular Fresnel roughness helper
+float3 FresnelSchlickRoughness(float cosTheta, float3 F0, float roughness) {
+	return F0 + (max(float3(1.0 - roughness, 1.0 - roughness, 1.0 - roughness), F0) - F0) *
+					pow(saturate(1.0 - cosTheta), 5.0);
 }

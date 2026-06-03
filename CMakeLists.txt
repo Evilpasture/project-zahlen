@@ -100,6 +100,8 @@ set(ENGINE_SOURCES
     src/engine/ProfilerUI.cpp
     src/engine/Text.cpp
     src/engine/system/MovementSystem.cpp
+    src/engine/Sky.cpp
+    src/engine/BRDFLUT.cpp
 )
 
 find_library(ZSTD_LIBRARY NAMES zstd zstd_static HINTS "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib")

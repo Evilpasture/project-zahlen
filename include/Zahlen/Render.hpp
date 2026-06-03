@@ -5,6 +5,7 @@
 #include <Zahlen/Window.hpp>
 #include <detail/String.hpp>
 #include <memory>
+#include <vector>
 
 namespace ZHLN {
 
@@ -39,6 +40,10 @@ class ZHLN_API RenderContext {
 	auto CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true)
 		-> uint32_t;
 
+	// --- NEW: Declare CreateTextureCube ---
+	auto CreateTextureCube(const std::vector<const void*>& faceData, uint32_t width,
+						   uint32_t height) -> uint32_t;
+
 	// Dynamic CPU-to-GPU Joint Matrix transfer hook
 	void UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices, uint32_t count);
 
@@ -48,6 +53,7 @@ class ZHLN_API RenderContext {
   private:
 	std::unique_ptr<Impl> _impl;
 };
+
 struct Color4;
 namespace Renderer {
 void Clear(RenderContext& ctx, const ZHLN::Color4& color, float depth = 1.0f,

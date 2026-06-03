@@ -1112,6 +1112,21 @@ class alignas(64) SemaphorePool {
 using ImageView = DeviceHandle<VkImageView, ZHLN_DestroyImageView>;
 
 template <VkFormat F>
+[[nodiscard]] static auto CreateView(VkDevice device, VkImage image,
+									 VkImageAspectFlags aspect = GetFormatAspect(F),
+									 uint32_t mips = 1) -> ImageView {
+	ZHLN_ImageViewDesc desc = {
+		.image = image,
+		.format = F,
+		.aspect = aspect,
+		.mip_levels = mips,
+		.array_layers = 1,				   // Restored to 1 for standard 2D views
+		.view_type = VK_IMAGE_VIEW_TYPE_2D // <-- Explicitly initialize 2D view type
+	};
+	return {device, ZHLN_CreateImageView(device, &desc)};
+}
+
+template <VkFormat F>
 [[nodiscard]] static auto CreateViewCube(VkDevice device, VkImage image, uint32_t mips = 1)
 	-> ImageView {
 	ZHLN_ImageViewDesc desc = {
@@ -1120,21 +1135,8 @@ template <VkFormat F>
 		.aspect = VK_IMAGE_ASPECT_COLOR_BIT,
 		.mip_levels = mips,
 		.array_layers = 6,
-		.view_type = VK_IMAGE_VIEW_TYPE_CUBE // <-- Explicitly flag as CUBE
+		.view_type = VK_IMAGE_VIEW_TYPE_CUBE // <-- Explicitly initialize CUBE view type
 	};
-	return {device, ZHLN_CreateImageView(device, &desc)};
-}
-
-template <VkFormat F>
-[[nodiscard]] static auto CreateView(VkDevice device, VkImage image,
-									 VkImageAspectFlags aspect = GetFormatAspect(F),
-									 uint32_t mips = 1) -> ImageView {
-	// Guard compile-time usage against unmapped formats
-	static_assert(GetFormatAspect(F) != VK_IMAGE_ASPECT_NONE,
-				  "The provided VkFormat has no mapped aspect flags. Add it to GetFormatAspect().");
-
-	ZHLN_ImageViewDesc desc = {
-		.image = image, .format = F, .aspect = aspect, .mip_levels = mips, .array_layers = 0};
 	return {device, ZHLN_CreateImageView(device, &desc)};
 }
 

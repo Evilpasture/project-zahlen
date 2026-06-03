@@ -52,8 +52,10 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 
 	if (isSkinned != 0) {
 		localPos = SkinPosition(localPos, input.joints, input.weights, jointOffset);
-		localNormal = normalize(SkinDirection(localNormal, input.joints, input.weights, jointOffset));
-		localTangent = normalize(SkinDirection(localTangent, input.joints, input.weights, jointOffset));
+		localNormal =
+			normalize(SkinDirection(localNormal, input.joints, input.weights, jointOffset));
+		localTangent =
+			normalize(SkinDirection(localTangent, input.joints, input.weights, jointOffset));
 	}
 
 	float4 worldPos = mul(worldMatrix, localPos);
@@ -219,7 +221,23 @@ PSOutput PSMain(VSOutput input) {
 		}
 	}
 
-	float3 ambient = albedo.rgb * 0.05; // Basic ambient fallback
+	// --- NEW: FULL PBR INDIRECT IMAGE-BASED LIGHTING (IBL) ---
+	float3 R = reflect(-V, worldNormal);
+	float3 F_rough = FresnelSchlickRoughness(max(dot(worldNormal, V), 0.0), F0, roughness);
+	float3 kS_rough = F_rough;
+	float3 kD_rough = (1.0 - kS_rough) * (1.0 - metallic);
+
+	// Diffuse IBL
+	float3 irradiance = irradianceMap.Sample(defaultSampler, worldNormal).rgb;
+	float3 diffuseIBL = irradiance * albedo.rgb;
+
+	// Specular IBL (Assuming 1 pre-filtered mip level is bound at the top)
+	float3 prefilteredColor = prefilteredMap.SampleLevel(defaultSampler, R, 0.0).rgb;
+	float2 envBRDF =
+		brdfLUT.Sample(defaultSampler, float2(max(dot(worldNormal, V), 0.0), roughness)).rg;
+	float3 specularIBL = prefilteredColor * (F_rough * envBRDF.x + envBRDF.y);
+
+	float3 ambient = (kD_rough * diffuseIBL + specularIBL); // Replaces flat 5% ambient!
 
 	// Preserve exact base color alpha for BLEND transparency pipelines
 	output.color = float4(ambient + directSun + directPunctual + emissive, albedo.a);

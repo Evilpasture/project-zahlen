@@ -30,7 +30,12 @@ using GlobalSceneLayout = Vk::DescriptorLayout<
 																				   // (UBO)
 	Vk::StorageBufferSlot<5, VK_SHADER_STAGE_FRAGMENT_BIT>,						   // Lights (SSBO)
 	Vk::StorageBufferSlot<6, VK_SHADER_STAGE_VERTEX_BIT>, // Instance buffer (SSBO)
-	Vk::StorageBufferSlot<7, VK_SHADER_STAGE_VERTEX_BIT>  // Joint matrices (SSBO)
+	Vk::StorageBufferSlot<7, VK_SHADER_STAGE_VERTEX_BIT>, // Joint matrices (SSBO)
+
+	// --- NEW: IBL DESCRIPTOR BINDINGS ---
+	Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>, // Irradiance Cubemap (Diffuse IBL)
+	Vk::SampledImageSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>, // Pre-filtered Cubemap (Specular IBL)
+	Vk::SampledImageSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT> // 2D BRDF LUT (2D Texture)
 	>;
 
 using TAALayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SampledImageSlot<1>,
@@ -154,6 +159,13 @@ struct RenderContext::Impl {
 	JPH::Array<UIDrawCommand> uiDrawQueue;
 	Vk::Pipeline uiPipeline;
 	Vk::PipelineLayout uiPipelineLayout;
+
+	Vk::Image irradianceImage;
+	Vk::ImageView irradianceView;
+	Vk::Image prefilteredImage;
+	Vk::ImageView prefilteredView;
+	Vk::Image brdfLutImage;
+	Vk::ImageView brdfLutView;
 
 	Impl(Window& win) : window(win) {}
 

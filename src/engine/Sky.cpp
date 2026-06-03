@@ -6,7 +6,7 @@
 namespace ZHLN::PBR {
 
 std::pair<float, float> Hammersley(uint32_t i, uint32_t N);
-
+JPH::Vec3 ImportanceSampleGGX(float u1, float u2, float roughness);
 // Linear Interpolation helper
 inline JPH::Vec3 LerpColor(const JPH::Vec3& a, const JPH::Vec3& b, float t) {
 	return a + t * (b - a);
@@ -117,6 +117,61 @@ std::vector<std::vector<uint32_t>> GenerateIrradianceCubemap() {
 
 				irradiance /= float(SAMPLE_COUNT);
 				cubemap[face][y * size + x] = PackColor(irradiance);
+			}
+		}
+	}
+	return cubemap;
+}
+
+std::vector<std::vector<uint32_t>> GenerateSpecularMip(uint32_t size, float roughness) {
+	std::vector<std::vector<uint32_t>> cubemap(
+		6, std::vector<uint32_t>(static_cast<size_t>(size * size)));
+
+	for (int face = 0; face < 6; ++face) {
+		for (uint32_t y = 0; y < size; ++y) {
+			float v = (float(y) + 0.5f) / float(size);
+			for (uint32_t x = 0; x < size; ++x) {
+				float u = (float(x) + 0.5f) / float(size);
+
+				JPH::Vec3 R = GetCubeDirection(face, u, v);
+
+				// Mip 0: Mirror reflection (Fast Path)
+				if (roughness == 0.0f) {
+					cubemap[face][y * size + x] = PackColor(EvaluateSky(R));
+					continue;
+				}
+
+				JPH::Vec3 N = R;
+				JPH::Vec3 V = R;
+
+				JPH::Vec3 prefilteredColor = JPH::Vec3::sZero();
+				float totalWeight = 0.0f;
+
+				const uint32_t SAMPLE_COUNT = 32; // Small sample count is highly performant on CPU
+				for (uint32_t i = 0; i < SAMPLE_COUNT; ++i) {
+					auto [u1, u2] = Hammersley(i, SAMPLE_COUNT);
+					JPH::Vec3 H = ImportanceSampleGGX(u1, u2, roughness);
+
+					// Orthonormal basis alignment
+					JPH::Vec3 up =
+						std::abs(N.GetY()) < 0.999f ? JPH::Vec3::sAxisY() : JPH::Vec3::sAxisZ();
+					JPH::Vec3 tangent = up.Cross(N).Normalized();
+					JPH::Vec3 bitangent = N.Cross(tangent);
+					JPH::Vec3 worldH = tangent * H.GetX() + bitangent * H.GetY() + N * H.GetZ();
+
+					JPH::Vec3 L = (2.0f * V.Dot(worldH) * worldH - V).Normalized();
+					float NdotL = std::max(L.Dot(N), 0.0f);
+
+					if (NdotL > 0.0f) {
+						prefilteredColor += EvaluateSky(L) * NdotL;
+						totalWeight += NdotL;
+					}
+				}
+
+				if (totalWeight > 0.0f) {
+					prefilteredColor /= totalWeight;
+				}
+				cubemap[face][y * size + x] = PackColor(prefilteredColor);
 			}
 		}
 	}

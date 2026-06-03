@@ -266,11 +266,13 @@ uint32_t RenderContext::CreateTextureCube(const std::vector<const void*>& faceDa
 		Vk::Buffer::Create(impl->allocator.Get(), faceSize * 6, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
 						   VMA_MEMORY_USAGE_CPU_ONLY);
 
-	auto mapped = staging.Map();
-	for (uint32_t i = 0; i < 6; ++i) {
-		std::memcpy(static_cast<char*>(mapped.data) + (i * faceSize), faceData[i], faceSize);
-	}
-	mapped.Release(); // Flush mapping
+	// Enclose the mapping in braces so the destructor unmaps automatically
+	{
+		auto mapped = staging.Map();
+		for (uint32_t i = 0; i < 6; ++i) {
+			std::memcpy(static_cast<char*>(mapped.data) + (i * faceSize), faceData[i], faceSize);
+		}
+	} // mapped goes out of scope here, flushing and unmapping automatically
 
 	Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
 		cmd, gpuImage.Handle());

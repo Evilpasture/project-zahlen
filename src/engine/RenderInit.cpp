@@ -1,4 +1,5 @@
 // File: src/engine/Render_Init.cpp
+#include "PBR.hpp"
 #include "RenderCore.hpp"
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
@@ -8,6 +9,7 @@
 #include "imgui.h"
 
 #include <Features.hpp>
+#include <cstddef>
 #include <threading/TaskSystem.hpp>
 
 namespace ZHLN {
@@ -253,6 +255,257 @@ void RenderContext::Impl::InitBindless() {
 		Vk::Buffer::Create(allocator.Get(), sizeof(JPH::Mat44) * 8192,
 						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
+	// -----------------------------------------------------------------
+	// Pass 1: BRDF LUT Generation
+	// -----------------------------------------------------------------
+	ZHLN::Log("[IBL] Generating 2D BRDF Look-Up Table...");
+	std::vector<uint32_t> lutData = ZHLN::PBR::GenerateBRDFLUT(512, 512);
+	VkImageCreateInfo lutInfo = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+								 .pNext = nullptr,
+								 .flags = 0,
+								 .imageType = VK_IMAGE_TYPE_2D,
+								 .format = VK_FORMAT_R8G8B8A8_UNORM,
+								 .extent = {.width = 512, .height = 512, .depth = 1},
+								 .mipLevels = 1,
+								 .arrayLayers = 1,
+								 .samples = VK_SAMPLE_COUNT_1_BIT,
+								 .tiling = VK_IMAGE_TILING_OPTIMAL,
+								 .usage =
+									 VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+								 .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+								 .queueFamilyIndexCount = 0,
+								 .pQueueFamilyIndices = nullptr,
+								 .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+	brdfLutImage = Vk::Image::Create(allocator.Get(), lutInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+
+	{
+		Vk::CommandPool lutPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+		if (!lutPool.Allocate(1)) {
+			ZHLN::Panic("Vulkan: Failed to allocate LUT command buffer");
+		}
+		VkCommandBuffer cmd = lutPool[0];
+
+		ZHLN_BeginCommandBuffer(cmd);
+		Vk::Buffer lutStaging =
+			Vk::Buffer::Create(allocator.Get(), static_cast<size_t>(512 * 512 * 4),
+							   VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+		std::memcpy(lutStaging.Map().data, lutData.data(), static_cast<size_t>(512 * 512 * 4));
+
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
+			cmd, brdfLutImage.Handle());
+		ZHLN_BufferImageCopyDesc lutCopy = {.buffer = lutStaging.Handle(),
+											.image = brdfLutImage.Handle(),
+											.layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+											.width = 512,
+											.height = 512,
+											.buffer_offset = 0,
+											.mip_level = 0,
+											.base_array_layer = 0};
+		ZHLN_CmdCopyBufferToImage(cmd, &lutCopy);
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, brdfLutImage.Handle());
+		ZHLN_EndCommandBuffer(cmd);
+
+		VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+											 .pNext = nullptr,
+											 .commandBuffer = cmd,
+											 .deviceMask = 0};
+		VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+								.pNext = nullptr,
+								.flags = 0,
+								.waitSemaphoreInfoCount = 0,
+								.pWaitSemaphoreInfos = nullptr,
+								.commandBufferInfoCount = 1,
+								.pCommandBufferInfos = &subInfo,
+								.signalSemaphoreInfoCount = 0,
+								.pSignalSemaphoreInfos = nullptr};
+		vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
+		vkQueueWaitIdle(ctx.GraphicsQueue());
+	}
+	brdfLutView = Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(ctx.Device(), brdfLutImage.Handle());
+
+	// -----------------------------------------------------------------
+	// Pass 2: Diffuse Irradiance Cubemap Generation
+	// -----------------------------------------------------------------
+	ZHLN::Log("[IBL] Generating Diffuse Irradiance Cubemap...");
+	std::vector<std::vector<uint32_t>> irrData = ZHLN::PBR::GenerateIrradianceCubemap();
+	VkImageCreateInfo irrInfo = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+								 .pNext = nullptr,
+								 .flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+								 .imageType = VK_IMAGE_TYPE_2D,
+								 .format = VK_FORMAT_R8G8B8A8_UNORM,
+								 .extent = {.width = 32, .height = 32, .depth = 1},
+								 .mipLevels = 1,
+								 .arrayLayers = 6,
+								 .samples = VK_SAMPLE_COUNT_1_BIT,
+								 .tiling = VK_IMAGE_TILING_OPTIMAL,
+								 .usage =
+									 VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+								 .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+								 .queueFamilyIndexCount = 0,
+								 .pQueueFamilyIndices = nullptr,
+								 .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+	irradianceImage = Vk::Image::Create(allocator.Get(), irrInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+
+	{
+		Vk::CommandPool irrPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+		if (!irrPool.Allocate(1)) {
+			ZHLN::Panic("Vulkan: Failed to allocate Irradiance command buffer");
+		}
+		VkCommandBuffer cmd = irrPool[0];
+
+		ZHLN_BeginCommandBuffer(cmd);
+		Vk::Buffer irrStaging =
+			Vk::Buffer::Create(allocator.Get(), 32 * 32 * 4 * 6, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+							   VMA_MEMORY_USAGE_CPU_ONLY);
+		{
+			auto irrMap = irrStaging.Map();
+			for (int i = 0; i < 6; ++i) {
+				std::memcpy((char*)irrMap.data + static_cast<ptrdiff_t>(i * 32 * 32 * 4),
+							irrData[i].data(), static_cast<size_t>(32 * 32 * 4));
+			}
+		}
+
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
+			cmd, irradianceImage.Handle());
+		for (int i = 0; i < 6; ++i) {
+			VkBufferImageCopy2 region = {
+				.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
+				.pNext = nullptr,
+				.bufferOffset = static_cast<VkDeviceSize>(i * 32 * 32 * 4),
+				.bufferRowLength = 0,
+				.bufferImageHeight = 0,
+				.imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+									 .mipLevel = 0,
+									 .baseArrayLayer = (uint32_t)i,
+									 .layerCount = 1},
+				.imageOffset = {.x = 0, .y = 0, .z = 0},
+				.imageExtent = {.width = 32, .height = 32, .depth = 1}};
+			VkCopyBufferToImageInfo2 copyInfo = {
+				.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
+				.pNext = nullptr,
+				.srcBuffer = irrStaging.Handle(),
+				.dstImage = irradianceImage.Handle(),
+				.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+				.regionCount = 1,
+				.pRegions = &region};
+			vkCmdCopyBufferToImage2(cmd, &copyInfo);
+		}
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd,
+																	   irradianceImage.Handle());
+		ZHLN_EndCommandBuffer(cmd);
+
+		VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+											 .pNext = nullptr,
+											 .commandBuffer = cmd,
+											 .deviceMask = 0};
+		VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+								.pNext = nullptr,
+								.flags = 0,
+								.waitSemaphoreInfoCount = 0,
+								.pWaitSemaphoreInfos = nullptr,
+								.commandBufferInfoCount = 1,
+								.pCommandBufferInfos = &subInfo,
+								.signalSemaphoreInfoCount = 0,
+								.pSignalSemaphoreInfos = nullptr};
+		vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
+		vkQueueWaitIdle(ctx.GraphicsQueue());
+	}
+	irradianceView =
+		Vk::CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(ctx.Device(), irradianceImage.Handle(), 1);
+
+	// -----------------------------------------------------------------
+	// Pass 3: Specular Pre-filtered Cubemap Generation
+	// -----------------------------------------------------------------
+	ZHLN::Log("[IBL] Generating Specular Pre-filtered Cubemap...");
+	std::vector<std::vector<uint32_t>> specData = ZHLN::PBR::GenerateSpecularMip(256, 0.0f);
+	VkImageCreateInfo specInfo = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+								  .pNext = nullptr,
+								  .flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+								  .imageType = VK_IMAGE_TYPE_2D,
+								  .format = VK_FORMAT_R8G8B8A8_UNORM,
+								  .extent = {.width = 256, .height = 256, .depth = 1},
+								  .mipLevels = 1,
+								  .arrayLayers = 6,
+								  .samples = VK_SAMPLE_COUNT_1_BIT,
+								  .tiling = VK_IMAGE_TILING_OPTIMAL,
+								  .usage =
+									  VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+								  .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+								  .queueFamilyIndexCount = 0,
+								  .pQueueFamilyIndices = nullptr,
+								  .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+	prefilteredImage = Vk::Image::Create(allocator.Get(), specInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+
+	{
+		Vk::CommandPool specPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+		if (!specPool.Allocate(1)) {
+			ZHLN::Panic("Vulkan: Failed to allocate Specular command buffer");
+		}
+		VkCommandBuffer cmd = specPool[0];
+
+		ZHLN_BeginCommandBuffer(cmd);
+		Vk::Buffer specStaging =
+			Vk::Buffer::Create(allocator.Get(), 256 * 256 * 4 * 6, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+							   VMA_MEMORY_USAGE_CPU_ONLY);
+		{
+			auto specMap = specStaging.Map();
+			for (int i = 0; i < 6; ++i) {
+				std::memcpy((char*)specMap.data + static_cast<ptrdiff_t>(i * 256 * 256 * 4),
+							specData[i].data(), static_cast<size_t>(256 * 256 * 4));
+			}
+		}
+
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
+			cmd, prefilteredImage.Handle());
+		for (int i = 0; i < 6; ++i) {
+			VkBufferImageCopy2 region = {
+				.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
+				.pNext = nullptr,
+				.bufferOffset = static_cast<VkDeviceSize>(i * 256 * 256 * 4),
+				.bufferRowLength = 0,
+				.bufferImageHeight = 0,
+				.imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+									 .mipLevel = 0,
+									 .baseArrayLayer = (uint32_t)i,
+									 .layerCount = 1},
+				.imageOffset = {.x = 0, .y = 0, .z = 0},
+				.imageExtent = {.width = 256, .height = 256, .depth = 1}};
+			VkCopyBufferToImageInfo2 copyInfo = {
+				.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
+				.pNext = nullptr,
+				.srcBuffer = specStaging.Handle(),
+				.dstImage = prefilteredImage.Handle(),
+				.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+				.regionCount = 1,
+				.pRegions = &region};
+			vkCmdCopyBufferToImage2(cmd, &copyInfo);
+		}
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd,
+																	   prefilteredImage.Handle());
+		ZHLN_EndCommandBuffer(cmd);
+
+		VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+											 .pNext = nullptr,
+											 .commandBuffer = cmd,
+											 .deviceMask = 0};
+		VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+								.pNext = nullptr,
+								.flags = 0,
+								.waitSemaphoreInfoCount = 0,
+								.pWaitSemaphoreInfos = nullptr,
+								.commandBufferInfoCount = 1,
+								.pCommandBufferInfos = &subInfo,
+								.signalSemaphoreInfoCount = 0,
+								.pSignalSemaphoreInfos = nullptr};
+		vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
+		vkQueueWaitIdle(ctx.GraphicsQueue());
+	}
+	prefilteredView =
+		Vk::CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(ctx.Device(), prefilteredImage.Handle(), 1);
+	// Update global descriptor bindings
 	GlobalSceneLayout::Write(ctx.Device(), bindlessSet, Vk::SkipWrite{},
 							 Vk::SamplerWrite{globalSampler.Get()},
 							 Vk::ImageWrite{.view = shadowMap.view.Get(),
@@ -261,7 +514,15 @@ void RenderContext::Impl::InitBindless() {
 							 Vk::BufferWrite{.buffer = frameUniformBuffer.Handle()},
 							 Vk::BufferWrite{.buffer = lightStorageBuffer.Handle()},
 							 Vk::BufferWrite{.buffer = instanceDataBuffer.Handle()},
-							 Vk::BufferWrite{.buffer = jointBuffer.Handle()});
+							 Vk::BufferWrite{.buffer = jointBuffer.Handle()},
+
+							 // --- WRITE IBL DESCRIPTORS ---
+							 Vk::ImageWrite{.view = irradianceView.Get(),
+											.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+							 Vk::ImageWrite{.view = prefilteredView.Get(),
+											.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+							 Vk::ImageWrite{.view = brdfLutView.Get(),
+											.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
 }
 
 void RenderContext::Impl::InitPostProcessing() {
