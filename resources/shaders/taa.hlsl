@@ -1,14 +1,17 @@
 struct VSOutput {
-    float4 pos : SV_Position;
-    float2 uv  : TEXCOORD0;
+	float4 pos : SV_Position;
+	float2 uv : TEXCOORD0;
 };
 
 // Generates a fullscreen triangle without vertex buffers
 VSOutput VSMain(uint vertexID : SV_VertexID) {
-    VSOutput output;
-    output.uv = float2((vertexID << 1) & 2, vertexID & 2);
-    output.pos = float4(output.uv * 2.0f - 1.0f, 0.0f, 1.0f);
-    return output;
+	VSOutput output;
+	output.uv = float2((vertexID << 1) & 2, vertexID & 2);
+
+	// Negate the Y coordinate to compensate for the negative viewport height
+	output.pos = float4(output.uv.x * 2.0f - 1.0f, 1.0f - output.uv.y * 2.0f, 0.0f, 1.0f);
+
+	return output;
 }
 
 [[vk::binding(0, 0)]] Texture2D<float4> texCurrent;
@@ -17,46 +20,46 @@ VSOutput VSMain(uint vertexID : SV_VertexID) {
 [[vk::binding(3, 0)]] SamplerState smp;
 
 struct PushConstants {
-    float feedback;
+	float feedback;
 };
 [[vk::push_constant]] PushConstants pc;
 
 float4 PSMain(VSOutput input) : SV_Target0 {
-    // 1. Fetch velocity to find where this pixel was last frame
-    float2 velocity = texVelocity.SampleLevel(smp, input.uv, 0).rg;
-    float2 historyUV = input.uv - velocity;
-    
-    float4 current = texCurrent.SampleLevel(smp, input.uv, 0);
+	// 1. Fetch velocity to find where this pixel was last frame
+	float2 velocity = texVelocity.SampleLevel(smp, input.uv, 0).rg;
+	float2 historyUV = input.uv - velocity;
 
-    // 2. Reject history if it points off-screen (prevents edge smearing)
-    if (any(historyUV < 0.0f) || any(historyUV > 1.0f)) {
-        return current;
-    }
+	float4 current = texCurrent.SampleLevel(smp, input.uv, 0);
 
-    float4 history = texHistory.SampleLevel(smp, historyUV, 0);
+	// 2. Reject history if it points off-screen (prevents edge smearing)
+	if (any(historyUV < 0.0f) || any(historyUV > 1.0f)) {
+		return current;
+	}
 
-    // 3. Neighborhood Clamping (Anti-Ghosting)
-    float4 m1 = 0;
-    float4 m2 = 0;
-    
-    uint w, h;
-    texCurrent.GetDimensions(w, h);
-    float2 texelSize = 1.0f / float2(w, h);
+	float4 history = texHistory.SampleLevel(smp, historyUV, 0);
 
-    for (int x = -1; x <= 1; ++x) {
-        for (int y = -1; y <= 1; ++y) {
-            float4 c = texCurrent.SampleLevel(smp, input.uv + float2(x, y) * texelSize, 0);
-            m1 += c;
-            m2 += c * c;
-        }
-    }
+	// 3. Neighborhood Clamping (Anti-Ghosting)
+	float4 m1 = 0;
+	float4 m2 = 0;
 
-    float4 mean = m1 / 9.0f;
-    float4 stddev = sqrt(max(0.0f, (m2 / 9.0f) - (mean * mean)));
+	uint w, h;
+	texCurrent.GetDimensions(w, h);
+	float2 texelSize = 1.0f / float2(w, h);
 
-    // Clamp the history color so it doesn't leave trails behind moving objects
-    history = clamp(history, mean - stddev, mean + stddev);
+	for (int x = -1; x <= 1; ++x) {
+		for (int y = -1; y <= 1; ++y) {
+			float4 c = texCurrent.SampleLevel(smp, input.uv + float2(x, y) * texelSize, 0);
+			m1 += c;
+			m2 += c * c;
+		}
+	}
 
-    // 4. Blend current frame with clamped history
-    return lerp(current, history, pc.feedback);
+	float4 mean = m1 / 9.0f;
+	float4 stddev = sqrt(max(0.0f, (m2 / 9.0f) - (mean * mean)));
+
+	// Clamp the history color so it doesn't leave trails behind moving objects
+	history = clamp(history, mean - stddev, mean + stddev);
+
+	// 4. Blend current frame with clamped history
+	return lerp(current, history, pc.feedback);
 }

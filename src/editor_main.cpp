@@ -426,8 +426,9 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 			JPH::Mat44 lightProj = Math::CreateOrtho(-50.0f, 50.0f, -50.0f, 50.0f, 0.1f, 200.0f);
 			JPH::Mat44 shadowProjView = lightProj * lightView;
 
+			// Change the second column's Y component from 0.5f to -0.5f
 			JPH::Mat44 biasMatrix = {
-				JPH::Vec4(0.5f, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, 0.5f, 0.0f, 0.0f),
+				JPH::Vec4(0.5f, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, -0.5f, 0.0f, 0.0f),
 				JPH::Vec4(0.0f, 0.0f, 1.0f, 0.0f), JPH::Vec4(0.5f, 0.5f, 0.0f, 1.0f)};
 			JPH::Mat44 lightSpaceBiased = biasMatrix * shadowProjView;
 

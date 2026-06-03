@@ -81,8 +81,7 @@ struct Scene {
 		std::vector<Entity> roomParts = AssetFactory::SpawnGLB(rc, reg, "Pomnis Room V2.glb");
 
 		// 2. Spawns Pomni and automatically loads internal textures natively
-		std::vector<Entity> pomniParts =
-			AssetFactory::SpawnGLB(rc, reg, "tadc_models/POMNI.glb");
+		std::vector<Entity> pomniParts = AssetFactory::SpawnGLB(rc, reg, "tadc_models/POMNI.glb");
 		// std::vector<Entity> cesiumParts =
 		// 	AssetFactory::SpawnGLB(rc, reg, "CesiumMan.glb");
 	}
@@ -238,7 +237,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			JPH::Mat44 shadowProjView = lightProj * lightView;
 
 			JPH::Mat44 biasMatrix = {
-				JPH::Vec4(0.5f, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, 0.5f, 0.0f, 0.0f),
+				JPH::Vec4(0.5f, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, -0.5f, 0.0f, 0.0f),
 				JPH::Vec4(0.0f, 0.0f, 1.0f, 0.0f), JPH::Vec4(0.5f, 0.5f, 0.0f, 1.0f)};
 			JPH::Mat44 lightSpaceBiased = biasMatrix * shadowProjView;
 
