@@ -1,3 +1,4 @@
+# tools/asset_utils/converter.py
 import subprocess
 import os
 
@@ -574,6 +575,104 @@ def bake_standard_meshes():
     bpy.context.view_layer.update()
 
 
+def activate_and_bake_blush():
+    """
+    Finds the driven procedural blush setup on the face and automatically 
+    bakes the composite colors directly into the active 'Color' vertex attribute.
+    This resolves the missing blush issue in GLB by bypassing procedural pipeline limits.
+    """
+    print("[*] Automatically preparing and baking blush into vertex colors...")
+    
+    head_obj = bpy.data.objects.get("pomni_head.002")
+    if not head_obj or head_obj.type != 'MESH':
+        print("  [-] Head object 'pomni_head.002' not found. Skipping blush bake.")
+        return False
+        
+    mat = bpy.data.materials.get("pomni_head")
+    if not mat or not mat.node_tree:
+        print("  [-] Head material 'pomni_head' not found. Skipping blush bake.")
+        return False
+
+    # 1. Force toggle.007 bone to active state
+    rig = bpy.data.objects.get("POMNI_rig")
+    if rig:
+        bone = rig.pose.bones.get("toggle.007")
+        if bone:
+            print("  [+] Translating toggle.007 bone to trigger the blush drivers...")
+            bone.location = (1.0, 1.0, 1.0)
+            bpy.context.view_layer.update()
+            
+    # Locate the node tree elements
+    nodes = mat.node_tree.nodes
+    mix_node = nodes.get("Mix.002")
+    parent_mix = nodes.get("Mix")
+    
+    # Temporarily strip key drivers on these specific nodes to guarantee clean manual clamps
+    if mat.node_tree.animation_data:
+        for d in list(mat.node_tree.animation_data.drivers):
+            if any(name in d.data_path for name in ["Mix.002", "Mix"]):
+                mat.node_tree.animation_data.drivers.remove(d)
+                
+    # Lock node properties so blush renders clearly
+    if mix_node:
+        mix_node.inputs[0].default_value = 0.0
+        print("  [+] Forced Mix.002 Factor to 0.0 (Evaluating blush ramp)")
+        
+    if parent_mix:
+        # A mix value of 0.4 provides a beautiful 60% blush, 40% base skin blend
+        parent_mix.inputs[0].default_value = 0.4
+        print("  [+] Forced parent Mix Factor to 0.4 (Blending blush over skin)")
+
+    # 2. Setup Cycles to execute the flat diffuse vertex bake
+    scene = bpy.context.scene
+    orig_engine = scene.render.engine
+    
+    print("  [~] Temporarily switching render engine to Cycles for vertex bake...")
+    scene.render.engine = 'CYCLES'
+    
+    # Save original settings to restore at finish
+    orig_bake_type = scene.cycles.bake_type
+    
+    # Configure flat bake (ignoring lights, shadows, and secondary bounces)
+    scene.cycles.bake_type = 'DIFFUSE'
+    scene.render.bake.use_pass_direct = False
+    scene.render.bake.use_pass_indirect = False
+    scene.render.bake.use_pass_color = True
+    scene.render.bake.target = 'VERTEX_COLORS'
+    
+    # Locate output vertex color layer
+    color_layer = head_obj.data.color_attributes.get("Color")
+    if color_layer:
+        head_obj.data.color_attributes.active = color_layer
+        print(f"  [+] Target Bake Layer active: '{color_layer.name}'")
+    else:
+        print("  [-] Core 'Color' vertex color layer not found. Aborting bake.")
+        scene.render.engine = orig_engine
+        return False
+        
+    # Crucial: Clear all active selections to prevent baking non-mesh objects (like the armature)
+    for obj in list(bpy.context.selected_objects):
+        obj.select_set(False)
+        
+    # Ensure only the head mesh is selected and set as the active object
+    bpy.context.view_layer.objects.active = head_obj
+    head_obj.select_set(True)
+    
+    # 3. Fire the bake operator
+    try:
+        print("  [~] Rendering procedural shader tree down to vertex colors... (Cycles)")
+        bpy.ops.object.bake(type='DIFFUSE', target='VERTEX_COLORS')
+        print("  [+] Blush successfully baked into 'Color' vertex colors!")
+    except Exception as e:
+        print(f"  [-] Bake failed to execute: {e}")
+    finally:
+        # Restore scene settings to original state
+        scene.render.engine = orig_engine
+        scene.cycles.bake_type = orig_bake_type
+        
+    return True
+
+
 def convert_shaders_to_gltf_pbr():
     """Translates existing shader materials into standard glTF-compliant PBR nodes."""
     print("[*] Converting shader trees to glTF-compliant PBR...")
@@ -1049,6 +1148,9 @@ def main():
         bake_armature_actions_data_level(rig)
 
     # 4. Materials Conversion & Final Pipeline Pruning
+    # Programmatically bake procedural blush down to vertex colors before material conversion
+    activate_and_bake_blush()
+    
     convert_shaders_to_gltf_pbr()
     cleanup_remaining_helpers(shrinkwrap_targets)
     exclude_helper_skeletons(shrinkwrap_targets)
