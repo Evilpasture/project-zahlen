@@ -64,6 +64,7 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 		f.pNext = &feat12;
 		f.features.multiDrawIndirect = VK_TRUE;
 		f.features.samplerAnisotropy = VK_TRUE;
+		f.features.drawIndirectFirstInstance = VK_TRUE;
 	});
 #ifdef __APPLE__
 	const char* dev_exts[] = {
@@ -255,6 +256,10 @@ void RenderContext::Impl::InitBindless() {
 		Vk::Buffer::Create(allocator.Get(), sizeof(JPH::Mat44) * 8192,
 						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
+	morphDeltasBuffer =
+		Vk::Buffer::Create(allocator.Get(), sizeof(float) * 4 * 1000000,
+						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
 	// -----------------------------------------------------------------
 	// Pass 1: BRDF LUT Generation
 	// -----------------------------------------------------------------
@@ -356,8 +361,8 @@ void RenderContext::Impl::InitBindless() {
 
 		ZHLN_BeginCommandBuffer(cmd);
 		Vk::Buffer irrStaging =
-			Vk::Buffer::Create(allocator.Get(), 32 * 32 * 4 * 6, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-							   VMA_MEMORY_USAGE_CPU_ONLY);
+			Vk::Buffer::Create(allocator.Get(), static_cast<size_t>(32 * 32 * 4 * 6),
+							   VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 		{
 			auto irrMap = irrStaging.Map();
 			for (int i = 0; i < 6; ++i) {
@@ -447,8 +452,8 @@ void RenderContext::Impl::InitBindless() {
 
 		ZHLN_BeginCommandBuffer(cmd);
 		Vk::Buffer specStaging =
-			Vk::Buffer::Create(allocator.Get(), 256 * 256 * 4 * 6, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-							   VMA_MEMORY_USAGE_CPU_ONLY);
+			Vk::Buffer::Create(allocator.Get(), static_cast<size_t>(256 * 256 * 4 * 6),
+							   VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 		{
 			auto specMap = specStaging.Map();
 			for (int i = 0; i < 6; ++i) {
@@ -505,6 +510,7 @@ void RenderContext::Impl::InitBindless() {
 	}
 	prefilteredView =
 		Vk::CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(ctx.Device(), prefilteredImage.Handle(), 1);
+
 	// Update global descriptor bindings
 	GlobalSceneLayout::Write(ctx.Device(), bindlessSet, Vk::SkipWrite{},
 							 Vk::SamplerWrite{globalSampler.Get()},
@@ -522,7 +528,8 @@ void RenderContext::Impl::InitBindless() {
 							 Vk::ImageWrite{.view = prefilteredView.Get(),
 											.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
 							 Vk::ImageWrite{.view = brdfLutView.Get(),
-											.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
+											.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+							 Vk::BufferWrite{.buffer = morphDeltasBuffer.Handle()});
 }
 
 void RenderContext::Impl::InitPostProcessing() {

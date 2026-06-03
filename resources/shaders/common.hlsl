@@ -37,7 +37,11 @@ struct ObjectConstants {
 	uint alphaMode;
 	uint jointOffset;
 	uint isSkinned;
-	uint useVertexColor;
+	uint vertexCount; // <--- ADDED: Align with C++ FrameConstants [1]
+
+	uint morphOffset;
+	uint activeMorphCount;
+	float4 morphWeights;
 	float4 baseColorFactor;
 };
 
@@ -56,9 +60,20 @@ struct InstanceData {
 	uint alphaMode;
 	uint jointOffset;
 	uint isSkinned;
+	uint morphOffset;
+	uint activeMorphCount;
+	float4 morphWeights;
 	float4 baseColorFactor;
 };
 
+struct GPUJoint {
+	float4 col0;
+	float4 col1;
+	float4 col2;
+	float4 col3;
+};
+
+#ifndef SKIP_BINDINGS
 [[vk::push_constant]] ObjectConstants obj;
 
 [[vk::binding(0, 0)]] Texture2D globalTextures[];
@@ -69,17 +84,12 @@ struct InstanceData {
 [[vk::binding(4, 0)]] ConstantBuffer<FrameUniforms> frame;
 [[vk::binding(5, 0)]] StructuredBuffer<Light> lights;
 
-struct GPUJoint {
-	float4 col0;
-	float4 col1;
-	float4 col2;
-	float4 col3;
-};
 [[vk::binding(7, 0)]] StructuredBuffer<GPUJoint> g_joints;
 
 [[vk::binding(8, 0)]] TextureCube irradianceMap;
 [[vk::binding(9, 0)]] TextureCube prefilteredMap;
 [[vk::binding(10, 0)]] Texture2D brdfLUT;
+[[vk::binding(11, 0)]] StructuredBuffer<float4> g_morphDeltas; // float4 matches std430 padding
 
 struct VSInput {
 	[[vk::location(0)]] float3 position : POSITION;
@@ -135,6 +145,11 @@ float4 SkinPosition(float4 position, uint4 joints, float4 weights, uint jointOff
 }
 
 float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint jointOffset) {
+	// If the sum of weights is zero, return the original direction to avoid NaN
+	if (dot(weights, float4(1.5, 1.0, 1.0, 1.0)) < 0.001) {
+		return direction;
+	}
+
 	GPUJoint j0 = g_joints[jointOffset + joints.x];
 	GPUJoint j1 = g_joints[jointOffset + joints.y];
 	GPUJoint j2 = g_joints[jointOffset + joints.z];
@@ -149,6 +164,7 @@ float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint jointO
 			weights.z +
 		(j3.col0.xyz * direction.x + j3.col1.xyz * direction.y + j3.col2.xyz * direction.z) *
 			weights.w;
+
 	return dir;
 }
 
@@ -166,3 +182,17 @@ float3 FresnelSchlickRoughness(float cosTheta, float3 F0, float roughness) {
 	return F0 + (max(float3(1.0 - roughness, 1.0 - roughness, 1.0 - roughness), F0) - F0) *
 					pow(saturate(1.0 - cosTheta), 5.0);
 }
+
+float3 GetMorphDisplacement(uint vertexId, uint vertexCount, uint morphOffset,
+							uint activeMorphCount, float4 weights) {
+	float3 displacement = float3(0, 0, 0);
+
+	for (uint i = 0; i < activeMorphCount; ++i) {
+		// Calculate index inside the contiguous GPU buffer
+		uint deltaIndex = morphOffset + (i * vertexCount) + vertexId;
+		displacement += g_morphDeltas[deltaIndex].xyz * weights[i];
+	}
+
+	return displacement;
+}
+#endif // SKIP_BINDINGS

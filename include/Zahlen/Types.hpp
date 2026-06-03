@@ -40,6 +40,30 @@ struct Vertex {
 
 static_assert(sizeof(Vertex) == 64, "Vertex must be exactly 64 bytes!");
 
+struct alignas(16) InstanceData {
+	JPH::Mat44 world;
+	JPH::Mat44 prevWorld;
+	uint32_t albedoIndex;
+	uint32_t normalIndex;
+	uint32_t pbrIndex;
+	uint32_t emissiveIndex;
+	uint32_t vertexCount;
+	float cullRadius;
+	float metallicFactor;
+	float roughnessFactor;
+	float alphaCutoff;
+	uint32_t alphaMode;
+	uint32_t jointOffset;
+	uint32_t isSkinned;
+
+	// --- NEW: Morph Target Bindings ---
+	uint32_t morphOffset;	   // Index offset into the global morph SSBO
+	uint32_t activeMorphCount; // Number of active morph targets (0 if none)
+
+	alignas(16) float morphWeights[4];	  // <--- ADDED alignas(16)
+	alignas(16) float baseColorFactor[4]; // <--- ADDED alignas(16)
+};
+
 struct FrameConstants {
 	JPH::Mat44 transform;
 	JPH::Mat44 prevTransform;
@@ -54,33 +78,16 @@ struct FrameConstants {
 	uint32_t alphaMode;	  // 0=Opaque, 1=Mask, 2=Blend
 	uint32_t jointOffset; // Offset into the global joint matrix SSBO
 	uint32_t isSkinned;	  // 1 if skinned, 0 otherwise
-	uint32_t _padding[1]; // Explicit padding before 16-byte aligned float4 array
-	float baseColorFactor[4];
-};
-
-static_assert(sizeof(FrameConstants) == 192,
-			  "FrameConstants must be exactly 192 bytes to match HLSL alignment.");
-
-struct alignas(16) InstanceData {
-	JPH::Mat44 world;
-	JPH::Mat44 prevWorld;
-	uint32_t albedoIndex;
-	uint32_t normalIndex;
-	uint32_t pbrIndex;
-	uint32_t emissiveIndex;
 	uint32_t vertexCount;
-	float cullRadius;
-	float metallicFactor;
-	float roughnessFactor;
-	float alphaCutoff;
-	uint32_t alphaMode;
-	uint32_t jointOffset; // Offset into the global joint matrix SSBO
-	uint32_t isSkinned;	  // 1 if skinned, 0 otherwise
-	float baseColorFactor[4];
-};
-static_assert(sizeof(InstanceData) == 192,
-			  "InstanceData must be exactly 192 bytes to match HLSL alignment.");
 
+	uint32_t morphOffset;
+	uint32_t activeMorphCount;
+
+	alignas(16) float morphWeights[4];	  // <--- ADDED alignas(16)
+	alignas(16) float baseColorFactor[4]; // <--- ADDED alignas(16)
+};
+static_assert(sizeof(InstanceData) == 224, "InstanceData must match HLSL alignment.");
+static_assert(sizeof(FrameConstants) == 224, "FrameConstants must match HLSL alignment.");
 // --- Opaque Resource Handles ---
 // These abstract away Vulkan objects completely.
 // NOLINTBEGIN(performance-enum-size)

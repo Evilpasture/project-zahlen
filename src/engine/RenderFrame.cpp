@@ -151,7 +151,11 @@ void RenderContext::Impl::RenderShadowPass(VkCommandBuffer cmd) {
 					.alphaMode = draw.alphaMode,
 					.jointOffset = draw.jointOffset,
 					.isSkinned = draw.isSkinned,
-					._padding = {},
+					.vertexCount = draw.mesh->vertexCount,	   // <--- ADDED
+					.morphOffset = draw.morphOffset,		   // <--- ADDED
+					.activeMorphCount = draw.activeMorphCount, // <--- ADDED
+					.morphWeights = {draw.morphWeights[0], draw.morphWeights[1],
+									 draw.morphWeights[2], draw.morphWeights[3]}, // <--- ADDED
 					.baseColorFactor = {draw.baseColorFactor[0], draw.baseColorFactor[1],
 										draw.baseColorFactor[2], draw.baseColorFactor[3]}};
 
@@ -296,24 +300,29 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 							 .set = bindlessSet,
 							 .vbo = drawCmd.mesh->buffer.Handle(),
 							 .vertexCount = drawCmd.mesh->vertexCount},
-							FrameConstants{.transform = drawCmd.transform,
-										   .prevTransform = drawCmd.prevTransform,
-										   .albedoIndex = drawCmd.albedoIndex,
-										   .normalIndex = drawCmd.normalIndex,
-										   .pbrIndex = drawCmd.pbrIndex,
-										   .emissiveIndex = drawCmd.emissiveIndex,
-										   .isShadowPass = 0,
-										   .metallicFactor = drawCmd.metallicFactor,
-										   .roughnessFactor = drawCmd.roughnessFactor,
-										   .alphaCutoff = drawCmd.alphaCutoff,
-										   .alphaMode = drawCmd.alphaMode,
-										   .jointOffset = drawCmd.jointOffset,
-										   .isSkinned = drawCmd.isSkinned,
-										   ._padding = {},
-										   .baseColorFactor = {drawCmd.baseColorFactor[0],
-															   drawCmd.baseColorFactor[1],
-															   drawCmd.baseColorFactor[2],
-															   drawCmd.baseColorFactor[3]}});
+							FrameConstants{
+								.transform = drawCmd.transform,
+								.prevTransform = drawCmd.prevTransform,
+								.albedoIndex = drawCmd.albedoIndex,
+								.normalIndex = drawCmd.normalIndex,
+								.pbrIndex = drawCmd.pbrIndex,
+								.emissiveIndex = drawCmd.emissiveIndex,
+								.isShadowPass = 0,
+								.metallicFactor = drawCmd.metallicFactor,
+								.roughnessFactor = drawCmd.roughnessFactor,
+								.alphaCutoff = drawCmd.alphaCutoff,
+								.alphaMode = drawCmd.alphaMode,
+								.jointOffset = drawCmd.jointOffset,
+								.isSkinned = drawCmd.isSkinned,
+								.vertexCount = drawCmd.mesh->vertexCount,	  // <--- ADDED
+								.morphOffset = drawCmd.morphOffset,			  // <--- ADDED
+								.activeMorphCount = drawCmd.activeMorphCount, // <--- ADDED
+								.morphWeights = {drawCmd.morphWeights[0], drawCmd.morphWeights[1],
+												 drawCmd.morphWeights[2],
+												 drawCmd.morphWeights[3]}, // <--- ADDED
+								.baseColorFactor = {
+									drawCmd.baseColorFactor[0], drawCmd.baseColorFactor[1],
+									drawCmd.baseColorFactor[2], drawCmd.baseColorFactor[3]}});
 					}
 
 					ZHLN_EndCommandBuffer(sec_cmd);
@@ -389,6 +398,11 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCom
 			.alphaMode = drawCmd.alphaMode,
 			.jointOffset = drawCmd.jointOffset,
 			.isSkinned = drawCmd.isSkinned,
+			.morphOffset = drawCmd.morphOffset,
+			// Pass the morph target info to the GPU:
+			.activeMorphCount = drawCmd.activeMorphCount,
+			.morphWeights = {drawCmd.morphWeights[0], drawCmd.morphWeights[1],
+							 drawCmd.morphWeights[2], drawCmd.morphWeights[3]},
 			.baseColorFactor = {drawCmd.baseColorFactor[0], drawCmd.baseColorFactor[1],
 								drawCmd.baseColorFactor[2], drawCmd.baseColorFactor[3]}};
 
@@ -667,7 +681,8 @@ void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
 
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 		  const JPH::Mat44& transform, const JPH::Mat44& prevTransform, float cullRadius,
-		  uint32_t jointOffset, bool isSkinned) {
+		  uint32_t jointOffset, bool isSkinned, uint32_t morphOffset, uint32_t activeMorphCount,
+		  const float* morphWeights) {
 	auto* impl = ctx.GetImpl();
 	if (impl->current_cmd == VK_NULL_HANDLE) {
 		return;
@@ -678,25 +693,31 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 	}
 
 	impl->drawQueue.push_back(
-		{.material = std::bit_cast<NativeMaterial*>(material.pipeline),
-		 .mesh = std::bit_cast<NativeMesh*>(mesh.vertexBuffer),
-		 .transform = transform,
-		 .prevTransform = prevTransform,
-		 .albedoIndex = material.albedoIndex,
-		 .normalIndex = material.normalIndex,
-		 .pbrIndex = material.pbrIndex,
-		 .emissiveIndex = material.emissiveIndex,
-		 .cullRadius = cullRadius,
-		 .metallicFactor = material.metallicFactor,
-		 .roughnessFactor = material.roughnessFactor,
-		 .alphaCutoff = material.alphaCutoff,
-		 .alphaMode = material.alphaMode,
-		 .jointOffset = jointOffset,
-		 .isSkinned = isSkinned ? 1u : 0u,
-		 .baseColorFactor = {material.baseColorFactor[0], material.baseColorFactor[1],
-							 material.baseColorFactor[2], material.baseColorFactor[3]}});
+		DrawCommand{// <--- EXPLICIT CONVERSION
+					.material = std::bit_cast<NativeMaterial*>(material.pipeline),
+					.mesh = std::bit_cast<NativeMesh*>(mesh.vertexBuffer),
+					.transform = transform,
+					.prevTransform = prevTransform,
+					.albedoIndex = material.albedoIndex,
+					.normalIndex = material.normalIndex,
+					.pbrIndex = material.pbrIndex,
+					.emissiveIndex = material.emissiveIndex,
+					.cullRadius = cullRadius,
+					.metallicFactor = material.metallicFactor,
+					.roughnessFactor = material.roughnessFactor,
+					.alphaCutoff = material.alphaCutoff,
+					.alphaMode = material.alphaMode,
+					.jointOffset = jointOffset,
+					.isSkinned = isSkinned ? 1u : 0u,
+					.baseColorFactor = {material.baseColorFactor[0], material.baseColorFactor[1],
+										material.baseColorFactor[2], material.baseColorFactor[3]},
+					.morphOffset = morphOffset,
+					.activeMorphCount = activeMorphCount,
+					.morphWeights = {(morphWeights != nullptr) ? morphWeights[0] : 0.0f,
+									 (morphWeights != nullptr) ? morphWeights[1] : 0.0f,
+									 (morphWeights != nullptr) ? morphWeights[2] : 0.0f,
+									 (morphWeights != nullptr) ? morphWeights[3] : 0.0f}});
 }
-
 void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex) {
 	auto* impl = ctx.GetImpl();
 	if (impl->current_cmd == VK_NULL_HANDLE) {

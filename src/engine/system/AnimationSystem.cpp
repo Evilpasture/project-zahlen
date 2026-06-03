@@ -140,6 +140,63 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 					targetNode->scale[1] = s0[1] + factor * (s1[1] - s0[1]);
 					targetNode->scale[2] = s0[2] + factor * (s1[2] - s0[2]);
 					targetNode->has_matrix = false;
+				} else if (channel.target_path == cgltf_animation_path_type_weights) {
+					cgltf_node* targetNode = channel.target_node;
+					cgltf_animation_sampler* sampler = channel.sampler;
+
+					size_t numKeys = sampler->input->count;
+					size_t numTargets = 0;
+
+					// Defensive check: Skip if target has no mesh (e.g. bones/empty nodes)
+					if (targetNode != nullptr && targetNode->mesh != nullptr) {
+						numTargets = targetNode->mesh->weights_count;
+					}
+
+					if (numKeys > 0 && numTargets > 0) {
+						float maxTime = 0.0f;
+						cgltf_accessor_read_float(sampler->input, numKeys - 1, &maxTime, 1);
+
+						float clampedTime = localAnimTime;
+						if (clampedTime > maxTime) {
+							clampedTime = std::fmod(clampedTime, maxTime);
+						}
+
+						size_t k = 0;
+						for (; k < numKeys - 1; ++k) {
+							float t1 = 0.0f;
+							cgltf_accessor_read_float(sampler->input, k + 1, &t1, 1);
+							if (t1 > clampedTime) {
+								break;
+							}
+						}
+						if (k >= numKeys - 1) {
+							k = numKeys - 2;
+						}
+
+						float t0 = 0.0f;
+						float t1 = 0.0f;
+						cgltf_accessor_read_float(sampler->input, k, &t0, 1);
+						cgltf_accessor_read_float(sampler->input, k + 1, &t1, 1);
+
+						float factor = (t1 > t0) ? (clampedTime - t0) / (t1 - t0) : 0.0f;
+
+						// Allocate buffers to read keyframe weights
+						std::vector<float> w0(numTargets);
+						std::vector<float> w1(numTargets);
+
+						cgltf_accessor_read_float(sampler->output, k, w0.data(), numTargets);
+						cgltf_accessor_read_float(sampler->output, k + 1, w1.data(), numTargets);
+
+						// Interpolate and store weights inside the cgltf_node so the component can
+						// read them
+						targetNode->weights_count = numTargets;
+						if (targetNode->weights == nullptr) {
+							targetNode->weights = (float*)std::malloc(numTargets * sizeof(float));
+						}
+						for (size_t w = 0; w < numTargets; ++w) {
+							targetNode->weights[w] = w0[w] + factor * (w1[w] - w0[w]);
+						}
+					}
 				}
 			}
 
@@ -194,13 +251,20 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 
 	for (size_t i = 0; i < entities.size(); ++i) {
 		MeshComponent& mesh = meshes[i];
-		if (mesh.gltfNode) {
-			cgltf_node* node = static_cast<cgltf_node*>(mesh.gltfNode);
+		if (mesh.gltfNode != nullptr) {
+			auto* node = static_cast<cgltf_node*>(mesh.gltfNode);
 
-			if (mesh.gltfSkin) {
-				cgltf_skin* skin = static_cast<cgltf_skin*>(mesh.gltfSkin);
+			// Check if the node has animated morph target weights
+			if ((node->weights != nullptr) && node->weights_count > 0) {
+				mesh.activeMorphCount = std::min((uint32_t)node->weights_count, 4u);
+				for (uint32_t w = 0; w < mesh.activeMorphCount; ++w) {
+					mesh.morphWeights[w] = node->weights[w];
+				}
+			}
+
+			if (mesh.gltfSkin != nullptr && mesh.isSkinned) {
+				auto* skin = static_cast<cgltf_skin*>(mesh.gltfSkin);
 				mesh.jointOffset = skinToBufferOffset[skin];
-				mesh.isSkinned = true;
 				mesh.localTransform = JPH::Mat44::sIdentity();
 			} else {
 				mesh.isSkinned = false;

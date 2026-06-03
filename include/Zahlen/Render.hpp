@@ -47,6 +47,8 @@ class ZHLN_API RenderContext {
 	// Dynamic CPU-to-GPU Joint Matrix transfer hook
 	void UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices, uint32_t count);
 
+	uint32_t AllocateMorphDeltas(uint32_t count, const float* deltas);
+
 	struct Impl;
 	[[nodiscard]] auto GetImpl() const -> Impl* { return _impl.get(); }
 
@@ -63,7 +65,9 @@ void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
 				  const JPH::Mat44& shadowProjView);
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 		  const JPH::Mat44& transform, const JPH::Mat44& prevTransform, float cullRadius = 1.0f,
-		  uint32_t jointOffset = 0, bool isSkinned = false);
+		  uint32_t jointOffset = 0, bool isSkinned = false, uint32_t morphOffset = 0,
+		  uint32_t activeMorphCount = 0, const float* morphWeights = nullptr); // <--- ADDED
+
 void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex);
 
 } // namespace Renderer

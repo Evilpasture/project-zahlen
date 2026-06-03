@@ -6,6 +6,7 @@
 #include <Zahlen/Math3D.hpp>
 #include <cgltf.h>
 #include <cmath>
+#include <cstddef>
 #include <filesystem>
 #include <stb_image.h>
 #include <string>
@@ -58,10 +59,11 @@ static uint32_t LoadEmbeddedTexture(RenderContext& ctx, cgltf_image* img,
 		if (img->uri != nullptr) {
 			std::filesystem::path glbFolder = std::filesystem::path(glbPath).parent_path();
 			Log("ERROR: Failed to load texture URI: {} (Path: {}) | Reason: {}", img->uri,
-				(glbFolder / img->uri).string(), reason ? reason : "Unknown");
+				(glbFolder / img->uri).string(), (reason != nullptr) ? reason : "Unknown");
 		} else {
 			Log("ERROR: Failed to load embedded texture (buffer_view offset: {}) | Reason: {}",
-				img->buffer_view ? img->buffer_view->offset : 0, reason ? reason : "Unknown");
+				(img->buffer_view != nullptr) ? img->buffer_view->offset : 0,
+				(reason != nullptr) ? reason : "Unknown");
 		}
 		return 1;
 	}
@@ -244,7 +246,7 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 		for (cgltf_size idx = 0; idx < data->nodes_count; ++idx) {
 			cgltf_node* node = &data->nodes[idx];
 			if (node->has_matrix) {
-				node->has_translation = true;
+				node->has_translation = 1;
 				node->translation[0] = node->matrix[12];
 				node->translation[1] = node->matrix[13];
 				node->translation[2] = node->matrix[14];
@@ -253,29 +255,32 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 				JPH::Vec3 col1(node->matrix[4], node->matrix[5], node->matrix[6]);
 				JPH::Vec3 col2(node->matrix[8], node->matrix[9], node->matrix[10]);
 
-				node->has_scale = true;
+				node->has_scale = 1;
 				node->scale[0] = col0.Length();
 				node->scale[1] = col1.Length();
 				node->scale[2] = col2.Length();
 
-				if (node->scale[0] > 1e-6f)
+				if (node->scale[0] > 1e-6f) {
 					col0 /= node->scale[0];
-				if (node->scale[1] > 1e-6f)
+				}
+				if (node->scale[1] > 1e-6f) {
 					col1 /= node->scale[1];
-				if (node->scale[2] > 1e-6f)
+				}
+				if (node->scale[2] > 1e-6f) {
 					col2 /= node->scale[2];
+				}
 
 				JPH::Mat44 rotMat(JPH::Vec4(col0, 0.0f), JPH::Vec4(col1, 0.0f),
 								  JPH::Vec4(col2, 0.0f), JPH::Vec4(0, 0, 0, 1));
 				JPH::Quat rot = rotMat.GetQuaternion();
 
-				node->has_rotation = true;
+				node->has_rotation = 1;
 				node->rotation[0] = rot.GetX();
 				node->rotation[1] = rot.GetY();
 				node->rotation[2] = rot.GetZ();
 				node->rotation[3] = rot.GetW();
 
-				node->has_matrix = false;
+				node->has_matrix = 0;
 			}
 		}
 	}
@@ -338,10 +343,9 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 			float roughnessFactor = 1.0f;
 			float alphaCutoff = 0.5f;
 			uint32_t alphaMode = 0;
-			bool hasAlbedoTexture = false;
 
 			if (prim.material != nullptr) {
-				doubleSided = prim.material->double_sided;
+				doubleSided = (prim.material->double_sided != 0);
 				if (prim.material->alpha_mode == cgltf_alpha_mode_mask) {
 					alphaMode = 1;
 					alphaCutoff = prim.material->alpha_cutoff;
@@ -361,7 +365,7 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 
 					if (prim.material->pbr_metallic_roughness.base_color_texture.texture !=
 						nullptr) {
-						hasAlbedoTexture = true;
+						/* stub for now */
 					}
 				}
 			}
@@ -414,13 +418,15 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 				v.uv = Math::PackUV(uv[0], uv[1]);
 
 				float rawColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-				if (colorAcc != nullptr) { // Removed !hasAlbedoTexture for now to achieve specification compliance with models that use vertex colors alongside textures
+				if (colorAcc !=
+					nullptr) { // Removed !hasAlbedoTexture for now to achieve specification
+							   // compliance with models that use vertex colors alongside textures
 					cgltf_accessor_read_float(colorAcc, vIdx, rawColor, 4);
 				}
 				v.color = Math::PackColor(rawColor[0], rawColor[1], rawColor[2], rawColor[3]);
 
 				uint32_t joints[4] = {0, 0, 0, 0};
-				if (jointsAcc) {
+				if (jointsAcc != nullptr) {
 					cgltf_accessor_read_uint(jointsAcc, vIdx, joints, 4);
 				}
 				v.joints[0] = static_cast<uint16_t>(joints[0]);
@@ -429,7 +435,7 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 				v.joints[3] = static_cast<uint16_t>(joints[3]);
 
 				float weights[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-				if (weightsAcc) {
+				if (weightsAcc != nullptr) {
 					cgltf_accessor_read_float(weightsAcc, vIdx, weights, 4);
 				}
 				v.weights[0] = weights[0];
@@ -456,10 +462,9 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 							.vertexCount = static_cast<uint32_t>(unrolledVertices.size())};
 
 			// Check if we are loading character parts to assign the toon material
-			bool isCharacter = (path.contains("POMNI") || path.contains("tadc_models"));
+			// bool isCharacter = (path.contains("POMNI") || path.contains("tadc_models"));
 
-			Material subMaterial = isCharacter ? CreateToonMaterial(ctx, doubleSided, alphaBlend)
-											   : CreateBasicMaterial(ctx, doubleSided, alphaBlend);
+			Material subMaterial = CreateBasicMaterial(ctx, doubleSided, alphaBlend);
 
 			subMaterial.alphaMode = alphaMode;
 			subMaterial.alphaCutoff = alphaCutoff;
@@ -495,12 +500,77 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 				}
 			}
 
+			uint32_t morphOffset = 0;
+			uint32_t activeMorphCount = 0;
+
+			if (prim.targets_count > 0) {
+				activeMorphCount = std::min((uint32_t)prim.targets_count, 4u);
+				
+				// Match the unrolled vertex count
+				auto unrolledVertexCount = static_cast<uint32_t>(unrolledVertices.size());
+				
+				std::vector<float> tempDeltas;
+				tempDeltas.resize(static_cast<size_t>(unrolledVertexCount) * activeMorphCount *
+				4, 				  0.0f);
+				
+				uint32_t deltaPtr = 0;
+				for (uint32_t t = 0; t < activeMorphCount; ++t) {
+					cgltf_accessor* targetPosAcc = nullptr;
+					for (cgltf_size a = 0; a < prim.targets[t].attributes_count; ++a) {
+						if (prim.targets[t].attributes[a].type == cgltf_attribute_type_position) {
+							targetPosAcc = prim.targets[t].attributes[a].data;
+							break;
+						}
+					}
+				
+					if (targetPosAcc != nullptr) {
+						// Match the unrolling logic of the vertices exactly
+						if (prim.indices != nullptr) {
+							size_t indexCount = prim.indices->count;
+							for (size_t idx = 0; idx < indexCount; ++idx) {
+								size_t originalIdx = cgltf_accessor_read_index(prim.indices, idx);
+				
+								float delta[3] = {0.0f, 0.0f, 0.0f};
+								cgltf_accessor_read_float(targetPosAcc, originalIdx, delta, 3);
+				
+								tempDeltas[deltaPtr++] = delta[0];
+								tempDeltas[deltaPtr++] = delta[1];
+								tempDeltas[deltaPtr++] = delta[2];
+								tempDeltas[deltaPtr++] = 0.0f; // std430 float4 padding
+							}
+						} else {
+							for (size_t vIdx = 0; vIdx < vertexCount; ++vIdx) {
+								float delta[3] = {0.0f, 0.0f, 0.0f};
+								cgltf_accessor_read_float(targetPosAcc, vIdx, delta, 3);
+				
+								tempDeltas[deltaPtr++] = delta[0];
+								tempDeltas[deltaPtr++] = delta[1];
+								tempDeltas[deltaPtr++] = delta[2];
+								tempDeltas[deltaPtr++] = 0.0f; // std430 float4 padding
+							}
+						}
+					}
+				}
+				
+				// Expose unrolledVertexCount to the shader
+				morphOffset = ctx.AllocateMorphDeltas(unrolledVertexCount * activeMorphCount,
+													  tempDeltas.data());
+			}
+
+			// Map the extracted details onto the spawned entity:
 			Entity part = reg.Create();
 			reg.Add(part, MeshComponent{.mesh = subMesh,
 										.material = subMaterial,
 										.cullRadius = 100.0f,
 										.localTransform = nodeTransform,
 										.prevTransform = nodeTransform,
+										.jointOffset = 0,
+										.isSkinned = false,
+
+										// Assign morph target trackers:
+										.morphOffset = morphOffset,
+										.activeMorphCount = activeMorphCount,
+
 										.gltfNode = (void*)node,
 										.gltfSkin = (void*)node->skin});
 			spawnedEntities.push_back(part);

@@ -33,9 +33,10 @@ using GlobalSceneLayout = Vk::DescriptorLayout<
 	Vk::StorageBufferSlot<7, VK_SHADER_STAGE_VERTEX_BIT>, // Joint matrices (SSBO)
 
 	// --- NEW: IBL DESCRIPTOR BINDINGS ---
-	Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>, // Irradiance Cubemap (Diffuse IBL)
-	Vk::SampledImageSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>, // Pre-filtered Cubemap (Specular IBL)
-	Vk::SampledImageSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT> // 2D BRDF LUT (2D Texture)
+	Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>,	// Irradiance Cubemap (Diffuse IBL)
+	Vk::SampledImageSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,	// Pre-filtered Cubemap (Specular IBL)
+	Vk::SampledImageSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>, // 2D BRDF LUT (2D Texture)
+	Vk::StorageBufferSlot<11, VK_SHADER_STAGE_VERTEX_BIT>	// Morph target deltas (SSBO)
 	>;
 
 using TAALayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SampledImageSlot<1>,
@@ -76,6 +77,9 @@ struct DrawCommand {
 	uint32_t jointOffset;
 	uint32_t isSkinned;
 	float baseColorFactor[4];
+	uint32_t morphOffset;
+	uint32_t activeMorphCount;
+	float morphWeights[4];
 };
 
 struct UIDrawCommand {
@@ -166,6 +170,9 @@ struct RenderContext::Impl {
 	Vk::ImageView prefilteredView;
 	Vk::Image brdfLutImage;
 	Vk::ImageView brdfLutView;
+
+	Vk::Buffer morphDeltasBuffer; // Holds all packed morph target deltas
+	uint32_t nextMorphDeltaIndex = 0;
 
 	Impl(Window& win) : window(win) {}
 

@@ -17,9 +17,9 @@ JPH::Vec3 EvaluateSky(const JPH::Vec3& D) {
 	float dy = D.GetY();
 
 	// Core palette
-	JPH::Vec3 zenith(0.02f, 0.15f, 0.45f);	// Deep royal blue
-	JPH::Vec3 horizon(0.45f, 0.65f, 0.85f); // Light horizon blue/grey
-	JPH::Vec3 ground(0.05f, 0.06f, 0.08f);	// Dark ground ambient
+	JPH::Vec3 zenith(0.5f, 0.65f, 0.85f);	// Soft pale sky blue
+	JPH::Vec3 horizon(0.88f, 0.85f, 0.82f); // Warm peach-white horizon
+	JPH::Vec3 ground(0.35f, 0.28f, 0.22f);	// Warm sandy/clay ground reflection
 
 	JPH::Vec3 color;
 	if (dy >= 0.0f) {

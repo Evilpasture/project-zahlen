@@ -229,7 +229,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			cam.frustum.Update(vp);
 			UpdateCulling(engine);
 
-			JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f};
+			JPH::Vec3 sunDirection = {-0.6f, 0.4f, -0.7f}; // Shines from front-right-above
 			JPH::Mat44 lightView =
 				Math::CreateLookAt(sunDirection * 100.0f, {0.0f, 0.0f, 0.0f}, JPH::Vec3::sAxisY());
 			JPH::Mat44 lightProj = Math::CreateOrtho(-50.0f, 50.0f, -50.0f, 50.0f, 0.1f, 200.0f);
@@ -277,7 +277,8 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 
 				Renderer::Draw(rc, mesh->material, mesh->mesh, currentTransform,
 							   mesh->prevTransform, mesh->cullRadius, mesh->jointOffset,
-							   mesh->isSkinned);
+							   mesh->isSkinned, mesh->morphOffset, mesh->activeMorphCount,
+							   mesh->morphWeights);
 				mesh->prevTransform = currentTransform;
 			}
 

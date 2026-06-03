@@ -16,14 +16,20 @@ VSOutput VSMain(uint vertexID : SV_VertexID) {
 [[vk::binding(0, 0)]] Texture2D<float4> texInput;
 [[vk::binding(1, 0)]] SamplerState smp;
 
+float3 ACESFilm(float3 x) {
+	float a = 2.51f;
+	float b = 0.03f;
+	float c = 2.43f;
+	float d = 0.59f;
+	float e = 0.14f;
+	return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
+}
+
 float4 PSMain(VSOutput input) : SV_Target0 {
 	float3 color = texInput.SampleLevel(smp, input.uv, 0).rgb;
 
-	// Reinhard ACES Tonemap
-	color = color / (color + 1.0f);
-
-	// Display Gamma Correction
-	// color = pow(color, 1.0f / 2.2f);
+	// Apply true ACES filmic curve
+	color = ACESFilm(color);
 
 	return float4(color, 1.0f);
 }

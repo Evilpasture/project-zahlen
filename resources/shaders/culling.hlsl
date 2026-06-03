@@ -1,22 +1,6 @@
-#pragma pack_matrix(column_major)
-
-struct InstanceData {
-	float4x4 world;
-	float4x4 prevWorld;
-	uint albedoIdx;
-	uint normalIdx;
-	uint pbrIdx;
-	uint emissiveIdx;
-	uint vertexCount;
-	float cullRadius;
-	float metallicFactor;
-	float roughnessFactor;
-	float alphaCutoff;
-	uint alphaMode;
-	uint jointOffset;
-	uint isSkinned;
-	float4 baseColorFactor;
-};
+// resources/shaders/culling.hlsl
+#define SKIP_BINDINGS
+#include "common.hlsl"
 
 struct DrawIndirectCommand {
 	uint vertexCount;

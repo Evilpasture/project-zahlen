@@ -15,8 +15,14 @@ struct MeshComponent {
 	JPH::Mat44 prevTransform = JPH::Mat44::sIdentity();
 	uint32_t jointOffset = 0;
 	bool isSkinned = false;
-	void* gltfNode = nullptr; // Node reference for skeletal animation
-	void* gltfSkin = nullptr; // Skin reference for skeleton deformers
+
+	// --- NEW: Morph Target tracking ---
+	uint32_t morphOffset = 0;
+	uint32_t activeMorphCount = 0;
+	float morphWeights[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+
+	void* gltfNode = nullptr;
+	void* gltfSkin = nullptr;
 };
 
 /**

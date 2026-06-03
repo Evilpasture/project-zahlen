@@ -1,7 +1,7 @@
 // resources/shaders/basic.hlsl
 #include "common.hlsl"
 
-VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
+VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	VSOutput output;
 
 	float4x4 worldMatrix;
@@ -12,6 +12,11 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 	uint alphaMode;
 	uint jointOffset;
 	uint isSkinned;
+
+	uint morphOffset;
+	uint activeMorphCount;
+	float4 morphWeights;
+	uint vertexCount;
 
 	if (obj.isShadowPass != 0 || obj.albedoIdx != 0) {
 		// --- CPU TRADITIONAL PATH ---
@@ -28,6 +33,11 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 		alphaMode = obj.alphaMode;
 		jointOffset = obj.jointOffset;
 		isSkinned = obj.isSkinned;
+
+		morphOffset = obj.morphOffset;
+		activeMorphCount = obj.activeMorphCount;
+		morphWeights = obj.morphWeights;
+		vertexCount = obj.vertexCount; // Resolves: 'no member named vertexCount' [1]
 	} else {
 		// --- GPU CULLING PATH ---
 		InstanceData inst = g_instances[instanceId];
@@ -44,12 +54,25 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 		alphaMode = inst.alphaMode;
 		jointOffset = inst.jointOffset;
 		isSkinned = inst.isSkinned;
+
+		morphOffset = inst.morphOffset;
+		activeMorphCount = inst.activeMorphCount;
+		morphWeights = inst.morphWeights;
+		vertexCount = inst.vertexCount;
 	}
 
+	// Declare as float4 initially:
 	float4 localPos = float4(input.position, 1.0f);
 	float3 localNormal = input.normal * 2.0f - 1.0f;
 	float3 localTangent = input.tangent.xyz * 2.0f - 1.0f;
 
+	// Apply morph target displacement:
+	if (activeMorphCount > 0) {
+		localPos.xyz += GetMorphDisplacement(vertexId, vertexCount, morphOffset, activeMorphCount,
+											 morphWeights);
+	}
+
+	// SkinPosition will now match since we passed float4:
 	if (isSkinned != 0) {
 		localPos = SkinPosition(localPos, input.joints, input.weights, jointOffset);
 		localNormal =
@@ -167,8 +190,8 @@ PSOutput PSMain(VSOutput input) {
 	float3 emissive = globalTextures[indices.w].Sample(defaultSampler, input.uv).rgb;
 
 	// glTF PBR Math: PBR Sample * Parameter Factors
-	float roughness = pbr.g * roughnessFactor;
-	float metallic = pbr.b * metallicFactor;
+	float roughness = (indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor;
+	float metallic = (indices.z == 0 ? 1.0f : pbr.b) * metallicFactor;
 
 	float3 N = normalize(input.normal);
 	float3 worldNormal = N;

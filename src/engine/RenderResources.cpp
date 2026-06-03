@@ -2,6 +2,8 @@
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
 
+#include <cstddef>
+
 namespace ZHLN {
 
 // Define CompileShadowPipeline here so it compiles with vertex reflection visible
@@ -344,6 +346,23 @@ void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matri
 	auto mappedRegion = _impl->jointBuffer.Map();
 	auto* gpuJoints = reinterpret_cast<JPH::Mat44*>(mappedRegion.data);
 	std::memcpy(gpuJoints + offset, matrices, count * sizeof(JPH::Mat44));
+}
+
+uint32_t RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas) {
+	uint32_t offset = _impl->nextMorphDeltaIndex;
+
+	// 1. Correctly map the morphDeltasBuffer and keep it in scope!
+	auto mappedRegion = _impl->morphDeltasBuffer.Map();
+
+	// 2. Safely offset the pointer within the mapped memory block
+	float* gpuDeltas =
+		reinterpret_cast<float*>(mappedRegion.data) + (static_cast<size_t>(offset * 4));
+
+	// 3. This memcpy is now 100% safe since mappedRegion is still alive
+	std::memcpy(gpuDeltas, deltas, count * sizeof(float) * 4);
+
+	_impl->nextMorphDeltaIndex += count;
+	return offset;
 }
 
 } // namespace ZHLN
