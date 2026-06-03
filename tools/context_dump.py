@@ -6,13 +6,29 @@ from datetime import datetime
 import argparse
 
 
-def get_git_tracked_files(target=".", ignore_demo=False):
+def get_git_tracked_files(target=".", ignore_demo=False, ignore_tools=False):
     extensions = {
-        ".cpp", ".hpp", ".mm", ".c", ".h", ".S", 
-        ".glsl", ".vert", ".frag", ".metal", ".lua", ".hlsl", ".sh"
+        ".cpp",
+        ".hpp",
+        ".mm",
+        ".c",
+        ".h",
+        ".S",
+        ".glsl",
+        ".vert",
+        ".frag",
+        ".metal",
+        ".lua",
+        ".hlsl",
+        ".sh",
+        ".py",
     }
     include_filenames = {"CMakeLists.txt"}
+
+    # Base ignore paths
     ignore_paths = {"third_party", "extern"}
+    if ignore_tools:
+        ignore_paths.add("tools")
 
     if os.path.isfile(target):
         return [target]
@@ -33,11 +49,11 @@ def get_git_tracked_files(target=".", ignore_demo=False):
         valid_files = []
         for f in all_files:
             path_obj = Path(f)
-            
+
             # 1. Skip paths containing globally ignored directories
             if any(part in ignore_paths for part in path_obj.parts):
                 continue
-            
+
             # 2. Skip if the file or any of its parent directories are in a .DEMO folder/path
             if ignore_demo:
                 # Check if any parent of this file is one of the directories we identified
@@ -105,15 +121,17 @@ def generate_snapshot_string(tracked_files, target_dir):
     return "\n".join(lines)
 
 
-def run_project_manager(target=".", ignore_demo=False):
-    tracked_files = get_git_tracked_files(target, ignore_demo=ignore_demo)
+def run_project_manager(target=".", ignore_demo=False, ignore_tools=False):
+    # Pass ignore_tools to get_git_tracked_files
+    tracked_files = get_git_tracked_files(
+        target, ignore_demo=ignore_demo, ignore_tools=ignore_tools
+    )
     if not tracked_files:
         print(f"No matching files found at '{target}'.")
         return
 
-    # NEW: Handle naming for single files
+    # Handle naming for single files
     if os.path.isfile(target):
-        # e.g., src/render/engine.cpp -> engine_snapshot.md
         name = Path(target).stem
         snapshot_file = f"{name}_snapshot.md"
         diff_file = f"{name}_diff.md"
@@ -121,7 +139,6 @@ def run_project_manager(target=".", ignore_demo=False):
         snapshot_file = "project_snapshot.md"
         diff_file = "project_diff.md"
     else:
-        # Normalize the path (e.g., 'src/render/' -> 'src/render') and replace slashes
         clean_path = os.path.normpath(target).strip(os.sep)
         prefix = clean_path.replace(os.sep, "_") + "_"
         snapshot_file = f"{prefix}project_snapshot.md"
@@ -138,7 +155,6 @@ def run_project_manager(target=".", ignore_demo=False):
 
     # 3. If there is old content, generate a diff
     if old_content:
-        # Generate unified diff
         diff = list(
             difflib.unified_diff(
                 old_content.splitlines(),
@@ -175,10 +191,21 @@ def run_project_manager(target=".", ignore_demo=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Dump git-tracked context for LLMs.")
-    parser.add_argument("target", nargs="?", default=".", help="Target directory to dump.")
-    # Add the new flag
-    parser.add_argument("--ignore-demo", action="store_true", help="Ignore directories containing .DEMO files.")
+    parser.add_argument(
+        "target", nargs="?", default=".", help="Target directory to dump."
+    )
+    parser.add_argument(
+        "--ignore-demo",
+        action="store_true",
+        help="Ignore directories containing .DEMO files.",
+    )
+    # NEW: Add the --ignore-tools flag
+    parser.add_argument(
+        "--ignore-tools", action="store_true", help="Ignore the tools/ directory."
+    )
 
     args = parser.parse_args()
     # Pass the new argument into your main function
-    run_project_manager(args.target, ignore_demo=args.ignore_demo)
+    run_project_manager(
+        args.target, ignore_demo=args.ignore_demo, ignore_tools=args.ignore_tools
+    )
