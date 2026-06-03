@@ -22,10 +22,14 @@ static uint32_t LoadEmbeddedTexture(RenderContext& ctx, cgltf_image* img,
 	static std::unordered_map<std::string, uint32_t> textureCache;
 	std::string key;
 
+	// Scope the key with the glbPath to prevent conflicts between different models
 	if (img->uri != nullptr) {
-		key = img->uri;
+		key = glbPath + ":" + img->uri;
 	} else if (img->buffer_view != nullptr) {
-		key = std::to_string(reinterpret_cast<uintptr_t>(img->buffer_view));
+		key = glbPath + ":" + std::to_string(reinterpret_cast<uintptr_t>(img->buffer_view));
+	} else {
+		// Fallback for cases with neither URI nor buffer view
+		key = glbPath + ":" + std::to_string(reinterpret_cast<uintptr_t>(img));
 	}
 
 	if (textureCache.contains(key)) {
@@ -410,7 +414,7 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 				v.uv = Math::PackUV(uv[0], uv[1]);
 
 				float rawColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-				if (colorAcc != nullptr && !hasAlbedoTexture) {
+				if (colorAcc != nullptr) { // Removed !hasAlbedoTexture for now to achieve specification compliance with models that use vertex colors alongside textures
 					cgltf_accessor_read_float(colorAcc, vIdx, rawColor, 4);
 				}
 				v.color = Math::PackColor(rawColor[0], rawColor[1], rawColor[2], rawColor[3]);

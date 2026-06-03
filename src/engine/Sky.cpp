@@ -1,0 +1,126 @@
+#include <Utils.hpp>
+#include <Zahlen/Math3D.hpp>
+#include <cmath>
+#include <cstddef>
+
+namespace ZHLN::PBR {
+
+std::pair<float, float> Hammersley(uint32_t i, uint32_t N);
+
+// Linear Interpolation helper
+inline JPH::Vec3 LerpColor(const JPH::Vec3& a, const JPH::Vec3& b, float t) {
+	return a + t * (b - a);
+}
+
+// Generates the sky color for a given 3D direction vector
+JPH::Vec3 EvaluateSky(const JPH::Vec3& D) {
+	float dy = D.GetY();
+
+	// Core palette
+	JPH::Vec3 zenith(0.02f, 0.15f, 0.45f);	// Deep royal blue
+	JPH::Vec3 horizon(0.45f, 0.65f, 0.85f); // Light horizon blue/grey
+	JPH::Vec3 ground(0.05f, 0.06f, 0.08f);	// Dark ground ambient
+
+	JPH::Vec3 color;
+	if (dy >= 0.0f) {
+		// Sky gradient
+		color = LerpColor(horizon, zenith, std::pow(dy, 1.2f));
+	} else {
+		// Ground gradient
+		color = LerpColor(horizon, ground, std::pow(-dy, 0.5f));
+	}
+
+	// Add a soft white light source ("Sun") to create beautiful specular reflections
+	JPH::Vec3 sunDir = JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized();
+	float cosTheta = D.Dot(sunDir);
+	if (cosTheta > 0.0f) {
+		float glow = std::pow(cosTheta, 24.0f) * 0.7f;	// Broad soft glow
+		float disk = std::pow(cosTheta, 400.0f) * 2.5f; // Sharp sun disk
+		color += JPH::Vec3(1.0f, 1.0f, 1.0f) * (glow + disk);
+	}
+
+	return color;
+}
+
+// Maps 2D pixel coordinates of a cubemap face into a 3D direction vector
+JPH::Vec3 GetCubeDirection(int face, float u, float v) {
+	float uc = u * 2.0f - 1.0f;
+	float vc = v * 2.0f - 1.0f;
+
+	// Standard Vulkan cubemap face coordinate system
+	switch (face) {
+		case 0:
+			return JPH::Vec3(1.0f, -vc, -uc).Normalized(); // POS_X
+		case 1:
+			return JPH::Vec3(-1.0f, -vc, uc).Normalized(); // NEG_X
+		case 2:
+			return JPH::Vec3(uc, 1.0f, vc).Normalized(); // POS_Y
+		case 3:
+			return JPH::Vec3(uc, -1.0f, -vc).Normalized(); // NEG_Y
+		case 4:
+			return JPH::Vec3(uc, -vc, 1.0f).Normalized(); // POS_Z
+		case 5:
+			return JPH::Vec3(-uc, -vc, -1.0f).Normalized(); // NEG_Z
+	}
+	return JPH::Vec3::sAxisY();
+}
+
+// Converts float colors into RGBA8 packed bytes
+uint32_t PackColor(const JPH::Vec3& color) {
+	auto r = static_cast<uint8_t>(ZHLN::Clamp(color.GetX(), 0.0f, 1.0f) * 255.0f);
+	auto g = static_cast<uint8_t>(ZHLN::Clamp(color.GetY(), 0.0f, 1.0f) * 255.0f);
+	auto b = static_cast<uint8_t>(ZHLN::Clamp(color.GetZ(), 0.0f, 1.0f) * 255.0f);
+	return 0xFF000000u | (uint32_t(b) << 16) | (uint32_t(g) << 8) | r;
+}
+
+JPH::Vec3 GenerateCosHemisphere(float u1, float u2) {
+	float phi = 2.0f * 3.14159265f * u1;
+	float cosTheta = std::sqrt(1.0f - u2);
+	float sinTheta = std::sqrt(u2);
+	return {std::cos(phi) * sinTheta, std::sin(phi) * sinTheta, cosTheta};
+}
+
+// Generates 6 face buffers for a 32x32 Irradiance Cubemap
+std::vector<std::vector<uint32_t>> GenerateIrradianceCubemap() {
+	const uint32_t size = 32;
+	std::vector<std::vector<uint32_t>> cubemap(
+		6, std::vector<uint32_t>(static_cast<size_t>(size * size)));
+
+	for (int face = 0; face < 6; ++face) {
+		for (uint32_t y = 0; y < size; ++y) {
+			float v = (float(y) + 0.5f) / float(size);
+			for (uint32_t x = 0; x < size; ++x) {
+				float u = (float(x) + 0.5f) / float(size);
+
+				JPH::Vec3 N = GetCubeDirection(face, u, v);
+
+				// Build orthonormal basis around normal N
+				JPH::Vec3 up =
+					std::abs(N.GetY()) < 0.999f ? JPH::Vec3::sAxisY() : JPH::Vec3::sAxisZ();
+				JPH::Vec3 tangent = up.Cross(N).Normalized();
+				JPH::Vec3 bitangent = N.Cross(tangent);
+
+				JPH::Vec3 irradiance = JPH::Vec3::sZero();
+
+				// Low-discrepancy Monte Carlo integration (64 samples per pixel)
+				const uint32_t SAMPLE_COUNT = 64;
+				for (uint32_t i = 0; i < SAMPLE_COUNT; ++i) {
+					auto [u1, u2] = Hammersley(i, SAMPLE_COUNT);
+					JPH::Vec3 hemiSample = GenerateCosHemisphere(u1, u2);
+
+					// Transform to world space
+					JPH::Vec3 L = tangent * hemiSample.GetX() + bitangent * hemiSample.GetY() +
+								  N * hemiSample.GetZ();
+
+					irradiance += EvaluateSky(L.Normalized());
+				}
+
+				irradiance /= float(SAMPLE_COUNT);
+				cubemap[face][y * size + x] = PackColor(irradiance);
+			}
+		}
+	}
+	return cubemap;
+}
+
+} // namespace ZHLN::PBR

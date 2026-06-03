@@ -23,7 +23,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	color = color / (color + 1.0f);
 
 	// Display Gamma Correction
-	color = pow(color, 1.0f / 2.2f);
+	// color = pow(color, 1.0f / 2.2f);
 
 	return float4(color, 1.0f);
 }

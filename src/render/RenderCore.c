@@ -1420,7 +1420,7 @@ VkImageView ZHLN_CreateImageView(const VkDevice device,
 	const VkImageViewCreateInfo info = {
 		.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
 		.image = desc->image,
-		.viewType = (desc->array_layers > 1) ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D,
+		.viewType = desc->view_type,
 		.format = desc->format,
 		.subresourceRange =
 			{

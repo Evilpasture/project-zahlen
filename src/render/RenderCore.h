@@ -266,9 +266,9 @@ typedef struct ZHLN_ShaderStages {
 } ZHLN_ShaderStages;
 
 typedef struct ZHLN_ShaderStagesDesc {
-    const VkDevice device;
-    const ZHLN_ShaderDesc vert;
-    const ZHLN_ShaderDesc frag;
+	const VkDevice device;
+	const ZHLN_ShaderDesc vert;
+	const ZHLN_ShaderDesc frag;
 } ZHLN_ShaderStagesDesc;
 
 [[nodiscard]]
@@ -337,7 +337,7 @@ void ZHLN_DestroyPipeline(VkDevice device, VkPipeline pipeline);
 
 typedef struct ZHLN_RenderPassDesc {
 	const VkImageView target_views[4]; // Array instead of single view
-	const uint32_t target_count; 	   // How many targets are we writing to?
+	const uint32_t target_count;	   // How many targets are we writing to?
 	const VkImageView depth_view;
 	const VkExtent2D extent;
 	const float clear_color[4];
@@ -471,6 +471,7 @@ typedef struct ZHLN_ImageViewDesc {
 	const VkImageAspectFlags aspect;
 	const uint32_t mip_levels;	 // default 1
 	const uint32_t array_layers; // default 1
+	const VkImageViewType view_type;
 } ZHLN_ImageViewDesc;
 
 [[nodiscard]]

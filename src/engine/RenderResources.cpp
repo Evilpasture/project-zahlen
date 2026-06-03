@@ -232,6 +232,108 @@ auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t hei
 	return index;
 }
 
+uint32_t RenderContext::CreateTextureCube(const std::vector<const void*>& faceData, uint32_t width,
+										  uint32_t height) {
+	auto* impl = _impl.get();
+	const VkDevice device = impl->ctx.Device();
+	const size_t faceSize = static_cast<size_t>(width) * height * 4;
+
+	const VkImageCreateInfo imgInfo = {
+		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+		.pNext = nullptr,
+		.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT, // Required for cubemaps
+		.imageType = VK_IMAGE_TYPE_2D,
+		.format = VK_FORMAT_R8G8B8A8_UNORM, // Irradiance maps are loaded in Linear space
+		.extent{.width = width, .height = height, .depth = 1},
+		.mipLevels = 1,
+		.arrayLayers = 6, // 6 faces
+		.samples = VK_SAMPLE_COUNT_1_BIT,
+		.tiling = VK_IMAGE_TILING_OPTIMAL,
+		.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+
+	auto gpuImage = Vk::Image::Create(impl->allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+
+	Vk::CommandPool tempPool(device, impl->ctx.PhysicalInfo().graphics_family);
+	tempPool.Allocate(1);
+	VkCommandBuffer cmd = tempPool[0];
+
+	ZHLN_BeginCommandBuffer(cmd);
+
+	// Create 1 staging buffer containing all 6 faces sequentially
+	Vk::Buffer staging =
+		Vk::Buffer::Create(impl->allocator.Get(), faceSize * 6, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+						   VMA_MEMORY_USAGE_CPU_ONLY);
+
+	auto mapped = staging.Map();
+	for (uint32_t i = 0; i < 6; ++i) {
+		std::memcpy(static_cast<char*>(mapped.data) + (i * faceSize), faceData[i], faceSize);
+	}
+	mapped.Release(); // Flush mapping
+
+	Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
+		cmd, gpuImage.Handle());
+
+	// Record copies for all 6 faces
+	for (uint32_t i = 0; i < 6; ++i) {
+		VkBufferImageCopy2 region = {
+			.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
+			.bufferOffset = i * faceSize,
+			.imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+								 .mipLevel = 0,
+								 .baseArrayLayer = i, // Destination face layer
+								 .layerCount = 1},
+			.imageExtent = {.width = width, .height = height, .depth = 1}};
+
+		VkCopyBufferToImageInfo2 copyInfo = {.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
+											 .srcBuffer = staging.Handle(),
+											 .dstImage = gpuImage.Handle(),
+											 .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+											 .regionCount = 1,
+											 .pRegions = &region};
+		vkCmdCopyBufferToImage2(cmd, &copyInfo);
+	}
+
+	Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+						 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
+
+	ZHLN_EndCommandBuffer(cmd);
+
+	// Submit copy commands to GPU...
+	VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+										 .commandBuffer = cmd};
+	VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+							.commandBufferInfoCount = 1,
+							.pCommandBufferInfos = &subInfo};
+	vkQueueSubmit2(impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
+	vkQueueWaitIdle(impl->ctx.GraphicsQueue());
+
+	// Create Cube View
+	auto gpuView = Vk::CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), 1);
+
+	uint32_t index = impl->nextTextureIndex++;
+
+	VkDescriptorImageInfo bindlessUpdate = {.sampler = VK_NULL_HANDLE,
+											.imageView = gpuView.Get(),
+											.imageLayout =
+												VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+
+	VkWriteDescriptorSet write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+								  .dstSet = impl->bindlessSet,
+								  .dstBinding = 0,
+								  .dstArrayElement = index,
+								  .descriptorCount = 1,
+								  .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+								  .pImageInfo = &bindlessUpdate};
+	vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+
+	impl->textureImages.push_back(std::move(gpuImage));
+	impl->textureViews.push_back(std::move(gpuView));
+
+	return index;
+}
+
 void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices,
 										uint32_t count) {
 	if (count == 0) {

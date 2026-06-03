@@ -1112,6 +1112,20 @@ class alignas(64) SemaphorePool {
 using ImageView = DeviceHandle<VkImageView, ZHLN_DestroyImageView>;
 
 template <VkFormat F>
+[[nodiscard]] static auto CreateViewCube(VkDevice device, VkImage image, uint32_t mips = 1)
+	-> ImageView {
+	ZHLN_ImageViewDesc desc = {
+		.image = image,
+		.format = F,
+		.aspect = VK_IMAGE_ASPECT_COLOR_BIT,
+		.mip_levels = mips,
+		.array_layers = 6,
+		.view_type = VK_IMAGE_VIEW_TYPE_CUBE // <-- Explicitly flag as CUBE
+	};
+	return {device, ZHLN_CreateImageView(device, &desc)};
+}
+
+template <VkFormat F>
 [[nodiscard]] static auto CreateView(VkDevice device, VkImage image,
 									 VkImageAspectFlags aspect = GetFormatAspect(F),
 									 uint32_t mips = 1) -> ImageView {
