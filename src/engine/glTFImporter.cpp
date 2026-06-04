@@ -502,17 +502,29 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 
 			uint32_t morphOffset = 0;
 			uint32_t activeMorphCount = 0;
+			float defaultWeights[4] = {0.0f, 0.0f, 0.0f, 0.0f}; // Default initializer
 
 			if (prim.targets_count > 0) {
+				ZHLN::Log("[Diagnostics] Mesh Part '{}' has {} total morph targets. Engine is "
+						  "keeping {}.",
+						  (node->name != nullptr) ? node->name : "Unnamed Node", prim.targets_count,
+						  std::min((uint32_t)prim.targets_count, 4u));
 				activeMorphCount = std::min((uint32_t)prim.targets_count, 4u);
-				
+
+				// Extract default weights from glTF if they are authored
+				if (mesh->weights != nullptr) {
+					for (uint32_t w = 0; w < activeMorphCount; ++w) {
+						defaultWeights[w] = mesh->weights[w];
+					}
+				}
+
 				// Match the unrolled vertex count
 				auto unrolledVertexCount = static_cast<uint32_t>(unrolledVertices.size());
-				
+
 				std::vector<float> tempDeltas;
-				tempDeltas.resize(static_cast<size_t>(unrolledVertexCount) * activeMorphCount *
-				4, 				  0.0f);
-				
+				tempDeltas.resize(static_cast<size_t>(unrolledVertexCount) * activeMorphCount * 4,
+								  0.0f);
+
 				uint32_t deltaPtr = 0;
 				for (uint32_t t = 0; t < activeMorphCount; ++t) {
 					cgltf_accessor* targetPosAcc = nullptr;
@@ -522,17 +534,17 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 							break;
 						}
 					}
-				
+
 					if (targetPosAcc != nullptr) {
 						// Match the unrolling logic of the vertices exactly
 						if (prim.indices != nullptr) {
 							size_t indexCount = prim.indices->count;
 							for (size_t idx = 0; idx < indexCount; ++idx) {
 								size_t originalIdx = cgltf_accessor_read_index(prim.indices, idx);
-				
+
 								float delta[3] = {0.0f, 0.0f, 0.0f};
 								cgltf_accessor_read_float(targetPosAcc, originalIdx, delta, 3);
-				
+
 								tempDeltas[deltaPtr++] = delta[0];
 								tempDeltas[deltaPtr++] = delta[1];
 								tempDeltas[deltaPtr++] = delta[2];
@@ -542,7 +554,7 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 							for (size_t vIdx = 0; vIdx < vertexCount; ++vIdx) {
 								float delta[3] = {0.0f, 0.0f, 0.0f};
 								cgltf_accessor_read_float(targetPosAcc, vIdx, delta, 3);
-				
+
 								tempDeltas[deltaPtr++] = delta[0];
 								tempDeltas[deltaPtr++] = delta[1];
 								tempDeltas[deltaPtr++] = delta[2];
@@ -551,25 +563,29 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 						}
 					}
 				}
-				
+
 				// Expose unrolledVertexCount to the shader
 				morphOffset = ctx.AllocateMorphDeltas(unrolledVertexCount * activeMorphCount,
 													  tempDeltas.data());
 			}
 
-			// Map the extracted details onto the spawned entity:
 			Entity part = reg.Create();
+			ZHLN::Log("[Diagnostics] Spawned submesh: '{}' -> Assigned Entity ID: {}",
+					  (node->name != nullptr) ? node->name : "Unnamed Node", part.index);
 			reg.Add(part, MeshComponent{.mesh = subMesh,
 										.material = subMaterial,
 										.cullRadius = 100.0f,
 										.localTransform = nodeTransform,
 										.prevTransform = nodeTransform,
 										.jointOffset = 0,
-										.isSkinned = false,
+										.isSkinned = (node->skin != nullptr),
 
 										// Assign morph target trackers:
 										.morphOffset = morphOffset,
 										.activeMorphCount = activeMorphCount,
+										// Pass default weights [1]
+										.morphWeights = {defaultWeights[0], defaultWeights[1],
+														 defaultWeights[2], defaultWeights[3]},
 
 										.gltfNode = (void*)node,
 										.gltfSkin = (void*)node->skin});

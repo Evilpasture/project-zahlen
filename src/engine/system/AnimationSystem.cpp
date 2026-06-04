@@ -2,6 +2,7 @@
 #include "Zahlen/Components.hpp"
 
 #include <Zahlen/AssetFactory.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <cgltf.h>
 #include <cmath>
@@ -15,6 +16,46 @@ namespace ZHLN::AssetFactory {
 extern std::unordered_map<std::string, cgltf_data*> s_GLBCache;
 
 void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
+	static bool s_LoggedAnimationManifest = false;
+	if (!s_LoggedAnimationManifest && !s_GLBCache.empty()) {
+		ZHLN::Log("=================== GLTF ANIMATION MANIFEST ===================");
+		for (const auto& [path, data] : s_GLBCache) {
+			ZHLN::Log("File: {} | Total Clips Found: {}", path, data->animations_count);
+
+			for (size_t a = 0; a < data->animations_count; ++a) {
+				const auto& anim = data->animations[a];
+				ZHLN::Log("  Track [{}]: '{}' (Channels: {})", a,
+						  (anim.name != nullptr) ? anim.name : "Unnamed Track",
+						  anim.channels_count);
+
+				// If this is the active track (index 0), inventory what it controls
+				if (a == 0) {
+					for (size_t c = 0; c < anim.channels_count; ++c) {
+						const auto& channel = anim.channels[c];
+						const char* pathType = "Unknown";
+						if (channel.target_path == cgltf_animation_path_type_translation) {
+							pathType = "Translation";
+						} else if (channel.target_path == cgltf_animation_path_type_rotation) {
+							pathType = "Rotation";
+						} else if (channel.target_path == cgltf_animation_path_type_scale) {
+							pathType = "Scale";
+						} else if (channel.target_path == cgltf_animation_path_type_weights) {
+							pathType = "Morph Weights";
+						}
+
+						ZHLN::Log("    Channel [{}]: Target Node '{}' -> Animating: {}", c,
+								  ((channel.target_node != nullptr) &&
+								   (channel.target_node->name != nullptr))
+									  ? channel.target_node->name
+									  : "Unnamed Node",
+								  pathType);
+					}
+				}
+			}
+		}
+		ZHLN::Log("===============================================================");
+		s_LoggedAnimationManifest = true;
+	}
 	std::unordered_map<cgltf_node*, JPH::Mat44> worldTransforms;
 
 	std::function<void(cgltf_node*, const JPH::Mat44&)> solveWorldMatrix =
@@ -74,8 +115,47 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 				cgltf_animation_sampler* sampler = channel.sampler;
 
 				size_t numKeys = sampler->input->count;
-				if (numKeys == 0)
+				if (numKeys == 0) {
 					continue;
+				}
+
+				if (numKeys == 1) {
+					bool isCubic =
+						(sampler->interpolation == cgltf_interpolation_type_cubic_spline);
+					size_t idx = isCubic ? 1 : 0;
+
+					if (channel.target_path == cgltf_animation_path_type_translation) {
+						float v[3];
+						cgltf_accessor_read_float(sampler->output, idx, v, 3);
+						targetNode->has_translation = true;
+						std::memcpy(targetNode->translation, v, sizeof(v));
+						targetNode->has_matrix = false;
+					} else if (channel.target_path == cgltf_animation_path_type_rotation) {
+						float q[4];
+						cgltf_accessor_read_float(sampler->output, idx, q, 4);
+						targetNode->has_rotation = true;
+						std::memcpy(targetNode->rotation, q, sizeof(q));
+						targetNode->has_matrix = false;
+					} else if (channel.target_path == cgltf_animation_path_type_scale) {
+						float s[3];
+						cgltf_accessor_read_float(sampler->output, idx, s, 3);
+						targetNode->has_scale = true;
+						std::memcpy(targetNode->scale, s, sizeof(s));
+						targetNode->has_matrix = false;
+					} else if (channel.target_path == cgltf_animation_path_type_weights) {
+						size_t numTargets = targetNode->mesh ? targetNode->mesh->weights_count : 0;
+						if (numTargets > 0) {
+							targetNode->weights_count = numTargets;
+							if (targetNode->weights == nullptr) {
+								targetNode->weights =
+									(float*)std::malloc(numTargets * sizeof(float));
+							}
+							cgltf_accessor_read_float(sampler->output, idx, targetNode->weights,
+													  numTargets);
+						}
+					}
+					continue; // Skip the interpolation math entirely for static bones
+				}
 
 				float maxTime = 0.0f;
 				cgltf_accessor_read_float(sampler->input, numKeys - 1, &maxTime, 1);
@@ -89,8 +169,9 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 				for (; k < numKeys - 1; ++k) {
 					float t1 = 0.0f;
 					cgltf_accessor_read_float(sampler->input, k + 1, &t1, 1);
-					if (t1 > localAnimTime)
+					if (t1 > localAnimTime) {
 						break;
+					}
 				}
 
 				if (k >= numKeys - 1) {
@@ -108,38 +189,62 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 				}
 
 				if (channel.target_path == cgltf_animation_path_type_translation) {
-					float v0[3], v1[3];
-					cgltf_accessor_read_float(sampler->output, k, v0, 3);
-					cgltf_accessor_read_float(sampler->output, k + 1, v1, 3);
-					targetNode->has_translation = true;
+					float v0[3];
+					float v1[3];
+
+					// Detect cubic spline layout
+					bool isCubic =
+						(sampler->interpolation == cgltf_interpolation_type_cubic_spline);
+					size_t idx0 = isCubic ? (3 * k + 1) : k;
+					size_t idx1 = isCubic ? (3 * (k + 1) + 1) : (k + 1);
+
+					cgltf_accessor_read_float(sampler->output, idx0, v0, 3);
+					cgltf_accessor_read_float(sampler->output, idx1, v1, 3);
+
+					targetNode->has_translation = 1;
 					targetNode->translation[0] = v0[0] + factor * (v1[0] - v0[0]);
 					targetNode->translation[1] = v0[1] + factor * (v1[1] - v0[1]);
 					targetNode->translation[2] = v0[2] + factor * (v1[2] - v0[2]);
-					targetNode->has_matrix = false;
+					targetNode->has_matrix = 0;
 				} else if (channel.target_path == cgltf_animation_path_type_rotation) {
-					float q0[4], q1[4];
-					cgltf_accessor_read_float(sampler->output, k, q0, 4);
-					cgltf_accessor_read_float(sampler->output, k + 1, q1, 4);
+					float q0[4];
+					float q1[4];
+
+					bool isCubic =
+						(sampler->interpolation == cgltf_interpolation_type_cubic_spline);
+					size_t idx0 = isCubic ? (3 * k + 1) : k;
+					size_t idx1 = isCubic ? (3 * (k + 1) + 1) : (k + 1);
+
+					cgltf_accessor_read_float(sampler->output, idx0, q0, 4);
+					cgltf_accessor_read_float(sampler->output, idx1, q1, 4);
 
 					JPH::Quat rot0(q0[0], q0[1], q0[2], q0[3]);
 					JPH::Quat rot1(q1[0], q1[1], q1[2], q1[3]);
 					JPH::Quat result = rot0.SLERP(rot1, factor);
 
-					targetNode->has_rotation = true;
+					targetNode->has_rotation = 1;
 					targetNode->rotation[0] = result.GetX();
 					targetNode->rotation[1] = result.GetY();
 					targetNode->rotation[2] = result.GetZ();
 					targetNode->rotation[3] = result.GetW();
-					targetNode->has_matrix = false;
+					targetNode->has_matrix = 0;
 				} else if (channel.target_path == cgltf_animation_path_type_scale) {
-					float s0[3], s1[3];
-					cgltf_accessor_read_float(sampler->output, k, s0, 3);
-					cgltf_accessor_read_float(sampler->output, k + 1, s1, 3);
-					targetNode->has_scale = true;
+					float s0[3];
+					float s1[3];
+
+					bool isCubic =
+						(sampler->interpolation == cgltf_interpolation_type_cubic_spline);
+					size_t idx0 = isCubic ? (3 * k + 1) : k;
+					size_t idx1 = isCubic ? (3 * (k + 1) + 1) : (k + 1);
+
+					cgltf_accessor_read_float(sampler->output, idx0, s0, 3);
+					cgltf_accessor_read_float(sampler->output, idx1, s1, 3);
+
+					targetNode->has_scale = 1;
 					targetNode->scale[0] = s0[0] + factor * (s1[0] - s0[0]);
 					targetNode->scale[1] = s0[1] + factor * (s1[1] - s0[1]);
 					targetNode->scale[2] = s0[2] + factor * (s1[2] - s0[2]);
-					targetNode->has_matrix = false;
+					targetNode->has_matrix = 0;
 				} else if (channel.target_path == cgltf_animation_path_type_weights) {
 					cgltf_node* targetNode = channel.target_node;
 					cgltf_animation_sampler* sampler = channel.sampler;
@@ -184,8 +289,17 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 						std::vector<float> w0(numTargets);
 						std::vector<float> w1(numTargets);
 
-						cgltf_accessor_read_float(sampler->output, k, w0.data(), numTargets);
-						cgltf_accessor_read_float(sampler->output, k + 1, w1.data(), numTargets);
+						bool isCubic =
+							(sampler->interpolation == cgltf_interpolation_type_cubic_spline);
+						size_t idx0 = isCubic ? (3 * k + 1) : k;
+						size_t idx1 = isCubic ? (3 * (k + 1) + 1) : (k + 1);
+
+						for (size_t w = 0; w < numTargets; ++w) {
+							cgltf_accessor_read_float(sampler->output, (idx0 * numTargets) + w,
+													  &w0[w], 1);
+							cgltf_accessor_read_float(sampler->output, (idx1 * numTargets) + w,
+													  &w1[w], 1);
+						}
 
 						// Interpolate and store weights inside the cgltf_node so the component can
 						// read them
@@ -216,7 +330,7 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 			skinToBufferOffset[skin] = currentJointCount;
 
 			std::vector<JPH::Mat44> ibms(skin->joints_count, JPH::Mat44::sIdentity());
-			if (skin->inverse_bind_matrices) {
+			if (skin->inverse_bind_matrices != nullptr) {
 				for (cgltf_size j = 0; j < skin->joints_count; ++j) {
 					float ibmRaw[16];
 					cgltf_accessor_read_float(skin->inverse_bind_matrices, j, ibmRaw, 16);
@@ -227,7 +341,19 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 				}
 			}
 
+			// Find the glTF node referencing this skin to get its inverse world transform
+			cgltf_node* skinnedNode = nullptr;
+			for (cgltf_size n = 0; n < data->nodes_count; ++n) {
+				if (data->nodes[n].skin == skin) {
+					skinnedNode = &data->nodes[n];
+					break;
+				}
+			}
+
 			JPH::Mat44 invMeshWorld = JPH::Mat44::sIdentity();
+			if (skinnedNode != nullptr) {
+				invMeshWorld = worldTransforms[skinnedNode].Inversed();
+			}
 
 			for (cgltf_size j = 0; j < skin->joints_count; ++j) {
 				cgltf_node* jointNode = skin->joints[j];
@@ -265,7 +391,7 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 			if (mesh.gltfSkin != nullptr && mesh.isSkinned) {
 				auto* skin = static_cast<cgltf_skin*>(mesh.gltfSkin);
 				mesh.jointOffset = skinToBufferOffset[skin];
-				mesh.localTransform = JPH::Mat44::sIdentity();
+				mesh.localTransform = worldTransforms[node]; // Preserve the solved transform
 			} else {
 				mesh.isSkinned = false;
 				mesh.localTransform = worldTransforms[node];

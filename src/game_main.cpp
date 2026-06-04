@@ -81,8 +81,7 @@ struct Scene {
 
 		// 2. Spawns Pomni and automatically loads internal textures natively
 		std::vector<Entity> pomniParts = AssetFactory::SpawnGLB(rc, reg, "tadc_models/POMNI.glb");
-		// std::vector<Entity> cesiumParts =
-		// 	AssetFactory::SpawnGLB(rc, reg, "CesiumMan.glb");
+		// std::vector<Entity> cesiumParts = AssetFactory::SpawnGLB(rc, reg, "CesiumMan.glb");
 	}
 };
 
@@ -259,21 +258,10 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 					continue;
 				}
 
-				// Offset character matrices in the world for an organized lineup
-				JPH::Mat44 currentTransform = mesh->localTransform;
-				if (e.index == 2) {
-					currentTransform =
-						Math::CreateTransform(JPH::Vec3(0.0f, 0.0f, 0.0f), JPH::Quat::sIdentity()) *
-						mesh->localTransform;
-				} else if (e.index == 3) {
-					currentTransform = Math::CreateTransform(JPH::Vec3(2.5f, 0.5f, -1.0f),
-															 JPH::Quat::sIdentity()) *
-									   mesh->localTransform;
-				} else if (e.index == 4) {
-					currentTransform = Math::CreateTransform(JPH::Vec3(-2.5f, 0.0f, 1.0f),
-															 JPH::Quat::sIdentity()) *
-									   mesh->localTransform;
-				}
+				// Apply the same identity transform to all Pomni submeshes
+				JPH::Mat44 currentTransform =
+					Math::CreateTransform(JPH::Vec3(0.0f, 0.0f, 0.0f), JPH::Quat::sIdentity()) *
+					mesh->localTransform;
 
 				Renderer::Draw(rc, mesh->material, mesh->mesh, currentTransform,
 							   mesh->prevTransform, mesh->cullRadius, mesh->jointOffset,

@@ -198,7 +198,11 @@ PSOutput PSMain(VSOutput input) {
 
 	if (any(input.tangent.xyz)) {
 		float3 T = normalize(input.tangent.xyz);
-		float3 B = normalize(cross(N, T) * input.tangent.w);
+
+		// Decode the sign: maps [0.0, 1.0] back to [-1.0, 1.0]
+		float tangentSign = input.tangent.w * 2.0f - 1.0f;
+		float3 B = normalize(cross(N, T) * tangentSign);
+
 		worldNormal = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * N);
 	}
 
