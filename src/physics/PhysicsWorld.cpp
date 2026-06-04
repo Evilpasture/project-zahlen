@@ -34,9 +34,10 @@ template <typename T> static void ReallocateStandard(T*& ptr, size_t old_count, 
 	if (ptr && old_count > 0) {
 		std::memcpy(new_ptr, ptr, old_count * sizeof(T));
 		delete[] ptr;
-	} else if (ptr) {
+	} else {
 		delete[] ptr;
 	}
+
 	ptr = new_ptr;
 }
 
@@ -44,6 +45,10 @@ template <typename T> static void ReallocateStandard(T*& ptr, size_t old_count, 
 
 void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem,
 						JPH::JobSystem* inJobSystem, JPH::TempAllocator* inTempAlloc) {
+	// Sanity check provides a concrete upper bound, silencing GCC's VRP warning
+	if (inMaxBodies == 0 || inMaxBodies > 10000000) {
+		ZHLN::Panic("PhysicsWorld::Init: inMaxBodies ({}) is out of bounds!", inMaxBodies);
+	}
 	std::memset(this, 0, sizeof(PhysicsWorld));
 
 	system = inSystem;
@@ -145,7 +150,7 @@ void PhysicsWorld::Shutdown() {
 	delete[] commandQueue;
 	delete[] commandQueueSpare;
 
-	if (contactBuffer) {
+	if (contactBuffer != nullptr) {
 		::operator delete[](contactBuffer, std::align_val_t{sizeof(ContactEvent)});
 	}
 
@@ -158,8 +163,9 @@ void PhysicsWorld::Shutdown() {
 }
 
 void PhysicsWorld::ResizeBuffers(size_t newCapacity) {
-	if (newCapacity <= capacity)
+	if (newCapacity <= capacity) {
 		return;
+	}
 
 	const size_t oldCap = capacity;
 	capacity = newCapacity;
@@ -193,8 +199,9 @@ void PhysicsWorld::ResizeBuffers(size_t newCapacity) {
 }
 
 void PhysicsWorld::ResizeConstraintBuffers(size_t newCapacity) {
-	if (newCapacity <= constraintCapacity)
+	if (newCapacity <= constraintCapacity) {
 		return;
+	}
 
 	const size_t oldCap = constraintCapacity;
 	constraintCapacity = newCapacity;
@@ -340,7 +347,7 @@ bool PhysicsWorld::LoadState(const uint8_t* data, size_t size) {
 	if (size < sizeof(WorldStateHeader)) {
 		return false;
 	}
-	const WorldStateHeader* header = reinterpret_cast<const WorldStateHeader*>(data);
+	const auto* header = reinterpret_cast<const WorldStateHeader*>(data);
 	if (header->magic != WorldStateHeader::ZHLN) {
 		return false;
 	}

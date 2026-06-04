@@ -1,9 +1,9 @@
 #pragma once
 
-#include <cstdarg>
-#include <cstring>
-#include <cstdio>
 #include <cmath>
+#include <cstdarg>
+#include <cstdio>
+#include <cstring>
 #include <format>
 #include <print>
 #include <source_location>
@@ -37,6 +37,26 @@ void CheckForCrashes(Engine* engine);
  * This prevents Log.hpp from needing to include the heavy Thread.hpp.
  */
 auto GetCurrentFiberID() -> uint64_t;
+
+enum class LogChannel : uint8_t { StdErr, StdOut, File };
+
+/**
+ * @brief Thread-safe getter/setter for a custom file stream.
+ * Defaults to "zahlen_runtime.log" if the channel is set to 'File'.
+ */
+inline auto GetCustomLogFile(FILE* overrideFile = nullptr) -> FILE* {
+	static FILE* logFile = nullptr;
+	if (overrideFile) {
+		if (logFile && logFile != stdout && logFile != stderr) {
+			std::fclose(logFile);
+		}
+		logFile = overrideFile;
+	}
+	if (!logFile) {
+		logFile = std::fopen("zahlen_runtime.log", "w");
+	}
+	return logFile;
+}
 
 inline auto GetPoorMansStacktrace() -> std::string {
 	std::string out = "";
@@ -103,17 +123,16 @@ struct LogContext {
 };
 
 /**
- * @brief Modern C++23 Engine Logger with Fiber awareness
+ * @brief Modern C++23 Engine Logger with Fiber awareness and compile-time channel dispatch.
  */
-template <typename... Args> void Log(LogContext ctx, Args&&... args) {
+template <LogChannel Channel = LogChannel::StdErr, typename... Args>
+void Log(LogContext ctx, Args&&... args) {
 	std::string_view file = ctx.loc.file_name();
 	if (auto pos = file.find_last_of("/\\"); pos != std::string_view::npos)
 		file.remove_prefix(pos + 1);
 
 	uint64_t fid = GetCurrentFiberID();
 
-	// If fid is 0, it means we are on a raw OS thread or the fiber system isn't init yet.
-	// If fid is 1, it's usually the Main thread/fiber.
 	std::string fiberTag;
 	if (fid == 0)
 		fiberTag = "Thread";
@@ -122,7 +141,17 @@ template <typename... Args> void Log(LogContext ctx, Args&&... args) {
 	else
 		fiberTag = std::format("{:#x}", fid);
 
-	std::println(stderr, "[{}:{}] [Fiber:{}] {}", file, ctx.loc.line(), fiberTag,
+	// Compile-time stream selection
+	FILE* outStream = nullptr;
+	if constexpr (Channel == LogChannel::StdOut) {
+		outStream = stdout;
+	} else if constexpr (Channel == LogChannel::File) {
+		outStream = GetCustomLogFile();
+	} else {
+		outStream = stderr;
+	}
+
+	std::println(outStream, "[{}:{}] [Fiber:{}] {}", file, ctx.loc.line(), fiberTag,
 				 std::vformat(ctx.fmt, std::make_format_args(args...)));
 }
 

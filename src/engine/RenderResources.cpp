@@ -115,14 +115,16 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 						.DepthFormat(VK_FORMAT_D32_SFLOAT);
 
 	// Toggle hardware culling based on material state
-	if (desc.doubleSided)
+	if (desc.doubleSided) {
 		pipeline.CullNone();
-	else
+	} else {
 		pipeline.CullBack();
+	}
 
 	// Toggle hardware alpha blending
-	if (desc.alphaBlend)
+	if (desc.alphaBlend) {
 		pipeline.AlphaBlend();
+	}
 
 	auto finalPipeline = pipeline.Build(impl->ctx.Device());
 
@@ -258,7 +260,9 @@ uint32_t RenderContext::CreateTextureCube(const std::vector<const void*>& faceDa
 	auto gpuImage = Vk::Image::Create(impl->allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 
 	Vk::CommandPool tempPool(device, impl->ctx.PhysicalInfo().graphics_family);
-	tempPool.Allocate(1);
+	if (!tempPool.Allocate(1)) {
+		ZHLN::Panic("Vulkan: Failed to allocate command buffer for Cubemap copy");
+	}
 	VkCommandBuffer cmd = tempPool[0];
 
 	ZHLN_BeginCommandBuffer(cmd);

@@ -64,3 +64,7 @@ void operator delete(void* p, std::size_t size) noexcept {
 	ZHLN::MemoryStats::TotalFreed.fetch_add(size, std::memory_order_relaxed);
 	std::free(p);
 }
+
+void operator delete(void* p) noexcept {
+	std::free(p);
+}

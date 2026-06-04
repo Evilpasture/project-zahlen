@@ -27,11 +27,7 @@ struct WorldStateHeader {
 	double worldTime;
 };
 
-#if defined(__cpp_lib_hardware_interference_size)
-inline constexpr std::size_t CACHE_LINE = std::hardware_destructive_interference_size;
-#else
 inline constexpr std::size_t CACHE_LINE = 64;
-#endif
 
 struct ConstraintHandle {
 	uint32_t index;
@@ -108,7 +104,7 @@ enum SlotState : uint8_t {
 	SLOT_PENDING_DESTROY = 3,
 };
 
-enum class ContactType : uint32_t { Added = 0, Persisted = 1, Removed = 2 };
+enum class ContactType : uint8_t { Added = 0, Persisted = 1, Removed = 2 };
 
 struct alignas(128) ContactEvent {
 	// --- Block 1: Identity & Spatial (Offset 0-63) ---
@@ -267,7 +263,7 @@ struct PhysicsWorld {
 	 * @param system The active Jolt PhysicsSystem.
 	 * @param activeCharacters The array of active CharacterVirtuals.
 	 */
-	void Synchronize(const JPH::PhysicsSystem* const system,
+	void Synchronize(const JPH::PhysicsSystem* system,
 					 const JPH::Array<JPH::CharacterVirtual*>& activeCharacters) noexcept;
 
 	JPH::Array<std::byte> SaveState() const;
@@ -294,7 +290,7 @@ struct SlotPredicate {
 	const uint32_t stateBit = 1U << (state & 0x7);
 	bool active = (stateBit & MASK_ACTIVE) != 0;
 	bool destructible = (stateBit & MASK_DESTRUCTIBLE) != 0;
-	return {active, destructible};
+	return {.isActive = active, .isDestructible = destructible};
 }
 
 // --- Constraints ---
