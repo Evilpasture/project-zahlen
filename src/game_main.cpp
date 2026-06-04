@@ -77,7 +77,7 @@ struct Scene {
 		ZHLN::Log("Assembling TADC Scene with Pure Runtime glTF Parsing...");
 
 		// 1. Spawns the entire Room and automatically loads all internal textures natively
-		// std::vector<Entity> roomParts = AssetFactory::SpawnGLB(rc, reg, "Pomnis Room V2.glb");
+		std::vector<Entity> roomParts = AssetFactory::SpawnGLB(rc, reg, "Pomnis Room V2.glb");
 
 		// 2. Spawns Pomni and automatically loads internal textures natively
 		std::vector<Entity> pomniParts = AssetFactory::SpawnGLB(rc, reg, "tadc_models/POMNI.glb");
