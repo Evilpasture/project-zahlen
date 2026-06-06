@@ -77,11 +77,12 @@ struct Scene {
 		ZHLN::Log("Assembling TADC Scene with Pure Runtime glTF Parsing...");
 
 		// 1. Spawns the entire Room and automatically loads all internal textures natively
-		std::vector<Entity> roomParts = AssetFactory::SpawnGLB(rc, reg, "Pomnis Room V2.glb");
+		std::vector<Entity> roomParts = AssetFactory::SpawnGLB(rc, reg, "Circus Lobby V9.glb");
 
 		// 2. Spawns Pomni and automatically loads internal textures natively
-		std::vector<Entity> pomniParts = AssetFactory::SpawnGLB(rc, reg, "tadc_models/POMNI.glb");
-		// std::vector<Entity> cesiumParts = AssetFactory::SpawnGLB(rc, reg, "CesiumMan.glb");
+		// std::vector<Entity> pomniParts = AssetFactory::SpawnGLB(rc, reg,
+		// "tadc_models/POMNI.glb"); std::vector<Entity> cesiumParts = AssetFactory::SpawnGLB(rc,
+		// reg, "CesiumMan.glb");
 	}
 };
 
@@ -101,29 +102,20 @@ void UpdateCulling(Engine& engine) {
 		return;
 	}
 
-	bool moved = (cam.position - s_LastCullPos).LengthSq() > 0.01f ||
-				 std::abs(cam.yaw - s_LastCullYaw) > 0.5f;
-	if (!moved && !s_VisibleEntities.empty()) {
-		return;
-	}
+	// bool moved = (cam.position - s_LastCullPos).LengthSq() > 0.01f ||
+	// 			 std::abs(cam.yaw - s_LastCullYaw) > 0.5f;
+	// if (!moved && !s_VisibleEntities.empty()) {
+	// 	return;
+	// }
 
 	s_VisibleEntities.clear();
 	auto meshes = reg.GetRawArray<MeshComponent>();
 
 	for (size_t i = 0; i < entities.size(); ++i) {
 		Entity e = entities[i];
+		// Lobby is positioned at the origin, so local translation is its world position
 		JPH::Vec3 pos = meshes[i].localTransform.GetTranslation();
 
-		// Position offsets for inspection layout
-		if (e.index == 2) {
-			pos += JPH::Vec3(0.0f, 0.0f, 0.0f); // Pomni at center
-		} else if (e.index == 3) {
-			pos += JPH::Vec3(2.5f, 0.5f, -1.0f); // Caine hovering right
-		} else if (e.index == 4) {
-			pos += JPH::Vec3(-2.5f, 0.0f, 1.0f); // Kinger left
-		}
-
-		// The room (index 1) remains at origin
 		if (cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius)) {
 			s_VisibleEntities.push_back(e);
 		}
@@ -146,7 +138,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 				   .width = 1280,
 				   .height = 720,
 				   .vsync = false,
-				   .enableValidation = true},
+				   .enableValidation = false},
 	};
 
 	Engine engine(config);
@@ -225,7 +217,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 				vp = unjitteredVp;
 			}
 
-			cam.frustum.Update(vp);
+			cam.frustum.Update(unjitteredVp);
 			UpdateCulling(engine);
 
 			JPH::Vec3 sunDirection = {-0.6f, 0.4f, -0.7f}; // Shines from front-right-above
@@ -239,10 +231,18 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 				JPH::Vec4(0.0f, 0.0f, 1.0f, 0.0f), JPH::Vec4(0.5f, 0.5f, 0.0f, 1.0f)};
 			JPH::Mat44 lightSpaceBiased = biasMatrix * shadowProjView;
 
+			// 1. Declare a static tracking variable inside the loop
+			static JPH::Mat44 s_PrevUnjitteredVp = unjitteredVp;
+			static bool s_FirstFrame = true;
+			if (s_FirstFrame) {
+				s_PrevUnjitteredVp = unjitteredVp;
+				s_FirstFrame = false;
+			}
+
 			FrameUniforms uniforms{};
 			uniforms.viewProj = vp;
-			uniforms.prevViewProj = unjitteredVp;
-			uniforms.lightSpaceMatrix = lightSpaceBiased;
+			uniforms.unjitteredViewProj = unjitteredVp;
+			uniforms.prevUnjitteredViewProj = s_PrevUnjitteredVp; // Actual previous unjittered VP
 			std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
 			std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);
 			uniforms.lightCount = 0;
@@ -267,7 +267,6 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 							   mesh->prevTransform, mesh->cullRadius, mesh->jointOffset,
 							   mesh->isSkinned, mesh->morphOffset, mesh->activeMorphCount,
 							   mesh->morphWeights);
-				mesh->prevTransform = currentTransform;
 			}
 
 			CullingStats::TotalObjects = (uint32_t)reg.GetEntitiesWith<MeshComponent>().size();
@@ -277,6 +276,18 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			Renderer::DrawUI(rc, helloText, fontAtlasIdx);
 
 			engine.EndFrame();
+
+			// Cache the unjittered projection for next frame's TAA
+			s_PrevUnjitteredVp = unjitteredVp;
+
+			// Global update for prevTransforms to prevent TAA motion vector spasms
+			auto allEntities = reg.GetEntitiesWith<MeshComponent>();
+			for (Entity e : allEntities) {
+				auto* mesh = reg.Get<MeshComponent>(e);
+				if (mesh != nullptr) {
+					mesh->prevTransform = mesh->localTransform;
+				}
+			}
 		} else {
 			Platform::Sleep(10);
 		}

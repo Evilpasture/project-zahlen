@@ -66,7 +66,8 @@ void RenderContext::BeginFrame() {
 		_impl->resized = true;
 		_impl->current_cmd = VK_NULL_HANDLE;
 		return;
-	} else if (acq_res == ZHLN_FrameResult_Error) {
+	}
+	if (acq_res == ZHLN_FrameResult_Error) {
 		_impl->current_cmd = VK_NULL_HANDLE;
 		return;
 	}
@@ -137,6 +138,7 @@ void RenderContext::Impl::RenderShadowPass(VkCommandBuffer cmd) {
 				auto* mesh = std::bit_cast<NativeMesh*>(draw.mesh);
 				JPH::Mat44 lightMVP = shadowProjView * draw.transform;
 
+				// Correct Designated Initializer Order (C++23)
 				FrameConstants shadowConstants = {
 					.transform = lightMVP,
 					.prevTransform = JPH::Mat44::sIdentity(),
@@ -151,22 +153,27 @@ void RenderContext::Impl::RenderShadowPass(VkCommandBuffer cmd) {
 					.alphaMode = draw.alphaMode,
 					.jointOffset = draw.jointOffset,
 					.isSkinned = draw.isSkinned,
-					.vertexCount = draw.mesh->vertexCount,	   // <--- ADDED
-					.morphOffset = draw.morphOffset,		   // <--- ADDED
-					.activeMorphCount = draw.activeMorphCount, // <--- ADDED
+					.vertexCount = draw.mesh->vertexCount,
+					.morphOffset = draw.morphOffset,
+					.activeMorphCount = draw.activeMorphCount,
+					.indexCount = draw.indexCount,
+					._pad = 0,
 					.morphWeights = {draw.morphWeights[0], draw.morphWeights[1],
-									 draw.morphWeights[2], draw.morphWeights[3]}, // <--- ADDED
+									 draw.morphWeights[2], draw.morphWeights[3]},
 					.baseColorFactor = {draw.baseColorFactor[0], draw.baseColorFactor[1],
 										draw.baseColorFactor[2], draw.baseColorFactor[3]}};
 
-				Vk::DrawInstanced(cmd,
-								  {.pipeline = shadowPipeline.Get(),
-								   .layout = shadowPipelineLayout.Get(),
-								   .set = bindlessSet,
-								   .vbo = mesh->buffer.Handle(),
-								   .vertexCount = mesh->vertexCount},
-								  shadowConstants,
-								  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+				Vk::DrawInstanced(
+					cmd,
+					{.pipeline = shadowPipeline.Get(),
+					 .layout = shadowPipelineLayout.Get(),
+					 .set = bindlessSets[frame_index],
+					 .vbo = mesh->buffer.Handle(),
+					 .ibo = draw.indexMesh ? draw.indexMesh->buffer.Handle() : VK_NULL_HANDLE,
+					 .vertexCount = mesh->vertexCount,
+					 .indexCount = draw.indexCount,
+					 .instanceCount = 1},
+					shadowConstants, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
 			}
 		});
 
@@ -224,7 +231,7 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 	uint32_t numChunks = (drawCount + 255) / 256;
 	JPH::Array<VkCommandBuffer> secondaries(numChunks);
 
-	std::array<VkFormat, 2> formats = {VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16G16_SFLOAT};
+	std::array<VkFormat, 2> formats = {VK_FORMAT_R16G16B16_SFLOAT, VK_FORMAT_R16G16_SFLOAT};
 	const VkCommandBufferInheritanceRenderingInfo inherit = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
 		.pNext = nullptr,
@@ -293,13 +300,17 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 							continue;
 						}
 
+						// Use anonymous struct designated initializer (Direct & No Boilerplate)
 						Vk::DrawInstanced(
 							sec_cmd,
 							{.pipeline = drawCmd.material->pipeline.Get(),
 							 .layout = drawCmd.material->layout.Get(),
-							 .set = bindlessSet,
+							 .set = bindlessSets[frame_index],
 							 .vbo = drawCmd.mesh->buffer.Handle(),
-							 .vertexCount = drawCmd.mesh->vertexCount},
+							 .ibo = drawCmd.indexMesh ? drawCmd.indexMesh->buffer.Handle()
+													  : VK_NULL_HANDLE,
+							 .vertexCount = drawCmd.mesh->vertexCount,
+							 .indexCount = drawCmd.indexCount},
 							FrameConstants{
 								.transform = drawCmd.transform,
 								.prevTransform = drawCmd.prevTransform,
@@ -314,12 +325,13 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 								.alphaMode = drawCmd.alphaMode,
 								.jointOffset = drawCmd.jointOffset,
 								.isSkinned = drawCmd.isSkinned,
-								.vertexCount = drawCmd.mesh->vertexCount,	  // <--- ADDED
-								.morphOffset = drawCmd.morphOffset,			  // <--- ADDED
-								.activeMorphCount = drawCmd.activeMorphCount, // <--- ADDED
+								.vertexCount = drawCmd.mesh->vertexCount,
+								.morphOffset = drawCmd.morphOffset,
+								.activeMorphCount = drawCmd.activeMorphCount,
+								.indexCount = drawCmd.indexCount,
+								._pad = 0,
 								.morphWeights = {drawCmd.morphWeights[0], drawCmd.morphWeights[1],
-												 drawCmd.morphWeights[2],
-												 drawCmd.morphWeights[3]}, // <--- ADDED
+												 drawCmd.morphWeights[2], drawCmd.morphWeights[3]},
 								.baseColorFactor = {
 									drawCmd.baseColorFactor[0], drawCmd.baseColorFactor[1],
 									drawCmd.baseColorFactor[2], drawCmd.baseColorFactor[3]}});
@@ -341,8 +353,8 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCom
 		return true;
 	}
 
-	if (!cullingPipeline.Valid() || !instanceDataBuffer.Valid() ||
-		!indirectCommandsBuffer.Valid()) {
+	if (!cullingPipeline.Valid() || !instanceDataBuffers[frame_index].Valid() ||
+		!indirectCommandsBuffers[frame_index].Valid()) {
 		return false;
 	}
 
@@ -365,9 +377,12 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCom
 	}
 	drawQueue = std::move(sortedDrawQueue);
 
+	// Extended GroupRange to carry private PIMPL buffers securely
 	struct GroupRange {
 		NativeMaterial* material;
 		NativeMesh* mesh;
+		NativeMesh* indexMesh;
+		uint32_t indexCount;
 		uint32_t start;
 		uint32_t count;
 	};
@@ -375,14 +390,16 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCom
 	JPH::Array<GroupRange> groups;
 	groups.reserve((drawCount + 15) / 16);
 
-	// Keep mapRegion in scope so the destructor unmaps only AFTER the loop ends
-	auto mapRegion = instanceDataBuffer.Map();
+	auto mapRegion = instanceDataBuffers[frame_index].Map();
 	auto* mapped = reinterpret_cast<InstanceData*>(mapRegion.data);
 
 	NativeMaterial* currentMaterial = nullptr;
 	NativeMesh* currentMesh = nullptr;
+	NativeMesh* currentIndexMesh = nullptr;
 	for (uint32_t i = 0; i < drawCount; ++i) {
 		const auto& drawCmd = drawQueue[i];
+
+		// Correct Designated Initializer Order (C++23)
 		mapped[i] = InstanceData{
 			.world = drawCmd.transform,
 			.prevWorld = drawCmd.prevTransform,
@@ -399,30 +416,36 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCom
 			.jointOffset = drawCmd.jointOffset,
 			.isSkinned = drawCmd.isSkinned,
 			.morphOffset = drawCmd.morphOffset,
-			// Pass the morph target info to the GPU:
 			.activeMorphCount = drawCmd.activeMorphCount,
+			.indexCount = drawCmd.indexCount,
+			._pad = 0,
 			.morphWeights = {drawCmd.morphWeights[0], drawCmd.morphWeights[1],
 							 drawCmd.morphWeights[2], drawCmd.morphWeights[3]},
 			.baseColorFactor = {drawCmd.baseColorFactor[0], drawCmd.baseColorFactor[1],
 								drawCmd.baseColorFactor[2], drawCmd.baseColorFactor[3]}};
 
-		if (i == 0 || drawCmd.material != currentMaterial || drawCmd.mesh != currentMesh) {
-			groups.push_back(
-				{.material = drawCmd.material, .mesh = drawCmd.mesh, .start = i, .count = 1});
+		if (i == 0 || drawCmd.material != currentMaterial || drawCmd.mesh != currentMesh ||
+			drawCmd.indexMesh != currentIndexMesh) {
+			groups.push_back({.material = drawCmd.material,
+							  .mesh = drawCmd.mesh,
+							  .indexMesh = drawCmd.indexMesh,
+							  .indexCount = drawCmd.indexCount,
+							  .start = i,
+							  .count = 1});
 			currentMaterial = drawCmd.material;
 			currentMesh = drawCmd.mesh;
+			currentIndexMesh = drawCmd.indexMesh; // Update the tracked IBO
 		} else {
 			groups.back().count++;
 		}
 	}
-
 	struct FrustumPlanes {
 		JPH::Vec4 planes[6];
 		uint32_t drawCount;
 	};
 	FrustumPlanes planes{};
 
-	const auto& vp = current_view_proj;
+	const auto& vp = unjittered_view_proj;
 	JPH::Vec4 r0(vp(0, 0), vp(0, 1), vp(0, 2), vp(0, 3));
 	JPH::Vec4 r1(vp(1, 0), vp(1, 1), vp(1, 2), vp(1, 3));
 	JPH::Vec4 r2(vp(2, 0), vp(2, 1), vp(2, 2), vp(2, 3));
@@ -443,7 +466,7 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCom
 
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullingPipeline.Get());
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullingPipelineLayout.Get(), 0, 1,
-							&cullingSet, 0, nullptr);
+							&cullingSets[frame_index], 0, nullptr);
 	vkCmdPushConstants(cmd, cullingPipelineLayout.Get(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
 					   sizeof(FrustumPlanes), &planes);
 
@@ -485,28 +508,24 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCom
 		.ClearColor(0, 0.08f, 0.09f, 0.12f, 1.0f)
 		.ClearColor(1, 0.0f, 0.0f, 0.0f, 0.0f)
 		.Execute(cmd, [&]() {
-			const VkDeviceSize stride = sizeof(VkDrawIndirectCommand);
+			const VkDeviceSize stride = sizeof(VkDrawIndexedIndirectCommand);
 			for (const auto& group : groups) {
 				if (!group.material->pipeline.Valid()) {
 					continue;
 				}
 
-				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-								  group.material->pipeline.Get());
-				vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-										group.material->layout.Get(), 0, 1, &bindlessSet, 0,
-										nullptr);
-
-				FrameConstants constants{};
-				vkCmdPushConstants(cmd, group.material->layout.Get(),
-								   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-								   sizeof(FrameConstants), &constants);
-
-				VkDeviceSize offset = 0;
-				VkBuffer vbo = group.mesh->buffer.Handle();
-				vkCmdBindVertexBuffers(cmd, 0, 1, &vbo, &offset);
-				vkCmdDrawIndirect(cmd, indirectCommandsBuffer.Handle(), group.start * stride,
-								  group.count, stride);
+				Vk::DrawIndirect(
+					cmd,
+					{.pipeline = group.material->pipeline.Get(),
+					 .layout = group.material->layout.Get(),
+					 .set = bindlessSets[frame_index],
+					 .vbo = group.mesh->buffer.Handle(),
+					 .ibo = group.indexMesh ? group.indexMesh->buffer.Handle() : VK_NULL_HANDLE,
+					 .argumentBuffer = indirectCommandsBuffers[frame_index].Handle(),
+					 .offset = group.start * stride,
+					 .drawCount = group.count,
+					 .stride = static_cast<uint32_t>(stride)},
+					FrameConstants{});
 			}
 		});
 
@@ -577,7 +596,7 @@ void RenderContext::Impl::BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, 
 						Vk::DrawInstanced(cmd,
 										  {.pipeline = uiPipeline.Get(),
 										   .layout = uiPipelineLayout.Get(),
-										   .set = bindlessSet,
+										   .set = bindlessSets[frame_index],
 										   .vbo = draw.mesh->buffer.Handle(),
 										   .vertexCount = draw.mesh->vertexCount},
 										  pc);
@@ -596,17 +615,15 @@ void RenderContext::Impl::BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, 
 
 void RenderContext::Impl::SubmitFrame() {
 	const ZHLN_FrameSync& s = sync[frame_index];
-	ZHLN_FrameSubmitDesc submitDesc = {
-		.graphicsQueue = ctx.GraphicsQueue(),
-		.presentQueue = ctx.PresentQueue(),
-		.cmd = current_cmd,
-		.imageAvailable = s.image_available,
-		.renderFinished =
-			presentation.presentSemaphores[current_image_index], // Safely reverted back to
-																 // swapchain image index tracking
-		.inFlight = s.in_flight,
-		.swapchain = presentation.swapchain.Get().handle,
-		.imageIndex = current_image_index};
+	ZHLN_FrameSubmitDesc submitDesc = {.graphicsQueue = ctx.GraphicsQueue(),
+									   .presentQueue = ctx.PresentQueue(),
+									   .cmd = current_cmd,
+									   .imageAvailable = s.image_available,
+									   .renderFinished =
+										   presentation.presentSemaphores[current_image_index],
+									   .inFlight = s.in_flight,
+									   .swapchain = presentation.swapchain.Get().handle,
+									   .imageIndex = current_image_index};
 
 	if (Vk::SubmitAndPresent(submitDesc) != ZHLN_FrameResult_Ok) {
 		resized = true;
@@ -658,25 +675,25 @@ void RenderContext::EndFrame() {
 
 namespace Renderer {
 void Clear(RenderContext& ctx, const ZHLN::Color4& color, float depth, bool useSecondaries) {
-	// Standalone no-op: clearing is now cleanly integrated into attachment load operations
-	// inside RenderMainPass and RenderMainPassGpuCulling.
 	(void)ctx;
 	(void)color;
 	(void)depth;
 	(void)useSecondaries;
 }
 
-void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj, const JPH::Mat44& prevViewProj) {
+void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj,
+				 const JPH::Mat44& unjitteredViewProj) {
 	auto* impl = ctx.GetImpl();
 	impl->current_view_proj = viewProj;
-	impl->prev_view_proj = prevViewProj;
+	impl->unjittered_view_proj = unjitteredViewProj;
 }
 
 void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
 				  const JPH::Mat44& shadowProjView) {
 	auto* impl = ctx.GetImpl();
 	impl->shadowProjView = shadowProjView;
-	std::memcpy(impl->frameUniformBuffer.Map().data, &uniforms, sizeof(FrameUniforms));
+	std::memcpy(impl->frameUniformBuffers[impl->frame_index].Map().data, &uniforms,
+				sizeof(FrameUniforms));
 }
 
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
@@ -693,9 +710,9 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 	}
 
 	impl->drawQueue.push_back(
-		DrawCommand{// <--- EXPLICIT CONVERSION
-					.material = std::bit_cast<NativeMaterial*>(material.pipeline),
+		DrawCommand{.material = std::bit_cast<NativeMaterial*>(material.pipeline),
 					.mesh = std::bit_cast<NativeMesh*>(mesh.vertexBuffer),
+					.indexMesh = std::bit_cast<NativeMesh*>(mesh.indexBuffer),
 					.transform = transform,
 					.prevTransform = prevTransform,
 					.albedoIndex = material.albedoIndex,
@@ -716,7 +733,8 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 					.morphWeights = {(morphWeights != nullptr) ? morphWeights[0] : 0.0f,
 									 (morphWeights != nullptr) ? morphWeights[1] : 0.0f,
 									 (morphWeights != nullptr) ? morphWeights[2] : 0.0f,
-									 (morphWeights != nullptr) ? morphWeights[3] : 0.0f}});
+									 (morphWeights != nullptr) ? morphWeights[3] : 0.0f},
+					.indexCount = mesh.indexCount});
 }
 void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex) {
 	auto* impl = ctx.GetImpl();

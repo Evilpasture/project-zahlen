@@ -61,12 +61,16 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 	float4 worldPos = mul(worldMatrix, localPos);
 	output.worldPos = worldPos.xyz;
 
-	output.currClip = mul(frame.viewProj, worldPos);
-	output.pos = output.currClip;
+	output.pos = mul(frame.viewProj, worldPos);
+	output.currClip = mul(frame.unjitteredViewProj, worldPos);
 
-	float4 prevWorldPos = mul(prevWorldMatrix, localPos);
-	output.prevClip = mul(frame.prevViewProj, prevWorldPos);
-
+	float4 prevWorldPos;
+	if (isSkinned != 0) {
+		prevWorldPos = worldPos;
+	} else {
+		prevWorldPos = mul(prevWorldMatrix, localPos);
+	}
+	output.prevClip = mul(frame.prevUnjitteredViewProj, prevWorldPos);
 	float3x3 world3x3 = (float3x3)worldMatrix;
 
 	output.normal = normalize(mul(world3x3, localNormal));
@@ -146,9 +150,10 @@ PSOutput PSMain(VSOutput input) {
 
 	output.color = float4(finalColor, albedo.a);
 
+	// Calculate Motion Vectors for TAA (Vulkan Y-Axis is inverted relative to UV space)
 	float2 ndcCurr = input.currClip.xy / input.currClip.w;
 	float2 ndcPrev = input.prevClip.xy / input.prevClip.w;
-	output.velocity = (ndcCurr - ndcPrev) * 0.5f;
+	output.velocity = (ndcCurr - ndcPrev) * float2(0.5f, -0.5f);
 
 	return output;
 }

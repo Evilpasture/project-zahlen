@@ -131,11 +131,11 @@ void UpdateEditorCulling(Engine& engine) {
 		return;
 	}
 
-	bool moved = (cam.position - s_LastCullPos).LengthSq() > 0.01f ||
-				 std::abs(cam.yaw - s_LastCullYaw) > 0.5f;
-	if (!moved && !s_VisibleEntities.empty()) {
-		return;
-	}
+	// bool moved = (cam.position - s_LastCullPos).LengthSq() > 0.01f ||
+	// 			 std::abs(cam.yaw - s_LastCullYaw) > 0.5f;
+	// if (!moved && !s_VisibleEntities.empty()) {
+	// 	return;
+	// }
 
 	s_VisibleEntities.clear();
 	auto meshes = reg.GetRawArray<MeshComponent>();
@@ -143,20 +143,28 @@ void UpdateEditorCulling(Engine& engine) {
 	ZHLN_LOCK(world.sync.shadowLock) {
 		for (size_t i = 0; i < entities.size(); ++i) {
 			Entity e = entities[i];
-			JPH::Vec3 pos{};
+			JPH::Mat44 currentTransform{};
 
 			if (auto* phys = reg.Get<PhysicsComponent>(e)) {
 				uint32_t dense = world.slotToDense[phys->physicsHandle.index];
 				const size_t base = static_cast<size_t>(dense) * 4;
-				pos = JPH::Vec3((float)world.positions[base], (float)world.positions[base + 1],
-								(float)world.positions[base + 2]);
+				JPH::Vec3 pos((float)world.positions[base], (float)world.positions[base + 1],
+							  (float)world.positions[base + 2]);
+				JPH::Quat rot(world.rotations[base], world.rotations[base + 1],
+							  world.rotations[base + 2], world.rotations[base + 3]);
+				currentTransform = Math::CreateTransform(pos, rot) * meshes[i].localTransform;
 			} else if (auto* alifeComp = reg.Get<ALife::ALifeComponent>(e)) {
-				pos = JPH::Vec3(alifeComp->position);
+				currentTransform =
+					Math::CreateTransform(JPH::Vec3(alifeComp->position), JPH::Quat::sIdentity()) *
+					meshes[i].localTransform;
 			} else {
-				pos = meshes[i].localTransform.GetTranslation();
+				currentTransform = meshes[i].localTransform;
 			}
 
-			if (cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius)) {
+			// Extract the exact world-space center evaluated by the renderer
+			JPH::Vec3 center = currentTransform.GetTranslation();
+
+			if (cam.frustum.IsSphereVisible(center, meshes[i].cullRadius)) {
 				s_VisibleEntities.push_back(e);
 			}
 		}
@@ -198,8 +206,7 @@ void DrawEditorPanels(Engine& engine) {
 	// 2. Scene Hierarchy Window
 	ImGui::Begin("Scene Hierarchy");
 	auto entities = reg.GetEntitiesWith<MeshComponent>();
-	for (size_t i = 0; i < entities.size(); ++i) {
-		Entity e = entities[i];
+	for (auto e : entities) {
 		std::string label = std::format("Entity [Index: {}, Gen: {}]", e.index, e.generation);
 		bool isSelected = (g_EditorState.selectedEntity == e);
 		if (ImGui::Selectable(label.c_str(), isSelected)) {
@@ -432,10 +439,17 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 				JPH::Vec4(0.0f, 0.0f, 1.0f, 0.0f), JPH::Vec4(0.5f, 0.5f, 0.0f, 1.0f)};
 			JPH::Mat44 lightSpaceBiased = biasMatrix * shadowProjView;
 
+			static JPH::Mat44 s_PrevUnjitteredVp = unjitteredVp;
+			static bool s_FirstFrame = true;
+			if (s_FirstFrame) {
+				s_PrevUnjitteredVp = unjitteredVp;
+				s_FirstFrame = false;
+			}
+
 			FrameUniforms uniforms{};
 			uniforms.viewProj = vp;
-			uniforms.prevViewProj = unjitteredVp;
-			uniforms.lightSpaceMatrix = lightSpaceBiased;
+			uniforms.unjitteredViewProj = unjitteredVp;
+			uniforms.prevUnjitteredViewProj = s_PrevUnjitteredVp; // Actual previous unjittered VP
 			std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
 			std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);
 			uniforms.lightCount = 0;
@@ -445,7 +459,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 			engine.BeginFrame();
 			Renderer::SetMatrices(rc, vp, unjitteredVp);
 
-			// Draw objects [c]
 			ZHLN_LOCK(worldState.sync.shadowLock) {
 				for (Entity e : s_VisibleEntities) {
 					auto* mesh = reg.Get<MeshComponent>(e);
@@ -478,7 +491,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 								   mesh->prevTransform, mesh->cullRadius, mesh->jointOffset,
 								   mesh->isSkinned, mesh->morphOffset, mesh->activeMorphCount,
 								   mesh->morphWeights);
-					mesh->prevTransform = currentTransform;
 				}
 			}
 
@@ -487,6 +499,37 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 				CullingStats::TotalObjects - (uint32_t)s_VisibleEntities.size();
 
 			engine.EndFrame();
+
+			// Cache the unjittered projection for next frame's TAA
+			s_PrevUnjitteredVp = unjitteredVp;
+
+			// Global update for prevTransforms to prevent TAA motion vector spasms
+			auto allEntities = reg.GetEntitiesWith<MeshComponent>();
+			for (Entity e : allEntities) {
+				auto* mesh = reg.Get<MeshComponent>(e);
+				if (mesh != nullptr) {
+					JPH::Mat44 currentTransform{};
+					auto* phys = reg.Get<PhysicsComponent>(e);
+					if (phys != nullptr) {
+						uint32_t dense = worldState.slotToDense[phys->physicsHandle.index];
+						const size_t base = static_cast<size_t>(dense) * 4;
+						JPH::Vec3 pos((float)worldState.positions[base],
+									  (float)worldState.positions[base + 1],
+									  (float)worldState.positions[base + 2]);
+						JPH::Quat rot(worldState.rotations[base], worldState.rotations[base + 1],
+									  worldState.rotations[base + 2],
+									  worldState.rotations[base + 3]);
+						currentTransform = Math::CreateTransform(pos, rot) * mesh->localTransform;
+					} else if (auto* alifeComp = reg.Get<ALife::ALifeComponent>(e)) {
+						currentTransform = Math::CreateTransform(JPH::Vec3(alifeComp->position),
+																 JPH::Quat::sIdentity()) *
+										   mesh->localTransform;
+					} else {
+						currentTransform = mesh->localTransform;
+					}
+					mesh->prevTransform = currentTransform;
+				}
+			}
 		} else {
 			Platform::Sleep(10);
 		}

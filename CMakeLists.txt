@@ -263,18 +263,15 @@ target_link_libraries(zahlen_cooker PRIVATE zahlen_engine)
 target_include_directories(zahlen_cooker PRIVATE ${CMAKE_SOURCE_DIR}/extern/cgltf)
 
 # --- 7.1 ASSET COOKING AUTOMATION ---
-# Create a custom target that ALWAYS runs the cooker before the game launches.
-# We use generator expressions ($<TARGET_FILE_DIR:...>) to ensure the data folder 
-# is created right next to the actual compiled .exe, regardless of OS/IDE.
 add_custom_target(cook_assets ALL
     # 1. Make sure the data directory exists
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:zahlen_game>/data"
     
-    # 2. Run the cooker
-    COMMAND zahlen_cooker "${CMAKE_SOURCE_DIR}/resources/assets" "$<TARGET_FILE_DIR:zahlen_game>/data/base.pak"
+    # 2. Run the cooker and output both base.pak AND debug .glb files [1]
+    COMMAND zahlen_cooker "${CMAKE_SOURCE_DIR}/resources/assets" "$<TARGET_FILE_DIR:zahlen_game>/data/base.pak" "$<TARGET_FILE_DIR:zahlen_game>/data"
     
     DEPENDS zahlen_cooker
-    COMMENT "Cooking assets into data/base.pak..."
+    COMMENT "Cooking assets into data/base.pak and compiling debug GLBs..."
 )
 
 # Ensure the game and editor wait for the cooking process to finish before they compile/run

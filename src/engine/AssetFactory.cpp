@@ -37,7 +37,7 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
 Mesh LoadCookedMesh(RenderContext& ctx, AssetManager& assetMgr, const std::string& virtualPath) {
 #ifdef ZHLN_DEV_MODE
 	std::string rawPath = "resources/assets/" + virtualPath;
-	return LoadGLB(ctx, rawPath);
+	return LoadGLB(ctx, rawPath); // (Optionally, update LoadGLB or keep as is)
 #else
 	AssetLoadRequest req;
 	req.assetID = HashAssetPath(virtualPath);
@@ -53,13 +53,26 @@ Mesh LoadCookedMesh(RenderContext& ctx, AssetManager& assetMgr, const std::strin
 		return {};
 	}
 
+	// 1. Resolve VBO
 	const auto* vertices = reinterpret_cast<const Vertex*>(header + 1);
-
 	BufferHandle vbo = ctx.CreateVertexBuffer(vertices, header->vertexCount * sizeof(Vertex));
+
+	// 2. Resolve IBO (index array follows vertex array in binary)
+	BufferHandle ibo = BufferHandle::Invalid;
+	if (header->indexCount > 0) {
+		const auto* indices = reinterpret_cast<const uint32_t*>(vertices + header->vertexCount);
+		ibo = ctx.CreateIndexBuffer(indices, header->indexCount * sizeof(uint32_t));
+	}
+
 	assetMgr.FreeAssetMemory(req);
 
-	Log("Loaded Cooked Mesh: {} ({} vertices)", virtualPath, header->vertexCount);
-	return Mesh{.vertexBuffer = vbo, .vertexCount = header->vertexCount};
+	Log("Loaded Cooked Indexed Mesh: {} ({} vertices, {} indices)", virtualPath,
+		header->vertexCount, header->indexCount);
+
+	return Mesh{.vertexBuffer = vbo,
+				.indexBuffer = ibo,
+				.vertexCount = header->vertexCount,
+				.indexCount = header->indexCount};
 #endif
 }
 

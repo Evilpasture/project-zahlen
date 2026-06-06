@@ -63,6 +63,7 @@ static constexpr uint32_t kGpuCullingMaxVisibleInstances =
 struct DrawCommand {
 	NativeMaterial* material;
 	NativeMesh* mesh;
+	NativeMesh* indexMesh;
 	JPH::Mat44 transform;
 	JPH::Mat44 prevTransform;
 	uint32_t albedoIndex;
@@ -80,6 +81,7 @@ struct DrawCommand {
 	uint32_t morphOffset;
 	uint32_t activeMorphCount;
 	float morphWeights[4];
+	uint32_t indexCount = 0;
 };
 
 struct UIDrawCommand {
@@ -120,7 +122,7 @@ struct RenderContext::Impl {
 	uint32_t current_image_index = 0;
 
 	JPH::Mat44 current_view_proj{};
-	JPH::Mat44 prev_view_proj{};
+	JPH::Mat44 unjittered_view_proj{};
 	JPH::Mat44 shadowProjView{};
 
 	JPH::Array<std::unique_ptr<NativeMesh>> meshes;
@@ -133,7 +135,7 @@ struct RenderContext::Impl {
 
 	Vk::DescriptorSetLayout bindlessLayout;
 	Vk::DescriptorPool bindlessPool;
-	VkDescriptorSet bindlessSet = VK_NULL_HANDLE;
+	ZHLN::DoubleBuffered<VkDescriptorSet> bindlessSets;
 	Vk::Sampler globalSampler;
 
 	uint32_t nextTextureIndex = 0;
@@ -142,19 +144,18 @@ struct RenderContext::Impl {
 
 	Vk::DescriptorSetLayout cullingLayout;
 	Vk::DescriptorPool cullingPool;
-	VkDescriptorSet cullingSet = VK_NULL_HANDLE;
+	ZHLN::DoubleBuffered<VkDescriptorSet> cullingSets;
 
 	static constexpr uint32_t SHADOW_RES = 2048;
 	Vk::RenderTarget<VK_FORMAT_D32_SFLOAT> shadowMap;
 	Vk::Sampler shadowSampler;
 
-	Vk::Buffer frameUniformBuffer;
-	Vk::Buffer lightStorageBuffer;
+	ZHLN::DoubleBuffered<Vk::Buffer> frameUniformBuffers;
+	ZHLN::DoubleBuffered<Vk::Buffer> lightStorageBuffers;
 
-	Vk::Buffer instanceDataBuffer;
-	Vk::Buffer indirectCommandsBuffer;
-	Vk::Buffer jointBuffer; // Global Joint Transforms SSBO
-
+	ZHLN::DoubleBuffered<Vk::Buffer> instanceDataBuffers;
+	ZHLN::DoubleBuffered<Vk::Buffer> indirectCommandsBuffers;
+	ZHLN::DoubleBuffered<Vk::Buffer> jointBuffers; // Global Joint Transforms SSBO
 	Vk::Pipeline shadowPipeline;
 	Vk::PipelineLayout shadowPipelineLayout;
 	Vk::Pipeline cullingPipeline;

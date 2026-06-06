@@ -902,9 +902,12 @@ struct DrawState {
 	VkPipelineLayout layout = VK_NULL_HANDLE;
 	VkDescriptorSet set = VK_NULL_HANDLE;
 	VkBuffer vbo = VK_NULL_HANDLE;
+	VkBuffer ibo = VK_NULL_HANDLE;
 	uint32_t vertexCount = 0;
+	uint32_t indexCount = 0;
 	uint32_t instanceCount = 1;
 	uint32_t firstVertex = 0;
+	uint32_t firstIndex = 0;
 	uint32_t firstInstance = 0;
 };
 
@@ -923,8 +926,52 @@ inline void DrawInstanced(VkCommandBuffer cmd, const DrawState& state, const T& 
 	VkBuffer vboHandle = state.vbo;
 	vkCmdBindVertexBuffers(cmd, 0, 1, &vboHandle, &offset);
 
-	// True instanced dispatch
-	vkCmdDraw(cmd, state.vertexCount, state.instanceCount, state.firstVertex, state.firstInstance);
+	if (state.ibo != VK_NULL_HANDLE && state.indexCount > 0) {
+		vkCmdBindIndexBuffer(cmd, state.ibo, 0, VK_INDEX_TYPE_UINT32);
+		vkCmdDrawIndexed(cmd, state.indexCount, state.instanceCount, state.firstIndex, 0,
+						 state.firstInstance);
+	} else {
+		vkCmdDraw(cmd, state.vertexCount, state.instanceCount, state.firstVertex,
+				  state.firstInstance);
+	}
+}
+
+// --- Consolidated Indirect Draw State & Dispatcher ---
+struct DrawIndirectState {
+	VkPipeline pipeline = VK_NULL_HANDLE;
+	VkPipelineLayout layout = VK_NULL_HANDLE;
+	VkDescriptorSet set = VK_NULL_HANDLE;
+	VkBuffer vbo = VK_NULL_HANDLE;
+	VkBuffer ibo = VK_NULL_HANDLE;
+	VkBuffer argumentBuffer = VK_NULL_HANDLE;
+	VkDeviceSize offset = 0;
+	uint32_t drawCount = 0;
+	uint32_t stride = 0;
+};
+
+template <GpuTriviallyCopyable T>
+inline void DrawIndirect(VkCommandBuffer cmd, const DrawIndirectState& state,
+						 const T& pushConstants,
+						 VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT |
+													 VK_SHADER_STAGE_FRAGMENT_BIT) {
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state.pipeline);
+	if (state.set != VK_NULL_HANDLE) {
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state.layout, 0, 1,
+								&state.set, 0, nullptr);
+	}
+	vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
+
+	VkDeviceSize vboOffset = 0;
+	VkBuffer vboHandle = state.vbo;
+	vkCmdBindVertexBuffers(cmd, 0, 1, &vboHandle, &vboOffset);
+
+	if (state.ibo != VK_NULL_HANDLE) {
+		vkCmdBindIndexBuffer(cmd, state.ibo, 0, VK_INDEX_TYPE_UINT32);
+		vkCmdDrawIndexedIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount,
+								 state.stride);
+	} else {
+		vkCmdDrawIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount, state.stride);
+	}
 }
 
 // ============================================================================

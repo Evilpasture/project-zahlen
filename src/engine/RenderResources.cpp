@@ -85,6 +85,40 @@ auto RenderContext::CreateVertexBuffer(const void* data, size_t size) -> BufferH
 	return handle;
 }
 
+auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHandle {
+	auto gpu_buf =
+		Vk::Buffer::Create(_impl->allocator.Get(), size,
+						   VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+						   VMA_MEMORY_USAGE_GPU_ONLY);
+	VkCommandBuffer cmd = _impl->pools.Cmd(0);
+	ZHLN_BeginCommandBuffer(cmd);
+	auto staging = Vk::UploadToBuffer(_impl->allocator.Get(), cmd, gpu_buf, data, size);
+	ZHLN_EndCommandBuffer(cmd);
+
+	VkCommandBufferSubmitInfo cmd_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+										  .pNext = nullptr,
+										  .commandBuffer = cmd,
+										  .deviceMask = 0};
+	VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+							.pNext = nullptr,
+							.flags = 0,
+							.waitSemaphoreInfoCount = 0,
+							.pWaitSemaphoreInfos = nullptr,
+							.commandBufferInfoCount = 1,
+							.pCommandBufferInfos = &cmd_info,
+							.signalSemaphoreInfoCount = 0,
+							.pSignalSemaphoreInfos = nullptr};
+	vkQueueSubmit2(_impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
+	vkQueueWaitIdle(_impl->ctx.GraphicsQueue());
+
+	// NativeMesh stores generic Vk::Buffer, which can represent VBO or IBO safely
+	auto mesh = std::make_unique<NativeMesh>(std::move(gpu_buf),
+											 static_cast<uint32_t>(size / sizeof(uint32_t)));
+	auto handle = static_cast<BufferHandle>(reinterpret_cast<uintptr_t>(mesh.get()));
+	_impl->meshes.push_back(std::move(mesh));
+	return handle;
+}
+
 auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 	ZHLN_ShaderDesc v_desc = {.code = Vk::AsSpirV(desc.vertexShaderData),
 							  .size = desc.vertexShaderSize,
@@ -112,7 +146,8 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 						.Layout(layout.Get())
 						.Vertex<Vertex>()
 						.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16G16_SFLOAT})
-						.DepthFormat(VK_FORMAT_D32_SFLOAT);
+						.DepthFormat(VK_FORMAT_D32_SFLOAT)
+						.CullNone();
 
 	// Toggle hardware culling based on material state
 	if (desc.doubleSided) {
@@ -217,19 +252,21 @@ auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t hei
 											.imageLayout =
 												VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 
-	VkWriteDescriptorSet write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-								  .pNext = nullptr,
-								  .dstSet = impl->bindlessSet,
-								  .dstBinding = 0,
-								  .dstArrayElement = index,
-								  .descriptorCount = 1,
-								  .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-								  .pImageInfo = &bindlessUpdate,
-								  .pBufferInfo = nullptr,
-								  .pTexelBufferView = nullptr};
+	VkWriteDescriptorSet writes[2] = {};
+	for (int i = 0; i < 2; ++i) {
+		writes[i] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+					 .pNext = nullptr,
+					 .dstSet = impl->bindlessSets[i],
+					 .dstBinding = 0,
+					 .dstArrayElement = index,
+					 .descriptorCount = 1,
+					 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+					 .pImageInfo = &bindlessUpdate,
+					 .pBufferInfo = nullptr,
+					 .pTexelBufferView = nullptr};
+	}
 
-	vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
-
+	vkUpdateDescriptorSets(device, 2, writes, 0, nullptr);
 	impl->textureImages.push_back(std::move(gpuImage));
 	impl->textureViews.push_back(std::move(gpuView));
 
@@ -327,15 +364,17 @@ uint32_t RenderContext::CreateTextureCube(const std::vector<const void*>& faceDa
 											.imageLayout =
 												VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 
-	VkWriteDescriptorSet write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-								  .dstSet = impl->bindlessSet,
-								  .dstBinding = 0,
-								  .dstArrayElement = index,
-								  .descriptorCount = 1,
-								  .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-								  .pImageInfo = &bindlessUpdate};
-	vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
-
+	VkWriteDescriptorSet writes[2] = {};
+	for (int i = 0; i < 2; ++i) {
+		writes[i] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+					 .dstSet = impl->bindlessSets[i],
+					 .dstBinding = 0,
+					 .dstArrayElement = index,
+					 .descriptorCount = 1,
+					 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+					 .pImageInfo = &bindlessUpdate};
+	}
+	vkUpdateDescriptorSets(device, 2, writes, 0, nullptr);
 	impl->textureImages.push_back(std::move(gpuImage));
 	impl->textureViews.push_back(std::move(gpuView));
 
@@ -347,7 +386,7 @@ void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matri
 	if (count == 0) {
 		return;
 	}
-	auto mappedRegion = _impl->jointBuffer.Map();
+	auto mappedRegion = _impl->jointBuffers[_impl->frame_index].Map();
 	auto* gpuJoints = reinterpret_cast<JPH::Mat44*>(mappedRegion.data);
 	std::memcpy(gpuJoints + offset, matrices, count * sizeof(JPH::Mat44));
 }

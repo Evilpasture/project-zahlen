@@ -17,7 +17,7 @@ extern std::unordered_map<std::string, cgltf_data*> s_GLBCache;
 
 void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 	static bool s_LoggedAnimationManifest = false;
-	if (!s_LoggedAnimationManifest && !s_GLBCache.empty()) {
+	if (!s_LoggedAnimationManifest && !s_GLBCache.empty() && false) {
 		ZHLN::Log("=================== GLTF ANIMATION MANIFEST ===================");
 		for (const auto& [path, data] : s_GLBCache) {
 			ZHLN::Log("File: {} | Total Clips Found: {}", path, data->animations_count);
@@ -79,7 +79,7 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 
 	std::unordered_map<cgltf_skin*, uint32_t> skinToBufferOffset;
 
-	std::vector<JPH::Mat44> calculatedJoints(8192);
+	JPH::Array<JPH::Mat44> calculatedJoints(8192, JPH::Mat44::sIdentity());
 	uint32_t currentJointCount = 0;
 
 	for (auto& [path, data] : s_GLBCache) {
@@ -127,23 +127,24 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 					if (channel.target_path == cgltf_animation_path_type_translation) {
 						float v[3];
 						cgltf_accessor_read_float(sampler->output, idx, v, 3);
-						targetNode->has_translation = true;
+						targetNode->has_translation = 1;
 						std::memcpy(targetNode->translation, v, sizeof(v));
-						targetNode->has_matrix = false;
+						targetNode->has_matrix = 0;
 					} else if (channel.target_path == cgltf_animation_path_type_rotation) {
 						float q[4];
 						cgltf_accessor_read_float(sampler->output, idx, q, 4);
-						targetNode->has_rotation = true;
+						targetNode->has_rotation = 1;
 						std::memcpy(targetNode->rotation, q, sizeof(q));
-						targetNode->has_matrix = false;
+						targetNode->has_matrix = 0;
 					} else if (channel.target_path == cgltf_animation_path_type_scale) {
 						float s[3];
 						cgltf_accessor_read_float(sampler->output, idx, s, 3);
-						targetNode->has_scale = true;
+						targetNode->has_scale = 1;
 						std::memcpy(targetNode->scale, s, sizeof(s));
-						targetNode->has_matrix = false;
+						targetNode->has_matrix = 0;
 					} else if (channel.target_path == cgltf_animation_path_type_weights) {
-						size_t numTargets = targetNode->mesh ? targetNode->mesh->weights_count : 0;
+						size_t numTargets =
+							(targetNode->mesh != nullptr) ? targetNode->mesh->weights_count : 0;
 						if (numTargets > 0) {
 							targetNode->weights_count = numTargets;
 							if (targetNode->weights == nullptr) {
@@ -359,7 +360,8 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 				cgltf_node* jointNode = skin->joints[j];
 				JPH::Mat44 jointWorld = worldTransforms[jointNode];
 
-				JPH::Mat44 finalJointMatrix = invMeshWorld * jointWorld * ibms[j];
+				// Standard glTF 2.0: Joint matrices transform directly into world space
+				JPH::Mat44 finalJointMatrix = jointWorld * ibms[j]; // Removed invMeshWorld
 
 				if (currentJointCount < 8192) {
 					calculatedJoints[currentJointCount++] = finalJointMatrix;

@@ -4,6 +4,7 @@
 #include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
+#include <algorithm>
 #include <cgltf.h>
 #include <cmath>
 #include <cstddef>
@@ -444,24 +445,38 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 				v.weights[3] = weights[3];
 			}
 
-			std::vector<Vertex> unrolledVertices;
+			// FIX: Do not unroll vertices if we are providing an IBO. Use the original compact VBO.
+			BufferHandle vbo =
+				ctx.CreateVertexBuffer(primVertices.data(), primVertices.size() * sizeof(Vertex));
+
+			uint32_t indexCount = 0;
+			std::vector<uint32_t> indices32;
+
 			if (prim.indices != nullptr) {
-				size_t indexCount = prim.indices->count;
-				unrolledVertices.reserve(indexCount);
+				indexCount = static_cast<uint32_t>(prim.indices->count);
+				indices32.resize(indexCount);
 				for (size_t idx = 0; idx < indexCount; ++idx) {
-					size_t originalIdx = cgltf_accessor_read_index(prim.indices, idx);
-					unrolledVertices.push_back(primVertices[originalIdx]);
+					indices32[idx] =
+						static_cast<uint32_t>(cgltf_accessor_read_index(prim.indices, idx));
 				}
 			} else {
-				unrolledVertices = std::move(primVertices);
+				// FIX: Force non-indexed meshes to be indexed to prevent GPU Culling indirect
+				// command stride corruption
+				indexCount = static_cast<uint32_t>(primVertices.size());
+				indices32.resize(indexCount);
+				for (uint32_t idx = 0; idx < indexCount; ++idx) {
+					indices32[idx] = idx;
+				}
 			}
 
-			BufferHandle vbo = ctx.CreateVertexBuffer(unrolledVertices.data(),
-													  unrolledVertices.size() * sizeof(Vertex));
-			Mesh subMesh = {.vertexBuffer = vbo,
-							.vertexCount = static_cast<uint32_t>(unrolledVertices.size())};
+			BufferHandle ibo =
+				ctx.CreateIndexBuffer(indices32.data(), indexCount * sizeof(uint32_t));
 
-			// Check if we are loading character parts to assign the toon material
+			Mesh subMesh = {.vertexBuffer = vbo,
+							.indexBuffer = ibo,
+							.vertexCount = static_cast<uint32_t>(primVertices.size()),
+							.indexCount = indexCount}; // Check if we are loading character parts to
+													   // assign the toon material
 			// bool isCharacter = (path.contains("POMNI") || path.contains("tadc_models"));
 
 			Material subMaterial = CreateBasicMaterial(ctx, doubleSided, alphaBlend);
@@ -518,11 +533,11 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 					}
 				}
 
-				// Match the unrolled vertex count
-				auto unrolledVertexCount = static_cast<uint32_t>(unrolledVertices.size());
+				// FIX: Do not use unrolled size. Use the original compact vertex count.
+				uint32_t currentVertexCount = static_cast<uint32_t>(primVertices.size());
 
 				std::vector<float> tempDeltas;
-				tempDeltas.resize(static_cast<size_t>(unrolledVertexCount) * activeMorphCount * 4,
+				tempDeltas.resize(static_cast<size_t>(currentVertexCount) * activeMorphCount * 4,
 								  0.0f);
 
 				uint32_t deltaPtr = 0;
@@ -536,45 +551,51 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 					}
 
 					if (targetPosAcc != nullptr) {
-						// Match the unrolling logic of the vertices exactly
-						if (prim.indices != nullptr) {
-							size_t indexCount = prim.indices->count;
-							for (size_t idx = 0; idx < indexCount; ++idx) {
-								size_t originalIdx = cgltf_accessor_read_index(prim.indices, idx);
+						for (size_t vIdx = 0; vIdx < currentVertexCount; ++vIdx) {
+							float delta[3] = {0.0f, 0.0f, 0.0f};
+							cgltf_accessor_read_float(targetPosAcc, vIdx, delta, 3);
 
-								float delta[3] = {0.0f, 0.0f, 0.0f};
-								cgltf_accessor_read_float(targetPosAcc, originalIdx, delta, 3);
-
-								tempDeltas[deltaPtr++] = delta[0];
-								tempDeltas[deltaPtr++] = delta[1];
-								tempDeltas[deltaPtr++] = delta[2];
-								tempDeltas[deltaPtr++] = 0.0f; // std430 float4 padding
-							}
-						} else {
-							for (size_t vIdx = 0; vIdx < vertexCount; ++vIdx) {
-								float delta[3] = {0.0f, 0.0f, 0.0f};
-								cgltf_accessor_read_float(targetPosAcc, vIdx, delta, 3);
-
-								tempDeltas[deltaPtr++] = delta[0];
-								tempDeltas[deltaPtr++] = delta[1];
-								tempDeltas[deltaPtr++] = delta[2];
-								tempDeltas[deltaPtr++] = 0.0f; // std430 float4 padding
-							}
+							tempDeltas[deltaPtr++] = delta[0];
+							tempDeltas[deltaPtr++] = delta[1];
+							tempDeltas[deltaPtr++] = delta[2];
+							tempDeltas[deltaPtr++] = 0.0f; // std430 float4 padding
 						}
+					} else {
+						// Skip zeroes if no position target was found
+						deltaPtr += currentVertexCount * 4;
 					}
 				}
 
-				// Expose unrolledVertexCount to the shader
-				morphOffset = ctx.AllocateMorphDeltas(unrolledVertexCount * activeMorphCount,
+				// Expose currentVertexCount to the shader
+				morphOffset = ctx.AllocateMorphDeltas(currentVertexCount * activeMorphCount,
 													  tempDeltas.data());
 			}
+
+			// Calculate the furthest distance from the local pivot (0,0,0) to any actual vertex
+			// This completely bypasses broken/missing glTF min/max metadata.
+			float maxD2 = 0.0f;
+			for (size_t vIdx = 0; vIdx < vertexCount; ++vIdx) {
+				float d2 = primVertices[vIdx].position[0] * primVertices[vIdx].position[0] +
+						   primVertices[vIdx].position[1] * primVertices[vIdx].position[1] +
+						   primVertices[vIdx].position[2] * primVertices[vIdx].position[2];
+				maxD2 = std::max(d2, maxD2);
+			}
+
+			JPH::Vec3 nodeScale(nodeTransform.GetColumn4(0).Length(),
+								nodeTransform.GetColumn4(1).Length(),
+								nodeTransform.GetColumn4(2).Length());
+			float maxScale = std::max({nodeScale.GetX(), nodeScale.GetY(), nodeScale.GetZ()});
+
+			// Add 20% padding + 1.0m constant to ensure meshes at the absolute edge of the screen
+			// are drawn for TAA history accumulation, preventing edge-pop artifacts.
+			float boundingRadius = std::sqrt(maxD2) * maxScale * 1.2f + 1.0f;
 
 			Entity part = reg.Create();
 			ZHLN::Log("[Diagnostics] Spawned submesh: '{}' -> Assigned Entity ID: {}",
 					  (node->name != nullptr) ? node->name : "Unnamed Node", part.index);
 			reg.Add(part, MeshComponent{.mesh = subMesh,
 										.material = subMaterial,
-										.cullRadius = 100.0f,
+										.cullRadius = boundingRadius, // <-- Safe, padded radius
 										.localTransform = nodeTransform,
 										.prevTransform = nodeTransform,
 										.jointOffset = 0,

@@ -66,22 +66,29 @@ VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV
 	float3 localNormal = input.normal * 2.0f - 1.0f;
 	float3 localTangent = input.tangent.xyz * 2.0f - 1.0f;
 
-	// Apply morph target displacement:
 	if (activeMorphCount > 0) {
 		localPos.xyz += GetMorphDisplacement(vertexId, vertexCount, morphOffset, activeMorphCount,
 											 morphWeights);
 	}
 
-	// SkinPosition will now match since we passed float4:
+	float4 worldPos;
+	float3x3 world3x3 = (float3x3)worldMatrix;
+
+	// 2. Select transform path based on skinning flag
 	if (isSkinned != 0) {
-		localPos = SkinPosition(localPos, input.joints, input.weights, jointOffset);
-		localNormal =
+		// Skinned: Bone matrices transform vertices straight to world space
+		worldPos = SkinPosition(localPos, input.joints, input.weights, jointOffset);
+		output.normal =
 			normalize(SkinDirection(localNormal, input.joints, input.weights, jointOffset));
-		localTangent =
+		output.tangent.xyz =
 			normalize(SkinDirection(localTangent, input.joints, input.weights, jointOffset));
+	} else {
+		// Non-skinned: Transform normally using the node's worldMatrix
+		worldPos = mul(worldMatrix, localPos);
+		output.normal = normalize(mul(world3x3, localNormal));
+		output.tangent.xyz = normalize(mul(world3x3, localTangent));
 	}
 
-	float4 worldPos = mul(worldMatrix, localPos);
 	output.worldPos = worldPos.xyz;
 
 	if (obj.isShadowPass != 0) {
@@ -101,16 +108,22 @@ VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV
 		return output;
 	}
 
-	output.currClip = mul(frame.viewProj, worldPos);
-	output.pos = output.currClip;
+	// Render normally using the Jittered projection
+	output.pos = mul(frame.viewProj, worldPos);
 
-	float4 prevWorldPos = mul(prevWorldMatrix, localPos);
-	output.prevClip = mul(frame.prevViewProj, prevWorldPos);
+	// Evaluate velocity using Unjittered projections
+	output.currClip = mul(frame.unjitteredViewProj, worldPos);
 
-	float3x3 world3x3 = (float3x3)worldMatrix;
+	float4 prevWorldPos;
+	if (isSkinned != 0) {
+		prevWorldPos = worldPos;
+	} else {
+		prevWorldPos = mul(prevWorldMatrix, localPos);
+	}
+	output.prevClip = mul(frame.prevUnjitteredViewProj, prevWorldPos);
 
-	output.normal = normalize(mul(world3x3, localNormal));
-	output.tangent.xyz = normalize(mul(world3x3, localTangent));
+	// Removed the normal/tangent overwrite here since they are calculated in the
+	// skinned/non-skinned branch above!
 	output.tangent.w = input.tangent.w;
 
 	output.uv = input.uv;
@@ -269,10 +282,10 @@ PSOutput PSMain(VSOutput input) {
 	// Preserve exact base color alpha for BLEND transparency pipelines
 	output.color = float4(ambient + directSun + directPunctual + emissive, albedo.a);
 
-	// Calculate Motion Vectors for TAA
+	// Calculate Motion Vectors for TAA (Vulkan Y-Axis is inverted relative to UV space)
 	float2 ndcCurr = input.currClip.xy / input.currClip.w;
 	float2 ndcPrev = input.prevClip.xy / input.prevClip.w;
-	output.velocity = (ndcCurr - ndcPrev) * 0.5f;
+	output.velocity = (ndcCurr - ndcPrev) * float2(0.5f, -0.5f);
 
 	return output;
 }

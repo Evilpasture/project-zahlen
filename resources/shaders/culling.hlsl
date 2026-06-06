@@ -3,9 +3,10 @@
 #include "common.hlsl"
 
 struct DrawIndirectCommand {
-	uint vertexCount;
+	uint indexCount; // Changed from vertexCount
 	uint instanceCount;
-	uint firstVertex;
+	uint firstIndex;  // Changed from firstVertex
+	int vertexOffset; // Changed from firstInstance (int-aligned)
 	uint firstInstance;
 };
 
@@ -40,10 +41,14 @@ bool SphereVisible(float3 center, float radius) {
 	float3 center = mul(inst.world, float4(0.0f, 0.0f, 0.0f, 1.0f)).xyz;
 	uint visible = SphereVisible(center, inst.cullRadius) ? 1u : 0u;
 
+	bool isIndexed = inst.indexCount > 0;
+
 	DrawIndirectCommand cmd;
-	cmd.vertexCount = inst.vertexCount;
+	cmd.indexCount = isIndexed ? inst.indexCount : inst.vertexCount;
 	cmd.instanceCount = visible;
-	cmd.firstVertex = 0;
-	cmd.firstInstance = index;
+	cmd.firstIndex = 0;
+	cmd.vertexOffset = isIndexed ? 0 : int(index);
+	cmd.firstInstance = isIndexed ? index : 0u;
+
 	g_indirectCommands[index] = cmd;
 }

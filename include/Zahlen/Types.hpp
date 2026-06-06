@@ -47,7 +47,7 @@ struct alignas(16) InstanceData {
 	uint32_t normalIndex;
 	uint32_t pbrIndex;
 	uint32_t emissiveIndex;
-	uint32_t vertexCount;
+	uint32_t vertexCount; // Kept (Required for morph targets!)
 	float cullRadius;
 	float metallicFactor;
 	float roughnessFactor;
@@ -55,13 +55,13 @@ struct alignas(16) InstanceData {
 	uint32_t alphaMode;
 	uint32_t jointOffset;
 	uint32_t isSkinned;
+	uint32_t morphOffset;
+	uint32_t activeMorphCount;
+	uint32_t indexCount; // Added: Fits into padding
+	uint32_t _pad;		 // Added: Aligns morphWeights to 16 bytes
 
-	// --- NEW: Morph Target Bindings ---
-	uint32_t morphOffset;	   // Index offset into the global morph SSBO
-	uint32_t activeMorphCount; // Number of active morph targets (0 if none)
-
-	alignas(16) float morphWeights[4];	  // <--- ADDED alignas(16)
-	alignas(16) float baseColorFactor[4]; // <--- ADDED alignas(16)
+	alignas(16) float morphWeights[4];
+	alignas(16) float baseColorFactor[4];
 };
 
 struct FrameConstants {
@@ -75,16 +75,17 @@ struct FrameConstants {
 	float metallicFactor;
 	float roughnessFactor;
 	float alphaCutoff;
-	uint32_t alphaMode;	  // 0=Opaque, 1=Mask, 2=Blend
-	uint32_t jointOffset; // Offset into the global joint matrix SSBO
-	uint32_t isSkinned;	  // 1 if skinned, 0 otherwise
-	uint32_t vertexCount;
-
+	uint32_t alphaMode;
+	uint32_t jointOffset;
+	uint32_t isSkinned;
+	uint32_t vertexCount; // Kept (Required for morph targets!)
 	uint32_t morphOffset;
 	uint32_t activeMorphCount;
+	uint32_t indexCount; // Added: Fits into padding
+	uint32_t _pad;		 // Added: Aligns morphWeights to 16 bytes
 
-	alignas(16) float morphWeights[4];	  // <--- ADDED alignas(16)
-	alignas(16) float baseColorFactor[4]; // <--- ADDED alignas(16)
+	alignas(16) float morphWeights[4];
+	alignas(16) float baseColorFactor[4];
 };
 static_assert(sizeof(InstanceData) == 224, "InstanceData must match HLSL alignment.");
 static_assert(sizeof(FrameConstants) == 224, "FrameConstants must match HLSL alignment.");
@@ -102,7 +103,9 @@ static_assert(sizeof(ResourceGroupHandle) == 8, "ResourceGroupHandle must be 64 
 
 struct Mesh {
 	BufferHandle vertexBuffer = BufferHandle::Invalid;
+	BufferHandle indexBuffer = BufferHandle::Invalid; // Added
 	uint32_t vertexCount = 0;
+	uint32_t indexCount = 0; // Added
 };
 
 // Align structures to 16-byte boundaries to match HLSL std430 layout
@@ -120,7 +123,8 @@ struct alignas(16) GPULight {
 
 struct alignas(16) FrameUniforms {
 	JPH::Mat44 viewProj;
-	JPH::Mat44 prevViewProj;
+	JPH::Mat44 unjitteredViewProj;
+	JPH::Mat44 prevUnjitteredViewProj;
 	JPH::Mat44 lightSpaceMatrix;
 	float camPos[4];
 	float lightDir[4];

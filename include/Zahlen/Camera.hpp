@@ -31,8 +31,9 @@ struct Frustum {
 		for (int i = 0; i < 6; ++i) {
 			// Normalize planes to ensure distance checks are in world units
 			float len = JPH::Vec3(planes[i].GetX(), planes[i].GetY(), planes[i].GetZ()).Length();
-			if (len > 1e-6f)
+			if (len > 1e-6f) {
 				planes[i] /= len;
+			}
 		}
 
 		// 2. Transpose to SIMD SoA
@@ -60,15 +61,13 @@ struct Frustum {
 
 		// block 0 (Planes 0-3)
 		JPH::Vec4 dist0 = mX[0] * cX + mY[0] * cY + mZ[0] * cZ + mW[0];
-		if (JPH::Vec4::sLess(dist0, negR).TestAnyTrue())
+		if (JPH::Vec4::sLess(dist0, negR).TestAnyTrue()) {
 			return false;
+		}
 
 		// block 1 (Planes 4-5)
 		JPH::Vec4 dist1 = mX[1] * cX + mY[1] * cY + mZ[1] * cZ + mW[1];
-		if (JPH::Vec4::sLess(dist1, negR).TestAnyTrue())
-			return false;
-
-		return true;
+		return !JPH::Vec4::sLess(dist1, negR).TestAnyTrue();
 	}
 };
 
@@ -114,9 +113,10 @@ struct Camera {
 			float jitterX = (Halton_2[g_TAAState.frameIndex % 16] - 0.5f) / (float)width;
 			float jitterY = (Halton_3[g_TAAState.frameIndex % 16] - 0.5f) / (float)height;
 
-			// Apply jitter (Elements 3,0 and 3,1 control X/Y NDC translation)
-			JPH::Vec4 col3 = proj.GetColumn4(3);
-			proj.SetColumn4(3, col3 + JPH::Vec4(jitterX, jitterY, 0.0f, 0.0f));
+			// FIX: Apply jitter to the 3rd column (index 2).
+			// Modifying the Z-column ensures the NDC shift remains constant regardless of depth.
+			JPH::Vec4 col2 = proj.GetColumn4(2);
+			proj.SetColumn4(2, col2 + JPH::Vec4(-jitterX * 2.0f, -jitterY * 2.0f, 0.0f, 0.0f));
 		}
 		return proj;
 	}

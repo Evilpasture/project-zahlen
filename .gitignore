@@ -55,6 +55,8 @@ Thumbs.db
 
 # Assets
 resources/assets/
+resources/intermediate/
+*.bin
 
 # Blender source files and unpacked textures
 blender/

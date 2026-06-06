@@ -171,32 +171,37 @@ void RenderContext::Impl::InitShadowResources() {
 						.DepthCompare()
 						.Build(ctx.Device());
 
-	frameUniformBuffer =
-		Vk::Buffer::Create(allocator.Get(), sizeof(FrameUniforms),
-						   VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	for (int i = 0; i < 2; ++i) {
+		frameUniformBuffers[i] =
+			Vk::Buffer::Create(allocator.Get(), sizeof(FrameUniforms),
+							   VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
-	lightStorageBuffer =
-		Vk::Buffer::Create(allocator.Get(), sizeof(GPULight) * 128,
-						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+		lightStorageBuffers[i] =
+			Vk::Buffer::Create(allocator.Get(), sizeof(GPULight) * 128,
+							   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	}
 }
 
 void RenderContext::Impl::InitCullingResources() {
 	cullingLayout = CullingLayout::CreateLayout(ctx.Device());
-	cullingPool = CullingLayout::CreatePool(ctx.Device(), 1);
-	cullingSet = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
+	cullingPool = CullingLayout::CreatePool(ctx.Device(), 2);
+	cullingSets[0] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
+	cullingSets[1] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
 
-	instanceDataBuffer =
-		Vk::Buffer::Create(allocator.Get(), sizeof(InstanceData) * kGpuCullingMaxInstances,
-						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	for (int i = 0; i < 2; ++i) {
+		instanceDataBuffers[i] =
+			Vk::Buffer::Create(allocator.Get(), sizeof(InstanceData) * kGpuCullingMaxInstances,
+							   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
-	indirectCommandsBuffer =
-		Vk::Buffer::Create(allocator.Get(), sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances,
-						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
-						   VMA_MEMORY_USAGE_GPU_ONLY);
+		indirectCommandsBuffers[i] = Vk::Buffer::Create(
+			allocator.Get(), sizeof(VkDrawIndexedIndirectCommand) * kGpuCullingMaxInstances,
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+			VMA_MEMORY_USAGE_GPU_ONLY);
 
-	CullingLayout::Write(ctx.Device(), cullingSet,
-						 Vk::BufferWrite{.buffer = instanceDataBuffer.Handle()},
-						 Vk::BufferWrite{.buffer = indirectCommandsBuffer.Handle()});
+		CullingLayout::Write(ctx.Device(), cullingSets[i],
+							 Vk::BufferWrite{.buffer = instanceDataBuffers[i].Handle()},
+							 Vk::BufferWrite{.buffer = indirectCommandsBuffers[i].Handle()});
+	}
 
 	constexpr uint32_t kCullingPushSize = sizeof(float) * 4 * 6 + sizeof(uint32_t) * 4;
 	VkPushConstantRange cullingPush = {
@@ -223,8 +228,10 @@ void RenderContext::Impl::InitCullingResources() {
 
 void RenderContext::Impl::InitBindless() {
 	bindlessLayout = GlobalSceneLayout::CreateLayout(ctx.Device());
-	bindlessPool = GlobalSceneLayout::CreatePool(ctx.Device(), 1);
-	bindlessSet =
+	bindlessPool = GlobalSceneLayout::CreatePool(ctx.Device(), 2);
+	bindlessSets[0] =
+		GlobalSceneLayout::Allocate(ctx.Device(), bindlessPool.Get(), bindlessLayout.Get());
+	bindlessSets[1] =
 		GlobalSceneLayout::Allocate(ctx.Device(), bindlessPool.Get(), bindlessLayout.Get());
 
 	VkSamplerCreateInfo samplerInfo = {
@@ -252,9 +259,16 @@ void RenderContext::Impl::InitBindless() {
 	globalSampler = Vk::Sampler(ctx.Device(), rawSampler);
 
 	// Allocate our global Joint storage buffer (Supports 8192 dynamic matrices)
-	jointBuffer =
-		Vk::Buffer::Create(allocator.Get(), sizeof(JPH::Mat44) * 8192,
-						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	JPH::Array<JPH::Mat44> identities(8192, JPH::Mat44::sIdentity());
+	for (int i = 0; i < 2; ++i) {
+		jointBuffers[i] =
+			Vk::Buffer::Create(allocator.Get(), sizeof(JPH::Mat44) * 8192,
+							   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+		// Upload identity matrices initially
+		auto mapped = jointBuffers[i].Map();
+		std::memcpy(mapped.data, identities.data(), identities.size() * sizeof(JPH::Mat44));
+	}
 
 	morphDeltasBuffer =
 		Vk::Buffer::Create(allocator.Get(), sizeof(float) * 4 * 1000000,
@@ -512,26 +526,27 @@ void RenderContext::Impl::InitBindless() {
 		Vk::CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(ctx.Device(), prefilteredImage.Handle(), 1);
 
 	// Update global descriptor bindings
-	GlobalSceneLayout::Write(ctx.Device(), bindlessSet, Vk::SkipWrite{},
-							 Vk::SamplerWrite{globalSampler.Get()},
-							 Vk::ImageWrite{.view = shadowMap.view.Get(),
-											.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-							 Vk::SamplerWrite{shadowSampler.Get()},
-							 Vk::BufferWrite{.buffer = frameUniformBuffer.Handle()},
-							 Vk::BufferWrite{.buffer = lightStorageBuffer.Handle()},
-							 Vk::BufferWrite{.buffer = instanceDataBuffer.Handle()},
-							 Vk::BufferWrite{.buffer = jointBuffer.Handle()},
+	for (int i = 0; i < 2; ++i) {
+		GlobalSceneLayout::Write(ctx.Device(), bindlessSets[i], Vk::SkipWrite{},
+								 Vk::SamplerWrite{globalSampler.Get()},
+								 Vk::ImageWrite{.view = shadowMap.view.Get(),
+												.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+								 Vk::SamplerWrite{shadowSampler.Get()},
+								 Vk::BufferWrite{.buffer = frameUniformBuffers[i].Handle()},
+								 Vk::BufferWrite{.buffer = lightStorageBuffers[i].Handle()},
+								 Vk::BufferWrite{.buffer = instanceDataBuffers[i].Handle()},
+								 Vk::BufferWrite{.buffer = jointBuffers[i].Handle()},
 
-							 // --- WRITE IBL DESCRIPTORS ---
-							 Vk::ImageWrite{.view = irradianceView.Get(),
-											.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-							 Vk::ImageWrite{.view = prefilteredView.Get(),
-											.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-							 Vk::ImageWrite{.view = brdfLutView.Get(),
-											.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-							 Vk::BufferWrite{.buffer = morphDeltasBuffer.Handle()});
+								 // --- WRITE IBL DESCRIPTORS ---
+								 Vk::ImageWrite{.view = irradianceView.Get(),
+												.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+								 Vk::ImageWrite{.view = prefilteredView.Get(),
+												.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+								 Vk::ImageWrite{.view = brdfLutView.Get(),
+												.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+								 Vk::BufferWrite{.buffer = morphDeltasBuffer.Handle()});
+	}
 }
-
 void RenderContext::Impl::InitPostProcessing() {
 	defaultSampler = Vk::SamplerBuilder{}.Linear().ClampToEdge().Build(ctx.Device());
 

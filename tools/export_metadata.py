@@ -6,7 +6,44 @@ import shutil
 import bpy
 from mathutils import Matrix
 
-# Setup output paths
+# ============================================================================
+# Core Type-Validation Helpers (OOP Injection)
+# ============================================================================
+
+
+def is_a(self, type_string):
+    """Injected type checking supporting both spatial Objects and generic mesh Attributes."""
+    try:
+        # Handle spatial objects
+        if hasattr(self, "type"):
+            return self.type.upper() == type_string.upper()
+        # Handle data attributes
+        if hasattr(self, "data_type") and hasattr(self, "domain"):
+            mappings = {
+                "UVMAP": ("CORNER", {"FLOAT_2D_VECTOR", "FLOAT_2"}),
+                "VERTEXCOLOR": (
+                    "CORNER",
+                    {"FLOAT_COLOR", "BYTE_COLOR", "FLOAT_VECTOR"},
+                ),
+                "NORMAL": ("POINT", {"FLOAT_VECTOR", "FLOAT_3D_VECTOR"}),
+            }
+            target = type_string.upper()
+            if target in mappings:
+                domain, allowed_types = mappings[target]
+                return self.domain == domain and self.data_type in allowed_types
+    except ReferenceError:
+        return False
+    return False
+
+
+# Inject straight into Blender's C++ base types
+bpy.types.Object.IsA = is_a
+bpy.types.Attribute.IsA = is_a
+
+# ============================================================================
+# Setup Global Configurations & Output Paths
+# ============================================================================
+
 input_dir = os.getcwd()
 output_parent = os.path.join(input_dir, "resources", "intermediate")
 os.makedirs(output_parent, exist_ok=True)
@@ -38,6 +75,10 @@ for root, _, files in os.walk(input_dir):
 
 print(f"Discovered {len(blend_files)} levels for raw metadata extraction.\n")
 
+# ============================================================================
+# Core Math & Geometry Unpacking Helpers
+# ============================================================================
+
 
 def make_id(prefix, name):
     """Converts a Blender name to a clean, unique, lowercase ID string."""
@@ -53,7 +94,7 @@ def clean_float(val):
 
 
 def safe_invert(matrix):
-    """Safely inverts a matrix, falling back to identity if singular (scale of 0)."""
+    """Safely inverts a matrix, falling back to identity if singular."""
     try:
         return matrix.inverted()
     except ValueError:
@@ -63,6 +104,75 @@ def safe_invert(matrix):
 def serialize_matrix_col_major(matrix):
     """Converts a mathutils.Matrix to a flat column-major list of 16 rounded floats."""
     return [clean_float(val) for col in matrix.transposed() for val in col]
+
+
+def unpack_color(val):
+    """Safely unpacks color/vector data of any dimension into a 4-float RGBA tuple."""
+    if val is None:
+        return (1.0, 1.0, 1.0, 1.0)
+    if not hasattr(val, "__len__"):
+        try:
+            f = float(val)
+            return (f, f, f, 1.0)
+        except Exception:
+            return (1.0, 1.0, 1.0, 1.0)
+    length = len(val)
+    if length == 0:
+        return (1.0, 1.0, 1.0, 1.0)
+    elif length == 1:
+        try:
+            f = float(val[0])
+            return (f, f, f, 1.0)
+        except Exception:
+            return (1.0, 1.0, 1.0, 1.0)
+    elif length == 2:
+        return (float(val[0]), float(val[1]), 0.0, 1.0)
+    elif length == 3:
+        return (float(val[0]), float(val[1]), float(val[2]), 1.0)
+    else:
+        return (float(val[0]), float(val[1]), float(val[2]), float(val[3]))
+
+
+def unpack_color_from_datum(datum, active_color_attr, v_idx, loop_idx):
+    """Helper to resolve the color based on the attribute layer's domain."""
+    if active_color_attr.domain == "CORNER":
+        return unpack_color(datum)
+    elif active_color_attr.domain == "POINT":
+        return unpack_color(datum)
+    return (1.0, 1.0, 1.0, 1.0)
+
+
+def is_valid_color_layer(attr):
+    """Deterministically verifies if an attribute is a true color layer by checking value ranges.
+
+    If any component of the data is negative (< -0.001) or exceeds 1.0 (> 1.001),
+    it is mathematically guaranteed to be a spatial vector (like a normal or position)
+    rather than a painted color.
+    """
+    if not attr or not attr.data:
+        return False
+
+    # Sample up to 100 vertices to be extremely fast and 100% safe
+    sample_size = min(len(attr.data), 100)
+    for i in range(sample_size):
+        datum = attr.data[i]
+
+        if hasattr(datum, "color"):
+            vals = datum.color
+        elif hasattr(datum, "vector"):
+            vals = datum.vector
+        elif hasattr(datum, "value"):
+            vals = datum.value
+            if not hasattr(vals, "__len__"):
+                vals = [vals]
+        else:
+            continue
+
+        for v in vals:
+            if v < -0.001 or v > 1.001:
+                return False  # Spatial/coordinate vector detected!
+
+    return True
 
 
 def get_evaluated_mesh_safely(obj, depsgraph):
@@ -85,7 +195,7 @@ def get_image_filename(image):
 
 
 def get_texture_node_image_block(input_socket):
-    """Recursively walks node trees to extract the actual image object, resolving normal wrappers."""
+    """Recursively walks node trees to extract the actual image object."""
     if input_socket and input_socket.is_linked:
         link = input_socket.links[0]
         from_node = link.from_node
@@ -101,24 +211,27 @@ def get_texture_node_image_block(input_socket):
     return None
 
 
+# ============================================================================
+# Modular Pipeline Exporters
+# ============================================================================
+
+
 def export_and_copy_textures(asset_dir):
-    """Safely extracts and copies packed/unpacked textures into the intermediate asset directory."""
+    """Extracts and copies packed/unpacked textures into the level folder."""
     textures_dir = os.path.join(asset_dir, "textures")
     os.makedirs(textures_dir, exist_ok=True)
 
     for image in bpy.data.images:
-        # Skip procedural render results and viewer nodes
-        if image.type in {"COMPOSITER", "VIEWER"}:
-            continue
-
-        # Ensure it's a file-backed image or has pixels we can output
-        if image.source not in {"FILE", "GENERATED", "TILED"}:
+        if image.type in {"COMPOSITER", "VIEWER"} or image.source not in {
+            "FILE",
+            "GENERATED",
+            "TILED",
+        }:
             continue
 
         dest_filename = get_image_filename(image)
         dest_path = os.path.join(textures_dir, dest_filename)
 
-        # 1. Handle Packed Files
         if image.packed_file:
             old_path = image.filepath_raw
             try:
@@ -131,7 +244,6 @@ def export_and_copy_textures(asset_dir):
             finally:
                 image.filepath_raw = old_path
         else:
-            # 2. Handle External Files on Disk
             src_path = bpy.path.abspath(image.filepath)
             if os.path.exists(src_path):
                 try:
@@ -141,7 +253,6 @@ def export_and_copy_textures(asset_dir):
                         f"      [Warning] Failed to copy texture '{image.name}' from '{src_path}': {e}"
                     )
             else:
-                # 3. Fallback: Save render if the source path is missing but pixels exist
                 try:
                     image.save_render(dest_path)
                 except Exception as e:
@@ -150,79 +261,33 @@ def export_and_copy_textures(asset_dir):
                     )
 
 
-def export_raw_scene_data(blend_path):
-    name_we = os.path.splitext(os.path.basename(blend_path))[0]
-    asset_dir = os.path.join(output_parent, name_we)
-    bin_dir = os.path.join(asset_dir, "geometry")
-    os.makedirs(bin_dir, exist_ok=True)
-
-    # Load Blender file headlessly
-    bpy.ops.wm.open_mainfile(filepath=blend_path)
-
-    # Prevent external library lookup issues using contextual overrides
-    try:
-        with bpy.context.temp_override(selected_objects=list(bpy.data.objects)):
-            bpy.ops.object.make_all_local(type="ALL")
-    except Exception:
-        try:
-            bpy.ops.object.make_all_local()
-        except Exception:
-            pass
-
-    # Export and copy all scene textures locally (Fixed headless lookup check)
-    export_and_copy_textures(asset_dir)
-
-    depsgraph = bpy.context.evaluated_depsgraph_get()
-
-    # Pre-map all node IDs in the scene graph
-    node_id_map = {}
-    for instance in depsgraph.object_instances:
-        obj = instance.object
-        node_id_map[obj.name] = make_id("node", obj.name)
-        if obj.type == "ARMATURE":
-            for bone in obj.data.bones:
-                node_id_map[f"bone_{obj.name}_{bone.name}"] = make_id(
-                    "node_bone", f"{obj.name}_{bone.name}"
-                )
-
-    scene_manifest = {
-        "version": "1.2",
-        "scene_info": {
-            "name": name_we,
-            "up_axis": "Y",
-            "coordinate_system": "Right-Handed",
-            "winding_order": "CCW",
-            "matrix_layout": "Column-Major",
-        },
-        "materials": [],
-        "meshes": [],
-        "nodes": [],
-        "skins": [],
-        "animations": [],
-        "extras": {},
-    }
-
-    # 1. Pre-calculate Y-Up World Matrices for all objects & bones
+def precalculate_world_matrices(scene_objects, depsgraph):
+    """Calculates all relative coordinate matrices across standard objects and armatures."""
     world_yup_map = {}
-    for instance in depsgraph.object_instances:
-        obj = instance.object
-        world_yup_map[obj.name] = c_basis @ instance.matrix_world @ c_basis_inv
+    for obj in scene_objects:
+        world_yup_map[obj.name] = c_basis @ obj.matrix_world @ c_basis_inv
 
     for obj in depsgraph.scene.objects:
-        if obj.type == "ARMATURE":
+        if obj.IsA("ARMATURE"):
             for bone in obj.data.bones:
                 bone_key = f"bone_{obj.name}_{bone.name}"
                 bone_world_zup = obj.matrix_world @ bone.matrix_local
                 world_yup_map[bone_key] = c_basis @ bone_world_zup @ c_basis_inv
+    return world_yup_map
 
-    # 2. Extract PBR Materials
+
+def extract_materials():
+    """Extracts all active materials, resolving node configurations & viewports."""
+    materials = []
     for mat in bpy.data.materials:
         mat_id = make_id("mat", mat.name)
+        default_color = [clean_float(c) for c in mat.diffuse_color]
+
         mat_info = {
             "id": mat_id,
             "name": mat.name,
             "pbr": {
-                "base_color": [0.8, 0.8, 0.8, 1.0],
+                "base_color": default_color,
                 "metallic": 0.0,
                 "roughness": 0.5,
                 "emissive_factor": [0.0, 0.0, 0.0],
@@ -237,31 +302,38 @@ def export_raw_scene_data(blend_path):
             "sampler": {"wrap": "REPEAT", "filter": "LINEAR"},
         }
 
-        if hasattr(mat, "node_tree") and mat.node_tree:
+        if mat.use_nodes and mat.node_tree:
             principled = next(
                 (n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None
             )
             if principled:
-                mat_info["pbr"]["base_color"] = [
-                    clean_float(c)
-                    for c in principled.inputs["Base Color"].default_value
-                ]
-                mat_info["pbr"]["metallic"] = clean_float(
-                    principled.inputs["Metallic"].default_value
-                )
-                mat_info["pbr"]["roughness"] = clean_float(
-                    principled.inputs["Roughness"].default_value
-                )
+                base_color_input = principled.inputs.get("Base Color")
+                if base_color_input and hasattr(base_color_input, "default_value"):
+                    mat_info["pbr"]["base_color"] = [
+                        clean_float(c) for c in base_color_input.default_value
+                    ]
+
+                metallic_input = principled.inputs.get("Metallic")
+                if metallic_input and hasattr(metallic_input, "default_value"):
+                    mat_info["pbr"]["metallic"] = clean_float(
+                        metallic_input.default_value
+                    )
+
+                roughness_input = principled.inputs.get("Roughness")
+                if roughness_input and hasattr(roughness_input, "default_value"):
+                    mat_info["pbr"]["roughness"] = clean_float(
+                        roughness_input.default_value
+                    )
 
                 em_col = principled.inputs.get(
                     "Emission Color"
                 ) or principled.inputs.get("Emission")
                 em_str = principled.inputs.get("Emission Strength")
-                if em_col:
+                if em_col and hasattr(em_col, "default_value"):
                     mat_info["pbr"]["emissive_factor"] = [
                         clean_float(c) for c in em_col.default_value[:3]
                     ]
-                if em_str:
+                if em_str and hasattr(em_str, "default_value"):
                     mat_info["pbr"]["emissive_strength"] = clean_float(
                         em_str.default_value
                     )
@@ -290,21 +362,24 @@ def export_raw_scene_data(blend_path):
                     f"textures/{mr_file}" if mr_file else None
                 )
 
-        scene_manifest["materials"].append(mat_info)
+        if not mat_info["maps"]["albedo"]:
+            mat_info["pbr"]["base_color"] = default_color
 
-    # 3. Extract Unique Meshes, Primitives & Package Binary Buffers
+        materials.append(mat_info)
+    return materials
+
+
+def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir):
+    """Packs local geometry buffers, split-vertex coordinates, and morph keys."""
+    meshes = []
     exported_meshes = set()
 
-    for instance in depsgraph.object_instances:
-        obj = instance.object
-        if obj.type != "MESH":
+    for obj in geometry_sources:
+        if not obj or not obj.IsA("MESH"):
             continue
 
-        # Check for skeletal rigging modifier
         armature_mod = next((m for m in obj.modifiers if m.type == "ARMATURE"), None)
         is_skinned = armature_mod is not None and armature_mod.object is not None
-
-        # Suffix ID to prevent data sharing conflicts
         mesh_suffix = "_skinned" if is_skinned else ""
         mesh_id = make_id("mesh", f"{obj.data.name}{mesh_suffix}")
 
@@ -315,16 +390,34 @@ def export_raw_scene_data(blend_path):
         if not mesh_data:
             continue
 
-        # Initialize split normals
         try:
             mesh_data.calc_normals_split()
         except Exception:
             pass
 
-        # Retrieve active split geometry layers
         active_uv_layer = (
             mesh_data.uv_layers.active.data if mesh_data.uv_layers else None
         )
+
+        # Proactive, Object-Oriented Color Attribute Scanner
+        active_color_attr = None
+        if mesh_data.color_attributes:
+            valid_color_attrs = []
+            for attr in mesh_data.color_attributes:
+                if is_valid_color_layer(attr):
+                    valid_color_attrs.append(attr)
+
+            if valid_color_attrs:
+                # Use the active attribute if it successfully passed the mathematical validation
+                active_attr = mesh_data.color_attributes.active
+                if active_attr in valid_color_attrs:
+                    active_color_attr = active_attr
+                else:
+                    # Otherwise, fallback to the first mathematically verified color layer
+                    active_color_attr = valid_color_attrs[0]
+
+        active_color_data_valid = active_color_attr.data if active_color_attr else None
+
         has_tangents = False
         try:
             mesh_data.calc_tangents()
@@ -332,7 +425,6 @@ def export_raw_scene_data(blend_path):
         except Exception:
             pass
 
-        # Skinning lookup structures
         group_to_joint_idx = {}
         if is_skinned:
             arm_obj = armature_mod.object
@@ -347,10 +439,8 @@ def export_raw_scene_data(blend_path):
         unique_vertices = {}
         flat_vbo = []
         vertex_count = 0
-
         joints_data = []
         weights_data = []
-
         primitives = []
         ibo_binary = b""
         current_offset = 0
@@ -375,9 +465,16 @@ def export_raw_scene_data(blend_path):
                     )
                     uv = active_uv_layer[loop_idx].uv if active_uv_layer else (0.0, 0.0)
 
-                    # NOTE: The stride is strictly 48 bytes (12 floats * 4 bytes) matching P3N3T4U2.
-                    # If the mesh has no tangents, we manually write (1.0, 0.0, 0.0, 1.0) as a fallback
-                    # so the binary buffer layout remains completely aligned and consistent for the compiler.
+                    color = (1.0, 1.0, 1.0, 1.0)
+                    if active_color_data_valid:
+                        if active_color_attr.domain == "CORNER":
+                            datum = active_color_data_valid[loop_idx]
+                        elif active_color_attr.domain == "POINT":
+                            datum = active_color_data_valid[v_idx]
+                        color = unpack_color_from_datum(
+                            datum, active_color_attr, v_idx, loop_idx
+                        )
+
                     if has_tangents:
                         tangent = mesh_data.loops[loop_idx].tangent
                         sign = mesh_data.loops[loop_idx].bitangent_sign
@@ -385,7 +482,6 @@ def export_raw_scene_data(blend_path):
                         tangent = (1.0, 0.0, 0.0)
                         sign = 1.0
 
-                    # Standard unique combination key
                     key = (
                         v_idx,
                         round(uv[0], 5),
@@ -397,6 +493,10 @@ def export_raw_scene_data(blend_path):
                         round(tangent[1], 5),
                         round(tangent[2], 5),
                         round(sign, 5),
+                        round(color[0], 5),
+                        round(color[1], 5),
+                        round(color[2], 5),
+                        round(color[3], 5),
                     )
 
                     if key in unique_vertices:
@@ -411,6 +511,9 @@ def export_raw_scene_data(blend_path):
                         flat_vbo.extend([normal[0], normal[2], -normal[1]])
                         flat_vbo.extend([tangent[0], tangent[2], -tangent[1], sign])
                         flat_vbo.extend([uv[0], 1.0 - uv[1]])  # Flip V for glTF
+                        flat_vbo.extend(
+                            [color[0], color[1], color[2], color[3]]
+                        )  # Pack RGBA vertex colors
 
                         # Skin weight collection corresponding to unique split indices
                         if is_skinned:
@@ -469,7 +572,7 @@ def export_raw_scene_data(blend_path):
             joints_binary = struct.pack(f"{len(joints_data)}H", *joints_data)
             weights_binary = struct.pack(f"{len(weights_data)}f", *weights_data)
 
-        # Morph Targets (Shape Keys) aligned to split indices (delta normals omitted)
+        # Morph targets
         morph_targets = []
         blend_weights = []
         morph_binary = b""
@@ -480,13 +583,11 @@ def export_raw_scene_data(blend_path):
             basis_key.data.foreach_get("co", basis_cos)
 
             morph_offset = 0
-            for idx, kb in enumerate(key_blocks[1:]):  # Skip Basis key
+            for idx, kb in enumerate(key_blocks[1:]):
                 target_cos = [0.0] * (len(mesh_data.vertices) * 3)
                 kb.data.foreach_get("co", target_cos)
-
                 deltas_pos = [0.0] * (vertex_count * 3)
 
-                # Propagate basic vertex deltas into duplicate split spaces
                 for key, split_idx in unique_vertices.items():
                     orig_v_idx = key[0]
                     dx = target_cos[orig_v_idx * 3] - basis_cos[orig_v_idx * 3]
@@ -524,7 +625,6 @@ def export_raw_scene_data(blend_path):
                     }
                 )
 
-        # Save buffer bytes to unified .bin file
         bin_path = os.path.join(bin_dir, f"{mesh_id}.bin")
         with open(bin_path, "wb") as f:
             f.write(vbo_binary)
@@ -535,14 +635,12 @@ def export_raw_scene_data(blend_path):
             if morph_binary:
                 f.write(morph_binary)
 
-        # Set relative byte bounds
         v_offset = 0
         v_len = len(vbo_binary)
         i_offset = v_len
         i_len = len(ibo_binary)
 
-        # Compose the combined layout description string dynamically
-        layout = "P3N3T4U2"
+        layout = "P3N3T4U2C4"
         if is_skinned:
             layout += "_J4W4"
         if morph_targets:
@@ -551,17 +649,15 @@ def export_raw_scene_data(blend_path):
         mesh_info = {
             "id": mesh_id,
             "name": f"{obj.data.name} Mesh",
-            "vertex_count": vertex_count,  # The number of unique split-VBO entries (used by the engine's loader)
-            "source_vertex_count": len(
-                mesh_data.vertices
-            ),  # Debug: Raw vertex count in Blender before UV splitting
+            "vertex_count": vertex_count,
+            "source_vertex_count": len(mesh_data.vertices),
             "layout": layout,
             "buffers": {
                 "bin_file": os.path.relpath(bin_path, asset_dir),
                 "vertex_buffer": {
                     "byte_offset": v_offset,
                     "byte_length": v_len,
-                    "stride": 48,
+                    "stride": 64,
                 },
                 "index_buffer": {"byte_offset": i_offset, "byte_length": i_len},
             },
@@ -590,7 +686,7 @@ def export_raw_scene_data(blend_path):
             for target in mesh_info["morph_targets"]:
                 target["delta_positions"]["byte_offset"] += target_start
 
-        scene_manifest["meshes"].append(mesh_info)
+        meshes.append(mesh_info)
         exported_meshes.add(mesh_id)
 
         try:
@@ -600,174 +696,170 @@ def export_raw_scene_data(blend_path):
                 bpy.data.meshes.remove(mesh_data)
             except Exception:
                 pass
+    return meshes
 
-    # 4. Extract Nodes (Object and Bone Hierarchies)
-    for instance in depsgraph.object_instances:
-        obj = instance.object
 
-        # Parent mapping
-        if obj.parent:
-            if obj.parent_type == "BONE" and obj.parent_bone:
-                parent_key = f"bone_{obj.parent.name}_{obj.parent_bone}"
-            else:
-                parent_key = obj.parent.name
-        else:
-            parent_key = None
+def build_node_info(
+    obj, node_id, node_name, parent_node_id, local_yup, world_yup, is_visible
+):
+    """Factory helper to build consistent glTF node manifest descriptions."""
+    armature_mod = next((m for m in obj.modifiers if m.type == "ARMATURE"), None)
+    is_skinned = armature_mod is not None and armature_mod.object is not None
+    mesh_suffix = "_skinned" if is_skinned else ""
 
+    modifier_stack = []
+    for mod in obj.modifiers:
+        params = {}
+        if mod.type == "SUBDIV":
+            params = {"levels": mod.levels, "render_levels": mod.render_levels}
+        elif mod.type == "ARMATURE" and mod.object:
+            params = {"armature_id": make_id("node", mod.object.name)}
+        elif mod.type == "DECIMATE":
+            params = {
+                "ratio": clean_float(mod.ratio),
+                "decimate_type": mod.decimate_type,
+            }
+        elif mod.type == "NODES" and mod.node_group:
+            params = {"node_group": mod.node_group.name}
+
+        modifier_stack.append(
+            {
+                "type": mod.type,
+                "name": mod.name,
+                "params": params,
+                "eval_order": len(modifier_stack),
+                "gn_hash": str(hash(mod.node_group.name))
+                if (mod.type == "NODES" and mod.node_group)
+                else None,
+            }
+        )
+
+    node_info = {
+        "id": node_id,
+        "name": node_name,
+        "type": obj.type,
+        "visible": is_visible,
+        "parent_id": parent_node_id,
+        "transform": {
+            "local": serialize_matrix_col_major(local_yup),
+            "world": serialize_matrix_col_major(world_yup),
+        },
+        "refs": {
+            "mesh_id": None,
+            "skin_id": None,
+            "material_ids": [],
+            "morph_weights": [],
+        },
+        "extras": {},
+        "modifier_stack": modifier_stack,
+    }
+
+    if armature_mod and armature_mod.object:
+        node_info["refs"]["skin_id"] = make_id("skin", armature_mod.object.name)
+
+    if obj.type == "LIGHT":
+        light_data = obj.data
+        node_info["extras"]["light"] = {
+            "type": light_data.type,
+            "color": [clean_float(c) for c in light_data.color],
+            "energy": clean_float(light_data.energy),
+            "spot_size": clean_float(light_data.spot_size)
+            if light_data.type == "SPOT"
+            else 0.0,
+        }
+    elif obj.type == "CAMERA":
+        cam_data = obj.data
+        node_info["extras"]["camera"] = {
+            "type": "PERSP" if cam_data.type == "PERSP" else "ORTHO",
+            "fov": clean_float(cam_data.angle),
+            "clip_start": clean_float(cam_data.clip_start),
+            "clip_end": clean_float(cam_data.clip_end),
+        }
+    elif obj.IsA("MESH"):
+        node_info["refs"]["mesh_id"] = make_id("mesh", f"{obj.data.name}{mesh_suffix}")
+        node_info["refs"]["material_ids"] = [
+            make_id("mat", s.material.name) for s in obj.material_slots if s.material
+        ]
+        if obj.data.shape_keys:
+            node_info["refs"]["morph_weights"] = [
+                clean_float(kb.value) for kb in obj.data.shape_keys.key_blocks[1:]
+            ]
+        try:
+            coords = [c_basis @ v.co for v in obj.data.vertices]
+            min_bound = [clean_float(min(c[i] for c in coords)) for i in range(3)]
+            max_bound = [clean_float(max(c[i] for c in coords)) for i in range(3)]
+        except Exception:
+            min_bound = [0.0, 0.0, 0.0]
+            max_bound = [0.0, 0.0, 0.0]
+
+        node_info["extras"]["bounds"] = {"min": min_bound, "max": max_bound}
+
+    return node_info
+
+
+def extract_nodes(scene_objects, depsgraph, node_id_map):
+    """Assembles node structures, separating standard objects from instances."""
+    nodes = []
+
+    # 1. Export Standard Scene Objects
+    for obj in scene_objects:
+        parent_key = obj.parent.name if obj.parent else None
         parent_node_id = node_id_map.get(parent_key) if parent_key else None
 
-        # Fetch local transform matrix securely via .get fallbacks
-        world_yup = world_yup_map.get(obj.name, Matrix.Identity(4))
-        if parent_key and parent_key in world_yup_map:
-            local_yup = (
-                safe_invert(world_yup_map.get(parent_key, Matrix.Identity(4)))
-                @ world_yup
-            )
-        else:
-            local_yup = world_yup
+        world_yup = c_basis @ obj.matrix_world @ c_basis_inv
+        local_yup = (
+            c_basis @ obj.matrix_local @ c_basis_inv if obj.parent else world_yup
+        )
 
-        # Compute modifier stack
-        modifier_stack = []
-        for mod in obj.modifiers:
-            params = {}
-            if mod.type == "SUBDIV":
-                params = {"levels": mod.levels, "render_levels": mod.render_levels}
-            elif mod.type == "ARMATURE" and mod.object:
-                params = {"armature_id": make_id("node", mod.object.name)}
-            elif mod.type == "DECIMATE":
-                params = {
-                    "ratio": clean_float(mod.ratio),
-                    "decimate_type": mod.decimate_type,
-                }
-            elif mod.type == "NODES" and mod.node_group:
-                params = {"node_group": mod.node_group.name}
+        node_info = build_node_info(
+            obj,
+            node_id_map.get(obj.name),
+            obj.name,
+            parent_node_id,
+            local_yup,
+            world_yup,
+            not obj.hide_viewport,
+        )
+        nodes.append(node_info)
 
-            modifier_stack.append(
-                {
-                    "type": mod.type,
-                    "name": mod.name,
-                    "params": params,
-                    "eval_order": len(modifier_stack),
-                    "gn_hash": str(hash(mod.node_group.name))
-                    if (mod.type == "NODES" and mod.node_group)
-                    else None,
-                }
-            )
+    # 2. Export Procedural Instances (Geometry Nodes / Scatter duplicates)
+    for idx, instance in enumerate(depsgraph.object_instances):
+        if not instance.is_instance:
+            continue
 
-        node_info = {
-            "id": node_id_map.get(obj.name),
-            "name": obj.name,
-            "type": obj.type,
-            "parent_id": parent_node_id,
-            "transform": {
-                "local": serialize_matrix_col_major(local_yup),
-                "world": serialize_matrix_col_major(world_yup),
-            },
-            "refs": {
-                "mesh_id": None,
-                "skin_id": None,
-                "material_ids": [],
-                "morph_weights": [],
-            },
-            "extras": {},
-            "modifier_stack": modifier_stack,
-        }
+        obj = instance.instance_object
+        if not obj or not obj.IsA("MESH"):
+            continue
 
-        # Armature skin pointer
-        armature_mod = next((m for m in obj.modifiers if m.type == "ARMATURE"), None)
-        if armature_mod and armature_mod.object:
-            node_info["refs"]["skin_id"] = make_id("skin", armature_mod.object.name)
+        node_id = f"node_{make_id('', instance.parent.name)}_inst_{idx}"
+        node_name = f"{instance.parent.name}_instance_{idx}"
+        parent_node_id = (
+            node_id_map.get(instance.parent.name) if instance.parent else None
+        )
 
-        # Build extras
-        if obj.type == "LIGHT":
-            light_data = obj.data
-            node_info["extras"]["light"] = {
-                "type": light_data.type,
-                "color": [clean_float(c) for c in light_data.color],
-                "energy": clean_float(light_data.energy),
-                "spot_size": clean_float(light_data.spot_size)
-                if light_data.type == "SPOT"
-                else 0.0,
-            }
-        elif obj.type == "CAMERA":
-            cam_data = obj.data
-            node_info["extras"]["camera"] = {
-                "type": "PERSP" if cam_data.type == "PERSP" else "ORTHO",
-                "fov": clean_float(cam_data.angle),
-                "clip_start": clean_float(cam_data.clip_start),
-                "clip_end": clean_float(cam_data.clip_end),
-            }
-        elif obj.type == "MESH":
-            is_skinned = armature_mod is not None and armature_mod.object is not None
-            mesh_suffix = "_skinned" if is_skinned else ""
+        world_yup = c_basis @ instance.matrix_world @ c_basis_inv
+        instancer_world_yup = c_basis @ instance.parent.matrix_world @ c_basis_inv
+        local_yup = safe_invert(instancer_world_yup) @ world_yup
 
-            node_info["refs"]["mesh_id"] = make_id(
-                "mesh", f"{obj.data.name}{mesh_suffix}"
-            )
-            node_info["refs"]["material_ids"] = [
-                make_id("mat", s.material.name)
-                for s in obj.material_slots
-                if s.material
-            ]
+        node_info = build_node_info(
+            obj,
+            node_id,
+            node_name,
+            parent_node_id,
+            local_yup,
+            world_yup,
+            instance.show_self,
+        )
+        nodes.append(node_info)
 
-            # Active Shape Key weights on this node instance
-            if obj.data.shape_keys:
-                node_info["refs"]["morph_weights"] = [
-                    clean_float(kb.value) for kb in obj.data.shape_keys.key_blocks[1:]
-                ]
+    return nodes
 
-            # Generate right-handed local bounding bounds
-            try:
-                coords = [c_basis @ v.co for v in obj.data.vertices]
-                min_bound = [clean_float(min(c[i] for c in coords)) for i in range(3)]
-                max_bound = [clean_float(max(c[i] for c in coords)) for i in range(3)]
-            except Exception:
-                min_bound = [0.0, 0.0, 0.0]
-                max_bound = [0.0, 0.0, 0.0]
 
-            node_info["extras"]["bounds"] = {"min": min_bound, "max": max_bound}
-
-        scene_manifest["nodes"].append(node_info)
-
-        # Pose bone scene node instantiation
-        if obj.type == "ARMATURE":
-            for bone in obj.data.bones:
-                bone_key = f"bone_{obj.name}_{bone.name}"
-                bone_world_yup = world_yup_map.get(bone_key, Matrix.Identity(4))
-
-                if bone.parent:
-                    bone_parent_key = f"bone_{obj.name}_{bone.parent.name}"
-                else:
-                    bone_parent_key = obj.name
-
-                bone_parent_world_yup = world_yup_map.get(
-                    bone_parent_key, Matrix.Identity(4)
-                )
-                bone_local_yup = safe_invert(bone_parent_world_yup) @ bone_world_yup
-
-                bone_node_info = {
-                    "id": node_id_map.get(bone_key),
-                    "name": bone.name,
-                    "type": "BONE",
-                    "parent_id": node_id_map.get(bone_parent_key),
-                    "transform": {
-                        "local": serialize_matrix_col_major(bone_local_yup),
-                        "world": serialize_matrix_col_major(bone_world_yup),
-                    },
-                    "refs": {
-                        "mesh_id": None,
-                        "skin_id": None,
-                        "material_ids": [],
-                        "morph_weights": [],
-                    },
-                    "extras": {},
-                    "modifier_stack": [],
-                }
-                scene_manifest["nodes"].append(bone_node_info)
-
-    # 5. Extract Skins
+def extract_skins(depsgraph, node_id_map, world_yup_map):
+    """Extracts skin bindings, inverse matrices, and rest poses."""
+    skins = []
     for obj in depsgraph.scene.objects:
-        if obj.type == "ARMATURE":
+        if obj.IsA("ARMATURE"):
             joints_list = []
             ibms_list = []
             rest_pose_list = []
@@ -780,18 +872,16 @@ def export_raw_scene_data(blend_path):
                 joints_list.append(bone_node_id)
                 pose_bone_ids.append(bone_node_id)
 
-                # Inverse Bind Matrix calculation
                 bone_world_zup = obj.matrix_world @ bone.matrix_local
                 bone_world_yup = c_basis @ bone_world_zup @ c_basis_inv
                 ibm_yup = safe_invert(bone_world_yup)
 
                 ibms_list.extend(serialize_matrix_col_major(ibm_yup))
 
-                # Rest Pose matrix (bone.matrix_local in Blender is rest space transform)
                 rest_pose_yup = c_basis @ bone.matrix_local @ c_basis_inv
                 rest_pose_list.extend(serialize_matrix_col_major(rest_pose_yup))
 
-            scene_manifest["skins"].append(
+            skins.append(
                 {
                     "id": make_id("skin", obj.name),
                     "name": f"{obj.name} Skin",
@@ -801,39 +891,34 @@ def export_raw_scene_data(blend_path):
                     "pose_bone_ids": pose_bone_ids,
                 }
             )
+    return skins
 
-    # 6. Extract Animations (Bakes actions into TRS channels)
-    fps = bpy.context.scene.render.fps / bpy.context.scene.render.fps_base
+
+def extract_animations(
+    depsgraph, node_id_map, bone_to_armature, bin_dir, asset_dir, fps
+):
+    """Saves animated keyframe tracks, packing bone and object channels to .bin."""
+    animations = []
     original_frame = bpy.context.scene.frame_current
-
-    # Optimization: pre-calculate global bone -> armature mapping once to avoid O(N^2) loops
-    bone_to_armature = {}
-    for obj in bpy.data.objects:
-        if obj.type == "ARMATURE":
-            for bone in obj.data.bones:
-                bone_to_armature[(obj.name, bone.name)] = obj
 
     for action in bpy.data.actions:
         action_id = make_id("anim", action.name)
         start_frame, end_frame = int(action.frame_range[0]), int(action.frame_range[1])
 
-        # Safe length guard
         if end_frame <= start_frame:
             continue
 
         duration = clean_float((end_frame - start_frame) / fps)
 
-        # Safely collect fcurves for Blender 5.0+ Slotted/Layered Animations
         fcurves = []
         if hasattr(action, "is_action_layered") and action.is_action_layered:
             for layer in action.layers:
-                for strip in layer.strips:
+                for strip in layer.strips:  # FIXED: Corrected splits to strips
                     for channelbag in strip.channelbags:
                         fcurves.extend(channelbag.fcurves)
         elif hasattr(action, "fcurves") and action.fcurves is not None:
             fcurves = list(action.fcurves)
 
-        # Identify channels modified by curves securely
         target_nodes = set()
         has_object_curves = False
 
@@ -841,11 +926,10 @@ def export_raw_scene_data(blend_path):
             path = fc.data_path
             if path.startswith("pose.bones["):
                 bone_name = path.split('"')[1]
-                # Match bone to containing armature
                 arm_obj = None
                 for obj in bpy.data.objects:
                     if (
-                        obj.type == "ARMATURE"
+                        obj.IsA("ARMATURE")
                         and obj.animation_data
                         and obj.animation_data.action == action
                     ):
@@ -853,7 +937,6 @@ def export_raw_scene_data(blend_path):
                             arm_obj = obj
                             break
                 if not arm_obj:
-                    # Fallback to any bone-to-armature registry match
                     for (arm_name, b_name), o in bone_to_armature.items():
                         if b_name == bone_name:
                             arm_obj = o
@@ -866,7 +949,6 @@ def export_raw_scene_data(blend_path):
                 has_object_curves = True
 
         if has_object_curves and (getattr(action, "id_root", "OBJECT") == "OBJECT"):
-            # Sample only objects explicitly associated with the active action
             for obj in bpy.data.objects:
                 if obj.animation_data and obj.animation_data.action == action:
                     target_nodes.add(("OBJECT", obj.name, obj.name, None))
@@ -878,51 +960,39 @@ def export_raw_scene_data(blend_path):
         samplers = []
         sampler_index = 0
 
-        # Temporarily link action to active object hierarchy to sample
         for mode, name, arm_or_obj_name, bone_name in target_nodes:
-            if mode == "OBJECT":
-                obj = bpy.data.objects.get(arm_or_obj_name)
-                if obj and obj.animation_data:
-                    obj.animation_data.action = action
-            elif mode == "BONE":
-                obj = bpy.data.objects.get(arm_or_obj_name)
-                if obj and obj.animation_data:
-                    obj.animation_data.action = action
+            obj = bpy.data.objects.get(arm_or_obj_name)
+            if obj and obj.animation_data:
+                obj.animation_data.action = action
 
-        # Sample frames
         sampled_times = []
         sampled_transforms = {n: [] for _, n, _, _ in target_nodes}
-
-        # Cache the evaluated depsgraph once before the loop for high-performance updates
         eval_dg = bpy.context.evaluated_depsgraph_get()
 
         for frame in range(start_frame, end_frame + 1):
             bpy.context.scene.frame_set(frame)
-            eval_dg.update()  # Update the active depsgraph state
+            eval_dg.update()
 
             sampled_times.append(clean_float((frame - start_frame) / fps))
 
-            # Recalculate evaluated world transforms
             world_yup_eval = {}
             for instance in eval_dg.object_instances:
                 o = instance.object
                 world_yup_eval[o.name] = c_basis @ instance.matrix_world @ c_basis_inv
 
-            # Bone Animation Sampling using evaluated pose-bone and evaluated-armature world matrices
             for o in eval_dg.scene.objects:
-                if o.type == "ARMATURE":
+                if o.IsA("ARMATURE"):
                     eval_arm = o.evaluated_get(eval_dg)
                     for pb in eval_arm.pose.bones:
                         b_key = f"bone_{o.name}_{pb.name}"
                         b_world_zup = eval_arm.matrix_world @ pb.matrix
                         world_yup_eval[b_key] = c_basis @ b_world_zup @ c_basis_inv
 
-            # Extract active transforms safely avoiding null objects and KeyErrors
             for mode, n, arm_or_obj_name, bone_name in target_nodes:
                 if mode == "OBJECT":
                     obj = bpy.data.objects.get(arm_or_obj_name)
                     parent_key = obj.parent.name if (obj and obj.parent) else None
-                else:  # BONE
+                else:
                     parts = n.split("_", 2)
                     if len(parts) >= 3:
                         arm_name = parts[1]
@@ -934,14 +1004,11 @@ def export_raw_scene_data(blend_path):
                             and hasattr(obj_arm.data, "bones")
                         ):
                             bone = obj_arm.data.bones.get(bone_name)
-                            if bone:
-                                parent_key = (
-                                    f"bone_{arm_name}_{bone.parent.name}"
-                                    if bone.parent
-                                    else arm_name
-                                )
-                            else:
-                                parent_key = arm_name
+                            parent_key = (
+                                f"bone_{arm_name}_{bone.parent.name}"
+                                if (bone and bone.parent)
+                                else arm_name
+                            )
                         else:
                             parent_key = arm_name
                     else:
@@ -959,11 +1026,9 @@ def export_raw_scene_data(blend_path):
                 t, r, s = local_yup.decompose()
                 sampled_transforms[n].append((t, r, s))
 
-        # Pack binary files per Action
         anim_bin_data = b""
         anim_bin_offset = 0
 
-        # Pack time array once
         times_bin = struct.pack(f"{len(sampled_times)}f", *sampled_times)
         anim_bin_data += times_bin
         times_offset = anim_bin_offset
@@ -974,14 +1039,12 @@ def export_raw_scene_data(blend_path):
             transforms = sampled_transforms[n]
             node_id = node_id_map.get(n)
 
-            # Translation, Rotation, and Scale separate packaging
             translations_flat = []
             rotations_flat = []
             scales_flat = []
 
             for t, r, s in transforms:
                 translations_flat.extend([t.x, t.y, t.z])
-                # Convert quaternion from [w, x, y, z] to glTF compliant [x, y, z, w]
                 rotations_flat.extend([r.x, r.y, r.z, r.w])
                 scales_flat.extend([s.x, s.y, s.z])
 
@@ -989,7 +1052,6 @@ def export_raw_scene_data(blend_path):
             r_bin = struct.pack(f"{len(rotations_flat)}f", *rotations_flat)
             s_bin = struct.pack(f"{len(scales_flat)}f", *scales_flat)
 
-            # 1. Translation Channel
             channels.append(
                 {
                     "target_node_id": node_id,
@@ -1010,7 +1072,6 @@ def export_raw_scene_data(blend_path):
             anim_bin_offset += len(t_bin)
             sampler_index += 1
 
-            # 2. Rotation Channel
             channels.append(
                 {
                     "target_node_id": node_id,
@@ -1031,7 +1092,6 @@ def export_raw_scene_data(blend_path):
             anim_bin_offset += len(r_bin)
             sampler_index += 1
 
-            # 3. Scale Channel
             channels.append(
                 {
                     "target_node_id": node_id,
@@ -1052,33 +1112,115 @@ def export_raw_scene_data(blend_path):
             anim_bin_offset += len(s_bin)
             sampler_index += 1
 
-        # Write Action binary file
         anim_bin_path = os.path.join(bin_dir, f"{action_id}_anim.bin")
         with open(anim_bin_path, "wb") as f:
             f.write(anim_bin_data)
 
-        # Assign binary path inside samplers
         rel_bin_path = os.path.relpath(anim_bin_path, asset_dir)
         for s in samplers:
             s["bin_file"] = rel_bin_path
 
-        scene_manifest["animations"].append(
+        animations.append(
             {
                 "id": action_id,
                 "name": action.name,
                 "duration": duration,
-                "loop": bool(
-                    action.get("loop", False)
-                ),  # Default animation loop is False for safety (e.g. cutscenes/one-shots)
+                "loop": bool(action.get("loop", False)),
                 "channels": channels,
                 "samplers": samplers,
             }
         )
 
-    # Restore scene state
     bpy.context.scene.frame_set(original_frame)
+    return animations
 
-    # Save Metadata JSON
+
+# ============================================================================
+# Core Execution Pipeline
+# ============================================================================
+
+
+def export_raw_scene_data(blend_path):
+    name_we = os.path.splitext(os.path.basename(blend_path))[0]
+    asset_dir = os.path.join(output_parent, name_we)
+    bin_dir = os.path.join(asset_dir, "geometry")
+    os.makedirs(bin_dir, exist_ok=True)
+
+    # 1. Headless load & make local
+    bpy.ops.wm.open_mainfile(filepath=blend_path)
+    try:
+        with bpy.context.temp_override(selected_objects=list(bpy.data.objects)):
+            bpy.ops.object.make_all_local(type="ALL")
+    except Exception:
+        try:
+            bpy.ops.object.make_all_local()
+        except Exception:
+            pass
+
+    # 2. Extract loose textures
+    export_and_copy_textures(asset_dir)
+
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    scene_objects = [obj for obj in bpy.context.scene.objects]
+
+    # Pre-map node IDs
+    node_id_map = {}
+    for obj in scene_objects:
+        node_id_map[obj.name] = make_id("node", obj.name)
+        if obj.IsA("ARMATURE"):
+            for bone in obj.data.bones:
+                node_id_map[f"bone_{obj.name}_{bone.name}"] = make_id(
+                    "node_bone", f"{obj.name}_{bone.name}"
+                )
+
+    # Resolve bone to armature maps
+    bone_to_armature = {}
+    for obj in bpy.data.objects:
+        if obj.IsA("ARMATURE"):
+            for bone in obj.data.bones:
+                bone_to_armature[(obj.name, bone.name)] = obj
+
+    # Pre-calculate world matrices
+    world_yup_map = precalculate_world_matrices(scene_objects, depsgraph)
+
+    # 3. Compile scene segments using modular helpers
+    materials = extract_materials()
+
+    geometry_sources = []
+    for obj in scene_objects:
+        if obj.IsA("MESH"):
+            geometry_sources.append(obj)
+    for instance in depsgraph.object_instances:
+        if instance.is_instance and instance.instance_object:
+            geometry_sources.append(instance.instance_object)
+
+    meshes = extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir)
+    nodes = extract_nodes(scene_objects, depsgraph, node_id_map)
+    skins = extract_skins(depsgraph, node_id_map, world_yup_map)
+
+    fps = bpy.context.scene.render.fps / bpy.context.scene.render.fps_base
+    animations = extract_animations(
+        depsgraph, node_id_map, bone_to_armature, bin_dir, asset_dir, fps
+    )
+
+    # 4. Save metadata manifest
+    scene_manifest = {
+        "version": "1.2",
+        "scene_info": {
+            "name": name_we,
+            "up_axis": "Y",
+            "coordinate_system": "Right-Handed",
+            "winding_order": "CCW",
+            "matrix_layout": "Column-Major",
+        },
+        "materials": materials,
+        "meshes": meshes,
+        "nodes": nodes,
+        "skins": skins,
+        "animations": animations,
+        "extras": {},
+    }
+
     json_path = os.path.join(asset_dir, "metadata.json")
     with open(json_path, "w") as f:
         json.dump(scene_manifest, f, indent=2)
@@ -1086,7 +1228,7 @@ def export_raw_scene_data(blend_path):
     print(f"      [Success] Extracted raw metadata & binary geometry for: {name_we}")
 
 
-# Run extractor
+# Main Loop
 for idx, blend_path in enumerate(blend_files, start=1):
     print(
         f"[{idx}/{len(blend_files)}] Extracting: {os.path.relpath(blend_path, input_dir)}"

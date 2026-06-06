@@ -15,7 +15,8 @@ struct Light {
 
 struct FrameUniforms {
 	float4x4 viewProj;
-	float4x4 prevViewProj;
+	float4x4 unjitteredViewProj;
+	float4x4 prevUnjitteredViewProj;
 	float4x4 lightSpaceMatrix;
 	float4 camPos;
 	float4 lightDir;
@@ -37,10 +38,11 @@ struct ObjectConstants {
 	uint alphaMode;
 	uint jointOffset;
 	uint isSkinned;
-	uint vertexCount; // <--- ADDED: Align with C++ FrameConstants [1]
-
+	uint vertexCount;
 	uint morphOffset;
 	uint activeMorphCount;
+	uint indexCount; // Added
+	uint pad;		 // Added
 	float4 morphWeights;
 	float4 baseColorFactor;
 };
@@ -62,10 +64,11 @@ struct InstanceData {
 	uint isSkinned;
 	uint morphOffset;
 	uint activeMorphCount;
+	uint indexCount; // Added
+	uint pad;		 // Added
 	float4 morphWeights;
 	float4 baseColorFactor;
 };
-
 struct GPUJoint {
 	float4 col0;
 	float4 col1;

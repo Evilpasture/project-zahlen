@@ -34,6 +34,7 @@ class ZHLN_API RenderContext {
 
 	// --- Opaque Resource Creation API ---
 	auto CreateVertexBuffer(const void* data, size_t size) -> BufferHandle;
+	auto CreateIndexBuffer(const void* data, size_t size) -> BufferHandle;
 	auto CreateConstantBuffer(size_t size) -> BufferHandle;
 	auto CreateMaterial(const PipelineDesc& desc) -> Material;
 
@@ -60,7 +61,8 @@ struct Color4;
 namespace Renderer {
 void Clear(RenderContext& ctx, const ZHLN::Color4& color, float depth = 1.0f,
 		   bool useSecondaries = true);
-void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj, const JPH::Mat44& prevViewProj);
+void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj,
+				 const JPH::Mat44& unjitteredViewProj);
 void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
 				  const JPH::Mat44& shadowProjView);
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
