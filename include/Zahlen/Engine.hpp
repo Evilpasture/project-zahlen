@@ -1,5 +1,6 @@
 #pragma once
 #include <Zahlen/AssetManager.hpp>
+#include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Input.hpp>
@@ -31,6 +32,7 @@ class ZHLN_API Engine {
 	Camera& GetCamera() { return _mainCamera; }
 	ALife::Simulator& GetALife() { return *_alifeSimulator; }
 	AssetManager& GetAssetManager() { return *_assetManager; }
+	AudioContext& GetAudioContext() { return *_audioContext; }
 
 	ECS::Registry& GetRegistry() { return _registry; }
 
@@ -39,6 +41,7 @@ class ZHLN_API Engine {
 	std::unique_ptr<Window> _window;
 	std::unique_ptr<RenderContext> _renderContext;
 	std::unique_ptr<PhysicsContext> _physicsContext;
+	std::unique_ptr<AudioContext> _audioContext;
 	std::unique_ptr<ALife::Simulator> _alifeSimulator;
 	std::unique_ptr<AssetManager> _assetManager;
 	Camera _mainCamera;

@@ -76,12 +76,14 @@ VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV
 
 	// 2. Select transform path based on skinning flag
 	if (isSkinned != 0) {
-		// Skinned: Bone matrices transform vertices straight to world space
-		worldPos = SkinPosition(localPos, input.joints, input.weights, jointOffset);
-		output.normal =
-			normalize(SkinDirection(localNormal, input.joints, input.weights, jointOffset));
-		output.tangent.xyz =
-			normalize(SkinDirection(localTangent, input.joints, input.weights, jointOffset));
+		// Skinned: Bone matrices transform vertices to model space, then we multiply by worldMatrix
+		// to go to world space [6]
+		worldPos =
+			mul(worldMatrix, SkinPosition(localPos, input.joints, input.weights, jointOffset));
+		output.normal = normalize(
+			mul(world3x3, SkinDirection(localNormal, input.joints, input.weights, jointOffset)));
+		output.tangent.xyz = normalize(
+			mul(world3x3, SkinDirection(localTangent, input.joints, input.weights, jointOffset)));
 	} else {
 		// Non-skinned: Transform normally using the node's worldMatrix
 		worldPos = mul(worldMatrix, localPos);

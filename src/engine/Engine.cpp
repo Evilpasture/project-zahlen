@@ -15,9 +15,6 @@
 namespace ZHLN {
 thread_local Engine* g_CurrentEngine = nullptr;
 static Engine* s_GlobalEngine = nullptr;
-extern void JoltTraceBridge(const char* inFMT, ...) noexcept;
-extern bool JoltAssertBridge(const char* inExpression, const char* inMessage, const char* inFile,
-							 uint32_t inLine) noexcept;
 
 Engine::Engine(const EngineConfig& cfg) {
 	g_CurrentEngine = this;
@@ -44,6 +41,7 @@ Engine::Engine(const EngineConfig& cfg) {
 
 	_renderContext = std::make_unique<RenderContext>(*_window, cfg.render);
 	_physicsContext = std::make_unique<PhysicsContext>(cfg.physics);
+	_audioContext = std::make_unique<AudioContext>();
 	_alifeSimulator = std::make_unique<ALife::Simulator>();
 	_assetManager = std::make_unique<AssetManager>();
 	if (std::filesystem::exists("data/base.pak")) {
@@ -60,12 +58,13 @@ Engine::~Engine() {
 	_renderContext.reset();
 	_window.reset();
 	_assetManager.reset();
+	_audioContext.reset();
 
 	// 2. Terminate GLFW
 	glfwTerminate();
 
 	JPH::UnregisterTypes();
-	if (JPH::Factory::sInstance) {
+	if (JPH::Factory::sInstance != nullptr) {
 		delete JPH::Factory::sInstance;
 		JPH::Factory::sInstance = nullptr;
 	}
@@ -96,8 +95,9 @@ void Engine::EndFrame() {
 }
 
 Engine* GetEngineContext() {
-	if (g_CurrentEngine)
+	if (g_CurrentEngine != nullptr) {
 		return g_CurrentEngine;
+	}
 	return s_GlobalEngine; // If worker doesn't have it, use the global singleton
 }
 

@@ -11,21 +11,28 @@ function update(ptr, dt)
     if not engine then
         engine = zahlen.wrap(ptr)
         world = engine:world()
-        
+
         -- Re-instantiate the registry with the active engine pointer
         game_ecs = zahlen.ecs.new(engine.raw)
         zahlen.log("Unified ECS Registry Initialized successfully.")
     end
 
     if not player_ent then
-        local entities = world:get_entities()
-        player_ent = entities[#entities - 1]
+        -- Query the ECS directly for the entity possessing the MovementComponent
+        for ent, movement in game_ecs:view("MovementComponent") do
+            player_ent = ent
+            break
+        end
 
-        -- Bind dynamic Lua tables to our C++ entity ID
-        game_ecs:add(player_ent, "combat", { hp = 100, max_hp = 100, is_poisoned = false })
-        game_ecs:add(player_ent, "inventory", { coins = 0 })
+        if player_ent then
+            -- Bind dynamic Lua tables to our C++ entity ID
+            game_ecs:add(player_ent, "combat", { hp = 100, max_hp = 100, is_poisoned = false })
+            game_ecs:add(player_ent, "inventory", { coins = 0 })
 
-        zahlen.log("Bound dynamic Lua components to C++ player handle: " .. tostring(player_ent))
+            zahlen.log("Bound dynamic Lua components to C++ player handle: " .. tostring(player_ent))
+        else
+            zahlen.log("WARNING: No player entity with MovementComponent found yet.")
+        end
     end
 
     player_input_system(game_ecs, engine)
@@ -38,9 +45,9 @@ end
 function player_input_system(registry, eng)
     if not player_ent then return end
 
-    local move_x = 0
-    local move_z = 0
-    local yaw_rad = math.rad(eng:get_camera_yaw())
+    local move_x    = 0
+    local move_z    = 0
+    local yaw_rad   = math.rad(eng:get_camera_yaw())
 
     local forward_x = math.cos(yaw_rad)
     local forward_z = math.sin(yaw_rad)
@@ -78,6 +85,9 @@ function player_input_system(registry, eng)
 
         if eng:is_key_down("SPACE") then
             movement.jumpRequested = true
+
+            -- Play a sharp procedural jump sound! (660Hz E5 Beep, 0.1s duration)
+            engine:beep(660.0, 0.1, 0.2)
         end
     end
 end
@@ -89,9 +99,9 @@ function hybrid_health_and_speed_system(registry, dt)
     for ent, movement, combat in registry:view("MovementComponent", "combat") do
         if combat.hp < 40 then
             movement.speed = 3.0
-            
+
             if not combat.is_poisoned then
-                zahlen.log(string.format("Entity %s is limping! HP: %d/100 (Speed throttled dynamically)", 
+                zahlen.log(string.format("Entity %s is limping! HP: %d/100 (Speed throttled dynamically)",
                     tostring(ent), combat.hp))
                 combat.is_poisoned = true
             end
@@ -122,15 +132,15 @@ collision_channel = collision_channel or zahlen.create_channel()
 -- Start a cooperative Citizen AI task
 zahlen.task.dispatch(function()
     zahlen.log("Citizen AI Fiber started. Awaiting trigger event...")
-    
+
     while true do
-        -- 1. This SUSPENDS the Fiber. 
+        -- 1. This SUSPENDS the Fiber.
         -- Zero CPU cycles will be wasted updating this citizen every frame.
-        local event = collision_channel:pop() 
-        
+        local event = collision_channel:pop()
+
         -- 2. Woke up! Someone hit our trigger volume.
         zahlen.log("AI Woke up! Encountered trigger event: " .. event.name)
-        
+
         -- Process local AI reactive behavior
         if event.instigator == player_ent then
             zahlen.log("Citizen screams: 'Flee from the player!'")
@@ -140,7 +150,7 @@ end)
 
 -- This function is called by the C++ Trigger Volume system when an entity steps inside
 function on_trigger_entered(entity_id)
-    -- Push the data to the suspended AI Fiber. 
+    -- Push the data to the suspended AI Fiber.
     -- It will wake up immediately on an OS worker thread this frame.
     collision_channel:push({
         name = "PlayerProximityAlert",

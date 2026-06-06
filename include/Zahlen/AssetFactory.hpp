@@ -24,6 +24,7 @@ Mesh LoadCookedMesh(RenderContext& ctx, AssetManager& assetMgr, const std::strin
 uint32_t LoadCookedTexture(RenderContext& ctx, AssetManager& assetMgr,
 						   const std::string& virtualPath);
 
+template <bool CreatePhysics = false>
 std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::string& path);
 
 // --- NEW: Expose runtime skeletal animation update loop ---

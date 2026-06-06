@@ -13,6 +13,7 @@
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Entity.hpp>
 #include <physics/PhysicsWorld.hpp>
+#include <Zahlen/Types.hpp>
 
 // clang-format on
 
@@ -40,12 +41,12 @@ class ZHLN_API PhysicsContext {
 	PhysicsContext(const PhysicsConfig& cfg);
 
 	void Step(float deltaTime);
-	uint32_t GetActiveBodyCount() const;
-	size_t GetMemoryUsage() const;
+	[[nodiscard]] uint32_t GetActiveBodyCount() const;
+	[[nodiscard]] size_t GetMemoryUsage() const;
 
 	struct Impl;
-	Impl* GetImpl() const { return _impl.get(); }
-	const Physics::PhysicsWorld& GetWorld() const;
+	[[nodiscard]] Impl* GetImpl() const { return _impl.get(); }
+	[[nodiscard]] const Physics::PhysicsWorld& GetWorld() const;
 
 	void OptimizeBroadphase();
 
@@ -66,6 +67,14 @@ ZHLN::Entity CreateRigidBody(PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::RVe
 							 JPH::QuatArg rot, JPH::EMotionType motion, JPH::ObjectLayer layer,
 							 uint32_t materialID = 0, uint32_t category = 0xFFFFFFFF,
 							 uint32_t mask = 0xFFFFFFFF);
+
+JPH::ShapeRefC CreateMeshShape(const Vertex* vertices, uint32_t vertexCount,
+							   const uint32_t* indices, uint32_t indexCount);
+
+ZHLN::Entity CreateMeshBody(PhysicsContext& ctx, const Vertex* vertices, uint32_t vertexCount,
+							const uint32_t* indices, uint32_t indexCount, JPH::RVec3Arg pos,
+							JPH::QuatArg rot, uint32_t category = 0xFFFFFFFF,
+							uint32_t mask = 0xFFFFFFFF);
 
 ZHLN::Entity CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position,
 							 uint32_t category = 0xFFFFFFFF, uint32_t mask = 0xFFFFFFFF);

@@ -1,5 +1,6 @@
 // File: src/engine/glTFImporter.cpp
 #include "Zahlen/Components.hpp"
+#include "Zahlen/Engine.hpp"
 
 #include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Log.hpp>
@@ -222,6 +223,7 @@ Mesh LoadGLB(RenderContext& ctx, const std::string& path) {
 	return Mesh{.vertexBuffer = vbo, .vertexCount = static_cast<uint32_t>(vertexBuffer.size())};
 }
 
+template <bool CreatePhysics>
 std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::string& path) {
 	cgltf_options opts{};
 	cgltf_data* data = nullptr;
@@ -335,6 +337,18 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 
 			if (posAcc == nullptr) {
 				continue;
+			}
+
+			// ----------------------------------------------------------------
+			// Extract local bounds for Jolt collision mapping [6]
+			// ----------------------------------------------------------------
+			float localMin[3] = {0.0f, 0.0f, 0.0f};
+			float localMax[3] = {0.0f, 0.0f, 0.0f};
+			if (posAcc->has_min) {
+				std::copy(posAcc->min, posAcc->min + 3, localMin);
+			}
+			if (posAcc->has_max) {
+				std::copy(posAcc->max, posAcc->max + 3, localMax);
 			}
 
 			bool doubleSided = false;
@@ -534,7 +548,7 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 				}
 
 				// FIX: Do not use unrolled size. Use the original compact vertex count.
-				uint32_t currentVertexCount = static_cast<uint32_t>(primVertices.size());
+				auto currentVertexCount = static_cast<uint32_t>(primVertices.size());
 
 				std::vector<float> tempDeltas;
 				tempDeltas.resize(static_cast<size_t>(currentVertexCount) * activeMorphCount * 4,
@@ -591,25 +605,56 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 			float boundingRadius = std::sqrt(maxD2) * maxScale * 1.2f + 1.0f;
 
 			Entity part = reg.Create();
-			ZHLN::Log("[Diagnostics] Spawned submesh: '{}' -> Assigned Entity ID: {}",
-					  (node->name != nullptr) ? node->name : "Unnamed Node", part.index);
 			reg.Add(part, MeshComponent{.mesh = subMesh,
 										.material = subMaterial,
-										.cullRadius = boundingRadius, // <-- Safe, padded radius
+										.cullRadius = boundingRadius,
 										.localTransform = nodeTransform,
 										.prevTransform = nodeTransform,
 										.jointOffset = 0,
 										.isSkinned = (node->skin != nullptr),
-
-										// Assign morph target trackers:
 										.morphOffset = morphOffset,
 										.activeMorphCount = activeMorphCount,
-										// Pass default weights [1]
 										.morphWeights = {defaultWeights[0], defaultWeights[1],
 														 defaultWeights[2], defaultWeights[3]},
-
 										.gltfNode = (void*)node,
 										.gltfSkin = (void*)node->skin});
+
+			// ----------------------------------------------------------------
+			// 3. Compile-time Evaluated Physical Collider Generation
+			// ----------------------------------------------------------------
+			if constexpr (CreatePhysics) { // <-- Evaluated entirely at compile-time!
+				auto& pc = GetEngineContext()->GetPhysicsContext();
+
+				// Create a precise, concave static Jolt MeshShape directly from the GLB vertices
+				// and indices
+				JPH::ShapeRefC meshShape = Physics::CreateMeshShape(
+					primVertices.data(), static_cast<uint32_t>(primVertices.size()),
+					indices32.data(), indexCount);
+
+				if (meshShape) {
+					// We translate and rotate the static body based on the glTF node matrix
+					JPH::Vec3 translation = nodeTransform.GetTranslation();
+					JPH::Vec3 col0 = nodeTransform.GetColumn3(0);
+					JPH::Vec3 col1 = nodeTransform.GetColumn3(1);
+					JPH::Vec3 col2 = nodeTransform.GetColumn3(2);
+
+					if (maxScale > 1e-6f) {
+						col0 /= nodeScale.GetX();
+						col1 /= nodeScale.GetY();
+						col2 /= nodeScale.GetZ();
+					}
+
+					JPH::Mat44 rotationMatrix(JPH::Vec4(col0, 0.0f), JPH::Vec4(col1, 0.0f),
+											  JPH::Vec4(col2, 0.0f),
+											  JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f));
+					JPH::Quat rotation = rotationMatrix.GetQuaternion();
+
+					// Register the static physical body in Jolt
+					reg.Add(part, PhysicsComponent{Physics::CreateRigidBody(
+									  pc, meshShape, JPH::RVec3(translation), rotation,
+									  JPH::EMotionType::Static, 0)});
+				}
+			}
 			spawnedEntities.push_back(part);
 		}
 	}
@@ -618,4 +663,9 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 		spawnedEntities.size());
 	return spawnedEntities;
 }
+
+template std::vector<Entity> SpawnGLB<true>(RenderContext& ctx, ECS::Registry& reg,
+											const std::string& path);
+template std::vector<Entity> SpawnGLB<false>(RenderContext& ctx, ECS::Registry& reg,
+											 const std::string& path);
 } // namespace ZHLN::AssetFactory

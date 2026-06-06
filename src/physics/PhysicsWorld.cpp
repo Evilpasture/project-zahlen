@@ -4,6 +4,7 @@
 
 #include <cstring>
 #include <new>
+#include <type_traits>
 
 namespace ZHLN::Physics {
 
@@ -13,8 +14,9 @@ template <typename T> [[nodiscard]] static T* AllocateAligned(size_t count, size
 }
 
 template <typename T> static void DeallocateAligned(T* ptr, size_t alignment) {
-	if (ptr)
+	if (ptr) {
 		::operator delete[](ptr, std::align_val_t{alignment});
+	}
 }
 
 template <typename T>
@@ -30,9 +32,11 @@ static void ReallocateAligned(T*& ptr, size_t old_count, size_t new_count, size_
 }
 
 template <typename T> static void ReallocateStandard(T*& ptr, size_t old_count, size_t new_count) {
+	static_assert(std::is_trivially_copyable_v<T>);
 	T* new_ptr = new T[new_count]();
 	if (ptr && old_count > 0) {
-		std::memcpy(new_ptr, ptr, old_count * sizeof(T));
+		std::memcpy(static_cast<void*>(new_ptr), static_cast<const void*>(ptr),
+					old_count * sizeof(T));
 		delete[] ptr;
 	} else {
 		delete[] ptr;

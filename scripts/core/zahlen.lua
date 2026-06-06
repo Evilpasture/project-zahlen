@@ -10,8 +10,10 @@ local vec3 = {}
 vec3.__index = vec3
 
 function vec3.__add(a, b) return ffi.new("vec3", a.x + b.x, a.y + b.y, a.z + b.z) end
+
 function vec3.__sub(a, b) return ffi.new("vec3", a.x - b.x, a.y - b.y, a.z - b.z) end
-function vec3.__unm(a)    return ffi.new("vec3", -a.x, -a.y, -a.z) end
+
+function vec3.__unm(a) return ffi.new("vec3", -a.x, -a.y, -a.z) end
 
 function vec3.__mul(a, b)
     if type(a) == "number" then
@@ -23,8 +25,9 @@ function vec3.__mul(a, b)
     return a.x * b.x + a.y * b.y + a.z * b.z
 end
 
-function vec3:length_sq() return self.x*self.x + self.y*self.y + self.z*self.z end
-function vec3:length()    return math.sqrt(self:length_sq()) end
+function vec3:length_sq() return self.x * self.x + self.y * self.y + self.z * self.z end
+
+function vec3:length() return math.sqrt(self:length_sq()) end
 
 function vec3:normalized()
     local len = self:length()
@@ -33,7 +36,7 @@ function vec3:normalized()
 end
 
 function vec3:cross(b)
-    return ffi.new("vec3", 
+    return ffi.new("vec3",
         self.y * b.z - self.z * b.y,
         self.z * b.x - self.x * b.z,
         self.x * b.y - self.y * b.x
@@ -111,7 +114,7 @@ function zahlen.task.update()
                 _G.zahlen.log("Error in Task: " .. tostring(res))
                 table.remove(active_tasks, i)
             elseif res == "WAIT_CHANNEL" then
-                -- The task is waiting on an empty channel. Remove it from 
+                -- The task is waiting on an empty channel. Remove it from
                 -- active scheduling so we do not auto-resume it next frame.
                 table.remove(active_tasks, i)
             else
@@ -138,9 +141,9 @@ end
 -- ============================================================================
 local World = {}
 World.__index = function(self, key)
-    if key == "positions"  then return track(mem.C.ZHLN_GetPhysicsPositions(self.engine)) end
+    if key == "positions" then return track(mem.C.ZHLN_GetPhysicsPositions(self.engine)) end
     if key == "velocities" then return track(mem.C.ZHLN_GetPhysicsLinearVelocities(self.engine)) end
-    if key == "contacts"   then return track(mem.C.ZHLN_GetPhysicsContactEvents(self.engine)) end
+    if key == "contacts" then return track(mem.C.ZHLN_GetPhysicsContactEvents(self.engine)) end
     return World[key]
 end
 
@@ -175,9 +178,9 @@ end
 function World:raycast(ox, oy, oz, dx, dy, dz, max_dist, ignore_handle)
     max_dist = max_dist or 1000.0
     ignore_handle = ignore_handle or 0ULL
-    
+
     local res = mem.C.ZHLN_Raycast(self.engine, ox, oy, oz, dx, dy, dz, max_dist, ignore_handle)
-    
+
     if res.hasHit == 1 then
         return {
             entity = res.entity,
@@ -202,13 +205,22 @@ end
 -- ============================================================================
 
 local KEY_MAP = {
-    W = 1, w = 1,
-    A = 2, a = 2,
-    S = 3, s = 3,
-    D = 4, d = 4,
-    LSHIFT = 5, lshift = 5, SHIFT = 5, shift = 5,
-    RBUTTON = 6, rbutton = 6,
-    SPACE = 7, space = 7
+    W = 1,
+    w = 1,
+    A = 2,
+    a = 2,
+    S = 3,
+    s = 3,
+    D = 4,
+    d = 4,
+    LSHIFT = 5,
+    lshift = 5,
+    SHIFT = 5,
+    shift = 5,
+    RBUTTON = 6,
+    rbutton = 6,
+    SPACE = 7,
+    space = 7
 }
 
 local Engine = {}
@@ -234,7 +246,7 @@ end
 
 -- Redefine standard logging to feel like Python
 function zahlen.log(...)
----@diagnostic disable-next-line: undefined-field
+    ---@diagnostic disable-next-line: undefined-field
     _G.zahlen.log(...)
 end
 
@@ -285,6 +297,18 @@ function Channel:pop()
     -- No items. Register this coroutine as suspended, and yield the "WAIT_CHANNEL" token
     table.insert(self.waiters, co)
     return coroutine.yield("WAIT_CHANNEL")
+end
+
+function Engine:play_sound(filepath, volume)
+    mem.C.ZHLN_PlayOneShot(self.raw, filepath, volume or 1.0)
+end
+
+function Engine:play_sound_3d(filepath, x, y, z, volume)
+    mem.C.ZHLN_PlayOneShot3D(self.raw, filepath, x, y, z, volume or 1.0)
+end
+
+function Engine:beep(frequency, duration, volume)
+    mem.C.ZHLN_PlayProceduralBeep(self.raw, frequency or 440.0, duration or 0.15, volume or 0.25)
 end
 
 return zahlen

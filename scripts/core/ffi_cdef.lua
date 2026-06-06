@@ -26,7 +26,7 @@ if not ok then
 
         ZHLN_BufferView ZHLN_GetECSBuffer(ZHLN_Engine* engine, const char* componentName);
         ZHLN_BufferView ZHLN_GetECSEntities(ZHLN_Engine* engine, const char* componentName);
-        
+
         int ZHLN_IsKeyDown(ZHLN_Engine* engine, uint8_t key);
         void ZHLN_GetMouseDelta(ZHLN_Engine* engine, float* outX, float* outY);
         float ZHLN_GetCameraYaw(struct ZHLN_Engine* engine);
@@ -74,9 +74,9 @@ if not ok then
             int hasHit;
         } ZHLN_RaycastResult;
 
-        ZHLN_RaycastResult ZHLN_Raycast(ZHLN_Engine* engine, 
-                                        double ox, double oy, double oz, 
-                                        float dx, float dy, float dz, 
+        ZHLN_RaycastResult ZHLN_Raycast(ZHLN_Engine* engine,
+                                        double ox, double oy, double oz,
+                                        float dx, float dy, float dz,
                                         float maxDist, uint64_t ignoreEntity);
 
         void ZHLN_SetMovementInput(ZHLN_Engine* handle, uint64_t entityRaw, float x, float z);
@@ -90,7 +90,7 @@ if not ok then
             float speed;
             float jumpForce;
         } MovementComponent;
-        
+
         // Expose our new C-API bridge function
         void* ZHLN_GetComponent(ZHLN_Engine* engine, uint64_t entityRaw, const char* componentName);
 
@@ -101,6 +101,10 @@ if not ok then
         void ZHLN_DestroyLuaChannel(ZHLN_LuaChannel* chan);
         void ZHLN_PushLuaChannel(ZHLN_Engine* engine, ZHLN_LuaChannel* chan, struct lua_State* L);
         void ZHLN_PopLuaChannel(ZHLN_Engine* engine, ZHLN_LuaChannel* chan, struct lua_State* L);
+
+        void ZHLN_PlayOneShot(ZHLN_Engine* engine, const char* filepath, float volume);
+        void ZHLN_PlayOneShot3D(ZHLN_Engine* engine, const char* filepath, float x, float y, float z, float volume);
+        void ZHLN_PlayProceduralBeep(ZHLN_Engine* engine, float frequency, float duration, float volume);
     ]]
 end
 

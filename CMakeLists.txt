@@ -67,7 +67,8 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/src/render)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/threading)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/physics)  
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/ecs)
-add_subdirectory(${CMAKE_SOURCE_DIR}/src/alife) 
+add_subdirectory(${CMAKE_SOURCE_DIR}/src/alife)
+add_subdirectory(${CMAKE_SOURCE_DIR}/src/audio)
 
 option(BUILD_TESTING "Build the render module test suite" OFF)
 if(BUILD_TESTING)
@@ -100,6 +101,7 @@ set(ENGINE_SOURCES
     src/engine/ProfilerUI.cpp
     src/engine/Text.cpp
     src/engine/system/MovementSystem.cpp
+    src/engine/system/AudioSystem.cpp
     src/engine/Sky.cpp
     src/engine/BRDFLUT.cpp
 )
@@ -128,7 +130,8 @@ target_link_libraries(zahlen_engine PRIVATE
     zahlen_physics  
     zahlen_threading
     zahlen_ecs 
-    zahlen_alife 
+    zahlen_alife
+    zahlen_audio
     glfw
     LuaJIT
     spirv_reflect

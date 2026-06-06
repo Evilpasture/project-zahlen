@@ -1,4 +1,6 @@
 -- scripts/core/ecs.lua
+-- Cross-version Lua compatibility shim for unpack
+table.unpack = table.unpack or _G.unpack or unpack
 local ffi = require("scripts.core.ffi_cdef")
 local mem = require("scripts.core.memoryview")
 
@@ -16,10 +18,10 @@ local NATIVE_COMPONENTS = {
 function Registry.new(engine_raw)
     return setmetatable({
         engine = engine_raw,
-        pools = {},        -- componentName -> { entity_id -> component_data } (Lua-only)
-        sizes = {},        -- componentName -> count
-        entities = {},     -- entity_id -> true
-        next_id = 1,       -- Fallback for purely Lua-created entities
+        pools = {},    -- componentName -> { entity_id -> component_data } (Lua-only)
+        sizes = {},    -- componentName -> count
+        entities = {}, -- entity_id -> true
+        next_id = 1,   -- Fallback for purely Lua-created entities
     }, Registry)
 end
 
@@ -37,14 +39,14 @@ function Registry:create(ent)
     if not ent then
         self.next_id = self.next_id + 1
     end
-    
+
     self.entities[id] = true
     return id
 end
 
 function Registry:destroy(ent)
     if not self.entities[ent] then return end
-    
+
     -- Remove from all component pools and update size counters
     for name, pool in pairs(self.pools) do
         if pool[ent] ~= nil then
@@ -52,7 +54,7 @@ function Registry:destroy(ent)
             self.sizes[name] = self.sizes[name] - 1
         end
     end
-    
+
     self.entities[ent] = nil
 end
 
@@ -89,13 +91,13 @@ function Registry:add(ent, comp_name, data)
         if pool[ent] == nil then
             self.sizes[comp_name] = self.sizes[comp_name] + 1
         end
-        
+
         if type(data) == "function" then
             pool[ent] = data()
         else
             pool[ent] = data or {}
         end
-        
+
         return pool[ent]
     end
 end
@@ -138,7 +140,7 @@ end
 -- ============================================================================
 
 function Registry:view(...)
-    local comps = {...}
+    local comps = { ... }
     local n = #comps
     if n == 0 then return function() end end
 
@@ -162,7 +164,7 @@ function Registry:view(...)
     local entities_view = ffi.C.ZHLN_GetECSEntities(self.engine, primary_native)
     local count = tonumber(entities_view.shape[0])
     local entity_array = ffi.cast("uint64_t*", entities_view.buf)
-    
+
     local index = 0
 
     return function()
@@ -196,7 +198,7 @@ end
 -- ============================================================================
 
 function Registry:pure_lua_view(...)
-    local comps = {...}
+    local comps = { ... }
     local n = #comps
     if n == 0 then
         return function() end
@@ -212,23 +214,23 @@ function Registry:pure_lua_view(...)
             ent, val = next(p1, ent)
             if ent then return ent, val end
         end
-    
-    -- Fast Path: Double component query (iterates over the smaller pool)
+
+        -- Fast Path: Double component query (iterates over the smaller pool)
     elseif n == 2 then
         local name1, name2 = comps[1], comps[2]
         local p1, p2 = self.pools[name1] or {}, self.pools[name2] or {}
         local swap = (self.sizes[name1] or 0) > (self.sizes[name2] or 0)
-        
+
         local iter_pool, check_pool = p1, p2
         if swap then iter_pool, check_pool = p2, p1 end
-        
+
         local ent = nil
         return function()
             while true do
                 local val
                 ent, val = next(iter_pool, ent)
                 if not ent then return nil end
-                
+
                 local other_val = check_pool[ent]
                 if other_val ~= nil then
                     if swap then
@@ -239,18 +241,18 @@ function Registry:pure_lua_view(...)
                 end
             end
         end
-        
-    -- Fast Path: Triple component query
+
+        -- Fast Path: Triple component query
     elseif n == 3 then
         local name1, name2, name3 = comps[1], comps[2], comps[3]
         local p1 = self.pools[name1] or {}
         local p2 = self.pools[name2] or {}
         local p3 = self.pools[name3] or {}
-        
+
         local s1 = self.sizes[name1] or 0
         local s2 = self.sizes[name2] or 0
         local s3 = self.sizes[name3] or 0
-        
+
         local ent = nil
         if s1 <= s2 and s1 <= s3 then
             return function()
@@ -320,7 +322,7 @@ function Registry:pure_lua_view(...)
         while true do
             ent, val = next(smallest_pool, ent)
             if not ent then return nil end
-            
+
             local matches = true
             for p = 1, #other_pools do
                 if other_pools[p][ent] == nil then
@@ -328,7 +330,7 @@ function Registry:pure_lua_view(...)
                     break
                 end
             end
-            
+
             if matches then
                 local results = {}
                 for i = 1, n do
@@ -341,3 +343,4 @@ function Registry:pure_lua_view(...)
 end
 
 return Registry
+
