@@ -1,5 +1,7 @@
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Sync.hpp"
+#include "ecs/ECS.hpp"
+#include "physics/Physics.hpp"
 
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Components.hpp>
@@ -124,16 +126,15 @@ ZHLN_BufferView ZHLN_GetPhysicsContactEvents(ZHLN_Engine* engine_handle) {
 }
 
 void* ZHLN_GetComponent(ZHLN_Engine* engine_handle, uint64_t entityRaw, const char* componentName) {
-    auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
-    auto entity = ZHLN::Entity::Unpack(entityRaw);
-    auto& reg = engine->GetRegistry();
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	auto entity = ZHLN::Entity::Unpack(entityRaw);
+	auto& reg = engine->GetRegistry();
 
-    auto it = ZHLN::ECS::Registry::s_NameToFamilyID.find(componentName);
-    if (it == ZHLN::ECS::Registry::s_NameToFamilyID.end()) {
-        return nullptr; // Not a registered C++ component
-    }
+	auto it = ZHLN::ECS::Registry::s_NameToFamilyID.find(componentName);
+	if (it == ZHLN::ECS::Registry::s_NameToFamilyID.end()) {
+		return nullptr; // Not a registered C++ component
+	}
 
-    return reg.GetRawByFamily(entity, it->second);
+	return reg.GetRawByFamily(entity, it->second);
 }
-
 }

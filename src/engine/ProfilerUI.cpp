@@ -1,6 +1,9 @@
 #include "Allocator.hpp" // For MemoryStats
 #include "Zahlen/Components.hpp"
+#include "Zahlen/Render.hpp"
+#include "ecs/ECS.hpp"
 #include "engine/RenderState.hpp"
+#include "physics/Physics.hpp"
 
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Profiler.hpp>

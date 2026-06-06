@@ -1,3 +1,6 @@
+#include "Zahlen/Camera.hpp"
+#include "physics/Physics.hpp"
+
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <atomic>
@@ -56,7 +59,7 @@ static void PerformDiagnosticDump(int sig, void* addr, Engine* engine) {
 				 Color::Reset);
 	std::println(stderr, "Faulting Address: {}{}{}", Color::Yellow, addr, Color::Reset);
 
-	if (engine) {
+	if (engine != nullptr) {
 		// 1. High-level structure trace
 		ZHLN_TRACE(*engine);
 
@@ -86,7 +89,7 @@ static void PerformDiagnosticDump(int sig, void* addr, Engine* engine) {
 		ZHLN_DUMP(cam.frustum);
 
 		// 5. Physics Trace
-		if (engine->GetPhysicsContext().GetImpl()) {
+		if (engine->GetPhysicsContext().GetImpl() != nullptr) {
 			ZHLN_TRACE(engine->GetPhysicsContext().GetWorld());
 		}
 	}
@@ -160,8 +163,9 @@ static void PosixCrashHandler(int sig, siginfo_t* info, [[maybe_unused]] void* c
 
 void CheckForCrashes(Engine* engine) {
 	int sig = s_PendingSignal.load();
-	if (sig <= 0)
+	if (sig <= 0) {
 		return;
+	}
 
 	s_PendingSignal.store(-1);
 	PerformDiagnosticDump(sig, s_FaultAddr.load(), engine);
@@ -172,7 +176,7 @@ void SetupSignalHandler() {
 #ifdef _WIN32
 	AddVectoredExceptionHandler(1, VectoredCrashHandler);
 #else
-	struct sigaction sa;
+	struct sigaction sa{};
 	sa.sa_sigaction = PosixCrashHandler;
 	sigemptyset(&sa.sa_mask);
 	sa.sa_flags = SA_SIGINFO;

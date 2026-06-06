@@ -1,51 +1,53 @@
 #pragma once
-#include <Zahlen/AssetManager.hpp>
-#include <Zahlen/Audio.hpp>
-#include <Zahlen/Camera.hpp>
+#include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
-#include <Zahlen/Input.hpp>
-#include <Zahlen/Render.hpp>
-#include <Zahlen/Window.hpp>
-#include <Zahlen/alife/Simulator.hpp>
-#include <ecs/ECS.hpp>
 #include <memory>
-#include <physics/Physics.hpp>
 
 namespace ZHLN {
+
+// Forward declarations for return types of the public facade
+class InputContext;
+class Window;
+class RenderContext;
+class PhysicsContext;
+class AudioContext;
+class AssetManager;
+struct Camera;
+struct EngineImpl; // Unified implementation footprint
+
+namespace ALife {
+class Simulator;
+}
+
+namespace ECS {
+class Registry;
+}
 
 class ZHLN_API Engine {
   public:
 	Engine();
+	Engine(const EngineConfig& cfg);
 	~Engine();
 
-	bool IsRunning() const;
+	[[nodiscard]] bool IsRunning() const;
 	void ProcessEvents();
 	void BeginFrame();
 	void EndFrame();
 
-	Engine(const EngineConfig& cfg = EngineConfig{});
-
-	RenderContext& GetRenderContext() { return *_renderContext; }
-	PhysicsContext& GetPhysicsContext() { return *_physicsContext; }
-	Window& GetWindow() { return *_window; }
-	InputContext& GetInput() { return *_input; }
-	Camera& GetCamera() { return _mainCamera; }
-	ALife::Simulator& GetALife() { return *_alifeSimulator; }
-	AssetManager& GetAssetManager() { return *_assetManager; }
-	AudioContext& GetAudioContext() { return *_audioContext; }
-
-	ECS::Registry& GetRegistry() { return _registry; }
+	// FACADE ACCESSORS: Zero transitive header footprint
+	Window& GetWindow();
+	PhysicsContext& GetPhysicsContext();
+	RenderContext& GetRenderContext();
+	InputContext& GetInput();
+	Camera& GetCamera();
+	ALife::Simulator& GetALife();
+	AssetManager& GetAssetManager();
+	AudioContext& GetAudioContext();
+	ECS::Registry& GetRegistry();
 
   private:
-	std::unique_ptr<InputContext> _input;
-	std::unique_ptr<Window> _window;
-	std::unique_ptr<RenderContext> _renderContext;
-	std::unique_ptr<PhysicsContext> _physicsContext;
-	std::unique_ptr<AudioContext> _audioContext;
-	std::unique_ptr<ALife::Simulator> _alifeSimulator;
-	std::unique_ptr<AssetManager> _assetManager;
-	Camera _mainCamera;
-	ECS::Registry _registry;
+	std::unique_ptr<EngineImpl> _impl; // The lone keeper of the keys
 };
+
 Engine* GetEngineContext();
 } // namespace ZHLN

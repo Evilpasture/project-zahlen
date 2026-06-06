@@ -1,3 +1,6 @@
+#include "Zahlen/Camera.hpp"
+#include "Zahlen/Input.hpp"
+
 #include <Zahlen/Console.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Scripting.h>
@@ -13,39 +16,37 @@ extern "C" {
 #include <lualib.h>
 }
 
-
 struct ZHLN_LuaChannel {
-    ZHLN::Channel<int> channel; // Stores the Lua Registry Reference index
+	ZHLN::Channel<int> channel; // Stores the Lua Registry Reference index
 };
-
 
 extern "C" {
 
 ZHLN_LuaChannel* ZHLN_CreateLuaChannel(void) {
-    return new ZHLN_LuaChannel();
+	return new ZHLN_LuaChannel();
 }
 
 void ZHLN_DestroyLuaChannel(ZHLN_LuaChannel* chan) {
-    delete chan;
+	delete chan;
 }
 
 void ZHLN_PushLuaChannel(ZHLN_Engine* /*engine*/, ZHLN_LuaChannel* chan, lua_State* L) {
-    // 1. Convert the object at the top of the Lua stack into a registry ref
-    int ref = luaL_ref(L, LUA_REGISTRYINDEX);
-    
-    // 2. Safely push the reference into the channel
-    chan->channel.Push(ref);
+	// 1. Convert the object at the top of the Lua stack into a registry ref
+	int ref = luaL_ref(L, LUA_REGISTRYINDEX);
+
+	// 2. Safely push the reference into the channel
+	chan->channel.Push(ref);
 }
 
 void ZHLN_PopLuaChannel(ZHLN_Engine* /*engine*/, ZHLN_LuaChannel* chan, lua_State* L) {
-    // 1. Pop the reference (This will block/yield the current Fiber if empty!)
-    int ref = chan->channel.Pop();
+	// 1. Pop the reference (This will block/yield the current Fiber if empty!)
+	int ref = chan->channel.Pop();
 
-    // 2. Fetch the referenced Lua object from the registry back to the Lua stack
-    lua_rawgeti(L, LUA_REGISTRYINDEX, ref);
+	// 2. Fetch the referenced Lua object from the registry back to the Lua stack
+	lua_rawgeti(L, LUA_REGISTRYINDEX, ref);
 
-    // 3. Deallocate the registry index so the GC can clean up the object later
-    luaL_unref(L, LUA_REGISTRYINDEX, ref);
+	// 3. Deallocate the registry index so the GC can clean up the object later
+	luaL_unref(L, LUA_REGISTRYINDEX, ref);
 }
 }
 
@@ -84,12 +85,14 @@ static int LuaBridge_Log(lua_State* L) {
 		lua_pushvalue(L, i);  // Push the argument
 		lua_call(L, 1, 1);	  // Call tostring(arg)
 
-		size_t len;
+		size_t len = 0;
 		const char* s = lua_tolstring(L, -1, &len);
-		if (i > 1)
+		if (i > 1) {
 			msg += "\t";
-		if (s)
+		}
+		if (s) {
 			msg += std::string(s, len);
+		}
 
 		lua_pop(L, 1); // Pop the string result
 	}
@@ -97,8 +100,9 @@ static int LuaBridge_Log(lua_State* L) {
 
 	// 3. Hand off to our manual C++ Logger
 	std::string_view file = ar.short_src;
-	if (auto pos = file.find_last_of("/\\"); pos != std::string_view::npos)
+	if (auto pos = file.find_last_of("/\\"); pos != std::string_view::npos) {
 		file.remove_prefix(pos + 1);
+	}
 
 	// Call your Engine's LogManual (defined in Log.hpp)
 	LogManual(file, ar.currentline, msg, Color::Green);
@@ -137,12 +141,14 @@ static int LuaBridge_Warn(lua_State* L) {
 		lua_pushvalue(L, i);  // Push the argument
 		lua_call(L, 1, 1);	  // Call tostring(arg)
 
-		size_t len;
+		size_t len = 0;
 		const char* s = lua_tolstring(L, -1, &len);
-		if (i > 1)
+		if (i > 1) {
 			msg += "\t";
-		if (s)
+		}
+		if (s) {
 			msg += std::string(s, len);
+		}
 
 		lua_pop(L, 1); // Pop the string result
 	}
@@ -184,8 +190,9 @@ ScriptRunner::ScriptRunner() {
 }
 
 ScriptRunner::~ScriptRunner() {
-	if (L)
+	if (L != nullptr) {
 		lua_close(L);
+	}
 }
 
 void ScriptRunner::RunFile(std::string_view path) {
@@ -236,8 +243,9 @@ void ScriptRunner::ReloadFile(std::string_view path) {
 	std::string moduleName = std::string(path);
 
 	// Convert "scripts/gameplay.lua" -> "scripts.gameplay"
-	if (size_t pos = moduleName.find(".lua"); pos != std::string::npos)
+	if (size_t pos = moduleName.find(".lua"); pos != std::string::npos) {
 		moduleName.erase(pos);
+	}
 	std::replace(moduleName.begin(), moduleName.end(), '/', '.');
 
 	std::string resetCode = std::format("package.loaded['{}'] = nil", moduleName);

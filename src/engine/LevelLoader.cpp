@@ -1,4 +1,5 @@
 #include "Zahlen/Components.hpp"
+#include "physics/Physics.hpp"
 
 #include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Engine.hpp>
@@ -36,7 +37,7 @@ void LoadLevel(Engine& engine, const std::string& path, Material material) {
 
 	for (cgltf_size i = 0; i < data->nodes_count; ++i) {
 		const cgltf_node* node = &data->nodes[i];
-		if (!node->mesh) {
+		if (node->mesh == nullptr) {
 			continue; // Skip structural nodes that don't contain renderable geometry
 		}
 
@@ -54,12 +55,15 @@ void LoadLevel(Engine& engine, const std::string& path, Material material) {
 		JPH::Vec3 scale(col0.Length(), col1.Length(), col2.Length());
 
 		// Normalize basis columns to extract the pure rotation quaternion
-		if (scale.GetX() > 1e-6f)
+		if (scale.GetX() > 1e-6f) {
 			col0 /= scale.GetX();
-		if (scale.GetY() > 1e-6f)
+		}
+		if (scale.GetY() > 1e-6f) {
 			col1 /= scale.GetY();
-		if (scale.GetZ() > 1e-6f)
+		}
+		if (scale.GetZ() > 1e-6f) {
 			col2 /= scale.GetZ();
+		}
 
 		JPH::Mat44 rotationMatrix(JPH::Vec4(col0, 0.0f), JPH::Vec4(col1, 0.0f),
 								  JPH::Vec4(col2, 0.0f), JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f));
@@ -85,15 +89,16 @@ void LoadLevel(Engine& engine, const std::string& path, Material material) {
 
 				for (cgltf_size a = 0; a < prim.attributes_count; ++a) {
 					const auto& attr = prim.attributes[a];
-					if (attr.type == cgltf_attribute_type_position)
+					if (attr.type == cgltf_attribute_type_position) {
 						pAcc = attr.data;
-					else if (attr.type == cgltf_attribute_type_normal)
+					} else if (attr.type == cgltf_attribute_type_normal) {
 						nAcc = attr.data;
-					else if (attr.type == cgltf_attribute_type_texcoord && attr.index == 0)
+					} else if (attr.type == cgltf_attribute_type_texcoord && attr.index == 0) {
 						uAcc = attr.data;
+					}
 				}
 
-				if (!pAcc) {
+				if (pAcc == nullptr) {
 					continue;
 				}
 
@@ -114,13 +119,15 @@ void LoadLevel(Engine& engine, const std::string& path, Material material) {
 					cgltf_accessor_read_float(pAcc, vIdx, v.position, 3);
 
 					float norm[3] = {0.0f, 1.0f, 0.0f};
-					if (nAcc)
+					if (nAcc != nullptr) {
 						cgltf_accessor_read_float(nAcc, vIdx, norm, 3);
+					}
 					v.normal = Math::PackNormal(norm[0], norm[1], norm[2]);
 
 					float uv[2] = {0.0f, 0.0f};
-					if (uAcc)
+					if (uAcc != nullptr) {
 						cgltf_accessor_read_float(uAcc, vIdx, uv, 2);
+					}
 					v.uv = Math::PackUV(uv[0], uv[1]);
 
 					v.color = Math::PackColor(1.0f, 1.0f, 1.0f, 1.0f);

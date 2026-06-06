@@ -1,6 +1,9 @@
 // src/game_main.cpp
+#include "Zahlen/Input.hpp"
+#include "Zahlen/alife/Types.hpp"
 #include "engine/FileWatcher.hpp"
 #include "engine/Platform.hpp"
+#include "physics/Physics.hpp"
 
 #include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Camera.hpp>

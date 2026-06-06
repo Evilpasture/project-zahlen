@@ -1,3 +1,5 @@
+#include "ecs/ECS.hpp"
+
 #include <Zahlen/Common.h>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>

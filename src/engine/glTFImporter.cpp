@@ -1,6 +1,7 @@
 // File: src/engine/glTFImporter.cpp
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
+#include "physics/Physics.hpp"
 
 #include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Log.hpp>

@@ -1,4 +1,11 @@
+#include "Zahlen/Camera.hpp"
+#include "Zahlen/Input.hpp"
+#include "Zahlen/alife/Simulator.hpp"
+#include "Zahlen/alife/Types.hpp"
+#include "physics/Physics.hpp"
+
 #include <GLFW/glfw3.h> // Fixes: GLFWwindow, glfwGetMouseButton, etc.
+#include <Jolt/Physics/Collision/CastResult.h>
 #include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/Components.hpp>
