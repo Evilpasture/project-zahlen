@@ -76,50 +76,46 @@ void RenderContext::BeginFrame() {
 	ZHLN_BeginCommandBuffer(_impl->current_cmd);
 
 	if (_impl->needsInitialClear) {
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-			_impl->current_cmd, _impl->sceneColor.image.Handle());
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-			_impl->current_cmd, _impl->velocityBuffer.image.Handle());
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-			_impl->current_cmd, _impl->accumBuffers[0].image.Handle());
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-			_impl->current_cmd, _impl->accumBuffers[1].image.Handle());
+		auto sColor_u = _impl->sceneColor.State();
+		auto sVel_u = _impl->velocityBuffer.State();
+		auto sAcc0_u = _impl->accumBuffers[0].State();
+		auto sAcc1_u = _impl->accumBuffers[1].State();
 
-		// Self-contained DynamicPass clears the framebuffers once on startup
+		auto sColor_att =
+			Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(_impl->current_cmd, sColor_u);
+		auto sVel_att =
+			Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(_impl->current_cmd, sVel_u);
+		auto sAcc0_att =
+			Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(_impl->current_cmd, sAcc0_u);
+		auto sAcc1_att =
+			Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(_impl->current_cmd, sAcc1_u);
+
+		// Self-contained DynamicPass clears the framebuffers once on startup (Compile-time
+		// verified!)
 		Vk::DynamicPass<4, false>(_impl->presentation.swapchain.Get().extent)
-			.Color(0, _impl->sceneColor.view.Get(), VK_ATTACHMENT_LOAD_OP_CLEAR)
-			.Color(1, _impl->velocityBuffer.view.Get(), VK_ATTACHMENT_LOAD_OP_CLEAR)
-			.Color(2, _impl->accumBuffers[0].view.Get(), VK_ATTACHMENT_LOAD_OP_CLEAR)
-			.Color(3, _impl->accumBuffers[1].view.Get(), VK_ATTACHMENT_LOAD_OP_CLEAR)
+			.Color(0, sColor_att, VK_ATTACHMENT_LOAD_OP_CLEAR)
+			.Color(1, sVel_att, VK_ATTACHMENT_LOAD_OP_CLEAR)
+			.Color(2, sAcc0_att, VK_ATTACHMENT_LOAD_OP_CLEAR)
+			.Color(3, sAcc1_att, VK_ATTACHMENT_LOAD_OP_CLEAR)
 			.ClearColor(0, 0.0f, 0.0f, 0.0f, 1.0f)
 			.ClearColor(1, 0.0f, 0.0f, 0.0f, 1.0f)
 			.ClearColor(2, 0.0f, 0.0f, 0.0f, 1.0f)
 			.ClearColor(3, 0.0f, 0.0f, 0.0f, 1.0f)
 			.Execute(_impl->current_cmd, []() {});
 
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-			_impl->current_cmd, _impl->sceneColor.image.Handle());
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-			_impl->current_cmd, _impl->velocityBuffer.image.Handle());
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-			_impl->current_cmd, _impl->accumBuffers[0].image.Handle());
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-			_impl->current_cmd, _impl->accumBuffers[1].image.Handle());
+		auto sColor_ro = Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+			_impl->current_cmd, sColor_att);
+		auto sVel_ro =
+			Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(_impl->current_cmd, sVel_att);
+		auto sAcc0_ro =
+			Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(_impl->current_cmd, sAcc0_att);
+		auto sAcc1_ro =
+			Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(_impl->current_cmd, sAcc1_att);
 
 		for (int i = 0; i < 2; ++i) {
-			_impl->taaPass.WriteIndex(
-				_impl->ctx.Device(), i,
-				Vk::ImageWrite{.view = _impl->sceneColor.view.Get(),
-							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-				Vk::ImageWrite{.view = _impl->accumBuffers[1 - i].view.Get(),
-							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-				Vk::ImageWrite{.view = _impl->velocityBuffer.view.Get(),
-							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-				Vk::SamplerWrite{.sampler = _impl->defaultSampler.Get()});
+			_impl->taaPass.WriteIndex(_impl->ctx.Device(), i, sColor_ro,
+									  i == 0 ? sAcc1_ro : sAcc0_ro, sVel_ro,
+									  Vk::SamplerWrite{.sampler = _impl->defaultSampler.Get()});
 		}
 
 		_impl->needsInitialClear = false;
@@ -127,18 +123,16 @@ void RenderContext::BeginFrame() {
 }
 
 void RenderContext::Impl::RenderShadowPass(VkCommandBuffer cmd) {
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-		cmd, shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+	auto shadow_u = shadowMap.State();
+	auto shadow_att = Vk::Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, shadow_u);
 
 	Vk::DynamicPass<0, true>({.width = SHADOW_RES, .height = SHADOW_RES})
-		.Depth(shadowMap.view.Get(), VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-			   1.0f)
+		.Depth(shadow_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1.0f)
 		.Execute(cmd, [&]() {
 			for (const auto& draw : drawQueue) {
 				auto* mesh = std::bit_cast<NativeMesh*>(draw.mesh);
 				JPH::Mat44 lightMVP = shadowProjView * draw.transform;
 
-				// Correct Designated Initializer Order (C++23)
 				FrameConstants shadowConstants = {
 					.transform = lightMVP,
 					.prevTransform = JPH::Mat44::sIdentity(),
@@ -177,9 +171,8 @@ void RenderContext::Impl::RenderShadowPass(VkCommandBuffer cmd) {
 			}
 		});
 
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-						 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, shadowMap.image.Handle(),
-																   VK_IMAGE_ASPECT_DEPTH_BIT);
+	// Cast to void to silence [[nodiscard]], as we don't need the token right now
+	(void)Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, shadow_att);
 }
 
 void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd) {
@@ -210,21 +203,34 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 	}
 	drawQueue = std::move(sortedDrawQueue);
 
-	// 2. Transition layouts to optimal states before starting the render pass
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-						 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, sceneColor.image.Handle());
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-						 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd,
-																   velocityBuffer.image.Handle());
+	// 2. Type-Safe Subpass Transitions
+	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> sceneColor_ro = {
+		.handle = sceneColor.image.Handle(),
+		.view = sceneColor.view.Get(),
+		.extent = sceneColor.extent,
+		.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
+	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> velocity_ro = {
+		.handle = velocityBuffer.image.Handle(),
+		.view = velocityBuffer.view.Get(),
+		.extent = velocityBuffer.extent,
+		.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
 
+	auto sceneColor_att =
+		Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, sceneColor_ro);
+	auto velocity_att = Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, velocity_ro);
+
+	Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> depth_att;
 	if (!depth_ready) {
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-			cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+		auto depth_u = presentation.depthTarget.State();
+		depth_att = Vk::Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, depth_u);
 		depth_ready = true;
 	} else {
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-							 VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-			cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+		Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> depth_current = {
+			.handle = presentation.depthTarget.image.Handle(),
+			.view = presentation.depthTarget.view.Get(),
+			.extent = presentation.depthTarget.extent,
+			.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
+		depth_att = Vk::Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, depth_current);
 	}
 
 	// 3. Prepare secondary command buffers
@@ -254,11 +260,9 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 		.pipelineStatistics = 0};
 
 	Vk::DynamicPass<2, true>(presentation.swapchain.Get().extent)
-		.Color(0, sceneColor.view.Get(), VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE)
-		.Color(1, velocityBuffer.view.Get(), VK_ATTACHMENT_LOAD_OP_CLEAR,
-			   VK_ATTACHMENT_STORE_OP_STORE)
-		.Depth(presentation.depthTarget.view.Get(), VK_ATTACHMENT_LOAD_OP_CLEAR,
-			   VK_ATTACHMENT_STORE_OP_STORE, 1.0f)
+		.Color(0, sceneColor_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE)
+		.Color(1, velocity_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE)
+		.Depth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1.0f)
 		.ClearColor(0, 0.08f, 0.09f, 0.12f, 1.0f)
 		.ClearColor(1, 0.0f, 0.0f, 0.0f, 0.0f)
 		.Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT)
@@ -300,7 +304,6 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 							continue;
 						}
 
-						// Use anonymous struct designated initializer (Direct & No Boilerplate)
 						Vk::DrawInstanced(
 							sec_cmd,
 							{.pipeline = drawCmd.material->pipeline.Get(),
@@ -377,7 +380,6 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCom
 	}
 	drawQueue = std::move(sortedDrawQueue);
 
-	// Extended GroupRange to carry private PIMPL buffers securely
 	struct GroupRange {
 		NativeMaterial* material;
 		NativeMesh* mesh;
@@ -399,7 +401,6 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCom
 	for (uint32_t i = 0; i < drawCount; ++i) {
 		const auto& drawCmd = drawQueue[i];
 
-		// Correct Designated Initializer Order (C++23)
 		mapped[i] = InstanceData{
 			.world = drawCmd.transform,
 			.prevWorld = drawCmd.prevTransform,
@@ -434,7 +435,7 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCom
 							  .count = 1});
 			currentMaterial = drawCmd.material;
 			currentMesh = drawCmd.mesh;
-			currentIndexMesh = drawCmd.indexMesh; // Update the tracked IBO
+			currentIndexMesh = drawCmd.indexMesh;
 		} else {
 			groups.back().count++;
 		}
@@ -482,29 +483,39 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCom
 						 VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT, 0, 1, &barrier, 0, nullptr, 0,
 						 nullptr);
 
-	// Transition layouts to optimal states before starting the render pass
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-						 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, sceneColor.image.Handle());
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-						 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd,
-																   velocityBuffer.image.Handle());
+	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> sceneColor_ro = {
+		.handle = sceneColor.image.Handle(),
+		.view = sceneColor.view.Get(),
+		.extent = sceneColor.extent,
+		.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
+	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> velocity_ro = {
+		.handle = velocityBuffer.image.Handle(),
+		.view = velocityBuffer.view.Get(),
+		.extent = velocityBuffer.extent,
+		.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
 
+	auto sceneColor_att =
+		Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, sceneColor_ro);
+	auto velocity_att = Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, velocity_ro);
+
+	Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> depth_att;
 	if (!depth_ready) {
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-			cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+		auto depth_u = presentation.depthTarget.State();
+		depth_att = Vk::Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, depth_u);
 		depth_ready = true;
 	} else {
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-							 VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-			cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+		Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> depth_current = {
+			.handle = presentation.depthTarget.image.Handle(),
+			.view = presentation.depthTarget.view.Get(),
+			.extent = presentation.depthTarget.extent,
+			.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
+		depth_att = Vk::Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, depth_current);
 	}
 
 	Vk::DynamicPass<2, true>(presentation.swapchain.Get().extent)
-		.Color(0, sceneColor.view.Get(), VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE)
-		.Color(1, velocityBuffer.view.Get(), VK_ATTACHMENT_LOAD_OP_CLEAR,
-			   VK_ATTACHMENT_STORE_OP_STORE)
-		.Depth(presentation.depthTarget.view.Get(), VK_ATTACHMENT_LOAD_OP_CLEAR,
-			   VK_ATTACHMENT_STORE_OP_STORE, 1.0f)
+		.Color(0, sceneColor_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE)
+		.Color(1, velocity_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE)
+		.Depth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1.0f)
 		.ClearColor(0, 0.08f, 0.09f, 0.12f, 1.0f)
 		.ClearColor(1, 0.0f, 0.0f, 0.0f, 0.0f)
 		.Execute(cmd, [&]() {
@@ -534,49 +545,67 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCom
 }
 
 void RenderContext::Impl::ApplyTAAPass(VkCommandBuffer cmd, VkExtent2D extent) {
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-						 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-		cmd, accumBuffers.Current().image.Handle());
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-						 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-		cmd, accumBuffers.Next().image.Handle());
+	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> accumCurr_ro = {
+		.handle = accumBuffers.Current().image.Handle(),
+		.view = accumBuffers.Current().view.Get(),
+		.extent = extent,
+		.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
+	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> accumNext_ro = {
+		.handle = accumBuffers.Next().image.Handle(),
+		.view = accumBuffers.Next().view.Get(),
+		.extent = extent,
+		.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
+
+	auto accumCurr_ready =
+		Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, accumCurr_ro);
+	auto accumNext_att =
+		Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, accumNext_ro);
 
 	Vk::DynamicPass<1, false>(extent)
-		.Color(0, accumBuffers.Next().view.Get(), VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+		.Color(0, accumNext_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
 		.Execute(cmd, [&]() {
-			taaPass.WriteNext(ctx.Device(),
-							  Vk::ImageWrite{.view = sceneColor.view.Get(),
-											 .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-							  Vk::ImageWrite{.view = accumBuffers.Current().view.Get(),
-											 .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-							  Vk::ImageWrite{.view = velocityBuffer.view.Get(),
-											 .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-							  Vk::SamplerWrite{.sampler = defaultSampler.Get()});
+			Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> sceneColor_ro = {
+				.handle = sceneColor.image.Handle(),
+				.view = sceneColor.view.Get(),
+				.extent = extent,
+				.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
+			Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> velocity_ro = {
+				.handle = velocityBuffer.image.Handle(),
+				.view = velocityBuffer.view.Get(),
+				.extent = extent,
+				.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
 
+			taaPass.WriteNext(ctx.Device(), sceneColor_ro, accumCurr_ready, velocity_ro,
+							  Vk::SamplerWrite{.sampler = defaultSampler.Get()});
 			taaPass.Execute(cmd, g_TAAState.feedback);
 		});
 
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-						 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-		cmd, accumBuffers.Next().image.Handle());
+	(void)Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, accumNext_att);
 }
 
 void RenderContext::Impl::BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, uint32_t imageIdx) {
 	VkImage swapImg = presentation.swapchain.Get().images[imageIdx];
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-		cmd, swapImg);
+	VkImageView swapView = presentation.swapchain.Get().views[imageIdx];
+
+	Vk::TypedImage<VK_IMAGE_LAYOUT_UNDEFINED> swap_u = {
+		.handle = swapImg, .view = swapView, .extent = extent, .aspect = VK_IMAGE_ASPECT_COLOR_BIT};
+
+	auto swap_att = Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, swap_u);
 
 	bool useTAA = g_TAAState.enabled && taaPass.pipeline.Valid();
-	VkImageView blitSource = useTAA ? accumBuffers.Next().view.Get() : sceneColor.view.Get();
 
-	blitPass.WriteNext(
-		ctx.Device(),
-		Vk::ImageWrite{.view = blitSource, .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-		Vk::SamplerWrite{defaultSampler.Get()});
+	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> blitSource_ro = {
+		.handle = useTAA ? accumBuffers.Next().image.Handle() : sceneColor.image.Handle(),
+		.view = useTAA ? accumBuffers.Next().view.Get() : sceneColor.view.Get(),
+		.extent = extent,
+		.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
+
+	blitPass.WriteNext(ctx.Device(), blitSource_ro,
+					   Vk::SamplerWrite{.sampler = defaultSampler.Get()});
 
 	if (blitPass.pipeline.Valid()) {
 		Vk::DynamicPass<1, false>(extent)
-			.Color(0, presentation.swapchain.Get().views[imageIdx], VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+			.Color(0, swap_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
 			.Execute(cmd, [&]() {
 				blitPass.Execute(cmd);
 
@@ -609,8 +638,7 @@ void RenderContext::Impl::BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, 
 			});
 	}
 
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(
-		cmd, swapImg);
+	(void)Vk::Transition<VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, swap_att);
 }
 
 void RenderContext::Impl::SubmitFrame() {
@@ -656,12 +684,22 @@ void RenderContext::EndFrame() {
 		return;
 	}
 
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-						 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-		_impl->current_cmd, _impl->sceneColor.image.Handle());
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-						 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-		_impl->current_cmd, _impl->velocityBuffer.image.Handle());
+	// The main pass left sceneColor and velocityBuffer in COLOR_ATTACHMENT_OPTIMAL
+	Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> sceneColor_att = {
+		.handle = _impl->sceneColor.image.Handle(),
+		.view = _impl->sceneColor.view.Get(),
+		.extent = extent,
+		.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
+	Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> velocity_att = {
+		.handle = _impl->velocityBuffer.image.Handle(),
+		.view = _impl->velocityBuffer.view.Get(),
+		.extent = extent,
+		.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
+
+	(void)Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(_impl->current_cmd,
+																   sceneColor_att);
+	(void)Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(_impl->current_cmd,
+																   velocity_att);
 
 	if (g_TAAState.enabled && _impl->taaPass.pipeline.Valid()) {
 		_impl->ApplyTAAPass(_impl->current_cmd, extent);

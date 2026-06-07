@@ -4,7 +4,6 @@
 #include "PipelineBuilder.hpp"
 #include "PresentationContext.hpp"
 #include "RenderCore.hpp"
-#include "RenderGraph.hpp"
 #include "RenderTarget.hpp"
 #include "SamplerBuilder.hpp"
 #include "SponzaSpecifics.hpp"
@@ -828,12 +827,6 @@ auto main() -> int {
 
 		ZHLN_BeginCommandBuffer(cmd);
 
-		// Transient tracker for this specific frame's swapchain image
-		ZHLN::Vk::GraphImage swapchainRes = ZHLN::Vk::GraphImage::Create(
-			presentation.swapchain.Get().images[image_index],
-			presentation.swapchain.Get().views[image_index], presentation.swapchain.Get().extent,
-			VK_IMAGE_ASPECT_COLOR_BIT);
-
 		// 1. Prepare Draw Call Data for this frame
 		std::vector<ZHLN::Vk::Passes::PBRDrawCall> pbrCalls;
 		pbrCalls.reserve(scene.drawCalls.size());
@@ -878,31 +871,54 @@ auto main() -> int {
 			.pbrData = {pipeline.Get(), pipelineLayout.Get(), &pbrCalls, &sceneCtx},
 			.fxaaData = {fxaaPipeline.Get(), fxaaPipelineLayout.Get(), fxaaSet}};
 
-		// 4. Node-Based Pipeline Assembly
-		using namespace ZHLN::Vk;
-		RenderGraph Graph;
+		// ====================================================================
+		// 4. Procedural Pipeline Execution with Compile-Time Layout Validation
+		// ====================================================================
 
-		// Pass 1: Shadows (D32)
-		Nodes::ShadowMap<VK_FORMAT_D32_SFLOAT>::Execute(
-			Graph, {.shadowMap = shadowMap.tracker, .data = frameData.shadowData});
+		auto shadow_u = shadowMap.State();
+		auto color_u = sceneColor.State();
+		auto depth_u = presentation.depthTarget.State();
 
-		// Pass 2: Main PBR (HDR Color + Depth)
-		Nodes::ForwardPBR<VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_D32_SFLOAT>::Execute(
-			Graph, {.color = sceneColor.tracker,
-					.depth = presentation.depthTarget.tracker,
-					.shadowMap = shadowMap.tracker,
-					.data = frameData.pbrData});
+		ZHLN::Vk::TypedImage<VK_IMAGE_LAYOUT_UNDEFINED> swap_u = {
+			.handle = presentation.swapchain.Get().images[image_index],
+			.view = presentation.swapchain.Get().views[image_index],
+			.extent = presentation.swapchain.Get().extent,
+			.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
 
-		// Pass 3: Post Process (LDR Swapchain Output)
-		Nodes::FXAA<VK_FORMAT_B8G8R8A8_SRGB>::Execute(
-			Graph,
-			{.input = sceneColor.tracker, .output = swapchainRes, .data = frameData.fxaaData});
+		// Pass 1: Shadows
+		auto shadow_att =
+			ZHLN::Vk::Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, shadow_u);
+		ZHLN::Vk::DynamicPass<0, true>({SHADOW_RES, SHADOW_RES})
+			.Depth(shadow_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1.0f)
+			.Execute(cmd, [&]() { ZHLN::Vk::Passes::DrawShadows(cmd, frameData.shadowData); });
 
-		// Pass 4: Final Hand-off to OS
-		Graph.AddPass("Present").Present(swapchainRes);
+		auto shadow_ro =
+			ZHLN::Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, shadow_att);
 
-		// Recording and Automatic Barrier Generation
-		Graph.Execute(cmd);
+		// Pass 2: Main PBR
+		auto color_att =
+			ZHLN::Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, color_u);
+		auto depth_att =
+			ZHLN::Vk::Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, depth_u);
+
+		ZHLN::Vk::DynamicPass<1, true>(presentation.swapchain.Get().extent)
+			.Color(0, color_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE)
+			.Depth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1.0f)
+			.ClearColor(0, 0.05f, 0.05f, 0.07f, 1.0f)
+			.Execute(cmd, [&]() { ZHLN::Vk::Passes::DrawPBR(cmd, frameData.pbrData); });
+
+		auto color_ro =
+			ZHLN::Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, color_att);
+
+		// Pass 3: FXAA -> Swapchain
+		auto swap_att = ZHLN::Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, swap_u);
+
+		ZHLN::Vk::DynamicPass<1, false>(presentation.swapchain.Get().extent)
+			.Color(0, swap_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_STORE)
+			.Execute(cmd, [&]() { ZHLN::Vk::Passes::DrawFXAA(cmd, frameData.fxaaData); });
+
+		// Present Transition
+		(void)ZHLN::Vk::Transition<VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, swap_att);
 
 		ZHLN_EndCommandBuffer(cmd);
 

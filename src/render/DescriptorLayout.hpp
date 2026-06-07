@@ -175,6 +175,9 @@ template <typename Layout, uint32_t BindingID> class BindlessRegistry {
 // DescriptorLayout<Slots...> — the main TMP type
 // ============================================================================
 
+template <typename T> struct IsTypedImage : std::false_type {};
+template <VkImageLayout L> struct IsTypedImage<TypedImage<L>> : std::true_type {};
+
 template <typename... Slots> class DescriptorLayout {
 	static constexpr uint32_t kCount = sizeof...(Slots);
 
@@ -377,35 +380,40 @@ template <typename... Slots> class DescriptorLayout {
 				.pTexelBufferView = nullptr,
 			};
 
+			// Evaluate if it's the raw struct OR the new Compile-Time TypedImage
 			if constexpr (Slot::type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ||
 						  Slot::type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
 
-				static_assert(std::is_same_v<T, ImageWrite>, "Binding expects ImageWrite");
-				imageInfo = {
-					.sampler = VK_NULL_HANDLE, // Explicitly initialized to silence warning
-					.imageView = arg.view, 
-					.imageLayout = arg.layout
-				};
-				write.pImageInfo = &imageInfo;
+				static_assert(std::is_same_v<T, ImageWrite> || IsTypedImage<T>::value,
+							  "Binding expects ImageWrite or TypedImage<Layout>");
 
+				if constexpr (IsTypedImage<T>::value) {
+					static_assert(T::layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL ||
+									  T::layout == VK_IMAGE_LAYOUT_GENERAL,
+								  "ZHLN Compile-Time Error: Image must be transitioned to a "
+								  "readable layout before binding.");
+					imageInfo = {
+						.sampler = VK_NULL_HANDLE, .imageView = arg.view, .imageLayout = T::layout};
+				} else {
+					imageInfo = {.sampler = VK_NULL_HANDLE,
+								 .imageView = arg.view,
+								 .imageLayout = arg.layout};
+				}
+				write.pImageInfo = &imageInfo;
 			} else if constexpr (Slot::type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
 
 				static_assert(std::is_same_v<T, ImageWrite>, "Binding expects ImageWrite");
-				imageInfo = {
-					.sampler = VK_NULL_HANDLE, // Explicitly initialized to silence warning
-					.imageView = arg.view, 
-					.imageLayout = VK_IMAGE_LAYOUT_GENERAL
-				};
+				imageInfo = {.sampler = VK_NULL_HANDLE, // Explicitly initialized to silence warning
+							 .imageView = arg.view,
+							 .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
 				write.pImageInfo = &imageInfo;
 
 			} else if constexpr (Slot::type == VK_DESCRIPTOR_TYPE_SAMPLER) {
 
 				static_assert(std::is_same_v<T, SamplerWrite>, "Binding expects SamplerWrite");
-				imageInfo = {
-					.sampler = arg.sampler,
-					.imageView = VK_NULL_HANDLE,
-					.imageLayout = VK_IMAGE_LAYOUT_UNDEFINED
-				};
+				imageInfo = {.sampler = arg.sampler,
+							 .imageView = VK_NULL_HANDLE,
+							 .imageLayout = VK_IMAGE_LAYOUT_UNDEFINED};
 				write.pImageInfo = &imageInfo;
 
 			} else if constexpr (Slot::type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ||

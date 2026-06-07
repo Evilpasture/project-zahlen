@@ -1,5 +1,443 @@
 #pragma once
 
+// ============================================================================
+// ZAHLEN RENDER SUBSYSTEM HEADER SYNOPSIS
+// ============================================================================
+//
+// This comment block acts as a centralized index and STL-style declaration
+// reference for all headers contained within the rendering subsystem.
+//
+// ----------------------------------------------------------------------------
+// 1. <RenderCore.h> Synopsis (Procedural C Vulkan Interface)
+// ----------------------------------------------------------------------------
+// struct ZHLN_InstanceDesc;
+// struct ZHLN_PhysicalDeviceInfo;
+// struct ZHLN_DeviceDesc;
+// struct ZHLN_Device;
+// struct ZHLN_SwapchainSupport;
+// struct ZHLN_SwapchainSupportDesc;
+// struct ZHLN_SwapchainDesc;
+// struct ZHLN_Swapchain;
+// struct ZHLN_FrameSync;
+// struct ZHLN_FrameSyncDesc;
+// struct ZHLN_CommandPool;
+// struct ZHLN_AcquireDesc;
+// struct ZHLN_PresentDesc;
+// struct ZHLN_ShaderDesc;
+// struct ZHLN_Shader;
+// struct ZHLN_ShaderStages;
+// struct ZHLN_ShaderStagesDesc;
+// struct ZHLN_PipelineLayoutDesc;
+// struct ZHLN_GraphicsPipelineDesc;
+// struct ZHLN_RenderPassDesc;
+// struct ZHLN_ImageBarrierDesc;
+// struct ZHLN_FrameSubmitDesc;
+// struct ZHLN_SecondaryCmdDesc;
+// struct ZHLN_BufferCopyDesc;
+// struct ZHLN_BufferImageCopyDesc;
+// struct ZHLN_ImageViewDesc;
+// struct ZHLN_ComputePipelineDesc;
+//
+// enum ZHLN_FrameResult : uint8_t {
+//   ZHLN_FrameResult_Ok,
+//   ZHLN_FrameResult_Suboptimal,
+//   ZHLN_FrameResult_OutOfDate,
+//   ZHLN_FrameResult_Error
+// };
+//
+// VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* desc);
+// ZHLN_PhysicalDeviceInfo ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* desc);
+// ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* desc);
+// ZHLN_SwapchainSupport ZHLN_QuerySwapchainSupport(const ZHLN_SwapchainSupportDesc* desc);
+// ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* desc);
+// void ZHLN_DestroySwapchain(VkDevice device, ZHLN_Swapchain* swapchain);
+// bool ZHLN_CreateFrameSync(const ZHLN_FrameSyncDesc* desc, ZHLN_FrameSync* out_sync);
+// void ZHLN_DestroyFrameSync(VkDevice device, ZHLN_FrameSync* sync, uint32_t frame_count);
+// bool ZHLN_CreateCommandPool(VkDevice device, uint32_t queue_family, ZHLN_CommandPool* out_pool);
+// bool ZHLN_AllocateCommandBuffers(VkDevice device, ZHLN_CommandPool* pool, uint32_t count);
+// void ZHLN_ResetCommandPool(VkDevice device, const ZHLN_CommandPool* pool);
+// void ZHLN_DestroyCommandPool(VkDevice device, ZHLN_CommandPool* pool);
+// void ZHLN_WaitAndResetFence(VkDevice device, VkFence fence);
+// ZHLN_FrameResult ZHLN_AcquireImage(VkDevice device, const ZHLN_AcquireDesc* desc, uint32_t*
+// out_image_index); void ZHLN_SubmitFrame(VkQueue graphics_queue, const ZHLN_FrameSync* sync,
+// VkCommandBuffer cmd); ZHLN_FrameResult ZHLN_PresentFrame(const ZHLN_PresentDesc* desc);
+// VkShaderModule ZHLN_CreateShaderModule(VkDevice device, const ZHLN_ShaderDesc* desc);
+// bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* desc, ZHLN_ShaderStages* out);
+// void ZHLN_DestroyShaderModule(VkDevice device, VkShaderModule module);
+// void ZHLN_DestroyShaderStages(VkDevice device, ZHLN_ShaderStages* stages);
+// uint32_t ZHLN_PopulateShaderStageInfos(const ZHLN_ShaderStages* stages,
+// VkPipelineShaderStageCreateInfo* out_stages); VkPipelineLayout ZHLN_CreatePipelineLayout(VkDevice
+// device, const ZHLN_PipelineLayoutDesc* desc); void ZHLN_DestroyPipelineLayout(VkDevice device,
+// VkPipelineLayout layout); VkPipeline ZHLN_CreateGraphicsPipeline(VkDevice device, const
+// ZHLN_GraphicsPipelineDesc* desc); void ZHLN_DestroyPipeline(VkDevice device, VkPipeline
+// pipeline); void ZHLN_BeginRendering(VkCommandBuffer cmd, const ZHLN_RenderPassDesc* desc); void
+// ZHLN_EndRendering(VkCommandBuffer cmd); ZHLN_FrameResult ZHLN_SubmitAndPresent(const
+// ZHLN_FrameSubmitDesc* desc); void ZHLN_BeginSecondaryCommandBuffer(VkCommandBuffer cmd, const
+// ZHLN_SecondaryCmdDesc* desc); bool ZHLN_AllocateSecondaryCommandBuffers(VkDevice device,
+// ZHLN_CommandPool* pool, uint32_t count); void ZHLN_WaitAndResetFrame(VkDevice device, VkFence
+// in_flight_fence, const ZHLN_CommandPool* pool); void ZHLN_BeginCommandBuffer(VkCommandBuffer
+// cmd); void ZHLN_EndCommandBuffer(VkCommandBuffer cmd); ZHLN_FrameResult
+// ZHLN_WaitAndAcquireImage(VkDevice device, VkSwapchainKHR swapchain, const ZHLN_FrameSync* sync,
+// const ZHLN_CommandPool* pool, uint32_t* out_image_index); void ZHLN_PushConstants(VkCommandBuffer
+// cmd, VkPipelineLayout layout, VkShaderStageFlags stages, const void* data, uint32_t size); const
+// char* ZHLN_VkResultString(VkResult result); void ZHLN_CmdCopyBuffer(VkCommandBuffer cmd, const
+// ZHLN_BufferCopyDesc* desc); void ZHLN_CmdImageBarrier(VkCommandBuffer cmd, const
+// ZHLN_ImageBarrierDesc* desc); void ZHLN_CmdCopyBufferToImage(VkCommandBuffer cmd, const
+// ZHLN_BufferImageCopyDesc* desc); VkSemaphore ZHLN_CreateSemaphore(VkDevice device); void
+// ZHLN_DestroySemaphore(VkDevice device, VkSemaphore semaphore); VkImageView
+// ZHLN_CreateImageView(VkDevice device, const ZHLN_ImageViewDesc* desc); void
+// ZHLN_DestroyImageView(VkDevice device, VkImageView view); void ZHLN_DestroySampler(VkDevice
+// device, VkSampler sampler); void ZHLN_DestroyDescriptorSetLayout(VkDevice device,
+// VkDescriptorSetLayout layout); void ZHLN_DestroyDescriptorPool(VkDevice device, VkDescriptorPool
+// pool); VkPipeline ZHLN_CreateComputePipeline(VkDevice device, const ZHLN_ComputePipelineDesc*
+// desc); void ZHLN_CmdDispatch(VkCommandBuffer cmd, uint32_t group_count_x, uint32_t group_count_y,
+// uint32_t group_count_z); void ZHLN_GenerateMipmaps(VkCommandBuffer cmd, VkImage image, int32_t
+// width, int32_t height, uint32_t mip_levels);
+//
+// ----------------------------------------------------------------------------
+// 2. <RenderCore.hpp> Synopsis (C++ Object-Oriented Wrappers & Frame Loop)
+// ----------------------------------------------------------------------------
+// namespace ZHLN {
+//   struct Color4 { float r, g, b, a; };
+//   template <typename T> class DoubleBuffered {
+//     auto Current() noexcept -> T&;
+//     auto Next() noexcept -> T&;
+//     void Flip() noexcept;
+//   };
+// }
+// namespace ZHLN::Vk {
+//   template <typename T> concept GpuTriviallyCopyable = std::is_trivially_copyable_v<T> &&
+//   std::is_standard_layout_v<T>; template <typename T> concept RecordFn = std::invocable<T,
+//   VkCommandBuffer, uint32_t>; template <typename T> concept RebuildFn = std::invocable<T>;
+//
+//   template <typename T, auto DeleterFn> class Handle;
+//   template <typename T, auto DeleterFn> class DeviceHandle;
+//
+//   using ShaderModule        = DeviceHandle<VkShaderModule, ZHLN_DestroyShaderModule>;
+//   using PipelineLayout      = DeviceHandle<VkPipelineLayout, ZHLN_DestroyPipelineLayout>;
+//   using Pipeline            = DeviceHandle<VkPipeline, ZHLN_DestroyPipeline>;
+//   using Semaphore           = DeviceHandle<VkSemaphore, ZHLN_DestroySemaphore>;
+//   using Sampler             = DeviceHandle<VkSampler, ZHLN_DestroySampler>;
+//   using DescriptorSetLayout = DeviceHandle<VkDescriptorSetLayout,
+//   ZHLN_DestroyDescriptorSetLayout>; using DescriptorPool      = DeviceHandle<VkDescriptorPool,
+//   ZHLN_DestroyDescriptorPool>; using ImageView           = DeviceHandle<VkImageView,
+//   ZHLN_DestroyImageView>;
+//
+//   class Context {
+//     static auto Create(const ZHLN_InstanceDesc&, const ZHLN_DeviceSelectDesc&, const
+//     ZHLN_DeviceDesc&) noexcept -> Context; auto Instance() const noexcept -> VkInstance; auto
+//     Device() const noexcept -> VkDevice; auto GraphicsQueue() const noexcept -> VkQueue; auto
+//     PresentQueue() const noexcept -> VkQueue; auto Physical() const noexcept -> VkPhysicalDevice;
+//     auto PhysicalInfo() const noexcept -> const ZHLN_PhysicalDeviceInfo&;
+//     auto Valid() const noexcept -> bool;
+//   };
+//
+//   struct SwapchainSupport;
+//   class Swapchain {
+//     auto Get() const noexcept -> const ZHLN_Swapchain&;
+//     auto Valid() const noexcept -> bool;
+//     auto Rebuild(const ZHLN_SwapchainDesc& desc) noexcept -> bool;
+//   };
+//
+//   template <uint32_t N> class FrameSync {
+//     static auto Create(const VkDevice device) noexcept -> FrameSync;
+//     auto operator[](const uint32_t frame) const noexcept -> const ZHLN_FrameSync&;
+//     auto Valid() const noexcept -> bool;
+//   };
+//
+//   class CommandPool {
+//     CommandPool(const VkDevice device, const uint32_t queue_family);
+//     auto Allocate(const uint32_t count) -> bool;
+//     auto AllocateSecondary(const uint32_t count) -> bool;
+//     void Reset() noexcept;
+//     auto operator[](const uint32_t idx) const noexcept -> VkCommandBuffer;
+//     auto Valid() const noexcept -> bool;
+//   };
+//
+//   template <uint32_t N> class CommandPools {
+//     static auto Create(const VkDevice device, const Description& desc) noexcept -> CommandPools;
+//     auto operator[](const uint32_t frame) noexcept -> CommandPool&;
+//     auto Cmd(const uint32_t frame) const noexcept -> VkCommandBuffer;
+//     auto Valid() const noexcept -> bool;
+//   };
+//
+//   class ShaderStages {
+//     static auto Create(const VkDevice, const ZHLN_ShaderDesc&, const ZHLN_ShaderDesc&) noexcept
+//     -> ShaderStages; static auto FromFiles(VkDevice, const std::filesystem::path&, const
+//     std::filesystem::path&, const char* = "main", const char* = "main") noexcept -> ShaderStages;
+//     auto Get() const noexcept -> const ZHLN_ShaderStages*;
+//     auto Valid() const noexcept -> bool;
+//   };
+//
+//   class ScopedRendering {
+//     ScopedRendering(const VkCommandBuffer cmd, const ZHLN_RenderPassDesc& desc) noexcept;
+//   };
+//
+//   template <VkImageLayout Layout> struct LayoutTraits;
+//   template <VkImageLayout OldLayout, VkImageLayout NewLayout> void TransitionLayout(const
+//   VkCommandBuffer, const VkImage, const VkImageAspectFlags) noexcept; template
+//   <GpuTriviallyCopyable T> void Push(const VkCommandBuffer, const VkPipelineLayout, const
+//   VkShaderStageFlags, const T&) noexcept; template <uint32_t N, typename Record, typename
+//   Rebuild> auto DrawFrame(const Context&, const Swapchain&, const FrameSync<N>&, const
+//   CommandPools<N>&, uint32_t&, Record&&, Rebuild&&) noexcept -> ZHLN_FrameResult; template
+//   <size_t ColorCount = 1, bool HasDepth = false> class DynamicPass {
+//     auto Color(size_t index, VkImageView view, VkAttachmentLoadOp loadOp, VkAttachmentStoreOp
+//     storeOp) noexcept -> DynamicPass&; auto Depth(VkImageView view, VkAttachmentLoadOp loadOp,
+//     VkAttachmentStoreOp storeOp, float clearVal) noexcept -> DynamicPass&; auto ClearColor(size_t
+//     index, const ZHLN::Color4& color) noexcept -> DynamicPass&; void Execute(VkCommandBuffer cmd,
+//     Func&& func) const;
+//   };
+//
+//   struct DrawState;
+//   template <GpuTriviallyCopyable T> void DrawInstanced(VkCommandBuffer, const DrawState&, const
+//   T&, VkShaderStageFlags) noexcept; struct DrawIndirectState; template <GpuTriviallyCopyable T>
+//   void DrawIndirect(VkCommandBuffer, const DrawIndirectState&, const T&, VkShaderStageFlags)
+//   noexcept; class Surface; class SemaphorePool {
+//     void Rebuild(const VkDevice device, const uint32_t count) noexcept;
+//     auto operator[](const uint32_t index) const noexcept -> VkSemaphore;
+//     auto Valid() const noexcept -> bool;
+//   };
+//   template <VkFormat F> ImageView CreateView(VkDevice, VkImage, VkImageAspectFlags, uint32_t)
+//   noexcept; template <VkFormat F> ImageView CreateViewCube(VkDevice, VkImage, uint32_t) noexcept;
+//   bool IsInstanceExtensionSupported(std::string_view) noexcept;
+//   bool IsDeviceExtensionSupported(VkPhysicalDevice, std::string_view) noexcept;
+//   struct PassResource;
+//   struct PassDesc;
+//   template <size_t MaxStackBarriers = 16> void ExecutePasses(VkCommandBuffer, std::span<const
+//   PassDesc>) noexcept; void Dispatch(VkCommandBuffer, uint32_t totalX, uint32_t totalY, uint32_t
+//   totalZ, uint32_t localX, uint32_t localY, uint32_t localZ) noexcept; template <uint32_t Width,
+//   uint32_t Height> consteval auto GetMipLevels() noexcept -> uint32_t; void GenerateMipmaps(const
+//   VkCommandBuffer, const VkImage, const uint32_t, const uint32_t) noexcept;
+// }
+//
+// ----------------------------------------------------------------------------
+// 3. <Allocator.hpp> Synopsis (VMA Allocator, Buffer, & Image Resource RAII)
+// ----------------------------------------------------------------------------
+// namespace ZHLN::Vk {
+//   class Allocator {
+//     auto Init(VkInstance, VkPhysicalDevice, VkDevice) noexcept -> bool;
+//     auto Init(const Context& ctx) noexcept -> bool;
+//     auto Get() const noexcept -> VmaAllocator;
+//     auto Valid() const noexcept -> bool;
+//   };
+//   class Buffer {
+//     static auto Create(VmaAllocator, size_t, VkBufferUsageFlags, VmaMemoryUsage) noexcept ->
+//     Buffer; struct MappedRegion {
+//       template <typename T> auto As() noexcept -> T*;
+//       void* data;
+//     };
+//     auto Map() noexcept -> MappedRegion;
+//     auto Handle() const noexcept -> VkBuffer;
+//     auto Size() const noexcept -> size_t;
+//     auto Valid() const noexcept -> bool;
+//   };
+//   auto UploadToBuffer(VmaAllocator, VkCommandBuffer, Buffer&, const void*, size_t) noexcept ->
+//   Buffer; class Image {
+//     static auto Create(VmaAllocator, const VkImageCreateInfo&, VmaMemoryUsage) -> Image;
+//     auto Valid() const noexcept -> bool;
+//     auto Handle() const -> VkImage;
+//   };
+// }
+//
+// ----------------------------------------------------------------------------
+// 4. <Commands.hpp> Synopsis (Batch Rendering Templates)
+// ----------------------------------------------------------------------------
+// namespace ZHLN::Vk {
+//   struct DrawBatchConfig {
+//     VkPipeline pipeline; VkPipelineLayout layout; VkBuffer vbo; VkBuffer ibo; VkDescriptorSet
+//     set; VkShaderStageFlags pushStages;
+//   };
+//   template <typename PushT = std::monostate, typename LoopFn> void DrawBatch(const
+//   VkCommandBuffer cmd, const DrawBatchConfig& cfg, LoopFn&& loop);
+// }
+//
+// ----------------------------------------------------------------------------
+// 5. <DescriptorLayout.hpp> Synopsis (Static Binding DSL & Bindless Storage)
+// ----------------------------------------------------------------------------
+// namespace ZHLN::Vk {
+//   void ReportBindlessRegistryExceeded(uint32_t bindingID, uint32_t capacity) noexcept;
+//   template <uint32_t Binding, VkDescriptorType Type, VkShaderStageFlags Stages, uint32_t Count =
+//   1, VkDescriptorBindingFlags Flags = 0> struct BindingSlot; struct ImageWrite; struct
+//   SamplerWrite; struct BufferWrite; struct SkipWrite; template <typename Layout, uint32_t
+//   BindingID> class BindlessRegistry {
+//     void Init(const VkDevice, const VkDescriptorSet);
+//     auto RegisterImage(const VkImageView, const VkImageLayout) -> uint32_t;
+//     auto RegisterCombined(const VkImageView, const VkSampler, const VkImageLayout) -> uint32_t;
+//     constexpr auto Capacity() const noexcept -> uint32_t;
+//     auto Size() const noexcept -> uint32_t;
+//   };
+//   template <typename... Slots> class DescriptorLayout {
+//     static auto CreateLayout(VkDevice) noexcept -> ZHLN::Vk::DescriptorSetLayout;
+//     static auto CreatePool(VkDevice, uint32_t) noexcept -> ZHLN::Vk::DescriptorPool;
+//     static auto Allocate(VkDevice, VkDescriptorPool, VkDescriptorSetLayout) noexcept ->
+//     VkDescriptorSet; template <typename... Args> static void Write(VkDevice, VkDescriptorSet,
+//     Args&&...) noexcept;
+//   };
+// }
+//
+// ----------------------------------------------------------------------------
+// 6. <Features.hpp> Synopsis (Vulkan pNext Compile-Time Chain Builders)
+// ----------------------------------------------------------------------------
+// namespace ZHLN::Vk {
+//   template <typename T> constexpr auto GetStructureType() noexcept -> VkStructureType;
+//   struct FeatureFactory {
+//     template <typename T> static constexpr auto Create(auto&& configure) noexcept -> T;
+//   };
+// }
+//
+// ----------------------------------------------------------------------------
+// 7. <PipelineBuilder.hpp> Synopsis (Fluent Graphics & Compute Pipeline Builders)
+// ----------------------------------------------------------------------------
+// namespace ZHLN::Vk {
+//   enum class PipelineBuilderResult : uint8_t;
+//   void ReportPipelineBuilderError(PipelineBuilderResult) noexcept;
+//   void ReportComputePipelineBuilderError(PipelineBuilderResult) noexcept;
+//   struct PipelineConfig;
+//   class PipelineBuilder {
+//     auto Shaders(const ShaderStages&) noexcept -> PipelineBuilder&;
+//     auto Layout(VkPipelineLayout) noexcept -> PipelineBuilder&;
+//     template <IsVertex V> auto Vertex() noexcept -> PipelineBuilder&;
+//     auto ColorFormats(std::initializer_list<VkFormat>) noexcept -> PipelineBuilder&;
+//     auto DepthFormat(VkFormat) noexcept -> PipelineBuilder&;
+//     auto DepthOnly() noexcept -> PipelineBuilder&;
+//     auto CullNone() noexcept -> PipelineBuilder&;
+//     auto CullBack() noexcept -> PipelineBuilder&;
+//     auto AlphaBlend() noexcept -> PipelineBuilder&;
+//     auto Build(VkDevice) const noexcept -> Pipeline;
+//   };
+//   class ComputePipelineBuilder {
+//     auto Shader(const uint32_t*, size_t, const char*) noexcept -> ComputePipelineBuilder&;
+//     auto Layout(const VkPipelineLayout) noexcept -> ComputePipelineBuilder&;
+//     auto Build(const VkDevice) const noexcept -> Pipeline;
+//   };
+// }
+//
+// ----------------------------------------------------------------------------
+// 8. <Postprocessing.hpp> Synopsis (Fullscreen Triangle & Post-Pass Pipelines)
+// ----------------------------------------------------------------------------
+// namespace ZHLN::Vk {
+//   template <typename LayoutT> struct PostProcessPass {
+//     DescriptorSetLayout descLayout; DescriptorPool pool; DoubleBuffered<VkDescriptorSet> sets;
+//     PipelineLayout pipelineLayout; Pipeline pipeline; bool Build(VkDevice, const ShaderStages&,
+//     std::initializer_list<VkFormat>, const VkPushConstantRange*, uint32_t) noexcept; template
+//     <typename... Args> void WriteNext(VkDevice, Args&&...) noexcept; template
+//     <GpuTriviallyCopyable T> void Execute(VkCommandBuffer, const T&, VkShaderStageFlags) const
+//     noexcept; void Execute(VkCommandBuffer) const noexcept;
+//   };
+// }
+//
+// ----------------------------------------------------------------------------
+// 9. <PresentationContext.hpp> Synopsis (Swapchain & Window Infrastructure)
+// ----------------------------------------------------------------------------
+// namespace ZHLN::Vk {
+//   class PresentationContext {
+//     Swapchain swapchain; SemaphorePool presentSemaphores; RenderTarget<VK_FORMAT_D32_SFLOAT>
+//     depthTarget; auto Init(const Context&, Allocator&, VkSurfaceKHR, uint32_t, uint32_t, bool) ->
+//     bool; auto Rebuild(uint32_t, uint32_t) -> bool;
+//   };
+// }
+//
+// ----------------------------------------------------------------------------
+// 10. <RenderGraph.hpp> Synopsis (Dependency-Driven Render Graph API)
+// ----------------------------------------------------------------------------
+// Deleted. We moved all the state-tracking logic into the C++ type system (using TypedImage<Layout>
+// and Vk::Transition), the compiler now does 100% of the work that RenderGraph used to do at
+// runtime.
+//
+// ----------------------------------------------------------------------------
+// 11. <RenderTarget.hpp> Synopsis (Render Targets & Offscreen Framebuffers)
+// ----------------------------------------------------------------------------
+// namespace ZHLN::Vk {
+//   template <VkFormat F> struct RenderTarget {
+//     Image image; ImageView view; GraphImage tracker;
+//     static auto Create(Allocator&, const Context&, VkExtent2D, VkImageUsageFlags,
+//     VkImageAspectFlags) -> RenderTarget; auto Valid() const noexcept -> bool;
+//   };
+// }
+//
+// ----------------------------------------------------------------------------
+// 12. <SamplerBuilder.hpp> Synopsis (Fluent Sampler Descriptors)
+// ----------------------------------------------------------------------------
+// namespace ZHLN::Vk {
+//   class SamplerBuilder {
+//     auto Linear() noexcept -> SamplerBuilder&;
+//     auto Nearest() noexcept -> SamplerBuilder&;
+//     auto ClampToEdge() noexcept -> SamplerBuilder&;
+//     auto ClampToBorder(VkBorderColor) noexcept -> SamplerBuilder&;
+//     auto Anisotropy(float) noexcept -> SamplerBuilder&;
+//     auto DepthCompare(VkCompareOp) noexcept -> SamplerBuilder&;
+//     auto Build(VkDevice) const noexcept -> Sampler;
+//   };
+// }
+//
+// ----------------------------------------------------------------------------
+// 13. <Texture.hpp> Synopsis (CPU-to-GPU Texture Loader)
+// ----------------------------------------------------------------------------
+// namespace ZHLN::Vk {
+//   struct TextureAsset { Image image; ImageView view; };
+//   template <VkFormat F> auto UploadTexture(Allocator&, const Context&, const VkImageCreateInfo&,
+//   const void*) -> TextureAsset;
+// }
+//
+// ----------------------------------------------------------------------------
+// 14. <TextureUtils.hpp> Synopsis (Constexpr Procedural Textures)
+// ----------------------------------------------------------------------------
+// namespace ZHLN::Texture {
+//   template <uint32_t Width, uint32_t Height> auto GenerateTest() -> std::vector<uint32_t>;
+//   template <uint32_t Width, uint32_t Height> auto GenerateTVInterrupt() -> std::vector<uint32_t>;
+//   template <uint32_t Width, uint32_t Height> auto GenerateBrickNormalMap() ->
+//   std::vector<uint32_t>; template <uint32_t Width, uint32_t Height> auto GenerateMarble() ->
+//   std::vector<uint32_t>; template <uint32_t Width, uint32_t Height> auto GenerateMarbleCrisp() ->
+//   std::vector<uint32_t>; template <uint32_t Width, uint32_t Height> auto GenerateGrassTexture()
+//   -> std::vector<uint32_t>; template <uint32_t Width, uint32_t Height> auto GenerateMandelbrot()
+//   -> std::vector<uint32_t>; template <uint32_t Width, uint32_t Height> auto GenerateColorWheel()
+//   -> std::vector<uint32_t>;
+// }
+//
+// ----------------------------------------------------------------------------
+// 15. <Utils.hpp> Synopsis (Constexpr Math & Noise Generation Suite)
+// ----------------------------------------------------------------------------
+// namespace ZHLN {
+//   constexpr float Floor(float);
+//   template <typename T> constexpr T Min(std::initializer_list<T>) noexcept;
+//   template <typename T> constexpr const T& Min(const T&, const T&) noexcept;
+//   template <typename T> constexpr const T& Max(const T&, const T&) noexcept;
+//   template <typename T> constexpr T Clamp(T, T, T) noexcept;
+//   constexpr float Fract(float);
+//   template <typename T, typename U> constexpr T Mix(const T&, const T&, const U&);
+//   template <typename T> constexpr T Saturate(T);
+//   constexpr float Hash(float, float);
+//   constexpr float Noise(float, float);
+//   constexpr float FBM(float, float, int);
+//   constexpr float constexpr_ln(float);
+//   constexpr float constexpr_exp(float);
+//   template <typename T> constexpr T FastIntPower(T, long long);
+//   template <typename BaseT, typename ExpT> constexpr auto Power(BaseT, ExpT) noexcept;
+//   constexpr uint32_t PackColor(uint8_t, uint8_t, uint8_t) noexcept;
+//   constexpr float Smoothstep(float, float, float) noexcept;
+//   template <typename T> constexpr T Abs(T) noexcept;
+//   constexpr float Sin(float) noexcept;
+//   constexpr float Sqrt(float) noexcept;
+//   constexpr float Worley(float, float);
+//   template <typename T> constexpr T Lerp(T, T, T) noexcept;
+// }
+//
+// ----------------------------------------------------------------------------
+// 16. <Vertex.hpp> Synopsis (Zero-Boilerplate Reflection Mapping)
+// ----------------------------------------------------------------------------
+// namespace ZHLN::Vk {
+//   struct Vertex;
+//   template <typename T> struct FormatOf;
+//   struct MemberInfo;
+//   template <typename T> consteval auto DefaultBinding(uint32_t binding) noexcept ->
+//   VkVertexInputBindingDescription; template <typename... Args> consteval auto
+//   MakeAttributeArray(Args... args) noexcept; template <typename T> struct VertexTraits; template
+//   <typename T> concept IsVertex = requires { ... };
+// }
+// #define ZHLN_FIELD(Type, Mem) ...
+// #define ZHLN_REFLECT_VERTEX(Type, ...) ...
+// ============================================================================
+
 #include "RenderCore.h"
 #include "Utils.hpp"
 
@@ -50,6 +488,19 @@ template <typename T> class DoubleBuffered {
 } // namespace ZHLN
 
 namespace ZHLN::Vk {
+
+/**
+ * @brief Zero-overhead, compile-time layout tracker.
+ * Memory footprint is identical to passing raw handles, but the compiler enforces state.
+ */
+template <VkImageLayout Layout> struct TypedImage {
+	static constexpr VkImageLayout layout = Layout;
+
+	VkImage handle = VK_NULL_HANDLE;
+	VkImageView view = VK_NULL_HANDLE;
+	VkExtent2D extent{};
+	VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+};
 
 // ============================================================================
 // TMP / Concepts
@@ -704,6 +1155,27 @@ inline void TransitionLayout(const VkCommandBuffer cmd, const VkImage image,
 	ZHLN_CmdImageBarrier(cmd, &barrier);
 }
 
+/**
+ * @brief Transforms the compile-time state of an image, emitting a pipeline barrier.
+ * Usage: auto readyImage = Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd,
+ * startImage);
+ */
+template <VkImageLayout NewLayout, VkImageLayout OldLayout>
+[[nodiscard]] inline auto
+Transition(VkCommandBuffer cmd, const TypedImage<OldLayout>& img,
+		   VkImageAspectFlags overrideAspect = VK_IMAGE_ASPECT_NONE) noexcept
+	-> TypedImage<NewLayout> {
+	VkImageAspectFlags aspect =
+		(overrideAspect != VK_IMAGE_ASPECT_NONE) ? overrideAspect : img.aspect;
+
+	// Record actual Vulkan pipeline barrier
+	TransitionLayout<OldLayout, NewLayout>(cmd, img.handle, aspect);
+
+	// Yield the transformed type
+	return TypedImage<NewLayout>{
+		.handle = img.handle, .view = img.view, .extent = img.extent, .aspect = img.aspect};
+}
+
 inline void CopyBufferToImage(const VkCommandBuffer cmd,
 							  const ZHLN_BufferImageCopyDesc& desc) noexcept {
 	ZHLN_CmdCopyBufferToImage(cmd, &desc);
@@ -795,14 +1267,20 @@ template <size_t ColorCount = 1, bool HasDepth = false> class DynamicPass {
   public:
 	constexpr explicit DynamicPass(VkExtent2D extent) noexcept : _extent(extent) {}
 
-	constexpr auto Color(size_t index, VkImageView view,
+	template <VkImageLayout Layout>
+	constexpr auto Color(size_t index, const TypedImage<Layout>& img,
 						 VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
 						 VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE) noexcept
 		-> DynamicPass& {
+		static_assert(Layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL ||
+						  Layout == VK_IMAGE_LAYOUT_GENERAL,
+					  "ZHLN Compile-Time Error: Color attachment image must be transitioned to "
+					  "VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL before binding.");
+
 		_colors[index] = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
 						  .pNext = nullptr,
-						  .imageView = view,
-						  .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+						  .imageView = img.view,
+						  .imageLayout = Layout,
 						  .resolveMode = VK_RESOLVE_MODE_NONE,
 						  .resolveImageView = VK_NULL_HANDLE,
 						  .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
@@ -812,15 +1290,22 @@ template <size_t ColorCount = 1, bool HasDepth = false> class DynamicPass {
 		return *this;
 	}
 
-	constexpr auto Depth(VkImageView view, VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+	template <VkImageLayout Layout>
+	constexpr auto Depth(const TypedImage<Layout>& img,
+						 VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
 						 VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE,
 						 float clearVal = 1.0f) noexcept -> DynamicPass&
 		requires(HasDepth)
 	{
+		static_assert(Layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL ||
+						  Layout == VK_IMAGE_LAYOUT_GENERAL,
+					  "ZHLN Compile-Time Error: Depth attachment image must be transitioned to "
+					  "VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL before binding.");
+
 		_depth = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
 				  .pNext = nullptr,
-				  .imageView = view,
-				  .imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+				  .imageView = img.view,
+				  .imageLayout = Layout,
 				  .resolveMode = VK_RESOLVE_MODE_NONE,
 				  .resolveImageView = VK_NULL_HANDLE,
 				  .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
@@ -829,7 +1314,6 @@ template <size_t ColorCount = 1, bool HasDepth = false> class DynamicPass {
 				  .clearValue = {.depthStencil = {.depth = clearVal, .stencil = 0}}};
 		return *this;
 	}
-
 	constexpr auto ClearColor(size_t index, const ZHLN::Color4& color) noexcept -> DynamicPass& {
 		_colors[index].clearValue.color = {.float32 = {color.r, color.g, color.b, color.a}};
 		return *this;

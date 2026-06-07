@@ -1,7 +1,6 @@
 #pragma once
 #include "Allocator.hpp"
 #include "RenderCore.hpp"
-#include "RenderGraph.hpp"
 
 namespace ZHLN::Vk {
 
@@ -12,7 +11,7 @@ namespace ZHLN::Vk {
 template <VkFormat F> struct RenderTarget {
 	Image image;
 	ImageView view;
-	GraphImage tracker;
+	VkExtent2D extent{};
 
 	RenderTarget() = default;
 
@@ -23,11 +22,20 @@ template <VkFormat F> struct RenderTarget {
 	auto operator=(RenderTarget&&) noexcept -> RenderTarget& = default;
 	~RenderTarget() = default; // <-- Defaulted destructor safely completes the Rule of Five
 
+	// Yields the initial untracked state representation
+	[[nodiscard]] auto State() const noexcept -> TypedImage<VK_IMAGE_LAYOUT_UNDEFINED> {
+		return {.handle = image.Handle(),
+				.view = view.Get(),
+				.extent = extent,
+				.aspect = GetFormatAspect(F)};
+	}
+
 	[[nodiscard]] static auto Create(Allocator& allocator, const Context& ctx, VkExtent2D extent,
 									 VkImageUsageFlags usage,
 									 VkImageAspectFlags aspect = GetFormatAspect(F))
 		-> RenderTarget {
-		RenderTarget renderTarget;
+		RenderTarget rt;
+		rt.extent = extent;
 
 		const VkImageCreateInfo info = {
 			.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -47,16 +55,11 @@ template <VkFormat F> struct RenderTarget {
 			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
 		};
 
-		renderTarget.image = Image::Create(allocator.Get(), info, VMA_MEMORY_USAGE_GPU_ONLY);
-		if (!renderTarget.image) {
-			return {};
+		rt.image = Image::Create(allocator.Get(), info, VMA_MEMORY_USAGE_GPU_ONLY);
+		if (rt.image.Valid()) {
+			rt.view = CreateView<F>(ctx.Device(), rt.image.Handle(), aspect, 1);
 		}
-
-		renderTarget.view = CreateView<F>(ctx.Device(), renderTarget.image.Handle(), aspect, 1);
-		renderTarget.tracker = GraphImage::Create(renderTarget.image.Handle(),
-												  renderTarget.view.Get(), extent, aspect);
-
-		return renderTarget;
+		return rt;
 	}
 
 	[[nodiscard]] auto Valid() const noexcept -> bool { return image.Valid() && view.Valid(); }
