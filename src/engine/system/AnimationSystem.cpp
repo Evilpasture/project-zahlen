@@ -278,10 +278,12 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 			std::unordered_map<cgltf_node*, SampledTransform> prevSampled;
 			SampleAnimation(data->animations[state.prevTrackIdx], state.prevTrackTime, prevSampled);
 
+			// 1. Gather nodes present in current track
 			for (const auto& [node, currentTrans] : currentSampled) {
 				auto& blend = blendedTransforms[node];
 				auto prevIt = prevSampled.find(node);
 				if (prevIt != prevSampled.end()) {
+					// Node is present in both tracks: standard crossfade
 					const auto& prevTrans = prevIt->second;
 					blend.translation =
 						prevTrans.translation +
@@ -298,7 +300,72 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 							state.blendFactor * (currentTrans.weights[w] - prevTrans.weights[w]);
 					}
 				} else {
-					blend = currentTrans;
+					// Node is only in current track: blend from static default values to current
+					// [2]
+					SampledTransform defaultTrans;
+					defaultTrans.translation =
+						JPH::Vec3(node->translation[0], node->translation[1], node->translation[2]);
+					defaultTrans.rotation = JPH::Quat(node->rotation[0], node->rotation[1],
+													  node->rotation[2], node->rotation[3]);
+					defaultTrans.scale = JPH::Vec3(node->scale[0], node->scale[1], node->scale[2]);
+					if (node->weights_count > 0 && node->weights != nullptr) {
+						defaultTrans.activeWeightsCount =
+							std::min((uint32_t)node->weights_count, 4u);
+						for (uint32_t w = 0; w < defaultTrans.activeWeightsCount; ++w) {
+							defaultTrans.weights[w] = node->weights[w];
+						}
+					}
+
+					blend.translation =
+						defaultTrans.translation +
+						state.blendFactor * (currentTrans.translation - defaultTrans.translation);
+					blend.rotation =
+						defaultTrans.rotation.SLERP(currentTrans.rotation, state.blendFactor);
+					blend.scale = defaultTrans.scale +
+								  state.blendFactor * (currentTrans.scale - defaultTrans.scale);
+
+					blend.activeWeightsCount = currentTrans.activeWeightsCount;
+					for (uint32_t w = 0; w < blend.activeWeightsCount; ++w) {
+						blend.weights[w] =
+							defaultTrans.weights[w] +
+							state.blendFactor * (currentTrans.weights[w] - defaultTrans.weights[w]);
+					}
+				}
+			}
+
+			// 2. Gather nodes only present in previous track (e.g. blinks), blending them back to
+			// static defaults [2]
+			for (const auto& [node, prevTrans] : prevSampled) {
+				if (blendedTransforms.contains(node)) {
+					continue;
+				}
+
+				auto& blend = blendedTransforms[node];
+				SampledTransform defaultTrans;
+				defaultTrans.translation =
+					JPH::Vec3(node->translation[0], node->translation[1], node->translation[2]);
+				defaultTrans.rotation = JPH::Quat(node->rotation[0], node->rotation[1],
+												  node->rotation[2], node->rotation[3]);
+				defaultTrans.scale = JPH::Vec3(node->scale[0], node->scale[1], node->scale[2]);
+				if (node->weights_count > 0 && node->weights != nullptr) {
+					defaultTrans.activeWeightsCount = std::min((uint32_t)node->weights_count, 4u);
+					for (uint32_t w = 0; w < defaultTrans.activeWeightsCount; ++w) {
+						defaultTrans.weights[w] = node->weights[w];
+					}
+				}
+
+				blend.translation =
+					prevTrans.translation +
+					state.blendFactor * (defaultTrans.translation - prevTrans.translation);
+				blend.rotation = prevTrans.rotation.SLERP(defaultTrans.rotation, state.blendFactor);
+				blend.scale =
+					prevTrans.scale + state.blendFactor * (defaultTrans.scale - prevTrans.scale);
+
+				blend.activeWeightsCount = prevTrans.activeWeightsCount;
+				for (uint32_t w = 0; w < blend.activeWeightsCount; ++w) {
+					blend.weights[w] =
+						prevTrans.weights[w] +
+						state.blendFactor * (defaultTrans.weights[w] - prevTrans.weights[w]);
 				}
 			}
 		} else {
@@ -323,8 +390,12 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 			node->scale[1] = blend.scale.GetY();
 			node->scale[2] = blend.scale.GetZ();
 
-			if (blend.activeWeightsCount > 0 && node->weights != nullptr) {
+			// FIX: Allocate memory for weight buffers if they are null in the node [2]
+			if (blend.activeWeightsCount > 0) {
 				node->weights_count = blend.activeWeightsCount;
+				if (node->weights == nullptr) {
+					node->weights = (float*)std::malloc(blend.activeWeightsCount * sizeof(float));
+				}
 				for (uint32_t w = 0; w < blend.activeWeightsCount; ++w) {
 					node->weights[w] = blend.weights[w];
 				}
@@ -412,5 +483,4 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 		}
 	}
 }
-
 } // namespace ZHLN::AssetFactory
