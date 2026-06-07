@@ -2,6 +2,9 @@
 #include "Entity.hpp"
 #include "Types.hpp"
 
+#include <Jolt/Jolt.h>
+#include <Jolt/Physics/Ragdoll/Ragdoll.h>
+
 namespace ZHLN {
 
 /**
@@ -42,6 +45,21 @@ struct MovementComponent {
 	float currentYVel = 0.0f;
 	float speed = 7.0f;
 	float jumpForce = 12.0f;
+};
+
+enum class RagdollState : uint8_t {
+	Inactive,	   // Entirely visual (animated skinned mesh)
+	KeyframeMotor, // Physical, but joints actively strive to match animations via motors
+	Limp		   // Complete passive physical simulation (dead / knocked out)
+};
+
+struct RagdollComponent {
+	JPH::Ref<JPH::Ragdoll> ragdollInstance = nullptr;
+	RagdollState state = RagdollState::Inactive;
+	bool isAddedToPhysics = false;
+
+	uint32_t jointOffset = 0;
+	uint32_t jointCount = 0;
 };
 
 } // namespace ZHLN

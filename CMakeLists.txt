@@ -102,6 +102,7 @@ set(ENGINE_SOURCES
     src/engine/Text.cpp
     src/engine/system/MovementSystem.cpp
     src/engine/system/AudioSystem.cpp
+    src/engine/system/ArticulationSystem.cpp
     src/engine/Sky.cpp
     src/engine/BRDFLUT.cpp
     src/engine/GizmoUI.cpp

@@ -10,6 +10,7 @@ add_library(zahlen_physics STATIC
     ConstraintFactory.cpp
     PhysicsDebug.cpp
     PhysicsDebug.hpp
+    RagdollFactory.cpp
 )
 set_target_properties(zahlen_physics PROPERTIES POSITION_INDEPENDENT_CODE ON)
 

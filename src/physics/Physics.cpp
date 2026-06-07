@@ -807,5 +807,13 @@ JPH::ShapeRefC CreateHeightFieldShape(const std::vector<float>& heights, int sam
 	return result.Get();
 }
 
+JPH::PhysicsSystem& GetInternalSystem(PhysicsContext& ctx) noexcept {
+	return ctx.GetImpl()->physicsSystem;
+}
+
+PhysicsWorld& GetInternalWorld(PhysicsContext& ctx) noexcept {
+	return ctx.GetImpl()->world;
+}
+
 } // namespace Physics
 } // namespace ZHLN
