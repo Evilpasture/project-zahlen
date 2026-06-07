@@ -2,8 +2,10 @@
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
+#include <detail/ControlFlow.hpp>
 #include <miniaudio.h>
-#include <mutex>
+#include <threading/Mutex.hpp>
+#include <type_traits>
 #include <vector>
 
 namespace ZHLN {
@@ -17,11 +19,31 @@ struct AudioContext::Impl {
 	ma_engine engine{};
 	bool initialized = false;
 	std::vector<ma_sound*> activeOneShots;
-	std::mutex oneShotMutex;
+	ZHLN::Mutex oneShotMutex{};
 	// Tracker for procedural beeps
 	std::vector<ProceduralBeep*> activeBeeps;
-	std::mutex beepMutex;
+	ZHLN::Mutex beepMutex{};
 };
+
+namespace {
+
+/**
+ * @brief Type-safe wrapper helper that manages safety checks and casts.
+ * Deduces return type at compile-time using C++23 traits.
+ */
+template <typename Func> auto WithSound(void* soundHandle, Func&& func) {
+	using ReturnType = std::invoke_result_t<Func, ma_sound*>;
+	if (soundHandle == nullptr) {
+		if constexpr (std::is_void_v<ReturnType>) {
+			return;
+		} else {
+			return ReturnType{};
+		}
+	}
+	return func(static_cast<ma_sound*>(soundHandle));
+}
+
+} // namespace
 
 AudioContext::AudioContext(const AudioConfig& cfg) : _impl(std::make_unique<Impl>()) {
 	ma_result result = ma_engine_init(nullptr, &_impl->engine);
@@ -62,8 +84,7 @@ void AudioContext::UpdateListener(const JPH::Vec3& position, const JPH::Vec3& di
 	ma_engine_listener_set_world_up(&_impl->engine, 0, up.GetX(), up.GetY(), up.GetZ());
 
 	// Prune finished 3D one-shots
-	{
-		std::lock_guard<std::mutex> lock(_impl->oneShotMutex);
+	ZHLN_LOCK(_impl->oneShotMutex) {
 		for (auto it = _impl->activeOneShots.begin(); it != _impl->activeOneShots.end();) {
 			ma_sound* sound = *it;
 			if (ma_sound_at_end(sound) == MA_TRUE) {
@@ -77,8 +98,7 @@ void AudioContext::UpdateListener(const JPH::Vec3& position, const JPH::Vec3& di
 	}
 
 	// Prune finished procedural beeps
-	{
-		std::lock_guard<std::mutex> lock(_impl->beepMutex);
+	ZHLN_LOCK(_impl->beepMutex) {
 		for (auto it = _impl->activeBeeps.begin(); it != _impl->activeBeeps.end();) {
 			ProceduralBeep* beep = *it;
 			if (ma_sound_at_end(&beep->sound) == MA_TRUE) {
@@ -130,8 +150,7 @@ void AudioContext::PlayProceduralBeep(float frequency, float duration, float vol
 	ma_sound_start(&beep->sound);
 
 	// 5. Track for destruction
-	{
-		std::lock_guard<std::mutex> lock(_impl->beepMutex);
+	ZHLN_LOCK(_impl->beepMutex) {
 		_impl->activeBeeps.push_back(beep);
 	}
 }
@@ -158,8 +177,9 @@ void AudioContext::PlayOneShot3D(const std::string& filepath, const JPH::Vec3& p
 		ma_sound_set_volume(sound, volume);
 		ma_sound_start(sound);
 
-		std::lock_guard<std::mutex> lock(_impl->oneShotMutex);
-		_impl->activeOneShots.push_back(sound);
+		ZHLN_LOCK(_impl->oneShotMutex) {
+			_impl->activeOneShots.push_back(sound);
+		}
 	} else {
 		delete sound;
 		ZHLN::Log("ERROR: Failed to play 3D one-shot: {}", filepath);
@@ -167,10 +187,11 @@ void AudioContext::PlayOneShot3D(const std::string& filepath, const JPH::Vec3& p
 }
 
 auto AudioContext::CreateSoundInstance(const std::string& filepath, bool spatialized) -> void* {
-	if (!_impl->initialized)
+	if (!_impl->initialized) {
 		return nullptr;
+	}
 
-	ma_sound* sound = new ma_sound();
+	auto* sound = new ma_sound();
 	ma_uint32 flags = spatialized ? 0 : MA_SOUND_FLAG_NO_SPATIALIZATION;
 
 	ma_result result =
@@ -185,48 +206,38 @@ auto AudioContext::CreateSoundInstance(const std::string& filepath, bool spatial
 }
 
 void AudioContext::DestroySoundInstance(void* soundHandle) {
-	if (!soundHandle)
-		return;
-	ma_sound* sound = static_cast<ma_sound*>(soundHandle);
-	ma_sound_uninit(sound);
-	delete sound;
+	WithSound(soundHandle, [](ma_sound* sound) {
+		ma_sound_uninit(sound);
+		delete sound;
+	});
 }
 
 void AudioContext::PlaySoundInstance(void* soundHandle) {
-	if (!soundHandle)
-		return;
-	ma_sound_start(static_cast<ma_sound*>(soundHandle));
+	WithSound(soundHandle, [](ma_sound* sound) { ma_sound_start(sound); });
 }
 
 void AudioContext::StopSoundInstance(void* soundHandle) {
-	if (!soundHandle)
-		return;
-	ma_sound_stop(static_cast<ma_sound*>(soundHandle));
+	WithSound(soundHandle, [](ma_sound* sound) { ma_sound_stop(sound); });
 }
 
 void AudioContext::SetSoundInstancePosition(void* soundHandle, const JPH::Vec3& position) {
-	if (!soundHandle)
-		return;
-	ma_sound_set_position(static_cast<ma_sound*>(soundHandle), position.GetX(), position.GetY(),
-						  position.GetZ());
+	WithSound(soundHandle, [&](ma_sound* sound) {
+		ma_sound_set_position(sound, position.GetX(), position.GetY(), position.GetZ());
+	});
 }
 
 void AudioContext::SetSoundInstanceVolume(void* soundHandle, float volume) {
-	if (!soundHandle)
-		return;
-	ma_sound_set_volume(static_cast<ma_sound*>(soundHandle), volume);
+	WithSound(soundHandle, [=](ma_sound* sound) { ma_sound_set_volume(sound, volume); });
 }
 
 void AudioContext::SetSoundInstanceLooping(void* soundHandle, bool looping) {
-	if (!soundHandle)
-		return;
-	ma_sound_set_looping(static_cast<ma_sound*>(soundHandle), looping ? MA_TRUE : MA_FALSE);
+	WithSound(soundHandle,
+			  [=](ma_sound* sound) { ma_sound_set_looping(sound, looping ? MA_TRUE : MA_FALSE); });
 }
 
 auto AudioContext::IsSoundInstancePlaying(void* soundHandle) -> bool {
-	if (!soundHandle)
-		return false;
-	return ma_sound_is_playing(static_cast<ma_sound*>(soundHandle)) == MA_TRUE;
+	return WithSound(soundHandle,
+					 [](ma_sound* sound) { return ma_sound_is_playing(sound) == MA_TRUE; });
 }
 
 } // namespace ZHLN

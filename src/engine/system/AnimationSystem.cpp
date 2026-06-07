@@ -56,6 +56,16 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 		ZHLN::Log("===============================================================");
 		s_LoggedAnimationManifest = true;
 	}
+	bool isPlayerMoving = false;
+	auto playerEntities = reg.GetEntitiesWith<MovementComponent>();
+	if (!playerEntities.empty()) {
+		Entity pEnt = playerEntities[0];
+		if (auto* move = reg.Get<MovementComponent>(pEnt)) {
+			float inputLen = std::sqrt(move->inputX * move->inputX + move->inputZ * move->inputZ);
+			isPlayerMoving = (inputLen > 0.1f);
+		}
+	}
+
 	std::unordered_map<cgltf_node*, JPH::Mat44> worldTransforms;
 
 	std::function<void(cgltf_node*, const JPH::Mat44&)> solveWorldMatrix =
@@ -78,12 +88,10 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 		};
 
 	std::unordered_map<cgltf_skin*, uint32_t> skinToBufferOffset;
-
 	JPH::Array<JPH::Mat44> calculatedJoints(8192, JPH::Mat44::sIdentity());
 	uint32_t currentJointCount = 0;
 
 	for (auto& [path, data] : s_GLBCache) {
-		// 1. ALWAYS solve the local transforms hierarchy (rest pose) on startup
 		for (cgltf_size n = 0; n < data->nodes_count; ++n) {
 			cgltf_node* node = &data->nodes[n];
 			if (node->parent == nullptr) {
@@ -91,10 +99,32 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 			}
 		}
 
-		// 2. Only perform keyframe interpolation if animations are present
 		if (data->animations_count > 0) {
-			cgltf_animation& anim = data->animations[0];
+			// 2. Select animation track based on active movement state and keywords
+			size_t activeTrackIdx = 0;
+			for (size_t a = 0; a < data->animations_count; ++a) {
+				std::string animName =
+					(data->animations[a].name != nullptr) ? data->animations[a].name : "";
+				// Convert to uppercase to prevent case mismatch
+				std::transform(animName.begin(), animName.end(), animName.begin(), ::toupper);
 
+				if (isPlayerMoving) {
+					// Prioritize RUN, WALK, or STRAFE keywords
+					if (animName.contains("RUN") || animName.contains("WALK") ||
+						animName.contains("STRAFE")) {
+						activeTrackIdx = a;
+						break;
+					}
+				} else {
+					// Prioritize IDLE keywords
+					if (animName.contains("IDLE")) {
+						activeTrackIdx = a;
+						break;
+					}
+				}
+			}
+
+			cgltf_animation& anim = data->animations[activeTrackIdx];
 			float duration = 0.0f;
 			for (size_t c = 0; c < anim.channels_count; ++c) {
 				cgltf_animation_sampler* sampler = anim.channels[c].sampler;

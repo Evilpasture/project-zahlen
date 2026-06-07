@@ -13,13 +13,13 @@ struct SortKey {
 	 * into 32-bit keys using a shift-XOR hash fold to prevent pointer collisions.
 	 */
 	static inline SortKey Pack(const void* material, const void* mesh) noexcept {
-		uint64_t mat_val = reinterpret_cast<uintptr_t>(material);
-		uint64_t mesh_val = reinterpret_cast<uintptr_t>(mesh);
+		auto mat_val = reinterpret_cast<uintptr_t>(material);
+		auto mesh_val = reinterpret_cast<uintptr_t>(mesh);
 
-		uint32_t mat_id = static_cast<uint32_t>((mat_val >> 3) ^ (mat_val >> 32));
-		uint32_t mesh_id = static_cast<uint32_t>((mesh_val >> 3) ^ (mesh_val >> 32));
+		auto mat_id = static_cast<uint32_t>((mat_val >> 3) ^ (mat_val >> 32));
+		auto mesh_id = static_cast<uint32_t>((mesh_val >> 3) ^ (mesh_val >> 32));
 
-		return { (static_cast<uint64_t>(mat_id) << 32) | mesh_id };
+		return {(static_cast<uint64_t>(mat_id) << 32) | mesh_id};
 	}
 };
 
@@ -30,12 +30,11 @@ struct SortItem {
 
 // Small swap helper
 
-template <typename T>
-    inline void Swap(T& a, T& b) noexcept {
-        T temp = static_cast<T&&>(a); // Raw move semantics without <utility>
-        a = static_cast<T&&>(b);
-        b = static_cast<T&&>(temp);
-    }
+template <typename T> inline void Swap(T& a, T& b) noexcept {
+	T temp = static_cast<T&&>(a); // Raw move semantics without <utility>
+	a = static_cast<T&&>(b);
+	b = static_cast<T&&>(temp);
+}
 
 /**
  * @brief Performs a highly optimized, stable Radix Sort over 64-bit keys.
@@ -50,7 +49,7 @@ inline void RadixSort64(SortItem* __restrict items, SortItem* __restrict temp, u
 
 		// 1. Calculate Histograms
 		for (uint32_t i = 0; i < size; ++i) {
-			uint8_t bucket = static_cast<uint8_t>((in[i].key.value >> shift) & 0xFF);
+			auto bucket = static_cast<uint8_t>((in[i].key.value >> shift) & 0xFF);
 			count[bucket]++;
 		}
 
@@ -63,7 +62,7 @@ inline void RadixSort64(SortItem* __restrict items, SortItem* __restrict temp, u
 
 		// 3. Scatter items into buckets
 		for (uint32_t i = 0; i < size; ++i) {
-			uint8_t bucket = static_cast<uint8_t>((in[i].key.value >> shift) & 0xFF);
+			auto bucket = static_cast<uint8_t>((in[i].key.value >> shift) & 0xFF);
 			uint32_t dest = prefixes[bucket]++;
 			out[dest] = in[i];
 		}

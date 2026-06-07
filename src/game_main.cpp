@@ -29,6 +29,7 @@ void DrawProfiler(Engine& engine);
 void MovementSystem(Engine& engine, float dt);
 void AudioSystem(Engine& engine, float dt);
 void LoadLevel(Engine& engine, const std::string& path, Material material);
+void DrawOrientationGizmo(const ZHLN::Camera& cam);
 } // namespace ZHLN
 
 using namespace ZHLN;
@@ -39,6 +40,7 @@ namespace {
 // capsule
 static std::vector<Entity> s_PomniParts;
 static Entity s_PlayerEntity = NullEntity;
+static float s_CamDistance = 4.5f;
 
 struct Scene {
 	void Setup(Engine& engine) {
@@ -192,6 +194,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 
 		ZHLN::DrawConsole(scriptRunner);
 		ZHLN::DrawProfiler(engine);
+		ZHLN::DrawOrientationGizmo(cam);
 
 		if (engine.GetInput().NeedsResize()) {
 			rc.SetResolution(engine.GetInput().GetNewSize());
@@ -278,9 +281,15 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			float pitchRad = JPH::DegreesToRadians(cam.pitch);
 			JPH::Vec3 offsetDir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad),
 								JPH::Sin(yawRad) * JPH::Cos(pitchRad));
+
+			float wheelDelta = engine.GetInput().GetMouse().wheel;
+			if (std::abs(wheelDelta) > 0.01f) {
+				// Scroll up zoom-in, scroll down zoom-out
+				s_CamDistance = JPH::Clamp(s_CamDistance - wheelDelta * 0.5f, 1.5f, 15.0f);
+			}
 			// Place the camera 4.5 meters behind the player capsule
 			cam.position =
-				playerPos - (offsetDir.Normalized() * 4.5f) + JPH::Vec3(0.0f, 1.3f, 0.0f);
+				playerPos - (offsetDir.Normalized() * s_CamDistance) + JPH::Vec3(0.0f, 1.3f, 0.0f);
 
 			JPH::Mat44 unjitteredProj = cam.GetProjectionMatrix((float)res.width / res.height);
 			JPH::Mat44 unjitteredVp = unjitteredProj * cam.GetViewMatrix();
@@ -328,16 +337,23 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			engine.BeginFrame();
 			Renderer::SetMatrices(rc, vp, unjitteredVp);
 
-			// Assemble Pomni's orientation matching the camera yaw rotation
-			JPH::Mat44 playerTransform = JPH::Mat44::sIdentity();
-			if (reg.IsAlive(s_PlayerEntity)) {
-				// Shift down by 1.0m to account for capsule visual center
-				playerTransform = Math::CreateTransform(
-					playerPos - JPH::Vec3(0.0f, 1.0f, 0.0f),
-					JPH::Quat::sRotation(JPH::Vec3::sAxisY(),
-										 JPH::DegreesToRadians(cam.yaw - 90.0f)));
+			static float s_PlayerYaw = -90.0f;
+
+			JPH::Vec3 velocity = Physics::GetCharacterVelocity(pc, charPhys);
+			JPH::Vec3 flatVel(velocity.GetX(), 0.0f, velocity.GetZ());
+
+			if (flatVel.LengthSq() > 0.1f) {
+				float movementAngleDeg =
+					JPH::RadiansToDegrees(std::atan2(-velocity.GetZ(), velocity.GetX()));
+				s_PlayerYaw = movementAngleDeg + 90.0f;
 			}
 
+			JPH::Mat44 playerTransform = JPH::Mat44::sIdentity();
+			if (reg.IsAlive(s_PlayerEntity)) {
+				playerTransform = Math::CreateTransform(
+					playerPos - JPH::Vec3(0.0f, 0.0f, 0.0f), // Match physical capsule bottom
+					JPH::Quat::sRotation(JPH::Vec3::sAxisY(), JPH::DegreesToRadians(s_PlayerYaw)));
+			}
 			for (Entity e : s_VisibleEntities) {
 				auto* mesh = reg.Get<MeshComponent>(e);
 				if (mesh == nullptr) {
@@ -378,7 +394,17 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			for (Entity e : allEntities) {
 				auto* mesh = reg.Get<MeshComponent>(e);
 				if (mesh != nullptr) {
-					mesh->prevTransform = mesh->localTransform;
+					JPH::Mat44 currentTransform{};
+					bool isPlayerPart = std::find(s_PomniParts.begin(), s_PomniParts.end(), e) !=
+										s_PomniParts.end();
+
+					if (isPlayerPart) {
+						currentTransform = playerTransform * mesh->localTransform;
+					} else {
+						currentTransform = mesh->localTransform;
+					}
+					mesh->prevTransform =
+						currentTransform; // Must match the evaluated render transform!
 				}
 			}
 		} else {

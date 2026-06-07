@@ -104,6 +104,7 @@ set(ENGINE_SOURCES
     src/engine/system/AudioSystem.cpp
     src/engine/Sky.cpp
     src/engine/BRDFLUT.cpp
+    src/engine/GizmoUI.cpp
 )
 
 find_library(ZSTD_LIBRARY NAMES zstd zstd_static HINTS "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib")
