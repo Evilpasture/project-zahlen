@@ -29,7 +29,7 @@ Mesh LoadCookedMesh(RenderContext& ctx, AssetManager& assetMgr, std::string_view
 uint32_t LoadCookedTexture(RenderContext& ctx, AssetManager& assetMgr,
 						   std::string_view virtualPath);
 
-template <bool CreatePhysics = false>
+template <bool CreatePhysics = false, bool Animated = true>
 uint32_t SpawnGLB(RenderContext& ctx, ECS::Registry& reg, std::string_view path,
 				  Entity* outBuffer = nullptr, uint32_t maxCount = 0);
 

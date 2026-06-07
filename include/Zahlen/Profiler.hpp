@@ -8,6 +8,7 @@ struct CullingStats {
 	static inline uint32_t TotalObjects = 0;
 	static inline uint32_t CulledObjects = 0;
 	static inline bool EnableCulling = true; // Toggle for testing!
+	static inline bool FreezeFrustum = false;
 };
 
 class Profiler {

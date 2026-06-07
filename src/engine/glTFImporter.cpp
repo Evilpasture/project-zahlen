@@ -22,6 +22,7 @@ namespace ZHLN::AssetFactory {
 
 // Declare shared caches (linked externally by AnimationSystem)
 std::unordered_map<std::string, cgltf_data*> s_GLBCache;
+std::vector<cgltf_data*> s_AnimatedGLBs;
 
 static uint32_t LoadEmbeddedTexture(RenderContext& ctx, cgltf_image* img,
 									const std::string& glbPath, bool isSRGB = true) {
@@ -227,7 +228,7 @@ Mesh LoadGLB(RenderContext& ctx, std::string_view path) {
 	return Mesh{.vertexBuffer = vbo, .vertexCount = static_cast<uint32_t>(vertexBuffer.size())};
 }
 
-template <bool CreatePhysics>
+template <bool CreatePhysics, bool Animated>
 uint32_t SpawnGLB(RenderContext& ctx, ECS::Registry& reg, std::string_view path, Entity* outBuffer,
 				  uint32_t maxCount) {
 	cgltf_options opts{};
@@ -291,6 +292,12 @@ uint32_t SpawnGLB(RenderContext& ctx, ECS::Registry& reg, std::string_view path,
 
 				node->has_matrix = 0;
 			}
+		}
+	}
+
+	if constexpr (Animated) {
+		if (std::find(s_AnimatedGLBs.begin(), s_AnimatedGLBs.end(), data) == s_AnimatedGLBs.end()) {
+			s_AnimatedGLBs.push_back(data);
 		}
 	}
 
@@ -611,19 +618,22 @@ uint32_t SpawnGLB(RenderContext& ctx, ECS::Registry& reg, std::string_view path,
 			float boundingRadius = std::sqrt(maxD2) * maxScale * 1.2f + 1.0f;
 
 			Entity part = reg.Create();
-			reg.Add(part, MeshComponent{.mesh = subMesh,
-										.material = subMaterial,
-										.cullRadius = boundingRadius,
-										.localTransform = nodeTransform,
-										.prevTransform = nodeTransform,
-										.jointOffset = 0,
-										.isSkinned = (node->skin != nullptr),
-										.morphOffset = morphOffset,
-										.activeMorphCount = activeMorphCount,
-										.morphWeights = {defaultWeights[0], defaultWeights[1],
-														 defaultWeights[2], defaultWeights[3]},
-										.gltfNode = (void*)node,
-										.gltfSkin = (void*)node->skin});
+			reg.Add(part, MeshComponent{
+							  .mesh = subMesh,
+							  .material = subMaterial,
+							  .cullRadius = boundingRadius,
+							  .localTransform = nodeTransform,
+							  .prevTransform = nodeTransform,
+							  .jointOffset = 0,
+							  // Only flag skinning and bind nodes if animation is requested [2]
+							  .isSkinned = (node->skin != nullptr) && Animated,
+							  .morphOffset = morphOffset,
+							  .activeMorphCount = activeMorphCount,
+							  .morphWeights = {defaultWeights[0], defaultWeights[1],
+											   defaultWeights[2], defaultWeights[3]},
+							  .gltfNode = Animated ? (void*)node : nullptr,
+							  .gltfSkin = (Animated && node->skin != nullptr) ? (void*)node->skin
+																			  : nullptr});
 
 			// ----------------------------------------------------------------
 			// 3. Compile-time Evaluated Physical Collider Generation
@@ -673,8 +683,15 @@ uint32_t SpawnGLB(RenderContext& ctx, ECS::Registry& reg, std::string_view path,
 	return spawnedCount;
 }
 
-template uint32_t SpawnGLB<true>(RenderContext& ctx, ECS::Registry& reg, std::string_view path,
-								 Entity* outBuffer, uint32_t maxCount);
-template uint32_t SpawnGLB<false>(RenderContext& ctx, ECS::Registry& reg, std::string_view path,
-								  Entity* outBuffer, uint32_t maxCount);
+template uint32_t SpawnGLB<true, true>(RenderContext& ctx, ECS::Registry& reg,
+									   std::string_view path, Entity* outBuffer, uint32_t maxCount);
+template uint32_t SpawnGLB<true, false>(RenderContext& ctx, ECS::Registry& reg,
+										std::string_view path, Entity* outBuffer,
+										uint32_t maxCount);
+template uint32_t SpawnGLB<false, true>(RenderContext& ctx, ECS::Registry& reg,
+										std::string_view path, Entity* outBuffer,
+										uint32_t maxCount);
+template uint32_t SpawnGLB<false, false>(RenderContext& ctx, ECS::Registry& reg,
+										 std::string_view path, Entity* outBuffer,
+										 uint32_t maxCount);
 } // namespace ZHLN::AssetFactory

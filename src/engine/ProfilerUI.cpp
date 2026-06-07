@@ -46,8 +46,9 @@ void Profiler::Record(const char* name, float timeMS) noexcept {
 }
 
 void Profiler::IterateMetrics(MetricCallback callback, void* userData) noexcept {
-	if (!callback)
+	if (callback == nullptr) {
 		return;
+	}
 	std::lock_guard<std::mutex> lock(s_ProfilerMutex);
 	for (const auto& [name, data] : s_Metrics) {
 		callback(name.c_str(), data.cpuTimeMS, data.rollingAverageMS, data.history.data(),
@@ -121,6 +122,7 @@ void DrawProfiler(Engine& engine) {
 		// 5. FRUSTUM CULLING
 		if (ImGui::CollapsingHeader("Frustum Culling", ImGuiTreeNodeFlags_DefaultOpen)) {
 			ImGui::Checkbox("Enable Culling", &CullingStats::EnableCulling);
+			ImGui::Checkbox("Freeze Frustum", &CullingStats::FreezeFrustum);
 
 			ImGui::Text("Total Objects:    %u", CullingStats::TotalObjects);
 			ImGui::Text("Objects Rendered: %u",

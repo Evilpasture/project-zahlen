@@ -16,48 +16,145 @@
 namespace ZHLN::AssetFactory {
 
 extern std::unordered_map<std::string, cgltf_data*> s_GLBCache;
+extern std::vector<cgltf_data*> s_AnimatedGLBs;
+// Temporal structure to hold a sampled local transform before blending
+struct SampledTransform {
+	JPH::Vec3 translation = JPH::Vec3::sZero();
+	JPH::Quat rotation = JPH::Quat::sIdentity();
+	JPH::Vec3 scale = JPH::Vec3::sReplicate(1.0f);
+	float weights[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+	uint32_t activeWeightsCount = 0;
 
-void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
-	static bool s_LoggedAnimationManifest = false;
-	if (!s_LoggedAnimationManifest && !s_GLBCache.empty() && false) {
-		ZHLN::Log("=================== GLTF ANIMATION MANIFEST ===================");
-		for (const auto& [path, data] : s_GLBCache) {
-			ZHLN::Log("File: {} | Total Clips Found: {}", path, data->animations_count);
+	bool hasTranslation = false;
+	bool hasRotation = false;
+	bool hasScale = false;
+	bool hasWeights = false;
+};
 
-			for (size_t a = 0; a < data->animations_count; ++a) {
-				const auto& anim = data->animations[a];
-				ZHLN::Log("  Track [{}]: '{}' (Channels: {})", a,
-						  (anim.name != nullptr) ? anim.name : "Unnamed Track",
-						  anim.channels_count);
+// Tracks the active state machine of each GLB model globally [2]
+struct GLBAnimState {
+	size_t currentTrackIdx = 0;
+	size_t prevTrackIdx = 0;
+	float currentTrackTime = 0.0f;
+	float prevTrackTime = 0.0f;
+	float blendFactor = 1.0f; // 1.0 = fully blended (no transition)
+	bool initialized = false;
+};
 
-				// If this is the active track (index 0), inventory what it controls
-				if (a == 0) {
-					for (size_t c = 0; c < anim.channels_count; ++c) {
-						const auto& channel = anim.channels[c];
-						const char* pathType = "Unknown";
-						if (channel.target_path == cgltf_animation_path_type_translation) {
-							pathType = "Translation";
-						} else if (channel.target_path == cgltf_animation_path_type_rotation) {
-							pathType = "Rotation";
-						} else if (channel.target_path == cgltf_animation_path_type_scale) {
-							pathType = "Scale";
-						} else if (channel.target_path == cgltf_animation_path_type_weights) {
-							pathType = "Morph Weights";
-						}
+static std::unordered_map<cgltf_data*, GLBAnimState> s_AnimStates;
 
-						ZHLN::Log("    Channel [{}]: Target Node '{}' -> Animating: {}", c,
-								  ((channel.target_node != nullptr) &&
-								   (channel.target_node->name != nullptr))
-									  ? channel.target_node->name
-									  : "Unnamed Node",
-								  pathType);
-					}
+// Samples a single animation track at a specific timestamp [2]
+static void SampleAnimation(cgltf_animation& anim, float animTime,
+							std::unordered_map<cgltf_node*, SampledTransform>& outTransforms) {
+	for (size_t c = 0; c < anim.channels_count; ++c) {
+		cgltf_animation_channel& channel = anim.channels[c];
+		cgltf_node* targetNode = channel.target_node;
+		if (targetNode == nullptr) {
+			continue;
+		}
+
+		cgltf_animation_sampler* sampler = channel.sampler;
+		size_t numKeys = sampler->input->count;
+		if (numKeys == 0) {
+			continue;
+		}
+
+		auto& sample = outTransforms[targetNode];
+
+		// Populate with static defaults if this is the first channel hitting this node
+		if (!sample.hasTranslation && !sample.hasRotation && !sample.hasScale &&
+			!sample.hasWeights) {
+			sample.translation = JPH::Vec3(targetNode->translation[0], targetNode->translation[1],
+										   targetNode->translation[2]);
+			sample.rotation = JPH::Quat(targetNode->rotation[0], targetNode->rotation[1],
+										targetNode->rotation[2], targetNode->rotation[3]);
+			sample.scale =
+				JPH::Vec3(targetNode->scale[0], targetNode->scale[1], targetNode->scale[2]);
+			if (targetNode->weights_count > 0 && targetNode->weights != nullptr) {
+				sample.activeWeightsCount = std::min((uint32_t)targetNode->weights_count, 4u);
+				for (uint32_t w = 0; w < sample.activeWeightsCount; ++w) {
+					sample.weights[w] = targetNode->weights[w];
 				}
 			}
 		}
-		ZHLN::Log("===============================================================");
-		s_LoggedAnimationManifest = true;
+
+		float maxTime = 0.0f;
+		cgltf_accessor_read_float(sampler->input, numKeys - 1, &maxTime, 1);
+
+		float localAnimTime = animTime;
+		if (localAnimTime > maxTime) {
+			localAnimTime = std::fmod(localAnimTime, maxTime);
+		}
+
+		size_t k = 0;
+		for (; k < numKeys - 1; ++k) {
+			float t1 = 0.0f;
+			cgltf_accessor_read_float(sampler->input, k + 1, &t1, 1);
+			if (t1 > localAnimTime) {
+				break;
+			}
+		}
+		if (k >= numKeys - 1) {
+			k = numKeys - 2;
+		}
+
+		float t0 = 0.0f;
+		float t1 = 0.0f;
+		cgltf_accessor_read_float(sampler->input, k, &t0, 1);
+		cgltf_accessor_read_float(sampler->input, k + 1, &t1, 1);
+
+		float factor = (t1 > t0) ? (localAnimTime - t0) / (t1 - t0) : 0.0f;
+		bool isCubic = (sampler->interpolation == cgltf_interpolation_type_cubic_spline);
+		size_t idx0 = isCubic ? (3 * k + 1) : k;
+		size_t idx1 = isCubic ? (3 * (k + 1) + 1) : (k + 1);
+
+		if (channel.target_path == cgltf_animation_path_type_translation) {
+			float v0[3];
+			float v1[3];
+			cgltf_accessor_read_float(sampler->output, idx0, v0, 3);
+			cgltf_accessor_read_float(sampler->output, idx1, v1, 3);
+			sample.translation =
+				JPH::Vec3(v0[0] + factor * (v1[0] - v0[0]), v0[1] + factor * (v1[1] - v0[1]),
+						  v0[2] + factor * (v1[2] - v0[2]));
+			sample.hasTranslation = true;
+		} else if (channel.target_path == cgltf_animation_path_type_rotation) {
+			float q0[4];
+			float q1[4];
+			cgltf_accessor_read_float(sampler->output, idx0, q0, 4);
+			cgltf_accessor_read_float(sampler->output, idx1, q1, 4);
+			JPH::Quat rot0(q0[0], q0[1], q0[2], q0[3]);
+			JPH::Quat rot1(q1[0], q1[1], q1[2], q1[3]);
+			sample.rotation = rot0.SLERP(rot1, factor);
+			sample.hasRotation = true;
+		} else if (channel.target_path == cgltf_animation_path_type_scale) {
+			float s0[3];
+			float s1[3];
+			cgltf_accessor_read_float(sampler->output, idx0, s0, 3);
+			cgltf_accessor_read_float(sampler->output, idx1, s1, 3);
+			sample.scale =
+				JPH::Vec3(s0[0] + factor * (s1[0] - s0[0]), s0[1] + factor * (s1[1] - s0[1]),
+						  s0[2] + factor * (s1[2] - s0[2]));
+			sample.hasScale = true;
+		} else if (channel.target_path == cgltf_animation_path_type_weights) {
+			size_t numTargets = (targetNode->mesh != nullptr) ? targetNode->mesh->weights_count : 0;
+			if (numTargets > 0) {
+				sample.activeWeightsCount = std::min((uint32_t)numTargets, 4u);
+				std::vector<float> w0(numTargets);
+				std::vector<float> w1(numTargets);
+				for (size_t w = 0; w < numTargets; ++w) {
+					cgltf_accessor_read_float(sampler->output, (idx0 * numTargets) + w, &w0[w], 1);
+					cgltf_accessor_read_float(sampler->output, (idx1 * numTargets) + w, &w1[w], 1);
+				}
+				for (size_t w = 0; w < sample.activeWeightsCount; ++w) {
+					sample.weights[w] = w0[w] + factor * (w1[w] - w0[w]);
+				}
+				sample.hasWeights = true;
+			}
+		}
 	}
+}
+
+void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 	bool isPlayerMoving = false;
 	auto playerEntities = reg.GetEntitiesWith<MovementComponent>();
 	if (!playerEntities.empty()) {
@@ -93,7 +190,149 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 	JPH::Array<JPH::Mat44> calculatedJoints(8192, JPH::Mat44::sIdentity());
 	uint32_t currentJointCount = 0;
 
-	for (auto& [path, data] : s_GLBCache) {
+	// Loop ONLY over explicitly animated data [2]
+	for (auto* data : s_AnimatedGLBs) {
+		if (data->animations_count == 0) {
+			continue;
+		}
+
+		// Find the best matching track based on movement state [2]
+		size_t activeTrackIdx = 0;
+		for (size_t a = 0; a < data->animations_count; ++a) {
+			std::string animName =
+				(data->animations[a].name != nullptr) ? data->animations[a].name : "";
+			std::transform(animName.begin(), animName.end(), animName.begin(), ::toupper);
+
+			if (isPlayerMoving) {
+				if (animName.contains("RUN") || animName.contains("WALK") ||
+					animName.contains("STRAFE")) {
+					activeTrackIdx = a;
+					break;
+				}
+			} else {
+				if (animName.contains("IDLE")) {
+					activeTrackIdx = a;
+					break;
+				}
+			}
+		}
+
+		// Grab or initialize the persistent state machine for this GLB
+		auto& state = s_AnimStates[data];
+		if (!state.initialized) {
+			state.currentTrackIdx = activeTrackIdx;
+			state.prevTrackIdx = activeTrackIdx;
+			state.currentTrackTime = 0.0f;
+			state.prevTrackTime = 0.0f;
+			state.blendFactor = 1.0f;
+			state.initialized = true;
+		}
+
+		// If the track target changes, trigger a crossfade [2]
+		if (activeTrackIdx != state.currentTrackIdx) {
+			state.prevTrackIdx = state.currentTrackIdx;
+			state.prevTrackTime = state.currentTrackTime;
+			state.currentTrackIdx = activeTrackIdx;
+			state.currentTrackTime = 0.0f;
+			state.blendFactor = 0.0f; // Start blending
+		}
+
+		float blendDuration = 0.2f; // Blend over 200ms
+		if (state.blendFactor < 1.0f) {
+			state.blendFactor = std::min(1.0f, state.blendFactor + (dt / blendDuration));
+		}
+
+		// Lambda to fetch duration of a track
+		auto getTrackDuration = [](cgltf_animation& anim) -> float {
+			float dur = 0.0f;
+			for (size_t c = 0; c < anim.channels_count; ++c) {
+				if (anim.channels[c].sampler->input->has_max) {
+					dur = std::max(dur, anim.channels[c].sampler->input->max[0]);
+				}
+			}
+			return dur;
+		};
+
+		// Advance track timers
+		float currentDur = getTrackDuration(data->animations[state.currentTrackIdx]);
+		state.currentTrackTime += dt;
+		if (state.currentTrackTime > currentDur) {
+			state.currentTrackTime = std::fmod(state.currentTrackTime, currentDur);
+		}
+
+		float prevDur = getTrackDuration(data->animations[state.prevTrackIdx]);
+		state.prevTrackTime += dt;
+		if (state.prevTrackTime > prevDur) {
+			state.prevTrackTime = std::fmod(state.prevTrackTime, prevDur);
+		}
+
+		// Sample Current Track [2]
+		std::unordered_map<cgltf_node*, SampledTransform> currentSampled;
+		SampleAnimation(data->animations[state.currentTrackIdx], state.currentTrackTime,
+						currentSampled);
+
+		std::unordered_map<cgltf_node*, SampledTransform> blendedTransforms;
+
+		// Perform interpolation if crossfading [2]
+		if (state.blendFactor < 1.0f) {
+			std::unordered_map<cgltf_node*, SampledTransform> prevSampled;
+			SampleAnimation(data->animations[state.prevTrackIdx], state.prevTrackTime, prevSampled);
+
+			for (const auto& [node, currentTrans] : currentSampled) {
+				auto& blend = blendedTransforms[node];
+				auto prevIt = prevSampled.find(node);
+				if (prevIt != prevSampled.end()) {
+					const auto& prevTrans = prevIt->second;
+					blend.translation =
+						prevTrans.translation +
+						state.blendFactor * (currentTrans.translation - prevTrans.translation);
+					blend.rotation =
+						prevTrans.rotation.SLERP(currentTrans.rotation, state.blendFactor);
+					blend.scale = prevTrans.scale +
+								  state.blendFactor * (currentTrans.scale - prevTrans.scale);
+
+					blend.activeWeightsCount = currentTrans.activeWeightsCount;
+					for (uint32_t w = 0; w < blend.activeWeightsCount; ++w) {
+						blend.weights[w] =
+							prevTrans.weights[w] +
+							state.blendFactor * (currentTrans.weights[w] - prevTrans.weights[w]);
+					}
+				} else {
+					blend = currentTrans;
+				}
+			}
+		} else {
+			blendedTransforms = std::move(currentSampled);
+		}
+
+		// Write blended transforms directly back to the cgltf_node's memory [2]
+		for (const auto& [node, blend] : blendedTransforms) {
+			node->has_translation = 1;
+			node->translation[0] = blend.translation.GetX();
+			node->translation[1] = blend.translation.GetY();
+			node->translation[2] = blend.translation.GetZ();
+
+			node->has_rotation = 1;
+			node->rotation[0] = blend.rotation.GetX();
+			node->rotation[1] = blend.rotation.GetY();
+			node->rotation[2] = blend.rotation.GetZ();
+			node->rotation[3] = blend.rotation.GetW();
+
+			node->has_scale = 1;
+			node->scale[0] = blend.scale.GetX();
+			node->scale[1] = blend.scale.GetY();
+			node->scale[2] = blend.scale.GetZ();
+
+			if (blend.activeWeightsCount > 0 && node->weights != nullptr) {
+				node->weights_count = blend.activeWeightsCount;
+				for (uint32_t w = 0; w < blend.activeWeightsCount; ++w) {
+					node->weights[w] = blend.weights[w];
+				}
+			}
+			node->has_matrix = 0;
+		}
+
+		// Resolve world space bone offsets
 		for (cgltf_size n = 0; n < data->nodes_count; ++n) {
 			cgltf_node* node = &data->nodes[n];
 			if (node->parent == nullptr) {
@@ -101,263 +340,7 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 			}
 		}
 
-		if (data->animations_count > 0) {
-			// 2. Select animation track based on active movement state and keywords
-			size_t activeTrackIdx = 0;
-			for (size_t a = 0; a < data->animations_count; ++a) {
-				std::string animName =
-					(data->animations[a].name != nullptr) ? data->animations[a].name : "";
-				// Convert to uppercase to prevent case mismatch
-				std::transform(animName.begin(), animName.end(), animName.begin(), ::toupper);
-
-				if (isPlayerMoving) {
-					// Prioritize RUN, WALK, or STRAFE keywords
-					if (animName.contains("RUN") || animName.contains("WALK") ||
-						animName.contains("STRAFE")) {
-						activeTrackIdx = a;
-						break;
-					}
-				} else {
-					// Prioritize IDLE keywords
-					if (animName.contains("IDLE")) {
-						activeTrackIdx = a;
-						break;
-					}
-				}
-			}
-
-			cgltf_animation& anim = data->animations[activeTrackIdx];
-			float duration = 0.0f;
-			for (size_t c = 0; c < anim.channels_count; ++c) {
-				cgltf_animation_sampler* sampler = anim.channels[c].sampler;
-				if (sampler->input->has_max) {
-					duration = std::max(duration, sampler->input->max[0]);
-				}
-			}
-
-			static float animTime = 0.0f;
-			animTime += dt;
-			if (animTime > duration) {
-				animTime = std::fmod(animTime, duration);
-			}
-
-			for (size_t c = 0; c < anim.channels_count; ++c) {
-				cgltf_animation_channel& channel = anim.channels[c];
-				cgltf_node* targetNode = channel.target_node;
-				cgltf_animation_sampler* sampler = channel.sampler;
-
-				size_t numKeys = sampler->input->count;
-				if (numKeys == 0) {
-					continue;
-				}
-
-				if (numKeys == 1) {
-					bool isCubic =
-						(sampler->interpolation == cgltf_interpolation_type_cubic_spline);
-					size_t idx = isCubic ? 1 : 0;
-
-					if (channel.target_path == cgltf_animation_path_type_translation) {
-						float v[3];
-						cgltf_accessor_read_float(sampler->output, idx, v, 3);
-						targetNode->has_translation = 1;
-						std::memcpy(targetNode->translation, v, sizeof(v));
-						targetNode->has_matrix = 0;
-					} else if (channel.target_path == cgltf_animation_path_type_rotation) {
-						float q[4];
-						cgltf_accessor_read_float(sampler->output, idx, q, 4);
-						targetNode->has_rotation = 1;
-						std::memcpy(targetNode->rotation, q, sizeof(q));
-						targetNode->has_matrix = 0;
-					} else if (channel.target_path == cgltf_animation_path_type_scale) {
-						float s[3];
-						cgltf_accessor_read_float(sampler->output, idx, s, 3);
-						targetNode->has_scale = 1;
-						std::memcpy(targetNode->scale, s, sizeof(s));
-						targetNode->has_matrix = 0;
-					} else if (channel.target_path == cgltf_animation_path_type_weights) {
-						size_t numTargets =
-							(targetNode->mesh != nullptr) ? targetNode->mesh->weights_count : 0;
-						if (numTargets > 0) {
-							targetNode->weights_count = numTargets;
-							if (targetNode->weights == nullptr) {
-								targetNode->weights =
-									(float*)std::malloc(numTargets * sizeof(float));
-							}
-							cgltf_accessor_read_float(sampler->output, idx, targetNode->weights,
-													  numTargets);
-						}
-					}
-					continue; // Skip the interpolation math entirely for static bones
-				}
-
-				float maxTime = 0.0f;
-				cgltf_accessor_read_float(sampler->input, numKeys - 1, &maxTime, 1);
-
-				float localAnimTime = animTime;
-				if (localAnimTime > maxTime) {
-					localAnimTime = std::fmod(localAnimTime, maxTime);
-				}
-
-				size_t k = 0;
-				for (; k < numKeys - 1; ++k) {
-					float t1 = 0.0f;
-					cgltf_accessor_read_float(sampler->input, k + 1, &t1, 1);
-					if (t1 > localAnimTime) {
-						break;
-					}
-				}
-
-				if (k >= numKeys - 1) {
-					k = numKeys - 2;
-				}
-
-				float t0 = 0.0f;
-				float t1 = 0.0f;
-				cgltf_accessor_read_float(sampler->input, k, &t0, 1);
-				cgltf_accessor_read_float(sampler->input, k + 1, &t1, 1);
-
-				float factor = 0.0f;
-				if (t1 > t0) {
-					factor = (localAnimTime - t0) / (t1 - t0);
-				}
-
-				if (channel.target_path == cgltf_animation_path_type_translation) {
-					float v0[3];
-					float v1[3];
-
-					// Detect cubic spline layout
-					bool isCubic =
-						(sampler->interpolation == cgltf_interpolation_type_cubic_spline);
-					size_t idx0 = isCubic ? (3 * k + 1) : k;
-					size_t idx1 = isCubic ? (3 * (k + 1) + 1) : (k + 1);
-
-					cgltf_accessor_read_float(sampler->output, idx0, v0, 3);
-					cgltf_accessor_read_float(sampler->output, idx1, v1, 3);
-
-					targetNode->has_translation = 1;
-					targetNode->translation[0] = v0[0] + factor * (v1[0] - v0[0]);
-					targetNode->translation[1] = v0[1] + factor * (v1[1] - v0[1]);
-					targetNode->translation[2] = v0[2] + factor * (v1[2] - v0[2]);
-					targetNode->has_matrix = 0;
-				} else if (channel.target_path == cgltf_animation_path_type_rotation) {
-					float q0[4];
-					float q1[4];
-
-					bool isCubic =
-						(sampler->interpolation == cgltf_interpolation_type_cubic_spline);
-					size_t idx0 = isCubic ? (3 * k + 1) : k;
-					size_t idx1 = isCubic ? (3 * (k + 1) + 1) : (k + 1);
-
-					cgltf_accessor_read_float(sampler->output, idx0, q0, 4);
-					cgltf_accessor_read_float(sampler->output, idx1, q1, 4);
-
-					JPH::Quat rot0(q0[0], q0[1], q0[2], q0[3]);
-					JPH::Quat rot1(q1[0], q1[1], q1[2], q1[3]);
-					JPH::Quat result = rot0.SLERP(rot1, factor);
-
-					targetNode->has_rotation = 1;
-					targetNode->rotation[0] = result.GetX();
-					targetNode->rotation[1] = result.GetY();
-					targetNode->rotation[2] = result.GetZ();
-					targetNode->rotation[3] = result.GetW();
-					targetNode->has_matrix = 0;
-				} else if (channel.target_path == cgltf_animation_path_type_scale) {
-					float s0[3];
-					float s1[3];
-
-					bool isCubic =
-						(sampler->interpolation == cgltf_interpolation_type_cubic_spline);
-					size_t idx0 = isCubic ? (3 * k + 1) : k;
-					size_t idx1 = isCubic ? (3 * (k + 1) + 1) : (k + 1);
-
-					cgltf_accessor_read_float(sampler->output, idx0, s0, 3);
-					cgltf_accessor_read_float(sampler->output, idx1, s1, 3);
-
-					targetNode->has_scale = 1;
-					targetNode->scale[0] = s0[0] + factor * (s1[0] - s0[0]);
-					targetNode->scale[1] = s0[1] + factor * (s1[1] - s0[1]);
-					targetNode->scale[2] = s0[2] + factor * (s1[2] - s0[2]);
-					targetNode->has_matrix = 0;
-				} else if (channel.target_path == cgltf_animation_path_type_weights) {
-					cgltf_node* targetNode = channel.target_node;
-					cgltf_animation_sampler* sampler = channel.sampler;
-
-					size_t numKeys = sampler->input->count;
-					size_t numTargets = 0;
-
-					// Defensive check: Skip if target has no mesh (e.g. bones/empty nodes)
-					if (targetNode != nullptr && targetNode->mesh != nullptr) {
-						numTargets = targetNode->mesh->weights_count;
-					}
-
-					if (numKeys > 0 && numTargets > 0) {
-						float maxTime = 0.0f;
-						cgltf_accessor_read_float(sampler->input, numKeys - 1, &maxTime, 1);
-
-						float clampedTime = localAnimTime;
-						if (clampedTime > maxTime) {
-							clampedTime = std::fmod(clampedTime, maxTime);
-						}
-
-						size_t k = 0;
-						for (; k < numKeys - 1; ++k) {
-							float t1 = 0.0f;
-							cgltf_accessor_read_float(sampler->input, k + 1, &t1, 1);
-							if (t1 > clampedTime) {
-								break;
-							}
-						}
-						if (k >= numKeys - 1) {
-							k = numKeys - 2;
-						}
-
-						float t0 = 0.0f;
-						float t1 = 0.0f;
-						cgltf_accessor_read_float(sampler->input, k, &t0, 1);
-						cgltf_accessor_read_float(sampler->input, k + 1, &t1, 1);
-
-						float factor = (t1 > t0) ? (clampedTime - t0) / (t1 - t0) : 0.0f;
-
-						// Allocate buffers to read keyframe weights
-						std::vector<float> w0(numTargets);
-						std::vector<float> w1(numTargets);
-
-						bool isCubic =
-							(sampler->interpolation == cgltf_interpolation_type_cubic_spline);
-						size_t idx0 = isCubic ? (3 * k + 1) : k;
-						size_t idx1 = isCubic ? (3 * (k + 1) + 1) : (k + 1);
-
-						for (size_t w = 0; w < numTargets; ++w) {
-							cgltf_accessor_read_float(sampler->output, (idx0 * numTargets) + w,
-													  &w0[w], 1);
-							cgltf_accessor_read_float(sampler->output, (idx1 * numTargets) + w,
-													  &w1[w], 1);
-						}
-
-						// Interpolate and store weights inside the cgltf_node so the component can
-						// read them
-						targetNode->weights_count = numTargets;
-						if (targetNode->weights == nullptr) {
-							targetNode->weights = (float*)std::malloc(numTargets * sizeof(float));
-						}
-						for (size_t w = 0; w < numTargets; ++w) {
-							targetNode->weights[w] = w0[w] + factor * (w1[w] - w0[w]);
-						}
-					}
-				}
-			}
-
-			// Propagate dynamic keyframe changes down the bone hierarchy
-			for (cgltf_size n = 0; n < data->nodes_count; ++n) {
-				cgltf_node* node = &data->nodes[n];
-				if (node->parent == nullptr) {
-					solveWorldMatrix(node, JPH::Mat44::sIdentity());
-				}
-			}
-		}
-
-		// 3. ALWAYS generate skin matrices based on resolved transforms (whether static or
-		// animated)
+		// Write back into the skeletal joint buffers
 		for (cgltf_size s = 0; s < data->skins_count; ++s) {
 			cgltf_skin* skin = &data->skins[s];
 			skinToBufferOffset[skin] = currentJointCount;
@@ -374,7 +357,6 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 				}
 			}
 
-			// Find the glTF node referencing this skin to get its inverse world transform
 			cgltf_node* skinnedNode = nullptr;
 			for (cgltf_size n = 0; n < data->nodes_count; ++n) {
 				if (data->nodes[n].skin == skin) {
@@ -391,9 +373,7 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 			for (cgltf_size j = 0; j < skin->joints_count; ++j) {
 				cgltf_node* jointNode = skin->joints[j];
 				JPH::Mat44 jointWorld = worldTransforms[jointNode];
-
-				// Standard glTF 2.0: Joint matrices transform directly into world space
-				JPH::Mat44 finalJointMatrix = jointWorld * ibms[j]; // Removed invMeshWorld
+				JPH::Mat44 finalJointMatrix = jointWorld * ibms[j];
 
 				if (currentJointCount < 8192) {
 					calculatedJoints[currentJointCount++] = finalJointMatrix;
@@ -414,7 +394,6 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 		if (mesh.gltfNode != nullptr) {
 			auto* node = static_cast<cgltf_node*>(mesh.gltfNode);
 
-			// Check if the node has animated morph target weights
 			if ((node->weights != nullptr) && node->weights_count > 0) {
 				mesh.activeMorphCount = std::min((uint32_t)node->weights_count, 4u);
 				for (uint32_t w = 0; w < mesh.activeMorphCount; ++w) {
@@ -425,7 +404,7 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 			if (mesh.gltfSkin != nullptr && mesh.isSkinned) {
 				auto* skin = static_cast<cgltf_skin*>(mesh.gltfSkin);
 				mesh.jointOffset = skinToBufferOffset[skin];
-				mesh.localTransform = worldTransforms[node]; // Preserve the solved transform
+				mesh.localTransform = worldTransforms[node];
 			} else {
 				mesh.isSkinned = false;
 				mesh.localTransform = worldTransforms[node];

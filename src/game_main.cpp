@@ -31,6 +31,12 @@ void MovementSystem(Engine& engine, float dt);
 void AudioSystem(Engine& engine, float dt);
 void LoadLevel(Engine& engine, const std::string& path, Material material);
 void DrawOrientationGizmo(const ZHLN::Camera& cam);
+
+// Define the 12 edges connecting the 8 frustum corners
+struct FrustumEdge {
+	int start;
+	int end;
+};
 } // namespace ZHLN
 
 using namespace ZHLN;
@@ -43,6 +49,19 @@ static std::vector<Entity> s_PomniParts;
 static Entity s_PlayerEntity = NullEntity;
 static float s_CamDistance = 4.5f;
 
+static constexpr FrustumEdge s_FrustumEdges[12] = {
+	{.start = 0, .end = 1}, {.start = 1, .end = 2},
+	{.start = 2, .end = 3}, {.start = 3, .end = 0}, // Near Plane loop
+	{.start = 4, .end = 5}, {.start = 5, .end = 6},
+	{.start = 6, .end = 7}, {.start = 7, .end = 4}, // Far Plane loop
+	{.start = 0, .end = 4}, {.start = 1, .end = 5},
+	{.start = 2, .end = 6}, {.start = 3, .end = 7} // Near-to-Far connection lines
+};
+
+// Pre-allocated debug wireframe resources to avoid mid-frame Vulkan allocations [2]
+static Mesh s_DebugLineMesh = {};
+static Material s_DebugLineMaterial = {};
+
 struct Scene {
 	void Setup(Engine& engine) {
 		auto& rc = engine.GetRenderContext();
@@ -50,15 +69,15 @@ struct Scene {
 
 		ZHLN::Log("Assembling Scene with Pure Runtime glTF Parsing...");
 
-		// 1. Spawns the entire Room, parses all PBR materials, AND builds Jolt colliders
-		// automatically!
-		AssetFactory::SpawnGLB<true>(rc, reg, "Circus Lobby V9.glb", nullptr, 0);
+		// 1. Spawns room with physics colliders, but flags as STATIC (No animation overhead!)
+		AssetFactory::SpawnGLB<true, false>(rc, reg, "Circus Lobby V9.glb", nullptr, 0);
 
-		// 2. Spawns Pomni skinned meshes
-		s_PomniParts.resize(128); // Pre-allocate maximum buffer size
-		uint32_t pomniCount = AssetFactory::SpawnGLB<false>(
+		// 2. Spawns Pomni as ANIMATED, with no static physics colliders (handles collision via
+		// Character Controller)
+		s_PomniParts.resize(128);
+		uint32_t pomniCount = AssetFactory::SpawnGLB<false, true>(
 			rc, reg, "tadc_models/POMNI.glb", s_PomniParts.data(), (uint32_t)s_PomniParts.size());
-		s_PomniParts.resize(pomniCount); // Resize back to actual spawned count
+		s_PomniParts.resize(pomniCount);
 	}
 };
 
@@ -184,6 +203,14 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	Mesh helloText = GUI::CreateTextMesh(rc, "Zahlen Engine - TADC Dorm Showcase", 25.0f, 25.0f,
 										 2.5f, {0.9f, 0.1f, 0.1f, 1.0f});
 
+	// --- PRE-INITIALIZE DEBUG FRUSTUM WIREFRAME RESOURCES ---
+	s_DebugLineMesh = AssetFactory::CreateBox(rc, {0.02f, 0.02f, 0.5f});
+	s_DebugLineMaterial = AssetFactory::CreateBasicMaterial(rc);
+	s_DebugLineMaterial.baseColorFactor[0] = 0.0f; // Neon Cyan
+	s_DebugLineMaterial.baseColorFactor[1] = 1.0f;
+	s_DebugLineMaterial.baseColorFactor[2] = 1.0f;
+	s_DebugLineMaterial.baseColorFactor[3] = 1.0f;
+
 	float physicsAccumulator = 0.0f;
 	const float targetDt = 1.0f / 60.0f;
 
@@ -307,7 +334,48 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 				vp = unjitteredVp;
 			}
 
-			cam.frustum.Update(unjitteredVp);
+			static JPH::Mat44 s_FrozenVP = JPH::Mat44::sIdentity();
+			static JPH::Vec3 s_FrustumCorners[8] = {};
+			static bool s_WasFrozen = false;
+
+			if (CullingStats::FreezeFrustum) {
+				if (!s_WasFrozen) {
+					// Freeze the current View-Projection matrix [1]
+					s_FrozenVP = unjitteredVp;
+
+					// Calculate the 8 corners of the static view frustum in world space [1]
+					JPH::Mat44 invVP = unjitteredVp.Inversed();
+					JPH::Vec4 ndc[8] = {
+						// Near Plane (Z = 0.0 in Vulkan depth)
+						{-1.0f, -1.0f, 0.0f, 1.0f}, // Top-Left
+						{1.0f, -1.0f, 0.0f, 1.0f},	// Top-Right
+						{1.0f, 1.0f, 0.0f, 1.0f},	// Bottom-Right
+						{-1.0f, 1.0f, 0.0f, 1.0f},	// Bottom-Left
+						// Far Plane (Z = 1.0 in Vulkan depth)
+						{-1.0f, -1.0f, 1.0f, 1.0f}, // Top-Left
+						{1.0f, -1.0f, 1.0f, 1.0f},	// Top-Right
+						{1.0f, 1.0f, 1.0f, 1.0f},	// Bottom-Right
+						{-1.0f, 1.0f, 1.0f, 1.0f}	// Bottom-Left
+					};
+
+					for (int i = 0; i < 8; ++i) {
+						JPH::Vec4 worldPos = invVP * ndc[i];
+						float w = worldPos.GetW();
+						if (std::abs(w) > 1e-6f) {
+							s_FrustumCorners[i] = JPH::Vec3(
+								worldPos.GetX() / w, worldPos.GetY() / w, worldPos.GetZ() / w);
+						}
+					}
+					s_WasFrozen = true;
+				}
+				// Lock frustum calculations to the captured matrix [1]
+				cam.frustum.Update(s_FrozenVP);
+			} else {
+				// Normal culling path [1]
+				cam.frustum.Update(unjitteredVp);
+				s_WasFrozen = false;
+			}
+
 			UpdateCulling(engine);
 
 			JPH::Vec3 sunDirection = {-0.6f, 0.4f, -0.7f};
@@ -341,22 +409,30 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			engine.BeginFrame();
 			Renderer::SetMatrices(rc, vp, unjitteredVp);
 
-			static float s_PlayerYaw = -90.0f;
+			static JPH::Quat s_PlayerRotation = JPH::Quat::sIdentity();
 
 			JPH::Vec3 velocity = Physics::GetCharacterVelocity(pc, charPhys);
 			JPH::Vec3 flatVel(velocity.GetX(), 0.0f, velocity.GetZ());
 
 			if (flatVel.LengthSq() > 0.1f) {
-				float movementAngleDeg =
-					JPH::RadiansToDegrees(std::atan2(-velocity.GetZ(), velocity.GetX()));
-				s_PlayerYaw = movementAngleDeg + 90.0f;
+				// Calculate target orientation based on velocity
+				float targetAngleRad =
+					std::atan2(-velocity.GetZ(), velocity.GetX()) + JPH::DegreesToRadians(90.0f);
+				JPH::Quat targetRotation =
+					JPH::Quat::sRotation(JPH::Vec3::sAxisY(), targetAngleRad);
+
+				// Smoothly interpolate (SLERP) towards the target rotation [6]
+				// Turn rate of 10.0f means Pomni will complete turns over ~100ms
+				float turnSpeed = 10.0f;
+				s_PlayerRotation = s_PlayerRotation.SLERP(
+					targetRotation, JPH::Clamp(turnSpeed * frameTime, 0.0f, 1.0f));
 			}
 
 			JPH::Mat44 playerTransform = JPH::Mat44::sIdentity();
 			if (reg.IsAlive(s_PlayerEntity)) {
 				playerTransform = Math::CreateTransform(
 					playerPos - JPH::Vec3(0.0f, 0.5f, 0.0f), // Match physical capsule bottom
-					JPH::Quat::sRotation(JPH::Vec3::sAxisY(), JPH::DegreesToRadians(s_PlayerYaw)));
+					s_PlayerRotation);
 			}
 			for (Entity e : s_VisibleEntities) {
 				auto* mesh = reg.Get<MeshComponent>(e);
@@ -385,6 +461,31 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 				CullingStats::TotalObjects - (uint32_t)s_VisibleEntities.size();
 
 			Renderer::DrawUI(rc, helloText, fontAtlasIdx);
+
+			// --- DRAW THE FREEZE WIREFRAME FRUSTUM ---
+			if (CullingStats::FreezeFrustum &&
+				s_DebugLineMesh.vertexBuffer != BufferHandle::Invalid) {
+				for (auto s_FrustumEdge : s_FrustumEdges) {
+					JPH::Vec3 pA = s_FrustumCorners[s_FrustumEdge.start];
+					JPH::Vec3 pB = s_FrustumCorners[s_FrustumEdge.end];
+
+					JPH::Vec3 v = pB - pA;
+					float len = v.Length();
+					if (len < 1e-4f) {
+						continue;
+					}
+
+					JPH::Vec3 dir = v / len;
+					JPH::Vec3 mid = (pA + pB) * 0.5f;
+
+					JPH::Quat rot = JPH::Quat::sFromTo(JPH::Vec3::sAxisZ(), dir);
+					JPH::Mat44 lineTransform =
+						Math::CreateTransform(mid, rot, JPH::Vec3(1.0f, 1.0f, len));
+
+					Renderer::Draw(rc, s_DebugLineMaterial, s_DebugLineMesh, lineTransform,
+								   lineTransform, len);
+				}
+			}
 
 			engine.EndFrame();
 
