@@ -78,6 +78,11 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, InputCont
 			self->_impl->input->InjectResize(
 				{static_cast<uint32_t>(width), static_cast<uint32_t>(height)});
 		});
+
+		glfwSetScrollCallback(_impl->handle, [](GLFWwindow* win, double xoffset, double yoffset) {
+			auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
+			self->_impl->input->InjectWheelMotion(static_cast<float>(yoffset));
+		});
 	}
 }
 
