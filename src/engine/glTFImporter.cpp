@@ -1,6 +1,8 @@
 // File: src/engine/glTFImporter.cpp
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
+#include "Zahlen/Render.hpp"
+#include "ecs/ECS.hpp"
 #include "physics/Physics.hpp"
 
 #include <Zahlen/AssetFactory.hpp>
@@ -78,16 +80,17 @@ static uint32_t LoadEmbeddedTexture(RenderContext& ctx, cgltf_image* img,
 	return index;
 }
 
-Mesh LoadGLB(RenderContext& ctx, const std::string& path) {
+Mesh LoadGLB(RenderContext& ctx, std::string_view path) {
 	cgltf_options opts{};
 	cgltf_data* data = nullptr;
 
-	if (cgltf_parse_file(&opts, path.c_str(), &data) != cgltf_result_success) {
+	std::string pathStr(path);
+	if (cgltf_parse_file(&opts, pathStr.c_str(), &data) != cgltf_result_success) {
 		Log("ERROR: Failed to parse GLB file: {}", path);
 		return {};
 	}
 
-	if (cgltf_load_buffers(&opts, data, path.c_str()) != cgltf_result_success) {
+	if (cgltf_load_buffers(&opts, data, pathStr.c_str()) != cgltf_result_success) {
 		Log("ERROR: Failed to load GLB buffers: {}", path);
 		cgltf_free(data);
 		return {};
@@ -225,26 +228,28 @@ Mesh LoadGLB(RenderContext& ctx, const std::string& path) {
 }
 
 template <bool CreatePhysics>
-std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::string& path) {
+uint32_t SpawnGLB(RenderContext& ctx, ECS::Registry& reg, std::string_view path, Entity* outBuffer,
+				  uint32_t maxCount) {
 	cgltf_options opts{};
 	cgltf_data* data = nullptr;
 
-	std::string rawPath = "resources/assets/" + path;
+	std::string pathStr(path);
+	std::string rawPath = "resources/assets/" + pathStr;
 
-	if (s_GLBCache.contains(path)) {
-		data = s_GLBCache[path];
+	if (s_GLBCache.contains(pathStr)) {
+		data = s_GLBCache[pathStr];
 	} else {
 		if (cgltf_parse_file(&opts, rawPath.c_str(), &data) != cgltf_result_success) {
 			Log("ERROR: Failed to parse GLB: {}", rawPath);
-			return {};
+			return 0;
 		}
 
 		if (cgltf_load_buffers(&opts, data, rawPath.c_str()) != cgltf_result_success) {
 			Log("ERROR: Failed to load GLB buffers: {}", rawPath);
 			cgltf_free(data);
-			return {};
+			return 0;
 		}
-		s_GLBCache[path] = data;
+		s_GLBCache[pathStr] = data;
 
 		// Decompose all static matrices into standard TRS paths
 		for (cgltf_size idx = 0; idx < data->nodes_count; ++idx) {
@@ -289,7 +294,7 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 		}
 	}
 
-	std::vector<Entity> spawnedEntities;
+	uint32_t spawnedCount = 0;
 
 	for (cgltf_size i = 0; i < data->nodes_count; ++i) {
 		const cgltf_node* node = &data->nodes[i];
@@ -656,17 +661,20 @@ std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::
 									  JPH::EMotionType::Static, 0)});
 				}
 			}
-			spawnedEntities.push_back(part);
+			if (outBuffer != nullptr && spawnedCount < maxCount) {
+				outBuffer[spawnedCount] = part;
+			}
+			spawnedCount++;
 		}
 	}
 
 	Log("Spawned GLB Model: {} ({} submesh parts/materials loaded dynamically)", path,
-		spawnedEntities.size());
-	return spawnedEntities;
+		spawnedCount);
+	return spawnedCount;
 }
 
-template std::vector<Entity> SpawnGLB<true>(RenderContext& ctx, ECS::Registry& reg,
-											const std::string& path);
-template std::vector<Entity> SpawnGLB<false>(RenderContext& ctx, ECS::Registry& reg,
-											 const std::string& path);
+template uint32_t SpawnGLB<true>(RenderContext& ctx, ECS::Registry& reg, std::string_view path,
+								 Entity* outBuffer, uint32_t maxCount);
+template uint32_t SpawnGLB<false>(RenderContext& ctx, ECS::Registry& reg, std::string_view path,
+								  Entity* outBuffer, uint32_t maxCount);
 } // namespace ZHLN::AssetFactory

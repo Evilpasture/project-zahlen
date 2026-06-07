@@ -5,7 +5,6 @@
 #include <Zahlen/Window.hpp>
 #include <detail/String.hpp>
 #include <memory>
-#include <vector>
 
 namespace ZHLN {
 
@@ -41,9 +40,9 @@ class ZHLN_API RenderContext {
 	auto CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true)
 		-> uint32_t;
 
-	// --- NEW: Declare CreateTextureCube ---
-	auto CreateTextureCube(const std::vector<const void*>& faceData, uint32_t width,
-						   uint32_t height) -> uint32_t;
+	// --- NEW: Declare CreateTextureCube (Switched from std::vector to raw pointer) ---
+	auto CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height)
+		-> uint32_t;
 
 	// Dynamic CPU-to-GPU Joint Matrix transfer hook
 	void UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices, uint32_t count);
@@ -68,7 +67,7 @@ void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 		  const JPH::Mat44& transform, const JPH::Mat44& prevTransform, float cullRadius = 1.0f,
 		  uint32_t jointOffset = 0, bool isSkinned = false, uint32_t morphOffset = 0,
-		  uint32_t activeMorphCount = 0, const float* morphWeights = nullptr); // <--- ADDED
+		  uint32_t activeMorphCount = 0, const float* morphWeights = nullptr);
 
 void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex);
 

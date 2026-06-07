@@ -1,6 +1,7 @@
 // src/game_main.cpp
 #include "Zahlen/Input.hpp"
 #include "Zahlen/alife/Types.hpp"
+#include "ecs/ECS.hpp"
 #include "engine/FileWatcher.hpp"
 #include "engine/Platform.hpp"
 #include "physics/Physics.hpp"
@@ -51,10 +52,13 @@ struct Scene {
 
 		// 1. Spawns the entire Room, parses all PBR materials, AND builds Jolt colliders
 		// automatically!
-		AssetFactory::SpawnGLB<true>(rc, reg, "Circus Lobby V9.glb");
+		AssetFactory::SpawnGLB<true>(rc, reg, "Circus Lobby V9.glb", nullptr, 0);
 
 		// 2. Spawns Pomni skinned meshes
-		s_PomniParts = AssetFactory::SpawnGLB(rc, reg, "tadc_models/POMNI.glb");
+		s_PomniParts.resize(128); // Pre-allocate maximum buffer size
+		uint32_t pomniCount = AssetFactory::SpawnGLB<false>(
+			rc, reg, "tadc_models/POMNI.glb", s_PomniParts.data(), (uint32_t)s_PomniParts.size());
+		s_PomniParts.resize(pomniCount); // Resize back to actual spawned count
 	}
 };
 
@@ -125,7 +129,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 				   .width = 1280,
 				   .height = 720,
 				   .vsync = false,
-				   .enableValidation = false},
+				   .enableValidation = true},
 	};
 
 	Engine engine(config);
@@ -351,7 +355,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			JPH::Mat44 playerTransform = JPH::Mat44::sIdentity();
 			if (reg.IsAlive(s_PlayerEntity)) {
 				playerTransform = Math::CreateTransform(
-					playerPos - JPH::Vec3(0.0f, 0.0f, 0.0f), // Match physical capsule bottom
+					playerPos - JPH::Vec3(0.0f, 0.5f, 0.0f), // Match physical capsule bottom
 					JPH::Quat::sRotation(JPH::Vec3::sAxisY(), JPH::DegreesToRadians(s_PlayerYaw)));
 			}
 			for (Entity e : s_VisibleEntities) {

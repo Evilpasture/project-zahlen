@@ -1,7 +1,7 @@
 #pragma once
 
-#include <Zahlen/Types.hpp>
 #include <Zahlen/Common.h>
+#include <Zahlen/Types.hpp>
 #include <bitset>
 
 namespace ZHLN {
@@ -19,14 +19,18 @@ class ZHLN_API InputContext {
   public:
 	InputContext() = default;
 
-	bool IsKeyDown(KeyCode key) const noexcept { return _keys[static_cast<size_t>(key)]; }
-	bool IsMouseButtonDown(KeyCode key) const noexcept { return _keys[static_cast<size_t>(key)]; }
-	const MouseState& GetMouse() const noexcept { return _mouse; }
+	[[nodiscard]] bool IsKeyDown(KeyCode key) const noexcept {
+		return _keys[static_cast<size_t>(key)];
+	}
+	[[nodiscard]] bool IsMouseButtonDown(KeyCode key) const noexcept {
+		return _keys[static_cast<size_t>(key)];
+	}
+	[[nodiscard]] const MouseState& GetMouse() const noexcept { return _mouse; }
 
 	void ResetDeltas();
 
-	bool NeedsResize() const { return _needsResize; }
-	Extent2D GetNewSize() const { return _newSize; }
+	[[nodiscard]] bool NeedsResize() const { return _needsResize; }
+	[[nodiscard]] Extent2D GetNewSize() const { return _newSize; }
 	void ClearResizeFlag() { _needsResize = false; }
 
 	// --- Injection API (Called by the hidden OS Window implementation) ---
@@ -38,7 +42,7 @@ class ZHLN_API InputContext {
 
   private:
 	bool _needsResize = false;
-	Extent2D _newSize{0, 0};
+	Extent2D _newSize{.width = 0, .height = 0};
 	std::bitset<256> _keys;
 	MouseState _mouse;
 	float _lastX = 0, _lastY = 0;

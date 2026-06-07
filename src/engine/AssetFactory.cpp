@@ -1,5 +1,7 @@
 // File: src/engine/AssetFactory.cpp
 
+#include "Zahlen/Render.hpp"
+
 #include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Font8x8.hpp>
 #include <Zahlen/Log.hpp>
@@ -34,10 +36,11 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
 	return ctx.CreateTexture(pixels.data(), atlasSize, atlasSize);
 }
 
-Mesh LoadCookedMesh(RenderContext& ctx, AssetManager& assetMgr, const std::string& virtualPath) {
+Mesh LoadCookedMesh(RenderContext& ctx, [[maybe_unused]] AssetManager& assetMgr,
+					std::string_view virtualPath) {
 #ifdef ZHLN_DEV_MODE
-	std::string rawPath = "resources/assets/" + virtualPath;
-	return LoadGLB(ctx, rawPath); // (Optionally, update LoadGLB or keep as is)
+	std::string rawPath = "resources/assets/" + std::string(virtualPath);
+	return LoadGLB(ctx, rawPath);
 #else
 	AssetLoadRequest req;
 	req.assetID = HashAssetPath(virtualPath);
@@ -76,14 +79,16 @@ Mesh LoadCookedMesh(RenderContext& ctx, AssetManager& assetMgr, const std::strin
 #endif
 }
 
-uint32_t LoadCookedTexture(RenderContext& ctx, AssetManager& assetMgr,
-						   const std::string& virtualPath) {
+uint32_t LoadCookedTexture(RenderContext& ctx, [[maybe_unused]] AssetManager& assetMgr,
+						   std::string_view virtualPath) {
 #ifdef ZHLN_DEV_MODE
-	std::string rawPath = "resources/assets/" + virtualPath;
+	std::string rawPath = "resources/assets/" + std::string(virtualPath);
 
-	int width = 0, height = 0, channels = 0;
+	int width = 0;
+	int height = 0;
+	int channels = 0;
 	unsigned char* pixels = stbi_load(rawPath.c_str(), &width, &height, &channels, 4);
-	if (!pixels) {
+	if (pixels == nullptr) {
 		Log("WARNING: Failed to load raw texture in dev mode: {}", rawPath);
 		return 0;
 	}

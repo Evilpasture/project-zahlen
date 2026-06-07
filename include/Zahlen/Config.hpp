@@ -1,6 +1,6 @@
 #pragma once
-#include <detail/String.hpp>
 #include <cstdint>
+#include <detail/String.hpp>
 
 namespace ZHLN {
 

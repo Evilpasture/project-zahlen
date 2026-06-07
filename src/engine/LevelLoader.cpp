@@ -1,4 +1,6 @@
 #include "Zahlen/Components.hpp"
+#include "Zahlen/Render.hpp"
+#include "ecs/ECS.hpp"
 #include "physics/Physics.hpp"
 
 #include <Zahlen/AssetFactory.hpp>
@@ -133,7 +135,7 @@ void LoadLevel(Engine& engine, const std::string& path, Material material) {
 					v.color = Math::PackColor(1.0f, 1.0f, 1.0f, 1.0f);
 				}
 
-				if (prim.indices) {
+				if (prim.indices != nullptr) {
 					size_t indexCount = prim.indices->count;
 					for (size_t idx = 0; idx < indexCount; ++idx) {
 						size_t originalIdx = cgltf_accessor_read_index(prim.indices, idx);

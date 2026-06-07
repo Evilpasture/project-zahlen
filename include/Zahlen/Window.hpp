@@ -1,7 +1,7 @@
 #pragma once
+#include <Zahlen/Common.h>
 #include <Zahlen/Types.hpp>
 #include <detail/String.hpp>
-#include <Zahlen/Common.h>
 #include <memory>
 
 namespace ZHLN {
@@ -16,17 +16,17 @@ class ZHLN_API Window {
 	Window(const Window&) = delete;
 	Window& operator=(const Window&) = delete;
 
-	bool IsRunning() const;
+	[[nodiscard]] bool IsRunning() const;
 	void ProcessEvents();
 	void Focus();
 
-	Extent2D GetSize() const;
+	[[nodiscard]] Extent2D GetSize() const;
 
 	struct Impl;
-	Impl* GetImpl() const { return _impl.get(); }
+	[[nodiscard]] Impl* GetImpl() const { return _impl.get(); }
 
 	// Returns the underlying LLGL::Window* as a void* to keep headers clean
-	void* GetNativeHandle() const;
+	[[nodiscard]] void* GetNativeHandle() const;
 
 	void Close();
 

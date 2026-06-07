@@ -1,8 +1,12 @@
+#include "threading/TaskSystem.hpp"
+
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Log.hpp>
 #include <cstring>
+#include <detail/ControlFlow.hpp>
 #include <engine/Platform.hpp>
 #include <new>
+#include <vector>
 
 #if __has_include(<zstd.h>)
 #include <zstd.h>
@@ -13,13 +17,27 @@
 
 namespace ZHLN {
 
-bool AssetManager::MountPak(const std::string& pakFilePath) {
-	auto archive = std::make_unique<PakArchive>();
+struct PakArchive {
+	String256 path;
+	Platform::MappedFile mapped;
+};
+
+AssetManager::~AssetManager() {
+	for (size_t i = 0; i < _archiveCount; ++i) {
+		Platform::CloseMappedFile(_archives[i]->mapped);
+		delete _archives[i];
+	}
+	delete[] _archives;
+}
+
+bool AssetManager::MountPak(std::string_view pakFilePath) {
+	auto* archive = new PakArchive();
 	archive->path = pakFilePath;
-	archive->mapped = Platform::OpenMappedFile(pakFilePath.c_str());
+	archive->mapped = Platform::OpenMappedFile(archive->path.c_str());
 
 	if (archive->mapped.data == nullptr) {
 		Log("ERROR: Failed to map PAK file: {}", pakFilePath);
+		delete archive;
 		return false;
 	}
 
@@ -27,34 +45,46 @@ bool AssetManager::MountPak(const std::string& pakFilePath) {
 	if (std::memcmp(header->magic, "ZPAK", 4) != 0) {
 		Log("ERROR: Invalid PAK magic signature in: {}", pakFilePath);
 		Platform::CloseMappedFile(archive->mapped);
+		delete archive;
 		return false;
 	}
 
 	const auto* entries = reinterpret_cast<const PakEntry*>(
 		static_cast<const char*>(archive->mapped.data) + header->tocOffset);
 
-	PakArchive* archivePtr = archive.get();
-	std::lock_guard<std::mutex> lock(_catalogMutex);
-	_archives.push_back(std::move(archive));
+	ZHLN_LOCK(_catalogMutex) {
+		if (_archiveCount >= _archiveCapacity) {
+			size_t newCap = _archiveCapacity == 0 ? 4 : _archiveCapacity * 2;
+			auto** newArrs = new PakArchive*[newCap];
+			if (_archives != nullptr) {
+				std::memcpy(newArrs, _archives, _archiveCount * sizeof(PakArchive*));
+				delete[] _archives;
+			}
+			_archives = newArrs;
+			_archiveCapacity = newCap;
+		}
+		_archives[_archiveCount++] = archive;
 
-	for (uint32_t i = 0; i < header->entryCount; ++i) {
-		_catalog[entries[i].pathHash] = {entries[i], archivePtr};
+		for (uint32_t i = 0; i < header->entryCount; ++i) {
+			_catalog.Insert(entries[i].pathHash, CatalogEntry{entries[i], archive});
+		}
 	}
 
 	Log("Mounted PAK: {} ({} assets)", pakFilePath, header->entryCount);
 	return true;
 }
 
-void AssetManager::LoadAsync(std::span<AssetLoadRequest> requests, TaskSystem::Counter* counter) {
-	if (requests.empty()) {
+void AssetManager::LoadAsync(RestrictSpan<AssetLoadRequest> requests,
+							 TaskSystem::Counter* counter) {
+	if (requests.size() == 0) {
 		return;
 	}
 
 	std::vector<TaskSystem::Task> tasks;
 	tasks.reserve(requests.size());
 
-	for (auto& req : requests) {
-		auto* jobPayload = new std::pair<AssetManager*, AssetLoadRequest*>(this, &req);
+	for (auto& request : requests) {
+		auto* jobPayload = new std::pair<AssetManager*, AssetLoadRequest*>(this, &request);
 
 		tasks.push_back({.func = [](void* arg) -> void {
 							 auto* payload =
@@ -78,28 +108,27 @@ void AssetManager::ExecuteLoad(AssetLoadRequest* req) {
 	PakArchive* archive = nullptr;
 
 	{
-		std::lock_guard<std::mutex> lock(_catalogMutex);
-		auto it = _catalog.find(req->assetID);
-		if (it == _catalog.end()) {
-			req->success = false;
-			return;
+		ZHLN_LOCK(_catalogMutex) {
+			const CatalogEntry* catEntry = _catalog.Find(req->assetID);
+			if (catEntry == nullptr) {
+				req->success = false;
+				return;
+			}
+			entry = catEntry->entry;
+			archive = catEntry->archive;
 		}
-		entry = it->second.first;
-		archive = it->second.second;
 	}
 
 	req->outSize = entry.uncompressedSize;
 	const char* payloadRaw = static_cast<const char*>(archive->mapped.data) + entry.offset;
 
 	if (entry.compression == 0) {
-		// --- ZERO-COPY FAST PATH ---
 		req->outData = const_cast<char*>(payloadRaw);
 		req->isZeroCopy = true;
 		req->success = true;
 		return;
 	}
 
-	// --- DECOMPRESSION PATH ---
 	req->outData = ::operator new[](entry.uncompressedSize, std::align_val_t{16});
 	req->isZeroCopy = false;
 

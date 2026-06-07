@@ -106,7 +106,7 @@ static int LuaBridge_Log(lua_State* L) {
 
 	// Call your Engine's LogManual (defined in Log.hpp)
 	LogManual(file, ar.currentline, msg, Color::Green);
-	ZHLN::GameConsole::Log(msg, {0.4f, 1.0f, 0.4f, 1.0f});
+	ZHLN::GameConsole::Log(msg, {.r = 0.4f, .g = 1.0f, .b = 0.4f, .a = 1.0f});
 
 	return 0;
 }
@@ -156,8 +156,9 @@ static int LuaBridge_Warn(lua_State* L) {
 
 	// 3. Hand off to our manual C++ Logger
 	std::string_view file = ar.short_src;
-	if (auto pos = file.find_last_of("/\\"); pos != std::string_view::npos)
+	if (auto pos = file.find_last_of("/\\"); pos != std::string_view::npos) {
 		file.remove_prefix(pos + 1);
+	}
 
 	LogManual(file, ar.currentline, msg, Color::Yellow);
 
@@ -255,7 +256,8 @@ void ScriptRunner::ReloadFile(std::string_view path) {
 	RunFile(path);
 
 	Log("Script Hot-Reloaded: {}", path);
-	ZHLN::GameConsole::Log("Hot-Reloaded: " + std::string(path), {0.2f, 0.8f, 1.0f, 1.0f});
+	ZHLN::GameConsole::Log("Hot-Reloaded: " + std::string(path),
+						   {.r = 0.2f, .g = 0.8f, .b = 1.0f, .a = 1.0f});
 }
 
 } // namespace ZHLN

@@ -130,11 +130,11 @@ void* ZHLN_GetComponent(ZHLN_Engine* engine_handle, uint64_t entityRaw, const ch
 	auto entity = ZHLN::Entity::Unpack(entityRaw);
 	auto& reg = engine->GetRegistry();
 
-	auto it = ZHLN::ECS::Registry::s_NameToFamilyID.find(componentName);
-	if (it == ZHLN::ECS::Registry::s_NameToFamilyID.end()) {
+	const uint32_t* pFamilyID = ZHLN::ECS::Registry::s_NameToFamilyID.Find(componentName);
+	if (pFamilyID == nullptr) {
 		return nullptr; // Not a registered C++ component
 	}
 
-	return reg.GetRawByFamily(entity, it->second);
+	return reg.GetRawByFamily(entity, *pFamilyID);
 }
 }

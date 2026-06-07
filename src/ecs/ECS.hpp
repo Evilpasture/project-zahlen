@@ -4,11 +4,11 @@
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Sync.hpp>
 #include <cstddef>
+#include <detail/HashMap.hpp>
 #include <detail/Span.hpp>
 #include <span>
-#include <string>
+#include <string_view>
 #include <threading/Mutex.hpp>
-#include <unordered_map>
 
 namespace ZHLN::ECS {
 
@@ -125,11 +125,11 @@ class Registry {
 	}
 
 	// Map component name strings to their unique family IDs
-	inline static std::unordered_map<std::string, uint32_t> s_NameToFamilyID;
+	inline static HashMap<std::string_view, uint32_t> s_NameToFamilyID;
 
-	template <typename T> void RegisterComponent(const std::string& name) {
+	template <typename T> void RegisterComponent(std::string_view name) {
 		uint32_t id = ComponentFamily::GetTypeID<T>();
-		s_NameToFamilyID[name] = id; // Store mapping
+		s_NameToFamilyID.Insert(name, id); // Store mapping
 
 		EnsureComponentCapacity(id);
 		if (!_components[id]) {

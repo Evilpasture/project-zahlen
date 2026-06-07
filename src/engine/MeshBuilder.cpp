@@ -1,6 +1,7 @@
 // File: src/engine/MeshBuilder.cpp
 #include "Resources.hpp"
 #include "Zahlen/Components.hpp"
+#include "Zahlen/Render.hpp"
 
 #include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -426,9 +427,8 @@ Mesh CreateBox(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& co
 }
 
 Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight,
-				   std::vector<float>& outHeights) {
-	outHeights.resize(static_cast<size_t>(sampleCount) * sampleCount);
-
+				   float* outHeights) {
+	// outHeights allocation size is assumed to be sampleCount * sampleCount
 	auto hash = [](float x, float y) -> float {
 		uint32_t ix = 0;
 		std::memcpy(&ix, &x, sizeof(float));

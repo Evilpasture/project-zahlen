@@ -1,5 +1,7 @@
 // File: src/engine/system/AnimationSystem.cpp
 #include "Zahlen/Components.hpp"
+#include "Zahlen/Render.hpp"
+#include "ecs/ECS.hpp"
 
 #include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Log.hpp>

@@ -1,24 +1,22 @@
 #pragma once
 
-#include "engine/Platform.hpp"
-
 #include <cstdint>
-#include <memory>
-#include <mutex>
-#include <span>
-#include <string>
+#include <detail/HashMap.hpp>
+#include <detail/Span.hpp>
+#include <detail/String.hpp>
 #include <string_view>
-#include <threading/TaskSystem.hpp>
-#include <unordered_map>
-#include <vector>
+#include <threading/Mutex.hpp>
 
 namespace ZHLN {
+
+namespace TaskSystem {
+struct Counter;
+}
 
 // ============================================================================
 // Hashing Utility
 // ============================================================================
 
-// Compile-time FNV-1a 64-bit hash for converting string paths to AssetIDs
 constexpr uint64_t HashAssetPath(std::string_view path) noexcept {
 	uint64_t hash = 0xcbf29ce484222325ull;
 	for (char c : path) {
@@ -67,7 +65,6 @@ struct CookedMeshHeader {
 	float boundingBoxMax[3];
 	uint32_t vertexCount;
 	uint32_t indexCount;
-	// Followed by Vertex array, then uint32_t Index array
 };
 
 #pragma pack(pop)
@@ -84,10 +81,15 @@ struct AssetLoadRequest {
 	bool isZeroCopy = false;
 };
 
+struct CatalogEntry {
+	PakEntry entry;
+	struct PakArchive* archive;
+};
+
 class AssetManager {
   public:
 	AssetManager() = default;
-	~AssetManager() = default;
+	~AssetManager();
 
 	// Non-copyable
 	AssetManager(const AssetManager&) = delete;
@@ -97,14 +99,14 @@ class AssetManager {
 	 * @brief Mounts a .pak file into the virtual file system.
 	 * Reads the Table of Contents but does not load payloads into memory.
 	 */
-	bool MountPak(const std::string& pakFilePath);
+	bool MountPak(std::string_view pakFilePath);
 
 	/**
 	 * @brief Asynchronously loads a batch of assets using the Fiber TaskSystem.
 	 * @param requests Span of requests to fulfill.
 	 * @param counter Task counter to wait on.
 	 */
-	void LoadAsync(std::span<AssetLoadRequest> requests, TaskSystem::Counter* counter);
+	void LoadAsync(RestrictSpan<AssetLoadRequest> requests, TaskSystem::Counter* counter);
 
 	/**
 	 * @brief Synchronously loads an asset. Blocks the calling thread/fiber.
@@ -117,16 +119,14 @@ class AssetManager {
 	void FreeAssetMemory(AssetLoadRequest& req);
 
   private:
-	struct PakArchive {
-		std::string path;
-		Platform::MappedFile mapped;
-	};
-
 	void ExecuteLoad(AssetLoadRequest* req);
 
-	std::vector<std::unique_ptr<PakArchive>> _archives;
-	std::unordered_map<uint64_t, std::pair<PakEntry, PakArchive*>> _catalog;
-	std::mutex _catalogMutex;
+	struct PakArchive** _archives = nullptr;
+	size_t _archiveCount = 0;
+	size_t _archiveCapacity = 0;
+
+	HashMap<uint64_t, CatalogEntry> _catalog;
+	Mutex _catalogMutex;
 };
 
 } // namespace ZHLN

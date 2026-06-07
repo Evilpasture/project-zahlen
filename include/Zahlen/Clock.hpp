@@ -14,7 +14,7 @@ class Clock {
 		return dt;
 	}
 
-	double GetTotalTime() const {
+	[[nodiscard]] double GetTotalTime() const {
 		return std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - _start)
 			.count();
 	}

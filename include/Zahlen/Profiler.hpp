@@ -1,15 +1,8 @@
 #pragma once
-#include <chrono>
-#include <map>
-#include <string>
-#include <vector>
+#include <cstddef>
+#include <cstdint>
 
 namespace ZHLN {
-struct ProfileData {
-	float cpuTimeMS = 0.0f;
-	float rollingAverageMS = 0.0f;
-	std::vector<float> history;
-};
 
 struct CullingStats {
 	static inline uint32_t TotalObjects = 0;
@@ -19,35 +12,23 @@ struct CullingStats {
 
 class Profiler {
   public:
-	static void Record(const std::string& name, float timeMS) {
-		auto& data = s_Metrics[name];
-		data.cpuTimeMS = timeMS;
+	static void Record(const char* name, float timeMS) noexcept;
 
-		// Rolling average (Lerp towards new value)
-		data.rollingAverageMS = data.rollingAverageMS * 0.95f + timeMS * 0.05f;
-
-		data.history.push_back(timeMS);
-		if (data.history.size() > 100)
-			data.history.erase(data.history.begin());
-	}
-
-	static const std::map<std::string, ProfileData>& GetMetrics() { return s_Metrics; }
-
-  private:
-	static inline std::map<std::string, ProfileData> s_Metrics;
+	// O(1) iteration interface for the UI loop
+	using MetricCallback = void (*)(const char* name, float cpuTimeMS, float rollingAverageMS,
+									const float* history, size_t historyCount, void* userData);
+	static void IterateMetrics(MetricCallback callback, void* userData) noexcept;
 };
 
-// RAII Timer
+// RAII Timer - Stripped of <chrono> and <string> templates
 struct ScopedTimer {
-	std::string name;
-	std::chrono::high_resolution_clock::time_point start;
-	ScopedTimer(const std::string& n) : name(n), start(std::chrono::high_resolution_clock::now()) {}
-	~ScopedTimer() {
-		auto end = std::chrono::high_resolution_clock::now();
-		float duration = std::chrono::duration<float, std::milli>(end - start).count();
-		Profiler::Record(name, duration);
-	}
+	const char* name;
+	uint64_t start;
+
+	ScopedTimer(const char* n) noexcept;
+	~ScopedTimer() noexcept;
 };
+
 } // namespace ZHLN
 
 #define ZHLN_PROFILE_SCOPE(name) ZHLN::ScopedTimer _prof_timer(name)

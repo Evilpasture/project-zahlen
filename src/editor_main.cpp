@@ -1,7 +1,10 @@
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Input.hpp"
+#include "Zahlen/Render.hpp"
+#include "Zahlen/Window.hpp"
 #include "Zahlen/alife/Simulator.hpp"
 #include "Zahlen/alife/Types.hpp"
+#include "ecs/ECS.hpp"
 #include "physics/Physics.hpp"
 
 #include <GLFW/glfw3.h> // Fixes: GLFWwindow, glfwGetMouseButton, etc.
@@ -16,6 +19,7 @@
 #include <Zahlen/physics/Physics_C.h>
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <detail/ControlFlow.hpp> // Fixes: ZHLN_LOCK
 #include <engine/Platform.hpp>	  // Fixes: Platform
 #include <imgui.h>
@@ -321,10 +325,11 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 	int terrainSize = 128;
 	float terrainWorldSize = 250.0f;
 	float terrainMaxHeight = 25.0f;
-	std::vector<float> terrainHeights;
+	std::vector<float> terrainHeights(
+		static_cast<size_t>(terrainSize * terrainSize)); // Pre-allocate the vector
 
 	Mesh terrainMesh = AssetFactory::CreateTerrain(rc, terrainSize, terrainWorldSize,
-												   terrainMaxHeight, terrainHeights);
+												   terrainMaxHeight, terrainHeights.data());
 	auto terrainShape =
 		Physics::CreateHeightFieldShape(terrainHeights, terrainSize, terrainWorldSize);
 	Material material = AssetFactory::CreateBasicMaterial(rc);

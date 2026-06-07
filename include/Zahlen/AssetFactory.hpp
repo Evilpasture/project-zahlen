@@ -1,11 +1,16 @@
 #pragma once
-#include "Zahlen/AssetManager.hpp"
-#include "Zahlen/Entity.hpp"
-#include "ecs/ECS.hpp"
 
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Entity.hpp>
 #include <Zahlen/Types.hpp>
-#include <vector>
+#include <string_view>
+
+namespace ZHLN {
+class RenderContext;
+class AssetManager;
+namespace ECS {
+class Registry;
+}
+} // namespace ZHLN
 
 namespace ZHLN::AssetFactory {
 Mesh CreateTetrahedron(RenderContext& ctx);
@@ -15,17 +20,18 @@ Mesh CreateBox(RenderContext& ctx, JPH::Vec3Arg halfExtents,
 			   const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f});
 Material CreateBasicMaterial(RenderContext& ctx, bool doubleSided = false, bool alphaBlend = false);
 Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight,
-				   std::vector<float>& outHeights);
-Mesh LoadGLB(RenderContext& ctx, const std::string& path);
+				   float* outHeights);
+Mesh LoadGLB(RenderContext& ctx, std::string_view path);
 
 uint32_t CreateFontAtlasTexture(RenderContext& ctx);
 
-Mesh LoadCookedMesh(RenderContext& ctx, AssetManager& assetMgr, const std::string& virtualPath);
+Mesh LoadCookedMesh(RenderContext& ctx, AssetManager& assetMgr, std::string_view virtualPath);
 uint32_t LoadCookedTexture(RenderContext& ctx, AssetManager& assetMgr,
-						   const std::string& virtualPath);
+						   std::string_view virtualPath);
 
 template <bool CreatePhysics = false>
-std::vector<Entity> SpawnGLB(RenderContext& ctx, ECS::Registry& reg, const std::string& path);
+uint32_t SpawnGLB(RenderContext& ctx, ECS::Registry& reg, std::string_view path,
+				  Entity* outBuffer = nullptr, uint32_t maxCount = 0);
 
 // --- NEW: Expose runtime skeletal animation update loop ---
 void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt);
