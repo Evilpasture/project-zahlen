@@ -54,14 +54,13 @@ static_assert(sizeof(RagdollState) == sizeof(uint32_t));
 
 // 2. Restore strongly typed enum classes
 struct RagdollComponent {
-	JPH::Ref<JPH::Ragdoll> ragdollInstance = nullptr; // 8 bytes
-	RagdollState state = RagdollState::Inactive;	  // 4 bytes (Explicitly 32-bit)
-	RagdollState prevState = RagdollState::Inactive;  // 4 bytes
-	uint32_t isAddedToPhysics = 0;					  // 4 bytes
-	uint32_t jointOffset = 0;						  // 4 bytes
-	uint32_t jointCount = 0;						  // 4 bytes
-	uint32_t _padding = 0;							  // 4 bytes (Alignment padding)
-	void* gltfSkin = nullptr;						  // 8 bytes
+	JPH::Ragdoll* ragdollInstance = nullptr;		 // 8 bytes (Trivial Raw Pointer)
+	RagdollState state = RagdollState::Inactive;	 // 4 bytes
+	RagdollState prevState = RagdollState::Inactive; // 4 bytes
+	uint32_t isAddedToPhysics = 0;					 // 4 bytes
+	uint32_t jointOffset = 0;						 // 4 bytes
+	uint32_t jointCount = 0;						 // 4 bytes
+	uint32_t _padding = 0;							 // 4 bytes (Alignment padding)
+	void* gltfSkin = nullptr;						 // 8 bytes
 };
-
 } // namespace ZHLN

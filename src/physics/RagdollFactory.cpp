@@ -77,7 +77,8 @@ JPH::Ref<JPH::Ragdoll> CreateSkeletalRagdoll(PhysicsContext& ctx, const JPH::Ske
 		// constraint. We auto-generate default constraints for unconfigured joints to prevent null
 		// dereferences.
 		for (size_t i = 1; i < skeleton->GetJointCount(); ++i) {
-			if (settings->mParts[i].mToParent == nullptr) {
+			int parentIdx = skeleton->GetJoint(i).mParentJointIndex;
+			if (parentIdx >= 0 && settings->mParts[i].mToParent == nullptr) {
 				auto* twist = new JPH::SwingTwistConstraintSettings();
 				twist->mSpace = JPH::EConstraintSpace::LocalToBodyCOM;
 				twist->mPosition1 = twist->mPosition2 = JPH::RVec3::sZero();
@@ -93,8 +94,7 @@ JPH::Ref<JPH::Ragdoll> CreateSkeletalRagdoll(PhysicsContext& ctx, const JPH::Ske
 
 				settings->mParts[i].mToParent = twist;
 			}
-		}
-		// ----------------------------------------
+		} // ----------------------------------------
 
 		// 7. Complete final joint and collision topology mapping
 		settings->DisableParentChildCollisions();

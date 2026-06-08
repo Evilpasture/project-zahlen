@@ -809,6 +809,9 @@ void SetupPlayerRagdoll(RenderContext& rc, PhysicsContext& pc, ECS::Registry& re
 		// Invoke the physics module's low-level constructor [3]
 		auto ragdollInstance = Physics::CreateSkeletalRagdoll(pc, skeleton.GetPtr(), parts);
 
+		// Increment the reference count so it is kept alive after our local Ref goes out of scope
+		ragdollInstance->AddRef();
+
 		uint32_t jointOffset = 0;
 		if (!visualParts.empty()) {
 			if (auto* meshComp = reg.Get<MeshComponent>(visualParts[0])) {
@@ -817,14 +820,14 @@ void SetupPlayerRagdoll(RenderContext& rc, PhysicsContext& pc, ECS::Registry& re
 		}
 
 		// Attach the component to the player controller entity
-		reg.Add(playerEntity, RagdollComponent{.ragdollInstance = ragdollInstance,
-											   .state = RagdollState::Inactive,
-											   .prevState = RagdollState::Inactive,
-											   .isAddedToPhysics = 0,
-											   .jointOffset = jointOffset,
-											   .jointCount = (uint32_t)pomniSkin->joints_count,
-											   .gltfSkin = const_cast<cgltf_skin*>(pomniSkin)});
-
+		reg.Add(playerEntity,
+				RagdollComponent{.ragdollInstance = ragdollInstance.GetPtr(), // Pass raw pointer
+								 .state = RagdollState::Inactive,
+								 .prevState = RagdollState::Inactive,
+								 .isAddedToPhysics = 0,
+								 .jointOffset = jointOffset,
+								 .jointCount = (uint32_t)pomniSkin->joints_count,
+								 .gltfSkin = const_cast<cgltf_skin*>(pomniSkin)});
 		Log("Skeletal Ragdoll successfully generated and bound to player controller.");
 	} else {
 		Log("WARNING: SetupPlayerRagdoll failed because no skeletal skin was found in visual "

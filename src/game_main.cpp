@@ -144,7 +144,13 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	Clock clock;
 
 	ZHLN::EngineConfig config{
-		.physics = {.maxBodies = 1000, .maxBodyPairs = 2000, .maxContactConstraints = 2000},
+		.physics =
+			{
+				.maxBodies = 5000,					  // Bumped from 1000
+				.maxBodyPairs = 10000,				  // Bumped from 2000
+				.maxContactConstraints = 10000,		  // Bumped from 2000
+				.tempAllocatorSize = 64 * 1024 * 1024 // Give Jolt extra temp space for solving
+			},
 		.render = {.appName = "Zahlen Engine - Digital Circus Showcase",
 				   .width = 1280,
 				   .height = 720,

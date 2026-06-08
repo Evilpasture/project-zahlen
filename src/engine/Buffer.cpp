@@ -7,6 +7,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Scripting.h>
 #include <physics/PhysicsWorld.hpp>
+
 namespace ZHLN {
 /**
  * @brief Policy that defines how to "lock" an engine object for script access.
@@ -56,21 +57,21 @@ struct ViewComposer {
 
 		view.len = stride; // Total footprint in bytes
 		view.flags = ZHLN_BUFFER_CONTIGUOUS | ZHLN_BUFFER_WRITABLE;
-		if (((uintptr_t)view.buf % 32) == 0)
+		if (((uintptr_t)view.buf % 32) == 0) {
 			view.flags |= ZHLN_BUFFER_ALIGNED_32;
+		}
 
 		return view;
 	}
 };
 } // namespace ZHLN
+
 extern "C" {
 
 ZHLN_BufferView ZHLN_GetPhysicsPositions(ZHLN_Engine* engine_handle) {
 	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
 	const auto& world = engine->GetPhysicsContext().GetWorld();
 
-	// No hardcoding '4' or 'ndim=2'. We just describe the logic:
-	// A 2D array of [CurrentCount] by [4 components]
 	return ZHLN::ViewComposer::Build(&world, world.positions, (sizeof(JPH::Real) == 8) ? "d" : "f",
 									 world.count.load(), 4);
 }
@@ -79,14 +80,10 @@ ZHLN_BufferView ZHLN_GetPhysicsLinearVelocities(ZHLN_Engine* engine_handle) {
 	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
 	const auto& world = engine->GetPhysicsContext().GetWorld();
 
-	// If you ever change velocities to be 3-wide (x,y,z),
-	// you just change '4' to '3' here. The composer handles the rest.
 	return ZHLN::ViewComposer::Build(&world, world.linearVelocities, "f", world.count.load(), 4);
 }
 
 void ZHLN_ReleaseBuffer(void* sync_ptr) {
-	// We know for a fact this is a BufferSync* because
-	// ViewComposer put it there.
 	ZHLN::SyncPolicy::Release(static_cast<ZHLN::BufferSync*>(sync_ptr));
 }
 
@@ -97,19 +94,21 @@ ZHLN_BufferView ZHLN_GetECSBuffer(struct ZHLN_Engine* engine_handle, const char*
 
 	if (name == "PhysicsComponent") {
 		auto raw = reg.GetRawArray<ZHLN::PhysicsComponent>();
-		// Use the Composer to handle the Acquire() call automatically
 		return ZHLN::ViewComposer::Build(&reg, raw.data(), "Q", raw.size());
 	}
 	return {};
 }
 
-ZHLN_BufferView ZHLN_GetECSEntities(struct ZHLN_Engine* engine_handle,
-									const char* /*componentName*/) {
+ZHLN_BufferView ZHLN_GetECSEntities(struct ZHLN_Engine* engine_handle, const char* componentName) {
 	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
 	auto& reg = engine->GetRegistry();
 
-	// Simplified: All components use the same entity dense array logic
-	auto entities = reg.GetEntitiesWith<ZHLN::PhysicsComponent>();
+	uint32_t familyID = ZHLN::ECS::Registry::GetFamilyIDFromName(componentName);
+	if (familyID == 0xFFFFFFFF) {
+		return {};
+	}
+
+	auto entities = reg.GetEntitiesByFamilyID(familyID);
 	return ZHLN::ViewComposer::Build(&reg, const_cast<ZHLN::Entity*>(entities.data()), "Q",
 									 entities.size());
 }
@@ -118,7 +117,6 @@ ZHLN_BufferView ZHLN_GetPhysicsContactEvents(ZHLN_Engine* engine_handle) {
 	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
 	auto events = ZHLN::Physics::GetContactEvents(engine->GetPhysicsContext());
 
-	// Choose format string based on Jolt precision
 	const char* fmt = (sizeof(JPH::Real) == 8) ? "EvtD" : "EvtF";
 
 	return ZHLN::ViewComposer::Build(&engine->GetPhysicsContext().GetWorld(), events.first, fmt,
@@ -130,11 +128,11 @@ void* ZHLN_GetComponent(ZHLN_Engine* engine_handle, uint64_t entityRaw, const ch
 	auto entity = ZHLN::Entity::Unpack(entityRaw);
 	auto& reg = engine->GetRegistry();
 
-	const uint32_t* pFamilyID = ZHLN::ECS::Registry::s_NameToFamilyID.Find(componentName);
-	if (pFamilyID == nullptr) {
+	uint32_t familyID = ZHLN::ECS::Registry::GetFamilyIDFromName(componentName);
+	if (familyID == 0xFFFFFFFF) {
 		return nullptr; // Not a registered C++ component
 	}
 
-	return reg.GetRawByFamily(entity, *pFamilyID);
+	return reg.GetRawByFamily(entity, familyID);
 }
 }

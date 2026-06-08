@@ -5,13 +5,44 @@
 #include <Zahlen/Log.hpp>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 
 namespace ZHLN::ECS {
+
+static std::mutex s_FamilyMutex;
+static uint32_t s_TypeCounter = 0;
+static HashMap<uint32_t, uint32_t> s_HashToDense;
+static HashMap<std::string_view, uint32_t> s_NameToFamilyID;
+
+uint32_t ComponentFamily::ResolveDenseID(uint32_t typeHash) noexcept {
+	std::lock_guard<std::mutex> lock(s_FamilyMutex);
+	const uint32_t* existing = s_HashToDense.Find(typeHash);
+	if (existing != nullptr) {
+		return *existing;
+	}
+	uint32_t id = s_TypeCounter++;
+	s_HashToDense.Insert(typeHash, id);
+	return id;
+}
+
+void Registry::MapNameToFamilyID(std::string_view name, uint32_t id) noexcept {
+	std::lock_guard<std::mutex> lock(s_FamilyMutex);
+	s_NameToFamilyID.Insert(name, id);
+}
+
+uint32_t Registry::GetFamilyIDFromName(std::string_view name) noexcept {
+	std::lock_guard<std::mutex> lock(s_FamilyMutex);
+	const uint32_t* id = s_NameToFamilyID.Find(name);
+	if (id) {
+		return *id;
+	}
+	return 0xFFFFFFFF; // Invalid
+}
 
 // --- HELPER: Manual Aligned Realloc ---
 static void* ReallocAligned(void* oldPtr, size_t oldSize, size_t newSize, size_t alignment) {
 	void* newPtr = ::operator new[](newSize, std::align_val_t{alignment});
-	if (oldPtr) {
+	if (oldPtr != nullptr) {
 		std::memcpy(newPtr, oldPtr, oldSize);
 		::operator delete[](oldPtr, std::align_val_t{alignment});
 	}
@@ -26,33 +57,40 @@ SparseSet::SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr)
 	: _elementSize(elementSize), _alignment(alignment), _sync(syncPtr) {}
 
 SparseSet::~SparseSet() {
-	if (_sparse)
+	if (_sparse != nullptr) {
 		::operator delete[](_sparse, std::align_val_t{alignof(uint32_t)});
-	if (_dense)
+	}
+	if (_dense != nullptr) {
 		::operator delete[](_dense, std::align_val_t{alignof(Entity)});
-	if (_data)
+	}
+	if (_data != nullptr) {
 		::operator delete[](_data, std::align_val_t{_alignment});
+	}
 }
 
 void SparseSet::ResizeSparse(uint32_t required) {
-	if (_sync && _sync->viewExportCount.load(std::memory_order_acquire) > 0)
+	if ((_sync != nullptr) && _sync->viewExportCount.load(std::memory_order_acquire) > 0) {
 		ZHLN::Panic("FFI MEMORY VIOLATION: SparseSet Sparse Resize");
+	}
 
 	size_t oldCap = _sparseCapacity;
 	_sparseCapacity = oldCap == 0 ? 1024 : oldCap * 2;
-	while (_sparseCapacity <= required)
+	while (_sparseCapacity <= required) {
 		_sparseCapacity *= 2;
+	}
 
 	_sparse = (uint32_t*)ReallocAligned(_sparse, oldCap * sizeof(uint32_t),
 										_sparseCapacity * sizeof(uint32_t), alignof(uint32_t));
 
-	for (size_t i = oldCap; i < _sparseCapacity; ++i)
+	for (size_t i = oldCap; i < _sparseCapacity; ++i) {
 		_sparse[i] = INVALID_DENSE;
+	}
 }
 
 void SparseSet::ResizeDense() {
-	if (_sync && _sync->viewExportCount.load(std::memory_order_acquire) > 0)
+	if ((_sync != nullptr) && _sync->viewExportCount.load(std::memory_order_acquire) > 0) {
 		ZHLN::Panic("FFI MEMORY VIOLATION: SparseSet Dense Resize");
+	}
 
 	size_t oldCap = _denseCapacity;
 	_denseCapacity = oldCap == 0 ? 64 : oldCap * 2;
@@ -64,13 +102,15 @@ void SparseSet::ResizeDense() {
 }
 
 void SparseSet::Insert(Entity entity, const void* data) {
-	if (entity.index >= _sparseCapacity)
+	if (entity.index >= _sparseCapacity) {
 		ResizeSparse(entity.index);
+	}
 
 	uint32_t denseIdx = _sparse[entity.index];
 	if (denseIdx == INVALID_DENSE) {
-		if (_count >= _denseCapacity)
+		if (_count >= _denseCapacity) {
 			ResizeDense();
+		}
 		denseIdx = (uint32_t)_count++;
 		_dense[denseIdx] = entity;
 		_sparse[entity.index] = denseIdx;
@@ -79,11 +119,13 @@ void SparseSet::Insert(Entity entity, const void* data) {
 }
 
 void SparseSet::Remove(Entity entity) {
-	if (entity.index >= _sparseCapacity)
+	if (entity.index >= _sparseCapacity) {
 		return;
+	}
 	uint32_t denseIdx = _sparse[entity.index];
-	if (denseIdx == INVALID_DENSE)
+	if (denseIdx == INVALID_DENSE) {
 		return;
+	}
 
 	uint32_t lastIdx = (uint32_t)_count - 1;
 	if (denseIdx != lastIdx) {
@@ -102,14 +144,16 @@ bool SparseSet::Contains(Entity entity) const noexcept {
 }
 
 void* SparseSet::Get(Entity entity) const noexcept {
-	if (!Contains(entity))
+	if (!Contains(entity)) {
 		return nullptr;
+	}
 	return _data + (_sparse[entity.index] * _elementSize);
 }
 
 void SparseSet::Clear() noexcept {
-	if (_sparse)
+	if (_sparse != nullptr) {
 		std::memset(_sparse, 0xFF, _sparseCapacity * sizeof(uint32_t));
+	}
 	_count = 0;
 }
 
@@ -152,25 +196,32 @@ Registry::Registry() {
 }
 
 Registry::~Registry() {
-	if (_generations)
+	if (_generations != nullptr) {
 		std::free(_generations);
-	if (_freeIndices)
+	}
+	if (_freeIndices != nullptr) {
 		std::free(_freeIndices);
-	for (size_t i = 0; i < _compCapacity; ++i)
-		if (_components[i])
+	}
+	for (size_t i = 0; i < _compCapacity; ++i) {
+		if (_components[i] != nullptr) {
 			delete _components[i];
-	if (_components)
-		std::free(_components);
+		}
+	}
+	if (_components != nullptr) {
+		std::free(static_cast<void*>(_components));
+	}
 }
 
 void Registry::EnsureEntityCapacity(uint32_t index) {
-	if (index < _entityCapacity)
+	if (index < _entityCapacity) {
 		return;
+	}
 
 	size_t oldCap = _entityCapacity;
 	_entityCapacity = oldCap == 0 ? 1024 : oldCap * 2;
-	while (_entityCapacity <= index)
+	while (_entityCapacity <= index) {
 		_entityCapacity *= 2;
+	}
 
 	_generations = (uint32_t*)std::realloc(_generations, _entityCapacity * sizeof(uint32_t));
 	_freeIndices = (uint32_t*)std::realloc(_freeIndices, _entityCapacity * sizeof(uint32_t));
@@ -182,31 +233,37 @@ void Registry::EnsureEntityCapacity(uint32_t index) {
 }
 
 void Registry::EnsureComponentCapacity(uint32_t id) {
-	if (id < _compCapacity)
+	if (id < _compCapacity) {
 		return;
+	}
 	size_t oldCap = _compCapacity;
 	_compCapacity = id + 8; // Small growth for component pointer array
-	_components = (SparseSet**)std::realloc(_components, _compCapacity * sizeof(SparseSet*));
-	for (size_t i = oldCap; i < _compCapacity; ++i)
+	_components = (SparseSet**)std::realloc(static_cast<void*>(_components),
+											_compCapacity * sizeof(SparseSet*));
+	for (size_t i = oldCap; i < _compCapacity; ++i) {
 		_components[i] = nullptr;
+	}
 }
 
 Entity Registry::Create() {
 	ZHLN_LOCK(sync.shadowLock) {
-		if (_freeCount == 0)
+		if (_freeCount == 0) {
 			EnsureEntityCapacity((uint32_t)_entityCapacity);
+		}
 		uint32_t index = _freeIndices[--_freeCount];
-		return Entity{index, _generations[index]};
+		return Entity{.index = index, .generation = _generations[index]};
 	}
 }
 
 void Registry::Destroy(Entity entity) {
 	ZHLN_LOCK(sync.shadowLock) {
-		if (entity.index >= _entityCapacity || _generations[entity.index] != entity.generation)
+		if (entity.index >= _entityCapacity || _generations[entity.index] != entity.generation) {
 			return;
+		}
 		for (size_t i = 0; i < _compCapacity; ++i) {
-			if (_components[i])
+			if (_components[i] != nullptr) {
 				_components[i]->Remove(entity);
+			}
 		}
 		_generations[entity.index]++;
 		_freeIndices[_freeCount++] = entity.index;
@@ -220,8 +277,9 @@ bool Registry::IsAlive(Entity entity) const noexcept {
 void Registry::Clear() {
 	ZHLN_LOCK(sync.shadowLock) {
 		for (size_t i = 0; i < _compCapacity; ++i) {
-			if (_components[i])
+			if (_components[i] != nullptr) {
 				_components[i]->Clear();
+			}
 		}
 		_freeCount = 0;
 		_entityCount = 0; // Reset active entity tracking

@@ -120,6 +120,7 @@ add_library(zahlen_engine SHARED ${ENGINE_SOURCES})
 target_compile_definitions(zahlen_engine PRIVATE 
     ZHLN_ENGINE_BUILD
     JPH_DOUBLE_PRECISION
+    JPH_SHARED_LIBRARY
 )
 
 target_sources(zahlen_engine PRIVATE 

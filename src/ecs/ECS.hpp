@@ -1,18 +1,34 @@
 #pragma once
 
 #include <Zahlen/Buffer.h>
+#include <Zahlen/Common.h>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Sync.hpp>
 #include <cstddef>
 #include <detail/HashMap.hpp>
 #include <detail/Span.hpp>
+#include <source_location>
 #include <span>
 #include <string_view>
 #include <threading/Mutex.hpp>
 
 namespace ZHLN::ECS {
 
-class SparseSet {
+consteval uint32_t HashTypeName(std::string_view str) {
+	uint32_t hash = 2166136261u;
+	for (char c : str) {
+		hash ^= static_cast<uint8_t>(c);
+		hash *= 16777619u;
+	}
+	return hash;
+}
+
+template <typename T> consteval uint32_t GetTypeHash() {
+	// The resolved function name contains the template parameter (e.g., "[with T = MeshComponent]")
+	return HashTypeName(std::source_location::current().function_name());
+}
+
+class ZHLN_API SparseSet {
   public:
 	SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr);
 	~SparseSet();
@@ -52,17 +68,17 @@ class SparseSet {
 	void ResizeDense();
 };
 
-class ComponentFamily {
-	static inline uint32_t _typeCounter = 0;
-
+class ZHLN_API ComponentFamily {
   public:
+	static uint32_t ResolveDenseID(uint32_t typeHash) noexcept;
+
 	template <typename T> static uint32_t GetTypeID() noexcept {
-		static uint32_t id = _typeCounter++;
-		return id;
+		static uint32_t denseID = ResolveDenseID(GetTypeHash<T>());
+		return denseID;
 	}
 };
 
-class Registry {
+class ZHLN_API Registry {
   public:
 	mutable BufferSync sync;
 
@@ -73,6 +89,9 @@ class Registry {
 	void Destroy(Entity entity);
 	bool IsAlive(Entity entity) const noexcept;
 	void Clear();
+
+	static void MapNameToFamilyID(std::string_view name, uint32_t id) noexcept;
+	static uint32_t GetFamilyIDFromName(std::string_view name) noexcept;
 
 	template <typename T> void RegisterComponent() {
 		uint32_t id = ComponentFamily::GetTypeID<T>();
@@ -124,17 +143,21 @@ class Registry {
 		return {_components[id]->GetDenseArray(), _components[id]->Count()};
 	}
 
-	// Map component name strings to their unique family IDs
-	inline static HashMap<std::string_view, uint32_t> s_NameToFamilyID;
-
 	template <typename T> void RegisterComponent(std::string_view name) {
 		uint32_t id = ComponentFamily::GetTypeID<T>();
-		s_NameToFamilyID.Insert(name, id); // Store mapping
+		MapNameToFamilyID(name, id);
 
 		EnsureComponentCapacity(id);
 		if (!_components[id]) {
 			_components[id] = new SparseSet(sizeof(T), alignof(T), &this->sync);
 		}
+	}
+
+	std::span<const Entity> GetEntitiesByFamilyID(uint32_t familyID) const noexcept {
+		if (familyID >= _compCapacity || (_components[familyID] == nullptr)) {
+			return {};
+		}
+		return {_components[familyID]->GetDenseArray(), _components[familyID]->Count()};
 	}
 
 	// Direct constant-time pointer fetch

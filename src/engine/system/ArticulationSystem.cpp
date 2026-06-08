@@ -37,7 +37,7 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
 			continue;
 		}
 
-		JPH::Ragdoll* ragdoll = ragComp.ragdollInstance.GetPtr();
+		JPH::Ragdoll* ragdoll = ragComp.ragdollInstance;
 		const JPH::Skeleton* skel = ragdoll->GetRagdollSettings()->GetSkeleton();
 		const auto* skin = static_cast<const cgltf_skin*>(ragComp.gltfSkin);
 
