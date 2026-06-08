@@ -1,3 +1,4 @@
+#include "Features.hpp"
 #include "PipelineBuilder.hpp"
 #include "RenderCore.hpp"
 #include "demo_utils/DemoWindow.hpp"
@@ -7,11 +8,11 @@
 
 auto main() -> int {
 	// 1. OS Window Creation
-	ZHLN::Demo::WindowState win = ZHLN::Demo::InitWindow(800, 600, "ZHLN Engine - Triangle");
+	ZHLN::Demo::WindowState win = ZHLN::Demo::InitWindow(800, 600, "ZHLN Engine - Modern Triangle");
 	if (!win.os_window)
 		return -1;
 
-	// 2. Context Setup
+	// 2. Instance & Device Feature Setup (Modernized via FeatureFactory)
 	ZHLN_InstanceDesc inst_desc = ZHLN_DEFAULT_INSTANCE_DESC;
 	auto inst_exts = ZHLN::Demo::GetRequiredInstanceExtensions();
 	inst_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
@@ -29,23 +30,25 @@ auto main() -> int {
 	inst_desc.extensions = inst_exts.data();
 	inst_desc.extension_count = static_cast<uint32_t>(inst_exts.size());
 
-	VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swap_maint = {
-		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR,
-		.swapchainMaintenance1 = VK_TRUE};
+	// Compile-time feature chain building
+	auto swap_maint =
+		ZHLN::Vk::FeatureFactory::Create<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>(
+			[](auto& f) { f.swapchainMaintenance1 = VK_TRUE; });
 
-	VkPhysicalDeviceVulkan13Features feat13 = {
-		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-		.pNext = has_maint1 ? &swap_maint : nullptr,
-		.synchronization2 = VK_TRUE,
-		.dynamicRendering = VK_TRUE};
+	auto feat13 = ZHLN::Vk::FeatureFactory::Create<VkPhysicalDeviceVulkan13Features>([&](auto& f) {
+		f.pNext = has_maint1 ? &swap_maint : nullptr;
+		f.synchronization2 = VK_TRUE;
+		f.dynamicRendering = VK_TRUE;
+	});
 
-	VkPhysicalDeviceVulkan12Features feat12 = {
-		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-		.pNext = &feat13,
-		.bufferDeviceAddress = VK_TRUE};
+	auto feat12 =
+		ZHLN::Vk::FeatureFactory::Create<VkPhysicalDeviceVulkan12Features>([&feat13](auto& f) {
+			f.pNext = &feat13;
+			f.bufferDeviceAddress = VK_TRUE;
+		});
 
-	VkPhysicalDeviceFeatures2 feat2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-									   .pNext = &feat12};
+	auto feat2 = ZHLN::Vk::FeatureFactory::Create<VkPhysicalDeviceFeatures2>(
+		[&feat12](auto& f) { f.pNext = &feat12; });
 
 	std::vector<const char*> dev_exts = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 	if (has_maint1) {
@@ -75,7 +78,7 @@ auto main() -> int {
 		ctx.Device(), {.queue_family = ctx.PhysicalInfo().graphics_family, .buffers_per_pool = 1});
 	ZHLN::Vk::SemaphorePool present_semaphores;
 
-	// 4. Pipeline Setup (Updated with HLSL filenames and entry points)
+	// 4. Pipeline Setup
 	auto shaders = ZHLN::Vk::ShaderStages::FromFiles(
 		ctx.Device(), "triangle.hlsl.VSMain.spv", "triangle.hlsl.PSMain.spv", "VSMain", "PSMain");
 
@@ -114,7 +117,7 @@ auto main() -> int {
 		win.resized = false;
 	};
 
-	// 6. Loop
+	// 6. Main Render Loop
 	uint32_t frame_index = 0;
 	win.resized = true;
 
@@ -143,21 +146,29 @@ auto main() -> int {
 		}
 
 		ZHLN_BeginCommandBuffer(cmd);
-		VkImage img = swapchain.Get().images[image_index];
-		ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED,
-								   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, img);
 
-		ZHLN_RenderPassDesc pass = {.target_views = {swapchain.Get().views[image_index]},
-									.depth_view = VK_NULL_HANDLE,
-									.extent = swapchain.Get().extent,
-									.clear_color = {0.01f, 0.01f, 0.02f, 1.0f}};
-		{
-			ZHLN::Vk::ScopedRendering render(cmd, pass);
-			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
-			vkCmdDraw(cmd, 3, 1, 0, 0);
-		}
-		ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-								   VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, img);
+		// --- MODERN TYPE-SAFE IMAGE LAYOUT STATE ---
+		ZHLN::Vk::TypedImage<VK_IMAGE_LAYOUT_UNDEFINED> swap_u = {
+			.handle = swapchain.Get().images[image_index],
+			.view = swapchain.Get().views[image_index],
+			.extent = swapchain.Get().extent,
+			.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
+
+		// Transition the image's layout; statically tracked by the compiler
+		auto swap_att = ZHLN::Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, swap_u);
+
+		// --- MODERN FLUENT RENDER PASS EXECUTION ---
+		ZHLN::Vk::DynamicPass<1, false>(swapchain.Get().extent)
+			.Color(0, swap_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE)
+			.ClearColor(0, 0.01f, 0.01f, 0.02f, 1.0f)
+			.Execute(cmd, [&]() {
+				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
+				vkCmdDraw(cmd, 3, 1, 0, 0);
+			});
+
+		// Transition image state back to present source
+		auto swap_pres = ZHLN::Vk::Transition<VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, swap_att);
+
 		ZHLN_EndCommandBuffer(cmd);
 
 		ZHLN_FrameSubmitDesc submitDesc = {.graphicsQueue = ctx.GraphicsQueue(),

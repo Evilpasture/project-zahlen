@@ -192,4 +192,33 @@ target_include_directories(zahlen_sponza PRIVATE
     ${CMAKE_SOURCE_DIR}/extern/cgltf
     ${CMAKE_SOURCE_DIR}/extern/stb
 )
-target_compile_features(zahlen_crt PRIVATE cxx_std_23)
+# ============================================================================
+# 8. Raw Vulkan Triangle Executable (No ZHLN abstractions)
+# ============================================================================
+
+set(RAW_TRIANGLE_HLSL "${CMAKE_CURRENT_SOURCE_DIR}/raw_triangle_app/raw_triangle.hlsl")
+compile_hlsl("${RAW_TRIANGLE_HLSL}" VSMain vs RAW_TRI_VERT_SPV)
+compile_hlsl("${RAW_TRIANGLE_HLSL}" PSMain ps RAW_TRI_FRAG_SPV)
+
+add_executable(zahlen_raw_triangle 
+    raw_triangle_app/main.cpp 
+    ${RAW_TRI_VERT_SPV} 
+    ${RAW_TRI_FRAG_SPV}
+)
+
+# Standard C-API Vulkan and GLFW only, no "zahlen_render" linkage
+target_link_libraries(zahlen_raw_triangle PRIVATE Vulkan::Vulkan glfw)
+
+target_include_directories(zahlen_raw_triangle PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}
+)
+
+target_compile_definitions(zahlen_raw_triangle PRIVATE
+    SHADER_RAW_VERT_PATH="${RAW_TRI_VERT_SPV}"
+    SHADER_RAW_FRAG_PATH="${RAW_TRI_FRAG_SPV}"
+)
+
+target_compile_features(zahlen_raw_triangle PRIVATE cxx_std_23)
+
+
