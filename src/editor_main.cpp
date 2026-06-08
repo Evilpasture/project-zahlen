@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <detail/ControlFlow.hpp> // Fixes: ZHLN_LOCK
 #include <engine/Platform.hpp>	  // Fixes: Platform
+#include <engine/system/CullingSystem.hpp>
 #include <imgui.h>
 #include <physics/PhysicsWorld.hpp>
 #include <threading/TaskSystem.hpp>
@@ -48,8 +49,6 @@ struct EditorState {
 
 EditorState g_EditorState;
 JPH::Array<Entity> s_VisibleEntities;
-JPH::Vec3 s_LastCullPos;
-float s_LastCullYaw = 0.0f;
 
 // ============================================================================
 // Free-Fly Editor Camera
@@ -125,64 +124,6 @@ auto CastPickingRay(Engine& engine, const Camera& cam) -> Physics::RaycastResult
 
 	// 3. Execute narrowing phase raycast query via Jolt [c]
 	return Physics::Raycast(engine.GetPhysicsContext(), JPH::RVec3(pNear), dir, 1000.0f);
-}
-
-// ============================================================================
-// Editor Frustum Culling
-// ============================================================================
-void UpdateEditorCulling(Engine& engine) {
-	auto& cam = engine.GetCamera();
-	auto& reg = engine.GetRegistry();
-	const auto& world = engine.GetPhysicsContext().GetWorld();
-
-	auto entities = reg.GetEntitiesWith<MeshComponent>();
-
-	if (!CullingStats::EnableCulling) {
-		s_VisibleEntities.assign(entities.begin(), entities.end());
-		return;
-	}
-
-	// bool moved = (cam.position - s_LastCullPos).LengthSq() > 0.01f ||
-	// 			 std::abs(cam.yaw - s_LastCullYaw) > 0.5f;
-	// if (!moved && !s_VisibleEntities.empty()) {
-	// 	return;
-	// }
-
-	s_VisibleEntities.clear();
-	auto meshes = reg.GetRawArray<MeshComponent>();
-
-	ZHLN_LOCK(world.sync.shadowLock) {
-		for (size_t i = 0; i < entities.size(); ++i) {
-			Entity e = entities[i];
-			JPH::Mat44 currentTransform{};
-
-			if (auto* phys = reg.Get<PhysicsComponent>(e)) {
-				uint32_t dense = world.slotToDense[phys->physicsHandle.index];
-				const size_t base = static_cast<size_t>(dense) * 4;
-				JPH::Vec3 pos((float)world.positions[base], (float)world.positions[base + 1],
-							  (float)world.positions[base + 2]);
-				JPH::Quat rot(world.rotations[base], world.rotations[base + 1],
-							  world.rotations[base + 2], world.rotations[base + 3]);
-				currentTransform = Math::CreateTransform(pos, rot) * meshes[i].localTransform;
-			} else if (auto* alifeComp = reg.Get<ALife::ALifeComponent>(e)) {
-				currentTransform =
-					Math::CreateTransform(JPH::Vec3(alifeComp->position), JPH::Quat::sIdentity()) *
-					meshes[i].localTransform;
-			} else {
-				currentTransform = meshes[i].localTransform;
-			}
-
-			// Extract the exact world-space center evaluated by the renderer
-			JPH::Vec3 center = currentTransform.GetTranslation();
-
-			if (cam.frustum.IsSphereVisible(center, meshes[i].cullRadius)) {
-				s_VisibleEntities.push_back(e);
-			}
-		}
-	}
-
-	s_LastCullPos = cam.position;
-	s_LastCullYaw = cam.yaw;
 }
 
 // ============================================================================
@@ -436,7 +377,9 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 			}
 
 			cam.frustum.Update(vp);
-			UpdateEditorCulling(engine);
+
+			// Explicitly invoke the dynamic physics-tracked path
+			CullingSystem<true>(engine, s_VisibleEntities, {});
 
 			// Shadow Matrices
 			JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f};

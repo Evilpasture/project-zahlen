@@ -19,12 +19,14 @@
 #include <cstddef>
 #include <detail/ControlFlow.hpp>
 #include <engine/system/ArticulationSystem.hpp>
+#include <engine/system/CullingSystem.hpp>
 #include <physics/PhysicsWorld.hpp>
 #include <print>
 #include <string>
 #include <threading/Mutex.hpp>
 #include <threading/TaskSystem.hpp>
 #include <vector>
+
 namespace ZHLN {
 void DrawConsole(ScriptRunner& runner);
 void DrawProfiler(Engine& engine);
@@ -83,58 +85,7 @@ struct Scene {
 };
 
 JPH::Array<ZHLN::Entity> s_VisibleEntities;
-JPH::Vec3 s_LastCullPos;
-float s_LastCullYaw = 0.0f;
 
-void UpdateCulling(Engine& engine) {
-	ZHLN_PROFILE_SCOPE("Culling (ECS O(N))");
-	auto& cam = engine.GetCamera();
-	auto& reg = engine.GetRegistry();
-	auto& pc = engine.GetPhysicsContext();
-	const auto& worldState = pc.GetWorld();
-
-	auto entities = reg.GetEntitiesWith<MeshComponent>();
-
-	if (!CullingStats::EnableCulling) {
-		s_VisibleEntities.assign(entities.begin(), entities.end());
-		return;
-	}
-
-	s_VisibleEntities.clear();
-	auto meshes = reg.GetRawArray<MeshComponent>();
-
-	// 1. Retrieve the player's physical coordinates for culling calculations [6]
-	JPH::Vec3 playerPos = JPH::Vec3::sZero();
-	if (reg.IsAlive(s_PlayerEntity)) {
-		if (auto* phys = reg.Get<PhysicsComponent>(s_PlayerEntity)) {
-			uint32_t dense = worldState.slotToDense[phys->physicsHandle.index];
-			const size_t base = static_cast<size_t>(dense) * 4;
-			playerPos =
-				JPH::Vec3((float)worldState.positions[base], (float)worldState.positions[base + 1],
-						  (float)worldState.positions[base + 2]);
-		}
-	}
-
-	for (size_t i = 0; i < entities.size(); ++i) {
-		Entity e = entities[i];
-		JPH::Vec3 pos = meshes[i].localTransform.GetTranslation();
-
-		// 2. If this mesh is part of Pomni, offset the culling sphere by her physical coordinate
-		// [6]
-		bool isPlayerPart =
-			std::find(s_PomniParts.begin(), s_PomniParts.end(), e) != s_PomniParts.end();
-		if (isPlayerPart) {
-			pos = playerPos + pos;
-		}
-
-		if (cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius)) {
-			s_VisibleEntities.push_back(e);
-		}
-	}
-
-	s_LastCullPos = cam.position;
-	s_LastCullYaw = cam.yaw;
-}
 } // namespace
 
 auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
@@ -146,9 +97,9 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	ZHLN::EngineConfig config{
 		.physics =
 			{
-				.maxBodies = 5000,					  // Bumped from 1000
-				.maxBodyPairs = 10000,				  // Bumped from 2000
-				.maxContactConstraints = 10000,		  // Bumped from 2000
+				.maxBodies = 5000,
+				.maxBodyPairs = 10000,
+				.maxContactConstraints = 10000,
 				.tempAllocatorSize = 64 * 1024 * 1024 // Give Jolt extra temp space for solving
 			},
 		.render = {.appName = "Zahlen Engine - Digital Circus Showcase",
@@ -389,7 +340,8 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 				s_WasFrozen = false;
 			}
 
-			UpdateCulling(engine);
+			// Explicitly invoke the baked-only path
+			CullingSystem<false>(engine, s_VisibleEntities, s_PomniParts);
 
 			JPH::Vec3 sunDirection = {-0.6f, 0.4f, -0.7f};
 			JPH::Mat44 lightView =
@@ -422,25 +374,6 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			engine.BeginFrame();
 			Renderer::SetMatrices(rc, vp, unjitteredVp);
 
-			static JPH::Quat s_PlayerRotation = JPH::Quat::sIdentity();
-
-			JPH::Vec3 velocity = Physics::GetCharacterVelocity(pc, charPhys);
-			JPH::Vec3 flatVel(velocity.GetX(), 0.0f, velocity.GetZ());
-
-			if (flatVel.LengthSq() > 0.1f) {
-				// Calculate target orientation based on velocity
-				float targetAngleRad =
-					std::atan2(-velocity.GetZ(), velocity.GetX()) + JPH::DegreesToRadians(90.0f);
-				JPH::Quat targetRotation =
-					JPH::Quat::sRotation(JPH::Vec3::sAxisY(), targetAngleRad);
-
-				// Smoothly interpolate (SLERP) towards the target rotation [6]
-				// Turn rate of 10.0f means Pomni will complete turns over ~100ms
-				float turnSpeed = 10.0f;
-				s_PlayerRotation = s_PlayerRotation.SLERP(
-					targetRotation, JPH::Clamp(turnSpeed * frameTime, 0.0f, 1.0f));
-			}
-
 			JPH::Mat44 playerTransform = JPH::Mat44::sIdentity();
 			if (reg.IsAlive(s_PlayerEntity)) {
 
@@ -453,8 +386,13 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 
 				// Only offset the model by the capsule position if the ragdoll is NOT simulated
 				if (!isRagdollActive) {
-					playerTransform = Math::CreateTransform(playerPos - JPH::Vec3(0.0f, 0.5f, 0.0f),
-															s_PlayerRotation);
+					JPH::Quat rotation = JPH::Quat::sIdentity();
+					if (auto* move = reg.Get<MovementComponent>(s_PlayerEntity)) {
+						rotation = JPH::Quat(move->orientation[0], move->orientation[1],
+											 move->orientation[2], move->orientation[3]);
+					}
+					playerTransform =
+						Math::CreateTransform(playerPos - JPH::Vec3(0.0f, 0.5f, 0.0f), rotation);
 				}
 			}
 			for (Entity e : s_VisibleEntities) {

@@ -89,6 +89,7 @@ if not ok then
             float currentYVel;
             float speed;
             float jumpForce;
+            float orientation[4];
         } MovementComponent;
 
         // Expose our new C-API bridge function
@@ -116,6 +117,7 @@ if not ok then
             uint32_t padding;
             void*    gltfSkin;
         } RagdollComponent;
+
     ]]
 end
 

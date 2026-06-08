@@ -45,6 +45,8 @@ struct MovementComponent {
 	float currentYVel = 0.0f;
 	float speed = 7.0f;
 	float jumpForce = 12.0f;
+
+	float orientation[4] = {0.0f, 0.0f, 0.0f, 1.0f}; // x, y, z, w (identity)
 };
 
 // 1. Explicitly size the enum to 32-bit

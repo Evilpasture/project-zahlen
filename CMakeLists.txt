@@ -103,6 +103,7 @@ set(ENGINE_SOURCES
     src/engine/system/MovementSystem.cpp
     src/engine/system/AudioSystem.cpp
     src/engine/system/ArticulationSystem.cpp
+    src/engine/system/CullingSystem.cpp
     src/engine/Sky.cpp
     src/engine/BRDFLUT.cpp
     src/engine/GizmoUI.cpp
