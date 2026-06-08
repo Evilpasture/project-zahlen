@@ -35,18 +35,26 @@ struct PhysicsComponent {
 	Entity physicsHandle; // Note: This is the PhysicsWorld handle, NOT the ECS Entity!
 };
 
+/**
+ * @brief Links an ECS Entity to an active movement controller.
+ * Members are aligned with floats first to guarantee a zero-padding layout.
+ */
 struct MovementComponent {
-	// Input Intents (Set by Lua)
+	// --- Floats first (Zero-padding alignment) ---
 	float inputX = 0.0f;
 	float inputZ = 0.0f;
-	bool jumpRequested = false;
-
-	// Current State (Managed by C++)
 	float currentYVel = 0.0f;
 	float speed = 7.0f;
 	float jumpForce = 12.0f;
-
 	float orientation[4] = {0.0f, 0.0f, 0.0f, 1.0f}; // x, y, z, w (identity)
+	float landingTimer = 0.0f;
+	float jumpDelayTimer = 0.0f;
+
+	// --- Bools next ---
+	bool jumpRequested = false;
+	bool isGrounded = true;
+	bool wasGrounded = true;
+	bool isSprinting = false;
 };
 
 // 1. Explicitly size the enum to 32-bit

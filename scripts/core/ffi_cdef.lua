@@ -30,6 +30,8 @@ if not ok then
         int ZHLN_IsKeyDown(ZHLN_Engine* engine, uint8_t key);
         void ZHLN_GetMouseDelta(ZHLN_Engine* engine, float* outX, float* outY);
         float ZHLN_GetCameraYaw(struct ZHLN_Engine* engine);
+        float ZHLN_GetCameraFOV(struct ZHLN_Engine* engine);
+        void ZHLN_SetCameraFOV(struct ZHLN_Engine* engine, float fov);
 
         void ZHLN_SetCharacterVelocity(ZHLN_Engine* engine, uint64_t physicsHandle, float x, float y, float z);
         int ZHLN_IsCharacterOnGround(ZHLN_Engine* engine, uint64_t physicsHandle);
@@ -85,11 +87,16 @@ if not ok then
         typedef struct MovementComponent {
             float inputX;
             float inputZ;
-            bool  jumpRequested;
             float currentYVel;
             float speed;
             float jumpForce;
             float orientation[4];
+            float landingTimer;
+            float jumpDelayTimer;
+            bool  jumpRequested;
+            bool  isGrounded;
+            bool  wasGrounded;
+            bool  isSprinting;
         } MovementComponent;
 
         // Expose our new C-API bridge function

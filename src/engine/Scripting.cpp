@@ -280,4 +280,14 @@ float ZHLN_GetCameraYaw(ZHLN_Engine* engine_handle) {
 	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
 	return engine->GetCamera().yaw;
 }
+
+float ZHLN_GetCameraFOV(ZHLN_Engine* engine_handle) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	return engine->GetCamera().fov;
+}
+
+void ZHLN_SetCameraFOV(ZHLN_Engine* engine_handle, float fov) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	engine->GetCamera().fov = fov;
+}
 }

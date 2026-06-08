@@ -16,6 +16,14 @@ local NATIVE_COMPONENTS = {
     RagdollComponent = true,
 }
 
+-- Stable key converter for cdata / uint64_t table indexing
+local function to_key(ent)
+    if type(ent) == "cdata" then
+        return tostring(ent)
+    end
+    return ent
+end
+
 function Registry.new(engine_raw)
     return setmetatable({
         engine = engine_raw,
@@ -41,26 +49,27 @@ function Registry:create(ent)
         self.next_id = self.next_id + 1
     end
 
-    self.entities[id] = true
+    self.entities[to_key(id)] = true
     return id
 end
 
 function Registry:destroy(ent)
-    if not self.entities[ent] then return end
+    local key = to_key(ent)
+    if not self.entities[key] then return end
 
     -- Remove from all component pools and update size counters
     for name, pool in pairs(self.pools) do
-        if pool[ent] ~= nil then
-            pool[ent] = nil
+        if pool[key] ~= nil then
+            pool[key] = nil
             self.sizes[name] = self.sizes[name] - 1
         end
     end
 
-    self.entities[ent] = nil
+    self.entities[key] = nil
 end
 
 function Registry:is_alive(ent)
-    return self.entities[ent] == true
+    return self.entities[to_key(ent)] == true
 end
 
 -- ============================================================================
@@ -68,7 +77,7 @@ end
 -- ============================================================================
 
 function Registry:add(ent, comp_name, data)
-    self.entities[ent] = true
+    self.entities[to_key(ent)] = true
 
     if self:is_native(comp_name) then
         -- Native components are added via C++, but we can retrieve and assign fields from Lua
@@ -89,17 +98,19 @@ function Registry:add(ent, comp_name, data)
             self.pools[comp_name] = pool
             self.sizes[comp_name] = 0
         end
-        if pool[ent] == nil then
+
+        local key = to_key(ent)
+        if pool[key] == nil then
             self.sizes[comp_name] = self.sizes[comp_name] + 1
         end
 
         if type(data) == "function" then
-            pool[ent] = data()
+            pool[key] = data()
         else
-            pool[ent] = data or {}
+            pool[key] = data or {}
         end
 
-        return pool[ent]
+        return pool[key]
     end
 end
 
@@ -110,7 +121,7 @@ function Registry:get(ent, comp_name)
         return ffi.cast(comp_name .. "*", ptr)
     else
         local pool = self.pools[comp_name]
-        return pool and pool[ent] or nil
+        return pool and pool[to_key(ent)] or nil
     end
 end
 
@@ -119,7 +130,7 @@ function Registry:has(ent, comp_name)
         return ffi.C.ZHLN_GetComponent(self.engine, ent, comp_name) ~= nil
     else
         local pool = self.pools[comp_name]
-        return (pool and pool[ent] ~= nil) or false
+        return (pool and pool[to_key(ent)] ~= nil) or false
     end
 end
 
@@ -129,8 +140,9 @@ function Registry:remove(ent, comp_name)
         -- Removing them from memory is handled at the engine level.
     else
         local pool = self.pools[comp_name]
-        if pool and pool[ent] ~= nil then
-            pool[ent] = nil
+        local key = to_key(ent)
+        if pool and pool[key] ~= nil then
+            pool[key] = nil
             self.sizes[comp_name] = self.sizes[comp_name] - 1
         end
     end
@@ -145,7 +157,6 @@ function Registry:view(...)
     local n = #comps
     if n == 0 then return function() end end
 
-    -- Check if we are querying at least one native component
     local has_native = false
     local primary_native = nil
     for i = 1, n do
@@ -156,12 +167,10 @@ function Registry:view(...)
         end
     end
 
-    -- If no native components are queried, fall back to pure Lua view logic
     if not has_native then
         return self:pure_lua_view(table.unpack(comps))
     end
 
-    -- HYBRID PATH: Driven by the contiguous C++ sparse-set arrays
     local entities_view = ffi.C.ZHLN_GetECSEntities(self.engine, primary_native)
     local count = tonumber(entities_view.shape[0])
     local entity_array = ffi.cast("uint64_t*", entities_view.buf)
@@ -173,7 +182,6 @@ function Registry:view(...)
             local ent = entity_array[index]
             index = index + 1
 
-            -- Check if this entity contains all requested components
             local results = {}
             local matches = true
 
@@ -195,7 +203,7 @@ function Registry:view(...)
 end
 
 -- ============================================================================
--- Pure Lua Optimized View (Re-integrated from your original codebase)
+-- Pure Lua Optimized View
 -- ============================================================================
 
 function Registry:pure_lua_view(...)
@@ -205,7 +213,6 @@ function Registry:pure_lua_view(...)
         return function() end
     end
 
-    -- Fast Path: Single component query
     if n == 1 then
         local name1 = comps[1]
         local p1 = self.pools[name1] or {}
@@ -215,8 +222,6 @@ function Registry:pure_lua_view(...)
             ent, val = next(p1, ent)
             if ent then return ent, val end
         end
-
-        -- Fast Path: Double component query (iterates over the smaller pool)
     elseif n == 2 then
         local name1, name2 = comps[1], comps[2]
         local p1, p2 = self.pools[name1] or {}, self.pools[name2] or {}
@@ -242,8 +247,6 @@ function Registry:pure_lua_view(...)
                 end
             end
         end
-
-        -- Fast Path: Triple component query
     elseif n == 3 then
         local name1, name2, name3 = comps[1], comps[2], comps[3]
         local p1 = self.pools[name1] or {}
@@ -294,7 +297,6 @@ function Registry:pure_lua_view(...)
         end
     end
 
-    -- Generic Slow-Path: 4+ components
     local smallest_name = comps[1]
     local smallest_size = self.sizes[smallest_name] or 0
 

@@ -37,6 +37,7 @@ function update(ptr, dt)
 
     player_input_system(game_ecs, engine)
     hybrid_health_and_speed_system(game_ecs, dt)
+    camera_fov_system(game_ecs, engine, dt)
 end
 
 -- ============================================================================
@@ -84,10 +85,12 @@ function player_input_system(registry, eng)
         movement.inputX = move_x
         movement.inputZ = move_z
 
+        -- Only flag sprinting if we are holding shift AND moving
+        local is_moving = (move_x * move_x + move_z * move_z) > 0.001
+        movement.isSprinting = eng:is_key_down("LSHIFT") and is_moving
+
         if eng:is_key_down("SPACE") then
             movement.jumpRequested = true
-
-            -- Play a sharp procedural jump sound! (660Hz E5 Beep, 0.1s duration)
             engine:beep(660.0, 0.1, 0.2)
         end
         -- Toggle Ragdoll State
@@ -96,22 +99,18 @@ function player_input_system(registry, eng)
             local ragdoll = registry:get(player_ent, "RagdollComponent")
             if ragdoll then
                 if ragdoll.state == 0 then
-                    -- Collapse the character physically
-                    ragdoll.state = 2 -- (RagdollState::Limp)
+                    ragdoll.state = 2
                     zahlen.log("Player collapsed into a Limp Ragdoll!")
-
-                    -- Play a low procedural sound to indicate a fall
                     engine:beep(150.0, 0.25, 0.3)
                 else
-                    -- Pull the character back up into the walking capsule
-                    ragdoll.state = 0 -- (RagdollState::Inactive)
+                    ragdoll.state = 0
                     zahlen.log("Player stood back up!")
                 end
             else
                 zahlen.log("WARNING: Player entity does not have a RagdollComponent assigned.")
             end
         end
-        was_r_down = is_r_down -- Update latch
+        was_r_down = is_r_down
     end
 end
 
@@ -129,7 +128,12 @@ function hybrid_health_and_speed_system(registry, dt)
                 combat.is_poisoned = true
             end
         else
-            movement.speed = 8.0
+            -- Set speed depending on sprint state when healthy
+            if movement.isSprinting then
+                movement.speed = 8.0 -- Sprint Speed
+            else
+                movement.speed = 4.0 -- Walk Speed
+            end
             combat.is_poisoned = false
         end
 
@@ -179,4 +183,26 @@ function on_trigger_entered(entity_id)
         name = "PlayerProximityAlert",
         instigator = entity_id
     })
+end
+
+-- ============================================================================
+-- System 3: Smooth Scriptable Camera FOV Interpolation
+-- ============================================================================
+function camera_fov_system(registry, eng, dt)
+    if not player_ent then return end
+
+    local movement = registry:get(player_ent, "MovementComponent")
+    if not movement then return end
+
+    -- Scriptable FOV Targets
+    local target_fov = 45.0 -- Base FOV
+    if movement.isSprinting then
+        target_fov = 55.0   -- Sprinting FOV
+    end
+
+    local current_fov = eng:get_camera_fov()
+
+    -- Smoothly lerp towards the target FOV (factor of 8.0 provides a snappy, punchy transition)
+    local new_fov = current_fov + (target_fov - current_fov) * 8.0 * dt
+    eng:set_camera_fov(new_fov)
 end

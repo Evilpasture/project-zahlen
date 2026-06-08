@@ -236,6 +236,14 @@ function Engine:get_camera_yaw()
     return mem.C.ZHLN_GetCameraYaw(self.raw)
 end
 
+function Engine:get_camera_fov()
+    return mem.C.ZHLN_GetCameraFOV(self.raw)
+end
+
+function Engine:set_camera_fov(fov)
+    mem.C.ZHLN_SetCameraFOV(self.raw, fov)
+end
+
 function Engine:is_key_down(key)
     local code = KEY_MAP[key]
     if not code then return false end

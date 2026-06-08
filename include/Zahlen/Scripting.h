@@ -26,6 +26,9 @@ ZHLN_API int ZHLN_IsKeyDown(struct ZHLN_Engine* engine, uint8_t key);
 ZHLN_API void ZHLN_GetMouseDelta(struct ZHLN_Engine* engine, float* outX, float* outY);
 ZHLN_API float ZHLN_GetCameraYaw(struct ZHLN_Engine* engine);
 
+ZHLN_API float ZHLN_GetCameraFOV(struct ZHLN_Engine* engine);
+ZHLN_API void ZHLN_SetCameraFOV(struct ZHLN_Engine* engine, float fov);
+
 ZHLN_API ZHLN_LuaChannel* ZHLN_CreateLuaChannel(void);
 ZHLN_API void ZHLN_DestroyLuaChannel(ZHLN_LuaChannel* chan);
 ZHLN_API void ZHLN_PushLuaChannel(struct ZHLN_Engine* engine, ZHLN_LuaChannel* chan, lua_State* L);

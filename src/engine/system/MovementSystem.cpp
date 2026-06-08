@@ -12,24 +12,19 @@ namespace ZHLN {
 void MovementSystem(Engine& engine, float dt) {
 	auto& reg = engine.GetRegistry();
 
-	// Obtain the contiguous list of entity IDs that own a MovementComponent
 	auto entities = reg.GetEntitiesWith<MovementComponent>();
 	if (entities.empty()) {
 		return;
 	}
 
-	// Get the direct contiguous memory span of the component array (extremely cache-friendly)
 	auto movements = reg.GetRawArray<MovementComponent>();
 	auto& pc = engine.GetPhysicsContext();
 
-	// Use your fiber task system to partition the calculations into chunks of 128
 	TaskSystem::ParallelFor(entities.size(), 128, [&](uint32_t start, uint32_t end, uint32_t) {
 		for (uint32_t i = start; i < end; ++i) {
 			MovementComponent& move = movements[i];
 			Entity e = entities[i];
 
-			// Cold path: Look up the secondary component (PhysicsComponent)
-			// using the sparse set's constant-time index mapping.
 			auto* phys = reg.Get<PhysicsComponent>(e);
 			if (!phys) {
 				continue;
@@ -44,27 +39,55 @@ void MovementSystem(Engine& engine, float dt) {
 
 			// Query Jolt ground state (thread-safe, read-only on distinct indices)
 			bool onGround = Physics::IsCharacterOnGround(pc, phys->physicsHandle);
+
+			// Track ground states and set/decay timers
+			move.wasGrounded = move.isGrounded;
+			move.isGrounded = onGround;
+
+			if (move.isGrounded && !move.wasGrounded) {
+				move.landingTimer = 0.25f; // Play landing animation for 250ms
+			}
+			if (move.landingTimer > 0.0f) {
+				move.landingTimer -= dt;
+			}
+
+			// --- NEW: Handle Jump Anticipation (Crouch Prep) ---
+			if (onGround && move.jumpRequested && move.jumpDelayTimer <= 0.0f) {
+				// 150ms delay is typical for stylized models like Pomni.
+				// Adjust this value to match your model's push-off frame.
+				move.jumpDelayTimer = 0.15f;
+			}
+			move.jumpRequested = false; // Consume intent
+
 			// 1. Calculate Vertical Velocity
 			if (onGround) {
-				if (move.jumpRequested) {
-					move.currentYVel = move.jumpForce;
+				if (move.jumpDelayTimer > 0.0f) {
+					move.jumpDelayTimer -= dt;
+					if (move.jumpDelayTimer <= 0.0f) {
+						// Anticipation finished! Launch physically
+						move.currentYVel = move.jumpForce;
+						move.isGrounded = false; // Force takeoff state
+					} else {
+						// Coiling legs: stay anchored to the ground
+						move.currentYVel = -1.0f;
+					}
 				} else {
 					move.currentYVel = -1.0f; // Snap to slopes
 				}
 			} else {
+				move.jumpDelayTimer = 0.0f;
 				move.currentYVel -= 30.0f * dt; // Gravity
 			}
 
-			// 2. Clear Jump (Consumption)
-			move.jumpRequested = false;
-
-			// 3. Assemble and apply final vector directly to the distinct character virtual
-			JPH::Vec3 velocity = {move.inputX * move.speed, move.currentYVel,
-								  move.inputZ * move.speed};
+			// 2. Assemble and apply final vector directly to the distinct character virtual
+			// Scale down horizontal speed during the coiling phase for natural weight feel
+			float speedMultiplier = (move.jumpDelayTimer > 0.0f) ? 0.25f : 1.0f;
+			JPH::Vec3 velocity = {move.inputX * move.speed * speedMultiplier, move.currentYVel,
+								  move.inputZ * move.speed * speedMultiplier};
 
 			Physics::SetCharacterVelocity(pc, phys->physicsHandle, velocity);
 
-			// 4. Character Orientation Interpolation
+			// 3. Character Orientation Interpolation
 			JPH::Vec3 flatVel(velocity.GetX(), 0.0f, velocity.GetZ());
 			if (flatVel.LengthSq() > 0.1f) {
 				float targetAngleRad =
@@ -87,5 +110,4 @@ void MovementSystem(Engine& engine, float dt) {
 		}
 	});
 }
-
 } // namespace ZHLN

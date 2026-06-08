@@ -18,15 +18,14 @@
 #include <algorithm>
 #include <cstddef>
 #include <detail/ControlFlow.hpp>
+#include <engine/system/AnimationSystem.hpp>
 #include <engine/system/ArticulationSystem.hpp>
 #include <engine/system/CullingSystem.hpp>
 #include <physics/PhysicsWorld.hpp>
-#include <print>
 #include <string>
 #include <threading/Mutex.hpp>
 #include <threading/TaskSystem.hpp>
 #include <vector>
-
 namespace ZHLN {
 void DrawConsole(ScriptRunner& runner);
 void DrawProfiler(Engine& engine);
@@ -118,6 +117,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	auto& pc = engine.GetPhysicsContext();
 
 	ZHLN::ArticulationSystem articulationSystem;
+	ZHLN::AnimationSystem animationSystem;
 
 	// ------------------------------------------------------------------------
 	// Register native components so the Lua FFI can resolve them!
@@ -228,7 +228,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			}
 
 			// --- STEP 4C: Play embedded skeletal keyframes over time ---
-			AssetFactory::UpdateAnimations(rc, reg, frameTime);
+			animationSystem.UpdateAnimations(rc, reg, frameTime);
 			articulationSystem.Update(engine, frameTime);
 		}
 

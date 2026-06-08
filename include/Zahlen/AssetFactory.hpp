@@ -35,9 +35,6 @@ template <bool CreatePhysics = false, bool Animated = true>
 uint32_t SpawnGLB(RenderContext& ctx, ECS::Registry& reg, std::string_view path,
 				  Entity* outBuffer = nullptr, uint32_t maxCount = 0);
 
-// --- NEW: Expose runtime skeletal animation update loop ---
-void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt);
-
 Material CreateToonMaterial(RenderContext& ctx, bool doubleSided = false, bool alphaBlend = false);
 
 void SetupPlayerRagdoll(RenderContext& rc, PhysicsContext& pc, ECS::Registry& reg,
