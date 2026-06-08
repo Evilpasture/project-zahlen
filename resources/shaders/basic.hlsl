@@ -118,7 +118,9 @@ VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV
 
 	float4 prevWorldPos;
 	if (isSkinned != 0) {
-		prevWorldPos = worldPos;
+		// Transform the skinned position using the previous frame's world matrix
+		prevWorldPos =
+			mul(prevWorldMatrix, SkinPosition(localPos, input.joints, input.weights, jointOffset));
 	} else {
 		prevWorldPos = mul(prevWorldMatrix, localPos);
 	}
