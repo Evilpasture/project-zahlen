@@ -7,9 +7,8 @@ class ContactListener final : public JPH::ContactListener {
   public:
 	explicit ContactListener(PhysicsWorld* world) : _world(world) {}
 
-	virtual JPH::ValidateResult OnContactValidate(const JPH::Body& b1, const JPH::Body& b2,
-												  JPH::RVec3Arg,
-												  const JPH::CollideShapeResult&) override {
+	JPH::ValidateResult OnContactValidate(const JPH::Body& b1, const JPH::Body& b2, JPH::RVec3Arg,
+										  const JPH::CollideShapeResult&) override {
 		uint32_t d1 = GetDense(b1.GetID());
 		uint32_t d2 = GetDense(b2.GetID());
 		if (d1 == 0xFFFFFFFF || d2 == 0xFFFFFFFF) {
@@ -23,17 +22,17 @@ class ContactListener final : public JPH::ContactListener {
 		return JPH::ValidateResult::AcceptAllContactsForThisBodyPair;
 	}
 
-	virtual void OnContactAdded(const JPH::Body& b1, const JPH::Body& b2,
-								const JPH::ContactManifold& m, JPH::ContactSettings&) override {
+	void OnContactAdded(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& m,
+						JPH::ContactSettings&) override {
 		Record(ContactType::Added, b1, b2, m);
 	}
 
-	virtual void OnContactPersisted(const JPH::Body& b1, const JPH::Body& b2,
-									const JPH::ContactManifold& m, JPH::ContactSettings&) override {
+	void OnContactPersisted(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& m,
+							JPH::ContactSettings&) override {
 		Record(ContactType::Persisted, b1, b2, m);
 	}
 
-	virtual void OnContactRemoved(const JPH::SubShapeIDPair& pair) override {
+	void OnContactRemoved(const JPH::SubShapeIDPair& pair) override {
 		size_t idx = _world->contactCount.fetch_add(1, std::memory_order_relaxed);
 		if (idx >= _world->contactCapacity) {
 			return;
@@ -62,8 +61,9 @@ class ContactListener final : public JPH::ContactListener {
 	void Record(ContactType type, const JPH::Body& b1, const JPH::Body& b2,
 				const JPH::ContactManifold& manifold) noexcept {
 		size_t idx = _world->contactCount.fetch_add(1, std::memory_order_relaxed);
-		if (idx >= _world->contactCapacity)
+		if (idx >= _world->contactCapacity) {
 			return;
+		}
 
 		ContactEvent& ev = _world->contactBuffer[idx];
 		ev.type = type;
@@ -108,30 +108,29 @@ class CharacterListener final : public JPH::CharacterContactListener {
   public:
 	explicit CharacterListener(PhysicsWorld* world) : _world(world) {}
 
-	virtual bool OnContactValidate(const JPH::CharacterVirtual* inChar,
-								   const JPH::CharacterContact& inContact) override {
+	bool OnContactValidate(const JPH::CharacterVirtual* inChar,
+						   const JPH::CharacterContact& inContact) override {
 		return Filter(inChar->GetUserData(), inContact.mBodyB);
 	}
 
-	virtual bool OnCharacterContactValidate(const JPH::CharacterVirtual* inChar,
-											const JPH::CharacterContact& inContact) override {
+	bool OnCharacterContactValidate(const JPH::CharacterVirtual* inChar,
+									const JPH::CharacterContact& inContact) override {
 		return Filter(inChar->GetUserData(), inContact.mCharacterB->GetUserData());
 	}
 
-	virtual void OnContactAdded(const JPH::CharacterVirtual* inChar,
-								const JPH::CharacterContact& inContact,
-								JPH::CharacterContactSettings& ioSettings) override {
+	void OnContactAdded(const JPH::CharacterVirtual* inChar, const JPH::CharacterContact& inContact,
+						JPH::CharacterContactSettings& ioSettings) override {
 		ApplyPushImpulse(inChar, inContact);
 	}
 
-	virtual void OnContactPersisted(const JPH::CharacterVirtual* inChar,
-									const JPH::CharacterContact& inContact,
-									JPH::CharacterContactSettings& ioSettings) override {
+	void OnContactPersisted(const JPH::CharacterVirtual* inChar,
+							const JPH::CharacterContact& inContact,
+							JPH::CharacterContactSettings& ioSettings) override {
 		ApplyPushImpulse(inChar, inContact);
 	}
 
-	virtual void OnAdjustBodyVelocity(const JPH::CharacterVirtual* inChar, const JPH::Body& inBody2,
-									  JPH::Vec3& ioLinVel, JPH::Vec3& ioAngVel) override {
+	void OnAdjustBodyVelocity(const JPH::CharacterVirtual* inChar, const JPH::Body& inBody2,
+							  JPH::Vec3& ioLinVel, JPH::Vec3& ioAngVel) override {
 		// Inherit tangential velocity from rotating platforms (Culverin-style)
 		JPH::Vec3 omega = inBody2.GetAngularVelocity();
 		JPH::RVec3 delta = inChar->GetPosition() - inBody2.GetPosition();
@@ -148,26 +147,31 @@ class CharacterListener final : public JPH::CharacterContactListener {
 	bool Filter(uint64_t u1, JPH::BodyID id2) {
 		uint32_t j_idx2 = id2.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
 		uint64_t u2 = _world->idToHandleMap[j_idx2].load(std::memory_order_relaxed);
-		if (u2 == 0)
-			return true;
+		if (u2 == 0) {
+			return false;
+		}
 
 		uint32_t d1 = _world->slotToDense[ZHLN::Entity::Unpack(u1).index];
 		uint32_t d2 = _world->slotToDense[ZHLN::Entity::Unpack(u2).index];
-		return (_world->categories[d1] & _world->masks[d2]) &&
-			   (_world->categories[d2] & _world->masks[d1]);
+		return ((_world->categories[d1] & _world->masks[d2]) != 0u) &&
+			   ((_world->categories[d2] & _world->masks[d1]) != 0u);
 	}
 
 	bool Filter(uint64_t u1, uint64_t u2) {
+		if (u1 == 0 || u2 == 0) {
+			return false;
+		}
 		uint32_t d1 = _world->slotToDense[ZHLN::Entity::Unpack(u1).index];
 		uint32_t d2 = _world->slotToDense[ZHLN::Entity::Unpack(u2).index];
-		return (_world->categories[d1] & _world->masks[d2]) &&
-			   (_world->categories[d2] & _world->masks[d1]);
+		return ((_world->categories[d1] & _world->masks[d2]) != 0u) &&
+			   ((_world->categories[d2] & _world->masks[d1]) != 0u);
 	}
 
 	void ApplyPushImpulse(const JPH::CharacterVirtual* inChar,
 						  const JPH::CharacterContact& inContact) {
-		if (inContact.mIsSensorB || inContact.mMotionTypeB != JPH::EMotionType::Dynamic)
+		if (inContact.mIsSensorB || inContact.mMotionTypeB != JPH::EMotionType::Dynamic) {
 			return;
+		}
 
 		JPH::Vec3 charVel = inChar->GetLinearVelocity();
 		// Normal points from Box -> Character.
@@ -183,8 +187,9 @@ class CharacterListener final : public JPH::CharacterContactListener {
 			JPH::Vec3 impulse = -inContact.mContactNormal * pushMagnitude;
 
 			// Prevent pushing boxes into the floor (optional but recommended)
-			if (impulse.GetY() < 0.0f)
+			if (impulse.GetY() < 0.0f) {
 				impulse.SetY(0.0f);
+			}
 
 			_world->bodyInterface->AddImpulse(inContact.mBodyB, impulse);
 		}

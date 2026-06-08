@@ -475,7 +475,7 @@ void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
 			if (mesh.gltfSkin != nullptr && mesh.isSkinned) {
 				auto* skin = static_cast<cgltf_skin*>(mesh.gltfSkin);
 				mesh.jointOffset = skinToBufferOffset[skin];
-				mesh.localTransform = worldTransforms[node];
+				mesh.localTransform = JPH::Mat44::sIdentity();
 			} else {
 				mesh.isSkinned = false;
 				mesh.localTransform = worldTransforms[node];

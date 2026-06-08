@@ -451,8 +451,6 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 									   ragComp->state == RagdollState::KeyframeMotor);
 				}
 
-				std::println("[C++] GameMain - isRagdollActive: {}", (int)isRagdollActive);
-
 				// Only offset the model by the capsule position if the ragdoll is NOT simulated
 				if (!isRagdollActive) {
 					playerTransform = Math::CreateTransform(playerPos - JPH::Vec3(0.0f, 0.5f, 0.0f),

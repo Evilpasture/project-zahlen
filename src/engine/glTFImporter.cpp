@@ -780,7 +780,7 @@ void SetupPlayerRagdoll(RenderContext& rc, PhysicsContext& pc, ECS::Registry& re
 			part.jointIndex = (uint32_t)i;
 			part.parentJointIndex = skeleton->GetJoint(i).mParentJointIndex;
 			part.shape = dummyShape;
-			part.mass = 0.001f;		   // 1 gram
+			part.mass = 0.5f;		   // 0.5kg (stable mass ratio)
 			part.enableMotors = false; // No motor overhead on dummy joints
 
 			GetNodeWorldTRS(pomniSkin->joints[i], part.position, part.rotation);

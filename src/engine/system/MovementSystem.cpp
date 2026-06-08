@@ -34,9 +34,15 @@ void MovementSystem(Engine& engine, float dt) {
 				continue;
 			}
 
+			if (auto* ragComp = reg.Get<RagdollComponent>(e)) {
+				if (ragComp->state == RagdollState::Limp ||
+					ragComp->state == RagdollState::KeyframeMotor) {
+					continue;
+				}
+			}
+
 			// Query Jolt ground state (thread-safe, read-only on distinct indices)
 			bool onGround = Physics::IsCharacterOnGround(pc, phys->physicsHandle);
-
 			// 1. Calculate Vertical Velocity
 			if (onGround) {
 				if (move.jumpRequested) {

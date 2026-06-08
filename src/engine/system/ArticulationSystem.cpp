@@ -29,10 +29,6 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
 		RagdollComponent& ragComp = ragdolls[i];
 		auto* phys = reg.Get<PhysicsComponent>(e);
 
-		std::println("[C++] ArticSystem - Entity: {}, State: {}, AddedToPhys: {}, Joints: {}",
-					 e.index, (uint32_t)ragComp.state, (int)ragComp.isAddedToPhysics,
-					 ragComp.jointCount);
-
 		if ((ragComp.ragdollInstance == nullptr) || (ragComp.gltfSkin == nullptr)) {
 			continue;
 		}
@@ -74,10 +70,21 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
 					JPH::Vec4(m[8], m[9], m[10], m[11]), JPH::Vec4(m[12], m[13], m[14], m[15]));
 			}
 		}
-		std::memcpy(animPose.GetJointMatrices().data(), localJoints.data(),
+
+		// Propagate local-space matrices into model-space hierarchical matrices
+		std::vector<JPH::Mat44> modelJoints(ragComp.jointCount, JPH::Mat44::sIdentity());
+		for (uint32_t j = 0; j < ragComp.jointCount; ++j) {
+			int parentIdx = skel->GetJoint(j).mParentJointIndex;
+			if (parentIdx >= 0) {
+				modelJoints[j] = modelJoints[parentIdx] * localJoints[j];
+			} else {
+				modelJoints[j] = localJoints[j];
+			}
+		}
+
+		std::memcpy(animPose.GetJointMatrices().data(), modelJoints.data(),
 					ragComp.jointCount * sizeof(JPH::Mat44));
 		animPose.CalculateJointStates();
-
 		// ====================================================================
 		// 2. STATE TRANSITIONS & MOMENTUM INHERITANCE
 		// ====================================================================
@@ -151,11 +158,10 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
 			auto allMeshes = reg.GetRawArray<MeshComponent>();
 			for (size_t k = 0; k < allEntities.size(); ++k) {
 				if (allMeshes[k].gltfSkin == skin) {
-					allMeshes[k].localTransform = JPH::Mat44::sTranslation(
-						JPH::Vec3(actualRootOffset)); // <-- UPDATED (Translation)
+					allMeshes[k].localTransform =
+						JPH::Mat44::sTranslation(JPH::Vec3(actualRootOffset));
 				}
 			}
-
 			rc.UpdateJointMatrices(ragComp.jointOffset, finalSkinningMatrices.data(),
 								   ragComp.jointCount);
 
