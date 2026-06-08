@@ -20,6 +20,7 @@
 #include <detail/ControlFlow.hpp>
 #include <engine/system/ArticulationSystem.hpp>
 #include <physics/PhysicsWorld.hpp>
+#include <print>
 #include <string>
 #include <threading/Mutex.hpp>
 #include <threading/TaskSystem.hpp>
@@ -75,7 +76,7 @@ struct Scene {
 		// 2. Spawns Pomni as ANIMATED, with no static physics colliders (handles collision via
 		// Character Controller)
 		s_PomniParts.resize(128);
-		uint32_t pomniCount = AssetFactory::SpawnGLB<false, true>(
+		uint32_t pomniCount = AssetFactory::SpawnGLB<true, true>(
 			rc, reg, "tadc_models/POMNI.glb", s_PomniParts.data(), (uint32_t)s_PomniParts.size());
 		s_PomniParts.resize(pomniCount);
 	}
@@ -168,6 +169,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	reg.RegisterComponent<PhysicsComponent>("PhysicsComponent");
 	reg.RegisterComponent<MovementComponent>("MovementComponent");
 	reg.RegisterComponent<ALife::ALifeComponent>("ALifeComponent");
+	reg.RegisterComponent<RagdollComponent>("RagdollComponent");
 
 	// ------------------------------------------------------------------------
 	// 1. Create a Solid Physics Ground Plane to stand on
@@ -195,6 +197,8 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 
 	Scene scene{};
 	scene.Setup(engine);
+
+	AssetFactory::SetupPlayerRagdoll(rc, pc, reg, s_PlayerEntity, s_PomniParts);
 
 	// Position Camera orientation initially looking forward
 	cam.yaw = -90.0f;
@@ -433,9 +437,21 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 
 			JPH::Mat44 playerTransform = JPH::Mat44::sIdentity();
 			if (reg.IsAlive(s_PlayerEntity)) {
-				playerTransform = Math::CreateTransform(
-					playerPos - JPH::Vec3(0.0f, 0.5f, 0.0f), // Match physical capsule bottom
-					s_PlayerRotation);
+
+				// CHECK IF RAGDOLL IS ACTIVE
+				bool isRagdollActive = false;
+				if (auto* ragComp = reg.Get<RagdollComponent>(s_PlayerEntity)) {
+					isRagdollActive = (ragComp->state == RagdollState::Limp ||
+									   ragComp->state == RagdollState::KeyframeMotor);
+				}
+
+				std::println("[C++] GameMain - isRagdollActive: {}", (int)isRagdollActive);
+
+				// Only offset the model by the capsule position if the ragdoll is NOT simulated
+				if (!isRagdollActive) {
+					playerTransform = Math::CreateTransform(playerPos - JPH::Vec3(0.0f, 0.5f, 0.0f),
+															s_PlayerRotation);
+				}
 			}
 			for (Entity e : s_VisibleEntities) {
 				auto* mesh = reg.Get<MeshComponent>(e);

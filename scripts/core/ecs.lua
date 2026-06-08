@@ -13,6 +13,7 @@ local NATIVE_COMPONENTS = {
     MeshComponent = true,
     PhysicsComponent = true,
     ALifeComponent = true,
+    RagdollComponent = true,
 }
 
 function Registry.new(engine_raw)
@@ -343,4 +344,3 @@ function Registry:pure_lua_view(...)
 end
 
 return Registry
-

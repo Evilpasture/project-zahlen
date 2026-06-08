@@ -220,7 +220,9 @@ local KEY_MAP = {
     RBUTTON = 6,
     rbutton = 6,
     SPACE = 7,
-    space = 7
+    space = 7,
+    R = 9,
+    r = 9
 }
 
 local Engine = {}

@@ -694,4 +694,141 @@ template uint32_t SpawnGLB<false, true>(RenderContext& ctx, ECS::Registry& reg,
 template uint32_t SpawnGLB<false, false>(RenderContext& ctx, ECS::Registry& reg,
 										 std::string_view path, Entity* outBuffer,
 										 uint32_t maxCount);
+
+// Helper to compile Jolt Skeleton on-the-fly from glTF joint hierarchies
+static JPH::Ref<JPH::Skeleton> BuildJoltSkeletonFromCgltf(const cgltf_skin* skin) {
+	auto* skeleton = new JPH::Skeleton();
+	for (size_t i = 0; i < skin->joints_count; ++i) {
+		cgltf_node* jointNode = skin->joints[i];
+		std::string name =
+			(jointNode->name != nullptr) ? jointNode->name : "joint_" + std::to_string(i);
+		std::string parentName =
+			((jointNode->parent != nullptr) && (jointNode->parent->name != nullptr))
+				? jointNode->parent->name
+				: "";
+		skeleton->AddJoint(name, parentName);
+	}
+	skeleton->CalculateParentJointIndices();
+	return skeleton;
+}
+
+void SetupPlayerRagdoll(RenderContext& rc, PhysicsContext& pc, ECS::Registry& reg,
+						Entity playerEntity, std::span<const Entity> visualParts) {
+	const cgltf_skin* pomniSkin = nullptr;
+	for (Entity part : visualParts) {
+		if (auto* meshComp = reg.Get<MeshComponent>(part)) {
+			if (meshComp->gltfSkin != nullptr) {
+				pomniSkin = static_cast<const cgltf_skin*>(meshComp->gltfSkin);
+				break;
+			}
+		}
+	}
+
+	if (pomniSkin != nullptr) {
+		auto skeleton = BuildJoltSkeletonFromCgltf(pomniSkin);
+
+		// Map key joints (hips, spine, head) by name
+		uint32_t hipIdx = 0;
+		uint32_t spineIdx = 0;
+		uint32_t headIdx = 0;
+
+		for (size_t i = 0; i < pomniSkin->joints_count; ++i) {
+			std::string name =
+				(pomniSkin->joints[i]->name != nullptr) ? pomniSkin->joints[i]->name : "";
+			std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+			if (name.contains("hip") || name.contains("pelvis") || name.contains("root")) {
+				hipIdx = (uint32_t)i;
+			} else if (name.contains("spine") || name.contains("chest") || name.contains("torso")) {
+				spineIdx = (uint32_t)i;
+			} else if (name.contains("head") || name.contains("neck")) {
+				headIdx = (uint32_t)i;
+			}
+		}
+
+		// Fallbacks
+		if (spineIdx == 0 && pomniSkin->joints_count > 1) {
+			spineIdx = (uint32_t)(pomniSkin->joints_count / 2);
+		}
+		if (headIdx == 0 && pomniSkin->joints_count > 2) {
+			headIdx = (uint32_t)(pomniSkin->joints_count - 1);
+		}
+
+		auto GetNodeWorldTRS = [](const cgltf_node* node, JPH::RVec3& outPos, JPH::Quat& outRot) {
+			float m[16];
+			cgltf_node_transform_world(node, m);
+			outPos = JPH::RVec3(m[12], m[13], m[14]);
+
+			JPH::Vec3 col0(m[0], m[1], m[2]);
+			JPH::Vec3 col1(m[4], m[5], m[6]);
+			JPH::Vec3 col2(m[8], m[9], m[10]);
+
+			JPH::Mat44 rotMat(JPH::Vec4(col0, 0), JPH::Vec4(col1, 0), JPH::Vec4(col2, 0),
+							  JPH::Vec4(0, 0, 0, 1));
+			outRot = rotMat.GetQuaternion();
+		};
+
+		// 1. Pre-populate all 1,121 joints with lightweight default parameters
+		// and their actual visual world-space bone coordinates
+		std::vector<Physics::RagdollPartParams> parts;
+		parts.resize(pomniSkin->joints_count);
+
+		JPH::ShapeRefC dummyShape =
+			Physics::GetOrCreateShape(pc, Physics::ShapeType::Sphere, 0.05f);
+
+		for (size_t i = 0; i < pomniSkin->joints_count; ++i) {
+			auto& part = parts[i];
+			part.jointIndex = (uint32_t)i;
+			part.parentJointIndex = skeleton->GetJoint(i).mParentJointIndex;
+			part.shape = dummyShape;
+			part.mass = 0.001f;		   // 1 gram
+			part.enableMotors = false; // No motor overhead on dummy joints
+
+			GetNodeWorldTRS(pomniSkin->joints[i], part.position, part.rotation);
+		}
+
+		// 2. Overwrite the Pelvis, Spine, and Head joints with their heavy physical attributes
+		// Hips (Root)
+		auto& hipPart = parts[hipIdx];
+		hipPart.shape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Capsule, 0.4f, 0.2f);
+		hipPart.mass = 15.0f;
+
+		// Spine
+		auto& spinePart = parts[spineIdx];
+		spinePart.shape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Capsule, 0.5f, 0.25f);
+		spinePart.mass = 20.0f;
+		spinePart.enableMotors = true;
+		spinePart.maxMotorForce = 250.0f;
+
+		// Head
+		auto& headPart = parts[headIdx];
+		headPart.shape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Sphere, 0.3f);
+		headPart.mass = 8.0f;
+		headPart.enableMotors = true;
+		headPart.maxMotorForce = 250.0f;
+
+		// Invoke the physics module's low-level constructor [3]
+		auto ragdollInstance = Physics::CreateSkeletalRagdoll(pc, skeleton.GetPtr(), parts);
+
+		uint32_t jointOffset = 0;
+		if (!visualParts.empty()) {
+			if (auto* meshComp = reg.Get<MeshComponent>(visualParts[0])) {
+				jointOffset = meshComp->jointOffset;
+			}
+		}
+
+		// Attach the component to the player controller entity
+		reg.Add(playerEntity, RagdollComponent{.ragdollInstance = ragdollInstance,
+											   .state = RagdollState::Inactive,
+											   .prevState = RagdollState::Inactive,
+											   .isAddedToPhysics = 0,
+											   .jointOffset = jointOffset,
+											   .jointCount = (uint32_t)pomniSkin->joints_count,
+											   .gltfSkin = const_cast<cgltf_skin*>(pomniSkin)});
+
+		Log("Skeletal Ragdoll successfully generated and bound to player controller.");
+	} else {
+		Log("WARNING: SetupPlayerRagdoll failed because no skeletal skin was found in visual "
+			"parts.");
+	}
+}
 } // namespace ZHLN::AssetFactory

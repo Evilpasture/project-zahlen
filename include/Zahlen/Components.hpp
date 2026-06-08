@@ -47,19 +47,21 @@ struct MovementComponent {
 	float jumpForce = 12.0f;
 };
 
-enum class RagdollState : uint8_t {
-	Inactive,	   // Entirely visual (animated skinned mesh)
-	KeyframeMotor, // Physical, but joints actively strive to match animations via motors
-	Limp		   // Complete passive physical simulation (dead / knocked out)
-};
+// 1. Explicitly size the enum to 32-bit
+// NOLINTNEXTLINE(performance-enum-size)
+enum class RagdollState : uint32_t { Inactive = 0, KeyframeMotor = 1, Limp = 2 };
+static_assert(sizeof(RagdollState) == sizeof(uint32_t));
 
+// 2. Restore strongly typed enum classes
 struct RagdollComponent {
-	JPH::Ref<JPH::Ragdoll> ragdollInstance = nullptr;
-	RagdollState state = RagdollState::Inactive;
-	bool isAddedToPhysics = false;
-
-	uint32_t jointOffset = 0;
-	uint32_t jointCount = 0;
+	JPH::Ref<JPH::Ragdoll> ragdollInstance = nullptr; // 8 bytes
+	RagdollState state = RagdollState::Inactive;	  // 4 bytes (Explicitly 32-bit)
+	RagdollState prevState = RagdollState::Inactive;  // 4 bytes
+	uint32_t isAddedToPhysics = 0;					  // 4 bytes
+	uint32_t jointOffset = 0;						  // 4 bytes
+	uint32_t jointCount = 0;						  // 4 bytes
+	uint32_t _padding = 0;							  // 4 bytes (Alignment padding)
+	void* gltfSkin = nullptr;						  // 8 bytes
 };
 
 } // namespace ZHLN

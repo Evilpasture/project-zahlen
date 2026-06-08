@@ -105,6 +105,17 @@ if not ok then
         void ZHLN_PlayOneShot(ZHLN_Engine* engine, const char* filepath, float volume);
         void ZHLN_PlayOneShot3D(ZHLN_Engine* engine, const char* filepath, float x, float y, float z, float volume);
         void ZHLN_PlayProceduralBeep(ZHLN_Engine* engine, float frequency, float duration, float volume);
+
+        typedef struct RagdollComponent {
+            void*    ragdollInstance;
+            uint32_t state;
+            uint32_t prevState;
+            uint32_t isAddedToPhysics;
+            uint32_t jointOffset;
+            uint32_t jointCount;
+            uint32_t padding;
+            void*    gltfSkin;
+        } RagdollComponent;
     ]]
 end
 

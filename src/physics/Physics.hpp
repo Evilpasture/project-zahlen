@@ -2,6 +2,7 @@
 
 #include "Zahlen/Camera.hpp"
 
+#include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <Zahlen/Buffer.h>
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -79,6 +80,29 @@ ZHLN::Entity CreateMeshBody(PhysicsContext& ctx, const Vertex* vertices, uint32_
 ZHLN::Entity CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position,
 							 uint32_t category = 0xFFFFFFFF, uint32_t mask = 0xFFFFFFFF);
 
+struct RagdollPartParams {
+	uint32_t jointIndex;
+	int parentJointIndex = -1;
+	JPH::ShapeRefC shape = nullptr;
+	float mass = 10.0f;
+
+	JPH::RVec3 position = JPH::RVec3::sZero();
+	JPH::Quat rotation = JPH::Quat::sIdentity();
+
+	JPH::Vec3 twistAxis = JPH::Vec3::sAxisX();
+	JPH::Vec3 planeNormal = JPH::Vec3::sAxisY();
+
+	float coneAngle = 0.0f;
+	float twistMin = -0.1f;
+	float twistMax = 0.1f;
+
+	bool enableMotors = true;
+	float maxMotorForce = 100.0f;
+};
+
+JPH::Ref<JPH::Ragdoll> CreateSkeletalRagdoll(PhysicsContext& ctx, const JPH::Skeleton* skeleton,
+											 const std::vector<RagdollPartParams>& parts);
+
 // --- Actions & Settings ---
 void SetCollisionFilter(PhysicsContext& ctx, ZHLN::Entity handle, uint32_t category, uint32_t mask);
 DebugDrawData GetDebugDrawData(PhysicsContext& ctx, bool drawShapes = true,
@@ -91,6 +115,7 @@ void RegisterMaterial(PhysicsContext& ctx, uint32_t id, float friction, float re
 void DestroyBody(PhysicsContext& ctx, ZHLN::Entity handle);
 void SetLinearVelocity(PhysicsContext& ctx, ZHLN::Entity handle, JPH::Vec3Arg velocity);
 void SetCharacterVelocity(PhysicsContext& ctx, ZHLN::Entity handle, JPH::Vec3Arg velocity);
+void SetCharacterPosition(PhysicsContext& ctx, ZHLN::Entity handle, JPH::RVec3Arg position);
 
 JPH::Vec3 GetCharacterVelocity(const PhysicsContext& ctx, ZHLN::Entity handle);
 bool IsCharacterOnGround(const PhysicsContext& ctx, ZHLN::Entity handle);

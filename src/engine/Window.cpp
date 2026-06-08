@@ -22,6 +22,8 @@ static KeyCode MapGLFWKey(int key) {
 			return KeyCode::Space;
 		case GLFW_KEY_ESCAPE:
 			return KeyCode::Escape;
+		case GLFW_KEY_R:
+			return KeyCode::R;
 		default:
 			return KeyCode::Unknown;
 	}

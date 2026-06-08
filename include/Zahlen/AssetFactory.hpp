@@ -1,5 +1,7 @@
 #pragma once
 
+#include "physics/Physics.hpp"
+
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Types.hpp>
 #include <string_view>
@@ -37,4 +39,7 @@ uint32_t SpawnGLB(RenderContext& ctx, ECS::Registry& reg, std::string_view path,
 void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt);
 
 Material CreateToonMaterial(RenderContext& ctx, bool doubleSided = false, bool alphaBlend = false);
+
+void SetupPlayerRagdoll(RenderContext& rc, PhysicsContext& pc, ECS::Registry& reg,
+						Entity playerEntity, std::span<const Entity> visualParts);
 } // namespace ZHLN::AssetFactory

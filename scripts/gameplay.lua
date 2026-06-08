@@ -42,6 +42,7 @@ end
 -- ============================================================================
 -- System 1: Direct FFI Input Mutation (Zero-Allocation)
 -- ============================================================================
+local was_r_down = false
 function player_input_system(registry, eng)
     if not player_ent then return end
 
@@ -89,6 +90,28 @@ function player_input_system(registry, eng)
             -- Play a sharp procedural jump sound! (660Hz E5 Beep, 0.1s duration)
             engine:beep(660.0, 0.1, 0.2)
         end
+        -- Toggle Ragdoll State
+        local is_r_down = eng:is_key_down("R")
+        if is_r_down and not was_r_down then
+            local ragdoll = registry:get(player_ent, "RagdollComponent")
+            if ragdoll then
+                if ragdoll.state == 0 then
+                    -- Collapse the character physically
+                    ragdoll.state = 2 -- (RagdollState::Limp)
+                    zahlen.log("Player collapsed into a Limp Ragdoll!")
+
+                    -- Play a low procedural sound to indicate a fall
+                    engine:beep(150.0, 0.25, 0.3)
+                else
+                    -- Pull the character back up into the walking capsule
+                    ragdoll.state = 0 -- (RagdollState::Inactive)
+                    zahlen.log("Player stood back up!")
+                end
+            else
+                zahlen.log("WARNING: Player entity does not have a RagdollComponent assigned.")
+            end
+        end
+        was_r_down = is_r_down -- Update latch
     end
 end
 

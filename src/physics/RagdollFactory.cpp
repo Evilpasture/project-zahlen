@@ -8,27 +8,6 @@
 
 namespace ZHLN::Physics {
 
-// Setup struct carrying creation constraints
-struct RagdollPartParams {
-	uint32_t jointIndex;
-	int parentJointIndex = -1;
-	JPH::ShapeRefC shape = nullptr;
-	float mass = 10.0f;
-
-	JPH::RVec3 position = JPH::RVec3::sZero(); // Added for double-precision support [6]
-	JPH::Quat rotation = JPH::Quat::sIdentity();
-
-	JPH::Vec3 twistAxis = JPH::Vec3::sAxisX();
-	JPH::Vec3 planeNormal = JPH::Vec3::sAxisY();
-
-	float coneAngle = 0.0f;
-	float twistMin = -0.1f;
-	float twistMax = 0.1f;
-
-	bool enableMotors = true;
-	float maxMotorForce = 100.0f;
-};
-
 JPH::Ref<JPH::Ragdoll> CreateSkeletalRagdoll(PhysicsContext& ctx, const JPH::Skeleton* skeleton,
 											 const std::vector<RagdollPartParams>& parts) {
 	// Retrieve Jolt objects cleanly over the PIMPL barrier using helpers [3]
@@ -88,9 +67,34 @@ JPH::Ref<JPH::Ragdoll> CreateSkeletalRagdoll(PhysicsContext& ctx, const JPH::Ske
 				}
 
 				// 6. Bind the constraint settings pointer to parent Ref target
-				settings->mParts[jointIdx].mToParent = &twistSettings;
+				settings->mParts[jointIdx].mToParent =
+					new JPH::SwingTwistConstraintSettings(twistSettings);
 			}
 		}
+
+		// --- CONSTRAINT SAFETY INITIALIZATION ---
+		// Jolt's Stabilize() assumes every joint with a parent in the skeleton has a valid
+		// constraint. We auto-generate default constraints for unconfigured joints to prevent null
+		// dereferences.
+		for (size_t i = 1; i < skeleton->GetJointCount(); ++i) {
+			if (settings->mParts[i].mToParent == nullptr) {
+				auto* twist = new JPH::SwingTwistConstraintSettings();
+				twist->mSpace = JPH::EConstraintSpace::LocalToBodyCOM;
+				twist->mPosition1 = twist->mPosition2 = JPH::RVec3::sZero();
+
+				twist->mTwistAxis1 = twist->mTwistAxis2 = JPH::Vec3::sAxisX();
+				twist->mPlaneAxis1 = twist->mPlaneAxis2 = JPH::Vec3::sAxisY();
+
+				// Setup comfortable default rotation limits
+				twist->mNormalHalfConeAngle = JPH::DegreesToRadians(45.0f);
+				twist->mPlaneHalfConeAngle = JPH::DegreesToRadians(45.0f);
+				twist->mTwistMinAngle = JPH::DegreesToRadians(-45.0f);
+				twist->mTwistMaxAngle = JPH::DegreesToRadians(45.0f);
+
+				settings->mParts[i].mToParent = twist;
+			}
+		}
+		// ----------------------------------------
 
 		// 7. Complete final joint and collision topology mapping
 		settings->DisableParentChildCollisions();
@@ -102,5 +106,4 @@ JPH::Ref<JPH::Ragdoll> CreateSkeletalRagdoll(PhysicsContext& ctx, const JPH::Ske
 		return {ragdoll};
 	}
 }
-
 } // namespace ZHLN::Physics

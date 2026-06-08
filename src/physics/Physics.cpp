@@ -673,6 +673,18 @@ void SetCharacterVelocity(PhysicsContext& ctx, ZHLN::Entity handle, JPH::Vec3Arg
 	}
 }
 
+void SetCharacterPosition(PhysicsContext& ctx, ZHLN::Entity handle, JPH::RVec3Arg position) {
+	auto* impl = ctx.GetImpl();
+
+	if (handle.index < impl->characterMap.size()) {
+		auto& character = impl->characterMap[handle.index];
+		if ((character != nullptr) &&
+			ZHLN::Entity::Unpack(character->GetUserData()).generation == handle.generation) {
+			character->SetPosition(position);
+		}
+	}
+}
+
 void SetLinearVelocity(PhysicsContext& ctx, ZHLN::Entity handle, JPH::Vec3Arg velocity) {
 	auto* impl = ctx.GetImpl();
 	JPH::BodyID id = impl->world.GetBodyID(handle);
