@@ -280,4 +280,34 @@ float3 LTC_Evaluate(float3 N, float3 V, float3 P, float3x3 Minv, float4 points[4
 	sum = twoSided ? abs(sum) : max(float3(0, 0, 0), sum);
 	return sum;
 }
+
+// --- Kulla-Conty Energy Compensation Helpers ---
+float GetDirectionalAlbedo(float NoX, float roughness) {
+	// Reuses your existing 2D BRDF LUT to evaluate directional albedo on-the-fly
+	float2 envBRDF = brdfLUT.SampleLevel(clampSampler, float2(saturate(NoX), roughness), 0.0f).rg;
+	return envBRDF.x + envBRDF.y;
+}
+
+float GetAverageAlbedo(float roughness) {
+	// Highly accurate polynomial fit for GGX average hemispherical albedo (Fdez-Agüera)
+	return 1.0f - roughness * (0.334f - roughness * 0.125f);
+}
+
+float3 EvaluateKullaContyDirect(float NoV, float NoL, float roughness, float3 F0, float3 Favg) {
+	float Ev = GetDirectionalAlbedo(NoV, roughness);
+	float El = GetDirectionalAlbedo(NoL, roughness);
+	float Eavg = GetAverageAlbedo(roughness);
+
+	float Ems_v = 1.0f - Ev;
+	float Ems_l = 1.0f - El;
+	float Ems_avg = 1.0f - Eavg;
+
+	// Precalculate the average multi-scattering specular reflectance
+	float3 Fms = (Favg * Favg * Ems_avg) / (1.0f - Favg * Ems_avg);
+
+	// Isotropic, diffuse-like specular compensation lobe
+	float3 f_add = (Ems_v * Ems_l * Fms) / (3.14159265f * Ems_avg * Ems_avg);
+
+	return f_add;
+}
 #endif // SKIP_BINDINGS

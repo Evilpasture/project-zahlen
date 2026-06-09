@@ -224,6 +224,9 @@ PSOutput PSMain(VSOutput input) {
 	float3 V = normalize(frame.camPos.xyz - input.worldPos);
 	float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo.rgb, metallic);
 
+	float NdotV = saturate(dot(worldNormal, V));
+	float3 Favg = F0 + (1.0f - F0) / 21.0f; // Average Fresnel term integrated over the hemisphere
+
 	// Direct Directional (Sun) Light
 	float3 L_sun = normalize(frame.lightDir.xyz); // Ensure no minus sign!
 	float3 H_sun = normalize(V + L_sun + 1e-5f);
@@ -234,9 +237,22 @@ PSOutput PSMain(VSOutput input) {
 	float g_term = GeometrySmith(worldNormal, V, L_sun, roughness);
 	float3 F = FresnelSchlick(saturate(dot(H_sun, V)), F0);
 
-	float3 spec = (D * g_term * F) / max(4.0 * saturate(dot(worldNormal, V)) * NdotL_sun, 0.001);
-	float3 kD = (1.0 - F) * (1.0 - metallic);
-	float3 directSun = (kD * albedo.rgb / 3.14159 + spec) * 10.0 * NdotL_sun * shadow;
+	// 1. Single-scatter specular
+	float3 spec = (D * g_term * F) / max(4.0 * NdotV * NdotL_sun, 0.001);
+
+	// 2. Analytical multiple-scattering energy compensation
+	float3 spec_ms = EvaluateKullaContyDirect(NdotV, NdotL_sun, roughness, F0, Favg);
+	float3 totalSpecular = spec + spec_ms;
+
+	// 3. Energy-conserving diffuse
+	float Ev_sun = GetDirectionalAlbedo(NdotV, roughness);
+	float El_sun = GetDirectionalAlbedo(NdotL_sun, roughness);
+	float Eavg_sun = GetAverageAlbedo(roughness);
+	float3 FmsEms_sun = (Favg * (1.0f - Ev_sun)) / (1.0f - Favg * (1.0f - Eavg_sun));
+
+	float3 kD_sun = (1.0f - Ev_sun - FmsEms_sun) * (1.0f - metallic);
+	float3 directSun =
+		(kD_sun * albedo.rgb / 3.14159265f + totalSpecular) * 10.0 * NdotL_sun * shadow;
 
 	// Process punctual and area lights in the SSBO
 	float3 directPunctual = float3(0, 0, 0);
@@ -300,12 +316,24 @@ PSOutput PSMain(VSOutput input) {
 				float G_p = GeometrySmith(worldNormal, V, L, modRoughness);
 				float3 F_p = FresnelSchlick(max(dot(H, V), 0.0), F0);
 
+				// 1. Single-scatter specular
 				float3 spec_p =
 					(D_p * G_p * F_p) / (4.0 * max(dot(worldNormal, V), 0.0) * NdotL + 0.0001);
-				float3 kD_p = (1.0 - F_p) * (1.0 - metallic);
 
-				directPunctual += (kD_p * albedo.rgb / 3.14159 + spec_p) * light.color *
-								  light.intensity * atten * NdotL;
+				// 2. Analytical multiple-scattering energy compensation
+				float3 spec_ms_p = EvaluateKullaContyDirect(NdotV, NdotL, modRoughness, F0, Favg);
+				float3 totalSpecular_p = spec_p + spec_ms_p;
+
+				// 3. Energy-conserving diffuse
+				float Ev_p = GetDirectionalAlbedo(NdotV, modRoughness);
+				float El_p = GetDirectionalAlbedo(NdotL, modRoughness);
+				float Eavg_p = GetAverageAlbedo(modRoughness);
+				float3 FmsEms_p = (Favg * (1.0f - Ev_p)) / (1.0f - Favg * (1.0f - Eavg_p));
+
+				float3 kD_p = (1.0f - Ev_p - FmsEms_p) * (1.0f - metallic);
+
+				directPunctual += (kD_p * albedo.rgb / 3.14159265f + totalSpecular_p) *
+								  light.color * light.intensity * atten * NdotL;
 			}
 		}
 	}
@@ -329,7 +357,6 @@ PSOutput PSMain(VSOutput input) {
 	// 3. Multi-Scatter Energy Compensation (Kulla-Conty / Fdez-Agüera)
 	float Ess = envBRDF.x + envBRDF.y;
 	float Ems = 1.0f - Ess;
-	float3 Favg = F0 + (1.0f - F0) / 21.0f;
 	float3 FmsEms = (Favg * Ems) / (1.0f - Favg * Ems);
 
 	// Multi-scattered specular energy diffuses back into the scene
