@@ -300,6 +300,12 @@ PSOutput PSMain(VSOutput input) {
 						baseAttenuation * (kD_sun * albedo.rgb / 3.14159265f + totalSpecular)) *
 					   10.0 * NdotL_sun * shadow;
 
+	// Only active on dielectrics (1.0 - metallic) and colored by her local albedo
+	float3 sunColor = float3(1.0f, 0.95f, 0.85f) * 10.0f; // Warm direct sunlight
+	float3 translucencySun =
+		CalculateTranslucency(input.shadowPos, N, V, L_sun, sunColor, 0.3f, 8.0f, 0.6f);
+	directSun += translucencySun * (1.0f - metallic) * albedo.rgb;
+
 	// Process punctual and area lights in the SSBO
 	float3 directPunctual = float3(0, 0, 0);
 	for (uint i = 0; i < frame.lightCount; i++) {
@@ -396,6 +402,18 @@ PSOutput PSMain(VSOutput input) {
 					(spec_coat_p * clearcoat +
 					 baseAttenuation_p * (kD_p * albedo.rgb / 3.14159265f + totalSpecular_p)) *
 					light.color * light.intensity * atten * NdotL;
+			} else {
+				// --- 6. Backlit Translucency for Point & Spot Lights ---
+				// (Evaluated only when the light is behind the surface!)
+				float3 H_p = normalize(L + N * 0.3f); // Use geometric normal N
+				float dotVH_p = saturate(dot(V, -H_p));
+
+				// Standard constant thickness scale (0.25f represents medium thinness)
+				float thicknessScale = 0.25f;
+				float3 translucencyPunctual = light.color * light.intensity * atten *
+											  pow(dotVH_p, 8.0f) * 0.4f * thicknessScale;
+
+				directPunctual += translucencyPunctual * (1.0f - metallic) * albedo.rgb;
 			}
 		}
 	}

@@ -333,4 +333,29 @@ float3 BoxParallaxCorrection(float3 posWS, float3 R, float3 boxMin, float3 boxMa
 	// Correct the reflection vector to look from the perspective of the probe capture point
 	return normalize(intersectPositionWS - probePos);
 }
+
+// --- SUBSURFACE SCATTERING & TRANSLUCENCY HELPER ---
+float3 CalculateTranslucency(float4 shadowPos, float3 N, float3 V, float3 L, float3 lightColor,
+							 float distortion, float power, float scale) {
+	float3 projCoords = shadowPos.xyz / shadowPos.w;
+	if (projCoords.x < 0.0f || projCoords.x > 1.0f || projCoords.y < 0.0f || projCoords.y > 1.0f ||
+		projCoords.z < 0.0f || projCoords.z > 1.0f) {
+		return float3(0.0f, 0.0f, 0.0f);
+	}
+
+	// Sample the shadow map depth using Level 0 to prevent loops compilation errors
+	float shadowDepth = shadowMap.SampleLevel(defaultSampler, projCoords.xy, 0).r;
+
+	// Thickness is the distance the light ray traveled inside the object
+	float thickness = max(projCoords.z - shadowDepth, 0.0f);
+
+	// Exponential absorption: thicker areas absorb more light (45.0f controls material density)
+	float thicknessScale = exp(-thickness * 45.0f);
+
+	// Bend the light vector slightly towards the normal to simulate scattering dispersion
+	float3 H = normalize(L + N * distortion);
+	float dotVH = saturate(dot(V, -H));
+
+	return lightColor * pow(dotVH, power) * scale * thicknessScale;
+}
 #endif // SKIP_BINDINGS
