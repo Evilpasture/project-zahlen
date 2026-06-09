@@ -4,6 +4,7 @@
 #include "ecs/ECS.hpp"
 #include "engine/FileWatcher.hpp"
 #include "engine/Platform.hpp"
+#include "imgui.h"
 #include "physics/Physics.hpp"
 
 #include <Zahlen/AssetFactory.hpp>
@@ -40,14 +41,19 @@ struct FrustumEdge {
 	int start;
 	int end;
 };
+
+// Decoupled application loop layers
+bool InitializeGame(Engine& engine);
+void UpdateGame(Engine& engine, float dt, float& physicsAccumulator);
+void RenderGame(Engine& engine, float physicsAccumulator);
+void ShutdownGame(Engine& engine);
 } // namespace ZHLN
 
 using namespace ZHLN;
 
 namespace {
 
-// We track which GLB entities belong to Pomni so we can translate them relative to the physics
-// capsule
+// Anonymous namespace for file-scoped static state (id-style memory isolation) [1]
 static std::vector<Entity> s_PomniParts;
 static Entity s_PlayerEntity = NullEntity;
 static float s_CamDistance = 4.5f;
@@ -61,9 +67,30 @@ static constexpr FrustumEdge s_FrustumEdges[12] = {
 	{.start = 2, .end = 6}, {.start = 3, .end = 7} // Near-to-Far connection lines
 };
 
-// Pre-allocated debug wireframe resources to avoid mid-frame Vulkan allocations [2]
+// Visual / Debug Mesh allocations
 static Mesh s_DebugLineMesh = {};
 static Material s_DebugLineMaterial = {};
+
+// Interactive Lighting Workspace parameters
+static Entity s_VisualFloorEntity = NullEntity;
+static float s_FloorRoughness = 0.15f;
+static float s_FloorMetallic = 0.95f;
+static float s_FloorYOffset = 0.72f;
+static Material s_FloorMaterial{};
+
+static float s_SphereLightRadius = 1.5f;
+static float s_Light1Intensity = 180.0f;
+static float s_Light2Intensity = 180.0f;
+
+// Engine subsystems pointers
+static ScriptRunner* s_ScriptRunner = nullptr;
+static FileWatcher* s_GameplayWatcher = nullptr;
+static ArticulationSystem* s_ArticulationSystem = nullptr;
+static AnimationSystem* s_AnimationSystem = nullptr;
+
+static uint32_t s_FrameCounter = 0;
+static uint32_t s_FontAtlasIdx = 0;
+static Mesh s_HelloText = {};
 
 struct Scene {
 	void Setup(Engine& engine) {
@@ -102,7 +129,450 @@ struct Scene {
 
 JPH::Array<ZHLN::Entity> s_VisibleEntities;
 
+Entity FindFloorEntity(ECS::Registry& reg) {
+	auto entities = reg.GetEntitiesWith<NameComponent>();
+	auto names = reg.GetRawArray<NameComponent>();
+
+	for (size_t i = 0; i < entities.size(); ++i) {
+		std::string nameLower(names[i].name.c_str());
+		std::transform(nameLower.begin(), nameLower.end(), nameLower.begin(), ::tolower);
+
+		// Scan for keywords commonly exported by Blender/glTF for floor meshes
+		if (nameLower.contains("floor") || nameLower.contains("ground") ||
+			nameLower.contains("lobby")) {
+			// Ensure it actually carries visual geometry
+			if (reg.Get<MeshComponent>(entities[i]) != nullptr) {
+				return entities[i];
+			}
+		}
+	}
+	return NullEntity;
+}
+
 } // namespace
+
+// ============================================================================
+// GAME APPLICATION INTERFACE IMPLEMENTATION
+// ============================================================================
+
+bool ZHLN::InitializeGame(Engine& engine) {
+	auto& rc = engine.GetRenderContext();
+	auto& reg = engine.GetRegistry();
+	auto& pc = engine.GetPhysicsContext();
+	auto& cam = engine.GetCamera();
+
+	// 1. Register Native components
+	reg.RegisterComponents<MeshComponent, PhysicsComponent, MovementComponent,
+						   ALife::ALifeComponent, RagdollComponent, NameComponent>();
+
+	// 2. Create Physical Ground Plane
+	auto groundShape =
+		Physics::GetOrCreateShape(pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
+	Entity ground = reg.Create();
+	reg.Add(ground,
+			PhysicsComponent{Physics::CreateRigidBody(
+				pc, groundShape, {0, 0, 0}, JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0)});
+
+	// 3. Create the Player Entity with Character Controller
+	s_PlayerEntity = reg.Create();
+	reg.Add(s_PlayerEntity, MovementComponent{});
+	Entity charPhys = Physics::CreateCharacter(pc, JPH::RVec3(0.0f, 3.0f, 0.0f));
+	reg.Add(s_PlayerEntity, PhysicsComponent{charPhys});
+
+	// 4. Initialize Scripting Subsystem
+	s_ScriptRunner = new ScriptRunner();
+	s_ScriptRunner->RunFile("scripts/gameplay.lua");
+	s_GameplayWatcher = new FileWatcher("scripts/gameplay.lua");
+	s_FrameCounter = 0;
+
+	// 5. Spawn Level Prefabs (Circus Lobby V9.glb)
+	Scene scene{};
+	scene.Setup(engine);
+
+	// --- 5.1 QUERY THE SPAWNED ENVIRONMENT FOR THE FLOOR ENTITY ---
+	s_VisualFloorEntity = FindFloorEntity(reg);
+	if (s_VisualFloorEntity != NullEntity) {
+		ZHLN::Log("[DOD Query] Successfully binded to glTF Floor Entity! Handle Index: {}",
+				  s_VisualFloorEntity.index);
+	} else {
+		ZHLN::Log("[DOD Query] WARNING: Could not find floor mesh in glTF scene.");
+	}
+
+	AssetFactory::SetupPlayerRagdoll(rc, pc, reg, s_PlayerEntity, s_PomniParts);
+
+	// Position Camera orientation initially looking forward
+	cam.yaw = -90.0f;
+	cam.pitch = -10.0f;
+
+	s_FontAtlasIdx = AssetFactory::CreateFontAtlasTexture(rc);
+	s_HelloText = GUI::CreateTextMesh(rc, "Zahlen Engine - TADC Dorm Showcase", 25.0f, 25.0f, 2.5f,
+									  {0.9f, 0.1f, 0.1f, 1.0f});
+
+	s_DebugLineMesh = AssetFactory::CreateBox(rc, {0.02f, 0.02f, 0.5f});
+	s_DebugLineMaterial = AssetFactory::CreateBasicMaterial(rc);
+	s_DebugLineMaterial.baseColorFactor[0] = 0.0f; // Neon Cyan
+	s_DebugLineMaterial.baseColorFactor[1] = 1.0f;
+	s_DebugLineMaterial.baseColorFactor[2] = 1.0f;
+	s_DebugLineMaterial.baseColorFactor[3] = 1.0f;
+
+	s_ArticulationSystem = new ArticulationSystem();
+	s_AnimationSystem = new AnimationSystem();
+
+	return true;
+}
+
+void ZHLN::UpdateGame(Engine& engine, float dt, float& physicsAccumulator) {
+	auto& cam = engine.GetCamera();
+	auto& pc = engine.GetPhysicsContext();
+	auto& rc = engine.GetRenderContext();
+	auto& reg = engine.GetRegistry();
+
+	// 1. Draw HUD Layouts
+	ZHLN::DrawConsole(*s_ScriptRunner);
+	ZHLN::DrawInventoryShell(*s_ScriptRunner);
+	ZHLN::DrawProfiler(engine);
+	ZHLN::DrawOrientationGizmo(cam);
+
+	// 2. Lighting Workspace Developer Menu
+	ImGui::Begin("Lighting Workspace Controller");
+	ImGui::Text("Specular Mips & Area Lights Debugger");
+	ImGui::Separator();
+	ImGui::SliderFloat("Sphere Light Radius", &s_SphereLightRadius, 0.0f, 5.0f);
+	ImGui::SliderFloat("Cyan Intensity", &s_Light1Intensity, 0.0f, 500.0f);
+	ImGui::SliderFloat("Magenta Intensity", &s_Light2Intensity, 0.0f, 500.0f);
+	ImGui::Separator();
+	ImGui::SliderFloat("Floor Roughness", &s_FloorRoughness, 0.0f, 1.0f);
+	ImGui::SliderFloat("Floor Metallic", &s_FloorMetallic, 0.0f, 1.0f);
+	ImGui::End();
+
+	// 3. Hot Reload Script Files
+	if (++s_FrameCounter % 60 == 0 && s_GameplayWatcher->CheckModified()) {
+		s_ScriptRunner->ReloadFile("scripts/gameplay.lua");
+	}
+
+	{
+		ZHLN_PROFILE_SCOPE("Logic");
+
+		// Mouse look (Active only when holding Right Click)
+		const float sensitivity = 0.15f;
+		if (engine.GetInput().IsMouseButtonDown(KeyCode::RButton)) {
+			cam.yaw += engine.GetInput().GetMouse().deltaX * sensitivity;
+			cam.pitch = std::clamp(cam.pitch - (engine.GetInput().GetMouse().deltaY * sensitivity),
+								   -89.0f, 89.0f);
+		}
+
+		s_ScriptRunner->CallUpdate(&engine, dt);
+
+		// 4. Physics Tick loop
+		physicsAccumulator += dt;
+		constexpr float targetDt = 1.0f / 60.0f;
+		while (physicsAccumulator >= targetDt) {
+			ZHLN::MovementSystem(engine, targetDt);
+			pc.Step(targetDt);
+			physicsAccumulator -= targetDt;
+		}
+
+		// 5. Run animation systems
+		s_AnimationSystem->UpdateAnimations(rc, reg, dt);
+		s_ArticulationSystem->Update(engine, dt);
+	}
+}
+
+void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
+	auto& rc = engine.GetRenderContext();
+	auto& reg = engine.GetRegistry();
+	auto& cam = engine.GetCamera();
+	auto& pc = engine.GetPhysicsContext();
+
+	// Static local clock to calculate independent frameTime delta for audio threading [1]
+	static Clock deltaClock;
+	float renderFrameTime = deltaClock.GetDeltaTime();
+
+	auto res = engine.GetWindow().GetSize();
+	const auto& worldState = pc.GetWorld();
+
+	if (g_TAAState.enabled) {
+		g_TAAState.frameIndex++;
+	} else {
+		g_TAAState.frameIndex = 0;
+	}
+
+	// 1. Retrieve & Interpolate Player Position from Jolt [6]
+	JPH::Vec3 playerPos = JPH::Vec3::sZero();
+	constexpr float targetDt = 1.0f / 60.0f;
+	if (reg.IsAlive(s_PlayerEntity)) {
+		if (auto* phys = reg.Get<PhysicsComponent>(s_PlayerEntity)) {
+			uint32_t dense = worldState.slotToDense[phys->physicsHandle.index];
+			const size_t base = static_cast<size_t>(dense) * 4;
+
+			JPH::Vec3 currPos((float)worldState.positions[base],
+							  (float)worldState.positions[base + 1],
+							  (float)worldState.positions[base + 2]);
+
+			JPH::Vec3 prevPos((float)worldState.prevPositions[base],
+							  (float)worldState.prevPositions[base + 1],
+							  (float)worldState.prevPositions[base + 2]);
+
+			float alpha = std::clamp(physicsAccumulator / targetDt, 0.0f, 1.0f);
+			playerPos = prevPos + alpha * (currPos - prevPos);
+		}
+	}
+
+	// 2. Camera Placement
+	float yawRad = JPH::DegreesToRadians(cam.yaw);
+	float pitchRad = JPH::DegreesToRadians(cam.pitch);
+	JPH::Vec3 offsetDir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad),
+						JPH::Sin(yawRad) * JPH::Cos(pitchRad));
+
+	float wheelDelta = engine.GetInput().GetMouse().wheel;
+	if (std::abs(wheelDelta) > 0.01f) {
+		s_CamDistance = JPH::Clamp(s_CamDistance - wheelDelta * 0.5f, 1.5f, 15.0f);
+	}
+	cam.position =
+		playerPos - (offsetDir.Normalized() * s_CamDistance) + JPH::Vec3(0.0f, 1.3f, 0.0f);
+
+	JPH::Mat44 unjitteredProj = cam.GetProjectionMatrix((float)res.width / res.height);
+	JPH::Mat44 unjitteredVp = unjitteredProj * cam.GetViewMatrix();
+
+	JPH::Mat44 vp{};
+	if (g_TAAState.enabled) {
+		vp = cam.GetJitteredProjectionMatrix((float)res.width / res.height, res.width, res.height) *
+			 cam.GetViewMatrix();
+	} else {
+		vp = unjitteredVp;
+	}
+
+	static JPH::Mat44 s_FrozenVP = JPH::Mat44::sIdentity();
+	static JPH::Vec3 s_FrustumCorners[8] = {};
+	static bool s_WasFrozen = false;
+
+	if (CullingStats::FreezeFrustum) {
+		if (!s_WasFrozen) {
+			s_FrozenVP = unjitteredVp;
+			JPH::Mat44 invVP = unjitteredVp.Inversed();
+			JPH::Vec4 ndc[8] = {{-1.0f, -1.0f, 0.0f, 1.0f}, {1.0f, -1.0f, 0.0f, 1.0f},
+								{1.0f, 1.0f, 0.0f, 1.0f},	{-1.0f, 1.0f, 0.0f, 1.0f},
+								{-1.0f, -1.0f, 1.0f, 1.0f}, {1.0f, -1.0f, 1.0f, 1.0f},
+								{1.0f, 1.0f, 1.0f, 1.0f},	{-1.0f, 1.0f, 1.0f, 1.0f}};
+
+			for (int i = 0; i < 8; ++i) {
+				JPH::Vec4 worldPos = invVP * ndc[i];
+				float w = worldPos.GetW();
+				if (std::abs(w) > 1e-6f) {
+					s_FrustumCorners[i] =
+						JPH::Vec3(worldPos.GetX() / w, worldPos.GetY() / w, worldPos.GetZ() / w);
+				}
+			}
+			s_WasFrozen = true;
+		}
+		cam.frustum.Update(s_FrozenVP);
+	} else {
+		cam.frustum.Update(unjitteredVp);
+		s_WasFrozen = false;
+	}
+
+	CullingSystem<false>(engine, s_VisibleEntities, s_PomniParts);
+
+	JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f};
+	JPH::Mat44 lightView =
+		Math::CreateLookAt(sunDirection * 100.0f, {0.0f, 0.0f, 0.0f}, JPH::Vec3::sAxisY());
+	JPH::Mat44 lightProj = Math::CreateOrtho(-50.0f, 50.0f, -50.0f, 50.0f, 0.1f, 200.0f);
+	JPH::Mat44 shadowProjView = lightProj * lightView;
+
+	JPH::Mat44 biasMatrix = {JPH::Vec4(0.5f, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, -0.5f, 0.0f, 0.0f),
+							 JPH::Vec4(0.0f, 0.0f, 1.0f, 0.0f), JPH::Vec4(0.5f, 0.5f, 0.0f, 1.0f)};
+
+	JPH::Mat44 lightSpaceBiased = biasMatrix * shadowProjView;
+
+	static JPH::Mat44 s_PrevUnjitteredVp = unjitteredVp;
+	static bool s_FirstFrame = true;
+	if (s_FirstFrame) {
+		s_PrevUnjitteredVp = unjitteredVp;
+		s_FirstFrame = false;
+	}
+
+	// 3. Compile lights list & sync material factors [1]
+	std::array<GPULight, 3> sceneLights{};
+
+	// --- NEW: GIANT RECTANGULAR PANEL LIGHT (LTC) ---
+	sceneLights[0].type = 3; // Quad / Area Light
+	sceneLights[0].color[0] = 1.0f;
+	sceneLights[0].color[1] = 0.8f;
+	sceneLights[0].color[2] = 0.6f; // Warm tungsten color
+	sceneLights[0].intensity = 5.0f;
+	sceneLights[0].twoSided = 0; // Only emits light downwards
+
+	// Define the 4 corners of a 4x4 meter ceiling panel
+	float hX = 2.0f;
+	float hZ = 2.0f;
+	float lY = 5.0f; // 5 meters up in the air
+
+	// Bottom-Left
+	sceneLights[0].points[0][0] = -hX;
+	sceneLights[0].points[0][1] = lY;
+	sceneLights[0].points[0][2] = -hZ;
+
+	// Bottom-Right
+	sceneLights[0].points[1][0] = hX;
+	sceneLights[0].points[1][1] = lY; // <-- FIX: Was sceneLights[1]
+	sceneLights[0].points[1][2] = -hZ;
+
+	// Top-Right
+	sceneLights[0].points[2][0] = hX;
+	sceneLights[0].points[2][1] = lY;
+	sceneLights[0].points[2][2] = hZ;
+
+	// Top-Left
+	sceneLights[0].points[3][0] = -hX;
+	sceneLights[0].points[3][1] = lY;
+	sceneLights[0].points[3][2] = hZ;
+
+	// --- LIGHT 1: CYAN SPHERE ---
+	sceneLights[1].position[0] = -5.0f; // <-- FIX: Was sceneLights[0]
+	sceneLights[1].position[1] = 4.0f;
+	sceneLights[1].position[2] = 0.0f;
+	sceneLights[1].type = 1;
+	sceneLights[1].color[0] = 0.0f;
+	sceneLights[1].color[1] = 0.5f;
+	sceneLights[1].color[2] = 1.0f;
+	sceneLights[1].intensity = s_Light1Intensity;
+	sceneLights[1].radius = s_SphereLightRadius;
+
+	// --- LIGHT 2: MAGENTA SPHERE ---
+	sceneLights[2].position[0] = 5.0f; // <-- FIX: Was sceneLights[1]
+	sceneLights[2].position[1] = 4.0f;
+	sceneLights[2].position[2] = 0.0f;
+	sceneLights[2].type = 1;
+	sceneLights[2].color[0] = 1.0f;
+	sceneLights[2].color[1] = 0.0f;
+	sceneLights[2].color[2] = 0.5f;
+	sceneLights[2].intensity = s_Light2Intensity;
+	sceneLights[2].radius = s_SphereLightRadius;
+
+	// Sync modified material values directly to the queried glTF floor in the registry
+	if (s_VisualFloorEntity != NullEntity) {
+		if (auto* floorMeshComp = reg.Get<MeshComponent>(s_VisualFloorEntity)) {
+			floorMeshComp->material.roughnessFactor = s_FloorRoughness;
+			floorMeshComp->material.metallicFactor = s_FloorMetallic;
+		}
+	}
+
+	FrameUniforms uniforms{};
+	uniforms.viewProj = vp;
+	uniforms.unjitteredViewProj = unjitteredVp;
+	uniforms.prevUnjitteredViewProj = s_PrevUnjitteredVp;
+	uniforms.lightSpaceMatrix = lightSpaceBiased;
+	std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
+	std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);
+	uniforms.lightCount = static_cast<uint32_t>(sceneLights.size());
+
+	Renderer::SetLights(rc, sceneLights.data(), uniforms.lightCount); // Upload SSBO to GPU
+	Renderer::SetFrameData(rc, uniforms, shadowProjView);
+
+	engine.BeginFrame();
+	Renderer::SetMatrices(rc, vp, unjitteredVp);
+
+	JPH::Mat44 playerTransform = JPH::Mat44::sIdentity();
+	if (reg.IsAlive(s_PlayerEntity)) {
+		bool isRagdollActive = false;
+		if (auto* ragComp = reg.Get<RagdollComponent>(s_PlayerEntity)) {
+			isRagdollActive = (ragComp->state == RagdollState::Limp ||
+							   ragComp->state == RagdollState::KeyframeMotor);
+		}
+
+		if (!isRagdollActive) {
+			JPH::Quat rotation = JPH::Quat::sIdentity();
+			if (auto* move = reg.Get<MovementComponent>(s_PlayerEntity)) {
+				rotation = JPH::Quat(move->orientation[0], move->orientation[1],
+									 move->orientation[2], move->orientation[3]);
+			}
+			playerTransform =
+				Math::CreateTransform(playerPos - JPH::Vec3(0.0f, 0.5f, 0.0f), rotation);
+		}
+	}
+
+	for (Entity e : s_VisibleEntities) {
+		auto* mesh = reg.Get<MeshComponent>(e);
+		if (mesh == nullptr) {
+			continue;
+		}
+
+		bool isPlayerPart = std::ranges::contains(s_PomniParts, e);
+		JPH::Mat44 currentTransform{};
+		if (isPlayerPart) {
+			currentTransform = playerTransform * mesh->localTransform;
+		} else {
+			currentTransform = mesh->localTransform;
+		}
+
+		Renderer::Draw(rc, mesh->material, mesh->mesh, currentTransform, mesh->prevTransform,
+					   mesh->cullRadius, mesh->jointOffset, mesh->isSkinned, mesh->morphOffset,
+					   mesh->activeMorphCount, mesh->morphWeights);
+	}
+
+	CullingStats::TotalObjects = (uint32_t)reg.GetEntitiesWith<MeshComponent>().size();
+	CullingStats::CulledObjects = CullingStats::TotalObjects - (uint32_t)s_VisibleEntities.size();
+
+	Renderer::DrawUI(rc, s_HelloText, s_FontAtlasIdx);
+
+	// --- DRAW THE FREEZE WIREFRAME FRUSTUM ---
+	if (CullingStats::FreezeFrustum && s_DebugLineMesh.vertexBuffer != BufferHandle::Invalid) {
+		for (auto s_FrustumEdge : s_FrustumEdges) {
+			JPH::Vec3 pA = s_FrustumCorners[s_FrustumEdge.start];
+			JPH::Vec3 pB = s_FrustumCorners[s_FrustumEdge.end];
+
+			JPH::Vec3 v = pB - pA;
+			float len = v.Length();
+			if (len < 1e-4f) {
+				continue;
+			}
+
+			JPH::Vec3 dir = v / len;
+			JPH::Vec3 mid = (pA + pB) * 0.5f;
+
+			JPH::Quat rot = JPH::Quat::sFromTo(JPH::Vec3::sAxisZ(), dir);
+			JPH::Mat44 lineTransform = Math::CreateTransform(mid, rot, JPH::Vec3(1.0f, 1.0f, len));
+
+			Renderer::Draw(rc, s_DebugLineMaterial, s_DebugLineMesh, lineTransform, lineTransform,
+						   len);
+		}
+	}
+
+	engine.EndFrame();
+
+	ZHLN::AudioSystem(engine, renderFrameTime); // Decoupled frametime for precise audio pacing [1]
+
+	s_PrevUnjitteredVp = unjitteredVp;
+
+	// Global update for prevTransforms
+	auto allEntities = reg.GetEntitiesWith<MeshComponent>();
+	for (Entity e : allEntities) {
+		auto* mesh = reg.Get<MeshComponent>(e);
+		if (mesh != nullptr) {
+			JPH::Mat44 currentTransform{};
+			bool isPlayerPart = std::ranges::contains(s_PomniParts, e);
+
+			if (isPlayerPart) {
+				currentTransform = playerTransform * mesh->localTransform;
+			} else {
+				currentTransform = mesh->localTransform;
+			}
+			mesh->prevTransform = currentTransform;
+		}
+	}
+}
+
+void ZHLN::ShutdownGame([[maybe_unused]] Engine& engine) {
+	// Reclaim heap memories
+	delete s_ScriptRunner;
+	delete s_GameplayWatcher;
+	delete s_ArticulationSystem;
+	delete s_AnimationSystem;
+}
+
+// ============================================================================
+// CLEAN ENTRYPOINT ENGINE CONTROL LOOP [1]
+// ============================================================================
 
 auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	Platform::Init();
@@ -111,13 +581,10 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	Clock clock;
 
 	ZHLN::EngineConfig config{
-		.physics =
-			{
-				.maxBodies = 5000,
-				.maxBodyPairs = 10000,
-				.maxContactConstraints = 10000,
-				.tempAllocatorSize = 64 * 1024 * 1024 // Give Jolt extra temp space for solving
-			},
+		.physics = {.maxBodies = 5000,
+					.maxBodyPairs = 10000,
+					.maxContactConstraints = 10000,
+					.tempAllocatorSize = 64 * 1024 * 1024},
 		.render = {.appName = "Zahlen Engine - Digital Circus Showcase",
 				   .width = 1280,
 				   .height = 720,
@@ -125,375 +592,46 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 				   .enableValidation = true},
 	};
 
-	Engine engine(config);
-	engine.GetWindow().Focus();
+	{
+		Engine engine(config);
+		engine.GetWindow().Focus();
 
-	auto& rc = engine.GetRenderContext();
-	auto& reg = engine.GetRegistry();
-	auto& cam = engine.GetCamera();
-	auto& pc = engine.GetPhysicsContext();
-
-	ZHLN::ArticulationSystem articulationSystem;
-	ZHLN::AnimationSystem animationSystem;
-
-	// ------------------------------------------------------------------------
-	// Register native components so the Lua FFI can resolve them!
-	// ------------------------------------------------------------------------
-	reg.RegisterComponents<MeshComponent, PhysicsComponent, MovementComponent,
-						   ALife::ALifeComponent, RagdollComponent, NameComponent>();
-
-	// ------------------------------------------------------------------------
-	// 1. Create a Solid Physics Ground Plane to stand on
-	// ------------------------------------------------------------------------
-	auto groundShape =
-		Physics::GetOrCreateShape(pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
-	Entity ground = reg.Create();
-	reg.Add(ground,
-			PhysicsComponent{Physics::CreateRigidBody(
-				pc, groundShape, {0, 0, 0}, JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0)});
-
-	// ------------------------------------------------------------------------
-	// 2. Create the Player Entity with Character Controller
-	// ------------------------------------------------------------------------
-	Entity player = reg.Create();
-	reg.Add(player, MovementComponent{});
-	Entity charPhys = Physics::CreateCharacter(pc, JPH::RVec3(0.0f, 3.0f, 0.0f));
-	reg.Add(player, PhysicsComponent{charPhys});
-	s_PlayerEntity = player;
-
-	ScriptRunner scriptRunner;
-	scriptRunner.RunFile("scripts/gameplay.lua");
-	FileWatcher gameplayWatcher("scripts/gameplay.lua");
-	uint32_t frameCounter = 0;
-
-	Scene scene{};
-	scene.Setup(engine);
-
-	AssetFactory::SetupPlayerRagdoll(rc, pc, reg, s_PlayerEntity, s_PomniParts);
-
-	// Position Camera orientation initially looking forward
-	cam.yaw = -90.0f;
-	cam.pitch = -10.0f;
-
-	uint32_t fontAtlasIdx = AssetFactory::CreateFontAtlasTexture(rc);
-
-	Mesh helloText = GUI::CreateTextMesh(rc, "Zahlen Engine - TADC Dorm Showcase", 25.0f, 25.0f,
-										 2.5f, {0.9f, 0.1f, 0.1f, 1.0f});
-
-	// --- PRE-INITIALIZE DEBUG FRUSTUM WIREFRAME RESOURCES ---
-	s_DebugLineMesh = AssetFactory::CreateBox(rc, {0.02f, 0.02f, 0.5f});
-	s_DebugLineMaterial = AssetFactory::CreateBasicMaterial(rc);
-	s_DebugLineMaterial.baseColorFactor[0] = 0.0f; // Neon Cyan
-	s_DebugLineMaterial.baseColorFactor[1] = 1.0f;
-	s_DebugLineMaterial.baseColorFactor[2] = 1.0f;
-	s_DebugLineMaterial.baseColorFactor[3] = 1.0f;
-
-	float physicsAccumulator = 0.0f;
-	const float targetDt = 1.0f / 60.0f;
-
-	while (engine.IsRunning()) {
-		float frameTime = clock.GetDeltaTime();
-
-		engine.ProcessEvents();
-
-		if (engine.GetInput().IsKeyDown(KeyCode::Escape)) {
-			engine.GetWindow().Close();
+		if (!ZHLN::InitializeGame(engine)) {
+			ZHLN::Log("Fatal: Game failed to initialize.");
+			return EXIT_FAILURE;
 		}
 
-		ZHLN::DrawConsole(scriptRunner);
-		ZHLN::DrawInventoryShell(scriptRunner);
-		ZHLN::DrawProfiler(engine);
-		ZHLN::DrawOrientationGizmo(cam);
+		float physicsAccumulator = 0.0f;
 
-		if (engine.GetInput().NeedsResize()) {
-			rc.SetResolution(engine.GetInput().GetNewSize());
-			engine.GetInput().ClearResizeFlag();
-			continue;
+		while (engine.IsRunning()) {
+			float frameTime = clock.GetDeltaTime();
+			engine.ProcessEvents();
+
+			if (engine.GetInput().IsKeyDown(KeyCode::Escape)) {
+				engine.GetWindow().Close();
+				break;
+			}
+
+			auto res = engine.GetWindow().GetSize();
+			if (res.width <= 0 || res.height <= 0) {
+				Platform::Sleep(10);
+				continue;
+			}
+
+			if (engine.GetInput().NeedsResize()) {
+				engine.GetRenderContext().SetResolution(engine.GetInput().GetNewSize());
+				engine.GetInput().ClearResizeFlag();
+				continue;
+			}
+
+			// Execute game simulation ticks and rendering
+			ZHLN::UpdateGame(engine, frameTime, physicsAccumulator);
+			ZHLN::RenderGame(engine, physicsAccumulator);
 		}
 
-		if (++frameCounter % 60 == 0 && gameplayWatcher.CheckModified()) {
-			scriptRunner.ReloadFile("scripts/gameplay.lua");
-		}
-
-		{
-			ZHLN_PROFILE_SCOPE("Logic");
-
-			// Mouse look (Active only when holding Right Click)
-			const float sensitivity = 0.15f;
-			if (engine.GetInput().IsMouseButtonDown(KeyCode::RButton)) {
-				cam.yaw += engine.GetInput().GetMouse().deltaX * sensitivity;
-				cam.pitch = std::clamp(
-					cam.pitch - (engine.GetInput().GetMouse().deltaY * sensitivity), -89.0f, 89.0f);
-			}
-
-			scriptRunner.CallUpdate(&engine, frameTime);
-
-			// ----------------------------------------------------------------
-			// 3. Physics Simulation Accumulator
-			// ----------------------------------------------------------------
-			physicsAccumulator += frameTime;
-			while (physicsAccumulator >= targetDt) {
-				// Solve movement vector using inputs populated from Lua scripts
-				ZHLN::MovementSystem(engine, targetDt);
-
-				// Advance Jolt simulation
-				pc.Step(targetDt);
-
-				physicsAccumulator -= targetDt;
-			}
-
-			// --- STEP 4C: Play embedded skeletal keyframes over time ---
-			animationSystem.UpdateAnimations(rc, reg, frameTime);
-			articulationSystem.Update(engine, frameTime);
-		}
-
-		auto res = engine.GetWindow().GetSize();
-
-		if (res.width > 0 && res.height > 0) {
-			const auto& worldState = pc.GetWorld();
-
-			if (g_TAAState.enabled) {
-				g_TAAState.frameIndex++;
-			} else {
-				g_TAAState.frameIndex = 0;
-			}
-
-			// ----------------------------------------------------------------
-			// 4. Retrieve & Interpolate Player Position from Jolt [6]
-			// ----------------------------------------------------------------
-			JPH::Vec3 playerPos = JPH::Vec3::sZero();
-			if (reg.IsAlive(s_PlayerEntity)) {
-				if (auto* phys = reg.Get<PhysicsComponent>(s_PlayerEntity)) {
-					uint32_t dense = worldState.slotToDense[phys->physicsHandle.index];
-					const size_t base = static_cast<size_t>(dense) * 4;
-
-					// Current frame position from Jolt [6]
-					JPH::Vec3 currPos((float)worldState.positions[base],
-									  (float)worldState.positions[base + 1],
-									  (float)worldState.positions[base + 2]);
-
-					// Previous frame position from Jolt [6]
-					JPH::Vec3 prevPos((float)worldState.prevPositions[base],
-									  (float)worldState.prevPositions[base + 1],
-									  (float)worldState.prevPositions[base + 2]);
-
-					// Calculate sub-frame remainder ratio (Alpha) [6]
-					float alpha = std::clamp(physicsAccumulator / targetDt, 0.0f, 1.0f);
-
-					// Smoothly interpolate to get exact sub-frame render coordinate [6]
-					playerPos = prevPos + alpha * (currPos - prevPos);
-				}
-			}
-			// ----------------------------------------------------------------
-			// 5. Orbit Camera Positioning (Follow Follow)
-			// ----------------------------------------------------------------
-			float yawRad = JPH::DegreesToRadians(cam.yaw);
-			float pitchRad = JPH::DegreesToRadians(cam.pitch);
-			JPH::Vec3 offsetDir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad),
-								JPH::Sin(yawRad) * JPH::Cos(pitchRad));
-
-			float wheelDelta = engine.GetInput().GetMouse().wheel;
-			if (std::abs(wheelDelta) > 0.01f) {
-				// Scroll up zoom-in, scroll down zoom-out
-				s_CamDistance = JPH::Clamp(s_CamDistance - wheelDelta * 0.5f, 1.5f, 15.0f);
-			}
-			// Place the camera 4.5 meters behind the player capsule
-			cam.position =
-				playerPos - (offsetDir.Normalized() * s_CamDistance) + JPH::Vec3(0.0f, 1.3f, 0.0f);
-
-			JPH::Mat44 unjitteredProj = cam.GetProjectionMatrix((float)res.width / res.height);
-			JPH::Mat44 unjitteredVp = unjitteredProj * cam.GetViewMatrix();
-
-			JPH::Mat44 vp{};
-			if (g_TAAState.enabled) {
-				vp = cam.GetJitteredProjectionMatrix((float)res.width / res.height, res.width,
-													 res.height) *
-					 cam.GetViewMatrix();
-			} else {
-				vp = unjitteredVp;
-			}
-
-			static JPH::Mat44 s_FrozenVP = JPH::Mat44::sIdentity();
-			static JPH::Vec3 s_FrustumCorners[8] = {};
-			static bool s_WasFrozen = false;
-
-			if (CullingStats::FreezeFrustum) {
-				if (!s_WasFrozen) {
-					// Freeze the current View-Projection matrix [1]
-					s_FrozenVP = unjitteredVp;
-
-					// Calculate the 8 corners of the static view frustum in world space [1]
-					JPH::Mat44 invVP = unjitteredVp.Inversed();
-					JPH::Vec4 ndc[8] = {
-						// Near Plane (Z = 0.0 in Vulkan depth)
-						{-1.0f, -1.0f, 0.0f, 1.0f}, // Top-Left
-						{1.0f, -1.0f, 0.0f, 1.0f},	// Top-Right
-						{1.0f, 1.0f, 0.0f, 1.0f},	// Bottom-Right
-						{-1.0f, 1.0f, 0.0f, 1.0f},	// Bottom-Left
-						// Far Plane (Z = 1.0 in Vulkan depth)
-						{-1.0f, -1.0f, 1.0f, 1.0f}, // Top-Left
-						{1.0f, -1.0f, 1.0f, 1.0f},	// Top-Right
-						{1.0f, 1.0f, 1.0f, 1.0f},	// Bottom-Right
-						{-1.0f, 1.0f, 1.0f, 1.0f}	// Bottom-Left
-					};
-
-					for (int i = 0; i < 8; ++i) {
-						JPH::Vec4 worldPos = invVP * ndc[i];
-						float w = worldPos.GetW();
-						if (std::abs(w) > 1e-6f) {
-							s_FrustumCorners[i] = JPH::Vec3(
-								worldPos.GetX() / w, worldPos.GetY() / w, worldPos.GetZ() / w);
-						}
-					}
-					s_WasFrozen = true;
-				}
-				// Lock frustum calculations to the captured matrix [1]
-				cam.frustum.Update(s_FrozenVP);
-			} else {
-				// Normal culling path [1]
-				cam.frustum.Update(unjitteredVp);
-				s_WasFrozen = false;
-			}
-
-			// Explicitly invoke the baked-only path
-			CullingSystem<false>(engine, s_VisibleEntities, s_PomniParts);
-
-			JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f};
-			JPH::Mat44 lightView =
-				Math::CreateLookAt(sunDirection * 100.0f, {0.0f, 0.0f, 0.0f}, JPH::Vec3::sAxisY());
-			JPH::Mat44 lightProj = Math::CreateOrtho(-50.0f, 50.0f, -50.0f, 50.0f, 0.1f, 200.0f);
-			JPH::Mat44 shadowProjView = lightProj * lightView;
-
-			// Bias Matrix mapping depth safely
-			JPH::Mat44 biasMatrix = {
-				JPH::Vec4(0.5f, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, -0.5f, 0.0f, 0.0f),
-				JPH::Vec4(0.0f, 0.0f, 1.0f, 0.0f), JPH::Vec4(0.5f, 0.5f, 0.0f, 1.0f)};
-
-			JPH::Mat44 lightSpaceBiased = biasMatrix * shadowProjView;
-
-			static JPH::Mat44 s_PrevUnjitteredVp = unjitteredVp;
-			static bool s_FirstFrame = true;
-			if (s_FirstFrame) {
-				s_PrevUnjitteredVp = unjitteredVp;
-				s_FirstFrame = false;
-			}
-
-			FrameUniforms uniforms{};
-			uniforms.viewProj = vp;
-			uniforms.unjitteredViewProj = unjitteredVp;
-			uniforms.prevUnjitteredViewProj = s_PrevUnjitteredVp;
-			uniforms.lightSpaceMatrix = lightSpaceBiased;
-			std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
-			std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);
-			uniforms.lightCount = 0;
-
-			Renderer::SetFrameData(rc, uniforms, shadowProjView);
-
-			engine.BeginFrame();
-			Renderer::SetMatrices(rc, vp, unjitteredVp);
-
-			JPH::Mat44 playerTransform = JPH::Mat44::sIdentity();
-			if (reg.IsAlive(s_PlayerEntity)) {
-
-				// CHECK IF RAGDOLL IS ACTIVE
-				bool isRagdollActive = false;
-				if (auto* ragComp = reg.Get<RagdollComponent>(s_PlayerEntity)) {
-					isRagdollActive = (ragComp->state == RagdollState::Limp ||
-									   ragComp->state == RagdollState::KeyframeMotor);
-				}
-
-				// Only offset the model by the capsule position if the ragdoll is NOT simulated
-				if (!isRagdollActive) {
-					JPH::Quat rotation = JPH::Quat::sIdentity();
-					if (auto* move = reg.Get<MovementComponent>(s_PlayerEntity)) {
-						rotation = JPH::Quat(move->orientation[0], move->orientation[1],
-											 move->orientation[2], move->orientation[3]);
-					}
-					playerTransform =
-						Math::CreateTransform(playerPos - JPH::Vec3(0.0f, 0.5f, 0.0f), rotation);
-				}
-			}
-			for (Entity e : s_VisibleEntities) {
-				auto* mesh = reg.Get<MeshComponent>(e);
-				if (mesh == nullptr) {
-					continue;
-				}
-
-				// Check if this submesh entity is part of the player character hierarchy
-				bool isPlayerPart = std::ranges::contains(s_PomniParts, e);
-				JPH::Mat44 currentTransform{};
-				if (isPlayerPart) {
-					currentTransform = playerTransform * mesh->localTransform;
-				} else {
-					currentTransform = mesh->localTransform;
-				}
-
-				Renderer::Draw(rc, mesh->material, mesh->mesh, currentTransform,
-							   mesh->prevTransform, mesh->cullRadius, mesh->jointOffset,
-							   mesh->isSkinned, mesh->morphOffset, mesh->activeMorphCount,
-							   mesh->morphWeights);
-			}
-
-			CullingStats::TotalObjects = (uint32_t)reg.GetEntitiesWith<MeshComponent>().size();
-			CullingStats::CulledObjects =
-				CullingStats::TotalObjects - (uint32_t)s_VisibleEntities.size();
-
-			Renderer::DrawUI(rc, helloText, fontAtlasIdx);
-
-			// --- DRAW THE FREEZE WIREFRAME FRUSTUM ---
-			if (CullingStats::FreezeFrustum &&
-				s_DebugLineMesh.vertexBuffer != BufferHandle::Invalid) {
-				for (auto s_FrustumEdge : s_FrustumEdges) {
-					JPH::Vec3 pA = s_FrustumCorners[s_FrustumEdge.start];
-					JPH::Vec3 pB = s_FrustumCorners[s_FrustumEdge.end];
-
-					JPH::Vec3 v = pB - pA;
-					float len = v.Length();
-					if (len < 1e-4f) {
-						continue;
-					}
-
-					JPH::Vec3 dir = v / len;
-					JPH::Vec3 mid = (pA + pB) * 0.5f;
-
-					JPH::Quat rot = JPH::Quat::sFromTo(JPH::Vec3::sAxisZ(), dir);
-					JPH::Mat44 lineTransform =
-						Math::CreateTransform(mid, rot, JPH::Vec3(1.0f, 1.0f, len));
-
-					Renderer::Draw(rc, s_DebugLineMaterial, s_DebugLineMesh, lineTransform,
-								   lineTransform, len);
-				}
-			}
-
-			engine.EndFrame();
-
-			// Run audio system updates
-			ZHLN::AudioSystem(engine, frameTime);
-
-			s_PrevUnjitteredVp = unjitteredVp;
-
-			// Global update for prevTransforms to prevent TAA motion vector spasms
-			auto allEntities = reg.GetEntitiesWith<MeshComponent>();
-			for (Entity e : allEntities) {
-				auto* mesh = reg.Get<MeshComponent>(e);
-				if (mesh != nullptr) {
-					JPH::Mat44 currentTransform{};
-					bool isPlayerPart = std::ranges::contains(s_PomniParts, e);
-
-					if (isPlayerPart) {
-						currentTransform = playerTransform * mesh->localTransform;
-					} else {
-						currentTransform = mesh->localTransform;
-					}
-					mesh->prevTransform =
-						currentTransform; // Must match the evaluated render transform!
-				}
-			}
-		} else {
-			Platform::Sleep(10);
-		}
+		ZHLN::ShutdownGame(engine);
 	}
 
-	ZHLN::Log("Shutting down engine...");
-	return 0;
+	TaskSystem::Shutdown();
+	return EXIT_SUCCESS;
 }

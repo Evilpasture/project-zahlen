@@ -3,14 +3,16 @@
 
 struct Light {
 	float3 position;
-	uint type; // 0=Dir, 1=Point, 2=Spot
+	uint type; // 0=Dir, 1=Point, 2=Spot, 3=Area(Quad)
 	float3 color;
 	float intensity;
 	float3 direction;
 	float range;
+	float4 points[4]; // 4 Corners of the quad
+	float radius;
 	float innerConeCos;
 	float outerConeCos;
-	float2 padding;
+	uint twoSided;
 };
 
 struct FrameUniforms {
@@ -94,6 +96,8 @@ struct GPUJoint {
 [[vk::binding(10, 0)]] Texture2D brdfLUT;
 [[vk::binding(11, 0)]] StructuredBuffer<float4> g_morphDeltas; // float4 matches std430 padding
 [[vk::binding(12, 0)]] SamplerState clampSampler;
+[[vk::binding(13, 0)]] Texture2D ltc_mat;
+[[vk::binding(14, 0)]] Texture2D ltc_amp;
 
 struct VSInput {
 	[[vk::location(0)]] float3 position : POSITION;
@@ -202,5 +206,67 @@ float3 GetMorphDisplacement(uint vertexId, uint vertexCount, uint morphOffset,
 	}
 
 	return displacement;
+}
+
+// --- LTC CORE MATH ---
+float3 IntegrateEdgeVector(float3 v1, float3 v2) {
+	float x = dot(v1, v2);
+	float y = abs(x);
+	float a = 0.8543985 + (0.4965155 + 0.0145206 * y) * y;
+	float b = 3.4175940 + (4.1616724 + y) * y;
+	float v = a / b;
+	float theta_sintheta = (x > 0.0) ? v : 0.5 * rsqrt(max(1.0 - x * x, 1e-7)) - v;
+	return cross(v1, v2) * theta_sintheta;
+}
+
+float3 LTC_Evaluate(float3 N, float3 V, float3 P, float3x3 Minv, float4 points[4], bool twoSided) {
+	// 1. Construct Orthonormal Basis
+	float3 T1, T2;
+	T1 = normalize(V - N * dot(V, N));
+	T2 = cross(N, T1);
+	float3x3 R = float3x3(T1, T2, N);
+
+	// 2. Transform polygon to local tangent space and apply LTC inverse matrix
+	float3 L[5]; // Max 5 vertices after clipping
+	L[0] = mul(Minv, mul(R, points[0].xyz - P));
+	L[1] = mul(Minv, mul(R, points[1].xyz - P));
+	L[2] = mul(Minv, mul(R, points[2].xyz - P));
+	L[3] = mul(Minv, mul(R, points[3].xyz - P));
+
+	// 3. Sutherland-Hodgman Clipping against the horizon (z = 0)
+	int n = 0;
+	float3 clipped[5];
+
+	// Unrolled fast clipper
+	[unroll] for (int i = 0; i < 4; ++i) {
+		float3 v1 = L[i];
+		float3 v2 = L[(i + 1) % 4];
+
+		if (v1.z > 0.0) {
+			clipped[n++] = v1;
+		}
+		// If the edge crosses the horizon plane
+		if ((v1.z > 0.0 && v2.z < 0.0) || (v1.z < 0.0 && v2.z > 0.0)) {
+			float t = v1.z / (v1.z - v2.z);
+			clipped[n++] = lerp(v1, v2, t);
+		}
+	}
+
+	if (n < 3)
+		return float3(0, 0, 0); // Completely below horizon
+	[unroll] for (int j = 0; j < n; ++j) {
+		clipped[j] = normalize(clipped[j]);
+	}
+	// 4. Integrate Area
+	float3 sum = float3(0, 0, 0);
+	sum += IntegrateEdgeVector(clipped[0], clipped[1]);
+	sum += IntegrateEdgeVector(clipped[1], clipped[2]);
+	if (n >= 4)
+		sum += IntegrateEdgeVector(clipped[2], clipped[3]);
+	if (n == 5)
+		sum += IntegrateEdgeVector(clipped[3], clipped[4]);
+
+	sum = twoSided ? abs(sum) : max(float3(0, 0, 0), sum);
+	return sum;
 }
 #endif // SKIP_BINDINGS

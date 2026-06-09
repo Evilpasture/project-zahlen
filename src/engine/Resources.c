@@ -57,3 +57,13 @@ const unsigned char ZHLN_Resource_ToonFragSpv[] = {
 #embed SHADER_TOON_HLSL_PS_PATH
 };
 const unsigned int ZHLN_Resource_ToonFragSpv_Len = sizeof(ZHLN_Resource_ToonFragSpv);
+
+const unsigned char ZHLN_Resource_LtcMatBin[] = {
+#embed "../../resources/shaders/ltc_mat.dds" // <-- Relative path from src/engine/
+};
+const unsigned int ZHLN_Resource_LtcMatBin_Len = sizeof(ZHLN_Resource_LtcMatBin);
+
+const unsigned char ZHLN_Resource_LtcAmpBin[] = {
+#embed "../../resources/shaders/ltc_amp.dds" // <-- Relative path from src/engine/
+};
+const unsigned int ZHLN_Resource_LtcAmpBin_Len = sizeof(ZHLN_Resource_LtcAmpBin);

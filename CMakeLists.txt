@@ -250,6 +250,12 @@ add_dependencies(zahlen_engine zahlen_engine_shadow_shader)
 target_compile_definitions(zahlen_engine PRIVATE SHADER_SHADOW_HLSL_PS_PATH="${SHADOW_FRAG_SPV}")
 set_source_files_properties(src/engine/Resources.c PROPERTIES OBJECT_DEPENDS "${SHADOW_FRAG_SPV}")
 
+# --- 6.1 LTC C23 EMBED DEPENDENCIES ---
+set_property(SOURCE src/engine/Resources.c APPEND PROPERTY OBJECT_DEPENDS 
+    "${CMAKE_SOURCE_DIR}/resources/shaders/ltc_mat.dds"
+    "${CMAKE_SOURCE_DIR}/resources/shaders/ltc_amp.dds"
+)
+
 # --- 7. EXECUTABLE TARGETS ---
 
 # Game Client Executable

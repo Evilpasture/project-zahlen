@@ -734,6 +734,16 @@ void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
 				sizeof(FrameUniforms));
 }
 
+void SetLights(RenderContext& ctx, const GPULight* lights, uint32_t count) {
+	auto* impl = ctx.GetImpl();
+	uint32_t safeCount = ZHLN::Min(count, 128u);
+	if (safeCount > 0 && lights != nullptr) {
+		// Flat, direct memory copy into the active frame's SSBO mapped region
+		std::memcpy(impl->lightStorageBuffers[impl->frame_index].Map().data, lights,
+					sizeof(GPULight) * safeCount);
+	}
+}
+
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 		  const JPH::Mat44& transform, const JPH::Mat44& prevTransform, float cullRadius,
 		  uint32_t jointOffset, bool isSkinned, uint32_t morphOffset, uint32_t activeMorphCount,

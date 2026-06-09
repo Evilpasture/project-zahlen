@@ -64,6 +64,7 @@ void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj,
 				 const JPH::Mat44& unjitteredViewProj);
 void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
 				  const JPH::Mat44& shadowProjView);
+void SetLights(RenderContext& ctx, const GPULight* lights, uint32_t count);
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 		  const JPH::Mat44& transform, const JPH::Mat44& prevTransform, float cullRadius = 1.0f,
 		  uint32_t jointOffset = 0, bool isSkinned = false, uint32_t morphOffset = 0,

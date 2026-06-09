@@ -111,15 +111,21 @@ struct Mesh {
 // Align structures to 16-byte boundaries to match HLSL std430 layout
 struct alignas(16) GPULight {
 	float position[3];
-	uint32_t type; // 0 = Directional, 1 = Point, 2 = Spot
+	uint32_t type; // 0 = Dir, 1 = Point, 2 = Spot, 3 = Area (LTC Quad)
 	float color[3];
 	float intensity;
 	float direction[3];
 	float range;
+
+	// --- Area Light Specific (64 Bytes) ---
+	float points[4][4]; // XYZ = World Space Vertices, W = Padding / Flags
+
+	float radius;
 	float innerConeCos;
 	float outerConeCos;
-	float _padding[2];
+	uint32_t twoSided; // 0 = Single-Sided, 1 = Double-Sided Area Light
 };
+static_assert(sizeof(GPULight) == 128, "GPULight must be exactly 128 bytes for SSBO alignment");
 
 struct alignas(16) FrameUniforms {
 	JPH::Mat44 viewProj;

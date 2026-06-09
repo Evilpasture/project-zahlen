@@ -18,4 +18,6 @@ DECLARE_RESOURCE(ZHLN_Resource_CullingCompSpv)
 DECLARE_RESOURCE(ZHLN_Resource_ShadowFragSpv)
 DECLARE_RESOURCE(ZHLN_Resource_ToonVertSpv)
 DECLARE_RESOURCE(ZHLN_Resource_ToonFragSpv)
+DECLARE_RESOURCE(ZHLN_Resource_LtcMatBin)
+DECLARE_RESOURCE(ZHLN_Resource_LtcAmpBin)
 }

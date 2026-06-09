@@ -33,11 +33,13 @@ using GlobalSceneLayout = Vk::DescriptorLayout<
 	Vk::StorageBufferSlot<7, VK_SHADER_STAGE_VERTEX_BIT>, // Joint matrices (SSBO)
 
 	// --- NEW: IBL DESCRIPTOR BINDINGS ---
-	Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>,	// Irradiance Cubemap (Diffuse IBL)
-	Vk::SampledImageSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,	// Pre-filtered Cubemap (Specular IBL)
-	Vk::SampledImageSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>, // 2D BRDF LUT (2D Texture)
-	Vk::StorageBufferSlot<11, VK_SHADER_STAGE_VERTEX_BIT>,	// Morph target deltas (SSBO)
-	Vk::SamplerSlot<12, VK_SHADER_STAGE_FRAGMENT_BIT>>;
+	Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>,	 // Irradiance Cubemap (Diffuse IBL)
+	Vk::SampledImageSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,	 // Pre-filtered Cubemap (Specular IBL)
+	Vk::SampledImageSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>,	 // 2D BRDF LUT (2D Texture)
+	Vk::StorageBufferSlot<11, VK_SHADER_STAGE_VERTEX_BIT>,	 // Morph target deltas (SSBO)
+	Vk::SamplerSlot<12, VK_SHADER_STAGE_FRAGMENT_BIT>,		 // Clamping
+	Vk::SampledImageSlot<13, VK_SHADER_STAGE_FRAGMENT_BIT>,	 // LTC Matrix
+	Vk::SampledImageSlot<14, VK_SHADER_STAGE_FRAGMENT_BIT>>; // LTC Amplitude
 
 using TAALayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SampledImageSlot<1>,
 									   Vk::SampledImageSlot<2>, Vk::SamplerSlot<3>>;
@@ -150,6 +152,11 @@ struct RenderContext::Impl {
 	Vk::RenderTarget<VK_FORMAT_D32_SFLOAT> shadowMap;
 	Vk::Sampler shadowSampler;
 	Vk::Sampler clampSampler;
+
+	Vk::Image ltcMatImage;
+	Vk::ImageView ltcMatView;
+	Vk::Image ltcAmpImage;
+	Vk::ImageView ltcAmpView;
 
 	ZHLN::DoubleBuffered<Vk::Buffer> frameUniformBuffers;
 	ZHLN::DoubleBuffered<Vk::Buffer> lightStorageBuffers;

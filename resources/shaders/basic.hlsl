@@ -238,31 +238,77 @@ PSOutput PSMain(VSOutput input) {
 	float3 kD = (1.0 - F) * (1.0 - metallic);
 	float3 directSun = (kD * albedo.rgb / 3.14159 + spec) * 10.0 * NdotL_sun * shadow;
 
-	// Process punctual lights (point/spots) in the SSBO
+	// Process punctual and area lights in the SSBO
 	float3 directPunctual = float3(0, 0, 0);
 	for (uint i = 0; i < frame.lightCount; i++) {
 		Light light = lights[i];
-		float3 L = light.position - input.worldPos;
-		float dist = length(L);
-		L = normalize(L);
 
-		float NdotL = max(dot(worldNormal, L), 0.0);
-		float atten = 1.0 / (dist * dist + 0.01); // Standard falloff
+		// AREA LIGHT EVALUATION
+		if (light.type == 3) {
+			float NdotV = saturate(dot(worldNormal, V));
+			float2 uv = float2(roughness, sqrt(1.0f - NdotV));
 
-		if (NdotL > 0.0) {
-			float3 H = normalize(V + L);
-			float D_p = DistributionGGX(worldNormal, H, roughness);
-			float G_p = GeometrySmith(worldNormal, V, L, roughness);
-			float3 F_p = FresnelSchlick(max(dot(H, V), 0.0), F0);
-			float3 spec_p =
-				(D_p * G_p * F_p) / (4.0 * max(dot(worldNormal, V), 0.0) * NdotL + 0.0001);
-			float3 kD_p = (1.0 - F_p) * (1.0 - metallic);
+			// Reconstruct LTC Matrix
+			float4 t1 = ltc_mat.SampleLevel(clampSampler, uv, 0.0f);
+			float3x3 Minv = float3x3(float3(t1.x, 0.0f, t1.y), float3(0.0f, 1.0f, 0.0f),
+									 float3(t1.z, 0.0f, t1.w));
 
-			directPunctual += (kD_p * albedo.rgb / 3.14159 + spec_p) * light.color *
-							  light.intensity * atten * NdotL;
+			// Reconstruct amplitude and fresnel
+			float4 t2 = ltc_amp.SampleLevel(clampSampler, uv, 0.0f);
+			float2 schlick = float2(t2.x, t2.y);
+
+			// Specular Evaluation
+			float3 specLTC = LTC_Evaluate(worldNormal, V, input.worldPos, Minv, light.points,
+										  light.twoSided == 1);
+			specLTC *= F0 * schlick.x + (1.0 - F0) * schlick.y;
+
+			// Diffuse Evaluation (Identity Matrix approximation)
+			float3 diffLTC =
+				LTC_Evaluate(worldNormal, V, input.worldPos, float3x3(1, 0, 0, 0, 1, 0, 0, 0, 1),
+							 light.points, light.twoSided == 1);
+			float3 kD_LTC = (1.0 - metallic);
+
+			directPunctual +=
+				(kD_LTC * albedo.rgb * diffLTC + specLTC) * light.color * light.intensity;
+		} else {
+			// Base distance vectors
+			float3 L_unnorm = light.position - input.worldPos;
+			float distToCenter = length(L_unnorm);
+			float3 L_center = L_unnorm / (distToCenter + 1e-5f);
+
+			// --- MOST REPRESENTATIVE POINT (MRP) APPROXIMATION ---
+			float3 closestPoint = light.position;
+			if (light.radius > 0.0f) {
+				float3 R_light = reflect(-V, worldNormal);
+				// Move light position strictly toward the reflection ray
+				closestPoint -= R_light * min(light.radius, distToCenter);
+			}
+
+			// Recalculate L based on the new MRP surface contact point
+			float3 L = normalize(closestPoint - input.worldPos);
+			float NdotL = max(dot(worldNormal, L), 0.0);
+			float atten = 1.0 / (distToCenter * distToCenter +
+								 0.01); // Standard falloff (using actual center distance)
+
+			if (NdotL > 0.0) {
+				// Energy Conservation: Widen apparent roughness based on light radius
+				float sphereAngle = saturate(light.radius / (distToCenter + 1e-5f));
+				float modRoughness = saturate(roughness + sphereAngle * 0.5f);
+
+				float3 H = normalize(V + L);
+				float D_p = DistributionGGX(worldNormal, H, modRoughness);
+				float G_p = GeometrySmith(worldNormal, V, L, modRoughness);
+				float3 F_p = FresnelSchlick(max(dot(H, V), 0.0), F0);
+
+				float3 spec_p =
+					(D_p * G_p * F_p) / (4.0 * max(dot(worldNormal, V), 0.0) * NdotL + 0.0001);
+				float3 kD_p = (1.0 - F_p) * (1.0 - metallic);
+
+				directPunctual += (kD_p * albedo.rgb / 3.14159 + spec_p) * light.color *
+								  light.intensity * atten * NdotL;
+			}
 		}
 	}
-
 	// --- NEW: FULL PBR INDIRECT IMAGE-BASED LIGHTING (IBL) ---
 	float3 R = reflect(-V, worldNormal);
 	float3 F_rough = FresnelSchlickRoughness(max(dot(worldNormal, V), 0.0), F0, roughness);
@@ -273,12 +319,13 @@ PSOutput PSMain(VSOutput input) {
 	float3 irradiance = irradianceMap.Sample(clampSampler, worldNormal).rgb;
 	float3 diffuseIBL = irradiance * albedo.rgb;
 
-	// Specular IBL (Assuming 1 pre-filtered mip level is bound at the top)
-	float3 prefilteredColor = prefilteredMap.SampleLevel(clampSampler, R, 0.0).rgb;
+	// Specular IBL (6 Mip Levels: 0.0 to 5.0)
+	float maxMipLevel = 5.0f;
+	float3 prefilteredColor =
+		prefilteredMap.SampleLevel(clampSampler, R, roughness * maxMipLevel).rgb;
 	float2 envBRDF =
 		brdfLUT.Sample(clampSampler, float2(max(dot(worldNormal, V), 0.0), roughness)).rg;
 	float3 specularIBL = prefilteredColor * (F_rough * envBRDF.x + envBRDF.y);
-
 	float3 ambient = (kD_rough * diffuseIBL + specularIBL);
 
 	// Combine all lighting
