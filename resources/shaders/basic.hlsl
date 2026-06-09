@@ -235,6 +235,11 @@ PSOutput PSMain(VSOutput input) {
 	float3 N = normalize(input.normal);
 	float3 worldNormal = N;
 
+	// Automatically applies a glossy clear coat lacquer to smooth materials
+	float clearcoat =
+		saturate((1.0f - roughnessFactor) * 2.0f - 1.0f) * (1.0f - metallicFactor * 0.5f);
+	const float clearcoatRoughness = 0.05f; // Highly glossy, flat outer shell
+
 	if (any(input.tangent.xyz)) {
 		float3 T_unnorm = input.tangent.xyz - dot(input.tangent.xyz, N) * N;
 		if (dot(T_unnorm, T_unnorm) < 0.0001f) {
@@ -277,8 +282,23 @@ PSOutput PSMain(VSOutput input) {
 	float3 FmsEms_sun = (Favg * (1.0f - Ev_sun)) / (1.0f - Favg * (1.0f - Eavg_sun));
 
 	float3 kD_sun = (1.0f - Ev_sun - FmsEms_sun) * (1.0f - metallic);
-	float3 directSun =
-		(kD_sun * albedo.rgb / 3.14159265f + totalSpecular) * 10.0 * NdotL_sun * shadow;
+
+	// --- 4. CLEAR COAT spec lobe ---
+	float3 H_coat = normalize(V + L_sun + 1e-5f);
+	float NdotL_coat = saturate(dot(N, L_sun)); // Note: Uses geometric normal N!
+	float NdotV_coat = saturate(dot(N, V));		// Note: Uses geometric normal N!
+
+	float D_coat = DistributionGGX(N, H_coat, clearcoatRoughness);
+	float G_coat = GeometrySmith(N, V, L_sun, clearcoatRoughness);
+	float3 F_coat = FresnelSchlick(saturate(dot(H_coat, V)), 0.04f); // Fixed clear coat F0 = 0.04
+
+	float3 spec_coat = (D_coat * G_coat * F_coat) / max(4.0 * NdotV_coat * NdotL_coat, 0.001);
+
+	// --- 5. Energy-Conserved Layer Blending ---
+	float3 baseAttenuation = 1.0f - F_coat * clearcoat;
+	float3 directSun = (spec_coat * clearcoat +
+						baseAttenuation * (kD_sun * albedo.rgb / 3.14159265f + totalSpecular)) *
+					   10.0 * NdotL_sun * shadow;
 
 	// Process punctual and area lights in the SSBO
 	float3 directPunctual = float3(0, 0, 0);
@@ -358,8 +378,24 @@ PSOutput PSMain(VSOutput input) {
 
 				float3 kD_p = (1.0f - Ev_p - FmsEms_p) * (1.0f - metallic);
 
-				directPunctual += (kD_p * albedo.rgb / 3.14159265f + totalSpecular_p) *
-								  light.color * light.intensity * atten * NdotL;
+				// --- 4. CLEAR COAT spec lobe ---
+				float3 H_coat = normalize(V + L);
+				float NdotL_coat = saturate(dot(N, L)); // Geometric normal
+				float NdotV_coat = saturate(dot(N, V)); // Geometric normal
+
+				float D_coat = DistributionGGX(N, H_coat, clearcoatRoughness);
+				float G_coat = GeometrySmith(N, V, L, clearcoatRoughness);
+				float3 F_coat = FresnelSchlick(saturate(dot(H_coat, V)), 0.04f);
+
+				float3 spec_coat_p =
+					(D_coat * G_coat * F_coat) / max(4.0 * NdotV_coat * NdotL_coat, 0.001);
+
+				// --- 5. Energy-Conserved Layer Blending ---
+				float3 baseAttenuation_p = 1.0f - F_coat * clearcoat;
+				directPunctual +=
+					(spec_coat_p * clearcoat +
+					 baseAttenuation_p * (kD_p * albedo.rgb / 3.14159265f + totalSpecular_p)) *
+					light.color * light.intensity * atten * NdotL;
 			}
 		}
 	}
@@ -406,7 +442,23 @@ PSOutput PSMain(VSOutput input) {
 	float3 kD_IBL = (1.0f - FssEss - FmsEms) * (1.0f - metallic);
 	float3 diffuseIBL = kD_IBL * albedo.rgb * irradiance;
 
-	float3 ambient = diffuseIBL + specularIBL + multiScatterIBL;
+	// --- 5. CLEAR COAT SPECULAR IBL ---
+	float3 R_geom = reflect(-V, N); // Flat geometric reflection (no normal map bumps)
+	float3 correctedR_coat = R_geom;
+	if (frame.probeMin.w > 0.0f) {
+		correctedR_coat = BoxParallaxCorrection(input.worldPos, R_geom, frame.probeMin.xyz,
+												frame.probeMax.xyz, frame.probePos.xyz);
+	}
+	float3 prefilteredCoatColor =
+		prefilteredMap.SampleLevel(clampSampler, correctedR_coat, clearcoatRoughness * maxMipLevel)
+			.rgb;
+	float3 F_coat_IBL = FresnelSchlickRoughness(max(dot(N, V), 0.0), 0.04f, clearcoatRoughness);
+	float3 clearcoatSpecularIBL = prefilteredCoatColor * F_coat_IBL * clearcoat;
+
+	// --- 6. Final Layer Blending ---
+	float3 baseIBLAttenuation = 1.0f - F_coat_IBL * clearcoat;
+	float3 ambient =
+		clearcoatSpecularIBL + baseIBLAttenuation * (diffuseIBL + specularIBL + multiScatterIBL);
 
 	// Combine all lighting
 	float3 finalLight = ambient + directSun + directPunctual + emissive;
