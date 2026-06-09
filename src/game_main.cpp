@@ -57,6 +57,12 @@ namespace {
 static std::vector<Entity> s_PomniParts;
 static Entity s_PlayerEntity = NullEntity;
 static float s_CamDistance = 4.5f;
+static int s_GIMode = 1;		   // 0 = Off, 1 = SSAO, 2 = SSGI
+static float s_AORadius = 0.5f;	   // Radius in meters
+static float s_AOBias = 0.05f;	   // Self-occlusion offset
+static float s_AOPower = 1.8f;	   // SSAO contrast
+static float s_GIIntensity = 1.2f; // SSGI bounce strength
+static int s_GISamples = 8;		   // Hemisphere ray samples count
 
 static constexpr FrustumEdge s_FrustumEdges[12] = {
 	{.start = 0, .end = 1}, {.start = 1, .end = 2},
@@ -243,6 +249,30 @@ void ZHLN::UpdateGame(Engine& engine, float dt, float& physicsAccumulator) {
 	ImGui::Separator();
 	ImGui::SliderFloat("Floor Roughness", &s_FloorRoughness, 0.0f, 1.0f);
 	ImGui::SliderFloat("Floor Metallic", &s_FloorMetallic, 0.0f, 1.0f);
+
+	// --- NEW: COOPERATIVE SSAO / SSGI CONTROLLER ---
+	ImGui::SeparatorText("Ambient Occlusion & Global Illumination");
+	const char* giModesList[] = {"Off", "SSAO (Ambient Occlusion)", "SSGI (Screen Space GI)",
+								 "HBAO (Horizon-Based AO)", "GTAO (Ground Truth AO)"};
+	ImGui::Combo("GI Mode", &s_GIMode, giModesList, IM_ARRAYSIZE(giModesList));
+
+	if (s_GIMode == 1) { // SSAO Settings
+		ImGui::SliderFloat("AO Radius", &s_AORadius, 0.05f, 2.5f, "%.2fm");
+		ImGui::SliderFloat("AO Bias", &s_AOBias, 0.001f, 0.2f, "%.3f");
+		ImGui::SliderFloat("AO Contrast", &s_AOPower, 0.5f, 5.0f, "%.1fx");
+		ImGui::SliderInt("AO Samples", &s_GISamples, 2, 32);
+	} else if (s_GIMode == 2) { // SSGI Settings
+		ImGui::SliderFloat("Bounce Radius", &s_AORadius, 0.05f, 2.5f, "%.2fm");
+		ImGui::SliderFloat("Bounce Bias", &s_AOBias, 0.001f, 0.2f, "%.3f");
+		ImGui::SliderFloat("GI Bounce Intensity", &s_GIIntensity, 0.1f, 5.0f, "%.1fx");
+		ImGui::SliderInt("GI Samples", &s_GISamples, 2, 32);
+	} else if (s_GIMode == 3 || s_GIMode == 4) { // HBAO / GTAO Settings
+		ImGui::SliderFloat("Search Radius", &s_AORadius, 0.05f, 3.0f, "%.2fm");
+		ImGui::SliderFloat("Acne Bias", &s_AOBias, 0.001f, 0.2f, "%.3f");
+		ImGui::SliderFloat("Shadow Contrast", &s_AOPower, 0.5f, 6.0f, "%.1fx");
+		ImGui::SliderInt("Search Steps", &s_GISamples, 4, 32); // Represents total step count
+	}
+
 	ImGui::End();
 
 	// 3. Hot Reload Script Files
@@ -466,6 +496,13 @@ void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 	std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
 	std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);
 	uniforms.lightCount = static_cast<uint32_t>(sceneLights.size());
+
+	Renderer::SetGISettings(rc, {.mode = s_GIMode,
+								 .aoRadius = s_AORadius,
+								 .aoBias = s_AOBias,
+								 .aoPower = s_AOPower,
+								 .giIntensity = s_GIIntensity,
+								 .giSamples = s_GISamples});
 
 	Renderer::SetLights(rc, sceneLights.data(), uniforms.lightCount); // Upload SSBO to GPU
 	Renderer::SetFrameData(rc, uniforms, shadowProjView);

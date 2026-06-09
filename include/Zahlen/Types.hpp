@@ -164,4 +164,13 @@ struct Material {
 	float alphaCutoff = 0.5f;
 	uint32_t alphaMode = 0; // 0=Opaque, 1=Mask, 2=Blend
 };
+
+struct GISettings {
+	int mode = 1; // 0 = Off, 1 = SSAO, 2 = SSGI
+	float aoRadius = 0.5f;
+	float aoBias = 0.05f;
+	float aoPower = 1.8f;
+	float giIntensity = 1.2f;
+	int giSamples = 8;
+};
 } // namespace ZHLN

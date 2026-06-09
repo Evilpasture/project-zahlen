@@ -186,6 +186,8 @@ struct RenderContext::Impl {
 	Vk::Image brdfLutImage;
 	Vk::ImageView brdfLutView;
 
+	GISettings giSettings{};
+
 	Vk::Buffer morphDeltasBuffer; // Holds all packed morph target deltas
 	uint32_t nextMorphDeltaIndex = 0;
 

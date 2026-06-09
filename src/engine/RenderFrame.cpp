@@ -643,10 +643,24 @@ void RenderContext::Impl::BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, 
 		JPH::Mat44 invViewProj;
 		JPH::Mat44 viewProj;
 		alignas(16) float camPos[4];
+		int giMode;
+		float aoRadius;
+		float aoBias;
+		float aoPower;
+		float giIntensity;
+		int giSamples;
+		float _pad[2];
 	} pc = {.invViewProj = currentUniforms.invViewProj,
 			.viewProj = currentUniforms.unjitteredViewProj,
 			.camPos = {currentUniforms.camPos[0], currentUniforms.camPos[1],
-					   currentUniforms.camPos[2], currentUniforms.camPos[3]}};
+					   currentUniforms.camPos[2], currentUniforms.camPos[3]},
+			.giMode = giSettings.mode,			   // <-- READ FROM LOCAL STATE
+			.aoRadius = giSettings.aoRadius,	   // <-- READ FROM LOCAL STATE
+			.aoBias = giSettings.aoBias,		   // <-- READ FROM LOCAL STATE
+			.aoPower = giSettings.aoPower,		   // <-- READ FROM LOCAL STATE
+			.giIntensity = giSettings.giIntensity, // <-- READ FROM LOCAL STATE
+			.giSamples = giSettings.giSamples,	   // <-- READ FROM LOCAL STATE
+			._pad = {}};
 	if (blitPass.pipeline.Valid()) {
 		Vk::DynamicPass<1, false>(extent)
 			.Color(0, swap_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
@@ -794,6 +808,11 @@ void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
 
 	std::memcpy(impl->frameUniformBuffers[impl->frame_index].Map().data, &impl->currentUniforms,
 				sizeof(FrameUniforms));
+}
+
+void SetGISettings(RenderContext& ctx, const GISettings& settings) {
+	auto* impl = ctx.GetImpl();
+	impl->giSettings = settings;
 }
 
 void SetLights(RenderContext& ctx, const GPULight* lights, uint32_t count) {
