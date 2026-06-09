@@ -2,6 +2,8 @@
 
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/ModelPrefab.hpp>
+#include <cgltf.h>
 #include <cstring>
 #include <detail/ControlFlow.hpp>
 #include <engine/Platform.hpp>
@@ -27,6 +29,13 @@ AssetManager::~AssetManager() {
 		Platform::CloseMappedFile(_archives[i]->mapped);
 		delete _archives[i];
 	}
+	for (size_t i = 0; i < _prefabsCount; ++i) {
+		auto* prefab = _prefabsMemory[i];
+		if (prefab->rawData)
+			cgltf_free(prefab->rawData);
+		delete prefab;
+	}
+	delete[] _prefabsMemory;
 	delete[] _archives;
 }
 
@@ -163,6 +172,33 @@ void AssetManager::FreeAssetMemory(AssetLoadRequest& req) {
 		::operator delete[](req.outData, std::align_val_t{16});
 	}
 	req.outData = nullptr;
+}
+
+ModelPrefab* AssetManager::GetCachedPrefab(uint64_t hash) {
+	ZHLN_LOCK(_prefabMutex) {
+		const auto* entry = _prefabCache.Find(hash);
+		if (entry != nullptr) {
+			return *entry;
+		}
+		return nullptr;
+	}
+}
+
+void AssetManager::CachePrefab(uint64_t hash, ModelPrefab* prefab) {
+	ZHLN_LOCK(_prefabMutex) {
+		_prefabCache.Insert(hash, prefab);
+		if (_prefabsCount >= _prefabsCapacity) {
+			size_t newCap = _prefabsCapacity == 0 ? 8 : _prefabsCapacity * 2;
+			auto** newArrs = new ModelPrefab*[newCap];
+			if (_prefabsMemory != nullptr) {
+				std::memcpy(newArrs, _prefabsMemory, _prefabsCount * sizeof(ModelPrefab*));
+				delete[] _prefabsMemory;
+			}
+			_prefabsMemory = newArrs;
+			_prefabsCapacity = newCap;
+		}
+		_prefabsMemory[_prefabsCount++] = prefab;
+	}
 }
 
 } // namespace ZHLN

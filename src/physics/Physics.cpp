@@ -237,11 +237,19 @@ void PhysicsContext::Step(float deltaTime) {
 
 	_impl->physicsSystem.Update(deltaTime, 2, _impl->tempAllocator.get(), &_impl->jobSystem);
 
+	// Pre-configure stair walking settings for kinematic virtual controllers
+	JPH::CharacterVirtual::ExtendedUpdateSettings updateSettings;
+	updateSettings.mWalkStairsStepUp =
+		JPH::Vec3(0.0f, 0.5f, 0.0f); // Steps over obstacles up to 0.5m
+	updateSettings.mStickToFloorStepDown =
+		JPH::Vec3(0.0f, -0.5f, 0.0f); // Snaps smoothly going down steps up to 0.5m
+
 	for (auto* character : _impl->activeCharacters) {
-		character->Update(deltaTime, _impl->physicsSystem.GetGravity(),
-						  _impl->physicsSystem.GetDefaultBroadPhaseLayerFilter(Layers::MOVING),
-						  _impl->physicsSystem.GetDefaultLayerFilter(Layers::MOVING), {}, {},
-						  *_impl->tempAllocator);
+		character->ExtendedUpdate(
+			deltaTime, _impl->physicsSystem.GetGravity(), updateSettings,
+			_impl->physicsSystem.GetDefaultBroadPhaseLayerFilter(Layers::MOVING),
+			_impl->physicsSystem.GetDefaultLayerFilter(Layers::MOVING), {}, {},
+			*_impl->tempAllocator);
 	}
 
 	// 3. Data Synchronization Pass (Jolt SoA -> Engine Shadow SoA)

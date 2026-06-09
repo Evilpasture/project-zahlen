@@ -13,6 +13,8 @@ namespace TaskSystem {
 struct Counter;
 }
 
+struct ModelPrefab;
+
 // ============================================================================
 // Hashing Utility
 // ============================================================================
@@ -118,6 +120,14 @@ class AssetManager {
 	 */
 	void FreeAssetMemory(AssetLoadRequest& req);
 
+	/**
+	 * @brief Fetches a cached ModelPrefab, or returns nullptr if not loaded.
+	 */
+	ModelPrefab* GetCachedPrefab(uint64_t hash);
+
+	// Internal hook for the AssetFactory to register a newly loaded Prefab
+	void CachePrefab(uint64_t hash, ModelPrefab* prefab);
+
   private:
 	void ExecuteLoad(AssetLoadRequest* req);
 
@@ -127,6 +137,13 @@ class AssetManager {
 
 	HashMap<uint64_t, CatalogEntry> _catalog;
 	Mutex _catalogMutex;
+
+	// Prefab Cache tracking
+	HashMap<uint64_t, ModelPrefab*> _prefabCache;
+	ModelPrefab** _prefabsMemory = nullptr;
+	size_t _prefabsCount = 0;
+	size_t _prefabsCapacity = 0;
+	Mutex _prefabMutex;
 };
 
 } // namespace ZHLN

@@ -5,7 +5,11 @@
 #include "ecs/ECS.hpp"
 #include "physics/Physics.hpp"
 
+#include <Jolt/Physics/Collision/Shape/BoxShape.h>
+#include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
+#include <Jolt/Physics/Collision/Shape/ScaledShape.h>
 #include <Zahlen/AssetFactory.hpp>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <algorithm>
@@ -81,227 +85,77 @@ static uint32_t LoadEmbeddedTexture(RenderContext& ctx, cgltf_image* img,
 	return index;
 }
 
-Mesh LoadGLB(RenderContext& ctx, std::string_view path) {
-	cgltf_options opts{};
-	cgltf_data* data = nullptr;
-
-	std::string pathStr(path);
-	if (cgltf_parse_file(&opts, pathStr.c_str(), &data) != cgltf_result_success) {
-		Log("ERROR: Failed to parse GLB file: {}", path);
-		return {};
+ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::string_view path) {
+	uint64_t hash = HashAssetPath(path);
+	if (auto* cached = assetMgr.GetCachedPrefab(hash)) {
+		return cached;
 	}
 
-	if (cgltf_load_buffers(&opts, data, pathStr.c_str()) != cgltf_result_success) {
-		Log("ERROR: Failed to load GLB buffers: {}", path);
-		cgltf_free(data);
-		return {};
-	}
-
-	std::vector<Vertex> vertexBuffer;
-
-	for (cgltf_size i = 0; i < data->nodes_count; ++i) {
-		const cgltf_node* node = &data->nodes[i];
-		if (node->mesh == nullptr) {
-			continue;
-		}
-
-		float matrix[16];
-		cgltf_node_transform_world(node, matrix);
-
-		const auto* mesh = node->mesh;
-		for (cgltf_size p = 0; p < mesh->primitives_count; ++p) {
-			const auto& prim = mesh->primitives[p];
-
-			cgltf_accessor* posAcc = nullptr;
-			cgltf_accessor* normAcc = nullptr;
-			cgltf_accessor* tangentAcc = nullptr;
-			cgltf_accessor* uvAcc = nullptr;
-
-			for (cgltf_size a = 0; a < prim.attributes_count; ++a) {
-				const auto& attr = prim.attributes[a];
-				if (attr.type == cgltf_attribute_type_position) {
-					posAcc = attr.data;
-				} else if (attr.type == cgltf_attribute_type_normal) {
-					normAcc = attr.data;
-				} else if (attr.type == cgltf_attribute_type_tangent) {
-					tangentAcc = attr.data;
-				} else if (attr.type == cgltf_attribute_type_texcoord && attr.index == 0) {
-					uvAcc = attr.data;
-				}
-			}
-
-			if (posAcc == nullptr) {
-				continue;
-			}
-
-			size_t vertexCount = posAcc->count;
-			std::vector<Vertex> primVertices(vertexCount);
-
-			for (size_t vIdx = 0; vIdx < vertexCount; ++vIdx) {
-				Vertex& v = primVertices[vIdx];
-				std::memset(&v, 0, sizeof(Vertex));
-
-				float rawPos[3] = {0.0f, 0.0f, 0.0f};
-				cgltf_accessor_read_float(posAcc, vIdx, rawPos, 3);
-
-				v.position[0] = matrix[0] * rawPos[0] + matrix[4] * rawPos[1] +
-								matrix[8] * rawPos[2] + matrix[12];
-				v.position[1] = matrix[1] * rawPos[0] + matrix[5] * rawPos[1] +
-								matrix[9] * rawPos[2] + matrix[13];
-				v.position[2] = matrix[2] * rawPos[0] + matrix[6] * rawPos[1] +
-								matrix[10] * rawPos[2] + matrix[14];
-
-				float rawNorm[3] = {0.0f, 1.0f, 0.0f};
-				if (normAcc != nullptr) {
-					cgltf_accessor_read_float(normAcc, vIdx, rawNorm, 3);
-				}
-				float nx = matrix[0] * rawNorm[0] + matrix[4] * rawNorm[1] + matrix[8] * rawNorm[2];
-				float ny = matrix[1] * rawNorm[0] + matrix[5] * rawNorm[1] + matrix[9] * rawNorm[2];
-				float nz =
-					matrix[2] * rawNorm[0] + matrix[6] * rawNorm[1] + matrix[10] * rawNorm[2];
-				float nLen = std::sqrt(nx * nx + ny * ny + nz * nz);
-				if (nLen > 1e-6f) {
-					nx /= nLen;
-					ny /= nLen;
-					nz /= nLen;
-				}
-				v.normal = Math::PackNormal(nx, ny, nz);
-
-				float rawTangent[4] = {1.0f, 0.0f, 0.0f, 1.0f};
-				if (tangentAcc != nullptr) {
-					cgltf_accessor_read_float(tangentAcc, vIdx, rawTangent, 4);
-				}
-				float tx = matrix[0] * rawTangent[0] + matrix[4] * rawTangent[1] +
-						   matrix[8] * rawTangent[2];
-				float ty = matrix[1] * rawTangent[0] + matrix[5] * rawTangent[1] +
-						   matrix[9] * rawTangent[2];
-				float tz = matrix[2] * rawTangent[0] + matrix[6] * rawTangent[1] +
-						   matrix[10] * rawTangent[2];
-				float tLen = std::sqrt(tx * tx + ty * ty + tz * tz);
-				if (tLen > 1e-6f) {
-					tx /= tLen;
-					ty /= tLen;
-					tz /= tLen;
-				}
-				v.tangent = Math::PackNormal(tx, ty, tz, rawTangent[3]);
-
-				float uv[2] = {0.0f, 0.0f};
-				if (uvAcc != nullptr) {
-					cgltf_accessor_read_float(uvAcc, vIdx, uv, 2);
-				}
-				v.uv = Math::PackUV(uv[0], uv[1]);
-
-				v.color = Math::PackColor(1.0f, 1.0f, 1.0f, 1.0f);
-
-				v.joints[0] = 0;
-				v.joints[1] = 0;
-				v.joints[2] = 0;
-				v.joints[3] = 0;
-				v.weights[0] = 0.0f;
-				v.weights[1] = 0.0f;
-				v.weights[2] = 0.0f;
-				v.weights[3] = 0.0f;
-			}
-
-			if (prim.indices != nullptr) {
-				size_t indexCount = prim.indices->count;
-				for (size_t idx = 0; idx < indexCount; ++idx) {
-					size_t originalIdx = cgltf_accessor_read_index(prim.indices, idx);
-					vertexBuffer.push_back(primVertices[originalIdx]);
-				}
-			} else {
-				vertexBuffer.insert(vertexBuffer.end(), primVertices.begin(), primVertices.end());
-			}
-		}
-	}
-
-	cgltf_free(data);
-
-	if (vertexBuffer.empty()) {
-		Log("WARNING: Loaded GLB has no geometry: {}", path);
-		return {};
-	}
-
-	BufferHandle vbo =
-		ctx.CreateVertexBuffer(vertexBuffer.data(), vertexBuffer.size() * sizeof(Vertex));
-	Log("Loaded GLB: {} ({} vertices uploaded, world-transforms baked)", path, vertexBuffer.size());
-	return Mesh{.vertexBuffer = vbo, .vertexCount = static_cast<uint32_t>(vertexBuffer.size())};
-}
-
-template <bool CreatePhysics, bool Animated>
-uint32_t SpawnGLB(RenderContext& ctx, ECS::Registry& reg, std::string_view path, Entity* outBuffer,
-				  uint32_t maxCount) {
 	cgltf_options opts{};
 	cgltf_data* data = nullptr;
 
 	std::string pathStr(path);
 	std::string rawPath = "resources/assets/" + pathStr;
 
-	if (s_GLBCache.contains(pathStr)) {
-		data = s_GLBCache[pathStr];
-	} else {
-		if (cgltf_parse_file(&opts, rawPath.c_str(), &data) != cgltf_result_success) {
-			Log("ERROR: Failed to parse GLB: {}", rawPath);
-			return 0;
-		}
+	if (cgltf_parse_file(&opts, rawPath.c_str(), &data) != cgltf_result_success) {
+		Log("ERROR: Failed to parse GLB: {}", rawPath);
+		return nullptr;
+	}
 
-		if (cgltf_load_buffers(&opts, data, rawPath.c_str()) != cgltf_result_success) {
-			Log("ERROR: Failed to load GLB buffers: {}", rawPath);
-			cgltf_free(data);
-			return 0;
-		}
-		s_GLBCache[pathStr] = data;
+	if (cgltf_load_buffers(&opts, data, rawPath.c_str()) != cgltf_result_success) {
+		Log("ERROR: Failed to load GLB buffers: {}", rawPath);
+		cgltf_free(data);
+		return nullptr;
+	}
 
-		// Decompose all static matrices into standard TRS paths
-		for (cgltf_size idx = 0; idx < data->nodes_count; ++idx) {
-			cgltf_node* node = &data->nodes[idx];
-			if (node->has_matrix) {
-				node->has_translation = 1;
-				node->translation[0] = node->matrix[12];
-				node->translation[1] = node->matrix[13];
-				node->translation[2] = node->matrix[14];
+	auto prefab = std::make_unique<ModelPrefab>();
+	prefab->virtualPath = String256(pathStr);
+	prefab->rawData = data;
 
-				JPH::Vec3 col0(node->matrix[0], node->matrix[1], node->matrix[2]);
-				JPH::Vec3 col1(node->matrix[4], node->matrix[5], node->matrix[6]);
-				JPH::Vec3 col2(node->matrix[8], node->matrix[9], node->matrix[10]);
+	// Decompose all static matrices into standard TRS paths
+	for (cgltf_size idx = 0; idx < data->nodes_count; ++idx) {
+		cgltf_node* node = &data->nodes[idx];
+		if (node->has_matrix) {
+			node->has_translation = 1;
+			node->translation[0] = node->matrix[12];
+			node->translation[1] = node->matrix[13];
+			node->translation[2] = node->matrix[14];
 
-				node->has_scale = 1;
-				node->scale[0] = col0.Length();
-				node->scale[1] = col1.Length();
-				node->scale[2] = col2.Length();
+			JPH::Vec3 col0(node->matrix[0], node->matrix[1], node->matrix[2]);
+			JPH::Vec3 col1(node->matrix[4], node->matrix[5], node->matrix[6]);
+			JPH::Vec3 col2(node->matrix[8], node->matrix[9], node->matrix[10]);
 
-				if (node->scale[0] > 1e-6f) {
-					col0 /= node->scale[0];
-				}
-				if (node->scale[1] > 1e-6f) {
-					col1 /= node->scale[1];
-				}
-				if (node->scale[2] > 1e-6f) {
-					col2 /= node->scale[2];
-				}
+			node->has_scale = 1;
+			node->scale[0] = col0.Length();
+			node->scale[1] = col1.Length();
+			node->scale[2] = col2.Length();
 
-				JPH::Mat44 rotMat(JPH::Vec4(col0, 0.0f), JPH::Vec4(col1, 0.0f),
-								  JPH::Vec4(col2, 0.0f), JPH::Vec4(0, 0, 0, 1));
-				JPH::Quat rot = rotMat.GetQuaternion();
-
-				node->has_rotation = 1;
-				node->rotation[0] = rot.GetX();
-				node->rotation[1] = rot.GetY();
-				node->rotation[2] = rot.GetZ();
-				node->rotation[3] = rot.GetW();
-
-				node->has_matrix = 0;
+			if (node->scale[0] > 1e-6f) {
+				col0 /= node->scale[0];
 			}
+			if (node->scale[1] > 1e-6f) {
+				col1 /= node->scale[1];
+			}
+			if (node->scale[2] > 1e-6f) {
+				col2 /= node->scale[2];
+			}
+
+			JPH::Mat44 rotMat(JPH::Vec4(col0, 0.0f), JPH::Vec4(col1, 0.0f), JPH::Vec4(col2, 0.0f),
+							  JPH::Vec4(0, 0, 0, 1));
+			JPH::Quat rot = rotMat.GetQuaternion();
+
+			node->has_rotation = 1;
+			node->rotation[0] = rot.GetX();
+			node->rotation[1] = rot.GetY();
+			node->rotation[2] = rot.GetZ();
+			node->rotation[3] = rot.GetW();
+
+			node->has_matrix = 0;
 		}
 	}
 
-	if constexpr (Animated) {
-		if (std::find(s_AnimatedGLBs.begin(), s_AnimatedGLBs.end(), data) == s_AnimatedGLBs.end()) {
-			s_AnimatedGLBs.push_back(data);
-		}
-	}
-
-	uint32_t spawnedCount = 0;
+	std::unordered_map<const cgltf_mesh*, std::vector<ModelPart>> meshCache;
+	std::vector<ModelPart> totalParts; // Flat local collector before array marshaling
 
 	for (cgltf_size i = 0; i < data->nodes_count; ++i) {
 		const cgltf_node* node = &data->nodes[i];
@@ -316,6 +170,29 @@ uint32_t SpawnGLB(RenderContext& ctx, ECS::Registry& reg, std::string_view path,
 								 JPH::Vec4(matrix[4], matrix[5], matrix[6], matrix[7]),
 								 JPH::Vec4(matrix[8], matrix[9], matrix[10], matrix[11]),
 								 JPH::Vec4(matrix[12], matrix[13], matrix[14], matrix[15]));
+
+		// VRAM Deduplication Check
+		auto it = meshCache.find(node->mesh);
+		if (it != meshCache.end()) {
+			for (auto part : it->second) {
+				part.name = node->name ? String64(node->name) : String64("Unnamed");
+				part.localTransform = nodeTransform;
+				part.gltfNode = (cgltf_node*)node;
+				part.gltfSkin = node->skin;
+				part.isSkinned = (node->skin != nullptr);
+
+				if (node->weights_count > 0 && node->weights != nullptr) {
+					part.activeMorphCount = std::min((uint32_t)node->weights_count, 4u);
+					for (uint32_t w = 0; w < part.activeMorphCount; ++w) {
+						part.defaultMorphWeights[w] = node->weights[w];
+					}
+				}
+				totalParts.push_back(part);
+			}
+			continue;
+		}
+
+		std::vector<ModelPart> newParts;
 
 		const auto* mesh = node->mesh;
 		for (cgltf_size p = 0; p < mesh->primitives_count; ++p) {
@@ -502,9 +379,7 @@ uint32_t SpawnGLB(RenderContext& ctx, ECS::Registry& reg, std::string_view path,
 			Mesh subMesh = {.vertexBuffer = vbo,
 							.indexBuffer = ibo,
 							.vertexCount = static_cast<uint32_t>(primVertices.size()),
-							.indexCount = indexCount}; // Check if we are loading character parts to
-													   // assign the toon material
-			// bool isCharacter = (path.contains("POMNI") || path.contains("tadc_models"));
+							.indexCount = indexCount};
 
 			Material subMaterial = CreateBasicMaterial(ctx, doubleSided, alphaBlend);
 
@@ -608,92 +483,146 @@ uint32_t SpawnGLB(RenderContext& ctx, ECS::Registry& reg, std::string_view path,
 				maxD2 = std::max(d2, maxD2);
 			}
 
-			JPH::Vec3 nodeScale(nodeTransform.GetColumn4(0).Length(),
-								nodeTransform.GetColumn4(1).Length(),
-								nodeTransform.GetColumn4(2).Length());
-			float maxScale = std::max({nodeScale.GetX(), nodeScale.GetY(), nodeScale.GetZ()});
+			// Build Local Colliders Once
+			JPH::ShapeRefC staticMeshCollider = nullptr;
+			JPH::ShapeRefC boxCollider = nullptr;
 
-			// Add 20% padding + 1.0m constant to ensure meshes at the absolute edge of the screen
-			// are drawn for TAA history accumulation, preventing edge-pop artifacts.
-			float boundingRadius = std::sqrt(maxD2) * maxScale * 1.2f + 1.0f;
+			float extentsX = (localMax[0] - localMin[0]) * 0.5f;
+			float extentsY = (localMax[1] - localMin[1]) * 0.5f;
+			float extentsZ = (localMax[2] - localMin[2]) * 0.5f;
+			JPH::Vec3 localCenter((localMax[0] + localMin[0]) * 0.5f,
+								  (localMax[1] + localMin[1]) * 0.5f,
+								  (localMax[2] + localMin[2]) * 0.5f);
 
-			Entity part = reg.Create();
-			reg.Add(part, MeshComponent{
+			JPH::ShapeRefC baseBox = new JPH::BoxShape(JPH::Vec3(extentsX, extentsY, extentsZ));
+			boxCollider =
+				new JPH::RotatedTranslatedShape(localCenter, JPH::Quat::sIdentity(), baseBox);
+
+			staticMeshCollider = Physics::CreateMeshShape(
+				primVertices.data(), static_cast<uint32_t>(primVertices.size()), indices32.data(),
+				indexCount);
+
+			ModelPart part = {.name = node->name ? String64(node->name) : String64("Unnamed"),
 							  .mesh = subMesh,
-							  .material = subMaterial,
-							  .cullRadius = boundingRadius,
+							  .defaultMaterial = subMaterial,
 							  .localTransform = nodeTransform,
-							  .prevTransform = nodeTransform,
 							  .jointOffset = 0,
-							  // Only flag skinning and bind nodes if animation is requested [2]
-							  .isSkinned = (node->skin != nullptr) && Animated,
+							  .isSkinned = (node->skin != nullptr),
+							  .gltfNode = (cgltf_node*)node,
+							  .gltfSkin = node->skin,
 							  .morphOffset = morphOffset,
 							  .activeMorphCount = activeMorphCount,
-							  .morphWeights = {defaultWeights[0], defaultWeights[1],
-											   defaultWeights[2], defaultWeights[3]},
-							  .gltfNode = Animated ? (void*)node : nullptr,
-							  .gltfSkin = (Animated && node->skin != nullptr) ? (void*)node->skin
-																			  : nullptr});
+							  .defaultMorphWeights = {defaultWeights[0], defaultWeights[1],
+													  defaultWeights[2], defaultWeights[3]},
+							  .boundingRadius = std::sqrt(maxD2) * 1.2f + 1.0f,
+							  .localMin = {localMin[0], localMin[1], localMin[2]},
+							  .localMax = {localMax[0], localMax[1], localMax[2]},
+							  .meshCollider = staticMeshCollider,
+							  .boxCollider = boxCollider};
+			newParts.push_back(part);
+		}
 
-			// ----------------------------------------------------------------
-			// 3. Compile-time Evaluated Physical Collider Generation
-			// ----------------------------------------------------------------
-			if constexpr (CreatePhysics) { // <-- Evaluated entirely at compile-time!
-				auto& pc = GetEngineContext()->GetPhysicsContext();
-
-				// Create a precise, concave static Jolt MeshShape directly from the GLB vertices
-				// and indices
-				JPH::ShapeRefC meshShape = Physics::CreateMeshShape(
-					primVertices.data(), static_cast<uint32_t>(primVertices.size()),
-					indices32.data(), indexCount);
-
-				if (meshShape) {
-					// We translate and rotate the static body based on the glTF node matrix
-					JPH::Vec3 translation = nodeTransform.GetTranslation();
-					JPH::Vec3 col0 = nodeTransform.GetColumn3(0);
-					JPH::Vec3 col1 = nodeTransform.GetColumn3(1);
-					JPH::Vec3 col2 = nodeTransform.GetColumn3(2);
-
-					if (maxScale > 1e-6f) {
-						col0 /= nodeScale.GetX();
-						col1 /= nodeScale.GetY();
-						col2 /= nodeScale.GetZ();
-					}
-
-					JPH::Mat44 rotationMatrix(JPH::Vec4(col0, 0.0f), JPH::Vec4(col1, 0.0f),
-											  JPH::Vec4(col2, 0.0f),
-											  JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f));
-					JPH::Quat rotation = rotationMatrix.GetQuaternion();
-
-					// Register the static physical body in Jolt
-					reg.Add(part, PhysicsComponent{Physics::CreateRigidBody(
-									  pc, meshShape, JPH::RVec3(translation), rotation,
-									  JPH::EMotionType::Static, 0)});
-				}
-			}
-			if (outBuffer != nullptr && spawnedCount < maxCount) {
-				outBuffer[spawnedCount] = part;
-			}
-			spawnedCount++;
+		meshCache[node->mesh] = newParts;
+		for (auto& p : newParts) {
+			totalParts.push_back(p);
 		}
 	}
 
-	Log("Spawned GLB Model: {} ({} submesh parts/materials loaded dynamically)", path,
-		spawnedCount);
-	return spawnedCount;
+	prefab->partCount = static_cast<uint32_t>(totalParts.size());
+	prefab->parts = new ModelPart[prefab->partCount];
+	for (uint32_t i = 0; i < prefab->partCount; ++i) {
+		prefab->parts[i] = totalParts[i];
+	}
+
+	Log("Loaded GLB Prefab: {} ({} unique mesh parts parsed and cached)", path, prefab->partCount);
+
+	ModelPrefab* result = prefab.release();
+	assetMgr.CachePrefab(hash, result);
+	return result;
 }
 
-template uint32_t SpawnGLB<true, true>(RenderContext& ctx, ECS::Registry& reg,
-									   std::string_view path, Entity* outBuffer, uint32_t maxCount);
-template uint32_t SpawnGLB<true, false>(RenderContext& ctx, ECS::Registry& reg,
-										std::string_view path, Entity* outBuffer,
-										uint32_t maxCount);
-template uint32_t SpawnGLB<false, true>(RenderContext& ctx, ECS::Registry& reg,
-										std::string_view path, Entity* outBuffer,
-										uint32_t maxCount);
-template uint32_t SpawnGLB<false, false>(RenderContext& ctx, ECS::Registry& reg,
-										 std::string_view path, Entity* outBuffer,
-										 uint32_t maxCount);
+uint32_t InstantiatePrefab(RenderContext& ctx, ECS::Registry& reg, PhysicsContext& pc,
+						   const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer,
+						   uint32_t maxCount) {
+	uint32_t spawnedCount = 0;
+
+	if (params.isAnimated && prefab.rawData != nullptr) {
+		if (std::find(s_AnimatedGLBs.begin(), s_AnimatedGLBs.end(), prefab.rawData) ==
+			s_AnimatedGLBs.end()) {
+			s_AnimatedGLBs.push_back(prefab.rawData);
+		}
+	}
+
+	for (uint32_t i = 0; i < prefab.partCount; ++i) {
+		const auto& part = prefab.parts[i];
+
+		Entity e = reg.Create();
+
+		float scaleMult = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
+
+		JPH::Mat44 baseTransform = Math::CreateTransform(
+			JPH::Vec3(params.position.GetX(), params.position.GetY(), params.position.GetZ()),
+			params.rotation, params.scale);
+		JPH::Mat44 finalLocal = baseTransform * part.localTransform;
+
+		// Calculate total world scale of the node
+		JPH::Vec3 nodeScale(part.localTransform.GetColumn4(0).Length(),
+							part.localTransform.GetColumn4(1).Length(),
+							part.localTransform.GetColumn4(2).Length());
+		float nodeMaxScale = std::max({nodeScale.GetX(), nodeScale.GetY(), nodeScale.GetZ()});
+
+		reg.Add(e, MeshComponent{
+					   .mesh = part.mesh,
+					   .material = params.materialOverride.pipeline != PipelineHandle::Invalid
+									   ? params.materialOverride
+									   : part.defaultMaterial,
+					   .cullRadius = part.boundingRadius * scaleMult * nodeMaxScale,
+					   .localTransform = finalLocal,
+					   .prevTransform = finalLocal,
+					   .jointOffset = part.jointOffset,
+					   .isSkinned = part.isSkinned && params.isAnimated,
+					   .morphOffset = part.morphOffset,
+					   .activeMorphCount = part.activeMorphCount,
+					   .morphWeights = {part.defaultMorphWeights[0], part.defaultMorphWeights[1],
+										part.defaultMorphWeights[2], part.defaultMorphWeights[3]},
+					   .gltfNode = params.isAnimated ? (void*)part.gltfNode : nullptr,
+					   .gltfSkin = params.isAnimated ? (void*)part.gltfSkin : nullptr});
+
+		if (params.createPhysics) {
+			JPH::ShapeRefC shape = params.useBoxColliders ? part.boxCollider : part.meshCollider;
+			if (shape) {
+				JPH::Vec3 totalScale = params.scale * nodeScale;
+
+				if (!totalScale.IsClose(JPH::Vec3::sReplicate(1.0f), 1e-5f)) {
+					shape = new JPH::ScaledShape(shape, totalScale);
+				}
+
+				JPH::Vec3 translation = finalLocal.GetTranslation();
+				JPH::Vec3 col0 = finalLocal.GetColumn3(0) / totalScale.GetX();
+				JPH::Vec3 col1 = finalLocal.GetColumn3(1) / totalScale.GetY();
+				JPH::Vec3 col2 = finalLocal.GetColumn3(2) / totalScale.GetZ();
+
+				JPH::Mat44 rotMat(JPH::Vec4(col0, 0), JPH::Vec4(col1, 0), JPH::Vec4(col2, 0),
+								  JPH::Vec4(0, 0, 0, 1));
+				JPH::Quat rotation = rotMat.GetQuaternion();
+
+				reg.Add(e, PhysicsComponent{Physics::CreateRigidBody(
+							   pc, shape, JPH::RVec3(translation), rotation,
+							   params.isStaticPhysics ? JPH::EMotionType::Static
+													  : JPH::EMotionType::Dynamic,
+							   params.isStaticPhysics ? static_cast<JPH::ObjectLayer>(0)
+													  : static_cast<JPH::ObjectLayer>(1),
+							   0, params.physicsCategory, params.physicsMask)});
+			}
+		}
+
+		if (outBuffer != nullptr && spawnedCount < maxCount) {
+			outBuffer[spawnedCount] = e;
+		}
+		spawnedCount++;
+	}
+	return spawnedCount;
+}
 
 // Helper to compile Jolt Skeleton on-the-fly from glTF joint hierarchies
 static JPH::Ref<JPH::Skeleton> BuildJoltSkeletonFromCgltf(const cgltf_skin* skin) {

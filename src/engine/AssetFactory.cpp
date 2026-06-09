@@ -7,13 +7,17 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <stb_image.h>
-#include <vector>
 
 namespace ZHLN::AssetFactory {
 
 uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
 	const uint32_t atlasSize = 128;
-	std::vector<uint32_t> pixels(static_cast<size_t>(atlasSize * atlasSize), 0x00000000);
+	// Minimal fallback array (no vector)
+	uint32_t* pixels = new uint32_t[atlasSize * atlasSize];
+
+	for (uint32_t i = 0; i < atlasSize * atlasSize; ++i) {
+		pixels[i] = 0x00000000;
+	}
 
 	for (uint32_t c = 0; c < 128; ++c) {
 		uint32_t gridX = c % 16;
@@ -33,14 +37,19 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
 		}
 	}
 
-	return ctx.CreateTexture(pixels.data(), atlasSize, atlasSize);
+	uint32_t tex = ctx.CreateTexture(pixels, atlasSize, atlasSize);
+	delete[] pixels;
+	return tex;
 }
 
 Mesh LoadCookedMesh(RenderContext& ctx, [[maybe_unused]] AssetManager& assetMgr,
 					std::string_view virtualPath) {
 #ifdef ZHLN_DEV_MODE
-	std::string rawPath = "resources/assets/" + std::string(virtualPath);
-	return LoadGLB(ctx, rawPath);
+	auto* prefab = LoadModelPrefab(ctx, assetMgr, virtualPath);
+	if (prefab && prefab->partCount > 0) {
+		return prefab->parts[0].mesh;
+	}
+	return {};
 #else
 	AssetLoadRequest req;
 	req.assetID = HashAssetPath(virtualPath);

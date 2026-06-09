@@ -26,12 +26,12 @@
 #include <threading/Mutex.hpp>
 #include <threading/TaskSystem.hpp>
 #include <vector>
+
 namespace ZHLN {
 void DrawConsole(ScriptRunner& runner);
 void DrawProfiler(Engine& engine);
 void MovementSystem(Engine& engine, float dt);
 void AudioSystem(Engine& engine, float dt);
-void LoadLevel(Engine& engine, const std::string& path, Material material);
 void DrawOrientationGizmo(const ZHLN::Camera& cam);
 
 // Define the 12 edges connecting the 8 frustum corners
@@ -71,15 +71,31 @@ struct Scene {
 
 		ZHLN::Log("Assembling Scene with Pure Runtime glTF Parsing...");
 
-		// 1. Spawns room with physics colliders, but flags as STATIC (No animation overhead!)
-		AssetFactory::SpawnGLB<true, false>(rc, reg, "Circus Lobby V9.glb", nullptr, 0);
+		auto* lobbyPrefab =
+			AssetFactory::LoadModelPrefab(rc, engine.GetAssetManager(), "Circus Lobby V9.glb");
+		if (lobbyPrefab) {
+			AssetFactory::SpawnParams params;
+			params.createPhysics = true;
+			params.useBoxColliders = false; // <-- CRITICAL: Must be false (mesh shape) so player is
+											// not stuck in a solid box
+			params.isStaticPhysics = true;
+			AssetFactory::InstantiatePrefab(rc, reg, engine.GetPhysicsContext(), *lobbyPrefab,
+											params);
+		}
 
-		// 2. Spawns Pomni as ANIMATED, with no static physics colliders (handles collision via
-		// Character Controller)
-		s_PomniParts.resize(128);
-		uint32_t pomniCount = AssetFactory::SpawnGLB<true, true>(
-			rc, reg, "tadc_models/POMNI.glb", s_PomniParts.data(), (uint32_t)s_PomniParts.size());
-		s_PomniParts.resize(pomniCount);
+		auto* pomniPrefab =
+			AssetFactory::LoadModelPrefab(rc, engine.GetAssetManager(), "tadc_models/POMNI.glb");
+		if (pomniPrefab) {
+			AssetFactory::SpawnParams params;
+			params.createPhysics = false;
+			params.isAnimated = true;
+
+			s_PomniParts.resize(128); // Pre-allocate ample buffer
+			uint32_t pomniCount = AssetFactory::InstantiatePrefab(
+				rc, reg, engine.GetPhysicsContext(), *pomniPrefab, params, s_PomniParts.data(),
+				(uint32_t)s_PomniParts.size());
+			s_PomniParts.resize(pomniCount);
+		}
 	}
 };
 

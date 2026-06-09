@@ -3,6 +3,7 @@
 #include "physics/Physics.hpp"
 
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Types.hpp>
 #include <string_view>
 
@@ -23,7 +24,6 @@ Mesh CreateBox(RenderContext& ctx, JPH::Vec3Arg halfExtents,
 Material CreateBasicMaterial(RenderContext& ctx, bool doubleSided = false, bool alphaBlend = false);
 Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight,
 				   float* outHeights);
-Mesh LoadGLB(RenderContext& ctx, std::string_view path);
 
 uint32_t CreateFontAtlasTexture(RenderContext& ctx);
 
@@ -31,9 +31,27 @@ Mesh LoadCookedMesh(RenderContext& ctx, AssetManager& assetMgr, std::string_view
 uint32_t LoadCookedTexture(RenderContext& ctx, AssetManager& assetMgr,
 						   std::string_view virtualPath);
 
-template <bool CreatePhysics = false, bool Animated = true>
-uint32_t SpawnGLB(RenderContext& ctx, ECS::Registry& reg, std::string_view path,
-				  Entity* outBuffer = nullptr, uint32_t maxCount = 0);
+struct SpawnParams {
+	JPH::RVec3 position = JPH::RVec3::sZero();
+	JPH::Quat rotation = JPH::Quat::sIdentity();
+	JPH::Vec3 scale = JPH::Vec3::sReplicate(1.0f);
+
+	bool createPhysics = false;
+	bool useBoxColliders = false;
+	bool isStaticPhysics = true;
+	bool isAnimated = false;
+	uint32_t physicsCategory = 0xFFFFFFFF;
+	uint32_t physicsMask = 0xFFFFFFFF;
+
+	Material materialOverride = {.pipeline = PipelineHandle::Invalid};
+};
+
+ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::string_view path);
+
+// Returns the number of entities actually spawned and populated into outBuffer (if provided)
+uint32_t InstantiatePrefab(RenderContext& ctx, ECS::Registry& reg, PhysicsContext& pc,
+						   const ModelPrefab& prefab, const SpawnParams& params,
+						   Entity* outBuffer = nullptr, uint32_t maxCount = 0);
 
 Material CreateToonMaterial(RenderContext& ctx, bool doubleSided = false, bool alphaBlend = false);
 

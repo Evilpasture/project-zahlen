@@ -89,7 +89,6 @@ set(ENGINE_SOURCES
     src/engine/glTFImporter.cpp
     src/engine/system/AnimationSystem.cpp
     src/engine/AssetManager.cpp
-    src/engine/LevelLoader.cpp
     src/engine/Window.cpp
     src/engine/Input.cpp
     src/engine/Resources.c
