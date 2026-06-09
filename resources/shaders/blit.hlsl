@@ -28,7 +28,8 @@ struct PushConstants {
 	float aoPower;	   // SSAO contrast multiplier
 	float giIntensity; // SSGI bounce color multiplier
 	int giSamples;	   // Hemisphere ray sample count
-	float2 _pad;	   // Pad structure to perfect 16-byte bounds
+	float vignetteIntensity;
+	float vignettePower;
 };
 [[vk::push_constant]] PushConstants pc;
 
@@ -167,6 +168,13 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
 	// Skip background (infinite depth)
 	if (depth >= 1.0f) {
+		// Apply vignette to the background/sky as well
+		if (pc.vignetteIntensity > 0.0f) {
+			float2 uvDist = abs(input.uv - 0.5f) * pc.vignetteIntensity;
+			float vignette = saturate(1.0f - dot(uvDist, uvDist));
+			vignette = pow(vignette, max(pc.vignettePower, 0.01f));
+			litColor *= vignette;
+		}
 		return float4(ACESFilm(litColor), 1.0f);
 	}
 
@@ -178,7 +186,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	// 2. Reconstruct World Position
 	float3 worldPos = ReconstructWorldPos(input.uv, depth);
 
-	// --- COOPERATIVE SSAO / SSGI / HBAO / GTAO EVALUATION PASS ---
+	// --- A. COOPERATIVE SSAO / SSGI / HBAO / GTAO EVALUATION PASS ---
+	// (This must run on ALL surfaces, rough and glossy alike)
 	if (pc.giMode > 0) {
 		float occlusion = 0.0f;
 		float3 indirectLight = float3(0.0f, 0.0f, 0.0f);
@@ -187,11 +196,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 		float2 edgeFactor = smoothstep(0.0f, 0.08f, input.uv) * smoothstep(1.0f, 0.92f, input.uv);
 		float screenFade = edgeFactor.x * edgeFactor.y;
 
-		// -------------------------------------------------------------
-		// PATH A: GEOMETRIC HORIZON SEARCH (HBAO / GTAO)
-		// -------------------------------------------------------------
+		// Path A: Geometric Horizon Search (HBAO / GTAO)
 		if (pc.giMode == 3 || pc.giMode == 4) {
-			// 4 screen-space slice directions (0, 45, 90, 135 degrees)
 			static const float2 sliceDirs[4] = {float2(1.0f, 0.0f), float2(0.7071f, 0.7071f),
 												float2(0.0f, 1.0f), float2(-0.7071f, 0.7071f)};
 
@@ -206,7 +212,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 				float2 rotatedDir = float2(rawDir.x * cosTheta - rawDir.y * sinTheta,
 										   rawDir.x * sinTheta + rawDir.y * cosTheta);
 
-				// Step size decreases inversely with depth to maintain world-space consistency
 				float2 uvStep = rotatedDir * (pc.aoRadius / max(depth, 0.01f)) * 0.05f;
 
 				float max_sin_right = 0.0f;
@@ -217,7 +222,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 					float2 uv_right = input.uv + uvStep * t;
 					float2 uv_left = input.uv - uvStep * t;
 
-					// 1. Trace Right (positive direction)
 					if (all(uv_right >= 0.0f) && all(uv_right <= 1.0f)) {
 						float d_right = texDepth.SampleLevel(smp, uv_right, 0).r;
 						if (d_right < 1.0f) {
@@ -231,7 +235,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 						}
 					}
 
-					// 2. Trace Left (negative direction - GTAO only)
 					if (pc.giMode == 4 && all(uv_left >= 0.0f) && all(uv_left <= 1.0f)) {
 						float d_left = texDepth.SampleLevel(smp, uv_left, 0).r;
 						if (d_left < 1.0f) {
@@ -247,21 +250,16 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 				}
 
 				if (pc.giMode == 3) {
-					// HBAO: accumulate single horizon angle
 					occlusion += saturate(max_sin_right - pc.aoBias);
 				} else if (pc.giMode == 4) {
-					// GTAO: accumulate average of both horizon angles
 					occlusion += saturate((max_sin_right + max_sin_left) * 0.5f - pc.aoBias);
 				}
 			}
 
-			// Average the results over the 4 slice directions and apply contrast
 			float ao = 1.0f - saturate((occlusion / 4.0f) * pc.aoPower * screenFade);
 			litColor *= ao;
 		}
-		// -------------------------------------------------------------
-		// PATH B: STOCHASTIC SPHERE SAMPLING (SSAO / SSGI)
-		// -------------------------------------------------------------
+		// Path B: Stochastic Sphere Sampling (SSAO / SSGI)
 		else {
 			float angle = GetRotationAngle(input.pos.xy);
 			float cosTheta = cos(angle * 2.0f * 3.14159265f);
@@ -329,36 +327,47 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 		}
 	}
 
-	// Skip raymarching entirely for fully rough surfaces (saves bandwidth)
-	if (roughness > 0.85f) {
-		return float4(ACESFilm(litColor), 1.0f);
+	// --- B. SCREEN SPACE REFLECTIONS (SSR) PASS ---
+	// (Only run on glossy surfaces; skip for rough surfaces to save bandwidth)
+	if (roughness <= 0.85f) {
+		float3 V = normalize(worldPos - pc.camPos.xyz);
+		float3 R = reflect(V, N);
+
+		// Apply the exact same Specular Lobe Elongation warp to your SSR rays
+		float NoV = saturate(dot(N, V));
+		float stretching = roughness * (1.0f - NoV) * 0.5f;
+		float3 stretchedR = normalize(R - V * stretching);
+
+		float confidence = 0.0f;
+		float2 hitUV = RaymarchSSR(worldPos, stretchedR, confidence); // <-- USE stretchedR HERE
+
+		if (confidence > 0.0f) {
+			float3 reflectionColor = texInput.SampleLevel(smp, hitUV, 0).rgb;
+
+			// Apply simple Schlick Fresnel to the SSR contribution
+			float3 F0 = float3(0.04, 0.04, 0.04);
+			float3 F = F0 + (1.0 - F0) * pow(saturate(1.0 - dot(-V, N)), 5.0);
+
+			// Fade reflection on rougher surfaces
+			float roughnessFade = saturate(1.0f - roughness);
+			float3 ssr = reflectionColor * F * confidence * roughnessFade;
+
+			// Blend
+			litColor = lerp(litColor, litColor + ssr, roughnessFade * confidence);
+		}
 	}
 
-	// 3. Cast reflection ray (SSR)
-	float3 V = normalize(worldPos - pc.camPos.xyz);
-	float3 R = reflect(V, N);
-
-	// 4. Execute Raymarch
-	float confidence = 0.0f;
-	float2 hitUV = RaymarchSSR(worldPos, R, confidence);
-
-	// 5. Resolve SSR and blend
-	if (confidence > 0.0f) {
-		float3 reflectionColor = texInput.SampleLevel(smp, hitUV, 0).rgb;
-
-		// Apply simple Schlick Fresnel to the SSR contribution
-		float3 F0 = float3(0.04, 0.04, 0.04); // Default dielectrics
-		float3 F = F0 + (1.0 - F0) * pow(saturate(1.0 - dot(-V, N)), 5.0);
-
-		// Fade reflection on rougher surfaces
-		float roughnessFade = saturate(1.0f - roughness);
-		float3 ssr = reflectionColor * F * confidence * roughnessFade;
-
-		// Blend: damp original specular highlight on reflected regions
-		litColor = lerp(litColor, litColor + ssr, roughnessFade * confidence);
-	}
-
-	// 6. Tonemap
+	// 3. Tonemap
 	litColor = ACESFilm(litColor);
+
+	// --- C. CAMERA VIGNETTE POST-PASS ---
+	// (Apply globally to the whole viewport)
+	if (pc.vignetteIntensity > 0.0f) {
+		float2 uvDist = abs(input.uv - 0.5f) * pc.vignetteIntensity;
+		float vignette = saturate(1.0f - dot(uvDist, uvDist));
+		vignette = pow(vignette, max(pc.vignettePower, 0.01f));
+		litColor *= vignette;
+	}
+
 	return float4(litColor, 1.0f);
 }

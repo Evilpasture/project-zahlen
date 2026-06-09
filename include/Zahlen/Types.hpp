@@ -177,5 +177,7 @@ struct GISettings {
 	float aoPower = 1.8f;
 	float giIntensity = 1.2f;
 	int giSamples = 8;
+	float vignetteIntensity = 1.1f; // 0.0f is completely off
+	float vignettePower = 1.5f;		// Controls softness falloff
 };
 } // namespace ZHLN

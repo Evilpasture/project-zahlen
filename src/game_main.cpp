@@ -67,8 +67,9 @@ static bool s_UseLocalProbe = true;
 static JPH::Vec3 s_ProbeMin = JPH::Vec3(-22.0f, 0.0f, -22.0f); // Initial bounding box min (meters)
 static JPH::Vec3 s_ProbeMax = JPH::Vec3(22.0f, 12.0f, 22.0f);  // Initial bounding box max (meters)
 static JPH::Vec3 s_ProbePos =
-	JPH::Vec3(0.0f, 4.0f, 0.0f); // Room center (where cubemap was captured)
-
+	JPH::Vec3(0.0f, 4.0f, 0.0f);		  // Room center (where cubemap was captured)
+static float s_VignetteIntensity = 1.10f; // 0.0f represents completely disabled
+static float s_VignettePower = 1.50f;	  // Softness falloff exponent
 static constexpr FrustumEdge s_FrustumEdges[12] = {
 	{.start = 0, .end = 1}, {.start = 1, .end = 2},
 	{.start = 2, .end = 3}, {.start = 3, .end = 0}, // Near Plane loop
@@ -295,6 +296,14 @@ void ZHLN::UpdateGame(Engine& engine, float dt, float& physicsAccumulator) {
 		ImGui::SliderFloat("Acne Bias", &s_AOBias, 0.001f, 0.2f, "%.3f");
 		ImGui::SliderFloat("Shadow Contrast", &s_AOPower, 0.5f, 6.0f, "%.1fx");
 		ImGui::SliderInt("Search Steps", &s_GISamples, 4, 32); // Represents total step count
+	}
+
+	// --- NEW: VIGNETTE SLIDERS ---
+	ImGui::Separator();
+	ImGui::SeparatorText("Camera Vignette");
+	ImGui::SliderFloat("Vignette Intensity", &s_VignetteIntensity, 0.0f, 2.5f, "%.2f");
+	if (s_VignetteIntensity > 0.0f) {
+		ImGui::SliderFloat("Vignette Power", &s_VignettePower, 0.1f, 6.0f, "%.2f");
 	}
 
 	ImGui::End();
@@ -529,7 +538,9 @@ void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 								 .aoBias = s_AOBias,
 								 .aoPower = s_AOPower,
 								 .giIntensity = s_GIIntensity,
-								 .giSamples = s_GISamples});
+								 .giSamples = s_GISamples,
+								 .vignetteIntensity = s_VignetteIntensity,
+								 .vignettePower = s_VignettePower});
 
 	Renderer::SetLights(rc, sceneLights.data(), uniforms.lightCount); // Upload SSBO to GPU
 	Renderer::SetFrameData(rc, uniforms, shadowProjView);

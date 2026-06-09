@@ -344,10 +344,16 @@ PSOutput PSMain(VSOutput input) {
 	// 1. Evaluate SH Diffuse
 	float3 irradiance = EvaluateSH(worldNormal, frame.sh);
 
-	// 2. Evaluate Single-Scatter Specular IBL (With Box-Projected Parallax Correction)
-	float3 correctedR = R;
+	// 2. Evaluate Single-Scatter Specular IBL (With Lobe Elongation & Parallax Correction)
+	float NoV = saturate(dot(worldNormal, V));
+
+	// Warp R along the view projection to simulate anisotropic stretching
+	float stretching = roughness * (1.0f - NoV) * 0.5f; // 0.5f is a comfortable elongation factor
+	float3 stretchedR = normalize(R - V * stretching);
+
+	float3 correctedR = stretchedR;
 	if (frame.probeMin.w > 0.0f) { // If useLocalProbe flag is set
-		correctedR = BoxParallaxCorrection(input.worldPos, R, frame.probeMin.xyz,
+		correctedR = BoxParallaxCorrection(input.worldPos, stretchedR, frame.probeMin.xyz,
 										   frame.probeMax.xyz, frame.probePos.xyz);
 	}
 

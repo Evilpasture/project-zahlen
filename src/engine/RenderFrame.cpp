@@ -649,18 +649,20 @@ void RenderContext::Impl::BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, 
 		float aoPower;
 		float giIntensity;
 		int giSamples;
-		float _pad[2];
+		float vignetteIntensity;
+		float vignettePower;
 	} pc = {.invViewProj = currentUniforms.invViewProj,
 			.viewProj = currentUniforms.unjitteredViewProj,
 			.camPos = {currentUniforms.camPos[0], currentUniforms.camPos[1],
 					   currentUniforms.camPos[2], currentUniforms.camPos[3]},
-			.giMode = giSettings.mode,			   // <-- READ FROM LOCAL STATE
-			.aoRadius = giSettings.aoRadius,	   // <-- READ FROM LOCAL STATE
-			.aoBias = giSettings.aoBias,		   // <-- READ FROM LOCAL STATE
-			.aoPower = giSettings.aoPower,		   // <-- READ FROM LOCAL STATE
-			.giIntensity = giSettings.giIntensity, // <-- READ FROM LOCAL STATE
-			.giSamples = giSettings.giSamples,	   // <-- READ FROM LOCAL STATE
-			._pad = {}};
+			.giMode = giSettings.mode,
+			.aoRadius = giSettings.aoRadius,
+			.aoBias = giSettings.aoBias,
+			.aoPower = giSettings.aoPower,
+			.giIntensity = giSettings.giIntensity,
+			.giSamples = giSettings.giSamples,
+			.vignetteIntensity = giSettings.vignetteIntensity,
+			.vignettePower = giSettings.vignettePower};
 	if (blitPass.pipeline.Valid()) {
 		Vk::DynamicPass<1, false>(extent)
 			.Color(0, swap_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
