@@ -28,6 +28,57 @@ template <typename T> consteval uint32_t GetTypeHash() {
 	return HashTypeName(std::source_location::current().function_name());
 }
 
+template <typename T> constexpr std::string_view BoxedName() {
+#if defined(__clang__) || defined(__GNUC__)
+	// GCC & Clang format: "constexpr std::string_view BoxedName() [with T = Type]"
+	std::string_view name = __PRETTY_FUNCTION__;
+	size_t start = name.find("T = ");
+	if (start != std::string_view::npos) {
+		start += 4;
+	} else {
+		return "Unknown";
+	}
+	size_t end = name.find_first_of("];", start);
+	if (end != std::string_view::npos) {
+		name = name.substr(start, end - start);
+	} else {
+		name = name.substr(start);
+	}
+#elif defined(_MSC_VER)
+	// MSVC format: "auto __cdecl BoxedName<struct Type>(void)"
+	std::string_view name = __FUNCSIG__;
+	size_t start = name.find("BoxedName<");
+	if (start != std::string_view::npos) {
+		start += 10;
+	} else {
+		return "Unknown";
+	}
+	size_t end = name.find_first_of(">(", start);
+	if (end != std::string_view::npos) {
+		name = name.substr(start, end - start);
+	} else {
+		name = name.substr(start);
+	}
+#else
+	std::string_view name = "Unknown";
+#endif
+
+	// Strip MSVC-specific 'struct' / 'class' prefixes if present
+	if (name.starts_with("struct ")) {
+		name.remove_prefix(7);
+	} else if (name.starts_with("class ")) {
+		name.remove_prefix(6);
+	}
+
+	// Strip namespace qualifiers (e.g., "ZHLN::ALife::ALifeComponent" -> "ALifeComponent")
+	size_t last_colon = name.find_last_of(':');
+	if (last_colon != std::string_view::npos) {
+		name.remove_prefix(last_colon + 1);
+	}
+
+	return name;
+}
+
 class ZHLN_API SparseSet {
   public:
 	SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr);
@@ -99,6 +150,11 @@ class ZHLN_API Registry {
 		if (!_components[id]) {
 			_components[id] = new SparseSet(sizeof(T), alignof(T), &this->sync);
 		}
+	}
+
+	template <typename... Components> void RegisterComponents() {
+		// A C++17 fold expression that expands for every component in the list
+		(RegisterComponent<Components>(BoxedName<Components>()), ...);
 	}
 
 	template <typename T> T& Add(Entity entity, T&& component) {

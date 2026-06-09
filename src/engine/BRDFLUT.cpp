@@ -56,7 +56,7 @@ std::vector<uint32_t> GenerateBRDFLUT(uint32_t width, uint32_t height) {
 			JPH::Vec3 V(std::sqrt(1.0f - NdotV * NdotV), 0.0f, NdotV);
 			JPH::Vec3 N(0.0f, 0.0f, 1.0f);
 
-			const uint32_t SAMPLE_COUNT = 128;
+			constexpr uint32_t SAMPLE_COUNT = 128;
 			for (uint32_t i = 0; i < SAMPLE_COUNT; ++i) {
 				auto [u1, u2] = Hammersley(i, SAMPLE_COUNT);
 				JPH::Vec3 H = ImportanceSampleGGX(u1, u2, roughness);
@@ -68,7 +68,8 @@ std::vector<uint32_t> GenerateBRDFLUT(uint32_t width, uint32_t height) {
 
 				if (NdotL > 0.0f) {
 					float G = GeometrySmith(NdotV, NdotL, roughness);
-					float G_Vis = (G * VdotH) / (NdotH * NdotV);
+					// FIX: Clamp denominators to strictly prevent 0.0 / 0.0 = NaN
+					float G_Vis = (G * VdotH) / (std::max(NdotH, 0.001f) * std::max(NdotV, 0.001f));
 					float Fc = std::pow(1.0f - VdotH, 5.0f);
 
 					A += (1.0f - Fc) * G_Vis;
@@ -79,10 +80,14 @@ std::vector<uint32_t> GenerateBRDFLUT(uint32_t width, uint32_t height) {
 			A /= float(SAMPLE_COUNT);
 			B /= float(SAMPLE_COUNT);
 
-			// Pack values into R8G8B8A8 (A maps to Red, B maps to Green)
+			// FIX: Failsafe strip NaNs if any still managed to propagate
+			if (std::isnan(A))
+				A = 0.0f;
+			if (std::isnan(B))
+				B = 0.0f;
+
 			auto r = static_cast<uint8_t>(ZHLN::Clamp(A, 0.0f, 1.0f) * 255.0f);
 			auto g = static_cast<uint8_t>(ZHLN::Clamp(B, 0.0f, 1.0f) * 255.0f);
-
 			pixels[y * width + x] = 0xFF000000u | (uint32_t(g) << 8) | r;
 		}
 	}

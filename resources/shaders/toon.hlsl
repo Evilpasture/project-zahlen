@@ -110,15 +110,24 @@ PSOutput PSMain(VSOutput input) {
 	float3 worldNormal = N;
 
 	if (any(input.tangent.xyz)) {
-		float3 T = normalize(input.tangent.xyz);
-		float3 B = normalize(cross(N, T) * input.tangent.w);
+		// 1. Calculate unnormalized tangent
+		float3 T_unnorm = input.tangent.xyz - dot(input.tangent.xyz, N) * N;
+
+		// 2. Check length BEFORE calling normalize() to prevent NaN
+		if (dot(T_unnorm, T_unnorm) < 0.0001f) {
+			T_unnorm = cross(N, abs(N.y) < 0.999f ? float3(0, 1, 0) : float3(1, 0, 0));
+		}
+		float3 T = normalize(T_unnorm);
+
+		float tangentSign = input.tangent.w * 2.0f - 1.0f;
+		float3 B = normalize(cross(N, T) * tangentSign);
+
 		float3 normalMap =
-			globalTextures[indices.y].Sample(defaultSampler, input.uv).rgb * 2.0 - 1.0;
+			globalTextures[indices.y].Sample(defaultSampler, input.uv).rgb * 2.0f - 1.0f;
 		worldNormal = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * N);
 	}
-
 	float3 V = normalize(frame.camPos.xyz - input.worldPos);
-	float3 L_sun = normalize(-frame.lightDir.xyz);
+	float3 L_sun = normalize(frame.lightDir.xyz);
 
 	// --- TOON LIGHTING RAMP ---
 	float NdotL_sun = dot(worldNormal, L_sun);
@@ -152,9 +161,12 @@ PSOutput PSMain(VSOutput input) {
 
 	output.color = float4(finalColor, albedo.a);
 
-	// Calculate Motion Vectors for TAA (Vulkan Y-Axis is inverted relative to UV space)
-	float2 ndcCurr = input.currClip.xy / input.currClip.w;
-	float2 ndcPrev = input.prevClip.xy / input.prevClip.w;
+	// Clamp W to a small positive number to prevent Divide-By-Zero NaN explosions
+	float currW = max(input.currClip.w, 0.0001f);
+	float prevW = max(input.prevClip.w, 0.0001f);
+
+	float2 ndcCurr = input.currClip.xy / currW;
+	float2 ndcPrev = input.prevClip.xy / prevW;
 	output.velocity = (ndcCurr - ndcPrev) * float2(0.5f, -0.5f);
 
 	return output;

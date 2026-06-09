@@ -174,8 +174,12 @@ float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint jointO
 // --- SHADOW CALCULATOR ---
 float CalculateShadow(float4 shadowPos, float3 N, float3 L) {
 	float3 projCoords = shadowPos.xyz / shadowPos.w;
-	if (projCoords.z > 1.0 || projCoords.z < 0.0)
+
+	if (projCoords.x < 0.0 || projCoords.x > 1.0 || projCoords.y < 0.0 || projCoords.y > 1.0 ||
+		projCoords.z < 0.0 || projCoords.z > 1.0) {
 		return 1.0;
+	}
+
 	float bias = max(0.015 * (1.0 - dot(N, L)), 0.005);
 	return shadowMap.SampleCmpLevelZero(shadowSampler, projCoords.xy, projCoords.z - bias).r;
 }

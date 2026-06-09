@@ -145,18 +145,19 @@ VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV
 float DistributionGGX(float3 N, float3 H, float roughness) {
 	float a = roughness * roughness;
 	float a2 = a * a;
-	float NdotH = max(dot(N, H), 0.0);
-	return a2 / (3.14159 * pow(NdotH * NdotH * (a2 - 1.0) + 1.0, 2.0));
+	float NdotH = saturate(dot(N, H)); // saturate guarantees exactly [0.0, 1.0]
+	float denom = (NdotH * NdotH * (a2 - 1.0) + 1.0);
+	return a2 / (3.14159 * denom * denom); // pow() with negative floats causes NaNs!
 }
 
 float GeometrySchlickGGX(float NdotV, float roughness) {
 	float k = pow(roughness + 1.0, 2.0) / 8.0;
-	return NdotV / (NdotV * (1.0 - k) + k);
+	return NdotV / max(NdotV * (1.0 - k) + k, 0.001); // Prevent Divide by zero
 }
 
 float GeometrySmith(float3 N, float3 V, float3 L, float roughness) {
-	return GeometrySchlickGGX(max(dot(N, V), 0.0), roughness) *
-		   GeometrySchlickGGX(max(dot(N, L), 0.0), roughness);
+	return GeometrySchlickGGX(saturate(dot(N, V)), roughness) *
+		   GeometrySchlickGGX(saturate(dot(N, L)), roughness);
 }
 
 float3 FresnelSchlick(float cosTheta, float3 F0) {
@@ -173,17 +174,14 @@ void PSShadow(VSOutput input) {
 	float4 albedo =
 		globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
 
-	if (alphaMode == 1) { // MASK
-		if (albedo.a < alphaCutoff) {
-			discard;
-		}
+	if (alphaMode == 1 && albedo.a < alphaCutoff) {
+		discard;
 	}
 }
 
 PSOutput PSMain(VSOutput input) {
 	PSOutput output;
 
-	// Sample Bindless Textures
 	uint4 indices = input.materialIndices;
 	float4 baseColorFactor = input.baseColorFactor;
 	float metallicFactor = input.pbrFactors.x;
@@ -191,32 +189,30 @@ PSOutput PSMain(VSOutput input) {
 	float alphaCutoff = input.pbrFactors.z;
 	uint alphaMode = input.alphaMode;
 
-	// glTF PBR Math: Albedo Sample * Base Color Factor * Vertex Color
 	float4 albedo =
 		globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
 
-	// Alpha Masking
-	if (alphaMode == 1) { // MASK
-		if (albedo.a < alphaCutoff) {
-			discard;
-		}
+	if (alphaMode == 1 && albedo.a < alphaCutoff) {
+		discard;
 	}
 
 	float3 normalMap = globalTextures[indices.y].Sample(defaultSampler, input.uv).rgb * 2.0 - 1.0;
 	float4 pbr = globalTextures[indices.z].Sample(defaultSampler, input.uv);
 	float3 emissive = globalTextures[indices.w].Sample(defaultSampler, input.uv).rgb;
 
-	// glTF PBR Math: PBR Sample * Parameter Factors
-	float roughness = (indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor;
+	// FIX: Hard clamp minimum roughness to Frostbite's 0.045 to prevent GGX NaN explosions
+	float roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.045f);
 	float metallic = (indices.z == 0 ? 1.0f : pbr.b) * metallicFactor;
 
 	float3 N = normalize(input.normal);
 	float3 worldNormal = N;
 
 	if (any(input.tangent.xyz)) {
-		float3 T = normalize(input.tangent.xyz);
-
-		// Decode the sign: maps [0.0, 1.0] back to [-1.0, 1.0]
+		float3 T_unnorm = input.tangent.xyz - dot(input.tangent.xyz, N) * N;
+		if (dot(T_unnorm, T_unnorm) < 0.0001f) {
+			T_unnorm = cross(N, abs(N.y) < 0.999f ? float3(0, 1, 0) : float3(1, 0, 0));
+		}
+		float3 T = normalize(T_unnorm);
 		float tangentSign = input.tangent.w * 2.0f - 1.0f;
 		float3 B = normalize(cross(N, T) * tangentSign);
 
@@ -227,16 +223,16 @@ PSOutput PSMain(VSOutput input) {
 	float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo.rgb, metallic);
 
 	// Direct Directional (Sun) Light
-	float3 L_sun = normalize(-frame.lightDir.xyz);
-	float3 H_sun = normalize(V + L_sun);
-	float NdotL_sun = max(dot(worldNormal, L_sun), 0.0);
+	float3 L_sun = normalize(frame.lightDir.xyz); // Ensure no minus sign!
+	float3 H_sun = normalize(V + L_sun + 1e-5f);
+	float NdotL_sun = saturate(dot(worldNormal, L_sun));
 	float shadow = CalculateShadow(input.shadowPos, worldNormal, L_sun);
 
 	float D = DistributionGGX(worldNormal, H_sun, roughness);
 	float g_term = GeometrySmith(worldNormal, V, L_sun, roughness);
-	float3 F = FresnelSchlick(max(dot(H_sun, V), 0.0), F0);
+	float3 F = FresnelSchlick(saturate(dot(H_sun, V)), F0);
 
-	float3 spec = (D * g_term * F) / (4.0 * max(dot(worldNormal, V), 0.0) * NdotL_sun + 0.0001);
+	float3 spec = (D * g_term * F) / max(4.0 * saturate(dot(worldNormal, V)) * NdotL_sun, 0.001);
 	float3 kD = (1.0 - F) * (1.0 - metallic);
 	float3 directSun = (kD * albedo.rgb / 3.14159 + spec) * 10.0 * NdotL_sun * shadow;
 
@@ -286,9 +282,12 @@ PSOutput PSMain(VSOutput input) {
 	// Preserve exact base color alpha for BLEND transparency pipelines
 	output.color = float4(ambient + directSun + directPunctual + emissive, albedo.a);
 
-	// Calculate Motion Vectors for TAA (Vulkan Y-Axis is inverted relative to UV space)
-	float2 ndcCurr = input.currClip.xy / input.currClip.w;
-	float2 ndcPrev = input.prevClip.xy / input.prevClip.w;
+	// Clamp W to a small positive number to prevent Divide-By-Zero NaN explosions
+	float currW = max(input.currClip.w, 0.0001f);
+	float prevW = max(input.prevClip.w, 0.0001f);
+
+	float2 ndcCurr = input.currClip.xy / currW;
+	float2 ndcPrev = input.prevClip.xy / prevW;
 	output.velocity = (ndcCurr - ndcPrev) * float2(0.5f, -0.5f);
 
 	return output;

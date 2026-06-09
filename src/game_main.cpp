@@ -74,7 +74,7 @@ struct Scene {
 
 		auto* lobbyPrefab =
 			AssetFactory::LoadModelPrefab(rc, engine.GetAssetManager(), "Circus Lobby V9.glb");
-		if (lobbyPrefab) {
+		if (lobbyPrefab != nullptr) {
 			AssetFactory::SpawnParams params;
 			params.createPhysics = true;
 			params.useBoxColliders = false; // <-- CRITICAL: Must be false (mesh shape) so player is
@@ -86,7 +86,7 @@ struct Scene {
 
 		auto* pomniPrefab =
 			AssetFactory::LoadModelPrefab(rc, engine.GetAssetManager(), "tadc_models/POMNI.glb");
-		if (pomniPrefab) {
+		if (pomniPrefab != nullptr) {
 			AssetFactory::SpawnParams params;
 			params.createPhysics = false;
 			params.isAnimated = true;
@@ -139,12 +139,8 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	// ------------------------------------------------------------------------
 	// Register native components so the Lua FFI can resolve them!
 	// ------------------------------------------------------------------------
-	reg.RegisterComponent<MeshComponent>("MeshComponent");
-	reg.RegisterComponent<PhysicsComponent>("PhysicsComponent");
-	reg.RegisterComponent<MovementComponent>("MovementComponent");
-	reg.RegisterComponent<ALife::ALifeComponent>("ALifeComponent");
-	reg.RegisterComponent<RagdollComponent>("RagdollComponent");
-	reg.RegisterComponent<NameComponent>("NameComponent");
+	reg.RegisterComponents<MeshComponent, PhysicsComponent, MovementComponent,
+						   ALife::ALifeComponent, RagdollComponent, NameComponent>();
 
 	// ------------------------------------------------------------------------
 	// 1. Create a Solid Physics Ground Plane to stand on
@@ -362,7 +358,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			// Explicitly invoke the baked-only path
 			CullingSystem<false>(engine, s_VisibleEntities, s_PomniParts);
 
-			JPH::Vec3 sunDirection = {-0.6f, 0.4f, -0.7f};
+			JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f};
 			JPH::Mat44 lightView =
 				Math::CreateLookAt(sunDirection * 100.0f, {0.0f, 0.0f, 0.0f}, JPH::Vec3::sAxisY());
 			JPH::Mat44 lightProj = Math::CreateOrtho(-50.0f, 50.0f, -50.0f, 50.0f, 0.1f, 200.0f);
@@ -372,6 +368,8 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			JPH::Mat44 biasMatrix = {
 				JPH::Vec4(0.5f, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, -0.5f, 0.0f, 0.0f),
 				JPH::Vec4(0.0f, 0.0f, 1.0f, 0.0f), JPH::Vec4(0.5f, 0.5f, 0.0f, 1.0f)};
+
+			JPH::Mat44 lightSpaceBiased = biasMatrix * shadowProjView;
 
 			static JPH::Mat44 s_PrevUnjitteredVp = unjitteredVp;
 			static bool s_FirstFrame = true;
@@ -384,6 +382,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 			uniforms.viewProj = vp;
 			uniforms.unjitteredViewProj = unjitteredVp;
 			uniforms.prevUnjitteredViewProj = s_PrevUnjitteredVp;
+			uniforms.lightSpaceMatrix = lightSpaceBiased;
 			std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
 			std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);
 			uniforms.lightCount = 0;
@@ -421,8 +420,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 				}
 
 				// Check if this submesh entity is part of the player character hierarchy
-				bool isPlayerPart =
-					std::find(s_PomniParts.begin(), s_PomniParts.end(), e) != s_PomniParts.end();
+				bool isPlayerPart = std::ranges::contains(s_PomniParts, e);
 				JPH::Mat44 currentTransform{};
 				if (isPlayerPart) {
 					currentTransform = playerTransform * mesh->localTransform;
@@ -480,8 +478,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 				auto* mesh = reg.Get<MeshComponent>(e);
 				if (mesh != nullptr) {
 					JPH::Mat44 currentTransform{};
-					bool isPlayerPart = std::find(s_PomniParts.begin(), s_PomniParts.end(), e) !=
-										s_PomniParts.end();
+					bool isPlayerPart = std::ranges::contains(s_PomniParts, e);
 
 					if (isPlayerPart) {
 						currentTransform = playerTransform * mesh->localTransform;

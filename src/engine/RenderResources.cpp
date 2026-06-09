@@ -37,7 +37,7 @@ void RenderContext::Impl::CompileShadowPipeline(VkDevice device, const void* sha
 						 .Vertex<Vertex>()
 						 .DepthOnly()
 						 .DepthFormat(VK_FORMAT_D32_SFLOAT)
-						 .CullBack()
+						 .CullFront()
 						 .Build(device);
 }
 

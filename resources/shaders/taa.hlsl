@@ -31,12 +31,15 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
 	float4 current = texCurrent.SampleLevel(smp, input.uv, 0);
 
-	// 2. Reject history if it points off-screen (prevents edge smearing)
-	if (any(historyUV < 0.0f) || any(historyUV > 1.0f)) {
+	// 2. Reject history if it points off-screen or contains invalid math (NaN)
+	if (any(historyUV < 0.0f) || any(historyUV > 1.0f) || any(isnan(historyUV))) {
 		return current;
 	}
 
 	float4 history = texHistory.SampleLevel(smp, historyUV, 0);
+	if (any(isnan(history))) {
+		return current;
+	}
 
 	// 3. Neighborhood Clamping (Anti-Ghosting)
 	float4 m1 = 0;

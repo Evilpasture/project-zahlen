@@ -406,6 +406,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 			uniforms.viewProj = vp;
 			uniforms.unjitteredViewProj = unjitteredVp;
 			uniforms.prevUnjitteredViewProj = s_PrevUnjitteredVp; // Actual previous unjittered VP
+			uniforms.lightSpaceMatrix = lightSpaceBiased;
 			std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
 			std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);
 			uniforms.lightCount = 0;
