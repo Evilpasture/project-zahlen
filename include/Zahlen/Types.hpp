@@ -138,6 +138,11 @@ struct alignas(16) FrameUniforms {
 	uint32_t lightCount;
 	float _padding[3];
 	JPH::Vec4 sh[9]; // 9 Spherical Harmonic Coefficients
+
+	// --- ADD PROBE PARAMETERS (3 * 16 = 48 bytes) ---
+	JPH::Vec4 probeMin; // XYZ: bounding box min, W: useLocalProbe flag (0.0 or 1.0)
+	JPH::Vec4 probeMax; // XYZ: bounding box max, W: unused
+	JPH::Vec4 probePos; // XYZ: probe capture position, W: unused
 };
 
 struct ObjectConstants {

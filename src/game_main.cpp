@@ -63,6 +63,11 @@ static float s_AOBias = 0.05f;	   // Self-occlusion offset
 static float s_AOPower = 1.8f;	   // SSAO contrast
 static float s_GIIntensity = 1.2f; // SSGI bounce strength
 static int s_GISamples = 8;		   // Hemisphere ray samples count
+static bool s_UseLocalProbe = true;
+static JPH::Vec3 s_ProbeMin = JPH::Vec3(-22.0f, 0.0f, -22.0f); // Initial bounding box min (meters)
+static JPH::Vec3 s_ProbeMax = JPH::Vec3(22.0f, 12.0f, 22.0f);  // Initial bounding box max (meters)
+static JPH::Vec3 s_ProbePos =
+	JPH::Vec3(0.0f, 4.0f, 0.0f); // Room center (where cubemap was captured)
 
 static constexpr FrustumEdge s_FrustumEdges[12] = {
 	{.start = 0, .end = 1}, {.start = 1, .end = 2},
@@ -249,6 +254,25 @@ void ZHLN::UpdateGame(Engine& engine, float dt, float& physicsAccumulator) {
 	ImGui::Separator();
 	ImGui::SliderFloat("Floor Roughness", &s_FloorRoughness, 0.0f, 1.0f);
 	ImGui::SliderFloat("Floor Metallic", &s_FloorMetallic, 0.0f, 1.0f);
+
+	// --- NEW: PARALLAX-CORRECTED PROBE CONTROLS ---
+	ImGui::SeparatorText("Parallax-Corrected Local Reflection Probe");
+	ImGui::Checkbox("Enable Box Projection", &s_UseLocalProbe);
+	if (s_UseLocalProbe) {
+		std::array<float, 3> minArr = {s_ProbeMin.GetX(), s_ProbeMin.GetY(), s_ProbeMin.GetZ()};
+		std::array<float, 3> maxArr = {s_ProbeMax.GetX(), s_ProbeMax.GetY(), s_ProbeMax.GetZ()};
+		std::array<float, 3> posArr = {s_ProbePos.GetX(), s_ProbePos.GetY(), s_ProbePos.GetZ()};
+
+		if (ImGui::DragFloat3("Box Min", minArr.data(), 0.1f, -100.0f, 100.0f, "%.1fm")) {
+			s_ProbeMin = JPH::Vec3(minArr[0], minArr[1], minArr[2]);
+		}
+		if (ImGui::DragFloat3("Box Max", maxArr.data(), 0.1f, -100.0f, 100.0f, "%.1fm")) {
+			s_ProbeMax = JPH::Vec3(maxArr[0], maxArr[1], maxArr[2]);
+		}
+		if (ImGui::DragFloat3("Probe Position", posArr.data(), 0.1f, -100.0f, 100.0f, "%.1fm")) {
+			s_ProbePos = JPH::Vec3(posArr[0], posArr[1], posArr[2]);
+		}
+	}
 
 	// --- NEW: COOPERATIVE SSAO / SSGI CONTROLLER ---
 	ImGui::SeparatorText("Ambient Occlusion & Global Illumination");
@@ -496,6 +520,9 @@ void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 	std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
 	std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);
 	uniforms.lightCount = static_cast<uint32_t>(sceneLights.size());
+	uniforms.probeMin = JPH::Vec4(s_ProbeMin, s_UseLocalProbe ? 1.0f : 0.0f);
+	uniforms.probeMax = JPH::Vec4(s_ProbeMax, 0.0f);
+	uniforms.probePos = JPH::Vec4(s_ProbePos, 0.0f);
 
 	Renderer::SetGISettings(rc, {.mode = s_GIMode,
 								 .aoRadius = s_AORadius,

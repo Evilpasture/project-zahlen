@@ -26,6 +26,9 @@ struct FrameUniforms {
 	uint lightCount;
 	float3 padding;
 	float4 sh[9];
+	float4 probeMin; // XYZ: boxMin, W: useLocalProbe (0.0 or 1.0)
+	float4 probeMax; // XYZ: boxMax, W: unused
+	float4 probePos; // XYZ: probePos, W: unused
 };
 
 struct ObjectConstants {
@@ -309,5 +312,25 @@ float3 EvaluateKullaContyDirect(float NoV, float NoL, float roughness, float3 F0
 	float3 f_add = (Ems_v * Ems_l * Fms) / (3.14159265f * Ems_avg * Ems_avg);
 
 	return f_add;
+}
+
+float3 BoxParallaxCorrection(float3 posWS, float3 R, float3 boxMin, float3 boxMax,
+							 float3 probePos) {
+	// Prevent division-by-zero by clamping the reflection vector with a tiny offset
+	float3 invR = 1.0f / max(abs(R), 0.00001f) * sign(R);
+
+	// Calculate the intersection distances along each coordinate axis
+	float3 t1 = (boxMax - posWS) * invR;
+	float3 t2 = (boxMin - posWS) * invR;
+	float3 tMax = max(t1, t2); // Furthest intersections along the ray
+
+	// Find the closest exit plane of the box
+	float distance = min(min(tMax.x, tMax.y), tMax.z);
+
+	// Calculate the 3D world-space intersection point
+	float3 intersectPositionWS = posWS + R * distance;
+
+	// Correct the reflection vector to look from the perspective of the probe capture point
+	return normalize(intersectPositionWS - probePos);
 }
 #endif // SKIP_BINDINGS

@@ -344,10 +344,17 @@ PSOutput PSMain(VSOutput input) {
 	// 1. Evaluate SH Diffuse
 	float3 irradiance = EvaluateSH(worldNormal, frame.sh);
 
-	// 2. Evaluate Single-Scatter Specular IBL
+	// 2. Evaluate Single-Scatter Specular IBL (With Box-Projected Parallax Correction)
+	float3 correctedR = R;
+	if (frame.probeMin.w > 0.0f) { // If useLocalProbe flag is set
+		correctedR = BoxParallaxCorrection(input.worldPos, R, frame.probeMin.xyz,
+										   frame.probeMax.xyz, frame.probePos.xyz);
+	}
+
 	float maxMipLevel = 5.0f;
 	float3 prefilteredColor =
-		prefilteredMap.SampleLevel(clampSampler, R, roughness * maxMipLevel).rgb;
+		prefilteredMap.SampleLevel(clampSampler, correctedR, roughness * maxMipLevel).rgb;
+
 	float2 envBRDF =
 		brdfLUT.Sample(clampSampler, float2(max(dot(worldNormal, V), 0.0), roughness)).rg;
 
