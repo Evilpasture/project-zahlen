@@ -488,7 +488,7 @@ void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 									 move->orientation[2], move->orientation[3]);
 			}
 			playerTransform =
-				Math::CreateTransform(playerPos - JPH::Vec3(0.0f, 0.5f, 0.0f), rotation);
+				Math::CreateTransform(playerPos - JPH::Vec3(0.0f, 0.8f, 0.0f), rotation);
 		}
 	}
 

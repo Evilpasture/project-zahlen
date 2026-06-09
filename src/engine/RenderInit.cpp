@@ -660,6 +660,9 @@ void RenderContext::Impl::InitBindless() {
 void RenderContext::Impl::InitPostProcessing() {
 	defaultSampler = Vk::SamplerBuilder{}.Linear().ClampToEdge().Build(ctx.Device());
 
+	// Create the nearest-neighbor sampler
+	pointSampler = Vk::SamplerBuilder{}.Nearest().ClampToEdge().Build(ctx.Device());
+
 	VkPushConstantRange taaPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float)};
 	auto taaShaders = Vk::ShaderStages::Create(ctx.Device(),

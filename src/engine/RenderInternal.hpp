@@ -47,7 +47,8 @@ using TAALayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SampledImage
 using BlitLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texCurrent (Color)
 										Vk::SamplerSlot<1>,		 // sampler
 										Vk::SampledImageSlot<2>, // texDepth
-										Vk::SampledImageSlot<3>	 // texNormalRoughness
+										Vk::SampledImageSlot<3>, // texNormalRoughness
+										Vk::SamplerSlot<4>		 // pointSampler (Nearest)
 										>;
 using CullingLayout = Vk::DescriptorLayout<Vk::StorageBufferSlot<0>, Vk::StorageBufferSlot<1>>;
 
@@ -121,6 +122,7 @@ struct RenderContext::Impl {
 	Vk::PostProcessPass<BlitLayout> blitPass;
 
 	Vk::Sampler defaultSampler;
+	Vk::Sampler pointSampler;
 
 	uint32_t frame_index = 0;
 	bool resized = true;

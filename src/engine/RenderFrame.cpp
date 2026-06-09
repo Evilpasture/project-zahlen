@@ -120,7 +120,7 @@ void RenderContext::BeginFrame() {
 			Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(_impl->current_cmd, sAcc0_att);
 		auto sAcc1_ro =
 			Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(_impl->current_cmd, sAcc1_att);
-		auto sNorm_ro =
+		[[maybe_unused]] auto sNorm_ro =
 			Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(_impl->current_cmd, sNorm_att);
 
 		for (int i = 0; i < 2; ++i) {
@@ -596,7 +596,7 @@ void RenderContext::Impl::ApplyTAAPass(VkCommandBuffer cmd, VkExtent2D extent) {
 				.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
 
 			taaPass.WriteNext(ctx.Device(), sceneColor_ro, accumCurr_ready, velocity_ro,
-							  Vk::SamplerWrite{.sampler = defaultSampler.Get()});
+							  Vk::SamplerWrite{.sampler = pointSampler.Get()});
 			taaPass.Execute(cmd, g_TAAState.feedback);
 		});
 
@@ -632,8 +632,12 @@ void RenderContext::Impl::BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, 
 		.extent = extent,
 		.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
 
-	blitPass.WriteNext(ctx.Device(), blitSource_ro,
-					   Vk::SamplerWrite{.sampler = defaultSampler.Get()}, depth_ro, normRough_ro);
+	blitPass.WriteNext(ctx.Device(),
+					   blitSource_ro,									  // 1. Color (Linear)
+					   Vk::SamplerWrite{.sampler = defaultSampler.Get()}, // 2. Sampler (Linear)
+					   depth_ro,										  // 3. Depth (Nearest)
+					   normRough_ro,									  // 4. Normal/Roughness
+					   Vk::SamplerWrite{.sampler = pointSampler.Get()});  // 5. Sampler (Nearest)
 
 	struct BlitPushConstants {
 		JPH::Mat44 invViewProj;
