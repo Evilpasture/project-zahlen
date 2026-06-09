@@ -257,6 +257,8 @@ void RenderContext::Impl::InitBindless() {
 	VkSampler rawSampler = VK_NULL_HANDLE;
 	vkCreateSampler(ctx.Device(), &samplerInfo, nullptr, &rawSampler);
 	globalSampler = Vk::Sampler(ctx.Device(), rawSampler);
+	// Create the math/environment sampler (ClampToEdge prevents wrap-around artifacts)
+	clampSampler = Vk::SamplerBuilder{}.Linear().ClampToEdge().Build(ctx.Device());
 
 	// Allocate our global Joint storage buffer (Supports 8192 dynamic matrices)
 	JPH::Array<JPH::Mat44> identities(8192, JPH::Mat44::sIdentity());
@@ -544,7 +546,8 @@ void RenderContext::Impl::InitBindless() {
 												.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
 								 Vk::ImageWrite{.view = brdfLutView.Get(),
 												.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-								 Vk::BufferWrite{.buffer = morphDeltasBuffer.Handle()});
+								 Vk::BufferWrite{.buffer = morphDeltasBuffer.Handle()},
+								 Vk::SamplerWrite{clampSampler.Get()});
 	}
 }
 void RenderContext::Impl::InitPostProcessing() {

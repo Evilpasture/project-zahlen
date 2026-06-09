@@ -25,23 +25,25 @@ struct PushConstants {
 [[vk::push_constant]] PushConstants pc;
 
 float4 PSMain(VSOutput input) : SV_Target0 {
-	// 1. Fetch velocity to find where this pixel was last frame
 	float2 velocity = texVelocity.SampleLevel(smp, input.uv, 0).rg;
 	float2 historyUV = input.uv - velocity;
 
 	float4 current = texCurrent.SampleLevel(smp, input.uv, 0);
 
-	// 2. Reject history if it points off-screen or contains invalid math (NaN)
+	// FIX: Sanitize incoming NaN pixels so they don't infect the frame
+	if (any(isnan(current))) {
+		current = float4(0.0f, 0.0f, 0.0f, 1.0f);
+	}
+
 	if (any(historyUV < 0.0f) || any(historyUV > 1.0f) || any(isnan(historyUV))) {
 		return current;
 	}
 
 	float4 history = texHistory.SampleLevel(smp, historyUV, 0);
 	if (any(isnan(history))) {
-		return current;
+		history = current;
 	}
 
-	// 3. Neighborhood Clamping (Anti-Ghosting)
 	float4 m1 = 0;
 	float4 m2 = 0;
 
@@ -60,9 +62,12 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	float4 mean = m1 / 9.0f;
 	float4 stddev = sqrt(max(0.0f, (m2 / 9.0f) - (mean * mean)));
 
-	// Clamp the history color so it doesn't leave trails behind moving objects
+	// FIX: If m2 overflowed into Infinity anyway, stddev will become NaN. Catch it.
+	if (any(isnan(stddev))) {
+		stddev = 0.0f;
+	}
+
 	history = clamp(history, mean - stddev, mean + stddev);
 
-	// 4. Blend current frame with clamped history
 	return lerp(current, history, pc.feedback);
 }

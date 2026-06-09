@@ -142,7 +142,7 @@ PSOutput PSMain(VSOutput input) {
 		celIntensity = 1.0f; // Bright band
 	}
 
-	float3 irradiance = irradianceMap.Sample(defaultSampler, worldNormal).rgb;
+	float3 irradiance = irradianceMap.Sample(clampSampler, worldNormal).rgb;
 	float3 ambient = albedo.rgb * irradiance * 0.25f; // Soft stylized ambient mapping
 
 	float shadow = CalculateShadow(input.shadowPos, worldNormal, L_sun);
@@ -158,6 +158,9 @@ PSOutput PSMain(VSOutput input) {
 	float rimIntensity = smoothstep(0.6f, 0.75f, rim) * 0.25f * celIntensity;
 
 	float3 finalColor = ambient + (albedo.rgb * celIntensity) + specular + rimIntensity;
+
+	// FIX: TAA register overflow safeguard
+	finalColor = min(finalColor, 100.0f);
 
 	output.color = float4(finalColor, albedo.a);
 

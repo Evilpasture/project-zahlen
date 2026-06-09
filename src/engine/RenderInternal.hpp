@@ -36,8 +36,8 @@ using GlobalSceneLayout = Vk::DescriptorLayout<
 	Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>,	// Irradiance Cubemap (Diffuse IBL)
 	Vk::SampledImageSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,	// Pre-filtered Cubemap (Specular IBL)
 	Vk::SampledImageSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>, // 2D BRDF LUT (2D Texture)
-	Vk::StorageBufferSlot<11, VK_SHADER_STAGE_VERTEX_BIT>	// Morph target deltas (SSBO)
-	>;
+	Vk::StorageBufferSlot<11, VK_SHADER_STAGE_VERTEX_BIT>,	// Morph target deltas (SSBO)
+	Vk::SamplerSlot<12, VK_SHADER_STAGE_FRAGMENT_BIT>>;
 
 using TAALayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SampledImageSlot<1>,
 									   Vk::SampledImageSlot<2>, Vk::SamplerSlot<3>>;
@@ -149,6 +149,7 @@ struct RenderContext::Impl {
 	static constexpr uint32_t SHADOW_RES = 2048;
 	Vk::RenderTarget<VK_FORMAT_D32_SFLOAT> shadowMap;
 	Vk::Sampler shadowSampler;
+	Vk::Sampler clampSampler;
 
 	ZHLN::DoubleBuffered<Vk::Buffer> frameUniformBuffers;
 	ZHLN::DoubleBuffered<Vk::Buffer> lightStorageBuffers;

@@ -145,9 +145,11 @@ VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV
 float DistributionGGX(float3 N, float3 H, float roughness) {
 	float a = roughness * roughness;
 	float a2 = a * a;
-	float NdotH = saturate(dot(N, H)); // saturate guarantees exactly [0.0, 1.0]
+	float NdotH = saturate(dot(N, H));
 	float denom = (NdotH * NdotH * (a2 - 1.0) + 1.0);
-	return a2 / (3.14159 * denom * denom); // pow() with negative floats causes NaNs!
+
+	// Reverted to pure math. No artificial clamps crushing the peak!
+	return a2 / (3.14159 * denom * denom);
 }
 
 float GeometrySchlickGGX(float NdotV, float roughness) {
@@ -268,19 +270,25 @@ PSOutput PSMain(VSOutput input) {
 	float3 kD_rough = (1.0 - kS_rough) * (1.0 - metallic);
 
 	// Diffuse IBL
-	float3 irradiance = irradianceMap.Sample(defaultSampler, worldNormal).rgb;
+	float3 irradiance = irradianceMap.Sample(clampSampler, worldNormal).rgb;
 	float3 diffuseIBL = irradiance * albedo.rgb;
 
 	// Specular IBL (Assuming 1 pre-filtered mip level is bound at the top)
-	float3 prefilteredColor = prefilteredMap.SampleLevel(defaultSampler, R, 0.0).rgb;
+	float3 prefilteredColor = prefilteredMap.SampleLevel(clampSampler, R, 0.0).rgb;
 	float2 envBRDF =
-		brdfLUT.Sample(defaultSampler, float2(max(dot(worldNormal, V), 0.0), roughness)).rg;
+		brdfLUT.Sample(clampSampler, float2(max(dot(worldNormal, V), 0.0), roughness)).rg;
 	float3 specularIBL = prefilteredColor * (F_rough * envBRDF.x + envBRDF.y);
 
-	float3 ambient = (kD_rough * diffuseIBL + specularIBL); // Replaces flat 5% ambient!
+	float3 ambient = (kD_rough * diffuseIBL + specularIBL);
 
-	// Preserve exact base color alpha for BLEND transparency pipelines
-	output.color = float4(ambient + directSun + directPunctual + emissive, albedo.a);
+	// Combine all lighting
+	float3 finalLight = ambient + directSun + directPunctual + emissive;
+
+	// FIX: Clamp HDR peak to 100.0. This is blistering bright, but safely
+	// prevents (c * c) Infinity overflows inside the 17-bit TAA registers.
+	finalLight = min(finalLight, 100.0f);
+
+	output.color = float4(finalLight, albedo.a);
 
 	// Clamp W to a small positive number to prevent Divide-By-Zero NaN explosions
 	float currW = max(input.currClip.w, 0.0001f);
@@ -289,6 +297,20 @@ PSOutput PSMain(VSOutput input) {
 	float2 ndcCurr = input.currClip.xy / currW;
 	float2 ndcPrev = input.prevClip.xy / prevW;
 	output.velocity = (ndcCurr - ndcPrev) * float2(0.5f, -0.5f);
-
+	// --- output.color overrides ---
+	// output.color = float4(envBRDF.rg, 0.0f, 1.0f);
+	// output.color = float4(worldNormal * 0.5f + 0.5f, 1.0f);
+	// output.color = float4(N * 0.5f + 0.5f, 1.0f);
+	// output.color = float4(B * 0.5f + 0.5f, 1.0f);
+	//	output.color = float4(abs(currW - prevW) * 100.0f, 0.0f, 0.0f, 1.0f);
+	//	output.color = float4(R * 0.5f + 0.5f, 1.0f);
+	//	output.color = float4(specularIBL, 1.0f);
+	//	output.color = float4(F_rough, 1.0f);
+	//	output.color = float4(float3(D, D, D) * 0.01f, 1.0f); // Scaled down to fit display
+	// output.color = float4(float3(g_term, g_term, g_term), 1.0f);
+	//	output.color = float4(roughness, roughness, roughness, 1.0f);
+	//	output.color = float4(metallic, metallic, metallic, 1.0f);
+	//	output.color = float4(shadow, shadow, shadow, 1.0f);
+	// ------------------------------
 	return output;
 }

@@ -24,10 +24,15 @@ std::pair<float, float> Hammersley(uint32_t i, uint32_t N) {
 
 // GGX importance sampling
 JPH::Vec3 ImportanceSampleGGX(float u1, float u2, float roughness) {
-	float a = roughness * roughness;
-	float phi = 2.0f * 3.14159265f * u1;
-	float cosTheta = std::sqrt((1.0f - u2) / (1.0f + (a * a - 1.0f) * u2));
-	float sinTheta = std::sqrt(1.0f - cosTheta * cosTheta);
+	const float a = roughness * roughness;
+	const float phi = 2.0f * 3.14159265f * u1;
+
+	// Clamp the division so it never goes negative
+	float cosTheta = std::sqrt(std::max((1.0f - u2) / (1.0f + (a * a - 1.0f) * u2), 0.0f));
+
+	// Clamp 1 - cos^2 so it never underflows below 0.0f
+	float sinTheta = std::sqrt(std::max(1.0f - cosTheta * cosTheta, 0.0f));
+
 	return {std::cos(phi) * sinTheta, std::sin(phi) * sinTheta, cosTheta};
 }
 
@@ -46,14 +51,18 @@ std::vector<uint32_t> GenerateBRDFLUT(uint32_t width, uint32_t height) {
 	std::vector<uint32_t> pixels(static_cast<size_t>(width * height));
 
 	for (uint32_t y = 0; y < height; ++y) {
-		float roughness = float(y) / float(height - 1);
+		// FIX 1: Clamp roughness to prevent divide-by-zero in Importance Sampling
+		float roughness = std::max(float(y) / float(height - 1), 0.001f);
+
 		for (uint32_t x = 0; x < width; ++x) {
-			float NdotV = float(x) / float(width - 1);
+			// FIX 2: Clamp NdotV so the left column doesn't evaluate to pure black 0.0
+			float NdotV = std::max(float(x) / float(width - 1), 0.001f);
 
 			float A = 0.0f;
 			float B = 0.0f;
 
-			JPH::Vec3 V(std::sqrt(1.0f - NdotV * NdotV), 0.0f, NdotV);
+			float sqrtArg = 1.0f - NdotV * NdotV;
+			JPH::Vec3 V(std::sqrt(std::max(sqrtArg, 0.0f)), 0.0f, NdotV);
 			JPH::Vec3 N(0.0f, 0.0f, 1.0f);
 
 			constexpr uint32_t SAMPLE_COUNT = 128;
@@ -67,10 +76,19 @@ std::vector<uint32_t> GenerateBRDFLUT(uint32_t width, uint32_t height) {
 				float VdotH = std::max(V.Dot(H), 0.0f);
 
 				if (NdotL > 0.0f) {
-					float G = GeometrySmith(NdotV, NdotL, roughness);
-					// FIX: Clamp denominators to strictly prevent 0.0 / 0.0 = NaN
-					float G_Vis = (G * VdotH) / (std::max(NdotH, 0.001f) * std::max(NdotV, 0.001f));
-					float Fc = std::pow(1.0f - VdotH, 5.0f);
+					// Correct geometry constant 'k' for IBL
+					float k = (roughness * roughness) / 2.0f;
+
+					float Vis_SchlickV = NdotV * (1.0f - k) + k;
+					float Vis_SchlickL = NdotL * (1.0f - k) + k;
+
+					// FIX 3: The mathematically perfect Epic Games cancellation.
+					// NdotV is algebraically cancelled out, and NdotL is preserved
+					// in the numerator so the LUT isn't blown out to yellow!
+					float G_Vis =
+						(NdotL * VdotH) / (Vis_SchlickV * Vis_SchlickL * std::max(NdotH, 0.001f));
+
+					float Fc = std::pow(std::max(1.0f - VdotH, 0.0f), 5.0f);
 
 					A += (1.0f - Fc) * G_Vis;
 					B += Fc * G_Vis;
@@ -80,12 +98,6 @@ std::vector<uint32_t> GenerateBRDFLUT(uint32_t width, uint32_t height) {
 			A /= float(SAMPLE_COUNT);
 			B /= float(SAMPLE_COUNT);
 
-			// FIX: Failsafe strip NaNs if any still managed to propagate
-			if (std::isnan(A))
-				A = 0.0f;
-			if (std::isnan(B))
-				B = 0.0f;
-
 			auto r = static_cast<uint8_t>(ZHLN::Clamp(A, 0.0f, 1.0f) * 255.0f);
 			auto g = static_cast<uint8_t>(ZHLN::Clamp(B, 0.0f, 1.0f) * 255.0f);
 			pixels[y * width + x] = 0xFF000000u | (uint32_t(g) << 8) | r;
@@ -93,5 +105,4 @@ std::vector<uint32_t> GenerateBRDFLUT(uint32_t width, uint32_t height) {
 	}
 	return pixels;
 }
-
 } // namespace ZHLN::PBR

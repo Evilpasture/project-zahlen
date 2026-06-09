@@ -93,6 +93,7 @@ struct GPUJoint {
 [[vk::binding(9, 0)]] TextureCube prefilteredMap;
 [[vk::binding(10, 0)]] Texture2D brdfLUT;
 [[vk::binding(11, 0)]] StructuredBuffer<float4> g_morphDeltas; // float4 matches std430 padding
+[[vk::binding(12, 0)]] SamplerState clampSampler;
 
 struct VSInput {
 	[[vk::location(0)]] float3 position : POSITION;
