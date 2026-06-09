@@ -80,47 +80,62 @@ JPH::Vec3 GenerateCosHemisphere(float u1, float u2) {
 	return {std::cos(phi) * sinTheta, std::sin(phi) * sinTheta, cosTheta};
 }
 
-// Generates 6 face buffers for a 32x32 Irradiance Cubemap
-std::vector<std::vector<uint32_t>> GenerateIrradianceCubemap() {
-	const uint32_t size = 32;
-	std::vector<std::vector<uint32_t>> cubemap(
-		6, std::vector<uint32_t>(static_cast<size_t>(size * size)));
+std::array<JPH::Vec4, 9> GenerateDiffuseSH() {
+	std::array<JPH::Vec4, 9> sh{};
+	for (int i = 0; i < 9; ++i) {
+		sh[i] = JPH::Vec4::sZero();
+	}
 
-	for (int face = 0; face < 6; ++face) {
-		for (uint32_t y = 0; y < size; ++y) {
-			float v = (float(y) + 0.5f) / float(size);
-			for (uint32_t x = 0; x < size; ++x) {
-				float u = (float(x) + 0.5f) / float(size);
+	const uint32_t SAMPLE_COUNT = 16384; // High sample count since it only runs once
+	const float weight = 4.0f * 3.14159265f / float(SAMPLE_COUNT);
 
-				JPH::Vec3 N = GetCubeDirection(face, u, v);
+	for (uint32_t i = 0; i < SAMPLE_COUNT; ++i) {
+		auto [u1, u2] = Hammersley(i, SAMPLE_COUNT);
 
-				// Build orthonormal basis around normal N
-				JPH::Vec3 up =
-					std::abs(N.GetY()) < 0.999f ? JPH::Vec3::sAxisY() : JPH::Vec3::sAxisZ();
-				JPH::Vec3 tangent = up.Cross(N).Normalized();
-				JPH::Vec3 bitangent = N.Cross(tangent);
+		// Uniform sphere mapping
+		float z = 1.0f - 2.0f * u1;
+		float r = std::sqrt(std::max(0.0f, 1.0f - z * z));
+		float phi = 2.0f * 3.14159265f * u2;
 
-				JPH::Vec3 irradiance = JPH::Vec3::sZero();
+		float x = r * std::cos(phi);
+		float y = r * std::sin(phi);
+		JPH::Vec3 dir(x, y, z);
 
-				// Low-discrepancy Monte Carlo integration (64 samples per pixel)
-				const uint32_t SAMPLE_COUNT = 64;
-				for (uint32_t i = 0; i < SAMPLE_COUNT; ++i) {
-					auto [u1, u2] = Hammersley(i, SAMPLE_COUNT);
-					JPH::Vec3 hemiSample = GenerateCosHemisphere(u1, u2);
+		JPH::Vec3 L_in = EvaluateSky(dir);
 
-					// Transform to world space
-					JPH::Vec3 L = tangent * hemiSample.GetX() + bitangent * hemiSample.GetY() +
-								  N * hemiSample.GetZ();
+		// Evaluate Real Spherical Harmonic Basis (Y_lm)
+		float Y[9];
+		Y[0] = 0.282095f;
+		Y[1] = -0.488603f * y;
+		Y[2] = 0.488603f * z;
+		Y[3] = -0.488603f * x;
+		Y[4] = 1.092548f * x * y;
+		Y[5] = -1.092548f * y * z;
+		Y[6] = 0.315392f * (3.0f * z * z - 1.0f);
+		Y[7] = -1.092548f * x * z;
+		Y[8] = 0.546274f * (x * x - y * y);
 
-					irradiance += EvaluateSky(L.Normalized());
-				}
-
-				irradiance /= float(SAMPLE_COUNT);
-				cubemap[face][y * size + x] = PackColor(irradiance);
-			}
+		for (int c = 0; c < 9; ++c) {
+			sh[c] += JPH::Vec4(L_in * Y[c] * weight, 0.0f);
 		}
 	}
-	return cubemap;
+
+	// Pre-convolve with the normalized diffuse cosine lobe (A_l / pi constants)
+	const float A0 = 1.0f;		  // Normalized (pi / pi)
+	const float A1 = 2.0f / 3.0f; // Normalized ((2pi / 3) / pi)
+	const float A2 = 0.25f;		  // Normalized ((pi / 4) / pi)
+
+	sh[0] *= A0;
+	sh[1] *= A1;
+	sh[2] *= A1;
+	sh[3] *= A1;
+	sh[4] *= A2;
+	sh[5] *= A2;
+	sh[6] *= A2;
+	sh[7] *= A2;
+	sh[8] *= A2;
+
+	return sh;
 }
 
 std::vector<std::vector<uint32_t>> GenerateSpecularMip(uint32_t size, float roughness) {

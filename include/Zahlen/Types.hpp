@@ -137,6 +137,7 @@ struct alignas(16) FrameUniforms {
 	float lightDir[4];
 	uint32_t lightCount;
 	float _padding[3];
+	JPH::Vec4 sh[9]; // 9 Spherical Harmonic Coefficients
 };
 
 struct ObjectConstants {

@@ -788,7 +788,11 @@ void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
 	auto* impl = ctx.GetImpl();
 	impl->shadowProjView = shadowProjView;
 	impl->currentUniforms = uniforms;
-	std::memcpy(impl->frameUniformBuffers[impl->frame_index].Map().data, &uniforms,
+
+	// Inject SH coefficients invisibly so game_main doesn't have to worry about them
+	std::memcpy(impl->currentUniforms.sh, impl->shCoeffs.data(), sizeof(JPH::Vec4) * 9);
+
+	std::memcpy(impl->frameUniformBuffers[impl->frame_index].Map().data, &impl->currentUniforms,
 				sizeof(FrameUniforms));
 }
 

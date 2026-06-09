@@ -312,21 +312,35 @@ PSOutput PSMain(VSOutput input) {
 	// --- NEW: FULL PBR INDIRECT IMAGE-BASED LIGHTING (IBL) ---
 	float3 R = reflect(-V, worldNormal);
 	float3 F_rough = FresnelSchlickRoughness(max(dot(worldNormal, V), 0.0), F0, roughness);
-	float3 kS_rough = F_rough;
-	float3 kD_rough = (1.0 - kS_rough) * (1.0 - metallic);
 
-	// Diffuse IBL
-	float3 irradiance = irradianceMap.Sample(clampSampler, worldNormal).rgb;
-	float3 diffuseIBL = irradiance * albedo.rgb;
+	// 1. Evaluate SH Diffuse
+	float3 irradiance = EvaluateSH(worldNormal, frame.sh);
 
-	// Specular IBL (6 Mip Levels: 0.0 to 5.0)
+	// 2. Evaluate Single-Scatter Specular IBL
 	float maxMipLevel = 5.0f;
 	float3 prefilteredColor =
 		prefilteredMap.SampleLevel(clampSampler, R, roughness * maxMipLevel).rgb;
 	float2 envBRDF =
 		brdfLUT.Sample(clampSampler, float2(max(dot(worldNormal, V), 0.0), roughness)).rg;
-	float3 specularIBL = prefilteredColor * (F_rough * envBRDF.x + envBRDF.y);
-	float3 ambient = (kD_rough * diffuseIBL + specularIBL);
+
+	float3 FssEss = F_rough * envBRDF.x + float3(envBRDF.y, envBRDF.y, envBRDF.y);
+	float3 specularIBL = prefilteredColor * FssEss;
+
+	// 3. Multi-Scatter Energy Compensation (Kulla-Conty / Fdez-Agüera)
+	float Ess = envBRDF.x + envBRDF.y;
+	float Ems = 1.0f - Ess;
+	float3 Favg = F0 + (1.0f - F0) / 21.0f;
+	float3 FmsEms = (Favg * Ems) / (1.0f - Favg * Ems);
+
+	// Multi-scattered specular energy diffuses back into the scene
+	float3 multiScatterIBL = FmsEms * irradiance;
+
+	// 4. Energy-Conserving Diffuse
+	// Light that isn't reflected via single or multiple scattering is absorbed/diffused
+	float3 kD_IBL = (1.0f - FssEss - FmsEms) * (1.0f - metallic);
+	float3 diffuseIBL = kD_IBL * albedo.rgb * irradiance;
+
+	float3 ambient = diffuseIBL + specularIBL + multiScatterIBL;
 
 	// Combine all lighting
 	float3 finalLight = ambient + directSun + directPunctual + emissive;

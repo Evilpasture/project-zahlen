@@ -25,6 +25,7 @@ struct FrameUniforms {
 	float4 lightDir;
 	uint lightCount;
 	float3 padding;
+	float4 sh[9];
 };
 
 struct ObjectConstants {
@@ -92,13 +93,12 @@ struct GPUJoint {
 
 [[vk::binding(7, 0)]] StructuredBuffer<GPUJoint> g_joints;
 
-[[vk::binding(8, 0)]] TextureCube irradianceMap;
-[[vk::binding(9, 0)]] TextureCube prefilteredMap;
-[[vk::binding(10, 0)]] Texture2D brdfLUT;
-[[vk::binding(11, 0)]] StructuredBuffer<float4> g_morphDeltas; // float4 matches std430 padding
-[[vk::binding(12, 0)]] SamplerState clampSampler;
-[[vk::binding(13, 0)]] Texture2D ltc_mat;
-[[vk::binding(14, 0)]] Texture2D ltc_amp;
+[[vk::binding(8, 0)]] TextureCube prefilteredMap; // Shifted
+[[vk::binding(9, 0)]] Texture2D brdfLUT;		  // Shifted
+[[vk::binding(10, 0)]] StructuredBuffer<float4> g_morphDeltas;
+[[vk::binding(11, 0)]] SamplerState clampSampler;
+[[vk::binding(12, 0)]] Texture2D ltc_mat;
+[[vk::binding(13, 0)]] Texture2D ltc_amp;
 
 struct VSInput {
 	[[vk::location(0)]] float3 position : POSITION;
@@ -131,6 +131,15 @@ struct PSOutput {
 	float2 velocity : SV_Target1;
 	float4 normalRoughness : SV_Target2;
 };
+
+float3 EvaluateSH(float3 N, float4 sh[9]) {
+	float3 result =
+		sh[0].xyz * 0.282095f + sh[1].xyz * -0.488603f * N.y + sh[2].xyz * 0.488603f * N.z +
+		sh[3].xyz * -0.488603f * N.x + sh[4].xyz * 1.092548f * N.x * N.y +
+		sh[5].xyz * -1.092548f * N.y * N.z + sh[6].xyz * 0.315392f * (3.0f * N.z * N.z - 1.0f) +
+		sh[7].xyz * -1.092548f * N.x * N.z + sh[8].xyz * 0.546274f * (N.x * N.x - N.y * N.y);
+	return max(result, float3(0.0f, 0.0f, 0.0f));
+}
 
 // --- SKELETAL SKINNING ---
 float4 SkinPosition(float4 position, uint4 joints, float4 weights, uint jointOffset) {

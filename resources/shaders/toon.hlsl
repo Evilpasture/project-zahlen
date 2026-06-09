@@ -142,8 +142,8 @@ PSOutput PSMain(VSOutput input) {
 		celIntensity = 1.0f; // Bright band
 	}
 
-	float3 irradiance = irradianceMap.Sample(clampSampler, worldNormal).rgb;
-	float3 ambient = albedo.rgb * irradiance * 0.25f; // Soft stylized ambient mapping
+	float3 irradiance = EvaluateSH(worldNormal, frame.sh);
+	float3 ambient = albedo.rgb * irradiance * 0.25f;
 
 	float shadow = CalculateShadow(input.shadowPos, worldNormal, L_sun);
 	celIntensity *= shadow;

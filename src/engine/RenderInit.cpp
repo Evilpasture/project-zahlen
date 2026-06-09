@@ -346,96 +346,10 @@ void RenderContext::Impl::InitBindless() {
 	brdfLutView = Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(ctx.Device(), brdfLutImage.Handle());
 
 	// -----------------------------------------------------------------
-	// Pass 2: Diffuse Irradiance Cubemap Generation
+	// Pass 2: Spherical Harmonics Generation
 	// -----------------------------------------------------------------
-	ZHLN::Log("[IBL] Generating Diffuse Irradiance Cubemap...");
-	std::vector<std::vector<uint32_t>> irrData = ZHLN::PBR::GenerateIrradianceCubemap();
-	VkImageCreateInfo irrInfo = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-								 .pNext = nullptr,
-								 .flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
-								 .imageType = VK_IMAGE_TYPE_2D,
-								 .format = VK_FORMAT_R8G8B8A8_UNORM,
-								 .extent = {.width = 32, .height = 32, .depth = 1},
-								 .mipLevels = 1,
-								 .arrayLayers = 6,
-								 .samples = VK_SAMPLE_COUNT_1_BIT,
-								 .tiling = VK_IMAGE_TILING_OPTIMAL,
-								 .usage =
-									 VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-								 .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-								 .queueFamilyIndexCount = 0,
-								 .pQueueFamilyIndices = nullptr,
-								 .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
-	irradianceImage = Vk::Image::Create(allocator.Get(), irrInfo, VMA_MEMORY_USAGE_GPU_ONLY);
-
-	{
-		Vk::CommandPool irrPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-		if (!irrPool.Allocate(1)) {
-			ZHLN::Panic("Vulkan: Failed to allocate Irradiance command buffer");
-		}
-		VkCommandBuffer cmd = irrPool[0];
-
-		ZHLN_BeginCommandBuffer(cmd);
-		Vk::Buffer irrStaging =
-			Vk::Buffer::Create(allocator.Get(), static_cast<size_t>(32 * 32 * 4 * 6),
-							   VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
-		{
-			auto irrMap = irrStaging.Map();
-			for (int i = 0; i < 6; ++i) {
-				std::memcpy((char*)irrMap.data + static_cast<ptrdiff_t>(i * 32 * 32 * 4),
-							irrData[i].data(), static_cast<size_t>(32 * 32 * 4));
-			}
-		}
-
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
-			cmd, irradianceImage.Handle());
-		for (int i = 0; i < 6; ++i) {
-			VkBufferImageCopy2 region = {
-				.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
-				.pNext = nullptr,
-				.bufferOffset = static_cast<VkDeviceSize>(i * 32 * 32 * 4),
-				.bufferRowLength = 0,
-				.bufferImageHeight = 0,
-				.imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-									 .mipLevel = 0,
-									 .baseArrayLayer = (uint32_t)i,
-									 .layerCount = 1},
-				.imageOffset = {.x = 0, .y = 0, .z = 0},
-				.imageExtent = {.width = 32, .height = 32, .depth = 1}};
-			VkCopyBufferToImageInfo2 copyInfo = {
-				.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
-				.pNext = nullptr,
-				.srcBuffer = irrStaging.Handle(),
-				.dstImage = irradianceImage.Handle(),
-				.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-				.regionCount = 1,
-				.pRegions = &region};
-			vkCmdCopyBufferToImage2(cmd, &copyInfo);
-		}
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd,
-																	   irradianceImage.Handle());
-		ZHLN_EndCommandBuffer(cmd);
-
-		VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-											 .pNext = nullptr,
-											 .commandBuffer = cmd,
-											 .deviceMask = 0};
-		VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-								.pNext = nullptr,
-								.flags = 0,
-								.waitSemaphoreInfoCount = 0,
-								.pWaitSemaphoreInfos = nullptr,
-								.commandBufferInfoCount = 1,
-								.pCommandBufferInfos = &subInfo,
-								.signalSemaphoreInfoCount = 0,
-								.pSignalSemaphoreInfos = nullptr};
-		vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
-		vkQueueWaitIdle(ctx.GraphicsQueue());
-	}
-	irradianceView =
-		Vk::CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(ctx.Device(), irradianceImage.Handle(), 1);
-
+	ZHLN::Log("[IBL] Generating Diffuse Spherical Harmonics...");
+	shCoeffs = ZHLN::PBR::GenerateDiffuseSH();
 	// -----------------------------------------------------------------
 	// Pass 3: Specular Pre-filtered Cubemap Generation (6 Mip Levels)
 	// -----------------------------------------------------------------
@@ -642,9 +556,7 @@ void RenderContext::Impl::InitBindless() {
 			Vk::BufferWrite{.buffer = instanceDataBuffers[i].Handle()},
 			Vk::BufferWrite{.buffer = jointBuffers[i].Handle()},
 
-			// --- WRITE IBL DESCRIPTORS ---
-			Vk::ImageWrite{.view = irradianceView.Get(),
-						   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+			// --- SHIFTED DESCRIPTORS ---
 			Vk::ImageWrite{.view = prefilteredView.Get(),
 						   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
 			Vk::ImageWrite{.view = brdfLutView.Get(),
