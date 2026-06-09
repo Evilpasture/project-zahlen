@@ -166,6 +166,22 @@ float3 FresnelSchlick(float cosTheta, float3 F0) {
 	return F0 + (1.0 - F0) * pow(saturate(1.0 - cosTheta), 5.0);
 }
 
+// --- GEOMETRIC SPECULAR ANTI-ALIASING (GSAA) ---
+float AntiAliasRoughness(float roughness, float3 unnormalizedNormal) {
+	float r = length(unnormalizedNormal);
+	r = clamp(r, 0.0001f, 1.0f);
+
+	float alpha = roughness * roughness;
+
+	// FIX: Clamp the specular power to >= 0.0 to prevent negative denominators and NaN division
+	float power = max(2.0f / (alpha * alpha + 0.0001f) - 2.0f, 0.0f);
+
+	float toksvig = r / (r + (1.0f - r) * power);
+
+	float newAlpha = sqrt(2.0f / (power * toksvig + 2.0f));
+	return saturate(newAlpha);
+}
+
 // --- SPECIALIZED SHADOW PASS ENTRY POINT ---
 void PSShadow(VSOutput input) {
 	uint4 indices = input.materialIndices;
@@ -198,7 +214,13 @@ PSOutput PSMain(VSOutput input) {
 		discard;
 	}
 
-	float3 normalMap = globalTextures[indices.y].Sample(defaultSampler, input.uv).rgb * 2.0 - 1.0;
+	// Sample the raw, unnormalized normal first to preserve its filtered length (representing
+	// sub-pixel variance)
+	float3 normalMapRaw =
+		globalTextures[indices.y].Sample(defaultSampler, input.uv).rgb * 2.0f - 1.0f;
+	float normalLength = length(normalMapRaw);
+	float3 normalMap = normalMapRaw / max(normalLength, 0.001f); // Normalize safely
+
 	float4 pbr = globalTextures[indices.z].Sample(defaultSampler, input.uv);
 	float3 emissive = globalTextures[indices.w].Sample(defaultSampler, input.uv).rgb;
 
@@ -206,6 +228,10 @@ PSOutput PSMain(VSOutput input) {
 	float roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.045f);
 	float metallic = (indices.z == 0 ? 1.0f : pbr.b) * metallicFactor;
 
+	// Apply Toksvig Specular Anti-Aliasing (Only if a custom normal map is bound; 2 is flat normal)
+	if (indices.y != 2) {
+		roughness = AntiAliasRoughness(roughness, normalMapRaw);
+	}
 	float3 N = normalize(input.normal);
 	float3 worldNormal = N;
 

@@ -162,6 +162,11 @@ float3 ACESFilm(float3 x) {
 	return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
 }
 
+// Exponential soft-limit curve to prevent hard plateau lines in dark shadows
+float SoftClamp(float x, float limit) {
+	return limit * (1.0f - exp(-x / max(limit, 0.0001f)));
+}
+
 float4 PSMain(VSOutput input) : SV_Target0 {
 	float3 litColor = texInput.SampleLevel(smp, input.uv, 0).rgb;
 	float depth = texDepth.SampleLevel(pointSampler, input.uv, 0).r;
@@ -185,6 +190,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
 	// 2. Reconstruct World Position
 	float3 worldPos = ReconstructWorldPos(input.uv, depth);
+
+	float ao = 1.0f; // Global AO tracker (Defaults to 1.0 = no occlusion)
 
 	// --- A. COOPERATIVE SSAO / SSGI / HBAO / GTAO EVALUATION PASS ---
 	// (This must run on ALL surfaces, rough and glossy alike)
@@ -256,7 +263,12 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 				}
 			}
 
-			float ao = 1.0f - saturate((occlusion / 4.0f) * pc.aoPower * screenFade);
+			// Average the results over the 4 slice directions
+			float rawAO = saturate((occlusion / 4.0f) * pc.aoPower * screenFade);
+
+			// UPDATED: Apply smooth-knee compression (max darkness 0.85 = min AO 0.15)
+			ao = 1.0f - SoftClamp(rawAO, 0.85f);
+
 			litColor *= ao;
 		}
 		// Path B: Stochastic Sphere Sampling (SSAO / SSGI)
@@ -316,8 +328,11 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 			}
 
 			if (pc.giMode == 1) {
-				float ao =
-					1.0f - saturate((occlusion / float(pc.giSamples)) * pc.aoPower * screenFade);
+				float rawAO = saturate((occlusion / float(pc.giSamples)) * pc.aoPower * screenFade);
+
+				// UPDATED: Apply smooth-knee compression (max darkness 0.85 = min AO 0.15)
+				ao = 1.0f - SoftClamp(rawAO, 0.85f);
+
 				litColor *= ao;
 			} else if (pc.giMode == 2) {
 				float3 indirect =
@@ -339,7 +354,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 		float3 stretchedR = normalize(R - V * stretching);
 
 		float confidence = 0.0f;
-		float2 hitUV = RaymarchSSR(worldPos, stretchedR, confidence); // <-- USE stretchedR HERE
+		float2 hitUV = RaymarchSSR(worldPos, stretchedR, confidence);
 
 		if (confidence > 0.0f) {
 			float3 reflectionColor = texInput.SampleLevel(smp, hitUV, 0).rgb;
@@ -350,13 +365,26 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
 			// Fade reflection on rougher surfaces
 			float roughnessFade = saturate(1.0f - roughness);
-			float3 ssr = reflectionColor * F * confidence * roughnessFade;
+
+			// --- NEW: SPECULAR & HORIZON OCCLUSION ---
+			// 1. Analytical Specular Occlusion (Lagarde/Sony)
+			// Darkens specular highlights in deep crevices to prevent light leaking
+			float specularOcclusion = saturate(pow(NoV + ao, roughness * roughness) - 1.0f + ao);
+
+			// 2. Horizon Occlusion (prevents light from physically leaking below the microfacet
+			// horizon)
+			float horizonOcclusion = saturate(1.0f + dot(stretchedR, N));
+			horizonOcclusion *=
+				horizonOcclusion; // Square the falloff for a smoother physical curve
+
+			// Scale the final specular reflection by both occlusion terms
+			float3 ssr = reflectionColor * F * confidence * roughnessFade * specularOcclusion *
+						 horizonOcclusion;
 
 			// Blend
 			litColor = lerp(litColor, litColor + ssr, roughnessFade * confidence);
 		}
 	}
-
 	// 3. Tonemap
 	litColor = ACESFilm(litColor);
 
