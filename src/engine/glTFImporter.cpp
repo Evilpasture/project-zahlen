@@ -587,10 +587,11 @@ uint32_t InstantiatePrefab(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 										part.defaultMorphWeights[2], part.defaultMorphWeights[3]},
 					   .gltfNode = params.isAnimated ? (void*)part.gltfNode : nullptr,
 					   .gltfSkin = params.isAnimated ? (void*)part.gltfSkin : nullptr});
+		reg.Add(e, NameComponent{.name = part.name});
 
 		if (params.createPhysics) {
 			JPH::ShapeRefC shape = params.useBoxColliders ? part.boxCollider : part.meshCollider;
-			if (shape) {
+			if (shape != nullptr) {
 				JPH::Vec3 totalScale = params.scale * nodeScale;
 
 				if (!totalScale.IsClose(JPH::Vec3::sReplicate(1.0f), 1e-5f)) {

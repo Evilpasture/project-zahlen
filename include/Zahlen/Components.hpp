@@ -4,6 +4,7 @@
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
+#include <detail/String.hpp>
 
 namespace ZHLN {
 
@@ -72,5 +73,12 @@ struct RagdollComponent {
 	uint32_t jointCount = 0;						 // 4 bytes
 	uint32_t _padding = 0;							 // 4 bytes (Alignment padding)
 	void* gltfSkin = nullptr;						 // 8 bytes
+};
+
+/**
+ * @brief Associates a string name/tag with an ECS Entity.
+ */
+struct NameComponent {
+	String64 name;
 };
 } // namespace ZHLN

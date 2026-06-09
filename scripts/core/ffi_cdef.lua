@@ -125,6 +125,14 @@ if not ok then
             void*    gltfSkin;
         } RagdollComponent;
 
+
+        typedef struct NameComponent {
+            char name[64];
+            size_t len;
+        } NameComponent;
+
+        void ZHLN_LogInventoryShell(const char* msg);
+
     ]]
 end
 

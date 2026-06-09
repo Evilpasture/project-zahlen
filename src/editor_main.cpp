@@ -261,6 +261,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 	reg.RegisterComponent<PhysicsComponent>("PhysicsComponent");
 	reg.RegisterComponent<MovementComponent>("MovementComponent");
 	reg.RegisterComponent<ALife::ALifeComponent>("ALifeComponent");
+	reg.RegisterComponent<NameComponent>("NameComponent");
 
 	ZHLN::Log("Initializing Editor Workspace Scene...");
 	int terrainSize = 128;

@@ -1,5 +1,6 @@
 local ffi = require("ffi")
 local zahlen = require("scripts.core.zahlen")
+local InventoryShell = require("scripts.core.inventory")
 
 -- Wrap the unified registry
 game_ecs = game_ecs or zahlen.ecs.new(engine and engine.raw or nil)
@@ -11,27 +12,30 @@ function update(ptr, dt)
     if not engine then
         engine = zahlen.wrap(ptr)
         world = engine:world()
-
-        -- Re-instantiate the registry with the active engine pointer
         game_ecs = zahlen.ecs.new(engine.raw)
+        inventory_shell = InventoryShell.new()
         zahlen.log("Unified ECS Registry Initialized successfully.")
     end
 
     if not player_ent then
-        -- Query the ECS directly for the entity possessing the MovementComponent
+        -- Find the player entity by looking for the movement component
         for ent, movement in game_ecs:view("MovementComponent") do
             player_ent = ent
             break
         end
 
         if player_ent then
-            -- Bind dynamic Lua tables to our C++ entity ID
             game_ecs:add(player_ent, "combat", { hp = 100, max_hp = 100, is_poisoned = false })
-            game_ecs:add(player_ent, "inventory", { coins = 0 })
-
+            game_ecs:add(player_ent, "inventory", { coins = 0, equipped = nil })
             zahlen.log("Bound dynamic Lua components to C++ player handle: " .. tostring(player_ent))
-        else
-            zahlen.log("WARNING: No player entity with MovementComponent found yet.")
+
+            -- EXAMPLE: Query a specific glTF sub-part by name
+            local left_eye = game_ecs:find("pomni_eyes")
+            if left_eye then
+                zahlen.log("Successfully found Pomni's eyes in the ECS hierarchy! Handle: " .. tostring(left_eye))
+            else
+                zahlen.log("Could not find eyes yet (not spawned or name mismatch)")
+            end
         end
     end
 
@@ -141,7 +145,7 @@ function hybrid_health_and_speed_system(registry, dt)
             combat.hp = math.min(combat.max_hp, combat.hp + 2.0 * dt)
         end
 
-        test_environmental_damage_simulation(combat)
+        -- test_environmental_damage_simulation(combat)
     end
 end
 
@@ -205,4 +209,15 @@ function camera_fov_system(registry, eng, dt)
     -- Smoothly lerp towards the target FOV (factor of 8.0 provides a snappy, punchy transition)
     local new_fov = current_fov + (target_fov - current_fov) * 8.0 * dt
     eng:set_camera_fov(new_fov)
+end
+
+-- ============================================================================
+-- System 4: Inventory Shell subsystem
+-- ============================================================================
+function run_inventory_command(cmd)
+    local out = inventory_shell:execute_command(cmd)
+    if out ~= "" then
+        -- Route the output back to our C++ terminal log
+        ffi.C.ZHLN_LogInventoryShell(out)
+    end
 end

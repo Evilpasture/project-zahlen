@@ -31,12 +31,8 @@ class ZHLN_API InputContext {
   public:
 	InputContext() = default;
 
-	[[nodiscard]] bool IsKeyDown(KeyCode key) const noexcept {
-		return _keys[static_cast<size_t>(key)];
-	}
-	[[nodiscard]] bool IsMouseButtonDown(KeyCode key) const noexcept {
-		return _keys[static_cast<size_t>(key)];
-	}
+	[[nodiscard]] bool IsKeyDown(KeyCode key) const noexcept;
+	[[nodiscard]] bool IsMouseButtonDown(KeyCode key) const noexcept;
 	[[nodiscard]] const MouseState& GetMouse() const noexcept { return _mouse; }
 
 	void ResetDeltas();

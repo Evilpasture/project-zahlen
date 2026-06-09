@@ -14,6 +14,7 @@ local NATIVE_COMPONENTS = {
     PhysicsComponent = true,
     ALifeComponent = true,
     RagdollComponent = true,
+    NameComponent = true,
 }
 
 -- Stable key converter for cdata / uint64_t table indexing
@@ -343,6 +344,18 @@ function Registry:pure_lua_view(...)
             end
         end
     end
+end
+
+-- ============================================================================
+-- Utility Helper: Find Entity by Name
+-- ============================================================================
+function Registry:find(name)
+    for ent, name_comp in self:view("NameComponent") do
+        if ffi.string(name_comp.name) == name then
+            return ent
+        end
+    end
+    return nil
 end
 
 return Registry

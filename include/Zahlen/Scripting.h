@@ -41,6 +41,8 @@ ZHLN_API void ZHLN_PlayOneShot3D(struct ZHLN_Engine* engine, const char* filepat
 ZHLN_API void ZHLN_PlayProceduralBeep(ZHLN_Engine* engine, float frequency, float duration,
 									  float volume);
 
+ZHLN_API void ZHLN_LogInventoryShell(const char* msg);
+
 #ifdef __cplusplus
 }
 #endif

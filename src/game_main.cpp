@@ -33,6 +33,7 @@ void DrawProfiler(Engine& engine);
 void MovementSystem(Engine& engine, float dt);
 void AudioSystem(Engine& engine, float dt);
 void DrawOrientationGizmo(const ZHLN::Camera& cam);
+void DrawInventoryShell(ScriptRunner& runner);
 
 // Define the 12 edges connecting the 8 frustum corners
 struct FrustumEdge {
@@ -143,6 +144,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 	reg.RegisterComponent<MovementComponent>("MovementComponent");
 	reg.RegisterComponent<ALife::ALifeComponent>("ALifeComponent");
 	reg.RegisterComponent<RagdollComponent>("RagdollComponent");
+	reg.RegisterComponent<NameComponent>("NameComponent");
 
 	// ------------------------------------------------------------------------
 	// 1. Create a Solid Physics Ground Plane to stand on
@@ -203,6 +205,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 		}
 
 		ZHLN::DrawConsole(scriptRunner);
+		ZHLN::DrawInventoryShell(scriptRunner);
 		ZHLN::DrawProfiler(engine);
 		ZHLN::DrawOrientationGizmo(cam);
 

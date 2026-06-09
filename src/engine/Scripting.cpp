@@ -8,6 +8,7 @@
 #include <Zahlen/physics/Physics_C.h>
 #include <cstring>
 #include <physics/PhysicsWorld.hpp>
+#include <print>
 #include <threading/Channel.hpp>
 
 extern "C" {
@@ -262,6 +263,10 @@ void ScriptRunner::ReloadFile(std::string_view path) {
 
 } // namespace ZHLN
 
+// Shared log state declared in ConsoleUI.cpp
+extern std::vector<std::string> s_InvShellLog;
+extern bool s_InvScrollToBottom;
+
 // --- C-API Exports ---
 extern "C" {
 
@@ -289,5 +294,26 @@ float ZHLN_GetCameraFOV(ZHLN_Engine* engine_handle) {
 void ZHLN_SetCameraFOV(ZHLN_Engine* engine_handle, float fov) {
 	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
 	engine->GetCamera().fov = fov;
+}
+
+void ZHLN_LogInventoryShell(const char* msg) {
+	std::string str(msg);
+	size_t pos = 0;
+
+	// Split the multi-line output block by \n into separate log rows [3]
+	while (pos < str.size()) {
+		size_t next_nl = str.find('\n', pos);
+		if (next_nl == std::string::npos) {
+			s_InvShellLog.push_back(str.substr(pos));
+			break;
+		}
+		s_InvShellLog.push_back(str.substr(pos, next_nl - pos));
+		pos = next_nl + 1;
+	}
+	s_InvScrollToBottom = true;
+
+	// Stream the raw block to the system terminal and force flush immediately [3]
+	std::println(stdout, "[InvShell Output]\n{}", msg);
+	std::fflush(stdout);
 }
 }
