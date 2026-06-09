@@ -132,6 +132,7 @@ struct alignas(16) FrameUniforms {
 	JPH::Mat44 unjitteredViewProj;
 	JPH::Mat44 prevUnjitteredViewProj;
 	JPH::Mat44 lightSpaceMatrix;
+	JPH::Mat44 invViewProj;
 	float camPos[4];
 	float lightDir[4];
 	uint32_t lightCount;

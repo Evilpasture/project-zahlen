@@ -462,6 +462,7 @@ void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 	uniforms.unjitteredViewProj = unjitteredVp;
 	uniforms.prevUnjitteredViewProj = s_PrevUnjitteredVp;
 	uniforms.lightSpaceMatrix = lightSpaceBiased;
+	uniforms.invViewProj = unjitteredVp.Inversed();
 	std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
 	std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);
 	uniforms.lightCount = static_cast<uint32_t>(sceneLights.size());

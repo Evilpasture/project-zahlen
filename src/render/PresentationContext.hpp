@@ -64,7 +64,8 @@ class PresentationContext {
 
 		// Automatically recreate the depth buffer to match the new swapchain extent
 		depthTarget = RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-			*_alloc, *_ctx, swapchain.Get().extent, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+			*_alloc, *_ctx, swapchain.Get().extent,
+			VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 
 		return depthTarget.Valid();
 	}

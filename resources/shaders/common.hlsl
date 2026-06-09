@@ -20,6 +20,7 @@ struct FrameUniforms {
 	float4x4 unjitteredViewProj;
 	float4x4 prevUnjitteredViewProj;
 	float4x4 lightSpaceMatrix;
+	float4x4 invViewProj;
 	float4 camPos;
 	float4 lightDir;
 	uint lightCount;
@@ -128,6 +129,7 @@ struct VSOutput {
 struct PSOutput {
 	float4 color : SV_Target0;
 	float2 velocity : SV_Target1;
+	float4 normalRoughness : SV_Target2;
 };
 
 // --- SKELETAL SKINNING ---

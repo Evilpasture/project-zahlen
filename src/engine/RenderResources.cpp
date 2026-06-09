@@ -145,7 +145,8 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 						.Shaders(shaders)
 						.Layout(layout.Get())
 						.Vertex<Vertex>()
-						.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16G16_SFLOAT})
+						.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16G16_SFLOAT,
+									   VK_FORMAT_R16G16B16A16_SFLOAT})
 						.DepthFormat(VK_FORMAT_D32_SFLOAT)
 						.CullNone();
 

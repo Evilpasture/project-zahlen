@@ -50,6 +50,9 @@ void RenderContext::BeginFrame() {
 		_impl->accumBuffers[1] = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
 			_impl->allocator, _impl->ctx, ext,
 			VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+		_impl->normalRoughnessBuffer = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
+			_impl->allocator, _impl->ctx, ext,
+			VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 
 		_impl->needsInitialClear = true;
 		_impl->depth_ready = false;
@@ -80,6 +83,7 @@ void RenderContext::BeginFrame() {
 		auto sVel_u = _impl->velocityBuffer.State();
 		auto sAcc0_u = _impl->accumBuffers[0].State();
 		auto sAcc1_u = _impl->accumBuffers[1].State();
+		auto sNorm_u = _impl->normalRoughnessBuffer.State();
 
 		auto sColor_att =
 			Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(_impl->current_cmd, sColor_u);
@@ -89,18 +93,23 @@ void RenderContext::BeginFrame() {
 			Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(_impl->current_cmd, sAcc0_u);
 		auto sAcc1_att =
 			Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(_impl->current_cmd, sAcc1_u);
+		auto sNorm_att =
+			Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(_impl->current_cmd, sNorm_u);
 
 		// Self-contained DynamicPass clears the framebuffers once on startup (Compile-time
 		// verified!)
-		Vk::DynamicPass<4, false>(_impl->presentation.swapchain.Get().extent)
+
+		Vk::DynamicPass<5, false>(_impl->presentation.swapchain.Get().extent)
 			.Color(0, sColor_att, VK_ATTACHMENT_LOAD_OP_CLEAR)
 			.Color(1, sVel_att, VK_ATTACHMENT_LOAD_OP_CLEAR)
 			.Color(2, sAcc0_att, VK_ATTACHMENT_LOAD_OP_CLEAR)
 			.Color(3, sAcc1_att, VK_ATTACHMENT_LOAD_OP_CLEAR)
+			.Color(4, sNorm_att, VK_ATTACHMENT_LOAD_OP_CLEAR) // Clear 5th target
 			.ClearColor(0, 0.0f, 0.0f, 0.0f, 1.0f)
 			.ClearColor(1, 0.0f, 0.0f, 0.0f, 1.0f)
 			.ClearColor(2, 0.0f, 0.0f, 0.0f, 1.0f)
 			.ClearColor(3, 0.0f, 0.0f, 0.0f, 1.0f)
+			.ClearColor(4, 0.0f, 0.0f, 0.0f, 1.0f)
 			.Execute(_impl->current_cmd, []() {});
 
 		auto sColor_ro = Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
@@ -111,6 +120,8 @@ void RenderContext::BeginFrame() {
 			Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(_impl->current_cmd, sAcc0_att);
 		auto sAcc1_ro =
 			Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(_impl->current_cmd, sAcc1_att);
+		auto sNorm_ro =
+			Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(_impl->current_cmd, sNorm_att);
 
 		for (int i = 0; i < 2; ++i) {
 			_impl->taaPass.WriteIndex(_impl->ctx.Device(), i, sColor_ro,
@@ -225,19 +236,19 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 		depth_att = Vk::Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, depth_u);
 		depth_ready = true;
 	} else {
-		Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> depth_current = {
+		Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> depth_current = {
 			.handle = presentation.depthTarget.image.Handle(),
 			.view = presentation.depthTarget.view.Get(),
 			.extent = presentation.depthTarget.extent,
 			.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
 		depth_att = Vk::Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, depth_current);
 	}
-
 	// 3. Prepare secondary command buffers
 	uint32_t numChunks = (drawCount + 255) / 256;
 	JPH::Array<VkCommandBuffer> secondaries(numChunks);
 
-	std::array<VkFormat, 2> formats = {VK_FORMAT_R16G16B16_SFLOAT, VK_FORMAT_R16G16_SFLOAT};
+	std::array<VkFormat, 3> formats = {VK_FORMAT_R16G16B16_SFLOAT, VK_FORMAT_R16G16_SFLOAT,
+									   VK_FORMAT_R16G16B16A16_SFLOAT};
 	const VkCommandBufferInheritanceRenderingInfo inherit = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
 		.pNext = nullptr,
@@ -493,10 +504,17 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCom
 		.view = velocityBuffer.view.Get(),
 		.extent = velocityBuffer.extent,
 		.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
+	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> normRough_ro = {
+		.handle = normalRoughnessBuffer.image.Handle(),
+		.view = normalRoughnessBuffer.view.Get(),
+		.extent = normalRoughnessBuffer.extent,
+		.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
 
 	auto sceneColor_att =
 		Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, sceneColor_ro);
 	auto velocity_att = Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, velocity_ro);
+	auto normRough_att =
+		Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, normRough_ro);
 
 	Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> depth_att;
 	if (!depth_ready) {
@@ -504,7 +522,7 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCom
 		depth_att = Vk::Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, depth_u);
 		depth_ready = true;
 	} else {
-		Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> depth_current = {
+		Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> depth_current = {
 			.handle = presentation.depthTarget.image.Handle(),
 			.view = presentation.depthTarget.view.Get(),
 			.extent = presentation.depthTarget.extent,
@@ -512,12 +530,14 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCom
 		depth_att = Vk::Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, depth_current);
 	}
 
-	Vk::DynamicPass<2, true>(presentation.swapchain.Get().extent)
+	Vk::DynamicPass<3, true>(presentation.swapchain.Get().extent)
 		.Color(0, sceneColor_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE)
 		.Color(1, velocity_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE)
+		.Color(2, normRough_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE)
 		.Depth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1.0f)
 		.ClearColor(0, 0.08f, 0.09f, 0.12f, 1.0f)
 		.ClearColor(1, 0.0f, 0.0f, 0.0f, 0.0f)
+		.ClearColor(2, 0.0f, 0.0f, 0.0f, 0.0f)
 		.Execute(cmd, [&]() {
 			const VkDeviceSize stride = sizeof(VkDrawIndexedIndirectCommand);
 			for (const auto& group : groups) {
@@ -594,6 +614,18 @@ void RenderContext::Impl::BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, 
 
 	bool useTAA = g_TAAState.enabled && taaPass.pipeline.Valid();
 
+	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> depth_ro = {
+		.handle = presentation.depthTarget.image.Handle(),
+		.view = presentation.depthTarget.view.Get(),
+		.extent = extent,
+		.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
+
+	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> normRough_ro = {
+		.handle = normalRoughnessBuffer.image.Handle(),
+		.view = normalRoughnessBuffer.view.Get(),
+		.extent = extent,
+		.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
+
 	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> blitSource_ro = {
 		.handle = useTAA ? accumBuffers.Next().image.Handle() : sceneColor.image.Handle(),
 		.view = useTAA ? accumBuffers.Next().view.Get() : sceneColor.view.Get(),
@@ -601,13 +633,21 @@ void RenderContext::Impl::BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, 
 		.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
 
 	blitPass.WriteNext(ctx.Device(), blitSource_ro,
-					   Vk::SamplerWrite{.sampler = defaultSampler.Get()});
+					   Vk::SamplerWrite{.sampler = defaultSampler.Get()}, depth_ro, normRough_ro);
 
+	struct BlitPushConstants {
+		JPH::Mat44 invViewProj;
+		JPH::Mat44 viewProj;
+		alignas(16) float camPos[4];
+	} pc = {.invViewProj = currentUniforms.invViewProj,
+			.viewProj = currentUniforms.unjitteredViewProj,
+			.camPos = {currentUniforms.camPos[0], currentUniforms.camPos[1],
+					   currentUniforms.camPos[2], currentUniforms.camPos[3]}};
 	if (blitPass.pipeline.Valid()) {
 		Vk::DynamicPass<1, false>(extent)
 			.Color(0, swap_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
 			.Execute(cmd, [&]() {
-				blitPass.Execute(cmd);
+				blitPass.Execute(cmd, pc);
 
 				if (!uiDrawQueue.empty()) {
 					struct UIObjectConstants {
@@ -695,11 +735,24 @@ void RenderContext::EndFrame() {
 		.view = _impl->velocityBuffer.view.Get(),
 		.extent = extent,
 		.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
+	Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> normRough_att = {
+		.handle = _impl->normalRoughnessBuffer.image.Handle(),
+		.view = _impl->normalRoughnessBuffer.view.Get(),
+		.extent = extent,
+		.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
+	Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> depth_att = {
+		.handle = _impl->presentation.depthTarget.image.Handle(),
+		.view = _impl->presentation.depthTarget.view.Get(),
+		.extent = extent,
+		.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
 
 	(void)Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(_impl->current_cmd,
 																   sceneColor_att);
 	(void)Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(_impl->current_cmd,
 																   velocity_att);
+	(void)Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(_impl->current_cmd,
+																   normRough_att);
+	(void)Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(_impl->current_cmd, depth_att);
 
 	if (g_TAAState.enabled && _impl->taaPass.pipeline.Valid()) {
 		_impl->ApplyTAAPass(_impl->current_cmd, extent);
@@ -730,6 +783,7 @@ void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
 				  const JPH::Mat44& shadowProjView) {
 	auto* impl = ctx.GetImpl();
 	impl->shadowProjView = shadowProjView;
+	impl->currentUniforms = uniforms;
 	std::memcpy(impl->frameUniformBuffers[impl->frame_index].Map().data, &uniforms,
 				sizeof(FrameUniforms));
 }

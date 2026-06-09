@@ -336,6 +336,7 @@ PSOutput PSMain(VSOutput input) {
 	finalLight = min(finalLight, 100.0f);
 
 	output.color = float4(finalLight, albedo.a);
+	output.normalRoughness = float4(worldNormal * 0.5f + 0.5f, roughness);
 
 	// Clamp W to a small positive number to prevent Divide-By-Zero NaN explosions
 	float currW = max(input.currClip.w, 0.0001f);

@@ -44,7 +44,11 @@ using GlobalSceneLayout = Vk::DescriptorLayout<
 using TAALayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SampledImageSlot<1>,
 									   Vk::SampledImageSlot<2>, Vk::SamplerSlot<3>>;
 
-using BlitLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SamplerSlot<1>>;
+using BlitLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texCurrent (Color)
+										Vk::SamplerSlot<1>,		 // sampler
+										Vk::SampledImageSlot<2>, // texDepth
+										Vk::SampledImageSlot<3>	 // texNormalRoughness
+										>;
 using CullingLayout = Vk::DescriptorLayout<Vk::StorageBufferSlot<0>, Vk::StorageBufferSlot<1>>;
 
 struct NativeMesh {
@@ -110,6 +114,7 @@ struct RenderContext::Impl {
 
 	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> sceneColor;
 	Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT> velocityBuffer;
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> normalRoughnessBuffer;
 	DoubleBuffered<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumBuffers;
 
 	Vk::PostProcessPass<TAALayout> taaPass;
@@ -126,6 +131,7 @@ struct RenderContext::Impl {
 	JPH::Mat44 current_view_proj{};
 	JPH::Mat44 unjittered_view_proj{};
 	JPH::Mat44 shadowProjView{};
+	FrameUniforms currentUniforms{};
 
 	JPH::Array<std::unique_ptr<NativeMesh>> meshes;
 	JPH::Array<std::unique_ptr<NativeMaterial>> materials;

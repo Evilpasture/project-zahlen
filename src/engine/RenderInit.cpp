@@ -674,6 +674,12 @@ void RenderContext::Impl::InitPostProcessing() {
 		ZHLN::Log("TAA pass build failure, continuing...");
 	}
 
+	VkPushConstantRange blitPush = {
+		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+		.offset = 0,
+		.size = 144 // (64 + 64 + 16 bytes)
+	};
+
 	auto blitShaders = Vk::ShaderStages::Create(ctx.Device(),
 												{.code = (const uint32_t*)ZHLN_Resource_BlitVertSpv,
 												 .size = ZHLN_Resource_BlitVertSpv_Len,
@@ -682,7 +688,7 @@ void RenderContext::Impl::InitPostProcessing() {
 												 .size = ZHLN_Resource_BlitFragSpv_Len,
 												 .entry_point = "PSMain"});
 
-	if (!blitPass.Build(ctx.Device(), blitShaders, {VK_FORMAT_B8G8R8A8_SRGB})) {
+	if (!blitPass.Build(ctx.Device(), blitShaders, {VK_FORMAT_B8G8R8A8_SRGB}, &blitPush, 1)) {
 		ZHLN::Log("Blit pass build failure, continuing...");
 	}
 }

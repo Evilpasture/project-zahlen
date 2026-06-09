@@ -97,7 +97,7 @@ PSOutput PSMain(VSOutput input) {
 	float4 baseColorFactor = input.baseColorFactor;
 	float alphaCutoff = input.pbrFactors.z;
 	uint alphaMode = input.alphaMode;
-
+	float roughness = input.pbrFactors.y;
 	// Restore texture sampling combined with base color and vertex color attributes!
 	float4 albedo =
 		globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
@@ -163,6 +163,7 @@ PSOutput PSMain(VSOutput input) {
 	finalColor = min(finalColor, 100.0f);
 
 	output.color = float4(finalColor, albedo.a);
+	output.normalRoughness = float4(worldNormal * 0.5f + 0.5f, roughness);
 
 	// Clamp W to a small positive number to prevent Divide-By-Zero NaN explosions
 	float currW = max(input.currClip.w, 0.0001f);
