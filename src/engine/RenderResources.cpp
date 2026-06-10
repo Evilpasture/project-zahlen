@@ -403,4 +403,8 @@ uint32_t RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas)
 	return offset;
 }
 
+void RenderContext::SetTAAState(const TAAState& state) {
+	_impl->taaState = state;
+}
+
 } // namespace ZHLN

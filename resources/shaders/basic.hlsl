@@ -241,37 +241,55 @@ PSOutput PSMain(VSOutput input) {
 		discard;
 	}
 
-	// Sample the raw, unnormalized normal first to preserve its filtered length (representing
-	// sub-pixel variance)
+	// 1. Update the normal map snapping and vertex flattening block (Around line 241)
 	float3 normalMapRaw =
 		globalTextures[indices.y].Sample(defaultSampler, input.uv).rgb * 2.0f - 1.0f;
 	float normalLength = length(normalMapRaw);
 	float3 normalMap = normalMapRaw / max(normalLength, 0.001f); // Normalize safely
 
+	// Snap near-flat normal map pixels to absolute center to clean up texture compression noise
+	if (normalMap.z > 0.998f) {
+		normalMap = float3(0.0f, 0.0f, 1.0f);
+	}
+
 	float4 pbr = globalTextures[indices.z].Sample(defaultSampler, input.uv);
 	float3 emissive = globalTextures[indices.w].Sample(defaultSampler, input.uv).rgb;
 
-	// FIX: Hard clamp minimum roughness to Frostbite's 0.045 to prevent GGX NaN explosions
+	// Hard clamp minimum roughness
 	float roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.045f);
 	float metallic = (indices.z == 0 ? 1.0f : pbr.b) * metallicFactor;
 
-	// Apply Toksvig Specular Anti-Aliasing (Only if a custom normal map is bound; 2 is flat normal)
+	float3 V = normalize(frame.camPos.xyz - input.worldPos);
+
+	float3 faceNormal = normalize(cross(ddx(input.worldPos), ddy(input.worldPos)));
+	if (dot(faceNormal, V) < 0.0f) {
+		faceNormal = -faceNormal;
+	}
+
+	float3 N = normalize(input.normal);
+
+	// CHANGED: Lowered threshold from 0.995f to 0.98f to catch aggressive vertex smoothing
+	if (dot(N, faceNormal) > 0.98f) {
+		N = faceNormal;
+	}
+	float3 worldNormal = N;
+
+	// 4. Apply Toksvig Specular Anti-Aliasing (Only if a custom normal map is bound)
 	if (indices.y != 2) {
 		roughness = AntiAliasRoughness(roughness, normalMapRaw);
 	}
-	float3 N = normalize(input.normal);
-	float3 worldNormal = N;
 
-	// Automatically applies a glossy clear coat lacquer to smooth materials
+	// 5. Restore the glossy clear coat lacquer properties
 	float clearcoat =
 		saturate((1.0f - roughnessFactor) * 2.0f - 1.0f) * (1.0f - metallicFactor * 0.5f);
 	const float clearcoatRoughness = 0.05f; // Highly glossy, flat outer shell
 
-	// --- SETUP ORTHONORMAL GEOMETRIC BASIS FOR ANISOTROPY ---
+	// 6. Setup Orthonormal Geometric Basis for Anisotropy
 	float3 T = float3(1.0f, 0.0f, 0.0f);
 	float3 B = float3(0.0f, 1.0f, 0.0f);
 
-	if (any(input.tangent.xyz)) {
+	// Only compute tangent-space normal maps if a custom normal map is actually bound
+	if (indices.y != 2 && any(input.tangent.xyz)) {
 		float3 T_unnorm = input.tangent.xyz - dot(input.tangent.xyz, N) * N;
 		if (dot(T_unnorm, T_unnorm) < 0.0001f) {
 			T_unnorm = cross(N, abs(N.y) < 0.999f ? float3(0, 1, 0) : float3(1, 0, 0));
@@ -299,7 +317,6 @@ PSOutput PSMain(VSOutput input) {
 	float alpha_x = max(alpha * (1.0f + anisotropy), 0.001f);
 	float alpha_y = max(alpha * (1.0f - anisotropy), 0.001f);
 
-	float3 V = normalize(frame.camPos.xyz - input.worldPos);
 	float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo.rgb, metallic);
 
 	float NdotV = saturate(dot(worldNormal, V));
@@ -494,10 +511,7 @@ PSOutput PSMain(VSOutput input) {
 
 	// 2. Evaluate Single-Scatter Specular IBL (With Lobe Elongation & Blended Parallax Correction)
 	float NoV = saturate(dot(worldNormal, V));
-
-	// Warp R along the view projection to simulate anisotropic stretching
-	float stretching = roughness * (1.0f - NoV) * 0.5f; // 0.5f is a comfortable elongation factor
-	float3 stretchedR = normalize(R - V * stretching);
+	float3 stretchedR = R;
 
 	float3 correctedR = stretchedR;
 	if (boxFade > 0.0f) {

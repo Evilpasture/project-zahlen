@@ -118,11 +118,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	float2 currentJitter = float2(pc.jitterX, pc.jitterY);
 	float2 prevJitter = float2(pc.prevJitterX, pc.prevJitterY);
 
-	// pc.jitterX/Y are already in UV scale (0..1). Do not multiply by 0.5!
-	// We only negate the Y-axis difference because of Vulkan's inverted Y-viewport.
-	float2 jitterDelta = float2(currentJitter.x - prevJitter.x, -(currentJitter.y - prevJitter.y));
+	float2 jitterDelta = float2(currentJitter.x - prevJitter.x, currentJitter.y - prevJitter.y);
 
-	historyUV -= jitterDelta;
+	// FIX: Change -= to +=
+	historyUV += jitterDelta;
 	float4 current = texCurrent.SampleLevel(smp, input.uv, 0);
 
 	// Sanitize incoming NaN pixels so they don't infect the frame

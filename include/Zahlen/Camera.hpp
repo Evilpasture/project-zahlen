@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Math3D.hpp"
-#include "engine/RenderState.hpp"
 
 namespace ZHLN {
 
@@ -105,31 +104,31 @@ struct Camera {
 										   0.481f, 0.814f, 0.259f, 0.592f};
 
 	[[nodiscard]] JPH::Mat44 GetJitteredProjectionMatrix(float aspectRatio, uint32_t width,
-														 uint32_t height) const {
+														 uint32_t height,
+														 TAAState& taaState) const { // <-- CHANGED
 		JPH::Mat44 proj = GetProjectionMatrix(aspectRatio);
 
-		if (g_TAAState.enabled) {
+		if (taaState.enabled) {
 			// Map Halton sequence [-0.5, 0.5] to Sub-Pixel NDC space
-			float jitterX = (Halton_2[g_TAAState.frameIndex % 16] - 0.5f) / (float)width;
-			float jitterY = (Halton_3[g_TAAState.frameIndex % 16] - 0.5f) / (float)height;
+			float jitterX = (Halton_2[taaState.frameIndex % 16] - 0.5f) / (float)width;
+			float jitterY = (Halton_3[taaState.frameIndex % 16] - 0.5f) / (float)height;
 
 			// If frameIndex is 0, there is no previous jitter
 			float prevJitterX =
-				g_TAAState.frameIndex > 0
-					? (Camera::Halton_2[(g_TAAState.frameIndex - 1) % 16] - 0.5f) / (float)width
+				taaState.frameIndex > 0
+					? (Camera::Halton_2[(taaState.frameIndex - 1) % 16] - 0.5f) / (float)width
 					: 0.0f;
 			float prevJitterY =
-				g_TAAState.frameIndex > 0
-					? (Camera::Halton_3[(g_TAAState.frameIndex - 1) % 16] - 0.5f) / (float)height
+				taaState.frameIndex > 0
+					? (Camera::Halton_3[(taaState.frameIndex - 1) % 16] - 0.5f) / (float)height
 					: 0.0f;
 
-			g_TAAState.jitterX = jitterX;
-			g_TAAState.jitterY = jitterY;
-			g_TAAState.prevJitterX = prevJitterX;
-			g_TAAState.prevJitterY = prevJitterY;
+			taaState.jitterX = jitterX;
+			taaState.jitterY = jitterY;
+			taaState.prevJitterX = prevJitterX;
+			taaState.prevJitterY = prevJitterY;
 
-			// FIX: Apply jitter to the 3rd column (index 2).
-			// Modifying the Z-column ensures the NDC shift remains constant regardless of depth.
+			// Apply jitter to the 3rd column (index 2).
 			JPH::Vec4 col2 = proj.GetColumn4(2);
 			proj.SetColumn4(2, col2 + JPH::Vec4(-jitterX * 2.0f, -jitterY * 2.0f, 0.0f, 0.0f));
 		}

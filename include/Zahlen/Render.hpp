@@ -49,6 +49,8 @@ class ZHLN_API RenderContext {
 
 	uint32_t AllocateMorphDeltas(uint32_t count, const float* deltas);
 
+	void SetTAAState(const TAAState& state);
+
 	struct Impl;
 	[[nodiscard]] auto GetImpl() const -> Impl* { return _impl.get(); }
 
@@ -65,6 +67,7 @@ void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj,
 void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
 				  const JPH::Mat44& shadowProjView);
 void SetGISettings(RenderContext& ctx, const GISettings& settings);
+
 void SetLights(RenderContext& ctx, const GPULight* lights, uint32_t count);
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 		  const JPH::Mat44& transform, const JPH::Mat44& prevTransform, float cullRadius = 1.0f,

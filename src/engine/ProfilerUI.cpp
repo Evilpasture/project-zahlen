@@ -1,8 +1,6 @@
-#include "Allocator.hpp" // For MemoryStats
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Render.hpp"
 #include "ecs/ECS.hpp"
-#include "engine/RenderState.hpp"
 #include "physics/Physics.hpp"
 
 #include <Zahlen/Engine.hpp>
@@ -73,7 +71,7 @@ ScopedTimer::~ScopedTimer() noexcept {
 // DrawProfiler Interface
 // ============================================================================
 
-void DrawProfiler(Engine& engine) {
+void DrawProfiler(Engine& engine, TAAState& taaState) {
 	if (ImGui::Begin("Zahlen Profiler")) {
 
 		// 1. CPU TIMINGS
@@ -142,9 +140,9 @@ void DrawProfiler(Engine& engine) {
 
 		// 6. ANTI-ALIASING
 		if (ImGui::CollapsingHeader("Anti-Aliasing", ImGuiTreeNodeFlags_DefaultOpen)) {
-			ImGui::Checkbox("Enable TAA", &g_TAAState.enabled);
-			if (g_TAAState.enabled) {
-				ImGui::SliderFloat("TAA Blend", &g_TAAState.feedback, 0.8f, 0.99f);
+			ImGui::Checkbox("Enable TAA", &taaState.enabled);
+			if (taaState.enabled) {
+				ImGui::SliderFloat("TAA Blend", &taaState.feedback, 0.8f, 0.99f);
 			}
 		}
 

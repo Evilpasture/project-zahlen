@@ -50,15 +50,20 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 	float3 localNormal = input.normal * 2.0f - 1.0f;
 	float3 localTangent = input.tangent.xyz * 2.0f - 1.0f;
 
+	// --- FIX: Store current skinned position in a separate variable to preserve bind-pose localPos
+	// ---
+	float4 skinnedPos = localPos;
+
 	if (isSkinned != 0) {
-		localPos = SkinPosition(localPos, input.joints, input.weights, jointOffset);
+		skinnedPos = SkinPosition(localPos, input.joints, input.weights, jointOffset);
 		localNormal =
 			normalize(SkinDirection(localNormal, input.joints, input.weights, jointOffset));
 		localTangent =
 			normalize(SkinDirection(localTangent, input.joints, input.weights, jointOffset));
 	}
 
-	float4 worldPos = mul(worldMatrix, localPos);
+	// --- FIX: Use skinnedPos for the current world position ---
+	float4 worldPos = mul(worldMatrix, skinnedPos);
 	output.worldPos = worldPos.xyz;
 
 	output.pos = mul(frame.viewProj, worldPos);
@@ -66,7 +71,7 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 
 	float4 prevWorldPos;
 	if (isSkinned != 0) {
-		// --- FIX: Use SkinPositionPrev instead of SkinPosition ---
+		// --- FIX: SkinPositionPrev can now safely read the original un-skinned localPos ---
 		prevWorldPos = mul(prevWorldMatrix,
 						   SkinPositionPrev(localPos, input.joints, input.weights, jointOffset));
 	} else {
@@ -109,7 +114,8 @@ PSOutput PSMain(VSOutput input) {
 	float3 N = normalize(input.normal);
 	float3 worldNormal = N;
 
-	if (any(input.tangent.xyz)) {
+	// CHANGED: Added indices.y != 2 check
+	if (indices.y != 2 && any(input.tangent.xyz)) {
 		// 1. Calculate unnormalized tangent
 		float3 T_unnorm = input.tangent.xyz - dot(input.tangent.xyz, N) * N;
 

@@ -49,6 +49,7 @@ struct EditorState {
 
 EditorState g_EditorState;
 JPH::Array<Entity> s_VisibleEntities;
+TAAState s_TAAState;
 
 // ============================================================================
 // Free-Fly Editor Camera
@@ -361,19 +362,19 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 		auto res = engine.GetWindow().GetSize();
 
 		if (res.width > 0 && res.height > 0) {
-			if (g_TAAState.enabled) {
-				g_TAAState.frameIndex++;
+			if (s_TAAState.enabled) {
+				s_TAAState.frameIndex++;
 			} else {
-				g_TAAState.frameIndex = 0;
+				s_TAAState.frameIndex = 0;
 			}
 
 			JPH::Mat44 unjitteredProj = cam.GetProjectionMatrix((float)res.width / res.height);
 			JPH::Mat44 unjitteredVp = unjitteredProj * cam.GetViewMatrix();
 
 			JPH::Mat44 vp = unjitteredVp;
-			if (g_TAAState.enabled) {
+			if (s_TAAState.enabled) {
 				vp = cam.GetJitteredProjectionMatrix((float)res.width / res.height, res.width,
-													 res.height) *
+													 res.height, s_TAAState) *
 					 cam.GetViewMatrix();
 			}
 

@@ -27,10 +27,9 @@
 #include <threading/Mutex.hpp>
 #include <threading/TaskSystem.hpp>
 #include <vector>
-
 namespace ZHLN {
 void DrawConsole(ScriptRunner& runner);
-void DrawProfiler(Engine& engine);
+void DrawProfiler(Engine& engine, TAAState& taaState);
 void MovementSystem(Engine& engine, float dt);
 void AudioSystem(Engine& engine, float dt);
 void DrawOrientationGizmo(const ZHLN::Camera& cam);
@@ -70,6 +69,10 @@ static JPH::Vec3 s_ProbePos =
 	JPH::Vec3(0.0f, 4.0f, 0.0f);		  // Room center (where cubemap was captured)
 static float s_VignetteIntensity = 1.10f; // 0.0f represents completely disabled
 static float s_VignettePower = 1.50f;	  // Softness falloff exponent
+static bool s_EnableSSR = true;
+
+static TAAState s_TAAState;
+
 static constexpr FrustumEdge s_FrustumEdges[12] = {
 	{.start = 0, .end = 1}, {.start = 1, .end = 2},
 	{.start = 2, .end = 3}, {.start = 3, .end = 0}, // Near Plane loop
@@ -242,7 +245,7 @@ void ZHLN::UpdateGame(Engine& engine, float dt, float& physicsAccumulator) {
 	// 1. Draw HUD Layouts
 	ZHLN::DrawConsole(*s_ScriptRunner);
 	ZHLN::DrawInventoryShell(*s_ScriptRunner);
-	ZHLN::DrawProfiler(engine);
+	ZHLN::DrawProfiler(engine, s_TAAState);
 	ZHLN::DrawOrientationGizmo(cam);
 
 	// 2. Lighting Workspace Developer Menu
@@ -306,6 +309,9 @@ void ZHLN::UpdateGame(Engine& engine, float dt, float& physicsAccumulator) {
 		ImGui::SliderFloat("Vignette Power", &s_VignettePower, 0.1f, 6.0f, "%.2f");
 	}
 
+	// when you realize graphical settings were there as a byproduct of ImGUI debugging hell
+	ImGui::Checkbox("Enable SSR", &s_EnableSSR);
+
 	ImGui::End();
 
 	// 3. Hot Reload Script Files
@@ -354,10 +360,10 @@ void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 	auto res = engine.GetWindow().GetSize();
 	const auto& worldState = pc.GetWorld();
 
-	if (g_TAAState.enabled) {
-		g_TAAState.frameIndex++;
+	if (s_TAAState.enabled) {
+		s_TAAState.frameIndex++;
 	} else {
-		g_TAAState.frameIndex = 0;
+		s_TAAState.frameIndex = 0;
 	}
 
 	// 1. Retrieve & Interpolate Player Position from Jolt [6]
@@ -398,8 +404,9 @@ void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 	JPH::Mat44 unjitteredVp = unjitteredProj * cam.GetViewMatrix();
 
 	JPH::Mat44 vp{};
-	if (g_TAAState.enabled) {
-		vp = cam.GetJitteredProjectionMatrix((float)res.width / res.height, res.width, res.height) *
+	if (s_TAAState.enabled) {
+		vp = cam.GetJitteredProjectionMatrix((float)res.width / res.height, res.width, res.height,
+											 s_TAAState) *
 			 cam.GetViewMatrix();
 	} else {
 		vp = unjitteredVp;
@@ -540,7 +547,8 @@ void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 								 .giIntensity = s_GIIntensity,
 								 .giSamples = s_GISamples,
 								 .vignetteIntensity = s_VignetteIntensity,
-								 .vignettePower = s_VignettePower});
+								 .vignettePower = s_VignettePower,
+								 .enableSSR = s_EnableSSR ? 1 : 0});
 
 	Renderer::SetLights(rc, sceneLights.data(), uniforms.lightCount); // Upload SSBO to GPU
 	Renderer::SetFrameData(rc, uniforms, shadowProjView);
@@ -612,6 +620,8 @@ void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 						   len);
 		}
 	}
+
+	rc.SetTAAState(s_TAAState);
 
 	engine.EndFrame();
 

@@ -194,6 +194,8 @@ struct RenderContext::Impl {
 	Vk::Buffer morphDeltasBuffer; // Holds all packed morph target deltas
 	uint32_t nextMorphDeltaIndex = 0;
 
+	TAAState taaState{};
+
 	Impl(Window& win) : window(win) {}
 
 	void InitShadowResources();

@@ -593,7 +593,7 @@ void RenderContext::Impl::InitPostProcessing() {
 	VkPushConstantRange blitPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 		.offset = 0,
-		.size = 176,
+		.size = 180,
 	};
 
 	auto blitShaders = Vk::ShaderStages::Create(ctx.Device(),

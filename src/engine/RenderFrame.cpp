@@ -4,7 +4,6 @@
 #include "Zahlen/Profiler.hpp"
 #include "backends/imgui_impl_vulkan.h"
 #include "detail/RadixSort.hpp"
-#include "engine/RenderState.hpp"
 #include "imgui.h"
 
 #include <algorithm>
@@ -606,11 +605,11 @@ void RenderContext::Impl::ApplyTAAPass(VkCommandBuffer cmd, VkExtent2D extent) {
 			taaPass.WriteNext(ctx.Device(), sceneColor_ro, accumCurr_ready, velocity_ro,
 							  Vk::SamplerWrite{.sampler = pointSampler.Get()});
 			taaPass.Execute(cmd, TAAPushConstants{
-									 .feedback = g_TAAState.feedback,
-									 .jitterX = g_TAAState.jitterX,
-									 .jitterY = g_TAAState.jitterY,
-									 .prevJitterX = g_TAAState.prevJitterX,
-									 .prevJitterY = g_TAAState.prevJitterY,
+									 .feedback = taaState.feedback,
+									 .jitterX = taaState.jitterX,
+									 .jitterY = taaState.jitterY,
+									 .prevJitterX = taaState.prevJitterX,
+									 .prevJitterY = taaState.prevJitterY,
 								 });
 		});
 
@@ -626,7 +625,7 @@ void RenderContext::Impl::BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, 
 
 	auto swap_att = Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, swap_u);
 
-	bool useTAA = g_TAAState.enabled && taaPass.pipeline.Valid();
+	bool useTAA = taaState.enabled && taaPass.pipeline.Valid();
 
 	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> depth_ro = {
 		.handle = presentation.depthTarget.image.Handle(),
@@ -667,10 +666,12 @@ void RenderContext::Impl::BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, 
 		int giSamples;
 		float vignetteIntensity;
 		float vignettePower;
+		int enableSSR;
 	} pc = {.invViewProj = currentUniforms.invViewProj,
 			.viewProj = currentUniforms.unjitteredViewProj,
 			.camPos = {currentUniforms.camPos[0], currentUniforms.camPos[1],
-					   currentUniforms.camPos[2], currentUniforms.camPos[3]},
+					   currentUniforms.camPos[2],
+					   (float)taaState.frameIndex}, // <-- FIX: Passes frameIndex into W!
 			.giMode = giSettings.mode,
 			.aoRadius = giSettings.aoRadius,
 			.aoBias = giSettings.aoBias,
@@ -678,7 +679,8 @@ void RenderContext::Impl::BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, 
 			.giIntensity = giSettings.giIntensity,
 			.giSamples = giSettings.giSamples,
 			.vignetteIntensity = giSettings.vignetteIntensity,
-			.vignettePower = giSettings.vignettePower};
+			.vignettePower = giSettings.vignettePower,
+			.enableSSR = giSettings.enableSSR};
 	if (blitPass.pipeline.Valid()) {
 		Vk::DynamicPass<1, false>(extent)
 			.Color(0, swap_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
@@ -790,7 +792,7 @@ void RenderContext::EndFrame() {
 																   normRough_att);
 	(void)Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(_impl->current_cmd, depth_att);
 
-	if (g_TAAState.enabled && _impl->taaPass.pipeline.Valid()) {
+	if (_impl->taaState.enabled && _impl->taaPass.pipeline.Valid()) { // <-- CHANGED
 		_impl->ApplyTAAPass(_impl->current_cmd, extent);
 	}
 
