@@ -102,6 +102,7 @@ struct GPUJoint {
 [[vk::binding(11, 0)]] SamplerState clampSampler;
 [[vk::binding(12, 0)]] Texture2D ltc_mat;
 [[vk::binding(13, 0)]] Texture2D ltc_amp;
+[[vk::binding(14, 0)]] StructuredBuffer<GPUJoint> g_prevJoints;
 
 struct VSInput {
 	[[vk::location(0)]] float3 position : POSITION;
@@ -145,6 +146,27 @@ float3 EvaluateSH(float3 N, float4 sh[9]) {
 }
 
 // --- SKELETAL SKINNING ---
+
+float4 SkinPositionPrev(float4 position, uint4 joints, float4 weights, uint jointOffset) {
+	GPUJoint j0 = g_prevJoints[jointOffset + joints.x];
+	GPUJoint j1 = g_prevJoints[jointOffset + joints.y];
+	GPUJoint j2 = g_prevJoints[jointOffset + joints.z];
+	GPUJoint j3 = g_prevJoints[jointOffset + joints.w];
+
+	float4 pos = (j0.col0 * position.x + j0.col1 * position.y + j0.col2 * position.z +
+				  j0.col3 * position.w) *
+					 weights.x +
+				 (j1.col0 * position.x + j1.col1 * position.y + j1.col2 * position.z +
+				  j1.col3 * position.w) *
+					 weights.y +
+				 (j2.col0 * position.x + j2.col1 * position.y + j2.col2 * position.z +
+				  j2.col3 * position.w) *
+					 weights.z +
+				 (j3.col0 * position.x + j3.col1 * position.y + j3.col2 * position.z +
+				  j3.col3 * position.w) *
+					 weights.w;
+	return pos;
+}
 float4 SkinPosition(float4 position, uint4 joints, float4 weights, uint jointOffset) {
 	GPUJoint j0 = g_joints[jointOffset + joints.x];
 	GPUJoint j1 = g_joints[jointOffset + joints.y];

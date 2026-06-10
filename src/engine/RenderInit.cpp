@@ -546,27 +546,28 @@ void RenderContext::Impl::InitBindless() {
 
 	// Update global descriptor bindings
 	for (int i = 0; i < 2; ++i) {
-		GlobalSceneLayout::Write(
-			ctx.Device(), bindlessSets[i], Vk::SkipWrite{}, Vk::SamplerWrite{globalSampler.Get()},
-			Vk::ImageWrite{.view = shadowMap.view.Get(),
-						   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-			Vk::SamplerWrite{shadowSampler.Get()},
-			Vk::BufferWrite{.buffer = frameUniformBuffers[i].Handle()},
-			Vk::BufferWrite{.buffer = lightStorageBuffers[i].Handle()},
-			Vk::BufferWrite{.buffer = instanceDataBuffers[i].Handle()},
-			Vk::BufferWrite{.buffer = jointBuffers[i].Handle()},
+		GlobalSceneLayout::Write(ctx.Device(), bindlessSets[i], Vk::SkipWrite{},
+								 Vk::SamplerWrite{globalSampler.Get()},
+								 Vk::ImageWrite{.view = shadowMap.view.Get(),
+												.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+								 Vk::SamplerWrite{shadowSampler.Get()},
+								 Vk::BufferWrite{.buffer = frameUniformBuffers[i].Handle()},
+								 Vk::BufferWrite{.buffer = lightStorageBuffers[i].Handle()},
+								 Vk::BufferWrite{.buffer = instanceDataBuffers[i].Handle()},
+								 Vk::BufferWrite{.buffer = jointBuffers[i].Handle()},
 
-			// --- SHIFTED DESCRIPTORS ---
-			Vk::ImageWrite{.view = prefilteredView.Get(),
-						   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-			Vk::ImageWrite{.view = brdfLutView.Get(),
-						   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-			Vk::BufferWrite{.buffer = morphDeltasBuffer.Handle()},
-			Vk::SamplerWrite{clampSampler.Get()},
-			Vk::ImageWrite{.view = ltcMatView.Get(),
-						   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-			Vk::ImageWrite{.view = ltcAmpView.Get(),
-						   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
+								 // --- SHIFTED DESCRIPTORS ---
+								 Vk::ImageWrite{.view = prefilteredView.Get(),
+												.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+								 Vk::ImageWrite{.view = brdfLutView.Get(),
+												.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+								 Vk::BufferWrite{.buffer = morphDeltasBuffer.Handle()},
+								 Vk::SamplerWrite{clampSampler.Get()},
+								 Vk::ImageWrite{.view = ltcMatView.Get(),
+												.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+								 Vk::ImageWrite{.view = ltcAmpView.Get(),
+												.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+								 Vk::BufferWrite{.buffer = jointBuffers[1 - i].Handle()});
 	}
 }
 void RenderContext::Impl::InitPostProcessing() {
@@ -576,7 +577,7 @@ void RenderContext::Impl::InitPostProcessing() {
 	pointSampler = Vk::SamplerBuilder{}.Nearest().ClampToEdge().Build(ctx.Device());
 
 	VkPushConstantRange taaPush = {
-		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float)};
+		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float) * 5};
 	auto taaShaders = Vk::ShaderStages::Create(ctx.Device(),
 											   {.code = Vk::AsSpirV(&ZHLN_Resource_TaaVertSpv[0]),
 												.size = ZHLN_Resource_TaaVertSpv_Len,

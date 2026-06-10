@@ -118,9 +118,9 @@ VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV
 
 	float4 prevWorldPos;
 	if (isSkinned != 0) {
-		// Transform the skinned position using the previous frame's world matrix
-		prevWorldPos =
-			mul(prevWorldMatrix, SkinPosition(localPos, input.joints, input.weights, jointOffset));
+		// --- FIX: Use SkinPositionPrev instead of SkinPosition ---
+		prevWorldPos = mul(prevWorldMatrix,
+						   SkinPositionPrev(localPos, input.joints, input.weights, jointOffset));
 	} else {
 		prevWorldPos = mul(prevWorldMatrix, localPos);
 	}
@@ -137,7 +137,6 @@ VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV
 	output.baseColorFactor = baseColorFactor;
 	output.pbrFactors = float3(metallicFactor, roughnessFactor, alphaCutoff);
 	output.alphaMode = alphaMode;
-
 	return output;
 }
 
@@ -581,7 +580,8 @@ PSOutput PSMain(VSOutput input) {
 	// output.color = float4(float3(g_term, g_term, g_term), 1.0f);
 	//	output.color = float4(roughness, roughness, roughness, 1.0f);
 	//	output.color = float4(metallic, metallic, metallic, 1.0f);
-	//	output.color = float4(shadow, shadow, shadow, 1.0f);
+	// output.color = float4(shadow, shadow, shadow, 1.0f);
+	// output.color = float4(abs(output.velocity) * 100.0f, 0.0f, 1.0f);
 	// ------------------------------
 	return output;
 }

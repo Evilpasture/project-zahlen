@@ -545,7 +545,6 @@ void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 	Renderer::SetLights(rc, sceneLights.data(), uniforms.lightCount); // Upload SSBO to GPU
 	Renderer::SetFrameData(rc, uniforms, shadowProjView);
 
-	engine.BeginFrame();
 	Renderer::SetMatrices(rc, vp, unjitteredVp);
 
 	JPH::Mat44 playerTransform = JPH::Mat44::sIdentity();
@@ -665,7 +664,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 				   .width = 1280,
 				   .height = 720,
 				   .vsync = false,
-				   .enableValidation = true},
+				   .enableValidation = false},
 	};
 
 	{
@@ -699,6 +698,8 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 				engine.GetInput().ClearResizeFlag();
 				continue;
 			}
+
+			engine.BeginFrame();
 
 			// Execute game simulation ticks and rendering
 			ZHLN::UpdateGame(engine, frameTime, physicsAccumulator);

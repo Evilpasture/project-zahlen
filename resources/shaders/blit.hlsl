@@ -54,6 +54,7 @@ float GetRotationAngle(float2 screenPos) {
 [[vk::binding(2, 0)]] Texture2D<float> texDepth;			// Raw Depth Buffer
 [[vk::binding(3, 0)]] Texture2D<float4> texNormalRoughness; // G-Buffer Normal/Roughness
 [[vk::binding(4, 0)]] SamplerState pointSampler;			// Nearest Sampler
+[[vk::binding(5, 0)]] TextureCube<float4> texEnvMap;		// Pre-filtered IBL Cubemap
 
 // Reconstruct 3D World Space Position from Clip Space Depth
 float3 ReconstructWorldPos(float2 uv, float depth) {
@@ -100,6 +101,15 @@ float2 BinarySearch(float3 startPos, float3 dir, float3 currentPos, out float co
 
 	float thicknessWorld = 0.3f; // Comfortable world space thickness allowance
 	if (abs(finalRayDepth - finalSampledDepth) < thicknessWorld) {
+		// NEW: Reject hits where the surface is facing the same way as the ray
+		// (means we hit a backface — geometry seen from behind)
+		float3 hitNormal =
+			normalize(texNormalRoughness.SampleLevel(pointSampler, uv, 0).xyz * 2.0f - 1.0f);
+		if (dot(hitNormal, dir) > 0.0f) {
+			confidence = 0.0f;
+			return float2(0.0f, 0.0f);
+		}
+
 		confidence = 1.0f;
 
 		// Distance Fade to blend SSR smoothly into background IBL
@@ -131,8 +141,8 @@ float2 RaymarchSSR(float3 startPos, float3 dir, out float confidence) {
 		float3 ndc = clipPos.xyz / clipPos.w;
 		float2 uv = ndc.xy * float2(0.5f, -0.5f) + 0.5f;
 
-		// Skip if ray goes out of screen bounds
-		if (any(uv < 0.0f) || any(uv > 1.0f)) {
+		static const float kUVBorder = 0.001f;
+		if (any(uv < kUVBorder) || any(uv > 1.0f - kUVBorder)) {
 			break;
 		}
 
@@ -369,8 +379,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	// --- B. SCREEN SPACE REFLECTIONS (SSR) PASS ---
 	// (Only run on glossy surfaces; skip for rough surfaces to save bandwidth)
 	if (roughness <= 0.85f) {
-		float3 V = normalize(worldPos - pc.camPos.xyz);
-		float3 R = reflect(V, N);
+		float3 V = normalize(pc.camPos.xyz - worldPos);
+		float3 R = reflect(-V, N);
 
 		// Apply the exact same Specular Lobe Elongation warp to your SSR rays
 		float NoV = saturate(dot(N, V));
@@ -378,36 +388,39 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 		float3 stretchedR = normalize(R - V * stretching);
 
 		float confidence = 0.0f;
-		float2 hitUV = RaymarchSSR(worldPos, stretchedR, confidence);
+		float3 reflectionColor = float3(0.0f, 0.0f, 0.0f);
+
+		// Bias the starting position along the normal by 10cm to prevent self-intersection
+		float3 biasedStartPos = worldPos + N * 0.1f;
+		float2 hitUV = RaymarchSSR(biasedStartPos, stretchedR, confidence);
 
 		if (confidence > 0.0f) {
-			float3 reflectionColor = texInput.SampleLevel(smp, hitUV, 0).rgb;
-
-			// Apply simple Schlick Fresnel to the SSR contribution
-			float3 F0 = float3(0.04, 0.04, 0.04);
-			float3 F = F0 + (1.0 - F0) * pow(saturate(1.0 - dot(-V, N)), 5.0);
-
-			// Fade reflection on rougher surfaces
-			float roughnessFade = saturate(1.0f - roughness);
-
-			// --- NEW: SPECULAR & HORIZON OCCLUSION ---
-			// 1. Analytical Specular Occlusion (Lagarde/Sony)
-			// Darkens specular highlights in deep crevices to prevent light leaking
-			float specularOcclusion = saturate(pow(NoV + ao, roughness * roughness) - 1.0f + ao);
-
-			// 2. Horizon Occlusion (prevents light from physically leaking below the microfacet
-			// horizon)
-			float horizonOcclusion = saturate(1.0f + dot(stretchedR, N));
-			horizonOcclusion *=
-				horizonOcclusion; // Square the falloff for a smoother physical curve
-
-			// Scale the final specular reflection by both occlusion terms
-			float3 ssr = reflectionColor * F * confidence * roughnessFade * specularOcclusion *
-						 horizonOcclusion;
-
-			// Blend
-			litColor = lerp(litColor, litColor + ssr, roughnessFade * confidence);
+			// Apply grazing angle fade and sample local screen color
+			confidence *= saturate(dot(stretchedR, N) * 10.0f);
+			reflectionColor = texInput.SampleLevel(smp, hitUV, 0).rgb;
 		}
+
+		// Always sample the pre-filtered IBL cubemap as our global fallback.
+		// Since the pre-filtered map has 6 mip levels (0..5), we scale by 5.0f.
+		float iblMip = roughness * 5.0f;
+		float3 iblColor = texEnvMap.SampleLevel(smp, stretchedR, iblMip).rgb;
+
+		// Blend local SSR result with global IBL fallback based on ray confidence
+		float3 finalReflection = lerp(iblColor, reflectionColor, confidence);
+
+		// Apply physical properties
+		float3 F0 = float3(0.15f, 0.15f, 0.15f);
+		float3 F = F0 + (1.0f - F0) * pow(saturate(1.0f - dot(V, N)), 5.0f);
+
+		float roughnessFade = saturate(1.0f - roughness);
+		float horizonOcclusion = saturate(1.0f + dot(stretchedR, N));
+		horizonOcclusion *= horizonOcclusion;
+
+		// Calculate final reflection term
+		float3 ssr = finalReflection * F * roughnessFade * horizonOcclusion;
+
+		// Add back to the base lighting
+		litColor = lerp(litColor, litColor + ssr, roughnessFade);
 	}
 	// 3. Tonemap
 	litColor = ACESFilm(litColor);

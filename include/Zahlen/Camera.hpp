@@ -28,11 +28,11 @@ struct Frustum {
 		planes[4] = r2;
 		planes[5] = r3 - r2;
 
-		for (int i = 0; i < 6; ++i) {
+		for (auto& plane : planes) {
 			// Normalize planes to ensure distance checks are in world units
-			float len = JPH::Vec3(planes[i].GetX(), planes[i].GetY(), planes[i].GetZ()).Length();
+			float len = JPH::Vec3(plane.GetX(), plane.GetY(), plane.GetZ()).Length();
 			if (len > 1e-6f) {
-				planes[i] /= len;
+				plane /= len;
 			}
 		}
 
@@ -112,6 +112,21 @@ struct Camera {
 			// Map Halton sequence [-0.5, 0.5] to Sub-Pixel NDC space
 			float jitterX = (Halton_2[g_TAAState.frameIndex % 16] - 0.5f) / (float)width;
 			float jitterY = (Halton_3[g_TAAState.frameIndex % 16] - 0.5f) / (float)height;
+
+			// If frameIndex is 0, there is no previous jitter
+			float prevJitterX =
+				g_TAAState.frameIndex > 0
+					? (Camera::Halton_2[(g_TAAState.frameIndex - 1) % 16] - 0.5f) / (float)width
+					: 0.0f;
+			float prevJitterY =
+				g_TAAState.frameIndex > 0
+					? (Camera::Halton_3[(g_TAAState.frameIndex - 1) % 16] - 0.5f) / (float)height
+					: 0.0f;
+
+			g_TAAState.jitterX = jitterX;
+			g_TAAState.jitterY = jitterY;
+			g_TAAState.prevJitterX = prevJitterX;
+			g_TAAState.prevJitterY = prevJitterY;
 
 			// FIX: Apply jitter to the 3rd column (index 2).
 			// Modifying the Z-column ensures the NDC shift remains constant regardless of depth.

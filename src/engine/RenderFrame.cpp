@@ -581,6 +581,14 @@ void RenderContext::Impl::ApplyTAAPass(VkCommandBuffer cmd, VkExtent2D extent) {
 	auto accumNext_att =
 		Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, accumNext_ro);
 
+	struct TAAPushConstants {
+		float feedback;
+		float jitterX;
+		float jitterY;
+		float prevJitterX;
+		float prevJitterY;
+	};
+
 	Vk::DynamicPass<1, false>(extent)
 		.Color(0, accumNext_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
 		.Execute(cmd, [&]() {
@@ -597,7 +605,13 @@ void RenderContext::Impl::ApplyTAAPass(VkCommandBuffer cmd, VkExtent2D extent) {
 
 			taaPass.WriteNext(ctx.Device(), sceneColor_ro, accumCurr_ready, velocity_ro,
 							  Vk::SamplerWrite{.sampler = pointSampler.Get()});
-			taaPass.Execute(cmd, g_TAAState.feedback);
+			taaPass.Execute(cmd, TAAPushConstants{
+									 .feedback = g_TAAState.feedback,
+									 .jitterX = g_TAAState.jitterX,
+									 .jitterY = g_TAAState.jitterY,
+									 .prevJitterX = g_TAAState.prevJitterX,
+									 .prevJitterY = g_TAAState.prevJitterY,
+								 });
 		});
 
 	(void)Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, accumNext_att);
@@ -633,11 +647,13 @@ void RenderContext::Impl::BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, 
 		.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
 
 	blitPass.WriteNext(ctx.Device(),
-					   blitSource_ro,									  // 1. Color (Linear)
-					   Vk::SamplerWrite{.sampler = defaultSampler.Get()}, // 2. Sampler (Linear)
-					   depth_ro,										  // 3. Depth (Nearest)
-					   normRough_ro,									  // 4. Normal/Roughness
-					   Vk::SamplerWrite{.sampler = pointSampler.Get()});  // 5. Sampler (Nearest)
+					   blitSource_ro,									  // 0
+					   Vk::SamplerWrite{.sampler = defaultSampler.Get()}, // 1
+					   depth_ro,										  // 2
+					   normRough_ro,									  // 3
+					   Vk::SamplerWrite{.sampler = pointSampler.Get()},	  // 4
+					   Vk::ImageWrite{.view = prefilteredView.Get(),	  // 5 (NEW)
+									  .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
 
 	struct BlitPushConstants {
 		JPH::Mat44 invViewProj;

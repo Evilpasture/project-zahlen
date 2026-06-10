@@ -32,12 +32,14 @@ using GlobalSceneLayout = Vk::DescriptorLayout<
 	Vk::StorageBufferSlot<6, VK_SHADER_STAGE_VERTEX_BIT>, // Instance buffer (SSBO)
 	Vk::StorageBufferSlot<7, VK_SHADER_STAGE_VERTEX_BIT>, // Joint matrices (SSBO)
 
-	Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>,	 // Pre-filtered Cubemap (Specular IBL)
-	Vk::SampledImageSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,	 // 2D BRDF LUT (2D Texture)
-	Vk::StorageBufferSlot<10, VK_SHADER_STAGE_VERTEX_BIT>,	 // Morph target deltas (SSBO)
-	Vk::SamplerSlot<11, VK_SHADER_STAGE_FRAGMENT_BIT>,		 // Clamping
-	Vk::SampledImageSlot<12, VK_SHADER_STAGE_FRAGMENT_BIT>,	 // LTC Matrix
-	Vk::SampledImageSlot<13, VK_SHADER_STAGE_FRAGMENT_BIT>>; // LTC Amplitude
+	Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>,	// Pre-filtered Cubemap (Specular IBL)
+	Vk::SampledImageSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,	// 2D BRDF LUT (2D Texture)
+	Vk::StorageBufferSlot<10, VK_SHADER_STAGE_VERTEX_BIT>,	// Morph target deltas (SSBO)
+	Vk::SamplerSlot<11, VK_SHADER_STAGE_FRAGMENT_BIT>,		// Clamping
+	Vk::SampledImageSlot<12, VK_SHADER_STAGE_FRAGMENT_BIT>, // LTC Matrix
+	Vk::SampledImageSlot<13, VK_SHADER_STAGE_FRAGMENT_BIT>, // LTC Amplitude
+	Vk::StorageBufferSlot<14, VK_SHADER_STAGE_VERTEX_BIT>	// Previous Joint matrices (SSBO)
+	>;
 
 using TAALayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SampledImageSlot<1>,
 									   Vk::SampledImageSlot<2>, Vk::SamplerSlot<3>>;
@@ -46,7 +48,8 @@ using BlitLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texCurrent (
 										Vk::SamplerSlot<1>,		 // sampler
 										Vk::SampledImageSlot<2>, // texDepth
 										Vk::SampledImageSlot<3>, // texNormalRoughness
-										Vk::SamplerSlot<4>		 // pointSampler (Nearest)
+										Vk::SamplerSlot<4>,		 // pointSampler (Nearest)
+										Vk::SampledImageSlot<5>	 // NEW: texEnvMap (Cubemap)
 										>;
 using CullingLayout = Vk::DescriptorLayout<Vk::StorageBufferSlot<0>, Vk::StorageBufferSlot<1>>;
 
