@@ -70,7 +70,7 @@ float3 ReconstructWorldPos(float2 uv, float depth) {
 }
 
 float2 RaymarchSSR(float3 startPosWS, float3 dirWS, out float confidence) {
-	float3 endPosWS = startPosWS + dirWS * 10.0f;
+	float3 endPosWS = startPosWS + dirWS * 40.0f;
 
 	float4 startClip = mul(pc.viewProj, float4(startPosWS, 1.0f));
 	float4 endClip = mul(pc.viewProj, float4(endPosWS, 1.0f));
@@ -139,7 +139,7 @@ float2 RaymarchSSR(float3 startPosWS, float3 dirWS, out float confidence) {
 
 			// Use a wider initial thickness threshold (1.2m) to catch the intersection,
 			// then let the binary search pin it down to a sub-centimeter tolerance!
-			if (thickness < 1.2f) {
+			if (thickness < 2.5f) {
 				float t_start = max(0.0f, (float(i) - 1.0f) / stepCount);
 				float t_end = float(i) / stepCount;
 
@@ -152,7 +152,7 @@ float2 RaymarchSSR(float3 startPosWS, float3 dirWS, out float confidence) {
 				float3 mid_ws = 0.0f;
 
 				// 5-step Binary Search (divides step size by 32)
-				[unroll(5)] for (int b = 0; b < 5; ++b) {
+				[unroll(7)] for (int b = 0; b < 7; ++b) {
 					t_mid = (t_start + t_end) * 0.5f;
 
 					float mid_invW = invW_start + (invW_end - invW_start) * t_mid;
@@ -181,16 +181,16 @@ float2 RaymarchSSR(float3 startPosWS, float3 dirWS, out float confidence) {
 				float finalRayDist = length(mid_ws - pc.camPos.xyz);
 				float finalSampleDist = length(finalSampledWS - pc.camPos.xyz);
 
-				if (abs(finalRayDist - finalSampleDist) < 0.15f) {
+				if (abs(finalRayDist - finalSampleDist) < 0.40f) {
 					float3 hitNormal = normalize(
 						texNormalRoughness.SampleLevel(pointSampler, mid_uv, 0).xyz * 2.0f - 1.0f);
-					if (dot(hitNormal, dirWS) < 0.0f) {
-						confidence = 1.0f;
-						float2 edgeFactor =
-							smoothstep(0.0f, 0.1f, mid_uv) * smoothstep(1.0f, 0.9f, mid_uv);
-						confidence *= edgeFactor.x * edgeFactor.y;
-						return mid_uv;
-					}
+					// if (dot(hitNormal, dirWS) < 0.0f) {
+					confidence = 1.0f;
+					float2 edgeFactor =
+						smoothstep(0.0f, 0.1f, mid_uv) * smoothstep(1.0f, 0.9f, mid_uv);
+					confidence *= edgeFactor.x * edgeFactor.y;
+					return mid_uv;
+					//	}
 				}
 			}
 		}

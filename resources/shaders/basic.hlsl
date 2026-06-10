@@ -268,10 +268,6 @@ PSOutput PSMain(VSOutput input) {
 
 	float3 N = normalize(input.normal);
 
-	// CHANGED: Lowered threshold from 0.995f to 0.98f to catch aggressive vertex smoothing
-	if (dot(N, faceNormal) > 0.98f) {
-		N = faceNormal;
-	}
 	float3 worldNormal = N;
 
 	// 4. Apply Toksvig Specular Anti-Aliasing (Only if a custom normal map is bound)
