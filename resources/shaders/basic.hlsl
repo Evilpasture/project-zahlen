@@ -37,7 +37,7 @@ VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV
 		morphOffset = obj.morphOffset;
 		activeMorphCount = obj.activeMorphCount;
 		morphWeights = obj.morphWeights;
-		vertexCount = obj.vertexCount; // Resolves: 'no member named vertexCount' [1]
+		vertexCount = obj.vertexCount;
 	} else {
 		// --- GPU CULLING PATH ---
 		InstanceData inst = g_instances[instanceId];
@@ -77,7 +77,7 @@ VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV
 	// 2. Select transform path based on skinning flag
 	if (isSkinned != 0) {
 		// Skinned: Bone matrices transform vertices to model space, then we multiply by worldMatrix
-		// to go to world space [6]
+		// to go to world space
 		worldPos =
 			mul(worldMatrix, SkinPosition(localPos, input.joints, input.weights, jointOffset));
 		output.normal = normalize(
@@ -182,6 +182,34 @@ float AntiAliasRoughness(float roughness, float3 unnormalizedNormal) {
 	return saturate(newAlpha);
 }
 
+// --- ANISOTROPIC GGX PBR FUNCTIONS ---
+float DistributionAnisotropicGGX(float3 N, float3 H, float3 T, float3 B, float alpha_x,
+								 float alpha_y) {
+	float HdotT = dot(H, T);
+	float HdotB = dot(H, B);
+	float HdotN = saturate(dot(N, H));
+
+	float d =
+		HdotT * HdotT / (alpha_x * alpha_x) + HdotB * HdotB / (alpha_y * alpha_y) + HdotN * HdotN;
+	return 1.0f / (3.14159265f * alpha_x * alpha_y * d * d);
+}
+
+float SmithG1_Anisotropic(float3 N, float3 V, float3 T, float3 B, float alpha_x, float alpha_y) {
+	float NdotV = saturate(dot(N, V));
+	float TdotV = dot(T, V);
+	float BdotV = dot(B, V);
+
+	float v2 =
+		alpha_x * alpha_x * TdotV * TdotV + alpha_y * alpha_y * BdotV * BdotV + NdotV * NdotV;
+	return 2.0f * NdotV / (NdotV + sqrt(v2));
+}
+
+float GeometryAnisotropicSmith(float3 N, float3 V, float3 L, float3 T, float3 B, float alpha_x,
+							   float alpha_y) {
+	return SmithG1_Anisotropic(N, V, T, B, alpha_x, alpha_y) *
+		   SmithG1_Anisotropic(N, L, T, B, alpha_x, alpha_y);
+}
+
 // --- SPECIALIZED SHADOW PASS ENTRY POINT ---
 void PSShadow(VSOutput input) {
 	uint4 indices = input.materialIndices;
@@ -240,17 +268,37 @@ PSOutput PSMain(VSOutput input) {
 		saturate((1.0f - roughnessFactor) * 2.0f - 1.0f) * (1.0f - metallicFactor * 0.5f);
 	const float clearcoatRoughness = 0.05f; // Highly glossy, flat outer shell
 
+	// --- SETUP ORTHONORMAL GEOMETRIC BASIS FOR ANISOTROPY ---
+	float3 T = float3(1.0f, 0.0f, 0.0f);
+	float3 B = float3(0.0f, 1.0f, 0.0f);
+
 	if (any(input.tangent.xyz)) {
 		float3 T_unnorm = input.tangent.xyz - dot(input.tangent.xyz, N) * N;
 		if (dot(T_unnorm, T_unnorm) < 0.0001f) {
 			T_unnorm = cross(N, abs(N.y) < 0.999f ? float3(0, 1, 0) : float3(1, 0, 0));
 		}
-		float3 T = normalize(T_unnorm);
+		T = normalize(T_unnorm);
 		float tangentSign = input.tangent.w * 2.0f - 1.0f;
-		float3 B = normalize(cross(N, T) * tangentSign);
+		B = normalize(cross(N, T) * tangentSign);
 
 		worldNormal = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * N);
+	} else {
+		// Build fallback orthonormal basis
+		T = normalize(cross(worldNormal, abs(worldNormal.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f)
+																	 : float3(0.0f, 0.0f, 1.0f)));
+		B = cross(worldNormal, T);
 	}
+
+	// --- SETUP ANISOTROPIC GGX PARAMETERS ---
+	// Brushed highlights will procedurally trigger on polished metals (e.g. CD tracks, brass
+	// pillars)
+	float anisotropy = 0.0f;
+	if (metallic > 0.5f && roughness < 0.3f) {
+		anisotropy = 0.65f;
+	}
+	float alpha = roughness * roughness;
+	float alpha_x = max(alpha * (1.0f + anisotropy), 0.001f);
+	float alpha_y = max(alpha * (1.0f - anisotropy), 0.001f);
 
 	float3 V = normalize(frame.camPos.xyz - input.worldPos);
 	float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo.rgb, metallic);
@@ -264,8 +312,9 @@ PSOutput PSMain(VSOutput input) {
 	float NdotL_sun = saturate(dot(worldNormal, L_sun));
 	float shadow = CalculateShadow(input.shadowPos, worldNormal, L_sun);
 
-	float D = DistributionGGX(worldNormal, H_sun, roughness);
-	float g_term = GeometrySmith(worldNormal, V, L_sun, roughness);
+	// Evaluate Anisotropic Specular Lobe for the Sun
+	float D = DistributionAnisotropicGGX(worldNormal, H_sun, T, B, alpha_x, alpha_y);
+	float g_term = GeometryAnisotropicSmith(worldNormal, V, L_sun, T, B, alpha_x, alpha_y);
 	float3 F = FresnelSchlick(saturate(dot(H_sun, V)), F0);
 
 	// 1. Single-scatter specular
@@ -364,8 +413,14 @@ PSOutput PSMain(VSOutput input) {
 				float modRoughness = saturate(roughness + sphereAngle * 0.5f);
 
 				float3 H = normalize(V + L);
-				float D_p = DistributionGGX(worldNormal, H, modRoughness);
-				float G_p = GeometrySmith(worldNormal, V, L, modRoughness);
+
+				// Evaluate Anisotropic Specular Lobe for point lights
+				float alpha_p = modRoughness * modRoughness;
+				float alpha_p_x = max(alpha_p * (1.0f + anisotropy), 0.001f);
+				float alpha_p_y = max(alpha_p * (1.0f - anisotropy), 0.001f);
+
+				float D_p = DistributionAnisotropicGGX(worldNormal, H, T, B, alpha_p_x, alpha_p_y);
+				float G_p = GeometryAnisotropicSmith(worldNormal, V, L, T, B, alpha_p_x, alpha_p_y);
 				float3 F_p = FresnelSchlick(max(dot(H, V), 0.0), F0);
 
 				// 1. Single-scatter specular
@@ -424,7 +479,21 @@ PSOutput PSMain(VSOutput input) {
 	// 1. Evaluate SH Diffuse
 	float3 irradiance = EvaluateSH(worldNormal, frame.sh);
 
-	// 2. Evaluate Single-Scatter Specular IBL (With Lobe Elongation & Parallax Correction)
+	// --- PRE-CALCULATE BOX PROJECTION BOUNDARY FADE ---
+	// Smoothly transitions local reflections to global reflections as you approach the room borders
+	float boxFade = 0.0f;
+	if (frame.probeMin.w > 0.0f) {
+		float3 boxCenter = (frame.probeMax.xyz + frame.probeMin.xyz) * 0.5f;
+		float3 boxExtent = (frame.probeMax.xyz - frame.probeMin.xyz) * 0.5f;
+		float3 distFromCenter = abs(input.worldPos - boxCenter);
+		float3 normDist = distFromCenter / max(boxExtent, 0.0001f);
+		float maxDist = max(max(normDist.x, normDist.y), normDist.z);
+
+		// Smoothly fade out the box projection within the outer 10% of the box bounds
+		boxFade = smoothstep(1.0f, 0.9f, maxDist);
+	}
+
+	// 2. Evaluate Single-Scatter Specular IBL (With Lobe Elongation & Blended Parallax Correction)
 	float NoV = saturate(dot(worldNormal, V));
 
 	// Warp R along the view projection to simulate anisotropic stretching
@@ -432,9 +501,12 @@ PSOutput PSMain(VSOutput input) {
 	float3 stretchedR = normalize(R - V * stretching);
 
 	float3 correctedR = stretchedR;
-	if (frame.probeMin.w > 0.0f) { // If useLocalProbe flag is set
-		correctedR = BoxParallaxCorrection(input.worldPos, stretchedR, frame.probeMin.xyz,
-										   frame.probeMax.xyz, frame.probePos.xyz);
+	if (boxFade > 0.0f) {
+		// Only run the expensive intersection math if the pixel is actually within the box range
+		float3 boxR = BoxParallaxCorrection(input.worldPos, stretchedR, frame.probeMin.xyz,
+											frame.probeMax.xyz, frame.probePos.xyz);
+		correctedR =
+			lerp(stretchedR, boxR, boxFade); // Smoothly blend local and infinite reflections
 	}
 
 	float maxMipLevel = 5.0f;
@@ -460,12 +532,13 @@ PSOutput PSMain(VSOutput input) {
 	float3 kD_IBL = (1.0f - FssEss - FmsEms) * (1.0f - metallic);
 	float3 diffuseIBL = kD_IBL * albedo.rgb * irradiance;
 
-	// --- 5. CLEAR COAT SPECULAR IBL ---
+	// --- 5. CLEAR COAT SPECULAR IBL (With Blended Parallax Correction) ---
 	float3 R_geom = reflect(-V, N); // Flat geometric reflection (no normal map bumps)
 	float3 correctedR_coat = R_geom;
-	if (frame.probeMin.w > 0.0f) {
-		correctedR_coat = BoxParallaxCorrection(input.worldPos, R_geom, frame.probeMin.xyz,
-												frame.probeMax.xyz, frame.probePos.xyz);
+	if (boxFade > 0.0f) {
+		float3 boxR_coat = BoxParallaxCorrection(input.worldPos, R_geom, frame.probeMin.xyz,
+												 frame.probeMax.xyz, frame.probePos.xyz);
+		correctedR_coat = lerp(R_geom, boxR_coat, boxFade);
 	}
 	float3 prefilteredCoatColor =
 		prefilteredMap.SampleLevel(clampSampler, correctedR_coat, clearcoatRoughness * maxMipLevel)

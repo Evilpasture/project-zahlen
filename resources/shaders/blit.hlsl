@@ -63,7 +63,7 @@ float3 ReconstructWorldPos(float2 uv, float depth) {
 }
 
 // Refines the intersection point down to sub-centimeter accuracy
-float2 BinarySearch(float3 dir, float3 currentPos, out float confidence) {
+float2 BinarySearch(float3 startPos, float3 dir, float3 currentPos, out float confidence) {
 	float3 step = dir * 0.25f;		  // Coarse step size (matches RaymarchSSR)
 	float3 start = currentPos - step; // The position at the previous step (in front)
 	float3 end = currentPos;		  // The position at the current step (behind)
@@ -102,7 +102,13 @@ float2 BinarySearch(float3 dir, float3 currentPos, out float confidence) {
 	if (abs(finalRayDepth - finalSampledDepth) < thicknessWorld) {
 		confidence = 1.0f;
 
-		// RESTORED: Smoothly fade reflections out as they approach any screen edge
+		// Distance Fade to blend SSR smoothly into background IBL
+		float maxRayDistance = 10.0f;			  // 40 steps * 0.25m stepSize
+		float rayLength = length(mid - startPos); // <-- NOW ACCESSIBLE
+		float distanceFade = saturate(1.0f - (rayLength / maxRayDistance));
+		confidence *= distanceFade;
+
+		// Smoothly fade reflections out as they approach any screen edge
 		float2 edgeFactor = smoothstep(0.0f, 0.08f, uv) * smoothstep(1.0f, 0.92f, uv);
 		confidence *= edgeFactor.x * edgeFactor.y;
 	} else {
@@ -145,7 +151,7 @@ float2 RaymarchSSR(float3 startPos, float3 dir, out float confidence) {
 
 		// Trigger Binary Search the moment we pass behind a surface
 		if (rayDepthWorld >= sampledDepthWorld) {
-			return BinarySearch(dir, currentPos, confidence); // <--- UPDATE THIS
+			return BinarySearch(startPos, dir, currentPos, confidence);
 		}
 
 		currentPos += dir * stepSize;
@@ -165,6 +171,20 @@ float3 ACESFilm(float3 x) {
 // Exponential soft-limit curve to prevent hard plateau lines in dark shadows
 float SoftClamp(float x, float limit) {
 	return limit * (1.0f - exp(-x / max(limit, 0.0001f)));
+}
+
+// High-performance World-Space hash for stable, non-crawling dither
+float GetWorldSpaceRotationAngle(float3 posWS) {
+	// Combine X, Y, and Z to create a stable 2D seed on the geometry
+	float2 seed = posWS.xy + posWS.zz * 1.61803f; // Golden ratio scale
+	return GetRotationAngle(seed * 15.0f);		  // Scale up to get high-frequency dither
+}
+
+// Low-discrepancy Weyl Sequence (generates a beautifully uniform, blue-like dither
+// that is 100% temporally stable on the screen, preventing any motion fizzing)
+float GetStableWeylNoise(uint2 pixelPos) {
+	// 0.6180339887... is the fractional part of the Golden Ratio (phi)
+	return frac(float(pixelPos.x * 12664589 + pixelPos.y * 9546283) * 0.6180339887498949f);
 }
 
 float4 PSMain(VSOutput input) : SV_Target0 {
@@ -191,15 +211,17 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	// 2. Reconstruct World Position
 	float3 worldPos = ReconstructWorldPos(input.uv, depth);
 
-	float ao = 1.0f; // Global AO tracker (Defaults to 1.0 = no occlusion)
+	// --- ADD THIS LINE ---
+	// Calculate actual physical distance (in meters) from the camera to this pixel
+	float linearDepth = length(worldPos - pc.camPos.xyz);
+
+	float ao = 1.0f;
 
 	// --- A. COOPERATIVE SSAO / SSGI / HBAO / GTAO EVALUATION PASS ---
-	// (This must run on ALL surfaces, rough and glossy alike)
 	if (pc.giMode > 0) {
 		float occlusion = 0.0f;
 		float3 indirectLight = float3(0.0f, 0.0f, 0.0f);
 
-		// Screen-space edge vignette
 		float2 edgeFactor = smoothstep(0.0f, 0.08f, input.uv) * smoothstep(1.0f, 0.92f, input.uv);
 		float screenFade = edgeFactor.x * edgeFactor.y;
 
@@ -208,7 +230,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 			static const float2 sliceDirs[4] = {float2(1.0f, 0.0f), float2(0.7071f, 0.7071f),
 												float2(0.0f, 1.0f), float2(-0.7071f, 0.7071f)};
 
-			float angle = GetRotationAngle(input.pos.xy) * 2.0f * 3.14159265f;
+			float angle = GetStableWeylNoise(uint2(input.pos.xy)) * 2.0f * 3.14159265f;
 			float cosTheta = cos(angle);
 			float sinTheta = sin(angle);
 
@@ -219,7 +241,9 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 				float2 rotatedDir = float2(rawDir.x * cosTheta - rawDir.y * sinTheta,
 										   rawDir.x * sinTheta + rawDir.y * cosTheta);
 
-				float2 uvStep = rotatedDir * (pc.aoRadius / max(depth, 0.01f)) * 0.05f;
+				// UPDATED: Scale the UV step size by true physical distance in meters (linearDepth)
+				// This properly contracts the search radius in the distance
+				float2 uvStep = rotatedDir * (pc.aoRadius / max(linearDepth, 0.1f)) * 1.5f;
 
 				float max_sin_right = 0.0f;
 				float max_sin_left = 0.0f;
