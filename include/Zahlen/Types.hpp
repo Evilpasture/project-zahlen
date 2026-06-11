@@ -64,31 +64,12 @@ struct alignas(16) InstanceData {
 	alignas(16) float baseColorFactor[4];
 };
 
-struct FrameConstants {
-	JPH::Mat44 transform;
-	JPH::Mat44 prevTransform;
-	uint32_t albedoIndex;
-	uint32_t normalIndex;
-	uint32_t pbrIndex;
-	uint32_t emissiveIndex;
+struct ObjectConstants {
+	uint32_t instanceId;
 	uint32_t isShadowPass;
-	float metallicFactor;
-	float roughnessFactor;
-	float alphaCutoff;
-	uint32_t alphaMode;
-	uint32_t jointOffset;
-	uint32_t isSkinned;
-	uint32_t vertexCount; // Kept (Required for morph targets!)
-	uint32_t morphOffset;
-	uint32_t activeMorphCount;
-	uint32_t indexCount; // Added: Fits into padding
-	uint32_t _pad;		 // Added: Aligns morphWeights to 16 bytes
-
-	alignas(16) float morphWeights[4];
-	alignas(16) float baseColorFactor[4];
 };
+static_assert(sizeof(ObjectConstants) == 8, "ObjectConstants must match HLSL alignment.");
 static_assert(sizeof(InstanceData) == 224, "InstanceData must match HLSL alignment.");
-static_assert(sizeof(FrameConstants) == 224, "FrameConstants must match HLSL alignment.");
 // --- Opaque Resource Handles ---
 // These abstract away Vulkan objects completely.
 // NOLINTBEGIN(performance-enum-size)
@@ -140,18 +121,10 @@ struct alignas(16) FrameUniforms {
 	JPH::Vec4 sh[9]; // 9 Spherical Harmonic Coefficients
 
 	// --- ADD PROBE PARAMETERS (3 * 16 = 48 bytes) ---
-	JPH::Vec4 probeMin; // XYZ: bounding box min, W: useLocalProbe flag (0.0 or 1.0)
-	JPH::Vec4 probeMax; // XYZ: bounding box max, W: unused
-	JPH::Vec4 probePos; // XYZ: probe capture position, W: unused
-};
-
-struct ObjectConstants {
-	JPH::Mat44 world;
-	JPH::Mat44 prevWorld;
-	uint32_t albedoIndex;
-	uint32_t normalIndex;
-	uint32_t pbrIndex;
-	uint32_t emissiveIndex;
+	JPH::Vec4 probeMin;		// XYZ: bounding box min, W: useLocalProbe flag (0.0 or 1.0)
+	JPH::Vec4 probeMax;		// XYZ: bounding box max, W: unused
+	JPH::Vec4 probePos;		// XYZ: probe capture position, W: unused
+	JPH::Vec4 jitterParams; // x: currentX, y: currentY, z: prevX, w: prevY
 };
 
 // Material handle representation

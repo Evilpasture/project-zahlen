@@ -1,6 +1,8 @@
 #pragma once
-#include <vulkan/vulkan.h>
+#include <tuple>
 #include <type_traits>
+#include <utility>
+#include <vulkan/vulkan.h>
 
 namespace ZHLN::Vk {
 
@@ -8,39 +10,76 @@ namespace ZHLN::Vk {
  * @brief Compile-time Type-to-Enum mapping.
  * Mirrors the GetFormatAspect function structure without requiring macros.
  */
-template <typename T>
-[[nodiscard]] constexpr auto GetStructureType() noexcept -> VkStructureType {
-    if constexpr (std::is_same_v<T, VkPhysicalDeviceVulkan11Features>) {
-        return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
-    } 
-    else if constexpr (std::is_same_v<T, VkPhysicalDeviceVulkan12Features>) {
-        return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    } 
-    else if constexpr (std::is_same_v<T, VkPhysicalDeviceVulkan13Features>) {
-        return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
-    } 
-    else if constexpr (std::is_same_v<T, VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>) {
-        return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR;
-    }
-    else if constexpr (std::is_same_v<T, VkPhysicalDeviceFeatures2>) {
-        return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    } 
-    else {
-        // C++23: Safe compile-time error only if an unregistered Type is instantiated
-        static_assert(false, "Vulkan structure type mapping not registered for this Type in GetStructureType().");
-        return VK_STRUCTURE_TYPE_MAX_ENUM;
-    }
+template <typename T> [[nodiscard]] constexpr auto GetStructureType() noexcept -> VkStructureType {
+	if constexpr (std::is_same_v<T, VkPhysicalDeviceVulkan11Features>) {
+		return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+	} else if constexpr (std::is_same_v<T, VkPhysicalDeviceVulkan12Features>) {
+		return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+	} else if constexpr (std::is_same_v<T, VkPhysicalDeviceVulkan13Features>) {
+		return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+	} else if constexpr (std::is_same_v<T, VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>) {
+		return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR;
+	} else if constexpr (std::is_same_v<T, VkPhysicalDeviceFeatures2>) {
+		return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+	} else {
+		// C++23: Safe compile-time error only if an unregistered Type is instantiated
+		static_assert(
+			sizeof(T) == 0,
+			"Vulkan structure type mapping not registered for this Type in GetStructureType().");
+		return VK_STRUCTURE_TYPE_MAX_ENUM;
+	}
 }
 
+template <typename... Ts> class FeatureChain {
+	std::tuple<Ts...> _features;
+
+  public:
+	FeatureChain() = default;
+	FeatureChain(std::tuple<Ts...>&& t) : _features(std::move(t)) {}
+
+	template <typename T, typename Func> auto Require(Func&& configure) && {
+		T feature{};
+		feature.sType = GetStructureType<T>();
+		feature.pNext = nullptr;
+		configure(feature);
+		return FeatureChain<Ts..., T>(
+			std::tuple_cat(std::move(_features), std::make_tuple(feature)));
+	}
+
+	FeatureChain<Ts...>& Build() { return *this; }
+
+	auto* GetRoot() {
+		if constexpr (sizeof...(Ts) > 1) {
+			auto link = []<std::size_t... Is>(std::tuple<Ts...>& t, std::index_sequence<Is...>) {
+				((std::get<sizeof...(Ts) - 1 - Is>(t).pNext = &std::get<sizeof...(Ts) - 2 - Is>(t)),
+				 ...);
+			};
+			link(_features, std::make_index_sequence<sizeof...(Ts) - 1>{});
+		}
+		return &std::get<sizeof...(Ts) - 1>(_features);
+	}
+};
+
+class FeatureChainBuilder {
+  public:
+	template <typename T, typename Func> auto Require(Func&& configure) {
+		T feature{};
+		feature.sType = GetStructureType<T>();
+		feature.pNext = nullptr;
+		configure(feature);
+		return FeatureChain<T>(std::make_tuple(feature));
+	}
+};
+
 struct FeatureFactory {
-    template <typename T>
-    [[nodiscard]] static constexpr auto Create(auto&& configure) noexcept -> T {
-        T features{}; // Value-initialization (Forces 0 warnings, zeroed memory)
-        features.sType = GetStructureType<T>(); // Stitched safely at compile-time
-        
-        configure(features);
-        return features; // Optimized out via NRVO
-    }
+	template <typename T>
+	[[nodiscard]] static constexpr auto Create(auto&& configure) noexcept -> T {
+		T features{}; // Value-initialization (Forces 0 warnings, zeroed memory)
+		features.sType = GetStructureType<T>(); // Stitched safely at compile-time
+
+		configure(features);
+		return features; // Optimized out via NRVO
+	}
 };
 
 } // namespace ZHLN::Vk

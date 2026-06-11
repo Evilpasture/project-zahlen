@@ -59,7 +59,8 @@ template <GpuStageTag... Stages> class GpuProfiler {
 
 	GpuProfiler(GpuProfiler&& other) noexcept
 		: _device(std::exchange(other._device, VK_NULL_HANDLE)),
-		  _pools(std::exchange(other._pools, {VK_NULL_HANDLE, VK_NULL_HANDLE})) {}
+		  _pools(std::exchange(other._pools, {VK_NULL_HANDLE, VK_NULL_HANDLE})),
+		  _recordedMasks(std::exchange(other._recordedMasks, {0, 0})) {}
 
 	auto operator=(GpuProfiler&& other) noexcept -> GpuProfiler& {
 		if (this != &other) {
@@ -70,12 +71,14 @@ template <GpuStageTag... Stages> class GpuProfiler {
 			}
 			_device = std::exchange(other._device, VK_NULL_HANDLE);
 			_pools = std::exchange(other._pools, {VK_NULL_HANDLE, VK_NULL_HANDLE});
+			_recordedMasks = std::exchange(other._recordedMasks, {0, 0});
 		}
 		return *this;
 	}
 
 	void Init(VkDevice device) noexcept {
 		_device = device;
+		_recordedMasks = {0, 0};
 		VkQueryPoolCreateInfo info = {.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
 									  .pNext = nullptr,
 									  .flags = 0,
@@ -94,7 +97,9 @@ template <GpuStageTag... Stages> class GpuProfiler {
 	 * @brief Resets the query pool on the CPU before recording.
 	 */
 	void Reset(uint32_t frameIndex) noexcept {
-		vkResetQueryPool(_device, _pools[frameIndex % 2], 0, kQueryCount);
+		uint32_t slot = frameIndex % 2;
+		vkResetQueryPool(_device, _pools[slot], 0, kQueryCount);
+		_recordedMasks[slot] = 0; // Reset recorded stages for this frame slot [2]
 	}
 
 	// --- Compile-Time Resolved Writes ---
@@ -103,10 +108,13 @@ template <GpuStageTag... Stages> class GpuProfiler {
 	void WriteStart(VkCommandBuffer cmd, uint32_t frameIndex) noexcept {
 		static_assert(ContainsType<Stage, Stages...>,
 					  "Stage tag not registered in this GpuProfiler!");
-		constexpr uint32_t queryIdx = TypeIndex<Stage, Stages...>::value * 2;
+		constexpr uint32_t stageIdx = TypeIndex<Stage, Stages...>::value;
+		constexpr uint32_t queryIdx = stageIdx * 2;
 
-		vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, _pools[frameIndex % 2],
-							 queryIdx);
+		uint32_t slot = frameIndex % 2;
+		_recordedMasks[slot] |= (1u << stageIdx); // Flag stage as recorded [2]
+
+		vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, _pools[slot], queryIdx);
 	}
 
 	template <GpuStageTag Stage> void WriteEnd(VkCommandBuffer cmd, uint32_t frameIndex) noexcept {
@@ -127,32 +135,37 @@ template <GpuStageTag... Stages> class GpuProfiler {
 	 */
 	template <typename Func>
 	void RetrieveResults(uint32_t frameIndex, float timestampPeriod, Func&& callback) noexcept {
-		VkQueryPool pool = _pools[frameIndex % 2];
-		std::array<uint64_t, kQueryCount> rawResults{};
-
-		VkResult res = vkGetQueryPoolResults(
-			_device, pool, 0, kQueryCount, rawResults.size() * sizeof(uint64_t), rawResults.data(),
-			sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
-
-		if (res != VK_SUCCESS) [[unlikely]] {
-			return; // GPU still evaluating or out of date
+		uint32_t slot = frameIndex % 2;
+		uint32_t mask = _recordedMasks[slot];
+		if (mask == 0) {
+			return; // No recorded stages, avoid querying entirely [2]
 		}
 
-		// Compile-time Fold Expansion: Walks through every registered stage sequentially
+		VkQueryPool pool = _pools[slot];
+
+		// Compile-time Fold Expansion: Query each stage individually *only if it was recorded* [2]
 		(
 			[&]<typename Stage>() {
-				constexpr uint32_t startIdx = TypeIndex<Stage, Stages...>::value * 2;
-				constexpr uint32_t endIdx = startIdx + 1;
+				constexpr uint32_t stageIdx = TypeIndex<Stage, Stages...>::value;
+				if (mask & (1u << stageIdx)) {
+					constexpr uint32_t startIdx = stageIdx * 2;
+					std::array<uint64_t, 2> stageResults{};
 
-				uint64_t startTicks = rawResults[startIdx];
-				uint64_t endTicks = rawResults[endIdx];
+					// Retrieve only the 2 timestamps for this specific stage [2]
+					VkResult res = vkGetQueryPoolResults(
+						_device, pool, startIdx, 2, stageResults.size() * sizeof(uint64_t),
+						stageResults.data(), sizeof(uint64_t),
+						VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 
-				float durationMS = 0.0f;
-				if (endTicks >= startTicks) {
-					durationMS =
-						static_cast<float>(endTicks - startTicks) * timestampPeriod / 1000000.0f;
+					if (res == VK_SUCCESS) {
+						float durationMS = 0.0f;
+						if (stageResults[1] >= stageResults[0]) {
+							durationMS = static_cast<float>(stageResults[1] - stageResults[0]) *
+										 timestampPeriod / 1000000.0f;
+						}
+						callback(Stage::name, durationMS);
+					}
 				}
-				callback(Stage::name, durationMS);
 			}.template operator()<Stages>(),
 			...);
 	}
@@ -160,6 +173,7 @@ template <GpuStageTag... Stages> class GpuProfiler {
   private:
 	VkDevice _device = VK_NULL_HANDLE;
 	std::array<VkQueryPool, 2> _pools = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+	std::array<uint32_t, 2> _recordedMasks = {0, 0}; // Double-buffered stage record mask [2]
 };
 
 // ============================================================================

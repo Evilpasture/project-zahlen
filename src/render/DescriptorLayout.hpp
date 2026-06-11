@@ -74,8 +74,6 @@ struct BufferWrite {
 	VkDeviceSize range = VK_WHOLE_SIZE;
 };
 
-// Use this to explicitly skip writing an array slot during initial setup,
-// deferring the write to the BindlessRegistry instead.
 struct SkipWrite {};
 
 // ============================================================================
@@ -99,7 +97,6 @@ template <uint32_t B> struct GetSlot<B> {
 // ============================================================================
 
 template <typename Layout, uint32_t BindingID> class BindlessRegistry {
-	// 1. Proof of Correctness: Extract the specific slot definition at compile-time
 	using Slot = typename Layout::template SlotInfo<BindingID>;
 
 	static_assert((Slot::flags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) != 0,
@@ -108,14 +105,12 @@ template <typename Layout, uint32_t BindingID> class BindlessRegistry {
   public:
 	BindlessRegistry() = default;
 
-	// No longer need to pass Binding or MaxSlots; they are baked into the Type.
 	void Init(const VkDevice device, const VkDescriptorSet set) {
 		_device = device;
 		_set = set;
 		_nextSlot = 0;
 	}
 
-	// Only compiled if the Slot type is actually a Sampled Image
 	auto RegisterImage(const VkImageView view,
 					   const VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
 		-> uint32_t
@@ -124,7 +119,6 @@ template <typename Layout, uint32_t BindingID> class BindlessRegistry {
 		return UpdateDescriptor(view, VK_NULL_HANDLE, layout);
 	}
 
-	// Only compiled if the Slot type is a Combined Image Sampler
 	auto RegisterCombined(const VkImageView view, const VkSampler sampler,
 						  const VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
 		-> uint32_t
@@ -138,7 +132,6 @@ template <typename Layout, uint32_t BindingID> class BindlessRegistry {
 
   private:
 	auto UpdateDescriptor(VkImageView view, VkSampler sampler, VkImageLayout layout) -> uint32_t {
-		// 2. Proof of Correctness: Runtime bounds check against compile-time limit
 		if (_nextSlot >= Slot::count) [[unlikely]] {
 			ReportBindlessRegistryExceeded(BindingID, Slot::count);
 			std::abort();
@@ -172,6 +165,89 @@ template <typename Layout, uint32_t BindingID> class BindlessRegistry {
 };
 
 // ============================================================================
+// Descriptor Updater (Zero Allocation System)
+// ============================================================================
+
+class DescriptorUpdater {
+	std::array<VkWriteDescriptorSet, 32> _writes{};
+	std::array<VkDescriptorImageInfo, 32> _imageInfos{};
+	std::array<VkDescriptorBufferInfo, 32> _bufferInfos{};
+	uint32_t _writeCount = 0;
+	uint32_t _imageCount = 0;
+	uint32_t _bufferCount = 0;
+
+  public:
+	void BindUniformBuffer(uint32_t binding, VkBuffer buffer, VkDeviceSize offset = 0,
+						   VkDeviceSize range = VK_WHOLE_SIZE) {
+		auto& bufInfo = _bufferInfos[_bufferCount++];
+		bufInfo = {.buffer = buffer, .offset = offset, .range = range};
+
+		auto& write = _writes[_writeCount++];
+		write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				 .dstBinding = binding,
+				 .dstArrayElement = 0,
+				 .descriptorCount = 1,
+				 .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+				 .pBufferInfo = &bufInfo};
+	}
+
+	void BindStorageBuffer(uint32_t binding, VkBuffer buffer, VkDeviceSize offset = 0,
+						   VkDeviceSize range = VK_WHOLE_SIZE) {
+		auto& bufInfo = _bufferInfos[_bufferCount++];
+		bufInfo = {.buffer = buffer, .offset = offset, .range = range};
+
+		auto& write = _writes[_writeCount++];
+		write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				 .dstBinding = binding,
+				 .dstArrayElement = 0,
+				 .descriptorCount = 1,
+				 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+				 .pBufferInfo = &bufInfo};
+	}
+
+	void BindSampledImage(uint32_t binding, VkImageView view, VkSampler sampler = VK_NULL_HANDLE,
+						  VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+		auto& imgInfo = _imageInfos[_imageCount++];
+		imgInfo = {.sampler = sampler, .imageView = view, .imageLayout = layout};
+
+		auto& write = _writes[_writeCount++];
+		write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				 .dstBinding = binding,
+				 .dstArrayElement = 0,
+				 .descriptorCount = 1,
+				 .descriptorType = sampler == VK_NULL_HANDLE
+									   ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+									   : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				 .pImageInfo = &imgInfo};
+	}
+
+	void BindSampler(uint32_t binding, VkSampler sampler) {
+		auto& imgInfo = _imageInfos[_imageCount++];
+		imgInfo = {.sampler = sampler,
+				   .imageView = VK_NULL_HANDLE,
+				   .imageLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+
+		auto& write = _writes[_writeCount++];
+		write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				 .dstBinding = binding,
+				 .dstArrayElement = 0,
+				 .descriptorCount = 1,
+				 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
+				 .pImageInfo = &imgInfo};
+	}
+
+	void UpdateSet(VkDevice device, VkDescriptorSet set) {
+		for (uint32_t i = 0; i < _writeCount; ++i) {
+			_writes[i].dstSet = set;
+		}
+		vkUpdateDescriptorSets(device, _writeCount, _writes.data(), 0, nullptr);
+		_writeCount = 0;
+		_imageCount = 0;
+		_bufferCount = 0;
+	}
+};
+
+// ============================================================================
 // DescriptorLayout<Slots...> — the main TMP type
 // ============================================================================
 
@@ -181,7 +257,6 @@ template <VkImageLayout L> struct IsTypedImage<TypedImage<L>> : std::true_type {
 template <typename... Slots> class DescriptorLayout {
 	static constexpr uint32_t kCount = sizeof...(Slots);
 
-	// Builds the VkDescriptorSetLayoutBinding array
 	static constexpr auto MakeBindings() noexcept {
 		std::array<VkDescriptorSetLayoutBinding, kCount> b{};
 		uint32_t i = 0;
@@ -189,15 +264,14 @@ template <typename... Slots> class DescriptorLayout {
 			  VkDescriptorSetLayoutBinding{
 				  .binding = Slots::binding,
 				  .descriptorType = Slots::type,
-				  .descriptorCount = Slots::count, // Handles arrays
+				  .descriptorCount = Slots::count,
 				  .stageFlags = Slots::stages,
-				  .pImmutableSamplers = nullptr, // Not used in this design
+				  .pImmutableSamplers = nullptr,
 			  }),
 		 ...);
 		return b;
 	}
 
-	// Builds the VkDescriptorBindingFlags array
 	static constexpr auto MakeBindingFlags() noexcept {
 		std::array<VkDescriptorBindingFlags, kCount> f{};
 		uint32_t i = 0;
@@ -205,14 +279,12 @@ template <typename... Slots> class DescriptorLayout {
 		return f;
 	}
 
-	// Detect if ANY slot requires UPDATE_AFTER_BIND logic
 	static constexpr auto HasUpdateAfterBind() noexcept -> bool {
 		bool has = false;
 		((has |= ((Slots::flags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) != 0)), ...);
 		return has;
 	}
 
-	// Pool size calculation multiplies by actual array slot counts
 	static constexpr auto MakePoolSizes(uint32_t setCount) noexcept {
 		std::array<VkDescriptorPoolSize, kCount> ps{};
 		uint32_t i = 0;
@@ -227,9 +299,7 @@ template <typename... Slots> class DescriptorLayout {
 
   public:
 	template <uint32_t B> using SlotInfo = GetSlot<B, Slots...>;
-	// -------------------------------------------------------------------------
-	// CreateLayout
-	// -------------------------------------------------------------------------
+
 	[[nodiscard]] static auto CreateLayout(VkDevice device) noexcept
 		-> ZHLN::Vk::DescriptorSetLayout {
 		constexpr auto bindings = MakeBindings();
@@ -257,9 +327,6 @@ template <typename... Slots> class DescriptorLayout {
 		return {device, layout}; // RAII wrap
 	}
 
-	// -------------------------------------------------------------------------
-	// CreatePool
-	// -------------------------------------------------------------------------
 	[[nodiscard]] static auto CreatePool(VkDevice device, uint32_t maxSets) noexcept
 		-> ZHLN::Vk::DescriptorPool {
 		const auto poolSizes = MakePoolSizes(maxSets);
@@ -280,9 +347,6 @@ template <typename... Slots> class DescriptorLayout {
 		return {device, pool}; // RAII wrap
 	}
 
-	// -------------------------------------------------------------------------
-	// Allocate
-	// -------------------------------------------------------------------------
 	[[nodiscard]] static auto Allocate(VkDevice device, VkDescriptorPool pool,
 									   VkDescriptorSetLayout layout) noexcept -> VkDescriptorSet {
 		const VkDescriptorSetAllocateInfo info = {
@@ -297,9 +361,6 @@ template <typename... Slots> class DescriptorLayout {
 		return set;
 	}
 
-	// -------------------------------------------------------------------------
-	// Write
-	// -------------------------------------------------------------------------
 	template <typename... Args>
 		requires(sizeof...(Args) == kCount)
 	static void Write(VkDevice device, VkDescriptorSet set, Args&&... args) noexcept {
@@ -325,7 +386,6 @@ template <typename... Slots> class DescriptorLayout {
 			 set, std::get<I>(args), imageInfos[I], bufferInfos[I], writes[I]),
 		 ...);
 
-		// Compact the writes array to ignore 'SkipWrite' entries where descriptorCount is 0
 		std::array<VkWriteDescriptorSet, kCount> validWrites{};
 		uint32_t validCount = 0;
 		for (uint32_t i = 0; i < kCount; ++i) {
@@ -346,27 +406,23 @@ template <typename... Slots> class DescriptorLayout {
 
 		using T = std::remove_cvref_t<Arg>;
 
-		// 1. If the user passes SkipWrite{}, early out and set count to 0
 		if constexpr (std::is_same_v<T, SkipWrite>) {
-			// Enforce that SkipWrite is only used for slots intended for deferred bindless updates
 			static_assert((Slot::flags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) != 0,
 						  "SkipWrite{} can only be used for slots with the UPDATE_AFTER_BIND flag "
 						  "(Bindless).");
 
 			write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 					 .pNext = nullptr,
-					 .dstSet = VK_NULL_HANDLE, // Not used since count is 0
-					 .dstBinding = 0,		   // Not used since count is 0
-					 .dstArrayElement = 0,	   // Not used since count is 0
+					 .dstSet = VK_NULL_HANDLE,
+					 .dstBinding = 0,
+					 .dstArrayElement = 0,
 					 .descriptorCount = 0,
 					 .descriptorType = Slot::type,
 					 .pImageInfo = nullptr,
 					 .pBufferInfo = nullptr,
 					 .pTexelBufferView = nullptr};
 			return;
-		}
-		// 2. Otherwise, perform the type-checked write
-		else {
+		} else {
 			write = {
 				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 				.pNext = nullptr,
@@ -380,7 +436,6 @@ template <typename... Slots> class DescriptorLayout {
 				.pTexelBufferView = nullptr,
 			};
 
-			// Evaluate if it's the raw struct OR the new Compile-Time TypedImage
 			if constexpr (Slot::type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ||
 						  Slot::type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
 
@@ -403,7 +458,7 @@ template <typename... Slots> class DescriptorLayout {
 			} else if constexpr (Slot::type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
 
 				static_assert(std::is_same_v<T, ImageWrite>, "Binding expects ImageWrite");
-				imageInfo = {.sampler = VK_NULL_HANDLE, // Explicitly initialized to silence warning
+				imageInfo = {.sampler = VK_NULL_HANDLE,
 							 .imageView = arg.view,
 							 .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
 				write.pImageInfo = &imageInfo;

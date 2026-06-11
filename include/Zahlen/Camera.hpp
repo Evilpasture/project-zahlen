@@ -130,7 +130,7 @@ struct Camera {
 
 			// Apply jitter to the 3rd column (index 2).
 			JPH::Vec4 col2 = proj.GetColumn4(2);
-			proj.SetColumn4(2, col2 + JPH::Vec4(-jitterX * 2.0f, -jitterY * 2.0f, 0.0f, 0.0f));
+			proj.SetColumn4(2, col2 + JPH::Vec4(jitterX * 2.0f, -jitterY * 2.0f, 0.0f, 0.0f));
 		}
 		return proj;
 	}

@@ -441,6 +441,9 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 		JPH::Vec4(game.graphics.probeMin, game.graphics.useLocalProbe ? 1.0f : 0.0f);
 	uniforms.probeMax = JPH::Vec4(game.graphics.probeMax, 0.0f);
 	uniforms.probePos = JPH::Vec4(game.graphics.probePos, 0.0f);
+	uniforms.jitterParams =
+		JPH::Vec4(game.graphics.taaState.jitterX, game.graphics.taaState.jitterY,
+				  game.graphics.taaState.prevJitterX, game.graphics.taaState.prevJitterY);
 
 	Renderer::SetGISettings(rc, {.mode = game.graphics.giMode,
 								 .aoRadius = game.graphics.aoRadius,
@@ -696,7 +699,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 				   .width = 1280,
 				   .height = 720,
 				   .vsync = false,
-				   .enableValidation = false},
+				   .enableValidation = true},
 	};
 
 	{

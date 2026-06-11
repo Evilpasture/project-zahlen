@@ -1,5 +1,5 @@
 // File: src/engine/Render_Init.cpp
-#include "PBR.hpp"
+#include "IBLProcessor.hpp"
 #include "RenderCore.hpp"
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
@@ -9,6 +9,7 @@
 #include "imgui.h"
 
 #include <Features.hpp>
+#include <StagingContext.hpp>
 #include <cstddef>
 #include <threading/TaskSystem.hpp>
 
@@ -36,36 +37,29 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 								   .enable_validation = cfg.enableValidation};
 	_impl->appName.copy_to(inst_desc.app_name);
 
-	// 1. Declare the leaf node of the chain
-	auto swap_maint = Vk::FeatureFactory::Create<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>(
-		[](auto& f) { f.swapchainMaintenance1 = VK_TRUE; });
+	auto features = Vk::FeatureChainBuilder()
+						.Require<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>(
+							[](auto& f) { f.swapchainMaintenance1 = VK_TRUE; })
+						.Require<VkPhysicalDeviceVulkan13Features>([](auto& f) {
+							f.synchronization2 = VK_TRUE;
+							f.dynamicRendering = VK_TRUE;
+						})
+						.Require<VkPhysicalDeviceVulkan12Features>([](auto& f) {
+							f.descriptorIndexing = VK_TRUE;
+							f.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+							f.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+							f.descriptorBindingPartiallyBound = VK_TRUE;
+							f.runtimeDescriptorArray = VK_TRUE;
+							f.bufferDeviceAddress = VK_TRUE;
+							f.hostQueryReset = VK_TRUE;
+						})
+						.Require<VkPhysicalDeviceFeatures2>([](auto& f) {
+							f.features.multiDrawIndirect = VK_TRUE;
+							f.features.samplerAnisotropy = VK_TRUE;
+							f.features.drawIndirectFirstInstance = VK_TRUE;
+						})
+						.Build();
 
-	// 2. Point 1.3 to swap_maint
-	auto feat13 =
-		Vk::FeatureFactory::Create<VkPhysicalDeviceVulkan13Features>([&swap_maint](auto& f) {
-			f.pNext = &swap_maint;
-			f.synchronization2 = VK_TRUE;
-			f.dynamicRendering = VK_TRUE;
-		});
-
-	// 3. Point 1.2 to 1.3
-	auto feat12 = Vk::FeatureFactory::Create<VkPhysicalDeviceVulkan12Features>([&feat13](auto& f) {
-		f.pNext = &feat13;
-		f.descriptorIndexing = VK_TRUE;
-		f.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
-		f.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
-		f.descriptorBindingPartiallyBound = VK_TRUE;
-		f.runtimeDescriptorArray = VK_TRUE;
-		f.bufferDeviceAddress = VK_TRUE;
-	});
-
-	// 4. Point root Features2 to 1.2
-	auto feat2 = Vk::FeatureFactory::Create<VkPhysicalDeviceFeatures2>([&feat12](auto& f) {
-		f.pNext = &feat12;
-		f.features.multiDrawIndirect = VK_TRUE;
-		f.features.samplerAnisotropy = VK_TRUE;
-		f.features.drawIndirectFirstInstance = VK_TRUE;
-	});
 #ifdef __APPLE__
 	const char* dev_exts[] = {
 		VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
@@ -79,7 +73,7 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 								.extensions = &dev_exts[0],
 								.extension_count =
 									(uint32_t)(sizeof(dev_exts) / sizeof(const char*)),
-								.features = &feat2,
+								.features = features.GetRoot(),
 								.enable_validation = cfg.enableValidation};
 	ZHLN_DeviceSelectDesc select_desc = {.instance = VK_NULL_HANDLE,
 										 .surface = VK_NULL_HANDLE,
@@ -154,6 +148,12 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 RenderContext::~RenderContext() {
 	if (_impl && (_impl->ctx.Device() != nullptr)) {
 		vkDeviceWaitIdle(_impl->ctx.Device());
+		if (_impl->initFence != VK_NULL_HANDLE) {
+			vkDestroyFence(_impl->ctx.Device(), _impl->initFence, nullptr);
+		}
+		if (_impl->stagingContext != nullptr) {
+			delete _impl->stagingContext;
+		}
 		ImGui_ImplVulkan_Shutdown();
 		ImGui_ImplGlfw_Shutdown();
 		ImGui::DestroyContext();
@@ -212,20 +212,14 @@ void RenderContext::Impl::InitCullingResources() {
 		.size = kCullingPushSize,
 	};
 
-	VkDescriptorSetLayout cullingLayouts[] = {cullingLayout.Get()};
-	auto desc = ZHLN_PipelineLayoutDesc{.set_layouts = cullingLayouts,
-										.set_layout_count = 1,
-										.push_constants = &cullingPush,
-										.push_constant_count = 1};
+	ZHLN_ShaderDesc cullingShader = {.code = Vk::AsSpirV(&ZHLN_Resource_CullingCompSpv[0]),
+									 .size = ZHLN_Resource_CullingCompSpv_Len,
+									 .entry_point = "CSMain"};
 
-	cullingPipelineLayout =
-		Vk::PipelineLayout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &desc));
-
-	cullingPipeline = Vk::ComputePipelineBuilder{}
-						  .Shader(Vk::AsSpirV(&ZHLN_Resource_CullingCompSpv[0]),
-								  ZHLN_Resource_CullingCompSpv_Len, "CSMain")
-						  .Layout(cullingPipelineLayout.Get())
-						  .Build(ctx.Device());
+	if (!cullingPass.Build(ctx.Device(), cullingLayout.Get(), cullingShader, &cullingPush, 1)) {
+		ZHLN::Panic("FATAL: Failed to compile or build the Compute Culling Pipeline. "
+					"Check SPIR-V bytecode integrity and Descriptor Layout matching.");
+	}
 }
 
 void RenderContext::Impl::InitBindless() {
@@ -278,186 +272,12 @@ void RenderContext::Impl::InitBindless() {
 		Vk::Buffer::Create(allocator.Get(), sizeof(float) * 4 * 1000000,
 						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
-	// -----------------------------------------------------------------
-	// Pass 1: BRDF LUT Generation
-	// -----------------------------------------------------------------
-	ZHLN::Log("[IBL] Generating 2D BRDF Look-Up Table...");
-	std::vector<uint32_t> lutData = ZHLN::PBR::GenerateBRDFLUT(512, 512);
-	VkImageCreateInfo lutInfo = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-								 .pNext = nullptr,
-								 .flags = 0,
-								 .imageType = VK_IMAGE_TYPE_2D,
-								 .format = VK_FORMAT_R8G8B8A8_UNORM,
-								 .extent = {.width = 512, .height = 512, .depth = 1},
-								 .mipLevels = 1,
-								 .arrayLayers = 1,
-								 .samples = VK_SAMPLE_COUNT_1_BIT,
-								 .tiling = VK_IMAGE_TILING_OPTIMAL,
-								 .usage =
-									 VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-								 .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-								 .queueFamilyIndexCount = 0,
-								 .pQueueFamilyIndices = nullptr,
-								 .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
-	brdfLutImage = Vk::Image::Create(allocator.Get(), lutInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+	stagingContext = new Vk::StagingContext(allocator, ctx);
+	stagingContext->Begin();
 
-	{
-		Vk::CommandPool lutPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-		if (!lutPool.Allocate(1)) {
-			ZHLN::Panic("Vulkan: Failed to allocate LUT command buffer");
-		}
-		VkCommandBuffer cmd = lutPool[0];
+	iblPayload = Vk::IBLProcessor::Bake(*this, *stagingContext);
 
-		ZHLN_BeginCommandBuffer(cmd);
-		Vk::Buffer lutStaging =
-			Vk::Buffer::Create(allocator.Get(), static_cast<size_t>(512 * 512 * 4),
-							   VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
-		std::memcpy(lutStaging.Map().data, lutData.data(), static_cast<size_t>(512 * 512 * 4));
-
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
-			cmd, brdfLutImage.Handle());
-		ZHLN_BufferImageCopyDesc lutCopy = {.buffer = lutStaging.Handle(),
-											.image = brdfLutImage.Handle(),
-											.layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-											.width = 512,
-											.height = 512,
-											.buffer_offset = 0,
-											.mip_level = 0,
-											.base_array_layer = 0};
-		ZHLN_CmdCopyBufferToImage(cmd, &lutCopy);
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, brdfLutImage.Handle());
-		ZHLN_EndCommandBuffer(cmd);
-
-		VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-											 .pNext = nullptr,
-											 .commandBuffer = cmd,
-											 .deviceMask = 0};
-		VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-								.pNext = nullptr,
-								.flags = 0,
-								.waitSemaphoreInfoCount = 0,
-								.pWaitSemaphoreInfos = nullptr,
-								.commandBufferInfoCount = 1,
-								.pCommandBufferInfos = &subInfo,
-								.signalSemaphoreInfoCount = 0,
-								.pSignalSemaphoreInfos = nullptr};
-		vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
-		vkQueueWaitIdle(ctx.GraphicsQueue());
-	}
-	brdfLutView = Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(ctx.Device(), brdfLutImage.Handle());
-
-	// -----------------------------------------------------------------
-	// Pass 2: Spherical Harmonics Generation
-	// -----------------------------------------------------------------
-	ZHLN::Log("[IBL] Generating Diffuse Spherical Harmonics...");
-	shCoeffs = ZHLN::PBR::GenerateDiffuseSH();
-	// -----------------------------------------------------------------
-	// Pass 3: Specular Pre-filtered Cubemap Generation (6 Mip Levels)
-	// -----------------------------------------------------------------
-	ZHLN::Log("[IBL] Generating Specular Pre-filtered Cubemap Mips...");
-
-	constexpr uint32_t kBaseSize = 256;
-	constexpr uint32_t kMipLevels = 6;
-
-	VkImageCreateInfo specInfo = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-								  .pNext = nullptr,
-								  .flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
-								  .imageType = VK_IMAGE_TYPE_2D,
-								  .format = VK_FORMAT_R8G8B8A8_UNORM,
-								  .extent = {.width = kBaseSize, .height = kBaseSize, .depth = 1},
-								  .mipLevels = kMipLevels, // <-- Set to 6
-								  .arrayLayers = 6,
-								  .samples = VK_SAMPLE_COUNT_1_BIT,
-								  .tiling = VK_IMAGE_TILING_OPTIMAL,
-								  .usage =
-									  VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-								  .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-								  .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
-	prefilteredImage = Vk::Image::Create(allocator.Get(), specInfo, VMA_MEMORY_USAGE_GPU_ONLY);
-
-	{
-		Vk::CommandPool specPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-		specPool.Allocate(1);
-		VkCommandBuffer cmd = specPool[0];
-		ZHLN_BeginCommandBuffer(cmd);
-
-		// Pre-calculate total bytes needed for all mips of 6 faces to allocate one flat buffer
-		size_t totalBytes = 0;
-		for (uint32_t m = 0; m < kMipLevels; ++m) {
-			uint32_t s = kBaseSize >> m;
-			totalBytes += (static_cast<size_t>(s * s * 4 * 6));
-		}
-
-		Vk::Buffer specStaging =
-			Vk::Buffer::Create(allocator.Get(), totalBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-							   VMA_MEMORY_USAGE_CPU_ONLY);
-
-		auto specMap = specStaging.Map();
-		char* writePtr = static_cast<char*>(specMap.data);
-		size_t currentOffset = 0;
-
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
-			cmd, prefilteredImage.Handle());
-
-		// Process and upload each mip level sequentially
-		for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
-			uint32_t mipSize = kBaseSize >> mip;
-			float roughness = static_cast<float>(mip) / static_cast<float>(kMipLevels - 1);
-
-			// Generate CPU-side
-			auto mipData = ZHLN::PBR::GenerateSpecularMip(mipSize, roughness);
-
-			// Write directly into mapped memory sequentially
-			auto faceBytes = static_cast<size_t>(mipSize) * mipSize * 4;
-			for (int face = 0; face < 6; ++face) {
-				std::memcpy(writePtr + currentOffset + (face * faceBytes), mipData[face].data(),
-							faceBytes);
-			}
-
-			// Record Vulkan copy commands for this mip level's 6 faces
-			for (int face = 0; face < 6; ++face) {
-				VkBufferImageCopy2 region = {
-					.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
-					.bufferOffset = currentOffset + (face * faceBytes),
-					.imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-										 .mipLevel = mip,
-										 .baseArrayLayer = static_cast<uint32_t>(face),
-										 .layerCount = 1},
-					.imageExtent = {.width = mipSize, .height = mipSize, .depth = 1}};
-
-				VkCopyBufferToImageInfo2 copyInfo = {
-					.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
-					.srcBuffer = specStaging.Handle(),
-					.dstImage = prefilteredImage.Handle(),
-					.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-					.regionCount = 1,
-					.pRegions = &region};
-				vkCmdCopyBufferToImage2(cmd, &copyInfo);
-			}
-			currentOffset += (faceBytes * 6);
-		}
-
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-			cmd, prefilteredImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT);
-
-		ZHLN_EndCommandBuffer(cmd);
-
-		VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-											 .commandBuffer = cmd};
-		VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-								.commandBufferInfoCount = 1,
-								.pCommandBufferInfos = &subInfo};
-		vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
-		vkQueueWaitIdle(ctx.GraphicsQueue());
-	}
-	prefilteredView = Vk::CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(
-		ctx.Device(), prefilteredImage.Handle(), kMipLevels);
-
-	// -----------------------------------------------------------------
 	// Pass 4: LTC Area Light LUT Uploads (Direct embedded memory blast)
-	// -----------------------------------------------------------------
 	ZHLN::Log("[IBL] Uploading Linearly Transformed Cosines (LTC) LUTs...");
 
 	VkImageCreateInfo ltcInfo = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -478,98 +298,54 @@ void RenderContext::Impl::InitBindless() {
 	ltcMatImage = Vk::Image::Create(allocator.Get(), ltcInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 	ltcAmpImage = Vk::Image::Create(allocator.Get(), ltcInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 
-	{
-		Vk::CommandPool ltcPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-		ltcPool.Allocate(1);
-		VkCommandBuffer cmd = ltcPool[0];
+	const size_t matRawSize = ZHLN_Resource_LtcMatBin_Len - 128;
+	const size_t ampRawSize = ZHLN_Resource_LtcAmpBin_Len - 128;
 
-		ZHLN_BeginCommandBuffer(cmd);
+	Vk::Buffer ltcStaging =
+		Vk::Buffer::Create(allocator.Get(), matRawSize + ampRawSize,
+						   VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 
-		// 1. We allocate the staging buffer based on raw pixel data size (excluding the 128-byte
-		// headers) [1]
-		const size_t matRawSize = ZHLN_Resource_LtcMatBin_Len - 128;
-		const size_t ampRawSize = ZHLN_Resource_LtcAmpBin_Len - 128;
+	auto mapped = ltcStaging.Map();
+	char* stagePtr = static_cast<char*>(mapped.data);
 
-		Vk::Buffer ltcStaging =
-			Vk::Buffer::Create(allocator.Get(), matRawSize + ampRawSize,
-							   VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+	std::memcpy(stagePtr, ZHLN_Resource_LtcMatBin + 128, matRawSize);
+	std::memcpy(stagePtr + matRawSize, ZHLN_Resource_LtcAmpBin + 128, ampRawSize);
 
-		auto mapped = ltcStaging.Map();
-		char* stagePtr = static_cast<char*>(mapped.data);
+	stagingContext->UploadImage2DBuffer(ltcMatImage.Handle(), 64, 64, 1, ltcStaging.Handle(), 0);
+	stagingContext->UploadImage2DBuffer(ltcAmpImage.Handle(), 64, 64, 1, ltcStaging.Handle(),
+										matRawSize);
+	stagingContext->AddBuffer(std::move(ltcStaging));
 
-		// 2. Direct-copy but offset source by 128 bytes to skip DDS headers [1]
-		std::memcpy(stagePtr, ZHLN_Resource_LtcMatBin + 128, matRawSize);
-		std::memcpy(stagePtr + matRawSize, ZHLN_Resource_LtcAmpBin + 128, ampRawSize);
-
-		// Transition images to DST
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
-			cmd, ltcMatImage.Handle());
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
-			cmd, ltcAmpImage.Handle());
-
-		// Copy Mat LUT (64x64)
-		ZHLN_BufferImageCopyDesc copyMat = {.buffer = ltcStaging.Handle(),
-											.image = ltcMatImage.Handle(),
-											.layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-											.width = 64,
-											.height = 64,
-											.buffer_offset = 0};
-		ZHLN_CmdCopyBufferToImage(cmd, &copyMat);
-
-		// Copy Amp LUT (64x64)
-		ZHLN_BufferImageCopyDesc copyAmp = {
-			.buffer = ltcStaging.Handle(),
-			.image = ltcAmpImage.Handle(),
-			.layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-			.width = 64,
-			.height = 64,
-			.buffer_offset = matRawSize // Staged offset
-		};
-		ZHLN_CmdCopyBufferToImage(cmd, &copyAmp);
-
-		// Transition to READ
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, ltcMatImage.Handle());
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, ltcAmpImage.Handle());
-
-		ZHLN_EndCommandBuffer(cmd);
-
-		VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-											 .commandBuffer = cmd};
-		VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-								.commandBufferInfoCount = 1,
-								.pCommandBufferInfos = &subInfo};
-		vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
-		vkQueueWaitIdle(ctx.GraphicsQueue());
-	}
 	ltcMatView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle());
 	ltcAmpView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle());
 
-	// Update global descriptor bindings
-	for (int i = 0; i < 2; ++i) {
-		GlobalSceneLayout::Write(ctx.Device(), bindlessSets[i], Vk::SkipWrite{},
-								 Vk::SamplerWrite{globalSampler.Get()},
-								 Vk::ImageWrite{.view = shadowMap.view.Get(),
-												.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-								 Vk::SamplerWrite{shadowSampler.Get()},
-								 Vk::BufferWrite{.buffer = frameUniformBuffers[i].Handle()},
-								 Vk::BufferWrite{.buffer = lightStorageBuffers[i].Handle()},
-								 Vk::BufferWrite{.buffer = instanceDataBuffers[i].Handle()},
-								 Vk::BufferWrite{.buffer = jointBuffers[i].Handle()},
+	initFence = stagingContext->ExecuteAsync();
 
-								 // --- SHIFTED DESCRIPTORS ---
-								 Vk::ImageWrite{.view = prefilteredView.Get(),
-												.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-								 Vk::ImageWrite{.view = brdfLutView.Get(),
-												.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-								 Vk::BufferWrite{.buffer = morphDeltasBuffer.Handle()},
-								 Vk::SamplerWrite{clampSampler.Get()},
-								 Vk::ImageWrite{.view = ltcMatView.Get(),
-												.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-								 Vk::ImageWrite{.view = ltcAmpView.Get(),
-												.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-								 Vk::BufferWrite{.buffer = jointBuffers[1 - i].Handle()});
+	// Update global descriptor bindings
+	Vk::DescriptorUpdater bindlessRegistry;
+	for (int i = 0; i < 2; ++i) {
+		bindlessRegistry.BindSampler(1, globalSampler.Get());
+		bindlessRegistry.BindSampledImage(2, shadowMap.view.Get(), VK_NULL_HANDLE,
+										  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		bindlessRegistry.BindSampler(3, shadowSampler.Get());
+		bindlessRegistry.BindUniformBuffer(4, frameUniformBuffers[i].Handle());
+		bindlessRegistry.BindStorageBuffer(5, lightStorageBuffers[i].Handle());
+		bindlessRegistry.BindStorageBuffer(6, instanceDataBuffers[i].Handle());
+		bindlessRegistry.BindStorageBuffer(7, jointBuffers[i].Handle());
+
+		bindlessRegistry.BindSampledImage(8, iblPayload.prefilteredView.Get(), VK_NULL_HANDLE,
+										  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		bindlessRegistry.BindSampledImage(9, iblPayload.brdfLutView.Get(), VK_NULL_HANDLE,
+										  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		bindlessRegistry.BindStorageBuffer(10, morphDeltasBuffer.Handle());
+		bindlessRegistry.BindSampler(11, clampSampler.Get());
+		bindlessRegistry.BindSampledImage(12, ltcMatView.Get(), VK_NULL_HANDLE,
+										  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		bindlessRegistry.BindSampledImage(13, ltcAmpView.Get(), VK_NULL_HANDLE,
+										  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		bindlessRegistry.BindStorageBuffer(14, jointBuffers[1 - i].Handle());
+
+		bindlessRegistry.UpdateSet(ctx.Device(), bindlessSets[i]);
 	}
 }
 void RenderContext::Impl::InitPostProcessing() {
@@ -579,7 +355,7 @@ void RenderContext::Impl::InitPostProcessing() {
 	pointSampler = Vk::SamplerBuilder{}.Nearest().ClampToEdge().Build(ctx.Device());
 
 	VkPushConstantRange taaPush = {
-		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float) * 5};
+		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float)};
 	auto taaShaders = Vk::ShaderStages::Create(ctx.Device(),
 											   {.code = Vk::AsSpirV(&ZHLN_Resource_TaaVertSpv[0]),
 												.size = ZHLN_Resource_TaaVertSpv_Len,
@@ -595,7 +371,7 @@ void RenderContext::Impl::InitPostProcessing() {
 	VkPushConstantRange blitPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 		.offset = 0,
-		.size = 180,
+		.size = 192,
 	};
 
 	auto blitShaders = Vk::ShaderStages::Create(ctx.Device(),

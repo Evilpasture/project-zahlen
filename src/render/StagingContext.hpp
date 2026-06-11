@@ -1,0 +1,155 @@
+#pragma once
+#include "Allocator.hpp"
+#include "RenderCore.hpp"
+
+#include <cstring>
+#include <vector>
+
+namespace ZHLN::Vk {
+
+class StagingContext {
+  public:
+	StagingContext(Allocator& allocator, const Context& ctx) : _allocator(allocator), _ctx(ctx) {}
+
+	void Begin() {
+		_cmdPool = CommandPool(_ctx.Device(), _ctx.PhysicalInfo().graphics_family);
+		_cmdPool.Allocate(1);
+		_cmd = _cmdPool[0];
+		ZHLN_BeginCommandBuffer(_cmd);
+	}
+
+	void UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels,
+					   const void* data, size_t bytes) {
+		Buffer staging = Buffer::Create(_allocator.Get(), bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+										VMA_MEMORY_USAGE_CPU_ONLY);
+		if (auto mapped = staging.Map(); mapped.data) {
+			std::memcpy(mapped.data, data, bytes);
+		}
+
+		UploadImage2DBuffer(dstImage, w, h, mipLevels, staging.Handle(), 0);
+		_stagingBuffers.push_back(std::move(staging));
+	}
+
+	void UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels,
+							 VkBuffer stagingBuf, VkDeviceSize offset) {
+		ZHLN_ImageBarrierDesc initialBarrier = {.image = dstImage,
+												.src_access = 0,
+												.dst_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+												.src_layout = VK_IMAGE_LAYOUT_UNDEFINED,
+												.dst_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+												.src_stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+												.dst_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+												.aspect = VK_IMAGE_ASPECT_COLOR_BIT,
+												.base_mip = 0,
+												.mip_count = mipLevels};
+		ZHLN_CmdImageBarrier(_cmd, &initialBarrier);
+
+		ZHLN_BufferImageCopyDesc copyRegion = {.buffer = stagingBuf,
+											   .image = dstImage,
+											   .layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+											   .width = w,
+											   .height = h,
+											   .buffer_offset = offset,
+											   .mip_level = 0,
+											   .base_array_layer = 0};
+		ZHLN_CmdCopyBufferToImage(_cmd, &copyRegion);
+
+		if (mipLevels > 1) {
+			ZHLN_GenerateMipmaps(_cmd, dstImage, w, h, mipLevels);
+		} else {
+			ZHLN_ImageBarrierDesc finalBarrier = {
+				.image = dstImage,
+				.src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+				.dst_access = VK_ACCESS_2_SHADER_READ_BIT,
+				.src_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+				.dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				.src_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+				.dst_stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+				.aspect = VK_IMAGE_ASPECT_COLOR_BIT,
+				.base_mip = 0,
+				.mip_count = 1};
+			ZHLN_CmdImageBarrier(_cmd, &finalBarrier);
+		}
+	}
+
+	void UploadPrefilteredCubeMap(VkImage dstImage, VkBuffer stagingBuf, uint32_t baseSize,
+								  uint32_t mipLevels) {
+		ZHLN_ImageBarrierDesc initialBarrier = {.image = dstImage,
+												.src_access = 0,
+												.dst_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+												.src_layout = VK_IMAGE_LAYOUT_UNDEFINED,
+												.dst_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+												.src_stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+												.dst_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+												.aspect = VK_IMAGE_ASPECT_COLOR_BIT,
+												.base_mip = 0,
+												.mip_count = mipLevels};
+		ZHLN_CmdImageBarrier(_cmd, &initialBarrier);
+
+		size_t currentOffset = 0;
+		for (uint32_t mip = 0; mip < mipLevels; ++mip) {
+			uint32_t mipSize = baseSize >> mip;
+			size_t faceSize = mipSize * mipSize * 4;
+
+			for (uint32_t face = 0; face < 6; ++face) {
+				VkBufferImageCopy2 region = {
+					.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
+					.bufferOffset = currentOffset + (face * faceSize),
+					.imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+										 .mipLevel = mip,
+										 .baseArrayLayer = face,
+										 .layerCount = 1},
+					.imageExtent = {.width = mipSize, .height = mipSize, .depth = 1}};
+
+				VkCopyBufferToImageInfo2 copyInfo = {
+					.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
+					.srcBuffer = stagingBuf,
+					.dstImage = dstImage,
+					.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+					.regionCount = 1,
+					.pRegions = &region};
+				vkCmdCopyBufferToImage2(_cmd, &copyInfo);
+			}
+			currentOffset += (faceSize * 6);
+		}
+
+		ZHLN_ImageBarrierDesc finalBarrier = {.image = dstImage,
+											  .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+											  .dst_access = VK_ACCESS_2_SHADER_READ_BIT,
+											  .src_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+											  .dst_layout =
+												  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+											  .src_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+											  .dst_stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+											  .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
+											  .base_mip = 0,
+											  .mip_count = mipLevels};
+		ZHLN_CmdImageBarrier(_cmd, &finalBarrier);
+	}
+
+	void AddBuffer(Buffer&& buf) { _stagingBuffers.push_back(std::move(buf)); }
+
+	VkFence ExecuteAsync() {
+		ZHLN_EndCommandBuffer(_cmd);
+		VkFenceCreateInfo fenceInfo = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+		VkFence fence = VK_NULL_HANDLE;
+		vkCreateFence(_ctx.Device(), &fenceInfo, nullptr, &fence);
+
+		VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+											 .commandBuffer = _cmd};
+		VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+								.commandBufferInfoCount = 1,
+								.pCommandBufferInfos = &subInfo};
+		vkQueueSubmit2(_ctx.GraphicsQueue(), 1, &submit, fence);
+		return fence;
+	}
+
+  private:
+	Allocator& _allocator;
+	const Context& _ctx;
+	CommandPool _cmdPool;
+	VkCommandBuffer _cmd = VK_NULL_HANDLE;
+	std::vector<Buffer> _stagingBuffers;
+};
+
+} // namespace ZHLN::Vk

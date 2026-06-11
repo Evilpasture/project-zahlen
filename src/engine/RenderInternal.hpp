@@ -2,12 +2,14 @@
 #pragma once
 
 #include "Allocator.hpp"
+#include "ComputePass.hpp"
 #include "DescriptorLayout.hpp"
 #include "GpuProfiler.hpp"
 #include "Postprocessing.hpp"
 #include "PresentationContext.hpp"
 #include "RenderCore.hpp"
 #include "RenderTarget.hpp"
+#include "StagingContext.hpp"
 #include "Vertex.hpp"
 
 #include <GLFW/glfw3.h>
@@ -16,6 +18,18 @@
 #include <Zahlen/Types.hpp>
 #include <array>
 #include <memory>
+
+namespace ZHLN::Vk {
+
+struct IBLPayload {
+	Image brdfLutImage;
+	ImageView brdfLutView;
+	Image prefilteredImage;
+	ImageView prefilteredView;
+	std::array<JPH::Vec4, 9> shCoeffs{};
+};
+
+} // namespace ZHLN::Vk
 
 namespace ZHLN {
 
@@ -41,8 +55,9 @@ using GlobalSceneLayout = Vk::DescriptorLayout<
 	Vk::StorageBufferSlot<14, VK_SHADER_STAGE_VERTEX_BIT>	// Previous Joint matrices (SSBO)
 	>;
 
-using TAALayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SampledImageSlot<1>,
-									   Vk::SampledImageSlot<2>, Vk::SamplerSlot<3>>;
+using TAALayout =
+	Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SampledImageSlot<1>, Vk::SampledImageSlot<2>,
+						 Vk::SamplerSlot<3>, Vk::UniformSlot<4, VK_SHADER_STAGE_FRAGMENT_BIT>>;
 
 using BlitLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texCurrent (Color)
 										Vk::SamplerSlot<1>,		 // sampler
@@ -185,6 +200,10 @@ struct RenderContext::Impl {
 	Vk::Image ltcAmpImage;
 	Vk::ImageView ltcAmpView;
 
+	Vk::IBLPayload iblPayload;
+	Vk::StagingContext* stagingContext = nullptr;
+	VkFence initFence = VK_NULL_HANDLE;
+
 	ZHLN::DoubleBuffered<Vk::Buffer> frameUniformBuffers;
 	ZHLN::DoubleBuffered<Vk::Buffer> lightStorageBuffers;
 
@@ -193,19 +212,11 @@ struct RenderContext::Impl {
 	ZHLN::DoubleBuffered<Vk::Buffer> jointBuffers; // Global Joint Transforms SSBO
 	Vk::Pipeline shadowPipeline;
 	Vk::PipelineLayout shadowPipelineLayout;
-	Vk::Pipeline cullingPipeline;
-	Vk::PipelineLayout cullingPipelineLayout;
+	Vk::ComputePass cullingPass;
 
 	JPH::Array<UIDrawCommand> uiDrawQueue;
 	Vk::Pipeline uiPipeline;
 	Vk::PipelineLayout uiPipelineLayout;
-
-	std::array<JPH::Vec4, 9> shCoeffs{};
-
-	Vk::Image prefilteredImage;
-	Vk::ImageView prefilteredView;
-	Vk::Image brdfLutImage;
-	Vk::ImageView brdfLutView;
 
 	GISettings giSettings{};
 
@@ -226,10 +237,12 @@ struct RenderContext::Impl {
 	void SetupUI(GLFWwindow* window);
 
 	// Decomposed Rendering Stage Helpers
+	void SortDrawQueue();
+	Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>
+	GetDepthAttachmentForMainPass(VkCommandBuffer cmd);
 	void RenderShadowPass(VkCommandBuffer cmd);
 	bool RenderMainPassGpuCulling(RenderContext& ctx, VkCommandBuffer cmd);
 	void RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd);
-	void extracted(VkCommandBuffer& cmd);
 	void ApplyTAAPass(VkCommandBuffer cmd, VkExtent2D extent);
 	void BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, uint32_t imageIdx);
 	void SubmitFrame();

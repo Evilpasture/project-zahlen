@@ -26,32 +26,15 @@ struct FrameUniforms {
 	uint lightCount;
 	float3 padding;
 	float4 sh[9];
-	float4 probeMin; // XYZ: boxMin, W: useLocalProbe (0.0 or 1.0)
-	float4 probeMax; // XYZ: boxMax, W: unused
-	float4 probePos; // XYZ: probePos, W: unused
+	float4 probeMin;	 // XYZ: boxMin, W: useLocalProbe (0.0 or 1.0)
+	float4 probeMax;	 // XYZ: boxMax, W: unused
+	float4 probePos;	 // XYZ: probePos, W: unused
+	float4 jitterParams; // x: currentX, y: currentY, z: prevX, w: prevY
 };
 
 struct ObjectConstants {
-	float4x4 world;
-	float4x4 prevWorld;
-	uint albedoIdx;
-	uint normalIdx;
-	uint pbrIdx;
-	uint emissiveIdx;
+	uint instanceId;
 	uint isShadowPass;
-	float metallicFactor;
-	float roughnessFactor;
-	float alphaCutoff;
-	uint alphaMode;
-	uint jointOffset;
-	uint isSkinned;
-	uint vertexCount;
-	uint morphOffset;
-	uint activeMorphCount;
-	uint indexCount; // Added
-	uint pad;		 // Added
-	float4 morphWeights;
-	float4 baseColorFactor;
 };
 
 struct InstanceData {

@@ -4,62 +4,28 @@
 VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	VSOutput output;
 
-	float4x4 worldMatrix;
-	float4x4 prevWorldMatrix;
-	uint albedoIdx, normalIdx, pbrIdx, emissiveIdx;
-	float4 baseColorFactor;
-	float metallicFactor, roughnessFactor, alphaCutoff;
-	uint alphaMode;
-	uint jointOffset;
-	uint isSkinned;
+	// Resolve Instance ID: Use push constant if valid; otherwise fallback to draw SV_InstanceID [1]
+	uint instId = (obj.instanceId != 4294967295u) ? obj.instanceId : instanceId;
+	InstanceData inst = g_instances[instId];
 
-	uint morphOffset;
-	uint activeMorphCount;
-	float4 morphWeights;
-	uint vertexCount;
+	float4x4 worldMatrix = inst.world;
+	float4x4 prevWorldMatrix = inst.prevWorld;
+	uint albedoIdx = inst.albedoIdx;
+	uint normalIdx = inst.normalIdx;
+	uint pbrIdx = inst.pbrIdx;
+	uint emissiveIdx = inst.emissiveIdx;
+	float4 baseColorFactor = inst.baseColorFactor;
+	float metallicFactor = inst.metallicFactor;
+	float roughnessFactor = inst.roughnessFactor;
+	float alphaCutoff = inst.alphaCutoff;
+	uint alphaMode = inst.alphaMode;
+	uint jointOffset = inst.jointOffset;
+	uint isSkinned = inst.isSkinned;
 
-	if (obj.isShadowPass != 0 || obj.albedoIdx != 0) {
-		// --- CPU TRADITIONAL PATH ---
-		worldMatrix = obj.world;
-		prevWorldMatrix = obj.prevWorld;
-		albedoIdx = obj.albedoIdx;
-		normalIdx = obj.normalIdx;
-		pbrIdx = obj.pbrIdx;
-		emissiveIdx = obj.emissiveIdx;
-		baseColorFactor = obj.baseColorFactor;
-		metallicFactor = obj.metallicFactor;
-		roughnessFactor = obj.roughnessFactor;
-		alphaCutoff = obj.alphaCutoff;
-		alphaMode = obj.alphaMode;
-		jointOffset = obj.jointOffset;
-		isSkinned = obj.isSkinned;
-
-		morphOffset = obj.morphOffset;
-		activeMorphCount = obj.activeMorphCount;
-		morphWeights = obj.morphWeights;
-		vertexCount = obj.vertexCount;
-	} else {
-		// --- GPU CULLING PATH ---
-		InstanceData inst = g_instances[instanceId];
-		worldMatrix = inst.world;
-		prevWorldMatrix = inst.prevWorld;
-		albedoIdx = inst.albedoIdx;
-		normalIdx = inst.normalIdx;
-		pbrIdx = inst.pbrIdx;
-		emissiveIdx = inst.emissiveIdx;
-		baseColorFactor = inst.baseColorFactor;
-		metallicFactor = inst.metallicFactor;
-		roughnessFactor = inst.roughnessFactor;
-		alphaCutoff = inst.alphaCutoff;
-		alphaMode = inst.alphaMode;
-		jointOffset = inst.jointOffset;
-		isSkinned = inst.isSkinned;
-
-		morphOffset = inst.morphOffset;
-		activeMorphCount = inst.activeMorphCount;
-		morphWeights = inst.morphWeights;
-		vertexCount = inst.vertexCount;
-	}
+	uint morphOffset = inst.morphOffset;
+	uint activeMorphCount = inst.activeMorphCount;
+	float4 morphWeights = inst.morphWeights;
+	uint vertexCount = inst.vertexCount;
 
 	// Declare as float4 initially:
 	float4 localPos = float4(input.position, 1.0f);
@@ -74,10 +40,7 @@ VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV
 	float4 worldPos;
 	float3x3 world3x3 = (float3x3)worldMatrix;
 
-	// 2. Select transform path based on skinning flag
 	if (isSkinned != 0) {
-		// Skinned: Bone matrices transform vertices to model space, then we multiply by worldMatrix
-		// to go to world space
 		worldPos =
 			mul(worldMatrix, SkinPosition(localPos, input.joints, input.weights, jointOffset));
 		output.normal = normalize(
@@ -85,7 +48,6 @@ VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV
 		output.tangent.xyz = normalize(
 			mul(world3x3, SkinDirection(localTangent, input.joints, input.weights, jointOffset)));
 	} else {
-		// Non-skinned: Transform normally using the node's worldMatrix
 		worldPos = mul(worldMatrix, localPos);
 		output.normal = normalize(mul(world3x3, localNormal));
 		output.tangent.xyz = normalize(mul(world3x3, localTangent));
@@ -146,9 +108,7 @@ float DistributionGGX(float3 N, float3 H, float roughness) {
 	float a2 = a * a;
 	float NdotH = saturate(dot(N, H));
 	float denom = (NdotH * NdotH * (a2 - 1.0) + 1.0);
-
-	// Reverted to pure math. No artificial clamps crushing the peak!
-	return a2 / (3.14159 * denom * denom);
+	return a2 / (3.14159265f * denom * denom);
 }
 
 float GeometrySchlickGGX(float NdotV, float roughness) {
@@ -260,14 +220,7 @@ PSOutput PSMain(VSOutput input) {
 	float metallic = (indices.z == 0 ? 1.0f : pbr.b) * metallicFactor;
 
 	float3 V = normalize(frame.camPos.xyz - input.worldPos);
-
-	float3 faceNormal = normalize(cross(ddx(input.worldPos), ddy(input.worldPos)));
-	if (dot(faceNormal, V) < 0.0f) {
-		faceNormal = -faceNormal;
-	}
-
 	float3 N = normalize(input.normal);
-
 	float3 worldNormal = N;
 
 	// 4. Apply Toksvig Specular Anti-Aliasing (Only if a custom normal map is bound)
@@ -303,62 +256,81 @@ PSOutput PSMain(VSOutput input) {
 	}
 
 	// --- SETUP ANISOTROPIC GGX PARAMETERS ---
-	// Brushed highlights will procedurally trigger on polished metals (e.g. CD tracks, brass
-	// pillars)
 	float anisotropy = 0.0f;
 	if (metallic > 0.5f && roughness < 0.3f) {
 		anisotropy = 0.65f;
 	}
-	float alpha = roughness * roughness;
-	float alpha_x = max(alpha * (1.0f + anisotropy), 0.001f);
-	float alpha_y = max(alpha * (1.0f - anisotropy), 0.001f);
 
 	float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo.rgb, metallic);
-
 	float NdotV = saturate(dot(worldNormal, V));
+
+	// -------------------------------------------------------------------------
+	// CACHED TEXTURE LOOKUPS: Pull 2D BRDF LUT parameters once [2]
+	// -------------------------------------------------------------------------
+	float2 envBRDF = brdfLUT.SampleLevel(clampSampler, float2(NdotV, roughness), 0.0f).rg;
+	float Ev_sun = envBRDF.x + envBRDF.y;
+	float Eavg_sun = GetAverageAlbedo(roughness);
 	float3 Favg = F0 + (1.0f - F0) / 21.0f; // Average Fresnel term integrated over the hemisphere
 
 	// Direct Directional (Sun) Light
-	float3 L_sun = normalize(frame.lightDir.xyz); // Ensure no minus sign!
+	float3 L_sun = normalize(frame.lightDir.xyz);
 	float3 H_sun = normalize(V + L_sun + 1e-5f);
 	float NdotL_sun = saturate(dot(worldNormal, L_sun));
 	float shadow = CalculateShadow(input.shadowPos, worldNormal, L_sun);
 
-	// Evaluate Anisotropic Specular Lobe for the Sun
-	float D = DistributionAnisotropicGGX(worldNormal, H_sun, T, B, alpha_x, alpha_y);
-	float g_term = GeometryAnisotropicSmith(worldNormal, V, L_sun, T, B, alpha_x, alpha_y);
+	float D = 0.0f;
+	float g_term = 0.0f;
+
+	// Optimization: Conditionally branch heavy Anisotropic math [2]
+	if (anisotropy > 0.0f) {
+		float alpha = roughness * roughness;
+		float alpha_x = max(alpha * (1.0f + anisotropy), 0.001f);
+		float alpha_y = max(alpha * (1.0f - anisotropy), 0.001f);
+		D = DistributionAnisotropicGGX(worldNormal, H_sun, T, B, alpha_x, alpha_y);
+		g_term = GeometryAnisotropicSmith(worldNormal, V, L_sun, T, B, alpha_x, alpha_y);
+	} else {
+		D = DistributionGGX(worldNormal, H_sun, roughness);
+		g_term = GeometrySmith(worldNormal, V, L_sun, roughness);
+	}
+
 	float3 F = FresnelSchlick(saturate(dot(H_sun, V)), F0);
 
 	// 1. Single-scatter specular
 	float3 spec = (D * g_term * F) / max(4.0 * NdotV * NdotL_sun, 0.001);
 
-	// 2. Analytical multiple-scattering energy compensation
-	float3 spec_ms = EvaluateKullaContyDirect(NdotV, NdotL_sun, roughness, F0, Favg);
+	// 2. Analytical multiple-scattering energy compensation (Avoid duplicate brdfLUT Samples) [2]
+	float2 envBRDF_L = brdfLUT.SampleLevel(clampSampler, float2(NdotL_sun, roughness), 0.0f).rg;
+	float El_sun = envBRDF_L.x + envBRDF_L.y;
+
+	float3 Fms = (Favg * Favg * (1.0f - Eavg_sun)) / (1.0f - Favg * (1.0f - Eavg_sun));
+	float3 spec_ms = ((1.0f - Ev_sun) * (1.0f - El_sun) * Fms) /
+					 (3.14159265f * (1.0f - Eavg_sun) * (1.0f - Eavg_sun));
 	float3 totalSpecular = spec + spec_ms;
 
 	// 3. Energy-conserving diffuse
-	float Ev_sun = GetDirectionalAlbedo(NdotV, roughness);
-	float El_sun = GetDirectionalAlbedo(NdotL_sun, roughness);
-	float Eavg_sun = GetAverageAlbedo(roughness);
 	float3 FmsEms_sun = (Favg * (1.0f - Ev_sun)) / (1.0f - Favg * (1.0f - Eavg_sun));
-
 	float3 kD_sun = (1.0f - Ev_sun - FmsEms_sun) * (1.0f - metallic);
 
 	// --- 4. CLEAR COAT spec lobe ---
-	float3 H_coat = normalize(V + L_sun + 1e-5f);
-	float NdotL_coat = saturate(dot(N, L_sun)); // Note: Uses geometric normal N!
-	float NdotV_coat = saturate(dot(N, V));		// Note: Uses geometric normal N!
+	float3 spec_coat = float3(0.0f, 0.0f, 0.0f);
+	float3 attenuation_coat = float3(1.0f, 1.0f, 1.0f);
 
-	float D_coat = DistributionGGX(N, H_coat, clearcoatRoughness);
-	float G_coat = GeometrySmith(N, V, L_sun, clearcoatRoughness);
-	float3 F_coat = FresnelSchlick(saturate(dot(H_coat, V)), 0.04f); // Fixed clear coat F0 = 0.04
+	if (clearcoat > 0.01f) {
+		float3 H_coat = normalize(V + L_sun + 1e-5f);
+		float NdotL_coat = saturate(dot(N, L_sun)); // Uses geometric normal N
+		float NdotV_coat = saturate(dot(N, V));		// Uses geometric normal N
 
-	float3 spec_coat = (D_coat * G_coat * F_coat) / max(4.0 * NdotV_coat * NdotL_coat, 0.001);
+		float D_coat = DistributionGGX(N, H_coat, clearcoatRoughness);
+		float G_coat = GeometrySmith(N, V, L_sun, clearcoatRoughness);
+		float3 F_coat = FresnelSchlick(saturate(dot(H_coat, V)), 0.04f);
+
+		spec_coat = (D_coat * G_coat * F_coat) / max(4.0 * NdotV_coat * NdotL_coat, 0.001);
+		attenuation_coat = 1.0f - F_coat * clearcoat;
+	}
 
 	// --- 5. Energy-Conserved Layer Blending ---
-	float3 baseAttenuation = 1.0f - F_coat * clearcoat;
 	float3 directSun = (spec_coat * clearcoat +
-						baseAttenuation * (kD_sun * albedo.rgb / 3.14159265f + totalSpecular)) *
+						attenuation_coat * (kD_sun * albedo.rgb / 3.14159265f + totalSpecular)) *
 					   10.0 * NdotL_sun * shadow;
 
 	// Only active on dielectrics (1.0 - metallic) and colored by her local albedo
@@ -374,7 +346,6 @@ PSOutput PSMain(VSOutput input) {
 
 		// AREA LIGHT EVALUATION
 		if (light.type == 3) {
-			float NdotV = saturate(dot(worldNormal, V));
 			float2 uv = float2(roughness, sqrt(1.0f - NdotV));
 
 			// Reconstruct LTC Matrix
@@ -409,15 +380,13 @@ PSOutput PSMain(VSOutput input) {
 			float3 closestPoint = light.position;
 			if (light.radius > 0.0f) {
 				float3 R_light = reflect(-V, worldNormal);
-				// Move light position strictly toward the reflection ray
 				closestPoint -= R_light * min(light.radius, distToCenter);
 			}
 
 			// Recalculate L based on the new MRP surface contact point
 			float3 L = normalize(closestPoint - input.worldPos);
 			float NdotL = max(dot(worldNormal, L), 0.0);
-			float atten = 1.0 / (distToCenter * distToCenter +
-								 0.01); // Standard falloff (using actual center distance)
+			float atten = 1.0 / (distToCenter * distToCenter + 0.01); // Standard falloff
 
 			if (NdotL > 0.0) {
 				// Energy Conservation: Widen apparent roughness based on light radius
@@ -426,56 +395,59 @@ PSOutput PSMain(VSOutput input) {
 
 				float3 H = normalize(V + L);
 
-				// Evaluate Anisotropic Specular Lobe for point lights
-				float alpha_p = modRoughness * modRoughness;
-				float alpha_p_x = max(alpha_p * (1.0f + anisotropy), 0.001f);
-				float alpha_p_y = max(alpha_p * (1.0f - anisotropy), 0.001f);
+				float D_p = 0.0f;
+				float G_p = 0.0f;
+				if (anisotropy > 0.0f) {
+					float alpha_p = modRoughness * modRoughness;
+					float alpha_p_x = max(alpha_p * (1.0f + anisotropy), 0.001f);
+					float alpha_p_y = max(alpha_p * (1.0f - anisotropy), 0.001f);
+					D_p = DistributionAnisotropicGGX(worldNormal, H, T, B, alpha_p_x, alpha_p_y);
+					G_p = GeometryAnisotropicSmith(worldNormal, V, L, T, B, alpha_p_x, alpha_p_y);
+				} else {
+					D_p = DistributionGGX(worldNormal, H, modRoughness);
+					G_p = GeometrySmith(worldNormal, V, L, modRoughness);
+				}
 
-				float D_p = DistributionAnisotropicGGX(worldNormal, H, T, B, alpha_p_x, alpha_p_y);
-				float G_p = GeometryAnisotropicSmith(worldNormal, V, L, T, B, alpha_p_x, alpha_p_y);
 				float3 F_p = FresnelSchlick(max(dot(H, V), 0.0), F0);
 
 				// 1. Single-scatter specular
 				float3 spec_p =
 					(D_p * G_p * F_p) / (4.0 * max(dot(worldNormal, V), 0.0) * NdotL + 0.0001);
 
-				// 2. Analytical multiple-scattering energy compensation
-				float3 spec_ms_p = EvaluateKullaContyDirect(NdotV, NdotL, modRoughness, F0, Favg);
-				float3 totalSpecular_p = spec_p + spec_ms_p;
-
-				// 3. Energy-conserving diffuse
-				float Ev_p = GetDirectionalAlbedo(NdotV, modRoughness);
-				float El_p = GetDirectionalAlbedo(NdotL, modRoughness);
-				float Eavg_p = GetAverageAlbedo(modRoughness);
-				float3 FmsEms_p = (Favg * (1.0f - Ev_p)) / (1.0f - Favg * (1.0f - Eavg_p));
-
-				float3 kD_p = (1.0f - Ev_p - FmsEms_p) * (1.0f - metallic);
+				// -------------------------------------------------------------
+				// FAST-PATH: Bypassed heavy multiple-scattering loops for punctual lights [2]
+				// -------------------------------------------------------------
+				float3 totalSpecular_p = spec_p;
+				float3 kD_p = (1.0f - F_p) * (1.0f - metallic);
 
 				// --- 4. CLEAR COAT spec lobe ---
-				float3 H_coat = normalize(V + L);
-				float NdotL_coat = saturate(dot(N, L)); // Geometric normal
-				float NdotV_coat = saturate(dot(N, V)); // Geometric normal
+				float3 spec_coat_p = float3(0.0f, 0.0f, 0.0f);
+				float3 attenuation_coat_p = float3(1.0f, 1.0f, 1.0f);
 
-				float D_coat = DistributionGGX(N, H_coat, clearcoatRoughness);
-				float G_coat = GeometrySmith(N, V, L, clearcoatRoughness);
-				float3 F_coat = FresnelSchlick(saturate(dot(H_coat, V)), 0.04f);
+				if (clearcoat > 0.01f) {
+					float3 H_coat = normalize(V + L);
+					float NdotL_coat = saturate(dot(N, L)); // Geometric normal
+					float NdotV_coat = saturate(dot(N, V)); // Geometric normal
 
-				float3 spec_coat_p =
-					(D_coat * G_coat * F_coat) / max(4.0 * NdotV_coat * NdotL_coat, 0.001);
+					float D_coat = DistributionGGX(N, H_coat, clearcoatRoughness);
+					float G_coat = GeometrySmith(N, V, L, clearcoatRoughness);
+					float3 F_coat = FresnelSchlick(saturate(dot(H_coat, V)), 0.04f);
+
+					spec_coat_p =
+						(D_coat * G_coat * F_coat) / max(4.0 * NdotV_coat * NdotL_coat, 0.001);
+					attenuation_coat_p = 1.0f - F_coat * clearcoat;
+				}
 
 				// --- 5. Energy-Conserved Layer Blending ---
-				float3 baseAttenuation_p = 1.0f - F_coat * clearcoat;
 				directPunctual +=
 					(spec_coat_p * clearcoat +
-					 baseAttenuation_p * (kD_p * albedo.rgb / 3.14159265f + totalSpecular_p)) *
+					 attenuation_coat_p * (kD_p * albedo.rgb / 3.14159265f + totalSpecular_p)) *
 					light.color * light.intensity * atten * NdotL;
 			} else {
 				// --- 6. Backlit Translucency for Point & Spot Lights ---
-				// (Evaluated only when the light is behind the surface!)
 				float3 H_p = normalize(L + N * 0.3f); // Use geometric normal N
 				float dotVH_p = saturate(dot(V, -H_p));
 
-				// Standard constant thickness scale (0.25f represents medium thinness)
 				float thicknessScale = 0.25f;
 				float3 translucencyPunctual = light.color * light.intensity * atten *
 											  pow(dotVH_p, 8.0f) * 0.4f * thicknessScale;
@@ -484,6 +456,7 @@ PSOutput PSMain(VSOutput input) {
 			}
 		}
 	}
+
 	// --- NEW: FULL PBR INDIRECT IMAGE-BASED LIGHTING (IBL) ---
 	float3 R = reflect(-V, worldNormal);
 	float3 F_rough = FresnelSchlickRoughness(max(dot(worldNormal, V), 0.0), F0, roughness);
@@ -492,7 +465,6 @@ PSOutput PSMain(VSOutput input) {
 	float3 irradiance = EvaluateSH(worldNormal, frame.sh);
 
 	// --- PRE-CALCULATE BOX PROJECTION BOUNDARY FADE ---
-	// Smoothly transitions local reflections to global reflections as you approach the room borders
 	float boxFade = 0.0f;
 	if (frame.probeMin.w > 0.0f) {
 		float3 boxCenter = (frame.probeMax.xyz + frame.probeMin.xyz) * 0.5f;
@@ -501,30 +473,23 @@ PSOutput PSMain(VSOutput input) {
 		float3 normDist = distFromCenter / max(boxExtent, 0.0001f);
 		float maxDist = max(max(normDist.x, normDist.y), normDist.z);
 
-		// Smoothly fade out the box projection within the outer 10% of the box bounds
 		boxFade = smoothstep(1.0f, 0.9f, maxDist);
 	}
 
 	// 2. Evaluate Single-Scatter Specular IBL (With Lobe Elongation & Blended Parallax Correction)
-	float NoV = saturate(dot(worldNormal, V));
-	float3 stretchedR = R;
-
-	float3 correctedR = stretchedR;
+	// [2]
+	float3 correctedR = R;
 	if (boxFade > 0.0f) {
-		// Only run the expensive intersection math if the pixel is actually within the box range
-		float3 boxR = BoxParallaxCorrection(input.worldPos, stretchedR, frame.probeMin.xyz,
+		float3 boxR = BoxParallaxCorrection(input.worldPos, R, frame.probeMin.xyz,
 											frame.probeMax.xyz, frame.probePos.xyz);
-		correctedR =
-			lerp(stretchedR, boxR, boxFade); // Smoothly blend local and infinite reflections
+		correctedR = lerp(R, boxR, boxFade);
 	}
 
 	float maxMipLevel = 5.0f;
 	float3 prefilteredColor =
 		prefilteredMap.SampleLevel(clampSampler, correctedR, roughness * maxMipLevel).rgb;
 
-	float2 envBRDF =
-		brdfLUT.Sample(clampSampler, float2(max(dot(worldNormal, V), 0.0), roughness)).rg;
-
+	// Use our single pre-sampled envBRDF texture fetch instead of duplicate lookups [2]
 	float3 FssEss = F_rough * envBRDF.x + float3(envBRDF.y, envBRDF.y, envBRDF.y);
 	float3 specularIBL = prefilteredColor * FssEss;
 
@@ -532,40 +497,40 @@ PSOutput PSMain(VSOutput input) {
 	float Ess = envBRDF.x + envBRDF.y;
 	float Ems = 1.0f - Ess;
 	float3 FmsEms = (Favg * Ems) / (1.0f - Favg * Ems);
-
-	// Multi-scattered specular energy diffuses back into the scene
 	float3 multiScatterIBL = FmsEms * irradiance;
 
 	// 4. Energy-Conserving Diffuse
-	// Light that isn't reflected via single or multiple scattering is absorbed/diffused
 	float3 kD_IBL = (1.0f - FssEss - FmsEms) * (1.0f - metallic);
 	float3 diffuseIBL = kD_IBL * albedo.rgb * irradiance;
 
 	// --- 5. CLEAR COAT SPECULAR IBL (With Blended Parallax Correction) ---
-	float3 R_geom = reflect(-V, N); // Flat geometric reflection (no normal map bumps)
-	float3 correctedR_coat = R_geom;
-	if (boxFade > 0.0f) {
-		float3 boxR_coat = BoxParallaxCorrection(input.worldPos, R_geom, frame.probeMin.xyz,
-												 frame.probeMax.xyz, frame.probePos.xyz);
-		correctedR_coat = lerp(R_geom, boxR_coat, boxFade);
+	float3 clearcoatSpecularIBL = float3(0.0f, 0.0f, 0.0f);
+	float3 baseIBLAttenuation = float3(1.0f, 1.0f, 1.0f);
+
+	if (clearcoat > 0.01f) {
+		float3 R_geom = reflect(-V, N); // Flat geometric reflection (no normal map bumps)
+		float3 correctedR_coat = R_geom;
+		if (boxFade > 0.0f) {
+			float3 boxR_coat = BoxParallaxCorrection(input.worldPos, R_geom, frame.probeMin.xyz,
+													 frame.probeMax.xyz, frame.probePos.xyz);
+			correctedR_coat = lerp(R_geom, boxR_coat, boxFade);
+		}
+		float3 prefilteredCoatColor =
+			prefilteredMap
+				.SampleLevel(clampSampler, correctedR_coat, clearcoatRoughness * maxMipLevel)
+				.rgb;
+		float3 F_coat_IBL = FresnelSchlickRoughness(max(dot(N, V), 0.0), 0.04f, clearcoatRoughness);
+		clearcoatSpecularIBL = prefilteredCoatColor * F_coat_IBL * clearcoat;
+		baseIBLAttenuation = 1.0f - F_coat_IBL * clearcoat;
 	}
-	float3 prefilteredCoatColor =
-		prefilteredMap.SampleLevel(clampSampler, correctedR_coat, clearcoatRoughness * maxMipLevel)
-			.rgb;
-	float3 F_coat_IBL = FresnelSchlickRoughness(max(dot(N, V), 0.0), 0.04f, clearcoatRoughness);
-	float3 clearcoatSpecularIBL = prefilteredCoatColor * F_coat_IBL * clearcoat;
 
 	// --- 6. Final Layer Blending ---
-	float3 baseIBLAttenuation = 1.0f - F_coat_IBL * clearcoat;
 	float3 ambient =
 		clearcoatSpecularIBL + baseIBLAttenuation * (diffuseIBL + specularIBL + multiScatterIBL);
 
 	// Combine all lighting
 	float3 finalLight = ambient + directSun + directPunctual + emissive;
-
-	// FIX: Clamp HDR peak to 100.0. This is blistering bright, but safely
-	// prevents (c * c) Infinity overflows inside the 17-bit TAA registers.
-	finalLight = min(finalLight, 100.0f);
+	finalLight = min(finalLight, 100.0f); // TAA register overflow safeguard
 
 	output.color = float4(finalLight, albedo.a);
 	output.normalRoughness = float4(worldNormal * 0.5f + 0.5f, roughness);
@@ -577,21 +542,6 @@ PSOutput PSMain(VSOutput input) {
 	float2 ndcCurr = input.currClip.xy / currW;
 	float2 ndcPrev = input.prevClip.xy / prevW;
 	output.velocity = (ndcCurr - ndcPrev) * float2(0.5f, -0.5f);
-	// --- output.color overrides ---
-	// output.color = float4(envBRDF.rg, 0.0f, 1.0f);
-	// output.color = float4(worldNormal * 0.5f + 0.5f, 1.0f);
-	// output.color = float4(N * 0.5f + 0.5f, 1.0f);
-	// output.color = float4(B * 0.5f + 0.5f, 1.0f);
-	//	output.color = float4(abs(currW - prevW) * 100.0f, 0.0f, 0.0f, 1.0f);
-	//	output.color = float4(R * 0.5f + 0.5f, 1.0f);
-	//	output.color = float4(specularIBL, 1.0f);
-	//	output.color = float4(F_rough, 1.0f);
-	//	output.color = float4(float3(D, D, D) * 0.01f, 1.0f); // Scaled down to fit display
-	// output.color = float4(float3(g_term, g_term, g_term), 1.0f);
-	//	output.color = float4(roughness, roughness, roughness, 1.0f);
-	//	output.color = float4(metallic, metallic, metallic, 1.0f);
-	// output.color = float4(shadow, shadow, shadow, 1.0f);
-	// output.color = float4(abs(output.velocity) * 100.0f, 0.0f, 1.0f);
-	// ------------------------------
+
 	return output;
 }

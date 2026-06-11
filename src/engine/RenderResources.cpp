@@ -1,6 +1,7 @@
 // File: src/engine/Render_Resources.cpp
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
+#include "Zahlen/Types.hpp"
 
 #include <cstddef>
 
@@ -20,7 +21,7 @@ void RenderContext::Impl::CompileShadowPipeline(VkDevice device, const void* sha
 	VkPushConstantRange pc_range = {.stageFlags =
 										VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 									.offset = 0,
-									.size = sizeof(FrameConstants)};
+									.size = sizeof(ObjectConstants)};
 
 	const std::array layouts = {bindlessLayout.Get()};
 	ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = layouts.data(),
@@ -132,7 +133,7 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 	VkPushConstantRange pc_range = {.stageFlags =
 										VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 									.offset = 0,
-									.size = sizeof(ZHLN::FrameConstants)};
+									.size = sizeof(ZHLN::ObjectConstants)};
 	const std::array layouts = {impl->bindlessLayout.Get()};
 	ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = layouts.data(),
 										   .set_layout_count = 1,

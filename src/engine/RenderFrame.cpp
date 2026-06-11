@@ -1,4 +1,5 @@
 // File: src/engine/RenderFrame.cpp
+#include "ParallelDraw.hpp"
 #include "RenderInternal.hpp"
 #include "Zahlen/GUI.hpp"
 #include "Zahlen/Profiler.hpp"
@@ -12,7 +13,49 @@
 
 namespace ZHLN {
 
+void RenderContext::Impl::SortDrawQueue() {
+	auto drawCount = static_cast<uint32_t>(drawQueue.size());
+	JPH::Array<SortItem> items(drawCount);
+	JPH::Array<SortItem> temp(drawCount);
+
+	for (uint32_t i = 0; i < drawCount; ++i) {
+		items[i] = {.key = SortKey::Pack(drawQueue[i].material, drawQueue[i].mesh), .payload = i};
+	}
+
+	RadixSort64(items.data(), temp.data(), drawCount);
+
+	JPH::Array<DrawCommand> sortedDrawQueue(drawCount);
+	for (uint32_t i = 0; i < drawCount; ++i) {
+		sortedDrawQueue[i] = drawQueue[items[i].payload];
+	}
+	drawQueue = std::move(sortedDrawQueue);
+}
+
+Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>
+RenderContext::Impl::GetDepthAttachmentForMainPass(VkCommandBuffer cmd) {
+	if (!depth_ready) {
+		auto depth_u = presentation.depthTarget.State();
+		depth_ready = true;
+		return Vk::Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, depth_u);
+	}
+
+	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> depth_current = {
+		.handle = presentation.depthTarget.image.Handle(),
+		.view = presentation.depthTarget.view.Get(),
+		.extent = presentation.depthTarget.extent,
+		.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
+	return Vk::Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, depth_current);
+}
+
 void RenderContext::BeginFrame() {
+	if (_impl->initFence != VK_NULL_HANDLE) {
+		vkWaitForFences(_impl->ctx.Device(), 1, &_impl->initFence, VK_TRUE, UINT64_MAX);
+		vkDestroyFence(_impl->ctx.Device(), _impl->initFence, nullptr);
+		_impl->initFence = VK_NULL_HANDLE;
+		delete _impl->stagingContext;
+		_impl->stagingContext = nullptr;
+	}
+
 	const ZHLN_FrameSync& s = _impl->sync[_impl->frame_index];
 
 	ZHLN_WaitAndResetFrame(_impl->ctx.Device(), s.in_flight, _impl->pools[_impl->frame_index]);
@@ -101,9 +144,6 @@ void RenderContext::BeginFrame() {
 		auto sNorm_att =
 			Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(_impl->current_cmd, sNorm_u);
 
-		// Self-contained DynamicPass clears the framebuffers once on startup (Compile-time
-		// verified!)
-
 		Vk::DynamicPass<5, false>(_impl->presentation.swapchain.Get().extent)
 			.Color(0, sColor_att, VK_ATTACHMENT_LOAD_OP_CLEAR)
 			.Color(1, sVel_att, VK_ATTACHMENT_LOAD_OP_CLEAR)
@@ -129,9 +169,10 @@ void RenderContext::BeginFrame() {
 			Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(_impl->current_cmd, sNorm_att);
 
 		for (int i = 0; i < 2; ++i) {
-			_impl->taaPass.WriteIndex(_impl->ctx.Device(), i, sColor_ro,
-									  i == 0 ? sAcc1_ro : sAcc0_ro, sVel_ro,
-									  Vk::SamplerWrite{.sampler = _impl->defaultSampler.Get()});
+			_impl->taaPass.WriteIndex(
+				_impl->ctx.Device(), i, sColor_ro, i == 0 ? sAcc1_ro : sAcc0_ro, sVel_ro,
+				Vk::SamplerWrite{.sampler = _impl->defaultSampler.Get()},
+				Vk::BufferWrite{.buffer = _impl->frameUniformBuffers[i].Handle()});
 		}
 
 		_impl->needsInitialClear = false;
@@ -147,33 +188,11 @@ void RenderContext::Impl::RenderShadowPass(VkCommandBuffer cmd) {
 	Vk::DynamicPass<0, true>({.width = SHADOW_RES, .height = SHADOW_RES})
 		.Depth(shadow_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1.0f)
 		.Execute(cmd, [&]() {
-			for (const auto& draw : drawQueue) {
+			for (uint32_t i = 0; i < drawQueue.size(); ++i) {
+				const auto& draw = drawQueue[i];
 				auto* mesh = std::bit_cast<NativeMesh*>(draw.mesh);
-				JPH::Mat44 lightMVP = shadowProjView * draw.transform;
 
-				FrameConstants shadowConstants = {
-					.transform = lightMVP,
-					.prevTransform = JPH::Mat44::sIdentity(),
-					.albedoIndex = draw.albedoIndex,
-					.normalIndex = 0,
-					.pbrIndex = 0,
-					.emissiveIndex = 0,
-					.isShadowPass = 1,
-					.metallicFactor = 0.0f,
-					.roughnessFactor = 0.0f,
-					.alphaCutoff = draw.alphaCutoff,
-					.alphaMode = draw.alphaMode,
-					.jointOffset = draw.jointOffset,
-					.isSkinned = draw.isSkinned,
-					.vertexCount = draw.mesh->vertexCount,
-					.morphOffset = draw.morphOffset,
-					.activeMorphCount = draw.activeMorphCount,
-					.indexCount = draw.indexCount,
-					._pad = 0,
-					.morphWeights = {draw.morphWeights[0], draw.morphWeights[1],
-									 draw.morphWeights[2], draw.morphWeights[3]},
-					.baseColorFactor = {draw.baseColorFactor[0], draw.baseColorFactor[1],
-										draw.baseColorFactor[2], draw.baseColorFactor[3]}};
+				ObjectConstants pushConstants = {.instanceId = i, .isShadowPass = 1};
 
 				Vk::DrawInstanced(
 					cmd,
@@ -185,23 +204,23 @@ void RenderContext::Impl::RenderShadowPass(VkCommandBuffer cmd) {
 					 .vertexCount = mesh->vertexCount,
 					 .indexCount = draw.indexCount,
 					 .instanceCount = 1},
-					shadowConstants, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+					pushConstants, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
 			}
 		});
 
-	// Cast to void to silence [[nodiscard]], as we don't need the token right now
 	(void)Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, shadow_att);
 }
 
 void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd) {
-	bool isCPU = RenderMainPassGpuCulling(ctx, cmd);
-	if (isCPU) {
-		[[maybe_unused]] static auto loggedOnce = []() -> bool {
-			ZHLN::Log("RENDERING DIAGNOSTIC: Falling back to CPU Traditional Path!");
-			return true;
-		}();
+	bool gpuCullingSuccess = RenderMainPassGpuCulling(ctx, cmd);
+	if (gpuCullingSuccess) {
 		return;
 	}
+
+	[[maybe_unused]] static auto loggedOnce = []() -> bool {
+		ZHLN::Log("RENDERING DIAGNOSTIC: Falling back to CPU Traditional Path!");
+		return true;
+	}();
 
 	Profiler::ScopedGpuProfile<Stages::MainPass, FrameProfiler> timer(cmd, frame_index,
 																	  gpuProfiler);
@@ -211,23 +230,39 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 		return;
 	}
 
-	// 1. Perform stable Radix Sort
-	JPH::Array<SortItem> items(drawCount);
-	JPH::Array<SortItem> temp(drawCount);
+	// 1. Sort the draw queue (Radix Sort)
+	SortDrawQueue();
 
+	// 2. Map and write draw parameters to the GPU instance buffer once [1]
+	auto mapRegion = instanceDataBuffers[frame_index].Map();
+	auto* mapped = reinterpret_cast<InstanceData*>(mapRegion.data);
 	for (uint32_t i = 0; i < drawCount; ++i) {
-		items[i] = {.key = SortKey::Pack(drawQueue[i].material, drawQueue[i].mesh), .payload = i};
+		const auto& drawCmd = drawQueue[i];
+		mapped[i] = InstanceData{
+			.world = drawCmd.transform,
+			.prevWorld = drawCmd.prevTransform,
+			.albedoIndex = drawCmd.albedoIndex,
+			.normalIndex = drawCmd.normalIndex,
+			.pbrIndex = drawCmd.pbrIndex,
+			.emissiveIndex = drawCmd.emissiveIndex,
+			.vertexCount = drawCmd.mesh->vertexCount,
+			.cullRadius = drawCmd.cullRadius,
+			.metallicFactor = drawCmd.metallicFactor,
+			.roughnessFactor = drawCmd.roughnessFactor,
+			.alphaCutoff = drawCmd.alphaCutoff,
+			.alphaMode = drawCmd.alphaMode,
+			.jointOffset = drawCmd.jointOffset,
+			.isSkinned = drawCmd.isSkinned,
+			.morphOffset = drawCmd.morphOffset,
+			.activeMorphCount = drawCmd.activeMorphCount,
+			.indexCount = drawCmd.indexCount,
+			._pad = 0,
+			.morphWeights = {drawCmd.morphWeights[0], drawCmd.morphWeights[1],
+							 drawCmd.morphWeights[2], drawCmd.morphWeights[3]},
+			.baseColorFactor = {drawCmd.baseColorFactor[0], drawCmd.baseColorFactor[1],
+								drawCmd.baseColorFactor[2], drawCmd.baseColorFactor[3]}};
 	}
 
-	RadixSort64(items.data(), temp.data(), drawCount);
-
-	JPH::Array<DrawCommand> sortedDrawQueue(drawCount);
-	for (uint32_t i = 0; i < drawCount; ++i) {
-		sortedDrawQueue[i] = drawQueue[items[i].payload];
-	}
-	drawQueue = std::move(sortedDrawQueue);
-
-	// 2. Type-Safe Subpass Transitions
 	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> sceneColor_ro = {
 		.handle = sceneColor.image.Handle(),
 		.view = sceneColor.view.Get(),
@@ -242,48 +277,14 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 	auto sceneColor_att =
 		Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, sceneColor_ro);
 	auto velocity_att = Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, velocity_ro);
+	auto depth_att = GetDepthAttachmentForMainPass(cmd);
 
-	Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> depth_att;
-	if (!depth_ready) {
-		auto depth_u = presentation.depthTarget.State();
-		depth_att = Vk::Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, depth_u);
-		depth_ready = true;
-	} else {
-		Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> depth_current = {
-			.handle = presentation.depthTarget.image.Handle(),
-			.view = presentation.depthTarget.view.Get(),
-			.extent = presentation.depthTarget.extent,
-			.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
-		depth_att = Vk::Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, depth_current);
-	}
-	// 3. Prepare secondary command buffers
-	uint32_t numChunks = (drawCount + 255) / 256;
-	JPH::Array<VkCommandBuffer> secondaries(numChunks);
+	VkExtent2D extent = presentation.swapchain.Get().extent;
+	std::array<VkFormat, 3> colorFormats = {VK_FORMAT_R16G16B16_SFLOAT, VK_FORMAT_R16G16_SFLOAT,
+											VK_FORMAT_R16G16B16A16_SFLOAT};
 
-	std::array<VkFormat, 3> formats = {VK_FORMAT_R16G16B16_SFLOAT, VK_FORMAT_R16G16_SFLOAT,
-									   VK_FORMAT_R16G16B16A16_SFLOAT};
-	const VkCommandBufferInheritanceRenderingInfo inherit = {
-		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
-		.pNext = nullptr,
-		.flags = 0,
-		.viewMask = 0,
-		.colorAttachmentCount = 2,
-		.pColorAttachmentFormats = formats.data(),
-		.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT,
-		.stencilAttachmentFormat = VK_FORMAT_UNDEFINED,
-		.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT};
-
-	const VkCommandBufferInheritanceInfo pInherit = {
-		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO,
-		.pNext = &inherit,
-		.renderPass = VK_NULL_HANDLE,
-		.subpass = 0,
-		.framebuffer = VK_NULL_HANDLE,
-		.occlusionQueryEnable = VK_FALSE,
-		.queryFlags = 0,
-		.pipelineStatistics = 0};
-
-	Vk::DynamicPass<2, true>(presentation.swapchain.Get().extent)
+	// 3. Dispatch parallel secondary buffers drawing our lightweight index [1]
+	Vk::DynamicPass<2, true>(extent)
 		.Color(0, sceneColor_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE)
 		.Color(1, velocity_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE)
 		.Depth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1.0f)
@@ -291,84 +292,32 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 		.ClearColor(1, 0.0f, 0.0f, 0.0f, 0.0f)
 		.Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT)
 		.Execute(cmd, [&]() {
-			TaskSystem::ParallelFor(
-				drawCount, 256, [&](uint32_t start, uint32_t end, uint32_t chunkIdx) -> void {
-					uint32_t wIdx = TaskSystem::GetWorkerIndex();
-					if (wIdx >= workerCmds.size()) {
-						wIdx = (uint32_t)(workerCmds.size() - 1);
+			Vk::ParallelDrawDispatch(
+				cmd,
+				Vk::SecondaryInheritance{.colorFormats = colorFormats,
+										 .depthFormat = VK_FORMAT_D32_SFLOAT},
+				extent, drawCount, 256, frame_index,
+				std::span<WorkerCmdContext>(workerCmds.data(), workerCmds.size()),
+				[&](VkCommandBuffer sec_cmd, uint32_t i) {
+					const auto& drawCmd = drawQueue[i];
+
+					if (!drawCmd.material->pipeline.Valid()) {
+						return;
 					}
 
-					uint32_t localCmdIdx = workerCmds[wIdx].cmdCount[frame_index].fetch_add(
-						1, std::memory_order_relaxed);
-					VkCommandBuffer sec_cmd = workerCmds[wIdx].pools[frame_index][localCmdIdx];
+					ObjectConstants pushConstants = {.instanceId = i, .isShadowPass = 0};
 
-					const VkCommandBufferBeginInfo beginInfo = {
-						.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-						.pNext = nullptr,
-						.flags = VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT |
-								 VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-						.pInheritanceInfo = &pInherit};
-					vkBeginCommandBuffer(sec_cmd, &beginInfo);
-
-					VkExtent2D extent = presentation.swapchain.Get().extent;
-					const VkViewport viewport = {.x = 0.0f,
-												 .y = (float)extent.height,
-												 .width = (float)extent.width,
-												 .height = -(float)extent.height,
-												 .minDepth = 0.0f,
-												 .maxDepth = 1.0f};
-					const VkRect2D scissor = {.offset = {.x = 0, .y = 0}, .extent = extent};
-					vkCmdSetViewport(sec_cmd, 0, 1, &viewport);
-					vkCmdSetScissor(sec_cmd, 0, 1, &scissor);
-
-					for (uint32_t i = start; i < end; ++i) {
-						const auto& drawCmd = drawQueue[i];
-
-						if (!drawCmd.material->pipeline.Valid()) {
-							continue;
-						}
-
-						Vk::DrawInstanced(
-							sec_cmd,
-							{.pipeline = drawCmd.material->pipeline.Get(),
-							 .layout = drawCmd.material->layout.Get(),
-							 .set = bindlessSets[frame_index],
-							 .vbo = drawCmd.mesh->buffer.Handle(),
-							 .ibo = drawCmd.indexMesh ? drawCmd.indexMesh->buffer.Handle()
-													  : VK_NULL_HANDLE,
-							 .vertexCount = drawCmd.mesh->vertexCount,
-							 .indexCount = drawCmd.indexCount},
-							FrameConstants{
-								.transform = drawCmd.transform,
-								.prevTransform = drawCmd.prevTransform,
-								.albedoIndex = drawCmd.albedoIndex,
-								.normalIndex = drawCmd.normalIndex,
-								.pbrIndex = drawCmd.pbrIndex,
-								.emissiveIndex = drawCmd.emissiveIndex,
-								.isShadowPass = 0,
-								.metallicFactor = drawCmd.metallicFactor,
-								.roughnessFactor = drawCmd.roughnessFactor,
-								.alphaCutoff = drawCmd.alphaCutoff,
-								.alphaMode = drawCmd.alphaMode,
-								.jointOffset = drawCmd.jointOffset,
-								.isSkinned = drawCmd.isSkinned,
-								.vertexCount = drawCmd.mesh->vertexCount,
-								.morphOffset = drawCmd.morphOffset,
-								.activeMorphCount = drawCmd.activeMorphCount,
-								.indexCount = drawCmd.indexCount,
-								._pad = 0,
-								.morphWeights = {drawCmd.morphWeights[0], drawCmd.morphWeights[1],
-												 drawCmd.morphWeights[2], drawCmd.morphWeights[3]},
-								.baseColorFactor = {
-									drawCmd.baseColorFactor[0], drawCmd.baseColorFactor[1],
-									drawCmd.baseColorFactor[2], drawCmd.baseColorFactor[3]}});
-					}
-
-					ZHLN_EndCommandBuffer(sec_cmd);
-					secondaries[chunkIdx] = sec_cmd;
+					Vk::DrawInstanced(sec_cmd,
+									  {.pipeline = drawCmd.material->pipeline.Get(),
+									   .layout = drawCmd.material->layout.Get(),
+									   .set = bindlessSets[frame_index],
+									   .vbo = drawCmd.mesh->buffer.Handle(),
+									   .ibo = drawCmd.indexMesh ? drawCmd.indexMesh->buffer.Handle()
+																: VK_NULL_HANDLE,
+									   .vertexCount = drawCmd.mesh->vertexCount,
+									   .indexCount = drawCmd.indexCount},
+									  pushConstants);
 				});
-
-			Vk::ExecuteCommands(cmd, secondaries);
 		});
 
 	drawQueue.clear();
@@ -382,7 +331,7 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCom
 		return true;
 	}
 
-	if (!cullingPipeline.Valid() || !instanceDataBuffers[frame_index].Valid() ||
+	if (!cullingPass.pipeline.Valid() || !instanceDataBuffers[frame_index].Valid() ||
 		!indirectCommandsBuffers[frame_index].Valid()) {
 		return false;
 	}
@@ -491,23 +440,11 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCom
 	planes.planes[5] = NormalizePlane(r3 - r2);
 	planes.drawCount = drawCount;
 
-	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullingPipeline.Get());
-	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullingPipelineLayout.Get(), 0, 1,
-							&cullingSets[frame_index], 0, nullptr);
-	vkCmdPushConstants(cmd, cullingPipelineLayout.Get(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
-					   sizeof(FrustumPlanes), &planes);
+	// Dispatch the culling pass using our new abstracted API
+	cullingPass.Dispatch(cmd, cullingSets[frame_index], (drawCount + 63) / 64, 1, 1, planes);
 
-	vkCmdDispatch(cmd, (drawCount + 63) / 64, 1, 1);
-
-	const VkMemoryBarrier barrier = {
-		.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-		.pNext = nullptr,
-		.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-		.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT,
-	};
-	vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-						 VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT, 0, 1, &barrier, 0, nullptr, 0,
-						 nullptr);
+	// Apply the execution/memory barrier so the GPU knows compute has finished writing
+	Vk::CmdBarrierComputeToIndirect(cmd);
 
 	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> sceneColor_ro = {
 		.handle = sceneColor.image.Handle(),
@@ -571,7 +508,10 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCom
 					 .offset = group.start * stride,
 					 .drawCount = group.count,
 					 .stride = static_cast<uint32_t>(stride)},
-					FrameConstants{});
+					ObjectConstants{
+						.instanceId = 4294967295u,
+						.isShadowPass =
+							0}); // 4294967295u is 0xFFFFFFFF, signaling SV_InstanceID fallback [1]
 			}
 		});
 
@@ -599,10 +539,6 @@ void RenderContext::Impl::ApplyTAAPass(VkCommandBuffer cmd, VkExtent2D extent) {
 
 	struct TAAPushConstants {
 		float feedback;
-		float jitterX;
-		float jitterY;
-		float prevJitterX;
-		float prevJitterY;
 	};
 
 	Vk::DynamicPass<1, false>(extent)
@@ -620,14 +556,10 @@ void RenderContext::Impl::ApplyTAAPass(VkCommandBuffer cmd, VkExtent2D extent) {
 				.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
 
 			taaPass.WriteNext(ctx.Device(), sceneColor_ro, accumCurr_ready, velocity_ro,
-							  Vk::SamplerWrite{.sampler = pointSampler.Get()});
-			taaPass.Execute(cmd, TAAPushConstants{
-									 .feedback = taaState.feedback,
-									 .jitterX = taaState.jitterX,
-									 .jitterY = taaState.jitterY,
-									 .prevJitterX = taaState.prevJitterX,
-									 .prevJitterY = taaState.prevJitterY,
-								 });
+							  Vk::SamplerWrite{.sampler = defaultSampler.Get()},
+							  Vk::BufferWrite{.buffer = frameUniformBuffers[frame_index].Handle()});
+
+			taaPass.Execute(cmd, TAAPushConstants{.feedback = taaState.feedback});
 		});
 
 	(void)Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, accumNext_att);
@@ -665,12 +597,12 @@ void RenderContext::Impl::BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, 
 		.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
 
 	blitPass.WriteNext(ctx.Device(),
-					   blitSource_ro,									  // 0
-					   Vk::SamplerWrite{.sampler = defaultSampler.Get()}, // 1
-					   depth_ro,										  // 2
-					   normRough_ro,									  // 3
-					   Vk::SamplerWrite{.sampler = pointSampler.Get()},	  // 4
-					   Vk::ImageWrite{.view = prefilteredView.Get(),	  // 5 (NEW)
+					   blitSource_ro,											// 0
+					   Vk::SamplerWrite{.sampler = defaultSampler.Get()},		// 1
+					   depth_ro,												// 2
+					   normRough_ro,											// 3
+					   Vk::SamplerWrite{.sampler = pointSampler.Get()},			// 4
+					   Vk::ImageWrite{.view = iblPayload.prefilteredView.Get(), // 5
 									  .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
 
 	struct BlitPushConstants {
@@ -689,8 +621,7 @@ void RenderContext::Impl::BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, 
 	} pc = {.invViewProj = currentUniforms.invViewProj,
 			.viewProj = currentUniforms.unjitteredViewProj,
 			.camPos = {currentUniforms.camPos[0], currentUniforms.camPos[1],
-					   currentUniforms.camPos[2],
-					   (float)taaState.frameIndex}, // <-- FIX: Passes frameIndex into W!
+					   currentUniforms.camPos[2], (float)taaState.frameIndex},
 			.giMode = giSettings.mode,
 			.aoRadius = giSettings.aoRadius,
 			.aoBias = giSettings.aoBias,
@@ -781,7 +712,6 @@ void RenderContext::EndFrame() {
 		return;
 	}
 
-	// The main pass left sceneColor and velocityBuffer in COLOR_ATTACHMENT_OPTIMAL
 	Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> sceneColor_att = {
 		.handle = _impl->sceneColor.image.Handle(),
 		.view = _impl->sceneColor.view.Get(),
@@ -811,7 +741,7 @@ void RenderContext::EndFrame() {
 																   normRough_att);
 	(void)Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(_impl->current_cmd, depth_att);
 
-	if (_impl->taaState.enabled && _impl->taaPass.pipeline.Valid()) { // <-- CHANGED
+	if (_impl->taaState.enabled && _impl->taaPass.pipeline.Valid()) {
 		_impl->ApplyTAAPass(_impl->current_cmd, extent);
 	}
 
@@ -842,8 +772,7 @@ void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
 	impl->shadowProjView = shadowProjView;
 	impl->currentUniforms = uniforms;
 
-	// Inject SH coefficients invisibly so game_main doesn't have to worry about them
-	std::memcpy(impl->currentUniforms.sh, impl->shCoeffs.data(), sizeof(JPH::Vec4) * 9);
+	std::memcpy(impl->currentUniforms.sh, impl->iblPayload.shCoeffs.data(), sizeof(JPH::Vec4) * 9);
 
 	std::memcpy(impl->frameUniformBuffers[impl->frame_index].Map().data, &impl->currentUniforms,
 				sizeof(FrameUniforms));
@@ -858,7 +787,6 @@ void SetLights(RenderContext& ctx, const GPULight* lights, uint32_t count) {
 	auto* impl = ctx.GetImpl();
 	uint32_t safeCount = ZHLN::Min(count, 128u);
 	if (safeCount > 0 && lights != nullptr) {
-		// Flat, direct memory copy into the active frame's SSBO mapped region
 		std::memcpy(impl->lightStorageBuffers[impl->frame_index].Map().data, lights,
 					sizeof(GPULight) * safeCount);
 	}

@@ -5,28 +5,38 @@ struct VSOutput {
 	float2 uv : TEXCOORD0;
 };
 
-// Generates a fullscreen triangle without vertex buffers
 VSOutput VSMain(uint vertexID : SV_VertexID) {
 	VSOutput output;
 	output.uv = float2((vertexID << 1) & 2, vertexID & 2);
-
-	// Negate the Y coordinate to compensate for the negative viewport height
 	output.pos = float4(output.uv.x * 2.0f - 1.0f, 1.0f - output.uv.y * 2.0f, 0.0f, 1.0f);
-
 	return output;
 }
+
+struct FrameUniforms {
+	float4x4 viewProj;
+	float4x4 unjitteredViewProj;
+	float4x4 prevUnjitteredViewProj;
+	float4x4 lightSpaceMatrix;
+	float4x4 invViewProj;
+	float4 camPos;
+	float4 lightDir;
+	uint32_t lightCount;
+	float3 padding;
+	float4 sh[9];
+	float4 probeMin;
+	float4 probeMax;
+	float4 probePos;
+	float4 jitterParams; // x: currentX, y: currentY, z: prevX, w: prevY
+};
 
 [[vk::binding(0, 0)]] Texture2D<float4> texCurrent;
 [[vk::binding(1, 0)]] Texture2D<float4> texHistory;
 [[vk::binding(2, 0)]] Texture2D<float2> texVelocity;
 [[vk::binding(3, 0)]] SamplerState smp;
+[[vk::binding(4, 0)]] ConstantBuffer<FrameUniforms> frame;
 
 struct PushConstants {
 	float feedback;
-	float jitterX;
-	float jitterY;
-	float prevJitterX;
-	float prevJitterY;
 };
 [[vk::push_constant]] PushConstants pc;
 
@@ -69,7 +79,6 @@ float3 ClipHistoryYCoCg(float3 history, float3 minColor, float3 maxColor, float3
 
 // --- OPTIMIZED 5-TAP CATMULL-ROM FILTER ---
 // Uses 5 bilinear taps to reconstruct a high-quality 4x4 cubic filter, preserving sharp details
-// [1.1.1]
 float4 SampleTextureCatmullRom(Texture2D<float4> tex, SamplerState s, float2 uv, float2 texelSize) {
 	float2 samplePos = uv / texelSize;
 	float2 texPos1 = floor(samplePos - 0.5f) + 0.5f;
@@ -112,38 +121,30 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	float2 texelSize = 1.0f / float2(w, h);
 
 	float2 velocity = texVelocity.SampleLevel(smp, input.uv, 0).rg;
-
 	float2 historyUV = input.uv - velocity;
 
-	float2 currentJitter = float2(pc.jitterX, pc.jitterY);
-	float2 prevJitter = float2(pc.prevJitterX, pc.prevJitterY);
+	// Pull atomic jitter parameters directly from the double-buffered UBO [2]
+	float2 currentJitter = frame.jitterParams.xy;
+	float2 prevJitter = frame.jitterParams.zw;
+	float2 jitterDelta = currentJitter - prevJitter;
 
-	float2 jitterDelta = float2(currentJitter.x - prevJitter.x, currentJitter.y - prevJitter.y);
+	// Align history UV coordinate
+	historyUV -= jitterDelta;
 
-	// FIX: Change -= to +=
-	historyUV += jitterDelta;
 	float4 current = texCurrent.SampleLevel(smp, input.uv, 0);
-
-	// Sanitize incoming NaN pixels so they don't infect the frame
-	if (any(isnan(current))) {
-		current = float4(0.0f, 0.0f, 0.0f, 1.0f);
-	}
 
 	if (any(historyUV < 0.0f) || any(historyUV > 1.0f) || any(isnan(historyUV))) {
 		return current;
 	}
 
-	// 1. High-fidelity history reconstruct sampling
 	float4 history = SampleTextureCatmullRom(texHistory, smp, historyUV, texelSize);
 	if (any(isnan(history))) {
 		history = current;
 	}
 
-	// 2. Convert current and history to perceptual YCoCg space
 	float3 currentYCoCg = RGBToYCoCg(current.rgb);
 	float3 historyYCoCg = RGBToYCoCg(history.rgb);
 
-	// 3. Compute 3x3 neighborhood statistics in YCoCg space
 	float3 m1 = 0.0f;
 	float3 m2 = 0.0f;
 
@@ -164,12 +165,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 		stddev = 0.0f;
 	}
 
-	// 4. Perform variance clamping in YCoCg space
 	float3 minColor = mean - stddev;
 	float3 maxColor = mean + stddev;
 	historyYCoCg = ClipHistoryYCoCg(historyYCoCg, minColor, maxColor, mean);
 
-	// 5. Blend and convert the final result back to RGB
 	float3 blendedYCoCg = lerp(currentYCoCg, historyYCoCg, pc.feedback);
 	float3 finalRGB = YCoCgToRGB(blendedYCoCg);
 

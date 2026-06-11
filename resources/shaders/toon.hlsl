@@ -1,57 +1,32 @@
 // resources/shaders/toon.hlsl
 #include "common.hlsl"
 
-VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
+VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	VSOutput output;
 
-	float4x4 worldMatrix;
-	float4x4 prevWorldMatrix;
-	uint albedoIdx, normalIdx, pbrIdx, emissiveIdx;
-	float4 baseColorFactor;
-	float metallicFactor, roughnessFactor, alphaCutoff;
-	uint alphaMode;
-	uint jointOffset;
-	uint isSkinned;
+	// Resolve the active instance data index (4294967295u is the 0xFFFFFFFF sentinel) [1]
+	uint instId = (obj.instanceId != 4294967295u) ? obj.instanceId : instanceId;
+	InstanceData inst = g_instances[instId];
 
-	if (obj.isShadowPass != 0 || obj.albedoIdx != 0) {
-		// --- CPU TRADITIONAL PATH ---
-		worldMatrix = obj.world;
-		prevWorldMatrix = obj.prevWorld;
-		albedoIdx = obj.albedoIdx;
-		normalIdx = obj.normalIdx;
-		pbrIdx = obj.pbrIdx;
-		emissiveIdx = obj.emissiveIdx;
-		baseColorFactor = obj.baseColorFactor;
-		metallicFactor = obj.metallicFactor;
-		roughnessFactor = obj.roughnessFactor;
-		alphaCutoff = obj.alphaCutoff;
-		alphaMode = obj.alphaMode;
-		jointOffset = obj.jointOffset;
-		isSkinned = obj.isSkinned;
-	} else {
-		// --- GPU CULLING PATH ---
-		InstanceData inst = g_instances[instanceId];
-		worldMatrix = inst.world;
-		prevWorldMatrix = inst.prevWorld;
-		albedoIdx = inst.albedoIdx;
-		normalIdx = inst.normalIdx;
-		pbrIdx = inst.pbrIdx;
-		emissiveIdx = inst.emissiveIdx;
-		baseColorFactor = inst.baseColorFactor;
-		metallicFactor = inst.metallicFactor;
-		roughnessFactor = inst.roughnessFactor;
-		alphaCutoff = inst.alphaCutoff;
-		alphaMode = inst.alphaMode;
-		jointOffset = inst.jointOffset;
-		isSkinned = inst.isSkinned;
-	}
+	float4x4 worldMatrix = inst.world;
+	float4x4 prevWorldMatrix = inst.prevWorld;
+	uint albedoIdx = inst.albedoIdx;
+	uint normalIdx = inst.normalIdx;
+	uint pbrIdx = inst.pbrIdx;
+	uint emissiveIdx = inst.emissiveIdx;
+	float4 baseColorFactor = inst.baseColorFactor;
+	float metallicFactor = inst.metallicFactor;
+	float roughnessFactor = inst.roughnessFactor;
+	float alphaCutoff = inst.alphaCutoff;
+	uint alphaMode = inst.alphaMode;
+	uint jointOffset = inst.jointOffset;
+	uint isSkinned = inst.isSkinned;
 
 	float4 localPos = float4(input.position, 1.0f);
 	float3 localNormal = input.normal * 2.0f - 1.0f;
 	float3 localTangent = input.tangent.xyz * 2.0f - 1.0f;
 
-	// --- FIX: Store current skinned position in a separate variable to preserve bind-pose localPos
-	// ---
+	// --- Store current skinned position in a separate variable to preserve bind-pose localPos ---
 	float4 skinnedPos = localPos;
 
 	if (isSkinned != 0) {
@@ -62,7 +37,7 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 			normalize(SkinDirection(localTangent, input.joints, input.weights, jointOffset));
 	}
 
-	// --- FIX: Use skinnedPos for the current world position ---
+	// --- Use skinnedPos for the current world position ---
 	float4 worldPos = mul(worldMatrix, skinnedPos);
 	output.worldPos = worldPos.xyz;
 
@@ -71,7 +46,7 @@ VSOutput VSMain(VSInput input, uint instanceId : SV_InstanceID) {
 
 	float4 prevWorldPos;
 	if (isSkinned != 0) {
-		// --- FIX: SkinPositionPrev can now safely read the original un-skinned localPos ---
+		// --- SkinPositionPrev can now safely read the original un-skinned localPos ---
 		prevWorldPos = mul(prevWorldMatrix,
 						   SkinPositionPrev(localPos, input.joints, input.weights, jointOffset));
 	} else {
@@ -114,7 +89,6 @@ PSOutput PSMain(VSOutput input) {
 	float3 N = normalize(input.normal);
 	float3 worldNormal = N;
 
-	// CHANGED: Added indices.y != 2 check
 	if (indices.y != 2 && any(input.tangent.xyz)) {
 		// 1. Calculate unnormalized tangent
 		float3 T_unnorm = input.tangent.xyz - dot(input.tangent.xyz, N) * N;
@@ -165,7 +139,6 @@ PSOutput PSMain(VSOutput input) {
 
 	float3 finalColor = ambient + (albedo.rgb * celIntensity) + specular + rimIntensity;
 
-	// FIX: TAA register overflow safeguard
 	finalColor = min(finalColor, 100.0f);
 
 	output.color = float4(finalColor, albedo.a);
