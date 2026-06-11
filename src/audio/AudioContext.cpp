@@ -1,8 +1,11 @@
+// src/audio/AudioContext.cpp
+
 #define MINIAUDIO_IMPLEMENTATION
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <detail/ControlFlow.hpp>
+#include <detail/MemoryPool.hpp> // <-- Include your ObjectPool
 #include <miniaudio.h>
 #include <threading/Mutex.hpp>
 #include <type_traits>
@@ -18,9 +21,14 @@ struct ProceduralBeep {
 struct AudioContext::Impl {
 	ma_engine engine{};
 	bool initialized = false;
+
+	// Page-aligned lockless-ready memory pools
+	ZHLN::ObjectPool<ma_sound, 128> soundPool;
+	ZHLN::ObjectPool<ProceduralBeep, 64> beepPool;
+
 	std::vector<ma_sound*> activeOneShots;
 	ZHLN::Mutex oneShotMutex{};
-	// Tracker for procedural beeps
+
 	std::vector<ProceduralBeep*> activeBeeps;
 	ZHLN::Mutex beepMutex{};
 };
@@ -57,14 +65,16 @@ AudioContext::AudioContext(const AudioConfig& cfg) : _impl(std::make_unique<Impl
 
 AudioContext::~AudioContext() {
 	if (_impl->initialized) {
+		// Clean up active one-shots and return memory back to the pool
 		for (auto* sound : _impl->activeOneShots) {
 			ma_sound_uninit(sound);
-			delete sound;
+			_impl->soundPool.Destroy(sound);
 		}
+		// Clean up active beeps and return memory back to the pool
 		for (auto* beep : _impl->activeBeeps) {
 			ma_sound_uninit(&beep->sound);
 			ma_waveform_uninit(&beep->waveform);
-			delete beep;
+			_impl->beepPool.Destroy(beep);
 		}
 		ma_engine_uninit(&_impl->engine);
 	}
@@ -76,20 +86,19 @@ void AudioContext::UpdateListener(const JPH::Vec3& position, const JPH::Vec3& di
 		return;
 	}
 
-	// miniaudio defaults listener index to 0
 	ma_engine_listener_set_position(&_impl->engine, 0, position.GetX(), position.GetY(),
 									position.GetZ());
 	ma_engine_listener_set_direction(&_impl->engine, 0, direction.GetX(), direction.GetY(),
 									 direction.GetZ());
 	ma_engine_listener_set_world_up(&_impl->engine, 0, up.GetX(), up.GetY(), up.GetZ());
 
-	// Prune finished 3D one-shots
+	// Prune finished 3D one-shots and return memory to the pool
 	ZHLN_LOCK(_impl->oneShotMutex) {
 		for (auto it = _impl->activeOneShots.begin(); it != _impl->activeOneShots.end();) {
 			ma_sound* sound = *it;
 			if (ma_sound_at_end(sound) == MA_TRUE) {
 				ma_sound_uninit(sound);
-				delete sound;
+				_impl->soundPool.Destroy(sound);
 				it = _impl->activeOneShots.erase(it);
 			} else {
 				++it;
@@ -97,14 +106,14 @@ void AudioContext::UpdateListener(const JPH::Vec3& position, const JPH::Vec3& di
 		}
 	}
 
-	// Prune finished procedural beeps
+	// Prune finished procedural beeps and return memory to the pool
 	ZHLN_LOCK(_impl->beepMutex) {
 		for (auto it = _impl->activeBeeps.begin(); it != _impl->activeBeeps.end();) {
 			ProceduralBeep* beep = *it;
 			if (ma_sound_at_end(&beep->sound) == MA_TRUE) {
 				ma_sound_uninit(&beep->sound);
 				ma_waveform_uninit(&beep->waveform);
-				delete beep;
+				_impl->beepPool.Destroy(beep);
 				it = _impl->activeBeeps.erase(it);
 			} else {
 				++it;
@@ -118,38 +127,33 @@ void AudioContext::PlayProceduralBeep(float frequency, float duration, float vol
 		return;
 	}
 
-	auto* beep = new ProceduralBeep();
+	// Allocate from the pool with zero heap allocations
+	auto* beep = _impl->beepPool.Create();
 
-	// 1. Config standard 48kHz, mono sine wave
 	ma_waveform_config waveConfig =
 		ma_waveform_config_init(ma_format_f32, 1, 48000, ma_waveform_type_sine, volume, frequency);
 
 	ma_result result = ma_waveform_init(&waveConfig, &beep->waveform);
 	if (result != MA_SUCCESS) {
-		delete beep;
+		_impl->beepPool.Destroy(beep);
 		return;
 	}
 
-	// 2. Bind the waveform as a sound data source
 	result =
 		ma_sound_init_from_data_source(&_impl->engine, &beep->waveform, 0, nullptr, &beep->sound);
 	if (result != MA_SUCCESS) {
 		ma_waveform_uninit(&beep->waveform);
-		delete beep;
+		_impl->beepPool.Destroy(beep);
 		return;
 	}
 
-	// 3. Instruct miniaudio to stop reading frames at stopTime (duration-based)
 	ma_uint32 sampleRate = ma_engine_get_sample_rate(&_impl->engine);
 	ma_uint64 currentEngineTime = ma_engine_get_time_in_pcm_frames(&_impl->engine);
 	ma_uint64 stopTime = currentEngineTime + static_cast<ma_uint64>(sampleRate * duration);
 
 	ma_sound_set_stop_time_in_pcm_frames(&beep->sound, stopTime);
-
-	// 4. Start playback
 	ma_sound_start(&beep->sound);
 
-	// 5. Track for destruction
 	ZHLN_LOCK(_impl->beepMutex) {
 		_impl->activeBeeps.push_back(beep);
 	}
@@ -169,7 +173,8 @@ void AudioContext::PlayOneShot3D(const std::string& filepath, const JPH::Vec3& p
 		return;
 	}
 
-	auto* sound = new ma_sound();
+	// Allocate from the pool with zero heap allocations
+	auto* sound = _impl->soundPool.Create();
 	ma_result result =
 		ma_sound_init_from_file(&_impl->engine, filepath.c_str(), 0, nullptr, nullptr, sound);
 	if (result == MA_SUCCESS) {
@@ -181,7 +186,7 @@ void AudioContext::PlayOneShot3D(const std::string& filepath, const JPH::Vec3& p
 			_impl->activeOneShots.push_back(sound);
 		}
 	} else {
-		delete sound;
+		_impl->soundPool.Destroy(sound);
 		ZHLN::Log("ERROR: Failed to play 3D one-shot: {}", filepath);
 	}
 }
@@ -191,14 +196,15 @@ auto AudioContext::CreateSoundInstance(const std::string& filepath, bool spatial
 		return nullptr;
 	}
 
-	auto* sound = new ma_sound();
+	// Allocate from the pool with zero heap allocations
+	auto* sound = _impl->soundPool.Create();
 	ma_uint32 flags = spatialized ? 0 : MA_SOUND_FLAG_NO_SPATIALIZATION;
 
 	ma_result result =
 		ma_sound_init_from_file(&_impl->engine, filepath.c_str(), flags, nullptr, nullptr, sound);
 	if (result != MA_SUCCESS) {
 		ZHLN::Log("ERROR: Failed to load sound file: {}", filepath);
-		delete sound;
+		_impl->soundPool.Destroy(sound);
 		return nullptr;
 	}
 
@@ -206,10 +212,12 @@ auto AudioContext::CreateSoundInstance(const std::string& filepath, bool spatial
 }
 
 void AudioContext::DestroySoundInstance(void* soundHandle) {
-	WithSound(soundHandle, [](ma_sound* sound) {
-		ma_sound_uninit(sound);
-		delete sound;
-	});
+	if (soundHandle == nullptr) {
+		return;
+	}
+	auto* sound = static_cast<ma_sound*>(soundHandle);
+	ma_sound_uninit(sound);
+	_impl->soundPool.Destroy(sound);
 }
 
 void AudioContext::PlaySoundInstance(void* soundHandle) {
