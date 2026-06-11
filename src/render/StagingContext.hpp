@@ -2,6 +2,7 @@
 #include "Allocator.hpp"
 #include "RenderCore.hpp"
 
+#include <cstddef>
 #include <cstring>
 #include <vector>
 
@@ -10,6 +11,20 @@ namespace ZHLN::Vk {
 class StagingContext {
   public:
 	StagingContext(Allocator& allocator, const Context& ctx) : _allocator(allocator), _ctx(ctx) {}
+
+	~StagingContext() {
+		// Destructor automatically cleans up the fence
+		if (_fence != VK_NULL_HANDLE) {
+			vkDestroyFence(_ctx.Device(), _fence, nullptr);
+		}
+	}
+
+	// Disable copying to enforce strict ownership
+	StagingContext(const StagingContext&) = delete;
+	StagingContext& operator=(const StagingContext&) = delete;
+
+	StagingContext(StagingContext&&) noexcept = default;
+	StagingContext& operator=(StagingContext&&) noexcept = delete;
 
 	void Begin() {
 		_cmdPool = CommandPool(_ctx.Device(), _ctx.PhysicalInfo().graphics_family);
@@ -89,25 +104,32 @@ class StagingContext {
 		size_t currentOffset = 0;
 		for (uint32_t mip = 0; mip < mipLevels; ++mip) {
 			uint32_t mipSize = baseSize >> mip;
-			size_t faceSize = mipSize * mipSize * 4;
+			auto faceSize = static_cast<size_t>(mipSize) * mipSize * 4;
 
 			for (uint32_t face = 0; face < 6; ++face) {
 				VkBufferImageCopy2 region = {
 					.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
+					.pNext = {},
 					.bufferOffset = currentOffset + (face * faceSize),
+					.bufferRowLength = {},
+					.bufferImageHeight = {},
 					.imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
 										 .mipLevel = mip,
 										 .baseArrayLayer = face,
 										 .layerCount = 1},
-					.imageExtent = {.width = mipSize, .height = mipSize, .depth = 1}};
+					.imageOffset = {},
+					.imageExtent = {.width = mipSize, .height = mipSize, .depth = 1},
+				};
 
 				VkCopyBufferToImageInfo2 copyInfo = {
 					.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
+					.pNext = {},
 					.srcBuffer = stagingBuf,
 					.dstImage = dstImage,
 					.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 					.regionCount = 1,
-					.pRegions = &region};
+					.pRegions = &region,
+				};
 				vkCmdCopyBufferToImage2(_cmd, &copyInfo);
 			}
 			currentOffset += (faceSize * 6);
@@ -129,19 +151,36 @@ class StagingContext {
 
 	void AddBuffer(Buffer&& buf) { _stagingBuffers.push_back(std::move(buf)); }
 
-	VkFence ExecuteAsync() {
+	void ExecuteAsync() {
 		ZHLN_EndCommandBuffer(_cmd);
-		VkFenceCreateInfo fenceInfo = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-		VkFence fence = VK_NULL_HANDLE;
-		vkCreateFence(_ctx.Device(), &fenceInfo, nullptr, &fence);
 
-		VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-											 .commandBuffer = _cmd};
-		VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-								.commandBufferInfoCount = 1,
-								.pCommandBufferInfos = &subInfo};
-		vkQueueSubmit2(_ctx.GraphicsQueue(), 1, &submit, fence);
-		return fence;
+		VkFenceCreateInfo fenceInfo = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+		vkCreateFence(_ctx.Device(), &fenceInfo, nullptr, &_fence);
+
+		VkCommandBufferSubmitInfo subInfo = {
+			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+			.pNext = {},
+			.commandBuffer = _cmd,
+			.deviceMask = {},
+		};
+		VkSubmitInfo2 submit = {
+			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+			.pNext = {},
+			.flags = {},
+			.waitSemaphoreInfoCount = {},
+			.pWaitSemaphoreInfos = {},
+			.commandBufferInfoCount = 1,
+			.pCommandBufferInfos = &subInfo,
+			.signalSemaphoreInfoCount = {},
+			.pSignalSemaphoreInfos = {},
+		};
+		vkQueueSubmit2(_ctx.GraphicsQueue(), 1, &submit, _fence);
+	}
+
+	void Wait() noexcept {
+		if (_fence != VK_NULL_HANDLE) {
+			vkWaitForFences(_ctx.Device(), 1, &_fence, VK_TRUE, UINT64_MAX);
+		}
 	}
 
   private:
@@ -150,6 +189,6 @@ class StagingContext {
 	CommandPool _cmdPool;
 	VkCommandBuffer _cmd = VK_NULL_HANDLE;
 	std::vector<Buffer> _stagingBuffers;
+	VkFence _fence = VK_NULL_HANDLE; // Owned internally
 };
-
 } // namespace ZHLN::Vk

@@ -183,12 +183,18 @@ class DescriptorUpdater {
 		bufInfo = {.buffer = buffer, .offset = offset, .range = range};
 
 		auto& write = _writes[_writeCount++];
-		write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-				 .dstBinding = binding,
-				 .dstArrayElement = 0,
-				 .descriptorCount = 1,
-				 .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-				 .pBufferInfo = &bufInfo};
+		write = {
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.pNext = {},
+			.dstSet = {},
+			.dstBinding = binding,
+			.dstArrayElement = 0,
+			.descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			.pImageInfo = {},
+			.pBufferInfo = &bufInfo,
+			.pTexelBufferView = {},
+		};
 	}
 
 	void BindStorageBuffer(uint32_t binding, VkBuffer buffer, VkDeviceSize offset = 0,
@@ -197,12 +203,18 @@ class DescriptorUpdater {
 		bufInfo = {.buffer = buffer, .offset = offset, .range = range};
 
 		auto& write = _writes[_writeCount++];
-		write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-				 .dstBinding = binding,
-				 .dstArrayElement = 0,
-				 .descriptorCount = 1,
-				 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				 .pBufferInfo = &bufInfo};
+		write = {
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.pNext = {},
+			.dstSet = {},
+			.dstBinding = binding,
+			.dstArrayElement = 0,
+			.descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.pImageInfo = {},
+			.pBufferInfo = &bufInfo,
+			.pTexelBufferView = {},
+		};
 	}
 
 	void BindSampledImage(uint32_t binding, VkImageView view, VkSampler sampler = VK_NULL_HANDLE,
@@ -211,14 +223,19 @@ class DescriptorUpdater {
 		imgInfo = {.sampler = sampler, .imageView = view, .imageLayout = layout};
 
 		auto& write = _writes[_writeCount++];
-		write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-				 .dstBinding = binding,
-				 .dstArrayElement = 0,
-				 .descriptorCount = 1,
-				 .descriptorType = sampler == VK_NULL_HANDLE
-									   ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
-									   : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				 .pImageInfo = &imgInfo};
+		write = {
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.pNext = {},
+			.dstSet = {},
+			.dstBinding = binding,
+			.dstArrayElement = 0,
+			.descriptorCount = 1,
+			.descriptorType = sampler == VK_NULL_HANDLE ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+														: VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			.pImageInfo = &imgInfo,
+			.pBufferInfo = {},
+			.pTexelBufferView = {},
+		};
 	}
 
 	void BindSampler(uint32_t binding, VkSampler sampler) {
@@ -228,12 +245,18 @@ class DescriptorUpdater {
 				   .imageLayout = VK_IMAGE_LAYOUT_UNDEFINED};
 
 		auto& write = _writes[_writeCount++];
-		write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-				 .dstBinding = binding,
-				 .dstArrayElement = 0,
-				 .descriptorCount = 1,
-				 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
-				 .pImageInfo = &imgInfo};
+		write = {
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.pNext = {},
+			.dstSet = {},
+			.dstBinding = binding,
+			.dstArrayElement = 0,
+			.descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
+			.pImageInfo = &imgInfo,
+			.pBufferInfo = {},
+			.pTexelBufferView = {},
+		};
 	}
 
 	void UpdateSet(VkDevice device, VkDescriptorSet set) {

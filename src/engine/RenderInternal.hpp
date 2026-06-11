@@ -230,8 +230,7 @@ struct RenderContext::Impl {
 	Vk::ImageView ltcAmpView;
 
 	Vk::IBLPayload iblPayload;
-	Vk::StagingContext* stagingContext = nullptr;
-	VkFence initFence = VK_NULL_HANDLE;
+	std::unique_ptr<Vk::StagingContext> stagingContext;
 
 	ZHLN::DoubleBuffered<Vk::Buffer> frameUniformBuffers;
 	ZHLN::DoubleBuffered<Vk::Buffer> lightStorageBuffers;

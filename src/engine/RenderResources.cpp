@@ -254,7 +254,7 @@ auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t hei
 											.imageLayout =
 												VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 
-	VkWriteDescriptorSet writes[2] = {};
+	std::array<VkWriteDescriptorSet, 2> writes = {};
 	for (int i = 0; i < 2; ++i) {
 		writes[i] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 					 .pNext = nullptr,
@@ -268,7 +268,7 @@ auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t hei
 					 .pTexelBufferView = nullptr};
 	}
 
-	vkUpdateDescriptorSets(device, 2, writes, 0, nullptr);
+	vkUpdateDescriptorSets(device, 2, writes.data(), 0, nullptr);
 	impl->textureImages.push_back(std::move(gpuImage));
 	impl->textureViews.push_back(std::move(gpuView));
 
@@ -281,20 +281,23 @@ uint32_t RenderContext::CreateTextureCube(const void* const* faceData, uint32_t 
 	const VkDevice device = impl->ctx.Device();
 	const size_t faceSize = static_cast<size_t>(width) * height * 4;
 
-	const VkImageCreateInfo imgInfo = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-									   .pNext = nullptr,
-									   .flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
-									   .imageType = VK_IMAGE_TYPE_2D,
-									   .format = VK_FORMAT_R8G8B8A8_UNORM,
-									   .extent{.width = width, .height = height, .depth = 1},
-									   .mipLevels = 1,
-									   .arrayLayers = 6,
-									   .samples = VK_SAMPLE_COUNT_1_BIT,
-									   .tiling = VK_IMAGE_TILING_OPTIMAL,
-									   .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-												VK_IMAGE_USAGE_SAMPLED_BIT,
-									   .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-									   .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+	const VkImageCreateInfo imgInfo = {
+		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+		.pNext = nullptr,
+		.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+		.imageType = VK_IMAGE_TYPE_2D,
+		.format = VK_FORMAT_R8G8B8A8_UNORM,
+		.extent{.width = width, .height = height, .depth = 1},
+		.mipLevels = 1,
+		.arrayLayers = 6,
+		.samples = VK_SAMPLE_COUNT_1_BIT,
+		.tiling = VK_IMAGE_TILING_OPTIMAL,
+		.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+		.queueFamilyIndexCount = {},
+		.pQueueFamilyIndices = {},
+		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+	};
 
 	auto gpuImage = Vk::Image::Create(impl->allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 
@@ -321,20 +324,29 @@ uint32_t RenderContext::CreateTextureCube(const void* const* faceData, uint32_t 
 		cmd, gpuImage.Handle());
 
 	for (uint32_t i = 0; i < 6; ++i) {
-		VkBufferImageCopy2 region = {.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
-									 .bufferOffset = i * faceSize,
-									 .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-														  .mipLevel = 0,
-														  .baseArrayLayer = i,
-														  .layerCount = 1},
-									 .imageExtent = {.width = width, .height = height, .depth = 1}};
+		VkBufferImageCopy2 region = {
+			.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
+			.pNext = nullptr,
+			.bufferOffset = i * faceSize,
+			.bufferRowLength = {},
+			.bufferImageHeight = {},
+			.imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+								 .mipLevel = 0,
+								 .baseArrayLayer = i,
+								 .layerCount = 1},
+			.imageOffset = {},
+			.imageExtent = {.width = width, .height = height, .depth = 1},
+		};
 
-		VkCopyBufferToImageInfo2 copyInfo = {.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
-											 .srcBuffer = staging.Handle(),
-											 .dstImage = gpuImage.Handle(),
-											 .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-											 .regionCount = 1,
-											 .pRegions = &region};
+		VkCopyBufferToImageInfo2 copyInfo = {
+			.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
+			.pNext = {},
+			.srcBuffer = staging.Handle(),
+			.dstImage = gpuImage.Handle(),
+			.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			.regionCount = 1,
+			.pRegions = &region,
+		};
 		vkCmdCopyBufferToImage2(cmd, &copyInfo);
 	}
 
@@ -343,11 +355,23 @@ uint32_t RenderContext::CreateTextureCube(const void* const* faceData, uint32_t 
 
 	ZHLN_EndCommandBuffer(cmd);
 
-	VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-										 .commandBuffer = cmd};
-	VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-							.commandBufferInfoCount = 1,
-							.pCommandBufferInfos = &subInfo};
+	VkCommandBufferSubmitInfo subInfo = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+		.pNext = {},
+		.commandBuffer = cmd,
+		.deviceMask = {},
+	};
+	VkSubmitInfo2 submit = {
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+		.pNext = {},
+		.flags = {},
+		.waitSemaphoreInfoCount = {},
+		.pWaitSemaphoreInfos = {},
+		.commandBufferInfoCount = 1,
+		.pCommandBufferInfos = &subInfo,
+		.signalSemaphoreInfoCount = {},
+		.pSignalSemaphoreInfos = {},
+	};
 	vkQueueSubmit2(impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
 	vkQueueWaitIdle(impl->ctx.GraphicsQueue());
 
@@ -360,17 +384,22 @@ uint32_t RenderContext::CreateTextureCube(const void* const* faceData, uint32_t 
 											.imageLayout =
 												VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 
-	VkWriteDescriptorSet writes[2] = {};
+	std::array<VkWriteDescriptorSet, 2> writes = {};
 	for (int i = 0; i < 2; ++i) {
-		writes[i] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-					 .dstSet = impl->bindlessSets[i],
-					 .dstBinding = 0,
-					 .dstArrayElement = index,
-					 .descriptorCount = 1,
-					 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-					 .pImageInfo = &bindlessUpdate};
+		writes[i] = {
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.pNext = {},
+			.dstSet = impl->bindlessSets[i],
+			.dstBinding = 0,
+			.dstArrayElement = index,
+			.descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+			.pImageInfo = &bindlessUpdate,
+			.pBufferInfo = {},
+			.pTexelBufferView = {},
+		};
 	}
-	vkUpdateDescriptorSets(device, 2, writes, 0, nullptr);
+	vkUpdateDescriptorSets(device, 2, writes.data(), 0, nullptr);
 	impl->textureImages.push_back(std::move(gpuImage));
 	impl->textureViews.push_back(std::move(gpuView));
 

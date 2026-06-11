@@ -18,6 +18,7 @@ class PresentationContext {
 	RenderTarget<VK_FORMAT_D32_SFLOAT> depthTarget;
 
 	PresentationContext() = default;
+	~PresentationContext() = default;
 
 	// Move-only
 	PresentationContext(const PresentationContext&) = delete;
@@ -65,7 +66,7 @@ class PresentationContext {
 		// Automatically recreate the depth buffer to match the new swapchain extent
 		depthTarget = RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
 			*_alloc, *_ctx, swapchain.Get().extent,
-			VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+			{.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
 
 		return depthTarget.Valid();
 	}

@@ -1155,6 +1155,65 @@ inline void TransitionLayout(const VkCommandBuffer cmd, const VkImage image,
 	ZHLN_CmdImageBarrier(cmd, &barrier);
 }
 
+// ============================================================================
+// Compile-Time Layout State Contract (Zero Runtime Overhead)
+// ============================================================================
+
+struct UndefinedState {};
+struct ColorAttachmentState {};
+struct DepthAttachmentState {};
+struct ShaderReadState {};
+struct PresentState {};
+
+template <typename State> struct LayoutMap;
+template <> struct LayoutMap<UndefinedState> {
+	static constexpr VkImageLayout value = VK_IMAGE_LAYOUT_UNDEFINED;
+};
+template <> struct LayoutMap<ColorAttachmentState> {
+	static constexpr VkImageLayout value = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+};
+template <> struct LayoutMap<DepthAttachmentState> {
+	static constexpr VkImageLayout value = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+};
+template <> struct LayoutMap<ShaderReadState> {
+	static constexpr VkImageLayout value = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+};
+template <> struct LayoutMap<PresentState> {
+	static constexpr VkImageLayout value = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+};
+
+template <typename InState, typename OutState, typename T>
+inline auto IssueBarrier(VkCommandBuffer cmd, const T& resource,
+						 VkImageAspectFlags aspectOverride = VK_IMAGE_ASPECT_NONE) {
+	constexpr VkImageLayout inLayout = LayoutMap<InState>::value;
+	constexpr VkImageLayout outLayout = LayoutMap<OutState>::value;
+
+	VkImage image = VK_NULL_HANDLE;
+	VkImageView view = VK_NULL_HANDLE;
+	VkExtent2D extent{};
+	VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+
+	if constexpr (requires { resource.handle; }) {
+		image = resource.handle;
+		view = resource.view;
+		extent = resource.extent;
+		aspect = resource.aspect;
+	} else if constexpr (requires { resource.image.Handle(); }) {
+		image = resource.image.Handle();
+		view = resource.view.Get();
+		extent = resource.extent;
+		aspect = resource.State().aspect;
+	}
+
+	if (aspectOverride != VK_IMAGE_ASPECT_NONE) {
+		aspect = aspectOverride;
+	}
+
+	TransitionLayout<inLayout, outLayout>(cmd, image, aspect);
+
+	return TypedImage<outLayout>{.handle = image, .view = view, .extent = extent, .aspect = aspect};
+}
+
 /**
  * @brief Transforms the compile-time state of an image, emitting a pipeline barrier.
  * Usage: auto readyImage = Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd,
@@ -1282,7 +1341,7 @@ template <size_t ColorCount = 0, bool HasDepth = false> class DynamicPass {
 
 	// Move constructor to allow chaining states cleanly
 	template <size_t InsideCount, bool InsideDepth>
-	constexpr DynamicPass(DynamicPass<InsideCount, InsideDepth>&& other,
+	constexpr DynamicPass(const DynamicPass<InsideCount, InsideDepth>&& other,
 						  std::array<VkRenderingAttachmentInfo, ColorCount>&& colors,
 						  VkRenderingAttachmentInfo depth) noexcept
 		: _extent(other._extent), _flags(other._flags), _colors(std::move(colors)), _depth(depth) {}
@@ -1814,10 +1873,17 @@ inline void ExecutePasses(VkCommandBuffer cmd, std::span<const PassDesc> passes)
 				};
 			}
 
-			const VkDependencyInfo dep_info = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-											   .pNext = nullptr,
-											   .imageMemoryBarrierCount = transition_count,
-											   .pImageMemoryBarriers = p_barriers};
+			const VkDependencyInfo dep_info = {
+				.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+				.pNext = nullptr,
+				.dependencyFlags = {},
+				.memoryBarrierCount = {},
+				.pMemoryBarriers = {},
+				.bufferMemoryBarrierCount = {},
+				.pBufferMemoryBarriers = {},
+				.imageMemoryBarrierCount = transition_count,
+				.pImageMemoryBarriers = p_barriers,
+			};
 			vkCmdPipelineBarrier2(cmd, &dep_info);
 
 			if (heap_allocated) [[unlikely]] {

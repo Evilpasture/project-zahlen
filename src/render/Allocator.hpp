@@ -68,6 +68,7 @@ class Allocator {
 			.vkGetDeviceBufferMemoryRequirements = &vkGetDeviceBufferMemoryRequirements,
 			.vkGetDeviceImageMemoryRequirements = &vkGetDeviceImageMemoryRequirements,
 			.vkGetMemoryWin32HandleKHR = nullptr,
+			.vkGetPhysicalDeviceProperties2KHR = {},
 		};
 
 		const VmaAllocatorCreateInfo info = {
@@ -81,6 +82,7 @@ class Allocator {
 			.pVulkanFunctions = &vfuncs,
 			.instance = instance,
 			.vulkanApiVersion = VK_API_VERSION_1_3,
+			.pTypeExternalMemoryHandleTypes = {},
 		};
 
 		return vmaCreateAllocator(&info, &_handle) == VK_SUCCESS;

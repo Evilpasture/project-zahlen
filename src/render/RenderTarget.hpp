@@ -35,10 +35,13 @@ template <VkFormat F> struct RenderTarget {
 				.aspect = GetFormatAspect(F)};
 	}
 
+	struct RenderTargetDescriptor {
+		VkImageUsageFlags usage = 0;
+		VkImageAspectFlags aspect = GetFormatAspect(F);
+	};
+
 	[[nodiscard]] static auto Create(Allocator& allocator, const Context& ctx, VkExtent2D extent,
-									 VkImageUsageFlags usage,
-									 VkImageAspectFlags aspect = GetFormatAspect(F))
-		-> RenderTarget {
+									 RenderTargetDescriptor desc) -> RenderTarget {
 		RenderTarget rt;
 		rt.extent = extent;
 
@@ -53,7 +56,7 @@ template <VkFormat F> struct RenderTarget {
 			.arrayLayers = 1,
 			.samples = VK_SAMPLE_COUNT_1_BIT,
 			.tiling = VK_IMAGE_TILING_OPTIMAL,
-			.usage = usage,
+			.usage = desc.usage,
 			.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
 			.queueFamilyIndexCount = 0,
 			.pQueueFamilyIndices = nullptr,
@@ -62,7 +65,7 @@ template <VkFormat F> struct RenderTarget {
 
 		rt.image = Image::Create(allocator.Get(), info, VMA_MEMORY_USAGE_GPU_ONLY);
 		if (rt.image.Valid()) {
-			rt.view = CreateView<F>(ctx.Device(), rt.image.Handle(), aspect, 1);
+			rt.view = CreateView<F>(ctx.Device(), rt.image.Handle(), desc.aspect, 1);
 		}
 		return rt;
 	}

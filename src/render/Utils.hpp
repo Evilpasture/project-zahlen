@@ -18,17 +18,18 @@ template <typename T> [[nodiscard]] constexpr T Min(std::initializer_list<T> lis
 	auto it = list.begin();
 	T result = *it;
 	while (++it != list.end()) {
-		if (*it < result)
+		if (*it < result) {
 			result = *it;
+		}
 	}
 	return result;
 }
 
-template <typename T> [[nodiscard]] constexpr const T& Min(const T& a, const T& b) noexcept {
+template <typename T> [[nodiscard]] constexpr T Min(T a, T b) noexcept {
 	return (b < a) ? b : a;
 }
 
-template <typename T> [[nodiscard]] constexpr const T& Max(const T& a, const T& b) noexcept {
+template <typename T> [[nodiscard]] constexpr T Max(T a, T b) noexcept {
 	return (a < b) ? b : a;
 }
 
@@ -102,8 +103,9 @@ constexpr float FBM(float x, float y, int octaves) {
 // Uses a Taylor series for ln(x) centered at 1.
 // Optimal for x in range [0.5, 1.5].
 constexpr float constexpr_ln(float x) {
-	if (x <= 0.0f)
+	if (x <= 0.0f) {
 		return -1e30f; // Simplified -inf
+	}
 
 	// Range reduction: ln(x) = ln(m * 2^k) = ln(m) + k * ln(2)
 	// For simplicity in a noise helper, we'll use the basic series:
@@ -132,12 +134,14 @@ constexpr float constexpr_exp(float x) {
 
 // --- 3. Fast Int Power (The "Fast Path") ---
 template <typename T> constexpr T FastIntPower(T base, long long exp) {
-	if (exp < 0)
+	if (exp < 0) {
 		return T(1) / FastIntPower(base, -exp);
+	}
 	T res = 1;
 	while (exp > 0) {
-		if (exp % 2 == 1)
+		if (exp % 2 == 1) {
 			res *= base;
+		}
 		base *= base;
 		exp /= 2;
 	}
@@ -153,8 +157,9 @@ template <typename BaseT, typename ExpT> constexpr auto Power(BaseT base, ExpT e
 		// 2. Runtime vs Compile-time check for Fractional path
 		if consteval {
 			// Taken ONLY during compile-time evaluation
-			if (base <= 0.0f)
+			if (base <= 0.0f) {
 				return 0.0f;
+			}
 			return constexpr_exp(static_cast<float>(exp) * constexpr_ln(static_cast<float>(base)));
 		} else {
 			// Taken ONLY at runtime
@@ -218,10 +223,12 @@ static constexpr float TWO_PI = 6.28318530717958647692f;
 
 [[nodiscard]] constexpr float Sqrt(float x) noexcept {
 	// Domain check
-	if (x < 0.0f)
+	if (x < 0.0f) {
 		return 0.0f / 0.0f; // Return NaN
-	if (x == 0.0f || x == 1.0f)
+	}
+	if (x == 0.0f || x == 1.0f) {
 		return x;
+	}
 
 	if consteval {
 		// Newton's Method: x_{n+1} = 0.5 * (x_n + S / x_n)
@@ -235,8 +242,9 @@ static constexpr float TWO_PI = 6.28318530717958647692f;
 			curr = 0.5f * (curr + x / curr);
 
 			// Early exit if we stop changing
-			if (curr == prev)
+			if (curr == prev) {
 				break;
+			}
 		}
 		return curr;
 	} else {
@@ -246,7 +254,8 @@ static constexpr float TWO_PI = 6.28318530717958647692f;
 }
 [[nodiscard]]
 constexpr float Worley(float x, float y) {
-	int ix = (int)Floor(x), iy = (int)Floor(y);
+	int ix = (int)Floor(x);
+	int iy = (int)Floor(y);
 	float minDist = 1e9f;
 	for (int dy = -1; dy <= 1; ++dy) {
 		for (int dx = -1; dx <= 1; ++dx) {
@@ -265,8 +274,9 @@ template <typename T> [[nodiscard]] constexpr T Lerp(T a, T b, T t) noexcept {
 		if ((a <= 0 && b >= 0) || (a >= 0 && b <= 0)) {
 			return t * b + (1 - t) * a;
 		}
-		if (t == 1)
+		if (t == 1) {
 			return b;
+		}
 		const T x = a + t * (b - a);
 		return (t > 1) == (b > a) ? Max(b, x) : Min(b, x);
 	} else {

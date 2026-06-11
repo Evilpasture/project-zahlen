@@ -219,16 +219,18 @@ static Scene BuildScene(cgltf_data* data) {
 			scene.primitives.push_back({
 				.indexCount = static_cast<uint32_t>(prim->indices->count),
 				.firstIndex = firstIndex,
-				.materialIndex =
-					prim->material ? static_cast<int>(prim->material - data->materials) : -1,
+				.materialIndex = (prim->material != nullptr)
+									 ? static_cast<int>(prim->material - data->materials)
+									 : -1,
 			});
 		}
 	}
 
 	for (cgltf_size i = 0; i < data->nodes_count; ++i) {
 		cgltf_node* node = &data->nodes[i];
-		if (!node->mesh)
+		if (node->mesh == nullptr) {
 			continue;
+		}
 
 		float matrix[16];
 		cgltf_node_transform_world(node, matrix);
@@ -236,8 +238,10 @@ static Scene BuildScene(cgltf_data* data) {
 		std::copy(matrix, matrix + 16, worldMat.data.begin());
 
 		size_t meshIdx = node->mesh - data->meshes;
-		for (size_t primIdx : meshPrimIndices[meshIdx])
-			scene.drawCalls.push_back({&scene.primitives[primIdx], worldMat});
+		for (size_t primIdx : meshPrimIndices[meshIdx]) {
+			scene.drawCalls.push_back(
+				{.mesh = &scene.primitives[primIdx], .worldMatrix = worldMat});
+		}
 	}
 
 	return scene;
@@ -248,7 +252,9 @@ template <VkFormat F>
 static ZHLN::Vk::TextureAsset
 UploadTextureFromFile(ZHLN::Vk::Allocator& allocator, const ZHLN::Vk::Context& ctx,
 					  const VkImageCreateInfo& baseInfo, const std::string& fullPath) {
-	int tw, th, tc;
+	int tw = 0;
+	int th = 0;
+	int tc = 0;
 	// Force 4 channels (RGBA) to match our buffer size logic
 	stbi_uc* pixels = stbi_load(fullPath.c_str(), &tw, &th, &tc, STBI_rgb_alpha);
 	if (!pixels) {
@@ -257,7 +263,8 @@ UploadTextureFromFile(ZHLN::Vk::Allocator& allocator, const ZHLN::Vk::Context& c
 	}
 
 	VkImageCreateInfo info = baseInfo;
-	info.extent = {static_cast<uint32_t>(tw), static_cast<uint32_t>(th), 1};
+	info.extent = {
+		.width = static_cast<uint32_t>(tw), .height = static_cast<uint32_t>(th), .depth = 1};
 
 	// Specify <F> here!
 	ZHLN::Vk::TextureAsset result = ZHLN::Vk::UploadTexture<F>(allocator, ctx, info, pixels);
@@ -281,8 +288,9 @@ struct FpsCounter {
 		++frames;
 		auto now = std::chrono::high_resolution_clock::now();
 		float elapsed = std::chrono::duration<float>(now - lastUpdate).count();
-		if (elapsed < 1.0f)
+		if (elapsed < 1.0f) {
 			return {};
+		}
 
 		float fps = static_cast<float>(frames) / elapsed;
 		frames = 0;
@@ -301,7 +309,7 @@ auto main() -> int {
 	ZHLN::Demo::WindowState win =
 		ZHLN::Demo::InitWindow(1280, 720, "ZHLN Engine - Sponza Bindless");
 
-	if (!win.os_window) {
+	if (win.os_window == nullptr) {
 		std::println(stderr, "Failed to create OS window. Exiting.");
 		return -1;
 	}
@@ -401,21 +409,21 @@ auto main() -> int {
 
 	for (cgltf_size i = 0; i < gltf->nodes_count; ++i) {
 		cgltf_node* node = &gltf->nodes[i];
-		if (!node->light)
+		if (node->light == nullptr) {
 			continue;
+		}
 
-		std::string name = node->name ? node->name : "";
+		std::string name = (node->name != nullptr) ? node->name : "";
 
 		// 1. SKIP the Sun (it's handled by pc.lightDir)
-		if (node->light->type == cgltf_light_type_directional ||
-			name.find("SUN") != std::string::npos) {
+		if (node->light->type == cgltf_light_type_directional || name.contains("SUN")) {
 			// Calculate sunPos for the shadow matrix, then skip adding to buffer
 			sunPos = {node->translation[0], node->translation[1], node->translation[2]};
 			continue;
 		}
 
 		// 2. SKIP the HDRI Sky (this is the "Blue Splotch")
-		if (name.find("HDRI") != std::string::npos || name.find("SKY") != std::string::npos) {
+		if (name.contains("HDRI") || name.contains("SKY")) {
 			continue;
 		}
 
@@ -442,8 +450,9 @@ auto main() -> int {
 
 	// --- GPU buffers ---
 	ZHLN::Vk::CommandPool setupPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-	if (!setupPool.Allocate(1))
+	if (!setupPool.Allocate(1)) {
 		return -1;
+	}
 	VkCommandBuffer setupCmd = setupPool[0];
 	ZHLN_BeginCommandBuffer(setupCmd);
 
@@ -495,7 +504,7 @@ auto main() -> int {
 
 	uint32_t white_pixel = 0xFFFFFFFF;
 	VkImageCreateInfo dummyInfo = texBaseInfo;
-	dummyInfo.extent = {1, 1, 1};
+	dummyInfo.extent = {.width = 1, .height = 1, .depth = 1};
 
 	ZHLN::Vk::TextureAsset dummyTex =
 		ZHLN::Vk::UploadTexture<VK_FORMAT_R8G8B8A8_UNORM>(allocator, ctx, dummyInfo, &white_pixel);
@@ -512,10 +521,10 @@ auto main() -> int {
 		std::string fullPath = paths.asset_prefix + gltf->images[i].uri;
 
 		// Sponza uses "BaseColor" in the filenames for Albedo maps
-		if (fullPath.find("BaseColor") != std::string::npos) {
+		if (fullPath.contains("BaseColor")) {
 			textures[i] = UploadTextureFromFile<VK_FORMAT_R8G8B8A8_SRGB>(allocator, ctx,
 																		 texBaseInfo, fullPath);
-		} else if (fullPath.find("Lightmap") != std::string::npos) {
+		} else if (fullPath.contains("Lightmap")) {
 			// Lightmaps should ALWAYS be UNORM (they are data)
 			textures[i] = UploadTextureFromFile<VK_FORMAT_R8G8B8A8_UNORM>(allocator, ctx,
 																		  texBaseInfo, fullPath);
@@ -535,15 +544,15 @@ auto main() -> int {
 
 	auto sceneColor = ZHLN::Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
 		allocator, ctx, presentation.swapchain.Get().extent,
-		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+		{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
 
 	// --- Technique-Specific Targets ---
 	constexpr uint32_t SHADOW_RES = 4096;
 	auto shadowMap = ZHLN::Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-		allocator, ctx, {SHADOW_RES, SHADOW_RES},
-		VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+		allocator, ctx, {.width = SHADOW_RES, .height = SHADOW_RES},
+		{.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
 
-	VkExtent2D shadowExtent = {SHADOW_RES, SHADOW_RES};
+	VkExtent2D shadowExtent = {.width = SHADOW_RES, .height = SHADOW_RES};
 
 	// --- Samplers (Via Builder) ---
 	auto defaultSampler =
@@ -565,11 +574,12 @@ auto main() -> int {
 	VkDescriptorSet globalSet =
 		SceneLayout::Allocate(ctx.Device(), descPool.Get(), descLayout.Get());
 
-	SceneLayout::Write(
-		ctx.Device(), globalSet, ZHLN::Vk::SkipWrite{},
-		ZHLN::Vk::SamplerWrite{defaultSampler.Get()}, ZHLN::Vk::ImageWrite{shadowMap.view.Get()},
-		ZHLN::Vk::SamplerWrite{shadowSampler.Get()}, ZHLN::Vk::SamplerWrite{lightmapSampler.Get()},
-		ZHLN::Vk::BufferWrite{lightBuffer.Handle()});
+	SceneLayout::Write(ctx.Device(), globalSet, ZHLN::Vk::SkipWrite{},
+					   ZHLN::Vk::SamplerWrite{defaultSampler.Get()},
+					   ZHLN::Vk::ImageWrite{.view = shadowMap.view.Get()},
+					   ZHLN::Vk::SamplerWrite{shadowSampler.Get()},
+					   ZHLN::Vk::SamplerWrite{lightmapSampler.Get()},
+					   ZHLN::Vk::BufferWrite{.buffer = lightBuffer.Handle()});
 
 	// 1. Define the Registry tied to the Layout and specific Binding Index (0)
 	ZHLN::Vk::BindlessRegistry<SceneLayout, 0> bindless;
@@ -609,7 +619,8 @@ auto main() -> int {
 
 		// Only assign emissive if it actually exists in the glTF
 		if (mat->has_emissive_strength || (mat->emissive_texture.texture)) {
-			if (mat->emissive_texture.texture && mat->emissive_texture.texture->image) {
+			if ((mat->emissive_texture.texture != nullptr) &&
+				(mat->emissive_texture.texture->image != nullptr)) {
 				int imgIdx = static_cast<int>(mat->emissive_texture.texture->image - gltf->images);
 				materials[i].emissiveIdx = bindlessTextureIndices[imgIdx];
 			}
@@ -618,7 +629,7 @@ auto main() -> int {
 		// FIX for the Green Tile:
 		// Sponza's master_material or floor-markers often have a pure-green emissive factor.
 		// If the emissive index is fallback white, and the color is green, it glows.
-		if (mat->name && std::string(mat->name).find("master") != std::string::npos) {
+		if ((mat->name != nullptr) && std::string(mat->name).contains("master")) {
 			materials[i].emissiveIdx = blackTexIdx;
 		}
 
@@ -626,25 +637,25 @@ auto main() -> int {
 		if (mat->has_pbr_metallic_roughness &&
 			mat->pbr_metallic_roughness.base_color_texture.texture) {
 			cgltf_texture* tex = mat->pbr_metallic_roughness.base_color_texture.texture;
-			if (tex->image) {
+			if (tex->image != nullptr) {
 				int imgIdx = static_cast<int>(tex->image - gltf->images);
 				materials[i].albedoIdx = bindlessTextureIndices[imgIdx];
 			}
 		}
 
 		if (mat->has_pbr_metallic_roughness &&
-			mat->pbr_metallic_roughness.metallic_roughness_texture.texture) {
+			(mat->pbr_metallic_roughness.metallic_roughness_texture.texture != nullptr)) {
 			cgltf_texture* tex = mat->pbr_metallic_roughness.metallic_roughness_texture.texture;
-			if (tex->image) {
+			if (tex->image != nullptr) {
 				int imgIdx = static_cast<int>(tex->image - gltf->images);
 				materials[i].pbrIdx = bindlessTextureIndices[imgIdx];
 			}
 		}
 
 		// 2. Assign Normal Map
-		if (mat->normal_texture.texture) {
+		if (mat->normal_texture.texture != nullptr) {
 			cgltf_texture* tex = mat->normal_texture.texture;
-			if (tex->image) {
+			if (tex->image != nullptr) {
 				int imgIdx = static_cast<int>(tex->image - gltf->images);
 				materials[i].normalIdx = bindlessTextureIndices[imgIdx];
 			}
@@ -654,7 +665,7 @@ auto main() -> int {
 		for (uint32_t t = 0; t < gltf->images_count; ++t) {
 			std::string imgName = gltf->images[t].uri;
 			// Check if this image is a lightmap
-			if (imgName.find("Lightmap") != std::string::npos) {
+			if (imgName.contains("Lightmap")) {
 				// Basic heuristic: many Sponza versions map 1:1 by index or name
 				// For now, let's assume the first lightmap found is the global one
 				// or check for material name matches.
@@ -663,7 +674,8 @@ auto main() -> int {
 			}
 		}
 		// Standard GLTF Emissive slot
-		if (mat->emissive_texture.texture && mat->emissive_texture.texture->image) {
+		if ((mat->emissive_texture.texture != nullptr) &&
+			(mat->emissive_texture.texture->image != nullptr)) {
 			int imgIdx = static_cast<int>(mat->emissive_texture.texture->image - gltf->images);
 			materials[i].emissiveIdx = bindlessTextureIndices[imgIdx];
 		}
@@ -707,13 +719,22 @@ auto main() -> int {
 		ctx.Device(), paths.shadow_vert_spv, paths.shadow_frag_spv, "VSMain", "PSMain");
 
 	// Note: mainPush now needs FRAGMENT bit to read textureIndex
-	VkPushConstantRange mainPush = {VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-									sizeof(ZHLN::Vk::Passes::PBRPushConstants)};
-	VkPushConstantRange shadowPush = {VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Mat4)};
+	VkPushConstantRange mainPush = {.stageFlags =
+										VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+									.offset = 0,
+									.size = sizeof(ZHLN::Vk::Passes::PBRPushConstants)};
+	VkPushConstantRange shadowPush = {
+		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .offset = 0, .size = sizeof(Mat4)};
 
 	VkDescriptorSetLayout rawLayout = descLayout.Get();
-	ZHLN_PipelineLayoutDesc mainLayoutDesc = {&rawLayout, 1, &mainPush, 1};
-	ZHLN_PipelineLayoutDesc shadowLayoutDesc = {nullptr, 0, &shadowPush, 1};
+	ZHLN_PipelineLayoutDesc mainLayoutDesc = {.set_layouts = &rawLayout,
+											  .set_layout_count = 1,
+											  .push_constants = &mainPush,
+											  .push_constant_count = 1};
+	ZHLN_PipelineLayoutDesc shadowLayoutDesc = {.set_layouts = nullptr,
+												.set_layout_count = 0,
+												.push_constants = &shadowPush,
+												.push_constant_count = 1};
 
 	ZHLN::Vk::PipelineLayout pipelineLayout(
 		ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &mainLayoutDesc));
@@ -752,27 +773,31 @@ auto main() -> int {
 
 	while (win.running) {
 		ZHLN::Demo::ProcessEvents(win);
-		if (win.width == 0 || win.height == 0)
+		if (win.width == 0 || win.height == 0) {
 			continue;
+		}
 
 		if (win.resized) {
-			if (!presentation.Rebuild(win.width, win.height))
+			if (!presentation.Rebuild(win.width, win.height)) {
 				continue;
+			}
 
 			// FIX: Change R8G8B8A8 to B8G8R8A8 to match the variable type
 			sceneColor = ZHLN::Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
 				allocator, ctx, presentation.swapchain.Get().extent,
-				VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+				{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
 
 			// Update the FXAA descriptor set to point to the new image
-			FXAALayout::Write(ctx.Device(), fxaaSet, ZHLN::Vk::ImageWrite{sceneColor.view.Get()},
+			FXAALayout::Write(ctx.Device(), fxaaSet,
+							  ZHLN::Vk::ImageWrite{.view = sceneColor.view.Get()},
 							  ZHLN::Vk::SamplerWrite{defaultSampler.Get()});
 
 			win.resized = false;
 		}
 
-		if (!presentation.swapchain.Valid() || presentation.swapchain.Get().extent.width == 0)
+		if (!presentation.swapchain.Valid() || presentation.swapchain.Get().extent.width == 0) {
 			continue;
+		}
 
 		float time =
 			std::chrono::duration<float>(std::chrono::high_resolution_clock::now() - startTime)
@@ -808,8 +833,9 @@ auto main() -> int {
 		Mat4 lightSpaceBiased = Multiply(biasMatrix, shadowProjView);
 
 		// FPS
-		if (auto title = fpsCounter.Tick(scene.drawCalls.size()); !title.empty())
+		if (auto title = fpsCounter.Tick(scene.drawCalls.size()); !title.empty()) {
 			ZHLN::Demo::UpdateWindowTitle(win, title.c_str());
+		}
 
 		// Frame sync
 		const ZHLN_FrameSync& frame_sync = sync[frame_index];
@@ -866,10 +892,17 @@ auto main() -> int {
 			.ibo = ibo.Handle()};
 
 		// 3. Define the Pass Configurations
-		AppFrameData frameData = {
-			.shadowData = {shadowPipeline.Get(), shadowLayout.Get(), &pbrCalls, &sceneCtx},
-			.pbrData = {pipeline.Get(), pipelineLayout.Get(), &pbrCalls, &sceneCtx},
-			.fxaaData = {fxaaPipeline.Get(), fxaaPipelineLayout.Get(), fxaaSet}};
+		AppFrameData frameData = {.shadowData = {.pipeline = shadowPipeline.Get(),
+												 .layout = shadowLayout.Get(),
+												 .drawCalls = &pbrCalls,
+												 .scene = &sceneCtx},
+								  .pbrData = {.pipeline = pipeline.Get(),
+											  .layout = pipelineLayout.Get(),
+											  .drawCalls = &pbrCalls,
+											  .scene = &sceneCtx},
+								  .fxaaData = {.pipeline = fxaaPipeline.Get(),
+											   .layout = fxaaPipelineLayout.Get(),
+											   .set = fxaaSet}};
 
 		// ====================================================================
 		// 4. Procedural Pipeline Execution with Compile-Time Layout Validation
@@ -888,7 +921,8 @@ auto main() -> int {
 		// Pass 1: Shadows
 		auto shadow_att =
 			ZHLN::Vk::Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, shadow_u);
-		ZHLN::Vk::DynamicPass({SHADOW_RES, SHADOW_RES}) // Compile-time deduced starting state
+		ZHLN::Vk::DynamicPass(
+			{.width = SHADOW_RES, .height = SHADOW_RES}) // Compile-time deduced starting state
 			.AddDepth(shadow_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1.0f)
 			.Execute(cmd, [&]() { ZHLN::Vk::Passes::DrawShadows(cmd, frameData.shadowData); });
 
@@ -904,7 +938,7 @@ auto main() -> int {
 		ZHLN::Vk::DynamicPass(
 			presentation.swapchain.Get().extent) // Compile-time deduced starting state
 			.AddColor(color_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-					  {0.05f, 0.05f, 0.07f, 1.0f})
+					  {.r = 0.05f, .g = 0.05f, .b = 0.07f, .a = 1.0f})
 			.AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1.0f)
 			.Execute(cmd, [&]() { ZHLN::Vk::Passes::DrawPBR(cmd, frameData.pbrData); });
 

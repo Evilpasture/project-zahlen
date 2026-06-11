@@ -148,12 +148,7 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 RenderContext::~RenderContext() {
 	if (_impl && (_impl->ctx.Device() != nullptr)) {
 		vkDeviceWaitIdle(_impl->ctx.Device());
-		if (_impl->initFence != VK_NULL_HANDLE) {
-			vkDestroyFence(_impl->ctx.Device(), _impl->initFence, nullptr);
-		}
-		if (_impl->stagingContext != nullptr) {
-			delete _impl->stagingContext;
-		}
+		_impl->stagingContext.reset();
 		ImGui_ImplVulkan_Shutdown();
 		ImGui_ImplGlfw_Shutdown();
 		ImGui::DestroyContext();
@@ -165,7 +160,7 @@ RenderContext::~RenderContext() {
 void RenderContext::Impl::InitShadowResources() {
 	shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
 		allocator, ctx, {.width = SHADOW_RES, .height = SHADOW_RES},
-		VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+		{.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
 
 	shadowSampler = Vk::SamplerBuilder{}
 						.Linear()
@@ -272,7 +267,7 @@ void RenderContext::Impl::InitBindless() {
 		Vk::Buffer::Create(allocator.Get(), sizeof(float) * 4 * 1000000,
 						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
-	stagingContext = new Vk::StagingContext(allocator, ctx);
+	stagingContext = std::make_unique<Vk::StagingContext>(allocator, ctx);
 	stagingContext->Begin();
 
 	iblPayload = Vk::IBLProcessor::Bake(*this, *stagingContext);
@@ -316,10 +311,10 @@ void RenderContext::Impl::InitBindless() {
 										matRawSize);
 	stagingContext->AddBuffer(std::move(ltcStaging));
 
+	stagingContext->ExecuteAsync();
+
 	ltcMatView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle());
 	ltcAmpView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle());
-
-	initFence = stagingContext->ExecuteAsync();
 
 	// Update global descriptor bindings
 	Vk::DescriptorUpdater bindlessRegistry;
