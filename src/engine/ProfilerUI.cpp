@@ -1,3 +1,5 @@
+// src/engine/ProfilerUI.cpp
+
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Render.hpp"
 #include "ecs/ECS.hpp"
@@ -5,62 +7,91 @@
 
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Profiler.hpp>
+#include <algorithm>
+#include <array>
 #include <chrono>
+#include <detail/Atomic.hpp>
+#include <detail/SkipList.hpp>
 #include <imgui.h>
-#include <map>
-#include <mutex>
-#include <string>
-#include <vector>
 
 namespace ZHLN {
 
 namespace {
 
-struct ProfileDataInternal {
-	float cpuTimeMS = 0.0f;
-	float rollingAverageMS = 0.0f;
-	std::vector<float> history;
+template <size_t N = 100> struct ProfileDataInternal {
+	// Using ZHLN::Atomic preserves trivial copy/construction for the SkipList
+	std::array<ZHLN::Atomic<float>, N> history;
+	ZHLN::Atomic<size_t> writeIndex;
+	ZHLN::Atomic<float> latestValue;
+	ZHLN::Atomic<float> rollingAverageMS;
+
+	void Push(float value) noexcept {
+		size_t idx = writeIndex.fetch_add(1, std::memory_order_relaxed) % N;
+		history[idx].store(value, std::memory_order_relaxed);
+		latestValue.store(value, std::memory_order_relaxed);
+
+		// Lock-free rolling average update
+		float avg = rollingAverageMS.load(std::memory_order_relaxed);
+		float nextAvg = avg * 0.95f + value * 0.05f;
+		rollingAverageMS.store(nextAvg, std::memory_order_relaxed);
+	}
 };
 
-static std::map<std::string, ProfileDataInternal, std::less<>> s_Metrics;
-static ZHLN::Mutex s_ProfilerMutex;
+// Safety assert to ensure compilers never silently break the POD contract
+static_assert(std::is_trivially_copyable_v<ProfileDataInternal<100>> &&
+				  std::is_trivially_default_constructible_v<ProfileDataInternal<100>>,
+			  "ProfileDataInternal must remain a POD for SkipList compatibility");
+
+// Stored completely by-value with zero runtime allocations
+static SkipList<std::string, ProfileDataInternal<100>, std::less<>> s_Metrics;
 
 } // namespace
 
 // ============================================================================
-// Profiler & ScopedTimer Static Implementations
+// Profiler & ScopedTimer Implementations
 // ============================================================================
 
 void CPUProfiler::Record(std::string_view name, float timeMS) noexcept {
-	std::lock_guard<ZHLN::Mutex> lock(s_ProfilerMutex);
+	std::string key(name);
+	const auto* dataPtr = s_Metrics.Find(key);
 
-	// 1. Transparent Lookup: Compares string_view against std::string nodes directly in-place
-	auto it = s_Metrics.find(name);
-
-	// 2. Only allocate a persistent std::string if the stage doesn't exist yet
-	if (it == s_Metrics.end()) {
-		it = s_Metrics.emplace(std::string(name), ProfileDataInternal{}).first;
+	if (dataPtr == nullptr) [[unlikely]] {
+		s_Metrics.Insert(key, ProfileDataInternal<100>{});
+		dataPtr = s_Metrics.Find(key);
 	}
 
-	auto& data = it->second;
-	data.cpuTimeMS = timeMS;
-	data.rollingAverageMS = data.rollingAverageMS * 0.95f + timeMS * 0.05f;
-
-	data.history.push_back(timeMS);
-	if (data.history.size() > 100) {
-		data.history.erase(data.history.begin());
-	}
+	// Safely cast away constness of the stable payload node
+	auto* data = const_cast<ProfileDataInternal<100>*>(dataPtr);
+	data->Push(timeMS);
 }
 
 void CPUProfiler::IterateMetrics(MetricCallback callback, void* userData) noexcept {
 	if (callback == nullptr) {
 		return;
 	}
-	std::lock_guard<ZHLN::Mutex> lock(s_ProfilerMutex);
-	for (const auto& [name, data] : s_Metrics) {
-		callback(name.c_str(), data.cpuTimeMS, data.rollingAverageMS, data.history.data(),
-				 data.history.size(), userData);
-	}
+
+	s_Metrics.Iterate([&](const std::string& name, const ProfileDataInternal<100>& data) {
+		float cpuTime = data.latestValue.load(std::memory_order_relaxed);
+		float rollingAvg = data.rollingAverageMS.load(std::memory_order_relaxed);
+
+		size_t count = data.writeIndex.load(std::memory_order_relaxed);
+		size_t limit = std::min(count, size_t(100));
+
+		// Reconstruct chronological history on the stack with zero allocations
+		std::array<float, 100> flatHistory{};
+		if (count < 100) {
+			for (size_t j = 0; j < count; ++j) {
+				flatHistory[j] = data.history[j].load(std::memory_order_relaxed);
+			}
+		} else {
+			size_t startIdx = count % 100;
+			for (size_t j = 0; j < 100; ++j) {
+				flatHistory[j] = data.history[(startIdx + j) % 100].load(std::memory_order_relaxed);
+			}
+		}
+
+		callback(name.c_str(), cpuTime, rollingAvg, flatHistory.data(), limit, userData);
+	});
 }
 
 ScopedTimer::ScopedTimer(const char* n) noexcept : name(n) {
