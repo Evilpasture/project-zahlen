@@ -4,10 +4,6 @@
 
 namespace ZHLN::Vk {
 
-/**
- * @brief Bundles a GPU Image, its View, and its RenderGraph State Tracker.
- * Perfect for Shadows, G-Buffers, Bloom, and other offscreen passes.
- */
 template <VkFormat F> struct RenderTarget {
 	Image image;
 	ImageView view;
@@ -15,14 +11,23 @@ template <VkFormat F> struct RenderTarget {
 
 	RenderTarget() = default;
 
-	// Rule of Five: Enforce move-only semantics and satisfy static analysis
 	RenderTarget(const RenderTarget&) = delete;
 	auto operator=(const RenderTarget&) -> RenderTarget& = delete;
-	RenderTarget(RenderTarget&&) noexcept = default;
-	auto operator=(RenderTarget&&) noexcept -> RenderTarget& = default;
-	~RenderTarget() = default; // <-- Defaulted destructor safely completes the Rule of Five
 
-	// Yields the initial untracked state representation
+	RenderTarget(RenderTarget&& other) noexcept
+		: image(std::move(other.image)), view(std::move(other.view)), extent(other.extent) {}
+
+	auto operator=(RenderTarget&& other) noexcept -> RenderTarget& {
+		if (this != &other) {
+			image = std::move(other.image);
+			view = std::move(other.view);
+			extent = other.extent;
+		}
+		return *this;
+	}
+
+	~RenderTarget() = default;
+
 	[[nodiscard]] auto State() const noexcept -> TypedImage<VK_IMAGE_LAYOUT_UNDEFINED> {
 		return {.handle = image.Handle(),
 				.view = view.Get(),
@@ -65,5 +70,12 @@ template <VkFormat F> struct RenderTarget {
 	[[nodiscard]] auto Valid() const noexcept -> bool { return image.Valid() && view.Valid(); }
 	explicit operator bool() const noexcept { return Valid(); }
 };
+
+// Define the Transition overload here where RenderTarget is fully complete [3]
+template <VkImageLayout TargetLayout, VkFormat F>
+[[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const RenderTarget<F>& rt,
+										Tag<TargetLayout> /*unused*/) noexcept {
+	return Transition<TargetLayout>(cmd, rt.State());
+}
 
 } // namespace ZHLN::Vk

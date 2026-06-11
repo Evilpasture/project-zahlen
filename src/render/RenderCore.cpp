@@ -1,5 +1,7 @@
 #include "RenderCore.hpp"
 
+#include "Allocator.hpp"
+
 #include <cstdlib>
 #include <fstream>
 #include <print>
@@ -70,6 +72,10 @@ auto ShaderStages::FromFiles(const VkDevice device, const std::filesystem::path&
 		.code = frag_spv.data(), .size = frag_spv.size() * 4, .entry_point = frag_entry};
 
 	return Create(device, v_desc, f_desc);
+}
+
+auto Allocator::Init(const Context& ctx) noexcept -> bool {
+	return Init(ctx.Instance(), ctx.Physical(), ctx.Device());
 }
 
 } // namespace ZHLN::Vk

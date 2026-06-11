@@ -5,6 +5,7 @@
 #include <Zahlen/Window.hpp>
 #include <detail/String.hpp>
 #include <memory>
+#include <optional>
 
 namespace ZHLN {
 
@@ -24,6 +25,8 @@ class ZHLN_API RenderContext {
 
 	RenderContext(const RenderContext&) = delete;
 	auto operator=(const RenderContext&) -> RenderContext& = delete;
+
+	[[nodiscard]] std::optional<Extent2D> GetFramebufferSize() const;
 
 	void BeginFrame();
 	void EndFrame();
@@ -58,10 +61,8 @@ class ZHLN_API RenderContext {
 	std::unique_ptr<Impl> _impl;
 };
 
-struct Color4;
 namespace Renderer {
-void Clear(RenderContext& ctx, const ZHLN::Color4& color, float depth = 1.0f,
-		   bool useSecondaries = true);
+
 void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj,
 				 const JPH::Mat44& unjitteredViewProj);
 void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,

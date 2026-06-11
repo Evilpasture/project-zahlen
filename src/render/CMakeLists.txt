@@ -53,7 +53,6 @@ target_include_directories(zahlen_render PUBLIC
 )
 
 target_compile_definitions(zahlen_render PRIVATE
-    VMA_IMPLEMENTATION
     VMA_STATIC_VULKAN_FUNCTIONS=0
     VMA_DYNAMIC_VULKAN_FUNCTIONS=1
 )

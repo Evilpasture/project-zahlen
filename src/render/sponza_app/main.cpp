@@ -888,8 +888,8 @@ auto main() -> int {
 		// Pass 1: Shadows
 		auto shadow_att =
 			ZHLN::Vk::Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, shadow_u);
-		ZHLN::Vk::DynamicPass<0, true>({SHADOW_RES, SHADOW_RES})
-			.Depth(shadow_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1.0f)
+		ZHLN::Vk::DynamicPass({SHADOW_RES, SHADOW_RES}) // Compile-time deduced starting state
+			.AddDepth(shadow_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1.0f)
 			.Execute(cmd, [&]() { ZHLN::Vk::Passes::DrawShadows(cmd, frameData.shadowData); });
 
 		auto shadow_ro =
@@ -901,10 +901,11 @@ auto main() -> int {
 		auto depth_att =
 			ZHLN::Vk::Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, depth_u);
 
-		ZHLN::Vk::DynamicPass<1, true>(presentation.swapchain.Get().extent)
-			.Color(0, color_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE)
-			.Depth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1.0f)
-			.ClearColor(0, 0.05f, 0.05f, 0.07f, 1.0f)
+		ZHLN::Vk::DynamicPass(
+			presentation.swapchain.Get().extent) // Compile-time deduced starting state
+			.AddColor(color_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+					  {0.05f, 0.05f, 0.07f, 1.0f})
+			.AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1.0f)
 			.Execute(cmd, [&]() { ZHLN::Vk::Passes::DrawPBR(cmd, frameData.pbrData); });
 
 		auto color_ro =
@@ -913,8 +914,9 @@ auto main() -> int {
 		// Pass 3: FXAA -> Swapchain
 		auto swap_att = ZHLN::Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, swap_u);
 
-		ZHLN::Vk::DynamicPass<1, false>(presentation.swapchain.Get().extent)
-			.Color(0, swap_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_STORE)
+		ZHLN::Vk::DynamicPass(
+			presentation.swapchain.Get().extent) // Compile-time deduced starting state
+			.AddColor(swap_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_STORE)
 			.Execute(cmd, [&]() { ZHLN::Vk::Passes::DrawFXAA(cmd, frameData.fxaaData); });
 
 		// Present Transition

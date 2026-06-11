@@ -1263,69 +1263,88 @@ inline void ExecuteCommands(const VkCommandBuffer primary,
 // ============================================================================
 // Type-Safe, Zero-Allocation Dynamic Render Pass Builder
 // ============================================================================
-template <size_t ColorCount = 1, bool HasDepth = false> class DynamicPass {
+template <VkImageLayout Layout> struct Tag {};
+
+inline constexpr Tag<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> AsColorAttachment;
+inline constexpr Tag<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> AsReadOnly;
+inline constexpr Tag<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> AsDepthAttachment;
+inline constexpr Tag<VK_IMAGE_LAYOUT_PRESENT_SRC_KHR> AsPresent;
+
+template <VkImageLayout TargetLayout, VkImageLayout OldLayout>
+[[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout>& img,
+										Tag<TargetLayout> /*unused*/) noexcept {
+	return Transition<TargetLayout>(cmd, img);
+}
+
+template <size_t ColorCount = 0, bool HasDepth = false> class DynamicPass {
   public:
 	constexpr explicit DynamicPass(VkExtent2D extent) noexcept : _extent(extent) {}
 
+	// Move constructor to allow chaining states cleanly
+	template <size_t InsideCount, bool InsideDepth>
+	constexpr DynamicPass(DynamicPass<InsideCount, InsideDepth>&& other,
+						  std::array<VkRenderingAttachmentInfo, ColorCount>&& colors,
+						  VkRenderingAttachmentInfo depth) noexcept
+		: _extent(other._extent), _flags(other._flags), _colors(std::move(colors)), _depth(depth) {}
+
+	// AddColor pushes the type state from ColorCount to ColorCount + 1
 	template <VkImageLayout Layout>
-	constexpr auto Color(size_t index, const TypedImage<Layout>& img,
-						 VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
-						 VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE) noexcept
-		-> DynamicPass& {
+	constexpr auto
+	AddColor(const TypedImage<Layout>& img, VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+			 VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+			 const ZHLN::Color4& clearColor = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f}) noexcept
+		-> DynamicPass<ColorCount + 1, HasDepth> {
 		static_assert(Layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL ||
-						  Layout == VK_IMAGE_LAYOUT_GENERAL,
-					  "ZHLN Compile-Time Error: Color attachment image must be transitioned to "
-					  "VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL before binding.");
+					  Layout == VK_IMAGE_LAYOUT_GENERAL);
 
-		_colors[index] = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-						  .pNext = nullptr,
-						  .imageView = img.view,
-						  .imageLayout = Layout,
-						  .resolveMode = VK_RESOLVE_MODE_NONE,
-						  .resolveImageView = VK_NULL_HANDLE,
-						  .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-						  .loadOp = loadOp,
-						  .storeOp = storeOp,
-						  .clearValue = {.color = {.float32 = {0.0f, 0.0f, 0.0f, 1.0f}}}};
-		return *this;
+		std::array<VkRenderingAttachmentInfo, ColorCount + 1> nextColors{};
+		for (size_t i = 0; i < ColorCount; ++i) {
+			nextColors[i] = _colors[i];
+		}
+
+		nextColors[ColorCount] = {
+			.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+			.pNext = nullptr,
+			.imageView = img.view,
+			.imageLayout = Layout,
+			.resolveMode = VK_RESOLVE_MODE_NONE,
+			.resolveImageView = VK_NULL_HANDLE,
+			.resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.loadOp = loadOp,
+			.storeOp = storeOp,
+			.clearValue = {
+				.color = {.float32 = {clearColor.r, clearColor.g, clearColor.b, clearColor.a}}}};
+
+		return DynamicPass<ColorCount + 1, HasDepth>(std::move(*this), std::move(nextColors),
+													 _depth);
 	}
 
+	// AddDepth flips the template boolean state to true
 	template <VkImageLayout Layout>
-	constexpr auto Depth(const TypedImage<Layout>& img,
-						 VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
-						 VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-						 float clearVal = 1.0f) noexcept -> DynamicPass&
-		requires(HasDepth)
-	{
+	constexpr auto AddDepth(const TypedImage<Layout>& img,
+							VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+							VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+							float clearVal = 1.0f) noexcept -> DynamicPass<ColorCount, true> {
+		static_assert(!HasDepth, "ZHLN Execution Error: Depth target already bound to this pass.");
 		static_assert(Layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL ||
-						  Layout == VK_IMAGE_LAYOUT_GENERAL,
-					  "ZHLN Compile-Time Error: Depth attachment image must be transitioned to "
-					  "VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL before binding.");
+					  Layout == VK_IMAGE_LAYOUT_GENERAL);
 
-		_depth = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-				  .pNext = nullptr,
-				  .imageView = img.view,
-				  .imageLayout = Layout,
-				  .resolveMode = VK_RESOLVE_MODE_NONE,
-				  .resolveImageView = VK_NULL_HANDLE,
-				  .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-				  .loadOp = loadOp,
-				  .storeOp = storeOp,
-				  .clearValue = {.depthStencil = {.depth = clearVal, .stencil = 0}}};
-		return *this;
-	}
-	constexpr auto ClearColor(size_t index, const ZHLN::Color4& color) noexcept -> DynamicPass& {
-		_colors[index].clearValue.color = {.float32 = {color.r, color.g, color.b, color.a}};
-		return *this;
+		VkRenderingAttachmentInfo nextDepth = {
+			.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+			.pNext = nullptr,
+			.imageView = img.view,
+			.imageLayout = Layout,
+			.resolveMode = VK_RESOLVE_MODE_NONE,
+			.resolveImageView = VK_NULL_HANDLE,
+			.resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.loadOp = loadOp,
+			.storeOp = storeOp,
+			.clearValue = {.depthStencil = {.depth = clearVal, .stencil = 0}}};
+
+		return DynamicPass<ColorCount, true>(std::move(*this), std::move(_colors), nextDepth);
 	}
 
-	constexpr auto ClearColor(size_t index, float r, float g, float b, float a = 1.0f) noexcept
-		-> DynamicPass& {
-		_colors[index].clearValue.color = {.float32 = {r, g, b, a}};
-		return *this;
-	}
-
-	constexpr auto Flags(VkRenderingFlags flags) noexcept -> DynamicPass& {
+	constexpr auto Flags(VkRenderingFlags flags) noexcept -> DynamicPass<ColorCount, HasDepth>& {
 		_flags = flags;
 		return *this;
 	}
@@ -1340,7 +1359,7 @@ template <size_t ColorCount = 1, bool HasDepth = false> class DynamicPass {
 			.viewMask = 0,
 			.colorAttachmentCount = ColorCount,
 			.pColorAttachments = ColorCount > 0 ? _colors.data() : nullptr,
-			.pDepthAttachment = GetDepthPtr(), // <-- Safely resolve using the constexpr helper
+			.pDepthAttachment = GetDepthPtr(),
 			.pStencilAttachment = nullptr,
 		};
 
@@ -1362,7 +1381,8 @@ template <size_t ColorCount = 1, bool HasDepth = false> class DynamicPass {
 	}
 
   private:
-	// This constexpr helper safely discards the invalid pointer conversion branch at compile time
+	template <size_t C, bool D> friend class DynamicPass;
+
 	[[nodiscard]] constexpr auto GetDepthPtr() const noexcept -> const VkRenderingAttachmentInfo* {
 		if constexpr (HasDepth) {
 			return &_depth;
@@ -1374,9 +1394,11 @@ template <size_t ColorCount = 1, bool HasDepth = false> class DynamicPass {
 	VkExtent2D _extent;
 	VkRenderingFlags _flags = 0;
 	std::array<VkRenderingAttachmentInfo, ColorCount> _colors{};
-	[[no_unique_address]] std::conditional_t<HasDepth, VkRenderingAttachmentInfo, std::monostate>
-		_depth{};
+	VkRenderingAttachmentInfo _depth{};
 };
+
+// C++17 Class Template Argument Deduction (CTAD) Guide
+DynamicPass(VkExtent2D) -> DynamicPass<0, false>;
 
 // ============================================================================
 // Consolidated Graphics State & Instanced Draw Dispatcher

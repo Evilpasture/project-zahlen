@@ -31,24 +31,19 @@ auto main() -> int {
 	inst_desc.extension_count = static_cast<uint32_t>(inst_exts.size());
 
 	// Compile-time feature chain building
-	auto swap_maint =
-		ZHLN::Vk::FeatureFactory::Create<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>(
-			[](auto& f) { f.swapchainMaintenance1 = VK_TRUE; });
-
-	auto feat13 = ZHLN::Vk::FeatureFactory::Create<VkPhysicalDeviceVulkan13Features>([&](auto& f) {
-		f.pNext = has_maint1 ? &swap_maint : nullptr;
-		f.synchronization2 = VK_TRUE;
-		f.dynamicRendering = VK_TRUE;
-	});
-
-	auto feat12 =
-		ZHLN::Vk::FeatureFactory::Create<VkPhysicalDeviceVulkan12Features>([&feat13](auto& f) {
-			f.pNext = &feat13;
-			f.bufferDeviceAddress = VK_TRUE;
-		});
-
-	auto feat2 = ZHLN::Vk::FeatureFactory::Create<VkPhysicalDeviceFeatures2>(
-		[&feat12](auto& f) { f.pNext = &feat12; });
+	auto features =
+		ZHLN::Vk::FeatureChainBuilder()
+			.Require<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>([has_maint1](auto& f) {
+				f.swapchainMaintenance1 = has_maint1 ? VK_TRUE : VK_FALSE;
+			})
+			.Require<VkPhysicalDeviceVulkan13Features>([](auto& f) {
+				f.synchronization2 = VK_TRUE;
+				f.dynamicRendering = VK_TRUE;
+			})
+			.Require<VkPhysicalDeviceVulkan12Features>(
+				[](auto& f) { f.bufferDeviceAddress = VK_TRUE; })
+			.Require<VkPhysicalDeviceFeatures2>([](auto& _) {})
+			.Build();
 
 	std::vector<const char*> dev_exts = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 	if (has_maint1) {
@@ -61,7 +56,7 @@ auto main() -> int {
 
 	ZHLN_DeviceDesc dev_desc = {.extensions = dev_exts.data(),
 								.extension_count = static_cast<uint32_t>(dev_exts.size()),
-								.features = &feat2,
+								.features = features.GetRoot(),
 								.enable_validation = true};
 
 	auto ctx = ZHLN::Vk::Context::Create(inst_desc, {VK_NULL_HANDLE, VK_NULL_HANDLE}, dev_desc);
@@ -158,9 +153,10 @@ auto main() -> int {
 		auto swap_att = ZHLN::Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, swap_u);
 
 		// --- MODERN FLUENT RENDER PASS EXECUTION ---
-		ZHLN::Vk::DynamicPass<1, false>(swapchain.Get().extent)
-			.Color(0, swap_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE)
-			.ClearColor(0, 0.01f, 0.01f, 0.02f, 1.0f)
+		ZHLN::Vk::DynamicPass(
+			swapchain.Get().extent) // Compile-time deduced starting state via CTAD [1]
+			.AddColor(swap_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+					  {0.01f, 0.01f, 0.02f, 1.0f})
 			.Execute(cmd, [&]() {
 				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
 				vkCmdDraw(cmd, 3, 1, 0, 0);

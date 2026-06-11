@@ -232,8 +232,6 @@ bool InitializeGame(Engine& engine, GameContext& game) {
 }
 
 void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
-	// engine.BeginFrame() is now placed at the start of RenderGame to avoid logical race conditions
-	engine.BeginFrame();
 
 	auto& rc = engine.GetRenderContext();
 	auto& reg = engine.GetRegistry();
@@ -428,6 +426,8 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 		}
 	}
 
+	rc.SetTAAState(game.graphics.taaState);
+
 	FrameUniforms uniforms{};
 	uniforms.viewProj = vp;
 	uniforms.unjitteredViewProj = unjitteredVp;
@@ -459,6 +459,8 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 	Renderer::SetFrameData(rc, uniforms, shadowProjView);
 
 	Renderer::SetMatrices(rc, vp, unjitteredVp);
+
+	engine.BeginFrame();
 
 	JPH::Mat44 playerTransform = JPH::Mat44::sIdentity();
 	if (reg.IsAlive(game.playerEntity)) {
@@ -527,8 +529,6 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 						   lineTransform, lineTransform, len);
 		}
 	}
-
-	rc.SetTAAState(game.graphics.taaState);
 
 	engine.EndFrame();
 

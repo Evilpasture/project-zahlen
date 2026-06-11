@@ -33,6 +33,35 @@ struct IBLPayload {
 
 namespace ZHLN {
 
+enum RenderAttachmentSlot : uint8_t {
+	ATTACHMENT_SLOT_SCENE_COLOR = 0,
+	ATTACHMENT_SLOT_VELOCITY = 1,
+	ATTACHMENT_SLOT_ACCUM_0 = 2,
+	ATTACHMENT_SLOT_ACCUM_1 = 3,
+	ATTACHMENT_SLOT_NORMAL_ROUGHNESS = 4,
+	ATTACHMENT_COUNT = 5
+};
+
+enum GBufferAttachmentSlot : uint8_t {
+	GBUFFER_SLOT_SCENE_COLOR = 0,
+	GBUFFER_SLOT_VELOCITY = 1,
+	GBUFFER_SLOT_NORMAL_ROUGHNESS = 2,
+	GBUFFER_COLOR_COUNT = 3
+};
+
+static constexpr uint32_t kGpuCullingSentinel = 4294967295u; // 0xFFFFFFFF [1]
+static constexpr Color4 kClearColorNormalRoughness = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
+
+static constexpr Color4 kClearColorBlack = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f};
+
+static constexpr uint32_t kMainPassColorAttachmentCount = 2;
+static constexpr uint32_t kParallelChunkSize = 256;
+
+static constexpr Color4 kClearColorScene = {
+	.r = 0.08f, .g = 0.09f, .b = 0.12f, .a = 1.0f}; // G-Buffer background theme
+static constexpr Color4 kClearColorVelocity = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
+static constexpr float kClearDepthValue = 1.0f;
+
 // --- Layouts and Types ---
 
 using GlobalSceneLayout = Vk::DescriptorLayout<
@@ -236,18 +265,11 @@ struct RenderContext::Impl {
 	void InitPostProcessing();
 	void SetupUI(GLFWwindow* window);
 
-	// Decomposed Rendering Stage Helpers
 	void SortDrawQueue();
-	Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>
-	GetDepthAttachmentForMainPass(VkCommandBuffer cmd);
-	void RenderShadowPass(VkCommandBuffer cmd);
-	bool RenderMainPassGpuCulling(RenderContext& ctx, VkCommandBuffer cmd);
-	void RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd);
-	void ApplyTAAPass(VkCommandBuffer cmd, VkExtent2D extent);
-	void BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, uint32_t imageIdx);
 	void SubmitFrame();
-};
 
+	// REMOVED: RenderShadowPass, RenderMainPass, ApplyTAAPass, BlitAndDrawUI...
+};
 } // namespace ZHLN
 
 namespace ZHLN::Vk {
