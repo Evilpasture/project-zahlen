@@ -22,8 +22,8 @@ struct ProfileDataInternal {
 	std::vector<float> history;
 };
 
-static std::map<std::string, ProfileDataInternal> s_Metrics;
-static std::mutex s_ProfilerMutex;
+static std::map<std::string, ProfileDataInternal, std::less<>> s_Metrics;
+static ZHLN::Mutex s_ProfilerMutex;
 
 } // namespace
 
@@ -31,9 +31,18 @@ static std::mutex s_ProfilerMutex;
 // Profiler & ScopedTimer Static Implementations
 // ============================================================================
 
-void Profiler::Record(const char* name, float timeMS) noexcept {
-	std::lock_guard<std::mutex> lock(s_ProfilerMutex);
-	auto& data = s_Metrics[name];
+void CPUProfiler::Record(std::string_view name, float timeMS) noexcept {
+	std::lock_guard<ZHLN::Mutex> lock(s_ProfilerMutex);
+
+	// 1. Transparent Lookup: Compares string_view against std::string nodes directly in-place
+	auto it = s_Metrics.find(name);
+
+	// 2. Only allocate a persistent std::string if the stage doesn't exist yet
+	if (it == s_Metrics.end()) {
+		it = s_Metrics.emplace(std::string(name), ProfileDataInternal{}).first;
+	}
+
+	auto& data = it->second;
 	data.cpuTimeMS = timeMS;
 	data.rollingAverageMS = data.rollingAverageMS * 0.95f + timeMS * 0.05f;
 
@@ -43,11 +52,11 @@ void Profiler::Record(const char* name, float timeMS) noexcept {
 	}
 }
 
-void Profiler::IterateMetrics(MetricCallback callback, void* userData) noexcept {
+void CPUProfiler::IterateMetrics(MetricCallback callback, void* userData) noexcept {
 	if (callback == nullptr) {
 		return;
 	}
-	std::lock_guard<std::mutex> lock(s_ProfilerMutex);
+	std::lock_guard<ZHLN::Mutex> lock(s_ProfilerMutex);
 	for (const auto& [name, data] : s_Metrics) {
 		callback(name.c_str(), data.cpuTimeMS, data.rollingAverageMS, data.history.data(),
 				 data.history.size(), userData);
@@ -64,7 +73,7 @@ ScopedTimer::~ScopedTimer() noexcept {
 	uint64_t end =
 		std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
 	float duration = static_cast<float>(end - start) / 1000.0f; // Microseconds to milliseconds
-	Profiler::Record(name, duration);
+	CPUProfiler::Record(name, duration);
 }
 
 // ============================================================================
@@ -74,12 +83,21 @@ ScopedTimer::~ScopedTimer() noexcept {
 void DrawProfiler(Engine& engine, TAAState& taaState) {
 	if (ImGui::Begin("Zahlen Profiler")) {
 
-		// 1. CPU TIMINGS
-		if (ImGui::CollapsingHeader("CPU Timings", ImGuiTreeNodeFlags_DefaultOpen)) {
-			Profiler::IterateMetrics(
+		// 1. TIMINGS (Rendered together but clearly separated by name)
+		if (ImGui::CollapsingHeader("Performance Timings", ImGuiTreeNodeFlags_DefaultOpen)) {
+			CPUProfiler::IterateMetrics(
 				[](const char* name, float cpuTimeMS, float rollingAverageMS, const float* history,
 				   size_t historyCount, void*) {
-					ImGui::Text("%-20s: %.3f ms (Avg: %.3f)", name, cpuTimeMS, rollingAverageMS);
+					// Color GPU lines slightly differently for instant readability
+					bool isGpu = std::string_view(name).starts_with("[GPU]");
+					if (isGpu) {
+						ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f),
+										   "%-25s: %.3f ms (Avg: %.3f)", name, cpuTimeMS,
+										   rollingAverageMS);
+					} else {
+						ImGui::Text("%-25s: %.3f ms (Avg: %.3f)", name, cpuTimeMS,
+									rollingAverageMS);
+					}
 
 					std::string label = "##" + std::string(name);
 					if (historyCount > 0) {
@@ -146,12 +164,22 @@ void DrawProfiler(Engine& engine, TAAState& taaState) {
 			}
 		}
 
-		float totalTime = 0.0f;
-		Profiler::IterateMetrics(
-			[](const char*, float cpuTimeMS, float, const float*, size_t, void* userData) {
-				*static_cast<float*>(userData) += cpuTimeMS;
+		// Separate CPU and GPU totals so parallel execution is measured correctly
+		struct BudgetPayload {
+			float cpuTotal = 0.0f;
+			float gpuTotal = 0.0f;
+		} totals;
+
+		CPUProfiler::IterateMetrics(
+			[](const char* name, float cpuTimeMS, float, const float*, size_t, void* userData) {
+				auto* b = static_cast<BudgetPayload*>(userData);
+				if (std::string_view(name).starts_with("[GPU]")) {
+					b->gpuTotal += cpuTimeMS;
+				} else {
+					b->cpuTotal += cpuTimeMS;
+				}
 			},
-			&totalTime);
+			&totals);
 
 		// --- FPS AND FRAME BUDGET ---
 		ImGui::SeparatorText("Performance Overview");
@@ -163,12 +191,23 @@ void DrawProfiler(Engine& engine, TAAState& taaState) {
 		ImGui::SameLine();
 		ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "(%.2f ms/frame)", frameTime);
 
-		float budgetPercent = totalTime / 16.66f;
-		ImVec4 budgetColor = budgetPercent > 0.9f ? ImVec4(1, 0, 0, 1) : ImVec4(0, 1, 0, 1);
+		// CPU Budget Progress Bar
+		float cpuPercent = totals.cpuTotal / 16.66f;
+		ImVec4 cpuColor = cpuPercent > 0.9f ? ImVec4(1, 0.3f, 0.3f, 1) : ImVec4(0.3f, 1, 0.3f, 1);
+		ImGui::PushStyleColor(ImGuiCol_PlotHistogram, cpuColor);
+		ImGui::ProgressBar(
+			cpuPercent, ImVec2(-1, 20),
+			std::format("CPU Profiled: {:.2f} ms / 16.6ms", totals.cpuTotal).c_str());
+		ImGui::PopStyleColor();
 
-		ImGui::PushStyleColor(ImGuiCol_PlotHistogram, budgetColor);
-		ImGui::ProgressBar(budgetPercent, ImVec2(-1, 25),
-						   std::format("Profiled: {:.2f} ms / 16.6ms", totalTime).c_str());
+		// GPU Budget Progress Bar
+		float gpuPercent = totals.gpuTotal / 16.66f;
+		ImVec4 gpuColor =
+			gpuPercent > 0.9f ? ImVec4(1, 0.3f, 0.3f, 1) : ImVec4(0.3f, 0.8f, 1.0f, 1);
+		ImGui::PushStyleColor(ImGuiCol_PlotHistogram, gpuColor);
+		ImGui::ProgressBar(
+			gpuPercent, ImVec2(-1, 20),
+			std::format("GPU Profiled: {:.2f} ms / 16.6ms", totals.gpuTotal).c_str());
 		ImGui::PopStyleColor();
 
 		static float fps_history[100] = {};
@@ -176,12 +215,11 @@ void DrawProfiler(Engine& engine, TAAState& taaState) {
 		fps_history[offset] = fps;
 		offset = (offset + 1) % 100;
 
-		ImGui::PlotHistogram("##FPS", fps_history, 100, offset, nullptr, 0.0f, 165.0f,
+		ImGui::PlotHistogram("##FPS", fps_history, 100, offset, nullptr, 0.0f, 250.0f,
 							 ImVec2(-1, 40));
 
 		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Profiled time is the sum of instrumented code.\n"
-							  "Wall-clock time (%.2fms) includes driver overhead and VSync wait.",
+			ImGui::SetTooltip("Wall-clock time (%.2fms) includes driver overhead and VSync wait.",
 							  frameTime);
 		}
 	}

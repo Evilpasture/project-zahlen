@@ -64,7 +64,7 @@ JPH::ShapeRefC GetOrCreateShape(PhysicsContext& ctx, ShapeType type, float p1, f
 								float p3 = 0.0f, float p4 = 0.0f);
 
 // --- Creation (Engine allocates and returns Handle) ---
-ZHLN::Entity CreateRigidBody(PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::RVec3Arg pos,
+ZHLN::Entity CreateRigidBody(PhysicsContext& ctx, const JPH::ShapeRefC& shape, JPH::RVec3Arg pos,
 							 JPH::QuatArg rot, JPH::EMotionType motion, JPH::ObjectLayer layer,
 							 uint32_t materialID = 0, uint32_t category = 0xFFFFFFFF,
 							 uint32_t mask = 0xFFFFFFFF);

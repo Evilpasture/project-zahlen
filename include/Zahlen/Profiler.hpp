@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 namespace ZHLN {
 
@@ -11,9 +12,9 @@ struct CullingStats {
 	static inline bool FreezeFrustum = false;
 };
 
-class Profiler {
+class CPUProfiler {
   public:
-	static void Record(const char* name, float timeMS) noexcept;
+	static void Record(std::string_view name, float timeMS) noexcept;
 
 	// O(1) iteration interface for the UI loop
 	using MetricCallback = void (*)(const char* name, float cpuTimeMS, float rollingAverageMS,

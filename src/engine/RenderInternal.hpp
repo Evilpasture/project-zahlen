@@ -3,6 +3,7 @@
 
 #include "Allocator.hpp"
 #include "DescriptorLayout.hpp"
+#include "GpuProfiler.hpp"
 #include "Postprocessing.hpp"
 #include "PresentationContext.hpp"
 #include "RenderCore.hpp"
@@ -15,7 +16,6 @@
 #include <Zahlen/Types.hpp>
 #include <array>
 #include <memory>
-#include <vulkan/vulkan_core.h>
 
 namespace ZHLN {
 
@@ -52,6 +52,24 @@ using BlitLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texCurrent (
 										Vk::SampledImageSlot<5>	 // NEW: texEnvMap (Cubemap)
 										>;
 using CullingLayout = Vk::DescriptorLayout<Vk::StorageBufferSlot<0>, Vk::StorageBufferSlot<1>>;
+
+namespace Stages {
+struct ShadowPass {
+	static constexpr std::string_view name = "[GPU] Shadow Map";
+};
+struct MainPass {
+	static constexpr std::string_view name = "[GPU] G-Buffer/Main";
+};
+struct TaaPass {
+	static constexpr std::string_view name = "[GPU] TAA Post";
+};
+struct BlitPass {
+	static constexpr std::string_view name = "[GPU] Blit/Composite";
+};
+} // namespace Stages
+
+using FrameProfiler =
+	Profiler::GpuProfiler<Stages::ShadowPass, Stages::MainPass, Stages::TaaPass, Stages::BlitPass>;
 
 struct NativeMesh {
 	Vk::Buffer buffer;
@@ -196,6 +214,8 @@ struct RenderContext::Impl {
 
 	TAAState taaState{};
 
+	FrameProfiler gpuProfiler;
+
 	Impl(Window& win) : window(win) {}
 
 	void InitShadowResources();
@@ -209,6 +229,7 @@ struct RenderContext::Impl {
 	void RenderShadowPass(VkCommandBuffer cmd);
 	bool RenderMainPassGpuCulling(RenderContext& ctx, VkCommandBuffer cmd);
 	void RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd);
+	void extracted(VkCommandBuffer& cmd);
 	void ApplyTAAPass(VkCommandBuffer cmd, VkExtent2D extent);
 	void BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, uint32_t imageIdx);
 	void SubmitFrame();

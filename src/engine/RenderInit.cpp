@@ -92,6 +92,8 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 		ZHLN::Panic("FATAL: Vulkan Memory Allocator (VMA) failed to initialize");
 	}
 
+	_impl->gpuProfiler.Init(_impl->ctx.Device());
+
 	_impl->InitShadowResources();
 	_impl->InitCullingResources();
 	_impl->InitBindless();

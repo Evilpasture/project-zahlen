@@ -481,7 +481,7 @@ static MaterialData ResolveMaterial(const PhysicsWorld& world, uint32_t id) {
 /**
  * @brief Generalized Rigid Body creation.
  */
-ZHLN::Entity CreateRigidBody(PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::RVec3Arg pos,
+ZHLN::Entity CreateRigidBody(PhysicsContext& ctx, const JPH::ShapeRefC& shape, JPH::RVec3Arg pos,
 							 JPH::QuatArg rot, JPH::EMotionType motion, JPH::ObjectLayer layer,
 							 uint32_t materialID, uint32_t category, uint32_t mask) {
 	auto& world = ctx.GetImpl()->world;

@@ -17,6 +17,12 @@ void RenderContext::BeginFrame() {
 
 	ZHLN_WaitAndResetFrame(_impl->ctx.Device(), s.in_flight, _impl->pools[_impl->frame_index]);
 
+	float timestampPeriod = _impl->ctx.PhysicalInfo().properties.properties.limits.timestampPeriod;
+	_impl->gpuProfiler.RetrieveResults(
+		_impl->frame_index, timestampPeriod,
+		[](std::string_view name, float durationMS) { CPUProfiler::Record(name, durationMS); });
+	_impl->gpuProfiler.Reset(_impl->frame_index);
+
 	for (auto& worker : _impl->workerCmds) {
 		worker.cmdCount[_impl->frame_index].store(0, std::memory_order_relaxed);
 		worker.pools[_impl->frame_index].Reset();
@@ -133,6 +139,8 @@ void RenderContext::BeginFrame() {
 }
 
 void RenderContext::Impl::RenderShadowPass(VkCommandBuffer cmd) {
+	Profiler::ScopedGpuProfile<Stages::ShadowPass, FrameProfiler> timer(cmd, frame_index,
+																		gpuProfiler);
 	auto shadow_u = shadowMap.State();
 	auto shadow_att = Vk::Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, shadow_u);
 
@@ -186,11 +194,17 @@ void RenderContext::Impl::RenderShadowPass(VkCommandBuffer cmd) {
 }
 
 void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd) {
-	if (RenderMainPassGpuCulling(ctx, cmd)) {
+	bool isCPU = RenderMainPassGpuCulling(ctx, cmd);
+	if (isCPU) {
+		[[maybe_unused]] static auto loggedOnce = []() -> bool {
+			ZHLN::Log("RENDERING DIAGNOSTIC: Falling back to CPU Traditional Path!");
+			return true;
+		}();
 		return;
 	}
 
-	ZHLN::Log("RENDERING DIAGNOSTIC: Falling back to CPU Traditional Path!");
+	Profiler::ScopedGpuProfile<Stages::MainPass, FrameProfiler> timer(cmd, frame_index,
+																	  gpuProfiler);
 
 	auto drawCount = static_cast<uint32_t>(drawQueue.size());
 	if (drawCount == 0) {
@@ -361,6 +375,8 @@ void RenderContext::Impl::RenderMainPass(RenderContext& ctx, VkCommandBuffer cmd
 }
 
 bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCommandBuffer cmd) {
+	Profiler::ScopedGpuProfile<Stages::MainPass, FrameProfiler> timer(cmd, frame_index,
+																	  gpuProfiler);
 	auto drawCount = static_cast<uint32_t>(drawQueue.size());
 	if (drawCount == 0) {
 		return true;
@@ -564,6 +580,7 @@ bool RenderContext::Impl::RenderMainPassGpuCulling(RenderContext& /*ctx*/, VkCom
 }
 
 void RenderContext::Impl::ApplyTAAPass(VkCommandBuffer cmd, VkExtent2D extent) {
+	Profiler::ScopedGpuProfile<Stages::TaaPass, FrameProfiler> timer(cmd, frame_index, gpuProfiler);
 	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> accumCurr_ro = {
 		.handle = accumBuffers.Current().image.Handle(),
 		.view = accumBuffers.Current().view.Get(),
@@ -617,6 +634,8 @@ void RenderContext::Impl::ApplyTAAPass(VkCommandBuffer cmd, VkExtent2D extent) {
 }
 
 void RenderContext::Impl::BlitAndDrawUI(VkCommandBuffer cmd, VkExtent2D extent, uint32_t imageIdx) {
+	Profiler::ScopedGpuProfile<Stages::BlitPass, FrameProfiler> timer(cmd, frame_index,
+																	  gpuProfiler);
 	VkImage swapImg = presentation.swapchain.Get().images[imageIdx];
 	VkImageView swapView = presentation.swapchain.Get().views[imageIdx];
 

@@ -27,91 +27,43 @@
 #include <threading/Mutex.hpp>
 #include <threading/TaskSystem.hpp>
 #include <vector>
+
 namespace ZHLN {
-void DrawConsole(ScriptRunner& runner);
-void DrawProfiler(Engine& engine, TAAState& taaState);
-void MovementSystem(Engine& engine, float dt);
-void AudioSystem(Engine& engine, float dt);
-void DrawOrientationGizmo(const ZHLN::Camera& cam);
-void DrawInventoryShell(ScriptRunner& runner);
 
-// Define the 12 edges connecting the 8 frustum corners
-struct FrustumEdge {
-	int start;
-	int end;
+struct GraphicsSettings {
+	int giMode = 1;			  // 0 = Off, 1 = SSAO, 2 = SSGI, 3 = HBAO, 4 = GTAO
+	float aoRadius = 0.5f;	  // Radius in meters
+	float aoBias = 0.05f;	  // Self-occlusion offset
+	float aoPower = 1.8f;	  // SSAO contrast
+	float giIntensity = 1.2f; // SSGI bounce strength
+	int giSamples = 8;		  // Hemisphere ray samples count
+	bool useLocalProbe = true;
+	JPH::Vec3 probeMin = JPH::Vec3(-22.0f, 0.0f, -22.0f); // Initial bounding box min (meters)
+	JPH::Vec3 probeMax = JPH::Vec3(22.0f, 12.0f, 22.0f);  // Initial bounding box max (meters)
+	JPH::Vec3 probePos = JPH::Vec3(0.0f, 4.0f, 0.0f); // Room center (where cubemap was captured)
+	float vignetteIntensity = 1.10f;				  // 0.0f represents completely disabled
+	float vignettePower = 1.50f;					  // Softness falloff exponent
+	bool enableSSR = true;
+	TAAState taaState{};
 };
 
-// Decoupled application loop layers
-bool InitializeGame(Engine& engine);
-void UpdateGame(Engine& engine, float dt, float& physicsAccumulator);
-void RenderGame(Engine& engine, float physicsAccumulator);
-void ShutdownGame(Engine& engine);
-} // namespace ZHLN
-
-using namespace ZHLN;
-
-namespace {
-
-// Anonymous namespace for file-scoped static state (id-style memory isolation) [1]
-static std::vector<Entity> s_PomniParts;
-static Entity s_PlayerEntity = NullEntity;
-static float s_CamDistance = 4.5f;
-static int s_GIMode = 1;		   // 0 = Off, 1 = SSAO, 2 = SSGI
-static float s_AORadius = 0.5f;	   // Radius in meters
-static float s_AOBias = 0.05f;	   // Self-occlusion offset
-static float s_AOPower = 1.8f;	   // SSAO contrast
-static float s_GIIntensity = 1.2f; // SSGI bounce strength
-static int s_GISamples = 8;		   // Hemisphere ray samples count
-static bool s_UseLocalProbe = true;
-static JPH::Vec3 s_ProbeMin = JPH::Vec3(-22.0f, 0.0f, -22.0f); // Initial bounding box min (meters)
-static JPH::Vec3 s_ProbeMax = JPH::Vec3(22.0f, 12.0f, 22.0f);  // Initial bounding box max (meters)
-static JPH::Vec3 s_ProbePos =
-	JPH::Vec3(0.0f, 4.0f, 0.0f);		  // Room center (where cubemap was captured)
-static float s_VignetteIntensity = 1.10f; // 0.0f represents completely disabled
-static float s_VignettePower = 1.50f;	  // Softness falloff exponent
-static bool s_EnableSSR = true;
-
-static TAAState s_TAAState;
-
-static constexpr FrustumEdge s_FrustumEdges[12] = {
-	{.start = 0, .end = 1}, {.start = 1, .end = 2},
-	{.start = 2, .end = 3}, {.start = 3, .end = 0}, // Near Plane loop
-	{.start = 4, .end = 5}, {.start = 5, .end = 6},
-	{.start = 6, .end = 7}, {.start = 7, .end = 4}, // Far Plane loop
-	{.start = 0, .end = 4}, {.start = 1, .end = 5},
-	{.start = 2, .end = 6}, {.start = 3, .end = 7} // Near-to-Far connection lines
+struct WorkspaceSettings {
+	float floorRoughness = 0.15f;
+	float floorMetallic = 0.95f;
+	float floorYOffset = 0.72f;
+	float sphereLightRadius = 1.5f;
+	float light1Intensity = 180.0f;
+	float light2Intensity = 180.0f;
 };
 
-// Visual / Debug Mesh allocations
-static Mesh s_DebugLineMesh = {};
-static Material s_DebugLineMaterial = {};
+struct SceneContext {
+	std::vector<Entity> pomniParts;
+	Entity visualFloorEntity = NullEntity;
+	Material floorMaterial{};
+	Mesh debugLineMesh{};
+	Material debugLineMaterial{};
 
-// Interactive Lighting Workspace parameters
-static Entity s_VisualFloorEntity = NullEntity;
-static float s_FloorRoughness = 0.15f;
-static float s_FloorMetallic = 0.95f;
-static float s_FloorYOffset = 0.72f;
-static Material s_FloorMaterial{};
-
-static float s_SphereLightRadius = 1.5f;
-static float s_Light1Intensity = 180.0f;
-static float s_Light2Intensity = 180.0f;
-
-// Engine subsystems pointers
-static ScriptRunner* s_ScriptRunner = nullptr;
-static FileWatcher* s_GameplayWatcher = nullptr;
-static ArticulationSystem* s_ArticulationSystem = nullptr;
-static AnimationSystem* s_AnimationSystem = nullptr;
-
-static uint32_t s_FrameCounter = 0;
-static uint32_t s_FontAtlasIdx = 0;
-static Mesh s_HelloText = {};
-
-struct Scene {
-	void Setup(Engine& engine) {
-		auto& rc = engine.GetRenderContext();
-		auto& reg = engine.GetRegistry();
-
+	void Setup(Engine& engine, RenderContext& rc, ECS::Registry& reg, PhysicsContext& pc) {
 		ZHLN::Log("Assembling Scene with Pure Runtime glTF Parsing...");
 
 		auto* lobbyPrefab =
@@ -122,8 +74,7 @@ struct Scene {
 			params.useBoxColliders = false; // <-- CRITICAL: Must be false (mesh shape) so player is
 											// not stuck in a solid box
 			params.isStaticPhysics = true;
-			AssetFactory::InstantiatePrefab(rc, reg, engine.GetPhysicsContext(), *lobbyPrefab,
-											params);
+			AssetFactory::InstantiatePrefab(rc, reg, pc, *lobbyPrefab, params);
 		}
 
 		auto* pomniPrefab =
@@ -133,36 +84,81 @@ struct Scene {
 			params.createPhysics = false;
 			params.isAnimated = true;
 
-			s_PomniParts.resize(128); // Pre-allocate ample buffer
+			pomniParts.resize(128); // Pre-allocate ample buffer
 			uint32_t pomniCount = AssetFactory::InstantiatePrefab(
-				rc, reg, engine.GetPhysicsContext(), *pomniPrefab, params, s_PomniParts.data(),
-				(uint32_t)s_PomniParts.size());
-			s_PomniParts.resize(pomniCount);
+				rc, reg, pc, *pomniPrefab, params, pomniParts.data(), pomniParts.size());
+			pomniParts.resize(pomniCount);
+		}
+	}
+
+	void FindFloorEntities(ECS::Registry& reg) {
+		auto entities = reg.GetEntitiesWith<NameComponent>();
+		auto names = reg.GetRawArray<NameComponent>();
+
+		for (size_t i = 0; i < entities.size(); ++i) {
+			std::string nameLower(names[i].name.c_str());
+			std::ranges::transform(nameLower, nameLower.begin(), ::tolower);
+
+			// Scan for keywords commonly exported by Blender/glTF for floor meshes
+			if (nameLower.contains("floor") || nameLower.contains("ground") ||
+				nameLower.contains("lobby")) {
+				// Ensure it actually carries visual geometry
+				if (reg.Get<MeshComponent>(entities[i]) != nullptr) {
+					visualFloorEntity = entities[i];
+					break; // Assign primary visual floor
+				}
+			}
 		}
 	}
 };
 
-JPH::Array<ZHLN::Entity> s_VisibleEntities;
+struct GameContext {
+	Entity playerEntity = NullEntity;
+	float camDistance = 4.5f;
+	uint32_t frameCounter = 0;
+	uint32_t fontAtlasIdx = 0;
+	Mesh helloText{};
+	JPH::Array<Entity> visibleEntities;
 
-Entity FindFloorEntity(ECS::Registry& reg) {
-	auto entities = reg.GetEntitiesWith<NameComponent>();
-	auto names = reg.GetRawArray<NameComponent>();
+	ScriptRunner* scriptRunner = nullptr;
+	FileWatcher* gameplayWatcher = nullptr;
+	ArticulationSystem* articulationSystem = nullptr;
+	AnimationSystem* animationSystem = nullptr;
 
-	for (size_t i = 0; i < entities.size(); ++i) {
-		std::string nameLower(names[i].name.c_str());
-		std::transform(nameLower.begin(), nameLower.end(), nameLower.begin(), ::tolower);
+	GraphicsSettings graphics{};
+	WorkspaceSettings workspace{};
+	SceneContext scene{};
+};
 
-		// Scan for keywords commonly exported by Blender/glTF for floor meshes
-		if (nameLower.contains("floor") || nameLower.contains("ground") ||
-			nameLower.contains("lobby")) {
-			// Ensure it actually carries visual geometry
-			if (reg.Get<MeshComponent>(entities[i]) != nullptr) {
-				return entities[i];
-			}
-		}
-	}
-	return NullEntity;
-}
+void DrawConsole(ScriptRunner& runner);
+void DrawProfiler(Engine& engine, TAAState& taaState);
+void MovementSystem(Engine& engine, float dt);
+void AudioSystem(Engine& engine, float dt);
+void DrawOrientationGizmo(const ZHLN::Camera& cam);
+void DrawInventoryShell(ScriptRunner& runner);
+
+namespace {
+
+// Define the 12 edges connecting the 8 frustum corners
+struct FrustumEdge {
+	int start;
+	int end;
+};
+
+constexpr std::array<FrustumEdge, 12> s_FrustumEdges = {{
+	{.start = 0, .end = 1},
+	{.start = 1, .end = 2},
+	{.start = 2, .end = 3},
+	{.start = 3, .end = 0}, // Near Plane loop
+	{.start = 4, .end = 5},
+	{.start = 5, .end = 6},
+	{.start = 6, .end = 7},
+	{.start = 7, .end = 4}, // Far Plane loop
+	{.start = 0, .end = 4},
+	{.start = 1, .end = 5},
+	{.start = 2, .end = 6},
+	{.start = 3, .end = 7} // Near-to-Far connection lines
+}};
 
 } // namespace
 
@@ -170,7 +166,7 @@ Entity FindFloorEntity(ECS::Registry& reg) {
 // GAME APPLICATION INTERFACE IMPLEMENTATION
 // ============================================================================
 
-bool ZHLN::InitializeGame(Engine& engine) {
+bool InitializeGame(Engine& engine, GameContext& game) {
 	auto& rc = engine.GetRenderContext();
 	auto& reg = engine.GetRegistry();
 	auto& pc = engine.GetPhysicsContext();
@@ -189,165 +185,56 @@ bool ZHLN::InitializeGame(Engine& engine) {
 				pc, groundShape, {0, 0, 0}, JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0)});
 
 	// 3. Create the Player Entity with Character Controller
-	s_PlayerEntity = reg.Create();
-	reg.Add(s_PlayerEntity, MovementComponent{});
+	game.playerEntity = reg.Create();
+	reg.Add(game.playerEntity, MovementComponent{});
 	Entity charPhys = Physics::CreateCharacter(pc, JPH::RVec3(0.0f, 3.0f, 0.0f));
-	reg.Add(s_PlayerEntity, PhysicsComponent{charPhys});
+	reg.Add(game.playerEntity, PhysicsComponent{charPhys});
 
 	// 4. Initialize Scripting Subsystem
-	s_ScriptRunner = new ScriptRunner();
-	s_ScriptRunner->RunFile("scripts/gameplay.lua");
-	s_GameplayWatcher = new FileWatcher("scripts/gameplay.lua");
-	s_FrameCounter = 0;
+	game.scriptRunner = new ScriptRunner();
+	game.scriptRunner->RunFile("scripts/gameplay.lua");
+	game.gameplayWatcher = new FileWatcher("scripts/gameplay.lua");
+	game.frameCounter = 0;
 
 	// 5. Spawn Level Prefabs (Circus Lobby V9.glb)
-	Scene scene{};
-	scene.Setup(engine);
+	game.scene.Setup(engine, rc, reg, pc);
 
 	// --- 5.1 QUERY THE SPAWNED ENVIRONMENT FOR THE FLOOR ENTITY ---
-	s_VisualFloorEntity = FindFloorEntity(reg);
-	if (s_VisualFloorEntity != NullEntity) {
+	game.scene.FindFloorEntities(reg);
+	if (game.scene.visualFloorEntity != NullEntity) {
 		ZHLN::Log("[DOD Query] Successfully binded to glTF Floor Entity! Handle Index: {}",
-				  s_VisualFloorEntity.index);
+				  game.scene.visualFloorEntity.index);
 	} else {
 		ZHLN::Log("[DOD Query] WARNING: Could not find floor mesh in glTF scene.");
 	}
 
-	AssetFactory::SetupPlayerRagdoll(rc, pc, reg, s_PlayerEntity, s_PomniParts);
+	AssetFactory::SetupPlayerRagdoll(rc, pc, reg, game.playerEntity, game.scene.pomniParts);
 
 	// Position Camera orientation initially looking forward
 	cam.yaw = -90.0f;
 	cam.pitch = -10.0f;
 
-	s_FontAtlasIdx = AssetFactory::CreateFontAtlasTexture(rc);
-	s_HelloText = GUI::CreateTextMesh(rc, "Zahlen Engine - TADC Dorm Showcase", 25.0f, 25.0f, 2.5f,
-									  {0.9f, 0.1f, 0.1f, 1.0f});
+	game.fontAtlasIdx = AssetFactory::CreateFontAtlasTexture(rc);
+	game.helloText = GUI::CreateTextMesh(rc, "Zahlen Engine - TADC Dorm Showcase", 25.0f, 25.0f,
+										 2.5f, {0.9f, 0.1f, 0.1f, 1.0f});
 
-	s_DebugLineMesh = AssetFactory::CreateBox(rc, {0.02f, 0.02f, 0.5f});
-	s_DebugLineMaterial = AssetFactory::CreateBasicMaterial(rc);
-	s_DebugLineMaterial.baseColorFactor[0] = 0.0f; // Neon Cyan
-	s_DebugLineMaterial.baseColorFactor[1] = 1.0f;
-	s_DebugLineMaterial.baseColorFactor[2] = 1.0f;
-	s_DebugLineMaterial.baseColorFactor[3] = 1.0f;
+	game.scene.debugLineMesh = AssetFactory::CreateBox(rc, {0.02f, 0.02f, 0.5f});
+	game.scene.debugLineMaterial = AssetFactory::CreateBasicMaterial(rc);
+	game.scene.debugLineMaterial.baseColorFactor[0] = 0.0f; // Neon Cyan
+	game.scene.debugLineMaterial.baseColorFactor[1] = 1.0f;
+	game.scene.debugLineMaterial.baseColorFactor[2] = 1.0f;
+	game.scene.debugLineMaterial.baseColorFactor[3] = 1.0f;
 
-	s_ArticulationSystem = new ArticulationSystem();
-	s_AnimationSystem = new AnimationSystem();
+	game.articulationSystem = new ArticulationSystem();
+	game.animationSystem = new AnimationSystem();
 
 	return true;
 }
 
-void ZHLN::UpdateGame(Engine& engine, float dt, float& physicsAccumulator) {
-	auto& cam = engine.GetCamera();
-	auto& pc = engine.GetPhysicsContext();
-	auto& rc = engine.GetRenderContext();
-	auto& reg = engine.GetRegistry();
+void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
+	// engine.BeginFrame() is now placed at the start of RenderGame to avoid logical race conditions
+	engine.BeginFrame();
 
-	// 1. Draw HUD Layouts
-	ZHLN::DrawConsole(*s_ScriptRunner);
-	ZHLN::DrawInventoryShell(*s_ScriptRunner);
-	ZHLN::DrawProfiler(engine, s_TAAState);
-	ZHLN::DrawOrientationGizmo(cam);
-
-	// 2. Lighting Workspace Developer Menu
-	ImGui::Begin("Lighting Workspace Controller");
-	ImGui::Text("Specular Mips & Area Lights Debugger");
-	ImGui::Separator();
-	ImGui::SliderFloat("Sphere Light Radius", &s_SphereLightRadius, 0.0f, 5.0f);
-	ImGui::SliderFloat("Cyan Intensity", &s_Light1Intensity, 0.0f, 500.0f);
-	ImGui::SliderFloat("Magenta Intensity", &s_Light2Intensity, 0.0f, 500.0f);
-	ImGui::Separator();
-	ImGui::SliderFloat("Floor Roughness", &s_FloorRoughness, 0.0f, 1.0f);
-	ImGui::SliderFloat("Floor Metallic", &s_FloorMetallic, 0.0f, 1.0f);
-
-	// --- NEW: PARALLAX-CORRECTED PROBE CONTROLS ---
-	ImGui::SeparatorText("Parallax-Corrected Local Reflection Probe");
-	ImGui::Checkbox("Enable Box Projection", &s_UseLocalProbe);
-	if (s_UseLocalProbe) {
-		std::array<float, 3> minArr = {s_ProbeMin.GetX(), s_ProbeMin.GetY(), s_ProbeMin.GetZ()};
-		std::array<float, 3> maxArr = {s_ProbeMax.GetX(), s_ProbeMax.GetY(), s_ProbeMax.GetZ()};
-		std::array<float, 3> posArr = {s_ProbePos.GetX(), s_ProbePos.GetY(), s_ProbePos.GetZ()};
-
-		if (ImGui::DragFloat3("Box Min", minArr.data(), 0.1f, -100.0f, 100.0f, "%.1fm")) {
-			s_ProbeMin = JPH::Vec3(minArr[0], minArr[1], minArr[2]);
-		}
-		if (ImGui::DragFloat3("Box Max", maxArr.data(), 0.1f, -100.0f, 100.0f, "%.1fm")) {
-			s_ProbeMax = JPH::Vec3(maxArr[0], maxArr[1], maxArr[2]);
-		}
-		if (ImGui::DragFloat3("Probe Position", posArr.data(), 0.1f, -100.0f, 100.0f, "%.1fm")) {
-			s_ProbePos = JPH::Vec3(posArr[0], posArr[1], posArr[2]);
-		}
-	}
-
-	// --- NEW: COOPERATIVE SSAO / SSGI CONTROLLER ---
-	ImGui::SeparatorText("Ambient Occlusion & Global Illumination");
-	const char* giModesList[] = {"Off", "SSAO (Ambient Occlusion)", "SSGI (Screen Space GI)",
-								 "HBAO (Horizon-Based AO)", "GTAO (Ground Truth AO)"};
-	ImGui::Combo("GI Mode", &s_GIMode, giModesList, IM_ARRAYSIZE(giModesList));
-
-	if (s_GIMode == 1) { // SSAO Settings
-		ImGui::SliderFloat("AO Radius", &s_AORadius, 0.05f, 2.5f, "%.2fm");
-		ImGui::SliderFloat("AO Bias", &s_AOBias, 0.001f, 0.2f, "%.3f");
-		ImGui::SliderFloat("AO Contrast", &s_AOPower, 0.5f, 5.0f, "%.1fx");
-		ImGui::SliderInt("AO Samples", &s_GISamples, 2, 32);
-	} else if (s_GIMode == 2) { // SSGI Settings
-		ImGui::SliderFloat("Bounce Radius", &s_AORadius, 0.05f, 2.5f, "%.2fm");
-		ImGui::SliderFloat("Bounce Bias", &s_AOBias, 0.001f, 0.2f, "%.3f");
-		ImGui::SliderFloat("GI Bounce Intensity", &s_GIIntensity, 0.1f, 5.0f, "%.1fx");
-		ImGui::SliderInt("GI Samples", &s_GISamples, 2, 32);
-	} else if (s_GIMode == 3 || s_GIMode == 4) { // HBAO / GTAO Settings
-		ImGui::SliderFloat("Search Radius", &s_AORadius, 0.05f, 3.0f, "%.2fm");
-		ImGui::SliderFloat("Acne Bias", &s_AOBias, 0.001f, 0.2f, "%.3f");
-		ImGui::SliderFloat("Shadow Contrast", &s_AOPower, 0.5f, 6.0f, "%.1fx");
-		ImGui::SliderInt("Search Steps", &s_GISamples, 4, 32); // Represents total step count
-	}
-
-	// --- NEW: VIGNETTE SLIDERS ---
-	ImGui::Separator();
-	ImGui::SeparatorText("Camera Vignette");
-	ImGui::SliderFloat("Vignette Intensity", &s_VignetteIntensity, 0.0f, 2.5f, "%.2f");
-	if (s_VignetteIntensity > 0.0f) {
-		ImGui::SliderFloat("Vignette Power", &s_VignettePower, 0.1f, 6.0f, "%.2f");
-	}
-
-	// when you realize graphical settings were there as a byproduct of ImGUI debugging hell
-	ImGui::Checkbox("Enable SSR", &s_EnableSSR);
-
-	ImGui::End();
-
-	// 3. Hot Reload Script Files
-	if (++s_FrameCounter % 60 == 0 && s_GameplayWatcher->CheckModified()) {
-		s_ScriptRunner->ReloadFile("scripts/gameplay.lua");
-	}
-
-	{
-		ZHLN_PROFILE_SCOPE("Logic");
-
-		// Mouse look (Active only when holding Right Click)
-		const float sensitivity = 0.15f;
-		if (engine.GetInput().IsMouseButtonDown(KeyCode::RButton)) {
-			cam.yaw += engine.GetInput().GetMouse().deltaX * sensitivity;
-			cam.pitch = std::clamp(cam.pitch - (engine.GetInput().GetMouse().deltaY * sensitivity),
-								   -89.0f, 89.0f);
-		}
-
-		s_ScriptRunner->CallUpdate(&engine, dt);
-
-		// 4. Physics Tick loop
-		physicsAccumulator += dt;
-		constexpr float targetDt = 1.0f / 60.0f;
-		while (physicsAccumulator >= targetDt) {
-			ZHLN::MovementSystem(engine, targetDt);
-			pc.Step(targetDt);
-			physicsAccumulator -= targetDt;
-		}
-
-		// 5. Run animation systems
-		s_AnimationSystem->UpdateAnimations(rc, reg, dt);
-		s_ArticulationSystem->Update(engine, dt);
-	}
-}
-
-void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 	auto& rc = engine.GetRenderContext();
 	auto& reg = engine.GetRegistry();
 	auto& cam = engine.GetCamera();
@@ -360,17 +247,17 @@ void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 	auto res = engine.GetWindow().GetSize();
 	const auto& worldState = pc.GetWorld();
 
-	if (s_TAAState.enabled) {
-		s_TAAState.frameIndex++;
+	if (game.graphics.taaState.enabled) {
+		game.graphics.taaState.frameIndex++;
 	} else {
-		s_TAAState.frameIndex = 0;
+		game.graphics.taaState.frameIndex = 0;
 	}
 
 	// 1. Retrieve & Interpolate Player Position from Jolt [6]
 	JPH::Vec3 playerPos = JPH::Vec3::sZero();
 	constexpr float targetDt = 1.0f / 60.0f;
-	if (reg.IsAlive(s_PlayerEntity)) {
-		if (auto* phys = reg.Get<PhysicsComponent>(s_PlayerEntity)) {
+	if (reg.IsAlive(game.playerEntity)) {
+		if (auto* phys = reg.Get<PhysicsComponent>(game.playerEntity)) {
 			uint32_t dense = worldState.slotToDense[phys->physicsHandle.index];
 			const size_t base = static_cast<size_t>(dense) * 4;
 
@@ -395,35 +282,39 @@ void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 
 	float wheelDelta = engine.GetInput().GetMouse().wheel;
 	if (std::abs(wheelDelta) > 0.01f) {
-		s_CamDistance = JPH::Clamp(s_CamDistance - wheelDelta * 0.5f, 1.5f, 15.0f);
+		game.camDistance = JPH::Clamp(game.camDistance - wheelDelta * 0.5f, 1.5f, 15.0f);
 	}
 	cam.position =
-		playerPos - (offsetDir.Normalized() * s_CamDistance) + JPH::Vec3(0.0f, 1.3f, 0.0f);
+		playerPos - (offsetDir.Normalized() * game.camDistance) + JPH::Vec3(0.0f, 1.3f, 0.0f);
 
 	JPH::Mat44 unjitteredProj = cam.GetProjectionMatrix((float)res.width / res.height);
 	JPH::Mat44 unjitteredVp = unjitteredProj * cam.GetViewMatrix();
 
 	JPH::Mat44 vp{};
-	if (s_TAAState.enabled) {
+	if (game.graphics.taaState.enabled) {
 		vp = cam.GetJitteredProjectionMatrix((float)res.width / res.height, res.width, res.height,
-											 s_TAAState) *
+											 game.graphics.taaState) *
 			 cam.GetViewMatrix();
 	} else {
 		vp = unjitteredVp;
 	}
 
 	static JPH::Mat44 s_FrozenVP = JPH::Mat44::sIdentity();
-	static JPH::Vec3 s_FrustumCorners[8] = {};
+	static std::array<JPH::Vec3, 8> s_FrustumCorners{};
 	static bool s_WasFrozen = false;
 
 	if (CullingStats::FreezeFrustum) {
 		if (!s_WasFrozen) {
 			s_FrozenVP = unjitteredVp;
 			JPH::Mat44 invVP = unjitteredVp.Inversed();
-			JPH::Vec4 ndc[8] = {{-1.0f, -1.0f, 0.0f, 1.0f}, {1.0f, -1.0f, 0.0f, 1.0f},
-								{1.0f, 1.0f, 0.0f, 1.0f},	{-1.0f, 1.0f, 0.0f, 1.0f},
-								{-1.0f, -1.0f, 1.0f, 1.0f}, {1.0f, -1.0f, 1.0f, 1.0f},
-								{1.0f, 1.0f, 1.0f, 1.0f},	{-1.0f, 1.0f, 1.0f, 1.0f}};
+			auto ndc = std::to_array<JPH::Vec4>({{-1.0f, -1.0f, 0.0f, 1.0f},
+												 {1.0f, -1.0f, 0.0f, 1.0f},
+												 {1.0f, 1.0f, 0.0f, 1.0f},
+												 {-1.0f, 1.0f, 0.0f, 1.0f},
+												 {-1.0f, -1.0f, 1.0f, 1.0f},
+												 {1.0f, -1.0f, 1.0f, 1.0f},
+												 {1.0f, 1.0f, 1.0f, 1.0f},
+												 {-1.0f, 1.0f, 1.0f, 1.0f}});
 
 			for (int i = 0; i < 8; ++i) {
 				JPH::Vec4 worldPos = invVP * ndc[i];
@@ -441,7 +332,7 @@ void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 		s_WasFrozen = false;
 	}
 
-	CullingSystem<false>(engine, s_VisibleEntities, s_PomniParts);
+	CullingSystem<false>(engine, game.visibleEntities, game.scene.pomniParts);
 
 	JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f};
 	JPH::Mat44 lightView =
@@ -505,8 +396,8 @@ void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 	sceneLights[1].color[0] = 0.0f;
 	sceneLights[1].color[1] = 0.5f;
 	sceneLights[1].color[2] = 1.0f;
-	sceneLights[1].intensity = s_Light1Intensity;
-	sceneLights[1].radius = s_SphereLightRadius;
+	sceneLights[1].intensity = game.workspace.light1Intensity;
+	sceneLights[1].radius = game.workspace.sphereLightRadius;
 
 	// --- LIGHT 2: MAGENTA SPHERE ---
 	sceneLights[2].position[0] = 5.0f; // <-- FIX: Was sceneLights[1]
@@ -516,14 +407,24 @@ void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 	sceneLights[2].color[0] = 1.0f;
 	sceneLights[2].color[1] = 0.0f;
 	sceneLights[2].color[2] = 0.5f;
-	sceneLights[2].intensity = s_Light2Intensity;
-	sceneLights[2].radius = s_SphereLightRadius;
+	sceneLights[2].intensity = game.workspace.light2Intensity;
+	sceneLights[2].radius = game.workspace.sphereLightRadius;
 
-	// Sync modified material values directly to the queried glTF floor in the registry
-	if (s_VisualFloorEntity != NullEntity) {
-		if (auto* floorMeshComp = reg.Get<MeshComponent>(s_VisualFloorEntity)) {
-			floorMeshComp->material.roughnessFactor = s_FloorRoughness;
-			floorMeshComp->material.metallicFactor = s_FloorMetallic;
+	// --- ALL-FLOOR DYNAMIC UPDATE FIX ---
+	// Traverse the registry to update every floor, ground, or lobby primitive cleanly
+	auto floorEntities = reg.GetEntitiesWith<NameComponent>();
+	auto floorNames = reg.GetRawArray<NameComponent>();
+
+	for (size_t i = 0; i < floorEntities.size(); ++i) {
+		std::string nameLower(floorNames[i].name.c_str());
+		std::ranges::transform(nameLower, nameLower.begin(), ::tolower);
+
+		if (nameLower.contains("floor") || nameLower.contains("ground") ||
+			nameLower.contains("lobby")) {
+			if (auto* floorMeshComp = reg.Get<MeshComponent>(floorEntities[i])) {
+				floorMeshComp->material.roughnessFactor = game.workspace.floorRoughness;
+				floorMeshComp->material.metallicFactor = game.workspace.floorMetallic;
+			}
 		}
 	}
 
@@ -536,19 +437,20 @@ void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 	std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
 	std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);
 	uniforms.lightCount = static_cast<uint32_t>(sceneLights.size());
-	uniforms.probeMin = JPH::Vec4(s_ProbeMin, s_UseLocalProbe ? 1.0f : 0.0f);
-	uniforms.probeMax = JPH::Vec4(s_ProbeMax, 0.0f);
-	uniforms.probePos = JPH::Vec4(s_ProbePos, 0.0f);
+	uniforms.probeMin =
+		JPH::Vec4(game.graphics.probeMin, game.graphics.useLocalProbe ? 1.0f : 0.0f);
+	uniforms.probeMax = JPH::Vec4(game.graphics.probeMax, 0.0f);
+	uniforms.probePos = JPH::Vec4(game.graphics.probePos, 0.0f);
 
-	Renderer::SetGISettings(rc, {.mode = s_GIMode,
-								 .aoRadius = s_AORadius,
-								 .aoBias = s_AOBias,
-								 .aoPower = s_AOPower,
-								 .giIntensity = s_GIIntensity,
-								 .giSamples = s_GISamples,
-								 .vignetteIntensity = s_VignetteIntensity,
-								 .vignettePower = s_VignettePower,
-								 .enableSSR = s_EnableSSR ? 1 : 0});
+	Renderer::SetGISettings(rc, {.mode = game.graphics.giMode,
+								 .aoRadius = game.graphics.aoRadius,
+								 .aoBias = game.graphics.aoBias,
+								 .aoPower = game.graphics.aoPower,
+								 .giIntensity = game.graphics.giIntensity,
+								 .giSamples = game.graphics.giSamples,
+								 .vignetteIntensity = game.graphics.vignetteIntensity,
+								 .vignettePower = game.graphics.vignettePower,
+								 .enableSSR = game.graphics.enableSSR ? 1 : 0});
 
 	Renderer::SetLights(rc, sceneLights.data(), uniforms.lightCount); // Upload SSBO to GPU
 	Renderer::SetFrameData(rc, uniforms, shadowProjView);
@@ -556,16 +458,16 @@ void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 	Renderer::SetMatrices(rc, vp, unjitteredVp);
 
 	JPH::Mat44 playerTransform = JPH::Mat44::sIdentity();
-	if (reg.IsAlive(s_PlayerEntity)) {
+	if (reg.IsAlive(game.playerEntity)) {
 		bool isRagdollActive = false;
-		if (auto* ragComp = reg.Get<RagdollComponent>(s_PlayerEntity)) {
+		if (auto* ragComp = reg.Get<RagdollComponent>(game.playerEntity)) {
 			isRagdollActive = (ragComp->state == RagdollState::Limp ||
 							   ragComp->state == RagdollState::KeyframeMotor);
 		}
 
 		if (!isRagdollActive) {
 			JPH::Quat rotation = JPH::Quat::sIdentity();
-			if (auto* move = reg.Get<MovementComponent>(s_PlayerEntity)) {
+			if (auto* move = reg.Get<MovementComponent>(game.playerEntity)) {
 				rotation = JPH::Quat(move->orientation[0], move->orientation[1],
 									 move->orientation[2], move->orientation[3]);
 			}
@@ -574,13 +476,13 @@ void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 		}
 	}
 
-	for (Entity e : s_VisibleEntities) {
+	for (Entity e : game.visibleEntities) {
 		auto* mesh = reg.Get<MeshComponent>(e);
 		if (mesh == nullptr) {
 			continue;
 		}
 
-		bool isPlayerPart = std::ranges::contains(s_PomniParts, e);
+		bool isPlayerPart = std::ranges::contains(game.scene.pomniParts, e);
 		JPH::Mat44 currentTransform{};
 		if (isPlayerPart) {
 			currentTransform = playerTransform * mesh->localTransform;
@@ -594,12 +496,14 @@ void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 	}
 
 	CullingStats::TotalObjects = (uint32_t)reg.GetEntitiesWith<MeshComponent>().size();
-	CullingStats::CulledObjects = CullingStats::TotalObjects - (uint32_t)s_VisibleEntities.size();
+	CullingStats::CulledObjects =
+		CullingStats::TotalObjects - (uint32_t)game.visibleEntities.size();
 
-	Renderer::DrawUI(rc, s_HelloText, s_FontAtlasIdx);
+	Renderer::DrawUI(rc, game.helloText, game.fontAtlasIdx);
 
 	// --- DRAW THE FREEZE WIREFRAME FRUSTUM ---
-	if (CullingStats::FreezeFrustum && s_DebugLineMesh.vertexBuffer != BufferHandle::Invalid) {
+	if (CullingStats::FreezeFrustum &&
+		game.scene.debugLineMesh.vertexBuffer != BufferHandle::Invalid) {
 		for (auto s_FrustumEdge : s_FrustumEdges) {
 			JPH::Vec3 pA = s_FrustumCorners[s_FrustumEdge.start];
 			JPH::Vec3 pB = s_FrustumCorners[s_FrustumEdge.end];
@@ -616,12 +520,12 @@ void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 			JPH::Quat rot = JPH::Quat::sFromTo(JPH::Vec3::sAxisZ(), dir);
 			JPH::Mat44 lineTransform = Math::CreateTransform(mid, rot, JPH::Vec3(1.0f, 1.0f, len));
 
-			Renderer::Draw(rc, s_DebugLineMaterial, s_DebugLineMesh, lineTransform, lineTransform,
-						   len);
+			Renderer::Draw(rc, game.scene.debugLineMaterial, game.scene.debugLineMesh,
+						   lineTransform, lineTransform, len);
 		}
 	}
 
-	rc.SetTAAState(s_TAAState);
+	rc.SetTAAState(game.graphics.taaState);
 
 	engine.EndFrame();
 
@@ -635,7 +539,7 @@ void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 		auto* mesh = reg.Get<MeshComponent>(e);
 		if (mesh != nullptr) {
 			JPH::Mat44 currentTransform{};
-			bool isPlayerPart = std::ranges::contains(s_PomniParts, e);
+			bool isPlayerPart = std::ranges::contains(game.scene.pomniParts, e);
 
 			if (isPlayerPart) {
 				currentTransform = playerTransform * mesh->localTransform;
@@ -647,13 +551,131 @@ void ZHLN::RenderGame(Engine& engine, float physicsAccumulator) {
 	}
 }
 
-void ZHLN::ShutdownGame([[maybe_unused]] Engine& engine) {
-	// Reclaim heap memories
-	delete s_ScriptRunner;
-	delete s_GameplayWatcher;
-	delete s_ArticulationSystem;
-	delete s_AnimationSystem;
+void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, GameContext& game) {
+	auto& cam = engine.GetCamera();
+	auto& pc = engine.GetPhysicsContext();
+	auto& rc = engine.GetRenderContext();
+	auto& reg = engine.GetRegistry();
+
+	// 1. Draw HUD Layouts
+	ZHLN::DrawConsole(*game.scriptRunner);
+	ZHLN::DrawInventoryShell(*game.scriptRunner);
+	ZHLN::DrawProfiler(engine, game.graphics.taaState);
+	ZHLN::DrawOrientationGizmo(cam);
+
+	// 2. Lighting Workspace Developer Menu
+	ImGui::Begin("Lighting Workspace Controller");
+	ImGui::Text("Specular Mips & Area Lights Debugger");
+	ImGui::Separator();
+	ImGui::SliderFloat("Sphere Light Radius", &game.workspace.sphereLightRadius, 0.0f, 5.0f);
+	ImGui::SliderFloat("Cyan Intensity", &game.workspace.light1Intensity, 0.0f, 500.0f);
+	ImGui::SliderFloat("Magenta Intensity", &game.workspace.light2Intensity, 0.0f, 500.0f);
+	ImGui::Separator();
+	ImGui::SliderFloat("Floor Roughness", &game.workspace.floorRoughness, 0.0f, 1.0f);
+	ImGui::SliderFloat("Floor Metallic", &game.workspace.floorMetallic, 0.0f, 1.0f);
+
+	// --- PARALLAX-CORRECTED PROBE CONTROLS ---
+	ImGui::SeparatorText("Parallax-Corrected Local Reflection Probe");
+	ImGui::Checkbox("Enable Box Projection", &game.graphics.useLocalProbe);
+	if (game.graphics.useLocalProbe) {
+		std::array<float, 3> minArr = {game.graphics.probeMin.GetX(), game.graphics.probeMin.GetY(),
+									   game.graphics.probeMin.GetZ()};
+		std::array<float, 3> maxArr = {game.graphics.probeMax.GetX(), game.graphics.probeMax.GetY(),
+									   game.graphics.probeMax.GetZ()};
+		std::array<float, 3> posArr = {game.graphics.probePos.GetX(), game.graphics.probePos.GetY(),
+									   game.graphics.probePos.GetZ()};
+
+		if (ImGui::DragFloat3("Box Min", minArr.data(), 0.1f, -100.0f, 100.0f, "%.1fm")) {
+			game.graphics.probeMin = JPH::Vec3(minArr[0], minArr[1], minArr[2]);
+		}
+		if (ImGui::DragFloat3("Box Max", maxArr.data(), 0.1f, -100.0f, 100.0f, "%.1fm")) {
+			game.graphics.probeMax = JPH::Vec3(maxArr[0], maxArr[1], maxArr[2]);
+		}
+		if (ImGui::DragFloat3("Probe Position", posArr.data(), 0.1f, -100.0f, 100.0f, "%.1fm")) {
+			game.graphics.probePos = JPH::Vec3(posArr[0], posArr[1], posArr[2]);
+		}
+	}
+
+	// --- COOPERATIVE SSAO / SSGI CONTROLLER ---
+	ImGui::SeparatorText("Ambient Occlusion & Global Illumination");
+	const char* giModesList[] = {"Off", "SSAO (Ambient Occlusion)", "SSGI (Screen Space GI)",
+								 "HBAO (Horizon-Based AO)", "GTAO (Ground Truth AO)"};
+	ImGui::Combo("GI Mode", &game.graphics.giMode, giModesList, IM_ARRAYSIZE(giModesList));
+
+	if (game.graphics.giMode == 1) { // SSAO Settings
+		ImGui::SliderFloat("AO Radius", &game.graphics.aoRadius, 0.05f, 2.5f, "%.2fm");
+		ImGui::SliderFloat("AO Bias", &game.graphics.aoBias, 0.001f, 0.2f, "%.3f");
+		ImGui::SliderFloat("AO Contrast", &game.graphics.aoPower, 0.5f, 5.0f, "%.1fx");
+		ImGui::SliderInt("AO Samples", &game.graphics.giSamples, 2, 32);
+	} else if (game.graphics.giMode == 2) { // SSGI Settings
+		ImGui::SliderFloat("Bounce Radius", &game.graphics.aoRadius, 0.05f, 2.5f, "%.2fm");
+		ImGui::SliderFloat("Bounce Bias", &game.graphics.aoBias, 0.001f, 0.2f, "%.3f");
+		ImGui::SliderFloat("GI Bounce Intensity", &game.graphics.giIntensity, 0.1f, 5.0f, "%.1fx");
+		ImGui::SliderInt("GI Samples", &game.graphics.giSamples, 2, 32);
+	} else if (game.graphics.giMode == 3 || game.graphics.giMode == 4) { // HBAO / GTAO Settings
+		ImGui::SliderFloat("Search Radius", &game.graphics.aoRadius, 0.05f, 3.0f, "%.2fm");
+		ImGui::SliderFloat("Acne Bias", &game.graphics.aoBias, 0.001f, 0.2f, "%.3f");
+		ImGui::SliderFloat("Shadow Contrast", &game.graphics.aoPower, 0.5f, 6.0f, "%.1fx");
+		ImGui::SliderInt("Search Steps", &game.graphics.giSamples, 4,
+						 32); // Represents total step count
+	}
+
+	// --- CAMERA VIGNETTE ---
+	ImGui::Separator();
+	ImGui::SeparatorText("Camera Vignette");
+	ImGui::SliderFloat("Vignette Intensity", &game.graphics.vignetteIntensity, 0.0f, 2.5f, "%.2f");
+	if (game.graphics.vignetteIntensity > 0.0f) {
+		ImGui::SliderFloat("Vignette Power", &game.graphics.vignettePower, 0.1f, 6.0f, "%.2f");
+	}
+
+	ImGui::Checkbox("Enable SSR", &game.graphics.enableSSR);
+
+	ImGui::End();
+
+	// 3. Hot Reload Script Files
+	if (++game.frameCounter % 60 == 0 && game.gameplayWatcher->CheckModified()) {
+		game.scriptRunner->ReloadFile("scripts/gameplay.lua");
+	}
+
+	{
+		ZHLN_PROFILE_SCOPE("Logic");
+
+		// Mouse look (Active only when holding Right Click)
+		const float sensitivity = 0.15f;
+		if (engine.GetInput().IsMouseButtonDown(KeyCode::RButton)) {
+			cam.yaw += engine.GetInput().GetMouse().deltaX * sensitivity;
+			cam.pitch = std::clamp(cam.pitch - (engine.GetInput().GetMouse().deltaY * sensitivity),
+								   -89.0f, 89.0f);
+		}
+
+		game.scriptRunner->CallUpdate(&engine, dt);
+
+		// 4. Physics Tick loop
+		physicsAccumulator += dt;
+		constexpr float targetDt = 1.0f / 60.0f;
+		while (physicsAccumulator >= targetDt) {
+			ZHLN::MovementSystem(engine, targetDt);
+			pc.Step(targetDt);
+			physicsAccumulator -= targetDt;
+		}
+
+		// 5. Run animation systems
+		game.animationSystem->UpdateAnimations(rc, reg, dt);
+		game.articulationSystem->Update(engine, dt);
+	}
 }
+
+void ShutdownGame([[maybe_unused]] Engine& engine, GameContext& game) {
+	// Reclaim heap memories
+	delete game.scriptRunner;
+	delete game.gameplayWatcher;
+	delete game.articulationSystem;
+	delete game.animationSystem;
+}
+
+} // namespace ZHLN
+
+using namespace ZHLN;
 
 // ============================================================================
 // CLEAN ENTRYPOINT ENGINE CONTROL LOOP [1]
@@ -681,7 +703,10 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 		Engine engine(config);
 		engine.GetWindow().Focus();
 
-		if (!ZHLN::InitializeGame(engine)) {
+		// Local stack allocation of context cleanly separates game loop dependencies [1]
+		GameContext game{};
+
+		if (!ZHLN::InitializeGame(engine, game)) {
 			ZHLN::Log("Fatal: Game failed to initialize.");
 			return EXIT_FAILURE;
 		}
@@ -709,14 +734,15 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 				continue;
 			}
 
-			engine.BeginFrame();
+			// Execute game simulation ticks and rendering (BeginFrame inside RenderGame)
+			// 1. Update physics, gameplay logic, and record ImGui windows
+			ZHLN::UpdateGame(engine, frameTime, physicsAccumulator, game);
 
-			// Execute game simulation ticks and rendering
-			ZHLN::UpdateGame(engine, frameTime, physicsAccumulator);
-			ZHLN::RenderGame(engine, physicsAccumulator);
+			// 2. Render scene, overlay ImGui draw data, and submit to GPU
+			ZHLN::RenderGame(engine, physicsAccumulator, game);
 		}
 
-		ZHLN::ShutdownGame(engine);
+		ZHLN::ShutdownGame(engine, game);
 	}
 
 	TaskSystem::Shutdown();
