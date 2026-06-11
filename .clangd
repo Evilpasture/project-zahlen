@@ -4,6 +4,11 @@ CompileFlags:
 
 Diagnostics:
   ClangTidy:
-    # Remove ["*"] and replace it with empty brackets or omit it entirely.
-    # This forces clangd to search for your local `.clang-tidy` file instead.
     Add: []
+
+---
+If:
+  PathMatch: .*\.(hpp|inl)
+CompileFlags:
+  Add: [-xc++-header, -std=c++26]
+  Remove: [-std=*]
