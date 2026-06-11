@@ -266,8 +266,6 @@ struct RenderContext::Impl {
 
 	void SortDrawQueue();
 	void SubmitFrame();
-
-	// REMOVED: RenderShadowPass, RenderMainPass, ApplyTAAPass, BlitAndDrawUI...
 };
 } // namespace ZHLN
 

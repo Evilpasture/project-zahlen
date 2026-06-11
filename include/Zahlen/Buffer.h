@@ -50,6 +50,6 @@ ZHLN_API ZHLN_BufferView ZHLN_GetPhysicsLinearVelocities(struct ZHLN_Engine* eng
 namespace ZHLN {
 // C++ alias
 using BufferView = ::ZHLN_BufferView;
-static_assert(std::is_trivial_v<BufferView>, "BufferView must be trivial for FFI safety!");
+static_assert((std::is_trivially_default_constructible_v<BufferView> && std::is_trivially_copyable_v<BufferView>), "BufferView must be trivial for FFI safety!");
 } // namespace ZHLN
 #endif

@@ -12,7 +12,7 @@ template <typename T> struct Atomic {
 	static_assert(std::is_trivially_copyable_v<T>);
 	static_assert(std::is_standard_layout_v<T>);
 	static_assert(std::is_scalar_v<T>);
-	static_assert(std::is_trivial_v<T>);
+	static_assert((std::is_trivially_default_constructible_v<T> && std::is_trivially_copyable_v<T>));
 
 	// Raw storage aligned to hardware requirements
 	alignas(std::atomic_ref<T>::required_alignment) T value;
@@ -62,6 +62,6 @@ template <typename T> struct Atomic {
 };
 
 // Guarantee at compile time!
-static_assert(std::is_trivial_v<Atomic<size_t>>, "ZHLN::Atomic must be Trivial");
+static_assert((std::is_trivially_default_constructible_v<Atomic<size_t>> && std::is_trivially_copyable_v<Atomic<size_t>>), "ZHLN::Atomic must be Trivial");
 
 } // namespace ZHLN

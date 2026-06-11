@@ -112,7 +112,7 @@ static_assert(kIsDebugMutex || sizeof(Mutex) == 1,
 			  "ZHLN::Mutex must be exactly 1 byte in Release mode!");
 
 // Guarantee it's a perfect POD
-static_assert(kIsDebugMutex || std::is_trivial_v<Mutex>, "Mutex MUST be trivial in Release mode!");
+static_assert(kIsDebugMutex || (std::is_trivially_default_constructible_v<Mutex> && std::is_trivially_copyable_v<Mutex>), "Mutex MUST be trivial in Release mode!");
 
 /**
  * @brief Trivial RAII guard to avoid including <mutex> in interface headers.

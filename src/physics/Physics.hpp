@@ -29,7 +29,7 @@ struct DebugDrawData;
 } // namespace Physics
 
 static_assert(std::is_trivially_copyable_v<ZHLN::Entity>);
-static_assert(std::is_trivial_v<ZHLN::Entity>);
+static_assert((std::is_trivially_default_constructible_v<ZHLN::Entity> && std::is_trivially_copyable_v<ZHLN::Entity>));
 
 class ZHLN_API PhysicsContext {
   public:
@@ -150,8 +150,8 @@ struct CullResult {
 void FrustumCull(const PhysicsContext& ctx, const JPH::Mat44& viewProj, const Frustum& frustum,
 				 JPH::Array<ZHLN::Entity>& outEntities);
 
-static_assert(std::is_trivial_v<RaycastResult> && std::is_trivial_v<ShapeCastResult> &&
-			  std::is_trivial_v<CullResult>);
+static_assert((std::is_trivially_default_constructible_v<RaycastResult> && std::is_trivially_copyable_v<RaycastResult>) && (std::is_trivially_default_constructible_v<ShapeCastResult> && std::is_trivially_copyable_v<ShapeCastResult>) &&
+			  (std::is_trivially_default_constructible_v<CullResult> && std::is_trivially_copyable_v<CullResult>));
 
 // --- Queries ---
 [[nodiscard]] RaycastResult Raycast(const PhysicsContext& ctx, JPH::RVec3Arg origin,

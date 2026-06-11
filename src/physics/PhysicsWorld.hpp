@@ -37,7 +37,7 @@ struct ConstraintHandle {
 	}
 };
 
-static_assert(std::is_trivial_v<ConstraintHandle>);
+static_assert((std::is_trivially_default_constructible_v<ConstraintHandle> && std::is_trivially_copyable_v<ConstraintHandle>));
 
 enum class ConstraintType : uint8_t { Fixed, Point, Hinge, Slider, Cone, Distance };
 
@@ -56,7 +56,7 @@ struct ConstraintParams {
 };
 
 // Protects struct Command from being non-trivial
-static_assert(std::is_trivial_v<ConstraintParams>);
+static_assert((std::is_trivially_default_constructible_v<ConstraintParams> && std::is_trivially_copyable_v<ConstraintParams>));
 
 enum class CommandType : uint8_t {
 	DestroyBody,
@@ -95,7 +95,7 @@ struct Command {
 #pragma GCC diagnostic pop
 #endif
 
-static_assert(std::is_trivial_v<Command>); // Must be trivial
+static_assert((std::is_trivially_default_constructible_v<Command> && std::is_trivially_copyable_v<Command>)); // Must be trivial
 
 enum SlotState : uint8_t {
 	SLOT_EMPTY = 0,
@@ -128,7 +128,7 @@ struct alignas(128) ContactEvent {
 static_assert(sizeof(ContactEvent) == 128,
 			  "ContactEvent must be exactly 128 bytes for L1/L2 cache isolation!");
 
-static_assert(std::is_trivial_v<ContactEvent>);
+static_assert((std::is_trivially_default_constructible_v<ContactEvent> && std::is_trivially_copyable_v<ContactEvent>));
 
 // Simple container for materials
 struct MaterialData {
@@ -137,7 +137,7 @@ struct MaterialData {
 	float restitution;
 };
 
-static_assert(std::is_trivial_v<MaterialData>);
+static_assert((std::is_trivially_default_constructible_v<MaterialData> && std::is_trivially_copyable_v<MaterialData>));
 
 /**
  * @brief Thread-Safe, Cache-Isolated Structure of Arrays (SoA) Physics World.
@@ -273,7 +273,7 @@ struct PhysicsWorld {
 // Guarantee predictable layout for raw memory mapping and SIMD logic
 static_assert(std::is_standard_layout_v<PhysicsWorld>);
 static_assert(std::is_trivially_copyable_v<PhysicsWorld>);
-static_assert(std::is_trivial_v<PhysicsWorld>);
+static_assert((std::is_trivially_default_constructible_v<PhysicsWorld> && std::is_trivially_copyable_v<PhysicsWorld>));
 
 // --- Slot Predication Logic ---
 

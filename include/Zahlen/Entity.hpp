@@ -20,7 +20,7 @@ struct Entity {
 	constexpr bool operator==(const Entity& other) const noexcept = default;
 };
 
-static_assert(std::is_trivial_v<Entity> && sizeof(Entity) == 8);
+static_assert((std::is_trivially_default_constructible_v<Entity> && std::is_trivially_copyable_v<Entity>) && sizeof(Entity) == 8);
 
 // Sentinel value
 constexpr Entity NullEntity = {0xFFFFFFFF, 0xFFFFFFFF};

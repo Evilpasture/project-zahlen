@@ -73,25 +73,25 @@ inline void ProcessItem(const uint32_t D, const JPH::Body* const ZHLN_RESTRICT b
 	const auto& translation = b->GetCenterOfMassPosition();
 
 	if constexpr (IS_DOUBLE) {
-		[[clang::always_inline]] translation.StoreDouble3(
+		 translation.StoreDouble3(
 			reinterpret_cast<PosPointerType>(targetPos));
 		targetPos->w = 0.0;
 	} else {
-		[[clang::always_inline]] JPH::Vec4(JPH::Vec3(translation), 0.0f)
+		 JPH::Vec4(JPH::Vec3(translation), 0.0f)
 			.StoreFloat4(reinterpret_cast<JPH::Float4* const ZHLN_RESTRICT>(targetPos));
 	}
 
 	// 3. Write Current Rotation
 	const auto& rotation = b->GetRotation();
-	[[clang::always_inline]] rotation.GetXYZW().StoreFloat4(
+	 rotation.GetXYZW().StoreFloat4(
 		reinterpret_cast<AuxPointerType>(&world.shadow_rot[D]));
 
 	// 4. Write Velocities (Rigid Body Only)
 	if constexpr (TType == JPH::EBodyType::RigidBody) {
-		[[clang::always_inline]] JPH::Vec4(b->GetLinearVelocity(), 0.0f)
+		 JPH::Vec4(b->GetLinearVelocity(), 0.0f)
 			.StoreFloat4(reinterpret_cast<AuxPointerType>(&world.shadow_lvel[D]));
 
-		[[clang::always_inline]] JPH::Vec4(b->GetAngularVelocity(), 0.0f)
+		 JPH::Vec4(b->GetAngularVelocity(), 0.0f)
 			.StoreFloat4(reinterpret_cast<AuxPointerType>(&world.shadow_avel[D]));
 	}
 }
@@ -139,7 +139,7 @@ inline void ExecuteSyncPass(const uint32_t active_count,
 		const auto* ZHLN_RESTRICT b =
 			static_cast<const JPH::Body * ZHLN_RESTRICT>(map.body_ptrs[j_idx]);
 
-		[[clang::always_inline]]
+		
 		if (b == nullptr || b->GetID().GetIndexAndSequenceNumber() != raw_jolt_id) [[unlikely]] {
 			b = lock_iface->TryGetBody(JPH::BodyID(raw_jolt_id));
 			map.body_ptrs[j_idx] = b;

@@ -127,6 +127,27 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 	}
 
 	/**
+	 * @brief Thread-safe lock-free reader traversal.
+	 * Safe to call concurrently with Insert/Erase.
+	 */
+	template <typename Func> void Iterate(Func&& func) const {
+		// Enter QSR reader phase
+		const_cast<SkipList*>(this)->EnterReader();
+
+		const SkipNode* curr = _head->GetForward()[0].load(std::memory_order_acquire);
+		while (curr != nullptr) {
+			// Only yield the node if it has not been logically deleted
+			if (!curr->deleted.load(std::memory_order_acquire)) {
+				func(curr->key, curr->value);
+			}
+			curr = curr->GetForward()[0].load(std::memory_order_acquire);
+		}
+
+		// Exit QSR reader phase
+		const_cast<SkipList*>(this)->ExitReader();
+	}
+
+	/**
 	 * @brief Fully concurrent Multi-Writer insertion using optimistic fine-grained locks.
 	 */
 	void Insert(const Key& key, const Value& value) {

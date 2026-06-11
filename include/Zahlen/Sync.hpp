@@ -9,5 +9,5 @@ struct alignas(64) BufferSync {
 	ZHLN::Mutex shadowLock;
 };
 
-static_assert(std::is_trivial_v<BufferSync>);
+static_assert((std::is_trivially_default_constructible_v<BufferSync> && std::is_trivially_copyable_v<BufferSync>));
 } // namespace ZHLN

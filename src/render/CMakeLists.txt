@@ -12,8 +12,12 @@ add_library(zahlen_render STATIC
     RenderCore.hpp
     RenderCore.cpp
     Allocator.hpp
+    StagingContext.hpp
     PipelineBuilder.cpp
     DescriptorLayout.cpp
+    Allocator.cpp
+    SamplerBuilder.cpp
+    StagingContext.cpp
 )
 set_target_properties(zahlen_render PROPERTIES POSITION_INDEPENDENT_CODE ON)
 

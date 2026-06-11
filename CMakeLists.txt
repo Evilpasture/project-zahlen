@@ -20,7 +20,7 @@ if(APPLE)
     set(CMAKE_SYSROOT ${MACOS_SDK_PATH})
 endif()
 
-set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -116,7 +116,7 @@ endif()
 # --- 5. BUILD CORE SHARED LIBRARY ---
 add_library(zahlen_engine SHARED ${ENGINE_SOURCES})
 
-# Compile definitions required for DLL exports on Windows [3]
+# Compile definitions required for DLL exports on Windows 
 target_compile_definitions(zahlen_engine PRIVATE 
     ZHLN_ENGINE_BUILD
     JPH_DOUBLE_PRECISION
@@ -147,7 +147,7 @@ target_link_libraries(zahlen_engine PUBLIC Jolt)
 target_include_directories(zahlen_engine SYSTEM PRIVATE
     ${CMAKE_SOURCE_DIR}/extern/JoltPhysics
 )
-# Use PUBLIC for the main include directory so dependent targets automatically get it [3]
+# Use PUBLIC for the main include directory so dependent targets automatically get it 
 target_include_directories(zahlen_engine PUBLIC
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/src

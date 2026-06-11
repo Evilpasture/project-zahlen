@@ -706,7 +706,7 @@ auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
 		Engine engine(config);
 		engine.GetWindow().Focus();
 
-		// Local stack allocation of context cleanly separates game loop dependencies [1]
+		// Local stack allocation of context cleanly separates game loop dependencies
 		GameContext game{};
 
 		if (!ZHLN::InitializeGame(engine, game)) {
