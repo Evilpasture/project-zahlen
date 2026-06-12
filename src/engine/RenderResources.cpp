@@ -79,11 +79,10 @@ auto RenderContext::CreateVertexBuffer(const void* data, size_t size) -> BufferH
 	vkQueueSubmit2(_impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
 	vkQueueWaitIdle(_impl->ctx.GraphicsQueue());
 
-	auto mesh = std::make_unique<NativeMesh>(std::move(gpu_buf),
-											 static_cast<uint32_t>(size / sizeof(Vertex)));
-	auto handle = static_cast<BufferHandle>(reinterpret_cast<uintptr_t>(mesh.get()));
-	_impl->meshes.push_back(std::move(mesh));
-	return handle;
+	// Return a packed generational handle
+	uint64_t handle =
+		_impl->meshPool.Create(std::move(gpu_buf), static_cast<uint32_t>(size / sizeof(Vertex)));
+	return static_cast<BufferHandle>(handle);
 }
 
 auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHandle {
@@ -112,12 +111,10 @@ auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHa
 	vkQueueSubmit2(_impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
 	vkQueueWaitIdle(_impl->ctx.GraphicsQueue());
 
-	// NativeMesh stores generic Vk::Buffer, which can represent VBO or IBO safely
-	auto mesh = std::make_unique<NativeMesh>(std::move(gpu_buf),
-											 static_cast<uint32_t>(size / sizeof(uint32_t)));
-	auto handle = static_cast<BufferHandle>(reinterpret_cast<uintptr_t>(mesh.get()));
-	_impl->meshes.push_back(std::move(mesh));
-	return handle;
+	// Return a packed generational handle
+	uint64_t handle =
+		_impl->meshPool.Create(std::move(gpu_buf), static_cast<uint32_t>(size / sizeof(uint32_t)));
+	return static_cast<BufferHandle>(handle);
 }
 
 auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
@@ -151,24 +148,21 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 						.DepthFormat(VK_FORMAT_D32_SFLOAT)
 						.CullNone();
 
-	// Toggle hardware culling based on material state
 	if (desc.doubleSided) {
 		pipeline.CullNone();
 	} else {
 		pipeline.CullBack();
 	}
 
-	// Toggle hardware alpha blending
 	if (desc.alphaBlend) {
 		pipeline.AlphaBlend();
 	}
 
 	auto finalPipeline = pipeline.Build(impl->ctx.Device());
 
-	auto mat = std::make_unique<NativeMaterial>(std::move(finalPipeline), std::move(layout));
-	auto handle = static_cast<PipelineHandle>(reinterpret_cast<uintptr_t>(mat.get()));
-	impl->materials.push_back(std::move(mat));
-	return Material{.pipeline = handle};
+	// Return a packed generational handle
+	uint64_t handle = impl->materialPool.Create(std::move(finalPipeline), std::move(layout));
+	return Material{.pipeline = static_cast<PipelineHandle>(handle)};
 }
 
 auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB)

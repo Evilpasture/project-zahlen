@@ -152,8 +152,9 @@ RenderContext::~RenderContext() {
 		ImGui_ImplVulkan_Shutdown();
 		ImGui_ImplGlfw_Shutdown();
 		ImGui::DestroyContext();
-		_impl->meshes.clear();
-		_impl->materials.clear();
+
+		// meshPool and materialPool automatically sweep and destroy all remaining
+		// active allocations here on context shutdown, cleaning up pipelines and buffers.
 	}
 }
 

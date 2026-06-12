@@ -12,7 +12,7 @@ struct SortKey {
 	 * Folds high-order 64-bit virtual address space bits (like ASLR offsets)
 	 * into 32-bit keys using a shift-XOR hash fold to prevent pointer collisions.
 	 */
-	static inline SortKey Pack(const void* material, const void* mesh) noexcept {
+	static SortKey Pack(const void* material, const void* mesh) noexcept {
 		auto mat_val = reinterpret_cast<uintptr_t>(material);
 		auto mesh_val = reinterpret_cast<uintptr_t>(mesh);
 

@@ -809,10 +809,27 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 		return;
 	}
 
+	// 1. Resolve Mesh Handles with Generational Safety checks
+	auto* nativeMesh = impl->meshPool.Resolve(static_cast<uint64_t>(mesh.vertexBuffer));
+	if (nativeMesh == nullptr) [[unlikely]] {
+		return; // Stale or invalid handle; safely ignore
+	}
+
+	auto* nativeIndexMesh = mesh.indexBuffer != BufferHandle::Invalid
+								? impl->meshPool.Resolve(static_cast<uint64_t>(mesh.indexBuffer))
+								: nullptr;
+
+	// 2. Resolve Material Handle with Generational Safety checks
+	auto* nativeMaterial = impl->materialPool.Resolve(static_cast<uint64_t>(material.pipeline));
+	if (nativeMaterial == nullptr) [[unlikely]] {
+		return; // Stale or invalid material; safely ignore
+	}
+
+	// 3. Record Draw Command using safe resolved raw pointers
 	impl->drawQueue.push_back(
-		DrawCommand{.material = std::bit_cast<NativeMaterial*>(material.pipeline),
-					.mesh = std::bit_cast<NativeMesh*>(mesh.vertexBuffer),
-					.indexMesh = std::bit_cast<NativeMesh*>(mesh.indexBuffer),
+		DrawCommand{.material = nativeMaterial,
+					.mesh = nativeMesh,
+					.indexMesh = nativeIndexMesh,
 					.transform = transform,
 					.prevTransform = prevTransform,
 					.albedoIndex = material.albedoIndex,
@@ -847,8 +864,13 @@ void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex) {
 		return;
 	}
 
-	impl->uiDrawQueue.push_back(
-		{.mesh = std::bit_cast<NativeMesh*>(mesh.vertexBuffer), .fontIndex = fontIndex});
+	// Resolve Mesh Handle with Generational Safety checks
+	auto* nativeMesh = impl->meshPool.Resolve(static_cast<uint64_t>(mesh.vertexBuffer));
+	if (nativeMesh == nullptr) [[unlikely]] {
+		return;
+	}
+
+	impl->uiDrawQueue.push_back({.mesh = nativeMesh, .fontIndex = fontIndex});
 }
 
 } // namespace Renderer

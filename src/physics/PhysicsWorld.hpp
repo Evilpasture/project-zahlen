@@ -37,7 +37,8 @@ struct ConstraintHandle {
 	}
 };
 
-static_assert((std::is_trivially_default_constructible_v<ConstraintHandle> && std::is_trivially_copyable_v<ConstraintHandle>));
+static_assert((std::is_trivially_default_constructible_v<ConstraintHandle> &&
+			   std::is_trivially_copyable_v<ConstraintHandle>));
 
 enum class ConstraintType : uint8_t { Fixed, Point, Hinge, Slider, Cone, Distance };
 
@@ -56,7 +57,8 @@ struct ConstraintParams {
 };
 
 // Protects struct Command from being non-trivial
-static_assert((std::is_trivially_default_constructible_v<ConstraintParams> && std::is_trivially_copyable_v<ConstraintParams>));
+static_assert((std::is_trivially_default_constructible_v<ConstraintParams> &&
+			   std::is_trivially_copyable_v<ConstraintParams>));
 
 enum class CommandType : uint8_t {
 	DestroyBody,
@@ -95,7 +97,8 @@ struct Command {
 #pragma GCC diagnostic pop
 #endif
 
-static_assert((std::is_trivially_default_constructible_v<Command> && std::is_trivially_copyable_v<Command>)); // Must be trivial
+static_assert((std::is_trivially_default_constructible_v<Command> &&
+			   std::is_trivially_copyable_v<Command>)); // Must be trivial
 
 enum SlotState : uint8_t {
 	SLOT_EMPTY = 0,
@@ -128,7 +131,8 @@ struct alignas(128) ContactEvent {
 static_assert(sizeof(ContactEvent) == 128,
 			  "ContactEvent must be exactly 128 bytes for L1/L2 cache isolation!");
 
-static_assert((std::is_trivially_default_constructible_v<ContactEvent> && std::is_trivially_copyable_v<ContactEvent>));
+static_assert((std::is_trivially_default_constructible_v<ContactEvent> &&
+			   std::is_trivially_copyable_v<ContactEvent>));
 
 // Simple container for materials
 struct MaterialData {
@@ -137,7 +141,8 @@ struct MaterialData {
 	float restitution;
 };
 
-static_assert((std::is_trivially_default_constructible_v<MaterialData> && std::is_trivially_copyable_v<MaterialData>));
+static_assert((std::is_trivially_default_constructible_v<MaterialData> &&
+			   std::is_trivially_copyable_v<MaterialData>));
 
 /**
  * @brief Thread-Safe, Cache-Isolated Structure of Arrays (SoA) Physics World.
@@ -147,90 +152,92 @@ std::pair<const ContactEvent*, size_t> GetContactEvents(const PhysicsContext& ct
 
 struct PhysicsWorld {
 	mutable BufferSync sync;
+
 	// ========================================================================
 	// BUCKET 1: JOLT CORE (Cold)
 	// ========================================================================
-	alignas(CACHE_LINE) JPH::PhysicsSystem* system;
-	JPH::BodyInterface* bodyInterface;
-	JPH::JobSystem* jobSystem;
-	JPH::BroadPhaseLayerInterface* bpInterface;
-	JPH::ObjectLayerPairFilter* pairFilter;
-	JPH::ObjectVsBroadPhaseLayerFilter* bpFilter;
-	JPH::ContactListener* contactListener;
-	JPH::TempAllocator* tempAllocator;
+	alignas(64) JPH::PhysicsSystem* system = nullptr;
+	JPH::BodyInterface* bodyInterface = nullptr;
+	JPH::JobSystem* jobSystem = nullptr;
+	JPH::BroadPhaseLayerInterface* bpInterface = nullptr;
+	JPH::ObjectLayerPairFilter* pairFilter = nullptr;
+	JPH::ObjectVsBroadPhaseLayerFilter* bpFilter = nullptr;
+	JPH::ContactListener* contactListener = nullptr;
+	JPH::TempAllocator* tempAllocator = nullptr;
 
-	uint32_t maxJoltBodies;
+	uint32_t maxJoltBodies = 0;
 
 	// ========================================================================
-	// BUCKET 2: HOT SIMULATION STATE
+	// BUCKET 2: HOT SIMULATION STATE (DOD SoA arrays - Aligned Raw Pointers)
 	// ========================================================================
-	alignas(CACHE_LINE) double time;
-	ZHLN::Atomic<size_t> count;
-	size_t capacity;
-	size_t slotCapacity;
-	ZHLN::Atomic<size_t> freeCount;
+	alignas(64) double time = 0.0;
+	ZHLN::Atomic<size_t> count{0};
+	size_t capacity = 0;
+	size_t slotCapacity = 0;
+	ZHLN::Atomic<size_t> freeCount{0};
 
-	JPH::Real* positions;
-	JPH::Real* prevPositions;
-	float* rotations;
-	float* prevRotations;
-	float* linearVelocities;
-	float* angularVelocities;
+	JPH::Real* positions = nullptr;
+	JPH::Real* prevPositions = nullptr;
+	float* rotations = nullptr;
+	float* prevRotations = nullptr;
+	float* linearVelocities = nullptr;
+	float* angularVelocities = nullptr;
 
-	JPH::BodyID* bodyIDs;
-	uint32_t* materialIDs;
-	uint64_t* userData;
+	// Managed automatically by JPH::Array
+	JPH::Array<JPH::BodyID> bodyIDs;
+	JPH::Array<uint32_t> materialIDs;
+	JPH::Array<uint64_t> userData;
 
 	// ========================================================================
 	// BUCKET 3: SYNCHRONIZATION
 	// ========================================================================
-	alignas(CACHE_LINE) ZHLN::Atomic<bool> isStepping;
+	alignas(64) ZHLN::Atomic<bool> isStepping{false};
 
-	Command* commandQueue;
-	Command* commandQueueSpare;
-	size_t commandCount;
-	size_t commandCapacity;
+	JPH::Array<Command> commandQueue;
+	JPH::Array<Command> commandQueueSpare;
+	size_t commandCount = 0;
+	size_t commandCapacity = 0;
 
 	// ========================================================================
-	// BUCKET 4: MAPPINGS & FILTERS (The ECS Engine)
+	// BUCKET 4: MAPPINGS & FILTERS (Managed automatically by JPH::Array)
 	// ========================================================================
-	alignas(CACHE_LINE) const void** joltBodyPtrs;
+	alignas(64) JPH::Array<const void*> joltBodyPtrs;
 
-	ZHLN::Atomic<uint64_t>* idToHandleMap;
-	uint32_t* slotToDense;
-	uint32_t* denseToSlot;
-	uint32_t* freeSlots;
+	JPH::Array<ZHLN::Atomic<uint64_t>> idToHandleMap;
+	JPH::Array<uint32_t> slotToDense;
+	JPH::Array<uint32_t> denseToSlot;
+	JPH::Array<uint32_t> freeSlots;
 
-	uint32_t* categories;
-	uint32_t* masks;
+	JPH::Array<uint32_t> categories;
+	JPH::Array<uint32_t> masks;
 
-	ZHLN::Atomic<uint8_t>* slotStates;
-	ZHLN::Atomic<uint32_t>* generations;
+	JPH::Array<ZHLN::Atomic<uint8_t>> slotStates;
+	JPH::Array<ZHLN::Atomic<uint32_t>> generations;
 
 	// ========================================================================
 	// BUCKET 5: CONTACTS & EVENTS
 	// ========================================================================
-	alignas(CACHE_LINE) ContactEvent* contactBuffer;
-	ZHLN::Atomic<size_t> contactCount;
-	size_t contactCapacity;
+	alignas(64) JPH::Array<ContactEvent> contactBuffer;
+	ZHLN::Atomic<size_t> contactCount{0};
+	size_t contactCapacity = 0;
 
 	// ========================================================================
 	// BUCKET 6: REGISTRIES
 	// ========================================================================
-	alignas(CACHE_LINE) MaterialData* materials;
-	size_t materialCount;
-	size_t materialCapacity;
+	alignas(64) JPH::Array<MaterialData> materials;
+	size_t materialCount = 0;
+	size_t materialCapacity = 0;
 
 	// ========================================================================
-	// BUCKET 7: CONSTRAINTS (SoA)
+	// BUCKET 7: CONSTRAINTS
 	// ========================================================================
-	alignas(CACHE_LINE) JPH::Constraint** constraints;
-	ZHLN::Atomic<uint32_t>* constraintGenerations;
-	uint8_t* constraintStates;
-	uint32_t* freeConstraintSlots;
-	size_t constraintCount;
-	size_t constraintCapacity;
-	size_t freeConstraintCount;
+	alignas(64) JPH::Array<JPH::Constraint*> constraints;
+	JPH::Array<ZHLN::Atomic<uint32_t>> constraintGenerations;
+	JPH::Array<uint8_t> constraintStates;
+	JPH::Array<uint32_t> freeConstraintSlots;
+	size_t constraintCount = 0;
+	size_t constraintCapacity = 0;
+	size_t freeConstraintCount = 0;
 
 	// ========================================================================
 	// METHODS
@@ -272,8 +279,6 @@ struct PhysicsWorld {
 
 // Guarantee predictable layout for raw memory mapping and SIMD logic
 static_assert(std::is_standard_layout_v<PhysicsWorld>);
-static_assert(std::is_trivially_copyable_v<PhysicsWorld>);
-static_assert((std::is_trivially_default_constructible_v<PhysicsWorld> && std::is_trivially_copyable_v<PhysicsWorld>));
 
 // --- Slot Predication Logic ---
 

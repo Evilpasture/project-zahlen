@@ -6,6 +6,8 @@
 #include <functional>
 #include <utility>
 
+// NOLINTBEGIN(misc-misplaced-const)
+
 namespace ZHLN {
 
 // ============================================================================
@@ -324,7 +326,7 @@ inline CommandPool::~CommandPool() {
 	}
 }
 
-inline constexpr CommandPool::CommandPool(CommandPool&& other) noexcept
+constexpr CommandPool::CommandPool(CommandPool&& other) noexcept
 	: _device(std::exchange(other._device, VK_NULL_HANDLE)), _raw(std::exchange(other._raw, {})) {}
 
 inline auto CommandPool::operator=(CommandPool&& other) noexcept -> CommandPool& {
@@ -513,7 +515,7 @@ inline auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout>& img,
 
 template <VkImageLayout TargetLayout, VkImageLayout OldLayout>
 constexpr auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout>& img,
-						  Tag<TargetLayout>) noexcept {
+						  Tag<TargetLayout> /*unused*/) noexcept {
 	return Transition<TargetLayout>(cmd, img);
 }
 
@@ -1048,5 +1050,7 @@ inline void GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, cons
 	ZHLN_GenerateMipmaps(cmd, image, static_cast<int32_t>(width), static_cast<int32_t>(height),
 						 levels);
 }
+
+// NOLINTEND(misc-misplaced-const)
 
 } // namespace ZHLN::Vk

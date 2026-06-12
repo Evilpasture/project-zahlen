@@ -8,19 +8,21 @@
 
 namespace ZHLN::Physics {
 
+namespace {
+
 // --- Internal Memory Utilities ---
-template <typename T> [[nodiscard]] static T* AllocateAligned(size_t count, size_t alignment) {
+template <typename T> [[nodiscard]] T* AllocateAligned(size_t count, size_t alignment) {
 	return static_cast<T*>(::operator new[](count * sizeof(T), std::align_val_t{alignment}));
 }
 
-template <typename T> static void DeallocateAligned(T* ptr, size_t alignment) {
+template <typename T> void DeallocateAligned(T* ptr, size_t alignment) {
 	if (ptr) {
 		::operator delete[](ptr, std::align_val_t{alignment});
 	}
 }
 
 template <typename T>
-static void ReallocateAligned(T*& ptr, size_t old_count, size_t new_count, size_t alignment) {
+void ReallocateAligned(T*& ptr, size_t old_count, size_t new_count, size_t alignment) {
 	T* new_ptr = AllocateAligned<T>(new_count, alignment);
 	if (ptr && old_count > 0) {
 		std::memcpy(new_ptr, ptr, old_count * sizeof(T));
@@ -30,30 +32,15 @@ static void ReallocateAligned(T*& ptr, size_t old_count, size_t new_count, size_
 	}
 	ptr = new_ptr;
 }
-
-template <typename T> static void ReallocateStandard(T*& ptr, size_t old_count, size_t new_count) {
-	static_assert(std::is_trivially_copyable_v<T>);
-	T* new_ptr = new T[new_count]();
-	if (ptr && old_count > 0) {
-		std::memcpy(static_cast<void*>(new_ptr), static_cast<const void*>(ptr),
-					old_count * sizeof(T));
-		delete[] ptr;
-	} else {
-		delete[] ptr;
-	}
-
-	ptr = new_ptr;
-}
+} // namespace
 
 // --- Implementation ---
 
 void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem,
 						JPH::JobSystem* inJobSystem, JPH::TempAllocator* inTempAlloc) {
-	// Sanity check provides a concrete upper bound, silencing GCC's VRP warning
 	if (inMaxBodies == 0 || inMaxBodies > 10000000) {
 		ZHLN::Panic("PhysicsWorld::Init: inMaxBodies ({}) is out of bounds!", inMaxBodies);
 	}
-	std::memset(this, 0, sizeof(PhysicsWorld));
 
 	system = inSystem;
 	bodyInterface = &inSystem->GetBodyInterface();
@@ -64,6 +51,7 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem,
 	capacity = inMaxBodies;
 	slotCapacity = inMaxBodies;
 
+	// Aligned allocations for hot SIMD paths
 	positions = AllocateAligned<JPH::Real>(capacity * 4, sizeof(JPH::Real) * 4);
 	prevPositions = AllocateAligned<JPH::Real>(capacity * 4, sizeof(JPH::Real) * 4);
 	rotations = AllocateAligned<float>(capacity * 4, sizeof(float) * 4);
@@ -71,22 +59,23 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem,
 	linearVelocities = AllocateAligned<float>(capacity * 4, sizeof(float) * 4);
 	angularVelocities = AllocateAligned<float>(capacity * 4, sizeof(float) * 4);
 
-	bodyIDs = new JPH::BodyID[capacity]();
-	materialIDs = new uint32_t[capacity]();
-	userData = new uint64_t[capacity]();
+	// Standard types are resized automatically
+	bodyIDs.resize(capacity);
+	materialIDs.resize(capacity);
+	userData.resize(capacity);
 
-	slotToDense = new uint32_t[capacity]();
-	denseToSlot = new uint32_t[capacity]();
-	freeSlots = new uint32_t[capacity]();
+	slotToDense.resize(capacity);
+	denseToSlot.resize(capacity);
+	freeSlots.resize(capacity);
 
-	categories = new uint32_t[capacity]();
-	masks = new uint32_t[capacity]();
+	categories.resize(capacity);
+	masks.resize(capacity);
 
-	slotStates = new ZHLN::Atomic<uint8_t>[capacity]();
-	generations = new ZHLN::Atomic<uint32_t>[capacity]();
+	slotStates.resize(capacity);
+	generations.resize(capacity);
 
-	idToHandleMap = new ZHLN::Atomic<uint64_t>[capacity + 1]();
-	joltBodyPtrs = new const void*[capacity + 1]();
+	idToHandleMap.resize(capacity + 1);
+	joltBodyPtrs.resize(capacity + 1);
 
 	for (uint32_t i = 0; i < capacity; ++i) {
 		generations[i].store(1, std::memory_order_relaxed);
@@ -99,29 +88,27 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem,
 
 	commandCapacity = 64;
 	commandCount = 0;
-	commandQueue = new Command[commandCapacity]();
-	commandQueueSpare = new Command[commandCapacity]();
+	commandQueue.resize(commandCapacity);
+	commandQueueSpare.resize(commandCapacity);
 
 	contactCapacity = 4096;
-	contactBuffer = static_cast<ContactEvent*>(::operator new[](
-		contactCapacity * sizeof(ContactEvent), std::align_val_t{sizeof(ContactEvent)}));
+	contactBuffer.resize(contactCapacity);
 
 	// Initialize Material Registry
 	materialCapacity = 16;
 	materialCount = 0;
-	materials = new MaterialData[materialCapacity]();
+	materials.resize(materialCapacity);
 
 	// Constraints
 	constraintCapacity = inMaxBodies;
 
-	constraints = new JPH::Constraint*[constraintCapacity]();
-	constraintStates = new uint8_t[constraintCapacity]();
-	constraintGenerations = new ZHLN::Atomic<uint32_t>[constraintCapacity]();
-	freeConstraintSlots = new uint32_t[constraintCapacity]();
+	constraints.resize(constraintCapacity, nullptr);
+	constraintStates.resize(constraintCapacity, SLOT_EMPTY);
+	constraintGenerations.resize(constraintCapacity);
+	freeConstraintSlots.resize(constraintCapacity);
 
 	for (uint32_t i = 0; i < constraintCapacity; ++i) {
 		constraintGenerations[i].store(1, std::memory_order_relaxed);
-		constraintStates[i] = SLOT_EMPTY;
 		freeConstraintSlots[i] = (constraintCapacity - 1) - i;
 	}
 
@@ -130,6 +117,7 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem,
 }
 
 void PhysicsWorld::Shutdown() {
+	// Reclaim hot SoA raw memory blocks
 	DeallocateAligned(positions, sizeof(JPH::Real) * 4);
 	DeallocateAligned(prevPositions, sizeof(JPH::Real) * 4);
 	DeallocateAligned(rotations, sizeof(float) * 4);
@@ -137,33 +125,28 @@ void PhysicsWorld::Shutdown() {
 	DeallocateAligned(linearVelocities, sizeof(float) * 4);
 	DeallocateAligned(angularVelocities, sizeof(float) * 4);
 
-	delete[] bodyIDs;
-	delete[] materialIDs;
-	delete[] userData;
-	delete[] slotToDense;
-	delete[] denseToSlot;
-	delete[] freeSlots;
-	delete[] categories;
-	delete[] masks;
+	// Clearing JPH::Arrays deallocates all system heap blocks automatically
+	bodyIDs.clear();
+	materialIDs.clear();
+	userData.clear();
+	slotToDense.clear();
+	denseToSlot.clear();
+	freeSlots.clear();
+	categories.clear();
+	masks.clear();
+	slotStates.clear();
+	generations.clear();
+	idToHandleMap.clear();
+	joltBodyPtrs.clear();
+	commandQueue.clear();
+	commandQueueSpare.clear();
+	contactBuffer.clear();
+	materials.clear();
 
-	delete[] slotStates;
-	delete[] generations;
-	delete[] idToHandleMap;
-	delete[] joltBodyPtrs;
-
-	delete[] commandQueue;
-	delete[] commandQueueSpare;
-
-	if (contactBuffer != nullptr) {
-		::operator delete[](contactBuffer, std::align_val_t{sizeof(ContactEvent)});
-	}
-
-	delete[] materials;
-
-	delete[] constraints;
-	delete[] constraintStates;
-	delete[] constraintGenerations;
-	delete[] freeConstraintSlots;
+	constraints.clear();
+	constraintStates.clear();
+	constraintGenerations.clear();
+	freeConstraintSlots.clear();
 }
 
 void PhysicsWorld::ResizeBuffers(size_t newCapacity) {
@@ -175,6 +158,7 @@ void PhysicsWorld::ResizeBuffers(size_t newCapacity) {
 	capacity = newCapacity;
 	slotCapacity = newCapacity;
 
+	// Reallocate aligned SoA arrays
 	ReallocateAligned(positions, oldCap * 4, newCapacity * 4, sizeof(JPH::Real) * 4);
 	ReallocateAligned(prevPositions, oldCap * 4, newCapacity * 4, sizeof(JPH::Real) * 4);
 	ReallocateAligned(rotations, oldCap * 4, newCapacity * 4, sizeof(float) * 4);
@@ -182,16 +166,21 @@ void PhysicsWorld::ResizeBuffers(size_t newCapacity) {
 	ReallocateAligned(linearVelocities, oldCap * 4, newCapacity * 4, sizeof(float) * 4);
 	ReallocateAligned(angularVelocities, oldCap * 4, newCapacity * 4, sizeof(float) * 4);
 
-	ReallocateStandard(bodyIDs, oldCap, newCapacity);
-	ReallocateStandard(materialIDs, oldCap, newCapacity);
-	ReallocateStandard(userData, oldCap, newCapacity);
-	ReallocateStandard(slotToDense, oldCap, newCapacity);
-	ReallocateStandard(denseToSlot, oldCap, newCapacity);
-	ReallocateStandard(freeSlots, oldCap, newCapacity);
-	ReallocateStandard(categories, oldCap, newCapacity);
-	ReallocateStandard(masks, oldCap, newCapacity);
-	ReallocateStandard(generations, oldCap, newCapacity);
-	ReallocateStandard(slotStates, oldCap, newCapacity);
+	// Using standard .resize() handles allocations and preserves stability
+	bodyIDs.resize(newCapacity);
+	materialIDs.resize(newCapacity);
+	userData.resize(newCapacity);
+	slotToDense.resize(newCapacity);
+	denseToSlot.resize(newCapacity);
+	freeSlots.resize(newCapacity);
+	categories.resize(newCapacity);
+	masks.resize(newCapacity);
+	generations.resize(newCapacity);
+	slotStates.resize(newCapacity);
+
+	// FIX: Explicitly scale active tracking maps to prevent out-of-bounds corruption
+	idToHandleMap.resize(newCapacity + 1);
+	joltBodyPtrs.resize(newCapacity + 1);
 
 	size_t freeIdx = freeCount.load(std::memory_order_relaxed);
 	for (size_t i = oldCap; i < newCapacity; i++) {
@@ -210,15 +199,13 @@ void PhysicsWorld::ResizeConstraintBuffers(size_t newCapacity) {
 	const size_t oldCap = constraintCapacity;
 	constraintCapacity = newCapacity;
 
-	ReallocateStandard(constraints, oldCap, newCapacity);
-	ReallocateStandard(constraintStates, oldCap, newCapacity);
-	ReallocateStandard(constraintGenerations, oldCap, newCapacity);
-	ReallocateStandard(freeConstraintSlots, oldCap, newCapacity);
+	constraints.resize(newCapacity, nullptr);
+	constraintStates.resize(newCapacity, SLOT_EMPTY);
+	constraintGenerations.resize(newCapacity);
+	freeConstraintSlots.resize(newCapacity);
 
-	// Initialize the newly expanded slots
 	for (size_t i = oldCap; i < newCapacity; i++) {
 		constraintGenerations[i].store(1, std::memory_order_relaxed);
-		constraintStates[i] = SLOT_EMPTY;
 		freeConstraintSlots[freeConstraintCount++] = static_cast<uint32_t>(i);
 	}
 }
@@ -333,9 +320,10 @@ JPH::Array<std::byte> PhysicsWorld::SaveState() const {
 			std::memcpy(ptr, &g, sizeof(uint32_t));
 			ptr += sizeof(uint32_t);
 		}
-		std::memcpy(ptr, slotToDense, slotCap * sizeof(uint32_t));
+		std::memcpy(ptr, slotToDense.data(), slotCap * sizeof(uint32_t));
 		ptr += (slotCap * sizeof(uint32_t));
-		std::memcpy(ptr, denseToSlot, slotCap * sizeof(uint32_t));
+		std::memcpy(ptr, denseToSlot.data(), slotCap * sizeof(uint32_t));
+
 		ptr += (slotCap * sizeof(uint32_t));
 
 		for (size_t i = 0; i < slotCap; ++i) {
@@ -384,9 +372,9 @@ bool PhysicsWorld::LoadState(const uint8_t* data, size_t size) {
 			generations[i].store(g, std::memory_order_relaxed);
 			ptr += sizeof(uint32_t);
 		}
-		std::memcpy(slotToDense, ptr, slotCapacity * sizeof(uint32_t));
+		std::memcpy(slotToDense.data(), ptr, slotCapacity * sizeof(uint32_t));
 		ptr += (slotCapacity * sizeof(uint32_t));
-		std::memcpy(denseToSlot, ptr, slotCapacity * sizeof(uint32_t));
+		std::memcpy(denseToSlot.data(), ptr, slotCapacity * sizeof(uint32_t));
 		ptr += (slotCapacity * sizeof(uint32_t));
 
 		for (size_t i = 0; i < slotCapacity; ++i) {

@@ -238,7 +238,7 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 	auto& cam = engine.GetCamera();
 	auto& pc = engine.GetPhysicsContext();
 
-	// Static local clock to calculate independent frameTime delta for audio threading [1]
+	// Static local clock to calculate independent frameTime delta for audio threading
 	static Clock deltaClock;
 	float renderFrameTime = deltaClock.GetDeltaTime();
 
@@ -350,7 +350,7 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 		s_FirstFrame = false;
 	}
 
-	// 3. Compile lights list & sync material factors [1]
+	// 3. Compile lights list & sync material factors
 	std::array<GPULight, 3> sceneLights{};
 
 	// --- NEW: GIANT RECTANGULAR PANEL LIGHT (LTC) ---
@@ -681,7 +681,7 @@ void ShutdownGame([[maybe_unused]] Engine& engine, GameContext& game) {
 using namespace ZHLN;
 
 // ============================================================================
-// CLEAN ENTRYPOINT ENGINE CONTROL LOOP [1]
+// CLEAN ENTRYPOINT ENGINE CONTROL LOOP
 // ============================================================================
 
 auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {

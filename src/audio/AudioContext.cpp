@@ -5,7 +5,7 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <detail/ControlFlow.hpp>
-#include <detail/MemoryPool.hpp> // <-- Include your ObjectPool
+#include <detail/MemoryPool.hpp>
 #include <miniaudio.h>
 #include <threading/Mutex.hpp>
 #include <type_traits>

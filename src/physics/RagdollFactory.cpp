@@ -10,7 +10,7 @@ namespace ZHLN::Physics {
 
 JPH::Ref<JPH::Ragdoll> CreateSkeletalRagdoll(PhysicsContext& ctx, const JPH::Skeleton* skeleton,
 											 const std::vector<RagdollPartParams>& parts) {
-	// Retrieve Jolt objects cleanly over the PIMPL barrier using helpers [3]
+	// Retrieve Jolt objects cleanly over the PIMPL barrier using helpers
 	auto& joltSystem = GetInternalSystem(ctx);
 	auto& world = GetInternalWorld(ctx);
 

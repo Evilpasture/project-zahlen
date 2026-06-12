@@ -208,25 +208,24 @@ PhysicsContext::~PhysicsContext() {
 }
 
 void PhysicsContext::Step(float deltaTime) {
-	ZHLN_PROFILE_SCOPE("Physics (Jolt)");
+	ZHLN_PROFILE_SCOPE("Physics (JPH)");
 	auto& world = _impl->world;
 
 	// --- 1. COMMAND FLUSH (Structural Phase) ---
-	Physics::Command* capturedQueue = nullptr;
 	size_t capturedCount = 0;
 
 	ZHLN_LOCK(world.sync.shadowLock) {
-
-		capturedQueue = world.commandQueue;
 		capturedCount = world.commandCount;
+		if (capturedCount > 0) {
+			// Zero-allocation ping-pong swap on the underlying array buffers
+			world.commandQueue.swap(world.commandQueueSpare);
+			world.commandCount = 0;
+		}
+	}
 
-		// Double-buffer swap
-		world.commandQueue = world.commandQueueSpare;
-		world.commandQueueSpare = capturedQueue;
-		world.commandCount = 0;
-
-		// Execute the specialized flusher
-		world.FlushCommands(capturedQueue, capturedCount);
+	// Execute the flusher outside the lock on the isolated commandQueueSpare data
+	if (capturedCount > 0) {
+		world.FlushCommands(world.commandQueueSpare.data(), capturedCount);
 	}
 
 	// Resets the counter so Jolt overwrites last frame's collisions
@@ -407,20 +406,11 @@ void DestroyBody(PhysicsContext& ctx, ZHLN::Entity handle) {
 
 	// Lock the shadow buffer to queue the command safely
 	ZHLN_LOCK(world.sync.shadowLock) {
-		// Expand raw queue if needed
-		if (world.commandCount >= world.commandCapacity) {
-			size_t newCap = world.commandCapacity * 2;
-			auto* newQ = new Physics::Command[newCap];
-			auto* newQS = new Physics::Command[newCap];
-
-			std::memcpy(newQ, world.commandQueue, world.commandCount * sizeof(Physics::Command));
-
-			delete[] world.commandQueue;
-			delete[] world.commandQueueSpare;
-
-			world.commandQueue = newQ;
-			world.commandQueueSpare = newQS;
-			world.commandCapacity = newCap;
+		// Expand the JPH::Arrays automatically if capacity is exceeded
+		if (world.commandCount >= world.commandQueue.size()) {
+			size_t newCap = world.commandQueue.size() == 0 ? 64 : world.commandQueue.size() * 2;
+			world.commandQueue.resize(newCap);
+			world.commandQueueSpare.resize(newCap);
 		}
 
 		world.commandQueue[world.commandCount++] = {.type = CommandType::DestroyBody,
@@ -440,18 +430,10 @@ void RegisterMaterial(PhysicsContext& ctx, uint32_t id, float friction, float re
 			}
 		}
 
-		// 2. Grow if needed
-		if (world.materialCount >= world.materialCapacity) {
-			size_t oldCap = world.materialCapacity;
-			size_t newCap = oldCap * 2;
-
-			auto* newMaterials = new MaterialData[newCap]();
-			if ((world.materials != nullptr) && oldCap > 0) {
-				std::memcpy(newMaterials, world.materials, oldCap * sizeof(MaterialData));
-				delete[] world.materials;
-			}
-			world.materials = newMaterials;
-			world.materialCapacity = newCap;
+		// 2. Grow if needed using managed resize
+		if (world.materialCount >= world.materials.size()) {
+			size_t newCap = world.materials.size() == 0 ? 16 : world.materials.size() * 2;
+			world.materials.resize(newCap);
 		}
 
 		// 3. Insert new
@@ -753,7 +735,7 @@ std::pair<const ContactEvent*, size_t> GetContactEvents(const PhysicsContext& ct
 	size_t count = world.contactCount.load(std::memory_order_acquire);
 	count = std::min(count, world.contactCapacity);
 
-	return {world.contactBuffer, count};
+	return {world.contactBuffer.data(), count};
 }
 
 ConstraintHandle CreateConstraint(PhysicsContext& ctx, ConstraintType type, ZHLN::Entity b1,

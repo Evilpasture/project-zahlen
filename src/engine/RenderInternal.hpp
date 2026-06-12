@@ -17,7 +17,9 @@
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Types.hpp>
 #include <array>
+#include <detail/MemoryPool.hpp>
 #include <memory>
+#include <type_traits>
 
 namespace ZHLN::Vk {
 
@@ -32,6 +34,77 @@ struct IBLPayload {
 } // namespace ZHLN::Vk
 
 namespace ZHLN {
+
+// ============================================================================
+// GenerationalPool Template
+// ============================================================================
+
+template <typename T, size_t MaxObjects> class GenerationalPool {
+  public:
+	GenerationalPool() {
+		_freeIndices.reserve(MaxObjects);
+		for (size_t i = 0; i < MaxObjects; ++i) {
+			_freeIndices.push_back((uint32_t)(MaxObjects - 1 - i));
+		}
+		_generations.fill(1); // Generations start at 1
+	}
+
+	~GenerationalPool() {
+		// Automatically sweeps and safely destroys all remaining active allocations on shutdown
+		for (size_t i = 0; i < MaxObjects; ++i) {
+			if (_pointers[i] != nullptr) {
+				_pool.Destroy(_pointers[i]);
+			}
+		}
+	}
+
+	// Non-copyable, non-movable matching engine context lifetime
+	GenerationalPool(const GenerationalPool&) = delete;
+	auto operator=(const GenerationalPool&) -> GenerationalPool& = delete;
+
+	template <typename... Args> uint64_t Create(Args&&... args) {
+		if (_freeIndices.empty()) [[unlikely]] {
+			ZHLN::Panic("GenerationalPool exceeded maximum capacity!");
+		}
+		uint32_t index = _freeIndices.back();
+		_freeIndices.pop_back();
+
+		uint32_t gen = _generations[index];
+		_pointers[index] = _pool.Create(std::forward<Args>(args)...);
+
+		return (static_cast<uint64_t>(gen) << 32) | index;
+	}
+
+	void Destroy(uint64_t handle) {
+		auto index = static_cast<uint32_t>(handle & 0xFFFFFFFF);
+		auto gen = static_cast<uint32_t>(handle >> 32);
+
+		if (index >= MaxObjects || _generations[index] != gen || _pointers[index] == nullptr) {
+			return; // Safely ignore stale or invalid handles
+		}
+
+		_pool.Destroy(_pointers[index]);
+		_pointers[index] = nullptr;
+		_generations[index]++; // Increment generation to invalidate stale handles
+		_freeIndices.push_back(index);
+	}
+
+	[[nodiscard]] T* Resolve(uint64_t handle) const noexcept {
+		auto index = static_cast<uint32_t>(handle & 0xFFFFFFFF);
+		auto gen = static_cast<uint32_t>(handle >> 32);
+
+		if (index >= MaxObjects || _generations[index] != gen) {
+			return nullptr;
+		}
+		return _pointers[index];
+	}
+
+  private:
+	ObjectPool<T, MaxObjects> _pool;
+	std::array<T*, MaxObjects> _pointers{};
+	std::array<uint32_t, MaxObjects> _generations{};
+	JPH::Array<uint32_t> _freeIndices;
+};
 
 enum RenderAttachmentSlot : uint8_t {
 	ATTACHMENT_SLOT_SCENE_COLOR = 0,
@@ -151,8 +224,11 @@ struct DrawCommand {
 	uint32_t morphOffset;
 	uint32_t activeMorphCount;
 	float morphWeights[4];
-	uint32_t indexCount = 0;
+	uint32_t indexCount;
 };
+
+static_assert(std::is_trivially_copyable_v<DrawCommand> &&
+			  std::is_trivially_constructible_v<DrawCommand>);
 
 struct UIDrawCommand {
 	NativeMesh* mesh;
@@ -198,8 +274,10 @@ struct RenderContext::Impl {
 	JPH::Mat44 shadowProjView{};
 	FrameUniforms currentUniforms{};
 
-	JPH::Array<std::unique_ptr<NativeMesh>> meshes;
-	JPH::Array<std::unique_ptr<NativeMaterial>> materials;
+	// Generational pools (Fully self-contained; no manual trackers needed)
+	GenerationalPool<NativeMesh, 1024> meshPool;
+	GenerationalPool<NativeMaterial, 512> materialPool;
+
 	JPH::Array<DrawCommand> drawQueue;
 	JPH::Array<WorkerCmdContext> workerCmds;
 

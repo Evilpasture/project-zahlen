@@ -448,7 +448,7 @@ inline constexpr Tag<VK_IMAGE_LAYOUT_PRESENT_SRC_KHR> AsPresent;
 
 template <VkImageLayout TargetLayout, VkImageLayout OldLayout>
 [[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout>& img,
-										Tag<TargetLayout>) noexcept;
+										Tag<TargetLayout> /*unused*/) noexcept;
 
 template <size_t ColorCount = 0, bool HasDepth = false> class DynamicPass {
   public:

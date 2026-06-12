@@ -160,7 +160,7 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 
 			SkipNode* curr = _head;
 
-			// Traversing from MAX_LEVEL - 1 ensures we do not miss concurrent updates [3]
+			// Traversing from MAX_LEVEL - 1 ensures we do not miss concurrent updates
 			for (int i = static_cast<int>(MAX_LEVEL) - 1; i >= 0; --i) {
 				SkipNode* next = curr->GetForward()[i].load(std::memory_order_relaxed);
 				while (next && _compare(next->key, key)) {
@@ -171,7 +171,7 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 				successors[i] = next;
 			}
 
-			// Check if key already exists [3]
+			// Check if key already exists
 			SkipNode* found = successors[0];
 			if (found && !_compare(found->key, key) && !_compare(key, found->key)) {
 				if (found->deleted.load(std::memory_order_acquire)) {
@@ -184,7 +184,7 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 				return;
 			}
 
-			// Lock all predecessors up to height bottom-to-top to avoid deadlocks [3]
+			// Lock all predecessors up to height bottom-to-top to avoid deadlocks
 			std::vector<SkipNode*> locked;
 			locked.reserve(height);
 			bool valid = true;
@@ -388,7 +388,8 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 	static SkipNode* CreateNode(const Key& key, const Value& value, uint32_t height) {
 		size_t size = sizeof(SkipNode) + height * sizeof(ZHLN::Atomic<SkipNode*>);
 		void* mem = ::operator new(size, std::align_val_t{alignof(SkipNode)});
-		auto* node = ::new (mem) SkipNode{key, value, height};
+		auto* node = ::new (mem)
+			SkipNode{.key = key, .value = value, .height = height, .deleted = {}, .lock = {}};
 
 		node->deleted.store(false, std::memory_order_relaxed);
 		node->lock.locked.store(false, std::memory_order_relaxed);
