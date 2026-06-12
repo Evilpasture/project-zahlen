@@ -69,11 +69,21 @@ float3 ReconstructWorldPos(float2 uv, float depth) {
 	return worldSpacePos.xyz / worldSpacePos.w;
 }
 
-float2 RaymarchSSR(float3 startPosWS, float3 dirWS, out float confidence) {
-	float3 endPosWS = startPosWS + dirWS * 40.0f;
+float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, float3 N,
+				   out float confidence) {
+	const float maxDistance = 14.0f; // Limit trace distance for tight, realistic indoor reflections
+	float3 endPosWS = startPosWS + dirWS * maxDistance;
 
 	float4 startClip = mul(pc.viewProj, float4(startPosWS, 1.0f));
 	float4 endClip = mul(pc.viewProj, float4(endPosWS, 1.0f));
+
+	// 1. Homogeneous near-plane clipping with a safer margin (W = 0.4)
+	// Prevents coordinate glitching and keeps reflections active when looking down
+	if (endClip.w < 0.4f) {
+		float t = (0.4f - startClip.w) / (endClip.w - startClip.w);
+		endPosWS = lerp(startPosWS, endPosWS, t);
+		endClip = mul(pc.viewProj, float4(endPosWS, 1.0f));
+	}
 
 	float invW_start = 1.0f / startClip.w;
 	float invW_end = 1.0f / endClip.w;
@@ -89,36 +99,32 @@ float2 RaymarchSSR(float3 startPosWS, float3 dirWS, out float confidence) {
 	float3 ws_w_start = startPosWS * invW_start;
 	float3 ws_w_end = endPosWS * invW_end;
 
-	// Perspective-correct NDC Depth interpolation setup
-	float z_w_start = startNDC.z * invW_start;
-	float z_w_end = endNDC.z * invW_end;
-
 	float2 deltaUV = endUV - startUV;
 
 	uint dw, dh;
 	texDepth.GetDimensions(dw, dh);
 	float2 screenPixels = abs(deltaUV * float2(dw, dh));
 
-	// OPTIMIZATION 1: Clamp maximum steps to 50 instead of 80.
-	// 50 steps with a binary search is indistinguishable from 80 but saves 37% of bandwidth.
-	float stepCount = clamp(max(screenPixels.x, screenPixels.y) / 2.0f, 16.0f, 50.0f);
+	// Dynamic Pixel-Stride Stepping (higher density at 4 pixels per step)
+	float maxPixelDist = max(screenPixels.x, screenPixels.y);
+	float stepCount = clamp(maxPixelDist / 4.0f, 16.0f, 64.0f);
 
 	float invW_step = (invW_end - invW_start) / stepCount;
 	float2 uv_w_step = (uv_w_end - uv_w_start) / stepCount;
-	float z_w_step = (z_w_end - z_w_start) / stepCount;
+	float3 ws_w_step = (ws_w_end - ws_w_start) / stepCount;
 
 	uint2 pixelPos = uint2(startUV * float2(dw, dh));
 	float dither = GetStableWeylNoise(pixelPos);
 
-	float current_invW = invW_start + invW_step * dither;
-	float2 current_uv_w = uv_w_start + uv_w_step * dither;
-	float current_z_w = z_w_start + z_w_step * dither;
+	// Initial offset of 1.2 steps + dither to completely clear the starting pixel
+	float startOffset = 1.2f + dither;
+	float current_invW = invW_start + invW_step * startOffset;
+	float2 current_uv_w = uv_w_start + uv_w_step * startOffset;
+	float3 current_ws_w = ws_w_start + ws_w_step * startOffset;
 
 	confidence = 0.0f;
 
-	// OPTIMIZATION 2: Use [loop] instead of [unroll(80)] to reduce register pressure
-	// and prevent local memory spilling on your GPU.
-	[loop] for (int i = 0; i < 50; ++i) {
+	[loop] for (int i = 0; i < 64; ++i) {
 		if (i >= int(stepCount))
 			break;
 
@@ -131,81 +137,80 @@ float2 RaymarchSSR(float3 startPosWS, float3 dirWS, out float confidence) {
 		if (sampledDepth >= 1.0f) {
 			current_invW += invW_step;
 			current_uv_w += uv_w_step;
-			current_z_w += z_w_step;
+			current_ws_w += ws_w_step;
 			continue;
 		}
 
-		// OPTIMIZATION 3: Compute perspective-correct NDC depth of the ray
-		float rayNDC_Z = current_z_w / current_invW;
+		float3 currentWS = current_ws_w / current_invW;
+		float3 sampledWS = ReconstructWorldPos(currentUV, sampledDepth);
 
-		// Perform the coarse collision check entirely in depth-space (Zero ALU overhead!)
-		if (rayNDC_Z >= sampledDepth) {
+		float rayDist = length(currentWS - pc.camPos.xyz);
+		float sampleDist = length(sampledWS - pc.camPos.xyz);
+		float thickness = rayDist - sampleDist;
 
-			// OPTIMIZATION 4: World positions are reconstructed ONLY when we cross behind a surface
-			float t_hit = (float(i) + dither) / stepCount;
-			float hit_invW = invW_start + (invW_end - invW_start) * t_hit;
-			float3 hit_ws_w = ws_w_start + (ws_w_end - ws_w_start) * t_hit;
-			float3 currentWS = hit_ws_w / hit_invW;
+		// Tight coarse thickness threshold to prevent leaks
+		if (thickness >= 0.0f && thickness < 0.4f) {
 
-			float3 sampledWS = ReconstructWorldPos(currentUV, sampledDepth);
-			float rayDist = length(currentWS - pc.camPos.xyz);
-			float sampleDist = length(sampledWS - pc.camPos.xyz);
-			float thickness = rayDist - sampleDist;
+			float t_start = (float(i) + dither) / stepCount;
+			float t_end = (float(i) + 1.0f + dither) / stepCount;
+			t_start = max(0.0f, t_start);
 
-			if (thickness > 0.0f && thickness < 2.5f) {
-				float t_start = max(0.0f, (float(i) - 1.0f) / stepCount);
-				float t_end = float(i) / stepCount;
+			float t_mid = 0.0f;
+			float2 mid_uv = 0.0f;
 
-				t_start += dither / stepCount;
-				t_end += dither / stepCount;
+			// 2. INCREASED BINARY SEARCH STEPS (6 steps for ultra-high sub-pixel precision)
+			[unroll(6)] for (int b = 0; b < 6; ++b) {
+				t_mid = (t_start + t_end) * 0.5f;
 
-				float t_mid = 0.0f;
-				float2 mid_uv = 0.0f;
+				float mid_invW = invW_start + (invW_end - invW_start) * t_mid;
+				float2 mid_uv_w = uv_w_start + (uv_w_end - uv_w_start) * t_mid;
+				float3 mid_ws_w = ws_w_start + (ws_w_end - ws_w_start) * t_mid;
 
-				// OPTIMIZATION 5: Run the Binary Search purely in depth-space.
-				// 5 steps divides the search interval by 32, achieving sub-centimeter precision.
-				[unroll(5)] for (int b = 0; b < 5; ++b) {
-					t_mid = (t_start + t_end) * 0.5f;
+				mid_uv = mid_uv_w / mid_invW;
+				float3 mid_ws = mid_ws_w / mid_invW;
 
-					float mid_invW = invW_start + (invW_end - invW_start) * t_mid;
-					float2 mid_uv_w = uv_w_start + (uv_w_end - uv_w_start) * t_mid;
-					float mid_z_w = z_w_start + (z_w_end - z_w_start) * t_mid;
+				float midDepth = texDepth.SampleLevel(pointSampler, mid_uv, 0).r;
+				float3 midSampledWS = ReconstructWorldPos(mid_uv, midDepth);
 
-					mid_uv = mid_uv_w / mid_invW;
-					float mid_ray_z = mid_z_w / mid_invW;
+				float midRayDist = length(mid_ws - pc.camPos.xyz);
+				float midSampleDist = length(midSampledWS - pc.camPos.xyz);
 
-					float midDepth = texDepth.SampleLevel(pointSampler, mid_uv, 0).r;
-
-					if (mid_ray_z >= midDepth) {
-						t_end = t_mid; // Behind geometry, shift left
-					} else {
-						t_start = t_mid; // In front of geometry, shift right
-					}
+				if (midRayDist >= midSampleDist) {
+					t_end = t_mid;
+				} else {
+					t_start = t_mid;
 				}
+			}
 
-				// OPTIMIZATION 6: Perform the single final thickness check in world space
-				float finalDepth = texDepth.SampleLevel(pointSampler, mid_uv, 0).r;
-				float final_invW = invW_start + (invW_end - invW_start) * t_mid;
-				float3 final_ws_w = ws_w_start + (ws_w_end - ws_w_start) * t_mid;
-				float3 mid_ws = final_ws_w / final_invW;
+			float finalDepth = texDepth.SampleLevel(pointSampler, mid_uv, 0).r;
+			float final_invW = invW_start + (invW_end - invW_start) * t_mid;
+			float3 final_ws_w = ws_w_start + (ws_w_end - ws_w_start) * t_mid;
+			float3 mid_ws = final_ws_w / final_invW;
 
-				float3 finalSampledWS = ReconstructWorldPos(mid_uv, finalDepth);
-				float finalRayDist = length(mid_ws - pc.camPos.xyz);
-				float finalSampleDist = length(finalSampledWS - pc.camPos.xyz);
+			float3 finalSampledWS = ReconstructWorldPos(mid_uv, finalDepth);
+			float finalRayDist = length(mid_ws - pc.camPos.xyz);
+			float finalSampleDist = length(finalSampledWS - pc.camPos.xyz);
 
-				if (abs(finalRayDist - finalSampleDist) < 0.40f) {
-					confidence = 1.0f;
-					float2 edgeFactor =
-						smoothstep(0.0f, 0.1f, mid_uv) * smoothstep(1.0f, 0.9f, mid_uv);
-					confidence *= edgeFactor.x * edgeFactor.y;
-					return mid_uv;
-				}
+			float distFromStart = length(mid_ws - startPosWS);
+			float heightAboveSurface = dot(mid_ws - worldPos, N);
+
+			// 3. Tighten height above surface & depth match to eliminate self-reflection
+			if (heightAboveSurface > 0.06f && abs(finalRayDist - finalSampleDist) < 0.08f) {
+
+				// 4. Quadratic Falloff for beautiful, smooth fade-out (Stops vertical elongation)
+				float distanceFade = saturate(1.0f - distFromStart / maxDistance);
+				confidence = distanceFade * distanceFade;
+
+				float2 edgeFactor =
+					smoothstep(0.0f, 0.08f, mid_uv) * smoothstep(1.0f, 0.92f, mid_uv);
+				confidence *= edgeFactor.x * edgeFactor.y;
+				return mid_uv;
 			}
 		}
 
 		current_invW += invW_step;
 		current_uv_w += uv_w_step;
-		current_z_w += z_w_step;
+		current_ws_w += ws_w_step;
 	}
 	return float2(0.0f, 0.0f);
 }
@@ -404,8 +409,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 			float confidence = 0.0f;
 			float3 reflectionColor = float3(0.0f, 0.0f, 0.0f);
 
-			float3 biasedStartPos = worldPos + N * 0.1f;
-			float2 hitUV = RaymarchSSR(biasedStartPos, stretchedR, confidence);
+			float3 biasedStartPos = worldPos + N * 0.05f; // Start slightly above (5cm)
+			float2 hitUV = RaymarchSSR(worldPos, biasedStartPos, stretchedR, N, confidence);
 
 			if (confidence > 0.0f) {
 				confidence *= saturate(dot(stretchedR, N) * 10.0f);

@@ -129,7 +129,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	float2 jitterDelta = currentJitter - prevJitter;
 
 	// Align history UV coordinate
-	historyUV -= jitterDelta;
+	historyUV += jitterDelta;
 
 	float4 current = texCurrent.SampleLevel(smp, input.uv, 0);
 

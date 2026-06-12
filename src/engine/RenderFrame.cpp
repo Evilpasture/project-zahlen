@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // --- src/engine/RenderFrame.cpp ---
 
 #include "ParallelDraw.hpp"
@@ -451,7 +450,8 @@ struct BlitPass {
 		struct BlitPushConstants {
 			JPH::Mat44 invViewProj;
 			JPH::Mat44 viewProj;
-			alignas(16) std::array<float, 4> camPos;
+			alignas(
+				16) std::array<float, 4> camPos; // camPos.w now contains the Temporal frameIndex!
 			int giMode;
 			float aoRadius;
 			float aoBias;
@@ -461,8 +461,8 @@ struct BlitPass {
 			float vignetteIntensity;
 			float vignettePower;
 			int enableSSR;
-		} pc = {.invViewProj = ctx.currentUniforms.invViewProj,
-				.viewProj = ctx.currentUniforms.unjitteredViewProj,
+		} pc = {.invViewProj = ctx.current_view_proj.Inversed(), // Use jittered inverse matrix
+				.viewProj = ctx.current_view_proj, // Use active jittered view-projection matrix
 				.camPos = {ctx.currentUniforms.camPos[0], ctx.currentUniforms.camPos[1],
 						   ctx.currentUniforms.camPos[2], ctx.currentUniforms.camPos[3]},
 				.giMode = ctx.giSettings.mode,
