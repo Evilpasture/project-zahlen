@@ -21,7 +21,6 @@ function vec3.__mul(a, b)
     elseif type(b) == "number" then
         return ffi.new("vec3", a.x * b, a.y * b, a.z * b)
     end
-    -- Dot product if both are vectors
     return a.x * b.x + a.y * b.y + a.z * b.z
 end
 
@@ -43,7 +42,6 @@ function vec3:cross(b)
     )
 end
 
--- IN-PLACE MUTATORS (High Performance, avoids JIT aborts)
 function vec3:add_inplace(b)
     self.x = self.x + b.x
     self.y = self.y + b.y
@@ -69,35 +67,54 @@ function vec3:__tostring()
     return string.format("vec3(%.2f, %.2f, %.2f)", self.x, self.y, self.z)
 end
 
--- Register the type with LuaJIT
 ffi.metatype("vec3", vec3)
 
--- Helper for the user to create new vectors
 local zahlen = {}
 function zahlen.vec3(x, y, z) return ffi.new("vec3", x or 0, y or 0, z or 0) end
 
 local tracked_views = {}
 
--- Internal: Tracks a view so it can be forced-released at end of frame
 local function track(v)
     table.insert(tracked_views, v)
     return v
 end
 
 -- ============================================================================
--- Cooperative Task Scheduler & Channel Updates
+-- System Scheduler (Supports Hot-Reload Swapping)
+-- ============================================================================
+zahlen.scheduler = {
+    systems = {}
+}
+
+function zahlen.scheduler.register(name, priority, fn)
+    -- Remove any old system of the same name to allow seamless hot-reloads
+    for i = #zahlen.scheduler.systems, 1, -1 do
+        if zahlen.scheduler.systems[i].name == name then
+            table.remove(zahlen.scheduler.systems, i)
+        end
+    end
+
+    table.insert(zahlen.scheduler.systems, {
+        name = name,
+        priority = priority or 100,
+        fn = fn,
+        enabled = true
+    })
+    table.sort(zahlen.scheduler.systems, function(a, b) return a.priority < b.priority end)
+end
+
+-- ============================================================================
+-- Cooperative Task Scheduler
 -- ============================================================================
 zahlen.task = {}
 local active_tasks = {}
-local pending_values = {} -- Stores pending channel payloads per suspended task
+local pending_values = {}
 
--- Spawns a cooperative lightweight task
 function zahlen.task.dispatch(fn)
     local co = coroutine.create(fn)
     table.insert(active_tasks, co)
 end
 
--- Ticks tasks once per frame
 function zahlen.task.update()
     local i = 1
     while i <= #active_tasks do
@@ -105,7 +122,6 @@ function zahlen.task.update()
         if coroutine.status(co) == "dead" then
             table.remove(active_tasks, i)
         else
-            -- Extract and deliver the pending channel value (if any)
             local val = pending_values[co]
             pending_values[co] = nil
 
@@ -114,8 +130,6 @@ function zahlen.task.update()
                 _G.zahlen.log("Error in Task: " .. tostring(res))
                 table.remove(active_tasks, i)
             elseif res == "WAIT_CHANNEL" then
-                -- The task is waiting on an empty channel. Remove it from
-                -- active scheduling so we do not auto-resume it next frame.
                 table.remove(active_tasks, i)
             else
                 i = i + 1
@@ -124,15 +138,12 @@ function zahlen.task.update()
     end
 end
 
--- Force-releases all buffers tracked this frame and ticks tasks
 function zahlen.cleanup()
     for i = 1, #tracked_views do
         tracked_views[i]:release()
         tracked_views[i] = nil
     end
     tracked_views = {}
-
-    -- Tick cooperative tasks
     zahlen.task.update()
 end
 
@@ -203,7 +214,6 @@ end
 -- ============================================================================
 -- Engine Class
 -- ============================================================================
-
 local KEY_MAP = {
     W = 1,
     w = 1,
@@ -250,20 +260,29 @@ function Engine:is_key_down(key)
     return mem.C.ZHLN_IsKeyDown(self.raw, code) == 1
 end
 
+function Engine:play_sound(filepath, volume)
+    mem.C.ZHLN_PlayOneShot(self.raw, filepath, volume or 1.0)
+end
+
+function Engine:play_sound_3d(filepath, x, y, z, volume)
+    mem.C.ZHLN_PlayOneShot3D(self.raw, filepath, x, y, z, volume or 1.0)
+end
+
+function Engine:beep(frequency, duration, volume)
+    mem.C.ZHLN_PlayProceduralBeep(self.raw, frequency or 440.0, duration or 0.15, volume or 0.25)
+end
+
 function zahlen.wrap(ptr)
     return setmetatable({ raw = ptr }, Engine)
 end
 
--- Redefine standard logging to feel like Python
-function zahlen.log(...)
-    ---@diagnostic disable-next-line: undefined-field
-    _G.zahlen.log(...)
-end
+zahlen.log = _G.zahlen.log
+zahlen.warn = _G.zahlen.warn
 
 zahlen.ecs = ecs
 
 -- ============================================================================
--- Fiber-Aware Message Channels (Pure Lua Implementation)
+-- Message Channels (Pure Lua)
 -- ============================================================================
 local Channel = {}
 Channel.__index = Channel
@@ -280,45 +299,81 @@ function Channel:destroy()
     self.waiters = {}
 end
 
--- Pushes any object to the channel. Wakes up the first waiting coroutine if any.
 function Channel:push(val)
     if #self.waiters > 0 then
         local co = table.remove(self.waiters, 1)
-        -- Store the value to be delivered when scheduled
         pending_values[co] = val
-        -- Insert back into the active scheduler list so it resumes next frame
         table.insert(active_tasks, co)
     else
         table.insert(self.queue, val)
     end
 end
 
--- Suspends the calling coroutine task if empty. Returns the pushed object.
 function Channel:pop()
     local co = coroutine.running()
     if not co then
-        error("Channel:pop() can only be called from inside a cooperative task spawned with zahlen.task.dispatch!")
+        error("Channel:pop() must be run within a Dispatch task!")
     end
 
     if #self.queue > 0 then
         return table.remove(self.queue, 1)
     end
 
-    -- No items. Register this coroutine as suspended, and yield the "WAIT_CHANNEL" token
     table.insert(self.waiters, co)
     return coroutine.yield("WAIT_CHANNEL")
 end
 
-function Engine:play_sound(filepath, volume)
-    mem.C.ZHLN_PlayOneShot(self.raw, filepath, volume or 1.0)
+-- ============================================================================
+-- Global Framework Entry Points (Launches & Orchestrates on first frame)
+-- ============================================================================
+_G.update = function(ptr, dt)
+    -- 1. Lazy-initialize FFI wrappers on first frame
+    if not _G.engine then
+        _G.engine = zahlen.wrap(ptr)
+        _G.world = _G.engine:world()
+        _G.game_ecs = ecs.new(ptr)
+
+        local InventoryShell = require("scripts.core.inventory")
+        _G.inventory_shell = InventoryShell.new()
+
+        zahlen.log("Core: Engine and ECS wraps successfully initialized.")
+    end
+
+    -- 2. Autodiscover and bind Player Entity dynamically
+    if not _G.player_ent then
+        for ent, movement in _G.game_ecs:view("MovementComponent") do
+            _G.player_ent = ent
+            break
+        end
+
+        if _G.player_ent then
+            _G.game_ecs:add(_G.player_ent, "combat", { hp = 100, max_hp = 100, is_poisoned = false })
+            _G.game_ecs:add(_G.player_ent, "inventory", { coins = 0, equipped = nil })
+            zahlen.log("Core: Dynamically bound player state to entity " .. tostring(_G.player_ent))
+
+            local eyes = _G.game_ecs:find("pomni_eyes")
+            if eyes then
+                zahlen.log("Core: Located eyes at entity " .. tostring(eyes))
+            end
+        end
+    end
+
+    -- 3. Execute all registered systems sequentially
+    for i = 1, #zahlen.scheduler.systems do
+        local sys = zahlen.scheduler.systems[i]
+        if sys.enabled then
+            sys.fn(dt)
+        end
+    end
 end
 
-function Engine:play_sound_3d(filepath, x, y, z, volume)
-    mem.C.ZHLN_PlayOneShot3D(self.raw, filepath, x, y, z, volume or 1.0)
-end
-
-function Engine:beep(frequency, duration, volume)
-    mem.C.ZHLN_PlayProceduralBeep(self.raw, frequency or 440.0, duration or 0.15, volume or 0.25)
+_G.run_inventory_command = function(cmd)
+    if _G.inventory_shell then
+        local out = _G.inventory_shell:execute_command(cmd)
+        if out ~= "" then
+            ffi.C.ZHLN_LogInventoryShell(out)
+        end
+    end
 end
 
 return zahlen
