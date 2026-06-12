@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+
 
 # Exit immediately if any command fails
 set -e

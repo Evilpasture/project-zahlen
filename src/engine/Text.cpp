@@ -1,3 +1,7 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Types.hpp>

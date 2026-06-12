@@ -1,3 +1,7 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+
 #ifdef __APPLE__
 #define VK_USE_PLATFORM_METAL_EXT
 #import <Cocoa/Cocoa.h>

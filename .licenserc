@@ -1,0 +1,4 @@
+# .licenserc
+LICENSE_TEMPLATE=".gpl-spdx-template"
+COPYRIGHT_HOLDER="Evilpasture | evilpasture+github@proton.me"
+COPYRIGHT_YEAR="2026"

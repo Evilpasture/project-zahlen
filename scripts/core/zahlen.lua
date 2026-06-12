@@ -1,3 +1,7 @@
+-- Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+-- SPDX-License-Identifier: GPL-3.0-or-later
+
+
 -- scripts/core/zahlen.lua
 local mem = require("scripts.core.memoryview")
 local ffi = require("scripts.core.ffi_cdef")

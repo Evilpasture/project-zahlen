@@ -1,3 +1,7 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+
 #ifdef __linux__
 #include "DemoWindow.hpp"
 #include <X11/Xlib.h>

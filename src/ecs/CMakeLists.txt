@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+
 add_library(zahlen_ecs STATIC
     ECS.cpp
     ECS.hpp

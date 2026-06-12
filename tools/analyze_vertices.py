@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+
 # tools/analyze_vertices.py
 import struct
 import json

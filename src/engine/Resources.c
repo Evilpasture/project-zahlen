@@ -1,3 +1,11 @@
+/*
+ * Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+/*
+ */
+
 const unsigned char ZHLN_Resource_BasicVertSpv[] = {
 #embed SHADER_BASIC_HLSL_VS_PATH
 };

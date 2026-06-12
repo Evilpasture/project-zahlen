@@ -1,3 +1,7 @@
+-- Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+-- SPDX-License-Identifier: GPL-3.0-or-later
+
+
 -- scripts/core/ecs.lua
 -- Cross-version Lua compatibility shim for unpack
 table.unpack = table.unpack or _G.unpack or unpack

@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 cmake_minimum_required(VERSION 3.25)
 
 # 1. Force the compiler selection BEFORE project()
