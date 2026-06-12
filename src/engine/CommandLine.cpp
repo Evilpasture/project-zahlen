@@ -47,7 +47,7 @@ std::expected<CommandLineOptions, EngineError> HandleCommandLine(std::span<char*
 				options.launchEditor = true;
 				break;
 
-			case ArgType::Version:
+			case ArgType::Version: {
 				std::println("Zahlen Engine - version {}.{}.{}", EngineVersion.major,
 							 EngineVersion.minor, EngineVersion.patch);
 				std::println("Built on:      {} (UTC)", __DATE__);
@@ -61,6 +61,7 @@ std::expected<CommandLineOptions, EngineError> HandleCommandLine(std::span<char*
 
 				return std::unexpected(
 					EngineError{.msg = {}, .code = EXIT_SUCCESS, .silent = true});
+			}
 			case ArgType::Help: {
 				// Evaluated at compile-time, zero runtime overhead
 				static constexpr std::string_view HelpMenu =

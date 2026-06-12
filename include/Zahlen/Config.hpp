@@ -24,6 +24,7 @@ struct Version {
 	uint32_t major;
 	uint32_t minor;
 	uint32_t patch;
+	static constexpr std::string_view String = ZHLN_VERSION_STR;
 };
 
 inline constexpr Version EngineVersion{
