@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 #include <cstdint>
 
@@ -24,4 +23,6 @@ DECLARE_RESOURCE(ZHLN_Resource_ToonVertSpv)
 DECLARE_RESOURCE(ZHLN_Resource_ToonFragSpv)
 DECLARE_RESOURCE(ZHLN_Resource_LtcMatBin)
 DECLARE_RESOURCE(ZHLN_Resource_LtcAmpBin)
+DECLARE_RESOURCE(ZHLN_Resource_PostProcessVertSpv)
+DECLARE_RESOURCE(ZHLN_Resource_PostProcessFragSpv)
 }

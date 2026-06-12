@@ -4,7 +4,7 @@
 VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	VSOutput output;
 
-	// Resolve Instance ID: Use push constant if valid; otherwise fallback to draw SV_InstanceID [1]
+	// Resolve Instance ID: Use push constant if valid; otherwise fallback to draw SV_InstanceID
 	uint instId = (obj.instanceId != 4294967295u) ? obj.instanceId : instanceId;
 	InstanceData inst = g_instances[instId];
 

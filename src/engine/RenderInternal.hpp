@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // File: src/engine/RenderInternal.hpp
 #pragma once
 
@@ -166,12 +165,16 @@ using TAALayout =
 						 Vk::SamplerSlot<3>, Vk::UniformSlot<4, VK_SHADER_STAGE_FRAGMENT_BIT>>;
 
 using BlitLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texCurrent (Color)
-										Vk::SamplerSlot<1>,		 // sampler
-										Vk::SampledImageSlot<2>, // texDepth
-										Vk::SampledImageSlot<3>, // texNormalRoughness
-										Vk::SamplerSlot<4>,		 // pointSampler (Nearest)
-										Vk::SampledImageSlot<5>	 // NEW: texEnvMap (Cubemap)
+										Vk::SamplerSlot<1>		 // sampler
 										>;
+
+using PostProcessLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texCurrent (Color)
+											   Vk::SamplerSlot<1>,		// sampler
+											   Vk::SampledImageSlot<2>, // texDepth
+											   Vk::SampledImageSlot<3>, // texNormalRoughness
+											   Vk::SamplerSlot<4>,		// pointSampler (Nearest)
+											   Vk::SampledImageSlot<5>	// texEnvMap (Cubemap)
+											   >;
 using CullingLayout = Vk::DescriptorLayout<Vk::StorageBufferSlot<0>, Vk::StorageBufferSlot<1>>;
 
 namespace Stages {
@@ -187,10 +190,13 @@ struct TaaPass {
 struct BlitPass {
 	static constexpr std::string_view name = "[GPU] Blit/Composite";
 };
+struct PostProcessPass {
+	static constexpr std::string_view name = "[GPU] PostProcess (GI)";
+};
 } // namespace Stages
 
-using FrameProfiler =
-	Profiler::GpuProfiler<Stages::ShadowPass, Stages::MainPass, Stages::TaaPass, Stages::BlitPass>;
+using FrameProfiler = Profiler::GpuProfiler<Stages::ShadowPass, Stages::MainPass, Stages::TaaPass,
+											Stages::PostProcessPass, Stages::BlitPass>;
 
 struct NativeMesh {
 	Vk::Buffer buffer;
@@ -259,9 +265,11 @@ struct RenderContext::Impl {
 	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> sceneColor;
 	Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT> velocityBuffer;
 	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> normalRoughnessBuffer;
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> postProcessTarget;
 	DoubleBuffered<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumBuffers;
 
 	Vk::PostProcessPass<TAALayout> taaPass;
+	Vk::PostProcessPass<PostProcessLayout> postProcessPass;
 	Vk::PostProcessPass<BlitLayout> blitPass;
 
 	Vk::Sampler defaultSampler;

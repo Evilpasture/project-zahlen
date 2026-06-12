@@ -6,7 +6,6 @@
 #include "ParallelDraw.hpp"
 #include "RenderInternal.hpp"
 #include "Zahlen/GUI.hpp"
-#include "Zahlen/Math3D.hpp"
 #include "Zahlen/Profiler.hpp"
 #include "backends/imgui_impl_vulkan.h"
 #include "detail/RadixSort.hpp"
@@ -151,8 +150,8 @@ struct GpuCullingPolicy {
 
 struct CpuCullingPolicy {
 	static void
-	Record(const FrameRecorder& recorder, const JPH::Array<GroupRange>& groups, uint32_t drawCount,
-		   Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> color_att,
+	Record(const FrameRecorder& recorder, const JPH::Array<GroupRange>& /*groups*/,
+		   uint32_t drawCount, Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> color_att,
 		   Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> vel_att,
 		   Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> norm_att,
 		   Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> depth_att) noexcept {
@@ -218,6 +217,8 @@ void ExecutePass(const FrameRecorder& recorder, const JPH::Array<GroupRange>& gr
 // ============================================================================
 
 namespace Passes {
+
+namespace {
 
 struct ShadowPass {
 	void Execute(const FrameRecorder& recorder) const noexcept {
@@ -410,11 +411,73 @@ struct TAAPass {
 	}
 };
 
+struct PostProcessPass {
+	[[nodiscard]] auto
+	Execute(const FrameRecorder& recorder,
+			SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+						   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> in) const noexcept
+		-> Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
+
+		VkCommandBuffer cmd = recorder.cmd;
+		auto& ctx = recorder.ctx;
+
+		Profiler::ScopedGpuProfile<Stages::PostProcessPass, FrameProfiler> timer(
+			cmd, recorder.frameIndex, ctx.gpuProfiler);
+
+		// 1. Transition ONLY our local postProcessTarget from its end-of-frame read state back to
+		// write state
+		auto pp_att = IssueBarrier<Vk::ShaderReadState, Vk::ColorAttachmentState>(
+			cmd, AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.postProcessTarget));
+
+		// 2. Bind the inputs directly (they are already transitioned to ShaderRead by the TAA
+		// pass!)
+		ctx.postProcessPass.WriteNext(
+			ctx.ctx.Device(), in.sceneColor, Vk::SamplerWrite{.sampler = ctx.defaultSampler.Get()},
+			in.depth, in.normRough, Vk::SamplerWrite{.sampler = ctx.pointSampler.Get()},
+			Vk::ImageWrite{.view = ctx.iblPayload.prefilteredView.Get(),
+						   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
+
+		struct PPPushConstants {
+			JPH::Mat44 invViewProj;
+			JPH::Mat44 viewProj;
+			alignas(16) std::array<float, 4> camPos;
+			int giMode;
+			float aoRadius;
+			float aoBias;
+			float aoPower;
+			float giIntensity;
+			int giSamples;
+			int enableSSR;
+			int pad;
+		} pc = {
+			.invViewProj = ctx.current_view_proj.Inversed(),
+			.viewProj = ctx.current_view_proj,
+			.camPos = {ctx.currentUniforms.camPos[0], ctx.currentUniforms.camPos[1],
+					   ctx.currentUniforms.camPos[2], ctx.currentUniforms.camPos[3]},
+			.giMode = ctx.giSettings.mode,
+			.aoRadius = ctx.giSettings.aoRadius,
+			.aoBias = ctx.giSettings.aoBias,
+			.aoPower = ctx.giSettings.aoPower,
+			.giIntensity = ctx.giSettings.giIntensity,
+			.giSamples = ctx.giSettings.giSamples,
+			.enableSSR = ctx.giSettings.enableSSR,
+			.pad = {},
+		};
+
+		if (ctx.postProcessPass.pipeline.Valid()) {
+			Vk::DynamicPass(ctx.postProcessTarget.extent)
+				.AddColor(pp_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+				.Execute(cmd, [&]() { ctx.postProcessPass.Execute(cmd, pc); });
+		}
+
+		// 3. Transition our local target to ShaderRead for the BlitPass to consume
+		return IssueBarrier<Vk::ColorAttachmentState, Vk::ShaderReadState>(cmd, pp_att);
+	}
+};
+
 struct BlitPass {
 	void Execute(const FrameRecorder& recorder,
-				 SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-								VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>
-					 in) const noexcept {
+				 Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor) const noexcept {
 		VkCommandBuffer cmd = recorder.cmd;
 		auto& ctx = recorder.ctx;
 
@@ -422,65 +485,28 @@ struct BlitPass {
 																		  ctx.gpuProfiler);
 
 		uint32_t imageIdx = ctx.current_image_index;
-		VkImage swapImg = ctx.presentation.swapchain.Get().images[imageIdx];
-		VkImageView swapView = ctx.presentation.swapchain.Get().views[imageIdx];
-
-		Vk::TypedImage<VK_IMAGE_LAYOUT_UNDEFINED> swap_u = {.handle = swapImg,
-															.view = swapView,
-															.extent = in.sceneColor.extent,
-															.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
-
-		// Compile-time state translation
-		auto swap_att = IssueBarrier<Vk::UndefinedState, Vk::ColorAttachmentState>(cmd, swap_u);
-
-		bool useTAA = ctx.taaState.enabled && ctx.taaPass.pipeline.Valid();
-
-		Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> blitSource_ro = {
-			.handle = useTAA ? ctx.accumBuffers.Next().image.Handle() : in.sceneColor.handle,
-			.view = useTAA ? ctx.accumBuffers.Next().view.Get() : in.sceneColor.view,
-			.extent = in.sceneColor.extent,
+		Vk::TypedImage<VK_IMAGE_LAYOUT_UNDEFINED> swap_u = {
+			.handle = ctx.presentation.swapchain.Get().images[imageIdx],
+			.view = ctx.presentation.swapchain.Get().views[imageIdx],
+			.extent = inColor.extent,
 			.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
 
-		ctx.blitPass.WriteNext(ctx.ctx.Device(), blitSource_ro,
-							   Vk::SamplerWrite{.sampler = ctx.defaultSampler.Get()}, in.depth,
-							   in.normRough, Vk::SamplerWrite{.sampler = ctx.pointSampler.Get()},
-							   Vk::ImageWrite{.view = ctx.iblPayload.prefilteredView.Get(),
-											  .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
+		auto swap_att = IssueBarrier<Vk::UndefinedState, Vk::ColorAttachmentState>(cmd, swap_u);
+
+		ctx.blitPass.WriteNext(ctx.ctx.Device(), inColor,
+							   Vk::SamplerWrite{.sampler = ctx.defaultSampler.Get()});
 
 		struct BlitPushConstants {
-			JPH::Mat44 invViewProj;
-			JPH::Mat44 viewProj;
-			alignas(
-				16) std::array<float, 4> camPos; // camPos.w now contains the Temporal frameIndex!
-			int giMode;
-			float aoRadius;
-			float aoBias;
-			float aoPower;
-			float giIntensity;
-			int giSamples;
 			float vignetteIntensity;
 			float vignettePower;
-			int enableSSR;
-		} pc = {.invViewProj = ctx.current_view_proj.Inversed(), // Use jittered inverse matrix
-				.viewProj = ctx.current_view_proj, // Use active jittered view-projection matrix
-				.camPos = {ctx.currentUniforms.camPos[0], ctx.currentUniforms.camPos[1],
-						   ctx.currentUniforms.camPos[2], ctx.currentUniforms.camPos[3]},
-				.giMode = ctx.giSettings.mode,
-				.aoRadius = ctx.giSettings.aoRadius,
-				.aoBias = ctx.giSettings.aoBias,
-				.aoPower = ctx.giSettings.aoPower,
-				.giIntensity = ctx.giSettings.giIntensity,
-				.giSamples = ctx.giSettings.giSamples,
-				.vignetteIntensity = ctx.giSettings.vignetteIntensity,
-				.vignettePower = ctx.giSettings.vignettePower,
-				.enableSSR = ctx.giSettings.enableSSR};
+		} pc = {.vignetteIntensity = ctx.giSettings.vignetteIntensity,
+				.vignettePower = ctx.giSettings.vignettePower};
 
 		if (ctx.blitPass.pipeline.Valid()) {
-			Vk::DynamicPass(in.sceneColor.extent)
+			Vk::DynamicPass(inColor.extent)
 				.AddColor(swap_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
 				.Execute(cmd, [&]() {
 					ctx.blitPass.Execute(cmd, pc);
-
 					if (!ctx.uiDrawQueue.empty()) {
 						struct UIObjectConstants {
 							JPH::Mat44 orthoMatrix;
@@ -488,8 +514,8 @@ struct BlitPass {
 							uint32_t albedoIdx;
 						} uipc{};
 
-						uipc.orthoMatrix = GUI::CreateOrthoMatrix(
-							(float)in.sceneColor.extent.width, (float)in.sceneColor.extent.height);
+						uipc.orthoMatrix =
+							GUI::CreateOrthoMatrix(inColor.extent.width, inColor.extent.height);
 
 						for (const auto& draw : ctx.uiDrawQueue) {
 							uipc.albedoIdx = draw.fontIndex;
@@ -516,6 +542,7 @@ struct BlitPass {
 			IssueBarrier<Vk::ColorAttachmentState, Vk::PresentState>(cmd, swap_att);
 	}
 };
+} // namespace
 
 } // namespace Passes
 
@@ -597,6 +624,9 @@ void RenderContext::BeginFrame() {
 		_impl->normalRoughnessBuffer = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
 			_impl->allocator, _impl->ctx, ext,
 			{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
+		_impl->postProcessTarget = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
+			_impl->allocator, _impl->ctx, ext,
+			{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
 
 		_impl->needsInitialClear = true;
 		_impl->resized = false;
@@ -629,6 +659,7 @@ void RenderContext::BeginFrame() {
 		auto sNorm_att = Vk::Transition(cmd, _impl->normalRoughnessBuffer, Vk::AsColorAttachment);
 		auto depth_att =
 			Vk::Transition(cmd, _impl->presentation.depthTarget, Vk::AsDepthAttachment);
+		auto sPost_att = Vk::Transition(cmd, _impl->postProcessTarget, Vk::AsColorAttachment);
 
 		Vk::DynamicPass(_impl->presentation.swapchain.Get().extent)
 			.AddColor(sColor_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
@@ -643,6 +674,8 @@ void RenderContext::BeginFrame() {
 					  kClearColorNormalRoughness)
 			.AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
 					  kClearDepthValue)
+			.AddColor(sPost_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+					  kClearColorBlack)
 			.Execute(cmd, []() {});
 
 		auto sColor_ro = Vk::Transition(cmd, sColor_att, Vk::AsReadOnly);
@@ -651,6 +684,7 @@ void RenderContext::BeginFrame() {
 		auto sAcc1_ro = Vk::Transition(cmd, sAcc1_att, Vk::AsReadOnly);
 		[[maybe_unused]] auto sNorm_ro = Vk::Transition(cmd, sNorm_att, Vk::AsReadOnly);
 		[[maybe_unused]] auto sDepth_ro = Vk::Transition(cmd, depth_att, Vk::AsReadOnly);
+		[[maybe_unused]] auto sPost_ro = Vk::Transition(cmd, sPost_att, Vk::AsReadOnly);
 
 		for (int i = 0; i < 2; ++i) {
 			_impl->taaPass.WriteIndex(
@@ -681,6 +715,7 @@ void RenderContext::Impl::SubmitFrame() {
 
 	accumBuffers.Flip();
 	taaPass.sets.Flip();
+	postProcessPass.sets.Flip();
 	blitPass.sets.Flip();
 
 	frame_index = (frame_index + 1) % 2;
@@ -707,7 +742,7 @@ void RenderContext::EndFrame() {
 
 	{
 		auto mapRegion = _impl->instanceDataBuffers[_impl->frame_index].Map();
-		auto* mapped = reinterpret_cast<InstanceData*>(mapRegion.data);
+		auto* mapped = std::bit_cast<InstanceData*>(mapRegion.data);
 		auto drawCount = static_cast<uint32_t>(_impl->drawQueue.size());
 
 		for (uint32_t i = 0; i < drawCount; ++i) {
@@ -758,7 +793,8 @@ void RenderContext::EndFrame() {
 
 	auto stateAfterMain = Passes::MainPass{}.Execute(recorder, initialState);
 	auto stateAfterTAA = Passes::TAAPass{}.Execute(recorder, stateAfterMain);
-	Passes::BlitPass{}.Execute(recorder, stateAfterTAA);
+	auto stateAfterPP = Passes::PostProcessPass{}.Execute(recorder, stateAfterTAA);
+	Passes::BlitPass{}.Execute(recorder, stateAfterPP);
 
 	ZHLN_EndCommandBuffer(cmd);
 	_impl->SubmitFrame();

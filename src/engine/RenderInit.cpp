@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // File: src/engine/Render_Init.cpp
 #include "IBLProcessor.hpp"
 #include "RenderCore.hpp"
@@ -75,8 +74,7 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 #endif
 	ZHLN_DeviceDesc dev_desc = {.physical = nullptr,
 								.extensions = &dev_exts[0],
-								.extension_count =
-									(uint32_t)(sizeof(dev_exts) / sizeof(const char*)),
+								.extension_count = sizeof(dev_exts) / sizeof(const char*),
 								.features = features.GetRoot(),
 								.enable_validation = cfg.enableValidation};
 	ZHLN_DeviceSelectDesc select_desc = {.instance = VK_NULL_HANDLE,
@@ -108,8 +106,8 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	int width = 0;
 	int height = 0;
 	glfwGetFramebufferSize(glfwWin, &width, &height);
-	if (!_impl->presentation.Init(_impl->ctx, _impl->allocator, _impl->surface.Get(),
-								  (uint32_t)width, (uint32_t)height, cfg.vsync)) {
+	if (!_impl->presentation.Init(_impl->ctx, _impl->allocator, _impl->surface.Get(), width, height,
+								  cfg.vsync)) {
 		ZHLN::Panic("FATAL: Presentation Context initialization failed");
 	}
 
@@ -137,16 +135,17 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	}
 
 	// Index 0: Solid Black (Used for Emissive, Metallic, and Roughness fallbacks) -> Linear
-	uint8_t blackPixel[4] = {0, 0, 0, 0};
-	CreateTexture(blackPixel, 1, 1, false);
+	std::array<uint8_t, 4> blackPixel = {0, 0, 0, 0};
+	CreateTexture(blackPixel.data(), 1, 1, false);
 
 	// Index 1: Solid White (Used for Albedo fallback) -> sRGB
-	uint8_t whitePixel[4] = {255, 255, 255, 255};
-	CreateTexture(whitePixel, 1, 1, true);
+	std::array<uint8_t, 4> whitePixel = {255, 255, 255, 255};
+	CreateTexture(whitePixel.data(), 1, 1, true);
 
 	// Index 2: Flat Tangent-Space Normal Map (R=128, G=128, B=255) -> Linear
-	uint8_t normalPixel[4] = {128, 128, 255, 255};
-	CreateTexture(normalPixel, 1, 1, false);
+	std::array<uint8_t, 4> normalPixel = {128, 128, 255, 255};
+
+	CreateTexture(normalPixel.data(), 1, 1, false);
 }
 
 RenderContext::~RenderContext() {
@@ -280,20 +279,23 @@ void RenderContext::Impl::InitBindless() {
 	// Pass 4: LTC Area Light LUT Uploads (Direct embedded memory blast)
 	ZHLN::Log("[IBL] Uploading Linearly Transformed Cosines (LTC) LUTs...");
 
-	VkImageCreateInfo ltcInfo = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-								 .pNext = nullptr,
-								 .flags = 0,
-								 .imageType = VK_IMAGE_TYPE_2D,
-								 .format = VK_FORMAT_R16G16B16A16_SFLOAT,
-								 .extent = {.width = 64, .height = 64, .depth = 1},
-								 .mipLevels = 1,
-								 .arrayLayers = 1,
-								 .samples = VK_SAMPLE_COUNT_1_BIT,
-								 .tiling = VK_IMAGE_TILING_OPTIMAL,
-								 .usage =
-									 VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-								 .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-								 .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+	VkImageCreateInfo ltcInfo = {
+		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+		.pNext = nullptr,
+		.flags = 0,
+		.imageType = VK_IMAGE_TYPE_2D,
+		.format = VK_FORMAT_R16G16B16A16_SFLOAT,
+		.extent = {.width = 64, .height = 64, .depth = 1},
+		.mipLevels = 1,
+		.arrayLayers = 1,
+		.samples = VK_SAMPLE_COUNT_1_BIT,
+		.tiling = VK_IMAGE_TILING_OPTIMAL,
+		.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+		.queueFamilyIndexCount = {},
+		.pQueueFamilyIndices = {},
+		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+	};
 
 	ltcMatImage = Vk::Image::Create(allocator.Get(), ltcInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 	ltcAmpImage = Vk::Image::Create(allocator.Get(), ltcInfo, VMA_MEMORY_USAGE_GPU_ONLY);
@@ -368,17 +370,38 @@ void RenderContext::Impl::InitPostProcessing() {
 		ZHLN::Log("TAA pass build failure, continuing...");
 	}
 
+	VkPushConstantRange ppPush = {
+		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 176};
+
+	auto ppShaders =
+		Vk::ShaderStages::Create(ctx.Device(),
+								 {
+									 .code = Vk::AsSpirV(&ZHLN_Resource_PostProcessVertSpv[0]),
+									 .size = ZHLN_Resource_PostProcessVertSpv_Len,
+									 .entry_point = {},
+								 },
+								 {
+									 .code = Vk::AsSpirV(&ZHLN_Resource_PostProcessFragSpv[0]),
+									 .size = ZHLN_Resource_PostProcessFragSpv_Len,
+									 .entry_point = {},
+								 });
+
+	if (!postProcessPass.Build(ctx.Device(), ppShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush,
+							   1)) {
+		ZHLN::Log("PostProcess pass build failure, continuing...");
+	}
+
 	VkPushConstantRange blitPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 		.offset = 0,
-		.size = 192,
+		.size = 8,
 	};
 
 	auto blitShaders = Vk::ShaderStages::Create(ctx.Device(),
-												{.code = (const uint32_t*)ZHLN_Resource_BlitVertSpv,
+												{.code = Vk::AsSpirV(&ZHLN_Resource_BlitVertSpv[0]),
 												 .size = ZHLN_Resource_BlitVertSpv_Len,
 												 .entry_point = "VSMain"},
-												{.code = (const uint32_t*)ZHLN_Resource_BlitFragSpv,
+												{.code = Vk::AsSpirV(&ZHLN_Resource_BlitFragSpv[0]),
 												 .size = ZHLN_Resource_BlitFragSpv_Len,
 												 .entry_point = "PSMain"});
 

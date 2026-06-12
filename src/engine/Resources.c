@@ -75,3 +75,13 @@ const unsigned char ZHLN_Resource_LtcAmpBin[] = {
 #embed "../../resources/shaders/ltc_amp.dds" // <-- Relative path from src/engine/
 };
 const unsigned int ZHLN_Resource_LtcAmpBin_Len = sizeof(ZHLN_Resource_LtcAmpBin);
+
+const unsigned char ZHLN_Resource_PostProcessVertSpv[] = {
+#embed SHADER_POSTPROCESS_HLSL_VS_PATH
+};
+const unsigned int ZHLN_Resource_PostProcessVertSpv_Len = sizeof(ZHLN_Resource_PostProcessVertSpv);
+
+const unsigned char ZHLN_Resource_PostProcessFragSpv[] = {
+#embed SHADER_POSTPROCESS_HLSL_PS_PATH
+};
+const unsigned int ZHLN_Resource_PostProcessFragSpv_Len = sizeof(ZHLN_Resource_PostProcessFragSpv);
