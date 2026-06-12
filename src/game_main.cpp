@@ -24,6 +24,7 @@
 #include <engine/system/AnimationSystem.hpp>
 #include <engine/system/ArticulationSystem.hpp>
 #include <engine/system/CullingSystem.hpp>
+#include <expected>
 #include <physics/PhysicsWorld.hpp>
 #include <print>
 #include <string>
@@ -553,9 +554,8 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 					   mesh->activeMorphCount, mesh->morphWeights);
 	}
 
-	CullingStats::TotalObjects = (uint32_t)reg.GetEntitiesWith<MeshComponent>().size();
-	CullingStats::CulledObjects =
-		CullingStats::TotalObjects - (uint32_t)game.visibleEntities.size();
+	CullingStats::TotalObjects = reg.GetEntitiesWith<MeshComponent>().size();
+	CullingStats::CulledObjects = CullingStats::TotalObjects - game.visibleEntities.size();
 
 	Renderer::DrawUI(rc, game.helloText, game.fontAtlasIdx);
 
@@ -628,110 +628,179 @@ void ShutdownGame([[maybe_unused]] Engine& engine, GameContext& game) {
 using namespace ZHLN;
 
 // ============================================================================
-// CLEAN ENTRYPOINT ENGINE CONTROL LOOP
+// MONADIC ERROR HANDLING STRUCTURES
+// ============================================================================
+namespace {
+
+struct EngineError {
+	std::string msg;
+	int code = EXIT_FAILURE;
+	bool silent = false;
+};
+
+struct CommandLineOptions {
+	std::span<char* const> args;
+	bool enableValidation = true;
+};
+
+// ============================================================================
+// STAGE 1: COMMAND LINE INTERFACE HANDLER
 // ============================================================================
 
-auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
-	for (int i = 1; i < argc; ++i) {
-		if (std::string_view(argv[i]) == "--version") {
-// Compile-time compiler detection
-#if defined(__clang__)
-			constexpr std::string_view compiler = "Clang (" __VERSION__ ")";
-#elif defined(__GNUC__)
-			constexpr std::string_view compiler = "GCC (" __VERSION__ ")";
-#elif defined(_MSC_VER)
-			constexpr std::string_view compiler = "MSVC";
-#else
-			constexpr std::string_view compiler = "Unknown Compiler";
-#endif
+std::expected<CommandLineOptions, EngineError> HandleCommandLine(std::span<char* const> args) {
+	CommandLineOptions options{.args = args, .enableValidation = true};
 
-// Compile-time build configuration detection
-#if defined(NDEBUG)
-			constexpr std::string_view buildType = "Release";
-#else
-			constexpr std::string_view buildType = "Debug";
-#endif
-
-// Compile-time sanitizer detection
-#if defined(__ASAN_ENABLED__)
-			constexpr std::string_view sanitizers = "enabled";
-#else
-			constexpr std::string_view sanitizers = "disabled";
-#endif
-
-			std::println("Zahlen Engine - version 1.0.0");
-			std::println("Built on:     {} (UTC)", __DATE__);
-			std::println("Build Profile: {} | Sanitizers: {}", buildType, sanitizers);
-			std::println("Compiler:      {}", compiler);
-			std::println("\nThis is free software; see the source for copying conditions.");
-			std::println("There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A "
-						 "PARTICULAR PURPOSE.");
-			return EXIT_SUCCESS;
+	// Check environment variables first (allows easy IDE configuration profiles)
+	if (const char* envVal = std::getenv("ZHLN_VALIDATION")) {
+		if (std::string_view(envVal) == "0" || std::string_view(envVal) == "false") {
+			options.enableValidation = false;
 		}
 	}
+
+	for (std::string_view arg : args.subspan(1)) {
+		if (arg == "--version") {
+			std::println("Zahlen Engine - version {}.{}.{}", EngineVersion.major,
+						 EngineVersion.minor, EngineVersion.patch);
+			std::println("Built on:      {} (UTC)", __DATE__);
+			std::println("Build Profile: {} | Sanitizers: {}", BuildType, Sanitizers);
+			std::println("Compiler:      {}", Compiler);
+
+			std::println("\nLicense GPLv3+: GNU GPL version 3 or later "
+						 "<https://gnu.org/licenses/gpl.html>.");
+			std::println("This is free software: you are free to change and redistribute it.");
+			std::println("There is NO WARRANTY, to the extent permitted by law.");
+
+			return std::unexpected(EngineError{.code = EXIT_SUCCESS, .silent = true});
+		}
+
+		if (arg == "--help" || arg == "-h") {
+			// Evaluated at compile-time, zero runtime overhead
+			static constexpr std::string_view HelpMenu =
+				R"(
+Usage: {} [options]
+
+Options:
+  -h, --help           Display this help menu and exit
+  --version            Display engine version information and exit
+  --no-validation      Disable Vulkan validation layers completely
+
+Environment Variables:
+  ZHLN_VALIDATION=0    Disable Vulkan validation layers
+
+)";
+
+			// Fallback if args is somehow empty(e.g., custom environment invocations)
+			std::string exeName = "zahlen_engine";
+
+			if (!args.empty() && args[0] != nullptr) {
+				exeName = std::filesystem::path(args[0]).filename().string();
+			}
+
+			std::print(HelpMenu, exeName);
+			return std::unexpected(EngineError{.code = EXIT_SUCCESS, .silent = true});
+		}
+
+		if (arg == "--no-validation") {
+			options.enableValidation = false;
+		}
+	}
+	return options;
+}
+
+// ============================================================================
+// STAGE 2: ENGINE & SUBSYSTEM INITIALIZATION
+// ============================================================================
+
+std::expected<std::unique_ptr<Engine>, EngineError> InitializeEngine(CommandLineOptions options) {
 	Platform::Init();
 	ZHLN::SetupSignalHandler();
 	TaskSystem::Init();
-	Clock clock;
 
-	ZHLN::EngineConfig config{
+	EngineConfig config{
 		.physics = {.maxBodies = 5000,
 					.maxBodyPairs = 10000,
 					.maxContactConstraints = 10000,
 					.tempAllocatorSize = 64 * 1024 * 1024},
-		.render = {.appName = "Zahlen Engine - Digital Circus Showcase",
+		.render = {.appName = "Zahlen Engine",
 				   .width = 1280,
 				   .height = 720,
 				   .vsync = false,
-				   .enableValidation = true},
+				   .enableValidation = options.enableValidation},
 	};
 
-	{
-		Engine engine(config);
-		engine.GetWindow().Focus();
-
-		// Local stack allocation of context cleanly separates game loop dependencies
-		GameContext game{};
-
-		if (!ZHLN::InitializeGame(engine, game)) {
-			ZHLN::Log("Fatal: Game failed to initialize.");
-			return EXIT_FAILURE;
-		}
-
-		float physicsAccumulator = 0.0f;
-
-		while (engine.IsRunning()) {
-			float frameTime = clock.GetDeltaTime();
-			engine.ProcessEvents();
-
-			if (engine.GetInput().IsKeyDown(KeyCode::Escape)) {
-				engine.GetWindow().Close();
-				break;
-			}
-
-			auto res = engine.GetWindow().GetSize();
-			if (res.width <= 0 || res.height <= 0) {
-				Platform::Sleep(10);
-				continue;
-			}
-
-			if (engine.GetInput().NeedsResize()) {
-				engine.GetRenderContext().SetResolution(engine.GetInput().GetNewSize());
-				engine.GetInput().ClearResizeFlag();
-				continue;
-			}
-
-			// Execute game simulation ticks and rendering (BeginFrame inside RenderGame)
-			// 1. Update physics, gameplay logic, and record ImGui windows
-			ZHLN::UpdateGame(engine, frameTime, physicsAccumulator, game);
-
-			// 2. Render scene, overlay ImGui draw data, and submit to GPU
-			ZHLN::RenderGame(engine, physicsAccumulator, game);
-		}
-
-		ZHLN::ShutdownGame(engine, game);
+	auto engine = std::make_unique<Engine>(config);
+	if (!engine) {
+		return std::unexpected(EngineError{.msg = "Failed to allocate memory for Engine context.",
+										   .code = EXIT_FAILURE});
 	}
 
+	engine->GetWindow().Focus();
+	return engine;
+}
+
+// ============================================================================
+// STAGE 3: RUN THE CORE SIMULATION LOOP
+// ============================================================================
+
+std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine) {
+	Clock clock;
+	GameContext game{};
+
+	if (!ZHLN::InitializeGame(*engine, game)) {
+		return std::unexpected(
+			EngineError{.msg = "Game failed to initialize.", .code = EXIT_FAILURE});
+	}
+
+	float physicsAccumulator = 0.0f;
+
+	while (engine->IsRunning()) {
+		float frameTime = clock.GetDeltaTime();
+		engine->ProcessEvents();
+
+		if (engine->GetInput().IsKeyDown(KeyCode::Escape)) {
+			engine->GetWindow().Close();
+			break;
+		}
+
+		auto res = engine->GetWindow().GetSize();
+		if (res.width <= 0 || res.height <= 0) {
+			Platform::Sleep(10);
+			continue;
+		}
+
+		if (engine->GetInput().NeedsResize()) {
+			engine->GetRenderContext().SetResolution(engine->GetInput().GetNewSize());
+			engine->GetInput().ClearResizeFlag();
+			continue;
+		}
+
+		// Execute game simulation ticks and rendering
+		ZHLN::UpdateGame(*engine, frameTime, physicsAccumulator, game);
+		ZHLN::RenderGame(*engine, physicsAccumulator, game);
+	}
+
+	ZHLN::ShutdownGame(*engine, game);
 	TaskSystem::Shutdown();
+
 	return EXIT_SUCCESS;
+}
+
+} // namespace
+
+// ============================================================================
+// MONADIC ENTRYPOINT ENGINE CONTROL LOOP
+// ============================================================================
+
+auto main(int argc, char* argv[]) -> int {
+	auto result = HandleCommandLine(std::span(argv, static_cast<size_t>(argc)))
+					  .and_then(InitializeEngine)
+					  .and_then(RunEngineLoop)
+					  .transform_error([](const EngineError& err) -> int {
+						  if (!err.msg.empty() && !err.silent) {
+							  std::println(stderr, "Error: {}", err.msg);
+						  }
+						  return err.code;
+					  });
+
+	return result.has_value() ? result.value() : result.error();
 }

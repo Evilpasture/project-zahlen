@@ -1,8 +1,52 @@
 #pragma once
 #include <cstdint>
 #include <detail/String.hpp>
+#include <string_view>
+
+#define ZHLN_VERSION_MAJOR 1
+#define ZHLN_VERSION_MINOR 2
+#define ZHLN_VERSION_PATCH 3
+
+// 1. The "Stringize" helper macros
+#define ZHLN_STR_HELPER(x) #x
+#define ZHLN_STR(x) ZHLN_STR_HELPER(x)
+
+// 2. Combine them using string literal concatenation
+#define ZHLN_VERSION_STR                                                                           \
+	ZHLN_STR(ZHLN_VERSION_MAJOR) "." ZHLN_STR(ZHLN_VERSION_MINOR) "." ZHLN_STR(ZHLN_VERSION_PATCH)
 
 namespace ZHLN {
+
+struct Version {
+	uint32_t major;
+	uint32_t minor;
+	uint32_t patch;
+};
+
+inline constexpr Version EngineVersion{
+	.major = ZHLN_VERSION_MAJOR, .minor = ZHLN_VERSION_MINOR, .patch = ZHLN_VERSION_PATCH};
+
+#if defined(__clang__)
+inline constexpr std::string_view Compiler = "Clang (" __VERSION__ ")";
+#elif defined(__GNUC__)
+inline constexpr std::string_view Compiler = "GCC (" __VERSION__ ")";
+#elif defined(_MSC_VER)
+inline constexpr std::string_view Compiler = "MSVC";
+#else
+inline constexpr std::string_view Compiler = "Unknown Compiler";
+#endif
+
+#if defined(NDEBUG)
+inline constexpr std::string_view BuildType = "Release";
+#else
+inline constexpr std::string_view BuildType = "Debug";
+#endif
+
+#if defined(__ASAN_ENABLED__)
+inline constexpr std::string_view Sanitizers = "enabled";
+#else
+inline constexpr std::string_view Sanitizers = "disabled";
+#endif
 
 struct PhysicsConfig {
 	uint32_t maxBodies = 1024;
