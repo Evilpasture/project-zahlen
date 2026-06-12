@@ -3,28 +3,26 @@ local zh = require("scripts.core.zahlen")
 
 -- --- Ambient & Post-Processing Subsystems ---
 zh.config({
-    ambient = {
-        giMode = 1,
-        aoRadius = 0.5,
-        aoBias = 0.05,
-        aoPower = 1.8,
-        giIntensity = 1.2,
-        giSamples = 8,
-        useLocalProbe = 1,
-        probeMin = { -22.0, 0.0, -22.0 },
-        probeMax = { 22.0, 12.0, 22.0 },
-        probePos = { 0.0, 4.0, 0.0 },
-        vignetteIntensity = 1.10,
-        vignettePower = 1.50,
-        enableSSR = 1,
-        floorRoughness = 0.15,
-        floorMetallic = 0.95,
-        sphereLightRadius = 1.5,
-        light1Intensity = 180.0,
-        light2Intensity = 180.0,
-        enableTAA = 1,
-        taaFeedback = 0.95,
-    }
+    giMode = 1,
+    aoRadius = 0.5,
+    aoBias = 0.05,
+    aoPower = 1.8,
+    giIntensity = 1.2,
+    giSamples = 8,
+    useLocalProbe = 1,
+    probeMin = { -22.0, 0.0, -22.0 },
+    probeMax = { 22.0, 12.0, 22.0 },
+    probePos = { 0.0, 4.0, 0.0 },
+    vignetteIntensity = 1.10,
+    vignettePower = 1.50,
+    enableSSR = 1,
+    floorRoughness = 0.15,
+    floorMetallic = 0.95,
+    sphereLightRadius = 1.5,
+    light1Intensity = 180.0,
+    light2Intensity = 180.0,
+    enableTAA = 1,
+    taaFeedback = 0.95,
 })
 
 -- --- Autostart Layout ---
@@ -190,3 +188,8 @@ zh.scheduler.register("CameraFOV", 30, camera_fov_system)
 zh.scheduler.register("VisualFeedback", 25, visual_feedback_system)
 
 zh.log("Gameplay: Systems successfully initialized under the Core Scheduler.")
+
+if not _G.engine_started then
+    _G.engine_started = true
+    zh.trigger("engine.start")
+end

@@ -176,11 +176,18 @@ function Registry:view(...)
     local count = tonumber(entities_view.shape[0])
     local entity_array = ffi.cast("uint64_t*", entities_view.buf)
 
-    local index = 0
+    -- Copy entities to a Lua table to avoid holding the C++ Mutex during arbitrary Lua execution
+    local entities = {}
+    for i = 0, count - 1 do
+        entities[i + 1] = entity_array[i]
+    end
+    entities_view:release()
+
+    local index = 1
 
     return function()
-        while index < count do
-            local ent = entity_array[index]
+        while index <= count do
+            local ent = entities[index]
             index = index + 1
 
             local results = {}

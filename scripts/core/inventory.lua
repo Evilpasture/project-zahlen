@@ -1,5 +1,4 @@
 local ffi = require("ffi")
-local _ = require("scripts.core.zahlen")
 
 local ANSI_RED = "\27[31m"
 local ANSI_GREEN = "\27[32m"
@@ -365,7 +364,7 @@ function InventoryShell:execute_command(input_string)
                     local status, ret = pcall(chunk, unpack(args))
                     if status then
                         stdout = ANSI_GREEN ..
-                        "Executing " .. exec_name .. "..." .. ANSI_RESET .. "\n" .. (ret or "Success.")
+                            "Executing " .. exec_name .. "..." .. ANSI_RESET .. "\n" .. (ret or "Success.")
                         return stdout
                     else
                         stderr = ANSI_RED .. "Runtime Error: " .. tostring(ret) .. ANSI_RESET

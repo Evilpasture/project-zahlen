@@ -76,8 +76,8 @@ function Engine:world()
     return setmetatable({ engine = self.raw }, {
         __index = function(t, k)
             if k == "positions" then return track(mem.C.ZHLN_GetPhysicsPositions(t.engine)) end
-            if key == "velocities" then return track(mem.C.ZHLN_GetPhysicsLinearVelocities(t.engine)) end
-            if key == "contacts" then return track(mem.C.ZHLN_GetPhysicsContactEvents(t.engine)) end
+            if k == "velocities" then return track(mem.C.ZHLN_GetPhysicsLinearVelocities(t.engine)) end
+            if k == "contacts" then return track(mem.C.ZHLN_GetPhysicsContactEvents(t.engine)) end
         end
     })
 end
@@ -268,7 +268,7 @@ function zh.spawn(path, options)
     local is_static = (options.static == nil) and true or options.static
     local is_animated = (options.animated == nil) and false or options.animated
 
-    local max_count = options.max_entities or 128
+    local max_count = options.max_entities or 2048
     local ent_buffer = ffi.new("uint64_t[?]", max_count)
 
     local path_c = ffi.new("char[256]")
@@ -286,7 +286,7 @@ function zh.spawn(path, options)
         ent_buffer
     })
 
-    local count = ffi.C.ZHLN_DispatchCommand(_G.engine.raw, "SpawnPrefab", args)
+    local count = tonumber(ffi.C.ZHLN_DispatchCommand(_G.engine.raw, "SpawnPrefab", args))
     if count == 0 then return {} end
 
     local entities = {}
@@ -480,7 +480,6 @@ _G.run_inventory_command = function(cmd)
     end
 end
 
--- Force trigger startup hook once compilation resolves
-zh.trigger("engine.start")
+
 
 return zh

@@ -156,6 +156,12 @@ if not ok then
 
             int enableTAA;
             float taaFeedback;
+
+            uint64_t playerParts[128];
+            uint32_t playerPartsCount;
+            uint64_t debugLineVbo;
+            uint64_t debugLinePipeline;
+            uint32_t debugLineAlbedo;
         } ZHLN_GameState;
 
         // Binary Command argument packing
@@ -193,9 +199,11 @@ if not ok then
         } __attribute__((packed)) RegisterDebugLineArgs;
 
         ZHLN_Engine* ZHLN_GetEngineContext(void);
+        void* ZHLN_GetGameState(ZHLN_Engine* engine);
         void ZHLN_RegisterGameState(ZHLN_Engine* engine, void* state_ptr);
         uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine, const char* cmd, const void* args);
-        float ZHLN_GetTotalTime(ZHLN_Engine* engine);    ]]
+        float ZHLN_GetTotalTime(ZHLN_Engine* engine);
+    ]]
 end
 
 return ffi

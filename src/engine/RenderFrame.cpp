@@ -284,6 +284,17 @@ struct MainPass {
 
 		auto drawCount = static_cast<uint32_t>(ctx.drawQueue.size());
 		if (drawCount == 0) {
+			Vk::DynamicPass(color_att.extent)
+				.AddColor(color_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+						  kClearColorScene)
+				.AddColor(vel_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+						  kClearColorVelocity)
+				.AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+						  kClearColorNormalRoughness)
+				.AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+						  kClearDepthValue)
+				.Execute(cmd, []() {});
+
 			return {.sceneColor = color_att,
 					.velocity = vel_att,
 					.normRough = norm_att,
@@ -681,14 +692,6 @@ void RenderContext::EndFrame() {
 	}
 
 	VkCommandBuffer cmd = _impl->current_cmd;
-
-	if (_impl->drawQueue.empty()) {
-		ZHLN_EndCommandBuffer(cmd);
-		_impl->SubmitFrame();
-		_impl->drawQueue.clear();
-		_impl->uiDrawQueue.clear();
-		return;
-	}
 
 	if (_impl->drawQueue.size() > kGpuCullingMaxInstances) {
 		ZHLN::Log("WARNING: Draw queue exceeded max instances ({} / {}). Truncating.",

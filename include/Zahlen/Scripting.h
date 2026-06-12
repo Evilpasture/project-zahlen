@@ -51,7 +51,7 @@ ZHLN_API struct ZHLN_Engine* ZHLN_GetEngineContext(void);
 
 // Purely stateless value-copy C-APIs
 ZHLN_API void ZHLN_SetGameState(struct ZHLN_Engine* engine, const ZHLN_GameState* state_ptr);
-ZHLN_API void ZHLN_GetGameState(struct ZHLN_Engine* engine, ZHLN_GameState* out_state);
+ZHLN_API void* ZHLN_GetGameState(struct ZHLN_Engine* engine);
 
 ZHLN_API uint64_t ZHLN_DispatchCommand(struct ZHLN_Engine* engine, const char* cmd,
 									   const void* args);

@@ -166,8 +166,8 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, GameContext
 	auto& rc = engine.GetRenderContext();
 	auto& reg = engine.GetRegistry();
 
-	ZHLN_GameState state{};
-	ZHLN_GetGameState(reinterpret_cast<ZHLN_Engine*>(&engine), &state);
+	ZHLN_GameState state =
+		*static_cast<ZHLN_GameState*>(ZHLN_GetGameState(reinterpret_cast<ZHLN_Engine*>(&engine)));
 
 	// Update local TAA properties from the shared state before UI / Profiler ticks
 	game.taaState.enabled = state.enableTAA != 0;
@@ -293,8 +293,8 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 	auto& pc = engine.GetPhysicsContext();
 
 	// 1. Fetch updated state populated by Lua or ImGui
-	ZHLN_GameState state{};
-	ZHLN_GetGameState(reinterpret_cast<ZHLN_Engine*>(&engine), &state);
+	ZHLN_GameState state =
+		*static_cast<ZHLN_GameState*>(ZHLN_GetGameState(reinterpret_cast<ZHLN_Engine*>(&engine)));
 
 	// 2. Extract player parts array from pure data (No shared std::vector!)
 	std::vector<Entity> playerParts(state.playerPartsCount);

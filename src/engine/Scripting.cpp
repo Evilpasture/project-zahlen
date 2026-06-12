@@ -76,8 +76,9 @@ static void RegisterFFICommands() {
 		auto& pc = engine->GetPhysicsContext();
 
 		auto* prefab = ZHLN::AssetFactory::LoadModelPrefab(rc, engine->GetAssetManager(), a->path);
-		if (!prefab)
+		if (!prefab) {
 			return 0;
+		}
 
 		ZHLN::AssetFactory::SpawnParams params;
 		params.position = JPH::RVec3(a->px, a->py, a->pz);
@@ -90,10 +91,11 @@ static void RegisterFFICommands() {
 		uint32_t count = ZHLN::AssetFactory::InstantiatePrefab(rc, reg, pc, *prefab, params,
 															   temp_buffer.data(), a->maxCount);
 
-		for (uint32_t i = 0; i < count; ++i) {
+		uint32_t writtenCount = std::min(count, a->maxCount);
+		for (uint32_t i = 0; i < writtenCount; ++i) {
 			a->outEntities[i] = temp_buffer[i].Pack();
 		}
-		return count;
+		return writtenCount;
 	};
 
 	s_CommandRegistry["SetupRagdoll"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
@@ -164,15 +166,13 @@ ZHLN_Engine* ZHLN_GetEngineContext() {
 }
 
 void ZHLN_SetGameState(ZHLN_Engine* /*engine_handle*/, const ZHLN_GameState* state_ptr) {
-	if (state_ptr) {
+	if (state_ptr != nullptr) {
 		s_LocalGameState = *state_ptr;
 	}
 }
 
-void ZHLN_GetGameState(ZHLN_Engine* /*engine_handle*/, ZHLN_GameState* out_state) {
-	if (out_state) {
-		*out_state = s_LocalGameState;
-	}
+void* ZHLN_GetGameState(ZHLN_Engine* /*engine_handle*/) {
+	return &s_LocalGameState;
 }
 
 uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine_handle, const char* cmd, const void* args) {
