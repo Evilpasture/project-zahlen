@@ -1,3 +1,5 @@
+// src/engine/Engine.cpp
+
 #include <GLFW/glfw3.h>
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -8,28 +10,25 @@
 #include "backends/imgui_impl_vulkan.h"
 #include "imgui.h"
 
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/Log.hpp>
-#include <filesystem>
-#include <threading/Thread.hpp>
-
-// Complete subsystem definitions required only inside this translation unit
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
+#include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/alife/Simulator.hpp>
 #include <ecs/ECS.hpp>
+#include <filesystem>
 #include <physics/Physics.hpp>
+#include <threading/Thread.hpp>
 
 namespace ZHLN {
 
 thread_local Engine* g_CurrentEngine = nullptr;
 static Engine* s_GlobalEngine = nullptr;
 
-// Implementation block containing the actual subsystem instances
 struct EngineImpl {
 	std::unique_ptr<InputContext> input;
 	std::unique_ptr<Window> window;
@@ -39,9 +38,10 @@ struct EngineImpl {
 	std::unique_ptr<ALife::Simulator> alifeSimulator;
 	std::unique_ptr<AssetManager> assetManager;
 
-	// Kept as concrete stack-allocated members to avoid double-indirection
 	Camera mainCamera;
 	ECS::Registry registry;
+
+	void* gameState = nullptr;
 };
 
 Engine::Engine() : Engine(EngineConfig{}) {}
@@ -123,7 +123,6 @@ void Engine::EndFrame() {
 	_impl->renderContext->EndFrame();
 }
 
-// Facade dispatch mapping
 Window& Engine::GetWindow() {
 	return *_impl->window;
 }
@@ -150,6 +149,13 @@ AudioContext& Engine::GetAudioContext() {
 }
 ECS::Registry& Engine::GetRegistry() {
 	return _impl->registry;
+}
+
+void* Engine::GetGameState() const {
+	return _impl->gameState;
+}
+void Engine::SetGameState(void* state) {
+	_impl->gameState = state;
 }
 
 Engine* GetEngineContext() {

@@ -1,15 +1,24 @@
+// src/engine/Scripting.cpp
+
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Input.hpp"
 
+#include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Console.hpp>
+#include <Zahlen/Entity.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Scripting.h>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/physics/Physics_C.h>
+#include <chrono>
 #include <cstring>
+#include <functional>
 #include <physics/PhysicsWorld.hpp>
 #include <print>
+#include <string_view>
 #include <threading/Channel.hpp>
+#include <unordered_map>
+#include <vector>
 
 extern "C" {
 #include <lauxlib.h>
@@ -17,10 +26,118 @@ extern "C" {
 #include <lualib.h>
 }
 
-struct ZHLN_LuaChannel {
-	ZHLN::Channel<int> channel; // Stores the Lua Registry Reference index
+// Local, library-allocated value state (No exported pointers!)
+static ZHLN_GameState s_LocalGameState{};
+
+// Opaque declarations of ConsoleUI globals (defined in ConsoleUI.cpp)
+extern std::vector<std::string> s_InvShellLog;
+extern bool s_InvScrollToBottom;
+
+#pragma pack(push, 1)
+struct SpawnPrefabArgs {
+	char path[256];
+	float px, py, pz;
+	int createPhysics;
+	int isStatic;
+	int isAnimated;
+	uint32_t maxCount;
+	uint64_t* outEntities;
 };
 
+struct SetupRagdollArgs {
+	uint64_t playerEntity;
+	uint32_t count;
+	uint64_t* visualParts;
+};
+
+struct CreateBoxArgs {
+	float hx, hy, hz;
+	float r, g, b, a;
+};
+
+struct CreateMaterialArgs {
+	float r, g, b, a;
+	uint64_t* outPipeline;
+	uint32_t* outAlbedo;
+};
+#pragma pack(pop)
+
+using CommandHandler = std::function<uint64_t(ZHLN::Engine*, const void*)>;
+static std::unordered_map<std::string_view, CommandHandler> s_CommandRegistry;
+
+static void RegisterFFICommands() {
+	if (!s_CommandRegistry.empty())
+		return;
+
+	s_CommandRegistry["SpawnPrefab"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		auto* a = static_cast<const SpawnPrefabArgs*>(args);
+		auto& rc = engine->GetRenderContext();
+		auto& reg = engine->GetRegistry();
+		auto& pc = engine->GetPhysicsContext();
+
+		auto* prefab = ZHLN::AssetFactory::LoadModelPrefab(rc, engine->GetAssetManager(), a->path);
+		if (!prefab)
+			return 0;
+
+		ZHLN::AssetFactory::SpawnParams params;
+		params.position = JPH::RVec3(a->px, a->py, a->pz);
+		params.createPhysics = a->createPhysics != 0;
+		params.isStaticPhysics = a->isStatic != 0;
+		params.isAnimated = a->isAnimated != 0;
+		params.useBoxColliders = false;
+
+		std::vector<ZHLN::Entity> temp_buffer(a->maxCount);
+		uint32_t count = ZHLN::AssetFactory::InstantiatePrefab(rc, reg, pc, *prefab, params,
+															   temp_buffer.data(), a->maxCount);
+
+		for (uint32_t i = 0; i < count; ++i) {
+			a->outEntities[i] = temp_buffer[i].Pack();
+		}
+		return count;
+	};
+
+	s_CommandRegistry["SetupRagdoll"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		auto* a = static_cast<const SetupRagdollArgs*>(args);
+		auto& rc = engine->GetRenderContext();
+		auto& pc = engine->GetPhysicsContext();
+		auto& reg = engine->GetRegistry();
+
+		std::vector<ZHLN::Entity> parts(a->count);
+		for (uint32_t i = 0; i < a->count; ++i) {
+			parts[i] = ZHLN::Entity::Unpack(a->visualParts[i]);
+		}
+
+		ZHLN::AssetFactory::SetupPlayerRagdoll(rc, pc, reg, ZHLN::Entity::Unpack(a->playerEntity),
+											   parts);
+		return 1;
+	};
+
+	s_CommandRegistry["CreateBox"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		auto* a = static_cast<const CreateBoxArgs*>(args);
+		auto& rc = engine->GetRenderContext();
+		ZHLN::Mesh mesh = ZHLN::AssetFactory::CreateBox(rc, JPH::Vec3(a->hx, a->hy, a->hz),
+														JPH::Vec4(a->r, a->g, a->b, a->a));
+		return static_cast<uint64_t>(mesh.vertexBuffer);
+	};
+
+	s_CommandRegistry["CreateBasicMaterial"] = [](ZHLN::Engine* engine,
+												  const void* args) -> uint64_t {
+		auto* a = static_cast<const CreateMaterialArgs*>(args);
+		auto& rc = engine->GetRenderContext();
+		ZHLN::Material mat = ZHLN::AssetFactory::CreateBasicMaterial(rc);
+		*a->outPipeline = static_cast<uint64_t>(mat.pipeline);
+		*a->outAlbedo = mat.albedoIndex;
+		return 1;
+	};
+}
+
+struct ZHLN_LuaChannel {
+	ZHLN::Channel<int> channel;
+};
+
+// ============================================================================
+// ALL C-EXPORTS MUST BE INSIDE THIS BLOCK TO AVOID MANGLING
+// ============================================================================
 extern "C" {
 
 ZHLN_LuaChannel* ZHLN_CreateLuaChannel(void) {
@@ -32,59 +149,114 @@ void ZHLN_DestroyLuaChannel(ZHLN_LuaChannel* chan) {
 }
 
 void ZHLN_PushLuaChannel(ZHLN_Engine* /*engine*/, ZHLN_LuaChannel* chan, lua_State* L) {
-	// 1. Convert the object at the top of the Lua stack into a registry ref
 	int ref = luaL_ref(L, LUA_REGISTRYINDEX);
-
-	// 2. Safely push the reference into the channel
 	chan->channel.Push(ref);
 }
 
 void ZHLN_PopLuaChannel(ZHLN_Engine* /*engine*/, ZHLN_LuaChannel* chan, lua_State* L) {
-	// 1. Pop the reference (This will block/yield the current Fiber if empty!)
 	int ref = chan->channel.Pop();
-
-	// 2. Fetch the referenced Lua object from the registry back to the Lua stack
 	lua_rawgeti(L, LUA_REGISTRYINDEX, ref);
-
-	// 3. Deallocate the registry index so the GC can clean up the object later
 	luaL_unref(L, LUA_REGISTRYINDEX, ref);
 }
+
+ZHLN_Engine* ZHLN_GetEngineContext() {
+	return reinterpret_cast<ZHLN_Engine*>(ZHLN::GetEngineContext());
 }
 
-namespace ZHLN {
+void ZHLN_SetGameState(ZHLN_Engine* /*engine_handle*/, const ZHLN_GameState* state_ptr) {
+	if (state_ptr) {
+		s_LocalGameState = *state_ptr;
+	}
+}
 
-// --- ScriptRunner Implementation ---
+void ZHLN_GetGameState(ZHLN_Engine* /*engine_handle*/, ZHLN_GameState* out_state) {
+	if (out_state) {
+		*out_state = s_LocalGameState;
+	}
+}
 
-extern "C" {
-/**
- * @brief Internal C-Function registered to Lua: zahlen.log(...)
- */
+uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine_handle, const char* cmd, const void* args) {
+	RegisterFFICommands();
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	auto it = s_CommandRegistry.find(std::string_view(cmd));
+	if (it != s_CommandRegistry.end()) {
+		return it->second(engine, args);
+	}
+	return 0;
+}
+
+float ZHLN_GetTotalTime(ZHLN_Engine* /*engine_handle*/) {
+	static auto start = std::chrono::high_resolution_clock::now();
+	auto now = std::chrono::high_resolution_clock::now();
+	return std::chrono::duration<float>(now - start).count();
+}
+
+int ZHLN_IsKeyDown(ZHLN_Engine* engine_handle, uint8_t key) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	return engine->GetInput().IsKeyDown(static_cast<ZHLN::KeyCode>(key)) ? 1 : 0;
+}
+
+void ZHLN_GetMouseDelta(ZHLN_Engine* engine_handle, float* outX, float* outY) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	*outX = engine->GetInput().GetMouse().deltaX;
+	*outY = engine->GetInput().GetMouse().deltaY;
+}
+
+float ZHLN_GetCameraYaw(ZHLN_Engine* engine_handle) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	return engine->GetCamera().yaw;
+}
+
+float ZHLN_GetCameraFOV(ZHLN_Engine* engine_handle) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	return engine->GetCamera().fov;
+}
+
+void ZHLN_SetCameraFOV(ZHLN_Engine* engine_handle, float fov) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	engine->GetCamera().fov = fov;
+}
+
+void ZHLN_LogInventoryShell(const char* msg) {
+	std::string str(msg);
+	size_t pos = 0;
+
+	while (pos < str.size()) {
+		size_t next_nl = str.find('\n', pos);
+		if (next_nl == std::string::npos) {
+			s_InvShellLog.push_back(str.substr(pos));
+			break;
+		}
+		s_InvShellLog.push_back(str.substr(pos, next_nl - pos));
+		pos = next_nl + 1;
+	}
+	s_InvScrollToBottom = true;
+
+	std::println(stdout, "[InvShell Output]\n{}", msg);
+	std::fflush(stdout);
+}
+
+// Lua internal Bridges
 static int LuaBridge_Log(lua_State* L) {
-	// 1. Get Lua Source Info
 	lua_Debug ar;
 	std::memset(&ar, 0, sizeof(lua_Debug));
 
-	// Level 1 is the function that called this C bridge
 	if (lua_getstack(L, 1, &ar)) {
 		lua_getinfo(L, "Sl", &ar);
 	} else {
-		// Fix: Use strncpy for fixed-size char arrays
 		std::strncpy(ar.short_src, "unknown", sizeof(ar.short_src) - 1);
 		ar.currentline = 0;
 	}
 
-	// 2. Concatenate all arguments into a single string
 	int n = lua_gettop(L);
 	std::string msg;
 
-	// We get the global "tostring" function once to use it for all arguments
-	// this ensures we respect Lua metamethods for tables/userdata.
 	lua_getglobal(L, "tostring");
 
 	for (int i = 1; i <= n; i++) {
-		lua_pushvalue(L, -1); // Push the 'tostring' function
-		lua_pushvalue(L, i);  // Push the argument
-		lua_call(L, 1, 1);	  // Call tostring(arg)
+		lua_pushvalue(L, -1);
+		lua_pushvalue(L, i);
+		lua_call(L, 1, 1);
 
 		size_t len = 0;
 		const char* s = lua_tolstring(L, -1, &len);
@@ -95,52 +267,41 @@ static int LuaBridge_Log(lua_State* L) {
 			msg += std::string(s, len);
 		}
 
-		lua_pop(L, 1); // Pop the string result
+		lua_pop(L, 1);
 	}
-	lua_pop(L, 1); // Pop the 'tostring' function
+	lua_pop(L, 1);
 
-	// 3. Hand off to our manual C++ Logger
 	std::string_view file = ar.short_src;
 	if (auto pos = file.find_last_of("/\\"); pos != std::string_view::npos) {
 		file.remove_prefix(pos + 1);
 	}
 
-	// Call your Engine's LogManual (defined in Log.hpp)
-	LogManual(file, ar.currentline, msg, Color::Green);
+	ZHLN::LogManual(file, ar.currentline, msg, ZHLN::Color::Green);
 	ZHLN::GameConsole::Log(msg, {.r = 0.4f, .g = 1.0f, .b = 0.4f, .a = 1.0f});
 
 	return 0;
 }
 
-/**
- * @brief Internal C-Function registered to Lua: zahlen.log(...)
- */
 static int LuaBridge_Warn(lua_State* L) {
-	// 1. Get Lua Source Info
 	lua_Debug ar;
 	std::memset(&ar, 0, sizeof(lua_Debug));
 
-	// Level 1 is the function that called this C bridge
 	if (lua_getstack(L, 1, &ar)) {
 		lua_getinfo(L, "Sl", &ar);
 	} else {
-		// Fix: Use strncpy for fixed-size char arrays
 		std::strncpy(ar.short_src, "unknown", sizeof(ar.short_src) - 1);
 		ar.currentline = 0;
 	}
 
-	// 2. Concatenate all arguments into a single string
 	int n = lua_gettop(L);
 	std::string msg;
 
-	// We get the global "tostring" function once to use it for all arguments
-	// this ensures we respect Lua metamethods for tables/userdata.
 	lua_getglobal(L, "tostring");
 
 	for (int i = 1; i <= n; i++) {
-		lua_pushvalue(L, -1); // Push the 'tostring' function
-		lua_pushvalue(L, i);  // Push the argument
-		lua_call(L, 1, 1);	  // Call tostring(arg)
+		lua_pushvalue(L, -1);
+		lua_pushvalue(L, i);
+		lua_call(L, 1, 1);
 
 		size_t len = 0;
 		const char* s = lua_tolstring(L, -1, &len);
@@ -151,35 +312,35 @@ static int LuaBridge_Warn(lua_State* L) {
 			msg += std::string(s, len);
 		}
 
-		lua_pop(L, 1); // Pop the string result
+		lua_pop(L, 1);
 	}
-	lua_pop(L, 1); // Pop the 'tostring' function
+	lua_pop(L, 1);
 
-	// 3. Hand off to our manual C++ Logger
 	std::string_view file = ar.short_src;
 	if (auto pos = file.find_last_of("/\\"); pos != std::string_view::npos) {
 		file.remove_prefix(pos + 1);
 	}
 
-	LogManual(file, ar.currentline, msg, Color::Yellow);
+	ZHLN::LogManual(file, ar.currentline, msg, ZHLN::Color::Yellow);
 
 	return 0;
 }
-}
+
+} // End of extern "C"
+
+namespace ZHLN {
 
 ScriptRunner::ScriptRunner() {
 	L = luaL_newstate();
 	luaL_openlibs(L);
 
-	// Register our specialized logging into the global 'zahlen' table
 	lua_newtable(L);
 	lua_pushcfunction(L, LuaBridge_Log);
 	lua_setfield(L, -2, "log");
-	lua_pushcfunction(L, LuaBridge_Warn); // Re-use for now or make Warn
+	lua_pushcfunction(L, LuaBridge_Warn);
 	lua_setfield(L, -2, "warn");
 	lua_setglobal(L, "zahlen");
 
-	// Override global print to use our engine logger
 	lua_pushcfunction(L, LuaBridge_Log);
 	lua_setglobal(L, "print");
 	lua_getglobal(L, "require");
@@ -220,15 +381,12 @@ void ScriptRunner::CallUpdate(Engine* engine, float dt) {
 		lua_pop(L, 1);
 	}
 
-	// --- NEW: FORCED CLEANUP ---
-	// This calls zahlen.cleanup() which releases the C++ Mutexes
-	// before the C++ Physics Step starts.
 	lua_getglobal(L, "require");
 	lua_pushstring(L, "scripts.core.zahlen");
 	lua_pcall(L, 1, 1, 0);
 	lua_getfield(L, -1, "cleanup");
 	lua_pcall(L, 0, 0, 0);
-	lua_pop(L, 1); // pop zahlen table
+	lua_pop(L, 1);
 }
 
 void ScriptRunner::ExecuteString(std::string_view code) {
@@ -240,11 +398,8 @@ void ScriptRunner::ExecuteString(std::string_view code) {
 }
 
 void ScriptRunner::ReloadFile(std::string_view path) {
-	// 1. Force Lua to forget the module
-	// This allows 'require' to actually hit the disk again
 	std::string moduleName = std::string(path);
 
-	// Convert "scripts/gameplay.lua" -> "scripts.gameplay"
 	if (size_t pos = moduleName.find(".lua"); pos != std::string::npos) {
 		moduleName.erase(pos);
 	}
@@ -253,7 +408,6 @@ void ScriptRunner::ReloadFile(std::string_view path) {
 	std::string resetCode = std::format("package.loaded['{}'] = nil", moduleName);
 	luaL_dostring(L, resetCode.c_str());
 
-	// 2. Re-run the entry file
 	RunFile(path);
 
 	Log("Script Hot-Reloaded: {}", path);
@@ -262,58 +416,3 @@ void ScriptRunner::ReloadFile(std::string_view path) {
 }
 
 } // namespace ZHLN
-
-// Shared log state declared in ConsoleUI.cpp
-extern std::vector<std::string> s_InvShellLog;
-extern bool s_InvScrollToBottom;
-
-// --- C-API Exports ---
-extern "C" {
-
-int ZHLN_IsKeyDown(ZHLN_Engine* engine_handle, uint8_t key) {
-	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
-	return engine->GetInput().IsKeyDown(static_cast<ZHLN::KeyCode>(key)) ? 1 : 0;
-}
-
-void ZHLN_GetMouseDelta(ZHLN_Engine* engine_handle, float* outX, float* outY) {
-	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
-	*outX = engine->GetInput().GetMouse().deltaX;
-	*outY = engine->GetInput().GetMouse().deltaY;
-}
-
-float ZHLN_GetCameraYaw(ZHLN_Engine* engine_handle) {
-	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
-	return engine->GetCamera().yaw;
-}
-
-float ZHLN_GetCameraFOV(ZHLN_Engine* engine_handle) {
-	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
-	return engine->GetCamera().fov;
-}
-
-void ZHLN_SetCameraFOV(ZHLN_Engine* engine_handle, float fov) {
-	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
-	engine->GetCamera().fov = fov;
-}
-
-void ZHLN_LogInventoryShell(const char* msg) {
-	std::string str(msg);
-	size_t pos = 0;
-
-	// Split the multi-line output block by \n into separate log rows [3]
-	while (pos < str.size()) {
-		size_t next_nl = str.find('\n', pos);
-		if (next_nl == std::string::npos) {
-			s_InvShellLog.push_back(str.substr(pos));
-			break;
-		}
-		s_InvShellLog.push_back(str.substr(pos, next_nl - pos));
-		pos = next_nl + 1;
-	}
-	s_InvScrollToBottom = true;
-
-	// Stream the raw block to the system terminal and force flush immediately [3]
-	std::println(stdout, "[InvShell Output]\n{}", msg);
-	std::fflush(stdout);
-}
-}

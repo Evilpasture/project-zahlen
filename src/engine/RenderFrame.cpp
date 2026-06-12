@@ -3,6 +3,7 @@
 #include "ParallelDraw.hpp"
 #include "RenderInternal.hpp"
 #include "Zahlen/GUI.hpp"
+#include "Zahlen/Math3D.hpp"
 #include "Zahlen/Profiler.hpp"
 #include "backends/imgui_impl_vulkan.h"
 #include "detail/RadixSort.hpp"

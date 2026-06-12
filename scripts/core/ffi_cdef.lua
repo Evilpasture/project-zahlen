@@ -133,7 +133,69 @@ if not ok then
 
         void ZHLN_LogInventoryShell(const char* msg);
 
-    ]]
+        typedef struct ZHLN_GameState {
+            int giMode;
+            float aoRadius;
+            float aoBias;
+            float aoPower;
+            float giIntensity;
+            int giSamples;
+            int useLocalProbe;
+            float probeMin[3];
+            float probeMax[3];
+            float probePos[3];
+            float vignetteIntensity;
+            float vignettePower;
+            int enableSSR;
+
+            float floorRoughness;
+            float floorMetallic;
+            float sphereLightRadius;
+            float light1Intensity;
+            float light2Intensity;
+
+            int enableTAA;
+            float taaFeedback;
+        } ZHLN_GameState;
+
+        // Binary Command argument packing
+        typedef struct SpawnPrefabArgs {
+            char path[256];
+            float px, py, pz;
+            int createPhysics;
+            int isStatic;
+            int isAnimated;
+            uint32_t maxCount;
+            uint64_t* outEntities;
+        } __attribute__((packed)) SpawnPrefabArgs;
+
+        typedef struct SetupRagdollArgs {
+            uint64_t playerEntity;
+            uint32_t count;
+            uint64_t* visualParts;
+        } __attribute__((packed)) SetupRagdollArgs;
+
+        typedef struct CreateBoxArgs {
+            float hx, hy, hz;
+            float r, g, b, a;
+        } __attribute__((packed)) CreateBoxArgs;
+
+        typedef struct CreateMaterialArgs {
+            float r, g, b, a;
+            uint64_t* outPipeline;
+            uint32_t* outAlbedo;
+        } __attribute__((packed)) CreateMaterialArgs;
+
+        typedef struct RegisterDebugLineArgs {
+            uint64_t meshVbo;
+            uint64_t pipelineHandle;
+            uint32_t albedoIdx;
+        } __attribute__((packed)) RegisterDebugLineArgs;
+
+        ZHLN_Engine* ZHLN_GetEngineContext(void);
+        void ZHLN_RegisterGameState(ZHLN_Engine* engine, void* state_ptr);
+        uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine, const char* cmd, const void* args);
+        float ZHLN_GetTotalTime(ZHLN_Engine* engine);    ]]
 end
 
 return ffi

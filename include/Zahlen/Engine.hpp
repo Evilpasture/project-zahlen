@@ -1,3 +1,4 @@
+// include/Zahlen/Engine.hpp
 #pragma once
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
@@ -5,7 +6,6 @@
 
 namespace ZHLN {
 
-// Forward declarations for return types of the public facade
 class InputContext;
 class Window;
 class RenderContext;
@@ -13,7 +13,7 @@ class PhysicsContext;
 class AudioContext;
 class AssetManager;
 struct Camera;
-struct EngineImpl; // Unified implementation footprint
+struct EngineImpl;
 
 namespace ALife {
 class Simulator;
@@ -45,8 +45,12 @@ class ZHLN_API Engine {
 	AudioContext& GetAudioContext();
 	ECS::Registry& GetRegistry();
 
+	// Single instance-local context slot for flat shared memory
+	[[nodiscard]] void* GetGameState() const;
+	void SetGameState(void* state);
+
   private:
-	std::unique_ptr<EngineImpl> _impl; // The lone keeper of the keys
+	std::unique_ptr<EngineImpl> _impl;
 };
 
 Engine* GetEngineContext();

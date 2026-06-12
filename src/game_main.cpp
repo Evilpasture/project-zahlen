@@ -1,4 +1,5 @@
 // src/game_main.cpp
+
 #include "Zahlen/Input.hpp"
 #include "Zahlen/alife/Types.hpp"
 #include "ecs/ECS.hpp"
@@ -15,6 +16,7 @@
 #include <Zahlen/GUI.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Profiler.hpp>
+#include <Zahlen/Scripting.h>
 #include <Zahlen/Scripting.hpp>
 #include <algorithm>
 #include <cstddef>
@@ -23,94 +25,13 @@
 #include <engine/system/ArticulationSystem.hpp>
 #include <engine/system/CullingSystem.hpp>
 #include <physics/PhysicsWorld.hpp>
+#include <print>
 #include <string>
 #include <threading/Mutex.hpp>
 #include <threading/TaskSystem.hpp>
 #include <vector>
 
 namespace ZHLN {
-
-struct GraphicsSettings {
-	int giMode = 1;			  // 0 = Off, 1 = SSAO, 2 = SSGI, 3 = HBAO, 4 = GTAO
-	float aoRadius = 0.5f;	  // Radius in meters
-	float aoBias = 0.05f;	  // Self-occlusion offset
-	float aoPower = 1.8f;	  // SSAO contrast
-	float giIntensity = 1.2f; // SSGI bounce strength
-	int giSamples = 8;		  // Hemisphere ray samples count
-	bool useLocalProbe = true;
-	JPH::Vec3 probeMin = JPH::Vec3(-22.0f, 0.0f, -22.0f); // Initial bounding box min (meters)
-	JPH::Vec3 probeMax = JPH::Vec3(22.0f, 12.0f, 22.0f);  // Initial bounding box max (meters)
-	JPH::Vec3 probePos = JPH::Vec3(0.0f, 4.0f, 0.0f); // Room center (where cubemap was captured)
-	float vignetteIntensity = 1.10f;				  // 0.0f represents completely disabled
-	float vignettePower = 1.50f;					  // Softness falloff exponent
-	bool enableSSR = true;
-	TAAState taaState{};
-};
-
-struct WorkspaceSettings {
-	float floorRoughness = 0.15f;
-	float floorMetallic = 0.95f;
-	float floorYOffset = 0.72f;
-	float sphereLightRadius = 1.5f;
-	float light1Intensity = 180.0f;
-	float light2Intensity = 180.0f;
-};
-
-struct SceneContext {
-	std::vector<Entity> pomniParts;
-	Entity visualFloorEntity = NullEntity;
-	Material floorMaterial{};
-	Mesh debugLineMesh{};
-	Material debugLineMaterial{};
-
-	void Setup(Engine& engine, RenderContext& rc, ECS::Registry& reg, PhysicsContext& pc) {
-		ZHLN::Log("Assembling Scene with Pure Runtime glTF Parsing...");
-
-		auto* lobbyPrefab =
-			AssetFactory::LoadModelPrefab(rc, engine.GetAssetManager(), "Circus Lobby V9.glb");
-		if (lobbyPrefab != nullptr) {
-			AssetFactory::SpawnParams params;
-			params.createPhysics = true;
-			params.useBoxColliders = false; // <-- CRITICAL: Must be false (mesh shape) so player is
-											// not stuck in a solid box
-			params.isStaticPhysics = true;
-			AssetFactory::InstantiatePrefab(rc, reg, pc, *lobbyPrefab, params);
-		}
-
-		auto* pomniPrefab =
-			AssetFactory::LoadModelPrefab(rc, engine.GetAssetManager(), "tadc_models/POMNI.glb");
-		if (pomniPrefab != nullptr) {
-			AssetFactory::SpawnParams params;
-			params.createPhysics = false;
-			params.isAnimated = true;
-
-			pomniParts.resize(128); // Pre-allocate ample buffer
-			uint32_t pomniCount = AssetFactory::InstantiatePrefab(
-				rc, reg, pc, *pomniPrefab, params, pomniParts.data(), pomniParts.size());
-			pomniParts.resize(pomniCount);
-		}
-	}
-
-	void FindFloorEntities(ECS::Registry& reg) {
-		auto entities = reg.GetEntitiesWith<NameComponent>();
-		auto names = reg.GetRawArray<NameComponent>();
-
-		for (size_t i = 0; i < entities.size(); ++i) {
-			std::string nameLower(names[i].name.c_str());
-			std::ranges::transform(nameLower, nameLower.begin(), ::tolower);
-
-			// Scan for keywords commonly exported by Blender/glTF for floor meshes
-			if (nameLower.contains("floor") || nameLower.contains("ground") ||
-				nameLower.contains("lobby")) {
-				// Ensure it actually carries visual geometry
-				if (reg.Get<MeshComponent>(entities[i]) != nullptr) {
-					visualFloorEntity = entities[i];
-					break; // Assign primary visual floor
-				}
-			}
-		}
-	}
-};
 
 struct GameContext {
 	Entity playerEntity = NullEntity;
@@ -125,9 +46,7 @@ struct GameContext {
 	ArticulationSystem* articulationSystem = nullptr;
 	AnimationSystem* animationSystem = nullptr;
 
-	GraphicsSettings graphics{};
-	WorkspaceSettings workspace{};
-	SceneContext scene{};
+	TAAState taaState{}; // Kept locally to track sub-pixel jitter indices
 };
 
 void DrawConsole(ScriptRunner& runner);
@@ -172,11 +91,45 @@ bool InitializeGame(Engine& engine, GameContext& game) {
 	auto& pc = engine.GetPhysicsContext();
 	auto& cam = engine.GetCamera();
 
-	// 1. Register Native components
+	// Allocate a safe temporary state block on the stack to register defaults
+	ZHLN_GameState defaultState{};
+	defaultState.giMode = 1;
+	defaultState.aoRadius = 0.5f;
+	defaultState.aoBias = 0.05f;
+	defaultState.aoPower = 1.8f;
+	defaultState.giIntensity = 1.2f;
+	defaultState.giSamples = 8;
+	defaultState.useLocalProbe = 1;
+	defaultState.probeMin[0] = -22.0f;
+	defaultState.probeMin[1] = 0.0f;
+	defaultState.probeMin[2] = -22.0f;
+	defaultState.probeMax[0] = 22.0f;
+	defaultState.probeMax[1] = 12.0f;
+	defaultState.probeMax[2] = 22.0f;
+	defaultState.probePos[0] = 0.0f;
+	defaultState.probePos[1] = 4.0f;
+	defaultState.probePos[2] = 0.0f;
+	defaultState.vignetteIntensity = 1.10f;
+	defaultState.vignettePower = 1.50f;
+	defaultState.enableSSR = 1;
+	defaultState.floorRoughness = 0.15f;
+	defaultState.floorMetallic = 0.95f;
+	defaultState.sphereLightRadius = 1.5f;
+	defaultState.light1Intensity = 180.0f;
+	defaultState.light2Intensity = 180.0f;
+	defaultState.enableTAA = 1;
+	defaultState.taaFeedback = 0.95f;
+
+	// Ensure pure-data handles start initialized to zero
+	defaultState.playerPartsCount = 0;
+	defaultState.debugLineVbo = 0;
+
+	// Inject the state into the FFI boundary BEFORE loading scripts
+	ZHLN_SetGameState(reinterpret_cast<ZHLN_Engine*>(&engine), &defaultState);
+
 	reg.RegisterComponents<MeshComponent, PhysicsComponent, MovementComponent,
 						   ALife::ALifeComponent, RagdollComponent, NameComponent>();
 
-	// 2. Create Physical Ground Plane
 	auto groundShape =
 		Physics::GetOrCreateShape(pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
 	Entity ground = reg.Create();
@@ -184,33 +137,16 @@ bool InitializeGame(Engine& engine, GameContext& game) {
 			PhysicsComponent{Physics::CreateRigidBody(
 				pc, groundShape, {0, 0, 0}, JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0)});
 
-	// 3. Create the Player Entity with Character Controller
 	game.playerEntity = reg.Create();
 	reg.Add(game.playerEntity, MovementComponent{});
 	Entity charPhys = Physics::CreateCharacter(pc, JPH::RVec3(0.0f, 3.0f, 0.0f));
 	reg.Add(game.playerEntity, PhysicsComponent{charPhys});
 
-	// 4. Initialize Scripting Subsystem
 	game.scriptRunner = new ScriptRunner();
 	game.scriptRunner->RunFile("scripts/gameplay.lua");
 	game.gameplayWatcher = new FileWatcher("scripts/gameplay.lua");
 	game.frameCounter = 0;
 
-	// 5. Spawn Level Prefabs (Circus Lobby V9.glb)
-	game.scene.Setup(engine, rc, reg, pc);
-
-	// --- 5.1 QUERY THE SPAWNED ENVIRONMENT FOR THE FLOOR ENTITY ---
-	game.scene.FindFloorEntities(reg);
-	if (game.scene.visualFloorEntity != NullEntity) {
-		ZHLN::Log("[DOD Query] Successfully binded to glTF Floor Entity! Handle Index: {}",
-				  game.scene.visualFloorEntity.index);
-	} else {
-		ZHLN::Log("[DOD Query] WARNING: Could not find floor mesh in glTF scene.");
-	}
-
-	AssetFactory::SetupPlayerRagdoll(rc, pc, reg, game.playerEntity, game.scene.pomniParts);
-
-	// Position Camera orientation initially looking forward
 	cam.yaw = -90.0f;
 	cam.pitch = -10.0f;
 
@@ -218,40 +154,170 @@ bool InitializeGame(Engine& engine, GameContext& game) {
 	game.helloText = GUI::CreateTextMesh(rc, "Zahlen Engine - TADC Dorm Showcase", 25.0f, 25.0f,
 										 2.5f, {0.9f, 0.1f, 0.1f, 1.0f});
 
-	game.scene.debugLineMesh = AssetFactory::CreateBox(rc, {0.02f, 0.02f, 0.5f});
-	game.scene.debugLineMaterial = AssetFactory::CreateBasicMaterial(rc);
-	game.scene.debugLineMaterial.baseColorFactor[0] = 0.0f; // Neon Cyan
-	game.scene.debugLineMaterial.baseColorFactor[1] = 1.0f;
-	game.scene.debugLineMaterial.baseColorFactor[2] = 1.0f;
-	game.scene.debugLineMaterial.baseColorFactor[3] = 1.0f;
-
 	game.articulationSystem = new ArticulationSystem();
 	game.animationSystem = new AnimationSystem();
 
 	return true;
 }
 
-void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
+void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, GameContext& game) {
+	auto& cam = engine.GetCamera();
+	auto& pc = engine.GetPhysicsContext();
+	auto& rc = engine.GetRenderContext();
+	auto& reg = engine.GetRegistry();
 
+	ZHLN_GameState state{};
+	ZHLN_GetGameState(reinterpret_cast<ZHLN_Engine*>(&engine), &state);
+
+	// Update local TAA properties from the shared state before UI / Profiler ticks
+	game.taaState.enabled = state.enableTAA != 0;
+	game.taaState.feedback = state.taaFeedback;
+
+	ZHLN::DrawConsole(*game.scriptRunner);
+	ZHLN::DrawInventoryShell(*game.scriptRunner);
+	ZHLN::DrawProfiler(engine, game.taaState);
+	ZHLN::DrawOrientationGizmo(cam);
+
+	// Synchronize any updates made by DrawProfiler back to the shared state
+	state.enableTAA = game.taaState.enabled ? 1 : 0;
+	state.taaFeedback = game.taaState.feedback;
+
+	ImGui::Begin("Lighting Workspace Controller");
+	ImGui::Text("Specular Mips & Area Lights Debugger");
+	ImGui::Separator();
+	ImGui::SliderFloat("Sphere Light Radius", &state.sphereLightRadius, 0.0f, 5.0f);
+	ImGui::SliderFloat("Cyan Intensity", &state.light1Intensity, 0.0f, 500.0f);
+	ImGui::SliderFloat("Magenta Intensity", &state.light2Intensity, 0.0f, 500.0f);
+	ImGui::Separator();
+	ImGui::SliderFloat("Floor Roughness", &state.floorRoughness, 0.0f, 1.0f);
+	ImGui::SliderFloat("Floor Metallic", &state.floorMetallic, 0.0f, 1.0f);
+
+	ImGui::SeparatorText("Parallax-Corrected Local Reflection Probe");
+	bool useProbe = state.useLocalProbe != 0;
+	if (ImGui::Checkbox("Enable Box Projection", &useProbe)) {
+		state.useLocalProbe = useProbe ? 1 : 0;
+	}
+	if (state.useLocalProbe != 0) {
+		std::array<float, 3> minArr = {state.probeMin[0], state.probeMin[1], state.probeMin[2]};
+		std::array<float, 3> maxArr = {state.probeMax[0], state.probeMax[1], state.probeMax[2]};
+		std::array<float, 3> posArr = {state.probePos[0], state.probePos[1], state.probePos[2]};
+
+		if (ImGui::DragFloat3("Box Min", minArr.data(), 0.1f, -100.0f, 100.0f, "%.1fm")) {
+			state.probeMin[0] = minArr[0];
+			state.probeMin[1] = minArr[1];
+			state.probeMin[2] = minArr[2];
+		}
+		if (ImGui::DragFloat3("Box Max", maxArr.data(), 0.1f, -100.0f, 100.0f, "%.1fm")) {
+			state.probeMax[0] = maxArr[0];
+			state.probeMax[1] = maxArr[1];
+			state.probeMax[2] = maxArr[2];
+		}
+		if (ImGui::DragFloat3("Probe Position", posArr.data(), 0.1f, -100.0f, 100.0f, "%.1fm")) {
+			state.probePos[0] = posArr[0];
+			state.probePos[1] = posArr[1];
+			state.probePos[2] = posArr[2];
+		}
+	}
+
+	ImGui::SeparatorText("Ambient Occlusion & Global Illumination");
+	const char* giModesList[] = {"Off", "SSAO (Ambient Occlusion)", "SSGI (Screen Space GI)",
+								 "HBAO (Horizon-Based AO)", "GTAO (Ground Truth AO)"};
+	ImGui::Combo("GI Mode", &state.giMode, giModesList, IM_ARRAYSIZE(giModesList));
+
+	if (state.giMode == 1) {
+		ImGui::SliderFloat("AO Radius", &state.aoRadius, 0.05f, 2.5f, "%.2fm");
+		ImGui::SliderFloat("AO Bias", &state.aoBias, 0.001f, 0.2f, "%.3f");
+		ImGui::SliderFloat("AO Contrast", &state.aoPower, 0.5f, 5.0f, "%.1fx");
+		ImGui::SliderInt("AO Samples", &state.giSamples, 2, 32);
+	} else if (state.giMode == 2) {
+		ImGui::SliderFloat("Bounce Radius", &state.aoRadius, 0.05f, 2.5f, "%.2fm");
+		ImGui::SliderFloat("Bounce Bias", &state.aoBias, 0.001f, 0.2f, "%.3f");
+		ImGui::SliderFloat("GI Bounce Intensity", &state.giIntensity, 0.1f, 5.0f, "%.1fx");
+		ImGui::SliderInt("GI Samples", &state.giSamples, 2, 32);
+	} else if (state.giMode == 3 || state.giMode == 4) {
+		ImGui::SliderFloat("Search Radius", &state.aoRadius, 0.05f, 3.0f, "%.2fm");
+		ImGui::SliderFloat("Acne Bias", &state.aoBias, 0.001f, 0.2f, "%.3f");
+		ImGui::SliderFloat("Shadow Contrast", &state.aoPower, 0.5f, 6.0f, "%.1fx");
+		ImGui::SliderInt("Search Steps", &state.giSamples, 4, 32);
+	}
+
+	ImGui::SeparatorText("Camera Vignette");
+	ImGui::SliderFloat("Vignette Intensity", &state.vignetteIntensity, 0.0f, 2.5f, "%.2f");
+	if (state.vignetteIntensity > 0.0f) {
+		ImGui::SliderFloat("Vignette Power", &state.vignettePower, 0.1f, 6.0f, "%.2f");
+	}
+
+	bool useSsr = state.enableSSR != 0;
+	if (ImGui::Checkbox("Enable SSR", &useSsr)) {
+		state.enableSSR = useSsr ? 1 : 0;
+	}
+
+	ImGui::End();
+
+	// Flush modified stack parameters back to the shared library memory
+	ZHLN_SetGameState(reinterpret_cast<ZHLN_Engine*>(&engine), &state);
+
+	if (++game.frameCounter % 60 == 0 && game.gameplayWatcher->CheckModified()) {
+		game.scriptRunner->ReloadFile("scripts/gameplay.lua");
+	}
+
+	{
+		ZHLN_PROFILE_SCOPE("Logic");
+
+		const float sensitivity = 0.15f;
+		if (engine.GetInput().IsMouseButtonDown(KeyCode::RButton)) {
+			cam.yaw += engine.GetInput().GetMouse().deltaX * sensitivity;
+			cam.pitch = std::clamp(cam.pitch - (engine.GetInput().GetMouse().deltaY * sensitivity),
+								   -89.0f, 89.0f);
+		}
+
+		game.scriptRunner->CallUpdate(&engine, dt);
+
+		physicsAccumulator += dt;
+		constexpr float targetDt = 1.0f / 60.0f;
+		while (physicsAccumulator >= targetDt) {
+			ZHLN::MovementSystem(engine, targetDt);
+			pc.Step(targetDt);
+			physicsAccumulator -= targetDt;
+		}
+
+		game.animationSystem->UpdateAnimations(rc, reg, dt);
+		game.articulationSystem->Update(engine, dt);
+	}
+}
+
+void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 	auto& rc = engine.GetRenderContext();
 	auto& reg = engine.GetRegistry();
 	auto& cam = engine.GetCamera();
 	auto& pc = engine.GetPhysicsContext();
 
-	// Static local clock to calculate independent frameTime delta for audio threading
+	// 1. Fetch updated state populated by Lua or ImGui
+	ZHLN_GameState state{};
+	ZHLN_GetGameState(reinterpret_cast<ZHLN_Engine*>(&engine), &state);
+
+	// 2. Extract player parts array from pure data (No shared std::vector!)
+	std::vector<Entity> playerParts(state.playerPartsCount);
+	for (uint32_t i = 0; i < state.playerPartsCount; ++i) {
+		playerParts[i] = Entity::Unpack(state.playerParts[i]);
+	}
+
 	static Clock deltaClock;
 	float renderFrameTime = deltaClock.GetDeltaTime();
 
 	auto res = engine.GetWindow().GetSize();
 	const auto& worldState = pc.GetWorld();
 
-	if (game.graphics.taaState.enabled) {
-		game.graphics.taaState.frameIndex++;
+	// Enforce current active state right before computing projection matrices
+	game.taaState.enabled = state.enableTAA != 0;
+	game.taaState.feedback = state.taaFeedback;
+
+	if (game.taaState.enabled) {
+		game.taaState.frameIndex++;
 	} else {
-		game.graphics.taaState.frameIndex = 0;
+		game.taaState.frameIndex = 0;
 	}
 
-	// 1. Retrieve & Interpolate Player Position from Jolt [6]
 	JPH::Vec3 playerPos = JPH::Vec3::sZero();
 	constexpr float targetDt = 1.0f / 60.0f;
 	if (reg.IsAlive(game.playerEntity)) {
@@ -272,7 +338,6 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 		}
 	}
 
-	// 2. Camera Placement
 	float yawRad = JPH::DegreesToRadians(cam.yaw);
 	float pitchRad = JPH::DegreesToRadians(cam.pitch);
 	JPH::Vec3 offsetDir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad),
@@ -289,9 +354,9 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 	JPH::Mat44 unjitteredVp = unjitteredProj * cam.GetViewMatrix();
 
 	JPH::Mat44 vp{};
-	if (game.graphics.taaState.enabled) {
+	if (game.taaState.enabled) {
 		vp = cam.GetJitteredProjectionMatrix((float)res.width / res.height, res.width, res.height,
-											 game.graphics.taaState) *
+											 game.taaState) *
 			 cam.GetViewMatrix();
 	} else {
 		vp = unjitteredVp;
@@ -330,7 +395,7 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 		s_WasFrozen = false;
 	}
 
-	CullingSystem<false>(engine, game.visibleEntities, game.scene.pomniParts);
+	CullingSystem<false>(engine, game.visibleEntities, playerParts);
 
 	JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f};
 	JPH::Mat44 lightView =
@@ -350,66 +415,55 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 		s_FirstFrame = false;
 	}
 
-	// 3. Compile lights list & sync material factors
 	std::array<GPULight, 3> sceneLights{};
 
-	// --- NEW: GIANT RECTANGULAR PANEL LIGHT (LTC) ---
 	sceneLights[0].type = 3; // Quad / Area Light
 	sceneLights[0].color[0] = 1.0f;
 	sceneLights[0].color[1] = 0.8f;
-	sceneLights[0].color[2] = 0.6f; // Warm tungsten color
+	sceneLights[0].color[2] = 0.6f;
 	sceneLights[0].intensity = 5.0f;
-	sceneLights[0].twoSided = 0; // Only emits light downwards
+	sceneLights[0].twoSided = 0;
 
-	// Define the 4 corners of a 4x4 meter ceiling panel
 	float hX = 2.0f;
 	float hZ = 2.0f;
-	float lY = 5.0f; // 5 meters up in the air
+	float lY = 5.0f;
 
-	// Bottom-Left
 	sceneLights[0].points[0][0] = -hX;
 	sceneLights[0].points[0][1] = lY;
 	sceneLights[0].points[0][2] = -hZ;
 
-	// Bottom-Right
 	sceneLights[0].points[1][0] = hX;
-	sceneLights[0].points[1][1] = lY; // <-- FIX: Was sceneLights[1]
+	sceneLights[0].points[1][1] = lY;
 	sceneLights[0].points[1][2] = -hZ;
 
-	// Top-Right
 	sceneLights[0].points[2][0] = hX;
 	sceneLights[0].points[2][1] = lY;
 	sceneLights[0].points[2][2] = hZ;
 
-	// Top-Left
 	sceneLights[0].points[3][0] = -hX;
 	sceneLights[0].points[3][1] = lY;
 	sceneLights[0].points[3][2] = hZ;
 
-	// --- LIGHT 1: CYAN SPHERE ---
-	sceneLights[1].position[0] = -5.0f; // <-- FIX: Was sceneLights[0]
+	sceneLights[1].position[0] = -5.0f;
 	sceneLights[1].position[1] = 4.0f;
 	sceneLights[1].position[2] = 0.0f;
 	sceneLights[1].type = 1;
 	sceneLights[1].color[0] = 0.0f;
 	sceneLights[1].color[1] = 0.5f;
 	sceneLights[1].color[2] = 1.0f;
-	sceneLights[1].intensity = game.workspace.light1Intensity;
-	sceneLights[1].radius = game.workspace.sphereLightRadius;
+	sceneLights[1].intensity = state.light1Intensity;
+	sceneLights[1].radius = state.sphereLightRadius;
 
-	// --- LIGHT 2: MAGENTA SPHERE ---
-	sceneLights[2].position[0] = 5.0f; // <-- FIX: Was sceneLights[1]
+	sceneLights[2].position[0] = 5.0f;
 	sceneLights[2].position[1] = 4.0f;
 	sceneLights[2].position[2] = 0.0f;
 	sceneLights[2].type = 1;
 	sceneLights[2].color[0] = 1.0f;
 	sceneLights[2].color[1] = 0.0f;
 	sceneLights[2].color[2] = 0.5f;
-	sceneLights[2].intensity = game.workspace.light2Intensity;
-	sceneLights[2].radius = game.workspace.sphereLightRadius;
+	sceneLights[2].intensity = state.light2Intensity;
+	sceneLights[2].radius = state.sphereLightRadius;
 
-	// --- ALL-FLOOR DYNAMIC UPDATE FIX ---
-	// Traverse the registry to update every floor, ground, or lobby primitive cleanly
 	auto floorEntities = reg.GetEntitiesWith<NameComponent>();
 	auto floorNames = reg.GetRawArray<NameComponent>();
 
@@ -420,13 +474,13 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 		if (nameLower.contains("floor") || nameLower.contains("ground") ||
 			nameLower.contains("lobby")) {
 			if (auto* floorMeshComp = reg.Get<MeshComponent>(floorEntities[i])) {
-				floorMeshComp->material.roughnessFactor = game.workspace.floorRoughness;
-				floorMeshComp->material.metallicFactor = game.workspace.floorMetallic;
+				floorMeshComp->material.roughnessFactor = state.floorRoughness;
+				floorMeshComp->material.metallicFactor = state.floorMetallic;
 			}
 		}
 	}
 
-	rc.SetTAAState(game.graphics.taaState);
+	rc.SetTAAState(game.taaState);
 
 	FrameUniforms uniforms{};
 	uniforms.viewProj = vp;
@@ -437,25 +491,24 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 	std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
 	std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);
 	uniforms.lightCount = static_cast<uint32_t>(sceneLights.size());
-	uniforms.probeMin =
-		JPH::Vec4(game.graphics.probeMin, game.graphics.useLocalProbe ? 1.0f : 0.0f);
-	uniforms.probeMax = JPH::Vec4(game.graphics.probeMax, 0.0f);
-	uniforms.probePos = JPH::Vec4(game.graphics.probePos, 0.0f);
-	uniforms.jitterParams =
-		JPH::Vec4(game.graphics.taaState.jitterX, game.graphics.taaState.jitterY,
-				  game.graphics.taaState.prevJitterX, game.graphics.taaState.prevJitterY);
+	uniforms.probeMin = JPH::Vec4(state.probeMin[0], state.probeMin[1], state.probeMin[2],
+								  state.useLocalProbe ? 1.0f : 0.0f);
+	uniforms.probeMax = JPH::Vec4(state.probeMax[0], state.probeMax[1], state.probeMax[2], 0.0f);
+	uniforms.probePos = JPH::Vec4(state.probePos[0], state.probePos[1], state.probePos[2], 0.0f);
+	uniforms.jitterParams = JPH::Vec4(game.taaState.jitterX, game.taaState.jitterY,
+									  game.taaState.prevJitterX, game.taaState.prevJitterY);
 
-	Renderer::SetGISettings(rc, {.mode = game.graphics.giMode,
-								 .aoRadius = game.graphics.aoRadius,
-								 .aoBias = game.graphics.aoBias,
-								 .aoPower = game.graphics.aoPower,
-								 .giIntensity = game.graphics.giIntensity,
-								 .giSamples = game.graphics.giSamples,
-								 .vignetteIntensity = game.graphics.vignetteIntensity,
-								 .vignettePower = game.graphics.vignettePower,
-								 .enableSSR = game.graphics.enableSSR ? 1 : 0});
+	Renderer::SetGISettings(rc, {.mode = state.giMode,
+								 .aoRadius = state.aoRadius,
+								 .aoBias = state.aoBias,
+								 .aoPower = state.aoPower,
+								 .giIntensity = state.giIntensity,
+								 .giSamples = state.giSamples,
+								 .vignetteIntensity = state.vignetteIntensity,
+								 .vignettePower = state.vignettePower,
+								 .enableSSR = state.enableSSR ? 1 : 0});
 
-	Renderer::SetLights(rc, sceneLights.data(), uniforms.lightCount); // Upload SSBO to GPU
+	Renderer::SetLights(rc, sceneLights.data(), uniforms.lightCount);
 	Renderer::SetFrameData(rc, uniforms, shadowProjView);
 
 	Renderer::SetMatrices(rc, vp, unjitteredVp);
@@ -487,7 +540,7 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 			continue;
 		}
 
-		bool isPlayerPart = std::ranges::contains(game.scene.pomniParts, e);
+		bool isPlayerPart = std::ranges::contains(playerParts, e);
 		JPH::Mat44 currentTransform{};
 		if (isPlayerPart) {
 			currentTransform = playerTransform * mesh->localTransform;
@@ -506,9 +559,19 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 
 	Renderer::DrawUI(rc, game.helloText, game.fontAtlasIdx);
 
-	// --- DRAW THE FREEZE WIREFRAME FRUSTUM ---
-	if (CullingStats::FreezeFrustum &&
-		game.scene.debugLineMesh.vertexBuffer != BufferHandle::Invalid) {
+	// Retrieve debug line properties directly from the shared POD struct (no functions required!)
+	if (CullingStats::FreezeFrustum && state.debugLineVbo != 0) {
+		Mesh debugMesh = {.vertexBuffer = static_cast<BufferHandle>(state.debugLineVbo),
+						  .vertexCount = 36};
+		Material debugMat = {.pipeline = static_cast<PipelineHandle>(state.debugLinePipeline),
+							 .albedoIndex = state.debugLineAlbedo};
+
+		// Setup the neon color locally
+		debugMat.baseColorFactor[0] = 0.0f;
+		debugMat.baseColorFactor[1] = 1.0f;
+		debugMat.baseColorFactor[2] = 1.0f;
+		debugMat.baseColorFactor[3] = 1.0f;
+
 		for (auto s_FrustumEdge : s_FrustumEdges) {
 			JPH::Vec3 pA = s_FrustumCorners[s_FrustumEdge.start];
 			JPH::Vec3 pB = s_FrustumCorners[s_FrustumEdge.end];
@@ -525,24 +588,22 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 			JPH::Quat rot = JPH::Quat::sFromTo(JPH::Vec3::sAxisZ(), dir);
 			JPH::Mat44 lineTransform = Math::CreateTransform(mid, rot, JPH::Vec3(1.0f, 1.0f, len));
 
-			Renderer::Draw(rc, game.scene.debugLineMaterial, game.scene.debugLineMesh,
-						   lineTransform, lineTransform, len);
+			Renderer::Draw(rc, debugMat, debugMesh, lineTransform, lineTransform, len);
 		}
 	}
 
 	engine.EndFrame();
 
-	ZHLN::AudioSystem(engine, renderFrameTime); // Decoupled frametime for precise audio pacing [1]
+	ZHLN::AudioSystem(engine, renderFrameTime);
 
 	s_PrevUnjitteredVp = unjitteredVp;
 
-	// Global update for prevTransforms
 	auto allEntities = reg.GetEntitiesWith<MeshComponent>();
 	for (Entity e : allEntities) {
 		auto* mesh = reg.Get<MeshComponent>(e);
 		if (mesh != nullptr) {
 			JPH::Mat44 currentTransform{};
-			bool isPlayerPart = std::ranges::contains(game.scene.pomniParts, e);
+			bool isPlayerPart = std::ranges::contains(playerParts, e);
 
 			if (isPlayerPart) {
 				currentTransform = playerTransform * mesh->localTransform;
@@ -551,120 +612,6 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 			}
 			mesh->prevTransform = currentTransform;
 		}
-	}
-}
-
-void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, GameContext& game) {
-	auto& cam = engine.GetCamera();
-	auto& pc = engine.GetPhysicsContext();
-	auto& rc = engine.GetRenderContext();
-	auto& reg = engine.GetRegistry();
-
-	// 1. Draw HUD Layouts
-	ZHLN::DrawConsole(*game.scriptRunner);
-	ZHLN::DrawInventoryShell(*game.scriptRunner);
-	ZHLN::DrawProfiler(engine, game.graphics.taaState);
-	ZHLN::DrawOrientationGizmo(cam);
-
-	// 2. Lighting Workspace Developer Menu
-	ImGui::Begin("Lighting Workspace Controller");
-	ImGui::Text("Specular Mips & Area Lights Debugger");
-	ImGui::Separator();
-	ImGui::SliderFloat("Sphere Light Radius", &game.workspace.sphereLightRadius, 0.0f, 5.0f);
-	ImGui::SliderFloat("Cyan Intensity", &game.workspace.light1Intensity, 0.0f, 500.0f);
-	ImGui::SliderFloat("Magenta Intensity", &game.workspace.light2Intensity, 0.0f, 500.0f);
-	ImGui::Separator();
-	ImGui::SliderFloat("Floor Roughness", &game.workspace.floorRoughness, 0.0f, 1.0f);
-	ImGui::SliderFloat("Floor Metallic", &game.workspace.floorMetallic, 0.0f, 1.0f);
-
-	// --- PARALLAX-CORRECTED PROBE CONTROLS ---
-	ImGui::SeparatorText("Parallax-Corrected Local Reflection Probe");
-	ImGui::Checkbox("Enable Box Projection", &game.graphics.useLocalProbe);
-	if (game.graphics.useLocalProbe) {
-		std::array<float, 3> minArr = {game.graphics.probeMin.GetX(), game.graphics.probeMin.GetY(),
-									   game.graphics.probeMin.GetZ()};
-		std::array<float, 3> maxArr = {game.graphics.probeMax.GetX(), game.graphics.probeMax.GetY(),
-									   game.graphics.probeMax.GetZ()};
-		std::array<float, 3> posArr = {game.graphics.probePos.GetX(), game.graphics.probePos.GetY(),
-									   game.graphics.probePos.GetZ()};
-
-		if (ImGui::DragFloat3("Box Min", minArr.data(), 0.1f, -100.0f, 100.0f, "%.1fm")) {
-			game.graphics.probeMin = JPH::Vec3(minArr[0], minArr[1], minArr[2]);
-		}
-		if (ImGui::DragFloat3("Box Max", maxArr.data(), 0.1f, -100.0f, 100.0f, "%.1fm")) {
-			game.graphics.probeMax = JPH::Vec3(maxArr[0], maxArr[1], maxArr[2]);
-		}
-		if (ImGui::DragFloat3("Probe Position", posArr.data(), 0.1f, -100.0f, 100.0f, "%.1fm")) {
-			game.graphics.probePos = JPH::Vec3(posArr[0], posArr[1], posArr[2]);
-		}
-	}
-
-	// --- COOPERATIVE SSAO / SSGI CONTROLLER ---
-	ImGui::SeparatorText("Ambient Occlusion & Global Illumination");
-	const char* giModesList[] = {"Off", "SSAO (Ambient Occlusion)", "SSGI (Screen Space GI)",
-								 "HBAO (Horizon-Based AO)", "GTAO (Ground Truth AO)"};
-	ImGui::Combo("GI Mode", &game.graphics.giMode, giModesList, IM_ARRAYSIZE(giModesList));
-
-	if (game.graphics.giMode == 1) { // SSAO Settings
-		ImGui::SliderFloat("AO Radius", &game.graphics.aoRadius, 0.05f, 2.5f, "%.2fm");
-		ImGui::SliderFloat("AO Bias", &game.graphics.aoBias, 0.001f, 0.2f, "%.3f");
-		ImGui::SliderFloat("AO Contrast", &game.graphics.aoPower, 0.5f, 5.0f, "%.1fx");
-		ImGui::SliderInt("AO Samples", &game.graphics.giSamples, 2, 32);
-	} else if (game.graphics.giMode == 2) { // SSGI Settings
-		ImGui::SliderFloat("Bounce Radius", &game.graphics.aoRadius, 0.05f, 2.5f, "%.2fm");
-		ImGui::SliderFloat("Bounce Bias", &game.graphics.aoBias, 0.001f, 0.2f, "%.3f");
-		ImGui::SliderFloat("GI Bounce Intensity", &game.graphics.giIntensity, 0.1f, 5.0f, "%.1fx");
-		ImGui::SliderInt("GI Samples", &game.graphics.giSamples, 2, 32);
-	} else if (game.graphics.giMode == 3 || game.graphics.giMode == 4) { // HBAO / GTAO Settings
-		ImGui::SliderFloat("Search Radius", &game.graphics.aoRadius, 0.05f, 3.0f, "%.2fm");
-		ImGui::SliderFloat("Acne Bias", &game.graphics.aoBias, 0.001f, 0.2f, "%.3f");
-		ImGui::SliderFloat("Shadow Contrast", &game.graphics.aoPower, 0.5f, 6.0f, "%.1fx");
-		ImGui::SliderInt("Search Steps", &game.graphics.giSamples, 4,
-						 32); // Represents total step count
-	}
-
-	// --- CAMERA VIGNETTE ---
-	ImGui::Separator();
-	ImGui::SeparatorText("Camera Vignette");
-	ImGui::SliderFloat("Vignette Intensity", &game.graphics.vignetteIntensity, 0.0f, 2.5f, "%.2f");
-	if (game.graphics.vignetteIntensity > 0.0f) {
-		ImGui::SliderFloat("Vignette Power", &game.graphics.vignettePower, 0.1f, 6.0f, "%.2f");
-	}
-
-	ImGui::Checkbox("Enable SSR", &game.graphics.enableSSR);
-
-	ImGui::End();
-
-	// 3. Hot Reload Script Files
-	if (++game.frameCounter % 60 == 0 && game.gameplayWatcher->CheckModified()) {
-		game.scriptRunner->ReloadFile("scripts/gameplay.lua");
-	}
-
-	{
-		ZHLN_PROFILE_SCOPE("Logic");
-
-		// Mouse look (Active only when holding Right Click)
-		const float sensitivity = 0.15f;
-		if (engine.GetInput().IsMouseButtonDown(KeyCode::RButton)) {
-			cam.yaw += engine.GetInput().GetMouse().deltaX * sensitivity;
-			cam.pitch = std::clamp(cam.pitch - (engine.GetInput().GetMouse().deltaY * sensitivity),
-								   -89.0f, 89.0f);
-		}
-
-		game.scriptRunner->CallUpdate(&engine, dt);
-
-		// 4. Physics Tick loop
-		physicsAccumulator += dt;
-		constexpr float targetDt = 1.0f / 60.0f;
-		while (physicsAccumulator >= targetDt) {
-			ZHLN::MovementSystem(engine, targetDt);
-			pc.Step(targetDt);
-			physicsAccumulator -= targetDt;
-		}
-
-		// 5. Run animation systems
-		game.animationSystem->UpdateAnimations(rc, reg, dt);
-		game.articulationSystem->Update(engine, dt);
 	}
 }
 
@@ -685,6 +632,43 @@ using namespace ZHLN;
 // ============================================================================
 
 auto main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) -> int {
+	for (int i = 1; i < argc; ++i) {
+		if (std::string_view(argv[i]) == "--version") {
+// Compile-time compiler detection
+#if defined(__clang__)
+			constexpr std::string_view compiler = "Clang (" __VERSION__ ")";
+#elif defined(__GNUC__)
+			constexpr std::string_view compiler = "GCC (" __VERSION__ ")";
+#elif defined(_MSC_VER)
+			constexpr std::string_view compiler = "MSVC";
+#else
+			constexpr std::string_view compiler = "Unknown Compiler";
+#endif
+
+// Compile-time build configuration detection
+#if defined(NDEBUG)
+			constexpr std::string_view buildType = "Release";
+#else
+			constexpr std::string_view buildType = "Debug";
+#endif
+
+// Compile-time sanitizer detection
+#if defined(__ASAN_ENABLED__)
+			constexpr std::string_view sanitizers = "enabled";
+#else
+			constexpr std::string_view sanitizers = "disabled";
+#endif
+
+			std::println("Zahlen Engine - version 1.0.0");
+			std::println("Built on:     {} (UTC)", __DATE__);
+			std::println("Build Profile: {} | Sanitizers: {}", buildType, sanitizers);
+			std::println("Compiler:      {}", compiler);
+			std::println("\nThis is free software; see the source for copying conditions.");
+			std::println("There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A "
+						 "PARTICULAR PURPOSE.");
+			return EXIT_SUCCESS;
+		}
+	}
 	Platform::Init();
 	ZHLN::SetupSignalHandler();
 	TaskSystem::Init();
