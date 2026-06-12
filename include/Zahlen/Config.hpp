@@ -1,15 +1,14 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 #include <cstdint>
 #include <detail/String.hpp>
 #include <string_view>
 
 #define ZHLN_VERSION_MAJOR 1
-#define ZHLN_VERSION_MINOR 2
-#define ZHLN_VERSION_PATCH 3
+#define ZHLN_VERSION_MINOR 0
+#define ZHLN_VERSION_PATCH 0
 
 // 1. The "Stringize" helper macros
 #define ZHLN_STR_HELPER(x) #x

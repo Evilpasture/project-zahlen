@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "Zahlen/Camera.hpp"
+#include "Zahlen/CommandLine.hpp"
 #include "Zahlen/Input.hpp"
 #include "Zahlen/Render.hpp"
 #include "Zahlen/Window.hpp"
@@ -11,7 +11,7 @@
 #include "ecs/ECS.hpp"
 #include "physics/Physics.hpp"
 
-#include <GLFW/glfw3.h> // Fixes: GLFWwindow, glfwGetMouseButton, etc.
+#include <GLFW/glfw3.h>
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Clock.hpp>
@@ -24,11 +24,14 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
-#include <detail/ControlFlow.hpp> // Fixes: ZHLN_LOCK
-#include <engine/Platform.hpp>	  // Fixes: Platform
+#include <cstdlib>
+#include <detail/ControlFlow.hpp>
+#include <engine/Platform.hpp>
 #include <engine/system/CullingSystem.hpp>
+#include <expected>
 #include <imgui.h>
 #include <physics/PhysicsWorld.hpp>
+#include <span>
 #include <threading/TaskSystem.hpp>
 #include <vector>
 
@@ -40,13 +43,7 @@ namespace {
 // Editor State & Global Systems
 // ============================================================================
 struct EditorState {
-	EditorState() = default;
-	EditorState(const EditorState&) = default;
-	EditorState(EditorState&&) = default;
-	auto operator=(const EditorState&) -> EditorState& = default;
-	auto operator=(EditorState&&) -> EditorState& = default;
-	~EditorState() = default;
-	bool simulationRunning = false;		// Pauses/runs physics and ALife [c]
+	bool simulationRunning = false;		// Pauses/runs physics and ALife
 	Entity selectedEntity = NullEntity; // Currently selected ECS entity
 	bool showPhysicsDebug = true;
 };
@@ -117,8 +114,8 @@ auto CastPickingRay(Engine& engine, const Camera& cam) -> Physics::RaycastResult
 	float aspect = (float)winSize.width / (float)winSize.height;
 	JPH::Mat44 invVP = (cam.GetProjectionMatrix(aspect) * cam.GetViewMatrix()).Inversed();
 
-	JPH::Vec4 nearWorld = invVP * JPH::Vec4(ndcX, ndcY, 0.0f, 1.0f); // Near is 0.0 in Vulkan [c]
-	JPH::Vec4 farWorld = invVP * JPH::Vec4(ndcX, ndcY, 1.0f, 1.0f);	 // Far is 1.0 in Vulkan [c]
+	JPH::Vec4 nearWorld = invVP * JPH::Vec4(ndcX, ndcY, 0.0f, 1.0f); // Near is 0.0 in Vulkan
+	JPH::Vec4 farWorld = invVP * JPH::Vec4(ndcX, ndcY, 1.0f, 1.0f);	 // Far is 1.0 in Vulkan
 
 	JPH::Vec3 pNear =
 		JPH::Vec3(nearWorld.GetX() / nearWorld.GetW(), nearWorld.GetY() / nearWorld.GetW(),
@@ -152,7 +149,6 @@ void DrawEditorPanels(Engine& engine) {
 		pc.Step(1.0f / 60.0f);
 	}
 
-	// Fix: Replaced internal ImGui::SeparatorEx with standard, portable layout calls [c]
 	ImGui::SameLine();
 	ImGui::TextDisabled("|");
 	ImGui::SameLine();
@@ -172,7 +168,7 @@ void DrawEditorPanels(Engine& engine) {
 	}
 	ImGui::End();
 
-	// 3. Component Inspector Window [c]
+	// 3. Component Inspector Window
 	ImGui::Begin("Component Inspector");
 	if (g_EditorState.selectedEntity != NullEntity && reg.IsAlive(g_EditorState.selectedEntity)) {
 		Entity e = g_EditorState.selectedEntity;
@@ -187,10 +183,10 @@ void DrawEditorPanels(Engine& engine) {
 			}
 		}
 
-		// Physics Component Panel (Direct Jolt Teleportation) [c]
+		// Physics Component Panel (Direct Jolt Teleportation)
 		if (auto* phys = reg.Get<PhysicsComponent>(e)) {
 			if (ImGui::CollapsingHeader("Physics Component", ImGuiTreeNodeFlags_DefaultOpen)) {
-				// Fix: Access Jolt BodyIDs using the const-safe free function [c]
+				// Fix: Access Jolt BodyIDs using the const-safe free function
 				JPH::BodyID bid = Physics::GetBodyID(world, phys->physicsHandle);
 				if (!bid.IsInvalid()) {
 					JPH::RVec3 p = world.bodyInterface->GetPosition(bid);
@@ -236,32 +232,45 @@ void DrawEditorPanels(Engine& engine) {
 	ImGui::End();
 }
 
-} // namespace
+// ============================================================================
+// STAGE 2: SUBSYSTEM INITIALIZATION & WORKSPACE WINDOW CREATION
+// ============================================================================
 
-// ============================================================================
-// Main Execution Entrypoint
-// ============================================================================
-int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
+std::expected<std::unique_ptr<Engine>, EngineError> InitializeEditor(CommandLineOptions options) {
 	Platform::Init();
 	ZHLN::SetupSignalHandler();
 	TaskSystem::Init();
-	Clock clock;
 
 	EngineConfig config{
 		.physics = {.maxBodies = 10000, .maxBodyPairs = 20000, .maxContactConstraints = 20000},
-		.render = {.appName = "Zahlen World Editor", .width = 1600, .height = 900, .vsync = true},
+		.render = {.appName = "Zahlen World Editor",
+				   .width = 1600,
+				   .height = 900,
+				   .vsync = true,
+				   .enableValidation = options.enableValidation},
 	};
 
-	Engine engine(config);
-	engine.GetWindow().Focus();
+	auto engine = std::make_unique<Engine>(config);
+	if (!engine) {
+		return std::unexpected(EngineError{.msg = "Failed to allocate memory for Engine context.",
+										   .code = EXIT_FAILURE});
+	}
 
+	engine->GetWindow().Focus();
+	return engine;
+}
+
+// ============================================================================
+// STAGE 3: WORKSPACE COMPONENT & GEOMETRY GENERATION
+// ============================================================================
+
+bool InitializeEditorScene(Engine& engine) {
 	auto& rc = engine.GetRenderContext();
 	auto& pc = engine.GetPhysicsContext();
 	auto& reg = engine.GetRegistry();
 	auto& cam = engine.GetCamera();
 
-	// Spawn a temporary workspace terrain and basic landmarks (Copying Setup from your old
-	// main.cpp)
+	// Register visual and physical components
 	reg.RegisterComponent<MeshComponent>("MeshComponent");
 	reg.RegisterComponent<PhysicsComponent>("PhysicsComponent");
 	reg.RegisterComponent<MovementComponent>("MovementComponent");
@@ -272,8 +281,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 	int terrainSize = 128;
 	float terrainWorldSize = 250.0f;
 	float terrainMaxHeight = 25.0f;
-	std::vector<float> terrainHeights(
-		static_cast<size_t>(terrainSize * terrainSize)); // Pre-allocate the vector
+	std::vector<float> terrainHeights(static_cast<size_t>(terrainSize * terrainSize));
 
 	Mesh terrainMesh = AssetFactory::CreateTerrain(rc, terrainSize, terrainWorldSize,
 												   terrainMaxHeight, terrainHeights.data());
@@ -287,7 +295,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 													  JPH::Quat::sIdentity(),
 													  JPH::EMotionType::Static, 0)});
 
-	// Place some test boxes for 3D selection and transformation [c]
+	// Place 3D selection test boxes
 	auto boxShape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Box, 2.0f, 2.0f, 2.0f);
 	for (int i = 0; i < 5; ++i) {
 		Entity box = reg.Create();
@@ -301,35 +309,53 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 
 	pc.OptimizeBroadphase();
 
-	// Position the camera initially above our workspace
+	// Set starting viewport transform
 	cam.position = {0.0f, 20.0f, 40.0f};
 	cam.yaw = -90.0f;
 	cam.pitch = -20.0f;
 
+	return true;
+}
+
+// ============================================================================
+// STAGE 4: MAIN WORKSPACE INTERACTION LOOP
+// ============================================================================
+
+std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine) {
+	Clock clock;
+
+	if (!InitializeEditorScene(*engine)) {
+		return std::unexpected(
+			EngineError{.msg = "Editor scene failed to initialize.", .code = EXIT_FAILURE});
+	}
+
+	auto& rc = engine->GetRenderContext();
+	auto& pc = engine->GetPhysicsContext();
+	auto& reg = engine->GetRegistry();
+	auto& cam = engine->GetCamera();
+
 	float accumulator = 0.0f;
 	const float targetDt = 1.0f / 60.0f;
 
-	while (engine.IsRunning()) {
+	while (engine->IsRunning()) {
 		float frameTime = clock.GetDeltaTime();
-		engine.ProcessEvents();
+		engine->ProcessEvents();
 
-		// Left Click selection logic when not interacting with ImGui Windows
-		if (engine.GetInput().IsKeyDown(KeyCode::Escape)) {
-			engine.GetWindow().Close();
+		if (engine->GetInput().IsKeyDown(KeyCode::Escape)) {
+			engine->GetWindow().Close();
 		}
 
-		if (!engine.GetInput().IsKeyDown(KeyCode::Unknown) &&
-			!engine.GetInput().IsMouseButtonDown(KeyCode::RButton) &&
+		if (!engine->GetInput().IsKeyDown(KeyCode::Unknown) &&
+			!engine->GetInput().IsMouseButtonDown(KeyCode::RButton) &&
 			!ImGui::GetIO().WantCaptureMouse) {
 
-			// Perform 3D viewport raycast selection on mouse press
 			static bool wasMouseDown = false;
 			bool isMouseDown =
-				glfwGetMouseButton(static_cast<GLFWwindow*>(engine.GetWindow().GetNativeHandle()),
+				glfwGetMouseButton(static_cast<GLFWwindow*>(engine->GetWindow().GetNativeHandle()),
 								   GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
 
 			if (isMouseDown && !wasMouseDown) {
-				auto hit = CastPickingRay(engine, cam);
+				auto hit = CastPickingRay(*engine, cam);
 				if (hit.hasHit) {
 					g_EditorState.selectedEntity = hit.handle;
 				} else {
@@ -339,31 +365,29 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 			wasMouseDown = isMouseDown;
 		}
 
-		// Draw HUDs, Hierarchies, and Inspectors
-		DrawEditorPanels(engine);
+		// UI render pass
+		DrawEditorPanels(*engine);
 
-		if (engine.GetInput().NeedsResize()) {
-			rc.SetResolution(engine.GetInput().GetNewSize());
-			engine.GetInput().ClearResizeFlag();
+		if (engine->GetInput().NeedsResize()) {
+			rc.SetResolution(engine->GetInput().GetNewSize());
+			engine->GetInput().ClearResizeFlag();
 			continue;
 		}
 
-		// 1. Only tick simulation systems if explicitly clicked "PLAY" [c]
+		// Physics simulation step
 		if (g_EditorState.simulationRunning) {
 			accumulator += frameTime;
 			while (accumulator >= targetDt) {
 				pc.Step(targetDt);
 				accumulator -= targetDt;
 			}
-			engine.GetALife().Update(engine, frameTime, JPH::RVec3(cam.position));
+			engine->GetALife().Update(*engine, frameTime, JPH::RVec3(cam.position));
 		}
 
-		// 2. Editor free camera moves regardless of whether simulation is running [c]
-		UpdateEditorCamera(cam, engine.GetInput(), frameTime);
+		UpdateEditorCamera(cam, engine->GetInput(), frameTime);
 
-		// 3. Render Viewport
 		const auto& worldState = pc.GetWorld();
-		auto res = engine.GetWindow().GetSize();
+		auto res = engine->GetWindow().GetSize();
 
 		if (res.width > 0 && res.height > 0) {
 			if (s_TAAState.enabled) {
@@ -384,17 +408,14 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 
 			cam.frustum.Update(vp);
 
-			// Explicitly invoke the dynamic physics-tracked path
-			CullingSystem<true>(engine, s_VisibleEntities, {});
+			CullingSystem<true>(*engine, s_VisibleEntities, {});
 
-			// Shadow Matrices
 			JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f};
 			JPH::Mat44 lightView =
 				Math::CreateLookAt(sunDirection * 100.0f, {0.0f, 0.0f, 0.0f}, JPH::Vec3::sAxisY());
 			JPH::Mat44 lightProj = Math::CreateOrtho(-50.0f, 50.0f, -50.0f, 50.0f, 0.1f, 200.0f);
 			JPH::Mat44 shadowProjView = lightProj * lightView;
 
-			// Change the second column's Y component from 0.5f to -0.5f
 			JPH::Mat44 biasMatrix = {
 				JPH::Vec4(0.5f, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, -0.5f, 0.0f, 0.0f),
 				JPH::Vec4(0.0f, 0.0f, 1.0f, 0.0f), JPH::Vec4(0.5f, 0.5f, 0.0f, 1.0f)};
@@ -410,7 +431,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 			FrameUniforms uniforms{};
 			uniforms.viewProj = vp;
 			uniforms.unjitteredViewProj = unjitteredVp;
-			uniforms.prevUnjitteredViewProj = s_PrevUnjitteredVp; // Actual previous unjittered VP
+			uniforms.prevUnjitteredViewProj = s_PrevUnjitteredVp;
 			uniforms.lightSpaceMatrix = lightSpaceBiased;
 			uniforms.invViewProj = unjitteredVp.Inversed();
 			std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
@@ -419,7 +440,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 
 			Renderer::SetFrameData(rc, uniforms, shadowProjView);
 
-			engine.BeginFrame();
+			engine->BeginFrame();
 			Renderer::SetMatrices(rc, vp, unjitteredVp);
 
 			ZHLN_LOCK(worldState.sync.shadowLock) {
@@ -457,16 +478,13 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 				}
 			}
 
-			CullingStats::TotalObjects = (uint32_t)reg.GetEntitiesWith<MeshComponent>().size();
-			CullingStats::CulledObjects =
-				CullingStats::TotalObjects - (uint32_t)s_VisibleEntities.size();
+			CullingStats::TotalObjects = reg.GetEntitiesWith<MeshComponent>().size();
+			CullingStats::CulledObjects = CullingStats::TotalObjects - s_VisibleEntities.size();
 
-			engine.EndFrame();
+			engine->EndFrame();
 
-			// Cache the unjittered projection for next frame's TAA
 			s_PrevUnjitteredVp = unjitteredVp;
 
-			// Global update for prevTransforms to prevent TAA motion vector spasms
 			auto allEntities = reg.GetEntitiesWith<MeshComponent>();
 			for (Entity e : allEntities) {
 				auto* mesh = reg.Get<MeshComponent>(e);
@@ -476,9 +494,8 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 					if (phys != nullptr) {
 						uint32_t dense = worldState.slotToDense[phys->physicsHandle.index];
 						const size_t base = static_cast<size_t>(dense) * 4;
-						JPH::Vec3 pos((float)worldState.positions[base],
-									  (float)worldState.positions[base + 1],
-									  (float)worldState.positions[base + 2]);
+						JPH::Vec3 pos(worldState.positions[base], worldState.positions[base + 1],
+									  worldState.positions[base + 2]);
 						JPH::Quat rot(worldState.rotations[base], worldState.rotations[base + 1],
 									  worldState.rotations[base + 2],
 									  worldState.rotations[base + 3]);
@@ -498,6 +515,23 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
 		}
 	}
 
+	TaskSystem::Shutdown();
 	ZHLN::Log("Shutting down Editor...");
-	return 0;
+
+	return EXIT_SUCCESS;
+}
+
+} // namespace
+
+extern auto RunEditor(const CommandLineOptions& options) {
+	auto result = InitializeEditor(options)
+					  .and_then(RunEditorLoop)
+					  .transform_error([](const EngineError& err) -> int {
+						  if (!err.msg.empty() && !err.silent) {
+							  ZHLN::Log("Error: {}", err.msg);
+						  }
+						  return err.code;
+					  });
+
+	return result.value_or(result.error());
 }

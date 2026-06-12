@@ -109,6 +109,7 @@ set(ENGINE_SOURCES
     src/engine/Sky.cpp
     src/engine/BRDFLUT.cpp
     src/engine/GizmoUI.cpp
+    src/engine/CommandLine.cpp
 )
 
 find_library(ZSTD_LIBRARY NAMES zstd zstd_static HINTS "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib")
@@ -261,16 +262,14 @@ set_property(SOURCE src/engine/Resources.c APPEND PROPERTY OBJECT_DEPENDS
 
 # --- 7. EXECUTABLE TARGETS ---
 
-# Game Client Executable
-add_executable(zahlen_game src/game_main.cpp)
-target_link_libraries(zahlen_game PRIVATE zahlen_engine imgui)
-target_compile_definitions(zahlen_game PRIVATE JPH_DOUBLE_PRECISION)
-
-# Editor Executable
-add_executable(zahlen_editor src/editor_main.cpp)
-# We also link imgui directly so your editor source code can call raw ImGui functions
-target_link_libraries(zahlen_editor PRIVATE zahlen_engine imgui)
-target_compile_definitions(zahlen_editor PRIVATE JPH_DOUBLE_PRECISION)
+# Unified Application Executable
+add_executable(zahlen 
+    src/main.cpp
+    src/game_main.cpp 
+    src/editor_main.cpp
+)
+target_link_libraries(zahlen PRIVATE zahlen_engine imgui)
+target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)
 
 # Offline Asset Cooker
 add_executable(zahlen_cooker src/cooker_main.cpp)
@@ -280,18 +279,14 @@ target_include_directories(zahlen_cooker PRIVATE ${CMAKE_SOURCE_DIR}/extern/cglt
 # --- 7.1 ASSET COOKING AUTOMATION ---
 add_custom_target(cook_assets ALL
     # 1. Make sure the data directory exists
-    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:zahlen_game>/data"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:zahlen>/data"
     
-    # 2. Run the cooker and output both base.pak AND debug .glb files [1]
-    COMMAND zahlen_cooker "${CMAKE_SOURCE_DIR}/resources/assets" "$<TARGET_FILE_DIR:zahlen_game>/data/base.pak" "$<TARGET_FILE_DIR:zahlen_game>/data"
+    # 2. Run the cooker and output both base.pak AND debug .glb files
+    COMMAND zahlen_cooker "${CMAKE_SOURCE_DIR}/resources/assets" "$<TARGET_FILE_DIR:zahlen>/data/base.pak" "$<TARGET_FILE_DIR:zahlen>/data"
     
     DEPENDS zahlen_cooker
     COMMENT "Cooking assets into data/base.pak and compiling debug GLBs..."
 )
-
-# Ensure the game and editor wait for the cooking process to finish before they compile/run
-add_dependencies(zahlen_game cook_assets)
-add_dependencies(zahlen_editor cook_assets)
 
 # --- 8. COMPILER FLAGS ---
 if(NOT MSVC)
@@ -317,9 +312,9 @@ add_custom_target(link_resources ALL
     COMMENT "Creating zero-copy symlinks for resources and scripts..."
 )
 
-# Make both executable targets depend on it so they wait for it to finish
-add_dependencies(zahlen_game link_resources)
-add_dependencies(zahlen_editor link_resources)
+# Ensure the executable waits for the cooking and symlinking processes to finish
+add_dependencies(zahlen cook_assets)
+add_dependencies(zahlen link_resources)
 
 
 
@@ -331,11 +326,9 @@ if(USE_SANITIZERS AND WIN32)
         PATHS "${CLANG_BIN_DIR}/../lib/clang/23/lib/windows" "${CLANG_BIN_DIR}/../lib/clang/22/lib/windows"
     )
     if(ASAN_DLL)
-        foreach(APP_TARGET zahlen_game zahlen_editor)
-            add_custom_command(TARGET ${APP_TARGET} POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy "${ASAN_DLL}" "$<TARGET_FILE_DIR:${APP_TARGET}>"
-                COMMENT "Copying ASan Runtime for ${APP_TARGET}..."
-            )
-        endforeach()
+        add_custom_command(TARGET zahlen POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy "${ASAN_DLL}" "$<TARGET_FILE_DIR:zahlen>"
+            COMMENT "Copying ASan Runtime for zahlen..."
+        )
     endif()
 endif()

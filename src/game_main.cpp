@@ -1,9 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // src/game_main.cpp
 
+#include "Zahlen/CommandLine.hpp"
 #include "Zahlen/Input.hpp"
 #include "Zahlen/alife/Types.hpp"
 #include "ecs/ECS.hpp"
@@ -30,7 +30,6 @@
 #include <engine/system/CullingSystem.hpp>
 #include <expected>
 #include <physics/PhysicsWorld.hpp>
-#include <print>
 #include <string>
 #include <threading/Mutex.hpp>
 #include <threading/TaskSystem.hpp>
@@ -631,89 +630,7 @@ void ShutdownGame([[maybe_unused]] Engine& engine, GameContext& game) {
 
 using namespace ZHLN;
 
-// ============================================================================
-// MONADIC ERROR HANDLING STRUCTURES
-// ============================================================================
 namespace {
-
-struct EngineError {
-	std::string msg;
-	int code = EXIT_FAILURE;
-	bool silent = false;
-};
-
-struct CommandLineOptions {
-	std::span<char* const> args;
-	bool enableValidation = true;
-};
-
-// ============================================================================
-// STAGE 1: COMMAND LINE INTERFACE HANDLER
-// ============================================================================
-
-std::expected<CommandLineOptions, EngineError> HandleCommandLine(std::span<char* const> args) {
-	CommandLineOptions options{.args = args, .enableValidation = true};
-
-	// Check environment variables first (allows easy IDE configuration profiles)
-	if (const char* envVal = std::getenv("ZHLN_VALIDATION")) {
-		if (std::string_view(envVal) == "0" || std::string_view(envVal) == "false") {
-			options.enableValidation = false;
-		}
-	}
-
-	for (std::string_view arg : args.subspan(1)) {
-		if (arg == "--version") {
-			std::println("Zahlen Engine - version {}.{}.{}", EngineVersion.major,
-						 EngineVersion.minor, EngineVersion.patch);
-			std::println("Built on:      {} (UTC)", __DATE__);
-			std::println("Build Profile: {} | Sanitizers: {}", BuildType, Sanitizers);
-			std::println("Compiler:      {}", Compiler);
-
-			std::println("\nLicense GPLv3+: GNU GPL version 3 or later "
-						 "<https://gnu.org/licenses/gpl.html>.");
-			std::println("This is free software: you are free to change and redistribute it.");
-			std::println("There is NO WARRANTY, to the extent permitted by law.");
-
-			return std::unexpected(EngineError{.code = EXIT_SUCCESS, .silent = true});
-		}
-
-		if (arg == "--help" || arg == "-h") {
-			// Evaluated at compile-time, zero runtime overhead
-			static constexpr std::string_view HelpMenu =
-				R"(
-Usage: {} [options]
-
-Options:
-  -h, --help           Display this help menu and exit
-  --version            Display engine version information and exit
-  --no-validation      Disable Vulkan validation layers completely
-
-Environment Variables:
-  ZHLN_VALIDATION=0    Disable Vulkan validation layers
-
-)";
-
-			// Fallback if args is somehow empty(e.g., custom environment invocations)
-			std::string exeName = "zahlen_engine";
-
-			if (!args.empty() && args[0] != nullptr) {
-				exeName = std::filesystem::path(args[0]).filename().string();
-			}
-
-			std::print(HelpMenu, exeName);
-			return std::unexpected(EngineError{.code = EXIT_SUCCESS, .silent = true});
-		}
-
-		if (arg == "--no-validation") {
-			options.enableValidation = false;
-		}
-	}
-	return options;
-}
-
-// ============================================================================
-// STAGE 2: ENGINE & SUBSYSTEM INITIALIZATION
-// ============================================================================
 
 std::expected<std::unique_ptr<Engine>, EngineError> InitializeEngine(CommandLineOptions options) {
 	Platform::Init();
@@ -741,10 +658,6 @@ std::expected<std::unique_ptr<Engine>, EngineError> InitializeEngine(CommandLine
 	engine->GetWindow().Focus();
 	return engine;
 }
-
-// ============================================================================
-// STAGE 3: RUN THE CORE SIMULATION LOOP
-// ============================================================================
 
 std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine) {
 	Clock clock;
@@ -791,20 +704,15 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine) {
 
 } // namespace
 
-// ============================================================================
-// MONADIC ENTRYPOINT ENGINE CONTROL LOOP
-// ============================================================================
-
-auto main(int argc, char* argv[]) -> int {
-	auto result = HandleCommandLine(std::span(argv, static_cast<size_t>(argc)))
-					  .and_then(InitializeEngine)
+extern auto RunGame(const ZHLN::CommandLineOptions& options) {
+	auto result = InitializeEngine(options)
 					  .and_then(RunEngineLoop)
 					  .transform_error([](const EngineError& err) -> int {
 						  if (!err.msg.empty() && !err.silent) {
-							  std::println(stderr, "Error: {}", err.msg);
+							  ZHLN::Log("Error: {}", err.msg);
 						  }
 						  return err.code;
 					  });
 
-	return result.has_value() ? result.value() : result.error();
+	return result.value_or(result.error());
 }
