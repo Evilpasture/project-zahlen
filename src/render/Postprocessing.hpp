@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 #include "PipelineBuilder.hpp"
 #include "RenderCore.hpp"
@@ -81,5 +80,7 @@ template <typename LayoutT> struct PostProcessPass {
 								&set, 0, nullptr);
 		vkCmdDraw(cmd, 3, 1, 0, 0);
 	}
+
+	void Flip() noexcept { sets.Flip(); }
 };
 } // namespace ZHLN::Vk

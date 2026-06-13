@@ -23,6 +23,7 @@ if(APPLE)
     set(CMAKE_SYSROOT ${MACOS_SDK_PATH})
 endif()
 
+# Global fallback standards for your targets
 set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -73,10 +74,40 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/src/ecs)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/alife)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/audio)
 
-option(BUILD_TESTING "Build the render module test suite" OFF)
+# --- 4.1 TESTING CONFIGURATION ---
+option(BUILD_TESTING "Build the test suite" OFF)
+
 if(BUILD_TESTING)
-    message("Building test suites for render backend")
+    message(STATUS "Building the test suites...")
     enable_testing()
+
+    # Find the system-installed GTest (e.g. 'sudo pacman -S gtest' on Arch)
+    find_package(GTest REQUIRED)
+
+    # Add the SSR CPU validation test
+    add_executable(zahlen_ssr_test src/ssr_test.cpp)
+
+    target_link_libraries(zahlen_ssr_test PRIVATE 
+        GTest::gtest_main
+        Jolt
+    )
+
+    target_include_directories(zahlen_ssr_test PRIVATE
+        ${CMAKE_SOURCE_DIR}         # To resolve "resources/shaders/postprocess.hlsl"
+        ${CMAKE_SOURCE_DIR}/include # To resolve "SharedMath.hpp"
+        ${CMAKE_SOURCE_DIR}/src     # To resolve Jolt/engine internal headers
+    )
+
+    target_compile_definitions(zahlen_ssr_test PRIVATE 
+        JPH_DOUBLE_PRECISION        # Must match the Jolt double-precision ABI used by the engine
+    )
+
+    # Disable warnings for unknown Vulkan attributes (like [[vk::push_constant]])
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(zahlen_ssr_test PRIVATE -Wno-attributes)
+    endif()
+
+    add_test(NAME ssr_cpu_test COMMAND zahlen_ssr_test)
 endif()
 
 # Collect shared engine source files (EXCLUDING src/game_main.cpp)
@@ -163,7 +194,6 @@ target_include_directories(zahlen_engine PRIVATE
 )
 
 # --- 6. SHADER COMPILATION ---
-# Handled within the shared library target
 function(compile_shaders TARGET_NAME)
     set(SHADER_FILES ${ARGN})
 
@@ -191,11 +221,11 @@ function(compile_shaders TARGET_NAME)
 
             set(OUTPUT_SPV "${GEN_INCLUDE_DIR}/${FILE_NAME}.${EXT}.spv")
 
-            # Added: -I flag to resolve include paths, and explicitly tracked the common.hlsl dependency
+            # Added: -I flag for include/ and explicitly tracked the SharedMath.hpp dependency
             add_custom_command(
                 OUTPUT ${OUTPUT_SPV}
-                COMMAND ${DXC_EXECUTABLE} -T ${PROFILE} -E ${ENTRY} -spirv -I "${CMAKE_SOURCE_DIR}/resources/shaders" ${HLSL_SRC} -Fo ${OUTPUT_SPV}
-                DEPENDS ${HLSL_SRC} "${CMAKE_SOURCE_DIR}/resources/shaders/common.hlsl"
+                COMMAND ${DXC_EXECUTABLE} -T ${PROFILE} -E ${ENTRY} -spirv -I "${CMAKE_SOURCE_DIR}/resources/shaders" -I "${CMAKE_SOURCE_DIR}/include" ${HLSL_SRC} -Fo ${OUTPUT_SPV}
+                DEPENDS ${HLSL_SRC} "${CMAKE_SOURCE_DIR}/resources/shaders/common.hlsl" "${CMAKE_SOURCE_DIR}/include/SharedMath.hpp"
                 COMMENT "DXC: Generating ${FILE_NAME}.${EXT}.spv"
                 VERBATIM
             )
@@ -225,8 +255,8 @@ function(compile_hlsl SHADER_PATH ENTRY STAGE OUTPUT_VAR)
 
     add_custom_command(
         OUTPUT ${OUTPUT_SPV}
-        COMMAND ${DXC_EXECUTABLE} -T ${STAGE} -E ${ENTRY} -spirv ${SHADER_PATH} -Fo ${OUTPUT_SPV}
-        DEPENDS ${SHADER_PATH}
+        COMMAND ${DXC_EXECUTABLE} -T ${STAGE} -E ${ENTRY} -spirv -I "${CMAKE_SOURCE_DIR}/resources/shaders" -I "${CMAKE_SOURCE_DIR}/include" ${SHADER_PATH} -Fo ${OUTPUT_SPV}
+        DEPENDS ${SHADER_PATH} "${CMAKE_SOURCE_DIR}/include/SharedMath.hpp"
         COMMENT "DXC: Generating ${FILE_NAME}.${ENTRY}.spv"
         VERBATIM
     )
@@ -300,6 +330,9 @@ if(NOT MSVC)
     endif()
 endif()
 
+# --- 8.1 TARGET ISOLATED REFLECTION FLAGS ---
+target_compile_options(zahlen_render PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-freflection>) 
+
 # --- 9. RESOURCE LINKING (Single target to avoid parallel race conditions) ---
 add_custom_target(link_resources ALL
     COMMAND ${CMAKE_COMMAND} 
@@ -316,7 +349,6 @@ add_custom_target(link_resources ALL
 # Ensure the executable waits for the cooking and symlinking processes to finish
 add_dependencies(zahlen cook_assets)
 add_dependencies(zahlen link_resources)
-
 
 
 # --- 10. SANITIZER RUNTIME DISTRIBUTION ---

@@ -66,7 +66,8 @@ auto BindlessRegistry<Layout, BindingID>::UpdateDescriptor(VkImageView view, VkS
 
 inline void DescriptorUpdater::BindUniformBuffer(uint32_t binding, VkBuffer buffer,
 												 VkDeviceSize offset, VkDeviceSize range) {
-	auto& bufInfo = _bufferInfos[_bufferCount++];
+	uint32_t idx = _bufferCount++;
+	auto& bufInfo = _bufferInfos[idx];
 	bufInfo = {.buffer = buffer, .offset = offset, .range = range};
 
 	auto& write = _writes[_writeCount++];
@@ -79,7 +80,7 @@ inline void DescriptorUpdater::BindUniformBuffer(uint32_t binding, VkBuffer buff
 		.descriptorCount = 1,
 		.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 		.pImageInfo = {},
-		.pBufferInfo = &bufInfo,
+		.pBufferInfo = &_bufferInfos[idx],
 		.pTexelBufferView = {},
 	};
 }
@@ -150,9 +151,7 @@ inline void DescriptorUpdater::UpdateSet(VkDevice device, VkDescriptorSet set) {
 		_writes[i].dstSet = set;
 	}
 	vkUpdateDescriptorSets(device, _writeCount, _writes.data(), 0, nullptr);
-	_writeCount = 0;
-	_imageCount = 0;
-	_bufferCount = 0;
+	Clear();
 }
 
 // ============================================================================

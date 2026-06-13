@@ -40,3 +40,12 @@ target_compile_definitions(zahlen_physics PRIVATE
 if(NOT MSVC)
     target_compile_options(zahlen_physics PRIVATE -fno-exceptions -fno-rtti)
 endif()
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # Forcefully strips -freflection out of this specific target's compile options
+    get_target_property(PHYS_OPTIONS zahlen_physics COMPILE_OPTIONS)
+    if(PHYS_OPTIONS)
+        list(REMOVE_ITEM PHYS_OPTIONS "-freflection")
+        set_target_properties(zahlen_physics PROPERTIES COMPILE_OPTIONS "${PHYS_OPTIONS}")
+    endif()
+endif()

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // src/engine/Scripting.cpp
 
 #include "Zahlen/Camera.hpp"
@@ -64,17 +63,25 @@ struct CreateMaterialArgs {
 	uint64_t* outPipeline;
 	uint32_t* outAlbedo;
 };
+
+struct SpawnPhysicalBoxArgs {
+	float hx, hy, hz; // Half-extents
+	float px, py, pz; // Position
+	float r, g, b, a; // Albedo Color
+	int isStatic;	  // 0 = dynamic, 1 = static
+};
 #pragma pack(pop)
 
 using CommandHandler = std::function<uint64_t(ZHLN::Engine*, const void*)>;
 static std::unordered_map<std::string_view, CommandHandler> s_CommandRegistry;
 
 static void RegisterFFICommands() {
-	if (!s_CommandRegistry.empty())
+	if (!s_CommandRegistry.empty()) {
 		return;
+	}
 
 	s_CommandRegistry["SpawnPrefab"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
-		auto* a = static_cast<const SpawnPrefabArgs*>(args);
+		const auto* a = static_cast<const SpawnPrefabArgs*>(args);
 		auto& rc = engine->GetRenderContext();
 		auto& reg = engine->GetRegistry();
 		auto& pc = engine->GetPhysicsContext();
@@ -103,7 +110,7 @@ static void RegisterFFICommands() {
 	};
 
 	s_CommandRegistry["SetupRagdoll"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
-		auto* a = static_cast<const SetupRagdollArgs*>(args);
+		const auto* a = static_cast<const SetupRagdollArgs*>(args);
 		auto& rc = engine->GetRenderContext();
 		auto& pc = engine->GetPhysicsContext();
 		auto& reg = engine->GetRegistry();
@@ -119,7 +126,7 @@ static void RegisterFFICommands() {
 	};
 
 	s_CommandRegistry["CreateBox"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
-		auto* a = static_cast<const CreateBoxArgs*>(args);
+		const auto* a = static_cast<const CreateBoxArgs*>(args);
 		auto& rc = engine->GetRenderContext();
 		ZHLN::Mesh mesh = ZHLN::AssetFactory::CreateBox(rc, JPH::Vec3(a->hx, a->hy, a->hz),
 														JPH::Vec4(a->r, a->g, a->b, a->a));
@@ -128,7 +135,7 @@ static void RegisterFFICommands() {
 
 	s_CommandRegistry["CreateBasicMaterial"] = [](ZHLN::Engine* engine,
 												  const void* args) -> uint64_t {
-		auto* a = static_cast<const CreateMaterialArgs*>(args);
+		const auto* a = static_cast<const CreateMaterialArgs*>(args);
 		auto& rc = engine->GetRenderContext();
 		ZHLN::Material mat = ZHLN::AssetFactory::CreateBasicMaterial(rc);
 		*a->outPipeline = static_cast<uint64_t>(mat.pipeline);

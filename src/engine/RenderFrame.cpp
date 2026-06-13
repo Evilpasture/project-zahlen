@@ -713,10 +713,11 @@ void RenderContext::Impl::SubmitFrame() {
 		resized = true;
 	}
 
-	accumBuffers.Flip();
-	taaPass.sets.Flip();
-	postProcessPass.sets.Flip();
-	blitPass.sets.Flip();
+	auto manager =
+		StaticResourceManager(&accumBuffers, &taaPass, &postProcessPass, &blitPass,
+							  &frameUniformBuffers, &lightStorageBuffers, &instanceDataBuffers,
+							  &indirectCommandsBuffers, &jointBuffers, &bindlessSets);
+	manager.FlipAll();
 
 	frame_index = (frame_index + 1) % 2;
 	current_cmd = VK_NULL_HANDLE;

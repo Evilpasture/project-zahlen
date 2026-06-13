@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // File: src/engine/system/AnimationSystem.cpp
 #include "AnimationSystem.hpp"
 
@@ -403,7 +402,7 @@ void AnimationSystem::ResolveSkeletalJointMatrices(
 			for (cgltf_size j = 0; j < skin->joints_count; ++j) {
 				cgltf_node* jointNode = skin->joints[j];
 				JPH::Mat44 jointWorld = outWorldTransforms[jointNode];
-				JPH::Mat44 finalJointMatrix = jointWorld * ibms[j];
+				JPH::Mat44 finalJointMatrix = invMeshWorld * jointWorld * ibms[j];
 
 				if (currentJointCount < 8192) {
 					calculatedJoints[currentJointCount++] = finalJointMatrix;

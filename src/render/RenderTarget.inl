@@ -75,7 +75,7 @@ template <VkFormat F> inline RenderTarget<F>::operator bool() const noexcept {
 
 template <VkImageLayout TargetLayout, VkFormat F>
 [[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const RenderTarget<F>& rt,
-										Tag<TargetLayout>) noexcept {
+										Tag<TargetLayout> /*unused*/) noexcept {
 	return Transition<TargetLayout>(cmd, rt.State());
 }
 

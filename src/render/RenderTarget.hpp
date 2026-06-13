@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #include "Allocator.hpp"
@@ -41,7 +40,7 @@ template <VkFormat F> struct RenderTarget {
 // Define the Transition overload here where RenderTarget is fully complete [3]
 template <VkImageLayout TargetLayout, VkFormat F>
 [[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const RenderTarget<F>& rt,
-										Tag<TargetLayout>) noexcept;
+										Tag<TargetLayout> /*unused*/) noexcept;
 
 } // namespace ZHLN::Vk
 

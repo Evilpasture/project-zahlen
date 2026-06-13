@@ -265,7 +265,7 @@ PSOutput PSMain(VSOutput input) {
 	float NdotV = saturate(dot(worldNormal, V));
 
 	// -------------------------------------------------------------------------
-	// CACHED TEXTURE LOOKUPS: Pull 2D BRDF LUT parameters once [2]
+	// CACHED TEXTURE LOOKUPS: Pull 2D BRDF LUT parameters once
 	// -------------------------------------------------------------------------
 	float2 envBRDF = brdfLUT.SampleLevel(clampSampler, float2(NdotV, roughness), 0.0f).rg;
 	float Ev_sun = envBRDF.x + envBRDF.y;
@@ -281,7 +281,7 @@ PSOutput PSMain(VSOutput input) {
 	float D = 0.0f;
 	float g_term = 0.0f;
 
-	// Optimization: Conditionally branch heavy Anisotropic math [2]
+	// Optimization: Conditionally branch heavy Anisotropic math
 	if (anisotropy > 0.0f) {
 		float alpha = roughness * roughness;
 		float alpha_x = max(alpha * (1.0f + anisotropy), 0.001f);
@@ -477,7 +477,7 @@ PSOutput PSMain(VSOutput input) {
 	}
 
 	// 2. Evaluate Single-Scatter Specular IBL (With Lobe Elongation & Blended Parallax Correction)
-	// [2]
+
 	float3 correctedR = R;
 	if (boxFade > 0.0f) {
 		float3 boxR = BoxParallaxCorrection(input.worldPos, R, frame.probeMin.xyz,

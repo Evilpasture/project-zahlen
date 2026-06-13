@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #include "RenderCore.h"
@@ -44,6 +43,54 @@ template <typename T> class DoubleBuffered {
   private:
 	std::array<T, 2> _data{};
 	uint32_t _index = 0;
+};
+
+namespace Detail {
+template <bool Condition> struct ResourceCheck {
+	[[gnu::warning(
+		"A static resource lived in the manager but lacks a Flip() method! It will be skipped.")]]
+	static void emit() noexcept {}
+};
+
+template <> struct ResourceCheck<true> {
+	static constexpr void emit() noexcept {}
+};
+} // namespace Detail
+
+/**
+ * @brief 100% Compile-Time Static Dispatch Resource Manager.
+ * Zero heap allocations, zero indirection, and perfect inlining.
+ */
+template <typename... Resources> class StaticResourceManager {
+  public:
+	constexpr explicit StaticResourceManager(Resources*... resources) noexcept
+		: _resources(resources...) {}
+
+	void FlipAll() noexcept {
+		std::apply(
+			[](auto*... r) {
+				// Define a helper lambda that checks for the Flip method at compile time
+				auto flip_single = [](auto* resource) {
+					// 1. Evaluate the constraint into a compile-time constant
+					constexpr bool can_flip = requires { resource->Flip(); };
+
+					// 2. Pass it to your custom warning diagnostic mechanism
+					Detail::ResourceCheck<can_flip>::emit();
+
+					// 3. Conditionally compile the execution code
+					if constexpr (can_flip) {
+						resource->Flip();
+					}
+				};
+
+				// Expand the fold expression using our conditional helper
+				(flip_single(r), ...);
+			},
+			_resources);
+	}
+
+  private:
+	std::tuple<Resources*...> _resources;
 };
 
 } // namespace ZHLN
@@ -127,6 +174,9 @@ using ShaderModule = DeviceHandle<VkShaderModule, ZHLN_DestroyShaderModule>;
 using PipelineLayout = DeviceHandle<VkPipelineLayout, ZHLN_DestroyPipelineLayout>;
 using Pipeline = DeviceHandle<VkPipeline, ZHLN_DestroyPipeline>;
 using Semaphore = DeviceHandle<VkSemaphore, ZHLN_DestroySemaphore>;
+using Sampler = DeviceHandle<VkSampler, ZHLN_DestroySampler>;
+using DescriptorSetLayout = DeviceHandle<VkDescriptorSetLayout, ZHLN_DestroyDescriptorSetLayout>;
+using DescriptorPool = DeviceHandle<VkDescriptorPool, ZHLN_DestroyDescriptorPool>;
 
 // ============================================================================
 // Context RAII
@@ -369,6 +419,68 @@ class ShaderStages {
 [[nodiscard]] constexpr auto AsSpirV(const void* data) noexcept -> const uint32_t* {
 	return std::bit_cast<const uint32_t*>(data);
 }
+
+/**
+ * @brief Holds fully automated, RAII-managed layout handles generated via shader reflection.
+ * @note [UNSAFE] This struct is populated by parsing untrusted SPIR-V bytecode at runtime.
+ * Incorrect layout assumptions here can lead to undefined behavior, driver hangs, or GPU crashes.
+ */
+struct UnsafeReflectedLayout {
+	PipelineLayout pipelineLayout;
+	std::array<DescriptorSetLayout, 4> descriptorSetLayouts;
+	uint32_t setLayoutCount = 0;
+
+	// Tracks the exact count of each descriptor type needed by all sets combined
+	std::array<uint32_t, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT + 1> descriptorTypeCounts{};
+
+	/**
+	 * @brief Unsafely fetches a raw layout handle.
+	 * @warning Caller must guarantee setIndex is within shader layout bounds.
+	 */
+	[[nodiscard]] auto GetSetLayoutUnsafe(uint32_t setIndex = 0) const noexcept
+		-> VkDescriptorSetLayout {
+		return setIndex < setLayoutCount ? descriptorSetLayouts[setIndex].Get() : VK_NULL_HANDLE;
+	}
+};
+
+/**
+ * @brief Reflection builder that queries SPIR-V bytecode at runtime using SPIRV-Reflect.
+ * @note [UNSAFE] Bypasses C++ compile-time type-safety guarantees. Relies entirely on
+ * runtime binary parsing. Use only when static layouts cannot be predefined.
+ */
+class UnsafeReflectedLayoutBuilder {
+  public:
+	UnsafeReflectedLayoutBuilder() noexcept = default;
+
+	// Non-movable, non-copyable
+	UnsafeReflectedLayoutBuilder(UnsafeReflectedLayoutBuilder&&) = delete;
+	UnsafeReflectedLayoutBuilder& operator=(UnsafeReflectedLayoutBuilder&&) = delete;
+	UnsafeReflectedLayoutBuilder(const UnsafeReflectedLayoutBuilder&) = delete;
+	auto operator=(const UnsafeReflectedLayoutBuilder&) -> UnsafeReflectedLayoutBuilder& = delete;
+	~UnsafeReflectedLayoutBuilder() noexcept = default;
+
+	/**
+	 * @brief Adds a shader bytecode stage to the pipeline parsing queue.
+	 * @warning It is undefined behavior if desc contains malformed SPIR-V or invalid bytecode size.
+	 */
+	void AddStageUnsafe(const ZHLN_ShaderDesc& desc, VkShaderStageFlags stage) noexcept;
+
+	/**
+	 * @brief Unsafely parses all registered stages and builds the Vulkan layouts.
+	 * @throws Does not throw, but failure to match pipeline state object requirements
+	 * later down the line will cause hard validation layer errors.
+	 */
+	[[nodiscard]] auto BuildUnsafe(VkDevice device) noexcept -> UnsafeReflectedLayout;
+
+  private:
+	struct StageData {
+		const uint32_t* code = nullptr;
+		size_t size = 0;
+		VkShaderStageFlags stage = 0;
+	};
+	std::array<StageData, 5> _stages{};
+	uint32_t _stageCount = 0;
+};
 
 // ============================================================================
 // Command & Rendering Helpers
@@ -614,10 +726,6 @@ template <VkFormat F>
 
 template <VkFormat F>
 [[nodiscard]] auto CreateViewCube(VkDevice device, VkImage image, uint32_t mips = 1) -> ImageView;
-
-using Sampler = DeviceHandle<VkSampler, ZHLN_DestroySampler>;
-using DescriptorSetLayout = DeviceHandle<VkDescriptorSetLayout, ZHLN_DestroyDescriptorSetLayout>;
-using DescriptorPool = DeviceHandle<VkDescriptorPool, ZHLN_DestroyDescriptorPool>;
 
 // ============================================================================
 // Extension Query Utilities

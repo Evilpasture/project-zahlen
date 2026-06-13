@@ -277,7 +277,9 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, GameContext
 
 		game.scriptRunner->CallUpdate(&engine, dt);
 
-		physicsAccumulator += dt;
+		float cappedDt = std::min(dt, 0.1f);
+		physicsAccumulator += cappedDt;
+
 		constexpr float targetDt = 1.0f / 60.0f;
 		while (physicsAccumulator >= targetDt) {
 			ZHLN::MovementSystem(engine, targetDt);

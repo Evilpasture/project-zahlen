@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #include "RenderCore.hpp"
@@ -9,7 +8,6 @@
 #include <array>
 #include <type_traits>
 #include <vulkan/vulkan.h>
-#include <vulkan/vulkan_core.h>
 
 namespace ZHLN::Vk {
 
@@ -142,6 +140,14 @@ class DescriptorUpdater {
 	uint32_t _bufferCount = 0;
 
   public:
+	DescriptorUpdater() = default;
+	~DescriptorUpdater() = default;
+
+	DescriptorUpdater(const DescriptorUpdater&) = delete;
+	DescriptorUpdater& operator=(const DescriptorUpdater&) = delete;
+	DescriptorUpdater(DescriptorUpdater&&) = delete;
+	DescriptorUpdater& operator=(DescriptorUpdater&&) = delete;
+
 	void BindUniformBuffer(uint32_t binding, VkBuffer buffer, VkDeviceSize offset = 0,
 						   VkDeviceSize range = VK_WHOLE_SIZE);
 	void BindStorageBuffer(uint32_t binding, VkBuffer buffer, VkDeviceSize offset = 0,
@@ -150,6 +156,11 @@ class DescriptorUpdater {
 						  VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	void BindSampler(uint32_t binding, VkSampler sampler);
 	void UpdateSet(VkDevice device, VkDescriptorSet set);
+	void Clear() noexcept {
+		_writeCount = 0;
+		_imageCount = 0;
+		_bufferCount = 0;
+	}
 };
 
 // ============================================================================
