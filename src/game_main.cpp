@@ -187,28 +187,19 @@ bool InitializeGame(Engine& engine, GameContext& game) {
 	return true;
 }
 
-void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, GameContext& game) {
-	auto& cam = engine.GetCamera();
-	auto& pc = engine.GetPhysicsContext();
-	auto& rc = engine.GetRenderContext();
-	auto& reg = engine.GetRegistry();
+static void SetupGameGUI(Engine& engine, GameContext& game, ZHLN_GameState& state) {
+	// If we are running in a raw TTY, the entire GUI subsystem is a no-op
+	if (engine.GetWindow().IsTTY()) {
+		return;
+	}
 
-	ZHLN_GameState state =
-		*static_cast<ZHLN_GameState*>(ZHLN_GetGameState(std::bit_cast<ZHLN_Engine*>(&engine)));
-
-	// Update local TAA properties from the shared state before UI / Profiler ticks
-	game.taaState.enabled = state.enableTAA != 0;
-	game.taaState.feedback = state.taaFeedback;
-
+	// 1. Draw Engine and Subshell Terminals
 	ZHLN::DrawConsole(*game.scriptRunner);
 	ZHLN::DrawInventoryShell(*game.scriptRunner);
 	ZHLN::DrawProfiler(engine, game.taaState);
-	ZHLN::DrawOrientationGizmo(cam);
+	ZHLN::DrawOrientationGizmo(engine.GetCamera());
 
-	// Synchronize any updates made by DrawProfiler back to the shared state
-	state.enableTAA = game.taaState.enabled ? 1 : 0;
-	state.taaFeedback = game.taaState.feedback;
-
+	// 2. Main Lighting & Render Controller Panel
 	ImGui::Begin("Lighting Workspace Controller");
 	ImGui::Text("Specular Mips & Area Lights Debugger");
 	ImGui::Separator();
@@ -281,8 +272,26 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, GameContext
 
 	ImGui::End();
 
-	// Flush modified stack parameters back to the shared library memory
+	// Flush any modified state parameters back to the shared library memory
 	ZHLN_SetGameState(std::bit_cast<ZHLN_Engine*>(&engine), &state);
+}
+
+void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, GameContext& game) {
+	auto& cam = engine.GetCamera();
+	auto& pc = engine.GetPhysicsContext();
+	auto& rc = engine.GetRenderContext();
+	auto& reg = engine.GetRegistry();
+
+	// Retrieve current global game state (can be updated from Lua scripts)
+	ZHLN_GameState state =
+		*static_cast<ZHLN_GameState*>(ZHLN_GetGameState(std::bit_cast<ZHLN_Engine*>(&engine)));
+
+	// Update local TAA properties from the shared state before logic & rendering ticks
+	game.taaState.enabled = state.enableTAA != 0;
+	game.taaState.feedback = state.taaFeedback;
+
+	// Process UI Panels (No-op in TTY)
+	SetupGameGUI(engine, game, state);
 
 	// Throttled and compiled-out FileWatcher to completely eliminate once-per-second IO stalls
 	if constexpr (isDev) {

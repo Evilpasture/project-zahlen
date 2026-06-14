@@ -531,9 +531,10 @@ struct BlitPass {
 						}
 						ctx.uiDrawQueue.clear();
 					}
-
-					ImGui::Render();
-					ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+					if (!ctx.window.IsTTY()) {
+						ImGui::Render();
+						ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+					}
 				});
 		}
 

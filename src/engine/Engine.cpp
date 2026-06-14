@@ -9,6 +9,7 @@
 #include <Jolt/Core/Factory.h>
 #include <Jolt/RegisterTypes.h>
 // clang-format on
+#include "TTYBackend.hpp"
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_vulkan.h"
 #include "imgui.h"
@@ -90,8 +91,15 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess) {
 	JPH::Factory::sInstance = new JPH::Factory();
 	JPH::RegisterTypes();
 
+	bool use_tty = false;
+
 	if (!glfwInit()) {
-		return; // Gracefully return; outSuccess remains false
+		if (TTYBackend::IsSupported()) {
+			ZHLN::Log("GLFW failed to initialize. Falling back to native TTY Display Mode.");
+			use_tty = true;
+		} else {
+			return; // Gracefully return; outSuccess remains false
+		}
 	}
 
 	_impl = std::make_unique<EngineImpl>();
@@ -99,8 +107,7 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess) {
 	_impl->input = std::make_unique<InputContext>();
 	_impl->window =
 		std::make_unique<Window>(cfg.render.appName.data(), cfg.render.width, cfg.render.height,
-								 cfg.render.fullscreen, _impl->input.get());
-
+								 cfg.render.fullscreen, _impl->input.get(), use_tty);
 	_impl->renderContext = std::make_unique<RenderContext>(*_impl->window, cfg.render);
 	_impl->physicsContext = std::make_unique<PhysicsContext>(cfg.physics);
 	_impl->audioContext = std::make_unique<AudioContext>();
@@ -140,8 +147,17 @@ bool Engine::IsRunning() const {
 void Engine::ProcessEvents() {
 	ZHLN::CheckForCrashes(this);
 	_impl->input->ResetDeltas();
-	glfwPollEvents();
 
+	if (_impl->window->IsTTY()) {
+		// Process raw evdev keyboard and mouse inputs directly
+		TTYBackend::ProcessEvents(_impl->window->GetTTYContext(), _impl->input.get());
+
+		// No ImGui contexts exist, so we exit immediately (prevents the 0x40 Null Pointer crash!)
+		return;
+	}
+
+	// Desktop GLFW + ImGui path
+	glfwPollEvents();
 	ImGui_ImplVulkan_NewFrame();
 	ImGui_ImplGlfw_NewFrame();
 	ImGui::NewFrame();

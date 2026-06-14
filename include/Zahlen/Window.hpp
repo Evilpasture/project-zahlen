@@ -14,7 +14,7 @@ class InputContext;
 class ZHLN_API Window {
   public:
 	Window(const String32& title, uint32_t width, uint32_t height, bool fullscreen,
-		   InputContext* input);
+		   InputContext* input, bool useTTY = false);
 	~Window();
 
 	Window(const Window&) = delete;
@@ -25,6 +25,7 @@ class ZHLN_API Window {
 	void Focus();
 
 	[[nodiscard]] Extent2D GetSize() const;
+	void SetSize(uint32_t width, uint32_t height) noexcept;
 
 	struct Impl;
 	[[nodiscard]] Impl* GetImpl() const { return _impl.get(); }
@@ -33,6 +34,9 @@ class ZHLN_API Window {
 	[[nodiscard]] void* GetNativeHandle() const;
 
 	void Close();
+
+	[[nodiscard]] bool IsTTY() const;
+	[[nodiscard]] void* GetTTYContext() const;
 
   private:
 	std::unique_ptr<Impl> _impl;

@@ -9,6 +9,7 @@
 #include "SamplerBuilder.hpp"
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_vulkan.h"
+#include "engine/TTYBackend.hpp"
 #include "imgui.h"
 
 #include <Features.hpp>
@@ -20,12 +21,18 @@ namespace ZHLN {
 
 RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	: _impl(std::make_unique<Impl>(window)) {
-	uint32_t glfwExtensionCount = 0;
-	const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-	std::vector<const char*> inst_exts(glfwExtensions, glfwExtensions + glfwExtensionCount);
-	inst_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-	inst_exts.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
-	inst_exts.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+	std::vector<const char*> inst_exts;
+	if (window.IsTTY()) {
+		inst_exts = TTYBackend::GetRequiredInstanceExtensions();
+		inst_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+	} else {
+		uint32_t glfwExtensionCount = 0;
+		const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+		inst_exts.assign(glfwExtensions, glfwExtensions + glfwExtensionCount);
+		inst_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+		inst_exts.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
+		inst_exts.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+	}
 #ifdef __APPLE__
 	inst_exts.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
 #endif
@@ -96,16 +103,26 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	_impl->CompileShadowPipeline(_impl->ctx.Device(), &ZHLN_Resource_BasicVertSpv[0],
 								 ZHLN_Resource_BasicVertSpv_Len);
 
-	_impl->InitPostProcessing();
-
-	auto* glfwWin = static_cast<GLFWwindow*>(window.GetNativeHandle());
 	VkSurfaceKHR raw_surface = nullptr;
-	glfwCreateWindowSurface(_impl->ctx.Instance(), glfwWin, nullptr, &raw_surface);
-	_impl->surface = Vk::Surface(_impl->ctx.Instance(), raw_surface);
-
 	int width = 0;
 	int height = 0;
-	glfwGetFramebufferSize(glfwWin, &width, &height);
+
+	if (window.IsTTY()) {
+		uint32_t hwWidth = 0;
+		uint32_t hwHeight = 0;
+		raw_surface = TTYBackend::CreateSurface(_impl->ctx.Instance(), _impl->ctx.Physical(),
+												window.GetTTYContext(), hwWidth, hwHeight);
+		width = hwWidth;
+		height = hwHeight;
+		window.SetSize(width, height);
+	} else {
+		auto* glfwWin = static_cast<GLFWwindow*>(window.GetNativeHandle());
+		glfwCreateWindowSurface(_impl->ctx.Instance(), glfwWin, nullptr, &raw_surface);
+		glfwGetFramebufferSize(glfwWin, &width, &height);
+	}
+
+	_impl->surface = Vk::Surface(_impl->ctx.Instance(), raw_surface);
+
 	if (!_impl->presentation.Init(_impl->ctx, _impl->allocator, _impl->surface.Get(), width, height,
 								  cfg.vsync)) {
 		ZHLN::Panic("FATAL: Presentation Context initialization failed");
@@ -115,7 +132,8 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	_impl->pools = Vk::CommandPools<2>::Create(
 		_impl->ctx.Device(),
 		{.queue_family = _impl->ctx.PhysicalInfo().graphics_family, .buffers_per_pool = 1});
-	_impl->SetupUI(static_cast<GLFWwindow*>(window.GetNativeHandle()));
+	_impl->InitPostProcessing();
+	_impl->SetupUI(window.IsTTY() ? nullptr : static_cast<GLFWwindow*>(window.GetNativeHandle()));
 
 	uint32_t workerCount = TaskSystem::GetWorkerCount() + 1;
 	if (workerCount == 0) {
@@ -405,7 +423,8 @@ void RenderContext::Impl::InitPostProcessing() {
 												 .size = ZHLN_Resource_BlitFragSpv_Len,
 												 .entry_point = "PSMain"});
 
-	if (!blitPass.Build(ctx.Device(), blitShaders, {VK_FORMAT_B8G8R8A8_SRGB}, &blitPush, 1)) {
+	VkFormat swapchainFormat = presentation.swapchain.Get().format;
+	if (!blitPass.Build(ctx.Device(), blitShaders, {swapchainFormat}, &blitPush, 1)) {
 		ZHLN::Log("Blit pass build failure, continuing...");
 	}
 }
@@ -448,7 +467,6 @@ void RenderContext::Impl::SetupUI(GLFWwindow* window) {
 		Vk::CreateShaderDesc(Vk::AsSpirV(&ZHLN_Resource_UiFragSpv[0]),
 							 ZHLN_Resource_UiFragSpv_Len));
 
-	// 144 bytes matches the exact size of the UIObjectConstants struct in HLSL
 	VkPushConstantRange uiPush = {.stageFlags =
 									  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 								  .offset = 0,
@@ -462,57 +480,60 @@ void RenderContext::Impl::SetupUI(GLFWwindow* window) {
 	uiPipelineLayout =
 		Vk::PipelineLayout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &uiLayoutDesc));
 
-	uiPipeline =
-		Vk::PipelineBuilder{}
-			.Shaders(uiShaders)
-			.Layout(uiPipelineLayout.Get())
-			.Vertex<Vertex>()
-			.ColorFormats({presentation.swapchain.Get().format}) // Render straight to swapchain!
-			.NoDepth()											 // Disable depth testing
-			.AlphaBlend()										 // Enable transparency
-			.CullNone()
-			.Build(ctx.Device());
-
-	IMGUI_CHECKVERSION();
-	ImGui::CreateContext();
-	ImGui_ImplGlfw_InitForVulkan(window, true);
 	VkFormat swapchainFormat = presentation.swapchain.Get().format;
 
-	ImGui_ImplVulkan_InitInfo init_info = {
-		.ApiVersion = VK_API_VERSION_1_3,
-		.Instance = ctx.Instance(),
-		.PhysicalDevice = ctx.Physical(),
-		.Device = ctx.Device(),
-		.QueueFamily = ctx.PhysicalInfo().graphics_family,
-		.Queue = ctx.GraphicsQueue(),
-		.DescriptorPool = uiPool.Get(),
-		.DescriptorPoolSize = 0,
-		.MinImageCount = 2,
-		.ImageCount = 2,
-		.PipelineCache = VK_NULL_HANDLE,
-		.PipelineInfoMain =
-			{
-				.RenderPass = VK_NULL_HANDLE,
-				.Subpass = 0,
-				.MSAASamples = VK_SAMPLE_COUNT_1_BIT,
-				.ExtraDynamicStates{},
-				.PipelineRenderingCreateInfo =
-					{.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-					 .pNext = nullptr,
-					 .viewMask = 0,
-					 .colorAttachmentCount = 1,
-					 .pColorAttachmentFormats = &swapchainFormat,
-					 .depthAttachmentFormat = VK_FORMAT_D32_SFLOAT,
-					 .stencilAttachmentFormat = VK_FORMAT_UNDEFINED},
-			},
-		.UseDynamicRendering = true,
-		.Allocator = nullptr,
-		.CheckVkResultFn = nullptr,
-		.MinAllocationSize = 0,
-		.CustomShaderVertCreateInfo = {},
-		.CustomShaderFragCreateInfo = {},
-	};
-	ImGui_ImplVulkan_Init(&init_info);
+	uiPipeline = Vk::PipelineBuilder{}
+					 .Shaders(uiShaders)
+					 .Layout(uiPipelineLayout.Get())
+					 .Vertex<Vertex>()
+					 .ColorFormats({swapchainFormat})
+					 .NoDepth()
+					 .AlphaBlend()
+					 .CullNone()
+					 .Build(ctx.Device());
+
+	// --- ONLY RUN THE IMGUI/GLFW PORTION IF WINDOW IS VALID ---
+	if (window != nullptr) {
+		IMGUI_CHECKVERSION();
+		ImGui::CreateContext();
+		ImGui_ImplGlfw_InitForVulkan(window, true);
+
+		ImGui_ImplVulkan_InitInfo init_info = {
+			.ApiVersion = VK_API_VERSION_1_3,
+			.Instance = ctx.Instance(),
+			.PhysicalDevice = ctx.Physical(),
+			.Device = ctx.Device(),
+			.QueueFamily = ctx.PhysicalInfo().graphics_family,
+			.Queue = ctx.GraphicsQueue(),
+			.DescriptorPool = uiPool.Get(),
+			.DescriptorPoolSize = 0,
+			.MinImageCount = 2,
+			.ImageCount = 2,
+			.PipelineCache = VK_NULL_HANDLE,
+			.PipelineInfoMain =
+				{
+					.RenderPass = VK_NULL_HANDLE,
+					.Subpass = 0,
+					.MSAASamples = VK_SAMPLE_COUNT_1_BIT,
+					.ExtraDynamicStates{},
+					.PipelineRenderingCreateInfo =
+						{.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+						 .pNext = nullptr,
+						 .viewMask = 0,
+						 .colorAttachmentCount = 1,
+						 .pColorAttachmentFormats = &swapchainFormat,
+						 .depthAttachmentFormat = VK_FORMAT_D32_SFLOAT,
+						 .stencilAttachmentFormat = VK_FORMAT_UNDEFINED},
+				},
+			.UseDynamicRendering = true,
+			.Allocator = nullptr,
+			.CheckVkResultFn = nullptr,
+			.MinAllocationSize = 0,
+			.CustomShaderVertCreateInfo = {},
+			.CustomShaderFragCreateInfo = {},
+		};
+		ImGui_ImplVulkan_Init(&init_info);
+	}
 }
 
 } // namespace ZHLN

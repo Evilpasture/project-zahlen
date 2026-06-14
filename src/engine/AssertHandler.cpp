@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Zahlen/Camera.hpp"
+#include "engine/TTYBackend.hpp"
 #include "physics/Physics.hpp"
 
 #include <Zahlen/Engine.hpp>
@@ -239,8 +240,8 @@ void MemoryDump(const void* ptr, size_t size, std::string_view label, LogContext
 						 "────────┼─────────────────────────┤");
 
 	for (size_t i = 0; i < size; i += opts.bytes_per_line) {
-		std::print(stderr, "│ {}{:#010x}{} │ ", Color::Cyan,
-				   reinterpret_cast<uintptr_t>(byte_ptr + i), Color::Reset);
+		std::print(stderr, "│ {}{:#010x}{} │ ", Color::Cyan, std::bit_cast<uintptr_t>(byte_ptr + i),
+				   Color::Reset);
 
 		for (size_t j = 0; j < opts.bytes_per_line; ++j) {
 			if (i + j < size) {
@@ -286,10 +287,11 @@ void MemoryDump(const void* ptr, size_t size, std::string_view label, LogContext
 					std::memcpy(&f32, byte_ptr + i, 4);
 					std::memcpy(&i32, byte_ptr + i, 4);
 
-					if (!std::isnan(f32) && std::abs(f32) > 0.0001f && std::abs(f32) < 1000000.0f)
+					if (!std::isnan(f32) && std::abs(f32) > 0.0001f && std::abs(f32) < 1000000.0f) {
 						std::print(stderr, "flt: {:<12.4f}", f32);
-					else
+					} else {
 						std::print(stderr, "int: {:<12}", i32);
+					}
 				}
 			} else {
 				std::print(stderr, "{}---{}", Color::Gray, Color::Reset);
@@ -389,6 +391,8 @@ static void ProcessCrash(int sig, void* addr) {
 
 		// Mark that we are now in the "Emergency Dump" phase
 		s_PendingSignal.store(-1);
+		// If TTY was active, it recovers. If GLFW was active, this is a silent no-op.
+		TTYBackend::EmergencyRestore();
 
 		PerformDiagnosticDump(sig, addr, ZHLN::GetEngineContext());
 
@@ -423,7 +427,14 @@ static LONG WINAPI VectoredCrashHandler(PEXCEPTION_POINTERS pExceptionInfo) {
 	return EXCEPTION_CONTINUE_SEARCH;
 }
 #else
-static void PosixCrashHandler(int sig, siginfo_t* info, [[maybe_unused]] void* context) {
+static void PosixCrashHandler(int sig, siginfo_t* info, void* context) {
+	// Intercept standard user terminations (Ctrl+C / Kill)
+	if (sig == SIGINT || sig == SIGTERM) {
+		ZHLN::TTYBackend::EmergencyRestore();
+		_exit(0); // Exit cleanly immediately
+	}
+
+	// Forward standard fatal errors to the crash handler
 	ProcessCrash(sig, info->si_addr);
 }
 #endif
@@ -453,6 +464,8 @@ void SetupSignalHandler() {
 	sigaction(SIGILL, &sa, nullptr);
 	sigaction(SIGFPE, &sa, nullptr);
 	sigaction(SIGABRT, &sa, nullptr);
+	sigaction(SIGINT, &sa, nullptr);
+	sigaction(SIGTERM, &sa, nullptr);
 #endif
 }
 

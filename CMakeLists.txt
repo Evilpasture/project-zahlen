@@ -142,11 +142,18 @@ set(ENGINE_SOURCES
     src/engine/GizmoUI.cpp
     src/engine/CommandLine.cpp
     src/engine/system/TargetCameraSystem.cpp
+    src/engine/TTYBackend.cpp
 )
 
 find_library(ZSTD_LIBRARY NAMES zstd zstd_static HINTS "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib")
 if(NOT ZSTD_LIBRARY)
     message(FATAL_ERROR "Could not find zstd library. Please install it (e.g., 'brew install zstd').")
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBEVDEV REQUIRED IMPORTED_TARGET libevdev)
+    pkg_check_modules(SYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
 endif()
 
 # --- 5. BUILD CORE SHARED LIBRARY ---
@@ -177,6 +184,11 @@ target_link_libraries(zahlen_engine PRIVATE
     imgui
     ${ZSTD_LIBRARY}
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(zahlen_engine PRIVATE PkgConfig::LIBEVDEV PkgConfig::SYSTEMD)
+endif()
+
 # Jolt is part of the public ABI exposed by engine headers, so propagate its include paths.
 target_link_libraries(zahlen_engine PUBLIC Jolt)
 
