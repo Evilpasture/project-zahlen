@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "Mutex.hpp"
 
 #include "TaskSystem.hpp"
@@ -58,19 +57,22 @@ thread_local size_t t_heldLocksCount = 0;
 // and falls back to the Fiber pointer if running inside a Fiber.
 static uintptr_t GetCurrentContextId() noexcept {
 	Fiber* f = GetCurrentFiber();
-	if (f)
-		return reinterpret_cast<uintptr_t>(f);
+	if (f != nullptr) {
+		return std::bit_cast<uintptr_t>(f);
+	}
 	thread_local char osThreadTag;
-	return reinterpret_cast<uintptr_t>(&osThreadTag);
+	return std::bit_cast<uintptr_t>(&osThreadTag);
 }
 
 static bool DfsCheckCycle(const Mutex* current, const Mutex* target) noexcept {
-	if (current == target)
+	if (current == target) {
 		return true;
+	}
 	for (size_t i = 0; i < s_numLockEdges; i++) {
 		if (s_lockEdges[i].from == current) {
-			if (DfsCheckCycle(s_lockEdges[i].to, target))
+			if (DfsCheckCycle(s_lockEdges[i].to, target)) {
 				return true;
+			}
 		}
 	}
 	return false;
@@ -80,8 +82,9 @@ static void AddLockEdge(const Mutex* from, const Mutex* to) noexcept {
 	std::lock_guard<std::mutex> guard(s_debugGraphMutex);
 
 	for (size_t i = 0; i < s_numLockEdges; i++) {
-		if (s_lockEdges[i].from == from && s_lockEdges[i].to == to)
+		if (s_lockEdges[i].from == from && s_lockEdges[i].to == to) {
 			return;
+		}
 	}
 
 	if (DfsCheckCycle(to, from)) {
@@ -90,7 +93,7 @@ static void AddLockEdge(const Mutex* from, const Mutex* to) noexcept {
 	}
 
 	if (s_numLockEdges < MAX_DEBUG_EDGES) {
-		s_lockEdges[s_numLockEdges++] = {from, to};
+		s_lockEdges[s_numLockEdges++] = {.from = from, .to = to};
 	}
 }
 
@@ -166,7 +169,7 @@ struct alignas(CACHE_LINE) Waiter {
 	Fiber* fiber;
 	Waiter* next;
 	std::condition_variable cond;
-	ZHLN::Atomic<bool> signaled{false};
+	ZHLN::Atomic<bool> signaled;
 };
 
 struct alignas(128) Bucket {
@@ -186,7 +189,7 @@ template <size_t BUCKET_COUNT>
 
 	// Golden ratio for 64-bit distribution
 	constexpr uint64_t K = 0x9E3779B97F4A7C15ULL;
-	uint64_t hash = reinterpret_cast<uintptr_t>(addr);
+	auto hash = std::bit_cast<uintptr_t>(addr);
 
 	hash *= K;
 
@@ -212,8 +215,9 @@ void Mutex::LockSlow() noexcept {
 		if (!(val & LOCKED)) {
 			if (_bits.compare_exchange_weak(val, val | LOCKED, std::memory_order_acquire,
 											std::memory_order_relaxed)) {
-				if constexpr (kIsDebugMutex)
+				if constexpr (kIsDebugMutex) {
 					PostLock();
+				}
 				return;
 			}
 		}
@@ -224,8 +228,9 @@ void Mutex::LockSlow() noexcept {
 		for (size_t j = 0; j < backoff_limit; j++) {
 			RelaxCPU();
 		}
-		if (backoff_limit < 1024)
+		if (backoff_limit < 1024) {
 			backoff_limit <<= 1;
+		}
 	}
 
 	// PHASE 2: Parking
@@ -235,8 +240,9 @@ void Mutex::LockSlow() noexcept {
 		if (!(val & LOCKED)) {
 			if (_bits.compare_exchange_weak(val, val | LOCKED, std::memory_order_acquire,
 											std::memory_order_relaxed)) {
-				if constexpr (kIsDebugMutex)
+				if constexpr (kIsDebugMutex) {
 					PostLock();
+				}
 				return;
 			}
 			continue;
@@ -291,8 +297,9 @@ void Mutex::UnlockSlow() noexcept {
 		uint8_t desired = val & ~LOCKED;
 		if (_bits.compare_exchange_weak(val, desired, std::memory_order_release,
 										std::memory_order_relaxed)) {
-			if (!(val & HAS_WAITERS))
+			if (!(val & HAS_WAITERS)) {
 				return;
+			}
 			break;
 		}
 	}
@@ -329,7 +336,7 @@ void Mutex::UnlockSlow() noexcept {
 
 	if (to_wake != nullptr) {
 		to_wake->signaled.store(true, std::memory_order_release);
-		if (!to_wake->fiber) {
+		if (to_wake->fiber == nullptr) {
 			to_wake->cond.notify_one();
 		} else {
 			// Push the fiber back into the OS Thread Ready Queue!

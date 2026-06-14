@@ -207,6 +207,21 @@ if not ok then
         void ZHLN_RegisterGameState(ZHLN_Engine* engine, void* state_ptr);
         uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine, const char* cmd, const void* args);
         float ZHLN_GetTotalTime(ZHLN_Engine* engine);
+
+        typedef struct TargetCameraComponent {
+            uint64_t target;
+            float    distance;
+            float    targetDistance;
+            float    yaw;
+            float    pitch;
+            float    targetOffset[3];
+            float    stiffness;
+            float    vignetteIntensity;
+            float    vignettePower;
+            float    fov;
+            float    targetFov;
+        } TargetCameraComponent;
+
     ]]
 end
 

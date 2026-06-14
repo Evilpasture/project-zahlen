@@ -141,6 +141,7 @@ set(ENGINE_SOURCES
     src/engine/BRDFLUT.cpp
     src/engine/GizmoUI.cpp
     src/engine/CommandLine.cpp
+    src/engine/system/TargetCameraSystem.cpp
 )
 
 find_library(ZSTD_LIBRARY NAMES zstd zstd_static HINTS "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib")
@@ -365,3 +366,5 @@ if(USE_SANITIZERS AND WIN32)
         )
     endif()
 endif()
+
+

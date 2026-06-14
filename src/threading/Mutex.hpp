@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #include <cstdint>
@@ -34,20 +33,18 @@ class Mutex {
 	constexpr Mutex() noexcept = default;
 	~Mutex() = default;
 
-	// Non-copyable, non-movable
-	Mutex(const Mutex&) = delete;
-	Mutex& operator=(const Mutex&) = delete;
-
 	[[gnu::flatten, gnu::hot, gnu::always_inline]]
 	void lock() noexcept {
-		if constexpr (kIsDebugMutex)
+		if constexpr (kIsDebugMutex) {
 			CheckPreLock();
+		}
 
 		uint8_t expected = UNLOCKED;
 		if (_bits.compare_exchange_strong(expected, LOCKED, std::memory_order_acquire,
 										  std::memory_order_relaxed)) [[likely]] {
-			if constexpr (kIsDebugMutex)
+			if constexpr (kIsDebugMutex) {
 				PostLock();
+			}
 			return;
 		}
 		LockSlow();
@@ -70,15 +67,17 @@ class Mutex {
 
 	[[gnu::flatten, gnu::hot, gnu::always_inline]]
 	bool try_lock() noexcept {
-		if constexpr (kIsDebugMutex)
+		if constexpr (kIsDebugMutex) {
 			CheckPreLock();
+		}
 
 		uint8_t expected = UNLOCKED;
 		bool success = _bits.compare_exchange_strong(expected, LOCKED, std::memory_order_acquire,
 													 std::memory_order_relaxed);
 		if constexpr (kIsDebugMutex) {
-			if (success)
+			if (success) {
 				PostLock();
+			}
 		}
 		return success;
 	}
@@ -96,8 +95,8 @@ class Mutex {
 
 	// --- Debug Variables & Helpers ---
 #ifdef ZHLN_DEBUG
-	alignas(32) ZHLN::Atomic<bool> _hasOwner{false};
-	ZHLN::Atomic<uintptr_t> _owner{0};
+	alignas(32) ZHLN::Atomic<bool> _hasOwner;
+	ZHLN::Atomic<uintptr_t> _owner;
 
 	void CheckPreLock() noexcept;
 	void PostLock() noexcept;
@@ -116,7 +115,9 @@ static_assert(kIsDebugMutex || sizeof(Mutex) == 1,
 			  "ZHLN::Mutex must be exactly 1 byte in Release mode!");
 
 // Guarantee it's a perfect POD
-static_assert(kIsDebugMutex || (std::is_trivially_default_constructible_v<Mutex> && std::is_trivially_copyable_v<Mutex>), "Mutex MUST be trivial in Release mode!");
+static_assert(kIsDebugMutex || (std::is_trivially_default_constructible_v<Mutex> &&
+								std::is_trivially_copyable_v<Mutex>),
+			  "Mutex MUST be trivial in Release mode!");
 
 /**
  * @brief Trivial RAII guard to avoid including <mutex> in interface headers.

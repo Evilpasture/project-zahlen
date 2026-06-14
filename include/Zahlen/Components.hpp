@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 #include "Entity.hpp"
 #include "Types.hpp"
@@ -85,4 +84,26 @@ struct RagdollComponent {
 struct NameComponent {
 	String64 name;
 };
+
+/**
+ * @brief Drives a third-person tracking camera locked to an ECS target.
+ */
+struct TargetCameraComponent {
+	Entity target = NullEntity;
+	float distance = 4.5f;
+	float targetDistance = 4.5f;
+	float yaw = -90.0f;
+	float pitch = -10.0f;
+	float targetOffset[3] = {0.0f, 1.3f, 0.0f};
+	float stiffness = 15.0f;
+
+	// --- Camera-bound Post-Processing ---
+	float vignetteIntensity = 1.10f;
+	float vignettePower = 1.50f;
+	float fov = 45.0f;
+	float targetFov = 45.0f;
+};
+
+static_assert(sizeof(TargetCameraComponent) == 56,
+			  "TargetCameraComponent layout must remain stable for FFI.");
 } // namespace ZHLN

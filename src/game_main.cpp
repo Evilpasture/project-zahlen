@@ -9,6 +9,7 @@
 #include "ecs/ECS.hpp"
 #include "engine/FileWatcher.hpp"
 #include "engine/Platform.hpp"
+#include "engine/system/TargetCameraSystem.hpp"
 #include "imgui.h"
 #include "physics/Physics.hpp"
 
@@ -23,6 +24,7 @@
 #include <Zahlen/Scripting.h>
 #include <Zahlen/Scripting.hpp>
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <detail/ControlFlow.hpp>
 #include <engine/system/AnimationSystem.hpp>
@@ -31,9 +33,14 @@
 #include <expected>
 #include <physics/PhysicsWorld.hpp>
 #include <string>
+#include <thread>
 #include <threading/Mutex.hpp>
 #include <threading/TaskSystem.hpp>
 #include <vector>
+
+#if defined(__x86_64__) || defined(_M_X64)
+#include <immintrin.h>
+#endif
 
 namespace ZHLN {
 
@@ -49,6 +56,7 @@ struct GameContext {
 	FileWatcher* gameplayWatcher = nullptr;
 	ArticulationSystem* articulationSystem = nullptr;
 	AnimationSystem* animationSystem = nullptr;
+	TargetCameraSystem* targetCameraSystem = nullptr;
 
 	TAAState taaState{}; // Kept locally to track sub-pixel jitter indices
 };
@@ -129,10 +137,11 @@ bool InitializeGame(Engine& engine, GameContext& game) {
 	defaultState.debugLineVbo = 0;
 
 	// Inject the state into the FFI boundary BEFORE loading scripts
-	ZHLN_SetGameState(reinterpret_cast<ZHLN_Engine*>(&engine), &defaultState);
+	ZHLN_SetGameState(std::bit_cast<ZHLN_Engine*>(&engine), &defaultState);
 
 	reg.RegisterComponents<MeshComponent, PhysicsComponent, MovementComponent,
-						   ALife::ALifeComponent, RagdollComponent, NameComponent>();
+						   ALife::ALifeComponent, RagdollComponent, NameComponent,
+						   TargetCameraComponent>();
 
 	auto groundShape =
 		Physics::GetOrCreateShape(pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
@@ -145,6 +154,19 @@ bool InitializeGame(Engine& engine, GameContext& game) {
 	reg.Add(game.playerEntity, MovementComponent{});
 	Entity charPhys = Physics::CreateCharacter(pc, JPH::RVec3(0.0f, 3.0f, 0.0f));
 	reg.Add(game.playerEntity, PhysicsComponent{charPhys});
+
+	// Instantiate Target Camera entity with initialized post-processing defaults
+	Entity cameraEntity = reg.Create();
+	reg.Add(cameraEntity, TargetCameraComponent{.target = game.playerEntity,
+												.distance = 4.5f,
+												.targetDistance = 4.5f,
+												.yaw = -90.0f,
+												.pitch = -10.0f,
+												.stiffness = 15.0f,
+												.vignetteIntensity = 1.10f,
+												.vignettePower = 1.50f,
+												.fov = 45.0f,
+												.targetFov = 45.0f});
 
 	game.scriptRunner = new ScriptRunner();
 	game.scriptRunner->RunFile("scripts/gameplay.lua");
@@ -160,6 +182,7 @@ bool InitializeGame(Engine& engine, GameContext& game) {
 
 	game.articulationSystem = new ArticulationSystem();
 	game.animationSystem = new AnimationSystem();
+	game.targetCameraSystem = new TargetCameraSystem();
 
 	return true;
 }
@@ -171,7 +194,7 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, GameContext
 	auto& reg = engine.GetRegistry();
 
 	ZHLN_GameState state =
-		*static_cast<ZHLN_GameState*>(ZHLN_GetGameState(reinterpret_cast<ZHLN_Engine*>(&engine)));
+		*static_cast<ZHLN_GameState*>(ZHLN_GetGameState(std::bit_cast<ZHLN_Engine*>(&engine)));
 
 	// Update local TAA properties from the shared state before UI / Profiler ticks
 	game.taaState.enabled = state.enableTAA != 0;
@@ -259,10 +282,18 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, GameContext
 	ImGui::End();
 
 	// Flush modified stack parameters back to the shared library memory
-	ZHLN_SetGameState(reinterpret_cast<ZHLN_Engine*>(&engine), &state);
+	ZHLN_SetGameState(std::bit_cast<ZHLN_Engine*>(&engine), &state);
 
-	if (++game.frameCounter % 60 == 0 && game.gameplayWatcher->CheckModified()) {
-		game.scriptRunner->ReloadFile("scripts/gameplay.lua");
+	// Throttled and compiled-out FileWatcher to completely eliminate once-per-second IO stalls
+	if constexpr (isDev) {
+		static float watcherAccumulator = 0.0f;
+		watcherAccumulator += dt;
+		if (watcherAccumulator >= 2.0f) {
+			watcherAccumulator = 0.0f;
+			if (game.gameplayWatcher->CheckModified()) {
+				game.scriptRunner->ReloadFile("scripts/gameplay.lua");
+			}
+		}
 	}
 
 	{
@@ -292,7 +323,7 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, GameContext
 	}
 }
 
-void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
+void RenderGame(Engine& engine, float frameTime, float physicsAccumulator, GameContext& game) {
 	auto& rc = engine.GetRenderContext();
 	auto& reg = engine.GetRegistry();
 	auto& cam = engine.GetCamera();
@@ -300,16 +331,13 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 
 	// 1. Fetch updated state populated by Lua or ImGui
 	ZHLN_GameState state =
-		*static_cast<ZHLN_GameState*>(ZHLN_GetGameState(reinterpret_cast<ZHLN_Engine*>(&engine)));
+		*static_cast<ZHLN_GameState*>(ZHLN_GetGameState(std::bit_cast<ZHLN_Engine*>(&engine)));
 
 	// 2. Extract player parts array from pure data (No shared std::vector!)
 	std::vector<Entity> playerParts(state.playerPartsCount);
 	for (uint32_t i = 0; i < state.playerPartsCount; ++i) {
 		playerParts[i] = Entity::Unpack(state.playerParts[i]);
 	}
-
-	static Clock deltaClock;
-	float renderFrameTime = deltaClock.GetDeltaTime();
 
 	auto res = engine.GetWindow().GetSize();
 	const auto& worldState = pc.GetWorld();
@@ -323,38 +351,22 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 	} else {
 		game.taaState.frameIndex = 0;
 	}
-
-	JPH::Vec3 playerPos = JPH::Vec3::sZero();
 	constexpr float targetDt = 1.0f / 60.0f;
-	if (reg.IsAlive(game.playerEntity)) {
-		if (auto* phys = reg.Get<PhysicsComponent>(game.playerEntity)) {
-			uint32_t dense = worldState.slotToDense[phys->physicsHandle.index];
-			const size_t base = static_cast<size_t>(dense) * 4;
 
-			JPH::Vec3 currPos((float)worldState.positions[base],
-							  (float)worldState.positions[base + 1],
-							  (float)worldState.positions[base + 2]);
+	// Fixed: pass primary frameTime directly to prevent drift across multiple Clocks
+	game.targetCameraSystem->Update(engine, frameTime, physicsAccumulator / targetDt);
 
-			JPH::Vec3 prevPos((float)worldState.prevPositions[base],
-							  (float)worldState.prevPositions[base + 1],
-							  (float)worldState.prevPositions[base + 2]);
+	// Resolve local post-processing settings directly from the active camera component
+	float vignetteIntensity = 1.10f;
+	float vignettePower = 1.50f;
 
-			float alpha = std::clamp(physicsAccumulator / targetDt, 0.0f, 1.0f);
-			playerPos = prevPos + alpha * (currPos - prevPos);
+	auto cameraEntities = reg.GetEntitiesWith<TargetCameraComponent>();
+	if (!cameraEntities.empty()) {
+		if (auto* camComp = reg.Get<TargetCameraComponent>(cameraEntities[0])) {
+			vignetteIntensity = camComp->vignetteIntensity;
+			vignettePower = camComp->vignettePower;
 		}
 	}
-
-	float yawRad = JPH::DegreesToRadians(cam.yaw);
-	float pitchRad = JPH::DegreesToRadians(cam.pitch);
-	JPH::Vec3 offsetDir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad),
-						JPH::Sin(yawRad) * JPH::Cos(pitchRad));
-
-	float wheelDelta = engine.GetInput().GetMouse().wheel;
-	if (std::abs(wheelDelta) > 0.01f) {
-		game.camDistance = JPH::Clamp(game.camDistance - wheelDelta * 0.5f, 1.5f, 15.0f);
-	}
-	cam.position =
-		playerPos - (offsetDir.Normalized() * game.camDistance) + JPH::Vec3(0.0f, 1.3f, 0.0f);
 
 	JPH::Mat44 unjitteredProj = cam.GetProjectionMatrix((float)res.width / res.height);
 	JPH::Mat44 unjitteredVp = unjitteredProj * cam.GetViewMatrix();
@@ -510,8 +522,8 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 								 .aoPower = state.aoPower,
 								 .giIntensity = state.giIntensity,
 								 .giSamples = state.giSamples,
-								 .vignetteIntensity = state.vignetteIntensity,
-								 .vignettePower = state.vignettePower,
+								 .vignetteIntensity = vignetteIntensity, // Dynamic view parameter
+								 .vignettePower = vignettePower,		 // Dynamic view parameter
 								 .enableSSR = state.enableSSR ? 1 : 0});
 
 	Renderer::SetLights(rc, sceneLights.data(), uniforms.lightCount);
@@ -521,6 +533,8 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 
 	engine.BeginFrame();
 
+	// Read player world matrix (ignoring interpolated translation calculations since they are
+	// covered by TargetCameraSystem)
 	JPH::Mat44 playerTransform = JPH::Mat44::sIdentity();
 	if (reg.IsAlive(game.playerEntity)) {
 		bool isRagdollActive = false;
@@ -535,8 +549,23 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 				rotation = JPH::Quat(move->orientation[0], move->orientation[1],
 									 move->orientation[2], move->orientation[3]);
 			}
+
+			// Simple interpolation for character model visualization
+			JPH::Vec3 lerpedPlayerPos = JPH::Vec3::sZero();
+			if (auto* phys = reg.Get<PhysicsComponent>(game.playerEntity)) {
+				uint32_t dense = worldState.slotToDense[phys->physicsHandle.index];
+				const size_t base = static_cast<size_t>(dense) * 4;
+				JPH::Vec3 currPos(worldState.positions[base], worldState.positions[base + 1],
+								  worldState.positions[base + 2]);
+				JPH::Vec3 prevPos(worldState.prevPositions[base],
+								  worldState.prevPositions[base + 1],
+								  worldState.prevPositions[base + 2]);
+				float alpha = std::clamp(physicsAccumulator / targetDt, 0.0f, 1.0f);
+				lerpedPlayerPos = prevPos + alpha * (currPos - prevPos);
+			}
+
 			playerTransform =
-				Math::CreateTransform(playerPos - JPH::Vec3(0.0f, 0.8f, 0.0f), rotation);
+				Math::CreateTransform(lerpedPlayerPos - JPH::Vec3(0.0f, 0.8f, 0.0f), rotation);
 		}
 	}
 
@@ -564,14 +593,12 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 
 	Renderer::DrawUI(rc, game.helloText, game.fontAtlasIdx);
 
-	// Retrieve debug line properties directly from the shared POD struct (no functions required!)
 	if (CullingStats::FreezeFrustum && state.debugLineVbo != 0) {
 		Mesh debugMesh = {.vertexBuffer = static_cast<BufferHandle>(state.debugLineVbo),
 						  .vertexCount = 36};
 		Material debugMat = {.pipeline = static_cast<PipelineHandle>(state.debugLinePipeline),
 							 .albedoIndex = state.debugLineAlbedo};
 
-		// Setup the neon color locally
 		debugMat.baseColorFactor[0] = 0.0f;
 		debugMat.baseColorFactor[1] = 1.0f;
 		debugMat.baseColorFactor[2] = 1.0f;
@@ -599,7 +626,8 @@ void RenderGame(Engine& engine, float physicsAccumulator, GameContext& game) {
 
 	engine.EndFrame();
 
-	ZHLN::AudioSystem(engine, renderFrameTime);
+	// Fixed: pass primary frameTime directly to prevent drift across multiple Clocks
+	ZHLN::AudioSystem(engine, frameTime);
 
 	s_PrevUnjitteredVp = unjitteredVp;
 
@@ -639,29 +667,36 @@ std::expected<std::unique_ptr<Engine>, EngineError> InitializeEngine(CommandLine
 	ZHLN::SetupSignalHandler();
 	TaskSystem::Init();
 
+	uint32_t w = options.fullscreen ? 0 : 1280;
+	uint32_t h = options.fullscreen ? 0 : 720;
+
 	EngineConfig config{
 		.physics = {.maxBodies = 5000,
 					.maxBodyPairs = 10000,
 					.maxContactConstraints = 10000,
 					.tempAllocatorSize = 64 * 1024 * 1024},
 		.render = {.appName = "Zahlen Engine",
-				   .width = 1280,
-				   .height = 720,
-				   .vsync = false,
+				   .width = w,
+				   .height = h,
+				   .vsync = options.vsync,
+				   .fullscreen = options.fullscreen,
 				   .enableValidation = options.enableValidation},
 	};
 
-	auto engine = std::make_unique<Engine>(config);
+	const char* initError = nullptr;
+	auto engine = Engine::Create(config, &initError);
+
 	if (!engine) {
-		return std::unexpected(EngineError{.msg = "Failed to allocate memory for Engine context.",
-										   .code = EXIT_FAILURE});
+		return std::unexpected(EngineError{
+			.msg = (initError != nullptr) ? initError : "Unknown engine initialization error.",
+			.code = EXIT_FAILURE});
 	}
 
 	engine->GetWindow().Focus();
 	return engine;
 }
 
-std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine) {
+std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, uint32_t fpsLimit) {
 	Clock clock;
 	GameContext game{};
 
@@ -671,6 +706,11 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine) {
 	}
 
 	float physicsAccumulator = 0.0f;
+	const double targetFrameTime = fpsLimit > 0 ? 1.0 / static_cast<double>(fpsLimit) : 0.0;
+
+	// Reset main loop delta accumulation to discard heavy asset-load / compile startup durations
+	clock.GetDeltaTime();
+	auto frameStart = std::chrono::high_resolution_clock::now();
 
 	while (engine->IsRunning()) {
 		float frameTime = clock.GetDeltaTime();
@@ -693,9 +733,35 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine) {
 			continue;
 		}
 
-		// Execute game simulation ticks and rendering
 		ZHLN::UpdateGame(*engine, frameTime, physicsAccumulator, game);
-		ZHLN::RenderGame(*engine, physicsAccumulator, game);
+		ZHLN::RenderGame(*engine, frameTime, physicsAccumulator, game);
+
+		// Frame Rate Limiter
+		if (fpsLimit > 0) {
+			auto frameEnd = std::chrono::high_resolution_clock::now();
+			double elapsed = std::chrono::duration<double>(frameEnd - frameStart).count();
+			if (elapsed < targetFrameTime) {
+				double sleepTime = targetFrameTime - elapsed;
+				// Yield the thread to the OS if we have a safe margin of time remaining
+				if (sleepTime > 0.002) {
+					std::this_thread::sleep_for(
+						std::chrono::microseconds(static_cast<int64_t>((sleepTime - 0.001) * 1e6)));
+				}
+				// Spin wait the last 1ms for microsecond accuracy
+				while (std::chrono::duration<double>(std::chrono::high_resolution_clock::now() -
+													 frameStart)
+						   .count() < targetFrameTime) {
+#if defined(__x86_64__) || defined(_M_X64)
+					_mm_pause();
+#elif defined(__aarch64__)
+					__asm__ __volatile__("yield" ::: "memory");
+#else
+					std::this_thread::yield();
+#endif
+				}
+			}
+		}
+		frameStart = std::chrono::high_resolution_clock::now();
 	}
 
 	ZHLN::ShutdownGame(*engine, game);
@@ -703,12 +769,13 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine) {
 
 	return EXIT_SUCCESS;
 }
-
 } // namespace
 
 extern auto RunGame(const ZHLN::CommandLineOptions& options) {
 	auto result = InitializeEngine(options)
-					  .and_then(RunEngineLoop)
+					  .and_then([&options](std::unique_ptr<Engine> engine) {
+						  return RunEngineLoop(std::move(engine), options.fpsLimit);
+					  })
 					  .transform_error([](const EngineError& err) -> int {
 						  if (!err.msg.empty() && !err.silent) {
 							  ZHLN::Log("Error: {}", err.msg);

@@ -19,6 +19,7 @@ local NATIVE_COMPONENTS = {
     ALifeComponent = true,
     RagdollComponent = true,
     NameComponent = true,
+    TargetCameraComponent = true,
 }
 
 -- Stable key converter for cdata / uint64_t table indexing

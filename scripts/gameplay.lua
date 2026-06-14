@@ -159,29 +159,44 @@ local function camera_fov_system(dt)
     local movement = game_ecs:get(player_ent, "MovementComponent")
     if not movement then return end
 
-    local target_fov = 45.0
-    if movement.isSprinting then
-        target_fov = 55.0
+    local cam_ent = nil
+    for ent, _ in game_ecs:view("TargetCameraComponent") do
+        cam_ent = ent
+        break
     end
+    if not cam_ent then return end
 
-    local current_fov = engine:get_camera_fov()
-    local new_fov = current_fov + (target_fov - current_fov) * 8.0 * dt
-    engine:set_camera_fov(new_fov)
+    local cam = game_ecs:get(cam_ent, "TargetCameraComponent")
+
+    if movement.isSprinting then
+        cam.targetFov = 55.0
+    else
+        cam.targetFov = 45.0
+    end
 end
 
 local function visual_feedback_system(dt)
-    if not player_ent or not game_state then return end
+    if not player_ent then return end
 
     local combat = game_ecs:get(player_ent, "combat")
     if not combat then return end
 
+    local cam_ent = nil
+    for ent, _ in game_ecs:view("TargetCameraComponent") do
+        cam_ent = ent
+        break
+    end
+    if not cam_ent then return end
+
+    local cam = game_ecs:get(cam_ent, "TargetCameraComponent")
+
     if combat.hp < 40 then
         local pulse = math.sin(engine:get_total_time() * 6.0)
-        game_state.vignetteIntensity = 1.4 + 0.35 * pulse
-        game_state.vignettePower = 2.0
+        cam.vignetteIntensity = 1.4 + 0.35 * pulse
+        cam.vignettePower = 2.0
     else
-        game_state.vignetteIntensity = 1.10
-        game_state.vignettePower = 1.50
+        cam.vignetteIntensity = 1.10
+        cam.vignettePower = 1.50
     end
 end
 
@@ -192,8 +207,3 @@ zh.scheduler.register("CameraFOV", 30, camera_fov_system)
 zh.scheduler.register("VisualFeedback", 25, visual_feedback_system)
 
 zh.log("Gameplay: Systems successfully initialized under the Core Scheduler.")
-
-if not _G.engine_started then
-    _G.engine_started = true
-    zh.trigger("engine.start")
-end

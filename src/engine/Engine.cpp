@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // src/engine/Engine.cpp
 
 #include <GLFW/glfw3.h>
@@ -51,6 +50,33 @@ struct EngineImpl {
 Engine::Engine() : Engine(EngineConfig{}) {}
 
 Engine::Engine(const EngineConfig& cfg) {
+	bool success = false;
+	InitInternal(cfg, success);
+	if (!success) {
+		ZHLN::Panic("FATAL: Failed to initialize Engine via legacy constructor.");
+	}
+}
+
+Engine::Engine(const EngineConfig& cfg, bool& outSuccess) {
+	InitInternal(cfg, outSuccess);
+}
+
+std::unique_ptr<Engine> Engine::Create(const EngineConfig& cfg, const char** outError) {
+	bool success = false;
+	auto engine = std::unique_ptr<Engine>(new (std::nothrow) Engine(cfg, success));
+
+	if (!engine || !success) {
+		if (outError != nullptr) {
+			*outError = "Failed to initialize windowing system (GLFW). Are you running in a "
+						"headless, SSH, or TTY environment without an active X11/Wayland session?";
+		}
+		return nullptr;
+	}
+	return engine;
+}
+
+void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess) {
+	outSuccess = false;
 	g_CurrentEngine = this;
 	s_GlobalEngine = this;
 	ZHLN::Fiber::InitMainThread();
@@ -65,14 +91,15 @@ Engine::Engine(const EngineConfig& cfg) {
 	JPH::RegisterTypes();
 
 	if (!glfwInit()) {
-		ZHLN::Panic("FATAL: Failed to initialize GLFW");
+		return; // Gracefully return; outSuccess remains false
 	}
 
 	_impl = std::make_unique<EngineImpl>();
 
 	_impl->input = std::make_unique<InputContext>();
-	_impl->window = std::make_unique<Window>("Project-Zahlen Engine", cfg.render.width,
-											 cfg.render.height, _impl->input.get());
+	_impl->window =
+		std::make_unique<Window>(cfg.render.appName.data(), cfg.render.width, cfg.render.height,
+								 cfg.render.fullscreen, _impl->input.get());
 
 	_impl->renderContext = std::make_unique<RenderContext>(*_impl->window, cfg.render);
 	_impl->physicsContext = std::make_unique<PhysicsContext>(cfg.physics);
@@ -87,6 +114,7 @@ Engine::Engine(const EngineConfig& cfg) {
 	} else {
 		ZHLN::Log("WARNING: Could not find 'data/base.pak' in working directory or build/ folder!");
 	}
+	outSuccess = true;
 }
 
 Engine::~Engine() {

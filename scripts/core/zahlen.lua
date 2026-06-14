@@ -465,6 +465,12 @@ end
 -- Global Host Hooks
 -- ============================================================================
 _G.update = function(ptr, dt)
+    -- Trigger the start event exactly once on the first frame tick
+    if not _G.engine_started then
+        _G.engine_started = true
+        zh.trigger("engine.start")
+    end
+
     zh.trigger("engine.tick", dt)
 
     for i = 1, #scheduler.systems do

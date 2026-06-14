@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // include/Zahlen/Engine.hpp
 #pragma once
 #include <Zahlen/Common.h>
@@ -31,14 +30,17 @@ class ZHLN_API Engine {
   public:
 	Engine();
 	Engine(const EngineConfig& cfg);
+	Engine(const EngineConfig& cfg, bool& outSuccess);
 	~Engine();
+
+	// Static Factory: Uses a raw out-pointer to avoid <string>/<expected> dependencies
+	static std::unique_ptr<Engine> Create(const EngineConfig& cfg, const char** outError = nullptr);
 
 	[[nodiscard]] bool IsRunning() const;
 	void ProcessEvents();
 	void BeginFrame();
 	void EndFrame();
 
-	// FACADE ACCESSORS: Zero transitive header footprint
 	Window& GetWindow();
 	PhysicsContext& GetPhysicsContext();
 	RenderContext& GetRenderContext();
@@ -49,11 +51,11 @@ class ZHLN_API Engine {
 	AudioContext& GetAudioContext();
 	ECS::Registry& GetRegistry();
 
-	// Single instance-local context slot for flat shared memory
 	[[nodiscard]] void* GetGameState() const;
 	void SetGameState(void* state);
 
   private:
+	void InitInternal(const EngineConfig& cfg, bool& outSuccess);
 	std::unique_ptr<EngineImpl> _impl;
 };
 

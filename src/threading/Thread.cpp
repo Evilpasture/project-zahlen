@@ -1,9 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "Thread.hpp"
 
+#include <bit>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -12,7 +13,7 @@
 #if defined(__x86_64__) || defined(_M_X64)
 #include <emmintrin.h>
 #endif
-// Defined in mag_asm.S
+// Defined in Thread.S
 extern "C" void ZHLN_Switch(void** old_sp, void* new_sp);
 extern "C" void ZHLN_TrampolineAsm(void);
 
@@ -23,13 +24,15 @@ static thread_local Fiber t_mainFiber;
 static thread_local Fiber* t_currentFiber = nullptr;
 
 auto GetCurrentFiberID() -> uint64_t {
-	if (!t_currentFiber)
+	if (t_currentFiber == nullptr) {
 		return 0; // Not a fiber-managed thread
-	if (t_currentFiber->isMain)
+	}
+	if (t_currentFiber->isMain) {
 		return 1; // Friendly ID for main thread
+	}
 
 	// For worker fibers, return the memory address as a unique ID
-	return reinterpret_cast<uint64_t>(t_currentFiber);
+	return std::bit_cast<uint64_t>(t_currentFiber);
 }
 
 /**
@@ -38,7 +41,7 @@ auto GetCurrentFiberID() -> uint64_t {
  */
 extern "C" void ZHLN_Trampoline() {
 	Fiber* self = t_currentFiber;
-	if (self->func) {
+	if (self->func != nullptr) {
 		self->func(self->arg);
 	}
 	self->isFinished = true;
@@ -67,8 +70,9 @@ Fiber* Fiber::GetCurrent() noexcept {
 }
 
 void Fiber::InitMainThread() noexcept {
-	if (t_currentFiber)
+	if (t_currentFiber != nullptr) {
 		return;
+	}
 
 	t_mainFiber.isFinished = false;
 	t_mainFiber.isMain = true;
@@ -93,8 +97,9 @@ Fiber* Fiber::Create(size_t stackSize, FiberFunc func, void* arg) noexcept {
 	size_t pageSize = sysconf(_SC_PAGESIZE);
 #endif
 
-	if (stackSize == 0)
-		stackSize = 1024 * 1024; // 1MB default
+	if (stackSize == 0) {
+		stackSize = static_cast<size_t>(1024 * 1024); // 1MB default
+	}
 	stackSize = (stackSize + pageSize - 1) & ~(pageSize - 1);
 	size_t totalSize = stackSize + (pageSize * 2); // Stack + 2 Guard Pages
 
@@ -110,9 +115,9 @@ Fiber* Fiber::Create(size_t stackSize, FiberFunc func, void* arg) noexcept {
 #endif
 
 	// 3. Place Fiber struct at the very top of the allocated memory
-	uintptr_t endAddr = reinterpret_cast<uintptr_t>(map) + totalSize;
+	uintptr_t endAddr = std::bit_cast<uintptr_t>(map) + totalSize;
 	uintptr_t structAddr = (endAddr - sizeof(Fiber)) & ~15ULL;
-	Fiber* fiber = reinterpret_cast<Fiber*>(structAddr);
+	auto* fiber = std::bit_cast<Fiber*>(structAddr);
 
 	fiber->mapAddr = map;
 	fiber->mapSize = totalSize;
@@ -131,23 +136,23 @@ Fiber* Fiber::Create(size_t stackSize, FiberFunc func, void* arg) noexcept {
 
 #if defined(_WIN32) && (defined(__x86_64__) || defined(_M_X64))
 	sp -= 240; // Windows x64 context size (GPRs + XMMs)
-	*reinterpret_cast<uintptr_t*>(sp + 232) = reinterpret_cast<uintptr_t>(ZHLN_TrampolineAsm);
+	*std::bit_cast<uintptr_t*>(sp + 232) = reinterpret_cast<uintptr_t>(ZHLN_TrampolineAsm);
 #elif defined(__x86_64__) || defined(_M_X64)
 	sp -= 8; // Space for Return Address
-	*reinterpret_cast<uintptr_t*>(sp) = reinterpret_cast<uintptr_t>(ZHLN_TrampolineAsm);
+	*std::bit_cast<uintptr_t*>(sp) = reinterpret_cast<uintptr_t>(ZHLN_TrampolineAsm);
 	sp -= 48; // Space for 6 Callee-saved GPRs
 #elif defined(__aarch64__) || defined(_M_ARM64)
 	sp -= 160; // ARM64 Context size
-	*reinterpret_cast<uintptr_t*>(sp + 88) =
+	*std::bit_cast<uintptr_t*>(sp + 88) =
 		reinterpret_cast<uintptr_t>(ZHLN_TrampolineAsm); // X30 (LR)
 #endif
 
-	fiber->stackPointer = reinterpret_cast<void*>(sp);
+	fiber->stackPointer = std::bit_cast<void*>(sp);
 	return fiber;
 }
 
 void Fiber::Resume(Fiber* target) noexcept {
-	// FIX: Ensure the target OS thread has fully vacated this stack before we jump into it!
+	//  Ensure the target OS thread has fully vacated this stack before we jump into it!
 	while (target->isRunning.load(std::memory_order_acquire)) {
 #if defined(__x86_64__) || defined(_M_X64)
 		_mm_pause();
@@ -175,8 +180,9 @@ void Fiber::Resume(Fiber* target) noexcept {
 void Fiber::Yield() noexcept {
 	Fiber* self = t_currentFiber;
 	Fiber* target = self->caller;
-	if (!target)
+	if (target == nullptr) {
 		return;
+	}
 
 	SwapTEB(target);
 	t_currentFiber = target;
@@ -184,8 +190,9 @@ void Fiber::Yield() noexcept {
 }
 
 void Fiber::Destroy(Fiber* fiber) noexcept {
-	if (!fiber || fiber->isMain)
+	if ((fiber == nullptr) || fiber->isMain) {
 		return;
+	}
 #if defined(_WIN32)
 	VirtualFree(fiber->mapAddr, 0, MEM_RELEASE);
 #else

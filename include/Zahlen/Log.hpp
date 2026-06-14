@@ -1,11 +1,13 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
+
+#include "CommandLine.hpp"
 
 #include <cstdio>
 #include <format>
+#include <print>
 #include <source_location>
 #include <string>
 #include <string_view>
@@ -22,6 +24,8 @@ auto GetCustomLogFile(FILE* overrideFile = nullptr) -> FILE*;
 auto GetPoorMansStacktrace() -> std::string;
 
 enum class LogChannel : uint8_t { StdErr, StdOut, File };
+void SetLogLevel(LogLevel level) noexcept;
+LogLevel GetLogLevel() noexcept;
 
 struct LogContext {
 	std::string_view fmt;
@@ -42,8 +46,13 @@ void InternalWriteLog(uint8_t channel, const char* file, uint32_t line, std::str
 /**
  * @brief Modern C++23 Engine Logger with Fiber awareness and compile-time channel dispatch.
  */
-template <LogChannel Channel = LogChannel::StdErr, typename... Args>
+template <LogChannel Channel = LogChannel::StdErr, LogLevel Level = LogLevel::Moderate,
+		  typename... Args>
 void Log(LogContext ctx, Args&&... args) {
+	// Filter logs dynamically: If global level is below this call's level, skip execution.
+	if (static_cast<uint8_t>(GetLogLevel()) < static_cast<uint8_t>(Level)) {
+		return;
+	}
 	std::string formatted = std::vformat(ctx.fmt, std::make_format_args(args...));
 	InternalWriteLog(static_cast<uint8_t>(Channel), ctx.loc.file_name(), ctx.loc.line(), formatted);
 }
@@ -82,15 +91,17 @@ inline void TraceStructInternal(const T& obj, std::string_view name, LogContext 
 	TraceStructHeader(name, ctx.fmt, ctx.loc.file_name(), ctx.loc.line());
 
 	if constexpr (std::is_pointer_v<T>) {
-		if (obj)
+		if (obj) {
 			__builtin_dump_struct(obj, &TraceStructCallback);
-		else
-			std::fprintf(stderr, "  (null pointer)\n");
+		} else {
+			std::println(stderr, "  (null pointer)");
+		}
 	} else if constexpr (requires { obj.get(); }) { // Detects std::unique_ptr / std::shared_ptr
-		if (obj.get())
+		if (obj.get()) {
 			__builtin_dump_struct(obj.get(), &TraceStructCallback);
-		else
-			std::fprintf(stderr, "  (null smart pointer)\n");
+		} else {
+			std::println(stderr, "  (null smart pointer)");
+		}
 	} else {
 		__builtin_dump_struct(&obj, &TraceStructCallback);
 	}

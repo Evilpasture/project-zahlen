@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 #include <Zahlen/Common.h>
 #include <Zahlen/Types.hpp>
@@ -14,7 +13,8 @@ class InputContext;
 
 class ZHLN_API Window {
   public:
-	Window(const String32& title, uint32_t width, uint32_t height, InputContext* input);
+	Window(const String32& title, uint32_t width, uint32_t height, bool fullscreen,
+		   InputContext* input);
 	~Window();
 
 	Window(const Window&) = delete;

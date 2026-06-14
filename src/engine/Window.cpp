@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "Platform.hpp"
 
 #include <GLFW/glfw3.h> // NEW
@@ -38,19 +37,35 @@ struct Window::Impl {
 	InputContext* input = nullptr;
 };
 
-Window::Window(const String32& title, uint32_t width, uint32_t height, InputContext* input)
+Window::Window(const String32& title, uint32_t width, uint32_t height, bool fullscreen,
+			   InputContext* input)
 	: _impl(std::make_unique<Impl>()) {
 
 	_impl->input = input;
 
-	// Tell GLFW NOT to create an OpenGL context
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-	_impl->handle = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
 
-	// Store 'this' pointer in GLFW so callbacks can access the InputContext
+	GLFWmonitor* monitor = nullptr;
+	if (fullscreen) {
+		monitor = glfwGetPrimaryMonitor();
+		if (monitor != nullptr) {
+			const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+			// Match monitor's native video configurations
+			glfwWindowHint(GLFW_RED_BITS, mode->redBits);
+			glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
+			glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
+			glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
+
+			// Automatically scale the resolution if no dimensions are supplied
+			width = (width == 0) ? static_cast<uint32_t>(mode->width) : width;
+			height = (height == 0) ? static_cast<uint32_t>(mode->height) : height;
+		}
+	}
+
+	_impl->handle = glfwCreateWindow(width, height, title.c_str(), monitor, nullptr);
 	glfwSetWindowUserPointer(_impl->handle, this);
 
-	if (input) {
+	if (input != nullptr) {
 		glfwSetKeyCallback(_impl->handle,
 						   [](GLFWwindow* win, int key, [[maybe_unused]] int scancode, int action,
 							  [[maybe_unused]] int mods) {
@@ -66,10 +81,11 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, InputCont
 			_impl->handle, [](GLFWwindow* win, int button, int action, [[maybe_unused]] int mods) {
 				auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
 				if (button == GLFW_MOUSE_BUTTON_RIGHT) {
-					if (action == GLFW_PRESS)
+					if (action == GLFW_PRESS) {
 						self->_impl->input->InjectKeyDown(KeyCode::RButton);
-					else if (action == GLFW_RELEASE)
+					} else if (action == GLFW_RELEASE) {
 						self->_impl->input->InjectKeyUp(KeyCode::RButton);
+					}
 				}
 			});
 
@@ -82,7 +98,7 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, InputCont
 		glfwSetFramebufferSizeCallback(_impl->handle, [](GLFWwindow* win, int width, int height) {
 			auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
 			self->_impl->input->InjectResize(
-				{static_cast<uint32_t>(width), static_cast<uint32_t>(height)});
+				{.width = static_cast<uint32_t>(width), .height = static_cast<uint32_t>(height)});
 		});
 
 		glfwSetScrollCallback(_impl->handle, [](GLFWwindow* win, double xoffset, double yoffset) {
@@ -93,13 +109,13 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, InputCont
 }
 
 Window::~Window() {
-	if (_impl->handle) {
+	if (_impl->handle != nullptr) {
 		glfwDestroyWindow(_impl->handle);
 	}
 }
 
 bool Window::IsRunning() const {
-	return !glfwWindowShouldClose(_impl->handle);
+	return glfwWindowShouldClose(_impl->handle) == 0;
 }
 
 void Window::ProcessEvents() {
@@ -107,11 +123,12 @@ void Window::ProcessEvents() {
 }
 
 Extent2D Window::GetSize() const {
-	int w, h;
+	int w = 0;
+	int h = 0;
 	// glfwGetWindowSize returns logical points
 	// glfwGetFramebufferSize returns actual pixels
 	glfwGetFramebufferSize(_impl->handle, &w, &h);
-	return {static_cast<uint32_t>(w), static_cast<uint32_t>(h)};
+	return {.width = static_cast<uint32_t>(w), .height = static_cast<uint32_t>(h)};
 }
 
 void Window::Focus() {

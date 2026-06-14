@@ -23,6 +23,7 @@
 #include <Zahlen/physics/Physics_C.h>
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdlib>
 #include <detail/ControlFlow.hpp>
@@ -32,8 +33,13 @@
 #include <imgui.h>
 #include <physics/PhysicsWorld.hpp>
 #include <span>
+#include <thread>
 #include <threading/TaskSystem.hpp>
 #include <vector>
+
+#if defined(__x86_64__) || defined(_M_X64)
+#include <immintrin.h>
+#endif
 
 using namespace ZHLN;
 
@@ -250,10 +256,13 @@ std::expected<std::unique_ptr<Engine>, EngineError> InitializeEditor(CommandLine
 				   .enableValidation = options.enableValidation},
 	};
 
-	auto engine = std::make_unique<Engine>(config);
+	const char* initError = nullptr;
+	auto engine = Engine::Create(config, &initError);
+
 	if (!engine) {
-		return std::unexpected(EngineError{.msg = "Failed to allocate memory for Engine context.",
-										   .code = EXIT_FAILURE});
+		return std::unexpected(EngineError{
+			.msg = (initError != nullptr) ? initError : "Unknown editor initialization error.",
+			.code = EXIT_FAILURE});
 	}
 
 	engine->GetWindow().Focus();
@@ -276,6 +285,7 @@ bool InitializeEditorScene(Engine& engine) {
 	reg.RegisterComponent<MovementComponent>("MovementComponent");
 	reg.RegisterComponent<ALife::ALifeComponent>("ALifeComponent");
 	reg.RegisterComponent<NameComponent>("NameComponent");
+	reg.RegisterComponent<TargetCameraComponent>("TargetCameraComponent");
 
 	ZHLN::Log("Initializing Editor Workspace Scene...");
 	int terrainSize = 128;
@@ -321,7 +331,7 @@ bool InitializeEditorScene(Engine& engine) {
 // STAGE 4: MAIN WORKSPACE INTERACTION LOOP
 // ============================================================================
 
-std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine) {
+std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, uint32_t fpsLimit) {
 	Clock clock;
 
 	if (!InitializeEditorScene(*engine)) {
@@ -336,6 +346,8 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine) {
 
 	float accumulator = 0.0f;
 	const float targetDt = 1.0f / 60.0f;
+	const double targetFrameTime = fpsLimit > 0 ? 1.0 / static_cast<double>(fpsLimit) : 0.0;
+	auto frameStart = std::chrono::high_resolution_clock::now();
 
 	while (engine->IsRunning()) {
 		float frameTime = clock.GetDeltaTime();
@@ -510,6 +522,30 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine) {
 					mesh->prevTransform = currentTransform;
 				}
 			}
+			// Frame Rate Limiter
+			if (fpsLimit > 0) {
+				auto frameEnd = std::chrono::high_resolution_clock::now();
+				double elapsed = std::chrono::duration<double>(frameEnd - frameStart).count();
+				if (elapsed < targetFrameTime) {
+					double sleepTime = targetFrameTime - elapsed;
+					if (sleepTime > 0.002) {
+						std::this_thread::sleep_for(std::chrono::microseconds(
+							static_cast<int64_t>((sleepTime - 0.001) * 1e6)));
+					}
+					while (std::chrono::duration<double>(std::chrono::high_resolution_clock::now() -
+														 frameStart)
+							   .count() < targetFrameTime) {
+#if defined(__x86_64__) || defined(_M_X64)
+						_mm_pause();
+#elif defined(__aarch64__)
+						__asm__ __volatile__("yield" ::: "memory");
+#else
+						std::this_thread::yield();
+#endif
+					}
+				}
+			}
+			frameStart = std::chrono::high_resolution_clock::now();
 		} else {
 			Platform::Sleep(10);
 		}
@@ -525,7 +561,9 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine) {
 
 extern auto RunEditor(const CommandLineOptions& options) {
 	auto result = InitializeEditor(options)
-					  .and_then(RunEditorLoop)
+					  .and_then([&options](std::unique_ptr<Engine> engine) {
+						  return RunEditorLoop(std::move(engine), options.fpsLimit);
+					  })
 					  .transform_error([](const EngineError& err) -> int {
 						  if (!err.msg.empty() && !err.silent) {
 							  ZHLN::Log("Error: {}", err.msg);

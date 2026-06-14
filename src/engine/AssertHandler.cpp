@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "Zahlen/Camera.hpp"
 #include "physics/Physics.hpp"
 
@@ -49,6 +48,15 @@ namespace ZHLN {
 
 static std::atomic<int> s_PendingSignal{0};
 static std::atomic<void*> s_FaultAddr{nullptr};
+static std::atomic<LogLevel> s_LogLevel{LogLevel::Moderate};
+
+void SetLogLevel(LogLevel level) noexcept {
+	s_LogLevel.store(level, std::memory_order_release);
+}
+
+LogLevel GetLogLevel() noexcept {
+	return s_LogLevel.load(std::memory_order_acquire);
+}
 
 static void WriteSafe(const char* msg) {
 	size_t len = 0;
@@ -62,20 +70,20 @@ static void WriteSafe(const char* msg) {
 
 auto GetCustomLogFile(FILE* overrideFile) -> FILE* {
 	static FILE* logFile = nullptr;
-	if (overrideFile) {
-		if (logFile && logFile != stdout && logFile != stderr) {
+	if (overrideFile != nullptr) {
+		if ((logFile != nullptr) && logFile != stdout && logFile != stderr) {
 			std::fclose(logFile);
 		}
 		logFile = overrideFile;
 	}
-	if (!logFile) {
+	if (logFile == nullptr) {
 		logFile = std::fopen("zahlen_runtime.log", "w");
 	}
 	return logFile;
 }
 
 auto GetPoorMansStacktrace() -> std::string {
-	std::string out = "";
+	std::string out;
 #if defined(__APPLE__) || defined(__linux__)
 	void* callstack[128];
 	int frames = backtrace(callstack, 128);
@@ -102,7 +110,7 @@ auto GetPoorMansStacktrace() -> std::string {
 			out += line + "\n";
 		}
 	}
-	std::free(strs);
+	std::free(static_cast<void*>(strs));
 #else
 	void* stack[100];
 	unsigned short frames = CaptureStackBackTrace(0, 100, stack, nullptr);
@@ -126,6 +134,11 @@ auto GetPoorMansStacktrace() -> std::string {
 }
 
 void InternalWriteLog(uint8_t channel, const char* file, uint32_t line, std::string_view message) {
+	// Guard against Quiet mode
+	if (s_LogLevel.load(std::memory_order_acquire) == LogLevel::Quiet) {
+		return;
+	}
+
 	std::string_view file_name = file;
 	if (auto pos = file_name.find_last_of("/\\"); pos != std::string_view::npos) {
 		file_name.remove_prefix(pos + 1);
@@ -134,12 +147,13 @@ void InternalWriteLog(uint8_t channel, const char* file, uint32_t line, std::str
 	uint64_t fid = GetCurrentFiberID();
 
 	std::string fiberTag;
-	if (fid == 0)
+	if (fid == 0) {
 		fiberTag = "Thread";
-	else if (fid == 1)
+	} else if (fid == 1) {
 		fiberTag = "Main";
-	else
+	} else {
 		fiberTag = std::format("{:#x}", fid);
+	}
 
 	FILE* outStream = nullptr;
 	if (channel == static_cast<uint8_t>(LogChannel::StdOut)) {
@@ -153,13 +167,20 @@ void InternalWriteLog(uint8_t channel, const char* file, uint32_t line, std::str
 	std::println(outStream, "[{}:{}] [Fiber:{}] {}", file_name, line, fiberTag, message);
 }
 
+// Note: Emergency panic / crash dumps are kept unfiltered to preserve crash visibility.
 [[noreturn]] void InternalPanic(const char* file, uint32_t line, std::string_view message) {
+	// Force enable output for catastrophic crashes
+	s_LogLevel.store(LogLevel::Verbose, std::memory_order_release);
 	InternalWriteLog(static_cast<uint8_t>(LogChannel::StdErr), file, line, message);
 	std::println(stderr, "Stack Trace:\n{}", GetPoorMansStacktrace());
 	std::abort();
 }
 
 void LogManual(std::string_view file, int line, std::string_view message, const char* color) {
+	if (s_LogLevel.load(std::memory_order_acquire) == LogLevel::Quiet) {
+		return;
+	}
+
 	uint64_t fid = GetCurrentFiberID();
 	std::string fiberTag = (fid == 0) ? "Thread" : (fid == 1) ? "Main" : std::format("{:#x}", fid);
 
@@ -201,7 +222,7 @@ void TraceStructFooter() {
 
 void MemoryDump(const void* ptr, size_t size, std::string_view label, LogContext ctx,
 				DumpOptions opts) {
-	const uint8_t* byte_ptr = static_cast<const uint8_t*>(ptr);
+	const auto* byte_ptr = static_cast<const uint8_t*>(ptr);
 	std::string_view file_name = ctx.loc.file_name();
 	if (auto pos = file_name.find_last_of("/\\"); pos != std::string_view::npos) {
 		file_name.remove_prefix(pos + 1);
@@ -224,27 +245,31 @@ void MemoryDump(const void* ptr, size_t size, std::string_view label, LogContext
 		for (size_t j = 0; j < opts.bytes_per_line; ++j) {
 			if (i + j < size) {
 				uint8_t b = byte_ptr[i + j];
-				if (b == 0)
+				if (b == 0) {
 					std::print(stderr, "{}00{} ", Color::Gray, Color::Reset);
-				else
+				} else {
 					std::print(stderr, "{:02X} ", b);
+				}
 			} else {
 				std::print(stderr, "   ");
 			}
-			if ((j + 1) % 4 == 0 && j + 1 < opts.bytes_per_line)
+			if ((j + 1) % 4 == 0 && j + 1 < opts.bytes_per_line) {
 				std::print(stderr, " ");
+			}
 		}
 
 		std::print(stderr, "│ ");
 		for (size_t j = 0; j < opts.bytes_per_line; ++j) {
 			if (i + j < size) {
 				uint8_t c = byte_ptr[i + j];
-				if (std::isprint(c))
+				if (std::isprint(c)) {
 					std::print(stderr, "{}", (char)c);
-				else
+				} else {
 					std::print(stderr, "{}·{}", Color::Gray, Color::Reset);
-			} else
+				}
+			} else {
 				std::print(stderr, " ");
+			}
 		}
 
 		std::print(stderr, " │ ");

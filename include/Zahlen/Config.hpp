@@ -46,6 +46,12 @@ inline constexpr std::string_view BuildType = "Release";
 inline constexpr std::string_view BuildType = "Debug";
 #endif
 
+#if defined(ZHLN_DEV_MODE)
+inline constexpr bool isDev = true;
+#else
+inline constexpr bool isDev = false;
+#endif
+
 #if defined(__ASAN_ENABLED__)
 inline constexpr std::string_view Sanitizers = "enabled";
 #else
@@ -64,6 +70,7 @@ struct RenderConfig {
 	uint32_t width = 1280;
 	uint32_t height = 720;
 	bool vsync = true;
+	bool fullscreen = false;
 	bool enableValidation = true;
 };
 
