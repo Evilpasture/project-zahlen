@@ -270,6 +270,11 @@ static void SetupGameGUI(Engine& engine, GameContext& game, ZHLN_GameState& stat
 		state.enableSSR = useSsr ? 1 : 0;
 	}
 
+	bool useRtr = state.enableRTR != 0;
+	if (ImGui::Checkbox("Enable Hardware RTR", &useRtr)) {
+		state.enableRTR = useRtr ? 1 : 0;
+	}
+
 	ImGui::End();
 
 	// Flush any modified state parameters back to the shared library memory
@@ -528,6 +533,7 @@ void RenderGame(Engine& engine, float frameTime, float physicsAccumulator, GameC
 	uniforms.probePos = JPH::Vec4(state.probePos[0], state.probePos[1], state.probePos[2], 0.0f);
 	uniforms.jitterParams = JPH::Vec4(game.taaState.jitterX, game.taaState.jitterY,
 									  game.taaState.prevJitterX, game.taaState.prevJitterY);
+	uniforms.enableRTR = state.enableRTR;
 
 	Renderer::SetGISettings(rc, {.mode = state.giMode,
 								 .aoRadius = state.aoRadius,
@@ -537,7 +543,8 @@ void RenderGame(Engine& engine, float frameTime, float physicsAccumulator, GameC
 								 .giSamples = state.giSamples,
 								 .vignetteIntensity = vignetteIntensity, // Dynamic view parameter
 								 .vignettePower = vignettePower,		 // Dynamic view parameter
-								 .enableSSR = state.enableSSR ? 1 : 0});
+								 .enableSSR = state.enableSSR ? 1 : 0,
+								 .enableRTR = state.enableRTR ? 1 : 0});
 
 	Renderer::SetLights(rc, sceneLights.data(), uniforms.lightCount);
 	Renderer::SetFrameData(rc, uniforms, shadowProjView);

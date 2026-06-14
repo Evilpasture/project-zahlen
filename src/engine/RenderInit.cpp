@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/engine/Render_Init.cpp
+// File: src/engine/RenderInit.cpp
 #include "IBLProcessor.hpp"
 #include "RenderCore.hpp"
 #include "RenderInternal.hpp"
@@ -47,37 +47,52 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 								   .enable_validation = cfg.enableValidation};
 	_impl->appName.copy_to(inst_desc.app_name);
 
-	auto features = Vk::FeatureChainBuilder()
-						.Require<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>(
-							[](auto& f) { f.swapchainMaintenance1 = VK_TRUE; })
-						.Require<VkPhysicalDeviceVulkan13Features>([](auto& f) {
-							f.synchronization2 = VK_TRUE;
-							f.dynamicRendering = VK_TRUE;
-						})
-						.Require<VkPhysicalDeviceVulkan12Features>([](auto& f) {
-							f.descriptorIndexing = VK_TRUE;
-							f.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
-							f.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
-							f.descriptorBindingPartiallyBound = VK_TRUE;
-							f.runtimeDescriptorArray = VK_TRUE;
-							f.bufferDeviceAddress = VK_TRUE;
-							f.hostQueryReset = VK_TRUE;
-						})
-						.Require<VkPhysicalDeviceFeatures2>([](auto& f) {
-							f.features.multiDrawIndirect = VK_TRUE;
-							f.features.samplerAnisotropy = VK_TRUE;
-							f.features.drawIndirectFirstInstance = VK_TRUE;
-						})
-						.Build();
+	auto features =
+		Vk::FeatureChainBuilder()
+			.Require<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>(
+				[](auto& f) { f.swapchainMaintenance1 = VK_TRUE; })
+			.Require<VkPhysicalDeviceVulkan13Features>([](auto& f) {
+				f.synchronization2 = VK_TRUE;
+				f.dynamicRendering = VK_TRUE;
+				f.shaderDemoteToHelperInvocation = VK_TRUE;
+			})
+			.Require<VkPhysicalDeviceVulkan12Features>([](auto& f) {
+				f.descriptorIndexing = VK_TRUE;
+				f.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+				f.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+				f.descriptorBindingPartiallyBound = VK_TRUE;
+				f.runtimeDescriptorArray = VK_TRUE;
+				f.bufferDeviceAddress = VK_TRUE;
+				f.hostQueryReset = VK_TRUE;
+				f.bufferDeviceAddress = VK_TRUE;
+			})
+			.Require<VkPhysicalDeviceAccelerationStructureFeaturesKHR>(
+				[](auto& f) { f.accelerationStructure = VK_TRUE; })
+			.Require<VkPhysicalDeviceRayQueryFeaturesKHR>([](auto& f) { f.rayQuery = VK_TRUE; })
+			.Require<VkPhysicalDeviceFeatures2>([](auto& f) {
+				f.features.multiDrawIndirect = VK_TRUE;
+				f.features.samplerAnisotropy = VK_TRUE;
+				f.features.drawIndirectFirstInstance = VK_TRUE;
+			})
+			.Build();
 
 #ifdef __APPLE__
-	const char* dev_exts[] = {
-		VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
-		VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME, "VK_KHR_portability_subset"};
+	const char* dev_exts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+							  VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
+							  VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME,
+							  "VK_KHR_portability_subset",
+							  VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+							  VK_KHR_RAY_QUERY_EXTENSION_NAME,
+							  VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+							  "VK_EXT_robustness2"};
 #else
 	const char* dev_exts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME,
 							  VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
-							  VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME};
+							  VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME,
+							  VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+							  VK_KHR_RAY_QUERY_EXTENSION_NAME,
+							  VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+							  "VK_EXT_robustness2"};
 #endif
 	ZHLN_DeviceDesc dev_desc = {.physical = nullptr,
 								.extensions = &dev_exts[0],
@@ -93,6 +108,10 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 
 	if (!_impl->allocator.Init(_impl->ctx)) {
 		ZHLN::Panic("FATAL: Vulkan Memory Allocator (VMA) failed to initialize");
+	}
+
+	if (!_impl->rtCtx.Init(_impl->ctx.Device())) {
+		ZHLN::Panic("FATAL: Raytracing context failed to initialize.");
 	}
 
 	_impl->gpuProfiler.Init(_impl->ctx.Device());
@@ -390,7 +409,7 @@ void RenderContext::Impl::InitPostProcessing() {
 	}
 
 	VkPushConstantRange ppPush = {
-		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 176};
+		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
 
 	auto ppShaders =
 		Vk::ShaderStages::Create(ctx.Device(),

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // File: src/engine/glTFImporter.cpp
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
@@ -384,6 +383,8 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 							.indexBuffer = ibo,
 							.vertexCount = static_cast<uint32_t>(primVertices.size()),
 							.indexCount = indexCount};
+
+			ctx.BuildMeshBLAS(subMesh);
 
 			Material subMaterial = CreateBasicMaterial(ctx, doubleSided, alphaBlend);
 

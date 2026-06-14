@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // File: src/engine/Render_Resources.cpp
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
@@ -61,7 +60,9 @@ void RenderContext::SetResolution([[maybe_unused]] const Extent2D& res) {
 auto RenderContext::CreateVertexBuffer(const void* data, size_t size) -> BufferHandle {
 	auto gpu_buf =
 		Vk::Buffer::Create(_impl->allocator.Get(), size,
-						   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+						   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+							   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+							   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
 						   VMA_MEMORY_USAGE_GPU_ONLY);
 	VkCommandBuffer cmd = _impl->pools.Cmd(0);
 	ZHLN_BeginCommandBuffer(cmd);
@@ -85,14 +86,17 @@ auto RenderContext::CreateVertexBuffer(const void* data, size_t size) -> BufferH
 
 	// Return a packed generational handle
 	uint64_t handle =
-		_impl->meshPool.Create(std::move(gpu_buf), static_cast<uint32_t>(size / sizeof(Vertex)));
+		_impl->meshPool.Create(std::move(gpu_buf), static_cast<uint32_t>(size / sizeof(Vertex)),
+							   VK_NULL_HANDLE, 0ull, Vk::Buffer{});
 	return static_cast<BufferHandle>(handle);
 }
 
 auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHandle {
 	auto gpu_buf =
 		Vk::Buffer::Create(_impl->allocator.Get(), size,
-						   VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+						   VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+							   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+							   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
 						   VMA_MEMORY_USAGE_GPU_ONLY);
 	VkCommandBuffer cmd = _impl->pools.Cmd(0);
 	ZHLN_BeginCommandBuffer(cmd);
@@ -117,7 +121,8 @@ auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHa
 
 	// Return a packed generational handle
 	uint64_t handle =
-		_impl->meshPool.Create(std::move(gpu_buf), static_cast<uint32_t>(size / sizeof(uint32_t)));
+		_impl->meshPool.Create(std::move(gpu_buf), static_cast<uint32_t>(size / sizeof(uint32_t)),
+							   VK_NULL_HANDLE, 0ull, Vk::Buffer{});
 	return static_cast<BufferHandle>(handle);
 }
 
@@ -410,7 +415,8 @@ void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matri
 		return;
 	}
 	auto mappedRegion = _impl->jointBuffers[_impl->frame_index].Map();
-	auto* gpuJoints = reinterpret_cast<JPH::Mat44*>(mappedRegion.data);
+	auto* gpuJoints = std::bit_cast<JPH::Mat44*>(mappedRegion.data);
+
 	std::memcpy(gpuJoints + offset, matrices, count * sizeof(JPH::Mat44));
 }
 
@@ -421,8 +427,7 @@ uint32_t RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas)
 	auto mappedRegion = _impl->morphDeltasBuffer.Map();
 
 	// 2. Safely offset the pointer within the mapped memory block
-	float* gpuDeltas =
-		reinterpret_cast<float*>(mappedRegion.data) + (static_cast<size_t>(offset * 4));
+	float* gpuDeltas = std::bit_cast<float*>(mappedRegion.data) + (static_cast<size_t>(offset * 4));
 
 	// 3. This memcpy is now 100% safe since mappedRegion is still alive
 	std::memcpy(gpuDeltas, deltas, count * sizeof(float) * 4);
@@ -435,4 +440,84 @@ void RenderContext::SetTAAState(const TAAState& state) {
 	_impl->taaState = state;
 }
 
+void RenderContext::BuildMeshBLAS(Mesh& mesh) {
+	auto* impl = _impl.get();
+	auto* nativeMesh = impl->meshPool.Resolve(static_cast<uint64_t>(mesh.vertexBuffer));
+	auto* nativeIndexMesh = mesh.indexBuffer != BufferHandle::Invalid
+								? impl->meshPool.Resolve(static_cast<uint64_t>(mesh.indexBuffer))
+								: nullptr;
+	if (nativeMesh == nullptr) {
+		return;
+	}
+
+	ZHLN_BlasGeometryDesc geom = {
+		.vertex_data = Vk::GetBufferDeviceAddress(impl->ctx.Device(), nativeMesh->buffer.Handle()),
+		.vertex_stride = sizeof(Vertex),
+		.max_vertex = mesh.vertexCount,
+		.vertex_format = VK_FORMAT_R32G32B32_SFLOAT,
+		.index_data =
+			(nativeIndexMesh != nullptr)
+				? Vk::GetBufferDeviceAddress(impl->ctx.Device(), nativeIndexMesh->buffer.Handle())
+				: 0,
+		.index_type = (nativeIndexMesh != nullptr) ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_NONE_KHR};
+
+	uint32_t primitiveCount =
+		(nativeIndexMesh != nullptr) ? mesh.indexCount / 3 : mesh.vertexCount / 3;
+
+	ZHLN_AccelerationStructureSizes sizes;
+	impl->rtCtx.GetBlasSizes(geom, primitiveCount, sizes);
+
+	nativeMesh->blasBuffer =
+		Vk::Buffer::Create(impl->allocator.Get(), sizes.acceleration_structure_size,
+						   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+							   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+						   VMA_MEMORY_USAGE_GPU_ONLY);
+	nativeMesh->blas =
+		impl->rtCtx.CreateAS(nativeMesh->blasBuffer.Handle(), sizes.acceleration_structure_size,
+							 ZHLN_AS_TYPE_BOTTOM_LEVEL);
+	nativeMesh->blasAddress = impl->rtCtx.GetASAddress(nativeMesh->blas);
+
+	nativeMesh->device = impl->ctx.Device();
+	nativeMesh->rtCtx = &impl->rtCtx;
+
+	Vk::Buffer scratch = Vk::Buffer::Create(impl->allocator.Get(), sizes.build_scratch_size,
+											VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+												VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+											VMA_MEMORY_USAGE_GPU_ONLY);
+
+	// Because we submit isolated queues, we just block the main thread and sync manually here (safe
+	// for initial static uploads)
+	Vk::CommandPool tempPool(impl->ctx.Device(), impl->ctx.PhysicalInfo().graphics_family);
+	if (!tempPool.Allocate(1)) {
+		ZHLN::Panic("Failed to initialize command pool for BLAS mesh building.");
+	}
+	VkCommandBuffer cmd = tempPool[0];
+	ZHLN_BeginCommandBuffer(cmd);
+
+	impl->rtCtx.CmdBuildBlas(cmd, geom, nativeMesh->blas,
+							 Vk::GetBufferDeviceAddress(impl->ctx.Device(), scratch.Handle()),
+							 primitiveCount);
+
+	ZHLN_EndCommandBuffer(cmd);
+
+	VkCommandBufferSubmitInfo subInfo = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+		.pNext = {},
+		.commandBuffer = cmd,
+		.deviceMask = {},
+	};
+	VkSubmitInfo2 submit = {
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+		.pNext = {},
+		.flags = {},
+		.waitSemaphoreInfoCount = {},
+		.pWaitSemaphoreInfos = {},
+		.commandBufferInfoCount = 1,
+		.pCommandBufferInfos = &subInfo,
+		.signalSemaphoreInfoCount = {},
+		.pSignalSemaphoreInfos = {},
+	};
+	vkQueueSubmit2(impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
+	vkQueueWaitIdle(impl->ctx.GraphicsQueue());
+}
 } // namespace ZHLN

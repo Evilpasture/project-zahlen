@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Render.hpp"
 #include "ecs/ECS.hpp"
@@ -155,6 +154,7 @@ void LoadLevel(Engine& engine, const std::string& path, Material material) {
 				rc.CreateVertexBuffer(vertexBuffer.data(), vertexBuffer.size() * sizeof(Vertex));
 			gpuMesh = Mesh{.vertexBuffer = vbo,
 						   .vertexCount = static_cast<uint32_t>(vertexBuffer.size())};
+			rc.BuildMeshBLAS(gpuMesh);
 			meshCache[node->mesh] = gpuMesh;
 
 			// 3. Auto-Calculate Physics Box Collider from mesh bounding box

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
@@ -57,6 +56,8 @@ class ZHLN_API RenderContext {
 	uint32_t AllocateMorphDeltas(uint32_t count, const float* deltas);
 
 	void SetTAAState(const TAAState& state);
+
+	void BuildMeshBLAS(Mesh& mesh);
 
 	struct Impl;
 	[[nodiscard]] auto GetImpl() const -> Impl* { return _impl.get(); }

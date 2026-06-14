@@ -86,10 +86,12 @@ Mesh LoadCookedMesh(RenderContext& ctx, [[maybe_unused]] AssetManager& assetMgr,
 		Log("Loaded Cooked Indexed Mesh: {} ({} vertices, {} indices)", virtualPath,
 			header->vertexCount, header->indexCount);
 
-		return Mesh{.vertexBuffer = vbo,
-					.indexBuffer = ibo,
-					.vertexCount = header->vertexCount,
-					.indexCount = header->indexCount};
+		Mesh finalMesh = Mesh{.vertexBuffer = vbo,
+							  .indexBuffer = ibo,
+							  .vertexCount = header->vertexCount,
+							  .indexCount = header->indexCount};
+		ctx.BuildMeshBLAS(finalMesh);
+		return finalMesh;
 	}
 }
 

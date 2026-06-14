@@ -20,6 +20,12 @@ template <typename T> [[nodiscard]] constexpr auto GetStructureType() noexcept -
 		return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR;
 	} else if constexpr (std::is_same_v<T, VkPhysicalDeviceFeatures2>) {
 		return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+	} else if constexpr (std::is_same_v<T, VkPhysicalDeviceAccelerationStructureFeaturesKHR>) {
+		return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+	} else if constexpr (std::is_same_v<T, VkPhysicalDeviceRayQueryFeaturesKHR>) {
+		return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+	} else if constexpr (std::is_same_v<T, VkPhysicalDeviceRobustness2FeaturesEXT>) {
+		return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT;
 	} else {
 		// C++23: Safe compile-time error only if an unregistered Type is instantiated
 		static_assert(

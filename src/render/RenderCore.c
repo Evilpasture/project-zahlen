@@ -1596,4 +1596,195 @@ void ZHLN_GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const 
 		.mip_count = 1};
 	ZHLN_CmdImageBarrier(cmd, &barrier_last);
 }
+
+void ZHLN_CmdMemoryBarrier(const VkCommandBuffer cmd,
+						   const ZHLN_MemoryBarrierDesc* const restrict desc) {
+	const VkMemoryBarrier2 barrier = {
+		.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+		.srcStageMask = desc->src_stage,
+		.srcAccessMask = desc->src_access,
+		.dstStageMask = desc->dst_stage,
+		.dstAccessMask = desc->dst_access,
+	};
+	const VkDependencyInfo dependency_info = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+											  .memoryBarrierCount = 1,
+											  .pMemoryBarriers = &barrier};
+	vkCmdPipelineBarrier2(cmd, &dependency_info);
+}
+
+VkDeviceAddress ZHLN_GetBufferDeviceAddress(VkDevice device, VkBuffer buffer) {
+	VkBufferDeviceAddressInfo info = {.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+									  .buffer = buffer};
+	return vkGetBufferDeviceAddress(device, &info);
+}
+
+bool ZHLN_InitRayTracingContext(VkDevice device, ZHLN_RayTracingContext* out_ctx) {
+	out_ctx->device = device;
+	out_ctx->get_build_sizes = (PFN_vkGetAccelerationStructureBuildSizesKHR)vkGetDeviceProcAddr(
+		device, "vkGetAccelerationStructureBuildSizesKHR");
+	out_ctx->create_as = (PFN_vkCreateAccelerationStructureKHR)vkGetDeviceProcAddr(
+		device, "vkCreateAccelerationStructureKHR");
+	out_ctx->build_as = (PFN_vkCmdBuildAccelerationStructuresKHR)vkGetDeviceProcAddr(
+		device, "vkCmdBuildAccelerationStructuresKHR");
+	out_ctx->get_address = (PFN_vkGetAccelerationStructureDeviceAddressKHR)vkGetDeviceProcAddr(
+		device, "vkGetAccelerationStructureDeviceAddressKHR");
+	out_ctx->destroy_as = (PFN_vkDestroyAccelerationStructureKHR)vkGetDeviceProcAddr(
+		device, "vkDestroyAccelerationStructureKHR");
+
+	return (out_ctx->get_build_sizes && out_ctx->create_as && out_ctx->build_as &&
+			out_ctx->get_address && out_ctx->destroy_as) != 0;
+}
+
+void ZHLN_GetBlasSizes(const ZHLN_RayTracingContext* ctx, const ZHLN_BlasGeometryDesc* desc,
+					   uint32_t primitive_count, ZHLN_AccelerationStructureSizes* out_sizes) {
+	VkAccelerationStructureGeometryKHR geom = {
+		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+		.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
+		.geometry =
+			{.triangles = {.sType =
+							   VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
+						   .vertexFormat = desc->vertex_format,
+						   .vertexData = {.deviceAddress = desc->vertex_data},
+						   .vertexStride = desc->vertex_stride,
+						   .maxVertex = desc->max_vertex,
+						   .indexType = desc->index_type,
+						   .indexData = {.deviceAddress = desc->index_data}}},
+		.flags = VK_GEOMETRY_OPAQUE_BIT_KHR};
+
+	VkAccelerationStructureBuildGeometryInfoKHR build_info = {
+		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+		.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
+		.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
+		.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
+		.geometryCount = 1,
+		.pGeometries = &geom};
+
+	VkAccelerationStructureBuildSizesInfoKHR sizes = {
+		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
+	ctx->get_build_sizes(ctx->device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build_info,
+						 &primitive_count, &sizes);
+
+	out_sizes->acceleration_structure_size = sizes.accelerationStructureSize;
+	out_sizes->build_scratch_size = sizes.buildScratchSize;
+	out_sizes->update_scratch_size = sizes.updateScratchSize;
+}
+
+void ZHLN_GetTlasSizes(const ZHLN_RayTracingContext* ctx, uint32_t instance_count,
+					   ZHLN_AccelerationStructureSizes* out_sizes) {
+	VkAccelerationStructureGeometryKHR geom = {
+		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+		.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
+		.geometry =
+			{.instances =
+				 {
+					 .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
+					 .arrayOfPointers = VK_FALSE,
+					 .data = {.deviceAddress = 0} // Placeholder for size queries
+				 }},
+		.flags = VK_GEOMETRY_OPAQUE_BIT_KHR};
+
+	VkAccelerationStructureBuildGeometryInfoKHR build_info = {
+		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+		.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
+		.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
+		.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
+		.geometryCount = 1,
+		.pGeometries = &geom};
+
+	VkAccelerationStructureBuildSizesInfoKHR sizes = {
+		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
+	ctx->get_build_sizes(ctx->device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build_info,
+						 &instance_count, &sizes);
+
+	out_sizes->acceleration_structure_size = sizes.accelerationStructureSize;
+	out_sizes->build_scratch_size = sizes.buildScratchSize;
+	out_sizes->update_scratch_size = sizes.updateScratchSize;
+}
+
+VkAccelerationStructureKHR ZHLN_CreateAS(const ZHLN_RayTracingContext* ctx, VkBuffer buffer,
+										 VkDeviceSize size, ZHLN_AccelerationStructureType type) {
+	VkAccelerationStructureCreateInfoKHR create_info = {
+		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
+		.buffer = buffer,
+		.size = size,
+		.type = (VkAccelerationStructureTypeKHR)type};
+	VkAccelerationStructureKHR as = VK_NULL_HANDLE;
+	ctx->create_as(ctx->device, &create_info, nullptr, &as);
+	return as;
+}
+
+void ZHLN_DestroyAS(const ZHLN_RayTracingContext* ctx, VkAccelerationStructureKHR as) {
+	if (as != VK_NULL_HANDLE) {
+		ctx->destroy_as(ctx->device, as, nullptr);
+	}
+}
+
+VkDeviceAddress ZHLN_GetASAddress(const ZHLN_RayTracingContext* ctx,
+								  VkAccelerationStructureKHR as) {
+	VkAccelerationStructureDeviceAddressInfoKHR info = {
+		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
+		.accelerationStructure = as};
+	return ctx->get_address(ctx->device, &info);
+}
+
+void ZHLN_CmdBuildBlas(const ZHLN_RayTracingContext* ctx, VkCommandBuffer cmd,
+					   const ZHLN_BlasGeometryDesc* desc, VkAccelerationStructureKHR dst_as,
+					   VkDeviceAddress scratch, uint32_t primitive_count) {
+	VkAccelerationStructureGeometryKHR geom = {
+		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+		.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
+		.geometry =
+			{.triangles = {.sType =
+							   VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
+						   .vertexFormat = desc->vertex_format,
+						   .vertexData = {.deviceAddress = desc->vertex_data},
+						   .vertexStride = desc->vertex_stride,
+						   .maxVertex = desc->max_vertex,
+						   .indexType = desc->index_type,
+						   .indexData = {.deviceAddress = desc->index_data}}},
+		.flags = VK_GEOMETRY_OPAQUE_BIT_KHR};
+
+	VkAccelerationStructureBuildGeometryInfoKHR build_info = {
+		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+		.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
+		.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
+		.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
+		.dstAccelerationStructure = dst_as,
+		.geometryCount = 1,
+		.pGeometries = &geom,
+		.scratchData = {.deviceAddress = scratch}};
+
+	VkAccelerationStructureBuildRangeInfoKHR range_info = {.primitiveCount = primitive_count};
+	const VkAccelerationStructureBuildRangeInfoKHR* p_range_infos[] = {&range_info};
+	ctx->build_as(cmd, 1, &build_info, p_range_infos);
+}
+
+void ZHLN_CmdBuildTlas(const ZHLN_RayTracingContext* ctx, VkCommandBuffer cmd,
+					   const ZHLN_TlasGeometryDesc* desc, VkAccelerationStructureKHR dst_as,
+					   VkDeviceAddress scratch, uint32_t instance_count) {
+	VkAccelerationStructureGeometryKHR geom = {
+		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+		.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
+		.geometry =
+			{.instances = {.sType =
+							   VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
+						   .arrayOfPointers = VK_FALSE,
+						   .data = {.deviceAddress = desc->instance_data}}},
+		.flags = VK_GEOMETRY_OPAQUE_BIT_KHR};
+
+	VkAccelerationStructureBuildGeometryInfoKHR build_info = {
+		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+		.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
+		.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
+		.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
+		.dstAccelerationStructure = dst_as,
+		.geometryCount = 1,
+		.pGeometries = &geom,
+		.scratchData = {.deviceAddress = scratch}};
+
+	VkAccelerationStructureBuildRangeInfoKHR range_info = {.primitiveCount = instance_count};
+	const VkAccelerationStructureBuildRangeInfoKHR* p_range_infos[] = {&range_info};
+	ctx->build_as(cmd, 1, &build_info, p_range_infos);
+}
+
 // NOLINTEND(misc-misplaced-const, readability-identifier-length)

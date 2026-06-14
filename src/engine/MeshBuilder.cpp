@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // File: src/engine/MeshBuilder.cpp
 #include "Resources.hpp"
 #include "Zahlen/Components.hpp"
@@ -103,7 +102,9 @@ Mesh CreatePlane(RenderContext& ctx, float extent, const JPH::Vec4& color) {
 	};
 
 	BufferHandle vbo = ctx.CreateVertexBuffer(data.data(), data.size() * sizeof(Vertex));
-	return Mesh{.vertexBuffer = vbo, .vertexCount = static_cast<uint32_t>(data.size())};
+	auto finalMesh = Mesh{.vertexBuffer = vbo, .vertexCount = static_cast<uint32_t>(data.size())};
+	ctx.BuildMeshBLAS(finalMesh);
+	return finalMesh;
 }
 
 Mesh CreateBox(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& color) {
@@ -427,7 +428,9 @@ Mesh CreateBox(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& co
 								 ._padding = {}}};
 
 	BufferHandle vbo = ctx.CreateVertexBuffer(data.data(), data.size() * sizeof(Vertex));
-	return Mesh{.vertexBuffer = vbo, .vertexCount = static_cast<uint32_t>(data.size())};
+	auto finalMesh = Mesh{.vertexBuffer = vbo, .vertexCount = static_cast<uint32_t>(data.size())};
+	ctx.BuildMeshBLAS(finalMesh);
+	return finalMesh;
 }
 
 Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight,
@@ -586,7 +589,9 @@ Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float m
 	}
 
 	BufferHandle vbo = ctx.CreateVertexBuffer(data.data(), data.size() * sizeof(Vertex));
-	return Mesh{.vertexBuffer = vbo, .vertexCount = static_cast<uint32_t>(data.size())};
+	auto finalMesh = Mesh{.vertexBuffer = vbo, .vertexCount = static_cast<uint32_t>(data.size())};
+	ctx.BuildMeshBLAS(finalMesh);
+	return finalMesh;
 }
 
 Material CreateToonMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend) {

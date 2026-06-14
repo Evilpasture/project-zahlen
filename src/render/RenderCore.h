@@ -516,6 +516,81 @@ void ZHLN_CmdDispatch(VkCommandBuffer cmd, uint32_t group_count_x, uint32_t grou
 void ZHLN_GenerateMipmaps(VkCommandBuffer cmd, VkImage image, int32_t width, int32_t height,
 						  uint32_t mip_levels);
 
+/* --- MEMORY BARRIERS --- */
+
+typedef struct ZHLN_MemoryBarrierDesc {
+	VkPipelineStageFlags2 src_stage;
+	VkAccessFlags2 src_access;
+	VkPipelineStageFlags2 dst_stage;
+	VkAccessFlags2 dst_access;
+} ZHLN_MemoryBarrierDesc;
+
+void ZHLN_CmdMemoryBarrier(VkCommandBuffer cmd, const ZHLN_MemoryBarrierDesc* ZHLN_RESTRICT desc);
+
+/* --- HARDWARE RAY TRACING --- */
+
+VkDeviceAddress ZHLN_GetBufferDeviceAddress(VkDevice device, VkBuffer buffer);
+
+typedef struct ZHLN_RayTracingContext {
+	VkDevice device;
+	PFN_vkGetAccelerationStructureBuildSizesKHR get_build_sizes;
+	PFN_vkCreateAccelerationStructureKHR create_as;
+	PFN_vkCmdBuildAccelerationStructuresKHR build_as;
+	PFN_vkGetAccelerationStructureDeviceAddressKHR get_address;
+	PFN_vkDestroyAccelerationStructureKHR destroy_as;
+} ZHLN_RayTracingContext;
+
+[[nodiscard]]
+bool ZHLN_InitRayTracingContext(VkDevice device, ZHLN_RayTracingContext* ZHLN_RESTRICT out_ctx);
+
+typedef enum ZHLN_AccelerationStructureType : uint8_t {
+	ZHLN_AS_TYPE_TOP_LEVEL = 0,
+	ZHLN_AS_TYPE_BOTTOM_LEVEL = 1
+} ZHLN_AccelerationStructureType;
+
+typedef struct ZHLN_AccelerationStructureSizes {
+	VkDeviceSize acceleration_structure_size;
+	VkDeviceSize build_scratch_size;
+	VkDeviceSize update_scratch_size;
+} ZHLN_AccelerationStructureSizes;
+
+typedef struct ZHLN_BlasGeometryDesc {
+	VkDeviceAddress vertex_data;
+	uint32_t vertex_stride;
+	uint32_t max_vertex;
+	VkFormat vertex_format;
+	VkDeviceAddress index_data;
+	VkIndexType index_type;
+} ZHLN_BlasGeometryDesc;
+
+typedef struct ZHLN_TlasGeometryDesc {
+	VkDeviceAddress instance_data;
+} ZHLN_TlasGeometryDesc;
+
+void ZHLN_GetBlasSizes(const ZHLN_RayTracingContext* ZHLN_RESTRICT ctx,
+					   const ZHLN_BlasGeometryDesc* ZHLN_RESTRICT desc, uint32_t primitive_count,
+					   ZHLN_AccelerationStructureSizes* ZHLN_RESTRICT out_sizes);
+void ZHLN_GetTlasSizes(const ZHLN_RayTracingContext* ZHLN_RESTRICT ctx, uint32_t instance_count,
+					   ZHLN_AccelerationStructureSizes* ZHLN_RESTRICT out_sizes);
+
+[[nodiscard]]
+VkAccelerationStructureKHR ZHLN_CreateAS(const ZHLN_RayTracingContext* ZHLN_RESTRICT ctx,
+										 VkBuffer buffer, VkDeviceSize size,
+										 ZHLN_AccelerationStructureType type);
+void ZHLN_DestroyAS(const ZHLN_RayTracingContext* ZHLN_RESTRICT ctx, VkAccelerationStructureKHR as);
+[[nodiscard]]
+VkDeviceAddress ZHLN_GetASAddress(const ZHLN_RayTracingContext* ZHLN_RESTRICT ctx,
+								  VkAccelerationStructureKHR as);
+
+void ZHLN_CmdBuildBlas(const ZHLN_RayTracingContext* ZHLN_RESTRICT ctx, VkCommandBuffer cmd,
+					   const ZHLN_BlasGeometryDesc* ZHLN_RESTRICT desc,
+					   VkAccelerationStructureKHR dst_as, VkDeviceAddress scratch,
+					   uint32_t primitive_count);
+void ZHLN_CmdBuildTlas(const ZHLN_RayTracingContext* ZHLN_RESTRICT ctx, VkCommandBuffer cmd,
+					   const ZHLN_TlasGeometryDesc* ZHLN_RESTRICT desc,
+					   VkAccelerationStructureKHR dst_as, VkDeviceAddress scratch,
+					   uint32_t instance_count);
+
 #ifdef __cplusplus
 }
 #endif

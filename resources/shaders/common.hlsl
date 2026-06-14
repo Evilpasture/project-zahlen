@@ -30,6 +30,8 @@ struct FrameUniforms {
 	float4 probeMax;	 // XYZ: boxMax, W: unused
 	float4 probePos;	 // XYZ: probePos, W: unused
 	float4 jitterParams; // x: currentX, y: currentY, z: prevX, w: prevY
+	int enableRTR;
+	int3 padding_rtr;
 };
 
 struct ObjectConstants {
@@ -86,6 +88,7 @@ struct GPUJoint {
 [[vk::binding(12, 0)]] Texture2D ltc_mat;
 [[vk::binding(13, 0)]] Texture2D ltc_amp;
 [[vk::binding(14, 0)]] StructuredBuffer<GPUJoint> g_prevJoints;
+[[vk::binding(15, 0)]] RaytracingAccelerationStructure tlas;
 
 struct VSInput {
 	[[vk::location(0)]] float3 position : POSITION;

@@ -435,7 +435,8 @@ struct PostProcessPass {
 			ctx.ctx.Device(), in.sceneColor, Vk::SamplerWrite{.sampler = ctx.defaultSampler.Get()},
 			in.depth, in.normRough, Vk::SamplerWrite{.sampler = ctx.pointSampler.Get()},
 			Vk::ImageWrite{.view = ctx.iblPayload.prefilteredView.Get(),
-						   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
+						   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+			&ctx.tlas.Current());
 
 		struct PPPushConstants {
 			JPH::Mat44 invViewProj;
@@ -448,6 +449,7 @@ struct PostProcessPass {
 			float giIntensity;
 			int giSamples;
 			int enableSSR;
+			int enableRTR;
 			int pad;
 		} pc = {
 			.invViewProj = ctx.current_view_proj.Inversed(),
@@ -461,6 +463,7 @@ struct PostProcessPass {
 			.giIntensity = ctx.giSettings.giIntensity,
 			.giSamples = ctx.giSettings.giSamples,
 			.enableSSR = ctx.giSettings.enableSSR,
+			.enableRTR = (ctx.tlas.Current() != VK_NULL_HANDLE) ? ctx.giSettings.enableRTR : 0,
 			.pad = {},
 		};
 
@@ -714,10 +717,10 @@ void RenderContext::Impl::SubmitFrame() {
 		resized = true;
 	}
 
-	auto manager =
-		StaticResourceManager(&accumBuffers, &taaPass, &postProcessPass, &blitPass,
-							  &frameUniformBuffers, &lightStorageBuffers, &instanceDataBuffers,
-							  &indirectCommandsBuffers, &jointBuffers, &bindlessSets);
+	auto manager = StaticResourceManager(&accumBuffers, &taaPass, &postProcessPass, &blitPass,
+										 &frameUniformBuffers, &lightStorageBuffers,
+										 &instanceDataBuffers, &indirectCommandsBuffers,
+										 &jointBuffers, &bindlessSets, &tlas, &tlasBuffer);
 	manager.FlipAll();
 
 	frame_index = (frame_index + 1) % 2;
@@ -742,38 +745,138 @@ void RenderContext::EndFrame() {
 
 	_impl->SortDrawQueue();
 
-	{
-		auto mapRegion = _impl->instanceDataBuffers[_impl->frame_index].Map();
-		auto* mapped = std::bit_cast<InstanceData*>(mapRegion.data);
-		auto drawCount = static_cast<uint32_t>(_impl->drawQueue.size());
+	auto drawCount = static_cast<uint32_t>(_impl->drawQueue.size());
+	if (drawCount > 0) {
+		auto mapped = _impl->instanceDataBuffers[_impl->frame_index].Map();
+		auto* dst = static_cast<InstanceData*>(mapped.data);
 
 		for (uint32_t i = 0; i < drawCount; ++i) {
-			const auto& drawCmd = _impl->drawQueue[i];
-
-			mapped[i] = InstanceData{
-				.world = drawCmd.transform,
-				.prevWorld = drawCmd.prevTransform,
-				.albedoIndex = drawCmd.albedoIndex,
-				.normalIndex = drawCmd.normalIndex,
-				.pbrIndex = drawCmd.pbrIndex,
-				.emissiveIndex = drawCmd.emissiveIndex,
-				.vertexCount = drawCmd.mesh->vertexCount,
-				.cullRadius = drawCmd.cullRadius,
-				.metallicFactor = drawCmd.metallicFactor,
-				.roughnessFactor = drawCmd.roughnessFactor,
-				.alphaCutoff = drawCmd.alphaCutoff,
-				.alphaMode = drawCmd.alphaMode,
-				.jointOffset = drawCmd.jointOffset,
-				.isSkinned = drawCmd.isSkinned,
-				.morphOffset = drawCmd.morphOffset,
-				.activeMorphCount = drawCmd.activeMorphCount,
-				.indexCount = drawCmd.indexCount,
+			const auto& cmdData = _impl->drawQueue[i];
+			dst[i] = InstanceData{
+				.world = cmdData.transform,
+				.prevWorld = cmdData.prevTransform,
+				.albedoIndex = cmdData.albedoIndex,
+				.normalIndex = cmdData.normalIndex,
+				.pbrIndex = cmdData.pbrIndex,
+				.emissiveIndex = cmdData.emissiveIndex,
+				.vertexCount = cmdData.mesh->vertexCount,
+				.cullRadius = cmdData.cullRadius,
+				.metallicFactor = cmdData.metallicFactor,
+				.roughnessFactor = cmdData.roughnessFactor,
+				.alphaCutoff = cmdData.alphaCutoff,
+				.alphaMode = cmdData.alphaMode,
+				.jointOffset = cmdData.jointOffset,
+				.isSkinned = cmdData.isSkinned,
+				.morphOffset = cmdData.morphOffset,
+				.activeMorphCount = cmdData.activeMorphCount,
+				.indexCount = cmdData.indexCount,
 				._pad = 0,
-				.morphWeights = {drawCmd.morphWeights[0], drawCmd.morphWeights[1],
-								 drawCmd.morphWeights[2], drawCmd.morphWeights[3]},
-				.baseColorFactor = {drawCmd.baseColorFactor[0], drawCmd.baseColorFactor[1],
-									drawCmd.baseColorFactor[2], drawCmd.baseColorFactor[3]}};
+				.morphWeights = {},
+				.baseColorFactor = {},
+			};
+			std::memcpy(dst[i].morphWeights, cmdData.morphWeights, sizeof(float) * 4);
+			std::memcpy(dst[i].baseColorFactor, cmdData.baseColorFactor, sizeof(float) * 4);
 		}
+	}
+	if (_impl->tlas.Current() != VK_NULL_HANDLE) {
+		_impl->rtCtx.DestroyAS(_impl->tlas.Current());
+		_impl->tlas.Current() = VK_NULL_HANDLE;
+		_impl->tlasBuffer.Current() = {};
+	}
+	_impl->tlasCleanupBuffers[_impl->frame_index].clear();
+
+	std::vector<VkAccelerationStructureInstanceKHR> tlasInstances;
+	tlasInstances.reserve(_impl->drawQueue.size());
+
+	for (uint32_t i = 0; i < _impl->drawQueue.size(); ++i) {
+		auto* mesh = std::bit_cast<NativeMesh*>(_impl->drawQueue[i].mesh);
+		if (mesh->blasAddress == 0 || _impl->drawQueue[i].isSkinned != 0) {
+			continue;
+		}
+
+		VkAccelerationStructureInstanceKHR inst{};
+		const auto& t = _impl->drawQueue[i].transform;
+		inst.transform.matrix[0][0] = t(0, 0);
+		inst.transform.matrix[0][1] = t(0, 1);
+		inst.transform.matrix[0][2] = t(0, 2);
+		inst.transform.matrix[0][3] = t(0, 3); // Correct Translation X
+
+		inst.transform.matrix[1][0] = t(1, 0);
+		inst.transform.matrix[1][1] = t(1, 1);
+		inst.transform.matrix[1][2] = t(1, 2);
+		inst.transform.matrix[1][3] = t(1, 3); // Correct Translation Y
+
+		inst.transform.matrix[2][0] = t(2, 0);
+		inst.transform.matrix[2][1] = t(2, 1);
+		inst.transform.matrix[2][2] = t(2, 2);
+		inst.transform.matrix[2][3] = t(2, 3); // Correct Translation Z
+		inst.instanceCustomIndex = i;
+		inst.mask = 0xFF;
+		inst.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+		inst.accelerationStructureReference = mesh->blasAddress;
+		tlasInstances.push_back(inst);
+	}
+
+	if (!tlasInstances.empty()) {
+		Vk::Buffer instanceBuf = Vk::Buffer::Create(
+			_impl->allocator.Get(),
+			tlasInstances.size() * sizeof(VkAccelerationStructureInstanceKHR),
+			VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+				VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+				VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+			VMA_MEMORY_USAGE_GPU_ONLY);
+		Vk::Buffer staging =
+			Vk::Buffer::Create(_impl->allocator.Get(),
+							   tlasInstances.size() * sizeof(VkAccelerationStructureInstanceKHR),
+							   VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+		std::memcpy(staging.Map().data, tlasInstances.data(),
+					tlasInstances.size() * sizeof(VkAccelerationStructureInstanceKHR));
+
+		ZHLN_BufferCopyDesc copy = {.src = staging.Handle(),
+									.dst = instanceBuf.Handle(),
+									.size = tlasInstances.size() *
+											sizeof(VkAccelerationStructureInstanceKHR),
+									.src_offset = 0,
+									.dst_offset = 0};
+		ZHLN_CmdCopyBuffer(cmd, &copy);
+
+		Vk::MemoryBarrier(cmd,
+						  {.src_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+						   .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+						   .dst_stage = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+						   .dst_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+										 VK_ACCESS_2_SHADER_READ_BIT});
+		ZHLN_TlasGeometryDesc geom = {
+			.instance_data = Vk::GetBufferDeviceAddress(_impl->ctx.Device(), instanceBuf.Handle())};
+
+		ZHLN_AccelerationStructureSizes sizes;
+		_impl->rtCtx.GetTlasSizes(static_cast<uint32_t>(tlasInstances.size()), sizes);
+
+		_impl->tlasBuffer.Current() = Vk::Buffer::Create(
+			_impl->allocator.Get(), sizes.acceleration_structure_size,
+			VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, VMA_MEMORY_USAGE_GPU_ONLY);
+		_impl->tlas.Current() =
+			_impl->rtCtx.CreateAS(_impl->tlasBuffer.Current().Handle(),
+								  sizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL);
+
+		Vk::Buffer scratch = Vk::Buffer::Create(_impl->allocator.Get(), sizes.build_scratch_size,
+												VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+													VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+												VMA_MEMORY_USAGE_GPU_ONLY);
+
+		_impl->rtCtx.CmdBuildTlas(cmd, geom, _impl->tlas.Current(),
+								  Vk::GetBufferDeviceAddress(_impl->ctx.Device(), scratch.Handle()),
+								  static_cast<uint32_t>(tlasInstances.size()));
+
+		Vk::MemoryBarrier(cmd,
+						  {.src_stage = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+						   .src_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+						   .dst_stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+						   .dst_access = VK_ACCESS_2_SHADER_READ_BIT});
+
+		_impl->tlasCleanupBuffers[_impl->frame_index].push_back(std::move(staging));
+		_impl->tlasCleanupBuffers[_impl->frame_index].push_back(std::move(instanceBuf));
+		_impl->tlasCleanupBuffers[_impl->frame_index].push_back(std::move(scratch));
 	}
 
 	// Encapsulate recording state

@@ -173,7 +173,8 @@ using PostProcessLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texCu
 											   Vk::SampledImageSlot<2>, // texDepth
 											   Vk::SampledImageSlot<3>, // texNormalRoughness
 											   Vk::SamplerSlot<4>,		// pointSampler (Nearest)
-											   Vk::SampledImageSlot<5>	// texEnvMap (Cubemap)
+											   Vk::SampledImageSlot<5>, // texEnvMap (Cubemap)
+											   Vk::AccelerationStructureSlot<6> // Hardware TLAS
 											   >;
 using CullingLayout = Vk::DescriptorLayout<Vk::StorageBufferSlot<0>, Vk::StorageBufferSlot<1>>;
 
@@ -199,8 +200,25 @@ using FrameProfiler = Profiler::GpuProfiler<Stages::ShadowPass, Stages::MainPass
 											Stages::PostProcessPass, Stages::BlitPass>;
 
 struct NativeMesh {
+	VkDevice device = VK_NULL_HANDLE;
+	const Vk::RayTracingContext* rtCtx = nullptr;
 	Vk::Buffer buffer;
-	uint32_t vertexCount;
+	uint32_t vertexCount = 0;
+	VkAccelerationStructureKHR blas = VK_NULL_HANDLE;
+	VkDeviceAddress blasAddress = 0;
+	Vk::Buffer blasBuffer;
+
+	NativeMesh() = default;
+	NativeMesh(Vk::Buffer&& buf, uint32_t count, VkAccelerationStructureKHR b = VK_NULL_HANDLE,
+			   VkDeviceAddress addr = 0, Vk::Buffer&& bBuf = {})
+		: buffer(std::move(buf)), vertexCount(count), blas(b), blasAddress(addr),
+		  blasBuffer(std::move(bBuf)) {}
+
+	~NativeMesh() {
+		if (blas != VK_NULL_HANDLE && rtCtx != nullptr) {
+			rtCtx->DestroyAS(blas);
+		}
+	}
 };
 
 struct NativeMaterial {
@@ -322,6 +340,11 @@ struct RenderContext::Impl {
 	Vk::IBLPayload iblPayload;
 	std::unique_ptr<Vk::StagingContext> stagingContext;
 
+	Vk::RayTracingContext rtCtx;
+	DoubleBuffered<VkAccelerationStructureKHR> tlas;
+	DoubleBuffered<Vk::Buffer> tlasBuffer;
+	std::array<std::vector<Vk::Buffer>, 2> tlasCleanupBuffers;
+
 	ZHLN::DoubleBuffered<Vk::Buffer> frameUniformBuffers;
 	ZHLN::DoubleBuffered<Vk::Buffer> lightStorageBuffers;
 
@@ -356,6 +379,16 @@ struct RenderContext::Impl {
 
 	void SortDrawQueue();
 	void SubmitFrame();
+
+	~Impl() {
+		if (ctx.Device() != VK_NULL_HANDLE) {
+			for (uint32_t i = 0; i < 2; ++i) {
+				if (tlas[i] != VK_NULL_HANDLE) {
+					rtCtx.DestroyAS(tlas[i]);
+				}
+			}
+		}
+	}
 };
 } // namespace ZHLN
 

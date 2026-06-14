@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // src/render/Allocator.cpp
 
 #include "Allocator.hpp"
@@ -68,7 +67,7 @@ auto Allocator::Init(VkInstance instance, VkPhysicalDevice physical, VkDevice de
 	};
 
 	const VmaAllocatorCreateInfo info = {
-		.flags = 0,
+		.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
 		.physicalDevice = physical,
 		.device = device,
 		.preferredLargeHeapBlockSize = 0,

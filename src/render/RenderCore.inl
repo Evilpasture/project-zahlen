@@ -392,6 +392,57 @@ inline void ImageBarrier(const VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc&
 	ZHLN_CmdImageBarrier(cmd, &desc);
 }
 
+inline void MemoryBarrier(const VkCommandBuffer cmd, const ZHLN_MemoryBarrierDesc& desc) noexcept {
+	ZHLN_CmdMemoryBarrier(cmd, &desc);
+}
+
+inline auto GetBufferDeviceAddress(VkDevice device, VkBuffer buffer) noexcept -> VkDeviceAddress {
+	return ZHLN_GetBufferDeviceAddress(device, buffer);
+}
+
+inline bool RayTracingContext::Init(VkDevice device) noexcept {
+	return ZHLN_InitRayTracingContext(device, &_raw);
+}
+
+inline void
+RayTracingContext::GetBlasSizes(const ZHLN_BlasGeometryDesc& desc, uint32_t primCount,
+								ZHLN_AccelerationStructureSizes& outSizes) const noexcept {
+	ZHLN_GetBlasSizes(&_raw, &desc, primCount, &outSizes);
+}
+
+inline void
+RayTracingContext::GetTlasSizes(uint32_t instanceCount,
+								ZHLN_AccelerationStructureSizes& outSizes) const noexcept {
+	ZHLN_GetTlasSizes(&_raw, instanceCount, &outSizes);
+}
+
+inline VkAccelerationStructureKHR
+RayTracingContext::CreateAS(VkBuffer buffer, VkDeviceSize size,
+							ZHLN_AccelerationStructureType type) const noexcept {
+	return ZHLN_CreateAS(&_raw, buffer, size, type);
+}
+
+inline void RayTracingContext::DestroyAS(VkAccelerationStructureKHR as) const noexcept {
+	ZHLN_DestroyAS(&_raw, as);
+}
+
+inline VkDeviceAddress
+RayTracingContext::GetASAddress(VkAccelerationStructureKHR as) const noexcept {
+	return ZHLN_GetASAddress(&_raw, as);
+}
+
+inline void RayTracingContext::CmdBuildBlas(VkCommandBuffer cmd, const ZHLN_BlasGeometryDesc& desc,
+											VkAccelerationStructureKHR dst, VkDeviceAddress scratch,
+											uint32_t primCount) const noexcept {
+	ZHLN_CmdBuildBlas(&_raw, cmd, &desc, dst, scratch, primCount);
+}
+
+inline void RayTracingContext::CmdBuildTlas(VkCommandBuffer cmd, const ZHLN_TlasGeometryDesc& desc,
+											VkAccelerationStructureKHR dst, VkDeviceAddress scratch,
+											uint32_t instanceCount) const noexcept {
+	ZHLN_CmdBuildTlas(&_raw, cmd, &desc, dst, scratch, instanceCount);
+}
+
 template <> struct LayoutTraits<VK_IMAGE_LAYOUT_UNDEFINED> {
 	static constexpr VkAccessFlags2 access = 0;
 	static constexpr VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;

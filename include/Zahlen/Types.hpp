@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 #include <Jolt/Jolt.h>
 #include <Jolt/Math/Mat44.h>
@@ -129,6 +128,8 @@ struct alignas(16) FrameUniforms {
 	JPH::Vec4 probeMax;		// XYZ: bounding box max, W: unused
 	JPH::Vec4 probePos;		// XYZ: probe capture position, W: unused
 	JPH::Vec4 jitterParams; // x: currentX, y: currentY, z: prevX, w: prevY
+	int enableRTR;
+	int _padding_rtr[3];
 };
 
 // Material handle representation
@@ -157,6 +158,7 @@ struct GISettings {
 	float vignetteIntensity = 1.1f; // 0.0f is completely off
 	float vignettePower = 1.5f;		// Controls softness falloff
 	int enableSSR = 1;
+	int enableRTR = 0;
 };
 
 struct TAAState {

@@ -146,6 +146,26 @@ inline void DescriptorUpdater::BindSampler(uint32_t binding, VkSampler sampler) 
 	};
 }
 
+inline void DescriptorUpdater::BindAccelerationStructure(uint32_t binding,
+														 const VkAccelerationStructureKHR* as) {
+	auto& asInfo = _asInfos[_asCount++];
+	asInfo = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
+			  .pNext = nullptr,
+			  .accelerationStructureCount = 1,
+			  .pAccelerationStructures = as};
+	auto& write = _writes[_writeCount++];
+	write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			 .pNext = &asInfo,
+			 .dstSet = VK_NULL_HANDLE,
+			 .dstBinding = binding,
+			 .dstArrayElement = 0,
+			 .descriptorCount = 1,
+			 .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
+			 .pImageInfo = nullptr,
+			 .pBufferInfo = nullptr,
+			 .pTexelBufferView = nullptr};
+}
+
 inline void DescriptorUpdater::UpdateSet(VkDevice device, VkDescriptorSet set) {
 	for (uint32_t i = 0; i < _writeCount; ++i) {
 		_writes[i].dstSet = set;
@@ -275,21 +295,24 @@ void DescriptorLayout<Slots...>::Write(VkDevice device, VkDescriptorSet set,
 
 	std::array<VkDescriptorImageInfo, kCount> imageInfos{};
 	std::array<VkDescriptorBufferInfo, kCount> bufferInfos{};
+	std::array<VkWriteDescriptorSetAccelerationStructureKHR, kCount> asInfos{};
 	std::array<VkWriteDescriptorSet, kCount> writes{};
 
-	WriteAll(device, set, argTuple, imageInfos, bufferInfos, writes,
+	WriteAll(device, set, argTuple, imageInfos, bufferInfos, asInfos, writes,
 			 std::make_index_sequence<kCount>{});
 }
 
 template <typename... Slots>
 template <typename ArgTuple, size_t... I>
-void DescriptorLayout<Slots...>::WriteAll(VkDevice device, VkDescriptorSet set, ArgTuple& args,
-										  std::array<VkDescriptorImageInfo, kCount>& imageInfos,
-										  std::array<VkDescriptorBufferInfo, kCount>& bufferInfos,
-										  std::array<VkWriteDescriptorSet, kCount>& writes,
-										  std::index_sequence<I...> /*unused*/) noexcept {
+void DescriptorLayout<Slots...>::WriteAll(
+	VkDevice device, VkDescriptorSet set, ArgTuple& args,
+	std::array<VkDescriptorImageInfo, kCount>& imageInfos,
+	std::array<VkDescriptorBufferInfo, kCount>& bufferInfos,
+	std::array<VkWriteDescriptorSetAccelerationStructureKHR, kCount>& asInfos,
+	std::array<VkWriteDescriptorSet, kCount>& writes,
+	std::index_sequence<I...> /*unused*/) noexcept {
 	(WriteSlot<I, std::tuple_element_t<I, std::tuple<Slots...>>>(
-		 set, std::get<I>(args), imageInfos[I], bufferInfos[I], writes[I]),
+		 set, std::get<I>(args), imageInfos[I], bufferInfos[I], asInfos[I], writes[I]),
 	 ...);
 
 	std::array<VkWriteDescriptorSet, kCount> validWrites{};
@@ -310,6 +333,7 @@ template <size_t I, typename Slot, typename Arg>
 void DescriptorLayout<Slots...>::WriteSlot(VkDescriptorSet set, Arg&& arg,
 										   VkDescriptorImageInfo& imageInfo,
 										   VkDescriptorBufferInfo& bufferInfo,
+										   VkWriteDescriptorSetAccelerationStructureKHR& asInfo,
 										   VkWriteDescriptorSet& write) noexcept {
 	using T = std::remove_cvref_t<Arg>;
 
@@ -377,6 +401,20 @@ void DescriptorLayout<Slots...>::WriteSlot(VkDescriptorSet set, Arg&& arg,
 			static_assert(std::is_same_v<T, BufferWrite>, "Binding expects BufferWrite");
 			bufferInfo = {.buffer = arg.buffer, .offset = arg.offset, .range = arg.range};
 			write.pBufferInfo = &bufferInfo;
+		} else if constexpr (Slot::type == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR) {
+			static_assert(std::is_same_v<T, const VkAccelerationStructureKHR*> ||
+							  std::is_same_v<T, VkAccelerationStructureKHR*>,
+						  "Binding expects a pointer to VkAccelerationStructureKHR");
+			if (*arg == VK_NULL_HANDLE) {
+				write.descriptorCount = 0;
+			} else {
+				asInfo = {.sType =
+							  VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
+						  .pNext = nullptr,
+						  .accelerationStructureCount = 1,
+						  .pAccelerationStructures = arg};
+				write.pNext = &asInfo;
+			}
 		} else {
 			static_assert(sizeof(Slot) == 0, "Unhandled descriptor type");
 		}

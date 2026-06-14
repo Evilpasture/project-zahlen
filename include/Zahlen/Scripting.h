@@ -53,6 +53,7 @@ typedef struct ZHLN_GameState {
 	uint64_t debugLineVbo;
 	uint64_t debugLinePipeline;
 	uint32_t debugLineAlbedo;
+	int enableRTR;
 } ZHLN_GameState;
 
 ZHLN_API struct ZHLN_Engine* ZHLN_GetEngineContext(void);

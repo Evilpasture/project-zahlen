@@ -41,6 +41,7 @@ struct PushConstants {
 	float giIntensity;
 	int giSamples;
 	int enableSSR;
+	int enableRTR;
 	int _pad;
 };
 [[vk::push_constant]] PushConstants pc;
@@ -73,6 +74,7 @@ float GetStableWeylNoise(uint2 pixelPos) {
 [[vk::binding(3, 0)]] Texture2D<float4> texNormalRoughness;
 [[vk::binding(4, 0)]] SamplerState pointSampler;
 [[vk::binding(5, 0)]] TextureCube<float4> texEnvMap;
+[[vk::binding(6, 0)]] RaytracingAccelerationStructure tlas;
 
 float3 ReconstructWorldPos(float2 uv, float depth) {
 	float4 clipSpacePos = float4(uv.x * 2.0f - 1.0f, (1.0f - uv.y) * 2.0f - 1.0f, depth, 1.0f);
@@ -226,6 +228,38 @@ float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, float3 N,
 	return float2(0.0f, 0.0f);
 }
 
+float2 RaytraceRTR(float3 worldPos, float3 N, float3 R, OUT_REF(float) confidence) {
+	confidence = 0.0f;
+	RayDesc ray;
+	ray.Origin = worldPos + N * 0.05f; // Bias ray to prevent shadow acne self-intersection
+	ray.Direction = R;
+	ray.TMin = 0.01f;
+	ray.TMax = 1000.0f;
+
+	RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> q;
+	q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
+
+	// DXR handles opaque hits internally. Proceed() returns false when traversal is complete.
+	while (q.Proceed()) {
+	}
+
+	if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
+		confidence = 1.0f;
+
+		// Map the hit world coordinate back to the screen UV to sample the actual G-Buffer colors
+		float3 hitWorldPos = ray.Origin + ray.Direction * q.CommittedRayT();
+		float4 hitClip = mul(pc.viewProj, float4(hitWorldPos, 1.0f));
+		float2 hitNDC = hitClip.xy / max(hitClip.w, 0.0001f);
+		float2 hitUV = hitNDC * float2(0.5f, -0.5f) + 0.5f;
+
+		// Soft falloff at screen boundaries
+		float2 edgeFactor = smoothstep(0.0f, 0.08f, hitUV) * smoothstep(1.0f, 0.92f, hitUV);
+		confidence *= edgeFactor.x * edgeFactor.y;
+		return hitUV;
+	}
+	return float2(0.0f, 0.0f);
+}
+
 float SoftClamp(float x, float limit) {
 	return limit * (1.0f - exp(-x / max(limit, 0.0001f)));
 }
@@ -360,17 +394,22 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 		}
 	}
 
-	// --- Screen Space Reflections ---
-	if (pc.enableSSR != 0 && roughness <= 0.85f) {
+	// --- Screen Space & Ray Traced Reflections ---
+	if ((pc.enableSSR != 0 || pc.enableRTR != 0) && roughness <= 0.85f) {
 		float3 V = normalize(pc.camPos.xyz - worldPos);
 		float3 R = reflect(-V, N);
 
 		if (dot(R, N) > 0.05f) {
 			float confidence = 0.0f;
 			float3 reflectionColor = float3(0.0f, 0.0f, 0.0f);
-			float3 biasedStartPos = worldPos + N * 0.05f;
+			float2 hitUV = float2(0.0f, 0.0f);
 
-			float2 hitUV = RaymarchSSR(worldPos, biasedStartPos, R, N, confidence);
+			if (pc.enableRTR != 0) {
+				hitUV = RaytraceRTR(worldPos, N, R, confidence);
+			} else {
+				float3 biasedStartPos = worldPos + N * 0.05f;
+				hitUV = RaymarchSSR(worldPos, biasedStartPos, R, N, confidence);
+			}
 
 			if (confidence > 0.0f) {
 				confidence *= saturate(dot(R, N) * 10.0f);
