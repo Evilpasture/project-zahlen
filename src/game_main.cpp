@@ -321,6 +321,10 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, GameContext
 		physicsAccumulator += cappedDt;
 
 		constexpr float targetDt = 1.0f / 60.0f;
+
+		// --- SAFETY: Cap the accumulator to prevent "spiral of death" micro-stutters ---
+		physicsAccumulator = std::min(physicsAccumulator, targetDt * 4.0f);
+
 		while (physicsAccumulator >= targetDt) {
 			ZHLN::MovementSystem(engine, targetDt);
 			pc.Step(targetDt);

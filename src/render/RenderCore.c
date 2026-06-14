@@ -472,19 +472,22 @@ ZHLN_Internal_ChooseFormat(const ZHLN_SwapchainSupport* const restrict support) 
 [[nodiscard]]
 static VkPresentModeKHR
 ZHLN_Internal_ChoosePresentMode(const ZHLN_SwapchainSupport* const restrict support, bool vsync) {
-	if (!vsync) {
-		for (uint32_t i = 0; i < support->present_mode_count; ++i) {
-			if (support->present_modes[i] == VK_PRESENT_MODE_MAILBOX_KHR) {
-				return VK_PRESENT_MODE_MAILBOX_KHR;
-			}
+	// ALWAYS prefer MAILBOX (triple buffering) if available. It provides tear-free
+	// rendering with zero VSync drop-stutter.
+	for (uint32_t i = 0; i < support->present_mode_count; ++i) {
+		if (support->present_modes[i] == VK_PRESENT_MODE_MAILBOX_KHR) {
+			return VK_PRESENT_MODE_MAILBOX_KHR;
 		}
-		// Immediate is better than FIFO for non-vsync if mailbox unavailable
+	}
+
+	if (!vsync) {
 		for (uint32_t i = 0; i < support->present_mode_count; ++i) {
 			if (support->present_modes[i] == VK_PRESENT_MODE_IMMEDIATE_KHR) {
 				return VK_PRESENT_MODE_IMMEDIATE_KHR;
 			}
 		}
 	}
+
 	// FIFO is always guaranteed by the spec
 	return VK_PRESENT_MODE_FIFO_KHR;
 }

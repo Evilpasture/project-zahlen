@@ -48,35 +48,42 @@ struct EngineImpl {
 	void* gameState = nullptr;
 };
 
-Engine::Engine() : Engine(EngineConfig{}) {}
+Engine::Engine() : _impl(nullptr) {
+	// Empty constructor specifically used by static factory Create() to defer initialization safely
+}
 
-Engine::Engine(const EngineConfig& cfg) {
+Engine::Engine(const EngineConfig& cfg) : _impl(nullptr) {
 	bool success = false;
-	InitInternal(cfg, success);
+	InitInternal(cfg, success, nullptr);
 	if (!success) {
 		ZHLN::Panic("FATAL: Failed to initialize Engine via legacy constructor.");
 	}
 }
 
-Engine::Engine(const EngineConfig& cfg, bool& outSuccess) {
-	InitInternal(cfg, outSuccess);
+Engine::Engine(const EngineConfig& cfg, bool& outSuccess) : _impl(nullptr) {
+	InitInternal(cfg, outSuccess, nullptr);
 }
 
 std::unique_ptr<Engine> Engine::Create(const EngineConfig& cfg, const char** outError) {
-	bool success = false;
-	auto engine = std::unique_ptr<Engine>(new (std::nothrow) Engine(cfg, success));
-
-	if (!engine || !success) {
+	auto engine = std::unique_ptr<Engine>(new (std::nothrow) Engine());
+	if (!engine) {
 		if (outError != nullptr) {
-			*outError = "Failed to initialize windowing system (GLFW). Are you running in a "
-						"headless, SSH, or TTY environment without an active X11/Wayland session?";
+			*outError = "Failed to allocate memory for the Engine context.";
 		}
 		return nullptr;
 	}
+
+	bool success = false;
+	engine->InitInternal(cfg, success, outError);
+
+	if (!success) {
+		return nullptr; // outError has been populated with the precise failure reason
+	}
+
 	return engine;
 }
 
-void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess) {
+void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess, const char** outError) {
 	outSuccess = false;
 	g_CurrentEngine = this;
 	s_GlobalEngine = this;
@@ -98,7 +105,11 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess) {
 			ZHLN::Log("GLFW failed to initialize. Falling back to native TTY Display Mode.");
 			use_tty = true;
 		} else {
-			return; // Gracefully return; outSuccess remains false
+			if (outError != nullptr) {
+				*outError = "GLFW failed to initialize, and native KMS/TTY display mode is not "
+							"supported on this platform.";
+			}
+			return;
 		}
 	}
 
@@ -108,6 +119,17 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess) {
 	_impl->window =
 		std::make_unique<Window>(cfg.render.appName.data(), cfg.render.width, cfg.render.height,
 								 cfg.render.fullscreen, _impl->input.get(), use_tty);
+
+	// Direct TTY Check (fails cleanly if libseat is missing or seatd is not running)
+	if (use_tty && _impl->window->GetTTYContext() == nullptr) {
+		ZHLN::Log("[Engine] FATAL: TTY Input initialization failed (libseat session rejected).");
+		if (outError != nullptr) {
+			*outError = "TTY input initialization failed. Please make sure seatd.service is active "
+						"or logind is running.";
+		}
+		return;
+	}
+
 	_impl->renderContext = std::make_unique<RenderContext>(*_impl->window, cfg.render);
 	_impl->physicsContext = std::make_unique<PhysicsContext>(cfg.physics);
 	_impl->audioContext = std::make_unique<AudioContext>();

@@ -153,7 +153,7 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBEVDEV REQUIRED IMPORTED_TARGET libevdev)
-    pkg_check_modules(SYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
+    pkg_check_modules(LIBSEAT REQUIRED IMPORTED_TARGET libseat)
 endif()
 
 # --- 5. BUILD CORE SHARED LIBRARY ---
@@ -186,7 +186,7 @@ target_link_libraries(zahlen_engine PRIVATE
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_link_libraries(zahlen_engine PRIVATE PkgConfig::LIBEVDEV PkgConfig::SYSTEMD)
+    target_link_libraries(zahlen_engine PRIVATE PkgConfig::LIBEVDEV PkgConfig::LIBSEAT)
 endif()
 
 # Jolt is part of the public ABI exposed by engine headers, so propagate its include paths.

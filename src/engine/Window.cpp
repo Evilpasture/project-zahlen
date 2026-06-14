@@ -177,4 +177,12 @@ void* Window::GetTTYContext() const {
 	return _impl->tty_context;
 }
 
+bool Window::ReinitTTY() {
+	if (_impl->is_tty && _impl->tty_context == nullptr) {
+		_impl->tty_context = TTYBackend::Init(_impl->width, _impl->height);
+		return _impl->tty_context != nullptr;
+	}
+	return false;
+}
+
 } // namespace ZHLN

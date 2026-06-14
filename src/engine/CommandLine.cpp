@@ -202,6 +202,7 @@ constexpr std::array Handlers = {
 } // namespace
 
 namespace ZHLN {
+
 std::expected<CommandLineOptions, EngineError> HandleCommandLine(std::span<char* const> args) {
 	CommandLineOptions options{.args = args, .enableValidation = true, .launchEditor = false};
 

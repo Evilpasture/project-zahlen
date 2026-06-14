@@ -170,12 +170,13 @@ RenderContext::~RenderContext() {
 	if (_impl && (_impl->ctx.Device() != nullptr)) {
 		vkDeviceWaitIdle(_impl->ctx.Device());
 		_impl->stagingContext.reset();
-		ImGui_ImplVulkan_Shutdown();
-		ImGui_ImplGlfw_Shutdown();
-		ImGui::DestroyContext();
 
-		// meshPool and materialPool automatically sweep and destroy all remaining
-		// active allocations here on context shutdown, cleaning up pipelines and buffers.
+		// --- SAFETY: Only shut down ImGui if it was actually initialized ---
+		if (!_impl->window.IsTTY()) {
+			ImGui_ImplVulkan_Shutdown();
+			ImGui_ImplGlfw_Shutdown();
+			ImGui::DestroyContext();
+		}
 	}
 }
 

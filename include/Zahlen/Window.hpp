@@ -37,6 +37,7 @@ class ZHLN_API Window {
 
 	[[nodiscard]] bool IsTTY() const;
 	[[nodiscard]] void* GetTTYContext() const;
+	bool ReinitTTY();
 
   private:
 	std::unique_ptr<Impl> _impl;

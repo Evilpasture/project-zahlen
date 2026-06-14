@@ -17,6 +17,7 @@ int main(int argc, char* argv[]) {
 		HandleCommandLine(std::span(argv, static_cast<size_t>(argc)))
 			.and_then([](const CommandLineOptions& options) -> std::expected<int, EngineError> {
 				ZHLN::SetLogLevel(options.logLevel);
+
 				if (options.launchEditor) {
 					return RunEditor(options);
 				}

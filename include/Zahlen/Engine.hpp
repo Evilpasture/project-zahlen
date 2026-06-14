@@ -55,7 +55,7 @@ class ZHLN_API Engine {
 	void SetGameState(void* state);
 
   private:
-	void InitInternal(const EngineConfig& cfg, bool& outSuccess);
+	void InitInternal(const EngineConfig& cfg, bool& outSuccess, const char** outError = nullptr);
 	std::unique_ptr<EngineImpl> _impl;
 };
 

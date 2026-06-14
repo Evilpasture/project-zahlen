@@ -3,20 +3,20 @@
 
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
-#include <print>
 
 #ifdef __linux__
 #include <dirent.h>
 #include <fcntl.h>
 #include <libevdev/libevdev.h>
+extern "C" {
+#include <libseat.h>
+}
 #include <linux/kd.h>
 #include <linux/vt.h>
 #include <sys/epoll.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
-#include <sys/sysmacros.h> // For major() and minor()
-#include <systemd/sd-bus.h>
-#include <systemd/sd-login.h>
+#include <sys/sysmacros.h>
 #include <termios.h>
 #include <unistd.h>
 #endif
@@ -30,6 +30,7 @@ struct TakenDevice {
 	uint32_t min;
 	int fd;
 	libevdev* dev;
+	int device_id; // Assigned by libseat
 };
 
 struct TTYState {
@@ -43,14 +44,10 @@ struct TTYState {
 	int epoll_fd = -1;
 	std::vector<TakenDevice> taken_devices;
 
-	// systemd-logind session state
-	sd_bus* bus = nullptr;
-	char* session_id = nullptr;
-	std::string session_path;
-	bool has_logind_control = false;
+	struct libseat* seat = nullptr;
+	bool active = false;
 };
 
-// Global pointer specifically for the crash handler to access
 static TTYState* g_CrashState = nullptr;
 
 static KeyCode MapEvdevKey(uint16_t code) {
@@ -72,13 +69,31 @@ static KeyCode MapEvdevKey(uint16_t code) {
 		case KEY_R:
 			return KeyCode::R;
 		case BTN_LEFT:
-			return KeyCode::RButton; // Map standard clicks
+			return KeyCode::RButton;
 		case BTN_RIGHT:
 			return KeyCode::RButton;
 		default:
 			return KeyCode::Unknown;
 	}
 }
+
+static void handle_enable_seat(struct libseat* seat, void* data) {
+	auto* state = static_cast<TTYState*>(data);
+	state->active = true;
+	ZHLN::Log("[TTY] libseat: Seat session enabled and active.");
+}
+
+static void handle_disable_seat(struct libseat* seat, void* data) {
+	auto* state = static_cast<TTYState*>(data);
+	state->active = false;
+	ZHLN::Log("[TTY] libseat: Seat session disabled (VT switched away).");
+	libseat_disable_seat(seat);
+}
+
+static struct libseat_seat_listener seat_listener = {
+	.enable_seat = handle_enable_seat,
+	.disable_seat = handle_disable_seat,
+};
 
 bool IsSupported() {
 	return access("/dev/tty", R_OK | W_OK) == 0;
@@ -91,131 +106,111 @@ void* Init(uint32_t width, uint32_t height) {
 
 	state->tty_fd = open("/dev/tty", O_RDWR | O_CLOEXEC);
 	if (state->tty_fd >= 0) {
-		ioctl(state->tty_fd, KDGKBMODE, &state->old_kb_mode);
+		if (ioctl(state->tty_fd, KDGKBMODE, &state->old_kb_mode) >= 0) {
+			struct termios t{};
+			tcgetattr(state->tty_fd, &t);
+			state->old_termios = t;
 
-		struct termios t{};
-		tcgetattr(state->tty_fd, &t);
-		state->old_termios = t;
+			t.c_lflag &= ~(ICANON | ECHO);
+			t.c_cc[VMIN] = 0;
+			t.c_cc[VTIME] = 0;
 
-		t.c_lflag &= ~(ICANON | ECHO);
-		t.c_cc[VMIN] = 0;
-		t.c_cc[VTIME] = 0;
-
-		tcsetattr(state->tty_fd, TCSANOW, &t);
-		ioctl(state->tty_fd, KDSETMODE, KD_GRAPHICS);
+			tcsetattr(state->tty_fd, TCSANOW, &t);
+			ioctl(state->tty_fd, KDSETMODE, KD_GRAPHICS);
+			ioctl(state->tty_fd, KDSKBMODE, K_MEDIUMRAW);
+			ZHLN::Log("[TTY] Virtual Console (VT) initialized.");
+		} else {
+			close(state->tty_fd);
+			state->tty_fd = -1;
+		}
 	}
 
-	// 1. Try to acquire systemd-logind Session Control
-	if (sd_pid_get_session(0, &state->session_id) >= 0) {
-		if (sd_bus_open_system(&state->bus) >= 0) {
-			state->session_path =
-				std::string("/org/freedesktop/login1/session/") + state->session_id;
-			sd_bus_error error = SD_BUS_ERROR_NULL;
+	// 1. Establish libseat session
+	libseat_set_log_level(LIBSEAT_LOG_LEVEL_INFO);
+	state->seat = libseat_open_seat(&seat_listener, state);
+	if (state->seat == nullptr) {
+		ZHLN::Log("[TTY] FATAL: Failed to initialize libseat session.");
+		Shutdown(state);
+		return nullptr;
+	}
 
-			int r =
-				sd_bus_call_method(state->bus, "org.freedesktop.login1",
-								   state->session_path.c_str(), "org.freedesktop.login1.Session",
-								   "TakeControl", &error, nullptr, "b", 0); // force = false
-			if (r >= 0) {
-				state->has_logind_control = true;
-				ZHLN::Log("[TTY] Successfully acquired systemd-logind Session Control.");
-			} else {
-				ZHLN::Log(
-					"[TTY] Logind TakeControl failed: {} (errno: {}). Falling back to direct open.",
-					(error.message != nullptr) ? error.message : "unknown", r);
-				sd_bus_error_free(&error);
-			}
+	// Dispatch initial setup events until seat is marked active
+	while (!state->active) {
+		if (libseat_dispatch(state->seat, -1) == -1) {
+			ZHLN::Log("[TTY] FATAL: Error dispatching libseat during startup.");
+			Shutdown(state);
+			return nullptr;
 		}
 	}
 
 	// 2. Initialize epoll
 	state->epoll_fd = epoll_create1(EPOLL_CLOEXEC);
-	if (state->epoll_fd >= 0) {
-		DIR* dir = opendir("/dev/input");
-		if (dir != nullptr) {
-			struct dirent* ent = nullptr;
-			while ((ent = readdir(dir)) != nullptr) {
-				if (strncmp(ent->d_name, "event", 5) == 0) {
-					std::string path = std::string("/dev/input/") + ent->d_name;
+	if (state->epoll_fd < 0) {
+		Shutdown(state);
+		return nullptr;
+	}
 
-					int fd = -1;
-					bool is_logind_fd = false;
-					struct stat st{};
+	// Add the libseat connection FD to epoll so we get notified on session switches
+	int seat_fd = libseat_get_fd(state->seat);
+	if (seat_fd >= 0) {
+		epoll_event ev{};
+		ev.events = EPOLLIN;
+		ev.data.ptr = state->seat; // Store pointer to differentiate from evdev
+		epoll_ctl(state->epoll_fd, EPOLL_CTL_ADD, seat_fd, &ev);
+	}
 
-					if (stat(path.c_str(), &st) == 0) {
-						uint32_t maj = major(st.st_rdev);
-						uint32_t min = minor(st.st_rdev);
+	// 3. Scan and Open input devices via libseat
+	DIR* dir = opendir("/dev/input");
+	if (dir != nullptr) {
+		struct dirent* ent = nullptr;
+		while ((ent = readdir(dir)) != nullptr) {
+			if (strncmp(ent->d_name, "event", 5) == 0) {
+				std::string path = std::string("/dev/input/") + ent->d_name;
 
-						if (state->has_logind_control) {
-							sd_bus_error error = SD_BUS_ERROR_NULL;
-							sd_bus_message* reply = nullptr;
+				int fd = -1;
+				int device_id = libseat_open_device(state->seat, path.c_str(), &fd);
 
-							int r = sd_bus_call_method(
-								state->bus, "org.freedesktop.login1", state->session_path.c_str(),
-								"org.freedesktop.login1.Session", "TakeDevice", &error, &reply,
-								"uu", maj, min);
-							if (r >= 0) {
-								int paused = 0;
-								sd_bus_message_read(reply, "hb", &fd, &paused);
-								is_logind_fd = true;
+				if (device_id >= 0 && fd >= 0) {
+					libevdev* dev = nullptr;
+					if (libevdev_new_from_fd(fd, &dev) == 0) {
+						if (libevdev_has_event_type(dev, EV_KEY) ||
+							libevdev_has_event_type(dev, EV_REL)) {
 
-								if (paused != 0) {
-									ZHLN::Log("[TTY] WARNING: systemd-logind paused device '{}' on "
-											  "startup!",
-											  path);
-								}
+							libevdev_grab(dev, LIBEVDEV_GRAB);
 
-								int flags = fcntl(fd, F_GETFL, 0);
-								fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-							} else {
-								ZHLN::Log(
-									"[TTY] systemd-logind rejected device '{}': {} (error: {})",
-									path, (error.message != nullptr) ? error.message : "unknown",
-									r);
-								sd_bus_error_free(&error);
-							}
-							if (reply != nullptr) {
-								sd_bus_message_unref(reply);
-							}
+							struct stat dev_st{};
+							stat(path.c_str(), &dev_st);
+
+							state->taken_devices.push_back({.maj = major(dev_st.st_rdev),
+															.min = minor(dev_st.st_rdev),
+															.fd = fd,
+															.dev = dev,
+															.device_id = device_id});
+
+							epoll_event ep_ev{};
+							ep_ev.events = EPOLLIN;
+							ep_ev.data.ptr = dev;
+							epoll_ctl(state->epoll_fd, EPOLL_CTL_ADD, fd, &ep_ev);
+
+							ZHLN::Log("[TTY] libseat opened input device: {} (ID: {})",
+									  libevdev_get_name(dev), device_id);
+						} else {
+							libevdev_free(dev);
+							libseat_close_device(state->seat, device_id);
 						}
-					}
-
-					// Fallback to standard open if logind failed or was bypassed
-					if (fd < 0) {
-						fd = open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-					}
-
-					if (fd >= 0) {
-						libevdev* dev = nullptr;
-						if (libevdev_new_from_fd(fd, &dev) == 0) {
-							if (libevdev_has_event_type(dev, EV_KEY) ||
-								libevdev_has_event_type(dev, EV_REL)) {
-
-								struct stat dev_st{};
-								stat(path.c_str(), &dev_st);
-								state->taken_devices.push_back({.maj = major(dev_st.st_rdev),
-																.min = minor(dev_st.st_rdev),
-																.fd = fd,
-																.dev = dev});
-
-								epoll_event ep_ev{};
-								ep_ev.events = EPOLLIN;
-								ep_ev.data.ptr = dev;
-								epoll_ctl(state->epoll_fd, EPOLL_CTL_ADD, fd, &ep_ev);
-
-								ZHLN::Log("[TTY] Monitoring input device: {} ({})",
-										  libevdev_get_name(dev),
-										  is_logind_fd ? "via systemd-logind" : "via direct open");
-							} else {
-								libevdev_free(dev);
-								close(fd);
-							}
-						}
+					} else {
+						libseat_close_device(state->seat, device_id);
 					}
 				}
 			}
-			closedir(dir);
 		}
+		closedir(dir);
+	}
+
+	if (state->taken_devices.empty()) {
+		ZHLN::Log("[TTY] FATAL: No input devices could be opened under this seat.");
+		Shutdown(state);
+		return nullptr;
 	}
 
 	g_CrashState = state;
@@ -227,38 +222,24 @@ void Shutdown(void* context) {
 	if (state != nullptr) {
 		if (state->tty_fd >= 0) {
 			ioctl(state->tty_fd, KDSETMODE, KD_TEXT);
+			ioctl(state->tty_fd, KDSKBMODE, state->old_kb_mode);
 			tcsetattr(state->tty_fd, TCSANOW, &state->old_termios);
 			tcflush(state->tty_fd, TCIFLUSH);
 			close(state->tty_fd);
 		}
 
-		// Clean up taken devices
 		for (const auto& td : state->taken_devices) {
-			libevdev_free(td.dev);
-
-			if (state->has_logind_control) {
-				sd_bus_error error = SD_BUS_ERROR_NULL;
-				sd_bus_call_method(state->bus, "org.freedesktop.login1",
-								   state->session_path.c_str(), "org.freedesktop.login1.Session",
-								   "ReleaseDevice", &error, nullptr, "uu", td.maj, td.min);
-				sd_bus_error_free(&error);
+			if (td.dev != nullptr) {
+				libevdev_grab(td.dev, LIBEVDEV_UNGRAB);
+				libevdev_free(td.dev);
 			}
-			close(td.fd);
+			if (state->seat != nullptr && td.device_id >= 0) {
+				libseat_close_device(state->seat, td.device_id);
+			}
 		}
 
-		if (state->has_logind_control) {
-			sd_bus_error error = SD_BUS_ERROR_NULL;
-			sd_bus_call_method(state->bus, "org.freedesktop.login1", state->session_path.c_str(),
-							   "org.freedesktop.login1.Session", "ReleaseControl", &error, nullptr,
-							   "");
-			sd_bus_error_free(&error);
-		}
-
-		if (state->bus != nullptr) {
-			sd_bus_unref(state->bus);
-		}
-		if (state->session_id != nullptr) {
-			free(state->session_id);
+		if (state->seat != nullptr) {
+			libseat_close_seat(state->seat);
 		}
 
 		if (state->epoll_fd >= 0) {
@@ -278,17 +259,21 @@ bool IsRunning(void* context) {
 void EmergencyRestore() {
 	if ((g_CrashState != nullptr) && g_CrashState->tty_fd >= 0) {
 		ioctl(g_CrashState->tty_fd, KDSETMODE, KD_TEXT);
-		ioctl(g_CrashState->tty_fd, KDSKBMODE, K_XLATE);
+		ioctl(g_CrashState->tty_fd, KDSKBMODE, g_CrashState->old_kb_mode);
 		tcsetattr(g_CrashState->tty_fd, TCSANOW, &g_CrashState->old_termios);
 		tcflush(g_CrashState->tty_fd, TCIFLUSH);
 
-		// Safely notify logind we've dropped session control
-		if (g_CrashState->has_logind_control) {
-			sd_bus_error error = SD_BUS_ERROR_NULL;
-			sd_bus_call_method(g_CrashState->bus, "org.freedesktop.login1",
-							   g_CrashState->session_path.c_str(), "org.freedesktop.login1.Session",
-							   "ReleaseControl", &error, nullptr, "");
-			sd_bus_error_free(&error);
+		for (const auto& td : g_CrashState->taken_devices) {
+			if (td.dev != nullptr) {
+				libevdev_grab(td.dev, LIBEVDEV_UNGRAB);
+			}
+			if (g_CrashState->seat != nullptr && td.device_id >= 0) {
+				libseat_close_device(g_CrashState->seat, td.device_id);
+			}
+		}
+
+		if (g_CrashState->seat != nullptr) {
+			libseat_close_seat(g_CrashState->seat);
 		}
 	}
 }
@@ -306,35 +291,53 @@ void ProcessEvents(void* context, InputContext* input) {
 	float mouseAccumY = 0.0f;
 	bool mouseMoved = false;
 
+	static bool ctrlDown = false;
+	static bool altDown = false;
+
 	for (int i = 0; i < n; i++) {
+		// --- Process internal libseat messages ---
+		if (events[i].data.ptr == state->seat) {
+			libseat_dispatch(state->seat, 0);
+			continue;
+		}
+
 		auto* dev = static_cast<libevdev*>(events[i].data.ptr);
 		input_event ev{};
 		int rc = 0;
 
-		// --- SOLIDIFIED NON-BLOCKING EVENT LOOP ---
 		while (true) {
 			rc = libevdev_next_event(dev, LIBEVDEV_READ_FLAG_NORMAL, &ev);
 
 			if (rc == -EAGAIN) {
-				break; // Queue is empty, exit loop cleanly
+				break;
 			}
 
 			if (rc == LIBEVDEV_READ_STATUS_SYNC) {
-				// Buffer out-of-sync; safely drain the sync queue using FLAG_SYNC to prevent
-				// infinite loop
 				while (libevdev_next_event(dev, LIBEVDEV_READ_FLAG_SYNC, &ev) ==
 					   LIBEVDEV_READ_STATUS_SYNC) {
-					// Consuming sync events silently
 				}
-				break; // Exit this frame's read pass immediately to let the buffer recover
+				break;
 			}
 
 			if (rc < 0) {
-				break; // Other error, exit loop
+				break;
 			}
 
-			// 1. Keys & Buttons
 			if (ev.type == EV_KEY) {
+				if (ev.code == KEY_LEFTCTRL || ev.code == KEY_RIGHTCTRL) {
+					ctrlDown = (ev.value != 0);
+				}
+				if (ev.code == KEY_LEFTALT || ev.code == KEY_RIGHTALT) {
+					altDown = (ev.value != 0);
+				}
+
+				// --- EMERGENCY ESCAPE HATCH ---
+				if (ctrlDown && altDown && ev.code == KEY_BACKSPACE && ev.value == 1) {
+					ZHLN::Log("[TTY] Emergency Escape Hatch triggered! Restoring terminal...");
+					EmergencyRestore();
+					_exit(0);
+				}
+
 				KeyCode key = MapEvdevKey(ev.code);
 				if (key != KeyCode::Unknown) {
 					if (ev.value == 1 || ev.value == 2) {
@@ -349,7 +352,6 @@ void ProcessEvents(void* context, InputContext* input) {
 				}
 			}
 
-			// 2. Mouse Axes
 			if (ev.type == EV_REL) {
 				if (ev.code == REL_X) {
 					mouseAccumX += (float)ev.value;
@@ -378,11 +380,9 @@ void ProcessEvents(void* context, InputContext* input) {
 }
 
 std::vector<const char*> GetRequiredInstanceExtensions() {
-	return {
-		VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_DISPLAY_EXTENSION_NAME,
-		// Require these on the instance level to satisfy swapchain_maintenance1 device requirements
-		VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
-		VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME};
+	return {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_DISPLAY_EXTENSION_NAME,
+			VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
+			VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME};
 }
 
 VkSurfaceKHR CreateSurface(VkInstance instance, VkPhysicalDevice physical, void* context,
@@ -414,7 +414,6 @@ VkSurfaceKHR CreateSurface(VkInstance instance, VkPhysicalDevice physical, void*
 	ZHLN::Log("[TTY] Selected Mode: {}x{} @ {}Hz", outWidth, outHeight,
 			  (float)modes[0].parameters.refreshRate / 1000.0f);
 
-	// --- FIX: Retrieve Plane Properties FIRST to satisfy validation requirements ---
 	uint32_t planeCount = 0;
 	vkGetPhysicalDeviceDisplayPlanePropertiesKHR(physical, &planeCount, nullptr);
 	std::vector<VkDisplayPlanePropertiesKHR> planeProps(planeCount);
@@ -487,7 +486,6 @@ VkSurfaceKHR CreateSurface(VkInstance instance, VkPhysicalDevice physical, void*
 
 #else
 
-// --- FALLBACK STUBS FOR NON-LINUX BUILDS (Windows/macOS) ---
 bool IsSupported() {
 	return false;
 }
