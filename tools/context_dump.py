@@ -26,6 +26,7 @@ def get_git_tracked_files(target=".", ignore_demo=False, ignore_tools=False):
         ".hlsl",
         ".sh",
         ".py",
+        ".inl",
     }
     include_filenames = {"CMakeLists.txt"}
 
