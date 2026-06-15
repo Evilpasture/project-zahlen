@@ -116,7 +116,8 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 		ZHLN::Log("Raytracing context initialized successfully.");
 	}
 
-	_impl->gpuProfiler.Init(_impl->ctx.Device());
+	_impl->gpuProfiler.Init(_impl->ctx.Device(), _impl->ctx.Physical(),
+							_impl->ctx.PhysicalInfo().graphics_family);
 
 	_impl->InitShadowResources();
 	_impl->InitCullingResources();

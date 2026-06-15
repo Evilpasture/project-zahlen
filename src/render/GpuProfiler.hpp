@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // src/render/GpuProfiler.hpp
 
 #pragma once
@@ -57,7 +56,7 @@ template <GpuStageTag... Stages> class GpuProfiler {
 	GpuProfiler(GpuProfiler&& other) noexcept;
 	auto operator=(GpuProfiler&& other) noexcept -> GpuProfiler&;
 
-	void Init(VkDevice device) noexcept;
+	void Init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex) noexcept;
 
 	/**
 	 * @brief Resets the query pool on the CPU before recording.
@@ -71,12 +70,6 @@ template <GpuStageTag... Stages> class GpuProfiler {
 	template <GpuStageTag Stage> void WriteEnd(VkCommandBuffer cmd, uint32_t frameIndex) noexcept;
 
 	// --- Results Extraction ---
-
-	/**
-	 * @brief Pulls completed results from the GPU and processes them via a fold expression.
-	 *
-	 * @tparam Func Callback signature: void(std::string_view name, float durationMS)
-	 */
 	template <typename Func>
 	void RetrieveResults(uint32_t frameIndex, float timestampPeriod, Func&& callback) noexcept;
 
@@ -84,6 +77,7 @@ template <GpuStageTag... Stages> class GpuProfiler {
 	VkDevice _device = VK_NULL_HANDLE;
 	std::array<VkQueryPool, 2> _pools = {VK_NULL_HANDLE, VK_NULL_HANDLE};
 	std::array<uint32_t, 2> _recordedMasks = {0, 0}; // Double-buffered stage record mask [2]
+	bool _enabled = false;							 // Added
 };
 
 // ============================================================================
