@@ -63,7 +63,6 @@ auto Allocator::Init(VkInstance instance, VkPhysicalDevice physical, VkDevice de
 		.vkGetDeviceBufferMemoryRequirements = &vkGetDeviceBufferMemoryRequirements,
 		.vkGetDeviceImageMemoryRequirements = &vkGetDeviceImageMemoryRequirements,
 		.vkGetMemoryWin32HandleKHR = nullptr,
-		.vkGetPhysicalDeviceProperties2KHR = {},
 	};
 
 	const VmaAllocatorCreateInfo info = {

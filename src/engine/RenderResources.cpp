@@ -58,12 +58,13 @@ void RenderContext::SetResolution([[maybe_unused]] const Extent2D& res) {
 }
 
 auto RenderContext::CreateVertexBuffer(const void* data, size_t size) -> BufferHandle {
+	VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	if (_impl->rtCtx.Valid()) {
+		usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+				 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+	}
 	auto gpu_buf =
-		Vk::Buffer::Create(_impl->allocator.Get(), size,
-						   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-							   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-							   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-						   VMA_MEMORY_USAGE_GPU_ONLY);
+		Vk::Buffer::Create(_impl->allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY);
 	VkCommandBuffer cmd = _impl->pools.Cmd(0);
 	ZHLN_BeginCommandBuffer(cmd);
 	auto staging = Vk::UploadToBuffer(_impl->allocator.Get(), cmd, gpu_buf, data, size);
@@ -92,12 +93,16 @@ auto RenderContext::CreateVertexBuffer(const void* data, size_t size) -> BufferH
 }
 
 auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHandle {
+	VkBufferUsageFlags usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+	if (_impl->rtCtx.Valid()) {
+		usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+				 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+	}
+
 	auto gpu_buf =
-		Vk::Buffer::Create(_impl->allocator.Get(), size,
-						   VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-							   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-							   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-						   VMA_MEMORY_USAGE_GPU_ONLY);
+		Vk::Buffer::Create(_impl->allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY);
+
 	VkCommandBuffer cmd = _impl->pools.Cmd(0);
 	ZHLN_BeginCommandBuffer(cmd);
 	auto staging = Vk::UploadToBuffer(_impl->allocator.Get(), cmd, gpu_buf, data, size);
@@ -442,6 +447,9 @@ void RenderContext::SetTAAState(const TAAState& state) {
 
 void RenderContext::BuildMeshBLAS(Mesh& mesh) {
 	auto* impl = _impl.get();
+	if (!impl->rtCtx.Valid()) {
+		return; // Gracefully skip BLAS build on non-RT systems
+	}
 	auto* nativeMesh = impl->meshPool.Resolve(static_cast<uint64_t>(mesh.vertexBuffer));
 	auto* nativeIndexMesh = mesh.indexBuffer != BufferHandle::Invalid
 								? impl->meshPool.Resolve(static_cast<uint64_t>(mesh.indexBuffer))

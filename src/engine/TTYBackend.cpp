@@ -505,6 +505,10 @@ VkSurfaceKHR CreateSurface(VkInstance, VkPhysicalDevice, void*, uint32_t&, uint3
 	return VK_NULL_HANDLE;
 }
 
+bool IsRunning(void*) {
+	return false;
+}
+
 #endif
 
 } // namespace ZHLN::TTYBackend

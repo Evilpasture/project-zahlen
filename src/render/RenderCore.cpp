@@ -233,4 +233,12 @@ auto UnsafeReflectedLayoutBuilder::BuildUnsafe(VkDevice device) noexcept -> Unsa
 	return result;
 }
 
+bool RayTracingContext::Init(VkDevice device) noexcept {
+	bool ok = ZHLN_InitRayTracingContext(device, &_raw);
+	if (!ok) {
+		_raw.device = VK_NULL_HANDLE;
+	}
+	return ok;
+}
+
 } // namespace ZHLN::Vk

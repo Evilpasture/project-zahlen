@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #include "physics/Physics.hpp"
@@ -9,6 +8,7 @@
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Types.hpp>
+#include <span>
 #include <string_view>
 
 namespace ZHLN {

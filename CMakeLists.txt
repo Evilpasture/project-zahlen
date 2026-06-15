@@ -199,9 +199,9 @@ target_include_directories(zahlen_engine SYSTEM PRIVATE
 target_include_directories(zahlen_engine PUBLIC
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/extern/LuaJIT/src
 )
 target_include_directories(zahlen_engine PRIVATE
-    ${CMAKE_SOURCE_DIR}/extern/LuaJIT/src
     ${CMAKE_SOURCE_DIR}/extern/cgltf
     ${CMAKE_SOURCE_DIR}/extern/stb
 )
@@ -266,9 +266,11 @@ function(compile_hlsl SHADER_PATH ENTRY STAGE OUTPUT_VAR)
     get_filename_component(FILE_NAME ${SHADER_PATH} NAME)
     set(OUTPUT_SPV "${CMAKE_CURRENT_BINARY_DIR}/generated_shaders/${FILE_NAME}.${ENTRY}.spv")
 
+    set(EXTRA_ARGS ${ARGN})
+
     add_custom_command(
         OUTPUT ${OUTPUT_SPV}
-        COMMAND ${DXC_EXECUTABLE} -T ${STAGE} -E ${ENTRY} -spirv -I "${CMAKE_SOURCE_DIR}/resources/shaders" -I "${CMAKE_SOURCE_DIR}/include" ${SHADER_PATH} -Fo ${OUTPUT_SPV}
+        COMMAND ${DXC_EXECUTABLE} -T ${STAGE} -E ${ENTRY} -spirv -I "${CMAKE_SOURCE_DIR}/resources/shaders" -I "${CMAKE_SOURCE_DIR}/include" ${EXTRA_ARGS} ${SHADER_PATH} -Fo ${OUTPUT_SPV}
         DEPENDS ${SHADER_PATH} "${CMAKE_SOURCE_DIR}/include/SharedMath.hpp"
         COMMENT "DXC: Generating ${FILE_NAME}.${ENTRY}.spv"
         VERBATIM
@@ -297,6 +299,19 @@ add_custom_target(zahlen_engine_shadow_shader ALL DEPENDS ${SHADOW_FRAG_SPV})
 add_dependencies(zahlen_engine zahlen_engine_shadow_shader)
 target_compile_definitions(zahlen_engine PRIVATE SHADER_SHADOW_HLSL_PS_PATH="${SHADOW_FRAG_SPV}")
 set_source_files_properties(src/engine/Resources.c PROPERTIES OBJECT_DEPENDS "${SHADOW_FRAG_SPV}")
+
+# --- SPECIALIZED NO-RT POSTPROCESS SHADERS (DISABLE_RTR definition) ---
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/postprocess.hlsl" VSMain vs_6_5 POSTPROCESS_NORT_VS_SPV "-DDISABLE_RTR")
+add_custom_target(zahlen_engine_postprocess_nort_vs_shader ALL DEPENDS ${POSTPROCESS_NORT_VS_SPV})
+add_dependencies(zahlen_engine zahlen_engine_postprocess_nort_vs_shader)
+target_compile_definitions(zahlen_engine PRIVATE SHADER_POSTPROCESS_NORT_HLSL_VS_PATH="${POSTPROCESS_NORT_VS_SPV}")
+set_source_files_properties(src/engine/Resources.c PROPERTIES OBJECT_DEPENDS "${POSTPROCESS_NORT_VS_SPV}")
+
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/postprocess.hlsl" PSMain ps_6_5 POSTPROCESS_NORT_PS_SPV "-DDISABLE_RTR")
+add_custom_target(zahlen_engine_postprocess_nort_ps_shader ALL DEPENDS ${POSTPROCESS_NORT_PS_SPV})
+add_dependencies(zahlen_engine zahlen_engine_postprocess_nort_ps_shader)
+target_compile_definitions(zahlen_engine PRIVATE SHADER_POSTPROCESS_NORT_HLSL_PS_PATH="${POSTPROCESS_NORT_PS_SPV}")
+set_source_files_properties(src/engine/Resources.c PROPERTIES OBJECT_DEPENDS "${POSTPROCESS_NORT_PS_SPV}")
 
 # --- 6.1 LTC C23 EMBED DEPENDENCIES ---
 set_property(SOURCE src/engine/Resources.c APPEND PROPERTY OBJECT_DEPENDS 
@@ -344,7 +359,9 @@ if(NOT MSVC)
 endif()
 
 # --- 8.1 TARGET ISOLATED REFLECTION FLAGS ---
-target_compile_options(zahlen_render PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-freflection>) 
+target_compile_options(zahlen_render PRIVATE 
+    $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU>>:-freflection>
+)
 
 # --- 9. RESOURCE LINKING (Single target to avoid parallel race conditions) ---
 add_custom_target(link_resources ALL

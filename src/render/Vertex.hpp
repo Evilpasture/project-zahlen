@@ -6,7 +6,9 @@
 #include <array>
 #include <concepts>
 #include <cstddef>
+#ifdef __cpp_reflection
 #include <meta>
+#endif
 #include <type_traits>
 #include <vulkan/vulkan.h>
 

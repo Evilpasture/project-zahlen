@@ -429,14 +429,23 @@ struct PostProcessPass {
 		auto pp_att = IssueBarrier<Vk::ShaderReadState, Vk::ColorAttachmentState>(
 			cmd, AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.postProcessTarget));
 
-		// 2. Bind the inputs directly (they are already transitioned to ShaderRead by the TAA
-		// pass!)
-		ctx.postProcessPass.WriteNext(
-			ctx.ctx.Device(), in.sceneColor, Vk::SamplerWrite{.sampler = ctx.defaultSampler.Get()},
-			in.depth, in.normRough, Vk::SamplerWrite{.sampler = ctx.pointSampler.Get()},
-			Vk::ImageWrite{.view = ctx.iblPayload.prefilteredView.Get(),
-						   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-			&ctx.tlas.Current());
+		// 2. Bind the inputs directly
+		if (ctx.rtCtx.Valid()) {
+			ctx.postProcessPass.WriteNext(
+				ctx.ctx.Device(), in.sceneColor,
+				Vk::SamplerWrite{.sampler = ctx.defaultSampler.Get()}, in.depth, in.normRough,
+				Vk::SamplerWrite{.sampler = ctx.pointSampler.Get()},
+				Vk::ImageWrite{.view = ctx.iblPayload.prefilteredView.Get(),
+							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+				&ctx.tlas.Current());
+		} else {
+			ctx.postProcessPassNoRT.WriteNext(
+				ctx.ctx.Device(), in.sceneColor,
+				Vk::SamplerWrite{.sampler = ctx.defaultSampler.Get()}, in.depth, in.normRough,
+				Vk::SamplerWrite{.sampler = ctx.pointSampler.Get()},
+				Vk::ImageWrite{.view = ctx.iblPayload.prefilteredView.Get(),
+							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
+		}
 
 		struct PPPushConstants {
 			JPH::Mat44 invViewProj;
@@ -450,7 +459,7 @@ struct PostProcessPass {
 			int giSamples;
 			int enableSSR;
 			int enableRTR;
-			int pad;
+			int _pad;
 		} pc = {
 			.invViewProj = ctx.current_view_proj.Inversed(),
 			.viewProj = ctx.current_view_proj,
@@ -464,13 +473,17 @@ struct PostProcessPass {
 			.giSamples = ctx.giSettings.giSamples,
 			.enableSSR = ctx.giSettings.enableSSR,
 			.enableRTR = (ctx.tlas.Current() != VK_NULL_HANDLE) ? ctx.giSettings.enableRTR : 0,
-			.pad = {},
+			._pad = {},
 		};
 
-		if (ctx.postProcessPass.pipeline.Valid()) {
+		if (ctx.rtCtx.Valid() && ctx.postProcessPass.pipeline.Valid()) {
 			Vk::DynamicPass(ctx.postProcessTarget.extent)
 				.AddColor(pp_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
 				.Execute(cmd, [&]() { ctx.postProcessPass.Execute(cmd, pc); });
+		} else if (!ctx.rtCtx.Valid() && ctx.postProcessPassNoRT.pipeline.Valid()) {
+			Vk::DynamicPass(ctx.postProcessTarget.extent)
+				.AddColor(pp_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+				.Execute(cmd, [&]() { ctx.postProcessPassNoRT.Execute(cmd, pc); });
 		}
 
 		// 3. Transition our local target to ShaderRead for the BlitPass to consume
@@ -717,10 +730,10 @@ void RenderContext::Impl::SubmitFrame() {
 		resized = true;
 	}
 
-	auto manager = StaticResourceManager(&accumBuffers, &taaPass, &postProcessPass, &blitPass,
-										 &frameUniformBuffers, &lightStorageBuffers,
-										 &instanceDataBuffers, &indirectCommandsBuffers,
-										 &jointBuffers, &bindlessSets, &tlas, &tlasBuffer);
+	auto manager = StaticResourceManager(
+		&accumBuffers, &taaPass, &postProcessPass, &postProcessPassNoRT, &blitPass,
+		&frameUniformBuffers, &lightStorageBuffers, &instanceDataBuffers, &indirectCommandsBuffers,
+		&jointBuffers, &bindlessSets, &tlas, &tlasBuffer);
 	manager.FlipAll();
 
 	frame_index = (frame_index + 1) % 2;
@@ -778,7 +791,7 @@ void RenderContext::EndFrame() {
 			std::memcpy(dst[i].baseColorFactor, cmdData.baseColorFactor, sizeof(float) * 4);
 		}
 	}
-	if (_impl->tlas.Current() != VK_NULL_HANDLE) {
+	if (_impl->tlas.Current() != VK_NULL_HANDLE && _impl->rtCtx.Valid()) {
 		_impl->rtCtx.DestroyAS(_impl->tlas.Current());
 		_impl->tlas.Current() = VK_NULL_HANDLE;
 		_impl->tlasBuffer.Current() = {};
@@ -817,7 +830,7 @@ void RenderContext::EndFrame() {
 		tlasInstances.push_back(inst);
 	}
 
-	if (!tlasInstances.empty()) {
+	if (!tlasInstances.empty() && _impl->rtCtx.Valid()) {
 		Vk::Buffer instanceBuf = Vk::Buffer::Create(
 			_impl->allocator.Get(),
 			tlasInstances.size() * sizeof(VkAccelerationStructureInstanceKHR),

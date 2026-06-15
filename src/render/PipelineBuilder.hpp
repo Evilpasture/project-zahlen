@@ -1,13 +1,14 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // src/render/PipelineBuilder.hpp
 
 #pragma once
 
 #include "RenderCore.hpp"
 #include "Vertex.hpp"
+
+#include <vector>
 
 namespace ZHLN::Vk {
 

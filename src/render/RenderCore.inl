@@ -4,8 +4,8 @@
 #include "Utils.hpp"
 
 #include <functional>
+#include <new>
 #include <utility>
-
 // NOLINTBEGIN(misc-misplaced-const)
 
 namespace ZHLN {
@@ -398,10 +398,6 @@ inline void MemoryBarrier(const VkCommandBuffer cmd, const ZHLN_MemoryBarrierDes
 
 inline auto GetBufferDeviceAddress(VkDevice device, VkBuffer buffer) noexcept -> VkDeviceAddress {
 	return ZHLN_GetBufferDeviceAddress(device, buffer);
-}
-
-inline bool RayTracingContext::Init(VkDevice device) noexcept {
-	return ZHLN_InitRayTracingContext(device, &_raw);
 }
 
 inline void

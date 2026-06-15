@@ -25,4 +25,6 @@ DECLARE_RESOURCE(ZHLN_Resource_LtcMatBin)
 DECLARE_RESOURCE(ZHLN_Resource_LtcAmpBin)
 DECLARE_RESOURCE(ZHLN_Resource_PostProcessVertSpv)
 DECLARE_RESOURCE(ZHLN_Resource_PostProcessFragSpv)
+DECLARE_RESOURCE(ZHLN_Resource_PostProcessNortVertSpv)
+DECLARE_RESOURCE(ZHLN_Resource_PostProcessNortFragSpv)
 }

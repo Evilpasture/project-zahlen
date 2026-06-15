@@ -176,6 +176,14 @@ using PostProcessLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texCu
 											   Vk::SampledImageSlot<5>, // texEnvMap (Cubemap)
 											   Vk::AccelerationStructureSlot<6> // Hardware TLAS
 											   >;
+
+using PostProcessLayoutNoRT = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texCurrent (Color)
+												   Vk::SamplerSlot<1>,		// sampler
+												   Vk::SampledImageSlot<2>, // texDepth
+												   Vk::SampledImageSlot<3>, // texNormalRoughness
+												   Vk::SamplerSlot<4>,	   // pointSampler (Nearest)
+												   Vk::SampledImageSlot<5> // texEnvMap (Cubemap)
+												   >;
 using CullingLayout = Vk::DescriptorLayout<Vk::StorageBufferSlot<0>, Vk::StorageBufferSlot<1>>;
 
 namespace Stages {
@@ -288,6 +296,7 @@ struct RenderContext::Impl {
 
 	Vk::PostProcessPass<TAALayout> taaPass;
 	Vk::PostProcessPass<PostProcessLayout> postProcessPass;
+	Vk::PostProcessPass<PostProcessLayoutNoRT> postProcessPassNoRT;
 	Vk::PostProcessPass<BlitLayout> blitPass;
 
 	Vk::Sampler defaultSampler;

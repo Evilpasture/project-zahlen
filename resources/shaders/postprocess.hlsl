@@ -74,7 +74,10 @@ float GetStableWeylNoise(uint2 pixelPos) {
 [[vk::binding(3, 0)]] Texture2D<float4> texNormalRoughness;
 [[vk::binding(4, 0)]] SamplerState pointSampler;
 [[vk::binding(5, 0)]] TextureCube<float4> texEnvMap;
+#ifndef DISABLE_RTR
 [[vk::binding(6, 0)]] RaytracingAccelerationStructure tlas;
+#endif
+
 
 float3 ReconstructWorldPos(float2 uv, float depth) {
 	float4 clipSpacePos = float4(uv.x * 2.0f - 1.0f, (1.0f - uv.y) * 2.0f - 1.0f, depth, 1.0f);
@@ -227,7 +230,7 @@ float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, float3 N,
 	}
 	return float2(0.0f, 0.0f);
 }
-
+#ifndef DISABLE_RTR
 float2 RaytraceRTR(float3 worldPos, float3 N, float3 R, OUT_REF(float) confidence) {
 	confidence = 0.0f;
 	RayDesc ray;
@@ -259,7 +262,7 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 R, OUT_REF(float) confidenc
 	}
 	return float2(0.0f, 0.0f);
 }
-
+#endif
 float SoftClamp(float x, float limit) {
 	return limit * (1.0f - exp(-x / max(limit, 0.0001f)));
 }
@@ -395,7 +398,11 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	}
 
 	// --- Screen Space & Ray Traced Reflections ---
+#ifdef DISABLE_RTR
+	if (pc.enableSSR != 0 && roughness <= 0.85f) {
+#else
 	if ((pc.enableSSR != 0 || pc.enableRTR != 0) && roughness <= 0.85f) {
+#endif
 		float3 V = normalize(pc.camPos.xyz - worldPos);
 		float3 R = reflect(-V, N);
 
@@ -404,12 +411,17 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 			float3 reflectionColor = float3(0.0f, 0.0f, 0.0f);
 			float2 hitUV = float2(0.0f, 0.0f);
 
+#ifdef DISABLE_RTR
+			float3 biasedStartPos = worldPos + N * 0.05f;
+			hitUV = RaymarchSSR(worldPos, biasedStartPos, R, N, confidence);
+#else
 			if (pc.enableRTR != 0) {
 				hitUV = RaytraceRTR(worldPos, N, R, confidence);
 			} else {
 				float3 biasedStartPos = worldPos + N * 0.05f;
 				hitUV = RaymarchSSR(worldPos, biasedStartPos, R, N, confidence);
 			}
+#endif
 
 			if (confidence > 0.0f) {
 				confidence *= saturate(dot(R, N) * 10.0f);

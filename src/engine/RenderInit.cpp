@@ -110,8 +110,10 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 		ZHLN::Panic("FATAL: Vulkan Memory Allocator (VMA) failed to initialize");
 	}
 
-	if (!_impl->rtCtx.Init(_impl->ctx.Device())) {
-		ZHLN::Panic("FATAL: Raytracing context failed to initialize.");
+	if (!_impl->rtCtx.Valid()) {
+		ZHLN::Log("WARNING: Raytracing context failed to initialize. RTR will be disabled.");
+	} else {
+		ZHLN::Log("Raytracing context initialized successfully.");
 	}
 
 	_impl->gpuProfiler.Init(_impl->ctx.Device());
@@ -411,22 +413,42 @@ void RenderContext::Impl::InitPostProcessing() {
 	VkPushConstantRange ppPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
 
-	auto ppShaders =
-		Vk::ShaderStages::Create(ctx.Device(),
-								 {
-									 .code = Vk::AsSpirV(&ZHLN_Resource_PostProcessVertSpv[0]),
-									 .size = ZHLN_Resource_PostProcessVertSpv_Len,
-									 .entry_point = {},
-								 },
-								 {
-									 .code = Vk::AsSpirV(&ZHLN_Resource_PostProcessFragSpv[0]),
-									 .size = ZHLN_Resource_PostProcessFragSpv_Len,
-									 .entry_point = {},
-								 });
+	if (rtCtx.Valid()) {
+		auto ppShaders =
+			Vk::ShaderStages::Create(ctx.Device(),
+									 {
+										 .code = Vk::AsSpirV(&ZHLN_Resource_PostProcessVertSpv[0]),
+										 .size = ZHLN_Resource_PostProcessVertSpv_Len,
+										 .entry_point = {},
+									 },
+									 {
+										 .code = Vk::AsSpirV(&ZHLN_Resource_PostProcessFragSpv[0]),
+										 .size = ZHLN_Resource_PostProcessFragSpv_Len,
+										 .entry_point = {},
+									 });
 
-	if (!postProcessPass.Build(ctx.Device(), ppShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush,
-							   1)) {
-		ZHLN::Log("PostProcess pass build failure, continuing...");
+		if (!postProcessPass.Build(ctx.Device(), ppShaders, {VK_FORMAT_R16G16B16A16_SFLOAT},
+								   &ppPush, 1)) {
+			ZHLN::Log("PostProcess pass build failure, continuing...");
+		}
+	} else {
+		auto ppNortShaders = Vk::ShaderStages::Create(
+			ctx.Device(),
+			{
+				.code = Vk::AsSpirV(&ZHLN_Resource_PostProcessNortVertSpv[0]),
+				.size = ZHLN_Resource_PostProcessNortVertSpv_Len,
+				.entry_point = {},
+			},
+			{
+				.code = Vk::AsSpirV(&ZHLN_Resource_PostProcessNortFragSpv[0]),
+				.size = ZHLN_Resource_PostProcessNortFragSpv_Len,
+				.entry_point = {},
+			});
+
+		if (!postProcessPassNoRT.Build(ctx.Device(), ppNortShaders, {VK_FORMAT_R16G16B16A16_SFLOAT},
+									   &ppPush, 1)) {
+			ZHLN::Log("PostProcessNoRT pass build failure, continuing...");
+		}
 	}
 
 	VkPushConstantRange blitPush = {

@@ -608,12 +608,19 @@ def find_blender():
     if "BLENDER_PATH" in os.environ:
         return os.environ["BLENDER_PATH"]
 
-    import shutil
+    # Prioritize the reliable macOS application bundle path first
+    if sys.platform == "darwin":
+        mac_path = "/Applications/Blender.app/Contents/MacOS/Blender"
+        if os.path.exists(mac_path):
+            return mac_path
 
+    # Fallback to system PATH discovery next
+    import shutil
     shutil_path = shutil.which("blender")
     if shutil_path:
         return shutil_path
 
+    # Windows specific fallback
     if sys.platform == "win32":
         paths = [
             r"C:\Program Files\Blender Foundation\Blender 4.2\blender.exe",
@@ -624,10 +631,6 @@ def find_blender():
         for p in paths:
             if os.path.exists(p):
                 return p
-    elif sys.platform == "darwin":
-        path = "/Applications/Blender.app/Contents/MacOS/Blender"
-        if os.path.exists(path):
-            return path
 
     raise FileNotFoundError(
         "Could not automatically locate the 'blender' executable on this system.\n"
@@ -654,9 +657,32 @@ def run_worker_process(blender_bin, script_path, blend_path, dev_mode):
     filename = os.path.basename(blend_path)
     prefix = f"[{filename}]"
 
-    # Start the background process and route both standard outputs chronologically to our listener
+    # --- ENV CLEANING BLOCK START ---
+    # 1. Start with a copy of the parent environment, tracking the venv path
+    venv_path = os.environ.get("VIRTUAL_ENV", "")
+    env = os.environ.copy()
+    
+    # 2. Scrub out active virtual environment Python variables
+    env.pop("PYTHONHOME", None)
+    env.pop("PYTHONPATH", None)
+    env.pop("VIRTUAL_ENV", None)
+    
+    # 3. Explicitly isolate Blender's internal Python site-packages
+    env["PYTHONNOUSERSITE"] = "1"
+    
+    # 4. Rebuild the system PATH to strip out the active virtual environment bin folder
+    if "PATH" in env and venv_path:
+        clean_path = [
+            p for p in env["PATH"].split(os.pathsep)
+            if not p.startswith(venv_path)
+        ]
+        env["PATH"] = os.pathsep.join(clean_path)
+    # --- ENV CLEANING BLOCK END ---
+
+    # Start the background process using the clean environment 'env'
     process = subprocess.Popen(
         cmd,
+        env=env, # <--- Pass the isolated environment mapping here
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
