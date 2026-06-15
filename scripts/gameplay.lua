@@ -33,7 +33,8 @@ zh.config({
 zh.on("engine.start", function()
     zh.log("Scene: Spawning declarative layout...")
 
-    zh.spawn("Pomnis Room V2.glb", { physics = true, static = true })
+    zh.spawn("Circus Lobby V9.glb", { physics = true, static = true })
+
     pomni_parts = zh.spawn("tadc_models/POMNI.glb", { animated = true })
 
     -- Immediate access to findings
