@@ -20,6 +20,7 @@ struct CommandLineOptions {
 	bool fullscreen = false;
 	LogLevel logLevel = LogLevel::Moderate;
 	uint32_t fpsLimit = 0;
+	bool enableRenderDoc = false;
 };
 
 struct EngineError {

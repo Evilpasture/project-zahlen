@@ -420,7 +420,7 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 
 			cam.frustum.Update(vp);
 
-			CullingSystem<true>(*engine, s_VisibleEntities, {});
+			CullingSystem<true>(*engine, s_VisibleEntities);
 
 			JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f};
 			JPH::Mat44 lightView =

@@ -402,8 +402,9 @@ struct TAAPass {
 					ctx.taaPass.Execute(cmd, TAAPushConstants{.feedback = ctx.taaState.feedback});
 				});
 
-			[[maybe_unused]] auto end =
+			[[maybe_unused]] auto color_ro =
 				IssueBarrier<Vk::ColorAttachmentState, Vk::ShaderReadState>(cmd, accumNext_att);
+			// Retain the resolved, anti-aliased frame instead of the raw, jittered target
 		}
 
 		return {

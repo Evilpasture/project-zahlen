@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Sync.hpp"
 #include "ecs/ECS.hpp"
@@ -138,5 +137,23 @@ void* ZHLN_GetComponent(ZHLN_Engine* engine_handle, uint64_t entityRaw, const ch
 	}
 
 	return reg.GetRawByFamily(entity, familyID);
+}
+
+void* ZHLN_AddComponent(ZHLN_Engine* engine_handle, uint64_t entityRaw, const char* componentName) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	auto entity = ZHLN::Entity::Unpack(entityRaw);
+	auto& reg = engine->GetRegistry();
+
+	std::string_view name(componentName);
+	if (name == "HierarchyComponent") {
+		return &reg.Add(entity, ZHLN::HierarchyComponent{});
+	} else if (name == "TransformComponent") {
+		return &reg.Add(entity, ZHLN::TransformComponent{});
+	} else if (name == "MovementComponent") {
+		return &reg.Add(entity, ZHLN::MovementComponent{});
+	} else if (name == "TargetCameraComponent") {
+		return &reg.Add(entity, ZHLN::TargetCameraComponent{});
+	}
+	return nullptr;
 }
 }

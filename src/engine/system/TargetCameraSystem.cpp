@@ -31,19 +31,19 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 	JPH::Vec3 targetPos = JPH::Vec3::sZero();
 
 	// 1. Resolve Target Position
-	if (auto* phys = reg.Get<PhysicsComponent>(targetEnt)) {
-		uint32_t dense = worldState.slotToDense[phys->physicsHandle.index];
-		const size_t base = static_cast<size_t>(dense) * 4;
-
-		JPH::Vec3 currPos(worldState.positions[base], worldState.positions[base + 1],
-						  worldState.positions[base + 2]);
-
-		JPH::Vec3 prevPos(worldState.prevPositions[base], worldState.prevPositions[base + 1],
-						  worldState.prevPositions[base + 2]);
-
-		targetPos = prevPos + alpha * (currPos - prevPos);
-	} else if (auto* alifeComp = reg.Get<ALife::ALifeComponent>(targetEnt)) {
-		targetPos = JPH::Vec3(alifeComp->position);
+	if (auto* trans = reg.Get<TransformComponent>(targetEnt)) {
+		// Retain ultra-smooth sub-step physics interpolation if a physics body is present
+		if (auto* phys = reg.Get<PhysicsComponent>(targetEnt)) {
+			uint32_t dense = worldState.slotToDense[phys->physicsHandle.index];
+			const size_t base = static_cast<size_t>(dense) * 4;
+			JPH::Vec3 currPos(worldState.positions[base], worldState.positions[base + 1],
+							  worldState.positions[base + 2]);
+			JPH::Vec3 prevPos(worldState.prevPositions[base], worldState.prevPositions[base + 1],
+							  worldState.prevPositions[base + 2]);
+			targetPos = prevPos + alpha * (currPos - prevPos);
+		} else {
+			targetPos = JPH::Vec3(trans->position[0], trans->position[1], trans->position[2]);
+		}
 	} else if (auto* meshComp = reg.Get<MeshComponent>(targetEnt)) {
 		targetPos = meshComp->localTransform.GetTranslation();
 	}
@@ -84,6 +84,17 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 
 	JPH::Vec3 offsetVec(camComp->targetOffset[0], camComp->targetOffset[1],
 						camComp->targetOffset[2]);
-	cam.position = targetPos - (offsetDir.Normalized() * camComp->distance) + offsetVec;
+
+	// Filter out high-frequency physics collision resolution jitter from Jolt character virtual
+	static JPH::Vec3 s_SmoothTargetPos = targetPos;
+	if ((targetPos - s_SmoothTargetPos).LengthSq() > 100.0f) {
+		s_SmoothTargetPos = targetPos; // Teleport instantly on large displacements
+	} else if (camComp->stiffness > 0.0f) {
+		s_SmoothTargetPos += (targetPos - s_SmoothTargetPos) * camComp->stiffness * dt;
+	} else {
+		s_SmoothTargetPos = targetPos;
+	}
+
+	cam.position = s_SmoothTargetPos - (offsetDir.Normalized() * camComp->distance) + offsetVec;
 }
 } // namespace ZHLN

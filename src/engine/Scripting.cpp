@@ -4,7 +4,9 @@
 // src/engine/Scripting.cpp
 
 #include "Zahlen/Camera.hpp"
+#include "Zahlen/Components.hpp"
 #include "Zahlen/Input.hpp"
+#include "ecs/ECS.hpp"
 
 #include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Console.hpp>
@@ -64,11 +66,13 @@ struct CreateMaterialArgs {
 	uint32_t* outAlbedo;
 };
 
-struct SpawnPhysicalBoxArgs {
-	float hx, hy, hz; // Half-extents
-	float px, py, pz; // Position
-	float r, g, b, a; // Albedo Color
-	int isStatic;	  // 0 = dynamic, 1 = static
+struct SpawnEntityArgs {
+	uint8_t shapeType;	  // 0=Box, 1=Sphere, 2=Capsule, 3=Cylinder, 4=Plane
+	float p1, p2, p3;	  // dynamic dimensions (hx/hy/hz or radius/halfHeight)
+	float px, py, pz;	  // position
+	float rx, ry, rz, rw; // rotation (quaternion)
+	float r, g, b, a;	  // color
+	uint8_t isStatic;
 };
 #pragma pack(pop)
 
@@ -141,6 +145,73 @@ static void RegisterFFICommands() {
 		*a->outPipeline = static_cast<uint64_t>(mat.pipeline);
 		*a->outAlbedo = mat.albedoIndex;
 		return 1;
+	};
+
+	s_CommandRegistry["CreateBasicMaterial"] = [](ZHLN::Engine* engine,
+												  const void* args) -> uint64_t {
+		const auto* a = static_cast<const CreateMaterialArgs*>(args);
+		auto& rc = engine->GetRenderContext();
+		ZHLN::Material mat = ZHLN::AssetFactory::CreateBasicMaterial(rc);
+		*a->outPipeline = static_cast<uint64_t>(mat.pipeline);
+		*a->outAlbedo = mat.albedoIndex;
+		return 1;
+	};
+
+	s_CommandRegistry["SpawnEntity"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		const auto* desc = static_cast<const SpawnEntityArgs*>(args);
+		auto& rc = engine->GetRenderContext();
+		auto& pc = engine->GetPhysicsContext();
+		auto& reg = engine->GetRegistry();
+
+		ZHLN::Mesh mesh;
+		JPH::ShapeRefC shape;
+		float cullRadius = 1.0f;
+
+		auto type = static_cast<ZHLN::Physics::ShapeType>(desc->shapeType);
+
+		switch (type) {
+			case ZHLN::Physics::ShapeType::Sphere:
+				mesh = ZHLN::AssetFactory::CreateBox(rc, JPH::Vec3(desc->p1, desc->p1, desc->p1),
+													 JPH::Vec4(desc->r, desc->g, desc->b, desc->a));
+				shape = ZHLN::Physics::GetOrCreateShape(pc, type, desc->p1);
+				cullRadius = desc->p1 * 2.0f;
+				break;
+			case ZHLN::Physics::ShapeType::Plane:
+				mesh = ZHLN::AssetFactory::CreatePlane(
+					rc, desc->p1, JPH::Vec4(desc->r, desc->g, desc->b, desc->a));
+				shape = ZHLN::Physics::GetOrCreateShape(pc, type, 0.0f, 1.0f, 0.0f, 0.0f);
+				cullRadius = desc->p1 * 2.0f;
+				break;
+			case ZHLN::Physics::ShapeType::Box:
+			default:
+				mesh = ZHLN::AssetFactory::CreateBox(rc, JPH::Vec3(desc->p1, desc->p2, desc->p3),
+													 JPH::Vec4(desc->r, desc->g, desc->b, desc->a));
+				shape = ZHLN::Physics::GetOrCreateShape(pc, ZHLN::Physics::ShapeType::Box, desc->p1,
+														desc->p2, desc->p3);
+				cullRadius = std::max({desc->p1, desc->p2, desc->p3}) * 2.0f;
+				break;
+		}
+
+		ZHLN::Material mat = ZHLN::AssetFactory::CreateBasicMaterial(rc);
+		ZHLN::Entity e = reg.Create();
+
+		reg.Add(e, ZHLN::TransformComponent{.position = {desc->px, desc->py, desc->pz},
+											.rotation = {desc->rx, desc->ry, desc->rz, desc->rw},
+											.scale = {1.0f, 1.0f, 1.0f}});
+
+		reg.Add(e, ZHLN::MeshComponent{.mesh = mesh,
+									   .material = mat,
+									   .cullRadius = cullRadius,
+									   .localTransform = JPH::Mat44::sIdentity(),
+									   .prevTransform = JPH::Mat44::sIdentity()});
+
+		JPH::Quat rotation(desc->rx, desc->ry, desc->rz, desc->rw);
+		reg.Add(e, ZHLN::PhysicsComponent{ZHLN::Physics::CreateRigidBody(
+					   pc, shape, JPH::RVec3(desc->px, desc->py, desc->pz), rotation,
+					   desc->isStatic ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
+					   desc->isStatic ? 0 : 1)});
+
+		return e.Pack();
 	};
 }
 

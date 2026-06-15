@@ -1,12 +1,10 @@
 -- Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 -- SPDX-License-Identifier: GPL-3.0-or-later
 
-
--- scripts/gameplay.lua
 local zh = require("scripts.core.zahlen")
 
 -- --- Ambient & Post-Processing Subsystems ---
-zh.config({
+zh:config({
     giMode = 1,
     aoRadius = 0.5,
     aoBias = 0.05,
@@ -29,30 +27,46 @@ zh.config({
     taaFeedback = 0.95,
 })
 
+local pomni_parts = nil
+
 -- --- Autostart Layout ---
-zh.on("engine.start", function()
+zh:on("engine.start", function()
     zh.log("Scene: Spawning declarative layout...")
 
-    zh.spawn("Circus Lobby V9.glb", { physics = true, static = true })
+    zh:spawn("Circus Lobby V9.glb", { physics = true, static = true })
+    pomni_parts = zh:spawn("tadc_models/POMNI.glb", { animated = true })
 
-    pomni_parts = zh.spawn("tadc_models/POMNI.glb", { animated = true })
-
-    -- Immediate access to findings
-    local floor = zh.find("floor")
-    if floor then
-        zh.log("Scene: Found floor, binding immediate state.")
+    local player_ent = nil
+    for ent, _ in zh.ecs:view("MovementComponent") do
+        player_ent = ent
+        break
     end
 
     if player_ent and pomni_parts then
-        zh.register_player_parts(pomni_parts)
-        zh.dispatch(zh.dsp.ragdoll.setup(player_ent, pomni_parts))
+        local pomni_root = pomni_parts[1]
+        local root_trans = zh.ecs:get(pomni_root, "TransformComponent")
+        if root_trans then
+            root_trans.position[0] = 0.0
+            root_trans.position[1] = -0.8 -- Capsule Visual Offset
+            root_trans.position[2] = 0.0
+        end
+        zh.ecs:add(pomni_root, "HierarchyComponent", { parent = player_ent })
+
+        zh.physics:setup_ragdoll(player_ent, pomni_parts)
         zh.log("Scene: Skeletal Ragdoll successfully generated and bound to player controller.")
     end
 
-    -- Create and register debug line resources inside Lua!
-    local line_mesh = zh.create_box(0.02, 0.02, 0.5, 0, 1, 1, 1)
-    local pipeline, albedo = zh.create_material(0, 1, 1, 1)
-    zh.register_debug_line(line_mesh, pipeline, albedo)
+    -- 3. Showcase the new generic Blueprint entity spawner!
+    zh.log("Scene: Dropping dynamic physics crates...")
+    for i = 1, 5 do
+        zh:spawn_entity({
+            type = "box",
+            size = zh.vec3(1.0, 1.0, 1.0),
+            position = zh.vec3(0, 10 + (i * 2.5), 0),
+            color = { 0.8, 0.4, 0.2, 1.0 },
+            static = false
+        })
+    end
 end)
 
 -- ==========================================
@@ -60,77 +74,92 @@ end)
 -- ==========================================
 
 local was_r_down = false
+local total_time = 0.0
 
 local function player_input_system(dt)
-    if not player_ent then return end
+    -- Data-driven: Process all entities acting as a player controller
+    for player_ent, movement in zh.ecs:view("MovementComponent") do
+        -- Property access invokes the hidden C++ Engine functions!
+        local yaw_rad        = math.rad(zh.camera.yaw)
 
-    local move_x    = 0
-    local move_z    = 0
-    local yaw_rad   = math.rad(engine:get_camera_yaw())
+        local move_x, move_z = 0, 0
+        local forward_x      = math.cos(yaw_rad)
+        local forward_z      = math.sin(yaw_rad)
+        local right_x        = -math.sin(yaw_rad)
+        local right_z        = math.cos(yaw_rad)
 
-    local forward_x = math.cos(yaw_rad)
-    local forward_z = math.sin(yaw_rad)
-    local right_x   = -math.sin(yaw_rad)
-    local right_z   = math.cos(yaw_rad)
+        if zh.input:is_key_down("W") then
+            move_x = move_x + forward_x; move_z = move_z + forward_z
+        end
+        if zh.input:is_key_down("S") then
+            move_x = move_x - forward_x; move_z = move_z - forward_z
+        end
+        if zh.input:is_key_down("A") then
+            move_x = move_x - right_x; move_z = move_z - right_z
+        end
+        if zh.input:is_key_down("D") then
+            move_x = move_x + right_x; move_z = move_z + right_z
+        end
 
-    if zh.is_key_down("W") then
-        move_x = move_x + forward_x
-        move_z = move_z + forward_z
-    end
-    if zh.is_key_down("S") then
-        move_x = move_x - forward_x
-        move_z = move_z - forward_z
-    end
-    if zh.is_key_down("A") then
-        move_x = move_x - right_x
-        move_z = move_z - right_z
-    end
-    if zh.is_key_down("D") then
-        move_x = move_x + right_x
-        move_z = move_z + right_z
-    end
+        local len = math.sqrt(move_x * move_x + move_z * move_z)
+        if len > 0.001 then
+            move_x = move_x / len
+            move_z = move_z / len
+        end
 
-    local len = math.sqrt(move_x * move_x + move_z * move_z)
-    if len > 0.001 then
-        move_x = move_x / len
-        move_z = move_z / len
-    end
-
-    local movement = game_ecs:get(player_ent, "MovementComponent")
-    if movement then
         movement.inputX = move_x
         movement.inputZ = move_z
 
-        local is_moving = (move_x * move_x + move_z * move_z) > 0.001
-        movement.isSprinting = zh.is_key_down("LSHIFT") and is_moving
+        movement.isSprinting = zh.input:is_key_down("LSHIFT") and (len > 0.001)
 
-        if zh.is_key_down("SPACE") then
+        if zh.input:is_key_down("SPACE") then
             movement.jumpRequested = true
-            zh.dispatch(zh.dsp.sound.beep(660.0, 0.1, 0.2))
+            zh.audio:beep(660.0, 0.1, 0.2)
         end
 
-        local is_r_down = zh.is_key_down("R")
+        local is_r_down = zh.input:is_key_down("R")
         if is_r_down and not was_r_down then
-            local ragdoll = game_ecs:get(player_ent, "RagdollComponent")
+            local ragdoll = zh.ecs:get(player_ent, "RagdollComponent")
             if ragdoll then
+                local pomni_root = pomni_parts[1]
+
                 if ragdoll.state == 0 then
+                    -- 1. COLLAPSE: Switch to Limp
                     ragdoll.state = 2
                     zh.log("Player collapsed into a Limp Ragdoll!")
-                    zh.dispatch(zh.dsp.sound.beep(150.0, 0.25, 0.3))
+                    zh.audio:beep(150.0, 0.25, 0.3)
+
+                    -- Detach visual hierarchy from the physics capsule
+                    zh.ecs:remove(pomni_root, "HierarchyComponent")
+
+                    -- Clear visual height offset so she ragdolls exactly at ground level
+                    local root_trans = zh.ecs:get(pomni_root, "TransformComponent")
+                    if root_trans then
+                        root_trans.position[1] = 0.0
+                    end
                 else
+                    -- 2. STAND UP: Switch to Inactive
                     ragdoll.state = 0
                     zh.log("Player stood back up!")
+
+                    -- Restore capsule visual height offset
+                    local root_trans = zh.ecs:get(pomni_root, "TransformComponent")
+                    if root_trans then
+                        root_trans.position[1] = -0.8
+                    end
+
+                    -- Re-attach visual hierarchy back to the player capsule
+                    zh.ecs:add(pomni_root, "HierarchyComponent", { parent = player_ent })
                 end
-            else
-                zh.log("WARNING: Player entity does not have a RagdollComponent assigned.")
             end
         end
         was_r_down = is_r_down
     end
 end
 
+
 local function hybrid_health_and_speed_system(dt)
-    for ent, movement, combat in game_ecs:view("MovementComponent", "combat") do
+    for ent, movement, combat in zh.ecs:view("MovementComponent", "combat") do
         if combat.hp < 40 then
             movement.speed = 3.0
 
@@ -155,53 +184,41 @@ local function hybrid_health_and_speed_system(dt)
 end
 
 local function camera_fov_system(dt)
-    if not player_ent then return end
-
-    local movement = game_ecs:get(player_ent, "MovementComponent")
-    if not movement then return end
-
-    local cam_ent = nil
-    for ent, _ in game_ecs:view("TargetCameraComponent") do
-        cam_ent = ent
-        break
-    end
-    if not cam_ent then return end
-
-    local cam = game_ecs:get(cam_ent, "TargetCameraComponent")
-
-    if movement.isSprinting then
-        cam.targetFov = 55.0
-    else
-        cam.targetFov = 45.0
+    for player_ent, movement in zh.ecs:view("MovementComponent") do
+        for cam_ent, cam in zh.ecs:view("TargetCameraComponent") do
+            if cam.target == player_ent then
+                if movement.isSprinting then
+                    cam.targetFov = 55.0
+                else
+                    cam.targetFov = 45.0
+                end
+            end
+        end
     end
 end
 
 local function visual_feedback_system(dt)
-    if not player_ent then return end
+    total_time = total_time + dt
 
-    local combat = game_ecs:get(player_ent, "combat")
-    if not combat then return end
-
-    local cam_ent = nil
-    for ent, _ in game_ecs:view("TargetCameraComponent") do
-        cam_ent = ent
-        break
-    end
-    if not cam_ent then return end
-
-    local cam = game_ecs:get(cam_ent, "TargetCameraComponent")
-
-    if combat.hp < 40 then
-        local pulse = math.sin(engine:get_total_time() * 6.0)
-        cam.vignetteIntensity = 1.4 + 0.35 * pulse
-        cam.vignettePower = 2.0
-    else
-        cam.vignetteIntensity = 1.10
-        cam.vignettePower = 1.50
+    for player_ent, combat in zh.ecs:view("combat") do
+        for cam_ent, cam in zh.ecs:view("TargetCameraComponent") do
+            if cam.target == player_ent then
+                if combat.hp < 40 then
+                    local pulse = math.sin(total_time * 6.0)
+                    cam.vignetteIntensity = 1.4 + 0.35 * pulse
+                    cam.vignettePower = 2.0
+                else
+                    cam.vignetteIntensity = 1.10
+                    cam.vignettePower = 1.50
+                end
+            end
+        end
     end
 end
 
+
 -- --- Register Systems in the Core Scheduler ---
+
 zh.scheduler.register("PlayerInput", 10, player_input_system)
 zh.scheduler.register("CombatAndSpeed", 20, hybrid_health_and_speed_system)
 zh.scheduler.register("CameraFOV", 30, camera_fov_system)

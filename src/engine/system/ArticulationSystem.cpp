@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "ArticulationSystem.hpp"
 
 #include <Jolt/Jolt.h>
@@ -16,7 +15,6 @@
 #include <ecs/ECS.hpp>
 #include <physics/Physics.hpp>
 #include <physics/PhysicsWorld.hpp>
-#include <print>
 
 namespace ZHLN {
 
@@ -34,6 +32,11 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
 		auto* phys = reg.Get<PhysicsComponent>(e);
 
 		if ((ragComp.ragdollInstance == nullptr) || (ragComp.gltfSkin == nullptr)) {
+			continue;
+		}
+
+		if (ragComp.state == RagdollState::Inactive &&
+			ragComp.prevState == RagdollState::Inactive) {
 			continue;
 		}
 
@@ -58,14 +61,8 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
 
 		std::vector<JPH::Mat44> localJoints(ragComp.jointCount, JPH::Mat44::sIdentity());
 		for (uint32_t j = 0; j < ragComp.jointCount; ++j) {
-			const cgltf_node* jointNode = nullptr;
-			for (size_t k = 0; k < skin->joints_count; ++k) {
-				if ((skin->joints[k]->name != nullptr) &&
-					std::string_view(skin->joints[k]->name) == skel->GetJoint(j).mName) {
-					jointNode = skin->joints[k];
-					break;
-				}
-			}
+			// High-performance O(1) index-based joint node mapping
+			const cgltf_node* jointNode = (j < skin->joints_count) ? skin->joints[j] : nullptr;
 			if (jointNode != nullptr) {
 				float m[16];
 				cgltf_node_transform_local(jointNode, m);
@@ -156,14 +153,16 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
 				finalSkinningMatrices[j] = physicalWorldJoints[j] * ibm;
 			}
 
-			// Update localTransform of visual meshes to match the physical pelvis root offset
-			// (actualRootOffset)
+			// Update the TransformComponent of visual meshes to match the physical pelvis root
+			// offset
 			auto allEntities = reg.GetEntitiesWith<MeshComponent>();
 			auto allMeshes = reg.GetRawArray<MeshComponent>();
 			for (size_t k = 0; k < allEntities.size(); ++k) {
 				if (allMeshes[k].gltfSkin == skin) {
-					allMeshes[k].localTransform =
-						JPH::Mat44::sTranslation(JPH::Vec3(actualRootOffset));
+					if (auto* trans = reg.Get<TransformComponent>(allEntities[k])) {
+						trans->position = JPH::Vec3(actualRootOffset);
+						trans->rotation = JPH::Quat::sIdentity();
+					}
 				}
 			}
 			rc.UpdateJointMatrices(ragComp.jointOffset, finalSkinningMatrices.data(),

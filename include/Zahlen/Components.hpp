@@ -7,9 +7,23 @@
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
+#include <Zahlen/Math3D.hpp>
 #include <detail/String.hpp>
 
 namespace ZHLN {
+
+/**
+ * @brief Represents the universal 3D World Transform of an Entity.
+ */
+struct TransformComponent {
+	JPH::Vec3 position = JPH::Vec3::sZero();
+	JPH::Quat rotation = JPH::Quat::sIdentity();
+	JPH::Vec3 scale = JPH::Vec3::sReplicate(1.0f);
+
+	[[nodiscard]] JPH::Mat44 GetMatrix() const {
+		return JPH::Mat44::sRotationTranslation(rotation, position) * JPH::Mat44::sScale(scale);
+	}
+};
 
 /**
  * @brief Links an ECS Entity to a Renderable Mesh and Material.
@@ -20,6 +34,7 @@ struct MeshComponent {
 	float cullRadius = 1.0f;
 	JPH::Mat44 localTransform = JPH::Mat44::sIdentity();
 	JPH::Mat44 prevTransform = JPH::Mat44::sIdentity();
+	JPH::Mat44 worldTransform = JPH::Mat44::sIdentity();
 	uint32_t jointOffset = 0;
 	bool isSkinned = false;
 
@@ -85,9 +100,10 @@ struct NameComponent {
 	String64 name;
 };
 
-/**
- * @brief Drives a third-person tracking camera locked to an ECS target.
- */
+struct HierarchyComponent {
+	Entity parent = NullEntity;
+};
+
 struct TargetCameraComponent {
 	Entity target = NullEntity;
 	float distance = 4.5f;

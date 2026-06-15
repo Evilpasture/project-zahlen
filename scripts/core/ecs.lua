@@ -13,6 +13,8 @@ Registry.__index = Registry
 
 -- List of components managed on the C++ side
 local NATIVE_COMPONENTS = {
+    TransformComponent = true,
+    HierarchyComponent = true,
     MovementComponent = true,
     MeshComponent = true,
     PhysicsComponent = true,
@@ -86,10 +88,13 @@ function Registry:add(ent, comp_name, data)
     self.entities[to_key(ent)] = true
 
     if self:is_native(comp_name) then
-        -- Native components are added via C++, but we can retrieve and assign fields from Lua
+        -- Native components are allocated via C++ if missing, then populated from Lua
         local ptr = ffi.C.ZHLN_GetComponent(self.engine, ent, comp_name)
         if ptr == nil then
-            error("Cannot add native component '" .. comp_name .. "' from Lua. It must be allocated in C++ first.")
+            ptr = ffi.C.ZHLN_AddComponent(self.engine, ent, comp_name)
+        end
+        if ptr == nil then
+            error("Cannot add native component '" .. comp_name .. "' from Lua.")
         end
         local comp = ffi.cast(comp_name .. "*", ptr)
         if data then
