@@ -1181,25 +1181,44 @@ if __name__ == "__main__":
         print(f"[-] Failed to write temporary file {temp_blend_path}: {e}")
         return False
 
+    # 1. Start with a copy of the environment, but scrub out the Python traps
     env = os.environ.copy()
-    if "VIRTUAL_ENV" in env:
-        venv_path = env["VIRTUAL_ENV"]
-        clean_path = [
-            p
-            for p in env.get("PATH", "").split(os.pathsep)
-            if not p.startswith(venv_path)
-        ]
-        env["PATH"] = os.pathsep.join(clean_path)
-        del env["VIRTUAL_ENV"]
+    
+    # Force absolute isolation from your terminal's virtual environment
     env.pop("PYTHONHOME", None)
     env.pop("PYTHONPATH", None)
+    env.pop("VIRTUAL_ENV", None)
+    
+    # Explicitly isolate Blender's internal Python site-packages
+    env["PYTHONNOUSERSITE"] = "1"
+    
+    # 2. Rebuild the PATH to completely omit the virtual environment folder
+    if "PATH" in env:
+        # If your virtual environment is active, filter its directory out of the system PATH
+        venv_path = os.environ.get("VIRTUAL_ENV", "")
+        if venv_path:
+            clean_path = [
+                p for p in env["PATH"].split(os.pathsep)
+                if not p.startswith(venv_path)
+            ]
+            env["PATH"] = os.pathsep.join(clean_path)
 
-    cmd = ["blender", "-b", temp_blend_path, "--python-expr", expr]
+    # 3. Direct path execution (No shell execution layer needed)
+    mac_blender_path = "/Applications/Blender.app/Contents/MacOS/Blender"
+    if os.path.exists(mac_blender_path):
+        cmd = [mac_blender_path, "-b", temp_blend_path, "--python-expr", expr]
+    else:
+        cmd = ["blender", "-b", temp_blend_path, "--python-expr", expr]
+
     print(f"[+] Exporting {os.path.basename(blend_path)} via temporary clone...")
 
     try:
+        # Execute directly without shell=True to avoid subshell initialization issues
         result = subprocess.run(
-            cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+            cmd, 
+            env=env, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.STDOUT
         )
         output_text = result.stdout.decode("utf-8", errors="replace")
 
