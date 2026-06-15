@@ -11,25 +11,22 @@
 #include <cctype> // For std::isprint
 #include <cmath>  // For std::isnan, std::abs
 #include <csignal>
-#include <cstdarg>					// For va_list, va_start, va_end
-#include <cstdint>					// For uint8_t, uint32_t, uint64_t
-#include <cstdio>					// For FILE, stderr, stdout, vfprintf
-#include <cstdlib>					// For std::abort, std::free
-#include <cstring>					// For std::memcpy
-#include <detail/Platform.hpp>		// This handles windows.h and includes unistd.h on Unix
+#include <cstdarg>			   // For va_list, va_start, va_end
+#include <cstdint>			   // For uint8_t, uint32_t, uint64_t
+#include <cstdio>			   // For FILE, stderr, stdout, vfprintf
+#include <cstdlib>			   // For std::abort, std::free
+#include <cstring>			   // For std::memcpy
+#include <detail/Platform.hpp> // This handles windows.h and includes unistd.h on Unix
+#include <detail/Print.hpp>
 #include <physics/PhysicsWorld.hpp> // Required to fully define PhysicsWorld for ZHLN_TRACE
-#include <print>					// For std::print, std::println
+#include <print>					// Restored for stable general-purpose printing
 #include <string>					// For std::string
 #include <string_view>				// For std::string_view
-
 #ifdef _WIN32
-#include <io.h>		 // For _write
 #include <process.h> // For _exit
-#define WRITE_STDOUT(msg, len) _write(2, msg, (unsigned int)len)
 #define HALT_THREAD() Sleep(INFINITE)
 #else
 #include <unistd.h> // Included via Platform.hpp, but here for clarity
-#define WRITE_STDOUT(msg, len) write(STDERR_FILENO, msg, len)
 #define HALT_THREAD() pause()
 #endif
 
@@ -59,12 +56,27 @@ LogLevel GetLogLevel() noexcept {
 	return s_LogLevel.load(std::memory_order_acquire);
 }
 
-static void WriteSafe(const char* msg) {
-	size_t len = 0;
-	while (msg[len]) {
-		len++;
+// Low-level writer strictly dedicated to signal handler pathways
+static void WriteToChannel(uint8_t channel, std::string_view msg) noexcept {
+	if (channel == static_cast<uint8_t>(LogChannel::StdOut)) {
+#if defined(_WIN32)
+		::_write(1, msg.data(), static_cast<unsigned int>(msg.size()));
+#else
+		::write(1, msg.data(), msg.size());
+#endif
+	} else if (channel == static_cast<uint8_t>(LogChannel::File)) {
+		FILE* f = GetCustomLogFile();
+		if (f != nullptr) {
+			std::fwrite(msg.data(), 1, msg.size(), f);
+			std::fflush(f);
+		}
+	} else {
+#if defined(_WIN32)
+		::_write(2, msg.data(), static_cast<unsigned int>(msg.size()));
+#else
+		::write(2, msg.data(), msg.size());
+#endif
 	}
-	[[maybe_unused]] auto _ = WRITE_STDOUT(msg, len);
 }
 
 // --- Log Implementation Helpers ---
@@ -125,6 +137,8 @@ auto GetPoorMansStacktrace() -> std::string {
 
 	for (unsigned int i = 0; i < frames; i++) {
 		SymFromAddr(process, (DWORD64)(stack[i]), 0, symbol);
+		// Note: Stack traces are evaluated under stable conditions on Windows, so std::format is
+		// safe
 		out += std::format("{}: {} - {:#x}\n", i, symbol->Name, symbol->Address);
 	}
 #endif
@@ -196,7 +210,14 @@ void LogManual(std::string_view file, int line, std::string_view message, const 
 int TraceStructCallback(const char* fmt, ...) {
 	va_list args;
 	va_start(args, fmt);
-	int ret = std::vfprintf(stderr, fmt, args);
+
+	// Keep trace rendering signal-safe via BufferPrint [1]
+	char buf[1024];
+	int ret = ZHLN::BufferPrint(buf, sizeof(buf), fmt, args);
+	if (ret > 0) {
+		WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), std::string_view(buf, ret));
+	}
+
 	va_end(args);
 	return ret;
 }
@@ -207,18 +228,22 @@ void TraceStructHeader(std::string_view name, std::string_view label, const char
 	if (auto pos = file_name.find_last_of("/\\"); pos != std::string_view::npos) {
 		file_name.remove_prefix(pos + 1);
 	}
-	std::println(stderr, "{}┌─── STRUCT TRACE: {} ({}) ───{}", Color::Cyan, name, label,
-				 Color::Reset);
-	std::println(stderr, "│ Source:  {}:{}", file_name, line);
-	std::println(stderr,
-				 "├──────────────────────────────────────────────────────────────────────────────");
+	auto line1 = ZHLN::Format("{}┌─── STRUCT TRACE: {} ({}) ───{}\n", Color::Cyan, name, label,
+							  Color::Reset);
+	auto line2 = ZHLN::Format("│ Source:  {}:{}\n", file_name, line);
+	auto line3 =
+		"├──────────────────────────────────────────────────────────────────────────────\n";
+
+	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), line1.string_view());
+	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), line2.string_view());
+	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), line3);
 }
 
 void TraceStructFooter() {
-	std::println(
-		stderr,
-		"{}└──────────────────────────────────────────────────────────────────────────────{}",
+	auto line = ZHLN::Format(
+		"{}└──────────────────────────────────────────────────────────────────────────────{}\n",
 		Color::Cyan, Color::Reset);
+	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), line.string_view());
 }
 
 void MemoryDump(const void* ptr, size_t size, std::string_view label, LogContext ctx,
@@ -229,83 +254,112 @@ void MemoryDump(const void* ptr, size_t size, std::string_view label, LogContext
 		file_name.remove_prefix(pos + 1);
 	}
 
-	std::println(stderr, "{}┌─── DUMP: {} ({}) ───{}", Color::Cyan, label, ctx.fmt, Color::Reset);
-	std::println(stderr, "│ Source:  {}:{}", file_name, ctx.loc.line());
-	std::println(stderr, "│ Address: {}{}{} ({} bytes)", Color::Yellow, ptr, Color::Reset, size);
-	std::println(stderr, "├────────────┬────────────────────────────────────────────────┬──────────"
-						 "────────┬─────────────────────────┐");
-	std::println(stderr, "│  Address   │ Hex Data                                       │ ASCII    "
-						 "        │ Interpretation          │");
-	std::println(stderr, "├────────────┼────────────────────────────────────────────────┼──────────"
-						 "────────┼─────────────────────────┤");
+	auto header1 =
+		ZHLN::Format("{}┌─── DUMP: {} ({}) ───{}\n", Color::Cyan, label, ctx.fmt, Color::Reset);
+	auto header2 = ZHLN::Format("│ Source:  {}:{}\n", file_name, ctx.loc.line());
+	auto header3 =
+		ZHLN::Format("│ Address: {}{}{} ({} bytes)\n", Color::Yellow, ptr, Color::Reset, size);
+	auto header4 = "├────────────┬────────────────────────────────────────────────┬──────────"
+				   "────────┬─────────────────────────┐\n";
+	auto header5 = "│  Address   │ Hex Data                                       │ ASCII    "
+				   "        │ Interpretation          │\n";
+	auto header6 = "├────────────┼────────────────────────────────────────────────┼──────────"
+				   "────────┼─────────────────────────┤\n";
+
+	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), header1.string_view());
+	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), header2.string_view());
+	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), header3.string_view());
+	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), header4);
+	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), header5);
+	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), header6);
 
 	for (size_t i = 0; i < size; i += opts.bytes_per_line) {
-		std::print(stderr, "│ {}{:#010x}{} │ ", Color::Cyan, std::bit_cast<uintptr_t>(byte_ptr + i),
-				   Color::Reset);
+		auto addr_str = ZHLN::Format("│ {}{:#010X}{} │ ", Color::Cyan,
+									 std::bit_cast<uintptr_t>(byte_ptr + i), Color::Reset);
+		WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), addr_str.string_view());
 
 		for (size_t j = 0; j < opts.bytes_per_line; ++j) {
 			if (i + j < size) {
 				uint8_t b = byte_ptr[i + j];
 				if (b == 0) {
-					std::print(stderr, "{}00{} ", Color::Gray, Color::Reset);
+					auto hex_zero = ZHLN::Format("{}00{} ", Color::Gray, Color::Reset);
+					WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr),
+								   hex_zero.string_view());
 				} else {
-					std::print(stderr, "{:02X} ", b);
+					if (b < 16) {
+						auto hex_val = ZHLN::Format("0{:X} ", b);
+						WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr),
+									   hex_val.string_view());
+					} else {
+						auto hex_val = ZHLN::Format("{:X} ", b);
+						WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr),
+									   hex_val.string_view());
+					}
 				}
 			} else {
-				std::print(stderr, "   ");
+				WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), "   ");
 			}
 			if ((j + 1) % 4 == 0 && j + 1 < opts.bytes_per_line) {
-				std::print(stderr, " ");
+				WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), " ");
 			}
 		}
 
-		std::print(stderr, "│ ");
+		WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), "│ ");
 		for (size_t j = 0; j < opts.bytes_per_line; ++j) {
 			if (i + j < size) {
 				uint8_t c = byte_ptr[i + j];
 				if (std::isprint(c)) {
-					std::print(stderr, "{}", (char)c);
+					char c_str[2] = {static_cast<char>(c), '\0'};
+					WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), c_str);
 				} else {
-					std::print(stderr, "{}·{}", Color::Gray, Color::Reset);
+					auto dot = ZHLN::Format("{}·{}", Color::Gray, Color::Reset);
+					WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), dot.string_view());
 				}
 			} else {
-				std::print(stderr, " ");
+				WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), " ");
 			}
 		}
 
-		std::print(stderr, " │ ");
+		WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), " │ ");
 		if (i + 8 <= size) {
-			uint64_t val64;
+			uint64_t val64 = 0;
 			std::memcpy(&val64, byte_ptr + i, 8);
 
 			if (val64 != 0) {
 				if (val64 > 0x100000000 && val64 < 0x00007FFFFFFFFFFF) {
-					std::print(stderr, "{}ptr: {:#014x}{}", Color::Green, val64, Color::Reset);
+					auto ptr_str =
+						ZHLN::Format("{}ptr: {:#014X}{}", Color::Green, val64, Color::Reset);
+					WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), ptr_str.string_view());
 				} else {
-					float f32;
-					int32_t i32;
+					float f32 = NAN;
+					int32_t i32 = 0;
 					std::memcpy(&f32, byte_ptr + i, 4);
 					std::memcpy(&i32, byte_ptr + i, 4);
 
 					if (!std::isnan(f32) && std::abs(f32) > 0.0001f && std::abs(f32) < 1000000.0f) {
-						std::print(stderr, "flt: {:<12.4f}", f32);
+						auto flt_str = ZHLN::Format("flt: {}", f32);
+						WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr),
+									   flt_str.string_view());
 					} else {
-						std::print(stderr, "int: {:<12}", i32);
+						auto int_str = ZHLN::Format("int: {}", i32);
+						WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr),
+									   int_str.string_view());
 					}
 				}
 			} else {
-				std::print(stderr, "{}---{}", Color::Gray, Color::Reset);
+				auto dash_str = ZHLN::Format("{}---{}", Color::Gray, Color::Reset);
+				WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), dash_str.string_view());
 			}
 		}
 
-		std::println(stderr, " │");
+		WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), " │\n");
 	}
 
-	std::println(stderr,
-				 "{}"
-				 "└────────────┴────────────────────────────────────────────────┴──────────────────"
-				 "┴─────────────────────────┘{}",
-				 Color::Cyan, Color::Reset);
+	auto footer = ZHLN::Format(
+		"{}└────────────┴────────────────────────────────────────────────┴──────────────────"
+		"┴─────────────────────────┘{}\n",
+		Color::Cyan, Color::Reset);
+	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), footer.string_view());
 }
 
 // --- Original Signal and Crash Diagnostic Logic ---
@@ -332,54 +386,67 @@ static void PerformDiagnosticDump(int sig, void* addr, Engine* engine) {
 #endif
 	}
 
-	std::println(stderr, "\n{}DIAGNOSTIC REPORT FOR SIGNAL: {}{}", Color::Red, sigName,
-				 Color::Reset);
-	std::println(stderr, "Faulting Address: {}{}{}", Color::Yellow, addr, Color::Reset);
+	auto sig_header =
+		ZHLN::Format("\n{}DIAGNOSTIC REPORT FOR SIGNAL: {}{}\n", Color::Red, sigName, Color::Reset);
+	auto addr_header =
+		ZHLN::Format("Faulting Address: {}{}{}\n", Color::Yellow, addr, Color::Reset);
+	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), sig_header.string_view());
+	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), addr_header.string_view());
 
 	if (engine != nullptr) {
-		// 1. High-level structure trace
 		ZHLN_TRACE(*engine);
 
-		// 2. Camera Deep State
 		auto& cam = engine->GetCamera();
-		std::println(stderr, "\n{}--- CAMERA DEEP STATE ---{}", Color::Cyan, Color::Reset);
-		std::println(stderr, "  Position:  ({:.4f}, {:.4f}, {:.4f})", cam.position.GetX(),
-					 cam.position.GetY(), cam.position.GetZ());
-		std::println(stderr, "  Direction: Yaw: {:.2f}, Pitch: {:.2f}", cam.yaw, cam.pitch);
+		auto cam_hdr = ZHLN::Format("\n{}--- CAMERA DEEP STATE ---{}\n", Color::Cyan, Color::Reset);
+		auto cam_pos = ZHLN::Format("  Position:  ({}, {}, {})\n", cam.position.GetX(),
+									cam.position.GetY(), cam.position.GetZ());
+		auto cam_dir = ZHLN::Format("  Direction: Yaw: {}, Pitch: {}\n", cam.yaw, cam.pitch);
 
-		// 3. Frustum "Crawl" (SIMD Decode)
+		WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), cam_hdr.string_view());
+		WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), cam_pos.string_view());
+		WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), cam_dir.string_view());
+
 		auto& f = cam.frustum;
-		std::println(stderr, "\n{}--- FRUSTUM PLANE EQUATIONS (SIMD DECODED) ---{}", Color::Cyan,
-					 Color::Reset);
+		auto frust_hdr = ZHLN::Format("\n{}--- FRUSTUM PLANE EQUATIONS (SIMD DECODED) ---{}\n",
+									  Color::Cyan, Color::Reset);
+		WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), frust_hdr.string_view());
 		const char* names[] = {"Left  ", "Right ", "Top   ", "Bottom", "Near  ", "Far   "};
 
 		for (int i = 0; i < 6; ++i) {
 			int block = i / 4;
 			int lane = i % 4;
-			// Crawling into the mF32 union of the Vec4 block
-			std::println(stderr, "  Plane {}: [{:>10.4f}x {:>10.4f}y {:>10.4f}z] offset: {:>10.4f}",
-						 names[i], f.mX[block].mF32[lane], f.mY[block].mF32[lane],
-						 f.mZ[block].mF32[lane], f.mW[block].mF32[lane]);
+			auto plane_str = ZHLN::Format("  Plane {}: [{}x {}y {}z] offset: {}\n", names[i],
+										  f.mX[block].mF32[lane], f.mY[block].mF32[lane],
+										  f.mZ[block].mF32[lane], f.mW[block].mF32[lane]);
+			WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), plane_str.string_view());
 		}
 
-		// 4. Raw Memory Dump of the Frustum structure
 		ZHLN_DUMP(cam.frustum);
 
-		// 5. Physics Trace
 		if (engine->GetPhysicsContext().GetImpl() != nullptr) {
 			ZHLN_TRACE(engine->GetPhysicsContext().GetWorld());
 		}
 	}
 
-	std::println(stderr, "\nStack Trace:\n{}", GetPoorMansStacktrace());
+	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), "\nStack Trace:\n");
+	auto stack = GetPoorMansStacktrace();
+	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), stack);
+	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), "\n");
 }
 
 static void ProcessCrash(int sig, void* addr) {
+
+	// If the signal is SIGABRT, it was raised by std::abort() inside InternalPanic.
+	// We already printed the panic and stacktrace, so exit immediately.
+	if (sig == SIGABRT) {
+		_exit(sig);
+	}
+
 	// DOUBLE-FAULT GUARD:
 	int expected = 0;
 	if (!s_PendingSignal.compare_exchange_strong(expected, sig)) {
 		if (expected == -1) {
-			WriteSafe("!! SECONDARY CRASH DURING DIAGNOSTICS. ABORTING !!\n");
+			ZHLN::Println("!! SECONDARY CRASH DURING DIAGNOSTICS. ABORTING !!");
 		}
 		_exit(sig);
 	}
@@ -387,7 +454,7 @@ static void ProcessCrash(int sig, void* addr) {
 	s_FaultAddr.store(addr);
 
 	if (ZHLN::GetCurrentFiberID() == 1) {
-		WriteSafe("\n[ZHLN] Terminal signal on Main Thread. Attempting emergency dump...\n");
+		ZHLN::Print("\n[ZHLN] Terminal signal on Main Thread. Attempting emergency dump...\n");
 
 		// Mark that we are now in the "Emergency Dump" phase
 		s_PendingSignal.store(-1);
@@ -398,7 +465,7 @@ static void ProcessCrash(int sig, void* addr) {
 
 		_exit(sig);
 	} else {
-		WriteSafe("\n[ZHLN] Signal intercepted in Worker. Main Thread will dump soon...\n");
+		ZHLN::Print("\n[ZHLN] Signal intercepted in Worker. Main Thread will dump soon...\n");
 		while (true) {
 			HALT_THREAD();
 		}
@@ -474,7 +541,7 @@ auto JoltTraceBridge(const char* inFMT, ...) noexcept -> void {
 	va_start(list, inFMT);
 
 	char buffer[1024]{};
-	int result = std::vsnprintf(buffer, sizeof(buffer), inFMT, list);
+	int result = ZHLN::BufferPrint(buffer, sizeof(buffer), inFMT, list);
 
 	va_end(list);
 
@@ -490,7 +557,7 @@ auto JoltAssertBridge(const char* inExpression, const char* inMessage, const cha
 			  "Msg:  {}\n"
 			  "File: {}:{}\n"
 			  "--------------------------\n",
-			  inExpression, (inMessage ? inMessage : "None"), inFile, inLine);
+			  inExpression, ((inMessage != nullptr) ? inMessage : "None"), inFile, inLine);
 	return true;
 }
 

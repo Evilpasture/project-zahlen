@@ -28,14 +28,31 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	} else {
 		uint32_t glfwExtensionCount = 0;
 		const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-		inst_exts.assign(glfwExtensions, glfwExtensions + glfwExtensionCount);
+
+		if (glfwExtensionCount > 0 && glfwExtensions != nullptr) {
+			inst_exts.assign(glfwExtensions, glfwExtensions + glfwExtensionCount);
+		} else {
+			// FALLBACK: If GLFW fails to detect Vulkan (common under RenderDoc/Vulkan layers on
+			// Linux), force-inject the standard platform extensions. ZHLN_CreateInstance will
+			// safely filter out any unsupported ones.
+			inst_exts.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+			if constexpr (isWindows) {
+				inst_exts.push_back("VK_KHR_win32_surface");
+			} else if constexpr (isMac) {
+				inst_exts.push_back("VK_EXT_metal_surface");
+			} else {
+				inst_exts.push_back("VK_KHR_xcb_surface");
+				inst_exts.push_back("VK_KHR_xlib_surface");
+				inst_exts.push_back("VK_KHR_wayland_surface");
+			}
+		}
 		inst_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 		inst_exts.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
 		inst_exts.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
 	}
-#ifdef __APPLE__
-	inst_exts.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
-#endif
+	if constexpr (isMac) {
+		inst_exts.push_back("VK_KHR_portability_enumeration");
+	}
 	_impl->appName = cfg.appName;
 	ZHLN_InstanceDesc inst_desc = {.app_name = {},
 								   .version = VK_MAKE_API_VERSION(0, 1, 0, 0),
@@ -76,27 +93,22 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 			})
 			.Build();
 
-#ifdef __APPLE__
-	const char* dev_exts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-							  VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
-							  VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME,
-							  "VK_KHR_portability_subset",
-							  VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
-							  VK_KHR_RAY_QUERY_EXTENSION_NAME,
-							  VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
-							  "VK_EXT_robustness2"};
-#else
-	const char* dev_exts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-							  VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
-							  VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME,
-							  VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
-							  VK_KHR_RAY_QUERY_EXTENSION_NAME,
-							  VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
-							  "VK_EXT_robustness2"};
-#endif
+	std::vector<const char*> dev_exts = {VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+										 VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
+										 VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME,
+										 VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+										 VK_KHR_RAY_QUERY_EXTENSION_NAME,
+										 VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+										 "VK_EXT_robustness2"};
+
+	if constexpr (isMac) {
+		// Note: We use the raw string because "VK_KHR_portability_subset"
+		// macro gates might still be finicky depending on the host header setup.
+		dev_exts.push_back("VK_KHR_portability_subset");
+	}
 	ZHLN_DeviceDesc dev_desc = {.physical = nullptr,
-								.extensions = &dev_exts[0],
-								.extension_count = sizeof(dev_exts) / sizeof(const char*),
+								.extensions = dev_exts.data(),
+								.extension_count = static_cast<uint32_t>(dev_exts.size()),
 								.features = features.GetRoot(),
 								.enable_validation = cfg.enableValidation};
 	ZHLN_DeviceSelectDesc select_desc = {.instance = VK_NULL_HANDLE,
@@ -106,11 +118,16 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 
 	_impl->ctx = Vk::Context::Create(inst_desc, select_desc, dev_desc);
 
+	if (!_impl->ctx.Valid()) {
+		ZHLN::Panic("FATAL: Vulkan Context failed to initialize. Please check your Vulkan drivers, "
+					"layers, or RenderDoc environment.");
+	}
+
 	if (!_impl->allocator.Init(_impl->ctx)) {
 		ZHLN::Panic("FATAL: Vulkan Memory Allocator (VMA) failed to initialize");
 	}
 
-	if (!_impl->rtCtx.Valid()) {
+	if (!_impl->rtCtx.Init(_impl->ctx.Device())) {
 		ZHLN::Log("WARNING: Raytracing context failed to initialize. RTR will be disabled.");
 	} else {
 		ZHLN::Log("Raytracing context initialized successfully.");
@@ -137,9 +154,21 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 		width = hwWidth;
 		height = hwHeight;
 		window.SetSize(width, height);
+
+		if (raw_surface == VK_NULL_HANDLE) {
+			ZHLN::Panic("FATAL: Failed to create TTY Vulkan Surface!");
+		}
 	} else {
 		auto* glfwWin = static_cast<GLFWwindow*>(window.GetNativeHandle());
-		glfwCreateWindowSurface(_impl->ctx.Instance(), glfwWin, nullptr, &raw_surface);
+		VkResult err =
+			glfwCreateWindowSurface(_impl->ctx.Instance(), glfwWin, nullptr, &raw_surface);
+
+		// Catch the surface creation failure before it propagates
+		if (!Vk::CheckResult(err, "Window Surface", std::source_location::current()) ||
+			raw_surface == VK_NULL_HANDLE) {
+			ZHLN::Panic("FATAL: Failed to create GLFW Vulkan window surface!");
+		}
+
 		glfwGetFramebufferSize(glfwWin, &width, &height);
 	}
 

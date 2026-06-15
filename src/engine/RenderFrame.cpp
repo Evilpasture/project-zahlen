@@ -779,16 +779,15 @@ void RenderContext::EndFrame() {
 				.alphaCutoff = cmdData.alphaCutoff,
 				.alphaMode = cmdData.alphaMode,
 				.jointOffset = cmdData.jointOffset,
-				.isSkinned = cmdData.isSkinned,
+				.isSkinned = (cmdData.flags & DrawFlags::Skinned) != DrawFlags::None ? 1u : 0u,
 				.morphOffset = cmdData.morphOffset,
 				.activeMorphCount = cmdData.activeMorphCount,
 				.indexCount = cmdData.indexCount,
 				._pad = 0,
-				.morphWeights = {},
-				.baseColorFactor = {},
+				.morphWeights = cmdData.morphWeights,
+				.baseColorFactor = cmdData.baseColorFactor,
+
 			};
-			std::memcpy(dst[i].morphWeights, cmdData.morphWeights, sizeof(float) * 4);
-			std::memcpy(dst[i].baseColorFactor, cmdData.baseColorFactor, sizeof(float) * 4);
 		}
 	}
 	if (_impl->tlas.Current() != VK_NULL_HANDLE && _impl->rtCtx.Valid()) {
@@ -803,7 +802,12 @@ void RenderContext::EndFrame() {
 
 	for (uint32_t i = 0; i < _impl->drawQueue.size(); ++i) {
 		auto* mesh = std::bit_cast<NativeMesh*>(_impl->drawQueue[i].mesh);
-		if (mesh->blasAddress == 0 || _impl->drawQueue[i].isSkinned != 0) {
+		const auto& drawCmd = _impl->drawQueue[i];
+
+		bool isSkinned = (drawCmd.flags & DrawFlags::Skinned) != DrawFlags::None;
+		bool isExcluded = (drawCmd.flags & DrawFlags::ExcludeFromTLAS) != DrawFlags::None;
+
+		if (mesh->blasAddress == 0 || isSkinned || isExcluded) {
 			continue;
 		}
 
@@ -959,61 +963,53 @@ void SetLights(RenderContext& ctx, const GPULight* lights, uint32_t count) {
 }
 
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
-		  const JPH::Mat44& transform, const JPH::Mat44& prevTransform, float cullRadius,
-		  uint32_t jointOffset, bool isSkinned, uint32_t morphOffset, uint32_t activeMorphCount,
-		  const float* morphWeights) {
+		  const DrawParams& params) {
 	auto* impl = ctx.GetImpl();
 	if (impl->current_cmd == VK_NULL_HANDLE) {
 		return;
 	}
 
-	if (mesh.vertexBuffer == BufferHandle::Invalid) {
-		return;
-	}
-
-	// 1. Resolve Mesh Handles with Generational Safety checks
 	auto* nativeMesh = impl->meshPool.Resolve(static_cast<uint64_t>(mesh.vertexBuffer));
 	if (nativeMesh == nullptr) [[unlikely]] {
-		return; // Stale or invalid handle; safely ignore
+		return;
 	}
 
 	auto* nativeIndexMesh = mesh.indexBuffer != BufferHandle::Invalid
 								? impl->meshPool.Resolve(static_cast<uint64_t>(mesh.indexBuffer))
 								: nullptr;
 
-	// 2. Resolve Material Handle with Generational Safety checks
 	auto* nativeMaterial = impl->materialPool.Resolve(static_cast<uint64_t>(material.pipeline));
 	if (nativeMaterial == nullptr) [[unlikely]] {
-		return; // Stale or invalid material; safely ignore
+		return;
 	}
 
-	// 3. Record Draw Command using safe resolved raw pointers
-	impl->drawQueue.push_back(
-		DrawCommand{.material = nativeMaterial,
-					.mesh = nativeMesh,
-					.indexMesh = nativeIndexMesh,
-					.transform = transform,
-					.prevTransform = prevTransform,
-					.albedoIndex = material.albedoIndex,
-					.normalIndex = material.normalIndex,
-					.pbrIndex = material.pbrIndex,
-					.emissiveIndex = material.emissiveIndex,
-					.cullRadius = cullRadius,
-					.metallicFactor = material.metallicFactor,
-					.roughnessFactor = material.roughnessFactor,
-					.alphaCutoff = material.alphaCutoff,
-					.alphaMode = material.alphaMode,
-					.jointOffset = jointOffset,
-					.isSkinned = isSkinned ? 1u : 0u,
-					.baseColorFactor = {material.baseColorFactor[0], material.baseColorFactor[1],
-										material.baseColorFactor[2], material.baseColorFactor[3]},
-					.morphOffset = morphOffset,
-					.activeMorphCount = activeMorphCount,
-					.morphWeights = {(morphWeights != nullptr) ? morphWeights[0] : 0.0f,
-									 (morphWeights != nullptr) ? morphWeights[1] : 0.0f,
-									 (morphWeights != nullptr) ? morphWeights[2] : 0.0f,
-									 (morphWeights != nullptr) ? morphWeights[3] : 0.0f},
-					.indexCount = mesh.indexCount});
+	impl->drawQueue.push_back(DrawCommand{
+		.material = nativeMaterial,
+		.mesh = nativeMesh,
+		.indexMesh = nativeIndexMesh,
+		.transform = params.transform,
+		.prevTransform = params.prevTransform,
+		.albedoIndex = material.albedoIndex,
+		.normalIndex = material.normalIndex,
+		.pbrIndex = material.pbrIndex,
+		.emissiveIndex = material.emissiveIndex,
+		.cullRadius = params.cullRadius,
+		.metallicFactor = material.metallicFactor,
+		.roughnessFactor = material.roughnessFactor,
+		.alphaCutoff = material.alphaCutoff,
+		.alphaMode = material.alphaMode,
+		.jointOffset = params.jointOffset,
+		.baseColorFactor = {material.baseColorFactor[0], material.baseColorFactor[1],
+							material.baseColorFactor[2], material.baseColorFactor[3]},
+		.morphOffset = params.morphOffset,
+		.activeMorphCount = params.activeMorphCount,
+		.morphWeights = {(params.morphWeights != nullptr) ? params.morphWeights[0] : 0.0f,
+						 (params.morphWeights != nullptr) ? params.morphWeights[1] : 0.0f,
+						 (params.morphWeights != nullptr) ? params.morphWeights[2] : 0.0f,
+						 (params.morphWeights != nullptr) ? params.morphWeights[3] : 0.0f},
+		.indexCount = mesh.indexCount,
+		.flags = params.flags,
+	});
 }
 
 void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex) {

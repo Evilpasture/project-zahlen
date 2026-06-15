@@ -255,12 +255,12 @@ struct DrawCommand {
 	float alphaCutoff;
 	uint32_t alphaMode;
 	uint32_t jointOffset;
-	uint32_t isSkinned;
-	float baseColorFactor[4];
+	std::array<float, 4> baseColorFactor;
 	uint32_t morphOffset;
 	uint32_t activeMorphCount;
-	float morphWeights[4];
+	std::array<float, 4> morphWeights;
 	uint32_t indexCount;
+	DrawFlags flags;
 };
 
 static_assert(std::is_trivially_copyable_v<DrawCommand> &&

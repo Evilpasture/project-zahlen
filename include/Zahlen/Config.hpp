@@ -58,6 +58,89 @@ inline constexpr std::string_view Sanitizers = "enabled";
 inline constexpr std::string_view Sanitizers = "disabled";
 #endif
 
+// --- PLATFORM DETECTION ---
+#if defined(_WIN32) || defined(_WIN64)
+inline constexpr std::string_view PlatformName = "Windows";
+inline constexpr bool isWindows = true;
+inline constexpr bool isLinux = false;
+inline constexpr bool isMac = false;
+#elif defined(__linux__) && !defined(__ANDROID__)
+inline constexpr std::string_view PlatformName = "Linux";
+inline constexpr bool isWindows = false;
+inline constexpr bool isLinux = true;
+inline constexpr bool isMac = false;
+#elif defined(__APPLE__) && defined(__MACH__)
+#include <TargetConditionals.h>
+#if TARGET_OS_MAC && !TARGET_OS_IPHONE
+inline constexpr std::string_view PlatformName = "macOS";
+inline constexpr bool isWindows = false;
+inline constexpr bool isLinux = false;
+inline constexpr bool isMac = true;
+#else
+inline constexpr std::string_view PlatformName = "Apple iOS/Other";
+inline constexpr bool isWindows = false;
+inline constexpr bool isLinux = false;
+inline constexpr bool isMac = false;
+#endif
+#else
+inline constexpr std::string_view PlatformName = "Unknown Platform";
+inline constexpr bool isWindows = false;
+inline constexpr bool isLinux = false;
+inline constexpr bool isMac = false;
+#endif
+
+// --- ARCHITECTURE DETECTION ---
+#if defined(__x86_64__) || defined(_M_X64)
+inline constexpr std::string_view Architecture = "x86_64";
+inline constexpr bool isX64 = true;
+inline constexpr bool isARM64 = false;
+#elif defined(__aarch64__) || defined(_M_ARM64)
+inline constexpr std::string_view Architecture = "ARM64";
+inline constexpr bool isX64 = false;
+inline constexpr bool isARM64 = true;
+#else
+inline constexpr std::string_view Architecture = "Unknown Arch";
+inline constexpr bool isX64 = false;
+inline constexpr bool isARM64 = false;
+#endif
+
+#if defined(__x86_64__) || defined(_M_X64)
+// Virtually all modern x86_64 CPUs use 64-byte cache lines
+inline constexpr size_t CacheLineSize = 64;
+#elif defined(__aarch64__) || defined(_M_ARM64)
+// Apple Silicon (M1/M2/M3) uses 128-byte cache lines for performance cores
+#if defined(__APPLE__)
+inline constexpr size_t CacheLineSize = 128;
+#else
+inline constexpr size_t CacheLineSize = 64;
+#endif
+#else
+inline constexpr size_t CacheLineSize = 64; // Safe fallback
+#endif
+
+inline constexpr bool isLittleEndian = (std::endian::native == std::endian::little);
+inline constexpr bool isBigEndian = (std::endian::native == std::endian::big);
+
+// Check if the compiler supports a standardized debug break hook
+inline void DebugBreak() noexcept {
+#if defined(_WIN32) || defined(_WIN64)
+// We are strictly on Windows
+#if defined(_MSC_VER) || defined(__clang__)
+	__debugbreak();
+#endif
+#elif defined(__linux__)
+// We are strictly on Linux
+#if defined(__GNUC__) || defined(__clang__)
+	__builtin_trap();
+#endif
+#elif defined(__APPLE__)
+// We are strictly on macOS
+#if defined(__GNUC__) || defined(__clang__)
+	__builtin_trap();
+#endif
+#endif
+}
+
 struct PhysicsConfig {
 	uint32_t maxBodies = 1024;
 	uint32_t maxBodyPairs = 1024;

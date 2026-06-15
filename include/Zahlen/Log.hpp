@@ -6,6 +6,7 @@
 #include "CommandLine.hpp"
 
 #include <cstdio>
+#include <detail/Print.hpp>
 #include <format>
 #include <print>
 #include <source_location>
@@ -45,11 +46,11 @@ void InternalWriteLog(uint8_t channel, const char* file, uint32_t line, std::str
 
 /**
  * @brief Modern C++23 Engine Logger with Fiber awareness and compile-time channel dispatch.
+ * Restored to standard dynamic formatting for stable general-purpose runtime use.
  */
 template <LogChannel Channel = LogChannel::StdErr, LogLevel Level = LogLevel::Moderate,
 		  typename... Args>
 void Log(LogContext ctx, Args&&... args) {
-	// Filter logs dynamically: If global level is below this call's level, skip execution.
 	if (static_cast<uint8_t>(GetLogLevel()) < static_cast<uint8_t>(Level)) {
 		return;
 	}
@@ -94,13 +95,13 @@ inline void TraceStructInternal(const T& obj, std::string_view name, LogContext 
 		if (obj) {
 			__builtin_dump_struct(obj, &TraceStructCallback);
 		} else {
-			std::println(stderr, "  (null pointer)");
+			ZHLN::Println(stderr, "  (null pointer)");
 		}
 	} else if constexpr (requires { obj.get(); }) { // Detects std::unique_ptr / std::shared_ptr
 		if (obj.get()) {
 			__builtin_dump_struct(obj.get(), &TraceStructCallback);
 		} else {
-			std::println(stderr, "  (null smart pointer)");
+			ZHLN::Println(stderr, "  (null smart pointer)");
 		}
 	} else {
 		__builtin_dump_struct(&obj, &TraceStructCallback);

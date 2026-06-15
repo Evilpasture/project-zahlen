@@ -12,9 +12,11 @@
 
 namespace ZHLN::Vk {
 
-void ReportVkError(VkResult result, const char* context, const std::source_location& location) {
-	std::println(stderr, "[Vk Error] {}:{} in {}: {} failed with {}", location.file_name(),
-				 location.line(), location.function_name(), context, ZHLN_VkResultString(result));
+std::string ReportVkError(VkResult result, const char* context,
+						  const std::source_location& location = std::source_location::current()) {
+	return std::format("[Vk Error] {}:{} in {}: {} failed with {}", location.file_name(),
+					   location.line(), location.function_name(), context,
+					   ZHLN_VkResultString(result));
 }
 
 [[noreturn]] void ReportSemaphoreBoundsError(uint32_t index, uint32_t count) noexcept {

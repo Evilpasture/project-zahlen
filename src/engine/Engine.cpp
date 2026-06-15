@@ -99,6 +99,13 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess, const char*
 	JPH::RegisterTypes();
 
 	bool use_tty = false;
+	if constexpr (isLinux) {
+		// If RenderDoc is active, force GLFW to initialize on X11 (XWayland)
+		// to match RenderDoc's active WSI extensions.
+		if (std::getenv("ENABLE_VULKAN_RENDERDOC_CAPTURE") != nullptr) {
+			glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+		}
+	}
 
 	if (!glfwInit()) {
 		if (TTYBackend::IsSupported()) {

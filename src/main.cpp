@@ -13,22 +13,16 @@ int RunGame(const CommandLineOptions& options);
 int RunEditor(const CommandLineOptions& options);
 
 int main(int argc, char* argv[]) {
-	auto result =
-		HandleCommandLine(std::span(argv, static_cast<size_t>(argc)))
-			.and_then([](const CommandLineOptions& options) -> std::expected<int, EngineError> {
-				ZHLN::SetLogLevel(options.logLevel);
-
-				if (options.launchEditor) {
-					return RunEditor(options);
-				}
-				return RunGame(options);
-			})
-			.transform_error([](const EngineError& err) -> int {
-				if (!err.msg.empty() && !err.silent) {
-					ZHLN::Log("Error: {}", err.msg);
-				}
-				return err.code;
-			});
-
-	return result.value_or(result.error());
+	return HandleCommandLine(std::span(argv, static_cast<size_t>(argc)))
+		.and_then([](const CommandLineOptions& options) -> std::expected<int, EngineError> {
+			ZHLN::SetLogLevel(options.logLevel);
+			return options.launchEditor ? RunEditor(options) : RunGame(options);
+		})
+		.transform_error([](const EngineError& err) -> int {
+			if (!err.msg.empty() && !err.silent) {
+				ZHLN::Log("Error: {}", err.msg);
+			}
+			return err.code;
+		})
+		.value_or(0); // value_or handles the final extraction safely
 }

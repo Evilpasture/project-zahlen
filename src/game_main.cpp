@@ -603,9 +603,23 @@ void RenderGame(Engine& engine, float frameTime, float physicsAccumulator, GameC
 			currentTransform = mesh->localTransform;
 		}
 
-		Renderer::Draw(rc, mesh->material, mesh->mesh, currentTransform, mesh->prevTransform,
-					   mesh->cullRadius, mesh->jointOffset, mesh->isSkinned, mesh->morphOffset,
-					   mesh->activeMorphCount, mesh->morphWeights);
+		DrawFlags flags = DrawFlags::None;
+		if (mesh->isSkinned) {
+			flags |= DrawFlags::Skinned;
+		}
+		if (isPlayerPart) {
+			flags |= DrawFlags::ExcludeFromTLAS;
+		}
+
+		Renderer::Draw(rc, mesh->material, mesh->mesh,
+					   {.transform = currentTransform,
+						.prevTransform = mesh->prevTransform,
+						.cullRadius = mesh->cullRadius,
+						.jointOffset = mesh->jointOffset,
+						.morphOffset = mesh->morphOffset,
+						.activeMorphCount = mesh->activeMorphCount,
+						.morphWeights = mesh->morphWeights,
+						.flags = flags});
 	}
 
 	CullingStats::TotalObjects = reg.GetEntitiesWith<MeshComponent>().size();
@@ -640,7 +654,9 @@ void RenderGame(Engine& engine, float frameTime, float physicsAccumulator, GameC
 			JPH::Quat rot = JPH::Quat::sFromTo(JPH::Vec3::sAxisZ(), dir);
 			JPH::Mat44 lineTransform = Math::CreateTransform(mid, rot, JPH::Vec3(1.0f, 1.0f, len));
 
-			Renderer::Draw(rc, debugMat, debugMesh, lineTransform, lineTransform, len);
+			Renderer::Draw(
+				rc, debugMat, debugMesh,
+				{.transform = lineTransform, .prevTransform = lineTransform, .cullRadius = len});
 		}
 	}
 

@@ -63,8 +63,8 @@ struct alignas(16) InstanceData {
 	uint32_t indexCount; // Added: Fits into padding
 	uint32_t _pad;		 // Added: Aligns morphWeights to 16 bytes
 
-	alignas(16) float morphWeights[4];
-	alignas(16) float baseColorFactor[4];
+	alignas(16) std::array<float, 4> morphWeights;
+	alignas(16) std::array<float, 4> baseColorFactor;
 };
 
 struct ObjectConstants {
@@ -170,4 +170,52 @@ struct TAAState {
 	float prevJitterY = 0.0f;
 	uint32_t frameIndex = 0; // Drives the Halton Jitter sequence
 };
+
+template <typename T> inline constexpr bool EnableEnumFlags = false;
+
+template <typename T>
+concept EnumFlag = std::is_enum_v<T> && EnableEnumFlags<T>;
+
+template <EnumFlag T> constexpr T operator|(T a, T b) noexcept {
+	return static_cast<T>(static_cast<std::underlying_type_t<T>>(a) |
+						  static_cast<std::underlying_type_t<T>>(b));
+}
+
+template <EnumFlag T> constexpr T operator&(T a, T b) noexcept {
+	return static_cast<T>(static_cast<std::underlying_type_t<T>>(a) &
+						  static_cast<std::underlying_type_t<T>>(b));
+}
+
+template <EnumFlag T> constexpr T operator^(T a, T b) noexcept {
+	return static_cast<T>(static_cast<std::underlying_type_t<T>>(a) ^
+						  static_cast<std::underlying_type_t<T>>(b));
+}
+
+template <EnumFlag T> constexpr T operator~(T a) noexcept {
+	return static_cast<T>(~static_cast<std::underlying_type_t<T>>(a));
+}
+
+template <EnumFlag T> constexpr T& operator|=(T& a, T b) noexcept {
+	a = a | b;
+	return a;
+}
+
+template <EnumFlag T> constexpr T& operator&=(T& a, T b) noexcept {
+	a = a & b;
+	return a;
+}
+
+template <EnumFlag T> constexpr T& operator^=(T& a, T b) noexcept {
+	a = a ^ b;
+	return a;
+}
+
+// NOLINTNEXTLINE(performance-enum-size)
+enum class DrawFlags : uint32_t {
+	None = 0,
+	ExcludeFromTLAS = 1 << 0, // Generic raytracing exclusion
+	Skinned = 1 << 1,		  // Tells the renderer that this draw is skin-weighted
+};
 } // namespace ZHLN
+
+template <> inline constexpr bool ZHLN::EnableEnumFlags<ZHLN::DrawFlags> = true;

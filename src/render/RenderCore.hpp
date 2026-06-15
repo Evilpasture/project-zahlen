@@ -9,6 +9,7 @@
 #include <bit>
 #include <concepts>
 #include <cstdlib>
+#include <expected>
 #include <filesystem>
 #include <source_location>
 #include <span>
@@ -705,12 +706,14 @@ class Surface {
 // Error Helpers
 // ============================================================================
 
-void ReportVkError(VkResult result, const char* context, const std::source_location& location);
+std::string ReportVkError(VkResult result, const char* context,
+						  const std::source_location& location);
 [[noreturn]] void ReportSemaphoreBoundsError(uint32_t index, uint32_t count) noexcept;
 
 [[nodiscard]] auto ResultString(const VkResult result) noexcept -> const char*;
-void CheckResult(const VkResult result, const char* context = "",
-				 const std::source_location location = std::source_location::current());
+std::expected<VkResult, std::string>
+CheckResult(const VkResult result, const char* context = "",
+			const std::source_location location = std::source_location::current());
 
 // ============================================================================
 // Semaphore Helpers

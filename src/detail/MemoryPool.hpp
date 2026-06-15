@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #include <algorithm>
@@ -128,7 +127,7 @@ template <typename T, size_t BlockCount = 1024> class ObjectPool {
 		_freeList = _freeList->next;
 		_lock.unlock();
 
-		return reinterpret_cast<void*>(node);
+		return std::bit_cast<void*>(node);
 	}
 
 	/**
@@ -139,7 +138,7 @@ template <typename T, size_t BlockCount = 1024> class ObjectPool {
 			return;
 		}
 
-		auto* node = reinterpret_cast<Node*>(ptr);
+		auto* node = std::bit_cast<Node*>(ptr);
 		_lock.lock();
 		node->next = _freeList;
 		_freeList = node;
@@ -158,7 +157,7 @@ template <typename T, size_t BlockCount = 1024> class ObjectPool {
 		// Link all slots in the new chunk together and attach them to the free list [6]
 		std::byte* start = chunk->storage.data();
 		for (size_t i = 0; i < BlockCount; ++i) {
-			auto* node = reinterpret_cast<Node*>(start + (i * ObjectSize));
+			auto* node = std::bit_cast<Node*>(start + (i * ObjectSize));
 			node->next = _freeList;
 			_freeList = node;
 		}

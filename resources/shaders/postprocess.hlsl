@@ -78,7 +78,6 @@ float GetStableWeylNoise(uint2 pixelPos) {
 [[vk::binding(6, 0)]] RaytracingAccelerationStructure tlas;
 #endif
 
-
 float3 ReconstructWorldPos(float2 uv, float depth) {
 	float4 clipSpacePos = float4(uv.x * 2.0f - 1.0f, (1.0f - uv.y) * 2.0f - 1.0f, depth, 1.0f);
 	float4 worldSpacePos = mul(pc.invViewProj, clipSpacePos);
@@ -247,22 +246,47 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 R, OUT_REF(float) confidenc
 	}
 
 	if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
-		confidence = 1.0f;
-
-		// Map the hit world coordinate back to the screen UV to sample the actual G-Buffer colors
 		float3 hitWorldPos = ray.Origin + ray.Direction * q.CommittedRayT();
 		float4 hitClip = mul(pc.viewProj, float4(hitWorldPos, 1.0f));
-		float2 hitNDC = hitClip.xy / max(hitClip.w, 0.0001f);
+
+		// --- GUARD: Reject hits behind the near plane ---
+		if (hitClip.w < 0.1f) {
+			confidence = 0.0f;
+			return float2(0.0f, 0.0f);
+		}
+		// ------------------------------------------------
+
+		float2 hitNDC = hitClip.xy / hitClip.w;
 		float2 hitUV = hitNDC * float2(0.5f, -0.5f) + 0.5f;
 
 		// Soft falloff at screen boundaries
 		float2 edgeFactor = smoothstep(0.0f, 0.08f, hitUV) * smoothstep(1.0f, 0.92f, hitUV);
-		confidence *= edgeFactor.x * edgeFactor.y;
+		confidence = edgeFactor.x * edgeFactor.y;
+
+		// --- SOFT DEPTH-MATCHING OCCLUSION MASK ---
+		if (confidence > 0.0f) {
+			float sampledRawDepth = texDepth.SampleLevel(pointSampler, hitUV, 0).r;
+			float3 sampledWorldPos = ReconstructWorldPos(hitUV, sampledRawDepth);
+
+			float distToHit = length(hitWorldPos - pc.camPos.xyz);
+			float distToSampled = length(sampledWorldPos - pc.camPos.xyz);
+
+			// Calculate the absolute distance discrepancy
+			float depthDiff = abs(distToHit - distToSampled);
+
+			// Smoothly fade out the reflection if the depth mismatch is between 0.4m and 1.2m.
+			// This completely eliminates the camera-pitch clipping lines.
+			float depthMask = smoothstep(1.2f, 0.4f, depthDiff);
+			confidence *= depthMask;
+		}
+		// ------------------------------------------
+
 		return hitUV;
 	}
 	return float2(0.0f, 0.0f);
 }
 #endif
+
 float SoftClamp(float x, float limit) {
 	return limit * (1.0f - exp(-x / max(limit, 0.0001f)));
 }
@@ -411,17 +435,22 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 			float3 reflectionColor = float3(0.0f, 0.0f, 0.0f);
 			float2 hitUV = float2(0.0f, 0.0f);
 
-#ifdef DISABLE_RTR
 			float3 biasedStartPos = worldPos + N * 0.05f;
-			hitUV = RaymarchSSR(worldPos, biasedStartPos, R, N, confidence);
-#else
-			if (pc.enableRTR != 0) {
-				hitUV = RaytraceRTR(worldPos, N, R, confidence);
-			} else {
-				float3 biasedStartPos = worldPos + N * 0.05f;
+
+			// 1. Attempt Screen-Space Reflection first (handles animated Pomni on-screen)
+			if (pc.enableSSR != 0) {
 				hitUV = RaymarchSSR(worldPos, biasedStartPos, R, N, confidence);
 			}
+
+			// 2. If SSR fails/goes off-screen, fall back to Hardware Ray Tracing for the static
+			// scene
+			if (confidence < 0.1f && pc.enableRTR != 0) {
+#ifdef DISABLE_RTR
+				// Headless fallback
+#else
+				hitUV = RaytraceRTR(worldPos, N, R, confidence);
 #endif
+			}
 
 			if (confidence > 0.0f) {
 				confidence *= saturate(dot(R, N) * 10.0f);

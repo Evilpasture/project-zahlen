@@ -66,6 +66,17 @@ class ZHLN_API RenderContext {
 	std::unique_ptr<Impl> _impl;
 };
 
+struct DrawParams {
+	JPH::Mat44 transform = JPH::Mat44::sIdentity();
+	JPH::Mat44 prevTransform = JPH::Mat44::sIdentity();
+	float cullRadius = 1.0f;
+	uint32_t jointOffset = 0;
+	uint32_t morphOffset = 0;
+	uint32_t activeMorphCount = 0;
+	const float* morphWeights = nullptr;
+	DrawFlags flags = DrawFlags::None;
+};
+
 namespace Renderer {
 
 void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj,
@@ -75,10 +86,7 @@ void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
 void SetGISettings(RenderContext& ctx, const GISettings& settings);
 
 void SetLights(RenderContext& ctx, const GPULight* lights, uint32_t count);
-void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
-		  const JPH::Mat44& transform, const JPH::Mat44& prevTransform, float cullRadius = 1.0f,
-		  uint32_t jointOffset = 0, bool isSkinned = false, uint32_t morphOffset = 0,
-		  uint32_t activeMorphCount = 0, const float* morphWeights = nullptr);
+void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const DrawParams& params);
 
 void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex);
 
