@@ -1,12 +1,22 @@
 // resources/shaders/toon.hlsl
 #include "common.hlsl"
 
-VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
+VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	VSOutput output;
 
-	// Resolve the active instance data index (4294967295u is the 0xFFFFFFFF sentinel) [1]
 	uint instId = (obj.instanceId != 4294967295u) ? obj.instanceId : instanceId;
 	InstanceData inst = g_instances[instId];
+
+	uint64_t baseAddr = inst.vboAddress + vertexId * 64;
+
+	// Load individual attributes directly (bypassing DXC struct loading bugs)
+	float3 position = vk::RawBufferLoad<float3>(baseAddr + 0, 4);
+	uint normal = vk::RawBufferLoad<uint>(baseAddr + 12, 4);
+	uint tangent = vk::RawBufferLoad<uint>(baseAddr + 16, 4);
+	uint uv = vk::RawBufferLoad<uint>(baseAddr + 20, 4);
+	uint color = vk::RawBufferLoad<uint>(baseAddr + 24, 4);
+	uint2 joints = vk::RawBufferLoad<uint2>(baseAddr + 28, 4);
+	float4 weights = vk::RawBufferLoad<float4>(baseAddr + 36, 4);
 
 	float4x4 worldMatrix = inst.world;
 	float4x4 prevWorldMatrix = inst.prevWorld;
@@ -22,22 +32,23 @@ VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV
 	uint jointOffset = inst.jointOffset;
 	uint isSkinned = inst.isSkinned;
 
-	float4 localPos = float4(input.position, 1.0f);
-	float3 localNormal = input.normal * 2.0f - 1.0f;
-	float3 localTangent = input.tangent.xyz * 2.0f - 1.0f;
+	// Process values from our safe vector loads
+	float4 localPos = float4(position, 1.0f);
+	float3 localNormal = UnpackNormal(normal).xyz;
+	float4 localTangent = UnpackNormal(tangent);
+	float2 localUV = UnpackUV(uv);
+	float4 localColor = UnpackColor(color);
+	uint4 localJoints = UnpackJoints(joints);
 
-	// --- Store current skinned position in a separate variable to preserve bind-pose localPos ---
 	float4 skinnedPos = localPos;
 
 	if (isSkinned != 0) {
-		skinnedPos = SkinPosition(localPos, input.joints, input.weights, jointOffset);
-		localNormal =
-			normalize(SkinDirection(localNormal, input.joints, input.weights, jointOffset));
-		localTangent =
-			normalize(SkinDirection(localTangent, input.joints, input.weights, jointOffset));
+		skinnedPos = SkinPosition(localPos, localJoints, weights, jointOffset);
+		localNormal = normalize(SkinDirection(localNormal, localJoints, weights, jointOffset));
+		localTangent.xyz =
+			normalize(SkinDirection(localTangent.xyz, localJoints, weights, jointOffset));
 	}
 
-	// --- Use skinnedPos for the current world position ---
 	float4 worldPos = mul(worldMatrix, skinnedPos);
 	output.worldPos = worldPos.xyz;
 
@@ -46,9 +57,8 @@ VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV
 
 	float4 prevWorldPos;
 	if (isSkinned != 0) {
-		// --- SkinPositionPrev can now safely read the original un-skinned localPos ---
-		prevWorldPos = mul(prevWorldMatrix,
-						   SkinPositionPrev(localPos, input.joints, input.weights, jointOffset));
+		prevWorldPos =
+			mul(prevWorldMatrix, SkinPositionPrev(localPos, localJoints, weights, jointOffset));
 	} else {
 		prevWorldPos = mul(prevWorldMatrix, localPos);
 	}
@@ -56,12 +66,12 @@ VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV
 	float3x3 world3x3 = (float3x3)worldMatrix;
 
 	output.normal = normalize(mul(world3x3, localNormal));
-	output.tangent.xyz = normalize(mul(world3x3, localTangent));
-	output.tangent.w = input.tangent.w;
+	output.tangent.xyz = normalize(mul(world3x3, localTangent.xyz));
+	output.tangent.w = localTangent.w;
 
-	output.uv = input.uv;
+	output.uv = localUV;
 	output.shadowPos = mul(frame.lightSpaceMatrix, worldPos);
-	output.color = input.color;
+	output.color = localColor;
 	output.materialIndices = uint4(albedoIdx, normalIdx, pbrIdx, emissiveIdx);
 	output.baseColorFactor = baseColorFactor;
 	output.pbrFactors = float3(metallicFactor, roughnessFactor, alphaCutoff);

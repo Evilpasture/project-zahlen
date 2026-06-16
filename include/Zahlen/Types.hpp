@@ -46,11 +46,13 @@ static_assert(sizeof(Vertex) == 64, "Vertex must be exactly 64 bytes!");
 struct alignas(16) InstanceData {
 	JPH::Mat44 world;
 	JPH::Mat44 prevWorld;
+	uint64_t vboAddress; // <-- NEW: Replaces traditional bindings
+	uint32_t vertexCount;
+	uint32_t indexCount;
 	uint32_t albedoIndex;
 	uint32_t normalIndex;
 	uint32_t pbrIndex;
 	uint32_t emissiveIndex;
-	uint32_t vertexCount; // Kept (Required for morph targets!)
 	float cullRadius;
 	float metallicFactor;
 	float roughnessFactor;
@@ -60,8 +62,7 @@ struct alignas(16) InstanceData {
 	uint32_t isSkinned;
 	uint32_t morphOffset;
 	uint32_t activeMorphCount;
-	uint32_t indexCount; // Added: Fits into padding
-	uint32_t _pad;		 // Added: Aligns morphWeights to 16 bytes
+	uint32_t _pad[3]; // <-- Pad to 208 bytes so arrays start aligned to 16
 
 	alignas(16) std::array<float, 4> morphWeights;
 	alignas(16) std::array<float, 4> baseColorFactor;
@@ -72,7 +73,7 @@ struct ObjectConstants {
 	uint32_t isShadowPass;
 };
 static_assert(sizeof(ObjectConstants) == 8, "ObjectConstants must match HLSL alignment.");
-static_assert(sizeof(InstanceData) == 224, "InstanceData must match HLSL alignment.");
+static_assert(sizeof(InstanceData) == 240, "InstanceData must match HLSL alignment.");
 // --- Opaque Resource Handles ---
 // These abstract away Vulkan objects completely.
 // NOLINTBEGIN(performance-enum-size)

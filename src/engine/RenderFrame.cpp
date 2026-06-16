@@ -135,7 +135,6 @@ struct GpuCullingPolicy {
 						{.pipeline = group.material->pipeline.Get(),
 						 .layout = group.material->layout.Get(),
 						 .set = recorder.bindlessSet,
-						 .vbo = group.mesh->buffer.Handle(),
 						 .ibo = group.indexMesh ? group.indexMesh->buffer.Handle() : VK_NULL_HANDLE,
 						 .argumentBuffer =
 							 ctx.indirectCommandsBuffers[recorder.frameIndex].Handle(),
@@ -193,7 +192,6 @@ struct CpuCullingPolicy {
 							 .layout =
 								 std::bit_cast<NativeMaterial*>(drawCmd.material)->layout.Get(),
 							 .set = recorder.bindlessSet,
-							 .vbo = std::bit_cast<NativeMesh*>(drawCmd.mesh)->buffer.Handle(),
 							 .ibo = drawCmd.indexMesh
 										? std::bit_cast<NativeMesh*>(drawCmd.indexMesh)
 											  ->buffer.Handle()
@@ -247,7 +245,6 @@ struct ShadowPass {
 						{.pipeline = ctx.shadowPipeline.Get(),
 						 .layout = ctx.shadowPipelineLayout.Get(),
 						 .set = recorder.bindlessSet,
-						 .vbo = mesh->buffer.Handle(),
 						 .ibo = draw.indexMesh
 									? std::bit_cast<NativeMesh*>(draw.indexMesh)->buffer.Handle()
 									: VK_NULL_HANDLE,
@@ -525,24 +522,23 @@ struct BlitPass {
 				.Execute(cmd, [&]() {
 					ctx.blitPass.Execute(cmd, pc);
 					if (!ctx.uiDrawQueue.empty()) {
-						struct UIObjectConstants {
-							JPH::Mat44 orthoMatrix;
-							JPH::Mat44 unused;
-							uint32_t albedoIdx;
-						} uipc{};
+						UIObjectConstants uipc{};
 
 						uipc.orthoMatrix =
 							GUI::CreateOrthoMatrix(inColor.extent.width, inColor.extent.height);
 
 						for (const auto& draw : ctx.uiDrawQueue) {
 							uipc.albedoIdx = draw.fontIndex;
+							uipc.vboAddress =
+								std::bit_cast<NativeMesh*>(draw.mesh)->vboAddress; // Map UI buffer
 
 							Vk::DrawInstanced(
 								cmd,
 								{.pipeline = ctx.uiPipeline.Get(),
 								 .layout = ctx.uiPipelineLayout.Get(),
 								 .set = recorder.bindlessSet,
-								 .vbo = std::bit_cast<NativeMesh*>(draw.mesh)->buffer.Handle(),
+								 .ibo = VK_NULL_HANDLE, // Explicitly no index buffer for UI (we do
+														// 6 verts natively)
 								 .vertexCount = std::bit_cast<NativeMesh*>(draw.mesh)->vertexCount},
 								uipc);
 						}
@@ -734,7 +730,7 @@ void RenderContext::Impl::SubmitFrame() {
 	auto manager = StaticResourceManager(
 		&accumBuffers, &taaPass, &postProcessPass, &postProcessPassNoRT, &blitPass,
 		&frameUniformBuffers, &lightStorageBuffers, &instanceDataBuffers, &indirectCommandsBuffers,
-		&jointBuffers, &bindlessSets, &tlas, &tlasBuffer);
+		&jointBuffers, &bindlessSets, &tlas, &tlasBuffer, &tlasScratchBuffer);
 	manager.FlipAll();
 
 	frame_index = (frame_index + 1) % 2;
@@ -757,6 +753,8 @@ void RenderContext::EndFrame() {
 		_impl->drawQueue.resize(kGpuCullingMaxInstances);
 	}
 
+	_impl->tlasCleanupBuffers[_impl->frame_index].clear();
+
 	_impl->SortDrawQueue();
 
 	auto drawCount = static_cast<uint32_t>(_impl->drawQueue.size());
@@ -769,11 +767,13 @@ void RenderContext::EndFrame() {
 			dst[i] = InstanceData{
 				.world = cmdData.transform,
 				.prevWorld = cmdData.prevTransform,
+				.vboAddress = std::bit_cast<NativeMesh*>(cmdData.mesh)->vboAddress,
+				.vertexCount = cmdData.mesh->vertexCount,
+				.indexCount = cmdData.indexCount,
 				.albedoIndex = cmdData.albedoIndex,
 				.normalIndex = cmdData.normalIndex,
 				.pbrIndex = cmdData.pbrIndex,
 				.emissiveIndex = cmdData.emissiveIndex,
-				.vertexCount = cmdData.mesh->vertexCount,
 				.cullRadius = cmdData.cullRadius,
 				.metallicFactor = cmdData.metallicFactor,
 				.roughnessFactor = cmdData.roughnessFactor,
@@ -783,8 +783,7 @@ void RenderContext::EndFrame() {
 				.isSkinned = (cmdData.flags & DrawFlags::Skinned) != DrawFlags::None ? 1u : 0u,
 				.morphOffset = cmdData.morphOffset,
 				.activeMorphCount = cmdData.activeMorphCount,
-				.indexCount = cmdData.indexCount,
-				._pad = 0,
+				._pad = {},
 				.morphWeights = cmdData.morphWeights,
 				.baseColorFactor = cmdData.baseColorFactor,
 
@@ -837,6 +836,7 @@ void RenderContext::EndFrame() {
 		tlasInstances.push_back(inst);
 	}
 
+	// 1. Inside RenderContext::EndFrame()'s TLAS build block:
 	if (!tlasInstances.empty() && _impl->rtCtx.Valid()) {
 		Vk::Buffer instanceBuf = Vk::Buffer::Create(
 			_impl->allocator.Get(),
@@ -860,33 +860,60 @@ void RenderContext::EndFrame() {
 									.dst_offset = 0};
 		ZHLN_CmdCopyBuffer(cmd, &copy);
 
-		Vk::MemoryBarrier(cmd,
-						  {.src_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-						   .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-						   .dst_stage = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-						   .dst_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
-										 VK_ACCESS_2_SHADER_READ_BIT});
+		// FIX: Comprehensive Sync Barrier for double-buffered AS/Scratch re-use AND Buffer Copy
+		Vk::MemoryBarrier(
+			cmd, {.src_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT |
+							   VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+							   VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+				  .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT |
+								VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+				  .dst_stage = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+				  .dst_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+								VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
+								VK_ACCESS_2_SHADER_READ_BIT});
+
 		ZHLN_TlasGeometryDesc geom = {
 			.instance_data = Vk::GetBufferDeviceAddress(_impl->ctx.Device(), instanceBuf.Handle())};
 
 		ZHLN_AccelerationStructureSizes sizes;
 		_impl->rtCtx.GetTlasSizes(static_cast<uint32_t>(tlasInstances.size()), sizes);
 
-		_impl->tlasBuffer.Current() = Vk::Buffer::Create(
-			_impl->allocator.Get(), sizes.acceleration_structure_size,
-			VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, VMA_MEMORY_USAGE_GPU_ONLY);
-		_impl->tlas.Current() =
-			_impl->rtCtx.CreateAS(_impl->tlasBuffer.Current().Handle(),
-								  sizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL);
+		// Build or resize the TLAS buffer only if needed
+		bool needRebuild = !_impl->tlasBuffer.Current().Valid() ||
+						   _impl->tlasBuffer.Current().Size() < sizes.acceleration_structure_size;
 
-		Vk::Buffer scratch = Vk::Buffer::Create(_impl->allocator.Get(), sizes.build_scratch_size,
-												VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-													VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-												VMA_MEMORY_USAGE_GPU_ONLY);
+		if (needRebuild) {
+			if (_impl->tlas.Current() != VK_NULL_HANDLE) {
+				_impl->rtCtx.DestroyAS(_impl->tlas.Current());
+				_impl->tlas.Current() = VK_NULL_HANDLE;
+			}
+			_impl->tlasBuffer.Current() = Vk::Buffer::Create(
+				_impl->allocator.Get(), sizes.acceleration_structure_size,
+				VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, VMA_MEMORY_USAGE_GPU_ONLY);
+			_impl->tlas.Current() =
+				_impl->rtCtx.CreateAS(_impl->tlasBuffer.Current().Handle(),
+									  sizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL);
+		}
 
-		_impl->rtCtx.CmdBuildTlas(cmd, geom, _impl->tlas.Current(),
-								  Vk::GetBufferDeviceAddress(_impl->ctx.Device(), scratch.Handle()),
-								  static_cast<uint32_t>(tlasInstances.size()));
+		// --- NEW: Persistent Scratch Buffer Re-use ---
+		// Reallocate/resize the scratch buffer only when needed
+		bool needScratchRebuild =
+			!_impl->tlasScratchBuffer.Current().Valid() ||
+			_impl->tlasScratchBuffer.Current().Size() < sizes.build_scratch_size;
+
+		if (needScratchRebuild) {
+			_impl->tlasScratchBuffer.Current() = Vk::Buffer::Create(
+				_impl->allocator.Get(), sizes.build_scratch_size,
+				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+				VMA_MEMORY_USAGE_GPU_ONLY);
+		}
+
+		// Execute TLAS build with zero runtime allocations
+		_impl->rtCtx.CmdBuildTlas(
+			cmd, geom, _impl->tlas.Current(),
+			Vk::GetBufferDeviceAddress(_impl->ctx.Device(),
+									   _impl->tlasScratchBuffer.Current().Handle()),
+			static_cast<uint32_t>(tlasInstances.size()));
 
 		Vk::MemoryBarrier(cmd,
 						  {.src_stage = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
@@ -896,7 +923,7 @@ void RenderContext::EndFrame() {
 
 		_impl->tlasCleanupBuffers[_impl->frame_index].push_back(std::move(staging));
 		_impl->tlasCleanupBuffers[_impl->frame_index].push_back(std::move(instanceBuf));
-		_impl->tlasCleanupBuffers[_impl->frame_index].push_back(std::move(scratch));
+		// DO NOT push tlasScratchBuffer to tlasCleanupBuffers (we keep it alive!)
 	}
 
 	// Encapsulate recording state

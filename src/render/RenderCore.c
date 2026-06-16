@@ -983,10 +983,10 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device,
 	// --- Vertex Input ---
 	const VkPipelineVertexInputStateCreateInfo vertex_input = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-		.vertexBindingDescriptionCount = desc->vertex_binding_count,
-		.pVertexBindingDescriptions = desc->vertex_bindings,
-		.vertexAttributeDescriptionCount = desc->vertex_attribute_count,
-		.pVertexAttributeDescriptions = desc->vertex_attributes,
+		.vertexBindingDescriptionCount = 0, // ENFORCED
+		.pVertexBindingDescriptions = nullptr,
+		.vertexAttributeDescriptionCount = 0, // ENFORCED
+		.pVertexAttributeDescriptions = nullptr,
 	};
 
 	// --- Input Assembly ---

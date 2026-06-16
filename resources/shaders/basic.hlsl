@@ -1,12 +1,22 @@
 // resources/shaders/basic.hlsl
 #include "common.hlsl"
 
-VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
+VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	VSOutput output;
 
-	// Resolve Instance ID: Use push constant if valid; otherwise fallback to draw SV_InstanceID
 	uint instId = (obj.instanceId != 4294967295u) ? obj.instanceId : instanceId;
 	InstanceData inst = g_instances[instId];
+
+	uint64_t baseAddr = inst.vboAddress + vertexId * 64;
+
+	// Load individual attributes directly (bypassing DXC struct loading bugs)
+	float3 position = vk::RawBufferLoad<float3>(baseAddr + 0, 4);
+	uint normal = vk::RawBufferLoad<uint>(baseAddr + 12, 4);
+	uint tangent = vk::RawBufferLoad<uint>(baseAddr + 16, 4);
+	uint uv = vk::RawBufferLoad<uint>(baseAddr + 20, 4);
+	uint color = vk::RawBufferLoad<uint>(baseAddr + 24, 4);
+	uint2 joints = vk::RawBufferLoad<uint2>(baseAddr + 28, 4);
+	float4 weights = vk::RawBufferLoad<float4>(baseAddr + 36, 4);
 
 	float4x4 worldMatrix = inst.world;
 	float4x4 prevWorldMatrix = inst.prevWorld;
@@ -27,10 +37,13 @@ VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV
 	float4 morphWeights = inst.morphWeights;
 	uint vertexCount = inst.vertexCount;
 
-	// Declare as float4 initially:
-	float4 localPos = float4(input.position, 1.0f);
-	float3 localNormal = input.normal * 2.0f - 1.0f;
-	float3 localTangent = input.tangent.xyz * 2.0f - 1.0f;
+	// Process values from our safe vector loads
+	float4 localPos = float4(position, 1.0f);
+	float3 localNormal = UnpackNormal(normal).xyz;
+	float4 localTangent = UnpackNormal(tangent);
+	float2 localUV = UnpackUV(uv);
+	float4 localColor = UnpackColor(color);
+	uint4 localJoints = UnpackJoints(joints);
 
 	if (activeMorphCount > 0) {
 		localPos.xyz += GetMorphDisplacement(vertexId, vertexCount, morphOffset, activeMorphCount,
@@ -41,23 +54,22 @@ VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV
 	float3x3 world3x3 = (float3x3)worldMatrix;
 
 	if (isSkinned != 0) {
-		worldPos =
-			mul(worldMatrix, SkinPosition(localPos, input.joints, input.weights, jointOffset));
-		output.normal = normalize(
-			mul(world3x3, SkinDirection(localNormal, input.joints, input.weights, jointOffset)));
+		worldPos = mul(worldMatrix, SkinPosition(localPos, localJoints, weights, jointOffset));
+		output.normal =
+			normalize(mul(world3x3, SkinDirection(localNormal, localJoints, weights, jointOffset)));
 		output.tangent.xyz = normalize(
-			mul(world3x3, SkinDirection(localTangent, input.joints, input.weights, jointOffset)));
+			mul(world3x3, SkinDirection(localTangent.xyz, localJoints, weights, jointOffset)));
 	} else {
 		worldPos = mul(worldMatrix, localPos);
 		output.normal = normalize(mul(world3x3, localNormal));
-		output.tangent.xyz = normalize(mul(world3x3, localTangent));
+		output.tangent.xyz = normalize(mul(world3x3, localTangent.xyz));
 	}
 
 	output.worldPos = worldPos.xyz;
 
 	if (obj.isShadowPass != 0) {
 		output.pos = worldPos;
-		output.uv = input.uv;
+		output.uv = localUV;
 		output.baseColorFactor = baseColorFactor;
 		output.pbrFactors = float3(metallicFactor, roughnessFactor, alphaCutoff);
 		output.alphaMode = alphaMode;
@@ -68,33 +80,27 @@ VSOutput VSMain(VSInput input, uint vertexId : SV_VertexID, uint instanceId : SV
 		output.normal = 0;
 		output.tangent = 0;
 		output.shadowPos = 0;
-		output.color = input.color;
+		output.color = localColor;
 		return output;
 	}
 
-	// Render normally using the Jittered projection
 	output.pos = mul(frame.viewProj, worldPos);
-
-	// Evaluate velocity using Unjittered projections
 	output.currClip = mul(frame.unjitteredViewProj, worldPos);
 
 	float4 prevWorldPos;
 	if (isSkinned != 0) {
-		// --- FIX: Use SkinPositionPrev instead of SkinPosition ---
-		prevWorldPos = mul(prevWorldMatrix,
-						   SkinPositionPrev(localPos, input.joints, input.weights, jointOffset));
+		prevWorldPos =
+			mul(prevWorldMatrix, SkinPositionPrev(localPos, localJoints, weights, jointOffset));
 	} else {
 		prevWorldPos = mul(prevWorldMatrix, localPos);
 	}
 	output.prevClip = mul(frame.prevUnjitteredViewProj, prevWorldPos);
 
-	// Removed the normal/tangent overwrite here since they are calculated in the
-	// skinned/non-skinned branch above!
-	output.tangent.w = input.tangent.w;
+	output.tangent.w = localTangent.w;
 
-	output.uv = input.uv;
+	output.uv = localUV;
 	output.shadowPos = mul(frame.lightSpaceMatrix, worldPos);
-	output.color = input.color;
+	output.color = localColor;
 	output.materialIndices = uint4(albedoIdx, normalIdx, pbrIdx, emissiveIdx);
 	output.baseColorFactor = baseColorFactor;
 	output.pbrFactors = float3(metallicFactor, roughnessFactor, alphaCutoff);

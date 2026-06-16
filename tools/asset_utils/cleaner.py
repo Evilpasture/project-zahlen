@@ -9,7 +9,7 @@ import os
 
 
 def sanitize_glb(glb_path: str) -> bool:
-    """Clamps baseColorFactors to resolve validation errors."""
+    """Clamps baseColorFactors and strips invalid morph weight animation channels to resolve validation issues."""
     if not os.path.exists(glb_path):
         print(f"[-] Cleaner Error: GLB file does not exist at '{glb_path}'.")
         return False
@@ -55,6 +55,70 @@ def sanitize_glb(glb_path: str) -> bool:
                 if factor != clamped:
                     pbr["baseColorFactor"] = clamped
                     modified = True
+
+    # 2. Fix ANIMATION_CHANNEL_TARGET_NODE_WEIGHTS_NO_MORPHS error
+    # Remove animation channels that target "weights" on nodes that do not have morph targets.
+    if "animations" in gltf:
+        nodes_with_morphs = set()
+        meshes_with_targets = set()
+
+        # Identify meshes that actually have morph targets (targets attribute on primitives)
+        if "meshes" in gltf:
+            for idx, mesh in enumerate(gltf["meshes"]):
+                has_targets = False
+                for prim in mesh.get("primitives", []):
+                    if "targets" in prim and len(prim["targets"]) > 0:
+                        has_targets = True
+                        break
+                if has_targets:
+                    meshes_with_targets.add(idx)
+
+        # Identify nodes referencing a mesh with morph targets
+        if "nodes" in gltf:
+            for idx, node in enumerate(gltf["nodes"]):
+                mesh_idx = node.get("mesh")
+                if mesh_idx is not None and mesh_idx in meshes_with_targets:
+                    nodes_with_morphs.add(idx)
+
+        # Filter animation channels
+        for anim in gltf["animations"]:
+            channels = anim.get("channels", [])
+            samplers = anim.get("samplers", [])
+            new_channels = []
+            used_sampler_indices = set()
+
+            for chan in channels:
+                target = chan.get("target", {})
+                node_idx = target.get("node")
+                path = target.get("path")
+
+                if path == "weights" and node_idx not in nodes_with_morphs:
+                    print(
+                        f"[~] Cleaner: Stripped invalid animation channel targeting weights on node {node_idx} (has no morph targets)"
+                    )
+                    modified = True
+                    continue
+
+                new_channels.append(chan)
+                if "sampler" in chan:
+                    used_sampler_indices.add(chan["sampler"])
+
+            # If any invalid channels were stripped, update channels and rebuild samplers to avoid warnings
+            if len(new_channels) != len(channels):
+                anim["channels"] = new_channels
+
+                new_samplers = []
+                sampler_mapping = {}
+                for old_idx in sorted(list(used_sampler_indices)):
+                    sampler_mapping[old_idx] = len(new_samplers)
+                    new_samplers.append(samplers[old_idx])
+
+                for chan in new_channels:
+                    old_s_idx = chan["sampler"]
+                    chan["sampler"] = sampler_mapping[old_s_idx]
+
+                anim["samplers"] = new_samplers
+                modified = True
 
     # NOTE: Skinned mesh reparenting has been removed.
     # Unparenting skinned meshes and deleting their 'translation', 'rotation', or 'scale'
@@ -102,4 +166,3 @@ def sanitize_glb(glb_path: str) -> bool:
     except Exception as e:
         print(f"[-] Cleaner Error: Exception occurred while repacking: {e}")
         return False
-

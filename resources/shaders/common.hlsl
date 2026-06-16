@@ -24,29 +24,37 @@ struct FrameUniforms {
 	float4 camPos;
 	float4 lightDir;
 	uint lightCount;
-	float3 padding;
-	float4 sh[9];
-	float4 probeMin;	 // XYZ: boxMin, W: useLocalProbe (0.0 or 1.0)
-	float4 probeMax;	 // XYZ: boxMax, W: unused
-	float4 probePos;	 // XYZ: probePos, W: unused
-	float4 jitterParams; // x: currentX, y: currentY, z: prevX, w: prevY
-	int enableRTR;
-	int3 padding_rtr;
-};
 
-struct ObjectConstants {
-	uint instanceId;
-	uint isShadowPass;
+	// FIX: Decompose float3 into scalars to prevent 16-byte alignment gaps
+	float pad0;
+	float pad1;
+	float pad2;
+
+	float4 sh[9];
+	float4 probeMin;
+	float4 probeMax;
+	float4 probePos;
+	float4 jitterParams;
+	int enableRTR;
+
+	// FIX: Decompose int3 into scalars to prevent 16-byte alignment gaps
+	int rtr_pad0;
+	int rtr_pad1;
+	int rtr_pad2;
 };
 
 struct InstanceData {
 	float4x4 world;
 	float4x4 prevWorld;
+	uint64_t vboAddress;
+
+	uint vertexCount;
+	uint indexCount;
+
 	uint albedoIdx;
 	uint normalIdx;
 	uint pbrIdx;
 	uint emissiveIdx;
-	uint vertexCount;
 	float cullRadius;
 	float metallicFactor;
 	float roughnessFactor;
@@ -56,17 +64,60 @@ struct InstanceData {
 	uint isSkinned;
 	uint morphOffset;
 	uint activeMorphCount;
-	uint indexCount; // Added
-	uint pad;		 // Added
+
+	// FIX: Decompose uint3 into scalars to match C++ uint32_t[3]
+	uint pad0;
+	uint pad1;
+	uint pad2;
+
 	float4 morphWeights;
 	float4 baseColorFactor;
 };
+
+struct ObjectConstants {
+	uint instanceId;
+	uint isShadowPass;
+};
+
+struct Vertex {
+	float3 position;
+	uint normal;
+	uint tangent;
+	uint uv;
+	uint color;
+	uint2 joints;
+	float4 weights;
+	uint3 _padding;
+};
+
 struct GPUJoint {
 	float4 col0;
 	float4 col1;
 	float4 col2;
 	float4 col3;
 };
+
+// --- Attribute Unpackers ---
+float4 UnpackNormal(uint packed) {
+	float x = (float(packed & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
+	float y = (float((packed >> 10) & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
+	float z = (float((packed >> 20) & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
+	float w = (packed >> 30) > 0 ? 1.0f : -1.0f;
+	return float4(x, y, z, w);
+}
+
+float2 UnpackUV(uint packed) {
+	return float2(f16tof32(packed & 0xFFFF), f16tof32(packed >> 16));
+}
+
+float4 UnpackColor(uint packed) {
+	return float4(float(packed & 0xFF) / 255.0f, float((packed >> 8) & 0xFF) / 255.0f,
+				  float((packed >> 16) & 0xFF) / 255.0f, float((packed >> 24) & 0xFF) / 255.0f);
+}
+
+uint4 UnpackJoints(uint2 packed) {
+	return uint4(packed.x & 0xFFFF, packed.x >> 16, packed.y & 0xFFFF, packed.y >> 16);
+}
 
 #ifndef SKIP_BINDINGS
 [[vk::push_constant]] ObjectConstants obj;
@@ -81,24 +132,14 @@ struct GPUJoint {
 
 [[vk::binding(7, 0)]] StructuredBuffer<GPUJoint> g_joints;
 
-[[vk::binding(8, 0)]] TextureCube prefilteredMap; // Shifted
-[[vk::binding(9, 0)]] Texture2D brdfLUT;		  // Shifted
+[[vk::binding(8, 0)]] TextureCube prefilteredMap;
+[[vk::binding(9, 0)]] Texture2D brdfLUT;
 [[vk::binding(10, 0)]] StructuredBuffer<float4> g_morphDeltas;
 [[vk::binding(11, 0)]] SamplerState clampSampler;
 [[vk::binding(12, 0)]] Texture2D ltc_mat;
 [[vk::binding(13, 0)]] Texture2D ltc_amp;
 [[vk::binding(14, 0)]] StructuredBuffer<GPUJoint> g_prevJoints;
 [[vk::binding(15, 0)]] RaytracingAccelerationStructure tlas;
-
-struct VSInput {
-	[[vk::location(0)]] float3 position : POSITION;
-	[[vk::location(1)]] float3 normal : NORMAL;
-	[[vk::location(2)]] float4 tangent : TANGENT;
-	[[vk::location(3)]] float2 uv : TEXCOORD;
-	[[vk::location(4)]] float4 color : COLOR;
-	[[vk::location(5)]] uint4 joints : JOINTS;
-	[[vk::location(6)]] float4 weights : WEIGHTS;
-};
 
 struct VSOutput {
 	float4 pos : SV_Position;
@@ -132,7 +173,6 @@ float3 EvaluateSH(float3 N, float4 sh[9]) {
 }
 
 // --- SKELETAL SKINNING ---
-
 float4 SkinPositionPrev(float4 position, uint4 joints, float4 weights, uint jointOffset) {
 	GPUJoint j0 = g_prevJoints[jointOffset + joints.x];
 	GPUJoint j1 = g_prevJoints[jointOffset + joints.y];
@@ -153,6 +193,7 @@ float4 SkinPositionPrev(float4 position, uint4 joints, float4 weights, uint join
 					 weights.w;
 	return pos;
 }
+
 float4 SkinPosition(float4 position, uint4 joints, float4 weights, uint jointOffset) {
 	GPUJoint j0 = g_joints[jointOffset + joints.x];
 	GPUJoint j1 = g_joints[jointOffset + joints.y];
@@ -175,7 +216,6 @@ float4 SkinPosition(float4 position, uint4 joints, float4 weights, uint jointOff
 }
 
 float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint jointOffset) {
-	// If the sum of weights is zero, return the original direction to avoid NaN
 	if (dot(weights, float4(1.5, 1.0, 1.0, 1.0)) < 0.001) {
 		return direction;
 	}
@@ -222,7 +262,6 @@ float3 GetMorphDisplacement(uint vertexId, uint vertexCount, uint morphOffset,
 	float3 displacement = float3(0, 0, 0);
 
 	for (uint i = 0; i < activeMorphCount; ++i) {
-		// Calculate index inside the contiguous GPU buffer
 		uint deltaIndex = morphOffset + (i * vertexCount) + vertexId;
 		displacement += g_morphDeltas[deltaIndex].xyz * weights[i];
 	}
@@ -242,24 +281,20 @@ float3 IntegrateEdgeVector(float3 v1, float3 v2) {
 }
 
 float3 LTC_Evaluate(float3 N, float3 V, float3 P, float3x3 Minv, float4 points[4], bool twoSided) {
-	// 1. Construct Orthonormal Basis
 	float3 T1, T2;
 	T1 = normalize(V - N * dot(V, N));
 	T2 = cross(N, T1);
 	float3x3 R = float3x3(T1, T2, N);
 
-	// 2. Transform polygon to local tangent space and apply LTC inverse matrix
-	float3 L[5]; // Max 5 vertices after clipping
+	float3 L[5];
 	L[0] = mul(Minv, mul(R, points[0].xyz - P));
 	L[1] = mul(Minv, mul(R, points[1].xyz - P));
 	L[2] = mul(Minv, mul(R, points[2].xyz - P));
 	L[3] = mul(Minv, mul(R, points[3].xyz - P));
 
-	// 3. Sutherland-Hodgman Clipping against the horizon (z = 0)
 	int n = 0;
 	float3 clipped[5];
 
-	// Unrolled fast clipper
 	[unroll] for (int i = 0; i < 4; ++i) {
 		float3 v1 = L[i];
 		float3 v2 = L[(i + 1) % 4];
@@ -267,7 +302,6 @@ float3 LTC_Evaluate(float3 N, float3 V, float3 P, float3x3 Minv, float4 points[4
 		if (v1.z > 0.0) {
 			clipped[n++] = v1;
 		}
-		// If the edge crosses the horizon plane
 		if ((v1.z > 0.0 && v2.z < 0.0) || (v1.z < 0.0 && v2.z > 0.0)) {
 			float t = v1.z / (v1.z - v2.z);
 			clipped[n++] = lerp(v1, v2, t);
@@ -275,11 +309,10 @@ float3 LTC_Evaluate(float3 N, float3 V, float3 P, float3x3 Minv, float4 points[4
 	}
 
 	if (n < 3)
-		return float3(0, 0, 0); // Completely below horizon
+		return float3(0, 0, 0);
 	[unroll] for (int j = 0; j < n; ++j) {
 		clipped[j] = normalize(clipped[j]);
 	}
-	// 4. Integrate Area
 	float3 sum = float3(0, 0, 0);
 	sum += IntegrateEdgeVector(clipped[0], clipped[1]);
 	sum += IntegrateEdgeVector(clipped[1], clipped[2]);
@@ -294,13 +327,11 @@ float3 LTC_Evaluate(float3 N, float3 V, float3 P, float3x3 Minv, float4 points[4
 
 // --- Kulla-Conty Energy Compensation Helpers ---
 float GetDirectionalAlbedo(float NoX, float roughness) {
-	// Reuses your existing 2D BRDF LUT to evaluate directional albedo on-the-fly
 	float2 envBRDF = brdfLUT.SampleLevel(clampSampler, float2(saturate(NoX), roughness), 0.0f).rg;
 	return envBRDF.x + envBRDF.y;
 }
 
 float GetAverageAlbedo(float roughness) {
-	// Highly accurate polynomial fit for GGX average hemispherical albedo (Fdez-Agüera)
 	return 1.0f - roughness * (0.334f - roughness * 0.125f);
 }
 
@@ -313,10 +344,8 @@ float3 EvaluateKullaContyDirect(float NoV, float NoL, float roughness, float3 F0
 	float Ems_l = 1.0f - El;
 	float Ems_avg = 1.0f - Eavg;
 
-	// Precalculate the average multi-scattering specular reflectance
 	float3 Fms = (Favg * Favg * Ems_avg) / (1.0f - Favg * Ems_avg);
 
-	// Isotropic, diffuse-like specular compensation lobe
 	float3 f_add = (Ems_v * Ems_l * Fms) / (3.14159265f * Ems_avg * Ems_avg);
 
 	return f_add;
@@ -324,12 +353,10 @@ float3 EvaluateKullaContyDirect(float NoV, float NoL, float roughness, float3 F0
 
 float3 BoxParallaxCorrection(float3 posWS, float3 R, float3 boxMin, float3 boxMax,
 							 float3 probePos) {
-	// Inflate the box boundaries slightly (10cm) to prevent floating-point acne on the floor plane
 	float3 eps = float3(0.1f, 0.1f, 0.1f);
 	float3 bMin = boxMin - eps;
 	float3 bMax = boxMax + eps;
 
-	// Avoid division-by-zero by clamping R with a tiny offset
 	float3 invR = 1.0f / max(abs(R), 0.00001f) * sign(R);
 	float3 t1 = (bMax - posWS) * invR;
 	float3 t2 = (bMin - posWS) * invR;
@@ -348,16 +375,12 @@ float3 CalculateTranslucency(float4 shadowPos, float3 N, float3 V, float3 L, flo
 		return float3(0.0f, 0.0f, 0.0f);
 	}
 
-	// Sample the shadow map depth using Level 0 to prevent loops compilation errors
 	float shadowDepth = shadowMap.SampleLevel(defaultSampler, projCoords.xy, 0).r;
 
-	// Thickness is the distance the light ray traveled inside the object
 	float thickness = max(projCoords.z - shadowDepth, 0.0f);
 
-	// Exponential absorption: thicker areas absorb more light (45.0f controls material density)
 	float thicknessScale = exp(-thickness * 45.0f);
 
-	// Bend the light vector slightly towards the normal to simulate scattering dispersion
 	float3 H = normalize(L + N * distortion);
 	float dotVH = saturate(dot(V, -H));
 

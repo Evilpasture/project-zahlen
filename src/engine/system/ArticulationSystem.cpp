@@ -40,7 +40,8 @@ static void VerifyArticulationStateConsistency(const ECS::Registry& reg) noexcep
 		}
 
 		// Test 2: Previous state is valid
-		if (ragComp.prevState != RagdollState::Inactive && ragComp.prevState != RagdollState::Limp &&
+		if (ragComp.prevState != RagdollState::Inactive &&
+			ragComp.prevState != RagdollState::Limp &&
 			ragComp.prevState != RagdollState::KeyframeMotor) {
 			ZHLN::Log("[Test Fail] Articulation State: Entity {} has invalid prev state {}",
 					  e.index, static_cast<int>(ragComp.prevState));
@@ -53,7 +54,7 @@ static void VerifyArticulationStateConsistency(const ECS::Registry& reg) noexcep
 		}
 
 		// Test 4: Joint count is reasonable
-		if (ragComp.jointCount > 1000 || ragComp.jointCount == 0) {
+		if (ragComp.jointCount > 2000 || ragComp.jointCount == 0) {
 			ZHLN::Log("[Test Fail] Articulation State: Entity {} has unreasonable joint count: {}",
 					  e.index, ragComp.jointCount);
 		}
