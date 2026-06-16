@@ -259,7 +259,13 @@ float3 GetMorphDisplacement(uint vertexId, uint vertexCount, uint morphOffset,
 							uint activeMorphCount, float4 weights) {
 	float3 displacement = float3(0, 0, 0);
 
-	[unroll] for (uint i = 0; i < activeMorphCount; ++i) {
+	// --- FIXED: Loop boundary is now a constant (4), allowing compile-time unrolling,
+	// with a dynamic exit check to prevent out-of-bounds reads.
+	[unroll] for (uint i = 0; i < 4; ++i) {
+		if (i >= activeMorphCount) {
+			break;
+		}
+
 		uint deltaIndex = morphOffset + (i * vertexCount) + vertexId;
 
 		// Safe, compile-time branch mapping to bypass register indexing bugs

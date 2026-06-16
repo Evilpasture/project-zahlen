@@ -433,8 +433,11 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 						  std::min((uint32_t)prim.targets_count, 4u));
 				activeMorphCount = std::min((uint32_t)prim.targets_count, 4u);
 
-				// Extract default weights from glTF if they are authored
-				if (mesh->weights != nullptr) {
+				if (node->weights_count > 0 && node->weights != nullptr) {
+					for (uint32_t w = 0; w < activeMorphCount; ++w) {
+						defaultWeights[w] = node->weights[w];
+					}
+				} else if (mesh->weights != nullptr) {
 					for (uint32_t w = 0; w < activeMorphCount; ++w) {
 						defaultWeights[w] = mesh->weights[w];
 					}

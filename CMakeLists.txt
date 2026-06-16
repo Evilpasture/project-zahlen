@@ -276,7 +276,7 @@ function(compile_hlsl SHADER_PATH ENTRY STAGE OUTPUT_VAR)
 
     add_custom_command(
         OUTPUT ${OUTPUT_SPV}
-        COMMAND ${DXC_EXECUTABLE} -T ${STAGE} -E ${ENTRY} -spirv -I "${CMAKE_SOURCE_DIR}/resources/shaders" -I "${CMAKE_SOURCE_DIR}/include" ${EXTRA_ARGS} ${SHADER_PATH} -Fo ${OUTPUT_SPV}
+        COMMAND ${DXC_EXECUTABLE} -T ${STAGE} -E ${ENTRY} -spirv -fspv-target-env=vulkan1.3 -I "${CMAKE_SOURCE_DIR}/resources/shaders" -I "${CMAKE_SOURCE_DIR}/include" ${EXTRA_ARGS} ${SHADER_PATH} -Fo ${OUTPUT_SPV}
         DEPENDS ${SHADER_PATH} "${CMAKE_SOURCE_DIR}/include/SharedMath.hpp"
         COMMENT "DXC: Generating ${FILE_NAME}.${ENTRY}.spv"
         VERBATIM
