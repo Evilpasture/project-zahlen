@@ -55,6 +55,16 @@ struct PhysicsComponent {
 };
 
 /**
+ * @brief Stores physics state for interpolation.
+ */
+struct PhysicsStateComponent {
+	JPH::Vec3 currPosition = JPH::Vec3::sZero();
+	JPH::Vec3 prevPosition = JPH::Vec3::sZero();
+	JPH::Quat currRotation = JPH::Quat::sIdentity();
+	JPH::Quat prevRotation = JPH::Quat::sIdentity();
+};
+
+/**
  * @brief Links an ECS Entity to an active movement controller.
  * Members are aligned with floats first to guarantee a zero-padding layout.
  */
@@ -66,6 +76,7 @@ struct MovementComponent {
 	float speed = 7.0f;
 	float jumpForce = 12.0f;
 	float orientation[4] = {0.0f, 0.0f, 0.0f, 1.0f}; // x, y, z, w (identity)
+	float prevOrientation[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 	float landingTimer = 0.0f;
 	float jumpDelayTimer = 0.0f;
 

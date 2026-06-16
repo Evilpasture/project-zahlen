@@ -3,18 +3,16 @@
 
 #include "TargetCameraSystem.hpp"
 
+#include "Zahlen/Camera.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Input.hpp"
-#include "Zahlen/alife/Types.hpp"
 #include "ecs/ECS.hpp"
-#include "physics/Physics.hpp"
 
 namespace ZHLN {
 void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept {
 	auto& reg = engine.GetRegistry();
 	auto& cam = engine.GetCamera();
-	const auto& worldState = engine.GetPhysicsContext().GetWorld();
 
 	auto cameraEntities = reg.GetEntitiesWith<TargetCameraComponent>();
 	if (cameraEntities.empty()) {
@@ -32,18 +30,7 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 
 	// 1. Resolve Target Position
 	if (auto* trans = reg.Get<TransformComponent>(targetEnt)) {
-		// Retain ultra-smooth sub-step physics interpolation if a physics body is present
-		if (auto* phys = reg.Get<PhysicsComponent>(targetEnt)) {
-			uint32_t dense = worldState.slotToDense[phys->physicsHandle.index];
-			const size_t base = static_cast<size_t>(dense) * 4;
-			JPH::Vec3 currPos(worldState.positions[base], worldState.positions[base + 1],
-							  worldState.positions[base + 2]);
-			JPH::Vec3 prevPos(worldState.prevPositions[base], worldState.prevPositions[base + 1],
-							  worldState.prevPositions[base + 2]);
-			targetPos = prevPos + alpha * (currPos - prevPos);
-		} else {
-			targetPos = JPH::Vec3(trans->position[0], trans->position[1], trans->position[2]);
-		}
+		targetPos = JPH::Vec3(trans->position[0], trans->position[1], trans->position[2]);
 	} else if (auto* meshComp = reg.Get<MeshComponent>(targetEnt)) {
 		targetPos = meshComp->localTransform.GetTranslation();
 	}
@@ -56,9 +43,9 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 	}
 
 	if (camComp->stiffness > 0.0f) {
-		camComp->distance +=
-			(camComp->targetDistance - camComp->distance) * camComp->stiffness * dt;
-		camComp->fov += (camComp->targetFov - camComp->fov) * camComp->stiffness * dt;
+		float factor = JPH::Clamp(camComp->stiffness * dt, 0.0f, 1.0f);
+		camComp->distance += (camComp->targetDistance - camComp->distance) * factor;
+		camComp->fov += (camComp->targetFov - camComp->fov) * factor;
 	} else {
 		camComp->distance = camComp->targetDistance;
 		camComp->fov = camComp->targetFov;
@@ -90,7 +77,8 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 	if ((targetPos - s_SmoothTargetPos).LengthSq() > 100.0f) {
 		s_SmoothTargetPos = targetPos; // Teleport instantly on large displacements
 	} else if (camComp->stiffness > 0.0f) {
-		s_SmoothTargetPos += (targetPos - s_SmoothTargetPos) * camComp->stiffness * dt;
+		float factor = JPH::Clamp(camComp->stiffness * dt, 0.0f, 1.0f);
+		s_SmoothTargetPos += (targetPos - s_SmoothTargetPos) * factor;
 	} else {
 		s_SmoothTargetPos = targetPos;
 	}

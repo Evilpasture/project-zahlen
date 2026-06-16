@@ -594,23 +594,27 @@ uint32_t InstantiatePrefab(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 			params.rotation, params.scale);
 		JPH::Mat44 finalLocal = baseTransform * part.localTransform;
 
-		// Calculate total world scale of the node
-		JPH::Vec3 nodeScale(part.localTransform.GetColumn4(0).Length(),
-							part.localTransform.GetColumn4(1).Length(),
-							part.localTransform.GetColumn4(2).Length());
-		float nodeMaxScale = std::max({nodeScale.GetX(), nodeScale.GetY(), nodeScale.GetZ()});
+		// 1. Mathematically extract the true physical world-space scale from the column lengths
+		JPH::Vec3 totalScale(finalLocal.GetColumn3(0).Length(), finalLocal.GetColumn3(1).Length(),
+							 finalLocal.GetColumn3(2).Length());
+		float nodeMaxScale = std::max({totalScale.GetX(), totalScale.GetY(), totalScale.GetZ()});
 
-		JPH::Vec3 totalScale = params.scale * nodeScale;
 		JPH::Vec3 translation = finalLocal.GetTranslation();
 
-		if (params.createPhysics) {
-			JPH::Vec3 col0 = finalLocal.GetColumn3(0) / totalScale.GetX();
-			JPH::Vec3 col1 = finalLocal.GetColumn3(1) / totalScale.GetY();
-			JPH::Vec3 col2 = finalLocal.GetColumn3(2) / totalScale.GetZ();
-			JPH::Mat44 rotMat(JPH::Vec4(col0, 0), JPH::Vec4(col1, 0), JPH::Vec4(col2, 0),
-							  JPH::Vec4(0, 0, 0, 1));
-			JPH::Quat rotation = rotMat.GetQuaternion();
+		// 2. Safe Orthogonalization: Divide columns by their actual physical lengths to isolate
+		// pure rotation [3]
+		JPH::Vec3 col0 = totalScale.GetX() > 1e-6f ? finalLocal.GetColumn3(0) / totalScale.GetX()
+												   : JPH::Vec3::sAxisX();
+		JPH::Vec3 col1 = totalScale.GetY() > 1e-6f ? finalLocal.GetColumn3(1) / totalScale.GetY()
+												   : JPH::Vec3::sAxisY();
+		JPH::Vec3 col2 = totalScale.GetZ() > 1e-6f ? finalLocal.GetColumn3(2) / totalScale.GetZ()
+												   : JPH::Vec3::sAxisZ();
 
+		JPH::Mat44 rotMat(JPH::Vec4(col0, 0.0f), JPH::Vec4(col1, 0.0f), JPH::Vec4(col2, 0.0f),
+						  JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f));
+		JPH::Quat rotation = rotMat.GetQuaternion();
+
+		if (params.createPhysics) {
 			reg.Add(e, TransformComponent{
 						   .position = {translation.GetX(), translation.GetY(), translation.GetZ()},
 						   .rotation = {rotation.GetX(), rotation.GetY(), rotation.GetZ(),
@@ -650,21 +654,38 @@ uint32_t InstantiatePrefab(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 							   params.isStaticPhysics ? static_cast<JPH::ObjectLayer>(0)
 													  : static_cast<JPH::ObjectLayer>(1),
 							   0, params.physicsCategory, params.physicsMask)});
+				reg.Add(e, PhysicsStateComponent{.currPosition = JPH::Vec3(translation),
+												 .prevPosition = JPH::Vec3(translation),
+												 .currRotation = rotation,
+												 .prevRotation = rotation});
 			}
 		} else {
 			// Decouple parts into local glTF coordinates relative to the prefab root
 			JPH::Vec3 nodePos = part.localTransform.GetTranslation();
-			JPH::Mat44 rotMat(part.localTransform.GetColumn4(0) / nodeScale.GetX(),
-							  part.localTransform.GetColumn4(1) / nodeScale.GetY(),
-							  part.localTransform.GetColumn4(2) / nodeScale.GetZ(),
-							  JPH::Vec4(0, 0, 0, 1));
-			JPH::Quat nodeRot = rotMat.GetQuaternion();
+			JPH::Vec3 localNodeScale(part.localTransform.GetColumn3(0).Length(),
+									 part.localTransform.GetColumn3(1).Length(),
+									 part.localTransform.GetColumn3(2).Length());
 
-			reg.Add(
-				e, TransformComponent{
-					   .position = {nodePos.GetX(), nodePos.GetY(), nodePos.GetZ()},
-					   .rotation = {nodeRot.GetX(), nodeRot.GetY(), nodeRot.GetZ(), nodeRot.GetW()},
-					   .scale = {nodeScale.GetX(), nodeScale.GetY(), nodeScale.GetZ()}});
+			JPH::Vec3 ncol0 = localNodeScale.GetX() > 1e-6f
+								  ? part.localTransform.GetColumn3(0) / localNodeScale.GetX()
+								  : JPH::Vec3::sAxisX();
+			JPH::Vec3 ncol1 = localNodeScale.GetY() > 1e-6f
+								  ? part.localTransform.GetColumn3(1) / localNodeScale.GetY()
+								  : JPH::Vec3::sAxisY();
+			JPH::Vec3 ncol2 = localNodeScale.GetZ() > 1e-6f
+								  ? part.localTransform.GetColumn3(2) / localNodeScale.GetZ()
+								  : JPH::Vec3::sAxisZ();
+
+			JPH::Mat44 nRotMat(JPH::Vec4(ncol0, 0.0f), JPH::Vec4(ncol1, 0.0f),
+							   JPH::Vec4(ncol2, 0.0f), JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f));
+			JPH::Quat nodeRot = nRotMat.GetQuaternion();
+
+			reg.Add(e,
+					TransformComponent{.position = {nodePos.GetX(), nodePos.GetY(), nodePos.GetZ()},
+									   .rotation = {nodeRot.GetX(), nodeRot.GetY(), nodeRot.GetZ(),
+													nodeRot.GetW()},
+									   .scale = {localNodeScale.GetX(), localNodeScale.GetY(),
+												 localNodeScale.GetZ()}});
 
 			reg.Add(e,
 					MeshComponent{

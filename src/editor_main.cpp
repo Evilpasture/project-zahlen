@@ -29,6 +29,7 @@
 #include <detail/ControlFlow.hpp>
 #include <engine/Platform.hpp>
 #include <engine/system/CullingSystem.hpp>
+#include <engine/system/PhysicsStateSystem.hpp>
 #include <expected>
 #include <imgui.h>
 #include <physics/PhysicsWorld.hpp>
@@ -282,6 +283,7 @@ bool InitializeEditorScene(Engine& engine) {
 	// Register visual and physical components
 	reg.RegisterComponent<MeshComponent>("MeshComponent");
 	reg.RegisterComponent<PhysicsComponent>("PhysicsComponent");
+	reg.RegisterComponent<PhysicsStateComponent>("PhysicsStateComponent");
 	reg.RegisterComponent<MovementComponent>("MovementComponent");
 	reg.RegisterComponent<ALife::ALifeComponent>("ALifeComponent");
 	reg.RegisterComponent<NameComponent>("NameComponent");
@@ -299,11 +301,13 @@ bool InitializeEditorScene(Engine& engine) {
 		Physics::CreateHeightFieldShape(terrainHeights, terrainSize, terrainWorldSize);
 	Material material = AssetFactory::CreateBasicMaterial(rc);
 
-	reg.Add(reg.Create(),
+	Entity terrainEnt = reg.Create();
+	reg.Add(terrainEnt,
 			MeshComponent{.mesh = terrainMesh, .material = material, .cullRadius = 300.0f},
 			PhysicsComponent{Physics::CreateRigidBody(pc, terrainShape, {0.0f, 0.0f, 0.0f},
 													  JPH::Quat::sIdentity(),
-													  JPH::EMotionType::Static, 0)});
+													  JPH::EMotionType::Static, 0)},
+			PhysicsStateComponent{});
 
 	// Place 3D selection test boxes
 	auto boxShape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Box, 2.0f, 2.0f, 2.0f);
@@ -313,8 +317,12 @@ bool InitializeEditorScene(Engine& engine) {
 								   .material = material,
 								   .cullRadius = 10.f});
 		reg.Add(box, PhysicsComponent{Physics::CreateRigidBody(
-						 pc, boxShape, {(float)i * 6.0f, 15.0f, 0.0f}, JPH::Quat::sIdentity(),
+						 pc, boxShape, {i * 6.0f, 15.0f, 0.0f}, JPH::Quat::sIdentity(),
 						 JPH::EMotionType::Dynamic, 1)});
+		reg.Add(box, PhysicsStateComponent{.currPosition = {i * 6.0f, 15.0f, 0.0f},
+										   .prevPosition = {i * 6.0f, 15.0f, 0.0f},
+										   .currRotation = JPH::Quat::sIdentity(),
+										   .prevRotation = JPH::Quat::sIdentity()});
 	}
 
 	pc.OptimizeBroadphase();
@@ -391,10 +399,14 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 			accumulator += frameTime;
 			while (accumulator >= targetDt) {
 				pc.Step(targetDt);
+				ZHLN::PhysicsStateSystem::WriteBack(*engine);
 				accumulator -= targetDt;
 			}
 			engine->GetALife().Update(*engine, frameTime, JPH::RVec3(cam.position));
 		}
+
+		ZHLN::VisualInterpolationSystem::Update(
+			*engine, g_EditorState.simulationRunning ? (accumulator / targetDt) : 1.0f);
 
 		UpdateEditorCamera(cam, engine->GetInput(), frameTime);
 
@@ -463,18 +475,10 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 					}
 
 					JPH::Mat44 currentTransform{};
-					auto* phys = reg.Get<PhysicsComponent>(e);
+					auto* trans = reg.Get<TransformComponent>(e);
 
-					if (phys != nullptr) {
-						uint32_t dense = worldState.slotToDense[phys->physicsHandle.index];
-						const size_t base = static_cast<size_t>(dense) * 4;
-						JPH::Vec3 pos((float)worldState.positions[base],
-									  (float)worldState.positions[base + 1],
-									  (float)worldState.positions[base + 2]);
-						JPH::Quat rot(worldState.rotations[base], worldState.rotations[base + 1],
-									  worldState.rotations[base + 2],
-									  worldState.rotations[base + 3]);
-						currentTransform = Math::CreateTransform(pos, rot) * mesh->localTransform;
+					if (trans != nullptr) {
+						currentTransform = trans->GetMatrix() * mesh->localTransform;
 					} else if (auto* alifeComp = reg.Get<ALife::ALifeComponent>(e)) {
 						currentTransform = Math::CreateTransform(JPH::Vec3(alifeComp->position),
 																 JPH::Quat::sIdentity()) *

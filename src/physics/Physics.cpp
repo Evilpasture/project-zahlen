@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // clang-format off
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
@@ -501,18 +500,27 @@ ZHLN::Entity CreateRigidBody(PhysicsContext& ctx, const JPH::ShapeRefC& shape, J
 		const uint32_t j_idx = id.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
 		world.idToHandleMap[j_idx].store(handle.Pack(), std::memory_order_release);
 
-		// Warm up shadow buffers so the very first render frame is correct
+		// Warm up shadow buffers so the very first render frame has valid interpolation states
 		world.positions[dense * 4 + 0] = pos.GetX();
 		world.positions[dense * 4 + 1] = pos.GetY();
 		world.positions[dense * 4 + 2] = pos.GetZ();
 		world.positions[dense * 4 + 3] = 0.0;
+
+		world.prevPositions[dense * 4 + 0] = pos.GetX();
+		world.prevPositions[dense * 4 + 1] = pos.GetY();
+		world.prevPositions[dense * 4 + 2] = pos.GetZ();
+		world.prevPositions[dense * 4 + 3] = 0.0;
 
 		world.rotations[dense * 4 + 0] = rot.GetX();
 		world.rotations[dense * 4 + 1] = rot.GetY();
 		world.rotations[dense * 4 + 2] = rot.GetZ();
 		world.rotations[dense * 4 + 3] = rot.GetW();
 
-		// Store Material ID in the SoA for fast callback lookup
+		world.prevRotations[dense * 4 + 0] = rot.GetX();
+		world.prevRotations[dense * 4 + 1] = rot.GetY();
+		world.prevRotations[dense * 4 + 2] = rot.GetZ();
+		world.prevRotations[dense * 4 + 3] = rot.GetW();
+
 		world.materialIDs[dense] = materialID;
 		world.categories[dense] = category;
 		world.masks[dense] = mask;
@@ -592,8 +600,8 @@ ZHLN::Entity CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position, uint32
 		settings.mShape = charShape;
 		settings.mMaxStrength = 100.0f;
 
-		auto character = new JPH::CharacterVirtual(&settings, position, JPH::Quat::sIdentity(),
-												   &impl->physicsSystem);
+		auto* character = new JPH::CharacterVirtual(&settings, position, JPH::Quat::sIdentity(),
+													&impl->physicsSystem);
 		character->SetListener(&impl->characterListener);
 		character->SetUserData(handle.Pack());
 
@@ -604,14 +612,34 @@ ZHLN::Entity CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position, uint32
 		impl->characterMap[handle.index] = character;
 		impl->activeCharacters.push_back(character);
 
-		// SoA Sync
+		// SoA Sync & Warm-up
 		auto dense = static_cast<uint32_t>(world.count.fetch_add(1, std::memory_order_relaxed));
 		world.slotToDense[handle.index] = dense;
 		world.denseToSlot[dense] = handle.index;
-		world.bodyIDs[dense] = JPH::BodyID(); // Characters don't have Jolt BodyIDs
+		world.bodyIDs[dense] = JPH::BodyID();
 		world.slotStates[handle.index].store(SLOT_CHARACTER, std::memory_order_release);
 		world.categories[dense] = category;
 		world.masks[dense] = mask;
+
+		world.positions[dense * 4 + 0] = position.GetX();
+		world.positions[dense * 4 + 1] = position.GetY();
+		world.positions[dense * 4 + 2] = position.GetZ();
+		world.positions[dense * 4 + 3] = 0.0;
+
+		world.prevPositions[dense * 4 + 0] = position.GetX();
+		world.prevPositions[dense * 4 + 1] = position.GetY();
+		world.prevPositions[dense * 4 + 2] = position.GetZ();
+		world.prevPositions[dense * 4 + 3] = 0.0;
+
+		world.rotations[dense * 4 + 0] = 0.0f;
+		world.rotations[dense * 4 + 1] = 0.0f;
+		world.rotations[dense * 4 + 2] = 0.0f;
+		world.rotations[dense * 4 + 3] = 1.0f;
+
+		world.prevRotations[dense * 4 + 0] = 0.0f;
+		world.prevRotations[dense * 4 + 1] = 0.0f;
+		world.prevRotations[dense * 4 + 2] = 0.0f;
+		world.prevRotations[dense * 4 + 3] = 1.0f;
 	}
 	return handle;
 }

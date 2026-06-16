@@ -27,11 +27,6 @@ class ZHLN_API TransformSystem {
 	TransformSystem(const TransformSystem&) = delete;
 	TransformSystem& operator=(const TransformSystem&) = delete;
 
-	// Synchronizes the Jolt shadow states down to the ECS TransformComponents with linear
-	// interpolation
-	void SyncPhysicsToTransforms(ECS::Registry& reg, const Physics::PhysicsWorld& world,
-								 float alpha) noexcept;
-
 	// Safely computes the final world-space matrix for an entity
 	[[nodiscard]] JPH::Mat44 GetWorldTransform(const ECS::Registry& reg, Entity e) const noexcept;
 

@@ -9,6 +9,7 @@
 #include "ecs/ECS.hpp"
 #include "engine/FileWatcher.hpp"
 #include "engine/Platform.hpp"
+#include "engine/system/PhysicsStateSystem.hpp"
 #include "engine/system/TargetCameraSystem.hpp"
 #include "engine/system/TransformSystem.hpp"
 #include "imgui.h"
@@ -139,9 +140,9 @@ bool InitializeGame(Engine& engine, GameContext& game) {
 	// Inject the state into the FFI boundary BEFORE loading scripts
 	ZHLN_SetGameState(std::bit_cast<ZHLN_Engine*>(&engine), &defaultState);
 
-	reg.RegisterComponents<TransformComponent, MeshComponent, PhysicsComponent, MovementComponent,
-						   ALife::ALifeComponent, RagdollComponent, NameComponent,
-						   TargetCameraComponent, TargetCameraComponent>();
+	reg.RegisterComponents<TransformComponent, MeshComponent, PhysicsComponent,
+						   PhysicsStateComponent, MovementComponent, ALife::ALifeComponent,
+						   RagdollComponent, NameComponent, TargetCameraComponent>();
 
 	auto groundShape =
 		Physics::GetOrCreateShape(pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
@@ -149,12 +150,15 @@ bool InitializeGame(Engine& engine, GameContext& game) {
 	reg.Add(ground,
 			PhysicsComponent{Physics::CreateRigidBody(
 				pc, groundShape, {0, 0, 0}, JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0)});
+	reg.Add(ground, PhysicsStateComponent{});
 
 	game.playerEntity = reg.Create();
 	reg.Add(game.playerEntity, TransformComponent{.position = {0.0f, 3.0f, 0.0f}});
 	reg.Add(game.playerEntity, MovementComponent{});
 	Entity charPhys = Physics::CreateCharacter(pc, JPH::RVec3(0.0f, 3.0f, 0.0f));
 	reg.Add(game.playerEntity, PhysicsComponent{charPhys});
+	reg.Add(game.playerEntity, PhysicsStateComponent{.currPosition = {0.0f, 3.0f, 0.0f},
+													 .prevPosition = {0.0f, 3.0f, 0.0f}});
 
 	// Instantiate Target Camera entity with initialized post-processing defaults
 	Entity cameraEntity = reg.Create();
@@ -336,6 +340,7 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, GameContext
 			while (physicsAccumulator >= targetDt) {
 				ZHLN::MovementSystem(engine, targetDt);
 				pc.Step(targetDt);
+				ZHLN::PhysicsStateSystem::WriteBack(engine);
 				physicsAccumulator -= targetDt;
 			}
 		}
@@ -343,8 +348,8 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, GameContext
 		float alpha = physicsAccumulator / targetDt;
 
 		{
-			ZHLN_PROFILE_SCOPE("ECS System: Sync Physics to Transforms");
-			game.transformSystem->SyncPhysicsToTransforms(reg, pc.GetWorld(), alpha);
+			ZHLN_PROFILE_SCOPE("ECS System: Visual Interpolation");
+			ZHLN::VisualInterpolationSystem::Update(engine, alpha);
 		}
 
 		{

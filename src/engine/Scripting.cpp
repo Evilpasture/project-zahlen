@@ -210,6 +210,10 @@ static void RegisterFFICommands() {
 					   pc, shape, JPH::RVec3(desc->px, desc->py, desc->pz), rotation,
 					   desc->isStatic ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
 					   desc->isStatic ? 0 : 1)});
+		reg.Add(e, ZHLN::PhysicsStateComponent{.currPosition = {desc->px, desc->py, desc->pz},
+											   .prevPosition = {desc->px, desc->py, desc->pz},
+											   .currRotation = rotation,
+											   .prevRotation = rotation});
 
 		return e.Pack();
 	};

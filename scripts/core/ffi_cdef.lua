@@ -95,6 +95,7 @@ if not ok then
             float speed;
             float jumpForce;
             float orientation[4];
+            float prevOrientation[4];
             float landingTimer;
             float jumpDelayTimer;
             bool  jumpRequested;

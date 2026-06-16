@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // src/engine/system/MovementSystem.cpp
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
@@ -28,6 +27,8 @@ void MovementSystem(Engine& engine, float dt) {
 		for (uint32_t i = start; i < end; ++i) {
 			MovementComponent& move = movements[i];
 			Entity e = entities[i];
+			// Record previous orientation before calculating the new one
+			std::memcpy(move.prevOrientation, move.orientation, sizeof(float) * 4);
 
 			auto* phys = reg.Get<PhysicsComponent>(e);
 			if (!phys) {

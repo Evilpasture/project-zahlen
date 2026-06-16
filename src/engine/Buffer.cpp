@@ -147,11 +147,17 @@ void* ZHLN_AddComponent(ZHLN_Engine* engine_handle, uint64_t entityRaw, const ch
 	std::string_view name(componentName);
 	if (name == "HierarchyComponent") {
 		return &reg.Add(entity, ZHLN::HierarchyComponent{});
-	} else if (name == "TransformComponent") {
+	}
+	if (name == "TransformComponent") {
 		return &reg.Add(entity, ZHLN::TransformComponent{});
-	} else if (name == "MovementComponent") {
+	}
+	if (name == "MovementComponent") {
 		return &reg.Add(entity, ZHLN::MovementComponent{});
-	} else if (name == "TargetCameraComponent") {
+	}
+	if (name == "PhysicsStateComponent") {
+		return &reg.Add(entity, ZHLN::PhysicsStateComponent{});
+	}
+	if (name == "TargetCameraComponent") {
 		return &reg.Add(entity, ZHLN::TargetCameraComponent{});
 	}
 	return nullptr;

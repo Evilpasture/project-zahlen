@@ -144,6 +144,7 @@ set(ENGINE_SOURCES
     src/engine/system/TargetCameraSystem.cpp
     src/engine/TTYBackend.cpp
     src/engine/system/TransformSystem.cpp
+    src/engine/system/PhysicsStateSystem.cpp
 )
 
 find_library(ZSTD_LIBRARY NAMES zstd zstd_static HINTS "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib")
