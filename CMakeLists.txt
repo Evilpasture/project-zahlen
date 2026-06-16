@@ -145,6 +145,9 @@ set(ENGINE_SOURCES
     src/engine/TTYBackend.cpp
     src/engine/system/TransformSystem.cpp
     src/engine/system/PhysicsStateSystem.cpp
+    src/engine/system/LightingSystem.cpp
+    src/engine/system/InputSystem.cpp
+    src/engine/system/CameraSystem.cpp
 )
 
 find_library(ZSTD_LIBRARY NAMES zstd zstd_static HINTS "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib")

@@ -9,6 +9,7 @@
 #include "ecs/ECS.hpp"
 #include "engine/FileWatcher.hpp"
 #include "engine/Platform.hpp"
+#include "engine/system/CameraSystem.hpp"
 #include "engine/system/InputSystem.hpp"
 #include "engine/system/LightingSystem.hpp"
 #include "engine/system/PhysicsStateSystem.hpp"
@@ -66,41 +67,10 @@ struct PostProcessComponent {
 	float vignettePower;
 	int enableSSR;
 	int enableRTR;
-	int enableTAA;
-	float taaFeedback;
-};
-
-struct CameraComponent {
-	JPH::Mat44 viewProj = JPH::Mat44::sIdentity();
-	JPH::Mat44 unjitteredViewProj = JPH::Mat44::sIdentity();
-	JPH::Mat44 prevUnjitteredViewProj = JPH::Mat44::sIdentity();
-	JPH::Mat44 frozenViewProj = JPH::Mat44::sIdentity();
-	uint32_t frameCounter = 0;
-};
-
-struct GameContext {
-	Entity playerEntity = NullEntity;
-	Entity cameraEntity = NullEntity;
-	Entity settingsEntity = NullEntity;
-	uint32_t fontAtlasIdx = 0;
-	Mesh helloText{};
-	JPH::Array<Entity> visibleEntities;
-
-	ScriptRunner* scriptRunner = nullptr;
-	FileWatcher* gameplayWatcher = nullptr;
-	ArticulationSystem* articulationSystem = nullptr;
-	AnimationSystem* animationSystem = nullptr;
-	TransformSystem* transformSystem = nullptr;
-	LightingSystem* lightingSystem = nullptr;
-	CullingSystem* cullingSystem = nullptr;
-	InputSystem* inputSystem = nullptr;
-
-	TAAState taaState{};
-	std::array<JPH::Vec3, 8> frustumCorners{};
 };
 
 void DrawConsole(ScriptRunner& runner);
-void DrawProfiler(Engine& engine, TAAState& taaState);
+void DrawProfiler(Engine& engine);
 void MovementSystem(Engine& engine, float dt);
 void AudioSystem(Engine& engine, float dt);
 void DrawOrientationGizmo(const ZHLN::Camera& cam);
@@ -135,143 +105,7 @@ constexpr std::array<FrustumEdge, 12> s_FrustumEdges = {{
 // Modular Systems
 // ============================================================================
 
-void CameraSystem(Engine& engine, GameContext& game, float dt, float alpha) {
-	auto& reg = engine.GetRegistry();
-	auto& cam = engine.GetCamera();
-
-	for (Entity camEnt : reg.GetEntitiesWith<TargetCameraComponent>()) {
-		auto* camComp = reg.Get<TargetCameraComponent>(camEnt);
-		auto* input = reg.Get<InputSystem::InputComponent>(camEnt);
-		if ((camComp == nullptr) || (input == nullptr) || !reg.IsAlive(camComp->target)) {
-			continue;
-		}
-
-		Entity targetEnt = camComp->target;
-		JPH::Vec3 targetPos = JPH::Vec3::sZero();
-
-		if (auto* state = reg.Get<PhysicsStateComponent>(targetEnt)) {
-			float clampedAlpha = std::clamp(alpha, 0.0f, 1.0f);
-			targetPos =
-				state->prevPosition + clampedAlpha * (state->currPosition - state->prevPosition);
-		} else if (auto* trans = reg.Get<TransformComponent>(targetEnt)) {
-			targetPos = JPH::Vec3(trans->position[0], trans->position[1], trans->position[2]);
-		} else if (auto* meshComp = reg.Get<MeshComponent>(targetEnt)) {
-			targetPos = meshComp->localTransform.GetTranslation();
-		}
-
-		if (std::abs(input->zoomDelta) > 1e-4f) {
-			camComp->targetDistance =
-				JPH::Clamp(camComp->targetDistance - input->zoomDelta, 1.5f, 15.0f);
-		}
-
-		if (camComp->stiffness > 0.0f) {
-			float factor = JPH::Clamp(camComp->stiffness * dt, 0.0f, 1.0f);
-			camComp->distance += (camComp->targetDistance - camComp->distance) * factor;
-			camComp->fov += (camComp->targetFov - camComp->fov) * factor;
-		} else {
-			camComp->distance = camComp->targetDistance;
-			camComp->fov = camComp->targetFov;
-		}
-
-		camComp->yaw += input->lookYawDelta;
-		camComp->pitch = std::clamp(camComp->pitch - input->lookPitchDelta, -89.0f, 89.0f);
-
-		cam.yaw = camComp->yaw;
-		cam.pitch = camComp->pitch;
-		cam.fov = camComp->fov;
-
-		float yawRad = JPH::DegreesToRadians(camComp->yaw);
-		float pitchRad = JPH::DegreesToRadians(camComp->pitch);
-		JPH::Vec3 offsetDir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad),
-							JPH::Sin(yawRad) * JPH::Cos(pitchRad));
-
-		JPH::Vec3 offsetVec = camComp->targetOffset;
-		JPH::Vec3 smoothTargetPos = camComp->smoothTargetPos;
-
-		if (camComp->hasInitSmoothTarget == 0) {
-			smoothTargetPos = targetPos;
-			camComp->hasInitSmoothTarget = 1;
-		}
-
-		if ((targetPos - smoothTargetPos).LengthSq() > 100.0f) {
-			smoothTargetPos = targetPos;
-		} else if (camComp->stiffness > 0.0f) {
-			float factor = 1.0f - std::exp(-camComp->stiffness * dt);
-			smoothTargetPos += (targetPos - smoothTargetPos) * factor;
-		} else {
-			smoothTargetPos = targetPos;
-		}
-
-		camComp->smoothTargetPos = smoothTargetPos;
-
-		cam.position = smoothTargetPos - (offsetDir.Normalized() * camComp->distance) + offsetVec;
-	}
-
-	auto res = engine.GetWindow().GetSize();
-	if (res.width == 0 || res.height == 0) {
-		return;
-	}
-
-	for (Entity e : reg.GetEntitiesWith<CameraComponent>()) {
-		if (auto* cComp = reg.Get<CameraComponent>(e)) {
-			if (cComp->frameCounter == 0) {
-				cComp->prevUnjitteredViewProj =
-					cam.GetProjectionMatrix((float)res.width / res.height) * cam.GetViewMatrix();
-				cComp->unjitteredViewProj = cComp->prevUnjitteredViewProj;
-				cComp->viewProj = cComp->unjitteredViewProj;
-			} else {
-				cComp->prevUnjitteredViewProj = cComp->unjitteredViewProj;
-			}
-
-			JPH::Mat44 unjitteredProj = cam.GetProjectionMatrix((float)res.width / res.height);
-			cComp->unjitteredViewProj = unjitteredProj * cam.GetViewMatrix();
-
-			if (game.taaState.enabled) {
-				game.taaState.frameIndex++;
-				cComp->viewProj =
-					cam.GetJitteredProjectionMatrix((float)res.width / res.height, res.width,
-													res.height, game.taaState) *
-					cam.GetViewMatrix();
-			} else {
-				game.taaState.frameIndex = 0;
-				cComp->viewProj = cComp->unjitteredViewProj;
-			}
-
-			static bool s_WasFrozen = false;
-			if (CullingStats::FreezeFrustum) {
-				if (!s_WasFrozen) {
-					cComp->frozenViewProj = cComp->unjitteredViewProj;
-					JPH::Mat44 invVP = cComp->unjitteredViewProj.Inversed();
-					auto ndc = std::to_array<JPH::Vec4>({{-1.0f, -1.0f, 0.0f, 1.0f},
-														 {1.0f, -1.0f, 0.0f, 1.0f},
-														 {1.0f, 1.0f, 0.0f, 1.0f},
-														 {-1.0f, 1.0f, 0.0f, 1.0f},
-														 {-1.0f, -1.0f, 1.0f, 1.0f},
-														 {1.0f, -1.0f, 1.0f, 1.0f},
-														 {1.0f, 1.0f, 1.0f, 1.0f},
-														 {-1.0f, 1.0f, 1.0f, 1.0f}});
-					for (int i = 0; i < 8; ++i) {
-						JPH::Vec4 worldPos = invVP * ndc[i];
-						float w = worldPos.GetW();
-						if (std::abs(w) > 1e-6f) {
-							game.frustumCorners[i] = JPH::Vec3(
-								worldPos.GetX() / w, worldPos.GetY() / w, worldPos.GetZ() / w);
-						}
-					}
-					s_WasFrozen = true;
-				}
-				cam.frustum.Update(cComp->frozenViewProj);
-			} else {
-				cam.frustum.Update(cComp->unjitteredViewProj);
-				s_WasFrozen = false;
-			}
-
-			cComp->frameCounter++;
-		}
-	}
-}
-
-void UISystem(Engine& engine, GameContext& game) {
+void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 	if (engine.GetWindow().IsTTY()) {
 		return;
 	}
@@ -279,9 +113,9 @@ void UISystem(Engine& engine, GameContext& game) {
 	ZHLN_GameState state =
 		*static_cast<ZHLN_GameState*>(ZHLN_GetGameState(reinterpret_cast<ZHLN_Engine*>(&engine)));
 
-	ZHLN::DrawConsole(*game.scriptRunner);
-	ZHLN::DrawInventoryShell(*game.scriptRunner);
-	ZHLN::DrawProfiler(engine, game.taaState);
+	ZHLN::DrawConsole(scriptRunner);
+	ZHLN::DrawInventoryShell(scriptRunner);
+	ZHLN::DrawProfiler(engine);
 	ZHLN::DrawOrientationGizmo(engine.GetCamera());
 	ZHLN::DrawECSProfiler();
 
@@ -381,21 +215,16 @@ void UISystem(Engine& engine, GameContext& game) {
 			pp->vignettePower = state.vignettePower;
 			pp->enableSSR = state.enableSSR;
 			pp->enableRTR = state.enableRTR;
-			pp->enableTAA = state.enableTAA;
-			pp->taaFeedback = state.taaFeedback;
 		}
 	}
 }
 
-void PostProcessSystem(Engine& engine, GameContext& game) {
+void PostProcessSystem(Engine& engine) {
 	auto& reg = engine.GetRegistry();
 	auto& rc = engine.GetRenderContext();
 
 	for (Entity e : reg.GetEntitiesWith<PostProcessComponent>()) {
 		if (auto* pp = reg.Get<PostProcessComponent>(e)) {
-			game.taaState.enabled = pp->enableTAA != 0;
-			game.taaState.feedback = pp->taaFeedback;
-
 			Renderer::SetGISettings(rc, {.mode = pp->giMode,
 										 .aoRadius = pp->aoRadius,
 										 .aoBias = pp->aoBias,
@@ -410,7 +239,7 @@ void PostProcessSystem(Engine& engine, GameContext& game) {
 	}
 }
 
-void DebugDrawSystem(Engine& engine, GameContext& game) {
+void DebugDrawSystem(Engine& engine, CullingSystem& cullingSystem) {
 	if (!CullingStats::FreezeFrustum) {
 		return;
 	}
@@ -430,9 +259,10 @@ void DebugDrawSystem(Engine& engine, GameContext& game) {
 		debugMat.baseColorFactor[2] = 1.0f;
 		debugMat.baseColorFactor[3] = 1.0f;
 
+		auto frustumCorners = cullingSystem.GetFrustumCorners();
 		for (auto s_FrustumEdge : s_FrustumEdges) {
-			JPH::Vec3 pA = game.frustumCorners[s_FrustumEdge.start];
-			JPH::Vec3 pB = game.frustumCorners[s_FrustumEdge.end];
+			JPH::Vec3 pA = frustumCorners[s_FrustumEdge.start];
+			JPH::Vec3 pB = frustumCorners[s_FrustumEdge.end];
 
 			JPH::Vec3 v = pB - pA;
 			float len = v.Length();
@@ -453,7 +283,8 @@ void DebugDrawSystem(Engine& engine, GameContext& game) {
 	}
 }
 
-void RenderSystem(Engine& engine, GameContext& game) {
+void RenderSystem(Engine& engine, CullingSystem& cullingSystem,
+				  const JPH::Array<Entity>& visibleEntities) {
 	auto& rc = engine.GetRenderContext();
 	auto& reg = engine.GetRegistry();
 	auto& cam = engine.GetCamera();
@@ -461,7 +292,13 @@ void RenderSystem(Engine& engine, GameContext& game) {
 	JPH::Mat44 vp{};
 	JPH::Mat44 unjitteredVp{};
 	JPH::Mat44 prevUnjitteredVp{};
-	if (auto* cComp = reg.Get<CameraComponent>(game.cameraEntity)) {
+
+	auto cameraEntities = reg.GetEntitiesWith<MainCameraTagComponent>();
+	if (cameraEntities.empty())
+		return;
+	Entity cameraEntity = cameraEntities[0];
+
+	if (auto* cComp = reg.Get<CameraSystem::CameraComponent>(cameraEntity)) {
 		vp = cComp->viewProj;
 		unjitteredVp = cComp->unjitteredViewProj;
 		prevUnjitteredVp = cComp->prevUnjitteredViewProj;
@@ -473,12 +310,18 @@ void RenderSystem(Engine& engine, GameContext& game) {
 	JPH::Vec4 probeMin(0, 0, 0, 0);
 	JPH::Vec4 probeMax(0, 0, 0, 0);
 	JPH::Vec4 probePos(0, 0, 0, 0);
-	if (auto* pp = reg.Get<PostProcessComponent>(game.settingsEntity)) {
-		enableRTR = pp->enableRTR;
-		probeMin = JPH::Vec4(pp->probeMin.GetX(), pp->probeMin.GetY(), pp->probeMin.GetZ(),
-							 pp->useLocalProbe ? 1.0f : 0.0f);
-		probeMax = JPH::Vec4(pp->probeMax.GetX(), pp->probeMax.GetY(), pp->probeMax.GetZ(), 0.0f);
-		probePos = JPH::Vec4(pp->probePos.GetX(), pp->probePos.GetY(), pp->probePos.GetZ(), 0.0f);
+
+	auto settingsEntities = reg.GetEntitiesWith<GlobalSettingsTagComponent>();
+	if (!settingsEntities.empty()) {
+		if (auto* pp = reg.Get<PostProcessComponent>(settingsEntities[0])) {
+			enableRTR = pp->enableRTR;
+			probeMin = JPH::Vec4(pp->probeMin.GetX(), pp->probeMin.GetY(), pp->probeMin.GetZ(),
+								 pp->useLocalProbe ? 1.0f : 0.0f);
+			probeMax =
+				JPH::Vec4(pp->probeMax.GetX(), pp->probeMax.GetY(), pp->probeMax.GetZ(), 0.0f);
+			probePos =
+				JPH::Vec4(pp->probePos.GetX(), pp->probePos.GetY(), pp->probePos.GetZ(), 0.0f);
+		}
 	}
 
 	JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f};
@@ -490,6 +333,11 @@ void RenderSystem(Engine& engine, GameContext& game) {
 	JPH::Mat44 biasMatrix = {JPH::Vec4(0.5f, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, -0.5f, 0.0f, 0.0f),
 							 JPH::Vec4(0.0f, 0.0f, 1.0f, 0.0f), JPH::Vec4(0.5f, 0.5f, 0.0f, 1.0f)};
 	JPH::Mat44 lightSpaceBiased = biasMatrix * shadowProjView;
+
+	TAAState taaState{};
+	if (auto* taaComp = reg.Get<TAASettingsComponent>(cameraEntity)) {
+		taaState = taaComp->state;
+	}
 
 	FrameUniforms uniforms{};
 	uniforms.viewProj = vp;
@@ -503,17 +351,17 @@ void RenderSystem(Engine& engine, GameContext& game) {
 	uniforms.probeMin = probeMin;
 	uniforms.probeMax = probeMax;
 	uniforms.probePos = probePos;
-	uniforms.jitterParams = JPH::Vec4(game.taaState.jitterX, game.taaState.jitterY,
-									  game.taaState.prevJitterX, game.taaState.prevJitterY);
+	uniforms.jitterParams =
+		JPH::Vec4(taaState.jitterX, taaState.jitterY, taaState.prevJitterX, taaState.prevJitterY);
 	uniforms.enableRTR = enableRTR;
 
-	rc.SetTAAState(game.taaState);
+	rc.SetTAAState(taaState);
 	Renderer::SetFrameData(rc, uniforms, shadowProjView);
 	Renderer::SetMatrices(rc, vp, unjitteredVp);
 
 	engine.BeginFrame();
 
-	for (Entity e : game.visibleEntities) {
+	for (Entity e : visibleEntities) {
 		auto* mesh = reg.Get<MeshComponent>(e);
 		if (mesh == nullptr) {
 			continue;
@@ -536,11 +384,18 @@ void RenderSystem(Engine& engine, GameContext& game) {
 	}
 
 	CullingStats::TotalObjects = reg.GetEntitiesWith<MeshComponent>().size();
-	CullingStats::CulledObjects = CullingStats::TotalObjects - game.visibleEntities.size();
+	CullingStats::CulledObjects = CullingStats::TotalObjects - visibleEntities.size();
 
-	Renderer::DrawUI(rc, game.helloText, game.fontAtlasIdx);
+	for (Entity e : reg.GetEntitiesWith<TextComponent>()) {
+		auto* text = reg.Get<TextComponent>(e);
+		if (text->mesh.vertexBuffer == BufferHandle::Invalid) {
+			text->mesh = GUI::CreateTextMesh(rc, text->text.c_str(), text->x, text->y, text->scale,
+											 text->color);
+		}
+		Renderer::DrawUI(rc, text->mesh, text->fontIndex);
+	}
 
-	DebugDrawSystem(engine, game);
+	DebugDrawSystem(engine, cullingSystem);
 
 	engine.EndFrame();
 }
@@ -549,10 +404,16 @@ void RenderSystem(Engine& engine, GameContext& game) {
 // GAME APPLICATION INTERFACE IMPLEMENTATION
 // ============================================================================
 
-bool InitializeGame(Engine& engine, GameContext& game) {
+bool InitializeGame(Engine& engine, ScriptRunner& scriptRunner) {
 	auto& rc = engine.GetRenderContext();
 	auto& reg = engine.GetRegistry();
 	auto& pc = engine.GetPhysicsContext();
+
+	// 1. Create a thin procedural box mesh (0.02m x 0.02m x 1.0m) to represent our lines.
+	// A half-extent of 0.5 on the Z-axis gives a total length of 1.0, which scales correctly with
+	// line lengths.
+	Mesh lineMesh = AssetFactory::CreateBox(rc, {0.01f, 0.01f, 0.5f}, {0.0f, 1.0f, 1.0f, 1.0f});
+	Material lineMat = AssetFactory::CreateBasicMaterial(rc);
 
 	ZHLN_GameState defaultState{};
 	defaultState.giMode = 1;
@@ -582,13 +443,20 @@ bool InitializeGame(Engine& engine, GameContext& game) {
 	defaultState.enableTAA = 1;
 	defaultState.taaFeedback = 0.95f;
 
+	// 2. Populate debug line state parameters
+	defaultState.debugLineVbo = static_cast<uint64_t>(lineMesh.vertexBuffer);
+	defaultState.debugLinePipeline = static_cast<uint64_t>(lineMat.pipeline);
+	defaultState.debugLineAlbedo = lineMat.albedoIndex;
+
 	ZHLN_SetGameState(reinterpret_cast<ZHLN_Engine*>(&engine), &defaultState);
 
 	reg.RegisterComponents<TransformComponent, MeshComponent, PhysicsComponent,
 						   PhysicsStateComponent, MovementComponent, ALife::ALifeComponent,
 						   RagdollComponent, NameComponent, TargetCameraComponent,
 						   InputSystem::InputComponent, LightingSystem::LightComponent,
-						   PostProcessComponent, CameraComponent>();
+						   PostProcessComponent, CameraSystem::CameraComponent, PlayerTagComponent,
+						   MainCameraTagComponent, GlobalSettingsTagComponent, TAASettingsComponent,
+						   TextComponent, UISettingsComponent>();
 
 	auto groundShape =
 		Physics::GetOrCreateShape(pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
@@ -598,32 +466,35 @@ bool InitializeGame(Engine& engine, GameContext& game) {
 				pc, groundShape, {0, 0, 0}, JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0)});
 	reg.Add(ground, PhysicsStateComponent{});
 
-	game.playerEntity = reg.Create();
-	reg.Add(game.playerEntity, TransformComponent{.position = {0.0f, 3.0f, 0.0f}});
-	reg.Add(game.playerEntity, MovementComponent{});
-	reg.Add(game.playerEntity, InputSystem::InputComponent{});
+	Entity playerEntity = reg.Create();
+	reg.Add(playerEntity, PlayerTagComponent{});
+	reg.Add(playerEntity, TransformComponent{.position = {0.0f, 3.0f, 0.0f}});
+	reg.Add(playerEntity, MovementComponent{});
+	reg.Add(playerEntity, InputSystem::InputComponent{});
 	Entity charPhys = Physics::CreateCharacter(pc, JPH::RVec3(0.0f, 3.0f, 0.0f));
-	reg.Add(game.playerEntity, PhysicsComponent{charPhys});
-	reg.Add(game.playerEntity, PhysicsStateComponent{.currPosition = {0.0f, 3.0f, 0.0f},
-													 .prevPosition = {0.0f, 3.0f, 0.0f}});
+	reg.Add(playerEntity, PhysicsComponent{charPhys});
+	reg.Add(playerEntity, PhysicsStateComponent{.currPosition = {0.0f, 3.0f, 0.0f},
+												.prevPosition = {0.0f, 3.0f, 0.0f}});
 
-	game.cameraEntity = reg.Create();
-	reg.Add(game.cameraEntity, TargetCameraComponent{.target = game.playerEntity,
-													 .distance = 4.5f,
-													 .targetDistance = 4.5f,
-													 .yaw = -90.0f,
-													 .pitch = -10.0f,
-													 .stiffness = 15.0f,
-													 .vignetteIntensity = 1.10f,
-													 .vignettePower = 1.50f,
-													 .fov = 45.0f,
-													 .targetFov = 45.0f});
-	reg.Add(game.cameraEntity, InputSystem::InputComponent{});
-	reg.Add(game.cameraEntity, CameraComponent{});
+	Entity cameraEntity = reg.Create();
+	reg.Add(cameraEntity, MainCameraTagComponent{});
+	reg.Add(cameraEntity, TargetCameraComponent{.target = playerEntity,
+												.distance = 4.5f,
+												.targetDistance = 4.5f,
+												.yaw = -90.0f,
+												.pitch = -10.0f,
+												.stiffness = 15.0f,
+												.vignetteIntensity = 1.10f,
+												.vignettePower = 1.50f,
+												.fov = 45.0f,
+												.targetFov = 45.0f});
+	reg.Add(cameraEntity, InputSystem::InputComponent{});
+	reg.Add(cameraEntity, CameraSystem::CameraComponent{});
+	reg.Add(cameraEntity, TAASettingsComponent{.state = {.enabled = true, .feedback = 0.95f}});
 
-	// Construct PostProcessComponent directly as a temporary
-	game.settingsEntity = reg.Create();
-	reg.Add(game.settingsEntity,
+	Entity settingsEntity = reg.Create();
+	reg.Add(settingsEntity, GlobalSettingsTagComponent{});
+	reg.Add(settingsEntity,
 			PostProcessComponent{
 				.giMode = defaultState.giMode,
 				.aoRadius = defaultState.aoRadius,
@@ -641,11 +512,8 @@ bool InitializeGame(Engine& engine, GameContext& game) {
 				.vignetteIntensity = defaultState.vignetteIntensity,
 				.vignettePower = defaultState.vignettePower,
 				.enableSSR = defaultState.enableSSR,
-				.enableRTR = defaultState.enableRTR,
-				.enableTAA = defaultState.enableTAA,
-				.taaFeedback = defaultState.taaFeedback});
+				.enableRTR = defaultState.enableRTR});
 
-	// Construct LightComponents directly as temporaries
 	Entity areaLight = reg.Create();
 	reg.Add(areaLight, LightingSystem::LightComponent{.type = 3,
 													  .color = {1.0f, 0.8f, 0.6f},
@@ -683,46 +551,47 @@ bool InitializeGame(Engine& engine, GameContext& game) {
 										   .twoSided = 0},
 			TransformComponent{.position = {5.0f, 4.0f, 0.0f}});
 
-	game.scriptRunner = new ScriptRunner();
-	game.gameplayWatcher = new FileWatcher("scripts/gameplay.lua");
-	game.fontAtlasIdx = AssetFactory::CreateFontAtlasTexture(rc);
-	game.helloText = GUI::CreateTextMesh(rc, "Zahlen Engine - TADC Dorm Showcase", 25.0f, 25.0f,
-										 2.5f, {0.9f, 0.1f, 0.1f, 1.0f});
+	Entity uiSettings = reg.Create();
+	reg.Add(uiSettings,
+			UISettingsComponent{.defaultFontAtlasIdx = AssetFactory::CreateFontAtlasTexture(rc)});
 
-	game.articulationSystem = new ArticulationSystem();
-	game.animationSystem = new AnimationSystem();
-	game.transformSystem = new TransformSystem();
-	game.lightingSystem = new LightingSystem();
-	game.cullingSystem = new CullingSystem();
-	game.inputSystem = new InputSystem();
+	Entity textEnt = reg.Create();
+	reg.Add(
+		textEnt,
+		TextComponent{.text = "Zahlen Engine - TADC Dorm Showcase",
+					  .x = 25.0f,
+					  .y = 25.0f,
+					  .scale = 2.5f,
+					  .color = {0.9f, 0.1f, 0.1f, 1.0f},
+					  .fontIndex = reg.Get<UISettingsComponent>(uiSettings)->defaultFontAtlasIdx});
 
 	return true;
 }
 
-void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, GameContext& game) {
-	game.inputSystem->Update(engine);
-	UISystem(engine, game);
-	PostProcessSystem(engine, game);
-	game.inputSystem->PlayerInputTranslate(engine, engine.GetCamera());
+void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, ScriptRunner& scriptRunner,
+				FileWatcher& gameplayWatcher, InputSystem& inputSystem,
+				AnimationSystem& animationSystem, ArticulationSystem& articulationSystem,
+				TransformSystem& transformSystem) {
+	inputSystem.Update(engine);
+	UISystem(engine, scriptRunner);
+	PostProcessSystem(engine);
+	inputSystem.PlayerInputTranslate(engine, engine.GetCamera());
 
 	if constexpr (isDev) {
 		static float watcherAccumulator = 0.0f;
 		watcherAccumulator += dt;
 		if (watcherAccumulator >= 2.0f) {
 			watcherAccumulator = 0.0f;
-			if (game.gameplayWatcher->CheckModified()) {
-				game.scriptRunner->ReloadFile("scripts/gameplay.lua");
+			if (gameplayWatcher.CheckModified()) {
+				scriptRunner.ReloadFile("scripts/gameplay.lua");
 			}
 		}
 	}
-	// TODO(Evilpasture): Documented as a hack for interpolation. While it works during CPU-bound,
-	// it doesn't work for GPU bound.
+
 	float cappedDt = std::min(dt, 0.1f);
 	physicsAccumulator += cappedDt;
 	constexpr float targetDt = 1.0f / 60.0f;
 
-	// TODO(Evilpasture): Documented as suspicious for interpolation failure during GPU bound
-	// scenarios. Do we clamp the accumulator? Or remove or change this line?
 	physicsAccumulator = std::min(physicsAccumulator, targetDt * 4.0f);
 
 	{
@@ -730,8 +599,6 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, GameContext
 		while (physicsAccumulator >= targetDt) {
 			ZHLN::MovementSystem(engine, targetDt);
 			engine.GetPhysicsContext().Step(targetDt);
-			// TODO(Evilpasture): Documented as suspicious for interpolation failure during GPU
-			// bound scenarios. Possibly redundant? Do we remove?
 			ZHLN::PhysicsStateSystem::WriteBack(engine);
 			physicsAccumulator -= targetDt;
 		}
@@ -746,33 +613,40 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, GameContext
 
 	{
 		ZHLN_PROFILE_SCOPE("ECS System: Script/Lua Update");
-		game.scriptRunner->CallUpdate(&engine, dt);
+		scriptRunner.CallUpdate(&engine, dt);
 	}
 
 	{
 		ZHLN_PROFILE_SCOPE("ECS System: Animation Update");
-		game.animationSystem->UpdateAnimations(engine.GetRenderContext(), engine.GetRegistry(), dt);
+		animationSystem.UpdateAnimations(engine.GetRenderContext(), engine.GetRegistry(), dt);
 	}
 
 	{
 		ZHLN_PROFILE_SCOPE("ECS System: Articulation/Ragdoll");
-		game.articulationSystem->Update(engine, dt);
+		articulationSystem.Update(engine, dt);
 	}
 
 	{
 		ZHLN_PROFILE_SCOPE("ECS System: Resolve Transforms");
-		game.transformSystem->ResolveTransforms(engine.GetRegistry());
+		transformSystem.ResolveTransforms(engine.GetRegistry());
 	}
 }
 
-void RenderGame(Engine& engine, float frameTime, float physicsAccumulator, GameContext& game) {
+void RenderGame(Engine& engine, float frameTime, float physicsAccumulator,
+				CullingSystem& cullingSystem, LightingSystem& lightingSystem) {
 	constexpr float targetDt = 1.0f / 60.0f;
 	float alpha = physicsAccumulator / targetDt;
 
-	CameraSystem(engine, game, frameTime, alpha);
-	game.cullingSystem->Update<false>(engine, game.visibleEntities);
-	game.lightingSystem->Update(engine, frameTime);
-	RenderSystem(engine, game);
+	TargetCameraSystem camSys;
+	camSys.Update(engine, frameTime, alpha);
+
+	CameraSystem standardCamSys;
+	standardCamSys.Update(engine, frameTime, alpha);
+
+	JPH::Array<Entity> visibleEntities;
+	cullingSystem.Update<false>(engine, visibleEntities);
+	lightingSystem.Update(engine, frameTime);
+	RenderSystem(engine, cullingSystem, visibleEntities);
 
 	{
 		ZHLN_PROFILE_SCOPE("ECS System: Audio Update");
@@ -781,19 +655,9 @@ void RenderGame(Engine& engine, float frameTime, float physicsAccumulator, GameC
 
 	{
 		ZHLN_PROFILE_SCOPE("ECS System: Update Transform History");
-		game.transformSystem->UpdateTransformHistory(engine.GetRegistry());
+		TransformSystem ts;
+		ts.UpdateTransformHistory(engine.GetRegistry());
 	}
-}
-
-void ShutdownGame([[maybe_unused]] Engine& engine, GameContext& game) {
-	delete game.scriptRunner;
-	delete game.gameplayWatcher;
-	delete game.articulationSystem;
-	delete game.animationSystem;
-	delete game.transformSystem;
-	delete game.lightingSystem;
-	delete game.cullingSystem;
-	delete game.inputSystem;
 }
 
 } // namespace ZHLN
@@ -837,20 +701,27 @@ std::expected<std::unique_ptr<Engine>, EngineError> InitializeEngine(CommandLine
 }
 
 std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, uint32_t fpsLimit) {
-	GameContext game{};
+	ScriptRunner scriptRunner;
+	FileWatcher gameplayWatcher("scripts/gameplay.lua");
+	ArticulationSystem articulationSystem;
+	AnimationSystem animationSystem;
+	TransformSystem transformSystem;
+	LightingSystem lightingSystem;
+	CullingSystem cullingSystem;
+	InputSystem inputSystem;
 
-	if (!ZHLN::InitializeGame(*engine, game)) {
+	if (!ZHLN::InitializeGame(*engine, scriptRunner)) {
 		return std::unexpected(
 			EngineError{.msg = "Game failed to initialize.", .code = EXIT_FAILURE});
 	}
 
 	for (int i = 0; i < 3; ++i) {
 		engine->ProcessEvents();
-		ZHLN::RenderGame(*engine, 0.016f, 0.0f, game);
+		ZHLN::RenderGame(*engine, 0.016f, 0.0f, cullingSystem, lightingSystem);
 	}
 
 	ZHLN::Log("Window active and presenting. Loading scene assets...");
-	game.scriptRunner->RunFile("scripts/gameplay.lua");
+	scriptRunner.RunFile("scripts/gameplay.lua");
 
 	float physicsAccumulator = 0.0f;
 	const double targetFrameTime = fpsLimit > 0 ? 1.0 / static_cast<double>(fpsLimit) : 0.0;
@@ -883,8 +754,9 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, ui
 			continue;
 		}
 
-		ZHLN::UpdateGame(*engine, frameTime, physicsAccumulator, game);
-		ZHLN::RenderGame(*engine, frameTime, physicsAccumulator, game);
+		ZHLN::UpdateGame(*engine, frameTime, physicsAccumulator, scriptRunner, gameplayWatcher,
+						 inputSystem, animationSystem, articulationSystem, transformSystem);
+		ZHLN::RenderGame(*engine, frameTime, physicsAccumulator, cullingSystem, lightingSystem);
 
 		if (fpsLimit > 0) {
 			auto now = std::chrono::high_resolution_clock::now();
@@ -910,7 +782,6 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, ui
 		}
 	}
 
-	ZHLN::ShutdownGame(*engine, game);
 	TaskSystem::Shutdown();
 
 	return EXIT_SUCCESS;

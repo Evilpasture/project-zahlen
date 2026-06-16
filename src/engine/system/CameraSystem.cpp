@@ -8,16 +8,12 @@
 #include "Zahlen/Window.hpp"
 #include "ecs/ECS.hpp"
 
-// NOTE: This code wouldn't compile until all TODOs are fixed.
 namespace ZHLN {
 
-// TODO(Evilpasture): Decouple game context. It's not a system if it needs to know about the game
-// state.
-void CameraSystem::Update(Engine& engine, GameContext& game, float dt, float alpha) {
+void CameraSystem::Update(Engine& engine, float dt, float alpha) {
 	auto& reg = engine.GetRegistry();
 	auto& cam = engine.GetCamera();
 
-	// TODO(Evilpasture): Suggest parallelism with fibers.
 	for (Entity camEnt : reg.GetEntitiesWith<TargetCameraComponent>()) {
 		auto* camComp = reg.Get<TargetCameraComponent>(camEnt);
 		auto* input = reg.Get<InputSystem::InputComponent>(camEnt);
@@ -106,46 +102,18 @@ void CameraSystem::Update(Engine& engine, GameContext& game, float dt, float alp
 			JPH::Mat44 unjitteredProj = cam.GetProjectionMatrix((float)res.width / res.height);
 			cComp->unjitteredViewProj = unjitteredProj * cam.GetViewMatrix();
 
-			// TODO(Evilpasture): Solved if decoupled from game state.
-			if (game.taaState.enabled) {
-				game.taaState.frameIndex++;
-				cComp->viewProj = cam.GetJitteredProjectionMatrix(res.width / res.height, res.width,
-																  res.height, game.taaState) *
-								  cam.GetViewMatrix();
+			auto* taaComp = reg.Get<TAASettingsComponent>(e);
+			if ((taaComp != nullptr) && taaComp->state.enabled) {
+				taaComp->state.frameIndex++;
+				cComp->viewProj =
+					cam.GetJitteredProjectionMatrix((float)res.width / res.height, res.width,
+													res.height, taaComp->state) *
+					cam.GetViewMatrix();
 			} else {
-				game.taaState.frameIndex = 0;
-				cComp->viewProj = cComp->unjitteredViewProj;
-			}
-
-			static bool s_WasFrozen = false;
-
-			// TODO(Evilpasture): My God, move this to the CullingSystem!
-			if (CullingStats::FreezeFrustum) {
-				if (!s_WasFrozen) {
-					cComp->frozenViewProj = cComp->unjitteredViewProj;
-					JPH::Mat44 invVP = cComp->unjitteredViewProj.Inversed();
-					auto ndc = std::to_array<JPH::Vec4>({{-1.0f, -1.0f, 0.0f, 1.0f},
-														 {1.0f, -1.0f, 0.0f, 1.0f},
-														 {1.0f, 1.0f, 0.0f, 1.0f},
-														 {-1.0f, 1.0f, 0.0f, 1.0f},
-														 {-1.0f, -1.0f, 1.0f, 1.0f},
-														 {1.0f, -1.0f, 1.0f, 1.0f},
-														 {1.0f, 1.0f, 1.0f, 1.0f},
-														 {-1.0f, 1.0f, 1.0f, 1.0f}});
-					for (int i = 0; i < 8; ++i) {
-						JPH::Vec4 worldPos = invVP * ndc[i];
-						float w = worldPos.GetW();
-						if (std::abs(w) > 1e-6f) {
-							game.frustumCorners[i] = JPH::Vec3(
-								worldPos.GetX() / w, worldPos.GetY() / w, worldPos.GetZ() / w);
-						}
-					}
-					s_WasFrozen = true;
+				if (taaComp != nullptr) {
+					taaComp->state.frameIndex = 0;
 				}
-				cam.frustum.Update(cComp->frozenViewProj);
-			} else {
-				cam.frustum.Update(cComp->unjitteredViewProj);
-				s_WasFrozen = false;
+				cComp->viewProj = cComp->unjitteredViewProj;
 			}
 
 			cComp->frameCounter++;

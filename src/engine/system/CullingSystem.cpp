@@ -3,6 +3,8 @@
 
 #include "CullingSystem.hpp"
 
+#include "engine/system/CameraSystem.hpp"
+
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
@@ -76,6 +78,47 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible) {
 	auto& reg = engine.GetRegistry();
 
 	auto entities = reg.GetEntitiesWith<MeshComponent>();
+	auto cameraEntities = reg.GetEntitiesWith<CameraSystem::CameraComponent>();
+
+	CameraSystem::CameraComponent* cComp = nullptr;
+	if (!cameraEntities.empty()) {
+		cComp = reg.Get<CameraSystem::CameraComponent>(cameraEntities[0]);
+	}
+
+	static bool s_WasFrozen = false;
+	if (CullingStats::FreezeFrustum) {
+		if (!s_WasFrozen) {
+			if (cComp != nullptr) {
+				cComp->frozenViewProj = cComp->unjitteredViewProj;
+				JPH::Mat44 invVP = cComp->frozenViewProj.Inversed();
+				auto ndc = std::to_array<JPH::Vec4>({{-1.0f, -1.0f, 0.0f, 1.0f},
+													 {1.0f, -1.0f, 0.0f, 1.0f},
+													 {1.0f, 1.0f, 0.0f, 1.0f},
+													 {-1.0f, 1.0f, 0.0f, 1.0f},
+													 {-1.0f, -1.0f, 1.0f, 1.0f},
+													 {1.0f, -1.0f, 1.0f, 1.0f},
+													 {1.0f, 1.0f, 1.0f, 1.0f},
+													 {-1.0f, 1.0f, 1.0f, 1.0f}});
+				for (int i = 0; i < 8; ++i) {
+					JPH::Vec4 worldPos = invVP * ndc[i];
+					float w = worldPos.GetW();
+					if (std::abs(w) > 1e-6f) {
+						m_frustumCorners[i] = JPH::Vec3(worldPos.GetX() / w, worldPos.GetY() / w,
+														worldPos.GetZ() / w);
+					}
+				}
+			}
+			s_WasFrozen = true;
+		}
+		if (cComp != nullptr) {
+			cam.frustum.Update(cComp->frozenViewProj);
+		}
+	} else {
+		if (cComp != nullptr) {
+			cam.frustum.Update(cComp->unjitteredViewProj);
+		}
+		s_WasFrozen = false;
+	}
 
 	if (!CullingStats::EnableCulling) {
 		outVisible.assign(entities.begin(), entities.end());

@@ -8,8 +8,8 @@
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <Zahlen/Math3D.hpp>
-#include <detail/String.hpp>
 #include <array>
+#include <detail/String.hpp>
 
 namespace ZHLN {
 
@@ -141,4 +141,27 @@ struct TargetCameraComponent {
 // Ensure FFI consumers (LuaJIT) account for the new size.
 static_assert(sizeof(TargetCameraComponent) == 112,
 			  "TargetCameraComponent layout must remain stable for FFI.");
+
+struct PlayerTagComponent {};
+struct MainCameraTagComponent {};
+struct GlobalSettingsTagComponent {};
+
+struct TAASettingsComponent {
+	TAAState state{};
+};
+
+struct TextComponent {
+	String256 text;
+	float x = 0.0f;
+	float y = 0.0f;
+	float scale = 1.0f;
+	JPH::Vec4 color = {1.0f, 1.0f, 1.0f, 1.0f};
+	uint32_t fontIndex = 0;
+	Mesh mesh{};
+};
+
+struct UISettingsComponent {
+	uint32_t defaultFontAtlasIdx = 0;
+};
+
 } // namespace ZHLN

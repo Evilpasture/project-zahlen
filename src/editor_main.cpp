@@ -431,8 +431,8 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 			}
 
 			cam.frustum.Update(vp);
-
-			CullingSystem<true>(*engine, s_VisibleEntities);
+			static auto* cullingSystem = new CullingSystem();
+			cullingSystem->Update<true>(*engine, s_VisibleEntities);
 
 			JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f};
 			JPH::Mat44 lightView =
@@ -493,9 +493,9 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 						 .prevTransform = mesh->prevTransform,
 						 .cullRadius = mesh->cullRadius,
 						 .jointOffset = mesh->jointOffset,
-												 .morphOffset = mesh->morphOffset,
-												 .activeMorphCount = mesh->activeMorphCount,
-												 .morphWeights = mesh->morphWeights.data(),
+						 .morphOffset = mesh->morphOffset,
+						 .activeMorphCount = mesh->activeMorphCount,
+						 .morphWeights = mesh->morphWeights.data(),
 						 .flags = mesh->isSkinned ? DrawFlags::Skinned : DrawFlags::None});
 				}
 			}

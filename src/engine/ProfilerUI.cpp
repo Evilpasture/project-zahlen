@@ -114,7 +114,7 @@ ScopedTimer::~ScopedTimer() noexcept {
 // DrawProfiler Interface
 // ============================================================================
 
-void DrawProfiler(Engine& engine, TAAState& taaState) {
+void DrawProfiler(Engine& engine) {
 	if (ImGui::Begin("Zahlen Profiler")) {
 
 		// 1. TIMINGS (Rendered together but clearly separated by name)
@@ -192,9 +192,13 @@ void DrawProfiler(Engine& engine, TAAState& taaState) {
 
 		// 6. ANTI-ALIASING
 		if (ImGui::CollapsingHeader("Anti-Aliasing", ImGuiTreeNodeFlags_DefaultOpen)) {
-			ImGui::Checkbox("Enable TAA", &taaState.enabled);
-			if (taaState.enabled) {
-				ImGui::SliderFloat("TAA Blend", &taaState.feedback, 0.8f, 0.99f);
+			auto taaEnts = engine.GetRegistry().GetEntitiesWith<TAASettingsComponent>();
+			if (!taaEnts.empty()) {
+				auto* taa = engine.GetRegistry().Get<TAASettingsComponent>(taaEnts[0]);
+				ImGui::Checkbox("Enable TAA", &taa->state.enabled);
+				if (taa->state.enabled) {
+					ImGui::SliderFloat("TAA Blend", &taa->state.feedback, 0.8f, 0.99f);
+				}
 			}
 		}
 
