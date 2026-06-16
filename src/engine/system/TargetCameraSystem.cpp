@@ -76,12 +76,10 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 	JPH::Vec3 offsetDir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad),
 						JPH::Sin(yawRad) * JPH::Cos(pitchRad));
 
-	JPH::Vec3 offsetVec(camComp->targetOffset[0], camComp->targetOffset[1],
-						camComp->targetOffset[2]);
+	JPH::Vec3 offsetVec = camComp->targetOffset;
 
 	// Filter out high-frequency physics collision resolution jitter from Jolt character virtual
-	JPH::Vec3 smoothTargetPos(camComp->smoothTargetPos[0], camComp->smoothTargetPos[1],
-							  camComp->smoothTargetPos[2]);
+	JPH::Vec3 smoothTargetPos = camComp->smoothTargetPos;
 
 	if (camComp->hasInitSmoothTarget == 0) {
 		smoothTargetPos = targetPos;
@@ -97,9 +95,7 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 		smoothTargetPos = targetPos;
 	}
 
-	camComp->smoothTargetPos[0] = smoothTargetPos.GetX();
-	camComp->smoothTargetPos[1] = smoothTargetPos.GetY();
-	camComp->smoothTargetPos[2] = smoothTargetPos.GetZ();
+	camComp->smoothTargetPos = smoothTargetPos;
 
 	cam.position = smoothTargetPos - (offsetDir.Normalized() * camComp->distance) + offsetVec;
 }

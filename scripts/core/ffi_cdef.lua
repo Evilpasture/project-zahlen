@@ -228,15 +228,15 @@ if not ok then
             float    targetDistance;
             float    yaw;
             float    pitch;
-            float    targetOffset[3];
+            float    targetOffset[4] __attribute__((aligned(16)));
             float    stiffness;
             float    vignetteIntensity;
             float    vignettePower;
             float    fov;
             float    targetFov;
-            float    smoothTargetPos[3];
+            float    smoothTargetPos[4] __attribute__((aligned(16)));
             uint32_t hasInitSmoothTarget;
-        } TargetCameraComponent;
+        } __attribute__((aligned(16))) TargetCameraComponent;
 
     ]]
 end

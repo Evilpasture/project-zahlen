@@ -9,6 +9,7 @@
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <Zahlen/Math3D.hpp>
 #include <detail/String.hpp>
+#include <array>
 
 namespace ZHLN {
 
@@ -41,7 +42,7 @@ struct MeshComponent {
 	// --- NEW: Morph Target tracking ---
 	uint32_t morphOffset = 0;
 	uint32_t activeMorphCount = 0;
-	float morphWeights[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+	std::array<float, 4> morphWeights = {0.0f, 0.0f, 0.0f, 0.0f};
 
 	void* gltfNode = nullptr;
 	void* gltfSkin = nullptr;
@@ -76,8 +77,8 @@ struct MovementComponent {
 	float currentYVel = 0.0f;
 	float speed = 7.0f;
 	float jumpForce = 12.0f;
-	float orientation[4] = {0.0f, 0.0f, 0.0f, 1.0f}; // x, y, z, w (identity)
-	float prevOrientation[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+	JPH::Quat orientation = JPH::Quat::sIdentity();
+	JPH::Quat prevOrientation = JPH::Quat::sIdentity();
 	float landingTimer = 0.0f;
 	float jumpDelayTimer = 0.0f;
 
@@ -122,7 +123,7 @@ struct TargetCameraComponent {
 	float targetDistance = 4.5f;
 	float yaw = -90.0f;
 	float pitch = -10.0f;
-	float targetOffset[3] = {0.0f, 1.3f, 0.0f};
+	JPH::Vec3 targetOffset = JPH::Vec3(0.0f, 1.3f, 0.0f);
 	float stiffness = 15.0f;
 
 	// --- Camera-bound Post-Processing ---
@@ -132,10 +133,12 @@ struct TargetCameraComponent {
 	float targetFov = 45.0f;
 
 	// --- Internal State ---
-	float smoothTargetPos[3] = {0.0f, 0.0f, 0.0f};
+	JPH::Vec3 smoothTargetPos = JPH::Vec3::sZero();
 	uint32_t hasInitSmoothTarget = 0;
 };
 
-static_assert(sizeof(TargetCameraComponent) == 72,
+// Updated: now uses JPH SIMD types which increase size/alignment (Vec3 is 16-byte)
+// Ensure FFI consumers (LuaJIT) account for the new size.
+static_assert(sizeof(TargetCameraComponent) == 112,
 			  "TargetCameraComponent layout must remain stable for FFI.");
 } // namespace ZHLN

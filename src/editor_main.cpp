@@ -493,9 +493,9 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 						 .prevTransform = mesh->prevTransform,
 						 .cullRadius = mesh->cullRadius,
 						 .jointOffset = mesh->jointOffset,
-						 .morphOffset = mesh->morphOffset,
-						 .activeMorphCount = mesh->activeMorphCount,
-						 .morphWeights = mesh->morphWeights,
+												 .morphOffset = mesh->morphOffset,
+												 .activeMorphCount = mesh->activeMorphCount,
+												 .morphWeights = mesh->morphWeights.data(),
 						 .flags = mesh->isSkinned ? DrawFlags::Skinned : DrawFlags::None});
 				}
 			}

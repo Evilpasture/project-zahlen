@@ -83,11 +83,8 @@ void PhysicsStateSystem::WriteBack(Engine& engine) noexcept {
 			if (isCharacter) {
 				auto* move = reg.Get<MovementComponent>(e);
 				if (move != nullptr) {
-					state->prevRotation =
-						JPH::Quat(move->prevOrientation[0], move->prevOrientation[1],
-								  move->prevOrientation[2], move->prevOrientation[3]);
-					state->currRotation = JPH::Quat(move->orientation[0], move->orientation[1],
-													move->orientation[2], move->orientation[3]);
+					state->prevRotation = move->prevOrientation;
+								state->currRotation = move->orientation;
 				} else {
 					state->prevRotation = JPH::Quat::sIdentity();
 					state->currRotation = JPH::Quat::sIdentity();

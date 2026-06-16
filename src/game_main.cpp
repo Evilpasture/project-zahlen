@@ -286,10 +286,8 @@ void CameraSystem(Engine& engine, GameContext& game, float dt, float alpha) {
 		JPH::Vec3 offsetDir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad),
 							JPH::Sin(yawRad) * JPH::Cos(pitchRad));
 
-		JPH::Vec3 offsetVec(camComp->targetOffset[0], camComp->targetOffset[1],
-							camComp->targetOffset[2]);
-		JPH::Vec3 smoothTargetPos(camComp->smoothTargetPos[0], camComp->smoothTargetPos[1],
-								  camComp->smoothTargetPos[2]);
+		JPH::Vec3 offsetVec = camComp->targetOffset;
+		JPH::Vec3 smoothTargetPos = camComp->smoothTargetPos;
 
 		if (camComp->hasInitSmoothTarget == 0) {
 			smoothTargetPos = targetPos;
@@ -305,9 +303,7 @@ void CameraSystem(Engine& engine, GameContext& game, float dt, float alpha) {
 			smoothTargetPos = targetPos;
 		}
 
-		camComp->smoothTargetPos[0] = smoothTargetPos.GetX();
-		camComp->smoothTargetPos[1] = smoothTargetPos.GetY();
-		camComp->smoothTargetPos[2] = smoothTargetPos.GetZ();
+		camComp->smoothTargetPos = smoothTargetPos;
 
 		cam.position = smoothTargetPos - (offsetDir.Normalized() * camComp->distance) + offsetVec;
 	}
@@ -685,7 +681,7 @@ void RenderSystem(Engine& engine, GameContext& game) {
 						.jointOffset = mesh->jointOffset,
 						.morphOffset = mesh->morphOffset,
 						.activeMorphCount = mesh->activeMorphCount,
-						.morphWeights = mesh->morphWeights,
+						.morphWeights = mesh->morphWeights.data(),
 						.flags = flags});
 	}
 

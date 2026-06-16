@@ -28,7 +28,7 @@ void MovementSystem(Engine& engine, float dt) {
 			MovementComponent& move = movements[i];
 			Entity e = entities[i];
 			// Record previous orientation before calculating the new one
-			std::memcpy(move.prevOrientation, move.orientation, sizeof(float) * 4);
+            move.prevOrientation = move.orientation;
 
 			auto* phys = reg.Get<PhysicsComponent>(e);
 			if (!phys) {
@@ -100,17 +100,14 @@ void MovementSystem(Engine& engine, float dt) {
 				JPH::Quat targetRotation =
 					JPH::Quat::sRotation(JPH::Vec3::sAxisY(), targetAngleRad);
 
-				JPH::Quat currentRotation(move.orientation[0], move.orientation[1],
-										  move.orientation[2], move.orientation[3]);
+				JPH::Quat currentRotation = move.orientation;
+
 
 				float turnSpeed = 10.0f;
 				JPH::Quat nextRotation =
 					currentRotation.SLERP(targetRotation, JPH::Clamp(turnSpeed * dt, 0.0f, 1.0f));
 
-				move.orientation[0] = nextRotation.GetX();
-				move.orientation[1] = nextRotation.GetY();
-				move.orientation[2] = nextRotation.GetZ();
-				move.orientation[3] = nextRotation.GetW();
+				move.orientation = nextRotation;
 			}
 		}
 	});
