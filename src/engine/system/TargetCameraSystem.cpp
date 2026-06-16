@@ -9,6 +9,9 @@
 #include "Zahlen/Input.hpp"
 #include "ecs/ECS.hpp"
 
+#include <algorithm>
+#include <cmath>
+
 namespace ZHLN {
 void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept {
 	auto& reg = engine.GetRegistry();
@@ -29,7 +32,11 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 	JPH::Vec3 targetPos = JPH::Vec3::sZero();
 
 	// 1. Resolve Target Position
-	if (auto* trans = reg.Get<TransformComponent>(targetEnt)) {
+	if (auto* state = reg.Get<PhysicsStateComponent>(targetEnt)) {
+		float clampedAlpha = std::clamp(alpha, 0.0f, 1.0f);
+		targetPos =
+			state->prevPosition + clampedAlpha * (state->currPosition - state->prevPosition);
+	} else if (auto* trans = reg.Get<TransformComponent>(targetEnt)) {
 		targetPos = JPH::Vec3(trans->position[0], trans->position[1], trans->position[2]);
 	} else if (auto* meshComp = reg.Get<MeshComponent>(targetEnt)) {
 		targetPos = meshComp->localTransform.GetTranslation();
@@ -73,16 +80,27 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 						camComp->targetOffset[2]);
 
 	// Filter out high-frequency physics collision resolution jitter from Jolt character virtual
-	static JPH::Vec3 s_SmoothTargetPos = targetPos;
-	if ((targetPos - s_SmoothTargetPos).LengthSq() > 100.0f) {
-		s_SmoothTargetPos = targetPos; // Teleport instantly on large displacements
-	} else if (camComp->stiffness > 0.0f) {
-		float factor = JPH::Clamp(camComp->stiffness * dt, 0.0f, 1.0f);
-		s_SmoothTargetPos += (targetPos - s_SmoothTargetPos) * factor;
-	} else {
-		s_SmoothTargetPos = targetPos;
+	JPH::Vec3 smoothTargetPos(camComp->smoothTargetPos[0], camComp->smoothTargetPos[1],
+							  camComp->smoothTargetPos[2]);
+
+	if (camComp->hasInitSmoothTarget == 0) {
+		smoothTargetPos = targetPos;
+		camComp->hasInitSmoothTarget = 1;
 	}
 
-	cam.position = s_SmoothTargetPos - (offsetDir.Normalized() * camComp->distance) + offsetVec;
+	if ((targetPos - smoothTargetPos).LengthSq() > 100.0f) {
+		smoothTargetPos = targetPos; // Teleport instantly on large displacements
+	} else if (camComp->stiffness > 0.0f) {
+		float factor = 1.0f - std::exp(-camComp->stiffness * dt);
+		smoothTargetPos += (targetPos - smoothTargetPos) * factor;
+	} else {
+		smoothTargetPos = targetPos;
+	}
+
+	camComp->smoothTargetPos[0] = smoothTargetPos.GetX();
+	camComp->smoothTargetPos[1] = smoothTargetPos.GetY();
+	camComp->smoothTargetPos[2] = smoothTargetPos.GetZ();
+
+	cam.position = smoothTargetPos - (offsetDir.Normalized() * camComp->distance) + offsetVec;
 }
 } // namespace ZHLN

@@ -62,6 +62,7 @@ struct PhysicsStateComponent {
 	JPH::Vec3 prevPosition = JPH::Vec3::sZero();
 	JPH::Quat currRotation = JPH::Quat::sIdentity();
 	JPH::Quat prevRotation = JPH::Quat::sIdentity();
+	uint64_t lastPhysicsSyncFrame = 0;
 };
 
 /**
@@ -129,8 +130,12 @@ struct TargetCameraComponent {
 	float vignettePower = 1.50f;
 	float fov = 45.0f;
 	float targetFov = 45.0f;
+
+	// --- Internal State ---
+	float smoothTargetPos[3] = {0.0f, 0.0f, 0.0f};
+	uint32_t hasInitSmoothTarget = 0;
 };
 
-static_assert(sizeof(TargetCameraComponent) == 56,
+static_assert(sizeof(TargetCameraComponent) == 72,
 			  "TargetCameraComponent layout must remain stable for FFI.");
 } // namespace ZHLN

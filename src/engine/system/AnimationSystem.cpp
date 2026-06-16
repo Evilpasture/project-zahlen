@@ -10,9 +10,9 @@
 
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
+#include <algorithm>
 #include <cgltf.h>
 #include <cmath>
-#include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -151,7 +151,7 @@ size_t AnimationSystem::ResolveActiveTrackIndex(cgltf_data* data, bool isPlayerM
 		for (size_t a = 0; a < data->animations_count; ++a) {
 			std::string animName =
 				(data->animations[a].name != nullptr) ? data->animations[a].name : "";
-			std::transform(animName.begin(), animName.end(), animName.begin(), ::toupper);
+			std::ranges::transform(animName, animName.begin(), ::toupper);
 
 			if (isPlayerMoving) {
 				if (animName.contains("RUN") || animName.contains("WALK") ||
@@ -354,7 +354,8 @@ void AnimationSystem::ResolveSkeletalJointMatrices(
 			if (blend.activeWeightsCount > 0) {
 				node->weights_count = blend.activeWeightsCount;
 				if (node->weights == nullptr) {
-					node->weights = (float*)std::malloc(blend.activeWeightsCount * sizeof(float));
+					node->weights =
+						static_cast<float*>(std::malloc(blend.activeWeightsCount * sizeof(float)));
 				}
 				for (uint32_t w = 0; w < blend.activeWeightsCount; ++w) {
 					node->weights[w] = blend.weights[w];

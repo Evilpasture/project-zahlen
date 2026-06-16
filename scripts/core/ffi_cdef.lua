@@ -234,6 +234,8 @@ if not ok then
             float    vignettePower;
             float    fov;
             float    targetFov;
+            float    smoothTargetPos[3];
+            uint32_t hasInitSmoothTarget;
         } TargetCameraComponent;
 
     ]]

@@ -72,6 +72,7 @@ struct EngineImpl {
 	ECS::Registry registry;
 
 	void* gameState = nullptr;
+	uint64_t frameCounter = 0;
 };
 
 Engine::Engine() : _impl(nullptr) {
@@ -236,6 +237,10 @@ void Engine::BeginFrame() {
 
 void Engine::EndFrame() {
 	_impl->renderContext->EndFrame();
+}
+
+uint64_t Engine::GetCurrentFrame() const noexcept {
+	return _impl->frameCounter;
 }
 
 Window& Engine::GetWindow() {
