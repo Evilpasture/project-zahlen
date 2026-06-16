@@ -7,10 +7,45 @@
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Input.hpp"
+#include "Zahlen/Log.hpp"
 #include "ecs/ECS.hpp"
 
 #include <algorithm>
 #include <cmath>
+
+namespace ZHLN::Tests {
+static void VerifyCameraInterpolation(const Camera& cam, float alpha) noexcept {
+	static bool testsRun = false;
+	if (testsRun) {
+		return;
+	}
+	testsRun = true;
+
+	// Test 1: Camera position is valid (finite)
+	if (!std::isfinite(cam.position.GetX()) || !std::isfinite(cam.position.GetY()) ||
+		!std::isfinite(cam.position.GetZ())) {
+		ZHLN::Log(
+			"[Test Fail] Camera Interpolation: Camera position contains NaN/Inf "
+			"({:.3f}, {:.3f}, {:.3f})",
+			cam.position.GetX(), cam.position.GetY(), cam.position.GetZ());
+	}
+
+	// Test 2: FOV is in valid range
+	if (cam.fov < 1.0f || cam.fov > 180.0f) {
+		ZHLN::Log("[Test Fail] Camera Interpolation: FOV out of range: {:.2f}", cam.fov);
+	}
+
+	// Test 3: Pitch is in valid range
+	if (cam.pitch < -90.0f || cam.pitch > 90.0f) {
+		ZHLN::Log("[Test Fail] Camera Interpolation: Pitch out of range: {:.2f}", cam.pitch);
+	}
+
+	// Test 4: Alpha is properly clamped
+	if (alpha < 0.0f || alpha > 1.0f) {
+		ZHLN::Log("[Test Fail] Camera Interpolation: Alpha out of bounds [0,1]: {:.4f}", alpha);
+	}
+}
+} // namespace ZHLN::Tests
 
 namespace ZHLN {
 void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept {
@@ -98,5 +133,9 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 	camComp->smoothTargetPos = smoothTargetPos;
 
 	cam.position = smoothTargetPos - (offsetDir.Normalized() * camComp->distance) + offsetVec;
+
+	if constexpr (isDev) {
+		ZHLN::Tests::VerifyCameraInterpolation(cam, alpha);
+	}
 }
 } // namespace ZHLN

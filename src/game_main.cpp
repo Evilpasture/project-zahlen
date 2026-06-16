@@ -9,6 +9,8 @@
 #include "ecs/ECS.hpp"
 #include "engine/FileWatcher.hpp"
 #include "engine/Platform.hpp"
+#include "engine/system/InputSystem.hpp"
+#include "engine/system/LightingSystem.hpp"
 #include "engine/system/PhysicsStateSystem.hpp"
 #include "engine/system/TargetCameraSystem.hpp"
 #include "engine/system/TransformSystem.hpp"
@@ -27,7 +29,6 @@
 #include <Zahlen/Scripting.hpp>
 #include <algorithm>
 #include <chrono>
-#include <cstddef>
 #include <detail/ControlFlow.hpp>
 #include <engine/system/AnimationSystem.hpp>
 #include <engine/system/ArticulationSystem.hpp>
@@ -49,27 +50,6 @@ namespace ZHLN {
 // ============================================================================
 // ECS Components
 // ============================================================================
-
-struct InputComponent {
-	float localMoveX = 0.0f;
-	float localMoveZ = 0.0f;
-	float lookYawDelta = 0.0f;
-	float lookPitchDelta = 0.0f;
-	float zoomDelta = 0.0f;
-	bool wantsToJump = false;
-	bool wantsToSprint = false;
-};
-
-struct LightComponent {
-	uint32_t type; // 0=Dir, 1=Point, 2=Spot, 3=Area (LTC Quad)
-	JPH::Vec3 color;
-	float intensity;
-	float radius;
-	JPH::Vec3 direction;
-	float range;
-	float points[4][4];
-	uint32_t twoSided;
-};
 
 struct PostProcessComponent {
 	int giMode;
@@ -111,6 +91,9 @@ struct GameContext {
 	ArticulationSystem* articulationSystem = nullptr;
 	AnimationSystem* animationSystem = nullptr;
 	TransformSystem* transformSystem = nullptr;
+	LightingSystem* lightingSystem = nullptr;
+	CullingSystem* cullingSystem = nullptr;
+	InputSystem* inputSystem = nullptr;
 
 	TAAState taaState{};
 	std::array<JPH::Vec3, 8> frustumCorners{};
@@ -152,97 +135,13 @@ constexpr std::array<FrustumEdge, 12> s_FrustumEdges = {{
 // Modular Systems
 // ============================================================================
 
-void InputSystem(Engine& engine) {
-	auto& input = engine.GetInput();
-	auto& reg = engine.GetRegistry();
-	auto mouse = input.GetMouse();
-
-	for (Entity e : reg.GetEntitiesWith<InputComponent>()) {
-		if (auto* ic = reg.Get<InputComponent>(e)) {
-			float moveX = 0.0f;
-			float moveZ = 0.0f;
-			if (input.IsKeyDown(KeyCode::W)) {
-				moveZ += 1.0f;
-			}
-			if (input.IsKeyDown(KeyCode::S)) {
-				moveZ -= 1.0f;
-			}
-			if (input.IsKeyDown(KeyCode::A)) {
-				moveX -= 1.0f;
-			}
-			if (input.IsKeyDown(KeyCode::D)) {
-				moveX += 1.0f;
-			}
-
-			float len = std::sqrt(moveX * moveX + moveZ * moveZ);
-			if (len > 0.001f) {
-				moveX /= len;
-				moveZ /= len;
-			}
-			ic->localMoveX = moveX;
-			ic->localMoveZ = moveZ;
-
-			if (input.IsMouseButtonDown(KeyCode::RButton)) {
-				const float sensitivity = 0.15f;
-				ic->lookYawDelta = mouse.deltaX * sensitivity;
-				ic->lookPitchDelta = mouse.deltaY * sensitivity;
-			} else {
-				ic->lookYawDelta = 0.0f;
-				ic->lookPitchDelta = 0.0f;
-			}
-
-			if (std::abs(mouse.wheel) > 0.01f) {
-				ic->zoomDelta = mouse.wheel * 0.5f;
-			} else {
-				ic->zoomDelta = 0.0f;
-			}
-
-			ic->wantsToJump = input.IsKeyDown(KeyCode::Space);
-			ic->wantsToSprint = input.IsKeyDown(KeyCode::LShift);
-		}
-	}
-}
-
-void PlayerInputTranslationSystem(Engine& engine, const Camera& cam) {
-	auto& reg = engine.GetRegistry();
-	for (Entity e : reg.GetEntitiesWith<MovementComponent>()) {
-		auto* move = reg.Get<MovementComponent>(e);
-		auto* input = reg.Get<InputComponent>(e);
-		if ((move == nullptr) || (input == nullptr)) {
-			continue;
-		}
-
-		float yawRad = JPH::DegreesToRadians(cam.yaw);
-		float forward_x = std::cos(yawRad);
-		float forward_z = std::sin(yawRad);
-		float right_x = -std::sin(yawRad);
-		float right_z = std::cos(yawRad);
-
-		float worldX = (input->localMoveZ * forward_x) + (input->localMoveX * right_x);
-		float worldZ = (input->localMoveZ * forward_z) + (input->localMoveX * right_z);
-
-		float len = std::sqrt(worldX * worldX + worldZ * worldZ);
-		if (len > 0.001f) {
-			worldX /= len;
-			worldZ /= len;
-		}
-
-		move->inputX = worldX;
-		move->inputZ = worldZ;
-		move->isSprinting = input->wantsToSprint && (len > 0.001f);
-		if (input->wantsToJump) {
-			move->jumpRequested = true;
-		}
-	}
-}
-
 void CameraSystem(Engine& engine, GameContext& game, float dt, float alpha) {
 	auto& reg = engine.GetRegistry();
 	auto& cam = engine.GetCamera();
 
 	for (Entity camEnt : reg.GetEntitiesWith<TargetCameraComponent>()) {
 		auto* camComp = reg.Get<TargetCameraComponent>(camEnt);
-		auto* input = reg.Get<InputComponent>(camEnt);
+		auto* input = reg.Get<InputSystem::InputComponent>(camEnt);
 		if ((camComp == nullptr) || (input == nullptr) || !reg.IsAlive(camComp->target)) {
 			continue;
 		}
@@ -372,65 +271,6 @@ void CameraSystem(Engine& engine, GameContext& game, float dt, float alpha) {
 	}
 }
 
-void LightingSystem(Engine& engine) {
-	auto& reg = engine.GetRegistry();
-	auto& rc = engine.GetRenderContext();
-
-	ZHLN_GameState state =
-		*static_cast<ZHLN_GameState*>(ZHLN_GetGameState(reinterpret_cast<ZHLN_Engine*>(&engine)));
-
-	std::vector<GPULight> sceneLights;
-	for (Entity e : reg.GetEntitiesWith<LightComponent>()) {
-		auto* light = reg.Get<LightComponent>(e);
-		auto* trans = reg.Get<TransformComponent>(e);
-
-		GPULight gpuLight{};
-		gpuLight.type = light->type;
-		gpuLight.color[0] = light->color.GetX();
-		gpuLight.color[1] = light->color.GetY();
-		gpuLight.color[2] = light->color.GetZ();
-		gpuLight.intensity = light->intensity;
-		gpuLight.radius = light->radius;
-		gpuLight.twoSided = light->twoSided;
-
-		if (trans != nullptr) {
-			gpuLight.position[0] = trans->position.GetX();
-			gpuLight.position[1] = trans->position.GetY();
-			gpuLight.position[2] = trans->position.GetZ();
-		}
-
-		if (gpuLight.type == 1 && gpuLight.color[2] > 0.9f) {
-			gpuLight.intensity = state.light1Intensity;
-			gpuLight.radius = state.sphereLightRadius;
-		} else if (gpuLight.type == 1 && gpuLight.color[0] > 0.9f) {
-			gpuLight.intensity = state.light2Intensity;
-			gpuLight.radius = state.sphereLightRadius;
-		}
-
-		if (gpuLight.type == 3) {
-			std::memcpy(gpuLight.points, light->points, sizeof(float) * 16);
-		}
-
-		sceneLights.push_back(gpuLight);
-	}
-
-	auto floorEntities = reg.GetEntitiesWith<NameComponent>();
-	auto floorNames = reg.GetRawArray<NameComponent>();
-	for (size_t i = 0; i < floorEntities.size(); ++i) {
-		std::string nameLower(floorNames[i].name.c_str());
-		std::ranges::transform(nameLower, nameLower.begin(), ::tolower);
-		if (nameLower.contains("floor") || nameLower.contains("ground") ||
-			nameLower.contains("lobby")) {
-			if (auto* floorMeshComp = reg.Get<MeshComponent>(floorEntities[i])) {
-				floorMeshComp->material.roughnessFactor = state.floorRoughness;
-				floorMeshComp->material.metallicFactor = state.floorMetallic;
-			}
-		}
-	}
-
-	Renderer::SetLights(rc, sceneLights.data(), sceneLights.size());
-}
-
 void UISystem(Engine& engine, GameContext& game) {
 	if (engine.GetWindow().IsTTY()) {
 		return;
@@ -511,12 +351,14 @@ void UISystem(Engine& engine, GameContext& game) {
 	}
 
 	bool useSsr = state.enableSSR != 0;
-	if (ImGui::Checkbox("Enable SSR", &useSsr))
+	if (ImGui::Checkbox("Enable SSR", &useSsr)) {
 		state.enableSSR = useSsr ? 1 : 0;
+	}
 
 	bool useRtr = state.enableRTR != 0;
-	if (ImGui::Checkbox("Enable Hardware RTR", &useRtr))
+	if (ImGui::Checkbox("Enable Hardware RTR", &useRtr)) {
 		state.enableRTR = useRtr ? 1 : 0;
+	}
 
 	ImGui::End();
 
@@ -569,8 +411,9 @@ void PostProcessSystem(Engine& engine, GameContext& game) {
 }
 
 void DebugDrawSystem(Engine& engine, GameContext& game) {
-	if (!CullingStats::FreezeFrustum)
+	if (!CullingStats::FreezeFrustum) {
 		return;
+	}
 
 	auto& rc = engine.GetRenderContext();
 	ZHLN_GameState state =
@@ -593,8 +436,9 @@ void DebugDrawSystem(Engine& engine, GameContext& game) {
 
 			JPH::Vec3 v = pB - pA;
 			float len = v.Length();
-			if (len < 1e-4f)
+			if (len < 1e-4f) {
 				continue;
+			}
 
 			JPH::Vec3 dir = v / len;
 			JPH::Vec3 mid = (pA + pB) * 0.5f;
@@ -614,7 +458,9 @@ void RenderSystem(Engine& engine, GameContext& game) {
 	auto& reg = engine.GetRegistry();
 	auto& cam = engine.GetCamera();
 
-	JPH::Mat44 vp, unjitteredVp, prevUnjitteredVp;
+	JPH::Mat44 vp{};
+	JPH::Mat44 unjitteredVp{};
+	JPH::Mat44 prevUnjitteredVp{};
 	if (auto* cComp = reg.Get<CameraComponent>(game.cameraEntity)) {
 		vp = cComp->viewProj;
 		unjitteredVp = cComp->unjitteredViewProj;
@@ -624,7 +470,9 @@ void RenderSystem(Engine& engine, GameContext& game) {
 	}
 
 	int enableRTR = 0;
-	JPH::Vec4 probeMin(0, 0, 0, 0), probeMax(0, 0, 0, 0), probePos(0, 0, 0, 0);
+	JPH::Vec4 probeMin(0, 0, 0, 0);
+	JPH::Vec4 probeMax(0, 0, 0, 0);
+	JPH::Vec4 probePos(0, 0, 0, 0);
 	if (auto* pp = reg.Get<PostProcessComponent>(game.settingsEntity)) {
 		enableRTR = pp->enableRTR;
 		probeMin = JPH::Vec4(pp->probeMin.GetX(), pp->probeMin.GetY(), pp->probeMin.GetZ(),
@@ -651,7 +499,7 @@ void RenderSystem(Engine& engine, GameContext& game) {
 	uniforms.invViewProj = unjitteredVp.Inversed();
 	std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
 	std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);
-	uniforms.lightCount = reg.GetEntitiesWith<LightComponent>().size();
+	uniforms.lightCount = reg.GetEntitiesWith<LightingSystem::LightComponent>().size();
 	uniforms.probeMin = probeMin;
 	uniforms.probeMax = probeMax;
 	uniforms.probePos = probePos;
@@ -667,12 +515,14 @@ void RenderSystem(Engine& engine, GameContext& game) {
 
 	for (Entity e : game.visibleEntities) {
 		auto* mesh = reg.Get<MeshComponent>(e);
-		if (!mesh)
+		if (mesh == nullptr) {
 			continue;
+		}
 
 		DrawFlags flags = DrawFlags::None;
-		if (mesh->isSkinned)
+		if (mesh->isSkinned) {
 			flags |= DrawFlags::Skinned;
+		}
 
 		Renderer::Draw(rc, mesh->material, mesh->mesh,
 					   {.transform = mesh->worldTransform,
@@ -736,8 +586,9 @@ bool InitializeGame(Engine& engine, GameContext& game) {
 
 	reg.RegisterComponents<TransformComponent, MeshComponent, PhysicsComponent,
 						   PhysicsStateComponent, MovementComponent, ALife::ALifeComponent,
-						   RagdollComponent, NameComponent, TargetCameraComponent, InputComponent,
-						   LightComponent, PostProcessComponent, CameraComponent>();
+						   RagdollComponent, NameComponent, TargetCameraComponent,
+						   InputSystem::InputComponent, LightingSystem::LightComponent,
+						   PostProcessComponent, CameraComponent>();
 
 	auto groundShape =
 		Physics::GetOrCreateShape(pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
@@ -750,7 +601,7 @@ bool InitializeGame(Engine& engine, GameContext& game) {
 	game.playerEntity = reg.Create();
 	reg.Add(game.playerEntity, TransformComponent{.position = {0.0f, 3.0f, 0.0f}});
 	reg.Add(game.playerEntity, MovementComponent{});
-	reg.Add(game.playerEntity, InputComponent{});
+	reg.Add(game.playerEntity, InputSystem::InputComponent{});
 	Entity charPhys = Physics::CreateCharacter(pc, JPH::RVec3(0.0f, 3.0f, 0.0f));
 	reg.Add(game.playerEntity, PhysicsComponent{charPhys});
 	reg.Add(game.playerEntity, PhysicsStateComponent{.currPosition = {0.0f, 3.0f, 0.0f},
@@ -767,7 +618,7 @@ bool InitializeGame(Engine& engine, GameContext& game) {
 													 .vignettePower = 1.50f,
 													 .fov = 45.0f,
 													 .targetFov = 45.0f});
-	reg.Add(game.cameraEntity, InputComponent{});
+	reg.Add(game.cameraEntity, InputSystem::InputComponent{});
 	reg.Add(game.cameraEntity, CameraComponent{});
 
 	// Construct PostProcessComponent directly as a temporary
@@ -796,40 +647,40 @@ bool InitializeGame(Engine& engine, GameContext& game) {
 
 	// Construct LightComponents directly as temporaries
 	Entity areaLight = reg.Create();
-	reg.Add(areaLight, LightComponent{.type = 3,
-									  .color = {1.0f, 0.8f, 0.6f},
-									  .intensity = 5.0f,
-									  .radius = 0.0f,
-									  .direction = {0.0f, -1.0f, 0.0f},
-									  .range = 0.0f,
-									  .points = {{-2.0f, 5.0f, -2.0f, 0.0f},
-												 {2.0f, 5.0f, -2.0f, 0.0f},
-												 {2.0f, 5.0f, 2.0f, 0.0f},
-												 {-2.0f, 5.0f, 2.0f, 0.0f}},
-									  .twoSided = 0});
+	reg.Add(areaLight, LightingSystem::LightComponent{.type = 3,
+													  .color = {1.0f, 0.8f, 0.6f},
+													  .intensity = 5.0f,
+													  .radius = 0.0f,
+													  .direction = {0.0f, -1.0f, 0.0f},
+													  .range = 0.0f,
+													  .points = {{-2.0f, 5.0f, -2.0f, 0.0f},
+																 {2.0f, 5.0f, -2.0f, 0.0f},
+																 {2.0f, 5.0f, 2.0f, 0.0f},
+																 {-2.0f, 5.0f, 2.0f, 0.0f}},
+													  .twoSided = 0});
 
 	Entity pt1 = reg.Create();
 	reg.Add(pt1,
-			LightComponent{.type = 1,
-						   .color = {0.0f, 0.5f, 1.0f},
-						   .intensity = defaultState.light1Intensity,
-						   .radius = defaultState.sphereLightRadius,
-						   .direction = {0.0f, 0.0f, 0.0f},
-						   .range = 0.0f,
-						   .points = {},
-						   .twoSided = 0},
+			LightingSystem::LightComponent{.type = 1,
+										   .color = {0.0f, 0.5f, 1.0f},
+										   .intensity = defaultState.light1Intensity,
+										   .radius = defaultState.sphereLightRadius,
+										   .direction = {0.0f, 0.0f, 0.0f},
+										   .range = 0.0f,
+										   .points = {},
+										   .twoSided = 0},
 			TransformComponent{.position = {-5.0f, 4.0f, 0.0f}});
 
 	Entity pt2 = reg.Create();
 	reg.Add(pt2,
-			LightComponent{.type = 1,
-						   .color = {1.0f, 0.0f, 0.5f},
-						   .intensity = defaultState.light2Intensity,
-						   .radius = defaultState.sphereLightRadius,
-						   .direction = {0.0f, 0.0f, 0.0f},
-						   .range = 0.0f,
-						   .points = {},
-						   .twoSided = 0},
+			LightingSystem::LightComponent{.type = 1,
+										   .color = {1.0f, 0.0f, 0.5f},
+										   .intensity = defaultState.light2Intensity,
+										   .radius = defaultState.sphereLightRadius,
+										   .direction = {0.0f, 0.0f, 0.0f},
+										   .range = 0.0f,
+										   .points = {},
+										   .twoSided = 0},
 			TransformComponent{.position = {5.0f, 4.0f, 0.0f}});
 
 	game.scriptRunner = new ScriptRunner();
@@ -841,15 +692,18 @@ bool InitializeGame(Engine& engine, GameContext& game) {
 	game.articulationSystem = new ArticulationSystem();
 	game.animationSystem = new AnimationSystem();
 	game.transformSystem = new TransformSystem();
+	game.lightingSystem = new LightingSystem();
+	game.cullingSystem = new CullingSystem();
+	game.inputSystem = new InputSystem();
 
 	return true;
 }
 
 void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, GameContext& game) {
-	InputSystem(engine);
+	game.inputSystem->Update(engine);
 	UISystem(engine, game);
 	PostProcessSystem(engine, game);
-	PlayerInputTranslationSystem(engine, engine.GetCamera());
+	game.inputSystem->PlayerInputTranslate(engine, engine.GetCamera());
 
 	if constexpr (isDev) {
 		static float watcherAccumulator = 0.0f;
@@ -861,10 +715,14 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, GameContext
 			}
 		}
 	}
-
+	// TODO(Evilpasture): Documented as a hack for interpolation. While it works during CPU-bound,
+	// it doesn't work for GPU bound.
 	float cappedDt = std::min(dt, 0.1f);
 	physicsAccumulator += cappedDt;
 	constexpr float targetDt = 1.0f / 60.0f;
+
+	// TODO(Evilpasture): Documented as suspicious for interpolation failure during GPU bound
+	// scenarios. Do we clamp the accumulator? Or remove or change this line?
 	physicsAccumulator = std::min(physicsAccumulator, targetDt * 4.0f);
 
 	{
@@ -872,6 +730,8 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, GameContext
 		while (physicsAccumulator >= targetDt) {
 			ZHLN::MovementSystem(engine, targetDt);
 			engine.GetPhysicsContext().Step(targetDt);
+			// TODO(Evilpasture): Documented as suspicious for interpolation failure during GPU
+			// bound scenarios. Possibly redundant? Do we remove?
 			ZHLN::PhysicsStateSystem::WriteBack(engine);
 			physicsAccumulator -= targetDt;
 		}
@@ -910,8 +770,8 @@ void RenderGame(Engine& engine, float frameTime, float physicsAccumulator, GameC
 	float alpha = physicsAccumulator / targetDt;
 
 	CameraSystem(engine, game, frameTime, alpha);
-	CullingSystem<false>(engine, game.visibleEntities);
-	LightingSystem(engine);
+	game.cullingSystem->Update<false>(engine, game.visibleEntities);
+	game.lightingSystem->Update(engine, frameTime);
 	RenderSystem(engine, game);
 
 	{
@@ -931,6 +791,9 @@ void ShutdownGame([[maybe_unused]] Engine& engine, GameContext& game) {
 	delete game.articulationSystem;
 	delete game.animationSystem;
 	delete game.transformSystem;
+	delete game.lightingSystem;
+	delete game.cullingSystem;
+	delete game.inputSystem;
 }
 
 } // namespace ZHLN
@@ -974,7 +837,6 @@ std::expected<std::unique_ptr<Engine>, EngineError> InitializeEngine(CommandLine
 }
 
 std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, uint32_t fpsLimit) {
-	Clock clock;
 	GameContext game{};
 
 	if (!ZHLN::InitializeGame(*engine, game)) {
@@ -993,12 +855,15 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, ui
 	float physicsAccumulator = 0.0f;
 	const double targetFrameTime = fpsLimit > 0 ? 1.0 / static_cast<double>(fpsLimit) : 0.0;
 
-	engine->ProcessEvents();
-	clock.GetDeltaTime();
 	auto frameStart = std::chrono::high_resolution_clock::now();
 
 	while (engine->IsRunning()) {
-		float frameTime = clock.GetDeltaTime();
+		// Calculate frame time based on frame limiter timing (not clock drift)
+		auto frameEnd = std::chrono::high_resolution_clock::now();
+		double elapsed = std::chrono::duration<double>(frameEnd - frameStart).count();
+		float frameTime = std::min(static_cast<float>(elapsed), 0.1f);
+		frameStart = std::chrono::high_resolution_clock::now();
+
 		engine->ProcessEvents();
 
 		if (engine->GetInput().IsKeyDown(KeyCode::Escape)) {
@@ -1022,10 +887,10 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, ui
 		ZHLN::RenderGame(*engine, frameTime, physicsAccumulator, game);
 
 		if (fpsLimit > 0) {
-			auto frameEnd = std::chrono::high_resolution_clock::now();
-			double elapsed = std::chrono::duration<double>(frameEnd - frameStart).count();
-			if (elapsed < targetFrameTime) {
-				double sleepTime = targetFrameTime - elapsed;
+			auto now = std::chrono::high_resolution_clock::now();
+			double frameElapsed = std::chrono::duration<double>(now - frameStart).count();
+			if (frameElapsed < targetFrameTime) {
+				double sleepTime = targetFrameTime - frameElapsed;
 				if (sleepTime > 0.002) {
 					std::this_thread::sleep_for(
 						std::chrono::microseconds(static_cast<int64_t>((sleepTime - 0.001) * 1e6)));
@@ -1043,7 +908,6 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, ui
 				}
 			}
 		}
-		frameStart = std::chrono::high_resolution_clock::now();
 	}
 
 	ZHLN::ShutdownGame(*engine, game);

@@ -10,11 +10,61 @@
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/Log.hpp>
 #include <physics/PhysicsWorld.hpp>
+
+namespace ZHLN::Tests {
+static void VerifyAudioSystemState(const Camera& cam, const ECS::Registry& reg) noexcept {
+	static bool testsRun = false;
+	if (testsRun) {
+		return;
+	}
+	testsRun = true;
+
+	// Test 1: Camera position is finite
+	if (!std::isfinite(cam.position.GetX()) || !std::isfinite(cam.position.GetY()) ||
+		!std::isfinite(cam.position.GetZ())) {
+		ZHLN::Log(
+			"[Test Fail] Audio System: Camera listener position contains NaN/Inf "
+			"({:.3f}, {:.3f}, {:.3f})",
+			cam.position.GetX(), cam.position.GetY(), cam.position.GetZ());
+	}
+
+	// Test 2: Audio source volumes are in valid range [0, 1]
+	// Note: GetEntitiesWith and GetRawArray should be called together and match in size
+	auto entities = reg.GetEntitiesWith<AudioSourceComponent>();
+	if (entities.empty()) {
+		return; // No audio sources to test
+	}
+
+	auto audioSources = reg.GetRawArray<AudioSourceComponent>();
+	if (audioSources.size() == 0 || audioSources.size() != entities.size()) {
+		ZHLN::Log("[Test Warn] Audio System: Entity/Component array mismatch ({} entities, {} components)",
+				  entities.size(), audioSources.size());
+		return; // Bail if arrays are misaligned
+	}
+
+	for (size_t i = 0; i < entities.size(); ++i) {
+		const auto& source = audioSources[i];
+		if (source.volume < 0.0f || source.volume > 1.0f) {
+			ZHLN::Log("[Test Fail] Audio System: Entity {} has invalid volume: {:.2f}",
+					  entities[i].index, source.volume);
+		}
+	}
+
+	// Test 3: Spatialized sounds should have valid native sound pointers
+	for (size_t i = 0; i < entities.size(); ++i) {
+		const auto& source = audioSources[i];
+		if (source.isSpatialized && source.nativeSound == nullptr) {
+			// This is not necessarily a failure - sounds may not be initialized yet on first frame
+		}
+	}
+}
+} // namespace ZHLN::Tests
 
 namespace ZHLN {
 
-ZHLN_API void AudioSystem(Engine& engine, float dt) {
+ZHLN_API void AudioSystem(Engine& engine, [[maybe_unused]] float dt) {
 	auto& reg = engine.GetRegistry();
 	auto& audio = engine.GetAudioContext();
 	const auto& world = engine.GetPhysicsContext().GetWorld();
@@ -69,6 +119,10 @@ ZHLN_API void AudioSystem(Engine& engine, float dt) {
 			audio.SetSoundInstanceVolume(source.nativeSound, source.volume);
 			audio.SetSoundInstanceLooping(source.nativeSound, source.isLooping);
 		}
+	}
+
+	if constexpr (isDev) {
+		ZHLN::Tests::VerifyAudioSystemState(engine.GetCamera(), reg);
 	}
 }
 

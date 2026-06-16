@@ -10,7 +10,10 @@
 namespace ZHLN {
 class Engine;
 
-template <bool UsePhysicsTransforms = false>
-ZHLN_API void CullingSystem(Engine& engine, JPH::Array<Entity>& outVisible);
+class ZHLN_API CullingSystem {
+  public:
+	template <bool UsePhysicsTransforms = false>
+	void Update(Engine& engine, JPH::Array<Entity>& outVisible);
+};
 
 } // namespace ZHLN

@@ -808,6 +808,8 @@ void RenderContext::EndFrame() {
 		bool isSkinned = (drawCmd.flags & DrawFlags::Skinned) != DrawFlags::None;
 		bool isExcluded = (drawCmd.flags & DrawFlags::ExcludeFromTLAS) != DrawFlags::None;
 
+		// TODO(Evilpasture): This still pulls animated screen space meshes. There is something
+		// wrong with the GLB we're using.
 		if (mesh->blasAddress == 0 || isSkinned || isExcluded) {
 			continue;
 		}

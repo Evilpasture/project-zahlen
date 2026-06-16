@@ -254,17 +254,27 @@ void MemoryDump(const void* ptr, size_t size, std::string_view label, LogContext
 		file_name.remove_prefix(pos + 1);
 	}
 
+	// Lambda to count visible characters (excluding ANSI escape sequences)
+	auto CountVisibleChars = [](std::string_view str) -> size_t {
+		size_t count = 0;
+		for (size_t i = 0; i < str.size(); ++i) {
+			if (str[i] == '\x1b') { // Start of ANSI escape
+				while (i < str.size() && str[i] != 'm') ++i;
+			} else {
+				count++;
+			}
+		}
+		return count;
+	};
+
 	auto header1 =
 		ZHLN::Format("{}┌─── DUMP: {} ({}) ───{}\n", Color::Cyan, label, ctx.fmt, Color::Reset);
 	auto header2 = ZHLN::Format("│ Source:  {}:{}\n", file_name, ctx.loc.line());
 	auto header3 =
 		ZHLN::Format("│ Address: {}{}{} ({} bytes)\n", Color::Yellow, ptr, Color::Reset, size);
-	auto header4 = "├────────────┬────────────────────────────────────────────────┬──────────"
-				   "────────┬─────────────────────────┐\n";
-	auto header5 = "│  Address   │ Hex Data                                       │ ASCII    "
-				   "        │ Interpretation          │\n";
-	auto header6 = "├────────────┼────────────────────────────────────────────────┼──────────"
-				   "────────┼─────────────────────────┤\n";
+	auto header4 = "├──────────────────┬───────────────────────────────────────────────────────┬──────────────────┬─────────────────────────┤\n";
+	auto header5 = "│     Address      │ Hex Data                                              │ ASCII            │ Interpretation          │\n";
+	auto header6 = "├──────────────────┼───────────────────────────────────────────────────────┼──────────────────┼─────────────────────────┤\n";
 
 	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), header1.string_view());
 	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), header2.string_view());
@@ -274,62 +284,54 @@ void MemoryDump(const void* ptr, size_t size, std::string_view label, LogContext
 	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), header6);
 
 	for (size_t i = 0; i < size; i += opts.bytes_per_line) {
-		auto addr_str = ZHLN::Format("│ {}{:#010X}{} │ ", Color::Cyan,
+		// Address column: 16 hex digits (64-bit), uppercase, consistent width
+		auto addr_str = ZHLN::Format("│ {}{:016X}{} │ ", Color::Cyan,
 									 std::bit_cast<uintptr_t>(byte_ptr + i), Color::Reset);
 		WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), addr_str.string_view());
 
+		// Hex data column: Build complete row with fixed width (54 chars)
+		std::string hex_row;
 		for (size_t j = 0; j < opts.bytes_per_line; ++j) {
 			if (i + j < size) {
 				uint8_t b = byte_ptr[i + j];
-				if (b == 0) {
-					auto hex_zero = ZHLN::Format("{}00{} ", Color::Gray, Color::Reset);
-					WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr),
-								   hex_zero.string_view());
-				} else {
-					if (b < 16) {
-						auto hex_val = ZHLN::Format("0{:X} ", b);
-						WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr),
-									   hex_val.string_view());
-					} else {
-						auto hex_val = ZHLN::Format("{:X} ", b);
-						WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr),
-									   hex_val.string_view());
-					}
-				}
+				hex_row += ZHLN::Format("{:02X} ", b);
 			} else {
-				WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), "   ");
+				hex_row += "   "; // Pad empty slots (3 chars per byte)
 			}
+			// Add extra space after every 4 bytes for readability
 			if ((j + 1) % 4 == 0 && j + 1 < opts.bytes_per_line) {
-				WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), " ");
+				hex_row += " ";
 			}
 		}
-
+		// Ensure hex_row is exactly 54 chars
+		hex_row.resize(54, ' ');
+		WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), hex_row);
 		WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), "│ ");
+
+		// ASCII column: Exactly 16 chars, use '.' instead of '·' to avoid UTF-8 multibyte issues
+		std::string ascii_row;
 		for (size_t j = 0; j < opts.bytes_per_line; ++j) {
 			if (i + j < size) {
 				uint8_t c = byte_ptr[i + j];
-				if (std::isprint(c)) {
-					char c_str[2] = {static_cast<char>(c), '\0'};
-					WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), c_str);
-				} else {
-					auto dot = ZHLN::Format("{}·{}", Color::Gray, Color::Reset);
-					WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), dot.string_view());
-				}
+				ascii_row += std::isprint(c) ? static_cast<char>(c) : '.';
 			} else {
-				WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), " ");
+				ascii_row += ' ';
 			}
 		}
-
+		ascii_row.resize(16, ' ');
+		WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), ascii_row);
 		WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), " │ ");
+
+		// Interpretation column: Generate and pad to 23 visible chars
+		std::string info_str;
 		if (i + 8 <= size) {
 			uint64_t val64 = 0;
 			std::memcpy(&val64, byte_ptr + i, 8);
 
 			if (val64 != 0) {
 				if (val64 > 0x100000000 && val64 < 0x00007FFFFFFFFFFF) {
-					auto ptr_str =
-						ZHLN::Format("{}ptr: {:#014X}{}", Color::Green, val64, Color::Reset);
-					WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), ptr_str.string_view());
+					// Looks like a pointer
+					info_str = ZHLN::Format("{}ptr: {:#014X}{}", Color::Green, val64, Color::Reset);
 				} else {
 					float f32 = NAN;
 					int32_t i32 = 0;
@@ -337,27 +339,30 @@ void MemoryDump(const void* ptr, size_t size, std::string_view label, LogContext
 					std::memcpy(&i32, byte_ptr + i, 4);
 
 					if (!std::isnan(f32) && std::abs(f32) > 0.0001f && std::abs(f32) < 1000000.0f) {
-						auto flt_str = ZHLN::Format("flt: {}", f32);
-						WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr),
-									   flt_str.string_view());
+						info_str = ZHLN::Format("flt: {}", f32);
 					} else {
-						auto int_str = ZHLN::Format("int: {}", i32);
-						WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr),
-									   int_str.string_view());
+						info_str = ZHLN::Format("int: {}", i32);
 					}
 				}
 			} else {
-				auto dash_str = ZHLN::Format("{}---{}", Color::Gray, Color::Reset);
-				WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), dash_str.string_view());
+				info_str = ZHLN::Format("{}---{}", Color::Gray, Color::Reset);
 			}
+		} else {
+			info_str = ZHLN::Format("{}N/A{}", Color::Gray, Color::Reset);
 		}
+		
+		// Pad info_str to 23 visible chars (excluding ANSI escape sequences)
+		size_t visible_len = CountVisibleChars(info_str);
+		if (visible_len < 23) {
+			info_str += std::string(23 - visible_len, ' ');
+		}
+		WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), info_str);
 
 		WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), " │\n");
 	}
 
 	auto footer = ZHLN::Format(
-		"{}└────────────┴────────────────────────────────────────────────┴──────────────────"
-		"┴─────────────────────────┘{}\n",
+		"{}└──────────────────┴───────────────────────────────────────────────────────┴──────────────────┴─────────────────────────┘{}\n",
 		Color::Cyan, Color::Reset);
 	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), footer.string_view());
 }

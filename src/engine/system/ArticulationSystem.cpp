@@ -8,6 +8,7 @@
 #include <Jolt/Skeleton/SkeletonPose.h>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
 #include <cgltf.h>
 #include <cstring>
@@ -15,6 +16,50 @@
 #include <ecs/ECS.hpp>
 #include <physics/Physics.hpp>
 #include <physics/PhysicsWorld.hpp>
+
+namespace ZHLN::Tests {
+static void VerifyArticulationStateConsistency(const ECS::Registry& reg) noexcept {
+	static bool testsRun = false;
+	if (testsRun) {
+		return;
+	}
+	testsRun = true;
+
+	auto entities = reg.GetEntitiesWith<RagdollComponent>();
+	auto ragdolls = reg.GetRawArray<RagdollComponent>();
+
+	for (size_t i = 0; i < entities.size(); ++i) {
+		Entity e = entities[i];
+		const auto& ragComp = ragdolls[i];
+
+		// Test 1: Ragdoll state is valid enum value
+		if (ragComp.state != RagdollState::Inactive && ragComp.state != RagdollState::Limp &&
+			ragComp.state != RagdollState::KeyframeMotor) {
+			ZHLN::Log("[Test Fail] Articulation State: Entity {} has invalid ragdoll state {}",
+					  e.index, static_cast<int>(ragComp.state));
+		}
+
+		// Test 2: Previous state is valid
+		if (ragComp.prevState != RagdollState::Inactive && ragComp.prevState != RagdollState::Limp &&
+			ragComp.prevState != RagdollState::KeyframeMotor) {
+			ZHLN::Log("[Test Fail] Articulation State: Entity {} has invalid prev state {}",
+					  e.index, static_cast<int>(ragComp.prevState));
+		}
+
+		// Test 3: isAddedToPhysics is boolean
+		if (ragComp.isAddedToPhysics != 0 && ragComp.isAddedToPhysics != 1) {
+			ZHLN::Log("[Test Fail] Articulation State: Entity {} isAddedToPhysics invalid: {}",
+					  e.index, ragComp.isAddedToPhysics);
+		}
+
+		// Test 4: Joint count is reasonable
+		if (ragComp.jointCount > 1000 || ragComp.jointCount == 0) {
+			ZHLN::Log("[Test Fail] Articulation State: Entity {} has unreasonable joint count: {}",
+					  e.index, ragComp.jointCount);
+		}
+	}
+}
+} // namespace ZHLN::Tests
 
 namespace ZHLN {
 
@@ -176,6 +221,10 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
 											  actualRootOffset);
 			}
 		}
+	}
+
+	if constexpr (isDev) {
+		ZHLN::Tests::VerifyArticulationStateConsistency(reg);
 	}
 }
 

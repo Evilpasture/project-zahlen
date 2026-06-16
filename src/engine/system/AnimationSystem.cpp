@@ -22,6 +22,47 @@ extern std::unordered_map<std::string, cgltf_data*> s_GLBCache;
 extern std::vector<cgltf_data*> s_AnimatedGLBs;
 } // namespace ZHLN::AssetFactory
 
+namespace ZHLN::Tests {
+static void VerifyAnimationStateConsistency(const ECS::Registry& reg) noexcept {
+	static bool testsRun = false;
+	if (testsRun) {
+		return;
+	}
+	testsRun = true;
+
+	auto playerEntities = reg.GetEntitiesWith<MovementComponent>();
+	if (playerEntities.empty()) {
+		return;
+	}
+
+	Entity pEnt = playerEntities[0];
+	if (auto* move = reg.Get<MovementComponent>(pEnt)) {
+		// Test 1: Animation state values are in valid ranges
+		if (move->landingTimer < 0.0f) {
+			ZHLN::Log("[Test Fail] Animation State: Landing timer is negative: {}",
+					  move->landingTimer);
+		}
+
+		// Test 2: Jump delay timer is positive when set
+		if (move->jumpDelayTimer < 0.0f) {
+			ZHLN::Log("[Test Fail] Animation State: Jump delay timer is negative: {}",
+					  move->jumpDelayTimer);
+		}
+
+		// Test 3: Ground state is boolean
+		if (move->isGrounded != 0 && move->isGrounded != 1) {
+			ZHLN::Log("[Test Fail] Animation State: Ground state is invalid: {}", move->isGrounded);
+		}
+
+		// Test 4: Current Y velocity is reasonable
+		if (std::abs(move->currentYVel) > 100.0f) {
+			ZHLN::Log("[Test Fail] Animation State: Current Y velocity unreasonably high: {}",
+					  move->currentYVel);
+		}
+	}
+}
+} // namespace ZHLN::Tests
+
 namespace ZHLN {
 
 static std::unordered_map<cgltf_data*, AnimationSystem::GLBAnimState> s_AnimStates;
@@ -47,6 +88,10 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
 
 	// 3. Resolve active mesh transform and morph weight assignments
 	ResolveMeshComponentTransforms(reg, worldTransforms, skinToBufferOffset);
+
+	if constexpr (isDev) {
+		ZHLN::Tests::VerifyAnimationStateConsistency(reg);
+	}
 }
 
 void AnimationSystem::ResolvePlayerMovementState(ECS::Registry& reg, bool& outIsPlayerMoving,
