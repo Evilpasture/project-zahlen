@@ -1,15 +1,70 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // src/engine/system/MovementSystem.cpp
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
+#include "Zahlen/Log.hpp"
 #include "ecs/ECS.hpp"
 #include "physics/Physics.hpp"
 
 #include <cmath> // std::atan2
 #include <threading/TaskSystem.hpp>
+
+namespace ZHLN::Tests {
+static void VerifyMovementStateConsistency(const ECS::Registry& reg) noexcept {
+	static bool testsRun = false;
+	if (testsRun) {
+		return;
+	}
+
+	auto entities = reg.GetEntitiesWith<MovementComponent>();
+	if (entities.empty()) {
+		return;
+	}
+	testsRun = true;
+
+	auto movements = reg.GetRawArray<MovementComponent>();
+	for (size_t i = 0; i < entities.size(); ++i) {
+		Entity e = entities[i];
+		const auto& move = movements[i];
+
+		// Test 1: Ground state consistency
+		if (move.wasGrounded && !move.isGrounded && move.landingTimer <= 0.0f) {
+			ZHLN::Log(
+				"[Test Fail] Movement State: Entity {} transitioned from grounded to airborne but "
+				"landing timer not set properly (landingTimer={})",
+				e.index, move.landingTimer);
+		}
+
+		// Test 2: Jump delay timer bounds
+		if (move.jumpDelayTimer < 0.0f) {
+			ZHLN::Log(
+				"[Test Fail] Movement State: Entity {} has negative jump delay timer: {}",
+				e.index, move.jumpDelayTimer);
+		}
+
+		// Test 3: Orientation is valid (normalized quaternion)
+		float orientationMagSq = move.orientation.GetX() * move.orientation.GetX() +
+								 move.orientation.GetY() * move.orientation.GetY() +
+								 move.orientation.GetZ() * move.orientation.GetZ() +
+								 move.orientation.GetW() * move.orientation.GetW();
+		if (std::abs(orientationMagSq - 1.0f) > 0.01f) {
+			ZHLN::Log(
+				"[Test Fail] Movement State: Entity {} orientation not normalized (mag={:.4f})",
+				e.index, std::sqrt(orientationMagSq));
+		}
+
+		// Test 4: Velocity bounds sanity check
+		float velMag = std::sqrt(move.inputX * move.inputX + move.inputZ * move.inputZ);
+		if (velMag > 2.0f) {
+			ZHLN::Log(
+				"[Test Fail] Movement State: Entity {} input velocity unusually high (mag={:.2f})",
+				e.index, velMag);
+		}
+	}
+}
+} // namespace ZHLN::Tests
 
 namespace ZHLN {
 
@@ -28,6 +83,8 @@ void MovementSystem(Engine& engine, float dt) {
 		for (uint32_t i = start; i < end; ++i) {
 			MovementComponent& move = movements[i];
 			Entity e = entities[i];
+			// Record previous orientation before calculating the new one
+            move.prevOrientation = move.orientation;
 
 			auto* phys = reg.Get<PhysicsComponent>(e);
 			if (!phys) {
@@ -99,19 +156,20 @@ void MovementSystem(Engine& engine, float dt) {
 				JPH::Quat targetRotation =
 					JPH::Quat::sRotation(JPH::Vec3::sAxisY(), targetAngleRad);
 
-				JPH::Quat currentRotation(move.orientation[0], move.orientation[1],
-										  move.orientation[2], move.orientation[3]);
+				JPH::Quat currentRotation = move.orientation;
+
 
 				float turnSpeed = 10.0f;
 				JPH::Quat nextRotation =
 					currentRotation.SLERP(targetRotation, JPH::Clamp(turnSpeed * dt, 0.0f, 1.0f));
 
-				move.orientation[0] = nextRotation.GetX();
-				move.orientation[1] = nextRotation.GetY();
-				move.orientation[2] = nextRotation.GetZ();
-				move.orientation[3] = nextRotation.GetW();
+				move.orientation = nextRotation;
 			}
 		}
 	});
+
+	if constexpr (isDev) {
+		ZHLN::Tests::VerifyMovementStateConsistency(reg);
+	}
 }
 } // namespace ZHLN

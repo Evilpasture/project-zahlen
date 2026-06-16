@@ -53,6 +53,7 @@ class ZHLN_API Engine {
 
 	[[nodiscard]] void* GetGameState() const;
 	void SetGameState(void* state);
+	[[nodiscard]] uint64_t GetCurrentFrame() const noexcept;
 
   private:
 	void InitInternal(const EngineConfig& cfg, bool& outSuccess, const char** outError = nullptr);

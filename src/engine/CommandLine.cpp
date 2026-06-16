@@ -69,6 +69,7 @@ Options:
   --fps-limit <value>      Limit the framerate to the specified integer (0 = uncapped)
   --verbose                Enable detailed verbose logging outputs
   --quiet                  Disable all logging outputs (silent mode)
+  --renderdoc <on|off>     Load RenderDoc library at startup (default: off)
 
 Environment Variables:
   ZHLN_VALIDATION=0    Disable Vulkan validation layers
@@ -196,6 +197,24 @@ constexpr std::array Handlers = {
 			opt.fpsLimit = val;
 			return {};
 		}},
+
+	CommandHandler{.key = "--renderdoc",
+				   .shortKey = "",
+				   .action = [](ZHLN::CommandLineOptions& opt,
+								std::string_view v) -> std::expected<void, ZHLN::EngineError> {
+					   if (v.empty() || IsTrue(v)) {
+						   opt.enableRenderDoc = true;
+					   } else if (IsFalse(v)) {
+						   opt.enableRenderDoc = false;
+					   } else {
+						   std::println(stderr, "Error: Invalid value '{}' for --renderdoc.", v);
+						   return std::unexpected(ZHLN::EngineError{
+							   .msg = "Invalid value for --renderdoc: " + std::string(v),
+							   .code = EXIT_FAILURE,
+							   .silent = true});
+					   }
+					   return {};
+				   }},
 
 };
 

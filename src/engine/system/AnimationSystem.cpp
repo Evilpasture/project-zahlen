@@ -10,9 +10,9 @@
 
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
+#include <algorithm>
 #include <cgltf.h>
 #include <cmath>
-#include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -21,6 +21,47 @@ namespace ZHLN::AssetFactory {
 extern std::unordered_map<std::string, cgltf_data*> s_GLBCache;
 extern std::vector<cgltf_data*> s_AnimatedGLBs;
 } // namespace ZHLN::AssetFactory
+
+namespace ZHLN::Tests {
+static void VerifyAnimationStateConsistency(const ECS::Registry& reg) noexcept {
+	static bool testsRun = false;
+	if (testsRun) {
+		return;
+	}
+	testsRun = true;
+
+	auto playerEntities = reg.GetEntitiesWith<MovementComponent>();
+	if (playerEntities.empty()) {
+		return;
+	}
+
+	Entity pEnt = playerEntities[0];
+	if (auto* move = reg.Get<MovementComponent>(pEnt)) {
+		// Test 1: Animation state values are in valid ranges
+		if (move->landingTimer < 0.0f) {
+			ZHLN::Log("[Test Fail] Animation State: Landing timer is negative: {}",
+					  move->landingTimer);
+		}
+
+		// Test 2: Jump delay timer is positive when set
+		if (move->jumpDelayTimer < 0.0f) {
+			ZHLN::Log("[Test Fail] Animation State: Jump delay timer is negative: {}",
+					  move->jumpDelayTimer);
+		}
+
+		// Test 3: Ground state is boolean
+		if (move->isGrounded != 0 && move->isGrounded != 1) {
+			ZHLN::Log("[Test Fail] Animation State: Ground state is invalid: {}", move->isGrounded);
+		}
+
+		// Test 4: Current Y velocity is reasonable
+		if (std::abs(move->currentYVel) > 100.0f) {
+			ZHLN::Log("[Test Fail] Animation State: Current Y velocity unreasonably high: {}",
+					  move->currentYVel);
+		}
+	}
+}
+} // namespace ZHLN::Tests
 
 namespace ZHLN {
 
@@ -47,6 +88,10 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
 
 	// 3. Resolve active mesh transform and morph weight assignments
 	ResolveMeshComponentTransforms(reg, worldTransforms, skinToBufferOffset);
+
+	if constexpr (isDev) {
+		ZHLN::Tests::VerifyAnimationStateConsistency(reg);
+	}
 }
 
 void AnimationSystem::ResolvePlayerMovementState(ECS::Registry& reg, bool& outIsPlayerMoving,
@@ -151,7 +196,7 @@ size_t AnimationSystem::ResolveActiveTrackIndex(cgltf_data* data, bool isPlayerM
 		for (size_t a = 0; a < data->animations_count; ++a) {
 			std::string animName =
 				(data->animations[a].name != nullptr) ? data->animations[a].name : "";
-			std::transform(animName.begin(), animName.end(), animName.begin(), ::toupper);
+			std::ranges::transform(animName, animName.begin(), ::toupper);
 
 			if (isPlayerMoving) {
 				if (animName.contains("RUN") || animName.contains("WALK") ||
@@ -354,7 +399,8 @@ void AnimationSystem::ResolveSkeletalJointMatrices(
 			if (blend.activeWeightsCount > 0) {
 				node->weights_count = blend.activeWeightsCount;
 				if (node->weights == nullptr) {
-					node->weights = (float*)std::malloc(blend.activeWeightsCount * sizeof(float));
+					node->weights =
+						static_cast<float*>(std::malloc(blend.activeWeightsCount * sizeof(float)));
 				}
 				for (uint32_t w = 0; w < blend.activeWeightsCount; ++w) {
 					node->weights[w] = blend.weights[w];

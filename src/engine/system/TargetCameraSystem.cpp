@@ -3,18 +3,54 @@
 
 #include "TargetCameraSystem.hpp"
 
+#include "Zahlen/Camera.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Input.hpp"
-#include "Zahlen/alife/Types.hpp"
+#include "Zahlen/Log.hpp"
 #include "ecs/ECS.hpp"
-#include "physics/Physics.hpp"
+
+#include <algorithm>
+#include <cmath>
+
+namespace ZHLN::Tests {
+static void VerifyCameraInterpolation(const Camera& cam, float alpha) noexcept {
+	static bool testsRun = false;
+	if (testsRun) {
+		return;
+	}
+	testsRun = true;
+
+	// Test 1: Camera position is valid (finite)
+	if (!std::isfinite(cam.position.GetX()) || !std::isfinite(cam.position.GetY()) ||
+		!std::isfinite(cam.position.GetZ())) {
+		ZHLN::Log(
+			"[Test Fail] Camera Interpolation: Camera position contains NaN/Inf "
+			"({:.3f}, {:.3f}, {:.3f})",
+			cam.position.GetX(), cam.position.GetY(), cam.position.GetZ());
+	}
+
+	// Test 2: FOV is in valid range
+	if (cam.fov < 1.0f || cam.fov > 180.0f) {
+		ZHLN::Log("[Test Fail] Camera Interpolation: FOV out of range: {:.2f}", cam.fov);
+	}
+
+	// Test 3: Pitch is in valid range
+	if (cam.pitch < -90.0f || cam.pitch > 90.0f) {
+		ZHLN::Log("[Test Fail] Camera Interpolation: Pitch out of range: {:.2f}", cam.pitch);
+	}
+
+	// Test 4: Alpha is properly clamped
+	if (alpha < 0.0f || alpha > 1.0f) {
+		ZHLN::Log("[Test Fail] Camera Interpolation: Alpha out of bounds [0,1]: {:.4f}", alpha);
+	}
+}
+} // namespace ZHLN::Tests
 
 namespace ZHLN {
 void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept {
 	auto& reg = engine.GetRegistry();
 	auto& cam = engine.GetCamera();
-	const auto& worldState = engine.GetPhysicsContext().GetWorld();
 
 	auto cameraEntities = reg.GetEntitiesWith<TargetCameraComponent>();
 	if (cameraEntities.empty()) {
@@ -31,19 +67,12 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 	JPH::Vec3 targetPos = JPH::Vec3::sZero();
 
 	// 1. Resolve Target Position
-	if (auto* phys = reg.Get<PhysicsComponent>(targetEnt)) {
-		uint32_t dense = worldState.slotToDense[phys->physicsHandle.index];
-		const size_t base = static_cast<size_t>(dense) * 4;
-
-		JPH::Vec3 currPos(worldState.positions[base], worldState.positions[base + 1],
-						  worldState.positions[base + 2]);
-
-		JPH::Vec3 prevPos(worldState.prevPositions[base], worldState.prevPositions[base + 1],
-						  worldState.prevPositions[base + 2]);
-
-		targetPos = prevPos + alpha * (currPos - prevPos);
-	} else if (auto* alifeComp = reg.Get<ALife::ALifeComponent>(targetEnt)) {
-		targetPos = JPH::Vec3(alifeComp->position);
+	if (auto* state = reg.Get<PhysicsStateComponent>(targetEnt)) {
+		float clampedAlpha = std::clamp(alpha, 0.0f, 1.0f);
+		targetPos =
+			state->prevPosition + clampedAlpha * (state->currPosition - state->prevPosition);
+	} else if (auto* trans = reg.Get<TransformComponent>(targetEnt)) {
+		targetPos = JPH::Vec3(trans->position[0], trans->position[1], trans->position[2]);
 	} else if (auto* meshComp = reg.Get<MeshComponent>(targetEnt)) {
 		targetPos = meshComp->localTransform.GetTranslation();
 	}
@@ -56,9 +85,9 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 	}
 
 	if (camComp->stiffness > 0.0f) {
-		camComp->distance +=
-			(camComp->targetDistance - camComp->distance) * camComp->stiffness * dt;
-		camComp->fov += (camComp->targetFov - camComp->fov) * camComp->stiffness * dt;
+		float factor = JPH::Clamp(camComp->stiffness * dt, 0.0f, 1.0f);
+		camComp->distance += (camComp->targetDistance - camComp->distance) * factor;
+		camComp->fov += (camComp->targetFov - camComp->fov) * factor;
 	} else {
 		camComp->distance = camComp->targetDistance;
 		camComp->fov = camComp->targetFov;
@@ -82,8 +111,31 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 	JPH::Vec3 offsetDir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad),
 						JPH::Sin(yawRad) * JPH::Cos(pitchRad));
 
-	JPH::Vec3 offsetVec(camComp->targetOffset[0], camComp->targetOffset[1],
-						camComp->targetOffset[2]);
-	cam.position = targetPos - (offsetDir.Normalized() * camComp->distance) + offsetVec;
+	JPH::Vec3 offsetVec = camComp->targetOffset;
+
+	// Filter out high-frequency physics collision resolution jitter from Jolt character virtual
+	JPH::Vec3 smoothTargetPos = camComp->smoothTargetPos;
+
+	if (camComp->hasInitSmoothTarget == 0) {
+		smoothTargetPos = targetPos;
+		camComp->hasInitSmoothTarget = 1;
+	}
+
+	if ((targetPos - smoothTargetPos).LengthSq() > 100.0f) {
+		smoothTargetPos = targetPos; // Teleport instantly on large displacements
+	} else if (camComp->stiffness > 0.0f) {
+		float factor = 1.0f - std::exp(-camComp->stiffness * dt);
+		smoothTargetPos += (targetPos - smoothTargetPos) * factor;
+	} else {
+		smoothTargetPos = targetPos;
+	}
+
+	camComp->smoothTargetPos = smoothTargetPos;
+
+	cam.position = smoothTargetPos - (offsetDir.Normalized() * camComp->distance) + offsetVec;
+
+	if constexpr (isDev) {
+		ZHLN::Tests::VerifyCameraInterpolation(cam, alpha);
+	}
 }
 } // namespace ZHLN

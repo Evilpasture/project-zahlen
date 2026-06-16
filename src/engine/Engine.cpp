@@ -23,6 +23,10 @@
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/alife/Simulator.hpp>
+#include <renderdoc_app.h>
+#ifdef __linux__
+#include <dlfcn.h>
+#endif
 #include <ecs/ECS.hpp>
 #include <filesystem>
 #include <physics/Physics.hpp>
@@ -32,6 +36,28 @@ namespace ZHLN {
 
 thread_local Engine* g_CurrentEngine = nullptr;
 static Engine* s_GlobalEngine = nullptr;
+static RENDERDOC_API_1_5_0* s_RDocAPI = nullptr;
+
+static void InitRenderDocAPI() {
+#if defined(_WIN32)
+	if (HMODULE mod = GetModuleHandleA("renderdoc.dll")) {
+		pRENDERDOC_GetAPI R_GetAPI = (pRENDERDOC_GetAPI)GetProcAddress(mod, "RENDERDOC_GetAPI");
+		if (R_GetAPI) {
+			R_GetAPI(eRENDERDOC_API_Version_1_5_0, (void**)&s_RDocAPI);
+		}
+	}
+#elif defined(__linux__)
+	if (void* mod = dlopen("librenderdoc.so", RTLD_NOW | RTLD_NOLOAD)) {
+		auto R_GetAPI = (pRENDERDOC_GetAPI)dlsym(mod, "RENDERDOC_GetAPI");
+		if (R_GetAPI != nullptr) {
+			R_GetAPI(eRENDERDOC_API_Version_1_5_0, (void**)&s_RDocAPI);
+		}
+	}
+#endif
+	if (s_RDocAPI != nullptr) {
+		ZHLN::Log("[RenderDoc] In-App API successfully bound.");
+	}
+}
 
 struct EngineImpl {
 	std::unique_ptr<InputContext> input;
@@ -46,6 +72,7 @@ struct EngineImpl {
 	ECS::Registry registry;
 
 	void* gameState = nullptr;
+	uint64_t frameCounter = 0;
 };
 
 Engine::Engine() : _impl(nullptr) {
@@ -87,17 +114,15 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess, const char*
 	outSuccess = false;
 	g_CurrentEngine = this;
 	s_GlobalEngine = this;
+
+	// 1. Thread and Fiber setup
 	ZHLN::Fiber::InitMainThread();
 
-	JPH::RegisterDefaultAllocator();
-	JPH::Trace = JoltTraceBridge;
-#ifdef JPH_ENABLE_ASSERTS
-	JPH::AssertFailed = JoltAssertBridge;
-#endif
+	// 2. Allocate the implementation block and input context first
+	_impl = std::make_unique<EngineImpl>();
+	_impl->input = std::make_unique<InputContext>();
 
-	JPH::Factory::sInstance = new JPH::Factory();
-	JPH::RegisterTypes();
-
+	// 3. Apply platform-specific window managers / RenderDoc hints
 	bool use_tty = false;
 	if constexpr (isLinux) {
 		// If RenderDoc is active, force GLFW to initialize on X11 (XWayland)
@@ -107,6 +132,7 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess, const char*
 		}
 	}
 
+	// 4. Initialize GLFW
 	if (!glfwInit()) {
 		if (TTYBackend::IsSupported()) {
 			ZHLN::Log("GLFW failed to initialize. Falling back to native TTY Display Mode.");
@@ -120,9 +146,7 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess, const char*
 		}
 	}
 
-	_impl = std::make_unique<EngineImpl>();
-
-	_impl->input = std::make_unique<InputContext>();
+	// 5. Create and show the Window immediately
 	_impl->window =
 		std::make_unique<Window>(cfg.render.appName.data(), cfg.render.width, cfg.render.height,
 								 cfg.render.fullscreen, _impl->input.get(), use_tty);
@@ -137,6 +161,20 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess, const char*
 		return;
 	}
 
+	// 6. Query the RenderDoc In-App API (if loaded by command line flag)
+	InitRenderDocAPI();
+
+	// 7. Initialize Jolt Physics global allocations
+	JPH::RegisterDefaultAllocator();
+	JPH::Trace = JoltTraceBridge;
+#ifdef JPH_ENABLE_ASSERTS
+	JPH::AssertFailed = JoltAssertBridge;
+#endif
+
+	JPH::Factory::sInstance = new JPH::Factory();
+	JPH::RegisterTypes();
+
+	// 8. Initialize remaining graphics, physics, and asset loader systems
 	_impl->renderContext = std::make_unique<RenderContext>(*_impl->window, cfg.render);
 	_impl->physicsContext = std::make_unique<PhysicsContext>(cfg.physics);
 	_impl->audioContext = std::make_unique<AudioContext>();
@@ -150,6 +188,7 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess, const char*
 	} else {
 		ZHLN::Log("WARNING: Could not find 'data/base.pak' in working directory or build/ folder!");
 	}
+
 	outSuccess = true;
 }
 
@@ -198,6 +237,10 @@ void Engine::BeginFrame() {
 
 void Engine::EndFrame() {
 	_impl->renderContext->EndFrame();
+}
+
+uint64_t Engine::GetCurrentFrame() const noexcept {
+	return _impl->frameCounter;
 }
 
 Window& Engine::GetWindow() {

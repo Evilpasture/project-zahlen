@@ -188,6 +188,10 @@ void LoadLevel(Engine& engine, const std::string& path, Material material) {
 								  .cullRadius = std::max({extentsX, extentsY, extentsZ}) * 3.0f});
 			reg.Add(prop, PhysicsComponent{Physics::CreateRigidBody(pc, boxShape, bodyPos, rotation,
 																	JPH::EMotionType::Static, 0)});
+			reg.Add(prop, PhysicsStateComponent{.currPosition = JPH::Vec3(bodyPos),
+												.prevPosition = JPH::Vec3(bodyPos),
+												.currRotation = rotation,
+												.prevRotation = rotation});
 		}
 	}
 

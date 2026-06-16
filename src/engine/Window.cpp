@@ -75,6 +75,12 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
 		_impl->handle = glfwCreateWindow(width, height, title.c_str(), monitor, nullptr);
 		glfwSetWindowUserPointer(_impl->handle, this);
 
+		if (_impl->handle != nullptr) {
+			// Force the window manager to map and display the window immediately
+			glfwShowWindow(_impl->handle);
+			glfwPollEvents();
+		}
+
 		if (input != nullptr) {
 			glfwSetKeyCallback(_impl->handle,
 							   [](GLFWwindow* win, int key, [[maybe_unused]] int scancode,

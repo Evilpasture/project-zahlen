@@ -390,6 +390,7 @@ template <typename T> inline size_t AppendValue(char* buf, size_t max_len, const
 struct FormatOptions {
 	bool hex = false;
 	bool uppercase = false;
+	size_t width = 0;  // Minimum field width (0-padded if hex)
 };
 
 } // namespace Detail
@@ -646,10 +647,43 @@ inline FormatResult Format(std::string_view fmt, Args&&... args) noexcept {
 							bool is_hex = spec.starts_with(':') &&
 										  (spec.ends_with('x') || spec.ends_with('X'));
 							bool is_upper = spec.ends_with('X');
+							
+							// Parse width from spec (e.g., ":02X" -> width=2)
+							size_t width = 0;
+							if (spec.starts_with(':')) {
+								std::string_view width_str = spec.substr(1);
+								// Remove trailing x/X
+								if (width_str.ends_with('x') || width_str.ends_with('X')) {
+									width_str.remove_suffix(1);
+								}
+								// Parse digits
+								for (char c : width_str) {
+									if (c >= '0' && c <= '9') {
+										width = width * 10 + (c - '0');
+									} else {
+										break; // Stop at non-digit
+									}
+								}
+							}
 
+							// Format the value
 							size_t written = BoundAppenders(next_arg_idx, buf + buf_idx, remaining,
-															{.hex = is_hex, .uppercase = is_upper});
-							buf_idx += written;
+															{.hex = is_hex, .uppercase = is_upper, .width = width});
+							
+							// Apply zero-padding for hex values if needed
+							if (is_hex && width > written && remaining > (width - written)) {
+								// Shift existing content to the right
+								for (int i = static_cast<int>(written) - 1; i >= 0; --i) {
+									buf[buf_idx + width - written + i] = buf[buf_idx + i];
+								}
+								// Fill leading zeros
+								for (size_t i = 0; i < (width - written); ++i) {
+									buf[buf_idx + i] = '0';
+								}
+								buf_idx += width;
+							} else {
+								buf_idx += written;
+							}
 							next_arg_idx++;
 						}
 						fmt_idx = close_idx + 1;

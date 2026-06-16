@@ -143,6 +143,11 @@ set(ENGINE_SOURCES
     src/engine/CommandLine.cpp
     src/engine/system/TargetCameraSystem.cpp
     src/engine/TTYBackend.cpp
+    src/engine/system/TransformSystem.cpp
+    src/engine/system/PhysicsStateSystem.cpp
+    src/engine/system/LightingSystem.cpp
+    src/engine/system/InputSystem.cpp
+    src/engine/system/CameraSystem.cpp
 )
 
 find_library(ZSTD_LIBRARY NAMES zstd zstd_static HINTS "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib")
@@ -194,6 +199,7 @@ target_link_libraries(zahlen_engine PUBLIC Jolt)
 
 target_include_directories(zahlen_engine SYSTEM PRIVATE
     ${CMAKE_SOURCE_DIR}/extern/JoltPhysics
+    ${CMAKE_SOURCE_DIR}/third_party/renderdoc
 )
 # Use PUBLIC for the main include directory so dependent targets automatically get it 
 target_include_directories(zahlen_engine PUBLIC

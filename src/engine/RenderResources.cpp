@@ -65,7 +65,11 @@ auto RenderContext::CreateVertexBuffer(const void* data, size_t size) -> BufferH
 	}
 	auto gpu_buf =
 		Vk::Buffer::Create(_impl->allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY);
-	VkCommandBuffer cmd = _impl->pools.Cmd(0);
+	Vk::CommandPool tempPool(_impl->ctx.Device(), _impl->ctx.PhysicalInfo().graphics_family);
+	if (!tempPool.Allocate(1)) {
+		ZHLN::Panic("Vulkan: Failed to allocate transient command buffer for vertex upload.");
+	}
+	VkCommandBuffer cmd = tempPool[0];
 	ZHLN_BeginCommandBuffer(cmd);
 	auto staging = Vk::UploadToBuffer(_impl->allocator.Get(), cmd, gpu_buf, data, size);
 	ZHLN_EndCommandBuffer(cmd);
@@ -103,7 +107,11 @@ auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHa
 	auto gpu_buf =
 		Vk::Buffer::Create(_impl->allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY);
 
-	VkCommandBuffer cmd = _impl->pools.Cmd(0);
+	Vk::CommandPool tempPool(_impl->ctx.Device(), _impl->ctx.PhysicalInfo().graphics_family);
+	if (!tempPool.Allocate(1)) {
+		ZHLN::Panic("Vulkan: Failed to allocate transient command buffer for index upload.");
+	}
+	VkCommandBuffer cmd = tempPool[0];
 	ZHLN_BeginCommandBuffer(cmd);
 	auto staging = Vk::UploadToBuffer(_impl->allocator.Get(), cmd, gpu_buf, data, size);
 	ZHLN_EndCommandBuffer(cmd);

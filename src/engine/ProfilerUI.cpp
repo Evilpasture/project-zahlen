@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // src/engine/ProfilerUI.cpp
 
 #include "Zahlen/Components.hpp"
@@ -115,7 +114,7 @@ ScopedTimer::~ScopedTimer() noexcept {
 // DrawProfiler Interface
 // ============================================================================
 
-void DrawProfiler(Engine& engine, TAAState& taaState) {
+void DrawProfiler(Engine& engine) {
 	if (ImGui::Begin("Zahlen Profiler")) {
 
 		// 1. TIMINGS (Rendered together but clearly separated by name)
@@ -193,9 +192,13 @@ void DrawProfiler(Engine& engine, TAAState& taaState) {
 
 		// 6. ANTI-ALIASING
 		if (ImGui::CollapsingHeader("Anti-Aliasing", ImGuiTreeNodeFlags_DefaultOpen)) {
-			ImGui::Checkbox("Enable TAA", &taaState.enabled);
-			if (taaState.enabled) {
-				ImGui::SliderFloat("TAA Blend", &taaState.feedback, 0.8f, 0.99f);
+			auto taaEnts = engine.GetRegistry().GetEntitiesWith<TAASettingsComponent>();
+			if (!taaEnts.empty()) {
+				auto* taa = engine.GetRegistry().Get<TAASettingsComponent>(taaEnts[0]);
+				ImGui::Checkbox("Enable TAA", &taa->state.enabled);
+				if (taa->state.enabled) {
+					ImGui::SliderFloat("TAA Blend", &taa->state.feedback, 0.8f, 0.99f);
+				}
 			}
 		}
 
@@ -257,6 +260,33 @@ void DrawProfiler(Engine& engine, TAAState& taaState) {
 			ImGui::SetTooltip("Wall-clock time (%.2fms) includes driver overhead and VSync wait.",
 							  frameTime);
 		}
+	}
+	ImGui::End();
+}
+
+void DrawECSProfiler() {
+	if (ImGui::Begin("Zahlen ECS Profiler")) {
+		ImGui::SeparatorText("ECS Systems CPU Execution");
+
+		CPUProfiler::IterateMetrics(
+			[](const char* name, float cpuTimeMS, float rollingAverageMS, const float* history,
+			   size_t historyCount, void*) {
+				std::string_view metricName(name);
+				if (metricName.starts_with("ECS System:")) {
+					// Strip "ECS System: " prefix for cleaner UI layout
+					metricName.remove_prefix(12);
+
+					ImGui::Text("%-30.*s: %.3f ms (Avg: %.3f)", (int)metricName.size(),
+								metricName.data(), cpuTimeMS, rollingAverageMS);
+
+					std::string label = "##ECS_" + std::string(metricName);
+					if (historyCount > 0) {
+						ImGui::PlotLines(label.c_str(), history, (int)historyCount, 0, nullptr,
+										 0.0f, 4.0f, ImVec2(-1, 30));
+					}
+				}
+			},
+			nullptr);
 	}
 	ImGui::End();
 }

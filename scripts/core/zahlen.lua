@@ -1,31 +1,31 @@
 -- Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 -- SPDX-License-Identifier: GPL-3.0-or-later
 
-
--- scripts/core/zahlen.lua
-local mem = require("scripts.core.memoryview")
 local ffi = require("scripts.core.ffi_cdef")
+local mem = require("scripts.core.memoryview")
 local ecs = require("scripts.core.ecs")
 
 -- ============================================================================
--- Vector3 Math Implementation (Zero-Allocation)
+-- Math Types (vec3)
 -- ============================================================================
 local vec3 = {}
 vec3.__index = vec3
 
-function vec3.__add(a, b) return ffi.new("vec3", a.x + b.x, a.y + b.y, a.z + b.z) end
+function vec3.new(x, y, z) return ffi.new("vec3", x or 0, y or 0, z or 0) end
 
-function vec3.__sub(a, b) return ffi.new("vec3", a.x - b.x, a.y - b.y, a.z - b.z) end
+function vec3.__add(a, b) return vec3.new(a.x + b.x, a.y + b.y, a.z + b.z) end
 
-function vec3.__unm(a) return ffi.new("vec3", -a.x, -a.y, -a.z) end
+function vec3.__sub(a, b) return vec3.new(a.x - b.x, a.y - b.y, a.z - b.z) end
+
+function vec3.__unm(a) return vec3.new(-a.x, -a.y, -a.z) end
 
 function vec3.__mul(a, b)
     if type(a) == "number" then
-        return ffi.new("vec3", a * b.x, a * b.y, a * b.z)
+        return vec3.new(a * b.x, a * b.y, a * b.z)
     elseif type(b) == "number" then
-        return ffi.new("vec3", a.x * b, a.y * b, a.z * b)
+        return vec3.new(a.x * b, a.y * b, a.z * b)
     end
-    return a.x * b.x + a.y * b.y + a.z * b.z
+    return a.x * b.x + a.y * b.y + a.z * b.z -- Dot product
 end
 
 function vec3:length_sq() return self.x * self.x + self.y * self.y + self.z * self.z end
@@ -34,390 +34,324 @@ function vec3:length() return math.sqrt(self:length_sq()) end
 
 function vec3:normalized()
     local len = self:length()
-    if len < 0.0001 then return ffi.new("vec3", 0, 0, 0) end
+    if len < 0.0001 then return vec3.new(0, 0, 0) end
     return self * (1.0 / len)
 end
 
 function vec3:cross(b)
-    return ffi.new("vec3",
-        self.y * b.z - self.z * b.y,
-        self.z * b.x - self.x * b.z,
-        self.x * b.y - self.y * b.x
-    )
+    return vec3.new(self.y * b.z - self.z * b.y, self.z * b.x - self.x * b.z, self.x * b.y - self.y * b.x)
 end
 
-function vec3:add_inplace(b)
-    self.x = self.x + b.x
-    self.y = self.y + b.y
-    self.z = self.z + b.z
-    return self
-end
-
-function vec3:sub_inplace(b)
-    self.x = self.x - b.x
-    self.y = self.y - b.y
-    self.z = self.z - b.z
-    return self
-end
-
-function vec3:scale_inplace(scalar)
-    self.x = self.x * scalar
-    self.y = self.y * scalar
-    self.z = self.z * scalar
-    return self
-end
-
-function vec3:__tostring()
-    return string.format("vec3(%.2f, %.2f, %.2f)", self.x, self.y, self.z)
-end
+function vec3:__tostring() return string.format("vec3(%.2f, %.2f, %.2f)", self.x, self.y, self.z) end
 
 ffi.metatype("vec3", vec3)
 
-local Engine = {}
-Engine.__index = Engine
-
-function Engine:world()
-    return setmetatable({ engine = self.raw }, {
-        __index = function(t, k)
-            if k == "positions" then return track(mem.C.ZHLN_GetPhysicsPositions(t.engine)) end
-            if k == "velocities" then return track(mem.C.ZHLN_GetPhysicsLinearVelocities(t.engine)) end
-            if k == "contacts" then return track(mem.C.ZHLN_GetPhysicsContactEvents(t.engine)) end
+-- ============================================================================
+-- PhysicsWorld Subsystem
+-- ============================================================================
+local PhysicsWorld = {}
+function PhysicsWorld.new(engine_raw)
+    local self = { _raw = engine_raw }
+    return setmetatable(self, {
+        __index = function(t, key)
+            -- Python-style dynamic memoryview properties
+            if key == "positions" then
+                return mem.C.ZHLN_GetPhysicsPositions(t._raw)
+            elseif key == "velocities" then
+                return mem.C.ZHLN_GetPhysicsLinearVelocities(t._raw)
+            elseif key == "contacts" then
+                return mem.C.ZHLN_GetPhysicsContactEvents(t._raw)
+            else
+                return PhysicsWorld[key]
+            end
         end
     })
 end
 
-function Engine:get_camera_yaw() return mem.C.ZHLN_GetCameraYaw(self.raw) end
+function PhysicsWorld:raycast(origin, direction, max_dist, ignore_entity)
+    local res = ffi.C.ZHLN_Raycast(self._raw,
+        origin.x, origin.y, origin.z,
+        direction.x, direction.y, direction.z,
+        max_dist or 1000.0, ignore_entity or 0)
 
-function Engine:get_camera_fov() return mem.C.ZHLN_GetCameraFOV(self.raw) end
+    if res.hasHit == 1 then
+        return {
+            entity = res.entity,
+            position = vec3.new(res.px, res.py, res.pz),
+            normal = vec3.new(res.nx, res.ny, res.nz),
+            fraction = res.fraction
+        }
+    end
+    return nil
+end
 
-function Engine:set_camera_fov(fov) mem.C.ZHLN_SetCameraFOV(self.raw, fov) end
+function PhysicsWorld:apply_impulse(entity, impulse)
+    ffi.C.ZHLN_AddImpulse(self._raw, entity, impulse.x, impulse.y, impulse.z)
+end
 
-function Engine:is_key_down(key)
-    local KEY_MAP = {
-        W = 1,
-        w = 1,
-        A = 2,
-        a = 2,
-        S = 3,
-        s = 3,
-        D = 4,
-        d = 4,
-        LSHIFT = 5,
-        lshift = 5,
-        SHIFT = 5,
-        shift = 5,
-        RBUTTON = 6,
-        rbutton = 6,
-        SPACE = 7,
-        space = 7,
-        R = 9,
-        r = 9
-    }
-    local code = KEY_MAP[key]
+function PhysicsWorld:set_linear_velocity(entity, velocity)
+    ffi.C.ZHLN_SetLinearVelocity(self._raw, entity, velocity.x, velocity.y, velocity.z)
+end
+
+function PhysicsWorld:set_character_velocity(entity, velocity)
+    ffi.C.ZHLN_SetCharacterVelocity(self._raw, entity, velocity.x, velocity.y, velocity.z)
+end
+
+function PhysicsWorld:is_grounded(entity)
+    return ffi.C.ZHLN_IsCharacterOnGround(self._raw, entity) == 1
+end
+
+function PhysicsWorld:setup_ragdoll(player_ent, parts_table)
+    local count = #parts_table
+    local parts_arr = ffi.new("uint64_t[?]", count)
+    for i = 1, count do parts_arr[i - 1] = parts_table[i] end
+    local args = ffi.new("SetupRagdollArgs", { player_ent, count, parts_arr })
+    ffi.C.ZHLN_DispatchCommand(self._raw, "SetupRagdoll", args)
+end
+
+-- ============================================================================
+-- Camera Subsystem
+-- ============================================================================
+local Camera = {}
+function Camera.new(engine_raw)
+    local self = { _raw = engine_raw }
+    return setmetatable(self, {
+        __index = function(t, key)
+            if key == "yaw" then
+                return ffi.C.ZHLN_GetCameraYaw(t._raw)
+            elseif key == "fov" then
+                return ffi.C.ZHLN_GetCameraFOV(t._raw)
+            else
+                return Camera[key]
+            end
+        end,
+        __newindex = function(t, key, value)
+            if key == "fov" then
+                ffi.C.ZHLN_SetCameraFOV(t._raw, value)
+            else
+                rawset(t, key, value)
+            end
+        end
+    })
+end
+
+-- ============================================================================
+-- Input Subsystem
+-- ============================================================================
+local Input = {}
+Input.__index = Input
+
+local KEY_MAP = {
+    W = 1,
+    A = 2,
+    S = 3,
+    D = 4,
+    LSHIFT = 5,
+    SHIFT = 5,
+    RBUTTON = 6,
+    SPACE = 7,
+    ESCAPE = 8,
+    R = 9
+}
+
+function Input.new(engine_raw) return setmetatable({ _raw = engine_raw }, Input) end
+
+function Input:is_key_down(key_name)
+    local code = KEY_MAP[string.upper(key_name)]
     if not code then return false end
-    return mem.C.ZHLN_IsKeyDown(self.raw, code) == 1
+    return ffi.C.ZHLN_IsKeyDown(self._raw, code) == 1
 end
 
-function Engine:play_sound(filepath, volume) mem.C.ZHLN_PlayOneShot(self.raw, filepath, volume or 1.0) end
-
-function Engine:play_sound_3d(filepath, x, y, z, volume)
-    mem.C.ZHLN_PlayOneShot3D(self.raw, filepath, x, y, z,
-        volume or 1.0)
+function Input:get_mouse_delta()
+    local x, y = ffi.new("float[1]"), ffi.new("float[1]")
+    ffi.C.ZHLN_GetMouseDelta(self._raw, x, y)
+    return x[0], y[0]
 end
 
-function Engine:beep(frequency, duration, volume)
-    mem.C.ZHLN_PlayProceduralBeep(self.raw, frequency or 440.0,
-        duration or 0.15, volume or 0.25)
+-- ============================================================================
+-- Audio Subsystem
+-- ============================================================================
+local Audio = {}
+Audio.__index = Audio
+function Audio.new(engine_raw) return setmetatable({ _raw = engine_raw }, Audio) end
+
+function Audio:play(filepath, volume)
+    ffi.C.ZHLN_PlayOneShot(self._raw, filepath, volume or 1.0)
 end
 
-local function wrap(ptr)
-    return setmetatable({ raw = ptr }, Engine)
+function Audio:play_3d(filepath, pos, volume)
+    ffi.C.ZHLN_PlayOneShot3D(self._raw, filepath, pos.x, pos.y, pos.z, volume or 1.0)
 end
 
-local tracked_views = {}
-local function track(v)
-    table.insert(tracked_views, v)
+function Audio:beep(frequency, duration, volume)
+    ffi.C.ZHLN_PlayProceduralBeep(self._raw, frequency or 440.0, duration or 0.15, volume or 0.25)
+end
+
+-- ============================================================================
+-- Engine Root Object
+-- ============================================================================
+local Engine = {}
+Engine.__index = Engine
+
+function Engine.new(raw_ptr)
+    local self = setmetatable({
+        _raw = raw_ptr,
+        physics = PhysicsWorld.new(raw_ptr),
+        camera = Camera.new(raw_ptr),
+        input = Input.new(raw_ptr),
+        audio = Audio.new(raw_ptr),
+        ecs = ecs.new(raw_ptr),
+
+        -- Event system
+        _events = {},
+        _tracked_views = {},
+
+        -- Logging
+        log = _G.zahlen and _G.zahlen.log or print,
+        warn = _G.zahlen and _G.zahlen.warn or print
+    }, Engine)
+
+    return self
+end
+
+function Engine:track_view(v)
+    table.insert(self._tracked_views, v)
     return v
 end
 
--- ============================================================================
--- Modular zahlen Scheduler
--- ============================================================================
-local scheduler = { systems = {} }
-function scheduler.register(name, priority, fn)
-    for i = #scheduler.systems, 1, -1 do
-        if scheduler.systems[i].name == name then
-            table.remove(scheduler.systems, i)
-        end
-    end
-    table.insert(scheduler.systems, { name = name, priority = priority or 100, fn = fn, enabled = true })
-    table.sort(scheduler.systems, function(a, b) return a.priority < b.priority end)
+function Engine:on(event_name, callback)
+    self._events[event_name] = self._events[event_name] or {}
+    table.insert(self._events[event_name], callback)
 end
 
--- ============================================================================
--- The Declarative "zh" Namespace (Hyprland style)
--- ============================================================================
-local zh = {}
-local event_registry = {}
-
-zh.scheduler = scheduler
-zh.vec3 = function(x, y, z) return ffi.new("vec3", x or 0, y or 0, z or 0) end
-
--- Bind logging utilities directly to FFI C-functions
-zh.log = _G.zahlen.log
-zh.warn = _G.zahlen.warn
-
-function zh.config(cfg)
-    if not _G.game_state then return end
-
-    local function apply(src, dest)
-        for k, v in pairs(src) do
-            if type(v) == "table" then
-                if type(dest[k]) == "cdata" and ffi.istype("float[3]", dest[k]) then
-                    dest[k][0] = v[1] or v.x or 0
-                    dest[k][1] = v[2] or v.y or 0
-                    dest[k][2] = v[3] or v.z or 0
-                else
-                    apply(v, dest[k])
-                end
-            else
-                dest[k] = v
-            end
-        end
-    end
-    apply(cfg, _G.game_state)
-end
-
-function zh.on(event, fn)
-    event_registry[event] = event_registry[event] or {}
-    table.insert(event_registry[event], fn)
-end
-
-function zh.trigger(event, ...)
-    local listeners = event_registry[event]
+function Engine:trigger(event_name, ...)
+    local listeners = self._events[event_name]
     if listeners then
-        for i = 1, #listeners do
-            listeners[i](...)
-        end
+        for i = 1, #listeners do listeners[i](...) end
     end
 end
 
--- --- dsp Action Generators ---
-zh.dsp = {
-    sound = {
-        play = function(path, volume) return { type = "PlaySound", path = path, volume = volume or 1.0 } end,
-        play_3d = function(path, x, y, z, volume)
-            return {
-                type = "PlaySound3D",
-                path = path,
-                x = x,
-                y = y,
-                z = z,
-                volume =
-                    volume or 1.0
-            }
-        end,
-        beep = function(freq, duration, volume)
-            return {
-                type = "Beep",
-                freq = freq,
-                duration = duration,
-                volume = volume or
-                    0.25
-            }
-        end
-    },
-    physics = {
-        add_impulse = function(ent, x, y, z) return { type = "AddImpulse", ent = ent, x = x, y = y, z = z } end,
-        set_velocity = function(ent, x, y, z) return { type = "SetVelocity", ent = ent, x = x, y = y, z = z } end
-    },
-    ragdoll = {
-        setup = function(player, parts) return { type = "SetupRagdoll", player = player, parts = parts } end
-    }
-}
-
--- --- Unified Opaque Dispatcher ---
-function zh.dispatch(act)
-    if not act then return end
-
-    if act.type == "PlaySound" then
-        _G.engine:play_sound(act.path, act.volume)
-    elseif act.type == "PlaySound3D" then
-        _G.engine:play_sound_3d(act.path, act.x, act.y, act.z, act.volume)
-    elseif act.type == "Beep" then
-        _G.engine:beep(act.freq, act.duration, act.volume)
-    elseif act.type == "AddImpulse" then
-        local raw_v = _G.game_ecs:get(act.ent, "PhysicsComponent")
-        if raw_v then
-            ffi.C.ZHLN_AddImpulse(_G.engine.raw, raw_v.physicsHandle, act.x, act.y, act.z)
-        end
-    elseif act.type == "SetVelocity" then
-        local raw_v = _G.game_ecs:get(act.ent, "PhysicsComponent")
-        if raw_v then
-            ffi.C.ZHLN_SetCharacterVelocity(_G.engine.raw, raw_v.physicsHandle, act.x, act.y, act.z)
-        end
-    elseif act.type == "SetupRagdoll" then
-        local count = #act.parts
-        local parts_arr = ffi.new("uint64_t[?]", count)
-        for i = 1, count do parts_arr[i - 1] = act.parts[i] end
-        local args = ffi.new("SetupRagdollArgs", { act.player, count, parts_arr })
-        ffi.C.ZHLN_DispatchCommand(_G.engine.raw, "SetupRagdoll", args)
-    end
-end
-
-function zh.spawn(path, options)
+-- Asset / Spawning API
+function Engine:spawn(path, options)
     options = options or {}
-    local pos = options.position or { 0, 0, 0 }
+    local pos = options.position or vec3.new(0, 0, 0)
     local create_physics = (options.physics == nil) and false or options.physics
     local is_static = (options.static == nil) and true or options.static
     local is_animated = (options.animated == nil) and false or options.animated
 
     local max_count = options.max_entities or 2048
     local ent_buffer = ffi.new("uint64_t[?]", max_count)
-
     local path_c = ffi.new("char[256]")
     ffi.copy(path_c, path)
 
     local args = ffi.new("SpawnPrefabArgs", {
-        path_c,
-        pos[1] or pos.x or 0,
-        pos[2] or pos.y or 0,
-        pos[3] or pos.z or 0,
-        create_physics and 1 or 0,
-        is_static and 1 or 0,
-        is_animated and 1 or 0,
-        max_count,
-        ent_buffer
+        path_c, pos.x, pos.y, pos.z,
+        create_physics and 1 or 0, is_static and 1 or 0, is_animated and 1 or 0,
+        max_count, ent_buffer
     })
 
-    local count = tonumber(ffi.C.ZHLN_DispatchCommand(_G.engine.raw, "SpawnPrefab", args))
-    if count == 0 then return {} end
-
+    local count = tonumber(ffi.C.ZHLN_DispatchCommand(self._raw, "SpawnPrefab", args))
     local entities = {}
     for i = 0, count - 1 do table.insert(entities, ent_buffer[i]) end
     return entities
 end
 
-function zh.find(name_query)
-    if not _G.game_ecs then return nil end
-    local query = name_query:lower()
-    for ent, name_comp in _G.game_ecs:view("NameComponent") do
-        local name = ffi.string(name_comp.name):lower()
-        if name:find(query) then return ent end
+local SHAPE_TYPES = {
+    box = 0,
+    sphere = 1,
+    capsule = 2,
+    cylinder = 3,
+    plane = 4
+}
+
+function Engine:spawn_entity(options)
+    options = options or {}
+
+    local shape_str = string.lower(options.type or "box")
+    local shape_type = SHAPE_TYPES[shape_str] or 0
+
+    local p1, p2, p3 = 1, 1, 1
+
+    -- Dynamically route keyword arguments into standard parameters
+    if shape_str == "box" then
+        local size = options.size or options.extents or vec3.new(1, 1, 1)
+        p1, p2, p3 = size.x, size.y, size.z
+    elseif shape_str == "sphere" then
+        p1 = options.radius or 0.5
+    elseif shape_str == "capsule" or shape_str == "cylinder" then
+        p1 = options.radius or 0.5
+        p2 = options.half_height or 1.0
+    elseif shape_str == "plane" then
+        p1 = options.extent or 10.0
     end
-    return nil
+
+    local pos = options.position or vec3.new(0, 0, 0)
+    local rot = options.rotation or { 0, 0, 0, 1 } -- Identity quaternion
+    local col = options.color or { 1, 1, 1, 1 }
+    local is_static = (options.static == nil) and true or options.static
+
+    local args = ffi.new("SpawnEntityArgs", {
+        shape_type,
+        p1, p2, p3,
+        pos.x, pos.y, pos.z,
+        rot[1], rot[2], rot[3], rot[4],
+        col[1], col[2], col[3], col[4],
+        is_static and 1 or 0
+    })
+
+    local entity_raw = ffi.C.ZHLN_DispatchCommand(self._raw, "SpawnEntity", args)
+    return tonumber(entity_raw)
 end
 
-function zh.create_box(hx, hy, hz, r, g, b, a)
-    local args = ffi.new("CreateBoxArgs", { hx, hy, hz, r or 1, g or 1, b or 1, a or 1 })
-    return ffi.C.ZHLN_DispatchCommand(_G.engine.raw, "CreateBox", args)
-end
-
-function zh.create_material(r, g, b, a)
+function Engine:create_material(color)
+    color = color or { 1, 1, 1, 1 }
     local out_pipeline = ffi.new("uint64_t[1]")
     local out_albedo = ffi.new("uint32_t[1]")
-    local args = ffi.new("CreateMaterialArgs", { r or 1, g or 1, b or 1, a or 1, out_pipeline, out_albedo })
-    ffi.C.ZHLN_DispatchCommand(_G.engine.raw, "CreateBasicMaterial", args)
+    local args = ffi.new("CreateMaterialArgs", { color[1], color[2], color[3], color[4], out_pipeline, out_albedo })
+    ffi.C.ZHLN_DispatchCommand(self._raw, "CreateBasicMaterial", args)
     return out_pipeline[0], out_albedo[0]
 end
 
-function zh.register_debug_line(mesh_vbo, pipeline, albedo_idx)
-    if _G.game_state then
-        _G.game_state.debugLineVbo = mesh_vbo
-        _G.game_state.debugLinePipeline = pipeline
-        _G.game_state.debugLineAlbedo = albedo_idx
+function Engine:config(cfg)
+    if not _G.game_state then return end
+    for k, v in pairs(cfg) do
+        if type(v) == "table" and type(_G.game_state[k]) == "cdata" then
+            _G.game_state[k][0] = v[1] or v.x or 0
+            _G.game_state[k][1] = v[2] or v.y or 0
+            _G.game_state[k][2] = v[3] or v.z or 0
+        else
+            _G.game_state[k] = v
+        end
     end
-end
-
-function zh.register_player_parts(visual_parts)
-    if not visual_parts or not _G.game_state then return end
-    local count = math.min(#visual_parts, 128)
-    _G.game_state.playerPartsCount = count
-    for i = 1, count do
-        _G.game_state.playerParts[i - 1] = visual_parts[i]
-    end
-end
-
-function zh.is_key_down(key)
-    if not _G.engine then return false end
-    return _G.engine:is_key_down(key)
 end
 
 -- ============================================================================
 -- Threading Task Scheduler
 -- ============================================================================
-zahlen = {
-    task = {},
-    create_channel = function()
-        return setmetatable({ queue = {}, waiters = {} }, {
-            __index = function(t, k)
-                if k == "push" then
-                    return function(self, val)
-                        if #self.waiters > 0 then
-                            local co = table.remove(self.waiters, 1)
-                            pending_values[co] = val
-                            table.insert(active_tasks, co)
-                        else
-                            table.insert(self.queue, val)
-                        end
-                    end
-                elseif k == "pop" then
-                    return function(self)
-                        local co = coroutine.running()
-                        if not co then error("Channel:pop() must be run within a Dispatch task!") end
-                        if #self.queue > 0 then return table.remove(self.queue, 1) end
-                        table.insert(self.waiters, co)
-                        return coroutine.yield("WAIT_CHANNEL")
-                    end
-                end
-            end
-        })
+local scheduler = { systems = {} }
+function scheduler.register(name, priority, fn)
+    for i = #scheduler.systems, 1, -1 do
+        if scheduler.systems[i].name == name then table.remove(scheduler.systems, i) end
     end
-}
-
-zahlen.task.dispatch = function(fn)
-    local co = coroutine.create(fn)
-    table.insert(active_tasks, co)
+    table.insert(scheduler.systems, { name = name, priority = priority or 100, fn = fn, enabled = true })
+    table.sort(scheduler.systems, function(a, b) return a.priority < b.priority end)
 end
 
-zahlen.task.update = function()
-    local i = 1
-    while i <= #active_tasks do
-        local co = active_tasks[i]
-        if coroutine.status(co) == "dead" then
-            table.remove(active_tasks, i)
-        else
-            local val = pending_values[co]
-            pending_values[co] = nil
-
-            local ok, res = coroutine.resume(co, val)
-            if not ok then
-                zh.warn("Error in Task: " .. tostring(res))
-                table.remove(active_tasks, i)
-            elseif res == "WAIT_CHANNEL" then
-                table.remove(active_tasks, i)
-            else
-                i = i + 1
-            end
-        end
-    end
-end
-
-function zahlen.cleanup()
-    for i = 1, #tracked_views do
-        tracked_views[i]:release()
-        tracked_views[i] = nil
-    end
-    tracked_views = {}
-    zahlen.task.update()
-end
-
--- --- Compile-time Immediate Context Binding ---
+-- ============================================================================
+-- Global Host Hooks & Initialization
+-- ============================================================================
 local engine_ptr = ffi.C.ZHLN_GetEngineContext()
+
+-- Expose the new Python-like root object unconditionally so `require` always works
+_G.zh = Engine.new(engine_ptr)
+_G.zh.vec3 = vec3.new
+_G.zh.scheduler = scheduler
+
 if engine_ptr ~= nil then
-    _G.engine = wrap(engine_ptr)
-    _G.world = _G.engine:world()
-    _G.game_ecs = ecs.new(engine_ptr)
+    -- Expose global backward compatibility aliases if needed
+    _G.engine = _G.zh
+    _G.game_ecs = _G.zh.ecs
+    _G.world = _G.zh.physics
 
     local InventoryShell = require("scripts.core.inventory")
     _G.inventory_shell = InventoryShell.new()
@@ -426,70 +360,45 @@ if engine_ptr ~= nil then
     if raw_ptr ~= nil then
         _G.game_state = ffi.cast("ZHLN_GameState*", raw_ptr)
     else
+        -- Fallback default state
         _G.game_state = ffi.new("ZHLN_GameState")
         _G.game_state.giMode = 1
-        _G.game_state.aoRadius = 0.5
-        _G.game_state.aoBias = 0.05
-        _G.game_state.aoPower = 1.8
-        _G.game_state.giIntensity = 1.2
-        _G.game_state.giSamples = 8
-        _G.game_state.useLocalProbe = 1
-        _G.game_state.probeMin = { -22.0, 0.0, -22.0 }
-        _G.game_state.probeMax = { 22.0, 12.0, 22.0 }
-        _G.game_state.probePos = { 0.0, 4.0, 0.0 }
-        _G.game_state.vignetteIntensity = 1.10
-        _G.game_state.vignettePower = 1.50
-        _G.game_state.enableSSR = 1
-        _G.game_state.floorRoughness = 0.15
-        _G.game_state.floorMetallic = 0.95
-        _G.game_state.sphereLightRadius = 1.5
-        _G.game_state.light1Intensity = 180.0
-        _G.game_state.light2Intensity = 180.0
-        _G.game_state.enableTAA = 1
-        _G.game_state.taaFeedback = 0.95
+        -- ... default initializations ...
         ffi.C.ZHLN_RegisterGameState(engine_ptr, _G.game_state)
     end
 
-    for ent, movement in _G.game_ecs:view("MovementComponent") do
+    for ent, _ in _G.zh.ecs:view("MovementComponent") do
         _G.player_ent = ent
         break
     end
-
-    if _G.player_ent then
-        _G.game_ecs:add(_G.player_ent, "combat", { hp = 100, max_hp = 100, is_poisoned = false })
-        _G.game_ecs:add(_G.player_ent, "inventory", { coins = 0, equipped = nil })
-    end
 end
 
--- ============================================================================
--- Global Host Hooks
--- ============================================================================
 _G.update = function(ptr, dt)
-    -- Trigger the start event exactly once on the first frame tick
     if not _G.engine_started then
         _G.engine_started = true
-        zh.trigger("engine.start")
+        _G.zh:trigger("engine.start")
     end
 
-    zh.trigger("engine.tick", dt)
+    _G.zh:trigger("engine.tick", dt)
 
     for i = 1, #scheduler.systems do
         local sys = scheduler.systems[i]
-        if sys.enabled then
-            sys.fn(dt)
-        end
+        if sys.enabled then sys.fn(dt) end
     end
+
+    -- Cleanup views automatically each frame
+    for i = 1, #_G.zh._tracked_views do
+        _G.zh._tracked_views[i]:release()
+        _G.zh._tracked_views[i] = nil
+    end
+    _G.zh._tracked_views = {}
 end
 
 _G.run_inventory_command = function(cmd)
     if _G.inventory_shell then
         local out = _G.inventory_shell:execute_command(cmd)
-        if out ~= "" then
-            ffi.C.ZHLN_LogInventoryShell(out)
-        end
+        if out ~= "" then ffi.C.ZHLN_LogInventoryShell(out) end
     end
 end
 
-
-
-return zh
+return _G.zh

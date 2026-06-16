@@ -95,6 +95,7 @@ if not ok then
             float speed;
             float jumpForce;
             float orientation[4];
+            float prevOrientation[4];
             float landingTimer;
             float jumpDelayTimer;
             bool  jumpRequested;
@@ -105,6 +106,7 @@ if not ok then
 
         // Expose our new C-API bridge function
         void* ZHLN_GetComponent(ZHLN_Engine* engine, uint64_t entityRaw, const char* componentName);
+        void* ZHLN_AddComponent(ZHLN_Engine* engine, uint64_t entityRaw, const char* componentName);
 
 
         typedef struct ZHLN_LuaChannel ZHLN_LuaChannel;
@@ -161,12 +163,16 @@ if not ok then
             int enableTAA;
             float taaFeedback;
 
-            uint64_t playerParts[128];
-            uint32_t playerPartsCount;
             uint64_t debugLineVbo;
             uint64_t debugLinePipeline;
             uint32_t debugLineAlbedo;
         } ZHLN_GameState;
+
+        typedef struct TransformComponent {
+            float position[4]; // 16 bytes (alignas(16) JPH::Vec3)
+            float rotation[4]; // 16 bytes (alignas(16) JPH::Quat)
+            float scale[4];    // 16 bytes (alignas(16) JPH::Vec3)
+        } TransformComponent;
 
         // Binary Command argument packing
         typedef struct SpawnPrefabArgs {
@@ -185,10 +191,14 @@ if not ok then
             uint64_t* visualParts;
         } __attribute__((packed)) SetupRagdollArgs;
 
-        typedef struct CreateBoxArgs {
-            float hx, hy, hz;
+        typedef struct SpawnEntityArgs {
+            uint8_t shapeType;
+            float p1, p2, p3;
+            float px, py, pz;
+            float rx, ry, rz, rw;
             float r, g, b, a;
-        } __attribute__((packed)) CreateBoxArgs;
+            uint8_t isStatic;
+        } __attribute__((packed)) SpawnEntityArgs;
 
         typedef struct CreateMaterialArgs {
             float r, g, b, a;
@@ -208,19 +218,25 @@ if not ok then
         uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine, const char* cmd, const void* args);
         float ZHLN_GetTotalTime(ZHLN_Engine* engine);
 
+        typedef struct HierarchyComponent {
+            uint64_t parent;
+        } HierarchyComponent;
+
         typedef struct TargetCameraComponent {
             uint64_t target;
             float    distance;
             float    targetDistance;
             float    yaw;
             float    pitch;
-            float    targetOffset[3];
+            float    targetOffset[4] __attribute__((aligned(16)));
             float    stiffness;
             float    vignetteIntensity;
             float    vignettePower;
             float    fov;
             float    targetFov;
-        } TargetCameraComponent;
+            float    smoothTargetPos[4] __attribute__((aligned(16)));
+            uint32_t hasInitSmoothTarget;
+        } __attribute__((aligned(16))) TargetCameraComponent;
 
     ]]
 end

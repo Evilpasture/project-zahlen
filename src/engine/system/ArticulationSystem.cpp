@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "ArticulationSystem.hpp"
 
 #include <Jolt/Jolt.h>
@@ -9,6 +8,7 @@
 #include <Jolt/Skeleton/SkeletonPose.h>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
 #include <cgltf.h>
 #include <cstring>
@@ -16,7 +16,50 @@
 #include <ecs/ECS.hpp>
 #include <physics/Physics.hpp>
 #include <physics/PhysicsWorld.hpp>
-#include <print>
+
+namespace ZHLN::Tests {
+static void VerifyArticulationStateConsistency(const ECS::Registry& reg) noexcept {
+	static bool testsRun = false;
+	if (testsRun) {
+		return;
+	}
+	testsRun = true;
+
+	auto entities = reg.GetEntitiesWith<RagdollComponent>();
+	auto ragdolls = reg.GetRawArray<RagdollComponent>();
+
+	for (size_t i = 0; i < entities.size(); ++i) {
+		Entity e = entities[i];
+		const auto& ragComp = ragdolls[i];
+
+		// Test 1: Ragdoll state is valid enum value
+		if (ragComp.state != RagdollState::Inactive && ragComp.state != RagdollState::Limp &&
+			ragComp.state != RagdollState::KeyframeMotor) {
+			ZHLN::Log("[Test Fail] Articulation State: Entity {} has invalid ragdoll state {}",
+					  e.index, static_cast<int>(ragComp.state));
+		}
+
+		// Test 2: Previous state is valid
+		if (ragComp.prevState != RagdollState::Inactive && ragComp.prevState != RagdollState::Limp &&
+			ragComp.prevState != RagdollState::KeyframeMotor) {
+			ZHLN::Log("[Test Fail] Articulation State: Entity {} has invalid prev state {}",
+					  e.index, static_cast<int>(ragComp.prevState));
+		}
+
+		// Test 3: isAddedToPhysics is boolean
+		if (ragComp.isAddedToPhysics != 0 && ragComp.isAddedToPhysics != 1) {
+			ZHLN::Log("[Test Fail] Articulation State: Entity {} isAddedToPhysics invalid: {}",
+					  e.index, ragComp.isAddedToPhysics);
+		}
+
+		// Test 4: Joint count is reasonable
+		if (ragComp.jointCount > 1000 || ragComp.jointCount == 0) {
+			ZHLN::Log("[Test Fail] Articulation State: Entity {} has unreasonable joint count: {}",
+					  e.index, ragComp.jointCount);
+		}
+	}
+}
+} // namespace ZHLN::Tests
 
 namespace ZHLN {
 
@@ -34,6 +77,11 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
 		auto* phys = reg.Get<PhysicsComponent>(e);
 
 		if ((ragComp.ragdollInstance == nullptr) || (ragComp.gltfSkin == nullptr)) {
+			continue;
+		}
+
+		if (ragComp.state == RagdollState::Inactive &&
+			ragComp.prevState == RagdollState::Inactive) {
 			continue;
 		}
 
@@ -58,14 +106,8 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
 
 		std::vector<JPH::Mat44> localJoints(ragComp.jointCount, JPH::Mat44::sIdentity());
 		for (uint32_t j = 0; j < ragComp.jointCount; ++j) {
-			const cgltf_node* jointNode = nullptr;
-			for (size_t k = 0; k < skin->joints_count; ++k) {
-				if ((skin->joints[k]->name != nullptr) &&
-					std::string_view(skin->joints[k]->name) == skel->GetJoint(j).mName) {
-					jointNode = skin->joints[k];
-					break;
-				}
-			}
+			// High-performance O(1) index-based joint node mapping
+			const cgltf_node* jointNode = (j < skin->joints_count) ? skin->joints[j] : nullptr;
 			if (jointNode != nullptr) {
 				float m[16];
 				cgltf_node_transform_local(jointNode, m);
@@ -156,14 +198,16 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
 				finalSkinningMatrices[j] = physicalWorldJoints[j] * ibm;
 			}
 
-			// Update localTransform of visual meshes to match the physical pelvis root offset
-			// (actualRootOffset)
+			// Update the TransformComponent of visual meshes to match the physical pelvis root
+			// offset
 			auto allEntities = reg.GetEntitiesWith<MeshComponent>();
 			auto allMeshes = reg.GetRawArray<MeshComponent>();
 			for (size_t k = 0; k < allEntities.size(); ++k) {
 				if (allMeshes[k].gltfSkin == skin) {
-					allMeshes[k].localTransform =
-						JPH::Mat44::sTranslation(JPH::Vec3(actualRootOffset));
+					if (auto* trans = reg.Get<TransformComponent>(allEntities[k])) {
+						trans->position = JPH::Vec3(actualRootOffset);
+						trans->rotation = JPH::Quat::sIdentity();
+					}
 				}
 			}
 			rc.UpdateJointMatrices(ragComp.jointOffset, finalSkinningMatrices.data(),
@@ -177,6 +221,10 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
 											  actualRootOffset);
 			}
 		}
+	}
+
+	if constexpr (isDev) {
+		ZHLN::Tests::VerifyArticulationStateConsistency(reg);
 	}
 }
 

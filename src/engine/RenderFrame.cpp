@@ -402,8 +402,9 @@ struct TAAPass {
 					ctx.taaPass.Execute(cmd, TAAPushConstants{.feedback = ctx.taaState.feedback});
 				});
 
-			[[maybe_unused]] auto end =
+			[[maybe_unused]] auto color_ro =
 				IssueBarrier<Vk::ColorAttachmentState, Vk::ShaderReadState>(cmd, accumNext_att);
+			// Retain the resolved, anti-aliased frame instead of the raw, jittered target
 		}
 
 		return {
@@ -807,6 +808,8 @@ void RenderContext::EndFrame() {
 		bool isSkinned = (drawCmd.flags & DrawFlags::Skinned) != DrawFlags::None;
 		bool isExcluded = (drawCmd.flags & DrawFlags::ExcludeFromTLAS) != DrawFlags::None;
 
+		// TODO(Evilpasture): This still pulls animated screen space meshes. There is something
+		// wrong with the GLB we're using.
 		if (mesh->blasAddress == 0 || isSkinned || isExcluded) {
 			continue;
 		}

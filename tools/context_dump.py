@@ -10,7 +10,9 @@ from datetime import datetime
 import argparse
 
 
-def get_git_tracked_files(target=".", ignore_demo=False, ignore_tools=False):
+def get_git_tracked_files(
+    target=".", ignore_demo=False, ignore_tools=False, ignore_inlines=False
+):
     extensions = {
         ".cpp",
         ".hpp",
@@ -34,6 +36,10 @@ def get_git_tracked_files(target=".", ignore_demo=False, ignore_tools=False):
     ignore_paths = {"third_party", "extern"}
     if ignore_tools:
         ignore_paths.add("tools")
+
+    # If the flag is set, remove .inl from the allowed extensions
+    if ignore_inlines:
+        extensions.discard(".inl")
 
     if os.path.isfile(target):
         return [target]
@@ -126,10 +132,14 @@ def generate_snapshot_string(tracked_files, target_dir):
     return "\n".join(lines)
 
 
-def run_project_manager(target=".", ignore_demo=False, ignore_tools=False):
-    # Pass ignore_tools to get_git_tracked_files
+def run_project_manager(
+    target=".", ignore_demo=False, ignore_tools=False, ignore_inlines=False
+):
     tracked_files = get_git_tracked_files(
-        target, ignore_demo=ignore_demo, ignore_tools=ignore_tools
+        target,
+        ignore_demo=ignore_demo,
+        ignore_tools=ignore_tools,
+        ignore_inlines=ignore_inlines,
     )
     if not tracked_files:
         print(f"No matching files found at '{target}'.")
@@ -207,6 +217,12 @@ if __name__ == "__main__":
     # NEW: Add the --ignore-tools flag
     parser.add_argument(
         "--ignore-tools", action="store_true", help="Ignore the tools/ directory."
+    )
+
+    parser.add_argument(
+        "--ignore-inlines",
+        action="store_true",
+        help="Ignore .inl implementation files.",
     )
 
     args = parser.parse_args()
