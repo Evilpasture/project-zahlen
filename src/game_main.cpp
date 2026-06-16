@@ -289,13 +289,17 @@ void RenderSystem(Engine& engine, CullingSystem& cullingSystem,
 	auto& reg = engine.GetRegistry();
 	auto& cam = engine.GetCamera();
 
+	// Restored original frame boundary initialization point.
+	rc.BeginFrame();
+
 	JPH::Mat44 vp{};
 	JPH::Mat44 unjitteredVp{};
 	JPH::Mat44 prevUnjitteredVp{};
 
 	auto cameraEntities = reg.GetEntitiesWith<MainCameraTagComponent>();
-	if (cameraEntities.empty())
+	if (cameraEntities.empty()) {
 		return;
+	}
 	Entity cameraEntity = cameraEntities[0];
 
 	if (auto* cComp = reg.Get<CameraSystem::CameraComponent>(cameraEntity)) {
@@ -359,8 +363,6 @@ void RenderSystem(Engine& engine, CullingSystem& cullingSystem,
 	Renderer::SetFrameData(rc, uniforms, shadowProjView);
 	Renderer::SetMatrices(rc, vp, unjitteredVp);
 
-	engine.BeginFrame();
-
 	for (Entity e : visibleEntities) {
 		auto* mesh = reg.Get<MeshComponent>(e);
 		if (mesh == nullptr) {
@@ -397,7 +399,7 @@ void RenderSystem(Engine& engine, CullingSystem& cullingSystem,
 
 	DebugDrawSystem(engine, cullingSystem);
 
-	engine.EndFrame();
+	rc.EndFrame();
 }
 
 // ============================================================================
@@ -715,6 +717,7 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, ui
 			EngineError{.msg = "Game failed to initialize.", .code = EXIT_FAILURE});
 	}
 
+	// 1. Original safe warm-up frames (balanced with rc.BeginFrame inside RenderSystem)
 	for (int i = 0; i < 3; ++i) {
 		engine->ProcessEvents();
 		ZHLN::RenderGame(*engine, 0.016f, 0.0f, cullingSystem, lightingSystem);
@@ -729,12 +732,6 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, ui
 	auto frameStart = std::chrono::high_resolution_clock::now();
 
 	while (engine->IsRunning()) {
-		// Calculate frame time based on frame limiter timing (not clock drift)
-		auto frameEnd = std::chrono::high_resolution_clock::now();
-		double elapsed = std::chrono::duration<double>(frameEnd - frameStart).count();
-		float frameTime = std::min(static_cast<float>(elapsed), 0.1f);
-		frameStart = std::chrono::high_resolution_clock::now();
-
 		engine->ProcessEvents();
 
 		if (engine->GetInput().IsKeyDown(KeyCode::Escape)) {
@@ -742,11 +739,30 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, ui
 			break;
 		}
 
-		auto res = engine->GetWindow().GetSize();
-		if (res.width <= 0 || res.height <= 0) {
-			Platform::Sleep(10);
-			continue;
+		// Calculate raw elapsed time
+		auto frameEnd = std::chrono::high_resolution_clock::now();
+		double elapsed = std::chrono::duration<double>(frameEnd - frameStart).count();
+		frameStart = std::chrono::high_resolution_clock::now();
+
+		// 1. Identify which refresh rate target we are actually near using the raw elapsed time.
+		// This prevents the low-pass filter from getting trapped in a feedback loop at high frame
+		// rates.
+		double target = elapsed;
+		constexpr double snapTargets[] = {1.0 / 60.0,  1.0 / 75.0,	1.0 / 90.0, 1.0 / 120.0,
+										  1.0 / 144.0, 1.0 / 240.0, 1.0 / 360.0};
+		for (double t : snapTargets) {
+			if (std::abs(elapsed - t) < 0.001) { // 1.0ms threshold against raw elapsed
+				target = t;
+				break;
+			}
 		}
+
+		// 2. Smooth the detected target with a low-pass filter to eliminate swapchain presentation
+		// jitter
+		static double smoothedElapsed = 0.0166667; // Fallback to 60fps
+		smoothedElapsed = (smoothedElapsed * 0.9) + (target * 0.1);
+
+		float frameTime = std::min(static_cast<float>(smoothedElapsed), 0.1f);
 
 		if (engine->GetInput().NeedsResize()) {
 			engine->GetRenderContext().SetResolution(engine->GetInput().GetNewSize());
