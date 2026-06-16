@@ -212,15 +212,17 @@ struct NativeMesh {
 	const Vk::RayTracingContext* rtCtx = nullptr;
 	Vk::Buffer buffer;
 	uint32_t vertexCount = 0;
+	VkDeviceAddress vboAddress = 0;
 	VkAccelerationStructureKHR blas = VK_NULL_HANDLE;
 	VkDeviceAddress blasAddress = 0;
 	Vk::Buffer blasBuffer;
 
 	NativeMesh() = default;
-	NativeMesh(Vk::Buffer&& buf, uint32_t count, VkAccelerationStructureKHR b = VK_NULL_HANDLE,
-			   VkDeviceAddress addr = 0, Vk::Buffer&& bBuf = {})
-		: buffer(std::move(buf)), vertexCount(count), blas(b), blasAddress(addr),
-		  blasBuffer(std::move(bBuf)) {}
+	NativeMesh(Vk::Buffer&& buf, uint32_t count, VkDeviceAddress vboAddr,
+			   VkAccelerationStructureKHR b = VK_NULL_HANDLE, VkDeviceAddress addr = 0,
+			   Vk::Buffer&& bBuf = {})
+		: buffer(std::move(buf)), vertexCount(count), vboAddress(vboAddr), blas(b),
+		  blasAddress(addr), blasBuffer(std::move(bBuf)) {}
 
 	~NativeMesh() {
 		if (blas != VK_NULL_HANDLE && rtCtx != nullptr) {
@@ -269,6 +271,13 @@ static_assert(std::is_trivially_copyable_v<DrawCommand> &&
 struct UIDrawCommand {
 	NativeMesh* mesh;
 	uint32_t fontIndex;
+};
+
+struct UIObjectConstants {
+	JPH::Mat44 orthoMatrix;
+	uint64_t vboAddress;
+	uint32_t albedoIdx;
+	uint32_t padding;
 };
 
 struct WorkerCmdContext {
@@ -352,6 +361,7 @@ struct RenderContext::Impl {
 	Vk::RayTracingContext rtCtx;
 	DoubleBuffered<VkAccelerationStructureKHR> tlas;
 	DoubleBuffered<Vk::Buffer> tlasBuffer;
+	DoubleBuffered<Vk::Buffer> tlasScratchBuffer;
 	std::array<std::vector<Vk::Buffer>, 2> tlasCleanupBuffers;
 
 	ZHLN::DoubleBuffered<Vk::Buffer> frameUniformBuffers;

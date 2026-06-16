@@ -766,10 +766,6 @@ inline void DrawInstanced(VkCommandBuffer cmd, const DrawState& state, const T& 
 	}
 	vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
 
-	VkDeviceSize offset = 0;
-	VkBuffer vboHandle = state.vbo;
-	vkCmdBindVertexBuffers(cmd, 0, 1, &vboHandle, &offset);
-
 	if (state.ibo != VK_NULL_HANDLE && state.indexCount > 0) {
 		vkCmdBindIndexBuffer(cmd, state.ibo, 0, VK_INDEX_TYPE_UINT32);
 		vkCmdDrawIndexed(cmd, state.indexCount, state.instanceCount, state.firstIndex, 0,
@@ -789,10 +785,6 @@ inline void DrawIndirect(VkCommandBuffer cmd, const DrawIndirectState& state,
 								&state.set, 0, nullptr);
 	}
 	vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
-
-	VkDeviceSize vboOffset = 0;
-	VkBuffer vboHandle = state.vbo;
-	vkCmdBindVertexBuffers(cmd, 0, 1, &vboHandle, &vboOffset);
 
 	if (state.ibo != VK_NULL_HANDLE) {
 		vkCmdBindIndexBuffer(cmd, state.ibo, 0, VK_INDEX_TYPE_UINT32);

@@ -90,6 +90,7 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 				f.features.multiDrawIndirect = VK_TRUE;
 				f.features.samplerAnisotropy = VK_TRUE;
 				f.features.drawIndirectFirstInstance = VK_TRUE;
+				f.features.shaderInt64 = VK_TRUE;
 			})
 			.Build();
 
@@ -539,10 +540,10 @@ void RenderContext::Impl::SetupUI(GLFWwindow* window) {
 		Vk::CreateShaderDesc(Vk::AsSpirV(&ZHLN_Resource_UiFragSpv[0]),
 							 ZHLN_Resource_UiFragSpv_Len));
 
-	VkPushConstantRange uiPush = {.stageFlags =
-									  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-								  .offset = 0,
-								  .size = 144};
+	VkPushConstantRange uiPush = {
+		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+		.offset = 0,
+		.size = sizeof(UIObjectConstants)}; // Now sizes dynamically to 80 bytes
 	VkDescriptorSetLayout rawLayout = bindlessLayout.Get();
 	ZHLN_PipelineLayoutDesc uiLayoutDesc = {.set_layouts = &rawLayout,
 											.set_layout_count = 1,
@@ -557,7 +558,6 @@ void RenderContext::Impl::SetupUI(GLFWwindow* window) {
 	uiPipeline = Vk::PipelineBuilder{}
 					 .Shaders(uiShaders)
 					 .Layout(uiPipelineLayout.Get())
-					 .Vertex<Vertex>()
 					 .ColorFormats({swapchainFormat})
 					 .NoDepth()
 					 .AlphaBlend()

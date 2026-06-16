@@ -38,7 +38,6 @@ void RenderContext::Impl::CompileShadowPipeline(VkDevice device, const void* sha
 	shadowPipeline = Vk::PipelineBuilder{}
 						 .Shaders(shaders)
 						 .Layout(shadowPipelineLayout.Get())
-						 .Vertex<Vertex>()
 						 .DepthOnly()
 						 .DepthFormat(VK_FORMAT_D32_SFLOAT)
 						 .CullFront()
@@ -58,10 +57,11 @@ void RenderContext::SetResolution([[maybe_unused]] const Extent2D& res) {
 }
 
 auto RenderContext::CreateVertexBuffer(const void* data, size_t size) -> BufferHandle {
-	VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+							   VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+							   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 	if (_impl->rtCtx.Valid()) {
-		usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-				 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+		usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
 	}
 	auto gpu_buf =
 		Vk::Buffer::Create(_impl->allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY);
@@ -89,21 +89,25 @@ auto RenderContext::CreateVertexBuffer(const void* data, size_t size) -> BufferH
 	vkQueueSubmit2(_impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
 	vkQueueWaitIdle(_impl->ctx.GraphicsQueue());
 
-	// Return a packed generational handle
-	uint64_t handle =
-		_impl->meshPool.Create(std::move(gpu_buf), static_cast<uint32_t>(size / sizeof(Vertex)),
-							   VK_NULL_HANDLE, 0ull, Vk::Buffer{});
+	// Extract the permanent GPU address
+	VkBufferDeviceAddressInfo bdaInfo = {
+		.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+		.pNext = {},
+		.buffer = gpu_buf.Handle(),
+	};
+	VkDeviceAddress address = vkGetBufferDeviceAddress(_impl->ctx.Device(), &bdaInfo);
+
+	uint64_t handle = _impl->meshPool.Create(std::move(gpu_buf),
+											 static_cast<uint32_t>(size / sizeof(Vertex)), address);
 	return static_cast<BufferHandle>(handle);
 }
 
 auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHandle {
-	VkBufferUsageFlags usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-
+	VkBufferUsageFlags usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+							   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 	if (_impl->rtCtx.Valid()) {
-		usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-				 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+		usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
 	}
-
 	auto gpu_buf =
 		Vk::Buffer::Create(_impl->allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY);
 
@@ -132,10 +136,15 @@ auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHa
 	vkQueueSubmit2(_impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
 	vkQueueWaitIdle(_impl->ctx.GraphicsQueue());
 
-	// Return a packed generational handle
-	uint64_t handle =
-		_impl->meshPool.Create(std::move(gpu_buf), static_cast<uint32_t>(size / sizeof(uint32_t)),
-							   VK_NULL_HANDLE, 0ull, Vk::Buffer{});
+	VkBufferDeviceAddressInfo bdaInfo = {
+		.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+		.pNext = {},
+		.buffer = gpu_buf.Handle(),
+	};
+	VkDeviceAddress address = vkGetBufferDeviceAddress(_impl->ctx.Device(), &bdaInfo);
+
+	uint64_t handle = _impl->meshPool.Create(
+		std::move(gpu_buf), static_cast<uint32_t>(size / sizeof(uint32_t)), address);
 	return static_cast<BufferHandle>(handle);
 }
 
@@ -164,7 +173,6 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 	auto pipeline = Vk::PipelineBuilder{}
 						.Shaders(shaders)
 						.Layout(layout.Get())
-						.Vertex<Vertex>()
 						.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16G16_SFLOAT,
 									   VK_FORMAT_R16G16B16A16_SFLOAT})
 						.DepthFormat(VK_FORMAT_D32_SFLOAT)

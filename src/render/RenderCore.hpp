@@ -647,8 +647,7 @@ struct DrawState {
 	VkPipeline pipeline = VK_NULL_HANDLE;
 	VkPipelineLayout layout = VK_NULL_HANDLE;
 	VkDescriptorSet set = VK_NULL_HANDLE;
-	VkBuffer vbo = VK_NULL_HANDLE;
-	VkBuffer ibo = VK_NULL_HANDLE;
+	VkBuffer ibo = VK_NULL_HANDLE; // Index buffer stays!
 	uint32_t vertexCount = 0;
 	uint32_t indexCount = 0;
 	uint32_t instanceCount = 1;
@@ -666,7 +665,6 @@ struct DrawIndirectState {
 	VkPipeline pipeline = VK_NULL_HANDLE;
 	VkPipelineLayout layout = VK_NULL_HANDLE;
 	VkDescriptorSet set = VK_NULL_HANDLE;
-	VkBuffer vbo = VK_NULL_HANDLE;
 	VkBuffer ibo = VK_NULL_HANDLE;
 	VkBuffer argumentBuffer = VK_NULL_HANDLE;
 	VkDeviceSize offset = 0;
