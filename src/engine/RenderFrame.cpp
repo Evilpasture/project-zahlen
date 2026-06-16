@@ -860,12 +860,18 @@ void RenderContext::EndFrame() {
 									.dst_offset = 0};
 		ZHLN_CmdCopyBuffer(cmd, &copy);
 
-		Vk::MemoryBarrier(cmd,
-						  {.src_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-						   .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-						   .dst_stage = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-						   .dst_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
-										 VK_ACCESS_2_SHADER_READ_BIT});
+		// FIX: Comprehensive Sync Barrier for double-buffered AS/Scratch re-use AND Buffer Copy
+		Vk::MemoryBarrier(
+			cmd, {.src_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT |
+							   VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+							   VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+				  .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT |
+								VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+				  .dst_stage = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+				  .dst_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+								VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
+								VK_ACCESS_2_SHADER_READ_BIT});
+
 		ZHLN_TlasGeometryDesc geom = {
 			.instance_data = Vk::GetBufferDeviceAddress(_impl->ctx.Device(), instanceBuf.Handle())};
 

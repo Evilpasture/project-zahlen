@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // src/render/PipelineBuilder.cpp
 
 #include "PipelineBuilder.hpp"
@@ -90,7 +89,6 @@ auto PipelineBuilder::CullBack() noexcept -> PipelineBuilder& {
 	_cfg.cull_mode = VK_CULL_MODE_BACK_BIT;
 	return *this;
 }
-
 auto PipelineBuilder::WindingCW() noexcept -> PipelineBuilder& {
 	_cfg.front_face = VK_FRONT_FACE_CLOCKWISE;
 	return *this;

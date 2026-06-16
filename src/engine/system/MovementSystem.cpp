@@ -29,19 +29,18 @@ static void VerifyMovementStateConsistency(const ECS::Registry& reg) noexcept {
 		Entity e = entities[i];
 		const auto& move = movements[i];
 
-		// Test 1: Ground state consistency
-		if (move.wasGrounded && !move.isGrounded && move.landingTimer <= 0.0f) {
+		// Test 1: Ground state consistency (FIXED: airborne to grounded)
+		if (!move.wasGrounded && move.isGrounded && move.landingTimer <= 0.0f) {
 			ZHLN::Log(
-				"[Test Fail] Movement State: Entity {} transitioned from grounded to airborne but "
+				"[Test Fail] Movement State: Entity {} transitioned from airborne to grounded but "
 				"landing timer not set properly (landingTimer={})",
 				e.index, move.landingTimer);
 		}
 
 		// Test 2: Jump delay timer bounds
 		if (move.jumpDelayTimer < 0.0f) {
-			ZHLN::Log(
-				"[Test Fail] Movement State: Entity {} has negative jump delay timer: {}",
-				e.index, move.jumpDelayTimer);
+			ZHLN::Log("[Test Fail] Movement State: Entity {} has negative jump delay timer: {}",
+					  e.index, move.jumpDelayTimer);
 		}
 
 		// Test 3: Orientation is valid (normalized quaternion)
@@ -84,7 +83,7 @@ void MovementSystem(Engine& engine, float dt) {
 			MovementComponent& move = movements[i];
 			Entity e = entities[i];
 			// Record previous orientation before calculating the new one
-            move.prevOrientation = move.orientation;
+			move.prevOrientation = move.orientation;
 
 			auto* phys = reg.Get<PhysicsComponent>(e);
 			if (!phys) {
@@ -157,7 +156,6 @@ void MovementSystem(Engine& engine, float dt) {
 					JPH::Quat::sRotation(JPH::Vec3::sAxisY(), targetAngleRad);
 
 				JPH::Quat currentRotation = move.orientation;
-
 
 				float turnSpeed = 10.0f;
 				JPH::Quat nextRotation =

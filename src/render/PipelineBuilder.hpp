@@ -90,6 +90,10 @@ class PipelineBuilder {
 	auto CullNone() noexcept -> PipelineBuilder&;
 	auto CullFront() noexcept -> PipelineBuilder&;
 	auto CullBack() noexcept -> PipelineBuilder&;
+	[[gnu::warning(R"(
+Forbidden. Use CCW whenever necessary.
+This is for fixing weird assets.
+)")]]
 	auto WindingCW() noexcept -> PipelineBuilder&;
 
 	auto DepthTest(bool v) noexcept -> PipelineBuilder&;

@@ -24,15 +24,54 @@ struct FrameUniforms {
 	float4 camPos;
 	float4 lightDir;
 	uint lightCount;
-	float3 padding;
-	float4 shadow; // (Unused)
+
+	// FIX: Decompose float3 into scalars to prevent 16-byte alignment gaps
+	float pad0;
+	float pad1;
+	float pad2;
+
 	float4 sh[9];
-	float4 probeMin;	 // XYZ: boxMin, W: useLocalProbe (0.0 or 1.0)
-	float4 probeMax;	 // XYZ: boxMax, W: unused
-	float4 probePos;	 // XYZ: probePos, W: unused
-	float4 jitterParams; // x: currentX, y: currentY, z: prevX, w: prevY
+	float4 probeMin;
+	float4 probeMax;
+	float4 probePos;
+	float4 jitterParams;
 	int enableRTR;
-	int3 padding_rtr;
+
+	// FIX: Decompose int3 into scalars to prevent 16-byte alignment gaps
+	int rtr_pad0;
+	int rtr_pad1;
+	int rtr_pad2;
+};
+
+struct InstanceData {
+	float4x4 world;
+	float4x4 prevWorld;
+	uint64_t vboAddress;
+
+	uint vertexCount;
+	uint indexCount;
+
+	uint albedoIdx;
+	uint normalIdx;
+	uint pbrIdx;
+	uint emissiveIdx;
+	float cullRadius;
+	float metallicFactor;
+	float roughnessFactor;
+	float alphaCutoff;
+	uint alphaMode;
+	uint jointOffset;
+	uint isSkinned;
+	uint morphOffset;
+	uint activeMorphCount;
+
+	// FIX: Decompose uint3 into scalars to match C++ uint32_t[3]
+	uint pad0;
+	uint pad1;
+	uint pad2;
+
+	float4 morphWeights;
+	float4 baseColorFactor;
 };
 
 struct ObjectConstants {
@@ -49,30 +88,6 @@ struct Vertex {
 	uint2 joints;
 	float4 weights;
 	uint3 _padding;
-};
-
-struct InstanceData {
-	float4x4 world;
-	float4x4 prevWorld;
-	uint64_t vboAddress; // 64-bit Buffer Device Address
-	uint albedoIdx;
-	uint normalIdx;
-	uint pbrIdx;
-	uint emissiveIdx;
-	uint vertexCount;
-	float cullRadius;
-	float metallicFactor;
-	float roughnessFactor;
-	float alphaCutoff;
-	uint alphaMode;
-	uint jointOffset;
-	uint isSkinned;
-	uint morphOffset;
-	uint activeMorphCount;
-	uint indexCount;
-	uint3 pad; // Match 16-byte alignment boundaries before the float4 vectors
-	float4 morphWeights;
-	float4 baseColorFactor;
 };
 
 struct GPUJoint {
