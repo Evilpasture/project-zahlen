@@ -46,7 +46,8 @@ static_assert(sizeof(Vertex) == 64, "Vertex must be exactly 64 bytes!");
 struct alignas(16) InstanceData {
 	JPH::Mat44 world;
 	JPH::Mat44 prevWorld;
-	uint64_t vboAddress; // <-- NEW: Replaces traditional bindings
+	uint64_t vboAddress;
+	uint64_t iboAddress;
 	uint32_t vertexCount;
 	uint32_t indexCount;
 	uint32_t albedoIndex;
@@ -62,7 +63,7 @@ struct alignas(16) InstanceData {
 	uint32_t isSkinned;
 	uint32_t morphOffset;
 	uint32_t activeMorphCount;
-	uint32_t _pad[3]; // <-- Pad to 208 bytes so arrays start aligned to 16
+	uint32_t _pad;
 
 	alignas(16) std::array<float, 4> morphWeights;
 	alignas(16) std::array<float, 4> baseColorFactor;

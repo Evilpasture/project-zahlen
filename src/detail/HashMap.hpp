@@ -177,7 +177,7 @@ template <typename Key, typename Value, size_t InitialCapacity = 32> class HashM
 					  (std::is_integral_v<Key> || std::is_enum_v<Key> || std::is_pointer_v<Key>)) {
 			uint64_t val = 0;
 			if constexpr (std::is_pointer_v<Key>) {
-				val = reinterpret_cast<uint64_t>(key);
+				val = std::bit_cast<uint64_t>(key);
 			} else {
 				val = static_cast<uint64_t>(key);
 			}
@@ -191,7 +191,7 @@ template <typename Key, typename Value, size_t InitialCapacity = 32> class HashM
 							   key.data();
 							   key.length();
 						   }) {
-			return HashRawBytes(reinterpret_cast<const char*>(key.data()),
+			return HashRawBytes(std::bit_cast<const char*>(key.data()),
 								key.length() * sizeof(*key.data()));
 		} else {
 			// Static assert prevents compilations with unhandled types,

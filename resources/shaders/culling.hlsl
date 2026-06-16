@@ -1,12 +1,10 @@
-// resources/shaders/culling.hlsl
 #define SKIP_BINDINGS
 #include "common.hlsl"
 
 struct DrawIndirectCommand {
-	uint indexCount; // Changed from vertexCount
+	uint vertexCount;
 	uint instanceCount;
-	uint firstIndex;  // Changed from firstVertex
-	int vertexOffset; // Changed from firstInstance (int-aligned)
+	uint firstVertex;
 	uint firstInstance;
 };
 
@@ -44,11 +42,10 @@ bool SphereVisible(float3 center, float radius) {
 	bool isIndexed = inst.indexCount > 0;
 
 	DrawIndirectCommand cmd;
-	cmd.indexCount = isIndexed ? inst.indexCount : inst.vertexCount;
+	cmd.vertexCount = isIndexed ? inst.indexCount : inst.vertexCount;
 	cmd.instanceCount = visible;
-	cmd.firstIndex = 0;
-	cmd.vertexOffset = isIndexed ? 0 : int(index);
-	cmd.firstInstance = isIndexed ? index : 0u;
+	cmd.firstVertex = 0;
+	cmd.firstInstance = index; // Ensures SV_InstanceID points to the correct InstanceData
 
 	g_indirectCommands[index] = cmd;
 }

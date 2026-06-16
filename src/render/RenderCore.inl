@@ -766,14 +766,8 @@ inline void DrawInstanced(VkCommandBuffer cmd, const DrawState& state, const T& 
 	}
 	vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
 
-	if (state.ibo != VK_NULL_HANDLE && state.indexCount > 0) {
-		vkCmdBindIndexBuffer(cmd, state.ibo, 0, VK_INDEX_TYPE_UINT32);
-		vkCmdDrawIndexed(cmd, state.indexCount, state.instanceCount, state.firstIndex, 0,
-						 state.firstInstance);
-	} else {
-		vkCmdDraw(cmd, state.vertexCount, state.instanceCount, state.firstVertex,
-				  state.firstInstance);
-	}
+	// Everything is a generic non-indexed draw now
+	vkCmdDraw(cmd, state.vertexCount, state.instanceCount, state.firstVertex, state.firstInstance);
 }
 
 template <GpuTriviallyCopyable T>
@@ -786,13 +780,8 @@ inline void DrawIndirect(VkCommandBuffer cmd, const DrawIndirectState& state,
 	}
 	vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
 
-	if (state.ibo != VK_NULL_HANDLE) {
-		vkCmdBindIndexBuffer(cmd, state.ibo, 0, VK_INDEX_TYPE_UINT32);
-		vkCmdDrawIndexedIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount,
-								 state.stride);
-	} else {
-		vkCmdDrawIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount, state.stride);
-	}
+	// Completely Bindless Geometry MDI Dispatch
+	vkCmdDrawIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount, state.stride);
 }
 
 // ============================================================================

@@ -184,7 +184,9 @@ using PostProcessLayoutNoRT = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // t
 												   Vk::SamplerSlot<4>,	   // pointSampler (Nearest)
 												   Vk::SampledImageSlot<5> // texEnvMap (Cubemap)
 												   >;
-using CullingLayout = Vk::DescriptorLayout<Vk::StorageBufferSlot<0>, Vk::StorageBufferSlot<1>>;
+using CullingLayout = Vk::DescriptorLayout<Vk::StorageBufferSlot<0>, // g_instances
+										   Vk::StorageBufferSlot<1>	 // g_indirectCommands
+										   >;
 
 namespace Stages {
 struct ShadowPass {

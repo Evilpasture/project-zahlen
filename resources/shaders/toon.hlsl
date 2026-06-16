@@ -1,15 +1,17 @@
 // resources/shaders/toon.hlsl
 #include "common.hlsl"
-
 VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	VSOutput output;
 
 	uint instId = (obj.instanceId != 4294967295u) ? obj.instanceId : instanceId;
 	InstanceData inst = g_instances[instId];
 
-	uint64_t baseAddr = inst.vboAddress + vertexId * 64;
+	uint actualVertexId = vertexId;
+	if (inst.iboAddress != 0) {
+		actualVertexId = vk::RawBufferLoad<uint>(inst.iboAddress + vertexId * 4, 4);
+	}
+	uint64_t baseAddr = inst.vboAddress + actualVertexId * 64;
 
-	// Load individual attributes directly (bypassing DXC struct loading bugs)
 	float3 position = vk::RawBufferLoad<float3>(baseAddr + 0, 4);
 	uint normal = vk::RawBufferLoad<uint>(baseAddr + 12, 4);
 	uint tangent = vk::RawBufferLoad<uint>(baseAddr + 16, 4);

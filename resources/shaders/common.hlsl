@@ -47,6 +47,7 @@ struct InstanceData {
 	float4x4 world;
 	float4x4 prevWorld;
 	uint64_t vboAddress;
+	uint64_t iboAddress;
 
 	uint vertexCount;
 	uint indexCount;
@@ -65,10 +66,7 @@ struct InstanceData {
 	uint morphOffset;
 	uint activeMorphCount;
 
-	// FIX: Decompose uint3 into scalars to match C++ uint32_t[3]
 	uint pad0;
-	uint pad1;
-	uint pad2;
 
 	float4 morphWeights;
 	float4 baseColorFactor;
@@ -261,9 +259,21 @@ float3 GetMorphDisplacement(uint vertexId, uint vertexCount, uint morphOffset,
 							uint activeMorphCount, float4 weights) {
 	float3 displacement = float3(0, 0, 0);
 
-	for (uint i = 0; i < activeMorphCount; ++i) {
+	[unroll] for (uint i = 0; i < activeMorphCount; ++i) {
 		uint deltaIndex = morphOffset + (i * vertexCount) + vertexId;
-		displacement += g_morphDeltas[deltaIndex].xyz * weights[i];
+
+		// Safe, compile-time branch mapping to bypass register indexing bugs
+		float weight = 0.0f;
+		if (i == 0)
+			weight = weights.x;
+		else if (i == 1)
+			weight = weights.y;
+		else if (i == 2)
+			weight = weights.z;
+		else if (i == 3)
+			weight = weights.w;
+
+		displacement += g_morphDeltas[deltaIndex].xyz * weight;
 	}
 
 	return displacement;

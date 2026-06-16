@@ -81,6 +81,7 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 				f.runtimeDescriptorArray = VK_TRUE;
 				f.bufferDeviceAddress = VK_TRUE;
 				f.hostQueryReset = VK_TRUE;
+				f.drawIndirectCount = VK_TRUE;
 				f.bufferDeviceAddress = VK_TRUE;
 			})
 			.Require<VkPhysicalDeviceAccelerationStructureFeaturesKHR>(
@@ -266,10 +267,11 @@ void RenderContext::Impl::InitCullingResources() {
 							   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
 		indirectCommandsBuffers[i] = Vk::Buffer::Create(
-			allocator.Get(), sizeof(VkDrawIndexedIndirectCommand) * kGpuCullingMaxInstances,
+			allocator.Get(), sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances,
 			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
 			VMA_MEMORY_USAGE_GPU_ONLY);
 
+		// Bind all three targets to the culling descriptor set
 		CullingLayout::Write(ctx.Device(), cullingSets[i],
 							 Vk::BufferWrite{.buffer = instanceDataBuffers[i].Handle()},
 							 Vk::BufferWrite{.buffer = indirectCommandsBuffers[i].Handle()});
@@ -287,8 +289,7 @@ void RenderContext::Impl::InitCullingResources() {
 									 .entry_point = "CSMain"};
 
 	if (!cullingPass.Build(ctx.Device(), cullingLayout.Get(), cullingShader, &cullingPush, 1)) {
-		ZHLN::Panic("FATAL: Failed to compile or build the Compute Culling Pipeline. "
-					"Check SPIR-V bytecode integrity and Descriptor Layout matching.");
+		ZHLN::Panic("FATAL: Failed to compile or build the Compute Culling Pipeline.");
 	}
 }
 

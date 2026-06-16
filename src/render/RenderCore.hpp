@@ -647,7 +647,6 @@ struct DrawState {
 	VkPipeline pipeline = VK_NULL_HANDLE;
 	VkPipelineLayout layout = VK_NULL_HANDLE;
 	VkDescriptorSet set = VK_NULL_HANDLE;
-	VkBuffer ibo = VK_NULL_HANDLE; // Index buffer stays!
 	uint32_t vertexCount = 0;
 	uint32_t indexCount = 0;
 	uint32_t instanceCount = 1;
@@ -665,11 +664,12 @@ struct DrawIndirectState {
 	VkPipeline pipeline = VK_NULL_HANDLE;
 	VkPipelineLayout layout = VK_NULL_HANDLE;
 	VkDescriptorSet set = VK_NULL_HANDLE;
-	VkBuffer ibo = VK_NULL_HANDLE;
 	VkBuffer argumentBuffer = VK_NULL_HANDLE;
 	VkDeviceSize offset = 0;
 	uint32_t drawCount = 0;
 	uint32_t stride = 0;
+	VkBuffer countBuffer = VK_NULL_HANDLE; // GPU-driven count buffer
+	VkDeviceSize countBufferOffset = 0;	   // Offset inside count buffer
 };
 
 template <GpuTriviallyCopyable T>

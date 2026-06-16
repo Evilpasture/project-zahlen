@@ -10,14 +10,16 @@
 #include "backends/imgui_impl_vulkan.h"
 #include "detail/RadixSort.hpp"
 #include "imgui.h"
-
-#include <algorithm>
+// clang-format off
+#include <Jolt/Jolt.h>
+#include <Jolt/Core/QuickSort.h>
+// clang-format on
 #include <array>
 #include <bit>
 #include <threading/TaskSystem.hpp>
 
 namespace ZHLN {
-
+namespace {
 // ============================================================================
 // RenderPass Concepts & Interface Structures
 // ============================================================================
@@ -64,9 +66,6 @@ template <VkImageLayout ColorL, VkImageLayout DepthL> struct SceneResources {
 
 struct GroupRange {
 	NativeMaterial* material;
-	NativeMesh* mesh;
-	NativeMesh* indexMesh;
-	uint32_t indexCount;
 	uint32_t start;
 	uint32_t count;
 };
@@ -88,8 +87,7 @@ struct GpuCullingPolicy {
 		struct FrustumPlanes {
 			std::array<JPH::Vec4, 6> planes;
 			uint32_t drawCount;
-		};
-		FrustumPlanes planes{};
+		} planes{};
 
 		const auto& vp = ctx.unjittered_view_proj;
 		JPH::Vec4 r0(vp(0, 0), vp(0, 1), vp(0, 2), vp(0, 3));
@@ -112,6 +110,8 @@ struct GpuCullingPolicy {
 
 		ctx.cullingPass.Dispatch(cmd, ctx.cullingSets[recorder.frameIndex], (drawCount + 63) / 64,
 								 1, 1, planes);
+
+		// Block compute writes until indirect drawing parameters are read by the graphics hardware
 		Vk::CmdBarrierComputeToIndirect(cmd);
 
 		Vk::DynamicPass(color_att.extent)
@@ -124,7 +124,7 @@ struct GpuCullingPolicy {
 			.AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
 					  kClearDepthValue)
 			.Execute(cmd, [&]() {
-				const VkDeviceSize stride = sizeof(VkDrawIndexedIndirectCommand);
+				const VkDeviceSize stride = sizeof(VkDrawIndirectCommand);
 				for (const auto& group : groups) {
 					if (!group.material->pipeline.Valid()) {
 						continue;
@@ -135,7 +135,6 @@ struct GpuCullingPolicy {
 						{.pipeline = group.material->pipeline.Get(),
 						 .layout = group.material->layout.Get(),
 						 .set = recorder.bindlessSet,
-						 .ibo = group.indexMesh ? group.indexMesh->buffer.Handle() : VK_NULL_HANDLE,
 						 .argumentBuffer =
 							 ctx.indirectCommandsBuffers[recorder.frameIndex].Handle(),
 						 .offset = group.start * stride,
@@ -192,12 +191,13 @@ struct CpuCullingPolicy {
 							 .layout =
 								 std::bit_cast<NativeMaterial*>(drawCmd.material)->layout.Get(),
 							 .set = recorder.bindlessSet,
-							 .ibo = drawCmd.indexMesh
-										? std::bit_cast<NativeMesh*>(drawCmd.indexMesh)
-											  ->buffer.Handle()
-										: VK_NULL_HANDLE,
-							 .vertexCount = std::bit_cast<NativeMesh*>(drawCmd.mesh)->vertexCount,
-							 .indexCount = drawCmd.indexCount},
+							 .vertexCount =
+								 drawCmd.indexMesh
+									 ? drawCmd.indexCount
+									 : std::bit_cast<NativeMesh*>(drawCmd.mesh)->vertexCount,
+							 .instanceCount = 1,
+							 .firstVertex = 0,
+							 .firstInstance = i},
 							pushConstants);
 					});
 			});
@@ -209,6 +209,7 @@ void ExecutePass(const FrameRecorder& recorder, const JPH::Array<GroupRange>& gr
 				 uint32_t drawCount, Args&&... args) {
 	CullingPolicy::Record(recorder, groups, drawCount, std::forward<Args>(args)...);
 }
+} // namespace
 
 // ============================================================================
 // Render Passes
@@ -240,18 +241,18 @@ struct ShadowPass {
 
 					ObjectConstants pushConstants = {.instanceId = i, .isShadowPass = 1};
 
-					Vk::DrawInstanced(
-						cmd,
-						{.pipeline = ctx.shadowPipeline.Get(),
-						 .layout = ctx.shadowPipelineLayout.Get(),
-						 .set = recorder.bindlessSet,
-						 .ibo = draw.indexMesh
-									? std::bit_cast<NativeMesh*>(draw.indexMesh)->buffer.Handle()
-									: VK_NULL_HANDLE,
-						 .vertexCount = mesh->vertexCount,
-						 .indexCount = draw.indexCount,
-						 .instanceCount = 1},
-						pushConstants, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+					uint32_t vCount = draw.indexMesh ? draw.indexCount : mesh->vertexCount;
+
+					Vk::DrawInstanced(cmd,
+									  {.pipeline = ctx.shadowPipeline.Get(),
+									   .layout = ctx.shadowPipelineLayout.Get(),
+									   .set = recorder.bindlessSet,
+									   .vertexCount = vCount,
+									   .instanceCount = 1,
+									   .firstVertex = 0,
+									   .firstInstance = i},
+									  pushConstants,
+									  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
 				}
 			});
 
@@ -306,27 +307,14 @@ struct MainPass {
 		groups.reserve((drawCount + 15) / 16);
 
 		NativeMaterial* currentMaterial = nullptr;
-		NativeMesh* currentMesh = nullptr;
-		NativeMesh* currentIndexMesh = nullptr;
 
 		for (uint32_t i = 0; i < drawCount; ++i) {
 			const auto& drawCmd = ctx.drawQueue[i];
-
 			auto* drawMat = std::bit_cast<NativeMaterial*>(drawCmd.material);
-			auto* drawMesh = std::bit_cast<NativeMesh*>(drawCmd.mesh);
-			auto* drawIndexMesh = std::bit_cast<NativeMesh*>(drawCmd.indexMesh);
 
-			if (i == 0 || drawMat != currentMaterial || drawMesh != currentMesh ||
-				drawIndexMesh != currentIndexMesh) {
-				groups.push_back(GroupRange{.material = drawMat,
-											.mesh = drawMesh,
-											.indexMesh = drawIndexMesh,
-											.indexCount = drawCmd.indexCount,
-											.start = i,
-											.count = 1});
+			if (i == 0 || drawMat != currentMaterial) {
+				groups.push_back(GroupRange{.material = drawMat, .start = i, .count = 1});
 				currentMaterial = drawMat;
-				currentMesh = drawMesh;
-				currentIndexMesh = drawIndexMesh;
 			} else {
 				groups.back().count++;
 			}
@@ -537,8 +525,6 @@ struct BlitPass {
 								{.pipeline = ctx.uiPipeline.Get(),
 								 .layout = ctx.uiPipelineLayout.Get(),
 								 .set = recorder.bindlessSet,
-								 .ibo = VK_NULL_HANDLE, // Explicitly no index buffer for UI (we do
-														// 6 verts natively)
 								 .vertexCount = std::bit_cast<NativeMesh*>(draw.mesh)->vertexCount},
 								uipc);
 						}
@@ -768,6 +754,9 @@ void RenderContext::EndFrame() {
 				.world = cmdData.transform,
 				.prevWorld = cmdData.prevTransform,
 				.vboAddress = std::bit_cast<NativeMesh*>(cmdData.mesh)->vboAddress,
+				.iboAddress = (cmdData.indexMesh != nullptr)
+								  ? std::bit_cast<NativeMesh*>(cmdData.indexMesh)->vboAddress
+								  : 0,
 				.vertexCount = cmdData.mesh->vertexCount,
 				.indexCount = cmdData.indexCount,
 				.albedoIndex = cmdData.albedoIndex,
