@@ -813,25 +813,22 @@ def exclude_helper_skeletons(shrinkwrap_targets):
     bpy.context.view_layer.update()
 
 
-def recover_skeletal_parenting(rig):
-    """Validates and restores explicit armature parenting on core meshes."""
+def unparent_skinned_meshes(rig):
+    """Unparents skinned meshes from the armature so they are exported at the root of the glTF hierarchy, eliminating NODE_SKINNED_MESH_NON_ROOT warnings."""
     if not rig:
         return
-    print("[*] Performing Skeletal Parenting Recovery...")
+    print("[*] Unparenting skinned meshes for clean root-level glTF export...")
     for obj in bpy.data.objects:
         if obj.type == 'MESH' and obj.name in CORE_CHARACTER_MESHES:
             has_armature_mod = any(
                 mod.type == 'ARMATURE' and mod.object == rig 
                 for mod in obj.modifiers
             )
-            if has_armature_mod:
-                if obj.parent != rig:
-                    print(f"  [+] Parenting skinned mesh directly to Armature: {obj.name}")
-                    world_matrix = obj.matrix_world.copy()
-                    obj.parent = rig
-                    obj.matrix_parent_inverse = rig.matrix_world.inverted()
-                    obj.matrix_world = world_matrix
-                    
+            if has_armature_mod and obj.parent:
+                print(f"  [~] Clearing parent of skinned mesh: {obj.name}")
+                world_matrix = obj.matrix_world.copy()
+                obj.parent = None
+                obj.matrix_world = world_matrix
     bpy.context.view_layer.update()
 
 
@@ -1004,7 +1001,7 @@ def bake_armature_actions_data_level(rig):
     if rig.animation_data.action:
         actions.add(rig.animation_data.action)
     for track in rig.animation_data.nla_tracks:
-        for strip in track.strips:
+        for strip in track.splits if hasattr(track, 'splits') else track.strips:
             if strip.action:
                 actions.add(strip.action)
                 
@@ -1160,7 +1157,7 @@ def main():
     exclude_helper_skeletons(shrinkwrap_targets)
 
     if rig:
-        recover_skeletal_parenting(rig)
+        unparent_skinned_meshes(rig)
         deep_fcurve_pruning(rig)
 
     # 5. Native glTF Stream Serialization
@@ -1183,23 +1180,22 @@ if __name__ == "__main__":
 
     # 1. Start with a copy of the environment, but scrub out the Python traps
     env = os.environ.copy()
-    
+
     # Force absolute isolation from your terminal's virtual environment
     env.pop("PYTHONHOME", None)
     env.pop("PYTHONPATH", None)
     env.pop("VIRTUAL_ENV", None)
-    
+
     # Explicitly isolate Blender's internal Python site-packages
     env["PYTHONNOUSERSITE"] = "1"
-    
+
     # 2. Rebuild the PATH to completely omit the virtual environment folder
     if "PATH" in env:
         # If your virtual environment is active, filter its directory out of the system PATH
         venv_path = os.environ.get("VIRTUAL_ENV", "")
         if venv_path:
             clean_path = [
-                p for p in env["PATH"].split(os.pathsep)
-                if not p.startswith(venv_path)
+                p for p in env["PATH"].split(os.pathsep) if not p.startswith(venv_path)
             ]
             env["PATH"] = os.pathsep.join(clean_path)
 
@@ -1215,10 +1211,7 @@ if __name__ == "__main__":
     try:
         # Execute directly without shell=True to avoid subshell initialization issues
         result = subprocess.run(
-            cmd, 
-            env=env, 
-            stdout=subprocess.PIPE, 
-            stderr=subprocess.STDOUT
+            cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
         )
         output_text = result.stdout.decode("utf-8", errors="replace")
 
@@ -1314,3 +1307,4 @@ if __name__ == "__main__":
         )
 
     return export_success
+
