@@ -611,7 +611,24 @@ std::optional<Extent2D> RenderContext::GetFramebufferSize() const {
 	return size;
 }
 
-void RenderContext::BeginFrame() {
+namespace {
+inline RenderFrameResult MapFrameResult(ZHLN_FrameResult res) noexcept {
+	switch (res) {
+		case ZHLN_FrameResult_Ok:
+			return RenderFrameResult::Success;
+		case ZHLN_FrameResult_Suboptimal:
+			return RenderFrameResult::Suboptimal;
+		case ZHLN_FrameResult_OutOfDate:
+			return RenderFrameResult::OutOfDate;
+		case ZHLN_FrameResult_DeviceLost:
+			return RenderFrameResult::DeviceLost;
+		default:
+			return RenderFrameResult::Error;
+	}
+}
+} // namespace
+
+RenderResult RenderContext::BeginFrame() noexcept {
 	if (_impl->stagingContext) {
 		_impl->stagingContext->Wait();
 		_impl->stagingContext.reset(); // Wait, cleanup, and destroy the fence automatically
@@ -619,7 +636,11 @@ void RenderContext::BeginFrame() {
 
 	const ZHLN_FrameSync& s = _impl->sync[_impl->frame_index];
 
-	ZHLN_WaitAndResetFrame(_impl->ctx.Device(), s.in_flight, _impl->pools[_impl->frame_index]);
+	auto wait_res =
+		ZHLN_WaitAndResetFrame(_impl->ctx.Device(), s.in_flight, _impl->pools[_impl->frame_index]);
+	if (wait_res == ZHLN_FrameResult_DeviceLost) {
+		return std::unexpected(RenderFrameResult::DeviceLost);
+	}
 
 	float timestampPeriod = _impl->ctx.PhysicalInfo().properties.properties.limits.timestampPeriod;
 	_impl->gpuProfiler.RetrieveResults(
@@ -635,13 +656,13 @@ void RenderContext::BeginFrame() {
 	if (_impl->resized) {
 		auto fbSize = GetFramebufferSize();
 		if (!fbSize.has_value()) {
-			return;
+			return std::unexpected(RenderFrameResult::OutOfDate); // <-- FIXED: Monadic return
 		}
 
 		VkExtent2D ext = {.width = fbSize->width, .height = fbSize->height};
 
 		if (!_impl->presentation.Rebuild(ext.width, ext.height)) {
-			return;
+			return std::unexpected(RenderFrameResult::Error); // <-- FIXED: Monadic return
 		}
 
 		_impl->sceneColor = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
@@ -682,11 +703,15 @@ void RenderContext::BeginFrame() {
 	if (acq_res == ZHLN_FrameResult_OutOfDate || acq_res == ZHLN_FrameResult_Suboptimal) {
 		_impl->resized = true;
 		_impl->current_cmd = VK_NULL_HANDLE;
-		return;
+		return std::unexpected(MapFrameResult(acq_res));
+	}
+	if (acq_res == ZHLN_FrameResult_DeviceLost) {
+		_impl->current_cmd = VK_NULL_HANDLE;
+		return std::unexpected(RenderFrameResult::DeviceLost);
 	}
 	if (acq_res == ZHLN_FrameResult_Error) {
 		_impl->current_cmd = VK_NULL_HANDLE;
-		return;
+		return std::unexpected(RenderFrameResult::Error);
 	}
 
 	_impl->current_cmd = _impl->pools.Cmd(_impl->frame_index);
@@ -737,9 +762,10 @@ void RenderContext::BeginFrame() {
 
 		_impl->needsInitialClear = false;
 	}
+	return {};
 }
 
-void RenderContext::Impl::SubmitFrame() {
+ZHLN_FrameResult RenderContext::Impl::SubmitFrame() {
 	const ZHLN_FrameSync& s = sync[frame_index];
 	ZHLN_FrameSubmitDesc submitDesc = {.graphicsQueue = ctx.GraphicsQueue(),
 									   .presentQueue = ctx.PresentQueue(),
@@ -751,7 +777,8 @@ void RenderContext::Impl::SubmitFrame() {
 									   .swapchain = presentation.swapchain.Get().handle,
 									   .imageIndex = current_image_index};
 
-	if (Vk::SubmitAndPresent(submitDesc) != ZHLN_FrameResult_Ok) {
+	ZHLN_FrameResult res = Vk::SubmitAndPresent(submitDesc);
+	if (res != ZHLN_FrameResult_Ok) {
 		resized = true;
 	}
 
@@ -764,14 +791,15 @@ void RenderContext::Impl::SubmitFrame() {
 
 	frame_index = (frame_index + 1) % 2;
 	current_cmd = VK_NULL_HANDLE;
+	return res; // <-- FIXED: Return the actual result instead of empty list {}
 }
 
-void RenderContext::EndFrame() {
+RenderResult RenderContext::EndFrame() noexcept {
 	ZHLN_PROFILE_SCOPE("Render (CPU Record)");
 	if (_impl->current_cmd == VK_NULL_HANDLE) {
 		_impl->drawQueue.clear();
 		_impl->uiDrawQueue.clear();
-		return;
+		return std::unexpected(RenderFrameResult::Error);
 	}
 
 	VkCommandBuffer cmd = _impl->current_cmd;
@@ -981,10 +1009,16 @@ void RenderContext::EndFrame() {
 	Passes::BlitPass{}.Execute(recorder, stateAfterPP);
 
 	ZHLN_EndCommandBuffer(cmd);
-	_impl->SubmitFrame();
+	// SubmitFrame now returns ZHLN_FrameResult
+	auto res = _impl->SubmitFrame();
+	if (res != ZHLN_FrameResult_Ok) {
+		return std::unexpected(MapFrameResult(res));
+	}
 
 	_impl->drawQueue.clear();
 	_impl->uiDrawQueue.clear();
+
+	return {};
 }
 
 namespace Renderer {

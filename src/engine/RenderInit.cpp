@@ -343,6 +343,20 @@ void RenderContext::Impl::InitBindless() {
 		Vk::Buffer::Create(allocator.Get(), sizeof(float) * 4 * 1000000,
 						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
+	ZHLN::Log("[RenderInit] Pre-allocating persistently mapped Double-Buffered Debug VBOs...");
+	size_t maxDebugVerts = 500000; // Large enough for dense wireframes (~32MB)
+	size_t bufferSize = maxDebugVerts * sizeof(Vertex);
+	for (int i = 0; i < 2; ++i) {
+		auto gpu_buf = Vk::Buffer::Create(allocator.Get(), bufferSize,
+										  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+											  VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+										  VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+		VkDeviceAddress address = Vk::GetBufferDeviceAddress(ctx.Device(), gpu_buf.Handle());
+		uint64_t handle = meshPool.Create(std::move(gpu_buf), maxDebugVerts, address);
+		debugMeshHandles[i] = static_cast<BufferHandle>(handle);
+	}
+
 	stagingContext = std::make_unique<Vk::StagingContext>(allocator, ctx);
 	stagingContext->Begin();
 

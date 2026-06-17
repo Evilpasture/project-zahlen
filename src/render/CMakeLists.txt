@@ -93,7 +93,7 @@ elseif(UNIX AND NOT APPLE) # Linux/BSD
 endif()
 
 add_library(zahlen_demo_utils STATIC ${DEMO_UTILS_SRCS})
-target_link_libraries(zahlen_demo_utils PRIVATE zahlen_render Vulkan::Vulkan)
+target_link_libraries(zahlen_demo_utils PUBLIC zahlen_render Vulkan::Vulkan)
 
 if(APPLE)
     set_source_files_properties(demo_utils/DemoWindow_mac.mm PROPERTIES LANGUAGE OBJCXX)
@@ -168,19 +168,19 @@ compile_hlsl("${SPONZA_FXAA_HLSL}" PSMain ps SPONZA_FXAA_FRAG_SPV)
 
 # 4. Triangle Executable
 add_executable(zahlen_triangle triangle_app/main.cpp ${TRI_VERT_SPV} ${TRI_FRAG_SPV})
-target_link_libraries(zahlen_triangle PRIVATE zahlen_render Vulkan::Vulkan zahlen_demo_utils)
+target_link_libraries(zahlen_triangle PRIVATE zahlen_demo_utils)
 target_include_directories(zahlen_triangle PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(zahlen_triangle PRIVATE cxx_std_23)
 
 # 5. Cube Executable
 add_executable(zahlen_cube cube_app/main.cpp ${CUBE_VERT_SPV} ${CUBE_FRAG_SPV})
-target_link_libraries(zahlen_cube PRIVATE zahlen_render Vulkan::Vulkan zahlen_demo_utils)
+target_link_libraries(zahlen_cube PRIVATE zahlen_demo_utils)
 target_include_directories(zahlen_cube PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(zahlen_cube PRIVATE cxx_std_23)
 
 # 6. CRT Executable
 add_executable(zahlen_crt crt_app/main.cpp ${CRT_VERT_SPV} ${CRT_FRAG_SPV})
-target_link_libraries(zahlen_crt PRIVATE zahlen_render Vulkan::Vulkan zahlen_demo_utils)
+target_link_libraries(zahlen_crt PRIVATE zahlen_demo_utils)
 target_include_directories(zahlen_crt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(zahlen_crt PRIVATE cxx_std_23)
 
@@ -193,7 +193,7 @@ add_executable(zahlen_sponza sponza_app/main.cpp
     ${SPONZA_FXAA_VERT_SPV} 
     ${SPONZA_FXAA_FRAG_SPV}
 )
-target_link_libraries(zahlen_sponza PRIVATE zahlen_render Vulkan::Vulkan zahlen_demo_utils)
+target_link_libraries(zahlen_sponza PRIVATE zahlen_demo_utils)
 target_include_directories(zahlen_sponza PRIVATE 
     ${CMAKE_CURRENT_SOURCE_DIR} 
     ${CMAKE_SOURCE_DIR}/extern/cgltf
@@ -227,5 +227,3 @@ target_compile_definitions(zahlen_raw_triangle PRIVATE
 )
 
 target_compile_features(zahlen_raw_triangle PRIVATE cxx_std_23)
-
-

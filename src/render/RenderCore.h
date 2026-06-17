@@ -229,6 +229,7 @@ typedef enum : uint8_t {
 	ZHLN_FrameResult_Ok,
 	ZHLN_FrameResult_Suboptimal,
 	ZHLN_FrameResult_OutOfDate, // C++ must rebuild swapchain
+	ZHLN_FrameResult_DeviceLost,
 	ZHLN_FrameResult_Error,
 } ZHLN_FrameResult;
 
@@ -395,8 +396,8 @@ void ZHLN_BeginSecondaryCommandBuffer(VkCommandBuffer cmd,
 bool ZHLN_AllocateSecondaryCommandBuffers(VkDevice device, ZHLN_CommandPool* ZHLN_RESTRICT pool,
 										  uint32_t count);
 
-void ZHLN_WaitAndResetFrame(VkDevice device, VkFence in_flight_fence,
-							const ZHLN_CommandPool* ZHLN_RESTRICT pool);
+ZHLN_FrameResult ZHLN_WaitAndResetFrame(VkDevice device, VkFence in_flight_fence,
+										const ZHLN_CommandPool* ZHLN_RESTRICT pool);
 
 // Wraps vkBeginCommandBuffer with one-time-submit flag for frame recording
 void ZHLN_BeginCommandBuffer(VkCommandBuffer cmd);

@@ -166,6 +166,8 @@ if not ok then
             uint64_t debugLineVbo;
             uint64_t debugLinePipeline;
             uint32_t debugLineAlbedo;
+            int enableRTR;
+            int physicsDrawMode;
         } ZHLN_GameState;
 
         typedef struct TransformComponent {

@@ -54,6 +54,30 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+if(NOT MSVC)
+    # Check for MOLD
+    execute_process(COMMAND ${CMAKE_CXX_COMPILER} -fuse-ld=mold -Wl,--version ERROR_QUIET OUTPUT_VARIABLE MOLD_VERSION)
+    
+    # Check for LLD
+    execute_process(COMMAND ${CMAKE_CXX_COMPILER} -fuse-ld=lld -Wl,--version ERROR_QUIET OUTPUT_VARIABLE LLD_VERSION)
+    
+    # Check for GOLD
+    execute_process(COMMAND ${CMAKE_CXX_COMPILER} -fuse-ld=gold -Wl,--version ERROR_QUIET OUTPUT_VARIABLE GOLD_VERSION)
+
+    if(MOLD_VERSION MATCHES "mold")
+        message(STATUS "Using MOLD linker")
+        add_link_options(-fuse-ld=mold)
+    elseif(LLD_VERSION MATCHES "LLD")
+        message(STATUS "Using LLD linker")
+        add_link_options(-fuse-ld=lld)
+    elseif(GOLD_VERSION MATCHES "GNU gold")
+        message(STATUS "Using GOLD linker")
+        add_link_options(-fuse-ld=gold)
+    else()
+        message(STATUS "Using default BFD linker")
+    endif()
+endif()
+
 # --- 2. GLOBAL SANITIZER CONFIG ---
 option(USE_SANITIZERS "Enable ASan and UBSan" OFF)
 if(USE_SANITIZERS)

@@ -393,6 +393,8 @@ struct RenderContext::Impl {
 	Vk::Buffer morphDeltasBuffer; // Holds all packed morph target deltas
 	uint32_t nextMorphDeltaIndex = 0;
 
+	ZHLN::DoubleBuffered<BufferHandle> debugMeshHandles;
+
 	AAState aaState{};
 
 	FrameProfiler gpuProfiler;
@@ -407,7 +409,7 @@ struct RenderContext::Impl {
 	void SetupUI(GLFWwindow* window);
 
 	void SortDrawQueue();
-	void SubmitFrame();
+	ZHLN_FrameResult SubmitFrame();
 
 	~Impl() {
 		if (ctx.Device() != VK_NULL_HANDLE) {

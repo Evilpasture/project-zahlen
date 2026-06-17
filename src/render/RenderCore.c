@@ -780,6 +780,8 @@ ZHLN_FrameResult ZHLN_AcquireImage(const VkDevice device,
 			return ZHLN_FrameResult_Suboptimal;
 		case VK_ERROR_OUT_OF_DATE_KHR:
 			return ZHLN_FrameResult_OutOfDate;
+		case VK_ERROR_DEVICE_LOST:
+			return ZHLN_FrameResult_DeviceLost;
 		default:
 			return ZHLN_FrameResult_Error;
 	}
@@ -836,6 +838,8 @@ ZHLN_FrameResult ZHLN_PresentFrame(const ZHLN_PresentDesc* const restrict desc) 
 			return ZHLN_FrameResult_Suboptimal;
 		case VK_ERROR_OUT_OF_DATE_KHR:
 			return ZHLN_FrameResult_OutOfDate;
+		case VK_ERROR_DEVICE_LOST:
+			return ZHLN_FrameResult_DeviceLost;
 		default:
 			return ZHLN_FrameResult_Error;
 	}
@@ -1177,7 +1181,10 @@ ZHLN_FrameResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* const restric
 								  .signalSemaphoreInfoCount = 1,
 								  .pSignalSemaphoreInfos = &signal_info};
 
-	vkQueueSubmit2(desc->graphicsQueue, 1, &submit, desc->inFlight);
+	VkResult res = vkQueueSubmit2(desc->graphicsQueue, 1, &submit, desc->inFlight);
+	if (res == VK_ERROR_DEVICE_LOST) {
+		return ZHLN_FrameResult_DeviceLost;
+	}
 
 	const ZHLN_PresentDesc pres = {.present_queue = desc->presentQueue,
 								   .swapchain = desc->swapchain,
@@ -1233,11 +1240,18 @@ bool ZHLN_AllocateSecondaryCommandBuffers(const VkDevice device,
 	return true;
 }
 
-void ZHLN_WaitAndResetFrame(const VkDevice device, const VkFence in_flight_fence,
-							const ZHLN_CommandPool* const restrict pool) {
-	vkWaitForFences(device, 1, &in_flight_fence, VK_TRUE, UINT64_MAX);
-	vkResetFences(device, 1, &in_flight_fence);
+ZHLN_FrameResult ZHLN_WaitAndResetFrame(const VkDevice device, const VkFence in_flight_fence,
+										const ZHLN_CommandPool* const restrict pool) {
+	VkResult res = vkWaitForFences(device, 1, &in_flight_fence, VK_TRUE, UINT64_MAX);
+	if (res == VK_ERROR_DEVICE_LOST) {
+		return ZHLN_FrameResult_DeviceLost; // Stop execution immediately on device lost
+	}
+	res = vkResetFences(device, 1, &in_flight_fence);
+	if (res == VK_ERROR_DEVICE_LOST) {
+		return ZHLN_FrameResult_DeviceLost;
+	}
 	ZHLN_ResetCommandPool(device, pool);
+	return ZHLN_FrameResult_Ok;
 }
 
 void ZHLN_BeginCommandBuffer(const VkCommandBuffer cmd) {

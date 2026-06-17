@@ -52,6 +52,10 @@ auto RenderContext::GetGPUName() const -> const char* {
 	return &_impl->ctx.PhysicalInfo().properties.properties.deviceName[0];
 }
 
+uint32_t RenderContext::GetFrameIndex() const noexcept {
+	return _impl->frame_index;
+}
+
 void RenderContext::SetResolution([[maybe_unused]] const Extent2D& res) {
 	_impl->resized = true;
 }
@@ -148,6 +152,13 @@ auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHa
 	return static_cast<BufferHandle>(handle);
 }
 
+void RenderContext::DestroyBuffer(BufferHandle handle) {
+	if (handle != BufferHandle::Invalid) {
+		// GenerationalPool handles the underlying VMA destruction safely
+		_impl->meshPool.Destroy(static_cast<uint64_t>(handle));
+	}
+}
+
 auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 	ZHLN_ShaderDesc v_desc = {.code = Vk::AsSpirV(desc.vertexShaderData),
 							  .size = desc.vertexShaderSize,
@@ -186,6 +197,10 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 
 	if (desc.alphaBlend) {
 		pipeline.AlphaBlend();
+	}
+
+	if (desc.isLineList) {
+		pipeline.Topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST);
 	}
 
 	auto finalPipeline = pipeline.Build(impl->ctx.Device());
@@ -297,6 +312,31 @@ auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t hei
 	impl->textureViews.push_back(std::move(gpuView));
 
 	return index;
+}
+
+void RenderContext::UploadDebugVertices(const void* data, size_t size,
+										uint32_t vertexCount) noexcept {
+	uint32_t frameIdx = _impl->frame_index;
+	auto* nativeMesh =
+		_impl->meshPool.Resolve(static_cast<uint64_t>(_impl->debugMeshHandles[frameIdx]));
+	if (nativeMesh == nullptr) {
+		return;
+	}
+
+	size_t maxSize = nativeMesh->buffer.Size();
+	size_t copySize = std::min(size, maxSize);
+
+	// Zero-copy direct transfer (VMA maintains persistence)
+	auto mapped = nativeMesh->buffer.Map();
+	std::memcpy(mapped.data, data, copySize);
+
+	// Update the active vertex draw limit dynamically
+	nativeMesh->vertexCount =
+		std::min(vertexCount, static_cast<uint32_t>(maxSize / sizeof(Vertex)));
+}
+
+BufferHandle RenderContext::GetDebugMeshBuffer() const noexcept {
+	return _impl->debugMeshHandles[_impl->frame_index];
 }
 
 uint32_t RenderContext::CreateTextureCube(const void* const* faceData, uint32_t width,

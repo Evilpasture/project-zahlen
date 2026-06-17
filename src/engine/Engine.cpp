@@ -73,6 +73,7 @@ struct EngineImpl {
 
 	void* gameState = nullptr;
 	uint64_t frameCounter = 0;
+	EngineConfig config;
 };
 
 Engine::Engine() : _impl(nullptr) {
@@ -85,6 +86,22 @@ Engine::Engine(const EngineConfig& cfg) : _impl(nullptr) {
 	if (!success) {
 		ZHLN::Panic("FATAL: Failed to initialize Engine via legacy constructor.");
 	}
+}
+
+void Engine::HandleDeviceLost() noexcept {
+	ZHLN::Log("[Engine] CRITICAL: Vulkan Device Lost detected! Initiating hardware hot-rebuild...");
+
+	// 1. Destroy the old renderer cleanly (automatically invokes destructors of swapchain,
+	// pipelines, VMA allocator, etc.)
+	_impl->renderContext.reset();
+
+	// 2. Re-create a fresh, clean Renderer
+	_impl->renderContext = std::make_unique<RenderContext>(*_impl->window, _impl->config.render);
+
+	// 3. Clear ECS registry visual components so we don't have dangling GPU handles
+	_impl->registry.Clear();
+
+	ZHLN::Log("[Engine] Hardware hot-rebuild completed successfully. Re-syncing scene assets...");
 }
 
 Engine::Engine(const EngineConfig& cfg, bool& outSuccess) : _impl(nullptr) {
@@ -120,6 +137,7 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess, const char*
 
 	// 2. Allocate the implementation block and input context first
 	_impl = std::make_unique<EngineImpl>();
+	_impl->config = cfg;
 	_impl->input = std::make_unique<InputContext>();
 
 	// 3. Apply platform-specific window managers / RenderDoc hints
@@ -231,12 +249,30 @@ void Engine::ProcessEvents() {
 	ImGui::NewFrame();
 }
 
-void Engine::BeginFrame() {
-	_impl->renderContext->BeginFrame();
+bool Engine::BeginFrame(bool& outDeviceLost) noexcept {
+	outDeviceLost = false;
+	auto res = _impl->renderContext->BeginFrame(); // Consumes the returned monad
+	if (!res) {
+		if (res.error() == RenderFrameResult::DeviceLost) {
+			outDeviceLost = true;
+			HandleDeviceLost(); // Rebuilds internally
+		}
+		return false;
+	}
+	return true;
 }
 
-void Engine::EndFrame() {
-	_impl->renderContext->EndFrame();
+bool Engine::EndFrame(bool& outDeviceLost) noexcept {
+	outDeviceLost = false;
+	auto res = _impl->renderContext->EndFrame(); // Consumes the returned monad
+	if (!res) {
+		if (res.error() == RenderFrameResult::DeviceLost) {
+			outDeviceLost = true;
+			HandleDeviceLost(); // Rebuilds internally
+		}
+		return false;
+	}
+	return true;
 }
 
 uint64_t Engine::GetCurrentFrame() const noexcept {

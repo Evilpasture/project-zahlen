@@ -657,7 +657,8 @@ void SetCollisionFilter(PhysicsContext& ctx, ZHLN::Entity handle, uint32_t categ
 	}
 }
 
-DebugDrawData GetDebugDrawData(PhysicsContext& ctx, bool drawShapes, bool drawConstraints) {
+DebugDrawData GetDebugDrawData(PhysicsContext& ctx, bool drawShapes, bool drawConstraints,
+							   bool wireframe) {
 	auto* impl = ctx.GetImpl();
 	auto& world = impl->world;
 
@@ -665,6 +666,7 @@ DebugDrawData GetDebugDrawData(PhysicsContext& ctx, bool drawShapes, bool drawCo
 
 	JPH::BodyManager::DrawSettings settings;
 	settings.mDrawShape = drawShapes;
+	settings.mDrawShapeWireframe = wireframe; // Apply wireframe state
 	settings.mDrawBoundingBox = false;
 	settings.mDrawCenterOfMassTransform = false;
 

@@ -9,7 +9,9 @@
 #include "Zahlen/alife/Simulator.hpp"
 #include "Zahlen/alife/Types.hpp"
 #include "ecs/ECS.hpp"
+#include "engine/Resources.hpp"
 #include "physics/Physics.hpp"
+#include "physics/PhysicsDebug.hpp"
 
 #include <GLFW/glfw3.h>
 #include <Jolt/Physics/Collision/CastResult.h>
@@ -52,7 +54,7 @@ namespace {
 struct EditorState {
 	bool simulationRunning = false;		// Pauses/runs physics and ALife
 	Entity selectedEntity = NullEntity; // Currently selected ECS entity
-	bool showPhysicsDebug = true;
+	bool showPhysicsDebug = true;		// Keep this exactly as it was
 };
 
 EditorState g_EditorState;
@@ -159,9 +161,6 @@ void DrawEditorPanels(Engine& engine) {
 	ImGui::SameLine();
 	ImGui::TextDisabled("|");
 	ImGui::SameLine();
-
-	ImGui::Checkbox("Show Colliders", &g_EditorState.showPhysicsDebug);
-	ImGui::End();
 
 	// 2. Scene Hierarchy Window
 	ImGui::Begin("Scene Hierarchy");
@@ -468,46 +467,118 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 			rc.SetAAState(s_AAState);
 			Renderer::SetFrameData(rc, uniforms, shadowProjView);
 
-			engine->BeginFrame();
+			auto begin_res = rc.BeginFrame(); // <-- FIXED: Capture expected
+			if (!begin_res) {
+				if (begin_res.error() == RenderFrameResult::DeviceLost) {
+					ZHLN::Panic("Vulkan Device Lost in Editor Loop!");
+				}
+				continue; // Skip rendering if the swapchain is out of date or suboptimal
+			}
+
 			Renderer::SetMatrices(rc, vp, unjitteredVp);
 
-			ZHLN_LOCK(worldState.sync.shadowLock) {
-				for (Entity e : s_VisibleEntities) {
-					auto* mesh = reg.Get<MeshComponent>(e);
-					if (mesh == nullptr) {
-						continue;
+			// -------------------------------------------------------------------------
+			// [FAST PERSISTENTLY MAPPED PHYSICS DEBUG RENDERER]
+			// -------------------------------------------------------------------------
+			static Material debugLineMat = {.pipeline = PipelineHandle::Invalid};
+			static Material debugSolidMat = {.pipeline = PipelineHandle::Invalid};
+
+			if (debugLineMat.pipeline == PipelineHandle::Invalid) {
+				PipelineDesc lineDesc = {.vertexShaderData = ZHLN_Resource_BasicVertSpv,
+										 .vertexShaderSize = ZHLN_Resource_BasicVertSpv_Len,
+										 .fragShaderData = ZHLN_Resource_BasicFragSpv,
+										 .fragShaderSize = ZHLN_Resource_BasicFragSpv_Len,
+										 .doubleSided = true,
+										 .alphaBlend = true,
+										 .isLineList = true};
+				debugLineMat = rc.CreateMaterial(lineDesc);
+				debugLineMat.albedoIndex = 1;
+
+				PipelineDesc solidDesc = lineDesc;
+				solidDesc.isLineList = false;
+				debugSolidMat = rc.CreateMaterial(solidDesc);
+				debugSolidMat.albedoIndex = 1;
+			}
+
+			if (g_EditorState.simulationRunning && g_EditorState.showPhysicsDebug) {
+				ZHLN_PROFILE_SCOPE("Physics Debug Extract & Upload"); // Profiled!
+				bool isWireframe = true;
+				auto debugData = Physics::GetDebugDrawData(pc, true, true, isWireframe);
+
+				std::vector<Vertex> debugVerts;
+				debugVerts.reserve(debugData.lineCount);
+
+				for (size_t i = 0; i < debugData.lineCount; ++i) {
+					const auto& jv = debugData.lines[i];
+					Vertex v{};
+					v.position[0] = jv.x;
+					v.position[1] = jv.y;
+					v.position[2] = jv.z;
+					v.color.data = jv.color;
+					v.normal = Math::PackNormal(0, 1, 0);
+					debugVerts.push_back(v);
+				}
+
+				if (!debugVerts.empty()) {
+					rc.UploadDebugVertices(debugVerts.data(), debugVerts.size() * sizeof(Vertex),
+										   (uint32_t)debugVerts.size());
+
+					Mesh debugMesh = {.vertexBuffer = rc.GetDebugMeshBuffer(),
+									  .vertexCount = (uint32_t)debugVerts.size()};
+
+					Renderer::Draw(rc, debugLineMat, debugMesh,
+								   {.transform = JPH::Mat44::sIdentity(),
+									.prevTransform = JPH::Mat44::sIdentity(),
+									.cullRadius = 10000.0f});
+				}
+			}
+			// -------------------------------------------------------------------------
+
+			// --- Wrap with conditional check to hide standard meshes ---
+			if (!g_EditorState.showPhysicsDebug) {
+				ZHLN_LOCK(worldState.sync.shadowLock) {
+					for (Entity e : s_VisibleEntities) {
+						auto* mesh = reg.Get<MeshComponent>(e);
+						if (mesh == nullptr) {
+							continue;
+						}
+
+						JPH::Mat44 currentTransform{};
+						auto* trans = reg.Get<TransformComponent>(e);
+
+						if (trans != nullptr) {
+							currentTransform = trans->GetMatrix() * mesh->localTransform;
+						} else if (auto* alifeComp = reg.Get<ALife::ALifeComponent>(e)) {
+							currentTransform = Math::CreateTransform(JPH::Vec3(alifeComp->position),
+																	 JPH::Quat::sIdentity()) *
+											   mesh->localTransform;
+						} else {
+							currentTransform = mesh->localTransform;
+						}
+
+						Renderer::Draw(
+							rc, mesh->material, mesh->mesh,
+							{.transform = currentTransform,
+							 .prevTransform = mesh->prevTransform,
+							 .cullRadius = mesh->cullRadius,
+							 .jointOffset = mesh->jointOffset,
+							 .morphOffset = mesh->morphOffset,
+							 .activeMorphCount = mesh->activeMorphCount,
+							 .morphWeights = mesh->morphWeights.data(),
+							 .flags = mesh->isSkinned ? DrawFlags::Skinned : DrawFlags::None});
 					}
-
-					JPH::Mat44 currentTransform{};
-					auto* trans = reg.Get<TransformComponent>(e);
-
-					if (trans != nullptr) {
-						currentTransform = trans->GetMatrix() * mesh->localTransform;
-					} else if (auto* alifeComp = reg.Get<ALife::ALifeComponent>(e)) {
-						currentTransform = Math::CreateTransform(JPH::Vec3(alifeComp->position),
-																 JPH::Quat::sIdentity()) *
-										   mesh->localTransform;
-					} else {
-						currentTransform = mesh->localTransform;
-					}
-
-					Renderer::Draw(
-						rc, mesh->material, mesh->mesh,
-						{.transform = currentTransform,
-						 .prevTransform = mesh->prevTransform,
-						 .cullRadius = mesh->cullRadius,
-						 .jointOffset = mesh->jointOffset,
-						 .morphOffset = mesh->morphOffset,
-						 .activeMorphCount = mesh->activeMorphCount,
-						 .morphWeights = mesh->morphWeights.data(),
-						 .flags = mesh->isSkinned ? DrawFlags::Skinned : DrawFlags::None});
 				}
 			}
 
 			CullingStats::TotalObjects = reg.GetEntitiesWith<MeshComponent>().size();
 			CullingStats::CulledObjects = CullingStats::TotalObjects - s_VisibleEntities.size();
 
-			engine->EndFrame();
+			auto end_res = rc.EndFrame(); // <-- FIXED: Capture expected
+			if (!end_res) {
+				if (end_res.error() == RenderFrameResult::DeviceLost) {
+					ZHLN::Panic("Vulkan Device Lost in Editor Loop!");
+				}
+			}
 
 			s_PrevUnjitteredVp = unjitteredVp;
 

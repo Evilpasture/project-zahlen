@@ -10,6 +10,7 @@
 #include "ecs/ECS.hpp"
 #include "engine/FileWatcher.hpp"
 #include "engine/Platform.hpp"
+#include "engine/Resources.hpp"
 #include "engine/system/CameraSystem.hpp"
 #include "engine/system/InputSystem.hpp"
 #include "engine/system/LightingSystem.hpp"
@@ -18,6 +19,7 @@
 #include "engine/system/TransformSystem.hpp"
 #include "imgui.h"
 #include "physics/Physics.hpp"
+#include "physics/PhysicsDebug.hpp"
 
 #include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Camera.hpp>
@@ -121,6 +123,12 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 	ZHLN::DrawECSProfiler();
 
 	ImGui::Begin("Lighting Workspace Controller");
+	ImGui::SeparatorText("Physics Debug");
+	ImGui::RadioButton("Hidden", &state.physicsDrawMode, 0);
+	ImGui::SameLine();
+	ImGui::RadioButton("Wireframe", &state.physicsDrawMode, 1);
+	ImGui::SameLine();
+	ImGui::RadioButton("Solid", &state.physicsDrawMode, 2);
 	ImGui::Text("Specular Mips & Area Lights Debugger");
 	ImGui::Separator();
 	ImGui::SliderFloat("Sphere Light Radius", &state.sphereLightRadius, 0.0f, 5.0f);
@@ -284,8 +292,8 @@ void DebugDrawSystem(Engine& engine, CullingSystem& cullingSystem) {
 	}
 }
 
-void RenderSystem(Engine& engine, CullingSystem& cullingSystem,
-				  const JPH::Array<Entity>& visibleEntities) {
+std::expected<void, RenderFrameResult> RenderSystem(Engine& engine, CullingSystem& cullingSystem,
+													const JPH::Array<Entity>& visibleEntities) {
 	auto& rc = engine.GetRenderContext();
 	auto& reg = engine.GetRegistry();
 	auto& cam = engine.GetCamera();
@@ -296,9 +304,14 @@ void RenderSystem(Engine& engine, CullingSystem& cullingSystem,
 
 	auto cameraEntities = reg.GetEntitiesWith<MainCameraTagComponent>();
 	if (cameraEntities.empty()) {
-		return;
+		return std::unexpected(
+			RenderFrameResult::Error); // <-- FIXED: Early exit returning expected error
 	}
-	rc.BeginFrame();
+	// Capture monadic results on BeginFrame
+	auto begin_res = rc.BeginFrame();
+	if (!begin_res) {
+		return std::unexpected(begin_res.error());
+	}
 	Entity cameraEntity = cameraEntities[0];
 
 	if (auto* cComp = reg.Get<CameraSystem::CameraComponent>(cameraEntity)) {
@@ -306,8 +319,13 @@ void RenderSystem(Engine& engine, CullingSystem& cullingSystem,
 		unjitteredVp = cComp->unjitteredViewProj;
 		prevUnjitteredVp = cComp->prevUnjitteredViewProj;
 	} else {
-		return;
+		return std::unexpected(
+			RenderFrameResult::Error); // <-- FIXED: Early exit returning expected error
 	}
+
+	// 1. Fetch Game State at the top so we can use the debug flag early
+	ZHLN_GameState state =
+		*static_cast<ZHLN_GameState*>(ZHLN_GetGameState(reinterpret_cast<ZHLN_Engine*>(&engine)));
 
 	int enableRTR = 0;
 	JPH::Vec4 probeMin(0, 0, 0, 0);
@@ -362,26 +380,29 @@ void RenderSystem(Engine& engine, CullingSystem& cullingSystem,
 	Renderer::SetFrameData(rc, uniforms, shadowProjView);
 	Renderer::SetMatrices(rc, vp, unjitteredVp);
 
-	for (Entity e : visibleEntities) {
-		auto* mesh = reg.Get<MeshComponent>(e);
-		if (mesh == nullptr) {
-			continue;
-		}
+	// 2. Wrap normal entity rendering with a conditional block
+	if (state.physicsDrawMode == 0) { // Only draw standard world when debug is Off
+		for (Entity e : visibleEntities) {
+			auto* mesh = reg.Get<MeshComponent>(e);
+			if (mesh == nullptr) {
+				continue;
+			}
 
-		DrawFlags flags = DrawFlags::None;
-		if (mesh->isSkinned) {
-			flags |= DrawFlags::Skinned;
-		}
+			DrawFlags flags = DrawFlags::None;
+			if (mesh->isSkinned) {
+				flags |= DrawFlags::Skinned;
+			}
 
-		Renderer::Draw(rc, mesh->material, mesh->mesh,
-					   {.transform = mesh->worldTransform,
-						.prevTransform = mesh->prevTransform,
-						.cullRadius = mesh->cullRadius,
-						.jointOffset = mesh->jointOffset,
-						.morphOffset = mesh->morphOffset,
-						.activeMorphCount = mesh->activeMorphCount,
-						.morphWeights = mesh->morphWeights.data(),
-						.flags = flags});
+			Renderer::Draw(rc, mesh->material, mesh->mesh,
+						   {.transform = mesh->worldTransform,
+							.prevTransform = mesh->prevTransform,
+							.cullRadius = mesh->cullRadius,
+							.jointOffset = mesh->jointOffset,
+							.morphOffset = mesh->morphOffset,
+							.activeMorphCount = mesh->activeMorphCount,
+							.morphWeights = mesh->morphWeights.data(),
+							.flags = flags});
+		}
 	}
 
 	CullingStats::TotalObjects = reg.GetEntitiesWith<MeshComponent>().size();
@@ -397,8 +418,87 @@ void RenderSystem(Engine& engine, CullingSystem& cullingSystem,
 	}
 
 	DebugDrawSystem(engine, cullingSystem);
+	// -------------------------------------------------------------------------
+	// [FAST PERSISTENTLY MAPPED PHYSICS DEBUG RENDERER]
+	// -------------------------------------------------------------------------
 
-	rc.EndFrame();
+	if (state.physicsDrawMode > 0) {
+		ZHLN_PROFILE_SCOPE("Physics Debug Extract & Upload"); // Now tracked on the CPU profiler!
+
+		static Material debugLineMat = {.pipeline = PipelineHandle::Invalid};
+		static Material debugSolidMat = {.pipeline = PipelineHandle::Invalid};
+
+		if (debugLineMat.pipeline == PipelineHandle::Invalid) {
+			PipelineDesc lineDesc = {.vertexShaderData = ZHLN_Resource_BasicVertSpv,
+									 .vertexShaderSize = ZHLN_Resource_BasicVertSpv_Len,
+									 .fragShaderData = ZHLN_Resource_BasicFragSpv,
+									 .fragShaderSize = ZHLN_Resource_BasicFragSpv_Len,
+									 .doubleSided = true,
+									 .alphaBlend = true,
+									 .isLineList = true};
+			debugLineMat = rc.CreateMaterial(lineDesc);
+			debugLineMat.albedoIndex = 1;
+
+			PipelineDesc solidDesc = lineDesc;
+			solidDesc.isLineList = false;
+			debugSolidMat = rc.CreateMaterial(solidDesc);
+			debugSolidMat.albedoIndex = 1;
+		}
+
+		bool isWireframe = (state.physicsDrawMode == 1);
+		auto debugData =
+			Physics::GetDebugDrawData(engine.GetPhysicsContext(), true, true, isWireframe);
+
+		std::vector<Vertex> debugVerts;
+
+		if (isWireframe && debugData.lineCount > 0) {
+			debugVerts.reserve(debugData.lineCount);
+			for (size_t i = 0; i < debugData.lineCount; ++i) {
+				const auto& jv = debugData.lines[i];
+				Vertex v{};
+				v.position[0] = jv.x;
+				v.position[1] = jv.y;
+				v.position[2] = jv.z;
+				v.color.data = jv.color;
+				v.normal = Math::PackNormal(0, 1, 0);
+				debugVerts.push_back(v);
+			}
+		} else if (!isWireframe && debugData.triangleCount > 0) {
+			debugVerts.reserve(debugData.triangleCount);
+			for (size_t i = 0; i < debugData.triangleCount; ++i) {
+				const auto& jv = debugData.triangles[i];
+				Vertex v{};
+				v.position[0] = jv.x;
+				v.position[1] = jv.y;
+				v.position[2] = jv.z;
+				v.color.data = jv.color;
+				v.normal = Math::PackNormal(0, 1, 0);
+				debugVerts.push_back(v);
+			}
+		}
+
+		if (!debugVerts.empty()) {
+			// Instantly upload vertices directly without triggering any Vulkan queue submissions
+			rc.UploadDebugVertices(debugVerts.data(), debugVerts.size() * sizeof(Vertex),
+								   (uint32_t)debugVerts.size());
+
+			Mesh debugMesh = {.vertexBuffer = rc.GetDebugMeshBuffer(),
+							  .vertexCount = (uint32_t)debugVerts.size()};
+
+			Renderer::Draw(rc, isWireframe ? debugLineMat : debugSolidMat, debugMesh,
+						   {.transform = JPH::Mat44::sIdentity(),
+							.prevTransform = JPH::Mat44::sIdentity(),
+							.cullRadius = 10000.0f});
+		}
+	}
+	// -------------------------------------------------------------------------
+
+	auto end_res = rc.EndFrame();
+	if (!end_res) {
+		return std::unexpected(end_res.error());
+	}
+
+	return {}; // <-- FIXED: Added final success return statement
 }
 
 // ============================================================================
@@ -448,6 +548,7 @@ bool InitializeGame(Engine& engine, ScriptRunner& scriptRunner) {
 	defaultState.debugLineVbo = static_cast<uint64_t>(lineMesh.vertexBuffer);
 	defaultState.debugLinePipeline = static_cast<uint64_t>(lineMat.pipeline);
 	defaultState.debugLineAlbedo = lineMat.albedoIndex;
+	defaultState.physicsDrawMode = 0;
 
 	ZHLN_SetGameState(reinterpret_cast<ZHLN_Engine*>(&engine), &defaultState);
 
@@ -634,8 +735,10 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, ScriptRunne
 	}
 }
 
-void RenderGame(Engine& engine, float frameTime, float physicsAccumulator,
-				CullingSystem& cullingSystem, LightingSystem& lightingSystem) {
+std::expected<void, RenderFrameResult> RenderGame(Engine& engine, float frameTime,
+												  float physicsAccumulator,
+												  CullingSystem& cullingSystem,
+												  LightingSystem& lightingSystem) {
 	constexpr float targetDt = 1.0f / 60.0f;
 	float alpha = physicsAccumulator / targetDt;
 
@@ -648,7 +751,12 @@ void RenderGame(Engine& engine, float frameTime, float physicsAccumulator,
 	JPH::Array<Entity> visibleEntities;
 	cullingSystem.Update<false>(engine, visibleEntities);
 	lightingSystem.Update(engine, frameTime);
-	RenderSystem(engine, cullingSystem, visibleEntities);
+
+	// Capture the monadic frame result
+	auto render_res = RenderSystem(engine, cullingSystem, visibleEntities);
+	if (!render_res) {
+		return std::unexpected(render_res.error());
+	}
 
 	{
 		ZHLN_PROFILE_SCOPE("ECS System: Audio Update");
@@ -660,6 +768,8 @@ void RenderGame(Engine& engine, float frameTime, float physicsAccumulator,
 		TransformSystem ts;
 		ts.UpdateTransformHistory(engine.GetRegistry());
 	}
+
+	return {};
 }
 
 } // namespace ZHLN
@@ -720,7 +830,14 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, ui
 	// 1. Original safe warm-up frames (balanced with rc.BeginFrame inside RenderSystem)
 	for (int i = 0; i < 3; ++i) {
 		engine->ProcessEvents();
-		ZHLN::RenderGame(*engine, 0.016f, 0.0f, cullingSystem, lightingSystem);
+
+		// Capture and check the monadic result during warm-up
+		auto res = ZHLN::RenderGame(*engine, 0.016f, 0.0f, cullingSystem, lightingSystem);
+		if (!res) {
+			if (res.error() == RenderFrameResult::DeviceLost) {
+				engine->HandleDeviceLost(); // Safe, parameterless rebuild
+			}
+		}
 	}
 
 	ZHLN::Log("Window active and presenting. Loading scene assets...");
@@ -775,7 +892,19 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, ui
 
 		ZHLN::UpdateGame(*engine, frameTime, physicsAccumulator, scriptRunner, gameplayWatcher,
 						 inputSystem, animationSystem, articulationSystem, transformSystem);
-		ZHLN::RenderGame(*engine, frameTime, physicsAccumulator, cullingSystem, lightingSystem);
+		auto render_res =
+			ZHLN::RenderGame(*engine, frameTime, physicsAccumulator, cullingSystem, lightingSystem);
+		if (!render_res) {
+			if (render_res.error() == RenderFrameResult::DeviceLost) {
+				engine->HandleDeviceLost();
+
+				// Re-run the scene setup script to reload and upload meshes/textures to the fresh
+				// Vulkan Context
+				scriptRunner.ReloadFile("scripts/gameplay.lua");
+			} else {
+				// Handle other non-fatal errors (OutOfDate, Suboptimal, resizing, etc.)
+			}
+		}
 
 		if (fpsLimit > 0) {
 			auto now = std::chrono::high_resolution_clock::now();

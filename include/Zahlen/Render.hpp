@@ -7,10 +7,15 @@
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
 #include <detail/String.hpp>
+#include <expected>
 #include <memory>
 #include <optional>
 
 namespace ZHLN {
+
+enum class RenderFrameResult : uint8_t { Success = 0, Suboptimal, OutOfDate, DeviceLost, Error };
+
+using RenderResult = std::expected<void, RenderFrameResult>;
 
 struct PipelineDesc {
 	const void* vertexShaderData = nullptr;
@@ -19,6 +24,7 @@ struct PipelineDesc {
 	size_t fragShaderSize = 0;
 	bool doubleSided = false;
 	bool alphaBlend = false;
+	bool isLineList = false;
 };
 
 class ZHLN_API RenderContext {
@@ -31,20 +37,25 @@ class ZHLN_API RenderContext {
 
 	[[nodiscard]] std::optional<Extent2D> GetFramebufferSize() const;
 
-	void BeginFrame();
-	void EndFrame();
+	[[nodiscard]] RenderResult BeginFrame() noexcept;
+	[[nodiscard]] RenderResult EndFrame() noexcept;
 	void SetResolution(const Extent2D& resolution);
 	[[nodiscard]] const char* GetRendererName() const;
 	[[nodiscard]] const char* GetGPUName() const;
+	[[nodiscard]] uint32_t GetFrameIndex() const noexcept;
 
 	// --- Opaque Resource Creation API ---
 	auto CreateVertexBuffer(const void* data, size_t size) -> BufferHandle;
 	auto CreateIndexBuffer(const void* data, size_t size) -> BufferHandle;
+	void DestroyBuffer(BufferHandle handle);
 	auto CreateConstantBuffer(size_t size) -> BufferHandle;
 	auto CreateMaterial(const PipelineDesc& desc) -> Material;
 
 	auto CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true)
 		-> uint32_t;
+
+	void UploadDebugVertices(const void* data, size_t size, uint32_t vertexCount) noexcept;
+	[[nodiscard]] BufferHandle GetDebugMeshBuffer() const noexcept;
 
 	// --- NEW: Declare CreateTextureCube (Switched from std::vector to raw pointer) ---
 	auto CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height)

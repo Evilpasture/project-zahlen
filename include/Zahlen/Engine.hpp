@@ -3,6 +3,7 @@
 
 // include/Zahlen/Engine.hpp
 #pragma once
+
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
 #include <memory>
@@ -33,13 +34,15 @@ class ZHLN_API Engine {
 	Engine(const EngineConfig& cfg, bool& outSuccess);
 	~Engine();
 
+	void HandleDeviceLost() noexcept;
+
 	// Static Factory: Uses a raw out-pointer to avoid <string>/<expected> dependencies
 	static std::unique_ptr<Engine> Create(const EngineConfig& cfg, const char** outError = nullptr);
 
 	[[nodiscard]] bool IsRunning() const;
 	void ProcessEvents();
-	void BeginFrame();
-	void EndFrame();
+	[[nodiscard]] bool BeginFrame(bool& outDeviceLost) noexcept;
+	[[nodiscard]] bool EndFrame(bool& outDeviceLost) noexcept;
 
 	Window& GetWindow();
 	PhysicsContext& GetPhysicsContext();
