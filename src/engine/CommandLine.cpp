@@ -22,6 +22,14 @@
 #define ZHLN_COMPILER_FLAGS "unknown"
 #endif
 
+#ifndef ZHLN_META_BUILDER
+#define ZHLN_META_BUILDER "unknown"
+#endif
+
+#ifndef ZHLN_BUILD_TOOL
+#define ZHLN_BUILD_TOOL "unknown"
+#endif
+
 namespace {
 
 struct Token {
@@ -57,6 +65,8 @@ void PrintVersion() {
 	std::println("Build Profile: {} | Sanitizers: {}", ZHLN::BuildType, ZHLN::Sanitizers);
 	std::println("Compiler:      {}", ZHLN::Compiler);
 	std::println("Compile Flags: {}", ZHLN_COMPILER_FLAGS);
+	std::println("Generator/Metabuild Tool:  {}", ZHLN_META_BUILDER);
+	std::println("Build Tool:    {}", ZHLN_BUILD_TOOL);
 	std::println("Copyright (C) {}, {}, Contact: {}", "Evilpasture", 2026,
 				 "evilpasture+github@proton.me");
 

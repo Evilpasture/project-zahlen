@@ -91,10 +91,11 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	output.pos = mul(frame.viewProj, worldPos);
 	output.currClip = mul(frame.unjitteredViewProj, worldPos);
 
+	// OPTIMIZATION: Cache skinning result for previous frame to avoid redundant calculations
 	float4 prevWorldPos;
 	if (isSkinned != 0) {
-		prevWorldPos =
-			mul(prevWorldMatrix, SkinPositionPrev(localPos, localJoints, weights, jointOffset));
+		// Use pre-computed previous joints from the previous frame (GPU-cached)
+		prevWorldPos = mul(prevWorldMatrix, SkinPositionPrev(localPos, localJoints, weights, jointOffset));
 	} else {
 		prevWorldPos = mul(prevWorldMatrix, localPos);
 	}

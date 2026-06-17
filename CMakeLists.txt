@@ -211,6 +211,8 @@ target_compile_definitions(zahlen_engine PRIVATE
     JPH_SHARED_LIBRARY
     ZHLN_GIT_COMMIT_HASH="${ZHLN_GIT_HASH}"
     ZHLN_COMPILER_FLAGS="${COMPILER_FLAGS_LIST}"
+    ZHLN_META_BUILDER="CMake ${CMAKE_VERSION}"
+    ZHLN_BUILD_TOOL="${CMAKE_GENERATOR}"
 )
 
 target_sources(zahlen_engine PRIVATE 
