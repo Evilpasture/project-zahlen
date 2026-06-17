@@ -11,6 +11,23 @@ endif()
 
 project(zahlen LANGUAGES C CXX ASM)
 
+# --- RETRIEVE GIT COMMIT HASH ---
+find_package(Git QUIET)
+if(GIT_FOUND)
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        OUTPUT_VARIABLE ZHLN_GIT_HASH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+endif()
+
+# Fallback if Git is not installed or we are building outside a repository
+if(NOT ZHLN_GIT_HASH)
+    set(ZHLN_GIT_HASH "unknown")
+endif()
+
 # --- FIX FOR LINUX/GCC 16 ASM COMPILATION RULES ---
 if(UNIX OR APPLE)
     set(CMAKE_ASM_COMPILE_OBJECT "<CMAKE_ASM_COMPILER> <DEFINES> <INCLUDES> <FLAGS> -o <OBJECT> -c <SOURCE>" CACHE STRING "ASM compile command" FORCE)
@@ -161,6 +178,29 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     pkg_check_modules(LIBSEAT REQUIRED IMPORTED_TARGET libseat)
 endif()
 
+# --- COLLECT ACTIVE COMPILER FLAGS ---
+set(COMPILER_FLAGS_LIST "${CMAKE_CXX_FLAGS}")
+
+# Append active build-profile specific flags
+if(CMAKE_BUILD_TYPE)
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" UPPER_BUILD_TYPE)
+    set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} ${CMAKE_CXX_FLAGS_${UPPER_BUILD_TYPE}}")
+else()
+    set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} ${CMAKE_CXX_FLAGS_DEBUG}")
+endif()
+
+# Append target-specific options we manually set below
+if(NOT MSVC)
+    set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti")
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+        set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} --param=destructive-interference-size=64")
+    endif()
+endif()
+
+# Clean up double-spaces and trim whitespace
+string(STRIP "${COMPILER_FLAGS_LIST}" COMPILER_FLAGS_LIST)
+string(REGEX REPLACE " +" " " COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST}")
+
 # --- 5. BUILD CORE SHARED LIBRARY ---
 add_library(zahlen_engine SHARED ${ENGINE_SOURCES})
 
@@ -169,6 +209,8 @@ target_compile_definitions(zahlen_engine PRIVATE
     ZHLN_ENGINE_BUILD
     JPH_DOUBLE_PRECISION
     JPH_SHARED_LIBRARY
+    ZHLN_GIT_COMMIT_HASH="${ZHLN_GIT_HASH}"
+    ZHLN_COMPILER_FLAGS="${COMPILER_FLAGS_LIST}"
 )
 
 target_sources(zahlen_engine PRIVATE 
@@ -351,6 +393,7 @@ add_custom_target(cook_assets ALL
     
     DEPENDS zahlen_cooker
     COMMENT "Cooking assets into data/base.pak and compiling debug GLBs..."
+    USES_TERMINAL
 )
 
 # --- 8. COMPILER FLAGS ---

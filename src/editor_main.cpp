@@ -391,6 +391,7 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 		if (engine->GetInput().NeedsResize()) {
 			rc.SetResolution(engine->GetInput().GetNewSize());
 			engine->GetInput().ClearResizeFlag();
+			ImGui::EndFrame();
 			continue;
 		}
 
@@ -581,5 +582,6 @@ extern auto RunEditor(const CommandLineOptions& options) {
 						  return err.code;
 					  });
 
-	return result.value_or(result.error());
+	// Fix: Prevent eager evaluation of .error() on successful runs
+	return result.has_value() ? result.value() : result.error();
 }

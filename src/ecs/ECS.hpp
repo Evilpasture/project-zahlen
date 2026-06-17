@@ -1,12 +1,12 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Sync.hpp>
 #include <cstddef>
 #include <detail/HashMap.hpp>
@@ -191,7 +191,12 @@ class ZHLN_API Registry {
 	}
 
 	template <typename T> ZHLN::RestrictSpan<T> GetRawArray() const noexcept {
-		auto* set = _components[ComponentFamily::GetTypeID<T>()];
+		uint32_t id = ComponentFamily::GetTypeID<T>();
+		if (id >= _compCapacity || !_components[id]) {
+			ZHLN::Log("Unknown component: {}", BoxedName<T>());
+			return ZHLN::RestrictSpan<T>(nullptr, 0); // Safely return an empty span
+		}
+		auto* set = _components[id];
 		return ZHLN::RestrictSpan<T>(reinterpret_cast<T*>(set->GetDataArray()), set->Count());
 	}
 

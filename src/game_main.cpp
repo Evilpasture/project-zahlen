@@ -3,6 +3,7 @@
 
 // src/game_main.cpp
 
+#include "Zahlen/Audio.hpp"
 #include "Zahlen/CommandLine.hpp"
 #include "Zahlen/Input.hpp"
 #include "Zahlen/alife/Types.hpp"
@@ -289,9 +290,6 @@ void RenderSystem(Engine& engine, CullingSystem& cullingSystem,
 	auto& reg = engine.GetRegistry();
 	auto& cam = engine.GetCamera();
 
-	// Restored original frame boundary initialization point.
-	rc.BeginFrame();
-
 	JPH::Mat44 vp{};
 	JPH::Mat44 unjitteredVp{};
 	JPH::Mat44 prevUnjitteredVp{};
@@ -300,6 +298,7 @@ void RenderSystem(Engine& engine, CullingSystem& cullingSystem,
 	if (cameraEntities.empty()) {
 		return;
 	}
+	rc.BeginFrame();
 	Entity cameraEntity = cameraEntities[0];
 
 	if (auto* cComp = reg.Get<CameraSystem::CameraComponent>(cameraEntity)) {
@@ -458,7 +457,7 @@ bool InitializeGame(Engine& engine, ScriptRunner& scriptRunner) {
 						   InputSystem::InputComponent, LightingSystem::LightComponent,
 						   PostProcessComponent, CameraSystem::CameraComponent, PlayerTagComponent,
 						   MainCameraTagComponent, GlobalSettingsTagComponent, TAASettingsComponent,
-						   TextComponent, UISettingsComponent>();
+						   TextComponent, UISettingsComponent, AudioSourceComponent>();
 
 	auto groundShape =
 		Physics::GetOrCreateShape(pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
@@ -767,6 +766,9 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, ui
 		if (engine->GetInput().NeedsResize()) {
 			engine->GetRenderContext().SetResolution(engine->GetInput().GetNewSize());
 			engine->GetInput().ClearResizeFlag();
+			if (!engine->GetWindow().IsTTY()) {
+				ImGui::EndFrame(); // <--- Add this!
+			}
 			continue;
 		}
 
@@ -817,5 +819,6 @@ extern auto RunGame(const ZHLN::CommandLineOptions& options) {
 						  return err.code;
 					  });
 
-	return result.value_or(result.error());
+	// Fix: Prevent eager evaluation of .error() on successful runs
+	return result.has_value() ? result.value() : result.error();
 }

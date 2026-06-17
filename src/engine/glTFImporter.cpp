@@ -145,7 +145,7 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 
 			JPH::Mat44 rotMat(JPH::Vec4(col0, 0.0f), JPH::Vec4(col1, 0.0f), JPH::Vec4(col2, 0.0f),
 							  JPH::Vec4(0, 0, 0, 1));
-			JPH::Quat rot = rotMat.GetQuaternion();
+			JPH::Quat rot = rotMat.GetQuaternion().Normalized();
 
 			node->has_rotation = 1;
 			node->rotation[0] = rot.GetX();
@@ -615,7 +615,7 @@ uint32_t InstantiatePrefab(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 
 		JPH::Mat44 rotMat(JPH::Vec4(col0, 0.0f), JPH::Vec4(col1, 0.0f), JPH::Vec4(col2, 0.0f),
 						  JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f));
-		JPH::Quat rotation = rotMat.GetQuaternion();
+		JPH::Quat rotation = rotMat.GetQuaternion().Normalized();
 
 		if (params.createPhysics) {
 			reg.Add(e, TransformComponent{
@@ -790,7 +790,7 @@ void SetupPlayerRagdoll(RenderContext& rc, PhysicsContext& pc, ECS::Registry& re
 
 			JPH::Mat44 rotMat(JPH::Vec4(col0, 0), JPH::Vec4(col1, 0), JPH::Vec4(col2, 0),
 							  JPH::Vec4(0, 0, 0, 1));
-			outRot = rotMat.GetQuaternion();
+			outRot = rotMat.GetQuaternion().Normalized();
 		};
 
 		// 1. Pre-populate all 1,121 joints with lightweight default parameters

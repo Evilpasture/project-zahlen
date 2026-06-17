@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // src/cooker_main.cpp
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -966,12 +965,13 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 		std::string matrixStr = "[";
 		for (int i = 0; i < 16; ++i) {
 			matrixStr += std::to_string(node.matrix[i]);
-			if (i < 15)
+			if (i < 15) {
 				matrixStr += ", ";
+			}
 		}
 		matrixStr += "]";
 
-		std::string meshStr = "";
+		std::string meshStr;
 		if (meshIndex != -1) {
 			meshStr = std::format(",\n      \"mesh\": {}", meshIndex);
 		}
@@ -1137,6 +1137,7 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 } // namespace GLB
 
 int main(int argc, char** argv) {
+	std::setvbuf(stdout, nullptr, _IONBF, 0);
 	std::println("=========================================================");
 	std::println("Zahlen Engine Asset Compiler (C++23 Native Pipeline)");
 	std::println("=========================================================");

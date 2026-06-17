@@ -72,8 +72,9 @@ void LoadLevel(Engine& engine, const std::string& path, Material material) {
 
 		JPH::Mat44 rotationMatrix(JPH::Vec4(col0, 0.0f), JPH::Vec4(col1, 0.0f),
 								  JPH::Vec4(col2, 0.0f), JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f));
-		JPH::Quat rotation = rotationMatrix.GetQuaternion(); // <-- GetQuaternion converts the 4x4
-															 // matrix directly to a unit Quat
+		JPH::Quat rotation =
+			rotationMatrix.GetQuaternion().Normalized(); // <-- GetQuaternion converts the 4x4
+														 // matrix directly to a unit Quat
 
 		// 2. Load or reuse the mesh geometry (VRAM Deduplication)
 		Mesh gpuMesh;

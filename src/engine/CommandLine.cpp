@@ -13,6 +13,15 @@
 #include <print>
 #include <span>
 #include <vector>
+
+#ifndef ZHLN_GIT_COMMIT_HASH
+#define ZHLN_GIT_COMMIT_HASH "unknown"
+#endif
+
+#ifndef ZHLN_COMPILER_FLAGS
+#define ZHLN_COMPILER_FLAGS "unknown"
+#endif
+
 namespace {
 
 struct Token {
@@ -42,11 +51,14 @@ std::vector<Token> Tokenize(std::span<char* const> args) {
 }
 
 void PrintVersion() {
-	std::println("Zahlen Engine - version {}.{}.{}", ZHLN::EngineVersion.major,
-				 ZHLN::EngineVersion.minor, ZHLN::EngineVersion.patch);
+	std::println("Zahlen Engine - version {}.{}.{} ({})", ZHLN::EngineVersion.major,
+				 ZHLN::EngineVersion.minor, ZHLN::EngineVersion.patch, ZHLN_GIT_COMMIT_HASH);
 	std::println("Built on:      {} (UTC)", __DATE__);
 	std::println("Build Profile: {} | Sanitizers: {}", ZHLN::BuildType, ZHLN::Sanitizers);
 	std::println("Compiler:      {}", ZHLN::Compiler);
+	std::println("Compile Flags: {}", ZHLN_COMPILER_FLAGS);
+	std::println("Copyright (C) {}, {}, Contact: {}", "Evilpasture", 2026,
+				 "evilpasture+github@proton.me");
 
 	std::println("\nLicense GPLv3+: GNU GPL version 3 or later "
 				 "<https://gnu.org/licenses/gpl.html>.");
