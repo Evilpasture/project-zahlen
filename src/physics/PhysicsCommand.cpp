@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "Physics.hpp" // For GetBodyID
+#include "Zahlen/Log.hpp"
 #include "physics/PhysicsWorld.hpp"
 
 #include <Jolt/Physics/Constraints/HingeConstraint.h>
@@ -26,8 +26,26 @@ void PhysicsWorld::FlushCommands(Command* capturedQueue, size_t capturedCount) {
 				uint32_t dense = slotToDense[slot];
 				JPH::BodyID bodyID = bodyIDs[dense];
 
+				// If we get here, the slot state was validated as SLOT_ALIVE (destructible rigid
+				// body). Having an invalid BodyID here means our internal state is completely
+				// broken.
+				if (bodyID.IsInvalid()) [[unlikely]] {
+					ZHLN::Panic(
+						"PhysicsCommand: Attempted to destroy an invalid Jolt BodyID on slot {}!",
+						slot);
+				}
+
 				const uint32_t joltIdx =
 					bodyID.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
+
+				// Verify indices against array boundaries before writing
+				if (joltIdx >= idToHandleMap.size() || joltIdx >= joltBodyPtrs.size())
+					[[unlikely]] {
+					ZHLN::Panic("PhysicsCommand: joltIdx ({}) exceeds active map sizes ({}, {}) "
+								"during DestroyBody!",
+								joltIdx, idToHandleMap.size(), joltBodyPtrs.size());
+				}
+
 				idToHandleMap[joltIdx].store(0, std::memory_order_release);
 				joltBodyPtrs[joltIdx] = nullptr;
 

@@ -2,7 +2,7 @@
 
 namespace ZHLN {
 class Engine;
-class Camera;
+struct Camera;
 
 class InputSystem {
   public:

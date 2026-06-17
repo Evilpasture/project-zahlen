@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "PhysicsWorld.hpp"
+#include "Zahlen/Log.hpp"
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Body/Body.h>
@@ -138,6 +138,13 @@ inline void ExecuteSyncPass(const uint32_t active_count,
 		const uint32_t raw_jolt_id = active_ids[i].GetIndexAndSequenceNumber();
 		const uint32_t j_idx = raw_jolt_id & JPH::BodyID::cMaxBodyIndex;
 
+		// 1. Panic immediately if Jolt returns an out-of-bounds index (indicates memory corruption)
+		if (j_idx >= map.slot_capacity + 1) [[unlikely]] {
+			ZHLN::Panic("PhysicsSync: Out of bounds j_idx ({}) detected! Slot capacity is {}. "
+						"Active ID: {:#x}",
+						j_idx, map.slot_capacity, raw_jolt_id);
+		}
+
 		const auto* ZHLN_RESTRICT b =
 			static_cast<const JPH::Body * ZHLN_RESTRICT>(map.body_ptrs[j_idx]);
 
@@ -145,9 +152,13 @@ inline void ExecuteSyncPass(const uint32_t active_count,
 			b = lock_iface->TryGetBody(JPH::BodyID(raw_jolt_id));
 			map.body_ptrs[j_idx] = b;
 		}
-		[[assume(b != nullptr)]];
 
-		// ECS Handle decoding
+		// 2. Panic if Jolt claims a body is active but we fail to resolve its pointer
+		if (b == nullptr) [[unlikely]] {
+			ZHLN::Panic("PhysicsSync: Failed to resolve Jolt Body for active ID: {:#x}",
+						raw_jolt_id);
+		}
+
 		const uint64_t handle = b->GetUserData();
 		const uint32_t slot = static_cast<uint32_t>(handle & 0xFFFFFFFF);
 		const uint32_t gen = static_cast<uint32_t>(handle >> 32);
@@ -155,7 +166,16 @@ inline void ExecuteSyncPass(const uint32_t active_count,
 		const uint32_t safe_slot = (slot < map.slot_capacity) ? slot : 0;
 		const uint32_t current_gen = map.generations[safe_slot].load(std::memory_order_relaxed);
 
-		// Branchless Validation
+		// 3. Panic if we find a garbage non-zero slot index exceeding capacity (indicates corrupted
+		// UserData)
+		if (slot >= map.slot_capacity && handle != 0) [[unlikely]] {
+			ZHLN::Panic(
+				"PhysicsSync: Decoded slot index ({}) exceeds slot capacity ({}). Handle: {:#x}",
+				slot, map.slot_capacity, handle);
+		}
+
+		// (Unmanaged bodies like Ragdoll joints have handle == 0 and are safely skipped
+		// branchlessly)
 		const uint32_t bad = static_cast<uint32_t>(slot >= map.slot_capacity) | (current_gen ^ gen);
 		const uint32_t d_idx = map.slot_to_dense[safe_slot];
 		const uint32_t is_valid = static_cast<uint32_t>(bad == 0);

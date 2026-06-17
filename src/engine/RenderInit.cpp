@@ -81,7 +81,7 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 				f.runtimeDescriptorArray = VK_TRUE;
 				f.bufferDeviceAddress = VK_TRUE;
 				f.hostQueryReset = VK_TRUE;
-				f.drawIndirectCount = VK_TRUE;
+				// f.drawIndirectCount = VK_TRUE;
 				f.bufferDeviceAddress = VK_TRUE;
 			})
 			.Require<VkPhysicalDeviceAccelerationStructureFeaturesKHR>(
@@ -459,11 +459,13 @@ void RenderContext::Impl::InitPostProcessing() {
 	// SMAA Pass Architecture Pre-allocation
 	// Requires inclusion of SMAA.hlsl and runtime compilation.
 	// Currently initialized as pass-throughs using standard layout blocks.
-	if (!smaaEdgePass.Build(ctx.Device(), fxaaShaders, {VK_FORMAT_R8G8_UNORM})) {
+	if (!smaaEdgePass.Build(ctx.Device(), fxaaShaders, {VK_FORMAT_R8G8_UNORM}, &fxaaPush, 1)) {
 	}
-	if (!smaaWeightPass.Build(ctx.Device(), fxaaShaders, {VK_FORMAT_R8G8B8A8_UNORM})) {
+	if (!smaaWeightPass.Build(ctx.Device(), fxaaShaders, {VK_FORMAT_R8G8B8A8_UNORM}, &fxaaPush,
+							  1)) {
 	}
-	if (!smaaBlendPass.Build(ctx.Device(), fxaaShaders, {VK_FORMAT_R16G16B16A16_SFLOAT})) {
+	if (!smaaBlendPass.Build(ctx.Device(), fxaaShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &fxaaPush,
+							 1)) {
 	}
 
 	VkPushConstantRange ppPush = {

@@ -57,7 +57,7 @@ struct EditorState {
 
 EditorState g_EditorState;
 JPH::Array<Entity> s_VisibleEntities;
-TAAState s_TAAState;
+AAState s_AAState;
 
 // ============================================================================
 // Free-Fly Editor Camera
@@ -415,19 +415,19 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 		auto res = engine->GetWindow().GetSize();
 
 		if (res.width > 0 && res.height > 0) {
-			if (s_TAAState.enabled) {
-				s_TAAState.frameIndex++;
+			if (s_AAState.mode == AAMode::TAA) {
+				s_AAState.frameIndex++;
 			} else {
-				s_TAAState.frameIndex = 0;
+				s_AAState.frameIndex = 0;
 			}
 
 			JPH::Mat44 unjitteredProj = cam.GetProjectionMatrix((float)res.width / res.height);
 			JPH::Mat44 unjitteredVp = unjitteredProj * cam.GetViewMatrix();
 
 			JPH::Mat44 vp = unjitteredVp;
-			if (s_TAAState.enabled) {
+			if (s_AAState.mode == AAMode::TAA) {
 				vp = cam.GetJitteredProjectionMatrix((float)res.width / res.height, res.width,
-													 res.height, s_TAAState) *
+													 res.height, s_AAState) *
 					 cam.GetViewMatrix();
 			}
 
@@ -462,7 +462,10 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 			std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
 			std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);
 			uniforms.lightCount = 0;
+			uniforms.jitterParams = JPH::Vec4(s_AAState.jitterX, s_AAState.jitterY,
+											  s_AAState.prevJitterX, s_AAState.prevJitterY);
 
+			rc.SetAAState(s_AAState);
 			Renderer::SetFrameData(rc, uniforms, shadowProjView);
 
 			engine->BeginFrame();

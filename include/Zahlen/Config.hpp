@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <bit>
 #include <cstdint>
 #include <detail/String.hpp>
 #include <string_view>

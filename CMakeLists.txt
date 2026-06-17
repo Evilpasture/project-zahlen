@@ -3,6 +3,9 @@
 
 cmake_minimum_required(VERSION 3.25)
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+include(AppleShim)
+
 # 1. Force the compiler selection BEFORE project()
 if(WIN32 AND NOT DEFINED CMAKE_C_COMPILER)
     set(CMAKE_C_COMPILER clang)
@@ -53,7 +56,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # --- 2. GLOBAL SANITIZER CONFIG ---
 option(USE_SANITIZERS "Enable ASan and UBSan" OFF)
-if(USE_SANITIZERS AND WIN32)
+if(USE_SANITIZERS)
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
     add_link_options(-fsanitize=address,undefined)
     add_definitions(-D__ASAN_ENABLED__)
@@ -335,6 +338,7 @@ compile_shaders(zahlen_engine
     "${CMAKE_SOURCE_DIR}/resources/shaders/ui.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/toon.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/postprocess.hlsl"
+    "${CMAKE_SOURCE_DIR}/resources/shaders/fxaa.hlsl"
 )
 
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/culling.hlsl" CSMain cs_6_0 CULLING_COMP_SPV)
