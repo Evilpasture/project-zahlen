@@ -102,16 +102,16 @@ void CameraSystem::Update(Engine& engine, float dt, float alpha) {
 			JPH::Mat44 unjitteredProj = cam.GetProjectionMatrix((float)res.width / res.height);
 			cComp->unjitteredViewProj = unjitteredProj * cam.GetViewMatrix();
 
-			auto* taaComp = reg.Get<TAASettingsComponent>(e);
-			if ((taaComp != nullptr) && taaComp->state.enabled) {
-				taaComp->state.frameIndex++;
+			auto* aaComp = reg.Get<AASettingsComponent>(e);
+			if ((aaComp != nullptr) && aaComp->state.mode == AAMode::TAA) {
+				aaComp->state.frameIndex++;
 				cComp->viewProj =
 					cam.GetJitteredProjectionMatrix((float)res.width / res.height, res.width,
-													res.height, taaComp->state) *
+													res.height, aaComp->state) *
 					cam.GetViewMatrix();
 			} else {
-				if (taaComp != nullptr) {
-					taaComp->state.frameIndex = 0;
+				if (aaComp != nullptr) {
+					aaComp->state.frameIndex = 0;
 				}
 				cComp->viewProj = cComp->unjitteredViewProj;
 			}

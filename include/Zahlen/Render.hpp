@@ -55,7 +55,7 @@ class ZHLN_API RenderContext {
 
 	uint32_t AllocateMorphDeltas(uint32_t count, const float* deltas);
 
-	void SetTAAState(const TAAState& state);
+	void SetAAState(const AAState& state);
 
 	void BuildMeshBLAS(Mesh& mesh);
 

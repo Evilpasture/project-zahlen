@@ -195,8 +195,8 @@ struct ShadowPass {
 struct MainPass {
 	static constexpr std::string_view name = "[GPU] G-Buffer/Main";
 };
-struct TaaPass {
-	static constexpr std::string_view name = "[GPU] TAA Post";
+struct AAPass {
+	static constexpr std::string_view name = "[GPU] Anti-Aliasing";
 };
 struct BlitPass {
 	static constexpr std::string_view name = "[GPU] Blit/Composite";
@@ -206,7 +206,7 @@ struct PostProcessPass {
 };
 } // namespace Stages
 
-using FrameProfiler = Profiler::GpuProfiler<Stages::ShadowPass, Stages::MainPass, Stages::TaaPass,
+using FrameProfiler = Profiler::GpuProfiler<Stages::ShadowPass, Stages::MainPass, Stages::AAPass,
 											Stages::PostProcessPass, Stages::BlitPass>;
 
 struct NativeMesh {
@@ -306,9 +306,17 @@ struct RenderContext::Impl {
 	DoubleBuffered<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumBuffers;
 
 	Vk::PostProcessPass<TAALayout> taaPass;
+	Vk::PostProcessPass<BlitLayout> fxaaPass;
+	Vk::PostProcessPass<BlitLayout> smaaEdgePass;
+	Vk::PostProcessPass<BlitLayout> smaaWeightPass;
+	Vk::PostProcessPass<BlitLayout> smaaBlendPass;
+
 	Vk::PostProcessPass<PostProcessLayout> postProcessPass;
 	Vk::PostProcessPass<PostProcessLayoutNoRT> postProcessPassNoRT;
 	Vk::PostProcessPass<BlitLayout> blitPass;
+
+	Vk::RenderTarget<VK_FORMAT_R8G8_UNORM> smaaEdgeTarget;
+	Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM> smaaWeightTarget;
 
 	Vk::Sampler defaultSampler;
 	Vk::Sampler pointSampler;
@@ -385,7 +393,7 @@ struct RenderContext::Impl {
 	Vk::Buffer morphDeltasBuffer; // Holds all packed morph target deltas
 	uint32_t nextMorphDeltaIndex = 0;
 
-	TAAState taaState{};
+	AAState aaState{};
 
 	FrameProfiler gpuProfiler;
 

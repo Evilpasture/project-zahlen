@@ -192,12 +192,27 @@ void DrawProfiler(Engine& engine) {
 
 		// 6. ANTI-ALIASING
 		if (ImGui::CollapsingHeader("Anti-Aliasing", ImGuiTreeNodeFlags_DefaultOpen)) {
-			auto taaEnts = engine.GetRegistry().GetEntitiesWith<TAASettingsComponent>();
-			if (!taaEnts.empty()) {
-				auto* taa = engine.GetRegistry().Get<TAASettingsComponent>(taaEnts[0]);
-				ImGui::Checkbox("Enable TAA", &taa->state.enabled);
-				if (taa->state.enabled) {
-					ImGui::SliderFloat("TAA Blend", &taa->state.feedback, 0.8f, 0.99f);
+			auto aaEnts = engine.GetRegistry().GetEntitiesWith<AASettingsComponent>();
+			if (!aaEnts.empty()) {
+				auto* aaSettings = engine.GetRegistry().Get<AASettingsComponent>(aaEnts[0]);
+
+				const char* aaModesList[] = {"Disabled", "FXAA (Fast Approximate)",
+											 "TAA (Temporal)", "SMAA (Subpixel Morphological)"};
+				int currentModeIdx = static_cast<int>(aaSettings->state.mode);
+
+				if (ImGui::Combo("AA Method", &currentModeIdx, aaModesList,
+								 IM_ARRAYSIZE(aaModesList))) {
+					aaSettings->state.mode = static_cast<AAMode>(currentModeIdx);
+				}
+
+				if (aaSettings->state.mode == AAMode::TAA) {
+					ImGui::SliderFloat("TAA Blend", &aaSettings->state.taaFeedback, 0.80f, 0.99f,
+									   "%.2f");
+				} else if (aaSettings->state.mode == AAMode::FXAA) {
+					ImGui::SliderFloat("FXAA Subpixel Blend", &aaSettings->state.fxaaSubpix, 0.0f,
+									   1.0f, "%.2f");
+					ImGui::SliderFloat("FXAA Edge Threshold", &aaSettings->state.fxaaEdgeThreshold,
+									   0.063f, 0.333f, "%.3f");
 				}
 			}
 		}

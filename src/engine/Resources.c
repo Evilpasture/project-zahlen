@@ -97,3 +97,13 @@ const unsigned char ZHLN_Resource_PostProcessNortFragSpv[] = {
 };
 const unsigned int ZHLN_Resource_PostProcessNortFragSpv_Len =
 	sizeof(ZHLN_Resource_PostProcessNortFragSpv);
+
+const unsigned char ZHLN_Resource_FxaaVertSpv[] = {
+#embed SHADER_FXAA_HLSL_VS_PATH
+};
+const unsigned int ZHLN_Resource_FxaaVertSpv_Len = sizeof(ZHLN_Resource_FxaaVertSpv);
+
+const unsigned char ZHLN_Resource_FxaaFragSpv[] = {
+#embed SHADER_FXAA_HLSL_PS_PATH
+};
+const unsigned int ZHLN_Resource_FxaaFragSpv_Len = sizeof(ZHLN_Resource_FxaaFragSpv);

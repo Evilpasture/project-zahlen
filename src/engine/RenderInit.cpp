@@ -442,6 +442,30 @@ void RenderContext::Impl::InitPostProcessing() {
 		ZHLN::Log("TAA pass build failure, continuing...");
 	}
 
+	VkPushConstantRange fxaaPush = {
+		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float) * 6};
+	auto fxaaShaders = Vk::ShaderStages::Create(ctx.Device(),
+												{.code = Vk::AsSpirV(&ZHLN_Resource_FxaaVertSpv[0]),
+												 .size = ZHLN_Resource_FxaaVertSpv_Len,
+												 .entry_point = "VSMain"},
+												{.code = Vk::AsSpirV(&ZHLN_Resource_FxaaFragSpv[0]),
+												 .size = ZHLN_Resource_FxaaFragSpv_Len,
+												 .entry_point = "PSMain"});
+
+	if (!fxaaPass.Build(ctx.Device(), fxaaShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &fxaaPush, 1)) {
+		ZHLN::Log("FXAA pass build failure, continuing...");
+	}
+
+	// SMAA Pass Architecture Pre-allocation
+	// Requires inclusion of SMAA.hlsl and runtime compilation.
+	// Currently initialized as pass-throughs using standard layout blocks.
+	if (!smaaEdgePass.Build(ctx.Device(), fxaaShaders, {VK_FORMAT_R8G8_UNORM})) {
+	}
+	if (!smaaWeightPass.Build(ctx.Device(), fxaaShaders, {VK_FORMAT_R8G8B8A8_UNORM})) {
+	}
+	if (!smaaBlendPass.Build(ctx.Device(), fxaaShaders, {VK_FORMAT_R16G16B16A16_SFLOAT})) {
+	}
+
 	VkPushConstantRange ppPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
 

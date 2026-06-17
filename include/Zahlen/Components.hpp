@@ -146,8 +146,8 @@ struct PlayerTagComponent {};
 struct MainCameraTagComponent {};
 struct GlobalSettingsTagComponent {};
 
-struct TAASettingsComponent {
-	TAAState state{};
+struct AASettingsComponent {
+	AAState state{};
 };
 
 struct TextComponent {

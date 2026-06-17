@@ -337,9 +337,9 @@ void RenderSystem(Engine& engine, CullingSystem& cullingSystem,
 							 JPH::Vec4(0.0f, 0.0f, 1.0f, 0.0f), JPH::Vec4(0.5f, 0.5f, 0.0f, 1.0f)};
 	JPH::Mat44 lightSpaceBiased = biasMatrix * shadowProjView;
 
-	TAAState taaState{};
-	if (auto* taaComp = reg.Get<TAASettingsComponent>(cameraEntity)) {
-		taaState = taaComp->state;
+	AAState aaState{};
+	if (auto* taaComp = reg.Get<AASettingsComponent>(cameraEntity)) {
+		aaState = taaComp->state;
 	}
 
 	FrameUniforms uniforms{};
@@ -355,10 +355,10 @@ void RenderSystem(Engine& engine, CullingSystem& cullingSystem,
 	uniforms.probeMax = probeMax;
 	uniforms.probePos = probePos;
 	uniforms.jitterParams =
-		JPH::Vec4(taaState.jitterX, taaState.jitterY, taaState.prevJitterX, taaState.prevJitterY);
+		JPH::Vec4(aaState.jitterX, aaState.jitterY, aaState.prevJitterX, aaState.prevJitterY);
 	uniforms.enableRTR = enableRTR;
 
-	rc.SetTAAState(taaState);
+	rc.SetAAState(aaState);
 	Renderer::SetFrameData(rc, uniforms, shadowProjView);
 	Renderer::SetMatrices(rc, vp, unjitteredVp);
 
@@ -456,7 +456,7 @@ bool InitializeGame(Engine& engine, ScriptRunner& scriptRunner) {
 						   RagdollComponent, NameComponent, TargetCameraComponent,
 						   InputSystem::InputComponent, LightingSystem::LightComponent,
 						   PostProcessComponent, CameraSystem::CameraComponent, PlayerTagComponent,
-						   MainCameraTagComponent, GlobalSettingsTagComponent, TAASettingsComponent,
+						   MainCameraTagComponent, GlobalSettingsTagComponent, AASettingsComponent,
 						   TextComponent, UISettingsComponent, AudioSourceComponent>();
 
 	auto groundShape =
@@ -491,7 +491,8 @@ bool InitializeGame(Engine& engine, ScriptRunner& scriptRunner) {
 												.targetFov = 45.0f});
 	reg.Add(cameraEntity, InputSystem::InputComponent{});
 	reg.Add(cameraEntity, CameraSystem::CameraComponent{});
-	reg.Add(cameraEntity, TAASettingsComponent{.state = {.enabled = true, .feedback = 0.95f}});
+	reg.Add(cameraEntity,
+			AASettingsComponent{.state = {.mode = AAMode::TAA, .taaFeedback = 0.95f}});
 
 	Entity settingsEntity = reg.Create();
 	reg.Add(settingsEntity, GlobalSettingsTagComponent{});

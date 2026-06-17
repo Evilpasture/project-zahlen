@@ -339,7 +339,7 @@ struct MainPass {
 	}
 };
 
-struct TAAPass {
+struct AAPass {
 	[[nodiscard]] auto
 	Execute(const FrameRecorder& recorder,
 			SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -349,8 +349,8 @@ struct TAAPass {
 		VkCommandBuffer cmd = recorder.cmd;
 		auto& ctx = recorder.ctx;
 
-		Profiler::ScopedGpuProfile<Stages::TaaPass, FrameProfiler> timer(cmd, recorder.frameIndex,
-																		 ctx.gpuProfiler);
+		Profiler::ScopedGpuProfile<Stages::AAPass, FrameProfiler> timer(cmd, recorder.frameIndex,
+																		ctx.gpuProfiler);
 
 		// Compile-time state translation
 		auto color_ro =
@@ -361,13 +361,12 @@ struct TAAPass {
 		auto depth_ro = IssueBarrier<Vk::DepthAttachmentState, Vk::ShaderReadState>(
 			cmd, in.depth, VK_IMAGE_ASPECT_DEPTH_BIT);
 
-		if (ctx.taaState.enabled && ctx.taaPass.pipeline.Valid()) {
+		if (ctx.aaState.mode == AAMode::TAA && ctx.taaPass.pipeline.Valid()) {
 			auto accumCurr_ro =
 				AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.accumBuffers.Current());
 			auto accumNext_u =
 				AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.accumBuffers.Next());
 
-			// Compile-time state translation
 			auto accumNext_att =
 				IssueBarrier<Vk::ShaderReadState, Vk::ColorAttachmentState>(cmd, accumNext_u);
 
@@ -384,12 +383,48 @@ struct TAAPass {
 						Vk::BufferWrite{.buffer =
 											ctx.frameUniformBuffers[recorder.frameIndex].Handle()});
 
-					ctx.taaPass.Execute(cmd, TAAPushConstants{.feedback = ctx.taaState.feedback});
+					ctx.taaPass.Execute(cmd, TAAPushConstants{.feedback = ctx.aaState.taaFeedback});
 				});
 
-			[[maybe_unused]] auto color_ro =
+			// Promote output into the downstream read chain
+			color_ro =
 				IssueBarrier<Vk::ColorAttachmentState, Vk::ShaderReadState>(cmd, accumNext_att);
-			// Retain the resolved, anti-aliased frame instead of the raw, jittered target
+
+		} else if (ctx.aaState.mode == AAMode::FXAA && ctx.fxaaPass.pipeline.Valid()) {
+			auto accumNext_u =
+				AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.accumBuffers.Next());
+			auto accumNext_att =
+				IssueBarrier<Vk::ShaderReadState, Vk::ColorAttachmentState>(cmd, accumNext_u);
+
+			struct FXAAPushConstants {
+				float rcpFrameX;
+				float rcpFrameY;
+				float subpix;
+				float edgeThreshold;
+				float edgeThresholdMin;
+				float _pad;
+			} pc = {.rcpFrameX = 1.0f / (float)in.sceneColor.extent.width,
+					.rcpFrameY = 1.0f / (float)in.sceneColor.extent.height,
+					.subpix = ctx.aaState.fxaaSubpix,
+					.edgeThreshold = ctx.aaState.fxaaEdgeThreshold,
+					.edgeThresholdMin = ctx.aaState.fxaaEdgeThresholdMin,
+					._pad = 0.0f};
+
+			Vk::DynamicPass(in.sceneColor.extent)
+				.AddColor(accumNext_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+				.Execute(cmd, [&]() {
+					ctx.fxaaPass.WriteNext(ctx.ctx.Device(), color_ro,
+										   Vk::SamplerWrite{.sampler = ctx.defaultSampler.Get()});
+					ctx.fxaaPass.Execute(cmd, pc);
+				});
+
+			color_ro =
+				IssueBarrier<Vk::ColorAttachmentState, Vk::ShaderReadState>(cmd, accumNext_att);
+
+		} else if (ctx.aaState.mode == AAMode::SMAA) {
+			// Architecture block allocated for integration with SMAA.hlsl
+			// Passes smaaEdgePass, smaaWeightPass, and smaaBlendPass are active in the context.
+			// Revert to passthrough until valid SearchTex and AreaTex LUTs are embedded.
 		}
 
 		return {
@@ -621,6 +656,13 @@ void RenderContext::BeginFrame() {
 		_impl->accumBuffers[1] = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
 			_impl->allocator, _impl->ctx, ext,
 			{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
+
+		_impl->smaaEdgeTarget = Vk::RenderTarget<VK_FORMAT_R8G8_UNORM>::Create(
+			_impl->allocator, _impl->ctx, ext,
+			{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
+		_impl->smaaWeightTarget = Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>::Create(
+			_impl->allocator, _impl->ctx, ext,
+			{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
 		_impl->normalRoughnessBuffer = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
 			_impl->allocator, _impl->ctx, ext,
 			{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
@@ -714,9 +756,10 @@ void RenderContext::Impl::SubmitFrame() {
 	}
 
 	auto manager = StaticResourceManager(
-		&accumBuffers, &taaPass, &postProcessPass, &postProcessPassNoRT, &blitPass,
-		&frameUniformBuffers, &lightStorageBuffers, &instanceDataBuffers, &indirectCommandsBuffers,
-		&jointBuffers, &bindlessSets, &tlas, &tlasBuffer, &tlasScratchBuffer);
+		&accumBuffers, &taaPass, &fxaaPass, &smaaEdgePass, &smaaWeightPass, &smaaBlendPass,
+		&postProcessPass, &postProcessPassNoRT, &blitPass, &frameUniformBuffers,
+		&lightStorageBuffers, &instanceDataBuffers, &indirectCommandsBuffers, &jointBuffers,
+		&bindlessSets, &tlas, &tlasBuffer, &tlasScratchBuffer);
 	manager.FlipAll();
 
 	frame_index = (frame_index + 1) % 2;
@@ -933,8 +976,8 @@ void RenderContext::EndFrame() {
 				_impl->presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT)};
 
 	auto stateAfterMain = Passes::MainPass{}.Execute(recorder, initialState);
-	auto stateAfterTAA = Passes::TAAPass{}.Execute(recorder, stateAfterMain);
-	auto stateAfterPP = Passes::PostProcessPass{}.Execute(recorder, stateAfterTAA);
+	auto stateAfterAA = Passes::AAPass{}.Execute(recorder, stateAfterMain);
+	auto stateAfterPP = Passes::PostProcessPass{}.Execute(recorder, stateAfterAA);
 	Passes::BlitPass{}.Execute(recorder, stateAfterPP);
 
 	ZHLN_EndCommandBuffer(cmd);
@@ -959,7 +1002,7 @@ void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
 	impl->shadowProjView = shadowProjView;
 	impl->currentUniforms = uniforms;
 
-	impl->currentUniforms.camPos[3] = static_cast<float>(impl->taaState.frameIndex);
+	impl->currentUniforms.camPos[3] = static_cast<float>(impl->aaState.frameIndex);
 
 	std::memcpy(impl->currentUniforms.sh, impl->iblPayload.shCoeffs.data(), sizeof(JPH::Vec4) * 9);
 

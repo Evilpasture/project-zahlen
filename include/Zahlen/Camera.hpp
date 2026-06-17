@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #include "Math3D.hpp"
@@ -109,28 +108,28 @@ struct Camera {
 
 	[[nodiscard]] JPH::Mat44 GetJitteredProjectionMatrix(float aspectRatio, uint32_t width,
 														 uint32_t height,
-														 TAAState& taaState) const { // <-- CHANGED
+														 AAState& aaState) const { // <-- CHANGED
 		JPH::Mat44 proj = GetProjectionMatrix(aspectRatio);
 
-		if (taaState.enabled) {
+		if (aaState.mode == AAMode::TAA) {
 			// Map Halton sequence [-0.5, 0.5] to Sub-Pixel NDC space
-			float jitterX = (Halton_2[taaState.frameIndex % 16] - 0.5f) / (float)width;
-			float jitterY = (Halton_3[taaState.frameIndex % 16] - 0.5f) / (float)height;
+			float jitterX = (Halton_2[aaState.frameIndex % 16] - 0.5f) / (float)width;
+			float jitterY = (Halton_3[aaState.frameIndex % 16] - 0.5f) / (float)height;
 
 			// If frameIndex is 0, there is no previous jitter
 			float prevJitterX =
-				taaState.frameIndex > 0
-					? (Camera::Halton_2[(taaState.frameIndex - 1) % 16] - 0.5f) / (float)width
+				aaState.frameIndex > 0
+					? (Camera::Halton_2[(aaState.frameIndex - 1) % 16] - 0.5f) / (float)width
 					: 0.0f;
 			float prevJitterY =
-				taaState.frameIndex > 0
-					? (Camera::Halton_3[(taaState.frameIndex - 1) % 16] - 0.5f) / (float)height
+				aaState.frameIndex > 0
+					? (Camera::Halton_3[(aaState.frameIndex - 1) % 16] - 0.5f) / (float)height
 					: 0.0f;
 
-			taaState.jitterX = jitterX;
-			taaState.jitterY = jitterY;
-			taaState.prevJitterX = prevJitterX;
-			taaState.prevJitterY = prevJitterY;
+			aaState.jitterX = jitterX;
+			aaState.jitterY = jitterY;
+			aaState.prevJitterX = prevJitterX;
+			aaState.prevJitterY = prevJitterY;
 
 			// Apply jitter to the 3rd column (index 2).
 			JPH::Vec4 col2 = proj.GetColumn4(2);

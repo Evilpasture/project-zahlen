@@ -457,8 +457,8 @@ uint32_t RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas)
 	return offset;
 }
 
-void RenderContext::SetTAAState(const TAAState& state) {
-	_impl->taaState = state;
+void RenderContext::SetAAState(const AAState& state) {
+	_impl->aaState = state;
 }
 
 void RenderContext::BuildMeshBLAS(Mesh& mesh) {

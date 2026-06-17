@@ -162,15 +162,24 @@ struct GISettings {
 	int enableSSR = 1;
 	int enableRTR = 0;
 };
+// NOLINTNEXTLINE(performance-enum-size)
+enum class AAMode : uint32_t { None = 0, FXAA = 1, TAA = 2, SMAA = 3 };
 
-struct TAAState {
-	bool enabled = true;
-	float feedback = 0.95f; // 95% History, 5% Current Frame
+struct AAState {
+	AAMode mode = AAMode::TAA;
+
+	// TAA Options
+	float taaFeedback = 0.95f; // 95% History, 5% Current Frame
 	float jitterX = 0.0f;
 	float jitterY = 0.0f;
 	float prevJitterX = 0.0f;
 	float prevJitterY = 0.0f;
 	uint32_t frameIndex = 0; // Drives the Halton Jitter sequence
+
+	// FXAA Options
+	float fxaaSubpix = 0.75f;
+	float fxaaEdgeThreshold = 0.166f;
+	float fxaaEdgeThresholdMin = 0.0833f;
 };
 
 template <typename T> inline constexpr bool EnableEnumFlags = false;

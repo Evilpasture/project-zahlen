@@ -27,4 +27,6 @@ DECLARE_RESOURCE(ZHLN_Resource_PostProcessVertSpv)
 DECLARE_RESOURCE(ZHLN_Resource_PostProcessFragSpv)
 DECLARE_RESOURCE(ZHLN_Resource_PostProcessNortVertSpv)
 DECLARE_RESOURCE(ZHLN_Resource_PostProcessNortFragSpv)
+DECLARE_RESOURCE(ZHLN_Resource_FxaaVertSpv)
+DECLARE_RESOURCE(ZHLN_Resource_FxaaFragSpv)
 }
