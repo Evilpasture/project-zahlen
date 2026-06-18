@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <detail/String.hpp>
 #include <string_view>
+#include <version>
 
 #define ZHLN_VERSION_MAJOR 1
 #define ZHLN_VERSION_MINOR 0
@@ -20,6 +21,25 @@
 	ZHLN_STR(ZHLN_VERSION_MAJOR) "." ZHLN_STR(ZHLN_VERSION_MINOR) "." ZHLN_STR(ZHLN_VERSION_PATCH)
 
 namespace ZHLN {
+
+constexpr std::string_view GetSTLVersion() noexcept {
+#if defined(_LIBCPP_VERSION)
+	// LLVM libc++
+	return "LLVM libc++ " ZHLN_STR(_LIBCPP_VERSION);
+#elif defined(__GLIBCXX__)
+// GNU libstdc++
+#if defined(_GLIBCXX_RELEASE)
+	return "GNU libstdc++ " ZHLN_STR(_GLIBCXX_RELEASE) " (Date: " ZHLN_STR(__GLIBCXX__) ")";
+#else
+	return "GNU libstdc++ (Date: " ZHLN_STR(__GLIBCXX__) ")";
+#endif
+#elif defined(_MSVC_STL_VERSION)
+	// MSVC STL
+	return "MSVC STL " ZHLN_STR(_MSVC_STL_VERSION);
+#else
+	return "Unknown Standard Library";
+#endif
+}
 
 struct Version {
 	uint32_t major;

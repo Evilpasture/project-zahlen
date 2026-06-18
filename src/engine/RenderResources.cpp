@@ -184,8 +184,7 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 	auto pipeline = Vk::PipelineBuilder{}
 						.Shaders(shaders)
 						.Layout(layout.Get())
-						.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16G16_SFLOAT,
-									   VK_FORMAT_R16G16B16A16_SFLOAT})
+						.ColorFormats(ActiveGBuffer::array)
 						.DepthFormat(VK_FORMAT_D32_SFLOAT)
 						.CullNone();
 
@@ -584,4 +583,5 @@ void RenderContext::BuildMeshBLAS(Mesh& mesh) {
 	vkQueueSubmit2(impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
 	vkQueueWaitIdle(impl->ctx.GraphicsQueue());
 }
+
 } // namespace ZHLN

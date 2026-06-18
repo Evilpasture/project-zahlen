@@ -82,6 +82,7 @@ class PipelineBuilder {
 	}
 
 	auto ColorFormats(std::initializer_list<VkFormat> formats) noexcept -> PipelineBuilder&;
+	auto ColorFormats(std::span<const VkFormat> formats) noexcept -> PipelineBuilder&;
 	auto DepthFormat(VkFormat f) noexcept -> PipelineBuilder&;
 	auto DepthOnly() noexcept -> PipelineBuilder&;
 

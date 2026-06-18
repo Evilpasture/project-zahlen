@@ -1,7 +1,6 @@
 -- Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 -- SPDX-License-Identifier: GPL-3.0-or-later
 
-
 local ffi = require("ffi")
 
 -- Prevent redefining if already loaded
@@ -154,18 +153,14 @@ if not ok then
             float vignettePower;
             int enableSSR;
 
-            float floorRoughness;
-            float floorMetallic;
-            float sphereLightRadius;
-            float light1Intensity;
-            float light2Intensity;
+            // Globals decoupled from GameState
 
             int enableTAA;
             float taaFeedback;
 
             uint64_t debugLineVbo;
             uint64_t debugLinePipeline;
-            uint32_t debugLineAlbedo;
+            uint32_t albedoIdx;
             int enableRTR;
             int physicsDrawMode;
         } ZHLN_GameState;
@@ -175,6 +170,11 @@ if not ok then
             float rotation[4]; // 16 bytes (alignas(16) JPH::Quat)
             float scale[4];    // 16 bytes (alignas(16) JPH::Vec3)
         } TransformComponent;
+
+        typedef struct PBRComponent {
+            float roughness;
+            float metallic;
+        } PBRComponent;
 
         // Binary Command argument packing
         typedef struct SpawnPrefabArgs {

@@ -156,8 +156,7 @@ struct CpuCullingPolicy {
 		VkCommandBuffer cmd = recorder.cmd;
 		auto& ctx = recorder.ctx;
 
-		std::array<VkFormat, 3> colorFormats = {
-			VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16G16_SFLOAT, VK_FORMAT_R16G16B16A16_SFLOAT};
+		const auto& colorFormats = ActiveGBuffer::array;
 
 		Vk::DynamicPass(color_att.extent)
 			.AddColor(color_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
@@ -1090,8 +1089,8 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 		.pbrIndex = material.pbrIndex,
 		.emissiveIndex = material.emissiveIndex,
 		.cullRadius = params.cullRadius,
-		.metallicFactor = material.metallicFactor,
-		.roughnessFactor = material.roughnessFactor,
+		.metallicFactor = params.metallic >= 0.0f ? params.metallic : material.metallicFactor,
+		.roughnessFactor = params.roughness >= 0.0f ? params.roughness : material.roughnessFactor,
 		.alphaCutoff = material.alphaCutoff,
 		.alphaMode = material.alphaMode,
 		.jointOffset = params.jointOffset,
@@ -1128,4 +1127,5 @@ void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex) {
 }
 
 } // namespace Renderer
+
 } // namespace ZHLN

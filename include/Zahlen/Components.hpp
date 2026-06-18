@@ -14,6 +14,14 @@
 namespace ZHLN {
 
 /**
+ * @brief Manages material roughness and metallic factors dynamically for an Entity.
+ */
+struct PBRComponent {
+	float roughness = 0.5f;
+	float metallic = 0.0f;
+};
+
+/**
  * @brief Represents the universal 3D World Transform of an Entity.
  */
 struct TransformComponent {

@@ -3,9 +3,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-/*
- */
-
 // include/Zahlen/Scripting.h
 #pragma once
 
@@ -36,11 +33,7 @@ typedef struct ZHLN_GameState {
 	float vignettePower;
 	int enableSSR;
 
-	float floorRoughness;
-	float floorMetallic;
-	float sphereLightRadius;
-	float light1Intensity;
-	float light2Intensity;
+	// Global overrides removed - now tracked directly via PBRComponent and LightComponent!
 
 	int enableTAA;
 	float taaFeedback;

@@ -148,6 +148,7 @@ void DrawEditorPanels(Engine& engine) {
 	// 1. Control Toolbar
 	ImGui::Begin("Toolbar", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove);
 	ImGui::SetWindowPos({0, 0});
+	ImGui::SetWindowPos({0, 0});
 	ImGui::SetWindowSize({(float)engine.GetWindow().GetSize().width, 42.0f});
 
 	if (ImGui::Button(g_EditorState.simulationRunning ? "⏸ PAUSE" : "▶ PLAY")) {
@@ -186,6 +187,14 @@ void DrawEditorPanels(Engine& engine) {
 			if (ImGui::CollapsingHeader("Mesh Component", ImGuiTreeNodeFlags_DefaultOpen)) {
 				ImGui::TextUnformatted(std::format("Vertices: {}", mesh->mesh.vertexCount).c_str());
 				ImGui::DragFloat("Cull Radius", &mesh->cullRadius, 0.1f, 0.5f, 200.0f);
+			}
+		}
+
+		// PBR Component Panel
+		if (auto* pbr = reg.Get<PBRComponent>(e)) {
+			if (ImGui::CollapsingHeader("PBR Component", ImGuiTreeNodeFlags_DefaultOpen)) {
+				ImGui::SliderFloat("Roughness", &pbr->roughness, 0.0f, 1.0f);
+				ImGui::SliderFloat("Metallic", &pbr->metallic, 0.0f, 1.0f);
 			}
 		}
 
@@ -287,6 +296,7 @@ bool InitializeEditorScene(Engine& engine) {
 	reg.RegisterComponent<ALife::ALifeComponent>("ALifeComponent");
 	reg.RegisterComponent<NameComponent>("NameComponent");
 	reg.RegisterComponent<TargetCameraComponent>("TargetCameraComponent");
+	reg.RegisterComponent<PBRComponent>("PBRComponent");
 
 	ZHLN::Log("Initializing Editor Workspace Scene...");
 	int terrainSize = 128;

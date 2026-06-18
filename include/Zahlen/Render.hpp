@@ -86,6 +86,10 @@ struct DrawParams {
 	uint32_t activeMorphCount = 0;
 	const float* morphWeights = nullptr;
 	DrawFlags flags = DrawFlags::None;
+
+	// --- Dynamic Shading Factor Overrides (-1.0f = fall back to material defaults) ---
+	float roughness = -1.0f;
+	float metallic = -1.0f;
 };
 
 namespace Renderer {

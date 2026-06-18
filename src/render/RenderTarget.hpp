@@ -37,10 +37,29 @@ template <VkFormat F> struct RenderTarget {
 	explicit operator bool() const noexcept;
 };
 
-// Define the Transition overload here where RenderTarget is fully complete [3]
+// Define the Transition overload here where RenderTarget is fully complete
 template <VkImageLayout TargetLayout, VkFormat F>
 [[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const RenderTarget<F>& rt,
 										Tag<TargetLayout> /*unused*/) noexcept;
+
+template <typename T> struct TargetFormat;
+
+template <VkFormat F> struct TargetFormat<Vk::RenderTarget<F>> {
+	static constexpr VkFormat value = F;
+};
+
+template <typename... Targets> struct GBufferLayout {
+	static constexpr size_t count = sizeof...(Targets);
+
+	template <size_t Index> using TargetTypeAt = Targets...[Index];
+
+	template <size_t Index> static constexpr VkFormat get() {
+		static_assert(Index < count, "GBuffer layout index out of bounds.");
+		return TargetFormat<TargetTypeAt<Index>>::value;
+	}
+
+	static constexpr std::array<VkFormat, count> array = {TargetFormat<Targets>::value...};
+};
 
 } // namespace ZHLN::Vk
 

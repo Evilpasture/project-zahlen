@@ -54,28 +54,43 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# --- 1.1 DETECT TARGET TRIPLE ---
+execute_process(
+    COMMAND ${CMAKE_CXX_COMPILER} -dumpmachine
+    OUTPUT_VARIABLE ZHLN_TARGET_TRIPLE
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(NOT ZHLN_TARGET_TRIPLE)
+    # Fallback to CMake variables if the compiler query fails
+    set(ZHLN_TARGET_TRIPLE "${CMAKE_SYSTEM_PROCESSOR}-unknown-${CMAKE_SYSTEM_NAME}")
+    string(TOLOWER "${ZHLN_TARGET_TRIPLE}" ZHLN_TARGET_TRIPLE)
+endif()
+
+# --- 1.2 DETECT ACTIVE LINKER (Modify your existing block) ---
 if(NOT MSVC)
-    # Check for MOLD
     execute_process(COMMAND ${CMAKE_CXX_COMPILER} -fuse-ld=mold -Wl,--version ERROR_QUIET OUTPUT_VARIABLE MOLD_VERSION)
-    
-    # Check for LLD
     execute_process(COMMAND ${CMAKE_CXX_COMPILER} -fuse-ld=lld -Wl,--version ERROR_QUIET OUTPUT_VARIABLE LLD_VERSION)
-    
-    # Check for GOLD
     execute_process(COMMAND ${CMAKE_CXX_COMPILER} -fuse-ld=gold -Wl,--version ERROR_QUIET OUTPUT_VARIABLE GOLD_VERSION)
 
     if(MOLD_VERSION MATCHES "mold")
         message(STATUS "Using MOLD linker")
         add_link_options(-fuse-ld=mold)
+        set(ZHLN_LINKER "mold")
     elseif(LLD_VERSION MATCHES "LLD")
         message(STATUS "Using LLD linker")
         add_link_options(-fuse-ld=lld)
+        set(ZHLN_LINKER "lld")
     elseif(GOLD_VERSION MATCHES "GNU gold")
         message(STATUS "Using GOLD linker")
         add_link_options(-fuse-ld=gold)
+        set(ZHLN_LINKER "gold")
     else()
         message(STATUS "Using default BFD linker")
+        set(ZHLN_LINKER "bfd")
     endif()
+else()
+    set(ZHLN_LINKER "link.exe")
 endif()
 
 # --- 2. GLOBAL SANITIZER CONFIG ---
@@ -240,6 +255,8 @@ target_compile_definitions(zahlen_engine PRIVATE
     ZHLN_COMPILER_FLAGS="${COMPILER_FLAGS_LIST}"
     ZHLN_META_BUILDER="CMake ${CMAKE_VERSION}"
     ZHLN_BUILD_TOOL="${CMAKE_GENERATOR}"
+    ZHLN_TARGET_TRIPLE="${ZHLN_TARGET_TRIPLE}" 
+    ZHLN_LINKER_NAME="${ZHLN_LINKER}"           
 )
 
 target_sources(zahlen_engine PRIVATE 

@@ -55,6 +55,11 @@ auto PipelineBuilder::ColorFormats(std::initializer_list<VkFormat> formats) noex
 	return *this;
 }
 
+auto PipelineBuilder::ColorFormats(std::span<const VkFormat> formats) noexcept -> PipelineBuilder& {
+	_cfg.color_formats.assign(formats.begin(), formats.end());
+	return *this;
+}
+
 auto PipelineBuilder::DepthFormat(VkFormat f) noexcept -> PipelineBuilder& {
 	_cfg.depth_format = f;
 	return *this;

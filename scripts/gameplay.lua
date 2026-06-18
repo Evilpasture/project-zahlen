@@ -1,6 +1,7 @@
 -- Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 -- SPDX-License-Identifier: GPL-3.0-or-later
 
+local ffi = require("ffi")
 local zh = require("scripts.core.zahlen")
 
 -- --- Ambient & Post-Processing Subsystems ---
@@ -18,11 +19,6 @@ zh:config({
     vignetteIntensity = 1.10,
     vignettePower = 1.50,
     enableSSR = 1,
-    floorRoughness = 0.15,
-    floorMetallic = 0.95,
-    sphereLightRadius = 1.5,
-    light1Intensity = 180.0,
-    light2Intensity = 180.0,
     enableTAA = 1,
     taaFeedback = 0.95,
 })
@@ -35,6 +31,14 @@ zh:on("engine.start", function()
 
     zh:spawn("Circus Lobby V9.glb", { physics = true, static = true })
     pomni_parts = zh:spawn("tadc_models/POMNI.glb", { animated = true })
+
+    -- Dynamically locate the floor mesh parts and add PBRComponent
+    for ent, name_comp in zh.ecs:view("NameComponent") do
+        local name_str = string.lower(ffi.string(name_comp.name))
+        if string.find(name_str, "floor") or string.find(name_str, "ground") or string.find(name_str, "lobby") then
+            zh.ecs:add(ent, "PBRComponent", { roughness = 0.15, metallic = 0.95 })
+        end
+    end
 
     local player_ent = nil
     for ent, _ in zh.ecs:view("MovementComponent") do

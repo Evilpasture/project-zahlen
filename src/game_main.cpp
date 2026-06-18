@@ -178,14 +178,42 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 	ImGui::RadioButton("Wireframe", &state.physicsDrawMode, 1);
 	ImGui::SameLine();
 	ImGui::RadioButton("Solid", &state.physicsDrawMode, 2);
-	ImGui::Text("Specular Mips & Area Lights Debugger");
+	ImGui::Text("PBR Materials & Lights Controller");
 	ImGui::Separator();
-	ImGui::SliderFloat("Sphere Light Radius", &state.sphereLightRadius, 0.0f, 5.0f);
-	ImGui::SliderFloat("Cyan Intensity", &state.light1Intensity, 0.0f, 500.0f);
-	ImGui::SliderFloat("Magenta Intensity", &state.light2Intensity, 0.0f, 500.0f);
-	ImGui::Separator();
-	ImGui::SliderFloat("Floor Roughness", &state.floorRoughness, 0.0f, 1.0f);
-	ImGui::SliderFloat("Floor Metallic", &state.floorMetallic, 0.0f, 1.0f);
+
+	// Dynamically edit PBRComponent on any named floor/ground/lobby entity
+	PBRComponent* floorPbr = nullptr;
+	auto& reg = engine.GetRegistry();
+	for (Entity e : reg.GetEntitiesWith<PBRComponent>()) {
+		if (auto* nameComp = reg.Get<NameComponent>(e)) {
+			std::string nameLower(nameComp->name.c_str());
+			std::ranges::transform(nameLower, nameLower.begin(), ::tolower);
+			if (nameLower.contains("floor") || nameLower.contains("ground") ||
+				nameLower.contains("lobby")) {
+				floorPbr = reg.Get<PBRComponent>(e);
+				break;
+			}
+		}
+	}
+
+	if (floorPbr != nullptr) {
+		ImGui::SliderFloat("Floor Roughness", &floorPbr->roughness, 0.0f, 1.0f);
+		ImGui::SliderFloat("Floor Metallic", &floorPbr->metallic, 0.0f, 1.0f);
+	}
+
+	// Dynamically edit LightComponent on the point lights
+	int lightIdx = 1;
+	for (Entity e : reg.GetEntitiesWith<LightingSystem::LightComponent>()) {
+		if (auto* light = reg.Get<LightingSystem::LightComponent>(e)) {
+			if (light->type == 1) { // Point Light
+				std::string labelInt = std::format("Point Light {} Intensity", lightIdx);
+				std::string labelRad = std::format("Point Light {} Radius", lightIdx);
+				ImGui::SliderFloat(labelInt.c_str(), &light->intensity, 0.0f, 500.0f);
+				ImGui::SliderFloat(labelRad.c_str(), &light->radius, 0.0f, 5.0f);
+				lightIdx++;
+			}
+		}
+	}
 
 	ImGui::SeparatorText("Parallax-Corrected Local Reflection Probe");
 	bool useProbe = state.useLocalProbe != 0;
@@ -258,7 +286,6 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 
 	ZHLN_SetGameState(reinterpret_cast<ZHLN_Engine*>(&engine), &state);
 
-	auto& reg = engine.GetRegistry();
 	for (Entity e : reg.GetEntitiesWith<PostProcessComponent>()) {
 		if (auto* pp = reg.Get<PostProcessComponent>(e)) {
 			pp->giMode = state.giMode;
@@ -442,6 +469,14 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 				flags |= DrawFlags::Skinned;
 			}
 
+			// Retrieve PBR factors from PBRComponent to use as the Single Source of Truth
+			float roughness = -1.0f;
+			float metallic = -1.0f;
+			if (auto* pbr = reg.Get<PBRComponent>(e)) {
+				roughness = pbr->roughness;
+				metallic = pbr->metallic;
+			}
+
 			Renderer::Draw(rc, mesh->material, mesh->mesh,
 						   {.transform = mesh->worldTransform,
 							.prevTransform = mesh->prevTransform,
@@ -450,7 +485,9 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 							.morphOffset = mesh->morphOffset,
 							.activeMorphCount = mesh->activeMorphCount,
 							.morphWeights = mesh->morphWeights.data(),
-							.flags = flags});
+							.flags = flags,
+							.roughness = roughness,
+							.metallic = metallic});
 		}
 	}
 
@@ -657,11 +694,6 @@ bool InitializeGame(Engine& engine) {
 	defaultState.vignetteIntensity = 1.10f;
 	defaultState.vignettePower = 1.50f;
 	defaultState.enableSSR = 1;
-	defaultState.floorRoughness = 0.15f;
-	defaultState.floorMetallic = 0.95f;
-	defaultState.sphereLightRadius = 1.5f;
-	defaultState.light1Intensity = 180.0f;
-	defaultState.light2Intensity = 180.0f;
 	defaultState.enableTAA = 1;
 	defaultState.taaFeedback = 0.95f;
 
@@ -672,13 +704,13 @@ bool InitializeGame(Engine& engine) {
 
 	ZHLN_SetGameState(reinterpret_cast<ZHLN_Engine*>(&engine), &defaultState);
 
-	reg.RegisterComponents<TransformComponent, MeshComponent, PhysicsComponent,
-						   PhysicsStateComponent, MovementComponent, ALife::ALifeComponent,
-						   RagdollComponent, NameComponent, TargetCameraComponent,
-						   InputSystem::InputComponent, LightingSystem::LightComponent,
-						   PostProcessComponent, CameraSystem::CameraComponent, PlayerTagComponent,
-						   MainCameraTagComponent, GlobalSettingsTagComponent, AASettingsComponent,
-						   TextComponent, UISettingsComponent, AudioSourceComponent>();
+	reg.RegisterComponents<
+		TransformComponent, MeshComponent, PhysicsComponent, PhysicsStateComponent,
+		MovementComponent, ALife::ALifeComponent, RagdollComponent, NameComponent,
+		TargetCameraComponent, InputSystem::InputComponent, LightingSystem::LightComponent,
+		PostProcessComponent, CameraSystem::CameraComponent, PlayerTagComponent,
+		MainCameraTagComponent, GlobalSettingsTagComponent, AASettingsComponent, TextComponent,
+		UISettingsComponent, AudioSourceComponent, PBRComponent>();
 
 	auto groundShape =
 		Physics::GetOrCreateShape(pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
@@ -754,8 +786,8 @@ bool InitializeGame(Engine& engine) {
 	reg.Add(pt1,
 			LightingSystem::LightComponent{.type = 1,
 										   .color = {0.0f, 0.5f, 1.0f},
-										   .intensity = defaultState.light1Intensity,
-										   .radius = defaultState.sphereLightRadius,
+										   .intensity = 180.0f,
+										   .radius = 1.5f,
 										   .direction = {0.0f, 0.0f, 0.0f},
 										   .range = 0.0f,
 										   .points = {},
@@ -766,8 +798,8 @@ bool InitializeGame(Engine& engine) {
 	reg.Add(pt2,
 			LightingSystem::LightComponent{.type = 1,
 										   .color = {1.0f, 0.0f, 0.5f},
-										   .intensity = defaultState.light2Intensity,
-										   .radius = defaultState.sphereLightRadius,
+										   .intensity = 180.0f,
+										   .radius = 1.5f,
 										   .direction = {0.0f, 0.0f, 0.0f},
 										   .range = 0.0f,
 										   .points = {},

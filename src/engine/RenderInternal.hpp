@@ -188,6 +188,13 @@ using CullingLayout = Vk::DescriptorLayout<Vk::StorageBufferSlot<0>, // g_instan
 										   Vk::StorageBufferSlot<1>	 // g_indirectCommands
 										   >;
 
+using ActiveGBuffer =
+	Vk::GBufferLayout<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>, // Index 0: sceneColor
+					  Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT>,	   // Index 1: velocityBuffer
+					  Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>  // Index 2:
+																	   // normalRoughnessBuffer
+					  >;
+
 namespace Stages {
 struct ShadowPass {
 	static constexpr std::string_view name = "[GPU] Shadow Map";
@@ -299,9 +306,10 @@ struct RenderContext::Impl {
 	Vk::FrameSync<2> sync;
 	Vk::CommandPools<2> pools;
 
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> sceneColor;
-	Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT> velocityBuffer;
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> normalRoughnessBuffer;
+	// These declarations are now mathematically tied to ActiveGBuffer
+	Vk::RenderTarget<ActiveGBuffer::get<0>()> sceneColor;
+	Vk::RenderTarget<ActiveGBuffer::get<1>()> velocityBuffer;
+	Vk::RenderTarget<ActiveGBuffer::get<2>()> normalRoughnessBuffer;
 	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> postProcessTarget;
 	DoubleBuffered<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumBuffers;
 

@@ -99,6 +99,11 @@ ZHLN_BufferView ZHLN_GetECSBuffer(struct ZHLN_Engine* engine_handle, const char*
 		auto raw = reg.GetRawArray<ZHLN::PhysicsComponent>();
 		return ZHLN::ViewComposer::Build(&reg, raw.data(), "Q", raw.size());
 	}
+	if (name == "PBRComponent") {
+		auto raw = reg.GetRawArray<ZHLN::PBRComponent>();
+		return ZHLN::ViewComposer::Build(&reg, raw.data(), "f", raw.size(),
+										 2); // 2 floats: roughness, metallic
+	}
 	return {};
 }
 
@@ -139,8 +144,8 @@ void* ZHLN_GetComponent(ZHLN_Engine* engine_handle, uint64_t entityRaw, const ch
 	return reg.GetRawByFamily(entity, familyID);
 }
 
-void* ZHLN_AddComponent(ZHLN_Engine* engine_handle, uint64_t entityRaw, const char* componentName) {
-	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+void* ZHLN_AddComponent(ZHLN_Engine* handle, uint64_t entityRaw, const char* componentName) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(handle);
 	auto entity = ZHLN::Entity::Unpack(entityRaw);
 	auto& reg = engine->GetRegistry();
 
@@ -159,6 +164,9 @@ void* ZHLN_AddComponent(ZHLN_Engine* engine_handle, uint64_t entityRaw, const ch
 	}
 	if (name == "TargetCameraComponent") {
 		return &reg.Add(entity, ZHLN::TargetCameraComponent{});
+	}
+	if (name == "PBRComponent") {
+		return &reg.Add(entity, ZHLN::PBRComponent{});
 	}
 	return nullptr;
 }

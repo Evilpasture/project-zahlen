@@ -30,6 +30,14 @@
 #define ZHLN_BUILD_TOOL "unknown"
 #endif
 
+#ifndef ZHLN_TARGET_TRIPLE
+#define ZHLN_TARGET_TRIPLE "unknown"
+#endif
+
+#ifndef ZHLN_LINKER_NAME
+#define ZHLN_LINKER_NAME "unknown"
+#endif
+
 namespace {
 
 struct Token {
@@ -61,6 +69,9 @@ std::vector<Token> Tokenize(std::span<char* const> args) {
 void PrintVersion() {
 	std::println("Zahlen Engine - version {}.{}.{} ({})", ZHLN::EngineVersion.major,
 				 ZHLN::EngineVersion.minor, ZHLN::EngineVersion.patch, ZHLN_GIT_COMMIT_HASH);
+	std::println("Target Triple:  {}", ZHLN_TARGET_TRIPLE);
+	std::println("Standard Lib:   {}", ZHLN::GetSTLVersion());
+	std::println("Active Linker:  {}", ZHLN_LINKER_NAME);
 	std::println("Built on:      {} (UTC)", __DATE__);
 	std::println("Build Profile: {} | Sanitizers: {}", ZHLN::BuildType, ZHLN::Sanitizers);
 	std::println("Compiler:      {}", ZHLN::Compiler);

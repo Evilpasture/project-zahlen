@@ -23,6 +23,7 @@ local NATIVE_COMPONENTS = {
     NameComponent = true,
     TargetCameraComponent = true,
     PhysicsStateComponent = true,
+    PBRComponent = true,
 }
 
 -- Stable key converter for cdata / uint64_t table indexing
