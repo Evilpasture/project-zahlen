@@ -420,10 +420,90 @@ struct AAPass {
 			color_ro =
 				IssueBarrier<Vk::ColorAttachmentState, Vk::ShaderReadState>(cmd, accumNext_att);
 
-		} else if (ctx.aaState.mode == AAMode::SMAA) {
-			// Architecture block allocated for integration with SMAA.hlsl
-			// Passes smaaEdgePass, smaaWeightPass, and smaaBlendPass are active in the context.
-			// Revert to passthrough until valid SearchTex and AreaTex LUTs are embedded.
+		} else if (ctx.aaState.mode == AAMode::SMAA && ctx.smaaEdgePass.pipeline.Valid()) {
+
+			// Capture texture metrics push constants
+			struct SMAAMetrics {
+				float rcpWidth;
+				float rcpHeight;
+				float width;
+				float height;
+			} metrics = {.rcpWidth = 1.0f / (float)in.sceneColor.extent.width,
+						 .rcpHeight = 1.0f / (float)in.sceneColor.extent.height,
+						 .width = (float)in.sceneColor.extent.width,
+						 .height = (float)in.sceneColor.extent.height};
+
+			// --- PASS 1: EDGE DETECTION ---
+			auto smaaEdge_u =
+				AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.smaaEdgeTarget);
+			auto smaaEdge_att =
+				IssueBarrier<Vk::ShaderReadState, Vk::ColorAttachmentState>(cmd, smaaEdge_u);
+
+			Vk::DynamicPass(in.sceneColor.extent)
+				.AddColor(smaaEdge_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+						  kClearColorBlack)
+				.Execute(cmd, [&]() {
+					ctx.smaaEdgePass.WriteNext(
+						ctx.ctx.Device(), color_ro,
+						Vk::SamplerWrite{.sampler = ctx.defaultSampler.Get()});
+					ctx.smaaEdgePass.Execute(
+						cmd, metrics, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+				});
+
+			auto smaaEdge_ro =
+				IssueBarrier<Vk::ColorAttachmentState, Vk::ShaderReadState>(cmd, smaaEdge_att);
+
+			// --- PASS 2: BLENDING WEIGHT CALCULATION ---
+			auto smaaWeight_u =
+				AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.smaaWeightTarget);
+			auto smaaWeight_att =
+				IssueBarrier<Vk::ShaderReadState, Vk::ColorAttachmentState>(cmd, smaaWeight_u);
+
+			// Bind edge-detection output along with precomputed LUT views
+			VkImageView areaView = ctx.textureViews[ctx.smaaAreaTexIdx].Get();
+			VkImageView searchView = ctx.textureViews[ctx.smaaSearchTexIdx].Get();
+
+			Vk::DynamicPass(in.sceneColor.extent)
+				.AddColor(smaaWeight_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+						  kClearColorBlack)
+				.Execute(cmd, [&]() {
+					ctx.smaaWeightPass.WriteNext(
+						ctx.ctx.Device(), smaaEdge_ro,
+						Vk::ImageWrite{.view = areaView,
+									   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+						Vk::ImageWrite{.view = searchView,
+									   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+						Vk::SamplerWrite{.sampler = ctx.defaultSampler.Get()}, // Slot 3: Linear
+						Vk::SamplerWrite{.sampler = ctx.pointSampler.Get()}
+						// Slot 4: Point / Nearest
+
+					);
+					ctx.smaaWeightPass.Execute(
+						cmd, metrics, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+				});
+
+			auto smaaWeight_ro =
+				IssueBarrier<Vk::ColorAttachmentState, Vk::ShaderReadState>(cmd, smaaWeight_att);
+
+			// --- PASS 3: NEIGHBORHOOD BLENDING ---
+			auto accumNext_u =
+				AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.accumBuffers.Next());
+			auto accumNext_att =
+				IssueBarrier<Vk::ShaderReadState, Vk::ColorAttachmentState>(cmd, accumNext_u);
+
+			Vk::DynamicPass(in.sceneColor.extent)
+				.AddColor(accumNext_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+				.Execute(cmd, [&]() {
+					ctx.smaaBlendPass.WriteNext(
+						ctx.ctx.Device(), color_ro, smaaWeight_ro,
+						Vk::SamplerWrite{.sampler = ctx.defaultSampler.Get()});
+					ctx.smaaBlendPass.Execute(
+						cmd, metrics, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+				});
+
+			// Feed output into final presentation pipeline
+			color_ro =
+				IssueBarrier<Vk::ColorAttachmentState, Vk::ShaderReadState>(cmd, accumNext_att);
 		}
 
 		return {
@@ -727,6 +807,10 @@ RenderResult RenderContext::BeginFrame() noexcept {
 			Vk::Transition(cmd, _impl->presentation.depthTarget, Vk::AsDepthAttachment);
 		auto sPost_att = Vk::Transition(cmd, _impl->postProcessTarget, Vk::AsColorAttachment);
 
+		// --- 1. Transition SMAA targets from Undefined to ColorAttachment ---
+		auto sEdge_att = Vk::Transition(cmd, _impl->smaaEdgeTarget, Vk::AsColorAttachment);
+		auto sWeight_att = Vk::Transition(cmd, _impl->smaaWeightTarget, Vk::AsColorAttachment);
+
 		Vk::DynamicPass(_impl->presentation.swapchain.Get().extent)
 			.AddColor(sColor_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
 					  kClearColorBlack)
@@ -742,6 +826,11 @@ RenderResult RenderContext::BeginFrame() noexcept {
 					  kClearDepthValue)
 			.AddColor(sPost_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
 					  kClearColorBlack)
+			// --- 2. Clear both SMAA targets to clean black ---
+			.AddColor(sEdge_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+					  kClearColorBlack)
+			.AddColor(sWeight_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+					  kClearColorBlack)
 			.Execute(cmd, []() {});
 
 		auto sColor_ro = Vk::Transition(cmd, sColor_att, Vk::AsReadOnly);
@@ -751,6 +840,10 @@ RenderResult RenderContext::BeginFrame() noexcept {
 		[[maybe_unused]] auto sNorm_ro = Vk::Transition(cmd, sNorm_att, Vk::AsReadOnly);
 		[[maybe_unused]] auto sDepth_ro = Vk::Transition(cmd, depth_att, Vk::AsReadOnly);
 		[[maybe_unused]] auto sPost_ro = Vk::Transition(cmd, sPost_att, Vk::AsReadOnly);
+
+		// --- 3. Transition SMAA targets to Read Only (matching the frame loop assumptions) ---
+		[[maybe_unused]] auto sEdge_ro = Vk::Transition(cmd, sEdge_att, Vk::AsReadOnly);
+		[[maybe_unused]] auto sWeight_ro = Vk::Transition(cmd, sWeight_att, Vk::AsReadOnly);
 
 		for (int i = 0; i < 2; ++i) {
 			_impl->taaPass.WriteIndex(

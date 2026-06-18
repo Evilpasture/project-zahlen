@@ -6,6 +6,7 @@
 #include "RenderCore.hpp"
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
+#include "SMAALUTGenerator.hpp"
 #include "SamplerBuilder.hpp"
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_vulkan.h"
@@ -15,7 +16,9 @@
 #include <Features.hpp>
 #include <StagingContext.hpp>
 #include <cstddef>
+#include <stb_image.h>
 #include <threading/TaskSystem.hpp>
+#include <vector>
 
 namespace ZHLN {
 
@@ -185,7 +188,7 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	_impl->pools = Vk::CommandPools<2>::Create(
 		_impl->ctx.Device(),
 		{.queue_family = _impl->ctx.PhysicalInfo().graphics_family, .buffers_per_pool = 1});
-	_impl->InitPostProcessing();
+	_impl->InitPostProcessing(*this);
 	_impl->SetupUI(window.IsTTY() ? nullptr : static_cast<GLFWwindow*>(window.GetNativeHandle()));
 
 	uint32_t workerCount = TaskSystem::GetWorkerCount() + 1;
@@ -436,7 +439,7 @@ void RenderContext::Impl::InitBindless() {
 		bindlessRegistry.UpdateSet(ctx.Device(), bindlessSets[i]);
 	}
 }
-void RenderContext::Impl::InitPostProcessing() {
+void RenderContext::Impl::InitPostProcessing(RenderContext& outer) {
 	defaultSampler = Vk::SamplerBuilder{}.Linear().ClampToEdge().Build(ctx.Device());
 
 	// Create the nearest-neighbor sampler
@@ -470,16 +473,60 @@ void RenderContext::Impl::InitPostProcessing() {
 		ZHLN::Log("FXAA pass build failure, continuing...");
 	}
 
-	// SMAA Pass Architecture Pre-allocation
-	// Requires inclusion of SMAA.hlsl and runtime compilation.
-	// Currently initialized as pass-throughs using standard layout blocks.
-	if (!smaaEdgePass.Build(ctx.Device(), fxaaShaders, {VK_FORMAT_R8G8_UNORM}, &fxaaPush, 1)) {
+	// 1. Generate the SMAA Area LUT via heap vector passed as span
+	std::vector<uint32_t> smaaAreaPixels(static_cast<size_t>(160 * 560));
+	ZHLN::PBR::FillSmaaAreaTex(smaaAreaPixels); // Implicit conversion to std::span
+	smaaAreaTexIdx = outer.CreateTexture(smaaAreaPixels.data(), 160, 560, false);
+
+	// 2. Generate the SMAA Search LUT via heap vector passed as span
+	std::vector<uint32_t> smaaSearchPixels(static_cast<size_t>(64 * 16));
+	ZHLN::PBR::FillSmaaSearchTex(smaaSearchPixels); // Implicit conversion to std::span
+	smaaSearchTexIdx = outer.CreateTexture(smaaSearchPixels.data(), 64, 16, false);
+
+	VkPushConstantRange smaaPush = {.stageFlags =
+										VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+									.offset = 0,
+									.size = sizeof(float) * 4};
+
+	// 2. Build Pass 1: Edge Detection (Note the entry points updated)
+	auto edgeShaders =
+		Vk::ShaderStages::Create(ctx.Device(),
+								 {.code = Vk::AsSpirV(&ZHLN_Resource_SmaaEdgeVertSpv[0]),
+								  .size = ZHLN_Resource_SmaaEdgeVertSpv_Len,
+								  .entry_point = "SmaaEdgeVS"},
+								 {.code = Vk::AsSpirV(&ZHLN_Resource_SmaaEdgeFragSpv[0]),
+								  .size = ZHLN_Resource_SmaaEdgeFragSpv_Len,
+								  .entry_point = "SmaaEdgePS"});
+	if (!smaaEdgePass.Build(ctx.Device(), edgeShaders, {VK_FORMAT_R8G8_UNORM}, &smaaPush, 1)) {
+		ZHLN::Log("Failed to build SMAA Edge Detection Pipeline!");
 	}
-	if (!smaaWeightPass.Build(ctx.Device(), fxaaShaders, {VK_FORMAT_R8G8B8A8_UNORM}, &fxaaPush,
+
+	// 3. Build Pass 2: Blending Weight
+	auto weightShaders =
+		Vk::ShaderStages::Create(ctx.Device(),
+								 {.code = Vk::AsSpirV(&ZHLN_Resource_SmaaWeightVertSpv[0]),
+								  .size = ZHLN_Resource_SmaaWeightVertSpv_Len,
+								  .entry_point = "SmaaWeightVS"},
+								 {.code = Vk::AsSpirV(&ZHLN_Resource_SmaaWeightFragSpv[0]),
+								  .size = ZHLN_Resource_SmaaWeightFragSpv_Len,
+								  .entry_point = "SmaaWeightPS"});
+	if (!smaaWeightPass.Build(ctx.Device(), weightShaders, {VK_FORMAT_R8G8B8A8_UNORM}, &smaaPush,
 							  1)) {
+		ZHLN::Log("Failed to build SMAA Blending Weight Pipeline!");
 	}
-	if (!smaaBlendPass.Build(ctx.Device(), fxaaShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &fxaaPush,
+
+	// 4. Build Pass 3: Neighborhood Blend
+	auto blendShaders =
+		Vk::ShaderStages::Create(ctx.Device(),
+								 {.code = Vk::AsSpirV(&ZHLN_Resource_SmaaBlendVertSpv[0]),
+								  .size = ZHLN_Resource_SmaaBlendVertSpv_Len,
+								  .entry_point = "SmaaBlendVS"},
+								 {.code = Vk::AsSpirV(&ZHLN_Resource_SmaaBlendFragSpv[0]),
+								  .size = ZHLN_Resource_SmaaBlendFragSpv_Len,
+								  .entry_point = "SmaaBlendPS"});
+	if (!smaaBlendPass.Build(ctx.Device(), blendShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &smaaPush,
 							 1)) {
+		ZHLN::Log("Failed to build SMAA Neighborhood Blending Pipeline!");
 	}
 
 	VkPushConstantRange ppPush = {

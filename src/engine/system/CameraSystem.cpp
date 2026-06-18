@@ -87,7 +87,6 @@ void CameraSystem::Update(Engine& engine, float dt, float alpha) {
 		return;
 	}
 
-	// TODO(Evilpasture): Suggest parallelism with fibers.
 	for (Entity e : reg.GetEntitiesWith<CameraComponent>()) {
 		if (auto* cComp = reg.Get<CameraComponent>(e)) {
 			if (cComp->frameCounter == 0) {

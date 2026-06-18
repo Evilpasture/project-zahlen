@@ -131,8 +131,24 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible) {
 	for (size_t i = 0; i < entities.size(); ++i) {
 		Entity e = entities[i];
 
-		// worldTransform is now the fully resolved, hierarchical world-space transform
-		JPH::Vec3 pos = meshes[i].worldTransform.GetTranslation();
+		JPH::Vec3 pos{};
+
+		// Resolve position on the fly if we are bypassing the transform hierarchy system (e.g., in
+		// the Editor)
+		if constexpr (UsePhysicsTransforms) {
+			if (auto* state = reg.Get<PhysicsStateComponent>(e)) {
+				// Interpolate using Jolt's physics step alpha to avoid visual stutter
+				float alpha = engine.GetCurrentAlpha();
+				pos = state->prevPosition + alpha * (state->currPosition - state->prevPosition);
+			} else if (auto* trans = reg.Get<TransformComponent>(e)) {
+				pos = trans->position;
+			} else {
+				pos = meshes[i].worldTransform.GetTranslation();
+			}
+		} else {
+			// Standard game pathway: rely on the pre-computed hierarchy transform
+			pos = meshes[i].worldTransform.GetTranslation();
+		}
 
 		if (cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius)) {
 			outVisible.push_back(e);

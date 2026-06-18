@@ -84,9 +84,9 @@ static void VerifyRealTransforms(const ECS::Registry& reg) noexcept {
 } // namespace ZHLN::Tests
 
 namespace ZHLN {
-
+namespace {
 // Helper to calculate the logical world-space transform of an entity
-static JPH::Mat44 GetLogicalWorldTransform(const ECS::Registry& reg, Entity e) noexcept {
+JPH::Mat44 GetLogicalWorldTransform(const ECS::Registry& reg, Entity e) noexcept {
 	const auto* trans = reg.Get<TransformComponent>(e);
 	JPH::Mat44 localMatrix = (trans != nullptr) ? trans->GetMatrix() : JPH::Mat44::sIdentity();
 
@@ -104,7 +104,7 @@ static JPH::Mat44 GetLogicalWorldTransform(const ECS::Registry& reg, Entity e) n
 	}
 	return localMatrix;
 }
-
+} // namespace
 JPH::Mat44 TransformSystem::GetWorldTransform(const ECS::Registry& reg, Entity e) const noexcept {
 	const auto* mesh = reg.Get<MeshComponent>(e);
 	JPH::Mat44 meshLocal = (mesh != nullptr) ? mesh->localTransform : JPH::Mat44::sIdentity();

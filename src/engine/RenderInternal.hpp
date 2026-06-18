@@ -188,6 +188,25 @@ using CullingLayout = Vk::DescriptorLayout<Vk::StorageBufferSlot<0>, // g_instan
 										   Vk::StorageBufferSlot<1>	 // g_indirectCommands
 										   >;
 
+// Pass 1: Edge Detection Layout (Reads the main scene color)
+using SMAAEdgeLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texInput (Color)
+											Vk::SamplerSlot<1>		 // sampler
+											>;
+
+// Pass 2: Blending Weight Layout (Reads edges, Area LUT, and Search LUT)
+using SMAAWeightLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texEdges
+											  Vk::SampledImageSlot<1>, // texArea (LUT)
+											  Vk::SampledImageSlot<2>, // texSearch (LUT)
+											  Vk::SamplerSlot<3>,	   // linearSampler
+											  Vk::SamplerSlot<4> // pointSampler (Nearest / Point)
+											  >;
+
+// Pass 3: Neighborhood Blending Layout (Blends original color with calculated weights)
+using SMAABlendLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texInput (Color)
+											 Vk::SampledImageSlot<1>, // texWeights
+											 Vk::SamplerSlot<2>		  // sampler
+											 >;
+
 using ActiveGBuffer =
 	Vk::GBufferLayout<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>, // Index 0: sceneColor
 					  Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT>,	   // Index 1: velocityBuffer
@@ -315,9 +334,12 @@ struct RenderContext::Impl {
 
 	Vk::PostProcessPass<TAALayout> taaPass;
 	Vk::PostProcessPass<BlitLayout> fxaaPass;
-	Vk::PostProcessPass<BlitLayout> smaaEdgePass;
-	Vk::PostProcessPass<BlitLayout> smaaWeightPass;
-	Vk::PostProcessPass<BlitLayout> smaaBlendPass;
+	Vk::PostProcessPass<SMAAEdgeLayout> smaaEdgePass;
+	Vk::PostProcessPass<SMAAWeightLayout> smaaWeightPass;
+	Vk::PostProcessPass<SMAABlendLayout> smaaBlendPass;
+
+	uint32_t smaaAreaTexIdx = 0;
+	uint32_t smaaSearchTexIdx = 0;
 
 	Vk::PostProcessPass<PostProcessLayout> postProcessPass;
 	Vk::PostProcessPass<PostProcessLayoutNoRT> postProcessPassNoRT;
@@ -413,7 +435,7 @@ struct RenderContext::Impl {
 	void InitCullingResources();
 	void CompileShadowPipeline(VkDevice device, const void* shaderData, size_t shaderSize);
 	void InitBindless();
-	void InitPostProcessing();
+	void InitPostProcessing(RenderContext& outer);
 	void SetupUI(GLFWwindow* window);
 
 	void SortDrawQueue();
