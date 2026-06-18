@@ -301,6 +301,20 @@ target_include_directories(zahlen_engine PRIVATE
 )
 
 # --- 6. SHADER COMPILATION ---
+if(NOT EXISTS "${CMAKE_SOURCE_DIR}/resources/shaders/SMAA.hlsl")
+    message(STATUS "SMAA.hlsl not found. Downloading from official iryoku/smaa repository...")
+    file(DOWNLOAD 
+        "https://raw.githubusercontent.com/iryoku/smaa/master/SMAA.hlsl"
+        "${CMAKE_SOURCE_DIR}/resources/shaders/SMAA.hlsl"
+        SHOW_PROGRESS
+        STATUS DOWNLOAD_STATUS
+    )
+    list(GET DOWNLOAD_STATUS 0 DOWNLOAD_CODE)
+    if(NOT DOWNLOAD_CODE EQUAL 0)
+        message(FATAL_ERROR "Failed to download SMAA.hlsl: ${DOWNLOAD_STATUS}")
+    endif()
+endif()
+
 function(compile_shaders TARGET_NAME)
     set(SHADER_FILES ${ARGN})
 
@@ -408,10 +422,36 @@ add_dependencies(zahlen_engine zahlen_engine_postprocess_nort_ps_shader)
 target_compile_definitions(zahlen_engine PRIVATE SHADER_POSTPROCESS_NORT_HLSL_PS_PATH="${POSTPROCESS_NORT_PS_SPV}")
 set_source_files_properties(src/engine/Resources.c PROPERTIES OBJECT_DEPENDS "${POSTPROCESS_NORT_PS_SPV}")
 
-# --- 6.1 LTC C23 EMBED DEPENDENCIES ---
+# --- 1. Compile Edge Detection Pass (SmaaEdgeVS, SmaaEdgePS) ---
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaEdgeVS vs_6_5 SMAA_EDGE_VS_SPV "-DEDGE_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=0")
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaEdgePS ps_6_5 SMAA_EDGE_PS_SPV "-DEDGE_PASS -DSMAA_INCLUDE_VS=0 -DSMAA_INCLUDE_PS=1")
+
+# --- 2. Compile Blending Weight Pass (SmaaWeightVS, SmaaWeightPS) ---
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaWeightVS vs_6_5 SMAA_WEIGHT_VS_SPV "-DWEIGHT_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=0")
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaWeightPS ps_6_5 SMAA_WEIGHT_PS_SPV "-DWEIGHT_PASS -DSMAA_INCLUDE_VS=0 -DSMAA_INCLUDE_PS=1")
+
+# --- 3. Compile Neighborhood Blending Pass (SmaaBlendVS, SmaaBlendPS) ---
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaBlendVS vs_6_5 SMAA_BLEND_VS_SPV "-DBLEND_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=0")
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaBlendPS ps_6_5 SMAA_BLEND_PS_SPV "-DBLEND_PASS -DSMAA_INCLUDE_VS=0 -DSMAA_INCLUDE_PS=1")
+
+# --- 4. Bind Output Paths to Target Definitions ---
+target_compile_definitions(zahlen_engine PRIVATE 
+    SHADER_SMAA_EDGE_VS_PATH="${SMAA_EDGE_VS_SPV}"
+    SHADER_SMAA_EDGE_PS_PATH="${SMAA_EDGE_PS_SPV}"
+    SHADER_SMAA_WEIGHT_VS_PATH="${SMAA_WEIGHT_VS_SPV}"
+    SHADER_SMAA_WEIGHT_PS_PATH="${SMAA_WEIGHT_PS_SPV}"
+    SHADER_SMAA_BLEND_VS_PATH="${SMAA_BLEND_VS_SPV}"
+    SHADER_SMAA_BLEND_PS_PATH="${SMAA_BLEND_PS_SPV}"
+)
+
+# --- 5. Add to C23 Embed Dependency Chain ---
 set_property(SOURCE src/engine/Resources.c APPEND PROPERTY OBJECT_DEPENDS 
-    "${CMAKE_SOURCE_DIR}/resources/shaders/ltc_mat.dds"
-    "${CMAKE_SOURCE_DIR}/resources/shaders/ltc_amp.dds"
+    "${SMAA_EDGE_VS_SPV}"
+    "${SMAA_EDGE_PS_SPV}"
+    "${SMAA_WEIGHT_VS_SPV}"
+    "${SMAA_WEIGHT_PS_SPV}"
+    "${SMAA_BLEND_VS_SPV}"
+    "${SMAA_BLEND_PS_SPV}"
 )
 
 # --- 7. EXECUTABLE TARGETS ---

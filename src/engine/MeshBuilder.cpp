@@ -39,8 +39,9 @@ Material CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBle
 
 	Material mat = ctx.CreateMaterial(desc);
 
-	// Generate the procedural texture and save its index!
-	mat.albedoIndex = CreateProceduralCheckerboard(ctx);
+	// Simply default to the solid white fallback texture (Index 1)
+	// rather than compiling 900+ redundant checkerboard textures!
+	mat.albedoIndex = 1;
 
 	return mat;
 }

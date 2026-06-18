@@ -209,10 +209,9 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 	return Material{.pipeline = static_cast<PipelineHandle>(handle)};
 }
 
-auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB)
-	-> uint32_t {
-	auto* impl = _impl.get();
-	const VkDevice device = impl->ctx.Device();
+auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width, uint32_t height,
+												bool isSRGB) -> uint32_t {
+	const VkDevice device = ctx.Device();
 	const size_t imageSize = static_cast<size_t>(width) * height * 4;
 
 	const VkImageCreateInfo imgInfo = {
@@ -233,9 +232,9 @@ auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t hei
 		.pQueueFamilyIndices = nullptr,
 		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
 
-	auto gpuImage = Vk::Image::Create(impl->allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+	auto gpuImage = Vk::Image::Create(allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 
-	Vk::CommandPool tempPool(device, impl->ctx.PhysicalInfo().graphics_family);
+	Vk::CommandPool tempPool(device, ctx.PhysicalInfo().graphics_family);
 	if (!tempPool.Allocate(1)) {
 		ZHLN::Panic("Allocation failed for texture");
 	}
@@ -243,8 +242,8 @@ auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t hei
 
 	ZHLN_BeginCommandBuffer(cmd);
 
-	auto staging = Vk::Buffer::Create(impl->allocator.Get(), imageSize,
-									  VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+	auto staging = Vk::Buffer::Create(allocator.Get(), imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+									  VMA_MEMORY_USAGE_CPU_ONLY);
 	std::memcpy(staging.Map().data, data, imageSize);
 
 	Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
@@ -278,14 +277,14 @@ auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t hei
 							.pCommandBufferInfos = &subInfo,
 							.signalSemaphoreInfoCount = 0,
 							.pSignalSemaphoreInfos = nullptr};
-	vkQueueSubmit2(impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
-	vkQueueWaitIdle(impl->ctx.GraphicsQueue());
+	vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
+	vkQueueWaitIdle(ctx.GraphicsQueue());
 
 	auto gpuView = isSRGB ? Vk::CreateView<VK_FORMAT_R8G8B8A8_SRGB>(device, gpuImage.Handle())
 						  : Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(
 								device, gpuImage.Handle()); // <--- Choose view
 
-	uint32_t index = impl->nextTextureIndex++;
+	uint32_t index = nextTextureIndex++;
 
 	VkDescriptorImageInfo bindlessUpdate = {.sampler = VK_NULL_HANDLE,
 											.imageView = gpuView.Get(),
@@ -296,7 +295,7 @@ auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t hei
 	for (int i = 0; i < 2; ++i) {
 		writes[i] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 					 .pNext = nullptr,
-					 .dstSet = impl->bindlessSets[i],
+					 .dstSet = bindlessSets[i],
 					 .dstBinding = 0,
 					 .dstArrayElement = index,
 					 .descriptorCount = 1,
@@ -307,41 +306,15 @@ auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t hei
 	}
 
 	vkUpdateDescriptorSets(device, 2, writes.data(), 0, nullptr);
-	impl->textureImages.push_back(std::move(gpuImage));
-	impl->textureViews.push_back(std::move(gpuView));
+	textureImages.push_back(std::move(gpuImage));
+	textureViews.push_back(std::move(gpuView));
 
 	return index;
 }
 
-void RenderContext::UploadDebugVertices(const void* data, size_t size,
-										uint32_t vertexCount) noexcept {
-	uint32_t frameIdx = _impl->frame_index;
-	auto* nativeMesh =
-		_impl->meshPool.Resolve(static_cast<uint64_t>(_impl->debugMeshHandles[frameIdx]));
-	if (nativeMesh == nullptr) {
-		return;
-	}
-
-	size_t maxSize = nativeMesh->buffer.Size();
-	size_t copySize = std::min(size, maxSize);
-
-	// Zero-copy direct transfer (VMA maintains persistence)
-	auto mapped = nativeMesh->buffer.Map();
-	std::memcpy(mapped.data, data, copySize);
-
-	// Update the active vertex draw limit dynamically
-	nativeMesh->vertexCount =
-		std::min(vertexCount, static_cast<uint32_t>(maxSize / sizeof(Vertex)));
-}
-
-BufferHandle RenderContext::GetDebugMeshBuffer() const noexcept {
-	return _impl->debugMeshHandles[_impl->frame_index];
-}
-
-uint32_t RenderContext::CreateTextureCube(const void* const* faceData, uint32_t width,
-										  uint32_t height) {
-	auto* impl = _impl.get();
-	const VkDevice device = impl->ctx.Device();
+uint32_t RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData, uint32_t width,
+														uint32_t height) {
+	const VkDevice device = ctx.Device();
 	const size_t faceSize = static_cast<size_t>(width) * height * 4;
 
 	const VkImageCreateInfo imgInfo = {
@@ -362,9 +335,9 @@ uint32_t RenderContext::CreateTextureCube(const void* const* faceData, uint32_t 
 		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
 	};
 
-	auto gpuImage = Vk::Image::Create(impl->allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+	auto gpuImage = Vk::Image::Create(allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 
-	Vk::CommandPool tempPool(device, impl->ctx.PhysicalInfo().graphics_family);
+	Vk::CommandPool tempPool(device, ctx.PhysicalInfo().graphics_family);
 	if (!tempPool.Allocate(1)) {
 		ZHLN::Panic("Vulkan: Failed to allocate command buffer for Cubemap copy");
 	}
@@ -372,9 +345,8 @@ uint32_t RenderContext::CreateTextureCube(const void* const* faceData, uint32_t 
 
 	ZHLN_BeginCommandBuffer(cmd);
 
-	Vk::Buffer staging =
-		Vk::Buffer::Create(impl->allocator.Get(), faceSize * 6, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-						   VMA_MEMORY_USAGE_CPU_ONLY);
+	Vk::Buffer staging = Vk::Buffer::Create(
+		allocator.Get(), faceSize * 6, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 
 	{
 		auto mapped = staging.Map();
@@ -435,12 +407,12 @@ uint32_t RenderContext::CreateTextureCube(const void* const* faceData, uint32_t 
 		.signalSemaphoreInfoCount = {},
 		.pSignalSemaphoreInfos = {},
 	};
-	vkQueueSubmit2(impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
-	vkQueueWaitIdle(impl->ctx.GraphicsQueue());
+	vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
+	vkQueueWaitIdle(ctx.GraphicsQueue());
 
 	auto gpuView = Vk::CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), 1);
 
-	uint32_t index = impl->nextTextureIndex++;
+	uint32_t index = nextTextureIndex++;
 
 	VkDescriptorImageInfo bindlessUpdate = {.sampler = VK_NULL_HANDLE,
 											.imageView = gpuView.Get(),
@@ -451,8 +423,8 @@ uint32_t RenderContext::CreateTextureCube(const void* const* faceData, uint32_t 
 	for (int i = 0; i < 2; ++i) {
 		writes[i] = {
 			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-			.pNext = {},
-			.dstSet = impl->bindlessSets[i],
+			.pNext = nullptr,
+			.dstSet = bindlessSets[i],
 			.dstBinding = 0,
 			.dstArrayElement = index,
 			.descriptorCount = 1,
@@ -463,10 +435,45 @@ uint32_t RenderContext::CreateTextureCube(const void* const* faceData, uint32_t 
 		};
 	}
 	vkUpdateDescriptorSets(device, 2, writes.data(), 0, nullptr);
-	impl->textureImages.push_back(std::move(gpuImage));
-	impl->textureViews.push_back(std::move(gpuView));
+	textureImages.push_back(std::move(gpuImage));
+	textureViews.push_back(std::move(gpuView));
 
 	return index;
+}
+
+auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB)
+	-> uint32_t {
+	return _impl->CreateTextureInternal(data, width, height, isSRGB);
+}
+
+auto RenderContext::CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height)
+	-> uint32_t {
+	return _impl->CreateTextureCubeInternal(faceData, width, height);
+}
+
+void RenderContext::UploadDebugVertices(const void* data, size_t size,
+										uint32_t vertexCount) noexcept {
+	uint32_t frameIdx = _impl->frame_index;
+	auto* nativeMesh =
+		_impl->meshPool.Resolve(static_cast<uint64_t>(_impl->debugMeshHandles[frameIdx]));
+	if (nativeMesh == nullptr) {
+		return;
+	}
+
+	size_t maxSize = nativeMesh->buffer.Size();
+	size_t copySize = std::min(size, maxSize);
+
+	// Zero-copy direct transfer (VMA maintains persistence)
+	auto mapped = nativeMesh->buffer.Map();
+	std::memcpy(mapped.data, data, copySize);
+
+	// Update the active vertex draw limit dynamically
+	nativeMesh->vertexCount =
+		std::min(vertexCount, static_cast<uint32_t>(maxSize / sizeof(Vertex)));
+}
+
+BufferHandle RenderContext::GetDebugMeshBuffer() const noexcept {
+	return _impl->debugMeshHandles[_impl->frame_index];
 }
 
 void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices,
@@ -582,6 +589,28 @@ void RenderContext::BuildMeshBLAS(Mesh& mesh) {
 	};
 	vkQueueSubmit2(impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
 	vkQueueWaitIdle(impl->ctx.GraphicsQueue());
+}
+
+void RenderContext::Impl::InitializeSystemTextures() {
+	ZHLN::Log("[Resource Factory] Registering fallback system texture slots...");
+
+	// Index 0: Solid Black (Used for Emissive, Metallic, and Roughness fallbacks) -> Linear
+	std::array<uint8_t, 4> blackPixel = {0, 0, 0, 0};
+	uint32_t blackIdx = CreateTextureInternal(blackPixel.data(), 1, 1, false);
+
+	// Index 1: Solid White (Used for Albedo fallback) -> sRGB
+	std::array<uint8_t, 4> whitePixel = {255, 255, 255, 255};
+	uint32_t whiteIdx = CreateTextureInternal(whitePixel.data(), 1, 1, true);
+
+	// Index 2: Flat Tangent-Space Normal Map (R=128, G=128, B=255) -> Linear
+	std::array<uint8_t, 4> normalPixel = {128, 128, 255, 255};
+	uint32_t normalIdx = CreateTextureInternal(normalPixel.data(), 1, 1, false);
+
+	// Validate that the slot indices match our compile-time expectations
+	if (blackIdx != 0 || whiteIdx != 1 || normalIdx != 2) {
+		ZHLN::Panic("System textures allocated out of order! Expected [0, 1, 2], got [{}, {}, {}]",
+					blackIdx, whiteIdx, normalIdx);
+	}
 }
 
 } // namespace ZHLN

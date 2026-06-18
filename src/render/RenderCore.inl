@@ -207,6 +207,26 @@ inline auto Context::Create(const ZHLN_InstanceDesc& instance_desc,
 	return ctx;
 }
 
+inline auto Context::Create(VkInstance instance, VkSurfaceKHR surface,
+							const ZHLN_PhysicalDeviceInfo& physical,
+							const ZHLN_DeviceDesc& device_desc) noexcept -> Context {
+	Context ctx;
+	ctx._instance = instance;
+	ctx._surface = surface;
+	ctx._physical = physical;
+
+	const ZHLN_DeviceDesc safe_device = {
+		.physical = &ctx._physical,
+		.extensions = device_desc.extensions,
+		.extension_count = device_desc.extension_count,
+		.features = device_desc.features,
+		.enable_validation = device_desc.enable_validation,
+	};
+	ctx._device = ZHLN_CreateDevice(&safe_device);
+
+	return ctx;
+}
+
 // ============================================================================
 // SwapchainSupport & Swapchain Implementation
 // ============================================================================

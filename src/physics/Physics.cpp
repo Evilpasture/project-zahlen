@@ -3,6 +3,7 @@
 
 // clang-format off
 #include <Jolt/Jolt.h>
+#include <Jolt/Core/Color.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Constraints/HingeConstraint.h>
@@ -13,6 +14,8 @@
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Core/JobSystemThreadPool.h>
+#include <Jolt/Core/JobSystemWithBarrier.h> // Jolt's JobSystem base
+#include <Jolt/Core/FixedSizeFreeList.h>    // Jolt's lock-free memory pool allocator
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/CylinderShape.h>
 #include <Jolt/Physics/Collision/Shape/PlaneShape.h>
@@ -26,6 +29,7 @@
 #include "PhysicsContactEvents.hpp"
 #include "Zahlen/Profiler.hpp"
 #include "detail/ControlFlow.hpp"
+#include "threading/TaskSystem.hpp"
 
 // ZHLN Detail Utilities
 #include <algorithm>
@@ -36,8 +40,12 @@
 // clang-format on
 
 #include <cstring>
+#include <malloc.h> // For alloca on Windows/Linux (or <alloca.h> on Unix)
 #include <memory>
 #include <new>
+#ifndef _WIN32
+#include <alloca.h>
+#endif
 
 namespace ZHLN {
 
@@ -162,6 +170,74 @@ class ObjectLayerPairFilterImpl : public JPH::ObjectLayerPairFilter {
 	}
 };
 
+namespace {
+
+class JobSystemFiber final : public JPH::JobSystemWithBarrier {
+  public:
+	JPH_OVERRIDE_NEW_DELETE
+
+	// Moved: Made a static member so it has access to JPH::JobSystem's protected nested Job class
+	static void JoltJobThunk(void* arg) {
+		auto* job = static_cast<JPH::JobSystem::Job*>(arg);
+		job->Execute();
+		job->Release();
+	}
+
+	JobSystemFiber(uint inMaxJobs, uint inMaxBarriers) : JPH::JobSystemWithBarrier(inMaxBarriers) {
+		mJobs.Init(inMaxJobs, inMaxJobs);
+	}
+
+	~JobSystemFiber() override = default;
+
+	[[nodiscard]] int GetMaxConcurrency() const override {
+		return static_cast<int>(ZHLN::TaskSystem::GetWorkerCount());
+	}
+
+	// Fixed: Qualified JPH::ColorArg, JPH::JobSystem::JobHandle, and JobFunction to resolve
+	// override checks
+	JPH::JobSystem::JobHandle CreateJob(const char* inName, JPH::ColorArg inColor,
+										const JPH::JobSystem::JobFunction& inJobFunction,
+										JPH::uint32 inNumDependencies = 0) override {
+		JPH::uint32 index =
+			mJobs.ConstructObject(inName, inColor, this, inJobFunction, inNumDependencies);
+		if (index == JPH::FixedSizeFreeList<JPH::JobSystem::Job>::cInvalidObjectIndex) {
+			ZHLN::Panic("Jolt: JobSystemFiber exceeded the maximum number of jobs!");
+		}
+		return JPH::JobSystem::JobHandle(&mJobs.Get(index));
+	}
+
+  protected:
+	void QueueJob(JPH::JobSystem::Job* inJob) override {
+		inJob->AddRef();
+
+		ZHLN::TaskSystem::Task task = {.func = JoltJobThunk, .arg = inJob};
+		ZHLN::TaskSystem::Dispatch(std::span<const ZHLN::TaskSystem::Task>(&task, 1), nullptr);
+	}
+
+	void QueueJobs(JPH::JobSystem::Job** inJobs, uint inNumJobs) override {
+		if (inNumJobs == 0) {
+			return;
+		}
+
+		auto* tasks = static_cast<ZHLN::TaskSystem::Task*>(
+			alloca(inNumJobs * sizeof(ZHLN::TaskSystem::Task)));
+
+		for (uint i = 0; i < inNumJobs; ++i) {
+			inJobs[i]->AddRef();
+			tasks[i] = {.func = JoltJobThunk, .arg = inJobs[i]};
+		}
+
+		ZHLN::TaskSystem::Dispatch(std::span<const ZHLN::TaskSystem::Task>(tasks, inNumJobs),
+								   nullptr);
+	}
+
+	void FreeJob(JPH::JobSystem::Job* inJob) override { mJobs.DestructObject(inJob); }
+
+  private:
+	using AvailableJobs = JPH::FixedSizeFreeList<JPH::JobSystem::Job>;
+	AvailableJobs mJobs;
+};
+} // namespace
 // =================================================================================================
 // CONTEXT IMPLEMENTATION
 // =================================================================================================
@@ -169,7 +245,7 @@ class ObjectLayerPairFilterImpl : public JPH::ObjectLayerPairFilter {
 struct PhysicsContext::Impl {
 	JPH::PhysicsSystem physicsSystem;
 	std::unique_ptr<JPH::TempAllocatorImpl> tempAllocator;
-	JPH::JobSystemThreadPool jobSystem{JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers, 1};
+	JobSystemFiber jobSystem{JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers};
 
 	BPLayerInterfaceImpl bpLayerInterface;
 	ObjectVsBroadPhaseLayerFilterImpl objVsBpFilter;

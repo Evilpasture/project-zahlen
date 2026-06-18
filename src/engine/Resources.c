@@ -107,3 +107,34 @@ const unsigned char ZHLN_Resource_FxaaFragSpv[] = {
 #embed SHADER_FXAA_HLSL_PS_PATH
 };
 const unsigned int ZHLN_Resource_FxaaFragSpv_Len = sizeof(ZHLN_Resource_FxaaFragSpv);
+
+// --- Compiled Shaders ---
+const unsigned char ZHLN_Resource_SmaaEdgeVertSpv[] = {
+#embed SHADER_SMAA_EDGE_VS_PATH
+};
+const unsigned int ZHLN_Resource_SmaaEdgeVertSpv_Len = sizeof(ZHLN_Resource_SmaaEdgeVertSpv);
+
+const unsigned char ZHLN_Resource_SmaaEdgeFragSpv[] = {
+#embed SHADER_SMAA_EDGE_PS_PATH
+};
+const unsigned int ZHLN_Resource_SmaaEdgeFragSpv_Len = sizeof(ZHLN_Resource_SmaaEdgeFragSpv);
+
+const unsigned char ZHLN_Resource_SmaaWeightVertSpv[] = {
+#embed SHADER_SMAA_WEIGHT_VS_PATH
+};
+const unsigned int ZHLN_Resource_SmaaWeightVertSpv_Len = sizeof(ZHLN_Resource_SmaaWeightVertSpv);
+
+const unsigned char ZHLN_Resource_SmaaWeightFragSpv[] = {
+#embed SHADER_SMAA_WEIGHT_PS_PATH
+};
+const unsigned int ZHLN_Resource_SmaaWeightFragSpv_Len = sizeof(ZHLN_Resource_SmaaWeightFragSpv);
+
+const unsigned char ZHLN_Resource_SmaaBlendVertSpv[] = {
+#embed SHADER_SMAA_BLEND_VS_PATH
+};
+const unsigned int ZHLN_Resource_SmaaBlendVertSpv_Len = sizeof(ZHLN_Resource_SmaaBlendVertSpv);
+
+const unsigned char ZHLN_Resource_SmaaBlendFragSpv[] = {
+#embed SHADER_SMAA_BLEND_PS_PATH
+};
+const unsigned int ZHLN_Resource_SmaaBlendFragSpv_Len = sizeof(ZHLN_Resource_SmaaBlendFragSpv);
