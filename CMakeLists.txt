@@ -461,7 +461,7 @@ add_dependencies(zahlen link_resources)
 
 
 # --- 10. SANITIZER RUNTIME DISTRIBUTION ---
-if(USE_SANITIZERS AND WIN32)
+if(USE_SANITIZERS)
     get_filename_component(CLANG_BIN_DIR ${CMAKE_CXX_COMPILER} DIRECTORY)
     find_file(ASAN_DLL 
         NAMES "clang_rt.asan_dynamic-x86_64.dll"

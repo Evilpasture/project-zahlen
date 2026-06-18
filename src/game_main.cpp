@@ -8,6 +8,8 @@
 #include "Zahlen/Input.hpp"
 #include "Zahlen/alife/Types.hpp"
 #include "ecs/ECS.hpp"
+#include "ecs/EntityCommandBuffer.hpp"
+#include "ecs/SystemGraph.hpp"
 #include "engine/FileWatcher.hpp"
 #include "engine/Platform.hpp"
 #include "engine/Resources.hpp"
@@ -40,20 +42,26 @@
 #include <expected>
 #include <physics/PhysicsWorld.hpp>
 #include <string>
-#include <thread>
 #include <threading/Mutex.hpp>
 #include <threading/TaskSystem.hpp>
-#include <utility> // Required for std::move
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
 #endif
 
-namespace ZHLN {
+using namespace ZHLN;
+using namespace ZHLN::ECS;
 
-// ============================================================================
-// ECS Components
-// ============================================================================
+namespace ZHLN {
+void DrawConsole(ScriptRunner& runner);
+void DrawProfiler(Engine& engine);
+void MovementSystem(Engine& engine, float dt);
+void DrawOrientationGizmo(const ZHLN::Camera& cam);
+void DrawInventoryShell(ScriptRunner& runner);
+void DrawECSProfiler();
+} // namespace ZHLN
+
+namespace {
 
 struct PostProcessComponent {
 	int giMode;
@@ -71,16 +79,6 @@ struct PostProcessComponent {
 	int enableSSR;
 	int enableRTR;
 };
-
-void DrawConsole(ScriptRunner& runner);
-void DrawProfiler(Engine& engine);
-void MovementSystem(Engine& engine, float dt);
-void AudioSystem(Engine& engine, float dt);
-void DrawOrientationGizmo(const ZHLN::Camera& cam);
-void DrawInventoryShell(ScriptRunner& runner);
-void DrawECSProfiler();
-
-namespace {
 
 struct FrustumEdge {
 	int start;
@@ -102,11 +100,62 @@ constexpr std::array<FrustumEdge, 12> s_FrustumEdges = {{
 	{.start = 3, .end = 7} // Near-to-Far connection lines
 }};
 
-} // namespace
+// ============================================================================
+// Flattened System Wrappers (For 100% Predictable Function Pointers)
+// ============================================================================
 
-// ============================================================================
-// Modular Systems
-// ============================================================================
+void Sys_VisualInterpolation(Engine& engine, float /*dt*/) {
+	VisualInterpolationSystem::Update(engine, engine.GetCurrentAlpha());
+}
+
+void Sys_Animation(Engine& engine, float dt) {
+	static AnimationSystem sys;
+	sys.UpdateAnimations(engine.GetRenderContext(), engine.GetRegistry(), dt);
+}
+
+void Sys_Articulation(Engine& engine, float dt) {
+	static ArticulationSystem sys;
+	sys.Update(engine, dt);
+}
+
+void Sys_Transform(Engine& engine, float /*dt*/) {
+	static TransformSystem sys;
+	sys.ResolveTransforms(engine.GetRegistry());
+}
+
+void Sys_Audio(Engine& engine, float dt) {
+	AudioSystem(engine, dt);
+}
+
+void Sys_TargetCamera(Engine& engine, float dt) {
+	static TargetCameraSystem sys;
+	sys.Update(engine, dt, engine.GetCurrentAlpha());
+}
+
+void Sys_Camera(Engine& engine, float dt) {
+	static CameraSystem sys;
+	sys.Update(engine, dt, engine.GetCurrentAlpha());
+}
+
+void Sys_Culling(Engine& engine, float /*dt*/) {
+	engine.GetCullingSystem().Update<false>(engine, engine.GetVisibleEntities());
+}
+
+void Sys_Lighting(Engine& engine, float dt) {
+	static LightingSystem sys;
+	sys.Update(engine, dt);
+}
+
+void Sys_ParticleSpawner(Engine& engine, float /*dt*/) {
+	// Demonstrative safe parallel structural updates via the main ECB
+	/*
+	auto& ecb = engine.GetMainECB();
+	for(int i = 0; i < 5; ++i) {
+		Entity e = ecb.CreateEntity();
+		ecb.AddComponent(e, TransformComponent{.position = {0, (float)i, 0}});
+	}
+	*/
+}
 
 void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 	if (engine.GetWindow().IsTTY()) {
@@ -116,11 +165,11 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 	ZHLN_GameState state =
 		*static_cast<ZHLN_GameState*>(ZHLN_GetGameState(reinterpret_cast<ZHLN_Engine*>(&engine)));
 
-	ZHLN::DrawConsole(scriptRunner);
-	ZHLN::DrawInventoryShell(scriptRunner);
-	ZHLN::DrawProfiler(engine);
-	ZHLN::DrawOrientationGizmo(engine.GetCamera());
-	ZHLN::DrawECSProfiler();
+	DrawConsole(scriptRunner);
+	DrawInventoryShell(scriptRunner);
+	DrawProfiler(engine);
+	DrawOrientationGizmo(engine.GetCamera());
+	DrawECSProfiler();
 
 	ImGui::Begin("Lighting Workspace Controller");
 	ImGui::SeparatorText("Physics Debug");
@@ -166,9 +215,11 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 	}
 
 	ImGui::SeparatorText("Ambient Occlusion & Global Illumination");
-	const char* giModesList[] = {"Off", "SSAO (Ambient Occlusion)", "SSGI (Screen Space GI)",
-								 "HBAO (Horizon-Based AO)", "GTAO (Ground Truth AO)"};
-	ImGui::Combo("GI Mode", &state.giMode, giModesList, IM_ARRAYSIZE(giModesList));
+	constexpr std::array<const char*, 5> giModesList = {
+		"Off", "SSAO (Ambient Occlusion)", "SSGI (Screen Space GI)", "HBAO (Horizon-Based AO)",
+		"GTAO (Ground Truth AO)"};
+	ImGui::Combo("GI Mode", &state.giMode, giModesList.data(),
+				 static_cast<int>(giModesList.size()));
 
 	if (state.giMode == 1) {
 		ImGui::SliderFloat("AO Radius", &state.aoRadius, 0.05f, 2.5f, "%.2fm");
@@ -228,7 +279,7 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 	}
 }
 
-void PostProcessSystem(Engine& engine) {
+void Sys_PostProcess(Engine& engine, float /*dt*/) {
 	auto& reg = engine.GetRegistry();
 	auto& rc = engine.GetRenderContext();
 
@@ -248,7 +299,8 @@ void PostProcessSystem(Engine& engine) {
 	}
 }
 
-void DebugDrawSystem(Engine& engine, CullingSystem& cullingSystem) {
+void DebugDrawSystem(Engine& engine) {
+	auto& cullingSystem = engine.GetCullingSystem();
 	if (!CullingStats::FreezeFrustum) {
 		return;
 	}
@@ -292,11 +344,11 @@ void DebugDrawSystem(Engine& engine, CullingSystem& cullingSystem) {
 	}
 }
 
-std::expected<void, RenderFrameResult> RenderSystem(Engine& engine, CullingSystem& cullingSystem,
-													const JPH::Array<Entity>& visibleEntities) {
+std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 	auto& rc = engine.GetRenderContext();
 	auto& reg = engine.GetRegistry();
 	auto& cam = engine.GetCamera();
+	const auto& visibleEntities = engine.GetVisibleEntities();
 
 	JPH::Mat44 vp{};
 	JPH::Mat44 unjitteredVp{};
@@ -304,10 +356,9 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine, CullingSyste
 
 	auto cameraEntities = reg.GetEntitiesWith<MainCameraTagComponent>();
 	if (cameraEntities.empty()) {
-		return std::unexpected(
-			RenderFrameResult::Error); // <-- FIXED: Early exit returning expected error
+		return std::unexpected(RenderFrameResult::Error);
 	}
-	// Capture monadic results on BeginFrame
+
 	auto begin_res = rc.BeginFrame();
 	if (!begin_res) {
 		return std::unexpected(begin_res.error());
@@ -319,11 +370,9 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine, CullingSyste
 		unjitteredVp = cComp->unjitteredViewProj;
 		prevUnjitteredVp = cComp->prevUnjitteredViewProj;
 	} else {
-		return std::unexpected(
-			RenderFrameResult::Error); // <-- FIXED: Early exit returning expected error
+		return std::unexpected(RenderFrameResult::Error);
 	}
 
-	// 1. Fetch Game State at the top so we can use the debug flag early
 	ZHLN_GameState state =
 		*static_cast<ZHLN_GameState*>(ZHLN_GetGameState(reinterpret_cast<ZHLN_Engine*>(&engine)));
 
@@ -368,7 +417,8 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine, CullingSyste
 	uniforms.invViewProj = unjitteredVp.Inversed();
 	std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
 	std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);
-	uniforms.lightCount = reg.GetEntitiesWith<LightingSystem::LightComponent>().size();
+	uniforms.lightCount =
+		static_cast<uint32_t>(reg.GetEntitiesWith<LightingSystem::LightComponent>().size());
 	uniforms.probeMin = probeMin;
 	uniforms.probeMax = probeMax;
 	uniforms.probePos = probePos;
@@ -380,7 +430,6 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine, CullingSyste
 	Renderer::SetFrameData(rc, uniforms, shadowProjView);
 	Renderer::SetMatrices(rc, vp, unjitteredVp);
 
-	// 2. Wrap normal entity rendering with a conditional block
 	if (state.physicsDrawMode == 0) { // Only draw standard world when debug is Off
 		for (Entity e : visibleEntities) {
 			auto* mesh = reg.Get<MeshComponent>(e);
@@ -417,13 +466,10 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine, CullingSyste
 		Renderer::DrawUI(rc, text->mesh, text->fontIndex);
 	}
 
-	DebugDrawSystem(engine, cullingSystem);
-	// -------------------------------------------------------------------------
-	// [FAST PERSISTENTLY MAPPED PHYSICS DEBUG RENDERER]
-	// -------------------------------------------------------------------------
+	DebugDrawSystem(engine);
 
 	if (state.physicsDrawMode > 0) {
-		ZHLN_PROFILE_SCOPE("Physics Debug Extract & Upload"); // Now tracked on the CPU profiler!
+		ZHLN_PROFILE_SCOPE("Physics Debug Extract & Upload");
 
 		static Material debugLineMat = {.pipeline = PipelineHandle::Invalid};
 		static Material debugSolidMat = {.pipeline = PipelineHandle::Invalid};
@@ -460,7 +506,9 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine, CullingSyste
 				v.position[1] = jv.y;
 				v.position[2] = jv.z;
 				v.color.data = jv.color;
-				v.normal = Math::PackNormal(0, 1, 0);
+				v.normal = Math::PackNormal(0.0f, 1.0f, 0.0f);
+				v.tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f);
+				v.uv = Math::PackUV(0.0f, 0.0f);
 				debugVerts.push_back(v);
 			}
 		} else if (!isWireframe && debugData.triangleCount > 0) {
@@ -472,18 +520,19 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine, CullingSyste
 				v.position[1] = jv.y;
 				v.position[2] = jv.z;
 				v.color.data = jv.color;
-				v.normal = Math::PackNormal(0, 1, 0);
+				v.normal = Math::PackNormal(0.0f, 1.0f, 0.0f);
+				v.tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f);
+				v.uv = Math::PackUV(0.0f, 0.0f);
 				debugVerts.push_back(v);
 			}
 		}
 
 		if (!debugVerts.empty()) {
-			// Instantly upload vertices directly without triggering any Vulkan queue submissions
 			rc.UploadDebugVertices(debugVerts.data(), debugVerts.size() * sizeof(Vertex),
-								   (uint32_t)debugVerts.size());
+								   static_cast<uint32_t>(debugVerts.size()));
 
 			Mesh debugMesh = {.vertexBuffer = rc.GetDebugMeshBuffer(),
-							  .vertexCount = (uint32_t)debugVerts.size()};
+							  .vertexCount = static_cast<uint32_t>(debugVerts.size())};
 
 			Renderer::Draw(rc, isWireframe ? debugLineMat : debugSolidMat, debugMesh,
 						   {.transform = JPH::Mat44::sIdentity(),
@@ -491,28 +540,100 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine, CullingSyste
 							.cullRadius = 10000.0f});
 		}
 	}
-	// -------------------------------------------------------------------------
 
 	auto end_res = rc.EndFrame();
 	if (!end_res) {
 		return std::unexpected(end_res.error());
 	}
 
-	return {}; // <-- FIXED: Added final success return statement
+	return {};
 }
 
-// ============================================================================
-// GAME APPLICATION INTERFACE IMPLEMENTATION
-// ============================================================================
+void BuildSystemGraphs(Engine& engine) {
+	auto& updateGraph = engine.GetUpdateGraph();
+	auto& renderGraph = engine.GetRenderGraph();
 
-bool InitializeGame(Engine& engine, ScriptRunner& scriptRunner) {
+	// --- COMPILE UPDATE GRAPH (Variable Timestep Logic) ---
+	updateGraph.AddSystem(
+		{.update_func = Sys_VisualInterpolation,
+		 .name = "VisualInterpolationSystem",
+		 .access_pattern = {Read<PhysicsStateComponent>(), Write<TransformComponent>()},
+		 .enabled = true});
+
+	updateGraph.AddSystem({.update_func = Sys_Animation,
+						   .name = "AnimationSystem",
+						   .access_pattern = {Read<MovementComponent>(), Write<MeshComponent>()},
+						   .enabled = true});
+
+	updateGraph.AddSystem(
+		{.update_func = Sys_Articulation,
+		 .name = "ArticulationSystem",
+		 .access_pattern = {Read<PhysicsComponent>(), Read<MeshComponent>(),
+							Write<RagdollComponent>(), Write<TransformComponent>()},
+		 .enabled = true});
+
+	updateGraph.AddSystem({.update_func = Sys_Transform,
+						   .name = "TransformSystem",
+						   .access_pattern = {Read<HierarchyComponent>(),
+											  Read<TransformComponent>(), Write<MeshComponent>()},
+						   .enabled = true});
+
+	updateGraph.AddSystem({.update_func = Sys_PostProcess,
+						   .name = "PostProcessSystem",
+						   .access_pattern = {Read<PostProcessComponent>()},
+						   .enabled = true});
+
+	updateGraph.AddSystem(
+		{.update_func = Sys_Audio,
+		 .name = "AudioSystem",
+		 .access_pattern = {Read<PhysicsComponent>(), Read<ALife::ALifeComponent>(),
+							Write<AudioSourceComponent>()},
+		 .enabled = true});
+
+	updateGraph.AddSystem({.update_func = Sys_ParticleSpawner,
+						   .name = "ParticleSpawnerExample",
+						   .access_pattern = {},
+						   .enabled = true});
+
+	updateGraph.Compile();
+
+	// --- COMPILE RENDER GRAPH (Camera & Culling) ---
+	renderGraph.AddSystem(
+		{.update_func = Sys_TargetCamera,
+		 .name = "TargetCameraSystem",
+		 .access_pattern = {Read<TargetCameraComponent>(), Read<PhysicsStateComponent>(),
+							Read<TransformComponent>(), Read<MeshComponent>(),
+							Read<InputSystem::InputComponent>()},
+		 .enabled = true});
+
+	renderGraph.AddSystem(
+		{.update_func = Sys_Camera,
+		 .name = "CameraSystem",
+		 .access_pattern = {Read<TargetCameraComponent>(), Write<CameraSystem::CameraComponent>(),
+							Read<AASettingsComponent>()},
+		 .enabled = true});
+
+	renderGraph.AddSystem(
+		{.update_func = Sys_Culling,
+		 .name = "CullingSystem",
+		 .access_pattern = {Read<MeshComponent>(), Read<CameraSystem::CameraComponent>()},
+		 .enabled = true});
+
+	renderGraph.AddSystem(
+		{.update_func = Sys_Lighting,
+		 .name = "LightingSystem",
+		 .access_pattern = {Read<LightingSystem::LightComponent>(), Read<TransformComponent>(),
+							Read<NameComponent>(), Write<MeshComponent>()},
+		 .enabled = true});
+
+	renderGraph.Compile();
+}
+
+bool InitializeGame(Engine& engine) {
 	auto& rc = engine.GetRenderContext();
 	auto& reg = engine.GetRegistry();
 	auto& pc = engine.GetPhysicsContext();
 
-	// 1. Create a thin procedural box mesh (0.02m x 0.02m x 1.0m) to represent our lines.
-	// A half-extent of 0.5 on the Z-axis gives a total length of 1.0, which scales correctly with
-	// line lengths.
 	Mesh lineMesh = AssetFactory::CreateBox(rc, {0.01f, 0.01f, 0.5f}, {0.0f, 1.0f, 1.0f, 1.0f});
 	Material lineMat = AssetFactory::CreateBasicMaterial(rc);
 
@@ -544,7 +665,6 @@ bool InitializeGame(Engine& engine, ScriptRunner& scriptRunner) {
 	defaultState.enableTAA = 1;
 	defaultState.taaFeedback = 0.95f;
 
-	// 2. Populate debug line state parameters
 	defaultState.debugLineVbo = static_cast<uint64_t>(lineMesh.vertexBuffer);
 	defaultState.debugLinePipeline = static_cast<uint64_t>(lineMat.pipeline);
 	defaultState.debugLineAlbedo = lineMat.albedoIndex;
@@ -668,16 +788,16 @@ bool InitializeGame(Engine& engine, ScriptRunner& scriptRunner) {
 					  .color = {0.9f, 0.1f, 0.1f, 1.0f},
 					  .fontIndex = reg.Get<UISettingsComponent>(uiSettings)->defaultFontAtlasIdx});
 
+	BuildSystemGraphs(engine);
+
 	return true;
 }
 
 void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, ScriptRunner& scriptRunner,
-				FileWatcher& gameplayWatcher, InputSystem& inputSystem,
-				AnimationSystem& animationSystem, ArticulationSystem& articulationSystem,
-				TransformSystem& transformSystem) {
+				FileWatcher& gameplayWatcher) {
+	static InputSystem inputSystem;
 	inputSystem.Update(engine);
 	UISystem(engine, scriptRunner);
-	PostProcessSystem(engine);
 	inputSystem.PlayerInputTranslate(engine, engine.GetCamera());
 
 	if constexpr (isDev) {
@@ -700,83 +820,40 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, ScriptRunne
 	{
 		ZHLN_PROFILE_SCOPE("ECS System: Physics & Movement");
 		while (physicsAccumulator >= targetDt) {
-			ZHLN::MovementSystem(engine, targetDt);
+			MovementSystem(engine, targetDt);
 			engine.GetPhysicsContext().Step(targetDt);
 			ZHLN::PhysicsStateSystem::WriteBack(engine);
 			physicsAccumulator -= targetDt;
 		}
 	}
 
-	float alpha = physicsAccumulator / targetDt;
-
-	{
-		ZHLN_PROFILE_SCOPE("ECS System: Visual Interpolation");
-		ZHLN::VisualInterpolationSystem::Update(engine, alpha);
-	}
+	engine.GetCurrentAlpha() = physicsAccumulator / targetDt;
 
 	{
 		ZHLN_PROFILE_SCOPE("ECS System: Script/Lua Update");
 		scriptRunner.CallUpdate(&engine, dt);
 	}
 
-	{
-		ZHLN_PROFILE_SCOPE("ECS System: Animation Update");
-		animationSystem.UpdateAnimations(engine.GetRenderContext(), engine.GetRegistry(), dt);
-	}
-
-	{
-		ZHLN_PROFILE_SCOPE("ECS System: Articulation/Ragdoll");
-		articulationSystem.Update(engine, dt);
-	}
-
-	{
-		ZHLN_PROFILE_SCOPE("ECS System: Resolve Transforms");
-		transformSystem.ResolveTransforms(engine.GetRegistry());
-	}
+	engine.GetUpdateGraph().Execute(engine, dt);
+	engine.GetMainECB().Playback();
 }
 
-std::expected<void, RenderFrameResult> RenderGame(Engine& engine, float frameTime,
-												  float physicsAccumulator,
-												  CullingSystem& cullingSystem,
-												  LightingSystem& lightingSystem) {
-	constexpr float targetDt = 1.0f / 60.0f;
-	float alpha = physicsAccumulator / targetDt;
+std::expected<void, RenderFrameResult> RenderGame(Engine& engine, float frameTime) {
+	engine.GetRenderGraph().Execute(engine, frameTime);
 
-	TargetCameraSystem camSys;
-	camSys.Update(engine, frameTime, alpha);
-
-	CameraSystem standardCamSys;
-	standardCamSys.Update(engine, frameTime, alpha);
-
-	JPH::Array<Entity> visibleEntities;
-	cullingSystem.Update<false>(engine, visibleEntities);
-	lightingSystem.Update(engine, frameTime);
-
-	// Capture the monadic frame result
-	auto render_res = RenderSystem(engine, cullingSystem, visibleEntities);
+	auto render_res = RenderSystem(engine);
 	if (!render_res) {
 		return std::unexpected(render_res.error());
 	}
 
 	{
-		ZHLN_PROFILE_SCOPE("ECS System: Audio Update");
-		ZHLN::AudioSystem(engine, frameTime);
-	}
-
-	{
 		ZHLN_PROFILE_SCOPE("ECS System: Update Transform History");
-		TransformSystem ts;
+		static TransformSystem ts;
 		ts.UpdateTransformHistory(engine.GetRegistry());
 	}
 
 	return {};
 }
-
-} // namespace ZHLN
-
-using namespace ZHLN;
-
-namespace {
 
 std::expected<std::unique_ptr<Engine>, EngineError> InitializeEngine(CommandLineOptions options) {
 	Platform::Init();
@@ -815,27 +892,19 @@ std::expected<std::unique_ptr<Engine>, EngineError> InitializeEngine(CommandLine
 std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, uint32_t fpsLimit) {
 	ScriptRunner scriptRunner;
 	FileWatcher gameplayWatcher("scripts/gameplay.lua");
-	ArticulationSystem articulationSystem;
-	AnimationSystem animationSystem;
-	TransformSystem transformSystem;
-	LightingSystem lightingSystem;
-	CullingSystem cullingSystem;
-	InputSystem inputSystem;
 
-	if (!ZHLN::InitializeGame(*engine, scriptRunner)) {
+	if (!InitializeGame(*engine)) {
 		return std::unexpected(
 			EngineError{.msg = "Game failed to initialize.", .code = EXIT_FAILURE});
 	}
 
-	// 1. Original safe warm-up frames (balanced with rc.BeginFrame inside RenderSystem)
 	for (int i = 0; i < 3; ++i) {
 		engine->ProcessEvents();
 
-		// Capture and check the monadic result during warm-up
-		auto res = ZHLN::RenderGame(*engine, 0.016f, 0.0f, cullingSystem, lightingSystem);
+		auto res = RenderGame(*engine, 0.016f);
 		if (!res) {
 			if (res.error() == RenderFrameResult::DeviceLost) {
-				engine->HandleDeviceLost(); // Safe, parameterless rebuild
+				engine->HandleDeviceLost();
 			}
 		}
 	}
@@ -856,27 +925,22 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, ui
 			break;
 		}
 
-		// Calculate raw elapsed time
 		auto frameEnd = std::chrono::high_resolution_clock::now();
 		double elapsed = std::chrono::duration<double>(frameEnd - frameStart).count();
 		frameStart = std::chrono::high_resolution_clock::now();
 
-		// 1. Identify which refresh rate target we are actually near using the raw elapsed time.
-		// This prevents the low-pass filter from getting trapped in a feedback loop at high frame
-		// rates.
 		double target = elapsed;
-		constexpr double snapTargets[] = {1.0 / 60.0,  1.0 / 75.0,	1.0 / 90.0, 1.0 / 120.0,
-										  1.0 / 144.0, 1.0 / 240.0, 1.0 / 360.0};
+		constexpr std::array<double, 7> snapTargets = {{1.0 / 60.0, 1.0 / 75.0, 1.0 / 90.0,
+														1.0 / 120.0, 1.0 / 144.0, 1.0 / 240.0,
+														1.0 / 360.0}};
 		for (double t : snapTargets) {
-			if (std::abs(elapsed - t) < 0.001) { // 1.0ms threshold against raw elapsed
+			if (std::abs(elapsed - t) < 0.001) {
 				target = t;
 				break;
 			}
 		}
 
-		// 2. Smooth the detected target with a low-pass filter to eliminate swapchain presentation
-		// jitter
-		static double smoothedElapsed = 0.0166667; // Fallback to 60fps
+		static double smoothedElapsed = 0.0166667;
 		smoothedElapsed = (smoothedElapsed * 0.9) + (target * 0.1);
 
 		float frameTime = std::min(static_cast<float>(smoothedElapsed), 0.1f);
@@ -885,24 +949,18 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, ui
 			engine->GetRenderContext().SetResolution(engine->GetInput().GetNewSize());
 			engine->GetInput().ClearResizeFlag();
 			if (!engine->GetWindow().IsTTY()) {
-				ImGui::EndFrame(); // <--- Add this!
+				ImGui::EndFrame();
 			}
 			continue;
 		}
 
-		ZHLN::UpdateGame(*engine, frameTime, physicsAccumulator, scriptRunner, gameplayWatcher,
-						 inputSystem, animationSystem, articulationSystem, transformSystem);
-		auto render_res =
-			ZHLN::RenderGame(*engine, frameTime, physicsAccumulator, cullingSystem, lightingSystem);
+		UpdateGame(*engine, frameTime, physicsAccumulator, scriptRunner, gameplayWatcher);
+
+		auto render_res = RenderGame(*engine, frameTime);
 		if (!render_res) {
 			if (render_res.error() == RenderFrameResult::DeviceLost) {
 				engine->HandleDeviceLost();
-
-				// Re-run the scene setup script to reload and upload meshes/textures to the fresh
-				// Vulkan Context
 				scriptRunner.ReloadFile("scripts/gameplay.lua");
-			} else {
-				// Handle other non-fatal errors (OutOfDate, Suboptimal, resizing, etc.)
 			}
 		}
 
@@ -949,6 +1007,5 @@ extern auto RunGame(const ZHLN::CommandLineOptions& options) {
 						  return err.code;
 					  });
 
-	// Fix: Prevent eager evaluation of .error() on successful runs
 	return result.has_value() ? result.value() : result.error();
 }

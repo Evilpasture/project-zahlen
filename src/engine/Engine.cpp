@@ -27,7 +27,11 @@
 #ifdef __linux__
 #include <dlfcn.h>
 #endif
+
 #include <ecs/ECS.hpp>
+#include <ecs/EntityCommandBuffer.hpp>
+#include <ecs/SystemGraph.hpp>
+#include <engine/system/CullingSystem.hpp>
 #include <filesystem>
 #include <physics/Physics.hpp>
 #include <threading/Thread.hpp>
@@ -71,14 +75,19 @@ struct EngineImpl {
 	Camera mainCamera;
 	ECS::Registry registry;
 
+	std::unique_ptr<ECS::SystemGraph> updateGraph;
+	std::unique_ptr<ECS::SystemGraph> renderGraph;
+	std::unique_ptr<ECS::EntityCommandBuffer> mainECB;
+	std::unique_ptr<CullingSystem> cullingSystem;
+	JPH::Array<Entity> visibleEntities;
+	float currentAlpha = 0.0f;
+
 	void* gameState = nullptr;
 	uint64_t frameCounter = 0;
 	EngineConfig config;
 };
 
-Engine::Engine() : _impl(nullptr) {
-	// Empty constructor specifically used by static factory Create() to defer initialization safely
-}
+Engine::Engine() : _impl(nullptr) {}
 
 Engine::Engine(const EngineConfig& cfg) : _impl(nullptr) {
 	bool success = false;
@@ -90,17 +99,9 @@ Engine::Engine(const EngineConfig& cfg) : _impl(nullptr) {
 
 void Engine::HandleDeviceLost() noexcept {
 	ZHLN::Log("[Engine] CRITICAL: Vulkan Device Lost detected! Initiating hardware hot-rebuild...");
-
-	// 1. Destroy the old renderer cleanly (automatically invokes destructors of swapchain,
-	// pipelines, VMA allocator, etc.)
 	_impl->renderContext.reset();
-
-	// 2. Re-create a fresh, clean Renderer
 	_impl->renderContext = std::make_unique<RenderContext>(*_impl->window, _impl->config.render);
-
-	// 3. Clear ECS registry visual components so we don't have dangling GPU handles
 	_impl->registry.Clear();
-
 	ZHLN::Log("[Engine] Hardware hot-rebuild completed successfully. Re-syncing scene assets...");
 }
 
@@ -132,25 +133,19 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess, const char*
 	g_CurrentEngine = this;
 	s_GlobalEngine = this;
 
-	// 1. Thread and Fiber setup
 	ZHLN::Fiber::InitMainThread();
 
-	// 2. Allocate the implementation block and input context first
 	_impl = std::make_unique<EngineImpl>();
 	_impl->config = cfg;
 	_impl->input = std::make_unique<InputContext>();
 
-	// 3. Apply platform-specific window managers / RenderDoc hints
 	bool use_tty = false;
 	if constexpr (isLinux) {
-		// If RenderDoc is active, force GLFW to initialize on X11 (XWayland)
-		// to match RenderDoc's active WSI extensions.
 		if (std::getenv("ENABLE_VULKAN_RENDERDOC_CAPTURE") != nullptr) {
 			glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
 		}
 	}
 
-	// 4. Initialize GLFW
 	if (!glfwInit()) {
 		if (TTYBackend::IsSupported()) {
 			ZHLN::Log("GLFW failed to initialize. Falling back to native TTY Display Mode.");
@@ -164,12 +159,10 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess, const char*
 		}
 	}
 
-	// 5. Create and show the Window immediately
 	_impl->window =
 		std::make_unique<Window>(cfg.render.appName.data(), cfg.render.width, cfg.render.height,
 								 cfg.render.fullscreen, _impl->input.get(), use_tty);
 
-	// Direct TTY Check (fails cleanly if libseat is missing or seatd is not running)
 	if (use_tty && _impl->window->GetTTYContext() == nullptr) {
 		ZHLN::Log("[Engine] FATAL: TTY Input initialization failed (libseat session rejected).");
 		if (outError != nullptr) {
@@ -179,10 +172,8 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess, const char*
 		return;
 	}
 
-	// 6. Query the RenderDoc In-App API (if loaded by command line flag)
 	InitRenderDocAPI();
 
-	// 7. Initialize Jolt Physics global allocations
 	JPH::RegisterDefaultAllocator();
 	JPH::Trace = JoltTraceBridge;
 #ifdef JPH_ENABLE_ASSERTS
@@ -192,12 +183,16 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess, const char*
 	JPH::Factory::sInstance = new JPH::Factory();
 	JPH::RegisterTypes();
 
-	// 8. Initialize remaining graphics, physics, and asset loader systems
 	_impl->renderContext = std::make_unique<RenderContext>(*_impl->window, cfg.render);
 	_impl->physicsContext = std::make_unique<PhysicsContext>(cfg.physics);
 	_impl->audioContext = std::make_unique<AudioContext>();
 	_impl->alifeSimulator = std::make_unique<ALife::Simulator>();
 	_impl->assetManager = std::make_unique<AssetManager>();
+
+	_impl->updateGraph = std::make_unique<ECS::SystemGraph>();
+	_impl->renderGraph = std::make_unique<ECS::SystemGraph>();
+	_impl->mainECB = std::make_unique<ECS::EntityCommandBuffer>(_impl->registry);
+	_impl->cullingSystem = std::make_unique<CullingSystem>();
 
 	if (std::filesystem::exists("data/base.pak")) {
 		_impl->assetManager->MountPak("data/base.pak");
@@ -216,6 +211,10 @@ Engine::~Engine() {
 	_impl->window.reset();
 	_impl->assetManager.reset();
 	_impl->audioContext.reset();
+	_impl->updateGraph.reset();
+	_impl->renderGraph.reset();
+	_impl->mainECB.reset();
+	_impl->cullingSystem.reset();
 
 	glfwTerminate();
 
@@ -235,14 +234,10 @@ void Engine::ProcessEvents() {
 	_impl->input->ResetDeltas();
 
 	if (_impl->window->IsTTY()) {
-		// Process raw evdev keyboard and mouse inputs directly
 		TTYBackend::ProcessEvents(_impl->window->GetTTYContext(), _impl->input.get());
-
-		// No ImGui contexts exist, so we exit immediately (prevents the 0x40 Null Pointer crash!)
 		return;
 	}
 
-	// Desktop GLFW + ImGui path
 	glfwPollEvents();
 	ImGui_ImplVulkan_NewFrame();
 	ImGui_ImplGlfw_NewFrame();
@@ -251,11 +246,11 @@ void Engine::ProcessEvents() {
 
 bool Engine::BeginFrame(bool& outDeviceLost) noexcept {
 	outDeviceLost = false;
-	auto res = _impl->renderContext->BeginFrame(); // Consumes the returned monad
+	auto res = _impl->renderContext->BeginFrame();
 	if (!res) {
 		if (res.error() == RenderFrameResult::DeviceLost) {
 			outDeviceLost = true;
-			HandleDeviceLost(); // Rebuilds internally
+			HandleDeviceLost();
 		}
 		return false;
 	}
@@ -264,11 +259,11 @@ bool Engine::BeginFrame(bool& outDeviceLost) noexcept {
 
 bool Engine::EndFrame(bool& outDeviceLost) noexcept {
 	outDeviceLost = false;
-	auto res = _impl->renderContext->EndFrame(); // Consumes the returned monad
+	auto res = _impl->renderContext->EndFrame();
 	if (!res) {
 		if (res.error() == RenderFrameResult::DeviceLost) {
 			outDeviceLost = true;
-			HandleDeviceLost(); // Rebuilds internally
+			HandleDeviceLost();
 		}
 		return false;
 	}
@@ -305,6 +300,25 @@ AudioContext& Engine::GetAudioContext() {
 }
 ECS::Registry& Engine::GetRegistry() {
 	return _impl->registry;
+}
+
+ECS::SystemGraph& Engine::GetUpdateGraph() {
+	return *_impl->updateGraph;
+}
+ECS::SystemGraph& Engine::GetRenderGraph() {
+	return *_impl->renderGraph;
+}
+ECS::EntityCommandBuffer& Engine::GetMainECB() {
+	return *_impl->mainECB;
+}
+CullingSystem& Engine::GetCullingSystem() {
+	return *_impl->cullingSystem;
+}
+JPH::Array<Entity>& Engine::GetVisibleEntities() {
+	return _impl->visibleEntities;
+}
+float& Engine::GetCurrentAlpha() {
+	return _impl->currentAlpha;
 }
 
 void* Engine::GetGameState() const {

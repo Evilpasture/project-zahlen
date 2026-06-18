@@ -3,9 +3,14 @@
 
 // include/Zahlen/Engine.hpp
 #pragma once
+// clang-format off
+#include <Jolt/Jolt.h>
+#include <Jolt/Core/Array.h>
+// clang-format on
 
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
+#include <Zahlen/Entity.hpp>
 #include <memory>
 
 namespace ZHLN {
@@ -25,7 +30,11 @@ class Simulator;
 
 namespace ECS {
 class Registry;
-}
+class SystemGraph;
+class EntityCommandBuffer;
+} // namespace ECS
+
+class CullingSystem;
 
 class ZHLN_API Engine {
   public:
@@ -53,6 +62,13 @@ class ZHLN_API Engine {
 	AssetManager& GetAssetManager();
 	AudioContext& GetAudioContext();
 	ECS::Registry& GetRegistry();
+
+	ECS::SystemGraph& GetUpdateGraph();
+	ECS::SystemGraph& GetRenderGraph();
+	ECS::EntityCommandBuffer& GetMainECB();
+	CullingSystem& GetCullingSystem();
+	JPH::Array<Entity>& GetVisibleEntities();
+	float& GetCurrentAlpha();
 
 	[[nodiscard]] void* GetGameState() const;
 	void SetGameState(void* state);

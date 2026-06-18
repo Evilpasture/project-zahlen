@@ -134,6 +134,8 @@ class ZHLN_API ComponentFamily {
 };
 
 class ZHLN_API Registry {
+	friend class EntityCommandBuffer;
+
   public:
 	mutable BufferSync sync;
 
