@@ -228,5 +228,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     # Pass the new argument into your main function
     run_project_manager(
-        args.target, ignore_demo=args.ignore_demo, ignore_tools=args.ignore_tools
+        args.target,
+        ignore_demo=args.ignore_demo,
+        ignore_tools=args.ignore_tools,
+        ignore_inlines=args.ignore_inlines,
     )
