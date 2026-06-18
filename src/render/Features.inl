@@ -1,8 +1,10 @@
 #pragma once
 #include "Features.hpp"
 
+#include <array>
 #include <type_traits>
 #include <utility>
+
 namespace ZHLN::Vk {
 
 // ============================================================================
@@ -40,31 +42,78 @@ template <typename T> [[nodiscard]] constexpr auto GetStructureType() noexcept -
 // ============================================================================
 
 template <typename... Ts>
-FeatureChain<Ts...>::FeatureChain(std::tuple<Ts...>&& t) : _features(std::move(t)) {}
+FeatureChain<Ts...>::FeatureChain(std::tuple<FeatureNode<Ts>...>&& t) : _features(std::move(t)) {}
 
 template <typename... Ts>
 template <typename T, typename Func>
 auto FeatureChain<Ts...>::Require(Func&& configure) && {
 	T feature{};
-	feature.sType = GetStructureType<T>();
-	feature.pNext = nullptr;
 	configure(feature);
-	return FeatureChain<Ts..., T>(std::tuple_cat(std::move(_features), std::make_tuple(feature)));
+	FeatureNode<T> node{.feature = feature, .active = true};
+	return FeatureChain<Ts..., T>(std::tuple_cat(std::move(_features), std::make_tuple(node)));
+}
+
+template <typename... Ts>
+template <typename T, typename Func>
+auto FeatureChain<Ts...>::Optional(bool condition, Func&& configure) && {
+	T feature{};
+	if (condition) {
+		configure(feature);
+	}
+	FeatureNode<T> node{.feature = feature, .active = condition};
+	return FeatureChain<Ts..., T>(std::tuple_cat(std::move(_features), std::make_tuple(node)));
 }
 
 template <typename... Ts> FeatureChain<Ts...>& FeatureChain<Ts...>::Build() {
 	return *this;
 }
 
-template <typename... Ts> auto* FeatureChain<Ts...>::GetRoot() {
-	if constexpr (sizeof...(Ts) > 1) {
-		auto link = []<std::size_t... Is>(std::tuple<Ts...>& t, std::index_sequence<Is...>) {
-			((std::get<sizeof...(Ts) - 1 - Is>(t).pNext = &std::get<sizeof...(Ts) - 2 - Is>(t)),
-			 ...);
-		};
-		link(_features, std::make_index_sequence<sizeof...(Ts) - 1>{});
+template <typename... Ts> const VkPhysicalDeviceFeatures2* FeatureChain<Ts...>::GetRoot() {
+	constexpr size_t N = sizeof...(Ts);
+	if constexpr (N == 0) {
+		return nullptr;
 	}
-	return &std::get<sizeof...(Ts) - 1>(_features);
+
+	const VkPhysicalDeviceFeatures2* rootPtr = nullptr;
+
+	std::apply(
+		[&rootPtr](auto&... nodes) {
+			std::array<void**, N> pNextPtrs{};
+			std::array<void*, N> featurePtrs{};
+			size_t activeCount = 0;
+
+			auto processNode = [&](auto& node) {
+				if (node.active) {
+					using FeatureType = std::remove_reference_t<decltype(node.feature)>;
+					node.feature.sType = GetStructureType<FeatureType>();
+
+					pNextPtrs[activeCount] = reinterpret_cast<void**>(&node.feature.pNext);
+					featurePtrs[activeCount] = &node.feature;
+					activeCount++;
+				}
+			};
+
+			// Fold expression processes nodes sequentially (from first to last)
+			(processNode(nodes), ...);
+
+			// Safely chain active nodes in reverse order: Last -> Second-to-last -> ... -> First ->
+			// nullptr
+			for (size_t i = 0; i < activeCount; ++i) {
+				if (i > 0) {
+					*pNextPtrs[i] = featurePtrs[i - 1];
+				} else {
+					*pNextPtrs[0] = nullptr;
+				}
+			}
+
+			if (activeCount > 0) {
+				rootPtr = reinterpret_cast<const VkPhysicalDeviceFeatures2*>(
+					featurePtrs[activeCount - 1]);
+			}
+		},
+		_features);
+
+	return rootPtr;
 }
 
 // ============================================================================
@@ -72,11 +121,12 @@ template <typename... Ts> auto* FeatureChain<Ts...>::GetRoot() {
 // ============================================================================
 
 template <typename T, typename Func> auto FeatureChainBuilder::Require(Func&& configure) {
-	T feature{};
-	feature.sType = GetStructureType<T>();
-	feature.pNext = nullptr;
-	configure(feature);
-	return FeatureChain<T>(std::make_tuple(feature));
+	return FeatureChain<>().template Require<T>(std::forward<Func>(configure));
+}
+
+template <typename T, typename Func>
+auto FeatureChainBuilder::Optional(bool condition, Func&& configure) {
+	return FeatureChain<>().template Optional<T>(condition, std::forward<Func>(configure));
 }
 
 // ============================================================================
@@ -85,11 +135,10 @@ template <typename T, typename Func> auto FeatureChainBuilder::Require(Func&& co
 
 template <typename T>
 [[nodiscard]] constexpr auto FeatureFactory::Create(auto&& configure) noexcept -> T {
-	T features{}; // Value-initialization (Forces 0 warnings, zeroed memory)
-	features.sType = GetStructureType<T>(); // Stitched safely at compile-time
-
+	T features{};
+	features.sType = GetStructureType<T>();
 	configure(features);
-	return features; // Optimized out via NRVO
+	return features;
 }
 
 } // namespace ZHLN::Vk

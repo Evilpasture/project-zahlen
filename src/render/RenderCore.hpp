@@ -199,6 +199,11 @@ class Context {
 	static auto Create(const ZHLN_InstanceDesc& instance_desc,
 					   const ZHLN_DeviceSelectDesc& select_desc,
 					   const ZHLN_DeviceDesc& device_desc) noexcept -> Context;
+	[[nodiscard(
+		"Vulkan context creation may fail; check validity with Valid() or explicit bool cast")]]
+	static auto Create(VkInstance instance, VkSurfaceKHR surface,
+					   const ZHLN_PhysicalDeviceInfo& physical,
+					   const ZHLN_DeviceDesc& device_desc) noexcept -> Context;
 
 	[[nodiscard]] auto Instance() const noexcept -> VkInstance { return _instance; }
 	[[nodiscard]] auto Device() const noexcept -> VkDevice { return _device.handle; }

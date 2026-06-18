@@ -14,23 +14,35 @@ namespace ZHLN::Vk {
  */
 template <typename T> [[nodiscard]] constexpr auto GetStructureType() noexcept -> VkStructureType;
 
+/**
+ * @brief Wrapper to associate a runtime active/inactive flag with a compile-time feature struct.
+ */
+template <typename T> struct FeatureNode {
+	T feature;
+	bool active = true;
+};
+
 template <typename... Ts> class FeatureChain {
-	std::tuple<Ts...> _features;
+	std::tuple<FeatureNode<Ts>...> _features;
 
   public:
 	FeatureChain() = default;
-	FeatureChain(std::tuple<Ts...>&& t);
+	FeatureChain(std::tuple<FeatureNode<Ts>...>&& t);
 
 	template <typename T, typename Func> auto Require(Func&& configure) &&;
 
+	template <typename T, typename Func> auto Optional(bool condition, Func&& configure) &&;
+
 	FeatureChain<Ts...>& Build();
 
-	auto* GetRoot();
+	const VkPhysicalDeviceFeatures2* GetRoot();
 };
 
 class FeatureChainBuilder {
   public:
 	template <typename T, typename Func> auto Require(Func&& configure);
+
+	template <typename T, typename Func> auto Optional(bool condition, Func&& configure);
 };
 
 struct FeatureFactory {

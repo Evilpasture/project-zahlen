@@ -435,11 +435,17 @@ struct RenderContext::Impl {
 	void InitCullingResources();
 	void CompileShadowPipeline(VkDevice device, const void* shaderData, size_t shaderSize);
 	void InitBindless();
-	void InitPostProcessing(RenderContext& outer);
+	void InitPostProcessing();
 	void SetupUI(GLFWwindow* window);
+
+	// Core Vulkan allocation implementation
+	uint32_t CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB);
+	uint32_t CreateTextureCubeInternal(const void* const* faceData, uint32_t width,
+									   uint32_t height);
 
 	void SortDrawQueue();
 	ZHLN_FrameResult SubmitFrame();
+	void InitializeSystemTextures();
 
 	~Impl() {
 		if (ctx.Device() != VK_NULL_HANDLE) {
