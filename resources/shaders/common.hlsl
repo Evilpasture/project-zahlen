@@ -257,7 +257,7 @@ float CalculateShadow(float4 shadowPos, float3 N, float3 L) {
 
 	if (projCoords.x < 0.0 || projCoords.x > 1.0 || projCoords.y < 0.0 || projCoords.y > 1.0 ||
 		projCoords.z < 0.0 || projCoords.z > 1.0) {
-		return 1.0;
+		return 0.0; // <-- Change from 1.0 to 0.0 to prevent sun leakage indoors
 	}
 
 	float bias = max(0.015 * (1.0 - dot(N, L)), 0.005);

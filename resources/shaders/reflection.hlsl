@@ -60,7 +60,16 @@ struct FrameUniforms {
 [[vk::binding(7, 0)]] ConstantBuffer<FrameUniforms> frame;
 [[vk::binding(8, 0)]] Texture2D brdfLUT;
 [[vk::binding(9, 0)]] SamplerState clampSampler;
-[[vk::binding(18, 0)]] Texture2D<float4> texLighting; // Lit color input from Pass 2
+[[vk::binding(10, 0)]] Texture2D<float4> texLighting; // Lit color input from Pass 2
+
+float3 EvaluateSH(float3 N, float4 sh[9]) {
+	float3 result =
+		sh[0].xyz * 0.282095f + sh[1].xyz * -0.488603f * N.y + sh[2].xyz * 0.488603f * N.z +
+		sh[3].xyz * -0.488603f * N.x + sh[4].xyz * 1.092548f * N.x * N.y +
+		sh[5].xyz * -1.092548f * N.y * N.z + sh[6].xyz * 0.315392f * (3.0f * N.z * N.z - 1.0f) +
+		sh[7].xyz * -1.092548f * N.x * N.z + sh[8].xyz * 0.546274f * (N.x * N.x - N.y * N.y);
+	return max(result, float3(0.0f, 0.0f, 0.0f));
+}
 
 float GetStableWeylNoise(uint2 pixelPos) {
 	uint frameIndex = uint(pc.camPos.w);
@@ -309,13 +318,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
 	float4 normRoughRaw = texNormalRoughness.SampleLevel(smp, input.uv, 0);
 	float roughness = normRoughRaw.z;
-
-	if (roughness > 0.85f)
-		return litColorRaw;
+	float metallic = normRoughRaw.w;
 
 	float4 albedoRaw = texInput.SampleLevel(smp, input.uv, 0);
 	float3 N = UnpackNormalOctahedron(normRoughRaw.xy * 2.0f - 1.0f);
-	float metallic = normRoughRaw.w;
 
 	float3 worldPos = ReconstructWorldPos(input.uv, depth);
 	float3 V = normalize(pc.camPos.xyz - worldPos);
@@ -327,6 +333,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	float3 F_rough = FresnelSchlickRoughness(NdotV, F0, roughness);
 	float3 FssEss = F_rough * envBRDF.x + float3(envBRDF.y, envBRDF.y, envBRDF.y);
 
+	float3 R_corr = R;
 	float boxFade = 0.0f;
 	if (frame.probeMin.w > 0.0f) {
 		float3 boxCenter = (frame.probeMax.xyz + frame.probeMin.xyz) * 0.5f;
@@ -338,15 +345,28 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 		boxFade = smoothstep(1.0f, 0.9f, normDist);
 	}
 
-	float3 correctedR = R;
 	if (boxFade > 0.0f) {
 		float3 boxR = BoxParallaxCorrection(worldPos, R, frame.probeMin.xyz, frame.probeMax.xyz,
 											frame.probePos.xyz);
-		correctedR = lerp(R, boxR, boxFade);
+		R_corr = lerp(R, boxR, boxFade);
 	}
 
-	float3 specularIBL = texEnvMap.SampleLevel(smp, correctedR, roughness * 5.0f).rgb * FssEss;
+	float3 prefilteredColor = texEnvMap.SampleLevel(smp, R_corr, roughness * 5.0f).rgb;
+	float3 specularIBL = prefilteredColor * FssEss;
+
+	// Extract AO from litColorRaw's alpha channel (written by lighting.hlsl)
+	float ao = litColorRaw.a;
 	float3 litColor = litColorRaw.rgb;
+
+	// Calculate Diffuse IBL (Irradiance)
+	float3 irradiance = EvaluateSH(N, frame.sh);
+	float3 Favg = F0 + (1.0f - F0) / 21.0f;
+	float3 FmsEms = (Favg * (1.0f - (envBRDF.x + envBRDF.y))) /
+					(1.0f - Favg * (1.0f - (envBRDF.x + envBRDF.y)));
+	float3 diffuseIBL = (1.0f - FssEss - FmsEms) * (1.0f - metallic) * albedoRaw.rgb * irradiance;
+
+	// Add Diffuse IBL and Multi-Bounce energy compensation to the base lighting
+	litColor += (diffuseIBL * ao) + ((FmsEms * irradiance) * ao);
 
 	if (roughness <= 0.85f && (ENABLE_SSR != 0 || ENABLE_RTR != 0)) {
 		float confidence = 0.0f;
@@ -371,7 +391,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
 		float3 localReflection = lerp(specularIBL, reflectionColor * FssEss, confidence);
 
-		float3 F_refl = lerp(float3(0.15f, 0.15f, 0.15f), litColor.rgb, metallic);
+		float3 F_refl = lerp(float3(0.15f, 0.15f, 0.15f), litColor, metallic);
 		float3 F_term = F_refl + (1.0f - F_refl) * pow(saturate(1.0f - dot(V, N)), 5.0f);
 		float roughnessFade = saturate(1.0f - roughness);
 		float horizonOcclusion = saturate(1.0f + dot(R, N));

@@ -365,7 +365,7 @@ struct RenderContext::Impl {
 	Vk::RenderTarget<ActiveGBuffer::get<0>()> sceneColor;
 	Vk::RenderTarget<ActiveGBuffer::get<1>()> velocityBuffer;
 	Vk::RenderTarget<ActiveGBuffer::get<2>()> normalRoughnessBuffer;
-	Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT> ambientTarget;
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> ambientTarget;
 	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> lightingTarget;
 	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> postProcessTarget;
 	DoubleBuffered<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumBuffers;

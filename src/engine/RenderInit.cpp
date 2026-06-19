@@ -721,7 +721,7 @@ void RenderContext::Impl::InitPostProcessing() {
 	ambientPass.Build(ctx.Device(), ambientShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush, 1,
 					  false);
 
-	// 2. Build Lighting Pass (Additive)
+	// 2. Build Lighting Pass
 	auto lightingShaders =
 		Vk::ShaderStages::Create(ctx.Device(),
 								 {.code = Vk::AsSpirV(&ZHLN_Resource_LightingVertSpv[0]),
@@ -730,11 +730,10 @@ void RenderContext::Impl::InitPostProcessing() {
 								 {.code = Vk::AsSpirV(&ZHLN_Resource_LightingFragSpv[0]),
 								  .size = ZHLN_Resource_LightingFragSpv_Len,
 								  .entry_point = "PSMain"});
-	// Pass 'true' as the final parameter to automatically configure Additive Blending
 	lightingPass.Build(ctx.Device(), lightingShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush, 1,
-					   true);
+					   false);
 
-	// 3. Build Reflection Pass Variants (Additive)
+	// 3. Build Reflection Pass Variants
 	auto reflShaders =
 		Vk::ShaderStages::Create(ctx.Device(),
 								 {.code = Vk::AsSpirV(&ZHLN_Resource_ReflectionVertSpv[0]),
@@ -766,7 +765,7 @@ void RenderContext::Impl::InitPostProcessing() {
 
 	// Build the 4 reflection pipelines concurrently mapped to their specialization constants
 	reflectionPass.BuildVariants(ctx.Device(), reflShaders, {VK_FORMAT_R16G16B16A16_SFLOAT},
-								 &ppPush, 1, specInfos, true);
+								 &ppPush, 1, specInfos, false);
 
 	VkPushConstantRange blitPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,

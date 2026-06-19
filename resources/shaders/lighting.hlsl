@@ -74,7 +74,7 @@ struct ClusterVolume {
 [[vk::binding(10, 0)]] SamplerState clampSampler;
 [[vk::binding(11, 0)]] StructuredBuffer<ClusterVolume> clusterGrid;
 [[vk::binding(12, 0)]] StructuredBuffer<uint> clusterIndexList;
-[[vk::binding(17, 0)]] Texture2D<float4> texAmbient; // Ambient input from Pass 1
+[[vk::binding(13, 0)]] Texture2D<float4> texAmbient; // Ambient input from Pass 1
 
 float3 UnpackNormalOctahedron(float2 H_unpacked) {
 	float3 N = float3(H_unpacked, 1.0 - abs(H_unpacked.x) - abs(H_unpacked.y));
@@ -95,7 +95,7 @@ float CalculateShadow(float4 shadowPos, float3 N, float3 L) {
 	float3 projCoords = shadowPos.xyz / shadowPos.w;
 	if (projCoords.x < 0.0 || projCoords.x > 1.0 || projCoords.y < 0.0 || projCoords.y > 1.0 ||
 		projCoords.z < 0.0 || projCoords.z > 1.0) {
-		return 1.0;
+		return 0.0; // <-- Change from 1.0 to 0.0 to prevent sun leakage indoors
 	}
 	float bias = max(0.015 * (1.0 - dot(N, L)), 0.005);
 	return shadowMap.SampleCmpLevelZero(shadowSampler, projCoords.xy, projCoords.z - bias).r;
@@ -191,7 +191,8 @@ VSOutput VSMain(uint vertexID : SV_VertexID) {
 }
 
 float4 PSMain(VSOutput input) : SV_Target0 {
-	float depth = texDepth.SampleLevel(smp, input.uv, 0).r;
+	float depth =
+		texDepth.SampleLevel(smp, input.uv, 0).r; // <-- FIXED: CHANGED pointSampler TO smp
 	if (depth >= 1.0f)
 		discard;
 
@@ -277,5 +278,5 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	}
 
 	float3 litColor = ambientDiffuseAndGI * albedoRaw.rgb + directSun + directPunctual;
-	return float4(litColor, 1.0f);
+	return float4(litColor, ao);
 }
