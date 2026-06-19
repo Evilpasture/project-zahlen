@@ -46,7 +46,6 @@ struct MeshComponent {
 	uint32_t jointOffset = 0;
 	bool isSkinned = false;
 
-	// --- NEW: Morph Target tracking ---
 	uint32_t morphOffset = 0;
 	uint32_t activeMorphCount = 0;
 	std::array<float, 4> morphWeights = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -59,7 +58,7 @@ struct MeshComponent {
  * @brief Links an ECS Entity to an object in the Physics World.
  */
 struct PhysicsComponent {
-	Entity physicsHandle; // Note: This is the PhysicsWorld handle, NOT the ECS Entity!
+	Entity physicsHandle;
 };
 
 /**
@@ -75,10 +74,8 @@ struct PhysicsStateComponent {
 
 /**
  * @brief Links an ECS Entity to an active movement controller.
- * Members are aligned with floats first to guarantee a zero-padding layout.
  */
 struct MovementComponent {
-	// --- Floats first (Zero-padding alignment) ---
 	float inputX = 0.0f;
 	float inputZ = 0.0f;
 	float currentYVel = 0.0f;
@@ -89,33 +86,27 @@ struct MovementComponent {
 	float landingTimer = 0.0f;
 	float jumpDelayTimer = 0.0f;
 
-	// --- Bools next ---
 	bool jumpRequested = false;
 	bool isGrounded = true;
 	bool wasGrounded = true;
 	bool isSprinting = false;
 };
 
-// 1. Explicitly size the enum to 32-bit
 // NOLINTNEXTLINE(performance-enum-size)
 enum class RagdollState : uint32_t { Inactive = 0, KeyframeMotor = 1, Limp = 2 };
 static_assert(sizeof(RagdollState) == sizeof(uint32_t));
 
-// 2. Restore strongly typed enum classes
 struct RagdollComponent {
-	JPH::Ragdoll* ragdollInstance = nullptr;		 // 8 bytes (Trivial Raw Pointer)
-	RagdollState state = RagdollState::Inactive;	 // 4 bytes
-	RagdollState prevState = RagdollState::Inactive; // 4 bytes
-	uint32_t isAddedToPhysics = 0;					 // 4 bytes
-	uint32_t jointOffset = 0;						 // 4 bytes
-	uint32_t jointCount = 0;						 // 4 bytes
-	uint32_t _padding = 0;							 // 4 bytes (Alignment padding)
-	void* gltfSkin = nullptr;						 // 8 bytes
+	JPH::Ragdoll* ragdollInstance = nullptr;
+	RagdollState state = RagdollState::Inactive;
+	RagdollState prevState = RagdollState::Inactive;
+	uint32_t isAddedToPhysics = 0;
+	uint32_t jointOffset = 0;
+	uint32_t jointCount = 0;
+	uint32_t _padding = 0;
+	void* gltfSkin = nullptr;
 };
 
-/**
- * @brief Associates a string name/tag with an ECS Entity.
- */
 struct NameComponent {
 	String64 name;
 };
@@ -133,38 +124,62 @@ struct TargetCameraComponent {
 	JPH::Vec3 targetOffset = JPH::Vec3(0.0f, 1.3f, 0.0f);
 	float stiffness = 15.0f;
 
-	// --- Camera-bound Post-Processing ---
 	float vignetteIntensity = 1.10f;
 	float vignettePower = 1.50f;
 	float fov = 45.0f;
 	float targetFov = 45.0f;
 
-	// --- Internal State ---
 	JPH::Vec3 smoothTargetPos = JPH::Vec3::sZero();
 	uint32_t hasInitSmoothTarget = 0;
 };
 
-// Updated: now uses JPH SIMD types which increase size/alignment (Vec3 is 16-byte)
-// Ensure FFI consumers (LuaJIT) account for the new size.
 static_assert(sizeof(TargetCameraComponent) == 112,
 			  "TargetCameraComponent layout must remain stable for FFI.");
 
 struct PlayerTagComponent {};
 struct MainCameraTagComponent {};
+
+// --- GLOBAL SETTINGS SINGLETONS ---
 struct GlobalSettingsTagComponent {};
 
 struct AASettingsComponent {
 	AAState state{};
 };
 
+struct PostProcessSettingsComponent {
+	int giMode = 1;
+	float aoRadius = 0.5f;
+	float aoBias = 0.05f;
+	float aoPower = 1.8f;
+	float giIntensity = 1.2f;
+	int giSamples = 8;
+	int useLocalProbe = 1;
+	float vignetteIntensity = 1.10f;
+	float vignettePower = 1.50f;
+	int enableSSR = 1;
+	int enableRTR = 0;
+	int _padding = 0;
+	JPH::Vec3 probeMin = JPH::Vec3(-22.0f, 0.0f, -22.0f);
+	JPH::Vec3 probeMax = JPH::Vec3(22.0f, 12.0f, 22.0f);
+	JPH::Vec3 probePos = JPH::Vec3(0.0f, 4.0f, 0.0f);
+};
+
+struct DebugSettingsComponent {
+	uint64_t debugLineVbo = 0;
+	uint64_t debugLinePipeline = 0;
+	uint32_t debugLineAlbedo = 0;
+	int physicsDrawMode = 0;
+};
+// ------------------------------------
+
 struct GlyphMetric {
-	float x0, y0, x1, y1;		// Normalized coordinate UV bounds in the atlas
-	float xoff, yoff, xadvance; // Layout offsets
+	float x0, y0, x1, y1;
+	float xoff, yoff, xadvance;
 };
 
 struct FontAtlas {
 	uint32_t textureIndex = 0;
-	GlyphMetric glyphs[96]{}; // ASCII 32 - 127
+	GlyphMetric glyphs[96]{};
 };
 
 struct TextComponent {
@@ -177,39 +192,26 @@ struct TextComponent {
 	Mesh mesh{};
 };
 
-// Update UISettingsComponent to hold the full Font state:
 struct UISettingsComponent {
 	uint32_t defaultFontAtlasIdx = 0;
-	FontAtlas fontAtlas; // Optional container keeping assets alive
+	FontAtlas fontAtlas;
 };
 
-/**
- * @brief Holds core identity and asset metadata for items.
- */
 struct ItemBaseComponent {
 	String64 name;
 	uint32_t id = 0;
 	String64 icon;
 };
 
-/**
- * @brief Flags an entity as an interactable/collectable item.
- */
 struct PickupComponent {
 	uint32_t isPickedUp = 0;
 };
 
-/**
- * @brief Defines an action triggered when the player uses/activates the object.
- */
 struct UsableComponent {
 	uint64_t scriptHash = 0;
 };
 static_assert(sizeof(UsableComponent) == 8);
 
-/**
- * @brief Represents an inventory container holding references to other entities.
- */
 struct ContainerComponent {
 	static constexpr size_t MAX_SLOTS = 16;
 	Entity slots[MAX_SLOTS] = {NullEntity, NullEntity, NullEntity, NullEntity,
@@ -217,18 +219,16 @@ struct ContainerComponent {
 							   NullEntity, NullEntity, NullEntity, NullEntity,
 							   NullEntity, NullEntity, NullEntity, NullEntity};
 	uint32_t count = 0;
-	uint32_t _padding = 0; // Alignment boundary padding
+	uint32_t _padding = 0;
 };
 
 struct TriggerComponent {
-	// NOLINTNEXTLINE(performance-enum-size)
 	enum Flags : uint32_t {
 		Active = 1 << 0,
 		PlayerInside = 1 << 1,
-		TriggerOnce = 1 << 2, // Future expansion examples without layout shift
+		TriggerOnce = 1 << 2,
 		RequiresItem = 1 << 3,
 	};
-
 	float radius = 2.0f;
 	uint32_t flags = Active;
 };

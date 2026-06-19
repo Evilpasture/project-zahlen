@@ -64,22 +64,61 @@ void DrawECSProfiler();
 
 namespace {
 
-struct PostProcessComponent {
-	int giMode;
-	float aoRadius;
-	float aoBias;
-	float aoPower;
-	float giIntensity;
-	int giSamples;
-	int useLocalProbe;
-	JPH::Vec3 probeMin;
-	JPH::Vec3 probeMax;
-	JPH::Vec3 probePos;
-	float vignetteIntensity;
-	float vignettePower;
-	int enableSSR;
-	int enableRTR;
-};
+void WriteBenchmarkLog(std::vector<double> frameTimes) {
+	if (frameTimes.empty()) {
+		return;
+	}
+
+	double totalTime = 0.0;
+	for (double t : frameTimes) {
+		totalTime += t;
+	}
+	double avgFrameTime = totalTime / frameTimes.size();
+	double avgFps = 1.0 / avgFrameTime;
+
+	// Sort to calculate percentiles and lows (slowest frames are at the end)
+	std::ranges::sort(frameTimes);
+
+	// 1% Lows: Average of the slowest 1% of frames
+	size_t count1Percent = std::max<size_t>(1, frameTimes.size() / 100);
+	double sum1Percent = 0.0;
+	for (size_t i = frameTimes.size() - count1Percent; i < frameTimes.size(); ++i) {
+		sum1Percent += frameTimes[i];
+	}
+	double low1PercentFps = 1.0 / (sum1Percent / count1Percent);
+
+	// 0.1% Lows: Average of the slowest 0.1% of frames
+	size_t count01Percent = std::max<size_t>(1, frameTimes.size() / 1000);
+	double sum01Percent = 0.0;
+	for (size_t i = frameTimes.size() - count01Percent; i < frameTimes.size(); ++i) {
+		sum01Percent += frameTimes[i];
+	}
+	double low01PercentFps = 1.0 / (sum01Percent / count01Percent);
+
+	// Percentiles
+	double p99 = frameTimes[static_cast<size_t>(frameTimes.size() * 0.99)] * 1000.0;
+	double p999 = frameTimes[static_cast<size_t>(frameTimes.size() * 0.999)] * 1000.0;
+
+	FILE* f = std::fopen("benchmark.log", "w");
+	if (f) {
+		std::println(f, "=========================================");
+		std::println(f, "         ZAHLEN BENCHMARK REPORT         ");
+		std::println(f, "=========================================");
+		std::println(f, "Total Frames:       {}", frameTimes.size());
+		std::println(f, "Total Time (s):     {:.3f}", totalTime);
+		std::println(f, "Average FPS:        {:.2f}", avgFps);
+		std::println(f, "Average Frametime:  {:.2f} ms", avgFrameTime * 1000.0);
+		std::println(f, "1% Low FPS:         {:.2f}", low1PercentFps);
+		std::println(f, "0.1% Low FPS:       {:.2f}", low01PercentFps);
+		std::println(f, "99.0% Percentile:   {:.2f} ms", p99);
+		std::println(f, "99.9% Percentile:   {:.2f} ms", p999);
+		std::println(f, "=========================================");
+		std::fclose(f);
+		ZHLN::Log("Benchmark report written to benchmark.log");
+	} else {
+		ZHLN::Log("Error: Failed to write benchmark.log");
+	}
+}
 
 struct FrustumEdge {
 	int start;
@@ -147,24 +186,12 @@ void Sys_Lighting(Engine& engine, float dt) {
 	sys.Update(engine, dt);
 }
 
-void Sys_ParticleSpawner(Engine& engine, float /*dt*/) {
-	// Demonstrative safe parallel structural updates via the main ECB
-	/*
-	auto& ecb = engine.GetMainECB();
-	for(int i = 0; i < 5; ++i) {
-		Entity e = ecb.CreateEntity();
-		ecb.AddComponent(e, TransformComponent{.position = {0, (float)i, 0}});
-	}
-	*/
-}
+void Sys_ParticleSpawner(Engine& engine, float /*dt*/) {}
 
 void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 	if (engine.GetWindow().IsTTY()) {
 		return;
 	}
-
-	ZHLN_GameState state =
-		*static_cast<ZHLN_GameState*>(ZHLN_GetGameState(reinterpret_cast<ZHLN_Engine*>(&engine)));
 
 	DrawConsole(scriptRunner);
 	DrawInventoryShell(scriptRunner);
@@ -172,19 +199,33 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 	DrawOrientationGizmo(engine.GetCamera());
 	DrawECSProfiler();
 
+	auto& reg = engine.GetRegistry();
+	auto settingsEntities = reg.GetEntitiesWith<GlobalSettingsTagComponent>();
+	if (settingsEntities.empty()) {
+		return;
+	}
+
+	Entity settingsEnt = settingsEntities[0];
+	auto* pp = reg.Get<PostProcessSettingsComponent>(settingsEnt);
+	auto* dbg = reg.Get<DebugSettingsComponent>(settingsEnt);
+	auto* aa = reg.Get<AASettingsComponent>(settingsEnt);
+
+	if ((pp == nullptr) || (dbg == nullptr)) {
+		return;
+	}
+
 	ImGui::Begin("Lighting Workspace Controller");
 	ImGui::SeparatorText("Physics Debug");
-	ImGui::RadioButton("Hidden", &state.physicsDrawMode, 0);
+	ImGui::RadioButton("Hidden", &dbg->physicsDrawMode, 0);
 	ImGui::SameLine();
-	ImGui::RadioButton("Wireframe", &state.physicsDrawMode, 1);
+	ImGui::RadioButton("Wireframe", &dbg->physicsDrawMode, 1);
 	ImGui::SameLine();
-	ImGui::RadioButton("Solid", &state.physicsDrawMode, 2);
+	ImGui::RadioButton("Solid", &dbg->physicsDrawMode, 2);
 	ImGui::Text("PBR Materials & Lights Controller");
 	ImGui::Separator();
 
 	// Dynamically edit PBRComponent on any named floor/ground/lobby entity
 	PBRComponent* floorPbr = nullptr;
-	auto& reg = engine.GetRegistry();
 	for (Entity e : reg.GetEntitiesWith<PBRComponent>()) {
 		if (auto* nameComp = reg.Get<NameComponent>(e)) {
 			std::string nameLower(nameComp->name.c_str());
@@ -217,29 +258,26 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 	}
 
 	ImGui::SeparatorText("Parallax-Corrected Local Reflection Probe");
-	bool useProbe = state.useLocalProbe != 0;
+	bool useProbe = pp->useLocalProbe != 0;
 	if (ImGui::Checkbox("Enable Box Projection", &useProbe)) {
-		state.useLocalProbe = useProbe ? 1 : 0;
+		pp->useLocalProbe = useProbe ? 1 : 0;
 	}
-	if (state.useLocalProbe != 0) {
-		std::array<float, 3> minArr = {state.probeMin[0], state.probeMin[1], state.probeMin[2]};
-		std::array<float, 3> maxArr = {state.probeMax[0], state.probeMax[1], state.probeMax[2]};
-		std::array<float, 3> posArr = {state.probePos[0], state.probePos[1], state.probePos[2]};
+	if (pp->useLocalProbe != 0) {
+		std::array<float, 3> minArr = {pp->probeMin.GetX(), pp->probeMin.GetY(),
+									   pp->probeMin.GetZ()};
+		std::array<float, 3> maxArr = {pp->probeMax.GetX(), pp->probeMax.GetY(),
+									   pp->probeMax.GetZ()};
+		std::array<float, 3> posArr = {pp->probePos.GetX(), pp->probePos.GetY(),
+									   pp->probePos.GetZ()};
 
 		if (ImGui::DragFloat3("Box Min", minArr.data(), 0.1f, -100.0f, 100.0f, "%.1fm")) {
-			state.probeMin[0] = minArr[0];
-			state.probeMin[1] = minArr[1];
-			state.probeMin[2] = minArr[2];
+			pp->probeMin = JPH::Vec3(minArr[0], minArr[1], minArr[2]);
 		}
 		if (ImGui::DragFloat3("Box Max", maxArr.data(), 0.1f, -100.0f, 100.0f, "%.1fm")) {
-			state.probeMax[0] = maxArr[0];
-			state.probeMax[1] = maxArr[1];
-			state.probeMax[2] = maxArr[2];
+			pp->probeMax = JPH::Vec3(maxArr[0], maxArr[1], maxArr[2]);
 		}
 		if (ImGui::DragFloat3("Probe Position", posArr.data(), 0.1f, -100.0f, 100.0f, "%.1fm")) {
-			state.probePos[0] = posArr[0];
-			state.probePos[1] = posArr[1];
-			state.probePos[2] = posArr[2];
+			pp->probePos = JPH::Vec3(posArr[0], posArr[1], posArr[2]);
 		}
 	}
 
@@ -247,72 +285,50 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 	constexpr std::array<const char*, 5> giModesList = {
 		"Off", "SSAO (Ambient Occlusion)", "SSGI (Screen Space GI)", "HBAO (Horizon-Based AO)",
 		"GTAO (Ground Truth AO)"};
-	ImGui::Combo("GI Mode", &state.giMode, giModesList.data(),
-				 static_cast<int>(giModesList.size()));
+	ImGui::Combo("GI Mode", &pp->giMode, giModesList.data(), static_cast<int>(giModesList.size()));
 
-	if (state.giMode == 1) {
-		ImGui::SliderFloat("AO Radius", &state.aoRadius, 0.05f, 2.5f, "%.2fm");
-		ImGui::SliderFloat("AO Bias", &state.aoBias, 0.001f, 0.2f, "%.3f");
-		ImGui::SliderFloat("AO Contrast", &state.aoPower, 0.5f, 5.0f, "%.1fx");
-		ImGui::SliderInt("AO Samples", &state.giSamples, 2, 32);
-	} else if (state.giMode == 2) {
-		ImGui::SliderFloat("Bounce Radius", &state.aoRadius, 0.05f, 2.5f, "%.2fm");
-		ImGui::SliderFloat("Bounce Bias", &state.aoBias, 0.001f, 0.2f, "%.3f");
-		ImGui::SliderFloat("GI Bounce Intensity", &state.giIntensity, 0.1f, 5.0f, "%.1fx");
-		ImGui::SliderInt("GI Samples", &state.giSamples, 2, 32);
-	} else if (state.giMode == 3 || state.giMode == 4) {
-		ImGui::SliderFloat("Search Radius", &state.aoRadius, 0.05f, 3.0f, "%.2fm");
-		ImGui::SliderFloat("Acne Bias", &state.aoBias, 0.001f, 0.2f, "%.3f");
-		ImGui::SliderFloat("Shadow Contrast", &state.aoPower, 0.5f, 6.0f, "%.1fx");
-		ImGui::SliderInt("Search Steps", &state.giSamples, 4, 32);
+	if (pp->giMode == 1) {
+		ImGui::SliderFloat("AO Radius", &pp->aoRadius, 0.05f, 2.5f, "%.2fm");
+		ImGui::SliderFloat("AO Bias", &pp->aoBias, 0.001f, 0.2f, "%.3f");
+		ImGui::SliderFloat("AO Contrast", &pp->aoPower, 0.5f, 5.0f, "%.1fx");
+		ImGui::SliderInt("AO Samples", &pp->giSamples, 2, 32);
+	} else if (pp->giMode == 2) {
+		ImGui::SliderFloat("Bounce Radius", &pp->aoRadius, 0.05f, 2.5f, "%.2fm");
+		ImGui::SliderFloat("Bounce Bias", &pp->aoBias, 0.001f, 0.2f, "%.3f");
+		ImGui::SliderFloat("GI Bounce Intensity", &pp->giIntensity, 0.1f, 5.0f, "%.1fx");
+		ImGui::SliderInt("GI Samples", &pp->giSamples, 2, 32);
+	} else if (pp->giMode == 3 || pp->giMode == 4) {
+		ImGui::SliderFloat("Search Radius", &pp->aoRadius, 0.05f, 3.0f, "%.2fm");
+		ImGui::SliderFloat("Acne Bias", &pp->aoBias, 0.001f, 0.2f, "%.3f");
+		ImGui::SliderFloat("Shadow Contrast", &pp->aoPower, 0.5f, 6.0f, "%.1fx");
+		ImGui::SliderInt("Search Steps", &pp->giSamples, 4, 32);
 	}
 
 	ImGui::SeparatorText("Camera Vignette");
-	ImGui::SliderFloat("Vignette Intensity", &state.vignetteIntensity, 0.0f, 2.5f, "%.2f");
-	if (state.vignetteIntensity > 0.0f) {
-		ImGui::SliderFloat("Vignette Power", &state.vignettePower, 0.1f, 6.0f, "%.2f");
+	ImGui::SliderFloat("Vignette Intensity", &pp->vignetteIntensity, 0.0f, 2.5f, "%.2f");
+	if (pp->vignetteIntensity > 0.0f) {
+		ImGui::SliderFloat("Vignette Power", &pp->vignettePower, 0.1f, 6.0f, "%.2f");
 	}
 
-	bool useSsr = state.enableSSR != 0;
+	bool useSsr = pp->enableSSR != 0;
 	if (ImGui::Checkbox("Enable SSR", &useSsr)) {
-		state.enableSSR = useSsr ? 1 : 0;
+		pp->enableSSR = useSsr ? 1 : 0;
 	}
 
-	bool useRtr = state.enableRTR != 0;
+	bool useRtr = pp->enableRTR != 0;
 	if (ImGui::Checkbox("Enable Hardware RTR", &useRtr)) {
-		state.enableRTR = useRtr ? 1 : 0;
+		pp->enableRTR = useRtr ? 1 : 0;
 	}
 
 	ImGui::End();
-
-	ZHLN_SetGameState(reinterpret_cast<ZHLN_Engine*>(&engine), &state);
-
-	for (Entity e : reg.GetEntitiesWith<PostProcessComponent>()) {
-		if (auto* pp = reg.Get<PostProcessComponent>(e)) {
-			pp->giMode = state.giMode;
-			pp->aoRadius = state.aoRadius;
-			pp->aoBias = state.aoBias;
-			pp->aoPower = state.aoPower;
-			pp->giIntensity = state.giIntensity;
-			pp->giSamples = state.giSamples;
-			pp->useLocalProbe = state.useLocalProbe;
-			pp->probeMin = JPH::Vec3(state.probeMin[0], state.probeMin[1], state.probeMin[2]);
-			pp->probeMax = JPH::Vec3(state.probeMax[0], state.probeMax[1], state.probeMax[2]);
-			pp->probePos = JPH::Vec3(state.probePos[0], state.probePos[1], state.probePos[2]);
-			pp->vignetteIntensity = state.vignetteIntensity;
-			pp->vignettePower = state.vignettePower;
-			pp->enableSSR = state.enableSSR;
-			pp->enableRTR = state.enableRTR;
-		}
-	}
 }
 
 void Sys_PostProcess(Engine& engine, float /*dt*/) {
 	auto& reg = engine.GetRegistry();
 	auto& rc = engine.GetRenderContext();
 
-	for (Entity e : reg.GetEntitiesWith<PostProcessComponent>()) {
-		if (auto* pp = reg.Get<PostProcessComponent>(e)) {
+	for (Entity e : reg.GetEntitiesWith<PostProcessSettingsComponent>()) {
+		if (auto* pp = reg.Get<PostProcessSettingsComponent>(e)) {
 			Renderer::SetGISettings(rc, {.mode = pp->giMode,
 										 .aoRadius = pp->aoRadius,
 										 .aoBias = pp->aoBias,
@@ -334,41 +350,48 @@ void DebugDrawSystem(Engine& engine) {
 	}
 
 	auto& rc = engine.GetRenderContext();
-	ZHLN_GameState state =
-		*static_cast<ZHLN_GameState*>(ZHLN_GetGameState(reinterpret_cast<ZHLN_Engine*>(&engine)));
+	auto& reg = engine.GetRegistry();
 
-	if (state.debugLineVbo != 0) {
-		Mesh debugMesh = {.vertexBuffer = static_cast<BufferHandle>(state.debugLineVbo),
-						  .vertexCount = 36};
-		Material debugMat = {.pipeline = static_cast<PipelineHandle>(state.debugLinePipeline),
-							 .albedoIndex = state.debugLineAlbedo};
+	auto settingsEntities = reg.GetEntitiesWith<GlobalSettingsTagComponent>();
+	if (settingsEntities.empty()) {
+		return;
+	}
 
-		debugMat.baseColorFactor[0] = 0.0f;
-		debugMat.baseColorFactor[1] = 1.0f;
-		debugMat.baseColorFactor[2] = 1.0f;
-		debugMat.baseColorFactor[3] = 1.0f;
+	auto* dbg = reg.Get<DebugSettingsComponent>(settingsEntities[0]);
+	if ((dbg == nullptr) || dbg->debugLineVbo == 0) {
+		return;
+	}
 
-		auto frustumCorners = cullingSystem.GetFrustumCorners();
-		for (auto s_FrustumEdge : s_FrustumEdges) {
-			JPH::Vec3 pA = frustumCorners[s_FrustumEdge.start];
-			JPH::Vec3 pB = frustumCorners[s_FrustumEdge.end];
+	Mesh debugMesh = {.vertexBuffer = static_cast<BufferHandle>(dbg->debugLineVbo),
+					  .vertexCount = 36};
+	Material debugMat = {.pipeline = static_cast<PipelineHandle>(dbg->debugLinePipeline),
+						 .albedoIndex = dbg->debugLineAlbedo};
 
-			JPH::Vec3 v = pB - pA;
-			float len = v.Length();
-			if (len < 1e-4f) {
-				continue;
-			}
+	debugMat.baseColorFactor[0] = 0.0f;
+	debugMat.baseColorFactor[1] = 1.0f;
+	debugMat.baseColorFactor[2] = 1.0f;
+	debugMat.baseColorFactor[3] = 1.0f;
 
-			JPH::Vec3 dir = v / len;
-			JPH::Vec3 mid = (pA + pB) * 0.5f;
+	auto frustumCorners = cullingSystem.GetFrustumCorners();
+	for (auto s_FrustumEdge : s_FrustumEdges) {
+		JPH::Vec3 pA = frustumCorners[s_FrustumEdge.start];
+		JPH::Vec3 pB = frustumCorners[s_FrustumEdge.end];
 
-			JPH::Quat rot = JPH::Quat::sFromTo(JPH::Vec3::sAxisZ(), dir);
-			JPH::Mat44 lineTransform = Math::CreateTransform(mid, rot, JPH::Vec3(1.0f, 1.0f, len));
-
-			Renderer::Draw(
-				rc, debugMat, debugMesh,
-				{.transform = lineTransform, .prevTransform = lineTransform, .cullRadius = len});
+		JPH::Vec3 v = pB - pA;
+		float len = v.Length();
+		if (len < 1e-4f) {
+			continue;
 		}
+
+		JPH::Vec3 dir = v / len;
+		JPH::Vec3 mid = (pA + pB) * 0.5f;
+
+		JPH::Quat rot = JPH::Quat::sFromTo(JPH::Vec3::sAxisZ(), dir);
+		JPH::Mat44 lineTransform = Math::CreateTransform(mid, rot, JPH::Vec3(1.0f, 1.0f, len));
+
+		Renderer::Draw(
+			rc, debugMat, debugMesh,
+			{.transform = lineTransform, .prevTransform = lineTransform, .cullRadius = len});
 	}
 }
 
@@ -401,17 +424,15 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 		return std::unexpected(RenderFrameResult::Error);
 	}
 
-	ZHLN_GameState state =
-		*static_cast<ZHLN_GameState*>(ZHLN_GetGameState(reinterpret_cast<ZHLN_Engine*>(&engine)));
-
 	int enableRTR = 0;
 	JPH::Vec4 probeMin(0, 0, 0, 0);
 	JPH::Vec4 probeMax(0, 0, 0, 0);
 	JPH::Vec4 probePos(0, 0, 0, 0);
+	int physicsDrawMode = 0;
 
 	auto settingsEntities = reg.GetEntitiesWith<GlobalSettingsTagComponent>();
 	if (!settingsEntities.empty()) {
-		if (auto* pp = reg.Get<PostProcessComponent>(settingsEntities[0])) {
+		if (auto* pp = reg.Get<PostProcessSettingsComponent>(settingsEntities[0])) {
 			enableRTR = pp->enableRTR;
 			probeMin = JPH::Vec4(pp->probeMin.GetX(), pp->probeMin.GetY(), pp->probeMin.GetZ(),
 								 pp->useLocalProbe ? 1.0f : 0.0f);
@@ -419,6 +440,9 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 				JPH::Vec4(pp->probeMax.GetX(), pp->probeMax.GetY(), pp->probeMax.GetZ(), 0.0f);
 			probePos =
 				JPH::Vec4(pp->probePos.GetX(), pp->probePos.GetY(), pp->probePos.GetZ(), 0.0f);
+		}
+		if (auto* dbg = reg.Get<DebugSettingsComponent>(settingsEntities[0])) {
+			physicsDrawMode = dbg->physicsDrawMode;
 		}
 	}
 
@@ -458,7 +482,7 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 	Renderer::SetFrameData(rc, uniforms, shadowProjView);
 	Renderer::SetMatrices(rc, vp, unjitteredVp);
 
-	if (state.physicsDrawMode == 0) { // Only draw standard world when debug is Off
+	if (physicsDrawMode == 0) { // Only draw standard world when debug is Off
 		for (Entity e : visibleEntities) {
 			auto* mesh = reg.Get<MeshComponent>(e);
 			if (mesh == nullptr) {
@@ -512,7 +536,7 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 
 	DebugDrawSystem(engine);
 
-	if (state.physicsDrawMode > 0) {
+	if (physicsDrawMode > 0) {
 		ZHLN_PROFILE_SCOPE("Physics Debug Extract & Upload");
 
 		static Material debugLineMat = {.pipeline = PipelineHandle::Invalid};
@@ -535,7 +559,7 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 			debugSolidMat.albedoIndex = 1;
 		}
 
-		bool isWireframe = (state.physicsDrawMode == 1);
+		bool isWireframe = (physicsDrawMode == 1);
 		auto debugData =
 			Physics::GetDebugDrawData(engine.GetPhysicsContext(), true, true, isWireframe);
 
@@ -624,7 +648,7 @@ void BuildSystemGraphs(Engine& engine) {
 
 	updateGraph.AddSystem({.update_func = Sys_PostProcess,
 						   .name = "PostProcessSystem",
-						   .access_pattern = {Read<PostProcessComponent>()},
+						   .access_pattern = {Read<PostProcessSettingsComponent>()},
 						   .enabled = true});
 
 	updateGraph.AddSystem(
@@ -679,44 +703,14 @@ bool InitializeGame(Engine& engine) {
 	Mesh lineMesh = AssetFactory::CreateBox(rc, {0.01f, 0.01f, 0.5f}, {0.0f, 1.0f, 1.0f, 1.0f});
 	Material lineMat = AssetFactory::CreateBasicMaterial(rc);
 
-	ZHLN_GameState defaultState{};
-	defaultState.giMode = 1;
-	defaultState.aoRadius = 0.5f;
-	defaultState.aoBias = 0.05f;
-	defaultState.aoPower = 1.8f;
-	defaultState.giIntensity = 1.2f;
-	defaultState.giSamples = 8;
-	defaultState.useLocalProbe = 1;
-	defaultState.probeMin[0] = -22.0f;
-	defaultState.probeMin[1] = 0.0f;
-	defaultState.probeMin[2] = -22.0f;
-	defaultState.probeMax[0] = 22.0f;
-	defaultState.probeMax[1] = 12.0f;
-	defaultState.probeMax[2] = 22.0f;
-	defaultState.probePos[0] = 0.0f;
-	defaultState.probePos[1] = 4.0f;
-	defaultState.probePos[2] = 0.0f;
-	defaultState.vignetteIntensity = 1.10f;
-	defaultState.vignettePower = 1.50f;
-	defaultState.enableSSR = 1;
-	defaultState.enableTAA = 1;
-	defaultState.taaFeedback = 0.95f;
-
-	defaultState.debugLineVbo = static_cast<uint64_t>(lineMesh.vertexBuffer);
-	defaultState.debugLinePipeline = static_cast<uint64_t>(lineMat.pipeline);
-	defaultState.debugLineAlbedo = lineMat.albedoIndex;
-	defaultState.physicsDrawMode = 0;
-
-	ZHLN_SetGameState(reinterpret_cast<ZHLN_Engine*>(&engine), &defaultState);
-
 	reg.RegisterComponents<
 		TransformComponent, MeshComponent, PhysicsComponent, PhysicsStateComponent,
 		MovementComponent, ALife::ALifeComponent, RagdollComponent, NameComponent,
 		TargetCameraComponent, InputSystem::InputComponent, LightingSystem::LightComponent,
-		PostProcessComponent, CameraSystem::CameraComponent, PlayerTagComponent,
+		PostProcessSettingsComponent, CameraSystem::CameraComponent, PlayerTagComponent,
 		MainCameraTagComponent, GlobalSettingsTagComponent, AASettingsComponent, TextComponent,
 		UISettingsComponent, AudioSourceComponent, PBRComponent, ItemBaseComponent, PickupComponent,
-		UsableComponent, ContainerComponent, TriggerComponent>();
+		UsableComponent, ContainerComponent, TriggerComponent, DebugSettingsComponent>();
 
 	auto groundShape =
 		Physics::GetOrCreateShape(pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
@@ -755,25 +749,12 @@ bool InitializeGame(Engine& engine) {
 
 	Entity settingsEntity = reg.Create();
 	reg.Add(settingsEntity, GlobalSettingsTagComponent{});
+	reg.Add(settingsEntity, PostProcessSettingsComponent{});
 	reg.Add(settingsEntity,
-			PostProcessComponent{
-				.giMode = defaultState.giMode,
-				.aoRadius = defaultState.aoRadius,
-				.aoBias = defaultState.aoBias,
-				.aoPower = defaultState.aoPower,
-				.giIntensity = defaultState.giIntensity,
-				.giSamples = defaultState.giSamples,
-				.useLocalProbe = defaultState.useLocalProbe,
-				.probeMin = JPH::Vec3(defaultState.probeMin[0], defaultState.probeMin[1],
-									  defaultState.probeMin[2]),
-				.probeMax = JPH::Vec3(defaultState.probeMax[0], defaultState.probeMax[1],
-									  defaultState.probeMax[2]),
-				.probePos = JPH::Vec3(defaultState.probePos[0], defaultState.probePos[1],
-									  defaultState.probePos[2]),
-				.vignetteIntensity = defaultState.vignetteIntensity,
-				.vignettePower = defaultState.vignettePower,
-				.enableSSR = defaultState.enableSSR,
-				.enableRTR = defaultState.enableRTR});
+			DebugSettingsComponent{.debugLineVbo = static_cast<uint64_t>(lineMesh.vertexBuffer),
+								   .debugLinePipeline = static_cast<uint64_t>(lineMat.pipeline),
+								   .debugLineAlbedo = lineMat.albedoIndex,
+								   .physicsDrawMode = 0});
 
 	Entity areaLight = reg.Create();
 	reg.Add(areaLight, LightingSystem::LightComponent{.type = 3,
@@ -812,22 +793,19 @@ bool InitializeGame(Engine& engine) {
 										   .twoSided = 0},
 			TransformComponent{.position = {5.0f, 4.0f, 0.0f}});
 
-	// 1. Create the entity and register an empty settings component first
 	Entity uiSettings = reg.Create();
 	reg.Add(uiSettings, UISettingsComponent{});
-
-	// 2. Now call the loader. It will find the component, bake the font, and populate the fields
 	AssetFactory::CreateFontAtlasTexture(rc);
 
-	Entity textEnt = reg.Create();
-	reg.Add(
-		textEnt,
-		TextComponent{.text = "Zahlen Engine - TADC Dorm Showcase",
-					  .x = 25.0f,
-					  .y = 25.0f,
-					  .scale = 2.5f,
-					  .color = {0.9f, 0.1f, 0.1f, 1.0f},
-					  .fontIndex = reg.Get<UISettingsComponent>(uiSettings)->defaultFontAtlasIdx});
+	// Entity textEnt = reg.Create();
+	// reg.Add(
+	// 	textEnt,
+	// 	TextComponent{.text = "Zahlen Engine - TADC Dorm Showcase",
+	// 				  .x = 25.0f,
+	// 				  .y = 25.0f,
+	// 				  .scale = 2.5f,
+	// 				  .color = {0.9f, 0.1f, 0.1f, 1.0f},
+	// 				  .fontIndex = reg.Get<UISettingsComponent>(uiSettings)->defaultFontAtlasIdx});
 
 	BuildSystemGraphs(engine);
 
@@ -837,17 +815,14 @@ bool InitializeGame(Engine& engine) {
 void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, ScriptRunner& scriptRunner,
 				FileWatcher& gameplayWatcher) {
 	static InputSystem inputSystem;
-	inputSystem.Update(engine); // Captures raw mouse/keyboard deltas
+	inputSystem.Update(engine);
 	UISystem(engine, scriptRunner);
 
-	// --- FIX: Execute the Camera Systems FIRST to resolve the camera's new yaw/pitch orientation
-	// --- before we translate the player's movement vectors relative to it. ---
 	static TargetCameraSystem targetCamSys;
 	static CameraSystem camSys;
 	targetCamSys.Update(engine, dt, engine.GetCurrentAlpha());
 	camSys.Update(engine, dt, engine.GetCurrentAlpha());
 
-	// Now translating inputs will use the newly updated camera angles for this frame
 	inputSystem.PlayerInputTranslate(engine, engine.GetCamera());
 
 	float cappedDt = std::min(dt, 0.1f);
@@ -928,7 +903,8 @@ std::expected<std::unique_ptr<Engine>, EngineError> InitializeEngine(CommandLine
 	return engine;
 }
 
-std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, uint32_t fpsLimit) {
+std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine,
+											  const CommandLineOptions& options) {
 	ScriptRunner scriptRunner;
 	FileWatcher gameplayWatcher("scripts/gameplay.lua");
 
@@ -952,7 +928,13 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, ui
 	scriptRunner.RunFile("scripts/gameplay.lua");
 
 	float physicsAccumulator = 0.0f;
-	const double targetFrameTime = fpsLimit > 0 ? 1.0 / static_cast<double>(fpsLimit) : 0.0;
+	const double targetFrameTime =
+		options.fpsLimit > 0 ? 1.0 / static_cast<double>(options.fpsLimit) : 0.0;
+
+	std::vector<double> frameTimes;
+	if (options.benchmark) {
+		frameTimes.reserve(10000); // Pre-allocate memory to avoid allocation spikes during gameplay
+	}
 
 	auto frameStart = std::chrono::high_resolution_clock::now();
 
@@ -968,11 +950,12 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, ui
 		double elapsed = std::chrono::duration<double>(frameEnd - frameStart).count();
 		frameStart = std::chrono::high_resolution_clock::now();
 
-		// --- FIX: Extract raw, unsmoothed delta time for the physics accumulator ---
+		if (options.benchmark) {
+			frameTimes.push_back(elapsed);
+		}
+
 		float rawDt = std::min(static_cast<float>(elapsed), 0.1f);
 
-		// Keep the target snapping purely for optional display or script updates if desired,
-		// but pass the rawDt to UpdateGame so the accumulator stays in perfect sync.
 		double target = elapsed;
 		constexpr std::array<double, 7> snapTargets = {{1.0 / 60.0, 1.0 / 75.0, 1.0 / 90.0,
 														1.0 / 120.0, 1.0 / 144.0, 1.0 / 240.0,
@@ -997,11 +980,8 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, ui
 			continue;
 		}
 
-		// Pass rawDt here so physicsAccumulator += rawDt matches wall-clock time exactly
 		UpdateGame(*engine, rawDt, physicsAccumulator, scriptRunner, gameplayWatcher);
 
-		// RenderGame can continue to use either rawDt or frameTime (rawDt is recommended for fluid
-		// motion)
 		auto render_res = RenderGame(*engine, rawDt);
 		if (!render_res) {
 			if (render_res.error() == RenderFrameResult::DeviceLost) {
@@ -1010,7 +990,7 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, ui
 			}
 		}
 
-		if (fpsLimit > 0) {
+		if (options.fpsLimit > 0) {
 			auto now = std::chrono::high_resolution_clock::now();
 			double frameElapsed = std::chrono::duration<double>(now - frameStart).count();
 			if (frameElapsed < targetFrameTime) {
@@ -1036,6 +1016,10 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, ui
 
 	TaskSystem::Shutdown();
 
+	if (options.benchmark && !frameTimes.empty()) {
+		WriteBenchmarkLog(frameTimes);
+	}
+
 	return EXIT_SUCCESS;
 }
 
@@ -1044,7 +1028,7 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, ui
 extern auto RunGame(const ZHLN::CommandLineOptions& options) {
 	auto result = InitializeEngine(options)
 					  .and_then([&options](std::unique_ptr<Engine> engine) {
-						  return RunEngineLoop(std::move(engine), options.fpsLimit);
+						  return RunEngineLoop(std::move(engine), options);
 					  })
 					  .transform_error([](const EngineError& err) -> int {
 						  if (!err.msg.empty() && !err.silent) {

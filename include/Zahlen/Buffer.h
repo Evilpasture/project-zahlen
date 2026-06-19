@@ -47,10 +47,6 @@ typedef struct ZHLN_BufferView {
 	uint32_t owner_type;
 } ZHLN_BufferView;
 
-// SoA Access
-ZHLN_API ZHLN_BufferView ZHLN_GetPhysicsPositions(struct ZHLN_Engine* engine);
-ZHLN_API ZHLN_BufferView ZHLN_GetPhysicsLinearVelocities(struct ZHLN_Engine* engine);
-
 #ifdef __cplusplus
 } // extern "C"
 
@@ -58,6 +54,8 @@ ZHLN_API ZHLN_BufferView ZHLN_GetPhysicsLinearVelocities(struct ZHLN_Engine* eng
 namespace ZHLN {
 // C++ alias
 using BufferView = ::ZHLN_BufferView;
-static_assert((std::is_trivially_default_constructible_v<BufferView> && std::is_trivially_copyable_v<BufferView>), "BufferView must be trivial for FFI safety!");
+static_assert((std::is_trivially_default_constructible_v<BufferView> &&
+			   std::is_trivially_copyable_v<BufferView>),
+			  "BufferView must be trivial for FFI safety!");
 } // namespace ZHLN
 #endif

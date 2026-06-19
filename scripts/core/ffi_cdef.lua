@@ -20,26 +20,22 @@ if not ok then
             size_t   shape[4];
             size_t   strides[4];
             uint32_t flags;
+            uint32_t owner_type;
         } ZHLN_BufferView;
 
         typedef struct ZHLN_Engine ZHLN_Engine;
-        ZHLN_BufferView ZHLN_GetPhysicsPositions(ZHLN_Engine* engine);
-        ZHLN_BufferView ZHLN_GetPhysicsLinearVelocities(ZHLN_Engine* engine);
-        void ZHLN_ReleaseBuffer(void* owner);
 
-        ZHLN_BufferView ZHLN_GetECSBuffer(ZHLN_Engine* engine, const char* componentName);
-        ZHLN_BufferView ZHLN_GetECSEntities(ZHLN_Engine* engine, const char* componentName);
+        // The singular Dispatch mechanism handling ALL C/Lua interactions.
+        uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine, const char* cmd, const void* args);
+        ZHLN_Engine* ZHLN_GetEngineContext(void);
 
-        int ZHLN_IsKeyDown(ZHLN_Engine* engine, uint8_t key);
-        void ZHLN_GetMouseDelta(ZHLN_Engine* engine, float* outX, float* outY);
-        float ZHLN_GetCameraYaw(struct ZHLN_Engine* engine);
-        float ZHLN_GetCameraFOV(struct ZHLN_Engine* engine);
-        void ZHLN_SetCameraFOV(struct ZHLN_Engine* engine, float fov);
-
-        void ZHLN_SetCharacterVelocity(ZHLN_Engine* engine, uint64_t physicsHandle, float x, float y, float z);
-        int ZHLN_IsCharacterOnGround(ZHLN_Engine* engine, uint64_t physicsHandle);
-        void ZHLN_SetLinearVelocity(ZHLN_Engine* engine, uint64_t physicsHandle, float x, float y, float z);
-        void ZHLN_AddImpulse(struct ZHLN_Engine* engine, uint64_t entityHandle, float x, float y, float z);
+        typedef struct ZHLN_RaycastResult {
+            uint64_t entity;
+            double px, py, pz;
+            float nx, ny, nz;
+            float fraction;
+            int hasHit;
+        } ZHLN_RaycastResult;
 
         typedef struct ZHLN_ContactEventF {
             uint64_t body1;
@@ -69,24 +65,6 @@ if not ok then
             uint32_t sub1, sub2;
         } __attribute__((aligned(128))) ZHLN_ContactEventD;
 
-        ZHLN_BufferView ZHLN_GetPhysicsContactEvents(ZHLN_Engine* engine);
-
-        typedef struct ZHLN_RaycastResult {
-            uint64_t entity;
-            double px, py, pz;
-            float nx, ny, nz;
-            float fraction;
-            int hasHit;
-        } ZHLN_RaycastResult;
-
-        ZHLN_RaycastResult ZHLN_Raycast(ZHLN_Engine* engine,
-                                        double ox, double oy, double oz,
-                                        float dx, float dy, float dz,
-                                        float maxDist, uint64_t ignoreEntity);
-
-        void ZHLN_SetMovementInput(ZHLN_Engine* handle, uint64_t entityRaw, float x, float z);
-        void ZHLN_SetJumpIntent(ZHLN_Engine* handle, uint64_t entityRaw);
-
         typedef struct MovementComponent {
             float inputX;
             float inputZ;
@@ -103,22 +81,6 @@ if not ok then
             bool  isSprinting;
         } MovementComponent;
 
-        // Expose our new C-API bridge function
-        void* ZHLN_GetComponent(ZHLN_Engine* engine, uint64_t entityRaw, const char* componentName);
-        void* ZHLN_AddComponent(ZHLN_Engine* engine, uint64_t entityRaw, const char* componentName);
-
-
-        typedef struct ZHLN_LuaChannel ZHLN_LuaChannel;
-
-        ZHLN_LuaChannel* ZHLN_CreateLuaChannel(void);
-        void ZHLN_DestroyLuaChannel(ZHLN_LuaChannel* chan);
-        void ZHLN_PushLuaChannel(ZHLN_Engine* engine, ZHLN_LuaChannel* chan, struct lua_State* L);
-        void ZHLN_PopLuaChannel(ZHLN_Engine* engine, ZHLN_LuaChannel* chan, struct lua_State* L);
-
-        void ZHLN_PlayOneShot(ZHLN_Engine* engine, const char* filepath, float volume);
-        void ZHLN_PlayOneShot3D(ZHLN_Engine* engine, const char* filepath, float x, float y, float z, float volume);
-        void ZHLN_PlayProceduralBeep(ZHLN_Engine* engine, float frequency, float duration, float volume);
-
         typedef struct RagdollComponent {
             void*    ragdollInstance;
             uint32_t state;
@@ -130,15 +92,30 @@ if not ok then
             void*    gltfSkin;
         } RagdollComponent;
 
-
         typedef struct NameComponent {
             char name[64];
             size_t len;
         } NameComponent;
 
-        void ZHLN_LogInventoryShell(const char* msg);
+        // --- NEW SINGLETON SETTINGS COMPONENTS ---
+        typedef struct AAState {
+            uint32_t mode;
+            float taaFeedback;
+            float jitterX;
+            float jitterY;
+            float prevJitterX;
+            float prevJitterY;
+            uint32_t frameIndex;
+            float fxaaSubpix;
+            float fxaaEdgeThreshold;
+            float fxaaEdgeThresholdMin;
+        } AAState;
 
-        typedef struct ZHLN_GameState {
+        typedef struct AASettingsComponent {
+            AAState state;
+        } AASettingsComponent;
+
+        typedef struct PostProcessSettingsComponent {
             int giMode;
             float aoRadius;
             float aoBias;
@@ -146,79 +123,33 @@ if not ok then
             float giIntensity;
             int giSamples;
             int useLocalProbe;
-            float probeMin[3];
-            float probeMax[3];
-            float probePos[3];
             float vignetteIntensity;
             float vignettePower;
             int enableSSR;
+            int enableRTR;
+            int _padding;
+            float probeMin[4]; // Packed float4 / Vec3
+            float probeMax[4];
+            float probePos[4];
+        } PostProcessSettingsComponent;
 
-            // Globals decoupled from GameState
-
-            int enableTAA;
-            float taaFeedback;
-
+        typedef struct DebugSettingsComponent {
             uint64_t debugLineVbo;
             uint64_t debugLinePipeline;
-            uint32_t albedoIdx;
-            int enableRTR;
+            uint32_t debugLineAlbedo;
             int physicsDrawMode;
-        } ZHLN_GameState;
+        } DebugSettingsComponent;
 
         typedef struct TransformComponent {
-            float position[4]; // 16 bytes (alignas(16) JPH::Vec3)
-            float rotation[4]; // 16 bytes (alignas(16) JPH::Quat)
-            float scale[4];    // 16 bytes (alignas(16) JPH::Vec3)
+            float position[4];
+            float rotation[4];
+            float scale[4];
         } TransformComponent;
 
         typedef struct PBRComponent {
             float roughness;
             float metallic;
         } PBRComponent;
-
-        // Binary Command argument packing
-        typedef struct SpawnPrefabArgs {
-            char path[256];
-            float px, py, pz;
-            int createPhysics;
-            int isStatic;
-            int isAnimated;
-            uint32_t maxCount;
-            uint64_t* outEntities;
-        } __attribute__((packed)) SpawnPrefabArgs;
-
-        typedef struct SetupRagdollArgs {
-            uint64_t playerEntity;
-            uint32_t count;
-            uint64_t* visualParts;
-        } __attribute__((packed)) SetupRagdollArgs;
-
-        typedef struct SpawnEntityArgs {
-            uint8_t shapeType;
-            float p1, p2, p3;
-            float px, py, pz;
-            float rx, ry, rz, rw;
-            float r, g, b, a;
-            uint8_t isStatic;
-        } __attribute__((packed)) SpawnEntityArgs;
-
-        typedef struct CreateMaterialArgs {
-            float r, g, b, a;
-            uint64_t* outPipeline;
-            uint32_t* outAlbedo;
-        } __attribute__((packed)) CreateMaterialArgs;
-
-        typedef struct RegisterDebugLineArgs {
-            uint64_t meshVbo;
-            uint64_t pipelineHandle;
-            uint32_t albedoIdx;
-        } __attribute__((packed)) RegisterDebugLineArgs;
-
-        ZHLN_Engine* ZHLN_GetEngineContext(void);
-        void* ZHLN_GetGameState(ZHLN_Engine* engine);
-        void ZHLN_RegisterGameState(ZHLN_Engine* engine, void* state_ptr);
-        uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine, const char* cmd, const void* args);
-        float ZHLN_GetTotalTime(ZHLN_Engine* engine);
 
         typedef struct HierarchyComponent {
             uint64_t parent;
@@ -264,10 +195,6 @@ if not ok then
             uint32_t defaultFontAtlasIdx;
         } UISettingsComponent;
 
-        uint64_t ZHLN_CreateEntity(ZHLN_Engine* engine);
-
-        void ZHLN_DestroyEntity(ZHLN_Engine* engine, uint64_t entityRaw);
-
         typedef struct String64 {
             char data[64];
             size_t len;
@@ -298,9 +225,66 @@ if not ok then
             uint32_t flags;
         } TriggerComponent;
 
-        void ZHLN_UnprojectScreenToWorld(ZHLN_Engine* engine, float ndcX, float ndcY, double* out_ox, double* out_oy, double* out_oz, float* out_dx, float* out_dy, float* out_dz);
-        void ZHLN_AddImpulseAt(ZHLN_Engine* engine, uint64_t entityHandle, float ix, float iy, float iz, double px, double py, double pz);
+        // ==============================================================================
+        // COMMAND PAYLOAD ARGS STRUCTS
+        // ==============================================================================
+        #pragma pack(push, 1)
+        typedef struct GetBufferArgs { ZHLN_BufferView* outView; } GetBufferArgs;
+        typedef struct GetECSBufferArgs { const char* componentName; ZHLN_BufferView* outView; } GetECSBufferArgs;
+        typedef struct ReleaseBufferArgs { void* sync_ptr; } ReleaseBufferArgs;
+        typedef struct GetComponentArgs { uint64_t entityRaw; const char* componentName; } GetComponentArgs;
+        typedef struct EntityOnlyArgs { uint64_t entityRaw; } EntityOnlyArgs;
+        typedef struct IsKeyDownArgs { uint8_t key; } IsKeyDownArgs;
+        typedef struct GetMouseDeltaArgs { float* outX; float* outY; } GetMouseDeltaArgs;
+        typedef struct CameraFloatArgs { float* outVal; } CameraFloatArgs;
+        typedef struct SetCameraFOVArgs { float fov; } SetCameraFOVArgs;
+        typedef struct PlayOneShotArgs { const char* filepath; float volume; } PlayOneShotArgs;
+        typedef struct PlayOneShot3DArgs { const char* filepath; float x; float y; float z; float volume; } PlayOneShot3DArgs;
+        typedef struct PlayProceduralBeepArgs { float frequency; float duration; float volume; } PlayProceduralBeepArgs;
+        typedef struct SetCharVelArgs { uint64_t entityRaw; float x; float y; float z; } SetCharVelArgs;
+        typedef struct AddImpulseAtArgs { uint64_t entityRaw; float ix; float iy; float iz; double px; double py; double pz; } AddImpulseAtArgs;
+        typedef struct RaycastArgs { double ox; double oy; double oz; float dx; float dy; float dz; float maxDist; uint64_t ignoreEntity; ZHLN_RaycastResult* outResult; } RaycastArgs;
+        typedef struct SetMoveInputArgs { uint64_t entityRaw; float x; float z; } SetMoveInputArgs;
+        typedef struct UnprojectArgs { float ndcX; float ndcY; double* ox; double* oy; double* oz; float* dx; float* dy; float* dz; } UnprojectArgs;
+        typedef struct LogInventoryArgs { const char* msg; } LogInventoryArgs;
 
+        typedef struct SpawnPrefabArgs {
+            char path[256];
+            float px, py, pz;
+            int createPhysics;
+            int isStatic;
+            int isAnimated;
+            uint32_t maxCount;
+            uint64_t* outEntities;
+        } SpawnPrefabArgs;
+
+        typedef struct SetupRagdollArgs {
+            uint64_t playerEntity;
+            uint32_t count;
+            uint64_t* visualParts;
+        } SetupRagdollArgs;
+
+        typedef struct CreateBoxArgs {
+            float hx, hy, hz;
+            float r, g, b, a;
+        } CreateBoxArgs;
+
+        typedef struct CreateMaterialArgs {
+            float r, g, b, a;
+            uint64_t* outPipeline;
+            uint32_t* outAlbedo;
+        } CreateMaterialArgs;
+
+        typedef struct SpawnEntityArgs {
+            uint8_t shapeType;
+            float p1, p2, p3;
+            float px, py, pz;
+            float rx, ry, rz, rw;
+            float r, g, b, a;
+            uint8_t isStatic;
+        } SpawnEntityArgs;
+
+        #pragma pack(pop)
     ]]
 end
 

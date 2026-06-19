@@ -8,7 +8,7 @@
 #include <string_view>
 #include <version>
 
-#define ZHLN_VERSION_MAJOR 1
+#define ZHLN_VERSION_MAJOR 0
 #define ZHLN_VERSION_MINOR 0
 #define ZHLN_VERSION_PATCH 0
 

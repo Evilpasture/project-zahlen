@@ -54,13 +54,21 @@ function PhysicsWorld.new(engine_raw)
     local self = { _raw = engine_raw }
     return setmetatable(self, {
         __index = function(t, key)
-            -- Python-style dynamic memoryview properties
             if key == "positions" then
-                return mem.C.ZHLN_GetPhysicsPositions(t._raw)
+                local view = ffi.new("ZHLN_BufferView[1]")
+                local args = ffi.new("GetBufferArgs", { view })
+                ffi.C.ZHLN_DispatchCommand(t._raw, "GetPhysicsPositions", args)
+                return view[0]
             elseif key == "velocities" then
-                return mem.C.ZHLN_GetPhysicsLinearVelocities(t._raw)
+                local view = ffi.new("ZHLN_BufferView[1]")
+                local args = ffi.new("GetBufferArgs", { view })
+                ffi.C.ZHLN_DispatchCommand(t._raw, "GetPhysicsLinearVelocities", args)
+                return view[0]
             elseif key == "contacts" then
-                return mem.C.ZHLN_GetPhysicsContactEvents(t._raw)
+                local view = ffi.new("ZHLN_BufferView[1]")
+                local args = ffi.new("GetBufferArgs", { view })
+                ffi.C.ZHLN_DispatchCommand(t._raw, "GetPhysicsContactEvents", args)
+                return view[0]
             else
                 return PhysicsWorld[key]
             end
@@ -68,37 +76,45 @@ function PhysicsWorld.new(engine_raw)
     })
 end
 
+-- (Fix applied to raycast coordinates mapping)
 function PhysicsWorld:raycast(origin, direction, max_dist, ignore_entity)
-    local res = ffi.C.ZHLN_Raycast(self._raw,
+    local res = ffi.new("ZHLN_RaycastResult[1]")
+    local args = ffi.new("RaycastArgs", {
         origin.x, origin.y, origin.z,
         direction.x, direction.y, direction.z,
-        max_dist or 1000.0, ignore_entity or 0)
+        max_dist or 1000.0, ignore_entity or 0, res
+    })
+    ffi.C.ZHLN_DispatchCommand(self._raw, "Raycast", args)
 
-    if res.hasHit == 1 then
+    if res[0].hasHit == 1 then
         return {
-            entity = res.entity,
-            position = vec3.new(res.px, res.py, res.pz),
-            normal = vec3.new(res.nx, res.ny, res.nz),
-            fraction = res.fraction
+            entity = res[0].entity,
+            position = vec3.new(res[0].px, res[0].py, res[0].pz),
+            normal = vec3.new(res[0].nx, res[0].ny, res[0].nz),
+            fraction = res[0].fraction
         }
     end
     return nil
 end
 
 function PhysicsWorld:apply_impulse(entity, impulse)
-    ffi.C.ZHLN_AddImpulse(self._raw, entity, impulse.x, impulse.y, impulse.z)
+    local args = ffi.new("SetCharVelArgs", { entity, impulse.x, impulse.y, impulse.z })
+    ffi.C.ZHLN_DispatchCommand(self._raw, "AddImpulse", args)
 end
 
 function PhysicsWorld:set_linear_velocity(entity, velocity)
-    ffi.C.ZHLN_SetLinearVelocity(self._raw, entity, velocity.x, velocity.y, velocity.z)
+    local args = ffi.new("SetCharVelArgs", { entity, velocity.x, velocity.y, velocity.z })
+    ffi.C.ZHLN_DispatchCommand(self._raw, "SetLinearVelocity", args)
 end
 
 function PhysicsWorld:set_character_velocity(entity, velocity)
-    ffi.C.ZHLN_SetCharacterVelocity(self._raw, entity, velocity.x, velocity.y, velocity.z)
+    local args = ffi.new("SetCharVelArgs", { entity, velocity.x, velocity.y, velocity.z })
+    ffi.C.ZHLN_DispatchCommand(self._raw, "SetCharacterVelocity", args)
 end
 
 function PhysicsWorld:is_grounded(entity)
-    return ffi.C.ZHLN_IsCharacterOnGround(self._raw, entity) == 1
+    local args = ffi.new("EntityOnlyArgs", { entity })
+    return ffi.C.ZHLN_DispatchCommand(self._raw, "IsCharacterOnGround", args) == 1
 end
 
 function PhysicsWorld:setup_ragdoll(player_ent, parts_table)
@@ -118,16 +134,23 @@ function Camera.new(engine_raw)
     return setmetatable(self, {
         __index = function(t, key)
             if key == "yaw" then
-                return ffi.C.ZHLN_GetCameraYaw(t._raw)
+                local fargs = ffi.new("float[1]")
+                local args = ffi.new("CameraFloatArgs", { fargs })
+                ffi.C.ZHLN_DispatchCommand(t._raw, "GetCameraYaw", args)
+                return fargs[0]
             elseif key == "fov" then
-                return ffi.C.ZHLN_GetCameraFOV(t._raw)
+                local fargs = ffi.new("float[1]")
+                local args = ffi.new("CameraFloatArgs", { fargs })
+                ffi.C.ZHLN_DispatchCommand(t._raw, "GetCameraFOV", args)
+                return fargs[0]
             else
                 return Camera[key]
             end
         end,
         __newindex = function(t, key, value)
             if key == "fov" then
-                ffi.C.ZHLN_SetCameraFOV(t._raw, value)
+                local args = ffi.new("SetCameraFOVArgs", { value })
+                ffi.C.ZHLN_DispatchCommand(t._raw, "SetCameraFOV", args)
             else
                 rawset(t, key, value)
             end
@@ -161,12 +184,15 @@ function Input.new(engine_raw) return setmetatable({ _raw = engine_raw }, Input)
 function Input:is_key_down(key_name)
     local code = KEY_MAP[string.upper(key_name)]
     if not code then return false end
-    return ffi.C.ZHLN_IsKeyDown(self._raw, code) == 1
+    local args = ffi.new("IsKeyDownArgs", { code })
+    return ffi.C.ZHLN_DispatchCommand(self._raw, "IsKeyDown", args) == 1
 end
 
 function Input:get_mouse_delta()
-    local x, y = ffi.new("float[1]"), ffi.new("float[1]")
-    ffi.C.ZHLN_GetMouseDelta(self._raw, x, y)
+    local x = ffi.new("float[1]")
+    local y = ffi.new("float[1]")
+    local args = ffi.new("GetMouseDeltaArgs", { x, y })
+    ffi.C.ZHLN_DispatchCommand(self._raw, "GetMouseDelta", args)
     return x[0], y[0]
 end
 
@@ -178,15 +204,18 @@ Audio.__index = Audio
 function Audio.new(engine_raw) return setmetatable({ _raw = engine_raw }, Audio) end
 
 function Audio:play(filepath, volume)
-    ffi.C.ZHLN_PlayOneShot(self._raw, filepath, volume or 1.0)
+    local args = ffi.new("PlayOneShotArgs", { filepath, volume or 1.0 })
+    ffi.C.ZHLN_DispatchCommand(self._raw, "PlayOneShot", args)
 end
 
 function Audio:play_3d(filepath, pos, volume)
-    ffi.C.ZHLN_PlayOneShot3D(self._raw, filepath, pos.x, pos.y, pos.z, volume or 1.0)
+    local args = ffi.new("PlayOneShot3DArgs", { filepath, pos.x, pos.y, pos.z, volume or 1.0 })
+    ffi.C.ZHLN_DispatchCommand(self._raw, "PlayOneShot3D", args)
 end
 
 function Audio:beep(frequency, duration, volume)
-    ffi.C.ZHLN_PlayProceduralBeep(self._raw, frequency or 440.0, duration or 0.15, volume or 0.25)
+    local args = ffi.new("PlayProceduralBeepArgs", { frequency or 440.0, duration or 0.15, volume or 0.25 })
+    ffi.C.ZHLN_DispatchCommand(self._raw, "PlayProceduralBeep", args)
 end
 
 -- ============================================================================
@@ -203,14 +232,13 @@ function Engine.new(raw_ptr)
         input = Input.new(raw_ptr),
         audio = Audio.new(raw_ptr),
         ecs = ecs.new(raw_ptr),
+        settings = { pp = nil, aa = nil },
 
         dialogue = require("scripts.core.dialogue"),
 
-        -- Event system
         _events = {},
         _tracked_views = {},
 
-        -- Logging
         log = _G.zahlen and _G.zahlen.log or print,
         warn = _G.zahlen and _G.zahlen.warn or print
     }, Engine)
@@ -260,23 +288,14 @@ function Engine:spawn(path, options)
     return entities
 end
 
-local SHAPE_TYPES = {
-    box = 0,
-    sphere = 1,
-    capsule = 2,
-    cylinder = 3,
-    plane = 4
-}
+local SHAPE_TYPES = { box = 0, sphere = 1, capsule = 2, cylinder = 3, plane = 4 }
 
 function Engine:spawn_entity(options)
     options = options or {}
-
     local shape_str = string.lower(options.type or "box")
     local shape_type = SHAPE_TYPES[shape_str] or 0
-
     local p1, p2, p3 = 1, 1, 1
 
-    -- Dynamically route keyword arguments into standard parameters
     if shape_str == "box" then
         local size = options.size or options.extents or vec3.new(1, 1, 1)
         p1, p2, p3 = size.x, size.y, size.z
@@ -290,21 +309,17 @@ function Engine:spawn_entity(options)
     end
 
     local pos = options.position or vec3.new(0, 0, 0)
-    local rot = options.rotation or { 0, 0, 0, 1 } -- Identity quaternion
+    local rot = options.rotation or { 0, 0, 0, 1 }
     local col = options.color or { 1, 1, 1, 1 }
     local is_static = (options.static == nil) and true or options.static
 
     local args = ffi.new("SpawnEntityArgs", {
-        shape_type,
-        p1, p2, p3,
-        pos.x, pos.y, pos.z,
-        rot[1], rot[2], rot[3], rot[4],
-        col[1], col[2], col[3], col[4],
+        shape_type, p1, p2, p3, pos.x, pos.y, pos.z,
+        rot[1], rot[2], rot[3], rot[4], col[1], col[2], col[3], col[4],
         is_static and 1 or 0
     })
 
-    local entity_raw = ffi.C.ZHLN_DispatchCommand(self._raw, "SpawnEntity", args)
-    return tonumber(entity_raw)
+    return tonumber(ffi.C.ZHLN_DispatchCommand(self._raw, "SpawnEntity", args))
 end
 
 function Engine:create_material(color)
@@ -317,16 +332,42 @@ function Engine:create_material(color)
 end
 
 function Engine:config(cfg)
-    if not _G.game_state then return end
-    for k, v in pairs(cfg) do
-        if type(v) == "table" and type(_G.game_state[k]) == "cdata" then
-            _G.game_state[k][0] = v[1] or v.x or 0
-            _G.game_state[k][1] = v[2] or v.y or 0
-            _G.game_state[k][2] = v[3] or v.z or 0
-        else
-            _G.game_state[k] = v
-        end
+    local pp = self.settings.pp
+    local aa = self.settings.aa
+
+    if cfg.giMode and pp then pp[0].giMode = cfg.giMode end
+    if cfg.aoRadius and pp then pp[0].aoRadius = cfg.aoRadius end
+    if cfg.aoBias and pp then pp[0].aoBias = cfg.aoBias end
+    if cfg.aoPower and pp then pp[0].aoPower = cfg.aoPower end
+    if cfg.giIntensity and pp then pp[0].giIntensity = cfg.giIntensity end
+    if cfg.giSamples and pp then pp[0].giSamples = cfg.giSamples end
+    if cfg.useLocalProbe and pp then pp[0].useLocalProbe = cfg.useLocalProbe end
+
+    if cfg.probeMin and pp then
+        pp[0].probeMin[0] = cfg.probeMin[1] or cfg.probeMin.x or 0
+        pp[0].probeMin[1] = cfg.probeMin[2] or cfg.probeMin.y or 0
+        pp[0].probeMin[2] = cfg.probeMin[3] or cfg.probeMin.z or 0
     end
+    if cfg.probeMax and pp then
+        pp[0].probeMax[0] = cfg.probeMax[1] or cfg.probeMax.x or 0
+        pp[0].probeMax[1] = cfg.probeMax[2] or cfg.probeMax.y or 0
+        pp[0].probeMax[2] = cfg.probeMax[3] or cfg.probeMax.z or 0
+    end
+    if cfg.probePos and pp then
+        pp[0].probePos[0] = cfg.probePos[1] or cfg.probePos.x or 0
+        pp[0].probePos[1] = cfg.probePos[2] or cfg.probePos.y or 0
+        pp[0].probePos[2] = cfg.probePos[3] or cfg.probePos.z or 0
+    end
+
+    if cfg.vignetteIntensity and pp then pp[0].vignetteIntensity = cfg.vignetteIntensity end
+    if cfg.vignettePower and pp then pp[0].vignettePower = cfg.vignettePower end
+    if cfg.enableSSR ~= nil and pp then pp[0].enableSSR = cfg.enableSSR end
+    if cfg.enableRTR ~= nil and pp then pp[0].enableRTR = cfg.enableRTR end
+
+    if cfg.enableTAA ~= nil and aa then
+        aa[0].state.mode = cfg.enableTAA == 1 and 2 or 0
+    end
+    if cfg.taaFeedback and aa then aa[0].state.taaFeedback = cfg.taaFeedback end
 end
 
 -- ============================================================================
@@ -346,18 +387,15 @@ end
 -- ============================================================================
 local engine_ptr = ffi.C.ZHLN_GetEngineContext()
 
--- Expose the new Python-like root object unconditionally so `require` always works
 _G.zh = Engine.new(engine_ptr)
 _G.zh.vec3 = vec3.new
 _G.zh.scheduler = scheduler
 
 if engine_ptr ~= nil then
-    -- Expose global backward compatibility aliases if needed
     _G.engine = _G.zh
     _G.game_ecs = _G.zh.ecs
     _G.world = _G.zh.physics
 
-    -- Load Dialogue Trees Database
     local db = require("scripts.dialogue_db")
     for id, tree in pairs(db) do
         _G.zh.dialogue:register(id, tree)
@@ -366,15 +404,29 @@ if engine_ptr ~= nil then
     local InventoryShell = require("scripts.core.inventory")
     _G.inventory_shell = InventoryShell.new()
 
-    local raw_ptr = ffi.C.ZHLN_GetGameState(engine_ptr)
-    if raw_ptr ~= nil then
-        _G.game_state = ffi.cast("ZHLN_GameState*", raw_ptr)
-    else
-        -- Fallback default state
-        _G.game_state = ffi.new("ZHLN_GameState")
-        _G.game_state.giMode = 1
-        -- ... default initializations ...
-        ffi.C.ZHLN_RegisterGameState(engine_ptr, _G.game_state)
+    -- Pull Singleton Settings Components directly from ECS
+    local pp_view = ffi.new("ZHLN_BufferView[1]")
+    ffi.C.ZHLN_DispatchCommand(engine_ptr, "GetECSBuffer",
+        ffi.new("GetECSBufferArgs", { "PostProcessSettingsComponent", pp_view }))
+    if pp_view[0].buf ~= nil then
+        _G.zh.settings.pp = ffi.cast("PostProcessSettingsComponent*", pp_view[0].buf)
+    end
+    -- Immediately release the Registry's structural shadow lock!
+    if pp_view[0].obj ~= nil then
+        local rel_args = ffi.new("ReleaseBufferArgs", { pp_view[0].obj })
+        ffi.C.ZHLN_DispatchCommand(nil, "ReleaseBuffer", rel_args)
+    end
+
+    local aa_view = ffi.new("ZHLN_BufferView[1]")
+    ffi.C.ZHLN_DispatchCommand(engine_ptr, "GetECSBuffer",
+        ffi.new("GetECSBufferArgs", { "AASettingsComponent", aa_view }))
+    if aa_view[0].buf ~= nil then
+        _G.zh.settings.aa = ffi.cast("AASettingsComponent*", aa_view[0].buf)
+    end
+    -- Immediately release the Registry's structural shadow lock!
+    if aa_view[0].obj ~= nil then
+        local rel_args = ffi.new("ReleaseBufferArgs", { aa_view[0].obj })
+        ffi.C.ZHLN_DispatchCommand(nil, "ReleaseBuffer", rel_args)
     end
 
     for ent, _ in _G.zh.ecs:view("MovementComponent") do
@@ -390,7 +442,6 @@ _G.update = function(ptr, dt)
     end
 
     _G.zh:trigger("engine.tick", dt)
-
     _G.zh.dialogue:update(dt)
 
     for i = 1, #scheduler.systems do
@@ -398,7 +449,6 @@ _G.update = function(ptr, dt)
         if sys.enabled then sys.fn(dt) end
     end
 
-    -- Cleanup views automatically each frame
     for i = 1, #_G.zh._tracked_views do
         _G.zh._tracked_views[i]:release()
         _G.zh._tracked_views[i] = nil
@@ -409,7 +459,10 @@ end
 _G.run_inventory_command = function(cmd)
     if _G.inventory_shell then
         local out = _G.inventory_shell:execute_command(cmd)
-        if out ~= "" then ffi.C.ZHLN_LogInventoryShell(out) end
+        if out ~= "" then
+            local args = ffi.new("LogInventoryArgs", { out })
+            ffi.C.ZHLN_DispatchCommand(engine_ptr, "LogInventoryShell", args)
+        end
     end
 end
 

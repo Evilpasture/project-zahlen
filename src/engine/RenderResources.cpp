@@ -214,19 +214,23 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
 	const VkDevice device = ctx.Device();
 	const size_t imageSize = static_cast<size_t>(width) * height * 4;
 
+	// 1. Calculate proper mip levels based on largest dimension
+	uint32_t mipLevels = std::bit_width(std::max(width, height));
+
 	const VkImageCreateInfo imgInfo = {
 		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 		.pNext = nullptr,
 		.flags = 0,
 		.imageType = VK_IMAGE_TYPE_2D,
-		.format = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB
-						 : VK_FORMAT_R8G8B8A8_UNORM, // <--- Dynamically chose format
+		.format = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM,
 		.extent{.width = width, .height = height, .depth = 1},
-		.mipLevels = 1,
+		.mipLevels = mipLevels, // <--- Use calculated mip levels
 		.arrayLayers = 1,
 		.samples = VK_SAMPLE_COUNT_1_BIT,
 		.tiling = VK_IMAGE_TILING_OPTIMAL,
-		.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+		// 2. Add TRANSFER_SRC so the GPU can blit and downsample the mips
+		.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+				 VK_IMAGE_USAGE_SAMPLED_BIT,
 		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
 		.queueFamilyIndexCount = 0,
 		.pQueueFamilyIndices = nullptr,
@@ -259,8 +263,8 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
 										   .base_array_layer = 0};
 	ZHLN_CmdCopyBufferToImage(cmd, &copyRegion);
 
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-						 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
+	// 3. Generate the mipmaps on the GPU
+	ZHLN_GenerateMipmaps(cmd, gpuImage.Handle(), width, height, mipLevels);
 
 	ZHLN_EndCommandBuffer(cmd);
 
@@ -280,9 +284,11 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
 	vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
 	vkQueueWaitIdle(ctx.GraphicsQueue());
 
-	auto gpuView = isSRGB ? Vk::CreateView<VK_FORMAT_R8G8B8A8_SRGB>(device, gpuImage.Handle())
+	// 4. Create the image view supporting all mip levels
+	auto gpuView = isSRGB ? Vk::CreateView<VK_FORMAT_R8G8B8A8_SRGB>(
+								device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels)
 						  : Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(
-								device, gpuImage.Handle()); // <--- Choose view
+								device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
 
 	uint32_t index = nextTextureIndex++;
 

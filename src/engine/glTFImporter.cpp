@@ -36,13 +36,11 @@ static uint32_t LoadEmbeddedTexture(RenderContext& ctx, cgltf_image* img,
 	static std::unordered_map<std::string, uint32_t> textureCache;
 	std::string key;
 
-	// Scope the key with the glbPath to prevent conflicts between different models
 	if (img->uri != nullptr) {
 		key = glbPath + ":" + img->uri;
 	} else if (img->buffer_view != nullptr) {
 		key = glbPath + ":" + std::to_string(reinterpret_cast<uintptr_t>(img->buffer_view));
 	} else {
-		// Fallback for cases with neither URI nor buffer view
 		key = glbPath + ":" + std::to_string(reinterpret_cast<uintptr_t>(img));
 	}
 
@@ -68,21 +66,101 @@ static uint32_t LoadEmbeddedTexture(RenderContext& ctx, cgltf_image* img,
 	}
 
 	if (pixels == nullptr) {
-		const char* reason = stbi_failure_reason();
-		if (img->uri != nullptr) {
-			std::filesystem::path glbFolder = std::filesystem::path(glbPath).parent_path();
-			Log("ERROR: Failed to load texture URI: {} (Path: {}) | Reason: {}", img->uri,
-				(glbFolder / img->uri).string(), (reason != nullptr) ? reason : "Unknown");
-		} else {
-			Log("ERROR: Failed to load embedded texture (buffer_view offset: {}) | Reason: {}",
-				(img->buffer_view != nullptr) ? img->buffer_view->offset : 0,
-				(reason != nullptr) ? reason : "Unknown");
-		}
 		return 1;
 	}
 
+	// ========================================================================
+	// DYNAMIC VRAM SAVER: 2x2 Box-Filter Texture Clamping
+	// ========================================================================
+	auto w = static_cast<uint32_t>(width);
+	auto h = static_cast<uint32_t>(height);
+
+	// Limit maximum texture dimension to 1024x1024 (saves 75% memory on 2K textures)
+	// Change this to 512 for even more VRAM savings (93.7% reduction!)
+	constexpr uint32_t MAX_TEX_DIM = 1024;
+	bool wasRescaled = false;
+
+	if (w > MAX_TEX_DIM || h > MAX_TEX_DIM) {
+		uint32_t targetW = w;
+		uint32_t targetH = h;
+		uint32_t scaleSteps = 0;
+
+		// Calculate how many 2x downsamples are needed
+		while (targetW > MAX_TEX_DIM || targetH > MAX_TEX_DIM) {
+			targetW /= 2;
+			targetH /= 2;
+			scaleSteps++;
+		}
+
+		if (targetW > 0 && targetH > 0 && scaleSteps > 0) {
+			unsigned char* currentSrc = pixels;
+			uint32_t currentW = w;
+			uint32_t currentH = h;
+
+			for (uint32_t step = 0; step < scaleSteps; ++step) {
+				uint32_t nextW = currentW / 2;
+				uint32_t nextH = currentH / 2;
+				auto* nextDst = static_cast<unsigned char*>(
+					std::malloc(static_cast<size_t>(nextW) * nextH * 4));
+
+				if (nextDst != nullptr) {
+					// 2x2 Box Filter Downsampling
+					for (uint32_t y = 0; y < nextH; ++y) {
+						for (uint32_t x = 0; x < nextW; ++x) {
+							uint32_t srcX = x * 2;
+							uint32_t srcY = y * 2;
+
+							uint32_t r = 0, g = 0, b = 0, a = 0;
+							for (uint32_t dy = 0; dy < 2; ++dy) {
+								for (uint32_t dx = 0; dx < 2; ++dx) {
+									auto srcIdx = static_cast<size_t>(((srcY + dy) * currentW) +
+																	  (srcX + dx)) *
+												  4;
+									r += currentSrc[srcIdx + 0];
+									g += currentSrc[srcIdx + 1];
+									b += currentSrc[srcIdx + 2];
+									a += currentSrc[srcIdx + 3];
+								}
+							}
+
+							auto dstIdx = static_cast<size_t>((y * nextW + x)) * 4;
+							nextDst[dstIdx + 0] = static_cast<unsigned char>(r / 4);
+							nextDst[dstIdx + 1] = static_cast<unsigned char>(g / 4);
+							nextDst[dstIdx + 2] = static_cast<unsigned char>(b / 4);
+							nextDst[dstIdx + 3] = static_cast<unsigned char>(a / 4);
+						}
+					}
+
+					// Free temporary buffers along the chain
+					if (currentSrc != pixels) {
+						std::free(currentSrc);
+					}
+					currentSrc = nextDst;
+					currentW = nextW;
+					currentH = nextH;
+				} else {
+					break; // Memory allocation failed, halt downsampling
+				}
+			}
+
+			if (currentSrc != pixels) {
+				stbi_image_free(pixels); // Free the original stb_image buffer
+				pixels = currentSrc;
+				width = static_cast<int>(currentW);
+				height = static_cast<int>(currentH);
+				wasRescaled = true;
+			}
+		}
+	}
+
+	// 5. Upload the rescaled texture and safely release memory
 	uint32_t index = ctx.CreateTexture(pixels, width, height, isSRGB);
-	stbi_image_free(pixels);
+
+	if (wasRescaled) {
+		std::free(pixels); // Free the custom malloc'd buffer
+	} else {
+		stbi_image_free(pixels); // Free original stb_image buffer
+	}
 
 	textureCache[key] = index;
 	return index;
@@ -258,8 +336,14 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 					alphaMode = 1;
 					alphaCutoff = prim.material->alpha_cutoff;
 				} else if (prim.material->alpha_mode == cgltf_alpha_mode_blend) {
-					alphaMode = 2;
-					alphaBlend = true;
+					// alphaMode = 2;
+					// alphaBlend = true;
+					// Treat alpha blending as masked in deferred G-Buffer rendering to
+					// prevent "glass-like" blending artifacts and restore solid walls.
+
+					alphaMode = 1;
+					alphaCutoff = 0.5f;
+					alphaBlend = false;
 				}
 
 				if (prim.material->has_pbr_metallic_roughness) {

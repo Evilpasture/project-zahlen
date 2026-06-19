@@ -60,59 +60,59 @@ zh:on("engine.start", function()
         zh.log("Scene: Skeletal Ragdoll successfully generated and bound to player controller.")
     end
 
-    -- 3. Showcase the new generic Blueprint entity spawner!
-    zh.log("Scene: Dropping dynamic physics crates...")
-    for i = 1, 5 do
-        zh:spawn_entity({
-            type = "box",
-            size = zh.vec3(1.0, 1.0, 1.0),
-            position = zh.vec3(0, 10 + (i * 2.5), 0),
-            color = { 0.8, 0.4, 0.2, 1.0 },
-            static = false
-        })
-    end
-
-    -- SPAWN AN INTERACTIVE NPC:
-    zh.log("Scene: Creating interactive Pomni Dialogue Companion...")
-
-    -- Let C++ handle the mesh, transform, material, and static collider setup automatically
-    local npc = zh:spawn_entity({
-        type = "box",
-        size = zh.vec3(0.5, 1.8, 0.5),  -- Stand-in character height/width
-        position = zh.vec3(5, 1, -5),
-        color = { 0.2, 0.6, 1.0, 1.0 }, -- Blue placeholder color
-        static = true
-    })
-
-    -- Attach the dialogue identifier to the newly spawned entity
-    zh.ecs:add(npc, "DialogueComponent", {
-        dialogue_id = "pomni_intro"
-    })
-
-    -- Simulated world quest flag (e.g. player found the sword note)
-    zh.dialogue:set_variable("has_sword", true)
-
-    -- ========================================================================
-    -- DIAGNOSTIC TEST CARD (Verify Vulkan Text Drawing)
-    -- ========================================================================
-    zh.log("Diagnostic: Spawning permanent test card...")
-
-    local font_idx = 0
-    for _, ui_comp in zh.ecs:view("UISettingsComponent") do
-        font_idx = ui_comp.defaultFontAtlasIdx
-        break
-    end
-
-    local test_card = zh.ecs:create()
-    local card_comp = zh.ecs:add(test_card, "TextComponent")
-
-    ffi.copy(card_comp.text, "LUA TEXT SYSTEM ACTIVE")
-    card_comp.text_len = #"LUA TEXT SYSTEM ACTIVE"
-    card_comp.x = 50.0
-    card_comp.y = 50.0
-    card_comp.scale = 2.0
-    card_comp.color[0], card_comp.color[1], card_comp.color[2], card_comp.color[3] = 0.0, 1.0, 0.0, 1.0 -- Green
-    card_comp.fontIndex = font_idx
+    -- -- 3. Showcase the new generic Blueprint entity spawner!
+    -- zh.log("Scene: Dropping dynamic physics crates...")
+    -- for i = 1, 5 do
+    --     zh:spawn_entity({
+    --         type = "box",
+    --         size = zh.vec3(1.0, 1.0, 1.0),
+    --         position = zh.vec3(0, 10 + (i * 2.5), 0),
+    --         color = { 0.8, 0.4, 0.2, 1.0 },
+    --         static = false
+    --     })
+    -- end
+    --
+    -- -- SPAWN AN INTERACTIVE NPC:
+    -- zh.log("Scene: Creating interactive Pomni Dialogue Companion...")
+    --
+    -- -- Let C++ handle the mesh, transform, material, and static collider setup automatically
+    -- local npc = zh:spawn_entity({
+    --     type = "box",
+    --     size = zh.vec3(0.5, 1.8, 0.5),  -- Stand-in character height/width
+    --     position = zh.vec3(5, 1, -5),
+    --     color = { 0.2, 0.6, 1.0, 1.0 }, -- Blue placeholder color
+    --     static = true
+    -- })
+    --
+    -- -- Attach the dialogue identifier to the newly spawned entity
+    -- zh.ecs:add(npc, "DialogueComponent", {
+    --     dialogue_id = "pomni_intro"
+    -- })
+    --
+    -- -- Simulated world quest flag (e.g. player found the sword note)
+    -- zh.dialogue:set_variable("has_sword", true)
+    --
+    -- -- ========================================================================
+    -- -- DIAGNOSTIC TEST CARD (Verify Vulkan Text Drawing)
+    -- -- ========================================================================
+    -- zh.log("Diagnostic: Spawning permanent test card...")
+    --
+    -- local font_idx = 0
+    -- for _, ui_comp in zh.ecs:view("UISettingsComponent") do
+    --     font_idx = ui_comp.defaultFontAtlasIdx
+    --     break
+    -- end
+    --
+    -- local test_card = zh.ecs:create()
+    -- local card_comp = zh.ecs:add(test_card, "TextComponent")
+    --
+    -- ffi.copy(card_comp.text, "LUA TEXT SYSTEM ACTIVE")
+    -- card_comp.text_len = #"LUA TEXT SYSTEM ACTIVE"
+    -- card_comp.x = 50.0
+    -- card_comp.y = 50.0
+    -- card_comp.scale = 2.0
+    -- card_comp.color[0], card_comp.color[1], card_comp.color[2], card_comp.color[3] = 0.0, 1.0, 0.0, 1.0 -- Green
+    -- card_comp.fontIndex = font_idx
 end)
 
 -- ==========================================

@@ -103,6 +103,7 @@ Options:
   --verbose                Enable detailed verbose logging outputs
   --quiet                  Disable all logging outputs (silent mode)
   --renderdoc <on|off>     Load RenderDoc library at startup (default: off)
+  --benchmark              Run the benchmark suite
 
 Environment Variables:
   ZHLN_VALIDATION=0    Disable Vulkan validation layers
@@ -246,6 +247,13 @@ constexpr std::array Handlers = {
 							   .code = EXIT_FAILURE,
 							   .silent = true});
 					   }
+					   return {};
+				   }},
+	CommandHandler{.key = "--benchmark",
+				   .shortKey = "",
+				   .action = [](ZHLN::CommandLineOptions& opt,
+								std::string_view) -> std::expected<void, ZHLN::EngineError> {
+					   opt.benchmark = true;
 					   return {};
 				   }},
 

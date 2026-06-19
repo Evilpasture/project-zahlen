@@ -26,12 +26,10 @@ if(GIT_FOUND)
     )
 endif()
 
-# Fallback if Git is not installed or we are building outside a repository
 if(NOT ZHLN_GIT_HASH)
     set(ZHLN_GIT_HASH "unknown")
 endif()
 
-# --- FIX FOR LINUX/GCC 16 ASM COMPILATION RULES ---
 if(UNIX OR APPLE)
     set(CMAKE_ASM_COMPILE_OBJECT "<CMAKE_ASM_COMPILER> <DEFINES> <INCLUDES> <FLAGS> -o <OBJECT> -c <SOURCE>" CACHE STRING "ASM compile command" FORCE)
 endif()
@@ -43,7 +41,6 @@ if(APPLE)
     set(CMAKE_SYSROOT ${MACOS_SDK_PATH})
 endif()
 
-# Global fallback standards for your targets
 set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -54,7 +51,6 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# --- 1.1 DETECT TARGET TRIPLE ---
 execute_process(
     COMMAND ${CMAKE_CXX_COMPILER} -dumpmachine
     OUTPUT_VARIABLE ZHLN_TARGET_TRIPLE
@@ -62,12 +58,10 @@ execute_process(
     ERROR_QUIET
 )
 if(NOT ZHLN_TARGET_TRIPLE)
-    # Fallback to CMake variables if the compiler query fails
     set(ZHLN_TARGET_TRIPLE "${CMAKE_SYSTEM_PROCESSOR}-unknown-${CMAKE_SYSTEM_NAME}")
     string(TOLOWER "${ZHLN_TARGET_TRIPLE}" ZHLN_TARGET_TRIPLE)
 endif()
 
-# --- 1.2 DETECT ACTIVE LINKER (Modify your existing block) ---
 if(NOT MSVC)
     execute_process(COMMAND ${CMAKE_CXX_COMPILER} -fuse-ld=mold -Wl,--version ERROR_QUIET OUTPUT_VARIABLE MOLD_VERSION)
     execute_process(COMMAND ${CMAKE_CXX_COMPILER} -fuse-ld=lld -Wl,--version ERROR_QUIET OUTPUT_VARIABLE LLD_VERSION)
@@ -93,7 +87,6 @@ else()
     set(ZHLN_LINKER "link.exe")
 endif()
 
-# --- 2. GLOBAL SANITIZER CONFIG ---
 option(USE_SANITIZERS "Enable ASan and UBSan" OFF)
 if(USE_SANITIZERS)
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
@@ -101,13 +94,11 @@ if(USE_SANITIZERS)
     add_definitions(-D__ASAN_ENABLED__)
 endif()
 
-# --- DUAL-PATH DEV MODE OPTION ---
 option(ZHLN_DEV_MODE "Enable raw loose-file asset loading for development" ON)
 if(ZHLN_DEV_MODE)
     add_compile_definitions(ZHLN_DEV_MODE)
 endif()
 
-# --- 3. GLFW Setup ---
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -115,7 +106,6 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/extern/glfw SYSTEM)
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/LuaJIT SYSTEM)
 
-# --- 4. Jolt Physics ---
 set(DOUBLE_PRECISION ON CACHE BOOL "" FORCE)
 set(USE_STD_INCLUDES ON CACHE BOOL "" FORCE)
 set(JPH_BUILD_SHARED_LIBS ON CACHE BOOL "Build Jolt as shared library" FORCE)
@@ -133,43 +123,27 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/src/ecs)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/alife)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/audio)
 
-# --- 4.1 TESTING CONFIGURATION ---
 option(BUILD_TESTING "Build the test suite" OFF)
 
 if(BUILD_TESTING)
     message(STATUS "Building the test suites...")
     enable_testing()
-
-    # Find the system-installed GTest (e.g. 'sudo pacman -S gtest' on Arch)
     find_package(GTest REQUIRED)
-
-    # Add the SSR CPU validation test
     add_executable(zahlen_ssr_test src/ssr_test.cpp)
-
-    target_link_libraries(zahlen_ssr_test PRIVATE 
-        GTest::gtest_main
-        Jolt
-    )
-
+    target_link_libraries(zahlen_ssr_test PRIVATE GTest::gtest_main Jolt)
     target_include_directories(zahlen_ssr_test PRIVATE
-        ${CMAKE_SOURCE_DIR}         # To resolve "resources/shaders/postprocess.hlsl"
-        ${CMAKE_SOURCE_DIR}/include # To resolve "SharedMath.hpp"
-        ${CMAKE_SOURCE_DIR}/src     # To resolve Jolt/engine internal headers
+        ${CMAKE_SOURCE_DIR}         
+        ${CMAKE_SOURCE_DIR}/include 
+        ${CMAKE_SOURCE_DIR}/src     
     )
-
-    target_compile_definitions(zahlen_ssr_test PRIVATE 
-        JPH_DOUBLE_PRECISION        # Must match the Jolt double-precision ABI used by the engine
-    )
-
-    # Disable warnings for unknown Vulkan attributes (like [[vk::push_constant]])
+    target_compile_definitions(zahlen_ssr_test PRIVATE JPH_DOUBLE_PRECISION)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
         target_compile_options(zahlen_ssr_test PRIVATE -Wno-attributes)
     endif()
-
     add_test(NAME ssr_cpu_test COMMAND zahlen_ssr_test)
 endif()
 
-# Collect shared engine source files (EXCLUDING src/game_main.cpp)
+# (Removed Buffer.cpp and Physics_C.cpp from the compilation pipeline)
 set(ENGINE_SOURCES
     src/engine/Allocator.cpp
     src/engine/AssertHandler.cpp
@@ -187,8 +161,6 @@ set(ENGINE_SOURCES
     src/engine/Resources.c
     src/engine/Platform.cpp
     src/engine/Scripting.cpp
-    src/engine/Physics_C.cpp
-    src/engine/Buffer.cpp
     src/engine/ConsoleUI.cpp
     src/engine/ProfilerUI.cpp
     src/engine/Text.cpp
@@ -223,10 +195,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
 endif()
 
-# --- COLLECT ACTIVE COMPILER FLAGS ---
 set(COMPILER_FLAGS_LIST "${CMAKE_CXX_FLAGS}")
-
-# Append active build-profile specific flags
 if(CMAKE_BUILD_TYPE)
     string(TOUPPER "${CMAKE_BUILD_TYPE}" UPPER_BUILD_TYPE)
     set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} ${CMAKE_CXX_FLAGS_${UPPER_BUILD_TYPE}}")
@@ -234,7 +203,6 @@ else()
     set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} ${CMAKE_CXX_FLAGS_DEBUG}")
 endif()
 
-# Append target-specific options we manually set below
 if(NOT MSVC)
     set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti")
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
@@ -242,14 +210,11 @@ if(NOT MSVC)
     endif()
 endif()
 
-# Clean up double-spaces and trim whitespace
 string(STRIP "${COMPILER_FLAGS_LIST}" COMPILER_FLAGS_LIST)
 string(REGEX REPLACE " +" " " COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST}")
 
-# --- 5. BUILD CORE SHARED LIBRARY ---
 add_library(zahlen_engine SHARED ${ENGINE_SOURCES})
 
-# Compile definitions required for DLL exports on Windows 
 target_compile_definitions(zahlen_engine PRIVATE 
     ZHLN_ENGINE_BUILD
     JPH_DOUBLE_PRECISION
@@ -285,14 +250,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(zahlen_engine PRIVATE PkgConfig::LIBEVDEV PkgConfig::LIBSEAT PkgConfig::FONTCONFIG)
 endif()
 
-# Jolt is part of the public ABI exposed by engine headers, so propagate its include paths.
 target_link_libraries(zahlen_engine PUBLIC Jolt)
 
 target_include_directories(zahlen_engine SYSTEM PRIVATE
     ${CMAKE_SOURCE_DIR}/extern/JoltPhysics
     ${CMAKE_SOURCE_DIR}/third_party/renderdoc
 )
-# Use PUBLIC for the main include directory so dependent targets automatically get it 
 target_include_directories(zahlen_engine PUBLIC
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/src
@@ -303,7 +266,6 @@ target_include_directories(zahlen_engine PRIVATE
     ${CMAKE_SOURCE_DIR}/extern/stb
 )
 
-# --- 6. SHADER COMPILATION ---
 if(NOT EXISTS "${CMAKE_SOURCE_DIR}/resources/shaders/SMAA.hlsl")
     message(STATUS "SMAA.hlsl not found. Downloading from official iryoku/smaa repository...")
     file(DOWNLOAD 
@@ -330,7 +292,6 @@ function(compile_shaders TARGET_NAME)
     file(MAKE_DIRECTORY ${GEN_INCLUDE_DIR})
 
     set(ALL_SPV_OUTPUTS "")
-    # UPDATE: Changed to 6_5 to support Raytracing Features
     set(STAGE_EXTS    "VS"      "PS"      "CS")
     set(STAGE_ENTRIES "VSMain"  "PSMain"  "CSMain")
     set(STAGE_PROFILES "vs_6_5" "ps_6_5"  "cs_6_5")
@@ -405,14 +366,12 @@ add_dependencies(zahlen_engine zahlen_engine_culling_shader)
 target_compile_definitions(zahlen_engine PRIVATE SHADER_CULLING_HLSL_CS_PATH="${CULLING_COMP_SPV}")
 set_source_files_properties(src/engine/Resources.c PROPERTIES OBJECT_DEPENDS "${CULLING_COMP_SPV}")
 
-# --- SPECIALIZED SHADOW FRAGMENT SHADER (Discards alpha masks without writing to rendering targets) ---
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/basic.hlsl" PSShadow ps_6_0 SHADOW_FRAG_SPV)
 add_custom_target(zahlen_engine_shadow_shader ALL DEPENDS ${SHADOW_FRAG_SPV})
 add_dependencies(zahlen_engine zahlen_engine_shadow_shader)
 target_compile_definitions(zahlen_engine PRIVATE SHADER_SHADOW_HLSL_PS_PATH="${SHADOW_FRAG_SPV}")
 set_source_files_properties(src/engine/Resources.c PROPERTIES OBJECT_DEPENDS "${SHADOW_FRAG_SPV}")
 
-# --- SPECIALIZED NO-RT POSTPROCESS SHADERS (DISABLE_RTR definition) ---
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/postprocess.hlsl" VSMain vs_6_5 POSTPROCESS_NORT_VS_SPV "-DDISABLE_RTR")
 add_custom_target(zahlen_engine_postprocess_nort_vs_shader ALL DEPENDS ${POSTPROCESS_NORT_VS_SPV})
 add_dependencies(zahlen_engine zahlen_engine_postprocess_nort_vs_shader)
@@ -425,15 +384,12 @@ add_dependencies(zahlen_engine zahlen_engine_postprocess_nort_ps_shader)
 target_compile_definitions(zahlen_engine PRIVATE SHADER_POSTPROCESS_NORT_HLSL_PS_PATH="${POSTPROCESS_NORT_PS_SPV}")
 set_source_files_properties(src/engine/Resources.c PROPERTIES OBJECT_DEPENDS "${POSTPROCESS_NORT_PS_SPV}")
 
-# --- 1. Compile Edge Detection Pass (SmaaEdgeVS, SmaaEdgePS) ---
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaEdgeVS vs_6_5 SMAA_EDGE_VS_SPV "-DEDGE_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=0")
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaEdgePS ps_6_5 SMAA_EDGE_PS_SPV "-DEDGE_PASS -DSMAA_INCLUDE_VS=0 -DSMAA_INCLUDE_PS=1")
 
-# --- 2. Compile Blending Weight Pass (SmaaWeightVS, SmaaWeightPS) ---
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaWeightVS vs_6_5 SMAA_WEIGHT_VS_SPV "-DWEIGHT_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=0")
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaWeightPS ps_6_5 SMAA_WEIGHT_PS_SPV "-DWEIGHT_PASS -DSMAA_INCLUDE_VS=0 -DSMAA_INCLUDE_PS=1")
 
-# --- 3. Compile Neighborhood Blending Pass (SmaaBlendVS, SmaaBlendPS) ---
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaBlendVS vs_6_5 SMAA_BLEND_VS_SPV "-DBLEND_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=0")
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaBlendPS ps_6_5 SMAA_BLEND_PS_SPV "-DBLEND_PASS -DSMAA_INCLUDE_VS=0 -DSMAA_INCLUDE_PS=1")
 
@@ -447,7 +403,6 @@ add_custom_target(zahlen_engine_cluster_cull ALL DEPENDS ${CLUSTER_CULLING_SPV})
 add_dependencies(zahlen_engine zahlen_engine_cluster_cull)
 target_compile_definitions(zahlen_engine PRIVATE SHADER_CLUSTER_CULLING_CS_PATH="${CLUSTER_CULLING_SPV}")
 
-# --- 4. Bind Output Paths to Target Definitions ---
 target_compile_definitions(zahlen_engine PRIVATE 
     SHADER_SMAA_EDGE_VS_PATH="${SMAA_EDGE_VS_SPV}"
     SHADER_SMAA_EDGE_PS_PATH="${SMAA_EDGE_PS_SPV}"
@@ -457,7 +412,6 @@ target_compile_definitions(zahlen_engine PRIVATE
     SHADER_SMAA_BLEND_PS_PATH="${SMAA_BLEND_PS_SPV}"
 )
 
-# --- 5. Add to C23 Embed Dependency Chain ---
 set_property(SOURCE src/engine/Resources.c APPEND PROPERTY OBJECT_DEPENDS 
     "${SMAA_EDGE_VS_SPV}"
     "${SMAA_EDGE_PS_SPV}"
@@ -467,9 +421,6 @@ set_property(SOURCE src/engine/Resources.c APPEND PROPERTY OBJECT_DEPENDS
     "${SMAA_BLEND_PS_SPV}"
 )
 
-# --- 7. EXECUTABLE TARGETS ---
-
-# Unified Application Executable
 add_executable(zahlen 
     src/main.cpp
     src/game_main.cpp 
@@ -478,25 +429,18 @@ add_executable(zahlen
 target_link_libraries(zahlen PRIVATE zahlen_engine imgui)
 target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)
 
-# Offline Asset Cooker
 add_executable(zahlen_cooker src/cooker_main.cpp)
 target_link_libraries(zahlen_cooker PRIVATE zahlen_engine)
 target_include_directories(zahlen_cooker PRIVATE ${CMAKE_SOURCE_DIR}/extern/cgltf)
 
-# --- 7.1 ASSET COOKING AUTOMATION ---
 add_custom_target(cook_assets ALL
-    # 1. Make sure the data directory exists
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:zahlen>/data"
-    
-    # 2. Run the cooker and output both base.pak AND debug .glb files
     COMMAND zahlen_cooker "${CMAKE_SOURCE_DIR}/resources/assets" "$<TARGET_FILE_DIR:zahlen>/data/base.pak" "$<TARGET_FILE_DIR:zahlen>/data"
-    
     DEPENDS zahlen_cooker
     COMMENT "Cooking assets into data/base.pak and compiling debug GLBs..."
     USES_TERMINAL
 )
 
-# --- 8. COMPILER FLAGS ---
 if(NOT MSVC)
     target_compile_options(zahlen_engine PRIVATE $<$<CXX_COMPILER_ID:GNU>:--param=destructive-interference-size=64> -Wall -Wextra -Wpedantic -Wno-interference-size -fno-exceptions -fno-rtti)
     if(WIN32)
@@ -507,12 +451,10 @@ if(NOT MSVC)
     endif()
 endif()
 
-# --- 8.1 TARGET ISOLATED REFLECTION FLAGS ---
 target_compile_options(zahlen_render PRIVATE 
     $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU>>:-freflection>
 )
 
-# --- 9. RESOURCE LINKING (Single target to avoid parallel race conditions) ---
 add_custom_target(link_resources ALL
     COMMAND ${CMAKE_COMMAND} 
         -D SRC="${CMAKE_SOURCE_DIR}/resources" 
@@ -525,12 +467,9 @@ add_custom_target(link_resources ALL
     COMMENT "Creating zero-copy symlinks for resources and scripts..."
 )
 
-# Ensure the executable waits for the cooking and symlinking processes to finish
 add_dependencies(zahlen cook_assets)
 add_dependencies(zahlen link_resources)
 
-
-# --- 10. SANITIZER RUNTIME DISTRIBUTION ---
 if(USE_SANITIZERS)
     get_filename_component(CLANG_BIN_DIR ${CMAKE_CXX_COMPILER} DIRECTORY)
     find_file(ASAN_DLL 
@@ -544,5 +483,3 @@ if(USE_SANITIZERS)
         )
     endif()
 endif()
-
-

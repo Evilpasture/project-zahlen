@@ -9,19 +9,23 @@
 #include "ecs/ECS.hpp"
 
 #include <Zahlen/AssetFactory.hpp>
+#include <Zahlen/Audio.hpp>
+#include <Zahlen/Buffer.h>
 #include <Zahlen/Console.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/Render.hpp>
 #include <Zahlen/Scripting.h>
 #include <Zahlen/Scripting.hpp>
-#include <Zahlen/physics/Physics_C.h>
+#include <Zahlen/Sync.hpp>
+#include <Zahlen/Window.hpp>
 #include <chrono>
 #include <cstring>
 #include <functional>
+#include <physics/Physics.hpp>
 #include <physics/PhysicsWorld.hpp>
 #include <print>
 #include <string_view>
-#include <threading/Channel.hpp>
 #include <unordered_map>
 #include <vector>
 
@@ -31,14 +35,112 @@ extern "C" {
 #include <lualib.h>
 }
 
-// Local, library-allocated value state (No exported pointers!)
-static ZHLN_GameState s_LocalGameState{};
-
-// Opaque declarations of ConsoleUI globals (defined in ConsoleUI.cpp)
-extern std::vector<std::string> s_InvShellLog;
-extern bool s_InvScrollToBottom;
-
+// ============================================================================
+// PAYLOAD DEFINITIONS (Must exactly match ffi_cdef.lua)
+// ============================================================================
 #pragma pack(push, 1)
+
+struct ZHLN_RaycastResult {
+	uint64_t entity;
+	double px, py, pz;
+	float nx, ny, nz;
+	float fraction;
+	int hasHit;
+};
+
+struct GetBufferArgs {
+	ZHLN_BufferView* outView;
+};
+struct GetECSBufferArgs {
+	const char* componentName;
+	ZHLN_BufferView* outView;
+};
+struct ReleaseBufferArgs {
+	void* sync_ptr;
+};
+struct GetComponentArgs {
+	uint64_t entityRaw;
+	const char* componentName;
+};
+using AddComponentArgs = GetComponentArgs; // Alias to resolve compiler type resolution
+
+struct EntityOnlyArgs {
+	uint64_t entityRaw;
+};
+struct IsKeyDownArgs {
+	uint8_t key;
+};
+struct GetMouseDeltaArgs {
+	float* outX;
+	float* outY;
+};
+struct CameraFloatArgs {
+	float* outVal;
+};
+struct SetCameraFOVArgs {
+	float fov;
+};
+struct PlayOneShotArgs {
+	const char* filepath;
+	float volume;
+};
+struct PlayOneShot3DArgs {
+	const char* filepath;
+	float x;
+	float y;
+	float z;
+	float volume;
+};
+struct PlayProceduralBeepArgs {
+	float frequency;
+	float duration;
+	float volume;
+};
+struct SetCharVelArgs {
+	uint64_t entityRaw;
+	float x;
+	float y;
+	float z;
+};
+struct AddImpulseAtArgs {
+	uint64_t entityRaw;
+	float ix;
+	float iy;
+	float iz;
+	double px;
+	double py;
+	double pz;
+};
+struct RaycastArgs {
+	double ox;
+	double oy;
+	double oz;
+	float dx;
+	float dy;
+	float dz;
+	float maxDist;
+	uint64_t ignoreEntity;
+	ZHLN_RaycastResult* outResult;
+};
+struct SetMoveInputArgs {
+	uint64_t entityRaw;
+	float x;
+	float z;
+};
+struct UnprojectArgs {
+	float ndcX;
+	float ndcY;
+	double* ox;
+	double* oy;
+	double* oz;
+	float* dx;
+	float* dy;
+	float* dz;
+};
+struct LogInventoryArgs {
+	const char* msg;
+};
+
 struct SpawnPrefabArgs {
 	char path[256];
 	float px, py, pz;
@@ -48,33 +150,85 @@ struct SpawnPrefabArgs {
 	uint32_t maxCount;
 	uint64_t* outEntities;
 };
-
 struct SetupRagdollArgs {
 	uint64_t playerEntity;
 	uint32_t count;
 	uint64_t* visualParts;
 };
-
 struct CreateBoxArgs {
 	float hx, hy, hz;
 	float r, g, b, a;
 };
-
 struct CreateMaterialArgs {
 	float r, g, b, a;
 	uint64_t* outPipeline;
 	uint32_t* outAlbedo;
 };
-
 struct SpawnEntityArgs {
-	uint8_t shapeType;	  // 0=Box, 1=Sphere, 2=Capsule, 3=Cylinder, 4=Plane
-	float p1, p2, p3;	  // dynamic dimensions (hx/hy/hz or radius/halfHeight)
-	float px, py, pz;	  // position
-	float rx, ry, rz, rw; // rotation (quaternion)
-	float r, g, b, a;	  // color
+	uint8_t shapeType;
+	float p1, p2, p3;
+	float px, py, pz;
+	float rx, ry, rz, rw;
+	float r, g, b, a;
 	uint8_t isStatic;
 };
+
 #pragma pack(pop)
+
+// Opaque declarations of ConsoleUI globals (defined in ConsoleUI.cpp)
+extern std::vector<std::string> s_InvShellLog;
+extern bool s_InvScrollToBottom;
+
+namespace ZHLN {
+
+struct SyncPolicy {
+	static void Acquire(BufferSync* sync) {
+		if (sync->viewExportCount.fetch_add(1, std::memory_order_acquire) == 0) {
+			sync->shadowLock.lock();
+		}
+	}
+	static void Release(BufferSync* sync) {
+		if (sync->viewExportCount.fetch_sub(1, std::memory_order_release) == 1) {
+			sync->shadowLock.unlock();
+		}
+	}
+};
+
+struct ViewComposer {
+	template <typename TOwner, typename TData, typename... Dims>
+	static ZHLN_BufferView Build(const TOwner* owner, TData* data, const char* format,
+								 Dims... dims) {
+		auto* sync = reinterpret_cast<BufferSync*>(const_cast<TOwner*>(owner));
+		SyncPolicy::Acquire(sync);
+
+		ZHLN_BufferView view = {};
+		view.buf = (void*)data;
+		view.obj = (void*)sync;
+		view.itemsize = sizeof(TData);
+		std::strncpy(view.format, format, 7);
+		view.readonly = 0;
+
+		view.ndim = sizeof...(dims);
+		size_t d_array[] = {static_cast<size_t>(dims)...};
+
+		size_t stride = sizeof(TData);
+		for (int i = (int)view.ndim - 1; i >= 0; --i) {
+			view.shape[i] = d_array[i];
+			view.strides[i] = stride;
+			stride *= d_array[i];
+		}
+
+		view.len = stride;
+		view.flags = ZHLN_BUFFER_CONTIGUOUS | ZHLN_BUFFER_WRITABLE;
+		if (((uintptr_t)view.buf % 32) == 0) {
+			view.flags |= ZHLN_BUFFER_ALIGNED_32;
+		}
+
+		return view;
+	}
+};
+
+} // namespace ZHLN
 
 using CommandHandler = std::function<uint64_t(ZHLN::Engine*, const void*)>;
 static std::unordered_map<std::string_view, CommandHandler> s_CommandRegistry;
@@ -84,6 +238,7 @@ static void RegisterFFICommands() {
 		return;
 	}
 
+	// --- Asset Spawning ---
 	s_CommandRegistry["SpawnPrefab"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
 		const auto* a = static_cast<const SpawnPrefabArgs*>(args);
 		auto& rc = engine->GetRenderContext();
@@ -91,9 +246,8 @@ static void RegisterFFICommands() {
 		auto& pc = engine->GetPhysicsContext();
 
 		auto* prefab = ZHLN::AssetFactory::LoadModelPrefab(rc, engine->GetAssetManager(), a->path);
-		if (!prefab) {
+		if (!prefab)
 			return 0;
-		}
 
 		ZHLN::AssetFactory::SpawnParams params;
 		params.position = JPH::RVec3(a->px, a->py, a->pz);
@@ -115,24 +269,19 @@ static void RegisterFFICommands() {
 
 	s_CommandRegistry["SetupRagdoll"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
 		const auto* a = static_cast<const SetupRagdollArgs*>(args);
-		auto& rc = engine->GetRenderContext();
-		auto& pc = engine->GetPhysicsContext();
-		auto& reg = engine->GetRegistry();
-
 		std::vector<ZHLN::Entity> parts(a->count);
-		for (uint32_t i = 0; i < a->count; ++i) {
+		for (uint32_t i = 0; i < a->count; ++i)
 			parts[i] = ZHLN::Entity::Unpack(a->visualParts[i]);
-		}
-
-		ZHLN::AssetFactory::SetupPlayerRagdoll(rc, pc, reg, ZHLN::Entity::Unpack(a->playerEntity),
-											   parts);
+		ZHLN::AssetFactory::SetupPlayerRagdoll(engine->GetRenderContext(),
+											   engine->GetPhysicsContext(), engine->GetRegistry(),
+											   ZHLN::Entity::Unpack(a->playerEntity), parts);
 		return 1;
 	};
 
 	s_CommandRegistry["CreateBox"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
 		const auto* a = static_cast<const CreateBoxArgs*>(args);
-		auto& rc = engine->GetRenderContext();
-		ZHLN::Mesh mesh = ZHLN::AssetFactory::CreateBox(rc, JPH::Vec3(a->hx, a->hy, a->hz),
+		ZHLN::Mesh mesh = ZHLN::AssetFactory::CreateBox(engine->GetRenderContext(),
+														JPH::Vec3(a->hx, a->hy, a->hz),
 														JPH::Vec4(a->r, a->g, a->b, a->a));
 		return static_cast<uint64_t>(mesh.vertexBuffer);
 	};
@@ -140,18 +289,7 @@ static void RegisterFFICommands() {
 	s_CommandRegistry["CreateBasicMaterial"] = [](ZHLN::Engine* engine,
 												  const void* args) -> uint64_t {
 		const auto* a = static_cast<const CreateMaterialArgs*>(args);
-		auto& rc = engine->GetRenderContext();
-		ZHLN::Material mat = ZHLN::AssetFactory::CreateBasicMaterial(rc);
-		*a->outPipeline = static_cast<uint64_t>(mat.pipeline);
-		*a->outAlbedo = mat.albedoIndex;
-		return 1;
-	};
-
-	s_CommandRegistry["CreateBasicMaterial"] = [](ZHLN::Engine* engine,
-												  const void* args) -> uint64_t {
-		const auto* a = static_cast<const CreateMaterialArgs*>(args);
-		auto& rc = engine->GetRenderContext();
-		ZHLN::Material mat = ZHLN::AssetFactory::CreateBasicMaterial(rc);
+		ZHLN::Material mat = ZHLN::AssetFactory::CreateBasicMaterial(engine->GetRenderContext());
 		*a->outPipeline = static_cast<uint64_t>(mat.pipeline);
 		*a->outAlbedo = mat.albedoIndex;
 		return 1;
@@ -166,7 +304,6 @@ static void RegisterFFICommands() {
 		ZHLN::Mesh mesh;
 		JPH::ShapeRefC shape;
 		float cullRadius = 1.0f;
-
 		auto type = static_cast<ZHLN::Physics::ShapeType>(desc->shapeType);
 
 		switch (type) {
@@ -194,11 +331,9 @@ static void RegisterFFICommands() {
 
 		ZHLN::Material mat = ZHLN::AssetFactory::CreateBasicMaterial(rc);
 		ZHLN::Entity e = reg.Create();
-
 		reg.Add(e, ZHLN::TransformComponent{.position = {desc->px, desc->py, desc->pz},
 											.rotation = {desc->rx, desc->ry, desc->rz, desc->rw},
 											.scale = {1.0f, 1.0f, 1.0f}});
-
 		reg.Add(e, ZHLN::MeshComponent{.mesh = mesh,
 									   .material = mat,
 									   .cullRadius = cullRadius,
@@ -217,51 +352,342 @@ static void RegisterFFICommands() {
 
 		return e.Pack();
 	};
-}
 
-struct ZHLN_LuaChannel {
-	ZHLN::Channel<int> channel;
-};
+	// --- Buffer Views ---
+	s_CommandRegistry["GetPhysicsPositions"] = [](ZHLN::Engine* engine,
+												  const void* args) -> uint64_t {
+		auto* a = static_cast<const GetBufferArgs*>(args);
+		const auto& world = engine->GetPhysicsContext().GetWorld();
+		*a->outView = ZHLN::ViewComposer::Build(
+			&world, world.positions, (sizeof(JPH::Real) == 8) ? "d" : "f", world.count.load(), 4);
+		return 0;
+	};
+
+	s_CommandRegistry["GetPhysicsLinearVelocities"] = [](ZHLN::Engine* engine,
+														 const void* args) -> uint64_t {
+		auto* a = static_cast<const GetBufferArgs*>(args);
+		const auto& world = engine->GetPhysicsContext().GetWorld();
+		*a->outView =
+			ZHLN::ViewComposer::Build(&world, world.linearVelocities, "f", world.count.load(), 4);
+		return 0;
+	};
+
+	s_CommandRegistry["ReleaseBuffer"] = [](ZHLN::Engine*, const void* args) -> uint64_t {
+		auto* a = static_cast<const ReleaseBufferArgs*>(args);
+		ZHLN::SyncPolicy::Release(static_cast<ZHLN::BufferSync*>(a->sync_ptr));
+		return 0;
+	};
+
+	s_CommandRegistry["GetECSBuffer"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		auto* a = static_cast<const GetECSBufferArgs*>(args);
+		auto& reg = engine->GetRegistry();
+		std::string_view name(a->componentName);
+
+		if (name == "PhysicsComponent") {
+			auto raw = reg.GetRawArray<ZHLN::PhysicsComponent>();
+			*a->outView = ZHLN::ViewComposer::Build(&reg, raw.data(), "Q", raw.size());
+		} else if (name == "PBRComponent") {
+			auto raw = reg.GetRawArray<ZHLN::PBRComponent>();
+			*a->outView = ZHLN::ViewComposer::Build(&reg, raw.data(), "f", raw.size(), 2);
+		} else if (name == "PostProcessSettingsComponent") {
+			auto raw = reg.GetRawArray<ZHLN::PostProcessSettingsComponent>();
+			*a->outView = ZHLN::ViewComposer::Build(&reg, raw.data(), "B",
+													raw.size()); // "B" for Bytes/Struct
+		} else if (name == "AASettingsComponent") {
+			auto raw = reg.GetRawArray<ZHLN::AASettingsComponent>();
+			*a->outView = ZHLN::ViewComposer::Build(&reg, raw.data(), "B", raw.size());
+		} else if (name == "DebugSettingsComponent") {
+			auto raw = reg.GetRawArray<ZHLN::DebugSettingsComponent>();
+			*a->outView = ZHLN::ViewComposer::Build(&reg, raw.data(), "B", raw.size());
+		} else {
+			*a->outView = {};
+		}
+		return 0;
+	};
+
+	s_CommandRegistry["GetECSEntities"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		auto* a = static_cast<const GetECSBufferArgs*>(args);
+		auto& reg = engine->GetRegistry();
+		uint32_t familyID = ZHLN::ECS::Registry::GetFamilyIDFromName(a->componentName);
+		if (familyID != 0xFFFFFFFF) {
+			auto entities = reg.GetEntitiesByFamilyID(familyID);
+			*a->outView = ZHLN::ViewComposer::Build(
+				&reg, const_cast<ZHLN::Entity*>(entities.data()), "Q", entities.size());
+		} else {
+			*a->outView = {};
+		}
+		return 0;
+	};
+
+	s_CommandRegistry["GetPhysicsContactEvents"] = [](ZHLN::Engine* engine,
+													  const void* args) -> uint64_t {
+		auto* a = static_cast<const GetBufferArgs*>(args);
+		auto events = ZHLN::Physics::GetContactEvents(engine->GetPhysicsContext());
+		const char* fmt = (sizeof(JPH::Real) == 8) ? "EvtD" : "EvtF";
+		*a->outView = ZHLN::ViewComposer::Build(&engine->GetPhysicsContext().GetWorld(),
+												events.first, fmt, events.second);
+		return 0;
+	};
+
+	// --- ECS ---
+	s_CommandRegistry["GetComponent"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		auto* a = static_cast<const GetComponentArgs*>(args);
+		uint32_t familyID = ZHLN::ECS::Registry::GetFamilyIDFromName(a->componentName);
+		if (familyID == 0xFFFFFFFF)
+			return 0;
+		return std::bit_cast<uint64_t>(
+			engine->GetRegistry().GetRawByFamily(ZHLN::Entity::Unpack(a->entityRaw), familyID));
+	};
+
+	s_CommandRegistry["AddComponent"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		auto* a = static_cast<const AddComponentArgs*>(args);
+		auto entity = ZHLN::Entity::Unpack(a->entityRaw);
+		auto& reg = engine->GetRegistry();
+		std::string_view name(a->componentName);
+		void* ptr = nullptr;
+		if (name == "HierarchyComponent")
+			ptr = &reg.Add(entity, ZHLN::HierarchyComponent{});
+		else if (name == "TransformComponent")
+			ptr = &reg.Add(entity, ZHLN::TransformComponent{});
+		else if (name == "MovementComponent")
+			ptr = &reg.Add(entity, ZHLN::MovementComponent{});
+		else if (name == "PhysicsStateComponent")
+			ptr = &reg.Add(entity, ZHLN::PhysicsStateComponent{});
+		else if (name == "TargetCameraComponent")
+			ptr = &reg.Add(entity, ZHLN::TargetCameraComponent{});
+		else if (name == "PBRComponent")
+			ptr = &reg.Add(entity, ZHLN::PBRComponent{});
+		else if (name == "TextComponent")
+			ptr = &reg.Add(entity, ZHLN::TextComponent{});
+		else if (name == "PostProcessSettingsComponent")
+			ptr = &reg.Add(entity, ZHLN::PostProcessSettingsComponent{});
+		else if (name == "DebugSettingsComponent")
+			ptr = &reg.Add(entity, ZHLN::DebugSettingsComponent{});
+		else if (name == "AASettingsComponent")
+			ptr = &reg.Add(entity, ZHLN::AASettingsComponent{});
+		return std::bit_cast<uint64_t>(ptr);
+	};
+
+	s_CommandRegistry["CreateEntity"] = [](ZHLN::Engine* engine, const void*) -> uint64_t {
+		return engine->GetRegistry().Create().Pack();
+	};
+
+	s_CommandRegistry["DestroyEntity"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		auto* a = static_cast<const EntityOnlyArgs*>(args);
+		auto entity = ZHLN::Entity::Unpack(a->entityRaw);
+		auto* text = engine->GetRegistry().Get<ZHLN::TextComponent>(entity);
+		if (text != nullptr) {
+			if (text->mesh.vertexBuffer != ZHLN::BufferHandle::Invalid)
+				engine->GetRenderContext().DestroyBuffer(text->mesh.vertexBuffer);
+			if (text->mesh.indexBuffer != ZHLN::BufferHandle::Invalid)
+				engine->GetRenderContext().DestroyBuffer(text->mesh.indexBuffer);
+		}
+		engine->GetRegistry().Destroy(entity);
+		return 0;
+	};
+
+	// --- Input ---
+	s_CommandRegistry["IsKeyDown"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		auto* a = static_cast<const IsKeyDownArgs*>(args);
+		return engine->GetInput().IsKeyDown(static_cast<ZHLN::KeyCode>(a->key)) ? 1 : 0;
+	};
+
+	s_CommandRegistry["GetMouseDelta"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		auto* a = static_cast<const GetMouseDeltaArgs*>(args);
+		*a->outX = engine->GetInput().GetMouse().deltaX;
+		*a->outY = engine->GetInput().GetMouse().deltaY;
+		return 0;
+	};
+
+	// --- Camera ---
+	s_CommandRegistry["GetCameraYaw"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		auto* a = static_cast<const CameraFloatArgs*>(args);
+		*a->outVal = engine->GetCamera().yaw;
+		return 0;
+	};
+
+	s_CommandRegistry["GetCameraFOV"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		auto* a = static_cast<const CameraFloatArgs*>(args);
+		*a->outVal = engine->GetCamera().fov;
+		return 0;
+	};
+
+	s_CommandRegistry["SetCameraFOV"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		auto* a = static_cast<const SetCameraFOVArgs*>(args);
+		engine->GetCamera().fov = a->fov;
+		return 0;
+	};
+
+	// --- Audio ---
+	s_CommandRegistry["PlayOneShot"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		auto* a = static_cast<const PlayOneShotArgs*>(args);
+		engine->GetAudioContext().PlayOneShot(a->filepath, a->volume);
+		return 0;
+	};
+
+	s_CommandRegistry["PlayOneShot3D"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		auto* a = static_cast<const PlayOneShot3DArgs*>(args);
+		engine->GetAudioContext().PlayOneShot3D(a->filepath, JPH::Vec3(a->x, a->y, a->z),
+												a->volume);
+		return 0;
+	};
+
+	s_CommandRegistry["PlayProceduralBeep"] = [](ZHLN::Engine* engine,
+												 const void* args) -> uint64_t {
+		auto* a = static_cast<const PlayProceduralBeepArgs*>(args);
+		engine->GetAudioContext().PlayProceduralBeep(a->frequency, a->duration, a->volume);
+		return 0;
+	};
+
+	// --- Physics & Control ---
+	s_CommandRegistry["SetCharacterVelocity"] = [](ZHLN::Engine* engine,
+												   const void* args) -> uint64_t {
+		auto* a = static_cast<const SetCharVelArgs*>(args);
+		ZHLN::Physics::SetCharacterVelocity(engine->GetPhysicsContext(),
+											ZHLN::Entity::Unpack(a->entityRaw),
+											JPH::Vec3(a->x, a->y, a->z));
+		return 0;
+	};
+
+	s_CommandRegistry["IsCharacterOnGround"] = [](ZHLN::Engine* engine,
+												  const void* args) -> uint64_t {
+		auto* a = static_cast<const EntityOnlyArgs*>(args);
+		return ZHLN::Physics::IsCharacterOnGround(engine->GetPhysicsContext(),
+												  ZHLN::Entity::Unpack(a->entityRaw))
+				   ? 1
+				   : 0;
+	};
+
+	s_CommandRegistry["SetLinearVelocity"] = [](ZHLN::Engine* engine,
+												const void* args) -> uint64_t {
+		auto* a = static_cast<const SetCharVelArgs*>(args);
+		ZHLN::Physics::SetLinearVelocity(engine->GetPhysicsContext(),
+										 ZHLN::Entity::Unpack(a->entityRaw),
+										 JPH::Vec3(a->x, a->y, a->z));
+		return 0;
+	};
+
+	s_CommandRegistry["AddImpulse"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		auto* a = static_cast<const SetCharVelArgs*>(args);
+		ZHLN::Physics::AddImpulse(engine->GetPhysicsContext(), ZHLN::Entity::Unpack(a->entityRaw),
+								  JPH::Vec3(a->x, a->y, a->z));
+		return 0;
+	};
+
+	s_CommandRegistry["AddImpulseAt"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		auto* a = static_cast<const AddImpulseAtArgs*>(args);
+		ZHLN::Physics::AddImpulse(engine->GetPhysicsContext(), ZHLN::Entity::Unpack(a->entityRaw),
+								  JPH::Vec3(a->ix, a->iy, a->iz), JPH::RVec3(a->px, a->py, a->pz));
+		return 0;
+	};
+
+	s_CommandRegistry["Raycast"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		auto* a = static_cast<const RaycastArgs*>(args);
+		ZHLN::Entity ignore =
+			a->ignoreEntity != 0 ? ZHLN::Entity::Unpack(a->ignoreEntity) : ZHLN::Entity{};
+		auto res =
+			ZHLN::Physics::Raycast(engine->GetPhysicsContext(), JPH::RVec3(a->ox, a->oy, a->oz),
+								   JPH::Vec3(a->dx, a->dy, a->dz), a->maxDist, ignore);
+		a->outResult->hasHit = res.hasHit ? 1 : 0;
+		if (res.hasHit) {
+			a->outResult->entity = res.handle.Pack();
+			a->outResult->px = res.position.GetX();
+			a->outResult->py = res.position.GetY();
+			a->outResult->pz = res.position.GetZ();
+			a->outResult->nx = res.normal.GetX();
+			a->outResult->ny = res.normal.GetY();
+			a->outResult->nz = res.normal.GetZ();
+			a->outResult->fraction = res.fraction;
+		}
+		return 0;
+	};
+
+	s_CommandRegistry["SetMovementInput"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		auto* a = static_cast<const SetMoveInputArgs*>(args);
+		if (auto* move = engine->GetRegistry().Get<ZHLN::MovementComponent>(
+				ZHLN::Entity::Unpack(a->entityRaw))) {
+			move->inputX = a->x;
+			move->inputZ = a->z;
+		}
+		return 0;
+	};
+
+	s_CommandRegistry["SetJumpIntent"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		auto* a = static_cast<const EntityOnlyArgs*>(args);
+		if (auto* move = engine->GetRegistry().Get<ZHLN::MovementComponent>(
+				ZHLN::Entity::Unpack(a->entityRaw))) {
+			move->jumpRequested = true;
+		}
+		return 0;
+	};
+
+	s_CommandRegistry["UnprojectScreenToWorld"] = [](ZHLN::Engine* engine,
+													 const void* args) -> uint64_t {
+		auto* a = static_cast<const UnprojectArgs*>(args);
+		auto winSize = engine->GetWindow().GetSize();
+		if (winSize.width == 0 || winSize.height == 0)
+			return 0;
+		float aspect = (float)winSize.width / (float)winSize.height;
+		const auto& cam = engine->GetCamera();
+		JPH::Mat44 invVP = (cam.GetProjectionMatrix(aspect) * cam.GetViewMatrix()).Inversed();
+		JPH::Vec4 nearWorld = invVP * JPH::Vec4(a->ndcX, a->ndcY, 0.0f, 1.0f);
+		JPH::Vec4 farWorld = invVP * JPH::Vec4(a->ndcX, a->ndcY, 1.0f, 1.0f);
+		JPH::Vec3 pNear =
+			JPH::Vec3(nearWorld.GetX() / nearWorld.GetW(), nearWorld.GetY() / nearWorld.GetW(),
+					  nearWorld.GetZ() / nearWorld.GetW());
+		JPH::Vec3 pFar =
+			JPH::Vec3(farWorld.GetX() / farWorld.GetW(), farWorld.GetY() / farWorld.GetW(),
+					  farWorld.GetZ() / farWorld.GetW());
+		JPH::Vec3 dir = (pFar - pNear).Normalized();
+		*a->ox = pNear.GetX();
+		*a->oy = pNear.GetY();
+		*a->oz = pNear.GetZ();
+		*a->dx = dir.GetX();
+		*a->dy = dir.GetY();
+		*a->dz = dir.GetZ();
+		return 0;
+	};
+
+	// --- Global State & Logging ---
+	s_CommandRegistry["GetTotalTime"] = [](ZHLN::Engine*, const void* args) -> uint64_t {
+		auto* a = static_cast<const CameraFloatArgs*>(args);
+		static auto start = std::chrono::high_resolution_clock::now();
+		auto now = std::chrono::high_resolution_clock::now();
+		*a->outVal = std::chrono::duration<float>(now - start).count();
+		return 0;
+	};
+
+	s_CommandRegistry["LogInventoryShell"] = [](ZHLN::Engine*, const void* args) -> uint64_t {
+		auto* a = static_cast<const LogInventoryArgs*>(args);
+		std::string str(a->msg);
+		size_t pos = 0;
+		while (pos < str.size()) {
+			size_t next_nl = str.find('\n', pos);
+			if (next_nl == std::string::npos) {
+				s_InvShellLog.push_back(str.substr(pos));
+				break;
+			}
+			s_InvShellLog.push_back(str.substr(pos, next_nl - pos));
+			pos = next_nl + 1;
+		}
+		s_InvScrollToBottom = true;
+		std::println(stdout, "[InvShell Output]\n{}", a->msg);
+		std::fflush(stdout);
+		return 0;
+	};
+}
 
 // ============================================================================
 // ALL C-EXPORTS MUST BE INSIDE THIS BLOCK TO AVOID MANGLING
 // ============================================================================
 extern "C" {
 
-ZHLN_LuaChannel* ZHLN_CreateLuaChannel(void) {
-	return new ZHLN_LuaChannel();
-}
-
-void ZHLN_DestroyLuaChannel(ZHLN_LuaChannel* chan) {
-	delete chan;
-}
-
-void ZHLN_PushLuaChannel(ZHLN_Engine* /*engine*/, ZHLN_LuaChannel* chan, lua_State* L) {
-	int ref = luaL_ref(L, LUA_REGISTRYINDEX);
-	chan->channel.Push(ref);
-}
-
-void ZHLN_PopLuaChannel(ZHLN_Engine* /*engine*/, ZHLN_LuaChannel* chan, lua_State* L) {
-	int ref = chan->channel.Pop();
-	lua_rawgeti(L, LUA_REGISTRYINDEX, ref);
-	luaL_unref(L, LUA_REGISTRYINDEX, ref);
-}
-
-ZHLN_Engine* ZHLN_GetEngineContext() {
+ZHLN_API ZHLN_Engine* ZHLN_GetEngineContext() {
 	return reinterpret_cast<ZHLN_Engine*>(ZHLN::GetEngineContext());
 }
 
-void ZHLN_SetGameState(ZHLN_Engine* /*engine_handle*/, const ZHLN_GameState* state_ptr) {
-	if (state_ptr != nullptr) {
-		s_LocalGameState = *state_ptr;
-	}
-}
-
-void* ZHLN_GetGameState(ZHLN_Engine* /*engine_handle*/) {
-	return &s_LocalGameState;
-}
-
-uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine_handle, const char* cmd, const void* args) {
+ZHLN_API uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine_handle, const char* cmd,
+									   const void* args) {
 	RegisterFFICommands();
 	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
 	auto it = s_CommandRegistry.find(std::string_view(cmd));
@@ -269,57 +695,6 @@ uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine_handle, const char* cmd, const
 		return it->second(engine, args);
 	}
 	return 0;
-}
-
-float ZHLN_GetTotalTime(ZHLN_Engine* /*engine_handle*/) {
-	static auto start = std::chrono::high_resolution_clock::now();
-	auto now = std::chrono::high_resolution_clock::now();
-	return std::chrono::duration<float>(now - start).count();
-}
-
-int ZHLN_IsKeyDown(ZHLN_Engine* engine_handle, uint8_t key) {
-	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
-	return engine->GetInput().IsKeyDown(static_cast<ZHLN::KeyCode>(key)) ? 1 : 0;
-}
-
-void ZHLN_GetMouseDelta(ZHLN_Engine* engine_handle, float* outX, float* outY) {
-	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
-	*outX = engine->GetInput().GetMouse().deltaX;
-	*outY = engine->GetInput().GetMouse().deltaY;
-}
-
-float ZHLN_GetCameraYaw(ZHLN_Engine* engine_handle) {
-	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
-	return engine->GetCamera().yaw;
-}
-
-float ZHLN_GetCameraFOV(ZHLN_Engine* engine_handle) {
-	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
-	return engine->GetCamera().fov;
-}
-
-void ZHLN_SetCameraFOV(ZHLN_Engine* engine_handle, float fov) {
-	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
-	engine->GetCamera().fov = fov;
-}
-
-void ZHLN_LogInventoryShell(const char* msg) {
-	std::string str(msg);
-	size_t pos = 0;
-
-	while (pos < str.size()) {
-		size_t next_nl = str.find('\n', pos);
-		if (next_nl == std::string::npos) {
-			s_InvShellLog.push_back(str.substr(pos));
-			break;
-		}
-		s_InvShellLog.push_back(str.substr(pos, next_nl - pos));
-		pos = next_nl + 1;
-	}
-	s_InvScrollToBottom = true;
-
-	std::println(stdout, "[InvShell Output]\n{}", msg);
-	std::fflush(stdout);
 }
 
 // Lua internal Bridges

@@ -21,6 +21,7 @@ struct CommandLineOptions {
 	LogLevel logLevel = LogLevel::Moderate;
 	uint32_t fpsLimit = 0;
 	bool enableRenderDoc = false;
+	bool benchmark = false;
 };
 
 struct EngineError {
