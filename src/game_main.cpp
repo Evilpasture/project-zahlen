@@ -39,6 +39,7 @@
 #include <engine/system/AnimationSystem.hpp>
 #include <engine/system/ArticulationSystem.hpp>
 #include <engine/system/CullingSystem.hpp>
+#include <engine/system/InteractionSystem.hpp>
 #include <expected>
 #include <physics/PhysicsWorld.hpp>
 #include <string>
@@ -638,6 +639,18 @@ void BuildSystemGraphs(Engine& engine) {
 						   .access_pattern = {},
 						   .enabled = true});
 
+	updateGraph.AddSystem(
+		{.update_func =
+			 [](Engine& eng, float dt) {
+				 static InteractionSystem sys;
+				 sys.Update(eng, dt);
+			 },
+		 .name = "InteractionSystem",
+		 .access_pattern = {Write<TriggerComponent>(), Write<ContainerComponent>(),
+							Write<PickupComponent>(), Read<ItemBaseComponent>(),
+							Read<UsableComponent>(), Read<MovementComponent>()},
+		 .enabled = true});
+
 	updateGraph.Compile();
 
 	// --- COMPILE RENDER GRAPH (Lighting & Culling) ---
@@ -702,7 +715,8 @@ bool InitializeGame(Engine& engine) {
 		TargetCameraComponent, InputSystem::InputComponent, LightingSystem::LightComponent,
 		PostProcessComponent, CameraSystem::CameraComponent, PlayerTagComponent,
 		MainCameraTagComponent, GlobalSettingsTagComponent, AASettingsComponent, TextComponent,
-		UISettingsComponent, AudioSourceComponent, PBRComponent>();
+		UISettingsComponent, AudioSourceComponent, PBRComponent, ItemBaseComponent, PickupComponent,
+		UsableComponent, ContainerComponent, TriggerComponent>();
 
 	auto groundShape =
 		Physics::GetOrCreateShape(pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);

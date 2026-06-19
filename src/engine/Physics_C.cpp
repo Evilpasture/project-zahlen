@@ -1,7 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
+#include "Zahlen/Input.hpp"
+#include "Zahlen/Window.hpp"
 #include "ecs/ECS.hpp"
 
 #include <Zahlen/Common.h>
@@ -84,5 +85,44 @@ void ZHLN_SetJumpIntent(ZHLN_Engine* handle, uint64_t entityRaw) {
 	if (auto* move = engine->GetRegistry().Get<ZHLN::MovementComponent>(entity)) {
 		move->jumpRequested = true;
 	}
+}
+
+ZHLN_API void ZHLN_UnprojectScreenToWorld(ZHLN_Engine* engine_handle, float ndcX, float ndcY,
+										  double* out_ox, double* out_oy, double* out_oz,
+										  float* out_dx, float* out_dy, float* out_dz) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	auto winSize = engine->GetWindow().GetSize();
+	if (winSize.width == 0 || winSize.height == 0) {
+		return;
+	}
+
+	float aspect = (float)winSize.width / (float)winSize.height;
+	const auto& cam = engine->GetCamera();
+	JPH::Mat44 invVP = (cam.GetProjectionMatrix(aspect) * cam.GetViewMatrix()).Inversed();
+
+	JPH::Vec4 nearWorld = invVP * JPH::Vec4(ndcX, ndcY, 0.0f, 1.0f);
+	JPH::Vec4 farWorld = invVP * JPH::Vec4(ndcX, ndcY, 1.0f, 1.0f);
+
+	JPH::Vec3 pNear =
+		JPH::Vec3(nearWorld.GetX() / nearWorld.GetW(), nearWorld.GetY() / nearWorld.GetW(),
+				  nearWorld.GetZ() / nearWorld.GetW());
+	JPH::Vec3 pFar = JPH::Vec3(farWorld.GetX() / farWorld.GetW(), farWorld.GetY() / farWorld.GetW(),
+							   farWorld.GetZ() / farWorld.GetW());
+	JPH::Vec3 dir = (pFar - pNear).Normalized();
+
+	*out_ox = pNear.GetX();
+	*out_oy = pNear.GetY();
+	*out_oz = pNear.GetZ();
+	*out_dx = dir.GetX();
+	*out_dy = dir.GetY();
+	*out_dz = dir.GetZ();
+}
+
+ZHLN_API void ZHLN_AddImpulseAt(ZHLN_Engine* engine_handle, uint64_t entityHandle, float ix,
+								float iy, float iz, double px, double py, double pz) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	ZHLN::Entity handle = ZHLN::Entity::Unpack(entityHandle);
+	ZHLN::Physics::AddImpulse(engine->GetPhysicsContext(), handle, JPH::Vec3(ix, iy, iz),
+							  JPH::RVec3(px, py, pz));
 }
 }

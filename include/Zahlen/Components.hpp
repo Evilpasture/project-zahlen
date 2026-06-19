@@ -183,4 +183,55 @@ struct UISettingsComponent {
 	FontAtlas fontAtlas; // Optional container keeping assets alive
 };
 
+/**
+ * @brief Holds core identity and asset metadata for items.
+ */
+struct ItemBaseComponent {
+	String64 name;
+	uint32_t id = 0;
+	String64 icon;
+};
+
+/**
+ * @brief Flags an entity as an interactable/collectable item.
+ */
+struct PickupComponent {
+	uint32_t isPickedUp = 0;
+};
+
+/**
+ * @brief Defines an action triggered when the player uses/activates the object.
+ */
+struct UsableComponent {
+	uint64_t scriptHash = 0;
+};
+static_assert(sizeof(UsableComponent) == 8);
+
+/**
+ * @brief Represents an inventory container holding references to other entities.
+ */
+struct ContainerComponent {
+	static constexpr size_t MAX_SLOTS = 16;
+	Entity slots[MAX_SLOTS] = {NullEntity, NullEntity, NullEntity, NullEntity,
+							   NullEntity, NullEntity, NullEntity, NullEntity,
+							   NullEntity, NullEntity, NullEntity, NullEntity,
+							   NullEntity, NullEntity, NullEntity, NullEntity};
+	uint32_t count = 0;
+	uint32_t _padding = 0; // Alignment boundary padding
+};
+
+struct TriggerComponent {
+	// NOLINTNEXTLINE(performance-enum-size)
+	enum Flags : uint32_t {
+		Active = 1 << 0,
+		PlayerInside = 1 << 1,
+		TriggerOnce = 1 << 2, // Future expansion examples without layout shift
+		RequiresItem = 1 << 3,
+	};
+
+	float radius = 2.0f;
+	uint32_t flags = Active;
+};
+static_assert(sizeof(TriggerComponent) == 8);
+
 } // namespace ZHLN

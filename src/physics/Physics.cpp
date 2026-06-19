@@ -919,6 +919,16 @@ JPH::ShapeRefC CreateHeightFieldShape(const std::vector<float>& heights, int sam
 	return result.Get();
 }
 
+void AddImpulse(PhysicsContext& ctx, ZHLN::Entity handle, JPH::Vec3Arg impulse,
+				JPH::RVec3Arg position) {
+	auto* impl = ctx.GetImpl();
+	JPH::BodyID id = impl->world.GetBodyID(handle);
+	if (!id.IsInvalid()) {
+		impl->world.bodyInterface->AddImpulse(id, impulse, position);
+		impl->world.bodyInterface->ActivateBody(id);
+	}
+}
+
 JPH::PhysicsSystem& GetInternalSystem(PhysicsContext& ctx) noexcept {
 	return ctx.GetImpl()->physicsSystem;
 }

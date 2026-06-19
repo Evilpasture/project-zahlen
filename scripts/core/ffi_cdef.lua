@@ -268,6 +268,39 @@ if not ok then
 
         void ZHLN_DestroyEntity(ZHLN_Engine* engine, uint64_t entityRaw);
 
+        typedef struct String64 {
+            char data[64];
+            size_t len;
+        } String64;
+
+        typedef struct ItemBaseComponent {
+            String64 name;
+            uint32_t id;
+            String64 icon;
+        } ItemBaseComponent;
+
+        typedef struct PickupComponent {
+            uint32_t isPickedUp;
+        } PickupComponent;
+
+        typedef struct UsableComponent {
+            uint64_t scriptHash;
+        } UsableComponent;
+
+        typedef struct ContainerComponent {
+            uint64_t slots[16];
+            uint32_t count;
+            uint32_t padding;
+        } ContainerComponent;
+
+        typedef struct TriggerComponent {
+            float radius;
+            uint32_t flags;
+        } TriggerComponent;
+
+        void ZHLN_UnprojectScreenToWorld(ZHLN_Engine* engine, float ndcX, float ndcY, double* out_ox, double* out_oy, double* out_oz, float* out_dx, float* out_dy, float* out_dz);
+        void ZHLN_AddImpulseAt(ZHLN_Engine* engine, uint64_t entityHandle, float ix, float iy, float iz, double px, double py, double pz);
+
     ]]
 end
 

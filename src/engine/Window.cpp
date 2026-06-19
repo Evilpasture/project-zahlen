@@ -28,6 +28,8 @@ static KeyCode MapGLFWKey(int key) {
 			return KeyCode::Escape;
 		case GLFW_KEY_R:
 			return KeyCode::R;
+		case GLFW_KEY_E:
+			return KeyCode::E;
 		default:
 			return KeyCode::Unknown;
 	}
@@ -102,6 +104,12 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
 						self->_impl->input->InjectKeyDown(KeyCode::RButton);
 					} else if (action == GLFW_RELEASE) {
 						self->_impl->input->InjectKeyUp(KeyCode::RButton);
+					}
+				} else if (button == GLFW_MOUSE_BUTTON_LEFT) {
+					if (action == GLFW_PRESS) {
+						self->_impl->input->InjectKeyDown(KeyCode::LButton);
+					} else if (action == GLFW_RELEASE) {
+						self->_impl->input->InjectKeyUp(KeyCode::LButton);
 					}
 				}
 			});

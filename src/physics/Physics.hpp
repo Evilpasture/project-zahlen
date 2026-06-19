@@ -186,6 +186,9 @@ ZHLN::Entity GetEntityHandle(const PhysicsContext& ctx, JPH::BodyID bodyID);
 JPH::ShapeRefC CreateHeightFieldShape(const std::vector<float>& heights, int sampleCount,
 									  float worldSize);
 
+void AddImpulse(PhysicsContext& ctx, ZHLN::Entity handle, JPH::Vec3Arg impulse,
+				JPH::RVec3Arg position);
+
 // Internal helpers to bridge PIMPL barriers for engine factories
 [[nodiscard]] JPH::PhysicsSystem& GetInternalSystem(PhysicsContext& ctx) noexcept;
 [[nodiscard]] PhysicsWorld& GetInternalWorld(PhysicsContext& ctx) noexcept;

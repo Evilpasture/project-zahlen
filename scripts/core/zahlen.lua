@@ -151,7 +151,9 @@ local KEY_MAP = {
     RBUTTON = 6,
     SPACE = 7,
     ESCAPE = 8,
-    R = 9
+    R = 9,
+    E = 10,
+    LBUTTON = 11
 }
 
 function Input.new(engine_raw) return setmetatable({ _raw = engine_raw }, Input) end
