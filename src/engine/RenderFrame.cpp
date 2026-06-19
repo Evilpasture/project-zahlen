@@ -511,7 +511,7 @@ struct AAPass {
 	}
 };
 
-struct PostProcessPass {
+struct DeferredLightingPass {
 	[[nodiscard]] auto
 	Execute(const FrameRecorder& recorder,
 			SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -524,55 +524,76 @@ struct PostProcessPass {
 		Profiler::ScopedGpuProfile<Stages::PostProcessPass, FrameProfiler> timer(
 			cmd, recorder.frameIndex, ctx.gpuProfiler);
 
-		// 1. Transition ONLY our local postProcessTarget from its end-of-frame read state back to
-		// write state
 		auto pp_att = IssueBarrier<Vk::ShaderReadState, Vk::ColorAttachmentState>(
 			cmd, AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.postProcessTarget));
 
-		// 2. Bind the inputs directly
+		// 1. Write Descriptor Bindings (9 Slots matching AmbientLayout)
+		ctx.ambientPass.WriteNext(
+			ctx.ctx.Device(), in.sceneColor, Vk::SamplerWrite{.sampler = ctx.defaultSampler.Get()},
+			in.depth, in.normRough, Vk::SamplerWrite{.sampler = ctx.pointSampler.Get()},
+			Vk::ImageWrite{.view = ctx.iblPayload.prefilteredView.Get(),
+						   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+			Vk::ImageWrite{.view = ctx.iblPayload.brdfLutView.Get(),
+						   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+			Vk::SamplerWrite{.sampler = ctx.clampSampler.Get()},
+			Vk::BufferWrite{.buffer = ctx.frameUniformBuffers[recorder.frameIndex].Handle()});
+
+		// 2. Write Descriptor Bindings (14 Slots matching LightingLayout)
+		ctx.lightingPass.WriteNext(
+			ctx.ctx.Device(), in.sceneColor, Vk::SamplerWrite{.sampler = ctx.defaultSampler.Get()},
+			in.depth, in.normRough,
+			Vk::BufferWrite{.buffer = ctx.lightStorageBuffers[recorder.frameIndex].Handle()},
+			Vk::BufferWrite{.buffer = ctx.frameUniformBuffers[recorder.frameIndex].Handle()},
+			Vk::ImageWrite{.view = ctx.shadowMap.view.Get(),
+						   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+			Vk::SamplerWrite{.sampler = ctx.shadowSampler.Get()},
+			Vk::ImageWrite{.view = ctx.ltcMatView.Get(),
+						   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+			Vk::ImageWrite{.view = ctx.ltcAmpView.Get(),
+						   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+			Vk::SamplerWrite{.sampler = ctx.clampSampler.Get()},
+			Vk::BufferWrite{.buffer = ctx.clusterGridBuffers[recorder.frameIndex].Handle()},
+			Vk::BufferWrite{.buffer = ctx.lightIndexListBuffers[recorder.frameIndex].Handle()},
+			Vk::ImageWrite{.view = ctx.ambientTarget.view.Get(),
+						   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}
+			// Slot 13: texAmbient
+		);
+
+		// 3. Write Descriptor Bindings (11 Slots matching ReflectionLayout)
 		if (ctx.rtCtx.Valid()) {
-			ctx.postProcessPass.WriteNext(
+			ctx.reflectionPass.WriteNext(
 				ctx.ctx.Device(), in.sceneColor,
 				Vk::SamplerWrite{.sampler = ctx.defaultSampler.Get()}, in.depth, in.normRough,
 				Vk::SamplerWrite{.sampler = ctx.pointSampler.Get()},
 				Vk::ImageWrite{.view = ctx.iblPayload.prefilteredView.Get(),
 							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
 				&ctx.tlas.Current(),
-				Vk::BufferWrite{.buffer = ctx.lightStorageBuffers[recorder.frameIndex].Handle()},
 				Vk::BufferWrite{.buffer = ctx.frameUniformBuffers[recorder.frameIndex].Handle()},
-				Vk::ImageWrite{.view = ctx.shadowMap.view.Get(),
-							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-				Vk::SamplerWrite{.sampler = ctx.shadowSampler.Get()},
-				Vk::ImageWrite{.view = ctx.ltcMatView.Get(),
-							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-				Vk::ImageWrite{.view = ctx.ltcAmpView.Get(),
-							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-				Vk::SamplerWrite{.sampler = ctx.clampSampler.Get()},
 				Vk::ImageWrite{.view = ctx.iblPayload.brdfLutView.Get(),
-							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-				Vk::BufferWrite{.buffer = ctx.clusterGridBuffers[recorder.frameIndex].Handle()},
-				Vk::BufferWrite{.buffer = ctx.lightIndexListBuffers[recorder.frameIndex].Handle()});
+							   .layout =
+								   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}, // Slot 8: brdfLUT
+				Vk::SamplerWrite{.sampler = ctx.clampSampler.Get()}, // Slot 9: clampSampler
+				Vk::ImageWrite{.view = ctx.lightingTarget.view.Get(),
+							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}
+				// Slot 10: texLighting
+			);
 		} else {
-			ctx.postProcessPassNoRT.WriteNext(
+			ctx.reflectionPass.WriteNext(
 				ctx.ctx.Device(), in.sceneColor,
 				Vk::SamplerWrite{.sampler = ctx.defaultSampler.Get()}, in.depth, in.normRough,
 				Vk::SamplerWrite{.sampler = ctx.pointSampler.Get()},
 				Vk::ImageWrite{.view = ctx.iblPayload.prefilteredView.Get(),
 							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-				Vk::BufferWrite{.buffer = ctx.lightStorageBuffers[recorder.frameIndex].Handle()},
+				Vk::SkipWrite{}, // Slot 6: tlas (skipped)
 				Vk::BufferWrite{.buffer = ctx.frameUniformBuffers[recorder.frameIndex].Handle()},
-				Vk::ImageWrite{.view = ctx.shadowMap.view.Get(),
-							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-				Vk::SamplerWrite{.sampler = ctx.shadowSampler.Get()},
-				Vk::ImageWrite{.view = ctx.ltcMatView.Get(),
-							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-				Vk::ImageWrite{.view = ctx.ltcAmpView.Get(),
-							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-				Vk::SamplerWrite{.sampler = ctx.clampSampler.Get()},
 				Vk::ImageWrite{.view = ctx.iblPayload.brdfLutView.Get(),
-							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-				Vk::BufferWrite{.buffer = ctx.clusterGridBuffers[recorder.frameIndex].Handle()},
-				Vk::BufferWrite{.buffer = ctx.lightIndexListBuffers[recorder.frameIndex].Handle()});
+							   .layout =
+								   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}, // Slot 8: brdfLUT
+				Vk::SamplerWrite{.sampler = ctx.clampSampler.Get()}, // Slot 9: clampSampler
+				Vk::ImageWrite{.view = ctx.lightingTarget.view.Get(),
+							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}
+				// Slot 10: texLighting
+			);
 		}
 
 		struct PPPushConstants {
@@ -604,17 +625,20 @@ struct PostProcessPass {
 			._pad = {},
 		};
 
-		if (ctx.rtCtx.Valid() && ctx.postProcessPass.pipeline.Valid()) {
-			Vk::DynamicPass(ctx.postProcessTarget.extent)
-				.AddColor(pp_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
-				.Execute(cmd, [&]() { ctx.postProcessPass.Execute(cmd, pc); });
-		} else if (!ctx.rtCtx.Valid() && ctx.postProcessPassNoRT.pipeline.Valid()) {
-			Vk::DynamicPass(ctx.postProcessTarget.extent)
-				.AddColor(pp_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
-				.Execute(cmd, [&]() { ctx.postProcessPassNoRT.Execute(cmd, pc); });
-		}
+		// 4. Execute all 3 passes into the single bound target
+		Vk::DynamicPass(ctx.postProcessTarget.extent)
+			.AddColor(pp_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE) // Opaque load (cleared by Ambient)
+			.Execute(cmd, [&]() {
+				ctx.ambientPass.Execute(cmd, pc);
+				ctx.lightingPass.Execute(cmd, pc);
 
-		// 3. Transition our local target to ShaderRead for the BlitPass to consume
+				uint32_t variantIdx =
+					(pc.enableSSR ? 1 : 0) | ((pc.enableRTR && ctx.rtCtx.Valid()) ? 2 : 0);
+				if (variantIdx > 0) {
+					ctx.reflectionPass.ExecuteVariant(cmd, variantIdx, pc);
+				}
+			});
+
 		return IssueBarrier<Vk::ColorAttachmentState, Vk::ShaderReadState>(cmd, pp_att);
 	}
 };
@@ -904,7 +928,7 @@ ZHLN_FrameResult RenderContext::Impl::SubmitFrame() {
 
 	auto manager = StaticResourceManager(
 		&accumBuffers, &taaPass, &fxaaPass, &smaaEdgePass, &smaaWeightPass, &smaaBlendPass,
-		&postProcessPass, &postProcessPassNoRT, &blitPass, &frameUniformBuffers,
+		&ambientPass, &lightingPass, &reflectionPass, &blitPass, &frameUniformBuffers,
 		&lightStorageBuffers, &instanceDataBuffers, &indirectCommandsBuffers, &jointBuffers,
 		&bindlessSets, &tlas, &tlasBuffer, &tlasScratchBuffer, &clusterGridBuffers,
 		&lightIndexListBuffers, &globalCounterBuffers, &clusterCullingSets);
@@ -1161,7 +1185,7 @@ RenderResult RenderContext::EndFrame() noexcept {
 
 	auto stateAfterMain = Passes::MainPass{}.Execute(recorder, initialState);
 	auto stateAfterAA = Passes::AAPass{}.Execute(recorder, stateAfterMain);
-	auto stateAfterPP = Passes::PostProcessPass{}.Execute(recorder, stateAfterAA);
+	auto stateAfterPP = Passes::DeferredLightingPass{}.Execute(recorder, stateAfterAA);
 	Passes::BlitPass{}.Execute(recorder, stateAfterPP);
 
 	ZHLN_EndCommandBuffer(cmd);

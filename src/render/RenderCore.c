@@ -931,7 +931,8 @@ void ZHLN_DestroyShaderStages(const VkDevice device, ZHLN_ShaderStages* const re
 
 [[nodiscard]]
 uint32_t ZHLN_PopulateShaderStageInfos(const ZHLN_ShaderStages* const restrict stages,
-									   VkPipelineShaderStageCreateInfo* const restrict out_stages) {
+									   VkPipelineShaderStageCreateInfo* const restrict out_stages,
+									   const VkSpecializationInfo* spec_info) {
 	uint32_t count = 0;
 	if (stages->vert.handle != VK_NULL_HANDLE) {
 		out_stages[count++] = (VkPipelineShaderStageCreateInfo){
@@ -939,6 +940,7 @@ uint32_t ZHLN_PopulateShaderStageInfos(const ZHLN_ShaderStages* const restrict s
 			.stage = stages->vert.stage,
 			.module = stages->vert.handle,
 			.pName = stages->vert.entry_point,
+			.pSpecializationInfo = spec_info,
 		};
 	}
 
@@ -948,6 +950,7 @@ uint32_t ZHLN_PopulateShaderStageInfos(const ZHLN_ShaderStages* const restrict s
 			.stage = stages->frag.stage,
 			.module = stages->frag.handle,
 			.pName = stages->frag.entry_point,
+			.pSpecializationInfo = spec_info,
 		};
 	}
 	return count;
@@ -982,7 +985,8 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device,
 
 	// --- Shader Stages ---
 	VkPipelineShaderStageCreateInfo shader_stages[2];
-	uint32_t stage_count = ZHLN_PopulateShaderStageInfos(desc->stages, shader_stages);
+	uint32_t stage_count =
+		ZHLN_PopulateShaderStageInfos(desc->stages, shader_stages, desc->specialization_info);
 
 	// --- Vertex Input ---
 	const VkPipelineVertexInputStateCreateInfo vertex_input = {
@@ -1007,11 +1011,11 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device,
 		.scissorCount = 1,
 	};
 
-	// --- Rasterizer ---
+	// --- Rasterizer  ---
 	const VkPipelineRasterizationStateCreateInfo rasterizer = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-		.polygonMode = desc->polygon_mode, // Just use the value directly
-		.cullMode = desc->cull_mode,	   // Just use the value directly
+		.polygonMode = desc->polygon_mode,
+		.cullMode = desc->cull_mode,
 		.frontFace = desc->front_face ? desc->front_face : VK_FRONT_FACE_COUNTER_CLOCKWISE,
 		.lineWidth = 1.0F,
 	};
@@ -1030,22 +1034,36 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device,
 		.depthCompareOp = VK_COMPARE_OP_LESS,
 	};
 
-	// --- Color Blend (FIX: Dynamic Attachment Count) ---
+	// --- Color Blend (Dynamic Attachment Count & Additive Branching) ---
 	VkPipelineColorBlendAttachmentState blend_attachments[8];
 	uint32_t safe_color_count = ZHLN_Min(desc->color_format_count, 8);
 
 	for (uint32_t i = 0; i < safe_color_count; ++i) {
-		blend_attachments[i] = (VkPipelineColorBlendAttachmentState){
-			.blendEnable = desc->blend_enable ? VK_TRUE : VK_FALSE,
-			.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
-			.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-			.colorBlendOp = VK_BLEND_OP_ADD,
-			.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
-			.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
-			.alphaBlendOp = VK_BLEND_OP_ADD,
-			.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-							  VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
-		};
+		if (desc->additive_blend) {
+			blend_attachments[i] = (VkPipelineColorBlendAttachmentState){
+				.blendEnable = VK_TRUE,
+				.srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
+				.dstColorBlendFactor = VK_BLEND_FACTOR_ONE,
+				.colorBlendOp = VK_BLEND_OP_ADD,
+				.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+				.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+				.alphaBlendOp = VK_BLEND_OP_ADD,
+				.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+								  VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+			};
+		} else {
+			blend_attachments[i] = (VkPipelineColorBlendAttachmentState){
+				.blendEnable = desc->blend_enable ? VK_TRUE : VK_FALSE,
+				.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+				.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+				.colorBlendOp = VK_BLEND_OP_ADD,
+				.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+				.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+				.alphaBlendOp = VK_BLEND_OP_ADD,
+				.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+								  VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+			};
+		}
 	}
 
 	const VkPipelineColorBlendStateCreateInfo color_blend = {
@@ -1066,7 +1084,7 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device,
 		.pDynamicStates = dynamic_states,
 	};
 
-	// --- Dynamic Rendering (Vulkan 1.3, no VkRenderPass needed) ---
+	// --- Dynamic Rendering ---
 	const VkPipelineRenderingCreateInfo rendering = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
 		.colorAttachmentCount = desc->color_format_count,

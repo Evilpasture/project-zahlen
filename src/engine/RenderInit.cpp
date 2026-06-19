@@ -705,43 +705,68 @@ void RenderContext::Impl::InitPostProcessing() {
 	VkPushConstantRange ppPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
 
-	if (rtCtx.Valid()) {
-		auto ppShaders =
-			Vk::ShaderStages::Create(ctx.Device(),
-									 {
-										 .code = Vk::AsSpirV(&ZHLN_Resource_PostProcessVertSpv[0]),
-										 .size = ZHLN_Resource_PostProcessVertSpv_Len,
-										 .entry_point = "VSMain", // Explicitly bypass reflection
-									 },
-									 {
-										 .code = Vk::AsSpirV(&ZHLN_Resource_PostProcessFragSpv[0]),
-										 .size = ZHLN_Resource_PostProcessFragSpv_Len,
-										 .entry_point = "PSMain", // Explicitly bypass reflection
-									 });
+	// ============================================================================
+	// DEFERRED CLUSTERED PASSES INITIALIZATION
+	// ============================================================================
 
-		if (!postProcessPass.Build(ctx.Device(), ppShaders, {VK_FORMAT_R16G16B16A16_SFLOAT},
-								   &ppPush, 1)) {
-			ZHLN::Log("PostProcess pass build failure, continuing...");
-		}
-	} else {
-		auto ppNortShaders = Vk::ShaderStages::Create(
-			ctx.Device(),
-			{
-				.code = Vk::AsSpirV(&ZHLN_Resource_PostProcessNortVertSpv[0]),
-				.size = ZHLN_Resource_PostProcessNortVertSpv_Len,
-				.entry_point = "VSMain",
-			},
-			{
-				.code = Vk::AsSpirV(&ZHLN_Resource_PostProcessNortFragSpv[0]),
-				.size = ZHLN_Resource_PostProcessNortFragSpv_Len,
-				.entry_point = "PSMain",
-			});
+	// 1. Build Ambient Pass (Base Opaque)
+	auto ambientShaders =
+		Vk::ShaderStages::Create(ctx.Device(),
+								 {.code = Vk::AsSpirV(&ZHLN_Resource_AmbientVertSpv[0]),
+								  .size = ZHLN_Resource_AmbientVertSpv_Len,
+								  .entry_point = "VSMain"},
+								 {.code = Vk::AsSpirV(&ZHLN_Resource_AmbientFragSpv[0]),
+								  .size = ZHLN_Resource_AmbientFragSpv_Len,
+								  .entry_point = "PSMain"});
+	ambientPass.Build(ctx.Device(), ambientShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush, 1,
+					  false);
 
-		if (!postProcessPassNoRT.Build(ctx.Device(), ppNortShaders, {VK_FORMAT_R16G16B16A16_SFLOAT},
-									   &ppPush, 1)) {
-			ZHLN::Log("PostProcessNoRT pass build failure, continuing...");
-		}
+	// 2. Build Lighting Pass (Additive)
+	auto lightingShaders =
+		Vk::ShaderStages::Create(ctx.Device(),
+								 {.code = Vk::AsSpirV(&ZHLN_Resource_LightingVertSpv[0]),
+								  .size = ZHLN_Resource_LightingVertSpv_Len,
+								  .entry_point = "VSMain"},
+								 {.code = Vk::AsSpirV(&ZHLN_Resource_LightingFragSpv[0]),
+								  .size = ZHLN_Resource_LightingFragSpv_Len,
+								  .entry_point = "PSMain"});
+	// Pass 'true' as the final parameter to automatically configure Additive Blending
+	lightingPass.Build(ctx.Device(), lightingShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush, 1,
+					   true);
+
+	// 3. Build Reflection Pass Variants (Additive)
+	auto reflShaders =
+		Vk::ShaderStages::Create(ctx.Device(),
+								 {.code = Vk::AsSpirV(&ZHLN_Resource_ReflectionVertSpv[0]),
+								  .size = ZHLN_Resource_ReflectionVertSpv_Len,
+								  .entry_point = "VSMain"},
+								 {.code = Vk::AsSpirV(&ZHLN_Resource_ReflectionFragSpv[0]),
+								  .size = ZHLN_Resource_ReflectionFragSpv_Len,
+								  .entry_point = "PSMain"});
+
+	struct SpecData {
+		int enableSSR;
+		int enableRTR;
+	};
+	std::array<VkSpecializationMapEntry, 2> specEntries = {
+		{{.constantID = 0, .offset = offsetof(SpecData, enableSSR), .size = sizeof(int)},
+		 {.constantID = 1, .offset = offsetof(SpecData, enableRTR), .size = sizeof(int)}}};
+
+	std::array<SpecData, 4> variants = {{{.enableSSR = 0, .enableRTR = 0},
+										 {.enableSSR = 1, .enableRTR = 0},
+										 {.enableSSR = 0, .enableRTR = 1},
+										 {.enableSSR = 1, .enableRTR = 1}}};
+	std::array<VkSpecializationInfo, 4> specInfos{};
+	for (int i = 0; i < 4; ++i) {
+		specInfos[i] = {.mapEntryCount = 2,
+						.pMapEntries = specEntries.data(),
+						.dataSize = sizeof(SpecData),
+						.pData = &variants[i]};
 	}
+
+	// Build the 4 reflection pipelines concurrently mapped to their specialization constants
+	reflectionPass.BuildVariants(ctx.Device(), reflShaders, {VK_FORMAT_R16G16B16A16_SFLOAT},
+								 &ppPush, 1, specInfos, true);
 
 	VkPushConstantRange blitPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,

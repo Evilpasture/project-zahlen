@@ -7,12 +7,12 @@
 #include <Zahlen/Math3D.hpp>
 #include <gtest/gtest.h>
 
-// Include the HLSL shader directly as C++
-#include "resources/shaders/postprocess.hlsl"
+// Include the isolated reflection pass to test raymarching
+#include "resources/shaders/reflection.hlsl"
 
 TEST(PostProcessTest, VerifyRaymarchSSR) {
 	// 1. Configure the Uniforms (Push Constants)
-	pc.enableSSR = 1;
+	pc.giMode = 1;
 	// Frame index in W is set to 1 for Stable Weyl noise offset validation
 	pc.camPos = float4(0.0f, 5.0f, -5.0f, 1.0f);
 	pc.viewProj = float4x4::sIdentity();

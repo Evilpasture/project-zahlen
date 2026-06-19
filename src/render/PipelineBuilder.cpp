@@ -121,6 +121,18 @@ auto PipelineBuilder::AlphaBlend() noexcept -> PipelineBuilder& {
 	return *this;
 }
 
+auto PipelineBuilder::AdditiveBlend() noexcept -> PipelineBuilder& {
+	_cfg.blend_enable = true;
+	_cfg.additive_blend = true;
+	return *this;
+}
+
+auto PipelineBuilder::Specialization(const VkSpecializationInfo* info) noexcept
+	-> PipelineBuilder& {
+	_cfg.specialization_info = info;
+	return *this;
+}
+
 auto PipelineBuilder::Build(VkDevice device) const noexcept -> Pipeline {
 	const auto result = Validate();
 	if (result != PipelineBuilderResult::Succeeded) {
@@ -134,7 +146,7 @@ auto PipelineBuilder::Build(VkDevice device) const noexcept -> Pipeline {
 		.vertex_bindings = _cfg.bindings,
 		.vertex_attributes = _cfg.attributes,
 		.vertex_binding_count = _cfg.bindingCount,
-		.vertex_attribute_count = _cfg.attributeCount,
+		.attribute_count = _cfg.attributeCount,
 		.color_formats = _cfg.color_formats.data(),
 		.color_format_count = static_cast<uint32_t>(_cfg.color_formats.size()),
 		.depth_format = _cfg.depth_format,
@@ -145,6 +157,8 @@ auto PipelineBuilder::Build(VkDevice device) const noexcept -> Pipeline {
 		.depth_test = _cfg.depth_test,
 		.depth_write = _cfg.depth_write,
 		.blend_enable = _cfg.blend_enable,
+		.additive_blend = _cfg.additive_blend,
+		.specialization_info = _cfg.specialization_info,
 	};
 
 	return {device, ZHLN_CreateGraphicsPipeline(device, &desc)};

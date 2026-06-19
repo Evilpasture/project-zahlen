@@ -143,7 +143,6 @@ if(BUILD_TESTING)
     add_test(NAME ssr_cpu_test COMMAND zahlen_ssr_test)
 endif()
 
-# (Removed Buffer.cpp and Physics_C.cpp from the compilation pipeline)
 set(ENGINE_SOURCES
     src/engine/Allocator.cpp
     src/engine/AssertHandler.cpp
@@ -336,7 +335,9 @@ function(compile_hlsl SHADER_PATH ENTRY STAGE OUTPUT_VAR)
     endif()
 
     get_filename_component(FILE_NAME ${SHADER_PATH} NAME)
-    set(OUTPUT_SPV "${CMAKE_CURRENT_BINARY_DIR}/generated_shaders/${FILE_NAME}.${ENTRY}.spv")
+    
+    # NEW: Appending .${OUTPUT_VAR} makes the output filename unique for different build configurations
+    set(OUTPUT_SPV "${CMAKE_CURRENT_BINARY_DIR}/generated_shaders/${FILE_NAME}.${ENTRY}.${OUTPUT_VAR}.spv")
 
     set(EXTRA_ARGS ${ARGN})
 
@@ -344,7 +345,7 @@ function(compile_hlsl SHADER_PATH ENTRY STAGE OUTPUT_VAR)
         OUTPUT ${OUTPUT_SPV}
         COMMAND ${DXC_EXECUTABLE} -T ${STAGE} -E ${ENTRY} -spirv -fspv-target-env=vulkan1.3 -I "${CMAKE_SOURCE_DIR}/resources/shaders" -I "${CMAKE_SOURCE_DIR}/include" ${EXTRA_ARGS} ${SHADER_PATH} -Fo ${OUTPUT_SPV}
         DEPENDS ${SHADER_PATH} "${CMAKE_SOURCE_DIR}/include/SharedMath.hpp"
-        COMMENT "DXC: Generating ${FILE_NAME}.${ENTRY}.spv"
+        COMMENT "DXC: Generating ${FILE_NAME}.${ENTRY}.${OUTPUT_VAR}.spv"
         VERBATIM
     )
     set(${OUTPUT_VAR} ${OUTPUT_SPV} PARENT_SCOPE)
@@ -356,8 +357,9 @@ compile_shaders(zahlen_engine
     "${CMAKE_SOURCE_DIR}/resources/shaders/taa.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/ui.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/toon.hlsl"
-    "${CMAKE_SOURCE_DIR}/resources/shaders/postprocess.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/fxaa.hlsl"
+    "${CMAKE_SOURCE_DIR}/resources/shaders/ambient.hlsl"
+    "${CMAKE_SOURCE_DIR}/resources/shaders/lighting.hlsl"
 )
 
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/culling.hlsl" CSMain cs_6_0 CULLING_COMP_SPV)
@@ -372,17 +374,21 @@ add_dependencies(zahlen_engine zahlen_engine_shadow_shader)
 target_compile_definitions(zahlen_engine PRIVATE SHADER_SHADOW_HLSL_PS_PATH="${SHADOW_FRAG_SPV}")
 set_source_files_properties(src/engine/Resources.c PROPERTIES OBJECT_DEPENDS "${SHADOW_FRAG_SPV}")
 
-compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/postprocess.hlsl" VSMain vs_6_5 POSTPROCESS_NORT_VS_SPV "-DDISABLE_RTR")
-add_custom_target(zahlen_engine_postprocess_nort_vs_shader ALL DEPENDS ${POSTPROCESS_NORT_VS_SPV})
-add_dependencies(zahlen_engine zahlen_engine_postprocess_nort_vs_shader)
-target_compile_definitions(zahlen_engine PRIVATE SHADER_POSTPROCESS_NORT_HLSL_VS_PATH="${POSTPROCESS_NORT_VS_SPV}")
-set_source_files_properties(src/engine/Resources.c PROPERTIES OBJECT_DEPENDS "${POSTPROCESS_NORT_VS_SPV}")
+# Reflections shaders (RT vs NoRT)
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/reflection.hlsl" VSMain vs_6_5 REFLECTION_VS_SPV)
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/reflection.hlsl" PSMain ps_6_5 REFLECTION_PS_SPV)
+add_custom_target(zahlen_engine_reflection_shader ALL DEPENDS ${REFLECTION_VS_SPV} ${REFLECTION_PS_SPV})
+add_dependencies(zahlen_engine zahlen_engine_reflection_shader)
+target_compile_definitions(zahlen_engine PRIVATE SHADER_REFLECTION_HLSL_VS_PATH="${REFLECTION_VS_SPV}" SHADER_REFLECTION_HLSL_PS_PATH="${REFLECTION_PS_SPV}")
+set_property(SOURCE src/engine/Resources.c APPEND PROPERTY OBJECT_DEPENDS "${REFLECTION_VS_SPV}" "${REFLECTION_PS_SPV}")
 
-compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/postprocess.hlsl" PSMain ps_6_5 POSTPROCESS_NORT_PS_SPV "-DDISABLE_RTR")
-add_custom_target(zahlen_engine_postprocess_nort_ps_shader ALL DEPENDS ${POSTPROCESS_NORT_PS_SPV})
-add_dependencies(zahlen_engine zahlen_engine_postprocess_nort_ps_shader)
-target_compile_definitions(zahlen_engine PRIVATE SHADER_POSTPROCESS_NORT_HLSL_PS_PATH="${POSTPROCESS_NORT_PS_SPV}")
-set_source_files_properties(src/engine/Resources.c PROPERTIES OBJECT_DEPENDS "${POSTPROCESS_NORT_PS_SPV}")
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/reflection.hlsl" VSMain vs_6_5 REFLECTION_NORT_VS_SPV "-DDISABLE_RTR")
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/reflection.hlsl" PSMain ps_6_5 REFLECTION_NORT_PS_SPV "-DDISABLE_RTR")
+add_custom_target(zahlen_engine_reflection_nort_shader ALL DEPENDS ${REFLECTION_NORT_VS_SPV} ${REFLECTION_NORT_PS_SPV})
+add_dependencies(zahlen_engine zahlen_engine_reflection_nort_shader)
+target_compile_definitions(zahlen_engine PRIVATE SHADER_REFLECTION_NORT_HLSL_VS_PATH="${REFLECTION_NORT_VS_SPV}" SHADER_REFLECTION_NORT_HLSL_PS_PATH="${REFLECTION_NORT_PS_SPV}")
+set_property(SOURCE src/engine/Resources.c APPEND PROPERTY OBJECT_DEPENDS "${REFLECTION_NORT_VS_SPV}" "${REFLECTION_NORT_PS_SPV}")
+
 
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaEdgeVS vs_6_5 SMAA_EDGE_VS_SPV "-DEDGE_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=0")
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaEdgePS ps_6_5 SMAA_EDGE_PS_SPV "-DEDGE_PASS -DSMAA_INCLUDE_VS=0 -DSMAA_INCLUDE_PS=1")
@@ -483,3 +489,4 @@ if(USE_SANITIZERS)
         )
     endif()
 endif()
+

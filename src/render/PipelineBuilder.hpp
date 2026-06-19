@@ -1,6 +1,3 @@
-// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
-// SPDX-License-Identifier: GPL-3.0-or-later
-
 // src/render/PipelineBuilder.hpp
 
 #pragma once
@@ -56,6 +53,10 @@ struct PipelineConfig {
 
 	// Blending
 	bool blend_enable = false;
+	bool additive_blend = false;
+
+	// Specialization
+	const VkSpecializationInfo* specialization_info = nullptr;
 };
 
 // ============================================================================
@@ -102,6 +103,10 @@ This is for fixing weird assets.
 	auto NoDepth() noexcept -> PipelineBuilder&;
 
 	auto AlphaBlend() noexcept -> PipelineBuilder&;
+
+	auto AdditiveBlend() noexcept -> PipelineBuilder&;
+
+	auto Specialization(const VkSpecializationInfo* info) noexcept -> PipelineBuilder&;
 
 	[[nodiscard("Pipeline creation may fail; verify validity before use")]]
 	auto Build(VkDevice device) const noexcept -> Pipeline;
