@@ -640,21 +640,7 @@ void BuildSystemGraphs(Engine& engine) {
 
 	updateGraph.Compile();
 
-	// --- COMPILE RENDER GRAPH (Camera & Culling) ---
-	renderGraph.AddSystem(
-		{.update_func = Sys_TargetCamera,
-		 .name = "TargetCameraSystem",
-		 .access_pattern = {Read<TargetCameraComponent>(), Read<PhysicsStateComponent>(),
-							Read<TransformComponent>(), Read<MeshComponent>(),
-							Read<InputSystem::InputComponent>()},
-		 .enabled = true});
-
-	renderGraph.AddSystem(
-		{.update_func = Sys_Camera,
-		 .name = "CameraSystem",
-		 .access_pattern = {Read<TargetCameraComponent>(), Write<CameraSystem::CameraComponent>(),
-							Read<AASettingsComponent>()},
-		 .enabled = true});
+	// --- COMPILE RENDER GRAPH (Lighting & Culling) ---
 
 	renderGraph.AddSystem(
 		{.update_func = Sys_Culling,
@@ -837,20 +823,18 @@ bool InitializeGame(Engine& engine) {
 void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, ScriptRunner& scriptRunner,
 				FileWatcher& gameplayWatcher) {
 	static InputSystem inputSystem;
-	inputSystem.Update(engine);
+	inputSystem.Update(engine); // Captures raw mouse/keyboard deltas
 	UISystem(engine, scriptRunner);
-	inputSystem.PlayerInputTranslate(engine, engine.GetCamera());
 
-	if constexpr (isDev) {
-		static float watcherAccumulator = 0.0f;
-		watcherAccumulator += dt;
-		if (watcherAccumulator >= 2.0f) {
-			watcherAccumulator = 0.0f;
-			if (gameplayWatcher.CheckModified()) {
-				scriptRunner.ReloadFile("scripts/gameplay.lua");
-			}
-		}
-	}
+	// --- FIX: Execute the Camera Systems FIRST to resolve the camera's new yaw/pitch orientation
+	// --- before we translate the player's movement vectors relative to it. ---
+	static TargetCameraSystem targetCamSys;
+	static CameraSystem camSys;
+	targetCamSys.Update(engine, dt, engine.GetCurrentAlpha());
+	camSys.Update(engine, dt, engine.GetCurrentAlpha());
+
+	// Now translating inputs will use the newly updated camera angles for this frame
+	inputSystem.PlayerInputTranslate(engine, engine.GetCamera());
 
 	float cappedDt = std::min(dt, 0.1f);
 	physicsAccumulator += cappedDt;
@@ -970,6 +954,11 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, ui
 		double elapsed = std::chrono::duration<double>(frameEnd - frameStart).count();
 		frameStart = std::chrono::high_resolution_clock::now();
 
+		// --- FIX: Extract raw, unsmoothed delta time for the physics accumulator ---
+		float rawDt = std::min(static_cast<float>(elapsed), 0.1f);
+
+		// Keep the target snapping purely for optional display or script updates if desired,
+		// but pass the rawDt to UpdateGame so the accumulator stays in perfect sync.
 		double target = elapsed;
 		constexpr std::array<double, 7> snapTargets = {{1.0 / 60.0, 1.0 / 75.0, 1.0 / 90.0,
 														1.0 / 120.0, 1.0 / 144.0, 1.0 / 240.0,
@@ -983,7 +972,6 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, ui
 
 		static double smoothedElapsed = 0.0166667;
 		smoothedElapsed = (smoothedElapsed * 0.9) + (target * 0.1);
-
 		float frameTime = std::min(static_cast<float>(smoothedElapsed), 0.1f);
 
 		if (engine->GetInput().NeedsResize()) {
@@ -995,9 +983,12 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, ui
 			continue;
 		}
 
-		UpdateGame(*engine, frameTime, physicsAccumulator, scriptRunner, gameplayWatcher);
+		// Pass rawDt here so physicsAccumulator += rawDt matches wall-clock time exactly
+		UpdateGame(*engine, rawDt, physicsAccumulator, scriptRunner, gameplayWatcher);
 
-		auto render_res = RenderGame(*engine, frameTime);
+		// RenderGame can continue to use either rawDt or frameTime (rawDt is recommended for fluid
+		// motion)
+		auto render_res = RenderGame(*engine, rawDt);
 		if (!render_res) {
 			if (render_res.error() == RenderFrameResult::DeviceLost) {
 				engine->HandleDeviceLost();

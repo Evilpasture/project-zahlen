@@ -24,10 +24,9 @@ static void VerifyCameraInterpolation(const Camera& cam, float alpha) noexcept {
 	// Test 1: Camera position is valid (finite)
 	if (!std::isfinite(cam.position.GetX()) || !std::isfinite(cam.position.GetY()) ||
 		!std::isfinite(cam.position.GetZ())) {
-		ZHLN::Log(
-			"[Test Fail] Camera Interpolation: Camera position contains NaN/Inf "
-			"({:.3f}, {:.3f}, {:.3f})",
-			cam.position.GetX(), cam.position.GetY(), cam.position.GetZ());
+		ZHLN::Log("[Test Fail] Camera Interpolation: Camera position contains NaN/Inf "
+				  "({:.3f}, {:.3f}, {:.3f})",
+				  cam.position.GetX(), cam.position.GetY(), cam.position.GetZ());
 	}
 
 	// Test 2: FOV is in valid range
@@ -68,9 +67,15 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 
 	// 1. Resolve Target Position
 	if (auto* state = reg.Get<PhysicsStateComponent>(targetEnt)) {
-		float clampedAlpha = std::clamp(alpha, 0.0f, 1.0f);
-		targetPos =
-			state->prevPosition + clampedAlpha * (state->currPosition - state->prevPosition);
+		// --- FIX: If camera smoothing is active, target the raw latest physics frame. ---
+		// --- If snapping is active, target the linearly-interpolated position.         ---
+		if (camComp->stiffness > 0.0f) {
+			targetPos = state->currPosition;
+		} else {
+			float clampedAlpha = std::clamp(alpha, 0.0f, 1.0f);
+			targetPos =
+				state->prevPosition + clampedAlpha * (state->currPosition - state->prevPosition);
+		}
 	} else if (auto* trans = reg.Get<TransformComponent>(targetEnt)) {
 		targetPos = JPH::Vec3(trans->position[0], trans->position[1], trans->position[2]);
 	} else if (auto* meshComp = reg.Get<MeshComponent>(targetEnt)) {

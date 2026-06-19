@@ -207,6 +207,7 @@ set(ENGINE_SOURCES
     src/engine/system/LightingSystem.cpp
     src/engine/system/InputSystem.cpp
     src/engine/system/CameraSystem.cpp
+    src/engine/RenderDocInit.cpp
 )
 
 find_library(ZSTD_LIBRARY NAMES zstd zstd_static HINTS "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib")

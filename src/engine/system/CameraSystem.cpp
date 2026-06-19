@@ -25,13 +25,16 @@ void CameraSystem::Update(Engine& engine, float dt, float alpha) {
 		JPH::Vec3 targetPos = JPH::Vec3::sZero();
 
 		if (auto* state = reg.Get<PhysicsStateComponent>(targetEnt)) {
-			float clampedAlpha = JPH::Clamp(alpha, 0.0f, 1.0f);
-			targetPos =
-				state->prevPosition + clampedAlpha * (state->currPosition - state->prevPosition);
+			// --- FIX: Apply the same spring-target logic here ---
+			if (camComp->stiffness > 0.0f) {
+				targetPos = state->currPosition;
+			} else {
+				float clampedAlpha = JPH::Clamp(alpha, 0.0f, 1.0f);
+				targetPos = state->prevPosition +
+							clampedAlpha * (state->currPosition - state->prevPosition);
+			}
 		} else if (auto* trans = reg.Get<TransformComponent>(targetEnt)) {
 			targetPos = JPH::Vec3(trans->position[0], trans->position[1], trans->position[2]);
-		} else if (auto* meshComp = reg.Get<MeshComponent>(targetEnt)) {
-			targetPos = meshComp->localTransform.GetTranslation();
 		}
 
 		if (std::abs(input->zoomDelta) > 1e-4f) {
