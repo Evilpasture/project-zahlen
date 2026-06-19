@@ -9,7 +9,7 @@
 #include <version>
 
 #define ZHLN_VERSION_MAJOR 0
-#define ZHLN_VERSION_MINOR 0
+#define ZHLN_VERSION_MINOR 1
 #define ZHLN_VERSION_PATCH 0
 
 // 1. The "Stringize" helper macros
