@@ -549,7 +549,9 @@ struct PostProcessPass {
 							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
 				Vk::SamplerWrite{.sampler = ctx.clampSampler.Get()},
 				Vk::ImageWrite{.view = ctx.iblPayload.brdfLutView.Get(),
-							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
+							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+				Vk::BufferWrite{.buffer = ctx.clusterGridBuffers[recorder.frameIndex].Handle()},
+				Vk::BufferWrite{.buffer = ctx.lightIndexListBuffers[recorder.frameIndex].Handle()});
 		} else {
 			ctx.postProcessPassNoRT.WriteNext(
 				ctx.ctx.Device(), in.sceneColor,
@@ -568,7 +570,9 @@ struct PostProcessPass {
 							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
 				Vk::SamplerWrite{.sampler = ctx.clampSampler.Get()},
 				Vk::ImageWrite{.view = ctx.iblPayload.brdfLutView.Get(),
-							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
+							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+				Vk::BufferWrite{.buffer = ctx.clusterGridBuffers[recorder.frameIndex].Handle()},
+				Vk::BufferWrite{.buffer = ctx.lightIndexListBuffers[recorder.frameIndex].Handle()});
 		}
 
 		struct PPPushConstants {
@@ -902,7 +906,8 @@ ZHLN_FrameResult RenderContext::Impl::SubmitFrame() {
 		&accumBuffers, &taaPass, &fxaaPass, &smaaEdgePass, &smaaWeightPass, &smaaBlendPass,
 		&postProcessPass, &postProcessPassNoRT, &blitPass, &frameUniformBuffers,
 		&lightStorageBuffers, &instanceDataBuffers, &indirectCommandsBuffers, &jointBuffers,
-		&bindlessSets, &tlas, &tlasBuffer, &tlasScratchBuffer);
+		&bindlessSets, &tlas, &tlasBuffer, &tlasScratchBuffer, &clusterGridBuffers,
+		&lightIndexListBuffers, &globalCounterBuffers, &clusterCullingSets);
 	manager.FlipAll();
 
 	frame_index = (frame_index + 1) % 2;
@@ -1105,6 +1110,41 @@ RenderResult RenderContext::EndFrame() noexcept {
 	// Encapsulate recording state
 	FrameRecorder recorder(cmd, *_impl);
 
+	{
+		VkCommandBuffer c = cmd;
+		uint32_t fIdx = _impl->frame_index;
+
+		if (_impl->resized) {
+			vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_COMPUTE,
+							  _impl->clusterBoundsPass.pipeline.Get());
+			vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_COMPUTE,
+									_impl->clusterBoundsPass.pipelineLayout.Get(), 0, 1,
+									&_impl->clusterCullingSets[fIdx], 0, nullptr);
+			vkCmdDispatch(c, 1, 1, 24);
+		}
+
+		vkCmdFillBuffer(c, _impl->globalCounterBuffers[fIdx].Handle(), 0, sizeof(uint32_t), 0);
+
+		Vk::MemoryBarrier(
+			c,
+			{.src_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+			 .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
+			 .dst_stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+			 .dst_access = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT});
+
+		vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_COMPUTE,
+						  _impl->clusterCullingPass.pipeline.Get());
+		vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_COMPUTE,
+								_impl->clusterCullingPass.pipelineLayout.Get(), 0, 1,
+								&_impl->clusterCullingSets[fIdx], 0, nullptr);
+		vkCmdDispatch(c, 1, 1, 24);
+
+		Vk::MemoryBarrier(c, {.src_stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+							  .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
+							  .dst_stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+							  .dst_access = VK_ACCESS_2_SHADER_READ_BIT});
+	}
+
 	// Concepts-constrained pass execution
 	RunPass(Passes::ShadowPass{}, recorder);
 
@@ -1155,6 +1195,13 @@ void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
 	impl->currentUniforms.camPos[3] = static_cast<float>(impl->aaState.frameIndex);
 
 	std::memcpy(impl->currentUniforms.sh, impl->iblPayload.shCoeffs.data(), sizeof(JPH::Vec4) * 9);
+
+	float nZ = 24.0f;
+	float nearZ = 0.1f;
+	float farZ = 1000.0f;
+	float logRatio = std::log(farZ / nearZ);
+	impl->currentUniforms.zScale = nZ / logRatio;
+	impl->currentUniforms.zBias = -(nZ * std::log(nearZ)) / logRatio;
 
 	std::memcpy(impl->frameUniformBuffers[impl->frame_index].Map().data, &impl->currentUniforms,
 				sizeof(FrameUniforms));

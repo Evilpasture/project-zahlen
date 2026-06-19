@@ -69,6 +69,15 @@ struct alignas(16) InstanceData {
 	alignas(16) std::array<float, 4> baseColorFactor;
 };
 
+struct ClusterBounds {
+	JPH::Vec4 minPoint;
+	JPH::Vec4 maxPoint;
+};
+struct ClusterVolume {
+	uint32_t offset;
+	uint32_t count;
+};
+
 struct ObjectConstants {
 	uint32_t instanceId;
 	uint32_t isShadowPass;
@@ -131,7 +140,9 @@ struct alignas(16) FrameUniforms {
 	JPH::Vec4 probePos;		// XYZ: probe capture position, W: unused
 	JPH::Vec4 jitterParams; // x: currentX, y: currentY, z: prevX, w: prevY
 	int enableRTR;
-	int _padding_rtr[3];
+	float zScale;
+	float zBias;
+	int _padding_rtr;
 };
 
 // Material handle representation

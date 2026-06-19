@@ -78,9 +78,10 @@ struct FrameUniforms {
 	float4 probePos;
 	float4 jitterParams;
 	int enableRTR;
+
+	float zScale;
+	float zBias;
 	int rtr_pad0;
-	int rtr_pad1;
-	int rtr_pad2;
 };
 
 // --- DITHERING & HEMISPHERE SAMPLERS ---
@@ -133,6 +134,13 @@ float GetStableWeylNoise(uint2 pixelPos) {
 [[vk::binding(12, 0)]] SamplerState clampSampler;
 [[vk::binding(13, 0)]] Texture2D brdfLUT;
 #endif
+
+struct ClusterVolume {
+	uint offset;
+	uint count;
+};
+[[vk::binding(15, 0)]] StructuredBuffer<ClusterVolume> clusterGrid;
+[[vk::binding(16, 0)]] StructuredBuffer<uint> clusterIndexList;
 
 // --- Octahedral Normal Unpacking ---
 float3 UnpackNormalOctahedron(float2 oct) {
@@ -652,7 +660,15 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
 	// Punctual and Area Lights Loop
 	float3 directPunctual = float3(0.0f, 0.0f, 0.0f);
-	for (uint l = 0; l < frame.lightCount; l++) {
+
+	uint sliceZ = uint(max(0.0f, log(linearDepth) * frame.zScale + frame.zBias));
+	uint cIdx = min(uint(input.uv.x * 16.0f), 15u) + (min(uint(input.uv.y * 9.0f), 8u) * 16) +
+				(min(sliceZ, 23u) * 144);
+
+	ClusterVolume cluster = clusterGrid[cIdx];
+
+	for (uint i = 0; i < cluster.count; ++i) {
+		uint l = clusterIndexList[cluster.offset + i];
 		Light light = lights[l];
 		if (light.type == 3) { // AREA LIGHT
 			float2 uv = float2(roughness, sqrt(1.0f - NdotV));

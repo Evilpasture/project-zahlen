@@ -35,4 +35,6 @@ DECLARE_RESOURCE(ZHLN_Resource_SmaaWeightVertSpv)
 DECLARE_RESOURCE(ZHLN_Resource_SmaaWeightFragSpv)
 DECLARE_RESOURCE(ZHLN_Resource_SmaaBlendVertSpv)
 DECLARE_RESOURCE(ZHLN_Resource_SmaaBlendFragSpv)
+DECLARE_RESOURCE(ZHLN_Resource_ClusterBoundsSpv)
+DECLARE_RESOURCE(ZHLN_Resource_ClusterCullingSpv)
 }

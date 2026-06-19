@@ -434,6 +434,16 @@ compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaWeightPS ps_6
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaBlendVS vs_6_5 SMAA_BLEND_VS_SPV "-DBLEND_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=0")
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaBlendPS ps_6_5 SMAA_BLEND_PS_SPV "-DBLEND_PASS -DSMAA_INCLUDE_VS=0 -DSMAA_INCLUDE_PS=1")
 
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/cluster_bounds.hlsl" CSMain cs_6_0 CLUSTER_BOUNDS_SPV)
+add_custom_target(zahlen_engine_cluster_bounds ALL DEPENDS ${CLUSTER_BOUNDS_SPV})
+add_dependencies(zahlen_engine zahlen_engine_cluster_bounds)
+target_compile_definitions(zahlen_engine PRIVATE SHADER_CLUSTER_BOUNDS_CS_PATH="${CLUSTER_BOUNDS_SPV}")
+
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/cluster_culling.hlsl" CSMain cs_6_0 CLUSTER_CULLING_SPV)
+add_custom_target(zahlen_engine_cluster_cull ALL DEPENDS ${CLUSTER_CULLING_SPV})
+add_dependencies(zahlen_engine zahlen_engine_cluster_cull)
+target_compile_definitions(zahlen_engine PRIVATE SHADER_CLUSTER_CULLING_CS_PATH="${CLUSTER_CULLING_SPV}")
+
 # --- 4. Bind Output Paths to Target Definitions ---
 target_compile_definitions(zahlen_engine PRIVATE 
     SHADER_SMAA_EDGE_VS_PATH="${SMAA_EDGE_VS_SPV}"

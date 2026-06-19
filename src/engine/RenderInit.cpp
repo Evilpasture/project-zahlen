@@ -422,6 +422,51 @@ void RenderContext::Impl::InitCullingResources() {
 	if (!cullingPass.Build(ctx.Device(), cullingLayout.Get(), cullingShader, &cullingPush, 1)) {
 		ZHLN::Panic("FATAL: Failed to compile or build the Compute Culling Pipeline.");
 	}
+
+	constexpr auto numClusters = static_cast<size_t>(16 * 9 * 24); // 3456
+	clusterBoundsBuffer =
+		Vk::Buffer::Create(allocator.Get(), sizeof(ClusterBounds) * numClusters,
+						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+
+	clusterCullingDescLayout = ClusterCullingLayout::CreateLayout(ctx.Device());
+	clusterCullingPool = ClusterCullingLayout::CreatePool(ctx.Device(), 2);
+	clusterCullingSets[0] = ClusterCullingLayout::Allocate(ctx.Device(), clusterCullingPool.Get(),
+														   clusterCullingDescLayout.Get());
+	clusterCullingSets[1] = ClusterCullingLayout::Allocate(ctx.Device(), clusterCullingPool.Get(),
+														   clusterCullingDescLayout.Get());
+
+	for (int i = 0; i < 2; ++i) {
+		clusterGridBuffers[i] =
+			Vk::Buffer::Create(allocator.Get(), sizeof(ClusterVolume) * numClusters,
+							   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+		lightIndexListBuffers[i] =
+			Vk::Buffer::Create(allocator.Get(), sizeof(uint32_t) * numClusters * 64,
+							   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+		globalCounterBuffers[i] = Vk::Buffer::Create(allocator.Get(), sizeof(uint32_t),
+													 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+														 VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+													 VMA_MEMORY_USAGE_GPU_ONLY);
+
+		ClusterCullingLayout::Write(
+			ctx.Device(), clusterCullingSets[i],
+			Vk::BufferWrite{.buffer = clusterBoundsBuffer.Handle()},
+			Vk::BufferWrite{.buffer = clusterGridBuffers[i].Handle()},
+			Vk::BufferWrite{.buffer = lightIndexListBuffers[i].Handle()},
+			Vk::BufferWrite{.buffer = globalCounterBuffers[i].Handle()},
+			Vk::BufferWrite{.buffer = frameUniformBuffers[i].Handle()}, // Binding 4: Frame UBO
+			Vk::BufferWrite{.buffer = lightStorageBuffers[i].Handle()}	// Binding 5: Lights SSBO
+		);
+	}
+
+	ZHLN_ShaderDesc bDesc = {.code = Vk::AsSpirV(&ZHLN_Resource_ClusterBoundsSpv[0]),
+							 .size = ZHLN_Resource_ClusterBoundsSpv_Len,
+							 .entry_point = "CSMain"};
+	clusterBoundsPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), bDesc);
+
+	ZHLN_ShaderDesc cDesc = {.code = Vk::AsSpirV(&ZHLN_Resource_ClusterCullingSpv[0]),
+							 .size = ZHLN_Resource_ClusterCullingSpv_Len,
+							 .entry_point = "CSMain"};
+	clusterCullingPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), cDesc);
 }
 
 void RenderContext::Impl::InitBindless() {

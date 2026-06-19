@@ -125,7 +125,7 @@ enum GBufferAttachmentSlot : uint8_t {
 	GBUFFER_COLOR_COUNT = 3
 };
 
-static constexpr uint32_t kGpuCullingSentinel = 4294967295u; // 0xFFFFFFFF [1]
+static constexpr uint32_t kGpuCullingSentinel = 0xFFFFFFFF;
 static constexpr Color4 kClearColorNormalRoughness = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
 
 static constexpr Color4 kClearColorBlack = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f};
@@ -176,15 +176,17 @@ using PostProcessLayout =
 												  // Metal)
 						 Vk::SamplerSlot<4>,	  // pointSampler (Nearest)
 						 Vk::SampledImageSlot<5>, // texEnvMap (Cubemap)
-						 Vk::AccelerationStructureSlot<6>,						 // Hardware TLAS
-						 Vk::StorageBufferSlot<7, VK_SHADER_STAGE_FRAGMENT_BIT>, // lights SSBO
-						 Vk::UniformSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>,		 // frame UBO
-						 Vk::SampledImageSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,	 // shadowMap
-						 Vk::SamplerSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>,		 // shadowSampler
-						 Vk::SampledImageSlot<11, VK_SHADER_STAGE_FRAGMENT_BIT>, // ltc_mat
-						 Vk::SampledImageSlot<12, VK_SHADER_STAGE_FRAGMENT_BIT>, // ltc_amp
-						 Vk::SamplerSlot<13, VK_SHADER_STAGE_FRAGMENT_BIT>,		 // clampSampler
-						 Vk::SampledImageSlot<14, VK_SHADER_STAGE_FRAGMENT_BIT>	 // brdfLUT
+						 Vk::AccelerationStructureSlot<6>,						  // Hardware TLAS
+						 Vk::StorageBufferSlot<7, VK_SHADER_STAGE_FRAGMENT_BIT>,  // lights SSBO
+						 Vk::UniformSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>,		  // frame UBO
+						 Vk::SampledImageSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,	  // shadowMap
+						 Vk::SamplerSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>,		  // shadowSampler
+						 Vk::SampledImageSlot<11, VK_SHADER_STAGE_FRAGMENT_BIT>,  // ltc_mat
+						 Vk::SampledImageSlot<12, VK_SHADER_STAGE_FRAGMENT_BIT>,  // ltc_amp
+						 Vk::SamplerSlot<13, VK_SHADER_STAGE_FRAGMENT_BIT>,		  // clampSampler
+						 Vk::SampledImageSlot<14, VK_SHADER_STAGE_FRAGMENT_BIT>,  // brdfLUT
+						 Vk::StorageBufferSlot<15, VK_SHADER_STAGE_FRAGMENT_BIT>, // ClusterGrid
+						 Vk::StorageBufferSlot<16, VK_SHADER_STAGE_FRAGMENT_BIT>  // LightIndexList
 						 >;
 
 using PostProcessLayoutNoRT =
@@ -194,14 +196,16 @@ using PostProcessLayoutNoRT =
 						 Vk::SampledImageSlot<3>, // texNormalRoughness
 						 Vk::SamplerSlot<4>,	  // pointSampler
 						 Vk::SampledImageSlot<5>, // texEnvMap (Cubemap)
-						 Vk::StorageBufferSlot<6, VK_SHADER_STAGE_FRAGMENT_BIT>, // lights SSBO
-						 Vk::UniformSlot<7, VK_SHADER_STAGE_FRAGMENT_BIT>,		 // frame UBO
-						 Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>,	 // shadowMap
-						 Vk::SamplerSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,		 // shadowSampler
-						 Vk::SampledImageSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>, // ltc_mat
-						 Vk::SampledImageSlot<11, VK_SHADER_STAGE_FRAGMENT_BIT>, // ltc_amp
-						 Vk::SamplerSlot<12, VK_SHADER_STAGE_FRAGMENT_BIT>,		 // clampSampler
-						 Vk::SampledImageSlot<13, VK_SHADER_STAGE_FRAGMENT_BIT>	 // brdfLUT
+						 Vk::StorageBufferSlot<6, VK_SHADER_STAGE_FRAGMENT_BIT>,  // lights SSBO
+						 Vk::UniformSlot<7, VK_SHADER_STAGE_FRAGMENT_BIT>,		  // frame UBO
+						 Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>,	  // shadowMap
+						 Vk::SamplerSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,		  // shadowSampler
+						 Vk::SampledImageSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>,  // ltc_mat
+						 Vk::SampledImageSlot<11, VK_SHADER_STAGE_FRAGMENT_BIT>,  // ltc_amp
+						 Vk::SamplerSlot<12, VK_SHADER_STAGE_FRAGMENT_BIT>,		  // clampSampler
+						 Vk::SampledImageSlot<13, VK_SHADER_STAGE_FRAGMENT_BIT>,  // brdfLUT
+						 Vk::StorageBufferSlot<15, VK_SHADER_STAGE_FRAGMENT_BIT>, // ClusterGrid
+						 Vk::StorageBufferSlot<16, VK_SHADER_STAGE_FRAGMENT_BIT>  // LightIndexList
 						 >;
 
 using CullingLayout = Vk::DescriptorLayout<Vk::StorageBufferSlot<0>, // g_instances
@@ -232,6 +236,15 @@ using ActiveGBuffer =
 					  Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT>, // Index 1: velocityBuffer
 					  Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM> // Index 2: normalRoughnessBuffer
 					  >;
+
+using ClusterCullingLayout =
+	Vk::DescriptorLayout<Vk::StorageBufferSlot<0>, // ClusterBoundsBuffer (R/W)
+						 Vk::StorageBufferSlot<1>, // ClusterGridBuffer (W)
+						 Vk::StorageBufferSlot<2>, // LightIndexListBuffer (W)
+						 Vk::StorageBufferSlot<3>, // GlobalCounterBuffer (Atomic)
+						 Vk::UniformSlot<4, VK_SHADER_STAGE_COMPUTE_BIT>,	   // Frame UBO
+						 Vk::StorageBufferSlot<5, VK_SHADER_STAGE_COMPUTE_BIT> // Lights SSBO
+						 >;
 
 namespace Stages {
 struct ShadowPass {
@@ -366,6 +379,18 @@ struct RenderContext::Impl {
 
 	Vk::RenderTarget<VK_FORMAT_R8G8_UNORM> smaaEdgeTarget;
 	Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM> smaaWeightTarget;
+
+	Vk::ComputePass clusterBoundsPass;
+	Vk::ComputePass clusterCullingPass;
+
+	Vk::DescriptorSetLayout clusterCullingDescLayout;
+	Vk::DescriptorPool clusterCullingPool;
+	ZHLN::DoubleBuffered<VkDescriptorSet> clusterCullingSets;
+
+	Vk::Buffer clusterBoundsBuffer;
+	ZHLN::DoubleBuffered<Vk::Buffer> clusterGridBuffers;
+	ZHLN::DoubleBuffered<Vk::Buffer> lightIndexListBuffers;
+	ZHLN::DoubleBuffered<Vk::Buffer> globalCounterBuffers;
 
 	Vk::Sampler defaultSampler;
 	Vk::Sampler pointSampler;

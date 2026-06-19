@@ -37,10 +37,9 @@ struct FrameUniforms {
 	float4 jitterParams;
 	int enableRTR;
 
-	// FIX: Decompose int3 into scalars to prevent 16-byte alignment gaps
+	float zScale;
+	float zBias;
 	int rtr_pad0;
-	int rtr_pad1;
-	int rtr_pad2;
 };
 
 struct InstanceData {

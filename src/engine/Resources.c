@@ -138,3 +138,13 @@ const unsigned char ZHLN_Resource_SmaaBlendFragSpv[] = {
 #embed SHADER_SMAA_BLEND_PS_PATH
 };
 const unsigned int ZHLN_Resource_SmaaBlendFragSpv_Len = sizeof(ZHLN_Resource_SmaaBlendFragSpv);
+
+const unsigned char ZHLN_Resource_ClusterBoundsSpv[] = {
+#embed SHADER_CLUSTER_BOUNDS_CS_PATH
+};
+const unsigned int ZHLN_Resource_ClusterBoundsSpv_Len = sizeof(ZHLN_Resource_ClusterBoundsSpv);
+
+const unsigned char ZHLN_Resource_ClusterCullingSpv[] = {
+#embed SHADER_CLUSTER_CULLING_CS_PATH
+};
+const unsigned int ZHLN_Resource_ClusterCullingSpv_Len = sizeof(ZHLN_Resource_ClusterCullingSpv);
