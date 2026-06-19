@@ -469,6 +469,7 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 	uniforms.invViewProj = unjitteredVp.Inversed();
 	std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
 	std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);
+	uniforms.lightDir[3] = 0.0f;
 	uniforms.lightCount =
 		static_cast<uint32_t>(reg.GetEntitiesWith<LightingSystem::LightComponent>().size());
 	uniforms.probeMin = probeMin;

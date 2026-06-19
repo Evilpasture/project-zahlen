@@ -226,7 +226,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	float3 spec = (D * G_term * F) / max(4.0f * NdotV * NdotL_sun, 0.001f);
 	float3 kD_sun = (1.0f - metallic);
 
-	float3 directSun = (kD_sun * albedoRaw.rgb / 3.14159265f + spec) * 10.0f * NdotL_sun * shadow;
+	// --- USE THE DYNAMIC SUN INTENSITY CONFIGURED BY C++ ---
+	float sunIntensity = frame.lightDir.w;
+	float3 directSun =
+		(kD_sun * albedoRaw.rgb / 3.14159265f + spec) * sunIntensity * NdotL_sun * shadow;
 
 	// --- 2. Punctual and Area Lights (Clustered) ---
 	float3 directPunctual = float3(0.0f, 0.0f, 0.0f);

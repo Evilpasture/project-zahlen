@@ -122,7 +122,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	float2 edgeFactor = smoothstep(0.0f, 0.08f, input.uv) * smoothstep(1.0f, 0.92f, input.uv);
 	float screenFade = edgeFactor.x * edgeFactor.y;
 
-	if (pc.giMode > 0 && linearDepth <= 50.0f) {
+	// --- DEFINE SMOOTH FADE BOUNDARY FROM 40m TO 50m ---
+	float fade = saturate((50.0f - linearDepth) / 10.0f);
+
+	if (pc.giMode > 0 && fade > 0.0f) {
 		float occlusion = 0.0f;
 		uint dw, dh;
 		texDepth.GetDimensions(dw, dh);
@@ -173,7 +176,11 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 				}
 				occlusion += saturate((max_sin_right + max_sin_left) * 0.5f - pc.aoBias);
 			}
-			ao = 1.0f - SoftClamp(saturate((occlusion / 4.0f) * pc.aoPower * screenFade), 0.85f);
+
+			float rawAo =
+				1.0f - SoftClamp(saturate((occlusion / 4.0f) * pc.aoPower * screenFade), 0.85f);
+			ao = lerp(1.0f, rawAo, fade); // Apply distance fade-out
+
 		} else {
 			float angle = GetRotationAngle(input.pos.xy);
 			float cosTheta = cos(angle * 2.0f * 3.14159265f);
@@ -218,9 +225,15 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 			}
 
 			if (pc.giMode == 1) {
-				ao = 1.0f - SoftClamp(saturate((occlusion / float(effectiveSamples)) * pc.aoPower *
-											   screenFade),
-									  0.85f);
+				float rawAo = 1.0f - SoftClamp(saturate((occlusion / float(effectiveSamples)) *
+														pc.aoPower * screenFade),
+											   0.85f);
+				ao = lerp(1.0f, rawAo, fade); // Apply distance fade-out
+			} else if (pc.giMode == 2) {
+				float3 rawGI =
+					(indirectLight / float(effectiveSamples)) * pc.giIntensity * screenFade;
+				indirectLight =
+					lerp(float3(0.0f, 0.0f, 0.0f), rawGI, fade); // Apply distance fade-out
 			}
 		}
 	}
