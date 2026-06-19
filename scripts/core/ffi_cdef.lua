@@ -240,6 +240,34 @@ if not ok then
             uint32_t hasInitSmoothTarget;
         } __attribute__((aligned(16))) TargetCameraComponent;
 
+        typedef struct Mesh {
+            uint64_t vertexBuffer;
+            uint64_t indexBuffer;
+            uint32_t vertexCount;
+            uint32_t indexCount;
+        } Mesh;
+
+        typedef struct TextComponent {
+            char     text[256];
+            size_t   text_len;
+            float    x;
+            float    y;
+            float    scale;
+            char     _pad1[12]; // padding to align float color[4] to 16 bytes
+            float    color[4];
+            uint32_t fontIndex;
+            char     _pad2[4];  // padding to align Mesh to 8 bytes
+            Mesh     mesh;
+        } TextComponent;
+
+        typedef struct UISettingsComponent {
+            uint32_t defaultFontAtlasIdx;
+        } UISettingsComponent;
+
+        uint64_t ZHLN_CreateEntity(ZHLN_Engine* engine);
+
+        void ZHLN_DestroyEntity(ZHLN_Engine* engine, uint64_t entityRaw);
+
     ]]
 end
 

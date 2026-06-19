@@ -24,14 +24,19 @@ local NATIVE_COMPONENTS = {
     TargetCameraComponent = true,
     PhysicsStateComponent = true,
     PBRComponent = true,
+    TextComponent = true,
+    UISettingsComponent = true,
 }
 
 -- Stable key converter for cdata / uint64_t table indexing
 local function to_key(ent)
-    if type(ent) == "cdata" then
+    if type(ent) == "number" then
+        -- Cast standard numbers to uint64_t first so they generate matching "ULL" strings
+        return tostring(ffi.cast("uint64_t", ent))
+    elseif type(ent) == "cdata" then
         return tostring(ent)
     end
-    return ent
+    return tostring(ent)
 end
 
 function Registry.new(engine_raw)
@@ -53,10 +58,10 @@ end
 -- ============================================================================
 
 function Registry:create(ent)
-    -- If a C++ packed uint64_t handle is passed, use it. Otherwise, generate a Lua ID.
-    local id = ent or self.next_id
+    -- If a C++ packed uint64_t handle is passed, use it. Otherwise, allocate a real C++ ID.
+    local id = ent
     if not ent then
-        self.next_id = self.next_id + 1
+        id = ffi.C.ZHLN_CreateEntity(self.engine)
     end
 
     self.entities[to_key(id)] = true
@@ -66,6 +71,9 @@ end
 function Registry:destroy(ent)
     local key = to_key(ent)
     if not self.entities[key] then return end
+
+    -- Trigger C++ destruction of native components
+    ffi.C.ZHLN_DestroyEntity(self.engine, ent)
 
     -- Remove from all component pools and update size counters
     for name, pool in pairs(self.pools) do

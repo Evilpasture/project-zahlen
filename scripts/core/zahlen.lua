@@ -202,6 +202,8 @@ function Engine.new(raw_ptr)
         audio = Audio.new(raw_ptr),
         ecs = ecs.new(raw_ptr),
 
+        dialogue = require("scripts.core.dialogue"),
+
         -- Event system
         _events = {},
         _tracked_views = {},
@@ -353,6 +355,12 @@ if engine_ptr ~= nil then
     _G.game_ecs = _G.zh.ecs
     _G.world = _G.zh.physics
 
+    -- Load Dialogue Trees Database
+    local db = require("scripts.dialogue_db")
+    for id, tree in pairs(db) do
+        _G.zh.dialogue:register(id, tree)
+    end
+
     local InventoryShell = require("scripts.core.inventory")
     _G.inventory_shell = InventoryShell.new()
 
@@ -380,6 +388,8 @@ _G.update = function(ptr, dt)
     end
 
     _G.zh:trigger("engine.tick", dt)
+
+    _G.zh.dialogue:update(dt)
 
     for i = 1, #scheduler.systems do
         local sys = scheduler.systems[i]

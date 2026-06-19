@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include <Zahlen/Common.h>
+#include "Common.h"
+
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>

@@ -54,6 +54,7 @@ struct FrameUniforms {
 [[vk::binding(4, 0)]] ConstantBuffer<FrameUniforms> frame; // Bound to slot 4 matching C++ layout
 [[vk::binding(5, 0)]] StructuredBuffer<Light> lights;	   // Bound to slot 5 matching C++ layout
 
+// --- Sphere vs Axis-Aligned Bounding Box (AABB) ---
 bool SphereAABB(float3 c, float r, float3 minB, float3 maxB) {
 	float sq = 0.0f;
 	for (int i = 0; i < 3; ++i) {
@@ -66,6 +67,21 @@ bool SphereAABB(float3 c, float r, float3 minB, float3 maxB) {
 	return sq <= (r * r);
 }
 
+// --- Cone vs Plane (Consistently evaluates if the entire cone lies behind the plane) ---
+bool ConeBehindPlane(float3 T, float3 D, float R, float r, float3 N, float d) {
+	// Value of the plane equation at the cone tip
+	float valTip = dot(N, T) + d;
+
+	// Project the plane normal onto the base circle's plane
+	float sinTheta = sqrt(max(0.0f, 1.0f - dot(N, D) * dot(N, D)));
+
+	// Value of the plane equation at the furthest point on the base circle in the direction of -N
+	float valBase = dot(N, T + D * R) + d - r * sinTheta;
+
+	// The cone is completely behind the plane if both points are in the negative halfspace
+	return (valTip < 0.0f) && (valBase < 0.0f);
+}
+
 [numthreads(16, 9, 1)] void CSMain(uint3 tid : SV_DispatchThreadID) {
 	uint cIdx = tid.x + (tid.y * 16) + (tid.z * 144);
 	ClusterBounds b = in_Bounds[cIdx];
@@ -76,9 +92,34 @@ bool SphereAABB(float3 c, float r, float3 minB, float3 maxB) {
 	for (uint i = 0; i < frame.lightCount && count < 64; ++i) {
 		if (lights[i].type == 0) { // Directional lights cover the entire scene
 			list[count++] = i;
-		} else {
+		} else if (lights[i].type == 1 || lights[i].type == 3) { // Point and Area Lights
 			if (SphereAABB(lights[i].position, lights[i].range, b.minPoint.xyz, b.maxPoint.xyz)) {
 				list[count++] = i;
+			}
+		} else if (lights[i].type == 2) { // Spotlights (Cone culling)
+			// Phase 1: Quick Sphere-AABB check to prune far lights
+			if (SphereAABB(lights[i].position, lights[i].range, b.minPoint.xyz, b.maxPoint.xyz)) {
+
+				float3 T = lights[i].position;
+				float3 dir = lights[i].direction;
+				float R = lights[i].range;
+
+				// Calculate cone base radius using spot angle properties
+				float cosTheta = lights[i].outerConeCos;
+				float sinTheta = sqrt(max(0.0f, 1.0f - cosTheta * cosTheta));
+				float r = R * (sinTheta / max(0.0001f, cosTheta));
+
+				// Phase 2: Cull if the spotlight cone lies entirely behind any of the 6 box planes
+				bool culled = ConeBehindPlane(T, dir, R, r, float3(1, 0, 0), -b.minPoint.x) ||
+							  ConeBehindPlane(T, dir, R, r, float3(-1, 0, 0), b.maxPoint.x) ||
+							  ConeBehindPlane(T, dir, R, r, float3(0, 1, 0), -b.minPoint.y) ||
+							  ConeBehindPlane(T, dir, R, r, float3(0, -1, 0), b.maxPoint.y) ||
+							  ConeBehindPlane(T, dir, R, r, float3(0, 0, 1), -b.minPoint.z) ||
+							  ConeBehindPlane(T, dir, R, r, float3(0, 0, -1), b.maxPoint.z);
+
+				if (!culled) {
+					list[count++] = i;
+				}
 			}
 		}
 	}

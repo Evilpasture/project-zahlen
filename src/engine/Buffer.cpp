@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Zahlen/Engine.hpp"
+#include "Zahlen/Render.hpp"
 #include "Zahlen/Sync.hpp"
 #include "ecs/ECS.hpp"
 #include "physics/Physics.hpp"
@@ -104,6 +105,7 @@ ZHLN_BufferView ZHLN_GetECSBuffer(struct ZHLN_Engine* engine_handle, const char*
 		return ZHLN::ViewComposer::Build(&reg, raw.data(), "f", raw.size(),
 										 2); // 2 floats: roughness, metallic
 	}
+
 	return {};
 }
 
@@ -168,6 +170,38 @@ void* ZHLN_AddComponent(ZHLN_Engine* handle, uint64_t entityRaw, const char* com
 	if (name == "PBRComponent") {
 		return &reg.Add(entity, ZHLN::PBRComponent{});
 	}
+	if (name == "TextComponent") {
+		return &reg.Add(entity, ZHLN::TextComponent{});
+	}
 	return nullptr;
+}
+
+static_assert(sizeof(ZHLN::TextComponent) == 336);
+static_assert(offsetof(ZHLN::TextComponent, color) == 288);
+static_assert(offsetof(ZHLN::TextComponent, mesh) == 312);
+
+uint64_t ZHLN_CreateEntity(ZHLN_Engine* engine_handle) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	return engine->GetRegistry().Create().Pack();
+}
+
+void ZHLN_DestroyEntity(ZHLN_Engine* engine_handle, uint64_t entityRaw) {
+	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
+	auto entity = ZHLN::Entity::Unpack(entityRaw);
+
+	// AUTOMATIC VULKAN CLEANUP:
+	// If the entity carries a TextComponent, destroy its GPU buffers in Vulkan to prevent
+	// memory/pool leaks!
+	auto* text = engine->GetRegistry().Get<ZHLN::TextComponent>(entity);
+	if (text != nullptr) {
+		if (text->mesh.vertexBuffer != ZHLN::BufferHandle::Invalid) {
+			engine->GetRenderContext().DestroyBuffer(text->mesh.vertexBuffer);
+		}
+		if (text->mesh.indexBuffer != ZHLN::BufferHandle::Invalid) {
+			engine->GetRenderContext().DestroyBuffer(text->mesh.indexBuffer);
+		}
+	}
+
+	engine->GetRegistry().Destroy(entity);
 }
 }

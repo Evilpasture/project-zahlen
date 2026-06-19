@@ -494,11 +494,17 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 	CullingStats::TotalObjects = reg.GetEntitiesWith<MeshComponent>().size();
 	CullingStats::CulledObjects = CullingStats::TotalObjects - visibleEntities.size();
 
+	auto uiSettingsEntities = reg.GetEntitiesWith<UISettingsComponent>();
+	const FontAtlas* activeFont = nullptr;
+	if (!uiSettingsEntities.empty()) {
+		activeFont = &reg.Get<UISettingsComponent>(uiSettingsEntities[0])->fontAtlas;
+	}
+
 	for (Entity e : reg.GetEntitiesWith<TextComponent>()) {
 		auto* text = reg.Get<TextComponent>(e);
-		if (text->mesh.vertexBuffer == BufferHandle::Invalid) {
-			text->mesh = GUI::CreateTextMesh(rc, text->text.c_str(), text->x, text->y, text->scale,
-											 text->color);
+		if (text->mesh.vertexBuffer == BufferHandle::Invalid && activeFont != nullptr) {
+			text->mesh = GUI::CreateTextMesh(rc, *activeFont, text->text.c_str(), text->x, text->y,
+											 text->scale, text->color);
 		}
 		Renderer::DrawUI(rc, text->mesh, text->fontIndex);
 	}
@@ -806,9 +812,12 @@ bool InitializeGame(Engine& engine) {
 										   .twoSided = 0},
 			TransformComponent{.position = {5.0f, 4.0f, 0.0f}});
 
+	// 1. Create the entity and register an empty settings component first
 	Entity uiSettings = reg.Create();
-	reg.Add(uiSettings,
-			UISettingsComponent{.defaultFontAtlasIdx = AssetFactory::CreateFontAtlasTexture(rc)});
+	reg.Add(uiSettings, UISettingsComponent{});
+
+	// 2. Now call the loader. It will find the component, bake the font, and populate the fields
+	AssetFactory::CreateFontAtlasTexture(rc);
 
 	Entity textEnt = reg.Create();
 	reg.Add(

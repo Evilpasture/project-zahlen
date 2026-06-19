@@ -1,7 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "Zahlen/Components.hpp"
 
+#include <Zahlen/GUI.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Types.hpp>
@@ -16,14 +18,14 @@ auto CreateOrthoMatrix(float width, float height) -> JPH::Mat44 {
 
 	// Invert the Y-scale (-2.0f / b) and Y-translation (+1.0f)
 	// to perfectly compensate for Vulkan's negative-height viewport.
-	return JPH::Mat44(JPH::Vec4(2.0f / r, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, -2.0f / b, 0.0f, 0.0f),
-					  JPH::Vec4(0.0f, 0.0f, 1.0f, 0.0f), JPH::Vec4(-1.0f, 1.0f, 0.0f, 1.0f));
+	return {JPH::Vec4(2.0f / r, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, -2.0f / b, 0.0f, 0.0f),
+			JPH::Vec4(0.0f, 0.0f, 1.0f, 0.0f), JPH::Vec4(-1.0f, 1.0f, 0.0f, 1.0f)};
 }
 
-auto CreateTextMesh(RenderContext& ctx, const std::string& text, float x, float y, float scale,
-					const JPH::Vec4& color) -> Mesh {
+auto CreateTextMesh(RenderContext& ctx, const FontAtlas& font, const std::string& text, float x,
+					float y, float scale, const JPH::Vec4& color) -> Mesh {
 	std::vector<Vertex> vertices;
-	vertices.reserve(text.length() * 6); // 6 vertices per char (2 triangles)
+	vertices.reserve(text.length() * 6);
 
 	float currentX = x;
 	PackedRGBA8 packedColor =
@@ -32,73 +34,77 @@ auto CreateTextMesh(RenderContext& ctx, const std::string& text, float x, float 
 	Packed1010102 dummyTangent = Math::PackNormal(1, 0, 0, 1);
 
 	for (char c : text) {
-		// Fallback for non-ASCII characters
-		auto glyphCode = static_cast<uint8_t>(c);
-		if (glyphCode > 127) {
+		uint32_t glyphCode = static_cast<uint8_t>(c);
+		if (glyphCode < 32 || glyphCode > 127) {
 			glyphCode = '?';
 		}
 
-		// Map character grid coordinates
-		uint32_t gridX = glyphCode % 16;
-		uint32_t gridY = glyphCode / 16;
+		// Retrieve layout bounds directly from the system font atlas
+		const auto& g = font.glyphs[glyphCode - 32];
 
-		// Font atlas calculation (16 columns, 16 rows, 8x8 glyphs)
-		float u0 = (float)(gridX * 8) / 128.0f;
-		float v0 = (float)(gridY * 8) / 128.0f;
-		float u1 = (float)((gridX + 1) * 8) / 128.0f;
-		float v1 = (float)((gridY + 1) * 8) / 128.0f;
+		// Normalize coordinate bounds to [0.0 - 1.0] inside the 512x512 texture
+		float u0 = g.x0 / 512.0f;
+		float v0 = g.y0 / 512.0f;
+		float u1 = g.x1 / 512.0f;
+		float v1 = g.y1 / 512.0f;
 
-		// Character quad coordinates in pixels
-		float x0 = currentX;
-		float y0 = y;
-		float x1 = currentX + (8.0f * scale);
-		float y1 = y + (8.0f * scale);
+		// Align bounding box using TrueType kerning offsets
+		float x0 = currentX + g.xoff * scale;
+		float y0 = y + g.yoff * scale;
+		float x1 = x0 + (g.x1 - g.x0) * scale;
+		float y1 = y0 + (g.y1 - g.y0) * scale;
 
-		Vertex vTL = {.position = {x0, y0, 0.0f},
-					  .normal = dummyNormal,
-					  .tangent = dummyTangent,
-					  .uv = Math::PackUV(u0, v0),
-					  .color = packedColor,
-					  .joints = {0, 0, 0, 0},
-					  .weights = {0.0f, 0.0f, 0.0f, 0.0f},
-					  ._padding = {}};
-		Vertex vTR = {.position = {x1, y0, 0.0f},
-					  .normal = dummyNormal,
-					  .tangent = dummyTangent,
-					  .uv = Math::PackUV(u1, v0),
-					  .color = packedColor,
-					  .joints = {0, 0, 0, 0},
-					  .weights = {0.0f, 0.0f, 0.0f, 0.0f},
-					  ._padding = {}};
-		Vertex vBL = {.position = {x0, y1, 0.0f},
-					  .normal = dummyNormal,
-					  .tangent = dummyTangent,
-					  .uv = Math::PackUV(u0, v1),
-					  .color = packedColor,
-					  .joints = {0, 0, 0, 0},
-					  .weights = {0.0f, 0.0f, 0.0f, 0.0f},
-					  ._padding = {}};
-		Vertex vBR = {.position = {x1, y1, 0.0f},
-					  .normal = dummyNormal,
-					  .tangent = dummyTangent,
-					  .uv = Math::PackUV(u1, v1),
-					  .color = packedColor,
-					  .joints = {0, 0, 0, 0},
-					  .weights = {0.0f, 0.0f, 0.0f, 0.0f},
-					  ._padding = {}};
+		Vertex vTL = {
+			.position = {x0, y0, 0.0f},
+			.normal = dummyNormal,
+			.tangent = dummyTangent,
+			.uv = Math::PackUV(u0, v0),
+			.color = packedColor,
+			.joints = {},
+			.weights = {},
+			._padding = {},
+		};
+		Vertex vTR = {
+			.position = {x1, y0, 0.0f},
+			.normal = dummyNormal,
+			.tangent = dummyTangent,
+			.uv = Math::PackUV(u1, v0),
+			.color = packedColor,
+			.joints = {},
+			.weights = {},
+			._padding = {},
+		};
+		Vertex vBL = {
+			.position = {x0, y1, 0.0f},
+			.normal = dummyNormal,
+			.tangent = dummyTangent,
+			.uv = Math::PackUV(u0, v1),
+			.color = packedColor,
+			.joints = {},
+			.weights = {},
+			._padding = {},
+		};
+		Vertex vBR = {
+			.position = {x1, y1, 0.0f},
+			.normal = dummyNormal,
+			.tangent = dummyTangent,
+			.uv = Math::PackUV(u1, v1),
+			.color = packedColor,
+			.joints = {},
+			.weights = {},
+			._padding = {},
+		};
 
-		// CCW Tri 1 (TL -> BL -> TR)
 		vertices.push_back(vTL);
 		vertices.push_back(vBL);
 		vertices.push_back(vTR);
 
-		// CCW Tri 2 (TR -> BL -> BR)
 		vertices.push_back(vTR);
 		vertices.push_back(vBL);
 		vertices.push_back(vBR);
 
-		// Move cursor for next character
-		currentX += (8.0f * scale);
+		// Advance cursor using proportional TrueType spacing
+		currentX += g.xadvance * scale;
 	}
 
 	BufferHandle vbo = ctx.CreateVertexBuffer(vertices.data(), vertices.size() * sizeof(Vertex));

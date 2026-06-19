@@ -65,6 +65,8 @@ ZHLN_API void* ZHLN_GetComponent(struct ZHLN_Engine* engine, uint64_t entityRaw,
 								 const char* componentName);
 ZHLN_API void* ZHLN_AddComponent(struct ZHLN_Engine* engine, uint64_t entityRaw,
 								 const char* componentName);
+ZHLN_API uint64_t ZHLN_CreateEntity(struct ZHLN_Engine* engine);
+ZHLN_API void ZHLN_DestroyEntity(struct ZHLN_Engine* engine, uint64_t entityRaw);
 ZHLN_API int ZHLN_IsKeyDown(struct ZHLN_Engine* engine, uint8_t key);
 ZHLN_API void ZHLN_GetMouseDelta(struct ZHLN_Engine* engine, float* outX, float* outY);
 ZHLN_API float ZHLN_GetCameraYaw(struct ZHLN_Engine* engine);

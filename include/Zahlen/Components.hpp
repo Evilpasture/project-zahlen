@@ -7,7 +7,6 @@
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
-#include <Zahlen/Math3D.hpp>
 #include <array>
 #include <detail/String.hpp>
 
@@ -158,6 +157,16 @@ struct AASettingsComponent {
 	AAState state{};
 };
 
+struct GlyphMetric {
+	float x0, y0, x1, y1;		// Normalized coordinate UV bounds in the atlas
+	float xoff, yoff, xadvance; // Layout offsets
+};
+
+struct FontAtlas {
+	uint32_t textureIndex = 0;
+	GlyphMetric glyphs[96]{}; // ASCII 32 - 127
+};
+
 struct TextComponent {
 	String256 text;
 	float x = 0.0f;
@@ -168,8 +177,10 @@ struct TextComponent {
 	Mesh mesh{};
 };
 
+// Update UISettingsComponent to hold the full Font state:
 struct UISettingsComponent {
 	uint32_t defaultFontAtlasIdx = 0;
+	FontAtlas fontAtlas; // Optional container keeping assets alive
 };
 
 } // namespace ZHLN

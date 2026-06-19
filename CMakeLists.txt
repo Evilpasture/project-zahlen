@@ -218,6 +218,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBEVDEV REQUIRED IMPORTED_TARGET libevdev)
     pkg_check_modules(LIBSEAT REQUIRED IMPORTED_TARGET libseat)
+    pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
 endif()
 
 # --- COLLECT ACTIVE COMPILER FLAGS ---
@@ -279,7 +280,7 @@ target_link_libraries(zahlen_engine PRIVATE
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_link_libraries(zahlen_engine PRIVATE PkgConfig::LIBEVDEV PkgConfig::LIBSEAT)
+    target_link_libraries(zahlen_engine PRIVATE PkgConfig::LIBEVDEV PkgConfig::LIBSEAT PkgConfig::FONTCONFIG)
 endif()
 
 # Jolt is part of the public ABI exposed by engine headers, so propagate its include paths.

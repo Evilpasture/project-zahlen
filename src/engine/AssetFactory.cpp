@@ -4,47 +4,116 @@
 // File: src/engine/AssetFactory.cpp
 
 #include "Zahlen/AssetManager.hpp"
+#include "Zahlen/Components.hpp"
+#include "Zahlen/Engine.hpp"
 #include "Zahlen/Render.hpp"
+#include "ecs/ECS.hpp"
 
 #include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Font8x8.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <cstddef>
+#include <fontconfig/fontconfig.h>
 #include <stb_image.h>
+#define STB_TRUETYPE_IMPLEMENTATION
+#include <stb_truetype.h>
 
 namespace ZHLN::AssetFactory {
 
-uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
-	const uint32_t atlasSize = 128;
-	// Minimal fallback array (no vector)
-	auto* pixels = new uint32_t[static_cast<size_t>(atlasSize * atlasSize)];
+// Queries Fontconfig to find the absolute file path of any font on your Arch Linux machine
+static std::string FindSystemFont(const char* fontName) {
+	FcConfig* config = FcInitLoadConfigAndFonts();
+	FcPattern* pat = FcNameParse(reinterpret_cast<const FcChar8*>(fontName));
+	FcConfigSubstitute(config, pat, FcMatchPattern);
+	FcDefaultSubstitute(pat);
 
-	for (uint32_t i = 0; i < atlasSize * atlasSize; ++i) {
-		pixels[i] = 0x00000000;
-	}
-
-	for (uint32_t c = 0; c < 128; ++c) {
-		uint32_t gridX = c % 16;
-		uint32_t gridY = c / 16;
-		uint32_t startX = gridX * 8;
-		uint32_t startY = gridY * 8;
-
-		for (uint32_t row = 0; row < 8; ++row) {
-			uint8_t byteVal = Font8x8_Basic[c][row];
-			for (uint32_t col = 0; col < 8; ++col) {
-				bool bit = (byteVal & (0x80 >> col)) != 0;
-				uint32_t pixelX = startX + col;
-				uint32_t pixelY = startY + row;
-
-				pixels[pixelY * atlasSize + pixelX] = bit ? 0xFFFFFFFF : 0x00000000;
-			}
+	FcResult result;
+	FcPattern* match = FcFontMatch(config, pat, &result);
+	std::string fontPath;
+	if (match != nullptr) {
+		FcChar8* file = nullptr;
+		if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch) {
+			fontPath = reinterpret_cast<const char*>(file);
 		}
+		FcPatternDestroy(match);
+	}
+	FcPatternDestroy(pat);
+	FcConfigDestroy(config);
+	return fontPath;
+}
+
+uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
+	// Query standard Arch sans-serif font (fallback to DejaVu/Liberation if missing)
+	std::string fontPath = FindSystemFont("sans-serif");
+	if (fontPath.empty()) {
+		fontPath = "/usr/share/fonts/TTF/DejaVuSans.ttf"; // Safe Arch fallback
 	}
 
-	uint32_t tex = ctx.CreateTexture(pixels, atlasSize, atlasSize);
-	delete[] pixels;
-	return tex;
+	Log("Loading TrueType system font: {}", fontPath);
+
+	FILE* f = std::fopen(fontPath.c_str(), "rb");
+	if (!f) {
+		Log("ERROR: Failed to open system font file: {}", fontPath);
+		return 0;
+	}
+
+	std::fseek(f, 0, SEEK_END);
+	long size = std::ftell(f);
+	std::fseek(f, 0, SEEK_SET);
+	std::vector<uint8_t> fontBuffer(size);
+	std::fread(fontBuffer.data(), 1, size, f);
+	std::fclose(f);
+
+	// Setup a clean 512x512 alpha map
+	const uint32_t atlasSize = 512;
+	std::vector<uint8_t> alphaBitmap(static_cast<size_t>(atlasSize * atlasSize), 0);
+
+	// Retrieve active font settings from your UISettingsComponent
+	auto* engine = GetEngineContext();
+	auto& reg = engine->GetRegistry();
+
+	auto uiSettingsEntities = reg.GetEntitiesWith<UISettingsComponent>();
+	if (uiSettingsEntities.empty()) {
+		return 0;
+	}
+	auto* uiSettings = reg.Get<UISettingsComponent>(uiSettingsEntities[0]);
+
+	stbtt_bakedchar bakedChars[96]; // ASCII 32 - 127
+	// Bake 24pt anti-aliased glyphs into the alpha channel
+	int result = stbtt_BakeFontBitmap(fontBuffer.data(), 0, 24.0f, alphaBitmap.data(), atlasSize,
+									  atlasSize, 32, 96, bakedChars);
+
+	if (result <= 0) {
+		Log("ERROR: stb_truetype failed to bake font bitmap!");
+		return 0;
+	}
+
+	// Convert 8-bit alpha map into Vulkan-native 32-bit RGBA texture
+	std::vector<uint32_t> rgbaPixels(static_cast<size_t>(atlasSize * atlasSize));
+	for (uint32_t i = 0; i < atlasSize * atlasSize; ++i) {
+		uint8_t alpha = alphaBitmap[i];
+		rgbaPixels[i] = (static_cast<uint32_t>(alpha) << 24) | 0x00FFFFFF; // Transparent white
+	}
+
+	uint32_t texIdx =
+		ctx.CreateTexture(rgbaPixels.data(), atlasSize, atlasSize, false); // Linear sampling
+
+	// Convert Jolt/C++ structures
+	for (uint32_t i = 0; i < 96; ++i) {
+		const auto& bc = bakedChars[i];
+		uiSettings->fontAtlas.glyphs[i] = GlyphMetric{.x0 = static_cast<float>(bc.x0),
+													  .y0 = static_cast<float>(bc.y0),
+													  .x1 = static_cast<float>(bc.x1),
+													  .y1 = static_cast<float>(bc.y1),
+													  .xoff = bc.xoff,
+													  .yoff = bc.yoff,
+													  .xadvance = bc.xadvance};
+	}
+	uiSettings->fontAtlas.textureIndex = texIdx;
+	uiSettings->defaultFontAtlasIdx = texIdx;
+
+	return texIdx;
 }
 
 Mesh LoadCookedMesh(RenderContext& ctx, [[maybe_unused]] AssetManager& assetMgr,
