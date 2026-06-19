@@ -666,12 +666,12 @@ void RenderContext::Impl::InitPostProcessing() {
 									 {
 										 .code = Vk::AsSpirV(&ZHLN_Resource_PostProcessVertSpv[0]),
 										 .size = ZHLN_Resource_PostProcessVertSpv_Len,
-										 .entry_point = {},
+										 .entry_point = "VSMain", // Explicitly bypass reflection
 									 },
 									 {
 										 .code = Vk::AsSpirV(&ZHLN_Resource_PostProcessFragSpv[0]),
 										 .size = ZHLN_Resource_PostProcessFragSpv_Len,
-										 .entry_point = {},
+										 .entry_point = "PSMain", // Explicitly bypass reflection
 									 });
 
 		if (!postProcessPass.Build(ctx.Device(), ppShaders, {VK_FORMAT_R16G16B16A16_SFLOAT},
@@ -684,12 +684,12 @@ void RenderContext::Impl::InitPostProcessing() {
 			{
 				.code = Vk::AsSpirV(&ZHLN_Resource_PostProcessNortVertSpv[0]),
 				.size = ZHLN_Resource_PostProcessNortVertSpv_Len,
-				.entry_point = {},
+				.entry_point = "VSMain",
 			},
 			{
 				.code = Vk::AsSpirV(&ZHLN_Resource_PostProcessNortFragSpv[0]),
 				.size = ZHLN_Resource_PostProcessNortFragSpv_Len,
-				.entry_point = {},
+				.entry_point = "PSMain",
 			});
 
 		if (!postProcessPassNoRT.Build(ctx.Device(), ppNortShaders, {VK_FORMAT_R16G16B16A16_SFLOAT},

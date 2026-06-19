@@ -537,13 +537,37 @@ struct PostProcessPass {
 				Vk::SamplerWrite{.sampler = ctx.pointSampler.Get()},
 				Vk::ImageWrite{.view = ctx.iblPayload.prefilteredView.Get(),
 							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-				&ctx.tlas.Current());
+				&ctx.tlas.Current(),
+				Vk::BufferWrite{.buffer = ctx.lightStorageBuffers[recorder.frameIndex].Handle()},
+				Vk::BufferWrite{.buffer = ctx.frameUniformBuffers[recorder.frameIndex].Handle()},
+				Vk::ImageWrite{.view = ctx.shadowMap.view.Get(),
+							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+				Vk::SamplerWrite{.sampler = ctx.shadowSampler.Get()},
+				Vk::ImageWrite{.view = ctx.ltcMatView.Get(),
+							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+				Vk::ImageWrite{.view = ctx.ltcAmpView.Get(),
+							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+				Vk::SamplerWrite{.sampler = ctx.clampSampler.Get()},
+				Vk::ImageWrite{.view = ctx.iblPayload.brdfLutView.Get(),
+							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
 		} else {
 			ctx.postProcessPassNoRT.WriteNext(
 				ctx.ctx.Device(), in.sceneColor,
 				Vk::SamplerWrite{.sampler = ctx.defaultSampler.Get()}, in.depth, in.normRough,
 				Vk::SamplerWrite{.sampler = ctx.pointSampler.Get()},
 				Vk::ImageWrite{.view = ctx.iblPayload.prefilteredView.Get(),
+							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+				Vk::BufferWrite{.buffer = ctx.lightStorageBuffers[recorder.frameIndex].Handle()},
+				Vk::BufferWrite{.buffer = ctx.frameUniformBuffers[recorder.frameIndex].Handle()},
+				Vk::ImageWrite{.view = ctx.shadowMap.view.Get(),
+							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+				Vk::SamplerWrite{.sampler = ctx.shadowSampler.Get()},
+				Vk::ImageWrite{.view = ctx.ltcMatView.Get(),
+							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+				Vk::ImageWrite{.view = ctx.ltcAmpView.Get(),
+							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+				Vk::SamplerWrite{.sampler = ctx.clampSampler.Get()},
+				Vk::ImageWrite{.view = ctx.iblPayload.brdfLutView.Get(),
 							   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
 		}
 
@@ -744,7 +768,7 @@ RenderResult RenderContext::BeginFrame() noexcept {
 			return std::unexpected(RenderFrameResult::Error); // <-- FIXED: Monadic return
 		}
 
-		_impl->sceneColor = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
+		_impl->sceneColor = Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>::Create(
 			_impl->allocator, _impl->ctx, ext,
 			{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
 		_impl->velocityBuffer = Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT>::Create(
@@ -763,7 +787,7 @@ RenderResult RenderContext::BeginFrame() noexcept {
 		_impl->smaaWeightTarget = Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>::Create(
 			_impl->allocator, _impl->ctx, ext,
 			{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
-		_impl->normalRoughnessBuffer = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
+		_impl->normalRoughnessBuffer = Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>::Create(
 			_impl->allocator, _impl->ctx, ext,
 			{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
 		_impl->postProcessTarget = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
@@ -960,7 +984,7 @@ RenderResult RenderContext::EndFrame() noexcept {
 		bool isExcluded = (drawCmd.flags & DrawFlags::ExcludeFromTLAS) != DrawFlags::None;
 
 		// TODO(Evilpasture): This still pulls animated screen space meshes. There is something
-		// wrong with the GLB we're using.
+		// wrong with the GLB we're using. What do we do? Nothing. Too much work.
 		if (mesh->blasAddress == 0 || isSkinned || isExcluded) {
 			continue;
 		}

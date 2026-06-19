@@ -117,6 +117,22 @@ uint4 UnpackJoints(uint2 packed) {
 	return uint4(packed.x & 0xFFFF, packed.x >> 16, packed.y & 0xFFFF, packed.y >> 16);
 }
 
+// --- Octahedral Normal Packing ---
+float2 PackNormalOctahedron(float3 N) {
+	N /= (abs(N.x) + abs(N.y) + abs(N.z));
+	float2 s = float2(N.x >= 0.0 ? 1.0 : -1.0, N.y >= 0.0 ? 1.0 : -1.0);
+	return N.z >= 0.0 ? N.xy : (1.0 - abs(N.yx)) * s;
+}
+
+float3 UnpackNormalOctahedron(float2 oct) {
+	float3 N = float3(oct, 1.0 - abs(oct.x) - abs(oct.y));
+	float2 s = float2(N.x >= 0.0 ? 1.0 : -1.0, N.y >= 0.0 ? 1.0 : -1.0);
+	if (N.z < 0.0) {
+		N.xy = (1.0 - abs(N.yx)) * s;
+	}
+	return normalize(N);
+}
+
 #ifndef SKIP_BINDINGS
 [[vk::push_constant]] ObjectConstants obj;
 

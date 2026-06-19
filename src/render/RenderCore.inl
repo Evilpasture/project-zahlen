@@ -932,29 +932,33 @@ inline void SemaphorePool::Cleanup() noexcept {
 // ============================================================================
 // Image View Helpers Implementation
 // ============================================================================
+namespace {
+struct FormatAspectMapping {
+	VkFormat format;
+	VkImageAspectFlags aspect;
+};
+} // namespace
+
+inline constexpr std::array<FormatAspectMapping, 10> kFormatAspectTable = {
+	{{.format = VK_FORMAT_R16G16B16A16_SFLOAT, .aspect = VK_IMAGE_ASPECT_COLOR_BIT},
+	 {.format = VK_FORMAT_R32G32B32A32_SFLOAT, .aspect = VK_IMAGE_ASPECT_COLOR_BIT},
+	 {.format = VK_FORMAT_R8G8B8A8_UNORM, .aspect = VK_IMAGE_ASPECT_COLOR_BIT},
+	 {.format = VK_FORMAT_R8G8B8A8_SRGB, .aspect = VK_IMAGE_ASPECT_COLOR_BIT},
+	 {.format = VK_FORMAT_B8G8R8A8_SRGB, .aspect = VK_IMAGE_ASPECT_COLOR_BIT},
+	 {.format = VK_FORMAT_R8G8_UNORM, .aspect = VK_IMAGE_ASPECT_COLOR_BIT},
+	 {.format = VK_FORMAT_B10G11R11_UFLOAT_PACK32, .aspect = VK_IMAGE_ASPECT_COLOR_BIT},
+	 {.format = VK_FORMAT_D32_SFLOAT, .aspect = VK_IMAGE_ASPECT_DEPTH_BIT},
+	 {.format = VK_FORMAT_D24_UNORM_S8_UINT,
+	  .aspect = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT},
+	 {.format = VK_FORMAT_R16G16_SFLOAT, .aspect = VK_IMAGE_ASPECT_COLOR_BIT}}};
 
 constexpr auto GetFormatAspect(VkFormat format) noexcept -> VkImageAspectFlags {
-	switch (format) {
-		case VK_FORMAT_R16G16B16A16_SFLOAT:
-		case VK_FORMAT_R32G32B32A32_SFLOAT:
-		case VK_FORMAT_R8G8B8A8_UNORM:
-		case VK_FORMAT_R8G8B8A8_SRGB:
-		case VK_FORMAT_B8G8R8A8_SRGB:
-		case VK_FORMAT_R8G8_UNORM:
-			return VK_IMAGE_ASPECT_COLOR_BIT;
-
-		case VK_FORMAT_D32_SFLOAT:
-			return VK_IMAGE_ASPECT_DEPTH_BIT;
-
-		case VK_FORMAT_D24_UNORM_S8_UINT:
-			return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-
-		case VK_FORMAT_R16G16_SFLOAT:
-			return VK_IMAGE_ASPECT_COLOR_BIT;
-
-		default:
-			return VK_IMAGE_ASPECT_NONE;
+	for (const auto& mapping : kFormatAspectTable) {
+		if (mapping.format == format) {
+			return mapping.aspect;
+		}
 	}
+	return VK_IMAGE_ASPECT_NONE;
 }
 
 template <VkFormat F>

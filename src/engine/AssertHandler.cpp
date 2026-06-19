@@ -44,6 +44,40 @@
 
 namespace ZHLN {
 
+namespace {
+
+// Safely reads memory without risking a crash/segmentation fault.
+// Returns true on success, false if the memory was unreadable or unmapped.
+inline bool SafeRead(const void* src, void* dest, size_t size) noexcept {
+	if ((src == nullptr) || (dest == nullptr) || size == 0) {
+		return false;
+	}
+#if defined(_WIN32)
+	SIZE_T bytesRead = 0;
+	BOOL ok = ReadProcessMemory(GetCurrentProcess(), src, dest, (SIZE_T)size, &bytesRead);
+	return ok && (bytesRead == size);
+#else
+	int fd[2];
+	if (pipe(fd) < 0) {
+		return false;
+	}
+	// Make the write non-blocking so we never hang if the kernel buffer gets full
+	fcntl(fd[1], F_SETFL, O_NONBLOCK);
+	ssize_t written = write(fd[1], src, size);
+	if (written > 0) {
+		ssize_t read_bytes = read(fd[0], dest, written);
+		close(fd[0]);
+		close(fd[1]);
+		return read_bytes == (ssize_t)size;
+	}
+	close(fd[0]);
+	close(fd[1]);
+	return false;
+#endif
+}
+
+} // namespace
+
 static std::atomic<int> s_PendingSignal{0};
 static std::atomic<void*> s_FaultAddr{nullptr};
 static std::atomic<LogLevel> s_LogLevel{LogLevel::Moderate};
@@ -259,7 +293,9 @@ void MemoryDump(const void* ptr, size_t size, std::string_view label, LogContext
 		size_t count = 0;
 		for (size_t i = 0; i < str.size(); ++i) {
 			if (str[i] == '\x1b') { // Start of ANSI escape
-				while (i < str.size() && str[i] != 'm') ++i;
+				while (i < str.size() && str[i] != 'm') {
+					++i;
+				}
 			} else {
 				count++;
 			}
@@ -272,9 +308,12 @@ void MemoryDump(const void* ptr, size_t size, std::string_view label, LogContext
 	auto header2 = ZHLN::Format("│ Source:  {}:{}\n", file_name, ctx.loc.line());
 	auto header3 =
 		ZHLN::Format("│ Address: {}{}{} ({} bytes)\n", Color::Yellow, ptr, Color::Reset, size);
-	auto header4 = "├──────────────────┬───────────────────────────────────────────────────────┬──────────────────┬─────────────────────────┤\n";
-	auto header5 = "│     Address      │ Hex Data                                              │ ASCII            │ Interpretation          │\n";
-	auto header6 = "├──────────────────┼───────────────────────────────────────────────────────┼──────────────────┼─────────────────────────┤\n";
+	auto header4 = "├──────────────────┬───────────────────────────────────────────────────────┬───"
+				   "───────────────┬─────────────────────────┤\n";
+	auto header5 = "│     Address      │ Hex Data                                              │ "
+				   "ASCII            │ Interpretation          │\n";
+	auto header6 = "├──────────────────┼───────────────────────────────────────────────────────┼───"
+				   "───────────────┼─────────────────────────┤\n";
 
 	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), header1.string_view());
 	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), header2.string_view());
@@ -350,7 +389,7 @@ void MemoryDump(const void* ptr, size_t size, std::string_view label, LogContext
 		} else {
 			info_str = ZHLN::Format("{}N/A{}", Color::Gray, Color::Reset);
 		}
-		
+
 		// Pad info_str to 23 visible chars (excluding ANSI escape sequences)
 		size_t visible_len = CountVisibleChars(info_str);
 		if (visible_len < 23) {
@@ -361,9 +400,10 @@ void MemoryDump(const void* ptr, size_t size, std::string_view label, LogContext
 		WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), " │\n");
 	}
 
-	auto footer = ZHLN::Format(
-		"{}└──────────────────┴───────────────────────────────────────────────────────┴──────────────────┴─────────────────────────┘{}\n",
-		Color::Cyan, Color::Reset);
+	auto footer = ZHLN::Format("{}"
+							   "└──────────────────┴───────────────────────────────────────────────"
+							   "────────┴──────────────────┴─────────────────────────┘{}\n",
+							   Color::Cyan, Color::Reset);
 	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), footer.string_view());
 }
 
@@ -397,6 +437,87 @@ static void PerformDiagnosticDump(int sig, void* addr, Engine* engine) {
 		ZHLN::Format("Faulting Address: {}{}{}\n", Color::Yellow, addr, Color::Reset);
 	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), sig_header.string_view());
 	WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), addr_header.string_view());
+
+	// --- Safe Memory Dump of Surrounding Address Space ---
+	if (addr != nullptr) {
+		constexpr size_t bytesPerLine = 16;
+		constexpr size_t totalLines = 8; // Dumps 128 bytes total
+		constexpr size_t totalSize = bytesPerLine * totalLines;
+
+		auto dump_hdr = ZHLN::Format("\n{}--- FAULTING MEMORY SURROUNDING REGION ---{}\n",
+									 Color::Cyan, Color::Reset);
+		WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), dump_hdr.string_view());
+
+		const char* byte_ptr = static_cast<const char*>(addr);
+
+		// Offset starting point back by half our dump window so the faulting address is centered
+		const char* start_ptr = byte_ptr - (bytesPerLine * (totalLines / 2));
+
+		// Align startAddr to 16-byte boundary for clean formatting
+		uintptr_t alignedStart = std::bit_cast<uintptr_t>(start_ptr) & ~15ULL;
+		start_ptr = std::bit_cast<const char*>(alignedStart);
+
+		for (size_t i = 0; i < totalSize; i += bytesPerLine) {
+			const char* current_ptr = start_ptr + i;
+
+			// Safely probe if the current line's memory is readable
+			char raw_bytes[16];
+			bool readable = SafeRead(current_ptr, raw_bytes, bytesPerLine);
+
+			// Address
+			auto addr_str = ZHLN::Format("  {}{:016X}{} | ", Color::Cyan,
+										 std::bit_cast<uintptr_t>(current_ptr), Color::Reset);
+			WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), addr_str.string_view());
+
+			if (!readable) {
+				const auto* line =
+					"?? ?? ?? ?? ?? ?? ?? ??  ?? ?? ?? ?? ?? ?? ?? ?? | ????????????????\n";
+				WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), line);
+				continue;
+			}
+
+			// Format Hex bytes
+			char lineBuf[512];
+			int offset = 0;
+			for (size_t j = 0; j < bytesPerLine; ++j) {
+				const char* cur = current_ptr + j;
+				bool isTarget = (cur == static_cast<const char*>(addr));
+
+				if (isTarget) {
+					// Highlight the exact faulting byte/address in Red
+					offset += ZHLN::BufferPrint(lineBuf + offset, sizeof(lineBuf) - offset,
+												"%s%02X%s ", Color::Red,
+												static_cast<uint8_t>(raw_bytes[j]), Color::Reset);
+				} else {
+					offset += ZHLN::BufferPrint(lineBuf + offset, sizeof(lineBuf) - offset, "%02X ",
+												static_cast<uint8_t>(raw_bytes[j]));
+				}
+
+				if ((j + 1) % 4 == 0 && j + 1 < bytesPerLine) {
+					offset += ZHLN::BufferPrint(lineBuf + offset, sizeof(lineBuf) - offset, " ");
+				}
+			}
+			// Pad the hex column to maintain alignment
+			while (offset < 54) {
+				lineBuf[offset++] = ' ';
+			}
+			lineBuf[offset] = '\0';
+			WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr),
+						   std::string_view(lineBuf, offset));
+			WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), " | ");
+
+			// Format ASCII
+			char ascii_buf[32];
+			for (size_t j = 0; j < bytesPerLine; ++j) {
+				auto c = static_cast<uint8_t>(raw_bytes[j]);
+				ascii_buf[j] = std::isprint(c) ? static_cast<char>(c) : '.';
+			}
+			WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr),
+						   std::string_view(ascii_buf, bytesPerLine));
+			WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), " |\n");
+		}
+		WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), "\n");
+	}
 
 	if (engine != nullptr) {
 		ZHLN_TRACE(*engine);

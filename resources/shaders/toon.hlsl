@@ -154,7 +154,11 @@ PSOutput PSMain(VSOutput input) {
 	finalColor = min(finalColor, 100.0f);
 
 	output.color = float4(finalColor, albedo.a);
-	output.normalRoughness = float4(worldNormal * 0.5f + 0.5f, roughness);
+
+	// Compress normal to 2D octahedral representation mapped to [0, 1]
+	float metallic = input.pbrFactors.x; // Fetch from input
+	float2 packedNormal = PackNormalOctahedron(worldNormal) * 0.5f + 0.5f;
+	output.normalRoughness = float4(packedNormal, roughness, metallic);
 
 	// Clamp W to a small positive number to prevent Divide-By-Zero NaN explosions
 	float currW = max(input.currClip.w, 0.0001f);
