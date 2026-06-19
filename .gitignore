@@ -54,7 +54,6 @@ Thumbs.db
 *.bak
 
 # Assets
-resources/assets/
 resources/intermediate/
 *.bin
 
