@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <stb_image.h>
 #include <string>
+#include <threading/TaskSystem.hpp>
 #include <unordered_map>
 #include <vector>
 
@@ -31,52 +32,84 @@ namespace ZHLN::AssetFactory {
 std::unordered_map<std::string, cgltf_data*> s_GLBCache;
 std::vector<cgltf_data*> s_AnimatedGLBs;
 
-static uint32_t LoadEmbeddedTexture(RenderContext& ctx, cgltf_image* img,
-									const std::string& glbPath, bool isSRGB = true) {
-	static std::unordered_map<std::string, uint32_t> textureCache;
-	std::string key;
-
-	if (img->uri != nullptr) {
-		key = glbPath + ":" + img->uri;
-	} else if (img->buffer_view != nullptr) {
-		key = glbPath + ":" + std::to_string(reinterpret_cast<uintptr_t>(img->buffer_view));
-	} else {
-		key = glbPath + ":" + std::to_string(reinterpret_cast<uintptr_t>(img));
-	}
-
-	if (textureCache.contains(key)) {
-		return textureCache[key];
-	}
-
+// Structures to hold intermediate parsed data from CPU-parallel phase
+struct CPUTextureJob {
+	cgltf_image* image = nullptr;
+	std::string glbPath;
+	bool isSRGB = true;
+	unsigned char* decodedPixels = nullptr;
 	int width = 0;
 	int height = 0;
+	bool wasRescaled = false;
+	uint32_t uploadedIndex = 0;
+};
+
+struct CPUPrimitiveJob {
+	const cgltf_node* node = nullptr;
+	const cgltf_primitive* prim = nullptr;
+	JPH::Mat44 nodeTransform;
+
+	std::vector<Vertex> vertices;
+	std::vector<uint32_t> indices;
+	uint32_t indexCount = 0;
+
+	float localMin[3] = {0.0f, 0.0f, 0.0f};
+	float localMax[3] = {0.0f, 0.0f, 0.0f};
+	float boundingRadius = 1.0f;
+
+	bool doubleSided = false;
+	bool alphaBlend = false;
+	float baseColorFactor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+	float metallicFactor = 1.0f;
+	float roughnessFactor = 1.0f;
+	float alphaCutoff = 0.5f;
+	uint32_t alphaMode = 0;
+
+	cgltf_image* albedoImage = nullptr;
+	cgltf_image* normalImage = nullptr;
+	cgltf_image* pbrImage = nullptr;
+
+	uint32_t morphOffset = 0;
+	uint32_t activeMorphCount = 0;
+	float defaultMorphWeights[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+	std::vector<float> tempDeltas;
+
+	JPH::ShapeRefC meshCollider = nullptr;
+	JPH::ShapeRefC boxCollider = nullptr;
+};
+
+struct PreparedPart {
+	JPH::Vec3 translation;
+	JPH::Quat rotation;
+	JPH::Vec3 scale;
+	float maxScale = 1.0f;
+	JPH::ShapeRefC shape = nullptr;
+};
+
+// Procedural image processing on the CPU (Runs in Parallel)
+static void DecodeAndRescaleTexture(CPUTextureJob& job) {
 	int channels = 0;
 	unsigned char* pixels = nullptr;
 
-	if (img->buffer_view != nullptr) {
+	if (job.image->buffer_view != nullptr) {
 		const char* bufferData =
-			(const char*)img->buffer_view->buffer->data + img->buffer_view->offset;
+			(const char*)job.image->buffer_view->buffer->data + job.image->buffer_view->offset;
 		pixels = stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(bufferData),
-									   static_cast<int>(img->buffer_view->size), &width, &height,
-									   &channels, 4);
-	} else if (img->uri != nullptr) {
-		std::filesystem::path glbFolder = std::filesystem::path(glbPath).parent_path();
-		std::filesystem::path texPath = glbFolder / img->uri;
-		pixels = stbi_load(texPath.string().c_str(), &width, &height, &channels, 4);
+									   static_cast<int>(job.image->buffer_view->size), &job.width,
+									   &job.height, &channels, 4);
+	} else if (job.image->uri != nullptr) {
+		std::filesystem::path glbFolder = std::filesystem::path(job.glbPath).parent_path();
+		std::filesystem::path texPath = glbFolder / job.image->uri;
+		pixels = stbi_load(texPath.string().c_str(), &job.width, &job.height, &channels, 4);
 	}
 
 	if (pixels == nullptr) {
-		return 1;
+		return;
 	}
 
-	// ========================================================================
-	// DYNAMIC VRAM SAVER: 2x2 Box-Filter Texture Clamping
-	// ========================================================================
-	auto w = static_cast<uint32_t>(width);
-	auto h = static_cast<uint32_t>(height);
+	auto w = static_cast<uint32_t>(job.width);
+	auto h = static_cast<uint32_t>(job.height);
 
-	// Limit maximum texture dimension to 1024x1024 (saves 75% memory on 2K textures)
-	// Change this to 512 for even more VRAM savings (93.7% reduction!)
 	constexpr uint32_t MAX_TEX_DIM = 1024;
 	bool wasRescaled = false;
 
@@ -85,7 +118,6 @@ static uint32_t LoadEmbeddedTexture(RenderContext& ctx, cgltf_image* img,
 		uint32_t targetH = h;
 		uint32_t scaleSteps = 0;
 
-		// Calculate how many 2x downsamples are needed
 		while (targetW > MAX_TEX_DIM || targetH > MAX_TEX_DIM) {
 			targetW /= 2;
 			targetH /= 2;
@@ -104,7 +136,6 @@ static uint32_t LoadEmbeddedTexture(RenderContext& ctx, cgltf_image* img,
 					std::malloc(static_cast<size_t>(nextW) * nextH * 4));
 
 				if (nextDst != nullptr) {
-					// 2x2 Box Filter Downsampling
 					for (uint32_t y = 0; y < nextH; ++y) {
 						for (uint32_t x = 0; x < nextW; ++x) {
 							uint32_t srcX = x * 2;
@@ -131,7 +162,6 @@ static uint32_t LoadEmbeddedTexture(RenderContext& ctx, cgltf_image* img,
 						}
 					}
 
-					// Free temporary buffers along the chain
 					if (currentSrc != pixels) {
 						std::free(currentSrc);
 					}
@@ -139,31 +169,251 @@ static uint32_t LoadEmbeddedTexture(RenderContext& ctx, cgltf_image* img,
 					currentW = nextW;
 					currentH = nextH;
 				} else {
-					break; // Memory allocation failed, halt downsampling
+					break;
 				}
 			}
 
 			if (currentSrc != pixels) {
-				stbi_image_free(pixels); // Free the original stb_image buffer
+				stbi_image_free(pixels);
 				pixels = currentSrc;
-				width = static_cast<int>(currentW);
-				height = static_cast<int>(currentH);
-				wasRescaled = true;
+				job.width = static_cast<int>(currentW);
+				job.height = static_cast<int>(currentH);
+				job.wasRescaled = true;
 			}
 		}
 	}
 
-	// 5. Upload the rescaled texture and safely release memory
-	uint32_t index = ctx.CreateTexture(pixels, width, height, isSRGB);
+	job.decodedPixels = pixels;
+}
 
-	if (wasRescaled) {
-		std::free(pixels); // Free the custom malloc'd buffer
-	} else {
-		stbi_image_free(pixels); // Free original stb_image buffer
+// Parses and packs geometry attributes on the CPU (Runs in Parallel)
+static void ProcessCPUPrimitive(CPUPrimitiveJob& job, PhysicsContext& pc) {
+	const auto& prim = *job.prim;
+	const auto* node = job.node;
+
+	cgltf_accessor* posAcc = nullptr;
+	cgltf_accessor* normAcc = nullptr;
+	cgltf_accessor* tangentAcc = nullptr;
+	cgltf_accessor* uvAcc = nullptr;
+	cgltf_accessor* colorAcc = nullptr;
+	cgltf_accessor* jointsAcc = nullptr;
+	cgltf_accessor* weightsAcc = nullptr;
+
+	for (cgltf_size a = 0; a < prim.attributes_count; ++a) {
+		const auto& attr = prim.attributes[a];
+		if (attr.type == cgltf_attribute_type_position) {
+			posAcc = attr.data;
+		} else if (attr.type == cgltf_attribute_type_normal) {
+			normAcc = attr.data;
+		} else if (attr.type == cgltf_attribute_type_tangent) {
+			tangentAcc = attr.data;
+		} else if (attr.type == cgltf_attribute_type_texcoord && attr.index == 0) {
+			uvAcc = attr.data;
+		} else if (attr.type == cgltf_attribute_type_color && attr.index == 0) {
+			colorAcc = attr.data;
+		} else if (attr.type == cgltf_attribute_type_joints && attr.index == 0) {
+			jointsAcc = attr.data;
+		} else if (attr.type == cgltf_attribute_type_weights && attr.index == 0) {
+			weightsAcc = attr.data;
+		}
 	}
 
-	textureCache[key] = index;
-	return index;
+	if (posAcc == nullptr) {
+		return;
+	}
+
+	if (posAcc->has_min) {
+		std::copy(posAcc->min, posAcc->min + 3, job.localMin);
+	}
+	if (posAcc->has_max) {
+		std::copy(posAcc->max, posAcc->max + 3, job.localMax);
+	}
+
+	if (prim.material != nullptr) {
+		job.doubleSided = (prim.material->double_sided != 0);
+		if (prim.material->alpha_mode == cgltf_alpha_mode_mask) {
+			job.alphaMode = 1;
+			job.alphaCutoff = prim.material->alpha_cutoff;
+		} else if (prim.material->alpha_mode == cgltf_alpha_mode_blend) {
+			job.alphaMode = 1;
+			job.alphaCutoff = 0.5f;
+			job.alphaBlend = false;
+		}
+
+		if (prim.material->has_pbr_metallic_roughness) {
+			const float* c = prim.material->pbr_metallic_roughness.base_color_factor;
+			job.baseColorFactor[0] = c[0];
+			job.baseColorFactor[1] = c[1];
+			job.baseColorFactor[2] = c[2];
+			job.baseColorFactor[3] = c[3];
+			job.metallicFactor = prim.material->pbr_metallic_roughness.metallic_factor;
+			job.roughnessFactor = prim.material->pbr_metallic_roughness.roughness_factor;
+
+			if (prim.material->pbr_metallic_roughness.base_color_texture.texture != nullptr) {
+				job.albedoImage =
+					prim.material->pbr_metallic_roughness.base_color_texture.texture->image;
+			}
+			if (prim.material->pbr_metallic_roughness.metallic_roughness_texture.texture !=
+				nullptr) {
+				job.pbrImage =
+					prim.material->pbr_metallic_roughness.metallic_roughness_texture.texture->image;
+			}
+		}
+		if (prim.material->normal_texture.texture != nullptr) {
+			job.normalImage = prim.material->normal_texture.texture->image;
+		}
+	}
+
+	size_t vertexCount = posAcc->count;
+	std::vector<Vertex> primVertices(vertexCount);
+
+	for (size_t vIdx = 0; vIdx < vertexCount; ++vIdx) {
+		Vertex& v = primVertices[vIdx];
+		std::memset(&v, 0, sizeof(Vertex));
+
+		float rawPos[3] = {0.0f, 0.0f, 0.0f};
+		cgltf_accessor_read_float(posAcc, vIdx, rawPos, 3);
+		v.position[0] = rawPos[0];
+		v.position[1] = rawPos[1];
+		v.position[2] = rawPos[2];
+
+		float rawNorm[3] = {0.0f, 1.0f, 0.0f};
+		if (normAcc != nullptr) {
+			cgltf_accessor_read_float(normAcc, vIdx, rawNorm, 3);
+		}
+		float nLen =
+			std::sqrt(rawNorm[0] * rawNorm[0] + rawNorm[1] * rawNorm[1] + rawNorm[2] * rawNorm[2]);
+		if (nLen > 1e-6f) {
+			rawNorm[0] /= nLen;
+			rawNorm[1] /= nLen;
+			rawNorm[2] /= nLen;
+		}
+		v.normal = Math::PackNormal(rawNorm[0], rawNorm[1], rawNorm[2]);
+
+		float rawTangent[4] = {1.0f, 0.0f, 0.0f, 1.0f};
+		if (tangentAcc != nullptr) {
+			cgltf_accessor_read_float(tangentAcc, vIdx, rawTangent, 4);
+		}
+		float tLen = std::sqrt(rawTangent[0] * rawTangent[0] + rawTangent[1] * rawTangent[1] +
+							   rawTangent[2] * rawTangent[2]);
+		if (tLen > 1e-6f) {
+			rawTangent[0] /= tLen;
+			rawTangent[1] /= tLen;
+			rawTangent[2] /= tLen;
+		}
+		v.tangent = Math::PackNormal(rawTangent[0], rawTangent[1], rawTangent[2], rawTangent[3]);
+
+		float uv[2] = {0.0f, 0.0f};
+		if (uvAcc != nullptr) {
+			cgltf_accessor_read_float(uvAcc, vIdx, uv, 2);
+		}
+		v.uv = Math::PackUV(uv[0], uv[1]);
+
+		float rawColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+		if (colorAcc != nullptr) {
+			cgltf_accessor_read_float(colorAcc, vIdx, rawColor, 4);
+		}
+		v.color = Math::PackColor(rawColor[0], rawColor[1], rawColor[2], rawColor[3]);
+
+		uint32_t joints[4] = {0, 0, 0, 0};
+		if (jointsAcc != nullptr) {
+			cgltf_accessor_read_uint(jointsAcc, vIdx, joints, 4);
+		}
+		v.joints[0] = static_cast<uint16_t>(joints[0]);
+		v.joints[1] = static_cast<uint16_t>(joints[1]);
+		v.joints[2] = static_cast<uint16_t>(joints[2]);
+		v.joints[3] = static_cast<uint16_t>(joints[3]);
+
+		float weights[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+		if (weightsAcc != nullptr) {
+			cgltf_accessor_read_float(weightsAcc, vIdx, weights, 4);
+		}
+		v.weights[0] = weights[0];
+		v.weights[1] = weights[1];
+		v.weights[2] = weights[2];
+		v.weights[3] = weights[3];
+	}
+
+	job.vertices = std::move(primVertices);
+
+	if (prim.indices != nullptr) {
+		job.indexCount = static_cast<uint32_t>(prim.indices->count);
+		job.indices.resize(job.indexCount);
+		for (size_t idx = 0; idx < job.indexCount; ++idx) {
+			job.indices[idx] = static_cast<uint32_t>(cgltf_accessor_read_index(prim.indices, idx));
+		}
+	} else {
+		job.indexCount = static_cast<uint32_t>(job.vertices.size());
+		job.indices.resize(job.indexCount);
+		for (uint32_t idx = 0; idx < job.indexCount; ++idx) {
+			job.indices[idx] = idx;
+		}
+	}
+
+	float maxD2 = 0.0f;
+	for (size_t vIdx = 0; vIdx < job.vertices.size(); ++vIdx) {
+		float d2 = job.vertices[vIdx].position[0] * job.vertices[vIdx].position[0] +
+				   job.vertices[vIdx].position[1] * job.vertices[vIdx].position[1] +
+				   job.vertices[vIdx].position[2] * job.vertices[vIdx].position[2];
+		maxD2 = std::max(d2, maxD2);
+	}
+	job.boundingRadius = std::sqrt(maxD2) * 1.2f + 1.0f;
+
+	if (prim.targets_count > 0) {
+		job.activeMorphCount = std::min((uint32_t)prim.targets_count, 4u);
+
+		if (node->weights_count > 0 && node->weights != nullptr) {
+			for (uint32_t w = 0; w < job.activeMorphCount; ++w) {
+				job.defaultMorphWeights[w] = node->weights[w];
+			}
+		} else if (node->mesh->weights != nullptr) {
+			for (uint32_t w = 0; w < job.activeMorphCount; ++w) {
+				job.defaultMorphWeights[w] = node->mesh->weights[w];
+			}
+		}
+
+		auto currentVertexCount = static_cast<uint32_t>(job.vertices.size());
+		job.tempDeltas.resize(static_cast<size_t>(currentVertexCount) * job.activeMorphCount * 4,
+							  0.0f);
+
+		uint32_t deltaPtr = 0;
+		for (uint32_t t = 0; t < job.activeMorphCount; ++t) {
+			cgltf_accessor* targetPosAcc = nullptr;
+			for (cgltf_size a = 0; a < prim.targets[t].attributes_count; ++a) {
+				if (prim.targets[t].attributes[a].type == cgltf_attribute_type_position) {
+					targetPosAcc = prim.targets[t].attributes[a].data;
+					break;
+				}
+			}
+
+			if (targetPosAcc != nullptr) {
+				for (size_t vIdx = 0; vIdx < currentVertexCount; ++vIdx) {
+					float delta[3] = {0.0f, 0.0f, 0.0f};
+					cgltf_accessor_read_float(targetPosAcc, vIdx, delta, 3);
+					job.tempDeltas[deltaPtr++] = delta[0];
+					job.tempDeltas[deltaPtr++] = delta[1];
+					job.tempDeltas[deltaPtr++] = delta[2];
+					job.tempDeltas[deltaPtr++] = 0.0f;
+				}
+			} else {
+				deltaPtr += currentVertexCount * 4;
+			}
+		}
+	}
+
+	// Compile Jolt shapes in parallel (safe & CPU-intensive)
+	float extentsX = (job.localMax[0] - job.localMin[0]) * 0.5f;
+	float extentsY = (job.localMax[1] - job.localMin[1]) * 0.5f;
+	float extentsZ = (job.localMax[2] - job.localMin[2]) * 0.5f;
+	JPH::Vec3 localCenter((job.localMax[0] + job.localMin[0]) * 0.5f,
+						  (job.localMax[1] + job.localMin[1]) * 0.5f,
+						  (job.localMax[2] + job.localMin[2]) * 0.5f);
+
+	JPH::ShapeRefC baseBox = new JPH::BoxShape(JPH::Vec3(extentsX, extentsY, extentsZ));
+	job.boxCollider = new JPH::RotatedTranslatedShape(localCenter, JPH::Quat::sIdentity(), baseBox);
+	job.meshCollider =
+		Physics::CreateMeshShape(job.vertices.data(), static_cast<uint32_t>(job.vertices.size()),
+								 job.indices.data(), job.indexCount);
 }
 
 ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::string_view path) {
@@ -193,7 +443,7 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 	prefab->virtualPath = String256(pathStr);
 	prefab->rawData = data;
 
-	// Decompose all static matrices into standard TRS paths
+	// Decompose static matrices
 	for (cgltf_size idx = 0; idx < data->nodes_count; ++idx) {
 		cgltf_node* node = &data->nodes[idx];
 		if (node->has_matrix) {
@@ -235,8 +485,15 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 		}
 	}
 
-	std::unordered_map<const cgltf_mesh*, std::vector<ModelPart>> meshCache;
-	std::vector<ModelPart> totalParts; // Flat local collector before array marshaling
+	// Identify unique images and primitives
+	std::vector<cgltf_image*> uniqueImages;
+	std::vector<CPUPrimitiveJob> primitiveJobs;
+
+	auto RegisterImage = [&](cgltf_image* img) {
+		if (img && std::find(uniqueImages.begin(), uniqueImages.end(), img) == uniqueImages.end()) {
+			uniqueImages.push_back(img);
+		}
+	};
 
 	for (cgltf_size i = 0; i < data->nodes_count; ++i) {
 		const cgltf_node* node = &data->nodes[i];
@@ -246,19 +503,107 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 
 		float matrix[16];
 		cgltf_node_transform_world(node, matrix);
-
 		JPH::Mat44 nodeTransform(JPH::Vec4(matrix[0], matrix[1], matrix[2], matrix[3]),
 								 JPH::Vec4(matrix[4], matrix[5], matrix[6], matrix[7]),
 								 JPH::Vec4(matrix[8], matrix[9], matrix[10], matrix[11]),
 								 JPH::Vec4(matrix[12], matrix[13], matrix[14], matrix[15]));
 
-		// VRAM Deduplication Check
+		const auto* mesh = node->mesh;
+		for (cgltf_size p = 0; p < mesh->primitives_count; ++p) {
+			CPUPrimitiveJob job{};
+			job.node = node;
+			job.prim = &mesh->primitives[p];
+			job.nodeTransform = nodeTransform;
+			primitiveJobs.push_back(std::move(job));
+
+			// Flag referenced materials & textures for parallel loading
+			const auto& prim = mesh->primitives[p];
+			if (prim.material != nullptr) {
+				if (prim.material->has_pbr_metallic_roughness) {
+					auto& pbr = prim.material->pbr_metallic_roughness;
+					if (pbr.base_color_texture.texture != nullptr) {
+						RegisterImage(pbr.base_color_texture.texture->image);
+					}
+					if (pbr.metallic_roughness_texture.texture != nullptr) {
+						RegisterImage(pbr.metallic_roughness_texture.texture->image);
+					}
+				}
+				if (prim.material->normal_texture.texture != nullptr) {
+					RegisterImage(prim.material->normal_texture.texture->image);
+				}
+			}
+		}
+	}
+
+	// ========================================================================
+	// PHASE 1: CPU-PARALLEL PROCESSING
+	// ========================================================================
+	std::vector<CPUTextureJob> textureJobs(uniqueImages.size());
+	for (size_t i = 0; i < uniqueImages.size(); ++i) {
+		textureJobs[i].image = uniqueImages[i];
+		textureJobs[i].glbPath = rawPath;
+		textureJobs[i].isSRGB = true;
+		for (const auto& primJob : primitiveJobs) {
+			if (primJob.normalImage == uniqueImages[i] || primJob.pbrImage == uniqueImages[i]) {
+				textureJobs[i].isSRGB = false;
+				break;
+			}
+		}
+	}
+
+	// Dispatch Texture Decodes
+	if (!textureJobs.empty()) {
+		TaskSystem::ParallelFor(textureJobs.size(), 1, [&](uint32_t start, uint32_t end, uint32_t) {
+			for (uint32_t i = start; i < end; ++i) {
+				DecodeAndRescaleTexture(textureJobs[i]);
+			}
+		});
+	}
+
+	// Dispatch Geometry & Jolt BVH Compilation
+	auto& pc = GetEngineContext()->GetPhysicsContext();
+	if (!primitiveJobs.empty()) {
+		TaskSystem::ParallelFor(primitiveJobs.size(), 1,
+								[&](uint32_t start, uint32_t end, uint32_t) {
+									for (uint32_t i = start; i < end; ++i) {
+										ProcessCPUPrimitive(primitiveJobs[i], pc);
+									}
+								});
+	}
+
+	// ========================================================================
+	// PHASE 2: SEQUENTIAL GPU UPLOAD
+	// ========================================================================
+	std::unordered_map<cgltf_image*, uint32_t> imageToBindlessIdx;
+	for (auto& texJob : textureJobs) {
+		if (texJob.decodedPixels != nullptr) {
+			uint32_t index =
+				ctx.CreateTexture(texJob.decodedPixels, texJob.width, texJob.height, texJob.isSRGB);
+			if (texJob.wasRescaled) {
+				std::free(texJob.decodedPixels);
+			} else {
+				stbi_image_free(texJob.decodedPixels);
+			}
+			imageToBindlessIdx[texJob.image] = index;
+		} else {
+			imageToBindlessIdx[texJob.image] = 1; // Fallback to white
+		}
+	}
+
+	std::unordered_map<const cgltf_mesh*, std::vector<ModelPart>> meshCache;
+	std::vector<ModelPart> totalParts;
+
+	// Loop back through to construct GPU meshes & materials in correct sequence
+	for (auto& primJob : primitiveJobs) {
+		const auto* node = primJob.node;
+
+		// If already cached, reuse the mesh parts directly
 		auto it = meshCache.find(node->mesh);
 		if (it != meshCache.end()) {
 			for (auto part : it->second) {
 				part.name = node->name ? String64(node->name) : String64("Unnamed");
-				part.localTransform = nodeTransform;
-				part.gltfNode = (cgltf_node*)node;
+				part.localTransform = primJob.nodeTransform;
+				part.gltfNode = const_cast<cgltf_node*>(node);
 				part.gltfSkin = node->skin;
 				part.isSkinned = (node->skin != nullptr);
 
@@ -273,352 +618,66 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 			continue;
 		}
 
-		std::vector<ModelPart> newParts;
+		// Create actual Vulkan buffers
+		BufferHandle vbo = ctx.CreateVertexBuffer(primJob.vertices.data(),
+												  primJob.vertices.size() * sizeof(Vertex));
+		BufferHandle ibo =
+			ctx.CreateIndexBuffer(primJob.indices.data(), primJob.indexCount * sizeof(uint32_t));
 
-		const auto* mesh = node->mesh;
-		for (cgltf_size p = 0; p < mesh->primitives_count; ++p) {
-			const auto& prim = mesh->primitives[p];
+		Mesh subMesh = {.vertexBuffer = vbo,
+						.indexBuffer = ibo,
+						.vertexCount = static_cast<uint32_t>(primJob.vertices.size()),
+						.indexCount = primJob.indexCount};
 
-			cgltf_accessor* posAcc = nullptr;
-			cgltf_accessor* normAcc = nullptr;
-			cgltf_accessor* tangentAcc = nullptr;
-			cgltf_accessor* uvAcc = nullptr;
-			cgltf_accessor* colorAcc = nullptr;
-			cgltf_accessor* jointsAcc = nullptr;
-			cgltf_accessor* weightsAcc = nullptr;
+		ctx.BuildMeshBLAS(subMesh);
 
-			for (cgltf_size a = 0; a < prim.attributes_count; ++a) {
-				const auto& attr = prim.attributes[a];
-				if (attr.type == cgltf_attribute_type_position) {
-					posAcc = attr.data;
-				} else if (attr.type == cgltf_attribute_type_normal) {
-					normAcc = attr.data;
-				} else if (attr.type == cgltf_attribute_type_tangent) {
-					tangentAcc = attr.data;
-				} else if (attr.type == cgltf_attribute_type_texcoord && attr.index == 0) {
-					uvAcc = attr.data;
-				} else if (attr.type == cgltf_attribute_type_color && attr.index == 0) {
-					colorAcc = attr.data; // Matches COLOR_0
-				} else if (attr.type == cgltf_attribute_type_joints && attr.index == 0) {
-					jointsAcc = attr.data; // Matches JOINTS_0
-				} else if (attr.type == cgltf_attribute_type_weights && attr.index == 0) {
-					weightsAcc = attr.data; // Matches WEIGHTS_0
-				}
-			}
-
-			if (posAcc == nullptr) {
-				continue;
-			}
-
-			// ----------------------------------------------------------------
-			// Extract local bounds for Jolt collision mapping [6]
-			// ----------------------------------------------------------------
-			float localMin[3] = {0.0f, 0.0f, 0.0f};
-			float localMax[3] = {0.0f, 0.0f, 0.0f};
-			if (posAcc->has_min) {
-				std::copy(posAcc->min, posAcc->min + 3, localMin);
-			}
-			if (posAcc->has_max) {
-				std::copy(posAcc->max, posAcc->max + 3, localMax);
-			}
-
-			bool doubleSided = false;
-			bool alphaBlend = false;
-			float baseColorFactor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-			float metallicFactor = 1.0f;
-			float roughnessFactor = 1.0f;
-			float alphaCutoff = 0.5f;
-			uint32_t alphaMode = 0;
-
-			if (prim.material != nullptr) {
-				doubleSided = (prim.material->double_sided != 0);
-				if (prim.material->alpha_mode == cgltf_alpha_mode_mask) {
-					alphaMode = 1;
-					alphaCutoff = prim.material->alpha_cutoff;
-				} else if (prim.material->alpha_mode == cgltf_alpha_mode_blend) {
-					// alphaMode = 2;
-					// alphaBlend = true;
-					// Treat alpha blending as masked in deferred G-Buffer rendering to
-					// prevent "glass-like" blending artifacts and restore solid walls.
-
-					alphaMode = 1;
-					alphaCutoff = 0.5f;
-					alphaBlend = false;
-				}
-
-				if (prim.material->has_pbr_metallic_roughness) {
-					const float* c = prim.material->pbr_metallic_roughness.base_color_factor;
-					baseColorFactor[0] = c[0];
-					baseColorFactor[1] = c[1];
-					baseColorFactor[2] = c[2];
-					baseColorFactor[3] = c[3];
-					metallicFactor = prim.material->pbr_metallic_roughness.metallic_factor;
-					roughnessFactor = prim.material->pbr_metallic_roughness.roughness_factor;
-
-					if (prim.material->pbr_metallic_roughness.base_color_texture.texture !=
-						nullptr) {
-						/* stub for now */
-					}
-				}
-			}
-
-			size_t vertexCount = posAcc->count;
-			std::vector<Vertex> primVertices(vertexCount);
-
-			for (size_t vIdx = 0; vIdx < vertexCount; ++vIdx) {
-				Vertex& v = primVertices[vIdx];
-				std::memset(&v, 0, sizeof(Vertex));
-
-				float rawPos[3] = {0.0f, 0.0f, 0.0f};
-				cgltf_accessor_read_float(posAcc, vIdx, rawPos, 3);
-				v.position[0] = rawPos[0];
-				v.position[1] = rawPos[1];
-				v.position[2] = rawPos[2];
-
-				float rawNorm[3] = {0.0f, 1.0f, 0.0f};
-				if (normAcc != nullptr) {
-					cgltf_accessor_read_float(normAcc, vIdx, rawNorm, 3);
-				}
-				float nLen = std::sqrt(rawNorm[0] * rawNorm[0] + rawNorm[1] * rawNorm[1] +
-									   rawNorm[2] * rawNorm[2]);
-				if (nLen > 1e-6f) {
-					rawNorm[0] /= nLen;
-					rawNorm[1] /= nLen;
-					rawNorm[2] /= nLen;
-				}
-				v.normal = Math::PackNormal(rawNorm[0], rawNorm[1], rawNorm[2]);
-
-				float rawTangent[4] = {1.0f, 0.0f, 0.0f, 1.0f};
-				if (tangentAcc != nullptr) {
-					cgltf_accessor_read_float(tangentAcc, vIdx, rawTangent, 4);
-				}
-				float tLen =
-					std::sqrt(rawTangent[0] * rawTangent[0] + rawTangent[1] * rawTangent[1] +
-							  rawTangent[2] * rawTangent[2]);
-				if (tLen > 1e-6f) {
-					rawTangent[0] /= tLen;
-					rawTangent[1] /= tLen;
-					rawTangent[2] /= tLen;
-				}
-				v.tangent =
-					Math::PackNormal(rawTangent[0], rawTangent[1], rawTangent[2], rawTangent[3]);
-
-				float uv[2] = {0.0f, 0.0f};
-				if (uvAcc != nullptr) {
-					cgltf_accessor_read_float(uvAcc, vIdx, uv, 2);
-				}
-				v.uv = Math::PackUV(uv[0], uv[1]);
-
-				float rawColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-				if (colorAcc !=
-					nullptr) { // Removed !hasAlbedoTexture for now to achieve specification
-							   // compliance with models that use vertex colors alongside textures
-					cgltf_accessor_read_float(colorAcc, vIdx, rawColor, 4);
-				}
-				v.color = Math::PackColor(rawColor[0], rawColor[1], rawColor[2], rawColor[3]);
-
-				uint32_t joints[4] = {0, 0, 0, 0};
-				if (jointsAcc != nullptr) {
-					cgltf_accessor_read_uint(jointsAcc, vIdx, joints, 4);
-				}
-				v.joints[0] = static_cast<uint16_t>(joints[0]);
-				v.joints[1] = static_cast<uint16_t>(joints[1]);
-				v.joints[2] = static_cast<uint16_t>(joints[2]);
-				v.joints[3] = static_cast<uint16_t>(joints[3]);
-
-				float weights[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-				if (weightsAcc != nullptr) {
-					cgltf_accessor_read_float(weightsAcc, vIdx, weights, 4);
-				}
-				v.weights[0] = weights[0];
-				v.weights[1] = weights[1];
-				v.weights[2] = weights[2];
-				v.weights[3] = weights[3];
-			}
-
-			// FIX: Do not unroll vertices if we are providing an IBO. Use the original compact VBO.
-			BufferHandle vbo =
-				ctx.CreateVertexBuffer(primVertices.data(), primVertices.size() * sizeof(Vertex));
-
-			uint32_t indexCount = 0;
-			std::vector<uint32_t> indices32;
-
-			if (prim.indices != nullptr) {
-				indexCount = static_cast<uint32_t>(prim.indices->count);
-				indices32.resize(indexCount);
-				for (size_t idx = 0; idx < indexCount; ++idx) {
-					indices32[idx] =
-						static_cast<uint32_t>(cgltf_accessor_read_index(prim.indices, idx));
-				}
-			} else {
-				// FIX: Force non-indexed meshes to be indexed to prevent GPU Culling indirect
-				// command stride corruption
-				indexCount = static_cast<uint32_t>(primVertices.size());
-				indices32.resize(indexCount);
-				for (uint32_t idx = 0; idx < indexCount; ++idx) {
-					indices32[idx] = idx;
-				}
-			}
-
-			BufferHandle ibo =
-				ctx.CreateIndexBuffer(indices32.data(), indexCount * sizeof(uint32_t));
-
-			Mesh subMesh = {.vertexBuffer = vbo,
-							.indexBuffer = ibo,
-							.vertexCount = static_cast<uint32_t>(primVertices.size()),
-							.indexCount = indexCount};
-
-			ctx.BuildMeshBLAS(subMesh);
-
-			Material subMaterial = CreateBasicMaterial(ctx, doubleSided, alphaBlend);
-
-			subMaterial.alphaMode = alphaMode;
-			subMaterial.alphaCutoff = alphaCutoff;
-			subMaterial.metallicFactor = metallicFactor;
-			subMaterial.roughnessFactor = roughnessFactor;
-			subMaterial.baseColorFactor[0] = baseColorFactor[0];
-			subMaterial.baseColorFactor[1] = baseColorFactor[1];
-			subMaterial.baseColorFactor[2] = baseColorFactor[2];
-			subMaterial.baseColorFactor[3] = baseColorFactor[3];
-			subMaterial.albedoIndex = 1;
-
-			if (prim.material != nullptr) {
-				if (prim.material->has_pbr_metallic_roughness) {
-					auto& pbr = prim.material->pbr_metallic_roughness;
-					if ((pbr.base_color_texture.texture != nullptr) &&
-						(pbr.base_color_texture.texture->image != nullptr)) {
-						subMaterial.albedoIndex = LoadEmbeddedTexture(
-							ctx, pbr.base_color_texture.texture->image, rawPath, true);
-					}
-				}
-				if ((prim.material->normal_texture.texture != nullptr) &&
-					(prim.material->normal_texture.texture->image != nullptr)) {
-					subMaterial.normalIndex = LoadEmbeddedTexture(
-						ctx, prim.material->normal_texture.texture->image, rawPath, false);
-				}
-				if (prim.material->has_pbr_metallic_roughness) {
-					auto& pbr = prim.material->pbr_metallic_roughness;
-					if ((pbr.metallic_roughness_texture.texture != nullptr) &&
-						(pbr.metallic_roughness_texture.texture->image != nullptr)) {
-						subMaterial.pbrIndex = LoadEmbeddedTexture(
-							ctx, pbr.metallic_roughness_texture.texture->image, rawPath, false);
-					}
-				}
-			}
-
-			uint32_t morphOffset = 0;
-			uint32_t activeMorphCount = 0;
-			float defaultWeights[4] = {0.0f, 0.0f, 0.0f, 0.0f}; // Default initializer
-
-			if (prim.targets_count > 0) {
-				ZHLN::Log("[Diagnostics] Mesh Part '{}' has {} total morph targets. Engine is "
-						  "keeping {}.",
-						  (node->name != nullptr) ? node->name : "Unnamed Node", prim.targets_count,
-						  std::min((uint32_t)prim.targets_count, 4u));
-				activeMorphCount = std::min((uint32_t)prim.targets_count, 4u);
-
-				if (node->weights_count > 0 && node->weights != nullptr) {
-					for (uint32_t w = 0; w < activeMorphCount; ++w) {
-						defaultWeights[w] = node->weights[w];
-					}
-				} else if (mesh->weights != nullptr) {
-					for (uint32_t w = 0; w < activeMorphCount; ++w) {
-						defaultWeights[w] = mesh->weights[w];
-					}
-				}
-
-				// FIX: Do not use unrolled size. Use the original compact vertex count.
-				auto currentVertexCount = static_cast<uint32_t>(primVertices.size());
-
-				std::vector<float> tempDeltas;
-				tempDeltas.resize(static_cast<size_t>(currentVertexCount) * activeMorphCount * 4,
-								  0.0f);
-
-				uint32_t deltaPtr = 0;
-				for (uint32_t t = 0; t < activeMorphCount; ++t) {
-					cgltf_accessor* targetPosAcc = nullptr;
-					for (cgltf_size a = 0; a < prim.targets[t].attributes_count; ++a) {
-						if (prim.targets[t].attributes[a].type == cgltf_attribute_type_position) {
-							targetPosAcc = prim.targets[t].attributes[a].data;
-							break;
-						}
-					}
-
-					if (targetPosAcc != nullptr) {
-						for (size_t vIdx = 0; vIdx < currentVertexCount; ++vIdx) {
-							float delta[3] = {0.0f, 0.0f, 0.0f};
-							cgltf_accessor_read_float(targetPosAcc, vIdx, delta, 3);
-
-							tempDeltas[deltaPtr++] = delta[0];
-							tempDeltas[deltaPtr++] = delta[1];
-							tempDeltas[deltaPtr++] = delta[2];
-							tempDeltas[deltaPtr++] = 0.0f; // std430 float4 padding
-						}
-					} else {
-						// Skip zeroes if no position target was found
-						deltaPtr += currentVertexCount * 4;
-					}
-				}
-
-				// Expose currentVertexCount to the shader
-				morphOffset = ctx.AllocateMorphDeltas(currentVertexCount * activeMorphCount,
-													  tempDeltas.data());
-			}
-
-			// Calculate the furthest distance from the local pivot (0,0,0) to any actual vertex
-			// This completely bypasses broken/missing glTF min/max metadata.
-			float maxD2 = 0.0f;
-			for (size_t vIdx = 0; vIdx < vertexCount; ++vIdx) {
-				float d2 = primVertices[vIdx].position[0] * primVertices[vIdx].position[0] +
-						   primVertices[vIdx].position[1] * primVertices[vIdx].position[1] +
-						   primVertices[vIdx].position[2] * primVertices[vIdx].position[2];
-				maxD2 = std::max(d2, maxD2);
-			}
-
-			// Build Local Colliders Once
-			JPH::ShapeRefC staticMeshCollider = nullptr;
-			JPH::ShapeRefC boxCollider = nullptr;
-
-			float extentsX = (localMax[0] - localMin[0]) * 0.5f;
-			float extentsY = (localMax[1] - localMin[1]) * 0.5f;
-			float extentsZ = (localMax[2] - localMin[2]) * 0.5f;
-			JPH::Vec3 localCenter((localMax[0] + localMin[0]) * 0.5f,
-								  (localMax[1] + localMin[1]) * 0.5f,
-								  (localMax[2] + localMin[2]) * 0.5f);
-
-			JPH::ShapeRefC baseBox = new JPH::BoxShape(JPH::Vec3(extentsX, extentsY, extentsZ));
-			boxCollider =
-				new JPH::RotatedTranslatedShape(localCenter, JPH::Quat::sIdentity(), baseBox);
-
-			staticMeshCollider = Physics::CreateMeshShape(
-				primVertices.data(), static_cast<uint32_t>(primVertices.size()), indices32.data(),
-				indexCount);
-
-			ModelPart part = {.name = (node->name != nullptr) ? String64(node->name)
-															  : String64("Unnamed"),
-							  .mesh = subMesh,
-							  .defaultMaterial = subMaterial,
-							  .localTransform = nodeTransform,
-							  .jointOffset = 0,
-							  .isSkinned = (node->skin != nullptr),
-							  .gltfNode = (cgltf_node*)node,
-							  .gltfSkin = node->skin,
-							  .morphOffset = morphOffset,
-							  .activeMorphCount = activeMorphCount,
-							  .defaultMorphWeights = {defaultWeights[0], defaultWeights[1],
-													  defaultWeights[2], defaultWeights[3]},
-							  .boundingRadius = std::sqrt(maxD2) * 1.2f + 1.0f,
-							  .localMin = {localMin[0], localMin[1], localMin[2]},
-							  .localMax = {localMax[0], localMax[1], localMax[2]},
-							  .meshCollider = staticMeshCollider,
-							  .boxCollider = boxCollider};
-			newParts.push_back(part);
+		// Allocate morph targets on GPU
+		uint32_t finalMorphOffset = 0;
+		if (primJob.activeMorphCount > 0) {
+			finalMorphOffset = ctx.AllocateMorphDeltas(
+				static_cast<uint32_t>(primJob.vertices.size()) * primJob.activeMorphCount,
+				primJob.tempDeltas.data());
 		}
 
-		meshCache[node->mesh] = newParts;
-		for (auto& p : newParts) {
-			totalParts.push_back(p);
+		// Map Materials and assign Bindless Indices
+		Material subMaterial = CreateBasicMaterial(ctx, primJob.doubleSided, primJob.alphaBlend);
+		subMaterial.alphaMode = primJob.alphaMode;
+		subMaterial.alphaCutoff = primJob.alphaCutoff;
+		subMaterial.metallicFactor = primJob.metallicFactor;
+		subMaterial.roughnessFactor = primJob.roughnessFactor;
+		std::memcpy(subMaterial.baseColorFactor, primJob.baseColorFactor, sizeof(float) * 4);
+
+		if (primJob.albedoImage) {
+			subMaterial.albedoIndex = imageToBindlessIdx[primJob.albedoImage];
 		}
+		if (primJob.normalImage) {
+			subMaterial.normalIndex = imageToBindlessIdx[primJob.normalImage];
+		}
+		if (primJob.pbrImage) {
+			subMaterial.pbrIndex = imageToBindlessIdx[primJob.pbrImage];
+		}
+
+		ModelPart part = {
+			.name = (node->name != nullptr) ? String64(node->name) : String64("Unnamed"),
+			.mesh = subMesh,
+			.defaultMaterial = subMaterial,
+			.localTransform = primJob.nodeTransform,
+			.jointOffset = 0,
+			.isSkinned = (node->skin != nullptr),
+			.gltfNode = const_cast<cgltf_node*>(node),
+			.gltfSkin = node->skin,
+			.morphOffset = finalMorphOffset,
+			.activeMorphCount = primJob.activeMorphCount,
+			.defaultMorphWeights = {primJob.defaultMorphWeights[0], primJob.defaultMorphWeights[1],
+									primJob.defaultMorphWeights[2], primJob.defaultMorphWeights[3]},
+			.boundingRadius = primJob.boundingRadius,
+			.localMin = {primJob.localMin[0], primJob.localMin[1], primJob.localMin[2]},
+			.localMax = {primJob.localMax[0], primJob.localMax[1], primJob.localMax[2]},
+			.meshCollider = primJob.meshCollider,
+			.boxCollider = primJob.boxCollider};
+
+		meshCache[node->mesh].push_back(part);
+		totalParts.push_back(part);
 	}
 
 	prefab->partCount = static_cast<uint32_t>(totalParts.size());
@@ -627,7 +686,7 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 		prefab->parts[i] = totalParts[i];
 	}
 
-	Log("Loaded GLB Prefab: {} ({} unique mesh parts parsed and cached)", path, prefab->partCount);
+	Log("Parallel Loaded GLB Prefab: {} ({} unique mesh parts compiled)", path, prefab->partCount);
 
 	ModelPrefab* result = prefab.release();
 	assetMgr.CachePrefab(hash, result);
@@ -669,44 +728,73 @@ uint32_t InstantiatePrefab(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 		}
 	}
 
+	// ========================================================================
+	// PHASE 1: PARALLEL MATH & COLLIDER PREPARATION
+	// ========================================================================
+	std::vector<PreparedPart> preparedParts(prefab.partCount);
+	JPH::Mat44 baseTransform = Math::CreateTransform(
+		JPH::Vec3(params.position.GetX(), params.position.GetY(), params.position.GetZ()),
+		params.rotation, params.scale);
+
+	TaskSystem::ParallelFor(prefab.partCount, 16, [&](uint32_t start, uint32_t end, uint32_t) {
+		for (uint32_t i = start; i < end; ++i) {
+			const auto& part = prefab.parts[i];
+			auto& prep = preparedParts[i];
+
+			JPH::Mat44 finalLocal = baseTransform * part.localTransform;
+
+			// Extract physical scale
+			prep.scale =
+				JPH::Vec3(finalLocal.GetColumn3(0).Length(), finalLocal.GetColumn3(1).Length(),
+						  finalLocal.GetColumn3(2).Length());
+			prep.maxScale = std::max({prep.scale.GetX(), prep.scale.GetY(), prep.scale.GetZ()});
+			prep.translation = finalLocal.GetTranslation();
+
+			// Orthogonalization & rotation extraction
+			JPH::Vec3 col0 = prep.scale.GetX() > 1e-6f
+								 ? finalLocal.GetColumn3(0) / prep.scale.GetX()
+								 : JPH::Vec3::sAxisX();
+			JPH::Vec3 col1 = prep.scale.GetY() > 1e-6f
+								 ? finalLocal.GetColumn3(1) / prep.scale.GetY()
+								 : JPH::Vec3::sAxisY();
+			JPH::Vec3 col2 = prep.scale.GetZ() > 1e-6f
+								 ? finalLocal.GetColumn3(2) / prep.scale.GetZ()
+								 : JPH::Vec3::sAxisZ();
+
+			JPH::Mat44 rotMat(JPH::Vec4(col0, 0.0f), JPH::Vec4(col1, 0.0f), JPH::Vec4(col2, 0.0f),
+							  JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f));
+			prep.rotation = rotMat.GetQuaternion().Normalized();
+
+			if (params.createPhysics) {
+				JPH::ShapeRefC rawShape =
+					params.useBoxColliders ? part.boxCollider : part.meshCollider;
+				if (rawShape != nullptr) {
+					if (!prep.scale.IsClose(JPH::Vec3::sReplicate(1.0f), 1e-5f)) {
+						prep.shape = new JPH::ScaledShape(rawShape, prep.scale);
+					} else {
+						prep.shape = rawShape;
+					}
+				}
+			}
+		}
+	});
+
+	// ========================================================================
+	// PHASE 2: SEQUENTIAL REGISTRATION
+	// ========================================================================
+	float scaleMult = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
+
 	for (uint32_t i = 0; i < prefab.partCount; ++i) {
 		const auto& part = prefab.parts[i];
+		const auto& prep = preparedParts[i];
 
 		Entity e = reg.Create();
 
-		float scaleMult = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
-
-		JPH::Mat44 baseTransform = Math::CreateTransform(
-			JPH::Vec3(params.position.GetX(), params.position.GetY(), params.position.GetZ()),
-			params.rotation, params.scale);
-		JPH::Mat44 finalLocal = baseTransform * part.localTransform;
-
-		// 1. Mathematically extract the true physical world-space scale from the column lengths
-		JPH::Vec3 totalScale(finalLocal.GetColumn3(0).Length(), finalLocal.GetColumn3(1).Length(),
-							 finalLocal.GetColumn3(2).Length());
-		float nodeMaxScale = std::max({totalScale.GetX(), totalScale.GetY(), totalScale.GetZ()});
-
-		JPH::Vec3 translation = finalLocal.GetTranslation();
-
-		// 2. Safe Orthogonalization: Divide columns by their actual physical lengths to isolate
-		// pure rotation [3]
-		JPH::Vec3 col0 = totalScale.GetX() > 1e-6f ? finalLocal.GetColumn3(0) / totalScale.GetX()
-												   : JPH::Vec3::sAxisX();
-		JPH::Vec3 col1 = totalScale.GetY() > 1e-6f ? finalLocal.GetColumn3(1) / totalScale.GetY()
-												   : JPH::Vec3::sAxisY();
-		JPH::Vec3 col2 = totalScale.GetZ() > 1e-6f ? finalLocal.GetColumn3(2) / totalScale.GetZ()
-												   : JPH::Vec3::sAxisZ();
-
-		JPH::Mat44 rotMat(JPH::Vec4(col0, 0.0f), JPH::Vec4(col1, 0.0f), JPH::Vec4(col2, 0.0f),
-						  JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f));
-		JPH::Quat rotation = rotMat.GetQuaternion().Normalized();
-
 		if (params.createPhysics) {
-			reg.Add(e, TransformComponent{
-						   .position = {translation.GetX(), translation.GetY(), translation.GetZ()},
-						   .rotation = {rotation.GetX(), rotation.GetY(), rotation.GetZ(),
-										rotation.GetW()},
-						   .scale = {totalScale.GetX(), totalScale.GetY(), totalScale.GetZ()}});
+			reg.Add(e, TransformComponent{.position = prep.translation,
+										  .rotation = {prep.rotation.GetX(), prep.rotation.GetY(),
+													   prep.rotation.GetZ(), prep.rotation.GetW()},
+										  .scale = prep.scale});
 
 			reg.Add(e,
 					MeshComponent{
@@ -714,7 +802,7 @@ uint32_t InstantiatePrefab(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 						.material = params.materialOverride.pipeline != PipelineHandle::Invalid
 										? params.materialOverride
 										: part.defaultMaterial,
-						.cullRadius = part.boundingRadius * scaleMult * nodeMaxScale,
+						.cullRadius = part.boundingRadius * scaleMult * prep.maxScale,
 						.localTransform = JPH::Mat44::sIdentity(),
 						.prevTransform = JPH::Mat44::sIdentity(),
 						.worldTransform = JPH::Mat44::sIdentity(),
@@ -728,26 +816,21 @@ uint32_t InstantiatePrefab(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 						.gltfSkin = params.isAnimated ? part.gltfSkin : nullptr});
 			reg.Add(e, NameComponent{.name = part.name});
 
-			JPH::ShapeRefC shape = params.useBoxColliders ? part.boxCollider : part.meshCollider;
-			if (shape != nullptr) {
-				if (!totalScale.IsClose(JPH::Vec3::sReplicate(1.0f), 1e-5f)) {
-					shape = new JPH::ScaledShape(shape, totalScale);
-				}
-
+			if (prep.shape != nullptr) {
 				reg.Add(e, PhysicsComponent{Physics::CreateRigidBody(
-							   pc, shape, JPH::RVec3(translation), rotation,
+							   pc, prep.shape, JPH::RVec3(prep.translation), prep.rotation,
 							   params.isStaticPhysics ? JPH::EMotionType::Static
 													  : JPH::EMotionType::Dynamic,
 							   params.isStaticPhysics ? static_cast<JPH::ObjectLayer>(0)
 													  : static_cast<JPH::ObjectLayer>(1),
 							   0, params.physicsCategory, params.physicsMask)});
-				reg.Add(e, PhysicsStateComponent{.currPosition = JPH::Vec3(translation),
-												 .prevPosition = JPH::Vec3(translation),
-												 .currRotation = rotation,
-												 .prevRotation = rotation});
+				reg.Add(e, PhysicsStateComponent{.currPosition = prep.translation,
+												 .prevPosition = prep.translation,
+												 .currRotation = prep.rotation,
+												 .prevRotation = prep.rotation});
 			}
 		} else {
-			// Decouple parts into local glTF coordinates relative to the prefab root
+			// Hierarchy-based non-physics path
 			JPH::Vec3 nodePos = part.localTransform.GetTranslation();
 			JPH::Vec3 localNodeScale(part.localTransform.GetColumn3(0).Length(),
 									 part.localTransform.GetColumn3(1).Length(),
@@ -765,7 +848,7 @@ uint32_t InstantiatePrefab(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 
 			JPH::Mat44 nRotMat(JPH::Vec4(ncol0, 0.0f), JPH::Vec4(ncol1, 0.0f),
 							   JPH::Vec4(ncol2, 0.0f), JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f));
-			JPH::Quat nodeRot = nRotMat.GetQuaternion();
+			JPH::Quat nodeRot = nRotMat.GetQuaternion().Normalized();
 
 			reg.Add(e,
 					TransformComponent{.position = {nodePos.GetX(), nodePos.GetY(), nodePos.GetZ()},
@@ -802,6 +885,7 @@ uint32_t InstantiatePrefab(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 		}
 		spawnedCount++;
 	}
+
 	return spawnedCount;
 }
 
@@ -916,7 +1000,7 @@ void SetupPlayerRagdoll(RenderContext& rc, PhysicsContext& pc, ECS::Registry& re
 		headPart.enableMotors = true;
 		headPart.maxMotorForce = 250.0f;
 
-		// Invoke the physics module's low-level constructor [3]
+		// 7. Complete final joint and collision topology mapping
 		auto ragdollInstance = Physics::CreateSkeletalRagdoll(pc, skeleton.GetPtr(), parts);
 
 		// Increment the reference count so it is kept alive after our local Ref goes out of scope
@@ -944,4 +1028,5 @@ void SetupPlayerRagdoll(RenderContext& rc, PhysicsContext& pc, ECS::Registry& re
 			"parts.");
 	}
 }
+
 } // namespace ZHLN::AssetFactory

@@ -295,7 +295,8 @@ void ZHLN_DestroyShaderStages(VkDevice device, ZHLN_ShaderStages* ZHLN_RESTRICT 
 // out_stages must point to an array of 2.
 [[nodiscard]] uint32_t
 ZHLN_PopulateShaderStageInfos(const ZHLN_ShaderStages* ZHLN_RESTRICT stages,
-							  VkPipelineShaderStageCreateInfo* ZHLN_RESTRICT out_stages);
+							  VkPipelineShaderStageCreateInfo* ZHLN_RESTRICT out_stages,
+							  const VkSpecializationInfo* spec_info);
 
 /* --- PIPELINE LAYOUT --- */
 
@@ -321,7 +322,7 @@ typedef struct ZHLN_GraphicsPipelineDesc {
 	const VkVertexInputBindingDescription* const ZHLN_RESTRICT vertex_bindings;
 	const VkVertexInputAttributeDescription* const ZHLN_RESTRICT vertex_attributes;
 	const uint32_t vertex_binding_count;
-	const uint32_t vertex_attribute_count;
+	const uint32_t attribute_count;
 
 	const VkFormat* const ZHLN_RESTRICT color_formats;
 	const uint32_t color_format_count;
@@ -333,7 +334,9 @@ typedef struct ZHLN_GraphicsPipelineDesc {
 
 	const bool depth_test;
 	const bool depth_write;
-	const bool blend_enable; // basic src_alpha / one_minus_src_alpha if true
+	const bool blend_enable;   // basic src_alpha / one_minus_src_alpha if true
+	const bool additive_blend; // Explicitly route additive blend configuration
+	const VkSpecializationInfo* specialization_info;
 } ZHLN_GraphicsPipelineDesc;
 
 [[nodiscard]]

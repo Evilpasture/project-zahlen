@@ -168,46 +168,6 @@ using BlitLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texCurrent (
 										Vk::SamplerSlot<1>		 // sampler
 										>;
 
-using PostProcessLayout =
-	Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texAlbedo (Unlit color + emissive)
-						 Vk::SamplerSlot<1>,	  // sampler
-						 Vk::SampledImageSlot<2>, // texDepth
-						 Vk::SampledImageSlot<3>, // texNormalRoughness (Packed Normal, Rough,
-												  // Metal)
-						 Vk::SamplerSlot<4>,	  // pointSampler (Nearest)
-						 Vk::SampledImageSlot<5>, // texEnvMap (Cubemap)
-						 Vk::AccelerationStructureSlot<6>,						  // Hardware TLAS
-						 Vk::StorageBufferSlot<7, VK_SHADER_STAGE_FRAGMENT_BIT>,  // lights SSBO
-						 Vk::UniformSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>,		  // frame UBO
-						 Vk::SampledImageSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,	  // shadowMap
-						 Vk::SamplerSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>,		  // shadowSampler
-						 Vk::SampledImageSlot<11, VK_SHADER_STAGE_FRAGMENT_BIT>,  // ltc_mat
-						 Vk::SampledImageSlot<12, VK_SHADER_STAGE_FRAGMENT_BIT>,  // ltc_amp
-						 Vk::SamplerSlot<13, VK_SHADER_STAGE_FRAGMENT_BIT>,		  // clampSampler
-						 Vk::SampledImageSlot<14, VK_SHADER_STAGE_FRAGMENT_BIT>,  // brdfLUT
-						 Vk::StorageBufferSlot<15, VK_SHADER_STAGE_FRAGMENT_BIT>, // ClusterGrid
-						 Vk::StorageBufferSlot<16, VK_SHADER_STAGE_FRAGMENT_BIT>  // LightIndexList
-						 >;
-
-using PostProcessLayoutNoRT =
-	Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texAlbedo (Unlit color + emissive)
-						 Vk::SamplerSlot<1>,	  // sampler
-						 Vk::SampledImageSlot<2>, // texDepth
-						 Vk::SampledImageSlot<3>, // texNormalRoughness
-						 Vk::SamplerSlot<4>,	  // pointSampler
-						 Vk::SampledImageSlot<5>, // texEnvMap (Cubemap)
-						 Vk::StorageBufferSlot<6, VK_SHADER_STAGE_FRAGMENT_BIT>,  // lights SSBO
-						 Vk::UniformSlot<7, VK_SHADER_STAGE_FRAGMENT_BIT>,		  // frame UBO
-						 Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>,	  // shadowMap
-						 Vk::SamplerSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,		  // shadowSampler
-						 Vk::SampledImageSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>,  // ltc_mat
-						 Vk::SampledImageSlot<11, VK_SHADER_STAGE_FRAGMENT_BIT>,  // ltc_amp
-						 Vk::SamplerSlot<12, VK_SHADER_STAGE_FRAGMENT_BIT>,		  // clampSampler
-						 Vk::SampledImageSlot<13, VK_SHADER_STAGE_FRAGMENT_BIT>,  // brdfLUT
-						 Vk::StorageBufferSlot<15, VK_SHADER_STAGE_FRAGMENT_BIT>, // ClusterGrid
-						 Vk::StorageBufferSlot<16, VK_SHADER_STAGE_FRAGMENT_BIT>  // LightIndexList
-						 >;
-
 using CullingLayout = Vk::DescriptorLayout<Vk::StorageBufferSlot<0>, // g_instances
 										   Vk::StorageBufferSlot<1>	 // g_indirectCommands
 										   >;
@@ -244,6 +204,50 @@ using ClusterCullingLayout =
 						 Vk::StorageBufferSlot<3>, // GlobalCounterBuffer (Atomic)
 						 Vk::UniformSlot<4, VK_SHADER_STAGE_COMPUTE_BIT>,	   // Frame UBO
 						 Vk::StorageBufferSlot<5, VK_SHADER_STAGE_COMPUTE_BIT> // Lights SSBO
+						 >;
+
+using AmbientLayout =
+	Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texAlbedo
+						 Vk::SamplerSlot<1>,	  // sampler
+						 Vk::SampledImageSlot<2>, // texDepth
+						 Vk::SampledImageSlot<3>, // texNormalRoughness
+						 Vk::SamplerSlot<4>,	  // pointSampler
+						 Vk::SampledImageSlot<5>, // texEnvMap
+						 Vk::SampledImageSlot<6, VK_SHADER_STAGE_FRAGMENT_BIT>, // brdfLUT
+						 Vk::SamplerSlot<7, VK_SHADER_STAGE_FRAGMENT_BIT>,		// clampSampler
+						 Vk::UniformSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>		// frame
+						 >;
+
+using LightingLayout = Vk::DescriptorLayout<
+	Vk::SampledImageSlot<0>,								 // texAlbedo
+	Vk::SamplerSlot<1>,										 // sampler
+	Vk::SampledImageSlot<2>,								 // texDepth
+	Vk::SampledImageSlot<3>,								 // texNormalRoughness
+	Vk::StorageBufferSlot<4, VK_SHADER_STAGE_FRAGMENT_BIT>,	 // lights
+	Vk::UniformSlot<5, VK_SHADER_STAGE_FRAGMENT_BIT>,		 // frame
+	Vk::SampledImageSlot<6, VK_SHADER_STAGE_FRAGMENT_BIT>,	 // shadowMap
+	Vk::SamplerSlot<7, VK_SHADER_STAGE_FRAGMENT_BIT>,		 // shadowSampler
+	Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>,	 // ltc_mat
+	Vk::SampledImageSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,	 // ltc_amp
+	Vk::SamplerSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>,		 // clampSampler
+	Vk::StorageBufferSlot<11, VK_SHADER_STAGE_FRAGMENT_BIT>, // clusterGrid
+	Vk::StorageBufferSlot<12, VK_SHADER_STAGE_FRAGMENT_BIT>, // clusterIndexList
+	Vk::SampledImageSlot<13, VK_SHADER_STAGE_FRAGMENT_BIT>	 // texAmbient (Pass 1 Output)
+	>;
+
+using ReflectionLayout =
+	Vk::DescriptorLayout<Vk::SampledImageSlot<0>,						   // texAlbedo
+						 Vk::SamplerSlot<1>,							   // sampler
+						 Vk::SampledImageSlot<2>,						   // texDepth
+						 Vk::SampledImageSlot<3>,						   // texNormalRoughness
+						 Vk::SamplerSlot<4>,							   // pointSampler
+						 Vk::SampledImageSlot<5>,						   // texEnvMap
+						 Vk::AccelerationStructureSlot<6>,				   // TLAS
+						 Vk::UniformSlot<7, VK_SHADER_STAGE_FRAGMENT_BIT>, // frame
+						 Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>, // brdfLUT
+						 Vk::SamplerSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,		// clampSampler
+						 Vk::SampledImageSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT> // texLighting (Pass
+																				// 2 Output)
 						 >;
 
 namespace Stages {
@@ -361,6 +365,8 @@ struct RenderContext::Impl {
 	Vk::RenderTarget<ActiveGBuffer::get<0>()> sceneColor;
 	Vk::RenderTarget<ActiveGBuffer::get<1>()> velocityBuffer;
 	Vk::RenderTarget<ActiveGBuffer::get<2>()> normalRoughnessBuffer;
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> ambientTarget;
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> lightingTarget;
 	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> postProcessTarget;
 	DoubleBuffered<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumBuffers;
 
@@ -373,8 +379,9 @@ struct RenderContext::Impl {
 	uint32_t smaaAreaTexIdx = 0;
 	uint32_t smaaSearchTexIdx = 0;
 
-	Vk::PostProcessPass<PostProcessLayout> postProcessPass;
-	Vk::PostProcessPass<PostProcessLayoutNoRT> postProcessPassNoRT;
+	Vk::PostProcessPass<AmbientLayout> ambientPass;
+	Vk::PostProcessPass<LightingLayout> lightingPass;
+	Vk::PostProcessPass<ReflectionLayout> reflectionPass;
 	Vk::PostProcessPass<BlitLayout> blitPass;
 
 	Vk::RenderTarget<VK_FORMAT_R8G8_UNORM> smaaEdgeTarget;

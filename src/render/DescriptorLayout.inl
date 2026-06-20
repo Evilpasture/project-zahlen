@@ -338,9 +338,10 @@ void DescriptorLayout<Slots...>::WriteSlot(VkDescriptorSet set, Arg&& arg,
 	using T = std::remove_cvref_t<Arg>;
 
 	if constexpr (std::is_same_v<T, SkipWrite>) {
-		static_assert(
-			(Slot::flags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) != 0,
-			"SkipWrite can only be used for slots with the UPDATE_AFTER_BIND flag (Bindless).");
+		static_assert(((Slot::flags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) != 0) ||
+						  ((Slot::flags & VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT) != 0),
+					  "SkipWrite can only be used for slots with the UPDATE_AFTER_BIND or "
+					  "PARTIALLY_BOUND flags.");
 
 		write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 				 .pNext = nullptr,

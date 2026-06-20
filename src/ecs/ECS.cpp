@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "ECS.hpp"
 
 #include "detail/ControlFlow.hpp"
@@ -9,36 +8,38 @@
 #include <Zahlen/Log.hpp>
 #include <cstdlib>
 #include <cstring>
-#include <mutex>
 
 namespace ZHLN::ECS {
 
-static std::mutex s_FamilyMutex;
+static ZHLN::Mutex s_FamilyMutex;
 static uint32_t s_TypeCounter = 0;
 static HashMap<uint32_t, uint32_t> s_HashToDense;
 static HashMap<std::string_view, uint32_t> s_NameToFamilyID;
 
 uint32_t ComponentFamily::ResolveDenseID(uint32_t typeHash) noexcept {
-	std::lock_guard<std::mutex> lock(s_FamilyMutex);
-	const uint32_t* existing = s_HashToDense.Find(typeHash);
-	if (existing != nullptr) {
-		return *existing;
+	ZHLN_LOCK(s_FamilyMutex) {
+		const uint32_t* existing = s_HashToDense.Find(typeHash);
+		if (existing != nullptr) {
+			return *existing;
+		}
+		uint32_t id = s_TypeCounter++;
+		s_HashToDense.Insert(typeHash, id);
+		return id;
 	}
-	uint32_t id = s_TypeCounter++;
-	s_HashToDense.Insert(typeHash, id);
-	return id;
 }
 
 void Registry::MapNameToFamilyID(std::string_view name, uint32_t id) noexcept {
-	std::lock_guard<std::mutex> lock(s_FamilyMutex);
-	s_NameToFamilyID.Insert(name, id);
+	ZHLN_LOCK(s_FamilyMutex) {
+		s_NameToFamilyID.Insert(name, id);
+	}
 }
 
 uint32_t Registry::GetFamilyIDFromName(std::string_view name) noexcept {
-	std::lock_guard<std::mutex> lock(s_FamilyMutex);
-	const uint32_t* id = s_NameToFamilyID.Find(name);
-	if (id) {
-		return *id;
+	ZHLN_LOCK(s_FamilyMutex) {
+		const uint32_t* id = s_NameToFamilyID.Find(name);
+		if (id != nullptr) {
+			return *id;
+		}
 	}
 	return 0xFFFFFFFF; // Invalid
 }
@@ -161,7 +162,6 @@ void SparseSet::Clear() noexcept {
 	_count = 0;
 }
 
-// FFI View Logic remains the same...
 BufferView SparseSet::GetBufferView(const void* owner, const char* format) const noexcept {
 	BufferView view = {};
 	view.buf = _data;

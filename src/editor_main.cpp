@@ -470,6 +470,7 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 			uniforms.invViewProj = unjitteredVp.Inversed();
 			std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
 			std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);
+			uniforms.lightDir[3] = 10.0f;
 			uniforms.lightCount = 0;
 			uniforms.jitterParams = JPH::Vec4(s_AAState.jitterX, s_AAState.jitterY,
 											  s_AAState.prevJitterX, s_AAState.prevJitterY);

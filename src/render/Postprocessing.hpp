@@ -1,31 +1,22 @@
-// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
-// SPDX-License-Identifier: GPL-3.0-or-later
-
+// src/render/Postprocessing.hpp
 #pragma once
 #include "PipelineBuilder.hpp"
 #include "RenderCore.hpp"
 
 namespace ZHLN::Vk {
-// ============================================================================
-// Postprocessing helpers
-// ============================================================================
 
-/**
- * @brief Generic TMP Post-Processing Pipeline Builder & Executor.
- *
- * @tparam LayoutT A ZHLN::Vk::DescriptorLayout defining the bindings.
- */
 template <typename LayoutT> struct PostProcessPass {
 	DescriptorSetLayout descLayout;
 	DescriptorPool pool;
 	ZHLN::DoubleBuffered<VkDescriptorSet> sets;
 	PipelineLayout pipelineLayout;
 	Pipeline pipeline;
+	std::vector<Pipeline> pipelines; // Unified storage for variants
 
 	[[nodiscard]] bool Build(VkDevice device, const ShaderStages& shaders,
 							 std::initializer_list<VkFormat> colorFormats,
 							 const VkPushConstantRange* pushConstants = nullptr,
-							 uint32_t pushCount = 0) noexcept {
+							 uint32_t pushCount = 0, bool additive = false) noexcept {
 		descLayout = LayoutT::CreateLayout(device);
 		pool = LayoutT::CreatePool(device, 2);
 
@@ -39,18 +30,64 @@ template <typename LayoutT> struct PostProcessPass {
 													 .push_constant_count = pushCount};
 		pipelineLayout = PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &pLayoutDesc));
 
-		pipeline = PipelineBuilder{}
-					   .Shaders(shaders)
-					   .Layout(pipelineLayout.Get())
-					   .ColorFormats(colorFormats)
-					   .NoDepth()
-					   .CullNone()
-					   .Build(device);
+		auto builder = PipelineBuilder{}
+						   .Shaders(shaders)
+						   .Layout(pipelineLayout.Get())
+						   .ColorFormats(colorFormats)
+						   .NoDepth()
+						   .CullNone();
 
+		if (additive) {
+			builder.AdditiveBlend();
+		}
+
+		pipeline = builder.Build(device);
 		return pipeline.Valid();
 	}
 
-	// Variadic template forwards safely to your existing LayoutT::Write
+	[[nodiscard]] bool BuildVariants(VkDevice device, const ShaderStages& shaders,
+									 std::initializer_list<VkFormat> colorFormats,
+									 const VkPushConstantRange* pushConstants, uint32_t pushCount,
+									 std::span<const VkSpecializationInfo> specInfos,
+									 bool additive = false) noexcept {
+		descLayout = LayoutT::CreateLayout(device);
+		pool = LayoutT::CreatePool(device, 2);
+
+		sets[0] = LayoutT::Allocate(device, pool.Get(), descLayout.Get());
+		sets[1] = LayoutT::Allocate(device, pool.Get(), descLayout.Get());
+
+		VkDescriptorSetLayout rawLayout = descLayout.Get();
+		const ZHLN_PipelineLayoutDesc pLayoutDesc = {.set_layouts = &rawLayout,
+													 .set_layout_count = 1,
+													 .push_constants = pushConstants,
+													 .push_constant_count = pushCount};
+		pipelineLayout = PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &pLayoutDesc));
+
+		pipelines.clear();
+		pipelines.reserve(specInfos.size());
+
+		for (const auto& spec : specInfos) {
+			auto builder = PipelineBuilder{}
+							   .Shaders(shaders)
+							   .Layout(pipelineLayout.Get())
+							   .ColorFormats(colorFormats)
+							   .Specialization(&spec)
+							   .NoDepth()
+							   .CullNone();
+			if (additive) {
+				builder.AdditiveBlend();
+			}
+
+			Pipeline p = builder.Build(device);
+			if (!p.Valid()) {
+				return false;
+			}
+			pipelines.push_back(std::move(p));
+		}
+
+		return !pipelines.empty();
+	}
+
 	template <typename... Args> void WriteNext(VkDevice device, Args&&... args) noexcept {
 		LayoutT::Write(device, sets.Next(), std::forward<Args>(args)...);
 	}
@@ -60,19 +97,28 @@ template <typename LayoutT> struct PostProcessPass {
 		LayoutT::Write(device, sets[idx], std::forward<Args>(args)...);
 	}
 
-	// Execution with optional Push Constants
 	template <GpuTriviallyCopyable T>
 	void Execute(VkCommandBuffer cmd, const T& pushData,
 				 VkShaderStageFlags stages = VK_SHADER_STAGE_FRAGMENT_BIT) const noexcept {
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
-		VkDescriptorSet set = sets.Next(); // Execute on the frame we just updated
+		VkDescriptorSet set = sets.Next();
 		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout.Get(), 0, 1,
 								&set, 0, nullptr);
 		Push(cmd, pipelineLayout.Get(), stages, pushData);
 		vkCmdDraw(cmd, 3, 1, 0, 0);
 	}
 
-	// Parameter-less execution (e.g., standard Blit)
+	template <GpuTriviallyCopyable T>
+	void ExecuteVariant(VkCommandBuffer cmd, uint32_t variantIdx, const T& pushData,
+						VkShaderStageFlags stages = VK_SHADER_STAGE_FRAGMENT_BIT) const noexcept {
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines[variantIdx].Get());
+		VkDescriptorSet set = sets.Next();
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout.Get(), 0, 1,
+								&set, 0, nullptr);
+		Push(cmd, pipelineLayout.Get(), stages, pushData);
+		vkCmdDraw(cmd, 3, 1, 0, 0);
+	}
+
 	void Execute(VkCommandBuffer cmd) const noexcept {
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
 		VkDescriptorSet set = sets.Next();

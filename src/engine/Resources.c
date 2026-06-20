@@ -76,27 +76,47 @@ const unsigned char ZHLN_Resource_LtcAmpBin[] = {
 };
 const unsigned int ZHLN_Resource_LtcAmpBin_Len = sizeof(ZHLN_Resource_LtcAmpBin);
 
-const unsigned char ZHLN_Resource_PostProcessVertSpv[] = {
-#embed SHADER_POSTPROCESS_HLSL_VS_PATH
+const unsigned char ZHLN_Resource_AmbientVertSpv[] = {
+#embed SHADER_AMBIENT_HLSL_VS_PATH
 };
-const unsigned int ZHLN_Resource_PostProcessVertSpv_Len = sizeof(ZHLN_Resource_PostProcessVertSpv);
+const unsigned int ZHLN_Resource_AmbientVertSpv_Len = sizeof(ZHLN_Resource_AmbientVertSpv);
 
-const unsigned char ZHLN_Resource_PostProcessFragSpv[] = {
-#embed SHADER_POSTPROCESS_HLSL_PS_PATH
+const unsigned char ZHLN_Resource_AmbientFragSpv[] = {
+#embed SHADER_AMBIENT_HLSL_PS_PATH
 };
-const unsigned int ZHLN_Resource_PostProcessFragSpv_Len = sizeof(ZHLN_Resource_PostProcessFragSpv);
+const unsigned int ZHLN_Resource_AmbientFragSpv_Len = sizeof(ZHLN_Resource_AmbientFragSpv);
 
-const unsigned char ZHLN_Resource_PostProcessNortVertSpv[] = {
-#embed SHADER_POSTPROCESS_NORT_HLSL_VS_PATH
+const unsigned char ZHLN_Resource_LightingVertSpv[] = {
+#embed SHADER_LIGHTING_HLSL_VS_PATH
 };
-const unsigned int ZHLN_Resource_PostProcessNortVertSpv_Len =
-	sizeof(ZHLN_Resource_PostProcessNortVertSpv);
+const unsigned int ZHLN_Resource_LightingVertSpv_Len = sizeof(ZHLN_Resource_LightingVertSpv);
 
-const unsigned char ZHLN_Resource_PostProcessNortFragSpv[] = {
-#embed SHADER_POSTPROCESS_NORT_HLSL_PS_PATH
+const unsigned char ZHLN_Resource_LightingFragSpv[] = {
+#embed SHADER_LIGHTING_HLSL_PS_PATH
 };
-const unsigned int ZHLN_Resource_PostProcessNortFragSpv_Len =
-	sizeof(ZHLN_Resource_PostProcessNortFragSpv);
+const unsigned int ZHLN_Resource_LightingFragSpv_Len = sizeof(ZHLN_Resource_LightingFragSpv);
+
+const unsigned char ZHLN_Resource_ReflectionVertSpv[] = {
+#embed SHADER_REFLECTION_HLSL_VS_PATH
+};
+const unsigned int ZHLN_Resource_ReflectionVertSpv_Len = sizeof(ZHLN_Resource_ReflectionVertSpv);
+
+const unsigned char ZHLN_Resource_ReflectionFragSpv[] = {
+#embed SHADER_REFLECTION_HLSL_PS_PATH
+};
+const unsigned int ZHLN_Resource_ReflectionFragSpv_Len = sizeof(ZHLN_Resource_ReflectionFragSpv);
+
+const unsigned char ZHLN_Resource_ReflectionNortVertSpv[] = {
+#embed SHADER_REFLECTION_NORT_HLSL_VS_PATH
+};
+const unsigned int ZHLN_Resource_ReflectionNortVertSpv_Len =
+	sizeof(ZHLN_Resource_ReflectionNortVertSpv);
+
+const unsigned char ZHLN_Resource_ReflectionNortFragSpv[] = {
+#embed SHADER_REFLECTION_NORT_HLSL_PS_PATH
+};
+const unsigned int ZHLN_Resource_ReflectionNortFragSpv_Len =
+	sizeof(ZHLN_Resource_ReflectionNortFragSpv);
 
 const unsigned char ZHLN_Resource_FxaaVertSpv[] = {
 #embed SHADER_FXAA_HLSL_VS_PATH
@@ -148,3 +168,4 @@ const unsigned char ZHLN_Resource_ClusterCullingSpv[] = {
 #embed SHADER_CLUSTER_CULLING_CS_PATH
 };
 const unsigned int ZHLN_Resource_ClusterCullingSpv_Len = sizeof(ZHLN_Resource_ClusterCullingSpv);
+
