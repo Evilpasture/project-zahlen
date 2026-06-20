@@ -25,11 +25,11 @@ using namespace ZHLN;
 
 // locale-safe checks to prevent glibc lookup table crashes
 inline bool IsDigit(char c) noexcept {
-	return std::isdigit(static_cast<unsigned char>(c));
+	return std::isdigit(static_cast<unsigned char>(c)) != 0;
 }
 
 inline bool IsAlpha(char c) noexcept {
-	return std::isalpha(static_cast<unsigned char>(c));
+	return std::isalpha(static_cast<unsigned char>(c)) != 0;
 }
 
 // Decodes standard JSON Unicode escape sequences (\uXXXX) and control characters to UTF-8
@@ -162,8 +162,9 @@ class Lexer {
 		while (true) {
 			Token tok = NextToken();
 			tokens.push_back(tok);
-			if (tok.type == TokenType::EndOfFile)
+			if (tok.type == TokenType::EndOfFile) {
 				break;
+			}
 		}
 		return tokens;
 	}
@@ -177,11 +178,13 @@ class Lexer {
 		return m_cursor >= m_source.length() ? '\0' : m_source[m_cursor];
 	}
 	char Advance() {
-		if (m_cursor >= m_source.length())
+		if (m_cursor >= m_source.length()) {
 			return '\0';
+		}
 		char c = m_source[m_cursor++];
-		if (c == '\n')
+		if (c == '\n') {
 			m_line++;
+		}
 		return c;
 	}
 
@@ -192,8 +195,9 @@ class Lexer {
 				Advance();
 			} else if (c == '/' && m_cursor + 1 < m_source.length() &&
 					   m_source[m_cursor + 1] == '/') {
-				while (Peek() != '\n' && Peek() != '\0')
+				while (Peek() != '\n' && Peek() != '\0') {
 					Advance();
+				}
 			} else {
 				break;
 			}
@@ -243,10 +247,12 @@ class Lexer {
 				return ParseString();
 		}
 
-		if (IsDigit(c) || c == '-')
+		if (IsDigit(c) || c == '-') {
 			return ParseNumber();
-		if (IsAlpha(c))
+		}
+		if (IsAlpha(c)) {
 			return ParseKeyword();
+		}
 
 		Advance();
 		return Token{
@@ -258,8 +264,9 @@ class Lexer {
 		Advance();
 		size_t startIdx = m_cursor;
 		while (Peek() != '"' && Peek() != '\0') {
-			if (Peek() == '\\')
+			if (Peek() == '\\') {
 				Advance();
+			}
 			Advance();
 		}
 		size_t len = m_cursor - startIdx;
@@ -271,14 +278,17 @@ class Lexer {
 	Token ParseNumber() {
 		size_t startLine = m_line;
 		size_t startIdx = m_cursor;
-		if (Peek() == '-')
+		if (Peek() == '-') {
 			Advance();
-		while (IsDigit(Peek()))
+		}
+		while (IsDigit(Peek())) {
 			Advance();
+		}
 		if (Peek() == '.') {
 			Advance();
-			while (IsDigit(Peek()))
+			while (IsDigit(Peek())) {
 				Advance();
+			}
 		}
 		return Token{.type = TokenType::Number,
 					 .value = m_source.substr(startIdx, m_cursor - startIdx),
@@ -288,13 +298,16 @@ class Lexer {
 	Token ParseKeyword() {
 		size_t startLine = m_line;
 		size_t startIdx = m_cursor;
-		while (IsAlpha(Peek()))
+		while (IsAlpha(Peek())) {
 			Advance();
+		}
 		std::string_view word = m_source.substr(startIdx, m_cursor - startIdx);
-		if (word == "true")
+		if (word == "true") {
 			return Token{.type = TokenType::True, .value = word, .line = startLine};
-		if (word == "false")
+		}
+		if (word == "false") {
 			return Token{.type = TokenType::False, .value = word, .line = startLine};
+		}
 		return Token{.type = TokenType::Null, .value = word, .line = startLine};
 	}
 };
@@ -378,20 +391,22 @@ class Parser {
 		while (!Match(TokenType::EndObject)) {
 			Token key = Expect(TokenType::String);
 			Expect(TokenType::Colon);
-			if (key.value == "scene_info")
+			if (key.value == "scene_info") {
 				ParseSceneInfo(manifest);
-			else if (key.value == "meshes")
+			} else if (key.value == "meshes") {
 				ParseMeshes(manifest);
-			else if (key.value == "nodes")
+			} else if (key.value == "nodes") {
 				ParseNodes(manifest);
-			else if (key.value == "lights")
+			} else if (key.value == "lights") {
 				ParseLights(manifest);
-			else if (key.value == "materials")
+			} else if (key.value == "materials") {
 				ParseMaterials(manifest);
-			else
+			} else {
 				SkipValue();
-			if (!Peek(TokenType::EndObject))
+			}
+			if (!Peek(TokenType::EndObject)) {
 				Expect(TokenType::Comma);
+			}
 		}
 		return manifest;
 	}
@@ -436,12 +451,14 @@ class Parser {
 		while (!Match(TokenType::EndObject)) {
 			Token key = Expect(TokenType::String);
 			Expect(TokenType::Colon);
-			if (key.value == "name")
+			if (key.value == "name") {
 				manifest.levelName = DecodeJSONString(Expect(TokenType::String).value);
-			else
+			} else {
 				SkipValue();
-			if (!Peek(TokenType::EndObject))
+			}
+			if (!Peek(TokenType::EndObject)) {
 				Expect(TokenType::Comma);
+			}
 		}
 	}
 
@@ -456,8 +473,9 @@ class Parser {
 				}
 			}
 			manifest.meshes.push_back(mesh);
-			if (!Peek(TokenType::EndArray))
+			if (!Peek(TokenType::EndArray)) {
 				Expect(TokenType::Comma);
+			}
 		}
 	}
 
@@ -467,16 +485,17 @@ class Parser {
 		}
 		Token key = Expect(TokenType::String);
 		Expect(TokenType::Colon);
-		if (key.value == "id")
+		if (key.value == "id") {
 			mesh.id = DecodeJSONString(Expect(TokenType::String).value);
-		else if (key.value == "layout")
+		} else if (key.value == "layout") {
 			mesh.layout = DecodeJSONString(Expect(TokenType::String).value);
-		else if (key.value == "buffers")
+		} else if (key.value == "buffers") {
 			ParseBuffers(mesh);
-		else if (key.value == "primitives")
+		} else if (key.value == "primitives") {
 			ParsePrimitives(mesh);
-		else
+		} else {
 			SkipValue();
+		}
 		return false;
 	}
 
@@ -485,20 +504,22 @@ class Parser {
 		while (!Match(TokenType::EndObject)) {
 			Token key = Expect(TokenType::String);
 			Expect(TokenType::Colon);
-			if (key.value == "bin_file")
+			if (key.value == "bin_file") {
 				mesh.binFile = DecodeJSONString(Expect(TokenType::String).value);
-			else if (key.value == "vertex_buffer")
+			} else if (key.value == "vertex_buffer") {
 				ParseBufferBound(mesh.vertexBuffer);
-			else if (key.value == "index_buffer")
+			} else if (key.value == "index_buffer") {
 				ParseBufferBound(mesh.indexBuffer);
-			else if (key.value == "joints")
+			} else if (key.value == "joints") {
 				ParseBufferBound(mesh.jointsBuffer);
-			else if (key.value == "weights")
+			} else if (key.value == "weights") {
 				ParseBufferBound(mesh.weightsBuffer);
-			else
+			} else {
 				SkipValue();
-			if (!Peek(TokenType::EndObject))
+			}
+			if (!Peek(TokenType::EndObject)) {
 				Expect(TokenType::Comma);
+			}
 		}
 	}
 
@@ -507,14 +528,16 @@ class Parser {
 		while (!Match(TokenType::EndObject)) {
 			Token key = Expect(TokenType::String);
 			Expect(TokenType::Colon);
-			if (key.value == "byte_offset")
+			if (key.value == "byte_offset") {
 				buf.byteOffset = std::stoul(std::string(Expect(TokenType::Number).value));
-			else if (key.value == "byte_length")
+			} else if (key.value == "byte_length") {
 				buf.byteLength = std::stoul(std::string(Expect(TokenType::Number).value));
-			else
+			} else {
 				SkipValue();
-			if (!Peek(TokenType::EndObject))
+			}
+			if (!Peek(TokenType::EndObject)) {
 				Expect(TokenType::Comma);
+			}
 		}
 	}
 
@@ -528,20 +551,24 @@ class Parser {
 				Expect(TokenType::Colon);
 				if (key.value == "material_id") {
 					Token val = Advance();
-					if (val.type == TokenType::String)
+					if (val.type == TokenType::String) {
 						prim.materialId = DecodeJSONString(val.value);
-				} else if (key.value == "index_offset")
+					}
+				} else if (key.value == "index_offset") {
 					prim.indexOffset = std::stoul(std::string(Expect(TokenType::Number).value));
-				else if (key.value == "index_count")
+				} else if (key.value == "index_count") {
 					prim.indexCount = std::stoul(std::string(Expect(TokenType::Number).value));
-				else
+				} else {
 					SkipValue();
-				if (!Peek(TokenType::EndObject))
+				}
+				if (!Peek(TokenType::EndObject)) {
 					Expect(TokenType::Comma);
+				}
 			}
 			mesh.primitives.push_back(prim);
-			if (!Peek(TokenType::EndArray))
+			if (!Peek(TokenType::EndArray)) {
 				Expect(TokenType::Comma);
+			}
 		}
 	}
 
@@ -554,22 +581,25 @@ class Parser {
 			while (!Match(TokenType::EndObject)) {
 				Token key = Expect(TokenType::String);
 				Expect(TokenType::Colon);
-				if (key.value == "id")
+				if (key.value == "id") {
 					node.id = DecodeJSONString(Expect(TokenType::String).value);
-				else if (key.value == "visible")
+				} else if (key.value == "visible") {
 					node.visible = (Advance().type == TokenType::True);
-				else if (key.value == "transform")
+				} else if (key.value == "transform") {
 					ParseTransform(node);
-				else if (key.value == "refs")
+				} else if (key.value == "refs") {
 					ParseRefs(node);
-				else
+				} else {
 					SkipValue();
-				if (!Peek(TokenType::EndObject))
+				}
+				if (!Peek(TokenType::EndObject)) {
 					Expect(TokenType::Comma);
+				}
 			}
 			manifest.nodes.push_back(node);
-			if (!Peek(TokenType::EndArray))
+			if (!Peek(TokenType::EndArray)) {
 				Expect(TokenType::Comma);
+			}
 		}
 	}
 
@@ -582,22 +612,26 @@ class Parser {
 				Expect(TokenType::BeginArray);
 				for (int i = 0; i < 16; ++i) {
 					node.localMatrix[i] = std::stof(std::string(Expect(TokenType::Number).value));
-					if (i < 15)
+					if (i < 15) {
 						Expect(TokenType::Comma);
+					}
 				}
 				Expect(TokenType::EndArray);
 			} else if (key.value == "world") {
 				Expect(TokenType::BeginArray);
 				for (int i = 0; i < 16; ++i) {
 					node.worldMatrix[i] = std::stof(std::string(Expect(TokenType::Number).value));
-					if (i < 15)
+					if (i < 15) {
 						Expect(TokenType::Comma);
+					}
 				}
 				Expect(TokenType::EndArray);
-			} else
+			} else {
 				SkipValue();
-			if (!Peek(TokenType::EndObject))
+			}
+			if (!Peek(TokenType::EndObject)) {
 				Expect(TokenType::Comma);
+			}
 		}
 	}
 
@@ -608,16 +642,20 @@ class Parser {
 			Expect(TokenType::Colon);
 			if (key.value == "mesh_id") {
 				Token val = Advance();
-				if (val.type == TokenType::String)
+				if (val.type == TokenType::String) {
 					node.meshId = DecodeJSONString(val.value);
+				}
 			} else if (key.value == "light_id") {
 				Token val = Advance();
-				if (val.type == TokenType::String)
+				if (val.type == TokenType::String) {
 					node.lightId = DecodeJSONString(val.value);
-			} else
+				}
+			} else {
 				SkipValue();
-			if (!Peek(TokenType::EndObject))
+			}
+			if (!Peek(TokenType::EndObject)) {
 				Expect(TokenType::Comma);
+			}
 		}
 	}
 
@@ -639,18 +677,22 @@ class Parser {
 					Expect(TokenType::BeginArray);
 					for (int i = 0; i < 3; ++i) {
 						l.color[i] = std::stof(std::string(Expect(TokenType::Number).value));
-						if (i < 2)
+						if (i < 2) {
 							Expect(TokenType::Comma);
+						}
 					}
 					Expect(TokenType::EndArray);
-				} else
+				} else {
 					SkipValue();
-				if (!Peek(TokenType::EndObject))
+				}
+				if (!Peek(TokenType::EndObject)) {
 					Expect(TokenType::Comma);
+				}
 			}
 			manifest.lights.push_back(l);
-			if (!Peek(TokenType::EndArray))
+			if (!Peek(TokenType::EndArray)) {
 				Expect(TokenType::Comma);
+			}
 		}
 	}
 
@@ -662,20 +704,23 @@ class Parser {
 			while (!Match(TokenType::EndObject)) {
 				Token key = Expect(TokenType::String);
 				Expect(TokenType::Colon);
-				if (key.value == "id")
+				if (key.value == "id") {
 					mat.id = DecodeJSONString(Expect(TokenType::String).value);
-				else if (key.value == "pbr")
+				} else if (key.value == "pbr") {
 					ParsePBR(mat);
-				else if (key.value == "maps")
+				} else if (key.value == "maps") {
 					ParseMaps(mat);
-				else
+				} else {
 					SkipValue();
-				if (!Peek(TokenType::EndObject))
+				}
+				if (!Peek(TokenType::EndObject)) {
 					Expect(TokenType::Comma);
+				}
 			}
 			manifest.materials.push_back(mat);
-			if (!Peek(TokenType::EndArray))
+			if (!Peek(TokenType::EndArray)) {
 				Expect(TokenType::Comma);
+			}
 		}
 	}
 
@@ -688,28 +733,32 @@ class Parser {
 				Expect(TokenType::BeginArray);
 				for (int i = 0; i < 4; ++i) {
 					mat.baseColor[i] = std::stof(std::string(Expect(TokenType::Number).value));
-					if (i < 3)
+					if (i < 3) {
 						Expect(TokenType::Comma);
+					}
 				}
 				Expect(TokenType::EndArray);
-			} else if (key.value == "metallic")
+			} else if (key.value == "metallic") {
 				mat.metallic = std::stof(std::string(Expect(TokenType::Number).value));
-			else if (key.value == "roughness")
+			} else if (key.value == "roughness") {
 				mat.roughness = std::stof(std::string(Expect(TokenType::Number).value));
-			else if (key.value == "emissive_factor") {
+			} else if (key.value == "emissive_factor") {
 				Expect(TokenType::BeginArray);
 				for (int i = 0; i < 3; ++i) {
 					mat.emissiveFactor[i] = std::stof(std::string(Expect(TokenType::Number).value));
-					if (i < 2)
+					if (i < 2) {
 						Expect(TokenType::Comma);
+					}
 				}
 				Expect(TokenType::EndArray);
 			} else if (key.value == "emissive_strength") {
 				mat.emissiveStrength = std::stof(std::string(Expect(TokenType::Number).value));
-			} else
+			} else {
 				SkipValue();
-			if (!Peek(TokenType::EndObject))
+			}
+			if (!Peek(TokenType::EndObject)) {
 				Expect(TokenType::Comma);
+			}
 		}
 	}
 
@@ -721,16 +770,18 @@ class Parser {
 			Token val = Advance();
 			std::string fileStr =
 				(val.type == TokenType::String) ? DecodeJSONString(val.value) : "";
-			if (key.value == "albedo" && !fileStr.empty())
+			if (key.value == "albedo" && !fileStr.empty()) {
 				mat.albedoMap = fileStr;
-			else if (key.value == "normal" && !fileStr.empty())
+			} else if (key.value == "normal" && !fileStr.empty()) {
 				mat.normalMap = fileStr;
-			else if (key.value == "metallic_roughness" && !fileStr.empty())
+			} else if (key.value == "metallic_roughness" && !fileStr.empty()) {
 				mat.metallicRoughnessMap = fileStr;
-			else if (key.value == "emissive" && !fileStr.empty())
+			} else if (key.value == "emissive" && !fileStr.empty()) {
 				mat.emissiveMap = fileStr;
-			if (!Peek(TokenType::EndObject))
+			}
+			if (!Peek(TokenType::EndObject)) {
 				Expect(TokenType::Comma);
+			}
 		}
 	}
 
@@ -740,19 +791,21 @@ class Parser {
 			int depth = 1;
 			while (depth > 0) {
 				Token t = Advance();
-				if (t.type == TokenType::BeginObject)
+				if (t.type == TokenType::BeginObject) {
 					depth++;
-				else if (t.type == TokenType::EndObject)
+				} else if (t.type == TokenType::EndObject) {
 					depth--;
+				}
 			}
 		} else if (tok.type == TokenType::BeginArray) {
 			int depth = 1;
 			while (depth > 0) {
 				Token t = Advance();
-				if (t.type == TokenType::BeginArray)
+				if (t.type == TokenType::BeginArray) {
 					depth++;
-				else if (t.type == TokenType::EndArray)
+				} else if (t.type == TokenType::EndArray) {
 					depth--;
+				}
 			}
 		}
 	}
@@ -792,8 +845,9 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 	std::vector<PackedImage> packedImages;
 
 	auto getTextureIndex = [&](const std::string& relativeUri) -> int {
-		if (relativeUri.empty())
+		if (relativeUri.empty()) {
 			return -1;
+		}
 
 		for (size_t i = 0; i < packedImages.size(); ++i) {
 			if (packedImages[i].relativeUri == relativeUri) {
@@ -999,7 +1053,7 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 
 		float minB[3] = {1e30f, 1e30f, 1e30f};
 		float maxB[3] = {-1e30f, -1e30f, -1e30f};
-		const float* floatVBO =
+		const auto* floatVBO =
 			reinterpret_cast<const float*>(rawBin.data() + mesh.vertexBuffer.byteOffset);
 		for (uint32_t i = 0; i < vertexCount; ++i) {
 			float x = floatVBO[i * 16 + 0];
@@ -1047,7 +1101,7 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
       "type": "VEC4"}})",
 										vboBViewIdx, vertexCount));
 
-		std::string primsStr = "";
+		std::string primsStr;
 		for (size_t p = 0; p < mesh.primitives.size(); ++p) {
 			const auto& prim = mesh.primitives[p];
 			uint32_t indexAcc = accIndex++;
@@ -1065,7 +1119,7 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 				matGlbIdx = it->second;
 			}
 
-			std::string matStr = "";
+			std::string matStr;
 			if (matGlbIdx != -1) {
 				matStr = std::format(R"(,
           "material": {})",
@@ -1157,7 +1211,7 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 
 	std::vector<std::string> usedExts;
 	if (!manifest.lights.empty()) {
-		usedExts.push_back("\"KHR_lights_punctual\"");
+		usedExts.emplace_back("\"KHR_lights_punctual\"");
 	}
 
 	bool usesEmissiveStrength = false;
@@ -1195,8 +1249,9 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
           "intensity": {}
         }})",
 									 l.id, l.type, l.color[0], l.color[1], l.color[2], l.intensity);
-			if (i < manifest.lights.size() - 1)
+			if (i < manifest.lights.size() - 1) {
 				lightsArr += ",\n";
+			}
 		}
 		rootExtensions += std::format(R"(  "extensions": {{
     "KHR_lights_punctual": {{
@@ -1348,14 +1403,15 @@ int CookMesh(int argc, char** argv) {
 	std::string metaPath, meshId, outPath, inPath;
 	for (int i = 0; i < argc; ++i) {
 		std::string_view arg = argv[i];
-		if (arg == "--meta" && i + 1 < argc)
+		if (arg == "--meta" && i + 1 < argc) {
 			metaPath = argv[++i];
-		else if (arg == "--id" && i + 1 < argc)
+		} else if (arg == "--id" && i + 1 < argc) {
 			meshId = argv[++i];
-		else if (arg == "-i" && i + 1 < argc)
+		} else if (arg == "-i" && i + 1 < argc) {
 			inPath = argv[++i];
-		else if (arg == "-o" && i + 1 < argc)
+		} else if (arg == "-o" && i + 1 < argc) {
 			outPath = argv[++i];
+		}
 	}
 
 	if (metaPath.empty() || meshId.empty() || inPath.empty() || outPath.empty()) {
@@ -1363,8 +1419,9 @@ int CookMesh(int argc, char** argv) {
 	}
 
 	FILE* f = std::fopen(metaPath.c_str(), "rb");
-	if (!f)
+	if (f == nullptr) {
 		return 1;
+	}
 	std::fseek(f, 0, SEEK_END);
 	long size = std::ftell(f);
 	std::fseek(f, 0, SEEK_SET);
@@ -1377,16 +1434,16 @@ int CookMesh(int argc, char** argv) {
 	Compiler::Parser parser(tokens, source);
 	Compiler::IRManifest manifest = parser.Parse();
 
-	auto it = std::find_if(manifest.meshes.begin(), manifest.meshes.end(),
-						   [&](const auto& m) { return m.id == meshId; });
+	auto it = std::ranges::find_if(manifest.meshes, [&](const auto& m) { return m.id == meshId; });
 	if (it == manifest.meshes.end()) {
 		return 1;
 	}
 	const auto& mesh = *it;
 
 	FILE* bf = std::fopen(inPath.c_str(), "rb");
-	if (!bf)
+	if (bf == nullptr) {
 		return 1;
+	}
 	std::fseek(bf, 0, SEEK_END);
 	long binSize = std::ftell(bf);
 	std::fseek(bf, 0, SEEK_SET);
@@ -1470,7 +1527,7 @@ int CookMesh(int argc, char** argv) {
 		dest.color = Math::PackColor(floatVBO[i * 16 + 12], floatVBO[i * 16 + 13],
 									 floatVBO[i * 16 + 14], floatVBO[i * 16 + 15]);
 
-		if (hasSkin && joints && weights) {
+		if (hasSkin && (joints != nullptr) && (weights != nullptr)) {
 			dest.joints[0] = joints[i * 4 + 0];
 			dest.joints[1] = joints[i * 4 + 1];
 			dest.joints[2] = joints[i * 4 + 2];
@@ -1521,8 +1578,9 @@ int CookMesh(int argc, char** argv) {
 
 	fs::create_directories(fs::path(outPath).parent_path());
 	FILE* out = std::fopen(outPath.c_str(), "wb");
-	if (!out)
+	if (out == nullptr) {
 		return 1;
+	}
 
 	std::fwrite(&meshHeader, 1, sizeof(CookedMeshHeader), out);
 	std::fwrite(compiledVertices.data(), 1, vboSize, out);
@@ -1533,13 +1591,15 @@ int CookMesh(int argc, char** argv) {
 }
 
 int CookTexture(int argc, char** argv) {
-	std::string inPath, outPath;
+	std::string inPath;
+	std::string outPath;
 	for (int i = 0; i < argc; ++i) {
 		std::string_view arg = argv[i];
-		if (arg == "-i" && i + 1 < argc)
+		if (arg == "-i" && i + 1 < argc) {
 			inPath = argv[++i];
-		else if (arg == "-o" && i + 1 < argc)
+		} else if (arg == "-o" && i + 1 < argc) {
 			outPath = argv[++i];
+		}
 	}
 
 	if (inPath.empty() || outPath.empty()) {
@@ -1547,8 +1607,9 @@ int CookTexture(int argc, char** argv) {
 	}
 
 	FILE* in = std::fopen(inPath.c_str(), "rb");
-	if (!in)
+	if (in == nullptr) {
 		return 1;
+	}
 	std::fseek(in, 0, SEEK_END);
 	long size = std::ftell(in);
 	std::fseek(in, 0, SEEK_SET);
@@ -1565,13 +1626,15 @@ int CookTexture(int argc, char** argv) {
 }
 
 int PackArchive(int argc, char** argv) {
-	std::string outPath, manifestPath;
+	std::string outPath;
+	std::string manifestPath;
 	for (int i = 0; i < argc; ++i) {
 		std::string_view arg = argv[i];
-		if (arg == "-o" && i + 1 < argc)
+		if (arg == "-o" && i + 1 < argc) {
 			outPath = argv[++i];
-		else if (arg == "-i" && i + 1 < argc)
+		} else if (arg == "-i" && i + 1 < argc) {
 			manifestPath = argv[++i];
+		}
 	}
 
 	if (outPath.empty() || manifestPath.empty()) {
@@ -1583,7 +1646,7 @@ int PackArchive(int argc, char** argv) {
 
 	// Open the output archive file directly
 	FILE* out = std::fopen(outPath.c_str(), "wb");
-	if (!out) {
+	if (out == nullptr) {
 		return 1;
 	}
 
@@ -1597,17 +1660,19 @@ int PackArchive(int argc, char** argv) {
 	std::ifstream ifs(manifestPath);
 	std::string line;
 	while (std::getline(ifs, line)) {
-		if (line.empty() || line[0] == '#')
+		if (line.empty() || line[0] == '#') {
 			continue;
+		}
 		auto pos = line.find('=');
-		if (pos == std::string::npos)
+		if (pos == std::string::npos) {
 			continue;
+		}
 
 		std::string vpath = line.substr(0, pos);
 		std::string rpath = line.substr(pos + 1);
 
 		FILE* f = std::fopen(rpath.c_str(), "rb");
-		if (!f) {
+		if (f == nullptr) {
 			continue;
 		}
 		std::fseek(f, 0, SEEK_END);
@@ -1666,13 +1731,15 @@ int PackArchive(int argc, char** argv) {
 }
 
 int CookGLB(int argc, char** argv) {
-	std::string metaPath, outPath;
+	std::string metaPath;
+	std::string outPath;
 	for (int i = 0; i < argc; ++i) {
 		std::string_view arg = argv[i];
-		if (arg == "--meta" && i + 1 < argc)
+		if (arg == "--meta" && i + 1 < argc) {
 			metaPath = argv[++i];
-		else if (arg == "-o" && i + 1 < argc)
+		} else if (arg == "-o" && i + 1 < argc) {
 			outPath = argv[++i];
+		}
 	}
 
 	if (metaPath.empty() || outPath.empty()) {
@@ -1680,8 +1747,9 @@ int CookGLB(int argc, char** argv) {
 	}
 
 	FILE* f = std::fopen(metaPath.c_str(), "rb");
-	if (!f)
+	if (f == nullptr) {
 		return 1;
+	}
 	std::fseek(f, 0, SEEK_END);
 	long size = std::ftell(f);
 	std::fseek(f, 0, SEEK_SET);
@@ -1707,14 +1775,18 @@ int main(int argc, char** argv) {
 	}
 
 	std::string_view cmd = argv[1];
-	if (cmd == "mesh")
+	if (cmd == "mesh") {
 		return CookMesh(argc - 2, argv + 2);
-	if (cmd == "tex")
+	}
+	if (cmd == "tex") {
 		return CookTexture(argc - 2, argv + 2);
-	if (cmd == "glb")
+	}
+	if (cmd == "glb") {
 		return CookGLB(argc - 2, argv + 2);
-	if (cmd == "pak")
+	}
+	if (cmd == "pak") {
 		return PackArchive(argc - 2, argv + 2);
+	}
 
 	return 1;
 }
