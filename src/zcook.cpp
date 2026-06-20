@@ -330,9 +330,11 @@ struct IRLight {
 	float intensity = 1.0f;
 };
 struct IRMaterial {
-	std::string id, albedoMap, normalMap, metallicRoughnessMap;
+	std::string id, albedoMap, normalMap, metallicRoughnessMap, emissiveMap;
 	float baseColor[4] = {1.f, 1.f, 1.f, 1.f};
 	float metallic = 0.f, roughness = 0.5f;
+	float emissiveFactor[3] = {0.f, 0.f, 0.f};
+	float emissiveStrength = 1.0f;
 };
 struct IRManifest {
 	std::string levelName;
@@ -694,7 +696,17 @@ class Parser {
 				mat.metallic = std::stof(std::string(Expect(TokenType::Number).value));
 			else if (key.value == "roughness")
 				mat.roughness = std::stof(std::string(Expect(TokenType::Number).value));
-			else
+			else if (key.value == "emissive_factor") {
+				Expect(TokenType::BeginArray);
+				for (int i = 0; i < 3; ++i) {
+					mat.emissiveFactor[i] = std::stof(std::string(Expect(TokenType::Number).value));
+					if (i < 2)
+						Expect(TokenType::Comma);
+				}
+				Expect(TokenType::EndArray);
+			} else if (key.value == "emissive_strength") {
+				mat.emissiveStrength = std::stof(std::string(Expect(TokenType::Number).value));
+			} else
 				SkipValue();
 			if (!Peek(TokenType::EndObject))
 				Expect(TokenType::Comma);
@@ -715,6 +727,8 @@ class Parser {
 				mat.normalMap = fileStr;
 			else if (key.value == "metallic_roughness" && !fileStr.empty())
 				mat.metallicRoughnessMap = fileStr;
+			else if (key.value == "emissive" && !fileStr.empty())
+				mat.emissiveMap = fileStr;
 			if (!Peek(TokenType::EndObject))
 				Expect(TokenType::Comma);
 		}
@@ -838,6 +852,7 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 		int albedoTex = getTextureIndex(mat.albedoMap);
 		int normalTex = getTextureIndex(mat.normalMap);
 		int mrTex = getTextureIndex(mat.metallicRoughnessMap);
+		int emissiveTex = getTextureIndex(mat.emissiveMap);
 
 		std::string pbrStr = std::format(R"(      "baseColorFactor": [{}, {}, {}, {}],
       "metallicFactor": {},
@@ -867,6 +882,52 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 			matStr += std::format(R"(,
       "metallicRoughnessTexture": {{"index": {}}})",
 								  mrTex);
+		}
+
+		// A material is only emissive if it has a non-zero strength multiplier
+		bool hasEmissive =
+			(mat.emissiveStrength > 0.f) &&
+			((emissiveTex != -1) || (mat.emissiveFactor[0] > 0.f || mat.emissiveFactor[1] > 0.f ||
+									 mat.emissiveFactor[2] > 0.f));
+
+		if (hasEmissive) {
+			float ef[3] = {mat.emissiveFactor[0], mat.emissiveFactor[1], mat.emissiveFactor[2]};
+			// Fallback to white if texture is present but emissive multiplier is zero
+			if (emissiveTex != -1 && ef[0] == 0.f && ef[1] == 0.f && ef[2] == 0.f) {
+				ef[0] = 1.f;
+				ef[1] = 1.f;
+				ef[2] = 1.f;
+			}
+
+			float strength = mat.emissiveStrength;
+			if (strength < 1.f) {
+				// Fold low emissive strengths directly into the factor
+				ef[0] *= strength;
+				ef[1] *= strength;
+				ef[2] *= strength;
+				strength = 1.f;
+			}
+
+			matStr += std::format(R"(,
+      "emissiveFactor": [{}, {}, {}])",
+								  ef[0], ef[1], ef[2]);
+
+			if (emissiveTex != -1) {
+				matStr += std::format(R"(,
+      "emissiveTexture": {{"index": {}}})",
+									  emissiveTex);
+			}
+
+			// Only write emissive strength extension if strength is actually greater than 1.0
+			if (strength > 1.f) {
+				matStr += std::format(R"(,
+      "extensions": {{
+        "KHR_materials_emissive_strength": {{
+          "emissiveStrength": {}
+        }}
+      }})",
+									  strength);
+			}
 		}
 
 		matStr += R"(
@@ -1094,12 +1155,37 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 		}
 	}
 
-	std::string extensionsUsed = "";
-	std::string rootExtensions = "";
+	std::vector<std::string> usedExts;
+	if (!manifest.lights.empty()) {
+		usedExts.push_back("\"KHR_lights_punctual\"");
+	}
+
+	bool usesEmissiveStrength = false;
+	for (const auto& mat : manifest.materials) {
+		bool hasEmissive = (mat.emissiveStrength > 0.f) &&
+						   ((!mat.emissiveMap.empty()) ||
+							(mat.emissiveFactor[0] > 0.f || mat.emissiveFactor[1] > 0.f ||
+							 mat.emissiveFactor[2] > 0.f));
+		if (hasEmissive && mat.emissiveStrength > 1.f) {
+			usesEmissiveStrength = true;
+			break;
+		}
+	}
+	if (usesEmissiveStrength) {
+		usedExts.emplace_back("\"KHR_materials_emissive_strength\"");
+	}
+
+	std::string extensionsUsed;
+	for (size_t i = 0; i < usedExts.size(); ++i) {
+		extensionsUsed += usedExts[i];
+		if (i < usedExts.size() - 1) {
+			extensionsUsed += ", ";
+		}
+	}
+	std::string rootExtensions;
 
 	if (!manifest.lights.empty()) {
-		extensionsUsed += "\"KHR_lights_punctual\"";
-		std::string lightsArr = "";
+		std::string lightsArr;
 		for (size_t i = 0; i < manifest.lights.size(); ++i) {
 			const auto& l = manifest.lights[i];
 			lightsArr += std::format(R"(        {{

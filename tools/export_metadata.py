@@ -26,13 +26,11 @@ def scalar_to_rgb(t):
     # b = 0.5 + 0.5 * math.cos(2.0 * math.pi * (t + 0.67))
 
     # OPTION B: Pastel Fantasy (Softer, less saturated)
-    # Uncomment below to use:
     r = 0.65 + 0.35 * math.cos(2.0 * math.pi * (t + 0.0))
     g = 0.65 + 0.35 * math.cos(2.0 * math.pi * (t + 0.33))
     b = 0.65 + 0.35 * math.cos(2.0 * math.pi * (t + 0.67))
 
     # OPTION C: Terracotta & Stone (Warm earthy brick/slate tones)
-    # Uncomment below to use:
     # r = 0.50 + 0.20 * math.cos(2.0 * math.pi * (t + 0.0))
     # g = 0.40 + 0.15 * math.cos(2.0 * math.pi * (t + 0.1))
     # b = 0.35 + 0.10 * math.cos(2.0 * math.pi * (t + 0.2))
@@ -186,6 +184,19 @@ def unpack_color_from_datum(datum):
             vals = [vals]
 
     return unpack_color(vals)
+
+
+def get_scalar_value_from_datum(datum):
+    """Extracts a singular scalar float value safely from any generic attribute datum."""
+    if not datum:
+        return 0.0
+    if hasattr(datum, "value"):
+        return float(datum.value)
+    if hasattr(datum, "color"):
+        return float(datum.color[0])
+    if hasattr(datum, "vector"):
+        return float(datum.vector[0])
+    return 0.0
 
 
 def is_valid_color_layer(attr):
@@ -358,8 +369,346 @@ def resolve_base_color(principled):
     return [clean_float(c) for c in base_color_input.default_value]
 
 
+# ============================================================================
+# Shader Tree Compilation Engine (Support for Mix, Add & Transparent Shaders)
+# ============================================================================
+
+
+def find_root_shader_node(material):
+    """Resolves the root shader node driving the active surface output."""
+    if not material.use_nodes or not material.node_tree:
+        return None
+
+    output_node = next(
+        (
+            n
+            for n in material.node_tree.nodes
+            if n.type == "OUTPUT_MATERIAL" and n.is_active_output
+        ),
+        None,
+    )
+    if not output_node:
+        # Fallback to any output material node
+        output_node = next(
+            (n for n in material.node_tree.nodes if n.type == "OUTPUT_MATERIAL"),
+            None,
+        )
+
+    if output_node:
+        surface_input = output_node.inputs.get("Surface")
+        if surface_input and surface_input.is_linked:
+            return surface_input.links[0].from_node
+    return None
+
+
+def evaluate_shader(node, depth=0):
+    """Recursively evaluates the shader node tree up to a defined depth,
+    compiling combined and mixed networks into unified PBR material values.
+    """
+    default_props = {
+        "base_color": [1.0, 1.0, 1.0, 1.0],
+        "metallic": 0.0,
+        "roughness": 0.5,
+        "emissive_factor": [0.0, 0.0, 0.0],
+        "emissive_strength": 0.0,
+        "albedo_img": None,
+        "normal_img": None,
+        "mr_img": None,
+        "emissive_img": None,
+    }
+
+    if depth > 10 or not node:
+        return default_props
+
+    if node.type == "BSDF_PRINCIPLED":
+        base_color = resolve_base_color(node)
+
+        metallic = 0.0
+        metallic_input = node.inputs.get("Metallic")
+        if metallic_input and not metallic_input.is_linked:
+            metallic = clean_float(metallic_input.default_value)
+
+        roughness = 0.5
+        roughness_input = node.inputs.get("Roughness")
+        if roughness_input and not roughness_input.is_linked:
+            roughness = clean_float(roughness_input.default_value)
+
+        em_col = [0.0, 0.0, 0.0]
+        em_col_input = node.inputs.get("Emission Color") or node.inputs.get("Emission")
+        emissive_img = None
+        if em_col_input:
+            if not em_col_input.is_linked:
+                try:
+                    em_col = [clean_float(c) for c in em_col_input.default_value[:3]]
+                except Exception:
+                    pass
+            else:
+                emissive_img = get_texture_node_image_block(em_col_input)
+                em_col = [1.0, 1.0, 1.0]
+
+        em_str = 1.0
+        em_str_input = node.inputs.get("Emission Strength")
+        if em_str_input and not em_str_input.is_linked:
+            em_str = clean_float(em_str_input.default_value)
+
+        albedo_img = get_texture_node_image_block(node.inputs.get("Base Color"))
+        normal_img = get_texture_node_image_block(node.inputs.get("Normal"))
+        mr_img = get_texture_node_image_block(node.inputs.get("Roughness"))
+
+        return {
+            "base_color": base_color,
+            "metallic": metallic,
+            "roughness": roughness,
+            "emissive_factor": em_col,
+            "emissive_strength": em_str,
+            "albedo_img": albedo_img,
+            "normal_img": normal_img,
+            "mr_img": mr_img,
+            "emissive_img": emissive_img,
+        }
+
+    elif node.type == "BSDF_DIFFUSE":
+        col_input = node.inputs.get("Color")
+        base_color = [1.0, 1.0, 1.0, 1.0]
+        albedo_img = None
+        if col_input:
+            if not col_input.is_linked:
+                base_color = [clean_float(c) for c in col_input.default_value]
+            else:
+                albedo_img = get_texture_node_image_block(col_input)
+
+        roughness = 0.5
+        rough_input = node.inputs.get("Roughness")
+        if rough_input and not rough_input.is_linked:
+            roughness = clean_float(rough_input.default_value)
+
+        return {
+            "base_color": base_color,
+            "metallic": 0.0,
+            "roughness": roughness,
+            "emissive_factor": [0.0, 0.0, 0.0],
+            "emissive_strength": 0.0,
+            "albedo_img": albedo_img,
+            "normal_img": get_texture_node_image_block(node.inputs.get("Normal")),
+            "mr_img": None,
+            "emissive_img": None,
+        }
+
+    elif node.type == "BSDF_GLOSSY":
+        col_input = node.inputs.get("Color")
+        base_color = [1.0, 1.0, 1.0, 1.0]
+        albedo_img = None
+        if col_input:
+            if not col_input.is_linked:
+                base_color = [clean_float(c) for c in col_input.default_value]
+            else:
+                albedo_img = get_texture_node_image_block(col_input)
+
+        roughness = 0.5
+        rough_input = node.inputs.get("Roughness")
+        if rough_input and not rough_input.is_linked:
+            roughness = clean_float(rough_input.default_value)
+
+        return {
+            "base_color": base_color,
+            "metallic": 1.0,
+            "roughness": roughness,
+            "emissive_factor": [0.0, 0.0, 0.0],
+            "emissive_strength": 0.0,
+            "albedo_img": albedo_img,
+            "normal_img": get_texture_node_image_block(node.inputs.get("Normal")),
+            "mr_img": None,
+            "emissive_img": None,
+        }
+
+    elif node.type == "BSDF_TRANSPARENT":
+        col_input = node.inputs.get("Color")
+        base_color = [1.0, 1.0, 1.0, 1.0]
+        albedo_img = None
+        if col_input:
+            if not col_input.is_linked:
+                c = col_input.default_value
+                base_color = [
+                    clean_float(c[0]),
+                    clean_float(c[1]),
+                    clean_float(c[2]),
+                    0.0,
+                ]
+            else:
+                albedo_img = get_texture_node_image_block(col_input)
+                base_color = [1.0, 1.0, 1.0, 0.0]
+
+        return {
+            "base_color": base_color,
+            "metallic": 0.0,
+            "roughness": 0.0,
+            "emissive_factor": [0.0, 0.0, 0.0],
+            "emissive_strength": 0.0,
+            "albedo_img": albedo_img,
+            "normal_img": None,
+            "mr_img": None,
+            "emissive_img": None,
+        }
+
+    elif node.type in {"EMISSION", "EMISSION_BSDF"}:
+        col_input = node.inputs.get("Color")
+        em_col = [1.0, 1.0, 1.0]
+        emissive_img = None
+        if col_input:
+            if not col_input.is_linked:
+                em_col = [clean_float(c) for c in col_input.default_value[:3]]
+            else:
+                emissive_img = get_texture_node_image_block(col_input)
+
+        strength = 1.0
+        strength_input = node.inputs.get("Strength")
+        if strength_input and not strength_input.is_linked:
+            strength = clean_float(strength_input.default_value)
+
+        return {
+            "base_color": [0.0, 0.0, 0.0, 1.0],
+            "metallic": 0.0,
+            "roughness": 0.5,
+            "emissive_factor": em_col,
+            "emissive_strength": strength,
+            "albedo_img": None,
+            "normal_img": None,
+            "mr_img": None,
+            "emissive_img": emissive_img,
+        }
+
+    elif node.type == "MIX_SHADER":
+        fac = 0.5
+        fac_input = node.inputs.get("Fac")
+        if fac_input and not fac_input.is_linked:
+            fac = clean_float(fac_input.default_value)
+
+        shader1_node = None
+        shader2_node = None
+
+        s1_input = node.inputs[1] if len(node.inputs) > 1 else None
+        s2_input = node.inputs[2] if len(node.inputs) > 2 else None
+
+        if s1_input and s1_input.is_linked:
+            shader1_node = s1_input.links[0].from_node
+        if s2_input and s2_input.is_linked:
+            shader2_node = s2_input.links[0].from_node
+
+        s1_props = evaluate_shader(shader1_node, depth + 1)
+        s2_props = evaluate_shader(shader2_node, depth + 1)
+
+        w1 = 1.0 - fac
+        w2 = fac
+
+        base_color = [
+            clean_float(s1_props["base_color"][i] * w1 + s2_props["base_color"][i] * w2)
+            for i in range(4)
+        ]
+        metallic = clean_float(s1_props["metallic"] * w1 + s2_props["metallic"] * w2)
+        roughness = clean_float(s1_props["roughness"] * w1 + s2_props["roughness"] * w2)
+        emissive_factor = [
+            clean_float(
+                s1_props["emissive_factor"][i] * w1
+                + s2_props["emissive_factor"][i] * w2
+            )
+            for i in range(3)
+        ]
+        emissive_strength = clean_float(
+            s1_props["emissive_strength"] * w1 + s2_props["emissive_strength"] * w2
+        )
+
+        albedo_img = s2_props["albedo_img"] if fac >= 0.5 else s1_props["albedo_img"]
+        normal_img = s2_props["normal_img"] if fac >= 0.5 else s1_props["normal_img"]
+        mr_img = s2_props["mr_img"] if fac >= 0.5 else s1_props["mr_img"]
+        emissive_img = (
+            s2_props.get("emissive_img") if fac >= 0.5 else s1_props.get("emissive_img")
+        )
+
+        if not albedo_img:
+            albedo_img = (
+                s1_props["albedo_img"] if fac >= 0.5 else s2_props["albedo_img"]
+            )
+        if not normal_img:
+            normal_img = (
+                s1_props["normal_img"] if fac >= 0.5 else s2_props["normal_img"]
+            )
+        if not mr_img:
+            mr_img = s1_props["mr_img"] if fac >= 0.5 else s2_props["mr_img"]
+        if not emissive_img:
+            emissive_img = (
+                s1_props.get("emissive_img")
+                if fac >= 0.5
+                else s2_props.get("emissive_img")
+            )
+
+        return {
+            "base_color": base_color,
+            "metallic": metallic,
+            "roughness": roughness,
+            "emissive_factor": emissive_factor,
+            "emissive_strength": emissive_strength,
+            "albedo_img": albedo_img,
+            "normal_img": normal_img,
+            "mr_img": mr_img,
+            "emissive_img": emissive_img,
+        }
+
+    elif node.type == "ADD_SHADER":
+        shader1_node = None
+        shader2_node = None
+
+        s1_input = node.inputs[0] if len(node.inputs) > 0 else None
+        s2_input = node.inputs[1] if len(node.inputs) > 1 else None
+
+        if s1_input and s1_input.is_linked:
+            shader1_node = s1_input.links[0].from_node
+        if s2_input and s2_input.is_linked:
+            shader2_node = s2_input.links[0].from_node
+
+        s1_props = evaluate_shader(shader1_node, depth + 1)
+        s2_props = evaluate_shader(shader2_node, depth + 1)
+
+        base_color = [
+            clean_float(min(1.0, s1_props["base_color"][i] + s2_props["base_color"][i]))
+            for i in range(4)
+        ]
+        metallic = clean_float(min(1.0, s1_props["metallic"] + s2_props["metallic"]))
+        roughness = clean_float((s1_props["roughness"] + s2_props["roughness"]) * 0.5)
+        emissive_factor = [
+            clean_float(
+                min(
+                    1.0,
+                    s1_props["emissive_factor"][i] + s2_props["emissive_factor"][i],
+                )
+            )
+            for i in range(3)
+        ]
+        emissive_strength = clean_float(
+            s1_props["emissive_strength"] + s2_props["emissive_strength"]
+        )
+
+        albedo_img = s1_props["albedo_img"] or s2_props["albedo_img"]
+        normal_img = s1_props["normal_img"] or s2_props["normal_img"]
+        mr_img = s1_props["mr_img"] or s2_props["mr_img"]
+        emissive_img = s1_props.get("emissive_img") or s2_props.get("emissive_img")
+
+        return {
+            "base_color": base_color,
+            "metallic": metallic,
+            "roughness": roughness,
+            "emissive_factor": emissive_factor,
+            "emissive_strength": emissive_strength,
+            "albedo_img": albedo_img,
+            "normal_img": normal_img,
+            "mr_img": mr_img,
+            "emissive_img": emissive_img,
+        }
+
+    return default_props
+
+
 def extract_materials():
-    """Extracts all active materials, resolving node configurations & viewports."""
+    """Extracts all active materials, compiling dynamic shader node configurations."""
     materials = []
     for mat in bpy.data.materials:
         mat_id = make_id("mat", mat.name)
@@ -379,68 +728,42 @@ def extract_materials():
                 "albedo": None,
                 "normal": None,
                 "metallic_roughness": None,
+                "emissive": None,
                 "ao": None,
             },
             "sampler": {"wrap": "REPEAT", "filter": "LINEAR"},
         }
 
-        if mat.use_nodes and mat.node_tree:
-            principled = next(
-                (n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None
+        root_node = find_root_shader_node(mat)
+        if root_node:
+            props = evaluate_shader(root_node)
+            mat_info["pbr"]["base_color"] = props["base_color"]
+            mat_info["pbr"]["metallic"] = props["metallic"]
+            mat_info["pbr"]["roughness"] = props["roughness"]
+            mat_info["pbr"]["emissive_factor"] = props["emissive_factor"]
+            mat_info["pbr"]["emissive_strength"] = props["emissive_strength"]
+
+            albedo_file = get_image_filename(props["albedo_img"])
+            normal_file = get_image_filename(props["normal_img"])
+            mr_file = get_image_filename(props["mr_img"])
+            emissive_file = get_image_filename(props.get("emissive_img"))
+
+            mat_info["maps"]["albedo"] = (
+                f"textures/{albedo_file}" if albedo_file else None
             )
-            if principled:
-                mat_info["pbr"]["base_color"] = resolve_base_color(principled)
+            mat_info["maps"]["normal"] = (
+                f"textures/{normal_file}" if normal_file else None
+            )
+            mat_info["maps"]["metallic_roughness"] = (
+                f"textures/{mr_file}" if mr_file else None
+            )
+            mat_info["maps"]["emissive"] = (
+                f"textures/{emissive_file}" if emissive_file else None
+            )
+        else:
+            mat_info["pbr"]["base_color"] = default_color
 
-                metallic_input = principled.inputs.get("Metallic")
-                if metallic_input and hasattr(metallic_input, "default_value"):
-                    mat_info["pbr"]["metallic"] = clean_float(
-                        metallic_input.default_value
-                    )
-
-                roughness_input = principled.inputs.get("Roughness")
-                if roughness_input and hasattr(roughness_input, "default_value"):
-                    mat_info["pbr"]["roughness"] = clean_float(
-                        roughness_input.default_value
-                    )
-
-                em_col = principled.inputs.get(
-                    "Emission Color"
-                ) or principled.inputs.get("Emission")
-                em_str = principled.inputs.get("Emission Strength")
-                if em_col and hasattr(em_col, "default_value"):
-                    mat_info["pbr"]["emissive_factor"] = [
-                        clean_float(c) for c in em_col.default_value[:3]
-                    ]
-                if em_str and hasattr(em_str, "default_value"):
-                    mat_info["pbr"]["emissive_strength"] = clean_float(
-                        em_str.default_value
-                    )
-
-                albedo_img = get_texture_node_image_block(
-                    principled.inputs.get("Base Color")
-                )
-                normal_img = get_texture_node_image_block(
-                    principled.inputs.get("Normal")
-                )
-                mr_img = get_texture_node_image_block(
-                    principled.inputs.get("Roughness")
-                )
-
-                albedo_file = get_image_filename(albedo_img)
-                normal_file = get_image_filename(normal_img)
-                mr_file = get_image_filename(mr_img)
-
-                mat_info["maps"]["albedo"] = (
-                    f"textures/{albedo_file}" if albedo_file else None
-                )
-                mat_info["maps"]["normal"] = (
-                    f"textures/{normal_file}" if normal_file else None
-                )
-                mat_info["maps"]["metallic_roughness"] = (
-                    f"textures/{mr_file}" if mr_file else None
-                )
-
-        if not mat_info["maps"]["albedo"]:
+        if not mat_info["maps"]["albedo"] and not root_node:
             mat_info["pbr"]["base_color"] = default_color
 
         materials.append(mat_info)
@@ -491,11 +814,7 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
             candidates_multi = []
             candidates_scalar = []
 
-            print(f"      [Debug] Attributes on '{obj.name}':")
             for attr in mesh_data.attributes:
-                print(
-                    f"        {attr.name!r} domain={attr.domain} type={attr.data_type}"
-                )
                 attr_name_lower = attr.name.lower()
 
                 # Exclude standard built-in geometric/UV attributes from being treated as color layers
@@ -527,25 +846,6 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
                     active_color_attr = named_candidates[0]
                 else:
                     active_color_attr = candidates_multi[0][0]
-
-            # Stage 3: Fall back to 1-channel scalar FLOAT attribute if no multi-channel color exists
-            if not active_color_attr and candidates_scalar:
-                active_color_attr = candidates_scalar[0]
-                print(
-                    f"      [Override] Automatically mapping scalar FLOAT attribute '{active_color_attr.name}' "
-                    f"on '{obj.name}' to greyscale color layer."
-                )
-            if candidates_scalar:
-                print(f"      [Debug Selection] Object: '{obj.name}'")
-                print(
-                    f"        Candidates Multi: {[c[0].name for c in candidates_multi]}"
-                )
-                print(
-                    f"        Candidates Scalar: {[c.name for c in candidates_scalar]}"
-                )
-                print(
-                    f"        Selected Color Attr: '{active_color_attr.name if active_color_attr else None}'"
-                )
 
         has_tangents = False
         try:
@@ -583,6 +883,25 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
 
         for mat_idx, tris in triangles_by_mat.items():
             prim_indices = []
+
+            # Check if active material has a Color Ramp driven by an Attribute node
+            ramp_node = None
+            ramp_attr = None
+            if mat_idx < len(obj.material_slots):
+                prim_mat = obj.material_slots[mat_idx].material
+                if prim_mat and prim_mat.use_nodes:
+                    ramp_node = next(
+                        (n for n in prim_mat.node_tree.nodes if n.type == "VALTORGB"),
+                        None,
+                    )
+                    if ramp_node:
+                        fac_input = ramp_node.inputs.get("Fac")
+                        attr_node = find_upstream_texture_or_attribute(fac_input)
+                        if attr_node and attr_node.type == "ATTRIBUTE":
+                            ramp_attr_name = attr_node.attribute_name
+                            if hasattr(mesh_data, "attributes") and ramp_attr_name:
+                                ramp_attr = mesh_data.attributes.get(ramp_attr_name)
+
             for tri in tris:
                 for loop_idx, v_idx in zip(tri.loops, tri.vertices):
                     co = mesh_data.vertices[v_idx].co
@@ -593,8 +912,21 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
                     )
                     uv = active_uv_layer[loop_idx].uv if active_uv_layer else (0.0, 0.0)
 
+                    # Resolve vertex color
                     color = (1.0, 1.0, 1.0, 1.0)
-                    if active_color_attr and active_color_attr.data:
+                    if ramp_node and ramp_attr and ramp_attr.data:
+                        if ramp_attr.domain == "CORNER":
+                            datum = ramp_attr.data[loop_idx]
+                        elif ramp_attr.domain == "POINT":
+                            datum = ramp_attr.data[v_idx]
+                        elif ramp_attr.domain == "FACE":
+                            datum = ramp_attr.data[tri.polygon_index]
+                        else:
+                            datum = None
+
+                        val = get_scalar_value_from_datum(datum)
+                        color = ramp_node.color_ramp.evaluate(val)
+                    elif active_color_attr and active_color_attr.data:
                         if active_color_attr.domain == "CORNER":
                             datum = active_color_attr.data[loop_idx]
                         elif active_color_attr.domain == "POINT":
