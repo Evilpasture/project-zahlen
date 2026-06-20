@@ -100,7 +100,7 @@ void WriteBenchmarkLog(std::vector<double> frameTimes) {
 	double p999 = frameTimes[static_cast<size_t>(frameTimes.size() * 0.999)] * 1000.0;
 
 	FILE* f = std::fopen("benchmark.log", "w");
-	if (f) {
+	if (f != nullptr) {
 		std::println(f, "=========================================");
 		std::println(f, "         ZAHLEN BENCHMARK REPORT         ");
 		std::println(f, "=========================================");
