@@ -67,6 +67,7 @@ struct alignas(16) InstanceData {
 
 	alignas(16) std::array<float, 4> morphWeights;
 	alignas(16) std::array<float, 4> baseColorFactor;
+	alignas(16) std::array<float, 4> emissiveFactor;
 };
 
 struct ClusterBounds {
@@ -83,7 +84,7 @@ struct ObjectConstants {
 	uint32_t isShadowPass;
 };
 static_assert(sizeof(ObjectConstants) == 8, "ObjectConstants must match HLSL alignment.");
-static_assert(sizeof(InstanceData) == 240, "InstanceData must match HLSL alignment.");
+static_assert(sizeof(InstanceData) == 256, "InstanceData must match HLSL alignment.");
 // --- Opaque Resource Handles ---
 // These abstract away Vulkan objects completely.
 // NOLINTBEGIN(performance-enum-size)
@@ -155,6 +156,7 @@ struct Material {
 	uint32_t pbrIndex = 0;		// Default to Solid Black (Index 0)
 	uint32_t emissiveIndex = 0; // Default to Solid Black (Index 0)
 	float baseColorFactor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+	float emissiveFactor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 	float metallicFactor = 1.0f;
 	float roughnessFactor = 1.0f;
 	float alphaCutoff = 0.5f;

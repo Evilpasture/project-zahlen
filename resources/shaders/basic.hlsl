@@ -29,6 +29,7 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	uint pbrIdx = inst.pbrIdx;
 	uint emissiveIdx = inst.emissiveIdx;
 	float4 baseColorFactor = inst.baseColorFactor;
+	float4 emissiveFactor = inst.emissiveFactor;
 	float metallicFactor = inst.metallicFactor;
 	float roughnessFactor = inst.roughnessFactor;
 	float alphaCutoff = inst.alphaCutoff;
@@ -75,6 +76,7 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 		output.pos = worldPos;
 		output.uv = localUV;
 		output.baseColorFactor = baseColorFactor;
+		output.emissiveFactor = emissiveFactor;
 		output.pbrFactors = float3(metallicFactor, roughnessFactor, alphaCutoff);
 		output.alphaMode = alphaMode;
 		output.materialIndices = uint4(albedoIdx, 0, 0, 0);
@@ -109,6 +111,7 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	output.color = localColor;
 	output.materialIndices = uint4(albedoIdx, normalIdx, pbrIdx, emissiveIdx);
 	output.baseColorFactor = baseColorFactor;
+	output.emissiveFactor = emissiveFactor;
 	output.pbrFactors = float3(metallicFactor, roughnessFactor, alphaCutoff);
 	output.alphaMode = alphaMode;
 	return output;
@@ -210,12 +213,15 @@ PSOutput PSMain(VSOutput input) {
 	float4 albedo =
 		globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
 
+	// --- GRAB EMISSIVE MAP AND MULTIPLY BY GLTF FACTOR ---
+	float3 emissiveMap = globalTextures[indices.w].Sample(defaultSampler, input.uv).rgb;
+	float3 emissive = emissiveMap * input.emissiveFactor.rgb;
+
 	if (alphaMode == 1 && albedo.a < alphaCutoff) {
 		discard;
 	}
 
 	float4 pbr = globalTextures[indices.z].Sample(defaultSampler, input.uv);
-	float3 emissive = globalTextures[indices.w].Sample(defaultSampler, input.uv).rgb;
 
 	float roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.045f);
 	float metallic = (indices.z == 0 ? 1.0f : pbr.b) * metallicFactor;

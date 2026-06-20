@@ -322,6 +322,7 @@ struct DrawCommand {
 	uint32_t alphaMode;
 	uint32_t jointOffset;
 	std::array<float, 4> baseColorFactor;
+	std::array<float, 4> emissiveFactor;
 	uint32_t morphOffset;
 	uint32_t activeMorphCount;
 	std::array<float, 4> morphWeights;

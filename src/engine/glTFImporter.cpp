@@ -24,6 +24,7 @@
 #include <string>
 #include <threading/TaskSystem.hpp>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace ZHLN::AssetFactory {
@@ -68,6 +69,8 @@ struct CPUPrimitiveJob {
 	cgltf_image* albedoImage = nullptr;
 	cgltf_image* normalImage = nullptr;
 	cgltf_image* pbrImage = nullptr;
+	cgltf_image* emissiveImage = nullptr;
+	float emissiveFactor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 
 	uint32_t morphOffset = 0;
 	uint32_t activeMorphCount = 0;
@@ -111,7 +114,6 @@ static void DecodeAndRescaleTexture(CPUTextureJob& job) {
 	auto h = static_cast<uint32_t>(job.height);
 
 	constexpr uint32_t MAX_TEX_DIM = 1024;
-	bool wasRescaled = false;
 
 	if (w > MAX_TEX_DIM || h > MAX_TEX_DIM) {
 		uint32_t targetW = w;
@@ -141,7 +143,10 @@ static void DecodeAndRescaleTexture(CPUTextureJob& job) {
 							uint32_t srcX = x * 2;
 							uint32_t srcY = y * 2;
 
-							uint32_t r = 0, g = 0, b = 0, a = 0;
+							uint32_t r = 0;
+							uint32_t g = 0;
+							uint32_t b = 0;
+							uint32_t a = 0;
 							for (uint32_t dy = 0; dy < 2; ++dy) {
 								for (uint32_t dx = 0; dx < 2; ++dx) {
 									auto srcIdx = static_cast<size_t>(((srcY + dy) * currentW) +
@@ -240,6 +245,18 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job, PhysicsContext& pc) {
 			job.alphaBlend = false;
 		}
 
+		job.emissiveFactor[0] = prim.material->emissive_factor[0];
+		job.emissiveFactor[1] = prim.material->emissive_factor[1];
+		job.emissiveFactor[2] = prim.material->emissive_factor[2];
+
+		// Apply KHR_materials_emissive_strength extension if the glTF uses it
+		if (prim.material->has_emissive_strength) {
+			float strength = prim.material->emissive_strength.emissive_strength;
+			job.emissiveFactor[0] *= strength;
+			job.emissiveFactor[1] *= strength;
+			job.emissiveFactor[2] *= strength;
+		}
+
 		if (prim.material->has_pbr_metallic_roughness) {
 			const float* c = prim.material->pbr_metallic_roughness.base_color_factor;
 			job.baseColorFactor[0] = c[0];
@@ -307,7 +324,8 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job, PhysicsContext& pc) {
 		if (uvAcc != nullptr) {
 			cgltf_accessor_read_float(uvAcc, vIdx, uv, 2);
 		}
-		v.uv = Math::PackUV(uv[0], uv[1]);
+		// Invert the V axis (uv[1]) for glTF conformance
+		v.uv = Math::PackUV(uv[0], 1.0f - uv[1]);
 
 		float rawColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
 		if (colorAcc != nullptr) {
@@ -351,10 +369,10 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job, PhysicsContext& pc) {
 	}
 
 	float maxD2 = 0.0f;
-	for (size_t vIdx = 0; vIdx < job.vertices.size(); ++vIdx) {
-		float d2 = job.vertices[vIdx].position[0] * job.vertices[vIdx].position[0] +
-				   job.vertices[vIdx].position[1] * job.vertices[vIdx].position[1] +
-				   job.vertices[vIdx].position[2] * job.vertices[vIdx].position[2];
+	for (auto& vertice : job.vertices) {
+		float d2 = vertice.position[0] * vertice.position[0] +
+				   vertice.position[1] * vertice.position[1] +
+				   vertice.position[2] * vertice.position[2];
 		maxD2 = std::max(d2, maxD2);
 	}
 	job.boundingRadius = std::sqrt(maxD2) * 1.2f + 1.0f;
@@ -514,24 +532,31 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 			job.node = node;
 			job.prim = &mesh->primitives[p];
 			job.nodeTransform = nodeTransform;
-			primitiveJobs.push_back(std::move(job));
 
-			// Flag referenced materials & textures for parallel loading
+			// --- SYNCHRONOUSLY REGISTER TEXTURES TO FIX sRGB RACE CONDITION ---
 			const auto& prim = mesh->primitives[p];
 			if (prim.material != nullptr) {
 				if (prim.material->has_pbr_metallic_roughness) {
 					auto& pbr = prim.material->pbr_metallic_roughness;
 					if (pbr.base_color_texture.texture != nullptr) {
-						RegisterImage(pbr.base_color_texture.texture->image);
+						job.albedoImage = pbr.base_color_texture.texture->image;
+						RegisterImage(job.albedoImage);
 					}
 					if (pbr.metallic_roughness_texture.texture != nullptr) {
-						RegisterImage(pbr.metallic_roughness_texture.texture->image);
+						job.pbrImage = pbr.metallic_roughness_texture.texture->image;
+						RegisterImage(job.pbrImage);
 					}
 				}
 				if (prim.material->normal_texture.texture != nullptr) {
-					RegisterImage(prim.material->normal_texture.texture->image);
+					job.normalImage = prim.material->normal_texture.texture->image;
+					RegisterImage(job.normalImage);
+				}
+				if (prim.material->emissive_texture.texture != nullptr) {
+					job.emissiveImage = prim.material->emissive_texture.texture->image;
+					RegisterImage(job.emissiveImage);
 				}
 			}
+			primitiveJobs.push_back(std::move(job));
 		}
 	}
 
@@ -544,6 +569,7 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 		textureJobs[i].glbPath = rawPath;
 		textureJobs[i].isSRGB = true;
 		for (const auto& primJob : primitiveJobs) {
+			// Emissive maps ARE sRGB. Only Normal and MetallicRoughness are linear!
 			if (primJob.normalImage == uniqueImages[i] || primJob.pbrImage == uniqueImages[i]) {
 				textureJobs[i].isSRGB = false;
 				break;
@@ -592,14 +618,21 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 
 	std::unordered_map<const cgltf_mesh*, std::vector<ModelPart>> meshCache;
 	std::vector<ModelPart> totalParts;
+	std::unordered_set<const cgltf_node*> resolvedNodes; // <--- ADD THIS
 
 	// Loop back through to construct GPU meshes & materials in correct sequence
 	for (auto& primJob : primitiveJobs) {
 		const auto* node = primJob.node;
 
-		// If already cached, reuse the mesh parts directly
+		// If this node was already fully instanced from the cache, skip its remaining primitive
+		// jobs
+		if (resolvedNodes.contains(node)) {
+			continue;
+		}
+
+		// Only re-use cached geometry if ALL primitives for this mesh have finished compiling
 		auto it = meshCache.find(node->mesh);
-		if (it != meshCache.end()) {
+		if (it != meshCache.end() && it->second.size() == node->mesh->primitives_count) {
 			for (auto part : it->second) {
 				part.name = node->name ? String64(node->name) : String64("Unnamed");
 				part.localTransform = primJob.nodeTransform;
@@ -615,6 +648,7 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 				}
 				totalParts.push_back(part);
 			}
+			resolvedNodes.insert(node); // Mark this node as fully resolved
 			continue;
 		}
 
@@ -647,15 +681,19 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 		subMaterial.roughnessFactor = primJob.roughnessFactor;
 		std::memcpy(subMaterial.baseColorFactor, primJob.baseColorFactor, sizeof(float) * 4);
 
-		if (primJob.albedoImage) {
+		if (primJob.albedoImage != nullptr) {
 			subMaterial.albedoIndex = imageToBindlessIdx[primJob.albedoImage];
 		}
-		if (primJob.normalImage) {
+		if (primJob.normalImage != nullptr) {
 			subMaterial.normalIndex = imageToBindlessIdx[primJob.normalImage];
 		}
-		if (primJob.pbrImage) {
+		if (primJob.pbrImage != nullptr) {
 			subMaterial.pbrIndex = imageToBindlessIdx[primJob.pbrImage];
 		}
+		if (primJob.emissiveImage != nullptr) {
+			subMaterial.emissiveIndex = imageToBindlessIdx[primJob.emissiveImage];
+		}
+		std::memcpy(subMaterial.emissiveFactor, primJob.emissiveFactor, sizeof(float) * 4);
 
 		ModelPart part = {
 			.name = (node->name != nullptr) ? String64(node->name) : String64("Unnamed"),
@@ -668,8 +706,8 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 			.gltfSkin = node->skin,
 			.morphOffset = finalMorphOffset,
 			.activeMorphCount = primJob.activeMorphCount,
-			.defaultMorphWeights = {primJob.defaultMorphWeights[0], primJob.defaultMorphWeights[1],
-									primJob.defaultMorphWeights[2], primJob.defaultMorphWeights[3]},
+			.defaultMorphWeights = {part.defaultMorphWeights[0], part.defaultMorphWeights[1],
+									part.defaultMorphWeights[2], part.defaultMorphWeights[3]},
 			.boundingRadius = primJob.boundingRadius,
 			.localMin = {primJob.localMin[0], primJob.localMin[1], primJob.localMin[2]},
 			.localMax = {primJob.localMax[0], primJob.localMax[1], primJob.localMax[2]},
@@ -678,6 +716,11 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 
 		meshCache[node->mesh].push_back(part);
 		totalParts.push_back(part);
+
+		// If we've finished compiling all primitives of this node, mark it as resolved
+		if (meshCache[node->mesh].size() == node->mesh->primitives_count) {
+			resolvedNodes.insert(node);
+		}
 	}
 
 	prefab->partCount = static_cast<uint32_t>(totalParts.size());

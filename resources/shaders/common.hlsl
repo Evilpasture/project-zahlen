@@ -69,6 +69,7 @@ struct InstanceData {
 
 	float4 morphWeights;
 	float4 baseColorFactor;
+	float4 emissiveFactor;
 };
 
 struct ObjectConstants {
@@ -168,6 +169,7 @@ struct VSOutput {
 	nointerpolation float4 baseColorFactor : TEXCOORD5;
 	nointerpolation float3 pbrFactors : TEXCOORD6;
 	nointerpolation uint alphaMode : TEXCOORD7;
+	nointerpolation float4 emissiveFactor : TEXCOORD8;
 };
 
 struct PSOutput {

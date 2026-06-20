@@ -78,6 +78,7 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	output.baseColorFactor = baseColorFactor;
 	output.pbrFactors = float3(metallicFactor, roughnessFactor, alphaCutoff);
 	output.alphaMode = alphaMode;
+	output.emissiveFactor = inst.emissiveFactor;
 
 	return output;
 }

@@ -336,7 +336,6 @@ function(compile_hlsl SHADER_PATH ENTRY STAGE OUTPUT_VAR)
 
     get_filename_component(FILE_NAME ${SHADER_PATH} NAME)
     
-    # NEW: Appending .${OUTPUT_VAR} makes the output filename unique for different build configurations
     set(OUTPUT_SPV "${CMAKE_CURRENT_BINARY_DIR}/generated_shaders/${FILE_NAME}.${ENTRY}.${OUTPUT_VAR}.spv")
 
     set(EXTRA_ARGS ${ARGN})
@@ -344,7 +343,7 @@ function(compile_hlsl SHADER_PATH ENTRY STAGE OUTPUT_VAR)
     add_custom_command(
         OUTPUT ${OUTPUT_SPV}
         COMMAND ${DXC_EXECUTABLE} -T ${STAGE} -E ${ENTRY} -spirv -fspv-target-env=vulkan1.3 -I "${CMAKE_SOURCE_DIR}/resources/shaders" -I "${CMAKE_SOURCE_DIR}/include" ${EXTRA_ARGS} ${SHADER_PATH} -Fo ${OUTPUT_SPV}
-        DEPENDS ${SHADER_PATH} "${CMAKE_SOURCE_DIR}/include/SharedMath.hpp"
+        DEPENDS ${SHADER_PATH} "${CMAKE_SOURCE_DIR}/include/SharedMath.hpp" "${CMAKE_SOURCE_DIR}/resources/shaders/common.hlsl"
         COMMENT "DXC: Generating ${FILE_NAME}.${ENTRY}.${OUTPUT_VAR}.spv"
         VERBATIM
     )

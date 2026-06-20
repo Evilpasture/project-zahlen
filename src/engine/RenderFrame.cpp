@@ -1011,6 +1011,7 @@ RenderResult RenderContext::EndFrame() noexcept {
 				._pad = {},
 				.morphWeights = cmdData.morphWeights,
 				.baseColorFactor = cmdData.baseColorFactor,
+				.emissiveFactor = cmdData.emissiveFactor,
 
 			};
 		}
@@ -1304,6 +1305,8 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 		.jointOffset = params.jointOffset,
 		.baseColorFactor = {material.baseColorFactor[0], material.baseColorFactor[1],
 							material.baseColorFactor[2], material.baseColorFactor[3]},
+		.emissiveFactor = {material.emissiveFactor[0], material.emissiveFactor[1],
+						   material.emissiveFactor[2], material.emissiveFactor[3]},
 		.morphOffset = params.morphOffset,
 		.activeMorphCount = params.activeMorphCount,
 		.morphWeights = {(params.morphWeights != nullptr) ? params.morphWeights[0] : 0.0f,
