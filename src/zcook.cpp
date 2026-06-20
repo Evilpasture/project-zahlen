@@ -1492,24 +1492,21 @@ int PackArchive(int argc, char** argv) {
 		return 1;
 	}
 
+	// Ensure the output directory exists
+	fs::create_directories(fs::path(outPath).parent_path());
+
+	// Open the output archive file directly
+	FILE* out = std::fopen(outPath.c_str(), "wb");
+	if (!out) {
+		return 1;
+	}
+
+	// Step 1: Write a dummy PakHeader to reserve space at the start of the file
+	PakHeader dummyHeader{};
+	std::fwrite(&dummyHeader, 1, sizeof(PakHeader), out);
+
 	std::vector<PakEntry> entries;
-	std::vector<char> payloadData;
-
-	auto appendToPak = [&](std::string_view virtualPath, const void* data, size_t size) {
-		size_t padding = (16 - (payloadData.size() % 16)) % 16;
-		payloadData.insert(payloadData.end(), padding, 0);
-
-		PakEntry entry{};
-		entry.pathHash = HashAssetPath(virtualPath);
-		entry.offset = sizeof(PakHeader) + payloadData.size();
-		entry.compressedSize = size;
-		entry.uncompressedSize = size;
-		entry.compression = 0;
-
-		entries.push_back(entry);
-		const char* bytes = reinterpret_cast<const char*>(data);
-		payloadData.insert(payloadData.end(), bytes, bytes + size);
-	};
+	uint64_t currentPayloadSize = 0; // Tracks payload offset relative to payload start
 
 	std::ifstream ifs(manifestPath);
 	std::string line;
@@ -1530,29 +1527,55 @@ int PackArchive(int argc, char** argv) {
 		std::fseek(f, 0, SEEK_END);
 		long size = std::ftell(f);
 		std::fseek(f, 0, SEEK_SET);
-		std::vector<char> fileData(size);
-		std::fread(fileData.data(), 1, size, f);
-		std::fclose(f);
 
-		appendToPak(vpath, fileData.data(), size);
+		// Step 2: Align to 16-byte boundary
+		size_t padding = (16 - (currentPayloadSize % 16)) % 16;
+		if (padding > 0) {
+			static const char zeroPadding[16] = {0};
+			std::fwrite(zeroPadding, 1, padding, out);
+			currentPayloadSize += padding;
+		}
+
+		// Step 3: Populate PakEntry metadata
+		PakEntry entry{};
+		entry.pathHash = HashAssetPath(vpath);
+		entry.offset = sizeof(PakHeader) + currentPayloadSize;
+		entry.compressedSize = size;
+		entry.uncompressedSize = size;
+		entry.compression = 0;
+
+		entries.push_back(entry);
+
+		// Step 4: Stream file data directly to the archive
+		if (size > 0) {
+			std::vector<char> fileData(size);
+			size_t readBytes = std::fread(fileData.data(), 1, size, f);
+			std::fwrite(fileData.data(), 1, readBytes, out);
+			currentPayloadSize += readBytes;
+		}
+		std::fclose(f);
 	}
 
+	// Step 5: Record final TOC Offset right after the payload data
+	uint64_t tocOffset = sizeof(PakHeader) + currentPayloadSize;
+
+	// Step 6: Write Table of Contents (entries list)
+	if (!entries.empty()) {
+		std::fwrite(entries.data(), sizeof(PakEntry), entries.size(), out);
+	}
+
+	// Step 7: Finalize actual PakHeader metadata
 	PakHeader header{};
 	std::memcpy(header.magic, "ZPAK", 4);
 	header.version = 1;
 	header.entryCount = entries.size();
-	header.tocOffset = sizeof(PakHeader) + payloadData.size();
+	header.tocOffset = tocOffset;
 
-	fs::create_directories(fs::path(outPath).parent_path());
-	FILE* out = std::fopen(outPath.c_str(), "wb");
-	if (!out)
-		return 1;
-
+	// Step 8: Seek back to the very beginning and overwrite the dummy header
+	std::fseek(out, 0, SEEK_SET);
 	std::fwrite(&header, 1, sizeof(PakHeader), out);
-	std::fwrite(payloadData.data(), 1, payloadData.size(), out);
-	std::fwrite(entries.data(), 1, entries.size() * sizeof(PakEntry), out);
-	std::fclose(out);
 
+	std::fclose(out);
 	return 0;
 }
 

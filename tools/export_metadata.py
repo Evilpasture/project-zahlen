@@ -9,9 +9,36 @@ import shutil
 import sys
 import bpy
 from mathutils import Matrix
+import math
 
 # Set recursion limit for large hierarchical models
 sys.setrecursionlimit(15000)
+
+
+def scalar_to_rgb(t):
+    """Procedurally maps a single scalar float to a 3D RGB color wheel.
+    Adjust the cosine parameters below to customize the visual aesthetic.
+    """
+    # OPTION A: Circus Rainbow (Saturated & Vibrant)
+    # Fits the colorful circus tent/rainbow aesthetic perfectly
+    # r = 0.5 + 0.5 * math.cos(2.0 * math.pi * (t + 0.0))
+    # g = 0.5 + 0.5 * math.cos(2.0 * math.pi * (t + 0.33))
+    # b = 0.5 + 0.5 * math.cos(2.0 * math.pi * (t + 0.67))
+
+    # OPTION B: Pastel Fantasy (Softer, less saturated)
+    # Uncomment below to use:
+    r = 0.65 + 0.35 * math.cos(2.0 * math.pi * (t + 0.0))
+    g = 0.65 + 0.35 * math.cos(2.0 * math.pi * (t + 0.33))
+    b = 0.65 + 0.35 * math.cos(2.0 * math.pi * (t + 0.67))
+
+    # OPTION C: Terracotta & Stone (Warm earthy brick/slate tones)
+    # Uncomment below to use:
+    # r = 0.50 + 0.20 * math.cos(2.0 * math.pi * (t + 0.0))
+    # g = 0.40 + 0.15 * math.cos(2.0 * math.pi * (t + 0.1))
+    # b = 0.35 + 0.10 * math.cos(2.0 * math.pi * (t + 0.2))
+
+    return (round(r, 4), round(g, 4), round(b, 4), 1.0)
+
 
 # ============================================================================
 # Core Type-Validation Helpers (OOP Injection)
@@ -123,7 +150,7 @@ def unpack_color(val):
     if not hasattr(val, "__len__"):
         try:
             f = float(val)
-            return (f, f, f, 1.0)
+            return scalar_to_rgb(f)  # Map scalar floats to RGB
         except Exception:
             return (1.0, 1.0, 1.0, 1.0)
     length = len(val)
@@ -132,7 +159,7 @@ def unpack_color(val):
     elif length == 1:
         try:
             f = float(val[0])
-            return (f, f, f, 1.0)
+            return scalar_to_rgb(f)  # Map list-wrapped scalar floats to RGB
         except Exception:
             return (1.0, 1.0, 1.0, 1.0)
     elif length == 2:
@@ -460,12 +487,65 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
         # Robust extraction of generic Geometry Node / Attribute colors
         active_color_attr = None
         if hasattr(mesh_data, "attributes"):
+            # Stage 1: Categorize potential color layers, ignoring standard built-ins
+            candidates_multi = []
+            candidates_scalar = []
+
+            print(f"      [Debug] Attributes on '{obj.name}':")
             for attr in mesh_data.attributes:
+                print(
+                    f"        {attr.name!r} domain={attr.domain} type={attr.data_type}"
+                )
+                attr_name_lower = attr.name.lower()
+
+                # Exclude standard built-in geometric/UV attributes from being treated as color layers
+                if attr_name_lower in {"position", "normal", "tangent", "uvmap", "uv"}:
+                    continue
+
+                has_color_name = any(
+                    hint in attr_name_lower
+                    for hint in ["col", "color", "tint", "hue", "rgb"]
+                )
+
                 if attr.data_type in {"FLOAT_COLOR", "BYTE_COLOR", "FLOAT_VECTOR"}:
                     if is_valid_color_layer(attr):
-                        active_color_attr = attr
-                        if "color" in attr.name.lower():
-                            break
+                        candidates_multi.append((attr, has_color_name))
+                elif attr.data_type == "FLOAT" and has_color_name:
+                    candidates_scalar.append(attr)
+
+            # Stage 2: Select the best candidate (Prioritizing custom scalar attributes like RandomCol/OrbColor)
+            if candidates_scalar:
+                active_color_attr = candidates_scalar[0]
+                print(
+                    f"      [Override] Automatically mapping scalar FLOAT attribute '{active_color_attr.name}' "
+                    f"on '{obj.name}' to greyscale color layer."
+                )
+            elif candidates_multi:
+                # Fallback to multi-channel attributes if no scalar color override exists
+                named_candidates = [c[0] for c in candidates_multi if c[1]]
+                if named_candidates:
+                    active_color_attr = named_candidates[0]
+                else:
+                    active_color_attr = candidates_multi[0][0]
+
+            # Stage 3: Fall back to 1-channel scalar FLOAT attribute if no multi-channel color exists
+            if not active_color_attr and candidates_scalar:
+                active_color_attr = candidates_scalar[0]
+                print(
+                    f"      [Override] Automatically mapping scalar FLOAT attribute '{active_color_attr.name}' "
+                    f"on '{obj.name}' to greyscale color layer."
+                )
+            if candidates_scalar:
+                print(f"      [Debug Selection] Object: '{obj.name}'")
+                print(
+                    f"        Candidates Multi: {[c[0].name for c in candidates_multi]}"
+                )
+                print(
+                    f"        Candidates Scalar: {[c.name for c in candidates_scalar]}"
+                )
+                print(
+                    f"        Selected Color Attr: '{active_color_attr.name if active_color_attr else None}'"
+                )
 
         has_tangents = False
         try:
