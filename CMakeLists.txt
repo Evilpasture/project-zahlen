@@ -435,17 +435,32 @@ add_executable(zahlen
 target_link_libraries(zahlen PRIVATE zahlen_engine imgui)
 target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)
 
-add_executable(zahlen_cooker src/cooker_main.cpp)
-target_link_libraries(zahlen_cooker PRIVATE zahlen_engine)
-target_include_directories(zahlen_cooker PRIVATE ${CMAKE_SOURCE_DIR}/extern/cgltf)
+add_executable(zcook src/zcook.cpp)
+target_link_libraries(zcook PRIVATE zahlen_engine)
+target_include_directories(zcook PRIVATE ${CMAKE_SOURCE_DIR}/extern/cgltf)
 
+# Generates the safe, non-colliding assets.ninja blueprint
+add_custom_command(
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/assets.ninja"
+    COMMAND python3 "${CMAKE_SOURCE_DIR}/configure_assets.py" "${CMAKE_CURRENT_BINARY_DIR}/assets.ninja" "$<TARGET_FILE:zcook>" "${CMAKE_SOURCE_DIR}"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+    DEPENDS zcook "${CMAKE_SOURCE_DIR}/configure_assets.py"
+    COMMENT "Scanning asset folders and generating assets.ninja..."
+)
+
+# Executes the Ninja asset build pipeline in parallel
 add_custom_target(cook_assets ALL
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:zahlen>/data"
-    COMMAND zahlen_cooker "${CMAKE_SOURCE_DIR}/resources/assets" "$<TARGET_FILE_DIR:zahlen>/data/base.pak" "$<TARGET_FILE_DIR:zahlen>/data"
-    DEPENDS zahlen_cooker
-    COMMENT "Cooking assets into data/base.pak and compiling debug GLBs..."
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/build_assets"
+    COMMAND ninja -f assets.ninja
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_BINARY_DIR}/data/base.pak" "$<TARGET_FILE_DIR:zahlen>/data/base.pak"
+    DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/assets.ninja"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+    COMMENT "Cooking assets in parallel using Ninja..."
     USES_TERMINAL
 )
+
+add_dependencies(cook_assets zcook)
 
 if(NOT MSVC)
     target_compile_options(zahlen_engine PRIVATE $<$<CXX_COMPILER_ID:GNU>:--param=destructive-interference-size=64> -Wall -Wextra -Wpedantic -Wno-interference-size -fno-exceptions -fno-rtti)
