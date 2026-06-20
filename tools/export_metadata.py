@@ -1,14 +1,17 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-
 # tools/export_metadata.py
 import os
 import json
 import struct
 import shutil
+import sys
 import bpy
 from mathutils import Matrix
+
+# Set recursion limit for large hierarchical models
+sys.setrecursionlimit(15000)
 
 # ============================================================================
 # Core Type-Validation Helpers (OOP Injection)
@@ -18,10 +21,8 @@ from mathutils import Matrix
 def is_a(self, type_string):
     """Injected type checking supporting both spatial Objects and generic mesh Attributes."""
     try:
-        # Handle spatial objects
         if hasattr(self, "type"):
             return self.type.upper() == type_string.upper()
-        # Handle data attributes
         if hasattr(self, "data_type") and hasattr(self, "domain"):
             mappings = {
                 "UVMAP": ("CORNER", {"FLOAT_2D_VECTOR", "FLOAT_2"}),
@@ -40,7 +41,6 @@ def is_a(self, type_string):
     return False
 
 
-# Inject straight into Blender's C++ base types
 bpy.types.Object.IsA = is_a
 bpy.types.Attribute.IsA = is_a
 
@@ -53,7 +53,6 @@ output_parent = os.path.join(input_dir, "resources", "intermediate")
 os.makedirs(output_parent, exist_ok=True)
 
 # glTF/OpenGL Basis Transform: Blender Z-up right-handed to Y-up right-handed
-# preserving winding order (CCW remains CCW)
 c_basis = Matrix(
     (
         (1.0, 0.0, 0.0, 0.0),
@@ -64,19 +63,26 @@ c_basis = Matrix(
 )
 c_basis_inv = c_basis.inverted()
 
-# Discover levels for metadata extraction
-blend_files = []
-for root, _, files in os.walk(input_dir):
-    norm_root = root.replace("\\", "/").lower()
-    if any(
-        p in norm_root
-        for p in ["resources", "exported_assets", "tadc_models", "asset_library"]
-    ):
-        continue
-    for file in files:
-        if file.endswith(".blend") and not file.startswith("."):
-            blend_files.append(os.path.join(root, file))
 
+def discover_blend_files(search_path):
+    """Recursively scans directories to discover valid level Blend files, ignoring asset libraries."""
+    blend_files = []
+    for root, _, files in os.walk(search_path):
+        norm_root = root.replace("\\", "/").lower()
+        if any(
+            p in norm_root
+            for p in ["resources", "exported_assets", "tadc_models", "asset_library"]
+        ):
+            continue
+        for file in files:
+            if file.endswith(".blend") and not file.startswith("."):
+                if "void" in file.lower():
+                    continue
+                blend_files.append(os.path.join(root, file))
+    return blend_files
+
+
+blend_files = discover_blend_files(input_dir)
 print(f"Discovered {len(blend_files)} levels for raw metadata extraction.\n")
 
 # ============================================================================
@@ -137,26 +143,29 @@ def unpack_color(val):
         return (float(val[0]), float(val[1]), float(val[2]), float(val[3]))
 
 
-def unpack_color_from_datum(datum, active_color_attr, v_idx, loop_idx):
-    """Helper to resolve the color based on the attribute layer's domain."""
-    if active_color_attr.domain == "CORNER":
-        return unpack_color(datum)
-    elif active_color_attr.domain == "POINT":
-        return unpack_color(datum)
-    return (1.0, 1.0, 1.0, 1.0)
+def unpack_color_from_datum(datum):
+    """Helper to resolve the color robustly from any generic attribute layer payload."""
+    if not datum:
+        return (1.0, 1.0, 1.0, 1.0)
+
+    vals = None
+    if hasattr(datum, "color"):
+        vals = datum.color
+    elif hasattr(datum, "vector"):
+        vals = datum.vector
+    elif hasattr(datum, "value"):
+        vals = datum.value
+        if not hasattr(vals, "__len__"):
+            vals = [vals]
+
+    return unpack_color(vals)
 
 
 def is_valid_color_layer(attr):
-    """Deterministically verifies if an attribute is a true color layer by checking value ranges.
-
-    If any component of the data is negative (< -0.001) or exceeds 1.0 (> 1.001),
-    it is mathematically guaranteed to be a spatial vector (like a normal or position)
-    rather than a painted color.
-    """
+    """Deterministically verifies if an attribute is a true color layer by checking value ranges."""
     if not attr or not attr.data:
         return False
 
-    # Sample up to 100 vertices to be extremely fast and 100% safe
     sample_size = min(len(attr.data), 100)
     for i in range(sample_size):
         datum = attr.data[i]
@@ -174,7 +183,7 @@ def is_valid_color_layer(attr):
 
         for v in vals:
             if v < -0.001 or v > 1.001:
-                return False  # Spatial/coordinate vector detected!
+                return False
 
     return True
 
@@ -198,20 +207,28 @@ def get_image_filename(image):
     return filename
 
 
-def get_texture_node_image_block(input_socket):
-    """Recursively walks node trees to extract the actual image object."""
-    if input_socket and input_socket.is_linked:
-        link = input_socket.links[0]
+def find_upstream_texture_or_attribute(socket):
+    """Recursively traverses linked node tree sockets to find if any image texture or attribute is connected."""
+    if not socket or not socket.is_linked:
+        return None
+
+    for link in socket.links:
         from_node = link.from_node
-        if from_node.type == "TEX_IMAGE" and from_node.image:
-            return from_node.image
-        if from_node.type == "NORMAL_MAP":
-            color_input = from_node.inputs.get("Color")
-            if color_input and color_input.is_linked:
-                norm_link = color_input.links[0]
-                norm_node = norm_link.from_node
-                if norm_node.type == "TEX_IMAGE" and norm_node.image:
-                    return norm_node.image
+        if from_node.type in {"TEX_IMAGE", "ATTRIBUTE", "VERTEX_COLOR"}:
+            return from_node
+
+        for input_socket in from_node.inputs:
+            found = find_upstream_texture_or_attribute(input_socket)
+            if found:
+                return found
+    return None
+
+
+def get_texture_node_image_block(input_socket):
+    """Recursively walks node trees to extract the actual image object, supporting linked networks."""
+    image_node = find_upstream_texture_or_attribute(input_socket)
+    if image_node and image_node.type == "TEX_IMAGE" and image_node.image:
+        return image_node.image
     return None
 
 
@@ -234,6 +251,8 @@ def export_and_copy_textures(asset_dir):
             continue
 
         dest_filename = get_image_filename(image)
+        if not dest_filename:
+            continue
         dest_path = os.path.join(textures_dir, dest_filename)
 
         if image.packed_file:
@@ -280,6 +299,38 @@ def precalculate_world_matrices(scene_objects, depsgraph):
     return world_yup_map
 
 
+def resolve_base_color(principled):
+    """Resolves the solid base color of a Principled BSDF node, tracing simple value links if necessary."""
+    base_color_input = principled.inputs.get("Base Color")
+    if not base_color_input:
+        return [1.0, 1.0, 1.0, 1.0]
+
+    if not base_color_input.is_linked:
+        return [clean_float(c) for c in base_color_input.default_value]
+
+    # If the base color is driven by an image texture or vertex color attribute,
+    # default the tint factor to white to prevent stray node values from darkening the export.
+    img_node = find_upstream_texture_or_attribute(base_color_input)
+    if img_node:
+        return [1.0, 1.0, 1.0, 1.0]
+
+    link = base_color_input.links[0]
+    from_node = link.from_node
+
+    if from_node.type == "RGB" and hasattr(from_node, "outputs") and from_node.outputs:
+        return [clean_float(c) for c in from_node.outputs[0].default_value]
+
+    if from_node.type == "VALTORGB" and len(from_node.color_ramp.elements) > 0:
+        return [clean_float(c) for c in from_node.color_ramp.elements[0].color]
+
+    if from_node.type in {"MIX", "MIX_RGB"}:
+        col_input = from_node.inputs.get("Color1") or from_node.inputs.get("A")
+        if col_input:
+            return [clean_float(c) for c in col_input.default_value]
+
+    return [clean_float(c) for c in base_color_input.default_value]
+
+
 def extract_materials():
     """Extracts all active materials, resolving node configurations & viewports."""
     materials = []
@@ -311,11 +362,7 @@ def extract_materials():
                 (n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None
             )
             if principled:
-                base_color_input = principled.inputs.get("Base Color")
-                if base_color_input and hasattr(base_color_input, "default_value"):
-                    mat_info["pbr"]["base_color"] = [
-                        clean_float(c) for c in base_color_input.default_value
-                    ]
+                mat_info["pbr"]["base_color"] = resolve_base_color(principled)
 
                 metallic_input = principled.inputs.get("Metallic")
                 if metallic_input and hasattr(metallic_input, "default_value"):
@@ -373,10 +420,9 @@ def extract_materials():
     return materials
 
 
-def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir):
+def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_meshes):
     """Packs local geometry buffers, split-vertex coordinates, and morph keys."""
     meshes = []
-    exported_meshes = set()
 
     for obj in geometry_sources:
         if not obj or not obj.IsA("MESH"):
@@ -394,6 +440,14 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir):
         if not mesh_data:
             continue
 
+        # Prevent empty mesh generation to preserve glTF spec compliance
+        if len(mesh_data.vertices) == 0 or len(mesh_data.polygons) == 0:
+            try:
+                obj.evaluated_get(depsgraph).to_mesh_clear()
+            except Exception:
+                pass
+            continue
+
         try:
             mesh_data.calc_normals_split()
         except Exception:
@@ -403,24 +457,15 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir):
             mesh_data.uv_layers.active.data if mesh_data.uv_layers else None
         )
 
-        # Proactive, Object-Oriented Color Attribute Scanner
+        # Robust extraction of generic Geometry Node / Attribute colors
         active_color_attr = None
-        if mesh_data.color_attributes:
-            valid_color_attrs = []
-            for attr in mesh_data.color_attributes:
-                if is_valid_color_layer(attr):
-                    valid_color_attrs.append(attr)
-
-            if valid_color_attrs:
-                # Use the active attribute if it successfully passed the mathematical validation
-                active_attr = mesh_data.color_attributes.active
-                if active_attr in valid_color_attrs:
-                    active_color_attr = active_attr
-                else:
-                    # Otherwise, fallback to the first mathematically verified color layer
-                    active_color_attr = valid_color_attrs[0]
-
-        active_color_data_valid = active_color_attr.data if active_color_attr else None
+        if hasattr(mesh_data, "attributes"):
+            for attr in mesh_data.attributes:
+                if attr.data_type in {"FLOAT_COLOR", "BYTE_COLOR", "FLOAT_VECTOR"}:
+                    if is_valid_color_layer(attr):
+                        active_color_attr = attr
+                        if "color" in attr.name.lower():
+                            break
 
         has_tangents = False
         try:
@@ -439,7 +484,6 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir):
                 if g.name in bone_names
             }
 
-        # Build loop-indexed split-vertex table (Corrects normal/tangent/UV seam artifacts)
         unique_vertices = {}
         flat_vbo = []
         vertex_count = 0
@@ -470,14 +514,16 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir):
                     uv = active_uv_layer[loop_idx].uv if active_uv_layer else (0.0, 0.0)
 
                     color = (1.0, 1.0, 1.0, 1.0)
-                    if active_color_data_valid:
+                    if active_color_attr and active_color_attr.data:
                         if active_color_attr.domain == "CORNER":
-                            datum = active_color_data_valid[loop_idx]
+                            datum = active_color_attr.data[loop_idx]
                         elif active_color_attr.domain == "POINT":
-                            datum = active_color_data_valid[v_idx]
-                        color = unpack_color_from_datum(
-                            datum, active_color_attr, v_idx, loop_idx
-                        )
+                            datum = active_color_attr.data[v_idx]
+                        elif active_color_attr.domain == "FACE":
+                            datum = active_color_attr.data[tri.polygon_index]
+                        else:
+                            datum = None
+                        color = unpack_color_from_datum(datum)
 
                     if has_tangents:
                         tangent = mesh_data.loops[loop_idx].tangent
@@ -510,16 +556,12 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir):
                         unique_vertices[key] = idx
                         vertex_count += 1
 
-                        # Align attributes to column-major right-handed Y-up system (X, Z, -Y)
                         flat_vbo.extend([co[0], co[2], -co[1]])
                         flat_vbo.extend([normal[0], normal[2], -normal[1]])
                         flat_vbo.extend([tangent[0], tangent[2], -tangent[1], sign])
-                        flat_vbo.extend([uv[0], 1.0 - uv[1]])  # Flip V for glTF
-                        flat_vbo.extend(
-                            [color[0], color[1], color[2], color[3]]
-                        )  # Pack RGBA vertex colors
+                        flat_vbo.extend([uv[0], 1.0 - uv[1]])
+                        flat_vbo.extend([color[0], color[1], color[2], color[3]])
 
-                        # Skin weight collection corresponding to unique split indices
                         if is_skinned:
                             v = mesh_data.vertices[v_idx]
                             v_influences = []
@@ -576,7 +618,6 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir):
             joints_binary = struct.pack(f"{len(joints_data)}H", *joints_data)
             weights_binary = struct.pack(f"{len(weights_data)}f", *weights_data)
 
-        # Morph targets
         morph_targets = []
         blend_weights = []
         morph_binary = b""
@@ -704,7 +745,14 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir):
 
 
 def build_node_info(
-    obj, node_id, node_name, parent_node_id, local_yup, world_yup, is_visible
+    obj,
+    node_id,
+    node_name,
+    parent_node_id,
+    local_yup,
+    world_yup,
+    is_visible,
+    exported_meshes,
 ):
     """Factory helper to build consistent glTF node manifest descriptions."""
     armature_mod = next((m for m in obj.modifiers if m.type == "ARMATURE"), None)
@@ -751,6 +799,7 @@ def build_node_info(
         "refs": {
             "mesh_id": None,
             "skin_id": None,
+            "light_id": None,
             "material_ids": [],
             "morph_weights": [],
         },
@@ -762,15 +811,18 @@ def build_node_info(
         node_info["refs"]["skin_id"] = make_id("skin", armature_mod.object.name)
 
     if obj.type == "LIGHT":
-        light_data = obj.data
-        node_info["extras"]["light"] = {
-            "type": light_data.type,
-            "color": [clean_float(c) for c in light_data.color],
-            "energy": clean_float(light_data.energy),
-            "spot_size": clean_float(light_data.spot_size)
-            if light_data.type == "SPOT"
-            else 0.0,
-        }
+        # Only attach light definitions if the object is strictly visible
+        if is_visible:
+            node_info["refs"]["light_id"] = make_id("light", obj.name)
+            light_data = obj.data
+            node_info["extras"]["light"] = {
+                "type": light_data.type,
+                "color": [clean_float(c) for c in light_data.color],
+                "energy": clean_float(light_data.energy),
+                "spot_size": clean_float(light_data.spot_size)
+                if light_data.type == "SPOT"
+                else 0.0,
+            }
     elif obj.type == "CAMERA":
         cam_data = obj.data
         node_info["extras"]["camera"] = {
@@ -780,7 +832,14 @@ def build_node_info(
             "clip_end": clean_float(cam_data.clip_end),
         }
     elif obj.IsA("MESH"):
-        node_info["refs"]["mesh_id"] = make_id("mesh", f"{obj.data.name}{mesh_suffix}")
+        mesh_id = make_id("mesh", f"{obj.data.name}{mesh_suffix}")
+
+        # Only attach mesh configurations if the object is strictly visible
+        if is_visible and mesh_id in exported_meshes:
+            node_info["refs"]["mesh_id"] = mesh_id
+        else:
+            node_info["refs"]["mesh_id"] = None
+
         node_info["refs"]["material_ids"] = [
             make_id("mat", s.material.name) for s in obj.material_slots if s.material
         ]
@@ -801,11 +860,10 @@ def build_node_info(
     return node_info
 
 
-def extract_nodes(scene_objects, depsgraph, node_id_map):
+def extract_nodes(scene_objects, depsgraph, node_id_map, exported_meshes):
     """Assembles node structures, separating standard objects from instances."""
     nodes = []
 
-    # 1. Export Standard Scene Objects
     for obj in scene_objects:
         parent_key = obj.parent.name if obj.parent else None
         parent_node_id = node_id_map.get(parent_key) if parent_key else None
@@ -823,10 +881,10 @@ def extract_nodes(scene_objects, depsgraph, node_id_map):
             local_yup,
             world_yup,
             not obj.hide_viewport,
+            exported_meshes,
         )
         nodes.append(node_info)
 
-    # 2. Export Procedural Instances (Geometry Nodes / Scatter duplicates)
     for idx, instance in enumerate(depsgraph.object_instances):
         if not instance.is_instance:
             continue
@@ -853,10 +911,38 @@ def extract_nodes(scene_objects, depsgraph, node_id_map):
             local_yup,
             world_yup,
             instance.show_self,
+            exported_meshes,
         )
         nodes.append(node_info)
 
     return nodes
+
+
+def extract_lights(scene_objects):
+    """Extracts KHR_lights_punctual compliant properties."""
+    lights = []
+    for obj in scene_objects:
+        if obj.type == "LIGHT":
+            ld = obj.data
+            l_type = (
+                "directional"
+                if ld.type == "SUN"
+                else ("spot" if ld.type == "SPOT" else "point")
+            )
+
+            light_info = {
+                "id": make_id("light", obj.name),
+                "type": l_type,
+                "color": [clean_float(c) for c in ld.color],
+                "intensity": clean_float(ld.energy),
+            }
+            if l_type == "spot":
+                light_info["spot"] = {
+                    "innerConeAngle": 0.0,
+                    "outerConeAngle": clean_float(ld.spot_size / 2.0),
+                }
+            lights.append(light_info)
+    return lights
 
 
 def extract_skins(depsgraph, node_id_map, world_yup_map):
@@ -917,7 +1003,7 @@ def extract_animations(
         fcurves = []
         if hasattr(action, "is_action_layered") and action.is_action_layered:
             for layer in action.layers:
-                for strip in layer.strips:  # FIXED: Corrected splits to strips
+                for strip in layer.strips:
                     for channelbag in strip.channelbags:
                         fcurves.extend(channelbag.fcurves)
         elif hasattr(action, "fcurves") and action.fcurves is not None:
@@ -1150,7 +1236,6 @@ def export_raw_scene_data(blend_path):
     bin_dir = os.path.join(asset_dir, "geometry")
     os.makedirs(bin_dir, exist_ok=True)
 
-    # 1. Headless load & make local
     bpy.ops.wm.open_mainfile(filepath=blend_path)
     try:
         with bpy.context.temp_override(selected_objects=list(bpy.data.objects)):
@@ -1161,13 +1246,11 @@ def export_raw_scene_data(blend_path):
         except Exception:
             pass
 
-    # 2. Extract loose textures
     export_and_copy_textures(asset_dir)
 
     depsgraph = bpy.context.evaluated_depsgraph_get()
     scene_objects = [obj for obj in bpy.context.scene.objects]
 
-    # Pre-map node IDs
     node_id_map = {}
     for obj in scene_objects:
         node_id_map[obj.name] = make_id("node", obj.name)
@@ -1177,17 +1260,14 @@ def export_raw_scene_data(blend_path):
                     "node_bone", f"{obj.name}_{bone.name}"
                 )
 
-    # Resolve bone to armature maps
     bone_to_armature = {}
     for obj in bpy.data.objects:
         if obj.IsA("ARMATURE"):
             for bone in obj.data.bones:
                 bone_to_armature[(obj.name, bone.name)] = obj
 
-    # Pre-calculate world matrices
     world_yup_map = precalculate_world_matrices(scene_objects, depsgraph)
 
-    # 3. Compile scene segments using modular helpers
     materials = extract_materials()
 
     geometry_sources = []
@@ -1198,8 +1278,12 @@ def export_raw_scene_data(blend_path):
         if instance.is_instance and instance.instance_object:
             geometry_sources.append(instance.instance_object)
 
-    meshes = extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir)
-    nodes = extract_nodes(scene_objects, depsgraph, node_id_map)
+    exported_meshes = set()
+    meshes = extract_meshes(
+        geometry_sources, depsgraph, asset_dir, bin_dir, exported_meshes
+    )
+    nodes = extract_nodes(scene_objects, depsgraph, node_id_map, exported_meshes)
+    lights = extract_lights(scene_objects)
     skins = extract_skins(depsgraph, node_id_map, world_yup_map)
 
     fps = bpy.context.scene.render.fps / bpy.context.scene.render.fps_base
@@ -1207,7 +1291,6 @@ def export_raw_scene_data(blend_path):
         depsgraph, node_id_map, bone_to_armature, bin_dir, asset_dir, fps
     )
 
-    # 4. Save metadata manifest
     scene_manifest = {
         "version": "1.2",
         "scene_info": {
@@ -1220,6 +1303,7 @@ def export_raw_scene_data(blend_path):
         "materials": materials,
         "meshes": meshes,
         "nodes": nodes,
+        "lights": lights,
         "skins": skins,
         "animations": animations,
         "extras": {},
@@ -1232,7 +1316,6 @@ def export_raw_scene_data(blend_path):
     print(f"      [Success] Extracted raw metadata & binary geometry for: {name_we}")
 
 
-# Main Loop
 for idx, blend_path in enumerate(blend_files, start=1):
     print(
         f"[{idx}/{len(blend_files)}] Extracting: {os.path.relpath(blend_path, input_dir)}"

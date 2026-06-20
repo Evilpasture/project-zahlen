@@ -317,9 +317,17 @@ struct IRMesh {
 	std::vector<IRPrimitive> primitives;
 };
 struct IRNode {
-	std::string id, meshId;
-	float matrix[16];
+	std::string id, meshId, lightId;
+	float localMatrix[16] = {1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f,
+							 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f};
+	float worldMatrix[16] = {1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f,
+							 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f};
 	bool visible = true;
+};
+struct IRLight {
+	std::string id, type;
+	float color[3] = {1.f, 1.f, 1.f};
+	float intensity = 1.0f;
 };
 struct IRMaterial {
 	std::string id, albedoMap, normalMap, metallicRoughnessMap;
@@ -330,6 +338,7 @@ struct IRManifest {
 	std::string levelName;
 	std::vector<IRMesh> meshes;
 	std::vector<IRNode> nodes;
+	std::vector<IRLight> lights;
 	std::vector<IRMaterial> materials;
 };
 
@@ -373,6 +382,8 @@ class Parser {
 				ParseMeshes(manifest);
 			else if (key.value == "nodes")
 				ParseNodes(manifest);
+			else if (key.value == "lights")
+				ParseLights(manifest);
 			else if (key.value == "materials")
 				ParseMaterials(manifest);
 			else
@@ -536,8 +547,6 @@ class Parser {
 		Expect(TokenType::BeginArray);
 		while (!Match(TokenType::EndArray)) {
 			IRNode node;
-			std::memset(node.matrix, 0, sizeof(node.matrix));
-			node.matrix[0] = node.matrix[5] = node.matrix[10] = node.matrix[15] = 1.0f;
 
 			Expect(TokenType::BeginObject);
 			while (!Match(TokenType::EndObject)) {
@@ -548,9 +557,9 @@ class Parser {
 				else if (key.value == "visible")
 					node.visible = (Advance().type == TokenType::True);
 				else if (key.value == "transform")
-					ParseTransform(node.matrix);
+					ParseTransform(node);
 				else if (key.value == "refs")
-					ParseRefs(node.meshId);
+					ParseRefs(node);
 				else
 					SkipValue();
 				if (!Peek(TokenType::EndObject))
@@ -562,7 +571,7 @@ class Parser {
 		}
 	}
 
-	void ParseTransform(float* outMatrix) {
+	void ParseTransform(IRNode& node) {
 		Expect(TokenType::BeginObject);
 		while (!Match(TokenType::EndObject)) {
 			Token key = Expect(TokenType::String);
@@ -570,7 +579,15 @@ class Parser {
 			if (key.value == "local") {
 				Expect(TokenType::BeginArray);
 				for (int i = 0; i < 16; ++i) {
-					outMatrix[i] = std::stof(std::string(Expect(TokenType::Number).value));
+					node.localMatrix[i] = std::stof(std::string(Expect(TokenType::Number).value));
+					if (i < 15)
+						Expect(TokenType::Comma);
+				}
+				Expect(TokenType::EndArray);
+			} else if (key.value == "world") {
+				Expect(TokenType::BeginArray);
+				for (int i = 0; i < 16; ++i) {
+					node.worldMatrix[i] = std::stof(std::string(Expect(TokenType::Number).value));
 					if (i < 15)
 						Expect(TokenType::Comma);
 				}
@@ -582,7 +599,7 @@ class Parser {
 		}
 	}
 
-	void ParseRefs(std::string& outMeshId) {
+	void ParseRefs(IRNode& node) {
 		Expect(TokenType::BeginObject);
 		while (!Match(TokenType::EndObject)) {
 			Token key = Expect(TokenType::String);
@@ -590,10 +607,47 @@ class Parser {
 			if (key.value == "mesh_id") {
 				Token val = Advance();
 				if (val.type == TokenType::String)
-					outMeshId = DecodeJSONString(val.value);
+					node.meshId = DecodeJSONString(val.value);
+			} else if (key.value == "light_id") {
+				Token val = Advance();
+				if (val.type == TokenType::String)
+					node.lightId = DecodeJSONString(val.value);
 			} else
 				SkipValue();
 			if (!Peek(TokenType::EndObject))
+				Expect(TokenType::Comma);
+		}
+	}
+
+	void ParseLights(IRManifest& manifest) {
+		Expect(TokenType::BeginArray);
+		while (!Match(TokenType::EndArray)) {
+			IRLight l;
+			Expect(TokenType::BeginObject);
+			while (!Match(TokenType::EndObject)) {
+				Token key = Expect(TokenType::String);
+				Expect(TokenType::Colon);
+				if (key.value == "id")
+					l.id = DecodeJSONString(Expect(TokenType::String).value);
+				else if (key.value == "type")
+					l.type = DecodeJSONString(Expect(TokenType::String).value);
+				else if (key.value == "intensity")
+					l.intensity = std::stof(std::string(Expect(TokenType::Number).value));
+				else if (key.value == "color") {
+					Expect(TokenType::BeginArray);
+					for (int i = 0; i < 3; ++i) {
+						l.color[i] = std::stof(std::string(Expect(TokenType::Number).value));
+						if (i < 2)
+							Expect(TokenType::Comma);
+					}
+					Expect(TokenType::EndArray);
+				} else
+					SkipValue();
+				if (!Peek(TokenType::EndObject))
+					Expect(TokenType::Comma);
+			}
+			manifest.lights.push_back(l);
+			if (!Peek(TokenType::EndArray))
 				Expect(TokenType::Comma);
 		}
 	}
@@ -692,6 +746,515 @@ class Parser {
 } // namespace Compiler
 
 // ============================================================================
+// GLB Emitter Namespace
+// ============================================================================
+namespace GLB {
+
+inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolder,
+					const std::string& outputPath) {
+	std::vector<uint8_t> binBuffer;
+	binBuffer.reserve(16 * 1024 * 1024);
+
+	std::vector<std::string> bufferViews;
+	std::vector<std::string> accessors;
+	std::vector<std::string> meshesJson;
+	std::vector<std::string> nodesJson;
+
+	std::unordered_map<std::string, int> meshIdToGlbIndex;
+	std::unordered_map<std::string, int> lightIdToGlbIndex;
+
+	uint32_t accIndex = 0;
+	uint32_t bViewIndex = 0;
+
+	std::vector<std::string> images;
+	std::vector<std::string> textures;
+	std::vector<std::string> materialsJson;
+	std::unordered_map<std::string, int> matIdToGlbIndex;
+
+	struct PackedImage {
+		std::string relativeUri;
+		uint32_t bufferViewIndex;
+	};
+	std::vector<PackedImage> packedImages;
+
+	auto getTextureIndex = [&](const std::string& relativeUri) -> int {
+		if (relativeUri.empty())
+			return -1;
+
+		for (size_t i = 0; i < packedImages.size(); ++i) {
+			if (packedImages[i].relativeUri == relativeUri) {
+				return static_cast<int>(i);
+			}
+		}
+
+		std::string fullPath = levelFolder + "/" + relativeUri;
+		FILE* f = std::fopen(fullPath.c_str(), "rb");
+		if (f == nullptr) {
+			return -1;
+		}
+
+		std::fseek(f, 0, SEEK_END);
+		long size = std::ftell(f);
+		std::fseek(f, 0, SEEK_SET);
+
+		std::vector<uint8_t> imgBytes(size);
+		std::fread(imgBytes.data(), 1, size, f);
+		std::fclose(f);
+
+		while (binBuffer.size() % 4 != 0) {
+			binBuffer.push_back(0);
+		}
+
+		auto imgOffset = static_cast<uint32_t>(binBuffer.size());
+		binBuffer.insert(binBuffer.end(), imgBytes.begin(), imgBytes.end());
+		while (binBuffer.size() % 4 != 0) {
+			binBuffer.push_back(0);
+		}
+
+		std::string mimeType = "image/png";
+		if (relativeUri.ends_with(".jpg") || relativeUri.ends_with(".jpeg")) {
+			mimeType = "image/jpeg";
+		}
+
+		bufferViews.push_back(std::format(R"(    {{
+      "buffer": 0,
+      "byteOffset": {},
+      "byteLength": {}
+    }})",
+										  imgOffset, size));
+		uint32_t imgBViewIdx = bViewIndex++;
+
+		int idx = static_cast<int>(packedImages.size());
+		packedImages.push_back({.relativeUri = relativeUri, .bufferViewIndex = imgBViewIdx});
+
+		textures.push_back(std::format(R"(    {{"sampler": 0, "source": {}}})", idx));
+		images.push_back(
+			std::format(R"(    {{"bufferView": {}, "mimeType": "{}"}})", imgBViewIdx, mimeType));
+
+		return idx;
+	};
+
+	for (const auto& mat : manifest.materials) {
+		int albedoTex = getTextureIndex(mat.albedoMap);
+		int normalTex = getTextureIndex(mat.normalMap);
+		int mrTex = getTextureIndex(mat.metallicRoughnessMap);
+
+		std::string pbrStr = std::format(R"(      "baseColorFactor": [{}, {}, {}, {}],
+      "metallicFactor": {},
+      "roughnessFactor": {})",
+										 mat.baseColor[0], mat.baseColor[1], mat.baseColor[2],
+										 mat.baseColor[3], mat.metallic, mat.roughness);
+
+		if (albedoTex != -1) {
+			pbrStr += std::format(R"(,
+      "baseColorTexture": {{"index": {}}})",
+								  albedoTex);
+		}
+
+		std::string matStr = std::format(R"(    {{
+      "name": "{}",
+      "pbrMetallicRoughness": {{
+  {}
+      }})",
+										 mat.id, pbrStr);
+
+		if (normalTex != -1) {
+			matStr += std::format(R"(,
+      "normalTexture": {{"index": {}}})",
+								  normalTex);
+		}
+		if (mrTex != -1) {
+			matStr += std::format(R"(,
+      "metallicRoughnessTexture": {{"index": {}}})",
+								  mrTex);
+		}
+
+		matStr += R"(
+    })";
+		matIdToGlbIndex[mat.id] = static_cast<int>(materialsJson.size());
+		materialsJson.push_back(matStr);
+	}
+
+	for (const auto& mesh : manifest.meshes) {
+		std::string binPath = levelFolder + "/" + mesh.binFile;
+
+		FILE* bf = std::fopen(binPath.c_str(), "rb");
+		if (bf == nullptr) {
+			continue;
+		}
+
+		std::fseek(bf, 0, SEEK_END);
+		long binSize = std::ftell(bf);
+		std::fseek(bf, 0, SEEK_SET);
+
+		std::vector<uint8_t> rawBin(binSize);
+		std::fread(rawBin.data(), 1, binSize, bf);
+		std::fclose(bf);
+
+		meshIdToGlbIndex[mesh.id] = static_cast<int>(meshesJson.size());
+
+		auto vboOffset = static_cast<uint32_t>(binBuffer.size());
+		binBuffer.insert(binBuffer.end(), rawBin.begin() + mesh.vertexBuffer.byteOffset,
+						 rawBin.begin() + mesh.vertexBuffer.byteOffset +
+							 mesh.vertexBuffer.byteLength);
+		while (binBuffer.size() % 4 != 0) {
+			binBuffer.push_back(0);
+		}
+
+		bufferViews.push_back(std::format(R"(    {{
+      "buffer": 0,
+      "byteOffset": {},
+      "byteLength": {},
+      "byteStride": 64,
+      "target": 34962
+    }})",
+										  vboOffset, mesh.vertexBuffer.byteLength));
+		uint32_t vboBViewIdx = bViewIndex++;
+
+		auto iboOffset = static_cast<uint32_t>(binBuffer.size());
+		binBuffer.insert(binBuffer.end(), rawBin.begin() + mesh.indexBuffer.byteOffset,
+						 rawBin.begin() + mesh.indexBuffer.byteOffset +
+							 mesh.indexBuffer.byteLength);
+		while (binBuffer.size() % 4 != 0) {
+			binBuffer.push_back(0);
+		}
+
+		bufferViews.push_back(std::format(R"(    {{
+      "buffer": 0,
+      "byteOffset": {},
+      "byteLength": {},
+      "target": 34963
+    }})",
+										  iboOffset, mesh.indexBuffer.byteLength));
+		uint32_t iboBViewIdx = bViewIndex++;
+
+		uint32_t vertexCount = mesh.vertexBuffer.byteLength / 64;
+
+		uint32_t posAcc = accIndex++;
+		uint32_t normAcc = accIndex++;
+		uint32_t tangAcc = accIndex++;
+		uint32_t uvAcc = accIndex++;
+		uint32_t colorAcc = accIndex++;
+
+		float minB[3] = {1e30f, 1e30f, 1e30f};
+		float maxB[3] = {-1e30f, -1e30f, -1e30f};
+		const float* floatVBO =
+			reinterpret_cast<const float*>(rawBin.data() + mesh.vertexBuffer.byteOffset);
+		for (uint32_t i = 0; i < vertexCount; ++i) {
+			float x = floatVBO[i * 16 + 0];
+			float y = floatVBO[i * 16 + 1];
+			float z = floatVBO[i * 16 + 2];
+			minB[0] = std::min(minB[0], x);
+			minB[1] = std::min(minB[1], y);
+			minB[2] = std::min(minB[2], z);
+			maxB[0] = std::max(maxB[0], x);
+			maxB[1] = std::max(maxB[1], y);
+			maxB[2] = std::max(maxB[2], z);
+		}
+
+		accessors.push_back(std::format(R"(    {{"bufferView": {},
+      "componentType": 5126,
+      "count": {},
+      "type": "VEC3",
+      "min": [{}, {}, {}],
+      "max": [{}, {}, {}]}})",
+										vboBViewIdx, vertexCount, minB[0], minB[1], minB[2],
+										maxB[0], maxB[1], maxB[2]));
+
+		accessors.push_back(std::format(R"(    {{"bufferView": {},
+      "byteOffset": 12,
+      "componentType": 5126,
+      "count": {},
+      "type": "VEC3"}})",
+										vboBViewIdx, vertexCount));
+		accessors.push_back(std::format(R"(    {{"bufferView": {},
+      "byteOffset": 24,
+      "componentType": 5126,
+      "count": {},
+      "type": "VEC4"}})",
+										vboBViewIdx, vertexCount));
+		accessors.push_back(std::format(R"(    {{"bufferView": {},
+      "byteOffset": 40,
+      "componentType": 5126,
+      "count": {},
+      "type": "VEC2"}})",
+										vboBViewIdx, vertexCount));
+		accessors.push_back(std::format(R"(    {{"bufferView": {},
+      "byteOffset": 48,
+      "componentType": 5126,
+      "count": {},
+      "type": "VEC4"}})",
+										vboBViewIdx, vertexCount));
+
+		std::string primsStr = "";
+		for (size_t p = 0; p < mesh.primitives.size(); ++p) {
+			const auto& prim = mesh.primitives[p];
+			uint32_t indexAcc = accIndex++;
+
+			accessors.push_back(std::format(R"(    {{"bufferView": {},
+      "byteOffset": {},
+      "componentType": 5125,
+      "count": {},
+      "type": "SCALAR"}})",
+											iboBViewIdx, prim.indexOffset, prim.indexCount));
+
+			int matGlbIdx = -1;
+			auto it = matIdToGlbIndex.find(prim.materialId);
+			if (it != matIdToGlbIndex.end()) {
+				matGlbIdx = it->second;
+			}
+
+			std::string matStr = "";
+			if (matGlbIdx != -1) {
+				matStr = std::format(R"(,
+          "material": {})",
+									 matGlbIdx);
+			}
+
+			primsStr += std::format(R"(        {{
+          "attributes": {{
+            "POSITION": {},
+            "NORMAL": {},
+            "TANGENT": {},
+            "TEXCOORD_0": {},
+            "COLOR_0": {}
+          }},
+          "indices": {}
+          {}
+        }})",
+									posAcc, normAcc, tangAcc, uvAcc, colorAcc, indexAcc, matStr);
+			if (p < mesh.primitives.size() - 1) {
+				primsStr += ",\n";
+			}
+		}
+
+		meshesJson.push_back(std::format(R"(    {{
+      "name": "{}",
+      "primitives": [
+{}
+      ]
+    }})",
+										 mesh.id, primsStr));
+	}
+
+	for (size_t i = 0; i < manifest.lights.size(); ++i) {
+		lightIdToGlbIndex[manifest.lights[i].id] = static_cast<int>(i);
+	}
+
+	for (const auto& node : manifest.nodes) {
+		if (!node.visible && node.meshId.empty() && node.lightId.empty()) {
+			continue;
+		}
+
+		std::string matrixStr = "[";
+		for (int i = 0; i < 16; ++i) {
+			matrixStr += std::to_string(node.worldMatrix[i]);
+			if (i < 15) {
+				matrixStr += ", ";
+			}
+		}
+		matrixStr += "]";
+
+		std::string meshStr;
+		if (!node.meshId.empty()) {
+			auto it = meshIdToGlbIndex.find(node.meshId);
+			if (it != meshIdToGlbIndex.end()) {
+				meshStr = std::format(",\n      \"mesh\": {}", it->second);
+			}
+		}
+
+		std::string extStr;
+		if (!node.lightId.empty()) {
+			auto lit = lightIdToGlbIndex.find(node.lightId);
+			if (lit != lightIdToGlbIndex.end()) {
+				extStr = std::format(R"(,
+      "extensions": {{
+        "KHR_lights_punctual": {{
+          "light": {}
+        }}
+      }})",
+									 lit->second);
+			}
+		}
+
+		nodesJson.push_back(std::format(R"(    {{
+      "name": "{}",
+      "matrix": {}{}{}
+    }})",
+										node.id, matrixStr, meshStr, extStr));
+	}
+
+	if (nodesJson.empty()) {
+		for (size_t i = 0; i < manifest.meshes.size(); ++i) {
+			nodesJson.push_back(std::format(R"(    {{
+      "name": "Node_{}",
+      "mesh": {}
+    }})",
+											manifest.meshes[i].id, i));
+		}
+	}
+
+	std::string extensionsUsed = "";
+	std::string rootExtensions = "";
+
+	if (!manifest.lights.empty()) {
+		extensionsUsed += "\"KHR_lights_punctual\"";
+		std::string lightsArr = "";
+		for (size_t i = 0; i < manifest.lights.size(); ++i) {
+			const auto& l = manifest.lights[i];
+			lightsArr += std::format(R"(        {{
+          "name": "{}",
+          "type": "{}",
+          "color": [{}, {}, {}],
+          "intensity": {}
+        }})",
+									 l.id, l.type, l.color[0], l.color[1], l.color[2], l.intensity);
+			if (i < manifest.lights.size() - 1)
+				lightsArr += ",\n";
+		}
+		rootExtensions += std::format(R"(  "extensions": {{
+    "KHR_lights_punctual": {{
+      "lights": [
+{}
+      ]
+    }}
+  }},
+)",
+									  lightsArr);
+	}
+
+	std::string json;
+	json.reserve(static_cast<size_t>(128 * 1024));
+	json.append(R"({
+  "asset": {"version": "2.0", "generator": "Zahlen GLB Emitter"},
+)");
+
+	if (!extensionsUsed.empty()) {
+		json.append(std::format("  \"extensionsUsed\": [{}],\n", extensionsUsed));
+	}
+	if (!rootExtensions.empty()) {
+		json.append(rootExtensions);
+	}
+
+	json.append("  \"bufferViews\": [\n");
+	for (size_t i = 0; i < bufferViews.size(); ++i) {
+		json.append(bufferViews[i]);
+		json.append(i < bufferViews.size() - 1 ? ",\n" : "\n");
+	}
+	json.append("  ],\n");
+
+	json.append("  \"accessors\": [\n");
+	for (size_t i = 0; i < accessors.size(); ++i) {
+		json.append(accessors[i]);
+		json.append(i < accessors.size() - 1 ? ",\n" : "\n");
+	}
+	json.append("  ],\n");
+
+	if (!materialsJson.empty()) {
+		json.append("  \"materials\": [\n");
+		for (size_t i = 0; i < materialsJson.size(); ++i) {
+			json.append(materialsJson[i]);
+			json.append(i < materialsJson.size() - 1 ? ",\n" : "\n");
+		}
+		json.append("  ],\n");
+	}
+
+	if (!textures.empty()) {
+		json.append("  \"textures\": [\n");
+		for (size_t i = 0; i < textures.size(); ++i) {
+			json.append(textures[i]);
+			json.append(i < textures.size() - 1 ? ",\n" : "\n");
+		}
+		json.append("  ],\n");
+	}
+
+	if (!images.empty()) {
+		json.append("  \"images\": [\n");
+		for (size_t i = 0; i < images.size(); ++i) {
+			json.append(images[i]);
+			json.append(i < images.size() - 1 ? ",\n" : "\n");
+		}
+		json.append("  ],\n");
+
+		json.append(R"(  "samplers": [
+    {"magFilter": 9729, "minFilter": 9729, "wrapS": 10497, "wrapT": 10497}
+  ],
+)");
+	}
+
+	if (!meshesJson.empty()) {
+		json.append("  \"meshes\": [\n");
+		for (size_t i = 0; i < meshesJson.size(); ++i) {
+			json.append(meshesJson[i]);
+			json.append(i < meshesJson.size() - 1 ? ",\n" : "\n");
+		}
+		json.append("  ],\n");
+	}
+
+	json.append("  \"nodes\": [\n");
+	for (size_t i = 0; i < nodesJson.size(); ++i) {
+		json.append(nodesJson[i]);
+		json.append(i < nodesJson.size() - 1 ? ",\n" : "\n");
+	}
+	json.append("  ],\n");
+
+	json.append("  \"scenes\": [\n"
+				"    {\n"
+				"      \"nodes\": [");
+	for (size_t i = 0; i < nodesJson.size(); ++i) {
+		json.append(std::to_string(i));
+		if (i < nodesJson.size() - 1) {
+			json.append(",");
+		}
+	}
+	json.append("]\n"
+				"    }\n"
+				"  ],\n"
+				"  \"scene\": 0,\n");
+
+	json.append(std::format(R"(  "buffers": [
+    {{
+      "byteLength": {}
+    }}
+  ]
+}})",
+							binBuffer.size()));
+
+	while (json.length() % 4 != 0) {
+		json += ' ';
+	}
+
+	auto jsonChunkLength = static_cast<uint32_t>(json.length());
+	auto binChunkLength = static_cast<uint32_t>(binBuffer.size());
+	uint32_t totalFileLength = 12 + 8 + jsonChunkLength + 8 + binChunkLength;
+
+	FILE* out = std::fopen(outputPath.c_str(), "wb");
+	if (out == nullptr) {
+		return;
+	}
+
+	uint32_t magic = 0x46546C67; // "glTF"
+	uint32_t version = 2;
+	std::fwrite(&magic, 1, 4, out);
+	std::fwrite(&version, 1, 4, out);
+	std::fwrite(&totalFileLength, 1, 4, out);
+
+	uint32_t chunkTypeJson = 0x4E4F534A; // "JSON"
+	std::fwrite(&jsonChunkLength, 1, 4, out);
+	std::fwrite(&chunkTypeJson, 1, 4, out);
+	std::fwrite(json.data(), 1, jsonChunkLength, out);
+
+	uint32_t chunkTypeBin = 0x004E4942; // "BIN"
+	std::fwrite(&binChunkLength, 1, 4, out);
+	std::fwrite(&chunkTypeBin, 1, 4, out);
+	std::fwrite(binBuffer.data(), 1, binChunkLength, out);
+
+	std::fclose(out);
+}
+
+} // namespace GLB
+
+// ============================================================================
 // CLI Subcommands
 // ============================================================================
 
@@ -731,7 +1294,6 @@ int CookMesh(int argc, char** argv) {
 	auto it = std::find_if(manifest.meshes.begin(), manifest.meshes.end(),
 						   [&](const auto& m) { return m.id == meshId; });
 	if (it == manifest.meshes.end()) {
-		std::println(stderr, "[zcook Error] Mesh ID '{}' not declared in {}", meshId, metaPath);
 		return 1;
 	}
 	const auto& mesh = *it;
@@ -750,9 +1312,6 @@ int CookMesh(int argc, char** argv) {
 
 	if (mesh.vertexBuffer.byteOffset + mesh.vertexBuffer.byteLength >
 		static_cast<uint32_t>(binSize)) {
-		std::println(stderr,
-					 "[zcook Error] Vertex buffer offset ({}) exceeds binary file size ({})",
-					 mesh.vertexBuffer.byteOffset + mesh.vertexBuffer.byteLength, binSize);
 		return 1;
 	}
 
@@ -765,7 +1324,6 @@ int CookMesh(int argc, char** argv) {
 	if (mesh.indexBuffer.byteLength > 0) {
 		if (mesh.indexBuffer.byteOffset + mesh.indexBuffer.byteLength >
 			static_cast<uint32_t>(binSize)) {
-			std::println(stderr, "[zcook Error] Index buffer offset exceeds binary file size!");
 			return 1;
 		}
 
@@ -793,7 +1351,6 @@ int CookMesh(int argc, char** argv) {
 	if (hasSkin && mesh.jointsBuffer.byteLength > 0) {
 		if (mesh.jointsBuffer.byteOffset + mesh.jointsBuffer.byteLength >
 			static_cast<uint32_t>(binSize)) {
-			std::println(stderr, "[zcook Error] Joints buffer offset exceeds binary file size!");
 			return 1;
 		}
 		joints =
@@ -804,7 +1361,6 @@ int CookMesh(int argc, char** argv) {
 	if (hasSkin && mesh.weightsBuffer.byteLength > 0) {
 		if (mesh.weightsBuffer.byteOffset + mesh.weightsBuffer.byteLength >
 			static_cast<uint32_t>(binSize)) {
-			std::println(stderr, "[zcook Error] Weights buffer offset exceeds binary file size!");
 			return 1;
 		}
 		weights =
@@ -846,9 +1402,6 @@ int CookMesh(int argc, char** argv) {
 	for (uint32_t idx = 0; idx < indexCount; ++idx) {
 		uint32_t originalIdx = compiledIndices[idx];
 		if (originalIdx >= vertexCount) [[unlikely]] {
-			std::println(stderr,
-						 "[zcook Error] Index {} points to invalid vertex {} (Max count={})", idx,
-						 originalIdx, vertexCount);
 			return 1;
 		}
 		unrolledVertices.push_back(compiledVertices[originalIdx]);
@@ -890,7 +1443,6 @@ int CookMesh(int argc, char** argv) {
 	std::fwrite(compiledIndices.data(), 1, iboSize, out);
 	std::fclose(out);
 
-	std::println("Compiled Mesh: {}", outPath);
 	return 0;
 }
 
@@ -905,7 +1457,6 @@ int CookTexture(int argc, char** argv) {
 	}
 
 	if (inPath.empty() || outPath.empty()) {
-		std::println(stderr, "Usage: zcook tex -i <input.png> -o <out.ztex>");
 		return 1;
 	}
 
@@ -924,7 +1475,6 @@ int CookTexture(int argc, char** argv) {
 	std::fwrite(fileData.data(), 1, size, out);
 	std::fclose(out);
 
-	std::println("Compiled Texture: {}", outPath);
 	return 0;
 }
 
@@ -939,7 +1489,6 @@ int PackArchive(int argc, char** argv) {
 	}
 
 	if (outPath.empty() || manifestPath.empty()) {
-		std::println(stderr, "Usage: zcook pak -i <manifest.txt> -o <out.pak>");
 		return 1;
 	}
 
@@ -955,7 +1504,7 @@ int PackArchive(int argc, char** argv) {
 		entry.offset = sizeof(PakHeader) + payloadData.size();
 		entry.compressedSize = size;
 		entry.uncompressedSize = size;
-		entry.compression = 0; // Zero-copy mapping
+		entry.compression = 0;
 
 		entries.push_back(entry);
 		const char* bytes = reinterpret_cast<const char*>(data);
@@ -976,7 +1525,6 @@ int PackArchive(int argc, char** argv) {
 
 		FILE* f = std::fopen(rpath.c_str(), "rb");
 		if (!f) {
-			std::println(stderr, "Warning: Could not open {}", rpath);
 			continue;
 		}
 		std::fseek(f, 0, SEEK_END);
@@ -1005,7 +1553,40 @@ int PackArchive(int argc, char** argv) {
 	std::fwrite(entries.data(), 1, entries.size() * sizeof(PakEntry), out);
 	std::fclose(out);
 
-	std::println("Packed {} files into {}", entries.size(), outPath);
+	return 0;
+}
+
+int CookGLB(int argc, char** argv) {
+	std::string metaPath, outPath;
+	for (int i = 0; i < argc; ++i) {
+		std::string_view arg = argv[i];
+		if (arg == "--meta" && i + 1 < argc)
+			metaPath = argv[++i];
+		else if (arg == "-o" && i + 1 < argc)
+			outPath = argv[++i];
+	}
+
+	if (metaPath.empty() || outPath.empty()) {
+		return 1;
+	}
+
+	FILE* f = std::fopen(metaPath.c_str(), "rb");
+	if (!f)
+		return 1;
+	std::fseek(f, 0, SEEK_END);
+	long size = std::ftell(f);
+	std::fseek(f, 0, SEEK_SET);
+	std::string source(size, '\0');
+	std::fread(source.data(), 1, size, f);
+	std::fclose(f);
+
+	Compiler::Lexer lexer(source);
+	std::vector<Compiler::Token> tokens = lexer.Tokenize();
+	Compiler::Parser parser(tokens, source);
+	Compiler::IRManifest manifest = parser.Parse();
+
+	std::string levelFolder = fs::path(metaPath).parent_path().string();
+	GLB::EmitGLB(manifest, levelFolder, outPath);
 	return 0;
 }
 
@@ -1013,12 +1594,6 @@ int main(int argc, char** argv) {
 	std::setvbuf(stdout, nullptr, _IONBF, 0);
 
 	if (argc < 2) {
-		std::println(stderr, "Zahlen Engine Asset Compiler (ZCook)");
-		std::println(stderr, "Usage: zcook <command> [args]");
-		std::println(stderr, "Commands:");
-		std::println(stderr, "  mesh   Compile a single mesh");
-		std::println(stderr, "  tex    Compile a single texture");
-		std::println(stderr, "  pak    Pack assets into an archive");
 		return 1;
 	}
 
@@ -1027,9 +1602,10 @@ int main(int argc, char** argv) {
 		return CookMesh(argc - 2, argv + 2);
 	if (cmd == "tex")
 		return CookTexture(argc - 2, argv + 2);
+	if (cmd == "glb")
+		return CookGLB(argc - 2, argv + 2);
 	if (cmd == "pak")
 		return PackArchive(argc - 2, argv + 2);
 
-	std::println(stderr, "Unknown command: {}", cmd);
 	return 1;
 }

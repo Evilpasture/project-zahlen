@@ -1,14 +1,12 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-
 # tools/convert_assets.py
 import os
 import sys
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# Safeguard imports to run under native Python (dispatcher) and Blender Python (worker)
 try:
     import bpy
     import bmesh
@@ -17,15 +15,12 @@ try:
 except ImportError:
     INSIDE_BLENDER = False
 
-# Set stack recursion limit (applied inside worker instances)
 if INSIDE_BLENDER:
     sys.setrecursionlimit(15000)
 
 # ========================================================================
 # PIPELINE CONFIGURATION FLAGS
 # ========================================================================
-# Set to True during active C++ coding to bypass the slow Cycles bake.
-# Set to False only when preparing a Release build to generate high-quality atlases.
 DEV_MODE = True
 # ========================================================================
 
@@ -132,10 +127,9 @@ def fix_instancing_loops():
 
 
 def make_instances_real():
-    """Converts visible instances to real objects natively and cleans up hidden objects to prevent export bloat."""
+    """Converts visible instances to real objects natively and cleans up hidden/empty objects to prevent export bloat."""
     ensure_object_mode()
 
-    # 1. Purge all hidden objects immediately to free RAM and avoid processing them
     for obj in list(bpy.context.scene.objects):
         try:
             if not obj.visible_get():
@@ -143,14 +137,12 @@ def make_instances_real():
         except Exception:
             pass
 
-    # 2. Select all remaining visible objects
     for obj in bpy.context.scene.objects:
         obj.select_set(True)
 
     if bpy.context.scene.objects:
         bpy.context.view_layer.objects.active = bpy.context.scene.objects[0]
 
-    # 3. Natively make all visible instances real
     try:
         bpy.ops.object.duplicates_make_real()
     except Exception as e:
@@ -158,7 +150,14 @@ def make_instances_real():
 
     ensure_object_mode()
 
-    # 4. Clean up any remaining non-mesh helper objects (Empties, curves, lights, cameras)
+    for obj in list(bpy.context.scene.objects):
+        if obj.type == "MESH":
+            if len(obj.data.vertices) == 0 or len(obj.data.polygons) == 0:
+                try:
+                    bpy.data.objects.remove(obj, do_unlink=True)
+                except Exception:
+                    pass
+
     for obj in list(bpy.context.scene.objects):
         if obj.type not in {"MESH", "ARMATURE"}:
             try:
@@ -166,7 +165,6 @@ def make_instances_real():
             except Exception:
                 pass
 
-    # Force Python GC to free memory immediately
     import gc
 
     gc.collect()
@@ -195,16 +193,13 @@ def bake_modifiers_to_shape_keys(obj, start, end, step=2):
     base_obj = bpy.data.objects.new(f"{obj.name}_Baked_Anim", base_mesh)
     bpy.context.scene.collection.objects.link(base_obj)
 
-    # Copy parent and transformations natively
     base_obj.parent = obj.parent
     base_obj.matrix_parent_inverse = obj.matrix_parent_inverse.copy()
     base_obj.matrix_local = obj.matrix_local.copy()
 
-    # Copy visibility settings
     base_obj.hide_viewport = obj.hide_viewport
     base_obj.hide_render = obj.hide_render
 
-    # Copy animation data natively
     if obj.animation_data and obj.animation_data.action:
         base_obj.animation_data_create()
         base_obj.animation_data.action = obj.animation_data.action
@@ -312,6 +307,23 @@ def configure_cycles_gpu(device_type="CUDA"):
         bpy.context.scene.cycles.device = "CPU"
 
 
+def find_upstream_texture_or_attribute(socket):
+    """Recursively traverses linked node tree sockets to find if any image texture or attribute is connected."""
+    if not socket or not socket.is_linked:
+        return None
+
+    for link in socket.links:
+        from_node = link.from_node
+        if from_node.type in {"TEX_IMAGE", "ATTRIBUTE", "VERTEX_COLOR"}:
+            return from_node
+
+        for input_socket in from_node.inputs:
+            found = find_upstream_texture_or_attribute(input_socket)
+            if found:
+                return found
+    return None
+
+
 def repair_materials_for_gltf_fallback(combined_obj):
     """Detects and repairs procedural materials so flat fallback base colors can export in DEV_MODE."""
     for mat in combined_obj.data.materials:
@@ -322,10 +334,11 @@ def repair_materials_for_gltf_fallback(combined_obj):
             if principled:
                 base_color_input = principled.inputs.get("Base Color")
                 if base_color_input and base_color_input.is_linked:
-                    link = base_color_input.links[0]
-                    from_node = link.from_node
+                    image_node = find_upstream_texture_or_attribute(base_color_input)
 
-                    if from_node.type != "TEX_IMAGE":
+                    if not image_node:
+                        link = base_color_input.links[0]
+                        from_node = link.from_node
                         fallback_color = [0.8, 0.8, 0.8, 1.0]
 
                         if (
@@ -355,7 +368,7 @@ def repair_materials_for_gltf_fallback(combined_obj):
                         mat.node_tree.links.remove(link)
                         base_color_input.default_value = fallback_color
                         print(
-                            f"       - [Dev Mode Material Repair] Applied flat fallback {fallback_color} to material '{mat.name}'"
+                            f"       - [Dev Mode Material Repair] Applied flat fallback {fallback_color} to procedural material '{mat.name}'"
                         )
 
 
@@ -475,13 +488,11 @@ def run_worker_pipeline(blend_path, dev_mode=True):
     png_path = os.path.join(output_dir, "textures", name_we + "_Atlas.png")
 
     try:
-        # Load file cleanly as data (bypasses viewport shader compilation hangs)
         bpy.ops.wm.open_mainfile(filepath=blend_path, load_ui=False, use_scripts=False)
 
         resolve_parenting_cycles()
         fix_instancing_loops()
 
-        # Identify if this is explicitly a character asset or a dedicated animation file
         is_character = (
             "tadc_models" in blend_path.lower()
             or "character" in name_we.lower()
@@ -501,8 +512,6 @@ def run_worker_pipeline(blend_path, dev_mode=True):
                         has_procedural_modifiers = True
                         break
 
-        # Always consolidate environments/rooms so modifiers inside collection instances
-        # are baked, and procedural materials are repaired.
         should_consolidate = not (is_character or is_explicit_animation)
         should_bake_shape_keys = (
             has_procedural_modifiers and has_actions and not should_consolidate
@@ -533,19 +542,17 @@ def run_worker_pipeline(blend_path, dev_mode=True):
             export_only_selection = False
         elif should_consolidate:
             make_instances_real()
-            export_only_selection = False  # Export full scene natively containing only our real visible meshes
+            export_only_selection = False
         else:
             print("       - Preserve animated hierarchies.")
             export_only_selection = False
 
         if should_consolidate:
             if dev_mode:
-                # Natively evaluate and repair flat fallback materials on all remaining meshes individually
                 for obj in bpy.context.scene.objects:
                     if obj.type == "MESH":
                         repair_materials_for_gltf_fallback(obj)
             else:
-                # In Release mode, join them into a single mesh and bake the texture atlas
                 ensure_object_mode()
                 for o in bpy.context.view_layer.objects:
                     o.select_set(False)
@@ -572,8 +579,11 @@ def run_worker_pipeline(blend_path, dev_mode=True):
                 filepath=glb_path,
                 export_format="GLB",
                 export_materials="EXPORT",
-                export_vertex_color="ACTIVE",
-                export_animations=not should_consolidate,  # Disable animation baking for static consolidated rooms
+                export_colors=True,
+                export_attributes=True,
+                export_apply=should_consolidate,
+                export_extras=True,
+                export_animations=not should_consolidate,
                 use_selection=export_only_selection,
             )
         except TypeError:
@@ -582,25 +592,25 @@ def run_worker_pipeline(blend_path, dev_mode=True):
                 export_format="GLB",
                 export_materials="EXPORT",
                 export_colors=True,
-                export_animations=not should_consolidate,  # Disable animation baking for static consolidated rooms
+                export_apply=should_consolidate,
+                export_extras=True,
+                export_animations=not should_consolidate,
                 use_selection=export_only_selection,
             )
 
         print(f"      [Success] Exported unified GLB: {os.path.basename(glb_path)}")
-        print(
-            "[PipelineStatus] Success"
-        )  # Token verified by dispatcher to confirm completion
+        print("[PipelineStatus] Success")
         return True
 
     except Exception as e:
         print(f"      [Error] Processing failed: {e}")
-        import traceback
 
-        traceback.print_exc()
+        text_type, val, tb = sys.exc_info()
+        print(f"      [Error Details] {val}")
         return False
 
 
-# --- MASTER DISPATCHER SYSTEM (Runs inside native OS python command prompt) ---
+# --- MASTER DISPATCHER SYSTEM ---
 
 
 def find_blender():
@@ -608,19 +618,17 @@ def find_blender():
     if "BLENDER_PATH" in os.environ:
         return os.environ["BLENDER_PATH"]
 
-    # Prioritize the reliable macOS application bundle path first
     if sys.platform == "darwin":
         mac_path = "/Applications/Blender.app/Contents/MacOS/Blender"
         if os.path.exists(mac_path):
             return mac_path
 
-    # Fallback to system PATH discovery next
     import shutil
+
     shutil_path = shutil.which("blender")
     if shutil_path:
         return shutil_path
 
-    # Windows specific fallback
     if sys.platform == "win32":
         paths = [
             r"C:\Program Files\Blender Foundation\Blender 4.2\blender.exe",
@@ -632,10 +640,7 @@ def find_blender():
             if os.path.exists(p):
                 return p
 
-    raise FileNotFoundError(
-        "Could not automatically locate the 'blender' executable on this system.\n"
-        "Please add Blender to your system PATH or configure the 'BLENDER_PATH' environment variable."
-    )
+    raise FileNotFoundError("Could not automatically locate the 'blender' executable.")
 
 
 def run_worker_process(blender_bin, script_path, blend_path, dev_mode):
@@ -657,32 +662,24 @@ def run_worker_process(blender_bin, script_path, blend_path, dev_mode):
     filename = os.path.basename(blend_path)
     prefix = f"[{filename}]"
 
-    # --- ENV CLEANING BLOCK START ---
-    # 1. Start with a copy of the parent environment, tracking the venv path
     venv_path = os.environ.get("VIRTUAL_ENV", "")
     env = os.environ.copy()
-    
-    # 2. Scrub out active virtual environment Python variables
+
     env.pop("PYTHONHOME", None)
     env.pop("PYTHONPATH", None)
     env.pop("VIRTUAL_ENV", None)
-    
-    # 3. Explicitly isolate Blender's internal Python site-packages
+
     env["PYTHONNOUSERSITE"] = "1"
-    
-    # 4. Rebuild the system PATH to strip out the active virtual environment bin folder
+
     if "PATH" in env and venv_path:
         clean_path = [
-            p for p in env["PATH"].split(os.pathsep)
-            if not p.startswith(venv_path)
+            p for p in env["PATH"].split(os.pathsep) if not p.startswith(venv_path)
         ]
         env["PATH"] = os.pathsep.join(clean_path)
-    # --- ENV CLEANING BLOCK END ---
 
-    # Start the background process using the clean environment 'env'
     process = subprocess.Popen(
         cmd,
-        env=env, # <--- Pass the isolated environment mapping here
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -692,7 +689,6 @@ def run_worker_process(blender_bin, script_path, blend_path, dev_mode):
     )
 
     full_stdout = []
-    # Read and print the console logs line by line as Blender writes them
     for line in iter(process.stdout.readline, ""):
         stripped = line.strip()
         if stripped:
@@ -712,7 +708,6 @@ def get_safer_worker_limit():
     """Calculates a safe concurrency limit to prevent running out of RAM on large assets."""
     cpu_limit = max(1, (os.cpu_count() or 4) - 1)
 
-    # Check system memory to dynamically size the pool safely
     import sys
 
     if sys.platform == "linux":
@@ -722,13 +717,11 @@ def get_safer_worker_limit():
                     if "MemTotal" in line:
                         total_kb = int(line.split()[1])
                         total_gb = total_kb / (1024 * 1024)
-                        # Allocate roughly 6.5GB per Blender instance to be extremely safe
                         mem_limit = max(1, int(total_gb // 6.5))
                         return min(cpu_limit, mem_limit)
         except Exception:
             pass
 
-    # Default fallback limit to prevent extreme RAM spikes on average desktop systems
     return min(cpu_limit, 4)
 
 
@@ -745,7 +738,7 @@ def run_master_dispatcher():
     print(f"  Output: {output_dir}")
     print("=========================================================")
 
-    # 1. Discover target files
+    # Discover target files cleanly
     blend_files = []
     for root, _, files in os.walk(input_dir):
         norm_root = root.replace("\\", "/").lower()
@@ -756,7 +749,6 @@ def run_master_dispatcher():
             continue
         for file in files:
             if file.endswith(".blend") and not file.startswith("."):
-                # Dynamically skip computationally impossible procedural loops
                 if "void" in file.lower():
                     print(
                         f"  [Skip] Intentionally bypassing computationally heavy scene: {file}"
@@ -777,7 +769,6 @@ def run_master_dispatcher():
         print(f"Error: {e}")
         sys.exit(1)
 
-    # 2. Configure Worker Pool Limit safely based on system RAM
     max_workers = get_safer_worker_limit()
     print(f"Spawning thread pool to orchestrate {max_workers} background workers...\n")
 
@@ -829,11 +820,8 @@ def run_master_dispatcher():
     print("=========================================================")
 
 
-# --- ENTRY ROUTING POINT ---
-
 if __name__ == "__main__":
     if INSIDE_BLENDER:
-        # Worker Entry: Execute logic on single target command argument
         args = []
         if "--" in sys.argv:
             args = sys.argv[sys.argv.index("--") + 1 :]
@@ -861,5 +849,4 @@ if __name__ == "__main__":
             print("[Worker Error] Invalid arguments passed to Blender worker process.")
             sys.exit(1)
     else:
-        # Master Entry: Run orchestrator using system Python interpreter
         run_master_dispatcher()
