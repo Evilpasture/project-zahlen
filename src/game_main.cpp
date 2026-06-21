@@ -42,6 +42,7 @@
 #include <engine/system/InteractionSystem.hpp>
 #include <expected>
 #include <physics/PhysicsWorld.hpp>
+#include <print>
 #include <string>
 #include <threading/Mutex.hpp>
 #include <threading/TaskSystem.hpp>

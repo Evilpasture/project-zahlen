@@ -461,12 +461,16 @@ void RenderContext::Impl::InitCullingResources() {
 	ZHLN_ShaderDesc bDesc = {.code = Vk::AsSpirV(&ZHLN_Resource_ClusterBoundsSpv[0]),
 							 .size = ZHLN_Resource_ClusterBoundsSpv_Len,
 							 .entry_point = "CSMain"};
-	clusterBoundsPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), bDesc);
+	if (!clusterBoundsPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), bDesc)) {
+		ZHLN::Panic("FATAL: Failed to build Cluster Bounds Pass!");
+	}
 
 	ZHLN_ShaderDesc cDesc = {.code = Vk::AsSpirV(&ZHLN_Resource_ClusterCullingSpv[0]),
 							 .size = ZHLN_Resource_ClusterCullingSpv_Len,
 							 .entry_point = "CSMain"};
-	clusterCullingPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), cDesc);
+	if (!clusterCullingPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), cDesc)) {
+		ZHLN::Panic("FATAL: Failed to build Cluster Culling Pass!");
+	}
 }
 
 void RenderContext::Impl::InitBindless() {
@@ -718,8 +722,10 @@ void RenderContext::Impl::InitPostProcessing() {
 								 {.code = Vk::AsSpirV(&ZHLN_Resource_AmbientFragSpv[0]),
 								  .size = ZHLN_Resource_AmbientFragSpv_Len,
 								  .entry_point = "PSMain"});
-	ambientPass.Build(ctx.Device(), ambientShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush, 1,
-					  false);
+	if (!ambientPass.Build(ctx.Device(), ambientShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush,
+						   1, false)) {
+		ZHLN::Panic("FATAL: Failed to build Ambient Pass!");
+	}
 
 	// 2. Build Lighting Pass
 	auto lightingShaders =
@@ -730,8 +736,10 @@ void RenderContext::Impl::InitPostProcessing() {
 								 {.code = Vk::AsSpirV(&ZHLN_Resource_LightingFragSpv[0]),
 								  .size = ZHLN_Resource_LightingFragSpv_Len,
 								  .entry_point = "PSMain"});
-	lightingPass.Build(ctx.Device(), lightingShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush, 1,
-					   false);
+	if (!lightingPass.Build(ctx.Device(), lightingShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush,
+							1, false)) {
+		ZHLN::Panic("FATAL: Failed to build Lighting Pass!");
+	}
 
 	// 3. Build Reflection Pass Variants
 	auto reflShaders =
@@ -764,8 +772,10 @@ void RenderContext::Impl::InitPostProcessing() {
 	}
 
 	// Build the 4 reflection pipelines concurrently mapped to their specialization constants
-	reflectionPass.BuildVariants(ctx.Device(), reflShaders, {VK_FORMAT_R16G16B16A16_SFLOAT},
-								 &ppPush, 1, specInfos, false);
+	if (!reflectionPass.BuildVariants(ctx.Device(), reflShaders, {VK_FORMAT_R16G16B16A16_SFLOAT},
+									  &ppPush, 1, specInfos, false)) {
+		ZHLN::Panic("FATAL: Failed to build Reflection Pass!");
+	}
 
 	VkPushConstantRange blitPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,

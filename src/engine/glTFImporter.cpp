@@ -706,8 +706,8 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 			.gltfSkin = node->skin,
 			.morphOffset = finalMorphOffset,
 			.activeMorphCount = primJob.activeMorphCount,
-			.defaultMorphWeights = {part.defaultMorphWeights[0], part.defaultMorphWeights[1],
-									part.defaultMorphWeights[2], part.defaultMorphWeights[3]},
+			.defaultMorphWeights = {primJob.defaultMorphWeights[0], primJob.defaultMorphWeights[1],
+									primJob.defaultMorphWeights[2], primJob.defaultMorphWeights[3]},
 			.boundingRadius = primJob.boundingRadius,
 			.localMin = {primJob.localMin[0], primJob.localMin[1], primJob.localMin[2]},
 			.localMax = {primJob.localMax[0], primJob.localMax[1], primJob.localMax[2]},
@@ -964,32 +964,17 @@ void SetupPlayerRagdoll(RenderContext& rc, PhysicsContext& pc, ECS::Registry& re
 	if (pomniSkin != nullptr) {
 		auto skeleton = BuildJoltSkeletonFromCgltf(pomniSkin);
 
-		// Map key joints (hips, spine, head) by name
-		uint32_t hipIdx = 0;
-		uint32_t spineIdx = 0;
-		uint32_t headIdx = 0;
+		// 1. Define which joint names are allowed to be physical
+		auto IsImportantJoint = [](std::string name) -> bool {
+			std::ranges::transform(name, name.begin(), ::tolower);
+			return name.contains("hip") || name.contains("pelvis") || name.contains("root") ||
+				   name.contains("spine") || name.contains("chest") || name.contains("torso") ||
+				   name.contains("head") || name.contains("neck") || name.contains("upper_arm") ||
+				   name.contains("forearm") || name.contains("thigh") || name.contains("calf") ||
+				   name.contains("shin");
+		};
 
-		for (size_t i = 0; i < pomniSkin->joints_count; ++i) {
-			std::string name =
-				(pomniSkin->joints[i]->name != nullptr) ? pomniSkin->joints[i]->name : "";
-			std::transform(name.begin(), name.end(), name.begin(), ::tolower);
-			if (name.contains("hip") || name.contains("pelvis") || name.contains("root")) {
-				hipIdx = (uint32_t)i;
-			} else if (name.contains("spine") || name.contains("chest") || name.contains("torso")) {
-				spineIdx = (uint32_t)i;
-			} else if (name.contains("head") || name.contains("neck")) {
-				headIdx = (uint32_t)i;
-			}
-		}
-
-		// Fallbacks
-		if (spineIdx == 0 && pomniSkin->joints_count > 1) {
-			spineIdx = (uint32_t)(pomniSkin->joints_count / 2);
-		}
-		if (headIdx == 0 && pomniSkin->joints_count > 2) {
-			headIdx = (uint32_t)(pomniSkin->joints_count - 1);
-		}
-
+		// 2. Define the GetNodeWorldTRS lambda before the loop
 		auto GetNodeWorldTRS = [](const cgltf_node* node, JPH::RVec3& outPos, JPH::Quat& outRot) {
 			float m[16];
 			cgltf_node_transform_world(node, m);
@@ -1004,49 +989,53 @@ void SetupPlayerRagdoll(RenderContext& rc, PhysicsContext& pc, ECS::Registry& re
 			outRot = rotMat.GetQuaternion().Normalized();
 		};
 
-		// 1. Pre-populate all 1,121 joints with lightweight default parameters
-		// and their actual visual world-space bone coordinates
 		std::vector<Physics::RagdollPartParams> parts;
-		parts.resize(pomniSkin->joints_count);
-
-		JPH::ShapeRefC dummyShape =
-			Physics::GetOrCreateShape(pc, Physics::ShapeType::Sphere, 0.05f);
-
+		// Process every single joint in the skeleton to satisfy Jolt's 1-on-1 requirements
 		for (size_t i = 0; i < pomniSkin->joints_count; ++i) {
-			auto& part = parts[i];
+			std::string name =
+				(pomniSkin->joints[i]->name != nullptr) ? pomniSkin->joints[i]->name : "";
+
+			Physics::RagdollPartParams part;
 			part.jointIndex = (uint32_t)i;
 			part.parentJointIndex = skeleton->GetJoint(i).mParentJointIndex;
-			part.shape = dummyShape;
-			part.mass = 0.5f;		   // 0.5kg (stable mass ratio)
-			part.enableMotors = false; // No motor overhead on dummy joints
+			part.mass = 1.0f;
+			part.enableMotors = false;
 
 			GetNodeWorldTRS(pomniSkin->joints[i], part.position, part.rotation);
+
+			// Map specific shapes to key bones
+			std::ranges::transform(name, name.begin(), ::tolower);
+			if (name.contains("hip") || name.contains("pelvis") || name.contains("root")) {
+				part.shape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Capsule, 0.4f, 0.2f);
+				part.mass = 15.0f;
+			} else if (name.contains("spine") || name.contains("chest") || name.contains("torso")) {
+				part.shape =
+					Physics::GetOrCreateShape(pc, Physics::ShapeType::Capsule, 0.5f, 0.25f);
+				part.mass = 20.0f;
+				part.enableMotors = true;
+				part.maxMotorForce = 250.0f;
+			} else if (name.contains("head") || name.contains("neck")) {
+				part.shape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Sphere, 0.3f);
+				part.mass = 8.0f;
+				part.enableMotors = true;
+				part.maxMotorForce = 250.0f;
+			} else if (IsImportantJoint(name)) {
+				// Default limb shape (small capsule)
+				part.shape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Capsule, 0.2f, 0.1f);
+				part.mass = 3.0f;
+			} else {
+				// Non-essential joints (fingers, hair, etc.) get a stable, lightweight dummy shape
+				// safely above the 0.05m Jolt convex radius to prevent division-by-zero scale
+				// errors
+				part.shape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Sphere, 0.08f);
+				part.mass = 0.5f;
+			}
+
+			parts.push_back(part);
 		}
 
-		// 2. Overwrite the Pelvis, Spine, and Head joints with their heavy physical attributes
-		// Hips (Root)
-		auto& hipPart = parts[hipIdx];
-		hipPart.shape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Capsule, 0.4f, 0.2f);
-		hipPart.mass = 15.0f;
-
-		// Spine
-		auto& spinePart = parts[spineIdx];
-		spinePart.shape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Capsule, 0.5f, 0.25f);
-		spinePart.mass = 20.0f;
-		spinePart.enableMotors = true;
-		spinePart.maxMotorForce = 250.0f;
-
-		// Head
-		auto& headPart = parts[headIdx];
-		headPart.shape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Sphere, 0.3f);
-		headPart.mass = 8.0f;
-		headPart.enableMotors = true;
-		headPart.maxMotorForce = 250.0f;
-
-		// 7. Complete final joint and collision topology mapping
+		// Create the skeletal ragdoll using the fully populated parts list
 		auto ragdollInstance = Physics::CreateSkeletalRagdoll(pc, skeleton.GetPtr(), parts);
-
-		// Increment the reference count so it is kept alive after our local Ref goes out of scope
 		ragdollInstance->AddRef();
 
 		uint32_t jointOffset = 0;
@@ -1056,19 +1045,16 @@ void SetupPlayerRagdoll(RenderContext& rc, PhysicsContext& pc, ECS::Registry& re
 			}
 		}
 
-		// Attach the component to the player controller entity
-		reg.Add(playerEntity,
-				RagdollComponent{.ragdollInstance = ragdollInstance.GetPtr(), // Pass raw pointer
-								 .state = RagdollState::Inactive,
-								 .prevState = RagdollState::Inactive,
-								 .isAddedToPhysics = 0,
-								 .jointOffset = jointOffset,
-								 .jointCount = (uint32_t)pomniSkin->joints_count,
-								 .gltfSkin = const_cast<cgltf_skin*>(pomniSkin)});
-		Log("Skeletal Ragdoll successfully generated and bound to player controller.");
+		reg.Add(playerEntity, RagdollComponent{.ragdollInstance = ragdollInstance.GetPtr(),
+											   .state = RagdollState::Inactive,
+											   .prevState = RagdollState::Inactive,
+											   .isAddedToPhysics = 0,
+											   .jointOffset = jointOffset,
+											   .jointCount = (uint32_t)pomniSkin->joints_count,
+											   .gltfSkin = const_cast<cgltf_skin*>(pomniSkin)});
+		Log("Skeletal Ragdoll successfully generated with simplified key bones.");
 	} else {
-		Log("WARNING: SetupPlayerRagdoll failed because no skeletal skin was found in visual "
-			"parts.");
+		Log("WARNING: SetupPlayerRagdoll failed because no skeletal skin was found.");
 	}
 }
 

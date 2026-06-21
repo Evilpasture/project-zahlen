@@ -8,7 +8,6 @@
 #include <cstdio>
 #include <detail/Print.hpp>
 #include <format>
-#include <print>
 #include <source_location>
 #include <string>
 #include <string_view>
@@ -91,18 +90,19 @@ template <typename T>
 inline void TraceStructInternal(const T& obj, std::string_view name, LogContext ctx) {
 	TraceStructHeader(name, ctx.fmt, ctx.loc.file_name(), ctx.loc.line());
 
-	if constexpr (std::is_pointer_v<T>) {
-		if (obj) {
-			__builtin_dump_struct(obj, &TraceStructCallback);
+	// Helper lambda to handle both raw pointers and smart pointers
+	auto dump = [](const auto* ptr) {
+		if (ptr) {
+			__builtin_dump_struct(ptr, &TraceStructCallback);
 		} else {
 			ZHLN::Println(stderr, "  (null pointer)");
 		}
-	} else if constexpr (requires { obj.get(); }) { // Detects std::unique_ptr / std::shared_ptr
-		if (obj.get()) {
-			__builtin_dump_struct(obj.get(), &TraceStructCallback);
-		} else {
-			ZHLN::Println(stderr, "  (null smart pointer)");
-		}
+	};
+
+	if constexpr (std::is_pointer_v<T>) {
+		dump(obj);
+	} else if constexpr (requires { obj.get(); }) {
+		dump(obj.get());
 	} else {
 		__builtin_dump_struct(&obj, &TraceStructCallback);
 	}

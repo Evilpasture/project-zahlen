@@ -34,6 +34,7 @@ rule zglb
 rule zpak
   command = "{escaped_zcook}" pak -o $out -i $in
   description = ZPAK $out
+  pool = console
 """
 
     compiled_targets = []

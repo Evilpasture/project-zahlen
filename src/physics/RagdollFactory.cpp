@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // src/physics/RagdollFactory.cpp
 #include "Physics.hpp"
 #include "detail/ControlFlow.hpp"
@@ -77,24 +76,24 @@ JPH::Ref<JPH::Ragdoll> CreateSkeletalRagdoll(PhysicsContext& ctx, const JPH::Ske
 		}
 
 		// --- CONSTRAINT SAFETY INITIALIZATION ---
-		// Jolt's Stabilize() assumes every joint with a parent in the skeleton has a valid
-		// constraint. We auto-generate default constraints for unconfigured joints to prevent null
-		// dereferences.
+		// Jolt's Stabilize() assumes every simulated joint with a parent in the skeleton has a
+		// valid constraint. We auto-generate default constraints for unconfigured joints to prevent
+		// null dereferences.
 		for (size_t i = 1; i < skeleton->GetJointCount(); ++i) {
 			int parentIdx = skeleton->GetJoint(i).mParentJointIndex;
-			if (parentIdx >= 0 && settings->mParts[i].mToParent == nullptr) {
+
+			if (parentIdx >= 0 && settings->mParts[i].GetShape() != nullptr &&
+				settings->mParts[i].mToParent == nullptr) {
+
 				auto* twist = new JPH::SwingTwistConstraintSettings();
 				twist->mSpace = JPH::EConstraintSpace::LocalToBodyCOM;
 				twist->mPosition1 = twist->mPosition2 = JPH::RVec3::sZero();
 
-				twist->mTwistAxis1 = twist->mTwistAxis2 = JPH::Vec3::sAxisX();
-				twist->mPlaneAxis1 = twist->mPlaneAxis2 = JPH::Vec3::sAxisY();
-
-				// Setup comfortable default rotation limits
-				twist->mNormalHalfConeAngle = JPH::DegreesToRadians(45.0f);
-				twist->mPlaneHalfConeAngle = JPH::DegreesToRadians(45.0f);
-				twist->mTwistMinAngle = JPH::DegreesToRadians(-45.0f);
-				twist->mTwistMaxAngle = JPH::DegreesToRadians(45.0f);
+				// Lock the joint completely so it doesn't wobble or add floppy degrees of freedom
+				twist->mNormalHalfConeAngle = 0.0f;
+				twist->mPlaneHalfConeAngle = 0.0f;
+				twist->mTwistMinAngle = 0.0f;
+				twist->mTwistMaxAngle = 0.0f;
 
 				settings->mParts[i].mToParent = twist;
 			}

@@ -184,8 +184,27 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
 				ragdoll->GetPose(actualRootOffset, physicalWorldJoints.data());
 			}
 
-			// Calculate final skinning matrices: Final = PhysicalWorld * InverseBindMatrix
+			// Resolve jointOffset and update the TransformComponent of visual meshes
+			uint32_t jointOffset = ragComp.jointOffset;
+			auto allEntities = reg.GetEntitiesWith<MeshComponent>();
+			auto allMeshes = reg.GetRawArray<MeshComponent>();
+			for (size_t k = 0; k < allEntities.size(); ++k) {
+				if (allMeshes[k].gltfSkin == skin) {
+					jointOffset = allMeshes[k].jointOffset;
+					if (auto* trans = reg.Get<TransformComponent>(allEntities[k])) {
+						trans->position = JPH::Vec3(actualRootOffset);
+						trans->rotation = JPH::Quat::sIdentity();
+					}
+				}
+			}
+
+			// Calculate final skinning matrices: Final = InvRoot * PhysicalWorld *
+			// InverseBindMatrix This transforms from mesh-local to root-relative space, which is
+			// then brought to world space by the mesh's TransformComponent (positioned at
+			// actualRootOffset).
 			std::vector<JPH::Mat44> finalSkinningMatrices(ragComp.jointCount);
+			JPH::Mat44 invRoot = JPH::Mat44::sTranslation(-JPH::Vec3(actualRootOffset));
+
 			for (uint32_t j = 0; j < ragComp.jointCount; ++j) {
 				JPH::Mat44 ibm = JPH::Mat44::sIdentity();
 				if (skin->inverse_bind_matrices != nullptr) {
@@ -196,31 +215,10 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
 									 JPH::Vec4(ibmRaw[8], ibmRaw[9], ibmRaw[10], ibmRaw[11]),
 									 JPH::Vec4(ibmRaw[12], ibmRaw[13], ibmRaw[14], ibmRaw[15]));
 				}
-				finalSkinningMatrices[j] = physicalWorldJoints[j] * ibm;
+				finalSkinningMatrices[j] = invRoot * physicalWorldJoints[j] * ibm;
 			}
 
-			// Update the TransformComponent of visual meshes to match the physical pelvis root
-			// offset
-			auto allEntities = reg.GetEntitiesWith<MeshComponent>();
-			auto allMeshes = reg.GetRawArray<MeshComponent>();
-			for (size_t k = 0; k < allEntities.size(); ++k) {
-				if (allMeshes[k].gltfSkin == skin) {
-					if (auto* trans = reg.Get<TransformComponent>(allEntities[k])) {
-						trans->position = JPH::Vec3(actualRootOffset);
-						trans->rotation = JPH::Quat::sIdentity();
-					}
-				}
-			}
-			rc.UpdateJointMatrices(ragComp.jointOffset, finalSkinningMatrices.data(),
-								   ragComp.jointCount);
-
-			// Sync the CharacterVirtual capsule so the camera continues to follow the falling body
-			if (phys != nullptr) {
-				Physics::SetCharacterVelocity(engine.GetPhysicsContext(), phys->physicsHandle,
-											  JPH::Vec3::sZero());
-				Physics::SetCharacterPosition(engine.GetPhysicsContext(), phys->physicsHandle,
-											  actualRootOffset);
-			}
+			rc.UpdateJointMatrices(jointOffset, finalSkinningMatrices.data(), ragComp.jointCount);
 		}
 	}
 

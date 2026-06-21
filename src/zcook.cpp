@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // src/zcook.cpp
+#include "threading/TaskSystem.hpp"
+#include "threading/Thread.hpp"
+
 #include <Jolt/Jolt.h>
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/AssetManager.hpp>
@@ -9,6 +12,7 @@
 #include <Zahlen/Types.hpp>
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <charconv>
 #include <cstddef>
 #include <cstdio>
@@ -16,6 +20,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <mutex>
 #include <print>
 #include <string>
 #include <string_view>
@@ -38,7 +43,8 @@ inline bool IsAlpha(char c) noexcept {
 std::string DecodeJSONString(std::string_view raw) {
 	std::string result;
 	result.reserve(raw.size());
-	for (size_t i = 0; i < raw.size(); ++i) {
+	size_t i = 0;
+	while (i < raw.size()) {
 		if (raw[i] == '\\' && i + 1 < raw.size()) {
 			char next = raw[i + 1];
 			if (next == 'u' && i + 5 < raw.size()) {
@@ -57,7 +63,7 @@ std::string DecodeJSONString(std::string_view raw) {
 						result.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
 						result.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
 					}
-					i += 5; // skip uXXXX
+					i += 6; // skip \uXXXX
 					continue;
 				}
 			}
@@ -90,9 +96,10 @@ std::string DecodeJSONString(std::string_view raw) {
 					result.push_back(next);
 					break;
 			}
-			i++; // skip escape char
+			i += 2; // skip escape char and modifier
 		} else {
 			result.push_back(raw[i]);
+			i++;
 		}
 	}
 	return result;
@@ -879,7 +886,8 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, const std::string& bin
 
 	FILE* bf = std::fopen(binPath.c_str(), "rb");
 	if (bf == nullptr) {
-		std::println(stderr, "[zcook] ERROR: Failed to open intermediate bin file: {}", binPath);
+		std::println(stderr, "[zcook] ERROR: Failed to open intermediate bin file '{}': {}",
+					 binPath, std::strerror(errno));
 		return result;
 	}
 
@@ -1071,7 +1079,7 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, const std::string& bin
 // ============================================================================
 namespace GLB {
 
-inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolder,
+inline bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolder,
 					const std::string& outputPath) {
 	std::vector<uint8_t> binBuffer;
 	binBuffer.reserve(static_cast<size_t>(16 * 1024 * 1024));
@@ -1112,6 +1120,9 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 		std::string fullPath = levelFolder + "/" + relativeUri;
 		FILE* f = std::fopen(fullPath.c_str(), "rb");
 		if (f == nullptr) {
+			std::println(stderr,
+						 "[zcook] WARNING: Failed to open texture source file '{}': {}. Skipping.",
+						 fullPath, std::strerror(errno));
 			return -1;
 		}
 
@@ -1250,6 +1261,10 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 		std::string binPath = levelFolder + "/" + mesh.binFile;
 		CompiledMesh compiled = CompileRawMesh(mesh, binPath);
 		if (compiled.glbVertices.empty()) {
+			std::println(
+				stderr,
+				"[zcook] WARNING: Compiled vertex buffer is empty for mesh ID '{}'. Skipping.",
+				mesh.id);
 			continue;
 		}
 
@@ -1292,7 +1307,7 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 										  iboOffset, iboBytes));
 		uint32_t iboBViewIdx = bViewIndex++;
 
-		uint32_t vertexCount = static_cast<uint32_t>(compiled.glbVertices.size() / 16);
+		auto vertexCount = static_cast<uint32_t>(compiled.glbVertices.size() / 16);
 
 		uint32_t posAcc = accIndex++;
 		uint32_t normAcc = accIndex++;
@@ -1386,7 +1401,7 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 										 mesh.id, primsStr));
 	}
 
-	for (size_t i = 0; i < manifest.lights.size(); ++i) {
+	for (size_t i = 0; i < lightIdToGlbIndex.size(); ++i) {
 		lightIdToGlbIndex[manifest.lights[i].id] = static_cast<int>(i);
 	}
 
@@ -1605,7 +1620,9 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 
 	FILE* out = std::fopen(outputPath.c_str(), "wb");
 	if (out == nullptr) {
-		return;
+		std::println(stderr, "[zcook] ERROR: Failed to open output GLB file '{}' for writing: {}",
+					 outputPath, std::strerror(errno));
+		return false;
 	}
 
 	uint32_t magic = 0x46546C67; // "glTF"
@@ -1625,6 +1642,7 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 	std::fwrite(binBuffer.data(), 1, binChunkLength, out);
 
 	std::fclose(out);
+	return true;
 }
 
 } // namespace GLB
@@ -1652,11 +1670,26 @@ int CookMesh(int argc, char** argv) {
 	}
 
 	if (metaPath.empty() || meshId.empty() || inPath.empty() || outPath.empty()) {
+		std::println(stderr, "[zcook] ERROR: Missing arguments for mesh subcommand. Requirements:");
+		if (metaPath.empty()) {
+			std::println(stderr, "  --meta <path>  (Scene metadata JSON)");
+		}
+		if (meshId.empty()) {
+			std::println(stderr, "  --id <string>  (Mesh Identifier)");
+		}
+		if (inPath.empty()) {
+			std::println(stderr, "  -i <path>      (Input raw binaries)");
+		}
+		if (outPath.empty()) {
+			std::println(stderr, "  -o <path>      (Output compiled destination file)");
+		}
 		return 1;
 	}
 
 	FILE* f = std::fopen(metaPath.c_str(), "rb");
 	if (f == nullptr) {
+		std::println(stderr, "[zcook] ERROR: Failed to open metadata scene file '{}': {}", metaPath,
+					 std::strerror(errno));
 		return 1;
 	}
 	std::fseek(f, 0, SEEK_END);
@@ -1673,6 +1706,9 @@ int CookMesh(int argc, char** argv) {
 
 	auto it = std::ranges::find_if(manifest.meshes, [&](const auto& m) { return m.id == meshId; });
 	if (it == manifest.meshes.end()) {
+		std::println(stderr,
+					 "[zcook] ERROR: Mesh ID '{}' was not found in parsed scene manifest '{}'",
+					 meshId, metaPath);
 		return 1;
 	}
 	const auto& mesh = *it;
@@ -1680,21 +1716,37 @@ int CookMesh(int argc, char** argv) {
 	// Pass to compiled engine core to perform deduplication and tangent generation
 	CompiledMesh compiled = CompileRawMesh(mesh, inPath);
 	if (compiled.glbVertices.empty()) {
-		return 1;
+		std::println(stderr,
+					 "[zcook] WARNING: Raw mesh compiled buffers are empty/null for path '{}'. "
+					 "Defaulting to an empty mesh structure.",
+					 inPath);
 	}
 
 	CookedMeshHeader meshHeader{};
 	meshHeader.magic = 0x3048534D; // 'MSH0'
 	meshHeader.version = 2;
-	meshHeader.boundingBoxMin[0] = compiled.minB[0];
-	meshHeader.boundingBoxMin[1] = compiled.minB[1];
-	meshHeader.boundingBoxMin[2] = compiled.minB[2];
-	meshHeader.boundingBoxMax[0] = compiled.maxB[0];
-	meshHeader.boundingBoxMax[1] = compiled.maxB[1];
-	meshHeader.boundingBoxMax[2] = compiled.maxB[2];
 
-	meshHeader.vertexCount = static_cast<uint32_t>(compiled.glbVertices.size() / 16);
-	meshHeader.indexCount = static_cast<uint32_t>(compiled.indices.size());
+	// If the compiled buffers are empty, we zero out the bounding box to prevent NaNs/Infs in
+	// rendering/physics
+	if (compiled.glbVertices.empty()) {
+		meshHeader.boundingBoxMin[0] = 0.0f;
+		meshHeader.boundingBoxMin[1] = 0.0f;
+		meshHeader.boundingBoxMin[2] = 0.0f;
+		meshHeader.boundingBoxMax[0] = 0.0f;
+		meshHeader.boundingBoxMax[1] = 0.0f;
+		meshHeader.boundingBoxMax[2] = 0.0f;
+		meshHeader.vertexCount = 0;
+		meshHeader.indexCount = 0;
+	} else {
+		meshHeader.boundingBoxMin[0] = compiled.minB[0];
+		meshHeader.boundingBoxMin[1] = compiled.minB[1];
+		meshHeader.boundingBoxMin[2] = compiled.minB[2];
+		meshHeader.boundingBoxMax[0] = compiled.maxB[0];
+		meshHeader.boundingBoxMax[1] = compiled.maxB[1];
+		meshHeader.boundingBoxMax[2] = compiled.maxB[2];
+		meshHeader.vertexCount = static_cast<uint32_t>(compiled.glbVertices.size() / 16);
+		meshHeader.indexCount = static_cast<uint32_t>(compiled.indices.size());
+	}
 
 	std::vector<Vertex> finalVerts(meshHeader.vertexCount);
 	for (uint32_t i = 0; i < meshHeader.vertexCount; ++i) {
@@ -1726,12 +1778,18 @@ int CookMesh(int argc, char** argv) {
 	fs::create_directories(fs::path(outPath).parent_path());
 	FILE* out = std::fopen(outPath.c_str(), "wb");
 	if (out == nullptr) {
+		std::println(stderr, "[zcook] ERROR: Failed to open output mesh file '{}' for writing: {}",
+					 outPath, std::strerror(errno));
 		return 1;
 	}
 
 	std::fwrite(&meshHeader, 1, sizeof(CookedMeshHeader), out);
-	std::fwrite(finalVerts.data(), 1, vboSize, out);
-	std::fwrite(compiled.indices.data(), 1, iboSize, out);
+	if (vboSize > 0) {
+		std::fwrite(finalVerts.data(), 1, vboSize, out);
+	}
+	if (iboSize > 0) {
+		std::fwrite(compiled.indices.data(), 1, iboSize, out);
+	}
 	std::fclose(out);
 
 	return 0;
@@ -1750,11 +1808,20 @@ int CookTexture(int argc, char** argv) {
 	}
 
 	if (inPath.empty() || outPath.empty()) {
+		std::println(stderr, "[zcook] ERROR: Missing arguments for tex subcommand. Requirements:");
+		if (inPath.empty()) {
+			std::println(stderr, "  -i <path>      (Input raw texture/image file)");
+		}
+		if (outPath.empty()) {
+			std::println(stderr, "  -o <path>      (Output compiled texture destination)");
+		}
 		return 1;
 	}
 
 	FILE* in = std::fopen(inPath.c_str(), "rb");
 	if (in == nullptr) {
+		std::println(stderr, "[zcook] ERROR: Failed to open input texture file '{}': {}", inPath,
+					 std::strerror(errno));
 		return 1;
 	}
 	std::fseek(in, 0, SEEK_END);
@@ -1766,6 +1833,12 @@ int CookTexture(int argc, char** argv) {
 
 	fs::create_directories(fs::path(outPath).parent_path());
 	FILE* out = std::fopen(outPath.c_str(), "wb");
+	if (out == nullptr) {
+		std::println(stderr,
+					 "[zcook] ERROR: Failed to open output texture file '{}' for writing: {}",
+					 outPath, std::strerror(errno));
+		return 1;
+	}
 	std::fwrite(fileData.data(), 1, size, out);
 	std::fclose(out);
 
@@ -1785,26 +1858,36 @@ int PackArchive(int argc, char** argv) {
 	}
 
 	if (outPath.empty() || manifestPath.empty()) {
+		std::println(stderr, "[zcook] ERROR: Missing arguments for pak subcommand. Requirements:");
+		if (manifestPath.empty()) {
+			std::println(stderr, "  -i <path>      (Input package manifest txt file)");
+		}
+		if (outPath.empty()) {
+			std::println(stderr, "  -o <path>      (Output compiled .pak archive path)");
+		}
 		return 1;
 	}
 
 	// Ensure the output directory exists
 	fs::create_directories(fs::path(outPath).parent_path());
 
-	// Open the output archive file directly
-	FILE* out = std::fopen(outPath.c_str(), "wb");
-	if (out == nullptr) {
+	std::ifstream ifs(manifestPath);
+	if (!ifs.is_open()) {
+		std::println(stderr, "[zcook] ERROR: Failed to open pak manifest file '{}'", manifestPath);
 		return 1;
 	}
 
-	// Step 1: Write a dummy PakHeader to reserve space at the start of the file
-	PakHeader dummyHeader{};
-	std::fwrite(&dummyHeader, 1, sizeof(PakHeader), out);
+	struct ManifestEntry {
+		std::string vpath;
+		std::string rpath;
+		std::vector<char> data;
+		size_t size = 0;
+		size_t alignedOffset = 0;
+		int errorCode = 0;
+		bool success = false;
+	};
 
-	std::vector<PakEntry> entries;
-	uint64_t currentPayloadSize = 0; // Tracks payload offset relative to payload start
-
-	std::ifstream ifs(manifestPath);
+	std::vector<ManifestEntry> manifestEntries;
 	std::string line;
 	while (std::getline(ifs, line)) {
 		if (line.empty() || line[0] == '#') {
@@ -1817,41 +1900,172 @@ int PackArchive(int argc, char** argv) {
 
 		std::string vpath = line.substr(0, pos);
 		std::string rpath = line.substr(pos + 1);
+		manifestEntries.push_back({.vpath = std::move(vpath), .rpath = std::move(rpath)});
+	}
+	ifs.close();
 
-		FILE* f = std::fopen(rpath.c_str(), "rb");
-		if (f == nullptr) {
+	const auto totalFiles = static_cast<uint32_t>(manifestEntries.size());
+
+	if (manifestEntries.empty()) {
+		std::println(stderr, "[zcook] WARNING: Manifest file '{}' is empty. No files to package.",
+					 manifestPath);
+	} else {
+		std::println("[zcook] Loading {} assets in parallel...", totalFiles);
+
+		std::atomic<uint32_t> loadedCount{0};
+		ZHLN::Mutex printMutex{};
+
+		ZHLN::TaskSystem::ParallelFor(
+			totalFiles, 1,
+			[&manifestEntries, &loadedCount, &printMutex, totalFiles](uint32_t start, uint32_t end,
+																	  uint32_t /*chunkIdx*/) {
+				for (uint32_t i = start; i < end; ++i) {
+					auto& entry = manifestEntries[i];
+					FILE* f = std::fopen(entry.rpath.c_str(), "rb");
+					if (f == nullptr) {
+						entry.errorCode = errno;
+						entry.success = false;
+					} else {
+						std::fseek(f, 0, SEEK_END);
+						long size = std::ftell(f);
+						std::fseek(f, 0, SEEK_SET);
+
+						entry.data.resize(size);
+						if (size > 0) {
+							size_t readBytes = std::fread(entry.data.data(), 1, size, f);
+							entry.data.resize(readBytes);
+							entry.size = readBytes;
+						}
+						entry.success = true;
+						std::fclose(f);
+					}
+
+					// Update thread-safe atomic counter
+					const uint32_t current =
+						loadedCount.fetch_add(1, std::memory_order_relaxed) + 1;
+
+					// Print progress updates periodically to minimize lock contention
+					if (current % 10 == 0 || current == totalFiles) {
+						std::lock_guard<ZHLN::Mutex> lock(printMutex);
+						std::print("\r[zcook] Loading assets: {}/{} ({:.1f}%)", current, totalFiles,
+								   (static_cast<float>(current) / totalFiles) * 100.0f);
+						std::fflush(stdout);
+					}
+				}
+			});
+		std::println(""); // Finalize the carriage return loading line
+	}
+
+	// Calculate the exact payload write size down to the byte
+	uint64_t totalBytesToWrite = sizeof(PakHeader);
+	uint64_t successfulCount = 0;
+	for (const auto& entry : manifestEntries) {
+		if (entry.success) {
+			size_t padding = (16 - (totalBytesToWrite % 16)) % 16;
+			totalBytesToWrite += padding + entry.size;
+			successfulCount++;
+		}
+	}
+	totalBytesToWrite += successfulCount * sizeof(PakEntry);
+
+	std::println("[zcook] Writing archive directly to '{}'...", outPath);
+
+	FILE* out = std::fopen(outPath.c_str(), "wb");
+	if (out == nullptr) {
+		std::println(
+			stderr,
+			"[zcook] ERROR: Failed to open output archive destination file '{}' for writing: {}",
+			outPath, std::strerror(errno));
+		return 1;
+	}
+
+	// Allocate a 1MB buffer to prevent thousands of tiny kernel context switches
+	std::vector<char> streamBuffer(static_cast<size_t>(1024 * 1024));
+	std::setvbuf(out, streamBuffer.data(), _IOFBF, streamBuffer.size());
+
+	uint64_t totalBytesWritten = 0;
+	auto writeAndTrack = [&](const void* ptr, size_t size) {
+		if (size == 0) {
+			return;
+		}
+		std::fwrite(ptr, 1, size, out);
+		totalBytesWritten += size;
+	};
+
+	// Step 1: Write a dummy PakHeader to reserve space at the start of the file
+	PakHeader dummyHeader{};
+	writeAndTrack(&dummyHeader, sizeof(PakHeader));
+
+	std::vector<PakEntry> entries;
+	uint64_t currentPayloadSize = 0; // Tracks payload offset relative to payload start
+
+	auto lastProgressTime = std::chrono::steady_clock::now();
+	auto startWriteTime = lastProgressTime;
+
+	// Progress updates rate-limited to 100ms intervals to prevent output I/O bottlenecking
+	auto updateProgress = [&](bool force) {
+		auto now = std::chrono::steady_clock::now();
+		auto elapsed =
+			std::chrono::duration_cast<std::chrono::milliseconds>(now - lastProgressTime).count();
+		if (force || elapsed >= 100) {
+			double writtenMB = static_cast<double>(totalBytesWritten) / (1024.0 * 1024.0);
+			double totalMB = static_cast<double>(totalBytesToWrite) / (1024.0 * 1024.0);
+			double percentage =
+				totalBytesToWrite > 0
+					? (static_cast<double>(totalBytesWritten) / totalBytesToWrite) * 100.0
+					: 100.0;
+
+			auto totalElapsedMS =
+				std::chrono::duration_cast<std::chrono::milliseconds>(now - startWriteTime).count();
+			double speedMBs = 0.0;
+			if (totalElapsedMS > 0) {
+				speedMBs = (writtenMB / totalElapsedMS) * 1000.0;
+			}
+
+			std::print("\r[zcook] Writing archive: {:.2f} / {:.2f} MB ({:.1f}%) | {:.1f} MB/s",
+					   writtenMB, totalMB, percentage, speedMBs);
+			std::fflush(stdout);
+			lastProgressTime = now;
+		}
+	};
+
+	for (auto& entry : manifestEntries) {
+		if (!entry.success) {
+			if (entry.errorCode != 0) {
+				std::println(
+					stderr,
+					"\n[zcook] WARNING: Failed to open archive source file '{}' specified in "
+					"manifest: {}. Skipping.",
+					entry.rpath, std::strerror(entry.errorCode));
+			}
 			continue;
 		}
-		std::fseek(f, 0, SEEK_END);
-		long size = std::ftell(f);
-		std::fseek(f, 0, SEEK_SET);
 
 		// Step 2: Align to 16-byte boundary
 		size_t padding = (16 - (currentPayloadSize % 16)) % 16;
 		if (padding > 0) {
 			static const char zeroPadding[16] = {0};
-			std::fwrite(zeroPadding, 1, padding, out);
+			writeAndTrack(zeroPadding, padding);
 			currentPayloadSize += padding;
 		}
 
 		// Step 3: Populate PakEntry metadata
-		PakEntry entry{};
-		entry.pathHash = HashAssetPath(vpath);
-		entry.offset = sizeof(PakHeader) + currentPayloadSize;
-		entry.compressedSize = size;
-		entry.uncompressedSize = size;
-		entry.compression = 0;
+		PakEntry pakEntry{};
+		pakEntry.pathHash = HashAssetPath(entry.vpath);
+		pakEntry.offset = sizeof(PakHeader) + currentPayloadSize;
+		pakEntry.compressedSize = entry.size;
+		pakEntry.uncompressedSize = entry.size;
+		pakEntry.compression = 0;
 
-		entries.push_back(entry);
+		entries.push_back(pakEntry);
 
-		// Step 4: Stream file data directly to the archive
-		if (size > 0) {
-			std::vector<char> fileData(size);
-			size_t readBytes = std::fread(fileData.data(), 1, size, f);
-			std::fwrite(fileData.data(), 1, readBytes, out);
-			currentPayloadSize += readBytes;
+		// Step 4: Dump pre-loaded data block directly to the package
+		if (entry.size > 0) {
+			writeAndTrack(entry.data.data(), entry.size);
+			currentPayloadSize += entry.size;
 		}
-		std::fclose(f);
+
+		updateProgress(false);
 	}
 
 	// Step 5: Record final TOC Offset right after the payload data
@@ -1859,7 +2073,7 @@ int PackArchive(int argc, char** argv) {
 
 	// Step 6: Write Table of Contents (entries list)
 	if (!entries.empty()) {
-		std::fwrite(entries.data(), sizeof(PakEntry), entries.size(), out);
+		writeAndTrack(entries.data(), entries.size() * sizeof(PakEntry));
 	}
 
 	// Step 7: Finalize actual PakHeader metadata
@@ -1873,7 +2087,28 @@ int PackArchive(int argc, char** argv) {
 	std::fseek(out, 0, SEEK_SET);
 	std::fwrite(&header, 1, sizeof(PakHeader), out);
 
+	// Mark all bytes as written for progress tracking
+	totalBytesWritten = totalBytesToWrite;
+
+	// Force the final progress bar to 100% on the terminal before blocking
+	updateProgress(true);
+	std::println(""); // Newline
+
+	// Notify the user that physical synchronization is taking place
+	std::print("[zcook] Syncing memory cache to physical disk (OS flush)...");
+	std::fflush(stdout);
+
+	// This is the blocking call where the physical 5-10s write to physical blocks actually occurs
 	std::fclose(out);
+
+	// Clear the "Syncing..." line cleanly by overwriting it with spaces
+	std::print("\r                                                                          \r");
+	std::fflush(stdout);
+
+	const double sizeInMB = static_cast<double>(tocOffset) / (1024.0 * 1024.0);
+	std::println("[zcook] Successfully packed {}/{} assets into '{}' ({:.2f} MB)", entries.size(),
+				 totalFiles, outPath, sizeInMB);
+
 	return 0;
 }
 
@@ -1890,11 +2125,20 @@ int CookGLB(int argc, char** argv) {
 	}
 
 	if (metaPath.empty() || outPath.empty()) {
+		std::println(stderr, "[zcook] ERROR: Missing arguments for glb subcommand. Requirements:");
+		if (metaPath.empty()) {
+			std::println(stderr, "  --meta <path>  (Metadata JSON scene layout file)");
+		}
+		if (outPath.empty()) {
+			std::println(stderr, "  -o <path>      (Output compiled destination path .glb)");
+		}
 		return 1;
 	}
 
 	FILE* f = std::fopen(metaPath.c_str(), "rb");
 	if (f == nullptr) {
+		std::println(stderr, "[zcook] ERROR: Failed to open metadata file '{}': {}", metaPath,
+					 std::strerror(errno));
 		return 1;
 	}
 	std::fseek(f, 0, SEEK_END);
@@ -1910,7 +2154,11 @@ int CookGLB(int argc, char** argv) {
 	Compiler::IRManifest manifest = parser.Parse();
 
 	std::string levelFolder = fs::path(metaPath).parent_path().string();
-	GLB::EmitGLB(manifest, levelFolder, outPath);
+	if (!GLB::EmitGLB(manifest, levelFolder, outPath)) {
+		std::println(stderr, "[zcook] ERROR: Failed to generate GLB asset package for path '{}'",
+					 outPath);
+		return 1;
+	}
 	return 0;
 }
 
@@ -1920,22 +2168,44 @@ int main(int argc, char** argv) {
 	std::setvbuf(stdout, nullptr, _IONBF, 0);
 
 	if (argc < 2) {
+		std::println(
+			stderr,
+			"[zcook] ERROR: Missing command-line action. Usage:\n"
+			"  zcook <command> [options]\n\n"
+			"Available Commands:\n"
+			"  mesh  - Deduplicates standard uncompressed floats into static mesh arrays.\n"
+			"  tex   - Copy and format static assets into standard asset structures.\n"
+			"  glb   - Compiles internal scenes and layouts into standard glTF GLB containers.\n"
+			"  pak   - Compact files listed in a manifest file into single custom pak indexes.");
 		return 1;
 	}
 
 	std::string_view cmd = argv[1];
-	if (cmd == "mesh") {
-		return ZHLN::CookMesh(argc - 2, argv + 2);
-	}
-	if (cmd == "tex") {
-		return ZHLN::CookTexture(argc - 2, argv + 2);
-	}
-	if (cmd == "glb") {
-		return ZHLN::CookGLB(argc - 2, argv + 2);
-	}
-	if (cmd == "pak") {
-		return ZHLN::PackArchive(argc - 2, argv + 2);
+	if (cmd != "mesh" && cmd != "tex" && cmd != "glb" && cmd != "pak") {
+		std::println(stderr,
+					 "[zcook] ERROR: Unsupported action subcommand '{}'. Run with no arguments to "
+					 "see usage.",
+					 cmd);
+		return 1;
 	}
 
-	return 1;
+	// Initialize the Fiber and Task Systems for all active cooking paths
+	ZHLN::Fiber::InitMainThread();
+	ZHLN::TaskSystem::Init(0); // 0 = Auto-detect CPU cores
+
+	int result = 0;
+	if (cmd == "mesh") {
+		result = ZHLN::CookMesh(argc - 2, argv + 2);
+	} else if (cmd == "tex") {
+		result = ZHLN::CookTexture(argc - 2, argv + 2);
+	} else if (cmd == "glb") {
+		result = ZHLN::CookGLB(argc - 2, argv + 2);
+	} else if (cmd == "pak") {
+		result = ZHLN::PackArchive(argc - 2, argv + 2);
+	}
+
+	// Graceful shutdown of workers and fibers
+	ZHLN::TaskSystem::Shutdown();
+
+	return result;
 }
