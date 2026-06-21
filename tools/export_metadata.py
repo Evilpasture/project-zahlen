@@ -19,21 +19,9 @@ def scalar_to_rgb(t):
     """Procedurally maps a single scalar float to a 3D RGB color wheel.
     Adjust the cosine parameters below to customize the visual aesthetic.
     """
-    # OPTION A: Circus Rainbow (Saturated & Vibrant)
-    # Fits the colorful circus tent/rainbow aesthetic perfectly
-    # r = 0.5 + 0.5 * math.cos(2.0 * math.pi * (t + 0.0))
-    # g = 0.5 + 0.5 * math.cos(2.0 * math.pi * (t + 0.33))
-    # b = 0.5 + 0.5 * math.cos(2.0 * math.pi * (t + 0.67))
-
-    # OPTION B: Pastel Fantasy (Softer, less saturated)
     r = 0.65 + 0.35 * math.cos(2.0 * math.pi * (t + 0.0))
     g = 0.65 + 0.35 * math.cos(2.0 * math.pi * (t + 0.33))
     b = 0.65 + 0.35 * math.cos(2.0 * math.pi * (t + 0.67))
-
-    # OPTION C: Terracotta & Stone (Warm earthy brick/slate tones)
-    # r = 0.50 + 0.20 * math.cos(2.0 * math.pi * (t + 0.0))
-    # g = 0.40 + 0.15 * math.cos(2.0 * math.pi * (t + 0.1))
-    # b = 0.35 + 0.10 * math.cos(2.0 * math.pi * (t + 0.2))
 
     return (round(r, 4), round(g, 4), round(b, 4), 1.0)
 
@@ -346,8 +334,6 @@ def resolve_base_color(principled):
     if not base_color_input.is_linked:
         return [clean_float(c) for c in base_color_input.default_value]
 
-    # If the base color is driven by an image texture or vertex color attribute,
-    # default the tint factor to white to prevent stray node values from darkening the export.
     img_node = find_upstream_texture_or_attribute(base_color_input)
     if img_node:
         return [1.0, 1.0, 1.0, 1.0]
@@ -388,7 +374,6 @@ def find_root_shader_node(material):
         None,
     )
     if not output_node:
-        # Fallback to any output material node
         output_node = next(
             (n for n in material.node_tree.nodes if n.type == "OUTPUT_MATERIAL"),
             None,
@@ -771,7 +756,7 @@ def extract_materials():
 
 
 def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_meshes):
-    """Packs local geometry buffers, split-vertex coordinates, and morph keys."""
+    """Packs fast contiguous loop arrays (offloading index deduplication to the C++ compiler)."""
     meshes = []
 
     for obj in geometry_sources:
@@ -790,7 +775,6 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
         if not mesh_data:
             continue
 
-        # Prevent empty mesh generation to preserve glTF spec compliance
         if len(mesh_data.vertices) == 0 or len(mesh_data.polygons) == 0:
             try:
                 obj.evaluated_get(depsgraph).to_mesh_clear()
@@ -807,17 +791,13 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
             mesh_data.uv_layers.active.data if mesh_data.uv_layers else None
         )
 
-        # Robust extraction of generic Geometry Node / Attribute colors
         active_color_attr = None
         if hasattr(mesh_data, "attributes"):
-            # Stage 1: Categorize potential color layers, ignoring standard built-ins
             candidates_multi = []
             candidates_scalar = []
 
             for attr in mesh_data.attributes:
                 attr_name_lower = attr.name.lower()
-
-                # Exclude standard built-in geometric/UV attributes from being treated as color layers
                 if attr_name_lower in {"position", "normal", "tangent", "uvmap", "uv"}:
                     continue
 
@@ -832,27 +812,14 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
                 elif attr.data_type == "FLOAT" and has_color_name:
                     candidates_scalar.append(attr)
 
-            # Stage 2: Select the best candidate (Prioritizing custom scalar attributes like RandomCol/OrbColor)
             if candidates_scalar:
                 active_color_attr = candidates_scalar[0]
-                print(
-                    f"      [Override] Automatically mapping scalar FLOAT attribute '{active_color_attr.name}' "
-                    f"on '{obj.name}' to greyscale color layer."
-                )
             elif candidates_multi:
-                # Fallback to multi-channel attributes if no scalar color override exists
                 named_candidates = [c[0] for c in candidates_multi if c[1]]
                 if named_candidates:
                     active_color_attr = named_candidates[0]
                 else:
                     active_color_attr = candidates_multi[0][0]
-
-        has_tangents = False
-        try:
-            mesh_data.calc_tangents()
-            has_tangents = True
-        except Exception:
-            pass
 
         group_to_joint_idx = {}
         if is_skinned:
@@ -864,13 +831,8 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
                 if g.name in bone_names
             }
 
-        unique_vertices = {}
         flat_vbo = []
-        vertex_count = 0
-        joints_data = []
-        weights_data = []
         primitives = []
-        ibo_binary = b""
         current_offset = 0
 
         mesh_data.calc_loop_triangles()
@@ -882,9 +844,6 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
             triangles_by_mat[mat_idx].append(tri)
 
         for mat_idx, tris in triangles_by_mat.items():
-            prim_indices = []
-
-            # Check if active material has a Color Ramp driven by an Attribute node
             ramp_node = None
             ramp_attr = None
             if mat_idx < len(obj.material_slots):
@@ -902,6 +861,7 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
                             if hasattr(mesh_data, "attributes") and ramp_attr_name:
                                 ramp_attr = mesh_data.attributes.get(ramp_attr_name)
 
+            loop_count = 0
             for tri in tris:
                 for loop_idx, v_idx in zip(tri.loops, tri.vertices):
                     co = mesh_data.vertices[v_idx].co
@@ -912,7 +872,6 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
                     )
                     uv = active_uv_layer[loop_idx].uv if active_uv_layer else (0.0, 0.0)
 
-                    # Resolve vertex color
                     color = (1.0, 1.0, 1.0, 1.0)
                     if ramp_node and ramp_attr and ramp_attr.data:
                         if ramp_attr.domain == "CORNER":
@@ -937,73 +896,50 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
                             datum = None
                         color = unpack_color_from_datum(datum)
 
-                    if has_tangents:
-                        tangent = mesh_data.loops[loop_idx].tangent
-                        sign = mesh_data.loops[loop_idx].bitangent_sign
-                    else:
-                        tangent = (1.0, 0.0, 0.0)
-                        sign = 1.0
-
-                    key = (
-                        v_idx,
-                        round(uv[0], 5),
-                        round(uv[1], 5),
-                        round(normal[0], 5),
-                        round(normal[1], 5),
-                        round(normal[2], 5),
-                        round(tangent[0], 5),
-                        round(tangent[1], 5),
-                        round(tangent[2], 5),
-                        round(sign, 5),
-                        round(color[0], 5),
-                        round(color[1], 5),
-                        round(color[2], 5),
-                        round(color[3], 5),
+                    flat_vbo.extend(
+                        [
+                            float(v_idx),
+                            co[0],
+                            co[2],
+                            -co[1],
+                            normal[0],
+                            normal[2],
+                            -normal[1],
+                            uv[0],
+                            1.0 - uv[1],
+                            color[0],
+                            color[1],
+                            color[2],
+                            color[3],
+                        ]
                     )
 
-                    if key in unique_vertices:
-                        idx = unique_vertices[key]
-                    else:
-                        idx = vertex_count
-                        unique_vertices[key] = idx
-                        vertex_count += 1
+                    if is_skinned:
+                        v = mesh_data.vertices[v_idx]
+                        v_influences = []
+                        for g in v.groups:
+                            j_idx = group_to_joint_idx.get(g.group)
+                            if j_idx is not None:
+                                v_influences.append((j_idx, g.weight))
 
-                        flat_vbo.extend([co[0], co[2], -co[1]])
-                        flat_vbo.extend([normal[0], normal[2], -normal[1]])
-                        flat_vbo.extend([tangent[0], tangent[2], -tangent[1], sign])
-                        flat_vbo.extend([uv[0], 1.0 - uv[1]])
-                        flat_vbo.extend([color[0], color[1], color[2], color[3]])
+                        v_influences = sorted(
+                            v_influences, key=lambda x: x[1], reverse=True
+                        )[:4]
+                        while len(v_influences) < 4:
+                            v_influences.append((0, 0.0))
 
-                        if is_skinned:
-                            v = mesh_data.vertices[v_idx]
-                            v_influences = []
-                            for g in v.groups:
-                                j_idx = group_to_joint_idx.get(g.group)
-                                if j_idx is not None:
-                                    v_influences.append((j_idx, g.weight))
+                        total_w = sum(w for _, w in v_influences)
+                        if total_w > 0.0:
+                            v_influences = [(j, w / total_w) for j, w in v_influences]
+                        else:
+                            v_influences = [(0, 1.0)] + [(0, 0.0)] * 3
 
-                            v_influences = sorted(
-                                v_influences, key=lambda x: x[1], reverse=True
-                            )[:4]
-                            while len(v_influences) < 4:
-                                v_influences.append((0, 0.0))
+                        for j, w in v_influences:
+                            flat_vbo.append(float(j))
+                        for j, w in v_influences:
+                            flat_vbo.append(float(w))
 
-                            total_w = sum(w for _, w in v_influences)
-                            if total_w > 0.0:
-                                v_influences = [
-                                    (j, w / total_w) for j, w in v_influences
-                                ]
-                            else:
-                                v_influences = [(0, 1.0)] + [(0, 0.0)] * 3
-
-                            for j, w in v_influences:
-                                joints_data.append(j)
-                                weights_data.append(w)
-
-                    prim_indices.append(idx)
-
-            prim_bin = struct.pack(f"{len(prim_indices)}I", *prim_indices)
-            ibo_binary += prim_bin
+                    loop_count += 1
 
             if (
                 mat_idx < len(obj.material_slots)
@@ -1016,132 +952,35 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
             primitives.append(
                 {
                     "material_id": mat_id,
-                    "draw_mode": "TRIANGLES",
-                    "index_offset": current_offset,
-                    "index_count": len(prim_indices),
+                    "vertex_offset": current_offset,
+                    "vertex_count": loop_count,
                 }
             )
-            current_offset += len(prim_bin)
+            current_offset += loop_count
 
         vbo_binary = struct.pack(f"{len(flat_vbo)}f", *flat_vbo)
-        joints_binary = b""
-        weights_binary = b""
-        if is_skinned:
-            joints_binary = struct.pack(f"{len(joints_data)}H", *joints_data)
-            weights_binary = struct.pack(f"{len(weights_data)}f", *weights_data)
-
-        morph_targets = []
-        blend_weights = []
-        morph_binary = b""
-        if mesh_data.shape_keys:
-            key_blocks = mesh_data.shape_keys.key_blocks
-            basis_key = key_blocks[0]
-            basis_cos = [0.0] * (len(mesh_data.vertices) * 3)
-            basis_key.data.foreach_get("co", basis_cos)
-
-            morph_offset = 0
-            for idx, kb in enumerate(key_blocks[1:]):
-                target_cos = [0.0] * (len(mesh_data.vertices) * 3)
-                kb.data.foreach_get("co", target_cos)
-                deltas_pos = [0.0] * (vertex_count * 3)
-
-                for key, split_idx in unique_vertices.items():
-                    orig_v_idx = key[0]
-                    dx = target_cos[orig_v_idx * 3] - basis_cos[orig_v_idx * 3]
-                    dy = target_cos[orig_v_idx * 3 + 1] - basis_cos[orig_v_idx * 3 + 1]
-                    dz = target_cos[orig_v_idx * 3 + 2] - basis_cos[orig_v_idx * 3 + 2]
-
-                    deltas_pos[split_idx * 3] = dx
-                    deltas_pos[split_idx * 3 + 1] = dz
-                    deltas_pos[split_idx * 3 + 2] = -dy
-
-                target_bin = struct.pack(f"{len(deltas_pos)}f", *deltas_pos)
-                morph_binary += target_bin
-
-                morph_targets.append(
-                    {
-                        "name": kb.name,
-                        "weight": clean_float(kb.value),
-                        "delta_positions": {
-                            "byte_offset": morph_offset,
-                            "byte_length": len(deltas_pos) * 4,
-                        },
-                    }
-                )
-                morph_offset += len(target_bin)
-
-                blend_weights.append(
-                    {
-                        "index": idx,
-                        "name": kb.name,
-                        "default_weight": clean_float(kb.value),
-                        "range": [
-                            clean_float(kb.slider_min),
-                            clean_float(kb.slider_max),
-                        ],
-                    }
-                )
 
         bin_path = os.path.join(bin_dir, f"{mesh_id}.bin")
         with open(bin_path, "wb") as f:
             f.write(vbo_binary)
-            f.write(ibo_binary)
-            if is_skinned:
-                f.write(joints_binary)
-                f.write(weights_binary)
-            if morph_binary:
-                f.write(morph_binary)
 
-        v_offset = 0
-        v_len = len(vbo_binary)
-        i_offset = v_len
-        i_len = len(ibo_binary)
-
-        layout = "P3N3T4U2C4"
+        layout = "RAW_P3N3U2C4"
         if is_skinned:
             layout += "_J4W4"
-        if morph_targets:
-            layout += f"_M{len(morph_targets)}"
 
         mesh_info = {
             "id": mesh_id,
             "name": f"{obj.data.name} Mesh",
-            "vertex_count": vertex_count,
-            "source_vertex_count": len(mesh_data.vertices),
             "layout": layout,
             "buffers": {
                 "bin_file": os.path.relpath(bin_path, asset_dir),
                 "vertex_buffer": {
-                    "byte_offset": v_offset,
-                    "byte_length": v_len,
-                    "stride": 64,
+                    "byte_offset": 0,
+                    "byte_length": len(vbo_binary),
                 },
-                "index_buffer": {"byte_offset": i_offset, "byte_length": i_len},
             },
             "primitives": primitives,
-            "morph_targets": morph_targets,
-            "blend_weights": blend_weights,
         }
-
-        if is_skinned:
-            j_offset = i_offset + i_len
-            j_len = len(joints_binary)
-            w_offset = j_offset + j_len
-            w_len = len(weights_binary)
-
-            mesh_info["buffers"]["joints"] = {
-                "byte_offset": j_offset,
-                "byte_length": j_len,
-            }
-            mesh_info["buffers"]["weights"] = {
-                "byte_offset": w_offset,
-                "byte_length": w_len,
-            }
-
-        if morph_binary:
-            target_start = i_offset + i_len + (len(joints_binary) + len(weights_binary))
-            for target in mesh_info["morph_targets"]:
-                target["delta_positions"]["byte_offset"] += target_start
 
         meshes.append(mesh_info)
         exported_meshes.add(mesh_id)
@@ -1246,7 +1085,6 @@ def build_node_info(
     elif obj.IsA("MESH"):
         mesh_id = make_id("mesh", f"{obj.data.name}{mesh_suffix}")
 
-        # Only attach mesh configurations if the object is strictly visible
         if is_visible and mesh_id in exported_meshes:
             node_info["refs"]["mesh_id"] = mesh_id
         else:
@@ -1255,10 +1093,7 @@ def build_node_info(
         node_info["refs"]["material_ids"] = [
             make_id("mat", s.material.name) for s in obj.material_slots if s.material
         ]
-        if obj.data.shape_keys:
-            node_info["refs"]["morph_weights"] = [
-                clean_float(kb.value) for kb in obj.data.shape_keys.key_blocks[1:]
-            ]
+
         try:
             coords = [c_basis @ v.co for v in obj.data.vertices]
             min_bound = [clean_float(min(c[i] for c in coords)) for i in range(3)]

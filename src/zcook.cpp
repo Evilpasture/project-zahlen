@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // src/zcook.cpp
+#include <Jolt/Jolt.h>
+#include <Jolt/Math/Vec3.h>
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Types.hpp>
@@ -321,12 +323,12 @@ struct IRBuffer {
 };
 struct IRPrimitive {
 	std::string materialId;
-	uint32_t indexOffset;
-	uint32_t indexCount;
+	uint32_t vertexOffset;
+	uint32_t vertexCount;
 };
 struct IRMesh {
 	std::string id, layout, binFile;
-	IRBuffer vertexBuffer, indexBuffer, jointsBuffer, weightsBuffer;
+	IRBuffer vertexBuffer;
 	std::vector<IRPrimitive> primitives;
 };
 struct IRNode {
@@ -508,12 +510,6 @@ class Parser {
 				mesh.binFile = DecodeJSONString(Expect(TokenType::String).value);
 			} else if (key.value == "vertex_buffer") {
 				ParseBufferBound(mesh.vertexBuffer);
-			} else if (key.value == "index_buffer") {
-				ParseBufferBound(mesh.indexBuffer);
-			} else if (key.value == "joints") {
-				ParseBufferBound(mesh.jointsBuffer);
-			} else if (key.value == "weights") {
-				ParseBufferBound(mesh.weightsBuffer);
 			} else {
 				SkipValue();
 			}
@@ -554,10 +550,10 @@ class Parser {
 					if (val.type == TokenType::String) {
 						prim.materialId = DecodeJSONString(val.value);
 					}
-				} else if (key.value == "index_offset") {
-					prim.indexOffset = std::stoul(std::string(Expect(TokenType::Number).value));
-				} else if (key.value == "index_count") {
-					prim.indexCount = std::stoul(std::string(Expect(TokenType::Number).value));
+				} else if (key.value == "vertex_offset") {
+					prim.vertexOffset = std::stoul(std::string(Expect(TokenType::Number).value));
+				} else if (key.value == "vertex_count") {
+					prim.vertexCount = std::stoul(std::string(Expect(TokenType::Number).value));
 				} else {
 					SkipValue();
 				}
@@ -813,6 +809,253 @@ class Parser {
 } // namespace Compiler
 
 // ============================================================================
+// Compilation Logic (Moved from Python to C++)
+// ============================================================================
+
+struct RawLoopVertex {
+	uint32_t v_idx;
+	float px, py, pz;
+	float nx, ny, nz;
+	float u, v;
+	float r, g, b, a;
+	uint16_t joints[4];
+	float weights[4];
+
+	bool operator==(const RawLoopVertex& o) const {
+		if (v_idx != o.v_idx)
+			return false;
+
+		// Exact float equality is fine here because these are read verbatim from the Python export
+		// array
+		if (u != o.u || v != o.v)
+			return false;
+		if (nx != o.nx || ny != o.ny || nz != o.nz)
+			return false;
+		if (r != o.r || g != o.g || b != o.b || a != o.a)
+			return false;
+		return true;
+	}
+};
+
+struct RawLoopVertexHash {
+	size_t operator()(const RawLoopVertex& v) const {
+		size_t h = std::hash<uint32_t>{}(v.v_idx);
+		auto combine = [&](float val) {
+			uint32_t bits;
+			std::memcpy(&bits, &val, 4);
+			h ^= bits + 0x9e3779b9 + (h << 6) + (h >> 2);
+		};
+		combine(v.u);
+		combine(v.v);
+		combine(v.nx);
+		combine(v.ny);
+		combine(v.nz);
+		return h;
+	}
+};
+
+struct CompiledMesh {
+	std::vector<float> glbVertices; // EXACTLY 16 uncompressed standard floats per vertex
+	std::vector<uint32_t> indices;
+	std::vector<uint16_t> joints;
+	std::vector<float> weights;
+	std::vector<Compiler::IRPrimitive> primitives;
+	float minB[3] = {1e30f, 1e30f, 1e30f};
+	float maxB[3] = {-1e30f, -1e30f, -1e30f};
+	bool isSkinned = false;
+};
+
+CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, const std::string& binPath) {
+	CompiledMesh result;
+
+	FILE* bf = std::fopen(binPath.c_str(), "rb");
+	if (!bf) {
+		std::println(stderr, "[zcook] ERROR: Failed to open intermediate bin file: {}", binPath);
+		return result;
+	}
+
+	std::fseek(bf, 0, SEEK_END);
+	long binSize = std::ftell(bf);
+	std::fseek(bf, 0, SEEK_SET);
+	std::vector<float> rawFloats(binSize / sizeof(float));
+	std::fread(rawFloats.data(), sizeof(float), rawFloats.size(), bf);
+	std::fclose(bf);
+
+	bool hasSkin = mesh.layout.find("_J4W4") != std::string::npos;
+	result.isSkinned = hasSkin;
+	size_t stride = hasSkin ? 21 : 13;
+
+	std::unordered_map<RawLoopVertex, uint32_t, RawLoopVertexHash> uniqueMap;
+	std::vector<RawLoopVertex> rawVerts;
+
+	// Phase 1: Vertex Deduplication
+	for (const auto& prim : mesh.primitives) {
+		uint32_t startLoop = prim.vertexOffset;
+		uint32_t loopCount = prim.vertexCount;
+
+		Compiler::IRPrimitive outPrim;
+		outPrim.materialId = prim.materialId;
+		// glTF GLB counts offsets in BYTEs relative to the start of the bufferView
+		outPrim.vertexOffset = static_cast<uint32_t>(result.indices.size() * sizeof(uint32_t));
+		outPrim.vertexCount = loopCount; // This is the total number of indices to draw!
+
+		for (uint32_t i = 0; i < loopCount; ++i) {
+			size_t offset = (startLoop + i) * stride;
+			if (offset + stride > rawFloats.size())
+				break;
+
+			RawLoopVertex rv{};
+			rv.v_idx = static_cast<uint32_t>(rawFloats[offset + 0]);
+			rv.px = rawFloats[offset + 1];
+			rv.py = rawFloats[offset + 2];
+			rv.pz = rawFloats[offset + 3];
+			rv.nx = rawFloats[offset + 4];
+			rv.ny = rawFloats[offset + 5];
+			rv.nz = rawFloats[offset + 6];
+			rv.u = rawFloats[offset + 7];
+			rv.v = rawFloats[offset + 8];
+			rv.r = rawFloats[offset + 9];
+			rv.g = rawFloats[offset + 10];
+			rv.b = rawFloats[offset + 11];
+			rv.a = rawFloats[offset + 12];
+
+			if (hasSkin) {
+				rv.joints[0] = static_cast<uint16_t>(rawFloats[offset + 13]);
+				rv.joints[1] = static_cast<uint16_t>(rawFloats[offset + 14]);
+				rv.joints[2] = static_cast<uint16_t>(rawFloats[offset + 15]);
+				rv.joints[3] = static_cast<uint16_t>(rawFloats[offset + 16]);
+				rv.weights[0] = rawFloats[offset + 17];
+				rv.weights[1] = rawFloats[offset + 18];
+				rv.weights[2] = rawFloats[offset + 19];
+				rv.weights[3] = rawFloats[offset + 20];
+			} else {
+				rv.joints[0] = rv.joints[1] = rv.joints[2] = rv.joints[3] = 0;
+				rv.weights[0] = rv.weights[1] = rv.weights[2] = rv.weights[3] = 0.0f;
+			}
+
+			auto it = uniqueMap.find(rv);
+			if (it != uniqueMap.end()) {
+				result.indices.push_back(it->second);
+			} else {
+				uint32_t newIdx = static_cast<uint32_t>(rawVerts.size());
+				uniqueMap[rv] = newIdx;
+				result.indices.push_back(newIdx);
+				rawVerts.push_back(rv);
+			}
+		}
+		result.primitives.push_back(outPrim);
+	}
+
+	// Phase 2: Tangent Calculation (MikkTSpace-lite orthogonalization)
+	std::vector<JPH::Vec3> tangents(rawVerts.size(), JPH::Vec3::sZero());
+	std::vector<JPH::Vec3> bitangents(rawVerts.size(), JPH::Vec3::sZero());
+
+	for (size_t i = 0; i + 2 < result.indices.size(); i += 3) {
+		uint32_t i0 = result.indices[i + 0];
+		uint32_t i1 = result.indices[i + 1];
+		uint32_t i2 = result.indices[i + 2];
+
+		if (i0 >= rawVerts.size() || i1 >= rawVerts.size() || i2 >= rawVerts.size())
+			continue;
+
+		auto& v0 = rawVerts[i0];
+		auto& v1 = rawVerts[i1];
+		auto& v2 = rawVerts[i2];
+
+		JPH::Vec3 p0(v0.px, v0.py, v0.pz);
+		JPH::Vec3 p1(v1.px, v1.py, v1.pz);
+		JPH::Vec3 p2(v2.px, v2.py, v2.pz);
+
+		JPH::Vec3 e1 = p1 - p0;
+		JPH::Vec3 e2 = p2 - p0;
+
+		float du1 = v1.u - v0.u;
+		float dv1 = v1.v - v0.v;
+		float du2 = v2.u - v0.u;
+		float dv2 = v2.v - v0.v;
+
+		float det = du1 * dv2 - dv1 * du2;
+		float r = (det != 0.0f) ? 1.0f / det : 0.0f;
+
+		JPH::Vec3 t = (e1 * dv2 - e2 * dv1) * r;
+		JPH::Vec3 b = (e2 * du1 - e1 * du2) * r;
+
+		tangents[i0] += t;
+		tangents[i1] += t;
+		tangents[i2] += t;
+		bitangents[i0] += b;
+		bitangents[i1] += b;
+		bitangents[i2] += b;
+	}
+
+	// Phase 3: Pack into pure uncompressed 64-byte float array blocks for GLB
+	result.glbVertices.resize(rawVerts.size() * 16);
+	if (hasSkin) {
+		result.joints.resize(rawVerts.size() * 4);
+		result.weights.resize(rawVerts.size() * 4);
+	}
+
+	for (size_t i = 0; i < rawVerts.size(); ++i) {
+		auto& rv = rawVerts[i];
+		float* f = &result.glbVertices[i * 16];
+
+		f[0] = rv.px;
+		f[1] = rv.py;
+		f[2] = rv.pz;
+		f[3] = rv.nx;
+		f[4] = rv.ny;
+		f[5] = rv.nz;
+
+		JPH::Vec3 n(rv.nx, rv.ny, rv.nz);
+		JPH::Vec3 t = tangents[i];
+		if (t.LengthSq() > 1e-6f) {
+			JPH::Vec3 tangent = (t - n * n.Dot(t)).Normalized();
+			float sign = n.Cross(t).Dot(bitangents[i]) < 0.0f ? -1.0f : 1.0f;
+			f[6] = tangent.GetX();
+			f[7] = tangent.GetY();
+			f[8] = tangent.GetZ();
+			f[9] = sign;
+		} else {
+			JPH::Vec3 absN(std::abs(n.GetX()), std::abs(n.GetY()), std::abs(n.GetZ()));
+			JPH::Vec3 fallbackT =
+				(absN.GetX() < 0.999f) ? JPH::Vec3(1.0f, 0.0f, 0.0f) : JPH::Vec3(0.0f, 1.0f, 0.0f);
+			JPH::Vec3 tangent = (fallbackT - n * n.Dot(fallbackT)).Normalized();
+			f[6] = tangent.GetX();
+			f[7] = tangent.GetY();
+			f[8] = tangent.GetZ();
+			f[9] = 1.0f;
+		}
+
+		f[10] = rv.u;
+		f[11] = rv.v;
+		f[12] = rv.r;
+		f[13] = rv.g;
+		f[14] = rv.b;
+		f[15] = rv.a;
+
+		if (hasSkin) {
+			result.joints[i * 4 + 0] = rv.joints[0];
+			result.joints[i * 4 + 1] = rv.joints[1];
+			result.joints[i * 4 + 2] = rv.joints[2];
+			result.joints[i * 4 + 3] = rv.joints[3];
+			result.weights[i * 4 + 0] = rv.weights[0];
+			result.weights[i * 4 + 1] = rv.weights[1];
+			result.weights[i * 4 + 2] = rv.weights[2];
+			result.weights[i * 4 + 3] = rv.weights[3];
+		}
+
+		result.minB[0] = std::min(result.minB[0], f[0]);
+		result.minB[1] = std::min(result.minB[1], f[1]);
+		result.minB[2] = std::min(result.minB[2], f[2]);
+		result.maxB[0] = std::max(result.maxB[0], f[0]);
+		result.maxB[1] = std::max(result.maxB[1], f[1]);
+		result.maxB[2] = std::max(result.maxB[2], f[2]);
+	}
+
+	return result;
+}
+
+// ============================================================================
 // GLB Emitter Namespace
 // ============================================================================
 namespace GLB {
@@ -938,7 +1181,6 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 								  mrTex);
 		}
 
-		// A material is only emissive if it has a non-zero strength multiplier
 		bool hasEmissive =
 			(mat.emissiveStrength > 0.f) &&
 			((emissiveTex != -1) || (mat.emissiveFactor[0] > 0.f || mat.emissiveFactor[1] > 0.f ||
@@ -946,7 +1188,6 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 
 		if (hasEmissive) {
 			float ef[3] = {mat.emissiveFactor[0], mat.emissiveFactor[1], mat.emissiveFactor[2]};
-			// Fallback to white if texture is present but emissive multiplier is zero
 			if (emissiveTex != -1 && ef[0] == 0.f && ef[1] == 0.f && ef[2] == 0.f) {
 				ef[0] = 1.f;
 				ef[1] = 1.f;
@@ -955,7 +1196,6 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 
 			float strength = mat.emissiveStrength;
 			if (strength < 1.f) {
-				// Fold low emissive strengths directly into the factor
 				ef[0] *= strength;
 				ef[1] *= strength;
 				ef[2] *= strength;
@@ -972,7 +1212,6 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 									  emissiveTex);
 			}
 
-			// Only write emissive strength extension if strength is actually greater than 1.0
 			if (strength > 1.f) {
 				matStr += std::format(R"(,
       "extensions": {{
@@ -992,26 +1231,17 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 
 	for (const auto& mesh : manifest.meshes) {
 		std::string binPath = levelFolder + "/" + mesh.binFile;
-
-		FILE* bf = std::fopen(binPath.c_str(), "rb");
-		if (bf == nullptr) {
+		CompiledMesh compiled = CompileRawMesh(mesh, binPath);
+		if (compiled.glbVertices.empty())
 			continue;
-		}
-
-		std::fseek(bf, 0, SEEK_END);
-		long binSize = std::ftell(bf);
-		std::fseek(bf, 0, SEEK_SET);
-
-		std::vector<uint8_t> rawBin(binSize);
-		std::fread(rawBin.data(), 1, binSize, bf);
-		std::fclose(bf);
 
 		meshIdToGlbIndex[mesh.id] = static_cast<int>(meshesJson.size());
 
+		// Append Compiled Vertices natively as standard 64-byte strided uncompressed glTF floats
 		auto vboOffset = static_cast<uint32_t>(binBuffer.size());
-		binBuffer.insert(binBuffer.end(), rawBin.begin() + mesh.vertexBuffer.byteOffset,
-						 rawBin.begin() + mesh.vertexBuffer.byteOffset +
-							 mesh.vertexBuffer.byteLength);
+		size_t vboBytes = compiled.glbVertices.size() * sizeof(float);
+		binBuffer.insert(binBuffer.end(), reinterpret_cast<uint8_t*>(compiled.glbVertices.data()),
+						 reinterpret_cast<uint8_t*>(compiled.glbVertices.data()) + vboBytes);
 		while (binBuffer.size() % 4 != 0) {
 			binBuffer.push_back(0);
 		}
@@ -1023,13 +1253,14 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
       "byteStride": 64,
       "target": 34962
     }})",
-										  vboOffset, mesh.vertexBuffer.byteLength));
+										  vboOffset, vboBytes));
 		uint32_t vboBViewIdx = bViewIndex++;
 
+		// Append Compiled Indices
 		auto iboOffset = static_cast<uint32_t>(binBuffer.size());
-		binBuffer.insert(binBuffer.end(), rawBin.begin() + mesh.indexBuffer.byteOffset,
-						 rawBin.begin() + mesh.indexBuffer.byteOffset +
-							 mesh.indexBuffer.byteLength);
+		size_t iboBytes = compiled.indices.size() * sizeof(uint32_t);
+		binBuffer.insert(binBuffer.end(), reinterpret_cast<uint8_t*>(compiled.indices.data()),
+						 reinterpret_cast<uint8_t*>(compiled.indices.data()) + iboBytes);
 		while (binBuffer.size() % 4 != 0) {
 			binBuffer.push_back(0);
 		}
@@ -1040,10 +1271,10 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
       "byteLength": {},
       "target": 34963
     }})",
-										  iboOffset, mesh.indexBuffer.byteLength));
+										  iboOffset, iboBytes));
 		uint32_t iboBViewIdx = bViewIndex++;
 
-		uint32_t vertexCount = mesh.vertexBuffer.byteLength / 64;
+		uint32_t vertexCount = static_cast<uint32_t>(compiled.glbVertices.size() / 16);
 
 		uint32_t posAcc = accIndex++;
 		uint32_t normAcc = accIndex++;
@@ -1051,30 +1282,15 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 		uint32_t uvAcc = accIndex++;
 		uint32_t colorAcc = accIndex++;
 
-		float minB[3] = {1e30f, 1e30f, 1e30f};
-		float maxB[3] = {-1e30f, -1e30f, -1e30f};
-		const auto* floatVBO =
-			reinterpret_cast<const float*>(rawBin.data() + mesh.vertexBuffer.byteOffset);
-		for (uint32_t i = 0; i < vertexCount; ++i) {
-			float x = floatVBO[i * 16 + 0];
-			float y = floatVBO[i * 16 + 1];
-			float z = floatVBO[i * 16 + 2];
-			minB[0] = std::min(minB[0], x);
-			minB[1] = std::min(minB[1], y);
-			minB[2] = std::min(minB[2], z);
-			maxB[0] = std::max(maxB[0], x);
-			maxB[1] = std::max(maxB[1], y);
-			maxB[2] = std::max(maxB[2], z);
-		}
-
 		accessors.push_back(std::format(R"(    {{"bufferView": {},
       "componentType": 5126,
       "count": {},
       "type": "VEC3",
       "min": [{}, {}, {}],
       "max": [{}, {}, {}]}})",
-										vboBViewIdx, vertexCount, minB[0], minB[1], minB[2],
-										maxB[0], maxB[1], maxB[2]));
+										vboBViewIdx, vertexCount, compiled.minB[0],
+										compiled.minB[1], compiled.minB[2], compiled.maxB[0],
+										compiled.maxB[1], compiled.maxB[2]));
 
 		accessors.push_back(std::format(R"(    {{"bufferView": {},
       "byteOffset": 12,
@@ -1102,8 +1318,8 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 										vboBViewIdx, vertexCount));
 
 		std::string primsStr;
-		for (size_t p = 0; p < mesh.primitives.size(); ++p) {
-			const auto& prim = mesh.primitives[p];
+		for (size_t p = 0; p < compiled.primitives.size(); ++p) {
+			const auto& prim = compiled.primitives[p];
 			uint32_t indexAcc = accIndex++;
 
 			accessors.push_back(std::format(R"(    {{"bufferView": {},
@@ -1111,7 +1327,7 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
       "componentType": 5125,
       "count": {},
       "type": "SCALAR"}})",
-											iboBViewIdx, prim.indexOffset, prim.indexCount));
+											iboBViewIdx, prim.vertexOffset, prim.vertexCount));
 
 			int matGlbIdx = -1;
 			auto it = matIdToGlbIndex.find(prim.materialId);
@@ -1138,7 +1354,7 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
           {}
         }})",
 									posAcc, normAcc, tangAcc, uvAcc, colorAcc, indexAcc, matStr);
-			if (p < mesh.primitives.size() - 1) {
+			if (p < compiled.primitives.size() - 1) {
 				primsStr += ",\n";
 			}
 		}
@@ -1440,141 +1656,51 @@ int CookMesh(int argc, char** argv) {
 	}
 	const auto& mesh = *it;
 
-	FILE* bf = std::fopen(inPath.c_str(), "rb");
-	if (bf == nullptr) {
+	// Pass to compiled engine core to perform deduplication and tangent generation
+	CompiledMesh compiled = CompileRawMesh(mesh, inPath);
+	if (compiled.glbVertices.empty()) {
 		return 1;
-	}
-	std::fseek(bf, 0, SEEK_END);
-	long binSize = std::ftell(bf);
-	std::fseek(bf, 0, SEEK_SET);
-	std::vector<char> rawBinBytes(binSize);
-	std::fread(rawBinBytes.data(), 1, binSize, bf);
-	std::fclose(bf);
-
-	uint32_t vertexCount = mesh.vertexBuffer.byteLength / 64;
-
-	if (mesh.vertexBuffer.byteOffset + mesh.vertexBuffer.byteLength >
-		static_cast<uint32_t>(binSize)) {
-		return 1;
-	}
-
-	const auto* floatVBO =
-		reinterpret_cast<const float*>(rawBinBytes.data() + mesh.vertexBuffer.byteOffset);
-
-	uint32_t indexCount = 0;
-	std::vector<uint32_t> compiledIndices;
-
-	if (mesh.indexBuffer.byteLength > 0) {
-		if (mesh.indexBuffer.byteOffset + mesh.indexBuffer.byteLength >
-			static_cast<uint32_t>(binSize)) {
-			return 1;
-		}
-
-		const auto* rawIndexData =
-			reinterpret_cast<const uint8_t*>(rawBinBytes.data() + mesh.indexBuffer.byteOffset);
-		bool is16Bit = (vertexCount <= 65535);
-
-		if (is16Bit) {
-			indexCount = mesh.indexBuffer.byteLength / 2;
-			compiledIndices.resize(indexCount);
-			const auto* indices16 = reinterpret_cast<const uint16_t*>(rawIndexData);
-			for (uint32_t i = 0; i < indexCount; ++i) {
-				compiledIndices[i] = static_cast<uint32_t>(indices16[i]);
-			}
-		} else {
-			indexCount = mesh.indexBuffer.byteLength / 4;
-			compiledIndices.resize(indexCount);
-			const auto* indices32 = reinterpret_cast<const uint32_t*>(rawIndexData);
-			std::memcpy(compiledIndices.data(), indices32, indexCount * sizeof(uint32_t));
-		}
-	}
-
-	bool hasSkin = mesh.layout.contains("J4W4");
-	const uint16_t* joints = nullptr;
-	if (hasSkin && mesh.jointsBuffer.byteLength > 0) {
-		if (mesh.jointsBuffer.byteOffset + mesh.jointsBuffer.byteLength >
-			static_cast<uint32_t>(binSize)) {
-			return 1;
-		}
-		joints =
-			reinterpret_cast<const uint16_t*>(rawBinBytes.data() + mesh.jointsBuffer.byteOffset);
-	}
-
-	const float* weights = nullptr;
-	if (hasSkin && mesh.weightsBuffer.byteLength > 0) {
-		if (mesh.weightsBuffer.byteOffset + mesh.weightsBuffer.byteLength >
-			static_cast<uint32_t>(binSize)) {
-			return 1;
-		}
-		weights =
-			reinterpret_cast<const float*>(rawBinBytes.data() + mesh.weightsBuffer.byteOffset);
-	}
-
-	std::vector<Vertex> compiledVertices(vertexCount);
-	for (uint32_t i = 0; i < vertexCount; ++i) {
-		Vertex& dest = compiledVertices[i];
-		std::memset(&dest, 0, sizeof(Vertex));
-
-		dest.position[0] = floatVBO[i * 16 + 0];
-		dest.position[1] = floatVBO[i * 16 + 1];
-		dest.position[2] = floatVBO[i * 16 + 2];
-
-		dest.normal =
-			Math::PackNormal(floatVBO[i * 16 + 3], floatVBO[i * 16 + 4], floatVBO[i * 16 + 5]);
-		dest.tangent = Math::PackNormal(floatVBO[i * 16 + 6], floatVBO[i * 16 + 7],
-										floatVBO[i * 16 + 8], floatVBO[i * 16 + 9]);
-		dest.uv = Math::PackUV(floatVBO[i * 16 + 10], floatVBO[i * 16 + 11]);
-		dest.color = Math::PackColor(floatVBO[i * 16 + 12], floatVBO[i * 16 + 13],
-									 floatVBO[i * 16 + 14], floatVBO[i * 16 + 15]);
-
-		if (hasSkin && (joints != nullptr) && (weights != nullptr)) {
-			dest.joints[0] = joints[i * 4 + 0];
-			dest.joints[1] = joints[i * 4 + 1];
-			dest.joints[2] = joints[i * 4 + 2];
-			dest.joints[3] = joints[i * 4 + 3];
-
-			dest.weights[0] = weights[i * 4 + 0];
-			dest.weights[1] = weights[i * 4 + 1];
-			dest.weights[2] = weights[i * 4 + 2];
-			dest.weights[3] = weights[i * 4 + 3];
-		}
-	}
-
-	std::vector<Vertex> unrolledVertices;
-	unrolledVertices.reserve(indexCount);
-	for (uint32_t idx = 0; idx < indexCount; ++idx) {
-		uint32_t originalIdx = compiledIndices[idx];
-		if (originalIdx >= vertexCount) [[unlikely]] {
-			return 1;
-		}
-		unrolledVertices.push_back(compiledVertices[originalIdx]);
-	}
-
-	float minB[3] = {1e30f, 1e30f, 1e30f};
-	float maxB[3] = {-1e30f, -1e30f, -1e30f};
-	for (const auto& v : unrolledVertices) {
-		minB[0] = std::min(minB[0], v.position[0]);
-		minB[1] = std::min(minB[1], v.position[1]);
-		minB[2] = std::min(minB[2], v.position[2]);
-		maxB[0] = std::max(maxB[0], v.position[0]);
-		maxB[1] = std::max(maxB[1], v.position[1]);
-		maxB[2] = std::max(maxB[2], v.position[2]);
 	}
 
 	CookedMeshHeader meshHeader{};
 	meshHeader.magic = 0x3048534D; // 'MSH0'
 	meshHeader.version = 2;
-	meshHeader.boundingBoxMin[0] = minB[0];
-	meshHeader.boundingBoxMin[1] = minB[1];
-	meshHeader.boundingBoxMin[2] = minB[2];
-	meshHeader.boundingBoxMax[0] = maxB[0];
-	meshHeader.boundingBoxMax[1] = maxB[1];
-	meshHeader.boundingBoxMax[2] = maxB[2];
-	meshHeader.vertexCount = vertexCount;
-	meshHeader.indexCount = indexCount;
+	meshHeader.boundingBoxMin[0] = compiled.minB[0];
+	meshHeader.boundingBoxMin[1] = compiled.minB[1];
+	meshHeader.boundingBoxMin[2] = compiled.minB[2];
+	meshHeader.boundingBoxMax[0] = compiled.maxB[0];
+	meshHeader.boundingBoxMax[1] = compiled.maxB[1];
+	meshHeader.boundingBoxMax[2] = compiled.maxB[2];
 
-	size_t vboSize = compiledVertices.size() * sizeof(Vertex);
-	size_t iboSize = indexCount * sizeof(uint32_t);
+	meshHeader.vertexCount = static_cast<uint32_t>(compiled.glbVertices.size() / 16);
+	meshHeader.indexCount = static_cast<uint32_t>(compiled.indices.size());
+
+	std::vector<Vertex> finalVerts(meshHeader.vertexCount);
+	for (uint32_t i = 0; i < meshHeader.vertexCount; ++i) {
+		Vertex& v = finalVerts[i];
+		const float* flts = &compiled.glbVertices[i * 16];
+		v.position[0] = flts[0];
+		v.position[1] = flts[1];
+		v.position[2] = flts[2];
+		v.normal = Math::PackNormal(flts[3], flts[4], flts[5]);
+		v.tangent = Math::PackNormal(flts[6], flts[7], flts[8], flts[9]);
+		v.uv = Math::PackUV(flts[10], flts[11]);
+		v.color = Math::PackColor(flts[12], flts[13], flts[14], flts[15]);
+
+		if (compiled.isSkinned) {
+			v.joints[0] = compiled.joints[i * 4 + 0];
+			v.joints[1] = compiled.joints[i * 4 + 1];
+			v.joints[2] = compiled.joints[i * 4 + 2];
+			v.joints[3] = compiled.joints[i * 4 + 3];
+			v.weights[0] = compiled.weights[i * 4 + 0];
+			v.weights[1] = compiled.weights[i * 4 + 1];
+			v.weights[2] = compiled.weights[i * 4 + 2];
+			v.weights[3] = compiled.weights[i * 4 + 3];
+		}
+	}
+
+	size_t vboSize = finalVerts.size() * sizeof(Vertex);
+	size_t iboSize = compiled.indices.size() * sizeof(uint32_t);
 
 	fs::create_directories(fs::path(outPath).parent_path());
 	FILE* out = std::fopen(outPath.c_str(), "wb");
@@ -1583,8 +1709,8 @@ int CookMesh(int argc, char** argv) {
 	}
 
 	std::fwrite(&meshHeader, 1, sizeof(CookedMeshHeader), out);
-	std::fwrite(compiledVertices.data(), 1, vboSize, out);
-	std::fwrite(compiledIndices.data(), 1, iboSize, out);
+	std::fwrite(finalVerts.data(), 1, vboSize, out);
+	std::fwrite(compiled.indices.data(), 1, iboSize, out);
 	std::fclose(out);
 
 	return 0;
