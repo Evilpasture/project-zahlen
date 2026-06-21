@@ -702,6 +702,7 @@ def extract_materials():
         mat_info = {
             "id": mat_id,
             "name": mat.name,
+            "double_sided": not mat.use_backface_culling,  # True if backface culling is OFF in Blender
             "pbr": {
                 "base_color": default_color,
                 "metallic": 0.0,

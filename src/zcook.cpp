@@ -23,7 +23,7 @@
 #include <vector>
 
 namespace fs = std::filesystem;
-using namespace ZHLN;
+namespace ZHLN {
 
 // locale-safe checks to prevent glibc lookup table crashes
 inline bool IsDigit(char c) noexcept {
@@ -211,8 +211,9 @@ class Lexer {
 		size_t startLine = m_line;
 		char c = Peek();
 
-		if (c == '\0')
+		if (c == '\0') {
 			return Token{.type = TokenType::EndOfFile, .value = {}, .line = startLine};
+		}
 
 		switch (c) {
 			case '{':
@@ -350,6 +351,7 @@ struct IRMaterial {
 	float metallic = 0.f, roughness = 0.5f;
 	float emissiveFactor[3] = {0.f, 0.f, 0.f};
 	float emissiveStrength = 1.0f;
+	bool doubleSided = false;
 };
 struct IRManifest {
 	std::string levelName;
@@ -663,13 +665,13 @@ class Parser {
 			while (!Match(TokenType::EndObject)) {
 				Token key = Expect(TokenType::String);
 				Expect(TokenType::Colon);
-				if (key.value == "id")
+				if (key.value == "id") {
 					l.id = DecodeJSONString(Expect(TokenType::String).value);
-				else if (key.value == "type")
+				} else if (key.value == "type") {
 					l.type = DecodeJSONString(Expect(TokenType::String).value);
-				else if (key.value == "intensity")
+				} else if (key.value == "intensity") {
 					l.intensity = std::stof(std::string(Expect(TokenType::Number).value));
-				else if (key.value == "color") {
+				} else if (key.value == "color") {
 					Expect(TokenType::BeginArray);
 					for (int i = 0; i < 3; ++i) {
 						l.color[i] = std::stof(std::string(Expect(TokenType::Number).value));
@@ -702,6 +704,9 @@ class Parser {
 				Expect(TokenType::Colon);
 				if (key.value == "id") {
 					mat.id = DecodeJSONString(Expect(TokenType::String).value);
+				} else if (key.value == "double_sided") {
+					Token val = Advance();
+					mat.doubleSided = (val.type == TokenType::True);
 				} else if (key.value == "pbr") {
 					ParsePBR(mat);
 				} else if (key.value == "maps") {
@@ -822,17 +827,21 @@ struct RawLoopVertex {
 	float weights[4];
 
 	bool operator==(const RawLoopVertex& o) const {
-		if (v_idx != o.v_idx)
+		if (v_idx != o.v_idx) {
 			return false;
+		}
 
 		// Exact float equality is fine here because these are read verbatim from the Python export
 		// array
-		if (u != o.u || v != o.v)
+		if (u != o.u || v != o.v) {
 			return false;
-		if (nx != o.nx || ny != o.ny || nz != o.nz)
+		}
+		if (nx != o.nx || ny != o.ny || nz != o.nz) {
 			return false;
-		if (r != o.r || g != o.g || b != o.b || a != o.a)
+		}
+		if (r != o.r || g != o.g || b != o.b || a != o.a) {
 			return false;
+		}
 		return true;
 	}
 };
@@ -841,7 +850,7 @@ struct RawLoopVertexHash {
 	size_t operator()(const RawLoopVertex& v) const {
 		size_t h = std::hash<uint32_t>{}(v.v_idx);
 		auto combine = [&](float val) {
-			uint32_t bits;
+			uint32_t bits = 0;
 			std::memcpy(&bits, &val, 4);
 			h ^= bits + 0x9e3779b9 + (h << 6) + (h >> 2);
 		};
@@ -869,7 +878,7 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, const std::string& bin
 	CompiledMesh result;
 
 	FILE* bf = std::fopen(binPath.c_str(), "rb");
-	if (!bf) {
+	if (bf == nullptr) {
 		std::println(stderr, "[zcook] ERROR: Failed to open intermediate bin file: {}", binPath);
 		return result;
 	}
@@ -881,7 +890,7 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, const std::string& bin
 	std::fread(rawFloats.data(), sizeof(float), rawFloats.size(), bf);
 	std::fclose(bf);
 
-	bool hasSkin = mesh.layout.find("_J4W4") != std::string::npos;
+	bool hasSkin = mesh.layout.contains("_J4W4");
 	result.isSkinned = hasSkin;
 	size_t stride = hasSkin ? 21 : 13;
 
@@ -901,8 +910,9 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, const std::string& bin
 
 		for (uint32_t i = 0; i < loopCount; ++i) {
 			size_t offset = (startLoop + i) * stride;
-			if (offset + stride > rawFloats.size())
+			if (offset + stride > rawFloats.size()) {
 				break;
+			}
 
 			RawLoopVertex rv{};
 			rv.v_idx = static_cast<uint32_t>(rawFloats[offset + 0]);
@@ -937,7 +947,7 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, const std::string& bin
 			if (it != uniqueMap.end()) {
 				result.indices.push_back(it->second);
 			} else {
-				uint32_t newIdx = static_cast<uint32_t>(rawVerts.size());
+				auto newIdx = static_cast<uint32_t>(rawVerts.size());
 				uniqueMap[rv] = newIdx;
 				result.indices.push_back(newIdx);
 				rawVerts.push_back(rv);
@@ -955,8 +965,9 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, const std::string& bin
 		uint32_t i1 = result.indices[i + 1];
 		uint32_t i2 = result.indices[i + 2];
 
-		if (i0 >= rawVerts.size() || i1 >= rawVerts.size() || i2 >= rawVerts.size())
+		if (i0 >= rawVerts.size() || i1 >= rawVerts.size() || i2 >= rawVerts.size()) {
 			continue;
+		}
 
 		auto& v0 = rawVerts[i0];
 		auto& v1 = rawVerts[i1];
@@ -1063,7 +1074,7 @@ namespace GLB {
 inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolder,
 					const std::string& outputPath) {
 	std::vector<uint8_t> binBuffer;
-	binBuffer.reserve(16 * 1024 * 1024);
+	binBuffer.reserve(static_cast<size_t>(16 * 1024 * 1024));
 
 	std::vector<std::string> bufferViews;
 	std::vector<std::string> accessors;
@@ -1170,6 +1181,12 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
       }})",
 										 mat.id, pbrStr);
 
+		// Disable backface culling in the glTF schema if requested
+		if (mat.doubleSided) {
+			matStr += R"(,
+      "doubleSided": true)";
+		}
+
 		if (normalTex != -1) {
 			matStr += std::format(R"(,
       "normalTexture": {{"index": {}}})",
@@ -1232,8 +1249,9 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 	for (const auto& mesh : manifest.meshes) {
 		std::string binPath = levelFolder + "/" + mesh.binFile;
 		CompiledMesh compiled = CompileRawMesh(mesh, binPath);
-		if (compiled.glbVertices.empty())
+		if (compiled.glbVertices.empty()) {
 			continue;
+		}
 
 		meshIdToGlbIndex[mesh.id] = static_cast<int>(meshesJson.size());
 
@@ -1616,7 +1634,10 @@ inline void EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 // ============================================================================
 
 int CookMesh(int argc, char** argv) {
-	std::string metaPath, meshId, outPath, inPath;
+	std::string metaPath;
+	std::string meshId;
+	std::string outPath;
+	std::string inPath;
 	for (int i = 0; i < argc; ++i) {
 		std::string_view arg = argv[i];
 		if (arg == "--meta" && i + 1 < argc) {
@@ -1678,7 +1699,7 @@ int CookMesh(int argc, char** argv) {
 	std::vector<Vertex> finalVerts(meshHeader.vertexCount);
 	for (uint32_t i = 0; i < meshHeader.vertexCount; ++i) {
 		Vertex& v = finalVerts[i];
-		const float* flts = &compiled.glbVertices[i * 16];
+		const float* flts = &compiled.glbVertices[static_cast<size_t>(i) * 16];
 		v.position[0] = flts[0];
 		v.position[1] = flts[1];
 		v.position[2] = flts[2];
@@ -1893,6 +1914,8 @@ int CookGLB(int argc, char** argv) {
 	return 0;
 }
 
+} // namespace ZHLN
+
 int main(int argc, char** argv) {
 	std::setvbuf(stdout, nullptr, _IONBF, 0);
 
@@ -1902,16 +1925,16 @@ int main(int argc, char** argv) {
 
 	std::string_view cmd = argv[1];
 	if (cmd == "mesh") {
-		return CookMesh(argc - 2, argv + 2);
+		return ZHLN::CookMesh(argc - 2, argv + 2);
 	}
 	if (cmd == "tex") {
-		return CookTexture(argc - 2, argv + 2);
+		return ZHLN::CookTexture(argc - 2, argv + 2);
 	}
 	if (cmd == "glb") {
-		return CookGLB(argc - 2, argv + 2);
+		return ZHLN::CookGLB(argc - 2, argv + 2);
 	}
 	if (cmd == "pak") {
-		return PackArchive(argc - 2, argv + 2);
+		return ZHLN::PackArchive(argc - 2, argv + 2);
 	}
 
 	return 1;
