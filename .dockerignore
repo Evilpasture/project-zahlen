@@ -1,0 +1,28 @@
+# Ignore local compiler build directories
+build/
+bin/
+out/
+cmake-build-*/
+.ninja_deps
+.ninja_log
+
+# Ignore local Git history
+.git/
+.gitignore
+
+# Ignore IDE and editor configurations
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.clang-format
+.clang-tidy
+
+# Ignore intermediate cooked assets (these will be rebuilt clean inside the container)
+resources/intermediate/
+build_assets/
+data/*.pak
+
+# OS junk
+**/.DS_Store
+Thumbs.db
