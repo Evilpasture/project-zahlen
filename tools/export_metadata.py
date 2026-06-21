@@ -95,9 +95,6 @@ def discover_blend_files(search_path):
     return blend_files
 
 
-blend_files = discover_blend_files(input_dir)
-print(f"Discovered {len(blend_files)} levels for raw metadata extraction.\n")
-
 # ============================================================================
 # Core Math & Geometry Unpacking Helpers
 # ============================================================================
@@ -1564,11 +1561,29 @@ def export_raw_scene_data(blend_path):
     print(f"      [Success] Extracted raw metadata & binary geometry for: {name_we}")
 
 
-for idx, blend_path in enumerate(blend_files, start=1):
-    print(
-        f"[{idx}/{len(blend_files)}] Extracting: {os.path.relpath(blend_path, input_dir)}"
-    )
-    try:
-        export_raw_scene_data(blend_path)
-    except Exception as e:
-        print(f"      [Error] Extraction failed: {e}")
+# Check if executed headless for a single file from the Ninja pipeline
+if "--" in sys.argv:
+    args = sys.argv[sys.argv.index("--") + 1 :]
+    if len(args) >= 2:
+        blend_path = args[0]
+        output_parent = args[1]
+        try:
+            export_raw_scene_data(blend_path)
+            sys.exit(0)
+        except Exception as e:
+            print(f"      [Error] Extraction failed for {blend_path}: {e}")
+            sys.exit(1)
+
+# Fallback block: Scan directory if executed manually outside of Ninja
+else:
+    blend_files = discover_blend_files(input_dir)
+    print(f"Discovered {len(blend_files)} levels for raw metadata extraction.\n")
+
+    for idx, blend_path in enumerate(blend_files, start=1):
+        print(
+            f"[{idx}/{len(blend_files)}] Extracting: {os.path.relpath(blend_path, input_dir)}"
+        )
+        try:
+            export_raw_scene_data(blend_path)
+        except Exception as e:
+            print(f"      [Error] Extraction failed: {e}")
