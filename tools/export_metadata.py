@@ -78,14 +78,12 @@ c_basis_inv = c_basis.inverted()
 
 
 def discover_blend_files(search_path):
-    """Recursively scans directories to discover valid level Blend files, ignoring asset libraries."""
+    """Recursively scans directories to discover valid Blend files."""
     blend_files = []
     for root, _, files in os.walk(search_path):
         norm_root = root.replace("\\", "/").lower()
-        if any(
-            p in norm_root
-            for p in ["resources", "exported_assets", "tadc_models", "asset_library"]
-        ):
+        # Removed "tadc_models" and "asset_library" from the exclusion list
+        if any(p in norm_root for p in ["resources", "exported_assets"]):
             continue
         for file in files:
             if file.endswith(".blend") and not file.startswith("."):
@@ -1475,9 +1473,17 @@ def extract_animations(
 # ============================================================================
 
 
-def export_raw_scene_data(blend_path):
-    name_we = os.path.splitext(os.path.basename(blend_path))[0]
-    asset_dir = os.path.join(output_parent, name_we)
+def export_raw_scene_data(blend_path, source_dir=None):
+    if source_dir is None:
+        source_dir = input_dir  # Falls back to global input_dir (os.getcwd())
+
+    # Resolve namespaced directories safely using absolute paths
+    abs_blend = os.path.abspath(blend_path)
+    abs_source = os.path.abspath(source_dir)
+    rel_path = os.path.relpath(abs_blend, abs_source)
+    namespace_dir = os.path.splitext(rel_path)[0].replace("\\", "/").replace("/", "_")
+
+    asset_dir = os.path.join(output_parent, namespace_dir)
     bin_dir = os.path.join(asset_dir, "geometry")
     os.makedirs(bin_dir, exist_ok=True)
 
@@ -1539,7 +1545,7 @@ def export_raw_scene_data(blend_path):
     scene_manifest = {
         "version": "1.2",
         "scene_info": {
-            "name": name_we,
+            "name": namespace_dir,  # Changed from name_we to namespace_dir
             "up_axis": "Y",
             "coordinate_system": "Right-Handed",
             "winding_order": "CCW",
@@ -1558,7 +1564,10 @@ def export_raw_scene_data(blend_path):
     with open(json_path, "w") as f:
         json.dump(scene_manifest, f, indent=2)
 
-    print(f"      [Success] Extracted raw metadata & binary geometry for: {name_we}")
+    # Changed from name_we to namespace_dir
+    print(
+        f"      [Success] Extracted raw metadata & binary geometry for: {namespace_dir}"
+    )
 
 
 # Check if executed headless for a single file from the Ninja pipeline
@@ -1568,7 +1577,9 @@ if "--" in sys.argv:
         blend_path = args[0]
         output_parent = args[1]
         try:
-            export_raw_scene_data(blend_path)
+            # Calculate the true source root relative to intermediate output folder
+            source_dir = os.path.abspath(os.path.join(output_parent, "..", ".."))
+            export_raw_scene_data(blend_path, source_dir)
             sys.exit(0)
         except Exception as e:
             print(f"      [Error] Extraction failed for {blend_path}: {e}")
@@ -1584,6 +1595,6 @@ else:
             f"[{idx}/{len(blend_files)}] Extracting: {os.path.relpath(blend_path, input_dir)}"
         )
         try:
-            export_raw_scene_data(blend_path)
+            export_raw_scene_data(blend_path, input_dir)
         except Exception as e:
             print(f"      [Error] Extraction failed: {e}")

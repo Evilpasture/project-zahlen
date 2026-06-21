@@ -449,7 +449,9 @@ add_custom_command(
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/assets.ninja"
     COMMAND python3 "${CMAKE_SOURCE_DIR}/configure_assets.py" "${CMAKE_CURRENT_BINARY_DIR}/assets.ninja" "$<TARGET_FILE:zcook>" "${CMAKE_SOURCE_DIR}"
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-    DEPENDS zcook "${CMAKE_SOURCE_DIR}/configure_assets.py"
+    DEPENDS zcook 
+            "${CMAKE_SOURCE_DIR}/configure_assets.py"
+            "${CMAKE_SOURCE_DIR}/tools/export_metadata.py" # Track changes to the exporter script
     COMMENT "Scanning asset folders and generating assets.ninja..."
 )
 
