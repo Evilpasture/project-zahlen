@@ -7,6 +7,7 @@
 #include "Zahlen/Types.hpp"
 
 #include <cstddef>
+#include <utility>
 
 namespace ZHLN {
 
@@ -457,6 +458,21 @@ auto RenderContext::CreateTextureCube(const void* const* faceData, uint32_t widt
 	return _impl->CreateTextureCubeInternal(faceData, width, height);
 }
 
+auto RenderContext::CreateSkinnedScratchBuffer(size_t size) -> BufferHandle {
+	VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+							   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+							   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+	if (_impl->rtCtx.Valid()) {
+		usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+	}
+	auto gpu_buf =
+		Vk::Buffer::Create(_impl->allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY);
+
+	VkDeviceAddress address = Vk::GetBufferDeviceAddress(_impl->ctx.Device(), gpu_buf.Handle());
+	uint64_t handle = _impl->meshPool.Create(std::move(gpu_buf), 0, address);
+	return static_cast<BufferHandle>(handle);
+}
+
 void RenderContext::UploadDebugVertices(const void* data, size_t size,
 										uint32_t vertexCount) noexcept {
 	uint32_t frameIdx = _impl->frame_index;
@@ -616,6 +632,12 @@ void RenderContext::Impl::InitializeSystemTextures() {
 	if (blackIdx != 0 || whiteIdx != 1 || normalIdx != 2) {
 		ZHLN::Panic("System textures allocated out of order! Expected [0, 1, 2], got [{}, {}, {}]",
 					blackIdx, whiteIdx, normalIdx);
+	}
+}
+void RenderContext::Impl::RegisterShaderWatcher(const char* path, std::function<void()> callback) {
+	if constexpr (isDev) {
+		shaderWatchers.push_back(
+			{.path = path, .watcher = FileWatcher(path), .reloadCallback = std::move(callback)});
 	}
 }
 

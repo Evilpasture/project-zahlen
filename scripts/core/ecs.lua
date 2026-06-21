@@ -23,6 +23,26 @@ local NATIVE_COMPONENTS = {
     UISettingsComponent = true,
 }
 
+local DYNAMIC_COMPONENTS = {} -- Tracks active dynamic types registered via Lua
+
+-- Register dynamic FFI structures with C++ sparse sets
+function Registry:register_dynamic(comp_name)
+    if DYNAMIC_COMPONENTS[comp_name] then return end
+
+    -- Extract sizing properties directly from active FFI definitions
+    local size = ffi.sizeof(comp_name)
+    local align = ffi.alignof(comp_name)
+
+    local args = ffi.new("RegisterDynamicComponentArgs", { comp_name, size, align })
+    local family_id = ffi.C.ZHLN_DispatchCommand(self.engine, "RegisterDynamicComponent", args)
+
+    if family_id == 0xFFFFFFFF then
+        error("Failed to register dynamic component: " .. comp_name)
+    end
+
+    DYNAMIC_COMPONENTS[comp_name] = true
+end
+
 local function to_key(ent)
     if type(ent) == "number" then
         return tostring(ffi.cast("uint64_t", ent))
@@ -38,7 +58,9 @@ function Registry.new(engine_raw)
     }, Registry)
 end
 
-function Registry:is_native(comp_name) return NATIVE_COMPONENTS[comp_name] == true end
+function Registry:is_native(comp_name)
+    return NATIVE_COMPONENTS[comp_name] == true or DYNAMIC_COMPONENTS[comp_name] == true
+end
 
 function Registry:create(ent)
     local id = ent

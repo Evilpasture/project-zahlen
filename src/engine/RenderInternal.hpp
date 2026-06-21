@@ -14,6 +14,7 @@
 #include "RenderTarget.hpp"
 #include "StagingContext.hpp"
 #include "Vertex.hpp"
+#include "engine/FileWatcher.hpp"
 
 #include <GLFW/glfw3.h>
 #include <Zahlen/Log.hpp>
@@ -23,6 +24,7 @@
 #include <detail/MemoryPool.hpp>
 #include <memory>
 #include <type_traits>
+#include <utility>
 
 namespace ZHLN::Vk {
 
@@ -327,6 +329,7 @@ struct DrawCommand {
 	uint32_t activeMorphCount;
 	std::array<float, 4> morphWeights;
 	uint32_t indexCount;
+	BufferHandle skinnedVertexBuffer;
 	DrawFlags flags;
 };
 
@@ -481,12 +484,33 @@ struct RenderContext::Impl {
 
 	FrameProfiler gpuProfiler;
 
+	Vk::ComputePass skinningPass;
+	Vk::PipelineLayout skinningPipelineLayout;
+
+	struct alignas(8) SkinningConstants {
+		uint64_t inputVerticesAddr;
+		uint64_t outputVerticesAddr;
+		uint64_t jointsAddr;
+		uint32_t vertexCount;
+		uint32_t jointOffset;
+	};
+
+	void BuildSkinningPipeline();
+	void DispatchSkinningPasses();
+
 	Impl(Window& win) : window(win) {}
 
 	void InitShadowResources();
 	void InitCullingResources();
 	void CompileShadowPipeline(VkDevice device, const void* shaderData, size_t shaderSize);
 	void InitBindless();
+	void BuildTAAPipeline();
+	void BuildFXAAPipeline();
+	void BuildSMAAPipeline();
+	void BuildAmbientPipeline();
+	void BuildLightingPipeline();
+	void BuildReflectionPipelines();
+	void BuildBlitPipeline();
 	void InitPostProcessing();
 	void SetupUI(GLFWwindow* window);
 
@@ -504,6 +528,32 @@ struct RenderContext::Impl {
 			for (uint32_t i = 0; i < 2; ++i) {
 				if (tlas[i] != VK_NULL_HANDLE) {
 					rtCtx.DestroyAS(tlas[i]);
+				}
+			}
+		}
+	}
+
+	struct WatchableShader {
+		std::string path;
+		FileWatcher watcher;
+		std::function<void()> reloadCallback;
+	};
+
+	std::vector<WatchableShader> shaderWatchers;
+
+	void RegisterShaderWatcher(const char* path, std::function<void()> callback);
+
+	void CheckShaderWatchers() noexcept {
+		if constexpr (isDev) {
+			bool anyReloaded = false;
+			for (auto& watcher : shaderWatchers) {
+				if (watcher.watcher.CheckModified()) {
+					if (!anyReloaded) {
+						// Prevent write-after-read race conditions by forcing GPU idle
+						vkDeviceWaitIdle(ctx.Device());
+						anyReloaded = true;
+					}
+					watcher.reloadCallback();
 				}
 			}
 		}

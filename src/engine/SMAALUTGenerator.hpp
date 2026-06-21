@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <utility>
@@ -54,18 +55,17 @@ inline std::pair<float, float> AreaOrthoInternal(SmaaVec2 p1, SmaaVec2 p2, float
 		if (is_trapezoid) {
 			float a = (y1 + y2) * 0.5f;
 			return (a < 0.0f) ? std::pair{std::abs(a), 0.0f} : std::pair{0.0f, std::abs(a)};
-		} else {
-			float intersection_x = -p1.y * dx / dy + p1.x;
-			float dummy;
-			// Native C++ std::modf handles negative fractional parts identically to Python
-			float frac = std::modf(intersection_x, &dummy);
-
-			float a1 = (intersection_x > p1.x) ? y1 * frac * 0.5f : 0.0f;
-			float a2 = (intersection_x < p2.x) ? y2 * (1.0f - frac) * 0.5f : 0.0f;
-			float a = (std::abs(a1) > std::abs(a2)) ? a1 : -a2;
-			return (a < 0.0f) ? std::pair{std::abs(a1), std::abs(a2)}
-							  : std::pair{std::abs(a2), std::abs(a1)};
 		}
+		float intersection_x = -p1.y * dx / dy + p1.x;
+		float dummy = 0.0f;
+		// Native C++ std::modf handles negative fractional parts identically to Python
+		float frac = std::modf(intersection_x, &dummy);
+
+		float a1 = (intersection_x > p1.x) ? y1 * frac * 0.5f : 0.0f;
+		float a2 = (intersection_x < p2.x) ? y2 * (1.0f - frac) * 0.5f : 0.0f;
+		float a = (std::abs(a1) > std::abs(a2)) ? a1 : -a2;
+		return (a < 0.0f) ? std::pair{std::abs(a1), std::abs(a2)}
+						  : std::pair{std::abs(a2), std::abs(a1)};
 	}
 	return {0.0f, 0.0f};
 }
@@ -80,12 +80,14 @@ inline std::pair<float, float> AreaOrtho(int pattern, float left, float right,
 		case 0:
 			return {0.0f, 0.0f};
 		case 1:
-			if (left <= right)
+			if (left <= right) {
 				return AreaOrthoInternal(SmaaVec2(0.0f, o2), SmaaVec2(d * 0.5f, 0.0f), left);
+			}
 			return {0.0f, 0.0f};
 		case 2:
-			if (left >= right)
+			if (left >= right) {
 				return AreaOrthoInternal(SmaaVec2(d * 0.5f, 0.0f), SmaaVec2(d, o2), left);
+			}
 			return {0.0f, 0.0f};
 		case 3: {
 			auto a1_pair = AreaOrthoInternal(SmaaVec2(0.0f, o2), SmaaVec2(d * 0.5f, 0.0f), left);
@@ -95,8 +97,9 @@ inline std::pair<float, float> AreaOrtho(int pattern, float left, float right,
 			return {smoothed.first.x + smoothed.second.x, smoothed.first.y + smoothed.second.y};
 		}
 		case 4:
-			if (left <= right)
+			if (left <= right) {
 				return AreaOrthoInternal(SmaaVec2(0.0f, o1), SmaaVec2(d * 0.5f, 0.0f), left);
+			}
 			return {0.0f, 0.0f};
 		case 5:
 			return {0.0f, 0.0f};
@@ -114,8 +117,9 @@ inline std::pair<float, float> AreaOrtho(int pattern, float left, float right,
 		case 7:
 			return AreaOrthoInternal(SmaaVec2(0.0f, o1), SmaaVec2(d, o2), left);
 		case 8:
-			if (left >= right)
+			if (left >= right) {
 				return AreaOrthoInternal(SmaaVec2(d * 0.5f, 0.0f), SmaaVec2(d, o1), left);
+			}
 			return {0.0f, 0.0f};
 		case 9:
 			if (std::abs(offset) > 0.0f) {
@@ -301,7 +305,7 @@ inline SmaaVec2 AreaDiag(int pattern, float left, float right, SmaaVec2 offset) 
 inline void FillSmaaAreaTex(std::span<uint32_t> outPixels) noexcept {
 	constexpr uint32_t width = 160;
 	constexpr uint32_t height = 560;
-	constexpr size_t totalSize = width * height;
+	constexpr auto totalSize = static_cast<const size_t>(width) * height;
 
 	// Bounds safety check
 	if (outPixels.size() < totalSize) [[unlikely]] {
@@ -329,8 +333,8 @@ inline void FillSmaaAreaTex(std::span<uint32_t> outPixels) noexcept {
 
 			for (int right = 0; right < 16; ++right) {
 				for (int left = 0; left < 16; ++left) {
-					float compLeft = static_cast<float>(left * left);
-					float compRight = static_cast<float>(right * right);
+					auto compLeft = static_cast<float>(left * left);
+					auto compRight = static_cast<float>(right * right);
 
 					auto res = AreaOrtho(pattern, compLeft, compRight, offset);
 
@@ -371,7 +375,7 @@ inline void FillSmaaAreaTex(std::span<uint32_t> outPixels) noexcept {
 inline void FillSmaaSearchTex(std::span<uint32_t> outPixels) noexcept {
 	constexpr uint32_t width = 64;
 	constexpr uint32_t height = 16;
-	constexpr size_t totalSize = width * height;
+	constexpr auto totalSize = static_cast<const size_t>(width) * height;
 
 	// Bounds safety check
 	if (outPixels.size() < totalSize) [[unlikely]] {
@@ -414,25 +418,29 @@ inline void FillSmaaSearchTex(std::span<uint32_t> outPixels) noexcept {
 	auto deltaLeft = [](const std::array<int, 4>& left,
 						const std::array<int, 4>& top) noexcept -> int {
 		int d = 0;
-		if (top[3] == 1)
+		if (top[3] == 1) {
 			d += 1;
-		if (d == 1 && top[2] == 1 && left[1] != 1 && left[3] != 1)
+		}
+		if (d == 1 && top[2] == 1 && left[1] != 1 && left[3] != 1) {
 			d += 1;
+		}
 		return d;
 	};
 
 	auto deltaRight = [](const std::array<int, 4>& left,
 						 const std::array<int, 4>& top) noexcept -> int {
 		int d = 0;
-		if (top[3] == 1 && left[1] != 1 && left[3] != 1)
+		if (top[3] == 1 && left[1] != 1 && left[3] != 1) {
 			d += 1;
-		if (d == 1 && top[2] == 1 && left[0] != 1 && left[2] != 1)
+		}
+		if (d == 1 && top[2] == 1 && left[0] != 1 && left[2] != 1) {
 			d += 1;
+		}
 		return d;
 	};
 
 	// Intermediate workspace buffer
-	std::array<uint8_t, 66 * 33> temp{};
+	std::array<uint8_t, static_cast<size_t>(66 * 33)> temp{};
 
 	for (int x = 0; x < 33; ++x) {
 		for (int y = 0; y < 33; ++y) {

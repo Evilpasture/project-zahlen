@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // File: src/engine/RenderInit.cpp
+#include "FileWatcher.hpp"
 #include "IBLProcessor.hpp"
 #include "RenderCore.hpp"
 #include "RenderInternal.hpp"
@@ -16,6 +17,8 @@
 #include <Features.hpp>
 #include <StagingContext.hpp>
 #include <cstddef>
+#include <fstream>
+#include <functional>
 #include <stb_image.h>
 #include <threading/TaskSystem.hpp>
 #include <vector>
@@ -138,6 +141,108 @@ HardwareCaps ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion)
 } // namespace
 
 namespace ZHLN {
+
+namespace {
+struct ShaderStageSource {
+	const char* path;
+	const unsigned char* fallbackCode;
+	size_t fallbackSize;
+	const char* entryPoint = "main";
+};
+
+// Helper to safely load binary SPIR-V bytes from disk
+std::vector<uint32_t> LoadShaderSpv(const std::string& path) noexcept {
+	std::ifstream file(path, std::ios::ate | std::ios::binary);
+	if (!file.is_open()) {
+		return {};
+	}
+	size_t fileSize = (size_t)file.tellg();
+	std::vector<uint32_t> buffer(fileSize / sizeof(uint32_t));
+	file.seekg(0);
+	file.read(reinterpret_cast<char*>(buffer.data()), fileSize);
+	file.close();
+	return buffer;
+}
+
+// Redirects shader source to disk data if available, falling back to embedded bytes
+static bool LoadShaderData(const ShaderStageSource& src, const void*& outData, size_t& outSize,
+						   std::vector<uint32_t>& diskBuffer) {
+	outData = src.fallbackCode;
+	outSize = src.fallbackSize;
+	if constexpr (isDev) {
+		diskBuffer = LoadShaderSpv(src.path);
+		if (!diskBuffer.empty()) {
+			outData = diskBuffer.data();
+			outSize = diskBuffer.size() * 4;
+			return true;
+		}
+	}
+	return false;
+}
+
+// Generic helper for standard PostProcessPass compilation
+template <typename LayoutT>
+void BuildPassHelper(RenderContext::Impl* self, Vk::PostProcessPass<LayoutT>& pass,
+					 const char* passName, ShaderStageSource vs, ShaderStageSource ps,
+					 std::initializer_list<VkFormat> colorFormats,
+					 const VkPushConstantRange* pushConstants = nullptr, uint32_t pushCount = 0,
+					 bool additive = false) noexcept {
+
+	const void* vs_code = nullptr;
+	size_t vs_size = 0;
+	const void* ps_code = nullptr;
+	size_t ps_size = 0;
+	std::vector<uint32_t> disk_vs;
+	std::vector<uint32_t> disk_ps;
+
+	LoadShaderData(vs, vs_code, vs_size, disk_vs);
+	LoadShaderData(ps, ps_code, ps_size, disk_ps);
+
+	auto shaders = Vk::ShaderStages::Create(
+		self->ctx.Device(),
+		{.code = Vk::AsSpirV(vs_code), .size = vs_size, .entry_point = vs.entryPoint},
+		{.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint});
+
+	if (pass.Build(self->ctx.Device(), shaders, colorFormats, pushConstants, pushCount, additive)) {
+		ZHLN::Log("[Shader Reload] {} Pipeline built successfully.", passName);
+	} else {
+		ZHLN::Log("[Shader Reload] {} Pipeline failed to build.", passName);
+	}
+}
+
+// Generic helper for specialized pipeline variants (e.g. Reflections)
+template <typename LayoutT>
+void BuildPassVariants(RenderContext::Impl* self, Vk::PostProcessPass<LayoutT>& pass,
+					   const char* passName, ShaderStageSource vs, ShaderStageSource ps,
+					   std::initializer_list<VkFormat> colorFormats,
+					   std::span<const VkSpecializationInfo> specInfos,
+					   const VkPushConstantRange* pushConstants = nullptr, uint32_t pushCount = 0,
+					   bool additive = false) noexcept {
+
+	const void* vs_code = nullptr;
+	size_t vs_size = 0;
+	const void* ps_code = nullptr;
+	size_t ps_size = 0;
+	std::vector<uint32_t> disk_vs;
+	std::vector<uint32_t> disk_ps;
+
+	LoadShaderData(vs, vs_code, vs_size, disk_vs);
+	LoadShaderData(ps, ps_code, ps_size, disk_ps);
+
+	auto shaders = Vk::ShaderStages::Create(
+		self->ctx.Device(),
+		{.code = Vk::AsSpirV(vs_code), .size = vs_size, .entry_point = vs.entryPoint},
+		{.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint});
+
+	if (pass.BuildVariants(self->ctx.Device(), shaders, colorFormats, pushConstants, pushCount,
+						   specInfos, additive)) {
+		ZHLN::Log("[Shader Reload] {} Pass variants built successfully.", passName);
+	} else {
+		ZHLN::Log("[Shader Reload] {} Pass variants failed to build.", passName);
+	}
+}
+
+} // namespace
 
 RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	: _impl(std::make_unique<Impl>(window)) {
@@ -364,6 +469,48 @@ RenderContext::~RenderContext() {
 	}
 }
 
+void RenderContext::CheckShaderReload() noexcept {
+	if constexpr (isDev) {
+		_impl->CheckShaderWatchers();
+	}
+}
+
+void RenderContext::Impl::BuildSkinningPipeline() {
+	VkPushConstantRange pushRange = {
+		.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(SkinningConstants)};
+
+	ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = nullptr,
+										   .set_layout_count = 0,
+										   .push_constants = &pushRange,
+										   .push_constant_count = 1};
+
+	// 1. Compile the PipelineLayout manually (storing directly inside the ComputePass)
+	skinningPass.pipelineLayout =
+		Vk::PipelineLayout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &layout_desc));
+
+	const void* cs_code = nullptr;
+	size_t cs_size = 0;
+	std::vector<uint32_t> disk_cs;
+
+	LoadShaderData({.path = SHADER_SKINNING_HLSL_CS_PATH,
+					.fallbackCode = ZHLN_Resource_SkinningCompSpv,
+					.fallbackSize = ZHLN_Resource_SkinningCompSpv_Len,
+					.entryPoint = "CSMain"},
+				   cs_code, cs_size, disk_cs);
+
+	// 2. Compile the Pipeline manually using the ComputePipelineBuilder
+	skinningPass.pipeline = Vk::ComputePipelineBuilder()
+								.Shader(Vk::AsSpirV(cs_code), cs_size, "CSMain")
+								.Layout(skinningPass.pipelineLayout.Get())
+								.Build(ctx.Device());
+
+	if (skinningPass.pipeline.Valid()) {
+		ZHLN::Log("[Shader Reload] GPU Skinning Compute pipeline built successfully.");
+	} else {
+		ZHLN::Log("[Shader Reload] GPU Skinning Compute pipeline failed to build.");
+	}
+}
+
 void RenderContext::Impl::InitShadowResources() {
 	shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
 		allocator, ctx, {.width = SHADOW_RES, .height = SHADOW_RES},
@@ -471,6 +618,12 @@ void RenderContext::Impl::InitCullingResources() {
 	if (!clusterCullingPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), cDesc)) {
 		ZHLN::Panic("FATAL: Failed to build Cluster Culling Pass!");
 	}
+
+	BuildSkinningPipeline();
+	if constexpr (isDev) {
+		// Skinning
+		RegisterShaderWatcher(SHADER_SKINNING_HLSL_CS_PATH, [this]() { BuildSkinningPipeline(); });
+	}
 }
 
 void RenderContext::Impl::InitBindless() {
@@ -510,9 +663,10 @@ void RenderContext::Impl::InitBindless() {
 	// Allocate our global Joint storage buffer (Supports 8192 dynamic matrices)
 	JPH::Array<JPH::Mat44> identities(8192, JPH::Mat44::sIdentity());
 	for (int i = 0; i < 2; ++i) {
-		jointBuffers[i] =
-			Vk::Buffer::Create(allocator.Get(), sizeof(JPH::Mat44) * 8192,
-							   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+		jointBuffers[i] = Vk::Buffer::Create(allocator.Get(), sizeof(JPH::Mat44) * 8192,
+											 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+												 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+											 VMA_MEMORY_USAGE_CPU_TO_GPU);
 
 		// Upload identity matrices initially
 		auto mapped = jointBuffers[i].Map();
@@ -616,140 +770,114 @@ void RenderContext::Impl::InitBindless() {
 		bindlessRegistry.UpdateSet(ctx.Device(), bindlessSets[i]);
 	}
 }
-void RenderContext::Impl::InitPostProcessing() {
-	defaultSampler = Vk::SamplerBuilder{}.Linear().ClampToEdge().Build(ctx.Device());
 
-	// Create the nearest-neighbor sampler
-	pointSampler = Vk::SamplerBuilder{}.Nearest().ClampToEdge().Build(ctx.Device());
-
+void RenderContext::Impl::BuildTAAPipeline() {
 	VkPushConstantRange taaPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float)};
-	auto taaShaders = Vk::ShaderStages::Create(ctx.Device(),
-											   {.code = Vk::AsSpirV(&ZHLN_Resource_TaaVertSpv[0]),
-												.size = ZHLN_Resource_TaaVertSpv_Len,
-												.entry_point = "VSMain"},
-											   {.code = Vk::AsSpirV(&ZHLN_Resource_TaaFragSpv[0]),
-												.size = ZHLN_Resource_TaaFragSpv_Len,
-												.entry_point = "PSMain"});
 
-	if (!taaPass.Build(ctx.Device(), taaShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &taaPush, 1)) {
-		ZHLN::Log("TAA pass build failure, continuing...");
-	}
+	BuildPassHelper(this, taaPass, "TAA",
+					{.path = SHADER_TAA_HLSL_VS_PATH,
+					 .fallbackCode = ZHLN_Resource_TaaVertSpv,
+					 .fallbackSize = ZHLN_Resource_TaaVertSpv_Len,
+					 .entryPoint = "VSMain"},
+					{.path = SHADER_TAA_HLSL_PS_PATH,
+					 .fallbackCode = ZHLN_Resource_TaaFragSpv,
+					 .fallbackSize = ZHLN_Resource_TaaFragSpv_Len,
+					 .entryPoint = "PSMain"},
+					{VK_FORMAT_R16G16B16A16_SFLOAT}, &taaPush, 1);
+}
 
+void RenderContext::Impl::BuildFXAAPipeline() {
 	VkPushConstantRange fxaaPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float) * 6};
-	auto fxaaShaders = Vk::ShaderStages::Create(ctx.Device(),
-												{.code = Vk::AsSpirV(&ZHLN_Resource_FxaaVertSpv[0]),
-												 .size = ZHLN_Resource_FxaaVertSpv_Len,
-												 .entry_point = "VSMain"},
-												{.code = Vk::AsSpirV(&ZHLN_Resource_FxaaFragSpv[0]),
-												 .size = ZHLN_Resource_FxaaFragSpv_Len,
-												 .entry_point = "PSMain"});
 
-	if (!fxaaPass.Build(ctx.Device(), fxaaShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &fxaaPush, 1)) {
-		ZHLN::Log("FXAA pass build failure, continuing...");
-	}
+	BuildPassHelper(this, fxaaPass, "FXAA",
+					{.path = SHADER_FXAA_HLSL_VS_PATH,
+					 .fallbackCode = ZHLN_Resource_FxaaVertSpv,
+					 .fallbackSize = ZHLN_Resource_FxaaVertSpv_Len,
+					 .entryPoint = "VSMain"},
+					{.path = SHADER_FXAA_HLSL_PS_PATH,
+					 .fallbackCode = ZHLN_Resource_FxaaFragSpv,
+					 .fallbackSize = ZHLN_Resource_FxaaFragSpv_Len,
+					 .entryPoint = "PSMain"},
+					{VK_FORMAT_R16G16B16A16_SFLOAT}, &fxaaPush, 1);
+}
 
-	// 1. Generate the SMAA Area LUT via heap vector passed as span
-	std::vector<uint32_t> smaaAreaPixels(static_cast<size_t>(160 * 560));
-	ZHLN::PBR::FillSmaaAreaTex(smaaAreaPixels); // Implicit conversion to std::span
-
-	// 2. Generate the SMAA Search LUT via heap vector passed as span
-	std::vector<uint32_t> smaaSearchPixels(static_cast<size_t>(64 * 16));
-	ZHLN::PBR::FillSmaaSearchTex(smaaSearchPixels); // Implicit conversion to std::span
-	smaaAreaTexIdx = CreateTextureInternal(smaaAreaPixels.data(), 160, 560, false);
-	smaaSearchTexIdx = CreateTextureInternal(smaaSearchPixels.data(), 64, 16, false);
-
+void RenderContext::Impl::BuildSMAAPipeline() {
 	VkPushConstantRange smaaPush = {.stageFlags =
 										VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 									.offset = 0,
 									.size = sizeof(float) * 4};
 
-	// 2. Build Pass 1: Edge Detection (Note the entry points updated)
-	auto edgeShaders =
-		Vk::ShaderStages::Create(ctx.Device(),
-								 {.code = Vk::AsSpirV(&ZHLN_Resource_SmaaEdgeVertSpv[0]),
-								  .size = ZHLN_Resource_SmaaEdgeVertSpv_Len,
-								  .entry_point = "SmaaEdgeVS"},
-								 {.code = Vk::AsSpirV(&ZHLN_Resource_SmaaEdgeFragSpv[0]),
-								  .size = ZHLN_Resource_SmaaEdgeFragSpv_Len,
-								  .entry_point = "SmaaEdgePS"});
-	if (!smaaEdgePass.Build(ctx.Device(), edgeShaders, {VK_FORMAT_R8G8_UNORM}, &smaaPush, 1)) {
-		ZHLN::Log("Failed to build SMAA Edge Detection Pipeline!");
-	}
+	BuildPassHelper(this, smaaEdgePass, "SMAA Edge Detection",
+					{.path = SHADER_SMAA_EDGE_VS_PATH,
+					 .fallbackCode = ZHLN_Resource_SmaaEdgeVertSpv,
+					 .fallbackSize = ZHLN_Resource_SmaaEdgeVertSpv_Len,
+					 .entryPoint = "SmaaEdgeVS"},
+					{.path = SHADER_SMAA_EDGE_PS_PATH,
+					 .fallbackCode = ZHLN_Resource_SmaaEdgeFragSpv,
+					 .fallbackSize = ZHLN_Resource_SmaaEdgeFragSpv_Len,
+					 .entryPoint = "SmaaEdgePS"},
+					{VK_FORMAT_R8G8_UNORM}, &smaaPush, 1);
 
-	// 3. Build Pass 2: Blending Weight
-	auto weightShaders =
-		Vk::ShaderStages::Create(ctx.Device(),
-								 {.code = Vk::AsSpirV(&ZHLN_Resource_SmaaWeightVertSpv[0]),
-								  .size = ZHLN_Resource_SmaaWeightVertSpv_Len,
-								  .entry_point = "SmaaWeightVS"},
-								 {.code = Vk::AsSpirV(&ZHLN_Resource_SmaaWeightFragSpv[0]),
-								  .size = ZHLN_Resource_SmaaWeightFragSpv_Len,
-								  .entry_point = "SmaaWeightPS"});
-	if (!smaaWeightPass.Build(ctx.Device(), weightShaders, {VK_FORMAT_R8G8B8A8_UNORM}, &smaaPush,
-							  1)) {
-		ZHLN::Log("Failed to build SMAA Blending Weight Pipeline!");
-	}
+	BuildPassHelper(this, smaaWeightPass, "SMAA Blending Weight",
+					{.path = SHADER_SMAA_WEIGHT_VS_PATH,
+					 .fallbackCode = ZHLN_Resource_SmaaWeightVertSpv,
+					 .fallbackSize = ZHLN_Resource_SmaaWeightVertSpv_Len,
+					 .entryPoint = "SmaaWeightVS"},
+					{.path = SHADER_SMAA_WEIGHT_PS_PATH,
+					 .fallbackCode = ZHLN_Resource_SmaaWeightFragSpv,
+					 .fallbackSize = ZHLN_Resource_SmaaWeightFragSpv_Len,
+					 .entryPoint = "SmaaWeightPS"},
+					{VK_FORMAT_R8G8B8A8_UNORM}, &smaaPush, 1);
 
-	// 4. Build Pass 3: Neighborhood Blend
-	auto blendShaders =
-		Vk::ShaderStages::Create(ctx.Device(),
-								 {.code = Vk::AsSpirV(&ZHLN_Resource_SmaaBlendVertSpv[0]),
-								  .size = ZHLN_Resource_SmaaBlendVertSpv_Len,
-								  .entry_point = "SmaaBlendVS"},
-								 {.code = Vk::AsSpirV(&ZHLN_Resource_SmaaBlendFragSpv[0]),
-								  .size = ZHLN_Resource_SmaaBlendFragSpv_Len,
-								  .entry_point = "SmaaBlendPS"});
-	if (!smaaBlendPass.Build(ctx.Device(), blendShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &smaaPush,
-							 1)) {
-		ZHLN::Log("Failed to build SMAA Neighborhood Blending Pipeline!");
-	}
+	BuildPassHelper(this, smaaBlendPass, "SMAA Neighborhood Blend",
+					{.path = SHADER_SMAA_BLEND_VS_PATH,
+					 .fallbackCode = ZHLN_Resource_SmaaBlendVertSpv,
+					 .fallbackSize = ZHLN_Resource_SmaaBlendVertSpv_Len,
+					 .entryPoint = "SmaaBlendVS"},
+					{.path = SHADER_SMAA_BLEND_PS_PATH,
+					 .fallbackCode = ZHLN_Resource_SmaaBlendFragSpv,
+					 .fallbackSize = ZHLN_Resource_SmaaBlendFragSpv_Len,
+					 .entryPoint = "SmaaBlendPS"},
+					{VK_FORMAT_R16G16B16A16_SFLOAT}, &smaaPush, 1);
+}
 
+void RenderContext::Impl::BuildAmbientPipeline() {
 	VkPushConstantRange ppPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
 
-	// ============================================================================
-	// DEFERRED CLUSTERED PASSES INITIALIZATION
-	// ============================================================================
+	BuildPassHelper(this, ambientPass, "Ambient",
+					{.path = SHADER_AMBIENT_HLSL_VS_PATH,
+					 .fallbackCode = ZHLN_Resource_AmbientVertSpv,
+					 .fallbackSize = ZHLN_Resource_AmbientVertSpv_Len,
+					 .entryPoint = "VSMain"},
+					{.path = SHADER_AMBIENT_HLSL_PS_PATH,
+					 .fallbackCode = ZHLN_Resource_AmbientFragSpv,
+					 .fallbackSize = ZHLN_Resource_AmbientFragSpv_Len,
+					 .entryPoint = "PSMain"},
+					{VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush, 1);
+}
 
-	// 1. Build Ambient Pass (Base Opaque)
-	auto ambientShaders =
-		Vk::ShaderStages::Create(ctx.Device(),
-								 {.code = Vk::AsSpirV(&ZHLN_Resource_AmbientVertSpv[0]),
-								  .size = ZHLN_Resource_AmbientVertSpv_Len,
-								  .entry_point = "VSMain"},
-								 {.code = Vk::AsSpirV(&ZHLN_Resource_AmbientFragSpv[0]),
-								  .size = ZHLN_Resource_AmbientFragSpv_Len,
-								  .entry_point = "PSMain"});
-	if (!ambientPass.Build(ctx.Device(), ambientShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush,
-						   1, false)) {
-		ZHLN::Panic("FATAL: Failed to build Ambient Pass!");
-	}
+void RenderContext::Impl::BuildLightingPipeline() {
+	VkPushConstantRange ppPush = {
+		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
 
-	// 2. Build Lighting Pass
-	auto lightingShaders =
-		Vk::ShaderStages::Create(ctx.Device(),
-								 {.code = Vk::AsSpirV(&ZHLN_Resource_LightingVertSpv[0]),
-								  .size = ZHLN_Resource_LightingVertSpv_Len,
-								  .entry_point = "VSMain"},
-								 {.code = Vk::AsSpirV(&ZHLN_Resource_LightingFragSpv[0]),
-								  .size = ZHLN_Resource_LightingFragSpv_Len,
-								  .entry_point = "PSMain"});
-	if (!lightingPass.Build(ctx.Device(), lightingShaders, {VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush,
-							1, false)) {
-		ZHLN::Panic("FATAL: Failed to build Lighting Pass!");
-	}
+	BuildPassHelper(this, lightingPass, "Lighting",
+					{.path = SHADER_LIGHTING_HLSL_VS_PATH,
+					 .fallbackCode = ZHLN_Resource_LightingVertSpv,
+					 .fallbackSize = ZHLN_Resource_LightingVertSpv_Len,
+					 .entryPoint = "VSMain"},
+					{.path = SHADER_LIGHTING_HLSL_PS_PATH,
+					 .fallbackCode = ZHLN_Resource_LightingFragSpv,
+					 .fallbackSize = ZHLN_Resource_LightingFragSpv_Len,
+					 .entryPoint = "PSMain"},
+					{VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush, 1);
+}
 
-	// 3. Build Reflection Pass Variants
-	auto reflShaders =
-		Vk::ShaderStages::Create(ctx.Device(),
-								 {.code = Vk::AsSpirV(&ZHLN_Resource_ReflectionVertSpv[0]),
-								  .size = ZHLN_Resource_ReflectionVertSpv_Len,
-								  .entry_point = "VSMain"},
-								 {.code = Vk::AsSpirV(&ZHLN_Resource_ReflectionFragSpv[0]),
-								  .size = ZHLN_Resource_ReflectionFragSpv_Len,
-								  .entry_point = "PSMain"});
+void RenderContext::Impl::BuildReflectionPipelines() {
+	VkPushConstantRange ppPush = {
+		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
 
 	struct SpecData {
 		int enableSSR;
@@ -771,30 +899,97 @@ void RenderContext::Impl::InitPostProcessing() {
 						.pData = &variants[i]};
 	}
 
-	// Build the 4 reflection pipelines concurrently mapped to their specialization constants
-	if (!reflectionPass.BuildVariants(ctx.Device(), reflShaders, {VK_FORMAT_R16G16B16A16_SFLOAT},
-									  &ppPush, 1, specInfos, false)) {
-		ZHLN::Panic("FATAL: Failed to build Reflection Pass!");
-	}
+	// Corrected argument sequence matching the new parameters
+	BuildPassVariants(this, reflectionPass, "Reflection",
+					  {.path = SHADER_REFLECTION_HLSL_VS_PATH,
+					   .fallbackCode = ZHLN_Resource_ReflectionVertSpv,
+					   .fallbackSize = ZHLN_Resource_ReflectionVertSpv_Len,
+					   .entryPoint = "VSMain"},
+					  {.path = SHADER_REFLECTION_HLSL_PS_PATH,
+					   .fallbackCode = ZHLN_Resource_ReflectionFragSpv,
+					   .fallbackSize = ZHLN_Resource_ReflectionFragSpv_Len,
+					   .entryPoint = "PSMain"},
+					  {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1);
+}
 
+void RenderContext::Impl::BuildBlitPipeline() {
 	VkPushConstantRange blitPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 		.offset = 0,
 		.size = 8,
 	};
 
-	auto blitShaders = Vk::ShaderStages::Create(ctx.Device(),
-												{.code = Vk::AsSpirV(&ZHLN_Resource_BlitVertSpv[0]),
-												 .size = ZHLN_Resource_BlitVertSpv_Len,
-												 .entry_point = "VSMain"},
-												{.code = Vk::AsSpirV(&ZHLN_Resource_BlitFragSpv[0]),
-												 .size = ZHLN_Resource_BlitFragSpv_Len,
-												 .entry_point = "PSMain"});
+	BuildPassHelper(this, blitPass, "Blit",
+					{.path = SHADER_BLIT_HLSL_VS_PATH,
+					 .fallbackCode = ZHLN_Resource_BlitVertSpv,
+					 .fallbackSize = ZHLN_Resource_BlitVertSpv_Len,
+					 .entryPoint = "VSMain"},
+					{.path = SHADER_BLIT_HLSL_PS_PATH,
+					 .fallbackCode = ZHLN_Resource_BlitFragSpv,
+					 .fallbackSize = ZHLN_Resource_BlitFragSpv_Len,
+					 .entryPoint = "PSMain"},
+					{presentation.swapchain.Get().format}, &blitPush, 1);
+}
 
-	VkFormat swapchainFormat = presentation.swapchain.Get().format;
-	if (!blitPass.Build(ctx.Device(), blitShaders, {swapchainFormat}, &blitPush, 1)) {
-		ZHLN::Log("Blit pass build failure, continuing...");
+void RenderContext::Impl::InitPostProcessing() {
+	defaultSampler = Vk::SamplerBuilder{}.Linear().ClampToEdge().Build(ctx.Device());
+
+	// Create the nearest-neighbor sampler
+	pointSampler = Vk::SamplerBuilder{}.Nearest().ClampToEdge().Build(ctx.Device());
+
+	// 1. Initial Compilation Passes (Reads from disk if available, otherwise falls back to memory)
+	BuildTAAPipeline();
+	BuildFXAAPipeline();
+	BuildSMAAPipeline();
+	BuildAmbientPipeline();
+	BuildLightingPipeline();
+	BuildReflectionPipelines();
+	BuildBlitPipeline();
+
+	// 2. Attach FileWatchers in Development Mode
+	if constexpr (isDev) {
+		// TAA
+		RegisterShaderWatcher(SHADER_TAA_HLSL_VS_PATH, [this]() { BuildTAAPipeline(); });
+		RegisterShaderWatcher(SHADER_TAA_HLSL_PS_PATH, [this]() { BuildTAAPipeline(); });
+
+		// FXAA
+		RegisterShaderWatcher(SHADER_FXAA_HLSL_VS_PATH, [this]() { BuildFXAAPipeline(); });
+		RegisterShaderWatcher(SHADER_FXAA_HLSL_PS_PATH, [this]() { BuildFXAAPipeline(); });
+
+		// SMAA (3 Passes)
+		RegisterShaderWatcher(SHADER_SMAA_EDGE_VS_PATH, [this]() { BuildSMAAPipeline(); });
+		RegisterShaderWatcher(SHADER_SMAA_EDGE_PS_PATH, [this]() { BuildSMAAPipeline(); });
+		RegisterShaderWatcher(SHADER_SMAA_WEIGHT_VS_PATH, [this]() { BuildSMAAPipeline(); });
+		RegisterShaderWatcher(SHADER_SMAA_WEIGHT_PS_PATH, [this]() { BuildSMAAPipeline(); });
+		RegisterShaderWatcher(SHADER_SMAA_BLEND_VS_PATH, [this]() { BuildSMAAPipeline(); });
+		RegisterShaderWatcher(SHADER_SMAA_BLEND_PS_PATH, [this]() { BuildSMAAPipeline(); });
+
+		// Clustered Ambient & Lighting Passes
+		RegisterShaderWatcher(SHADER_AMBIENT_HLSL_VS_PATH, [this]() { BuildAmbientPipeline(); });
+		RegisterShaderWatcher(SHADER_AMBIENT_HLSL_PS_PATH, [this]() { BuildAmbientPipeline(); });
+		RegisterShaderWatcher(SHADER_LIGHTING_HLSL_VS_PATH, [this]() { BuildLightingPipeline(); });
+		RegisterShaderWatcher(SHADER_LIGHTING_HLSL_PS_PATH, [this]() { BuildLightingPipeline(); });
+
+		// Specialized Reflection Pass
+		RegisterShaderWatcher(SHADER_REFLECTION_HLSL_VS_PATH,
+							  [this]() { BuildReflectionPipelines(); });
+		RegisterShaderWatcher(SHADER_REFLECTION_HLSL_PS_PATH,
+							  [this]() { BuildReflectionPipelines(); });
+
+		// Final Composition / Blit Pass
+		RegisterShaderWatcher(SHADER_BLIT_HLSL_VS_PATH, [this]() { BuildBlitPipeline(); });
+		RegisterShaderWatcher(SHADER_BLIT_HLSL_PS_PATH, [this]() { BuildBlitPipeline(); });
 	}
+
+	// 3. Generate the SMAA Area LUT via heap vector passed as span
+	std::vector<uint32_t> smaaAreaPixels(static_cast<size_t>(160 * 560));
+	ZHLN::PBR::FillSmaaAreaTex(smaaAreaPixels); // Implicit conversion to std::span
+
+	// 4. Generate the SMAA Search LUT via heap vector passed as span
+	std::vector<uint32_t> smaaSearchPixels(static_cast<size_t>(64 * 16));
+	ZHLN::PBR::FillSmaaSearchTex(smaaSearchPixels); // Implicit conversion to std::span
+	smaaAreaTexIdx = CreateTextureInternal(smaaAreaPixels.data(), 160, 560, false);
+	smaaSearchTexIdx = CreateTextureInternal(smaaSearchPixels.data(), 64, 16, false);
 }
 
 void RenderContext::Impl::SetupUI(GLFWwindow* window) {

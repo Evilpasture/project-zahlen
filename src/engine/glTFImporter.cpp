@@ -831,6 +831,13 @@ uint32_t InstantiatePrefab(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 		const auto& part = prefab.parts[i];
 		const auto& prep = preparedParts[i];
 
+		// 1. Pre-allocate the dynamic skinned scratch buffer handle
+		BufferHandle skinnedVbo = BufferHandle::Invalid;
+		if (part.isSkinned && params.isAnimated) {
+			size_t bufferSize = part.mesh.vertexCount * sizeof(Vertex);
+			skinnedVbo = ctx.CreateSkinnedScratchBuffer(bufferSize);
+		}
+
 		Entity e = reg.Create();
 
 		if (params.createPhysics) {
@@ -851,6 +858,7 @@ uint32_t InstantiatePrefab(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 						.worldTransform = JPH::Mat44::sIdentity(),
 						.jointOffset = part.jointOffset,
 						.isSkinned = part.isSkinned && params.isAnimated,
+						.skinnedVertexBuffer = skinnedVbo,
 						.morphOffset = part.morphOffset,
 						.activeMorphCount = part.activeMorphCount,
 						.morphWeights = {part.defaultMorphWeights[0], part.defaultMorphWeights[1],
@@ -912,6 +920,7 @@ uint32_t InstantiatePrefab(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 						.worldTransform = JPH::Mat44::sIdentity(),
 						.jointOffset = part.jointOffset,
 						.isSkinned = part.isSkinned && params.isAnimated,
+						.skinnedVertexBuffer = skinnedVbo,
 						.morphOffset = part.morphOffset,
 						.activeMorphCount = part.activeMorphCount,
 						.morphWeights = {part.defaultMorphWeights[0], part.defaultMorphWeights[1],

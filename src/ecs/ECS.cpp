@@ -123,6 +123,26 @@ void SparseSet::Insert(Entity entity, const void* data) {
 	std::memcpy(_data + (denseIdx * _elementSize), data, _elementSize);
 }
 
+void* SparseSet::InsertEmpty(Entity entity) {
+	if (entity.index >= _sparseCapacity) {
+		ResizeSparse(entity.index);
+	}
+
+	uint32_t denseIdx = _sparse[entity.index];
+	if (denseIdx == INVALID_DENSE) {
+		if (_count >= _denseCapacity) {
+			ResizeDense();
+		}
+		denseIdx = (uint32_t)_count++;
+		_dense[denseIdx] = entity;
+		_sparse[entity.index] = denseIdx;
+
+		// Zero-initialize the generic memory slot
+		std::memset(_data + (denseIdx * _elementSize), 0, _elementSize);
+	}
+	return _data + (denseIdx * _elementSize);
+}
+
 void SparseSet::Remove(Entity entity) {
 	if (entity.index >= _sparseCapacity) {
 		return;
@@ -292,6 +312,37 @@ void Registry::Clear() {
 			_freeIndices[_freeCount++] = (uint32_t)i;
 		}
 	}
+}
+
+uint32_t Registry::RegisterComponentDynamic(std::string_view name, size_t size, size_t alignment) {
+	uint32_t id = GetFamilyIDFromName(name);
+	ZHLN_LOCK(sync.shadowLock) {
+		// Return early if already mapped
+		if (id != 0xFFFFFFFF) {
+			return id;
+		}
+
+		// Resolve a unique dynamic dense ID using the name hash
+		uint32_t typeHash = HashTypeName(name);
+		id = ComponentFamily::ResolveDenseID(typeHash);
+		MapNameToFamilyID(name, id);
+
+		EnsureComponentCapacity(id);
+		if (_components[id] == nullptr) {
+			_components[id] = new SparseSet(size, alignment, &this->sync);
+		}
+	}
+	return id;
+}
+
+void* Registry::AddDynamic(Entity entity, uint32_t familyID) {
+	ZHLN_LOCK(sync.shadowLock) {
+		EnsureComponentCapacity(familyID);
+		if (familyID >= _compCapacity || (_components[familyID] == nullptr)) {
+			return nullptr;
+		}
+	}
+	return _components[familyID]->InsertEmpty(entity);
 }
 
 } // namespace ZHLN::ECS

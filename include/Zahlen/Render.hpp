@@ -36,6 +36,8 @@ class ZHLN_API RenderContext {
 	RenderContext(const RenderContext&) = delete;
 	auto operator=(const RenderContext&) -> RenderContext& = delete;
 
+	void CheckShaderReload() noexcept;
+
 	[[nodiscard]] std::optional<Extent2D> GetFramebufferSize() const;
 
 	[[nodiscard]] RenderResult BeginFrame() noexcept;
@@ -54,6 +56,7 @@ class ZHLN_API RenderContext {
 
 	auto CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true)
 		-> uint32_t;
+	auto CreateSkinnedScratchBuffer(size_t size) -> BufferHandle;
 
 	void UploadDebugVertices(const void* data, size_t size, uint32_t vertexCount) noexcept;
 	[[nodiscard]] BufferHandle GetDebugMeshBuffer() const noexcept;
@@ -87,6 +90,8 @@ struct DrawParams {
 	uint32_t activeMorphCount = 0;
 	const float* morphWeights = nullptr;
 	DrawFlags flags = DrawFlags::None;
+
+	BufferHandle skinnedVertexBuffer = BufferHandle::Invalid;
 
 	// --- Dynamic Shading Factor Overrides (-1.0f = fall back to material defaults) ---
 	float roughness = -1.0f;

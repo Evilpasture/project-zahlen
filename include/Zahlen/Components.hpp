@@ -46,6 +46,8 @@ struct MeshComponent {
 	uint32_t jointOffset = 0;
 	bool isSkinned = false;
 
+	BufferHandle skinnedVertexBuffer = BufferHandle::Invalid;
+
 	uint32_t morphOffset = 0;
 	uint32_t activeMorphCount = 0;
 	std::array<float, 4> morphWeights = {0.0f, 0.0f, 0.0f, 0.0f};

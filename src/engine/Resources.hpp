@@ -41,5 +41,5 @@ DECLARE_RESOURCE(ZHLN_Resource_SmaaBlendVertSpv)
 DECLARE_RESOURCE(ZHLN_Resource_SmaaBlendFragSpv)
 DECLARE_RESOURCE(ZHLN_Resource_ClusterBoundsSpv)
 DECLARE_RESOURCE(ZHLN_Resource_ClusterCullingSpv)
+DECLARE_RESOURCE(ZHLN_Resource_SkinningCompSpv)
 }
-

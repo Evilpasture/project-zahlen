@@ -247,6 +247,11 @@ if not ok then
         typedef struct SetMoveInputArgs { uint64_t entityRaw; float x; float z; } SetMoveInputArgs;
         typedef struct UnprojectArgs { float ndcX; float ndcY; double* ox; double* oy; double* oz; float* dx; float* dy; float* dz; } UnprojectArgs;
         typedef struct LogInventoryArgs { const char* msg; } LogInventoryArgs;
+        typedef struct RegisterDynamicComponentArgs {
+            const char* name;
+            uint64_t size;
+            uint64_t alignment;
+        } RegisterDynamicComponentArgs;
 
         typedef struct SpawnPrefabArgs {
             char path[256];

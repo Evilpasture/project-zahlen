@@ -169,3 +169,7 @@ const unsigned char ZHLN_Resource_ClusterCullingSpv[] = {
 };
 const unsigned int ZHLN_Resource_ClusterCullingSpv_Len = sizeof(ZHLN_Resource_ClusterCullingSpv);
 
+const unsigned char ZHLN_Resource_SkinningCompSpv[] = {
+#embed SHADER_SKINNING_HLSL_CS_PATH
+};
+const unsigned int ZHLN_Resource_SkinningCompSpv_Len = sizeof(ZHLN_Resource_SkinningCompSpv);

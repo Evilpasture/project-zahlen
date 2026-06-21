@@ -765,6 +765,54 @@ inline RenderFrameResult MapFrameResult(ZHLN_FrameResult res) noexcept {
 }
 } // namespace
 
+void RenderContext::Impl::DispatchSkinningPasses() {
+	bool hasSkinned = false;
+	for (const auto& drawCmd : drawQueue) {
+		if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
+			hasSkinned = true;
+			break;
+		}
+	}
+	if (!hasSkinned) {
+		return;
+	}
+
+	ZHLN_PROFILE_SCOPE("GPU Compute Skinning");
+	VkCommandBuffer cmd = current_cmd;
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, skinningPass.pipeline.Get());
+
+	for (const auto& drawCmd : drawQueue) {
+		if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
+			auto* inMesh = std::bit_cast<NativeMesh*>(drawCmd.mesh);
+			auto* outMesh = meshPool.Resolve(static_cast<uint64_t>(drawCmd.skinnedVertexBuffer));
+
+			if (inMesh == nullptr || outMesh == nullptr) {
+				continue;
+			}
+
+			SkinningConstants pcs{};
+			pcs.inputVerticesAddr = inMesh->vboAddress;
+			pcs.outputVerticesAddr = outMesh->vboAddress;
+			pcs.jointsAddr =
+				Vk::GetBufferDeviceAddress(ctx.Device(), jointBuffers[frame_index].Handle());
+			pcs.vertexCount = inMesh->vertexCount;
+			pcs.jointOffset = drawCmd.jointOffset;
+
+			vkCmdPushConstants(cmd, skinningPass.pipelineLayout.Get(), VK_SHADER_STAGE_COMPUTE_BIT,
+							   0, sizeof(SkinningConstants), &pcs);
+
+			uint32_t groupCount = (inMesh->vertexCount + 63) / 64;
+			vkCmdDispatch(cmd, groupCount, 1, 1);
+		}
+	}
+
+	// Memory barrier to synchronize Compute Writes -> Vertex Shader Reads
+	Vk::MemoryBarrier(cmd, {.src_stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+							.src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
+							.dst_stage = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+							.dst_access = VK_ACCESS_2_SHADER_READ_BIT});
+}
+
 RenderResult RenderContext::BeginFrame() noexcept {
 	if (_impl->stagingContext) {
 		_impl->stagingContext->Wait();
@@ -967,6 +1015,9 @@ RenderResult RenderContext::EndFrame() noexcept {
 		return std::unexpected(RenderFrameResult::Error);
 	}
 
+	// Execute pre-render compute skinning cleanly and self-contained
+	_impl->DispatchSkinningPasses();
+
 	VkCommandBuffer cmd = _impl->current_cmd;
 
 	if (_impl->drawQueue.size() > kGpuCullingMaxInstances) {
@@ -986,10 +1037,21 @@ RenderResult RenderContext::EndFrame() noexcept {
 
 		for (uint32_t i = 0; i < drawCount; ++i) {
 			const auto& cmdData = _impl->drawQueue[i];
+
+			// --- CORRECTED TO SAFELY RESOLVE THE HANDLE ---
+			auto* vboMesh =
+				(cmdData.skinnedVertexBuffer != BufferHandle::Invalid)
+					? _impl->meshPool.Resolve(static_cast<uint64_t>(cmdData.skinnedVertexBuffer))
+					: std::bit_cast<NativeMesh*>(cmdData.mesh);
+
+			if (vboMesh == nullptr) {
+				continue;
+			}
+
 			dst[i] = InstanceData{
 				.world = cmdData.transform,
 				.prevWorld = cmdData.prevTransform,
-				.vboAddress = std::bit_cast<NativeMesh*>(cmdData.mesh)->vboAddress,
+				.vboAddress = vboMesh->vboAddress, // BDA now safely points to the scratch output
 				.iboAddress = (cmdData.indexMesh != nullptr)
 								  ? std::bit_cast<NativeMesh*>(cmdData.indexMesh)->vboAddress
 								  : 0,
@@ -1005,14 +1067,13 @@ RenderResult RenderContext::EndFrame() noexcept {
 				.alphaCutoff = cmdData.alphaCutoff,
 				.alphaMode = cmdData.alphaMode,
 				.jointOffset = cmdData.jointOffset,
-				.isSkinned = (cmdData.flags & DrawFlags::Skinned) != DrawFlags::None ? 1u : 0u,
+				.isSkinned = 0u,
 				.morphOffset = cmdData.morphOffset,
 				.activeMorphCount = cmdData.activeMorphCount,
 				._pad = {},
 				.morphWeights = cmdData.morphWeights,
 				.baseColorFactor = cmdData.baseColorFactor,
 				.emissiveFactor = cmdData.emissiveFactor,
-
 			};
 		}
 	}
@@ -1314,6 +1375,7 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 						 (params.morphWeights != nullptr) ? params.morphWeights[2] : 0.0f,
 						 (params.morphWeights != nullptr) ? params.morphWeights[3] : 0.0f},
 		.indexCount = mesh.indexCount,
+		.skinnedVertexBuffer = params.skinnedVertexBuffer,
 		.flags = params.flags,
 	});
 }

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "Allocator.hpp"
 
 #include <Zahlen/Log.hpp>
@@ -59,16 +58,16 @@ bool LinearAllocator::do_is_equal(const std::pmr::memory_resource& other) const 
 
 } // namespace ZHLN
 
-void* operator new(std::size_t size) {
-	ZHLN::MemoryStats::TotalAllocated.fetch_add(size, std::memory_order_relaxed);
-	return std::malloc(size);
-}
-
-void operator delete(void* p, std::size_t size) noexcept {
-	ZHLN::MemoryStats::TotalFreed.fetch_add(size, std::memory_order_relaxed);
-	std::free(p);
-}
-
-void operator delete(void* p) noexcept {
-	std::free(p);
-}
+// void* operator new(std::size_t size) {
+// 	ZHLN::MemoryStats::TotalAllocated.fetch_add(size, std::memory_order_relaxed);
+// 	return std::malloc(size);
+// }
+//
+// void operator delete(void* p, std::size_t size) noexcept {
+// 	ZHLN::MemoryStats::TotalFreed.fetch_add(size, std::memory_order_relaxed);
+// 	std::free(p);
+// }
+//
+// void operator delete(void* p) noexcept {
+// 	std::free(p);
+// }

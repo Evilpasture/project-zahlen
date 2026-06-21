@@ -18,7 +18,7 @@
 
 namespace ZHLN::ECS {
 
-consteval uint32_t HashTypeName(std::string_view str) {
+constexpr uint32_t HashTypeName(std::string_view str) {
 	uint32_t hash = 2166136261u;
 	for (char c : str) {
 		hash ^= static_cast<uint8_t>(c);
@@ -92,6 +92,7 @@ class ZHLN_API SparseSet {
 	SparseSet& operator=(const SparseSet&) = delete;
 
 	void Insert(Entity entity, const void* data);
+	[[nodiscard]] void* InsertEmpty(Entity entity);
 	void Remove(Entity entity);
 	[[nodiscard]] bool Contains(Entity entity) const noexcept;
 	[[nodiscard]] void* Get(Entity entity) const noexcept;
@@ -146,6 +147,9 @@ class ZHLN_API Registry {
 	void Destroy(Entity entity);
 	bool IsAlive(Entity entity) const noexcept;
 	void Clear();
+
+	uint32_t RegisterComponentDynamic(std::string_view name, size_t size, size_t alignment);
+	void* AddDynamic(Entity entity, uint32_t familyID);
 
 	static void MapNameToFamilyID(std::string_view name, uint32_t id) noexcept;
 	static uint32_t GetFamilyIDFromName(std::string_view name) noexcept;

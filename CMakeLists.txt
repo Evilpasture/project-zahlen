@@ -426,6 +426,12 @@ set_property(SOURCE src/engine/Resources.c APPEND PROPERTY OBJECT_DEPENDS
     "${SMAA_BLEND_PS_SPV}"
 )
 
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/skinning.hlsl" CSMain cs_6_0 SKINNING_COMP_SPV)
+add_custom_target(zahlen_engine_skinning_shader ALL DEPENDS ${SKINNING_COMP_SPV})
+add_dependencies(zahlen_engine zahlen_engine_skinning_shader)
+target_compile_definitions(zahlen_engine PRIVATE SHADER_SKINNING_HLSL_CS_PATH="${SKINNING_COMP_SPV}")
+set_source_files_properties(src/engine/Resources.c PROPERTIES OBJECT_DEPENDS "${SKINNING_COMP_SPV}")
+
 add_executable(zahlen 
     src/main.cpp
     src/game_main.cpp 
@@ -462,7 +468,20 @@ add_custom_target(cook_assets ALL
 add_dependencies(cook_assets zcook)
 
 if(NOT MSVC)
-    target_compile_options(zahlen_engine PRIVATE $<$<CXX_COMPILER_ID:GNU>:--param=destructive-interference-size=64> -Wall -Wextra -Wpedantic -Wno-interference-size -fno-exceptions -fno-rtti)
+    # Define flags that should ONLY apply to GNU/GCC
+    set(GCC_ONLY_FLAGS 
+        "--param=destructive-interference-size=64"
+        "-Wno-interference-size"
+        "-fno-exceptions"
+        "-fno-rtti"
+    )
+   
+    target_compile_options(zahlen_engine PRIVATE 
+        $<$<AND:$<CXX_COMPILER_ID:GNU>,$<COMPILE_LANGUAGE:CXX>>:${GCC_ONLY_FLAGS}>
+        
+        # General warnings (always applied to non-MSVC)
+        $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
+    )
     if(WIN32)
         target_link_options(zahlen_engine PRIVATE -Xlinker /subsystem:console)
         target_compile_options(zahlen_engine PRIVATE -Wno-microsoft-anon-tag -Wno-unknown-pragmas -Wno-unused-parameter)

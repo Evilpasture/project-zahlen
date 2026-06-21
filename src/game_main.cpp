@@ -513,6 +513,7 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 							.activeMorphCount = mesh->activeMorphCount,
 							.morphWeights = mesh->morphWeights.data(),
 							.flags = flags,
+							.skinnedVertexBuffer = mesh->skinnedVertexBuffer,
 							.roughness = roughness,
 							.metallic = metallic});
 		}
@@ -819,6 +820,12 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, ScriptRunne
 	static InputSystem inputSystem;
 	inputSystem.Update(engine);
 	UISystem(engine, scriptRunner);
+
+	// --- DYNAMIC HOT-RELOAD PUMP ---
+	if (gameplayWatcher.CheckModified()) {
+		scriptRunner.ReloadFile("scripts/gameplay.lua");
+	}
+	engine.GetRenderContext().CheckShaderReload(); // Checks and re-builds stale pipelines
 
 	static TargetCameraSystem targetCamSys;
 	static CameraSystem camSys;
