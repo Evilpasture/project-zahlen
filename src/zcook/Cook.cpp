@@ -4,9 +4,8 @@
 
 #include "Cook.hpp"
 
+#include "BinaryReader.hpp"
 #include "GLB.hpp"
-#include "Lexer.hpp"
-#include "Parser.hpp"
 #include "Transform.hpp"
 #include "threading/TaskSystem.hpp"
 #include "threading/Thread.hpp"
@@ -46,20 +45,11 @@ int CookMesh(int argc, char** argv) {
 		return 1;
 	}
 
-	FILE* f = std::fopen(metaPath.c_str(), "rb");
-	if (f == nullptr)
-		return 1;
-	std::fseek(f, 0, SEEK_END);
-	long size = std::ftell(f);
-	std::fseek(f, 0, SEEK_SET);
-	std::string source(size, '\0');
-	std::fread(source.data(), 1, size, f);
-	std::fclose(f);
+	// Safely patch the extension incase the build system passed .json instead of .bin
+	std::string binMetaPath = fs::path(metaPath).replace_extension(".bin").string();
 
-	Compiler::Lexer lexer(source);
-	auto tokens = lexer.Tokenize();
-	Compiler::Parser parser(tokens, source);
-	Compiler::IRManifest manifest = parser.Parse();
+	Compiler::BinaryReader reader(binMetaPath);
+	Compiler::IRManifest manifest = reader.Parse();
 
 	auto it = std::ranges::find_if(manifest.meshes, [&](const auto& m) { return m.id == meshId; });
 	if (it == manifest.meshes.end())
@@ -169,22 +159,9 @@ int CookAnimation(int argc, char** argv) {
 	if (metaPath.empty() || animId.empty() || outPath.empty())
 		return 1;
 
-	std::string source;
-	{
-		FILE* f = std::fopen(metaPath.c_str(), "rb");
-		if (!f)
-			return 1;
-		std::fseek(f, 0, SEEK_END);
-		source.resize(std::ftell(f));
-		std::fseek(f, 0, SEEK_SET);
-		std::fread(source.data(), 1, source.size(), f);
-		std::fclose(f);
-	}
-
-	Compiler::Lexer lexer(source);
-	auto tokens = lexer.Tokenize();
-	Compiler::Parser parser(tokens, source);
-	Compiler::IRManifest manifest = parser.Parse();
+	std::string binMetaPath = fs::path(metaPath).replace_extension(".bin").string();
+	Compiler::BinaryReader reader(binMetaPath);
+	Compiler::IRManifest manifest = reader.Parse();
 
 	auto it =
 		std::ranges::find_if(manifest.animations, [&](const auto& a) { return a.id == animId; });
@@ -446,20 +423,9 @@ int CookGLB(int argc, char** argv) {
 	if (metaPath.empty() || outPath.empty())
 		return 1;
 
-	FILE* f = std::fopen(metaPath.c_str(), "rb");
-	if (!f)
-		return 1;
-	std::fseek(f, 0, SEEK_END);
-	long size = std::ftell(f);
-	std::fseek(f, 0, SEEK_SET);
-	std::string source(size, '\0');
-	std::fread(source.data(), 1, size, f);
-	std::fclose(f);
-
-	Compiler::Lexer lexer(source);
-	auto tokens = lexer.Tokenize();
-	Compiler::Parser parser(tokens, source);
-	Compiler::IRManifest manifest = parser.Parse();
+	std::string binMetaPath = fs::path(metaPath).replace_extension(".bin").string();
+	Compiler::BinaryReader reader(binMetaPath);
+	Compiler::IRManifest manifest = reader.Parse();
 
 	std::string levelFolder = fs::path(metaPath).parent_path().string();
 	if (!GLB::EmitGLB(manifest, levelFolder, outPath))

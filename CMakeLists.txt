@@ -442,8 +442,6 @@ target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)
 
 add_executable(zcook 
     src/zcook/main.cpp
-    src/zcook/Lexer.cpp
-    src/zcook/Parser.cpp
     src/zcook/Transform.cpp
     src/zcook/GLB.cpp
     src/zcook/Cook.cpp

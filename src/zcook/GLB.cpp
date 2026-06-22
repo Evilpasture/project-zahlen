@@ -7,6 +7,7 @@
 #include "Transform.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <format>
@@ -127,18 +128,27 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
       }})",
 										 mat.id, pbrStr);
 
-		if (mat.doubleSided)
+		// If the material has a semi-transparent alpha channel, enable alpha blending
+		if (mat.baseColor[3] < 0.999f) {
+			matStr += R"(,
+      "alphaMode": "BLEND")";
+		}
+
+		if (mat.doubleSided) {
 			matStr += R"(,
       "doubleSided": true)";
+		}
 
-		if (normalTex != -1)
+		if (normalTex != -1) {
 			matStr += std::format(R"(,
       "normalTexture": {{"index": {}}})",
 								  normalTex);
-		if (mrTex != -1)
+		}
+		if (mrTex != -1) {
 			matStr += std::format(R"(,
       "metallicRoughnessTexture": {{"index": {}}})",
 								  mrTex);
+		}
 
 		bool hasEmissive =
 			(mat.emissiveStrength > 0.f) &&
@@ -162,10 +172,11 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 			matStr += std::format(R"(,
       "emissiveFactor": [{}, {}, {}])",
 								  ef[0], ef[1], ef[2]);
-			if (emissiveTex != -1)
+			if (emissiveTex != -1) {
 				matStr += std::format(R"(,
       "emissiveTexture": {{"index": {}}})",
 									  emissiveTex);
+			}
 			if (strength > 1.f) {
 				matStr += std::format(R"(,
       "extensions": {{
@@ -185,19 +196,22 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 	for (const auto& mesh : manifest.meshes) {
 		std::string binPath = levelFolder + "/" + mesh.binFile;
 		CompiledMesh compiled = CompileRawMesh(mesh, binPath);
-		if (compiled.glbVertices.empty())
+		if (compiled.glbVertices.empty()) {
 			continue;
+		}
 
 		meshIdToGlbIndex[mesh.id] = static_cast<int>(meshesJson.size());
 
 		auto vboOffset = static_cast<uint32_t>(binBuffer.size());
 		size_t vboBytes = compiled.glbVertices.size() * sizeof(float);
-		if (vboBytes > 0)
+		if (vboBytes > 0) {
 			binBuffer.insert(binBuffer.end(),
 							 reinterpret_cast<uint8_t*>(compiled.glbVertices.data()),
 							 reinterpret_cast<uint8_t*>(compiled.glbVertices.data()) + vboBytes);
-		while (binBuffer.size() % 4 != 0)
+		}
+		while (binBuffer.size() % 4 != 0) {
 			binBuffer.push_back(0);
+		}
 
 		bufferViews.push_back(std::format(R"(    {{
       "buffer": 0,
@@ -211,11 +225,13 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 
 		auto iboOffset = static_cast<uint32_t>(binBuffer.size());
 		size_t iboBytes = compiled.indices.size() * sizeof(uint32_t);
-		if (iboBytes > 0)
+		if (iboBytes > 0) {
 			binBuffer.insert(binBuffer.end(), reinterpret_cast<uint8_t*>(compiled.indices.data()),
 							 reinterpret_cast<uint8_t*>(compiled.indices.data()) + iboBytes);
-		while (binBuffer.size() % 4 != 0)
+		}
+		while (binBuffer.size() % 4 != 0) {
 			binBuffer.push_back(0);
+		}
 
 		bufferViews.push_back(std::format(R"(    {{
       "buffer": 0,
@@ -254,16 +270,19 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 		uint32_t weightsAcc = 0;
 
 		if (compiled.isSkinned) {
-			while (binBuffer.size() % 4 != 0)
+			while (binBuffer.size() % 4 != 0) {
 				binBuffer.push_back(0);
+			}
 			auto jboOffset = static_cast<uint32_t>(binBuffer.size());
 			size_t jboBytes = compiled.joints.size() * sizeof(uint16_t);
-			if (jboBytes > 0)
+			if (jboBytes > 0) {
 				binBuffer.insert(binBuffer.end(),
 								 reinterpret_cast<uint8_t*>(compiled.joints.data()),
 								 reinterpret_cast<uint8_t*>(compiled.joints.data()) + jboBytes);
-			while (binBuffer.size() % 4 != 0)
+			}
+			while (binBuffer.size() % 4 != 0) {
 				binBuffer.push_back(0);
+			}
 
 			bufferViews.push_back(std::format(
 				R"(    {{ "buffer": 0, "byteOffset": {}, "byteLength": {}, "target": 34962 }})",
@@ -302,8 +321,9 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 		for (const auto& target : mesh.morphTargets) {
 			std::string targetBinPath = levelFolder + "/" + target.binFile;
 			FILE* tbf = std::fopen(targetBinPath.c_str(), "rb");
-			if (!tbf)
+			if (tbf == nullptr) {
 				continue;
+			}
 
 			std::fseek(tbf, 0, SEEK_END);
 			long tSize = std::ftell(tbf);
@@ -315,7 +335,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 			std::fclose(tbf);
 
 			// Remap original raw offsets using original Blender vertex indices
-			std::vector<float> compiledOffsets(vertexCount * 3, 0.0f);
+			std::vector<float> compiledOffsets(static_cast<size_t>(vertexCount * 3), 0.0f);
 			for (size_t i = 0; i < vertexCount; ++i) {
 				uint32_t origIdx = compiled.originalVertexIndices[i];
 				if (origIdx * 3 + 2 < rawOffsets.size()) {
@@ -325,8 +345,9 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 				}
 			}
 
-			while (binBuffer.size() % 4 != 0)
+			while (binBuffer.size() % 4 != 0) {
 				binBuffer.push_back(0);
+			}
 			auto targetOffset = static_cast<uint32_t>(binBuffer.size());
 			size_t targetBytes = compiledOffsets.size() * sizeof(float);
 			binBuffer.insert(binBuffer.end(), reinterpret_cast<uint8_t*>(compiledOffsets.data()),
@@ -377,17 +398,20 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 
 			int matGlbIdx = -1;
 			auto it = matIdToGlbIndex.find(prim.materialId);
-			if (it != matIdToGlbIndex.end())
+			if (it != matIdToGlbIndex.end()) {
 				matGlbIdx = it->second;
+			}
 
 			std::string matStr;
-			if (matGlbIdx != -1)
+			if (matGlbIdx != -1) {
 				matStr = std::format(R"(, "material": {})", matGlbIdx);
+			}
 
 			std::string skinAttribs;
-			if (compiled.isSkinned)
+			if (compiled.isSkinned) {
 				skinAttribs =
 					std::format(R"(, "JOINTS_0": {}, "WEIGHTS_0": {})", jointsAcc, weightsAcc);
+			}
 
 			primsStr += std::format(R"(        {{
           "attributes": {{ "POSITION": {}, "NORMAL": {}, "TANGENT": {}, "TEXCOORD_0": {}, "COLOR_0": {} {} }},
@@ -395,26 +419,30 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
         }})",
 									posAcc, normAcc, tangAcc, uvAcc, colorAcc, skinAttribs,
 									indexAcc, matStr, targetsArrayStr);
-			if (p < compiled.primitives.size() - 1)
+			if (p < compiled.primitives.size() - 1) {
 				primsStr += ",\n";
+			}
 		}
 
 		meshesJson.push_back(
 			std::format(R"(    {{ "name": "{}", "primitives": [ {} ] }})", mesh.id, primsStr));
 	}
 
-	for (size_t i = 0; i < manifest.lights.size(); ++i)
+	for (size_t i = 0; i < manifest.lights.size(); ++i) {
 		lightIdToGlbIndex[manifest.lights[i].id] = static_cast<int>(i);
+	}
 
 	std::unordered_map<std::string, std::vector<std::string>> nodeChildren;
 	for (const auto& node : manifest.nodes) {
-		if (!node.parentId.empty())
+		if (!node.parentId.empty()) {
 			nodeChildren[node.parentId].push_back(node.id);
+		}
 	}
 	for (const auto& skin : manifest.skins) {
 		for (size_t i = 0; i < skin.joints.size(); ++i) {
-			if (i < skin.parents.size() && !skin.parents[i].empty())
+			if (i < skin.parents.size() && !skin.parents[i].empty()) {
 				nodeChildren[skin.parents[i]].push_back(skin.joints[i]);
+			}
 		}
 	}
 
@@ -429,11 +457,13 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 					break;
 				}
 			}
-			if (isTargetedByAnim)
+			if (isTargetedByAnim) {
 				break;
+			}
 		}
-		if (!node.visible && node.meshId.empty() && node.lightId.empty() && !isTargetedByAnim)
+		if (!node.visible && node.meshId.empty() && node.lightId.empty() && !isTargetedByAnim) {
 			continue;
+		}
 		nodeIdToGlbIndex[node.id] = glbNodeIdx++;
 		nodesToEmit.push_back(&node);
 	}
@@ -442,8 +472,9 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 	for (const auto& skin : manifest.skins) {
 		for (size_t i = 0; i < skin.joints.size(); ++i) {
 			const auto& jointId = skin.joints[i];
-			if (nodeIdToGlbIndex.contains(jointId))
+			if (nodeIdToGlbIndex.contains(jointId)) {
 				continue;
+			}
 
 			std::string matrixStr = "[";
 			for (int m = 0; m < 16; ++m) {
@@ -451,26 +482,29 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 								? skin.restPose[i * 16 + m]
 								: (m == 0 || m == 5 || m == 10 || m == 15 ? 1.0f : 0.0f);
 				matrixStr += std::to_string(val);
-				if (m < 15)
+				if (m < 15) {
 					matrixStr += ", ";
+				}
 			}
 			matrixStr += "]";
 			nodeIdToGlbIndex[jointId] = glbNodeIdx++;
-			jointsToEmit.push_back({jointId, matrixStr});
+			jointsToEmit.emplace_back(jointId, matrixStr);
 		}
 	}
 
 	nodesJson.resize(glbNodeIdx);
 
 	for (const auto& skin : manifest.skins) {
-		while (binBuffer.size() % 4 != 0)
+		while (binBuffer.size() % 4 != 0) {
 			binBuffer.push_back(0);
+		}
 		auto ibmOffset = static_cast<uint32_t>(binBuffer.size());
 		size_t ibmBytes = skin.inverseBindMatrices.size() * sizeof(float);
-		if (ibmBytes > 0)
+		if (ibmBytes > 0) {
 			binBuffer.insert(
 				binBuffer.end(), reinterpret_cast<const uint8_t*>(skin.inverseBindMatrices.data()),
 				reinterpret_cast<const uint8_t*>(skin.inverseBindMatrices.data()) + ibmBytes);
+		}
 
 		bufferViews.push_back(std::format(
 			R"(    {{ "buffer": 0, "byteOffset": {}, "byteLength": {} }})", ibmOffset, ibmBytes));
@@ -539,7 +573,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 		matrixStr += "]";
 
 		std::string meshStr, skinStr, extStr, weightsStr;
-		if (!node.meshId.empty()) {
+		if (!node.meshId.empty() && node.visible) {
 			auto it = meshIdToGlbIndex.find(node.meshId);
 			if (it != meshIdToGlbIndex.end()) {
 				meshStr = std::format(",\n      \"mesh\": {}", it->second);

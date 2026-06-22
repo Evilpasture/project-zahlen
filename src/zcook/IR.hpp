@@ -1,3 +1,4 @@
+// src/zcook/IR.hpp
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -5,33 +6,9 @@
 
 #include <cstdint>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace Compiler {
-
-enum class TokenType : uint8_t {
-	BeginObject,
-	EndObject,
-	BeginArray,
-	EndArray,
-	Colon,
-	Comma,
-	String,
-	Number,
-	True,
-	False,
-	Null,
-	EndOfFile
-};
-
-struct Token {
-	TokenType type;
-	std::string_view value;
-	size_t line = 1;
-};
-
-const char* GetTokenTypeName(TokenType type);
 
 struct IRBuffer {
 	uint32_t byteOffset = 0;

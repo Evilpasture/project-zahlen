@@ -3,7 +3,6 @@
 
 # tools/export_metadata.py
 import os
-import json
 import struct
 import shutil
 import sys
@@ -13,6 +12,148 @@ import math
 
 # Set recursion limit for large hierarchical models
 sys.setrecursionlimit(15000)
+
+
+class BinaryMetadataWriter:
+    """Serializes the extracted scene manifest directly to a fast, zero-parsing binary stream."""
+
+    def __init__(self, filepath):
+        self.f = open(filepath, "wb")
+        # Write Magic header "ZMET" (Zahlen Metadata) and version 1
+        self.f.write(b"ZMET")
+        self.f.write(struct.pack("<I", 1))
+
+    def close(self):
+        self.f.close()
+
+    def write_string(self, s):
+        """Writes length-prefixed UTF-8 string."""
+        s = s or ""
+        b = s.encode("utf-8")
+        self.f.write(struct.pack("<I", len(b)) + b)
+
+    def write_fmt(self, fmt, *args):
+        """Utility for packing flat types. '<' enforces little-endian."""
+        self.f.write(struct.pack("<" + fmt, *args))
+
+    def write_floats(self, lst):
+        """Helper to write variable-length arrays of floats."""
+        if not lst:
+            return
+        self.write_fmt(f"{len(lst)}f", *lst)
+
+    def serialize(self, manifest):
+        # 1. Level Info
+        self.write_string(manifest["scene_info"]["name"])
+
+        # 2. Materials
+        self.write_fmt("I", len(manifest["materials"]))
+        for mat in manifest["materials"]:
+            self.write_string(mat["id"])
+            self.write_floats(mat["pbr"]["base_color"])  # 4 floats
+            self.write_fmt("f", mat["pbr"]["metallic"])
+            self.write_fmt("f", mat["pbr"]["roughness"])
+            self.write_floats(mat["pbr"]["emissive_factor"])  # 3 floats
+            self.write_fmt("f", mat["pbr"]["emissive_strength"])
+            self.write_fmt("B", 1 if mat["double_sided"] else 0)
+            self.write_string(mat["maps"]["albedo"])
+            self.write_string(mat["maps"]["normal"])
+            self.write_string(mat["maps"]["metallic_roughness"])
+            self.write_string(mat["maps"]["emissive"])
+
+        # 3. Meshes
+        self.write_fmt("I", len(manifest["meshes"]))
+        for mesh in manifest["meshes"]:
+            self.write_string(mesh["id"])
+            self.write_string(mesh["layout"])
+            self.write_string(mesh["buffers"]["bin_file"])
+            self.write_fmt(
+                "II",
+                mesh["buffers"]["vertex_buffer"]["byte_offset"],
+                mesh["buffers"]["vertex_buffer"]["byte_length"],
+            )
+            # Primitives
+            self.write_fmt("I", len(mesh["primitives"]))
+            for prim in mesh["primitives"]:
+                self.write_string(prim["material_id"])
+                self.write_fmt("II", prim["vertex_offset"], prim["vertex_count"])
+            # Morph targets
+            self.write_fmt("I", len(mesh["morph_targets"]))
+            for target in mesh["morph_targets"]:
+                self.write_string(target["name"])
+                self.write_string(target["bin_file"])
+                self.write_fmt("II", target["byte_offset"], target["byte_length"])
+
+        # 4. Nodes
+        self.write_fmt("I", len(manifest["nodes"]))
+        for node in manifest["nodes"]:
+            self.write_string(node["id"])
+            self.write_string(node["parent_id"])
+            self.write_fmt("B", 1 if node["visible"] else 0)
+            self.write_floats(node["transform"]["local"])  # 16 floats
+            self.write_floats(node["transform"]["world"])  # 16 floats
+            self.write_string(node["refs"]["mesh_id"])
+            self.write_string(node["refs"]["skin_id"])
+            self.write_string(node["refs"]["light_id"])
+
+        # 5. Lights
+        self.write_fmt("I", len(manifest["lights"]))
+        for light in manifest["lights"]:
+            self.write_string(light["id"])
+            self.write_string(light["type"])
+            self.write_floats(light["color"])  # 3 floats
+            self.write_fmt("f", light["intensity"])
+
+        # 6. Skins
+        self.write_fmt("I", len(manifest["skins"]))
+        for skin in manifest["skins"]:
+            self.write_string(skin["id"])
+            self.write_string(skin["name"])
+
+            # Joints (list of strings)
+            self.write_fmt("I", len(skin["joints"]))
+            for joint in skin["joints"]:
+                self.write_string(joint)
+
+            # Parents (list of strings)
+            self.write_fmt("I", len(skin["parents"]))
+            for parent in skin["parents"]:
+                self.write_string(parent)
+
+            # Inverse Bind Matrices (flat floats)
+            self.write_fmt("I", len(skin["inverse_bind_matrices"]))
+            self.write_floats(skin["inverse_bind_matrices"])
+
+            # Rest Pose (flat floats)
+            self.write_fmt("I", len(skin["rest_pose"]))
+            self.write_floats(skin["rest_pose"])
+
+        # 7. Animations
+        self.write_fmt("I", len(manifest["animations"]))
+        for anim in manifest["animations"]:
+            self.write_string(anim["id"])
+            self.write_string(anim["name"])
+            self.write_fmt("fB", anim["duration"], 1 if anim["loop"] else 0)
+
+            # Channels
+            self.write_fmt("I", len(anim["channels"]))
+            for chan in anim["channels"]:
+                self.write_string(chan["target_node_id"])
+                self.write_string(chan["target_path"])
+                self.write_fmt("I", chan["sampler_id"])
+
+            # Samplers
+            self.write_fmt("I", len(anim["samplers"]))
+            for samp in anim["samplers"]:
+                self.write_string(samp["interpolation"])
+                self.write_fmt(
+                    "IIII",
+                    samp["input_offset"],
+                    samp["input_length"],
+                    samp["output_offset"],
+                    samp["output_length"],
+                )
+                self.write_string(samp["bin_file"])
 
 
 def remove_scale_from_matrix(matrix):
@@ -368,7 +509,8 @@ def resolve_base_color(principled):
 
 def find_root_shader_node(material):
     """Resolves the root shader node driving the active surface output."""
-    if not material.use_nodes or not material.node_tree:
+    # CHANGED: 'material.use_nodes' check replaced with 'material.node_tree' to bypass Blender 6.0 deprecation warning
+    if not material.node_tree:
         return None
 
     output_node = next(
@@ -835,11 +977,6 @@ def extract_nodes(scene_objects, depsgraph, node_id_map, exported_meshes):
     return nodes
 
 
-# ============================================================================
-# Standard Unchanged Exporters
-# ============================================================================
-
-
 def build_node_info(
     obj,
     node_id,
@@ -1143,7 +1280,8 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
             ramp_attr = None
             if mat_idx < len(obj.material_slots):
                 prim_mat = obj.material_slots[mat_idx].material
-                if prim_mat and prim_mat.use_nodes:
+                # CHANGED: 'prim_mat.use_nodes' replaced with 'prim_mat.node_tree' to bypass Blender 6.0 deprecation warning
+                if prim_mat and prim_mat.node_tree:
                     ramp_node = next(
                         (n for n in prim_mat.node_tree.nodes if n.type == "VALTORGB"),
                         None,
@@ -1296,14 +1434,20 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
                     target_bin_data = struct.pack(
                         f"{len(target_offsets)}f", *target_offsets
                     )
-                    target_bin_name = f"{mesh_id}_target_{kb.name}.bin"
+
+                    # --- FIX: Sanitize the shape key name to prevent slash "/" from causing directory traversal errors ---
+                    clean_kb_name = "".join(
+                        [c if c.isalnum() or c in "._-" else "_" for c in kb.name]
+                    )
+                    target_bin_name = f"{mesh_id}_target_{clean_kb_name}.bin"
                     target_bin_path = os.path.join(bin_dir, target_bin_name)
+
                     with open(target_bin_path, "wb") as f:
                         f.write(target_bin_data)
 
                     morph_targets.append(
                         {
-                            "name": kb.name,
+                            "name": kb.name,  # Keep original shape key name as the morph target name so the engine can look it up
                             "bin_file": os.path.relpath(target_bin_path, asset_dir),
                             "byte_offset": 0,
                             "byte_length": len(target_bin_data),
@@ -1877,9 +2021,11 @@ def export_raw_scene_data(blend_path, source_dir=None):
         "extras": {},
     }
 
-    json_path = os.path.join(asset_dir, "metadata.json")
-    with open(json_path, "w") as f:
-        json.dump(scene_manifest, f, indent=2)
+    # REPLACED JSON writer with BinaryMetadataWriter
+    binary_path = os.path.join(asset_dir, "metadata.bin")
+    writer = BinaryMetadataWriter(binary_path)
+    writer.serialize(scene_manifest)
+    writer.close()
 
     print(
         f"      [Success] Extracted raw metadata & binary geometry for: {namespace_dir}"
