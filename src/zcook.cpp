@@ -300,6 +300,15 @@ class Lexer {
 				Advance();
 			}
 		}
+		if (Peek() == 'e' || Peek() == 'E') {
+			Advance();
+			if (Peek() == '+' || Peek() == '-') {
+				Advance();
+			}
+			while (IsDigit(Peek())) {
+				Advance();
+			}
+		}
 		return Token{.type = TokenType::Number,
 					 .value = m_source.substr(startIdx, m_cursor - startIdx),
 					 .line = startLine};
@@ -340,7 +349,7 @@ struct IRMesh {
 	std::vector<IRPrimitive> primitives;
 };
 struct IRNode {
-	std::string id, meshId, lightId;
+	std::string id, meshId, lightId, skinId, parentId;
 	float localMatrix[16] = {1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f,
 							 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f};
 	float worldMatrix[16] = {1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f,
@@ -360,12 +369,48 @@ struct IRMaterial {
 	float emissiveStrength = 1.0f;
 	bool doubleSided = false;
 };
+
+struct IRAnimationSampler {
+	std::string interpolation;
+	uint32_t inputOffset = 0;
+	uint32_t inputLength = 0;
+	uint32_t outputOffset = 0;
+	uint32_t outputLength = 0;
+	std::string binFile;
+};
+
+struct IRAnimationChannel {
+	std::string targetNodeId;
+	std::string targetPath; // "translation", "rotation", or "scale"
+	uint32_t samplerId = 0;
+};
+
+struct IRAnimation {
+	std::string id;
+	std::string name;
+	float duration = 0.0f;
+	bool loop = false;
+	std::vector<IRAnimationChannel> channels;
+	std::vector<IRAnimationSampler> samplers;
+};
+
+struct IRSkin {
+	std::string id;
+	std::string name;
+	std::vector<std::string> joints;
+	std::vector<std::string> parents;
+	std::vector<float> inverseBindMatrices;
+	std::vector<float> restPose;
+};
+
 struct IRManifest {
 	std::string levelName;
 	std::vector<IRMesh> meshes;
 	std::vector<IRNode> nodes;
 	std::vector<IRLight> lights;
 	std::vector<IRMaterial> materials;
+	std::vector<IRAnimation> animations;
+	std::vector<IRSkin> skins;
 };
 
 inline void PrintParserErrorContext(std::string_view source, size_t targetLine) {
@@ -412,6 +457,10 @@ class Parser {
 				ParseLights(manifest);
 			} else if (key.value == "materials") {
 				ParseMaterials(manifest);
+			} else if (key.value == "animations") {
+				ParseAnimations(manifest);
+			} else if (key.value == "skins") {
+				ParseSkins(manifest);
 			} else {
 				SkipValue();
 			}
@@ -588,6 +637,11 @@ class Parser {
 				Expect(TokenType::Colon);
 				if (key.value == "id") {
 					node.id = DecodeJSONString(Expect(TokenType::String).value);
+				} else if (key.value == "parent_id") {
+					Token val = Advance();
+					if (val.type == TokenType::String) {
+						node.parentId = DecodeJSONString(val.value);
+					}
 				} else if (key.value == "visible") {
 					node.visible = (Advance().type == TokenType::True);
 				} else if (key.value == "transform") {
@@ -654,6 +708,11 @@ class Parser {
 				Token val = Advance();
 				if (val.type == TokenType::String) {
 					node.lightId = DecodeJSONString(val.value);
+				}
+			} else if (key.value == "skin_id") {
+				Token val = Advance();
+				if (val.type == TokenType::String) {
+					node.skinId = DecodeJSONString(val.value);
 				}
 			} else {
 				SkipValue();
@@ -817,6 +876,161 @@ class Parser {
 			}
 		}
 	}
+	void ParseAnimations(IRManifest& manifest) {
+		Expect(TokenType::BeginArray);
+		while (!Match(TokenType::EndArray)) {
+			IRAnimation anim;
+			Expect(TokenType::BeginObject);
+			while (!Match(TokenType::EndObject)) {
+				Token key = Expect(TokenType::String);
+				Expect(TokenType::Colon);
+				if (key.value == "id") {
+					anim.id = DecodeJSONString(Expect(TokenType::String).value);
+				} else if (key.value == "name") {
+					anim.name = DecodeJSONString(Expect(TokenType::String).value);
+				} else if (key.value == "duration") {
+					anim.duration = std::stof(std::string(Expect(TokenType::Number).value));
+				} else if (key.value == "loop") {
+					anim.loop = (Advance().type == TokenType::True);
+				} else if (key.value == "channels") {
+					ParseAnimChannels(anim);
+				} else if (key.value == "samplers") {
+					ParseAnimSamplers(anim);
+				} else {
+					SkipValue();
+				}
+				if (!Peek(TokenType::EndObject)) {
+					Expect(TokenType::Comma);
+				}
+			}
+			manifest.animations.push_back(anim);
+			if (!Peek(TokenType::EndArray)) {
+				Expect(TokenType::Comma);
+			}
+		}
+	}
+
+	void ParseAnimChannels(IRAnimation& anim) {
+		Expect(TokenType::BeginArray);
+		while (!Match(TokenType::EndArray)) {
+			IRAnimationChannel chan;
+			Expect(TokenType::BeginObject);
+			while (!Match(TokenType::EndObject)) {
+				Token key = Expect(TokenType::String);
+				Expect(TokenType::Colon);
+				if (key.value == "target_node_id") {
+					chan.targetNodeId = DecodeJSONString(Expect(TokenType::String).value);
+				} else if (key.value == "target_path") {
+					chan.targetPath = DecodeJSONString(Expect(TokenType::String).value);
+				} else if (key.value == "sampler_id") {
+					chan.samplerId = std::stoul(std::string(Expect(TokenType::Number).value));
+				} else {
+					SkipValue();
+				}
+				if (!Peek(TokenType::EndObject)) {
+					Expect(TokenType::Comma);
+				}
+			}
+			anim.channels.push_back(chan);
+			if (!Peek(TokenType::EndArray)) {
+				Expect(TokenType::Comma);
+			}
+		}
+	}
+
+	void ParseAnimSamplers(IRAnimation& anim) {
+		Expect(TokenType::BeginArray);
+		while (!Match(TokenType::EndArray)) {
+			IRAnimationSampler samp;
+			Expect(TokenType::BeginObject);
+			while (!Match(TokenType::EndObject)) {
+				Token key = Expect(TokenType::String);
+				Expect(TokenType::Colon);
+				if (key.value == "interpolation") {
+					samp.interpolation = DecodeJSONString(Expect(TokenType::String).value);
+				} else if (key.value == "input_offset") {
+					samp.inputOffset = std::stoul(std::string(Expect(TokenType::Number).value));
+				} else if (key.value == "input_length") {
+					samp.inputLength = std::stoul(std::string(Expect(TokenType::Number).value));
+				} else if (key.value == "output_offset") {
+					samp.outputOffset = std::stoul(std::string(Expect(TokenType::Number).value));
+				} else if (key.value == "output_length") {
+					samp.outputLength = std::stoul(std::string(Expect(TokenType::Number).value));
+				} else if (key.value == "bin_file") {
+					samp.binFile = DecodeJSONString(Expect(TokenType::String).value);
+				} else {
+					SkipValue();
+				}
+				if (!Peek(TokenType::EndObject)) {
+					Expect(TokenType::Comma);
+				}
+			}
+			anim.samplers.push_back(samp);
+			if (!Peek(TokenType::EndArray)) {
+				Expect(TokenType::Comma);
+			}
+		}
+	}
+
+	void ParseSkins(IRManifest& manifest) {
+		Expect(TokenType::BeginArray);
+		while (!Match(TokenType::EndArray)) {
+			IRSkin skin;
+			Expect(TokenType::BeginObject);
+			while (!Match(TokenType::EndObject)) {
+				Token key = Expect(TokenType::String);
+				Expect(TokenType::Colon);
+				if (key.value == "id") {
+					skin.id = DecodeJSONString(Expect(TokenType::String).value);
+				} else if (key.value == "name") {
+					skin.name = DecodeJSONString(Expect(TokenType::String).value);
+				} else if (key.value == "joints") {
+					Expect(TokenType::BeginArray);
+					while (!Match(TokenType::EndArray)) {
+						skin.joints.push_back(DecodeJSONString(Expect(TokenType::String).value));
+						if (!Peek(TokenType::EndArray)) {
+							Expect(TokenType::Comma);
+						}
+					}
+				} else if (key.value == "parents") {
+					Expect(TokenType::BeginArray);
+					while (!Match(TokenType::EndArray)) {
+						skin.parents.push_back(DecodeJSONString(Expect(TokenType::String).value));
+						if (!Peek(TokenType::EndArray)) {
+							Expect(TokenType::Comma);
+						}
+					}
+				} else if (key.value == "inverse_bind_matrices") {
+					Expect(TokenType::BeginArray);
+					while (!Match(TokenType::EndArray)) {
+						skin.inverseBindMatrices.push_back(
+							std::stof(std::string(Expect(TokenType::Number).value)));
+						if (!Peek(TokenType::EndArray)) {
+							Expect(TokenType::Comma);
+						}
+					}
+				} else if (key.value == "rest_pose") {
+					Expect(TokenType::BeginArray);
+					while (!Match(TokenType::EndArray)) {
+						skin.restPose.push_back(
+							std::stof(std::string(Expect(TokenType::Number).value)));
+						if (!Peek(TokenType::EndArray)) {
+							Expect(TokenType::Comma);
+						}
+					}
+				} else {
+					SkipValue();
+				}
+				if (!Peek(TokenType::EndObject)) {
+					Expect(TokenType::Comma);
+				}
+			}
+			manifest.skins.push_back(skin);
+			if (!Peek(TokenType::EndArray)) {
+				Expect(TokenType::Comma);
+			}
+		}
+	}
 };
 } // namespace Compiler
 
@@ -895,7 +1109,9 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, const std::string& bin
 	long binSize = std::ftell(bf);
 	std::fseek(bf, 0, SEEK_SET);
 	std::vector<float> rawFloats(binSize / sizeof(float));
-	std::fread(rawFloats.data(), sizeof(float), rawFloats.size(), bf);
+	if (!rawFloats.empty()) {
+		std::fread(rawFloats.data(), sizeof(float), rawFloats.size(), bf);
+	}
 	std::fclose(bf);
 
 	bool hasSkin = mesh.layout.contains("_J4W4");
@@ -1088,9 +1304,13 @@ inline bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 	std::vector<std::string> accessors;
 	std::vector<std::string> meshesJson;
 	std::vector<std::string> nodesJson;
+	std::vector<std::string> skinsJson;
+	std::vector<std::string> glbAnimsJson;
 
 	std::unordered_map<std::string, int> meshIdToGlbIndex;
 	std::unordered_map<std::string, int> lightIdToGlbIndex;
+	std::unordered_map<std::string, int> nodeIdToGlbIndex;
+	std::unordered_map<std::string, int> skinIdToGlbIndex;
 
 	uint32_t accIndex = 0;
 	uint32_t bViewIndex = 0;
@@ -1273,8 +1493,11 @@ inline bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 		// Append Compiled Vertices natively as standard 64-byte strided uncompressed glTF floats
 		auto vboOffset = static_cast<uint32_t>(binBuffer.size());
 		size_t vboBytes = compiled.glbVertices.size() * sizeof(float);
-		binBuffer.insert(binBuffer.end(), reinterpret_cast<uint8_t*>(compiled.glbVertices.data()),
-						 reinterpret_cast<uint8_t*>(compiled.glbVertices.data()) + vboBytes);
+		if (vboBytes > 0) {
+			binBuffer.insert(binBuffer.end(),
+							 reinterpret_cast<uint8_t*>(compiled.glbVertices.data()),
+							 reinterpret_cast<uint8_t*>(compiled.glbVertices.data()) + vboBytes);
+		}
 		while (binBuffer.size() % 4 != 0) {
 			binBuffer.push_back(0);
 		}
@@ -1292,8 +1515,10 @@ inline bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 		// Append Compiled Indices
 		auto iboOffset = static_cast<uint32_t>(binBuffer.size());
 		size_t iboBytes = compiled.indices.size() * sizeof(uint32_t);
-		binBuffer.insert(binBuffer.end(), reinterpret_cast<uint8_t*>(compiled.indices.data()),
-						 reinterpret_cast<uint8_t*>(compiled.indices.data()) + iboBytes);
+		if (iboBytes > 0) {
+			binBuffer.insert(binBuffer.end(), reinterpret_cast<uint8_t*>(compiled.indices.data()),
+							 reinterpret_cast<uint8_t*>(compiled.indices.data()) + iboBytes);
+		}
 		while (binBuffer.size() % 4 != 0) {
 			binBuffer.push_back(0);
 		}
@@ -1350,16 +1575,85 @@ inline bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
       "type": "VEC4"}})",
 										vboBViewIdx, vertexCount));
 
+		uint32_t jointsAcc = 0;
+		uint32_t weightsAcc = 0;
+
+		if (compiled.isSkinned) {
+			// Write joints (UNSIGNED_SHORT x 4 per vertex)
+			while (binBuffer.size() % 4 != 0) {
+				binBuffer.push_back(0);
+			}
+			auto jboOffset = static_cast<uint32_t>(binBuffer.size());
+			size_t jboBytes = compiled.joints.size() * sizeof(uint16_t);
+			if (jboBytes > 0) {
+				binBuffer.insert(binBuffer.end(),
+								 reinterpret_cast<uint8_t*>(compiled.joints.data()),
+								 reinterpret_cast<uint8_t*>(compiled.joints.data()) + jboBytes);
+			}
+			while (binBuffer.size() % 4 != 0) {
+				binBuffer.push_back(0);
+			}
+
+			bufferViews.push_back(std::format(R"(    {{
+			  "buffer": 0,
+			  "byteOffset": {},
+			  "byteLength": {},
+			  "target": 34962
+			}})",
+											  jboOffset, jboBytes));
+			uint32_t jboBViewIdx = bViewIndex++;
+
+			jointsAcc = accIndex++;
+			accessors.push_back(std::format(R"(    {{"bufferView": {},
+			  "componentType": 5123,
+			  "count": {},
+			  "type": "VEC4"}})",
+											jboBViewIdx, vertexCount));
+
+			// Write weights (FLOAT x 4 per vertex)
+			while (binBuffer.size() % 4 != 0) {
+				binBuffer.push_back(0);
+			}
+			auto wboOffset = static_cast<uint32_t>(binBuffer.size());
+			size_t wboBytes = compiled.weights.size() * sizeof(float);
+			if (wboBytes > 0) {
+				binBuffer.insert(binBuffer.end(),
+								 reinterpret_cast<uint8_t*>(compiled.weights.data()),
+								 reinterpret_cast<uint8_t*>(compiled.weights.data()) + wboBytes);
+			}
+			while (binBuffer.size() % 4 != 0) {
+				binBuffer.push_back(0);
+			}
+
+			bufferViews.push_back(std::format(R"(    {{
+			  "buffer": 0,
+			  "byteOffset": {},
+			  "byteLength": {},
+			  "target": 34962
+			}})",
+											  wboOffset, wboBytes));
+			uint32_t wboBViewIdx = bViewIndex++;
+
+			weightsAcc = accIndex++;
+			accessors.push_back(std::format(R"(    {{"bufferView": {},
+			  "componentType": 5126,
+			  "count": {},
+			  "type": "VEC4"}})",
+											wboBViewIdx, vertexCount));
+		}
+
 		std::string primsStr;
 		for (size_t p = 0; p < compiled.primitives.size(); ++p) {
 			const auto& prim = compiled.primitives[p];
 			uint32_t indexAcc = accIndex++;
 
-			accessors.push_back(std::format(R"(    {{"bufferView": {},
-      "byteOffset": {},
-      "componentType": 5125,
-      "count": {},
-      "type": "SCALAR"}})",
+			accessors.push_back(std::format(R"(    {{
+			  "bufferView": {},
+			  "byteOffset": {},
+			  "componentType": 5125,
+			  "count": {},
+			  "type": "SCALAR"
+			}})",
 											iboBViewIdx, prim.vertexOffset, prim.vertexCount));
 
 			int matGlbIdx = -1;
@@ -1375,6 +1669,14 @@ inline bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 									 matGlbIdx);
 			}
 
+			std::string skinAttribs;
+			if (compiled.isSkinned) {
+				skinAttribs = std::format(R"(,
+				"JOINTS_0": {},
+				"WEIGHTS_0": {})",
+										  jointsAcc, weightsAcc);
+			}
+
 			primsStr += std::format(R"(        {{
           "attributes": {{
             "POSITION": {},
@@ -1382,11 +1684,13 @@ inline bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
             "TANGENT": {},
             "TEXCOORD_0": {},
             "COLOR_0": {}
+            {}
           }},
           "indices": {}
           {}
         }})",
-									posAcc, normAcc, tangAcc, uvAcc, colorAcc, indexAcc, matStr);
+									posAcc, normAcc, tangAcc, uvAcc, colorAcc, skinAttribs,
+									indexAcc, matStr);
 			if (p < compiled.primitives.size() - 1) {
 				primsStr += ",\n";
 			}
@@ -1405,14 +1709,176 @@ inline bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 		lightIdToGlbIndex[manifest.lights[i].id] = static_cast<int>(i);
 	}
 
+	// 1. Maintain local parenting arrays to build clean flat-bone hierarchies
+	std::unordered_map<std::string, std::vector<std::string>> nodeChildren;
 	for (const auto& node : manifest.nodes) {
-		if (!node.visible && node.meshId.empty() && node.lightId.empty()) {
+		if (!node.parentId.empty()) {
+			nodeChildren[node.parentId].push_back(node.id);
+		}
+	}
+	for (const auto& skin : manifest.skins) {
+		for (size_t i = 0; i < skin.joints.size(); ++i) {
+			if (i < skin.parents.size() && !skin.parents[i].empty()) {
+				nodeChildren[skin.parents[i]].push_back(skin.joints[i]);
+			}
+		}
+	}
+
+	// 2. Pre-process standard scene nodes to prevent bone tracks from being pruned
+	int glbNodeIdx = 0;
+	std::vector<const Compiler::IRNode*> nodesToEmit;
+	for (const auto& node : manifest.nodes) {
+		bool isTargetedByAnim = false;
+		for (const auto& anim : manifest.animations) {
+			for (const auto& chan : anim.channels) {
+				if (chan.targetNodeId == node.id) {
+					isTargetedByAnim = true;
+					break;
+				}
+			}
+			if (isTargetedByAnim) {
+				break;
+			}
+		}
+
+		if (!node.visible && node.meshId.empty() && node.lightId.empty() && !isTargetedByAnim) {
 			continue;
+		}
+
+		nodeIdToGlbIndex[node.id] = glbNodeIdx++;
+		nodesToEmit.push_back(&node);
+	}
+
+	// 3. Dynamically append skinned skeleton bones to the glTF scene tree if missing
+	std::vector<std::pair<std::string, std::string>> jointsToEmit; // {jointId, matrixStr}
+	for (const auto& skin : manifest.skins) {
+		for (size_t i = 0; i < skin.joints.size(); ++i) {
+			const auto& jointId = skin.joints[i];
+			if (nodeIdToGlbIndex.contains(jointId)) {
+				continue;
+			}
+
+			// Generate Rest Pose matrix parameters (relative-to-parent)
+			std::string matrixStr = "[";
+			for (int m = 0; m < 16; ++m) {
+				float val = 0.0f;
+				if (i * 16 + m < skin.restPose.size()) {
+					val = skin.restPose[i * 16 + m];
+				} else if (m == 0 || m == 5 || m == 10 || m == 15) {
+					val = 1.0f;
+				}
+				matrixStr += std::to_string(val);
+				if (m < 15) {
+					matrixStr += ", ";
+				}
+			}
+			matrixStr += "]";
+
+			nodeIdToGlbIndex[jointId] =
+				glbNodeIdx++; // Fix:Contiguously allocate indices to joints [2]
+			jointsToEmit.push_back({jointId, matrixStr});
+		}
+	}
+
+	// Resize nodesJson to hold exactly the allocated count
+	nodesJson.resize(glbNodeIdx);
+
+	// 4. Construct Skins block elements and serialize Inverse Bind Matrices
+	for (const auto& skin : manifest.skins) {
+		while (binBuffer.size() % 4 != 0) {
+			binBuffer.push_back(0);
+		}
+		auto ibmOffset = static_cast<uint32_t>(binBuffer.size());
+		size_t ibmBytes = skin.inverseBindMatrices.size() * sizeof(float);
+		if (ibmBytes > 0) {
+			binBuffer.insert(
+				binBuffer.end(), reinterpret_cast<const uint8_t*>(skin.inverseBindMatrices.data()),
+				reinterpret_cast<const uint8_t*>(skin.inverseBindMatrices.data()) + ibmBytes);
+		}
+
+		bufferViews.push_back(std::format(R"(    {{
+		  "buffer": 0,
+		  "byteOffset": {},
+		  "byteLength": {}
+		}})",
+										  ibmOffset, ibmBytes));
+		uint32_t ibmBViewIdx = bViewIndex++;
+
+		uint32_t ibmAccIdx = accIndex++;
+		accessors.push_back(std::format(R"(    {{"bufferView": {},
+		  "componentType": 5126,
+		  "count": {},
+		  "type": "MAT4"}})",
+										ibmBViewIdx, skin.joints.size()));
+
+		std::string jointsStr;
+		for (size_t j = 0; j < skin.joints.size(); ++j) {
+			jointsStr += std::to_string(nodeIdToGlbIndex[skin.joints[j]]);
+			if (j < skin.joints.size() - 1) {
+				jointsStr += ", ";
+			}
+		}
+
+		skinIdToGlbIndex[skin.id] = static_cast<int>(skinsJson.size());
+		skinsJson.push_back(std::format(R"(    {{
+		  "name": "{}",
+		  "inverseBindMatrices": {},
+		  "joints": [{}]
+		}})",
+										skin.name, ibmAccIdx, jointsStr));
+	}
+
+	// 5. Populate joint nodes safely
+	for (const auto& [jointId, matrixStr] : jointsToEmit) {
+		int nIdx = nodeIdToGlbIndex[jointId];
+
+		// Fix: Exclude skipped parent nodes when writing children arrays [1]
+		std::string childrenStr;
+		auto cIt = nodeChildren.find(jointId);
+		if (cIt != nodeChildren.end() && !cIt->second.empty()) {
+			std::vector<int> activeChildren;
+			for (const auto& childId : cIt->second) {
+				auto childIt = nodeIdToGlbIndex.find(childId);
+				if (childIt != nodeIdToGlbIndex.end()) {
+					activeChildren.push_back(childIt->second);
+				}
+			}
+			if (!activeChildren.empty()) {
+				childrenStr = ",\n      \"children\": [";
+				for (size_t c = 0; c < activeChildren.size(); ++c) {
+					childrenStr += std::to_string(activeChildren[c]);
+					if (c < activeChildren.size() - 1) {
+						childrenStr += ", ";
+					}
+				}
+				childrenStr += "]";
+			}
+		}
+
+		nodesJson[nIdx] = std::format(R"(    {{
+	  "name": "{}",
+	  "matrix": {}{}
+	}})",
+									  jointId, matrixStr, childrenStr);
+	}
+
+	// 6. Populate standard nodes safely
+	for (const auto* nodePtr : nodesToEmit) {
+		const auto& node = *nodePtr;
+		int nIdx = nodeIdToGlbIndex[node.id];
+
+		// Fix: Select matrix relative to parent's status in glTF scene graph [2]
+		const float* matrixData = node.worldMatrix;
+		if (!node.parentId.empty()) {
+			auto pIt = nodeIdToGlbIndex.find(node.parentId);
+			if (pIt != nodeIdToGlbIndex.end()) {
+				matrixData = node.localMatrix;
+			}
 		}
 
 		std::string matrixStr = "[";
 		for (int i = 0; i < 16; ++i) {
-			matrixStr += std::to_string(node.worldMatrix[i]);
+			matrixStr += std::to_string(matrixData[i]);
 			if (i < 15) {
 				matrixStr += ", ";
 			}
@@ -1427,34 +1893,243 @@ inline bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 			}
 		}
 
+		std::string skinStr;
+		if (!node.skinId.empty()) {
+			auto sit = skinIdToGlbIndex.find(node.skinId);
+			if (sit != skinIdToGlbIndex.end()) {
+				skinStr = std::format(",\n      \"skin\": {}", sit->second);
+			}
+		}
+
 		std::string extStr;
 		if (!node.lightId.empty()) {
 			auto lit = lightIdToGlbIndex.find(node.lightId);
 			if (lit != lightIdToGlbIndex.end()) {
 				extStr = std::format(R"(,
-      "extensions": {{
-        "KHR_lights_punctual": {{
-          "light": {}
-        }}
-      }})",
+		  "extensions": {{
+			"KHR_lights_punctual": {{
+			  "light": {}
+			}}
+		  }})",
 									 lit->second);
 			}
 		}
 
-		nodesJson.push_back(std::format(R"(    {{
-      "name": "{}",
-      "matrix": {}{}{}
-    }})",
-										node.id, matrixStr, meshStr, extStr));
+		// Fix: Exclude skipped parent nodes when writing children arrays [1]
+		std::string childrenStr;
+		auto cIt = nodeChildren.find(node.id);
+		if (cIt != nodeChildren.end() && !cIt->second.empty()) {
+			std::vector<int> activeChildren;
+			for (const auto& childId : cIt->second) {
+				auto childIt = nodeIdToGlbIndex.find(childId);
+				if (childIt != nodeIdToGlbIndex.end()) {
+					activeChildren.push_back(childIt->second);
+				}
+			}
+			if (!activeChildren.empty()) {
+				childrenStr = ",\n      \"children\": [";
+				for (size_t c = 0; c < activeChildren.size(); ++c) {
+					childrenStr += std::to_string(activeChildren[c]);
+					if (c < activeChildren.size() - 1) {
+						childrenStr += ", ";
+					}
+				}
+				childrenStr += "]";
+			}
+		}
+
+		nodesJson[nIdx] = std::format(R"(    {{
+		  "name": "{}",
+		  "matrix": {}{}{}{}{}
+		}})",
+									  node.id, matrixStr, meshStr, skinStr, extStr, childrenStr);
 	}
 
-	if (nodesJson.empty()) {
-		for (size_t i = 0; i < manifest.meshes.size(); ++i) {
-			nodesJson.push_back(std::format(R"(    {{
-      "name": "Node_{}",
-      "mesh": {}
-    }})",
-											manifest.meshes[i].id, i));
+	// 7. Append Animations directly to glTF binary buffers
+	for (const auto& anim : manifest.animations) {
+		std::vector<std::string> channelsJson;
+		std::vector<std::string> samplersJson;
+
+		for (size_t sIdx = 0; sIdx < anim.samplers.size(); ++sIdx) {
+			const auto& s = anim.samplers[sIdx];
+			std::string fullBinPath = levelFolder + "/" + s.binFile;
+
+			FILE* abf = std::fopen(fullBinPath.c_str(), "rb");
+			if (!abf) {
+				std::println(stderr,
+							 "[zcook] WARNING: Failed to open intermediate animation bin '{}': {}",
+							 fullBinPath, std::strerror(errno));
+				continue;
+			}
+
+			std::vector<uint8_t> inputBytes(s.inputLength);
+			std::fseek(abf, s.inputOffset, SEEK_SET);
+			std::fread(inputBytes.data(), 1, s.inputLength, abf);
+
+			std::vector<uint8_t> outputBytes(s.outputLength);
+			std::fseek(abf, s.outputOffset, SEEK_SET);
+			std::fread(outputBytes.data(), 1, s.outputLength, abf);
+
+			std::fclose(abf);
+
+			while (binBuffer.size() % 4 != 0) {
+				binBuffer.push_back(0);
+			}
+			uint32_t glbInOffset = static_cast<uint32_t>(binBuffer.size());
+			binBuffer.insert(binBuffer.end(), inputBytes.begin(), inputBytes.end());
+
+			while (binBuffer.size() % 4 != 0) {
+				binBuffer.push_back(0);
+			}
+			uint32_t glbOutOffset = static_cast<uint32_t>(binBuffer.size());
+			binBuffer.insert(binBuffer.end(), outputBytes.begin(), outputBytes.end());
+
+			bufferViews.push_back(std::format(R"(    {{
+			  "buffer": 0,
+			  "byteOffset": {},
+			  "byteLength": {}
+			}})",
+											  glbInOffset, s.inputLength));
+			uint32_t inBViewIdx = bViewIndex++;
+
+			bufferViews.push_back(std::format(R"(    {{
+			  "buffer": 0,
+			  "byteOffset": {},
+			  "byteLength": {}
+			}})",
+											  glbOutOffset, s.outputLength));
+			uint32_t outBViewIdx = bViewIndex++;
+
+			uint32_t keyCount = s.inputLength / sizeof(float);
+			std::string outputType = "VEC3";
+			for (const auto& chan : anim.channels) {
+				if (chan.samplerId == sIdx) {
+					if (chan.targetPath == "rotation") {
+						outputType = "VEC4";
+					}
+					break;
+				}
+			}
+
+			float minTime = 0.0f;
+			float maxTime = anim.duration;
+			if (keyCount > 0 && inputBytes.size() >= sizeof(float)) {
+				std::memcpy(&minTime, inputBytes.data(), sizeof(float));
+				if (inputBytes.size() >= keyCount * sizeof(float)) {
+					std::memcpy(&maxTime, inputBytes.data() + (keyCount - 1) * sizeof(float),
+								sizeof(float));
+				}
+			}
+
+			uint32_t inAccIdx = accIndex++;
+			accessors.push_back(std::format(R"(    {{"bufferView": {},
+			  "componentType": 5126,
+			  "count": {},
+			  "type": "SCALAR",
+			  "min": [{}],
+			  "max": [{}]}})",
+											inBViewIdx, keyCount, minTime, maxTime));
+
+			uint32_t outAccIdx = accIndex++;
+			accessors.push_back(std::format(R"(    {{"bufferView": {},
+			  "componentType": 5126,
+			  "count": {},
+			  "type": "{}"}})",
+											outBViewIdx, keyCount, outputType));
+
+			samplersJson.push_back(std::format(
+				R"(        {{
+			  "input": {},
+			  "interpolation": "{}",
+			  "output": {}
+			}})",
+				inAccIdx, s.interpolation.empty() ? "LINEAR" : s.interpolation, outAccIdx));
+		}
+
+		for (const auto& chan : anim.channels) {
+			auto nIt = nodeIdToGlbIndex.find(chan.targetNodeId);
+			if (nIt == nodeIdToGlbIndex.end()) {
+				continue;
+			}
+
+			channelsJson.push_back(std::format(R"(        {{
+			  "sampler": {},
+			  "target": {{
+				"node": {},
+				"path": "{}"
+			  }}
+			}})",
+											   chan.samplerId, nIt->second, chan.targetPath));
+		}
+
+		if (!channelsJson.empty() && !samplersJson.empty()) {
+			std::string chansArr;
+			for (size_t i = 0; i < channelsJson.size(); ++i) {
+				chansArr += channelsJson[i];
+				if (i < channelsJson.size() - 1) {
+					chansArr += ",\n";
+				}
+			}
+
+			std::string sampsArr;
+			for (size_t i = 0; i < samplersJson.size(); ++i) {
+				sampsArr += samplersJson[i];
+				if (i < samplersJson.size() - 1) {
+					sampsArr += ",\n";
+				}
+			}
+
+			glbAnimsJson.push_back(std::format(R"(    {{
+		  "name": "{}",
+		  "channels": [
+	{}
+		  ],
+		  "samplers": [
+	{}
+		  ]
+		}})",
+											   anim.name, chansArr, sampsArr));
+		}
+	}
+
+	// 8. Resolve scene root nodes indices (only list parents without owners to prevent duplication)
+	// [1]
+	std::vector<int> rootNodeIndices;
+	for (const auto& node : manifest.nodes) {
+		if (node.parentId.empty() || !nodeIdToGlbIndex.contains(node.parentId)) {
+			auto it = nodeIdToGlbIndex.find(node.id);
+			if (it != nodeIdToGlbIndex.end()) {
+				rootNodeIndices.push_back(it->second);
+			}
+		}
+	}
+	for (const auto& skin : manifest.skins) {
+		for (size_t i = 0; i < skin.joints.size(); ++i) {
+			if (i < skin.parents.size()) {
+				std::string parentId = skin.parents[i];
+				if (parentId.empty() || !nodeIdToGlbIndex.contains(parentId)) {
+					auto it = nodeIdToGlbIndex.find(skin.joints[i]);
+					if (it != nodeIdToGlbIndex.end()) {
+						int idx = it->second;
+						if (std::ranges::find(rootNodeIndices, idx) == rootNodeIndices.end()) {
+							bool isChild = false;
+							for (const auto& pair : nodeChildren) {
+								if (nodeIdToGlbIndex.contains(
+										pair.first)) { // Parent must be active
+									if (std::ranges::find(pair.second, skin.joints[i]) !=
+										pair.second.end()) {
+										isChild = true;
+										break;
+									}
+								}
+							}
+							if (!isChild) {
+								rootNodeIndices.push_back(idx);
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 
@@ -1581,6 +2256,24 @@ inline bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 		json.append("  ],\n");
 	}
 
+	if (!skinsJson.empty()) {
+		json.append("  \"skins\": [\n");
+		for (size_t i = 0; i < skinsJson.size(); ++i) {
+			json.append(skinsJson[i]);
+			json.append(i < skinsJson.size() - 1 ? ",\n" : "\n");
+		}
+		json.append("  ],\n");
+	}
+
+	if (!glbAnimsJson.empty()) {
+		json.append("  \"animations\": [\n");
+		for (size_t i = 0; i < glbAnimsJson.size(); ++i) {
+			json.append(glbAnimsJson[i]);
+			json.append(i < glbAnimsJson.size() - 1 ? ",\n" : "\n");
+		}
+		json.append("  ],\n");
+	}
+
 	json.append("  \"nodes\": [\n");
 	for (size_t i = 0; i < nodesJson.size(); ++i) {
 		json.append(nodesJson[i]);
@@ -1588,12 +2281,13 @@ inline bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& lev
 	}
 	json.append("  ],\n");
 
+	// Fix: Print exact root node indices without duplicating children [1]
 	json.append("  \"scenes\": [\n"
 				"    {\n"
 				"      \"nodes\": [");
-	for (size_t i = 0; i < nodesJson.size(); ++i) {
-		json.append(std::to_string(i));
-		if (i < nodesJson.size() - 1) {
+	for (size_t i = 0; i < rootNodeIndices.size(); ++i) {
+		json.append(std::to_string(rootNodeIndices[i]));
+		if (i < rootNodeIndices.size() - 1) {
 			json.append(",");
 		}
 	}
@@ -1731,7 +2425,6 @@ int CookMesh(int argc, char** argv) {
 	if (compiled.glbVertices.empty()) {
 		meshHeader.boundingBoxMin[0] = 0.0f;
 		meshHeader.boundingBoxMin[1] = 0.0f;
-		meshHeader.boundingBoxMin[2] = 0.0f;
 		meshHeader.boundingBoxMax[0] = 0.0f;
 		meshHeader.boundingBoxMax[1] = 0.0f;
 		meshHeader.boundingBoxMax[2] = 0.0f;
@@ -1842,6 +2535,155 @@ int CookTexture(int argc, char** argv) {
 	std::fwrite(fileData.data(), 1, size, out);
 	std::fclose(out);
 
+	return 0;
+}
+
+int CookAnimation(int argc, char** argv) {
+	std::string metaPath;
+	std::string outPath;
+	std::string animId;
+
+	for (int i = 0; i < argc; ++i) {
+		std::string_view arg = argv[i];
+		if (arg == "--meta" && i + 1 < argc) {
+			metaPath = argv[++i];
+		} else if (arg == "--id" && i + 1 < argc) {
+			animId = argv[++i];
+		} else if (arg == "-o" && i + 1 < argc) {
+			outPath = argv[++i];
+		}
+	}
+
+	if (metaPath.empty() || animId.empty() || outPath.empty()) {
+		std::println(stderr, "[zcook] ERROR: Missing arguments for anim subcommand. Requirements:");
+		if (metaPath.empty()) {
+			std::println(stderr, "  --meta <path>  (Scene metadata JSON)");
+		}
+		if (animId.empty()) {
+			std::println(stderr, "  --id <string>  (Animation Identifier)");
+		}
+		if (outPath.empty()) {
+			std::println(stderr, "  -o <path>      (Output compiled animation destination)");
+		}
+		return 1;
+	}
+
+	// Reuse your Lexer & Parser to get the manifest
+	std::string source;
+	{
+		FILE* f = std::fopen(metaPath.c_str(), "rb");
+		if (f == nullptr) {
+			std::println(stderr, "[zcook] ERROR: Failed to open metadata scene file '{}': {}",
+						 metaPath, std::strerror(errno));
+			return 1;
+		}
+		std::fseek(f, 0, SEEK_END);
+		source.resize(std::ftell(f));
+		std::fseek(f, 0, SEEK_SET);
+		std::fread(source.data(), 1, source.size(), f);
+		std::fclose(f);
+	}
+
+	Compiler::Lexer lexer(source);
+	auto tokens = lexer.Tokenize();
+	Compiler::Parser parser(tokens, source);
+	Compiler::IRManifest manifest = parser.Parse();
+
+	auto it =
+		std::ranges::find_if(manifest.animations, [&](const auto& a) { return a.id == animId; });
+	if (it == manifest.animations.end()) {
+		std::println(stderr, "[zcook] ERROR: Animation ID '{}' not found inParsed Manifest.",
+					 animId);
+		return 1;
+	}
+	const auto& anim = *it;
+
+	std::string levelFolder = fs::path(metaPath).parent_path().string();
+
+	std::vector<CookedAnimTrack> tracks;
+	std::vector<uint8_t> payloadData; // Holds flat time and TRS buffers
+
+	// Helper to read and align binary data
+	auto appendPayload = [&](const std::string& binFile, uint32_t offset,
+							 uint32_t length) -> uint32_t {
+		std::string fullBinPath = levelFolder + "/" + binFile;
+		FILE* bf = std::fopen(fullBinPath.c_str(), "rb");
+		if (!bf) {
+			std::println(stderr,
+						 "[zcook] ERROR: Failed to open intermediate animation bin file '{}': {}",
+						 fullBinPath, std::strerror(errno));
+			return 0;
+		}
+
+		std::vector<uint8_t> temp(length);
+		std::fseek(bf, offset, SEEK_SET);
+		std::fread(temp.data(), 1, length, bf);
+		std::fclose(bf);
+
+		while (payloadData.size() % 4 != 0) {
+			payloadData.push_back(0); // 4-byte align
+		}
+		auto localOffset = static_cast<uint32_t>(payloadData.size());
+		payloadData.insert(payloadData.end(), temp.begin(), temp.end());
+		return localOffset;
+	};
+
+	for (const auto& channel : anim.channels) {
+		if (channel.samplerId >= anim.samplers.size()) {
+			continue;
+		}
+		const auto& sampler = anim.samplers[channel.samplerId];
+
+		CookedAnimTrack track{};
+		// Hash the node string to avoid storing strings in runtime tracks
+		track.targetNodeHash = HashAssetPath(channel.targetNodeId);
+
+		if (channel.targetPath == "translation") {
+			track.pathType = 0;
+		} else if (channel.targetPath == "rotation") {
+			track.pathType = 1;
+		} else if (channel.targetPath == "scale") {
+			track.pathType = 2;
+		} else {
+			continue;
+		}
+
+		// Extract key count: divide input byte length by sizeof(float)
+		track.keyCount = sampler.inputLength / sizeof(float);
+
+		// Read and append keyframe times and TRS values from the intermediate binary file
+		track.timeOffset = appendPayload(sampler.binFile, sampler.inputOffset, sampler.inputLength);
+		track.valueOffset =
+			appendPayload(sampler.binFile, sampler.outputOffset, sampler.outputLength);
+
+		tracks.push_back(track);
+	}
+
+	// Write final cooked animation asset
+	CookedAnimHeader header{};
+	header.duration = anim.duration;
+	header.loop = anim.loop ? 1 : 0;
+	header.trackCount = static_cast<uint32_t>(tracks.size());
+
+	fs::create_directories(fs::path(outPath).parent_path());
+	FILE* out = std::fopen(outPath.c_str(), "wb");
+	if (out == nullptr) {
+		std::println(stderr,
+					 "[zcook] ERROR: Failed to open output animation file '{}' for writing: {}",
+					 outPath, std::strerror(errno));
+		return 1;
+	}
+
+	std::fwrite(&header, sizeof(CookedAnimHeader), 1, out);
+	if (!tracks.empty()) {
+		std::fwrite(tracks.data(), sizeof(CookedAnimTrack), tracks.size(), out);
+	}
+	if (!payloadData.empty()) {
+		std::fwrite(payloadData.data(), 1, payloadData.size(), out);
+	}
+	std::fclose(out);
+
+	std::println("[zcook] Compiled animation '{}' -> '{}'", anim.name, outPath);
 	return 0;
 }
 
@@ -2176,12 +3018,13 @@ int main(int argc, char** argv) {
 			"  mesh  - Deduplicates standard uncompressed floats into static mesh arrays.\n"
 			"  tex   - Copy and format static assets into standard asset structures.\n"
 			"  glb   - Compiles internal scenes and layouts into standard glTF GLB containers.\n"
+			"  anim  - Compiles animations into binary format for runtime playback.\n"
 			"  pak   - Compact files listed in a manifest file into single custom pak indexes.");
 		return 1;
 	}
 
 	std::string_view cmd = argv[1];
-	if (cmd != "mesh" && cmd != "tex" && cmd != "glb" && cmd != "pak") {
+	if (cmd != "mesh" && cmd != "tex" && cmd != "glb" && cmd != "anim" && cmd != "pak") {
 		std::println(stderr,
 					 "[zcook] ERROR: Unsupported action subcommand '{}'. Run with no arguments to "
 					 "see usage.",
@@ -2196,6 +3039,8 @@ int main(int argc, char** argv) {
 	int result = 0;
 	if (cmd == "mesh") {
 		result = ZHLN::CookMesh(argc - 2, argv + 2);
+	} else if (cmd == "anim") {
+		result = ZHLN::CookAnimation(argc - 2, argv + 2);
 	} else if (cmd == "tex") {
 		result = ZHLN::CookTexture(argc - 2, argv + 2);
 	} else if (cmd == "glb") {

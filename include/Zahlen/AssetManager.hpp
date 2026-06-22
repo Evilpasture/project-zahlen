@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #include <cstdint>
@@ -71,6 +70,22 @@ struct CookedMeshHeader {
 	float boundingBoxMax[3];
 	uint32_t vertexCount;
 	uint32_t indexCount;
+};
+
+struct CookedAnimHeader {
+	uint32_t magic; // 'ANM0'
+	uint32_t version;
+	float duration;
+	uint32_t loop;
+	uint32_t trackCount;
+};
+
+struct CookedAnimTrack {
+	uint64_t targetNodeHash; // Murmur/FNV1a hash of the bone/node name
+	uint32_t pathType;		 // 0 = Translation, 1 = Rotation, 2 = Scale
+	uint32_t keyCount;
+	uint32_t timeOffset;  // Offset to float time array
+	uint32_t valueOffset; // Offset to float TRS array
 };
 
 #pragma pack(pop)

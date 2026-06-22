@@ -52,6 +52,10 @@ rule zmesh
   command = "{escaped_zcook}" mesh --meta "$meta" --id "$id" -i $in -o $out
   description = ZMESH $id
 
+rule zanim
+  command = "{escaped_zcook}" anim --meta "$meta" --id "$id" -o $out
+  description = ZANIM $id
+
 rule ztex
   command = "{escaped_zcook}" tex -i $in -o $out
   description = ZTEX $in
@@ -122,11 +126,37 @@ rule zpak
                 output_zmesh = f"build_assets/{level}/{mesh_id}.zmesh"
                 virtual_path = f"{mesh_id}.zmesh"
 
-                ninja_content += f"\nbuild {escape_ninja(output_zmesh)}: zmesh {escape_ninja(bin_file)} | {escaped_zcook}\n"
+                # Fix: Added meta_path dependency to ensure blender_extract finishes before zmesh executes
+                ninja_content += f"\nbuild {escape_ninja(output_zmesh)}: zmesh {escape_ninja(bin_file)} | {escape_ninja(meta_path)} {escaped_zcook}\n"
                 ninja_content += f"  meta = {meta_path}\n"
                 ninja_content += f"  id = {mesh_id}\n"
                 compiled_targets.append(output_zmesh)
                 manifest_entries.append(f"{virtual_path}={output_zmesh}")
+
+            # Map individual Animations
+            for anim in manifest.get("animations", []):
+                anim_id = anim.get("id")
+                if not anim_id:
+                    continue
+
+                # Locate target animation keyframe .bin dependency via the first sampler's binary file
+                samplers = anim.get("samplers", [])
+                if not samplers:
+                    continue
+                bin_name = samplers[0].get("bin_file")
+                if not bin_name:
+                    continue
+
+                bin_file = os.path.join(level_dir, bin_name).replace("\\", "/")
+                output_zanim = f"build_assets/{level}/{anim_id}.zanim"
+                virtual_path = f"{anim_id}.zanim"
+
+                # Fix: Added meta_path dependency to ensure blender_extract finishes before zanim executes
+                ninja_content += f"\nbuild {escape_ninja(output_zanim)}: zanim {escape_ninja(bin_file)} | {escape_ninja(meta_path)} {escaped_zcook}\n"
+                ninja_content += f"  meta = {meta_path}\n"
+                ninja_content += f"  id = {anim_id}\n"
+                compiled_targets.append(output_zanim)
+                manifest_entries.append(f"{virtual_path}={output_zanim}")
 
             # Map Intermediate Textures
             tex_dir = os.path.join(level_dir, "textures")
@@ -136,7 +166,8 @@ rule zpak
                     out_path = f"build_assets/{level}/lvl_{tex}.ztex"
                     virtual_path = f"textures/{tex}"
 
-                    ninja_content += f"build {escape_ninja(out_path)}: ztex {escape_ninja(in_path)} | {escaped_zcook}\n"
+                    # Fix: Added meta_path dependency so textures are written before ztex compiles them
+                    ninja_content += f"build {escape_ninja(out_path)}: ztex {escape_ninja(in_path)} | {escape_ninja(meta_path)} {escaped_zcook}\n"
                     compiled_targets.append(out_path)
                     manifest_entries.append(f"{virtual_path}={out_path}")
 

@@ -82,7 +82,6 @@ def discover_blend_files(search_path):
     blend_files = []
     for root, _, files in os.walk(search_path):
         norm_root = root.replace("\\", "/").lower()
-        # Removed "tadc_models" and "asset_library" from the exclusion list
         if any(p in norm_root for p in ["resources", "exported_assets"]):
             continue
         for file in files:
@@ -687,6 +686,259 @@ def evaluate_shader(node, depth=0):
     return default_props
 
 
+# ============================================================================
+# Core Asset Extraction Logic
+# ============================================================================
+
+
+def extract_skins(depsgraph, node_id_map, world_yup_map):
+    """Extracts skin bindings, inverse matrices, and rest poses."""
+    skins = []
+    for obj in depsgraph.scene.objects:
+        if obj.IsA("ARMATURE"):
+            joints_list = []
+            parents_list = []
+            ibms_list = []
+            rest_pose_list = []
+            pose_bone_ids = []
+
+            # Precompute Armature basis
+            arm_world_yup = c_basis @ obj.matrix_world @ c_basis_inv
+
+            for bone in obj.data.bones:
+                bone_key = f"bone_{obj.name}_{bone.name}"
+                bone_node_id = node_id_map.get(bone_key)
+
+                joints_list.append(bone_node_id)
+                pose_bone_ids.append(bone_node_id)
+
+                bone_world_zup = obj.matrix_world @ bone.matrix_local
+                bone_world_yup = c_basis @ bone_world_zup @ c_basis_inv
+
+                # Calculate parent-relative local rest pose matrix
+                if bone.parent:
+                    parent_key = f"bone_{obj.name}_{bone.parent.name}"
+                    parents_list.append(node_id_map.get(parent_key))
+
+                    parent_world_zup = obj.matrix_world @ bone.parent.matrix_local
+                    parent_world_yup = c_basis @ parent_world_zup @ c_basis_inv
+                    local_rest_yup = safe_invert(parent_world_yup) @ bone_world_yup
+                else:
+                    parents_list.append(make_id("node", obj.name))
+                    local_rest_yup = safe_invert(arm_world_yup) @ bone_world_yup
+
+                ibm_yup = safe_invert(bone_world_yup)
+
+                ibms_list.extend(serialize_matrix_col_major(ibm_yup))
+                rest_pose_list.extend(serialize_matrix_col_major(local_rest_yup))
+
+            skins.append(
+                {
+                    "id": make_id("skin", obj.name),
+                    "name": f"{obj.name} Skin",
+                    "joints": joints_list,
+                    "parents": parents_list,
+                    "inverse_bind_matrices": ibms_list,
+                    "rest_pose": rest_pose_list,
+                    "pose_bone_ids": pose_bone_ids,
+                }
+            )
+    return skins
+
+
+def extract_nodes(scene_objects, depsgraph, node_id_map, exported_meshes):
+    """Assembles node structures, separating standard objects from instances."""
+    nodes = []
+
+    for obj in scene_objects:
+        # Check if the node has Bone Parenting
+        if obj.parent and obj.parent_type == "BONE" and obj.parent_bone:
+            parent_key = f"bone_{obj.parent.name}_{obj.parent_bone}"
+            parent_node_id = node_id_map.get(parent_key)
+
+            # Parent bone world transform reference
+            parent_bone = obj.parent.data.bones.get(obj.parent_bone)
+            if parent_bone:
+                parent_world_zup = obj.parent.matrix_world @ parent_bone.matrix_local
+                parent_world_yup = c_basis @ parent_world_zup @ c_basis_inv
+            else:
+                parent_world_yup = c_basis @ obj.parent.matrix_world @ c_basis_inv
+        else:
+            parent_key = obj.parent.name if obj.parent else None
+            parent_node_id = node_id_map.get(parent_key) if parent_key else None
+            parent_world_yup = (
+                c_basis @ obj.parent.matrix_world @ c_basis_inv if obj.parent else None
+            )
+
+        world_yup = c_basis @ obj.matrix_world @ c_basis_inv
+
+        # Calculate parent-relative local matrix consistently
+        if parent_node_id and parent_world_yup:
+            local_yup = safe_invert(parent_world_yup) @ world_yup
+        else:
+            local_yup = world_yup
+
+        node_info = build_node_info(
+            obj,
+            node_id_map.get(obj.name),
+            obj.name,
+            parent_node_id,
+            local_yup,
+            world_yup,
+            not obj.hide_viewport,
+            exported_meshes,
+        )
+        nodes.append(node_info)
+
+    for idx, instance in enumerate(depsgraph.object_instances):
+        if not instance.is_instance:
+            continue
+
+        obj = instance.instance_object
+        if not obj or not obj.IsA("MESH"):
+            continue
+
+        node_id = f"node_{make_id('', instance.parent.name)}_inst_{idx}"
+        node_name = f"{instance.parent.name}_instance_{idx}"
+        parent_node_id = (
+            node_id_map.get(instance.parent.name) if instance.parent else None
+        )
+
+        world_yup = c_basis @ instance.matrix_world @ c_basis_inv
+        instancer_world_yup = c_basis @ instance.parent.matrix_world @ c_basis_inv
+        local_yup = safe_invert(instancer_world_yup) @ world_yup
+
+        node_info = build_node_info(
+            obj,
+            node_id,
+            node_name,
+            parent_node_id,
+            local_yup,
+            world_yup,
+            instance.show_self,
+            exported_meshes,
+        )
+        nodes.append(node_info)
+
+    return nodes
+
+
+# ============================================================================
+# Standard Unchanged Exporters
+# ============================================================================
+
+
+def build_node_info(
+    obj,
+    node_id,
+    node_name,
+    parent_node_id,
+    local_yup,
+    world_yup,
+    is_visible,
+    exported_meshes,
+):
+    """Factory helper to build consistent glTF node manifest descriptions."""
+    armature_mod = next((m for m in obj.modifiers if m.type == "ARMATURE"), None)
+    is_skinned = armature_mod is not None and armature_mod.object is not None
+    mesh_suffix = "_skinned" if is_skinned else ""
+
+    modifier_stack = []
+    for mod in obj.modifiers:
+        params = {}
+        if mod.type == "SUBDIV":
+            params = {"levels": mod.levels, "render_levels": mod.render_levels}
+        elif mod.type == "ARMATURE" and mod.object:
+            params = {"armature_id": make_id("node", mod.object.name)}
+        elif mod.type == "DECIMATE":
+            params = {
+                "ratio": clean_float(mod.ratio),
+                "decimate_type": mod.decimate_type,
+            }
+        elif mod.type == "NODES" and mod.node_group:
+            params = {"node_group": mod.node_group.name}
+
+        modifier_stack.append(
+            {
+                "type": mod.type,
+                "name": mod.name,
+                "params": params,
+                "eval_order": len(modifier_stack),
+                "gn_hash": str(hash(mod.node_group.name))
+                if (mod.type == "NODES" and mod.node_group)
+                else None,
+            }
+        )
+
+    node_info = {
+        "id": node_id,
+        "name": node_name,
+        "type": obj.type,
+        "visible": is_visible,
+        "parent_id": parent_node_id,
+        "transform": {
+            "local": serialize_matrix_col_major(local_yup),
+            "world": serialize_matrix_col_major(world_yup),
+        },
+        "refs": {
+            "mesh_id": None,
+            "skin_id": None,
+            "light_id": None,
+            "material_ids": [],
+            "morph_weights": [],
+        },
+        "extras": {},
+        "modifier_stack": modifier_stack,
+    }
+
+    if armature_mod and armature_mod.object:
+        node_info["refs"]["skin_id"] = make_id("skin", armature_mod.object.name)
+
+    if obj.type == "LIGHT":
+        if is_visible:
+            node_info["refs"]["light_id"] = make_id("light", obj.name)
+            light_data = obj.data
+            node_info["extras"]["light"] = {
+                "type": light_data.type,
+                "color": [clean_float(c) for c in light_data.color],
+                "energy": clean_float(light_data.energy),
+                "spot_size": clean_float(light_data.spot_size)
+                if light_data.type == "SPOT"
+                else 0.0,
+            }
+    elif obj.type == "CAMERA":
+        cam_data = obj.data
+        node_info["extras"]["camera"] = {
+            "type": "PERSP" if cam_data.type == "PERSP" else "ORTHO",
+            "fov": clean_float(cam_data.angle),
+            "clip_start": clean_float(cam_data.clip_start),
+            "clip_end": clean_float(cam_data.clip_end),
+        }
+    elif obj.IsA("MESH"):
+        mesh_id = make_id("mesh", f"{obj.data.name}{mesh_suffix}")
+
+        if is_visible and mesh_id in exported_meshes:
+            node_info["refs"]["mesh_id"] = mesh_id
+        else:
+            node_info["refs"]["mesh_id"] = None
+
+        node_info["refs"]["material_ids"] = [
+            make_id("mat", s.material.name) for s in obj.material_slots if s.material
+        ]
+
+        try:
+            coords = [c_basis @ v.co for v in obj.data.vertices]
+            min_bound = [clean_float(min(c[i] for c in coords)) for i in range(3)]
+            max_bound = [clean_float(max(c[i] for c in coords)) for i in range(3)]
+        except Exception:
+            min_bound = [0.0, 0.0, 0.0]
+            max_bound = [0.0, 0.0, 0.0]
+
+        node_info["extras"]["bounds"] = {"min": min_bound, "max": max_bound}
+
+    return node_info
+
+
 def extract_materials():
     """Extracts all active materials, compiling dynamic shader node configurations."""
     materials = []
@@ -697,7 +949,7 @@ def extract_materials():
         mat_info = {
             "id": mat_id,
             "name": mat.name,
-            "double_sided": not mat.use_backface_culling,  # True if backface culling is OFF in Blender
+            "double_sided": not mat.use_backface_culling,
             "pbr": {
                 "base_color": default_color,
                 "metallic": 0.0,
@@ -742,9 +994,6 @@ def extract_materials():
                 f"textures/{emissive_file}" if emissive_file else None
             )
         else:
-            mat_info["pbr"]["base_color"] = default_color
-
-        if not mat_info["maps"]["albedo"] and not root_node:
             mat_info["pbr"]["base_color"] = default_color
 
         materials.append(mat_info)
@@ -991,176 +1240,6 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
     return meshes
 
 
-def build_node_info(
-    obj,
-    node_id,
-    node_name,
-    parent_node_id,
-    local_yup,
-    world_yup,
-    is_visible,
-    exported_meshes,
-):
-    """Factory helper to build consistent glTF node manifest descriptions."""
-    armature_mod = next((m for m in obj.modifiers if m.type == "ARMATURE"), None)
-    is_skinned = armature_mod is not None and armature_mod.object is not None
-    mesh_suffix = "_skinned" if is_skinned else ""
-
-    modifier_stack = []
-    for mod in obj.modifiers:
-        params = {}
-        if mod.type == "SUBDIV":
-            params = {"levels": mod.levels, "render_levels": mod.render_levels}
-        elif mod.type == "ARMATURE" and mod.object:
-            params = {"armature_id": make_id("node", mod.object.name)}
-        elif mod.type == "DECIMATE":
-            params = {
-                "ratio": clean_float(mod.ratio),
-                "decimate_type": mod.decimate_type,
-            }
-        elif mod.type == "NODES" and mod.node_group:
-            params = {"node_group": mod.node_group.name}
-
-        modifier_stack.append(
-            {
-                "type": mod.type,
-                "name": mod.name,
-                "params": params,
-                "eval_order": len(modifier_stack),
-                "gn_hash": str(hash(mod.node_group.name))
-                if (mod.type == "NODES" and mod.node_group)
-                else None,
-            }
-        )
-
-    node_info = {
-        "id": node_id,
-        "name": node_name,
-        "type": obj.type,
-        "visible": is_visible,
-        "parent_id": parent_node_id,
-        "transform": {
-            "local": serialize_matrix_col_major(local_yup),
-            "world": serialize_matrix_col_major(world_yup),
-        },
-        "refs": {
-            "mesh_id": None,
-            "skin_id": None,
-            "light_id": None,
-            "material_ids": [],
-            "morph_weights": [],
-        },
-        "extras": {},
-        "modifier_stack": modifier_stack,
-    }
-
-    if armature_mod and armature_mod.object:
-        node_info["refs"]["skin_id"] = make_id("skin", armature_mod.object.name)
-
-    if obj.type == "LIGHT":
-        # Only attach light definitions if the object is strictly visible
-        if is_visible:
-            node_info["refs"]["light_id"] = make_id("light", obj.name)
-            light_data = obj.data
-            node_info["extras"]["light"] = {
-                "type": light_data.type,
-                "color": [clean_float(c) for c in light_data.color],
-                "energy": clean_float(light_data.energy),
-                "spot_size": clean_float(light_data.spot_size)
-                if light_data.type == "SPOT"
-                else 0.0,
-            }
-    elif obj.type == "CAMERA":
-        cam_data = obj.data
-        node_info["extras"]["camera"] = {
-            "type": "PERSP" if cam_data.type == "PERSP" else "ORTHO",
-            "fov": clean_float(cam_data.angle),
-            "clip_start": clean_float(cam_data.clip_start),
-            "clip_end": clean_float(cam_data.clip_end),
-        }
-    elif obj.IsA("MESH"):
-        mesh_id = make_id("mesh", f"{obj.data.name}{mesh_suffix}")
-
-        if is_visible and mesh_id in exported_meshes:
-            node_info["refs"]["mesh_id"] = mesh_id
-        else:
-            node_info["refs"]["mesh_id"] = None
-
-        node_info["refs"]["material_ids"] = [
-            make_id("mat", s.material.name) for s in obj.material_slots if s.material
-        ]
-
-        try:
-            coords = [c_basis @ v.co for v in obj.data.vertices]
-            min_bound = [clean_float(min(c[i] for c in coords)) for i in range(3)]
-            max_bound = [clean_float(max(c[i] for c in coords)) for i in range(3)]
-        except Exception:
-            min_bound = [0.0, 0.0, 0.0]
-            max_bound = [0.0, 0.0, 0.0]
-
-        node_info["extras"]["bounds"] = {"min": min_bound, "max": max_bound}
-
-    return node_info
-
-
-def extract_nodes(scene_objects, depsgraph, node_id_map, exported_meshes):
-    """Assembles node structures, separating standard objects from instances."""
-    nodes = []
-
-    for obj in scene_objects:
-        parent_key = obj.parent.name if obj.parent else None
-        parent_node_id = node_id_map.get(parent_key) if parent_key else None
-
-        world_yup = c_basis @ obj.matrix_world @ c_basis_inv
-        local_yup = (
-            c_basis @ obj.matrix_local @ c_basis_inv if obj.parent else world_yup
-        )
-
-        node_info = build_node_info(
-            obj,
-            node_id_map.get(obj.name),
-            obj.name,
-            parent_node_id,
-            local_yup,
-            world_yup,
-            not obj.hide_viewport,
-            exported_meshes,
-        )
-        nodes.append(node_info)
-
-    for idx, instance in enumerate(depsgraph.object_instances):
-        if not instance.is_instance:
-            continue
-
-        obj = instance.instance_object
-        if not obj or not obj.IsA("MESH"):
-            continue
-
-        node_id = f"node_{make_id('', instance.parent.name)}_inst_{idx}"
-        node_name = f"{instance.parent.name}_instance_{idx}"
-        parent_node_id = (
-            node_id_map.get(instance.parent.name) if instance.parent else None
-        )
-
-        world_yup = c_basis @ instance.matrix_world @ c_basis_inv
-        instancer_world_yup = c_basis @ instance.parent.matrix_world @ c_basis_inv
-        local_yup = safe_invert(instancer_world_yup) @ world_yup
-
-        node_info = build_node_info(
-            obj,
-            node_id,
-            node_name,
-            parent_node_id,
-            local_yup,
-            world_yup,
-            instance.show_self,
-            exported_meshes,
-        )
-        nodes.append(node_info)
-
-    return nodes
-
-
 def extract_lights(scene_objects):
     """Extracts KHR_lights_punctual compliant properties."""
     lights = []
@@ -1186,45 +1265,6 @@ def extract_lights(scene_objects):
                 }
             lights.append(light_info)
     return lights
-
-
-def extract_skins(depsgraph, node_id_map, world_yup_map):
-    """Extracts skin bindings, inverse matrices, and rest poses."""
-    skins = []
-    for obj in depsgraph.scene.objects:
-        if obj.IsA("ARMATURE"):
-            joints_list = []
-            ibms_list = []
-            rest_pose_list = []
-            pose_bone_ids = []
-
-            for bone in obj.data.bones:
-                bone_key = f"bone_{obj.name}_{bone.name}"
-                bone_node_id = node_id_map.get(bone_key)
-
-                joints_list.append(bone_node_id)
-                pose_bone_ids.append(bone_node_id)
-
-                bone_world_zup = obj.matrix_world @ bone.matrix_local
-                bone_world_yup = c_basis @ bone_world_zup @ c_basis_inv
-                ibm_yup = safe_invert(bone_world_yup)
-
-                ibms_list.extend(serialize_matrix_col_major(ibm_yup))
-
-                rest_pose_yup = c_basis @ bone.matrix_local @ c_basis_inv
-                rest_pose_list.extend(serialize_matrix_col_major(rest_pose_yup))
-
-            skins.append(
-                {
-                    "id": make_id("skin", obj.name),
-                    "name": f"{obj.name} Skin",
-                    "joints": joints_list,
-                    "inverse_bind_matrices": ibms_list,
-                    "rest_pose": rest_pose_list,
-                    "pose_bone_ids": pose_bone_ids,
-                }
-            )
-    return skins
 
 
 def extract_animations(
@@ -1324,7 +1364,16 @@ def extract_animations(
             for mode, n, arm_or_obj_name, bone_name in target_nodes:
                 if mode == "OBJECT":
                     obj = bpy.data.objects.get(arm_or_obj_name)
-                    parent_key = obj.parent.name if (obj and obj.parent) else None
+                    # Check if standard object has bone parenting
+                    if (
+                        obj
+                        and obj.parent
+                        and obj.parent_type == "BONE"
+                        and obj.parent_bone
+                    ):
+                        parent_key = f"bone_{obj.parent.name}_{obj.parent_bone}"
+                    else:
+                        parent_key = obj.parent.name if (obj and obj.parent) else None
                 else:
                     parts = n.split("_", 2)
                     if len(parts) >= 3:
@@ -1475,7 +1524,7 @@ def extract_animations(
 
 def export_raw_scene_data(blend_path, source_dir=None):
     if source_dir is None:
-        source_dir = input_dir  # Falls back to global input_dir (os.getcwd())
+        source_dir = input_dir
 
     # Resolve namespaced directories safely using absolute paths
     abs_blend = os.path.abspath(blend_path)
@@ -1545,7 +1594,7 @@ def export_raw_scene_data(blend_path, source_dir=None):
     scene_manifest = {
         "version": "1.2",
         "scene_info": {
-            "name": namespace_dir,  # Changed from name_we to namespace_dir
+            "name": namespace_dir,
             "up_axis": "Y",
             "coordinate_system": "Right-Handed",
             "winding_order": "CCW",
@@ -1564,7 +1613,6 @@ def export_raw_scene_data(blend_path, source_dir=None):
     with open(json_path, "w") as f:
         json.dump(scene_manifest, f, indent=2)
 
-    # Changed from name_we to namespace_dir
     print(
         f"      [Success] Extracted raw metadata & binary geometry for: {namespace_dir}"
     )
@@ -1580,10 +1628,9 @@ if "--" in sys.argv:
             # Calculate the true source root relative to intermediate output folder
             source_dir = os.path.abspath(os.path.join(output_parent, "..", ".."))
             export_raw_scene_data(blend_path, source_dir)
-            sys.exit(0)
         except Exception as e:
             print(f"      [Error] Extraction failed for {blend_path}: {e}")
-            sys.exit(1)
+            raise e
 
 # Fallback block: Scan directory if executed manually outside of Ninja
 else:
