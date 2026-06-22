@@ -15,6 +15,18 @@ import math
 sys.setrecursionlimit(15000)
 
 
+def remove_scale_from_matrix(matrix):
+    """Returns a copy of the matrix with uniform/non-uniform scaling removed (axes normalized)."""
+    m = matrix.copy()
+    col0 = m.col[0].to_3d().normalized()
+    col1 = m.col[1].to_3d().normalized()
+    col2 = m.col[2].to_3d().normalized()
+    m.col[0] = (col0.x, col0.y, col0.z, m.col[0].w)
+    m.col[1] = (col1.x, col1.y, col1.z, m.col[1].w)
+    m.col[2] = (col2.x, col2.y, col2.z, m.col[2].w)
+    return m
+
+
 def scalar_to_rgb(t):
     """Procedurally maps a single scalar float to a 3D RGB color wheel.
     Adjust the cosine parameters below to customize the visual aesthetic.
@@ -843,6 +855,13 @@ def build_node_info(
     is_skinned = armature_mod is not None and armature_mod.object is not None
     mesh_suffix = "_skinned" if is_skinned else ""
 
+    if is_skinned:
+        local_yup_final = Matrix.Identity(4)
+        world_yup_final = Matrix.Identity(4)
+    else:
+        local_yup_final = local_yup
+        world_yup_final = world_yup
+
     modifier_stack = []
     for mod in obj.modifiers:
         params = {}
@@ -877,8 +896,8 @@ def build_node_info(
         "visible": is_visible,
         "parent_id": parent_node_id,
         "transform": {
-            "local": serialize_matrix_col_major(local_yup),
-            "world": serialize_matrix_col_major(world_yup),
+            "local": serialize_matrix_col_major(local_yup_final),
+            "world": serialize_matrix_col_major(world_yup_final),
         },
         "refs": {
             "mesh_id": None,
@@ -927,7 +946,14 @@ def build_node_info(
         ]
 
         try:
-            coords = [c_basis @ v.co for v in obj.data.vertices]
+            # --- FIX: Evaluate bounds in world space for skinned meshes ---
+            if is_skinned:
+                coords = [
+                    c_basis @ (obj.matrix_world @ v.co) for v in obj.data.vertices
+                ]
+            else:
+                coords = [c_basis @ v.co for v in obj.data.vertices]
+            # ---------------------------------------------------------------
             min_bound = [clean_float(min(c[i] for c in coords)) for i in range(3)]
             max_bound = [clean_float(max(c[i] for c in coords)) for i in range(3)]
         except Exception:
@@ -1016,11 +1042,35 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
         if mesh_id in exported_meshes:
             continue
 
+        # --- FIX: Temporarily disable armature modifiers to prevent double deforms ---
+        armature_mods_state = []
+        has_armature = False
+        for mod in obj.modifiers:
+            if mod.type == "ARMATURE":
+                armature_mods_state.append((mod, mod.show_viewport))
+                mod.show_viewport = False
+                has_armature = True
+
+        if has_armature:
+            depsgraph.update()
+        # ----------------------------------------------------------------------------
+
         mesh_data = get_evaluated_mesh_safely(obj, depsgraph)
+
         if not mesh_data:
+            # Safely restore modifier viewport visibility before skipping
+            if has_armature:
+                for mod, state in armature_mods_state:
+                    mod.show_viewport = state
+                depsgraph.update()
             continue
 
         if len(mesh_data.vertices) == 0 or len(mesh_data.polygons) == 0:
+            # Safely restore modifier viewport visibility before skipping
+            if has_armature:
+                for mod, state in armature_mods_state:
+                    mod.show_viewport = state
+                depsgraph.update()
             try:
                 obj.evaluated_get(depsgraph).to_mesh_clear()
             except Exception:
@@ -1115,6 +1165,23 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
                         if hasattr(mesh_data.loops[loop_idx], "normal")
                         else mesh_data.vertices[v_idx].normal
                     )
+
+                    # --- FIX: Bake skinned mesh vertices to align with skeleton ---
+                    if is_skinned:
+                        # Transform local vertex position to world space
+                        co_world = obj.matrix_world @ co
+                        cx, cy, cz = co_world[0], co_world[2], -co_world[1]
+
+                        # Transform normal using inverse-transpose (handles non-uniform scales)
+                        normal_world = (
+                            safe_invert(obj.matrix_world).to_3x3().transposed() @ normal
+                        ).normalized()
+                        nx, ny, nz = normal_world[0], normal_world[2], -normal_world[1]
+                    else:
+                        cx, cy, cz = co[0], co[2], -co[1]
+                        nx, ny, nz = normal[0], normal[2], -normal[1]
+                    # -------------------------------------------------------------
+
                     uv = active_uv_layer[loop_idx].uv if active_uv_layer else (0.0, 0.0)
 
                     color = (1.0, 1.0, 1.0, 1.0)
@@ -1144,12 +1211,12 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
                     flat_vbo.extend(
                         [
                             float(v_idx),
-                            co[0],
-                            co[2],
-                            -co[1],
-                            normal[0],
-                            normal[2],
-                            -normal[1],
+                            cx,
+                            cy,
+                            cz,
+                            nx,
+                            ny,
+                            nz,
                             uv[0],
                             1.0 - uv[1],
                             color[0],
@@ -1209,6 +1276,40 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
         with open(bin_path, "wb") as f:
             f.write(vbo_binary)
 
+        # Extract and bake morph targets (shape keys) generically
+        morph_targets = []
+        if obj.data.shape_keys:
+            basis_kb = obj.data.shape_keys.key_blocks.get("Basis")
+            if basis_kb:
+                for kb in obj.data.shape_keys.key_blocks:
+                    if kb.name == "Basis":
+                        continue
+
+                    target_offsets = []
+                    for v_idx, v in enumerate(obj.data.vertices):
+                        # Calculate local coordinate difference relative to base shape
+                        offset = kb.data[v_idx].co - basis_kb.data[v_idx].co
+                        # Align offsets into Y-up orientation
+                        cx, cy, cz = offset[0], offset[2], -offset[1]
+                        target_offsets.extend([cx, cy, cz])
+
+                    target_bin_data = struct.pack(
+                        f"{len(target_offsets)}f", *target_offsets
+                    )
+                    target_bin_name = f"{mesh_id}_target_{kb.name}.bin"
+                    target_bin_path = os.path.join(bin_dir, target_bin_name)
+                    with open(target_bin_path, "wb") as f:
+                        f.write(target_bin_data)
+
+                    morph_targets.append(
+                        {
+                            "name": kb.name,
+                            "bin_file": os.path.relpath(target_bin_path, asset_dir),
+                            "byte_offset": 0,
+                            "byte_length": len(target_bin_data),
+                        }
+                    )
+
         layout = "RAW_P3N3U2C4"
         if is_skinned:
             layout += "_J4W4"
@@ -1225,10 +1326,18 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
                 },
             },
             "primitives": primitives,
+            "morph_targets": morph_targets,
         }
 
         meshes.append(mesh_info)
         exported_meshes.add(mesh_id)
+
+        # --- FIX: Safe modifier restoration ONLY after mesh processing is complete ---
+        if has_armature:
+            for mod, state in armature_mods_state:
+                mod.show_viewport = state
+            depsgraph.update()
+        # -----------------------------------------------------------------------------
 
         try:
             obj.evaluated_get(depsgraph).to_mesh_clear()
@@ -1267,12 +1376,76 @@ def extract_lights(scene_objects):
     return lights
 
 
+def get_node_ancestry(node_info):
+    """Gathers all ancestor keys and details for a given node to ensure clean evaluation."""
+    ancestors = []
+    mode, n, arm_or_obj_name, bone_name = node_info
+
+    current_mode, current_n, current_arm_obj, current_bone = (
+        mode,
+        n,
+        arm_or_obj_name,
+        bone_name,
+    )
+
+    while True:
+        parent_key = None
+        p_mode, p_arm_obj, p_bone = None, None, None
+
+        if current_mode == "BONE":
+            arm = bpy.data.objects.get(current_arm_obj)
+            if arm:
+                bone = arm.data.bones.get(current_bone)
+                if bone and bone.parent:
+                    parent_key = f"bone_{current_arm_obj}_{bone.parent.name}"
+                    p_mode = "BONE"
+                    p_arm_obj = current_arm_obj
+                    p_bone = bone.parent.name
+                else:
+                    parent_key = current_arm_obj
+                    p_mode = "OBJECT"
+                    p_arm_obj = current_arm_obj
+                    p_bone = None
+        else:
+            obj = bpy.data.objects.get(current_arm_obj)
+            if obj and obj.parent:
+                if obj.parent_type == "BONE" and obj.parent_bone:
+                    parent_key = f"bone_{obj.parent.name}_{obj.parent_bone}"
+                    p_mode = "BONE"
+                    p_arm_obj = obj.parent.name
+                    p_bone = obj.parent_bone
+                else:
+                    parent_key = obj.parent.name
+                    p_mode = "OBJECT"
+                    p_arm_obj = obj.parent.name
+                    p_bone = None
+
+        if parent_key:
+            ancestors.append((p_mode, parent_key, p_arm_obj, p_bone))
+            current_mode, current_n, current_arm_obj, current_bone = (
+                p_mode,
+                parent_key,
+                p_arm_obj,
+                p_bone,
+            )
+        else:
+            break
+
+    return ancestors
+
+
 def extract_animations(
     depsgraph, node_id_map, bone_to_armature, bin_dir, asset_dir, fps
 ):
-    """Saves animated keyframe tracks, packing bone and object channels to .bin."""
+    """Saves animated keyframe tracks, packing bone and object channels to .bin using high-performance evaluation."""
     animations = []
     original_frame = bpy.context.scene.frame_current
+
+    # Non-destructive action tracking: Cache original actions to restore after extraction
+    original_actions = {}
+    for obj in bpy.data.objects:
+        if obj.animation_data:
+            original_actions[obj] = obj.animation_data.action
 
     for action in bpy.data.actions:
         action_id = make_id("anim", action.name)
@@ -1292,7 +1465,10 @@ def extract_animations(
         elif hasattr(action, "fcurves") and action.fcurves is not None:
             fcurves = list(action.fcurves)
 
-        target_nodes = set()
+        # Collect target armatures and objects
+        animated_armatures = set()
+        animated_objects = set()
+        animated_meshes_with_shape_keys = set()
         has_object_curves = False
 
         for fc in fcurves:
@@ -1316,15 +1492,43 @@ def extract_animations(
                             break
 
                 if arm_obj:
-                    bone_key = f"bone_{arm_obj.name}_{bone_name}"
-                    target_nodes.add(("BONE", bone_key, arm_obj.name, bone_name))
+                    animated_armatures.add(arm_obj)
+            elif "key_blocks" in path:
+                if isinstance(fc.id_data, bpy.types.Key):
+                    for obj in bpy.data.objects:
+                        if obj.type == "MESH" and obj.data.shape_keys == fc.id_data:
+                            animated_meshes_with_shape_keys.add(obj)
             else:
                 has_object_curves = True
 
         if has_object_curves and (getattr(action, "id_root", "OBJECT") == "OBJECT"):
             for obj in bpy.data.objects:
                 if obj.animation_data and obj.animation_data.action == action:
-                    target_nodes.add(("OBJECT", obj.name, obj.name, None))
+                    if obj.IsA("ARMATURE"):
+                        animated_armatures.add(obj)
+                    else:
+                        animated_objects.add(obj)
+
+        # Assemble actual target nodes to export
+        target_nodes = set()
+
+        # FORCE SKELETON BAKING:
+        # If any bone of an armature is animated, we evaluate and export keyframe
+        # tracks for ALL bones of that armature. This bakes all constraint, IK,
+        # and driver evaluations directly into visual space, eliminating frozen deform bones.
+        for arm in animated_armatures:
+            for bone in arm.data.bones:
+                bone_key = f"bone_{arm.name}_{bone.name}"
+                target_nodes.add(("BONE", bone_key, arm.name, bone.name))
+
+        for obj in animated_objects:
+            target_nodes.add(("OBJECT", obj.name, obj.name, None))
+
+        # Dynamically register morph target (shape key) channels generics-only
+        for obj in animated_meshes_with_shape_keys:
+            node_id = node_id_map.get(obj.name)
+            if node_id:
+                target_nodes.add(("WEIGHTS", node_id, obj.name, None))
 
         if not target_nodes:
             continue
@@ -1333,80 +1537,106 @@ def extract_animations(
         samplers = []
         sampler_index = 0
 
+        # Apply target action for evaluation
         for mode, name, arm_or_obj_name, bone_name in target_nodes:
+            if mode == "WEIGHTS":
+                continue
             obj = bpy.data.objects.get(arm_or_obj_name)
             if obj and obj.animation_data:
                 obj.animation_data.action = action
+
+        # Gather the exact, minimal ancestry path for all standard target nodes (skip WEIGHTS tracks)
+        all_eval_nodes = set()
+        for node_info in target_nodes:
+            if node_info[0] != "WEIGHTS":
+                all_eval_nodes.add(node_info)
+                for ancestor in get_node_ancestry(node_info):
+                    all_eval_nodes.add(ancestor)
 
         sampled_times = []
         sampled_transforms = {n: [] for _, n, _, _ in target_nodes}
         eval_dg = bpy.context.evaluated_depsgraph_get()
 
+        # Step through active frames
         for frame in range(start_frame, end_frame + 1):
             bpy.context.scene.frame_set(frame)
             eval_dg.update()
 
             sampled_times.append(clean_float((frame - start_frame) / fps))
 
+            # Evaluate exact world-space matrices for active nodes in Y-up orientation
             world_yup_eval = {}
-            for instance in eval_dg.object_instances:
-                o = instance.object
-                world_yup_eval[o.name] = c_basis @ instance.matrix_world @ c_basis_inv
-
-            for o in eval_dg.scene.objects:
-                if o.IsA("ARMATURE"):
-                    eval_arm = o.evaluated_get(eval_dg)
-                    for pb in eval_arm.pose.bones:
-                        b_key = f"bone_{o.name}_{pb.name}"
-                        b_world_zup = eval_arm.matrix_world @ pb.matrix
-                        world_yup_eval[b_key] = c_basis @ b_world_zup @ c_basis_inv
-
-            for mode, n, arm_or_obj_name, bone_name in target_nodes:
-                if mode == "OBJECT":
-                    obj = bpy.data.objects.get(arm_or_obj_name)
-                    # Check if standard object has bone parenting
-                    if (
-                        obj
-                        and obj.parent
-                        and obj.parent_type == "BONE"
-                        and obj.parent_bone
-                    ):
-                        parent_key = f"bone_{obj.parent.name}_{obj.parent_bone}"
-                    else:
-                        parent_key = obj.parent.name if (obj and obj.parent) else None
+            for mode, n, arm_or_obj, bone_name in all_eval_nodes:
+                if mode == "BONE":
+                    arm = bpy.data.objects.get(arm_or_obj)
+                    if arm:
+                        eval_arm = arm.evaluated_get(eval_dg)
+                        pb = eval_arm.pose.bones.get(bone_name)
+                        if pb:
+                            b_world_zup = eval_arm.matrix_world @ pb.matrix
+                            world_yup_eval[n] = c_basis @ b_world_zup @ c_basis_inv
                 else:
-                    parts = n.split("_", 2)
-                    if len(parts) >= 3:
-                        arm_name = parts[1]
-                        bone_name = parts[2]
-                        obj_arm = bpy.data.objects.get(arm_name)
-                        if (
-                            obj_arm
-                            and hasattr(obj_arm, "data")
-                            and hasattr(obj_arm.data, "bones")
-                        ):
-                            bone = obj_arm.data.bones.get(bone_name)
-                            parent_key = (
-                                f"bone_{arm_name}_{bone.parent.name}"
-                                if (bone and bone.parent)
-                                else arm_name
+                    obj = bpy.data.objects.get(arm_or_obj)
+                    if obj:
+                        eval_obj = obj.evaluated_get(eval_dg)
+                        world_yup_eval[n] = (
+                            c_basis @ eval_obj.matrix_world @ c_basis_inv
+                        )
+
+            # Extract parent-relative transformations
+            for mode, n, arm_or_obj_name, bone_name in target_nodes:
+                if mode == "WEIGHTS":
+                    obj_mesh = bpy.data.objects.get(arm_or_obj_name)
+                    weights = []
+                    if obj_mesh and obj_mesh.data.shape_keys:
+                        for kb in obj_mesh.data.shape_keys.key_blocks:
+                            if kb.name != "Basis":
+                                weights.append(kb.value)
+                    sampled_transforms[n].append(weights)
+                else:
+                    parent_key = None
+                    if mode == "BONE":
+                        arm = bpy.data.objects.get(arm_or_obj_name)
+                        bone = arm.data.bones.get(bone_name) if arm else None
+                        if bone and bone.parent:
+                            parent_key = f"bone_{arm_or_obj_name}_{bone.parent.name}"
+                        else:
+                            parent_key = arm_or_obj_name
+                    else:
+                        obj = bpy.data.objects.get(arm_or_obj_name)
+                        if obj and obj.parent:
+                            if obj.parent_type == "BONE" and obj.parent_bone:
+                                parent_key = f"bone_{obj.parent.name}_{obj.parent_bone}"
+                            else:
+                                parent_key = obj.parent.name
+
+                    world_yup = world_yup_eval.get(n, Matrix.Identity(4))
+
+                    # --- FIX: Isolate scale/shear for joints ---
+                    if mode == "BONE":
+                        world_unscaled = remove_scale_from_matrix(world_yup)
+                        if parent_key and parent_key in world_yup_eval:
+                            parent_unscaled = remove_scale_from_matrix(
+                                world_yup_eval[parent_key]
+                            )
+                            local_yup = safe_invert(parent_unscaled) @ world_unscaled
+                        else:
+                            local_yup = world_unscaled
+                    else:
+                        # Maintain scale for standard object animations
+                        if parent_key and parent_key in world_yup_eval:
+                            local_yup = (
+                                safe_invert(world_yup_eval[parent_key]) @ world_yup
                             )
                         else:
-                            parent_key = arm_name
-                    else:
-                        parent_key = None
-
-                world_yup = world_yup_eval.get(n, Matrix.Identity(4))
-                if parent_key and parent_key in world_yup_eval:
-                    local_yup = (
-                        safe_invert(world_yup_eval.get(parent_key, Matrix.Identity(4)))
-                        @ world_yup
-                    )
-                else:
-                    local_yup = world_yup
+                            local_yup = world_yup
+                # -------------------------------------------
 
                 t, r, s = local_yup.decompose()
                 sampled_transforms[n].append((t, r, s))
+
+        if not sampled_times or not any(sampled_transforms.values()):
+            continue
 
         anim_bin_data = b""
         anim_bin_offset = 0
@@ -1420,79 +1650,112 @@ def extract_animations(
         for n in sampled_transforms:
             transforms = sampled_transforms[n]
             node_id = node_id_map.get(n)
+            if not node_id:
+                continue
 
-            translations_flat = []
-            rotations_flat = []
-            scales_flat = []
+            # Check if this track animations shape key weights
+            is_weights_track = any(
+                x[0] == "WEIGHTS" and x[1] == n for x in target_nodes
+            )
 
-            for t, r, s in transforms:
-                translations_flat.extend([t.x, t.y, t.z])
-                rotations_flat.extend([r.x, r.y, r.z, r.w])
-                scales_flat.extend([s.x, s.y, s.z])
+            if is_weights_track:
+                weights_flat = []
+                for w_list in transforms:
+                    weights_flat.extend(w_list)
+                w_bin = struct.pack(f"{len(weights_flat)}f", *weights_flat)
 
-            t_bin = struct.pack(f"{len(translations_flat)}f", *translations_flat)
-            r_bin = struct.pack(f"{len(rotations_flat)}f", *rotations_flat)
-            s_bin = struct.pack(f"{len(scales_flat)}f", *scales_flat)
+                channels.append(
+                    {
+                        "target_node_id": node_id,
+                        "target_path": "weights",
+                        "sampler_id": sampler_index,
+                    }
+                )
+                samplers.append(
+                    {
+                        "interpolation": "LINEAR",
+                        "input_offset": times_offset,
+                        "input_length": times_length,
+                        "output_offset": anim_bin_offset,
+                        "output_length": len(w_bin),
+                    }
+                )
+                anim_bin_data += w_bin
+                anim_bin_offset += len(w_bin)
+                sampler_index += 1
+            else:
+                translations_flat = []
+                rotations_flat = []
+                scales_flat = []
 
-            channels.append(
-                {
-                    "target_node_id": node_id,
-                    "target_path": "translation",
-                    "sampler_id": sampler_index,
-                }
-            )
-            samplers.append(
-                {
-                    "interpolation": "LINEAR",
-                    "input_offset": times_offset,
-                    "input_length": times_length,
-                    "output_offset": anim_bin_offset,
-                    "output_length": len(t_bin),
-                }
-            )
-            anim_bin_data += t_bin
-            anim_bin_offset += len(t_bin)
-            sampler_index += 1
+                for t, r, s in transforms:
+                    translations_flat.extend([t.x, t.y, t.z])
+                    rotations_flat.extend([r.x, r.y, r.z, r.w])
+                    scales_flat.extend([s.x, s.y, s.z])
 
-            channels.append(
-                {
-                    "target_node_id": node_id,
-                    "target_path": "rotation",
-                    "sampler_id": sampler_index,
-                }
-            )
-            samplers.append(
-                {
-                    "interpolation": "LINEAR",
-                    "input_offset": times_offset,
-                    "input_length": times_length,
-                    "output_offset": anim_bin_offset,
-                    "output_length": len(r_bin),
-                }
-            )
-            anim_bin_data += r_bin
-            anim_bin_offset += len(r_bin)
-            sampler_index += 1
+                t_bin = struct.pack(f"{len(translations_flat)}f", *translations_flat)
+                r_bin = struct.pack(f"{len(rotations_flat)}f", *rotations_flat)
+                s_bin = struct.pack(f"{len(scales_flat)}f", *scales_flat)
 
-            channels.append(
-                {
-                    "target_node_id": node_id,
-                    "target_path": "scale",
-                    "sampler_id": sampler_index,
-                }
-            )
-            samplers.append(
-                {
-                    "interpolation": "LINEAR",
-                    "input_offset": times_offset,
-                    "input_length": times_length,
-                    "output_offset": anim_bin_offset,
-                    "output_length": len(s_bin),
-                }
-            )
-            anim_bin_data += s_bin
-            anim_bin_offset += len(s_bin)
-            sampler_index += 1
+                channels.append(
+                    {
+                        "target_node_id": node_id,
+                        "target_path": "translation",
+                        "sampler_id": sampler_index,
+                    }
+                )
+                samplers.append(
+                    {
+                        "interpolation": "LINEAR",
+                        "input_offset": times_offset,
+                        "input_length": times_length,
+                        "output_offset": anim_bin_offset,
+                        "output_length": len(t_bin),
+                    }
+                )
+                anim_bin_data += t_bin
+                anim_bin_offset += len(t_bin)
+                sampler_index += 1
+
+                channels.append(
+                    {
+                        "target_node_id": node_id,
+                        "target_path": "rotation",
+                        "sampler_id": sampler_index,
+                    }
+                )
+                samplers.append(
+                    {
+                        "interpolation": "LINEAR",
+                        "input_offset": times_offset,
+                        "input_length": times_length,
+                        "output_offset": anim_bin_offset,
+                        "output_length": len(r_bin),
+                    }
+                )
+                anim_bin_data += r_bin
+                anim_bin_offset += len(r_bin)
+                sampler_index += 1
+
+                channels.append(
+                    {
+                        "target_node_id": node_id,
+                        "target_path": "scale",
+                        "sampler_id": sampler_index,
+                    }
+                )
+                samplers.append(
+                    {
+                        "interpolation": "LINEAR",
+                        "input_offset": times_offset,
+                        "input_length": times_length,
+                        "output_offset": anim_bin_offset,
+                        "output_length": len(s_bin),
+                    }
+                )
+                anim_bin_data += s_bin
+                anim_bin_offset += len(s_bin)
+                sampler_index += 1
 
         anim_bin_path = os.path.join(bin_dir, f"{action_id}_anim.bin")
         with open(anim_bin_path, "wb") as f:
@@ -1512,6 +1775,11 @@ def extract_animations(
                 "samplers": samplers,
             }
         )
+
+    # Clean restore of original actions
+    for obj, orig_act in original_actions.items():
+        if obj.animation_data:
+            obj.animation_data.action = orig_act
 
     bpy.context.scene.frame_set(original_frame)
     return animations

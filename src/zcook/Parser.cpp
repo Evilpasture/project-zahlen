@@ -201,6 +201,8 @@ bool Parser::matchMeshField(IRMesh& mesh) {
 		ParseBuffers(mesh);
 	else if (key.value == "primitives")
 		ParsePrimitives(mesh);
+	else if (key.value == "morph_targets")
+		ParseMorphTargets(mesh);
 	else
 		SkipValue();
 	return false;
@@ -624,6 +626,33 @@ void Parser::ParseSkins(IRManifest& manifest) {
 				Expect(TokenType::Comma);
 		}
 		manifest.skins.push_back(skin);
+		if (!Peek(TokenType::EndArray))
+			Expect(TokenType::Comma);
+	}
+}
+
+void Parser::ParseMorphTargets(IRMesh& mesh) {
+	Expect(TokenType::BeginArray);
+	while (!Match(TokenType::EndArray)) {
+		IRMorphTarget target;
+		Expect(TokenType::BeginObject);
+		while (!Match(TokenType::EndObject)) {
+			Token key = Expect(TokenType::String);
+			Expect(TokenType::Colon);
+			if (key.value == "name")
+				target.name = DecodeJSONString(Expect(TokenType::String).value);
+			else if (key.value == "bin_file")
+				target.binFile = DecodeJSONString(Expect(TokenType::String).value);
+			else if (key.value == "byte_offset")
+				target.byteOffset = std::stoul(std::string(Expect(TokenType::Number).value));
+			else if (key.value == "byte_length")
+				target.byteLength = std::stoul(std::string(Expect(TokenType::Number).value));
+			else
+				SkipValue();
+			if (!Peek(TokenType::EndObject))
+				Expect(TokenType::Comma);
+		}
+		mesh.morphTargets.push_back(target);
 		if (!Peek(TokenType::EndArray))
 			Expect(TokenType::Comma);
 	}

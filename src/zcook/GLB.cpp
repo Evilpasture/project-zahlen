@@ -48,8 +48,9 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 	std::vector<PackedImage> packedImages;
 
 	auto getTextureIndex = [&](const std::string& relativeUri) -> int {
-		if (relativeUri.empty())
+		if (relativeUri.empty()) {
 			return -1;
+		}
 
 		for (size_t i = 0; i < packedImages.size(); ++i) {
 			if (packedImages[i].relativeUri == relativeUri)
@@ -296,6 +297,75 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 				wboBViewIdx, vertexCount));
 		}
 
+		// Compile morph targets (shape keys)
+		std::vector<std::string> targetsJson;
+		for (const auto& target : mesh.morphTargets) {
+			std::string targetBinPath = levelFolder + "/" + target.binFile;
+			FILE* tbf = std::fopen(targetBinPath.c_str(), "rb");
+			if (!tbf)
+				continue;
+
+			std::fseek(tbf, 0, SEEK_END);
+			long tSize = std::ftell(tbf);
+			std::fseek(tbf, 0, SEEK_SET);
+			std::vector<float> rawOffsets(tSize / sizeof(float));
+			if (!rawOffsets.empty()) {
+				std::fread(rawOffsets.data(), sizeof(float), rawOffsets.size(), tbf);
+			}
+			std::fclose(tbf);
+
+			// Remap original raw offsets using original Blender vertex indices
+			std::vector<float> compiledOffsets(vertexCount * 3, 0.0f);
+			for (size_t i = 0; i < vertexCount; ++i) {
+				uint32_t origIdx = compiled.originalVertexIndices[i];
+				if (origIdx * 3 + 2 < rawOffsets.size()) {
+					compiledOffsets[i * 3 + 0] = rawOffsets[origIdx * 3 + 0];
+					compiledOffsets[i * 3 + 1] = rawOffsets[origIdx * 3 + 1];
+					compiledOffsets[i * 3 + 2] = rawOffsets[origIdx * 3 + 2];
+				}
+			}
+
+			while (binBuffer.size() % 4 != 0)
+				binBuffer.push_back(0);
+			auto targetOffset = static_cast<uint32_t>(binBuffer.size());
+			size_t targetBytes = compiledOffsets.size() * sizeof(float);
+			binBuffer.insert(binBuffer.end(), reinterpret_cast<uint8_t*>(compiledOffsets.data()),
+							 reinterpret_cast<uint8_t*>(compiledOffsets.data()) + targetBytes);
+
+			bufferViews.push_back(
+				std::format(R"(    {{ "buffer": 0, "byteOffset": {}, "byteLength": {} }})",
+							targetOffset, targetBytes));
+			uint32_t targetBViewIdx = bViewIndex++;
+
+			uint32_t targetAccIdx = accIndex++;
+
+			float minO[3] = {1e30f, 1e30f, 1e30f};
+			float maxO[3] = {-1e30f, -1e30f, -1e30f};
+			for (size_t i = 0; i < vertexCount; ++i) {
+				minO[0] = std::min(minO[0], compiledOffsets[i * 3 + 0]);
+				minO[1] = std::min(minO[1], compiledOffsets[i * 3 + 1]);
+				minO[2] = std::min(minO[2], compiledOffsets[i * 3 + 2]);
+				maxO[0] = std::max(maxO[0], compiledOffsets[i * 3 + 0]);
+				maxO[1] = std::max(maxO[1], compiledOffsets[i * 3 + 1]);
+				maxO[2] = std::max(maxO[2], compiledOffsets[i * 3 + 2]);
+			}
+
+			accessors.push_back(std::format(
+				R"(    {{"bufferView": {}, "componentType": 5126, "count": {}, "type": "VEC3", "min": [{}, {}, {}], "max": [{}, {}, {}]}})",
+				targetBViewIdx, vertexCount, minO[0], minO[1], minO[2], maxO[0], maxO[1], maxO[2]));
+
+			targetsJson.push_back(std::format(R"(        {{ "POSITION": {} }})", targetAccIdx));
+		}
+
+		std::string targetsArrayStr;
+		if (!targetsJson.empty()) {
+			targetsArrayStr = R"(, "targets": [ )";
+			for (size_t t = 0; t < targetsJson.size(); ++t) {
+				targetsArrayStr += targetsJson[t] + (t < targetsJson.size() - 1 ? ", " : "");
+			}
+			targetsArrayStr += " ]";
+		}
+
 		std::string primsStr;
 		for (size_t p = 0; p < compiled.primitives.size(); ++p) {
 			const auto& prim = compiled.primitives[p];
@@ -321,10 +391,10 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 
 			primsStr += std::format(R"(        {{
           "attributes": {{ "POSITION": {}, "NORMAL": {}, "TANGENT": {}, "TEXCOORD_0": {}, "COLOR_0": {} {} }},
-          "indices": {} {}
+          "indices": {} {}{}
         }})",
 									posAcc, normAcc, tangAcc, uvAcc, colorAcc, skinAttribs,
-									indexAcc, matStr);
+									indexAcc, matStr, targetsArrayStr);
 			if (p < compiled.primitives.size() - 1)
 				primsStr += ",\n";
 		}
@@ -468,11 +538,23 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 		}
 		matrixStr += "]";
 
-		std::string meshStr, skinStr, extStr;
+		std::string meshStr, skinStr, extStr, weightsStr;
 		if (!node.meshId.empty()) {
 			auto it = meshIdToGlbIndex.find(node.meshId);
-			if (it != meshIdToGlbIndex.end())
+			if (it != meshIdToGlbIndex.end()) {
 				meshStr = std::format(",\n      \"mesh\": {}", it->second);
+
+				auto mIt = std::ranges::find_if(manifest.meshes,
+												[&](const auto& m) { return m.id == node.meshId; });
+				if (mIt != manifest.meshes.end() && !mIt->morphTargets.empty()) {
+					weightsStr = ",\n      \"weights\": [";
+					for (size_t w = 0; w < mIt->morphTargets.size(); ++w) {
+						weightsStr +=
+							"0.0" + std::string(w < mIt->morphTargets.size() - 1 ? ", " : "");
+					}
+					weightsStr += "]";
+				}
+			}
 		}
 		if (!node.skinId.empty()) {
 			auto sit = skinIdToGlbIndex.find(node.skinId);
@@ -506,8 +588,8 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 				childrenStr += "]";
 			}
 		}
-		nodesJson[nIdx] = std::format(R"(    {{ "name": "{}", "matrix": {}{}{}{}{} }})", node.id,
-									  matrixStr, meshStr, skinStr, extStr, childrenStr);
+		nodesJson[nIdx] = std::format(R"(    {{ "name": "{}", "matrix": {}{}{}{}{}{} }})", node.id,
+									  matrixStr, meshStr, skinStr, extStr, childrenStr, weightsStr);
 	}
 
 	for (const auto& anim : manifest.animations) {
@@ -557,6 +639,8 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 				if (chan.samplerId == sIdx) {
 					if (chan.targetPath == "rotation")
 						outputType = "VEC4";
+					else if (chan.targetPath == "weights")
+						outputType = "SCALAR";
 					break;
 				}
 			}

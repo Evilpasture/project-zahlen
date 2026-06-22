@@ -44,10 +44,18 @@ struct IRPrimitive {
 	uint32_t vertexCount;
 };
 
+struct IRMorphTarget {
+	std::string name;
+	std::string binFile;
+	uint32_t byteOffset = 0;
+	uint32_t byteLength = 0;
+};
+
 struct IRMesh {
 	std::string id, layout, binFile;
 	IRBuffer vertexBuffer;
 	std::vector<IRPrimitive> primitives;
+	std::vector<IRMorphTarget> morphTargets;
 };
 
 struct IRNode {

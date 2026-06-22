@@ -15,6 +15,7 @@ struct CompiledMesh {
 	std::vector<uint16_t> joints;
 	std::vector<float> weights;
 	std::vector<Compiler::IRPrimitive> primitives;
+	std::vector<uint32_t> originalVertexIndices;
 	float minB[3] = {1e30f, 1e30f, 1e30f};
 	float maxB[3] = {-1e30f, -1e30f, -1e30f};
 	bool isSkinned = false;

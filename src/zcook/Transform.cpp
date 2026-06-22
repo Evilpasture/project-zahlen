@@ -132,6 +132,7 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, const std::string& bin
 				uniqueMap[rv] = newIdx;
 				result.indices.push_back(newIdx);
 				rawVerts.push_back(rv);
+				result.originalVertexIndices.push_back(rv.v_idx);
 			}
 		}
 		result.primitives.push_back(outPrim);

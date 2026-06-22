@@ -33,6 +33,7 @@ class Parser {
 	void ParseBuffers(IRMesh& mesh);
 	void ParseBufferBound(IRBuffer& buf);
 	void ParsePrimitives(IRMesh& mesh);
+	void ParseMorphTargets(IRMesh& mesh);
 	void ParseNodes(IRManifest& manifest);
 	void ParseTransform(IRNode& node);
 	void ParseRefs(IRNode& node);
