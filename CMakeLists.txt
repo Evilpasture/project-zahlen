@@ -440,9 +440,19 @@ add_executable(zahlen
 target_link_libraries(zahlen PRIVATE zahlen_engine imgui)
 target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)
 
-add_executable(zcook src/zcook.cpp)
+add_executable(zcook 
+    src/zcook/main.cpp
+    src/zcook/Lexer.cpp
+    src/zcook/Parser.cpp
+    src/zcook/Transform.cpp
+    src/zcook/GLB.cpp
+    src/zcook/Cook.cpp
+)
 target_link_libraries(zcook PRIVATE zahlen_engine)
-target_include_directories(zcook PRIVATE ${CMAKE_SOURCE_DIR}/extern/cgltf)
+target_include_directories(zcook PRIVATE 
+    ${CMAKE_SOURCE_DIR}/extern/cgltf
+    ${CMAKE_SOURCE_DIR}/src/zcook
+)
 
 # Generates the safe, non-colliding assets.ninja blueprint
 add_custom_command(
