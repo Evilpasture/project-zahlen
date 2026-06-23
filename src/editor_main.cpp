@@ -482,7 +482,7 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 			uniforms.viewProj = vp;
 			uniforms.unjitteredViewProj = unjitteredVp;
 			uniforms.prevUnjitteredViewProj = s_PrevUnjitteredVp;
-			uniforms.lightSpaceMatrix = lightSpaceBiased;
+			uniforms.lightSpaceMatrix = shadowProjView;
 			uniforms.invViewProj = unjitteredVp.Inversed();
 			std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
 			std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);

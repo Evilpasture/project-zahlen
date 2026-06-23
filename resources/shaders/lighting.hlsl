@@ -122,6 +122,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
 	// Transform the biased world position into light space
 	float4 shadowPos = mul(frame.lightSpaceMatrix, float4(biasedWorldPos, 1.0f));
+
+	// Manually apply the Vulkan texture coordinate bias
+	shadowPos.xy = shadowPos.xy * float2(0.5f, -0.5f) + 0.5f * shadowPos.w;
+
 	float shadow =
 		CalculateShadowPCSS(shadowPos, N, L_sun, input.pos.xy, shadowMap, shadowSampler, smp);
 

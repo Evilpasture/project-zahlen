@@ -71,7 +71,7 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	output.worldPos = worldPos.xyz;
 
 	if (obj.isShadowPass != 0) {
-		output.pos = worldPos;
+		output.pos = mul(frame.lightSpaceMatrix, worldPos); // Standard, unbiased projection
 		output.uv = localUV;
 		output.baseColorFactor = baseColorFactor;
 		output.emissiveFactor = emissiveFactor;

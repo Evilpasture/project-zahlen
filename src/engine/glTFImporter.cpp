@@ -6,6 +6,7 @@
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Render.hpp"
 #include "ecs/ECS.hpp"
+#include "engine/system/LightingSystem.hpp"
 #include "physics/Physics.hpp"
 
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
@@ -31,7 +32,7 @@ namespace ZHLN::AssetFactory {
 
 // Declare shared caches (linked externally by AnimationSystem)
 std::unordered_map<std::string, cgltf_data*> s_GLBCache;
-std::vector<cgltf_data*> s_AnimatedGLBs;
+JPH::Array<cgltf_data*> s_AnimatedGLBs;
 
 // Structures to hold intermediate parsed data from CPU-parallel phase
 struct CPUTextureJob {
@@ -508,7 +509,7 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 	std::vector<CPUPrimitiveJob> primitiveJobs;
 
 	auto RegisterImage = [&](cgltf_image* img) {
-		if (img && std::find(uniqueImages.begin(), uniqueImages.end(), img) == uniqueImages.end()) {
+		if (img && std::ranges::find(uniqueImages, img) == uniqueImages.end()) {
 			uniqueImages.push_back(img);
 		}
 	};
@@ -563,7 +564,7 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 	// ========================================================================
 	// PHASE 1: CPU-PARALLEL PROCESSING
 	// ========================================================================
-	std::vector<CPUTextureJob> textureJobs(uniqueImages.size());
+	JPH::Array<CPUTextureJob> textureJobs(uniqueImages.size());
 	for (size_t i = 0; i < uniqueImages.size(); ++i) {
 		textureJobs[i].image = uniqueImages[i];
 		textureJobs[i].glbPath = rawPath;
@@ -617,8 +618,8 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 	}
 
 	std::unordered_map<const cgltf_mesh*, std::vector<ModelPart>> meshCache;
-	std::vector<ModelPart> totalParts;
-	std::unordered_set<const cgltf_node*> resolvedNodes; // <--- ADD THIS
+	JPH::Array<ModelPart> totalParts;
+	std::unordered_set<const cgltf_node*> resolvedNodes;
 
 	// Loop back through to construct GPU meshes & materials in correct sequence
 	for (auto& primJob : primitiveJobs) {
@@ -634,7 +635,7 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 		auto it = meshCache.find(node->mesh);
 		if (it != meshCache.end() && it->second.size() == node->mesh->primitives_count) {
 			for (auto part : it->second) {
-				part.name = node->name ? String64(node->name) : String64("Unnamed");
+				part.name = (node->name != nullptr) ? String64(node->name) : String64("Unnamed");
 				part.localTransform = primJob.nodeTransform;
 				part.gltfNode = const_cast<cgltf_node*>(node);
 				part.gltfSkin = node->skin;
@@ -736,6 +737,260 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 	return result;
 }
 
+namespace {
+
+// ----------------------------------------------------------------------------
+// HELPER 1: Safe glTF World Matrix extractor
+// ----------------------------------------------------------------------------
+JPH::Mat44 GetNodeWorldMat(const cgltf_node* node, const JPH::Mat44& baseTransform) {
+	float m[16];
+	cgltf_node_transform_world(node, m);
+	JPH::Mat44 local(JPH::Vec4(m[0], m[1], m[2], m[3]), JPH::Vec4(m[4], m[5], m[6], m[7]),
+					 JPH::Vec4(m[8], m[9], m[10], m[11]), JPH::Vec4(m[12], m[13], m[14], m[15]));
+	return baseTransform * local;
+}
+
+// ----------------------------------------------------------------------------
+// HELPER 2: Non-physics root structural anchor
+// ----------------------------------------------------------------------------
+Entity SpawnPrefabRoot(ECS::Registry& reg, std::string_view vPath, const SpawnParams& p) {
+	Entity root = reg.Create();
+	reg.Add(root, TransformComponent{
+					  .position = JPH::Vec3(p.position), // Natively casts RVec3 to float Vec3
+					  .rotation = p.rotation,
+					  .scale = p.scale});
+	reg.Add(root, NameComponent{.name = String64("Root_" + std::string(vPath))});
+	return root;
+}
+
+// ----------------------------------------------------------------------------
+// HELPER 3: Parallel math & Jolt Shape scaling pass
+// ----------------------------------------------------------------------------
+void PreparePrefabPhysics(const ModelPrefab& prefab, const JPH::Mat44& baseTransform,
+						  bool createPhysics, bool useBoxColliders,
+						  std::vector<PreparedPart>& outPrepared) {
+	outPrepared.resize(prefab.partCount);
+
+	TaskSystem::ParallelFor(prefab.partCount, 16, [&](uint32_t start, uint32_t end, uint32_t) {
+		for (uint32_t i = start; i < end; ++i) {
+			const auto& part = prefab.parts[i];
+			auto& prep = outPrepared[i];
+
+			JPH::Mat44 finalLocal = baseTransform * part.localTransform;
+
+			prep.scale =
+				JPH::Vec3(finalLocal.GetColumn3(0).Length(), finalLocal.GetColumn3(1).Length(),
+						  finalLocal.GetColumn3(2).Length());
+			prep.maxScale = std::max({prep.scale.GetX(), prep.scale.GetY(), prep.scale.GetZ()});
+			prep.translation = finalLocal.GetTranslation();
+
+			JPH::Vec3 c0 = prep.scale.GetX() > 1e-6f ? finalLocal.GetColumn3(0) / prep.scale.GetX()
+													 : JPH::Vec3::sAxisX();
+			JPH::Vec3 c1 = prep.scale.GetY() > 1e-6f ? finalLocal.GetColumn3(1) / prep.scale.GetY()
+													 : JPH::Vec3::sAxisY();
+			JPH::Vec3 c2 = prep.scale.GetZ() > 1e-6f ? finalLocal.GetColumn3(2) / prep.scale.GetZ()
+													 : JPH::Vec3::sAxisZ();
+
+			JPH::Mat44 rotMat(JPH::Vec4(c0, 0), JPH::Vec4(c1, 0), JPH::Vec4(c2, 0),
+							  JPH::Vec4(0, 0, 0, 1));
+			prep.rotation = rotMat.GetQuaternion().Normalized();
+
+			if (createPhysics) {
+				JPH::ShapeRefC rawShape = useBoxColliders ? part.boxCollider : part.meshCollider;
+				if (rawShape != nullptr) {
+					prep.shape = !prep.scale.IsClose(JPH::Vec3::sReplicate(1.0f), 1e-5f)
+									 ? new JPH::ScaledShape(rawShape, prep.scale)
+									 : rawShape;
+				}
+			}
+		}
+	});
+}
+
+// ----------------------------------------------------------------------------
+// HELPER 4: Single Renderable Part Spawner
+// ----------------------------------------------------------------------------
+Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContext& pc,
+						   const ModelPart& part, const PreparedPart& prep,
+						   const SpawnParams& params, Entity rootEntity, float scaleMult) {
+	BufferHandle skinnedVbo = BufferHandle::Invalid;
+	if (part.isSkinned && params.isAnimated) {
+		skinnedVbo = ctx.CreateSkinnedScratchBuffer(part.mesh.vertexCount * sizeof(Vertex));
+	}
+
+	Entity e = reg.Create();
+	Material activeMat = params.materialOverride.pipeline != PipelineHandle::Invalid
+							 ? params.materialOverride
+							 : part.defaultMaterial;
+
+	if (params.createPhysics) {
+		reg.Add(e, TransformComponent{.position = prep.translation,
+									  .rotation = prep.rotation,
+									  .scale = prep.scale});
+		reg.Add(e, MeshComponent{
+					   .mesh = part.mesh,
+					   .material = activeMat,
+					   .cullRadius = part.boundingRadius * scaleMult * prep.maxScale,
+					   .localTransform = JPH::Mat44::sIdentity(),
+					   .prevTransform = JPH::Mat44::sIdentity(),
+					   .worldTransform = JPH::Mat44::sIdentity(),
+					   .jointOffset = part.jointOffset,
+					   .isSkinned = part.isSkinned && params.isAnimated,
+					   .skinnedVertexBuffer = skinnedVbo,
+					   .morphOffset = part.morphOffset,
+					   .activeMorphCount = part.activeMorphCount,
+					   .morphWeights = {part.defaultMorphWeights[0], part.defaultMorphWeights[1],
+										part.defaultMorphWeights[2], part.defaultMorphWeights[3]},
+					   .gltfNode = params.isAnimated ? part.gltfNode : nullptr,
+					   .gltfSkin = params.isAnimated ? part.gltfSkin : nullptr});
+		reg.Add(e, NameComponent{.name = part.name});
+
+		if (prep.shape != nullptr) {
+			reg.Add(e, PhysicsComponent{Physics::CreateRigidBody(
+						   pc, prep.shape, JPH::RVec3(prep.translation), prep.rotation,
+						   params.isStaticPhysics ? JPH::EMotionType::Static
+												  : JPH::EMotionType::Dynamic,
+						   params.isStaticPhysics ? static_cast<JPH::ObjectLayer>(0)
+												  : static_cast<JPH::ObjectLayer>(1),
+						   0, params.physicsCategory, params.physicsMask)});
+			reg.Add(e, PhysicsStateComponent{.currPosition = prep.translation,
+											 .prevPosition = prep.translation,
+											 .currRotation = prep.rotation,
+											 .prevRotation = prep.rotation});
+		}
+	} else {
+		JPH::Vec3 nodePos = part.localTransform.GetTranslation();
+		JPH::Vec3 nodeScale(part.localTransform.GetColumn3(0).Length(),
+							part.localTransform.GetColumn3(1).Length(),
+							part.localTransform.GetColumn3(2).Length());
+
+		JPH::Vec3 nc0 = nodeScale.GetX() > 1e-6f
+							? part.localTransform.GetColumn3(0) / nodeScale.GetX()
+							: JPH::Vec3::sAxisX();
+		JPH::Vec3 nc1 = nodeScale.GetY() > 1e-6f
+							? part.localTransform.GetColumn3(1) / nodeScale.GetY()
+							: JPH::Vec3::sAxisY();
+		JPH::Vec3 nc2 = nodeScale.GetZ() > 1e-6f
+							? part.localTransform.GetColumn3(2) / nodeScale.GetZ()
+							: JPH::Vec3::sAxisZ();
+
+		JPH::Mat44 nRotMat(JPH::Vec4(nc0, 0), JPH::Vec4(nc1, 0), JPH::Vec4(nc2, 0),
+						   JPH::Vec4(0, 0, 0, 1));
+
+		reg.Add(e, TransformComponent{.position = nodePos,
+									  .rotation = nRotMat.GetQuaternion().Normalized(),
+									  .scale = nodeScale});
+		reg.Add(e, MeshComponent{
+					   .mesh = part.mesh,
+					   .material = activeMat,
+					   .cullRadius = part.boundingRadius * scaleMult,
+					   .localTransform = JPH::Mat44::sIdentity(),
+					   .prevTransform = JPH::Mat44::sIdentity(),
+					   .worldTransform = JPH::Mat44::sIdentity(),
+					   .jointOffset = part.jointOffset,
+					   .isSkinned = part.isSkinned && params.isAnimated,
+					   .skinnedVertexBuffer = skinnedVbo,
+					   .morphOffset = part.morphOffset,
+					   .activeMorphCount = part.activeMorphCount,
+					   .morphWeights = {part.defaultMorphWeights[0], part.defaultMorphWeights[1],
+										part.defaultMorphWeights[2], part.defaultMorphWeights[3]},
+					   .gltfNode = params.isAnimated ? part.gltfNode : nullptr,
+					   .gltfSkin = params.isAnimated ? part.gltfSkin : nullptr});
+		reg.Add(e, NameComponent{.name = part.name});
+		reg.Add(e, HierarchyComponent{.parent = rootEntity});
+	}
+	return e;
+}
+
+// ----------------------------------------------------------------------------
+// HELPER 5: Auto-Glow VPL Spawner for Emissive Meshes
+// ----------------------------------------------------------------------------
+Entity TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part,
+						   const JPH::Mat44& baseTransform, float scaleMult) {
+	const float* ef = part.defaultMaterial.emissiveFactor;
+	float lum = ef[0] * 0.2126f + ef[1] * 0.7152f + ef[2] * 0.0722f;
+	if (lum <= 0.01f) {
+		return NullEntity;
+	}
+
+	JPH::Vec3 localCenter((part.localMax[0] + part.localMin[0]) * 0.5f,
+						  (part.localMax[1] + part.localMin[1]) * 0.5f,
+						  (part.localMax[2] + part.localMin[2]) * 0.5f);
+
+	JPH::Mat44 worldMat = baseTransform * part.localTransform;
+	float partExtent = (part.localMax[0] - part.localMin[0]) +
+					   (part.localMax[1] - part.localMin[1]) +
+					   (part.localMax[2] - part.localMin[2]);
+
+	Entity glowEnt = reg.Create();
+	reg.Add(glowEnt, TransformComponent{.position = worldMat * localCenter,
+										.rotation = JPH::Quat::sIdentity(),
+										.scale = JPH::Vec3::sReplicate(1.0f)});
+	reg.Add(glowEnt, NameComponent{.name = String64("Glow_" + std::string(part.name.c_str()))});
+	reg.Add(glowEnt, LightingSystem::LightComponent{
+						 .type = 1, // Point Light
+						 .color = JPH::Vec3(ef[0], ef[1], ef[2]),
+						 .intensity = lum * 35.0f,
+						 .radius = std::max(partExtent * scaleMult * 0.15f, 0.05f),
+						 .direction = JPH::Vec3(0, -1, 0),
+						 .range = std::max(partExtent * scaleMult * 2.5f, 3.0f),
+						 .points = {},
+						 .twoSided = 0});
+	return glowEnt;
+}
+
+// ----------------------------------------------------------------------------
+// HELPER 6: KHR_lights_punctual glTF Authored Light Spawner
+// ----------------------------------------------------------------------------
+uint32_t InstantiateAuthoredLights(ECS::Registry& reg, const cgltf_data* rawData,
+								   const JPH::Mat44& baseTransform, Entity* outBuffer,
+								   uint32_t startIdx, uint32_t maxCount) {
+	if (rawData == nullptr) {
+		return 0;
+	}
+	uint32_t count = 0;
+
+	for (cgltf_size i = 0; i < rawData->nodes_count; ++i) {
+		const cgltf_node* node = &rawData->nodes[i];
+		if (node->light == nullptr) {
+			continue;
+		}
+
+		JPH::Mat44 worldMat = GetNodeWorldMat(node, baseTransform);
+		JPH::Vec3 dir = -worldMat.GetColumn3(2); // Local -Z emission axis
+		dir = (dir.LengthSq() > 1e-6f) ? dir.Normalized() : JPH::Vec3(0, -1, 0);
+
+		const cgltf_light* l = node->light;
+		uint32_t type = (l->type == cgltf_light_type_directional) ? 0
+						: (l->type == cgltf_light_type_spot)	  ? 2
+																  : 1;
+
+		Entity ent = reg.Create();
+		reg.Add(ent, TransformComponent{.position = worldMat.GetTranslation(),
+										.rotation = worldMat.GetQuaternion().Normalized(),
+										.scale = JPH::Vec3::sReplicate(1.0f)});
+		reg.Add(ent, NameComponent{.name = (node->name != nullptr) ? String64(node->name)
+																   : String64("GLB_Light")});
+		reg.Add(ent, LightingSystem::LightComponent{
+						 .type = type,
+						 .color = JPH::Vec3(l->color[0], l->color[1], l->color[2]),
+						 .intensity = l->intensity,
+						 .radius = 0.1f,
+						 .direction = dir,
+						 .range = (l->range > 0.0f) ? l->range : 100.0f,
+						 .points = {},
+						 .twoSided = 0});
+
+		if (outBuffer != nullptr && (startIdx + count) < maxCount) {
+			outBuffer[startIdx + count] = ent;
+		}
+		count++;
+	}
+	return count;
+}
+
+} // namespace
+
 uint32_t InstantiatePrefab(RenderContext& ctx, ECS::Registry& reg, PhysicsContext& pc,
 						   const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer,
 						   uint32_t maxCount) {
@@ -751,19 +1006,7 @@ uint32_t InstantiatePrefab(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 	uint32_t startIndex = 0;
 
 	if (!params.createPhysics) {
-		// Spawn a master parent structural entity that carries the base spawn transform
-		rootEntity = reg.Create();
-		reg.Add(rootEntity,
-				TransformComponent{
-					.position = {static_cast<float>(params.position.GetX()),
-								 static_cast<float>(params.position.GetY()),
-								 static_cast<float>(params.position.GetZ())},
-					.rotation = {params.rotation.GetX(), params.rotation.GetY(),
-								 params.rotation.GetZ(), params.rotation.GetW()},
-					.scale = {params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()}});
-		reg.Add(rootEntity,
-				NameComponent{.name = String64("Root_" + std::string(prefab.virtualPath.c_str()))});
-
+		rootEntity = SpawnPrefabRoot(reg, prefab.virtualPath, params);
 		if (outBuffer != nullptr && maxCount > 0) {
 			outBuffer[0] = rootEntity;
 			startIndex = 1;
@@ -771,172 +1014,36 @@ uint32_t InstantiatePrefab(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 		}
 	}
 
-	// ========================================================================
-	// PHASE 1: PARALLEL MATH & COLLIDER PREPARATION
-	// ========================================================================
-	std::vector<PreparedPart> preparedParts(prefab.partCount);
-	JPH::Mat44 baseTransform = Math::CreateTransform(
-		JPH::Vec3(params.position.GetX(), params.position.GetY(), params.position.GetZ()),
-		params.rotation, params.scale);
+	JPH::Mat44 baseTransform =
+		Math::CreateTransform(JPH::Vec3(params.position), params.rotation, params.scale);
 
-	TaskSystem::ParallelFor(prefab.partCount, 16, [&](uint32_t start, uint32_t end, uint32_t) {
-		for (uint32_t i = start; i < end; ++i) {
-			const auto& part = prefab.parts[i];
-			auto& prep = preparedParts[i];
+	std::vector<PreparedPart> preparedParts;
+	PreparePrefabPhysics(prefab, baseTransform, params.createPhysics, params.useBoxColliders,
+						 preparedParts);
 
-			JPH::Mat44 finalLocal = baseTransform * part.localTransform;
-
-			// Extract physical scale
-			prep.scale =
-				JPH::Vec3(finalLocal.GetColumn3(0).Length(), finalLocal.GetColumn3(1).Length(),
-						  finalLocal.GetColumn3(2).Length());
-			prep.maxScale = std::max({prep.scale.GetX(), prep.scale.GetY(), prep.scale.GetZ()});
-			prep.translation = finalLocal.GetTranslation();
-
-			// Orthogonalization & rotation extraction
-			JPH::Vec3 col0 = prep.scale.GetX() > 1e-6f
-								 ? finalLocal.GetColumn3(0) / prep.scale.GetX()
-								 : JPH::Vec3::sAxisX();
-			JPH::Vec3 col1 = prep.scale.GetY() > 1e-6f
-								 ? finalLocal.GetColumn3(1) / prep.scale.GetY()
-								 : JPH::Vec3::sAxisY();
-			JPH::Vec3 col2 = prep.scale.GetZ() > 1e-6f
-								 ? finalLocal.GetColumn3(2) / prep.scale.GetZ()
-								 : JPH::Vec3::sAxisZ();
-
-			JPH::Mat44 rotMat(JPH::Vec4(col0, 0.0f), JPH::Vec4(col1, 0.0f), JPH::Vec4(col2, 0.0f),
-							  JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f));
-			prep.rotation = rotMat.GetQuaternion().Normalized();
-
-			if (params.createPhysics) {
-				JPH::ShapeRefC rawShape =
-					params.useBoxColliders ? part.boxCollider : part.meshCollider;
-				if (rawShape != nullptr) {
-					if (!prep.scale.IsClose(JPH::Vec3::sReplicate(1.0f), 1e-5f)) {
-						prep.shape = new JPH::ScaledShape(rawShape, prep.scale);
-					} else {
-						prep.shape = rawShape;
-					}
-				}
-			}
-		}
-	});
-
-	// ========================================================================
-	// PHASE 2: SEQUENTIAL REGISTRATION
-	// ========================================================================
 	float scaleMult = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
 
 	for (uint32_t i = 0; i < prefab.partCount; ++i) {
-		const auto& part = prefab.parts[i];
-		const auto& prep = preparedParts[i];
-
-		// 1. Pre-allocate the dynamic skinned scratch buffer handle
-		BufferHandle skinnedVbo = BufferHandle::Invalid;
-		if (part.isSkinned && params.isAnimated) {
-			size_t bufferSize = part.mesh.vertexCount * sizeof(Vertex);
-			skinnedVbo = ctx.CreateSkinnedScratchBuffer(bufferSize);
-		}
-
-		Entity e = reg.Create();
-
-		if (params.createPhysics) {
-			reg.Add(e, TransformComponent{.position = prep.translation,
-										  .rotation = {prep.rotation.GetX(), prep.rotation.GetY(),
-													   prep.rotation.GetZ(), prep.rotation.GetW()},
-										  .scale = prep.scale});
-
-			reg.Add(e,
-					MeshComponent{
-						.mesh = part.mesh,
-						.material = params.materialOverride.pipeline != PipelineHandle::Invalid
-										? params.materialOverride
-										: part.defaultMaterial,
-						.cullRadius = part.boundingRadius * scaleMult * prep.maxScale,
-						.localTransform = JPH::Mat44::sIdentity(),
-						.prevTransform = JPH::Mat44::sIdentity(),
-						.worldTransform = JPH::Mat44::sIdentity(),
-						.jointOffset = part.jointOffset,
-						.isSkinned = part.isSkinned && params.isAnimated,
-						.skinnedVertexBuffer = skinnedVbo,
-						.morphOffset = part.morphOffset,
-						.activeMorphCount = part.activeMorphCount,
-						.morphWeights = {part.defaultMorphWeights[0], part.defaultMorphWeights[1],
-										 part.defaultMorphWeights[2], part.defaultMorphWeights[3]},
-						.gltfNode = params.isAnimated ? part.gltfNode : nullptr,
-						.gltfSkin = params.isAnimated ? part.gltfSkin : nullptr});
-			reg.Add(e, NameComponent{.name = part.name});
-
-			if (prep.shape != nullptr) {
-				reg.Add(e, PhysicsComponent{Physics::CreateRigidBody(
-							   pc, prep.shape, JPH::RVec3(prep.translation), prep.rotation,
-							   params.isStaticPhysics ? JPH::EMotionType::Static
-													  : JPH::EMotionType::Dynamic,
-							   params.isStaticPhysics ? static_cast<JPH::ObjectLayer>(0)
-													  : static_cast<JPH::ObjectLayer>(1),
-							   0, params.physicsCategory, params.physicsMask)});
-				reg.Add(e, PhysicsStateComponent{.currPosition = prep.translation,
-												 .prevPosition = prep.translation,
-												 .currRotation = prep.rotation,
-												 .prevRotation = prep.rotation});
-			}
-		} else {
-			// Hierarchy-based non-physics path
-			JPH::Vec3 nodePos = part.localTransform.GetTranslation();
-			JPH::Vec3 localNodeScale(part.localTransform.GetColumn3(0).Length(),
-									 part.localTransform.GetColumn3(1).Length(),
-									 part.localTransform.GetColumn3(2).Length());
-
-			JPH::Vec3 ncol0 = localNodeScale.GetX() > 1e-6f
-								  ? part.localTransform.GetColumn3(0) / localNodeScale.GetX()
-								  : JPH::Vec3::sAxisX();
-			JPH::Vec3 ncol1 = localNodeScale.GetY() > 1e-6f
-								  ? part.localTransform.GetColumn3(1) / localNodeScale.GetY()
-								  : JPH::Vec3::sAxisY();
-			JPH::Vec3 ncol2 = localNodeScale.GetZ() > 1e-6f
-								  ? part.localTransform.GetColumn3(2) / localNodeScale.GetZ()
-								  : JPH::Vec3::sAxisZ();
-
-			JPH::Mat44 nRotMat(JPH::Vec4(ncol0, 0.0f), JPH::Vec4(ncol1, 0.0f),
-							   JPH::Vec4(ncol2, 0.0f), JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f));
-			JPH::Quat nodeRot = nRotMat.GetQuaternion().Normalized();
-
-			reg.Add(e,
-					TransformComponent{.position = {nodePos.GetX(), nodePos.GetY(), nodePos.GetZ()},
-									   .rotation = {nodeRot.GetX(), nodeRot.GetY(), nodeRot.GetZ(),
-													nodeRot.GetW()},
-									   .scale = {localNodeScale.GetX(), localNodeScale.GetY(),
-												 localNodeScale.GetZ()}});
-
-			reg.Add(e,
-					MeshComponent{
-						.mesh = part.mesh,
-						.material = params.materialOverride.pipeline != PipelineHandle::Invalid
-										? params.materialOverride
-										: part.defaultMaterial,
-						.cullRadius = part.boundingRadius * scaleMult,
-						.localTransform = JPH::Mat44::sIdentity(),
-						.prevTransform = JPH::Mat44::sIdentity(),
-						.worldTransform = JPH::Mat44::sIdentity(),
-						.jointOffset = part.jointOffset,
-						.isSkinned = part.isSkinned && params.isAnimated,
-						.skinnedVertexBuffer = skinnedVbo,
-						.morphOffset = part.morphOffset,
-						.activeMorphCount = part.activeMorphCount,
-						.morphWeights = {part.defaultMorphWeights[0], part.defaultMorphWeights[1],
-										 part.defaultMorphWeights[2], part.defaultMorphWeights[3]},
-						.gltfNode = params.isAnimated ? (void*)part.gltfNode : nullptr,
-						.gltfSkin = params.isAnimated ? (void*)part.gltfSkin : nullptr});
-
-			reg.Add(e, NameComponent{.name = part.name});
-			reg.Add(e, HierarchyComponent{.parent = rootEntity});
-		}
-
+		Entity meshEnt = InstantiateMeshPart(ctx, reg, pc, prefab.parts[i], preparedParts[i],
+											 params, rootEntity, scaleMult);
 		if (outBuffer != nullptr && spawnedCount < maxCount) {
-			outBuffer[startIndex + (spawnedCount - startIndex)] = e;
+			outBuffer[startIndex + (spawnedCount - startIndex)] = meshEnt;
 		}
 		spawnedCount++;
+
+		// Auto-spawn companion Point Light for glowing meshes
+		Entity glowEnt = TrySpawnEmissiveVPL(reg, prefab.parts[i], baseTransform, scaleMult);
+		if (glowEnt != NullEntity) {
+			if (outBuffer != nullptr && spawnedCount < maxCount) {
+				outBuffer[spawnedCount] = glowEnt;
+			}
+			spawnedCount++;
+		}
 	}
+
+	// Instantiate authored KHR_lights_punctual glTF lights
+	spawnedCount += InstantiateAuthoredLights(reg, prefab.rawData, baseTransform, outBuffer,
+											  spawnedCount, maxCount);
 
 	return spawnedCount;
 }

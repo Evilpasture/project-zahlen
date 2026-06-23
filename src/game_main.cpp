@@ -493,7 +493,7 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 	uniforms.viewProj = vp;
 	uniforms.unjitteredViewProj = unjitteredVp;
 	uniforms.prevUnjitteredViewProj = prevUnjitteredVp;
-	uniforms.lightSpaceMatrix = lightSpaceBiased;
+	uniforms.lightSpaceMatrix = shadowProjView;
 	uniforms.invViewProj = unjitteredVp.Inversed();
 	std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
 	std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);

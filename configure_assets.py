@@ -2,12 +2,181 @@
 # configure_assets.py
 import os
 import sys
-import json
+import struct
 
 
 def escape_ninja(path):
     # Ninja uses '$ ' to escape spaces in target and dependency paths
     return path.replace(" ", "$ ")
+
+
+class BinaryMetadataReader:
+    """Helper to read the fast binary metadata stream directly in the build configure step."""
+
+    def __init__(self, filepath):
+        self.f = open(filepath, "rb")
+        magic = self.f.read(4)
+        if magic != b"ZMET":
+            raise ValueError("Invalid magic header")
+        self.version = struct.unpack("<I", self.f.read(4))[0]
+
+    def close(self):
+        self.f.close()
+
+    def read_string(self):
+        length_bytes = self.f.read(4)
+        if not length_bytes or len(length_bytes) < 4:
+            return ""
+        length = struct.unpack("<I", length_bytes)[0]
+        if length == 0:
+            return ""
+        return self.f.read(length).decode("utf-8")
+
+    def read_fmt(self, fmt):
+        size = struct.calcsize("<" + fmt)
+        data = self.f.read(size)
+        if len(data) < size:
+            raise EOFError(f"Expected {size} bytes, got {len(data)}")
+        return struct.unpack("<" + fmt, data)
+
+    def read_floats(self, count):
+        if count == 0:
+            return []
+        return list(self.read_fmt(f"{count}f"))
+
+
+def parse_metadata_bin(filepath):
+    """Unpacks metadata.bin directly to extract meshes and animations for Ninja rule generation."""
+    reader = BinaryMetadataReader(filepath)
+    try:
+        manifest = {
+            "materials": [],
+            "meshes": [],
+            "nodes": [],
+            "lights": [],
+            "skins": [],
+            "animations": [],
+        }
+
+        # 1. Level Info
+        scene_name = reader.read_string()
+        manifest["scene_info"] = {"name": scene_name}
+
+        # 2. Materials
+        mat_count = reader.read_fmt("I")[0]
+        for _ in range(mat_count):
+            _ = reader.read_string()  # id
+            _ = reader.read_floats(4)  # base_color
+            _ = reader.read_fmt("f")[0]  # metallic
+            _ = reader.read_fmt("f")[0]  # roughness
+            _ = reader.read_floats(3)  # emissive_factor
+            _ = reader.read_fmt("f")[0]  # emissive_strength
+            _ = reader.read_fmt("B")[0]  # double_sided
+            _ = reader.read_string()  # albedo map
+            _ = reader.read_string()  # normal map
+            _ = reader.read_string()  # metallic_roughness map
+            _ = reader.read_string()  # emissive map
+
+        # 3. Meshes
+        mesh_count = reader.read_fmt("I")[0]
+        for _ in range(mesh_count):
+            mesh_id = reader.read_string()
+            _ = reader.read_string()  # layout
+            bin_file = reader.read_string()
+            byte_offset, byte_length = reader.read_fmt("II")
+
+            # Primitives
+            prim_count = reader.read_fmt("I")[0]
+            for _ in range(prim_count):
+                _ = reader.read_string()  # material_id
+                _, _ = reader.read_fmt("II")  # vertex_offset, vertex_count
+
+            # Morph targets
+            morph_count = reader.read_fmt("I")[0]
+            for _ in range(morph_count):
+                _ = reader.read_string()  # target_name
+                _ = reader.read_string()  # target_bin
+                _, _ = reader.read_fmt("II")  # t_offset, t_length
+
+            manifest["meshes"].append(
+                {
+                    "id": mesh_id,
+                    "buffers": {
+                        "bin_file": bin_file,
+                        "vertex_buffer": {
+                            "byte_offset": byte_offset,
+                            "byte_length": byte_length,
+                        },
+                    },
+                }
+            )
+
+        # 4. Nodes
+        node_count = reader.read_fmt("I")[0]
+        for _ in range(node_count):
+            _ = reader.read_string()  # id
+            _ = reader.read_string()  # parent_id
+            _ = reader.read_fmt("B")[0]  # visible
+            _ = reader.read_floats(16)  # local transform
+            _ = reader.read_floats(16)  # world transform
+            _ = reader.read_string()  # mesh_id
+            _ = reader.read_string()  # skin_id
+            _ = reader.read_string()  # light_id
+
+        # 5. Lights
+        light_count = reader.read_fmt("I")[0]
+        for _ in range(light_count):
+            _ = reader.read_string()  # id
+            _ = reader.read_string()  # type
+            _ = reader.read_floats(3)  # color
+            _ = reader.read_fmt("f")[0]  # intensity
+
+        # 6. Skins
+        skin_count = reader.read_fmt("I")[0]
+        for _ in range(skin_count):
+            _ = reader.read_string()  # id
+            _ = reader.read_string()  # name
+
+            joint_count = reader.read_fmt("I")[0]
+            for _ in range(joint_count):
+                _ = reader.read_string()
+
+            parent_count = reader.read_fmt("I")[0]
+            for _ in range(parent_count):
+                _ = reader.read_string()
+
+            ibm_count = reader.read_fmt("I")[0]
+            _ = reader.read_floats(ibm_count)
+
+            rest_count = reader.read_fmt("I")[0]
+            _ = reader.read_floats(rest_count)
+
+        # 7. Animations
+        anim_count = reader.read_fmt("I")[0]
+        for _ in range(anim_count):
+            anim_id = reader.read_string()
+            _ = reader.read_string()  # name
+            _, _ = reader.read_fmt("fB")  # duration, loop
+
+            chan_count = reader.read_fmt("I")[0]
+            for _ in range(chan_count):
+                _ = reader.read_string()  # target_node_id
+                _ = reader.read_string()  # target_path
+                _ = reader.read_fmt("I")  # sampler_id
+
+            samplers = []
+            samp_count = reader.read_fmt("I")[0]
+            for _ in range(samp_count):
+                _ = reader.read_string()  # interpolation
+                _, _, _, _ = reader.read_fmt("IIII")  # input/output offsets/lengths
+                bin_file = reader.read_string()
+                samplers.append({"bin_file": bin_file})
+
+            manifest["animations"].append({"id": anim_id, "samplers": samplers})
+
+        return manifest
+    finally:
+        reader.close()
 
 
 def discover_blend_files(search_path):
@@ -103,7 +272,7 @@ rule zpak
         rel_path = os.path.relpath(abs_blend, abs_source)
         level = os.path.splitext(rel_path)[0].replace("\\", "/").replace("/", "_")
         meta_deps_list.append(
-            os.path.join(intermediate_root, level, "metadata.json").replace("\\", "/")
+            os.path.join(intermediate_root, level, "metadata.bin").replace("\\", "/")
         )
 
     meta_deps = " ".join([escape_ninja(m) for m in meta_deps_list])
@@ -116,15 +285,14 @@ rule zpak
         level = os.path.splitext(rel_path)[0].replace("\\", "/").replace("/", "_")
 
         level_dir = os.path.join(intermediate_root, level).replace("\\", "/")
-        meta_path = os.path.join(level_dir, "metadata.json").replace("\\", "/")
+        meta_path = os.path.join(level_dir, "metadata.bin").replace("\\", "/")
 
         # Direct Ninja dependency representing the Blender extraction rule
         ninja_content += f"\nbuild {escape_ninja(meta_path)}: blender_extract {escape_ninja(blend_path)} | {escaped_script}\n"
 
         if os.path.exists(meta_path):
             try:
-                with open(meta_path, "r") as f:
-                    manifest = json.load(f)
+                manifest = parse_metadata_bin(meta_path)
             except Exception as e:
                 print(f"[Warning] Failed to parse {meta_path}: {e}")
                 manifest = {}
@@ -237,7 +405,7 @@ rule zpak
     with open(manifest_target, "w") as f:
         f.write("\n".join(manifest_entries))
 
-    # 4. Final pack step: data/base.pak depends on the manifest, all compiled targets, and all metadata.json files
+    # 4. Final pack step: data/base.pak depends on the manifest, all compiled targets, and all metadata.bin files
     escaped_targets = [escape_ninja(t) for t in sorted(compiled_targets)]
     escaped_manifest = escape_ninja(manifest_target)
     escaped_meta_deps = [escape_ninja(m) for m in sorted(meta_deps_list)]

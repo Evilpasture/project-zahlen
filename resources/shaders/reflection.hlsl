@@ -168,7 +168,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
 		if (confidence > 0.0f) {
 			confidence *= saturate(dot(R, N) * 10.0f);
-			reflectionColor = texInput.SampleLevel(smp, hitUV, 0).rgb;
+			reflectionColor = texLighting.SampleLevel(smp, hitUV, 0).rgb;
 		}
 
 		float3 localReflection = lerp(specularIBL, reflectionColor * FssEss, confidence);

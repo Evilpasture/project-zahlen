@@ -32,7 +32,8 @@ void LightingSystem::Update(Engine& engine, [[maybe_unused]] float dt) {
 		gpuLight.intensity = light->intensity;
 		gpuLight.radius = light->radius;
 		gpuLight.twoSided = light->twoSided;
-
+		gpuLight.range = (light->range > 0.0f) ? light->range : 1000.0f;
+		std::memcpy(gpuLight.direction, &light->direction, sizeof(float) * 3);
 		std::memcpy(gpuLight.color, &light->color, sizeof(float) * 3);
 
 		if (trans != nullptr) {
