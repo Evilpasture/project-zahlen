@@ -138,8 +138,8 @@ PSOutput PSMain(VSOutput input) {
 	float3 ambient = albedo.rgb * irradiance * 0.25f;
 
 	// --- 3. NORMAL OFFSET BIAS & SHADOWS ---
-	float texelSizeWorld = 100.0 / 2048.0;
-	float normalBias = saturate(1.0 - dot(worldNormal, L_sun)) * 0.25;
+	float texelSizeWorld = 200.0 / 2048.0;
+	float normalBias = saturate(1.0 - dot(worldNormal, L_sun)) * 1.5;
 	float3 biasedWorldPos = input.worldPos + worldNormal * (normalBias * texelSizeWorld);
 
 	float4 shadowPos = mul(frame.lightSpaceMatrix, float4(biasedWorldPos, 1.0f));

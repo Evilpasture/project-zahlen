@@ -20,7 +20,7 @@ struct PushConstants {
 
 struct Light {
 	float3 position;
-	uint type; // 0=Dir, 1=Point, 2=Spot, 3=Area(Quad)
+	uint type; // 0=Dir, 1=Point, 2=Spot, 3=Area(LTC Quad)
 	float3 color;
 	float intensity;
 	float3 direction;
@@ -63,11 +63,11 @@ struct ClusterVolume {
 // --- G-Buffer & Lighting Inputs ---
 [[vk::binding(0, 0)]] Texture2D<float4> texInput;
 [[vk::binding(1, 0)]] SamplerState smp;
-[[vk::binding(2, 0)]] Texture2D<float> texDepth;
+[[vk::binding(2, 0)]] Texture2D<float> texDepth; // Single-channel depth float texture
 [[vk::binding(3, 0)]] Texture2D<float4> texNormalRoughness;
 [[vk::binding(4, 0)]] StructuredBuffer<Light> lights;
 [[vk::binding(5, 0)]] ConstantBuffer<FrameUniforms> frame;
-[[vk::binding(6, 0)]] Texture2D shadowMap;
+[[vk::binding(6, 0)]] Texture2D<float> shadowMap; // Single-channel depth float texture
 [[vk::binding(7, 0)]] SamplerComparisonState shadowSampler;
 [[vk::binding(8, 0)]] Texture2D ltc_mat;
 [[vk::binding(9, 0)]] Texture2D ltc_amp;
@@ -75,6 +75,7 @@ struct ClusterVolume {
 [[vk::binding(11, 0)]] StructuredBuffer<ClusterVolume> clusterGrid;
 [[vk::binding(12, 0)]] StructuredBuffer<uint> clusterIndexList;
 [[vk::binding(13, 0)]] Texture2D<float4> texAmbient; // Ambient input from Pass 1
+[[vk::binding(14, 0)]] SamplerState pointSampler;	 // Point Sampler for safe depth sampling
 
 struct VSOutput {
 	float4 pos : SV_Position;
@@ -89,7 +90,8 @@ VSOutput VSMain(uint vertexID : SV_VertexID) {
 }
 
 float4 PSMain(VSOutput input) : SV_Target0 {
-	float depth = texDepth.SampleLevel(smp, input.uv, 0).r;
+	// Sample G-buffer depth using pointSampler (safe on all hardware)
+	float depth = texDepth.SampleLevel(pointSampler, input.uv, 0);
 	if (depth >= 1.0f)
 		discard;
 
@@ -113,28 +115,25 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	float3 H_sun = normalize(V + L_sun + 1e-5f);
 	float NdotL_sun = saturate(dot(N, L_sun));
 
-	// --- NORMAL OFFSET BIAS CALCULATION ---
-	// Orthographic shadow map is 100m wide, resolution is 2048x2048
-	float texelSizeWorld = 100.0 / 2048.0;
-	// Scale bias by the angle of inclination to the light
-	float normalBias = saturate(1.0 - dot(N, L_sun)) * 0.25;
+	float texelSizeWorld = 200.0 / 2048.0;
+	float normalBias = saturate(1.0 - dot(N, L_sun)) * 1.5;
 	float3 biasedWorldPos = worldPos + N * (normalBias * texelSizeWorld);
 
-	// Transform the biased world position into light space
 	float4 shadowPos = mul(frame.lightSpaceMatrix, float4(biasedWorldPos, 1.0f));
 
-	// Manually apply the Vulkan texture coordinate bias
 	shadowPos.xy = shadowPos.xy * float2(0.5f, -0.5f) + 0.5f * shadowPos.w;
 
-	float shadow =
-		CalculateShadowPCSS(shadowPos, N, L_sun, input.pos.xy, shadowMap, shadowSampler, smp);
+	// Pass pointSampler to PCSS for correct blocker search filtering
+	float shadow = CalculateShadowPCSS(shadowPos, N, L_sun, input.pos.xy, shadowMap, shadowSampler,
+									   pointSampler);
 
 	float D = DistributionGGX(N, H_sun, roughness);
 	float G_term = GeometrySmith(N, V, L_sun, roughness);
 	float3 F = FresnelSchlick(saturate(dot(H_sun, V)), F0);
 
 	float3 spec = (D * G_term * F) / max(4.0f * NdotV * NdotL_sun, 0.001f);
-	float3 kD_sun = (1.0f - metallic);
+
+	float3 kD_sun = (float3(1.0f, 1.0f, 1.0f) - F) * (1.0f - metallic);
 
 	float sunIntensity = frame.lightDir.w;
 	float3 directSun =
@@ -142,8 +141,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
 	// --- 2. Punctual and Area Lights (Clustered) ---
 	float3 directPunctual = float3(0.0f, 0.0f, 0.0f);
-	float linearDepth = length(worldPos - pc.camPos.xyz);
-	uint sliceZ = uint(max(0.0f, log(linearDepth) * frame.zScale + frame.zBias));
+	float viewDepth = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
+	uint sliceZ = uint(max(0.0f, log(viewDepth) * frame.zScale + frame.zBias));
 	uint cIdx = min(uint(input.uv.x * 16.0f), 15u) + (min(uint(input.uv.y * 9.0f), 8u) * 16) +
 				(min(sliceZ, 23u) * 144);
 
@@ -172,7 +171,11 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 			float distToCenter = length(L_unnorm);
 			float3 L_p = L_unnorm / (distToCenter + 1e-5f);
 			float NdotL = max(dot(N, L_p), 0.0f);
-			float atten = 1.0f / (distToCenter * distToCenter + 0.01f);
+
+			float distRatio = distToCenter / max(light.range, 0.001f);
+			float window = saturate(1.0f - distRatio * distRatio);
+			window *= window;
+			float atten = window / (distToCenter * distToCenter + 1.0f);
 
 			if (NdotL > 0.0f) {
 				float3 H = normalize(V + L_p);

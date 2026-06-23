@@ -115,25 +115,24 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 		R_corr = lerp(R, boxR, boxFade);
 	}
 
-	float3 prefilteredColor = texEnvMap.SampleLevel(smp, R_corr, roughness * 5.0f).rgb;
-	float3 specularIBL = prefilteredColor * FssEss;
+	// Define the ambient exposure boost for the LDR skybox
+	float ambientExposure = 25.0f;
 
-	// --- DARK OUTFIT INDOOR SPECULAR REFLECTIONS ---
-	if (frame.probeMin.w > 0.0f) {
-		specularIBL = lerp(specularIBL, float3(0.0f, 0.0f, 0.0f), boxFade);
-	}
+	float3 prefilteredColor =
+		texEnvMap.SampleLevel(smp, R_corr, roughness * 5.0f).rgb * ambientExposure;
+	float3 specularIBL = prefilteredColor * FssEss;
 
 	// Extract AO from litColorRaw's alpha channel (written by lighting.hlsl)
 	float ao = litColorRaw.a;
 	float3 litColor = litColorRaw.rgb;
 
-	// Calculate Diffuse IBL (Irradiance)
-	float3 irradiance = EvaluateSH(N, frame.sh);
+	float3 irradiance = EvaluateSH(N, frame.sh) * ambientExposure;
 
 	// --- ACCURATE GLOBAL IRRADIANCE OCCLUSION ---
 	// Fade out the bright blue outdoor sky dome inside your indoor probe box
 	if (frame.probeMin.w > 0.0f && boxFade > 0.0f) {
-		float3 indoorAmbient = float3(0.04f, 0.04f, 0.04f); // Dim neutral indoor ambient
+		// FIX: Properly apply the 25.0f HDR exposure boost to the indoor ambient fallback
+		float3 indoorAmbient = float3(0.12f, 0.12f, 0.12f) * ambientExposure;
 		irradiance = lerp(irradiance, indoorAmbient, boxFade);
 	}
 

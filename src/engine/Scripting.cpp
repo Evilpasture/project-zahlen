@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <engine/system/LightingSystem.hpp>
 #include <functional>
 #include <physics/Physics.hpp>
 #include <physics/PhysicsWorld.hpp>
@@ -29,7 +30,6 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
-
 extern "C" {
 #include <lauxlib.h>
 #include <lua.h>
@@ -177,6 +177,18 @@ struct RegisterDynamicComponentArgs {
 	const char* name;
 	uint64_t size;
 	uint64_t alignment;
+};
+
+struct SpawnLightArgs {
+	float px, py, pz;	  // Position
+	float rx, ry, rz, rw; // Rotation (Quaternion) <-- Added
+	float r, g, b;		  // Color
+	float intensity;
+	float radius;
+	float dx, dy, dz; // Direction
+	float range;
+	uint32_t type; // 0=Dir, 1=Point, 2=Spot, 3=Area
+	uint32_t twoSided;
 };
 
 #pragma pack(pop)
@@ -481,6 +493,8 @@ static void RegisterFFICommands() {
 			ptr = &reg.Add(entity, ZHLN::DebugSettingsComponent{});
 		} else if (name == "AASettingsComponent") {
 			ptr = &reg.Add(entity, ZHLN::AASettingsComponent{});
+		} else if (name == "SunTagComponent") {
+			ptr = &reg.Add(entity, ZHLN::SunTagComponent{});
 		} else {
 			// 2. Fall back to dynamically registered types
 			uint32_t familyID = ZHLN::ECS::Registry::GetFamilyIDFromName(name);
@@ -706,6 +720,32 @@ static void RegisterFFICommands() {
 		std::println(stdout, "[InvShell Output]\n{}", a->msg);
 		std::fflush(stdout);
 		return 0;
+	};
+
+	s_CommandRegistry["SpawnLight"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		const auto* a = static_cast<const SpawnLightArgs*>(args);
+		auto& reg = engine->GetRegistry();
+
+		ZHLN::Entity e = reg.Create();
+
+		// Apply the passed rotation to the Transform
+		reg.Add(
+			e, ZHLN::TransformComponent{
+				   .position = {a->px, a->py, a->pz},
+				   .rotation = JPH::Quat(a->rx, a->ry, a->rz, a->rw), // <-- Custom rotation applied
+				   .scale = {1.0f, 1.0f, 1.0f}});
+
+		reg.Add(e, ZHLN::NameComponent{.name = ZHLN::String64("SpawnedLight")});
+		reg.Add(e, ZHLN::LightingSystem::LightComponent{.type = a->type,
+														.color = JPH::Vec3(a->r, a->g, a->b),
+														.intensity = a->intensity,
+														.radius = a->radius,
+														.direction = JPH::Vec3(a->dx, a->dy, a->dz),
+														.range = a->range,
+														.points = JPH::Mat44::sIdentity(),
+														.twoSided = a->twoSided});
+
+		return e.Pack();
 	};
 }
 

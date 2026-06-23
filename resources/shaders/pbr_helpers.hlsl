@@ -67,14 +67,15 @@ float SoftClamp(float x, float limit) {
 #define BLOCKER_SEARCH_SAMPLES 16
 #define PCF_SAMPLES 16
 
-float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture2D shadowMap,
+// FIX: Update shadowMap type to Texture2D<float> and remove vector .r swizzle
+float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture2D<float> shadowMap,
 				  SamplerState linearSampler) {
 	float blockerSum = 0.0f;
 	int numBlockers = 0;
 
 	[unroll] for (int i = 0; i < BLOCKER_SEARCH_SAMPLES; ++i) {
 		float2 offset = PoissonDisk[i] * searchRadius;
-		float shadowMapDepth = shadowMap.SampleLevel(linearSampler, uv + offset, 0).r;
+		float shadowMapDepth = shadowMap.SampleLevel(linearSampler, uv + offset, 0); // Removed .r
 		if (shadowMapDepth < zReceiver) {
 			blockerSum += shadowMapDepth;
 			numBlockers++;
@@ -86,8 +87,9 @@ float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture2D shad
 	return blockerSum / (float)numBlockers;
 }
 
+// FIX: Update shadowMap type to Texture2D<float> and remove SampleCmp .r swizzle
 float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 screenPos,
-						  Texture2D shadowMap, SamplerComparisonState shadowSampler,
+						  Texture2D<float> shadowMap, SamplerComparisonState shadowSampler,
 						  SamplerState linearSampler) {
 	float3 projCoords = shadowPos.xyz / shadowPos.w;
 
@@ -100,8 +102,9 @@ float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 screenPos
 	float zReceiver = projCoords.z;
 	float texelSize = 1.0 / 2048.0;
 
-	// Scale the depth bias to match the expanded 400m orthographic range
-	float bias = max(0.003 * (1.0 - dot(N, L)), 0.001);
+	// FIX: Reduced depth bias to 0.0003 (max ~12cm at 400m range) to prevent Peter Panning / Light
+	// Leaks
+	float bias = max(0.0003 * (1.0 - dot(N, L)), 0.0001);
 	zReceiver -= bias;
 
 	// 1. Blocker Search
@@ -114,8 +117,13 @@ float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 screenPos
 		return 1.0f;
 
 	// 2. Penumbra Estimation (Orthographic)
-	float penumbraWidth = (zReceiver - avgBlockerDepth) * 40.0f;		// Softness scaling factor
-	float filterRadius = clamp(penumbraWidth, 1.0f, 12.0f) * texelSize; // Contact Hardening
+	float worldDepthDiff = (zReceiver - avgBlockerDepth) * 400.0f;
+
+	// FIX: Increased softness multiplier from 0.15f to 0.5f for softer edges
+	float penumbraWidth = worldDepthDiff * 0.5f;
+
+	// FIX: Enforce a minimum 2.5 texel blur radius to hide the shadow map's pixel grid
+	float filterRadius = clamp(penumbraWidth, 2.5f, 16.0f) * texelSize;
 
 	// 3. Filtered PCF pass (Rotated Poisson Disk)
 	float shadow = 0.0f;
@@ -128,7 +136,8 @@ float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 screenPos
 							   PoissonDisk[i].x * s + PoissonDisk[i].y * c) *
 						filterRadius;
 
-		shadow += shadowMap.SampleCmpLevelZero(shadowSampler, projCoords.xy + offset, zReceiver).r;
+		shadow += shadowMap.SampleCmpLevelZero(shadowSampler, projCoords.xy + offset,
+											   zReceiver); // Removed .r
 	}
 
 	return shadow / (float)PCF_SAMPLES;

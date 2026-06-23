@@ -32,6 +32,18 @@ zh:on("engine.start", function()
     zh:spawn("Circus Lobby V9.glb", { physics = true, static = true })
     pomni_parts = zh:spawn("tadc_models/POMNI.glb", { animated = true })
 
+    local my_sun = zh:spawn_light({
+        type = 1,                              -- Point Light
+        position = zh.vec3(70.0, 150.0, 15.0), -- Positioned in the middle of the lobby
+        rotation = { 0.1, 0.9, 0.1, 0.4 },     -- Tilts the global sun's shadow maps
+        color = { 1.0, 0.95, 0.85 },           -- Warm Sunlight
+        intensity = 250.0,
+        radius = 1.0,
+        range = 30.0
+    })
+
+    game_ecs:add(my_sun, "SunTagComponent")
+
     -- Dynamically locate the floor mesh parts and add PBRComponent
     for ent, name_comp in zh.ecs:view("NameComponent") do
         local name_str = string.lower(ffi.string(name_comp.name))

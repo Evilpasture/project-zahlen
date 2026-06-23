@@ -201,6 +201,44 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 	DrawECSProfiler();
 
 	auto& reg = engine.GetRegistry();
+
+	// ============================================================================
+	// NEW: semi-transparent corner HUD overlay for coordinate tracking
+	// ============================================================================
+	ImGui::SetNextWindowBgAlpha(0.35f); // Semi-transparent background
+	ImGuiWindowFlags hudFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+								ImGuiWindowFlags_NoSavedSettings |
+								ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
+
+	// Position the HUD overlay near the top-left (just under the toolbar)
+	ImGui::SetNextWindowPos({10.0f, 50.0f}, ImGuiCond_FirstUseEver);
+	if (ImGui::Begin("Coordinates HUD", nullptr, hudFlags)) {
+
+		// 1. Fetch player entity position
+		Entity playerEnt = NullEntity;
+		for (Entity e : reg.GetEntitiesWith<MovementComponent>()) {
+			playerEnt = e;
+			break;
+		}
+
+		if (playerEnt != NullEntity) {
+			if (auto* trans = reg.Get<TransformComponent>(playerEnt)) {
+				ImGui::Text("Player Pos:  X: %.2f, Y: %.2f, Z: %.2f", trans->position.GetX(),
+							trans->position.GetY(), trans->position.GetZ());
+			}
+		} else {
+			ImGui::Text("Player Pos:  [Not Found]");
+		}
+
+		// 2. Fetch camera position & orientation
+		auto& cam = engine.GetCamera();
+		ImGui::Text("Camera Pos:  X: %.2f, Y: %.2f, Z: %.2f", cam.position.GetX(),
+					cam.position.GetY(), cam.position.GetZ());
+		ImGui::Text("Camera Rot:  Yaw: %.1f, Pitch: %.1f", cam.yaw, cam.pitch);
+	}
+	ImGui::End();
+	// ============================================================================
+
 	auto settingsEntities = reg.GetEntitiesWith<GlobalSettingsTagComponent>();
 	if (settingsEntities.empty()) {
 		return;
@@ -448,6 +486,23 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 	}
 
 	JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f};
+	float sunIntensity = 0.0f; // Default off if no sun entity exists
+
+	// Search the ECS for your custom Sun entity
+	auto sunEntities = reg.GetEntitiesWith<SunTagComponent>();
+	if (!sunEntities.empty()) {
+		Entity sunEnt = sunEntities[0];
+		if (auto* trans = reg.Get<TransformComponent>(sunEnt)) {
+			// 1. Extract the direction (local -Z forward vector) from its rotation
+			JPH::Mat44 worldMat = trans->GetMatrix();
+			sunDirection = worldMat.GetColumn3(2);
+
+			// 2. Extract the intensity from its standard LightComponent
+			if (auto* light = reg.Get<LightingSystem::LightComponent>(sunEnt)) {
+				sunIntensity = light->intensity;
+			}
+		}
+	}
 	sunDirection = sunDirection.Normalized();
 
 	// 1. Calculate camera forward direction
@@ -457,9 +512,8 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 					  JPH::Sin(yawRad) * JPH::Cos(pitchRad));
 	forward = forward.Normalized();
 
-	// 2. Offset shadow center 30 meters in front of the camera to capture distant background
-	float shadowFocusDistance = 30.0f;
-	JPH::Vec3 shadowCenter = cam.position + forward * shadowFocusDistance;
+	// 2. Keep the shadow map centered on the camera position to prevent orientation swings
+	JPH::Vec3 shadowCenter = cam.position;
 
 	// 3. Expand coverage to 200m (from -100 to 100) to cover the entire lobby scene
 	float shadowWidth = 200.0f;
@@ -497,7 +551,7 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 	uniforms.invViewProj = unjitteredVp.Inversed();
 	std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
 	std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);
-	uniforms.lightDir[3] = 0.0f;
+	uniforms.lightDir[3] = sunIntensity;
 	uniforms.lightCount =
 		static_cast<uint32_t>(reg.GetEntitiesWith<LightingSystem::LightComponent>().size());
 	uniforms.probeMin = probeMin;
@@ -740,7 +794,8 @@ bool InitializeGame(Engine& engine) {
 		PostProcessSettingsComponent, CameraSystem::CameraComponent, PlayerTagComponent,
 		MainCameraTagComponent, GlobalSettingsTagComponent, AASettingsComponent, TextComponent,
 		UISettingsComponent, AudioSourceComponent, PBRComponent, ItemBaseComponent, PickupComponent,
-		UsableComponent, ContainerComponent, TriggerComponent, DebugSettingsComponent>();
+		UsableComponent, ContainerComponent, TriggerComponent, DebugSettingsComponent,
+		SunTagComponent>();
 
 	auto groundShape =
 		Physics::GetOrCreateShape(pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);

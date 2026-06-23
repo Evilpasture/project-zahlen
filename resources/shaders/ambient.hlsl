@@ -75,7 +75,9 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	float3 N = UnpackNormalOctahedron(octNormal);
 
 	float3 worldPos = ReconstructWorldPos(input.uv, depth, pc.invViewProj);
-	float linearDepth = length(worldPos - pc.camPos.xyz);
+
+	// FIX: Use true view-space depth (z-depth) instead of Euclidean length to prevent edge warping
+	float viewDepth = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
 	float ao = 1.0f;
 	float3 indirectLight = float3(0.0f, 0.0f, 0.0f);
 
@@ -83,7 +85,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	float screenFade = edgeFactor.x * edgeFactor.y;
 
 	// --- DEFINE SMOOTH FADE BOUNDARY FROM 40m TO 50m ---
-	float fade = saturate((50.0f - linearDepth) / 10.0f);
+	float fade = saturate((50.0f - viewDepth) / 10.0f);
 
 	if (pc.giMode > 0 && fade > 0.0f) {
 		float occlusion = 0.0f;
@@ -96,7 +98,9 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 			float jitterOffset = GetRotationAngle(input.pos.xy, pc.camPos.w);
 			float aspect = float(dw) / max(float(dh), 1.0f);
 			float focalLength = abs(pc.viewProj[1][1]);
-			float uvRadius = min((pc.aoRadius * focalLength) / max(linearDepth, 0.1f), 0.2f);
+
+			// FIX: UV radius projection depends strictly on view-space depth (z-depth)
+			float uvRadius = min((pc.aoRadius * focalLength) / max(viewDepth, 0.1f), 0.2f);
 
 			for (int d = 0; d < 4; ++d) {
 				float sliceAngle = (float(d) / 4.0f) * 3.14159265f + angle;

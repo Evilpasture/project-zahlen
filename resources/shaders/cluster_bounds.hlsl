@@ -1,3 +1,4 @@
+// resources/shaders/cluster_bounds.hlsl
 #pragma pack_matrix(column_major)
 
 struct ClusterBounds {
@@ -29,8 +30,7 @@ struct FrameUniforms {
 };
 
 [[vk::binding(0, 0)]] RWStructuredBuffer<ClusterBounds> out_Bounds;
-[[vk::binding(4,
-			  0)]] ConstantBuffer<FrameUniforms> frame; // CHANGED FROM 5 TO 4 TO MATCH C++ LAYOUT
+[[vk::binding(4, 0)]] ConstantBuffer<FrameUniforms> frame;
 
 float4 Unproject(float4 coord) {
 	float4 res = mul(frame.invViewProj, coord);
@@ -43,10 +43,14 @@ float4 Unproject(float4 coord) {
 	uint cIdx = tid.x + (tid.y * 16) + (tid.z * 144);
 
 	float2 ts = float2(2.0f / 16.0f, 2.0f / 9.0f);
-	float4 ndc[4] = {float4(-1.0f + tid.x * ts.x, -1.0f + tid.y * ts.y, 0.0f, 1.0f),
-					 float4(-1.0f + (tid.x + 1) * ts.x, -1.0f + tid.y * ts.y, 0.0f, 1.0f),
-					 float4(-1.0f + (tid.x + 1) * ts.x, -1.0f + (tid.y + 1) * ts.y, 0.0f, 1.0f),
-					 float4(-1.0f + tid.x * ts.x, -1.0f + (tid.y + 1) * ts.y, 0.0f, 1.0f)};
+
+	// FIX: Invert the Y NDC coordinates to match the negative viewport height hack.
+	// tid.y = 0 (Top) now properly maps to +1.0f, aligning the cluster AABBs perfectly with the
+	// screen space.
+	float4 ndc[4] = {float4(-1.0f + tid.x * ts.x, 1.0f - tid.y * ts.y, 0.0f, 1.0f),
+					 float4(-1.0f + (tid.x + 1) * ts.x, 1.0f - tid.y * ts.y, 0.0f, 1.0f),
+					 float4(-1.0f + (tid.x + 1) * ts.x, 1.0f - (tid.y + 1) * ts.y, 0.0f, 1.0f),
+					 float4(-1.0f + tid.x * ts.x, 1.0f - (tid.y + 1) * ts.y, 0.0f, 1.0f)};
 
 	float3 pNear[4];
 	float3 pFar[4];

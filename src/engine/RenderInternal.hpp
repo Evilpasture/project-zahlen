@@ -234,7 +234,8 @@ using LightingLayout = Vk::DescriptorLayout<
 	Vk::SamplerSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>,		 // clampSampler
 	Vk::StorageBufferSlot<11, VK_SHADER_STAGE_FRAGMENT_BIT>, // clusterGrid
 	Vk::StorageBufferSlot<12, VK_SHADER_STAGE_FRAGMENT_BIT>, // clusterIndexList
-	Vk::SampledImageSlot<13, VK_SHADER_STAGE_FRAGMENT_BIT>	 // texAmbient (Pass 1 Output)
+	Vk::SampledImageSlot<13, VK_SHADER_STAGE_FRAGMENT_BIT>,	 // texAmbient (Pass 1 Output)
+	Vk::SamplerSlot<14, VK_SHADER_STAGE_FRAGMENT_BIT>		 // pointSampler
 	>;
 
 using ReflectionLayout =

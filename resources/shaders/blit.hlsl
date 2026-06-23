@@ -34,16 +34,23 @@ float3 ACESFilm(float3 x) {
 float4 PSMain(VSOutput input) : SV_Target0 {
 	float3 hdrColor = texInput.SampleLevel(smp, input.uv, 0).rgb;
 
-	// Tonemap HDR -> LDR
+	// 1. Exposure Control: Scale down the massive HDR values (Sun is 250.0)
+	hdrColor *= 0.015f; // Adjusted for better mid-tone balance
+
+	// 2. Tonemap HDR -> LDR (This specific ACES fit outputs LINEAR color)
 	float3 finalColor = ACESFilm(hdrColor);
 
-	// Apply Vignette overlay
+	// 3. Apply Vignette overlay
 	if (pc.vignetteIntensity > 0.0f) {
 		float2 uvDist = abs(input.uv - 0.5f) * pc.vignetteIntensity;
 		float vignette = saturate(1.0f - dot(uvDist, uvDist));
 		vignette = pow(vignette, max(pc.vignettePower, 0.01f));
 		finalColor *= vignette;
 	}
+
+	// FIX: Removed the pow(finalColor, 2.2f).
+	// The Vulkan SRGB swapchain expects Linear input and will apply the gamma curve natively in
+	// hardware.
 
 	return float4(finalColor, 1.0f);
 }

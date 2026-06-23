@@ -289,6 +289,22 @@ if not ok then
             uint8_t isStatic;
         } SpawnEntityArgs;
 
+        typedef struct SpawnLightArgs {
+            float px, py, pz;
+            float rx, ry, rz, rw;
+            float r, g, b;
+            float intensity;
+            float radius;
+            float dx, dy, dz;
+            float range;
+            uint32_t type;
+            uint32_t twoSided;
+        } SpawnLightArgs;
+
+        typedef struct SunTagComponent {
+            uint8_t dummy; // Standard 1-byte placeholder for empty structs
+        } SunTagComponent;
+
         #pragma pack(pop)
     ]]
 end

@@ -322,6 +322,28 @@ function Engine:spawn_entity(options)
     return tonumber(ffi.C.ZHLN_DispatchCommand(self._raw, "SpawnEntity", args))
 end
 
+function Engine:spawn_light(options)
+    options = options or {}
+    local pos = options.position or vec3.new(0, 0, 0)
+    local rot = options.rotation or { 0, 0, 0, 1 }
+    local col = options.color or { 1, 1, 1 }
+    local dir = options.direction or vec3.new(0, -1, 0)
+
+    local args = ffi.new("SpawnLightArgs", {
+        pos.x, pos.y, pos.z,
+        rot[1] or rot.x or 0, rot[2] or rot.y or 0, rot[3] or rot.z or 0, rot[4] or rot.w or 1,
+        col[1] or col.x or 1, col[2] or col.y or 1, col[3] or col.z or 1,
+        options.intensity or 100.0,
+        options.radius or 0.1,
+        dir.x, dir.y, dir.z,
+        options.range or 10.0,
+        options.type or 1,
+        options.twoSided and 1 or 0
+    })
+
+    return ffi.C.ZHLN_DispatchCommand(self._raw, "SpawnLight", args)
+end
+
 function Engine:create_material(color)
     color = color or { 1, 1, 1, 1 }
     local out_pipeline = ffi.new("uint64_t[1]")

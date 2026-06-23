@@ -19,7 +19,7 @@
 
 namespace ZHLN::AssetFactory {
 extern std::unordered_map<std::string, cgltf_data*> s_GLBCache;
-extern std::vector<cgltf_data*> s_AnimatedGLBs;
+extern JPH::Array<cgltf_data*> s_AnimatedGLBs;
 } // namespace ZHLN::AssetFactory
 
 namespace ZHLN::Tests {

@@ -341,8 +341,8 @@ struct MainPass {
 struct AAPass {
 	[[nodiscard]] auto
 	Execute(const FrameRecorder& recorder,
-			SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-						   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> in) const noexcept
+			SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+						   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> in) const noexcept
 		-> SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 						  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
 		VkCommandBuffer cmd = recorder.cmd;
@@ -351,14 +351,11 @@ struct AAPass {
 		Profiler::ScopedGpuProfile<Stages::AAPass, FrameProfiler> timer(cmd, recorder.frameIndex,
 																		ctx.gpuProfiler);
 
-		// Compile-time state translation
-		auto color_ro =
-			IssueBarrier<Vk::ColorAttachmentState, Vk::ShaderReadState>(cmd, in.sceneColor);
-		auto vel_ro = IssueBarrier<Vk::ColorAttachmentState, Vk::ShaderReadState>(cmd, in.velocity);
-		auto norm_ro =
-			IssueBarrier<Vk::ColorAttachmentState, Vk::ShaderReadState>(cmd, in.normRough);
-		auto depth_ro = IssueBarrier<Vk::DepthAttachmentState, Vk::ShaderReadState>(
-			cmd, in.depth, VK_IMAGE_ASPECT_DEPTH_BIT);
+		// Resources are already transitioned to ShaderReadState by preceding passes
+		auto color_ro = in.sceneColor;
+		auto vel_ro = in.velocity;
+		auto norm_ro = in.normRough;
+		auto depth_ro = in.depth;
 
 		if (ctx.aaState.mode == AAMode::TAA && ctx.taaPass.pipeline.Valid()) {
 			auto accumCurr_ro =
@@ -595,7 +592,8 @@ struct DeferredLightingPass {
 			Vk::BufferWrite{.buffer = ctx.clusterGridBuffers[recorder.frameIndex].Handle()},
 			Vk::BufferWrite{.buffer = ctx.lightIndexListBuffers[recorder.frameIndex].Handle()},
 			Vk::ImageWrite{.view = ambient_ro.view,
-						   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
+						   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+			Vk::SamplerWrite{.sampler = ctx.pointSampler.Get()});
 
 		Vk::DynamicPass(ctx.lightingTarget.extent)
 			.AddColor(light_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
@@ -1067,7 +1065,10 @@ RenderResult RenderContext::EndFrame() noexcept {
 				.alphaCutoff = cmdData.alphaCutoff,
 				.alphaMode = cmdData.alphaMode,
 				.jointOffset = cmdData.jointOffset,
-				.isSkinned = 0u,
+				.isSkinned = (cmdData.skinnedVertexBuffer == BufferHandle::Invalid &&
+							  (cmdData.flags & DrawFlags::Skinned) != DrawFlags::None)
+								 ? 1u
+								 : 0u,
 				.morphOffset = cmdData.morphOffset,
 				.activeMorphCount = cmdData.activeMorphCount,
 				._pad = {},
@@ -1220,14 +1221,13 @@ RenderResult RenderContext::EndFrame() noexcept {
 		VkCommandBuffer c = cmd;
 		uint32_t fIdx = _impl->frame_index;
 
-		if (_impl->resized) {
-			vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_COMPUTE,
-							  _impl->clusterBoundsPass.pipeline.Get());
-			vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_COMPUTE,
-									_impl->clusterBoundsPass.pipelineLayout.Get(), 0, 1,
-									&_impl->clusterCullingSets[fIdx], 0, nullptr);
-			vkCmdDispatch(c, 1, 1, 24);
-		}
+		// Recalculate cluster bounds every frame to match the moving camera frustum
+		vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_COMPUTE,
+						  _impl->clusterBoundsPass.pipeline.Get());
+		vkCmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_COMPUTE,
+								_impl->clusterBoundsPass.pipelineLayout.Get(), 0, 1,
+								&_impl->clusterCullingSets[fIdx], 0, nullptr);
+		vkCmdDispatch(c, 1, 1, 24);
 
 		vkCmdFillBuffer(c, _impl->globalCounterBuffers[fIdx].Handle(), 0, sizeof(uint32_t), 0);
 
@@ -1265,10 +1265,41 @@ RenderResult RenderContext::EndFrame() noexcept {
 			.depth = AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
 				_impl->presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT)};
 
+	// 1. Render the G-Buffer (Geometry Pass)
 	auto stateAfterMain = Passes::MainPass{}.Execute(recorder, initialState);
-	auto stateAfterAA = Passes::AAPass{}.Execute(recorder, stateAfterMain);
-	auto stateAfterPP = Passes::DeferredLightingPass{}.Execute(recorder, stateAfterAA);
-	Passes::BlitPass{}.Execute(recorder, stateAfterPP);
+
+	// 2. Transition G-Buffer outputs to Shader Read layouts before computing lighting
+	auto color_ro =
+		IssueBarrier<Vk::ColorAttachmentState, Vk::ShaderReadState>(cmd, stateAfterMain.sceneColor);
+	auto vel_ro =
+		IssueBarrier<Vk::ColorAttachmentState, Vk::ShaderReadState>(cmd, stateAfterMain.velocity);
+	auto norm_ro =
+		IssueBarrier<Vk::ColorAttachmentState, Vk::ShaderReadState>(cmd, stateAfterMain.normRough);
+	auto depth_ro = IssueBarrier<Vk::DepthAttachmentState, Vk::ShaderReadState>(
+		cmd, stateAfterMain.depth, VK_IMAGE_ASPECT_DEPTH_BIT);
+
+	SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>
+		stateAfterMain_ro = {
+			.sceneColor = color_ro, .velocity = vel_ro, .normRough = norm_ro, .depth = depth_ro};
+
+	// 3. Compute Deferred Lighting (Ambient, Direct, Clustered, and Reflections) on the G-Buffer
+	auto stateAfterPP = Passes::DeferredLightingPass{}.Execute(recorder, stateAfterMain_ro);
+
+	// 4. Assemble the TAA inputs (the lit color target + unlit G-buffer velocity & depth)
+	SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>
+		resourcesForAA = {.sceneColor =
+							  stateAfterPP, // The Lit Color output from DeferredLightingPass
+						  .velocity = stateAfterMain_ro.velocity,
+						  .normRough = stateAfterMain_ro.normRough,
+						  .depth = stateAfterMain_ro.depth};
+
+	// 5. Run TAA to resolve all high-frequency dithering and geometry aliasing
+	auto stateAfterAA = Passes::AAPass{}.Execute(recorder, resourcesForAA);
+
+	// 6. Blit and present the clean, smoothed image
+	Passes::BlitPass{}.Execute(recorder, stateAfterAA.sceneColor);
 
 	ZHLN_EndCommandBuffer(cmd);
 	// SubmitFrame now returns ZHLN_FrameResult

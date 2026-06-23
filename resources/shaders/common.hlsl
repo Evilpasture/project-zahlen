@@ -129,7 +129,7 @@ float2 PackNormalOctahedron(float3 N) {
 [[vk::binding(0, 0)]] Texture2D globalTextures[];
 [[vk::binding(6, 0)]] StructuredBuffer<InstanceData> g_instances;
 [[vk::binding(1, 0)]] SamplerState defaultSampler;
-[[vk::binding(2, 0)]] Texture2D shadowMap;
+[[vk::binding(2, 0)]] Texture2D<float> shadowMap;
 [[vk::binding(3, 0)]] SamplerComparisonState shadowSampler;
 [[vk::binding(4, 0)]] ConstantBuffer<FrameUniforms> frame;
 [[vk::binding(5, 0)]] StructuredBuffer<Light> lights;
