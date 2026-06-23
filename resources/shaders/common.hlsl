@@ -1,5 +1,6 @@
 // resources/shaders/common.hlsl
 #pragma pack_matrix(column_major)
+#include "pbr_helpers.hlsl"
 
 struct Light {
 	float3 position;
@@ -25,7 +26,6 @@ struct FrameUniforms {
 	float4 lightDir;
 	uint lightCount;
 
-	// FIX: Decompose float3 into scalars to prevent 16-byte alignment gaps
 	float pad0;
 	float pad1;
 	float pad2;
@@ -117,20 +117,10 @@ uint4 UnpackJoints(uint2 packed) {
 	return uint4(packed.x & 0xFFFF, packed.x >> 16, packed.y & 0xFFFF, packed.y >> 16);
 }
 
-// --- Octahedral Normal Packing ---
 float2 PackNormalOctahedron(float3 N) {
 	N /= (abs(N.x) + abs(N.y) + abs(N.z));
 	float2 s = float2(N.x >= 0.0 ? 1.0 : -1.0, N.y >= 0.0 ? 1.0 : -1.0);
 	return N.z >= 0.0 ? N.xy : (1.0 - abs(N.yx)) * s;
-}
-
-float3 UnpackNormalOctahedron(float2 oct) {
-	float3 N = float3(oct, 1.0 - abs(oct.x) - abs(oct.y));
-	float2 s = float2(N.x >= 0.0 ? 1.0 : -1.0, N.y >= 0.0 ? 1.0 : -1.0);
-	if (N.z < 0.0) {
-		N.xy = (1.0 - abs(N.yx)) * s;
-	}
-	return normalize(N);
 }
 
 #ifndef SKIP_BINDINGS
@@ -177,15 +167,6 @@ struct PSOutput {
 	float2 velocity : SV_Target1;
 	float4 normalRoughness : SV_Target2;
 };
-
-float3 EvaluateSH(float3 N, float4 sh[9]) {
-	float3 result =
-		sh[0].xyz * 0.282095f + sh[1].xyz * -0.488603f * N.y + sh[2].xyz * 0.488603f * N.z +
-		sh[3].xyz * -0.488603f * N.x + sh[4].xyz * 1.092548f * N.x * N.y +
-		sh[5].xyz * -1.092548f * N.y * N.z + sh[6].xyz * 0.315392f * (3.0f * N.z * N.z - 1.0f) +
-		sh[7].xyz * -1.092548f * N.x * N.z + sh[8].xyz * 0.546274f * (N.x * N.x - N.y * N.y);
-	return max(result, float3(0.0f, 0.0f, 0.0f));
-}
 
 // --- SKELETAL SKINNING ---
 float4 SkinPositionPrev(float4 position, uint4 joints, float4 weights, uint jointOffset) {
@@ -253,31 +234,10 @@ float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint jointO
 	return dir;
 }
 
-// --- SHADOW CALCULATOR ---
-float CalculateShadow(float4 shadowPos, float3 N, float3 L) {
-	float3 projCoords = shadowPos.xyz / shadowPos.w;
-
-	if (projCoords.x < 0.0 || projCoords.x > 1.0 || projCoords.y < 0.0 || projCoords.y > 1.0 ||
-		projCoords.z < 0.0 || projCoords.z > 1.0) {
-		return 0.0; // <-- Change from 1.0 to 0.0 to prevent sun leakage indoors
-	}
-
-	float bias = max(0.015 * (1.0 - dot(N, L)), 0.005);
-	return shadowMap.SampleCmpLevelZero(shadowSampler, projCoords.xy, projCoords.z - bias).r;
-}
-
-// Specular Fresnel roughness helper
-float3 FresnelSchlickRoughness(float cosTheta, float3 F0, float roughness) {
-	return F0 + (max(float3(1.0 - roughness, 1.0 - roughness, 1.0 - roughness), F0) - F0) *
-					pow(saturate(1.0 - cosTheta), 5.0);
-}
-
 float3 GetMorphDisplacement(uint vertexId, uint vertexCount, uint morphOffset,
 							uint activeMorphCount, float4 weights) {
 	float3 displacement = float3(0, 0, 0);
 
-	// --- FIXED: Loop boundary is now a constant (4), allowing compile-time unrolling,
-	// with a dynamic exit check to prevent out-of-bounds reads.
 	[unroll] for (uint i = 0; i < 4; ++i) {
 		if (i >= activeMorphCount) {
 			break;
@@ -285,7 +245,6 @@ float3 GetMorphDisplacement(uint vertexId, uint vertexCount, uint morphOffset,
 
 		uint deltaIndex = morphOffset + (i * vertexCount) + vertexId;
 
-		// Safe, compile-time branch mapping to bypass register indexing bugs
 		float weight = 0.0f;
 		if (i == 0)
 			weight = weights.x;
@@ -300,123 +259,5 @@ float3 GetMorphDisplacement(uint vertexId, uint vertexCount, uint morphOffset,
 	}
 
 	return displacement;
-}
-
-// --- LTC CORE MATH ---
-float3 IntegrateEdgeVector(float3 v1, float3 v2) {
-	float x = dot(v1, v2);
-	float y = abs(x);
-	float a = 0.8543985 + (0.4965155 + 0.0145206 * y) * y;
-	float b = 3.4175940 + (4.1616724 + y) * y;
-	float v = a / b;
-	float theta_sintheta = (x > 0.0) ? v : 0.5 * rsqrt(max(1.0 - x * x, 1e-7)) - v;
-	return cross(v1, v2) * theta_sintheta;
-}
-
-float3 LTC_Evaluate(float3 N, float3 V, float3 P, float3x3 Minv, float4 points[4], bool twoSided) {
-	float3 T1, T2;
-	T1 = normalize(V - N * dot(V, N));
-	T2 = cross(N, T1);
-	float3x3 R = float3x3(T1, T2, N);
-
-	float3 L[5];
-	L[0] = mul(Minv, mul(R, points[0].xyz - P));
-	L[1] = mul(Minv, mul(R, points[1].xyz - P));
-	L[2] = mul(Minv, mul(R, points[2].xyz - P));
-	L[3] = mul(Minv, mul(R, points[3].xyz - P));
-
-	int n = 0;
-	float3 clipped[5];
-
-	[unroll] for (int i = 0; i < 4; ++i) {
-		float3 v1 = L[i];
-		float3 v2 = L[(i + 1) % 4];
-
-		if (v1.z > 0.0) {
-			clipped[n++] = v1;
-		}
-		if ((v1.z > 0.0 && v2.z < 0.0) || (v1.z < 0.0 && v2.z > 0.0)) {
-			float t = v1.z / (v1.z - v2.z);
-			clipped[n++] = lerp(v1, v2, t);
-		}
-	}
-
-	if (n < 3)
-		return float3(0, 0, 0);
-	[unroll] for (int j = 0; j < n; ++j) {
-		clipped[j] = normalize(clipped[j]);
-	}
-	float3 sum = float3(0, 0, 0);
-	sum += IntegrateEdgeVector(clipped[0], clipped[1]);
-	sum += IntegrateEdgeVector(clipped[1], clipped[2]);
-	if (n >= 4)
-		sum += IntegrateEdgeVector(clipped[2], clipped[3]);
-	if (n == 5)
-		sum += IntegrateEdgeVector(clipped[3], clipped[4]);
-
-	sum = twoSided ? abs(sum) : max(float3(0, 0, 0), sum);
-	return sum;
-}
-
-// --- Kulla-Conty Energy Compensation Helpers ---
-float GetDirectionalAlbedo(float NoX, float roughness) {
-	float2 envBRDF = brdfLUT.SampleLevel(clampSampler, float2(saturate(NoX), roughness), 0.0f).rg;
-	return envBRDF.x + envBRDF.y;
-}
-
-float GetAverageAlbedo(float roughness) {
-	return 1.0f - roughness * (0.334f - roughness * 0.125f);
-}
-
-float3 EvaluateKullaContyDirect(float NoV, float NoL, float roughness, float3 F0, float3 Favg) {
-	float Ev = GetDirectionalAlbedo(NoV, roughness);
-	float El = GetDirectionalAlbedo(NoL, roughness);
-	float Eavg = GetAverageAlbedo(roughness);
-
-	float Ems_v = 1.0f - Ev;
-	float Ems_l = 1.0f - El;
-	float Ems_avg = 1.0f - Eavg;
-
-	float3 Fms = (Favg * Favg * Ems_avg) / (1.0f - Favg * Ems_avg);
-
-	float3 f_add = (Ems_v * Ems_l * Fms) / (3.14159265f * Ems_avg * Ems_avg);
-
-	return f_add;
-}
-
-float3 BoxParallaxCorrection(float3 posWS, float3 R, float3 boxMin, float3 boxMax,
-							 float3 probePos) {
-	float3 eps = float3(0.1f, 0.1f, 0.1f);
-	float3 bMin = boxMin - eps;
-	float3 bMax = boxMax + eps;
-
-	float3 invR = 1.0f / max(abs(R), 0.00001f) * sign(R);
-	float3 t1 = (bMax - posWS) * invR;
-	float3 t2 = (bMin - posWS) * invR;
-	float3 tMax = max(t1, t2);
-	float distance = min(min(tMax.x, tMax.y), tMax.z);
-	float3 intersectPositionWS = posWS + R * distance;
-	return normalize(intersectPositionWS - probePos);
-}
-
-// --- SUBSURFACE SCATTERING & TRANSLUCENCY HELPER ---
-float3 CalculateTranslucency(float4 shadowPos, float3 N, float3 V, float3 L, float3 lightColor,
-							 float distortion, float power, float scale) {
-	float3 projCoords = shadowPos.xyz / shadowPos.w;
-	if (projCoords.x < 0.0f || projCoords.x > 1.0f || projCoords.y < 0.0f || projCoords.y > 1.0f ||
-		projCoords.z < 0.0f || projCoords.z > 1.0f) {
-		return float3(0.0f, 0.0f, 0.0f);
-	}
-
-	float shadowDepth = shadowMap.SampleLevel(defaultSampler, projCoords.xy, 0).r;
-
-	float thickness = max(projCoords.z - shadowDepth, 0.0f);
-
-	float thicknessScale = exp(-thickness * 45.0f);
-
-	float3 H = normalize(L + N * distortion);
-	float dotVH = saturate(dot(V, -H));
-
-	return lightColor * pow(dotVH, power) * scale * thicknessScale;
 }
 #endif // SKIP_BINDINGS

@@ -13,7 +13,24 @@ def escape_ninja(path):
 def discover_blend_files(search_path):
     """Recursively scans directories to discover valid Blend files."""
     blend_files = []
-    for root, _, files in os.walk(search_path):
+    for root, dirs, files in os.walk(search_path):
+        # Prevent os.walk from scanning build, system, and external library directories
+        dirs[:] = [
+            d
+            for d in dirs
+            if d.lower()
+            not in [
+                "build",
+                "cmake",
+                ".git",
+                ".github",
+                "bin",
+                "extern",
+                "third_party",
+                "build_assets",
+            ]
+        ]
+
         norm_root = root.replace("\\", "/").lower()
         if any(
             p in norm_root
@@ -74,8 +91,8 @@ rule zpak
     glb_targets = []
     manifest_entries = []
 
-    # Find master level blend sources
-    blend_files = discover_blend_files(source_dir)
+    # Find master level blend sources and sort them for binary determinism
+    blend_files = sorted(discover_blend_files(source_dir))
 
     # Pre-calculate namespaced metadata dependencies using absolute paths
     # This ensures both the build graph and generator rules share identical namespaced targets
@@ -126,8 +143,8 @@ rule zpak
                 output_zmesh = f"build_assets/{level}/{mesh_id}.zmesh"
                 virtual_path = f"{mesh_id}.zmesh"
 
-                # Fix: Added meta_path dependency to ensure blender_extract finishes before zmesh executes
-                ninja_content += f"\nbuild {escape_ninja(output_zmesh)}: zmesh {escape_ninja(bin_file)} | {escape_ninja(meta_path)} {escaped_zcook}\n"
+                # Changed zcook dependency to order-only (||) so recompiling engine doesn't rebuild assets
+                ninja_content += f"\nbuild {escape_ninja(output_zmesh)}: zmesh {escape_ninja(bin_file)} | {escape_ninja(meta_path)} || {escaped_zcook}\n"
                 ninja_content += f"  meta = {meta_path}\n"
                 ninja_content += f"  id = {mesh_id}\n"
                 compiled_targets.append(output_zmesh)
@@ -151,8 +168,8 @@ rule zpak
                 output_zanim = f"build_assets/{level}/{anim_id}.zanim"
                 virtual_path = f"{anim_id}.zanim"
 
-                # Fix: Added meta_path dependency to ensure blender_extract finishes before zanim executes
-                ninja_content += f"\nbuild {escape_ninja(output_zanim)}: zanim {escape_ninja(bin_file)} | {escape_ninja(meta_path)} {escaped_zcook}\n"
+                # Changed zcook dependency to order-only (||) so recompiling engine doesn't rebuild assets
+                ninja_content += f"\nbuild {escape_ninja(output_zanim)}: zanim {escape_ninja(bin_file)} | {escape_ninja(meta_path)} || {escaped_zcook}\n"
                 ninja_content += f"  meta = {meta_path}\n"
                 ninja_content += f"  id = {anim_id}\n"
                 compiled_targets.append(output_zanim)
@@ -161,13 +178,14 @@ rule zpak
             # Map Intermediate Textures
             tex_dir = os.path.join(level_dir, "textures")
             if os.path.exists(tex_dir):
-                for tex in os.listdir(tex_dir):
+                # Sort directory listing to keep target generation order stable
+                for tex in sorted(os.listdir(tex_dir)):
                     in_path = os.path.join(tex_dir, tex).replace("\\", "/")
                     out_path = f"build_assets/{level}/lvl_{tex}.ztex"
                     virtual_path = f"textures/{tex}"
 
-                    # Fix: Added meta_path dependency so textures are written before ztex compiles them
-                    ninja_content += f"build {escape_ninja(out_path)}: ztex {escape_ninja(in_path)} | {escape_ninja(meta_path)} {escaped_zcook}\n"
+                    # Changed zcook dependency to order-only (||) so recompiling engine doesn't rebuild assets
+                    ninja_content += f"build {escape_ninja(out_path)}: ztex {escape_ninja(in_path)} | {escape_ninja(meta_path)} || {escaped_zcook}\n"
                     compiled_targets.append(out_path)
                     manifest_entries.append(f"{virtual_path}={out_path}")
 
@@ -182,26 +200,31 @@ rule zpak
                     )
 
             bin_dependencies = list(set(bin_dependencies))
-            escaped_deps = " ".join([escape_ninja(d) for d in bin_dependencies])
+            escaped_deps = " ".join([escape_ninja(d) for d in sorted(bin_dependencies)])
 
-            ninja_content += f"\nbuild {escape_ninja(output_glb)}: zglb {escape_ninja(meta_path)} | {escaped_deps} {escaped_zcook}\n"
+            # Changed zcook dependency to order-only (||) so recompiling engine doesn't rebuild assets
+            ninja_content += f"\nbuild {escape_ninja(output_glb)}: zglb {escape_ninja(meta_path)} | {escaped_deps} || {escaped_zcook}\n"
             glb_targets.append(output_glb)
 
     # 2. Process Raw Loose Textures
     assets_root = os.path.join(source_dir, "resources", "assets")
     if os.path.exists(assets_root):
-        for root, _, files in os.walk(assets_root):
+        raw_textures = []
+        for root, dirs, files in os.walk(assets_root):
+            dirs[:] = [d for d in dirs if d.lower() not in ["build", "cmake", ".git"]]
             for file in files:
                 if file.lower().endswith((".png", ".jpg", ".jpeg", ".tga")):
-                    input_path = os.path.join(root, file).replace("\\", "/")
-                    rel_path = os.path.relpath(input_path, assets_root).replace(
-                        "\\", "/"
-                    )
-                    output_ztex = f"build_assets/raw/{rel_path}.ztex"
+                    raw_textures.append(os.path.join(root, file).replace("\\", "/"))
 
-                    ninja_content += f"build {escape_ninja(output_ztex)}: ztex {escape_ninja(input_path)} | {escaped_zcook}\n"
-                    compiled_targets.append(output_ztex)
-                    manifest_entries.append(f"{rel_path}={output_ztex}")
+        # Sort paths to keep the rule block output order consistent
+        for input_path in sorted(raw_textures):
+            rel_path = os.path.relpath(input_path, assets_root).replace("\\", "/")
+            output_ztex = f"build_assets/raw/{rel_path}.ztex"
+
+            # Changed zcook dependency to order-only (||) so recompiling engine doesn't rebuild assets
+            ninja_content += f"build {escape_ninja(output_ztex)}: ztex {escape_ninja(input_path)} || {escaped_zcook}\n"
+            compiled_targets.append(output_ztex)
+            manifest_entries.append(f"{rel_path}={output_ztex}")
 
     # 3. Write Manifest
     build_dir = os.path.dirname(output_file)
@@ -209,18 +232,21 @@ rule zpak
     os.makedirs(manifest_dir, exist_ok=True)
     manifest_target = os.path.join(manifest_dir, "manifest.txt").replace("\\", "/")
 
+    # Ensure manifest entries are sorted alphabetically
+    manifest_entries.sort()
     with open(manifest_target, "w") as f:
         f.write("\n".join(manifest_entries))
 
     # 4. Final pack step: data/base.pak depends on the manifest, all compiled targets, and all metadata.json files
-    escaped_targets = [escape_ninja(t) for t in compiled_targets]
+    escaped_targets = [escape_ninja(t) for t in sorted(compiled_targets)]
     escaped_manifest = escape_ninja(manifest_target)
-    escaped_meta_deps = [escape_ninja(m) for m in meta_deps_list]
+    escaped_meta_deps = [escape_ninja(m) for m in sorted(meta_deps_list)]
 
-    ninja_content += f"\nbuild data/base.pak: zpak {escaped_manifest} | {' '.join(escaped_targets)} {' '.join(escaped_meta_deps)}\n"
+    # Added zcook as an order-only dependency (||)
+    ninja_content += f"\nbuild data/base.pak: zpak {escaped_manifest} | {' '.join(escaped_targets)} {' '.join(escaped_meta_deps)} || {escaped_zcook}\n"
 
     # 5. Virtual targets
-    escaped_glbs = [escape_ninja(g) for g in glb_targets]
+    escaped_glbs = [escape_ninja(g) for g in sorted(glb_targets)]
     ninja_content += f"\nbuild debug_glbs: phony {' '.join(escaped_glbs)}\n"
 
     # 6. Self-Regeneration details
@@ -237,8 +263,8 @@ rule zpak
     ninja_content += "  description = Regenerating assets.ninja\n"
     ninja_content += "  generator = 1\n"
 
-    # Added both export_metadata.py and zcook to the self-regeneration dependencies
-    ninja_content += f"\nbuild {escaped_output}: regenerate_ninja {escaped_configure} | {blend_deps} {meta_deps} {escaped_script} {escaped_zcook}\n"
+    # Removed zcook from self-regeneration dependencies as compiling zcook shouldn't restructure the build graph
+    ninja_content += f"\nbuild {escaped_output}: regenerate_ninja {escaped_configure} | {blend_deps} {meta_deps} {escaped_script}\n"
 
     ninja_content += "\ndefault data/base.pak\n"
 

@@ -7,7 +7,6 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	uint instId = (obj.instanceId != 4294967295u) ? obj.instanceId : instanceId;
 	InstanceData inst = g_instances[instId];
 
-	// --- NEW: True Bindless Geometry Fetch ---
 	uint actualVertexId = vertexId;
 	if (inst.iboAddress != 0) {
 		actualVertexId = vk::RawBufferLoad<uint>(inst.iboAddress + vertexId * 4, 4);
@@ -42,7 +41,6 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	float4 morphWeights = inst.morphWeights;
 	uint vertexCount = inst.vertexCount;
 
-	// Process values from our safe vector loads
 	float4 localPos = float4(position, 1.0f);
 	float3 localNormal = UnpackNormal(normal).xyz;
 	float4 localTangent = UnpackNormal(tangent);
@@ -93,10 +91,8 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	output.pos = mul(frame.viewProj, worldPos);
 	output.currClip = mul(frame.unjitteredViewProj, worldPos);
 
-	// OPTIMIZATION: Cache skinning result for previous frame to avoid redundant calculations
 	float4 prevWorldPos;
 	if (isSkinned != 0) {
-		// Use pre-computed previous joints from the previous frame (GPU-cached)
 		prevWorldPos =
 			mul(prevWorldMatrix, SkinPositionPrev(localPos, localJoints, weights, jointOffset));
 	} else {
@@ -105,7 +101,6 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	output.prevClip = mul(frame.prevUnjitteredViewProj, prevWorldPos);
 
 	output.tangent.w = localTangent.w;
-
 	output.uv = localUV;
 	output.shadowPos = mul(frame.lightSpaceMatrix, worldPos);
 	output.color = localColor;
@@ -117,74 +112,6 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	return output;
 }
 
-// --- PBR Helper Functions ---
-float DistributionGGX(float3 N, float3 H, float roughness) {
-	float a = roughness * roughness;
-	float a2 = a * a;
-	float NdotH = saturate(dot(N, H));
-	float denom = (NdotH * NdotH * (a2 - 1.0) + 1.0);
-	return a2 / (3.14159265f * denom * denom);
-}
-
-float GeometrySchlickGGX(float NdotV, float roughness) {
-	float k = pow(roughness + 1.0, 2.0) / 8.0;
-	return NdotV / max(NdotV * (1.0 - k) + k, 0.001); // Prevent Divide by zero
-}
-
-float GeometrySmith(float3 N, float3 V, float3 L, float roughness) {
-	return GeometrySchlickGGX(saturate(dot(N, V)), roughness) *
-		   GeometrySchlickGGX(saturate(dot(N, L)), roughness);
-}
-
-float3 FresnelSchlick(float cosTheta, float3 F0) {
-	return F0 + (1.0 - F0) * pow(saturate(1.0 - cosTheta), 5.0);
-}
-
-// --- GEOMETRIC SPECULAR ANTI-ALIASING (GSAA) ---
-float AntiAliasRoughness(float roughness, float3 unnormalizedNormal) {
-	float r = length(unnormalizedNormal);
-	r = clamp(r, 0.0001f, 1.0f);
-
-	float alpha = roughness * roughness;
-
-	// FIX: Clamp the specular power to >= 0.0 to prevent negative denominators and NaN division
-	float power = max(2.0f / (alpha * alpha + 0.0001f) - 2.0f, 0.0f);
-
-	float toksvig = r / (r + (1.0f - r) * power);
-
-	float newAlpha = sqrt(2.0f / (power * toksvig + 2.0f));
-	return saturate(newAlpha);
-}
-
-// --- ANISOTROPIC GGX PBR FUNCTIONS ---
-float DistributionAnisotropicGGX(float3 N, float3 H, float3 T, float3 B, float alpha_x,
-								 float alpha_y) {
-	float HdotT = dot(H, T);
-	float HdotB = dot(H, B);
-	float HdotN = saturate(dot(N, H));
-
-	float d =
-		HdotT * HdotT / (alpha_x * alpha_x) + HdotB * HdotB / (alpha_y * alpha_y) + HdotN * HdotN;
-	return 1.0f / (3.14159265f * alpha_x * alpha_y * d * d);
-}
-
-float SmithG1_Anisotropic(float3 N, float3 V, float3 T, float3 B, float alpha_x, float alpha_y) {
-	float NdotV = saturate(dot(N, V));
-	float TdotV = dot(T, V);
-	float BdotV = dot(B, V);
-
-	float v2 =
-		alpha_x * alpha_x * TdotV * TdotV + alpha_y * alpha_y * BdotV * BdotV + NdotV * NdotV;
-	return 2.0f * NdotV / (NdotV + sqrt(v2));
-}
-
-float GeometryAnisotropicSmith(float3 N, float3 V, float3 L, float3 T, float3 B, float alpha_x,
-							   float alpha_y) {
-	return SmithG1_Anisotropic(N, V, T, B, alpha_x, alpha_y) *
-		   SmithG1_Anisotropic(N, L, T, B, alpha_x, alpha_y);
-}
-
-// --- SPECIALIZED SHADOW PASS ENTRY POINT ---
 void PSShadow(VSOutput input) {
 	uint4 indices = input.materialIndices;
 	float4 baseColorFactor = input.baseColorFactor;
@@ -209,11 +136,8 @@ PSOutput PSMain(VSOutput input) {
 	float alphaCutoff = input.pbrFactors.z;
 	uint alphaMode = input.alphaMode;
 
-	// Sample raw textures
 	float4 albedo =
 		globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
-
-	// --- GRAB EMISSIVE MAP AND MULTIPLY BY GLTF FACTOR ---
 	float3 emissiveMap = globalTextures[indices.w].Sample(defaultSampler, input.uv).rgb;
 	float3 emissive = emissiveMap * input.emissiveFactor.rgb;
 
@@ -243,14 +167,10 @@ PSOutput PSMain(VSOutput input) {
 		worldNormal = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * N);
 	}
 
-	// Output raw diffuse and emissive added together in target 0
 	output.color = float4(albedo.rgb + emissive, albedo.a);
-
-	// Output packed normals and material descriptors
 	float2 packedNormal = PackNormalOctahedron(worldNormal) * 0.5f + 0.5f;
 	output.normalRoughness = float4(packedNormal, roughness, metallic);
 
-	// Velocity output
 	float currW = max(input.currClip.w, 0.0001f);
 	float prevW = max(input.prevClip.w, 0.0001f);
 	float2 ndcCurr = input.currClip.xy / currW;

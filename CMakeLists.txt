@@ -408,6 +408,17 @@ add_custom_target(zahlen_engine_cluster_cull ALL DEPENDS ${CLUSTER_CULLING_SPV})
 add_dependencies(zahlen_engine zahlen_engine_cluster_cull)
 target_compile_definitions(zahlen_engine PRIVATE SHADER_CLUSTER_CULLING_CS_PATH="${CLUSTER_CULLING_SPV}")
 
+# Create a formal custom target to block parallel-compile race conditions
+add_custom_target(zahlen_engine_smaa_shaders ALL DEPENDS 
+    ${SMAA_EDGE_VS_SPV}
+    ${SMAA_EDGE_PS_SPV}
+    ${SMAA_WEIGHT_VS_SPV}
+    ${SMAA_WEIGHT_PS_SPV}
+    ${SMAA_BLEND_VS_SPV}
+    ${SMAA_BLEND_PS_SPV}
+)
+add_dependencies(zahlen_engine zahlen_engine_smaa_shaders)
+
 target_compile_definitions(zahlen_engine PRIVATE 
     SHADER_SMAA_EDGE_VS_PATH="${SMAA_EDGE_VS_SPV}"
     SHADER_SMAA_EDGE_PS_PATH="${SMAA_EDGE_PS_SPV}"
@@ -457,8 +468,7 @@ add_custom_command(
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/assets.ninja"
     COMMAND python3 "${CMAKE_SOURCE_DIR}/configure_assets.py" "${CMAKE_CURRENT_BINARY_DIR}/assets.ninja" "$<TARGET_FILE:zcook>" "${CMAKE_SOURCE_DIR}"
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-    DEPENDS zcook 
-            "${CMAKE_SOURCE_DIR}/configure_assets.py"
+    DEPENDS "${CMAKE_SOURCE_DIR}/configure_assets.py"
             "${CMAKE_SOURCE_DIR}/tools/export_metadata.py" # Track changes to the exporter script
     COMMENT "Scanning asset folders and generating assets.ninja..."
 )

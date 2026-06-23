@@ -83,9 +83,10 @@ struct Camera {
 	float farZ = 1000.0f;
 
 	Frustum frustum{};
+	Frustum shadowFrustum{};
 
 	[[nodiscard]] JPH::Mat44 GetViewMatrix() const {
-		JPH::Vec3 direction;
+		JPH::Vec3 direction{};
 		direction.SetX(JPH::Cos(JPH::DegreesToRadians(yaw)) *
 					   JPH::Cos(JPH::DegreesToRadians(pitch)));
 		direction.SetY(JPH::Sin(JPH::DegreesToRadians(pitch)));

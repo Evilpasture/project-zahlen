@@ -1,6 +1,6 @@
 // resources/shaders/lighting.hlsl
 #pragma pack_matrix(column_major)
-#include <SharedMath.hpp>
+#include "pbr_helpers.hlsl"
 
 struct PushConstants {
 	float4x4 invViewProj;
@@ -76,108 +76,6 @@ struct ClusterVolume {
 [[vk::binding(12, 0)]] StructuredBuffer<uint> clusterIndexList;
 [[vk::binding(13, 0)]] Texture2D<float4> texAmbient; // Ambient input from Pass 1
 
-float3 UnpackNormalOctahedron(float2 H_unpacked) {
-	float3 N = float3(H_unpacked, 1.0 - abs(H_unpacked.x) - abs(H_unpacked.y));
-	float2 s = float2(N.x >= 0.0 ? 1.0 : -1.0, N.y >= 0.0 ? 1.0 : -1.0);
-	if (N.z < 0.0) {
-		N.xy = (1.0 - abs(N.yx)) * s;
-	}
-	return normalize(N);
-}
-
-float3 ReconstructWorldPos(float2 uv, float depth) {
-	float4 clipSpacePos = float4(uv.x * 2.0f - 1.0f, (1.0f - uv.y) * 2.0f - 1.0f, depth, 1.0f);
-	float4 worldSpacePos = mul(pc.invViewProj, clipSpacePos);
-	return worldSpacePos.xyz / worldSpacePos.w;
-}
-
-float CalculateShadow(float4 shadowPos, float3 N, float3 L) {
-	float3 projCoords = shadowPos.xyz / shadowPos.w;
-	if (projCoords.x < 0.0 || projCoords.x > 1.0 || projCoords.y < 0.0 || projCoords.y > 1.0 ||
-		projCoords.z < 0.0 || projCoords.z > 1.0) {
-		return 0.0; // <-- Change from 1.0 to 0.0 to prevent sun leakage indoors
-	}
-	float bias = max(0.015 * (1.0 - dot(N, L)), 0.005);
-	return shadowMap.SampleCmpLevelZero(shadowSampler, projCoords.xy, projCoords.z - bias).r;
-}
-
-float DistributionGGX(float3 N, float3 H, float roughness) {
-	float a = roughness * roughness;
-	float a2 = a * a;
-	float NdotH = saturate(dot(N, H));
-	float denom = (NdotH * NdotH * (a2 - 1.0f) + 1.0f);
-	return a2 / (3.14159265f * denom * denom);
-}
-
-float GeometrySchlickGGX(float NdotV, float roughness) {
-	float k = pow(roughness + 1.0f, 2.0f) / 8.0f;
-	return NdotV / max(NdotV * (1.0f - k) + k, 0.001f);
-}
-
-float GeometrySmith(float3 N, float3 V, float3 L, float roughness) {
-	return GeometrySchlickGGX(saturate(dot(N, V)), roughness) *
-		   GeometrySchlickGGX(saturate(dot(N, L)), roughness);
-}
-
-float3 FresnelSchlick(float cosTheta, float3 F0) {
-	return F0 + (1.0 - F0) * pow(saturate(1.0 - cosTheta), 5.0);
-}
-
-float3 IntegrateEdgeVector(float3 v1, float3 v2) {
-	float x = dot(v1, v2);
-	float y = abs(x);
-	float a = 0.8543985 + (0.4965155 + 0.0145206 * y) * y;
-	float b = 3.4175940 + (4.1616724 + y) * y;
-	float v = a / b;
-	float theta_sintheta = (x > 0.0) ? v : 0.5 * rsqrt(max(1.0 - x * x, 1e-7)) - v;
-	return cross(v1, v2) * theta_sintheta;
-}
-
-float3 LTC_Evaluate(float3 N, float3 V, float3 P, float3x3 Minv, float4 points[4], bool twoSided) {
-	float3 T1, T2;
-	T1 = normalize(V - N * dot(V, N));
-	T2 = cross(N, T1);
-	float3x3 R = float3x3(T1, T2, N);
-
-	float3 L[5];
-	L[0] = mul(Minv, mul(R, points[0].xyz - P));
-	L[1] = mul(Minv, mul(R, points[1].xyz - P));
-	L[2] = mul(Minv, mul(R, points[2].xyz - P));
-	L[3] = mul(Minv, mul(R, points[3].xyz - P));
-
-	int n = 0;
-	float3 clipped[5];
-
-	[unroll] for (int i = 0; i < 4; ++i) {
-		float3 v1 = L[i];
-		float3 v2 = L[(i + 1) % 4];
-
-		if (v1.z > 0.0) {
-			clipped[n++] = v1;
-		}
-		if ((v1.z > 0.0 && v2.z < 0.0) || (v1.z < 0.0 && v2.z > 0.0)) {
-			float t = v1.z / (v1.z - v2.z);
-			clipped[n++] = lerp(v1, v2, t);
-		}
-	}
-
-	if (n < 3)
-		return float3(0, 0, 0);
-	[unroll] for (int j = 0; j < n; ++j) {
-		clipped[j] = normalize(clipped[j]);
-	}
-	float3 sum = float3(0, 0, 0);
-	sum += IntegrateEdgeVector(clipped[0], clipped[1]);
-	sum += IntegrateEdgeVector(clipped[1], clipped[2]);
-	if (n >= 4)
-		sum += IntegrateEdgeVector(clipped[2], clipped[3]);
-	if (n == 5)
-		sum += IntegrateEdgeVector(clipped[3], clipped[4]);
-
-	sum = twoSided ? abs(sum) : max(float3(0, 0, 0), sum);
-	return sum;
-}
-
 struct VSOutput {
 	float4 pos : SV_Position;
 	float2 uv : TEXCOORD0;
@@ -191,8 +89,7 @@ VSOutput VSMain(uint vertexID : SV_VertexID) {
 }
 
 float4 PSMain(VSOutput input) : SV_Target0 {
-	float depth =
-		texDepth.SampleLevel(smp, input.uv, 0).r; // <-- FIXED: CHANGED pointSampler TO smp
+	float depth = texDepth.SampleLevel(smp, input.uv, 0).r;
 	if (depth >= 1.0f)
 		discard;
 
@@ -202,7 +99,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	float roughness = normRoughRaw.z;
 	float metallic = normRoughRaw.w;
 
-	float3 worldPos = ReconstructWorldPos(input.uv, depth);
+	float3 worldPos = ReconstructWorldPos(input.uv, depth, pc.invViewProj);
 	float3 V = normalize(pc.camPos.xyz - worldPos);
 	float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedoRaw.rgb, metallic);
 	float NdotV = saturate(dot(N, V));
@@ -216,8 +113,17 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	float3 H_sun = normalize(V + L_sun + 1e-5f);
 	float NdotL_sun = saturate(dot(N, L_sun));
 
-	float4 shadowPos = mul(frame.lightSpaceMatrix, float4(worldPos, 1.0f));
-	float shadow = CalculateShadow(shadowPos, N, L_sun);
+	// --- NORMAL OFFSET BIAS CALCULATION ---
+	// Orthographic shadow map is 100m wide, resolution is 2048x2048
+	float texelSizeWorld = 100.0 / 2048.0;
+	// Scale bias by the angle of inclination to the light
+	float normalBias = saturate(1.0 - dot(N, L_sun)) * 0.25;
+	float3 biasedWorldPos = worldPos + N * (normalBias * texelSizeWorld);
+
+	// Transform the biased world position into light space
+	float4 shadowPos = mul(frame.lightSpaceMatrix, float4(biasedWorldPos, 1.0f));
+	float shadow =
+		CalculateShadowPCSS(shadowPos, N, L_sun, input.pos.xy, shadowMap, shadowSampler, smp);
 
 	float D = DistributionGGX(N, H_sun, roughness);
 	float G_term = GeometrySmith(N, V, L_sun, roughness);
@@ -226,7 +132,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	float3 spec = (D * G_term * F) / max(4.0f * NdotV * NdotL_sun, 0.001f);
 	float3 kD_sun = (1.0f - metallic);
 
-	// --- USE THE DYNAMIC SUN INTENSITY CONFIGURED BY C++ ---
 	float sunIntensity = frame.lightDir.w;
 	float3 directSun =
 		(kD_sun * albedoRaw.rgb / 3.14159265f + spec) * sunIntensity * NdotL_sun * shadow;

@@ -30,7 +30,11 @@ void VerifyCullingResults(const ECS::Registry& reg, const JPH::Array<Entity>& vi
 	size_t expectedVisible = 0;
 	for (size_t i = 0; i < entities.size(); ++i) {
 		JPH::Vec3 pos = meshes[i].worldTransform.GetTranslation();
-		if (cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius)) {
+
+		// --- UPDATE DIAGNOSTICS TO USE DUAL FRUSTUMS ---
+		bool visibleInMain = cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius);
+		bool visibleInShadow = cam.shadowFrustum.IsSphereVisible(pos, meshes[i].cullRadius);
+		if (visibleInMain || visibleInShadow) {
 			expectedVisible++;
 		}
 	}
@@ -150,7 +154,13 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible) {
 			pos = meshes[i].worldTransform.GetTranslation();
 		}
 
-		if (cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius)) {
+		// --- DUAL FRUSTUM VISIBILITY CHECK ---
+		// Keep the entity alive if it is visible to the main player camera
+		// OR the shadow camera (so out-of-view objects like the roof still cast shadows!)
+		bool visibleInMain = cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius);
+		bool visibleInShadow = cam.shadowFrustum.IsSphereVisible(pos, meshes[i].cullRadius);
+
+		if (visibleInMain || visibleInShadow) {
 			outVisible.push_back(e);
 		}
 	}

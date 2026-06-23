@@ -444,11 +444,27 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 			static auto* cullingSystem = new CullingSystem();
 			cullingSystem->Update<true>(*engine, s_VisibleEntities);
 
+			// 1. Retrieve the sun direction and current camera position
 			JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f};
-			JPH::Mat44 lightView =
-				Math::CreateLookAt(sunDirection * 100.0f, {0.0f, 0.0f, 0.0f}, JPH::Vec3::sAxisY());
+			sunDirection = sunDirection.Normalized();
+
+			JPH::Vec3 shadowCenter = cam.position;
+
+			// 2. Snapping: Align the shadow center to texel increments to prevent edge shimmering.
+			// Total orthographic width is 100.0f (-50 to 50), and shadow map resolution is 2048.
+			float texelSize = 100.0f / 2048.0f;
+			shadowCenter.SetX(std::round(shadowCenter.GetX() / texelSize) * texelSize);
+			shadowCenter.SetY(std::round(shadowCenter.GetY() / texelSize) * texelSize);
+			shadowCenter.SetZ(std::round(shadowCenter.GetZ() / texelSize) * texelSize);
+
+			// 3. Build the camera-centric shadow View-Projection matrices
+			JPH::Vec3 lightPos = shadowCenter + sunDirection * 100.0f;
+			JPH::Mat44 lightView = Math::CreateLookAt(lightPos, shadowCenter, JPH::Vec3::sAxisY());
+
+			// Orthographic projection bounding volume (adjust width/height based on clip distance)
 			JPH::Mat44 lightProj = Math::CreateOrtho(-50.0f, 50.0f, -50.0f, 50.0f, 0.1f, 200.0f);
 			JPH::Mat44 shadowProjView = lightProj * lightView;
+			cam.shadowFrustum.Update(shadowProjView);
 
 			JPH::Mat44 biasMatrix = {
 				JPH::Vec4(0.5f, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, -0.5f, 0.0f, 0.0f),

@@ -1,5 +1,6 @@
 // resources/shaders/toon.hlsl
 #include "common.hlsl"
+
 VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	VSOutput output;
 
@@ -34,7 +35,6 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	uint jointOffset = inst.jointOffset;
 	uint isSkinned = inst.isSkinned;
 
-	// Process values from our safe vector loads
 	float4 localPos = float4(position, 1.0f);
 	float3 localNormal = UnpackNormal(normal).xyz;
 	float4 localTangent = UnpackNormal(tangent);
@@ -91,7 +91,7 @@ PSOutput PSMain(VSOutput input) {
 	float alphaCutoff = input.pbrFactors.z;
 	uint alphaMode = input.alphaMode;
 	float roughness = input.pbrFactors.y;
-	// Restore texture sampling combined with base color and vertex color attributes!
+
 	float4 albedo =
 		globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
 
@@ -103,10 +103,7 @@ PSOutput PSMain(VSOutput input) {
 	float3 worldNormal = N;
 
 	if (indices.y != 2 && any(input.tangent.xyz)) {
-		// 1. Calculate unnormalized tangent
 		float3 T_unnorm = input.tangent.xyz - dot(input.tangent.xyz, N) * N;
-
-		// 2. Check length BEFORE calling normalize() to prevent NaN
 		if (dot(T_unnorm, T_unnorm) < 0.0001f) {
 			T_unnorm = cross(N, abs(N.y) < 0.999f ? float3(0, 1, 0) : float3(1, 0, 0));
 		}
@@ -119,10 +116,11 @@ PSOutput PSMain(VSOutput input) {
 			globalTextures[indices.y].Sample(defaultSampler, input.uv).rgb * 2.0f - 1.0f;
 		worldNormal = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * N);
 	}
+
 	float3 V = normalize(frame.camPos.xyz - input.worldPos);
 	float3 L_sun = normalize(frame.lightDir.xyz);
 
-	// --- TOON LIGHTING RAMP ---
+	// --- 1. TOON LIGHTING RAMP ---
 	float NdotL_sun = dot(worldNormal, L_sun);
 	float halfLambert = NdotL_sun * 0.5f + 0.5f;
 
@@ -135,36 +133,41 @@ PSOutput PSMain(VSOutput input) {
 		celIntensity = 1.0f; // Bright band
 	}
 
+	// --- 2. AMBIENT ---
 	float3 irradiance = EvaluateSH(worldNormal, frame.sh);
 	float3 ambient = albedo.rgb * irradiance * 0.25f;
 
-	float shadow = CalculateShadow(input.shadowPos, worldNormal, L_sun);
+	// --- 3. NORMAL OFFSET BIAS & SHADOWS ---
+	float texelSizeWorld = 100.0 / 2048.0;
+	float normalBias = saturate(1.0 - dot(worldNormal, L_sun)) * 0.25;
+	float3 biasedWorldPos = input.worldPos + worldNormal * (normalBias * texelSizeWorld);
+
+	float4 shadowPos = mul(frame.lightSpaceMatrix, float4(biasedWorldPos, 1.0f));
+	float shadow = CalculateShadowPCSS(shadowPos, worldNormal, L_sun, input.pos.xy, shadowMap,
+									   shadowSampler, defaultSampler);
 	celIntensity *= shadow;
 
-	// --- TOON SPECULAR SHAPE ---
+	// --- 4. TOON SPECULAR SHAPE ---
 	float3 H_sun = normalize(V + L_sun);
 	float NdotH_sun = max(dot(worldNormal, H_sun), 0.0f);
 	float specular = step(0.98f, NdotH_sun) * 0.35f * shadow;
 
-	// --- SHARP CONTOUR OUTLINE ---
+	// --- 5. SHARP CONTOUR OUTLINE ---
 	float rim = 1.0f - saturate(dot(worldNormal, V));
 	float rimIntensity = smoothstep(0.6f, 0.75f, rim) * 0.25f * celIntensity;
 
+	// --- 6. COMPOSITING ---
 	float3 finalColor = ambient + (albedo.rgb * celIntensity) + specular + rimIntensity;
-
 	finalColor = min(finalColor, 100.0f);
 
 	output.color = float4(finalColor, albedo.a);
 
-	// Compress normal to 2D octahedral representation mapped to [0, 1]
-	float metallic = input.pbrFactors.x; // Fetch from input
+	float metallic = input.pbrFactors.x;
 	float2 packedNormal = PackNormalOctahedron(worldNormal) * 0.5f + 0.5f;
 	output.normalRoughness = float4(packedNormal, roughness, metallic);
 
-	// Clamp W to a small positive number to prevent Divide-By-Zero NaN explosions
 	float currW = max(input.currClip.w, 0.0001f);
 	float prevW = max(input.prevClip.w, 0.0001f);
-
 	float2 ndcCurr = input.currClip.xy / currW;
 	float2 ndcPrev = input.prevClip.xy / prevW;
 	output.velocity = (ndcCurr - ndcPrev) * float2(0.5f, -0.5f);

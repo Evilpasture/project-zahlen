@@ -36,7 +36,11 @@ TEST(PostProcessTest, VerifyRaymarchSSR) {
 
 	// 5. Execute the highly optimized Binary Search Raymarcher
 	float confidence = 0.0f;
-	float2 hitUV = RaymarchSSR(worldPos, biasedStartPos, R, N, confidence);
+	void* pointSampler = nullptr; // Mock sampler
+
+	// Successfully pass matrix dependencies dynamically instead of relying on globals
+	float2 hitUV = RaymarchSSR(worldPos, biasedStartPos, R, N, confidence, texDepth, pointSampler,
+							   pc.viewProj, pc.camPos, pc.invViewProj);
 
 	// 6. Verify that the raymarched ceiling hit cleanly and returned valid UVs
 	EXPECT_GT(confidence, 0.0f);

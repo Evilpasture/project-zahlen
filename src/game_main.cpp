@@ -448,10 +448,37 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 	}
 
 	JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f};
-	JPH::Mat44 lightView =
-		Math::CreateLookAt(sunDirection * 100.0f, {0.0f, 0.0f, 0.0f}, JPH::Vec3::sAxisY());
-	JPH::Mat44 lightProj = Math::CreateOrtho(-50.0f, 50.0f, -50.0f, 50.0f, 0.1f, 200.0f);
+	sunDirection = sunDirection.Normalized();
+
+	// 1. Calculate camera forward direction
+	float yawRad = JPH::DegreesToRadians(cam.yaw);
+	float pitchRad = JPH::DegreesToRadians(cam.pitch);
+	JPH::Vec3 forward(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad),
+					  JPH::Sin(yawRad) * JPH::Cos(pitchRad));
+	forward = forward.Normalized();
+
+	// 2. Offset shadow center 30 meters in front of the camera to capture distant background
+	float shadowFocusDistance = 30.0f;
+	JPH::Vec3 shadowCenter = cam.position + forward * shadowFocusDistance;
+
+	// 3. Expand coverage to 200m (from -100 to 100) to cover the entire lobby scene
+	float shadowWidth = 200.0f;
+	float texelSize = shadowWidth / 2048.0f; // 200m total width / 2048 texels
+
+	// 4. Snap the shadow center to prevent shadow shimmering
+	shadowCenter.SetX(std::round(shadowCenter.GetX() / texelSize) * texelSize);
+	shadowCenter.SetY(std::round(shadowCenter.GetY() / texelSize) * texelSize);
+	shadowCenter.SetZ(std::round(shadowCenter.GetZ() / texelSize) * texelSize);
+
+	JPH::Vec3 lightPos =
+		shadowCenter + sunDirection * 150.0f; // Place light further back to fit larger bounds
+	JPH::Mat44 lightView = Math::CreateLookAt(lightPos, shadowCenter, JPH::Vec3::sAxisY());
+
+	// Orthographic projection covering 200x200 meters with depth up to 400m
+	JPH::Mat44 lightProj = Math::CreateOrtho(-100.0f, 100.0f, -100.0f, 100.0f, 0.1f, 400.0f);
 	JPH::Mat44 shadowProjView = lightProj * lightView;
+
+	cam.shadowFrustum.Update(shadowProjView);
 
 	JPH::Mat44 biasMatrix = {JPH::Vec4(0.5f, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, -0.5f, 0.0f, 0.0f),
 							 JPH::Vec4(0.0f, 0.0f, 1.0f, 0.0f), JPH::Vec4(0.5f, 0.5f, 0.0f, 1.0f)};
