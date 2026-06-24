@@ -17,6 +17,27 @@ local TypeCache = {}
 
 local uint32_ptr = ffi.typeof("uint32_t*")
 
+-- Register a duplicate, metatable-free raw structure to bypass the metatype index interceptor
+local ok = pcall(ffi.typeof, "ZHLN_BufferView_Raw")
+if not ok then
+    ffi.cdef [[
+        typedef struct ZHLN_BufferView_Raw {
+            void*    buf;
+            void*    obj;
+            size_t   len;
+            uint32_t itemsize;
+            char     format[8];
+            int      readonly;
+            uint32_t ndim;
+            size_t   shape[4];
+            size_t   strides[4];
+            uint32_t flags;
+            uint32_t owner_type;
+        } ZHLN_BufferView_Raw;
+    ]]
+end
+local RawType = ffi.typeof("ZHLN_BufferView_Raw*")
+
 local function get_ctype(format_ptr)
     local key = ffi.cast(uint32_ptr, format_ptr)[0]
     local t = TypeCache[key]
@@ -66,7 +87,15 @@ function BufferMT:__index(i)
     if type(i) == "string" then
         local idx = COMPONENT_MAP[i]
         if idx then return self[idx] end
-        error("Invalid property: " .. tostring(i))
+
+        -- Safely query the raw, metatable-free pointer to read native fields (like .obj or .buf)
+        local raw = ffi.cast(RawType, self)
+        local success, val = pcall(function() return raw[i] end)
+        if success then return val end
+
+        -- Return nil instead of throwing an error. This prevents the catastrophic
+        -- nested error loop that overflows the LuaJIT stack.
+        return nil
     end
     if self.ndim > 1 then
         local sub = ffi.new("ZHLN_BufferView")

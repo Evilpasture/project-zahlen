@@ -1,5 +1,5 @@
 // resources/shaders/taa.hlsl
-
+#include "uniforms.hlsl"
 struct VSOutput {
 	float4 pos : SV_Position;
 	float2 uv : TEXCOORD0;
@@ -11,23 +11,6 @@ VSOutput VSMain(uint vertexID : SV_VertexID) {
 	output.pos = float4(output.uv.x * 2.0f - 1.0f, 1.0f - output.uv.y * 2.0f, 0.0f, 1.0f);
 	return output;
 }
-
-struct FrameUniforms {
-	float4x4 viewProj;
-	float4x4 unjitteredViewProj;
-	float4x4 prevUnjitteredViewProj;
-	float4x4 lightSpaceMatrix;
-	float4x4 invViewProj;
-	float4 camPos;
-	float4 lightDir;
-	uint32_t lightCount;
-	float3 padding;
-	float4 sh[9];
-	float4 probeMin;
-	float4 probeMax;
-	float4 probePos;
-	float4 jitterParams; // x: currentX, y: currentY, z: prevX, w: prevY
-};
 
 [[vk::binding(0, 0)]] Texture2D<float4> texCurrent;
 [[vk::binding(1, 0)]] Texture2D<float4> texHistory;
@@ -157,12 +140,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	m2 += centerYCoCg * centerYCoCg;
 
 	// Cardinal directions: right, left, up, down
-	float2 offsets[4] = {
-		float2(1.0f, 0.0f),
-		float2(-1.0f, 0.0f),
-		float2(0.0f, 1.0f),
-		float2(0.0f, -1.0f)
-	};
+	float2 offsets[4] = {float2(1.0f, 0.0f), float2(-1.0f, 0.0f), float2(0.0f, 1.0f),
+						 float2(0.0f, -1.0f)};
 
 	for (int i = 0; i < 4; ++i) {
 		float4 c = texCurrent.SampleLevel(smp, input.uv + offsets[i] * texelSize, 0);

@@ -1,7 +1,7 @@
 // resources/shaders/lighting.hlsl
 #pragma pack_matrix(column_major)
 #include "pbr_helpers.hlsl"
-
+#include "uniforms.hlsl"
 struct PushConstants {
 	float4x4 invViewProj;
 	float4x4 viewProj;
@@ -17,43 +17,6 @@ struct PushConstants {
 	int _pad;
 };
 [[vk::push_constant]] PushConstants pc;
-
-struct Light {
-	float3 position;
-	uint type; // 0=Dir, 1=Point, 2=Spot, 3=Area(LTC Quad)
-	float3 color;
-	float intensity;
-	float3 direction;
-	float range;
-	float4 points[4];
-	float radius;
-	float innerConeCos;
-	float outerConeCos;
-	uint twoSided;
-};
-
-struct FrameUniforms {
-	float4x4 viewProj;
-	float4x4 unjitteredViewProj;
-	float4x4 prevUnjitteredViewProj;
-	float4x4 lightSpaceMatrix;
-	float4x4 invViewProj;
-	float4 camPos;
-	float4 lightDir;
-	uint lightCount;
-	float pad0;
-	float pad1;
-	float pad2;
-	float4 sh[9];
-	float4 probeMin;
-	float4 probeMax;
-	float4 probePos;
-	float4 jitterParams;
-	int enableRTR;
-	float zScale;
-	float zBias;
-	int rtr_pad0;
-};
 
 struct ClusterVolume {
 	uint offset;

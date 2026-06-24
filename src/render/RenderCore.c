@@ -1016,7 +1016,7 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device,
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
 		.polygonMode = desc->polygon_mode,
 		.cullMode = desc->cull_mode,
-		.frontFace = desc->front_face ? desc->front_face : VK_FRONT_FACE_COUNTER_CLOCKWISE,
+		.frontFace = desc->front_face,
 		.lineWidth = 1.0F,
 	};
 

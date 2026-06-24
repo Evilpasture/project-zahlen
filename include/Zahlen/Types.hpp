@@ -132,8 +132,9 @@ struct alignas(16) FrameUniforms {
 	float camPos[4];
 	float lightDir[4];
 	uint32_t lightCount;
-	float _padding[3];
-	JPH::Vec4 sh[9]; // 9 Spherical Harmonic Coefficients
+	float ambientExposure; // <-- Named explicitly (4 bytes)
+	float _padding[2];	   // <-- Shrunk from 3 to 2 to maintain the 16-byte boundary
+	JPH::Vec4 sh[9];	   // 9 Spherical Harmonic Coefficients
 
 	// --- ADD PROBE PARAMETERS (3 * 16 = 48 bytes) ---
 	JPH::Vec4 probeMin;		// XYZ: bounding box min, W: useLocalProbe flag (0.0 or 1.0)

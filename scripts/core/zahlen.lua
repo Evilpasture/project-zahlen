@@ -364,6 +364,7 @@ function Engine:config(cfg)
     if cfg.giIntensity and pp then pp[0].giIntensity = cfg.giIntensity end
     if cfg.giSamples and pp then pp[0].giSamples = cfg.giSamples end
     if cfg.useLocalProbe and pp then pp[0].useLocalProbe = cfg.useLocalProbe end
+    if cfg.ambientExposure and pp then pp[0].ambientExposure = cfg.ambientExposure end
 
     if cfg.probeMin and pp then
         pp[0].probeMin[0] = cfg.probeMin[1] or cfg.probeMin.x or 0
@@ -486,6 +487,212 @@ _G.run_inventory_command = function(cmd)
             ffi.C.ZHLN_DispatchCommand(engine_ptr, "LogInventoryShell", args)
         end
     end
+end
+
+-- ============================================================================
+-- UNIFIED COMMAND DISPATCHER (Hyprland-style IPC)
+-- ============================================================================
+
+-- Command to FFI struct type-name mapping for generic fallback dispatches
+local COMMAND_STRUCTS = {
+    IsKeyDown = "IsKeyDownArgs",
+    GetMouseDelta = "GetMouseDeltaArgs",
+    GetCameraYaw = "CameraFloatArgs",
+    GetCameraFOV = "CameraFloatArgs",
+    SetCameraFOV = "SetCameraFOVArgs",
+    PlayOneShot = "PlayOneShotArgs",
+    PlayOneShot3D = "PlayOneShot3DArgs",
+    PlayProceduralBeep = "PlayProceduralBeepArgs",
+    SetCharacterVelocity = "SetCharVelArgs",
+    SetLinearVelocity = "SetCharVelArgs",
+    AddImpulse = "SetCharVelArgs",
+    AddImpulseAt = "AddImpulseAtArgs",
+    SetMovementInput = "SetMoveInputArgs",
+    LogInventoryShell = "LogInventoryArgs",
+    SetJumpIntent = "EntityOnlyArgs",
+    DestroyEntity = "EntityOnlyArgs",
+    IsCharacterOnGround = "EntityOnlyArgs",
+}
+
+local SHAPE_TYPES = { box = 0, sphere = 1, capsule = 2, cylinder = 3, plane = 4 }
+
+-- Safe coordinate extraction helpers to handle both vec3 structs, tables, and nil fallbacks
+local function get_xyz(v, def_x, def_y, def_z)
+    if not v then return def_x or 0, def_y or 0, def_z or 0 end
+    if type(v) == "cdata" then
+        return v.x, v.y, v.z
+    end
+    return v[1] or v.x or def_x or 0, v[2] or v.y or def_y or 0, v[3] or v.z or def_z or 0
+end
+
+local function get_xyzw(v, def_x, def_y, def_z, def_w)
+    if not v then return def_x or 0, def_y or 0, def_z or 0, def_w or 1 end
+    if type(v) == "cdata" then
+        return v.x or 0, v.y or 0, v.z or 0, v.w or 1
+    end
+    return v[1] or v.x or def_x or 0, v[2] or v.y or def_y or 0, v[3] or v.z or def_z or 0, v[4] or v.w or def_w or 1
+end
+
+local function get_rgba(v, def_r, def_g, def_b, def_a)
+    if not v then return def_r or 1, def_g or 1, def_b or 1, def_a or 1 end
+    return v[1] or v.r or def_r or 1, v[2] or v.g or def_g or 1, v[3] or v.b or def_b or 1, v[4] or v.a or def_a or 1
+end
+
+-- Specialized handlers for commands requiring pointers or custom structures
+local SPECIALIZED_HANDLERS = {}
+
+SPECIALIZED_HANDLERS["SpawnPrefab"] = function(self, args)
+    local max_count = args.max_entities or 2048
+    local ent_buffer = ffi.new("uint64_t[?]", max_count)
+    local path_c = ffi.new("char[256]")
+    ffi.copy(path_c, args.path)
+
+    local px, py, pz = get_xyz(args.position)
+    local ffi_args = ffi.new("SpawnPrefabArgs", {
+        path_c,
+        px, py, pz,
+        args.physics and 1 or 0,
+        (args.static == nil or args.static == true) and 1 or 0,
+        args.animated and 1 or 0,
+        max_count,
+        ent_buffer
+    })
+
+    local count = tonumber(ffi.C.ZHLN_DispatchCommand(self._raw, "SpawnPrefab", ffi_args))
+    local entities = {}
+    for i = 0, count - 1 do table.insert(entities, ent_buffer[i]) end
+    return entities
+end
+
+SPECIALIZED_HANDLERS["SpawnEntity"] = function(self, args)
+    local shape_type = SHAPE_TYPES[string.lower(args.type or "box")] or 0
+    local p1, p2, p3 = 1, 1, 1
+
+    if args.type == "box" then
+        local size = args.size or args.extents or { 1, 1, 1 }
+        p1, p2, p3 = get_xyz(size, 1, 1, 1)
+    elseif args.type == "sphere" then
+        p1 = args.radius or 0.5
+    elseif args.type == "capsule" or args.type == "cylinder" then
+        p1 = args.radius or 0.5
+        p2 = args.half_height or 1.0
+    elseif args.type == "plane" then
+        p1 = args.extent or 10.0
+    end
+
+    local px, py, pz = get_xyz(args.position)
+    local rx, ry, rz, rw = get_xyzw(args.rotation, 0, 0, 0, 1)
+    local r, g, b, a = get_rgba(args.color, 1, 1, 1, 1)
+    local is_static = (args.static == nil) and true or args.static
+
+    local ffi_args = ffi.new("SpawnEntityArgs", {
+        shapeType = shape_type,
+        p1 = p1,
+        p2 = p2,
+        p3 = p3,
+        px = px,
+        py = py,
+        pz = pz,
+        rx = rx,
+        ry = ry,
+        rz = rz,
+        rw = rw,
+        r = r,
+        g = g,
+        b = b,
+        a = a,
+        isStatic = is_static and 1 or 0
+    })
+    return ffi.C.ZHLN_DispatchCommand(self._raw, "SpawnEntity", ffi_args)
+end
+
+SPECIALIZED_HANDLERS["SpawnLight"] = function(self, args)
+    local px, py, pz = get_xyz(args.position)
+    local rx, ry, rz, rw = get_xyzw(args.rotation, 0, 0, 0, 1)
+    local r, g, b = get_rgba(args.color, 1, 1, 1, 1)
+    local dx, dy, dz = get_xyz(args.direction, 0, -1, 0)
+
+    local ffi_args = ffi.new("SpawnLightArgs", {
+        px = px,
+        py = py,
+        pz = pz,
+        rx = rx,
+        ry = ry,
+        rz = rz,
+        rw = rw,
+        r = r,
+        g = g,
+        b = b,
+        intensity = args.intensity or 100.0,
+        radius = args.radius or 0.1,
+        dx = dx,
+        dy = dy,
+        dz = dz,
+        range = args.range or 10.0,
+        type = args.type or 1,
+        twoSided = args.twoSided and 1 or 0
+    })
+    return ffi.C.ZHLN_DispatchCommand(self._raw, "SpawnLight", ffi_args)
+end
+
+SPECIALIZED_HANDLERS["Raycast"] = function(self, args)
+    local res = ffi.new("ZHLN_RaycastResult[1]")
+    local ox, oy, oz = get_xyz(args.origin)
+    local dx, dy, dz = get_xyz(args.direction, 0, -1, 0)
+
+    local ffi_args = ffi.new("RaycastArgs", {
+        ox = ox,
+        oy = oy,
+        oz = oz,
+        dx = dx,
+        dy = dy,
+        dz = dz,
+        maxDist = args.max_dist or 1000.0,
+        ignoreEntity = args.ignore_entity or 0,
+        outResult = res
+    })
+
+    ffi.C.ZHLN_DispatchCommand(self._raw, "Raycast", ffi_args)
+    if res[0].hasHit == 1 then
+        return {
+            entity = res[0].entity,
+            position = vec3.new(res[0].px, res[0].py, res[0].pz),
+            normal = vec3.new(res[0].nx, res[0].ny, res[0].nz),
+            fraction = res[0].fraction
+        }
+    end
+    return nil
+end
+
+-- Expose the dispatch interface to the Engine object
+function Engine:dispatch(cmd, args)
+    local specialized = SPECIALIZED_HANDLERS[cmd]
+    if specialized then
+        return specialized(self, args)
+    end
+
+    local struct_name = COMMAND_STRUCTS[cmd]
+    if not struct_name then
+        error("[ZHLN] Unknown command: " .. tostring(cmd))
+    end
+
+    local ffi_arg = ffi.new(struct_name, args)
+    return ffi.C.ZHLN_DispatchCommand(self._raw, cmd, ffi_arg)
+end
+
+-- Backward compatibility aliases (Redirect to dispatch)
+function Engine:spawn(path, options)
+    options = options or {}
+    options.path = path
+    return self:dispatch("SpawnPrefab", options)
+end
+
+function Engine:spawn_entity(options)
+    return self:dispatch("SpawnEntity", options)
+end
+
+function Engine:spawn_light(options)
+    return self:dispatch("SpawnLight", options)
 end
 
 return _G.zh

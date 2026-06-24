@@ -1,0 +1,42 @@
+// resources/shaders/uniforms.hlsl
+#ifndef UNIFORMS_HLSL
+#define UNIFORMS_HLSL
+
+struct FrameUniforms {
+	float4x4 viewProj;
+	float4x4 unjitteredViewProj;
+	float4x4 prevUnjitteredViewProj;
+	float4x4 lightSpaceMatrix;
+	float4x4 invViewProj;
+	float4 camPos;
+	float4 lightDir;
+	uint lightCount;
+	float ambientExposure; // Maps to C++ _padding[0]
+	float pad1;			   // Maps to C++ _padding[1]
+	float pad2;			   // Maps to C++ _padding[2]
+	float4 sh[9];
+	float4 probeMin;
+	float4 probeMax;
+	float4 probePos;
+	float4 jitterParams;
+	int enableRTR;
+	float zScale;
+	float zBias;
+	int rtr_pad0;
+};
+
+struct Light {
+	float3 position;
+	uint type;
+	float3 color;
+	float intensity;
+	float3 direction;
+	float range;
+	float4 points[4];
+	float radius;
+	float innerConeCos;
+	float outerConeCos;
+	uint twoSided;
+};
+
+#endif // UNIFORMS_HLSL

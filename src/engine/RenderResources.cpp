@@ -209,7 +209,8 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 
 	// Return a packed generational handle
 	uint64_t handle = impl->materialPool.Create(std::move(finalPipeline), std::move(layout));
-	return Material{.pipeline = static_cast<PipelineHandle>(handle)};
+	return {.pipeline = static_cast<PipelineHandle>(handle),
+			.alphaMode = desc.alphaBlend ? 2u : 0u};
 }
 
 auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width, uint32_t height,

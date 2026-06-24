@@ -181,6 +181,24 @@ PSOutput PSMain(VSOutput input) {
 }
 
 #ifdef FORWARD_PASS
+float3 RotateVector(float3 V, float3 lightDir) {
+	float lenB = length(lightDir);
+	if (lenB < 0.001f) {
+		return V;
+	}
+	float3 A = normalize(float3(0.5f, 1.0f, 0.2f));
+	float3 B = lightDir / lenB;
+	float3 q_xyz = cross(B, A);
+	float q_w = 1.0f + dot(A, B);
+	float q_len = sqrt(dot(q_xyz, q_xyz) + q_w * q_w);
+	if (q_len > 0.0001f) {
+		q_xyz /= q_len;
+		q_w /= q_len;
+		return V + 2.0f * cross(q_xyz, cross(q_xyz, V) + q_w * V);
+	}
+	return V;
+}
+
 float4 PSForward(VSOutput input) : SV_Target0 {
 	uint4 indices = input.materialIndices;
 	float4 baseColorFactor = input.baseColorFactor;
@@ -225,9 +243,13 @@ float4 PSForward(VSOutput input) : SV_Target0 {
 
 	float2 envBRDF = brdfLUT.SampleLevel(clampSampler, float2(NdotV, roughnessFactor), 0.0f).rg;
 
+	// Rotate the forward reflection vector to match the dynamic sun
+	float3 R_rot = RotateVector(R, frame.lightDir.xyz);
+
 	// Fast Specular IBL Reflection
-	float3 specularIBL = prefilteredMap.SampleLevel(defaultSampler, R, roughnessFactor * 5.0f).rgb *
-						 25.0f * (F * envBRDF.x + envBRDF.y);
+	float3 specularIBL =
+		prefilteredMap.SampleLevel(defaultSampler, R_rot, roughnessFactor * 5.0f).rgb * 25.0f *
+		(F * envBRDF.x + envBRDF.y);
 
 	float3 diffuseIBL = albedo.rgb * 0.5f;
 	float3 finalColor = diffuseIBL + specularIBL;

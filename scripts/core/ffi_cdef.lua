@@ -127,7 +127,7 @@ if not ok then
             float vignettePower;
             int enableSSR;
             int enableRTR;
-            int _padding;
+            float ambientExposure;
             float probeMin[4]; // Packed float4 / Vec3
             float probeMax[4];
             float probePos[4];

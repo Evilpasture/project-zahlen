@@ -272,9 +272,12 @@ float3 LTC_Evaluate(float3 N, float3 V, float3 P, float3x3 Minv, float4 points[4
 // REFLECTIONS
 // ============================================================================
 float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, float3 N, out float confidence,
-				   Texture2D<float> texDepth, SamplerState pointSampler, float4x4 viewProj,
-				   float4 camPos, float4x4 invViewProj) {
-	const float maxDistance = 14.0f;
+				   out float debugValue, Texture2D<float> texDepth, SamplerState pointSampler,
+				   float4x4 viewProj, float4 camPos, float4x4 invViewProj) {
+	// Default debug value
+	debugValue = 0.0f;
+
+	const float maxDistance = 30.0f;
 	float3 endPosWS = startPosWS + dirWS * maxDistance;
 
 	float4 startClip = mul(viewProj, float4(startPosWS, 1.0f));
@@ -297,8 +300,10 @@ float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, float3 N, o
 
 	float2 uv_w_start = startUV * invW_start;
 	float2 uv_w_end = endUV * invW_end;
-	float3 ws_w_start = startPosWS * invW_start;
-	float3 ws_w_end = endPosWS * invW_end;
+
+	// Linearly interpolate NDC Z directly in screen space (no W division required)
+	float ndc_z_start = startNDC.z;
+	float ndc_z_end = endNDC.z;
 
 	float2 deltaUV = endUV - startUV;
 
@@ -307,19 +312,18 @@ float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, float3 N, o
 	float2 screenPixels = abs(deltaUV * float2(dw, dh));
 
 	float maxPixelDist = max(screenPixels.x, screenPixels.y);
-	float stepCount = clamp(maxPixelDist / 4.0f, 8.0f, 48.0f);
+	float stepCount = clamp(maxPixelDist / 3.0f, 16.0f, 64.0f);
 
 	float invW_step = (invW_end - invW_start) / stepCount;
 	float2 uv_w_step = (uv_w_end - uv_w_start) / stepCount;
-	float3 ws_w_step = (ws_w_end - ws_w_start) / stepCount;
+	float ndc_z_step = (ndc_z_end - ndc_z_start) / stepCount;
 
 	uint2 pixelPos = uint2(startUV * float2(dw, dh));
-	float dither = GetStableWeylNoise(pixelPos, camPos.w);
+	float dither = GetStableWeylNoise(pixelPos, 0.0f);
 
 	float startOffset = 1.2f + dither;
 	float current_invW = invW_start + invW_step * startOffset;
 	float2 current_uv_w = uv_w_start + uv_w_step * startOffset;
-	float3 current_ws_w = ws_w_start + ws_w_step * startOffset;
 
 	confidence = 0.0f;
 
@@ -334,20 +338,27 @@ float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, float3 N, o
 
 		float sampledDepth = texDepth.SampleLevel(pointSampler, currentUV, 0).r;
 		if (sampledDepth >= 1.0f) {
+			debugValue = float(i) / stepCount;
 			current_invW += invW_step;
 			current_uv_w += uv_w_step;
-			current_ws_w += ws_w_step;
 			continue;
 		}
 
-		float3 currentWS = current_ws_w / current_invW;
+		// Direct linear interpolation of the depth buffer-space Z
+		float rayDepth = ndc_z_start + ndc_z_step * (float(i) + dither);
+
+		// Reconstruct BOTH positions using the exact same function and matrix
+		float3 currentWS = ReconstructWorldPos(currentUV, rayDepth, invViewProj);
 		float3 sampledWS = ReconstructWorldPos(currentUV, sampledDepth, invViewProj);
 
 		float rayDist = length(currentWS - camPos.xyz);
 		float sampleDist = length(sampledWS - camPos.xyz);
 		float thickness = rayDist - sampleDist;
 
-		if (thickness >= 0.0f && thickness < 0.4f) {
+		// Precision-matched bias
+		float bias = 0.03f + rayDist * 0.002f;
+
+		if (thickness >= bias && thickness < 2.0f) {
 			float t_start = max(0.0f, (float(i) + dither) / stepCount);
 			float t_end = (float(i) + 1.0f + dither) / stepCount;
 
@@ -359,10 +370,13 @@ float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, float3 N, o
 
 				float mid_invW = invW_start + (invW_end - invW_start) * t_mid;
 				float2 mid_uv_w = uv_w_start + (uv_w_end - uv_w_start) * t_mid;
-				float3 mid_ws_w = ws_w_start + (ws_w_end - ws_w_start) * t_mid;
 
 				mid_uv = mid_uv_w / mid_invW;
-				float3 mid_ws = mid_ws_w / mid_invW;
+
+				// Direct linear interpolation of NDC Z for binary search
+				float midRayDepth = ndc_z_start + (ndc_z_end - ndc_z_start) * t_mid;
+
+				float3 mid_ws = ReconstructWorldPos(mid_uv, midRayDepth, invViewProj);
 
 				float midDepth = texDepth.SampleLevel(pointSampler, mid_uv, 0).r;
 				float3 midSampledWS = ReconstructWorldPos(mid_uv, midDepth, invViewProj);
@@ -379,9 +393,11 @@ float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, float3 N, o
 
 			float finalDepth = texDepth.SampleLevel(pointSampler, mid_uv, 0).r;
 			float final_invW = invW_start + (invW_end - invW_start) * t_mid;
-			float3 final_ws_w = ws_w_start + (ws_w_end - ws_w_start) * t_mid;
-			float3 mid_ws = final_ws_w / final_invW;
 
+			// Direct linear interpolation of NDC Z for final hit
+			float finalRayDepth = ndc_z_start + (ndc_z_end - ndc_z_start) * t_mid;
+
+			float3 mid_ws = ReconstructWorldPos(mid_uv, finalRayDepth, invViewProj);
 			float3 finalSampledWS = ReconstructWorldPos(mid_uv, finalDepth, invViewProj);
 			float finalRayDist = length(mid_ws - camPos.xyz);
 			float finalSampleDist = length(finalSampledWS - camPos.xyz);
@@ -389,24 +405,28 @@ float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, float3 N, o
 			float distFromStart = length(mid_ws - startPosWS);
 			float heightAboveSurface = dot(mid_ws - worldPos, N);
 
-			if (heightAboveSurface > 0.06f && abs(finalRayDist - finalSampleDist) < 0.08f) {
+			// Strict 5cm height constraint to eliminate floor self-reflections
+			if (heightAboveSurface > 0.05f && abs(finalRayDist - finalSampleDist) < 0.25f) {
 				float distanceFade = saturate(1.0f - distFromStart / maxDistance);
 				confidence = distanceFade * distanceFade;
 
 				float2 edgeFactor =
 					smoothstep(0.0f, 0.08f, mid_uv) * smoothstep(1.0f, 0.92f, mid_uv);
 				confidence *= edgeFactor.x * edgeFactor.y;
+
+				debugValue = float(i) / stepCount;
 				return mid_uv;
 			}
 		}
 
+		debugValue = float(i) / stepCount;
 		current_invW += invW_step;
 		current_uv_w += uv_w_step;
-		current_ws_w += ws_w_step;
 	}
 	return float2(0.0f, 0.0f);
 }
 
+// resources/shaders/pbr_helpers.hlsl
 #ifndef DISABLE_RTR
 float2 RaytraceRTR(float3 worldPos, float3 N, float3 R, out float confidence,
 				   RaytracingAccelerationStructure tlas, Texture2D<float> texDepth,
@@ -425,7 +445,8 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 R, out float confidence,
 	}
 
 	if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
-		float3 hitWorldPos = ray.Origin + ray.Direction * q.CommittedRayT();
+		float rayT = q.CommittedRayT();
+		float3 hitWorldPos = ray.Origin + ray.Direction * rayT;
 		float4 hitClip = mul(viewProj, float4(hitWorldPos, 1.0f));
 
 		if (hitClip.w < 0.1f)
@@ -434,18 +455,22 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 R, out float confidence,
 		float2 hitNDC = hitClip.xy / hitClip.w;
 		float2 hitUV = hitNDC * float2(0.5f, -0.5f) + 0.5f;
 
-		float2 edgeFactor = smoothstep(0.0f, 0.08f, hitUV) * smoothstep(1.0f, 0.92f, hitUV);
+		// Tighten the screen-edge fade to 3% (down from 8%) so reflections reach further
+		float2 edgeFactor = smoothstep(0.0f, 0.03f, hitUV) * smoothstep(1.0f, 0.97f, hitUV);
 		confidence = edgeFactor.x * edgeFactor.y;
 
 		if (confidence > 0.0f) {
-			float sampledRawDepth = texDepth.SampleLevel(pointSampler, hitUV, 0).r;
+			float sampledRawDepth = texDepth.SampleLevel(pointSampler, hitUV, 0);
 			float3 sampledWorldPos = ReconstructWorldPos(hitUV, sampledRawDepth, invViewProj);
 
 			float distToHit = length(hitWorldPos - camPos.xyz);
 			float distToSampled = length(sampledWorldPos - camPos.xyz);
 
 			float depthDiff = abs(distToHit - distToSampled);
-			float depthMask = smoothstep(1.2f, 0.4f, depthDiff);
+
+			// DYNAMIC TOLERANCE: Scales gracefully based on how far the ray traveled
+			float maxDiff = 1.0f + rayT * 0.15f;
+			float depthMask = smoothstep(maxDiff, maxDiff * 0.2f, depthDiff);
 			confidence *= depthMask;
 		}
 		return hitUV;

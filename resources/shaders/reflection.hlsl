@@ -1,13 +1,31 @@
 // resources/shaders/reflection.hlsl
 #pragma pack_matrix(column_major)
 #include "pbr_helpers.hlsl"
-
+#include "uniforms.hlsl"
 [[vk::constant_id(0)]] const int ENABLE_SSR = 1;
 #ifndef DISABLE_RTR
 [[vk::constant_id(1)]] const int ENABLE_RTR = 1;
 #else
 static const int ENABLE_RTR = 0;
 #endif
+
+float3 RotateVector(float3 V, float3 lightDir) {
+	float lenB = length(lightDir);
+	if (lenB < 0.001f) {
+		return V;
+	}
+	float3 A = normalize(float3(0.5f, 1.0f, 0.2f));
+	float3 B = lightDir / lenB;
+	float3 q_xyz = cross(B, A);
+	float q_w = 1.0f + dot(A, B);
+	float q_len = sqrt(dot(q_xyz, q_xyz) + q_w * q_w);
+	if (q_len > 0.0001f) {
+		q_xyz /= q_len;
+		q_w /= q_len;
+		return V + 2.0f * cross(q_xyz, cross(q_xyz, V) + q_w * V);
+	}
+	return V;
+}
 
 struct PushConstants {
 	float4x4 invViewProj;
@@ -24,29 +42,6 @@ struct PushConstants {
 	int _pad;
 };
 [[vk::push_constant]] PushConstants pc;
-
-struct FrameUniforms {
-	float4x4 viewProj;
-	float4x4 unjitteredViewProj;
-	float4x4 prevUnjitteredViewProj;
-	float4x4 lightSpaceMatrix;
-	float4x4 invViewProj;
-	float4 camPos;
-	float4 lightDir;
-	uint lightCount;
-	float pad0;
-	float pad1;
-	float pad2;
-	float4 sh[9];
-	float4 probeMin;
-	float4 probeMax;
-	float4 probePos;
-	float4 jitterParams;
-	int enableRTR;
-	float zScale;
-	float zBias;
-	int rtr_pad0;
-};
 
 [[vk::binding(0, 0)]] Texture2D<float4> texInput;
 [[vk::binding(1, 0)]] SamplerState smp;
@@ -82,6 +77,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 		float3 worldPos = ReconstructWorldPos(input.uv, 1.0f, pc.invViewProj);
 		// Calculate the ray direction pointing away from the camera
 		float3 rayDir = normalize(worldPos - pc.camPos.xyz);
+
+		// Rotate the visual skybox to match the dynamic sun
+		rayDir = RotateVector(rayDir, frame.lightDir.xyz);
+
 		// Sample the environment map at MIP 0 with the standard 25.0f exposure boost
 		float3 skyColor = texEnvMap.SampleLevel(smp, rayDir, 0.0f).rgb * 25.0f;
 		return float4(skyColor, 1.0f);
@@ -101,6 +100,12 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	float3 worldPos = ReconstructWorldPos(input.uv, depth, pc.invViewProj);
 	float3 V = normalize(pc.camPos.xyz - worldPos);
 	float3 R = reflect(-V, N);
+
+	// Horizon-clamp: prevent perturbed normals from reflecting rays downward into the floor
+	if (R.y < 0.05f) {
+		R.y = 0.05f;
+		R = normalize(R);
+	}
 
 	float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedoRaw.rgb, metallic);
 	float NdotV = saturate(dot(N, V));
@@ -126,24 +131,26 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 		R_corr = lerp(R, boxR, boxFade);
 	}
 
-	// Define the ambient exposure boost for the LDR skybox
-	float ambientExposure = 25.0f;
+	// Rotate the specular lookup vector to match the dynamic sun
+	R_corr = RotateVector(R_corr, frame.lightDir.xyz);
 
 	float3 prefilteredColor =
-		texEnvMap.SampleLevel(smp, R_corr, roughness * 5.0f).rgb * ambientExposure;
+		texEnvMap.SampleLevel(smp, R_corr, roughness * 5.0f).rgb * frame.ambientExposure;
 	float3 specularIBL = prefilteredColor * FssEss;
 
 	// Extract AO from litColorRaw's alpha channel (written by lighting.hlsl)
 	float ao = litColorRaw.a;
 	float3 litColor = litColorRaw.rgb;
 
-	float3 irradiance = EvaluateSH(N, frame.sh) * ambientExposure;
+	// Rotate the diffuse SH lookup normal to match the dynamic sun
+	float3 N_rot = RotateVector(N, frame.lightDir.xyz);
+	float3 irradiance = EvaluateSH(N_rot, frame.sh) * frame.ambientExposure;
 
 	// --- ACCURATE GLOBAL IRRADIANCE OCCLUSION ---
 	// Fade out the bright blue outdoor sky dome inside your indoor probe box
 	if (frame.probeMin.w > 0.0f && boxFade > 0.0f) {
 		// FIX: Properly apply the 25.0f HDR exposure boost to the indoor ambient fallback
-		float3 indoorAmbient = float3(0.12f, 0.12f, 0.12f) * ambientExposure;
+		float3 indoorAmbient = float3(0.12f, 0.12f, 0.12f) * frame.ambientExposure;
 		irradiance = lerp(irradiance, indoorAmbient, boxFade);
 	}
 
@@ -158,14 +165,15 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
 	if (roughness <= 0.85f && (ENABLE_SSR != 0 || ENABLE_RTR != 0)) {
 		float confidence = 0.0f;
+		float debugValue = 0.0f;
 		float3 reflectionColor = float3(0.0f, 0.0f, 0.0f);
 		float2 hitUV = float2(0.0f, 0.0f);
 		float3 biasedStartPos = worldPos + N * 0.05f;
 
 		if (ENABLE_SSR != 0) {
-			// Unified SSR Raymarch function from helper library
-			hitUV = RaymarchSSR(worldPos, biasedStartPos, R, N, confidence, texDepth, pointSampler,
-								pc.viewProj, pc.camPos, pc.invViewProj);
+			// Pass debugValue to collect normalized step count
+			hitUV = RaymarchSSR(worldPos, biasedStartPos, R, N, confidence, debugValue, texDepth,
+								pointSampler, pc.viewProj, pc.camPos, pc.invViewProj);
 		}
 
 #ifndef DISABLE_RTR

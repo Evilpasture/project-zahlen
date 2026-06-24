@@ -162,7 +162,7 @@ struct PostProcessSettingsComponent {
 	float vignettePower = 1.50f;
 	int enableSSR = 1;
 	int enableRTR = 0;
-	int _padding = 0;
+	float ambientExposure = 25.0f;
 	JPH::Vec3 probeMin = JPH::Vec3(-22.0f, 0.0f, -22.0f);
 	JPH::Vec3 probeMax = JPH::Vec3(22.0f, 12.0f, 22.0f);
 	JPH::Vec3 probePos = JPH::Vec3(0.0f, 4.0f, 0.0f);

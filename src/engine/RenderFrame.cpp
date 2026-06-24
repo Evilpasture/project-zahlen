@@ -177,7 +177,7 @@ struct CpuCullingPolicy {
 					std::span<WorkerCmdContext>(ctx.workerCmds.data(), ctx.workerCmds.size()),
 					[&](VkCommandBuffer sec_cmd, uint32_t i) {
 						const auto& drawCmd = ctx.drawQueue[i];
-						if (!drawCmd.material->pipeline.Valid()) {
+						if (!drawCmd.material->pipeline.Valid() || drawCmd.alphaMode == 2) {
 							return;
 						}
 

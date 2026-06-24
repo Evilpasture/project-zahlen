@@ -514,14 +514,13 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 	if (!sunEntities.empty()) {
 		Entity sunEnt = sunEntities[0];
 		if (auto* trans = reg.Get<TransformComponent>(sunEnt)) {
-			// 1. Extract the direction (local -Z forward vector) from its rotation
+			// Extract the direction pointing towards the sun (local +Z)
 			JPH::Mat44 worldMat = trans->GetMatrix();
 			sunDirection = worldMat.GetColumn3(2);
-
-			// 2. Extract the intensity from its standard LightComponent
-			if (auto* light = reg.Get<LightingSystem::LightComponent>(sunEnt)) {
-				sunIntensity = light->intensity;
-			}
+		}
+		// Extract the intensity from its standard LightComponent
+		if (auto* light = reg.Get<LightingSystem::LightComponent>(sunEnt)) {
+			sunIntensity = light->intensity;
 		}
 	}
 	sunDirection = sunDirection.Normalized();
@@ -533,8 +532,14 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 					  JPH::Sin(yawRad) * JPH::Cos(pitchRad));
 	forward = forward.Normalized();
 
-	// 2. Keep the shadow map centered on the camera position to prevent orientation swings
-	JPH::Vec3 shadowCenter = cam.position;
+	// 2. anchors the shadow map over the player/origin
+	JPH::Vec3 shadowCenter = JPH::Vec3::sZero();
+	auto playerEntities = reg.GetEntitiesWith<PlayerTagComponent>();
+	if (!playerEntities.empty()) {
+		if (auto* trans = reg.Get<TransformComponent>(playerEntities[0])) {
+			shadowCenter = trans->position;
+		}
+	}
 
 	// 3. Expand coverage to 200m (from -100 to 100) to cover the entire lobby scene
 	float shadowWidth = 200.0f;
@@ -545,8 +550,7 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 	shadowCenter.SetY(std::round(shadowCenter.GetY() / texelSize) * texelSize);
 	shadowCenter.SetZ(std::round(shadowCenter.GetZ() / texelSize) * texelSize);
 
-	JPH::Vec3 lightPos =
-		shadowCenter + sunDirection * 150.0f; // Place light further back to fit larger bounds
+	JPH::Vec3 lightPos = shadowCenter + sunDirection * 150.0f;
 	JPH::Mat44 lightView = Math::CreateLookAt(lightPos, shadowCenter, JPH::Vec3::sAxisY());
 
 	// Orthographic projection covering 200x200 meters with depth up to 400m
@@ -571,7 +575,8 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 	uniforms.lightSpaceMatrix = shadowProjView;
 	uniforms.invViewProj = unjitteredVp.Inversed();
 	std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
-	std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);
+	JPH::Vec3 shaderLightDir = sunDirection;
+	std::memcpy(&uniforms.lightDir[0], &shaderLightDir, sizeof(float) * 3);
 	uniforms.lightDir[3] = sunIntensity;
 	uniforms.lightCount =
 		static_cast<uint32_t>(reg.GetEntitiesWith<LightingSystem::LightComponent>().size());
@@ -581,6 +586,11 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 	uniforms.jitterParams =
 		JPH::Vec4(aaState.jitterX, aaState.jitterY, aaState.prevJitterX, aaState.prevJitterY);
 	uniforms.enableRTR = enableRTR;
+	if (!settingsEntities.empty()) {
+		if (auto* pp = reg.Get<PostProcessSettingsComponent>(settingsEntities[0])) {
+			uniforms.ambientExposure = pp->ambientExposure;
+		}
+	}
 
 	rc.SetAAState(aaState);
 	Renderer::SetFrameData(rc, uniforms, shadowProjView);
@@ -862,42 +872,42 @@ bool InitializeGame(Engine& engine) {
 								   .debugLineAlbedo = lineMat.albedoIndex,
 								   .physicsDrawMode = 0});
 
-	Entity areaLight = reg.Create();
-	reg.Add(areaLight, LightingSystem::LightComponent{.type = 3,
-													  .color = {1.0f, 0.8f, 0.6f},
-													  .intensity = 5.0f,
-													  .radius = 0.0f,
-													  .direction = {0.0f, -1.0f, 0.0f},
-													  .range = 0.0f,
-													  .points = {{-2.0f, 5.0f, -2.0f, 0.0f},
-																 {2.0f, 5.0f, -2.0f, 0.0f},
-																 {2.0f, 5.0f, 2.0f, 0.0f},
-																 {-2.0f, 5.0f, 2.0f, 0.0f}},
-													  .twoSided = 0});
-
-	Entity pt1 = reg.Create();
-	reg.Add(pt1,
-			LightingSystem::LightComponent{.type = 1,
-										   .color = {0.0f, 0.5f, 1.0f},
-										   .intensity = 180.0f,
-										   .radius = 1.5f,
-										   .direction = {0.0f, 0.0f, 0.0f},
-										   .range = 0.0f,
-										   .points = {},
-										   .twoSided = 0},
-			TransformComponent{.position = {-5.0f, 4.0f, 0.0f}});
-
-	Entity pt2 = reg.Create();
-	reg.Add(pt2,
-			LightingSystem::LightComponent{.type = 1,
-										   .color = {1.0f, 0.0f, 0.5f},
-										   .intensity = 180.0f,
-										   .radius = 1.5f,
-										   .direction = {0.0f, 0.0f, 0.0f},
-										   .range = 0.0f,
-										   .points = {},
-										   .twoSided = 0},
-			TransformComponent{.position = {5.0f, 4.0f, 0.0f}});
+	// Entity areaLight = reg.Create();
+	// reg.Add(areaLight, LightingSystem::LightComponent{.type = 3,
+	// 												  .color = {1.0f, 0.8f, 0.6f},
+	// 												  .intensity = 5.0f,
+	// 												  .radius = 0.0f,
+	// 												  .direction = {0.0f, -1.0f, 0.0f},
+	// 												  .range = 0.0f,
+	// 												  .points = {{-2.0f, 5.0f, -2.0f, 0.0f},
+	// 															 {2.0f, 5.0f, -2.0f, 0.0f},
+	// 															 {2.0f, 5.0f, 2.0f, 0.0f},
+	// 															 {-2.0f, 5.0f, 2.0f, 0.0f}},
+	// 												  .twoSided = 0});
+	//
+	// Entity pt1 = reg.Create();
+	// reg.Add(pt1,
+	// 		LightingSystem::LightComponent{.type = 1,
+	// 									   .color = {0.0f, 0.5f, 1.0f},
+	// 									   .intensity = 180.0f,
+	// 									   .radius = 1.5f,
+	// 									   .direction = {0.0f, 0.0f, 0.0f},
+	// 									   .range = 0.0f,
+	// 									   .points = {},
+	// 									   .twoSided = 0},
+	// 		TransformComponent{.position = {-5.0f, 4.0f, 0.0f}});
+	//
+	// Entity pt2 = reg.Create();
+	// reg.Add(pt2,
+	// 		LightingSystem::LightComponent{.type = 1,
+	// 									   .color = {1.0f, 0.0f, 0.5f},
+	// 									   .intensity = 180.0f,
+	// 									   .radius = 1.5f,
+	// 									   .direction = {0.0f, 0.0f, 0.0f},
+	// 									   .range = 0.0f,
+	// 									   .points = {},
+	// 									   .twoSided = 0},
+	// 		TransformComponent{.position = {5.0f, 4.0f, 0.0f}});
 
 	Entity uiSettings = reg.Create();
 	reg.Add(uiSettings, UISettingsComponent{});

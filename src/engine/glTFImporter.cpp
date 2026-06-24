@@ -325,8 +325,8 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job, PhysicsContext& pc) {
 		if (uvAcc != nullptr) {
 			cgltf_accessor_read_float(uvAcc, vIdx, uv, 2);
 		}
-		// Invert the V axis (uv[1]) for glTF conformance
-		v.uv = Math::PackUV(uv[0], 1.0f - uv[1]);
+		// FIX: glTF natively uses a Top-Left UV origin. Do not invert the V axis!
+		v.uv = Math::PackUV(uv[0], uv[1]);
 
 		float rawColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
 		if (colorAcc != nullptr) {
