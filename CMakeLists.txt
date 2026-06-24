@@ -187,10 +187,22 @@ if(NOT ZSTD_LIBRARY)
     message(FATAL_ERROR "Could not find zstd library. Please install it (e.g., 'brew install zstd').")
 endif()
 
+if(APPLE)
+    # Ensure CMake searches Homebrew's prefix for packages, headers, and libraries
+    list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
+endif()
+
+# Find PkgConfig on both Linux and macOS
+find_package(PkgConfig REQUIRED)
+
+# Linux-only dependencies
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBEVDEV REQUIRED IMPORTED_TARGET libevdev)
     pkg_check_modules(LIBSEAT REQUIRED IMPORTED_TARGET libseat)
+endif()
+
+# Dependencies needed on both Linux and macOS
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
     pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
 endif()
 
@@ -245,8 +257,14 @@ target_link_libraries(zahlen_engine PRIVATE
     ${ZSTD_LIBRARY}
 )
 
+# Link Linux-only dependencies
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_link_libraries(zahlen_engine PRIVATE PkgConfig::LIBEVDEV PkgConfig::LIBSEAT PkgConfig::FONTCONFIG)
+    target_link_libraries(zahlen_engine PRIVATE PkgConfig::LIBEVDEV PkgConfig::LIBSEAT)
+endif()
+
+# Link Fontconfig on both Linux and macOS
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
+    target_link_libraries(zahlen_engine PRIVATE PkgConfig::FONTCONFIG)
 endif()
 
 target_link_libraries(zahlen_engine PUBLIC Jolt)

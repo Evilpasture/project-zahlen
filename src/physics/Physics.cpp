@@ -39,10 +39,11 @@
 #include <detail/Loop.hpp>
 // clang-format on
 
+#include <alloca.h> // Include this specifically for alloca() on macOS/Linux
 #include <cstring>
-#include <malloc.h> // For alloca on Windows/Linux (or <alloca.h> on Unix)
 #include <memory>
 #include <new>
+#include <stdlib.h> // This is the standard header for memory functions
 #ifndef _WIN32
 #include <alloca.h>
 #endif
