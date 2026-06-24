@@ -407,14 +407,14 @@ target_compile_definitions(zahlen_engine PRIVATE SHADER_REFLECTION_NORT_HLSL_VS_
 set_property(SOURCE src/engine/Resources.c APPEND PROPERTY OBJECT_DEPENDS "${REFLECTION_NORT_VS_SPV}" "${REFLECTION_NORT_PS_SPV}")
 
 
-compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaEdgeVS vs_6_5 SMAA_EDGE_VS_SPV "-DEDGE_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=0")
-compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaEdgePS ps_6_5 SMAA_EDGE_PS_SPV "-DEDGE_PASS -DSMAA_INCLUDE_VS=0 -DSMAA_INCLUDE_PS=1")
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa_wrap.hlsl" SmaaEdgeVS vs_6_5 SMAA_EDGE_VS_SPV "-DEDGE_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=0")
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa_wrap.hlsl" SmaaEdgePS ps_6_5 SMAA_EDGE_PS_SPV "-DEDGE_PASS -DSMAA_INCLUDE_VS=0 -DSMAA_INCLUDE_PS=1")
 
-compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaWeightVS vs_6_5 SMAA_WEIGHT_VS_SPV "-DWEIGHT_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=0")
-compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaWeightPS ps_6_5 SMAA_WEIGHT_PS_SPV "-DWEIGHT_PASS -DSMAA_INCLUDE_VS=0 -DSMAA_INCLUDE_PS=1")
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa_wrap.hlsl" SmaaWeightVS vs_6_5 SMAA_WEIGHT_VS_SPV "-DWEIGHT_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=0")
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa_wrap.hlsl" SmaaWeightPS ps_6_5 SMAA_WEIGHT_PS_SPV "-DWEIGHT_PASS -DSMAA_INCLUDE_VS=0 -DSMAA_INCLUDE_PS=1")
 
-compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaBlendVS vs_6_5 SMAA_BLEND_VS_SPV "-DBLEND_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=0")
-compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa.hlsl" SmaaBlendPS ps_6_5 SMAA_BLEND_PS_SPV "-DBLEND_PASS -DSMAA_INCLUDE_VS=0 -DSMAA_INCLUDE_PS=1")
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa_wrap.hlsl" SmaaBlendVS vs_6_5 SMAA_BLEND_VS_SPV "-DBLEND_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=0")
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa_wrap.hlsl" SmaaBlendPS ps_6_5 SMAA_BLEND_PS_SPV "-DBLEND_PASS -DSMAA_INCLUDE_VS=0 -DSMAA_INCLUDE_PS=1")
 
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/cluster_bounds.hlsl" CSMain cs_6_0 CLUSTER_BOUNDS_SPV)
 add_custom_target(zahlen_engine_cluster_bounds ALL DEPENDS ${CLUSTER_BOUNDS_SPV})
