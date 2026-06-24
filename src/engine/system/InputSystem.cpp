@@ -61,6 +61,20 @@ void InputSystem::Update(Engine& engine) {
 
 void InputSystem::PlayerInputTranslate(Engine& engine, const Camera& cam) {
 	auto& reg = engine.GetRegistry();
+
+	auto camEnts = reg.GetEntitiesWith<MainCameraTagComponent>();
+	if (!camEnts.empty() && reg.Get<FreeCamTagComponent>(camEnts[0]) != nullptr) {
+		// Zero out player intent so they stand frozen in an Idle pose
+		for (Entity e : reg.GetEntitiesWith<MovementComponent>()) {
+			if (auto* move = reg.Get<MovementComponent>(e)) {
+				move->inputX = 0.0f;
+				move->inputZ = 0.0f;
+				move->jumpRequested = false;
+			}
+		}
+		return;
+	}
+
 	for (Entity e : reg.GetEntitiesWith<MovementComponent>()) {
 		auto* move = reg.Get<MovementComponent>(e);
 		auto* input = reg.Get<InputComponent>(e);

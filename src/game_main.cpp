@@ -254,6 +254,27 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 	}
 
 	ImGui::Begin("Lighting Workspace Controller");
+
+	auto camEnts = reg.GetEntitiesWith<MainCameraTagComponent>();
+	if (!camEnts.empty()) {
+		Entity camEnt = camEnts[0];
+		bool isFreeCam = (reg.Get<FreeCamTagComponent>(camEnt) != nullptr);
+
+		ImGui::SeparatorText("Camera Controls");
+		if (ImGui::Checkbox("Free Cam Mode (Fly)", &isFreeCam)) {
+			if (isFreeCam) {
+				reg.Add(camEnt, FreeCamTagComponent{});
+			} else {
+				reg.Remove<FreeCamTagComponent>(camEnt);
+			}
+		}
+		if (isFreeCam) {
+			ImGui::SameLine();
+			ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.3f, 1.0f),
+							   "  [Hold Right-Click + WASD to fly]");
+		}
+	}
+
 	ImGui::SeparatorText("Physics Debug");
 	ImGui::RadioButton("Hidden", &dbg->physicsDrawMode, 0);
 	ImGui::SameLine();
@@ -795,7 +816,7 @@ bool InitializeGame(Engine& engine) {
 		MainCameraTagComponent, GlobalSettingsTagComponent, AASettingsComponent, TextComponent,
 		UISettingsComponent, AudioSourceComponent, PBRComponent, ItemBaseComponent, PickupComponent,
 		UsableComponent, ContainerComponent, TriggerComponent, DebugSettingsComponent,
-		SunTagComponent>();
+		SunTagComponent, FreeCamTagComponent>();
 
 	auto groundShape =
 		Physics::GetOrCreateShape(pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);

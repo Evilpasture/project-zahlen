@@ -435,37 +435,47 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job, PhysicsContext& pc) {
 								 job.indices.data(), job.indexCount);
 }
 
-ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::string_view path) {
-	uint64_t hash = HashAssetPath(path);
-	if (auto* cached = assetMgr.GetCachedPrefab(hash)) {
-		return cached;
+namespace {
+
+struct CompiledPrimitive {
+	Mesh mesh;
+	Material defaultMaterial;
+	float boundingRadius;
+	float localMin[3];
+	float localMax[3];
+	JPH::ShapeRefC meshCollider;
+	JPH::ShapeRefC boxCollider;
+	uint32_t morphOffset = 0;
+	uint32_t activeMorphCount = 0;
+};
+
+// ============================================================================
+// HELPERS FOR LoadModelPrefab REFACTOR
+// ============================================================================
+
+static void DecomposeStaticMatrices(cgltf_data* data) noexcept {
+	// Identify which nodes actually need decomposition (only animated nodes or joints)
+	std::unordered_set<const cgltf_node*> nodesToDecompose;
+	for (cgltf_size i = 0; i < data->animations_count; ++i) {
+		for (cgltf_size j = 0; j < data->animations[i].channels_count; ++j) {
+			if (data->animations[i].channels[j].target_node != nullptr) {
+				nodesToDecompose.insert(data->animations[i].channels[j].target_node);
+			}
+		}
+	}
+	for (cgltf_size i = 0; i < data->skins_count; ++i) {
+		for (cgltf_size j = 0; j < data->skins[i].joints_count; ++j) {
+			if (data->skins[i].joints[j] != nullptr) {
+				nodesToDecompose.insert(data->skins[i].joints[j]);
+			}
+		}
 	}
 
-	cgltf_options opts{};
-	cgltf_data* data = nullptr;
-
-	std::string pathStr(path);
-	std::string rawPath = "resources/assets/" + pathStr;
-
-	if (cgltf_parse_file(&opts, rawPath.c_str(), &data) != cgltf_result_success) {
-		Log("ERROR: Failed to parse GLB: {}", rawPath);
-		return nullptr;
-	}
-
-	if (cgltf_load_buffers(&opts, data, rawPath.c_str()) != cgltf_result_success) {
-		Log("ERROR: Failed to load GLB buffers: {}", rawPath);
-		cgltf_free(data);
-		return nullptr;
-	}
-
-	auto prefab = std::make_unique<ModelPrefab>();
-	prefab->virtualPath = String256(pathStr);
-	prefab->rawData = data;
-
-	// Decompose static matrices
 	for (cgltf_size idx = 0; idx < data->nodes_count; ++idx) {
 		cgltf_node* node = &data->nodes[idx];
-		if (node->has_matrix) {
+
+		// ONLY decompose if the node is actively used by skeleton joints or animation tracks
+		if (node->has_matrix && nodesToDecompose.contains(node)) {
 			node->has_translation = 1;
 			node->translation[0] = node->matrix[12];
 			node->translation[1] = node->matrix[13];
@@ -503,14 +513,13 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 			node->has_matrix = 0;
 		}
 	}
+}
 
-	// Identify unique images and primitives
-	std::vector<cgltf_image*> uniqueImages;
-	std::vector<CPUPrimitiveJob> primitiveJobs;
-
+void GatherImagesAndPrimitiveJobs(cgltf_data* data, std::vector<cgltf_image*>& outUniqueImages,
+								  std::vector<CPUPrimitiveJob>& outPrimitiveJobs) {
 	auto RegisterImage = [&](cgltf_image* img) {
-		if (img && std::ranges::find(uniqueImages, img) == uniqueImages.end()) {
-			uniqueImages.push_back(img);
+		if (img && std::ranges::find(outUniqueImages, img) == outUniqueImages.end()) {
+			outUniqueImages.push_back(img);
 		}
 	};
 
@@ -534,7 +543,6 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 			job.prim = &mesh->primitives[p];
 			job.nodeTransform = nodeTransform;
 
-			// --- SYNCHRONOUSLY REGISTER TEXTURES TO FIX sRGB RACE CONDITION ---
 			const auto& prim = mesh->primitives[p];
 			if (prim.material != nullptr) {
 				if (prim.material->has_pbr_metallic_roughness) {
@@ -557,37 +565,36 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 					RegisterImage(job.emissiveImage);
 				}
 			}
-			primitiveJobs.push_back(std::move(job));
+			outPrimitiveJobs.push_back(std::move(job));
 		}
 	}
+}
 
-	// ========================================================================
-	// PHASE 1: CPU-PARALLEL PROCESSING
-	// ========================================================================
-	JPH::Array<CPUTextureJob> textureJobs(uniqueImages.size());
+void ProcessCPUTasks(const std::string& rawPath, const std::vector<cgltf_image*>& uniqueImages,
+					 std::vector<CPUPrimitiveJob>& primitiveJobs,
+					 JPH::Array<CPUTextureJob>& outTextureJobs) {
+	outTextureJobs.resize(uniqueImages.size());
 	for (size_t i = 0; i < uniqueImages.size(); ++i) {
-		textureJobs[i].image = uniqueImages[i];
-		textureJobs[i].glbPath = rawPath;
-		textureJobs[i].isSRGB = true;
+		outTextureJobs[i].image = uniqueImages[i];
+		outTextureJobs[i].glbPath = rawPath;
+		outTextureJobs[i].isSRGB = true;
 		for (const auto& primJob : primitiveJobs) {
-			// Emissive maps ARE sRGB. Only Normal and MetallicRoughness are linear!
 			if (primJob.normalImage == uniqueImages[i] || primJob.pbrImage == uniqueImages[i]) {
-				textureJobs[i].isSRGB = false;
+				outTextureJobs[i].isSRGB = false;
 				break;
 			}
 		}
 	}
 
-	// Dispatch Texture Decodes
-	if (!textureJobs.empty()) {
-		TaskSystem::ParallelFor(textureJobs.size(), 1, [&](uint32_t start, uint32_t end, uint32_t) {
-			for (uint32_t i = start; i < end; ++i) {
-				DecodeAndRescaleTexture(textureJobs[i]);
-			}
-		});
+	if (!outTextureJobs.empty()) {
+		TaskSystem::ParallelFor(outTextureJobs.size(), 1,
+								[&](uint32_t start, uint32_t end, uint32_t) {
+									for (uint32_t i = start; i < end; ++i) {
+										DecodeAndRescaleTexture(outTextureJobs[i]);
+									}
+								});
 	}
 
-	// Dispatch Geometry & Jolt BVH Compilation
 	auto& pc = GetEngineContext()->GetPhysicsContext();
 	if (!primitiveJobs.empty()) {
 		TaskSystem::ParallelFor(primitiveJobs.size(), 1,
@@ -597,10 +604,10 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 									}
 								});
 	}
+}
 
-	// ========================================================================
-	// PHASE 2: SEQUENTIAL GPU UPLOAD
-	// ========================================================================
+std::unordered_map<cgltf_image*, uint32_t>
+UploadTexturesToGPU(RenderContext& ctx, JPH::Array<CPUTextureJob>& textureJobs) {
 	std::unordered_map<cgltf_image*, uint32_t> imageToBindlessIdx;
 	for (auto& texJob : textureJobs) {
 		if (texJob.decodedPixels != nullptr) {
@@ -616,112 +623,177 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 			imageToBindlessIdx[texJob.image] = 1; // Fallback to white
 		}
 	}
+	return imageToBindlessIdx;
+}
 
-	std::unordered_map<const cgltf_mesh*, std::vector<ModelPart>> meshCache;
+static CompiledPrimitive GetOrCreateCompiledPrimitive(
+	RenderContext& ctx, const CPUPrimitiveJob& primJob,
+	const std::unordered_map<cgltf_image*, uint32_t>& imageToBindlessIdx,
+	std::unordered_map<const cgltf_primitive*, CompiledPrimitive>& primCache, bool isMirrored) {
+	auto it = primCache.find(primJob.prim);
+	if (it != primCache.end()) {
+		return it->second;
+	}
+
+	// Create actual Vulkan buffers
+	BufferHandle vbo =
+		ctx.CreateVertexBuffer(primJob.vertices.data(), primJob.vertices.size() * sizeof(Vertex));
+	BufferHandle ibo =
+		ctx.CreateIndexBuffer(primJob.indices.data(), primJob.indexCount * sizeof(uint32_t));
+
+	Mesh subMesh = {.vertexBuffer = vbo,
+					.indexBuffer = ibo,
+					.vertexCount = static_cast<uint32_t>(primJob.vertices.size()),
+					.indexCount = primJob.indexCount};
+
+	ctx.BuildMeshBLAS(subMesh);
+
+	// Allocate morph targets on GPU
+	uint32_t finalMorphOffset = 0;
+	if (primJob.activeMorphCount > 0) {
+		finalMorphOffset = ctx.AllocateMorphDeltas(static_cast<uint32_t>(primJob.vertices.size()) *
+													   primJob.activeMorphCount,
+												   primJob.tempDeltas.data());
+	}
+
+	// Map Materials and assign Bindless Indices
+	Material subMaterial =
+		CreateBasicMaterial(ctx, primJob.doubleSided || isMirrored, primJob.alphaBlend);
+	subMaterial.alphaMode = primJob.alphaMode;
+	subMaterial.alphaCutoff = primJob.alphaCutoff;
+	subMaterial.metallicFactor = primJob.metallicFactor;
+	subMaterial.roughnessFactor = primJob.roughnessFactor;
+	std::memcpy(subMaterial.baseColorFactor, primJob.baseColorFactor, sizeof(float) * 4);
+
+	auto GetBindlessIndex = [&](cgltf_image* img) -> uint32_t {
+		if (!img) {
+			return 1;
+		}
+		auto texIt = imageToBindlessIdx.find(img);
+		return (texIt != imageToBindlessIdx.end()) ? texIt->second : 1;
+	};
+
+	subMaterial.albedoIndex = GetBindlessIndex(primJob.albedoImage);
+	subMaterial.normalIndex = GetBindlessIndex(primJob.normalImage);
+	subMaterial.pbrIndex = GetBindlessIndex(primJob.pbrImage);
+	subMaterial.emissiveIndex = GetBindlessIndex(primJob.emissiveImage);
+	std::memcpy(subMaterial.emissiveFactor, primJob.emissiveFactor, sizeof(float) * 4);
+
+	CompiledPrimitive compPrim = {
+		.mesh = subMesh,
+		.defaultMaterial = subMaterial,
+		.boundingRadius = primJob.boundingRadius,
+		.localMin = {primJob.localMin[0], primJob.localMin[1], primJob.localMin[2]},
+		.localMax = {primJob.localMax[0], primJob.localMax[1], primJob.localMax[2]},
+		.meshCollider = primJob.meshCollider,
+		.boxCollider = primJob.boxCollider,
+		.morphOffset = finalMorphOffset,
+		.activeMorphCount = primJob.activeMorphCount};
+
+	primCache[primJob.prim] = compPrim;
+	return compPrim;
+}
+
+} // namespace
+
+// ============================================================================
+// REFACTORED MAIN IMPORT FUNCTION
+// ============================================================================
+
+ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::string_view path) {
+	uint64_t hash = HashAssetPath(path);
+	if (auto* cached = assetMgr.GetCachedPrefab(hash)) {
+		return cached;
+	}
+
+	cgltf_options opts{};
+	cgltf_data* data = nullptr;
+
+	std::string pathStr(path);
+	std::string rawPath = "resources/assets/" + pathStr;
+
+	if (cgltf_parse_file(&opts, rawPath.c_str(), &data) != cgltf_result_success) {
+		Log("ERROR: Failed to parse GLB: {}", rawPath);
+		return nullptr;
+	}
+
+	if (cgltf_load_buffers(&opts, data, rawPath.c_str()) != cgltf_result_success) {
+		Log("ERROR: Failed to load GLB buffers: {}", rawPath);
+		cgltf_free(data);
+		return nullptr;
+	}
+
+	auto prefab = std::make_unique<ModelPrefab>();
+	prefab->virtualPath = String256(pathStr);
+	prefab->rawData = data;
+
+	// 1. Decompose static matrices
+	DecomposeStaticMatrices(data);
+
+	// 2. Identify unique images and primitives
+	std::vector<cgltf_image*> uniqueImages;
+	std::vector<CPUPrimitiveJob> primitiveJobs;
+	GatherImagesAndPrimitiveJobs(data, uniqueImages, primitiveJobs);
+
+	// 3. Process CPU-Parallel tasks
+	JPH::Array<CPUTextureJob> textureJobs;
+	ProcessCPUTasks(rawPath, uniqueImages, primitiveJobs, textureJobs);
+
+	// 4. Upload textures to GPU (Main-thread bound)
+	auto imageToBindlessIdx = UploadTexturesToGPU(ctx, textureJobs);
+
+	// 5. Construct GPU meshes & materials sequentially using the primitive cache
+	std::unordered_map<const cgltf_primitive*, CompiledPrimitive> primCache;
 	JPH::Array<ModelPart> totalParts;
-	std::unordered_set<const cgltf_node*> resolvedNodes;
 
-	// Loop back through to construct GPU meshes & materials in correct sequence
-	for (auto& primJob : primitiveJobs) {
+	for (const auto& primJob : primitiveJobs) {
 		const auto* node = primJob.node;
+		bool isMirrored = (primJob.nodeTransform.GetDeterminant3x3() < 0.0f);
 
-		// If this node was already fully instanced from the cache, skip its remaining primitive
-		// jobs
-		if (resolvedNodes.contains(node)) {
-			continue;
+		// Resolve unique primitive buffers
+		CompiledPrimitive compPrim =
+			GetOrCreateCompiledPrimitive(ctx, primJob, imageToBindlessIdx, primCache, isMirrored);
+
+		// Configure local instanced properties
+		Material activeMaterial = compPrim.defaultMaterial;
+		if (isMirrored && activeMaterial.pipeline != PipelineHandle::Invalid) {
+			// Upgrade base material to a double-sided pipeline variant on mirrored nodes
+			Material mirroredMat = CreateBasicMaterial(ctx, true, activeMaterial.alphaMode == 2);
+			mirroredMat.albedoIndex = activeMaterial.albedoIndex;
+			mirroredMat.normalIndex = activeMaterial.normalIndex;
+			mirroredMat.pbrIndex = activeMaterial.pbrIndex;
+			mirroredMat.emissiveIndex = activeMaterial.emissiveIndex;
+			mirroredMat.alphaMode = activeMaterial.alphaMode;
+			mirroredMat.alphaCutoff = activeMaterial.alphaCutoff;
+			mirroredMat.metallicFactor = activeMaterial.metallicFactor;
+			mirroredMat.roughnessFactor = activeMaterial.roughnessFactor;
+			std::memcpy(mirroredMat.baseColorFactor, activeMaterial.baseColorFactor,
+						sizeof(float) * 4);
+			std::memcpy(mirroredMat.emissiveFactor, activeMaterial.emissiveFactor,
+						sizeof(float) * 4);
+			activeMaterial = mirroredMat;
 		}
-
-		// Only re-use cached geometry if ALL primitives for this mesh have finished compiling
-		auto it = meshCache.find(node->mesh);
-		if (it != meshCache.end() && it->second.size() == node->mesh->primitives_count) {
-			for (auto part : it->second) {
-				part.name = (node->name != nullptr) ? String64(node->name) : String64("Unnamed");
-				part.localTransform = primJob.nodeTransform;
-				part.gltfNode = const_cast<cgltf_node*>(node);
-				part.gltfSkin = node->skin;
-				part.isSkinned = (node->skin != nullptr);
-
-				if (node->weights_count > 0 && node->weights != nullptr) {
-					part.activeMorphCount = std::min((uint32_t)node->weights_count, 4u);
-					for (uint32_t w = 0; w < part.activeMorphCount; ++w) {
-						part.defaultMorphWeights[w] = node->weights[w];
-					}
-				}
-				totalParts.push_back(part);
-			}
-			resolvedNodes.insert(node); // Mark this node as fully resolved
-			continue;
-		}
-
-		// Create actual Vulkan buffers
-		BufferHandle vbo = ctx.CreateVertexBuffer(primJob.vertices.data(),
-												  primJob.vertices.size() * sizeof(Vertex));
-		BufferHandle ibo =
-			ctx.CreateIndexBuffer(primJob.indices.data(), primJob.indexCount * sizeof(uint32_t));
-
-		Mesh subMesh = {.vertexBuffer = vbo,
-						.indexBuffer = ibo,
-						.vertexCount = static_cast<uint32_t>(primJob.vertices.size()),
-						.indexCount = primJob.indexCount};
-
-		ctx.BuildMeshBLAS(subMesh);
-
-		// Allocate morph targets on GPU
-		uint32_t finalMorphOffset = 0;
-		if (primJob.activeMorphCount > 0) {
-			finalMorphOffset = ctx.AllocateMorphDeltas(
-				static_cast<uint32_t>(primJob.vertices.size()) * primJob.activeMorphCount,
-				primJob.tempDeltas.data());
-		}
-
-		// Map Materials and assign Bindless Indices
-		Material subMaterial = CreateBasicMaterial(ctx, primJob.doubleSided, primJob.alphaBlend);
-		subMaterial.alphaMode = primJob.alphaMode;
-		subMaterial.alphaCutoff = primJob.alphaCutoff;
-		subMaterial.metallicFactor = primJob.metallicFactor;
-		subMaterial.roughnessFactor = primJob.roughnessFactor;
-		std::memcpy(subMaterial.baseColorFactor, primJob.baseColorFactor, sizeof(float) * 4);
-
-		if (primJob.albedoImage != nullptr) {
-			subMaterial.albedoIndex = imageToBindlessIdx[primJob.albedoImage];
-		}
-		if (primJob.normalImage != nullptr) {
-			subMaterial.normalIndex = imageToBindlessIdx[primJob.normalImage];
-		}
-		if (primJob.pbrImage != nullptr) {
-			subMaterial.pbrIndex = imageToBindlessIdx[primJob.pbrImage];
-		}
-		if (primJob.emissiveImage != nullptr) {
-			subMaterial.emissiveIndex = imageToBindlessIdx[primJob.emissiveImage];
-		}
-		std::memcpy(subMaterial.emissiveFactor, primJob.emissiveFactor, sizeof(float) * 4);
 
 		ModelPart part = {
 			.name = (node->name != nullptr) ? String64(node->name) : String64("Unnamed"),
-			.mesh = subMesh,
-			.defaultMaterial = subMaterial,
+			.mesh = compPrim.mesh,
+			.defaultMaterial = activeMaterial,
 			.localTransform = primJob.nodeTransform,
 			.jointOffset = 0,
 			.isSkinned = (node->skin != nullptr),
 			.gltfNode = const_cast<cgltf_node*>(node),
 			.gltfSkin = node->skin,
-			.morphOffset = finalMorphOffset,
-			.activeMorphCount = primJob.activeMorphCount,
+			.morphOffset = compPrim.morphOffset,
+			.activeMorphCount = compPrim.activeMorphCount,
 			.defaultMorphWeights = {primJob.defaultMorphWeights[0], primJob.defaultMorphWeights[1],
 									primJob.defaultMorphWeights[2], primJob.defaultMorphWeights[3]},
-			.boundingRadius = primJob.boundingRadius,
-			.localMin = {primJob.localMin[0], primJob.localMin[1], primJob.localMin[2]},
-			.localMax = {primJob.localMax[0], primJob.localMax[1], primJob.localMax[2]},
-			.meshCollider = primJob.meshCollider,
-			.boxCollider = primJob.boxCollider};
+			.boundingRadius = compPrim.boundingRadius,
+			.localMin = {compPrim.localMin[0], compPrim.localMin[1], compPrim.localMin[2]},
+			.localMax = {compPrim.localMax[0], compPrim.localMax[1], compPrim.localMax[2]},
+			.meshCollider = compPrim.meshCollider,
+			.boxCollider = compPrim.boxCollider};
 
-		meshCache[node->mesh].push_back(part);
 		totalParts.push_back(part);
-
-		// If we've finished compiling all primitives of this node, mark it as resolved
-		if (meshCache[node->mesh].size() == node->mesh->primitives_count) {
-			resolvedNodes.insert(node);
-		}
 	}
 
 	prefab->partCount = static_cast<uint32_t>(totalParts.size());
@@ -781,15 +853,28 @@ void PreparePrefabPhysics(const ModelPrefab& prefab, const JPH::Mat44& baseTrans
 			prep.scale =
 				JPH::Vec3(finalLocal.GetColumn3(0).Length(), finalLocal.GetColumn3(1).Length(),
 						  finalLocal.GetColumn3(2).Length());
-			prep.maxScale = std::max({prep.scale.GetX(), prep.scale.GetY(), prep.scale.GetZ()});
+
+			// ============================================================================
+			// PRESERVE REFLECTION (NEGATIVE SCALE)
+			// ============================================================================
+			if (finalLocal.GetDeterminant3x3() < 0.0f) {
+				prep.scale.SetX(-prep.scale.GetX());
+			}
+			// ============================================================================
+
+			prep.maxScale = std::max({std::abs(prep.scale.GetX()), std::abs(prep.scale.GetY()),
+									  std::abs(prep.scale.GetZ())});
 			prep.translation = finalLocal.GetTranslation();
 
-			JPH::Vec3 c0 = prep.scale.GetX() > 1e-6f ? finalLocal.GetColumn3(0) / prep.scale.GetX()
-													 : JPH::Vec3::sAxisX();
-			JPH::Vec3 c1 = prep.scale.GetY() > 1e-6f ? finalLocal.GetColumn3(1) / prep.scale.GetY()
-													 : JPH::Vec3::sAxisY();
-			JPH::Vec3 c2 = prep.scale.GetZ() > 1e-6f ? finalLocal.GetColumn3(2) / prep.scale.GetZ()
-													 : JPH::Vec3::sAxisZ();
+			// Strip sign from columns to extract a clean, uncorrupted rotation basis
+			JPH::Vec3 absScale(std::abs(prep.scale.GetX()), std::abs(prep.scale.GetY()),
+							   std::abs(prep.scale.GetZ()));
+			JPH::Vec3 c0 = absScale.GetX() > 1e-6f ? finalLocal.GetColumn3(0) / prep.scale.GetX()
+												   : JPH::Vec3::sAxisX();
+			JPH::Vec3 c1 = absScale.GetY() > 1e-6f ? finalLocal.GetColumn3(1) / prep.scale.GetY()
+												   : JPH::Vec3::sAxisY();
+			JPH::Vec3 c2 = absScale.GetZ() > 1e-6f ? finalLocal.GetColumn3(2) / prep.scale.GetZ()
+												   : JPH::Vec3::sAxisZ();
 
 			JPH::Mat44 rotMat(JPH::Vec4(c0, 0), JPH::Vec4(c1, 0), JPH::Vec4(c2, 0),
 							  JPH::Vec4(0, 0, 0, 1));
@@ -853,10 +938,17 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 						   params.isStaticPhysics ? static_cast<JPH::ObjectLayer>(0)
 												  : static_cast<JPH::ObjectLayer>(1),
 						   0, params.physicsCategory, params.physicsMask)});
-			reg.Add(e, PhysicsStateComponent{.currPosition = prep.translation,
-											 .prevPosition = prep.translation,
-											 .currRotation = prep.rotation,
-											 .prevRotation = prep.rotation});
+
+			// ============================================================================
+			// ONLY ADD INTERPOLATION STATE TO DYNAMIC (MOVING) OBJECTS
+			// ============================================================================
+			if (!params.isStaticPhysics) {
+				reg.Add(e, PhysicsStateComponent{.currPosition = prep.translation,
+												 .prevPosition = prep.translation,
+												 .currRotation = prep.rotation,
+												 .prevRotation = prep.rotation});
+			}
+			// ============================================================================
 		}
 	} else {
 		JPH::Vec3 nodePos = part.localTransform.GetTranslation();

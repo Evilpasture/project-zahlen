@@ -185,9 +185,7 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 	auto pipeline = Vk::PipelineBuilder{}
 						.Shaders(shaders)
 						.Layout(layout.Get())
-						.ColorFormats(ActiveGBuffer::array)
-						.DepthFormat(VK_FORMAT_D32_SFLOAT)
-						.CullNone();
+						.DepthFormat(VK_FORMAT_D32_SFLOAT);
 
 	if (desc.doubleSided) {
 		pipeline.CullNone();
@@ -196,7 +194,11 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 	}
 
 	if (desc.alphaBlend) {
+		pipeline.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT}); // Output straight to the Lit pass
+		pipeline.DepthWrite(false); // DO NOT write to depth, to preserve opaque occlusion
 		pipeline.AlphaBlend();
+	} else {
+		pipeline.ColorFormats(ActiveGBuffer::array);
 	}
 
 	if (desc.isLineList) {

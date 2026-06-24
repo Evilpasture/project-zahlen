@@ -15,6 +15,14 @@ void CameraSystem::Update(Engine& engine, float dt, float alpha) {
 	auto& cam = engine.GetCamera();
 
 	for (Entity camEnt : reg.GetEntitiesWith<TargetCameraComponent>()) {
+
+		// ============================================================================
+		// SKIP REPOSITIONING IF IN FREE CAM MODE (Bypasses the character lock)
+		// ============================================================================
+		if (reg.Get<FreeCamTagComponent>(camEnt) != nullptr) {
+			continue;
+		}
+
 		auto* camComp = reg.Get<TargetCameraComponent>(camEnt);
 		auto* input = reg.Get<InputSystem::InputComponent>(camEnt);
 		if ((camComp == nullptr) || (input == nullptr) || !reg.IsAlive(camComp->target)) {

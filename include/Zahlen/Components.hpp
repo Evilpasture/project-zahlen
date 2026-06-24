@@ -141,6 +141,7 @@ static_assert(sizeof(TargetCameraComponent) == 112,
 struct PlayerTagComponent {};
 struct MainCameraTagComponent {};
 struct SunTagComponent {};
+struct FreeCamTagComponent {};
 
 // --- GLOBAL SETTINGS SINGLETONS ---
 struct GlobalSettingsTagComponent {};

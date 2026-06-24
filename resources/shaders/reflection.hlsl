@@ -76,6 +76,17 @@ VSOutput VSMain(uint vertexID : SV_VertexID) {
 
 float4 PSMain(VSOutput input) : SV_Target0 {
 	float depth = texDepth.SampleLevel(pointSampler, input.uv, 0).r;
+
+	if (depth >= 1.0f) {
+		// Reconstruct the world-space point on the far plane (depth = 1.0)
+		float3 worldPos = ReconstructWorldPos(input.uv, 1.0f, pc.invViewProj);
+		// Calculate the ray direction pointing away from the camera
+		float3 rayDir = normalize(worldPos - pc.camPos.xyz);
+		// Sample the environment map at MIP 0 with the standard 25.0f exposure boost
+		float3 skyColor = texEnvMap.SampleLevel(smp, rayDir, 0.0f).rgb * 25.0f;
+		return float4(skyColor, 1.0f);
+	}
+
 	float4 litColorRaw = texLighting.SampleLevel(pointSampler, input.uv, 0);
 	if (depth >= 1.0f)
 		return litColorRaw;

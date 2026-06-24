@@ -236,6 +236,9 @@ struct ShadowPass {
 			.Execute(cmd, [&]() {
 				for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
 					const auto& draw = ctx.drawQueue[i];
+					if (draw.alphaMode == 2) {
+						continue;
+					}
 					auto* mesh = std::bit_cast<NativeMesh*>(draw.mesh);
 
 					ObjectConstants pushConstants = {.instanceId = i, .isShadowPass = 1};
@@ -310,6 +313,11 @@ struct MainPass {
 		for (uint32_t i = 0; i < drawCount; ++i) {
 			const auto& drawCmd = ctx.drawQueue[i];
 			auto* drawMat = std::bit_cast<NativeMaterial*>(drawCmd.material);
+
+			if (drawCmd.alphaMode == 2) {
+				currentMaterial = nullptr;
+				continue;
+			}
 
 			if (i == 0 || drawMat != currentMaterial) {
 				groups.push_back(GroupRange{.material = drawMat, .start = i, .count = 1});
@@ -644,6 +652,54 @@ struct DeferredLightingPass {
 			});
 
 		return IssueBarrier<Vk::ColorAttachmentState, Vk::ShaderReadState>(cmd, pp_att);
+	}
+};
+
+struct ForwardPass {
+	[[nodiscard]] auto
+	Execute(const FrameRecorder& recorder,
+			Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> litColor,
+			Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> depth) const noexcept
+		-> Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
+
+		VkCommandBuffer cmd = recorder.cmd;
+		auto& ctx = recorder.ctx;
+
+		auto color_att = IssueBarrier<Vk::ShaderReadState, Vk::ColorAttachmentState>(cmd, litColor);
+		auto depth_att = IssueBarrier<Vk::ShaderReadState, Vk::DepthAttachmentState>(
+			cmd, depth, VK_IMAGE_ASPECT_DEPTH_BIT);
+
+		Vk::DynamicPass(color_att.extent)
+			.AddColor(color_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+			.AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+			.Execute(cmd, [&]() {
+				for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
+					const auto& drawCmd = ctx.drawQueue[i];
+					if (drawCmd.alphaMode == 2 && drawCmd.material->pipeline.Valid()) {
+						ObjectConstants pushConstants = {.instanceId = i, .isShadowPass = 0};
+
+						Vk::DrawInstanced(
+							cmd,
+							{.pipeline =
+								 std::bit_cast<NativeMaterial*>(drawCmd.material)->pipeline.Get(),
+							 .layout =
+								 std::bit_cast<NativeMaterial*>(drawCmd.material)->layout.Get(),
+							 .set = recorder.bindlessSet,
+							 .vertexCount =
+								 drawCmd.indexMesh
+									 ? drawCmd.indexCount
+									 : std::bit_cast<NativeMesh*>(drawCmd.mesh)->vertexCount,
+							 .instanceCount = 1,
+							 .firstVertex = 0,
+							 .firstInstance = i},
+							pushConstants);
+					}
+				}
+			});
+
+		IssueBarrier<Vk::DepthAttachmentState, Vk::ShaderReadState>(cmd, depth_att,
+																	VK_IMAGE_ASPECT_DEPTH_BIT);
+		return IssueBarrier<Vk::ColorAttachmentState, Vk::ShaderReadState>(cmd, color_att);
 	}
 };
 
@@ -1283,14 +1339,17 @@ RenderResult RenderContext::EndFrame() noexcept {
 		stateAfterMain_ro = {
 			.sceneColor = color_ro, .velocity = vel_ro, .normRough = norm_ro, .depth = depth_ro};
 
-	// 3. Compute Deferred Lighting (Ambient, Direct, Clustered, and Reflections) on the G-Buffer
+	// 3. Compute Deferred Lighting
 	auto stateAfterPP = Passes::DeferredLightingPass{}.Execute(recorder, stateAfterMain_ro);
 
-	// 4. Assemble the TAA inputs (the lit color target + unlit G-buffer velocity & depth)
+	// 3.5. Forward Pass (Transparent geometry mapped ON TOP of Deferred Lighting)
+	auto stateAfterForward =
+		Passes::ForwardPass{}.Execute(recorder, stateAfterPP, stateAfterMain_ro.depth);
+
+	// 4. Assemble the TAA inputs
 	SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 				   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>
-		resourcesForAA = {.sceneColor =
-							  stateAfterPP, // The Lit Color output from DeferredLightingPass
+		resourcesForAA = {.sceneColor = stateAfterForward, // Output of Forward Pass!
 						  .velocity = stateAfterMain_ro.velocity,
 						  .normRough = stateAfterMain_ro.normRough,
 						  .depth = stateAfterMain_ro.depth};

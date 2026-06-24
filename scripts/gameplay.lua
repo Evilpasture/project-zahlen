@@ -6,18 +6,15 @@ local zh = require("scripts.core.zahlen")
 
 -- --- Ambient & Post-Processing Subsystems ---
 zh:config({
-    giMode = 1,
-    aoRadius = 0.5,
-    aoBias = 0.05,
-    aoPower = 1.8,
-    giIntensity = 1.2,
-    giSamples = 8,
-    useLocalProbe = 1,
-    probeMin = { -200.0, -10.0, -200.0 },
-    probeMax = { 200.0, 200.0, 200.0 },
-    probePos = { 0.0, 4.0, 0.0 },
-    vignetteIntensity = 1.10,
-    vignettePower = 1.50,
+    giMode = 2,        -- Enable SSGI (Screen Space Global Illumination) for warm light bounces!
+    aoRadius = 0.8,    -- Increase AO search radius for softer contact shadows
+    aoBias = 0.03,
+    aoPower = 2.2,     -- Boost AO contrast
+    giIntensity = 1.5, -- Boost GI bounce intensity
+    giSamples = 16,    -- Bump sample count for smoother, noise-free shadowing
+    useLocalProbe = 0, -- Disable local probe so the bright outdoor sky irradiance floods the solarium!
+    vignetteIntensity = 1.0,
+    vignettePower = 1.8,
     enableSSR = 1,
     enableTAA = 1,
     taaFeedback = 0.95,
@@ -29,20 +26,40 @@ local pomni_parts = nil
 zh:on("engine.start", function()
     zh.log("Scene: Spawning declarative layout...")
 
-    zh:spawn("Circus Lobby V9.glb", { physics = true, static = true })
+    zh:spawn("blender_Caines Office.glb", { physics = true, static = true })
     pomni_parts = zh:spawn("tadc_models/POMNI.glb", { animated = true })
 
+    -- 1. Direct Sun (Changed from Point Light to a true Directional Light)
     local my_sun = zh:spawn_light({
-        type = 1,                              -- Point Light
-        position = zh.vec3(70.0, 150.0, 15.0), -- Positioned in the middle of the lobby
-        rotation = { 0.1, 0.9, 0.1, 0.4 },     -- Tilts the global sun's shadow maps
-        color = { 1.0, 0.95, 0.85 },           -- Warm Sunlight
-        intensity = 250.0,
-        radius = 1.0,
-        range = 30.0
+        type = 0,                           -- 0 = Directional Light (Sun), 1 = Point Light
+        rotation = { 0.25, 0.4, 0.1, 0.8 }, -- Low-angle morning sun tilt for dramatic shadows
+        color = { 1.0, 0.95, 0.88 },        -- Warm sunlight tone
+        intensity = 15.0,                   -- Direct sun intensity (flat, unattenuated)
+        radius = 0.5,
+        range = 400.0
     })
 
     game_ecs:add(my_sun, "SunTagComponent")
+
+    -- 2. Cozy Desk Lamp (Orange glow placed right on Caine's central desk)
+    zh:spawn_light({
+        type = 1,                    -- Point Light
+        position = zh.vec3(0.0, 2.3, -4.0),
+        color = { 1.0, 0.55, 0.25 }, -- Warm ember
+        intensity = 90.0,
+        radius = 0.1,
+        range = 10.0
+    })
+
+    -- 3. Cabinet Highlight (Halogen spotlight pointing at the central shelf)
+    zh:spawn_light({
+        type = 1,              -- Point Light
+        position = zh.vec3(0.0, 4.2, -6.5),
+        color = { 1.0, 0.85, 0.70 }, -- Soft halogen glow
+        intensity = 130.0,
+        radius = 0.15,
+        range = 12.0
+    })
 
     -- Dynamically locate the floor mesh parts and add PBRComponent
     for ent, name_comp in zh.ecs:view("NameComponent") do

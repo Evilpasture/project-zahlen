@@ -32,17 +32,19 @@ Material CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBle
 	PipelineDesc desc;
 	desc.vertexShaderData = ZHLN_Resource_BasicVertSpv;
 	desc.vertexShaderSize = ZHLN_Resource_BasicVertSpv_Len;
-	desc.fragShaderData = ZHLN_Resource_BasicFragSpv;
-	desc.fragShaderSize = ZHLN_Resource_BasicFragSpv_Len;
+
+	if (alphaBlend) {
+		desc.fragShaderData = ZHLN_Resource_ForwardFragSpv;
+		desc.fragShaderSize = ZHLN_Resource_ForwardFragSpv_Len;
+	} else {
+		desc.fragShaderData = ZHLN_Resource_BasicFragSpv;
+		desc.fragShaderSize = ZHLN_Resource_BasicFragSpv_Len;
+	}
+
 	desc.doubleSided = doubleSided;
 	desc.alphaBlend = alphaBlend;
-
 	Material mat = ctx.CreateMaterial(desc);
-
-	// Simply default to the solid white fallback texture (Index 1)
-	// rather than compiling 900+ redundant checkerboard textures!
 	mat.albedoIndex = 1;
-
 	return mat;
 }
 

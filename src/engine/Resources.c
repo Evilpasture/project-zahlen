@@ -173,3 +173,8 @@ const unsigned char ZHLN_Resource_SkinningCompSpv[] = {
 #embed SHADER_SKINNING_HLSL_CS_PATH
 };
 const unsigned int ZHLN_Resource_SkinningCompSpv_Len = sizeof(ZHLN_Resource_SkinningCompSpv);
+
+const unsigned char ZHLN_Resource_ForwardFragSpv[] = {
+#embed SHADER_FORWARD_HLSL_PS_PATH
+};
+const unsigned int ZHLN_Resource_ForwardFragSpv_Len = sizeof(ZHLN_Resource_ForwardFragSpv);

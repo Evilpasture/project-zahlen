@@ -62,6 +62,53 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 		return;
 	}
 
+	// ========================================================================
+	// FREE-CAM INTERCEPTION BRANCH
+	// ========================================================================
+	if (reg.Get<FreeCamTagComponent>(camEnt) != nullptr) {
+		const auto& input = engine.GetInput();
+		const float speed = input.IsKeyDown(KeyCode::LShift) ? 35.0f : 12.0f;
+		const float sensitivity = 0.15f;
+
+		// Mouse look (Hold Right-Click to look around)
+		if (input.IsMouseButtonDown(KeyCode::RButton)) {
+			cam.yaw += input.GetMouse().deltaX * sensitivity;
+			cam.pitch =
+				std::clamp(cam.pitch - (input.GetMouse().deltaY * sensitivity), -89.0f, 89.0f);
+		}
+
+		float yawRad = JPH::DegreesToRadians(cam.yaw);
+		float pitchRad = JPH::DegreesToRadians(cam.pitch);
+		JPH::Vec3 forward(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad),
+						  JPH::Sin(yawRad) * JPH::Cos(pitchRad));
+		forward = forward.Normalized();
+		JPH::Vec3 right = forward.Cross(JPH::Vec3::sAxisY()).Normalized();
+
+		JPH::Vec3 moveDir = JPH::Vec3::sZero();
+		if (input.IsKeyDown(KeyCode::W)) {
+			moveDir += forward;
+		}
+		if (input.IsKeyDown(KeyCode::S)) {
+			moveDir -= forward;
+		}
+		if (input.IsKeyDown(KeyCode::A)) {
+			moveDir -= right;
+		}
+		if (input.IsKeyDown(KeyCode::D)) {
+			moveDir += right;
+		}
+
+		if (moveDir.LengthSq() > 0.0f) {
+			cam.position += moveDir.Normalized() * speed * dt;
+		}
+
+		// Keep backing component synced so toggling OFF doesn't cause a wild rotation snap
+		camComp->yaw = cam.yaw;
+		camComp->pitch = cam.pitch;
+		camComp->smoothTargetPos = cam.position;
+		return;
+	}
+
 	Entity targetEnt = camComp->target;
 	JPH::Vec3 targetPos = JPH::Vec3::sZero();
 

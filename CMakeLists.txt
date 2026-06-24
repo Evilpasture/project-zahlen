@@ -461,6 +461,12 @@ add_dependencies(zahlen_engine zahlen_engine_skinning_shader)
 target_compile_definitions(zahlen_engine PRIVATE SHADER_SKINNING_HLSL_CS_PATH="${SKINNING_COMP_SPV}")
 set_source_files_properties(src/engine/Resources.c PROPERTIES OBJECT_DEPENDS "${SKINNING_COMP_SPV}")
 
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/basic.hlsl" PSForward ps_6_0 FORWARD_FRAG_SPV "-DFORWARD_PASS")
+add_custom_target(zahlen_engine_forward_shader ALL DEPENDS ${FORWARD_FRAG_SPV})
+add_dependencies(zahlen_engine zahlen_engine_forward_shader)
+target_compile_definitions(zahlen_engine PRIVATE SHADER_FORWARD_HLSL_PS_PATH="${FORWARD_FRAG_SPV}")
+set_property(SOURCE src/engine/Resources.c APPEND PROPERTY OBJECT_DEPENDS "${FORWARD_FRAG_SPV}")
+
 add_executable(zahlen 
     src/main.cpp
     src/game_main.cpp 
