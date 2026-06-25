@@ -665,18 +665,20 @@ static CompiledPrimitive GetOrCreateCompiledPrimitive(
 	subMaterial.roughnessFactor = primJob.roughnessFactor;
 	std::memcpy(subMaterial.baseColorFactor, primJob.baseColorFactor, sizeof(float) * 4);
 
-	auto GetBindlessIndex = [&](cgltf_image* img) -> uint32_t {
+	auto GetBindlessIndex = [&](cgltf_image* img, uint32_t defaultIdx) -> uint32_t {
 		if (!img) {
-			return 1;
+			return defaultIdx;
 		}
 		auto texIt = imageToBindlessIdx.find(img);
-		return (texIt != imageToBindlessIdx.end()) ? texIt->second : 1;
+		return (texIt != imageToBindlessIdx.end()) ? texIt->second : defaultIdx;
 	};
 
-	subMaterial.albedoIndex = GetBindlessIndex(primJob.albedoImage);
-	subMaterial.normalIndex = GetBindlessIndex(primJob.normalImage);
-	subMaterial.pbrIndex = GetBindlessIndex(primJob.pbrImage);
-	subMaterial.emissiveIndex = GetBindlessIndex(primJob.emissiveImage);
+	// Use correct system fallbacks (0 = Black, 1 = White, 2 = Flat Normal)
+	subMaterial.albedoIndex = GetBindlessIndex(primJob.albedoImage, 1);
+	subMaterial.normalIndex = GetBindlessIndex(primJob.normalImage, 2);
+	subMaterial.pbrIndex = GetBindlessIndex(primJob.pbrImage, 0);
+	subMaterial.emissiveIndex =
+		GetBindlessIndex(primJob.emissiveImage, 1); // 1 (White) ensures factor-only emission works
 	std::memcpy(subMaterial.emissiveFactor, primJob.emissiveFactor, sizeof(float) * 4);
 
 	CompiledPrimitive compPrim = {

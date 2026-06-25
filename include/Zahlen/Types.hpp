@@ -155,7 +155,7 @@ struct Material {
 	uint32_t albedoIndex = 1;	// Default to Solid White (Index 1)
 	uint32_t normalIndex = 2;	// Default to Flat Normal Map (Index 2)
 	uint32_t pbrIndex = 0;		// Default to Solid Black (Index 0)
-	uint32_t emissiveIndex = 0; // Default to Solid Black (Index 0)
+	uint32_t emissiveIndex = 1; // Default to Solid White (Index 1)
 	float baseColorFactor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
 	float emissiveFactor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 	float metallicFactor = 1.0f;

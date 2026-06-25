@@ -18,6 +18,7 @@ zh:config({
     enableSSR = 1,
     enableTAA = 1,
     taaFeedback = 0.95,
+    ambientExposure = 1.0,
 })
 
 local pomni_parts = nil

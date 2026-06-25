@@ -207,6 +207,8 @@ float4 PSForward(VSOutput input) : SV_Target0 {
 
 	float4 albedo =
 		globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
+	float3 emissiveMap = globalTextures[indices.w].Sample(defaultSampler, input.uv).rgb;
+	float3 emissive = emissiveMap * input.emissiveFactor.rgb;
 
 	float3 N = normalize(input.normal);
 	float3 V = normalize(frame.camPos.xyz - input.worldPos);
@@ -252,7 +254,7 @@ float4 PSForward(VSOutput input) : SV_Target0 {
 		(F * envBRDF.x + envBRDF.y);
 
 	float3 diffuseIBL = albedo.rgb * 0.5f;
-	float3 finalColor = diffuseIBL + specularIBL;
+	float3 finalColor = diffuseIBL + specularIBL + emissive;
 
 	// Additive fresnel boost to simulate refractive edges
 	float glassAlpha = saturate(albedo.a + saturate(1.0f - NdotV) * 0.5f);

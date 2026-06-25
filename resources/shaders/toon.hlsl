@@ -95,6 +95,9 @@ PSOutput PSMain(VSOutput input) {
 	float4 albedo =
 		globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
 
+	float3 emissiveMap = globalTextures[indices.w].Sample(defaultSampler, input.uv).rgb;
+	float3 emissive = emissiveMap * input.emissiveFactor.rgb;
+
 	if (alphaMode == 1 && albedo.a < alphaCutoff) {
 		discard;
 	}
@@ -161,7 +164,7 @@ PSOutput PSMain(VSOutput input) {
 	float rimIntensity = smoothstep(0.6f, 0.75f, rim) * 0.25f * celIntensity;
 
 	// --- 6. COMPOSITING ---
-	float3 finalColor = ambient + (albedo.rgb * celIntensity) + specular + rimIntensity;
+	float3 finalColor = ambient + (albedo.rgb * celIntensity) + specular + rimIntensity + emissive;
 	finalColor = min(finalColor, 100.0f);
 
 	output.color = float4(finalColor, albedo.a);
