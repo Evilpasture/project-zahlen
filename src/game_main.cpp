@@ -234,14 +234,15 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 		if (ImGui::Combo("Shadow Map Resolution", &currentResIdx, resolutions,
 						 IM_ARRAYSIZE(resolutions))) {
 			int newRes = 2048;
-			if (currentResIdx == 0)
+			if (currentResIdx == 0) {
 				newRes = 512;
-			else if (currentResIdx == 1)
+			} else if (currentResIdx == 1) {
 				newRes = 1024;
-			else if (currentResIdx == 2)
+			} else if (currentResIdx == 2) {
 				newRes = 2048;
-			else if (currentResIdx == 3)
+			} else if (currentResIdx == 3) {
 				newRes = 4096;
+			}
 
 			shadowSettings->shadowResolution = newRes;
 
