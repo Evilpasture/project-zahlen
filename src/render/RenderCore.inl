@@ -524,21 +524,64 @@ inline void TransitionLayout(const VkCommandBuffer cmd, const VkImage image,
 	ZHLN_CmdImageBarrier(cmd, &barrier);
 }
 
-template <> struct LayoutMap<UndefinedState> {
-	static constexpr VkImageLayout value = VK_IMAGE_LAYOUT_UNDEFINED;
-};
-template <> struct LayoutMap<ColorAttachmentState> {
-	static constexpr VkImageLayout value = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-};
-template <> struct LayoutMap<DepthAttachmentState> {
-	static constexpr VkImageLayout value = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-};
-template <> struct LayoutMap<ShaderReadState> {
-	static constexpr VkImageLayout value = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-};
-template <> struct LayoutMap<PresentState> {
-	static constexpr VkImageLayout value = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-};
+// ============================================================================
+// Scoped RAII Layout Transition Implementations
+// ============================================================================
+
+template <typename SrcState, typename DstState>
+ScopedBarrierGuard<SrcState, DstState>::ScopedBarrierGuard(
+	VkCommandBuffer c, const TypedImage<LayoutMap<SrcState>::value>& res,
+	VkImageAspectFlags aspect) noexcept
+	: cmd(c), resource(res), aspectOverride(aspect) {}
+
+template <typename SrcState, typename DstState>
+ScopedBarrierGuard<SrcState, DstState>::~ScopedBarrierGuard() noexcept {
+	if (active) {
+		IssueBarrier<DstState, SrcState>(cmd, resource, aspectOverride);
+	}
+}
+
+template <typename SrcState, typename DstState>
+ScopedBarrierGuard<SrcState, DstState>::ScopedBarrierGuard(ScopedBarrierGuard&& other) noexcept
+	: cmd(other.cmd), resource(other.resource), aspectOverride(other.aspectOverride),
+	  active(other.active) {
+	other.active = false;
+}
+
+template <typename SrcState, typename DstState>
+auto ScopedBarrierGuard<SrcState, DstState>::operator=(ScopedBarrierGuard&& other) noexcept
+	-> ScopedBarrierGuard& {
+	if (this != &other) {
+		if (active) {
+			IssueBarrier<DstState, SrcState>(cmd, resource, aspectOverride);
+		}
+		cmd = other.cmd;
+		resource = other.resource;
+		aspectOverride = other.aspectOverride;
+		active = other.active;
+		other.active = false;
+	}
+	return *this;
+}
+
+template <typename SrcState, typename DstState, typename T>
+auto ScopedBarrier(VkCommandBuffer cmd, const T& resource,
+				   VkImageAspectFlags aspectOverride) noexcept {
+	auto transitionedImage = IssueBarrier<SrcState, DstState>(cmd, resource, aspectOverride);
+
+	constexpr VkImageLayout srcLayout = LayoutMap<SrcState>::value;
+	TypedImage<srcLayout> srcImage;
+
+	if constexpr (requires { resource.State(); }) {
+		auto state = resource.State();
+		srcImage = {state.handle, state.view, state.extent, state.aspect};
+	} else {
+		srcImage = {resource.handle, resource.view, resource.extent, resource.aspect};
+	}
+
+	return std::make_pair(transitionedImage,
+						  ScopedBarrierGuard<SrcState, DstState>(cmd, srcImage, aspectOverride));
+}
 
 template <typename InState, typename OutState, typename T>
 inline auto IssueBarrier(VkCommandBuffer cmd, const T& resource,

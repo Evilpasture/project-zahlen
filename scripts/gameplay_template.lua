@@ -12,7 +12,7 @@ zh:config({
     aoBias = 0.03,
     aoPower = 2.2,     -- Boost ambient occlusion contrast
     giIntensity = 1.5, -- Warm, bright light bounces
-    giSamples = 16,    -- High sample counts to prevent specular/dither noise
+    giSamples = 16,    -- High sample counts to prevent dither noise
     useLocalProbe = 0, -- Let the skybox irradiance flood the scene
     vignetteIntensity = 1.0,
     vignettePower = 1.8,
@@ -29,8 +29,6 @@ zh:on("engine.start", function()
     zh.log("[Sandbox] Initializing lightweight lighting & physics playground...")
 
     -- A. Spawn a Large Static Baseplate
-    -- The box center is at Y = -0.5 with height = 1.0. This places the top
-    -- surface exactly at Y = 0.0, aligning with the player's initial gravity drop.
     local baseplate = zh:spawn_entity({
         type = "box",
         size = zh.vec3(100.0, 1.0, 100.0),
@@ -54,7 +52,6 @@ zh:on("engine.start", function()
     }
 
     for i = 1, 5 do
-        -- Stacked with a slight Y-offset so they fall and collide dynamically
         local box = zh:spawn_entity({
             type = "box",
             size = zh.vec3(1.0, 1.0, 1.0),
@@ -63,22 +60,34 @@ zh:on("engine.start", function()
             static = false
         })
         zh.ecs:add(box, "NameComponent", { name = "TestCrate_" .. tostring(i) })
-
-        -- Vary PBR roughness & metallic properties incrementally
         zh.ecs:add(box, "PBRComponent", {
             roughness = 0.15 * i,
             metallic = 0.2 * (5 - i)
         })
     end
 
-    -- C. Inject Lighting Workspace
+    -- C. ADDED: Semi-Transparent Interactive Glass Box
+    zh.log("[Sandbox] Spawning semi-transparent glass box...")
+    local glassBox = zh:spawn_entity({
+        type = "box",
+        size = zh.vec3(1.5, 3.0, 1.5),
+        position = zh.vec3(4.0, 1.5, -3.0), -- Positioned to the right of the red crates
+        color = { 0.4, 0.7, 1.0, 0.4 },     -- Light blue with 40% opacity (0.4 alpha)
+        static = true                       -- Keep it anchored
+    })
+    zh.ecs:add(glassBox, "NameComponent", { name = "GlassObstacle" })
+    zh.ecs:add(glassBox, "PBRComponent", {
+        roughness = 0.05, -- Very smooth for sharp specular reflections
+        metallic = 0.10   -- Low metallic factor for dielectric glass
+    })
+
+    -- D. Inject Lighting Workspace
     zh.log("[Sandbox] Injecting high-contrast light setup...")
 
-    -- Direct Sun (Directional Light, type = 0)
     local sun = zh:spawn_light({
         type = 0,
-        rotation = { -0.575, 0.287, 0.0, 0.766 }, -- Aligned with the sky's baked sun disk
-        color = { 1.0, 0.95, 0.88 },              -- Soft warm sunlight
+        rotation = { -0.575, 0.287, 0.0, 0.766 },
+        color = { 1.0, 0.95, 0.88 },
         intensity = 180.0,
         radius = 0.5,
         range = 400.0

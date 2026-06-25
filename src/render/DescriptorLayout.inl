@@ -370,54 +370,113 @@ void DescriptorLayout<Slots...>::WriteSlot(VkDescriptorSet set, Arg&& arg,
 
 		if constexpr (Slot::type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ||
 					  Slot::type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
-			static_assert(std::is_same_v<T, ImageWrite> || IsTypedImage<T>::value,
-						  "Binding expects ImageWrite or TypedImage<Layout>");
+			VkImageView view = VK_NULL_HANDLE;
+			VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-			if constexpr (IsTypedImage<T>::value) {
-				static_assert(T::layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL ||
-								  T::layout == VK_IMAGE_LAYOUT_GENERAL,
-							  "ZHLN Compile-Time Error: Image must be transitioned to a readable "
-							  "layout before binding.");
-				imageInfo = {
-					.sampler = VK_NULL_HANDLE, .imageView = arg.view, .imageLayout = T::layout};
+			if constexpr (std::is_same_v<T, ImageWrite>) {
+				view = arg.view;
+				layout = arg.layout;
+			} else if constexpr (IsTypedImage<T>::value) {
+				view = arg.view;
+				layout = T::layout;
+			} else if constexpr (requires { arg.view.Get(); }) { // RenderTarget<F>
+				view = arg.view.Get();
+				layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			} else if constexpr (requires {
+									 { arg.Get() } -> std::convertible_to<VkImageView>;
+								 }) { // ImageView / DeviceHandle
+				view = arg.Get();
+				layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			} else if constexpr (std::is_same_v<T, VkImageView>) {
+				view = arg;
+				layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 			} else {
-				imageInfo = {
-					.sampler = VK_NULL_HANDLE, .imageView = arg.view, .imageLayout = arg.layout};
+				static_assert(sizeof(T) == 0, "Unsupported argument type for SampledImage slot.");
 			}
+
+			imageInfo = {.sampler = VK_NULL_HANDLE, .imageView = view, .imageLayout = layout};
 			write.pImageInfo = &imageInfo;
+
 		} else if constexpr (Slot::type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
-			static_assert(std::is_same_v<T, ImageWrite>, "Binding expects ImageWrite");
+			VkImageView view = VK_NULL_HANDLE;
+			if constexpr (std::is_same_v<T, ImageWrite>) {
+				view = arg.view;
+			} else if constexpr (requires { arg.view.Get(); }) {
+				view = arg.view.Get();
+			} else if constexpr (requires {
+									 { arg.Get() } -> std::convertible_to<VkImageView>;
+								 }) {
+				view = arg.Get();
+			} else if constexpr (std::is_same_v<T, VkImageView>) {
+				view = arg;
+			} else {
+				static_assert(sizeof(T) == 0, "Unsupported argument type for StorageImage slot.");
+			}
+
 			imageInfo = {.sampler = VK_NULL_HANDLE,
-						 .imageView = arg.view,
+						 .imageView = view,
 						 .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
 			write.pImageInfo = &imageInfo;
+
 		} else if constexpr (Slot::type == VK_DESCRIPTOR_TYPE_SAMPLER) {
-			static_assert(std::is_same_v<T, SamplerWrite>, "Binding expects SamplerWrite");
-			imageInfo = {.sampler = arg.sampler,
+			VkSampler sampler = VK_NULL_HANDLE;
+			if constexpr (std::is_same_v<T, SamplerWrite>) {
+				sampler = arg.sampler;
+			} else if constexpr (requires {
+									 { arg.Get() } -> std::convertible_to<VkSampler>;
+								 }) { // Sampler / DeviceHandle
+				sampler = arg.Get();
+			} else if constexpr (std::is_same_v<T, VkSampler>) {
+				sampler = arg;
+			} else {
+				static_assert(sizeof(T) == 0, "Unsupported argument type for Sampler slot.");
+			}
+
+			imageInfo = {.sampler = sampler,
 						 .imageView = VK_NULL_HANDLE,
 						 .imageLayout = VK_IMAGE_LAYOUT_UNDEFINED};
 			write.pImageInfo = &imageInfo;
+
 		} else if constexpr (Slot::type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ||
 							 Slot::type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
-			static_assert(std::is_same_v<T, BufferWrite>, "Binding expects BufferWrite");
-			bufferInfo = {.buffer = arg.buffer, .offset = arg.offset, .range = arg.range};
-			write.pBufferInfo = &bufferInfo;
-		} else if constexpr (Slot::type == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR) {
-			static_assert(std::is_same_v<T, const VkAccelerationStructureKHR*> ||
-							  std::is_same_v<T, VkAccelerationStructureKHR*>,
-						  "Binding expects a pointer to VkAccelerationStructureKHR");
-			if (*arg == VK_NULL_HANDLE) {
-				write.descriptorCount = 0;
+			VkBuffer buffer = VK_NULL_HANDLE;
+			VkDeviceSize offset = 0;
+			VkDeviceSize range = VK_WHOLE_SIZE;
+
+			if constexpr (std::is_same_v<T, BufferWrite>) {
+				buffer = arg.buffer;
+				offset = arg.offset;
+				range = arg.range;
+			} else if constexpr (requires { arg.Handle(); }) { // Vk::Buffer
+				buffer = arg.Handle();
+			} else if constexpr (std::is_same_v<T, VkBuffer>) {
+				buffer = arg;
 			} else {
-				asInfo = {.sType =
-							  VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
-						  .pNext = nullptr,
-						  .accelerationStructureCount = 1,
-						  .pAccelerationStructures = arg};
-				write.pNext = &asInfo;
+				static_assert(sizeof(T) == 0, "Unsupported argument type for Buffer slot.");
 			}
-		} else {
-			static_assert(sizeof(Slot) == 0, "Unhandled descriptor type");
+
+			bufferInfo = {.buffer = buffer, .offset = offset, .range = range};
+			write.pBufferInfo = &bufferInfo;
+
+		} else if constexpr (Slot::type == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR) {
+			if constexpr (std::is_pointer_v<T> &&
+						  (std::is_same_v<std::remove_pointer_t<T>,
+										  const VkAccelerationStructureKHR> ||
+						   std::is_same_v<std::remove_pointer_t<T>, VkAccelerationStructureKHR>)) {
+				if (arg == nullptr || *arg == VK_NULL_HANDLE) {
+					write.descriptorCount = 0;
+				} else {
+					asInfo = {.sType =
+								  VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
+							  .pNext = nullptr,
+							  .accelerationStructureCount = 1,
+							  .pAccelerationStructures = arg};
+					write.pNext = &asInfo;
+				}
+			} else {
+				static_assert(sizeof(T) == 0,
+							  "Unsupported argument type for AccelerationStructure slot.");
+			}
 		}
 	}
 }

@@ -583,16 +583,15 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 							currentTransform = mesh->localTransform;
 						}
 
-						Renderer::Draw(
-							rc, mesh->material, mesh->mesh,
-							{.transform = currentTransform,
-							 .prevTransform = mesh->prevTransform,
-							 .cullRadius = mesh->cullRadius,
-							 .jointOffset = mesh->jointOffset,
-							 .morphOffset = mesh->morphOffset,
-							 .activeMorphCount = mesh->activeMorphCount,
-							 .morphWeights = mesh->morphWeights.data(),
-							 .flags = mesh->isSkinned ? DrawFlags::Skinned : DrawFlags::None});
+						Renderer::Draw(rc, mesh->material, mesh->mesh,
+									   {.transform = currentTransform,
+										.prevTransform = mesh->prevTransform,
+										.cullRadius = mesh->cullRadius,
+										.jointOffset = mesh->jointOffset,
+										.morphOffset = mesh->morphOffset,
+										.activeMorphCount = mesh->activeMorphCount,
+										.morphWeights = mesh->morphWeights.data(),
+										.flags = mesh->flags});
 					}
 				}
 			}

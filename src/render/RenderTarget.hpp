@@ -62,6 +62,28 @@ template <typename... Targets> struct GBufferLayout {
 	static constexpr std::array<VkFormat, count> array = {TargetFormat<Targets>::value...};
 };
 
+// --- Graph Helper ---
+template <VkImageLayout L, VkFormat F>
+Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget<F>& rt,
+							   VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
+	return {rt.image.Handle(), rt.view.Get(), rt.extent, aspect};
+}
+
+template <VkImageLayout TargetLayout, typename T>
+constexpr auto TransitionSingle(VkCommandBuffer cmd, const T& res) noexcept {
+	if constexpr (requires { res.State(); }) { // RenderTarget<F>
+		return Vk::Transition<TargetLayout>(cmd, res.State());
+	} else { // TypedImage<Layout>
+		return Vk::Transition<TargetLayout>(cmd, res);
+	}
+}
+
+template <VkImageLayout TargetLayout, typename... Resources>
+[[nodiscard]] constexpr auto TransitionBatch(VkCommandBuffer cmd,
+											 const Resources&... resources) noexcept {
+	return std::make_tuple(TransitionSingle<TargetLayout>(cmd, resources)...);
+}
+
 } // namespace ZHLN::Vk
 
 #include "RenderTarget.inl"

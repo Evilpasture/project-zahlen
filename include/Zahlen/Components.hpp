@@ -54,6 +54,7 @@ struct MeshComponent {
 
 	void* gltfNode = nullptr;
 	void* gltfSkin = nullptr;
+	DrawFlags flags = DrawFlags::None;
 };
 
 /**

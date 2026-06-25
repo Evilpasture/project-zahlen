@@ -615,11 +615,6 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 				continue;
 			}
 
-			DrawFlags flags = DrawFlags::None;
-			if (mesh->isSkinned) {
-				flags |= DrawFlags::Skinned;
-			}
-
 			// Retrieve PBR factors from PBRComponent to use as the Single Source of Truth
 			float roughness = -1.0f;
 			float metallic = -1.0f;
@@ -636,7 +631,7 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 							.morphOffset = mesh->morphOffset,
 							.activeMorphCount = mesh->activeMorphCount,
 							.morphWeights = mesh->morphWeights.data(),
-							.flags = flags,
+							.flags = mesh->flags,
 							.skinnedVertexBuffer = mesh->skinnedVertexBuffer,
 							.roughness = roughness,
 							.metallic = metallic});
@@ -948,7 +943,7 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, ScriptRunne
 
 	// --- DYNAMIC HOT-RELOAD PUMP ---
 	if (gameplayWatcher.CheckModified()) {
-		scriptRunner.ReloadFile("scripts/gameplay.lua");
+		scriptRunner.ReloadFile("scripts/gameplay_template.lua");
 	}
 	engine.GetRenderContext().CheckShaderReload(); // Checks and re-builds stale pipelines
 
@@ -1095,7 +1090,7 @@ std::expected<std::unique_ptr<Engine>, EngineError> InitializeEngine(CommandLine
 std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine,
 											  const CommandLineOptions& options) {
 	ScriptRunner scriptRunner;
-	FileWatcher gameplayWatcher("scripts/gameplay.lua");
+	FileWatcher gameplayWatcher("scripts/gameplay_template.lua");
 
 	if (!InitializeGame(*engine)) {
 		return std::unexpected(
@@ -1114,7 +1109,7 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine,
 	}
 
 	ZHLN::Log("Window active and presenting. Loading scene assets...");
-	scriptRunner.RunFile("scripts/gameplay.lua");
+	scriptRunner.RunFile("scripts/gameplay_template.lua");
 
 	float physicsAccumulator = 0.0f;
 	const double targetFrameTime =
@@ -1175,7 +1170,7 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine,
 		if (!render_res) {
 			if (render_res.error() == RenderFrameResult::DeviceLost) {
 				engine->HandleDeviceLost();
-				scriptRunner.ReloadFile("scripts/gameplay.lua");
+				scriptRunner.ReloadFile("scripts/gameplay_template.lua");
 			}
 		}
 

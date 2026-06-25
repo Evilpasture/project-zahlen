@@ -910,6 +910,16 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 							 ? params.materialOverride
 							 : part.defaultMaterial;
 
+	// Resolve runtime DrawFlags
+	DrawFlags flags = DrawFlags::None;
+	if (part.isSkinned && params.isAnimated) {
+		flags |= DrawFlags::Skinned;
+	}
+	// Exclude from the Raytracing Acceleration Structure if the material is transparent
+	if (activeMat.alphaMode == 2) {
+		flags |= DrawFlags::ExcludeFromTLAS;
+	}
+
 	if (params.createPhysics) {
 		reg.Add(e, TransformComponent{.position = prep.translation,
 									  .rotation = prep.rotation,
@@ -929,7 +939,8 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 					   .morphWeights = {part.defaultMorphWeights[0], part.defaultMorphWeights[1],
 										part.defaultMorphWeights[2], part.defaultMorphWeights[3]},
 					   .gltfNode = params.isAnimated ? part.gltfNode : nullptr,
-					   .gltfSkin = params.isAnimated ? part.gltfSkin : nullptr});
+					   .gltfSkin = params.isAnimated ? part.gltfSkin : nullptr,
+					   .flags = flags});
 		reg.Add(e, NameComponent{.name = part.name});
 
 		if (prep.shape != nullptr) {

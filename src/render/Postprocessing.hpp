@@ -1,7 +1,14 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // src/render/Postprocessing.hpp
 #pragma once
 #include "PipelineBuilder.hpp"
 #include "RenderCore.hpp"
+
+#include <tuple>
+#include <type_traits>
+#include <utility>
 
 namespace ZHLN::Vk {
 
@@ -88,8 +95,60 @@ template <typename LayoutT> struct PostProcessPass {
 		return !pipelines.empty();
 	}
 
+	template <typename TargetT, typename PushT, typename... Args>
+	auto ExecuteWithTransitions(VkCommandBuffer cmd, VkDevice device, TargetT& targetRenderTarget,
+								const PushT& pc, Args&&... inputs)
+		-> TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
+
+		auto target_u = AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(targetRenderTarget);
+		auto target_att =
+			IssueBarrier<Vk::ShaderReadState, Vk::ColorAttachmentState>(cmd, target_u);
+
+		WriteNext(device, std::forward<Args>(inputs)...);
+
+		DynamicPass(targetRenderTarget.extent)
+			.AddColor(target_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+			.Execute(cmd, [&]() { Execute(cmd, pc); });
+
+		return IssueBarrier<Vk::ColorAttachmentState, Vk::ShaderReadState>(cmd, target_att);
+	}
+
+	template <typename TargetT, typename PushT, typename... Args>
+	auto ExecuteVariantWithTransitions(VkCommandBuffer cmd, VkDevice device,
+									   TargetT& targetRenderTarget, uint32_t variantIdx,
+									   const PushT& pc, Args&&... inputs)
+		-> TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
+
+		auto target_u = AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(targetRenderTarget);
+		auto target_att =
+			IssueBarrier<Vk::ShaderReadState, Vk::ColorAttachmentState>(cmd, target_u);
+
+		WriteNext(device, std::forward<Args>(inputs)...);
+
+		DynamicPass(targetRenderTarget.extent)
+			.AddColor(target_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+			.Execute(cmd, [&]() { ExecuteVariant(cmd, variantIdx, pc); });
+
+		return IssueBarrier<Vk::ColorAttachmentState, Vk::ShaderReadState>(cmd, target_att);
+	}
+
 	template <typename... Args> void WriteNext(VkDevice device, Args&&... args) noexcept {
-		LayoutT::Write(device, sets.Next(), std::forward<Args>(args)...);
+		if constexpr (sizeof...(Args) == 1) {
+			using FirstT = std::decay_t<std::tuple_element_t<0, std::tuple<Args...>>>;
+
+			if constexpr (requires { std::declval<FirstT>().AsTuple(); }) {
+				std::apply(
+					[&](auto&&... unpacked) {
+						LayoutT::Write(device, sets.Next(),
+									   std::forward<decltype(unpacked)>(unpacked)...);
+					},
+					std::get<0>(std::forward_as_tuple(args...)).AsTuple());
+			} else {
+				LayoutT::Write(device, sets.Next(), std::forward<Args>(args)...);
+			}
+		} else {
+			LayoutT::Write(device, sets.Next(), std::forward<Args>(args)...);
+		}
 	}
 
 	template <typename... Args>

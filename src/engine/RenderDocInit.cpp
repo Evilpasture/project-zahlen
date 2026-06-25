@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #include <print>
 #if defined(_WIN32)
 #include <windows.h>

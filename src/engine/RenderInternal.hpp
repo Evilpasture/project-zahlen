@@ -597,6 +597,15 @@ struct RenderContext::Impl {
 			}
 		}
 	}
+
+	template <VkFormat F>
+	auto CreateDefaultTarget(VkExtent2D ext, VkImageUsageFlags extraFlags = 0) {
+		return Vk::RenderTarget<F>::Create(allocator, ctx, ext,
+										   {.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+													 VK_IMAGE_USAGE_SAMPLED_BIT | extraFlags});
+	}
+
+	bool RecreateTargets(VkExtent2D ext);
 };
 
 } // namespace ZHLN

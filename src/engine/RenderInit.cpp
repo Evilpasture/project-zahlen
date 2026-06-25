@@ -1184,4 +1184,48 @@ void RenderContext::Impl::SetupUI(GLFWwindow* window) {
 	}
 }
 
+bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
+	if (!presentation.Rebuild(ext.width, ext.height)) {
+		return false;
+	}
+
+	sceneColor = CreateDefaultTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>(ext);
+	velocityBuffer = CreateDefaultTarget<VK_FORMAT_R16G16_SFLOAT>(ext);
+	accumBuffers[0] = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
+	accumBuffers[1] = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
+	normalRoughnessBuffer = CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext);
+	postProcessTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
+	ambientTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
+	lightingTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
+	smaaEdgeTarget = CreateDefaultTarget<VK_FORMAT_R8G8_UNORM>(ext);
+	smaaWeightTarget = CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext);
+
+	VkExtent2D bloomExt = {std::max(1u, ext.width / 4), std::max(1u, ext.height / 4)};
+	bloomThresholdTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(bloomExt);
+	bloomBlurTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(bloomExt);
+	bloomFinalTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(bloomExt);
+
+	punctualShadowViews.clear();
+	uint32_t maxPointLights = 4;
+	punctualShadowViews.resize(maxPointLights);
+	for (uint32_t i = 0; i < maxPointLights; ++i) {
+		VkImageViewCreateInfo viewInfo = {
+			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+			.image = shadowAtlas.image.Handle(),
+			.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+			.format = VK_FORMAT_D32_SFLOAT,
+			.subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+								 .baseMipLevel = 0,
+								 .levelCount = 1,
+								 .baseArrayLayer = i * 6,
+								 .layerCount = 6}};
+
+		VkImageView rawView = VK_NULL_HANDLE;
+		vkCreateImageView(ctx.Device(), &viewInfo, nullptr, &rawView);
+		punctualShadowViews[i] = Vk::ImageView(ctx.Device(), rawView);
+	}
+
+	return true;
+}
+
 } // namespace ZHLN

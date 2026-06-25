@@ -509,6 +509,7 @@ class ScopedRendering {
 void ImageBarrier(const VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc& desc) noexcept;
 
 void MemoryBarrier(const VkCommandBuffer cmd, const ZHLN_MemoryBarrierDesc& desc) noexcept;
+
 [[nodiscard]] auto GetBufferDeviceAddress(VkDevice device, VkBuffer buffer) noexcept
 	-> VkDeviceAddress;
 
@@ -560,6 +561,22 @@ struct PresentState {};
 
 template <typename State> struct LayoutMap;
 
+template <> struct LayoutMap<UndefinedState> {
+	static constexpr VkImageLayout value = VK_IMAGE_LAYOUT_UNDEFINED;
+};
+template <> struct LayoutMap<ColorAttachmentState> {
+	static constexpr VkImageLayout value = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+};
+template <> struct LayoutMap<DepthAttachmentState> {
+	static constexpr VkImageLayout value = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+};
+template <> struct LayoutMap<ShaderReadState> {
+	static constexpr VkImageLayout value = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+};
+template <> struct LayoutMap<PresentState> {
+	static constexpr VkImageLayout value = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+};
+
 template <typename InState, typename OutState, typename T>
 auto IssueBarrier(VkCommandBuffer cmd, const T& resource,
 				  VkImageAspectFlags aspectOverride = VK_IMAGE_ASPECT_NONE);
@@ -574,6 +591,53 @@ void CopyBufferToImage(const VkCommandBuffer cmd, const ZHLN_BufferImageCopyDesc
 template <GpuTriviallyCopyable T>
 void Push(const VkCommandBuffer cmd, const VkPipelineLayout layout, const VkShaderStageFlags stages,
 		  const T& value) noexcept;
+
+// ============================================================================
+// Scoped RAII Layout Transition Guards
+// ============================================================================
+
+template <typename SrcState, typename DstState> class ScopedBarrierGuard {
+  public:
+	VkCommandBuffer cmd;
+	TypedImage<LayoutMap<SrcState>::value> resource;
+	VkImageAspectFlags aspectOverride;
+	bool active = true;
+
+	ScopedBarrierGuard(VkCommandBuffer c, const TypedImage<LayoutMap<SrcState>::value>& res,
+					   VkImageAspectFlags aspect) noexcept;
+	~ScopedBarrierGuard() noexcept;
+
+	// Move-only semantics
+	ScopedBarrierGuard(const ScopedBarrierGuard&) = delete;
+	auto operator=(const ScopedBarrierGuard&) -> ScopedBarrierGuard& = delete;
+
+	ScopedBarrierGuard(ScopedBarrierGuard&& other) noexcept;
+	auto operator=(ScopedBarrierGuard&& other) noexcept -> ScopedBarrierGuard&;
+};
+
+template <typename SrcState, typename DstState, typename T>
+[[nodiscard]] auto ScopedBarrier(VkCommandBuffer cmd, const T& resource,
+								 VkImageAspectFlags aspectOverride = VK_IMAGE_ASPECT_NONE) noexcept;
+
+// ============================================================================
+// Scoped Barrier Functor (Customization Point Objects)
+// ============================================================================
+
+template <typename SrcState, typename DstState> struct ScopedBarrierTrans {
+	template <typename T>
+	[[nodiscard]] auto
+	operator()(VkCommandBuffer cmd, const T& resource,
+			   VkImageAspectFlags aspectOverride = VK_IMAGE_ASPECT_NONE) const noexcept {
+		return ScopedBarrier<SrcState, DstState, T>(cmd, resource, aspectOverride);
+	}
+};
+
+// Aliases for common transition pipelines
+using ReadToColorTrans = ScopedBarrierTrans<Vk::ShaderReadState, Vk::ColorAttachmentState>;
+using ColorToReadTrans = ScopedBarrierTrans<Vk::ColorAttachmentState, Vk::ShaderReadState>;
+
+inline constexpr ReadToColorTrans ReadToColor{};
+inline constexpr ColorToReadTrans ColorToRead{};
 
 // ============================================================================
 // Frame Execution

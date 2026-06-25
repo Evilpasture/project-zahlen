@@ -309,7 +309,13 @@ static void RegisterFFICommands() {
 	s_CommandRegistry["CreateBasicMaterial"] = [](ZHLN::Engine* engine,
 												  const void* args) -> uint64_t {
 		const auto* a = static_cast<const CreateMaterialArgs*>(args);
-		ZHLN::Material mat = ZHLN::AssetFactory::CreateBasicMaterial(engine->GetRenderContext());
+		bool isTransparent = (a->a < 1.0f);
+		ZHLN::Material mat = ZHLN::AssetFactory::CreateBasicMaterial(engine->GetRenderContext(),
+																	 false, isTransparent);
+		mat.baseColorFactor[0] = a->r;
+		mat.baseColorFactor[1] = a->g;
+		mat.baseColorFactor[2] = a->b;
+		mat.baseColorFactor[3] = a->a;
 		*a->outPipeline = static_cast<uint64_t>(mat.pipeline);
 		*a->outAlbedo = mat.albedoIndex;
 		return 1;
@@ -349,16 +355,29 @@ static void RegisterFFICommands() {
 				break;
 		}
 
-		ZHLN::Material mat = ZHLN::AssetFactory::CreateBasicMaterial(rc);
+		bool isTransparent = (desc->a < 1.0f);
+
+		ZHLN::Material mat = ZHLN::AssetFactory::CreateBasicMaterial(rc, false, isTransparent);
+		mat.baseColorFactor[0] = desc->r;
+		mat.baseColorFactor[1] = desc->g;
+		mat.baseColorFactor[2] = desc->b;
+		mat.baseColorFactor[3] = desc->a;
 		ZHLN::Entity e = reg.Create();
 		reg.Add(e, ZHLN::TransformComponent{.position = {desc->px, desc->py, desc->pz},
 											.rotation = {desc->rx, desc->ry, desc->rz, desc->rw},
 											.scale = {1.0f, 1.0f, 1.0f}});
+		// Configure DrawFlags based on transparency
+		ZHLN::DrawFlags flags = ZHLN::DrawFlags::None;
+		if (isTransparent) {
+			flags |= ZHLN::DrawFlags::ExcludeFromTLAS;
+		}
+
 		reg.Add(e, ZHLN::MeshComponent{.mesh = mesh,
 									   .material = mat,
 									   .cullRadius = cullRadius,
 									   .localTransform = JPH::Mat44::sIdentity(),
-									   .prevTransform = JPH::Mat44::sIdentity()});
+									   .prevTransform = JPH::Mat44::sIdentity(),
+									   .flags = flags});
 
 		JPH::Quat rotation(desc->rx, desc->ry, desc->rz, desc->rw);
 		reg.Add(e, ZHLN::PhysicsComponent{ZHLN::Physics::CreateRigidBody(
