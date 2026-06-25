@@ -26,19 +26,26 @@ struct ClusterVolume {
 // --- G-Buffer & Lighting Inputs ---
 [[vk::binding(0, 0)]] Texture2D<float4> texInput;
 [[vk::binding(1, 0)]] SamplerState smp;
-[[vk::binding(2, 0)]] Texture2D<float> texDepth; // Single-channel depth float texture
+[[vk::binding(2, 0)]] Texture2D<float> texDepth;
 [[vk::binding(3, 0)]] Texture2D<float4> texNormalRoughness;
 [[vk::binding(4, 0)]] StructuredBuffer<Light> lights;
 [[vk::binding(5, 0)]] ConstantBuffer<FrameUniforms> frame;
-[[vk::binding(6, 0)]] Texture2D<float> shadowMap; // Single-channel depth float texture
+[[vk::binding(6, 0)]] Texture2D<float> shadowMap;
 [[vk::binding(7, 0)]] SamplerComparisonState shadowSampler;
 [[vk::binding(8, 0)]] Texture2D ltc_mat;
 [[vk::binding(9, 0)]] Texture2D ltc_amp;
 [[vk::binding(10, 0)]] SamplerState clampSampler;
 [[vk::binding(11, 0)]] StructuredBuffer<ClusterVolume> clusterGrid;
 [[vk::binding(12, 0)]] StructuredBuffer<uint> clusterIndexList;
-[[vk::binding(13, 0)]] Texture2D<float4> texAmbient; // Ambient input from Pass 1
-[[vk::binding(14, 0)]] SamplerState pointSampler;	 // Point Sampler for safe depth sampling
+[[vk::binding(13, 0)]] Texture2D<float4> texAmbient;
+[[vk::binding(14, 0)]] SamplerState pointSampler;
+[[vk::binding(15, 0)]] RaytracingAccelerationStructure tlas;
+
+// --- Punctual Shadow Maps ---
+[[vk::binding(16, 0)]] TextureCubeArray<float> punctualShadowCube; //  Omni-directional shadows
+[[vk::binding(17, 0)]] Texture2DArray<float> punctualShadow2D;	   // Spotlight shadows
+
+[[vk::constant_id(0)]] const int ENABLE_RTR = 1;
 
 struct VSOutput {
 	float4 pos : SV_Position;
@@ -53,7 +60,6 @@ VSOutput VSMain(uint vertexID : SV_VertexID) {
 }
 
 float4 PSMain(VSOutput input) : SV_Target0 {
-	// Sample G-buffer depth using pointSampler (safe on all hardware)
 	float depth = texDepth.SampleLevel(pointSampler, input.uv, 0);
 	if (depth >= 1.0f)
 		discard;
@@ -83,10 +89,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	float3 biasedWorldPos = worldPos + N * (normalBias * texelSizeWorld);
 
 	float4 shadowPos = mul(frame.lightSpaceMatrix, float4(biasedWorldPos, 1.0f));
-
 	shadowPos.xy = shadowPos.xy * float2(0.5f, -0.5f) + 0.5f * shadowPos.w;
 
-	// Pass pointSampler to PCSS for correct blocker search filtering
 	float shadow = CalculateShadowPCSS(shadowPos, N, L_sun, input.pos.xy, shadowMap, shadowSampler,
 									   pointSampler);
 
@@ -95,7 +99,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	float3 F = FresnelSchlick(saturate(dot(H_sun, V)), F0);
 
 	float3 spec = (D * G_term * F) / max(4.0f * NdotV * NdotL_sun, 0.001f);
-
 	float3 kD_sun = (float3(1.0f, 1.0f, 1.0f) - F) * (1.0f - metallic);
 
 	float sunIntensity = frame.lightDir.w;
@@ -127,8 +130,36 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
 			float3 diffLTC = LTC_Evaluate(N, V, worldPos, float3x3(1, 0, 0, 0, 1, 0, 0, 0, 1),
 										  light.points, light.twoSided == 1);
+
+			float shadowVisibility = 1.0f;
+			if (ENABLE_RTR != 0 && pc.enableRTR != 0) {
+				float3 L_center = ((light.points[0].xyz + light.points[1].xyz +
+									light.points[2].xyz + light.points[3].xyz) *
+								   0.25f) -
+								  worldPos;
+				float distToCenter = length(L_center);
+				float3 L_p = L_center / (distToCenter + 1e-5f);
+
+				RayDesc ray;
+				ray.Origin = worldPos + N * 0.01f;
+				ray.Direction = L_p;
+				ray.TMin = 0.01f;
+				ray.TMax = distToCenter;
+
+				RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES |
+						 RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH>
+					q;
+				q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
+				while (q.Proceed()) {
+				}
+
+				if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
+					shadowVisibility = 0.0f;
+				}
+			}
+
 			directPunctual += ((1.0f - metallic) * albedoRaw.rgb * diffLTC + specLTC) *
-							  light.color * light.intensity;
+							  light.color * light.intensity * shadowVisibility;
 		} else { // POINT/SPOT LIGHT
 			float3 L_unnorm = light.position - worldPos;
 			float distToCenter = length(L_unnorm);
@@ -149,8 +180,53 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 				float3 spec_p = (D_p * G_p * F_p) / (4.0f * max(dot(N, V), 0.0f) * NdotL + 0.0001f);
 				float3 kD_p = (1.0f - F_p) * (1.0f - metallic);
 
+				float shadowVisibility = 1.0f;
+				if (ENABLE_RTR != 0 && pc.enableRTR != 0) {
+					RayDesc ray;
+					ray.Origin = worldPos + N * 0.01f;
+					ray.Direction = L_p;
+					ray.TMin = 0.01f;
+					ray.TMax = distToCenter;
+
+					RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES |
+							 RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH>
+						q;
+					q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
+					while (q.Proceed()) {
+					}
+
+					if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
+						shadowVisibility = 0.0f;
+					}
+				} else if (light.shadowLayer >= 0) {
+					if (light.type == 1) {	  // POINT LIGHT (Omni-directional Cubemap)
+						float3 r = -L_unnorm; // Vector from light to pixel
+						float d = max(abs(r.x), max(abs(r.y), abs(r.z)));
+						float n = 0.1f;
+						float f = light.range;
+
+						// Reconstruct non-linear perspective depth matching Vulkan's [0.0, 1.0]
+						// range [2]
+						float currentDepth =
+							(f / (f - n)) - ((n * f) / (f - n)) / d; // <-- FIXED FORMULA
+						currentDepth -= 0.005f;						 // Bias to prevent shadow acne
+
+						shadowVisibility = punctualShadowCube.SampleCmpLevelZero(
+							shadowSampler, float4(r, light.shadowLayer), currentDepth);
+					} else if (light.type == 2) { // SPOT LIGHT (2D Perspective Array)
+						float4 sPos =
+							mul((float4x4)light.points, float4(worldPos + N * 0.05f, 1.0f));
+						sPos.xy = sPos.xy * float2(0.5f, -0.5f) + 0.5f * sPos.w;
+
+						float depthRef = (sPos.z / sPos.w) - 0.005f;
+						shadowVisibility = punctualShadow2D.SampleCmpLevelZero(
+							shadowSampler, float3(sPos.xy / sPos.w, (float)light.shadowLayer),
+							depthRef);
+					}
+				}
+
 				directPunctual += (kD_p * albedoRaw.rgb / 3.14159265f + spec_p) * light.color *
-								  light.intensity * atten * NdotL;
+								  light.intensity * atten * NdotL * shadowVisibility;
 			}
 		}
 	}

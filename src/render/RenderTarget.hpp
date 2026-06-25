@@ -28,6 +28,7 @@ template <VkFormat F> struct RenderTarget {
 	struct RenderTargetDescriptor {
 		VkImageUsageFlags usage = 0;
 		VkImageAspectFlags aspect = GetFormatAspect(F);
+		uint32_t arrayLayers = 1;
 	};
 
 	[[nodiscard]] static auto Create(Allocator& allocator, const Context& ctx, VkExtent2D extent,

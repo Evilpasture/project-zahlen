@@ -744,7 +744,7 @@ void DynamicPass<ColorCount, HasDepth>::Execute(VkCommandBuffer cmd, Func&& func
 		.flags = _flags,
 		.renderArea = {.offset = {0, 0}, .extent = _extent},
 		.layerCount = 1,
-		.viewMask = 0,
+		.viewMask = _viewMask,
 		.colorAttachmentCount = ColorCount,
 		.pColorAttachments = ColorCount > 0 ? _colors.data() : nullptr,
 		.pDepthAttachment = GetDepthPtr(),
@@ -766,6 +766,13 @@ void DynamicPass<ColorCount, HasDepth>::Execute(VkCommandBuffer cmd, Func&& func
 	std::forward<Func>(func)();
 
 	vkCmdEndRendering(cmd);
+}
+
+template <size_t ColorCount, bool HasDepth>
+constexpr auto DynamicPass<ColorCount, HasDepth>::ViewMask(uint32_t mask) noexcept
+	-> DynamicPass<ColorCount, HasDepth>& {
+	_viewMask = mask;
+	return *this;
 }
 
 template <size_t ColorCount, bool HasDepth>
@@ -966,23 +973,56 @@ constexpr auto GetFormatAspect(VkFormat format) noexcept -> VkImageAspectFlags {
 template <VkFormat F>
 inline auto CreateView(VkDevice device, VkImage image, VkImageAspectFlags aspect, uint32_t mips)
 	-> ImageView {
-	ZHLN_ImageViewDesc desc = {.image = image,
-							   .format = F,
-							   .aspect = aspect,
-							   .mip_levels = mips,
-							   .array_layers = 1,
-							   .view_type = VK_IMAGE_VIEW_TYPE_2D};
+	ZHLN_ImageViewDesc desc = {
+		.image = image,
+		.format = F,
+		.aspect = aspect,
+		.mip_levels = mips,
+		.array_layers = 1,
+		.view_type = VK_IMAGE_VIEW_TYPE_2D,
+		.base_array_layer = {},
+	};
 	return {device, ZHLN_CreateImageView(device, &desc)};
 }
 
 template <VkFormat F>
 inline auto CreateViewCube(VkDevice device, VkImage image, uint32_t mips) -> ImageView {
+	ZHLN_ImageViewDesc desc = {
+		.image = image,
+		.format = F,
+		.aspect = VK_IMAGE_ASPECT_COLOR_BIT,
+		.mip_levels = mips,
+		.array_layers = 6,
+		.view_type = VK_IMAGE_VIEW_TYPE_CUBE,
+		.base_array_layer = {},
+	};
+	return {device, ZHLN_CreateImageView(device, &desc)};
+}
+
+template <VkFormat F>
+inline auto CreateView2DArray(VkDevice device, VkImage image, uint32_t baseLayer,
+							  uint32_t layerCount, VkImageAspectFlags aspect, uint32_t mips)
+	-> ImageView {
 	ZHLN_ImageViewDesc desc = {.image = image,
 							   .format = F,
-							   .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
+							   .aspect = aspect,
 							   .mip_levels = mips,
-							   .array_layers = 6,
-							   .view_type = VK_IMAGE_VIEW_TYPE_CUBE};
+							   .array_layers = layerCount,
+							   .view_type = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+							   .base_array_layer = baseLayer};
+	return {device, ZHLN_CreateImageView(device, &desc)};
+}
+
+template <VkFormat F>
+inline auto CreateViewCubeArray(VkDevice device, VkImage image, uint32_t arrayLayers,
+								VkImageAspectFlags aspect, uint32_t mips) -> ImageView {
+	ZHLN_ImageViewDesc desc = {.image = image,
+							   .format = F,
+							   .aspect = aspect,
+							   .mip_levels = mips,
+							   .array_layers = arrayLayers,
+							   .view_type = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY,
+							   .base_array_layer = 0};
 	return {device, ZHLN_CreateImageView(device, &desc)};
 }
 

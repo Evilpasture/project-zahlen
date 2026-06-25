@@ -345,6 +345,7 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 		Vk::FeatureChainBuilder()
 			.Require<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>(
 				[](auto& f) { f.swapchainMaintenance1 = VK_TRUE; })
+			.Require<VkPhysicalDeviceVulkan11Features>([](auto& f) { f.multiview = VK_TRUE; })
 			.Require<VkPhysicalDeviceVulkan13Features>([](auto& f) {
 				f.synchronization2 = VK_TRUE;
 				f.dynamicRendering = VK_TRUE;
@@ -370,6 +371,7 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 				f.features.samplerAnisotropy = VK_TRUE;
 				f.features.drawIndirectFirstInstance = VK_TRUE;
 				f.features.shaderInt64 = caps.supportsInt64 ? VK_TRUE : VK_FALSE;
+				f.features.imageCubeArray = VK_TRUE;
 			})
 			.Build();
 
@@ -421,6 +423,9 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	_impl->InitBindless();
 	_impl->CompileShadowPipeline(_impl->ctx.Device(), &ZHLN_Resource_BasicVertSpv[0],
 								 ZHLN_Resource_BasicVertSpv_Len);
+	_impl->CompilePunctualShadowPipeline(_impl->ctx.Device(),
+										 &ZHLN_Resource_PunctualShadowsVertSpv[0],
+										 ZHLN_Resource_PunctualShadowsVertSpv_Len);
 
 	if (!_impl->presentation.Init(_impl->ctx, _impl->allocator, _impl->surface.Get(), width, height,
 								  cfg.vsync)) {
@@ -512,15 +517,34 @@ void RenderContext::Impl::BuildSkinningPipeline() {
 }
 
 void RenderContext::Impl::InitShadowResources() {
-	shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-		allocator, ctx, {.width = SHADOW_RES, .height = SHADOW_RES},
-		{.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
-
 	shadowSampler = Vk::SamplerBuilder{}
 						.Linear()
 						.ClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE)
 						.DepthCompare()
 						.Build(ctx.Device());
+
+	shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+		allocator, ctx, {.width = SHADOW_RES, .height = SHADOW_RES},
+		{.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
+
+	// 1. Allocate 24-layer Shadow Atlas
+	shadowAtlas = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+		allocator, ctx, {.width = 1024, .height = 1024},
+		{.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+		 .arrayLayers = 24});
+
+	// 2. Pre-allocate Views using clean C++ helper templates!
+	shadowAtlasCubeView =
+		Vk::CreateViewCubeArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), shadowAtlas.image.Handle(), 24);
+	shadowAtlas2DView = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(
+		ctx.Device(), shadowAtlas.image.Handle(), 0, 24);
+
+	uint32_t maxPointLights = 4;
+	punctualShadowViews.resize(maxPointLights);
+	for (uint32_t i = 0; i < maxPointLights; ++i) {
+		punctualShadowViews[i] = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(
+			ctx.Device(), shadowAtlas.image.Handle(), i * 6, 6);
+	}
 
 	for (int i = 0; i < 2; ++i) {
 		frameUniformBuffers[i] =
@@ -863,16 +887,31 @@ void RenderContext::Impl::BuildLightingPipeline() {
 	VkPushConstantRange ppPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
 
-	BuildPassHelper(this, lightingPass, "Lighting",
-					{.path = SHADER_LIGHTING_HLSL_VS_PATH,
-					 .fallbackCode = ZHLN_Resource_LightingVertSpv,
-					 .fallbackSize = ZHLN_Resource_LightingVertSpv_Len,
-					 .entryPoint = "VSMain"},
-					{.path = SHADER_LIGHTING_HLSL_PS_PATH,
-					 .fallbackCode = ZHLN_Resource_LightingFragSpv,
-					 .fallbackSize = ZHLN_Resource_LightingFragSpv_Len,
-					 .entryPoint = "PSMain"},
-					{VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush, 1);
+	struct SpecData {
+		int enableRTR;
+	};
+	std::array<VkSpecializationMapEntry, 1> specEntries = {
+		{{.constantID = 0, .offset = offsetof(SpecData, enableRTR), .size = sizeof(int)}}};
+
+	std::array<SpecData, 2> variants = {{{.enableRTR = 0}, {.enableRTR = 1}}};
+	std::array<VkSpecializationInfo, 2> specInfos{};
+	for (int i = 0; i < 2; ++i) {
+		specInfos[i] = {.mapEntryCount = 1,
+						.pMapEntries = specEntries.data(),
+						.dataSize = sizeof(SpecData),
+						.pData = &variants[i]};
+	}
+
+	BuildPassVariants(this, lightingPass, "Lighting",
+					  {.path = SHADER_LIGHTING_HLSL_VS_PATH,
+					   .fallbackCode = ZHLN_Resource_LightingVertSpv,
+					   .fallbackSize = ZHLN_Resource_LightingVertSpv_Len,
+					   .entryPoint = "VSMain"},
+					  {.path = SHADER_LIGHTING_HLSL_PS_PATH,
+					   .fallbackCode = ZHLN_Resource_LightingFragSpv,
+					   .fallbackSize = ZHLN_Resource_LightingFragSpv_Len,
+					   .entryPoint = "PSMain"},
+					  {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1);
 }
 
 void RenderContext::Impl::BuildReflectionPipelines() {
@@ -912,6 +951,45 @@ void RenderContext::Impl::BuildReflectionPipelines() {
 					  {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1);
 }
 
+void RenderContext::Impl::BuildBloomPipelines() {
+	BuildPassHelper(this, bloomThresholdPass, "Bloom Threshold",
+					{.path = SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH,
+					 .fallbackCode = ZHLN_Resource_BloomThresholdVertSpv,
+					 .fallbackSize = ZHLN_Resource_BloomThresholdVertSpv_Len,
+					 .entryPoint = "VSMain"},
+					{.path = SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH,
+					 .fallbackCode = ZHLN_Resource_BloomThresholdFragSpv,
+					 .fallbackSize = ZHLN_Resource_BloomThresholdFragSpv_Len,
+					 .entryPoint = "PSMain"},
+					{VK_FORMAT_R16G16B16A16_SFLOAT});
+
+	VkPushConstantRange blurPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+									.offset = 0,
+									.size = sizeof(int) + sizeof(float)};
+
+	BuildPassHelper(this, bloomBlurHPass, "Bloom Blur H",
+					{.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH,
+					 .fallbackCode = ZHLN_Resource_BloomBlurVertSpv,
+					 .fallbackSize = ZHLN_Resource_BloomBlurVertSpv_Len,
+					 .entryPoint = "VSMain"},
+					{.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH,
+					 .fallbackCode = ZHLN_Resource_BloomBlurFragSpv,
+					 .fallbackSize = ZHLN_Resource_BloomBlurFragSpv_Len,
+					 .entryPoint = "PSMain"},
+					{VK_FORMAT_R16G16B16A16_SFLOAT}, &blurPush, 1);
+
+	BuildPassHelper(this, bloomBlurVPass, "Bloom Blur V",
+					{.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH,
+					 .fallbackCode = ZHLN_Resource_BloomBlurVertSpv,
+					 .fallbackSize = ZHLN_Resource_BloomBlurVertSpv_Len,
+					 .entryPoint = "VSMain"},
+					{.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH,
+					 .fallbackCode = ZHLN_Resource_BloomBlurFragSpv,
+					 .fallbackSize = ZHLN_Resource_BloomBlurFragSpv_Len,
+					 .entryPoint = "PSMain"},
+					{VK_FORMAT_R16G16B16A16_SFLOAT}, &blurPush, 1);
+}
+
 void RenderContext::Impl::BuildBlitPipeline() {
 	VkPushConstantRange blitPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -944,6 +1022,7 @@ void RenderContext::Impl::InitPostProcessing() {
 	BuildAmbientPipeline();
 	BuildLightingPipeline();
 	BuildReflectionPipelines();
+	BuildBloomPipelines();
 	BuildBlitPipeline();
 
 	// 2. Attach FileWatchers in Development Mode
@@ -975,6 +1054,13 @@ void RenderContext::Impl::InitPostProcessing() {
 							  [this]() { BuildReflectionPipelines(); });
 		RegisterShaderWatcher(SHADER_REFLECTION_HLSL_PS_PATH,
 							  [this]() { BuildReflectionPipelines(); });
+
+		RegisterShaderWatcher(SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH,
+							  [this]() { BuildBloomPipelines(); });
+		RegisterShaderWatcher(SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH,
+							  [this]() { BuildBloomPipelines(); });
+		RegisterShaderWatcher(SHADER_BLOOM_BLUR_HLSL_VS_PATH, [this]() { BuildBloomPipelines(); });
+		RegisterShaderWatcher(SHADER_BLOOM_BLUR_HLSL_PS_PATH, [this]() { BuildBloomPipelines(); });
 
 		// Final Composition / Blit Pass
 		RegisterShaderWatcher(SHADER_BLIT_HLSL_VS_PATH, [this]() { BuildBlitPipeline(); });

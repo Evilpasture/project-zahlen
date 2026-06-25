@@ -119,9 +119,11 @@ struct alignas(16) GPULight {
 	float radius;
 	float innerConeCos;
 	float outerConeCos;
-	uint32_t twoSided; // 0 = Single-Sided, 1 = Double-Sided Area Light
+	uint32_t twoSided;	 // 0 = Single-Sided, 1 = Double-Sided Area Light
+	int32_t shadowLayer; // -1 if no shadow, >= 0 for Atlas layer index
+	float pad[3];
 };
-static_assert(sizeof(GPULight) == 128, "GPULight must be exactly 128 bytes for SSBO alignment");
+static_assert(sizeof(GPULight) == 144);
 
 struct alignas(16) FrameUniforms {
 	JPH::Mat44 viewProj;

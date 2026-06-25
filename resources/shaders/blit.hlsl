@@ -21,6 +21,7 @@ struct PushConstants {
 
 [[vk::binding(0, 0)]] Texture2D<float4> texInput;
 [[vk::binding(1, 0)]] SamplerState smp;
+[[vk::binding(2, 0)]] Texture2D<float4> texBloom; // <-- Bound dynamically by BlitPass
 
 float3 ACESFilm(float3 x) {
 	float a = 2.51f;
@@ -34,10 +35,14 @@ float3 ACESFilm(float3 x) {
 float4 PSMain(VSOutput input) : SV_Target0 {
 	float3 hdrColor = texInput.SampleLevel(smp, input.uv, 0).rgb;
 
-	// 1. Exposure Control: Scale down the massive HDR values (Sun is 250.0)
-	hdrColor *= 0.015f; // Adjusted for better mid-tone balance
+	// Sample Bloom and blend additively (adjust the 0.5f intensity multiplier as needed)
+	float3 bloom = texBloom.SampleLevel(smp, input.uv, 0).rgb;
+	hdrColor += bloom * 0.5f;
 
-	// 2. Tonemap HDR -> LDR (This specific ACES fit outputs LINEAR color)
+	// 1. Exposure Control: Scale down the massive HDR values (Sun is 250.0)
+	hdrColor *= 0.015f;
+
+	// 2. Tonemap HDR -> LDR
 	float3 finalColor = ACESFilm(hdrColor);
 
 	// 3. Apply Vignette overlay
@@ -47,10 +52,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 		vignette = pow(vignette, max(pc.vignettePower, 0.01f));
 		finalColor *= vignette;
 	}
-
-	// FIX: Removed the pow(finalColor, 2.2f).
-	// The Vulkan SRGB swapchain expects Linear input and will apply the gamma curve natively in
-	// hardware.
 
 	return float4(finalColor, 1.0f);
 }

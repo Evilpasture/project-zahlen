@@ -1483,7 +1483,7 @@ VkImageView ZHLN_CreateImageView(const VkDevice device,
 				.aspectMask = desc->aspect,
 				.baseMipLevel = 0,
 				.levelCount = desc->mip_levels ? desc->mip_levels : 1,
-				.baseArrayLayer = 0,
+				.baseArrayLayer = desc->base_array_layer,
 				.layerCount = desc->array_layers ? desc->array_layers : 1,
 			},
 	};

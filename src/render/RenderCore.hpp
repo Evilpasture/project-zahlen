@@ -631,6 +631,8 @@ template <size_t ColorCount = 0, bool HasDepth = false> class DynamicPass {
 
 	template <typename Func> void Execute(VkCommandBuffer cmd, Func&& func) const;
 
+	constexpr auto ViewMask(uint32_t mask) noexcept -> DynamicPass<ColorCount, HasDepth>&;
+
   private:
 	template <size_t C, bool D> friend class DynamicPass;
 
@@ -640,6 +642,7 @@ template <size_t ColorCount = 0, bool HasDepth = false> class DynamicPass {
 	VkRenderingFlags _flags = 0;
 	std::array<VkRenderingAttachmentInfo, ColorCount> _colors{};
 	VkRenderingAttachmentInfo _depth{};
+	uint32_t _viewMask = 0;
 };
 
 DynamicPass(VkExtent2D) -> DynamicPass<0, false>;
@@ -765,6 +768,16 @@ template <VkFormat F>
 
 template <VkFormat F>
 [[nodiscard]] auto CreateViewCube(VkDevice device, VkImage image, uint32_t mips = 1) -> ImageView;
+
+template <VkFormat F>
+[[nodiscard]] auto
+CreateView2DArray(VkDevice device, VkImage image, uint32_t baseLayer, uint32_t layerCount,
+				  VkImageAspectFlags aspect = GetFormatAspect(F), uint32_t mips = 1) -> ImageView;
+
+template <VkFormat F>
+[[nodiscard]] auto CreateViewCubeArray(VkDevice device, VkImage image, uint32_t arrayLayers,
+									   VkImageAspectFlags aspect = GetFormatAspect(F),
+									   uint32_t mips = 1) -> ImageView;
 
 // ============================================================================
 // Extension Query Utilities

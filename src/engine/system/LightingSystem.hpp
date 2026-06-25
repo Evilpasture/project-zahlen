@@ -17,6 +17,7 @@ class LightingSystem {
 		float range;
 		JPH::Mat44 points;
 		uint32_t twoSided;
+		int32_t shadowLayer = -1;
 	};
 	static_assert(sizeof(LightComponent) == 160);
 	void Update(Engine& engine, float dt);

@@ -141,6 +141,8 @@ constexpr std::array<FrustumEdge, 12> s_FrustumEdges = {{
 	{.start = 3, .end = 7} // Near-to-Far connection lines
 }};
 
+int g_MaxPunctualShadows = 1;
+
 // ============================================================================
 // Flattened System Wrappers (For 100% Predictable Function Pointers)
 // ============================================================================
@@ -254,6 +256,16 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 	}
 
 	ImGui::Begin("Lighting Workspace Controller");
+
+	ImGui::SeparatorText("Punctual Shadows (Raster Fallback)");
+	ImGui::SliderInt("Max Punctual Shadows", &g_MaxPunctualShadows, 0, 4);
+	if (g_MaxPunctualShadows > 0) {
+		ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f),
+						   "  [Rendering %d shadow-casting light(s)]", g_MaxPunctualShadows);
+	} else {
+		ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f),
+						   "  [Punctual shadows disabled (0ms overhead)]");
+	}
 
 	auto camEnts = reg.GetEntitiesWith<MainCameraTagComponent>();
 	if (!camEnts.empty()) {
@@ -968,6 +980,61 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, ScriptRunne
 	{
 		ZHLN_PROFILE_SCOPE("ECS System: Script/Lua Update");
 		scriptRunner.CallUpdate(&engine, dt);
+	}
+
+	// --- DYNAMIC SHADOW ALLOCATION ---
+	auto& reg = engine.GetRegistry();
+	const auto& cam = engine.GetCamera(); // <-- Already available here!
+
+	// Find the player entity
+	Entity playerEnt = NullEntity;
+	for (Entity e : reg.GetEntitiesWith<PlayerTagComponent>()) {
+		playerEnt = e;
+		break;
+	}
+
+	// If player is valid, find the 4 closest visible point lights [2]
+	if (playerEnt != NullEntity) {
+		struct LightDistance {
+			Entity entity;
+			float distSq;
+		};
+		std::vector<LightDistance> lightDistances;
+
+		if (auto* playerTrans = reg.Get<TransformComponent>(playerEnt)) {
+			JPH::Vec3 playerPos = playerTrans->position;
+
+			for (Entity e : reg.GetEntitiesWith<LightingSystem::LightComponent>()) {
+				auto* light = reg.Get<LightingSystem::LightComponent>(e);
+				light->shadowLayer = -1; // Reset all to disabled initially
+
+				if (light->type == 1) { // Point Light
+					if (auto* trans = reg.Get<TransformComponent>(e)) {
+
+						// Check if the light's radius is even visible to the camera frustum
+						bool isLightVisible =
+							cam.frustum.IsSphereVisible(trans->position, light->range);
+						if (!isLightVisible) {
+							continue; // Skip lights the camera can't see!
+						}
+
+						float dSq = (trans->position - playerPos).LengthSq();
+						lightDistances.push_back({.entity = e, .distSq = dSq});
+					}
+				}
+			}
+
+			std::ranges::sort(lightDistances, [](const LightDistance& a, const LightDistance& b) {
+				return a.distSq < b.distSq;
+			});
+
+			// Assign the closest visible lights based on our live budget [2]
+			uint32_t shadowCasters = std::min(static_cast<uint32_t>(g_MaxPunctualShadows),
+											  static_cast<uint32_t>(lightDistances.size()));
+			for (uint32_t i = 0; i < shadowCasters; ++i) {
+				reg.Get<LightingSystem::LightComponent>(lightDistances[i].entity)->shadowLayer = i;
+			}
+		}
 	}
 
 	engine.GetUpdateGraph().Execute(engine, dt);

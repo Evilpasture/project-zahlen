@@ -1073,7 +1073,8 @@ uint32_t InstantiateAuthoredLights(ECS::Registry& reg, const cgltf_data* rawData
 						 .direction = dir,
 						 .range = (l->range > 0.0f) ? l->range : 100.0f,
 						 .points = {},
-						 .twoSided = 0});
+						 .twoSided = 0,
+						 .shadowLayer = -1});
 
 		if (outBuffer != nullptr && (startIdx + count) < maxCount) {
 			outBuffer[startIdx + count] = ent;

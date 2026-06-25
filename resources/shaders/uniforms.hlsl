@@ -37,6 +37,8 @@ struct Light {
 	float innerConeCos;
 	float outerConeCos;
 	uint twoSided;
+	int shadowLayer;
+	float3 pad;
 };
 
 #endif // UNIFORMS_HLSL

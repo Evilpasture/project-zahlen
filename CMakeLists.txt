@@ -377,6 +377,9 @@ compile_shaders(zahlen_engine
     "${CMAKE_SOURCE_DIR}/resources/shaders/fxaa.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/ambient.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/lighting.hlsl"
+    "${CMAKE_SOURCE_DIR}/resources/shaders/bloom_threshold.hlsl" 
+    "${CMAKE_SOURCE_DIR}/resources/shaders/bloom_blur.hlsl"
+    "${CMAKE_SOURCE_DIR}/resources/shaders/punctual_shadows.hlsl"
 )
 
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/culling.hlsl" CSMain cs_6_0 CULLING_COMP_SPV)

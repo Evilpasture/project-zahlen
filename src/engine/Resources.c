@@ -178,3 +178,37 @@ const unsigned char ZHLN_Resource_ForwardFragSpv[] = {
 #embed SHADER_FORWARD_HLSL_PS_PATH
 };
 const unsigned int ZHLN_Resource_ForwardFragSpv_Len = sizeof(ZHLN_Resource_ForwardFragSpv);
+
+const unsigned char ZHLN_Resource_BloomThresholdVertSpv[] = {
+#embed SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH
+};
+const unsigned int ZHLN_Resource_BloomThresholdVertSpv_Len =
+	sizeof(ZHLN_Resource_BloomThresholdVertSpv);
+
+const unsigned char ZHLN_Resource_BloomThresholdFragSpv[] = {
+#embed SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH
+};
+const unsigned int ZHLN_Resource_BloomThresholdFragSpv_Len =
+	sizeof(ZHLN_Resource_BloomThresholdFragSpv);
+
+const unsigned char ZHLN_Resource_BloomBlurVertSpv[] = {
+#embed SHADER_BLOOM_BLUR_HLSL_VS_PATH
+};
+const unsigned int ZHLN_Resource_BloomBlurVertSpv_Len = sizeof(ZHLN_Resource_BloomBlurVertSpv);
+
+const unsigned char ZHLN_Resource_BloomBlurFragSpv[] = {
+#embed SHADER_BLOOM_BLUR_HLSL_PS_PATH
+};
+const unsigned int ZHLN_Resource_BloomBlurFragSpv_Len = sizeof(ZHLN_Resource_BloomBlurFragSpv);
+
+const unsigned char ZHLN_Resource_PunctualShadowsVertSpv[] = {
+#embed SHADER_PUNCTUAL_SHADOWS_HLSL_VS_PATH
+};
+const unsigned int ZHLN_Resource_PunctualShadowsVertSpv_Len =
+	sizeof(ZHLN_Resource_PunctualShadowsVertSpv);
+
+const unsigned char ZHLN_Resource_PunctualShadowsFragSpv[] = {
+#embed SHADER_PUNCTUAL_SHADOWS_HLSL_PS_PATH
+};
+const unsigned int ZHLN_Resource_PunctualShadowsFragSpv_Len =
+	sizeof(ZHLN_Resource_PunctualShadowsFragSpv);

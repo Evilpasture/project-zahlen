@@ -484,6 +484,7 @@ typedef struct ZHLN_ImageViewDesc {
 	const uint32_t mip_levels;	 // default 1
 	const uint32_t array_layers; // default 1
 	const VkImageViewType view_type;
+	const uint32_t base_array_layer;
 } ZHLN_ImageViewDesc;
 
 [[nodiscard]]

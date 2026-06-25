@@ -149,7 +149,8 @@ using GlobalSceneLayout = Vk::DescriptorLayout<
 	Vk::SamplerSlot<3>,					   // Shadow Map comparison sampler
 	Vk::UniformSlot<4, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT>, // FrameUniforms
 																				   // (UBO)
-	Vk::StorageBufferSlot<5, VK_SHADER_STAGE_FRAGMENT_BIT>,						   // Lights (SSBO)
+	Vk::StorageBufferSlot<5, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT>, // Lights
+																						 // (SSBO)
 	Vk::StorageBufferSlot<6, VK_SHADER_STAGE_VERTEX_BIT>, // Instance buffer (SSBO)
 	Vk::StorageBufferSlot<7, VK_SHADER_STAGE_VERTEX_BIT>, // Joint matrices (SSBO)
 
@@ -166,7 +167,21 @@ using TAALayout =
 	Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SampledImageSlot<1>, Vk::SampledImageSlot<2>,
 						 Vk::SamplerSlot<3>, Vk::UniformSlot<4, VK_SHADER_STAGE_FRAGMENT_BIT>>;
 
+using FXAALayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texCurrent (Color)
+										Vk::SamplerSlot<1>		 // sampler
+										>;
+
 using BlitLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texCurrent (Color)
+										Vk::SamplerSlot<1>,		 // sampler
+										Vk::SampledImageSlot<2>	 // texBloom (Bloom)
+										>;
+
+// Layouts for Threshold & Blur
+using BloomThresholdLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texInput
+												  Vk::SamplerSlot<1>	   // sampler
+												  >;
+
+using BlurLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texInput
 										Vk::SamplerSlot<1>		 // sampler
 										>;
 
@@ -235,7 +250,10 @@ using LightingLayout = Vk::DescriptorLayout<
 	Vk::StorageBufferSlot<11, VK_SHADER_STAGE_FRAGMENT_BIT>, // clusterGrid
 	Vk::StorageBufferSlot<12, VK_SHADER_STAGE_FRAGMENT_BIT>, // clusterIndexList
 	Vk::SampledImageSlot<13, VK_SHADER_STAGE_FRAGMENT_BIT>,	 // texAmbient (Pass 1 Output)
-	Vk::SamplerSlot<14, VK_SHADER_STAGE_FRAGMENT_BIT>		 // pointSampler
+	Vk::SamplerSlot<14, VK_SHADER_STAGE_FRAGMENT_BIT>,		 // pointSampler
+	Vk::AccelerationStructureSlot<15>,						 // TLAS
+	Vk::SampledImageSlot<16, VK_SHADER_STAGE_FRAGMENT_BIT>,	 // punctualShadowCube (Point)
+	Vk::SampledImageSlot<17, VK_SHADER_STAGE_FRAGMENT_BIT>	 // punctualShadow2D (Spot)
 	>;
 
 using ReflectionLayout =
@@ -263,6 +281,9 @@ struct MainPass {
 struct AAPass {
 	static constexpr std::string_view name = "[GPU] Anti-Aliasing";
 };
+struct BloomPass {
+	static constexpr std::string_view name = "[GPU] Bloom Pass";
+};
 struct BlitPass {
 	static constexpr std::string_view name = "[GPU] Blit/Composite";
 };
@@ -271,8 +292,9 @@ struct PostProcessPass {
 };
 } // namespace Stages
 
-using FrameProfiler = Profiler::GpuProfiler<Stages::ShadowPass, Stages::MainPass, Stages::AAPass,
-											Stages::PostProcessPass, Stages::BlitPass>;
+using FrameProfiler =
+	Profiler::GpuProfiler<Stages::ShadowPass, Stages::MainPass, Stages::AAPass,
+						  Stages::PostProcessPass, Stages::BloomPass, Stages::BlitPass>;
 
 struct NativeMesh {
 	VkDevice device = VK_NULL_HANDLE;
@@ -374,9 +396,12 @@ struct RenderContext::Impl {
 	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> lightingTarget;
 	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> postProcessTarget;
 	DoubleBuffered<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumBuffers;
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomThresholdTarget;
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomBlurTarget;
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomFinalTarget;
 
 	Vk::PostProcessPass<TAALayout> taaPass;
-	Vk::PostProcessPass<BlitLayout> fxaaPass;
+	Vk::PostProcessPass<FXAALayout> fxaaPass;
 	Vk::PostProcessPass<SMAAEdgeLayout> smaaEdgePass;
 	Vk::PostProcessPass<SMAAWeightLayout> smaaWeightPass;
 	Vk::PostProcessPass<SMAABlendLayout> smaaBlendPass;
@@ -388,6 +413,9 @@ struct RenderContext::Impl {
 	Vk::PostProcessPass<LightingLayout> lightingPass;
 	Vk::PostProcessPass<ReflectionLayout> reflectionPass;
 	Vk::PostProcessPass<BlitLayout> blitPass;
+	Vk::PostProcessPass<BloomThresholdLayout> bloomThresholdPass;
+	Vk::PostProcessPass<BlurLayout> bloomBlurHPass;
+	Vk::PostProcessPass<BlurLayout> bloomBlurVPass;
 
 	Vk::RenderTarget<VK_FORMAT_R8G8_UNORM> smaaEdgeTarget;
 	Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM> smaaWeightTarget;
@@ -445,6 +473,12 @@ struct RenderContext::Impl {
 	Vk::RenderTarget<VK_FORMAT_D32_SFLOAT> shadowMap;
 	Vk::Sampler shadowSampler;
 	Vk::Sampler clampSampler;
+	Vk::RenderTarget<VK_FORMAT_D32_SFLOAT> shadowAtlas;
+	Vk::ImageView shadowAtlasCubeView;
+	Vk::ImageView shadowAtlas2DView;
+
+	JPH::Array<Vk::ImageView> punctualShadowViews;
+	JPH::Array<GPULight> mappedLights;
 
 	Vk::Image ltcMatImage;
 	Vk::ImageView ltcMatView;
@@ -468,6 +502,8 @@ struct RenderContext::Impl {
 	ZHLN::DoubleBuffered<Vk::Buffer> jointBuffers; // Global Joint Transforms SSBO
 	Vk::Pipeline shadowPipeline;
 	Vk::PipelineLayout shadowPipelineLayout;
+	Vk::Pipeline punctualShadowPipeline;
+	Vk::PipelineLayout punctualShadowPipelineLayout;
 	Vk::ComputePass cullingPass;
 
 	JPH::Array<UIDrawCommand> uiDrawQueue;
@@ -504,6 +540,7 @@ struct RenderContext::Impl {
 	void InitShadowResources();
 	void InitCullingResources();
 	void CompileShadowPipeline(VkDevice device, const void* shaderData, size_t shaderSize);
+	void CompilePunctualShadowPipeline(VkDevice device, const void* shaderData, size_t shaderSize);
 	void InitBindless();
 	void BuildTAAPipeline();
 	void BuildFXAAPipeline();
@@ -512,6 +549,7 @@ struct RenderContext::Impl {
 	void BuildLightingPipeline();
 	void BuildReflectionPipelines();
 	void BuildBlitPipeline();
+	void BuildBloomPipelines();
 	void InitPostProcessing();
 	void SetupUI(GLFWwindow* window);
 
@@ -560,6 +598,7 @@ struct RenderContext::Impl {
 		}
 	}
 };
+
 } // namespace ZHLN
 
 namespace ZHLN::Vk {

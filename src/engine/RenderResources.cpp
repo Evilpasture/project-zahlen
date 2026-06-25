@@ -41,8 +41,38 @@ void RenderContext::Impl::CompileShadowPipeline(VkDevice device, const void* sha
 						 .Layout(shadowPipelineLayout.Get())
 						 .DepthOnly()
 						 .DepthFormat(VK_FORMAT_D32_SFLOAT)
-						 .CullFront()
+						 .CullNone()
 						 .Build(device);
+}
+
+void RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const void* shaderData,
+														size_t shaderSize) {
+	auto v_desc = Vk::CreateShaderDesc(Vk::AsSpirV(shaderData), shaderSize);
+	auto shaders = Vk::ShaderStages::Create(device, v_desc, {}); // Depth-only, no fragment shader!
+
+	VkPushConstantRange pc_range = {
+		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+		.offset = 0,
+		.size = sizeof(uint32_t) // Pushes pc.lightIndex (4 bytes)
+	};
+
+	const std::array layouts = {bindlessLayout.Get()};
+	ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = layouts.data(),
+										   .set_layout_count = 1,
+										   .push_constants = &pc_range,
+										   .push_constant_count = 1};
+
+	punctualShadowPipelineLayout =
+		Vk::PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &layout_desc));
+
+	punctualShadowPipeline =
+		Vk::PipelineBuilder{}
+			.Shaders(shaders)
+			.Layout(punctualShadowPipelineLayout.Get())
+			.DepthOnly()
+			.DepthFormat(VK_FORMAT_D32_SFLOAT)
+			.CullNone() // Windings can flip depending on cubemap faces; CullNone ensures no gaps
+			.Build(device);
 }
 
 auto RenderContext::GetRendererName() const -> const char* {
