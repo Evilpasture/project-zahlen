@@ -141,8 +141,10 @@ PSOutput PSMain(VSOutput input) {
 	float3 ambient = albedo.rgb * irradiance * 0.25f;
 
 	// --- 3. NORMAL OFFSET BIAS & SHADOWS ---
-	float texelSizeWorld = 200.0 / 2048.0;
-	float normalBias = saturate(1.0 - dot(worldNormal, L_sun)) * 1.5;
+	// Dynamically scale using the active shadow map settings
+	float texelSizeWorld = frame.shadowWidth / frame.shadowResolution;
+	// Add a baseline offset of 0.2 texels to prevent flat-surface acne at lower resolutions
+	float normalBias = saturate(1.0 - dot(worldNormal, L_sun)) * 1.5 + 0.2;
 	float3 biasedWorldPos = input.worldPos + worldNormal * (normalBias * texelSizeWorld);
 
 	float4 shadowPos = mul(frame.lightSpaceMatrix, float4(biasedWorldPos, 1.0f));
@@ -151,7 +153,7 @@ PSOutput PSMain(VSOutput input) {
 	shadowPos.xy = shadowPos.xy * float2(0.5f, -0.5f) + 0.5f * shadowPos.w;
 
 	float shadow = CalculateShadowPCSS(shadowPos, worldNormal, L_sun, input.pos.xy, shadowMap,
-									   shadowSampler, defaultSampler);
+									   shadowSampler, defaultSampler, frame.shadowResolution);
 	celIntensity *= shadow;
 
 	// --- 4. TOON SPECULAR SHAPE ---

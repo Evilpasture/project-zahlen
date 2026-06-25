@@ -84,15 +84,16 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	float3 H_sun = normalize(V + L_sun + 1e-5f);
 	float NdotL_sun = saturate(dot(N, L_sun));
 
-	float texelSizeWorld = 200.0 / 2048.0;
-	float normalBias = saturate(1.0 - dot(N, L_sun)) * 1.5;
+	float texelSizeWorld = frame.shadowWidth / frame.shadowResolution;
+	// Add a baseline offset of 0.2 texels to prevent flat-surface acne at lower resolutions
+	float normalBias = saturate(1.0 - dot(N, L_sun)) * 1.5 + 0.2;
 	float3 biasedWorldPos = worldPos + N * (normalBias * texelSizeWorld);
 
 	float4 shadowPos = mul(frame.lightSpaceMatrix, float4(biasedWorldPos, 1.0f));
 	shadowPos.xy = shadowPos.xy * float2(0.5f, -0.5f) + 0.5f * shadowPos.w;
 
 	float shadow = CalculateShadowPCSS(shadowPos, N, L_sun, input.pos.xy, shadowMap, shadowSampler,
-									   pointSampler);
+									   pointSampler, frame.shadowResolution);
 
 	float D = DistributionGGX(N, H_sun, roughness);
 	float G_term = GeometrySmith(N, V, L_sun, roughness);

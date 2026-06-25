@@ -151,6 +151,11 @@ struct AASettingsComponent {
 	AAState state{};
 };
 
+struct ShadowSettingsComponent {
+	float shadowWidth = 200.0f;
+	int shadowResolution = 2048;
+};
+
 struct PostProcessSettingsComponent {
 	int giMode = 1;
 	float aoRadius = 0.5f;

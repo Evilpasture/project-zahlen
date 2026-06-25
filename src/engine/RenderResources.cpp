@@ -558,6 +558,69 @@ uint32_t RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas)
 	return offset;
 }
 
+void RenderContext::SetShadowResolution(uint32_t resolution) {
+	auto* impl = _impl.get();
+	vkDeviceWaitIdle(impl->ctx.Device());
+
+	// Recreate shadow map via RAII allocator
+	impl->shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+		impl->allocator, impl->ctx, {.width = resolution, .height = resolution},
+		{.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
+
+	// --- ADDED: Transition the new shadow map layout to SHADER_READ_ONLY_OPTIMAL ---
+	Vk::CommandPool tempPool(impl->ctx.Device(), impl->ctx.PhysicalInfo().graphics_family);
+	if (tempPool.Allocate(1)) {
+		VkCommandBuffer cmd = tempPool[0];
+		ZHLN_BeginCommandBuffer(cmd);
+
+		// 1. Transition to write/attachment layout first (satisfies Best Practices)
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+			cmd, impl->shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+
+		// 2. Transition to final resting read-only shader resource layout
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+			cmd, impl->shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+
+		ZHLN_EndCommandBuffer(cmd);
+
+		VkCommandBufferSubmitInfo cmd_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+											  .pNext = nullptr,
+											  .commandBuffer = cmd,
+											  .deviceMask = 0};
+		VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+								.pNext = nullptr,
+								.flags = 0,
+								.commandBufferInfoCount = 1,
+								.pCommandBufferInfos = &cmd_info};
+		vkQueueSubmit2(impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
+		vkQueueWaitIdle(impl->ctx.GraphicsQueue());
+	}
+	// -------------------------------------------------------------------------------
+
+	// Safely update the bindless descriptor set (Binding 2 represents the Shadow Map)
+	for (int i = 0; i < 2; ++i) {
+		VkDescriptorImageInfo updateInfo = {.sampler = VK_NULL_HANDLE,
+											.imageView = impl->shadowMap.view.Get(),
+											.imageLayout =
+												VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+		VkWriteDescriptorSet write = {
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.pNext = nullptr,
+			.dstSet = impl->bindlessSets[i],
+			.dstBinding = 2,
+			.dstArrayElement = 0,
+			.descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+			.pImageInfo = &updateInfo,
+			.pBufferInfo = {},
+			.pTexelBufferView = {},
+		};
+		vkUpdateDescriptorSets(impl->ctx.Device(), 1, &write, 0, nullptr);
+	}
+	ZHLN::Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);
+}
+
 void RenderContext::SetAAState(const AAState& state) {
 	_impl->aaState = state;
 }

@@ -432,6 +432,9 @@ static void RegisterFFICommands() {
 			auto raw = reg.GetRawArray<ZHLN::PostProcessSettingsComponent>();
 			*a->outView = ZHLN::ViewComposer::Build(&reg, raw.data(), "B",
 													raw.size()); // "B" for Bytes/Struct
+		} else if (name == "ShadowSettingsComponent") {
+			auto raw = reg.GetRawArray<ZHLN::ShadowSettingsComponent>();
+			*a->outView = ZHLN::ViewComposer::Build(&reg, raw.data(), "B", raw.size());
 		} else if (name == "AASettingsComponent") {
 			auto raw = reg.GetRawArray<ZHLN::AASettingsComponent>();
 			*a->outView = ZHLN::ViewComposer::Build(&reg, raw.data(), "B", raw.size());
@@ -514,6 +517,8 @@ static void RegisterFFICommands() {
 			ptr = &reg.Add(entity, ZHLN::AASettingsComponent{});
 		} else if (name == "SunTagComponent") {
 			ptr = &reg.Add(entity, ZHLN::SunTagComponent{});
+		} else if (name == "ShadowSettingsComponent") {
+			ptr = &reg.Add(entity, ZHLN::ShadowSettingsComponent{});
 		} else {
 			// 2. Fall back to dynamically registered types
 			uint32_t familyID = ZHLN::ECS::Registry::GetFamilyIDFromName(name);

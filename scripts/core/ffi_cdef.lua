@@ -195,6 +195,11 @@ if not ok then
             uint32_t defaultFontAtlasIdx;
         } UISettingsComponent;
 
+        typedef struct ShadowSettingsComponent {
+            float shadowWidth;
+            int shadowResolution;
+        } ShadowSettingsComponent;
+
         typedef struct String64 {
             char data[64];
             size_t len;

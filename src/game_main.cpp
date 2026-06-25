@@ -43,7 +43,6 @@
 #include <expected>
 #include <physics/PhysicsWorld.hpp>
 #include <print>
-#include <string>
 #include <threading/Mutex.hpp>
 #include <threading/TaskSystem.hpp>
 
@@ -203,6 +202,54 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 	DrawECSProfiler();
 
 	auto& reg = engine.GetRegistry();
+
+	// 1. Retrieve the Shadow Settings Component
+	auto shadowSettingsEntities = reg.GetEntitiesWith<ShadowSettingsComponent>();
+	if (!shadowSettingsEntities.empty()) {
+		auto* shadowSettings = reg.Get<ShadowSettingsComponent>(shadowSettingsEntities[0]);
+
+		ImGui::Begin("Lighting Workspace Controller");
+		ImGui::SeparatorText("Global Shadow Settings");
+
+		// --- Shadow Width Control ---
+		ImGui::DragFloat("Shadow Width", &shadowSettings->shadowWidth, 1.0f, 10.0f, 500.0f,
+						 "%.1f m");
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Orthographic width of the directional cascade volume.");
+		}
+
+		// --- Shadow Resolution Control ---
+		const char* resolutions[] = {"512", "1024", "2048", "4096"};
+		int currentResIdx = 2; // Default to 2048
+		if (shadowSettings->shadowResolution == 512) {
+			currentResIdx = 0;
+		} else if (shadowSettings->shadowResolution == 1024) {
+			currentResIdx = 1;
+		} else if (shadowSettings->shadowResolution == 2048) {
+			currentResIdx = 2;
+		} else if (shadowSettings->shadowResolution == 4096) {
+			currentResIdx = 3;
+		}
+
+		if (ImGui::Combo("Shadow Map Resolution", &currentResIdx, resolutions,
+						 IM_ARRAYSIZE(resolutions))) {
+			int newRes = 2048;
+			if (currentResIdx == 0)
+				newRes = 512;
+			else if (currentResIdx == 1)
+				newRes = 1024;
+			else if (currentResIdx == 2)
+				newRes = 2048;
+			else if (currentResIdx == 3)
+				newRes = 4096;
+
+			shadowSettings->shadowResolution = newRes;
+
+			// Trigger the GPU depth texture recreation
+			engine.GetRenderContext().SetShadowResolution(newRes);
+		}
+		ImGui::End();
+	}
 
 	// ============================================================================
 	// NEW: semi-transparent corner HUD overlay for coordinate tracking
@@ -537,14 +584,26 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 	}
 	sunDirection = sunDirection.Normalized();
 
-	// 1. Calculate camera forward direction
 	float yawRad = JPH::DegreesToRadians(cam.yaw);
 	float pitchRad = JPH::DegreesToRadians(cam.pitch);
 	JPH::Vec3 forward(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad),
 					  JPH::Sin(yawRad) * JPH::Cos(pitchRad));
 	forward = forward.Normalized();
 
-	// 2. anchors the shadow map over the player/origin
+	// 1. Retrieve the custom shadow settings, falling back to defaults if not found
+	float shadowWidth = 80.0f;
+	uint32_t shadowResolution = 2048;
+
+	auto shadowEntities = reg.GetEntitiesWith<ShadowSettingsComponent>();
+	if (!shadowEntities.empty()) {
+		auto* shadowSettings = reg.Get<ShadowSettingsComponent>(shadowEntities[0]);
+		shadowWidth = shadowSettings->shadowWidth;
+		shadowResolution = shadowSettings->shadowResolution;
+	}
+
+	// 2. Snapping: Align the shadow center to texel increments using the dynamic resolution
+	float texelSize = shadowWidth / static_cast<float>(shadowResolution);
+
 	JPH::Vec3 shadowCenter = JPH::Vec3::sZero();
 	auto playerEntities = reg.GetEntitiesWith<PlayerTagComponent>();
 	if (!playerEntities.empty()) {
@@ -553,11 +612,6 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 		}
 	}
 
-	// 3. Expand coverage to 200m (from -100 to 100) to cover the entire lobby scene
-	float shadowWidth = 200.0f;
-	float texelSize = shadowWidth / 2048.0f; // 200m total width / 2048 texels
-
-	// 4. Snap the shadow center to prevent shadow shimmering
 	shadowCenter.SetX(std::round(shadowCenter.GetX() / texelSize) * texelSize);
 	shadowCenter.SetY(std::round(shadowCenter.GetY() / texelSize) * texelSize);
 	shadowCenter.SetZ(std::round(shadowCenter.GetZ() / texelSize) * texelSize);
@@ -565,8 +619,10 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 	JPH::Vec3 lightPos = shadowCenter + sunDirection * 150.0f;
 	JPH::Mat44 lightView = Math::CreateLookAt(lightPos, shadowCenter, JPH::Vec3::sAxisY());
 
-	// Orthographic projection covering 200x200 meters with depth up to 400m
-	JPH::Mat44 lightProj = Math::CreateOrtho(-100.0f, 100.0f, -100.0f, 100.0f, 0.1f, 400.0f);
+	// 3. Apply the dynamic shadow width to the orthographic projection
+	float halfWidth = shadowWidth * 0.5f;
+	JPH::Mat44 lightProj =
+		Math::CreateOrtho(-halfWidth, halfWidth, -halfWidth, halfWidth, 0.1f, 400.0f);
 	JPH::Mat44 shadowProjView = lightProj * lightView;
 
 	cam.shadowFrustum.Update(shadowProjView);
@@ -598,6 +654,8 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 	uniforms.jitterParams =
 		JPH::Vec4(aaState.jitterX, aaState.jitterY, aaState.prevJitterX, aaState.prevJitterY);
 	uniforms.enableRTR = enableRTR;
+	uniforms.shadowWidth = shadowWidth;
+	uniforms.shadowResolution = shadowResolution;
 	if (!settingsEntities.empty()) {
 		if (auto* pp = reg.Get<PostProcessSettingsComponent>(settingsEntities[0])) {
 			uniforms.ambientExposure = pp->ambientExposure;
@@ -833,7 +891,7 @@ bool InitializeGame(Engine& engine) {
 		MainCameraTagComponent, GlobalSettingsTagComponent, AASettingsComponent, TextComponent,
 		UISettingsComponent, AudioSourceComponent, PBRComponent, ItemBaseComponent, PickupComponent,
 		UsableComponent, ContainerComponent, TriggerComponent, DebugSettingsComponent,
-		SunTagComponent, FreeCamTagComponent>();
+		SunTagComponent, FreeCamTagComponent, ShadowSettingsComponent>();
 
 	auto groundShape =
 		Physics::GetOrCreateShape(pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
@@ -873,6 +931,7 @@ bool InitializeGame(Engine& engine) {
 	Entity settingsEntity = reg.Create();
 	reg.Add(settingsEntity, GlobalSettingsTagComponent{});
 	reg.Add(settingsEntity, PostProcessSettingsComponent{});
+	reg.Add(settingsEntity, ShadowSettingsComponent{});
 	reg.Add(settingsEntity,
 			DebugSettingsComponent{.debugLineVbo = static_cast<uint64_t>(lineMesh.vertexBuffer),
 								   .debugLinePipeline = static_cast<uint64_t>(lineMat.pipeline),

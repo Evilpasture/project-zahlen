@@ -74,6 +74,8 @@ class ZHLN_API RenderContext {
 
 	void BuildMeshBLAS(Mesh& mesh);
 
+	void SetShadowResolution(uint32_t resolution);
+
 	struct Impl;
 	[[nodiscard]] auto GetImpl() const -> Impl* { return _impl.get(); }
 

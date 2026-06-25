@@ -11,9 +11,9 @@ struct FrameUniforms {
 	float4 camPos;
 	float4 lightDir;
 	uint lightCount;
-	float ambientExposure; // Maps to C++ _padding[0]
-	float pad1;			   // Maps to C++ _padding[1]
-	float pad2;			   // Maps to C++ _padding[2]
+	float ambientExposure;
+	float shadowWidth;
+	uint shadowResolution;
 	float4 sh[9];
 	float4 probeMin;
 	float4 probeMax;

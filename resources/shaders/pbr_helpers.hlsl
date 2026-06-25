@@ -67,16 +67,20 @@ float SoftClamp(float x, float limit) {
 #define BLOCKER_SEARCH_SAMPLES 16
 #define PCF_SAMPLES 16
 
-// FIX: Update shadowMap type to Texture2D<float> and remove vector .r swizzle
 float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture2D<float> shadowMap,
 				  SamplerState linearSampler) {
 	float blockerSum = 0.0f;
 	int numBlockers = 0;
 
+	// Apply a small bias to prevent the flat floor from self-shadowing
+	float blockerBias = 0.0005f;
+
 	[unroll] for (int i = 0; i < BLOCKER_SEARCH_SAMPLES; ++i) {
 		float2 offset = PoissonDisk[i] * searchRadius;
-		float shadowMapDepth = shadowMap.SampleLevel(linearSampler, uv + offset, 0); // Removed .r
-		if (shadowMapDepth < zReceiver) {
+		float shadowMapDepth = shadowMap.SampleLevel(linearSampler, uv + offset, 0);
+
+		// Subtract bias from the receiver depth
+		if (shadowMapDepth < (zReceiver - blockerBias)) {
 			blockerSum += shadowMapDepth;
 			numBlockers++;
 		}
@@ -90,7 +94,7 @@ float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture2D<floa
 // FIX: Update shadowMap type to Texture2D<float> and remove SampleCmp .r swizzle
 float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 screenPos,
 						  Texture2D<float> shadowMap, SamplerComparisonState shadowSampler,
-						  SamplerState linearSampler) {
+						  SamplerState linearSampler, float shadowResolution) {
 	float3 projCoords = shadowPos.xyz / shadowPos.w;
 
 	// Bounds check
@@ -100,11 +104,11 @@ float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 screenPos
 	}
 
 	float zReceiver = projCoords.z;
-	float texelSize = 1.0 / 2048.0;
+	float texelSize = 1.0 / shadowResolution;
 
-	// FIX: Reduced depth bias to 0.0003 (max ~12cm at 400m range) to prevent Peter Panning / Light
-	// Leaks
-	float bias = max(0.0003 * (1.0 - dot(N, L)), 0.0001);
+	// Scale the depth bias dynamically based on resolution to handle larger texel footprints
+	float resolutionScale = 2048.0 / shadowResolution;
+	float bias = max(0.0015f * (1.0 - dot(N, L)), 0.0005f) * resolutionScale;
 	zReceiver -= bias;
 
 	// 1. Blocker Search

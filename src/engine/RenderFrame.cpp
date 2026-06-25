@@ -231,8 +231,7 @@ struct ShadowPass {
 				Vk::ScopedBarrier<Vk::ShaderReadState, Vk::DepthAttachmentState>(
 					cmd, ctx.shadowMap, VK_IMAGE_ASPECT_DEPTH_BIT);
 
-			Vk::DynamicPass({.width = ZHLN::RenderContext::Impl::SHADOW_RES,
-							 .height = ZHLN::RenderContext::Impl::SHADOW_RES})
+			Vk::DynamicPass(ctx.shadowMap.extent)
 				.AddDepth(shadow_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
 						  1.0f)
 				.Execute(cmd, [&]() {
