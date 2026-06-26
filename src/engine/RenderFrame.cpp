@@ -1034,6 +1034,8 @@ RenderResult RenderContext::BeginFrame() noexcept {
 
 			VkImageView rawView = VK_NULL_HANDLE;
 			vkCreateImageView(_impl->ctx.Device(), &viewInfo, nullptr, &rawView);
+
+			// Construct the RAII wrapper to manage this view's lifetime automatically
 			_impl->punctualShadowViews[i] = Vk::ImageView(_impl->ctx.Device(), rawView);
 		}
 
@@ -1077,21 +1079,20 @@ RenderResult RenderContext::BeginFrame() noexcept {
 										  _impl->bloomFinalTarget);
 
 		// --- BATCH TRANSITION 1: Color Attachments ---
+		// Transition UNDEFINED -> COLOR_ATTACHMENT_OPTIMAL
 		auto mainAtts = mainBundle.Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd);
 		auto ppAtts = ppBundle.Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd);
 		auto bloomAtts = bloomBundle.Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd);
 
-		[[maybe_unused]] auto sShadowMap_att =
-			Vk::Transition(cmd, _impl->shadowMap, Vk::AsDepthAttachment);
-		[[maybe_unused]] auto sShadowAtlas_att =
-			Vk::Transition(cmd, _impl->shadowAtlas, Vk::AsDepthAttachment);
+		auto sShadowMap_att = Vk::Transition(cmd, _impl->shadowMap, Vk::AsDepthAttachment);
+		auto sShadowAtlas_att = Vk::Transition(cmd, _impl->shadowAtlas, Vk::AsDepthAttachment);
 		auto depth_att =
 			Vk::Transition(cmd, _impl->presentation.depthTarget, Vk::AsDepthAttachment);
 
 		// Pass 1: Clear G-Buffer and TAA history
 		Vk::DynamicPass(_impl->presentation.swapchain.Get().extent)
 			.AddColorGroup(mainAtts, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-						   {.r = 0, .g = 0, .b = 0, .a = 0})
+						   {0, 0, 0, 0})
 			.AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
 					  kClearDepthValue)
 			.Execute(cmd, []() {});
@@ -1109,24 +1110,37 @@ RenderResult RenderContext::BeginFrame() noexcept {
 			.Execute(cmd, []() {});
 
 		// --- BATCH TRANSITION 2: Read Only ---
-		[[maybe_unused]] auto mainRo =
-			mainBundle.Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
-		[[maybe_unused]] auto ppRo =
-			ppBundle.Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
-		[[maybe_unused]] auto bloomRo =
-			bloomBundle.Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
+		// Transition from the active COLOR_ATTACHMENT_OPTIMAL layout tuples
+		// (mainAtts, ppAtts, bloomAtts) instead of querying the un-tracked, static UNDEFINED
+		// layouts from the base bundle references.
+		[[maybe_unused]] auto mainRo = std::apply(
+			[&](const auto&... atts) {
+				return Vk::TransitionBatch<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, atts...);
+			},
+			mainAtts);
 
-		[[maybe_unused]] auto sDepth_ro =
-			Vk::Transition(cmd, _impl->presentation.depthTarget, Vk::AsReadOnly);
-		[[maybe_unused]] auto sShadowMap_ro = Vk::Transition(cmd, _impl->shadowMap, Vk::AsReadOnly);
+		[[maybe_unused]] auto ppRo = std::apply(
+			[&](const auto&... atts) {
+				return Vk::TransitionBatch<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, atts...);
+			},
+			ppAtts);
+
+		[[maybe_unused]] auto bloomRo = std::apply(
+			[&](const auto&... atts) {
+				return Vk::TransitionBatch<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, atts...);
+			},
+			bloomAtts);
+
+		[[maybe_unused]] auto sDepth_ro = Vk::Transition(cmd, depth_att, Vk::AsReadOnly);
+		[[maybe_unused]] auto sShadowMap_ro = Vk::Transition(cmd, sShadowMap_att, Vk::AsReadOnly);
 		[[maybe_unused]] auto sShadowAtlas_ro =
-			Vk::Transition(cmd, _impl->shadowAtlas, Vk::AsReadOnly);
+			Vk::Transition(cmd, sShadowAtlas_att, Vk::AsReadOnly);
 
 		for (int i = 0; i < 2; ++i) {
 			_impl->taaPass.WriteIndex(
 				_impl->ctx.Device(), i,
 				std::get<0>(mainRo),								// sceneColor
-				i == 0 ? std::get<3>(mainRo) : std::get<2>(mainRo), // accumNext
+				i == 0 ? std::get<3>(mainRo) : std::get<2>(mainRo), // accumNext (accum1 : accum0)
 				std::get<1>(mainRo),								// velocity
 				_impl->defaultSampler.Get(), _impl->frameUniformBuffers[i].Handle());
 		}
