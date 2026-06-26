@@ -956,6 +956,7 @@ RenderResult RenderContext::BeginFrame() noexcept {
 		worker.pools[_impl->frame_index].Reset();
 	}
 
+	// Determine physical size
 	if (_impl->resized) {
 		auto fbSize = GetFramebufferSize();
 		if (!fbSize.has_value()) {
@@ -964,79 +965,9 @@ RenderResult RenderContext::BeginFrame() noexcept {
 
 		VkExtent2D ext = {.width = fbSize->width, .height = fbSize->height};
 
-		if (!_impl->presentation.Rebuild(ext.width, ext.height)) {
+		// Delegate entire target and view reconstruction to pre-existing helper
+		if (!_impl->RecreateTargets(ext)) {
 			return std::unexpected(RenderFrameResult::Error);
-		}
-
-		_impl->sceneColor = Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>::Create(
-			_impl->allocator, _impl->ctx, ext,
-			{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
-		_impl->velocityBuffer = Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT>::Create(
-			_impl->allocator, _impl->ctx, ext,
-			{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
-		_impl->accumBuffers[0] = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
-			_impl->allocator, _impl->ctx, ext,
-			{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
-		_impl->accumBuffers[1] = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
-			_impl->allocator, _impl->ctx, ext,
-			{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
-		_impl->normalRoughnessBuffer = Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>::Create(
-			_impl->allocator, _impl->ctx, ext,
-			{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
-		_impl->postProcessTarget = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
-			_impl->allocator, _impl->ctx, ext,
-			{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
-		_impl->ambientTarget = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
-			_impl->allocator, _impl->ctx, ext,
-			{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
-		_impl->lightingTarget = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
-			_impl->allocator, _impl->ctx, ext,
-			{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
-		_impl->smaaEdgeTarget = Vk::RenderTarget<VK_FORMAT_R8G8_UNORM>::Create(
-			_impl->allocator, _impl->ctx, ext,
-			{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
-		_impl->smaaWeightTarget = Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>::Create(
-			_impl->allocator, _impl->ctx, ext,
-			{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
-
-		// Allocate bloom targets at 1/4 resolution of the viewport
-		VkExtent2D bloomExt = {.width = std::max(1u, ext.width / 4),
-							   .height = std::max(1u, ext.height / 4)};
-		_impl->bloomThresholdTarget = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
-			_impl->allocator, _impl->ctx, bloomExt,
-			{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
-		_impl->bloomBlurTarget = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
-			_impl->allocator, _impl->ctx, bloomExt,
-			{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
-		_impl->bloomFinalTarget = Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
-			_impl->allocator, _impl->ctx, bloomExt,
-			{.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
-
-		// Safely clearing the vector automatically destroys all old Vulkan image views
-		_impl->punctualShadowViews.clear();
-
-		uint32_t maxPointLights = 4;
-		_impl->punctualShadowViews.resize(maxPointLights);
-		for (uint32_t i = 0; i < maxPointLights; ++i) {
-			VkImageViewCreateInfo viewInfo = {
-				.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-				.pNext = nullptr,
-				.flags = 0,
-				.image = _impl->shadowAtlas.image.Handle(),
-				.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-				.format = VK_FORMAT_D32_SFLOAT,
-				.components = {},
-				.subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
-									 .baseMipLevel = 0,
-									 .levelCount = 1,
-									 .baseArrayLayer = i * 6,
-									 .layerCount = 6}};
-
-			VkImageView rawView = VK_NULL_HANDLE;
-			vkCreateImageView(_impl->ctx.Device(), &viewInfo, nullptr, &rawView);
-
-			// Construct the RAII wrapper to manage this view's lifetime automatically
-			_impl->punctualShadowViews[i] = Vk::ImageView(_impl->ctx.Device(), rawView);
 		}
 
 		_impl->needsInitialClear = true;
@@ -1079,11 +1010,11 @@ RenderResult RenderContext::BeginFrame() noexcept {
 										  _impl->bloomFinalTarget);
 
 		// --- BATCH TRANSITION 1: Color Attachments ---
-		// Transition UNDEFINED -> COLOR_ATTACHMENT_OPTIMAL
 		auto mainAtts = mainBundle.Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd);
 		auto ppAtts = ppBundle.Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd);
 		auto bloomAtts = bloomBundle.Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd);
 
+		// Resolve first-stage Depth and Shadow Map transition layouts
 		auto sShadowMap_att = Vk::Transition(cmd, _impl->shadowMap, Vk::AsDepthAttachment);
 		auto sShadowAtlas_att = Vk::Transition(cmd, _impl->shadowAtlas, Vk::AsDepthAttachment);
 		auto depth_att =
@@ -1092,7 +1023,7 @@ RenderResult RenderContext::BeginFrame() noexcept {
 		// Pass 1: Clear G-Buffer and TAA history
 		Vk::DynamicPass(_impl->presentation.swapchain.Get().extent)
 			.AddColorGroup(mainAtts, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-						   {0, 0, 0, 0})
+						   {.r = 0, .g = 0, .b = 0, .a = 0})
 			.AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
 					  kClearDepthValue)
 			.Execute(cmd, []() {});
@@ -1110,9 +1041,6 @@ RenderResult RenderContext::BeginFrame() noexcept {
 			.Execute(cmd, []() {});
 
 		// --- BATCH TRANSITION 2: Read Only ---
-		// Transition from the active COLOR_ATTACHMENT_OPTIMAL layout tuples
-		// (mainAtts, ppAtts, bloomAtts) instead of querying the un-tracked, static UNDEFINED
-		// layouts from the base bundle references.
 		[[maybe_unused]] auto mainRo = std::apply(
 			[&](const auto&... atts) {
 				return Vk::TransitionBatch<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, atts...);
@@ -1131,18 +1059,17 @@ RenderResult RenderContext::BeginFrame() noexcept {
 			},
 			bloomAtts);
 
+		// Transition from the active transitioned structures to preserve layout history
 		[[maybe_unused]] auto sDepth_ro = Vk::Transition(cmd, depth_att, Vk::AsReadOnly);
 		[[maybe_unused]] auto sShadowMap_ro = Vk::Transition(cmd, sShadowMap_att, Vk::AsReadOnly);
 		[[maybe_unused]] auto sShadowAtlas_ro =
 			Vk::Transition(cmd, sShadowAtlas_att, Vk::AsReadOnly);
 
 		for (int i = 0; i < 2; ++i) {
-			_impl->taaPass.WriteIndex(
-				_impl->ctx.Device(), i,
-				std::get<0>(mainRo),								// sceneColor
-				i == 0 ? std::get<3>(mainRo) : std::get<2>(mainRo), // accumNext (accum1 : accum0)
-				std::get<1>(mainRo),								// velocity
-				_impl->defaultSampler.Get(), _impl->frameUniformBuffers[i].Handle());
+			_impl->taaPass.WriteIndex(_impl->ctx.Device(), i, std::get<0>(mainRo),
+									  i == 0 ? std::get<3>(mainRo) : std::get<2>(mainRo),
+									  std::get<1>(mainRo), _impl->defaultSampler.Get(),
+									  _impl->frameUniformBuffers[i].Handle());
 		}
 
 		_impl->needsInitialClear = false;
