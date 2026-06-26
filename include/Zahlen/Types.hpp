@@ -141,25 +141,31 @@ struct alignas(16) FrameUniforms {
 	JPH::Mat44 viewProj;
 	JPH::Mat44 unjitteredViewProj;
 	JPH::Mat44 prevUnjitteredViewProj;
-	JPH::Mat44 lightSpaceMatrix;
+
+	// CHANGED: Array of light-space projection matrices (maximum 4 cascades is standard)
+	JPH::Mat44 lightSpaceMatrices[4];
+
 	JPH::Mat44 invViewProj;
 	float camPos[4];
 	float lightDir[4];
 	uint32_t lightCount;
-	float ambientExposure; // <-- Named explicitly (4 bytes)
-	float shadowWidth;
+	float ambientExposure;
+	float shadowWidth; // Can now represent cascade-0 width or be repurposed
 	uint32_t shadowResolution;
-	JPH::Vec4 sh[9]; // 9 Spherical Harmonic Coefficients
+	JPH::Vec4 sh[9];
 
-	// --- ADD PROBE PARAMETERS (3 * 16 = 48 bytes) ---
-	JPH::Vec4 probeMin;		// XYZ: bounding box min, W: useLocalProbe flag (0.0 or 1.0)
-	JPH::Vec4 probeMax;		// XYZ: bounding box max, W: unused
-	JPH::Vec4 probePos;		// XYZ: probe capture position, W: unused
-	JPH::Vec4 jitterParams; // x: currentX, y: currentY, z: prevX, w: prevY
+	JPH::Vec4 probeMin;
+	JPH::Vec4 probeMax;
+	JPH::Vec4 probePos;
+	JPH::Vec4 jitterParams;
 	int enableRTR;
 	float zScale;
 	float zBias;
-	int _padding_rtr;
+
+	// NEW: Depth boundaries where each cascade ends
+	alignas(16) float cascadeSplits[4];
+	int numCascades; // E.g., 4
+	float _pad_csm[3];
 };
 
 // Material handle representation

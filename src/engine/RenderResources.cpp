@@ -539,7 +539,8 @@ void RenderContext::SetShadowResolution(uint32_t resolution) {
 	// Recreate shadow map via RAII allocator
 	impl->shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
 		impl->allocator, impl->ctx, {.width = resolution, .height = resolution},
-		{.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
+		{.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+		 .arrayLayers = RenderContext::Impl::NUM_CASCADES});
 
 	// --- ADDED: Transition the new shadow map layout to SHADER_READ_ONLY_OPTIMAL ---
 	Vk::CommandPool tempPool(impl->ctx.Device(), impl->ctx.PhysicalInfo().graphics_family);

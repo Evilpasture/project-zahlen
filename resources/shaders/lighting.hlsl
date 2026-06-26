@@ -30,7 +30,7 @@ struct ClusterVolume {
 [[vk::binding(3, 0)]] Texture2D<float4> texNormalRoughness;
 [[vk::binding(4, 0)]] StructuredBuffer<Light> lights;
 [[vk::binding(5, 0)]] ConstantBuffer<FrameUniforms> frame;
-[[vk::binding(6, 0)]] Texture2D<float> shadowMap;
+[[vk::binding(6, 0)]] Texture2DArray<float> shadowMap;
 [[vk::binding(7, 0)]] SamplerComparisonState shadowSampler;
 [[vk::binding(8, 0)]] Texture2D ltc_mat;
 [[vk::binding(9, 0)]] Texture2D ltc_amp;
@@ -71,6 +71,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	float metallic = normRoughRaw.w;
 
 	float3 worldPos = ReconstructWorldPos(input.uv, depth, pc.invViewProj);
+
+	// NEW: Define viewDepth here at the top of PSMain
+	float viewDepth = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
+
 	float3 V = normalize(pc.camPos.xyz - worldPos);
 	float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedoRaw.rgb, metallic);
 	float NdotV = saturate(dot(N, V));
@@ -84,16 +88,26 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	float3 H_sun = normalize(V + L_sun + 1e-5f);
 	float NdotL_sun = saturate(dot(N, L_sun));
 
-	float texelSizeWorld = frame.shadowWidth / frame.shadowResolution;
-	// Add a baseline offset of 0.2 texels to prevent flat-surface acne at lower resolutions
+	// CHANGED: Flat, fast, branchless cascade selection
+	uint cascadeIndex = 0;
+	if (viewDepth > frame.cascadeSplits.x)
+		cascadeIndex = 1;
+	if (viewDepth > frame.cascadeSplits.y)
+		cascadeIndex = 2;
+	if (viewDepth > frame.cascadeSplits.z)
+		cascadeIndex = 3;
+
+	// Calculate normal bias relative to cascade-specific texel footprint
+	float texelSizeWorld = (frame.shadowWidth * (cascadeIndex + 1)) / frame.shadowResolution;
 	float normalBias = saturate(1.0 - dot(N, L_sun)) * 1.5 + 0.2;
 	float3 biasedWorldPos = worldPos + N * (normalBias * texelSizeWorld);
 
-	float4 shadowPos = mul(frame.lightSpaceMatrix, float4(biasedWorldPos, 1.0f));
+	// Transform position to the selected light-space matrix
+	float4 shadowPos = mul(frame.lightSpaceMatrices[cascadeIndex], float4(biasedWorldPos, 1.0f));
 	shadowPos.xy = shadowPos.xy * float2(0.5f, -0.5f) + 0.5f * shadowPos.w;
 
 	float shadow = CalculateShadowPCSS(shadowPos, N, L_sun, input.pos.xy, shadowMap, shadowSampler,
-									   pointSampler, frame.shadowResolution);
+									   pointSampler, frame.shadowResolution, cascadeIndex);
 
 	float D = DistributionGGX(N, H_sun, roughness);
 	float G_term = GeometrySmith(N, V, L_sun, roughness);
@@ -108,7 +122,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
 	// --- 2. Punctual and Area Lights (Clustered) ---
 	float3 directPunctual = float3(0.0f, 0.0f, 0.0f);
-	float viewDepth = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
+
+	// RETAINED: SliceZ calculation using the relocated viewDepth
 	uint sliceZ = uint(max(0.0f, log(viewDepth) * frame.zScale + frame.zBias));
 	uint cIdx = min(uint(input.uv.x * 16.0f), 15u) + (min(uint(input.uv.y * 9.0f), 8u) * 16) +
 				(min(sliceZ, 23u) * 144);

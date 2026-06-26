@@ -647,7 +647,6 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 	uniforms.viewProj = vp;
 	uniforms.unjitteredViewProj = unjitteredVp;
 	uniforms.prevUnjitteredViewProj = prevUnjitteredVp;
-	uniforms.lightSpaceMatrix = shadowProjView;
 	uniforms.invViewProj = unjitteredVp.Inversed();
 	std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
 	JPH::Vec3 shaderLightDir = sunDirection;
@@ -670,7 +669,7 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 	}
 
 	rc.SetAAState(aaState);
-	Renderer::SetFrameData(rc, uniforms, shadowProjView);
+	Renderer::SetFrameData(rc, cam, uniforms, shadowProjView);
 	Renderer::SetMatrices(rc, vp, unjitteredVp);
 
 	const auto& mainVisible = engine.GetVisibleEntities();

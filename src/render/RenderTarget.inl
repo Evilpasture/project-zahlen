@@ -57,7 +57,12 @@ inline auto RenderTarget<F>::Create(Allocator& allocator, const Context& ctx, Vk
 
 	rt.image = Image::Create(allocator.Get(), info, VMA_MEMORY_USAGE_GPU_ONLY);
 	if (rt.image.Valid()) {
-		rt.view = CreateView<F>(ctx.Device(), rt.image.Handle(), desc.aspect, 1);
+		if (desc.arrayLayers > 1) {
+			rt.view = CreateView2DArray<F>(ctx.Device(), rt.image.Handle(), 0, desc.arrayLayers,
+										   desc.aspect, 1);
+		} else {
+			rt.view = CreateView<F>(ctx.Device(), rt.image.Handle(), desc.aspect, 1);
+		}
 	}
 	return rt;
 }

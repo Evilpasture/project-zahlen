@@ -484,7 +484,6 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 			uniforms.viewProj = vp;
 			uniforms.unjitteredViewProj = unjitteredVp;
 			uniforms.prevUnjitteredViewProj = s_PrevUnjitteredVp;
-			uniforms.lightSpaceMatrix = shadowProjView;
 			uniforms.invViewProj = unjitteredVp.Inversed();
 			std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
 			std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);
@@ -494,7 +493,7 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 											  s_AAState.prevJitterX, s_AAState.prevJitterY);
 
 			rc.SetAAState(s_AAState);
-			Renderer::SetFrameData(rc, uniforms, shadowProjView);
+			Renderer::SetFrameData(rc, cam, uniforms, shadowProjView);
 
 			auto begin_res = rc.BeginFrame(); // <-- FIXED: Capture expected
 			if (!begin_res) {

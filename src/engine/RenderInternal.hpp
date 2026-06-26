@@ -470,9 +470,14 @@ struct RenderContext::Impl {
 	ZHLN::DoubleBuffered<VkDescriptorSet> cullingSets;
 
 	static constexpr uint32_t SHADOW_RES = 2048;
+	static constexpr uint32_t NUM_CASCADES = 4;
+
 	Vk::RenderTarget<VK_FORMAT_D32_SFLOAT> shadowMap;
 	Vk::Sampler shadowSampler;
 	Vk::Sampler clampSampler;
+
+	JPH::Array<Vk::ImageView> shadowCascadeViews;
+
 	Vk::RenderTarget<VK_FORMAT_D32_SFLOAT> shadowAtlas;
 	Vk::ImageView shadowAtlasCubeView;
 	Vk::ImageView shadowAtlas2DView;

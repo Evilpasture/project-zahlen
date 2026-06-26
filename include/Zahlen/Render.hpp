@@ -27,7 +27,7 @@ struct PipelineDesc {
 	bool alphaBlend = false;
 	bool isLineList = false;
 };
-
+struct Camera;
 class ZHLN_API RenderContext {
   public:
 	RenderContext(Window& window, const RenderConfig& cfg);
@@ -107,7 +107,7 @@ namespace Renderer {
 
 void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj,
 				 const JPH::Mat44& unjitteredViewProj);
-void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
+void SetFrameData(RenderContext& ctx, const Camera& cam, const FrameUniforms& uniforms,
 				  const JPH::Mat44& shadowProjView);
 void SetGISettings(RenderContext& ctx, const GISettings& settings);
 

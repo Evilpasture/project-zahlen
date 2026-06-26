@@ -67,19 +67,18 @@ float SoftClamp(float x, float limit) {
 #define BLOCKER_SEARCH_SAMPLES 16
 #define PCF_SAMPLES 16
 
-float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture2D<float> shadowMap,
-				  SamplerState linearSampler) {
+float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture2DArray<float> shadowMap,
+				  SamplerState linearSampler, uint cascadeIndex) {
 	float blockerSum = 0.0f;
 	int numBlockers = 0;
-
-	// Apply a small bias to prevent the flat floor from self-shadowing
 	float blockerBias = 0.0005f;
 
 	[unroll] for (int i = 0; i < BLOCKER_SEARCH_SAMPLES; ++i) {
 		float2 offset = PoissonDisk[i] * searchRadius;
-		float shadowMapDepth = shadowMap.SampleLevel(linearSampler, uv + offset, 0);
+		// Sample from the active cascade slice [c]
+		float shadowMapDepth =
+			shadowMap.SampleLevel(linearSampler, float3(uv + offset, cascadeIndex), 0);
 
-		// Subtract bias from the receiver depth
 		if (shadowMapDepth < (zReceiver - blockerBias)) {
 			blockerSum += shadowMapDepth;
 			numBlockers++;
@@ -91,13 +90,11 @@ float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture2D<floa
 	return blockerSum / (float)numBlockers;
 }
 
-// FIX: Update shadowMap type to Texture2D<float> and remove SampleCmp .r swizzle
 float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 screenPos,
-						  Texture2D<float> shadowMap, SamplerComparisonState shadowSampler,
-						  SamplerState linearSampler, float shadowResolution) {
+						  Texture2DArray<float> shadowMap, SamplerComparisonState shadowSampler,
+						  SamplerState linearSampler, float shadowResolution, uint cascadeIndex) {
 	float3 projCoords = shadowPos.xyz / shadowPos.w;
 
-	// Bounds check
 	if (projCoords.x < 0.0 || projCoords.x > 1.0 || projCoords.y < 0.0 || projCoords.y > 1.0 ||
 		projCoords.z < 0.0 || projCoords.z > 1.0) {
 		return 1.0f;
@@ -106,30 +103,24 @@ float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 screenPos
 	float zReceiver = projCoords.z;
 	float texelSize = 1.0 / shadowResolution;
 
-	// Scale the depth bias dynamically based on resolution to handle larger texel footprints
 	float resolutionScale = 2048.0 / shadowResolution;
 	float bias = max(0.0015f * (1.0 - dot(N, L)), 0.0005f) * resolutionScale;
 	zReceiver -= bias;
 
-	// 1. Blocker Search
+	// 1. Blocker Search (Passing cascadeIndex)
 	float searchRadius = 4.0 * texelSize;
 	float avgBlockerDepth =
-		FindBlocker(projCoords.xy, zReceiver, searchRadius, shadowMap, linearSampler);
+		FindBlocker(projCoords.xy, zReceiver, searchRadius, shadowMap, linearSampler, cascadeIndex);
 
-	// No blockers found -> fully illuminated
 	if (avgBlockerDepth == -1.0f)
 		return 1.0f;
 
-	// 2. Penumbra Estimation (Orthographic)
+	// 2. Penumbra Estimation
 	float worldDepthDiff = (zReceiver - avgBlockerDepth) * 400.0f;
-
-	// FIX: Increased softness multiplier from 0.15f to 0.5f for softer edges
 	float penumbraWidth = worldDepthDiff * 0.5f;
-
-	// FIX: Enforce a minimum 2.5 texel blur radius to hide the shadow map's pixel grid
 	float filterRadius = clamp(penumbraWidth, 2.5f, 16.0f) * texelSize;
 
-	// 3. Filtered PCF pass (Rotated Poisson Disk)
+	// 3. Filtered PCF pass
 	float shadow = 0.0f;
 	float angle = GetShadowDither(screenPos) * 2.0 * 3.14159265;
 	float s = sin(angle);
@@ -140,8 +131,9 @@ float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 screenPos
 							   PoissonDisk[i].x * s + PoissonDisk[i].y * c) *
 						filterRadius;
 
-		shadow += shadowMap.SampleCmpLevelZero(shadowSampler, projCoords.xy + offset,
-											   zReceiver); // Removed .r
+		// Sample using texture array coordinate format: float3(UV, slice) [c]
+		shadow += shadowMap.SampleCmpLevelZero(
+			shadowSampler, float3(projCoords.xy + offset, cascadeIndex), zReceiver);
 	}
 
 	return shadow / (float)PCF_SAMPLES;

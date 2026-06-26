@@ -524,7 +524,14 @@ void RenderContext::Impl::InitShadowResources() {
 
 	shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
 		allocator, ctx, {.width = SHADOW_RES, .height = SHADOW_RES},
-		{.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
+		{.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+		 .arrayLayers = NUM_CASCADES});
+
+	shadowCascadeViews.resize(NUM_CASCADES);
+	for (uint32_t i = 0; i < NUM_CASCADES; ++i) {
+		shadowCascadeViews[i] = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(
+			ctx.Device(), shadowMap.image.Handle(), i, 1);
+	}
 
 	// 1. Allocate 24-layer Shadow Atlas
 	shadowAtlas = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(

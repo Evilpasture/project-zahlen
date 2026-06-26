@@ -6,7 +6,9 @@
 #include "ParallelDraw.hpp"
 #include "RenderInternal.hpp"
 #include "RenderParams.hpp"
+#include "Zahlen/Camera.hpp"
 #include "Zahlen/GUI.hpp"
+#include "Zahlen/Math3D.hpp"
 #include "Zahlen/Profiler.hpp"
 #include "backends/imgui_impl_vulkan.h"
 #include "detail/RadixSort.hpp"
@@ -247,34 +249,45 @@ struct ShadowPass {
 			cmd, recorder.frameIndex, ctx.gpuProfiler);
 
 		// ====================================================================
-		// 1. DIRECTIONAL SHADOW PASS (Sun)
+		// 1. DIRECTIONAL CASCADED SHADOW PASS (Sun)
 		// ====================================================================
-		{
-			auto [shadow_att, scope] =
-				Vk::ScopedBarrier<Vk::ShaderReadState, Vk::DepthAttachmentState>(
-					cmd, ctx.shadowMap, VK_IMAGE_ASPECT_DEPTH_BIT);
+		for (uint32_t cascade = 0; cascade < RenderContext::Impl::NUM_CASCADES; ++cascade) {
+			// Pick the specific subview representing this cascade layer
+			Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> cascadeLayerImage = {
+				.handle = ctx.shadowMap.image.Handle(),
+				.view = ctx.shadowCascadeViews[cascade].Get(),
+				.extent = {.width = RenderContext::Impl::SHADOW_RES,
+						   .height = RenderContext::Impl::SHADOW_RES},
+				.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
 
-			Vk::DynamicPass(ctx.shadowMap.extent)
-				.AddDepth(shadow_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+			auto [cascade_att, scope] =
+				Vk::ScopedBarrier<Vk::ShaderReadState, Vk::DepthAttachmentState>(
+					cmd, cascadeLayerImage, VK_IMAGE_ASPECT_DEPTH_BIT);
+
+			Vk::DynamicPass(cascadeLayerImage.extent)
+				.AddDepth(cascade_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
 						  1.0f)
 				.Execute(cmd, [&]() {
 					for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
 						const auto& draw = ctx.drawQueue[i];
-						// Bitwise check: Only draw if marked for shadows (or if no visibility flags
-						// are set)
 						bool isVisible =
 							(draw.flags & DrawFlags::VisibleInShadow) != DrawFlags::None ||
 							(draw.flags & (DrawFlags::VisibleInMain |
 										   DrawFlags::VisibleInShadow)) == DrawFlags::None;
-						if (!isVisible) {
+						if (!isVisible || draw.alphaMode == 2) {
 							continue;
 						}
-						if (draw.alphaMode == 2) {
-							continue;
-						}
-						auto* mesh = draw.posMesh;
 
-						ObjectConstants pushConstants = {.instanceId = i, .isShadowPass = 1};
+						// Tell the vertex shader which cascade matrix to use (using isShadowPass
+						// field as index)
+						ObjectConstants pushConstants = {
+							.instanceId = i,
+							.isShadowPass =
+								cascade +
+								1 // Offset by 1 so 0 still represents non-shadow/normal render path
+						};
+
+						auto* mesh = draw.posMesh;
 						uint32_t vCount = draw.indexMesh ? draw.indexCount : mesh->vertexCount;
 
 						Vk::DrawInstanced(cmd,
@@ -1486,22 +1499,106 @@ void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj,
 	impl->unjittered_view_proj = unjitteredViewProj;
 }
 
-void SetFrameData(RenderContext& ctx, const FrameUniforms& uniforms,
-				  const JPH::Mat44& shadowProjView) {
+void SetFrameData(RenderContext& ctx, const Camera& cam, const FrameUniforms& uniforms,
+				  [[maybe_unused]] const JPH::Mat44& shadowProjView) {
 	auto* impl = ctx.GetImpl();
-	impl->shadowProjView = shadowProjView;
-	impl->currentUniforms = uniforms;
 
+	impl->currentUniforms = uniforms;
 	impl->currentUniforms.camPos[3] = static_cast<float>(impl->aaState.frameIndex);
+	impl->currentUniforms.numCascades = RenderContext::Impl::NUM_CASCADES;
 
 	std::memcpy(impl->currentUniforms.sh, impl->iblPayload.shCoeffs.data(), sizeof(JPH::Vec4) * 9);
 
+	// --- CASCADED SHADOW MAP CALCULATIONS ---
+	float nearClip = cam.nearZ;
+	float farClip = 150.0f;
+	float ratio = farClip / nearClip;
+
+	// 1. Calculate Cascade Splits using the Practical Split Scheme (Logarithmic/Uniform Mix)
+	float lambda = 0.93f; // Favors logarithmic closer to the camera
+	std::array<float, RenderContext::Impl::NUM_CASCADES + 1> splits{};
+	for (uint32_t i = 0; i <= RenderContext::Impl::NUM_CASCADES; ++i) {
+		float p = static_cast<float>(i) / RenderContext::Impl::NUM_CASCADES;
+		float logSplit = nearClip * std::pow(ratio, p);
+		float uniformSplit = nearClip + (farClip - nearClip) * p;
+		splits[i] = lambda * logSplit + (1.0f - lambda) * uniformSplit;
+	}
+
+	// Determine the aspect ratio of your viewport
+	VkExtent2D res = impl->sceneColor.extent;
+	float aspect = (res.height > 0) ? (float)res.width / res.height : 1.777f;
+	float tanHalfFov = std::tan(JPH::DegreesToRadians(cam.fov * 0.5f));
+
+	JPH::Mat44 camView = cam.GetViewMatrix();
+	JPH::Mat44 invCamView = camView.Inversed();
+
+	JPH::Vec3 lightDir =
+		JPH::Vec3(uniforms.lightDir[0], uniforms.lightDir[1], uniforms.lightDir[2]).Normalized();
+	JPH::Mat44 lightView =
+		Math::CreateLookAt(lightDir * 100.0f, JPH::Vec3::sZero(), JPH::Vec3::sAxisY());
+
+	for (uint32_t i = 0; i < RenderContext::Impl::NUM_CASCADES; ++i) {
+		float nearDist = splits[i];
+		float farDist = splits[i + 1];
+
+		// Store split distance for the shader
+		impl->currentUniforms.cascadeSplits[i] = farDist;
+
+		// 2. Find the 8 View-Space Frustum segment corners
+		float hNear = 2.0f * tanHalfFov * nearDist;
+		float wNear = hNear * aspect;
+		float hFar = 2.0f * tanHalfFov * farDist;
+		float wFar = hFar * aspect;
+
+		std::array<JPH::Vec3, 8> corners = {{{-wNear * 0.5f, hNear * 0.5f, -nearDist},
+											 {wNear * 0.5f, hNear * 0.5f, -nearDist},
+											 {wNear * 0.5f, -hNear * 0.5f, -nearDist},
+											 {-wNear * 0.5f, -hNear * 0.5f, -nearDist},
+											 {-wFar * 0.5f, hFar * 0.5f, -farDist},
+											 {wFar * 0.5f, hFar * 0.5f, -farDist},
+											 {wFar * 0.5f, -hFar * 0.5f, -farDist},
+											 {-wFar * 0.5f, -hFar * 0.5f, -farDist}}};
+
+		// 3. Transform View-Space corners to World Space, then to Light-Space
+		JPH::Vec3 center = JPH::Vec3::sZero();
+		for (auto& corner : corners) {
+			corner = invCamView * corner;
+			center += corner;
+		}
+		center /= 8.0f; // Geographic center of the cascade frustum volume
+
+		// 4. Calculate bounding sphere radius to prevent rotational shimmering
+		float radius = 0.0f;
+		for (const auto& corner : corners) {
+			radius = std::max(radius, (corner - center).Length());
+		}
+		radius = std::ceil(radius * 16.0f) / 16.0f; // Round slightly for stabilizer precision
+
+		// 5. Snap the sphere center in light-space to texel boundaries
+		JPH::Vec3 centerLight = lightView * center;
+		float texelsPerUnit = static_cast<float>(RenderContext::Impl::SHADOW_RES) / (radius * 2.0f);
+
+		centerLight.SetX(std::floor(centerLight.GetX() * texelsPerUnit) / texelsPerUnit);
+		centerLight.SetY(std::floor(centerLight.GetY() * texelsPerUnit) / texelsPerUnit);
+
+		// Transform the stabilized center back to world space
+		center = lightView.Inversed() * centerLight;
+
+		// 6. Build final stabilized projection matrices
+		JPH::Vec3 cascadeLightPos = center + lightDir * 150.0f;
+		JPH::Mat44 cascadeLightView =
+			Math::CreateLookAt(cascadeLightPos, center, JPH::Vec3::sAxisY());
+		JPH::Mat44 cascadeLightProj =
+			Math::CreateOrtho(-radius, radius, -radius, radius, 0.1f, 300.0f);
+
+		impl->currentUniforms.lightSpaceMatrices[i] = cascadeLightProj * cascadeLightView;
+	}
+
+	// Pack SH, clustering, and upload UBO
 	float nZ = 24.0f;
-	float nearZ = 0.1f;
-	float farZ = 1000.0f;
-	float logRatio = std::log(farZ / nearZ);
+	float logRatio = std::log(1000.0f / 0.1f);
 	impl->currentUniforms.zScale = nZ / logRatio;
-	impl->currentUniforms.zBias = -(nZ * std::log(nearZ)) / logRatio;
+	impl->currentUniforms.zBias = -(nZ * std::log(0.1f)) / logRatio;
 
 	std::memcpy(impl->frameUniformBuffers[impl->frame_index].Map().data, &impl->currentUniforms,
 				sizeof(FrameUniforms));

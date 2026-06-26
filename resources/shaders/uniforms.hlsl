@@ -6,7 +6,10 @@ struct FrameUniforms {
 	float4x4 viewProj;
 	float4x4 unjitteredViewProj;
 	float4x4 prevUnjitteredViewProj;
-	float4x4 lightSpaceMatrix;
+
+	// CHANGED: Array of 4 matrices replacing the single matrix [3]
+	float4x4 lightSpaceMatrices[4];
+
 	float4x4 invViewProj;
 	float4 camPos;
 	float4 lightDir;
@@ -22,7 +25,11 @@ struct FrameUniforms {
 	int enableRTR;
 	float zScale;
 	float zBias;
-	int rtr_pad0;
+
+	// NEW: To match std140 array packing, declare splits as a single float4 vector [3]
+	float4 cascadeSplits;
+	int numCascades;
+	float3 _pad_csm; // 12-byte pad to close out the final 16-byte boundary
 };
 
 struct Light {

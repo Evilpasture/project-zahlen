@@ -95,7 +95,9 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	float alphaCutoff = inst.alphaCutoff;
 
 	if (obj.isShadowPass != 0) {
-		output.pos = mul(frame.lightSpaceMatrix, worldPos); // Standard, unbiased projection
+		// Map back from the offset index passed in by Passes::ShadowPass::Execute
+		uint cascadeIndex = clamp(obj.isShadowPass - 1, 0u, 3u);
+		output.pos = mul(frame.lightSpaceMatrices[cascadeIndex], worldPos);
 		output.uv = localUV;
 		output.baseColorFactor = baseColorFactor;
 		output.emissiveFactor = emissiveFactor;
@@ -126,7 +128,9 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 
 	output.tangent.w = localTangent.w;
 	output.uv = localUV;
-	output.shadowPos = mul(frame.lightSpaceMatrix, worldPos);
+
+	// CHANGED: Default shadowPos to cascade 0 for forward pass compatibility
+	output.shadowPos = mul(frame.lightSpaceMatrices[0], worldPos);
 	output.color = localColor;
 	output.materialIndices = uint4(albedoIdx, normalIdx, pbrIdx, emissiveIdx);
 	output.baseColorFactor = baseColorFactor;
