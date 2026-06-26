@@ -31,9 +31,10 @@ float4 LocalUnpackColor(uint packed) {
 }
 
 struct UIObjectConstants {
-	float4x4 orthoMatrix; // Passes C++ screen projection matrix
-	uint64_t vboAddress;  // BDA to visual character vertex buffer
-	uint albedoIdx;		  // Bindless font atlas index
+	float4x4 orthoMatrix;
+	uint64_t posAddress;
+	uint64_t attrAddress;
+	uint albedoIdx;
 	uint padding;
 };
 
@@ -51,12 +52,9 @@ struct UIVSOutput {
 UIVSOutput VSMain(uint vertexId : SV_VertexID) {
 	UIVSOutput output;
 
-	uint64_t baseAddr = obj.vboAddress + vertexId * 64;
-
-	// Load individual attributes directly (bypassing DXC struct loading bugs)
-	float3 position = vk::RawBufferLoad<float3>(baseAddr + 0, 4);
-	uint uv = vk::RawBufferLoad<uint>(baseAddr + 20, 4);
-	uint color = vk::RawBufferLoad<uint>(baseAddr + 24, 4);
+	float3 position = vk::RawBufferLoad<float3>(obj.posAddress + vertexId * 12, 4);
+	uint uv = vk::RawBufferLoad<uint>(obj.attrAddress + vertexId * 16 + 8, 4);
+	uint color = vk::RawBufferLoad<uint>(obj.attrAddress + vertexId * 16 + 12, 4);
 
 	output.pos = mul(obj.orthoMatrix, float4(position, 1.0f));
 	output.uv = LocalUnpackUV(uv);

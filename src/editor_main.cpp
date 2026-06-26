@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// File: src/editor_main.cpp
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/CommandLine.hpp"
 #include "Zahlen/Input.hpp"
@@ -115,7 +116,7 @@ auto CastPickingRay(Engine& engine, const Camera& cam) -> Physics::RaycastResult
 		return {};
 	}
 
-	// 1. Map to Normalized Device Coordinates [-1, 1] [c]
+	// 1. Map to Normalized Device Coordinates [-1, 1]
 	float ndcX = (2.0f * mouse.x) / (float)winSize.width - 1.0f;
 	float ndcY = 1.0f - (2.0f * mouse.y) / (float)winSize.height;
 
@@ -133,7 +134,7 @@ auto CastPickingRay(Engine& engine, const Camera& cam) -> Physics::RaycastResult
 							   farWorld.GetZ() / farWorld.GetW());
 	JPH::Vec3 dir = (pFar - pNear).Normalized();
 
-	// 3. Execute narrowing phase raycast query via Jolt [c]
+	// 3. Execute narrowing phase raycast query via Jolt
 	return Physics::Raycast(engine.GetPhysicsContext(), JPH::RVec3(pNear), dir, 1000.0f);
 }
 
@@ -532,26 +533,32 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 				bool isWireframe = true;
 				auto debugData = Physics::GetDebugDrawData(pc, true, true, isWireframe);
 
-				std::vector<Vertex> debugVerts;
-				debugVerts.reserve(debugData.lineCount);
+				std::vector<VertexPosition> debugPos;
+				std::vector<VertexAttributes> debugAttr;
+				debugPos.reserve(debugData.lineCount);
+				debugAttr.reserve(debugData.lineCount);
 
 				for (size_t i = 0; i < debugData.lineCount; ++i) {
 					const auto& jv = debugData.lines[i];
-					Vertex v{};
-					v.position[0] = jv.x;
-					v.position[1] = jv.y;
-					v.position[2] = jv.z;
-					v.color.data = jv.color;
-					v.normal = Math::PackNormal(0, 1, 0);
-					debugVerts.push_back(v);
+					debugPos.push_back({.position = {jv.x, jv.y, jv.z}});
+					debugAttr.push_back({.normal = Math::PackNormal(0.0f, 1.0f, 0.0f),
+										 .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
+										 .uv = Math::PackUV(0.0f, 0.0f),
+										 .color = {.data = jv.color}});
 				}
 
-				if (!debugVerts.empty()) {
-					rc.UploadDebugVertices(debugVerts.data(), debugVerts.size() * sizeof(Vertex),
-										   (uint32_t)debugVerts.size());
+				if (!debugPos.empty()) {
+					rc.UploadDebugVertices(
+						debugPos.data(), debugPos.size() * sizeof(VertexPosition), debugAttr.data(),
+						debugAttr.size() * sizeof(VertexAttributes),
+						static_cast<uint32_t>(debugPos.size()));
 
-					Mesh debugMesh = {.vertexBuffer = rc.GetDebugMeshBuffer(),
-									  .vertexCount = (uint32_t)debugVerts.size()};
+					Mesh debugMesh = {.posBuffer = rc.GetDebugMeshBuffer(),
+									  .attrBuffer = rc.GetDebugMeshBuffer(),
+									  .skinBuffer = BufferHandle::Invalid,
+									  .indexBuffer = BufferHandle::Invalid,
+									  .vertexCount = static_cast<uint32_t>(debugPos.size()),
+									  .indexCount = 0};
 
 					Renderer::Draw(rc, debugLineMat, debugMesh,
 								   {.transform = JPH::Mat44::sIdentity(),

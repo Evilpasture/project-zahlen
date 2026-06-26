@@ -605,7 +605,7 @@ ZHLN::Entity CreateRigidBody(PhysicsContext& ctx, const JPH::ShapeRefC& shape, J
 	return handle;
 }
 
-JPH::ShapeRefC CreateMeshShape(const Vertex* vertices, uint32_t vertexCount,
+JPH::ShapeRefC CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount,
 							   const uint32_t* indices, uint32_t indexCount) {
 	if (vertexCount < 3 || indexCount < 3 || (indexCount % 3) != 0) {
 		ZHLN::Log("WARNING: Cannot create MeshShape. Invalid bounds (vertices: {}, indices: {})",
@@ -621,7 +621,7 @@ JPH::ShapeRefC CreateMeshShape(const Vertex* vertices, uint32_t vertexCount,
 			JPH::Float3(vertices[i].position[0], vertices[i].position[1], vertices[i].position[2]));
 	}
 
-	// 2. Validate indices and pack into Jolt's IndexedTriangleList (Array<IndexedTriangle>) [6]
+	// 2. Validate indices and pack into Jolt's IndexedTriangleList (Array<IndexedTriangle>)
 	JPH::IndexedTriangleList joltTriangles;
 	joltTriangles.reserve(indexCount / 3);
 	for (uint32_t i = 0; i < indexCount; i += 3) {
@@ -629,7 +629,7 @@ JPH::ShapeRefC CreateMeshShape(const Vertex* vertices, uint32_t vertexCount,
 		uint32_t i2 = indices[i + 1];
 		uint32_t i3 = indices[i + 2];
 
-		// Translated C23 Index Boundary Validation Guard [6]
+		// Index Boundary Validation Guard
 		if (i1 >= vertexCount || i2 >= vertexCount || i3 >= vertexCount) [[unlikely]] {
 			ZHLN::Panic("[Jolt Mesh Build] Index out of range: %u/%u/%u >= vertex_count (%u)", i1,
 						i2, i3, vertexCount);
@@ -648,18 +648,18 @@ JPH::ShapeRefC CreateMeshShape(const Vertex* vertices, uint32_t vertexCount,
 		return nullptr;
 	}
 
-	return result.Get(); // Returns safe JPH::ShapeRefC smart pointer [6]
+	return result.Get(); // Returns safe JPH::ShapeRefC smart pointer
 }
 
-ZHLN::Entity CreateMeshBody(PhysicsContext& ctx, const Vertex* vertices, uint32_t vertexCount,
-							const uint32_t* indices, uint32_t indexCount, JPH::RVec3Arg pos,
-							JPH::QuatArg rot, uint32_t category, uint32_t mask) {
+ZHLN::Entity CreateMeshBody(PhysicsContext& ctx, const VertexPosition* vertices,
+							uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount,
+							JPH::RVec3Arg pos, JPH::QuatArg rot, uint32_t category, uint32_t mask) {
 	JPH::ShapeRefC shape = CreateMeshShape(vertices, vertexCount, indices, indexCount);
 	if (shape == nullptr) {
 		return ZHLN::NullEntity;
 	}
 
-	// Mesh shapes are strictly static in Jolt; spawn as a standard static rigid body [6]
+	// Mesh shapes are strictly static in Jolt; spawn as a standard static rigid body
 	return CreateRigidBody(ctx, shape, pos, rot, JPH::EMotionType::Static, Layers::NON_MOVING, 0,
 						   category, mask);
 }

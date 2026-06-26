@@ -70,6 +70,7 @@ struct CookedMeshHeader {
 	float boundingBoxMax[3];
 	uint32_t vertexCount;
 	uint32_t indexCount;
+	uint32_t hasSkin;
 };
 
 struct CookedAnimHeader {

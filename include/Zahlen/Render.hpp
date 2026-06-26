@@ -48,7 +48,8 @@ class ZHLN_API RenderContext {
 	[[nodiscard]] uint32_t GetFrameIndex() const noexcept;
 
 	// --- Opaque Resource Creation API ---
-	auto CreateVertexBuffer(const void* data, size_t size) -> BufferHandle;
+	auto CreateVertexBuffer(const void* data, size_t size, uint32_t stride = sizeof(VertexPosition))
+		-> BufferHandle;
 	auto CreateIndexBuffer(const void* data, size_t size) -> BufferHandle;
 	void DestroyBuffer(BufferHandle handle);
 	auto CreateConstantBuffer(size_t size) -> BufferHandle;
@@ -56,9 +57,10 @@ class ZHLN_API RenderContext {
 
 	auto CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true)
 		-> uint32_t;
-	auto CreateSkinnedScratchBuffer(size_t size) -> BufferHandle;
+	auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;
 
-	void UploadDebugVertices(const void* data, size_t size, uint32_t vertexCount) noexcept;
+	void UploadDebugVertices(const void* posData, size_t posSize, const void* attrData,
+							 size_t attrSize, uint32_t vertexCount) noexcept;
 	[[nodiscard]] BufferHandle GetDebugMeshBuffer() const noexcept;
 
 	// --- NEW: Declare CreateTextureCube (Switched from std::vector to raw pointer) ---

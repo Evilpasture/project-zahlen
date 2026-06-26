@@ -73,12 +73,12 @@ ZHLN::Entity CreateRigidBody(PhysicsContext& ctx, const JPH::ShapeRefC& shape, J
 							 uint32_t materialID = 0, uint32_t category = 0xFFFFFFFF,
 							 uint32_t mask = 0xFFFFFFFF);
 
-JPH::ShapeRefC CreateMeshShape(const Vertex* vertices, uint32_t vertexCount,
+JPH::ShapeRefC CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount,
 							   const uint32_t* indices, uint32_t indexCount);
 
-ZHLN::Entity CreateMeshBody(PhysicsContext& ctx, const Vertex* vertices, uint32_t vertexCount,
-							const uint32_t* indices, uint32_t indexCount, JPH::RVec3Arg pos,
-							JPH::QuatArg rot, uint32_t category = 0xFFFFFFFF,
+ZHLN::Entity CreateMeshBody(PhysicsContext& ctx, const VertexPosition* vertices,
+							uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount,
+							JPH::RVec3Arg pos, JPH::QuatArg rot, uint32_t category = 0xFFFFFFFF,
 							uint32_t mask = 0xFFFFFFFF);
 
 ZHLN::Entity CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position,

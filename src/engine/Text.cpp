@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// File: src/engine/Text.cpp
 #include "Zahlen/Components.hpp"
 
 #include <Zahlen/GUI.hpp>
@@ -24,8 +25,10 @@ auto CreateOrthoMatrix(float width, float height) -> JPH::Mat44 {
 
 auto CreateTextMesh(RenderContext& ctx, const FontAtlas& font, const std::string& text, float x,
 					float y, float scale, const JPH::Vec4& color) -> Mesh {
-	std::vector<Vertex> vertices;
-	vertices.reserve(text.length() * 6);
+	std::vector<VertexPosition> positions;
+	std::vector<VertexAttributes> attributes;
+	positions.reserve(text.length() * 6);
+	attributes.reserve(text.length() * 6);
 
 	float currentX = x;
 	PackedRGBA8 packedColor =
@@ -54,61 +57,53 @@ auto CreateTextMesh(RenderContext& ctx, const FontAtlas& font, const std::string
 		float x1 = x0 + (g.x1 - g.x0) * scale;
 		float y1 = y0 + (g.y1 - g.y0) * scale;
 
-		Vertex vTL = {
-			.position = {x0, y0, 0.0f},
-			.normal = dummyNormal,
-			.tangent = dummyTangent,
-			.uv = Math::PackUV(u0, v0),
-			.color = packedColor,
-			.joints = {},
-			.weights = {},
-			._padding = {},
-		};
-		Vertex vTR = {
-			.position = {x1, y0, 0.0f},
-			.normal = dummyNormal,
-			.tangent = dummyTangent,
-			.uv = Math::PackUV(u1, v0),
-			.color = packedColor,
-			.joints = {},
-			.weights = {},
-			._padding = {},
-		};
-		Vertex vBL = {
-			.position = {x0, y1, 0.0f},
-			.normal = dummyNormal,
-			.tangent = dummyTangent,
-			.uv = Math::PackUV(u0, v1),
-			.color = packedColor,
-			.joints = {},
-			.weights = {},
-			._padding = {},
-		};
-		Vertex vBR = {
-			.position = {x1, y1, 0.0f},
-			.normal = dummyNormal,
-			.tangent = dummyTangent,
-			.uv = Math::PackUV(u1, v1),
-			.color = packedColor,
-			.joints = {},
-			.weights = {},
-			._padding = {},
-		};
+		VertexPosition vTL_pos = {{x0, y0, 0.0f}};
+		VertexAttributes vTL_attr = {dummyNormal, dummyTangent, Math::PackUV(u0, v0), packedColor};
 
-		vertices.push_back(vTL);
-		vertices.push_back(vBL);
-		vertices.push_back(vTR);
+		VertexPosition vTR_pos = {{x1, y0, 0.0f}};
+		VertexAttributes vTR_attr = {dummyNormal, dummyTangent, Math::PackUV(u1, v0), packedColor};
 
-		vertices.push_back(vTR);
-		vertices.push_back(vBL);
-		vertices.push_back(vBR);
+		VertexPosition vBL_pos = {{x0, y1, 0.0f}};
+		VertexAttributes vBL_attr = {dummyNormal, dummyTangent, Math::PackUV(u0, v1), packedColor};
+
+		VertexPosition vBR_pos = {{x1, y1, 0.0f}};
+		VertexAttributes vBR_attr = {dummyNormal, dummyTangent, Math::PackUV(u1, v1), packedColor};
+
+		// Triangle 1: TL -> BL -> TR
+		positions.push_back(vTL_pos);
+		attributes.push_back(vTL_attr);
+
+		positions.push_back(vBL_pos);
+		attributes.push_back(vBL_attr);
+
+		positions.push_back(vTR_pos);
+		attributes.push_back(vTR_attr);
+
+		// Triangle 2: TR -> BL -> BR
+		positions.push_back(vTR_pos);
+		attributes.push_back(vTR_attr);
+
+		positions.push_back(vBL_pos);
+		attributes.push_back(vBL_attr);
+
+		positions.push_back(vBR_pos);
+		attributes.push_back(vBR_attr);
 
 		// Advance cursor using proportional TrueType spacing
 		currentX += g.xadvance * scale;
 	}
 
-	BufferHandle vbo = ctx.CreateVertexBuffer(vertices.data(), vertices.size() * sizeof(Vertex));
-	return Mesh{.vertexBuffer = vbo, .vertexCount = static_cast<uint32_t>(vertices.size())};
+	BufferHandle posVbo = ctx.CreateVertexBuffer(
+		positions.data(), positions.size() * sizeof(VertexPosition), sizeof(VertexPosition));
+	BufferHandle attrVbo = ctx.CreateVertexBuffer(
+		attributes.data(), attributes.size() * sizeof(VertexAttributes), sizeof(VertexAttributes));
+
+	return Mesh{.posBuffer = posVbo,
+				.attrBuffer = attrVbo,
+				.skinBuffer = BufferHandle::Invalid,
+				.indexBuffer = BufferHandle::Invalid,
+				.vertexCount = static_cast<uint32_t>(positions.size()),
+				.indexCount = 0};
 }
 
 } // namespace ZHLN::GUI

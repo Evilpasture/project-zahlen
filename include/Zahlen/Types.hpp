@@ -30,44 +30,52 @@ struct PackedRGBA8 {
 	uint32_t data;
 }; // Color
 
-struct Vertex {
-	float position[3];	   // 12B - Full precision
+struct VertexPosition {
+	float position[3]; // 12B - Full precision
+};
+
+struct VertexAttributes {
 	Packed1010102 normal;  // 4B  - 10-bit per axis
 	Packed1010102 tangent; // 4B  - 10-bit + sign
 	PackedHalf2 uv;		   // 4B  - 16-bit UVs
 	PackedRGBA8 color;	   // 4B  - RGBA8
-	uint16_t joints[4];	   // 8B  - 16-bit Joint indices (Vulkan VK_FORMAT_R16G16B16A16_UINT)
-	float weights[4];	   // 16B - 32-bit float weights (Vulkan VK_FORMAT_R32G32B32A32_SFLOAT)
-	uint32_t _padding[3];  // 12B - Pad to exactly 64 bytes
-};
+}; // 16B - Perfect alignment
 
-static_assert(sizeof(Vertex) == 64, "Vertex must be exactly 64 bytes!");
+struct VertexSkin {
+	uint16_t joints[4];	 // 8B  - 16-bit Joint indices
+	PackedRGBA8 weights; // 4B  - 8-bit UNORM weights mapped to [0.0, 1.0]
+}; // 12B
 
 struct alignas(16) InstanceData {
 	JPH::Mat44 world;
 	JPH::Mat44 prevWorld;
-	uint64_t vboAddress;
+	uint64_t posAddress;
+	uint64_t attrAddress;
+	uint64_t skinAddress;
 	uint64_t iboAddress;
 	uint32_t vertexCount;
 	uint32_t indexCount;
-	uint32_t albedoIndex;
-	uint32_t normalIndex;
-	uint32_t pbrIndex;
-	uint32_t emissiveIndex;
+	uint32_t texIndices0; // [albedo:16 | normal:16]
+	uint32_t texIndices1; // [pbr:16    | emissive:16]
 	float cullRadius;
 	float metallicFactor;
 	float roughnessFactor;
 	float alphaCutoff;
-	uint32_t alphaMode;
+	uint32_t flags; // [alphaMode:8 | isSkinned:8 | padding:16]
 	uint32_t jointOffset;
-	uint32_t isSkinned;
 	uint32_t morphOffset;
 	uint32_t activeMorphCount;
-	uint32_t _pad;
-
 	alignas(16) std::array<float, 4> morphWeights;
 	alignas(16) std::array<float, 4> baseColorFactor;
 	alignas(16) std::array<float, 4> emissiveFactor;
+};
+
+struct UIObjectConstants {
+	JPH::Mat44 orthoMatrix;
+	uint64_t posAddress;
+	uint64_t attrAddress;
+	uint32_t albedoIdx;
+	uint32_t padding;
 };
 
 struct ClusterBounds {
@@ -98,10 +106,12 @@ static_assert(sizeof(PipelineHandle) == 8, "PipelineHandle must be 64 bits!");
 static_assert(sizeof(ResourceGroupHandle) == 8, "ResourceGroupHandle must be 64 bits!");
 
 struct Mesh {
-	BufferHandle vertexBuffer = BufferHandle::Invalid;
-	BufferHandle indexBuffer = BufferHandle::Invalid; // Added
+	BufferHandle posBuffer = BufferHandle::Invalid;
+	BufferHandle attrBuffer = BufferHandle::Invalid;
+	BufferHandle skinBuffer = BufferHandle::Invalid;
+	BufferHandle indexBuffer = BufferHandle::Invalid;
 	uint32_t vertexCount = 0;
-	uint32_t indexCount = 0; // Added
+	uint32_t indexCount = 0;
 };
 
 // Align structures to 16-byte boundaries to match HLSL std430 layout

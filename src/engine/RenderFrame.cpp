@@ -187,10 +187,8 @@ struct CpuCullingPolicy {
 							 .layout =
 								 std::bit_cast<NativeMaterial*>(drawCmd.material)->layout.Get(),
 							 .set = recorder.bindlessSet,
-							 .vertexCount =
-								 drawCmd.indexMesh
-									 ? drawCmd.indexCount
-									 : std::bit_cast<NativeMesh*>(drawCmd.mesh)->vertexCount,
+							 .vertexCount = drawCmd.indexMesh ? drawCmd.indexCount
+															  : drawCmd.posMesh->vertexCount,
 							 .instanceCount = 1,
 							 .firstVertex = 0,
 							 .firstInstance = i},
@@ -240,7 +238,7 @@ struct ShadowPass {
 						if (draw.alphaMode == 2) {
 							continue;
 						}
-						auto* mesh = std::bit_cast<NativeMesh*>(draw.mesh);
+						auto* mesh = draw.posMesh;
 
 						ObjectConstants pushConstants = {.instanceId = i, .isShadowPass = 1};
 						uint32_t vCount = draw.indexMesh ? draw.indexCount : mesh->vertexCount;
@@ -301,7 +299,7 @@ struct ShadowPass {
 								continue;
 							}
 
-							auto* mesh = std::bit_cast<NativeMesh*>(draw.mesh);
+							auto* mesh = draw.posMesh;
 
 							struct PunctualPush {
 								uint32_t lightIdx;
@@ -523,10 +521,8 @@ struct ForwardPass {
 							 .layout =
 								 std::bit_cast<NativeMaterial*>(drawCmd.material)->layout.Get(),
 							 .set = recorder.bindlessSet,
-							 .vertexCount =
-								 drawCmd.indexMesh
-									 ? drawCmd.indexCount
-									 : std::bit_cast<NativeMesh*>(drawCmd.mesh)->vertexCount,
+							 .vertexCount = drawCmd.indexMesh ? drawCmd.indexCount
+															  : drawCmd.posMesh->vertexCount,
 							 .instanceCount = 1,
 							 .firstVertex = 0,
 							 .firstInstance = i},
@@ -813,16 +809,15 @@ struct BlitPass {
 
 						for (const auto& draw : ctx.uiDrawQueue) {
 							uipc.albedoIdx = draw.fontIndex;
-							uipc.vboAddress =
-								std::bit_cast<NativeMesh*>(draw.mesh)->vboAddress; // Map UI buffer
+							uipc.posAddress = draw.posMesh->vboAddress;
+							uipc.attrAddress = draw.attrMesh->vboAddress;
 
-							Vk::DrawInstanced(
-								cmd,
-								{.pipeline = ctx.uiPipeline.Get(),
-								 .layout = ctx.uiPipelineLayout.Get(),
-								 .set = recorder.bindlessSet,
-								 .vertexCount = std::bit_cast<NativeMesh*>(draw.mesh)->vertexCount},
-								uipc);
+							Vk::DrawInstanced(cmd,
+											  {.pipeline = ctx.uiPipeline.Get(),
+											   .layout = ctx.uiPipelineLayout.Get(),
+											   .set = recorder.bindlessSet,
+											   .vertexCount = draw.posMesh->vertexCount},
+											  uipc);
 						}
 						ctx.uiDrawQueue.clear();
 					}
@@ -851,7 +846,8 @@ void RenderContext::Impl::SortDrawQueue() {
 	JPH::Array<SortItem> temp(drawCount);
 
 	for (uint32_t i = 0; i < drawCount; ++i) {
-		items[i] = {.key = SortKey::Pack(drawQueue[i].material, drawQueue[i].mesh), .payload = i};
+		items[i] = {.key = SortKey::Pack(drawQueue[i].material, drawQueue[i].posMesh),
+					.payload = i};
 	}
 
 	RadixSort64(items.data(), temp.data(), drawCount);
@@ -906,22 +902,38 @@ void RenderContext::Impl::DispatchSkinningPasses() {
 
 	for (const auto& drawCmd : drawQueue) {
 		if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
-			auto* inMesh = std::bit_cast<NativeMesh*>(drawCmd.mesh);
-			auto* outMesh = meshPool.Resolve(static_cast<uint64_t>(drawCmd.skinnedVertexBuffer));
+			auto* posMesh = drawCmd.posMesh;
+			auto* attrMesh = drawCmd.attrMesh;
+			auto* skinMesh = drawCmd.skinMesh;
+			auto* scratchMesh =
+				meshPool.Resolve(static_cast<uint64_t>(drawCmd.skinnedVertexBuffer));
 
-			if (inMesh == nullptr || outMesh == nullptr) {
+			if ((posMesh == nullptr) || (attrMesh == nullptr) || (skinMesh == nullptr) ||
+				(scratchMesh == nullptr)) {
 				continue;
 			}
 
-			SkinningConstants pcs = {.inputVerticesAddr = inMesh->vboAddress,
-									 .outputVerticesAddr = outMesh->vboAddress,
-									 .jointsAddr = Vk::GetBufferDeviceAddress(
-										 ctx.Device(), jointBuffers[frame_index].Handle()),
-									 .vertexCount = inMesh->vertexCount,
-									 .jointOffset = drawCmd.jointOffset};
+			// Pass the split buffer addresses directly to the Compute Shader
+			SkinningConstants pcs = {
+				.inPosAddr = posMesh->vboAddress,
+				.inAttrAddr = attrMesh->vboAddress,
+				.inSkinAddr = skinMesh->vboAddress,
+				.outPosAddr = scratchMesh->vboAddress,
+				.outAttrAddr =
+					scratchMesh->vboAddress + (scratchMesh->vertexCount * sizeof(VertexPosition)),
+				.jointsAddr =
+					Vk::GetBufferDeviceAddress(ctx.Device(), jointBuffers[frame_index].Handle()),
+				.morphDeltasAddr =
+					Vk::GetBufferDeviceAddress(ctx.Device(), morphDeltasBuffer.Handle()),
+				.vertexCount = posMesh->vertexCount,
+				.jointOffset = drawCmd.jointOffset,
+				.morphOffset = drawCmd.morphOffset,
+				.activeMorphCount = drawCmd.activeMorphCount,
+				.morphWeights = {drawCmd.morphWeights[0], drawCmd.morphWeights[1],
+								 drawCmd.morphWeights[2], drawCmd.morphWeights[3]}};
 
 			skinningPass.PushConstants(cmd, pcs);
-			skinningPass.Dispatch(cmd, (inMesh->vertexCount + 63) / 64, 1, 1);
+			skinningPass.Dispatch(cmd, (posMesh->vertexCount + 63) / 64, 1, 1);
 		}
 	}
 
@@ -1140,41 +1152,71 @@ RenderResult RenderContext::EndFrame() noexcept {
 		for (uint32_t i = 0; i < drawCount; ++i) {
 			const auto& cmdData = _impl->drawQueue[i];
 
-			auto* vboMesh =
+			auto* posMesh =
 				(cmdData.skinnedVertexBuffer != BufferHandle::Invalid)
 					? _impl->meshPool.Resolve(static_cast<uint64_t>(cmdData.skinnedVertexBuffer))
-					: std::bit_cast<NativeMesh*>(cmdData.mesh);
+					: cmdData.posMesh;
 
-			if (vboMesh == nullptr) {
+			auto* attrMesh = cmdData.attrMesh;
+			auto* skinMesh = cmdData.skinMesh;
+			auto* idxMesh = cmdData.indexMesh;
+
+			if (posMesh == nullptr || attrMesh == nullptr) {
 				continue;
+			}
+
+			uint64_t posAddr = posMesh->vboAddress;
+			uint64_t attrAddr = attrMesh->vboAddress;
+			uint64_t skinAddr = (skinMesh != nullptr) ? skinMesh->vboAddress : 0;
+
+			if (posMesh == attrMesh) {
+				// For debug meshes sharing a single double-buffered VBO, attributes are offset to
+				// the second half
+				attrAddr = posMesh->vboAddress + (500000 * sizeof(VertexPosition));
+			} else if (cmdData.skinnedVertexBuffer != BufferHandle::Invalid) {
+				// For skinned meshes, attributes are offset past the output positions in the
+				// scratch buffer
+				attrAddr =
+					posMesh->vboAddress + (cmdData.posMesh->vertexCount * sizeof(VertexPosition));
+			}
+
+			uint32_t texIndices0 = (cmdData.normalIndex << 16) | (cmdData.albedoIndex & 0xFFFF);
+			uint32_t texIndices1 = (cmdData.emissiveIndex << 16) | (cmdData.pbrIndex & 0xFFFF);
+			uint32_t isSkinned = (cmdData.skinnedVertexBuffer == BufferHandle::Invalid &&
+								  (cmdData.flags & DrawFlags::Skinned) != DrawFlags::None)
+									 ? 1u
+									 : 0u;
+			uint32_t flags = (isSkinned << 8) | (cmdData.alphaMode & 0xFF);
+
+			uint32_t activeMorphCount = cmdData.activeMorphCount;
+
+			if (cmdData.skinnedVertexBuffer != BufferHandle::Invalid) {
+				// Offset the attributes past the output positions in the scratch buffer
+				attrAddr =
+					posMesh->vboAddress + (cmdData.posMesh->vertexCount * sizeof(VertexPosition));
+
+				activeMorphCount = 0;
 			}
 
 			dst[i] = InstanceData{
 				.world = cmdData.transform,
 				.prevWorld = cmdData.prevTransform,
-				.vboAddress = vboMesh->vboAddress,
-				.iboAddress = (cmdData.indexMesh != nullptr)
-								  ? std::bit_cast<NativeMesh*>(cmdData.indexMesh)->vboAddress
-								  : 0,
-				.vertexCount = cmdData.mesh->vertexCount,
+				.posAddress = posAddr,
+				.attrAddress = attrAddr,
+				.skinAddress = skinAddr,
+				.iboAddress = (idxMesh != nullptr) ? idxMesh->vboAddress : 0,
+				.vertexCount = cmdData.posMesh->vertexCount,
 				.indexCount = cmdData.indexCount,
-				.albedoIndex = cmdData.albedoIndex,
-				.normalIndex = cmdData.normalIndex,
-				.pbrIndex = cmdData.pbrIndex,
-				.emissiveIndex = cmdData.emissiveIndex,
+				.texIndices0 = texIndices0,
+				.texIndices1 = texIndices1,
 				.cullRadius = cmdData.cullRadius,
 				.metallicFactor = cmdData.metallicFactor,
 				.roughnessFactor = cmdData.roughnessFactor,
 				.alphaCutoff = cmdData.alphaCutoff,
-				.alphaMode = cmdData.alphaMode,
+				.flags = flags,
 				.jointOffset = cmdData.jointOffset,
-				.isSkinned = (cmdData.skinnedVertexBuffer == BufferHandle::Invalid &&
-							  (cmdData.flags & DrawFlags::Skinned) != DrawFlags::None)
-								 ? 1u
-								 : 0u,
 				.morphOffset = cmdData.morphOffset,
-				.activeMorphCount = cmdData.activeMorphCount,
-				._pad = {},
+				.activeMorphCount = activeMorphCount,
 				.morphWeights = cmdData.morphWeights,
 				.baseColorFactor = cmdData.baseColorFactor,
 				.emissiveFactor = cmdData.emissiveFactor,
@@ -1192,7 +1234,7 @@ RenderResult RenderContext::EndFrame() noexcept {
 	tlasInstances.reserve(_impl->drawQueue.size());
 
 	for (uint32_t i = 0; i < _impl->drawQueue.size(); ++i) {
-		auto* mesh = std::bit_cast<NativeMesh*>(_impl->drawQueue[i].mesh);
+		auto* mesh = _impl->drawQueue[i].posMesh;
 		const auto& drawCmd = _impl->drawQueue[i];
 
 		bool isSkinned = (drawCmd.flags & DrawFlags::Skinned) != DrawFlags::None;
@@ -1440,10 +1482,19 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 		return;
 	}
 
-	auto* nativeMesh = impl->meshPool.Resolve(static_cast<uint64_t>(mesh.vertexBuffer));
-	if (nativeMesh == nullptr) [[unlikely]] {
+	auto* posMesh = impl->meshPool.Resolve(static_cast<uint64_t>(mesh.posBuffer));
+	if (posMesh == nullptr) [[unlikely]] {
 		return;
 	}
+
+	auto* attrMesh = impl->meshPool.Resolve(static_cast<uint64_t>(mesh.attrBuffer));
+	if (attrMesh == nullptr) [[unlikely]] {
+		return;
+	}
+
+	auto* skinMesh = mesh.skinBuffer != BufferHandle::Invalid
+						 ? impl->meshPool.Resolve(static_cast<uint64_t>(mesh.skinBuffer))
+						 : nullptr;
 
 	auto* nativeIndexMesh = mesh.indexBuffer != BufferHandle::Invalid
 								? impl->meshPool.Resolve(static_cast<uint64_t>(mesh.indexBuffer))
@@ -1456,7 +1507,9 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 
 	impl->drawQueue.push_back(DrawCommand{
 		.material = nativeMaterial,
-		.mesh = nativeMesh,
+		.posMesh = posMesh,
+		.attrMesh = attrMesh,
+		.skinMesh = skinMesh,
 		.indexMesh = nativeIndexMesh,
 		.transform = params.transform,
 		.prevTransform = params.prevTransform,
@@ -1492,16 +1545,17 @@ void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex) {
 		return;
 	}
 
-	if (mesh.vertexBuffer == BufferHandle::Invalid) {
+	if (mesh.posBuffer == BufferHandle::Invalid || mesh.attrBuffer == BufferHandle::Invalid) {
 		return;
 	}
 
-	auto* nativeMesh = impl->meshPool.Resolve(static_cast<uint64_t>(mesh.vertexBuffer));
-	if (nativeMesh == nullptr) [[unlikely]] {
+	auto* posMesh = impl->meshPool.Resolve(static_cast<uint64_t>(mesh.posBuffer));
+	auto* attrMesh = impl->meshPool.Resolve(static_cast<uint64_t>(mesh.attrBuffer));
+	if (posMesh == nullptr || attrMesh == nullptr) [[unlikely]] {
 		return;
 	}
 
-	impl->uiDrawQueue.push_back({.mesh = nativeMesh, .fontIndex = fontIndex});
+	impl->uiDrawQueue.push_back({.posMesh = posMesh, .attrMesh = attrMesh, .fontIndex = fontIndex});
 }
 
 } // namespace Renderer

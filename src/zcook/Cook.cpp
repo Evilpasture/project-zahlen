@@ -8,7 +8,6 @@
 #include "GLB.hpp"
 #include "Transform.hpp"
 #include "threading/TaskSystem.hpp"
-#include "threading/Thread.hpp"
 
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -52,19 +51,21 @@ int CookMesh(int argc, char** argv) {
 	Compiler::IRManifest manifest = reader.Parse();
 
 	auto it = std::ranges::find_if(manifest.meshes, [&](const auto& m) { return m.id == meshId; });
-	if (it == manifest.meshes.end())
+	if (it == manifest.meshes.end()) {
 		return 1;
+	}
 
 	CompiledMesh compiled = CompileRawMesh(*it, inPath);
 
 	CookedMeshHeader meshHeader{};
 	meshHeader.magic = 0x3048534D;
-	meshHeader.version = 2;
+	meshHeader.version = 3; // Version 3 for separated SoA layouts
 
-	if (compiled.glbVertices.empty()) {
+	if (compiled.positions.empty()) {
 		meshHeader.boundingBoxMin[0] = meshHeader.boundingBoxMin[1] = meshHeader.boundingBoxMax[0] =
 			meshHeader.boundingBoxMax[1] = meshHeader.boundingBoxMax[2] = 0.0f;
 		meshHeader.vertexCount = meshHeader.indexCount = 0;
+		meshHeader.hasSkin = 0;
 	} else {
 		meshHeader.boundingBoxMin[0] = compiled.minB[0];
 		meshHeader.boundingBoxMin[1] = compiled.minB[1];
@@ -72,45 +73,34 @@ int CookMesh(int argc, char** argv) {
 		meshHeader.boundingBoxMax[0] = compiled.maxB[0];
 		meshHeader.boundingBoxMax[1] = compiled.maxB[1];
 		meshHeader.boundingBoxMax[2] = compiled.maxB[2];
-		meshHeader.vertexCount = static_cast<uint32_t>(compiled.glbVertices.size() / 16);
+		meshHeader.vertexCount = static_cast<uint32_t>(compiled.positions.size());
 		meshHeader.indexCount = static_cast<uint32_t>(compiled.indices.size());
-	}
-
-	std::vector<Vertex> finalVerts(meshHeader.vertexCount);
-	for (uint32_t i = 0; i < meshHeader.vertexCount; ++i) {
-		Vertex& v = finalVerts[i];
-		const float* flts = &compiled.glbVertices[static_cast<size_t>(i) * 16];
-		v.position[0] = flts[0];
-		v.position[1] = flts[1];
-		v.position[2] = flts[2];
-		v.normal = Math::PackNormal(flts[3], flts[4], flts[5]);
-		v.tangent = Math::PackNormal(flts[6], flts[7], flts[8], flts[9]);
-		v.uv = Math::PackUV(flts[10], flts[11]);
-		v.color = Math::PackColor(flts[12], flts[13], flts[14], flts[15]);
-
-		if (compiled.isSkinned) {
-			v.joints[0] = compiled.joints[i * 4 + 0];
-			v.joints[1] = compiled.joints[i * 4 + 1];
-			v.joints[2] = compiled.joints[i * 4 + 2];
-			v.joints[3] = compiled.joints[i * 4 + 3];
-			v.weights[0] = compiled.weights[i * 4 + 0];
-			v.weights[1] = compiled.weights[i * 4 + 1];
-			v.weights[2] = compiled.weights[i * 4 + 2];
-			v.weights[3] = compiled.weights[i * 4 + 3];
-		}
+		meshHeader.hasSkin = compiled.isSkinned ? 1 : 0;
 	}
 
 	fs::create_directories(fs::path(outPath).parent_path());
 	FILE* out = std::fopen(outPath.c_str(), "wb");
-	if (out == nullptr)
-		return 1;
+	if (out != nullptr) {
+		std::fwrite(&meshHeader, 1, sizeof(CookedMeshHeader), out);
 
-	std::fwrite(&meshHeader, 1, sizeof(CookedMeshHeader), out);
-	if (!finalVerts.empty())
-		std::fwrite(finalVerts.data(), 1, finalVerts.size() * sizeof(Vertex), out);
-	if (!compiled.indices.empty())
-		std::fwrite(compiled.indices.data(), 1, compiled.indices.size() * sizeof(uint32_t), out);
-	std::fclose(out);
+		// Write separate SoA streams directly
+		if (!compiled.positions.empty()) {
+			std::fwrite(compiled.positions.data(), 1,
+						compiled.positions.size() * sizeof(VertexPosition), out);
+		}
+		if (!compiled.attributes.empty()) {
+			std::fwrite(compiled.attributes.data(), 1,
+						compiled.attributes.size() * sizeof(VertexAttributes), out);
+		}
+		if (compiled.isSkinned && !compiled.skins.empty()) {
+			std::fwrite(compiled.skins.data(), 1, compiled.skins.size() * sizeof(VertexSkin), out);
+		}
+		if (!compiled.indices.empty()) {
+			std::fwrite(compiled.indices.data(), 1, compiled.indices.size() * sizeof(uint32_t),
+						out);
+		}
+		std::fclose(out);
+	}
 	return 0;
 }
 

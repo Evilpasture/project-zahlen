@@ -91,7 +91,8 @@ void RenderContext::SetResolution([[maybe_unused]] const Extent2D& res) {
 	_impl->resized = true;
 }
 
-auto RenderContext::CreateVertexBuffer(const void* data, size_t size) -> BufferHandle {
+auto RenderContext::CreateVertexBuffer(const void* data, size_t size, uint32_t stride)
+	-> BufferHandle {
 	VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
 							   VK_BUFFER_USAGE_TRANSFER_DST_BIT |
 							   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
@@ -132,8 +133,9 @@ auto RenderContext::CreateVertexBuffer(const void* data, size_t size) -> BufferH
 	};
 	VkDeviceAddress address = vkGetBufferDeviceAddress(_impl->ctx.Device(), &bdaInfo);
 
-	uint64_t handle = _impl->meshPool.Create(std::move(gpu_buf),
-											 static_cast<uint32_t>(size / sizeof(Vertex)), address);
+	// Calculate and store the precise element/vertex count using the dynamic stride parameter
+	uint64_t handle =
+		_impl->meshPool.Create(std::move(gpu_buf), static_cast<uint32_t>(size / stride), address);
 	return static_cast<BufferHandle>(handle);
 }
 
@@ -491,7 +493,10 @@ auto RenderContext::CreateTextureCube(const void* const* faceData, uint32_t widt
 	return _impl->CreateTextureCubeInternal(faceData, width, height);
 }
 
-auto RenderContext::CreateSkinnedScratchBuffer(size_t size) -> BufferHandle {
+auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle {
+	// Allocate contiguous memory for Positions followed by Attributes
+	size_t size = (vertexCount * sizeof(VertexPosition)) + (vertexCount * sizeof(VertexAttributes));
+
 	VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
 							   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
 							   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
@@ -502,12 +507,13 @@ auto RenderContext::CreateSkinnedScratchBuffer(size_t size) -> BufferHandle {
 		Vk::Buffer::Create(_impl->allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY);
 
 	VkDeviceAddress address = Vk::GetBufferDeviceAddress(_impl->ctx.Device(), gpu_buf.Handle());
-	uint64_t handle = _impl->meshPool.Create(std::move(gpu_buf), 0, address);
+	// Pass vertexCount to the pool so we know how to split the addresses later
+	uint64_t handle = _impl->meshPool.Create(std::move(gpu_buf), vertexCount, address);
 	return static_cast<BufferHandle>(handle);
 }
 
-void RenderContext::UploadDebugVertices(const void* data, size_t size,
-										uint32_t vertexCount) noexcept {
+void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData,
+										size_t attrSize, uint32_t vertexCount) noexcept {
 	uint32_t frameIdx = _impl->frame_index;
 	auto* nativeMesh =
 		_impl->meshPool.Resolve(static_cast<uint64_t>(_impl->debugMeshHandles[frameIdx]));
@@ -515,16 +521,19 @@ void RenderContext::UploadDebugVertices(const void* data, size_t size,
 		return;
 	}
 
-	size_t maxSize = nativeMesh->buffer.Size();
-	size_t copySize = std::min(size, maxSize);
+	size_t maxPosSize = 500000 * sizeof(VertexPosition);
+	size_t maxAttrSize = 500000 * sizeof(VertexAttributes);
 
-	// Zero-copy direct transfer (VMA maintains persistence)
 	auto mapped = nativeMesh->buffer.Map();
-	std::memcpy(mapped.data, data, copySize);
+	char* basePtr = static_cast<char*>(mapped.data);
 
-	// Update the active vertex draw limit dynamically
-	nativeMesh->vertexCount =
-		std::min(vertexCount, static_cast<uint32_t>(maxSize / sizeof(Vertex)));
+	// Copy positions to the start of the buffer
+	std::memcpy(basePtr, posData, std::min(posSize, maxPosSize));
+
+	// Copy attributes to the second half of the buffer (offset by the maximum position stride)
+	std::memcpy(basePtr + maxPosSize, attrData, std::min(attrSize, maxAttrSize));
+
+	nativeMesh->vertexCount = std::min(vertexCount, 500000u);
 }
 
 BufferHandle RenderContext::GetDebugMeshBuffer() const noexcept {
@@ -630,23 +639,22 @@ void RenderContext::BuildMeshBLAS(Mesh& mesh) {
 	if (!impl->rtCtx.Valid()) {
 		return; // Gracefully skip BLAS build on non-RT systems
 	}
-	auto* nativeMesh = impl->meshPool.Resolve(static_cast<uint64_t>(mesh.vertexBuffer));
+
+	auto* nativePosMesh = impl->meshPool.Resolve(static_cast<uint64_t>(mesh.posBuffer));
 	auto* nativeIndexMesh = mesh.indexBuffer != BufferHandle::Invalid
 								? impl->meshPool.Resolve(static_cast<uint64_t>(mesh.indexBuffer))
 								: nullptr;
-	if (nativeMesh == nullptr) {
+
+	if (nativePosMesh == nullptr) {
 		return;
 	}
 
 	ZHLN_BlasGeometryDesc geom = {
-		.vertex_data = Vk::GetBufferDeviceAddress(impl->ctx.Device(), nativeMesh->buffer.Handle()),
-		.vertex_stride = sizeof(Vertex),
+		.vertex_data = nativePosMesh->vboAddress,
+		.vertex_stride = sizeof(VertexPosition),
 		.max_vertex = mesh.vertexCount,
 		.vertex_format = VK_FORMAT_R32G32B32_SFLOAT,
-		.index_data =
-			(nativeIndexMesh != nullptr)
-				? Vk::GetBufferDeviceAddress(impl->ctx.Device(), nativeIndexMesh->buffer.Handle())
-				: 0,
+		.index_data = (nativeIndexMesh != nullptr) ? nativeIndexMesh->vboAddress : 0,
 		.index_type = (nativeIndexMesh != nullptr) ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_NONE_KHR};
 
 	uint32_t primitiveCount =
@@ -655,18 +663,18 @@ void RenderContext::BuildMeshBLAS(Mesh& mesh) {
 	ZHLN_AccelerationStructureSizes sizes;
 	impl->rtCtx.GetBlasSizes(geom, primitiveCount, sizes);
 
-	nativeMesh->blasBuffer =
+	nativePosMesh->blasBuffer =
 		Vk::Buffer::Create(impl->allocator.Get(), sizes.acceleration_structure_size,
 						   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
 							   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
 						   VMA_MEMORY_USAGE_GPU_ONLY);
-	nativeMesh->blas =
-		impl->rtCtx.CreateAS(nativeMesh->blasBuffer.Handle(), sizes.acceleration_structure_size,
+	nativePosMesh->blas =
+		impl->rtCtx.CreateAS(nativePosMesh->blasBuffer.Handle(), sizes.acceleration_structure_size,
 							 ZHLN_AS_TYPE_BOTTOM_LEVEL);
-	nativeMesh->blasAddress = impl->rtCtx.GetASAddress(nativeMesh->blas);
+	nativePosMesh->blasAddress = impl->rtCtx.GetASAddress(nativePosMesh->blas);
 
-	nativeMesh->device = impl->ctx.Device();
-	nativeMesh->rtCtx = &impl->rtCtx;
+	nativePosMesh->device = impl->ctx.Device();
+	nativePosMesh->rtCtx = &impl->rtCtx;
 
 	Vk::Buffer scratch = Vk::Buffer::Create(impl->allocator.Get(), sizes.build_scratch_size,
 											VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
@@ -682,7 +690,7 @@ void RenderContext::BuildMeshBLAS(Mesh& mesh) {
 	VkCommandBuffer cmd = tempPool[0];
 	ZHLN_BeginCommandBuffer(cmd);
 
-	impl->rtCtx.CmdBuildBlas(cmd, geom, nativeMesh->blas,
+	impl->rtCtx.CmdBuildBlas(cmd, geom, nativePosMesh->blas,
 							 Vk::GetBufferDeviceAddress(impl->ctx.Device(), scratch.Handle()),
 							 primitiveCount);
 

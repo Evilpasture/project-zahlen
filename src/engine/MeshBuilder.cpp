@@ -53,59 +53,29 @@ Mesh CreatePlane(RenderContext& ctx, float extent, const JPH::Vec4& color) {
 	Packed1010102 t = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f);
 	PackedRGBA8 c = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
 
-	std::vector<Vertex> data = {
-		{.position = {-extent, 0.0f, extent},
-		 .normal = n,
-		 .tangent = t,
-		 .uv = Math::PackUV(0.0f, 1.0f),
-		 .color = c,
-		 .joints = {0, 0, 0, 0},
-		 .weights = {0.0f, 0.0f, 0.0f, 0.0f},
-		 ._padding = {}},
-		{.position = {extent, 0.0f, extent},
-		 .normal = n,
-		 .tangent = t,
-		 .uv = Math::PackUV(1.0f, 1.0f),
-		 .color = c,
-		 .joints = {0, 0, 0, 0},
-		 .weights = {0.0f, 0.0f, 0.0f, 0.0f},
-		 ._padding = {}},
-		{.position = {extent, 0.0f, -extent},
-		 .normal = n,
-		 .tangent = t,
-		 .uv = Math::PackUV(1.0f, 0.0f),
-		 .color = c,
-		 .joints = {0, 0, 0, 0},
-		 .weights = {0.0f, 0.0f, 0.0f, 0.0f},
-		 ._padding = {}},
-		{.position = {extent, 0.0f, -extent},
-		 .normal = n,
-		 .tangent = t,
-		 .uv = Math::PackUV(1.0f, 0.0f),
-		 .color = c,
-		 .joints = {0, 0, 0, 0},
-		 .weights = {0.0f, 0.0f, 0.0f, 0.0f},
-		 ._padding = {}},
-		{.position = {-extent, 0.0f, -extent},
-		 .normal = n,
-		 .tangent = t,
-		 .uv = Math::PackUV(0.0f, 0.0f),
-		 .color = c,
-		 .joints = {0, 0, 0, 0},
-		 .weights = {0.0f, 0.0f, 0.0f, 0.0f},
-		 ._padding = {}},
-		{.position = {-extent, 0.0f, extent},
-		 .normal = n,
-		 .tangent = t,
-		 .uv = Math::PackUV(0.0f, 1.0f),
-		 .color = c,
-		 .joints = {0, 0, 0, 0},
-		 .weights = {0.0f, 0.0f, 0.0f, 0.0f},
-		 ._padding = {}},
-	};
+	std::vector<VertexPosition> positions = {{{-extent, 0.0f, extent}},	 {{extent, 0.0f, extent}},
+											 {{extent, 0.0f, -extent}},	 {{extent, 0.0f, -extent}},
+											 {{-extent, 0.0f, -extent}}, {{-extent, 0.0f, extent}}};
 
-	BufferHandle vbo = ctx.CreateVertexBuffer(data.data(), data.size() * sizeof(Vertex));
-	auto finalMesh = Mesh{.vertexBuffer = vbo, .vertexCount = static_cast<uint32_t>(data.size())};
+	std::vector<VertexAttributes> attributes = {
+		{.normal = n, .tangent = t, .uv = Math::PackUV(0.0f, 1.0f), .color = c},
+		{n, t, Math::PackUV(1.0f, 1.0f), c},
+		{.normal = n, .tangent = t, .uv = Math::PackUV(1.0f, 0.0f), .color = c},
+		{n, t, Math::PackUV(1.0f, 0.0f), c},
+		{.normal = n, .tangent = t, .uv = Math::PackUV(0.0f, 0.0f), .color = c},
+		{n, t, Math::PackUV(0.0f, 1.0f), c}};
+
+	BufferHandle posVbo =
+		ctx.CreateVertexBuffer(positions.data(), positions.size() * sizeof(VertexPosition));
+	BufferHandle attrVbo =
+		ctx.CreateVertexBuffer(attributes.data(), attributes.size() * sizeof(VertexAttributes));
+
+	auto finalMesh = Mesh{.posBuffer = posVbo,
+						  .attrBuffer = attrVbo,
+						  .skinBuffer = BufferHandle::Invalid,
+						  .indexBuffer = BufferHandle::Invalid,
+						  .vertexCount = static_cast<uint32_t>(positions.size()),
+						  .indexCount = 0};
 	ctx.BuildMeshBLAS(finalMesh);
 	return finalMesh;
 }
@@ -135,303 +105,103 @@ Mesh CreateBox(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& co
 	auto uv01 = Math::PackUV(0.0f, 1.0f);
 	auto uv11 = Math::PackUV(1.0f, 1.0f);
 
-	std::vector<Vertex> data = {// Front (+Z)
-								{.position = {-x, -y, z},
-								 .normal = nZ,
-								 .tangent = tZ,
-								 .uv = uv01,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {x, -y, z},
-								 .normal = nZ,
-								 .tangent = tZ,
-								 .uv = uv11,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {x, y, z},
-								 .normal = nZ,
-								 .tangent = tZ,
-								 .uv = uv10,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {x, y, z},
-								 .normal = nZ,
-								 .tangent = tZ,
-								 .uv = uv10,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {-x, y, z},
-								 .normal = nZ,
-								 .tangent = tZ,
-								 .uv = uv00,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {-x, -y, z},
-								 .normal = nZ,
-								 .tangent = tZ,
-								 .uv = uv01,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								// Back (-Z)
-								{.position = {x, -y, -z},
-								 .normal = nNZ,
-								 .tangent = tNZ,
-								 .uv = uv01,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {-x, -y, -z},
-								 .normal = nNZ,
-								 .tangent = tNZ,
-								 .uv = uv11,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {-x, y, -z},
-								 .normal = nNZ,
-								 .tangent = tNZ,
-								 .uv = uv10,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {-x, y, -z},
-								 .normal = nNZ,
-								 .tangent = tNZ,
-								 .uv = uv10,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {x, y, -z},
-								 .normal = nNZ,
-								 .tangent = tNZ,
-								 .uv = uv00,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {x, -y, -z},
-								 .normal = nNZ,
-								 .tangent = tNZ,
-								 .uv = uv01,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								// Top (+Y)
-								{.position = {-x, y, z},
-								 .normal = nY,
-								 .tangent = tY,
-								 .uv = uv01,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {x, y, z},
-								 .normal = nY,
-								 .tangent = tY,
-								 .uv = uv11,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {x, y, -z},
-								 .normal = nY,
-								 .tangent = tY,
-								 .uv = uv10,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {x, y, -z},
-								 .normal = nY,
-								 .tangent = tY,
-								 .uv = uv10,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {-x, y, -z},
-								 .normal = nY,
-								 .tangent = tY,
-								 .uv = uv00,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {-x, y, z},
-								 .normal = nY,
-								 .tangent = tY,
-								 .uv = uv01,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								// Bottom (-Y)
-								{.position = {-x, -y, -z},
-								 .normal = nNY,
-								 .tangent = tNY,
-								 .uv = uv01,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {x, -y, -z},
-								 .normal = nNY,
-								 .tangent = tNY,
-								 .uv = uv11,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {x, -y, z},
-								 .normal = nNY,
-								 .tangent = tNY,
-								 .uv = uv10,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {x, -y, z},
-								 .normal = nNY,
-								 .tangent = tNY,
-								 .uv = uv10,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {-x, -y, z},
-								 .normal = nNY,
-								 .tangent = tNY,
-								 .uv = uv00,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {-x, -y, -z},
-								 .normal = nNY,
-								 .tangent = tNY,
-								 .uv = uv01,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								// Right (+X)
-								{.position = {x, -y, z},
-								 .normal = nX,
-								 .tangent = tX,
-								 .uv = uv01,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {x, -y, -z},
-								 .normal = nX,
-								 .tangent = tX,
-								 .uv = uv11,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {x, y, -z},
-								 .normal = nX,
-								 .tangent = tX,
-								 .uv = uv10,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {x, y, -z},
-								 .normal = nX,
-								 .tangent = tX,
-								 .uv = uv10,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {x, y, z},
-								 .normal = nX,
-								 .tangent = tX,
-								 .uv = uv00,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {x, -y, z},
-								 .normal = nX,
-								 .tangent = tX,
-								 .uv = uv01,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								// Left (-X)
-								{.position = {-x, -y, -z},
-								 .normal = nNX,
-								 .tangent = tNX,
-								 .uv = uv01,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {-x, -y, z},
-								 .normal = nNX,
-								 .tangent = tNX,
-								 .uv = uv11,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {-x, y, z},
-								 .normal = nNX,
-								 .tangent = tNX,
-								 .uv = uv10,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {-x, y, z},
-								 .normal = nNX,
-								 .tangent = tNX,
-								 .uv = uv10,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {-x, y, -z},
-								 .normal = nNX,
-								 .tangent = tNX,
-								 .uv = uv00,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}},
-								{.position = {-x, -y, -z},
-								 .normal = nNX,
-								 .tangent = tNX,
-								 .uv = uv01,
-								 .color = c,
-								 .joints = {0, 0, 0, 0},
-								 .weights = {0, 0, 0, 0},
-								 ._padding = {}}};
+	std::vector<VertexPosition> positions = {// Front (+Z)
+											 {{-x, -y, z}},
+											 {{x, -y, z}},
+											 {{x, y, z}},
+											 {{x, y, z}},
+											 {{-x, y, z}},
+											 {{-x, -y, z}},
+											 // Back (-Z)
+											 {{x, -y, -z}},
+											 {{-x, -y, -z}},
+											 {{-x, y, -z}},
+											 {{-x, y, -z}},
+											 {{x, y, -z}},
+											 {{x, -y, -z}},
+											 // Top (+Y)
+											 {{-x, y, z}},
+											 {{x, y, z}},
+											 {{x, y, -z}},
+											 {{x, y, -z}},
+											 {{-x, y, -z}},
+											 {{-x, y, z}},
+											 // Bottom (-Y)
+											 {{-x, -y, -z}},
+											 {{x, -y, -z}},
+											 {{x, -y, z}},
+											 {{x, -y, z}},
+											 {{-x, -y, z}},
+											 {{-x, -y, -z}},
+											 // Right (+X)
+											 {{x, -y, z}},
+											 {{x, -y, -z}},
+											 {{x, y, -z}},
+											 {{x, y, -z}},
+											 {{x, y, z}},
+											 {{x, -y, z}},
+											 // Left (-X)
+											 {{-x, -y, -z}},
+											 {{-x, -y, z}},
+											 {{-x, y, z}},
+											 {{-x, y, z}},
+											 {{-x, y, -z}},
+											 {{-x, -y, -z}}};
 
-	BufferHandle vbo = ctx.CreateVertexBuffer(data.data(), data.size() * sizeof(Vertex));
-	auto finalMesh = Mesh{.vertexBuffer = vbo, .vertexCount = static_cast<uint32_t>(data.size())};
+	std::vector<VertexAttributes> attributes = {// Front (+Z)
+												{nZ, tZ, uv01, c},
+												{nZ, tZ, uv11, c},
+												{nZ, tZ, uv10, c},
+												{nZ, tZ, uv10, c},
+												{nZ, tZ, uv00, c},
+												{nZ, tZ, uv01, c},
+												// Back (-Z)
+												{nNZ, tNZ, uv01, c},
+												{nNZ, tNZ, uv11, c},
+												{nNZ, tNZ, uv10, c},
+												{nNZ, tNZ, uv10, c},
+												{nNZ, tNZ, uv00, c},
+												{nNZ, tNZ, uv01, c},
+												// Top (+Y)
+												{nY, tY, uv01, c},
+												{nY, tY, uv11, c},
+												{nY, tY, uv10, c},
+												{nY, tY, uv10, c},
+												{nY, tY, uv00, c},
+												{nY, tY, uv01, c},
+												// Bottom (-Y)
+												{nNY, tNY, uv01, c},
+												{nNY, tNY, uv11, c},
+												{nNY, tNY, uv10, c},
+												{nNY, tNY, uv10, c},
+												{nNY, tNY, uv00, c},
+												{nNY, tNY, uv01, c},
+												// Right (+X)
+												{nX, tX, uv01, c},
+												{nX, tX, uv11, c},
+												{nX, tX, uv10, c},
+												{nX, tX, uv10, c},
+												{nX, tX, uv00, c},
+												{nX, tX, uv01, c},
+												// Left (-X)
+												{nNX, tNX, uv01, c},
+												{nNX, tNX, uv11, c},
+												{nNX, tNX, uv10, c},
+												{nNX, tNX, uv10, c},
+												{nNX, tNX, uv00, c},
+												{nNX, tNX, uv01, c}};
+
+	BufferHandle posVbo =
+		ctx.CreateVertexBuffer(positions.data(), positions.size() * sizeof(VertexPosition));
+	BufferHandle attrVbo =
+		ctx.CreateVertexBuffer(attributes.data(), attributes.size() * sizeof(VertexAttributes));
+
+	auto finalMesh = Mesh{.posBuffer = posVbo,
+						  .attrBuffer = attrVbo,
+						  .skinBuffer = BufferHandle::Invalid,
+						  .indexBuffer = BufferHandle::Invalid,
+						  .vertexCount = static_cast<uint32_t>(positions.size()),
+						  .indexCount = 0};
 	ctx.BuildMeshBLAS(finalMesh);
 	return finalMesh;
 }
@@ -490,8 +260,10 @@ Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float m
 		}
 	}
 
-	std::vector<Vertex> data;
-	data.reserve(static_cast<size_t>((sampleCount - 1)) * (sampleCount - 1) * 6);
+	std::vector<VertexPosition> positions;
+	std::vector<VertexAttributes> attributes;
+	positions.reserve(static_cast<size_t>((sampleCount - 1)) * (sampleCount - 1) * 6);
+	attributes.reserve(static_cast<size_t>((sampleCount - 1)) * (sampleCount - 1) * 6);
 
 	auto get_normal = [&](int x, int z) -> JPH::Vec3 {
 		float posX = -halfSize + x * dx;
@@ -548,51 +320,65 @@ Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float m
 				return Math::PackColor(0.12f, greenVar, 0.08f, 1.0f);
 			};
 
-			Vertex vA = {.position = {ax, ay, az},
-						 .normal = Math::PackNormal(nA.GetX(), nA.GetY(), nA.GetZ()),
-						 .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
-						 .uv = Math::PackUV((float)x / sampleCount, (float)z / sampleCount),
-						 .color = get_color(ay, nA),
-						 .joints = {0, 0, 0, 0},
-						 .weights = {0, 0, 0, 0},
-						 ._padding = {}};
-			Vertex vB = {.position = {bx, by, bz},
-						 .normal = Math::PackNormal(nB.GetX(), nB.GetY(), nB.GetZ()),
-						 .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
-						 .uv = Math::PackUV((float)(x + 1) / sampleCount, (float)z / sampleCount),
-						 .color = get_color(by, nB),
-						 .joints = {0, 0, 0, 0},
-						 .weights = {0, 0, 0, 0},
-						 ._padding = {}};
-			Vertex vC = {.position = {cx, cy, cz},
-						 .normal = Math::PackNormal(nC.GetX(), nC.GetY(), nC.GetZ()),
-						 .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
-						 .uv = Math::PackUV((float)x / sampleCount, (float)(z + 1) * sampleCount),
-						 .color = get_color(cy, nC),
-						 .joints = {0, 0, 0, 0},
-						 .weights = {0, 0, 0, 0},
-						 ._padding = {}};
-			Vertex vD = {
-				.position = {dx_, dy, dz_},
+			VertexPosition posA = {{ax, ay, az}};
+			VertexAttributes attrA = {
+				.normal = Math::PackNormal(nA.GetX(), nA.GetY(), nA.GetZ()),
+				.tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
+				.uv = Math::PackUV((float)x / sampleCount, (float)z / sampleCount),
+				.color = get_color(ay, nA)};
+
+			VertexPosition vB = {{bx, by, bz}};
+			VertexAttributes attrB = {
+				.normal = Math::PackNormal(nB.GetX(), nB.GetY(), nB.GetZ()),
+				.tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
+				.uv = Math::PackUV((float)(x + 1) / sampleCount, (float)z / sampleCount),
+				.color = get_color(by, nB)};
+
+			VertexPosition vC = {{cx, cy, cz}};
+			VertexAttributes attrC = {
+				.normal = Math::PackNormal(nC.GetX(), nC.GetY(), nC.GetZ()),
+				.tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
+				.uv = Math::PackUV((float)x / sampleCount, (float)(z + 1) * sampleCount),
+				.color = get_color(cy, nC)};
+
+			VertexPosition vD = {{dx_, dy, dz_}};
+			VertexAttributes attrD = {
 				.normal = Math::PackNormal(nD.GetX(), nD.GetY(), nD.GetZ()),
 				.tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
 				.uv = Math::PackUV((float)(x + 1) / sampleCount, (float)(z + 1) / sampleCount),
-				.color = get_color(dy, nD),
-				.joints = {0, 0, 0, 0},
-				.weights = {0, 0, 0, 0},
-				._padding = {}};
+				.color = get_color(dy, nD)};
 
-			data.push_back(vA);
-			data.push_back(vC);
-			data.push_back(vB);
-			data.push_back(vB);
-			data.push_back(vC);
-			data.push_back(vD);
+			positions.push_back(posA);
+			attributes.push_back(attrA);
+
+			positions.push_back(vC);
+			attributes.push_back(attrC);
+
+			positions.push_back(vB);
+			attributes.push_back(attrB);
+
+			positions.push_back(vB);
+			attributes.push_back(attrB);
+
+			positions.push_back(vC);
+			attributes.push_back(attrC);
+
+			positions.push_back(vD);
+			attributes.push_back(attrD);
 		}
 	}
 
-	BufferHandle vbo = ctx.CreateVertexBuffer(data.data(), data.size() * sizeof(Vertex));
-	auto finalMesh = Mesh{.vertexBuffer = vbo, .vertexCount = static_cast<uint32_t>(data.size())};
+	BufferHandle posVbo =
+		ctx.CreateVertexBuffer(positions.data(), positions.size() * sizeof(VertexPosition));
+	BufferHandle attrVbo =
+		ctx.CreateVertexBuffer(attributes.data(), attributes.size() * sizeof(VertexAttributes));
+
+	auto finalMesh = Mesh{.posBuffer = posVbo,
+						  .attrBuffer = attrVbo,
+						  .skinBuffer = BufferHandle::Invalid,
+						  .indexBuffer = BufferHandle::Invalid,
+						  .vertexCount = static_cast<uint32_t>(positions.size()),
+						  .indexCount = 0};
 	ctx.BuildMeshBLAS(finalMesh);
 	return finalMesh;
 }

@@ -1,11 +1,13 @@
-// src/zcook/Transform.cpp
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// File: src/zcook/Transform.cpp
 #include "Transform.hpp"
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Math/Vec3.h>
+#include <Zahlen/Math3D.hpp>
+#include <Zahlen/Types.hpp>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -54,6 +56,8 @@ struct RawLoopVertexHash {
 };
 
 } // namespace
+
+namespace ZHLN {
 
 CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, const std::string& binPath) {
 	CompiledMesh result;
@@ -179,68 +183,57 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, const std::string& bin
 		bitangents[i2] += b;
 	}
 
-	result.glbVertices.resize(rawVerts.size() * 16);
+	result.positions.resize(rawVerts.size());
+	result.attributes.resize(rawVerts.size());
 	if (hasSkin) {
-		result.joints.resize(rawVerts.size() * 4);
-		result.weights.resize(rawVerts.size() * 4);
+		result.skins.resize(rawVerts.size());
 	}
 
 	for (size_t i = 0; i < rawVerts.size(); ++i) {
 		auto& rv = rawVerts[i];
-		float* f = &result.glbVertices[i * 16];
 
-		f[0] = rv.px;
-		f[1] = rv.py;
-		f[2] = rv.pz;
-		f[3] = rv.nx;
-		f[4] = rv.ny;
-		f[5] = rv.nz;
+		// 1. Pack Positions
+		result.positions[i] = {.position = {rv.px, rv.py, rv.pz}};
 
+		// 2. Compute and Pack Tangents and Attributes
 		JPH::Vec3 n(rv.nx, rv.ny, rv.nz);
 		JPH::Vec3 t = tangents[i];
+		JPH::Vec3 tangentVec;
+		float sign = 1.0f;
+
 		if (t.LengthSq() > 1e-6f) {
-			JPH::Vec3 tangent = (t - n * n.Dot(t)).Normalized();
-			float sign = n.Cross(t).Dot(bitangents[i]) < 0.0f ? -1.0f : 1.0f;
-			f[6] = tangent.GetX();
-			f[7] = tangent.GetY();
-			f[8] = tangent.GetZ();
-			f[9] = sign;
+			tangentVec = (t - n * n.Dot(t)).Normalized();
+			sign = n.Cross(t).Dot(bitangents[i]) < 0.0f ? -1.0f : 1.0f;
 		} else {
 			JPH::Vec3 absN(std::abs(n.GetX()), std::abs(n.GetY()), std::abs(n.GetZ()));
 			JPH::Vec3 fallbackT =
 				(absN.GetX() < 0.999f) ? JPH::Vec3(1.0f, 0.0f, 0.0f) : JPH::Vec3(0.0f, 1.0f, 0.0f);
-			JPH::Vec3 tangent = (fallbackT - n * n.Dot(fallbackT)).Normalized();
-			f[6] = tangent.GetX();
-			f[7] = tangent.GetY();
-			f[8] = tangent.GetZ();
-			f[9] = 1.0f;
+			tangentVec = (fallbackT - n * n.Dot(fallbackT)).Normalized();
 		}
 
-		f[10] = rv.u;
-		f[11] = rv.v;
-		f[12] = rv.r;
-		f[13] = rv.g;
-		f[14] = rv.b;
-		f[15] = rv.a;
+		result.attributes[i] = {.normal = Math::PackNormal(rv.nx, rv.ny, rv.nz),
+								.tangent = Math::PackNormal(tangentVec.GetX(), tangentVec.GetY(),
+															tangentVec.GetZ(), sign),
+								.uv = Math::PackUV(rv.u, rv.v),
+								.color = Math::PackColor(rv.r, rv.g, rv.b, rv.a)};
 
+		// 3. Pack Joints and Weights (using UNORM8 compression)
 		if (hasSkin) {
-			result.joints[i * 4 + 0] = rv.joints[0];
-			result.joints[i * 4 + 1] = rv.joints[1];
-			result.joints[i * 4 + 2] = rv.joints[2];
-			result.joints[i * 4 + 3] = rv.joints[3];
-			result.weights[i * 4 + 0] = rv.weights[0];
-			result.weights[i * 4 + 1] = rv.weights[1];
-			result.weights[i * 4 + 2] = rv.weights[2];
-			result.weights[i * 4 + 3] = rv.weights[3];
+			result.skins[i] = {.joints = {rv.joints[0], rv.joints[1], rv.joints[2], rv.joints[3]},
+							   .weights = Math::PackColor(rv.weights[0], rv.weights[1],
+														  rv.weights[2], rv.weights[3])};
 		}
 
-		result.minB[0] = std::min(result.minB[0], f[0]);
-		result.minB[1] = std::min(result.minB[1], f[1]);
-		result.minB[2] = std::min(result.minB[2], f[2]);
-		result.maxB[0] = std::max(result.maxB[0], f[0]);
-		result.maxB[1] = std::max(result.maxB[1], f[1]);
-		result.maxB[2] = std::max(result.maxB[2], f[2]);
+		// 4. Update Bounding Box
+		result.minB[0] = std::min(result.minB[0], rv.px);
+		result.minB[1] = std::min(result.minB[1], rv.py);
+		result.minB[2] = std::min(result.minB[2], rv.pz);
+		result.maxB[0] = std::max(result.maxB[0], rv.px);
+		result.maxB[1] = std::max(result.maxB[1], rv.py);
+		result.maxB[2] = std::max(result.maxB[2], rv.pz);
 	}
 
 	return result;
 }
+
+} // namespace ZHLN
