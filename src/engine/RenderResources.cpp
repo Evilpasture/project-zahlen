@@ -536,23 +536,31 @@ void RenderContext::SetShadowResolution(uint32_t resolution) {
 	auto* impl = _impl.get();
 	vkDeviceWaitIdle(impl->ctx.Device());
 
-	// Recreate shadow map via RAII allocator
+	// 1. Recreate the shadow map with the new resolution
 	impl->shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
 		impl->allocator, impl->ctx, {.width = resolution, .height = resolution},
 		{.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
 		 .arrayLayers = RenderContext::Impl::NUM_CASCADES});
 
-	// --- ADDED: Transition the new shadow map layout to SHADER_READ_ONLY_OPTIMAL ---
+	// 2. Recreate the cascade views so they point to the new image allocation!
+	impl->shadowCascadeViews.clear();
+	impl->shadowCascadeViews.resize(RenderContext::Impl::NUM_CASCADES);
+	for (uint32_t i = 0; i < RenderContext::Impl::NUM_CASCADES; ++i) {
+		impl->shadowCascadeViews[i] = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(
+			impl->ctx.Device(), impl->shadowMap.image.Handle(), i, 1);
+	}
+
+	// 3. Transition the new shadow map layout to SHADER_READ_ONLY_OPTIMAL
 	Vk::CommandPool tempPool(impl->ctx.Device(), impl->ctx.PhysicalInfo().graphics_family);
 	if (tempPool.Allocate(1)) {
 		VkCommandBuffer cmd = tempPool[0];
 		ZHLN_BeginCommandBuffer(cmd);
 
-		// 1. Transition to write/attachment layout first (satisfies Best Practices)
+		// Transition to write/attachment layout first (satisfies Vulkan validation best practices)
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
 			cmd, impl->shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
 
-		// 2. Transition to final resting read-only shader resource layout
+		// Transition to final resting read-only shader resource layout
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
 							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
 			cmd, impl->shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
@@ -577,9 +585,8 @@ void RenderContext::SetShadowResolution(uint32_t resolution) {
 		vkQueueSubmit2(impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
 		vkQueueWaitIdle(impl->ctx.GraphicsQueue());
 	}
-	// -------------------------------------------------------------------------------
 
-	// Safely update the bindless descriptor set (Binding 2 represents the Shadow Map)
+	// 4. Update the bindless descriptor set (Binding 2 represents the Global Shadow Map)
 	for (int i = 0; i < 2; ++i) {
 		VkDescriptorImageInfo updateInfo = {.sampler = VK_NULL_HANDLE,
 											.imageView = impl->shadowMap.view.Get(),

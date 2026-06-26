@@ -265,8 +265,7 @@ void ShadowPass::RenderDirectionalShadows(const FrameRecorder& recorder) const n
 		Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> cascadeLayerImage = {
 			.handle = ctx.shadowMap.image.Handle(),
 			.view = ctx.shadowCascadeViews[cascade].Get(),
-			.extent = {.width = RenderContext::Impl::SHADOW_RES,
-					   .height = RenderContext::Impl::SHADOW_RES},
+			.extent = ctx.shadowMap.extent,
 			.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
 
 		auto [cascade_att, scope] =
@@ -1581,7 +1580,8 @@ void SetFrameData(RenderContext& ctx, const Camera& cam, const FrameUniforms& un
 
 		// 5. Snap the sphere center in light-space to texel boundaries
 		JPH::Vec3 centerLight = lightView * center;
-		float texelsPerUnit = static_cast<float>(RenderContext::Impl::SHADOW_RES) / (radius * 2.0f);
+		float texelsPerUnit =
+			static_cast<float>(impl->currentUniforms.shadowResolution) / (radius * 2.0f);
 
 		centerLight.SetX(std::floor(centerLight.GetX() * texelsPerUnit) / texelsPerUnit);
 		centerLight.SetY(std::floor(centerLight.GetY() * texelsPerUnit) / texelsPerUnit);

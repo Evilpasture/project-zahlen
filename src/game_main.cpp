@@ -202,54 +202,57 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 
 	auto& reg = engine.GetRegistry();
 
-	// 1. Retrieve the Shadow Settings Component
+	// 1. Retrieve the Shadow Settings Component safely
 	auto shadowSettingsEntities = reg.GetEntitiesWith<ShadowSettingsComponent>();
 	ShadowSettingsComponent* shadowSettings = nullptr;
 	if (!shadowSettingsEntities.empty()) {
 		shadowSettings = reg.Get<ShadowSettingsComponent>(shadowSettingsEntities[0]);
 	}
 
-	ImGui::Begin("Lighting Workspace Controller");
-	ImGui::SeparatorText("Global Shadow Settings");
+	if (shadowSettings != nullptr) {
+		ImGui::Begin("Lighting Workspace Controller");
+		ImGui::SeparatorText("Global Shadow Settings");
 
-	// --- Shadow Width Control ---
-	ImGui::DragFloat("Shadow Width", &shadowSettings->shadowWidth, 1.0f, 10.0f, 500.0f, "%.1f m");
-	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("Orthographic width of the directional cascade volume.");
-	}
-
-	// --- Shadow Resolution Control ---
-	const char* resolutions[] = {"512", "1024", "2048", "4096"};
-	int currentResIdx = 2; // Default to 2048
-	if (shadowSettings->shadowResolution == 512) {
-		currentResIdx = 0;
-	} else if (shadowSettings->shadowResolution == 1024) {
-		currentResIdx = 1;
-	} else if (shadowSettings->shadowResolution == 2048) {
-		currentResIdx = 2;
-	} else if (shadowSettings->shadowResolution == 4096) {
-		currentResIdx = 3;
-	}
-
-	if (ImGui::Combo("Shadow Map Resolution", &currentResIdx, resolutions,
-					 IM_ARRAYSIZE(resolutions))) {
-		int newRes = 2048;
-		if (currentResIdx == 0) {
-			newRes = 512;
-		} else if (currentResIdx == 1) {
-			newRes = 1024;
-		} else if (currentResIdx == 2) {
-			newRes = 2048;
-		} else if (currentResIdx == 3) {
-			newRes = 4096;
+		// --- Shadow Width Control ---
+		ImGui::DragFloat("Shadow Width", &shadowSettings->shadowWidth, 1.0f, 10.0f, 500.0f,
+						 "%.1f m");
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Orthographic width of the directional cascade volume.");
 		}
 
-		shadowSettings->shadowResolution = newRes;
+		// --- Shadow Resolution Control ---
+		const char* resolutions[] = {"512", "1024", "2048", "4096"};
+		int currentResIdx = 2; // Default to 2048
+		if (shadowSettings->shadowResolution == 512) {
+			currentResIdx = 0;
+		} else if (shadowSettings->shadowResolution == 1024) {
+			currentResIdx = 1;
+		} else if (shadowSettings->shadowResolution == 2048) {
+			currentResIdx = 2;
+		} else if (shadowSettings->shadowResolution == 4096) {
+			currentResIdx = 3;
+		}
 
-		// Trigger the GPU depth texture recreation
-		engine.GetRenderContext().SetShadowResolution(newRes);
+		if (ImGui::Combo("Shadow Map Resolution", &currentResIdx, resolutions,
+						 IM_ARRAYSIZE(resolutions))) {
+			int newRes = 2048;
+			if (currentResIdx == 0) {
+				newRes = 512;
+			} else if (currentResIdx == 1) {
+				newRes = 1024;
+			} else if (currentResIdx == 2) {
+				newRes = 2048;
+			} else if (currentResIdx == 3) {
+				newRes = 4096;
+			}
+
+			shadowSettings->shadowResolution = newRes;
+
+			// Trigger the GPU depth texture recreation safely
+			engine.GetRenderContext().SetShadowResolution(newRes);
+		}
+		ImGui::End();
 	}
-	ImGui::End();
 
 	// ============================================================================
 	// NEW: semi-transparent corner HUD overlay for coordinate tracking
