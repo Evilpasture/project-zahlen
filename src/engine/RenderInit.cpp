@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // File: src/engine/RenderInit.cpp
-#include "FileWatcher.hpp"
 #include "IBLProcessor.hpp"
 #include "RenderCore.hpp"
 #include "RenderInternal.hpp"
@@ -712,8 +711,7 @@ void RenderContext::Impl::InitBindless() {
 										  VMA_MEMORY_USAGE_CPU_TO_GPU);
 
 		VkDeviceAddress address = Vk::GetBufferDeviceAddress(ctx.Device(), gpu_buf.Handle());
-		uint64_t handle = meshPool.Create(std::move(gpu_buf), maxDebugVerts, address);
-		debugMeshHandles[i] = static_cast<BufferHandle>(handle);
+		debugMeshHandles[i] = meshPool.Create(std::move(gpu_buf), maxDebugVerts, address);
 	}
 
 	stagingContext = std::make_unique<Vk::StagingContext>(allocator, ctx);

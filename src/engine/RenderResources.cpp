@@ -93,102 +93,21 @@ void RenderContext::SetResolution([[maybe_unused]] const Extent2D& res) {
 
 auto RenderContext::CreateVertexBuffer(const void* data, size_t size, uint32_t stride)
 	-> BufferHandle {
-	VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-							   VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-							   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-	if (_impl->rtCtx.Valid()) {
-		usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
-	}
-	auto gpu_buf =
-		Vk::Buffer::Create(_impl->allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY);
-	Vk::CommandPool tempPool(_impl->ctx.Device(), _impl->ctx.PhysicalInfo().graphics_family);
-	if (!tempPool.Allocate(1)) {
-		ZHLN::Panic("Vulkan: Failed to allocate transient command buffer for vertex upload.");
-	}
-	VkCommandBuffer cmd = tempPool[0];
-	ZHLN_BeginCommandBuffer(cmd);
-	auto staging = Vk::UploadToBuffer(_impl->allocator.Get(), cmd, gpu_buf, data, size);
-	ZHLN_EndCommandBuffer(cmd);
-	VkCommandBufferSubmitInfo cmd_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-										  .pNext = nullptr,
-										  .commandBuffer = cmd,
-										  .deviceMask = 0};
-	VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-							.pNext = nullptr,
-							.flags = 0,
-							.waitSemaphoreInfoCount = 0,
-							.pWaitSemaphoreInfos = nullptr,
-							.commandBufferInfoCount = 1,
-							.pCommandBufferInfos = &cmd_info,
-							.signalSemaphoreInfoCount = 0,
-							.pSignalSemaphoreInfos = nullptr};
-	vkQueueSubmit2(_impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
-	vkQueueWaitIdle(_impl->ctx.GraphicsQueue());
-
-	// Extract the permanent GPU address
-	VkBufferDeviceAddressInfo bdaInfo = {
-		.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-		.pNext = {},
-		.buffer = gpu_buf.Handle(),
-	};
-	VkDeviceAddress address = vkGetBufferDeviceAddress(_impl->ctx.Device(), &bdaInfo);
-
-	// Calculate and store the precise element/vertex count using the dynamic stride parameter
-	uint64_t handle =
-		_impl->meshPool.Create(std::move(gpu_buf), static_cast<uint32_t>(size / stride), address);
-	return static_cast<BufferHandle>(handle);
+	auto [gpu_buf, address] = _impl->CreateGPUBuffer(size, data, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+	return _impl->meshPool.Create(std::move(gpu_buf), static_cast<uint32_t>(size / stride),
+								  address);
 }
 
 auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHandle {
-	VkBufferUsageFlags usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-							   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-	if (_impl->rtCtx.Valid()) {
-		usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
-	}
-	auto gpu_buf =
-		Vk::Buffer::Create(_impl->allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY);
-
-	Vk::CommandPool tempPool(_impl->ctx.Device(), _impl->ctx.PhysicalInfo().graphics_family);
-	if (!tempPool.Allocate(1)) {
-		ZHLN::Panic("Vulkan: Failed to allocate transient command buffer for index upload.");
-	}
-	VkCommandBuffer cmd = tempPool[0];
-	ZHLN_BeginCommandBuffer(cmd);
-	auto staging = Vk::UploadToBuffer(_impl->allocator.Get(), cmd, gpu_buf, data, size);
-	ZHLN_EndCommandBuffer(cmd);
-
-	VkCommandBufferSubmitInfo cmd_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-										  .pNext = nullptr,
-										  .commandBuffer = cmd,
-										  .deviceMask = 0};
-	VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-							.pNext = nullptr,
-							.flags = 0,
-							.waitSemaphoreInfoCount = 0,
-							.pWaitSemaphoreInfos = nullptr,
-							.commandBufferInfoCount = 1,
-							.pCommandBufferInfos = &cmd_info,
-							.signalSemaphoreInfoCount = 0,
-							.pSignalSemaphoreInfos = nullptr};
-	vkQueueSubmit2(_impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
-	vkQueueWaitIdle(_impl->ctx.GraphicsQueue());
-
-	VkBufferDeviceAddressInfo bdaInfo = {
-		.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-		.pNext = {},
-		.buffer = gpu_buf.Handle(),
-	};
-	VkDeviceAddress address = vkGetBufferDeviceAddress(_impl->ctx.Device(), &bdaInfo);
-
-	uint64_t handle = _impl->meshPool.Create(
-		std::move(gpu_buf), static_cast<uint32_t>(size / sizeof(uint32_t)), address);
-	return static_cast<BufferHandle>(handle);
+	auto [gpu_buf, address] = _impl->CreateGPUBuffer(size, data, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+	return _impl->meshPool.Create(std::move(gpu_buf),
+								  static_cast<uint32_t>(size / sizeof(uint32_t)), address);
 }
 
 void RenderContext::DestroyBuffer(BufferHandle handle) {
 	if (handle != BufferHandle::Invalid) {
 		// GenerationalPool handles the underlying VMA destruction safely
-		_impl->meshPool.Destroy(static_cast<uint64_t>(handle));
+		_impl->meshPool.Destroy(handle);
 	}
 }
 
@@ -240,8 +159,7 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 	auto finalPipeline = pipeline.Build(impl->ctx.Device());
 
 	// Return a packed generational handle
-	uint64_t handle = impl->materialPool.Create(std::move(finalPipeline), std::move(layout));
-	return {.pipeline = static_cast<PipelineHandle>(handle),
+	return {.pipeline = impl->materialPool.Create(std::move(finalPipeline), std::move(layout)),
 			.alphaMode = desc.alphaBlend ? 2u : 0u};
 }
 
@@ -483,6 +401,55 @@ uint32_t RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceD
 	return index;
 }
 
+auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data,
+										  VkBufferUsageFlags functionalUsage) const
+	-> std::pair<Vk::Buffer, VkDeviceAddress> {
+
+	// 1. Gather all core required usage bits
+	VkBufferUsageFlags usage = functionalUsage | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+							   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+
+	if (rtCtx.Valid()) {
+		usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+	}
+
+	// 2. Allocate the GPU destination memory
+	auto gpu_buf = Vk::Buffer::Create(allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY);
+
+	// 3. Command recording & temporary submit infrastructure
+	Vk::CommandPool tempPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+	if (!tempPool.Allocate(1)) {
+		ZHLN::Panic("Vulkan: Failed to allocate transient command buffer for buffer upload.");
+	}
+
+	VkCommandBuffer cmd = tempPool[0];
+	ZHLN_BeginCommandBuffer(cmd);
+	auto staging = Vk::UploadToBuffer(allocator.Get(), cmd, gpu_buf, data, size);
+	ZHLN_EndCommandBuffer(cmd);
+
+	// 4. Submit transfer commands
+	VkCommandBufferSubmitInfo cmd_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+										  .commandBuffer = cmd};
+	VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+							.commandBufferInfoCount = 1,
+							.pCommandBufferInfos = &cmd_info};
+
+	vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
+
+	// Consolidated sync stall
+	vkQueueWaitIdle(ctx.GraphicsQueue());
+
+	// 5. Query the Buffer Device Address (BDA)
+	VkBufferDeviceAddressInfo bdaInfo = {
+		.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+		.pNext = {},
+		.buffer = gpu_buf.Handle(),
+	};
+	VkDeviceAddress address = vkGetBufferDeviceAddress(ctx.Device(), &bdaInfo);
+
+	return {std::move(gpu_buf), address};
+}
+
 auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB)
 	-> uint32_t {
 	return _impl->CreateTextureInternal(data, width, height, isSRGB);
@@ -508,15 +475,13 @@ auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHa
 
 	VkDeviceAddress address = Vk::GetBufferDeviceAddress(_impl->ctx.Device(), gpu_buf.Handle());
 	// Pass vertexCount to the pool so we know how to split the addresses later
-	uint64_t handle = _impl->meshPool.Create(std::move(gpu_buf), vertexCount, address);
-	return static_cast<BufferHandle>(handle);
+	return _impl->meshPool.Create(std::move(gpu_buf), vertexCount, address);
 }
 
 void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData,
 										size_t attrSize, uint32_t vertexCount) noexcept {
 	uint32_t frameIdx = _impl->frame_index;
-	auto* nativeMesh =
-		_impl->meshPool.Resolve(static_cast<uint64_t>(_impl->debugMeshHandles[frameIdx]));
+	auto* nativeMesh = _impl->meshPool.Resolve(_impl->debugMeshHandles[frameIdx]);
 	if (nativeMesh == nullptr) {
 		return;
 	}
@@ -597,11 +562,17 @@ void RenderContext::SetShadowResolution(uint32_t resolution) {
 											  .pNext = nullptr,
 											  .commandBuffer = cmd,
 											  .deviceMask = 0};
-		VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-								.pNext = nullptr,
-								.flags = 0,
-								.commandBufferInfoCount = 1,
-								.pCommandBufferInfos = &cmd_info};
+		VkSubmitInfo2 submit = {
+			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+			.pNext = nullptr,
+			.flags = 0,
+			.waitSemaphoreInfoCount = {},
+			.pWaitSemaphoreInfos = {},
+			.commandBufferInfoCount = 1,
+			.pCommandBufferInfos = &cmd_info,
+			.signalSemaphoreInfoCount = {},
+			.pSignalSemaphoreInfos = {},
+		};
 		vkQueueSubmit2(impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
 		vkQueueWaitIdle(impl->ctx.GraphicsQueue());
 	}
@@ -640,9 +611,9 @@ void RenderContext::BuildMeshBLAS(Mesh& mesh) {
 		return; // Gracefully skip BLAS build on non-RT systems
 	}
 
-	auto* nativePosMesh = impl->meshPool.Resolve(static_cast<uint64_t>(mesh.posBuffer));
+	auto* nativePosMesh = impl->meshPool.Resolve(mesh.posBuffer);
 	auto* nativeIndexMesh = mesh.indexBuffer != BufferHandle::Invalid
-								? impl->meshPool.Resolve(static_cast<uint64_t>(mesh.indexBuffer))
+								? impl->meshPool.Resolve(mesh.indexBuffer)
 								: nullptr;
 
 	if (nativePosMesh == nullptr) {

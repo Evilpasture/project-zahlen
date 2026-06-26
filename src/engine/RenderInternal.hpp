@@ -44,7 +44,7 @@ namespace ZHLN {
 // GenerationalPool Template
 // ============================================================================
 
-template <typename T, size_t MaxObjects> class GenerationalPool {
+template <typename T, size_t MaxObjects, typename HandleType = uint64_t> class GenerationalPool {
   public:
 	GenerationalPool() {
 		_freeIndices.reserve(MaxObjects);
@@ -67,7 +67,7 @@ template <typename T, size_t MaxObjects> class GenerationalPool {
 	GenerationalPool(const GenerationalPool&) = delete;
 	auto operator=(const GenerationalPool&) -> GenerationalPool& = delete;
 
-	template <typename... Args> uint64_t Create(Args&&... args) {
+	template <typename... Args> HandleType Create(Args&&... args) {
 		if (_freeIndices.empty()) [[unlikely]] {
 			ZHLN::Panic("GenerationalPool exceeded maximum capacity!");
 		}
@@ -77,12 +77,14 @@ template <typename T, size_t MaxObjects> class GenerationalPool {
 		uint32_t gen = _generations[index];
 		_pointers[index] = _pool.Create(std::forward<Args>(args)...);
 
-		return (static_cast<uint64_t>(gen) << 32) | index;
+		uint64_t packed = (static_cast<uint64_t>(gen) << 32) | index;
+		return static_cast<HandleType>(packed);
 	}
 
-	void Destroy(uint64_t handle) {
-		auto index = static_cast<uint32_t>(handle & 0xFFFFFFFF);
-		auto gen = static_cast<uint32_t>(handle >> 32);
+	void Destroy(HandleType handle) {
+		auto rawHandle = static_cast<uint64_t>(handle);
+		auto index = static_cast<uint32_t>(rawHandle & 0xFFFFFFFF);
+		auto gen = static_cast<uint32_t>(rawHandle >> 32);
 
 		if (index >= MaxObjects || _generations[index] != gen || _pointers[index] == nullptr) {
 			return; // Safely ignore stale or invalid handles
@@ -94,9 +96,10 @@ template <typename T, size_t MaxObjects> class GenerationalPool {
 		_freeIndices.push_back(index);
 	}
 
-	[[nodiscard]] T* Resolve(uint64_t handle) const noexcept {
-		auto index = static_cast<uint32_t>(handle & 0xFFFFFFFF);
-		auto gen = static_cast<uint32_t>(handle >> 32);
+	[[nodiscard]] T* Resolve(HandleType handle) const noexcept {
+		auto rawHandle = static_cast<uint64_t>(handle);
+		auto index = static_cast<uint32_t>(rawHandle & 0xFFFFFFFF);
+		auto gen = static_cast<uint32_t>(rawHandle >> 32);
 
 		if (index >= MaxObjects || _generations[index] != gen) {
 			return nullptr;
@@ -443,8 +446,8 @@ struct RenderContext::Impl {
 	FrameUniforms currentUniforms{};
 
 	// Generational pools (Expanded to provide massive headroom for SoA split streams)
-	GenerationalPool<NativeMesh, 8192> meshPool;		 // Expanded from 1024 to 8192
-	GenerationalPool<NativeMaterial, 2048> materialPool; // Expanded from 512 to 2048
+	GenerationalPool<NativeMesh, 8192, BufferHandle> meshPool;
+	GenerationalPool<NativeMaterial, 2048, PipelineHandle> materialPool;
 
 	JPH::Array<DrawCommand> drawQueue;
 	JPH::Array<WorkerCmdContext> workerCmds;
@@ -560,6 +563,9 @@ struct RenderContext::Impl {
 	uint32_t CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB);
 	uint32_t CreateTextureCubeInternal(const void* const* faceData, uint32_t width,
 									   uint32_t height);
+
+	auto CreateGPUBuffer(size_t size, const void* data, VkBufferUsageFlags functionalUsage) const
+		-> std::pair<Vk::Buffer, VkDeviceAddress>;
 
 	void SortDrawQueue();
 	ZHLN_FrameResult SubmitFrame();
