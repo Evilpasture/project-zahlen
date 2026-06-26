@@ -241,133 +241,150 @@ namespace Passes {
 namespace {
 
 struct ShadowPass {
+	static constexpr uint32_t kCubemapFaceMask = 0x3F; // 6 bits representing all 6 cubemap faces
+	static constexpr float kShadowClearDepth = 1.0f;
 	void Execute(const FrameRecorder& recorder) const noexcept {
-		VkCommandBuffer cmd = recorder.cmd;
-		auto& ctx = recorder.ctx;
+		RenderDirectionalShadows(recorder);
+		RenderPunctualShadows(recorder);
+	}
 
-		Profiler::ScopedGpuProfile<Stages::ShadowPass, FrameProfiler> timer(
-			cmd, recorder.frameIndex, ctx.gpuProfiler);
+  private:
+	void RenderDirectionalShadows(const FrameRecorder& recorder) const noexcept;
+	void RenderPunctualShadows(const FrameRecorder& recorder) const noexcept;
+};
 
-		// ====================================================================
-		// 1. DIRECTIONAL CASCADED SHADOW PASS (Sun)
-		// ====================================================================
-		for (uint32_t cascade = 0; cascade < RenderContext::Impl::NUM_CASCADES; ++cascade) {
-			// Pick the specific subview representing this cascade layer
-			Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> cascadeLayerImage = {
-				.handle = ctx.shadowMap.image.Handle(),
-				.view = ctx.shadowCascadeViews[cascade].Get(),
-				.extent = {.width = RenderContext::Impl::SHADOW_RES,
-						   .height = RenderContext::Impl::SHADOW_RES},
-				.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
+void ShadowPass::RenderDirectionalShadows(const FrameRecorder& recorder) const noexcept {
+	VkCommandBuffer cmd = recorder.cmd;
+	auto& ctx = recorder.ctx;
 
-			auto [cascade_att, scope] =
-				Vk::ScopedBarrier<Vk::ShaderReadState, Vk::DepthAttachmentState>(
-					cmd, cascadeLayerImage, VK_IMAGE_ASPECT_DEPTH_BIT);
+	Profiler::ScopedGpuProfile<Stages::ShadowPass, FrameProfiler> timer(cmd, recorder.frameIndex,
+																		ctx.gpuProfiler);
 
-			Vk::DynamicPass(cascadeLayerImage.extent)
-				.AddDepth(cascade_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-						  1.0f)
-				.Execute(cmd, [&]() {
-					for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
-						const auto& draw = ctx.drawQueue[i];
-						bool isVisible =
-							(draw.flags & DrawFlags::VisibleInShadow) != DrawFlags::None ||
-							(draw.flags & (DrawFlags::VisibleInMain |
-										   DrawFlags::VisibleInShadow)) == DrawFlags::None;
-						if (!isVisible || draw.alphaMode == 2) {
-							continue;
-						}
+	// Local lambda helper to handle individual cascade transition & drawing lifetimes
+	auto ExecuteCascadePass = [&](uint32_t cascade, auto&& recordFn) {
+		Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> cascadeLayerImage = {
+			.handle = ctx.shadowMap.image.Handle(),
+			.view = ctx.shadowCascadeViews[cascade].Get(),
+			.extent = {.width = RenderContext::Impl::SHADOW_RES,
+					   .height = RenderContext::Impl::SHADOW_RES},
+			.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
 
-						// Tell the vertex shader which cascade matrix to use (using isShadowPass
-						// field as index)
-						ObjectConstants pushConstants = {
-							.instanceId = i,
-							.isShadowPass =
-								cascade +
-								1 // Offset by 1 so 0 still represents non-shadow/normal render path
-						};
+		auto [cascade_att, scope] =
+			Vk::ScopedBarrier<Vk::ShaderReadState, Vk::DepthAttachmentState>(
+				cmd, cascadeLayerImage, VK_IMAGE_ASPECT_DEPTH_BIT);
 
-						auto* mesh = draw.posMesh;
-						uint32_t vCount = draw.indexMesh ? draw.indexCount : mesh->vertexCount;
+		Vk::DynamicPass(cascadeLayerImage.extent)
+			.AddDepth(cascade_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+					  kShadowClearDepth)
+			.Execute(cmd, std::forward<decltype(recordFn)>(recordFn));
+	};
 
-						Vk::DrawInstanced(cmd,
-										  {.pipeline = ctx.shadowPipeline.Get(),
-										   .layout = ctx.shadowPipelineLayout.Get(),
-										   .set = recorder.bindlessSet,
-										   .vertexCount = vCount,
-										   .instanceCount = 1,
-										   .firstVertex = 0,
-										   .firstInstance = i},
-										  pushConstants,
-										  VK_SHADER_STAGE_VERTEX_BIT |
-											  VK_SHADER_STAGE_FRAGMENT_BIT);
-					}
-				});
-		}
-
-		// ====================================================================
-		// 2. PUNCTUAL SHADOW PASSES (Point Lights via Multiview)
-		// ====================================================================
-		if (ctx.punctualShadowPipeline.Valid() && !ctx.punctualShadowViews.empty()) {
-			auto [atlas_att, scope] =
-				Vk::ScopedBarrier<Vk::ShaderReadState, Vk::DepthAttachmentState>(
-					cmd, ctx.shadowAtlas, VK_IMAGE_ASPECT_DEPTH_BIT);
-
-			for (uint32_t l_idx = 0; l_idx < ctx.mappedLights.size(); ++l_idx) {
-				const auto& light = ctx.mappedLights[l_idx];
-				if (light.shadowLayer < 0 || light.type != 1) {
+	for (uint32_t cascade = 0; cascade < RenderContext::Impl::NUM_CASCADES; ++cascade) {
+		ExecuteCascadePass(cascade, [&]() {
+			for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
+				const auto& draw = ctx.drawQueue[i];
+				bool isVisible =
+					(draw.flags & DrawFlags::VisibleInShadow) != DrawFlags::None ||
+					(draw.flags & (DrawFlags::VisibleInMain | DrawFlags::VisibleInShadow)) ==
+						DrawFlags::None;
+				if (!isVisible || draw.alphaMode == 2) {
 					continue;
 				}
 
-				Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> subViewImage = {
-					.handle = ctx.shadowAtlas.image.Handle(),
-					.view = ctx.punctualShadowViews[light.shadowLayer].Get(),
-					.extent = {.width = 1024, .height = 1024},
-					.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
+				ObjectConstants pushConstants = {
+					.instanceId = i,
+					.isShadowPass = cascade + 1 // Offset by 1 for shader path detection
+				};
 
-				Vk::DynamicPass(subViewImage.extent)
-					.ViewMask(63)
-					.AddDepth(subViewImage, VK_ATTACHMENT_LOAD_OP_CLEAR,
-							  VK_ATTACHMENT_STORE_OP_STORE, 1.0f)
-					.Execute(cmd, [&]() {
-						for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
-							const auto& draw = ctx.drawQueue[i];
-							if (draw.alphaMode == 2) {
-								continue;
-							}
+				auto* mesh = draw.posMesh;
+				uint32_t vCount = draw.indexMesh ? draw.indexCount : mesh->vertexCount;
 
-							JPH::Vec3 meshPos = draw.transform.GetTranslation();
-							JPH::Vec3 lightPos(light.position[0], light.position[1],
-											   light.position[2]);
-							float distToLight = (meshPos - lightPos).Length();
-							float maxRange = light.range + draw.cullRadius;
-
-							if (distToLight > maxRange) {
-								continue;
-							}
-
-							auto* mesh = draw.posMesh;
-
-							struct PunctualPush {
-								uint32_t lightIdx;
-							} pc = {l_idx};
-							uint32_t vCount = draw.indexMesh ? draw.indexCount : mesh->vertexCount;
-
-							Vk::DrawInstanced(cmd,
-											  {.pipeline = ctx.punctualShadowPipeline.Get(),
-											   .layout = ctx.punctualShadowPipelineLayout.Get(),
-											   .set = recorder.bindlessSet,
-											   .vertexCount = vCount,
-											   .instanceCount = 1,
-											   .firstVertex = 0,
-											   .firstInstance = i},
-											  pc, VK_SHADER_STAGE_VERTEX_BIT);
-						}
-					});
+				Vk::DrawInstanced(cmd,
+								  {.pipeline = ctx.shadowPipeline.Get(),
+								   .layout = ctx.shadowPipelineLayout.Get(),
+								   .set = recorder.bindlessSet,
+								   .vertexCount = vCount,
+								   .instanceCount = 1,
+								   .firstVertex = 0,
+								   .firstInstance = i},
+								  pushConstants,
+								  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
 			}
-		}
+		});
 	}
-};
+}
+
+void ShadowPass::RenderPunctualShadows(const FrameRecorder& recorder) const noexcept {
+	VkCommandBuffer cmd = recorder.cmd;
+	auto& ctx = recorder.ctx;
+
+	if (!ctx.punctualShadowPipeline.Valid() || ctx.punctualShadowViews.empty()) {
+		return;
+	}
+
+	// Transition the entire depth atlas once up front
+	auto [atlas_att, scope] = Vk::ScopedBarrier<Vk::ShaderReadState, Vk::DepthAttachmentState>(
+		cmd, ctx.shadowAtlas, VK_IMAGE_ASPECT_DEPTH_BIT);
+
+	// Local lambda helper to handle sub-viewport rendering with the active multiview mask
+	auto ExecutePunctualPass =
+		[&](const Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>& subViewImage,
+			auto&& recordFn) {
+			Vk::DynamicPass(subViewImage.extent)
+				.ViewMask(kCubemapFaceMask) // Constant replaces magic number 63
+				.AddDepth(subViewImage, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+						  kShadowClearDepth)
+				.Execute(cmd, std::forward<decltype(recordFn)>(recordFn));
+		};
+
+	for (uint32_t l_idx = 0; l_idx < ctx.mappedLights.size(); ++l_idx) {
+		const auto& light = ctx.mappedLights[l_idx];
+		if (light.shadowLayer < 0 || light.type != 1) {
+			continue;
+		}
+
+		Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> subViewImage = {
+			.handle = ctx.shadowAtlas.image.Handle(),
+			.view = ctx.punctualShadowViews[light.shadowLayer].Get(),
+			.extent = {.width = 1024, .height = 1024},
+			.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
+
+		ExecutePunctualPass(subViewImage, [&]() {
+			for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
+				const auto& draw = ctx.drawQueue[i];
+				if (draw.alphaMode == 2) {
+					continue;
+				}
+
+				JPH::Vec3 meshPos = draw.transform.GetTranslation();
+				JPH::Vec3 lightPos(light.position[0], light.position[1], light.position[2]);
+				float distToLight = (meshPos - lightPos).Length();
+				float maxRange = light.range + draw.cullRadius;
+
+				if (distToLight > maxRange) {
+					continue;
+				}
+
+				auto* mesh = draw.posMesh;
+
+				struct PunctualPush {
+					uint32_t lightIdx;
+				} pc = {l_idx};
+				uint32_t vCount = draw.indexMesh ? draw.indexCount : mesh->vertexCount;
+
+				Vk::DrawInstanced(cmd,
+								  {.pipeline = ctx.punctualShadowPipeline.Get(),
+								   .layout = ctx.punctualShadowPipelineLayout.Get(),
+								   .set = recorder.bindlessSet,
+								   .vertexCount = vCount,
+								   .instanceCount = 1,
+								   .firstVertex = 0,
+								   .firstInstance = i},
+								  pc, VK_SHADER_STAGE_VERTEX_BIT);
+			}
+		});
+	}
+}
 
 struct MainPass {
 	void Execute(const FrameRecorder& recorder,
@@ -767,64 +784,52 @@ struct AAPass {
 					 .width = (float)in.sceneColor.extent.width,
 					 .height = (float)in.sceneColor.extent.height};
 
+		// 1. CLEAN HYGIENIC HELPER: Encapsulates scoped barrier lifetime & pass execution
+		auto ExecuteSubPass = [&](auto& targetImage, VkAttachmentLoadOp loadOp, auto&& recordFn) {
+			auto [attachment, scope] = Vk::ReadToColor(cmd, targetImage);
+			Vk::DynamicPass(in.sceneColor.extent)
+				.AddColor(attachment, loadOp, VK_ATTACHMENT_STORE_OP_STORE, kClearColorBlack)
+				.Execute(cmd, std::forward<decltype(recordFn)>(recordFn));
+			// 'scope' is destroyed here, transitioning 'targetImage' back to
+			// SHADER_READ_ONLY_OPTIMAL
+		};
+
 		// --- PASS 1: EDGE DETECTION ---
 		auto smaaEdge_u =
 			AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.smaaEdgeTarget);
 		auto smaaEdge_ro = smaaEdge_u;
 
-		{
-			auto [smaaEdge_att, scope] = Vk::ReadToColor(cmd, smaaEdge_u);
-
-			Vk::DynamicPass(in.sceneColor.extent)
-				.AddColor(smaaEdge_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-						  kClearColorBlack)
-				.Execute(cmd, [&]() {
-					ctx.smaaEdgePass.WriteNext(ctx.ctx.Device(), color_ro,
-											   ctx.defaultSampler.Get());
-					ctx.smaaEdgePass.Execute(
-						cmd, metrics, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
-				});
-		}
+		ExecuteSubPass(smaaEdge_u, VK_ATTACHMENT_LOAD_OP_CLEAR, [&]() {
+			ctx.smaaEdgePass.WriteNext(ctx.ctx.Device(), color_ro, ctx.defaultSampler.Get());
+			ctx.smaaEdgePass.Execute(cmd, metrics,
+									 VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+		});
 
 		// --- PASS 2: BLENDING WEIGHT CALCULATION ---
 		auto smaaWeight_u =
 			AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.smaaWeightTarget);
 		auto smaaWeight_ro = smaaWeight_u;
 
-		{
-			auto [smaaWeight_att, scope] = Vk::ReadToColor(cmd, smaaWeight_u);
-
+		ExecuteSubPass(smaaWeight_u, VK_ATTACHMENT_LOAD_OP_CLEAR, [&]() {
 			VkImageView areaView = ctx.textureViews[ctx.smaaAreaTexIdx].Get();
 			VkImageView searchView = ctx.textureViews[ctx.smaaSearchTexIdx].Get();
 
-			Vk::DynamicPass(in.sceneColor.extent)
-				.AddColor(smaaWeight_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-						  kClearColorBlack)
-				.Execute(cmd, [&]() {
-					ctx.smaaWeightPass.WriteNext(ctx.ctx.Device(), smaaEdge_ro, areaView,
-												 searchView, ctx.defaultSampler.Get(),
-												 ctx.pointSampler.Get());
-					ctx.smaaWeightPass.Execute(
-						cmd, metrics, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
-				});
-		}
+			ctx.smaaWeightPass.WriteNext(ctx.ctx.Device(), smaaEdge_ro, areaView, searchView,
+										 ctx.defaultSampler.Get(), ctx.pointSampler.Get());
+			ctx.smaaWeightPass.Execute(cmd, metrics,
+									   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+		});
 
 		// --- PASS 3: NEIGHBORHOOD BLENDING ---
 		auto accumNext_u =
 			AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.accumBuffers.Next());
 
-		{
-			auto [accumNext_att, scope] = Vk::ReadToColor(cmd, accumNext_u);
-
-			Vk::DynamicPass(in.sceneColor.extent)
-				.AddColor(accumNext_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
-				.Execute(cmd, [&]() {
-					ctx.smaaBlendPass.WriteNext(ctx.ctx.Device(), color_ro, smaaWeight_ro,
-												ctx.defaultSampler.Get());
-					ctx.smaaBlendPass.Execute(
-						cmd, metrics, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
-				});
-		}
+		ExecuteSubPass(accumNext_u, VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
+			ctx.smaaBlendPass.WriteNext(ctx.ctx.Device(), color_ro, smaaWeight_ro,
+										ctx.defaultSampler.Get());
+			ctx.smaaBlendPass.Execute(cmd, metrics,
+									  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+		});
 
 		return accumNext_u;
 	}
