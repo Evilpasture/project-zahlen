@@ -27,7 +27,7 @@ local pomni_parts = nil
 zh:on("engine.start", function()
     zh.log("Scene: Spawning declarative layout...")
 
-    zh:spawn("blender_Caines Office.glb", { physics = true, static = true })
+    zh:spawn("Circus Lobby V9.glb", { physics = true, static = true })
     pomni_parts = zh:spawn("tadc_models/POMNI.glb", { animated = true })
 
     local sun = zh:spawn_light({
