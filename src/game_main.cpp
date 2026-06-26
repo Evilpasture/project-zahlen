@@ -140,8 +140,6 @@ constexpr std::array<FrustumEdge, 12> s_FrustumEdges = {{
 	{.start = 3, .end = 7} // Near-to-Far connection lines
 }};
 
-int g_MaxPunctualShadows = 1;
-
 // ============================================================================
 // Flattened System Wrappers (For 100% Predictable Function Pointers)
 // ============================================================================
@@ -205,52 +203,52 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 
 	// 1. Retrieve the Shadow Settings Component
 	auto shadowSettingsEntities = reg.GetEntitiesWith<ShadowSettingsComponent>();
+	ShadowSettingsComponent* shadowSettings = nullptr;
 	if (!shadowSettingsEntities.empty()) {
-		auto* shadowSettings = reg.Get<ShadowSettingsComponent>(shadowSettingsEntities[0]);
-
-		ImGui::Begin("Lighting Workspace Controller");
-		ImGui::SeparatorText("Global Shadow Settings");
-
-		// --- Shadow Width Control ---
-		ImGui::DragFloat("Shadow Width", &shadowSettings->shadowWidth, 1.0f, 10.0f, 500.0f,
-						 "%.1f m");
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Orthographic width of the directional cascade volume.");
-		}
-
-		// --- Shadow Resolution Control ---
-		const char* resolutions[] = {"512", "1024", "2048", "4096"};
-		int currentResIdx = 2; // Default to 2048
-		if (shadowSettings->shadowResolution == 512) {
-			currentResIdx = 0;
-		} else if (shadowSettings->shadowResolution == 1024) {
-			currentResIdx = 1;
-		} else if (shadowSettings->shadowResolution == 2048) {
-			currentResIdx = 2;
-		} else if (shadowSettings->shadowResolution == 4096) {
-			currentResIdx = 3;
-		}
-
-		if (ImGui::Combo("Shadow Map Resolution", &currentResIdx, resolutions,
-						 IM_ARRAYSIZE(resolutions))) {
-			int newRes = 2048;
-			if (currentResIdx == 0) {
-				newRes = 512;
-			} else if (currentResIdx == 1) {
-				newRes = 1024;
-			} else if (currentResIdx == 2) {
-				newRes = 2048;
-			} else if (currentResIdx == 3) {
-				newRes = 4096;
-			}
-
-			shadowSettings->shadowResolution = newRes;
-
-			// Trigger the GPU depth texture recreation
-			engine.GetRenderContext().SetShadowResolution(newRes);
-		}
-		ImGui::End();
+		shadowSettings = reg.Get<ShadowSettingsComponent>(shadowSettingsEntities[0]);
 	}
+
+	ImGui::Begin("Lighting Workspace Controller");
+	ImGui::SeparatorText("Global Shadow Settings");
+
+	// --- Shadow Width Control ---
+	ImGui::DragFloat("Shadow Width", &shadowSettings->shadowWidth, 1.0f, 10.0f, 500.0f, "%.1f m");
+	if (ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("Orthographic width of the directional cascade volume.");
+	}
+
+	// --- Shadow Resolution Control ---
+	const char* resolutions[] = {"512", "1024", "2048", "4096"};
+	int currentResIdx = 2; // Default to 2048
+	if (shadowSettings->shadowResolution == 512) {
+		currentResIdx = 0;
+	} else if (shadowSettings->shadowResolution == 1024) {
+		currentResIdx = 1;
+	} else if (shadowSettings->shadowResolution == 2048) {
+		currentResIdx = 2;
+	} else if (shadowSettings->shadowResolution == 4096) {
+		currentResIdx = 3;
+	}
+
+	if (ImGui::Combo("Shadow Map Resolution", &currentResIdx, resolutions,
+					 IM_ARRAYSIZE(resolutions))) {
+		int newRes = 2048;
+		if (currentResIdx == 0) {
+			newRes = 512;
+		} else if (currentResIdx == 1) {
+			newRes = 1024;
+		} else if (currentResIdx == 2) {
+			newRes = 2048;
+		} else if (currentResIdx == 3) {
+			newRes = 4096;
+		}
+
+		shadowSettings->shadowResolution = newRes;
+
+		// Trigger the GPU depth texture recreation
+		engine.GetRenderContext().SetShadowResolution(newRes);
+	}
+	ImGui::End();
 
 	// ============================================================================
 	// NEW: semi-transparent corner HUD overlay for coordinate tracking
@@ -306,10 +304,11 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 	ImGui::Begin("Lighting Workspace Controller");
 
 	ImGui::SeparatorText("Punctual Shadows (Raster Fallback)");
-	ImGui::SliderInt("Max Punctual Shadows", &g_MaxPunctualShadows, 0, 4);
-	if (g_MaxPunctualShadows > 0) {
+	ImGui::SliderInt("Max Punctual Shadows", &shadowSettings->maxPunctualShadows, 0, 4);
+	if (shadowSettings->maxPunctualShadows > 0) {
 		ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f),
-						   "  [Rendering %d shadow-casting light(s)]", g_MaxPunctualShadows);
+						   "  [Rendering %d shadow-casting light(s)]",
+						   shadowSettings->maxPunctualShadows);
 	} else {
 		ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f),
 						   "  [Punctual shadows disabled (0ms overhead)]");
@@ -594,12 +593,14 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 	// 1. Retrieve the custom shadow settings, falling back to defaults if not found
 	float shadowWidth = 80.0f;
 	uint32_t shadowResolution = 2048;
+	int maxPunctualShadows = 1;
 
 	auto shadowEntities = reg.GetEntitiesWith<ShadowSettingsComponent>();
 	if (!shadowEntities.empty()) {
 		auto* shadowSettings = reg.Get<ShadowSettingsComponent>(shadowEntities[0]);
 		shadowWidth = shadowSettings->shadowWidth;
 		shadowResolution = shadowSettings->shadowResolution;
+		maxPunctualShadows = shadowSettings->maxPunctualShadows;
 	}
 
 	// 2. Snapping: Align the shadow center to texel increments using the dynamic resolution
@@ -1035,9 +1036,16 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, ScriptRunne
 				return a.distSq < b.distSq;
 			});
 
-			// Assign the closest visible lights based on our live budget [2]
-			uint32_t shadowCasters = std::min(static_cast<uint32_t>(g_MaxPunctualShadows),
-											  static_cast<uint32_t>(lightDistances.size()));
+			auto shadowSettingsEntities = reg.GetEntitiesWith<ShadowSettingsComponent>();
+			if (shadowSettingsEntities.empty()) {
+				return;
+			}
+			auto* shadowSettings = reg.Get<ShadowSettingsComponent>(shadowSettingsEntities[0]);
+
+			// Assign the closest visible lights based on our live budget
+			uint32_t shadowCasters =
+				std::min(static_cast<uint32_t>(shadowSettings->maxPunctualShadows),
+						 static_cast<uint32_t>(lightDistances.size()));
 			for (uint32_t i = 0; i < shadowCasters; ++i) {
 				reg.Get<LightingSystem::LightComponent>(lightDistances[i].entity)->shadowLayer = i;
 			}

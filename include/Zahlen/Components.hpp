@@ -154,6 +154,7 @@ struct AASettingsComponent {
 struct ShadowSettingsComponent {
 	float shadowWidth = 200.0f;
 	int shadowResolution = 2048;
+	int maxPunctualShadows = 1;
 };
 
 struct PostProcessSettingsComponent {

@@ -198,6 +198,7 @@ if not ok then
         typedef struct ShadowSettingsComponent {
             float shadowWidth;
             int shadowResolution;
+            int maxPunctualShadows;
         } ShadowSettingsComponent;
 
         typedef struct String64 {
