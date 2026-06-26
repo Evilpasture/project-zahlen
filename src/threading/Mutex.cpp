@@ -17,22 +17,6 @@
 #include <new>
 #include <thread>
 
-// Hardware-specific CPU yield for adaptive backoff
-#if defined(__aarch64__)
-[[gnu::always_inline]] inline void RelaxCPU() noexcept {
-	__asm__ __volatile__("yield" ::: "memory");
-}
-#elif defined(__x86_64__) || defined(_M_X64)
-#include <immintrin.h>
-[[gnu::always_inline]] inline void RelaxCPU() noexcept {
-	_mm_pause();
-}
-#else
-[[gnu::always_inline]] inline void RelaxCPU() noexcept {
-	std::this_thread::yield();
-}
-#endif
-
 namespace ZHLN {
 
 // ============================================================================
@@ -222,11 +206,12 @@ void Mutex::LockSlow() noexcept {
 			}
 		}
 
-		if (val & POISONED) [[unlikely]]
+		if (val & POISONED) [[unlikely]] {
 			return;
+		}
 
 		for (size_t j = 0; j < backoff_limit; j++) {
-			RelaxCPU();
+			CPURelax();
 		}
 		if (backoff_limit < 1024) {
 			backoff_limit <<= 1;

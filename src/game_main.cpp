@@ -674,7 +674,6 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 				continue;
 			}
 
-			// Retrieve PBR factors from PBRComponent to use as the Single Source of Truth
 			float roughness = -1.0f;
 			float metallic = -1.0f;
 			if (auto* pbr = reg.Get<PBRComponent>(e)) {
@@ -939,56 +938,9 @@ bool InitializeGame(Engine& engine) {
 								   .debugLineAlbedo = lineMat.albedoIndex,
 								   .physicsDrawMode = 0});
 
-	// Entity areaLight = reg.Create();
-	// reg.Add(areaLight, LightingSystem::LightComponent{.type = 3,
-	// 												  .color = {1.0f, 0.8f, 0.6f},
-	// 												  .intensity = 5.0f,
-	// 												  .radius = 0.0f,
-	// 												  .direction = {0.0f, -1.0f, 0.0f},
-	// 												  .range = 0.0f,
-	// 												  .points = {{-2.0f, 5.0f, -2.0f, 0.0f},
-	// 															 {2.0f, 5.0f, -2.0f, 0.0f},
-	// 															 {2.0f, 5.0f, 2.0f, 0.0f},
-	// 															 {-2.0f, 5.0f, 2.0f, 0.0f}},
-	// 												  .twoSided = 0});
-	//
-	// Entity pt1 = reg.Create();
-	// reg.Add(pt1,
-	// 		LightingSystem::LightComponent{.type = 1,
-	// 									   .color = {0.0f, 0.5f, 1.0f},
-	// 									   .intensity = 180.0f,
-	// 									   .radius = 1.5f,
-	// 									   .direction = {0.0f, 0.0f, 0.0f},
-	// 									   .range = 0.0f,
-	// 									   .points = {},
-	// 									   .twoSided = 0},
-	// 		TransformComponent{.position = {-5.0f, 4.0f, 0.0f}});
-	//
-	// Entity pt2 = reg.Create();
-	// reg.Add(pt2,
-	// 		LightingSystem::LightComponent{.type = 1,
-	// 									   .color = {1.0f, 0.0f, 0.5f},
-	// 									   .intensity = 180.0f,
-	// 									   .radius = 1.5f,
-	// 									   .direction = {0.0f, 0.0f, 0.0f},
-	// 									   .range = 0.0f,
-	// 									   .points = {},
-	// 									   .twoSided = 0},
-	// 		TransformComponent{.position = {5.0f, 4.0f, 0.0f}});
-
 	Entity uiSettings = reg.Create();
 	reg.Add(uiSettings, UISettingsComponent{});
 	AssetFactory::CreateFontAtlasTexture(rc);
-
-	// Entity textEnt = reg.Create();
-	// reg.Add(
-	// 	textEnt,
-	// 	TextComponent{.text = "Zahlen Engine - TADC Dorm Showcase",
-	// 				  .x = 25.0f,
-	// 				  .y = 25.0f,
-	// 				  .scale = 2.5f,
-	// 				  .color = {0.9f, 0.1f, 0.1f, 1.0f},
-	// 				  .fontIndex = reg.Get<UISettingsComponent>(uiSettings)->defaultFontAtlasIdx});
 
 	BuildSystemGraphs(engine);
 
@@ -1039,7 +991,7 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, ScriptRunne
 
 	// --- DYNAMIC SHADOW ALLOCATION ---
 	auto& reg = engine.GetRegistry();
-	const auto& cam = engine.GetCamera(); // <-- Already available here!
+	const auto& cam = engine.GetCamera();
 
 	// Find the player entity
 	Entity playerEnt = NullEntity;
@@ -1048,7 +1000,7 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, ScriptRunne
 		break;
 	}
 
-	// If player is valid, find the 4 closest visible point lights [2]
+	// If player is valid, find the 4 closest visible point lights
 	if (playerEnt != NullEntity) {
 		struct LightDistance {
 			Entity entity;
@@ -1246,13 +1198,7 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine,
 				while (std::chrono::duration<double>(std::chrono::high_resolution_clock::now() -
 													 frameStart)
 						   .count() < targetFrameTime) {
-#if defined(__x86_64__) || defined(_M_X64)
-					_mm_pause();
-#elif defined(__aarch64__)
-					__asm__ __volatile__("yield" ::: "memory");
-#else
-					std::this_thread::yield();
-#endif
+					CPURelax();
 				}
 			}
 		}

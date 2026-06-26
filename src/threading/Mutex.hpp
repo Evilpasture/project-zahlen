@@ -5,6 +5,9 @@
 
 #include <cstdint>
 #include <detail/Atomic.hpp>
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#include <immintrin.h>
+#endif
 
 #ifndef NDEBUG
 #define ZHLN_DEBUG 1
@@ -124,11 +127,21 @@ static_assert(kIsDebugMutex || (std::is_trivially_default_constructible_v<Mutex>
  */
 struct MutexGuard {
 	Mutex& _m;
-	inline explicit MutexGuard(Mutex& m) noexcept : _m(m) { _m.lock(); }
-	inline ~MutexGuard() noexcept { _m.unlock(); }
+	explicit MutexGuard(Mutex& m) noexcept : _m(m) { _m.lock(); }
+	~MutexGuard() noexcept { _m.unlock(); }
 
 	MutexGuard(const MutexGuard&) = delete;
 	MutexGuard& operator=(const MutexGuard&) = delete;
 };
+
+inline void CPURelax() noexcept {
+#if defined(__x86_64__) || defined(_M_X64)
+	_mm_pause();
+#elif defined(__aarch64__)
+	__asm__ __volatile__("yield" ::: "memory");
+#else
+	std::this_thread::yield();
+#endif
+}
 
 } // namespace ZHLN

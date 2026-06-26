@@ -1,25 +1,16 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "TaskSystem.hpp"
 
 #include "Thread.hpp"
 #include "engine/Platform.hpp"
+#include "threading/Mutex.hpp"
 
 #include <condition_variable>
 #include <mutex>
 #include <thread>
 #include <vector>
-
-#if defined(__x86_64__) || defined(_M_X64)
-#include <immintrin.h>
-#define RELAX_CPU() _mm_pause()
-#elif defined(__aarch64__)
-#define RELAX_CPU() __asm__ __volatile__("yield" ::: "memory")
-#else
-#define RELAX_CPU()
-#endif
 
 namespace ZHLN::TaskSystem {
 
@@ -39,8 +30,9 @@ struct WorkQueue {
 	Fiber* PopOrWait() {
 		std::unique_lock lock(mtx);
 		cv.wait(lock, [this] { return !fibers.empty() || quit; });
-		if (quit && fibers.empty())
+		if (quit && fibers.empty()) {
 			return nullptr;
+		}
 		Fiber* f = fibers.back();
 		fibers.pop_back();
 		return f;
@@ -48,8 +40,9 @@ struct WorkQueue {
 
 	Fiber* TryPop() {
 		std::lock_guard lock(mtx);
-		if (fibers.empty())
+		if (fibers.empty()) {
 			return nullptr;
+		}
 		Fiber* f = fibers.back();
 		fibers.pop_back();
 		return f;
@@ -82,15 +75,15 @@ static TaskSystemDeinitGuard s_deinitGuard;
 
 // --- The Infinite Loop every Fiber runs ---
 static void FiberMain(void* arg) {
-	FiberData* data = static_cast<FiberData*>(arg);
+	auto* data = static_cast<FiberData*>(arg);
 	while (true) {
 		// 1. Run the assigned task
-		if (data->task.func) {
+		if (data->task.func != nullptr) {
 			data->task.func(data->task.arg);
 		}
 
 		// 2. Decrement counter if provided
-		if (data->counter) {
+		if (data->counter != nullptr) {
 			data->counter->value.fetch_sub(1, std::memory_order_release);
 		}
 
@@ -112,7 +105,7 @@ static void WorkerMain(uint32_t index) {
 
 	while (true) {
 		Fiber* f = s_readyQueue.PopOrWait();
-		if (!f) {
+		if (f == nullptr) {
 			break;
 		}
 		Fiber::Resume(f);
@@ -125,10 +118,12 @@ void Init(uint32_t numThreads, uint32_t numFibers, size_t stackSize) {
 	Fiber::InitMainThread();
 	if (numThreads == 0) {
 		numThreads = std::thread::hardware_concurrency();
-		if (numThreads == 0)
+		if (numThreads == 0) {
 			numThreads = 4;
-		if (numThreads > 1)
+		}
+		if (numThreads > 1) {
 			numThreads -= 1; // Leave 1 core for the main loop
+		}
 	}
 
 	s_workerCount = numThreads + 1;
@@ -161,8 +156,9 @@ void Shutdown() {
 	s_freeQueue.WakeAll();
 
 	for (auto& t : s_threads) {
-		if (t.joinable())
+		if (t.joinable()) {
 			t.join();
+		}
 	}
 	s_threads.clear();
 
@@ -173,21 +169,23 @@ void Shutdown() {
 }
 
 void Dispatch(std::span<const Task> tasks, Counter* counter) {
-	if (tasks.empty())
+	if (tasks.empty()) {
 		return;
+	}
 
-	if (counter) {
+	if (counter != nullptr) {
 		counter->value.fetch_add(tasks.size(), std::memory_order_relaxed);
 	}
 
 	for (const auto& task : tasks) {
 		// Grab a sleeping fiber
 		Fiber* f = s_freeQueue.PopOrWait();
-		if (!f)
+		if (f == nullptr) {
 			return;
+		}
 
 		// Assign the task to its data payload
-		FiberData* data = static_cast<FiberData*>(f->arg);
+		auto* data = static_cast<FiberData*>(f->arg);
 		data->task = task;
 		data->counter = counter;
 
@@ -197,8 +195,9 @@ void Dispatch(std::span<const Task> tasks, Counter* counter) {
 }
 
 void Wait(Counter* counter) {
-	if (!counter)
+	if (counter == nullptr) {
 		return;
+	}
 
 	Fiber* self = Fiber::GetCurrent();
 	uint32_t spinCount = 0;
@@ -208,7 +207,7 @@ void Wait(Counter* counter) {
 
 		if (isMain) {
 			Fiber* f = s_readyQueue.TryPop();
-			if (f) {
+			if (f != nullptr) {
 				Fiber::Resume(f);
 				spinCount = 0;
 			} else {
@@ -216,11 +215,11 @@ void Wait(Counter* counter) {
 				// We spin to keep the P-core "Hot" so the OS doesn't
 				// context switch us for a trackpad interrupt.
 				if (spinCount < 100) {
-					RELAX_CPU();
+					CPURelax();
 				} else if (spinCount < 1000) {
 					// Small backoff but still no OS yield
 					for (int i = 0; i < 10; ++i) {
-						RELAX_CPU();
+						CPURelax();
 					}
 				} else {
 					// Only after 1000 failures do we finally give the OS

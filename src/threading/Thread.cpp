@@ -3,6 +3,8 @@
 
 #include "Thread.hpp"
 
+#include "threading/Mutex.hpp"
+
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -154,13 +156,7 @@ Fiber* Fiber::Create(size_t stackSize, FiberFunc func, void* arg) noexcept {
 void Fiber::Resume(Fiber* target) noexcept {
 	//  Ensure the target OS thread has fully vacated this stack before we jump into it!
 	while (target->isRunning.load(std::memory_order_acquire)) {
-#if defined(__x86_64__) || defined(_M_X64)
-		_mm_pause();
-#elif defined(__aarch64__)
-		__asm__ __volatile__("yield" ::: "memory");
-#else
-		std::this_thread::yield();
-#endif
+		CPURelax();
 	}
 
 	Fiber* self = t_currentFiber;

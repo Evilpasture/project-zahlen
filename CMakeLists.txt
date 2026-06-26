@@ -373,7 +373,6 @@ compile_shaders(zahlen_engine
     "${CMAKE_SOURCE_DIR}/resources/shaders/blit.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/taa.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/ui.hlsl"
-    "${CMAKE_SOURCE_DIR}/resources/shaders/toon.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/fxaa.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/ambient.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/lighting.hlsl"

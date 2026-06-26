@@ -1,12 +1,12 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include <Jolt/Jolt.h>
 #include <Utils.hpp>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <numbers>
 #include <vector>
 
 namespace ZHLN::PBR {
@@ -29,7 +29,7 @@ std::pair<float, float> Hammersley(uint32_t i, uint32_t N) {
 // GGX importance sampling
 JPH::Vec3 ImportanceSampleGGX(float u1, float u2, float roughness) {
 	const float a = roughness * roughness;
-	const float phi = 2.0f * 3.14159265f * u1;
+	const float phi = 2.0f * std::numbers::pi_v<float> * u1;
 
 	// Clamp the division so it never goes negative
 	float cosTheta = std::sqrt(std::max((1.0f - u2) / (1.0f + (a * a - 1.0f) * u2), 0.0f));
