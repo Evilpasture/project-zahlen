@@ -685,6 +685,14 @@ template <size_t ColorCount = 0, bool HasDepth = false> class DynamicPass {
 			 const ZHLN::Color4& clearColor = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f}) noexcept
 		-> DynamicPass<ColorCount + 1, HasDepth>;
 
+	template <typename... TypedImages>
+	constexpr auto AddColorGroup(
+		const std::tuple<TypedImages...>& imageTuple,
+		VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+		VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+		const ZHLN::Color4& clearColor = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f}) noexcept
+		-> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth>;
+
 	template <VkImageLayout Layout>
 	constexpr auto AddDepth(const TypedImage<Layout>& img,
 							VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,

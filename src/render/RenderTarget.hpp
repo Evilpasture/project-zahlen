@@ -84,6 +84,33 @@ template <VkImageLayout TargetLayout, typename... Resources>
 	return std::make_tuple(TransitionSingle<TargetLayout>(cmd, resources)...);
 }
 
+template <typename... Targets> struct RenderTargetBundle {
+	std::tuple<Targets&...> targets;
+
+	constexpr explicit RenderTargetBundle(Targets&... t) noexcept : targets(t...) {}
+
+	// 1. Batch Recreate (Resize)
+	void Recreate(Allocator& alloc, const Context& ctx, VkExtent2D extent) const {
+		std::apply(
+			[&](auto&... t) {
+				((t = std::remove_cvref_t<decltype(t)>::Create(alloc, ctx, extent, {})), ...);
+			},
+			targets);
+	}
+
+	// 2. Batch Transition
+	template <VkImageLayout TargetLayout>
+	[[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd) const noexcept {
+		return std::apply(
+			[&](const auto&... t) { return TransitionBatch<TargetLayout>(cmd, t...); }, targets);
+	}
+};
+
+// CTAD Factory
+template <typename... Ts> [[nodiscard]] constexpr auto TieTargets(Ts&... tgts) noexcept {
+	return RenderTargetBundle<Ts...>(tgts...);
+}
+
 } // namespace ZHLN::Vk
 
 #include "RenderTarget.inl"

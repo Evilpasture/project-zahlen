@@ -746,6 +746,45 @@ constexpr auto DynamicPass<ColorCount, HasDepth>::AddColor(const TypedImage<Layo
 }
 
 template <size_t ColorCount, bool HasDepth>
+template <typename... TypedImages>
+constexpr auto DynamicPass<ColorCount, HasDepth>::AddColorGroup(
+	const std::tuple<TypedImages...>& imageTuple, VkAttachmentLoadOp loadOp,
+	VkAttachmentStoreOp storeOp, const ZHLN::Color4& clearColor) noexcept
+	-> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth> {
+
+	constexpr size_t AddedCount = sizeof...(TypedImages);
+	std::array<VkRenderingAttachmentInfo, ColorCount + AddedCount> nextColors{};
+
+	// 1. Preserve existing attachments
+	for (size_t i = 0; i < ColorCount; ++i) {
+		nextColors[i] = _colors[i];
+	}
+
+	// 2. Unpack tuple into parameter pack and populate remaining slots branchlessly
+	std::apply(
+		[&](const auto&... img) {
+			size_t offset = ColorCount;
+			((nextColors[offset++] =
+				  {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+				   .pNext = nullptr,
+				   .imageView = img.view,
+				   .imageLayout = std::remove_cvref_t<decltype(img)>::layout,
+				   .resolveMode = VK_RESOLVE_MODE_NONE,
+				   .resolveImageView = VK_NULL_HANDLE,
+				   .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+				   .loadOp = loadOp,
+				   .storeOp = storeOp,
+				   .clearValue = {.color = {.float32 = {clearColor.r, clearColor.g, clearColor.b,
+														clearColor.a}}}}),
+			 ...);
+		},
+		imageTuple);
+
+	return DynamicPass<ColorCount + AddedCount, HasDepth>(std::move(*this), std::move(nextColors),
+														  _depth);
+}
+
+template <size_t ColorCount, bool HasDepth>
 template <VkImageLayout Layout>
 constexpr auto DynamicPass<ColorCount, HasDepth>::AddDepth(const TypedImage<Layout>& img,
 														   VkAttachmentLoadOp loadOp,

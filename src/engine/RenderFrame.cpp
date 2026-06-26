@@ -437,65 +437,60 @@ struct DeferredLightingPass {
 		};
 
 		// --- 1. AMBIENT PASS ---
-		AmbientPassParams ambientParams = {.sceneColor = in.sceneColor,
-										   .defaultSampler = ctx.defaultSampler.Get(),
-										   .depth = in.depth,
-										   .normRough = in.normRough,
-										   .pointSampler = ctx.pointSampler.Get(),
-										   .prefilteredView = ctx.iblPayload.prefilteredView.Get(),
-										   .brdfLutView = ctx.iblPayload.brdfLutView.Get(),
-										   .clampSampler = ctx.clampSampler.Get(),
-										   .frameUniformBuffer =
-											   ctx.frameUniformBuffers[fIdx].Handle()};
 
-		auto ambient_ro = ctx.ambientPass.ExecuteWithTransitions(cmd, device, ctx.ambientTarget, pc,
-																 ambientParams);
+		auto ambient_ro = ctx.ambientPass.ExecuteWithTransitions(
+			cmd, device, ctx.ambientTarget, pc,
+			AmbientPassParams{.sceneColor = in.sceneColor,
+							  .defaultSampler = ctx.defaultSampler.Get(),
+							  .depth = in.depth,
+							  .normRough = in.normRough,
+							  .pointSampler = ctx.pointSampler.Get(),
+							  .prefilteredView = ctx.iblPayload.prefilteredView.Get(),
+							  .brdfLutView = ctx.iblPayload.brdfLutView.Get(),
+							  .clampSampler = ctx.clampSampler.Get(),
+							  .frameUniformBuffer = ctx.frameUniformBuffers[fIdx].Handle()});
 
 		// --- 2. LIGHTING PASS ---
 		uint32_t lightVariant = (pc.enableRTR && ctx.rtCtx.Valid()) ? 1 : 0;
 
-		LightingPassParams lightingParams = {
-			.sceneColor = in.sceneColor,
-			.defaultSampler = ctx.defaultSampler.Get(),
-			.depth = in.depth,
-			.normRough = in.normRough,
-			.lightStorageBuffer = ctx.lightStorageBuffers[fIdx].Handle(),
-			.frameUniformBuffer = ctx.frameUniformBuffers[fIdx].Handle(),
-			.shadowMapView = ctx.shadowMap.view.Get(),
-			.shadowSampler = ctx.shadowSampler.Get(),
-			.ltcMatView = ctx.ltcMatView.Get(),
-			.ltcAmpView = ctx.ltcAmpView.Get(),
-			.clampSampler = ctx.clampSampler.Get(),
-			.clusterGridBuffer = ctx.clusterGridBuffers[fIdx].Handle(),
-			.lightIndexListBuffer = ctx.lightIndexListBuffers[fIdx].Handle(),
-			.ambientTarget = ambient_ro,
-			.pointSampler = ctx.pointSampler.Get(),
-			.tlas = ctx.rtCtx.Valid() ? &ctx.tlas.Current() : nullptr,
-			.shadowAtlasCubeView = ctx.shadowAtlasCubeView.Get(),
-			.shadowAtlas2DView = ctx.shadowAtlas2DView.Get()};
-
 		auto light_ro = ctx.lightingPass.ExecuteVariantWithTransitions(
-			cmd, device, ctx.lightingTarget, lightVariant, pc, lightingParams);
+			cmd, device, ctx.lightingTarget, lightVariant, pc,
+			LightingPassParams{.sceneColor = in.sceneColor,
+							   .defaultSampler = ctx.defaultSampler.Get(),
+							   .depth = in.depth,
+							   .normRough = in.normRough,
+							   .lightStorageBuffer = ctx.lightStorageBuffers[fIdx].Handle(),
+							   .frameUniformBuffer = ctx.frameUniformBuffers[fIdx].Handle(),
+							   .shadowMapView = ctx.shadowMap.view.Get(),
+							   .shadowSampler = ctx.shadowSampler.Get(),
+							   .ltcMatView = ctx.ltcMatView.Get(),
+							   .ltcAmpView = ctx.ltcAmpView.Get(),
+							   .clampSampler = ctx.clampSampler.Get(),
+							   .clusterGridBuffer = ctx.clusterGridBuffers[fIdx].Handle(),
+							   .lightIndexListBuffer = ctx.lightIndexListBuffers[fIdx].Handle(),
+							   .ambientTarget = ambient_ro,
+							   .pointSampler = ctx.pointSampler.Get(),
+							   .tlas = ctx.rtCtx.Valid() ? &ctx.tlas.Current() : nullptr,
+							   .shadowAtlasCubeView = ctx.shadowAtlasCubeView.Get(),
+							   .shadowAtlas2DView = ctx.shadowAtlas2DView.Get()});
 
 		// --- 3. REFLECTION PASS ---
 		uint32_t reflVariant =
 			(pc.enableSSR ? 1 : 0) | ((pc.enableRTR && ctx.rtCtx.Valid()) ? 2 : 0);
 
-		ReflectionPassParams reflectionParams = {
-			.sceneColor = in.sceneColor,
-			.defaultSampler = ctx.defaultSampler.Get(),
-			.depth = in.depth,
-			.normRough = in.normRough,
-			.pointSampler = ctx.pointSampler.Get(),
-			.prefilteredView = ctx.iblPayload.prefilteredView.Get(),
-			.tlas = ctx.rtCtx.Valid() ? &ctx.tlas.Current() : nullptr,
-			.frameUniformBuffer = ctx.frameUniformBuffers[fIdx].Handle(),
-			.brdfLutView = ctx.iblPayload.brdfLutView.Get(),
-			.clampSampler = ctx.clampSampler.Get(),
-			.lightingTarget = light_ro};
-
-		return ctx.reflectionPass.ExecuteVariantWithTransitions(cmd, device, ctx.postProcessTarget,
-																reflVariant, pc, reflectionParams);
+		return ctx.reflectionPass.ExecuteVariantWithTransitions(
+			cmd, device, ctx.postProcessTarget, reflVariant, pc,
+			ReflectionPassParams{.sceneColor = in.sceneColor,
+								 .defaultSampler = ctx.defaultSampler.Get(),
+								 .depth = in.depth,
+								 .normRough = in.normRough,
+								 .pointSampler = ctx.pointSampler.Get(),
+								 .prefilteredView = ctx.iblPayload.prefilteredView.Get(),
+								 .tlas = ctx.rtCtx.Valid() ? &ctx.tlas.Current() : nullptr,
+								 .frameUniformBuffer = ctx.frameUniformBuffers[fIdx].Handle(),
+								 .brdfLutView = ctx.iblPayload.brdfLutView.Get(),
+								 .clampSampler = ctx.clampSampler.Get(),
+								 .lightingTarget = light_ro});
 	}
 };
 
@@ -1039,8 +1034,6 @@ RenderResult RenderContext::BeginFrame() noexcept {
 
 			VkImageView rawView = VK_NULL_HANDLE;
 			vkCreateImageView(_impl->ctx.Device(), &viewInfo, nullptr, &rawView);
-
-			// Construct the RAII wrapper to manage this view's lifetime automatically
 			_impl->punctualShadowViews[i] = Vk::ImageView(_impl->ctx.Device(), rawView);
 		}
 
@@ -1073,83 +1066,68 @@ RenderResult RenderContext::BeginFrame() noexcept {
 	if (_impl->needsInitialClear) {
 		auto* cmd = _impl->current_cmd;
 
+		// Tie relevant layout groups dynamically into zero-cost reference bundles
+		auto mainBundle =
+			Vk::TieTargets(_impl->sceneColor, _impl->velocityBuffer, _impl->accumBuffers[0],
+						   _impl->accumBuffers[1], _impl->normalRoughnessBuffer);
+		auto ppBundle =
+			Vk::TieTargets(_impl->postProcessTarget, _impl->ambientTarget, _impl->lightingTarget,
+						   _impl->smaaEdgeTarget, _impl->smaaWeightTarget);
+		auto bloomBundle = Vk::TieTargets(_impl->bloomThresholdTarget, _impl->bloomBlurTarget,
+										  _impl->bloomFinalTarget);
+
 		// --- BATCH TRANSITION 1: Color Attachments ---
-		auto [sColor_att, sVel_att, sAcc0_att, sAcc1_att, sNorm_att, sPost_att, sAmb_att,
-			  sLight_att, sEdge_att, sWeight_att] =
-			Vk::TransitionBatch<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-				cmd, _impl->sceneColor, _impl->velocityBuffer, _impl->accumBuffers[0],
-				_impl->accumBuffers[1], _impl->normalRoughnessBuffer, _impl->postProcessTarget,
-				_impl->ambientTarget, _impl->lightingTarget, _impl->smaaEdgeTarget,
-				_impl->smaaWeightTarget);
+		auto mainAtts = mainBundle.Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd);
+		auto ppAtts = ppBundle.Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd);
+		auto bloomAtts = bloomBundle.Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd);
 
-		auto sShadowMap_att = Vk::Transition(cmd, _impl->shadowMap, Vk::AsDepthAttachment);
-		auto sShadowAtlas_att = Vk::Transition(cmd, _impl->shadowAtlas, Vk::AsDepthAttachment);
-
+		[[maybe_unused]] auto sShadowMap_att =
+			Vk::Transition(cmd, _impl->shadowMap, Vk::AsDepthAttachment);
+		[[maybe_unused]] auto sShadowAtlas_att =
+			Vk::Transition(cmd, _impl->shadowAtlas, Vk::AsDepthAttachment);
 		auto depth_att =
 			Vk::Transition(cmd, _impl->presentation.depthTarget, Vk::AsDepthAttachment);
 
 		// Pass 1: Clear G-Buffer and TAA history
 		Vk::DynamicPass(_impl->presentation.swapchain.Get().extent)
-			.AddColor(sColor_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-					  kClearColorBlack)
-			.AddColor(sVel_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-					  kClearColorVelocity)
-			.AddColor(sAcc0_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-					  kClearColorBlack)
-			.AddColor(sAcc1_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-					  kClearColorBlack)
-			.AddColor(sNorm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-					  kClearColorNormalRoughness)
+			.AddColorGroup(mainAtts, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+						   {.r = 0, .g = 0, .b = 0, .a = 0})
 			.AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
 					  kClearDepthValue)
 			.Execute(cmd, []() {});
 
 		// Pass 2: Clear Post-Process intermediate targets
 		Vk::DynamicPass(_impl->presentation.swapchain.Get().extent)
-			.AddColor(sPost_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-					  kClearColorBlack)
-			.AddColor(sAmb_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-					  kClearColorBlack)
-			.AddColor(sLight_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-					  kClearColorBlack)
-			.AddColor(sEdge_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-					  kClearColorBlack)
-			.AddColor(sWeight_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-					  kClearColorBlack)
+			.AddColorGroup(ppAtts, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+						   kClearColorBlack)
 			.Execute(cmd, []() {});
 
 		// Pass 3: Clear Bloom targets (1/4 resolution)
-		auto [sBloomT_att, sBloomB_att, sBloomF_att] =
-			Vk::TransitionBatch<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-				cmd, _impl->bloomThresholdTarget, _impl->bloomBlurTarget, _impl->bloomFinalTarget);
-
 		Vk::DynamicPass(_impl->bloomThresholdTarget.extent)
-			.AddColor(sBloomT_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-					  kClearColorBlack)
-			.AddColor(sBloomB_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-					  kClearColorBlack)
-			.AddColor(sBloomF_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-					  kClearColorBlack)
+			.AddColorGroup(bloomAtts, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+						   kClearColorBlack)
 			.Execute(cmd, []() {});
 
 		// --- BATCH TRANSITION 2: Read Only ---
-		auto [sColor_ro, sVel_ro, sAcc0_ro, sAcc1_ro] =
-			Vk::TransitionBatch<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, sColor_att, sVel_att,
-																		  sAcc0_att, sAcc1_att);
+		[[maybe_unused]] auto mainRo =
+			mainBundle.Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
+		[[maybe_unused]] auto ppRo =
+			ppBundle.Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
+		[[maybe_unused]] auto bloomRo =
+			bloomBundle.Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
 
-		[[maybe_unused]] auto [sNorm_ro, sDepth_ro, sPost_ro, sAmb_ro, sLight_ro, sEdge_ro,
-							   sWeight_ro, sBloomT_ro, sBloomB_ro, sBloomF_ro] =
-			Vk::TransitionBatch<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-				cmd, sNorm_att, depth_att, sPost_att, sAmb_att, sLight_att, sEdge_att, sWeight_att,
-				sBloomT_att, sBloomB_att, sBloomF_att);
-
-		[[maybe_unused]] auto sShadowMap_ro = Vk::Transition(cmd, sShadowMap_att, Vk::AsReadOnly);
+		[[maybe_unused]] auto sDepth_ro =
+			Vk::Transition(cmd, _impl->presentation.depthTarget, Vk::AsReadOnly);
+		[[maybe_unused]] auto sShadowMap_ro = Vk::Transition(cmd, _impl->shadowMap, Vk::AsReadOnly);
 		[[maybe_unused]] auto sShadowAtlas_ro =
-			Vk::Transition(cmd, sShadowAtlas_att, Vk::AsReadOnly);
+			Vk::Transition(cmd, _impl->shadowAtlas, Vk::AsReadOnly);
 
 		for (int i = 0; i < 2; ++i) {
 			_impl->taaPass.WriteIndex(
-				_impl->ctx.Device(), i, sColor_ro, i == 0 ? sAcc1_ro : sAcc0_ro, sVel_ro,
+				_impl->ctx.Device(), i,
+				std::get<0>(mainRo),								// sceneColor
+				i == 0 ? std::get<3>(mainRo) : std::get<2>(mainRo), // accumNext
+				std::get<1>(mainRo),								// velocity
 				_impl->defaultSampler.Get(), _impl->frameUniformBuffers[i].Handle());
 		}
 
@@ -1279,6 +1257,9 @@ RenderResult RenderContext::EndFrame() noexcept {
 		bool isSkinned = (drawCmd.flags & DrawFlags::Skinned) != DrawFlags::None;
 		bool isExcluded = (drawCmd.flags & DrawFlags::ExcludeFromTLAS) != DrawFlags::None;
 
+		// TODO(Evilpasture): Putting this here just to not forget that there is a weird issue with
+		// the character when skipping animated meshes. Apparently it's impossible to skip them in
+		// screenspace.
 		if (mesh->blasAddress == 0 || isSkinned || isExcluded) {
 			continue;
 		}
@@ -1397,7 +1378,7 @@ RenderResult RenderContext::EndFrame() noexcept {
 
 		_impl->clusterBoundsPass.Dispatch(c, _impl->clusterCullingSets[fIdx], 1, 1, 24);
 
-		vkCmdFillBuffer(c, _impl->globalCounterBuffers[fIdx].Handle(), 0, sizeof(uint32_t), 0);
+		Vk::FillBuffer(c, _impl->globalCounterBuffers[fIdx]);
 
 		Vk::BarrierBuilder()
 			.From(Vk::BarrierStage::Transfer | Vk::BarrierStage::Compute,

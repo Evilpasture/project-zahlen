@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // src/render/Allocator.hpp
 
 #pragma once
@@ -123,5 +122,12 @@ class Image {
 	VkImage _handle = VK_NULL_HANDLE;
 	VmaAllocation _allocation = nullptr;
 };
+
+template <typename T = uint32_t>
+void FillBuffer(VkCommandBuffer cmd, const Buffer& buffer, VkDeviceSize offset = 0, T data = 0) {
+	static_assert(sizeof(T) % 4 == 0, "Type must be 4-byte aligned for vkCmdFillBuffer");
+
+	vkCmdFillBuffer(cmd, buffer.Handle(), offset, sizeof(T), data);
+}
 
 } // namespace ZHLN::Vk
