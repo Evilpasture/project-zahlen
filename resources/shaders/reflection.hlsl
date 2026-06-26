@@ -163,7 +163,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	// Add Diffuse IBL and Multi-Bounce energy compensation to the base lighting
 	litColor += (diffuseIBL * ao) + ((FmsEms * irradiance) * ao);
 
-	if (roughness <= 0.85f && (ENABLE_SSR != 0 || ENABLE_RTR != 0)) {
+	if (roughness <= 0.4f && (ENABLE_SSR != 0 || ENABLE_RTR != 0)) {
 		float confidence = 0.0f;
 		float debugValue = 0.0f;
 		float3 reflectionColor = float3(0.0f, 0.0f, 0.0f);

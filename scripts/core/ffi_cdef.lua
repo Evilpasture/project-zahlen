@@ -66,13 +66,13 @@ if not ok then
         } __attribute__((aligned(128))) ZHLN_ContactEventD;
 
         typedef struct MovementComponent {
+            float orientation[4];
+            float prevOrientation[4];
             float inputX;
             float inputZ;
             float currentYVel;
             float speed;
             float jumpForce;
-            float orientation[4];
-            float prevOrientation[4];
             float landingTimer;
             float jumpDelayTimer;
             bool  jumpRequested;

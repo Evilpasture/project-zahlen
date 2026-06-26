@@ -14,7 +14,8 @@ class Engine;
 class ZHLN_API CullingSystem {
   public:
 	template <bool UsePhysicsTransforms = false>
-	void Update(Engine& engine, JPH::Array<Entity>& outVisible);
+	void Update(Engine& engine, JPH::Array<Entity>& outVisible,
+				JPH::Array<Entity>& outVisibleShadow);
 
 	[[nodiscard]] std::array<JPH::Vec3, 8> GetFrustumCorners() const { return m_frustumCorners; }
 

@@ -40,6 +40,7 @@ struct MeshComponent {
 	Mesh mesh;
 	Material material;
 	float cullRadius = 1.0f;
+	JPH::Vec3 localCenter = JPH::Vec3::sZero();
 	JPH::Mat44 localTransform = JPH::Mat44::sIdentity();
 	JPH::Mat44 prevTransform = JPH::Mat44::sIdentity();
 	JPH::Mat44 worldTransform = JPH::Mat44::sIdentity();
@@ -79,21 +80,26 @@ struct PhysicsStateComponent {
  * @brief Links an ECS Entity to an active movement controller.
  */
 struct MovementComponent {
+	// 16-byte aligned types first
+	JPH::Quat orientation = JPH::Quat::sIdentity();
+	JPH::Quat prevOrientation = JPH::Quat::sIdentity();
+
+	// 4-byte aligned types second
 	float inputX = 0.0f;
 	float inputZ = 0.0f;
 	float currentYVel = 0.0f;
 	float speed = 7.0f;
 	float jumpForce = 12.0f;
-	JPH::Quat orientation = JPH::Quat::sIdentity();
-	JPH::Quat prevOrientation = JPH::Quat::sIdentity();
 	float landingTimer = 0.0f;
 	float jumpDelayTimer = 0.0f;
 
+	// 1-byte aligned types last
 	bool jumpRequested = false;
 	bool isGrounded = true;
 	bool wasGrounded = true;
 	bool isSprinting = false;
 };
+static_assert(sizeof(MovementComponent) == 64 && offsetof(MovementComponent, orientation) == 0);
 
 // NOLINTNEXTLINE(performance-enum-size)
 enum class RagdollState : uint32_t { Inactive = 0, KeyframeMotor = 1, Limp = 2 };

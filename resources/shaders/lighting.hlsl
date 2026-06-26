@@ -148,7 +148,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 				ray.TMax = distToCenter;
 
 				RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES |
-						 RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH>
+						 RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE>
 					q;
 				q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
 				while (q.Proceed()) {
@@ -190,7 +190,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 					ray.TMax = distToCenter;
 
 					RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES |
-							 RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH>
+							 RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE>
 						q;
 					q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
 					while (q.Proceed()) {

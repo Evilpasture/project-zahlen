@@ -441,9 +441,9 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 R, out float confidence,
 	ray.Origin = worldPos + N * 0.05f;
 	ray.Direction = R;
 	ray.TMin = 0.01f;
-	ray.TMax = 1000.0f;
+	ray.TMax = 50.0f;
 
-	RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> q;
+	RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_FORCE_OPAQUE> q;
 	q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
 	while (q.Proceed()) {
 	}

@@ -89,6 +89,7 @@ struct DrawParams {
 	JPH::Mat44 transform = JPH::Mat44::sIdentity();
 	JPH::Mat44 prevTransform = JPH::Mat44::sIdentity();
 	float cullRadius = 1.0f;
+	std::array<float, 3> localCenter = {0.0f, 0.0f, 0.0f};
 	uint32_t jointOffset = 0;
 	uint32_t morphOffset = 0;
 	uint32_t activeMorphCount = 0;

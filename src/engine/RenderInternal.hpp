@@ -346,6 +346,7 @@ struct DrawCommand {
 	uint32_t pbrIndex;
 	uint32_t emissiveIndex;
 	float cullRadius;
+	std::array<float, 3> localCenter;
 	float metallicFactor;
 	float roughnessFactor;
 	float alphaCutoff;

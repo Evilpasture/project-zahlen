@@ -63,6 +63,7 @@ zh:on("engine.start", function()
             root_trans.position[2] = 0.0
         end
         zh.ecs:add(pomni_root, "HierarchyComponent", { parent = player_ent })
+        zh.ecs:add(player_ent, "combat", { hp = 100, max_hp = 100 })
 
         zh.physics:setup_ragdoll(player_ent, pomni_parts)
         zh.log("Scene: Skeletal Ragdoll successfully generated and bound to player controller.")

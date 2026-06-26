@@ -26,6 +26,9 @@ struct InstanceData {
 	uint morphOffset;
 	uint activeMorphCount;
 
+	float3 localCenter;
+	uint _paddingCenter;
+
 	float4 morphWeights;
 	float4 baseColorFactor;
 	float4 emissiveFactor;

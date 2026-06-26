@@ -76,7 +76,8 @@ void VerifyCullingResults(const ECS::Registry& reg, const JPH::Array<Entity>& vi
 namespace ZHLN {
 
 template <bool UsePhysicsTransforms>
-void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible) {
+void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible,
+						   JPH::Array<Entity>& outVisibleShadow) {
 	ZHLN_PROFILE_SCOPE("Culling (ECS O(N))");
 	auto& cam = engine.GetCamera();
 	auto& reg = engine.GetRegistry();
@@ -126,42 +127,33 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible) {
 
 	if (!CullingStats::EnableCulling) {
 		outVisible.assign(entities.begin(), entities.end());
+		outVisibleShadow.assign(entities.begin(), entities.end());
 		return;
 	}
 
 	outVisible.clear();
+	outVisibleShadow.clear();
 	auto meshes = reg.GetRawArray<MeshComponent>();
 
 	for (size_t i = 0; i < entities.size(); ++i) {
 		Entity e = entities[i];
 
-		JPH::Vec3 pos{};
+		JPH::Vec3 pos = meshes[i].worldTransform * meshes[i].localCenter;
 
-		// Resolve position on the fly if we are bypassing the transform hierarchy system (e.g., in
-		// the Editor)
-		if constexpr (UsePhysicsTransforms) {
-			if (auto* state = reg.Get<PhysicsStateComponent>(e)) {
-				// Interpolate using Jolt's physics step alpha to avoid visual stutter
-				float alpha = engine.GetCurrentAlpha();
-				pos = state->prevPosition + alpha * (state->currPosition - state->prevPosition);
-			} else if (auto* trans = reg.Get<TransformComponent>(e)) {
-				pos = trans->position;
-			} else {
-				pos = meshes[i].worldTransform.GetTranslation();
-			}
-		} else {
-			// Standard game pathway: rely on the pre-computed hierarchy transform
-			pos = meshes[i].worldTransform.GetTranslation();
+		// Extract max scale from the 3x3 rotational component of the world matrix
+		float scaleX = meshes[i].worldTransform.GetColumn3(0).Length();
+		float scaleY = meshes[i].worldTransform.GetColumn3(1).Length();
+		float scaleZ = meshes[i].worldTransform.GetColumn3(2).Length();
+		float currentMaxScale = std::max({scaleX, scaleY, scaleZ});
+
+		// 1. Cull against Main Camera Frustum
+		if (cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius * currentMaxScale)) {
+			outVisible.push_back(e);
 		}
 
-		// --- DUAL FRUSTUM VISIBILITY CHECK ---
-		// Keep the entity alive if it is visible to the main player camera
-		// OR the shadow camera (so out-of-view objects like the roof still cast shadows!)
-		bool visibleInMain = cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius);
-		bool visibleInShadow = cam.shadowFrustum.IsSphereVisible(pos, meshes[i].cullRadius);
-
-		if (visibleInMain || visibleInShadow) {
-			outVisible.push_back(e);
+		// 2. Cull against Shadow Camera Frustum
+		if (cam.shadowFrustum.IsSphereVisible(pos, meshes[i].cullRadius)) {
+			outVisibleShadow.push_back(e);
 		}
 	}
 
@@ -170,6 +162,6 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible) {
 	}
 }
 
-template void CullingSystem::Update<true>(Engine&, JPH::Array<Entity>&);
-template void CullingSystem::Update<false>(Engine&, JPH::Array<Entity>&);
+template void CullingSystem::Update<true>(Engine&, JPH::Array<Entity>&, JPH::Array<Entity>&);
+template void CullingSystem::Update<false>(Engine&, JPH::Array<Entity>&, JPH::Array<Entity>&);
 } // namespace ZHLN

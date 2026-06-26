@@ -60,6 +60,7 @@ struct EditorState {
 
 EditorState g_EditorState;
 JPH::Array<Entity> s_VisibleEntities;
+JPH::Array<Entity> s_VisibleShadowEntities;
 AAState s_AAState;
 
 // ============================================================================
@@ -443,7 +444,7 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 
 			cam.frustum.Update(vp);
 			static auto* cullingSystem = new CullingSystem();
-			cullingSystem->Update<true>(*engine, s_VisibleEntities);
+			cullingSystem->Update<true>(*engine, s_VisibleEntities, s_VisibleShadowEntities);
 
 			// 1. Retrieve the sun direction and current camera position
 			JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f};
@@ -590,15 +591,18 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 							currentTransform = mesh->localTransform;
 						}
 
-						Renderer::Draw(rc, mesh->material, mesh->mesh,
-									   {.transform = currentTransform,
-										.prevTransform = mesh->prevTransform,
-										.cullRadius = mesh->cullRadius,
-										.jointOffset = mesh->jointOffset,
-										.morphOffset = mesh->morphOffset,
-										.activeMorphCount = mesh->activeMorphCount,
-										.morphWeights = mesh->morphWeights.data(),
-										.flags = mesh->flags});
+						Renderer::Draw(
+							rc, mesh->material, mesh->mesh,
+							{.transform = currentTransform,
+							 .prevTransform = mesh->prevTransform,
+							 .cullRadius = mesh->cullRadius,
+							 .localCenter = {mesh->localCenter.GetX(), mesh->localCenter.GetY(),
+											 mesh->localCenter.GetZ()},
+							 .jointOffset = mesh->jointOffset,
+							 .morphOffset = mesh->morphOffset,
+							 .activeMorphCount = mesh->activeMorphCount,
+							 .morphWeights = mesh->morphWeights.data(),
+							 .flags = mesh->flags});
 					}
 				}
 			}

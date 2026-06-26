@@ -65,6 +65,8 @@ struct alignas(16) InstanceData {
 	uint32_t jointOffset;
 	uint32_t morphOffset;
 	uint32_t activeMorphCount;
+	alignas(16) std::array<float, 3> localCenter;
+	uint32_t _paddingCenter;
 	alignas(16) std::array<float, 4> morphWeights;
 	alignas(16) std::array<float, 4> baseColorFactor;
 	alignas(16) std::array<float, 4> emissiveFactor;
@@ -92,7 +94,7 @@ struct ObjectConstants {
 	uint32_t isShadowPass;
 };
 static_assert(sizeof(ObjectConstants) == 8, "ObjectConstants must match HLSL alignment.");
-static_assert(sizeof(InstanceData) == 256, "InstanceData must match HLSL alignment.");
+static_assert(sizeof(InstanceData) == 272, "InstanceData must match HLSL alignment.");
 // --- Opaque Resource Handles ---
 // These abstract away Vulkan objects completely.
 // NOLINTBEGIN(performance-enum-size)
@@ -253,6 +255,8 @@ enum class DrawFlags : uint32_t {
 	None = 0,
 	ExcludeFromTLAS = 1 << 0, // Generic raytracing exclusion
 	Skinned = 1 << 1,		  // Tells the renderer that this draw is skin-weighted
+	VisibleInMain = 1 << 2,
+	VisibleInShadow = 1 << 3,
 };
 } // namespace ZHLN
 

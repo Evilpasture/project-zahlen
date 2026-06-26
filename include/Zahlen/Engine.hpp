@@ -68,6 +68,7 @@ class ZHLN_API Engine {
 	ECS::EntityCommandBuffer& GetMainECB();
 	CullingSystem& GetCullingSystem();
 	JPH::Array<Entity>& GetVisibleEntities();
+	JPH::Array<Entity>& GetVisibleShadowEntities();
 	float& GetCurrentAlpha();
 
 	[[nodiscard]] void* GetGameState() const;

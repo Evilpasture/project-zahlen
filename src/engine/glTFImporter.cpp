@@ -368,13 +368,26 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
 		}
 	}
 
+	// Calculate the true geometric center of the primitive
+	JPH::Vec3 localCenter((job.localMax[0] + job.localMin[0]) * 0.5f,
+						  (job.localMax[1] + job.localMin[1]) * 0.5f,
+						  (job.localMax[2] + job.localMin[2]) * 0.5f);
+
+	// Compute the bounding radius as the distance from the local center to the furthest vertex
 	float maxD2 = 0.0f;
 	for (const auto& pos : job.positions) {
-		float d2 = pos.position[0] * pos.position[0] + pos.position[1] * pos.position[1] +
-				   pos.position[2] * pos.position[2];
+		float dx = pos.position[0] - localCenter.GetX();
+		float dy = pos.position[1] - localCenter.GetY();
+		float dz = pos.position[2] - localCenter.GetZ();
+		float d2 = dx * dx + dy * dy + dz * dz;
 		maxD2 = std::max(d2, maxD2);
 	}
-	job.boundingRadius = std::sqrt(maxD2) * 1.2f + 1.0f;
+	job.boundingRadius = std::sqrt(maxD2) * 1.15f + 0.5f;
+
+	// Massively inflate bounds for skinned meshes to account for animation travel
+	if (jointsAcc != nullptr && weightsAcc != nullptr) {
+		job.boundingRadius *= 3.0f; // Give animations room to breathe
+	}
 
 	if (prim.targets_count > 0) {
 		job.activeMorphCount = std::min((uint32_t)prim.targets_count, 4u);
@@ -422,9 +435,6 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
 	float extentsX = (job.localMax[0] - job.localMin[0]) * 0.5f;
 	float extentsY = (job.localMax[1] - job.localMin[1]) * 0.5f;
 	float extentsZ = (job.localMax[2] - job.localMin[2]) * 0.5f;
-	JPH::Vec3 localCenter((job.localMax[0] + job.localMin[0]) * 0.5f,
-						  (job.localMax[1] + job.localMin[1]) * 0.5f,
-						  (job.localMax[2] + job.localMin[2]) * 0.5f);
 
 	JPH::ShapeRefC baseBox = new JPH::BoxShape(JPH::Vec3(extentsX, extentsY, extentsZ));
 	job.boxCollider = new JPH::RotatedTranslatedShape(localCenter, JPH::Quat::sIdentity(), baseBox);
@@ -942,6 +952,9 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 					   .mesh = part.mesh,
 					   .material = activeMat,
 					   .cullRadius = part.boundingRadius * scaleMult * prep.maxScale,
+					   .localCenter = JPH::Vec3((part.localMax[0] + part.localMin[0]) * 0.5f,
+												(part.localMax[1] + part.localMin[1]) * 0.5f,
+												(part.localMax[2] + part.localMin[2]) * 0.5f),
 					   .localTransform = JPH::Mat44::sIdentity(),
 					   .prevTransform = JPH::Mat44::sIdentity(),
 					   .worldTransform = JPH::Mat44::sIdentity(),
@@ -983,6 +996,10 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 							part.localTransform.GetColumn3(1).Length(),
 							part.localTransform.GetColumn3(2).Length());
 
+		// 1. Calculate the maximum scale factor of this specific node
+		float nodeMaxScale = std::max(
+			{std::abs(nodeScale.GetX()), std::abs(nodeScale.GetY()), std::abs(nodeScale.GetZ())});
+
 		JPH::Vec3 nc0 = nodeScale.GetX() > 1e-6f
 							? part.localTransform.GetColumn3(0) / nodeScale.GetX()
 							: JPH::Vec3::sAxisX();
@@ -999,22 +1016,29 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 		reg.Add(e, TransformComponent{.position = nodePos,
 									  .rotation = nRotMat.GetQuaternion().Normalized(),
 									  .scale = nodeScale});
-		reg.Add(e, MeshComponent{
-					   .mesh = part.mesh,
-					   .material = activeMat,
-					   .cullRadius = part.boundingRadius * scaleMult,
-					   .localTransform = JPH::Mat44::sIdentity(),
-					   .prevTransform = JPH::Mat44::sIdentity(),
-					   .worldTransform = JPH::Mat44::sIdentity(),
-					   .jointOffset = part.jointOffset,
-					   .isSkinned = part.isSkinned && params.isAnimated,
-					   .skinnedVertexBuffer = skinnedVbo,
-					   .morphOffset = part.morphOffset,
-					   .activeMorphCount = part.activeMorphCount,
-					   .morphWeights = {part.defaultMorphWeights[0], part.defaultMorphWeights[1],
-										part.defaultMorphWeights[2], part.defaultMorphWeights[3]},
-					   .gltfNode = params.isAnimated ? part.gltfNode : nullptr,
-					   .gltfSkin = params.isAnimated ? part.gltfSkin : nullptr});
+		reg.Add(e,
+				MeshComponent{
+					.mesh = part.mesh,
+					.material = activeMat,
+
+					// 2. FIXED: Multiply by nodeMaxScale so the culling sphere grows with the mesh
+					.cullRadius = part.boundingRadius * scaleMult * nodeMaxScale,
+
+					.localCenter = JPH::Vec3((part.localMax[0] + part.localMin[0]) * 0.5f,
+											 (part.localMax[1] + part.localMin[1]) * 0.5f,
+											 (part.localMax[2] + part.localMin[2]) * 0.5f),
+					.localTransform = JPH::Mat44::sIdentity(),
+					.prevTransform = JPH::Mat44::sIdentity(),
+					.worldTransform = JPH::Mat44::sIdentity(),
+					.jointOffset = part.jointOffset,
+					.isSkinned = part.isSkinned && params.isAnimated,
+					.skinnedVertexBuffer = skinnedVbo,
+					.morphOffset = part.morphOffset,
+					.activeMorphCount = part.activeMorphCount,
+					.morphWeights = {part.defaultMorphWeights[0], part.defaultMorphWeights[1],
+									 part.defaultMorphWeights[2], part.defaultMorphWeights[3]},
+					.gltfNode = params.isAnimated ? part.gltfNode : nullptr,
+					.gltfSkin = params.isAnimated ? part.gltfSkin : nullptr});
 		reg.Add(e, NameComponent{.name = part.name});
 		reg.Add(e, HierarchyComponent{.parent = rootEntity});
 	}

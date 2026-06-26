@@ -178,7 +178,8 @@ void Sys_Camera(Engine& engine, float dt) {
 }
 
 void Sys_Culling(Engine& engine, float /*dt*/) {
-	engine.GetCullingSystem().Update<false>(engine, engine.GetVisibleEntities());
+	engine.GetCullingSystem().Update<false>(engine, engine.GetVisibleEntities(),
+											engine.GetVisibleShadowEntities());
 }
 
 void Sys_Lighting(Engine& engine, float dt) {
@@ -672,32 +673,55 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 	Renderer::SetFrameData(rc, uniforms, shadowProjView);
 	Renderer::SetMatrices(rc, vp, unjitteredVp);
 
-	if (physicsDrawMode == 0) { // Only draw standard world when debug is Off
-		for (Entity e : visibleEntities) {
-			auto* mesh = reg.Get<MeshComponent>(e);
-			if (mesh == nullptr) {
-				continue;
-			}
+	const auto& mainVisible = engine.GetVisibleEntities();
+	const auto& shadowVisible = engine.GetVisibleShadowEntities();
 
-			float roughness = -1.0f;
-			float metallic = -1.0f;
-			if (auto* pbr = reg.Get<PBRComponent>(e)) {
-				roughness = pbr->roughness;
-				metallic = pbr->metallic;
-			}
+	auto IsInList = [](const JPH::Array<Entity>& list, Entity e) -> bool {
+		return std::ranges::find(list, e) != list.end();
+	};
 
-			Renderer::Draw(rc, mesh->material, mesh->mesh,
-						   {.transform = mesh->worldTransform,
-							.prevTransform = mesh->prevTransform,
-							.cullRadius = mesh->cullRadius,
-							.jointOffset = mesh->jointOffset,
-							.morphOffset = mesh->morphOffset,
-							.activeMorphCount = mesh->activeMorphCount,
-							.morphWeights = mesh->morphWeights.data(),
-							.flags = mesh->flags,
-							.skinnedVertexBuffer = mesh->skinnedVertexBuffer,
-							.roughness = roughness,
-							.metallic = metallic});
+	if (physicsDrawMode == 0) {
+		for (Entity e : reg.GetEntitiesWith<MeshComponent>()) {
+			bool inMain = IsInList(mainVisible, e);
+			bool inShadow = IsInList(shadowVisible, e);
+
+			if (inMain || inShadow) {
+				auto* mesh = reg.Get<MeshComponent>(e);
+				if (mesh == nullptr) {
+					continue;
+				}
+
+				// Pack visibility states directly into the bitmask
+				DrawFlags drawFlags = mesh->flags;
+				if (inMain) {
+					drawFlags |= DrawFlags::VisibleInMain;
+				}
+				if (inShadow) {
+					drawFlags |= DrawFlags::VisibleInShadow;
+				}
+
+				float roughness = -1.0f;
+				float metallic = -1.0f;
+				if (auto* pbr = reg.Get<PBRComponent>(e)) {
+					roughness = pbr->roughness;
+					metallic = pbr->metallic;
+				}
+
+				Renderer::Draw(rc, mesh->material, mesh->mesh,
+							   {.transform = mesh->worldTransform,
+								.prevTransform = mesh->prevTransform,
+								.cullRadius = mesh->cullRadius,
+								.localCenter = {mesh->localCenter.GetX(), mesh->localCenter.GetY(),
+												mesh->localCenter.GetZ()},
+								.jointOffset = mesh->jointOffset,
+								.morphOffset = mesh->morphOffset,
+								.activeMorphCount = mesh->activeMorphCount,
+								.morphWeights = mesh->morphWeights.data(),
+								.flags = drawFlags,
+								.skinnedVertexBuffer = mesh->skinnedVertexBuffer,
+								.roughness = roughness,
+								.metallic = metallic});
+			}
 		}
 	}
 

@@ -189,6 +189,16 @@ struct CpuCullingPolicy {
 					std::span<WorkerCmdContext>(ctx.workerCmds.data(), ctx.workerCmds.size()),
 					[&](VkCommandBuffer sec_cmd, uint32_t i) {
 						const auto& drawCmd = ctx.drawQueue[i];
+						// Bitwise check: Only draw if marked for main pass (or if no visibility
+						// flags are set)
+						bool isVisible =
+							(drawCmd.flags & DrawFlags::VisibleInMain) != DrawFlags::None ||
+							(drawCmd.flags & (DrawFlags::VisibleInMain |
+											  DrawFlags::VisibleInShadow)) == DrawFlags::None;
+						if (!isVisible) {
+							return;
+						}
+
 						if (!drawCmd.material->pipeline.Valid() || drawCmd.alphaMode == 2) {
 							return;
 						}
@@ -250,6 +260,15 @@ struct ShadowPass {
 				.Execute(cmd, [&]() {
 					for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
 						const auto& draw = ctx.drawQueue[i];
+						// Bitwise check: Only draw if marked for shadows (or if no visibility flags
+						// are set)
+						bool isVisible =
+							(draw.flags & DrawFlags::VisibleInShadow) != DrawFlags::None ||
+							(draw.flags & (DrawFlags::VisibleInMain |
+										   DrawFlags::VisibleInShadow)) == DrawFlags::None;
+						if (!isVisible) {
+							continue;
+						}
 						if (draw.alphaMode == 2) {
 							continue;
 						}
@@ -1246,6 +1265,8 @@ RenderResult RenderContext::EndFrame() noexcept {
 				.jointOffset = cmdData.jointOffset,
 				.morphOffset = cmdData.morphOffset,
 				.activeMorphCount = activeMorphCount,
+				.localCenter = cmdData.localCenter,
+				._paddingCenter = {},
 				.morphWeights = cmdData.morphWeights,
 				.baseColorFactor = cmdData.baseColorFactor,
 				.emissiveFactor = cmdData.emissiveFactor,
@@ -1547,6 +1568,7 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 		.pbrIndex = material.pbrIndex,
 		.emissiveIndex = material.emissiveIndex,
 		.cullRadius = params.cullRadius,
+		.localCenter = params.localCenter,
 		.metallicFactor = params.metallic >= 0.0f ? params.metallic : material.metallicFactor,
 		.roughnessFactor = params.roughness >= 0.0f ? params.roughness : material.roughnessFactor,
 		.alphaCutoff = material.alphaCutoff,

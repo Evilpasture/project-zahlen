@@ -80,6 +80,7 @@ struct EngineImpl {
 	std::unique_ptr<ECS::EntityCommandBuffer> mainECB;
 	std::unique_ptr<CullingSystem> cullingSystem;
 	JPH::Array<Entity> visibleEntities;
+	JPH::Array<Entity> visibleShadowEntities;
 	float currentAlpha = 0.0f;
 
 	void* gameState = nullptr;
@@ -316,6 +317,9 @@ CullingSystem& Engine::GetCullingSystem() {
 }
 JPH::Array<Entity>& Engine::GetVisibleEntities() {
 	return _impl->visibleEntities;
+}
+JPH::Array<Entity>& Engine::GetVisibleShadowEntities() {
+	return _impl->visibleShadowEntities;
 }
 float& Engine::GetCurrentAlpha() {
 	return _impl->currentAlpha;

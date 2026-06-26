@@ -67,7 +67,17 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 	// ========================================================================
 	if (reg.Get<FreeCamTagComponent>(camEnt) != nullptr) {
 		const auto& input = engine.GetInput();
-		const float speed = input.IsKeyDown(KeyCode::LShift) ? 35.0f : 12.0f;
+
+		// 1. Resolve dynamic fly speed from player's MovementComponent
+		float baseSpeed = 12.0f;
+		if (reg.IsAlive(camComp->target)) {
+			if (auto* targetMove = reg.Get<MovementComponent>(camComp->target)) {
+				baseSpeed = targetMove->speed;
+			}
+		}
+
+		// 2. Scale fly speed dynamically (Shift maps to 2x speed)
+		const float speed = input.IsKeyDown(KeyCode::LShift) ? (baseSpeed * 2.0f) : baseSpeed;
 		const float sensitivity = 0.15f;
 
 		// Mouse look (Hold Right-Click to look around)
