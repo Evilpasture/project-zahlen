@@ -14,8 +14,40 @@
 #include <print>
 #include <unordered_map>
 #include <vector>
-
+namespace ZHLN {
 namespace GLB {
+
+namespace {
+
+// Safe scalar helper to expand half-precision floats back to standard 32-bit floats
+inline float HalfToFloat(uint16_t h) noexcept {
+	uint32_t sign = (h >> 15) & 0x00000001;
+	uint32_t exponent = (h >> 10) & 0x0000001f;
+	uint32_t mantissa = h & 0x000003ff;
+
+	if (exponent == 0) {
+		if (mantissa == 0) {
+			return sign ? -0.0f : 0.0f;
+		}
+		return (sign ? -1.0f : 1.0f) * std::ldexp(static_cast<float>(mantissa), -24);
+	} else if (exponent == 31) {
+		return sign ? -INFINITY : INFINITY;
+	}
+
+	return (sign ? -1.0f : 1.0f) *
+		   std::ldexp(static_cast<float>(mantissa | 0x0400), static_cast<int>(exponent) - 15 - 10);
+}
+
+// Unpacks 10-bit per-axis packed normal/tangent formats back into standard floats
+inline std::array<float, 4> UnpackNormal(uint32_t packed) noexcept {
+	float x = (float(packed & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
+	float y = (float((packed >> 10) & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
+	float z = (float((packed >> 20) & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
+	float w = (packed >> 30) > 0 ? 1.0f : -1.0f;
+	return {x, y, z, w};
+}
+
+} // namespace
 
 bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolder,
 			 const std::string& outputPath) {
@@ -128,7 +160,6 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
       }})",
 										 mat.id, pbrStr);
 
-		// If the material has a semi-transparent alpha channel, enable alpha blending
 		if (mat.baseColor[3] < 0.999f) {
 			matStr += R"(,
       "alphaMode": "BLEND")";
@@ -196,33 +227,113 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 	for (const auto& mesh : manifest.meshes) {
 		std::string binPath = levelFolder + "/" + mesh.binFile;
 		CompiledMesh compiled = CompileRawMesh(mesh, binPath);
-		if (compiled.glbVertices.empty()) {
+		if (compiled.positions.empty()) {
 			continue;
 		}
 
 		meshIdToGlbIndex[mesh.id] = static_cast<int>(meshesJson.size());
 
-		auto vboOffset = static_cast<uint32_t>(binBuffer.size());
-		size_t vboBytes = compiled.glbVertices.size() * sizeof(float);
-		if (vboBytes > 0) {
-			binBuffer.insert(binBuffer.end(),
-							 reinterpret_cast<uint8_t*>(compiled.glbVertices.data()),
-							 reinterpret_cast<uint8_t*>(compiled.glbVertices.data()) + vboBytes);
-		}
-		while (binBuffer.size() % 4 != 0) {
+		auto vertexCount = static_cast<uint32_t>(compiled.positions.size());
+
+		// 1. Pack Positions (directly from compiled.positions)
+		auto posOffset = static_cast<uint32_t>(binBuffer.size());
+		size_t posBytes = compiled.positions.size() * sizeof(VertexPosition);
+		binBuffer.insert(binBuffer.end(),
+						 reinterpret_cast<const uint8_t*>(compiled.positions.data()),
+						 reinterpret_cast<const uint8_t*>(compiled.positions.data()) + posBytes);
+		while (binBuffer.size() % 4 != 0)
 			binBuffer.push_back(0);
-		}
 
 		bufferViews.push_back(std::format(R"(    {{
       "buffer": 0,
       "byteOffset": {},
       "byteLength": {},
-      "byteStride": 64,
       "target": 34962
     }})",
-										  vboOffset, vboBytes));
-		uint32_t vboBViewIdx = bViewIndex++;
+										  posOffset, posBytes));
+		uint32_t posBViewIdx = bViewIndex++;
 
+		// 2. Unpack and Pack Normals (FLOAT3)
+		auto normOffset = static_cast<uint32_t>(binBuffer.size());
+		for (const auto& attr : compiled.attributes) {
+			auto n = UnpackNormal(attr.normal.data);
+			float nFlt[3] = {n[0], n[1], n[2]};
+			binBuffer.insert(binBuffer.end(), reinterpret_cast<const uint8_t*>(nFlt),
+							 reinterpret_cast<const uint8_t*>(nFlt) + 12);
+		}
+		while (binBuffer.size() % 4 != 0)
+			binBuffer.push_back(0);
+
+		bufferViews.push_back(std::format(R"(    {{
+      "buffer": 0,
+      "byteOffset": {},
+      "byteLength": {},
+      "target": 34962
+    }})",
+										  normOffset, vertexCount * 12));
+		uint32_t normBViewIdx = bViewIndex++;
+
+		// 3. Unpack and Pack Tangents (FLOAT4)
+		auto tangOffset = static_cast<uint32_t>(binBuffer.size());
+		for (const auto& attr : compiled.attributes) {
+			auto t = UnpackNormal(attr.tangent.data);
+			float tFlt[4] = {t[0], t[1], t[2], t[3]};
+			binBuffer.insert(binBuffer.end(), reinterpret_cast<const uint8_t*>(tFlt),
+							 reinterpret_cast<const uint8_t*>(tFlt) + 16);
+		}
+		while (binBuffer.size() % 4 != 0)
+			binBuffer.push_back(0);
+
+		bufferViews.push_back(std::format(R"(    {{
+      "buffer": 0,
+      "byteOffset": {},
+      "byteLength": {},
+      "target": 34962
+    }})",
+										  tangOffset, vertexCount * 16));
+		uint32_t tangBViewIdx = bViewIndex++;
+
+		// 4. Unpack and Pack UVs (FLOAT2)
+		auto uvOffset = static_cast<uint32_t>(binBuffer.size());
+		for (const auto& attr : compiled.attributes) {
+			float u = HalfToFloat(attr.uv.data & 0xFFFF);
+			float v = HalfToFloat(attr.uv.data >> 16);
+			float uvFlt[2] = {u, v};
+			binBuffer.insert(binBuffer.end(), reinterpret_cast<const uint8_t*>(uvFlt),
+							 reinterpret_cast<const uint8_t*>(uvFlt) + 8);
+		}
+		while (binBuffer.size() % 4 != 0)
+			binBuffer.push_back(0);
+
+		bufferViews.push_back(std::format(R"(    {{
+      "buffer": 0,
+      "byteOffset": {},
+      "byteLength": {},
+      "target": 34962
+    }})",
+										  uvOffset, vertexCount * 8));
+		uint32_t uvBViewIdx = bViewIndex++;
+
+		// 5. Pack Colors (directly as UNORM8)
+		auto colorOffset = static_cast<uint32_t>(binBuffer.size());
+		for (const auto& attr : compiled.attributes) {
+			uint32_t col = attr.color.data;
+			binBuffer.insert(binBuffer.end(), reinterpret_cast<const uint8_t*>(&col),
+							 reinterpret_cast<const uint8_t*>(&col) + 4);
+		}
+		while (binBuffer.size() % 4 != 0)
+			binBuffer.push_back(0);
+
+		bufferViews.push_back(std::format(R"(    {{
+      "buffer": 0,
+      "byteOffset": {},
+      "byteLength": {},
+      "target": 34962
+    }})",
+										  colorOffset, vertexCount * 4));
+		uint32_t colorBViewIdx = bViewIndex++;
+
+		// 6. Indices (IBO)
 		auto iboOffset = static_cast<uint32_t>(binBuffer.size());
 		size_t iboBytes = compiled.indices.size() * sizeof(uint32_t);
 		if (iboBytes > 0) {
@@ -242,7 +353,6 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 										  iboOffset, iboBytes));
 		uint32_t iboBViewIdx = bViewIndex++;
 
-		auto vertexCount = static_cast<uint32_t>(compiled.glbVertices.size() / 16);
 		uint32_t posAcc = accIndex++;
 		uint32_t normAcc = accIndex++;
 		uint32_t tangAcc = accIndex++;
@@ -251,34 +361,36 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 
 		accessors.push_back(std::format(
 			R"(    {{"bufferView": {}, "componentType": 5126, "count": {}, "type": "VEC3", "min": [{}, {}, {}], "max": [{}, {}, {}]}})",
-			vboBViewIdx, vertexCount, compiled.minB[0], compiled.minB[1], compiled.minB[2],
+			posBViewIdx, vertexCount, compiled.minB[0], compiled.minB[1], compiled.minB[2],
 			compiled.maxB[0], compiled.maxB[1], compiled.maxB[2]));
 		accessors.push_back(std::format(
-			R"(    {{"bufferView": {}, "byteOffset": 12, "componentType": 5126, "count": {}, "type": "VEC3"}})",
-			vboBViewIdx, vertexCount));
+			R"(    {{"bufferView": {}, "componentType": 5126, "count": {}, "type": "VEC3"}})",
+			normBViewIdx, vertexCount));
 		accessors.push_back(std::format(
-			R"(    {{"bufferView": {}, "byteOffset": 24, "componentType": 5126, "count": {}, "type": "VEC4"}})",
-			vboBViewIdx, vertexCount));
+			R"(    {{"bufferView": {}, "componentType": 5126, "count": {}, "type": "VEC4"}})",
+			tangBViewIdx, vertexCount));
 		accessors.push_back(std::format(
-			R"(    {{"bufferView": {}, "byteOffset": 40, "componentType": 5126, "count": {}, "type": "VEC2"}})",
-			vboBViewIdx, vertexCount));
+			R"(    {{"bufferView": {}, "componentType": 5126, "count": {}, "type": "VEC2"}})",
+			uvBViewIdx, vertexCount));
+
+		// Use 5121 (UNSIGNED_BYTE) normalized=true for vertex colors
 		accessors.push_back(std::format(
-			R"(    {{"bufferView": {}, "byteOffset": 48, "componentType": 5126, "count": {}, "type": "VEC4"}})",
-			vboBViewIdx, vertexCount));
+			R"(    {{"bufferView": {}, "componentType": 5121, "count": {}, "type": "VEC4", "normalized": true}})",
+			colorBViewIdx, vertexCount));
 
 		uint32_t jointsAcc = 0;
 		uint32_t weightsAcc = 0;
 
 		if (compiled.isSkinned) {
+			// joints: uint16_t[4] -> 5123 (UNSIGNED_SHORT)
 			while (binBuffer.size() % 4 != 0) {
 				binBuffer.push_back(0);
 			}
 			auto jboOffset = static_cast<uint32_t>(binBuffer.size());
-			size_t jboBytes = compiled.joints.size() * sizeof(uint16_t);
-			if (jboBytes > 0) {
-				binBuffer.insert(binBuffer.end(),
-								 reinterpret_cast<uint8_t*>(compiled.joints.data()),
-								 reinterpret_cast<uint8_t*>(compiled.joints.data()) + jboBytes);
+			size_t jboBytes = compiled.skins.size() * 8;
+			for (const auto& s : compiled.skins) {
+				binBuffer.insert(binBuffer.end(), reinterpret_cast<const uint8_t*>(s.joints),
+								 reinterpret_cast<const uint8_t*>(s.joints) + 8);
 			}
 			while (binBuffer.size() % 4 != 0) {
 				binBuffer.push_back(0);
@@ -294,25 +406,28 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 				R"(    {{"bufferView": {}, "componentType": 5123, "count": {}, "type": "VEC4"}})",
 				jboBViewIdx, vertexCount));
 
-			while (binBuffer.size() % 4 != 0)
+			// weights: PackedRGBA8 -> 5121 (UNSIGNED_BYTE) normalized=true
+			while (binBuffer.size() % 4 != 0) {
 				binBuffer.push_back(0);
+			}
 			auto wboOffset = static_cast<uint32_t>(binBuffer.size());
-			size_t wboBytes = compiled.weights.size() * sizeof(float);
-			if (wboBytes > 0)
-				binBuffer.insert(binBuffer.end(),
-								 reinterpret_cast<uint8_t*>(compiled.weights.data()),
-								 reinterpret_cast<uint8_t*>(compiled.weights.data()) + wboBytes);
-			while (binBuffer.size() % 4 != 0)
+			for (const auto& s : compiled.skins) {
+				uint32_t w = s.weights.data;
+				binBuffer.insert(binBuffer.end(), reinterpret_cast<const uint8_t*>(&w),
+								 reinterpret_cast<const uint8_t*>(&w) + 4);
+			}
+			while (binBuffer.size() % 4 != 0) {
 				binBuffer.push_back(0);
+			}
 
 			bufferViews.push_back(std::format(
 				R"(    {{ "buffer": 0, "byteOffset": {}, "byteLength": {}, "target": 34962 }})",
-				wboOffset, wboBytes));
+				wboOffset, vertexCount * 4));
 			uint32_t wboBViewIdx = bViewIndex++;
 
 			weightsAcc = accIndex++;
 			accessors.push_back(std::format(
-				R"(    {{"bufferView": {}, "componentType": 5126, "count": {}, "type": "VEC4"}})",
+				R"(    {{"bufferView": {}, "componentType": 5121, "count": {}, "type": "VEC4", "normalized": true}})",
 				wboBViewIdx, vertexCount));
 		}
 
@@ -963,3 +1078,4 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 }
 
 } // namespace GLB
+} // namespace ZHLN

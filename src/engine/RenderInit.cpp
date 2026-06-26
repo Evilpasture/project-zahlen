@@ -697,13 +697,14 @@ void RenderContext::Impl::InitBindless() {
 		std::memcpy(mapped.data, identities.data(), identities.size() * sizeof(JPH::Mat44));
 	}
 
-	morphDeltasBuffer =
-		Vk::Buffer::Create(allocator.Get(), sizeof(float) * 4 * 1000000,
-						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	morphDeltasBuffer = Vk::Buffer::Create(allocator.Get(), sizeof(float) * 4 * 1000000,
+										   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+											   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+										   VMA_MEMORY_USAGE_CPU_TO_GPU);
 
 	ZHLN::Log("[RenderInit] Pre-allocating persistently mapped Double-Buffered Debug VBOs...");
 	size_t maxDebugVerts = 500000; // Large enough for dense wireframes (~32MB)
-	size_t bufferSize = maxDebugVerts * sizeof(Vertex);
+	size_t bufferSize = maxDebugVerts * (sizeof(VertexPosition) + sizeof(VertexAttributes));
 	for (int i = 0; i < 2; ++i) {
 		auto gpu_buf = Vk::Buffer::Create(allocator.Get(), bufferSize,
 										  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |

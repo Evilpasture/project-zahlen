@@ -29,11 +29,18 @@ struct GPUJoint {
 };
 
 struct SkinningConstants {
-	uint64_t inputVerticesAddr;
-	uint64_t outputVerticesAddr;
+	uint64_t inPosAddr;
+	uint64_t inAttrAddr;
+	uint64_t inSkinAddr;
+	uint64_t outPosAddr;
+	uint64_t outAttrAddr;
 	uint64_t jointsAddr;
+	uint64_t morphDeltasAddr; // <-- ADDED
 	uint32_t vertexCount;
 	uint32_t jointOffset;
+	uint32_t morphOffset;	   // <-- ADDED
+	uint32_t activeMorphCount; // <-- ADDED
+	float morphWeights[4];	   // <-- ADDED
 };
 
 [[vk::push_constant]] SkinningConstants pcs;
@@ -109,45 +116,52 @@ float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint jointO
 	if (tid.x >= pcs.vertexCount)
 		return;
 
-	// Load original vertex using push constant BDA address
-	uint64_t inputAddr = pcs.inputVerticesAddr + tid.x * 64;
-	Vertex v = vk::RawBufferLoad<Vertex>(inputAddr, 4);
+	// Load separated SoA input streams
+	float3 localPos = vk::RawBufferLoad<float3>(pcs.inPosAddr + tid.x * 12, 4);
+	uint normalRaw = vk::RawBufferLoad<uint>(pcs.inAttrAddr + tid.x * 16 + 0, 4);
+	uint tangentRaw = vk::RawBufferLoad<uint>(pcs.inAttrAddr + tid.x * 16 + 4, 4);
+	uint uvRaw = vk::RawBufferLoad<uint>(pcs.inAttrAddr + tid.x * 16 + 8, 4);
+	uint colorRaw = vk::RawBufferLoad<uint>(pcs.inAttrAddr + tid.x * 16 + 12, 4);
 
-	float4 localPos = float4(v.pos_x, v.pos_y, v.pos_z, 1.0f);
-	float4 normRaw = UnpackNormal(v.normal);
-	float4 tangRaw = UnpackNormal(v.tangent);
+	uint2 jointsRaw = vk::RawBufferLoad<uint2>(pcs.inSkinAddr + tid.x * 12 + 0, 4);
+	uint weightsRaw = vk::RawBufferLoad<uint>(pcs.inSkinAddr + tid.x * 12 + 8, 4);
 
-	// Unpack 16-bit joint indices from flattened 32-bit registers
-	uint4 joints = uint4(v.joint0 & 0xFFFF, v.joint0 >> 16, v.joint1 & 0xFFFF, v.joint1 >> 16);
-	float4 weights = float4(v.weight0, v.weight1, v.weight2, v.weight3);
+	uint4 joints =
+		uint4(jointsRaw.x & 0xFFFF, jointsRaw.x >> 16, jointsRaw.y & 0xFFFF, jointsRaw.y >> 16);
+	float4 weights = float4(
+		float(weightsRaw & 0xFF) / 255.0f, float((weightsRaw >> 8) & 0xFF) / 255.0f,
+		float((weightsRaw >> 16) & 0xFF) / 255.0f, float((weightsRaw >> 24) & 0xFF) / 255.0f);
 
-	// Apply joint matrices
-	float4 skinnedPos = SkinPosition(localPos, joints, weights, pcs.jointOffset, pcs.jointsAddr);
+	// Apply Morph Targets FIRST (in bind-pose space)
+	if (pcs.activeMorphCount > 0) {
+		[unroll] for (uint i = 0; i < 4; ++i) {
+			if (i >= pcs.activeMorphCount)
+				break;
+			uint deltaIndex = pcs.morphOffset + (i * pcs.vertexCount) + tid.x;
+
+			// Replaced ternary branches with a fast O(1) array lookup
+			float weight = pcs.morphWeights[i];
+
+			float3 delta = vk::RawBufferLoad<float3>(pcs.morphDeltasAddr + deltaIndex * 16, 4);
+			localPos += delta * weight;
+		}
+	}
+
+	// Apply joint matrices SECOND
+	float4 skinnedPos =
+		SkinPosition(float4(localPos, 1.0f), joints, weights, pcs.jointOffset, pcs.jointsAddr);
+	float4 normUnpack = UnpackNormal(normalRaw);
 	float3 skinnedNorm =
-		normalize(SkinDirection(normRaw.xyz, joints, weights, pcs.jointOffset, pcs.jointsAddr));
+		normalize(SkinDirection(normUnpack.xyz, joints, weights, pcs.jointOffset, pcs.jointsAddr));
+	float4 tangUnpack = UnpackNormal(tangentRaw);
 	float3 skinnedTang =
-		normalize(SkinDirection(tangRaw.xyz, joints, weights, pcs.jointOffset, pcs.jointsAddr));
+		normalize(SkinDirection(tangUnpack.xyz, joints, weights, pcs.jointOffset, pcs.jointsAddr));
 
-	// Pack attributes back into the output vertex
-	Vertex outV;
-	outV.pos_x = skinnedPos.x;
-	outV.pos_y = skinnedPos.y;
-	outV.pos_z = skinnedPos.z;
-	outV.normal = PackNormal(skinnedNorm, normRaw.w);
-	outV.tangent = PackNormal(skinnedTang, tangRaw.w);
-	outV.uv = v.uv;
-	outV.color = v.color;
-	outV.joint0 = v.joint0;
-	outV.joint1 = v.joint1;
-	outV.weight0 = v.weight0;
-	outV.weight1 = v.weight1;
-	outV.weight2 = v.weight2;
-	outV.weight3 = v.weight3;
-	outV.pad0 = v.pad0;
-	outV.pad1 = v.pad1;
-	outV.pad2 = v.pad2;
+	// Write directly to separate output scratch buffers
+	vk::RawBufferStore<float3>(pcs.outPosAddr + tid.x * 12, skinnedPos.xyz, 4);
 
-	// Write directly to output scratch buffer
-	uint64_t outputAddr = pcs.outputVerticesAddr + tid.x * 64;
-	vk::RawBufferStore<Vertex>(outputAddr, outV, 4);
+	uint outNorm = PackNormal(skinnedNorm, normUnpack.w);
+	uint outTang = PackNormal(skinnedTang, tangUnpack.w);
+	vk::RawBufferStore<uint2>(pcs.outAttrAddr + tid.x * 16 + 0, uint2(outNorm, outTang), 4);
+	vk::RawBufferStore<uint2>(pcs.outAttrAddr + tid.x * 16 + 8, uint2(uvRaw, colorRaw), 4);
 }

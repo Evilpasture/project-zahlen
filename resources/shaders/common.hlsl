@@ -6,27 +6,25 @@
 struct InstanceData {
 	float4x4 world;
 	float4x4 prevWorld;
-	uint64_t vboAddress;
+	uint64_t posAddress;
+	uint64_t attrAddress;
+	uint64_t skinAddress;
 	uint64_t iboAddress;
 
 	uint vertexCount;
 	uint indexCount;
+	uint texIndices0;
+	uint texIndices1;
 
-	uint albedoIdx;
-	uint normalIdx;
-	uint pbrIdx;
-	uint emissiveIdx;
 	float cullRadius;
 	float metallicFactor;
 	float roughnessFactor;
 	float alphaCutoff;
-	uint alphaMode;
+
+	uint flags;
 	uint jointOffset;
-	uint isSkinned;
 	uint morphOffset;
 	uint activeMorphCount;
-
-	uint pad0;
 
 	float4 morphWeights;
 	float4 baseColorFactor;
@@ -36,17 +34,6 @@ struct InstanceData {
 struct ObjectConstants {
 	uint instanceId;
 	uint isShadowPass;
-};
-
-struct Vertex {
-	float3 position;
-	uint normal;
-	uint tangent;
-	uint uv;
-	uint color;
-	uint2 joints;
-	float4 weights;
-	uint3 _padding;
 };
 
 struct GPUJoint {

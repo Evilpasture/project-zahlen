@@ -481,8 +481,12 @@ void DebugDrawSystem(Engine& engine) {
 		return;
 	}
 
-	Mesh debugMesh = {.vertexBuffer = static_cast<BufferHandle>(dbg->debugLineVbo),
-					  .vertexCount = 36};
+	Mesh debugMesh = {.posBuffer = static_cast<BufferHandle>(dbg->debugLineVbo),
+					  .attrBuffer = static_cast<BufferHandle>(dbg->debugLineVbo),
+					  .skinBuffer = BufferHandle::Invalid,
+					  .indexBuffer = BufferHandle::Invalid,
+					  .vertexCount = 36,
+					  .indexCount = 0};
 	Material debugMat = {.pipeline = static_cast<PipelineHandle>(dbg->debugLinePipeline),
 						 .albedoIndex = dbg->debugLineAlbedo};
 
@@ -708,7 +712,7 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 
 	for (Entity e : reg.GetEntitiesWith<TextComponent>()) {
 		auto* text = reg.Get<TextComponent>(e);
-		if (text->mesh.vertexBuffer == BufferHandle::Invalid && activeFont != nullptr) {
+		if (text->mesh.posBuffer == BufferHandle::Invalid && activeFont != nullptr) {
 			text->mesh = GUI::CreateTextMesh(rc, *activeFont, text->text.c_str(), text->x, text->y,
 											 text->scale, text->color);
 		}
@@ -744,44 +748,44 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 		auto debugData =
 			Physics::GetDebugDrawData(engine.GetPhysicsContext(), true, true, isWireframe);
 
-		std::vector<Vertex> debugVerts;
+		std::vector<VertexPosition> debugPos;
+		std::vector<VertexAttributes> debugAttr;
 
 		if (isWireframe && debugData.lineCount > 0) {
-			debugVerts.reserve(debugData.lineCount);
+			debugPos.reserve(debugData.lineCount);
+			debugAttr.reserve(debugData.lineCount);
 			for (size_t i = 0; i < debugData.lineCount; ++i) {
 				const auto& jv = debugData.lines[i];
-				Vertex v{};
-				v.position[0] = jv.x;
-				v.position[1] = jv.y;
-				v.position[2] = jv.z;
-				v.color.data = jv.color;
-				v.normal = Math::PackNormal(0.0f, 1.0f, 0.0f);
-				v.tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f);
-				v.uv = Math::PackUV(0.0f, 0.0f);
-				debugVerts.push_back(v);
+				debugPos.push_back({.position = {jv.x, jv.y, jv.z}});
+				debugAttr.push_back({.normal = Math::PackNormal(0.0f, 1.0f, 0.0f),
+									 .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
+									 .uv = Math::PackUV(0.0f, 0.0f),
+									 .color = {.data = jv.color}});
 			}
 		} else if (!isWireframe && debugData.triangleCount > 0) {
-			debugVerts.reserve(debugData.triangleCount);
+			debugPos.reserve(debugData.triangleCount);
+			debugAttr.reserve(debugData.triangleCount);
 			for (size_t i = 0; i < debugData.triangleCount; ++i) {
 				const auto& jv = debugData.triangles[i];
-				Vertex v{};
-				v.position[0] = jv.x;
-				v.position[1] = jv.y;
-				v.position[2] = jv.z;
-				v.color.data = jv.color;
-				v.normal = Math::PackNormal(0.0f, 1.0f, 0.0f);
-				v.tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f);
-				v.uv = Math::PackUV(0.0f, 0.0f);
-				debugVerts.push_back(v);
+				debugPos.push_back({.position = {jv.x, jv.y, jv.z}});
+				debugAttr.push_back({.normal = Math::PackNormal(0.0f, 1.0f, 0.0f),
+									 .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
+									 .uv = Math::PackUV(0.0f, 0.0f),
+									 .color = {.data = jv.color}});
 			}
 		}
 
-		if (!debugVerts.empty()) {
-			rc.UploadDebugVertices(debugVerts.data(), debugVerts.size() * sizeof(Vertex),
-								   static_cast<uint32_t>(debugVerts.size()));
+		if (!debugPos.empty()) {
+			rc.UploadDebugVertices(debugPos.data(), debugPos.size() * sizeof(VertexPosition),
+								   debugAttr.data(), debugAttr.size() * sizeof(VertexAttributes),
+								   static_cast<uint32_t>(debugPos.size()));
 
-			Mesh debugMesh = {.vertexBuffer = rc.GetDebugMeshBuffer(),
-							  .vertexCount = static_cast<uint32_t>(debugVerts.size())};
+			Mesh debugMesh = {.posBuffer = rc.GetDebugMeshBuffer(),
+							  .attrBuffer = rc.GetDebugMeshBuffer(),
+							  .skinBuffer = BufferHandle::Invalid,
+							  .indexBuffer = BufferHandle::Invalid,
+							  .vertexCount = static_cast<uint32_t>(debugPos.size()),
+							  .indexCount = 0};
 
 			Renderer::Draw(rc, isWireframe ? debugLineMat : debugSolidMat, debugMesh,
 						   {.transform = JPH::Mat44::sIdentity(),
@@ -934,7 +938,7 @@ bool InitializeGame(Engine& engine) {
 	reg.Add(settingsEntity, PostProcessSettingsComponent{});
 	reg.Add(settingsEntity, ShadowSettingsComponent{});
 	reg.Add(settingsEntity,
-			DebugSettingsComponent{.debugLineVbo = static_cast<uint64_t>(lineMesh.vertexBuffer),
+			DebugSettingsComponent{.debugLineVbo = static_cast<uint64_t>(lineMesh.posBuffer),
 								   .debugLinePipeline = static_cast<uint64_t>(lineMat.pipeline),
 								   .debugLineAlbedo = lineMat.albedoIndex,
 								   .physicsDrawMode = 0});
@@ -956,7 +960,7 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, ScriptRunne
 
 	// --- DYNAMIC HOT-RELOAD PUMP ---
 	if (gameplayWatcher.CheckModified()) {
-		scriptRunner.ReloadFile("scripts/gameplay_template.lua");
+		scriptRunner.ReloadFile("scripts/gameplay.lua");
 	}
 	engine.GetRenderContext().CheckShaderReload(); // Checks and re-builds stale pipelines
 
@@ -1110,7 +1114,7 @@ std::expected<std::unique_ptr<Engine>, EngineError> InitializeEngine(CommandLine
 std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine,
 											  const CommandLineOptions& options) {
 	ScriptRunner scriptRunner;
-	FileWatcher gameplayWatcher("scripts/gameplay_template.lua");
+	FileWatcher gameplayWatcher("scripts/gameplay.lua");
 
 	if (!InitializeGame(*engine)) {
 		return std::unexpected(
@@ -1129,7 +1133,7 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine,
 	}
 
 	ZHLN::Log("Window active and presenting. Loading scene assets...");
-	scriptRunner.RunFile("scripts/gameplay_template.lua");
+	scriptRunner.RunFile("scripts/gameplay.lua");
 
 	float physicsAccumulator = 0.0f;
 	const double targetFrameTime =
@@ -1190,7 +1194,7 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine,
 		if (!render_res) {
 			if (render_res.error() == RenderFrameResult::DeviceLost) {
 				engine->HandleDeviceLost();
-				scriptRunner.ReloadFile("scripts/gameplay_template.lua");
+				scriptRunner.ReloadFile("scripts/gameplay.lua");
 			}
 		}
 

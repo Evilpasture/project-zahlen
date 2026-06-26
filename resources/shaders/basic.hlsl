@@ -11,42 +11,57 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	if (inst.iboAddress != 0) {
 		actualVertexId = vk::RawBufferLoad<uint>(inst.iboAddress + vertexId * 4, 4);
 	}
-	uint64_t baseAddr = inst.vboAddress + actualVertexId * 64;
 
-	float3 position = vk::RawBufferLoad<float3>(baseAddr + 0, 4);
-	uint normal = vk::RawBufferLoad<uint>(baseAddr + 12, 4);
-	uint tangent = vk::RawBufferLoad<uint>(baseAddr + 16, 4);
-	uint uv = vk::RawBufferLoad<uint>(baseAddr + 20, 4);
-	uint color = vk::RawBufferLoad<uint>(baseAddr + 24, 4);
-	uint2 joints = vk::RawBufferLoad<uint2>(baseAddr + 28, 4);
-	float4 weights = vk::RawBufferLoad<float4>(baseAddr + 36, 4);
+	uint texIndices0 = inst.texIndices0;
+	uint albedoIdx = texIndices0 & 0xFFFF;
+	uint normalIdx = texIndices0 >> 16;
+	uint texIndices1 = inst.texIndices1;
+	uint pbrIdx = texIndices1 & 0xFFFF;
+	uint emissiveIdx = texIndices1 >> 16;
 
-	float4x4 worldMatrix = inst.world;
-	float4x4 prevWorldMatrix = inst.prevWorld;
-	uint albedoIdx = inst.albedoIdx;
-	uint normalIdx = inst.normalIdx;
-	uint pbrIdx = inst.pbrIdx;
-	uint emissiveIdx = inst.emissiveIdx;
-	float4 baseColorFactor = inst.baseColorFactor;
-	float4 emissiveFactor = inst.emissiveFactor;
-	float metallicFactor = inst.metallicFactor;
-	float roughnessFactor = inst.roughnessFactor;
-	float alphaCutoff = inst.alphaCutoff;
-	uint alphaMode = inst.alphaMode;
-	uint jointOffset = inst.jointOffset;
-	uint isSkinned = inst.isSkinned;
+	uint flags = inst.flags;
+	uint alphaMode = flags & 0xFF;
+	uint isSkinned = (flags >> 8) & 0xFF;
 
+	float3 position = vk::RawBufferLoad<float3>(inst.posAddress + actualVertexId * 12, 4);
+	float2 localUV = float2(0, 0);
+	float4 localColor = float4(1, 1, 1, 1);
+	float3 localNormal = float3(0, 1, 0);
+	float4 localTangent = float4(1, 0, 0, 1);
+
+	// Load Attributes
+	if (inst.attrAddress != 0) {
+		uint64_t attrAddr = inst.attrAddress + actualVertexId * 16;
+		uint normalRaw = vk::RawBufferLoad<uint>(attrAddr + 0, 4);
+		uint tangentRaw = vk::RawBufferLoad<uint>(attrAddr + 4, 4);
+		uint uvRaw = vk::RawBufferLoad<uint>(attrAddr + 8, 4);
+		uint colorRaw = vk::RawBufferLoad<uint>(attrAddr + 12, 4);
+
+		localNormal = UnpackNormal(normalRaw).xyz;
+		localTangent = UnpackNormal(tangentRaw);
+		localUV = UnpackUV(uvRaw);
+		localColor = UnpackColor(colorRaw);
+	}
+
+	float4 localPos = float4(position, 1.0f);
+
+	uint4 localJoints = uint4(0, 0, 0, 0);
+	float4 weights = float4(0.0f, 0.0f, 0.0f, 0.0f);
+
+	// Unpack UNORM8 skinning weights
+	if (isSkinned != 0 && inst.skinAddress != 0) {
+		uint64_t skinAddr = inst.skinAddress + actualVertexId * 12;
+		uint2 jointsRaw = vk::RawBufferLoad<uint2>(skinAddr + 0, 4);
+		uint weightsRaw = vk::RawBufferLoad<uint>(skinAddr + 8, 4);
+
+		localJoints = UnpackJoints(jointsRaw);
+		weights = UnpackColor(weightsRaw); // Decodes UNORM8 weights!
+	}
+
+	uint vertexCount = inst.vertexCount;
 	uint morphOffset = inst.morphOffset;
 	uint activeMorphCount = inst.activeMorphCount;
 	float4 morphWeights = inst.morphWeights;
-	uint vertexCount = inst.vertexCount;
-
-	float4 localPos = float4(position, 1.0f);
-	float3 localNormal = UnpackNormal(normal).xyz;
-	float4 localTangent = UnpackNormal(tangent);
-	float2 localUV = UnpackUV(uv);
-	float4 localColor = UnpackColor(color);
-	uint4 localJoints = UnpackJoints(joints);
 
 	if (activeMorphCount > 0) {
 		localPos.xyz += GetMorphDisplacement(actualVertexId, vertexCount, morphOffset,
@@ -54,7 +69,10 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	}
 
 	float4 worldPos;
-	float3x3 world3x3 = (float3x3)worldMatrix;
+	float3x3 world3x3 = (float3x3)inst.world;
+	float4x4 worldMatrix = inst.world;
+	float4x4 prevWorldMatrix = inst.prevWorld;
+	uint jointOffset = inst.jointOffset;
 
 	if (isSkinned != 0) {
 		worldPos = mul(worldMatrix, SkinPosition(localPos, localJoints, weights, jointOffset));
@@ -69,6 +87,12 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	}
 
 	output.worldPos = worldPos.xyz;
+
+	float4 baseColorFactor = inst.baseColorFactor;
+	float4 emissiveFactor = inst.emissiveFactor;
+	float metallicFactor = inst.metallicFactor;
+	float roughnessFactor = inst.roughnessFactor;
+	float alphaCutoff = inst.alphaCutoff;
 
 	if (obj.isShadowPass != 0) {
 		output.pos = mul(frame.lightSpaceMatrix, worldPos); // Standard, unbiased projection

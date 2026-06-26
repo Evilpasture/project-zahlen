@@ -303,7 +303,8 @@ static void RegisterFFICommands() {
 		ZHLN::Mesh mesh = ZHLN::AssetFactory::CreateBox(engine->GetRenderContext(),
 														JPH::Vec3(a->hx, a->hy, a->hz),
 														JPH::Vec4(a->r, a->g, a->b, a->a));
-		return static_cast<uint64_t>(mesh.vertexBuffer);
+		return static_cast<uint64_t>(
+			mesh.posBuffer); // Return the position stream handle as the key
 	};
 
 	s_CommandRegistry["CreateBasicMaterial"] = [](ZHLN::Engine* engine,
@@ -538,8 +539,12 @@ static void RegisterFFICommands() {
 		auto entity = ZHLN::Entity::Unpack(a->entityRaw);
 		auto* text = engine->GetRegistry().Get<ZHLN::TextComponent>(entity);
 		if (text != nullptr) {
-			if (text->mesh.vertexBuffer != ZHLN::BufferHandle::Invalid) {
-				engine->GetRenderContext().DestroyBuffer(text->mesh.vertexBuffer);
+			// Clean up both uniquely generated text mesh streams
+			if (text->mesh.posBuffer != ZHLN::BufferHandle::Invalid) {
+				engine->GetRenderContext().DestroyBuffer(text->mesh.posBuffer);
+			}
+			if (text->mesh.attrBuffer != ZHLN::BufferHandle::Invalid) {
+				engine->GetRenderContext().DestroyBuffer(text->mesh.attrBuffer);
 			}
 			if (text->mesh.indexBuffer != ZHLN::BufferHandle::Invalid) {
 				engine->GetRenderContext().DestroyBuffer(text->mesh.indexBuffer);

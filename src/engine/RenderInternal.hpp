@@ -332,8 +332,10 @@ static constexpr uint32_t kGpuCullingMaxVisibleInstances =
 
 struct DrawCommand {
 	NativeMaterial* material;
-	NativeMesh* mesh;
-	NativeMesh* indexMesh;
+	NativeMesh* posMesh;   // Points to the positions stream NativeMesh
+	NativeMesh* attrMesh;  // Points to the attributes stream NativeMesh
+	NativeMesh* skinMesh;  // Points to the skinning stream NativeMesh (nullptr if unskinned)
+	NativeMesh* indexMesh; // Points to the index buffer stream NativeMesh (nullptr if non-indexed)
 	JPH::Mat44 transform;
 	JPH::Mat44 prevTransform;
 	uint32_t albedoIndex;
@@ -360,15 +362,9 @@ static_assert(std::is_trivially_copyable_v<DrawCommand> &&
 			  std::is_trivially_constructible_v<DrawCommand>);
 
 struct UIDrawCommand {
-	NativeMesh* mesh;
+	NativeMesh* posMesh;
+	NativeMesh* attrMesh;
 	uint32_t fontIndex;
-};
-
-struct UIObjectConstants {
-	JPH::Mat44 orthoMatrix;
-	uint64_t vboAddress;
-	uint32_t albedoIdx;
-	uint32_t padding;
 };
 
 struct WorkerCmdContext {
@@ -446,9 +442,9 @@ struct RenderContext::Impl {
 	JPH::Mat44 shadowProjView{};
 	FrameUniforms currentUniforms{};
 
-	// Generational pools (Fully self-contained; no manual trackers needed)
-	GenerationalPool<NativeMesh, 1024> meshPool;
-	GenerationalPool<NativeMaterial, 512> materialPool;
+	// Generational pools (Expanded to provide massive headroom for SoA split streams)
+	GenerationalPool<NativeMesh, 8192> meshPool;		 // Expanded from 1024 to 8192
+	GenerationalPool<NativeMaterial, 2048> materialPool; // Expanded from 512 to 2048
 
 	JPH::Array<DrawCommand> drawQueue;
 	JPH::Array<WorkerCmdContext> workerCmds;
@@ -525,11 +521,18 @@ struct RenderContext::Impl {
 	Vk::PipelineLayout skinningPipelineLayout;
 
 	struct alignas(8) SkinningConstants {
-		uint64_t inputVerticesAddr;
-		uint64_t outputVerticesAddr;
+		uint64_t inPosAddr;
+		uint64_t inAttrAddr;
+		uint64_t inSkinAddr;
+		uint64_t outPosAddr;
+		uint64_t outAttrAddr;
 		uint64_t jointsAddr;
+		uint64_t morphDeltasAddr;
 		uint32_t vertexCount;
 		uint32_t jointOffset;
+		uint32_t morphOffset;
+		uint32_t activeMorphCount;
+		float morphWeights[4];
 	};
 
 	void BuildSkinningPipeline();
@@ -625,4 +628,6 @@ template <> struct FormatOf<::ZHLN::PackedRGBA8> {
 };
 } // namespace ZHLN::Vk
 
-ZHLN_REFLECT_VERTEX(::ZHLN::Vertex, position, normal, tangent, uv, color, joints, weights);
+ZHLN_REFLECT_VERTEX(::ZHLN::VertexPosition, position);
+ZHLN_REFLECT_VERTEX(::ZHLN::VertexAttributes, normal, tangent, uv, color);
+ZHLN_REFLECT_VERTEX(::ZHLN::VertexSkin, joints, weights);

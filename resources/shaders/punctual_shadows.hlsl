@@ -23,12 +23,12 @@ PunctualShadowVSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_
 							  uint viewId : SV_ViewID) {
 	PunctualShadowVSOutput output;
 
-	// Since this is a CPU-driven draw call, the absolute draw index maps 1:1 to instanceId [2]
 	InstanceData inst = g_instances[instanceId];
 	uint actualVertexId = inst.iboAddress != 0
 							  ? vk::RawBufferLoad<uint>(inst.iboAddress + vertexId * 4, 4)
 							  : vertexId;
-	float3 localPos = vk::RawBufferLoad<float3>(inst.vboAddress + actualVertexId * 64, 4);
+	// ONLY fetch 12 bytes!
+	float3 localPos = vk::RawBufferLoad<float3>(inst.posAddress + actualVertexId * 12, 4);
 	float3 worldPos = mul(inst.world, float4(localPos, 1.0f)).xyz;
 
 	// 2. Fetch Light Data

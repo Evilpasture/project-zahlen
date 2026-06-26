@@ -7,7 +7,7 @@
 
 #include <string>
 
-namespace GLB {
+namespace ZHLN::GLB {
 bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolder,
 			 const std::string& outputPath);
 }

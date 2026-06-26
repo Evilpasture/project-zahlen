@@ -51,7 +51,9 @@ struct CPUPrimitiveJob {
 	const cgltf_primitive* prim = nullptr;
 	JPH::Mat44 nodeTransform;
 
-	std::vector<Vertex> vertices;
+	std::vector<VertexPosition> positions;
+	std::vector<VertexAttributes> attributes;
+	std::vector<VertexSkin> skins;
 	std::vector<uint32_t> indices;
 	uint32_t indexCount = 0;
 
@@ -193,7 +195,7 @@ static void DecodeAndRescaleTexture(CPUTextureJob& job) {
 }
 
 // Parses and packs geometry attributes on the CPU (Runs in Parallel)
-static void ProcessCPUPrimitive(CPUPrimitiveJob& job, PhysicsContext& pc) {
+static void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
 	const auto& prim = *job.prim;
 	const auto* node = job.node;
 
@@ -283,18 +285,19 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job, PhysicsContext& pc) {
 	}
 
 	size_t vertexCount = posAcc->count;
-	std::vector<Vertex> primVertices(vertexCount);
+	job.positions.resize(vertexCount);
+	job.attributes.resize(vertexCount);
+	if (jointsAcc != nullptr && weightsAcc != nullptr) {
+		job.skins.resize(vertexCount);
+	}
 
 	for (size_t vIdx = 0; vIdx < vertexCount; ++vIdx) {
-		Vertex& v = primVertices[vIdx];
-		std::memset(&v, 0, sizeof(Vertex));
-
+		// 1. Pack Positions (Full Precision)
 		float rawPos[3] = {0.0f, 0.0f, 0.0f};
 		cgltf_accessor_read_float(posAcc, vIdx, rawPos, 3);
-		v.position[0] = rawPos[0];
-		v.position[1] = rawPos[1];
-		v.position[2] = rawPos[2];
+		job.positions[vIdx] = {.position = {rawPos[0], rawPos[1], rawPos[2]}};
 
+		// 2. Pack Attributes (normal, tangent, uv, color)
 		float rawNorm[3] = {0.0f, 1.0f, 0.0f};
 		if (normAcc != nullptr) {
 			cgltf_accessor_read_float(normAcc, vIdx, rawNorm, 3);
@@ -306,7 +309,6 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job, PhysicsContext& pc) {
 			rawNorm[1] /= nLen;
 			rawNorm[2] /= nLen;
 		}
-		v.normal = Math::PackNormal(rawNorm[0], rawNorm[1], rawNorm[2]);
 
 		float rawTangent[4] = {1.0f, 0.0f, 0.0f, 1.0f};
 		if (tangentAcc != nullptr) {
@@ -319,41 +321,38 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job, PhysicsContext& pc) {
 			rawTangent[1] /= tLen;
 			rawTangent[2] /= tLen;
 		}
-		v.tangent = Math::PackNormal(rawTangent[0], rawTangent[1], rawTangent[2], rawTangent[3]);
 
 		float uv[2] = {0.0f, 0.0f};
 		if (uvAcc != nullptr) {
 			cgltf_accessor_read_float(uvAcc, vIdx, uv, 2);
 		}
-		// FIX: glTF natively uses a Top-Left UV origin. Do not invert the V axis!
-		v.uv = Math::PackUV(uv[0], uv[1]);
 
 		float rawColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
 		if (colorAcc != nullptr) {
 			cgltf_accessor_read_float(colorAcc, vIdx, rawColor, 4);
 		}
-		v.color = Math::PackColor(rawColor[0], rawColor[1], rawColor[2], rawColor[3]);
 
-		uint32_t joints[4] = {0, 0, 0, 0};
-		if (jointsAcc != nullptr) {
+		job.attributes[vIdx] = {
+			.normal = Math::PackNormal(rawNorm[0], rawNorm[1], rawNorm[2]),
+			.tangent = Math::PackNormal(rawTangent[0], rawTangent[1], rawTangent[2], rawTangent[3]),
+			.uv = Math::PackUV(uv[0], uv[1]),
+			.color = Math::PackColor(rawColor[0], rawColor[1], rawColor[2], rawColor[3])};
+
+		// 3. Pack Skins (joints, weights)
+		if (jointsAcc != nullptr && weightsAcc != nullptr) {
+			uint32_t joints[4] = {0, 0, 0, 0};
 			cgltf_accessor_read_uint(jointsAcc, vIdx, joints, 4);
-		}
-		v.joints[0] = static_cast<uint16_t>(joints[0]);
-		v.joints[1] = static_cast<uint16_t>(joints[1]);
-		v.joints[2] = static_cast<uint16_t>(joints[2]);
-		v.joints[3] = static_cast<uint16_t>(joints[3]);
 
-		float weights[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-		if (weightsAcc != nullptr) {
+			float weights[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 			cgltf_accessor_read_float(weightsAcc, vIdx, weights, 4);
-		}
-		v.weights[0] = weights[0];
-		v.weights[1] = weights[1];
-		v.weights[2] = weights[2];
-		v.weights[3] = weights[3];
-	}
 
-	job.vertices = std::move(primVertices);
+			job.skins[vIdx] = {
+				.joints = {static_cast<uint16_t>(joints[0]), static_cast<uint16_t>(joints[1]),
+						   static_cast<uint16_t>(joints[2]), static_cast<uint16_t>(joints[3])},
+				// Compress float4 weights on-the-fly to PackedRGBA8 (UNORM8)
+				.weights = Math::PackColor(weights[0], weights[1], weights[2], weights[3])};
+		}
+	}
 
 	if (prim.indices != nullptr) {
 		job.indexCount = static_cast<uint32_t>(prim.indices->count);
@@ -362,7 +361,7 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job, PhysicsContext& pc) {
 			job.indices[idx] = static_cast<uint32_t>(cgltf_accessor_read_index(prim.indices, idx));
 		}
 	} else {
-		job.indexCount = static_cast<uint32_t>(job.vertices.size());
+		job.indexCount = static_cast<uint32_t>(job.positions.size());
 		job.indices.resize(job.indexCount);
 		for (uint32_t idx = 0; idx < job.indexCount; ++idx) {
 			job.indices[idx] = idx;
@@ -370,10 +369,9 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job, PhysicsContext& pc) {
 	}
 
 	float maxD2 = 0.0f;
-	for (auto& vertice : job.vertices) {
-		float d2 = vertice.position[0] * vertice.position[0] +
-				   vertice.position[1] * vertice.position[1] +
-				   vertice.position[2] * vertice.position[2];
+	for (const auto& pos : job.positions) {
+		float d2 = pos.position[0] * pos.position[0] + pos.position[1] * pos.position[1] +
+				   pos.position[2] * pos.position[2];
 		maxD2 = std::max(d2, maxD2);
 	}
 	job.boundingRadius = std::sqrt(maxD2) * 1.2f + 1.0f;
@@ -391,7 +389,7 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job, PhysicsContext& pc) {
 			}
 		}
 
-		auto currentVertexCount = static_cast<uint32_t>(job.vertices.size());
+		auto currentVertexCount = static_cast<uint32_t>(job.positions.size());
 		job.tempDeltas.resize(static_cast<size_t>(currentVertexCount) * job.activeMorphCount * 4,
 							  0.0f);
 
@@ -431,7 +429,7 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job, PhysicsContext& pc) {
 	JPH::ShapeRefC baseBox = new JPH::BoxShape(JPH::Vec3(extentsX, extentsY, extentsZ));
 	job.boxCollider = new JPH::RotatedTranslatedShape(localCenter, JPH::Quat::sIdentity(), baseBox);
 	job.meshCollider =
-		Physics::CreateMeshShape(job.vertices.data(), static_cast<uint32_t>(job.vertices.size()),
+		Physics::CreateMeshShape(job.positions.data(), static_cast<uint32_t>(job.positions.size()),
 								 job.indices.data(), job.indexCount);
 }
 
@@ -595,12 +593,11 @@ void ProcessCPUTasks(const std::string& rawPath, const std::vector<cgltf_image*>
 								});
 	}
 
-	auto& pc = GetEngineContext()->GetPhysicsContext();
 	if (!primitiveJobs.empty()) {
 		TaskSystem::ParallelFor(primitiveJobs.size(), 1,
 								[&](uint32_t start, uint32_t end, uint32_t) {
 									for (uint32_t i = start; i < end; ++i) {
-										ProcessCPUPrimitive(primitiveJobs[i], pc);
+										ProcessCPUPrimitive(primitiveJobs[i]);
 									}
 								});
 	}
@@ -636,14 +633,29 @@ static CompiledPrimitive GetOrCreateCompiledPrimitive(
 	}
 
 	// Create actual Vulkan buffers
-	BufferHandle vbo =
-		ctx.CreateVertexBuffer(primJob.vertices.data(), primJob.vertices.size() * sizeof(Vertex));
-	BufferHandle ibo =
-		ctx.CreateIndexBuffer(primJob.indices.data(), primJob.indexCount * sizeof(uint32_t));
+	BufferHandle posVbo = ctx.CreateVertexBuffer(primJob.positions.data(),
+												 primJob.positions.size() * sizeof(VertexPosition),
+												 sizeof(VertexPosition));
+	BufferHandle attrVbo = ctx.CreateVertexBuffer(
+		primJob.attributes.data(), primJob.attributes.size() * sizeof(VertexAttributes),
+		sizeof(VertexAttributes));
 
-	Mesh subMesh = {.vertexBuffer = vbo,
+	BufferHandle skinVbo = BufferHandle::Invalid;
+	if (!primJob.skins.empty()) {
+		skinVbo = ctx.CreateVertexBuffer(
+			primJob.skins.data(), primJob.skins.size() * sizeof(VertexSkin), sizeof(VertexSkin));
+	}
+
+	BufferHandle ibo = BufferHandle::Invalid;
+	if (primJob.indexCount > 0) {
+		ibo = ctx.CreateIndexBuffer(primJob.indices.data(), primJob.indexCount * sizeof(uint32_t));
+	}
+
+	Mesh subMesh = {.posBuffer = posVbo,
+					.attrBuffer = attrVbo,
+					.skinBuffer = skinVbo,
 					.indexBuffer = ibo,
-					.vertexCount = static_cast<uint32_t>(primJob.vertices.size()),
+					.vertexCount = static_cast<uint32_t>(primJob.positions.size()),
 					.indexCount = primJob.indexCount};
 
 	ctx.BuildMeshBLAS(subMesh);
@@ -651,7 +663,7 @@ static CompiledPrimitive GetOrCreateCompiledPrimitive(
 	// Allocate morph targets on GPU
 	uint32_t finalMorphOffset = 0;
 	if (primJob.activeMorphCount > 0) {
-		finalMorphOffset = ctx.AllocateMorphDeltas(static_cast<uint32_t>(primJob.vertices.size()) *
+		finalMorphOffset = ctx.AllocateMorphDeltas(static_cast<uint32_t>(primJob.positions.size()) *
 													   primJob.activeMorphCount,
 												   primJob.tempDeltas.data());
 	}
@@ -787,8 +799,10 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::st
 			.gltfSkin = node->skin,
 			.morphOffset = compPrim.morphOffset,
 			.activeMorphCount = compPrim.activeMorphCount,
-			.defaultMorphWeights = {primJob.defaultMorphWeights[0], primJob.defaultMorphWeights[1],
-									primJob.defaultMorphWeights[2], primJob.defaultMorphWeights[3]},
+			.defaultMorphWeights =
+				{primJob.defaultMorphWeights[0], primJob.defaultMorphWeights[1],
+				 primJob.defaultMorphWeights[2],
+				 primJob.defaultMorphWeights[3]}, // Fixed: Read from primJob instead of compPrim
 			.boundingRadius = compPrim.boundingRadius,
 			.localMin = {compPrim.localMin[0], compPrim.localMin[1], compPrim.localMin[2]},
 			.localMax = {compPrim.localMax[0], compPrim.localMax[1], compPrim.localMax[2]},
@@ -902,7 +916,7 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 						   const SpawnParams& params, Entity rootEntity, float scaleMult) {
 	BufferHandle skinnedVbo = BufferHandle::Invalid;
 	if (part.isSkinned && params.isAnimated) {
-		skinnedVbo = ctx.CreateSkinnedScratchBuffer(part.mesh.vertexCount * sizeof(Vertex));
+		skinnedVbo = ctx.CreateSkinnedScratchBuffer(part.mesh.vertexCount);
 	}
 
 	Entity e = reg.Create();
@@ -1171,7 +1185,7 @@ static JPH::Ref<JPH::Skeleton> BuildJoltSkeletonFromCgltf(const cgltf_skin* skin
 	return skeleton;
 }
 
-void SetupPlayerRagdoll(RenderContext& rc, PhysicsContext& pc, ECS::Registry& reg,
+void SetupPlayerRagdoll([[maybe_unused]] RenderContext& rc, PhysicsContext& pc, ECS::Registry& reg,
 						Entity playerEntity, std::span<const Entity> visualParts) {
 	const cgltf_skin* pomniSkin = nullptr;
 	for (Entity part : visualParts) {

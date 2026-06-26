@@ -139,23 +139,32 @@ Mesh LoadCookedMesh(RenderContext& ctx, [[maybe_unused]] AssetManager& assetMgr,
 			return {};
 		}
 
-		// 1. Resolve VBO
-		const auto* vertices = std::bit_cast<const Vertex*>(header + 1);
-		BufferHandle vbo = ctx.CreateVertexBuffer(vertices, header->vertexCount * sizeof(Vertex));
+		const char* ptr = reinterpret_cast<const char*>(header + 1);
 
-		// 2. Resolve IBO (index array follows vertex array in binary)
-		BufferHandle ibo = BufferHandle::Invalid;
-		if (header->indexCount > 0) {
-			const auto* indices = std::bit_cast<const uint32_t*>(vertices + header->vertexCount);
-			ibo = ctx.CreateIndexBuffer(indices, header->indexCount * sizeof(uint32_t));
+		BufferHandle posVbo =
+			ctx.CreateVertexBuffer(ptr, header->vertexCount * sizeof(VertexPosition));
+		ptr += header->vertexCount * sizeof(VertexPosition);
+
+		BufferHandle attrVbo = ctx.CreateVertexBuffer(
+			ptr, header->vertexCount * sizeof(VertexAttributes), sizeof(VertexAttributes));
+		ptr += header->vertexCount * sizeof(VertexAttributes);
+
+		BufferHandle skinVbo = BufferHandle::Invalid;
+		if (header->hasSkin) {
+			// FIX: Explicitly pass sizeof(VertexSkin) as the 3rd argument
+			skinVbo = ctx.CreateVertexBuffer(ptr, header->vertexCount * sizeof(VertexSkin),
+											 sizeof(VertexSkin));
+			ptr += header->vertexCount * sizeof(VertexSkin);
 		}
 
-		assetMgr.FreeAssetMemory(req);
+		BufferHandle ibo = BufferHandle::Invalid;
+		if (header->indexCount > 0) {
+			ibo = ctx.CreateIndexBuffer(ptr, header->indexCount * sizeof(uint32_t));
+		}
 
-		Log("Loaded Cooked Indexed Mesh: {} ({} vertices, {} indices)", virtualPath,
-			header->vertexCount, header->indexCount);
-
-		Mesh finalMesh = Mesh{.vertexBuffer = vbo,
+		Mesh finalMesh = Mesh{.posBuffer = posVbo,
+							  .attrBuffer = attrVbo,
+							  .skinBuffer = skinVbo,
 							  .indexBuffer = ibo,
 							  .vertexCount = header->vertexCount,
 							  .indexCount = header->indexCount};
