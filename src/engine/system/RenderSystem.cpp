@@ -26,6 +26,30 @@
 namespace ZHLN {
 
 std::expected<void, RenderFrameResult> RenderSystem::Update(Engine& engine) {
+	int physicsDrawMode = 0;
+	JPH::Mat44 shadowProjView = JPH::Mat44::sIdentity();
+
+	// 1. Process standard geometry draws and frame configurations
+	auto mainResult = RenderMain(engine, physicsDrawMode, shadowProjView);
+	if (!mainResult) {
+		return mainResult;
+	}
+
+	// 2. Process secondary debug lines/solids drawing
+	RenderDebug(engine, physicsDrawMode);
+
+	// 3. Resolve frame boundaries
+	auto& rc = engine.GetRenderContext();
+	auto end_res = rc.EndFrame();
+	if (!end_res) {
+		return std::unexpected(end_res.error());
+	}
+
+	return {};
+}
+
+std::expected<void, RenderFrameResult>
+RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView) {
 	auto& rc = engine.GetRenderContext();
 	auto& reg = engine.GetRegistry();
 	auto& cam = engine.GetCamera();
@@ -59,7 +83,7 @@ std::expected<void, RenderFrameResult> RenderSystem::Update(Engine& engine) {
 	JPH::Vec4 probeMin(0, 0, 0, 0);
 	JPH::Vec4 probeMax(0, 0, 0, 0);
 	JPH::Vec4 probePos(0, 0, 0, 0);
-	int physicsDrawMode = 0;
+	outPhysicsDrawMode = 0;
 
 	auto settingsEntities = reg.GetEntitiesWith<GlobalSettingsTagComponent>();
 	if (!settingsEntities.empty()) {
@@ -73,7 +97,7 @@ std::expected<void, RenderFrameResult> RenderSystem::Update(Engine& engine) {
 				JPH::Vec4(pp->probePos.GetX(), pp->probePos.GetY(), pp->probePos.GetZ(), 0.0f);
 		}
 		if (auto* dbg = reg.Get<DebugSettingsComponent>(settingsEntities[0])) {
-			physicsDrawMode = dbg->physicsDrawMode;
+			outPhysicsDrawMode = dbg->physicsDrawMode;
 		}
 	}
 
@@ -129,9 +153,9 @@ std::expected<void, RenderFrameResult> RenderSystem::Update(Engine& engine) {
 	float halfWidth = shadowWidth * 0.5f;
 	JPH::Mat44 lightProj =
 		Math::CreateOrtho(-halfWidth, halfWidth, -halfWidth, halfWidth, 0.1f, 400.0f);
-	JPH::Mat44 shadowProjView = lightProj * lightView;
+	outShadowProjView = lightProj * lightView;
 
-	cam.shadowFrustum.Update(shadowProjView);
+	cam.shadowFrustum.Update(outShadowProjView);
 
 	JPH::Mat44 biasMatrix = {JPH::Vec4(0.5f, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, -0.5f, 0.0f, 0.0f),
 							 JPH::Vec4(0.0f, 0.0f, 1.0f, 0.0f), JPH::Vec4(0.5f, 0.5f, 0.0f, 1.0f)};
@@ -167,7 +191,7 @@ std::expected<void, RenderFrameResult> RenderSystem::Update(Engine& engine) {
 	}
 
 	rc.SetAAState(aaState);
-	Renderer::SetFrameData(rc, cam, uniforms, shadowProjView);
+	Renderer::SetFrameData(rc, cam, uniforms, outShadowProjView);
 	Renderer::SetMatrices(rc, vp, unjitteredVp);
 
 	const auto& mainVisible = engine.GetVisibleEntities();
@@ -177,7 +201,7 @@ std::expected<void, RenderFrameResult> RenderSystem::Update(Engine& engine) {
 		return std::ranges::find(list, e) != list.end();
 	};
 
-	if (physicsDrawMode == 0) {
+	if (outPhysicsDrawMode == 0) {
 		for (Entity e : reg.GetEntitiesWith<MeshComponent>()) {
 			bool inMain = IsInList(mainVisible, e);
 			bool inShadow = IsInList(shadowVisible, e);
@@ -223,6 +247,12 @@ std::expected<void, RenderFrameResult> RenderSystem::Update(Engine& engine) {
 
 	CullingStats::TotalObjects = reg.GetEntitiesWith<MeshComponent>().size();
 	CullingStats::CulledObjects = CullingStats::TotalObjects - visibleEntities.size();
+
+	return {};
+}
+
+void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
+	auto& rc = engine.GetRenderContext();
 
 	engine.GetCullingSystem().DrawDebugFrustum(engine);
 
@@ -305,13 +335,6 @@ std::expected<void, RenderFrameResult> RenderSystem::Update(Engine& engine) {
 							.cullRadius = 10000.0f});
 		}
 	}
-
-	auto end_res = rc.EndFrame();
-	if (!end_res) {
-		return std::unexpected(end_res.error());
-	}
-
-	return {};
 }
 
 } // namespace ZHLN

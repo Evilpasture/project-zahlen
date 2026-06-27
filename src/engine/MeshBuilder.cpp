@@ -14,20 +14,6 @@
 
 namespace ZHLN::AssetFactory {
 
-// --- HELPER: Generates a procedural 2D grid texture ---
-static uint32_t CreateProceduralCheckerboard(RenderContext& ctx) {
-	const uint32_t size = 256;
-	std::vector<uint32_t> pixels(static_cast<size_t>(size * size));
-	for (uint32_t y = 0; y < size; y++) {
-		for (uint32_t x = 0; x < size; x++) {
-			// XOR logic creates a perfect grid
-			bool isWhite = ((x / 32) + (y / 32)) % 2 == 0;
-			pixels[(y * size) + x] = isWhite ? 0xFFFFFFFF : 0xFF333333;
-		}
-	}
-	return ctx.CreateTexture(pixels.data(), size, size);
-}
-
 Material CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend) {
 	PipelineDesc desc;
 	desc.vertexShaderData = ZHLN_Resource_BasicVertSpv;
@@ -59,11 +45,11 @@ Mesh CreatePlane(RenderContext& ctx, float extent, const JPH::Vec4& color) {
 
 	std::vector<VertexAttributes> attributes = {
 		{.normal = n, .tangent = t, .uv = Math::PackUV(0.0f, 1.0f), .color = c},
-		{n, t, Math::PackUV(1.0f, 1.0f), c},
+		{.normal = n, .tangent = t, .uv = Math::PackUV(1.0f, 1.0f), .color = c},
 		{.normal = n, .tangent = t, .uv = Math::PackUV(1.0f, 0.0f), .color = c},
-		{n, t, Math::PackUV(1.0f, 0.0f), c},
+		{.normal = n, .tangent = t, .uv = Math::PackUV(1.0f, 0.0f), .color = c},
 		{.normal = n, .tangent = t, .uv = Math::PackUV(0.0f, 0.0f), .color = c},
-		{n, t, Math::PackUV(0.0f, 1.0f), c}};
+		{.normal = n, .tangent = t, .uv = Math::PackUV(0.0f, 1.0f), .color = c}};
 
 	BufferHandle posVbo =
 		ctx.CreateVertexBuffer(positions.data(), positions.size() * sizeof(VertexPosition));

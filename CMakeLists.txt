@@ -144,7 +144,6 @@ if(BUILD_TESTING)
 endif()
 
 set(ENGINE_SOURCES
-    src/engine/Allocator.cpp
     src/engine/AssertHandler.cpp
     src/engine/RenderFrame.cpp
     src/engine/RenderInit.cpp

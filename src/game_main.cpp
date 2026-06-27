@@ -11,7 +11,6 @@
 #include "ecs/SystemGraph.hpp"
 #include "engine/FileWatcher.hpp"
 #include "engine/Platform.hpp"
-#include "engine/Resources.hpp"
 #include "engine/system/CameraSystem.hpp"
 #include "engine/system/InputSystem.hpp"
 #include "engine/system/LightingSystem.hpp"
@@ -22,7 +21,6 @@
 #include "engine/system/UIRenderSystem.hpp"
 #include "imgui.h"
 #include "physics/Physics.hpp"
-#include "physics/PhysicsDebug.hpp"
 
 #include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Camera.hpp>

@@ -11,7 +11,15 @@ class Engine;
 
 class ZHLN_API RenderSystem {
   public:
-	// Runs the main scene geometry and light submission pass
+	// Top-level orchestrator managing frame lifecycles
 	static std::expected<void, RenderFrameResult> Update(Engine& engine);
+
+  private:
+	// Phase 1: Resolves viewports, cascaded shadows, and draws standard mesh components
+	static std::expected<void, RenderFrameResult>
+	RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView);
+
+	// Phase 2: Resolves frustum outlines and Jolt physics debug visualizations
+	static void RenderDebug(Engine& engine, int physicsDrawMode);
 };
 } // namespace ZHLN
