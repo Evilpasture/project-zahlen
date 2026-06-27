@@ -500,7 +500,8 @@ struct RenderContext::Impl {
 	DoubleBuffered<VkAccelerationStructureKHR> tlas;
 	DoubleBuffered<Vk::Buffer> tlasBuffer;
 	DoubleBuffered<Vk::Buffer> tlasScratchBuffer;
-	std::array<std::vector<Vk::Buffer>, 2> tlasCleanupBuffers;
+	DoubleBuffered<Vk::Buffer> tlasInstanceBuffers;
+	DoubleBuffered<Vk::Buffer> tlasStagingBuffers;
 
 	ZHLN::DoubleBuffered<Vk::Buffer> frameUniformBuffers;
 	ZHLN::DoubleBuffered<Vk::Buffer> lightStorageBuffers;
@@ -546,6 +547,11 @@ struct RenderContext::Impl {
 		uint32_t activeMorphCount;
 		float morphWeights[4];
 	};
+
+	Vk::ComputePass hangGpuPass;
+
+	void BuildHangGpuPipeline();
+	void ProvokeDeviceLostInternal() const;
 
 	void BuildSkinningPipeline();
 	void DispatchSkinningPasses();

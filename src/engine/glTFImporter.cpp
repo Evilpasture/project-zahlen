@@ -965,8 +965,8 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 					   .activeMorphCount = part.activeMorphCount,
 					   .morphWeights = {part.defaultMorphWeights[0], part.defaultMorphWeights[1],
 										part.defaultMorphWeights[2], part.defaultMorphWeights[3]},
-					   .gltfNode = params.isAnimated ? part.gltfNode : nullptr,
-					   .gltfSkin = params.isAnimated ? part.gltfSkin : nullptr,
+					   .gltfNode = part.gltfNode,
+					   .gltfSkin = part.gltfSkin,
 					   .flags = flags});
 		reg.Add(e, NameComponent{.name = part.name});
 
@@ -1037,8 +1037,8 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 					.activeMorphCount = part.activeMorphCount,
 					.morphWeights = {part.defaultMorphWeights[0], part.defaultMorphWeights[1],
 									 part.defaultMorphWeights[2], part.defaultMorphWeights[3]},
-					.gltfNode = params.isAnimated ? part.gltfNode : nullptr,
-					.gltfSkin = params.isAnimated ? part.gltfSkin : nullptr});
+					.gltfNode = part.gltfNode,
+					.gltfSkin = part.gltfSkin});
 		reg.Add(e, NameComponent{.name = part.name});
 		reg.Add(e, HierarchyComponent{.parent = rootEntity});
 	}
@@ -1315,6 +1315,108 @@ void SetupPlayerRagdoll([[maybe_unused]] RenderContext& rc, PhysicsContext& pc, 
 		Log("Skeletal Ragdoll successfully generated with simplified key bones.");
 	} else {
 		Log("WARNING: SetupPlayerRagdoll failed because no skeletal skin was found.");
+	}
+}
+
+void ReuploadAllPrefabs(
+	RenderContext& ctx, AssetManager& assetMgr,
+	std::unordered_map<BufferHandle, std::pair<Mesh, Material>>& outMeshRebuildMap) {
+	// 1. Query the actual number of active cached prefabs
+	uint32_t count = assetMgr.GetCachedPrefabs(nullptr, 0);
+	if (count == 0) {
+		return;
+	}
+
+	// 2. Allocate the local vector and retrieve the pointers safely under lock
+	std::vector<ModelPrefab*> prefabs(count);
+	assetMgr.GetCachedPrefabs(prefabs.data(), count);
+
+	for (auto* prefab : prefabs) {
+		cgltf_data* data = prefab->rawData;
+		if (data == nullptr) {
+			continue;
+		}
+
+		// Gather all tasks based on the glTF data
+		std::vector<cgltf_image*> uniqueImages;
+		std::vector<CPUPrimitiveJob> primitiveJobs;
+		GatherImagesAndPrimitiveJobs(data, uniqueImages, primitiveJobs);
+
+		JPH::Array<CPUTextureJob> textureJobs;
+		ProcessCPUTasks(std::string(prefab->virtualPath.c_str()), uniqueImages, primitiveJobs,
+						textureJobs);
+
+		// Upload texture resources
+		auto imageToBindlessIdx = UploadTexturesToGPU(ctx, textureJobs);
+
+		std::unordered_map<const cgltf_primitive*, CompiledPrimitive> primCache;
+
+		for (size_t i = 0; i < primitiveJobs.size(); ++i) {
+			const auto& primJob = primitiveJobs[i];
+			bool isMirrored = (primJob.nodeTransform.GetDeterminant3x3() < 0.0f);
+
+			// Compile and upload the primitive's mesh and material
+			CompiledPrimitive compPrim = GetOrCreateCompiledPrimitive(
+				ctx, primJob, imageToBindlessIdx, primCache, isMirrored);
+
+			if (i < prefab->partCount) {
+				// Record the mapping: OLD posBuffer handle -> NEW Mesh / Material
+				BufferHandle oldPosBuffer = prefab->parts[i].mesh.posBuffer;
+				if (oldPosBuffer != BufferHandle::Invalid) {
+					outMeshRebuildMap[oldPosBuffer] = {compPrim.mesh, compPrim.defaultMaterial};
+				}
+
+				// Update the cached prefab's internal part handles
+				prefab->parts[i].mesh = compPrim.mesh;
+				prefab->parts[i].defaultMaterial = compPrim.defaultMaterial;
+			}
+		}
+	}
+}
+
+void RebuildVulkanResources(RenderContext& ctx, AssetManager& assetMgr, ECS::Registry& reg) {
+	ZHLN::Log("[Engine] Re-uploading all textures and meshes to new Vulkan device...");
+
+	// 1. Re-bake system font atlas
+	CreateFontAtlasTexture(ctx);
+
+	// 2. Map of OLD posBuffer -> NEW Mesh and Material
+	std::unordered_map<BufferHandle, std::pair<Mesh, Material>> meshRebuildMap;
+
+	// 3. Re-upload all cached prefabs and populate the rebuild map
+	ReuploadAllPrefabs(ctx, assetMgr, meshRebuildMap);
+
+	// 4. Update existing MeshComponents in the registry
+	auto entities = reg.GetEntitiesWith<MeshComponent>();
+	auto meshes = reg.GetRawArray<MeshComponent>();
+	for (size_t i = 0; i < entities.size(); ++i) {
+		MeshComponent& meshComp = meshes[i];
+
+		// Extract the old VBO handle to look up its newly compiled counterpart
+		BufferHandle oldPosBuffer = meshComp.mesh.posBuffer;
+
+		// If it is a skinned mesh, recreate its scratch buffer
+		if (meshComp.isSkinned && meshComp.skinnedVertexBuffer != BufferHandle::Invalid) {
+			meshComp.skinnedVertexBuffer =
+				ctx.CreateSkinnedScratchBuffer(meshComp.mesh.vertexCount);
+		}
+
+		if (oldPosBuffer != BufferHandle::Invalid) {
+			auto it = meshRebuildMap.find(oldPosBuffer);
+			if (it != meshRebuildMap.end()) {
+				meshComp.mesh = it->second.first;
+				meshComp.material = it->second.second;
+			}
+		}
+	}
+
+	// 5. Reset TextComponents so they rebuild their mesh buffers on the next frame
+	for (Entity e : reg.GetEntitiesWith<TextComponent>()) {
+		if (auto* text = reg.Get<TextComponent>(e)) {
+			text->mesh.posBuffer = BufferHandle::Invalid;
+			text->mesh.attrBuffer = BufferHandle::Invalid;
+			text->mesh.indexBuffer = BufferHandle::Invalid;
+		}
 	}
 }
 

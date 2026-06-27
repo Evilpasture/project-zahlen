@@ -753,6 +753,14 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 		static Material debugLineMat = {.pipeline = PipelineHandle::Invalid};
 		static Material debugSolidMat = {.pipeline = PipelineHandle::Invalid};
 
+		// Context tracker to invalidate static pipelines upon hardware hot-rebuild
+		static RenderContext* s_LastContext = nullptr;
+		if (&rc != s_LastContext) {
+			debugLineMat.pipeline = PipelineHandle::Invalid;
+			debugSolidMat.pipeline = PipelineHandle::Invalid;
+			s_LastContext = &rc;
+		}
+
 		if (debugLineMat.pipeline == PipelineHandle::Invalid) {
 			PipelineDesc lineDesc = {.vertexShaderData = ZHLN_Resource_BasicVertSpv,
 									 .vertexShaderSize = ZHLN_Resource_BasicVertSpv_Len,
@@ -1219,8 +1227,8 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine,
 		auto render_res = RenderGame(*engine, rawDt);
 		if (!render_res) {
 			if (render_res.error() == RenderFrameResult::DeviceLost) {
+				// Recover the graphics device and rebind the meshes seamlessly!
 				engine->HandleDeviceLost();
-				scriptRunner.ReloadFile("scripts/gameplay.lua");
 			}
 		}
 

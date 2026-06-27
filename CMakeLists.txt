@@ -469,6 +469,12 @@ add_dependencies(zahlen_engine zahlen_engine_forward_shader)
 target_compile_definitions(zahlen_engine PRIVATE SHADER_FORWARD_HLSL_PS_PATH="${FORWARD_FRAG_SPV}")
 set_property(SOURCE src/engine/Resources.c APPEND PROPERTY OBJECT_DEPENDS "${FORWARD_FRAG_SPV}")
 
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/hang_gpu.hlsl" CSMain cs_6_0 HANG_GPU_COMP_SPV)
+add_custom_target(zahlen_engine_hang_gpu_shader ALL DEPENDS ${HANG_GPU_COMP_SPV})
+add_dependencies(zahlen_engine zahlen_engine_hang_gpu_shader)
+target_compile_definitions(zahlen_engine PRIVATE SHADER_HANG_GPU_HLSL_CS_PATH="${HANG_GPU_COMP_SPV}")
+set_property(SOURCE src/engine/Resources.c APPEND PROPERTY OBJECT_DEPENDS "${HANG_GPU_COMP_SPV}")
+
 add_executable(zahlen 
     src/main.cpp
     src/game_main.cpp 

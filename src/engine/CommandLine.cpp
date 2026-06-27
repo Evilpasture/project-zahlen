@@ -10,6 +10,7 @@
 #include <charconv>
 #include <expected>
 #include <filesystem>
+#include <iostream>
 #include <print>
 #include <span>
 #include <vector>
@@ -38,7 +39,21 @@
 #define ZHLN_LINKER_NAME "unknown"
 #endif
 
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 namespace {
+
+auto GetPID() noexcept {
+#ifdef _WIN32
+	return _getpid();
+#else
+	return getpid();
+#endif
+}
 
 struct Token {
 	std::string_view key;
@@ -104,6 +119,7 @@ Options:
   --quiet                  Disable all logging outputs (silent mode)
   --renderdoc <on|off>     Load RenderDoc library at startup (default: off)
   --benchmark              Run the benchmark suite
+  --debug-attach           Wait for a program to attach to the running engine process
 
 Environment Variables:
   ZHLN_VALIDATION=0    Disable Vulkan validation layers
@@ -256,6 +272,21 @@ constexpr std::array Handlers = {
 					   opt.benchmark = true;
 					   return {};
 				   }},
+	CommandHandler{
+		.key = "--debug-attach",
+		.shortKey = "",
+		.action = [](ZHLN::CommandLineOptions&,
+					 std::string_view) -> std::expected<void, ZHLN::EngineError> {
+			std::println(R"(
+Waiting for attachment. PID: {}
+Press ENTER to continue.
+)",
+						 GetPID());
+
+			std::cin.get();
+			return {};
+		},
+	}
 
 };
 

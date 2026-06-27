@@ -63,6 +63,10 @@ static void InitRenderDocAPI() {
 	}
 }
 
+namespace AssetFactory {
+void RebuildVulkanResources(RenderContext& ctx, AssetManager& assetMgr, ECS::Registry& reg);
+}
+
 struct EngineImpl {
 	std::unique_ptr<InputContext> input;
 	std::unique_ptr<Window> window;
@@ -100,10 +104,17 @@ Engine::Engine(const EngineConfig& cfg) : _impl(nullptr) {
 
 void Engine::HandleDeviceLost() noexcept {
 	ZHLN::Log("[Engine] CRITICAL: Vulkan Device Lost detected! Initiating hardware hot-rebuild...");
+
+	// 1. Reset and Recreate Render Context (New Vulkan Device)
 	_impl->renderContext.reset();
 	_impl->renderContext = std::make_unique<RenderContext>(*_impl->window, _impl->config.render);
-	_impl->registry.Clear();
-	ZHLN::Log("[Engine] Hardware hot-rebuild completed successfully. Re-syncing scene assets...");
+
+	// 2. Perform True Rebinding Recovery (Zero physics/registry/scripting resets)
+	AssetFactory::RebuildVulkanResources(*_impl->renderContext, *_impl->assetManager,
+										 _impl->registry);
+
+	ZHLN::Log("[Engine] Hardware hot-rebuild completed successfully. All visual assets rebound to "
+			  "new GPU.");
 }
 
 Engine::Engine(const EngineConfig& cfg, bool& outSuccess) : _impl(nullptr) {
@@ -142,7 +153,10 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess, const char*
 
 	bool use_tty = false;
 	if constexpr (isLinux) {
-		if (std::getenv("ENABLE_VULKAN_RENDERDOC_CAPTURE") != nullptr) {
+		// Detects both RenderDoc and NVIDIA Nsight Graphics (Nomad) launch environments
+		if (std::getenv("ENABLE_VULKAN_RENDERDOC_CAPTURE") != nullptr ||
+			std::getenv("NOMAD_VULKAN_LAYER") != nullptr ||
+			std::getenv("NGFX_INJECTION") != nullptr) {
 			glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
 		}
 	}
@@ -330,6 +344,10 @@ void* Engine::GetGameState() const {
 }
 void Engine::SetGameState(void* state) {
 	_impl->gameState = state;
+}
+
+void Engine::ProvokeDeviceLost() {
+	_impl->renderContext->ProvokeDeviceLost();
 }
 
 Engine* GetEngineContext() {

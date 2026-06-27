@@ -664,6 +664,10 @@ SPECIALIZED_HANDLERS["Raycast"] = function(self, args)
     return nil
 end
 
+SPECIALIZED_HANDLERS["ProvokeDeviceLost"] = function(self, args)
+    return ffi.C.ZHLN_DispatchCommand(self._raw, "ProvokeDeviceLost", nil)
+end
+
 -- Expose the dispatch interface to the Engine object
 function Engine:dispatch(cmd, args)
     local specialized = SPECIALIZED_HANDLERS[cmd]
@@ -693,6 +697,10 @@ end
 
 function Engine:spawn_light(options)
     return self:dispatch("SpawnLight", options)
+end
+
+function Engine:provoke_device_lost()
+    return self:dispatch("ProvokeDeviceLost", nil)
 end
 
 return _G.zh

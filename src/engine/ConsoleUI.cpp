@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include <Zahlen/Console.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <detail/ControlFlow.hpp>
@@ -187,6 +186,13 @@ void DrawConsole(ScriptRunner& scriptRunner) {
 		ImGui::End();
 		return;
 	}
+
+	if (ImGui::Button("Provoke GPU Hang")) {
+		if (auto* engine = GetEngineContext()) {
+			engine->ProvokeDeviceLost();
+		}
+	}
+	ImGui::SameLine();
 
 	const float footer_height =
 		ImGui::GetStyle().ItemSpacing.y + ImGui::GetFrameHeightWithSpacing();

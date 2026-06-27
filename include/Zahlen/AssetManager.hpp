@@ -148,6 +148,19 @@ class AssetManager {
 	// Internal hook for the AssetFactory to register a newly loaded Prefab
 	void CachePrefab(uint64_t hash, ModelPrefab* prefab);
 
+	/**
+	 * @brief Safely clears and frees all cached ModelPrefabs.
+	 */
+	void ClearCache() noexcept;
+
+	/**
+	 * @brief Safely retrieves pointers to all currently cached ModelPrefabs.
+	 * @param outPrefabs Destination array of ModelPrefab pointers (pass nullptr to query count).
+	 * @param maxCount Maximum number of pointers the destination array can hold.
+	 * @return The total number of cached prefabs.
+	 */
+	uint32_t GetCachedPrefabs(struct ModelPrefab** outPrefabs, uint32_t maxCount);
+
   private:
 	void ExecuteLoad(AssetLoadRequest* req);
 

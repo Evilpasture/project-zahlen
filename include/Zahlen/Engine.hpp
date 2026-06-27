@@ -75,6 +75,8 @@ class ZHLN_API Engine {
 	void SetGameState(void* state);
 	[[nodiscard]] uint64_t GetCurrentFrame() const noexcept;
 
+	void ProvokeDeviceLost();
+
   private:
 	void InitInternal(const EngineConfig& cfg, bool& outSuccess, const char** outError = nullptr);
 	std::unique_ptr<EngineImpl> _impl;

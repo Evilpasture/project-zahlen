@@ -776,6 +776,11 @@ static void RegisterFFICommands() {
 
 		return e.Pack();
 	};
+
+	s_CommandRegistry["ProvokeDeviceLost"] = [](ZHLN::Engine* engine, const void*) -> uint64_t {
+		engine->ProvokeDeviceLost();
+		return 1;
+	};
 }
 
 // ============================================================================

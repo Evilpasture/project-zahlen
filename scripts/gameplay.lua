@@ -40,6 +40,16 @@ zh:on("engine.start", function()
     })
     zh.ecs:add(sun, "SunTagComponent")
 
+    zh:spawn_light({
+        type = 0,
+        position = { 64.0, 200.0, 64.0 },
+        rotation = { 0.0, 0.0, 0.0, 1.0 },
+        color = { 1.0, 1.0, 1.0 },
+        intensity = 180.0,
+        radius = 0.5,
+        range = 400.0
+    })
+
     -- Dynamically locate the floor mesh parts and add PBRComponent
     for ent, name_comp in zh.ecs:view("NameComponent") do
         local name_str = string.lower(ffi.string(name_comp.name))

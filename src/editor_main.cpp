@@ -511,6 +511,13 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 			static Material debugLineMat = {.pipeline = PipelineHandle::Invalid};
 			static Material debugSolidMat = {.pipeline = PipelineHandle::Invalid};
 
+			static RenderContext* s_LastContext = nullptr;
+			if (&rc != s_LastContext) {
+				debugLineMat.pipeline = PipelineHandle::Invalid;
+				debugSolidMat.pipeline = PipelineHandle::Invalid;
+				s_LastContext = &rc;
+			}
+
 			if (debugLineMat.pipeline == PipelineHandle::Invalid) {
 				PipelineDesc lineDesc = {.vertexShaderData = ZHLN_Resource_BasicVertSpv,
 										 .vertexShaderSize = ZHLN_Resource_BasicVertSpv_Len,

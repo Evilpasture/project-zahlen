@@ -344,7 +344,11 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 		Vk::FeatureChainBuilder()
 			.Require<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>(
 				[](auto& f) { f.swapchainMaintenance1 = VK_TRUE; })
-			.Require<VkPhysicalDeviceVulkan11Features>([](auto& f) { f.multiview = VK_TRUE; })
+			.Require<VkPhysicalDeviceVulkan11Features>([](auto& f) {
+				f.multiview = VK_TRUE;
+				f.storageBuffer16BitAccess = VK_TRUE;
+				f.uniformAndStorageBuffer16BitAccess = VK_TRUE;
+			})
 			.Require<VkPhysicalDeviceVulkan13Features>([](auto& f) {
 				f.synchronization2 = VK_TRUE;
 				f.dynamicRendering = VK_TRUE;
@@ -360,6 +364,7 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 				f.hostQueryReset = VK_TRUE;
 				f.drawIndirectCount = caps.supportsDrawIndirectCount ? VK_TRUE : VK_FALSE;
 				f.bufferDeviceAddress = VK_TRUE;
+				f.uniformAndStorageBuffer8BitAccess = VK_TRUE;
 			})
 			.Optional<VkPhysicalDeviceAccelerationStructureFeaturesKHR>(
 				caps.supportsRayTracing, [](auto& f) { f.accelerationStructure = VK_TRUE; })
@@ -420,6 +425,9 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	_impl->InitShadowResources();
 	_impl->InitCullingResources();
 	_impl->InitBindless();
+
+	_impl->BuildHangGpuPipeline();
+
 	_impl->CompileShadowPipeline(_impl->ctx.Device(), &ZHLN_Resource_BasicVertSpv[0],
 								 ZHLN_Resource_BasicVertSpv_Len);
 	_impl->CompilePunctualShadowPipeline(_impl->ctx.Device(),
@@ -647,6 +655,46 @@ void RenderContext::Impl::InitCullingResources() {
 							 .entry_point = "CSMain"};
 	if (!clusterCullingPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), cDesc)) {
 		ZHLN::Panic("FATAL: Failed to build Cluster Culling Pass!");
+	}
+
+	// --- PRE-ALLOCATE STATIC TLAS RESOURCES ---
+	if (rtCtx.Valid()) {
+		ZHLN_AccelerationStructureSizes tlasSizes;
+		rtCtx.GetTlasSizes(kGpuCullingMaxInstances, tlasSizes);
+
+		for (int i = 0; i < 2; ++i) {
+			// Allocate TLAS Backing Storage
+			tlasBuffer[i] =
+				Vk::Buffer::Create(allocator.Get(), tlasSizes.acceleration_structure_size,
+								   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+									   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+								   VMA_MEMORY_USAGE_GPU_ONLY);
+
+			// Allocate TLAS Build Scratch Memory
+			tlasScratchBuffer[i] = Vk::Buffer::Create(allocator.Get(), tlasSizes.build_scratch_size,
+													  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+														  VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+													  VMA_MEMORY_USAGE_GPU_ONLY);
+
+			// Create Top-Level Acceleration Structure Handle
+			tlas[i] = rtCtx.CreateAS(tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size,
+									 ZHLN_AS_TYPE_TOP_LEVEL);
+
+			// Allocate GPU Instance Buffer (Reads instances into the AS builder)
+			tlasInstanceBuffers[i] = Vk::Buffer::Create(
+				allocator.Get(),
+				sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances,
+				VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+					VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+					VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+				VMA_MEMORY_USAGE_GPU_ONLY);
+
+			// Allocate Host-Visible Staging Buffer
+			tlasStagingBuffers[i] = Vk::Buffer::Create(
+				allocator.Get(),
+				sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances,
+				VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+		}
 	}
 
 	BuildSkinningPipeline();
@@ -1206,7 +1254,8 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
 	smaaEdgeTarget = CreateDefaultTarget<VK_FORMAT_R8G8_UNORM>(ext);
 	smaaWeightTarget = CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext);
 
-	VkExtent2D bloomExt = {std::max(1u, ext.width / 4), std::max(1u, ext.height / 4)};
+	VkExtent2D bloomExt = {.width = std::max(1u, ext.width / 4),
+						   .height = std::max(1u, ext.height / 4)};
 	bloomThresholdTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(bloomExt);
 	bloomBlurTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(bloomExt);
 	bloomFinalTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(bloomExt);
@@ -1232,6 +1281,40 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
 	}
 
 	return true;
+}
+
+void RenderContext::Impl::BuildHangGpuPipeline() {
+	const void* cs_code = nullptr;
+	size_t cs_size = 0;
+	std::vector<uint32_t> disk_cs;
+
+	LoadShaderData({.path = SHADER_HANG_GPU_HLSL_CS_PATH,
+					.fallbackCode = ZHLN_Resource_HangGpuCompSpv,
+					.fallbackSize = ZHLN_Resource_HangGpuCompSpv_Len,
+					.entryPoint = "CSMain"},
+				   cs_code, cs_size, disk_cs);
+
+	ZHLN_ShaderDesc desc = {.code = Vk::AsSpirV(cs_code), .size = cs_size, .entry_point = "CSMain"};
+
+	// Create an empty pipeline layout with 0 descriptor set layouts
+	ZHLN_PipelineLayoutDesc pLayoutDesc = {.set_layouts = nullptr,
+										   .set_layout_count = 0,
+										   .push_constants = nullptr,
+										   .push_constant_count = 0};
+
+	// Build the compute pipeline with the empty layout
+	hangGpuPass.pipelineLayout =
+		Vk::PipelineLayout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &pLayoutDesc));
+	hangGpuPass.pipeline = Vk::ComputePipelineBuilder()
+							   .Shader(desc)
+							   .Layout(hangGpuPass.pipelineLayout.Get())
+							   .Build(ctx.Device());
+
+	if (hangGpuPass.pipeline.Valid()) {
+		ZHLN::Log("[Shader Reload] Hang GPU Pipeline built successfully with empty layout.");
+	} else {
+		ZHLN::Log("ERROR: Failed to build Hang GPU compute pipeline.");
+	}
 }
 
 } // namespace ZHLN

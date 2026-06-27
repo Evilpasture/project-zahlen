@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "threading/TaskSystem.hpp"
 
 #include <Zahlen/AssetManager.hpp>
@@ -35,8 +34,9 @@ AssetManager::~AssetManager() {
 	}
 	for (size_t i = 0; i < _prefabsCount; ++i) {
 		auto* prefab = _prefabsMemory[i];
-		if (prefab->rawData)
+		if (prefab->rawData != nullptr) {
 			cgltf_free(prefab->rawData);
+		}
 		delete prefab;
 	}
 	delete[] _prefabsMemory;
@@ -202,6 +202,34 @@ void AssetManager::CachePrefab(uint64_t hash, ModelPrefab* prefab) {
 			_prefabsCapacity = newCap;
 		}
 		_prefabsMemory[_prefabsCount++] = prefab;
+	}
+}
+
+void AssetManager::ClearCache() noexcept {
+	ZHLN_LOCK(_prefabMutex) {
+		// 1. Clear the lookup hash map
+		_prefabCache.Clear();
+
+		// 2. Destroy and free all memory allocated for cached prefabs
+		for (size_t i = 0; i < _prefabsCount; ++i) {
+			auto* prefab = _prefabsMemory[i];
+			if (prefab->rawData != nullptr) {
+				cgltf_free(prefab->rawData);
+			}
+			delete prefab;
+		}
+		_prefabsCount = 0;
+	}
+}
+
+uint32_t AssetManager::GetCachedPrefabs(ModelPrefab** outPrefabs, uint32_t maxCount) {
+	ZHLN_LOCK(_prefabMutex) {
+		if (outPrefabs == nullptr || maxCount == 0) {
+			return static_cast<uint32_t>(_prefabsCount);
+		}
+		uint32_t toCopy = std::min(static_cast<uint32_t>(_prefabsCount), maxCount);
+		std::memcpy(outPrefabs, _prefabsMemory, toCopy * sizeof(ModelPrefab*));
+		return toCopy;
 	}
 }
 

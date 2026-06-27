@@ -202,3 +202,8 @@ const unsigned char ZHLN_Resource_PunctualShadowsFragSpv[] = {
 };
 const unsigned int ZHLN_Resource_PunctualShadowsFragSpv_Len =
 	sizeof(ZHLN_Resource_PunctualShadowsFragSpv);
+
+const unsigned char ZHLN_Resource_HangGpuCompSpv[] = {
+#embed SHADER_HANG_GPU_HLSL_CS_PATH
+};
+const unsigned int ZHLN_Resource_HangGpuCompSpv_Len = sizeof(ZHLN_Resource_HangGpuCompSpv);

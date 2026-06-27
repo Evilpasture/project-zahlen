@@ -47,4 +47,5 @@ DECLARE_RESOURCE(ZHLN_Resource_BloomBlurVertSpv)
 DECLARE_RESOURCE(ZHLN_Resource_BloomBlurFragSpv)
 DECLARE_RESOURCE(ZHLN_Resource_PunctualShadowsVertSpv)
 DECLARE_RESOURCE(ZHLN_Resource_PunctualShadowsFragSpv)
+DECLARE_RESOURCE(ZHLN_Resource_HangGpuCompSpv)
 }

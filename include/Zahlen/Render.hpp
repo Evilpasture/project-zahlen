@@ -78,6 +78,8 @@ class ZHLN_API RenderContext {
 
 	void SetShadowResolution(uint32_t resolution);
 
+	void ProvokeDeviceLost();
+
 	struct Impl;
 	[[nodiscard]] auto GetImpl() const -> Impl* { return _impl.get(); }
 

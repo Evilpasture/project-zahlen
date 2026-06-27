@@ -1206,8 +1206,6 @@ RenderResult RenderContext::EndFrame() noexcept {
 		_impl->drawQueue.resize(kGpuCullingMaxInstances);
 	}
 
-	_impl->tlasCleanupBuffers[_impl->frame_index].clear();
-
 	_impl->SortDrawQueue();
 
 	auto drawCount = static_cast<uint32_t>(_impl->drawQueue.size());
@@ -1290,12 +1288,6 @@ RenderResult RenderContext::EndFrame() noexcept {
 			};
 		}
 	}
-	if (_impl->tlas.Current() != VK_NULL_HANDLE && _impl->rtCtx.Valid()) {
-		_impl->rtCtx.DestroyAS(_impl->tlas.Current());
-		_impl->tlas.Current() = VK_NULL_HANDLE;
-		_impl->tlasBuffer.Current() = {};
-	}
-	_impl->tlasCleanupBuffers[_impl->frame_index].clear();
 
 	std::vector<VkAccelerationStructureInstanceKHR> tlasInstances;
 	tlasInstances.reserve(_impl->drawQueue.size());
@@ -1338,21 +1330,15 @@ RenderResult RenderContext::EndFrame() noexcept {
 	}
 
 	if (!tlasInstances.empty() && _impl->rtCtx.Valid()) {
-		Vk::Buffer instanceBuf = Vk::Buffer::Create(
-			_impl->allocator.Get(),
-			tlasInstances.size() * sizeof(VkAccelerationStructureInstanceKHR),
-			VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-				VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-				VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-			VMA_MEMORY_USAGE_GPU_ONLY);
-		Vk::Buffer staging =
-			Vk::Buffer::Create(_impl->allocator.Get(),
-							   tlasInstances.size() * sizeof(VkAccelerationStructureInstanceKHR),
-							   VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
-		std::memcpy(staging.Map().data, tlasInstances.data(),
+		auto& stagingBuf = _impl->tlasStagingBuffers[_impl->frame_index];
+		auto& instanceBuf = _impl->tlasInstanceBuffers[_impl->frame_index];
+
+		// Safely write to persistently mapped memory
+		std::memcpy(stagingBuf.Map().data, tlasInstances.data(),
 					tlasInstances.size() * sizeof(VkAccelerationStructureInstanceKHR));
 
-		ZHLN_BufferCopyDesc copy = {.src = staging.Handle(),
+		// Command Buffer Transfer Copy
+		ZHLN_BufferCopyDesc copy = {.src = stagingBuf.Handle(),
 									.dst = instanceBuf.Handle(),
 									.size = tlasInstances.size() *
 											sizeof(VkAccelerationStructureInstanceKHR),
@@ -1360,49 +1346,18 @@ RenderResult RenderContext::EndFrame() noexcept {
 									.dst_offset = 0};
 		ZHLN_CmdCopyBuffer(cmd, &copy);
 
-		Vk::MemoryBarrier(
-			cmd, {.src_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT |
-							   VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
-							   VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-				  .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT |
-								VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
-				  .dst_stage = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-				  .dst_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
-								VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
-								VK_ACCESS_2_SHADER_READ_BIT});
+		// --- SPECIFIC, EXTREMELY LIGHTWEIGHT PIPELINE BARRIER ---
+		// Synchronizes only this dedicated 512KB instance buffer before the AS build begins:
+		Vk::MemoryBarrier(cmd,
+						  {.src_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+						   .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+						   .dst_stage = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+						   .dst_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+										 VK_ACCESS_2_SHADER_READ_BIT});
 
+		// 4. Build the TLAS using pre-allocated, double-buffered scratch and AS memory
 		ZHLN_TlasGeometryDesc geom = {
 			.instance_data = Vk::GetBufferDeviceAddress(_impl->ctx.Device(), instanceBuf.Handle())};
-
-		ZHLN_AccelerationStructureSizes sizes;
-		_impl->rtCtx.GetTlasSizes(static_cast<uint32_t>(tlasInstances.size()), sizes);
-
-		bool needRebuild = !_impl->tlasBuffer.Current().Valid() ||
-						   _impl->tlasBuffer.Current().Size() < sizes.acceleration_structure_size;
-
-		if (needRebuild) {
-			if (_impl->tlas.Current() != VK_NULL_HANDLE) {
-				_impl->rtCtx.DestroyAS(_impl->tlas.Current());
-				_impl->tlas.Current() = VK_NULL_HANDLE;
-			}
-			_impl->tlasBuffer.Current() = Vk::Buffer::Create(
-				_impl->allocator.Get(), sizes.acceleration_structure_size,
-				VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, VMA_MEMORY_USAGE_GPU_ONLY);
-			_impl->tlas.Current() =
-				_impl->rtCtx.CreateAS(_impl->tlasBuffer.Current().Handle(),
-									  sizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL);
-		}
-
-		bool needScratchRebuild =
-			!_impl->tlasScratchBuffer.Current().Valid() ||
-			_impl->tlasScratchBuffer.Current().Size() < sizes.build_scratch_size;
-
-		if (needScratchRebuild) {
-			_impl->tlasScratchBuffer.Current() = Vk::Buffer::Create(
-				_impl->allocator.Get(), sizes.build_scratch_size,
-				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-				VMA_MEMORY_USAGE_GPU_ONLY);
-		}
 
 		_impl->rtCtx.CmdBuildTlas(
 			cmd, geom, _impl->tlas.Current(),
@@ -1410,14 +1365,12 @@ RenderResult RenderContext::EndFrame() noexcept {
 									   _impl->tlasScratchBuffer.Current().Handle()),
 			static_cast<uint32_t>(tlasInstances.size()));
 
+		// Make the TLAS visible to the Fragment/Deferred shading stage
 		Vk::MemoryBarrier(cmd,
 						  {.src_stage = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
 						   .src_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
 						   .dst_stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
 						   .dst_access = VK_ACCESS_2_SHADER_READ_BIT});
-
-		_impl->tlasCleanupBuffers[_impl->frame_index].push_back(std::move(staging));
-		_impl->tlasCleanupBuffers[_impl->frame_index].push_back(std::move(instanceBuf));
 	}
 
 	FrameRecorder recorder(cmd, *_impl);
@@ -1492,6 +1445,59 @@ RenderResult RenderContext::EndFrame() noexcept {
 	_impl->uiDrawQueue.clear();
 
 	return {};
+}
+
+void RenderContext::ProvokeDeviceLost() {
+	_impl->ProvokeDeviceLostInternal();
+}
+
+void RenderContext::Impl::ProvokeDeviceLostInternal() const {
+	if (!hangGpuPass.pipeline.Valid()) {
+		ZHLN::Log("ERROR: Cannot provoke device lost because the Hang GPU pipeline is invalid.");
+		return;
+	}
+
+	VkCommandBuffer cmd = current_cmd;
+	bool submitQueue = false;
+
+	// 1. Declare tempPool at function scope so its lifetime spans the entire submission
+	Vk::CommandPool tempPool;
+
+	if (cmd == VK_NULL_HANDLE) {
+		// 2. Move-assign the fully initialized command pool
+		tempPool = Vk::CommandPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+		if (!tempPool.Allocate(1)) {
+			return;
+		}
+		cmd = tempPool[0];
+		ZHLN_BeginCommandBuffer(cmd);
+		submitQueue = true;
+	}
+
+	// 3. cmd is now guaranteed to point to a valid command buffer here
+	hangGpuPass.Bind(cmd);
+	hangGpuPass.Dispatch(cmd, 512, 512, 1);
+
+	if (submitQueue) {
+		ZHLN_EndCommandBuffer(cmd);
+		VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+											 .pNext = nullptr,
+											 .commandBuffer = cmd,
+											 .deviceMask = 0};
+		VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+								.pNext = nullptr,
+								.flags = 0,
+								.waitSemaphoreInfoCount = 0,
+								.pWaitSemaphoreInfos = nullptr,
+								.commandBufferInfoCount = 1,
+								.pCommandBufferInfos = &subInfo,
+								.signalSemaphoreInfoCount = 0,
+								.pSignalSemaphoreInfos = nullptr};
+		vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
+
+		// 4. Block until GPU has finished executing the hang before releasing the command pool
+		vkQueueWaitIdle(ctx.GraphicsQueue());
+	}
 }
 
 namespace Renderer {
