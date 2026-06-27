@@ -39,6 +39,7 @@ extern "C" {
 // ============================================================================
 // PAYLOAD DEFINITIONS (Must exactly match ffi_cdef.lua)
 // ============================================================================
+namespace {
 #pragma pack(push, 1)
 
 struct ZHLN_RaycastResult {
@@ -192,6 +193,76 @@ struct SpawnLightArgs {
 };
 
 #pragma pack(pop)
+
+void SafeDestroyEntity(ZHLN::Engine* engine, ZHLN::Entity entity) {
+	auto& reg = engine->GetRegistry();
+
+	std::vector<ZHLN::Entity> childrenToDestroy;
+
+	// Channel A: Scan HierarchyComponent (used by 3D meshes)
+	uint32_t hierarchyID = ZHLN::ECS::ComponentFamily::GetTypeID<ZHLN::HierarchyComponent>();
+	auto hEntities = reg.GetEntitiesByFamilyID(hierarchyID);
+	for (ZHLN::Entity e : hEntities) {
+		if (auto* hier = reg.Get<ZHLN::HierarchyComponent>(e)) {
+			if (hier->parent == entity) {
+				childrenToDestroy.push_back(e);
+			}
+		}
+	}
+
+	// Channel B: Scan UIRectComponent (used by UI elements)
+	uint32_t uiRectID = ZHLN::ECS::ComponentFamily::GetTypeID<ZHLN::UIRectComponent>();
+	auto uEntities = reg.GetEntitiesByFamilyID(uiRectID);
+	for (ZHLN::Entity e : uEntities) {
+		if (auto* rect = reg.Get<ZHLN::UIRectComponent>(e)) {
+			if (rect->parentEntity == entity) {
+				childrenToDestroy.push_back(e);
+			}
+		}
+	}
+
+	// 1. Recursively destroy all gathered children first
+	for (ZHLN::Entity child : childrenToDestroy) {
+		SafeDestroyEntity(engine, child);
+	}
+
+	// 2. Clean up native TextComponent GPU buffers if present
+	auto* text = reg.Get<ZHLN::TextComponent>(entity);
+	if (text != nullptr) {
+		if (text->mesh.posBuffer != ZHLN::BufferHandle::Invalid) {
+			engine->GetRenderContext().DestroyBuffer(text->mesh.posBuffer);
+		}
+		if (text->mesh.attrBuffer != ZHLN::BufferHandle::Invalid) {
+			engine->GetRenderContext().DestroyBuffer(text->mesh.attrBuffer);
+		}
+		if (text->mesh.indexBuffer != ZHLN::BufferHandle::Invalid) {
+			engine->GetRenderContext().DestroyBuffer(text->mesh.indexBuffer);
+		}
+	}
+
+	// 3. Clean up native UIPanelComponent GPU meshes if present
+	auto* panel = reg.Get<ZHLN::UIPanelComponent>(entity);
+	if (panel != nullptr) {
+		if (panel->mesh.posBuffer != ZHLN::BufferHandle::Invalid) {
+			engine->GetRenderContext().DestroyBuffer(panel->mesh.posBuffer);
+		}
+		if (panel->mesh.attrBuffer != ZHLN::BufferHandle::Invalid) {
+			engine->GetRenderContext().DestroyBuffer(panel->mesh.attrBuffer);
+		}
+	}
+
+	// 4. Clean up native MeshComponent skinned scratch buffers if present
+	auto* mesh = reg.Get<ZHLN::MeshComponent>(entity);
+	if (mesh != nullptr) {
+		if (mesh->skinnedVertexBuffer != ZHLN::BufferHandle::Invalid) {
+			engine->GetRenderContext().DestroyBuffer(mesh->skinnedVertexBuffer);
+		}
+	}
+
+	// 5. Finally, destroy the entity itself
+	reg.Destroy(entity);
+}
+} // namespace
 
 // Opaque declarations of ConsoleUI globals (defined in ConsoleUI.cpp)
 extern std::vector<std::string> s_InvShellLog;
@@ -541,26 +612,9 @@ static void RegisterFFICommands() {
 	s_CommandRegistry["DestroyEntity"] = [](ZHLN::Engine* engine, const void* args) -> uint64_t {
 		const auto* a = static_cast<const EntityOnlyArgs*>(args);
 		auto entity = ZHLN::Entity::Unpack(a->entityRaw);
-		auto* text = engine->GetRegistry().Get<ZHLN::TextComponent>(entity);
-		if (text != nullptr) {
-			// Clean up both uniquely generated text mesh streams
-			if (text->mesh.posBuffer != ZHLN::BufferHandle::Invalid) {
-				engine->GetRenderContext().DestroyBuffer(text->mesh.posBuffer);
-			}
-			if (text->mesh.attrBuffer != ZHLN::BufferHandle::Invalid) {
-				engine->GetRenderContext().DestroyBuffer(text->mesh.attrBuffer);
-			}
-			if (text->mesh.indexBuffer != ZHLN::BufferHandle::Invalid) {
-				engine->GetRenderContext().DestroyBuffer(text->mesh.indexBuffer);
-			}
-		}
-		auto* mesh = engine->GetRegistry().Get<ZHLN::MeshComponent>(entity);
-		if (mesh != nullptr) {
-			if (mesh->skinnedVertexBuffer != ZHLN::BufferHandle::Invalid) {
-				engine->GetRenderContext().DestroyBuffer(mesh->skinnedVertexBuffer);
-			}
-		}
-		engine->GetRegistry().Destroy(entity);
+
+		SafeDestroyEntity(engine, entity);
+
 		return 0;
 	};
 

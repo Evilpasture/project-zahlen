@@ -285,4 +285,22 @@ struct UIPanelComponent {
 	Mesh mesh{};
 };
 
+enum class UIButton : uint8_t { None = 0, Hovered = 1 << 0, Pressed = 1 << 1, Clicked = 1 << 2 };
+template <> inline constexpr bool EnableEnumFlags<UIButton> = true;
+struct UIButtonComponent {
+	UIButton flags = UIButton::None;
+
+	void Set(UIButton flag, bool value) noexcept {
+		if (value) {
+			flags |= flag;
+		} else {
+			flags &= ~flag;
+		}
+	}
+
+	[[nodiscard]] bool Has(UIButton flag) const noexcept {
+		return (flags & flag) != UIButton::None;
+	}
+};
+
 } // namespace ZHLN

@@ -266,6 +266,10 @@ if not ok then
             Mesh mesh;             // Map the internal C++ mesh handle
         } UIPanelComponent;
 
+        typedef struct UIButtonComponent {
+            uint8_t flags;
+        } UIButtonComponent;
+
 
         // ==============================================================================
         // COMMAND PAYLOAD ARGS STRUCTS

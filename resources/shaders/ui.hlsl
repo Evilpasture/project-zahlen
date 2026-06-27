@@ -63,14 +63,6 @@ UIVSOutput VSMain(uint vertexId : SV_VertexID) {
 }
 
 float4 PSMain(UIVSOutput input) : SV_Target0 {
-	// Sample texture atlas
 	float4 textSample = globalTextures[obj.albedoIdx].Sample(defaultSampler, input.uv);
-
-	// --- COMMENT THIS OUT TEMPORARILY: ---
-	// if (textSample.a < 0.1)
-	//     discard;
-	// -------------------------------------
-
-	// --- Return solid white/color boxes instead of masking with alpha ---
-	return float4(input.color.rgb, input.color.a);
+	return float4(input.color.rgb, input.color.a * textSample.a);
 }

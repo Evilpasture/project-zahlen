@@ -264,6 +264,14 @@ template <EnumFlag T> constexpr T& operator^=(T& a, T b) noexcept {
 	return a;
 }
 
+template <EnumFlag T> constexpr bool operator==(T a, T b) noexcept {
+	return static_cast<std::underlying_type_t<T>>(a) == static_cast<std::underlying_type_t<T>>(b);
+}
+
+template <EnumFlag T> constexpr bool operator!=(T a, T b) noexcept {
+	return !(a == b);
+}
+
 // NOLINTNEXTLINE(performance-enum-size)
 enum class DrawFlags : uint32_t {
 	None = 0,

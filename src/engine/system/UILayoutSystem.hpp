@@ -38,13 +38,6 @@ class UILayoutSystem {
 			UIRectComponent& rect = rects[entry.rawIndex];
 			Entity parent = rect.parentEntity;
 
-			if (parent.index != 0xFFFFFFFF && parent.index != 0) {
-				ZHLN::Log(
-					"[Layout Debug] Raw Slot: {} | Parent Entity: ({}, {}) | Parent Alive: {}",
-					entry.rawIndex, parent.index, parent.generation,
-					reg.IsAlive(parent) ? "YES" : "NO");
-			}
-
 			// Resolve parent bounds (default to viewport if root)
 			float pMinX = 0.0f;
 			float pMinY = 0.0f;

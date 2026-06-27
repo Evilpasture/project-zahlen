@@ -41,6 +41,7 @@
 #include <engine/system/ArticulationSystem.hpp>
 #include <engine/system/CullingSystem.hpp>
 #include <engine/system/InteractionSystem.hpp>
+#include <engine/system/UIInteractionSystem.hpp>
 #include <expected>
 #include <physics/PhysicsWorld.hpp>
 #include <print>
@@ -748,10 +749,8 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 				drawX = rect->computedAbsMinX;
 				drawY = rect->computedAbsMinY;
 			}
-			ZHLN::Log(
-				"[UI Text Compile] String: '{}' | Compile Pos: ({:.1f}, {:.1f}) | Font Slot: {}",
-				text->text.c_str(), drawX, drawY, text->fontIndex);
-			text->mesh = GUI::CreateTextMesh(rc, *activeFont, text->text.c_str(), text->x, text->y,
+
+			text->mesh = GUI::CreateTextMesh(rc, *activeFont, text->text.c_str(), drawX, drawY,
 											 text->scale, text->color);
 		}
 		Renderer::DrawUI(rc, text->mesh, text->fontIndex);
@@ -943,7 +942,7 @@ bool InitializeGame(Engine& engine) {
 		UISettingsComponent, AudioSourceComponent, PBRComponent, ItemBaseComponent, PickupComponent,
 		UsableComponent, ContainerComponent, TriggerComponent, DebugSettingsComponent,
 		SunTagComponent, FreeCamTagComponent, ShadowSettingsComponent, UIRectComponent,
-		UIPanelComponent>();
+		UIPanelComponent, UIButtonComponent>();
 
 	auto groundShape =
 		Physics::GetOrCreateShape(pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
@@ -1003,6 +1002,7 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, ScriptRunne
 				FileWatcher& gameplayWatcher) {
 	static InputSystem inputSystem;
 	inputSystem.Update(engine);
+	UIInteractionSystem::Update(engine);
 	UISystem(engine, scriptRunner);
 
 	// --- DYNAMIC HOT-RELOAD PUMP ---

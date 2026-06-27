@@ -28,10 +28,7 @@ auto CreateTextMesh(RenderContext& ctx, const FontAtlas& font, const std::string
 	if (text.empty()) {
 		return {};
 	}
-	const auto& g = font.glyphs[83 - 32];
-	ZHLN::Log("[Glyph Debug] Character 'S': Bounds:[({:.1f},{:.1f}) to ({:.1f},{:.1f})] | "
-			  "Offsets:({:.1f},{:.1f}) | Advance:{:.1f}",
-			  g.x0, g.y0, g.x1, g.y1, g.xoff, g.yoff, g.xadvance);
+
 	JPH::Array<VertexPosition> positions;
 	JPH::Array<VertexAttributes> attributes;
 	positions.reserve(text.length() * 6);
