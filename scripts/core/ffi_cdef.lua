@@ -97,7 +97,6 @@ if not ok then
             size_t len;
         } NameComponent;
 
-        // --- NEW SINGLETON SETTINGS COMPONENTS ---
         typedef struct AAState {
             uint32_t mode;
             float taaFeedback;
@@ -128,7 +127,7 @@ if not ok then
             int enableSSR;
             int enableRTR;
             float ambientExposure;
-            float probeMin[4]; // Packed float4 / Vec3
+            float probeMin[4];
             float probeMax[4];
             float probePos[4];
         } PostProcessSettingsComponent;
@@ -171,8 +170,11 @@ if not ok then
             uint32_t hasInitSmoothTarget;
         } __attribute__((aligned(16))) TargetCameraComponent;
 
+        // FIXED: Expanded to match C++ 40-byte layout (pos, attr, skin, index buffers)
         typedef struct Mesh {
-            uint64_t vertexBuffer;
+            uint64_t posBuffer;
+            uint64_t attrBuffer;
+            uint64_t skinBuffer;
             uint64_t indexBuffer;
             uint32_t vertexCount;
             uint32_t indexCount;
@@ -184,10 +186,10 @@ if not ok then
             float    x;
             float    y;
             float    scale;
-            char     _pad1[12]; // padding to align float color[4] to 16 bytes
+            char     _pad1[12];
             float    color[4];
             uint32_t fontIndex;
-            char     _pad2[4];  // padding to align Mesh to 8 bytes
+            char     _pad2[4];
             Mesh     mesh;
             float    lastDrawX;
             float    lastDrawY;
@@ -239,12 +241,12 @@ if not ok then
         } TriggerComponent;
 
         typedef struct SunTagComponent {
-            uint8_t dummy; // Standard 1-byte placeholder for empty structs
+            uint8_t dummy;
         } SunTagComponent;
 
 
         typedef struct UIRectComponent {
-            uint64_t parentEntity; // ZHLN::Entity packed (8 bytes)
+            uint64_t parentEntity;
 
             float x;
             float y;
@@ -268,12 +270,12 @@ if not ok then
 
         typedef struct UIPanelComponent {
             float color[4];
-            float borderRadius[4]; // TopLeft, TopRight, BottomRight, BottomLeft
+            float borderRadius[4];
             uint32_t textureIndex;
             bool isDirty;
-            char _pad[3];          // Keep 4-byte alignment
-            Mesh mesh;             // Map the internal C++ mesh handle
-            float edgeWidth;       // Match the C++ 9-slice fields
+            char _pad[3];
+            Mesh mesh;             /* Aligning Mesh now sets edgeWidth at offset 80 */
+            float edgeWidth;
             float uvLeft;
             float uvRight;
             float uvTop;
@@ -305,9 +307,6 @@ if not ok then
         } UITextInputComponent;
 
 
-        // ==============================================================================
-        // COMMAND PAYLOAD ARGS STRUCTS
-        // ==============================================================================
         #pragma pack(push, 1)
         typedef struct GetBufferArgs { ZHLN_BufferView* outView; } GetBufferArgs;
         typedef struct GetECSBufferArgs { const char* componentName; ZHLN_BufferView* outView; } GetECSBufferArgs;

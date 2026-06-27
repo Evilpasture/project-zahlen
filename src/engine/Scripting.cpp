@@ -182,7 +182,7 @@ struct RegisterDynamicComponentArgs {
 
 struct SpawnLightArgs {
 	float px, py, pz;	  // Position
-	float rx, ry, rz, rw; // Rotation (Quaternion) <-- Added
+	float rx, ry, rz, rw; // Rotation (Quaternion)
 	float r, g, b;		  // Color
 	float intensity;
 	float radius;
@@ -455,7 +455,9 @@ static void RegisterFFICommands() {
 		reg.Add(e, ZHLN::PhysicsComponent{ZHLN::Physics::CreateRigidBody(
 					   pc, shape, JPH::RVec3(desc->px, desc->py, desc->pz), rotation,
 					   desc->isStatic ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
-					   desc->isStatic ? 0 : 1)});
+					   desc->isStatic ? static_cast<JPH::ObjectLayer>(0)
+									  : static_cast<JPH::ObjectLayer>(1),
+					   0)});
 		reg.Add(e, ZHLN::PhysicsStateComponent{.currPosition = {desc->px, desc->py, desc->pz},
 											   .prevPosition = {desc->px, desc->py, desc->pz},
 											   .currRotation = rotation,
@@ -485,6 +487,9 @@ static void RegisterFFICommands() {
 
 	s_CommandRegistry["ReleaseBuffer"] = [](ZHLN::Engine*, const void* args) -> uint64_t {
 		const auto* a = static_cast<const ReleaseBufferArgs*>(args);
+		if (a->sync_ptr == nullptr) {
+			return 0;
+		}
 		ZHLN::SyncPolicy::Release(static_cast<ZHLN::BufferSync*>(a->sync_ptr));
 		return 0;
 	};
@@ -502,8 +507,7 @@ static void RegisterFFICommands() {
 			*a->outView = ZHLN::ViewComposer::Build(&reg, raw.data(), "f", raw.size(), 2);
 		} else if (name == "PostProcessSettingsComponent") {
 			auto raw = reg.GetRawArray<ZHLN::PostProcessSettingsComponent>();
-			*a->outView = ZHLN::ViewComposer::Build(&reg, raw.data(), "B",
-													raw.size()); // "B" for Bytes/Struct
+			*a->outView = ZHLN::ViewComposer::Build(&reg, raw.data(), "B", raw.size());
 		} else if (name == "ShadowSettingsComponent") {
 			auto raw = reg.GetRawArray<ZHLN::ShadowSettingsComponent>();
 			*a->outView = ZHLN::ViewComposer::Build(&reg, raw.data(), "B", raw.size());
@@ -543,7 +547,6 @@ static void RegisterFFICommands() {
 		return 0;
 	};
 
-	// --- ECS ---
 	s_CommandRegistry["RegisterDynamicComponent"] = [](ZHLN::Engine* engine,
 													   const void* args) -> uint64_t {
 		const auto* a = static_cast<const RegisterDynamicComponentArgs*>(args);
@@ -821,12 +824,9 @@ static void RegisterFFICommands() {
 
 		ZHLN::Entity e = reg.Create();
 
-		// Apply the passed rotation to the Transform
-		reg.Add(
-			e, ZHLN::TransformComponent{
-				   .position = {a->px, a->py, a->pz},
-				   .rotation = JPH::Quat(a->rx, a->ry, a->rz, a->rw), // <-- Custom rotation applied
-				   .scale = {1.0f, 1.0f, 1.0f}});
+		reg.Add(e, ZHLN::TransformComponent{.position = {a->px, a->py, a->pz},
+											.rotation = JPH::Quat(a->rx, a->ry, a->rz, a->rw),
+											.scale = {1.0f, 1.0f, 1.0f}});
 
 		reg.Add(e, ZHLN::NameComponent{.name = ZHLN::String64("SpawnedLight")});
 		reg.Add(e, ZHLN::LightingSystem::LightComponent{.type = a->type,
@@ -847,9 +847,6 @@ static void RegisterFFICommands() {
 	};
 }
 
-// ============================================================================
-// ALL C-EXPORTS MUST BE INSIDE THIS BLOCK TO AVOID MANGLING
-// ============================================================================
 extern "C" {
 
 ZHLN_API ZHLN_Engine* ZHLN_GetEngineContext() {
@@ -858,16 +855,70 @@ ZHLN_API ZHLN_Engine* ZHLN_GetEngineContext() {
 
 ZHLN_API uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine_handle, const char* cmd,
 									   const void* args) {
+	if (cmd == nullptr) {
+		return 0;
+	}
 	RegisterFFICommands();
 	auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
 	auto it = s_CommandRegistry.find(std::string_view(cmd));
 	if (it != s_CommandRegistry.end()) {
+		std::string_view cmdStr(cmd);
+
+		// EXHAUSTIVE DISPATCHER-LEVEL NULL GUARDS
+		// 1. Commands requiring non-null args payload (independent of engine)
+		if (cmdStr == "ReleaseBuffer") {
+			if (args == nullptr)
+				return 0;
+			return it->second(nullptr, args);
+		}
+		// 2. Commands requiring non-null engine context (args can be null)
+		if (cmdStr == "CreateEntity" || cmdStr == "ProvokeDeviceLost") {
+			if (engine == nullptr)
+				return 0;
+			return it->second(engine, nullptr);
+		}
+		// 3. String-based query / FFI mapping commands (requires guarding direct string-view
+		// constructions)
+		if (cmdStr == "GetComponent" || cmdStr == "AddComponent" || cmdStr == "GetECSBuffer" ||
+			cmdStr == "GetECSEntities") {
+			if (engine == nullptr || args == nullptr)
+				return 0;
+			const auto* rawArgs = static_cast<const GetECSBufferArgs*>(args);
+			if (rawArgs->componentName == nullptr)
+				return 0;
+		}
+		if (cmdStr == "RegisterDynamicComponent") {
+			if (engine == nullptr || args == nullptr)
+				return 0;
+			const auto* rawArgs = static_cast<const RegisterDynamicComponentArgs*>(args);
+			if (rawArgs->name == nullptr)
+				return 0;
+		}
+		if (cmdStr == "PlayOneShot" || cmdStr == "PlayOneShot3D") {
+			if (engine == nullptr || args == nullptr)
+				return 0;
+			const auto* rawArgs = static_cast<const PlayOneShotArgs*>(args);
+			if (rawArgs->filepath == nullptr)
+				return 0;
+		}
+		if (cmdStr == "LogInventoryShell") {
+			if (args == nullptr)
+				return 0;
+			const auto* rawArgs = static_cast<const LogInventoryArgs*>(args);
+			if (rawArgs->msg == nullptr)
+				return 0;
+		}
+
+		// 4. Default baseline guard: All remaining commands require both valid engine and non-null
+		// args payload
+		if (engine == nullptr || args == nullptr) {
+			return 0;
+		}
 		return it->second(engine, args);
 	}
 	return 0;
 }
 
-// Lua internal Bridges
 static int LuaBridge_Log(lua_State* L) {
 	lua_Debug ar;
 	std::memset(&ar, 0, sizeof(lua_Debug));
@@ -956,8 +1007,7 @@ static int LuaBridge_Warn(lua_State* L) {
 
 	return 0;
 }
-
-} // End of extern "C"
+}
 
 namespace ZHLN {
 
