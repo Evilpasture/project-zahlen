@@ -38,8 +38,8 @@ bool ConeBehindPlane(float3 T, float3 D, float R, float r, float3 N, float d) {
 	// Project the plane normal onto the base circle's plane
 	float sinTheta = sqrt(max(0.0f, 1.0f - dot(N, D) * dot(N, D)));
 
-	// Value of the plane equation at the furthest point on the base circle in the direction of -N
-	float valBase = dot(N, T + D * R) + d - r * sinTheta;
+	// FIXED: Changed minus to plus to correctly evaluate the furthest point on the base circle
+	float valBase = dot(N, T + D * R) + d + r * sinTheta;
 
 	// The cone is completely behind the plane if both points are in the negative halfspace
 	return (valTip < 0.0f) && (valBase < 0.0f);
