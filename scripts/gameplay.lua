@@ -132,6 +132,27 @@ zh:on("engine.start", function()
     -- card_comp.scale = 2.0
     -- card_comp.color[0], card_comp.color[1], card_comp.color[2], card_comp.color[3] = 0.0, 1.0, 0.0, 1.0 -- Green
     -- card_comp.fontIndex = font_idx
+
+
+    zh.log("Spawning UI Test Panel...")
+
+    local ui_root = zh.ecs:create()
+    local rect = zh.ecs:add(ui_root, "UIRectComponent")
+
+    -- Anchor to the exact center of the screen
+    rect.anchorMinX, rect.anchorMaxX = 0.5, 0.5
+    rect.anchorMinY, rect.anchorMaxY = 0.5, 0.5
+
+    -- Fixed 400x200 panel, offset so the center of the panel matches the anchor
+    rect.x, rect.y = -200, -100
+    rect.width, rect.height = 400, 200
+
+    local panel = zh.ecs:add(ui_root, "UIPanelComponent")
+    -- Semi-transparent dark blue panel
+    panel.color[0] = 0.1 -- R
+    panel.color[1] = 0.2 -- G
+    panel.color[2] = 0.5 -- B
+    panel.color[3] = 0.8 -- A
 end)
 
 -- ==========================================

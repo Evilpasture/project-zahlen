@@ -5,11 +5,11 @@
 #include "Zahlen/Components.hpp"
 
 #include <Zahlen/GUI.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Types.hpp>
 #include <string>
-#include <vector>
 
 namespace ZHLN::GUI {
 
@@ -25,8 +25,15 @@ auto CreateOrthoMatrix(float width, float height) -> JPH::Mat44 {
 
 auto CreateTextMesh(RenderContext& ctx, const FontAtlas& font, const std::string& text, float x,
 					float y, float scale, const JPH::Vec4& color) -> Mesh {
-	std::vector<VertexPosition> positions;
-	std::vector<VertexAttributes> attributes;
+	if (text.empty()) {
+		return {};
+	}
+	const auto& g = font.glyphs[83 - 32];
+	ZHLN::Log("[Glyph Debug] Character 'S': Bounds:[({:.1f},{:.1f}) to ({:.1f},{:.1f})] | "
+			  "Offsets:({:.1f},{:.1f}) | Advance:{:.1f}",
+			  g.x0, g.y0, g.x1, g.y1, g.xoff, g.yoff, g.xadvance);
+	JPH::Array<VertexPosition> positions;
+	JPH::Array<VertexAttributes> attributes;
 	positions.reserve(text.length() * 6);
 	attributes.reserve(text.length() * 6);
 
@@ -58,16 +65,28 @@ auto CreateTextMesh(RenderContext& ctx, const FontAtlas& font, const std::string
 		float y1 = y0 + (g.y1 - g.y0) * scale;
 
 		VertexPosition vTL_pos = {{x0, y0, 0.0f}};
-		VertexAttributes vTL_attr = {dummyNormal, dummyTangent, Math::PackUV(u0, v0), packedColor};
+		VertexAttributes vTL_attr = {.normal = dummyNormal,
+									 .tangent = dummyTangent,
+									 .uv = Math::PackUV(u0, v0),
+									 .color = packedColor};
 
 		VertexPosition vTR_pos = {{x1, y0, 0.0f}};
-		VertexAttributes vTR_attr = {dummyNormal, dummyTangent, Math::PackUV(u1, v0), packedColor};
+		VertexAttributes vTR_attr = {.normal = dummyNormal,
+									 .tangent = dummyTangent,
+									 .uv = Math::PackUV(u1, v0),
+									 .color = packedColor};
 
 		VertexPosition vBL_pos = {{x0, y1, 0.0f}};
-		VertexAttributes vBL_attr = {dummyNormal, dummyTangent, Math::PackUV(u0, v1), packedColor};
+		VertexAttributes vBL_attr = {.normal = dummyNormal,
+									 .tangent = dummyTangent,
+									 .uv = Math::PackUV(u0, v1),
+									 .color = packedColor};
 
 		VertexPosition vBR_pos = {{x1, y1, 0.0f}};
-		VertexAttributes vBR_attr = {dummyNormal, dummyTangent, Math::PackUV(u1, v1), packedColor};
+		VertexAttributes vBR_attr = {.normal = dummyNormal,
+									 .tangent = dummyTangent,
+									 .uv = Math::PackUV(u1, v1),
+									 .color = packedColor};
 
 		// Triangle 1: TL -> BL -> TR
 		positions.push_back(vTL_pos);
@@ -104,6 +123,44 @@ auto CreateTextMesh(RenderContext& ctx, const FontAtlas& font, const std::string
 				.indexBuffer = BufferHandle::Invalid,
 				.vertexCount = static_cast<uint32_t>(positions.size()),
 				.indexCount = 0};
+}
+
+auto CreatePanelMesh(RenderContext& ctx, const UIRectComponent& rect, const UIPanelComponent& panel)
+	-> Mesh {
+	JPH::Array<VertexPosition> positions(6);
+	JPH::Array<VertexAttributes> attributes(6);
+
+	float x0 = rect.computedAbsMinX;
+	float y0 = rect.computedAbsMinY;
+	float x1 = rect.computedAbsMaxX;
+	float y1 = rect.computedAbsMaxY;
+
+	PackedRGBA8 c = Math::PackColor(panel.color.GetX(), panel.color.GetY(), panel.color.GetZ(),
+									panel.color.GetW());
+	Packed1010102 n = Math::PackNormal(0, 0, 1);
+	Packed1010102 t = Math::PackNormal(1, 0, 0, 1);
+
+	// Quad Triangles (TL -> BL -> TR, TR -> BL -> BR)
+	positions[0] = {{x0, y0, 0.0f}};
+	attributes[0] = {.normal = n, .tangent = t, .uv = Math::PackUV(0.0f, 0.0f), .color = c}; // TL
+	positions[1] = {{x0, y1, 0.0f}};
+	attributes[1] = {.normal = n, .tangent = t, .uv = Math::PackUV(0.0f, 1.0f), .color = c}; // BL
+	positions[2] = {{x1, y0, 0.0f}};
+	attributes[2] = {.normal = n, .tangent = t, .uv = Math::PackUV(1.0f, 0.0f), .color = c}; // TR
+
+	positions[3] = {{x1, y0, 0.0f}};
+	attributes[3] = {.normal = n, .tangent = t, .uv = Math::PackUV(1.0f, 0.0f), .color = c}; // TR
+	positions[4] = {{x0, y1, 0.0f}};
+	attributes[4] = {.normal = n, .tangent = t, .uv = Math::PackUV(0.0f, 1.0f), .color = c}; // BL
+	positions[5] = {{x1, y1, 0.0f}};
+	attributes[5] = {.normal = n, .tangent = t, .uv = Math::PackUV(1.0f, 1.0f), .color = c}; // BR
+
+	BufferHandle posVbo = ctx.CreateVertexBuffer(
+		positions.data(), positions.size() * sizeof(VertexPosition), sizeof(VertexPosition));
+	BufferHandle attrVbo = ctx.CreateVertexBuffer(
+		attributes.data(), attributes.size() * sizeof(VertexAttributes), sizeof(VertexAttributes));
+
+	return Mesh{.posBuffer = posVbo, .attrBuffer = attrVbo, .vertexCount = 6, .indexCount = 0};
 }
 
 } // namespace ZHLN::GUI

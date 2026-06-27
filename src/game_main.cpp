@@ -19,6 +19,7 @@
 #include "engine/system/PhysicsStateSystem.hpp"
 #include "engine/system/TargetCameraSystem.hpp"
 #include "engine/system/TransformSystem.hpp"
+#include "engine/system/UIRenderSystem.hpp"
 #include "imgui.h"
 #include "physics/Physics.hpp"
 #include "physics/PhysicsDebug.hpp"
@@ -45,7 +46,6 @@
 #include <print>
 #include <threading/Mutex.hpp>
 #include <threading/TaskSystem.hpp>
-
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
 #endif
@@ -139,6 +139,8 @@ constexpr std::array<FrustumEdge, 12> s_FrustumEdges = {{
 	{.start = 2, .end = 6},
 	{.start = 3, .end = 7} // Near-to-Far connection lines
 }};
+
+std::string s_GameplayFile = "scripts/gameplay_template.lua";
 
 // ============================================================================
 // Flattened System Wrappers (For 100% Predictable Function Pointers)
@@ -541,6 +543,7 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 	if (!begin_res) {
 		return std::unexpected(begin_res.error());
 	}
+	UIRenderSystem::Update(engine);
 	Entity cameraEntity = cameraEntities[0];
 
 	if (auto* cComp = reg.Get<CameraSystem::CameraComponent>(cameraEntity)) {
@@ -739,6 +742,15 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 	for (Entity e : reg.GetEntitiesWith<TextComponent>()) {
 		auto* text = reg.Get<TextComponent>(e);
 		if (text->mesh.posBuffer == BufferHandle::Invalid && activeFont != nullptr) {
+			float drawX = text->x;
+			float drawY = text->y;
+			if (auto* rect = reg.Get<UIRectComponent>(e)) {
+				drawX = rect->computedAbsMinX;
+				drawY = rect->computedAbsMinY;
+			}
+			ZHLN::Log(
+				"[UI Text Compile] String: '{}' | Compile Pos: ({:.1f}, {:.1f}) | Font Slot: {}",
+				text->text.c_str(), drawX, drawY, text->fontIndex);
 			text->mesh = GUI::CreateTextMesh(rc, *activeFont, text->text.c_str(), text->x, text->y,
 											 text->scale, text->color);
 		}
@@ -930,7 +942,8 @@ bool InitializeGame(Engine& engine) {
 		MainCameraTagComponent, GlobalSettingsTagComponent, AASettingsComponent, TextComponent,
 		UISettingsComponent, AudioSourceComponent, PBRComponent, ItemBaseComponent, PickupComponent,
 		UsableComponent, ContainerComponent, TriggerComponent, DebugSettingsComponent,
-		SunTagComponent, FreeCamTagComponent, ShadowSettingsComponent>();
+		SunTagComponent, FreeCamTagComponent, ShadowSettingsComponent, UIRectComponent,
+		UIPanelComponent>();
 
 	auto groundShape =
 		Physics::GetOrCreateShape(pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
@@ -994,7 +1007,7 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, ScriptRunne
 
 	// --- DYNAMIC HOT-RELOAD PUMP ---
 	if (gameplayWatcher.CheckModified()) {
-		scriptRunner.ReloadFile("scripts/gameplay.lua");
+		scriptRunner.ReloadFile(s_GameplayFile);
 	}
 	engine.GetRenderContext().CheckShaderReload(); // Checks and re-builds stale pipelines
 
@@ -1148,7 +1161,7 @@ std::expected<std::unique_ptr<Engine>, EngineError> InitializeEngine(CommandLine
 std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine,
 											  const CommandLineOptions& options) {
 	ScriptRunner scriptRunner;
-	FileWatcher gameplayWatcher("scripts/gameplay.lua");
+	FileWatcher gameplayWatcher(s_GameplayFile);
 
 	if (!InitializeGame(*engine)) {
 		return std::unexpected(
@@ -1167,7 +1180,7 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine,
 	}
 
 	ZHLN::Log("Window active and presenting. Loading scene assets...");
-	scriptRunner.RunFile("scripts/gameplay.lua");
+	scriptRunner.RunFile(s_GameplayFile);
 
 	float physicsAccumulator = 0.0f;
 	const double targetFrameTime =

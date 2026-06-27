@@ -251,4 +251,38 @@ struct TriggerComponent {
 };
 static_assert(sizeof(TriggerComponent) == 8);
 
+struct UIRectComponent {
+	// Local offsets / dimensions relative to anchors
+	float x = 0.0f;
+	float y = 0.0f;
+	float width = 100.0f;
+	float height = 100.0f;
+
+	// Layout anchoring relative to parent (0.0 = Left/Top, 1.0 = Right/Bottom)
+	float anchorMinX = 0.0f;
+	float anchorMinY = 0.0f;
+	float anchorMaxX = 0.0f;
+	float anchorMaxY = 0.0f;
+
+	// --- RUNTIME COMPUTED CACHE (Packed tightly for your systems) ---
+	// Your layout system writes these. Your rendering system reads these.
+	float computedAbsMinX = 0.0f;
+	float computedAbsMinY = 0.0f;
+	float computedAbsMaxX = 0.0f;
+	float computedAbsMaxY = 0.0f;
+
+	uint32_t hierarchyDepth = 0; // For sorted linear execution
+	uint32_t _paddingDepth = 0;
+	ZHLN::Entity parentEntity{}; // Invalid/null if root canvas
+};
+
+struct UIPanelComponent {
+	JPH::Vec4 color = {1.0f, 1.0f, 1.0f, 1.0f};
+	JPH::Vec4 borderRadius = {0.0f, 0.0f, 0.0f, 0.0f}; // TopLeft, TopRight, BottomRight, BottomLeft
+
+	uint32_t textureIndex = 1; // Handled via Bindless Descriptor Indexing in your fragment shader
+	bool isDirty = true;	   // Triggers a data rewrite to the shared buffer instance chunk
+	Mesh mesh{};
+};
+
 } // namespace ZHLN

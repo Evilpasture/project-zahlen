@@ -231,6 +231,42 @@ if not ok then
             uint32_t flags;
         } TriggerComponent;
 
+        typedef struct SunTagComponent {
+            uint8_t dummy; // Standard 1-byte placeholder for empty structs
+        } SunTagComponent;
+
+
+        typedef struct UIRectComponent {
+            float x;
+            float y;
+            float width;
+            float height;
+
+            float anchorMinX;
+            float anchorMinY;
+            float anchorMaxX;
+            float anchorMaxY;
+
+            float computedAbsMinX;
+            float computedAbsMinY;
+            float computedAbsMaxX;
+            float computedAbsMaxY;
+
+            uint32_t hierarchyDepth;
+            uint32_t _paddingDepth;
+            uint64_t parentEntity; // ZHLN::Entity packed
+        } UIRectComponent;
+
+        typedef struct UIPanelComponent {
+            float color[4];
+            float borderRadius[4]; // TopLeft, TopRight, BottomRight, BottomLeft
+            uint32_t textureIndex;
+            bool isDirty;
+            char _pad[3];          // Keep 4-byte alignment
+            Mesh mesh;             // Map the internal C++ mesh handle
+        } UIPanelComponent;
+
+
         // ==============================================================================
         // COMMAND PAYLOAD ARGS STRUCTS
         // ==============================================================================
@@ -306,10 +342,6 @@ if not ok then
             uint32_t type;
             uint32_t twoSided;
         } SpawnLightArgs;
-
-        typedef struct SunTagComponent {
-            uint8_t dummy; // Standard 1-byte placeholder for empty structs
-        } SunTagComponent;
 
         #pragma pack(pop)
     ]]

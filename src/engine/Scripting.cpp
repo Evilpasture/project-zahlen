@@ -520,6 +520,10 @@ static void RegisterFFICommands() {
 			ptr = &reg.Add(entity, ZHLN::SunTagComponent{});
 		} else if (name == "ShadowSettingsComponent") {
 			ptr = &reg.Add(entity, ZHLN::ShadowSettingsComponent{});
+		} else if (name == "UIRectComponent") {
+			ptr = &reg.Add(entity, ZHLN::UIRectComponent{});
+		} else if (name == "UIPanelComponent") {
+			ptr = &reg.Add(entity, ZHLN::UIPanelComponent{});
 		} else {
 			// 2. Fall back to dynamically registered types
 			uint32_t familyID = ZHLN::ECS::Registry::GetFamilyIDFromName(name);

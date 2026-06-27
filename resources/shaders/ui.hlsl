@@ -63,12 +63,14 @@ UIVSOutput VSMain(uint vertexId : SV_VertexID) {
 }
 
 float4 PSMain(UIVSOutput input) : SV_Target0 {
-	// Sample texture atlas (Red channel serves as monochrome alpha mask)
+	// Sample texture atlas
 	float4 textSample = globalTextures[obj.albedoIdx].Sample(defaultSampler, input.uv);
 
-	// Discard zero-alpha parts to avoid drawing bounding boxes
-	if (textSample.a < 0.1)
-		discard;
+	// --- COMMENT THIS OUT TEMPORARILY: ---
+	// if (textSample.a < 0.1)
+	//     discard;
+	// -------------------------------------
 
-	return float4(input.color.rgb, input.color.a * textSample.a);
+	// --- Return solid white/color boxes instead of masking with alpha ---
+	return float4(input.color.rgb, input.color.a);
 }
