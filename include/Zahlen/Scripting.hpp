@@ -4,16 +4,16 @@
 #pragma once
 
 #include <Zahlen/Engine.hpp>
+#include <memory>
 #include <string_view>
-
-// Forward declare lua_State to keep the header clean
-struct lua_State;
 
 namespace ZHLN {
 
+class IScriptRuntime;
+
 /**
  * @brief High-performance Scripting Environment wrapper.
- * Manages the LuaJIT VM and the Buffer Protocol bridge.
+ * Acts as the bridge to the underlying abstract Scripting Runtime.
  */
 class ScriptRunner {
   public:
@@ -25,12 +25,12 @@ class ScriptRunner {
 	ScriptRunner& operator=(const ScriptRunner&) = delete;
 
 	/**
-	 * @brief Loads and executes a Lua script.
+	 * @brief Loads and executes a script.
 	 */
 	void RunFile(std::string_view path);
 
 	/**
-	 * @brief Calls the global 'update(engine, dt)' function in Lua.
+	 * @brief Calls the script update distribution loop.
 	 */
 	void CallUpdate(Engine* engine, float dt);
 
@@ -38,8 +38,10 @@ class ScriptRunner {
 
 	void ReloadFile(std::string_view path);
 
+	[[nodiscard]] IScriptRuntime* GetRuntime() const noexcept { return _runtime.get(); }
+
   private:
-	lua_State* L;
+	std::unique_ptr<IScriptRuntime> _runtime;
 };
 
 } // namespace ZHLN

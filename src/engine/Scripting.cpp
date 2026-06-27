@@ -3,6 +3,8 @@
 
 // src/engine/Scripting.cpp
 
+#include "IScriptRuntime.hpp"
+#include "LuaScriptRuntime.hpp"
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Input.hpp"
@@ -30,11 +32,6 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
-extern "C" {
-#include <lauxlib.h>
-#include <lua.h>
-#include <lualib.h>
-}
 
 // ============================================================================
 // PAYLOAD DEFINITIONS (Must exactly match ffi_cdef.lua)
@@ -64,7 +61,7 @@ struct GetComponentArgs {
 	uint64_t entityRaw;
 	const char* componentName;
 };
-using AddComponentArgs = GetComponentArgs; // Alias to resolve compiler type resolution
+using AddComponentArgs = GetComponentArgs;
 
 struct EntityOnlyArgs {
 	uint64_t entityRaw;
@@ -199,7 +196,6 @@ void SafeDestroyEntity(ZHLN::Engine* engine, ZHLN::Entity entity) {
 
 	std::vector<ZHLN::Entity> childrenToDestroy;
 
-	// Channel A: Scan HierarchyComponent (used by 3D meshes)
 	uint32_t hierarchyID = ZHLN::ECS::ComponentFamily::GetTypeID<ZHLN::HierarchyComponent>();
 	auto hEntities = reg.GetEntitiesByFamilyID(hierarchyID);
 	for (ZHLN::Entity e : hEntities) {
@@ -210,7 +206,6 @@ void SafeDestroyEntity(ZHLN::Engine* engine, ZHLN::Entity entity) {
 		}
 	}
 
-	// Channel B: Scan UIRectComponent (used by UI elements)
 	uint32_t uiRectID = ZHLN::ECS::ComponentFamily::GetTypeID<ZHLN::UIRectComponent>();
 	auto uEntities = reg.GetEntitiesByFamilyID(uiRectID);
 	for (ZHLN::Entity e : uEntities) {
@@ -221,12 +216,10 @@ void SafeDestroyEntity(ZHLN::Engine* engine, ZHLN::Entity entity) {
 		}
 	}
 
-	// 1. Recursively destroy all gathered children first
 	for (ZHLN::Entity child : childrenToDestroy) {
 		SafeDestroyEntity(engine, child);
 	}
 
-	// 2. Clean up native TextComponent GPU buffers if present
 	auto* text = reg.Get<ZHLN::TextComponent>(entity);
 	if (text != nullptr) {
 		if (text->mesh.posBuffer != ZHLN::BufferHandle::Invalid) {
@@ -240,7 +233,6 @@ void SafeDestroyEntity(ZHLN::Engine* engine, ZHLN::Entity entity) {
 		}
 	}
 
-	// 3. Clean up native UIPanelComponent GPU meshes if present
 	auto* panel = reg.Get<ZHLN::UIPanelComponent>(entity);
 	if (panel != nullptr) {
 		if (panel->mesh.posBuffer != ZHLN::BufferHandle::Invalid) {
@@ -251,7 +243,6 @@ void SafeDestroyEntity(ZHLN::Engine* engine, ZHLN::Entity entity) {
 		}
 	}
 
-	// 4. Clean up native MeshComponent skinned scratch buffers if present
 	auto* mesh = reg.Get<ZHLN::MeshComponent>(entity);
 	if (mesh != nullptr) {
 		if (mesh->skinnedVertexBuffer != ZHLN::BufferHandle::Invalid) {
@@ -259,12 +250,10 @@ void SafeDestroyEntity(ZHLN::Engine* engine, ZHLN::Entity entity) {
 		}
 	}
 
-	// 5. Finally, destroy the entity itself
 	reg.Destroy(entity);
 }
 } // namespace
 
-// Opaque declarations of ConsoleUI globals (defined in ConsoleUI.cpp)
 extern std::vector<std::string> s_InvShellLog;
 extern bool s_InvScrollToBottom;
 
@@ -438,7 +427,6 @@ static void RegisterFFICommands() {
 		reg.Add(e, ZHLN::TransformComponent{.position = {desc->px, desc->py, desc->pz},
 											.rotation = {desc->rx, desc->ry, desc->rz, desc->rw},
 											.scale = {1.0f, 1.0f, 1.0f}});
-		// Configure DrawFlags based on transparency
 		ZHLN::DrawFlags flags = ZHLN::DrawFlags::None;
 		if (isTransparent) {
 			flags |= ZHLN::DrawFlags::ExcludeFromTLAS;
@@ -605,7 +593,6 @@ static void RegisterFFICommands() {
 		} else if (name == "UIStackComponent") {
 			ptr = &reg.Add(entity, ZHLN::UIStackComponent{});
 		} else {
-			// 2. Fall back to dynamically registered types
 			uint32_t familyID = ZHLN::ECS::Registry::GetFamilyIDFromName(name);
 			if (familyID != 0xFFFFFFFF) {
 				ptr = reg.AddDynamic(entity, familyID);
@@ -835,7 +822,7 @@ static void RegisterFFICommands() {
 														.radius = a->radius,
 														.direction = JPH::Vec3(a->dx, a->dy, a->dz),
 														.range = a->range,
-														.points = JPH::Mat44::sIdentity(),
+														.points = {},
 														.twoSided = a->twoSided});
 
 		return e.Pack();
@@ -865,20 +852,16 @@ ZHLN_API uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine_handle, const char* c
 		std::string_view cmdStr(cmd);
 
 		// EXHAUSTIVE DISPATCHER-LEVEL NULL GUARDS
-		// 1. Commands requiring non-null args payload (independent of engine)
 		if (cmdStr == "ReleaseBuffer") {
 			if (args == nullptr)
 				return 0;
 			return it->second(nullptr, args);
 		}
-		// 2. Commands requiring non-null engine context (args can be null)
 		if (cmdStr == "CreateEntity" || cmdStr == "ProvokeDeviceLost") {
 			if (engine == nullptr)
 				return 0;
 			return it->second(engine, nullptr);
 		}
-		// 3. String-based query / FFI mapping commands (requires guarding direct string-view
-		// constructions)
 		if (cmdStr == "GetComponent" || cmdStr == "AddComponent" || cmdStr == "GetECSBuffer" ||
 			cmdStr == "GetECSEntities") {
 			if (engine == nullptr || args == nullptr)
@@ -909,8 +892,6 @@ ZHLN_API uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine_handle, const char* c
 				return 0;
 		}
 
-		// 4. Default baseline guard: All remaining commands require both valid engine and non-null
-		// args payload
 		if (engine == nullptr || args == nullptr) {
 			return 0;
 		}
@@ -919,180 +900,31 @@ ZHLN_API uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine_handle, const char* c
 	return 0;
 }
 
-static int LuaBridge_Log(lua_State* L) {
-	lua_Debug ar;
-	std::memset(&ar, 0, sizeof(lua_Debug));
-
-	if (lua_getstack(L, 1, &ar)) {
-		lua_getinfo(L, "Sl", &ar);
-	} else {
-		std::strncpy(ar.short_src, "unknown", sizeof(ar.short_src) - 1);
-		ar.currentline = 0;
-	}
-
-	int n = lua_gettop(L);
-	std::string msg;
-
-	lua_getglobal(L, "tostring");
-
-	for (int i = 1; i <= n; i++) {
-		lua_pushvalue(L, -1);
-		lua_pushvalue(L, i);
-		lua_call(L, 1, 1);
-
-		size_t len = 0;
-		const char* s = lua_tolstring(L, -1, &len);
-		if (i > 1) {
-			msg += "\t";
-		}
-		if (s != nullptr) {
-			msg += std::string(s, len);
-		}
-
-		lua_pop(L, 1);
-	}
-	lua_pop(L, 1);
-
-	std::string_view file = ar.short_src;
-	if (auto pos = file.find_last_of("/\\"); pos != std::string_view::npos) {
-		file.remove_prefix(pos + 1);
-	}
-
-	ZHLN::LogManual(file, ar.currentline, msg, ZHLN::Color::Green);
-	ZHLN::GameConsole::Log(msg, {.r = 0.4f, .g = 1.0f, .b = 0.4f, .a = 1.0f});
-
-	return 0;
-}
-
-static int LuaBridge_Warn(lua_State* L) {
-	lua_Debug ar;
-	std::memset(&ar, 0, sizeof(lua_Debug));
-
-	if (lua_getstack(L, 1, &ar)) {
-		lua_getinfo(L, "Sl", &ar);
-	} else {
-		std::strncpy(ar.short_src, "unknown", sizeof(ar.short_src) - 1);
-		ar.currentline = 0;
-	}
-
-	int n = lua_gettop(L);
-	std::string msg;
-
-	lua_getglobal(L, "tostring");
-
-	for (int i = 1; i <= n; i++) {
-		lua_pushvalue(L, -1);
-		lua_pushvalue(L, i);
-		lua_call(L, 1, 1);
-
-		size_t len = 0;
-		const char* s = lua_tolstring(L, -1, &len);
-		if (i > 1) {
-			msg += "\t";
-		}
-		if (s) {
-			msg += std::string(s, len);
-		}
-
-		lua_pop(L, 1);
-	}
-	lua_pop(L, 1);
-
-	std::string_view file = ar.short_src;
-	if (auto pos = file.find_last_of("/\\"); pos != std::string_view::npos) {
-		file.remove_prefix(pos + 1);
-	}
-
-	ZHLN::LogManual(file, ar.currentline, msg, ZHLN::Color::Yellow);
-
-	return 0;
-}
-}
+} // extern "C"
 
 namespace ZHLN {
 
-ScriptRunner::ScriptRunner() : L(luaL_newstate()) {
-	luaL_openlibs(L);
+ScriptRunner::ScriptRunner() : _runtime(std::make_unique<LuaScriptRuntime>()) {}
 
-	lua_newtable(L);
-	lua_pushcfunction(L, LuaBridge_Log);
-	lua_setfield(L, -2, "log");
-	lua_pushcfunction(L, LuaBridge_Warn);
-	lua_setfield(L, -2, "warn");
-	lua_setglobal(L, "zahlen");
-
-	lua_pushcfunction(L, LuaBridge_Log);
-	lua_setglobal(L, "print");
-	lua_getglobal(L, "require");
-	lua_pushstring(L, "scripts.core.memoryview");
-	if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
-		Panic("Failed to load core script: scripts/core/memoryview.lua. Error: {}",
-			  lua_tostring(L, -1));
-	}
-	lua_pop(L, 1);
-}
-
-ScriptRunner::~ScriptRunner() {
-	if (L != nullptr) {
-		lua_close(L);
-	}
-}
+ScriptRunner::~ScriptRunner() = default;
 
 void ScriptRunner::RunFile(std::string_view path) {
-	std::string p(path);
-	if (luaL_dofile(L, p.c_str()) != LUA_OK) {
-		Log("Lua Error in {}: {}", path, lua_tostring(L, -1));
-		lua_pop(L, 1);
-	}
+	_runtime->RunFile(path);
 }
 
 void ScriptRunner::CallUpdate(Engine* engine, float dt) {
-	lua_getglobal(L, "update");
-	if (!lua_isfunction(L, -1)) {
-		lua_pop(L, 1);
-		return;
+	if (engine != nullptr) {
+		_runtime->Initialize(engine);
+		_runtime->TickUpdate(engine, dt);
 	}
-
-	lua_pushlightuserdata(L, engine);
-	lua_pushnumber(L, dt);
-
-	if (lua_pcall(L, 2, 0, 0) != LUA_OK) {
-		Log("Lua Error: {}", lua_tostring(L, -1));
-		lua_pop(L, 1);
-	}
-
-	lua_getglobal(L, "require");
-	lua_pushstring(L, "scripts.core.zahlen");
-	lua_pcall(L, 1, 1, 0);
-	lua_getfield(L, -1, "cleanup");
-	lua_pcall(L, 0, 0, 0);
-	lua_pop(L, 1);
 }
 
 void ScriptRunner::ExecuteString(std::string_view code) {
-	if (luaL_dostring(L, code.data()) != LUA_OK) {
-		std::string err = lua_tostring(L, -1);
-		ZHLN::GameConsole::Log("Lua Error: " + err, {1.0f, 0.4f, 0.4f, 1.0f});
-		lua_pop(L, 1);
-	}
+	_runtime->ExecuteString(code);
 }
 
 void ScriptRunner::ReloadFile(std::string_view path) {
-	std::string moduleName = std::string(path);
-
-	if (size_t pos = moduleName.find(".lua"); pos != std::string::npos) {
-		moduleName.erase(pos);
-	}
-	std::ranges::replace(moduleName, '/', '.');
-
-	std::string resetCode = std::format("package.loaded['{}'] = nil", moduleName);
-	luaL_dostring(L, resetCode.c_str());
-
-	RunFile(path);
-
-	Log("Script Hot-Reloaded: {}", path);
-	ZHLN::GameConsole::Log("Hot-Reloaded: " + std::string(path),
-						   {.r = 0.2f, .g = 0.8f, .b = 1.0f, .a = 1.0f});
+	_runtime->ReloadFile(path);
 }
 
 } // namespace ZHLN

@@ -160,6 +160,7 @@ set(ENGINE_SOURCES
     src/engine/Resources.c
     src/engine/Platform.cpp
     src/engine/Scripting.cpp
+    src/engine/LuaScriptRuntime.cpp
     src/engine/ConsoleUI.cpp
     src/engine/ProfilerUI.cpp
     src/engine/Text.cpp
