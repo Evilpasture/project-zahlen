@@ -4,15 +4,17 @@
 local ffi = require("ffi")
 local zh = require("scripts.core.zahlen")
 
--- --- Ambient & Post-Processing Subsystems ---
+-- ============================================================================
+-- 1. CONFIGURE GRAPHICS & POST-PROCESSING ON STARTUP
+-- ============================================================================
 zh:config({
-    giMode = 2,        -- Enable SSGI (Screen Space Global Illumination) for warm light bounces!
+    giMode = 2,        -- Enable SSGI (Screen Space Global Illumination)
     aoRadius = 0.8,    -- Increase AO search radius for softer contact shadows
     aoBias = 0.03,
     aoPower = 2.2,     -- Boost AO contrast
     giIntensity = 1.5, -- Boost GI bounce intensity
     giSamples = 16,    -- Bump sample count for smoother, noise-free shadowing
-    useLocalProbe = 0, -- Disable local probe so the bright outdoor sky irradiance floods the solarium!
+    useLocalProbe = 0, -- Disable local probe so the bright outdoor sky irradiance floods the solarium
     vignetteIntensity = 1.0,
     vignettePower = 1.8,
     enableSSR = 1,
@@ -21,15 +23,29 @@ zh:config({
     ambientExposure = 1.0,
 })
 
+-- ============================================================================
+-- 2. REQUIRE THE MAIN MENU SYSTEM FIRST
+-- ============================================================================
+-- This registers the "MainMenuUpdate" system and draws the canvas on engine.start
+require("scripts.main_menu")
+
+-- Global state gate to control gameplay system execution
+_G.game_started = false
+
 local pomni_parts = nil
 
--- --- Autostart Layout ---
-zh:on("engine.start", function()
-    zh.log("Scene: Spawning declarative layout...")
+-- ============================================================================
+-- 3. DEFINE WORLD GENERATION / GAMESTART CALLBACK
+-- ============================================================================
+-- This is invoked by scripts/main_menu.lua when "START GAME" is clicked
+function _G.StartGame()
+    zh.log("[Gameplay] Spawning Circus Lobby layout and characters...")
 
+    -- Spawn static world geometry and physics colliders
     zh:spawn("Circus Lobby V9.glb", { physics = true, static = true })
     pomni_parts = zh:spawn("tadc_models/POMNI.glb", { animated = true })
 
+    -- Spawn dynamic directional sunlight
     local sun = zh:spawn_light({
         type = 0,
         rotation = { -0.575, 0.287, 0.0, 0.766 }, -- Aligned with the sky's baked sun disk
@@ -40,17 +56,18 @@ zh:on("engine.start", function()
     })
     zh.ecs:add(sun, "SunTagComponent")
 
+    -- Spawn auxiliary fill light
     zh:spawn_light({
         type = 0,
-        position = { 64.0, 200.0, 64.0 },
+        position = { 50.0, 110.0, 34.0 },
         rotation = { 0.0, 0.0, 0.0, 1.0 },
-        color = { 1.0, 1.0, 1.0 },
-        intensity = 180.0,
-        radius = 0.5,
+        color = { 1.0, 0.95, 0.88 },
+        intensity = 230.0,
+        radius = 200.0,
         range = 400.0
     })
 
-    -- Dynamically locate the floor mesh parts and add PBRComponent
+    -- Dynamically locate the floor mesh parts and assign metallic PBR parameters
     for ent, name_comp in zh.ecs:view("NameComponent") do
         local name_str = string.lower(ffi.string(name_comp.name))
         if string.find(name_str, "floor") or string.find(name_str, "ground") or string.find(name_str, "lobby") then
@@ -58,6 +75,7 @@ zh:on("engine.start", function()
         end
     end
 
+    -- Bind visual parts to the C++ pre-created player character capsule
     local player_ent = nil
     for ent, _ in zh.ecs:view("MovementComponent") do
         player_ent = ent
@@ -76,96 +94,24 @@ zh:on("engine.start", function()
         zh.ecs:add(player_ent, "combat", { hp = 100, max_hp = 100 })
 
         zh.physics:setup_ragdoll(player_ent, pomni_parts)
-        zh.log("Scene: Skeletal Ragdoll successfully generated and bound to player controller.")
+        zh.log("[Gameplay] Skeletal Ragdoll successfully generated and bound to player controller.")
     end
 
-    -- -- 3. Showcase the new generic Blueprint entity spawner!
-    -- zh.log("Scene: Dropping dynamic physics crates...")
-    -- for i = 1, 5 do
-    --     zh:spawn_entity({
-    --         type = "box",
-    --         size = zh.vec3(1.0, 1.0, 1.0),
-    --         position = zh.vec3(0, 10 + (i * 2.5), 0),
-    --         color = { 0.8, 0.4, 0.2, 1.0 },
-    --         static = false
-    --     })
-    -- end
-    --
-    -- -- SPAWN AN INTERACTIVE NPC:
-    -- zh.log("Scene: Creating interactive Pomni Dialogue Companion...")
-    --
-    -- -- Let C++ handle the mesh, transform, material, and static collider setup automatically
-    -- local npc = zh:spawn_entity({
-    --     type = "box",
-    --     size = zh.vec3(0.5, 1.8, 0.5),  -- Stand-in character height/width
-    --     position = zh.vec3(5, 1, -5),
-    --     color = { 0.2, 0.6, 1.0, 1.0 }, -- Blue placeholder color
-    --     static = true
-    -- })
-    --
-    -- -- Attach the dialogue identifier to the newly spawned entity
-    -- zh.ecs:add(npc, "DialogueComponent", {
-    --     dialogue_id = "pomni_intro"
-    -- })
-    --
-    -- -- Simulated world quest flag (e.g. player found the sword note)
-    -- zh.dialogue:set_variable("has_sword", true)
-    --
-    -- -- ========================================================================
-    -- -- DIAGNOSTIC TEST CARD (Verify Vulkan Text Drawing)
-    -- -- ========================================================================
-    -- zh.log("Diagnostic: Spawning permanent test card...")
-    --
-    -- local font_idx = 0
-    -- for _, ui_comp in zh.ecs:view("UISettingsComponent") do
-    --     font_idx = ui_comp.defaultFontAtlasIdx
-    --     break
-    -- end
-    --
-    -- local test_card = zh.ecs:create()
-    -- local card_comp = zh.ecs:add(test_card, "TextComponent")
-    --
-    -- ffi.copy(card_comp.text, "LUA TEXT SYSTEM ACTIVE")
-    -- card_comp.text_len = #"LUA TEXT SYSTEM ACTIVE"
-    -- card_comp.x = 50.0
-    -- card_comp.y = 50.0
-    -- card_comp.scale = 2.0
-    -- card_comp.color[0], card_comp.color[1], card_comp.color[2], card_comp.color[3] = 0.0, 1.0, 0.0, 1.0 -- Green
-    -- card_comp.fontIndex = font_idx
+    -- Release the systems to begin running
+    _G.game_started = true
+end
 
-
-    zh.log("Spawning UI Test Panel...")
-
-    local ui_root = zh.ecs:create()
-    local rect = zh.ecs:add(ui_root, "UIRectComponent")
-
-    -- Anchor to the exact center of the screen
-    rect.anchorMinX, rect.anchorMaxX = 0.5, 0.5
-    rect.anchorMinY, rect.anchorMaxY = 0.5, 0.5
-
-    -- Fixed 400x200 panel, offset so the center of the panel matches the anchor
-    rect.x, rect.y = -200, -100
-    rect.width, rect.height = 400, 200
-
-    local panel = zh.ecs:add(ui_root, "UIPanelComponent")
-    -- Semi-transparent dark blue panel
-    panel.color[0] = 0.1 -- R
-    panel.color[1] = 0.2 -- G
-    panel.color[2] = 0.5 -- B
-    panel.color[3] = 0.8 -- A
-end)
-
--- ==========================================
--- SYSTEMS & GAMEPLAY PIPELINES (Event/Tick driven)
--- ==========================================
+-- ============================================================================
+-- 4. ECS SYSTEMS & GAMEPLAY PIPELINES (Guarded by _G.game_started)
+-- ============================================================================
 
 local was_r_down = false
 local total_time = 0.0
 
 local function player_input_system(dt)
-    -- Data-driven: Process all entities acting as a player controller
+    if not _G.game_started then return end
+
     for player_ent, movement in zh.ecs:view("MovementComponent") do
-        -- Property access invokes the hidden C++ Engine functions!
         local yaw_rad        = math.rad(zh.camera.yaw)
 
         local move_x, move_z = 0, 0
@@ -210,31 +156,21 @@ local function player_input_system(dt)
                 local pomni_root = pomni_parts[1]
 
                 if ragdoll.state == 0 then
-                    -- 1. COLLAPSE: Switch to Limp
                     ragdoll.state = 2
                     zh.log("Player collapsed into a Limp Ragdoll!")
                     zh.audio:beep(150.0, 0.25, 0.3)
-
-                    -- Detach visual hierarchy from the physics capsule
                     zh.ecs:remove(pomni_root, "HierarchyComponent")
-
-                    -- Clear visual height offset so she ragdolls exactly at ground level
                     local root_trans = zh.ecs:get(pomni_root, "TransformComponent")
                     if root_trans then
                         root_trans.position[1] = 0.0
                     end
                 else
-                    -- 2. STAND UP: Switch to Inactive
                     ragdoll.state = 0
                     zh.log("Player stood back up!")
-
-                    -- Restore capsule visual height offset
                     local root_trans = zh.ecs:get(pomni_root, "TransformComponent")
                     if root_trans then
                         root_trans.position[1] = -0.8
                     end
-
-                    -- Re-attach visual hierarchy back to the player capsule
                     zh.ecs:add(pomni_root, "HierarchyComponent", { parent = player_ent })
                 end
             end
@@ -243,12 +179,12 @@ local function player_input_system(dt)
     end
 end
 
-
 local function hybrid_health_and_speed_system(dt)
+    if not _G.game_started then return end
+
     for ent, movement, combat in zh.ecs:view("MovementComponent", "combat") do
         if combat.hp < 40 then
             movement.speed = 3.0
-
             if not combat.is_poisoned then
                 zh.log(string.format("Entity %s is limping! HP: %d/100 (Speed throttled dynamically)",
                     tostring(ent), combat.hp))
@@ -270,6 +206,8 @@ local function hybrid_health_and_speed_system(dt)
 end
 
 local function camera_fov_system(dt)
+    if not _G.game_started then return end
+
     for player_ent, movement in zh.ecs:view("MovementComponent") do
         for cam_ent, cam in zh.ecs:view("TargetCameraComponent") do
             if cam.target == player_ent then
@@ -284,6 +222,7 @@ local function camera_fov_system(dt)
 end
 
 local function visual_feedback_system(dt)
+    if not _G.game_started then return end
     total_time = total_time + dt
 
     for player_ent, combat in zh.ecs:view("combat") do
@@ -302,12 +241,10 @@ local function visual_feedback_system(dt)
     end
 end
 
-
 -- --- Register Systems in the Core Scheduler ---
-
 zh.scheduler.register("PlayerInput", 10, player_input_system)
 zh.scheduler.register("CombatAndSpeed", 20, hybrid_health_and_speed_system)
 zh.scheduler.register("CameraFOV", 30, camera_fov_system)
 zh.scheduler.register("VisualFeedback", 25, visual_feedback_system)
 
-zh.log("Gameplay: Systems successfully initialized under the Core Scheduler.")
+zh.log("[Gameplay] Systems successfully registered in dormant state.")

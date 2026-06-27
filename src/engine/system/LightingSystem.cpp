@@ -3,7 +3,6 @@
 
 #include "LightingSystem.hpp"
 
-#include "Zahlen/Camera.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Entity.hpp"
@@ -20,7 +19,6 @@ namespace ZHLN {
 void LightingSystem::Update(Engine& engine, [[maybe_unused]] float dt) {
 	auto& reg = engine.GetRegistry();
 	auto& rc = engine.GetRenderContext();
-	const auto& cam = engine.GetCamera();
 
 	// 1. DYNAMIC SHADOW ALLOCATION
 	Entity playerEnt = NullEntity;
@@ -45,13 +43,7 @@ void LightingSystem::Update(Engine& engine, [[maybe_unused]] float dt) {
 
 				if (light->type == LightType::Point) {
 					if (auto* trans = reg.Get<TransformComponent>(e)) {
-						// Exclude light sources outside of active view frustum
-						bool isLightVisible =
-							cam.frustum.IsSphereVisible(trans->position, light->range);
-						if (!isLightVisible) {
-							continue;
-						}
-
+						// Record all active point lights for distance-based sorting
 						float dSq = (trans->position - playerPos).LengthSq();
 						lightDistances.push_back({.entity = e, .distSq = dSq});
 					}
