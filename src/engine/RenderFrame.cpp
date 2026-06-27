@@ -870,14 +870,28 @@ struct BlitPass {
 					ctx.blitPass.Execute(cmd, pc);
 					if (!ctx.uiDrawQueue.empty()) {
 						UIObjectConstants uipc{};
-
 						uipc.orthoMatrix =
 							GUI::CreateOrthoMatrix(inColor.extent.width, inColor.extent.height);
+
+						// Fallback full-screen scissor matching the swapchain dimensions
+						VkRect2D defaultScissor = {.offset = {.x = 0, .y = 0},
+												   .extent = {.width = inColor.extent.width,
+															  .height = inColor.extent.height}};
 
 						for (const auto& draw : ctx.uiDrawQueue) {
 							uipc.albedoIdx = draw.fontIndex;
 							uipc.posAddress = draw.posMesh->vboAddress;
 							uipc.attrAddress = draw.attrMesh->vboAddress;
+
+							if (draw.useScissor) {
+								VkRect2D vkScissor = {
+									.offset = {.x = draw.scissorRect.x, .y = draw.scissorRect.y},
+									.extent = {.width = draw.scissorRect.width,
+											   .height = draw.scissorRect.height}};
+								vkCmdSetScissor(cmd, 0, 1, &vkScissor);
+							} else {
+								vkCmdSetScissor(cmd, 0, 1, &defaultScissor);
+							}
 
 							Vk::DrawInstanced(cmd,
 											  {.pipeline = ctx.uiPipeline.Get(),
@@ -886,6 +900,8 @@ struct BlitPass {
 											   .vertexCount = draw.posMesh->vertexCount},
 											  uipc);
 						}
+						// Restore default scissor state before exiting
+						vkCmdSetScissor(cmd, 0, 1, &defaultScissor);
 						ctx.uiDrawQueue.clear();
 					}
 					if (!ctx.window.IsTTY()) {
@@ -1698,13 +1714,10 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 	});
 }
 
-void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex) {
+void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex, bool useScissor,
+			ScissorRect scissorRect) {
 	auto* impl = ctx.GetImpl();
 	if (impl->current_cmd == VK_NULL_HANDLE) {
-		return;
-	}
-
-	if (mesh.posBuffer == BufferHandle::Invalid || mesh.attrBuffer == BufferHandle::Invalid) {
 		return;
 	}
 
@@ -1714,7 +1727,11 @@ void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex) {
 		return;
 	}
 
-	impl->uiDrawQueue.push_back({.posMesh = posMesh, .attrMesh = attrMesh, .fontIndex = fontIndex});
+	impl->uiDrawQueue.push_back({.posMesh = posMesh,
+								 .attrMesh = attrMesh,
+								 .fontIndex = fontIndex,
+								 .useScissor = useScissor,
+								 .scissorRect = scissorRect});
 }
 
 } // namespace Renderer

@@ -372,6 +372,10 @@ struct UIDrawCommand {
 	NativeMesh* posMesh;
 	NativeMesh* attrMesh;
 	uint32_t fontIndex;
+
+	// --- Scissoring Bounds ---
+	bool useScissor = false;
+	ScissorRect scissorRect{};
 };
 
 struct WorkerCmdContext {

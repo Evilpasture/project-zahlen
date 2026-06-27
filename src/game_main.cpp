@@ -752,7 +752,6 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 			hasRect = true;
 		}
 
-		// Recreate the text mesh on position changes, ensuring old buffers are freed
 		if (hasRect && (text->x != drawX || text->y != drawY)) {
 			if (text->mesh.posBuffer != BufferHandle::Invalid) {
 				rc.DestroyBuffer(text->mesh.posBuffer);
@@ -768,7 +767,49 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 			text->mesh = GUI::CreateTextMesh(rc, *activeFont, text->text.c_str(), drawX, drawY,
 											 text->scale, text->color);
 		}
-		Renderer::DrawUI(rc, text->mesh, text->fontIndex);
+
+		// Calculate ancestor scissor on-the-fly for the text node
+		bool useScissor = false;
+		ScissorRect currentScissor{};
+
+		if (hasRect) {
+			Entity parent = reg.Get<UIRectComponent>(e)->parentEntity;
+			while (parent != NullEntity && reg.IsAlive(parent)) {
+				if (auto* parentRect = reg.Get<UIRectComponent>(parent)) {
+					if (parentRect->clipChildren) {
+						ScissorRect parentClip = {
+							.x = (int32_t)std::max(0.0f, parentRect->computedAbsMinX),
+							.y = (int32_t)std::max(0.0f, parentRect->computedAbsMinY),
+							.width = (uint32_t)std::max(0.0f, parentRect->computedAbsMaxX -
+																  parentRect->computedAbsMinX),
+							.height = (uint32_t)std::max(0.0f, parentRect->computedAbsMaxY -
+																   parentRect->computedAbsMinY)};
+
+						if (!useScissor) {
+							currentScissor = parentClip;
+							useScissor = true;
+						} else {
+							int32_t x0 = std::max(currentScissor.x, parentClip.x);
+							int32_t y0 = std::max(currentScissor.y, parentClip.y);
+							int32_t x1 = std::min(currentScissor.x + (int32_t)currentScissor.width,
+												  parentClip.x + (int32_t)parentClip.width);
+							int32_t y1 = std::min(currentScissor.y + (int32_t)currentScissor.height,
+												  parentClip.y + (int32_t)parentClip.height);
+
+							currentScissor.x = x0;
+							currentScissor.y = y0;
+							currentScissor.width = std::max(0, x1 - x0);
+							currentScissor.height = std::max(0, y1 - y0);
+						}
+					}
+					parent = parentRect->parentEntity;
+				} else {
+					break;
+				}
+			}
+		}
+
+		Renderer::DrawUI(rc, text->mesh, text->fontIndex, useScissor, currentScissor);
 	}
 
 	DebugDrawSystem(engine);

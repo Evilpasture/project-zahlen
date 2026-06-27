@@ -252,37 +252,53 @@ struct TriggerComponent {
 static_assert(sizeof(TriggerComponent) == 8);
 
 struct UIRectComponent {
-	// Local offsets / dimensions relative to anchors
+	// 1. 8-Byte Types First (Aligned cleanly to 8-byte boundary)
+	ZHLN::Entity parentEntity{}; // 8 bytes
+
+	// 2. 4-Byte Types (12 floats * 4 bytes = 48 bytes. Packs perfectly into 8-byte lines)
 	float x = 0.0f;
 	float y = 0.0f;
 	float width = 100.0f;
 	float height = 100.0f;
 
-	// Layout anchoring relative to parent (0.0 = Left/Top, 1.0 = Right/Bottom)
 	float anchorMinX = 0.0f;
 	float anchorMinY = 0.0f;
 	float anchorMaxX = 0.0f;
 	float anchorMaxY = 0.0f;
 
-	// --- RUNTIME COMPUTED CACHE (Packed tightly for your systems) ---
-	// Your layout system writes these. Your rendering system reads these.
 	float computedAbsMinX = 0.0f;
 	float computedAbsMinY = 0.0f;
 	float computedAbsMaxX = 0.0f;
 	float computedAbsMaxY = 0.0f;
 
-	uint32_t hierarchyDepth = 0; // For sorted linear execution
-	uint32_t _paddingDepth = 0;
-	ZHLN::Entity parentEntity{}; // Invalid/null if root canvas
+	// 3. More 4-Byte Types (1 uint32_t = 4 bytes)
+	uint32_t hierarchyDepth = 0; // 4 bytes
+
+	// 4. 1-Byte Types at the Tail (1 byte)
+	bool clipChildren = false; // 1 byte
+
+	// --- RECLAIMED REAL ESTATE ---
+	// At this exact point, we have used 8 + 48 + 4 + 1 = 61 bytes.
+	// The compiler needs the struct to be a multiple of 8, so it adds 3 bytes of implicit padding.
+	// That means you have exactly 3 bytes of FREE SPACE right here for future flags or uint8_ts!
+	// char _free_space[3];
 };
+static_assert(sizeof(UIRectComponent) == 64, "UIRectComponent fits perfectly in one cache line!");
 
 struct UIPanelComponent {
 	JPH::Vec4 color = {1.0f, 1.0f, 1.0f, 1.0f};
 	JPH::Vec4 borderRadius = {0.0f, 0.0f, 0.0f, 0.0f}; // TopLeft, TopRight, BottomRight, BottomLeft
 
-	uint32_t textureIndex = 1; // Handled via Bindless Descriptor Indexing in your fragment shader
+	uint32_t textureIndex = 1; // Handled via Bindless Descriptor Indexing
 	bool isDirty = true;	   // Triggers a data rewrite to the shared buffer instance chunk
 	Mesh mesh{};
+
+	// --- 9-Slice Options ---
+	float edgeWidth = 0.0f; // Screen-space border size in pixels. Set to 0.0f to disable 9-slice.
+	float uvLeft = 0.1f;	// Texture-space margins (normalized UV coords, 0.0 to 1.0)
+	float uvRight = 0.1f;
+	float uvTop = 0.1f;
+	float uvBottom = 0.1f;
 };
 
 enum class UIButton : uint8_t { None = 0, Hovered = 1 << 0, Pressed = 1 << 1, Clicked = 1 << 2 };

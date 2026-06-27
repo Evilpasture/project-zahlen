@@ -19,6 +19,13 @@ struct Offset2D {
 	int32_t x, y;
 };
 
+struct ScissorRect {
+	int32_t x;
+	int32_t y;
+	uint32_t width;
+	uint32_t height;
+};
+
 // Semantic types to help the Renderer choose the right Vulkan Format
 struct Packed1010102 {
 	uint32_t data;

@@ -116,7 +116,8 @@ void SetGISettings(RenderContext& ctx, const GISettings& settings);
 void SetLights(RenderContext& ctx, const GPULight* lights, uint32_t count);
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const DrawParams& params);
 
-void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex);
+void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex, bool useScissor = false,
+			ScissorRect scissorRect = {});
 
 } // namespace Renderer
 

@@ -237,6 +237,8 @@ if not ok then
 
 
         typedef struct UIRectComponent {
+            uint64_t parentEntity; // ZHLN::Entity packed (8 bytes)
+
             float x;
             float y;
             float width;
@@ -253,8 +255,8 @@ if not ok then
             float computedAbsMaxY;
 
             uint32_t hierarchyDepth;
-            uint32_t _paddingDepth;
-            uint64_t parentEntity; // ZHLN::Entity packed
+            bool clipChildren;
+            char _free_space[3];
         } UIRectComponent;
 
         typedef struct UIPanelComponent {
@@ -264,6 +266,11 @@ if not ok then
             bool isDirty;
             char _pad[3];          // Keep 4-byte alignment
             Mesh mesh;             // Map the internal C++ mesh handle
+            float edgeWidth;       // Match the C++ 9-slice fields
+            float uvLeft;
+            float uvRight;
+            float uvTop;
+            float uvBottom;
         } UIPanelComponent;
 
         typedef struct UIButtonComponent {
