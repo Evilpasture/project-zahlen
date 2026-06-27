@@ -5,7 +5,6 @@
 #include <Zahlen/Input.hpp>
 #include <algorithm>
 #include <ecs/ECS.hpp>
-#include <vector>
 
 namespace ZHLN {
 
@@ -21,11 +20,28 @@ void UIInteractionSystem::Update(Engine& engine) {
 		return;
 	}
 
+	bool leftMouseDown = input.IsMouseButtonDown(KeyCode::LButton);
+
+	for (Entity e : reg.GetEntitiesWith<UIDragComponent>()) {
+		auto* drag = reg.Get<UIDragComponent>(e);
+		if (drag->isDragging) {
+			if (!leftMouseDown) {
+				drag->isDragging = false;
+			} else {
+				// Move the target master panel by the raw mouse delta
+				if (auto* targetRect = reg.Get<UIRectComponent>(drag->targetEntity)) {
+					targetRect->x += mouse.deltaX;
+					targetRect->y += mouse.deltaY;
+				}
+			}
+		}
+	}
+
 	struct SortEntry {
 		size_t rawIndex;
 		uint32_t depth;
 	};
-	std::vector<SortEntry> sortedEntries;
+	JPH::Array<SortEntry> sortedEntries;
 	sortedEntries.reserve(entities.size());
 	for (size_t i = 0; i < entities.size(); ++i) {
 		sortedEntries.push_back({.rawIndex = i, .depth = rects[i].hierarchyDepth});
@@ -34,7 +50,6 @@ void UIInteractionSystem::Update(Engine& engine) {
 					  [](const SortEntry& a, const SortEntry& b) { return a.depth > b.depth; });
 
 	bool clickConsumed = false;
-	bool leftMouseDown = input.IsMouseButtonDown(KeyCode::LButton);
 
 	for (const auto& entry : sortedEntries) {
 		Entity e = entities[entry.rawIndex];
@@ -61,6 +76,10 @@ void UIInteractionSystem::Update(Engine& engine) {
 			button->Set(UIButton::Hovered, true);
 			if (leftMouseDown) {
 				button->Set(UIButton::Pressed, true);
+				// If this element has a drag component, initiate dragging
+				if (auto* drag = reg.Get<UIDragComponent>(e)) {
+					drag->isDragging = true;
+				}
 			} else {
 				if (button->Has(UIButton::Pressed)) {
 					button->Set(UIButton::Clicked, true);
@@ -70,7 +89,9 @@ void UIInteractionSystem::Update(Engine& engine) {
 			}
 		} else {
 			button->Set(UIButton::Hovered, false);
-			button->Set(UIButton::Pressed, false);
+			if (!leftMouseDown) {
+				button->Set(UIButton::Pressed, false);
+			}
 		}
 	}
 }

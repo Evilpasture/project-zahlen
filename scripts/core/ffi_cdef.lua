@@ -270,6 +270,12 @@ if not ok then
             uint8_t flags;
         } UIButtonComponent;
 
+        typedef struct UIDragComponent {
+            uint64_t targetEntity;
+            bool isDragging;
+            char _pad[7];
+        } UIDragComponent;
+
 
         // ==============================================================================
         // COMMAND PAYLOAD ARGS STRUCTS

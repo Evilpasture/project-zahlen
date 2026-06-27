@@ -742,14 +742,29 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 
 	for (Entity e : reg.GetEntitiesWith<TextComponent>()) {
 		auto* text = reg.Get<TextComponent>(e);
-		if (text->mesh.posBuffer == BufferHandle::Invalid && activeFont != nullptr) {
-			float drawX = text->x;
-			float drawY = text->y;
-			if (auto* rect = reg.Get<UIRectComponent>(e)) {
-				drawX = rect->computedAbsMinX;
-				drawY = rect->computedAbsMinY;
-			}
+		float drawX = text->x;
+		float drawY = text->y;
+		bool hasRect = false;
 
+		if (auto* rect = reg.Get<UIRectComponent>(e)) {
+			drawX = rect->computedAbsMinX;
+			drawY = rect->computedAbsMinY;
+			hasRect = true;
+		}
+
+		// Recreate the text mesh on position changes, ensuring old buffers are freed
+		if (hasRect && (text->x != drawX || text->y != drawY)) {
+			if (text->mesh.posBuffer != BufferHandle::Invalid) {
+				rc.DestroyBuffer(text->mesh.posBuffer);
+				rc.DestroyBuffer(text->mesh.attrBuffer);
+				text->mesh.posBuffer = BufferHandle::Invalid;
+				text->mesh.attrBuffer = BufferHandle::Invalid;
+			}
+			text->x = drawX;
+			text->y = drawY;
+		}
+
+		if (text->mesh.posBuffer == BufferHandle::Invalid && activeFont != nullptr) {
 			text->mesh = GUI::CreateTextMesh(rc, *activeFont, text->text.c_str(), drawX, drawY,
 											 text->scale, text->color);
 		}
@@ -942,7 +957,7 @@ bool InitializeGame(Engine& engine) {
 		UISettingsComponent, AudioSourceComponent, PBRComponent, ItemBaseComponent, PickupComponent,
 		UsableComponent, ContainerComponent, TriggerComponent, DebugSettingsComponent,
 		SunTagComponent, FreeCamTagComponent, ShadowSettingsComponent, UIRectComponent,
-		UIPanelComponent, UIButtonComponent>();
+		UIPanelComponent, UIButtonComponent, UIDragComponent>();
 
 	auto groundShape =
 		Physics::GetOrCreateShape(pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);

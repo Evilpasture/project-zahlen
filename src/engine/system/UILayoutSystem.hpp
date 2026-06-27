@@ -1,4 +1,6 @@
 // src/engine/system/UILayoutSystem.hpp
+#pragma once
+
 #include "Zahlen/Components.hpp"
 #include "ecs/ECS.hpp"
 
@@ -35,6 +37,7 @@ class UILayoutSystem {
 
 		// 2. Solve layouts linearly
 		for (const auto& entry : sortedEntries) {
+			Entity e = entities[entry.rawIndex]; // Defined here
 			UIRectComponent& rect = rects[entry.rawIndex];
 			Entity parent = rect.parentEntity;
 
@@ -62,6 +65,12 @@ class UILayoutSystem {
 			float anchorTop = pMinY + (pHeight * rect.anchorMinY);
 			float anchorBottom = pMinY + (pHeight * rect.anchorMaxY);
 
+			// Cache previous absolute coordinates
+			float oldMinX = rect.computedAbsMinX;
+			float oldMinY = rect.computedAbsMinY;
+			float oldMaxX = rect.computedAbsMaxX;
+			float oldMaxY = rect.computedAbsMaxY;
+
 			// Resolve horizontal positioning
 			if (JPH::abs(rect.anchorMinX - rect.anchorMaxX) < 1e-5f) {
 				// Fixed Width: x is offset relative to anchor, width is absolute
@@ -82,6 +91,14 @@ class UILayoutSystem {
 				// Stretching
 				rect.computedAbsMinY = anchorTop + rect.y;
 				rect.computedAbsMaxY = anchorBottom + rect.height;
+			}
+
+			// If absolute position changed, mark the panel dirty to force a mesh rebuild
+			if (rect.computedAbsMinX != oldMinX || rect.computedAbsMinY != oldMinY ||
+				rect.computedAbsMaxX != oldMaxX || rect.computedAbsMaxY != oldMaxY) {
+				if (auto* panel = reg.Get<UIPanelComponent>(e)) {
+					panel->isDirty = true;
+				}
 			}
 		}
 	}

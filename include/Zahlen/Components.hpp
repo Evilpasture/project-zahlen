@@ -303,4 +303,9 @@ struct UIButtonComponent {
 	}
 };
 
+struct UIDragComponent {
+	ZHLN::Entity targetEntity{}; // The master panel we want to translate
+	bool isDragging = false;
+};
+
 } // namespace ZHLN

@@ -124,7 +124,7 @@ zh:on("engine.start", function()
     p_panel.color[2] = 0.12
     p_panel.color[3] = 0.95
 
-    -- B. The Header Bar (Child Panel - Stretched horizontally across the top)
+    -- B. The Header Bar
     local header = zh.ecs:create()
     local h_rect = zh.ecs:add(header, "UIRectComponent")
     h_rect.parentEntity = parent
@@ -140,11 +140,17 @@ zh:on("engine.start", function()
     h_panel.color[2] = 0.22
     h_panel.color[3] = 1.0
 
+    -- Make the header bar click-reactive and link its drag-target to the master window parent
+    zh.ecs:add(header, "UIButtonComponent")
+    zh.ecs:add(header, "UIDragComponent", {
+        targetEntity = parent
+    })
+
     -- C. The Close Button (Child Panel - Anchored to Top-Right corner of the parent)
     closeBtn = zh.ecs:create()
     local b_rect = zh.ecs:add(closeBtn, "UIRectComponent")
-    b_rect.parentEntity = parent
-    b_rect.hierarchyDepth = 1
+    b_rect.parentEntity = header -- Parented directly to the header bar
+    b_rect.hierarchyDepth = 2    -- Increased depth ensures it sorts first
     b_rect.anchorMinX, b_rect.anchorMaxX = 1.0, 1.0
     b_rect.anchorMinY, b_rect.anchorMaxY = 0.0, 0.0
     b_rect.x, b_rect.y = -40, 7
