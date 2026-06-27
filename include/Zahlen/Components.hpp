@@ -324,4 +324,14 @@ struct UIDragComponent {
 	bool isDragging = false;
 };
 
+enum class StackDirection : uint8_t { Horizontal = 0, Vertical = 1 };
+
+struct UIStackComponent {
+	float spacing = 8.0f; // Gap size between adjacent elements (pixels)
+	float padding = 8.0f; // Container boundary padding margin (pixels)
+	StackDirection direction = StackDirection::Vertical;
+	char _pad[3] = {}; // Align to 4-byte boundaries/multiples (Total size: 12 bytes)
+};
+static_assert(sizeof(UIStackComponent) == 12, "UIStackComponent size must be exactly 12 bytes!");
+
 } // namespace ZHLN

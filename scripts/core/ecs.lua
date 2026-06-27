@@ -26,6 +26,7 @@ local NATIVE_COMPONENTS = {
     UIPanelComponent = true,
     UIButtonComponent = true,
     UIDragComponent = true,
+    UIStackComponent = true,
 }
 
 local DYNAMIC_COMPONENTS = {} -- Tracks active dynamic types registered via Lua

@@ -998,7 +998,7 @@ bool InitializeGame(Engine& engine) {
 		UISettingsComponent, AudioSourceComponent, PBRComponent, ItemBaseComponent, PickupComponent,
 		UsableComponent, ContainerComponent, TriggerComponent, DebugSettingsComponent,
 		SunTagComponent, FreeCamTagComponent, ShadowSettingsComponent, UIRectComponent,
-		UIPanelComponent, UIButtonComponent, UIDragComponent>();
+		UIPanelComponent, UIButtonComponent, UIDragComponent, UIStackComponent>();
 
 	auto groundShape =
 		Physics::GetOrCreateShape(pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);

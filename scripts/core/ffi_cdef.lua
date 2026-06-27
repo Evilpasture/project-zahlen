@@ -283,6 +283,13 @@ if not ok then
             char _pad[7];
         } UIDragComponent;
 
+        typedef struct UIStackComponent {
+            float spacing;
+            float padding;
+            uint8_t direction;
+            char _pad[3];
+        } UIStackComponent;
+
 
         // ==============================================================================
         // COMMAND PAYLOAD ARGS STRUCTS
