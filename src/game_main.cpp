@@ -747,20 +747,46 @@ std::expected<void, RenderFrameResult> RenderSystem(Engine& engine) {
 		bool hasRect = false;
 
 		if (auto* rect = reg.Get<UIRectComponent>(e)) {
-			drawX = rect->computedAbsMinX;
-			drawY = rect->computedAbsMinY;
+			// Treat text->x and text->y as relative padding offsets inside parent bounds!
+			drawX = rect->computedAbsMinX + text->x;
+			drawY = rect->computedAbsMinY + text->y;
 			hasRect = true;
 		}
 
-		if (hasRect && (text->x != drawX || text->y != drawY)) {
+		// Handle raw text input synchronization and cursor appending
+		if (auto* input = reg.Get<UITextInputComponent>(e)) {
+			std::string_view raw = input->text;
+			std::string displayStr;
+
+			if (input->isFocused) {
+				// Inject a vertical bar cursor '|' at the current cursor index position
+				displayStr = std::string(raw.substr(0, input->cursorIndex)) + "|" +
+							 std::string(raw.substr(input->cursorIndex));
+			} else {
+				displayStr = raw;
+			}
+
+			if (displayStr != text->text.c_str()) {
+				if (text->mesh.posBuffer != BufferHandle::Invalid) {
+					rc.DestroyBuffer(text->mesh.posBuffer);
+					rc.DestroyBuffer(text->mesh.attrBuffer);
+				}
+				text->text.assign(displayStr);
+				text->mesh.posBuffer = BufferHandle::Invalid;
+				text->mesh.attrBuffer = BufferHandle::Invalid;
+			}
+		}
+
+		// If the computed absolute coordinates changed (due to dragging), rebuild the text mesh
+		if (text->lastDrawX != drawX || text->lastDrawY != drawY) {
 			if (text->mesh.posBuffer != BufferHandle::Invalid) {
 				rc.DestroyBuffer(text->mesh.posBuffer);
 				rc.DestroyBuffer(text->mesh.attrBuffer);
 				text->mesh.posBuffer = BufferHandle::Invalid;
 				text->mesh.attrBuffer = BufferHandle::Invalid;
 			}
-			text->x = drawX;
-			text->y = drawY;
+			text->lastDrawX = drawX;
+			text->lastDrawY = drawY;
 		}
 
 		if (text->mesh.posBuffer == BufferHandle::Invalid && activeFont != nullptr) {
@@ -998,7 +1024,8 @@ bool InitializeGame(Engine& engine) {
 		UISettingsComponent, AudioSourceComponent, PBRComponent, ItemBaseComponent, PickupComponent,
 		UsableComponent, ContainerComponent, TriggerComponent, DebugSettingsComponent,
 		SunTagComponent, FreeCamTagComponent, ShadowSettingsComponent, UIRectComponent,
-		UIPanelComponent, UIButtonComponent, UIDragComponent, UIStackComponent>();
+		UIPanelComponent, UIButtonComponent, UIDragComponent, UIStackComponent,
+		UITextInputComponent>();
 
 	auto groundShape =
 		Physics::GetOrCreateShape(pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);

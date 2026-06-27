@@ -207,6 +207,10 @@ struct TextComponent {
 	JPH::Vec4 color = {1.0f, 1.0f, 1.0f, 1.0f};
 	uint32_t fontIndex = 0;
 	Mesh mesh{};
+
+	// --- Rendering Position Cache ---
+	float lastDrawX = -1e30f;
+	float lastDrawY = -1e30f;
 };
 
 struct UISettingsComponent {
@@ -333,5 +337,14 @@ struct UIStackComponent {
 	char _pad[3] = {}; // Align to 4-byte boundaries/multiples (Total size: 12 bytes)
 };
 static_assert(sizeof(UIStackComponent) == 12, "UIStackComponent size must be exactly 12 bytes!");
+
+struct UITextInputComponent {
+	String256 text;			  // 264 bytes
+	uint32_t cursorIndex = 0; // 4 bytes
+	bool isFocused = false;	  // 1 byte
+	char _pad[3] = {};		  // 3 bytes padding (Total size: 272 bytes)
+};
+static_assert(sizeof(UITextInputComponent) == 272,
+			  "UITextInputComponent size must be exactly 272 bytes!");
 
 } // namespace ZHLN

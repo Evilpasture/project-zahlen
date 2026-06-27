@@ -3,8 +3,11 @@
 
 #include "Platform.hpp"
 #include "TTYBackend.hpp"
+#include "Zahlen/Components.hpp"
+#include "Zahlen/Engine.hpp"
+#include "ecs/ECS.hpp"
 
-#include <GLFW/glfw3.h> // NEW
+#include <GLFW/glfw3.h>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Window.hpp>
 
@@ -132,6 +135,77 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
 					auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
 					self->_impl->input->InjectWheelMotion(static_cast<float>(yoffset));
 				});
+
+			// Handle control keys (Backspace / Arrow keys) for focused text inputs
+			glfwSetKeyCallback(_impl->handle, [](GLFWwindow* win, int key,
+												 [[maybe_unused]] int scancode, int action,
+												 [[maybe_unused]] int mods) {
+				auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
+				KeyCode mapped = MapGLFWKey(key);
+				if (action == GLFW_PRESS) {
+					self->_impl->input->InjectKeyDown(mapped);
+				} else if (action == GLFW_RELEASE) {
+					self->_impl->input->InjectKeyUp(mapped);
+				}
+
+				// Process text control actions on key press
+				if (action == GLFW_PRESS || action == GLFW_REPEAT) {
+					if (auto* engine = GetEngineContext()) {
+						auto& reg = engine->GetRegistry();
+						for (Entity e : reg.GetEntitiesWith<UITextInputComponent>()) {
+							auto* input = reg.Get<UITextInputComponent>(e);
+							if (input && input->isFocused) {
+								std::string_view curr = input->text;
+
+								if (key == GLFW_KEY_BACKSPACE && input->cursorIndex > 0) {
+									// Erase character before cursor
+									std::string next =
+										std::string(curr.substr(0, input->cursorIndex - 1)) +
+										std::string(curr.substr(input->cursorIndex));
+									input->text.assign(next);
+									input->cursorIndex--;
+
+									// Force immediate redraw
+									if (auto* text = reg.Get<TextComponent>(e)) {
+										text->mesh.posBuffer = BufferHandle::Invalid;
+									}
+								} else if (key == GLFW_KEY_LEFT && input->cursorIndex > 0) {
+									input->cursorIndex--;
+								} else if (key == GLFW_KEY_RIGHT &&
+										   input->cursorIndex < curr.size()) {
+									input->cursorIndex++;
+								}
+							}
+						}
+					}
+				}
+			});
+
+			// Handle printable character inputs
+			glfwSetCharCallback(_impl->handle, [](GLFWwindow* win, unsigned int codepoint) {
+				if (auto* engine = GetEngineContext()) {
+					auto& reg = engine->GetRegistry();
+					for (Entity e : reg.GetEntitiesWith<UITextInputComponent>()) {
+						auto* input = reg.Get<UITextInputComponent>(e);
+						if (input && input->isFocused) {
+							// Append only printable ASCII characters within buffer limits
+							if (codepoint >= 32 && codepoint <= 126 && input->text.size() < 255) {
+								std::string_view curr = input->text;
+								std::string next = std::string(curr.substr(0, input->cursorIndex)) +
+												   static_cast<char>(codepoint) +
+												   std::string(curr.substr(input->cursorIndex));
+								input->text.assign(next);
+								input->cursorIndex++;
+
+								// Force immediate redraw
+								if (auto* text = reg.Get<TextComponent>(e)) {
+									text->mesh.posBuffer = BufferHandle::Invalid;
+								}
+							}
+						}
+					}
+				}
+			});
 		}
 	}
 }

@@ -601,7 +601,6 @@ static void RegisterFFICommands() {
 			ptr = &reg.Add(entity, ZHLN::UIDragComponent{});
 		} else if (name == "UIStackComponent") {
 			ptr = &reg.Add(entity, ZHLN::UIStackComponent{});
-
 		} else {
 			// 2. Fall back to dynamically registered types
 			uint32_t familyID = ZHLN::ECS::Registry::GetFamilyIDFromName(name);

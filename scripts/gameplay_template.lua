@@ -32,6 +32,7 @@ local UIButtonFlags = {
 -- Declare file-scoped references so they can be accessed across systems
 local parent = nil
 local closeBtn = nil
+local textBox = nil
 
 -- ============================================================================
 -- 2. SCENE INITIALIZATION (Baseplate, Lights & Physical Props)
@@ -76,7 +77,7 @@ zh:on("engine.start", function()
         })
     end
 
-    -- C. ADDED: Semi-Transparent Interactive Glass Box
+    -- C. Semi-Transparent Interactive Glass Box
     zh.log("[Sandbox] Spawning semi-transparent glass box...")
     local glassBox = zh:spawn_entity({
         type = "box",
@@ -109,6 +110,12 @@ zh:on("engine.start", function()
     -- ============================================================================
     zh.log("[UI] Spawning nested window frame...")
 
+    local font_idx = 0
+    for _, ui_comp in zh.ecs:view("UISettingsComponent") do
+        font_idx = ui_comp.defaultFontAtlasIdx
+        break
+    end
+
     -- A. The Master Window (Parent Panel - Centered on screen)
     parent = zh.ecs:create()
     local p_rect = zh.ecs:add(parent, "UIRectComponent")
@@ -123,12 +130,16 @@ zh:on("engine.start", function()
     p_panel.color[1] = 0.08
     p_panel.color[2] = 0.12
     p_panel.color[3] = 0.95
+    -- Feature Test 1: Enable 9-slice panel rendering
+    p_panel.edgeWidth = 16.0
+    p_panel.uvLeft, p_panel.uvRight = 0.1, 0.1
+    p_panel.uvTop, p_panel.uvBottom = 0.1, 0.1
 
     -- B. The Header Bar
     local header = zh.ecs:create()
     local h_rect = zh.ecs:add(header, "UIRectComponent")
     h_rect.parentEntity = parent
-    h_rect.hierarchyDepth = 1
+    h_rect.hierarchyDepth = 1 -- Changed from 2 to 1
     h_rect.anchorMinX, h_rect.anchorMaxX = 0.0, 1.0
     h_rect.anchorMinY, h_rect.anchorMaxY = 0.0, 0.0
     h_rect.x, h_rect.y = 0, 0
@@ -149,7 +160,7 @@ zh:on("engine.start", function()
     -- C. The Close Button (Child Panel - Anchored to Top-Right corner of the parent)
     closeBtn = zh.ecs:create()
     local b_rect = zh.ecs:add(closeBtn, "UIRectComponent")
-    b_rect.parentEntity = header -- Parented directly to the header bar
+    b_rect.parentEntity = header -- Parented directly to the header bar to sort correctly
     b_rect.hierarchyDepth = 2    -- Increased depth ensures it sorts first
     b_rect.anchorMinX, b_rect.anchorMaxX = 1.0, 1.0
     b_rect.anchorMinY, b_rect.anchorMaxY = 0.0, 0.0
@@ -175,12 +186,6 @@ zh:on("engine.start", function()
     t_rect.x = 15
     t_rect.y = 25
 
-    local font_idx = 0
-    for _, ui_comp in zh.ecs:view("UISettingsComponent") do
-        font_idx = ui_comp.defaultFontAtlasIdx
-        break
-    end
-
     local text_comp = zh.ecs:add(title, "TextComponent")
     ffi.copy(text_comp.text, "Sandbox Workspace Controller")
     text_comp.scale = 0.8
@@ -189,6 +194,76 @@ zh:on("engine.start", function()
     text_comp.color[1] = 0.9
     text_comp.color[2] = 0.9
     text_comp.color[3] = 1.0
+
+    -- E. Feature Test 2: Auto-Layout Vertical Stack Container (VBox)
+    local stackContainer = zh.ecs:create()
+    local s_rect = zh.ecs:add(stackContainer, "UIRectComponent")
+    s_rect.parentEntity = parent
+    s_rect.hierarchyDepth = 1
+    s_rect.anchorMinX, s_rect.anchorMaxX = 0.0, 0.0
+    s_rect.anchorMinY, s_rect.anchorMaxY = 0.0, 0.0
+    s_rect.x, s_rect.y = 20, 60
+    s_rect.width, s_rect.height = 200, 200
+
+    -- Add the layout system's auto-arranger (VBox)
+    local stack = zh.ecs:add(stackContainer, "UIStackComponent")
+    stack.direction = 1 -- Vertical direction
+    stack.spacing = 10.0
+    stack.padding = 8.0
+
+    -- Spawn child panels inside the stack container to demonstrate auto-positioning
+    for i = 1, 3 do
+        local item = zh.ecs:create()
+        local item_rect = zh.ecs:add(item, "UIRectComponent")
+        item_rect.parentEntity = stackContainer
+        item_rect.hierarchyDepth = 2
+        item_rect.width = 180
+        item_rect.height = 30 -- X and Y offsets are managed automatically by UIStackComponent
+
+        local item_panel = zh.ecs:add(item, "UIPanelComponent")
+        item_panel.color[0], item_panel.color[1], item_panel.color[2], item_panel.color[3] = 0.18, 0.18, 0.26, 1.0
+        item_panel.edgeWidth = 4.0 -- 9-slice on children too!
+
+        local item_text = zh.ecs:add(item, "TextComponent")
+        ffi.copy(item_text.text, "Auto Stack Item #" .. tostring(i))
+        item_text.x = 10 -- Left padding offset relative to the item panel
+        item_text.y = 20 -- Vertical padding offset relative to the item panel
+        item_text.scale = 0.8
+        item_text.fontIndex = font_idx
+        item_text.color[0], item_text.color[1], item_text.color[2], item_text.color[3] = 0.8, 0.8, 0.8, 1.0
+    end
+
+    -- F. Feature Test 3: Interactive Text Input Box (Focus Clickable + Keyboard Entry)
+    textBox = zh.ecs:create()
+    local box_rect = zh.ecs:add(textBox, "UIRectComponent")
+    box_rect.parentEntity = parent
+    box_rect.hierarchyDepth = 1
+    box_rect.anchorMinX, box_rect.anchorMaxX = 0.0, 0.0
+    box_rect.anchorMinY, box_rect.anchorMaxY = 0.0, 0.0
+    box_rect.x, box_rect.y = 240, 100
+    box_rect.width, box_rect.height = 240, 40
+
+    local box_panel = zh.ecs:add(textBox, "UIPanelComponent")
+    box_panel.color[0], box_panel.color[1], box_panel.color[2], box_panel.color[3] = 0.03, 0.03, 0.05, 1.0
+    box_panel.edgeWidth = 8.0
+
+    -- Make the text box select-reactive on click to grab keyboard focus
+    zh.ecs:add(textBox, "UIButtonComponent")
+
+    -- Initialize the keyboard buffer and cursor state
+    local box_input = zh.ecs:add(textBox, "UITextInputComponent")
+    ffi.copy(box_input.text.data, "Click & Type here...")
+    box_input.text.len = #"Click & Type here..."
+    box_input.cursorIndex = box_input.text.len
+
+    -- Assign a TextComponent to visually display the input buffer
+    local box_text = zh.ecs:add(textBox, "TextComponent")
+    ffi.copy(box_text.text, box_input.text.data, box_input.text.len + 1)
+    box_text.x = 12 -- Left padding offset relative to the textbox panel
+    box_text.y = 25 -- Vertical padding offset relative to the textbox panel
+    box_text.scale = 0.8
+    box_text.fontIndex = font_idx
+    box_text.color[0], box_text.color[1], box_text.color[2], box_text.color[3] = 0.9, 0.9, 0.9, 1.0
 end)
 
 -- ============================================================================
@@ -250,6 +325,7 @@ local function ui_controller_system(dt)
             -- Nil out the references so this update logic stops polling
             parent = nil
             closeBtn = nil
+            textBox = nil
         end
     end
 end

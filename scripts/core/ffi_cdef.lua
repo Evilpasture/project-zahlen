@@ -189,6 +189,8 @@ if not ok then
             uint32_t fontIndex;
             char     _pad2[4];  // padding to align Mesh to 8 bytes
             Mesh     mesh;
+            float    lastDrawX;
+            float    lastDrawY;
         } TextComponent;
 
         typedef struct UISettingsComponent {
@@ -205,6 +207,11 @@ if not ok then
             char data[64];
             size_t len;
         } String64;
+
+        typedef struct String256 {
+            char data[256];
+            size_t len;
+        } String256;
 
         typedef struct ItemBaseComponent {
             String64 name;
@@ -289,6 +296,13 @@ if not ok then
             uint8_t direction;
             char _pad[3];
         } UIStackComponent;
+
+        typedef struct UITextInputComponent {
+            String256 text;
+            uint32_t cursorIndex;
+            bool isFocused;
+            char _pad[3];
+        } UITextInputComponent;
 
 
         // ==============================================================================
