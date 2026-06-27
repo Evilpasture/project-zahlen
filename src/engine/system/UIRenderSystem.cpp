@@ -1,8 +1,12 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // src/engine/system/UIRenderSystem.cpp
 #include "UIRenderSystem.hpp"
 
 #include "UILayoutSystem.hpp"
 
+#include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/GUI.hpp>
 #include <Zahlen/Render.hpp>
@@ -115,6 +119,99 @@ void UIRenderSystem::Update(Engine& engine) {
 			}
 			Renderer::DrawUI(rc, panel->mesh, panel->textureIndex, useScissor, currentScissor);
 		}
+	}
+
+	// 3. Process Text & Text Input Components
+	auto uiSettingsEntities = reg.GetEntitiesWith<UISettingsComponent>();
+	const FontAtlas* activeFont = nullptr;
+	if (!uiSettingsEntities.empty()) {
+		activeFont = &reg.Get<UISettingsComponent>(uiSettingsEntities[0])->fontAtlas;
+	}
+
+	for (Entity e : reg.GetEntitiesWith<TextComponent>()) {
+		auto* text = reg.Get<TextComponent>(e);
+		float drawX = text->x;
+		float drawY = text->y;
+		bool hasRect = false;
+
+		auto* rect = reg.Get<UIRectComponent>(e);
+		if (rect != nullptr) {
+			drawX = rect->computedAbsMinX + text->x;
+			drawY = rect->computedAbsMinY + text->y;
+			hasRect = true;
+		}
+
+		// Handle raw text input synchronization and cursor appending
+		if (auto* input = reg.Get<UITextInputComponent>(e)) {
+			std::string_view raw = input->text;
+			std::string displayStr;
+
+			if (input->isFocused) {
+				// Inject a vertical bar cursor '|' at the current cursor index position
+				displayStr = std::string(raw.substr(0, input->cursorIndex)) + "|" +
+							 std::string(raw.substr(input->cursorIndex));
+			} else {
+				displayStr = raw;
+			}
+
+			if (displayStr != text->text.c_str()) {
+				if (text->mesh.posBuffer != BufferHandle::Invalid) {
+					rc.DestroyBuffer(text->mesh.posBuffer);
+					rc.DestroyBuffer(text->mesh.attrBuffer);
+				}
+				text->text.assign(displayStr);
+				text->mesh.posBuffer = BufferHandle::Invalid;
+				text->mesh.attrBuffer = BufferHandle::Invalid;
+			}
+		}
+
+		// If the computed absolute coordinates changed (due to dragging), rebuild the text mesh
+		if (text->lastDrawX != drawX || text->lastDrawY != drawY) {
+			if (text->mesh.posBuffer != BufferHandle::Invalid) {
+				rc.DestroyBuffer(text->mesh.posBuffer);
+				rc.DestroyBuffer(text->mesh.attrBuffer);
+				text->mesh.posBuffer = BufferHandle::Invalid;
+				text->mesh.attrBuffer = BufferHandle::Invalid;
+			}
+			text->lastDrawX = drawX;
+			text->lastDrawY = drawY;
+		}
+
+		if (text->mesh.posBuffer == BufferHandle::Invalid && activeFont != nullptr) {
+			text->mesh = GUI::CreateTextMesh(rc, *activeFont, text->text.c_str(), drawX, drawY,
+											 text->scale, text->color);
+		}
+
+		// Calculate scissor constraints (using O(1) hash lookups from step 2)
+		bool useScissor = false;
+		ScissorRect currentScissor{};
+
+		if (hasRect) {
+			const ScissorRect* parentScissorPtr = activeScissors.Find(rect->parentEntity.Pack());
+			if (parentScissorPtr != nullptr) {
+				currentScissor = *parentScissorPtr;
+				useScissor = true;
+			} else {
+				// Fallback: Check if the direct parent itself had clipping enabled
+				if (rect->parentEntity != NullEntity && reg.IsAlive(rect->parentEntity)) {
+					if (auto* parentRect = reg.Get<UIRectComponent>(rect->parentEntity)) {
+						if (parentRect->clipChildren) {
+							currentScissor = {
+								.x = (int32_t)std::max(0.0f, parentRect->computedAbsMinX),
+								.y = (int32_t)std::max(0.0f, parentRect->computedAbsMinY),
+								.width = (uint32_t)std::max(0.0f, parentRect->computedAbsMaxX -
+																	  parentRect->computedAbsMinX),
+								.height =
+									(uint32_t)std::max(0.0f, parentRect->computedAbsMaxY -
+																 parentRect->computedAbsMinY)};
+							useScissor = true;
+						}
+					}
+				}
+			}
+		}
+
+		Renderer::DrawUI(rc, text->mesh, text->fontIndex, useScissor, currentScissor);
 	}
 }
 

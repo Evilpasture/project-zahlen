@@ -3,6 +3,7 @@
 
 #include "CullingSystem.hpp"
 
+#include "Zahlen/Render.hpp"
 #include "engine/system/CameraSystem.hpp"
 
 #include <Zahlen/Camera.hpp>
@@ -159,6 +160,79 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible,
 
 	if constexpr (isDev) {
 		ZHLN::Tests::VerifyCullingResults(reg, outVisible, cam);
+	}
+}
+
+void CullingSystem::DrawDebugFrustum(Engine& engine) {
+	if (!CullingStats::FreezeFrustum) {
+		return;
+	}
+
+	auto& rc = engine.GetRenderContext();
+	auto& reg = engine.GetRegistry();
+
+	auto settingsEntities = reg.GetEntitiesWith<GlobalSettingsTagComponent>();
+	if (settingsEntities.empty()) {
+		return;
+	}
+
+	auto* dbg = reg.Get<DebugSettingsComponent>(settingsEntities[0]);
+	if ((dbg == nullptr) || dbg->debugLineVbo == 0) {
+		return;
+	}
+
+	Mesh debugMesh = {.posBuffer = static_cast<BufferHandle>(dbg->debugLineVbo),
+					  .attrBuffer = static_cast<BufferHandle>(dbg->debugLineVbo),
+					  .skinBuffer = BufferHandle::Invalid,
+					  .indexBuffer = BufferHandle::Invalid,
+					  .vertexCount = 36,
+					  .indexCount = 0};
+	Material debugMat = {.pipeline = static_cast<PipelineHandle>(dbg->debugLinePipeline),
+						 .albedoIndex = dbg->debugLineAlbedo};
+
+	debugMat.baseColorFactor[0] = 0.0f;
+	debugMat.baseColorFactor[1] = 1.0f;
+	debugMat.baseColorFactor[2] = 1.0f;
+	debugMat.baseColorFactor[3] = 1.0f;
+
+	struct FrustumEdge {
+		int start;
+		int end;
+	};
+	static constexpr std::array<FrustumEdge, 12> frustumEdges = {{
+		{.start = 0, .end = 1},
+		{.start = 1, .end = 2},
+		{.start = 2, .end = 3},
+		{.start = 3, .end = 0}, // Near Plane loop
+		{.start = 4, .end = 5},
+		{.start = 5, .end = 6},
+		{.start = 6, .end = 7},
+		{.start = 7, .end = 4}, // Far Plane loop
+		{.start = 0, .end = 4},
+		{.start = 1, .end = 5},
+		{.start = 2, .end = 6},
+		{.start = 3, .end = 7} // Near-to-Far connection lines
+	}};
+
+	for (auto edge : frustumEdges) {
+		JPH::Vec3 pA = m_frustumCorners[edge.start];
+		JPH::Vec3 pB = m_frustumCorners[edge.end];
+
+		JPH::Vec3 v = pB - pA;
+		float len = v.Length();
+		if (len < 1e-4f) {
+			continue;
+		}
+
+		JPH::Vec3 dir = v / len;
+		JPH::Vec3 mid = (pA + pB) * 0.5f;
+
+		JPH::Quat rot = JPH::Quat::sFromTo(JPH::Vec3::sAxisZ(), dir);
+		JPH::Mat44 lineTransform = Math::CreateTransform(mid, rot, JPH::Vec3(1.0f, 1.0f, len));
+
+		Renderer::Draw(
+			rc, debugMat, debugMesh,
+			{.transform = lineTransform, .prevTransform = lineTransform, .cullRadius = len});
 	}
 }
 

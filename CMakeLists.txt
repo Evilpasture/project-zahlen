@@ -163,7 +163,9 @@ set(ENGINE_SOURCES
     src/engine/LuaScriptRuntime.cpp
     src/engine/ConsoleUI.cpp
     src/engine/ProfilerUI.cpp
+    src/engine/DiagnosticUI.cpp
     src/engine/Text.cpp
+    src/engine/system/RenderSystem.cpp 
     src/engine/system/MovementSystem.cpp
     src/engine/system/AudioSystem.cpp
     src/engine/system/ArticulationSystem.cpp

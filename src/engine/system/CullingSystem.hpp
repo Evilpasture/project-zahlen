@@ -19,6 +19,9 @@ class ZHLN_API CullingSystem {
 
 	[[nodiscard]] std::array<JPH::Vec3, 8> GetFrustumCorners() const { return m_frustumCorners; }
 
+	// Draws the line segments of the frozen camera frustum
+	void DrawDebugFrustum(Engine& engine);
+
   private:
 	std::array<JPH::Vec3, 8> m_frustumCorners{};
 };

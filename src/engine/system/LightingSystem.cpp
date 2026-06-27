@@ -3,6 +3,7 @@
 
 #include "LightingSystem.hpp"
 
+#include "Zahlen/Camera.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Entity.hpp"
@@ -10,6 +11,7 @@
 #include "Zahlen/Types.hpp"
 #include "ecs/ECS.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <vector>
 
@@ -18,7 +20,63 @@ namespace ZHLN {
 void LightingSystem::Update(Engine& engine, [[maybe_unused]] float dt) {
 	auto& reg = engine.GetRegistry();
 	auto& rc = engine.GetRenderContext();
+	const auto& cam = engine.GetCamera();
 
+	// 1. DYNAMIC SHADOW ALLOCATION
+	Entity playerEnt = NullEntity;
+	for (Entity e : reg.GetEntitiesWith<PlayerTagComponent>()) {
+		playerEnt = e;
+		break;
+	}
+
+	if (playerEnt != NullEntity) {
+		struct LightDistance {
+			Entity entity;
+			float distSq;
+		};
+		std::vector<LightDistance> lightDistances;
+
+		if (auto* playerTrans = reg.Get<TransformComponent>(playerEnt)) {
+			JPH::Vec3 playerPos = playerTrans->position;
+
+			for (Entity e : reg.GetEntitiesWith<LightComponent>()) {
+				auto* light = reg.Get<LightComponent>(e);
+				light->shadowLayer = -1; // Reset to disabled initially
+
+				if (light->type == LightType::Point) {
+					if (auto* trans = reg.Get<TransformComponent>(e)) {
+						// Exclude light sources outside of active view frustum
+						bool isLightVisible =
+							cam.frustum.IsSphereVisible(trans->position, light->range);
+						if (!isLightVisible) {
+							continue;
+						}
+
+						float dSq = (trans->position - playerPos).LengthSq();
+						lightDistances.push_back({.entity = e, .distSq = dSq});
+					}
+				}
+			}
+
+			// Sort light sources nearest to player
+			std::ranges::sort(lightDistances, [](const LightDistance& a, const LightDistance& b) {
+				return a.distSq < b.distSq;
+			});
+
+			auto shadowEntities = reg.GetEntitiesWith<ShadowSettingsComponent>();
+			if (!shadowEntities.empty()) {
+				auto* shadowSettings = reg.Get<ShadowSettingsComponent>(shadowEntities[0]);
+				uint32_t shadowCasters =
+					std::min(static_cast<uint32_t>(shadowSettings->maxPunctualShadows),
+							 static_cast<uint32_t>(lightDistances.size()));
+				for (uint32_t i = 0; i < shadowCasters; ++i) {
+					reg.Get<LightComponent>(lightDistances[i].entity)->shadowLayer = i;
+				}
+			}
+		}
+	}
+
+	// 2. COMPILE GPU LIGHTS
 	std::vector<GPULight> sceneLights;
 	auto lightEntities = reg.GetEntitiesWith<LightComponent>();
 	sceneLights.reserve(lightEntities.size());

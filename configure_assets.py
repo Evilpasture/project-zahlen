@@ -222,12 +222,12 @@ def generate_ninja(output_file, zcook_executable, source_dir):
     escaped_script = escape_ninja(
         os.path.join(source_dir, "tools", "export_metadata.py").replace("\\", "/")
     )
-    
+
     # 1. ADDED: Resolve and escape path to the run_blender.py environment wrapper
     escaped_wrapper = escape_ninja(
         os.path.join(source_dir, "tools", "run_blender.py").replace("\\", "/")
     )
-    
+
     intermediate_root = os.path.join(source_dir, "resources", "intermediate").replace(
         "\\", "/"
     )
@@ -455,3 +455,4 @@ if __name__ == "__main__":
         sys.exit(1)
 
     generate_ninja(sys.argv[1], sys.argv[2], sys.argv[3])
+
