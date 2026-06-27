@@ -1071,7 +1071,7 @@ Entity TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part,
 										.scale = JPH::Vec3::sReplicate(1.0f)});
 	reg.Add(glowEnt, NameComponent{.name = String64("Glow_" + std::string(part.name.c_str()))});
 	reg.Add(glowEnt, LightingSystem::LightComponent{
-						 .type = 1, // Point Light
+						 .type = LightType::Point,
 						 .color = JPH::Vec3(ef[0], ef[1], ef[2]),
 						 .intensity = lum * 35.0f,
 						 .radius = std::max(partExtent * scaleMult * 0.15f, 0.05f),
@@ -1104,9 +1104,9 @@ uint32_t InstantiateAuthoredLights(ECS::Registry& reg, const cgltf_data* rawData
 		dir = (dir.LengthSq() > 1e-6f) ? dir.Normalized() : JPH::Vec3(0, -1, 0);
 
 		const cgltf_light* l = node->light;
-		uint32_t type = (l->type == cgltf_light_type_directional) ? 0
-						: (l->type == cgltf_light_type_spot)	  ? 2
-																  : 1;
+		LightType type = (l->type == cgltf_light_type_directional) ? LightType::Directional
+						 : (l->type == cgltf_light_type_spot)	   ? LightType::Spot
+																   : LightType::Point;
 
 		Entity ent = reg.Create();
 		reg.Add(ent, TransformComponent{.position = worldMat.GetTranslation(),

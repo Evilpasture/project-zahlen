@@ -187,7 +187,7 @@ struct SpawnLightArgs {
 	float radius;
 	float dx, dy, dz; // Direction
 	float range;
-	uint32_t type; // 0=Dir, 1=Point, 2=Spot, 3=Area
+	ZHLN::LightType type; // 0=Dir, 1=Point, 2=Spot, 3=Area
 	uint32_t twoSided;
 };
 

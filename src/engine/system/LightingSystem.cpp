@@ -41,7 +41,7 @@ void LightingSystem::Update(Engine& engine, [[maybe_unused]] float dt) {
 			std::memcpy(gpuLight.position, &trans->position, sizeof(float) * 3);
 		}
 
-		if (gpuLight.type == 3) {
+		if (gpuLight.type == LightType::Area) {
 			std::memcpy(gpuLight.points, &light->points, sizeof(JPH::Mat44));
 		}
 

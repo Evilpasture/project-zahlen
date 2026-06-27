@@ -69,7 +69,10 @@ template <typename T, size_t MaxObjects, typename HandleType = uint64_t> class G
 
 	template <typename... Args> HandleType Create(Args&&... args) {
 		if (_freeIndices.empty()) [[unlikely]] {
-			ZHLN::Panic("GenerationalPool exceeded maximum capacity!");
+			ZHLN::Log("ERROR: GenerationalPool has exceeded its maximum capacity of {}! Returning "
+					  "invalid handle.",
+					  MaxObjects);
+			return static_cast<HandleType>(0);
 		}
 		uint32_t index = _freeIndices.back();
 		_freeIndices.pop_back();

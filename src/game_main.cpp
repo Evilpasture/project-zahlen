@@ -370,7 +370,7 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 	int lightIdx = 1;
 	for (Entity e : reg.GetEntitiesWith<LightingSystem::LightComponent>()) {
 		if (auto* light = reg.Get<LightingSystem::LightComponent>(e)) {
-			if (light->type == 1) { // Point Light
+			if (light->type == LightType::Point) { // Point Light
 				std::string labelInt = std::format("Point Light {} Intensity", lightIdx);
 				std::string labelRad = std::format("Point Light {} Radius", lightIdx);
 				ImGui::SliderFloat(labelInt.c_str(), &light->intensity, 0.0f, 500.0f);
@@ -1046,7 +1046,7 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, ScriptRunne
 				auto* light = reg.Get<LightingSystem::LightComponent>(e);
 				light->shadowLayer = -1; // Reset all to disabled initially
 
-				if (light->type == 1) { // Point Light
+				if (light->type == LightType::Point) {
 					if (auto* trans = reg.Get<TransformComponent>(e)) {
 
 						// Check if the light's radius is even visible to the camera frustum

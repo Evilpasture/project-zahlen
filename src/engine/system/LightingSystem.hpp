@@ -4,6 +4,7 @@
 #pragma once
 
 #include "Zahlen/Engine.hpp"
+#include "Zahlen/Types.hpp"
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Math/Vec3.h>
@@ -12,7 +13,7 @@ namespace ZHLN {
 class LightingSystem {
   public:
 	struct LightComponent {
-		uint32_t type; // 0=Dir, 1=Point, 2=Spot, 3=Area (LTC Quad)
+		LightType type; // 0=Dir, 1=Point, 2=Spot, 3=Area (LTC Quad)
 		JPH::Vec3 color;
 		float intensity;
 		float radius;

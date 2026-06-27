@@ -338,7 +338,7 @@ void ShadowPass::RenderPunctualShadows(const FrameRecorder& recorder) const noex
 
 	for (uint32_t l_idx = 0; l_idx < ctx.mappedLights.size(); ++l_idx) {
 		const auto& light = ctx.mappedLights[l_idx];
-		if (light.shadowLayer < 0 || light.type != 1) {
+		if (light.shadowLayer < 0 || light.type != LightType::Point) {
 			continue;
 		}
 
