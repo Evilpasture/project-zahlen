@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// include/Zahlen/Scripting.h
 #pragma once
 
 #include <Zahlen/Common.h>
@@ -15,7 +14,11 @@ extern "C" {
 
 ZHLN_API struct ZHLN_Engine* ZHLN_GetEngineContext(void);
 
-ZHLN_API uint64_t ZHLN_DispatchCommand(struct ZHLN_Engine* engine, const char* cmd,
+// 1. Interns the string once and assigns it a fast array index
+ZHLN_API uint32_t ZHLN_GetCommandID(const char* cmdName);
+
+// 2. Dispatches via O(1) jump table
+ZHLN_API uint64_t ZHLN_DispatchCommand(struct ZHLN_Engine* engine, uint32_t cmdID,
 									   const void* args);
 
 #ifdef __cplusplus

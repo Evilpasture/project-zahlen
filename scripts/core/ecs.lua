@@ -32,6 +32,20 @@ local NATIVE_COMPONENTS = {
 
 local DYNAMIC_COMPONENTS = {} -- Tracks active dynamic types registered via Lua
 
+-- Cache command IDs locally to bypass string hashing on the hot path
+local CMD_IDS = {}
+local function get_cmd(name)
+    local id = CMD_IDS[name]
+    if not id then
+        id = ffi.C.ZHLN_GetCommandID(name)
+        if id == 0xFFFFFFFF then
+            error("[ZHLN] Command not registered in C++: " .. tostring(name))
+        end
+        CMD_IDS[name] = id
+    end
+    return id
+end
+
 -- Register dynamic FFI structures with C++ sparse sets
 function Registry:register_dynamic(comp_name)
     if DYNAMIC_COMPONENTS[comp_name] then return end
@@ -41,7 +55,7 @@ function Registry:register_dynamic(comp_name)
     local align = ffi.alignof(comp_name)
 
     local args = ffi.new("RegisterDynamicComponentArgs", { comp_name, size, align })
-    local family_id = ffi.C.ZHLN_DispatchCommand(self.engine, "RegisterDynamicComponent", args)
+    local family_id = ffi.C.ZHLN_DispatchCommand(self.engine, get_cmd("RegisterDynamicComponent"), args)
 
     if family_id == 0xFFFFFFFF then
         error("Failed to register dynamic component: " .. comp_name)
@@ -72,7 +86,7 @@ end
 function Registry:create(ent)
     local id = ent
     if not ent then
-        id = ffi.C.ZHLN_DispatchCommand(self.engine, "CreateEntity", nil)
+        id = ffi.C.ZHLN_DispatchCommand(self.engine, get_cmd("CreateEntity"), nil)
     end
     self.entities[to_key(id)] = true
     return id
@@ -83,7 +97,7 @@ function Registry:destroy(ent)
     if not self.entities[key] then return end
 
     local args = ffi.new("EntityOnlyArgs", { ent })
-    ffi.C.ZHLN_DispatchCommand(self.engine, "DestroyEntity", args)
+    ffi.C.ZHLN_DispatchCommand(self.engine, get_cmd("DestroyEntity"), args)
 
     for name, pool in pairs(self.pools) do
         if pool[key] ~= nil then
@@ -101,9 +115,9 @@ function Registry:add(ent, comp_name, data)
 
     if self:is_native(comp_name) then
         local args = ffi.new("GetComponentArgs", { ent, comp_name })
-        local ptr_int = ffi.C.ZHLN_DispatchCommand(self.engine, "GetComponent", args)
+        local ptr_int = ffi.C.ZHLN_DispatchCommand(self.engine, get_cmd("GetComponent"), args)
         if ptr_int == 0ULL then
-            ptr_int = ffi.C.ZHLN_DispatchCommand(self.engine, "AddComponent", args)
+            ptr_int = ffi.C.ZHLN_DispatchCommand(self.engine, get_cmd("AddComponent"), args)
         end
         if ptr_int == 0ULL then error("Cannot add native component '" .. comp_name .. "'.") end
 
@@ -127,7 +141,7 @@ end
 function Registry:get(ent, comp_name)
     if self:is_native(comp_name) then
         local args = ffi.new("GetComponentArgs", { ent, comp_name })
-        local ptr_int = ffi.C.ZHLN_DispatchCommand(self.engine, "GetComponent", args)
+        local ptr_int = ffi.C.ZHLN_DispatchCommand(self.engine, get_cmd("GetComponent"), args)
         if ptr_int == 0ULL then return nil end
         return ffi.cast(comp_name .. "*", ptr_int)
     else
@@ -139,7 +153,7 @@ end
 function Registry:has(ent, comp_name)
     if self:is_native(comp_name) then
         local args = ffi.new("GetComponentArgs", { ent, comp_name })
-        return ffi.C.ZHLN_DispatchCommand(self.engine, "GetComponent", args) ~= 0ULL
+        return ffi.C.ZHLN_DispatchCommand(self.engine, get_cmd("GetComponent"), args) ~= 0ULL
     else
         local pool = self.pools[comp_name]
         return (pool and pool[to_key(ent)] ~= nil) or false
@@ -175,7 +189,7 @@ function Registry:view(...)
 
     local view_buf = ffi.new("ZHLN_BufferView[1]")
     local args = ffi.new("GetECSBufferArgs", { primary_native, view_buf })
-    ffi.C.ZHLN_DispatchCommand(self.engine, "GetECSEntities", args)
+    ffi.C.ZHLN_DispatchCommand(self.engine, get_cmd("GetECSEntities"), args)
     local entities_view = view_buf[0]
 
     local count = tonumber(entities_view.shape[0])
@@ -185,7 +199,7 @@ function Registry:view(...)
     for i = 0, count - 1 do entities[i + 1] = entity_array[i] end
 
     local rel_args = ffi.new("ReleaseBufferArgs", { entities_view.obj })
-    ffi.C.ZHLN_DispatchCommand(nil, "ReleaseBuffer", rel_args)
+    ffi.C.ZHLN_DispatchCommand(nil, get_cmd("ReleaseBuffer"), rel_args)
 
     local index = 1
     return function()

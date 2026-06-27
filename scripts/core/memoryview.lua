@@ -71,13 +71,15 @@ function BufferMT:set(val, i, j, k, l)
     ffi.cast(get_ctype(self.format), ptr)[0] = val
 end
 
+local release_id = nil
+
 function BufferMT:release()
-    -- Cast to the metatable-free raw pointer to bypass __index / __newindex interception
     local raw = ffi.cast(RawType, self)
     if raw.obj ~= nil then
+        if not release_id then release_id = ffi.C.ZHLN_GetCommandID("ReleaseBuffer") end
         local args = ffi.new("ReleaseBufferArgs", { raw.obj })
-        ffi.C.ZHLN_DispatchCommand(nil, "ReleaseBuffer", args)
-        raw.obj = nil -- Safely clears the C++ owner pointer with no Lua callbacks
+        ffi.C.ZHLN_DispatchCommand(nil, release_id, args)
+        raw.obj = nil
     end
 end
 
