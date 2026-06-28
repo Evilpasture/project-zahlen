@@ -1266,14 +1266,18 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
 	for (uint32_t i = 0; i < maxPointLights; ++i) {
 		VkImageViewCreateInfo viewInfo = {
 			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+			.pNext = {},
+			.flags = {},
 			.image = shadowAtlas.image.Handle(),
 			.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
 			.format = VK_FORMAT_D32_SFLOAT,
+			.components = {},
 			.subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
 								 .baseMipLevel = 0,
 								 .levelCount = 1,
 								 .baseArrayLayer = i * 6,
-								 .layerCount = 6}};
+								 .layerCount = 6},
+		};
 
 		VkImageView rawView = VK_NULL_HANDLE;
 		vkCreateImageView(ctx.Device(), &viewInfo, nullptr, &rawView);

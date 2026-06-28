@@ -4,6 +4,7 @@
 #pragma once
 
 #include "CommandLine.hpp"
+#include "Zahlen/Config.hpp"
 
 #include <cstdio>
 #include <detail/Print.hpp>
@@ -60,6 +61,26 @@ void Log(LogContext ctx, Args&&... args) {
 template <typename... Args> [[noreturn]] void Panic(LogContext ctx, Args&&... args) {
 	std::string formatted = std::vformat(ctx.fmt, std::make_format_args(args...));
 	InternalPanic(ctx.loc.file_name(), ctx.loc.line(), formatted);
+}
+
+template <typename... Args> void Assert(bool condition, LogContext ctx, Args&&... args) {
+	if consteval {
+		if (!condition) {
+			[]() {
+				extern void ASSERTION_FAILED_AT_COMPILE_TIME();
+				ASSERTION_FAILED_AT_COMPILE_TIME();
+			}();
+		}
+	}
+
+	if (!condition) {
+		if constexpr (isDev) {
+			std::string formatted = std::vformat(ctx.fmt, std::make_format_args(args...));
+			InternalPanic(ctx.loc.file_name(), ctx.loc.line(), formatted);
+		} else {
+			[[assume(false)]];
+		}
+	}
 }
 
 struct DumpOptions {

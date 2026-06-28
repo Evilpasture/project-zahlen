@@ -51,6 +51,16 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# --- DETECT C++26 REFLECTION SUPPORT ---
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag("-freflection" COMPILER_HAS_REFLECTION)
+
+if(COMPILER_HAS_REFLECTION)
+    message(STATUS "C++26 Static Reflection supported via -freflection")
+else()
+    message(STATUS "C++26 Static Reflection not supported by current compiler. Using manual macro fallback.")
+endif()
+
 execute_process(
     COMMAND ${CMAKE_CXX_COMPILER} -dumpmachine
     OUTPUT_VARIABLE ZHLN_TARGET_TRIPLE
@@ -579,3 +589,15 @@ if(USE_SANITIZERS)
     endif()
 endif()
 
+# --- APPLY TARGET-SPECIFIC REFLECTION FLAGS ---
+if(COMPILER_HAS_REFLECTION)
+    # Target-specific C++ only flags via generator expressions ($<COMPILE_LANGUAGE:CXX>)
+    target_compile_options(zahlen_render PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
+    target_compile_options(zahlen_engine PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
+    target_compile_options(zahlen PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
+    
+    # Propagate the preprocessor definition safely
+    target_compile_definitions(zahlen_render PRIVATE __cpp_reflection=202600L)
+    target_compile_definitions(zahlen_engine PRIVATE __cpp_reflection=202600L)
+    target_compile_definitions(zahlen PRIVATE __cpp_reflection=202600L)
+endif()

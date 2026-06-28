@@ -118,6 +118,40 @@ static VkBool32 VKAPI_CALL ZHLN_Internal_DebugCallback(
 
 	return VK_FALSE;
 }
+
+static const char* ZHLN_Internal_FindSpirvEntryPoint(const uint32_t* code, size_t size_in_bytes) {
+	if (!code || size_in_bytes < 20) {
+		return nullptr;
+	}
+	if (code[0] != 0x07230203) {
+		return nullptr; // Validate SPIR-V magic number
+	}
+
+	size_t word_index = 5; // Skip the 5-word header
+	size_t total_words = size_in_bytes / 4;
+
+	while (word_index < total_words) {
+		uint32_t word = code[word_index];
+		uint16_t opcode = word & 0xFFFF;
+		uint16_t word_count = word >> 16;
+
+		if (word_count == 0) {
+			break; // Avoid infinite loops on malformed binaries
+		}
+
+		// OpEntryPoint instruction opcode is 15
+		if (opcode == 15) {
+			// Layout: Word 0 = Header, Word 1 = Execution Model, Word 2 = Target ID, Word 3 = Start
+			// of Name String
+			if (word_index + word_count <= total_words && word_count > 3) {
+				return (const char*)&code[word_index + 3];
+			}
+		}
+		word_index += word_count;
+	}
+	return nullptr;
+}
+
 [[nodiscard]]
 VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
 	const VkApplicationInfo app_info = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -887,7 +921,7 @@ bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* const restrict desc,
 		out->frag.stage = (VkShaderStageFlagBits)0;
 	}
 
-	// --- NEW: AUTO-REFLECTION LOGIC ---
+	// --- SAFELY RESOLVE ENTRY POINTS ---
 	const ZHLN_ShaderDesc* descs[2] = {&desc->vert, &desc->frag};
 	ZHLN_Shader* targets[2] = {&out->vert, &out->frag};
 
@@ -897,20 +931,21 @@ bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* const restrict desc,
 		}
 
 		if (descs[i]->entry_point) {
-			// Use provided name
 			strncpy(targets[i]->entry_point, descs[i]->entry_point, 63);
 		} else {
-			// Auto-reflect name from SPIR-V
-			SpvReflectShaderModule module;
-			if (spvReflectCreateShaderModule(descs[i]->size, descs[i]->code, &module) ==
-				SPV_REFLECT_RESULT_SUCCESS) {
-				if (module.entry_point_count > 0) {
-					strncpy(targets[i]->entry_point, module.entry_points[0].name, 63);
-				}
-				spvReflectDestroyShaderModule(&module);
+			// Extract the entry point directly from the SPIR-V bytecode
+			const char* entry = ZHLN_Internal_FindSpirvEntryPoint(descs[i]->code, descs[i]->size);
+			if (entry != nullptr) {
+				strncpy(targets[i]->entry_point, entry, 63);
 			} else {
-				// Fallback to main if reflection fails
-				strncpy(targets[i]->entry_point, "main", 63);
+				// Final static fallback matching engine naming standards
+				if (targets[i]->stage == VK_SHADER_STAGE_VERTEX_BIT) {
+					strncpy(targets[i]->entry_point, "VSMain", 63);
+				} else if (targets[i]->stage == VK_SHADER_STAGE_FRAGMENT_BIT) {
+					strncpy(targets[i]->entry_point, "PSMain", 63);
+				} else {
+					strncpy(targets[i]->entry_point, "main", 63);
+				}
 			}
 		}
 	}
@@ -1511,6 +1546,7 @@ void ZHLN_DestroyDescriptorSetLayout(const VkDevice device, const VkDescriptorSe
 void ZHLN_DestroyDescriptorPool(const VkDevice device, const VkDescriptorPool pool) {
 	vkDestroyDescriptorPool(device, pool, nullptr);
 }
+
 [[nodiscard]]
 VkPipeline ZHLN_CreateComputePipeline(const VkDevice device,
 									  const ZHLN_ComputePipelineDesc* const restrict desc) {
@@ -1519,17 +1555,13 @@ VkPipeline ZHLN_CreateComputePipeline(const VkDevice device,
 		return VK_NULL_HANDLE;
 	}
 
-	char entry_name[64] = "main";
+	char entry_name[64] = "CSMain";
 	if (desc->shader.entry_point) {
 		strncpy(entry_name, desc->shader.entry_point, 63);
 	} else {
-		SpvReflectShaderModule ref_mod;
-		if (spvReflectCreateShaderModule(desc->shader.size, desc->shader.code, &ref_mod) ==
-			SPV_REFLECT_RESULT_SUCCESS) {
-			if (ref_mod.entry_point_count > 0) {
-				strncpy(entry_name, ref_mod.entry_points[0].name, 63);
-			}
-			spvReflectDestroyShaderModule(&ref_mod);
+		const char* entry = ZHLN_Internal_FindSpirvEntryPoint(desc->shader.code, desc->shader.size);
+		if (entry != nullptr) {
+			strncpy(entry_name, entry, 63);
 		}
 	}
 

@@ -308,7 +308,7 @@ inline SmaaVec2 AreaDiag(int pattern, float left, float right, SmaaVec2 offset) 
 inline void FillSmaaAreaTex(std::span<uint32_t> outPixels) noexcept {
 	constexpr uint32_t width = 160;
 	constexpr uint32_t height = 560;
-	constexpr auto totalSize = static_cast<const size_t>(width) * height;
+	constexpr auto totalSize = static_cast<size_t>(width) * height;
 
 	// Bounds safety check
 	if (outPixels.size() < totalSize) [[unlikely]] {
@@ -378,7 +378,7 @@ inline void FillSmaaAreaTex(std::span<uint32_t> outPixels) noexcept {
 inline void FillSmaaSearchTex(std::span<uint32_t> outPixels) noexcept {
 	constexpr uint32_t width = 64;
 	constexpr uint32_t height = 16;
-	constexpr auto totalSize = static_cast<const size_t>(width) * height;
+	constexpr auto totalSize = static_cast<size_t>(width) * height;
 
 	// Bounds safety check
 	if (outPixels.size() < totalSize) [[unlikely]] {

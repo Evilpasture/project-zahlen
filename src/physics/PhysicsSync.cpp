@@ -37,7 +37,7 @@ struct SyncWorkItem {
 	const JPH::Body* body;
 	uint32_t dense_idx;
 };
-
+// NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
 struct WorldDataCreateInfo {
 	PosStride* const ZHLN_RESTRICT shadow_pos;
 	PosStride* const ZHLN_RESTRICT shadow_ppos;
@@ -53,6 +53,8 @@ struct MappingDataCreateInfo {
 	const size_t slot_capacity;
 	const uint32_t* const ZHLN_RESTRICT slot_to_dense;
 };
+
+// NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 
 #ifdef JPH_DOUBLE_PRECISION
 inline constexpr bool IS_DOUBLE = true;
@@ -99,7 +101,11 @@ inline void ProcessItem(const uint32_t D, const JPH::Body* const ZHLN_RESTRICT b
 }
 
 template <JPH::EBodyType TType>
-[[gnu::always_inline, gnu::hot, gnu::flatten]]
+[[gnu::always_inline, gnu::hot,
+#if defined(__clang__)
+  gnu::flatten
+#endif
+]]
 inline void ProcessBatch(const WorldDataCreateInfo world,
 						 RestrictSpan<const SyncWorkItem> items) noexcept {
 
@@ -118,20 +124,26 @@ inline void ProcessBatch(const WorldDataCreateInfo world,
 }
 
 template <JPH::EBodyType TType>
-[[gnu::always_inline, gnu::flatten, gnu::nonnull(2)]]
+[[gnu::always_inline,
+#if defined(__clang__)
+  gnu::flatten,
+#endif
+  gnu::nonnull(2)]]
 inline void ExecuteSyncPass(const uint32_t active_count,
 							const JPH::PhysicsSystem* const ZHLN_RESTRICT system,
 							MappingDataCreateInfo map, const WorldDataCreateInfo world) noexcept {
-	if (active_count == 0)
+	if (active_count == 0) {
 		return;
+	}
 
 	const JPH::BodyID* const ZHLN_RESTRICT active_ids = system->GetActiveBodiesUnsafe(TType);
-	if (active_ids == nullptr) [[unlikely]]
+	if (active_ids == nullptr) [[unlikely]] {
 		return;
+	}
 
 	const auto* const ZHLN_RESTRICT lock_iface = &system->GetBodyLockInterfaceNoLock();
 
-	alignas(64) std::array<SyncWorkItem, BATCH_SIZE> worklist;
+	alignas(64) std::array<SyncWorkItem, BATCH_SIZE> worklist{};
 	uint32_t work_ptr = 0;
 
 	for (uint32_t i = 0; i < active_count; i++) {
@@ -139,11 +151,10 @@ inline void ExecuteSyncPass(const uint32_t active_count,
 		const uint32_t j_idx = raw_jolt_id & JPH::BodyID::cMaxBodyIndex;
 
 		// 1. Panic immediately if Jolt returns an out-of-bounds index (indicates memory corruption)
-		if (j_idx >= map.slot_capacity + 1) [[unlikely]] {
-			ZHLN::Panic("PhysicsSync: Out of bounds j_idx ({}) detected! Slot capacity is {}. "
-						"Active ID: {:#x}",
-						j_idx, map.slot_capacity, raw_jolt_id);
-		}
+		ZHLN::Assert(
+			j_idx < map.slot_capacity + 1,
+			"PhysicsSync: Out of bounds j_idx ({}) detected! Slot capacity is {}. Active ID: {:#x}",
+			j_idx, map.slot_capacity, raw_jolt_id);
 
 		const auto* ZHLN_RESTRICT b =
 			static_cast<const JPH::Body * ZHLN_RESTRICT>(map.body_ptrs[j_idx]);
@@ -154,31 +165,28 @@ inline void ExecuteSyncPass(const uint32_t active_count,
 		}
 
 		// 2. Panic if Jolt claims a body is active but we fail to resolve its pointer
-		if (b == nullptr) [[unlikely]] {
-			ZHLN::Panic("PhysicsSync: Failed to resolve Jolt Body for active ID: {:#x}",
-						raw_jolt_id);
-		}
+		ZHLN::Assert(b != nullptr, "PhysicsSync: Failed to resolve Jolt Body for active ID: {:#x}",
+					 raw_jolt_id);
 
 		const uint64_t handle = b->GetUserData();
-		const uint32_t slot = static_cast<uint32_t>(handle & 0xFFFFFFFF);
-		const uint32_t gen = static_cast<uint32_t>(handle >> 32);
+		const auto slot = static_cast<uint32_t>(handle & 0xFFFFFFFF);
+		const auto gen = static_cast<uint32_t>(handle >> 32);
 
 		const uint32_t safe_slot = (slot < map.slot_capacity) ? slot : 0;
 		const uint32_t current_gen = map.generations[safe_slot].load(std::memory_order_relaxed);
 
 		// 3. Panic if we find a garbage non-zero slot index exceeding capacity (indicates corrupted
 		// UserData)
-		if (slot >= map.slot_capacity && handle != 0) [[unlikely]] {
-			ZHLN::Panic(
-				"PhysicsSync: Decoded slot index ({}) exceeds slot capacity ({}). Handle: {:#x}",
-				slot, map.slot_capacity, handle);
-		}
+		ZHLN::Assert(
+			slot < map.slot_capacity,
+			"PhysicsSync: Decoded slot index ({}) exceeds slot capacity ({}). Handle: {:#x}", slot,
+			map.slot_capacity, handle);
 
 		// (Unmanaged bodies like Ragdoll joints have handle == 0 and are safely skipped
 		// branchlessly)
 		const uint32_t bad = static_cast<uint32_t>(slot >= map.slot_capacity) | (current_gen ^ gen);
 		const uint32_t d_idx = map.slot_to_dense[safe_slot];
-		const uint32_t is_valid = static_cast<uint32_t>(bad == 0);
+		const auto is_valid = static_cast<uint32_t>(bad == 0);
 
 		[[assume(work_ptr < BATCH_SIZE)]];
 		worklist[work_ptr].body = b;
@@ -205,8 +213,9 @@ inline void SyncCharacters(const JPH::Array<JPH::CharacterVirtual*>& characters,
 
 		// In-loop validation (similar to rigid body pass)
 		const uint32_t slot = h.index;
-		if (slot >= map.slot_capacity) [[unlikely]]
+		if (slot >= map.slot_capacity) [[unlikely]] {
 			continue;
+		}
 
 		const uint32_t D = map.slot_to_dense[slot];
 
@@ -240,15 +249,19 @@ inline void SyncCharacters(const JPH::Array<JPH::CharacterVirtual*>& characters,
 // PUBLIC API
 // =================================================================================================
 
-[[gnu::flatten, gnu::hot, gnu::nonnull(2)]]
+[[
+#if defined(__clang__)
+	gnu::flatten,
+#endif
+	gnu::hot, gnu::nonnull(2)]]
 void PhysicsWorld::Synchronize(
 	const JPH::PhysicsSystem* const system,
 	const JPH::Array<JPH::CharacterVirtual*>& activeCharacters) noexcept {
 
 	const uint32_t activeRigids = system->GetNumActiveBodies(JPH::EBodyType::RigidBody);
 
-	if (activeRigids == 0 && activeCharacters.empty()) {
-		[[unlikely]] return;
+	if (activeRigids == 0 && activeCharacters.empty()) [[unlikely]] {
+		return;
 	}
 
 	// Retrieve aligned raw pointers from the managed JPH::Arrays
@@ -268,7 +281,7 @@ void PhysicsWorld::Synchronize(
 	};
 
 	const MappingDataCreateInfo mapInfo = {
-		.body_ptrs = const_cast<const void**>(joltBodyPtrs.data()),
+		.body_ptrs = joltBodyPtrs.data(),
 		.generations = const_cast<ZHLN::Atomic<uint32_t>*>(generations.data()),
 		.slot_capacity = slotCapacity,
 		.slot_to_dense = slotToDense.data(),

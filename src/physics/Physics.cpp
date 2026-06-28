@@ -630,10 +630,9 @@ JPH::ShapeRefC CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCo
 		uint32_t i3 = indices[i + 2];
 
 		// Index Boundary Validation Guard
-		if (i1 >= vertexCount || i2 >= vertexCount || i3 >= vertexCount) [[unlikely]] {
-			ZHLN::Panic("[Jolt Mesh Build] Index out of range: %u/%u/%u >= vertex_count (%u)", i1,
-						i2, i3, vertexCount);
-		}
+		ZHLN::Assert(i1 < vertexCount && i2 < vertexCount && i3 < vertexCount,
+					 "[Jolt Mesh Build] Index out of range: {}/{}/{} >= vertex_count (%u)", i1, i2,
+					 i3, vertexCount);
 
 		// Create native IndexedTriangle (materialIndex=0, userData=0)
 		joltTriangles.push_back(JPH::IndexedTriangle(i1, i2, i3, 0, 0));
@@ -899,6 +898,11 @@ void AddImpulse(PhysicsContext& ctx, ZHLN::Entity handle, JPH::Vec3Arg impulse) 
 
 JPH::ShapeRefC CreateHeightFieldShape(const std::vector<float>& heights, int sampleCount,
 									  float worldSize) {
+	ZHLN::Assert(sampleCount > 0, "Sample count must be greater than 0");
+	ZHLN::Assert(worldSize > 0.0f, "World size must be greater than 0.0f");
+	ZHLN::Assert(heights.size() >= static_cast<size_t>(sampleCount) * sampleCount,
+				 "Heights vector size ({}) is smaller than expected ({}x{})", heights.size(),
+				 sampleCount, sampleCount);
 	JPH::HeightFieldShapeSettings settings;
 	settings.mSampleCount = sampleCount;
 	settings.mHeightSamples.resize(static_cast<size_t>(sampleCount) * sampleCount);
@@ -915,7 +919,8 @@ JPH::ShapeRefC CreateHeightFieldShape(const std::vector<float>& heights, int sam
 
 	JPH::Shape::ShapeResult result = settings.Create();
 	if (result.HasError()) {
-		ZHLN::Panic("Failed to build Jolt HeightFieldShape: {}", result.GetError().c_str());
+		ZHLN::Log("Failed to build Jolt HeightFieldShape: {}", result.GetError().c_str());
+		return nullptr;
 	}
 	return result.Get();
 }

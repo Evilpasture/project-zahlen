@@ -39,8 +39,8 @@ inline auto RenderTarget<F>::Create(Allocator& allocator, const Context& ctx, Vk
 	const VkImageCreateInfo info = {
 		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 		.pNext = nullptr,
-		.flags = (desc.arrayLayers >= 6) ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT
-										 : static_cast<VkImageCreateFlags>(0),
+		.flags = static_cast<VkImageCreateFlags>((desc.arrayLayers >= 6) *
+												 VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT),
 		.imageType = VK_IMAGE_TYPE_2D,
 		.format = F,
 		.extent = {.width = extent.width, .height = extent.height, .depth = 1},

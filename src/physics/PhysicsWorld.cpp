@@ -1,14 +1,12 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "PhysicsWorld.hpp"
 
 #include "detail/ControlFlow.hpp"
 
 #include <cstring>
 #include <new>
-#include <type_traits>
 
 namespace ZHLN::Physics {
 
@@ -42,9 +40,8 @@ void ReallocateAligned(T*& ptr, size_t old_count, size_t new_count, size_t align
 
 void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem,
 						JPH::JobSystem* inJobSystem, JPH::TempAllocator* inTempAlloc) {
-	if (inMaxBodies == 0 || inMaxBodies > 10000000) {
-		ZHLN::Panic("PhysicsWorld::Init: inMaxBodies ({}) is out of bounds!", inMaxBodies);
-	}
+	ZHLN::Assert(inMaxBodies > 0 && inMaxBodies < 10000000,
+				 "PhysicsWorld::Init: inMaxBodies ({}) is out of bounds!", inMaxBodies);
 
 	system = inSystem;
 	bodyInterface = &inSystem->GetBodyInterface();

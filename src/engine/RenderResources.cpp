@@ -428,11 +428,23 @@ auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data,
 	ZHLN_EndCommandBuffer(cmd);
 
 	// 4. Submit transfer commands
-	VkCommandBufferSubmitInfo cmd_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-										  .commandBuffer = cmd};
-	VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-							.commandBufferInfoCount = 1,
-							.pCommandBufferInfos = &cmd_info};
+	VkCommandBufferSubmitInfo cmd_info = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+		.pNext = {},
+		.commandBuffer = cmd,
+		.deviceMask = {},
+	};
+	VkSubmitInfo2 submit = {
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+		.pNext = {},
+		.flags = {},
+		.waitSemaphoreInfoCount = {},
+		.pWaitSemaphoreInfos = {},
+		.commandBufferInfoCount = 1,
+		.pCommandBufferInfos = &cmd_info,
+		.signalSemaphoreInfoCount = {},
+		.pSignalSemaphoreInfos = {},
+	};
 
 	vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
 
@@ -711,11 +723,9 @@ void RenderContext::Impl::InitializeSystemTextures() {
 	std::array<uint8_t, 4> normalPixel = {128, 128, 255, 255};
 	uint32_t normalIdx = CreateTextureInternal(normalPixel.data(), 1, 1, false);
 
-	// Validate that the slot indices match our compile-time expectations
-	if (blackIdx != 0 || whiteIdx != 1 || normalIdx != 2) {
-		ZHLN::Panic("System textures allocated out of order! Expected [0, 1, 2], got [{}, {}, {}]",
-					blackIdx, whiteIdx, normalIdx);
-	}
+	ZHLN::Assert(blackIdx == 0 && whiteIdx == 1 && normalIdx == 2,
+				 "System textures allocated out of order! Expected [0, 1, 2], got [{}, {}, {}]",
+				 blackIdx, whiteIdx, normalIdx);
 }
 void RenderContext::Impl::RegisterShaderWatcher(const char* path, std::function<void()> callback) {
 	if constexpr (isDev) {

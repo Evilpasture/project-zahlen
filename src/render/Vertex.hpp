@@ -99,33 +99,55 @@ template <typename... Args> [[nodiscard]] consteval auto MakeAttributeArray(Args
 // C++26 Automatic Layout Reflection Engine (Primary Template)
 // ============================================================================
 
-/**
- * @brief Completely automated C++26 attribute extractor matching GCC 16 specifications.
- */
-template <typename T> [[nodiscard]] consteval auto ReflectAttributes() noexcept {
-	constexpr auto fields = std::meta::nonstatic_data_members_of(
-		std::meta::reflexpr(T), std::meta::access_context::unprivileged());
-	constexpr size_t count = fields.size();
+namespace detail {
+// Pure structural array wrapper to cross boundary contexts cleanly
+template <size_t N> struct MetaRange {
+	std::meta::info data[N == 0 ? 1 : N]{};
+};
 
-	std::array<VkVertexInputAttributeDescription, count> attrs{};
-
-	size_t i = 0;
-	template for (constexpr auto field : fields) {
-		using FieldType = typename[:std::meta::type_of(field):];
-		constexpr auto layout_offset = std::meta::offset_of(field);
-
-		attrs[i] = {.location = static_cast<uint32_t>(i),
-					.binding = 0,
-					.format = FormatOf<FieldType>::value,
-					.offset = static_cast<uint32_t>(layout_offset.bytes)};
-		++i;
-	}
-	return attrs;
+// Calculate count on the type handle level
+template <typename T> [[nodiscard]] consteval size_t GetFieldCount() noexcept {
+	return std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unprivileged())
+		.size();
 }
+
+// Isolate data extraction into a flat array structure with an explicit compile-time size
+template <typename T, size_t N> [[nodiscard]] consteval auto ExtractMetaElements() noexcept {
+	auto members =
+		std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unprivileged());
+	MetaRange<N> range{};
+	for (size_t i = 0; i < N; ++i) {
+		range.data[i] = members[i];
+	}
+	return range;
+}
+} // namespace detail
+
+template <typename T> struct AutoReflectAttributes {
+	static constexpr size_t attribute_count = detail::GetFieldCount<T>();
+	static constexpr auto meta_range = detail::ExtractMetaElements<T, attribute_count>();
+
+	template <size_t... Is>
+	static consteval auto generate_descriptions(std::index_sequence<Is...>) noexcept {
+		return std::array<VkVertexInputAttributeDescription, attribute_count>{[]() consteval {
+			constexpr auto field = meta_range.data[Is];
+			using FieldType = typename[:std::meta::type_of(field):];
+			return VkVertexInputAttributeDescription{
+				.location = static_cast<uint32_t>(Is),
+				.binding = 0,
+				.format = FormatOf<FieldType>::value,
+				.offset = static_cast<uint32_t>(std::meta::offset_of(field).bytes)};
+		}()...};
+	}
+
+	static consteval auto get() noexcept {
+		return generate_descriptions(std::make_index_sequence<attribute_count>{});
+	}
+};
 
 template <typename T> struct VertexTraits {
 	static consteval auto Bindings() { return std::array{DefaultBinding<T>(0)}; }
-	static consteval auto Attributes() { return ReflectAttributes<T>(); }
+	static consteval auto Attributes() { return AutoReflectAttributes<T>::get(); }
 };
 
 #else
