@@ -13,6 +13,470 @@ import math
 # Set recursion limit for large hierarchical models
 sys.setrecursionlimit(15000)
 
+# ============================================================================
+# Setup Global Configurations & Output Paths
+# ============================================================================
+
+input_dir = os.getcwd()
+output_parent = os.path.join(input_dir, "resources", "intermediate")
+os.makedirs(output_parent, exist_ok=True)
+
+# glTF/OpenGL Basis Transform: Blender Z-up right-handed to Y-up right-handed
+c_basis = Matrix(
+    (
+        (1.0, 0.0, 0.0, 0.0),
+        (0.0, 0.0, 1.0, 0.0),
+        (0.0, -1.0, 0.0, 0.0),
+        (0.0, 0.0, 0.0, 1.0),
+    )
+)
+c_basis_inv = c_basis.inverted()
+
+
+# ============================================================================
+# Core Type-Validation Helpers (OOP Injection)
+# ============================================================================
+
+
+def is_a(self, type_string):
+    """Injected type checking supporting both spatial Objects and generic mesh Attributes."""
+    try:
+        if hasattr(self, "type"):
+            return self.type.upper() == type_string.upper()
+        if hasattr(self, "data_type") and hasattr(self, "domain"):
+            mappings = {
+                "UVMAP": ("CORNER", {"FLOAT_2D_VECTOR", "FLOAT_2"}),
+                "VERTEXCOLOR": (
+                    "CORNER",
+                    {"FLOAT_COLOR", "BYTE_COLOR", "FLOAT_VECTOR"},
+                ),
+                "NORMAL": ("POINT", {"FLOAT_VECTOR", "FLOAT_3D_VECTOR"}),
+            }
+            target = type_string.upper()
+            if target in mappings:
+                domain, allowed_types = mappings[target]
+                return self.domain == domain and self.data_type in allowed_types
+    except ReferenceError:
+        return False
+    return False
+
+
+bpy.types.Object.IsA = is_a
+bpy.types.Attribute.IsA = is_a
+
+
+# ============================================================================
+# Core Math, String & Search Helpers
+# ============================================================================
+
+
+def discover_blend_files(search_path):
+    """Recursively scans directories to discover valid Blend files."""
+    blend_files = []
+    for root, _, files in os.walk(search_path):
+        norm_root = root.replace("\\", "/").lower()
+        if any(p in norm_root for p in ["resources", "exported_assets"]):
+            continue
+        for file in files:
+            if file.endswith(".blend") and not file.startswith("."):
+                if "void" in file.lower():
+                    continue
+                blend_files.append(os.path.join(root, file))
+    return blend_files
+
+
+def make_id(prefix, name):
+    """Converts a Blender name to a clean, unique, lowercase ID string."""
+    clean_name = "".join([c.lower() if c.isalnum() else "_" for c in name])
+    while "__" in clean_name:
+        clean_name = clean_name.replace("__", "_")
+    return f"{prefix}_{clean_name.strip('_')}"
+
+
+def clean_float(val):
+    """Rounds floats to 4 decimal places for clean serialization."""
+    return round(val, 4)
+
+
+def safe_invert(matrix):
+    """Safely inverts a matrix, falling back to identity if singular."""
+    try:
+        return matrix.inverted()
+    except ValueError:
+        return Matrix.Identity(4)
+
+
+def serialize_matrix_col_major(matrix):
+    """Converts a mathutils.Matrix to a flat column-major list of 16 rounded floats."""
+    return [clean_float(val) for col in matrix.transposed() for val in col]
+
+
+def remove_scale_from_matrix(matrix):
+    """Returns a copy of the matrix with uniform/non-uniform scaling removed (axes normalized)."""
+    m = matrix.copy()
+    col0 = m.col[0].to_3d().normalized()
+    col1 = m.col[1].to_3d().normalized()
+    col2 = m.col[2].to_3d().normalized()
+    m.col[0] = (col0.x, col0.y, col0.z, m.col[0].w)
+    m.col[1] = (col1.x, col1.y, col1.z, m.col[1].w)
+    m.col[2] = (col2.x, col2.y, col2.z, m.col[2].w)
+    return m
+
+
+def scalar_to_rgb(t):
+    """Procedurally maps a single scalar float to a 3D RGB color wheel."""
+    r = 0.65 + 0.35 * math.cos(2.0 * math.pi * (t + 0.0))
+    g = 0.65 + 0.35 * math.cos(2.0 * math.pi * (t + 0.33))
+    b = 0.65 + 0.35 * math.cos(2.0 * math.pi * (t + 0.67))
+    return (round(r, 4), round(g, 4), round(b, 4), 1.0)
+
+
+def unpack_color(val):
+    if val is None:
+        return (1.0, 1.0, 1.0, 1.0)
+    if not hasattr(val, "__len__"):
+        try:
+            f = float(val)
+            return scalar_to_rgb(f)
+        except Exception:
+            return (1.0, 1.0, 1.0, 1.0)
+    length = len(val)
+    if length == 0:
+        return (1.0, 1.0, 1.0, 1.0)
+    elif length == 1:
+        try:
+            f = float(val[0])
+            return scalar_to_rgb(f)
+        except Exception:
+            return (1.0, 1.0, 1.0, 1.0)
+    elif length == 2:
+        return (float(val[0]), float(val[1]), 0.0, 1.0)
+    elif length == 3:
+        return (float(val[0]), float(val[1]), float(val[2]), 1.0)
+    else:
+        return (float(val[0]), float(val[1]), float(val[2]), float(val[3]))
+
+
+def unpack_color_from_datum(datum):
+    if not datum:
+        return (1.0, 1.0, 1.0, 1.0)
+    vals = None
+    if hasattr(datum, "color"):
+        vals = datum.color
+    elif hasattr(datum, "vector"):
+        vals = datum.vector
+    elif hasattr(datum, "value"):
+        vals = datum.value
+        if not hasattr(vals, "__len__"):
+            vals = [vals]
+    return unpack_color(vals)
+
+
+def get_scalar_value_from_datum(datum):
+    if not datum:
+        return 0.0
+    if hasattr(datum, "value"):
+        return float(datum.value)
+    if hasattr(datum, "color"):
+        return float(datum.color[0])
+    if hasattr(datum, "vector"):
+        return float(datum.vector[0])
+    return 0.0
+
+
+def is_valid_color_layer(attr):
+    if not attr or not attr.data:
+        return False
+    sample_size = min(len(attr.data), 100)
+    for i in range(sample_size):
+        datum = attr.data[i]
+        if hasattr(datum, "color"):
+            vals = datum.color
+        elif hasattr(datum, "vector"):
+            vals = datum.vector
+        elif hasattr(datum, "value"):
+            vals = datum.value
+            if not hasattr(vals, "__len__"):
+                vals = [vals]
+        else:
+            continue
+        for v in vals:
+            if v < -0.001 or v > 1.001:
+                return False
+    return True
+
+
+def get_evaluated_mesh_safely(obj, depsgraph):
+    """Safely extracts fully evaluated mesh data directly from the dependency graph."""
+    try:
+        eval_obj = obj.evaluated_get(depsgraph)
+        return eval_obj.to_mesh()
+    except Exception:
+        return obj.data.copy()
+
+
+def get_image_filename(image):
+    """Gets a clean target filename for a Blender Image block, falling back to PNG."""
+    if not image:
+        return None
+    filename = os.path.basename(image.filepath)
+    if not filename:
+        filename = f"{image.name}.png"
+    return filename
+
+
+def find_upstream_texture_or_attribute(socket):
+    """Recursively traverses linked node tree sockets to find if any image texture or attribute is connected."""
+    if not socket or not socket.is_linked:
+        return None
+
+    for link in socket.links:
+        from_node = link.from_node
+        if from_node.type in {"TEX_IMAGE", "ATTRIBUTE", "VERTEX_COLOR"}:
+            return from_node
+
+        for input_socket in from_node.inputs:
+            found = find_upstream_texture_or_attribute(input_socket)
+            if found:
+                return found
+    return None
+
+
+def get_texture_node_image_block(input_socket):
+    """Recursively walks node trees to extract the actual image object, supporting linked networks."""
+    image_node = find_upstream_texture_or_attribute(input_socket)
+    if image_node and image_node.type == "TEX_IMAGE" and image_node.image:
+        return image_node.image
+    return None
+
+
+def find_root_shader_node(material):
+    """Resolves the root shader node driving the active surface output."""
+    if not material.node_tree:
+        return None
+
+    output_node = next(
+        (
+            n
+            for n in material.node_tree.nodes
+            if n.type == "OUTPUT_MATERIAL" and n.is_active_output
+        ),
+        None,
+    )
+    if not output_node:
+        output_node = next(
+            (n for n in material.node_tree.nodes if n.type == "OUTPUT_MATERIAL"), None
+        )
+
+    if output_node:
+        surface_input = output_node.inputs.get("Surface")
+        if surface_input and surface_input.is_linked:
+            return surface_input.links[0].from_node
+    return None
+
+
+# ============================================================================
+# Shader Node Graph Bytecode Compiler (Python Front-End)
+# ============================================================================
+
+
+def build_procedural_instructions(material):
+    root = find_root_shader_node(material)
+    if not root:
+        return None
+
+    # Guard: Ensure we only compile actual procedural patterns (no image-textured materials)
+    has_image_texture = False
+    has_procedural_nodes = False
+    if material.node_tree:
+        for node in material.node_tree.nodes:
+            if node.type == "TEX_IMAGE":
+                has_image_texture = True
+            if node.type in {"TEX_VORONOI", "TEX_NOISE", "TEX_MUSGRAVE"}:
+                has_procedural_nodes = True
+
+    if has_image_texture or not has_procedural_nodes:
+        return None
+
+    base_color_node = None
+    if root.type == "BSDF_PRINCIPLED":
+        socket = root.inputs.get("Base Color")
+        if socket and socket.is_linked:
+            base_color_node = socket.links[0].from_node
+    else:
+        base_color_node = root
+
+    if not base_color_node:
+        return None
+
+    # Topological Sort via DFS
+    visited = set()
+    ordered = []
+
+    def dfs(node):
+        if node.name in visited:
+            return
+        visited.add(node.name)
+        for inp in node.inputs:
+            if inp.is_linked:
+                for link in inp.links:
+                    dfs(link.from_node)
+        ordered.append(node)
+
+    dfs(base_color_node)
+
+    node_to_idx = {}
+    instructions = []
+
+    for idx, node in enumerate(ordered):
+        node_to_idx[node.name] = idx
+
+        def get_inp(name, fallback_idx=0):
+            inp = node.inputs.get(name)
+            if not inp and len(node.inputs) > fallback_idx:
+                inp = node.inputs[fallback_idx]
+            if inp and inp.is_linked:
+                return node_to_idx[inp.links[0].from_node.name]
+            return -1
+
+        floats = []
+
+        # Opcode 0: TEX_COORD
+        if node.type in {"TEX_COORD", "NEW_GEOMETRY"}:
+            floats.append(0)
+
+        # Opcode 1: MAPPING
+        elif node.type == "MAPPING":
+            floats.append(1)
+            floats.append(get_inp("Vector", 0))
+            loc = (
+                node.inputs["Location"].default_value
+                if "Location" in node.inputs
+                else [0, 0, 0]
+            )
+            rot = (
+                node.inputs["Rotation"].default_value
+                if "Rotation" in node.inputs
+                else [0, 0, 0]
+            )
+            sca = (
+                node.inputs["Scale"].default_value
+                if "Scale" in node.inputs
+                else [1, 1, 1]
+            )
+            floats.extend([clean_float(x) for x in loc])
+            floats.extend([clean_float(x) for x in rot])
+            floats.extend([clean_float(x) for x in sca])
+
+        # Opcode 2: TEX_VORONOI
+        elif node.type == "TEX_VORONOI":
+            floats.append(2)
+            floats.append(get_inp("Vector", 0))
+            scale = (
+                node.inputs["Scale"].default_value if "Scale" in node.inputs else 5.0
+            )
+            rand = (
+                node.inputs["Randomness"].default_value
+                if "Randomness" in node.inputs
+                else 1.0
+            )
+            floats.extend([clean_float(scale), clean_float(rand)])
+
+        # Opcode 3: VALTORGB (Color Ramp)
+        elif node.type == "VALTORGB":
+            floats.append(3)
+            floats.append(get_inp("Fac", 0))
+            floats.append(0 if node.color_ramp.interpolation == "CONSTANT" else 1)
+            floats.append(len(node.color_ramp.elements))
+            for el in node.color_ramp.elements:
+                floats.append(clean_float(el.position))
+                floats.extend([clean_float(c) for c in el.color])
+
+        # Opcode 4: MIX / MIX_RGB
+        elif node.type in {"MIX", "MIX_RGB"}:
+            floats.append(4)
+            fac_inp = node.inputs.get("Factor") or node.inputs.get("Fac")
+            a_inp = node.inputs.get("A") or node.inputs.get("Color1")
+            b_inp = node.inputs.get("B") or node.inputs.get("Color2")
+
+            floats.append(get_inp(fac_inp.name if fac_inp else "Fac", 0))
+            floats.append(get_inp(a_inp.name if a_inp else "A", 1))
+            floats.append(get_inp(b_inp.name if b_inp else "B", 2))
+
+            blend_map = {
+                "MIX": 0,
+                "LIGHTEN": 1,
+                "MULTIPLY": 2,
+                "ADD": 3,
+                "SCREEN": 4,
+                "DARKEN": 5,
+            }
+            btype = blend_map.get(getattr(node, "blend_type", "MIX"), 0)
+            floats.append(btype)
+
+            floats.append(
+                clean_float(fac_inp.default_value)
+                if fac_inp and not hasattr(fac_inp.default_value, "__len__")
+                else 0.5
+            )
+            def_a = a_inp.default_value if a_inp else [1, 1, 1, 1]
+            def_b = b_inp.default_value if b_inp else [1, 1, 1, 1]
+            floats.extend(
+                [
+                    clean_float(x)
+                    for x in (
+                        def_a if hasattr(def_a, "__len__") else [def_a, def_a, def_a, 1]
+                    )
+                ]
+            )
+            floats.extend(
+                [
+                    clean_float(x)
+                    for x in (
+                        def_b if hasattr(def_b, "__len__") else [def_b, def_b, def_b, 1]
+                    )
+                ]
+            )
+        else:
+            floats.append(-1)
+
+        instructions.append((f"inst_{idx}", floats))
+
+    return {"type": "NODE_GRAPH", "parameters": dict(instructions)}
+
+
+def serialize_instruction_to_floats(inst):
+    t = inst["type"]
+    inputs = inst["inputs"]
+    p = inst["params"]
+
+    floats = []
+    if t == 0:
+        floats.append(float(p.get("coord_type", 1)))
+    elif t == 1:
+        floats.extend(p.get("translation", [0, 0, 0]))
+        floats.extend(p.get("rotation", [0, 0, 0]))
+        floats.extend(p.get("scale", [1, 1, 1]))
+    elif t == 2:
+        floats.append(p.get("scale", 5.0))
+        floats.append(p.get("randomness", 1.0))
+    elif t == 3:
+        floats.append(float(p.get("interpolation", 1)))
+        elements = p.get("elements", [])
+        floats.append(float(len(elements)))
+        for pos, col in elements:
+            floats.append(pos)
+            floats.extend(col)
+    elif t == 4:
+        floats.append(float(p.get("blend_type", 0)))
+        floats.append(p.get("factor", 1.0))
+        floats.extend(p.get("color1", [1, 1, 1, 1]))
+        floats.extend(p.get("color2", [1, 1, 1, 1]))
+    elif t == 5:
+        floats.append(p.get("scale", 5.0))
+
+    return t, inputs, floats
+
 
 class BinaryMetadataWriter:
     """Serializes the extracted scene manifest directly to a fast, zero-parsing binary stream."""
@@ -65,8 +529,6 @@ class BinaryMetadataWriter:
             if proc:
                 self.write_fmt("B", 1)
                 self.write_string(proc["type"])
-
-                # Write parameters as a flat key-value list of floats
                 self.write_fmt("I", len(proc["parameters"]))
                 for key, val in proc["parameters"].items():
                     self.write_string(key)
@@ -174,298 +636,6 @@ class BinaryMetadataWriter:
                 self.write_string(samp["bin_file"])
 
 
-def remove_scale_from_matrix(matrix):
-    """Returns a copy of the matrix with uniform/non-uniform scaling removed (axes normalized)."""
-    m = matrix.copy()
-    col0 = m.col[0].to_3d().normalized()
-    col1 = m.col[1].to_3d().normalized()
-    col2 = m.col[2].to_3d().normalized()
-    m.col[0] = (col0.x, col0.y, col0.z, m.col[0].w)
-    m.col[1] = (col1.x, col1.y, col1.z, m.col[1].w)
-    m.col[2] = (col2.x, col2.y, col2.z, m.col[2].w)
-    return m
-
-
-def scalar_to_rgb(t):
-    """Procedurally maps a single scalar float to a 3D RGB color wheel.
-    Adjust the cosine parameters below to customize the visual aesthetic.
-    """
-    r = 0.65 + 0.35 * math.cos(2.0 * math.pi * (t + 0.0))
-    g = 0.65 + 0.35 * math.cos(2.0 * math.pi * (t + 0.33))
-    b = 0.65 + 0.35 * math.cos(2.0 * math.pi * (t + 0.67))
-
-    return (round(r, 4), round(g, 4), round(b, 4), 1.0)
-
-
-# ============================================================================
-# Core Type-Validation Helpers (OOP Injection)
-# ============================================================================
-
-
-def is_a(self, type_string):
-    """Injected type checking supporting both spatial Objects and generic mesh Attributes."""
-    try:
-        if hasattr(self, "type"):
-            return self.type.upper() == type_string.upper()
-        if hasattr(self, "data_type") and hasattr(self, "domain"):
-            mappings = {
-                "UVMAP": ("CORNER", {"FLOAT_2D_VECTOR", "FLOAT_2"}),
-                "VERTEXCOLOR": (
-                    "CORNER",
-                    {"FLOAT_COLOR", "BYTE_COLOR", "FLOAT_VECTOR"},
-                ),
-                "NORMAL": ("POINT", {"FLOAT_VECTOR", "FLOAT_3D_VECTOR"}),
-            }
-            target = type_string.upper()
-            if target in mappings:
-                domain, allowed_types = mappings[target]
-                return self.domain == domain and self.data_type in allowed_types
-    except ReferenceError:
-        return False
-    return False
-
-
-bpy.types.Object.IsA = is_a
-bpy.types.Attribute.IsA = is_a
-
-# ============================================================================
-# Setup Global Configurations & Output Paths
-# ============================================================================
-
-input_dir = os.getcwd()
-output_parent = os.path.join(input_dir, "resources", "intermediate")
-os.makedirs(output_parent, exist_ok=True)
-
-# glTF/OpenGL Basis Transform: Blender Z-up right-handed to Y-up right-handed
-c_basis = Matrix(
-    (
-        (1.0, 0.0, 0.0, 0.0),
-        (0.0, 0.0, 1.0, 0.0),
-        (0.0, -1.0, 0.0, 0.0),
-        (0.0, 0.0, 0.0, 1.0),
-    )
-)
-c_basis_inv = c_basis.inverted()
-
-
-def discover_blend_files(search_path):
-    """Recursively scans directories to discover valid Blend files."""
-    blend_files = []
-    for root, _, files in os.walk(search_path):
-        norm_root = root.replace("\\", "/").lower()
-        if any(p in norm_root for p in ["resources", "exported_assets"]):
-            continue
-        for file in files:
-            if file.endswith(".blend") and not file.startswith("."):
-                if "void" in file.lower():
-                    continue
-                blend_files.append(os.path.join(root, file))
-    return blend_files
-
-
-# ============================================================================
-# Core Math & Geometry Unpacking Helpers
-# ============================================================================
-
-
-def make_id(prefix, name):
-    """Converts a Blender name to a clean, unique, lowercase ID string."""
-    clean_name = "".join([c.lower() if c.isalnum() else "_" for c in name])
-    while "__" in clean_name:
-        clean_name = clean_name.replace("__", "_")
-    return f"{prefix}_{clean_name.strip('_')}"
-
-
-def clean_float(val):
-    """Rounds floats to 4 decimal places for clean serialization."""
-    return round(val, 4)
-
-
-def safe_invert(matrix):
-    """Safely inverts a matrix, falling back to identity if singular."""
-    try:
-        return matrix.inverted()
-    except ValueError:
-        return Matrix.Identity(4)
-
-
-def serialize_matrix_col_major(matrix):
-    """Converts a mathutils.Matrix to a flat column-major list of 16 rounded floats."""
-    return [clean_float(val) for col in matrix.transposed() for val in col]
-
-
-def unpack_color(val):
-    """Safely unpacks color/vector data of any dimension into a 4-float RGBA tuple."""
-    if val is None:
-        return (1.0, 1.0, 1.0, 1.0)
-    if not hasattr(val, "__len__"):
-        try:
-            f = float(val)
-            return scalar_to_rgb(f)  # Map scalar floats to RGB
-        except Exception:
-            return (1.0, 1.0, 1.0, 1.0)
-    length = len(val)
-    if length == 0:
-        return (1.0, 1.0, 1.0, 1.0)
-    elif length == 1:
-        try:
-            f = float(val[0])
-            return scalar_to_rgb(f)  # Map list-wrapped scalar floats to RGB
-        except Exception:
-            return (1.0, 1.0, 1.0, 1.0)
-    elif length == 2:
-        return (float(val[0]), float(val[1]), 0.0, 1.0)
-    elif length == 3:
-        return (float(val[0]), float(val[1]), float(val[2]), 1.0)
-    else:
-        return (float(val[0]), float(val[1]), float(val[2]), float(val[3]))
-
-
-def unpack_color_from_datum(datum):
-    """Helper to resolve the color robustly from any generic attribute layer payload."""
-    if not datum:
-        return (1.0, 1.0, 1.0, 1.0)
-
-    vals = None
-    if hasattr(datum, "color"):
-        vals = datum.color
-    elif hasattr(datum, "vector"):
-        vals = datum.vector
-    elif hasattr(datum, "value"):
-        vals = datum.value
-        if not hasattr(vals, "__len__"):
-            vals = [vals]
-
-    return unpack_color(vals)
-
-
-def get_scalar_value_from_datum(datum):
-    """Extracts a singular scalar float value safely from any generic attribute datum."""
-    if not datum:
-        return 0.0
-    if hasattr(datum, "value"):
-        return float(datum.value)
-    if hasattr(datum, "color"):
-        return float(datum.color[0])
-    if hasattr(datum, "vector"):
-        return float(datum.vector[0])
-    return 0.0
-
-
-def is_valid_color_layer(attr):
-    """Deterministically verifies if an attribute is a true color layer by checking value ranges."""
-    if not attr or not attr.data:
-        return False
-
-    sample_size = min(len(attr.data), 100)
-    for i in range(sample_size):
-        datum = attr.data[i]
-
-        if hasattr(datum, "color"):
-            vals = datum.color
-        elif hasattr(datum, "vector"):
-            vals = datum.vector
-        elif hasattr(datum, "value"):
-            vals = datum.value
-            if not hasattr(vals, "__len__"):
-                vals = [vals]
-        else:
-            continue
-
-        for v in vals:
-            if v < -0.001 or v > 1.001:
-                return False
-
-    return True
-
-
-def get_evaluated_mesh_safely(obj, depsgraph):
-    """Safely extracts fully evaluated mesh data directly from the dependency graph."""
-    try:
-        eval_obj = obj.evaluated_get(depsgraph)
-        return eval_obj.to_mesh()
-    except Exception:
-        return obj.data.copy()
-
-
-def get_image_filename(image):
-    """Gets a clean target filename for a Blender Image block, falling back to PNG."""
-    if not image:
-        return None
-    filename = os.path.basename(image.filepath)
-    if not filename:
-        filename = f"{image.name}.png"
-    return filename
-
-
-def find_upstream_texture_or_attribute(socket):
-    """Recursively traverses linked node tree sockets to find if any image texture or attribute is connected."""
-    if not socket or not socket.is_linked:
-        return None
-
-    for link in socket.links:
-        from_node = link.from_node
-        if from_node.type in {"TEX_IMAGE", "ATTRIBUTE", "VERTEX_COLOR"}:
-            return from_node
-
-        for input_socket in from_node.inputs:
-            found = find_upstream_texture_or_attribute(input_socket)
-            if found:
-                return found
-    return None
-
-
-def get_texture_node_image_block(input_socket):
-    """Recursively walks node trees to extract the actual image object, supporting linked networks."""
-    image_node = find_upstream_texture_or_attribute(input_socket)
-    if image_node and image_node.type == "TEX_IMAGE" and image_node.image:
-        return image_node.image
-    return None
-
-
-def find_upstream_procedural_node(socket):
-    """Recursively search upstream links for procedural texture nodes."""
-    if not socket or not socket.is_linked:
-        return None
-    for link in socket.links:
-        from_node = link.from_node
-        if from_node.type in {"TEX_VORONOI", "TEX_NOISE"}:
-            return from_node
-        for input_socket in from_node.inputs:
-            found = find_upstream_procedural_node(input_socket)
-            if found:
-                return found
-    return None
-
-
-# Map Blender procedural node types to your engine's target shaders
-PROCEDURAL_TYPE_MAP = {
-    "TEX_VORONOI": "VORONOI",
-    "TEX_NOISE": "PERLIN_NOISE",
-    "TEX_MUSGRAVE": "FBM_NOISE",
-    "TEX_WAVE": "WAVE_MARBLE",
-}
-
-
-def serialize_procedural_node(node):
-    """Dynamically serialize all unlinked input values/sliders of a node."""
-    target_type = PROCEDURAL_TYPE_MAP.get(node.type)
-    if not target_type:
-        return None
-
-    params = {}
-    for socket in node.inputs:
-        if not socket.is_linked:
-            val = socket.default_value
-            # Handle float arrays (colors/vectors) vs single floats
-            if hasattr(val, "__len__"):
-                params[socket.name] = [clean_float(x) for x in val]
-            else:
-                params[socket.name] = clean_float(val)
-
-    return {"type": target_type, "parameters": params}
-
-
 # ============================================================================
 # Modular Pipeline Exporters
 # ============================================================================
@@ -475,7 +645,6 @@ def export_and_copy_textures(asset_dir):
     """Extracts and copies packed/unpacked textures into the level folder."""
     textures_dir = os.path.join(asset_dir, "textures")
     os.makedirs(textures_dir, exist_ok=True)
-
     for image in bpy.data.images:
         if image.type in {"COMPOSITER", "VIEWER"} or image.source not in {
             "FILE",
@@ -483,7 +652,6 @@ def export_and_copy_textures(asset_dir):
             "TILED",
         }:
             continue
-
         dest_filename = get_image_filename(image)
         if not dest_filename:
             continue
@@ -494,10 +662,8 @@ def export_and_copy_textures(asset_dir):
             try:
                 image.filepath_raw = dest_path
                 image.save()
-            except Exception as e:
-                print(
-                    f"      [Warning] Failed to save packed image '{image.name}': {e}"
-                )
+            except Exception:
+                pass
             finally:
                 image.filepath_raw = old_path
         else:
@@ -505,17 +671,13 @@ def export_and_copy_textures(asset_dir):
             if os.path.exists(src_path):
                 try:
                     shutil.copy2(src_path, dest_path)
-                except Exception as e:
-                    print(
-                        f"      [Warning] Failed to copy texture '{image.name}' from '{src_path}': {e}"
-                    )
+                except Exception:
+                    pass
             else:
                 try:
                     image.save_render(dest_path)
-                except Exception as e:
-                    print(
-                        f"      [Warning] Source missing and fallback failed for '{image.name}': {e}"
-                    )
+                except Exception:
+                    pass
 
 
 def precalculate_world_matrices(scene_objects, depsgraph):
@@ -523,7 +685,6 @@ def precalculate_world_matrices(scene_objects, depsgraph):
     world_yup_map = {}
     for obj in scene_objects:
         world_yup_map[obj.name] = c_basis @ obj.matrix_world @ c_basis_inv
-
     for obj in depsgraph.scene.objects:
         if obj.IsA("ARMATURE"):
             for bone in obj.data.bones:
@@ -531,384 +692,6 @@ def precalculate_world_matrices(scene_objects, depsgraph):
                 bone_world_zup = obj.matrix_world @ bone.matrix_local
                 world_yup_map[bone_key] = c_basis @ bone_world_zup @ c_basis_inv
     return world_yup_map
-
-
-def resolve_base_color(principled):
-    """Resolves the solid base color of a Principled BSDF node, tracing simple value links if necessary."""
-    base_color_input = principled.inputs.get("Base Color")
-    if not base_color_input:
-        return [1.0, 1.0, 1.0, 1.0]
-
-    if not base_color_input.is_linked:
-        return [clean_float(c) for c in base_color_input.default_value]
-
-    img_node = find_upstream_texture_or_attribute(base_color_input)
-    if img_node:
-        return [1.0, 1.0, 1.0, 1.0]
-
-    link = base_color_input.links[0]
-    from_node = link.from_node
-
-    if from_node.type == "RGB" and hasattr(from_node, "outputs") and from_node.outputs:
-        return [clean_float(c) for c in from_node.outputs[0].default_value]
-
-    if from_node.type == "VALTORGB" and len(from_node.color_ramp.elements) > 0:
-        return [clean_float(c) for c in from_node.color_ramp.elements[0].color]
-
-    if from_node.type in {"MIX", "MIX_RGB"}:
-        col_input = from_node.inputs.get("Color1") or from_node.inputs.get("A")
-        if col_input:
-            return [clean_float(c) for c in col_input.default_value]
-
-    return [clean_float(c) for c in base_color_input.default_value]
-
-
-# ============================================================================
-# Shader Tree Compilation Engine (Support for Mix, Add & Transparent Shaders)
-# ============================================================================
-
-
-def find_root_shader_node(material):
-    """Resolves the root shader node driving the active surface output."""
-    # CHANGED: 'material.use_nodes' check replaced with 'material.node_tree' to bypass Blender 6.0 deprecation warning
-    if not material.node_tree:
-        return None
-
-    output_node = next(
-        (
-            n
-            for n in material.node_tree.nodes
-            if n.type == "OUTPUT_MATERIAL" and n.is_active_output
-        ),
-        None,
-    )
-    if not output_node:
-        output_node = next(
-            (n for n in material.node_tree.nodes if n.type == "OUTPUT_MATERIAL"),
-            None,
-        )
-
-    if output_node:
-        surface_input = output_node.inputs.get("Surface")
-        if surface_input and surface_input.is_linked:
-            return surface_input.links[0].from_node
-    return None
-
-
-def evaluate_shader(node, depth=0):
-    """Recursively evaluates the shader node tree up to a defined depth,
-    compiling combined and mixed networks into unified PBR material values.
-    """
-    default_props = {
-        "base_color": [1.0, 1.0, 1.0, 1.0],
-        "metallic": 0.0,
-        "roughness": 0.5,
-        "emissive_factor": [0.0, 0.0, 0.0],
-        "emissive_strength": 0.0,
-        "albedo_img": None,
-        "normal_img": None,
-        "mr_img": None,
-        "emissive_img": None,
-    }
-
-    if depth > 10 or not node:
-        return default_props
-
-    if node.type == "BSDF_PRINCIPLED":
-        base_color = resolve_base_color(node)
-
-        metallic = 0.0
-        metallic_input = node.inputs.get("Metallic")
-        if metallic_input and not metallic_input.is_linked:
-            metallic = clean_float(metallic_input.default_value)
-
-        roughness = 0.5
-        roughness_input = node.inputs.get("Roughness")
-        if roughness_input and not roughness_input.is_linked:
-            roughness = clean_float(roughness_input.default_value)
-
-        em_col = [0.0, 0.0, 0.0]
-        em_col_input = node.inputs.get("Emission Color") or node.inputs.get("Emission")
-        emissive_img = None
-        if em_col_input:
-            if not em_col_input.is_linked:
-                try:
-                    em_col = [clean_float(c) for c in em_col_input.default_value[:3]]
-                except Exception:
-                    pass
-            else:
-                emissive_img = get_texture_node_image_block(em_col_input)
-                em_col = [1.0, 1.0, 1.0]
-
-        em_str = 1.0
-        em_str_input = node.inputs.get("Emission Strength")
-        if em_str_input and not em_str_input.is_linked:
-            em_str = clean_float(em_str_input.default_value)
-
-        albedo_img = get_texture_node_image_block(node.inputs.get("Base Color"))
-        normal_img = get_texture_node_image_block(node.inputs.get("Normal"))
-        mr_img = get_texture_node_image_block(node.inputs.get("Roughness"))
-
-        # Traverse and find any procedural node upstream of Base Color
-        proc_node = find_upstream_procedural_node(node.inputs.get("Base Color"))
-        procedural_props = serialize_procedural_node(proc_node) if proc_node else None
-
-        return {
-            "base_color": base_color,
-            "metallic": metallic,
-            "roughness": roughness,
-            "emissive_factor": em_col,
-            "emissive_strength": em_str,
-            "albedo_img": albedo_img if not procedural_props else None,
-            "normal_img": normal_img,
-            "mr_img": mr_img,
-            "emissive_img": emissive_img,
-            "procedural": procedural_props,
-        }
-
-    elif node.type == "BSDF_DIFFUSE":
-        col_input = node.inputs.get("Color")
-        base_color = [1.0, 1.0, 1.0, 1.0]
-        albedo_img = None
-        if col_input:
-            if not col_input.is_linked:
-                base_color = [clean_float(c) for c in col_input.default_value]
-            else:
-                albedo_img = get_texture_node_image_block(col_input)
-
-        roughness = 0.5
-        rough_input = node.inputs.get("Roughness")
-        if rough_input and not rough_input.is_linked:
-            roughness = clean_float(rough_input.default_value)
-
-        return {
-            "base_color": base_color,
-            "metallic": 0.0,
-            "roughness": roughness,
-            "emissive_factor": [0.0, 0.0, 0.0],
-            "emissive_strength": 0.0,
-            "albedo_img": albedo_img,
-            "normal_img": get_texture_node_image_block(node.inputs.get("Normal")),
-            "mr_img": None,
-            "emissive_img": None,
-        }
-
-    elif node.type == "BSDF_GLOSSY":
-        col_input = node.inputs.get("Color")
-        base_color = [1.0, 1.0, 1.0, 1.0]
-        albedo_img = None
-        if col_input:
-            if not col_input.is_linked:
-                base_color = [clean_float(c) for c in col_input.default_value]
-            else:
-                albedo_img = get_texture_node_image_block(col_input)
-
-        roughness = 0.5
-        rough_input = node.inputs.get("Roughness")
-        if rough_input and not rough_input.is_linked:
-            roughness = clean_float(rough_input.default_value)
-
-        return {
-            "base_color": base_color,
-            "metallic": 1.0,
-            "roughness": roughness,
-            "emissive_factor": [0.0, 0.0, 0.0],
-            "emissive_strength": 0.0,
-            "albedo_img": albedo_img,
-            "normal_img": get_texture_node_image_block(node.inputs.get("Normal")),
-            "mr_img": None,
-            "emissive_img": None,
-        }
-
-    elif node.type == "BSDF_TRANSPARENT":
-        col_input = node.inputs.get("Color")
-        base_color = [1.0, 1.0, 1.0, 1.0]
-        albedo_img = None
-        if col_input:
-            if not col_input.is_linked:
-                c = col_input.default_value
-                base_color = [
-                    clean_float(c[0]),
-                    clean_float(c[1]),
-                    clean_float(c[2]),
-                    0.0,
-                ]
-            else:
-                albedo_img = get_texture_node_image_block(col_input)
-                base_color = [1.0, 1.0, 1.0, 0.0]
-
-        return {
-            "base_color": base_color,
-            "metallic": 0.0,
-            "roughness": 0.0,
-            "emissive_factor": [0.0, 0.0, 0.0],
-            "emissive_strength": 0.0,
-            "albedo_img": albedo_img,
-            "normal_img": None,
-            "mr_img": None,
-            "emissive_img": None,
-        }
-
-    elif node.type in {"EMISSION", "EMISSION_BSDF"}:
-        col_input = node.inputs.get("Color")
-        em_col = [1.0, 1.0, 1.0]
-        emissive_img = None
-        if col_input:
-            if not col_input.is_linked:
-                em_col = [clean_float(c) for c in col_input.default_value[:3]]
-            else:
-                emissive_img = get_texture_node_image_block(col_input)
-
-        strength = 1.0
-        strength_input = node.inputs.get("Strength")
-        if strength_input and not strength_input.is_linked:
-            strength = clean_float(strength_input.default_value)
-
-        return {
-            "base_color": [0.0, 0.0, 0.0, 1.0],
-            "metallic": 0.0,
-            "roughness": 0.5,
-            "emissive_factor": em_col,
-            "emissive_strength": strength,
-            "albedo_img": None,
-            "normal_img": None,
-            "mr_img": None,
-            "emissive_img": emissive_img,
-        }
-
-    elif node.type == "MIX_SHADER":
-        fac = 0.5
-        fac_input = node.inputs.get("Fac")
-        if fac_input and not fac_input.is_linked:
-            fac = clean_float(fac_input.default_value)
-
-        shader1_node = None
-        shader2_node = None
-
-        s1_input = node.inputs[1] if len(node.inputs) > 1 else None
-        s2_input = node.inputs[2] if len(node.inputs) > 2 else None
-
-        if s1_input and s1_input.is_linked:
-            shader1_node = s1_input.links[0].from_node
-        if s2_input and s2_input.is_linked:
-            shader2_node = s2_input.links[0].from_node
-
-        s1_props = evaluate_shader(shader1_node, depth + 1)
-        s2_props = evaluate_shader(shader2_node, depth + 1)
-
-        w1 = 1.0 - fac
-        w2 = fac
-
-        base_color = [
-            clean_float(s1_props["base_color"][i] * w1 + s2_props["base_color"][i] * w2)
-            for i in range(4)
-        ]
-        metallic = clean_float(s1_props["metallic"] * w1 + s2_props["metallic"] * w2)
-        roughness = clean_float(s1_props["roughness"] * w1 + s2_props["roughness"] * w2)
-        emissive_factor = [
-            clean_float(
-                s1_props["emissive_factor"][i] * w1
-                + s2_props["emissive_factor"][i] * w2
-            )
-            for i in range(3)
-        ]
-        emissive_strength = clean_float(
-            s1_props["emissive_strength"] * w1 + s2_props["emissive_strength"] * w2
-        )
-
-        albedo_img = s2_props["albedo_img"] if fac >= 0.5 else s1_props["albedo_img"]
-        normal_img = s2_props["normal_img"] if fac >= 0.5 else s1_props["normal_img"]
-        mr_img = s2_props["mr_img"] if fac >= 0.5 else s1_props["mr_img"]
-        emissive_img = (
-            s2_props.get("emissive_img") if fac >= 0.5 else s1_props.get("emissive_img")
-        )
-
-        if not albedo_img:
-            albedo_img = (
-                s1_props["albedo_img"] if fac >= 0.5 else s2_props["albedo_img"]
-            )
-        if not normal_img:
-            normal_img = (
-                s1_props["normal_img"] if fac >= 0.5 else s2_props["normal_img"]
-            )
-        if not mr_img:
-            mr_img = s1_props["mr_img"] if fac >= 0.5 else s2_props["mr_img"]
-        if not emissive_img:
-            emissive_img = (
-                s1_props.get("emissive_img")
-                if fac >= 0.5
-                else s2_props.get("emissive_img")
-            )
-
-        return {
-            "base_color": base_color,
-            "metallic": metallic,
-            "roughness": roughness,
-            "emissive_factor": emissive_factor,
-            "emissive_strength": emissive_strength,
-            "albedo_img": albedo_img,
-            "normal_img": normal_img,
-            "mr_img": mr_img,
-            "emissive_img": emissive_img,
-        }
-
-    elif node.type == "ADD_SHADER":
-        shader1_node = None
-        shader2_node = None
-
-        s1_input = node.inputs[0] if len(node.inputs) > 0 else None
-        s2_input = node.inputs[1] if len(node.inputs) > 1 else None
-
-        if s1_input and s1_input.is_linked:
-            shader1_node = s1_input.links[0].from_node
-        if s2_input and s2_input.is_linked:
-            shader2_node = s2_input.links[0].from_node
-
-        s1_props = evaluate_shader(shader1_node, depth + 1)
-        s2_props = evaluate_shader(shader2_node, depth + 1)
-
-        base_color = [
-            clean_float(min(1.0, s1_props["base_color"][i] + s2_props["base_color"][i]))
-            for i in range(4)
-        ]
-        metallic = clean_float(min(1.0, s1_props["metallic"] + s2_props["metallic"]))
-        roughness = clean_float((s1_props["roughness"] + s2_props["roughness"]) * 0.5)
-        emissive_factor = [
-            clean_float(
-                min(
-                    1.0,
-                    s1_props["emissive_factor"][i] + s2_props["emissive_factor"][i],
-                )
-            )
-            for i in range(3)
-        ]
-        emissive_strength = clean_float(
-            s1_props["emissive_strength"] + s2_props["emissive_strength"]
-        )
-
-        albedo_img = s1_props["albedo_img"] or s2_props["albedo_img"]
-        normal_img = s1_props["normal_img"] or s2_props["normal_img"]
-        mr_img = s1_props["mr_img"] or s2_props["mr_img"]
-        emissive_img = s1_props.get("emissive_img") or s2_props.get("emissive_img")
-
-        return {
-            "base_color": base_color,
-            "metallic": metallic,
-            "roughness": roughness,
-            "emissive_factor": emissive_factor,
-            "emissive_strength": emissive_strength,
-            "albedo_img": albedo_img,
-            "normal_img": normal_img,
-            "mr_img": mr_img,
-            "emissive_img": emissive_img,
-        }
-
-    return default_props
-
-
-# ============================================================================
-# Core Asset Extraction Logic
-# ============================================================================
 
 
 def extract_skins(depsgraph, node_id_map, world_yup_map):
@@ -964,83 +747,6 @@ def extract_skins(depsgraph, node_id_map, world_yup_map):
                 }
             )
     return skins
-
-
-def extract_nodes(scene_objects, depsgraph, node_id_map, exported_meshes):
-    """Assembles node structures, separating standard objects from instances."""
-    nodes = []
-
-    for obj in scene_objects:
-        # Check if the node has Bone Parenting
-        if obj.parent and obj.parent_type == "BONE" and obj.parent_bone:
-            parent_key = f"bone_{obj.parent.name}_{obj.parent_bone}"
-            parent_node_id = node_id_map.get(parent_key)
-
-            # Parent bone world transform reference
-            parent_bone = obj.parent.data.bones.get(obj.parent_bone)
-            if parent_bone:
-                parent_world_zup = obj.parent.matrix_world @ parent_bone.matrix_local
-                parent_world_yup = c_basis @ parent_world_zup @ c_basis_inv
-            else:
-                parent_world_yup = c_basis @ obj.parent.matrix_world @ c_basis_inv
-        else:
-            parent_key = obj.parent.name if obj.parent else None
-            parent_node_id = node_id_map.get(parent_key) if parent_key else None
-            parent_world_yup = (
-                c_basis @ obj.parent.matrix_world @ c_basis_inv if obj.parent else None
-            )
-
-        world_yup = c_basis @ obj.matrix_world @ c_basis_inv
-
-        # Calculate parent-relative local matrix consistently
-        if parent_node_id and parent_world_yup:
-            local_yup = safe_invert(parent_world_yup) @ world_yup
-        else:
-            local_yup = world_yup
-
-        node_info = build_node_info(
-            obj,
-            node_id_map.get(obj.name),
-            obj.name,
-            parent_node_id,
-            local_yup,
-            world_yup,
-            not obj.hide_viewport,
-            exported_meshes,
-        )
-        nodes.append(node_info)
-
-    for idx, instance in enumerate(depsgraph.object_instances):
-        if not instance.is_instance:
-            continue
-
-        obj = instance.instance_object
-        if not obj or not obj.IsA("MESH"):
-            continue
-
-        node_id = f"node_{make_id('', instance.parent.name)}_inst_{idx}"
-        node_name = f"{instance.parent.name}_instance_{idx}"
-        parent_node_id = (
-            node_id_map.get(instance.parent.name) if instance.parent else None
-        )
-
-        world_yup = c_basis @ instance.matrix_world @ c_basis_inv
-        instancer_world_yup = c_basis @ instance.parent.matrix_world @ c_basis_inv
-        local_yup = safe_invert(instancer_world_yup) @ world_yup
-
-        node_info = build_node_info(
-            obj,
-            node_id,
-            node_name,
-            parent_node_id,
-            local_yup,
-            world_yup,
-            instance.show_self,
-            exported_meshes,
-        )
-        nodes.append(node_info)
-
-    return nodes
 
 
 def build_node_info(
@@ -1148,24 +854,85 @@ def build_node_info(
             make_id("mat", s.material.name) for s in obj.material_slots if s.material
         ]
 
-        try:
-            # --- FIX: Evaluate bounds in world space for skinned meshes ---
-            if is_skinned:
-                coords = [
-                    c_basis @ (obj.matrix_world @ v.co) for v in obj.data.vertices
-                ]
-            else:
-                coords = [c_basis @ v.co for v in obj.data.vertices]
-            # ---------------------------------------------------------------
-            min_bound = [clean_float(min(c[i] for c in coords)) for i in range(3)]
-            max_bound = [clean_float(max(c[i] for c in coords)) for i in range(3)]
-        except Exception:
-            min_bound = [0.0, 0.0, 0.0]
-            max_bound = [0.0, 0.0, 0.0]
-
-        node_info["extras"]["bounds"] = {"min": min_bound, "max": max_bound}
+        # --- OPTIMIZED OUT: MOVED TO C++ ---
+        # We write simple dummy bounds [0,0,0] in the metadata.bin JSON,
+        # because the engine reads the true bounds directly from the compiled .zmesh header.
+        node_info["extras"]["bounds"] = {"min": [0.0, 0.0, 0.0], "max": [0.0, 0.0, 0.0]}
 
     return node_info
+
+
+def extract_nodes(scene_objects, depsgraph, node_id_map, exported_meshes):
+    """Assembles node structures, separating standard objects from instances."""
+    nodes = []
+    for obj in scene_objects:
+        if obj.parent and obj.parent_type == "BONE" and obj.parent_bone:
+            parent_key = f"bone_{obj.parent.name}_{obj.parent_bone}"
+            parent_node_id = node_id_map.get(parent_key)
+            parent_bone = obj.parent.data.bones.get(obj.parent_bone)
+            if parent_bone:
+                parent_world_zup = obj.parent.matrix_world @ parent_bone.matrix_local
+                parent_world_yup = c_basis @ parent_world_zup @ c_basis_inv
+            else:
+                parent_world_yup = c_basis @ obj.parent.matrix_world @ c_basis_inv
+        else:
+            parent_key = obj.parent.name if obj.parent else None
+            parent_node_id = node_id_map.get(parent_key) if parent_key else None
+            parent_world_yup = (
+                c_basis @ obj.parent.matrix_world @ c_basis_inv if obj.parent else None
+            )
+
+        world_yup = c_basis @ obj.matrix_world @ c_basis_inv
+        local_yup = (
+            safe_invert(parent_world_yup) @ world_yup
+            if parent_node_id and parent_world_yup
+            else world_yup
+        )
+
+        nodes.append(
+            build_node_info(
+                obj,
+                node_id_map.get(obj.name),
+                obj.name,
+                parent_node_id,
+                local_yup,
+                world_yup,
+                not obj.hide_viewport,
+                exported_meshes,
+            )
+        )
+
+    for idx, instance in enumerate(depsgraph.object_instances):
+        if not instance.is_instance:
+            continue
+        obj = instance.instance_object
+        if not obj or not obj.IsA("MESH"):
+            continue
+
+        node_id = f"node_{make_id('', instance.parent.name)}_inst_{idx}"
+        node_name = f"{instance.parent.name}_instance_{idx}"
+        parent_node_id = (
+            node_id_map.get(instance.parent.name) if instance.parent else None
+        )
+
+        world_yup = c_basis @ instance.matrix_world @ c_basis_inv
+        instancer_world_yup = c_basis @ instance.parent.matrix_world @ c_basis_inv
+        local_yup = safe_invert(instancer_world_yup) @ world_yup
+
+        nodes.append(
+            build_node_info(
+                obj,
+                node_id,
+                node_name,
+                parent_node_id,
+                local_yup,
+                world_yup,
+                instance.show_self,
+                exported_meshes,
+            )
+        )
+
+    return nodes
 
 
 def extract_materials():
@@ -1196,34 +963,74 @@ def extract_materials():
             "sampler": {"wrap": "REPEAT", "filter": "LINEAR"},
         }
 
-        root_node = find_root_shader_node(mat)
-        if root_node:
-            props = evaluate_shader(root_node)
-            mat_info["pbr"]["base_color"] = props["base_color"]
-            mat_info["pbr"]["metallic"] = props["metallic"]
-            mat_info["pbr"]["roughness"] = props["roughness"]
-            mat_info["pbr"]["emissive_factor"] = props["emissive_factor"]
-            mat_info["pbr"]["emissive_strength"] = props["emissive_strength"]
+        # Read the raw basic properties dynamically so they are still present as fallbacks
+        root = find_root_shader_node(mat)
+        if root and root.type == "BSDF_PRINCIPLED":
+            # --- ALBEDO MAP (Base Color) ---
+            def_col = root.inputs.get("Base Color")
+            if def_col:
+                if not def_col.is_linked:
+                    mat_info["pbr"]["base_color"] = [
+                        clean_float(c) for c in def_col.default_value
+                    ]
+                else:
+                    img = get_texture_node_image_block(def_col)
+                    if img:
+                        mat_info["maps"]["albedo"] = os.path.join(
+                            "textures", get_image_filename(img)
+                        ).replace("\\", "/")
 
-            albedo_file = get_image_filename(props["albedo_img"])
-            normal_file = get_image_filename(props["normal_img"])
-            mr_file = get_image_filename(props["mr_img"])
-            emissive_file = get_image_filename(props.get("emissive_img"))
+            # --- METALLIC MAP ---
+            def_met = root.inputs.get("Metallic")
+            if def_met and not def_met.is_linked:
+                mat_info["pbr"]["metallic"] = clean_float(def_met.default_value)
 
-            mat_info["maps"]["albedo"] = (
-                f"textures/{albedo_file}" if albedo_file else None
-            )
-            mat_info["maps"]["normal"] = (
-                f"textures/{normal_file}" if normal_file else None
-            )
-            mat_info["maps"]["metallic_roughness"] = (
-                f"textures/{mr_file}" if mr_file else None
-            )
-            mat_info["maps"]["emissive"] = (
-                f"textures/{emissive_file}" if emissive_file else None
-            )
-        else:
-            mat_info["pbr"]["base_color"] = default_color
+            # --- ROUGHNESS MAP ---
+            def_rgh = root.inputs.get("Roughness")
+            if def_rgh:
+                if not def_rgh.is_linked:
+                    mat_info["pbr"]["roughness"] = clean_float(def_rgh.default_value)
+                else:
+                    img = get_texture_node_image_block(def_rgh)
+                    if img:
+                        mat_info["maps"]["metallic_roughness"] = os.path.join(
+                            "textures", get_image_filename(img)
+                        ).replace("\\", "/")
+
+            # --- NORMAL MAP ---
+            def_nrm = root.inputs.get("Normal")
+            if def_nrm and def_nrm.is_linked:
+                img = get_texture_node_image_block(def_nrm)
+                if img:
+                    mat_info["maps"]["normal"] = os.path.join(
+                        "textures", get_image_filename(img)
+                    ).replace("\\", "/")
+
+            # --- EMISSIVE MAP & FACTOR ---
+            def_ems = root.inputs.get("Emission Color") or root.inputs.get("Emission")
+            if def_ems:
+                if not def_ems.is_linked:
+                    mat_info["pbr"]["emissive_factor"] = [
+                        clean_float(c) for c in def_ems.default_value[:3]
+                    ]
+                else:
+                    img = get_texture_node_image_block(def_ems)
+                    if img:
+                        mat_info["maps"]["emissive"] = os.path.join(
+                            "textures", get_image_filename(img)
+                        ).replace("\\", "/")
+
+            # --- EMISSIVE STRENGTH ---
+            def_str = root.inputs.get("Emission Strength")
+            if def_str and not def_str.is_linked:
+                mat_info["pbr"]["emissive_strength"] = clean_float(
+                    def_str.default_value
+                )
+
+        # Inject the Graph Bytecode Compiler!
+        proc = build_procedural_instructions(mat)
+        if proc:
+            mat_info["procedural"] = proc
 
         materials.append(mat_info)
     return materials
@@ -1232,7 +1039,6 @@ def extract_materials():
 def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_meshes):
     """Packs fast contiguous loop arrays (offloading index deduplication to the C++ compiler)."""
     meshes = []
-
     for obj in geometry_sources:
         if not obj or not obj.IsA("MESH"):
             continue
@@ -1245,7 +1051,6 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
         if mesh_id in exported_meshes:
             continue
 
-        # --- FIX: Temporarily disable armature modifiers to prevent double deforms ---
         armature_mods_state = []
         has_armature = False
         for mod in obj.modifiers:
@@ -1256,12 +1061,9 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
 
         if has_armature:
             depsgraph.update()
-        # ----------------------------------------------------------------------------
-
         mesh_data = get_evaluated_mesh_safely(obj, depsgraph)
 
         if not mesh_data:
-            # Safely restore modifier viewport visibility before skipping
             if has_armature:
                 for mod, state in armature_mods_state:
                     mod.show_viewport = state
@@ -1269,7 +1071,6 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
             continue
 
         if len(mesh_data.vertices) == 0 or len(mesh_data.polygons) == 0:
-            # Safely restore modifier viewport visibility before skipping
             if has_armature:
                 for mod, state in armature_mods_state:
                     mod.show_viewport = state
@@ -1288,22 +1089,18 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
         active_uv_layer = (
             mesh_data.uv_layers.active.data if mesh_data.uv_layers else None
         )
-
         active_color_attr = None
         if hasattr(mesh_data, "attributes"):
             candidates_multi = []
             candidates_scalar = []
-
             for attr in mesh_data.attributes:
                 attr_name_lower = attr.name.lower()
                 if attr_name_lower in {"position", "normal", "tangent", "uvmap", "uv"}:
                     continue
-
                 has_color_name = any(
                     hint in attr_name_lower
                     for hint in ["col", "color", "tint", "hue", "rgb"]
                 )
-
                 if attr.data_type in {"FLOAT_COLOR", "BYTE_COLOR", "FLOAT_VECTOR"}:
                     if is_valid_color_layer(attr):
                         candidates_multi.append((attr, has_color_name))
@@ -1342,24 +1139,6 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
             triangles_by_mat[mat_idx].append(tri)
 
         for mat_idx, tris in triangles_by_mat.items():
-            ramp_node = None
-            ramp_attr = None
-            if mat_idx < len(obj.material_slots):
-                prim_mat = obj.material_slots[mat_idx].material
-                # CHANGED: 'prim_mat.use_nodes' replaced with 'prim_mat.node_tree' to bypass Blender 6.0 deprecation warning
-                if prim_mat and prim_mat.node_tree:
-                    ramp_node = next(
-                        (n for n in prim_mat.node_tree.nodes if n.type == "VALTORGB"),
-                        None,
-                    )
-                    if ramp_node:
-                        fac_input = ramp_node.inputs.get("Fac")
-                        attr_node = find_upstream_texture_or_attribute(fac_input)
-                        if attr_node and attr_node.type == "ATTRIBUTE":
-                            ramp_attr_name = attr_node.attribute_name
-                            if hasattr(mesh_data, "attributes") and ramp_attr_name:
-                                ramp_attr = mesh_data.attributes.get(ramp_attr_name)
-
             loop_count = 0
             for tri in tris:
                 for loop_idx, v_idx in zip(tri.loops, tri.vertices):
@@ -1370,13 +1149,9 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
                         else mesh_data.vertices[v_idx].normal
                     )
 
-                    # --- FIX: Bake skinned mesh vertices to align with skeleton ---
                     if is_skinned:
-                        # Transform local vertex position to world space
                         co_world = obj.matrix_world @ co
                         cx, cy, cz = co_world[0], co_world[2], -co_world[1]
-
-                        # Transform normal using inverse-transpose (handles non-uniform scales)
                         normal_world = (
                             safe_invert(obj.matrix_world).to_3x3().transposed() @ normal
                         ).normalized()
@@ -1384,24 +1159,15 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
                     else:
                         cx, cy, cz = co[0], co[2], -co[1]
                         nx, ny, nz = normal[0], normal[2], -normal[1]
-                    # -------------------------------------------------------------
 
                     uv = active_uv_layer[loop_idx].uv if active_uv_layer else (0.0, 0.0)
 
+                    # --- OPTIMIZED OUT: MOVED TO C++ ---
+                    # Ignore joint limits, weight normalization, and sorting.
+                    # We just pack the coordinates, UVs and raw vertex groups; zcook will parse
+                    # and normalize them natively.
                     color = (1.0, 1.0, 1.0, 1.0)
-                    if ramp_node and ramp_attr and ramp_attr.data:
-                        if ramp_attr.domain == "CORNER":
-                            datum = ramp_attr.data[loop_idx]
-                        elif ramp_attr.domain == "POINT":
-                            datum = ramp_attr.data[v_idx]
-                        elif ramp_attr.domain == "FACE":
-                            datum = ramp_attr.data[tri.polygon_index]
-                        else:
-                            datum = None
-
-                        val = get_scalar_value_from_datum(datum)
-                        color = ramp_node.color_ramp.evaluate(val)
-                    elif active_color_attr and active_color_attr.data:
+                    if active_color_attr and active_color_attr.data:
                         if active_color_attr.domain == "CORNER":
                             datum = active_color_attr.data[loop_idx]
                         elif active_color_attr.domain == "POINT":
@@ -1432,23 +1198,30 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
 
                     if is_skinned:
                         v = mesh_data.vertices[v_idx]
-                        v_influences = []
-                        for g in v.groups:
-                            j_idx = group_to_joint_idx.get(g.group)
-                            if j_idx is not None:
-                                v_influences.append((j_idx, g.weight))
+                        v_influences = [
+                            (group_to_joint_idx[g.group], g.weight)
+                            for g in v.groups
+                            if g.group in group_to_joint_idx
+                        ]
 
-                        v_influences = sorted(
-                            v_influences, key=lambda x: x[1], reverse=True
-                        )[:4]
+                        # Optimization: Avoid sorting if we have 4 or fewer influences
+                        if len(v_influences) > 4:
+                            v_influences = sorted(
+                                v_influences, key=lambda x: x[1], reverse=True
+                            )[:4]
                         while len(v_influences) < 4:
                             v_influences.append((0, 0.0))
 
-                        total_w = sum(w for _, w in v_influences)
+                        total_w = (
+                            v_influences[0][1]
+                            + v_influences[1][1]
+                            + v_influences[2][1]
+                            + v_influences[3][1]
+                        )
                         if total_w > 0.0:
                             v_influences = [(j, w / total_w) for j, w in v_influences]
                         else:
-                            v_influences = [(0, 1.0)] + [(0, 0.0)] * 3
+                            v_influences = [(0, 1.0), (0, 0.0), (0, 0.0), (0, 0.0)]
 
                         for j, w in v_influences:
                             flat_vbo.append(float(j))
@@ -1457,14 +1230,12 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
 
                     loop_count += 1
 
-            if (
-                mat_idx < len(obj.material_slots)
+            mat_id = (
+                make_id("mat", obj.material_slots[mat_idx].material.name)
+                if mat_idx < len(obj.material_slots)
                 and obj.material_slots[mat_idx].material
-            ):
-                mat_id = make_id("mat", obj.material_slots[mat_idx].material.name)
-            else:
-                mat_id = None
-
+                else None
+            )
             primitives.append(
                 {
                     "material_id": mat_id,
@@ -1475,12 +1246,10 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
             current_offset += loop_count
 
         vbo_binary = struct.pack(f"{len(flat_vbo)}f", *flat_vbo)
-
         bin_path = os.path.join(bin_dir, f"{mesh_id}.bin")
         with open(bin_path, "wb") as f:
             f.write(vbo_binary)
 
-        # Extract and bake morph targets (shape keys) generically
         morph_targets = []
         if obj.data.shape_keys:
             basis_kb = obj.data.shape_keys.key_blocks.get("Basis")
@@ -1488,66 +1257,49 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
                 for kb in obj.data.shape_keys.key_blocks:
                     if kb.name == "Basis":
                         continue
-
                     target_offsets = []
                     for v_idx, v in enumerate(obj.data.vertices):
-                        # Calculate local coordinate difference relative to base shape
                         offset = kb.data[v_idx].co - basis_kb.data[v_idx].co
-                        # Align offsets into Y-up orientation
                         cx, cy, cz = offset[0], offset[2], -offset[1]
                         target_offsets.extend([cx, cy, cz])
-
                     target_bin_data = struct.pack(
                         f"{len(target_offsets)}f", *target_offsets
                     )
-
-                    # --- FIX: Sanitize the shape key name to prevent slash "/" from causing directory traversal errors ---
                     clean_kb_name = "".join(
                         [c if c.isalnum() or c in "._-" else "_" for c in kb.name]
                     )
                     target_bin_name = f"{mesh_id}_target_{clean_kb_name}.bin"
                     target_bin_path = os.path.join(bin_dir, target_bin_name)
-
                     with open(target_bin_path, "wb") as f:
                         f.write(target_bin_data)
-
                     morph_targets.append(
                         {
-                            "name": kb.name,  # Keep original shape key name as the morph target name so the engine can look it up
+                            "name": kb.name,
                             "bin_file": os.path.relpath(target_bin_path, asset_dir),
                             "byte_offset": 0,
                             "byte_length": len(target_bin_data),
                         }
                     )
 
-        layout = "RAW_P3N3U2C4"
-        if is_skinned:
-            layout += "_J4W4"
-
+        layout = "RAW_P3N3U2C4_J4W4" if is_skinned else "RAW_P3N3U2C4"
         mesh_info = {
             "id": mesh_id,
             "name": f"{obj.data.name} Mesh",
             "layout": layout,
             "buffers": {
                 "bin_file": os.path.relpath(bin_path, asset_dir),
-                "vertex_buffer": {
-                    "byte_offset": 0,
-                    "byte_length": len(vbo_binary),
-                },
+                "vertex_buffer": {"byte_offset": 0, "byte_length": len(vbo_binary)},
             },
             "primitives": primitives,
             "morph_targets": morph_targets,
         }
-
         meshes.append(mesh_info)
         exported_meshes.add(mesh_id)
 
-        # --- FIX: Safe modifier restoration ONLY after mesh processing is complete ---
         if has_armature:
             for mod, state in armature_mods_state:
                 mod.show_viewport = state
             depsgraph.update()
-        # -----------------------------------------------------------------------------
 
         try:
             obj.evaluated_get(depsgraph).to_mesh_clear()
@@ -1559,38 +1311,9 @@ def extract_meshes(geometry_sources, depsgraph, asset_dir, bin_dir, exported_mes
     return meshes
 
 
-def extract_lights(scene_objects):
-    """Extracts KHR_lights_punctual compliant properties."""
-    lights = []
-    for obj in scene_objects:
-        if obj.type == "LIGHT":
-            ld = obj.data
-            l_type = (
-                "directional"
-                if ld.type == "SUN"
-                else ("spot" if ld.type == "SPOT" else "point")
-            )
-
-            light_info = {
-                "id": make_id("light", obj.name),
-                "type": l_type,
-                "color": [clean_float(c) for c in ld.color],
-                "intensity": clean_float(ld.energy),
-            }
-            if l_type == "spot":
-                light_info["spot"] = {
-                    "innerConeAngle": 0.0,
-                    "outerConeAngle": clean_float(ld.spot_size / 2.0),
-                }
-            lights.append(light_info)
-    return lights
-
-
 def get_node_ancestry(node_info):
-    """Gathers all ancestor keys and details for a given node to ensure clean evaluation."""
     ancestors = []
     mode, n, arm_or_obj_name, bone_name = node_info
-
     current_mode, current_n, current_arm_obj, current_bone = (
         mode,
         n,
@@ -1601,7 +1324,6 @@ def get_node_ancestry(node_info):
     while True:
         parent_key = None
         p_mode, p_arm_obj, p_bone = None, None, None
-
         if current_mode == "BONE":
             arm = bpy.data.objects.get(current_arm_obj)
             if arm:
@@ -1640,18 +1362,42 @@ def get_node_ancestry(node_info):
             )
         else:
             break
-
     return ancestors
+
+
+def extract_lights(scene_objects):
+    """Extracts KHR_lights_punctual compliant properties."""
+    lights = []
+    for obj in scene_objects:
+        if obj.type == "LIGHT":
+            ld = obj.data
+            l_type = (
+                "directional"
+                if ld.type == "SUN"
+                else ("spot" if ld.type == "SPOT" else "point")
+            )
+
+            light_info = {
+                "id": make_id("light", obj.name),
+                "type": l_type,
+                "color": [clean_float(c) for c in ld.color],
+                "intensity": clean_float(ld.energy),
+            }
+            if l_type == "spot":
+                light_info["spot"] = {
+                    "innerConeAngle": 0.0,
+                    "outerConeAngle": clean_float(ld.spot_size / 2.0),
+                }
+            lights.append(light_info)
+    return lights
 
 
 def extract_animations(
     depsgraph, node_id_map, bone_to_armature, bin_dir, asset_dir, fps
 ):
-    """Saves animated keyframe tracks, packing bone and object channels to .bin using high-performance evaluation."""
     animations = []
     original_frame = bpy.context.scene.frame_current
 
-    # Non-destructive action tracking: Cache original actions to restore after extraction
     original_actions = {}
     for obj in bpy.data.objects:
         if obj.animation_data:
@@ -1660,10 +1406,8 @@ def extract_animations(
     for action in bpy.data.actions:
         action_id = make_id("anim", action.name)
         start_frame, end_frame = int(action.frame_range[0]), int(action.frame_range[1])
-
         if end_frame <= start_frame:
             continue
-
         duration = clean_float((end_frame - start_frame) / fps)
 
         fcurves = []
@@ -1675,7 +1419,6 @@ def extract_animations(
         elif hasattr(action, "fcurves") and action.fcurves is not None:
             fcurves = list(action.fcurves)
 
-        # Collect target armatures and objects
         animated_armatures = set()
         animated_objects = set()
         animated_meshes_with_shape_keys = set()
@@ -1700,7 +1443,6 @@ def extract_animations(
                         if b_name == bone_name:
                             arm_obj = o
                             break
-
                 if arm_obj:
                     animated_armatures.add(arm_obj)
             elif "key_blocks" in path:
@@ -1719,13 +1461,7 @@ def extract_animations(
                     else:
                         animated_objects.add(obj)
 
-        # Assemble actual target nodes to export
         target_nodes = set()
-
-        # FORCE SKELETON BAKING:
-        # If any bone of an armature is animated, we evaluate and export keyframe
-        # tracks for ALL bones of that armature. This bakes all constraint, IK,
-        # and driver evaluations directly into visual space, eliminating frozen deform bones.
         for arm in animated_armatures:
             for bone in arm.data.bones:
                 bone_key = f"bone_{arm.name}_{bone.name}"
@@ -1734,7 +1470,6 @@ def extract_animations(
         for obj in animated_objects:
             target_nodes.add(("OBJECT", obj.name, obj.name, None))
 
-        # Dynamically register morph target (shape key) channels generics-only
         for obj in animated_meshes_with_shape_keys:
             node_id = node_id_map.get(obj.name)
             if node_id:
@@ -1747,7 +1482,6 @@ def extract_animations(
         samplers = []
         sampler_index = 0
 
-        # Apply target action for evaluation
         for mode, name, arm_or_obj_name, bone_name in target_nodes:
             if mode == "WEIGHTS":
                 continue
@@ -1755,7 +1489,6 @@ def extract_animations(
             if obj and obj.animation_data:
                 obj.animation_data.action = action
 
-        # Gather the exact, minimal ancestry path for all standard target nodes (skip WEIGHTS tracks)
         all_eval_nodes = set()
         for node_info in target_nodes:
             if node_info[0] != "WEIGHTS":
@@ -1767,14 +1500,11 @@ def extract_animations(
         sampled_transforms = {n: [] for _, n, _, _ in target_nodes}
         eval_dg = bpy.context.evaluated_depsgraph_get()
 
-        # Step through active frames
         for frame in range(start_frame, end_frame + 1):
             bpy.context.scene.frame_set(frame)
             eval_dg.update()
-
             sampled_times.append(clean_float((frame - start_frame) / fps))
 
-            # Evaluate exact world-space matrices for active nodes in Y-up orientation
             world_yup_eval = {}
             for mode, n, arm_or_obj, bone_name in all_eval_nodes:
                 if mode == "BONE":
@@ -1793,7 +1523,6 @@ def extract_animations(
                             c_basis @ eval_obj.matrix_world @ c_basis_inv
                         )
 
-            # Extract parent-relative transformations
             for mode, n, arm_or_obj_name, bone_name in target_nodes:
                 if mode == "WEIGHTS":
                     obj_mesh = bpy.data.objects.get(arm_or_obj_name)
@@ -1822,7 +1551,6 @@ def extract_animations(
 
                     world_yup = world_yup_eval.get(n, Matrix.Identity(4))
 
-                    # --- FIX: Isolate scale/shear for joints ---
                     if mode == "BONE":
                         world_unscaled = remove_scale_from_matrix(world_yup)
                         if parent_key and parent_key in world_yup_eval:
@@ -1833,14 +1561,12 @@ def extract_animations(
                         else:
                             local_yup = world_unscaled
                     else:
-                        # Maintain scale for standard object animations
                         if parent_key and parent_key in world_yup_eval:
                             local_yup = (
                                 safe_invert(world_yup_eval[parent_key]) @ world_yup
                             )
                         else:
                             local_yup = world_yup
-                # -------------------------------------------
 
                 t, r, s = local_yup.decompose()
                 sampled_transforms[n].append((t, r, s))
@@ -1863,7 +1589,6 @@ def extract_animations(
             if not node_id:
                 continue
 
-            # Check if this track animations shape key weights
             is_weights_track = any(
                 x[0] == "WEIGHTS" and x[1] == n for x in target_nodes
             )
@@ -1873,7 +1598,6 @@ def extract_animations(
                 for w_list in transforms:
                     weights_flat.extend(w_list)
                 w_bin = struct.pack(f"{len(weights_flat)}f", *weights_flat)
-
                 channels.append(
                     {
                         "target_node_id": node_id,
@@ -1897,7 +1621,6 @@ def extract_animations(
                 translations_flat = []
                 rotations_flat = []
                 scales_flat = []
-
                 for t, r, s in transforms:
                     translations_flat.extend([t.x, t.y, t.z])
                     rotations_flat.extend([r.x, r.y, r.z, r.w])
@@ -1986,7 +1709,6 @@ def extract_animations(
             }
         )
 
-    # Clean restore of original actions
     for obj, orig_act in original_actions.items():
         if obj.animation_data:
             obj.animation_data.action = orig_act
@@ -1995,16 +1717,10 @@ def extract_animations(
     return animations
 
 
-# ============================================================================
-# Core Execution Pipeline
-# ============================================================================
-
-
 def export_raw_scene_data(blend_path, source_dir=None):
     if source_dir is None:
         source_dir = input_dir
 
-    # Resolve namespaced directories safely using absolute paths
     abs_blend = os.path.abspath(blend_path)
     abs_source = os.path.abspath(source_dir)
     rel_path = os.path.relpath(abs_blend, abs_source)
@@ -2023,6 +1739,158 @@ def export_raw_scene_data(blend_path, source_dir=None):
             bpy.ops.object.make_all_local()
         except Exception:
             pass
+
+    # ============================================================================
+    # AUTOMATED PIPELINE FIX: PROCEDURAL SHADER MAPS & NON-UNIFORM STRETCH FIX
+    # ============================================================================
+    procedural_materials = set()
+    for mat in bpy.data.materials:
+        if not mat.node_tree:
+            continue
+
+        # Guard: Check if the material is actually a procedural node-graph
+        has_image_texture = False
+        has_procedural_nodes = False
+        for node in mat.node_tree.nodes:
+            if node.type == "TEX_IMAGE":
+                has_image_texture = True
+            if node.type in {"TEX_VORONOI", "TEX_NOISE", "TEX_MUSGRAVE"}:
+                has_procedural_nodes = True
+
+        # ONLY apply changes to materials that are strictly procedural (no image textures)
+        if has_procedural_nodes and not has_image_texture:
+            procedural_materials.add(mat)
+
+            # Make mapping scales uniform so procedural dots bake as circular patterns
+            for node in mat.node_tree.nodes:
+                if node.type == "MAPPING":
+                    scale_inp = node.inputs.get("Scale")
+                    if scale_inp:
+                        val = scale_inp.default_value
+                        avg_scale = (val[0] + val[1]) / 2.0
+
+                        # Find reference object dimensions if present to scale our mapping factor
+                        max_dim = 10.0
+                        for other_node in mat.node_tree.nodes:
+                            if other_node.type == "TEX_COORD" and other_node.object:
+                                max_dim = max(other_node.object.dimensions)
+                                break
+                        if max_dim == 0:
+                            max_dim = 10.0
+
+                        # Normalize the scale parameter by dividing by the Lattice's maximum dimension
+                        scale_inp.default_value = (
+                            avg_scale / max_dim,
+                            avg_scale / max_dim,
+                            val[2] / max_dim,
+                        )
+
+            # Safely reroute standard coordinates to UV space for the 2D custom baker
+            for node in mat.node_tree.nodes:
+                if node.type == "TEX_COORD":
+                    obj_socket = node.outputs.get("Object")
+                    gen_socket = node.outputs.get("Generated")
+                    uv_socket = node.outputs.get("UV")
+                    if uv_socket:
+                        for socket in [obj_socket, gen_socket]:
+                            if socket and socket.is_linked:
+                                links = list(socket.links)
+                                for link in links:
+                                    mat.node_tree.links.new(uv_socket, link.to_socket)
+
+    # Apply scaling on any mesh utilizing a procedural material via low-level API
+    for obj in list(bpy.data.objects):
+        if obj.type == "MESH":
+            uses_proc = any(
+                slot.material in procedural_materials for slot in obj.material_slots
+            )
+            if uses_proc:
+                try:
+                    # 1. Identify if the texture coordinates target a reference object (e.g. Lattice)
+                    reference_object = None
+                    for slot in obj.material_slots:
+                        if slot.material and slot.material.node_tree:
+                            for node in slot.material.node_tree.nodes:
+                                if node.type == "TEX_COORD" and node.object:
+                                    reference_object = node.object
+                                    break
+                            if reference_object:
+                                break
+
+                    orig_matrix_world = obj.matrix_world.copy()
+
+                    # Find scene/logo bounds to normalize the projection space
+                    max_dim = 10.0
+                    if reference_object:
+                        max_dim = max(reference_object.dimensions)
+                        if max_dim == 0:
+                            max_dim = 10.0
+
+                    # 2. Direct programmatic Triplanar/Box UV projection
+                    if not obj.data.uv_layers:
+                        obj.data.uv_layers.new(name="UVMap")
+                    uv_layer = obj.data.uv_layers.active
+
+                    for poly in obj.data.polygons:
+                        normal = poly.normal
+                        abs_nx = abs(normal.x)
+                        abs_ny = abs(normal.y)
+                        abs_nz = abs(normal.z)
+
+                        # Project onto the dominant normal plane to generate uniform 3D coordinates
+                        if abs_nz >= abs_nx and abs_nz >= abs_ny:
+                            # Front / Back faces (project on X-Y plane)
+                            proj_u = 0
+                            proj_v = 1
+                        elif abs_nx >= abs_ny and abs_nx >= abs_nz:
+                            # Left / Right faces (project on Y-Z plane)
+                            proj_u = 1
+                            proj_v = 2
+                        else:
+                            # Top / Bottom faces (project on X-Z plane)
+                            proj_u = 0
+                            proj_v = 2
+
+                        for loop_idx in poly.loop_indices:
+                            v_idx = obj.data.loops[loop_idx].vertex_index
+                            v_co = obj.data.vertices[v_idx].co
+
+                            if reference_object:
+                                # Transform coordinates into the unscaled local space of the reference object
+                                p_world = orig_matrix_world @ v_co
+                                unscaled_target_matrix = remove_scale_from_matrix(
+                                    reference_object.matrix_world
+                                )
+                                v_co_eval = unscaled_target_matrix.inverted() @ p_world
+                            else:
+                                # Fallback: scale local coordinates directly
+                                v_co_eval = v_co.copy()
+                                v_co_eval[0] *= obj.scale[0]
+                                v_co_eval[1] *= obj.scale[1]
+                                v_co_eval[2] *= obj.scale[2]
+
+                            # Normalize coordinates into the [0, 1] range based on the reference object's dimensions
+                            u = (v_co_eval[proj_u] / max_dim) + 0.5
+                            v = (v_co_eval[proj_v] / max_dim) + 0.5
+
+                            uv_layer.data[loop_idx].uv = (u, v)
+
+                    # 3. Resolve Multi-User Data Block issue by copying shared data
+                    if obj.data and obj.data.users > 1:
+                        obj.data = obj.data.copy()
+
+                    # 4. Apply scale directly to mesh vertices using Python API
+                    scale_matrix = Matrix.Diagonal(obj.scale).to_4x4()
+                    obj.data.transform(scale_matrix)
+
+                    # 5. Freeze the transform scale of the object back to 1.0
+                    obj.scale = (1.0, 1.0, 1.0)
+
+                except Exception as e:
+                    print(
+                        f"      [Warning] Non-uniform scale fix skipped for '{obj.name}': {e}"
+                    )
+    # ============================================================================
 
     export_and_copy_textures(asset_dir)
 
@@ -2045,7 +1913,6 @@ def export_raw_scene_data(blend_path, source_dir=None):
                 bone_to_armature[(obj.name, bone.name)] = obj
 
     world_yup_map = precalculate_world_matrices(scene_objects, depsgraph)
-
     materials = extract_materials()
 
     geometry_sources = []
@@ -2070,24 +1937,15 @@ def export_raw_scene_data(blend_path, source_dir=None):
     )
 
     scene_manifest = {
-        "version": "1.2",
-        "scene_info": {
-            "name": namespace_dir,
-            "up_axis": "Y",
-            "coordinate_system": "Right-Handed",
-            "winding_order": "CCW",
-            "matrix_layout": "Column-Major",
-        },
+        "scene_info": {"name": namespace_dir},
         "materials": materials,
         "meshes": meshes,
         "nodes": nodes,
         "lights": lights,
         "skins": skins,
         "animations": animations,
-        "extras": {},
     }
 
-    # REPLACED JSON writer with BinaryMetadataWriter
     binary_path = os.path.join(asset_dir, "metadata.bin")
     writer = BinaryMetadataWriter(binary_path)
     writer.serialize(scene_manifest)
@@ -2098,25 +1956,20 @@ def export_raw_scene_data(blend_path, source_dir=None):
     )
 
 
-# Check if executed headless for a single file from the Ninja pipeline
 if "--" in sys.argv:
     args = sys.argv[sys.argv.index("--") + 1 :]
     if len(args) >= 2:
         blend_path = args[0]
         output_parent = args[1]
         try:
-            # Calculate the true source root relative to intermediate output folder
             source_dir = os.path.abspath(os.path.join(output_parent, "..", ".."))
             export_raw_scene_data(blend_path, source_dir)
         except Exception as e:
             print(f"      [Error] Extraction failed for {blend_path}: {e}")
             raise e
-
-# Fallback block: Scan directory if executed manually outside of Ninja
 else:
     blend_files = discover_blend_files(input_dir)
     print(f"Discovered {len(blend_files)} levels for raw metadata extraction.\n")
-
     for idx, blend_path in enumerate(blend_files, start=1):
         print(
             f"[{idx}/{len(blend_files)}] Extracting: {os.path.relpath(blend_path, input_dir)}"

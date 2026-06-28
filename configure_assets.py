@@ -79,7 +79,11 @@ def parse_metadata_bin(filepath):
             has_procedural = reader.read_fmt("B")[0]
             if has_procedural:
                 _ = reader.read_string()  # type
-                _ = reader.read_fmt("ff")  # scale, randomness
+                param_count = reader.read_fmt("I")[0]
+                for _ in range(param_count):
+                    _ = reader.read_string()  # parameter name
+                    float_count = reader.read_fmt("B")[0]
+                    _ = reader.read_floats(float_count)  # parameter values
 
         # 3. Meshes
         mesh_count = reader.read_fmt("I")[0]

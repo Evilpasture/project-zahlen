@@ -1,50 +1,208 @@
-// src/zcook/GLB.cpp
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// File: src/zcook/GLB.cpp
 #include "GLB.hpp"
 
 #include "Transform.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <format>
-#include <print>
 #include <unordered_map>
 #include <vector>
-namespace ZHLN {
-namespace GLB {
+
+namespace ZHLN::GLB {
 
 namespace {
 
-// Safe scalar helper to expand half-precision floats back to standard 32-bit floats
+// ============================================================================
+// Internal Bytecode Processor & Math Library
+// ============================================================================
+
+struct float2 {
+	float x, y;
+};
+struct float3 {
+	float x, y, z;
+};
+struct float4 {
+	float x, y, z, w;
+};
+
+inline float frac(float x) {
+	return x - std::floor(x);
+}
+
+inline float2 Hash22(float2 p) {
+	float3 p3 = {frac(p.x * 0.1031f), frac(p.y * 0.1030f), frac(p.x * 0.0973f)};
+	float dot_val = p3.x * (p3.y + 33.33f) + p3.y * (p3.z + 33.33f) + p3.z * (p3.x + 33.33f);
+	p3.x += dot_val;
+	p3.y += dot_val;
+	p3.z += dot_val;
+	return {frac((p3.x + p3.y) * p3.z), frac((p3.x + p3.z) * p3.z)};
+}
+
+inline float3 EvaluateVoronoi(float2 uv, float randomness) {
+	float2 ip = {std::floor(uv.x), std::floor(uv.y)};
+	float2 fp = {frac(uv.x), frac(uv.y)};
+	float md = 8.0f;
+	float2 mg, mr;
+
+	for (int y = -1; y <= 1; y++) {
+		for (int x = -1; x <= 1; x++) {
+			float2 g = {float(x), float(y)};
+			float2 h = Hash22({ip.x + g.x, ip.y + g.y});
+			float2 o = {h.x * randomness, h.y * randomness};
+			float2 r = {g.x + o.x - fp.x, g.y + o.y - fp.y};
+			float d = r.x * r.x + r.y * r.y;
+			if (d < md) {
+				md = d;
+				mr = r;
+				mg = g;
+			}
+		}
+	}
+	float2 h = Hash22({ip.x + mg.x, ip.y + mg.y});
+	return {std::sqrt(md), h.x, h.y};
+}
+
 inline float HalfToFloat(uint16_t h) noexcept {
 	uint32_t sign = (h >> 15) & 0x00000001;
 	uint32_t exponent = (h >> 10) & 0x0000001f;
 	uint32_t mantissa = h & 0x000003ff;
 
 	if (exponent == 0) {
-		if (mantissa == 0) {
+		if (mantissa == 0)
 			return sign ? -0.0f : 0.0f;
-		}
 		return (sign ? -1.0f : 1.0f) * std::ldexp(static_cast<float>(mantissa), -24);
 	} else if (exponent == 31) {
 		return sign ? -INFINITY : INFINITY;
 	}
-
 	return (sign ? -1.0f : 1.0f) *
 		   std::ldexp(static_cast<float>(mantissa | 0x0400), static_cast<int>(exponent) - 15 - 10);
 }
 
-// Unpacks 10-bit per-axis packed normal/tangent formats back into standard floats
 inline std::array<float, 4> UnpackNormal(uint32_t packed) noexcept {
 	float x = (float(packed & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
 	float y = (float((packed >> 10) & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
 	float z = (float((packed >> 20) & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
 	float w = (packed >> 30) > 0 ? 1.0f : -1.0f;
 	return {x, y, z, w};
+}
+
+inline uint32_t crc32(const uint8_t* data, size_t len) {
+	uint32_t crc = 0xFFFFFFFF;
+	for (size_t i = 0; i < len; ++i) {
+		crc ^= data[i];
+		for (int j = 0; j < 8; ++j) {
+			if (crc & 1)
+				crc = (crc >> 1) ^ 0xEDB88320;
+			else
+				crc >>= 1;
+		}
+	}
+	return ~crc;
+}
+
+std::vector<uint8_t> CreatePNGBytes(const std::vector<uint32_t>& rgbaPixels, uint32_t width,
+									uint32_t height) {
+	std::vector<uint8_t> rawData;
+	rawData.reserve(static_cast<size_t>(height) * (1 + width * 4));
+	for (uint32_t y = 0; y < height; ++y) {
+		rawData.push_back(0);
+		for (uint32_t x = 0; x < width; ++x) {
+			uint32_t pixel = rgbaPixels[y * width + x];
+			rawData.push_back(pixel & 0xFF);
+			rawData.push_back((pixel >> 8) & 0xFF);
+			rawData.push_back((pixel >> 16) & 0xFF);
+			rawData.push_back((pixel >> 24) & 0xFF);
+		}
+	}
+
+	std::vector<uint8_t> zlibData;
+	zlibData.push_back(0x78);
+	zlibData.push_back(0x01);
+
+	size_t offset = 0;
+	while (offset < rawData.size()) {
+		size_t chunk = std::min(rawData.size() - offset, size_t(65535));
+		bool isLast = (offset + chunk == rawData.size());
+
+		zlibData.push_back(isLast ? 0x01 : 0x00);
+		zlibData.push_back(chunk & 0xFF);
+		zlibData.push_back((chunk >> 8) & 0xFF);
+		zlibData.push_back((~chunk) & 0xFF);
+		zlibData.push_back(((~chunk) >> 8) & 0xFF);
+
+		zlibData.insert(zlibData.end(), rawData.begin() + offset, rawData.begin() + offset + chunk);
+		offset += chunk;
+	}
+
+	uint32_t s1 = 1, s2 = 0;
+	for (uint8_t b : rawData) {
+		s1 = (s1 + b) % 65521;
+		s2 = (s2 + s1) % 65521;
+	}
+	uint32_t adler = (s2 << 16) | s1;
+	zlibData.push_back((adler >> 24) & 0xFF);
+	zlibData.push_back((adler >> 16) & 0xFF);
+	zlibData.push_back((adler >> 8) & 0xFF);
+	zlibData.push_back(adler & 0xFF);
+
+	std::vector<uint8_t> png = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+
+	std::vector<uint8_t> ihdrData = {'I',
+									 'H',
+									 'D',
+									 'R',
+									 static_cast<uint8_t>((width >> 24) & 0xFF),
+									 static_cast<uint8_t>((width >> 16) & 0xFF),
+									 static_cast<uint8_t>((width >> 8) & 0xFF),
+									 static_cast<uint8_t>(width & 0xFF),
+									 static_cast<uint8_t>((height >> 24) & 0xFF),
+									 static_cast<uint8_t>((height >> 16) & 0xFF),
+									 static_cast<uint8_t>((height >> 8) & 0xFF),
+									 static_cast<uint8_t>(height & 0xFF),
+									 8,
+									 6,
+									 0,
+									 0,
+									 0};
+
+	uint32_t ihdrCrc = crc32(ihdrData.data(), ihdrData.size());
+	png.push_back(0);
+	png.push_back(0);
+	png.push_back(0);
+	png.push_back(13);
+	png.insert(png.end(), ihdrData.begin(), ihdrData.end());
+	png.push_back((ihdrCrc >> 24) & 0xFF);
+	png.push_back((ihdrCrc >> 16) & 0xFF);
+	png.push_back((ihdrCrc >> 8) & 0xFF);
+	png.push_back(ihdrCrc & 0xFF);
+
+	std::vector<uint8_t> idatHeader = {'I', 'D', 'A', 'T'};
+	idatHeader.insert(idatHeader.end(), zlibData.begin(), zlibData.end());
+	uint32_t idatCrc = crc32(idatHeader.data(), idatHeader.size());
+	uint32_t zlibLen = static_cast<uint32_t>(zlibData.size());
+
+	png.push_back((zlibLen >> 24) & 0xFF);
+	png.push_back((zlibLen >> 16) & 0xFF);
+	png.push_back((zlibLen >> 8) & 0xFF);
+	png.push_back(zlibLen & 0xFF);
+	png.insert(png.end(), idatHeader.begin(), idatHeader.end());
+	png.push_back((idatCrc >> 24) & 0xFF);
+	png.push_back((idatCrc >> 16) & 0xFF);
+	png.push_back((idatCrc >> 8) & 0xFF);
+	png.push_back(idatCrc & 0xFF);
+
+	const uint8_t iend[] = {0x00, 0x00, 0x00, 0x00, 'I', 'E', 'N', 'D', 0xAE, 0x42, 0x60, 0x82};
+	png.insert(png.end(), iend, iend + 12);
+	return png;
 }
 
 } // namespace
@@ -81,10 +239,8 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 	std::vector<PackedImage> packedImages;
 
 	auto getTextureIndex = [&](const std::string& relativeUri) -> int {
-		if (relativeUri.empty()) {
+		if (relativeUri.empty())
 			return -1;
-		}
-
 		for (size_t i = 0; i < packedImages.size(); ++i) {
 			if (packedImages[i].relativeUri == relativeUri)
 				return static_cast<int>(i);
@@ -92,12 +248,8 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 
 		std::string fullPath = levelFolder + "/" + relativeUri;
 		FILE* f = std::fopen(fullPath.c_str(), "rb");
-		if (f == nullptr) {
-			std::println(stderr,
-						 "[zcook] WARNING: Failed to open texture source file '{}': {}. Skipping.",
-						 fullPath, std::strerror(errno));
+		if (f == nullptr)
 			return -1;
-		}
 
 		std::fseek(f, 0, SEEK_END);
 		long size = std::ftell(f);
@@ -109,7 +261,6 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 
 		while (binBuffer.size() % 4 != 0)
 			binBuffer.push_back(0);
-
 		auto imgOffset = static_cast<uint32_t>(binBuffer.size());
 		binBuffer.insert(binBuffer.end(), imgBytes.begin(), imgBytes.end());
 		while (binBuffer.size() % 4 != 0)
@@ -119,12 +270,8 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 		if (relativeUri.ends_with(".jpg") || relativeUri.ends_with(".jpeg"))
 			mimeType = "image/jpeg";
 
-		bufferViews.push_back(std::format(R"(    {{
-      "buffer": 0,
-      "byteOffset": {},
-      "byteLength": {}
-    }})",
-										  imgOffset, size));
+		bufferViews.push_back(std::format(
+			R"(    {{ "buffer": 0, "byteOffset": {}, "byteLength": {} }})", imgOffset, size));
 		uint32_t imgBViewIdx = bViewIndex++;
 
 		int idx = static_cast<int>(packedImages.size());
@@ -136,8 +283,192 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 		return idx;
 	};
 
+	auto getProceduralTextureIndex = [&](const Compiler::IRMaterial& mat) -> int {
+		std::string id = "procedural_" + mat.id;
+		for (size_t i = 0; i < packedImages.size(); ++i) {
+			if (packedImages[i].relativeUri == id)
+				return static_cast<int>(i);
+		}
+
+		struct Inst {
+			int op;
+			int in0, in1, in2;
+			std::vector<float> p;
+		};
+		std::vector<Inst> instructions;
+
+		for (size_t i = 0; i < mat.procedural.parameters.size(); ++i) {
+			for (const auto& param : mat.procedural.parameters) {
+				if (param.name == "inst_" + std::to_string(i)) {
+					Inst inst;
+					inst.op = param.values[0];
+					if (inst.op == 1) {
+						inst.in0 = param.values[1];
+						inst.p.assign(param.values.begin() + 2, param.values.end());
+					} else if (inst.op == 2 || inst.op == 3) {
+						inst.in0 = param.values[1];
+						inst.p.assign(param.values.begin() + 2, param.values.end());
+					} else if (inst.op == 4) {
+						inst.in0 = param.values[1];
+						inst.in1 = param.values[2];
+						inst.in2 = param.values[3];
+						inst.p.assign(param.values.begin() + 4, param.values.end());
+					} else {
+						inst.in0 = inst.in1 = inst.in2 = -1;
+					}
+					instructions.push_back(inst);
+					break;
+				}
+			}
+		}
+
+		uint32_t width = 512, height = 512;
+		std::vector<uint32_t> pixels(static_cast<size_t>(width * height));
+
+		for (uint32_t y = 0; y < height; ++y) {
+			for (uint32_t x = 0; x < width; ++x) {
+				float2 uv = {float(x) / width, float(y) / height};
+				std::vector<float4> regs(instructions.size(), {0, 0, 0, 0});
+
+				for (size_t i = 0; i < instructions.size(); ++i) {
+					const auto& inst = instructions[i];
+					float4 res = {0, 0, 0, 0};
+
+					if (inst.op == 0) {
+						res = {uv.x, uv.y, 0, 0};
+					} else if (inst.op == 1) {
+						float4 vec = (inst.in0 >= 0) ? regs[inst.in0] : float4{0, 0, 0, 0};
+
+						// 1. Subtract Location translation
+						vec.x -= inst.p[0];
+						vec.y -= inst.p[1];
+						vec.z -= inst.p[2];
+
+						// 2. Rotate coordinates
+						float cosZ = std::cos(-inst.p[5]);
+						float sinZ = std::sin(-inst.p[5]);
+						float rx = vec.x * cosZ - vec.y * sinZ;
+						float ry = vec.x * sinZ + vec.y * cosZ;
+						vec.x = rx;
+						vec.y = ry;
+
+						// 3. Divide by Scale (standard Blender Point Mapping behavior)
+						vec.x /= (inst.p[6] != 0.0f ? inst.p[6] : 1.0f);
+						vec.y /= (inst.p[7] != 0.0f ? inst.p[7] : 1.0f);
+						vec.z /= (inst.p[8] != 0.0f ? inst.p[8] : 1.0f);
+
+						res = vec;
+					} else if (inst.op == 2) {
+						float4 vec = (inst.in0 >= 0) ? regs[inst.in0] : float4{0, 0, 0, 0};
+						float3 v =
+							EvaluateVoronoi({vec.x * inst.p[0], vec.y * inst.p[0]}, inst.p[1]);
+						res = {v.x, v.y, v.y, 1.0f};
+					} else if (inst.op == 3) {
+						float fac =
+							std::clamp((inst.in0 >= 0) ? regs[inst.in0].x : 0.0f, 0.0f, 1.0f);
+
+						// inst.p[0] holds 0.0 for CONSTANT interpolation, 1.0 for LINEAR
+						bool is_constant = (inst.p[0] == 0.0f);
+						int num_els = inst.p[1];
+
+						if (num_els == 1)
+							res = {inst.p[3], inst.p[4], inst.p[5], inst.p[6]};
+						else if (num_els > 1) {
+							int e = 0;
+							while (e < num_els - 1 && fac > inst.p[2 + (e + 1) * 5])
+								e++;
+							if (e == num_els - 1) {
+								res = {inst.p[2 + e * 5 + 1], inst.p[2 + e * 5 + 2],
+									   inst.p[2 + e * 5 + 3], inst.p[2 + e * 5 + 4]};
+							} else {
+								float p1 = inst.p[2 + e * 5], p2 = inst.p[2 + (e + 1) * 5];
+								float4 r1 = {inst.p[2 + e * 5 + 1], inst.p[2 + e * 5 + 2],
+											 inst.p[2 + e * 5 + 3], inst.p[2 + e * 5 + 4]};
+
+								if (is_constant) {
+									// Constant interpolation: keep color flat up to the next stop
+									res = r1;
+								} else {
+									// Linear interpolation: blend between current and next stop
+									float t = (fac - p1) / std::max(p2 - p1, 1e-6f);
+									float4 r2 = {
+										inst.p[2 + (e + 1) * 5 + 1], inst.p[2 + (e + 1) * 5 + 2],
+										inst.p[2 + (e + 1) * 5 + 3], inst.p[2 + (e + 1) * 5 + 4]};
+									res = {r1.x + (r2.x - r1.x) * t, r1.y + (r2.y - r1.y) * t,
+										   r1.z + (r2.z - r1.z) * t, r1.w + (r2.w - r1.w) * t};
+								}
+							}
+						}
+					} else if (inst.op == 4) {
+						float fac =
+							std::clamp((inst.in0 >= 0) ? regs[inst.in0].x : inst.p[1], 0.0f, 1.0f);
+						float4 a = (inst.in1 >= 0)
+									   ? regs[inst.in1]
+									   : float4{inst.p[2], inst.p[3], inst.p[4], inst.p[5]};
+						float4 b = (inst.in2 >= 0)
+									   ? regs[inst.in2]
+									   : float4{inst.p[6], inst.p[7], inst.p[8], inst.p[9]};
+						int btype = inst.p[0];
+						if (btype == 0) {
+							res = {a.x + (b.x - a.x) * fac, a.y + (b.y - a.y) * fac,
+								   a.z + (b.z - a.z) * fac, 1.0f};
+						} else if (btype == 1) {
+							res = {std::max(a.x, b.x) * fac + a.x * (1 - fac),
+								   std::max(a.y, b.y) * fac + a.y * (1 - fac),
+								   std::max(a.z, b.z) * fac + a.z * (1 - fac), 1.0f};
+						}
+					}
+					regs[i] = res;
+				}
+
+				float4 finalColor = regs.empty() ? float4{0, 0, 0, 1} : regs.back();
+				auto r = static_cast<uint8_t>(std::clamp(finalColor.x, 0.0f, 1.0f) * 255.0f);
+				auto g = static_cast<uint8_t>(std::clamp(finalColor.y, 0.0f, 1.0f) * 255.0f);
+				auto b = static_cast<uint8_t>(std::clamp(finalColor.z, 0.0f, 1.0f) * 255.0f);
+				pixels[y * width + x] = 0xFF000000u | (uint32_t(b) << 16) | (uint32_t(g) << 8) | r;
+			}
+		}
+
+		std::vector<uint8_t> pngBytes = CreatePNGBytes(pixels, width, height);
+
+		std::string texDir = levelFolder + "/textures";
+		std::error_code ec;
+		std::filesystem::create_directories(texDir, ec);
+		std::string ztexPath = texDir + "/baked_" + mat.id + ".ztex";
+		FILE* zf = std::fopen(ztexPath.c_str(), "wb");
+		if (zf != nullptr) {
+			std::fwrite(pngBytes.data(), 1, pngBytes.size(), zf);
+			std::fclose(zf);
+		}
+
+		while (binBuffer.size() % 4 != 0)
+			binBuffer.push_back(0);
+		auto imgOffset = static_cast<uint32_t>(binBuffer.size());
+		binBuffer.insert(binBuffer.end(), pngBytes.begin(), pngBytes.end());
+		while (binBuffer.size() % 4 != 0)
+			binBuffer.push_back(0);
+
+		bufferViews.push_back(
+			std::format(R"(    {{ "buffer": 0, "byteOffset": {}, "byteLength": {} }})", imgOffset,
+						pngBytes.size()));
+		uint32_t imgBViewIdx = bViewIndex++;
+
+		int idx = static_cast<int>(packedImages.size());
+		packedImages.push_back({.relativeUri = id, .bufferViewIndex = imgBViewIdx});
+		textures.push_back(std::format(R"(    {{"sampler": 0, "source": {}}})", idx));
+		images.push_back(
+			std::format(R"(    {{"bufferView": {}, "mimeType": "image/png"}})", imgBViewIdx));
+
+		return idx;
+	};
+
 	for (const auto& mat : manifest.materials) {
-		int albedoTex = getTextureIndex(mat.albedoMap);
+		int albedoTex = -1;
+		if (mat.procedural.active && mat.procedural.type == "NODE_GRAPH") {
+			albedoTex = getProceduralTextureIndex(mat);
+		} else {
+			albedoTex = getTextureIndex(mat.albedoMap);
+		}
 		int normalTex = getTextureIndex(mat.normalMap);
 		int mrTex = getTextureIndex(mat.metallicRoughnessMap);
 		int emissiveTex = getTextureIndex(mat.emissiveMap);
@@ -161,8 +492,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
       }})",
 										 mat.id, pbrStr);
 
-		// If procedural data is present, write it as a custom extension
-		if (mat.procedural.active) {
+		if (mat.procedural.active && mat.procedural.type != "NODE_GRAPH") {
 			std::string paramsJson = "{\n";
 			for (size_t p = 0; p < mat.procedural.parameters.size(); ++p) {
 				const auto& param = mat.procedural.parameters[p];
@@ -1110,5 +1440,4 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 	return true;
 }
 
-} // namespace GLB
-} // namespace ZHLN
+} // namespace ZHLN::GLB
