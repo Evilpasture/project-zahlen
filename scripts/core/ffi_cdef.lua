@@ -381,6 +381,15 @@ if not ok then
             uint32_t twoSided;
         } SpawnLightArgs;
 
+        typedef struct CreateSoundInstanceArgs {
+            const char* filepath;
+            int spatialized;
+        } CreateSoundInstanceArgs;
+
+        typedef struct SoundInstanceArgs {
+            uint64_t handle;
+        } SoundInstanceArgs;
+
         #pragma pack(pop)
     ]]
 end

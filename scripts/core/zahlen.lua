@@ -235,6 +235,29 @@ function Audio:beep(frequency, duration, volume)
     ffi.C.ZHLN_DispatchCommand(self._raw, get_cmd_id("PlayProceduralBeep"), args)
 end
 
+function Audio:create_instance(filepath, spatialized)
+    local args = ffi.new("CreateSoundInstanceArgs", { filepath, spatialized and 1 or 0 })
+    return ffi.C.ZHLN_DispatchCommand(self._raw, get_cmd_id("CreateSoundInstance"), args)
+end
+
+function Audio:play_instance(handle)
+    if not handle or handle == 0ULL then return end
+    local args = ffi.new("SoundInstanceArgs", { handle })
+    ffi.C.ZHLN_DispatchCommand(self._raw, get_cmd_id("PlaySoundInstance"), args)
+end
+
+function Audio:stop_instance(handle)
+    if not handle or handle == 0ULL then return end
+    local args = ffi.new("SoundInstanceArgs", { handle })
+    ffi.C.ZHLN_DispatchCommand(self._raw, get_cmd_id("StopSoundInstance"), args)
+end
+
+function Audio:destroy_instance(handle)
+    if not handle or handle == 0ULL then return end
+    local args = ffi.new("SoundInstanceArgs", { handle })
+    ffi.C.ZHLN_DispatchCommand(self._raw, get_cmd_id("DestroySoundInstance"), args)
+end
+
 -- ============================================================================
 -- Engine Root Object
 -- ============================================================================
@@ -438,6 +461,10 @@ local COMMAND_STRUCTS = {
     PlayOneShot = "PlayOneShotArgs",
     PlayOneShot3D = "PlayOneShot3DArgs",
     PlayProceduralBeep = "PlayProceduralBeepArgs",
+    CreateSoundInstance = "CreateSoundInstanceArgs",
+    PlaySoundInstance = "SoundInstanceArgs",
+    StopSoundInstance = "SoundInstanceArgs",
+    DestroySoundInstance = "SoundInstanceArgs",
     SetCharacterVelocity = "SetCharVelArgs",
     SetLinearVelocity = "SetCharVelArgs",
     AddImpulse = "SetCharVelArgs",

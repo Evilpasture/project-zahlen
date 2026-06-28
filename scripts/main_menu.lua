@@ -22,6 +22,12 @@ local Menu = {
 zh:on("engine.start", function()
     zh.log("[Main Menu] Building baseline canvas and interactable buttons...")
 
+    -- Start menu music (non-spatialized)
+    Menu.theme_music = zh.audio:create_instance("resources/assets/audio/theme.mp3", false)
+    if Menu.theme_music and Menu.theme_music ~= 0ULL then
+        zh.audio:play_instance(Menu.theme_music)
+    end
+
     local font_idx = 0
     for _, ui_comp in zh.ecs:view("UISettingsComponent") do
         font_idx = ui_comp.defaultFontAtlasIdx
@@ -142,6 +148,14 @@ local function main_menu_update_system(dt)
     process_button(Menu.start_btn, function()
         zh.log("[Main Menu] Start Clicked. Destroying UI and loading world...")
         zh.audio:beep(660, 0.15, 0.25)
+
+        -- Stop and destroy the menu music
+        if Menu.theme_music and Menu.theme_music ~= 0ULL then
+            zh.audio:stop_instance(Menu.theme_music)
+            zh.audio:destroy_instance(Menu.theme_music)
+            Menu.theme_music = nil
+        end
+
 
         -- Clean up menu UI
         zh.ecs:destroy(Menu.root_canvas)

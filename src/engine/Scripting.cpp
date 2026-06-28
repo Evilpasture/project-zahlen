@@ -189,6 +189,15 @@ struct SpawnLightArgs {
 	uint32_t twoSided;
 };
 
+struct CreateSoundInstanceArgs {
+	const char* filepath;
+	int spatialized;
+};
+
+struct SoundInstanceArgs {
+	uint64_t handle;
+};
+
 #pragma pack(pop)
 
 void SafeDestroyEntity(ZHLN::Engine* engine, ZHLN::Entity entity) {
@@ -885,8 +894,9 @@ static void RegisterFFICommands() {
 	});
 
 	RegisterCmd("SpawnLight", [](ZHLN::Engine* engine, const void* args) -> uint64_t {
-		if (!engine || !args)
+		if (!engine || !args) {
 			return 0;
+		}
 		const auto* a = static_cast<const SpawnLightArgs*>(args);
 		auto& reg = engine->GetRegistry();
 
@@ -904,6 +914,41 @@ static void RegisterFFICommands() {
 														.points = {},
 														.twoSided = a->twoSided});
 		return e.Pack();
+	});
+
+	RegisterCmd("CreateSoundInstance", [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		if (!engine || !args)
+			return 0;
+		const auto* a = static_cast<const CreateSoundInstanceArgs*>(args);
+		if (!a->filepath)
+			return 0;
+		void* handle =
+			engine->GetAudioContext().CreateSoundInstance(a->filepath, a->spatialized != 0);
+		return reinterpret_cast<uint64_t>(handle);
+	});
+
+	RegisterCmd("PlaySoundInstance", [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		if (!engine || !args)
+			return 0;
+		const auto* a = static_cast<const SoundInstanceArgs*>(args);
+		engine->GetAudioContext().PlaySoundInstance(reinterpret_cast<void*>(a->handle));
+		return 0;
+	});
+
+	RegisterCmd("StopSoundInstance", [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		if (!engine || !args)
+			return 0;
+		const auto* a = static_cast<const SoundInstanceArgs*>(args);
+		engine->GetAudioContext().StopSoundInstance(reinterpret_cast<void*>(a->handle));
+		return 0;
+	});
+
+	RegisterCmd("DestroySoundInstance", [](ZHLN::Engine* engine, const void* args) -> uint64_t {
+		if (!engine || !args)
+			return 0;
+		const auto* a = static_cast<const SoundInstanceArgs*>(args);
+		engine->GetAudioContext().DestroySoundInstance(reinterpret_cast<void*>(a->handle));
+		return 0;
 	});
 
 	RegisterCmd("ProvokeDeviceLost", [](ZHLN::Engine* engine, const void*) -> uint64_t {
