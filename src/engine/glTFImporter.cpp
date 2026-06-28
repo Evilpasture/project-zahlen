@@ -82,6 +82,11 @@ struct CPUPrimitiveJob {
 
 	JPH::ShapeRefC meshCollider = nullptr;
 	JPH::ShapeRefC boxCollider = nullptr;
+
+	bool hasProcedural = false;
+	std::string proceduralType;
+	float proceduralScale = 5.0f;
+	float proceduralRandomness = 1.0f;
 };
 
 struct PreparedPart {
@@ -206,6 +211,7 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
 	cgltf_accessor* colorAcc = nullptr;
 	cgltf_accessor* jointsAcc = nullptr;
 	cgltf_accessor* weightsAcc = nullptr;
+	cgltf_extension* ext = nullptr;
 
 	for (cgltf_size a = 0; a < prim.attributes_count; ++a) {
 		const auto& attr = prim.attributes[a];
@@ -252,7 +258,6 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
 		job.emissiveFactor[1] = prim.material->emissive_factor[1];
 		job.emissiveFactor[2] = prim.material->emissive_factor[2];
 
-		// Apply KHR_materials_emissive_strength extension if the glTF uses it
 		if (prim.material->has_emissive_strength) {
 			float strength = prim.material->emissive_strength.emissive_strength;
 			job.emissiveFactor[0] *= strength;
@@ -282,6 +287,38 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
 		if (prim.material->normal_texture.texture != nullptr) {
 			job.normalImage = prim.material->normal_texture.texture->image;
 		}
+
+		// --- Process Procedural Shader Extensions (CPU side only) ---
+		for (cgltf_size e = 0; e < prim.material->extensions_count; ++e) {
+			if (strcmp(prim.material->extensions[e].name, "ZHLN_procedural_shader") == 0) {
+				ext = &prim.material->extensions[e];
+				break;
+			}
+		}
+
+		if ((ext != nullptr) && (ext->data != nullptr)) {
+			job.hasProcedural = true;
+			job.proceduralScale = 5.0f;
+			job.proceduralRandomness = 1.0f;
+
+			std::string extData(ext->data);
+			if (size_t tPos = extData.find("\"type\":"); tPos != std::string::npos) {
+				size_t startQuote = extData.find('"', tPos + 7);
+				size_t endQuote = extData.find('"', startQuote + 1);
+				if (startQuote != std::string::npos && endQuote != std::string::npos) {
+					job.proceduralType = extData.substr(startQuote + 1, endQuote - startQuote - 1);
+				}
+			} else {
+				job.proceduralType = "VORONOI";
+			}
+
+			if (size_t sPos = extData.find("\"scale\":"); sPos != std::string::npos) {
+				job.proceduralScale = std::stof(extData.substr(sPos + 8));
+			}
+			if (size_t rPos = extData.find("\"randomness\":"); rPos != std::string::npos) {
+				job.proceduralRandomness = std::stof(extData.substr(rPos + 13));
+			}
+		}
 	}
 
 	size_t vertexCount = posAcc->count;
@@ -292,12 +329,10 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
 	}
 
 	for (size_t vIdx = 0; vIdx < vertexCount; ++vIdx) {
-		// 1. Pack Positions (Full Precision)
 		float rawPos[3] = {0.0f, 0.0f, 0.0f};
 		cgltf_accessor_read_float(posAcc, vIdx, rawPos, 3);
 		job.positions[vIdx] = {.position = {rawPos[0], rawPos[1], rawPos[2]}};
 
-		// 2. Pack Attributes (normal, tangent, uv, color)
 		float rawNorm[3] = {0.0f, 1.0f, 0.0f};
 		if (normAcc != nullptr) {
 			cgltf_accessor_read_float(normAcc, vIdx, rawNorm, 3);
@@ -338,7 +373,6 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
 			.uv = Math::PackUV(uv[0], uv[1]),
 			.color = Math::PackColor(rawColor[0], rawColor[1], rawColor[2], rawColor[3])};
 
-		// 3. Pack Skins (joints, weights)
 		if (jointsAcc != nullptr && weightsAcc != nullptr) {
 			uint32_t joints[4] = {0, 0, 0, 0};
 			cgltf_accessor_read_uint(jointsAcc, vIdx, joints, 4);
@@ -349,7 +383,6 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
 			job.skins[vIdx] = {
 				.joints = {static_cast<uint16_t>(joints[0]), static_cast<uint16_t>(joints[1]),
 						   static_cast<uint16_t>(joints[2]), static_cast<uint16_t>(joints[3])},
-				// Compress float4 weights on-the-fly to PackedRGBA8 (UNORM8)
 				.weights = Math::PackColor(weights[0], weights[1], weights[2], weights[3])};
 		}
 	}
@@ -368,12 +401,10 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
 		}
 	}
 
-	// Calculate the true geometric center of the primitive
 	JPH::Vec3 localCenter((job.localMax[0] + job.localMin[0]) * 0.5f,
 						  (job.localMax[1] + job.localMin[1]) * 0.5f,
 						  (job.localMax[2] + job.localMin[2]) * 0.5f);
 
-	// Compute the bounding radius as the distance from the local center to the furthest vertex
 	float maxD2 = 0.0f;
 	for (const auto& pos : job.positions) {
 		float dx = pos.position[0] - localCenter.GetX();
@@ -384,9 +415,8 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
 	}
 	job.boundingRadius = std::sqrt(maxD2) * 1.15f + 0.5f;
 
-	// Massively inflate bounds for skinned meshes to account for animation travel
 	if (jointsAcc != nullptr && weightsAcc != nullptr) {
-		job.boundingRadius *= 3.0f; // Give animations room to breathe
+		job.boundingRadius *= 3.0f;
 	}
 
 	if (prim.targets_count > 0) {
@@ -431,7 +461,6 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
 		}
 	}
 
-	// Compile Jolt shapes in parallel (safe & CPU-intensive)
 	float extentsX = (job.localMax[0] - job.localMin[0]) * 0.5f;
 	float extentsY = (job.localMax[1] - job.localMin[1]) * 0.5f;
 	float extentsZ = (job.localMax[2] - job.localMin[2]) * 0.5f;
@@ -637,6 +666,7 @@ static CompiledPrimitive GetOrCreateCompiledPrimitive(
 	RenderContext& ctx, const CPUPrimitiveJob& primJob,
 	const std::unordered_map<cgltf_image*, uint32_t>& imageToBindlessIdx,
 	std::unordered_map<const cgltf_primitive*, CompiledPrimitive>& primCache, bool isMirrored) {
+
 	auto it = primCache.find(primJob.prim);
 	if (it != primCache.end()) {
 		return it->second;
@@ -695,12 +725,27 @@ static CompiledPrimitive GetOrCreateCompiledPrimitive(
 		return (texIt != imageToBindlessIdx.end()) ? texIt->second : defaultIdx;
 	};
 
-	// Use correct system fallbacks (0 = Black, 1 = White, 2 = Flat Normal)
-	subMaterial.albedoIndex = GetBindlessIndex(primJob.albedoImage, 1);
+	// Bake on-the-fly and bind to VRAM on the main thread safely
+	if (primJob.hasProcedural) {
+		// Determine variant based on parsed type string
+		uint32_t variantIdx = 0; // Default: VORONOI
+		if (primJob.proceduralType == "PERLIN_NOISE") {
+			variantIdx = 1;
+		} else if (primJob.proceduralType == "WAVE_MARBLE") {
+			variantIdx = 2;
+		}
+
+		// Clean, decoupled, Vulkan-free PIMPL call
+		uint32_t bakedIndex = ctx.BakeProceduralTexture(
+			512, 512, variantIdx, primJob.proceduralScale, primJob.proceduralRandomness);
+		subMaterial.albedoIndex = bakedIndex;
+	} else {
+		subMaterial.albedoIndex = GetBindlessIndex(primJob.albedoImage, 1);
+	}
+
 	subMaterial.normalIndex = GetBindlessIndex(primJob.normalImage, 2);
 	subMaterial.pbrIndex = GetBindlessIndex(primJob.pbrImage, 0);
-	subMaterial.emissiveIndex =
-		GetBindlessIndex(primJob.emissiveImage, 1); // 1 (White) ensures factor-only emission works
+	subMaterial.emissiveIndex = GetBindlessIndex(primJob.emissiveImage, 1);
 	std::memcpy(subMaterial.emissiveFactor, primJob.emissiveFactor, sizeof(float) * 4);
 
 	CompiledPrimitive compPrim = {

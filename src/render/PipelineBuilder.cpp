@@ -199,6 +199,12 @@ auto ComputePipelineBuilder::Layout(const VkPipelineLayout l) noexcept -> Comput
 	return *this;
 }
 
+auto ComputePipelineBuilder::Specialization(const VkSpecializationInfo* info) noexcept
+	-> ComputePipelineBuilder& {
+	_specialization_info = info;
+	return *this;
+}
+
 auto ComputePipelineBuilder::Build(const VkDevice device) const noexcept -> Pipeline {
 	const auto result = Validate();
 	if (result != PipelineBuilderResult::Succeeded) {
@@ -209,6 +215,7 @@ auto ComputePipelineBuilder::Build(const VkDevice device) const noexcept -> Pipe
 	const ZHLN_ComputePipelineDesc desc = {
 		.shader = {.code = _code, .size = _size, .entry_point = _entry},
 		.layout = _layout,
+		.specialization_info = _specialization_info,
 	};
 
 	return {device, ZHLN_CreateComputePipeline(device, &desc)};

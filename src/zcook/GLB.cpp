@@ -148,10 +148,11 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 										 mat.baseColor[0], mat.baseColor[1], mat.baseColor[2],
 										 mat.baseColor[3], mat.metallic, mat.roughness);
 
-		if (albedoTex != -1)
+		if (albedoTex != -1) {
 			pbrStr += std::format(R"(,
       "baseColorTexture": {{"index": {}}})",
 								  albedoTex);
+		}
 
 		std::string matStr = std::format(R"(    {{
       "name": "{}",
@@ -159,6 +160,36 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
   {}
       }})",
 										 mat.id, pbrStr);
+
+		// If procedural data is present, write it as a custom extension
+		if (mat.procedural.active) {
+			std::string paramsJson = "{\n";
+			for (size_t p = 0; p < mat.procedural.parameters.size(); ++p) {
+				const auto& param = mat.procedural.parameters[p];
+				paramsJson += std::format(R"(          "{}": )", param.name);
+				if (param.values.size() == 1) {
+					paramsJson += std::to_string(param.values[0]);
+				} else {
+					paramsJson += "[";
+					for (size_t v = 0; v < param.values.size(); ++v) {
+						paramsJson += std::to_string(param.values[v]) +
+									  (v < param.values.size() - 1 ? ", " : "");
+					}
+					paramsJson += "]";
+				}
+				paramsJson += (p < mat.procedural.parameters.size() - 1 ? ",\n" : "\n");
+			}
+			paramsJson += "        }";
+
+			matStr += std::format(R"(,
+      "extensions": {{
+        "ZHLN_procedural_shader": {{
+          "type": "{}",
+          "parameters": {}
+        }}
+      }})",
+								  mat.procedural.type, paramsJson);
+		}
 
 		if (mat.baseColor[3] < 0.999f) {
 			matStr += R"(,
@@ -894,6 +925,8 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 	}
 	if (usesEmissiveStrength)
 		usedExts.emplace_back("\"KHR_materials_emissive_strength\"");
+
+	usedExts.emplace_back("\"ZHLN_procedural_shader\"");
 
 	std::string extensionsUsed;
 	for (size_t i = 0; i < usedExts.size(); ++i)

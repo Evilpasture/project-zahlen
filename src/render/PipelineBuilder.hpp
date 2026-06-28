@@ -131,10 +131,10 @@ class ComputePipelineBuilder {
 	auto Shader(const uint32_t* code, size_t size, const char* entry = "main") noexcept
 		-> ComputePipelineBuilder&;
 	auto Shader(const ZHLN_ShaderDesc& desc) noexcept -> ComputePipelineBuilder&;
-	auto Layout(const VkPipelineLayout l) noexcept -> ComputePipelineBuilder&;
+	auto Layout(VkPipelineLayout l) noexcept -> ComputePipelineBuilder&;
+	auto Specialization(const VkSpecializationInfo* info) noexcept -> ComputePipelineBuilder&;
 
-	[[nodiscard("Compute pipeline creation may fail; verify validity before use")]]
-	auto Build(const VkDevice device) const noexcept -> Pipeline;
+	[[nodiscard]] auto Build(VkDevice device) const noexcept -> Pipeline;
 
   private:
 	[[nodiscard]] auto Validate() const noexcept -> PipelineBuilderResult;
@@ -143,6 +143,7 @@ class ComputePipelineBuilder {
 	size_t _size = 0;
 	const char* _entry = nullptr;
 	VkPipelineLayout _layout = VK_NULL_HANDLE;
+	const VkSpecializationInfo* _specialization_info = nullptr;
 };
 
 } // namespace ZHLN::Vk

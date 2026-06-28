@@ -80,6 +80,14 @@ class ZHLN_API RenderContext {
 
 	void ProvokeDeviceLost();
 
+	/**
+	 * @brief Dispatches a GPU compute pass to bake a procedural noise texture
+	 * on-the-fly and registers it in the bindless texture array.
+	 * @return The bindless texture index.
+	 */
+	auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale,
+							   float randomness) -> uint32_t;
+
 	struct Impl;
 	[[nodiscard]] auto GetImpl() const -> Impl* { return _impl.get(); }
 

@@ -734,4 +734,10 @@ void RenderContext::Impl::RegisterShaderWatcher(const char* path, std::function<
 	}
 }
 
+auto RenderContext::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx,
+										  float scale, float randomness) -> uint32_t {
+	// Delegate directly to the private Impl method, passing 0.0f for the unused parameter
+	return _impl->BakeProceduralTexture(width, height, variantIdx, scale, randomness, 0.0f);
+}
+
 } // namespace ZHLN

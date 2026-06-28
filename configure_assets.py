@@ -76,6 +76,10 @@ def parse_metadata_bin(filepath):
             _ = reader.read_string()  # normal map
             _ = reader.read_string()  # metallic_roughness map
             _ = reader.read_string()  # emissive map
+            has_procedural = reader.read_fmt("B")[0]
+            if has_procedural:
+                _ = reader.read_string()  # type
+                _ = reader.read_fmt("ff")  # scale, randomness
 
         # 3. Meshes
         mesh_count = reader.read_fmt("I")[0]
@@ -455,4 +459,3 @@ if __name__ == "__main__":
         sys.exit(1)
 
     generate_ninja(sys.argv[1], sys.argv[2], sys.argv[3])
-

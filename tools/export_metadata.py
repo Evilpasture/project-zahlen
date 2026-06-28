@@ -61,6 +61,24 @@ class BinaryMetadataWriter:
             self.write_string(mat["maps"]["metallic_roughness"])
             self.write_string(mat["maps"]["emissive"])
 
+            proc = mat.get("procedural")
+            if proc:
+                self.write_fmt("B", 1)
+                self.write_string(proc["type"])
+
+                # Write parameters as a flat key-value list of floats
+                self.write_fmt("I", len(proc["parameters"]))
+                for key, val in proc["parameters"].items():
+                    self.write_string(key)
+                    if isinstance(val, list):
+                        self.write_fmt("B", len(val))  # float count
+                        self.write_floats(val)
+                    else:
+                        self.write_fmt("B", 1)
+                        self.write_fmt("f", val)
+            else:
+                self.write_fmt("B", 0)
+
         # 3. Meshes
         self.write_fmt("I", len(manifest["meshes"]))
         for mesh in manifest["meshes"]:
@@ -405,6 +423,49 @@ def get_texture_node_image_block(input_socket):
     return None
 
 
+def find_upstream_procedural_node(socket):
+    """Recursively search upstream links for procedural texture nodes."""
+    if not socket or not socket.is_linked:
+        return None
+    for link in socket.links:
+        from_node = link.from_node
+        if from_node.type in {"TEX_VORONOI", "TEX_NOISE"}:
+            return from_node
+        for input_socket in from_node.inputs:
+            found = find_upstream_procedural_node(input_socket)
+            if found:
+                return found
+    return None
+
+
+# Map Blender procedural node types to your engine's target shaders
+PROCEDURAL_TYPE_MAP = {
+    "TEX_VORONOI": "VORONOI",
+    "TEX_NOISE": "PERLIN_NOISE",
+    "TEX_MUSGRAVE": "FBM_NOISE",
+    "TEX_WAVE": "WAVE_MARBLE",
+}
+
+
+def serialize_procedural_node(node):
+    """Dynamically serialize all unlinked input values/sliders of a node."""
+    target_type = PROCEDURAL_TYPE_MAP.get(node.type)
+    if not target_type:
+        return None
+
+    params = {}
+    for socket in node.inputs:
+        if not socket.is_linked:
+            val = socket.default_value
+            # Handle float arrays (colors/vectors) vs single floats
+            if hasattr(val, "__len__"):
+                params[socket.name] = [clean_float(x) for x in val]
+            else:
+                params[socket.name] = clean_float(val)
+
+    return {"type": target_type, "parameters": params}
+
+
 # ============================================================================
 # Modular Pipeline Exporters
 # ============================================================================
@@ -588,16 +649,21 @@ def evaluate_shader(node, depth=0):
         normal_img = get_texture_node_image_block(node.inputs.get("Normal"))
         mr_img = get_texture_node_image_block(node.inputs.get("Roughness"))
 
+        # Traverse and find any procedural node upstream of Base Color
+        proc_node = find_upstream_procedural_node(node.inputs.get("Base Color"))
+        procedural_props = serialize_procedural_node(proc_node) if proc_node else None
+
         return {
             "base_color": base_color,
             "metallic": metallic,
             "roughness": roughness,
             "emissive_factor": em_col,
             "emissive_strength": em_str,
-            "albedo_img": albedo_img,
+            "albedo_img": albedo_img if not procedural_props else None,
             "normal_img": normal_img,
             "mr_img": mr_img,
             "emissive_img": emissive_img,
+            "procedural": procedural_props,
         }
 
     elif node.type == "BSDF_DIFFUSE":

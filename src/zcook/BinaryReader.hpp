@@ -83,6 +83,22 @@ class BinaryReader {
 			mat.normalMap = ReadString();
 			mat.metallicRoughnessMap = ReadString();
 			mat.emissiveMap = ReadString();
+			uint8_t hasProcedural = Read<uint8_t>();
+			if (hasProcedural != 0) {
+				mat.procedural.active = true;
+				mat.procedural.type = ReadString();
+
+				uint32_t paramCount = Read<uint32_t>();
+				mat.procedural.parameters.resize(paramCount);
+				for (uint32_t p = 0; p < paramCount; ++p) {
+					mat.procedural.parameters[p].name = ReadString();
+					uint8_t floatCount = Read<uint8_t>();
+					mat.procedural.parameters[p].values.resize(floatCount);
+					for (uint8_t f = 0; f < floatCount; ++f) {
+						mat.procedural.parameters[p].values[f] = Read<float>();
+					}
+				}
+			}
 			manifest.materials.push_back(mat);
 		}
 

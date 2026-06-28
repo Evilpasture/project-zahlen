@@ -50,6 +50,17 @@ struct IRLight {
 	float intensity = 1.0f;
 };
 
+struct IRProceduralParam {
+	std::string name;
+	std::vector<float> values;
+};
+
+struct IRProcedural {
+	bool active = false;
+	std::string type;
+	std::vector<IRProceduralParam> parameters;
+};
+
 struct IRMaterial {
 	std::string id, albedoMap, normalMap, metallicRoughnessMap, emissiveMap;
 	float baseColor[4] = {1.f, 1.f, 1.f, 1.f};
@@ -57,6 +68,7 @@ struct IRMaterial {
 	float emissiveFactor[3] = {0.f, 0.f, 0.f};
 	float emissiveStrength = 1.0f;
 	bool doubleSided = false;
+	IRProcedural procedural;
 };
 
 struct IRAnimationSampler {

@@ -3,7 +3,6 @@
 
 // File: src/engine/RenderInternal.hpp
 #pragma once
-
 #include "Allocator.hpp"
 #include "ComputePass.hpp"
 #include "DescriptorLayout.hpp"
@@ -22,6 +21,7 @@
 #include <Zahlen/Types.hpp>
 #include <array>
 #include <detail/MemoryPool.hpp>
+#include <fstream>
 #include <memory>
 #include <type_traits>
 #include <utility>
@@ -277,6 +277,8 @@ using ReflectionLayout =
 																				// 2 Output)
 						 >;
 
+using BakeLayout = Vk::DescriptorLayout<Vk::StorageImageSlot<0>>;
+
 namespace Stages {
 struct ShadowPass {
 	static constexpr std::string_view name = "[GPU] Shadow Map";
@@ -442,6 +444,11 @@ struct RenderContext::Impl {
 	Vk::Sampler defaultSampler;
 	Vk::Sampler pointSampler;
 
+	Vk::ComputePass proceduralBakePass;
+	Vk::DescriptorSetLayout proceduralBakeDescLayout;
+	Vk::DescriptorPool proceduralBakeDescPool;
+	VkDescriptorSet proceduralBakeSet{};
+
 	uint32_t frame_index = 0;
 	bool resized = true;
 	bool needsInitialClear = true;
@@ -560,6 +567,10 @@ struct RenderContext::Impl {
 	void BuildSkinningPipeline();
 	void DispatchSkinningPasses();
 
+	void BuildProceduralBakePipeline();
+	uint32_t BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx,
+								   float scale, float randomness, float distortion);
+
 	Impl(Window& win) : window(win) {}
 
 	void InitShadowResources();
@@ -635,6 +646,42 @@ struct RenderContext::Impl {
 
 	bool RecreateTargets(VkExtent2D ext);
 };
+
+struct ShaderStageSource {
+	const char* path;
+	const unsigned char* fallbackCode;
+	size_t fallbackSize;
+	const char* entryPoint = "main";
+};
+
+inline std::vector<uint32_t> LoadShaderSpv(const std::string& path) noexcept {
+	std::ifstream file(path, std::ios::ate | std::ios::binary);
+	if (!file.is_open()) {
+		return {};
+	}
+	auto fileSize = (size_t)file.tellg();
+	std::vector<uint32_t> buffer(fileSize / sizeof(uint32_t));
+	file.seekg(0);
+	file.read(reinterpret_cast<char*>(buffer.data()), fileSize);
+	file.close();
+	return buffer;
+}
+
+// Redirects shader source to disk data if available, falling back to embedded bytes
+inline bool LoadShaderData(const ShaderStageSource& src, const void*& outData, size_t& outSize,
+						   std::vector<uint32_t>& diskBuffer) {
+	outData = src.fallbackCode;
+	outSize = src.fallbackSize;
+	if constexpr (isDev) {
+		diskBuffer = LoadShaderSpv(src.path);
+		if (!diskBuffer.empty()) {
+			outData = diskBuffer.data();
+			outSize = diskBuffer.size() * 4;
+			return true;
+		}
+	}
+	return false;
+}
 
 } // namespace ZHLN
 

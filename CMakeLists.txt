@@ -194,6 +194,7 @@ set(ENGINE_SOURCES
     src/engine/system/InteractionSystem.cpp
     src/engine/system/UIRenderSystem.cpp
     src/engine/system/UIInteractionSystem.cpp
+    src/engine/RenderProcedural.cpp
 )
 
 find_library(ZSTD_LIBRARY NAMES zstd zstd_static HINTS "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib")
@@ -488,6 +489,11 @@ add_custom_target(zahlen_engine_hang_gpu_shader ALL DEPENDS ${HANG_GPU_COMP_SPV}
 add_dependencies(zahlen_engine zahlen_engine_hang_gpu_shader)
 target_compile_definitions(zahlen_engine PRIVATE SHADER_HANG_GPU_HLSL_CS_PATH="${HANG_GPU_COMP_SPV}")
 set_property(SOURCE src/engine/Resources.c APPEND PROPERTY OBJECT_DEPENDS "${HANG_GPU_COMP_SPV}")
+
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/procedural_bake.hlsl" CSMain cs_6_0 PROCEDURAL_BAKE_CS_SPV)
+add_custom_target(zahlen_engine_procedural_bake ALL DEPENDS ${PROCEDURAL_BAKE_CS_SPV})
+add_dependencies(zahlen_engine zahlen_engine_procedural_bake)
+target_compile_definitions(zahlen_engine PRIVATE SHADER_PROCEDURAL_BAKE_CS_PATH="${PROCEDURAL_BAKE_CS_SPV}")
 
 add_executable(zahlen 
     src/main.cpp

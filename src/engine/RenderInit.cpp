@@ -16,7 +16,6 @@
 #include <Features.hpp>
 #include <StagingContext.hpp>
 #include <cstddef>
-#include <fstream>
 #include <functional>
 #include <stb_image.h>
 #include <threading/TaskSystem.hpp>
@@ -142,42 +141,6 @@ HardwareCaps ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion)
 namespace ZHLN {
 
 namespace {
-struct ShaderStageSource {
-	const char* path;
-	const unsigned char* fallbackCode;
-	size_t fallbackSize;
-	const char* entryPoint = "main";
-};
-
-// Helper to safely load binary SPIR-V bytes from disk
-std::vector<uint32_t> LoadShaderSpv(const std::string& path) noexcept {
-	std::ifstream file(path, std::ios::ate | std::ios::binary);
-	if (!file.is_open()) {
-		return {};
-	}
-	size_t fileSize = (size_t)file.tellg();
-	std::vector<uint32_t> buffer(fileSize / sizeof(uint32_t));
-	file.seekg(0);
-	file.read(reinterpret_cast<char*>(buffer.data()), fileSize);
-	file.close();
-	return buffer;
-}
-
-// Redirects shader source to disk data if available, falling back to embedded bytes
-static bool LoadShaderData(const ShaderStageSource& src, const void*& outData, size_t& outSize,
-						   std::vector<uint32_t>& diskBuffer) {
-	outData = src.fallbackCode;
-	outSize = src.fallbackSize;
-	if constexpr (isDev) {
-		diskBuffer = LoadShaderSpv(src.path);
-		if (!diskBuffer.empty()) {
-			outData = diskBuffer.data();
-			outSize = diskBuffer.size() * 4;
-			return true;
-		}
-	}
-	return false;
-}
 
 // Generic helper for standard PostProcessPass compilation
 template <typename LayoutT>

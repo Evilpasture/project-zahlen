@@ -1570,6 +1570,7 @@ VkPipeline ZHLN_CreateComputePipeline(const VkDevice device,
 		.stage = VK_SHADER_STAGE_COMPUTE_BIT,
 		.module = comp_module,
 		.pName = entry_name,
+		.pSpecializationInfo = desc->specialization_info,
 	};
 
 	const VkComputePipelineCreateInfo pipeline_info = {

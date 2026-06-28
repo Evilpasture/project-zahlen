@@ -503,6 +503,7 @@ void ZHLN_DestroyDescriptorPool(VkDevice device, VkDescriptorPool pool);
 typedef struct ZHLN_ComputePipelineDesc {
 	const ZHLN_ShaderDesc shader;
 	const VkPipelineLayout layout;
+	const VkSpecializationInfo* specialization_info;
 } ZHLN_ComputePipelineDesc;
 
 [[nodiscard]]

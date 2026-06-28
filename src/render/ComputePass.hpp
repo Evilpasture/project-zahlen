@@ -11,6 +11,7 @@ namespace ZHLN::Vk {
 struct ComputePass {
 	PipelineLayout pipelineLayout;
 	Pipeline pipeline;
+	std::vector<Pipeline> pipelines;
 
 	[[nodiscard]] bool Build(VkDevice device, VkDescriptorSetLayout descriptorLayout,
 							 const ZHLN_ShaderDesc& shader,
@@ -28,6 +29,35 @@ struct ComputePass {
 		return pipeline.Valid();
 	}
 
+	[[nodiscard]] bool BuildVariants(VkDevice device, VkDescriptorSetLayout descriptorLayout,
+									 const ZHLN_ShaderDesc& shader,
+									 std::span<const VkSpecializationInfo> specInfos,
+									 const VkPushConstantRange* pushConstants = nullptr,
+									 uint32_t pushCount = 0) noexcept {
+		ZHLN_PipelineLayoutDesc pLayoutDesc = {.set_layouts = &descriptorLayout,
+											   .set_layout_count = 1,
+											   .push_constants = pushConstants,
+											   .push_constant_count = pushCount};
+		pipelineLayout = PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &pLayoutDesc));
+
+		pipelines.clear();
+		pipelines.reserve(specInfos.size());
+
+		for (const auto& spec : specInfos) {
+			auto p = ComputePipelineBuilder()
+						 .Shader(shader)
+						 .Layout(pipelineLayout.Get())
+						 .Specialization(&spec)
+						 .Build(device);
+
+			if (!p.Valid()) {
+				return false;
+			}
+			pipelines.push_back(std::move(p));
+		}
+		return !pipelines.empty();
+	}
+
 	// --- Stateful Bind and Push Helpers ---
 
 	void Bind(VkCommandBuffer cmd) const noexcept {
@@ -37,6 +67,20 @@ struct ComputePass {
 	void BindSet(VkCommandBuffer cmd, VkDescriptorSet set, uint32_t firstSet = 0) const noexcept {
 		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout.Get(), firstSet,
 								1, &set, 0, nullptr);
+	}
+
+	// Stateful Bind and Push Helpers for variants
+	void BindVariant(VkCommandBuffer cmd, uint32_t variantIdx) const noexcept {
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines[variantIdx].Get());
+	}
+
+	template <GpuTriviallyCopyable T>
+	void DispatchVariant(VkCommandBuffer cmd, VkDescriptorSet set, uint32_t variantIdx, uint32_t x,
+						 uint32_t y, uint32_t z, const T& pushData) const noexcept {
+		BindVariant(cmd, variantIdx);
+		BindSet(cmd, set);
+		PushConstants(cmd, pushData);
+		Dispatch(cmd, x, y, z);
 	}
 
 	template <GpuTriviallyCopyable T>
