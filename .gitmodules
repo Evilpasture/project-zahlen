@@ -23,3 +23,6 @@
 [submodule "extern/miniaudio"]
 	path = extern/miniaudio
 	url = https://github.com/mackron/miniaudio.git
+[submodule "extern/mimalloc"]
+	path = extern/mimalloc
+	url = https://github.com/microsoft/mimalloc.git

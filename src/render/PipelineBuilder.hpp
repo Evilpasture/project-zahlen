@@ -146,4 +146,20 @@ class ComputePipelineBuilder {
 	const VkSpecializationInfo* _specialization_info = nullptr;
 };
 
+class PipelineLayoutBuilder {
+  public:
+	explicit PipelineLayoutBuilder(VkDevice device) noexcept;
+
+	PipelineLayoutBuilder& AddDescriptorSetLayout(VkDescriptorSetLayout layout) noexcept;
+	PipelineLayoutBuilder& AddPushConstant(VkShaderStageFlags stages, uint32_t size,
+										   uint32_t offset = 0) noexcept;
+
+	[[nodiscard]] PipelineLayout Build() const noexcept;
+
+  private:
+	VkDevice _device;
+	std::vector<VkDescriptorSetLayout> _setLayouts;
+	std::vector<VkPushConstantRange> _pushConstants;
+};
+
 } // namespace ZHLN::Vk

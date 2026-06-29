@@ -8,6 +8,7 @@
 #include "RenderCore.hpp"
 
 #include <cstring>
+#include <sys/types.h>
 
 namespace ZHLN::Vk {
 
@@ -253,6 +254,112 @@ auto Image::Create(VmaAllocator allocator, const VkImageCreateInfo& info, VmaMem
 		return {};
 	}
 	return img;
+}
+
+// ============================================================================
+// Immediate Command PIMPL Implementation
+// ============================================================================
+
+struct ImmediateCommand::Impl {
+	VkDevice device = VK_NULL_HANDLE;
+	VkQueue queue = VK_NULL_HANDLE;
+	VkCommandPool pool = VK_NULL_HANDLE;
+	VkCommandBuffer cmd = VK_NULL_HANDLE;
+	std::vector<Buffer> resources;
+
+	Impl(Impl&& other) noexcept
+		: device(std::exchange(other.device, VK_NULL_HANDLE)),
+		  queue(std::exchange(other.queue, VK_NULL_HANDLE)),
+		  pool(std::exchange(other.pool, VK_NULL_HANDLE)),
+		  cmd(std::exchange(other.cmd, VK_NULL_HANDLE)), resources(std::move(other.resources)) {}
+	Impl& operator=(Impl&& other) noexcept {
+		if (this != &other) {
+			// Let the destructor handle existing resources cleanly
+			this->~Impl();
+
+			device = std::exchange(other.device, VK_NULL_HANDLE);
+			queue = std::exchange(other.queue, VK_NULL_HANDLE);
+			pool = std::exchange(other.pool, VK_NULL_HANDLE);
+			cmd = std::exchange(other.cmd, VK_NULL_HANDLE);
+			resources = std::move(other.resources);
+		}
+		return *this;
+	}
+	Impl(const Impl&) = delete;
+	Impl& operator=(const Impl&) = delete;
+	Impl(VkDevice dev, VkQueue q, uint32_t queueFamily) noexcept : device(dev), queue(q) {
+		VkCommandPoolCreateInfo poolInfo = {
+			.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+			.pNext = {},
+			.flags = {},
+			.queueFamilyIndex = queueFamily,
+		};
+		vkCreateCommandPool(device, &poolInfo, nullptr, &pool);
+
+		VkCommandBufferAllocateInfo allocInfo = {
+			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+			.pNext = {},
+			.commandPool = pool,
+			.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+			.commandBufferCount = 1,
+		};
+		vkAllocateCommandBuffers(device, &allocInfo, &cmd);
+
+		VkCommandBufferBeginInfo beginInfo = {
+			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+			.pNext = {},
+			.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+			.pInheritanceInfo = {},
+		};
+		vkBeginCommandBuffer(cmd, &beginInfo);
+	}
+
+	~Impl() noexcept {
+		if (cmd != VK_NULL_HANDLE) {
+			vkEndCommandBuffer(cmd);
+
+			VkCommandBufferSubmitInfo subInfo = {
+				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+				.pNext = {},
+				.commandBuffer = cmd,
+				.deviceMask = {},
+			};
+			VkSubmitInfo2 submit = {
+				.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+				.pNext = {},
+				.flags = {},
+				.waitSemaphoreInfoCount = {},
+				.pWaitSemaphoreInfos = {},
+				.commandBufferInfoCount = 1,
+				.pCommandBufferInfos = &subInfo,
+				.signalSemaphoreInfoCount = {},
+				.pSignalSemaphoreInfos = {},
+			};
+
+			vkQueueSubmit2(queue, 1, &submit, VK_NULL_HANDLE);
+			vkQueueWaitIdle(queue);
+		}
+
+		// Staging buffers are safely destroyed here, after the queue becomes idle
+		resources.clear();
+
+		if (pool != VK_NULL_HANDLE) {
+			vkDestroyCommandPool(device, pool, nullptr);
+		}
+	}
+};
+
+ImmediateCommand::ImmediateCommand(VkDevice dev, VkQueue q, uint32_t queueFamily) noexcept
+	: _impl(std::make_unique<Impl>(dev, q, queueFamily)) {}
+
+ImmediateCommand::~ImmediateCommand() noexcept = default;
+
+void ImmediateCommand::KeepAlive(Buffer&& buffer) {
+	_impl->resources.push_back(std::move(buffer));
+}
+
+ImmediateCommand::operator VkCommandBuffer() const noexcept {
+	return _impl->cmd;
 }
 
 } // namespace ZHLN::Vk

@@ -489,6 +489,31 @@ class UnsafeReflectedLayoutBuilder {
 };
 
 // ============================================================================
+// Scoped RAII Scissor State Guard
+// ============================================================================
+
+struct ScopedScissor {
+	VkCommandBuffer commandRect;
+	VkRect2D resetScissor;
+
+	struct ScissorDesc {
+		VkRect2D target;
+		VkRect2D fallback;
+	};
+	ScopedScissor(VkCommandBuffer cmd, const ScissorDesc& desc) noexcept
+		: commandRect(cmd), resetScissor(desc.fallback) {
+		vkCmdSetScissor(commandRect, 0, 1, &desc.target);
+	}
+
+	~ScopedScissor() noexcept { vkCmdSetScissor(commandRect, 0, 1, &resetScissor); }
+
+	ScopedScissor(const ScopedScissor&) = delete;
+	auto operator=(const ScopedScissor&) -> ScopedScissor& = delete;
+	ScopedScissor(ScopedScissor&&) = delete;
+	auto operator=(ScopedScissor&&) -> ScopedScissor& = delete;
+};
+
+// ============================================================================
 // Command & Rendering Helpers
 // ============================================================================
 

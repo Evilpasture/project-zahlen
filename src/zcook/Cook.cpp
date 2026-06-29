@@ -52,6 +52,7 @@ int CookMesh(int argc, char** argv) {
 
 	auto it = std::ranges::find_if(manifest.meshes, [&](const auto& m) { return m.id == meshId; });
 	if (it == manifest.meshes.end()) {
+		std::println(stderr, "[zcook] ERROR: Mesh '{}' not found in manifest.", meshId);
 		return 1;
 	}
 
@@ -113,12 +114,16 @@ int CookTexture(int argc, char** argv) {
 		else if (arg == "-o" && i + 1 < argc)
 			outPath = argv[++i];
 	}
-	if (inPath.empty() || outPath.empty())
+	if (inPath.empty() || outPath.empty()) {
+		std::println(stderr, "[zcook] ERROR: Missing arguments for texture subcommand.");
 		return 1;
+	}
 
 	FILE* in = std::fopen(inPath.c_str(), "rb");
-	if (!in)
+	if (!in) {
+		std::println(stderr, "[zcook] ERROR: Failed to open '{}' for reading.", inPath);
 		return 1;
+	}
 	std::fseek(in, 0, SEEK_END);
 	long size = std::ftell(in);
 	std::fseek(in, 0, SEEK_SET);
@@ -128,26 +133,33 @@ int CookTexture(int argc, char** argv) {
 
 	fs::create_directories(fs::path(outPath).parent_path());
 	FILE* out = std::fopen(outPath.c_str(), "wb");
-	if (!out)
+	if (!out) {
+		std::println(stderr, "[zcook] ERROR: Failed to open '{}' for writing.", outPath);
 		return 1;
+	}
 	std::fwrite(fileData.data(), 1, size, out);
 	std::fclose(out);
 	return 0;
 }
 
 int CookAnimation(int argc, char** argv) {
-	std::string metaPath, outPath, animId;
+	std::string metaPath;
+	std::string outPath;
+	std::string animId;
 	for (int i = 0; i < argc; ++i) {
 		std::string_view arg = argv[i];
-		if (arg == "--meta" && i + 1 < argc)
+		if (arg == "--meta" && i + 1 < argc) {
 			metaPath = argv[++i];
-		else if (arg == "--id" && i + 1 < argc)
+		} else if (arg == "--id" && i + 1 < argc) {
 			animId = argv[++i];
-		else if (arg == "-o" && i + 1 < argc)
+		} else if (arg == "-o" && i + 1 < argc) {
 			outPath = argv[++i];
+		}
 	}
-	if (metaPath.empty() || animId.empty() || outPath.empty())
+	if (metaPath.empty() || animId.empty() || outPath.empty()) {
+		std::println(stderr, "[zcook] ERROR: Missing arguments for animation subcommand.");
 		return 1;
+	}
 
 	std::string binMetaPath = fs::path(metaPath).replace_extension(".bin").string();
 	Compiler::BinaryReader reader(binMetaPath);
@@ -155,8 +167,10 @@ int CookAnimation(int argc, char** argv) {
 
 	auto it =
 		std::ranges::find_if(manifest.animations, [&](const auto& a) { return a.id == animId; });
-	if (it == manifest.animations.end())
+	if (it == manifest.animations.end()) {
+		std::println(stderr, "[zcook] ERROR: Animation '{}' not found in manifest.", animId);
 		return 1;
+	}
 
 	const auto& anim = *it;
 	std::string levelFolder = fs::path(metaPath).parent_path().string();
@@ -168,35 +182,39 @@ int CookAnimation(int argc, char** argv) {
 							 uint32_t length) -> uint32_t {
 		std::string fullBinPath = levelFolder + "/" + binFile;
 		FILE* bf = std::fopen(fullBinPath.c_str(), "rb");
-		if (!bf)
+		if (!bf) {
 			return 0;
+		}
 		std::vector<uint8_t> temp(length);
 		std::fseek(bf, offset, SEEK_SET);
 		std::fread(temp.data(), 1, length, bf);
 		std::fclose(bf);
-		while (payloadData.size() % 4 != 0)
+		while (payloadData.size() % 4 != 0) {
 			payloadData.push_back(0);
+		}
 		auto localOffset = static_cast<uint32_t>(payloadData.size());
 		payloadData.insert(payloadData.end(), temp.begin(), temp.end());
 		return localOffset;
 	};
 
 	for (const auto& channel : anim.channels) {
-		if (channel.samplerId >= anim.samplers.size())
+		if (channel.samplerId >= anim.samplers.size()) {
 			continue;
+		}
 		const auto& sampler = anim.samplers[channel.samplerId];
 
 		CookedAnimTrack track{};
 		track.targetNodeHash = HashAssetPath(channel.targetNodeId);
 
-		if (channel.targetPath == "translation")
+		if (channel.targetPath == "translation") {
 			track.pathType = 0;
-		else if (channel.targetPath == "rotation")
+		} else if (channel.targetPath == "rotation") {
 			track.pathType = 1;
-		else if (channel.targetPath == "scale")
+		} else if (channel.targetPath == "scale") {
 			track.pathType = 2;
-		else
+		} else {
 			continue;
+		}
 
 		track.keyCount = sampler.inputLength / sizeof(float);
 		track.timeOffset = appendPayload(sampler.binFile, sampler.inputOffset, sampler.inputLength);
@@ -212,14 +230,18 @@ int CookAnimation(int argc, char** argv) {
 
 	fs::create_directories(fs::path(outPath).parent_path());
 	FILE* out = std::fopen(outPath.c_str(), "wb");
-	if (!out)
+	if (out == nullptr) {
+		std::println(stderr, "[zcook] ERROR: Failed to open '{}' for writing.", outPath);
 		return 1;
+	}
 
 	std::fwrite(&header, sizeof(CookedAnimHeader), 1, out);
-	if (!tracks.empty())
+	if (!tracks.empty()) {
 		std::fwrite(tracks.data(), sizeof(CookedAnimTrack), tracks.size(), out);
-	if (!payloadData.empty())
+	}
+	if (!payloadData.empty()) {
 		std::fwrite(payloadData.data(), 1, payloadData.size(), out);
+	}
 	std::fclose(out);
 	return 0;
 }
@@ -233,13 +255,17 @@ int PackArchive(int argc, char** argv) {
 		else if (arg == "-i" && i + 1 < argc)
 			manifestPath = argv[++i];
 	}
-	if (outPath.empty() || manifestPath.empty())
+	if (outPath.empty() || manifestPath.empty()) {
+		std::println(stderr, "[zcook] ERROR: Missing arguments for pack subcommand.");
 		return 1;
+	}
 
 	fs::create_directories(fs::path(outPath).parent_path());
 	std::ifstream ifs(manifestPath);
-	if (!ifs.is_open())
+	if (!ifs.is_open()) {
+		std::println(stderr, "[zcook] ERROR: Failed to open '{}' for reading.", manifestPath);
 		return 1;
+	}
 
 	struct ManifestEntry {
 		std::string vpath, rpath;
@@ -307,8 +333,10 @@ int PackArchive(int argc, char** argv) {
 	totalBytesToWrite += successfulCount * sizeof(PakEntry);
 
 	FILE* out = std::fopen(outPath.c_str(), "wb");
-	if (!out)
+	if (!out) {
+		std::println(stderr, "[zcook] ERROR: Failed to open '{}' for writing.", outPath);
 		return 1;
+	}
 
 	std::vector<char> streamBuffer(1024 * 1024);
 	std::setvbuf(out, streamBuffer.data(), _IOFBF, streamBuffer.size());
@@ -405,21 +433,26 @@ int CookGLB(int argc, char** argv) {
 	std::string metaPath, outPath;
 	for (int i = 0; i < argc; ++i) {
 		std::string_view arg = argv[i];
-		if (arg == "--meta" && i + 1 < argc)
+		if (arg == "--meta" && i + 1 < argc) {
 			metaPath = argv[++i];
-		else if (arg == "-o" && i + 1 < argc)
+		} else if (arg == "-o" && i + 1 < argc) {
 			outPath = argv[++i];
+		}
 	}
-	if (metaPath.empty() || outPath.empty())
+	if (metaPath.empty() || outPath.empty()) {
+		std::println(stderr, "[zcook] ERROR: Missing arguments for glb subcommand.");
 		return 1;
+	}
 
 	std::string binMetaPath = fs::path(metaPath).replace_extension(".bin").string();
 	Compiler::BinaryReader reader(binMetaPath);
 	Compiler::IRManifest manifest = reader.Parse();
 
 	std::string levelFolder = fs::path(metaPath).parent_path().string();
-	if (!GLB::EmitGLB(manifest, levelFolder, outPath))
+	if (!GLB::EmitGLB(manifest, levelFolder, outPath)) {
+		std::println(stderr, "[zcook] ERROR: Failed to generate GLB.");
 		return 1;
+	}
 	return 0;
 }
 

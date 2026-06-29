@@ -1280,7 +1280,8 @@ void RenderContext::Impl::BuildHangGpuPipeline() {
 	if (hangGpuPass.pipeline.Valid()) {
 		ZHLN::Log("[Shader Reload] Hang GPU Pipeline built successfully with empty layout.");
 	} else {
-		ZHLN::Log("ERROR: Failed to build Hang GPU compute pipeline.");
+		ZHLN::Log("ERROR: Failed to build Hang GPU compute pipeline. This isn't a fatal error, but "
+				  "please check your build.");
 	}
 }
 

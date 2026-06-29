@@ -37,11 +37,13 @@ local pomni_parts = nil
 -- ============================================================================
 -- 3. DEFINE WORLD GENERATION / GAMESTART CALLBACK
 -- ============================================================================
--- This is invoked by scripts/main_menu.lua when "START GAME" is clicked
 function _G.StartGame()
     zh.log("[Gameplay] Spawning Circus Lobby layout and characters...")
 
-    -- Spawn static world geometry and physics colliders
+    -- 1. Initialize the deferred player, physical floor, and camera controller
+    _G.player_ent = zh:dispatch("InitPlayer")
+
+    -- 2. Spawn static world geometry and physics colliders
     zh:spawn("Circus Lobby V9.glb", { physics = true, static = true })
     pomni_parts = zh:spawn("tadc_models/POMNI.glb", { animated = true })
 
@@ -75,14 +77,7 @@ function _G.StartGame()
         end
     end
 
-    -- Bind visual parts to the C++ pre-created player character capsule
-    local player_ent = nil
-    for ent, _ in zh.ecs:view("MovementComponent") do
-        player_ent = ent
-        break
-    end
-
-    if player_ent and pomni_parts then
+    if _G.player_ent and pomni_parts then
         local pomni_root = pomni_parts[1]
         local root_trans = zh.ecs:get(pomni_root, "TransformComponent")
         if root_trans then
@@ -90,10 +85,10 @@ function _G.StartGame()
             root_trans.position[1] = -0.8 -- Capsule Visual Offset
             root_trans.position[2] = 0.0
         end
-        zh.ecs:add(pomni_root, "HierarchyComponent", { parent = player_ent })
-        zh.ecs:add(player_ent, "combat", { hp = 100, max_hp = 100 })
+        zh.ecs:add(pomni_root, "HierarchyComponent", { parent = _G.player_ent })
+        zh.ecs:add(_G.player_ent, "combat", { hp = 100, max_hp = 100 })
 
-        zh.physics:setup_ragdoll(player_ent, pomni_parts)
+        zh.physics:setup_ragdoll(_G.player_ent, pomni_parts)
         zh.log("[Gameplay] Skeletal Ragdoll successfully generated and bound to player controller.")
     end
 

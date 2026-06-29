@@ -15,7 +15,7 @@ void RenderContext::Impl::BuildProceduralBakePipeline() {
 	VkPushConstantRange push = {
 		.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
 		.offset = 0,
-		.size = sizeof(uint32_t) * 2 + sizeof(float) * 2 // width, height, scale, randomness
+		.size = sizeof(BakePush),
 	};
 
 	const void* cs_code = nullptr;
@@ -44,14 +44,11 @@ void RenderContext::Impl::BuildProceduralBakePipeline() {
 						.pData = &variants[i]};
 	}
 
-	// Compile the three driver-optimized variants using our new framework API!
-	if (proceduralBakePass.BuildVariants(ctx.Device(), proceduralBakeDescLayout.Get(), shader,
-										 specInfos, &push, 1)) {
-		ZHLN::Log("[Shader] GPU Procedural Bake Compute Pipeline initialized with specialization "
-				  "variants.");
-	} else {
-		ZHLN::Panic("FATAL: Failed to build specialized Procedural Bake Compute variants!");
-	}
+	ZHLN::PanicIf(!proceduralBakePass.BuildVariants(ctx.Device(), proceduralBakeDescLayout.Get(),
+													shader, specInfos, &push, 1),
+				  "[Shader] Failed to build specialized Procedural Bake Compute variants!");
+	ZHLN::Log("[Shader] GPU Procedural Bake Compute Pipeline initialized with specialization "
+			  "variants.");
 }
 
 uint32_t RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
@@ -60,18 +57,23 @@ uint32_t RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t hei
 	const VkDevice device = ctx.Device();
 
 	// 1. Create a texture with STORAGE and SAMPLED usage
-	const VkImageCreateInfo imgInfo = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-									   .imageType = VK_IMAGE_TYPE_2D,
-									   .format = VK_FORMAT_R8G8B8A8_UNORM,
-									   .extent = {.width = width, .height = height, .depth = 1},
-									   .mipLevels = 1,
-									   .arrayLayers = 1,
-									   .samples = VK_SAMPLE_COUNT_1_BIT,
-									   .tiling = VK_IMAGE_TILING_OPTIMAL,
-									   .usage =
-										   VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-									   .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-									   .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+	const VkImageCreateInfo imgInfo = {
+		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+		.pNext = {},
+		.flags = {},
+		.imageType = VK_IMAGE_TYPE_2D,
+		.format = VK_FORMAT_R8G8B8A8_UNORM,
+		.extent = {.width = width, .height = height, .depth = 1},
+		.mipLevels = 1,
+		.arrayLayers = 1,
+		.samples = VK_SAMPLE_COUNT_1_BIT,
+		.tiling = VK_IMAGE_TILING_OPTIMAL,
+		.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+		.queueFamilyIndexCount = {},
+		.pQueueFamilyIndices = {},
+		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+	};
 
 	auto gpuImage = Vk::Image::Create(allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 	auto writeView = Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(),
@@ -83,9 +85,8 @@ uint32_t RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t hei
 	// 2. Dispatch the Compute Shader
 	Vk::CommandPool tempPool(device, ctx.PhysicalInfo().graphics_family);
 
-	// FIX: Handle [[nodiscard]] return value safely
 	if (!tempPool.Allocate(1)) {
-		ZHLN::Panic("FATAL: Failed to allocate temporary command pool for procedural baking!");
+		ZHLN::Log("Failed to allocate temporary command pool for procedural baking!");
 		return 0;
 	}
 	VkCommandBuffer cmd = tempPool[0];
@@ -96,22 +97,13 @@ uint32_t RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t hei
 	Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd,
 																			 gpuImage.Handle());
 
-	struct BakePush {
-		uint32_t width;
-		uint32_t height;
-		float scale;
-		float randomness;
-		float distortion;
-		uint32_t bakeType;
-	} pc = {.width = width,
-			.height = height,
-			.scale = scale,
-			.randomness = randomness,
-			.distortion = distortion,
-			.bakeType = variantIdx};
-
 	proceduralBakePass.Dispatch(cmd, proceduralBakeSet, (width + 15) / 16, (height + 15) / 16, 1,
-								pc);
+								BakePush{.width = width,
+										 .height = height,
+										 .scale = scale,
+										 .randomness = randomness,
+										 .distortion = distortion,
+										 .bakeType = variantIdx});
 
 	// Transition General -> Shader Read Only (Ready for Bindless fragment reads)
 	Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
@@ -120,11 +112,23 @@ uint32_t RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t hei
 	ZHLN_EndCommandBuffer(cmd);
 
 	// Submit queue synchronously
-	VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-										 .commandBuffer = cmd};
-	VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-							.commandBufferInfoCount = 1,
-							.pCommandBufferInfos = &subInfo};
+	VkCommandBufferSubmitInfo subInfo = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+		.pNext = {},
+		.commandBuffer = cmd,
+		.deviceMask = {},
+	};
+	VkSubmitInfo2 submit = {
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+		.pNext = {},
+		.flags = {},
+		.waitSemaphoreInfoCount = {},
+		.pWaitSemaphoreInfos = {},
+		.commandBufferInfoCount = 1,
+		.pCommandBufferInfos = &subInfo,
+		.signalSemaphoreInfoCount = {},
+		.pSignalSemaphoreInfos = {},
+	};
 	vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
 	vkQueueWaitIdle(ctx.GraphicsQueue());
 
@@ -137,13 +141,18 @@ uint32_t RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t hei
 
 	std::array<VkWriteDescriptorSet, 2> writes = {};
 	for (int i = 0; i < 2; ++i) {
-		writes[i] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-					 .dstSet = bindlessSets[i],
-					 .dstBinding = 0,
-					 .dstArrayElement = index,
-					 .descriptorCount = 1,
-					 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-					 .pImageInfo = &bindlessUpdate};
+		writes[i] = {
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.pNext = {},
+			.dstSet = bindlessSets[i],
+			.dstBinding = 0,
+			.dstArrayElement = index,
+			.descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+			.pImageInfo = &bindlessUpdate,
+			.pBufferInfo = {},
+			.pTexelBufferView = {},
+		};
 	}
 	vkUpdateDescriptorSets(device, 2, writes.data(), 0, nullptr);
 

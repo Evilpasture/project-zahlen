@@ -9,6 +9,7 @@
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Input.hpp"
 #include "ecs/ECS.hpp"
+#include "engine/system/InputSystem.hpp"
 
 #include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Audio.hpp>
@@ -647,6 +648,53 @@ static void RegisterFFICommands() {
 			}
 		}
 		return std::bit_cast<uint64_t>(ptr);
+	});
+
+	RegisterCmd("InitPlayer", [](ZHLN::Engine* engine, const void*) -> uint64_t {
+		using namespace ZHLN;
+		if (!engine) {
+			return 0;
+		}
+		auto& reg = engine->GetRegistry();
+		auto& pc = engine->GetPhysicsContext();
+
+		// 1. Spawn infinite physical ground plane
+		auto groundShape = ZHLN::Physics::GetOrCreateShape(pc, ZHLN::Physics::ShapeType::Plane,
+														   0.0f, 1.0f, 0.0f, 0.0f);
+		ZHLN::Entity ground = reg.Create();
+		reg.Add(ground, PhysicsComponent{Physics::CreateRigidBody(pc, groundShape, {0, 0, 0},
+																  JPH::Quat::sIdentity(),
+																  JPH::EMotionType::Static, 0)});
+		reg.Add(ground, PhysicsStateComponent{});
+
+		// 2. Spawn the Player Character Controller
+		ZHLN::Entity playerEntity = reg.Create();
+		reg.Add(playerEntity, PlayerTagComponent{});
+		reg.Add(playerEntity, TransformComponent{.position = {0.0f, 3.0f, 0.0f}});
+		reg.Add(playerEntity, MovementComponent{});
+		reg.Add(playerEntity, InputSystem::InputComponent{});
+		ZHLN::Entity charPhys = ZHLN::Physics::CreateCharacter(pc, JPH::RVec3(0.0f, 3.0f, 0.0f));
+		reg.Add(playerEntity, PhysicsComponent{charPhys});
+		reg.Add(playerEntity, PhysicsStateComponent{.currPosition = {0.0f, 3.0f, 0.0f},
+													.prevPosition = {0.0f, 3.0f, 0.0f}});
+
+		// 3. Attach Camera Tracking logic to the blank menu camera
+		auto camEnts = reg.GetEntitiesWith<ZHLN::MainCameraTagComponent>();
+		if (!camEnts.empty()) {
+			ZHLN::Entity camEnt = camEnts[0];
+			reg.Add(camEnt, TargetCameraComponent{.target = playerEntity,
+												  .distance = 4.5f,
+												  .targetDistance = 4.5f,
+												  .yaw = -90.0f,
+												  .pitch = -10.0f,
+												  .stiffness = 15.0f,
+												  .vignetteIntensity = 1.10f,
+												  .vignettePower = 1.50f,
+												  .fov = 45.0f,
+												  .targetFov = 45.0f});
+			reg.Add(camEnt, InputSystem::InputComponent{});
+		}
+		return playerEntity.Pack();
 	});
 
 	RegisterCmd("CreateEntity", [](ZHLN::Engine* engine, const void*) -> uint64_t {

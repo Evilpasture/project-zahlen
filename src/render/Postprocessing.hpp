@@ -132,7 +132,7 @@ template <typename LayoutT> struct PostProcessPass {
 		return IssueBarrier<Vk::ColorAttachmentState, Vk::ShaderReadState>(cmd, target_att);
 	}
 
-	template <typename... Args> void WriteNext(VkDevice device, Args&&... args) noexcept {
+	template <typename... Args> void WriteNext(VkDevice device, Args&&... args) const noexcept {
 		if constexpr (sizeof...(Args) == 1) {
 			using FirstT = std::decay_t<std::tuple_element_t<0, std::tuple<Args...>>>;
 

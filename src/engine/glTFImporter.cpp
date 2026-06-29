@@ -1041,7 +1041,6 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 							part.localTransform.GetColumn3(1).Length(),
 							part.localTransform.GetColumn3(2).Length());
 
-		// 1. Calculate the maximum scale factor of this specific node
 		float nodeMaxScale = std::max(
 			{std::abs(nodeScale.GetX()), std::abs(nodeScale.GetY()), std::abs(nodeScale.GetZ())});
 
@@ -1061,29 +1060,29 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 		reg.Add(e, TransformComponent{.position = nodePos,
 									  .rotation = nRotMat.GetQuaternion().Normalized(),
 									  .scale = nodeScale});
-		reg.Add(e,
-				MeshComponent{
-					.mesh = part.mesh,
-					.material = activeMat,
+		reg.Add(
+			e, MeshComponent{
+				   .mesh = part.mesh,
+				   .material = activeMat,
 
-					// 2. FIXED: Multiply by nodeMaxScale so the culling sphere grows with the mesh
-					.cullRadius = part.boundingRadius * scaleMult * nodeMaxScale,
+				   .cullRadius = part.boundingRadius * scaleMult * nodeMaxScale,
 
-					.localCenter = JPH::Vec3((part.localMax[0] + part.localMin[0]) * 0.5f,
-											 (part.localMax[1] + part.localMin[1]) * 0.5f,
-											 (part.localMax[2] + part.localMin[2]) * 0.5f),
-					.localTransform = JPH::Mat44::sIdentity(),
-					.prevTransform = JPH::Mat44::sIdentity(),
-					.worldTransform = JPH::Mat44::sIdentity(),
-					.jointOffset = part.jointOffset,
-					.isSkinned = part.isSkinned && params.isAnimated,
-					.skinnedVertexBuffer = skinnedVbo,
-					.morphOffset = part.morphOffset,
-					.activeMorphCount = part.activeMorphCount,
-					.morphWeights = {part.defaultMorphWeights[0], part.defaultMorphWeights[1],
-									 part.defaultMorphWeights[2], part.defaultMorphWeights[3]},
-					.gltfNode = part.gltfNode,
-					.gltfSkin = part.gltfSkin});
+				   .localCenter = JPH::Vec3((part.localMax[0] + part.localMin[0]) * 0.5f,
+											(part.localMax[1] + part.localMin[1]) * 0.5f,
+											(part.localMax[2] + part.localMin[2]) * 0.5f),
+				   .localTransform = part.isSkinned ? JPH::Mat44::sIdentity() : part.localTransform,
+				   .prevTransform = part.isSkinned ? JPH::Mat44::sIdentity() : part.localTransform,
+				   .worldTransform = JPH::Mat44::sIdentity(),
+				   .jointOffset = part.jointOffset,
+				   .isSkinned = part.isSkinned && params.isAnimated,
+				   .skinnedVertexBuffer = skinnedVbo,
+				   .morphOffset = part.morphOffset,
+				   .activeMorphCount = part.activeMorphCount,
+				   .morphWeights = {part.defaultMorphWeights[0], part.defaultMorphWeights[1],
+									part.defaultMorphWeights[2], part.defaultMorphWeights[3]},
+				   .gltfNode = part.gltfNode,
+				   .gltfSkin = part.gltfSkin,
+				   .flags = flags});
 		reg.Add(e, NameComponent{.name = part.name});
 		reg.Add(e, HierarchyComponent{.parent = rootEntity});
 	}

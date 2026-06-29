@@ -98,9 +98,11 @@ inline void GpuProfiler<Stages...>::Reset(uint32_t frameIndex) noexcept {
 
 template <GpuStageTag... Stages>
 template <GpuStageTag Stage>
-inline void GpuProfiler<Stages...>::WriteStart(VkCommandBuffer cmd, uint32_t frameIndex) noexcept {
-	if (!_enabled)
+inline void GpuProfiler<Stages...>::WriteStart(VkCommandBuffer cmd,
+											   uint32_t frameIndex) const noexcept {
+	if (!_enabled) {
 		return;
+	}
 	static_assert(ContainsType<Stage, Stages...>, "Stage tag not registered in this GpuProfiler!");
 	constexpr uint32_t stageIdx = TypeIndex<Stage, Stages...>::value;
 	constexpr uint32_t queryIdx = stageIdx * 2;
@@ -113,9 +115,11 @@ inline void GpuProfiler<Stages...>::WriteStart(VkCommandBuffer cmd, uint32_t fra
 
 template <GpuStageTag... Stages>
 template <GpuStageTag Stage>
-inline void GpuProfiler<Stages...>::WriteEnd(VkCommandBuffer cmd, uint32_t frameIndex) noexcept {
-	if (!_enabled)
+inline void GpuProfiler<Stages...>::WriteEnd(VkCommandBuffer cmd,
+											 uint32_t frameIndex) const noexcept {
+	if (!_enabled) {
 		return;
+	}
 	static_assert(ContainsType<Stage, Stages...>, "Stage tag not registered in this GpuProfiler!");
 	constexpr uint32_t queryIdx = (TypeIndex<Stage, Stages...>::value * 2) + 1;
 
@@ -127,8 +131,9 @@ template <GpuStageTag... Stages>
 template <typename Func>
 inline void GpuProfiler<Stages...>::RetrieveResults(uint32_t frameIndex, float timestampPeriod,
 													Func&& callback) noexcept {
-	if (!_enabled)
+	if (!_enabled) {
 		return;
+	}
 	uint32_t slot = frameIndex % 2;
 	uint32_t mask = _recordedMasks[slot];
 	if (mask == 0) {
@@ -169,7 +174,7 @@ inline void GpuProfiler<Stages...>::RetrieveResults(uint32_t frameIndex, float t
 template <GpuStageTag Stage, typename ProfilerT>
 inline ScopedGpuProfile<Stage, ProfilerT>::ScopedGpuProfile(VkCommandBuffer cmd,
 															uint32_t frameIndex,
-															ProfilerT& profiler) noexcept
+															const ProfilerT& profiler) noexcept
 	: _cmd(cmd), _frameIndex(frameIndex), _profiler(profiler) {
 	_profiler.template WriteStart<Stage>(_cmd, _frameIndex);
 }

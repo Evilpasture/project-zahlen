@@ -447,6 +447,10 @@ SPECIALIZED_HANDLERS["ProvokeDeviceLost"] = function(self, args)
     return ffi.C.ZHLN_DispatchCommand(self._raw, get_cmd_id("ProvokeDeviceLost"), nil)
 end
 
+SPECIALIZED_HANDLERS["InitPlayer"] = function(self, args)
+    return ffi.C.ZHLN_DispatchCommand(self._raw, get_cmd_id("InitPlayer"), nil)
+end
+
 -- ============================================================================
 -- UNIFIED COMMAND DISPATCHER (Hyprland-style IPC)
 -- ============================================================================

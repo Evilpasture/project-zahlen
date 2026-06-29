@@ -277,37 +277,9 @@ bool InitializeGame(Engine& engine) {
 		UIPanelComponent, UIButtonComponent, UIDragComponent, UIStackComponent,
 		UITextInputComponent>();
 
-	auto groundShape =
-		Physics::GetOrCreateShape(pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
-	Entity ground = reg.Create();
-	reg.Add(ground,
-			PhysicsComponent{Physics::CreateRigidBody(
-				pc, groundShape, {0, 0, 0}, JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0)});
-	reg.Add(ground, PhysicsStateComponent{});
-
-	Entity playerEntity = reg.Create();
-	reg.Add(playerEntity, PlayerTagComponent{});
-	reg.Add(playerEntity, TransformComponent{.position = {0.0f, 3.0f, 0.0f}});
-	reg.Add(playerEntity, MovementComponent{});
-	reg.Add(playerEntity, InputSystem::InputComponent{});
-	Entity charPhys = Physics::CreateCharacter(pc, JPH::RVec3(0.0f, 3.0f, 0.0f));
-	reg.Add(playerEntity, PhysicsComponent{charPhys});
-	reg.Add(playerEntity, PhysicsStateComponent{.currPosition = {0.0f, 3.0f, 0.0f},
-												.prevPosition = {0.0f, 3.0f, 0.0f}});
-
+	// Spawn a blank, static camera just to render the main menu
 	Entity cameraEntity = reg.Create();
 	reg.Add(cameraEntity, MainCameraTagComponent{});
-	reg.Add(cameraEntity, TargetCameraComponent{.target = playerEntity,
-												.distance = 4.5f,
-												.targetDistance = 4.5f,
-												.yaw = -90.0f,
-												.pitch = -10.0f,
-												.stiffness = 15.0f,
-												.vignetteIntensity = 1.10f,
-												.vignettePower = 1.50f,
-												.fov = 45.0f,
-												.targetFov = 45.0f});
-	reg.Add(cameraEntity, InputSystem::InputComponent{});
 	reg.Add(cameraEntity, CameraSystem::CameraComponent{});
 	reg.Add(cameraEntity,
 			AASettingsComponent{.state = {.mode = AAMode::TAA, .taaFeedback = 0.95f}});

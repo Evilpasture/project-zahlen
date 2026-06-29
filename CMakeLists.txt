@@ -109,6 +109,14 @@ if(ZHLN_DEV_MODE)
     add_compile_definitions(ZHLN_DEV_MODE)
 endif()
 
+set(MI_OVERRIDE ON CACHE BOOL "" FORCE)
+set(MI_BUILD_SHARED OFF CACHE BOOL "" FORCE) # Build static lib for easy embedding
+set(MI_BUILD_OBJECT OFF CACHE BOOL "" FORCE)
+set(MI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+add_subdirectory(extern/mimalloc EXCLUDE_FROM_ALL)
+
+
+
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -269,6 +277,7 @@ target_link_libraries(zahlen_engine PRIVATE
     LuaJIT
     spirv_reflect
     imgui
+    mimalloc-static
     ${ZSTD_LIBRARY}
 )
 
@@ -529,7 +538,7 @@ add_custom_command(
 add_custom_target(cook_assets ALL
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:zahlen>/data"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/build_assets"
-    COMMAND ninja -f assets.ninja
+    COMMAND ninja -f "${CMAKE_CURRENT_BINARY_DIR}/assets.ninja"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_BINARY_DIR}/data/base.pak" "$<TARGET_FILE_DIR:zahlen>/data/base.pak"
     DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/assets.ninja"
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"

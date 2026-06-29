@@ -13,6 +13,7 @@
 #include "RenderTarget.hpp"
 #include "StagingContext.hpp"
 #include "Vertex.hpp"
+#include "detail/Array.hpp"
 #include "engine/FileWatcher.hpp"
 
 #include <GLFW/glfw3.h>
@@ -114,7 +115,7 @@ template <typename T, size_t MaxObjects, typename HandleType = uint64_t> class G
 	ObjectPool<T, MaxObjects> _pool;
 	std::array<T*, MaxObjects> _pointers{};
 	std::array<uint32_t, MaxObjects> _generations{};
-	JPH::Array<uint32_t> _freeIndices;
+	ZHLN::Array<uint32_t> _freeIndices;
 };
 
 enum RenderAttachmentSlot : uint8_t {
@@ -464,8 +465,8 @@ struct RenderContext::Impl {
 	GenerationalPool<NativeMesh, 8192, BufferHandle> meshPool;
 	GenerationalPool<NativeMaterial, 2048, PipelineHandle> materialPool;
 
-	JPH::Array<DrawCommand> drawQueue;
-	JPH::Array<WorkerCmdContext> workerCmds;
+	ZHLN::Array<DrawCommand> drawQueue;
+	ZHLN::Array<WorkerCmdContext> workerCmds;
 
 	bool depth_ready = false;
 	Vk::DescriptorPool uiPool;
@@ -476,8 +477,8 @@ struct RenderContext::Impl {
 	Vk::Sampler globalSampler;
 
 	uint32_t nextTextureIndex = 0;
-	JPH::Array<Vk::Image> textureImages;
-	JPH::Array<Vk::ImageView> textureViews;
+	ZHLN::Array<Vk::Image> textureImages;
+	ZHLN::Array<Vk::ImageView> textureViews;
 
 	Vk::DescriptorSetLayout cullingLayout;
 	Vk::DescriptorPool cullingPool;
@@ -490,14 +491,14 @@ struct RenderContext::Impl {
 	Vk::Sampler shadowSampler;
 	Vk::Sampler clampSampler;
 
-	JPH::Array<Vk::ImageView> shadowCascadeViews;
+	ZHLN::Array<Vk::ImageView> shadowCascadeViews;
 
 	Vk::RenderTarget<VK_FORMAT_D32_SFLOAT> shadowAtlas;
 	Vk::ImageView shadowAtlasCubeView;
 	Vk::ImageView shadowAtlas2DView;
 
-	JPH::Array<Vk::ImageView> punctualShadowViews;
-	JPH::Array<GPULight> mappedLights;
+	ZHLN::Array<Vk::ImageView> punctualShadowViews;
+	ZHLN::Array<GPULight> mappedLights;
 
 	Vk::Image ltcMatImage;
 	Vk::ImageView ltcMatView;
@@ -526,7 +527,7 @@ struct RenderContext::Impl {
 	Vk::PipelineLayout punctualShadowPipelineLayout;
 	Vk::ComputePass cullingPass;
 
-	JPH::Array<UIDrawCommand> uiDrawQueue;
+	ZHLN::Array<UIDrawCommand> uiDrawQueue;
 	Vk::Pipeline uiPipeline;
 	Vk::PipelineLayout uiPipelineLayout;
 
@@ -559,6 +560,15 @@ struct RenderContext::Impl {
 		float morphWeights[4];
 	};
 
+	struct BakePush {
+		uint32_t width;
+		uint32_t height;
+		float scale;
+		float randomness;
+		float distortion;
+		uint32_t bakeType;
+	};
+
 	Vk::ComputePass hangGpuPass;
 
 	void BuildHangGpuPipeline();
@@ -572,6 +582,8 @@ struct RenderContext::Impl {
 								   float scale, float randomness, float distortion);
 
 	Impl(Window& win) : window(win) {}
+
+	void UpdateBindlessTextureSlot(uint32_t slotIndex, VkImageView view, uint32_t dstBinding = 0);
 
 	void InitShadowResources();
 	void InitCullingResources();
@@ -617,7 +629,7 @@ struct RenderContext::Impl {
 		std::function<void()> reloadCallback;
 	};
 
-	std::vector<WatchableShader> shaderWatchers;
+	ZHLN::Array<WatchableShader> shaderWatchers;
 
 	void RegisterShaderWatcher(const char* path, std::function<void()> callback);
 

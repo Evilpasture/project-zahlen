@@ -88,7 +88,7 @@ struct GroupRange {
 
 struct GpuCullingPolicy {
 	static void
-	Record(const FrameRecorder& recorder, const JPH::Array<GroupRange>& groups, uint32_t drawCount,
+	Record(const FrameRecorder& recorder, const ZHLN::Array<GroupRange>& groups, uint32_t drawCount,
 		   Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> color_att,
 		   Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> vel_att,
 		   Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> norm_att,
@@ -162,7 +162,7 @@ struct GpuCullingPolicy {
 
 struct CpuCullingPolicy {
 	static void
-	Record(const FrameRecorder& recorder, const JPH::Array<GroupRange>& /*groups*/,
+	Record(const FrameRecorder& recorder, const ZHLN::Array<GroupRange>& /*groups*/,
 		   uint32_t drawCount, Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> color_att,
 		   Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> vel_att,
 		   Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> norm_att,
@@ -226,7 +226,7 @@ struct CpuCullingPolicy {
 };
 
 template <typename CullingPolicy, typename... Args>
-void ExecutePass(const FrameRecorder& recorder, const JPH::Array<GroupRange>& groups,
+void ExecutePass(const FrameRecorder& recorder, const ZHLN::Array<GroupRange>& groups,
 				 uint32_t drawCount, Args&&... args) {
 	CullingPolicy::Record(recorder, groups, drawCount, std::forward<Args>(args)...);
 }
@@ -396,13 +396,14 @@ struct MainPass {
 		Profiler::ScopedGpuProfile<Stages::MainPass, FrameProfiler> timer(cmd, recorder.frameIndex,
 																		  ctx.gpuProfiler);
 
-		auto [color_att, scope1] = Vk::ReadToColor(cmd, in.sceneColor);
-		auto [vel_att, scope2] = Vk::ReadToColor(cmd, in.velocity);
-		auto [norm_att, scope3] = Vk::ReadToColor(cmd, in.normRough);
-		auto [depth_att, scope4] = Vk::ScopedBarrier<Vk::ShaderReadState, Vk::DepthAttachmentState>(
-			cmd, in.depth, VK_IMAGE_ASPECT_DEPTH_BIT);
+		const auto [color_att, scope1] = Vk::ReadToColor(cmd, in.sceneColor);
+		const auto [vel_att, scope2] = Vk::ReadToColor(cmd, in.velocity);
+		const auto [norm_att, scope3] = Vk::ReadToColor(cmd, in.normRough);
+		const auto [depth_att, scope4] =
+			Vk::ScopedBarrier<Vk::ShaderReadState, Vk::DepthAttachmentState>(
+				cmd, in.depth, VK_IMAGE_ASPECT_DEPTH_BIT);
 
-		auto drawCount = static_cast<uint32_t>(ctx.drawQueue.size());
+		const auto drawCount = static_cast<uint32_t>(ctx.drawQueue.size());
 		if (drawCount == 0) {
 			Vk::DynamicPass(color_att.extent)
 				.AddColor(color_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
@@ -417,14 +418,14 @@ struct MainPass {
 			return;
 		}
 
-		JPH::Array<GroupRange> groups;
+		ZHLN::Array<GroupRange> groups;
 		groups.reserve((drawCount + 15) / 16);
 
 		NativeMaterial* currentMaterial = nullptr;
 
 		for (uint32_t i = 0; i < drawCount; ++i) {
 			const auto& drawCmd = ctx.drawQueue[i];
-			auto* drawMat = std::bit_cast<NativeMaterial*>(drawCmd.material);
+			auto* const drawMat = std::bit_cast<NativeMaterial* const>(drawCmd.material);
 
 			if (drawCmd.alphaMode == 2) {
 				currentMaterial = nullptr;
@@ -439,9 +440,11 @@ struct MainPass {
 			}
 		}
 
-		bool useGpuCulling = ctx.cullingPass.pipeline.Valid() &&
-							 ctx.indirectCommandsBuffers[recorder.frameIndex].Valid() &&
-							 (drawCount <= kGpuCullingMaxInstances);
+		const bool useGpuCulling = [&]() {
+			return ctx.cullingPass.pipeline.Valid() &&
+				   ctx.indirectCommandsBuffers[recorder.frameIndex].Valid() &&
+				   (drawCount <= kGpuCullingMaxInstances);
+		}();
 
 		if (useGpuCulling) {
 			ExecutePass<GpuCullingPolicy>(recorder, groups, drawCount, color_att, vel_att, norm_att,
@@ -578,10 +581,10 @@ struct ForwardPass {
 				 Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> depth) const noexcept {
 
 		VkCommandBuffer cmd = recorder.cmd;
-		auto& ctx = recorder.ctx;
+		const auto& ctx = recorder.ctx;
 
-		auto [color_att, color_scope] = Vk::ReadToColor(cmd, litColor);
-		auto [depth_att, depth_scope] =
+		const auto [color_att, color_scope] = Vk::ReadToColor(cmd, litColor);
+		const auto [depth_att, depth_scope] =
 			Vk::ScopedBarrier<Vk::ShaderReadState, Vk::DepthAttachmentState>(
 				cmd, depth, VK_IMAGE_ASPECT_DEPTH_BIT);
 
@@ -592,7 +595,7 @@ struct ForwardPass {
 				for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
 					const auto& drawCmd = ctx.drawQueue[i];
 					if (drawCmd.alphaMode == 2 && drawCmd.material->pipeline.Valid()) {
-						ObjectConstants pushConstants = {.instanceId = i, .isShadowPass = 0};
+						const ObjectConstants pushConstants = {.instanceId = i, .isShadowPass = 0};
 
 						Vk::DrawInstanced(
 							cmd,
@@ -619,22 +622,22 @@ struct BloomPass {
 			Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor) const noexcept
 		-> Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
 		VkCommandBuffer cmd = recorder.cmd;
-		auto& ctx = recorder.ctx;
+		const auto& ctx = recorder.ctx;
 		VkDevice device = ctx.ctx.Device();
 
 		Profiler::ScopedGpuProfile<Stages::BloomPass, FrameProfiler> timer(cmd, recorder.frameIndex,
 																		   ctx.gpuProfiler);
 
-		auto bloomThreshold_u =
+		const auto bloomThreshold_u =
 			AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.bloomThresholdTarget);
-		auto bloomBlur_u =
+		const auto bloomBlur_u =
 			AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.bloomBlurTarget);
-		auto bloomFinal_u =
+		const auto bloomFinal_u =
 			AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.bloomFinalTarget);
 
 		// --- Pass A: Brightness Thresholding & Downsampling ---
 		{
-			auto [bloomThreshold_att, scope] = Vk::ReadToColor(cmd, bloomThreshold_u);
+			const auto [bloomThreshold_att, scope] = Vk::ReadToColor(cmd, bloomThreshold_u);
 			ctx.bloomThresholdPass.WriteNext(device, inColor, ctx.defaultSampler.Get());
 
 			Vk::DynamicPass(ctx.bloomThresholdTarget.extent)
@@ -650,7 +653,7 @@ struct BloomPass {
 		// Generic local helper to dispatch the horizontal/vertical blur passes cleanly
 		auto DispatchBlurPass = [&](auto& passObject, auto inputImage, auto targetImage,
 									int horizontal, float texelSize) noexcept {
-			auto [targetAttachment, scope] = Vk::ReadToColor(cmd, targetImage);
+			const auto [targetAttachment, scope] = Vk::ReadToColor(cmd, targetImage);
 			passObject.WriteNext(device, inputImage, ctx.defaultSampler.Get());
 
 			Vk::DynamicPass(targetImage.extent)
@@ -706,10 +709,10 @@ struct AAPass {
 	[[nodiscard]] auto ExecuteTAA(VkCommandBuffer cmd, const FrameRecorder& recorder,
 								  const SceneRO& in, ColorImageRO color_ro) const noexcept
 		-> ColorImageRO {
-		auto& ctx = recorder.ctx;
-		auto accumCurr_ro =
+		const auto& ctx = recorder.ctx;
+		const auto accumCurr_ro =
 			AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.accumBuffers.Current());
-		auto accumNext_u =
+		const auto accumNext_u =
 			AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.accumBuffers.Next());
 
 		// Open transition scope
@@ -737,8 +740,8 @@ struct AAPass {
 	[[nodiscard]] auto ExecuteFXAA(VkCommandBuffer cmd, const FrameRecorder& recorder,
 								   const SceneRO& in, ColorImageRO color_ro) const noexcept
 		-> ColorImageRO {
-		auto& ctx = recorder.ctx;
-		auto accumNext_u =
+		const auto& ctx = recorder.ctx;
+		const auto accumNext_u =
 			AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.accumBuffers.Next());
 
 		{
@@ -772,7 +775,7 @@ struct AAPass {
 	[[nodiscard]] auto ExecuteSMAA(VkCommandBuffer cmd, const FrameRecorder& recorder,
 								   const SceneRO& in, ColorImageRO color_ro) const noexcept
 		-> ColorImageRO {
-		auto& ctx = recorder.ctx;
+		const auto& ctx = recorder.ctx;
 		struct SMAAMetrics {
 			float rcpWidth;
 			float rcpHeight;
@@ -794,9 +797,9 @@ struct AAPass {
 		};
 
 		// --- PASS 1: EDGE DETECTION ---
-		auto smaaEdge_u =
+		const auto smaaEdge_u =
 			AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.smaaEdgeTarget);
-		auto smaaEdge_ro = smaaEdge_u;
+		const auto smaaEdge_ro = smaaEdge_u;
 
 		ExecuteSubPass(smaaEdge_u, VK_ATTACHMENT_LOAD_OP_CLEAR, [&]() {
 			ctx.smaaEdgePass.WriteNext(ctx.ctx.Device(), color_ro, ctx.defaultSampler.Get());
@@ -805,13 +808,13 @@ struct AAPass {
 		});
 
 		// --- PASS 2: BLENDING WEIGHT CALCULATION ---
-		auto smaaWeight_u =
+		const auto smaaWeight_u =
 			AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.smaaWeightTarget);
-		auto smaaWeight_ro = smaaWeight_u;
+		const auto smaaWeight_ro = smaaWeight_u;
 
 		ExecuteSubPass(smaaWeight_u, VK_ATTACHMENT_LOAD_OP_CLEAR, [&]() {
-			VkImageView areaView = ctx.textureViews[ctx.smaaAreaTexIdx].Get();
-			VkImageView searchView = ctx.textureViews[ctx.smaaSearchTexIdx].Get();
+			const auto& [areaView, searchView] = std::tie(ctx.textureViews[ctx.smaaAreaTexIdx],
+														  ctx.textureViews[ctx.smaaSearchTexIdx]);
 
 			ctx.smaaWeightPass.WriteNext(ctx.ctx.Device(), smaaEdge_ro, areaView, searchView,
 										 ctx.defaultSampler.Get(), ctx.pointSampler.Get());
@@ -820,7 +823,7 @@ struct AAPass {
 		});
 
 		// --- PASS 3: NEIGHBORHOOD BLENDING ---
-		auto accumNext_u =
+		const auto accumNext_u =
 			AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.accumBuffers.Next());
 
 		ExecuteSubPass(accumNext_u, VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
@@ -857,7 +860,7 @@ struct BlitPass {
 
 		ctx.blitPass.WriteNext(ctx.ctx.Device(), inColor, ctx.defaultSampler.Get(), bloomColor);
 
-		struct BlitPushConstants {
+		const struct BlitPushConstants {
 			float vignetteIntensity;
 			float vignettePower;
 		} pc = {.vignetteIntensity = ctx.giSettings.vignetteIntensity,
@@ -883,15 +886,18 @@ struct BlitPass {
 							uipc.posAddress = draw.posMesh->vboAddress;
 							uipc.attrAddress = draw.attrMesh->vboAddress;
 
-							if (draw.useScissor) {
-								VkRect2D vkScissor = {
-									.offset = {.x = draw.scissorRect.x, .y = draw.scissorRect.y},
-									.extent = {.width = draw.scissorRect.width,
-											   .height = draw.scissorRect.height}};
-								vkCmdSetScissor(cmd, 0, 1, &vkScissor);
-							} else {
-								vkCmdSetScissor(cmd, 0, 1, &defaultScissor);
-							}
+							Vk::ScopedScissor scissorGuard(
+								cmd,
+								Vk::ScopedScissor::ScissorDesc{
+									.target =
+										draw.useScissor
+											? VkRect2D{.offset = {.x = draw.scissorRect.x,
+																  .y = draw.scissorRect.y},
+													   .extent = {.width = draw.scissorRect.width,
+																  .height =
+																	  draw.scissorRect.height}}
+											: defaultScissor,
+									.fallback = defaultScissor});
 
 							Vk::DrawInstanced(cmd,
 											  {.pipeline = ctx.uiPipeline.Get(),
@@ -900,8 +906,6 @@ struct BlitPass {
 											   .vertexCount = draw.posMesh->vertexCount},
 											  uipc);
 						}
-						// Restore default scissor state before exiting
-						vkCmdSetScissor(cmd, 0, 1, &defaultScissor);
 						ctx.uiDrawQueue.clear();
 					}
 					if (!ctx.window.IsTTY()) {
@@ -925,8 +929,8 @@ struct BlitPass {
 
 void RenderContext::Impl::SortDrawQueue() {
 	auto drawCount = static_cast<uint32_t>(drawQueue.size());
-	JPH::Array<SortItem> items(drawCount);
-	JPH::Array<SortItem> temp(drawCount);
+	ZHLN::Array<SortItem> items(drawCount);
+	ZHLN::Array<SortItem> temp(drawCount);
 
 	for (uint32_t i = 0; i < drawCount; ++i) {
 		items[i] = {.key = SortKey::Pack(drawQueue[i].material, drawQueue[i].posMesh),
@@ -935,7 +939,7 @@ void RenderContext::Impl::SortDrawQueue() {
 
 	RadixSort64(items.data(), temp.data(), drawCount);
 
-	JPH::Array<DrawCommand> sortedDrawQueue(drawCount);
+	ZHLN::Array<DrawCommand> sortedDrawQueue(drawCount);
 	for (uint32_t i = 0; i < drawCount; ++i) {
 		sortedDrawQueue[i] = drawQueue[items[i].payload];
 	}

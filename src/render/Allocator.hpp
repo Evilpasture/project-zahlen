@@ -6,6 +6,7 @@
 #pragma once
 
 #include <cstring>
+#include <memory>
 #include <vk_mem_alloc.h>
 #include <vulkan/vulkan.h>
 
@@ -129,5 +130,28 @@ void FillBuffer(VkCommandBuffer cmd, const Buffer& buffer, VkDeviceSize offset =
 
 	vkCmdFillBuffer(cmd, buffer.Handle(), offset, sizeof(T), data);
 }
+
+// ============================================================================
+// Immediate Command RAII Wrapper (Staging/Initial Uploads)
+// ============================================================================
+
+class ImmediateCommand {
+  public:
+	ImmediateCommand(VkDevice dev, VkQueue q, uint32_t queueFamily) noexcept;
+	~ImmediateCommand() noexcept;
+
+	void KeepAlive(Buffer&& buffer);
+
+	operator VkCommandBuffer() const noexcept;
+
+	ImmediateCommand(const ImmediateCommand&) = delete;
+	auto operator=(const ImmediateCommand&) -> ImmediateCommand& = delete;
+	ImmediateCommand(ImmediateCommand&&) = delete;
+	auto operator=(ImmediateCommand&&) -> ImmediateCommand& = delete;
+
+  private:
+	struct Impl;
+	std::unique_ptr<Impl> _impl;
+};
 
 } // namespace ZHLN::Vk

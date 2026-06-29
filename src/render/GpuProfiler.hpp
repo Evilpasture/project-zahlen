@@ -65,9 +65,11 @@ template <GpuStageTag... Stages> class GpuProfiler {
 
 	// --- Compile-Time Resolved Writes ---
 
-	template <GpuStageTag Stage> void WriteStart(VkCommandBuffer cmd, uint32_t frameIndex) noexcept;
+	template <GpuStageTag Stage>
+	void WriteStart(VkCommandBuffer cmd, uint32_t frameIndex) const noexcept;
 
-	template <GpuStageTag Stage> void WriteEnd(VkCommandBuffer cmd, uint32_t frameIndex) noexcept;
+	template <GpuStageTag Stage>
+	void WriteEnd(VkCommandBuffer cmd, uint32_t frameIndex) const noexcept;
 
 	// --- Results Extraction ---
 	template <typename Func>
@@ -76,8 +78,8 @@ template <GpuStageTag... Stages> class GpuProfiler {
   private:
 	VkDevice _device = VK_NULL_HANDLE;
 	std::array<VkQueryPool, 2> _pools = {VK_NULL_HANDLE, VK_NULL_HANDLE};
-	std::array<uint32_t, 2> _recordedMasks = {0, 0}; // Double-buffered stage record mask [2]
-	bool _enabled = false;							 // Added
+	mutable std::array<uint32_t, 2> _recordedMasks = {0, 0};
+	bool _enabled = false;
 };
 
 // ============================================================================
@@ -86,7 +88,7 @@ template <GpuStageTag... Stages> class GpuProfiler {
 
 template <GpuStageTag Stage, typename ProfilerT> class ScopedGpuProfile {
   public:
-	ScopedGpuProfile(VkCommandBuffer cmd, uint32_t frameIndex, ProfilerT& profiler) noexcept;
+	ScopedGpuProfile(VkCommandBuffer cmd, uint32_t frameIndex, const ProfilerT& profiler) noexcept;
 	~ScopedGpuProfile() noexcept;
 
 	ScopedGpuProfile(const ScopedGpuProfile&) = delete;
@@ -95,7 +97,7 @@ template <GpuStageTag Stage, typename ProfilerT> class ScopedGpuProfile {
   private:
 	VkCommandBuffer _cmd;
 	uint32_t _frameIndex;
-	ProfilerT& _profiler;
+	const ProfilerT& _profiler;
 };
 
 } // namespace ZHLN::Profiler

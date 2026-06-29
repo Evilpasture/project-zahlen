@@ -32,7 +32,10 @@ zh:config({
 function _G.StartGame()
     zh.log("[Gameplay] Initializing physics and spawning 3D assets...")
 
-    -- Spawn static ground baseplate
+    -- 1. Tell the C++ Engine to construct the complex Player and Camera objects!
+    _G.player_ent = zh:dispatch("InitPlayer")
+
+    -- 2. Spawn static ground baseplate
     local baseplate = zh:spawn_entity({
         type = "box",
         size = zh.vec3(100.0, 1.0, 100.0),
@@ -43,12 +46,8 @@ function _G.StartGame()
     zh.ecs:add(baseplate, "PBRComponent", { roughness = 0.15, metallic = 0.85 })
     zh.ecs:add(baseplate, "NameComponent", { name = "Baseplate" })
 
-    -- Spawn some physical test crates
-    local colors = {
-        { 0.8, 0.2, 0.2, 1.0 },
-        { 0.2, 0.8, 0.2, 1.0 },
-        { 0.2, 0.2, 0.8, 1.0 }
-    }
+    -- 3. Spawn test crates
+    local colors = { { 0.8, 0.2, 0.2, 1.0 }, { 0.2, 0.8, 0.2, 1.0 }, { 0.2, 0.2, 0.8, 1.0 } }
     for i = 1, 3 do
         local box = zh:spawn_entity({
             type = "box",
@@ -57,11 +56,10 @@ function _G.StartGame()
             color = colors[(i % 3) + 1],
             static = false
         })
-        zh.ecs:add(box, "NameComponent", { name = "Crate_" .. tostring(i) })
         zh.ecs:add(box, "PBRComponent", { roughness = 0.3, metallic = 0.1 })
     end
 
-    -- Spawn directional sunlight
+    -- 4. Spawn directional sunlight
     local sun = zh:spawn_light({
         type = 0,
         rotation = { -0.575, 0.287, 0.0, 0.766 },
@@ -71,8 +69,6 @@ function _G.StartGame()
         range = 400.0
     })
     zh.ecs:add(sun, "SunTagComponent")
-
-    zh.log("[Gameplay] Game world loaded successfully.")
 end
 
 -- ============================================================================

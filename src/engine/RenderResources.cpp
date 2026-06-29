@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/engine/Render_Resources.cpp
+// File: src/engine/RenderResources.cpp
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
 #include "Zahlen/Types.hpp"
@@ -11,30 +11,50 @@
 
 namespace ZHLN {
 
+void RenderContext::Impl::UpdateBindlessTextureSlot(uint32_t slotIndex, VkImageView view,
+													uint32_t dstBinding) {
+	// NOTE: Since our bindless descriptor layouts use VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT,
+	// host-side descriptor updates are fully valid even while the command buffer is executing.
+	// When migrating ImmediateCommand away from host-stalling (vkQueueWaitIdle), ensure that the
+	// GPU-side layout transition command is recorded and synchronized on the timeline before any
+	// shader reads from this slotIndex.
+	VkDescriptorImageInfo bindlessUpdate = {.sampler = VK_NULL_HANDLE,
+											.imageView = view,
+											.imageLayout =
+												VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+
+	std::array<VkWriteDescriptorSet, 2> writes = {};
+	for (int i = 0; i < 2; ++i) {
+		writes[i] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+					 .pNext = nullptr,
+					 .dstSet = bindlessSets[i],
+					 .dstBinding = dstBinding,
+					 .dstArrayElement = slotIndex,
+					 .descriptorCount = 1,
+					 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+					 .pImageInfo = &bindlessUpdate,
+					 .pBufferInfo = nullptr,
+					 .pTexelBufferView = nullptr};
+	}
+	vkUpdateDescriptorSets(ctx.Device(), 2, writes.data(), 0, nullptr);
+}
+
 // Define CompileShadowPipeline here so it compiles with vertex reflection visible
 void RenderContext::Impl::CompileShadowPipeline(VkDevice device, const void* shaderData,
 												size_t shaderSize) {
 	auto v_desc = Vk::CreateShaderDesc(Vk::AsSpirV(shaderData), shaderSize);
-	// NEW: Include fragment shader in shadow pass so alpha-discard functions correctly!
 	ZHLN_ShaderDesc f_desc = {.code = Vk::AsSpirV(&ZHLN_Resource_ShadowFragSpv[0]),
 							  .size = ZHLN_Resource_ShadowFragSpv_Len,
 							  .entry_point = "PSShadow"};
 
 	auto shaders = Vk::ShaderStages::Create(device, v_desc, f_desc);
 
-	VkPushConstantRange pc_range = {.stageFlags =
-										VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-									.offset = 0,
-									.size = sizeof(ObjectConstants)};
-
-	const std::array layouts = {bindlessLayout.Get()};
-	ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = layouts.data(),
-										   .set_layout_count = 1,
-										   .push_constants = &pc_range,
-										   .push_constant_count = 1};
-
 	shadowPipelineLayout =
-		Vk::PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &layout_desc));
+		Vk::PipelineLayoutBuilder(device)
+			.AddDescriptorSetLayout(bindlessLayout.Get())
+			.AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+							 sizeof(ObjectConstants))
+			.Build();
 
 	shadowPipeline = Vk::PipelineBuilder{}
 						 .Shaders(shaders)
@@ -50,20 +70,11 @@ void RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const v
 	auto v_desc = Vk::CreateShaderDesc(Vk::AsSpirV(shaderData), shaderSize);
 	auto shaders = Vk::ShaderStages::Create(device, v_desc, {}); // Depth-only, no fragment shader!
 
-	VkPushConstantRange pc_range = {
-		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-		.offset = 0,
-		.size = sizeof(uint32_t) // Pushes pc.lightIndex (4 bytes)
-	};
-
-	const std::array layouts = {bindlessLayout.Get()};
-	ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = layouts.data(),
-										   .set_layout_count = 1,
-										   .push_constants = &pc_range,
-										   .push_constant_count = 1};
-
 	punctualShadowPipelineLayout =
-		Vk::PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &layout_desc));
+		Vk::PipelineLayoutBuilder(device)
+			.AddDescriptorSetLayout(bindlessLayout.Get())
+			.AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT, sizeof(uint32_t))
+			.Build();
 
 	punctualShadowPipeline =
 		Vk::PipelineBuilder{}
@@ -106,7 +117,6 @@ auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHa
 
 void RenderContext::DestroyBuffer(BufferHandle handle) {
 	if (handle != BufferHandle::Invalid) {
-		// GenerationalPool handles the underlying VMA destruction safely
 		_impl->meshPool.Destroy(handle);
 	}
 }
@@ -121,17 +131,11 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 	auto shaders = Vk::ShaderStages::Create(_impl->ctx.Device(), v_desc, f_desc);
 	auto* impl = _impl.get();
 
-	VkPushConstantRange pc_range = {.stageFlags =
-										VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-									.offset = 0,
-									.size = sizeof(ZHLN::ObjectConstants)};
-	const std::array layouts = {impl->bindlessLayout.Get()};
-	ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = layouts.data(),
-										   .set_layout_count = 1,
-										   .push_constants = &pc_range,
-										   .push_constant_count = 1};
-	auto layout = Vk::PipelineLayout(impl->ctx.Device(),
-									 ZHLN_CreatePipelineLayout(impl->ctx.Device(), &layout_desc));
+	auto layout = Vk::PipelineLayoutBuilder(impl->ctx.Device())
+					  .AddDescriptorSetLayout(impl->bindlessLayout.Get())
+					  .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+									   sizeof(ZHLN::ObjectConstants))
+					  .Build();
 
 	auto pipeline = Vk::PipelineBuilder{}
 						.Shaders(shaders)
@@ -158,7 +162,6 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 
 	auto finalPipeline = pipeline.Build(impl->ctx.Device());
 
-	// Return a packed generational handle
 	return {.pipeline = impl->materialPool.Create(std::move(finalPipeline), std::move(layout)),
 			.alphaMode = desc.alphaBlend ? 2u : 0u};
 }
@@ -168,7 +171,6 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
 	const VkDevice device = ctx.Device();
 	const size_t imageSize = static_cast<size_t>(width) * height * 4;
 
-	// 1. Calculate proper mip levels based on largest dimension
 	uint32_t mipLevels = std::bit_width(std::max(width, height));
 
 	const VkImageCreateInfo imgInfo = {
@@ -178,11 +180,10 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
 		.imageType = VK_IMAGE_TYPE_2D,
 		.format = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM,
 		.extent{.width = width, .height = height, .depth = 1},
-		.mipLevels = mipLevels, // <--- Use calculated mip levels
+		.mipLevels = mipLevels,
 		.arrayLayers = 1,
 		.samples = VK_SAMPLE_COUNT_1_BIT,
 		.tiling = VK_IMAGE_TILING_OPTIMAL,
-		// 2. Add TRANSFER_SRC so the GPU can blit and downsample the mips
 		.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
 				 VK_IMAGE_USAGE_SAMPLED_BIT,
 		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
@@ -192,80 +193,39 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
 
 	auto gpuImage = Vk::Image::Create(allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 
-	Vk::CommandPool tempPool(device, ctx.PhysicalInfo().graphics_family);
-	if (!tempPool.Allocate(1)) {
-		ZHLN::Panic("Allocation failed for texture");
-	}
-	VkCommandBuffer cmd = tempPool[0];
-
-	ZHLN_BeginCommandBuffer(cmd);
-
 	auto staging = Vk::Buffer::Create(allocator.Get(), imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
 									  VMA_MEMORY_USAGE_CPU_ONLY);
 	std::memcpy(staging.Map().data, data, imageSize);
 
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
-		cmd, gpuImage.Handle());
+	{
+		Vk::ImmediateCommand cmd(device, ctx.GraphicsQueue(), ctx.PhysicalInfo().graphics_family);
 
-	ZHLN_BufferImageCopyDesc copyRegion = {.buffer = staging.Handle(),
-										   .image = gpuImage.Handle(),
-										   .layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-										   .width = width,
-										   .height = height,
-										   .buffer_offset = 0,
-										   .mip_level = 0,
-										   .base_array_layer = 0};
-	ZHLN_CmdCopyBufferToImage(cmd, &copyRegion);
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
+			cmd, gpuImage.Handle());
 
-	// 3. Generate the mipmaps on the GPU
-	ZHLN_GenerateMipmaps(cmd, gpuImage.Handle(), width, height, mipLevels);
+		ZHLN_BufferImageCopyDesc copyRegion = {.buffer = staging.Handle(),
+											   .image = gpuImage.Handle(),
+											   .layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+											   .width = width,
+											   .height = height,
+											   .buffer_offset = 0,
+											   .mip_level = 0,
+											   .base_array_layer = 0};
+		ZHLN_CmdCopyBufferToImage(cmd, &copyRegion);
 
-	ZHLN_EndCommandBuffer(cmd);
+		ZHLN_GenerateMipmaps(cmd, gpuImage.Handle(), width, height, mipLevels);
 
-	VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-										 .pNext = nullptr,
-										 .commandBuffer = cmd,
-										 .deviceMask = 0};
-	VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-							.pNext = nullptr,
-							.flags = 0,
-							.waitSemaphoreInfoCount = 0,
-							.pWaitSemaphoreInfos = nullptr,
-							.commandBufferInfoCount = 1,
-							.pCommandBufferInfos = &subInfo,
-							.signalSemaphoreInfoCount = 0,
-							.pSignalSemaphoreInfos = nullptr};
-	vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
-	vkQueueWaitIdle(ctx.GraphicsQueue());
+		cmd.KeepAlive(std::move(staging));
+	}
 
-	// 4. Create the image view supporting all mip levels
 	auto gpuView = isSRGB ? Vk::CreateView<VK_FORMAT_R8G8B8A8_SRGB>(
 								device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels)
 						  : Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(
 								device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
 
 	uint32_t index = nextTextureIndex++;
+	UpdateBindlessTextureSlot(index, gpuView.Get(), 0);
 
-	VkDescriptorImageInfo bindlessUpdate = {.sampler = VK_NULL_HANDLE,
-											.imageView = gpuView.Get(),
-											.imageLayout =
-												VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-
-	std::array<VkWriteDescriptorSet, 2> writes = {};
-	for (int i = 0; i < 2; ++i) {
-		writes[i] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-					 .pNext = nullptr,
-					 .dstSet = bindlessSets[i],
-					 .dstBinding = 0,
-					 .dstArrayElement = index,
-					 .descriptorCount = 1,
-					 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-					 .pImageInfo = &bindlessUpdate,
-					 .pBufferInfo = nullptr,
-					 .pTexelBufferView = nullptr};
-	}
-
-	vkUpdateDescriptorSets(device, 2, writes.data(), 0, nullptr);
 	textureImages.push_back(std::move(gpuImage));
 	textureViews.push_back(std::move(gpuView));
 
@@ -297,14 +257,6 @@ uint32_t RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceD
 
 	auto gpuImage = Vk::Image::Create(allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 
-	Vk::CommandPool tempPool(device, ctx.PhysicalInfo().graphics_family);
-	if (!tempPool.Allocate(1)) {
-		ZHLN::Panic("Vulkan: Failed to allocate command buffer for Cubemap copy");
-	}
-	VkCommandBuffer cmd = tempPool[0];
-
-	ZHLN_BeginCommandBuffer(cmd);
-
 	Vk::Buffer staging = Vk::Buffer::Create(
 		allocator.Get(), faceSize * 6, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 
@@ -315,86 +267,48 @@ uint32_t RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceD
 		}
 	}
 
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
-		cmd, gpuImage.Handle());
+	{
+		Vk::ImmediateCommand cmd(device, ctx.GraphicsQueue(), ctx.PhysicalInfo().graphics_family);
 
-	for (uint32_t i = 0; i < 6; ++i) {
-		VkBufferImageCopy2 region = {
-			.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
-			.pNext = nullptr,
-			.bufferOffset = i * faceSize,
-			.bufferRowLength = {},
-			.bufferImageHeight = {},
-			.imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-								 .mipLevel = 0,
-								 .baseArrayLayer = i,
-								 .layerCount = 1},
-			.imageOffset = {},
-			.imageExtent = {.width = width, .height = height, .depth = 1},
-		};
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
+			cmd, gpuImage.Handle());
 
-		VkCopyBufferToImageInfo2 copyInfo = {
-			.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
-			.pNext = {},
-			.srcBuffer = staging.Handle(),
-			.dstImage = gpuImage.Handle(),
-			.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-			.regionCount = 1,
-			.pRegions = &region,
-		};
+		// Batch all six cubemap faces into a single copy pipeline dispatch
+		std::array<VkBufferImageCopy2, 6> regions{};
+		for (uint32_t i = 0; i < 6; ++i) {
+			regions[i] = {.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
+						  .pNext = nullptr,
+						  .bufferOffset = i * faceSize,
+						  .bufferRowLength = 0,
+						  .bufferImageHeight = 0,
+						  .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+											   .mipLevel = 0,
+											   .baseArrayLayer = i,
+											   .layerCount = 1},
+						  .imageOffset = {.x = 0, .y = 0, .z = 0},
+						  .imageExtent = {.width = width, .height = height, .depth = 1}};
+		}
+
+		VkCopyBufferToImageInfo2 copyInfo = {.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
+											 .pNext = nullptr,
+											 .srcBuffer = staging.Handle(),
+											 .dstImage = gpuImage.Handle(),
+											 .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+											 .regionCount = static_cast<uint32_t>(regions.size()),
+											 .pRegions = regions.data()};
 		vkCmdCopyBufferToImage2(cmd, &copyInfo);
+
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
+
+		cmd.KeepAlive(std::move(staging));
 	}
-
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-						 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
-
-	ZHLN_EndCommandBuffer(cmd);
-
-	VkCommandBufferSubmitInfo subInfo = {
-		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-		.pNext = {},
-		.commandBuffer = cmd,
-		.deviceMask = {},
-	};
-	VkSubmitInfo2 submit = {
-		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-		.pNext = {},
-		.flags = {},
-		.waitSemaphoreInfoCount = {},
-		.pWaitSemaphoreInfos = {},
-		.commandBufferInfoCount = 1,
-		.pCommandBufferInfos = &subInfo,
-		.signalSemaphoreInfoCount = {},
-		.pSignalSemaphoreInfos = {},
-	};
-	vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
-	vkQueueWaitIdle(ctx.GraphicsQueue());
 
 	auto gpuView = Vk::CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), 1);
 
 	uint32_t index = nextTextureIndex++;
+	UpdateBindlessTextureSlot(index, gpuView.Get(), 0);
 
-	VkDescriptorImageInfo bindlessUpdate = {.sampler = VK_NULL_HANDLE,
-											.imageView = gpuView.Get(),
-											.imageLayout =
-												VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-
-	std::array<VkWriteDescriptorSet, 2> writes = {};
-	for (int i = 0; i < 2; ++i) {
-		writes[i] = {
-			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-			.pNext = nullptr,
-			.dstSet = bindlessSets[i],
-			.dstBinding = 0,
-			.dstArrayElement = index,
-			.descriptorCount = 1,
-			.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-			.pImageInfo = &bindlessUpdate,
-			.pBufferInfo = {},
-			.pTexelBufferView = {},
-		};
-	}
-	vkUpdateDescriptorSets(device, 2, writes.data(), 0, nullptr);
 	textureImages.push_back(std::move(gpuImage));
 	textureViews.push_back(std::move(gpuView));
 
@@ -405,7 +319,6 @@ auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data,
 										  VkBufferUsageFlags functionalUsage) const
 	-> std::pair<Vk::Buffer, VkDeviceAddress> {
 
-	// 1. Gather all core required usage bits
 	VkBufferUsageFlags usage = functionalUsage | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
 							   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 
@@ -413,45 +326,15 @@ auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data,
 		usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
 	}
 
-	// 2. Allocate the GPU destination memory
 	auto gpu_buf = Vk::Buffer::Create(allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY);
 
-	// 3. Command recording & temporary submit infrastructure
-	Vk::CommandPool tempPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-	if (!tempPool.Allocate(1)) {
-		ZHLN::Panic("Vulkan: Failed to allocate transient command buffer for buffer upload.");
+	{
+		Vk::ImmediateCommand cmd(ctx.Device(), ctx.GraphicsQueue(),
+								 ctx.PhysicalInfo().graphics_family);
+		auto staging = Vk::UploadToBuffer(allocator.Get(), cmd, gpu_buf, data, size);
+		cmd.KeepAlive(std::move(staging));
 	}
 
-	VkCommandBuffer cmd = tempPool[0];
-	ZHLN_BeginCommandBuffer(cmd);
-	auto staging = Vk::UploadToBuffer(allocator.Get(), cmd, gpu_buf, data, size);
-	ZHLN_EndCommandBuffer(cmd);
-
-	// 4. Submit transfer commands
-	VkCommandBufferSubmitInfo cmd_info = {
-		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-		.pNext = {},
-		.commandBuffer = cmd,
-		.deviceMask = {},
-	};
-	VkSubmitInfo2 submit = {
-		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-		.pNext = {},
-		.flags = {},
-		.waitSemaphoreInfoCount = {},
-		.pWaitSemaphoreInfos = {},
-		.commandBufferInfoCount = 1,
-		.pCommandBufferInfos = &cmd_info,
-		.signalSemaphoreInfoCount = {},
-		.pSignalSemaphoreInfos = {},
-	};
-
-	vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
-
-	// Consolidated sync stall
-	vkQueueWaitIdle(ctx.GraphicsQueue());
-
-	// 5. Query the Buffer Device Address (BDA)
 	VkBufferDeviceAddressInfo bdaInfo = {
 		.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
 		.pNext = {},
@@ -473,7 +356,6 @@ auto RenderContext::CreateTextureCube(const void* const* faceData, uint32_t widt
 }
 
 auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle {
-	// Allocate contiguous memory for Positions followed by Attributes
 	size_t size = (vertexCount * sizeof(VertexPosition)) + (vertexCount * sizeof(VertexAttributes));
 
 	VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
@@ -486,7 +368,6 @@ auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHa
 		Vk::Buffer::Create(_impl->allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY);
 
 	VkDeviceAddress address = Vk::GetBufferDeviceAddress(_impl->ctx.Device(), gpu_buf.Handle());
-	// Pass vertexCount to the pool so we know how to split the addresses later
 	return _impl->meshPool.Create(std::move(gpu_buf), vertexCount, address);
 }
 
@@ -504,10 +385,7 @@ void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, con
 	auto mapped = nativeMesh->buffer.Map();
 	char* basePtr = static_cast<char*>(mapped.data);
 
-	// Copy positions to the start of the buffer
 	std::memcpy(basePtr, posData, std::min(posSize, maxPosSize));
-
-	// Copy attributes to the second half of the buffer (offset by the maximum position stride)
 	std::memcpy(basePtr + maxPosSize, attrData, std::min(attrSize, maxAttrSize));
 
 	nativeMesh->vertexCount = std::min(vertexCount, 500000u);
@@ -531,13 +409,9 @@ void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matri
 uint32_t RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas) {
 	uint32_t offset = _impl->nextMorphDeltaIndex;
 
-	// 1. Correctly map the morphDeltasBuffer and keep it in scope!
 	auto mappedRegion = _impl->morphDeltasBuffer.Map();
-
-	// 2. Safely offset the pointer within the mapped memory block
 	float* gpuDeltas = std::bit_cast<float*>(mappedRegion.data) + (static_cast<size_t>(offset * 4));
 
-	// 3. This memcpy is now 100% safe since mappedRegion is still alive
 	std::memcpy(gpuDeltas, deltas, count * sizeof(float) * 4);
 
 	_impl->nextMorphDeltaIndex += count;
@@ -548,13 +422,11 @@ void RenderContext::SetShadowResolution(uint32_t resolution) {
 	auto* impl = _impl.get();
 	vkDeviceWaitIdle(impl->ctx.Device());
 
-	// 1. Recreate the shadow map with the new resolution
 	impl->shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
 		impl->allocator, impl->ctx, {.width = resolution, .height = resolution},
 		{.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
 		 .arrayLayers = RenderContext::Impl::NUM_CASCADES});
 
-	// 2. Recreate the cascade views so they point to the new image allocation!
 	impl->shadowCascadeViews.clear();
 	impl->shadowCascadeViews.resize(RenderContext::Impl::NUM_CASCADES);
 	for (uint32_t i = 0; i < RenderContext::Impl::NUM_CASCADES; ++i) {
@@ -562,62 +434,19 @@ void RenderContext::SetShadowResolution(uint32_t resolution) {
 			impl->ctx.Device(), impl->shadowMap.image.Handle(), i, 1);
 	}
 
-	// 3. Transition the new shadow map layout to SHADER_READ_ONLY_OPTIMAL
-	Vk::CommandPool tempPool(impl->ctx.Device(), impl->ctx.PhysicalInfo().graphics_family);
-	if (tempPool.Allocate(1)) {
-		VkCommandBuffer cmd = tempPool[0];
-		ZHLN_BeginCommandBuffer(cmd);
+	{
+		Vk::ImmediateCommand cmd(impl->ctx.Device(), impl->ctx.GraphicsQueue(),
+								 impl->ctx.PhysicalInfo().graphics_family);
 
-		// Transition to write/attachment layout first (satisfies Vulkan validation best practices)
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
 			cmd, impl->shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
 
-		// Transition to final resting read-only shader resource layout
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
 							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
 			cmd, impl->shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
-
-		ZHLN_EndCommandBuffer(cmd);
-
-		VkCommandBufferSubmitInfo cmd_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-											  .pNext = nullptr,
-											  .commandBuffer = cmd,
-											  .deviceMask = 0};
-		VkSubmitInfo2 submit = {
-			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-			.pNext = nullptr,
-			.flags = 0,
-			.waitSemaphoreInfoCount = {},
-			.pWaitSemaphoreInfos = {},
-			.commandBufferInfoCount = 1,
-			.pCommandBufferInfos = &cmd_info,
-			.signalSemaphoreInfoCount = {},
-			.pSignalSemaphoreInfos = {},
-		};
-		vkQueueSubmit2(impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
-		vkQueueWaitIdle(impl->ctx.GraphicsQueue());
 	}
 
-	// 4. Update the bindless descriptor set (Binding 2 represents the Global Shadow Map)
-	for (int i = 0; i < 2; ++i) {
-		VkDescriptorImageInfo updateInfo = {.sampler = VK_NULL_HANDLE,
-											.imageView = impl->shadowMap.view.Get(),
-											.imageLayout =
-												VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-		VkWriteDescriptorSet write = {
-			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-			.pNext = nullptr,
-			.dstSet = impl->bindlessSets[i],
-			.dstBinding = 2,
-			.dstArrayElement = 0,
-			.descriptorCount = 1,
-			.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-			.pImageInfo = &updateInfo,
-			.pBufferInfo = {},
-			.pTexelBufferView = {},
-		};
-		vkUpdateDescriptorSets(impl->ctx.Device(), 1, &write, 0, nullptr);
-	}
+	impl->UpdateBindlessTextureSlot(0, impl->shadowMap.view.Get(), 2);
 	ZHLN::Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);
 }
 
@@ -628,7 +457,7 @@ void RenderContext::SetAAState(const AAState& state) {
 void RenderContext::BuildMeshBLAS(Mesh& mesh) {
 	auto* impl = _impl.get();
 	if (!impl->rtCtx.Valid()) {
-		return; // Gracefully skip BLAS build on non-RT systems
+		return;
 	}
 
 	auto* nativePosMesh = impl->meshPool.Resolve(mesh.posBuffer);
@@ -672,54 +501,25 @@ void RenderContext::BuildMeshBLAS(Mesh& mesh) {
 												VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
 											VMA_MEMORY_USAGE_GPU_ONLY);
 
-	// Because we submit isolated queues, we just block the main thread and sync manually here (safe
-	// for initial static uploads)
-	Vk::CommandPool tempPool(impl->ctx.Device(), impl->ctx.PhysicalInfo().graphics_family);
-	if (!tempPool.Allocate(1)) {
-		ZHLN::Panic("Failed to initialize command pool for BLAS mesh building.");
+	{
+		Vk::ImmediateCommand cmd(impl->ctx.Device(), impl->ctx.GraphicsQueue(),
+								 impl->ctx.PhysicalInfo().graphics_family);
+		impl->rtCtx.CmdBuildBlas(cmd, geom, nativePosMesh->blas,
+								 Vk::GetBufferDeviceAddress(impl->ctx.Device(), scratch.Handle()),
+								 primitiveCount);
+		cmd.KeepAlive(std::move(scratch));
 	}
-	VkCommandBuffer cmd = tempPool[0];
-	ZHLN_BeginCommandBuffer(cmd);
-
-	impl->rtCtx.CmdBuildBlas(cmd, geom, nativePosMesh->blas,
-							 Vk::GetBufferDeviceAddress(impl->ctx.Device(), scratch.Handle()),
-							 primitiveCount);
-
-	ZHLN_EndCommandBuffer(cmd);
-
-	VkCommandBufferSubmitInfo subInfo = {
-		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-		.pNext = {},
-		.commandBuffer = cmd,
-		.deviceMask = {},
-	};
-	VkSubmitInfo2 submit = {
-		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-		.pNext = {},
-		.flags = {},
-		.waitSemaphoreInfoCount = {},
-		.pWaitSemaphoreInfos = {},
-		.commandBufferInfoCount = 1,
-		.pCommandBufferInfos = &subInfo,
-		.signalSemaphoreInfoCount = {},
-		.pSignalSemaphoreInfos = {},
-	};
-	vkQueueSubmit2(impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
-	vkQueueWaitIdle(impl->ctx.GraphicsQueue());
 }
 
 void RenderContext::Impl::InitializeSystemTextures() {
 	ZHLN::Log("[Resource Factory] Registering fallback system texture slots...");
 
-	// Index 0: Solid Black (Used for Emissive, Metallic, and Roughness fallbacks) -> Linear
 	std::array<uint8_t, 4> blackPixel = {0, 0, 0, 0};
 	uint32_t blackIdx = CreateTextureInternal(blackPixel.data(), 1, 1, false);
 
-	// Index 1: Solid White (Used for Albedo fallback) -> sRGB
 	std::array<uint8_t, 4> whitePixel = {255, 255, 255, 255};
 	uint32_t whiteIdx = CreateTextureInternal(whitePixel.data(), 1, 1, true);
 
-	// Index 2: Flat Tangent-Space Normal Map (R=128, G=128, B=255) -> Linear
 	std::array<uint8_t, 4> normalPixel = {128, 128, 255, 255};
 	uint32_t normalIdx = CreateTextureInternal(normalPixel.data(), 1, 1, false);
 
@@ -727,6 +527,7 @@ void RenderContext::Impl::InitializeSystemTextures() {
 				 "System textures allocated out of order! Expected [0, 1, 2], got [{}, {}, {}]",
 				 blackIdx, whiteIdx, normalIdx);
 }
+
 void RenderContext::Impl::RegisterShaderWatcher(const char* path, std::function<void()> callback) {
 	if constexpr (isDev) {
 		shaderWatchers.push_back(
@@ -736,7 +537,6 @@ void RenderContext::Impl::RegisterShaderWatcher(const char* path, std::function<
 
 auto RenderContext::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx,
 										  float scale, float randomness) -> uint32_t {
-	// Delegate directly to the private Impl method, passing 0.0f for the unused parameter
 	return _impl->BakeProceduralTexture(width, height, variantIdx, scale, randomness, 0.0f);
 }
 
