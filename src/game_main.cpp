@@ -111,7 +111,7 @@ void WriteBenchmarkLog(std::vector<double> frameTimes) {
 	}
 }
 
-std::string s_GameplayFile = "scripts/gameplay.lua";
+std::string s_GameplayFile = "scripts/gameplay_template.lua";
 
 // ============================================================================
 // Flattened System Wrappers (For 100% Predictable Function Pointers)

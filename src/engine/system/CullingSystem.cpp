@@ -3,6 +3,7 @@
 
 #include "CullingSystem.hpp"
 
+#include "LightingSystem.hpp" // Added to resolve sun data queries
 #include "Zahlen/Render.hpp"
 #include "engine/system/CameraSystem.hpp"
 
@@ -10,6 +11,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/Math3D.hpp> // Added to resolve JPH projection math
 #include <Zahlen/Profiler.hpp>
 #include <detail/ControlFlow.hpp>
 #include <ecs/ECS.hpp>
@@ -91,6 +93,26 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible,
 		cComp = reg.Get<CameraSystem::CameraComponent>(cameraEntities[0]);
 	}
 
+	// 1. Fetch Global Settings & Shadow Configuration values
+	bool isFullBright = false;
+	float shadowWidth = 80.0f;
+	uint32_t shadowResolution = 2048;
+
+	auto settingsEntities = reg.GetEntitiesWith<GlobalSettingsTagComponent>();
+	if (!settingsEntities.empty()) {
+		if (auto* pp = reg.Get<PostProcessSettingsComponent>(settingsEntities[0])) {
+			isFullBright = (pp->fullBright != 0);
+		}
+	}
+
+	auto shadowEntities = reg.GetEntitiesWith<ShadowSettingsComponent>();
+	if (!shadowEntities.empty()) {
+		auto* shadowSettings = reg.Get<ShadowSettingsComponent>(shadowEntities[0]);
+		shadowWidth = shadowSettings->shadowWidth;
+		shadowResolution = shadowSettings->shadowResolution;
+	}
+
+	// 2. Perform Viewport Camera Culling Updates
 	static bool s_WasFrozen = false;
 	if (CullingStats::FreezeFrustum) {
 		if (!s_WasFrozen) {
@@ -126,6 +148,29 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible,
 		s_WasFrozen = false;
 	}
 
+	// 3. Dynamically update the shadow culling frustum using the centralized Sun orientation [1]
+	if (!isFullBright) {
+		auto [sunDirection, sunIntensity] = LightingSystem::GetSunDirectionAndIntensity(reg);
+
+		JPH::Vec3 shadowCenter = cam.position;
+
+		// Align the shadow center to texel increments to prevent edge shimmering [1]
+		float texelSize = shadowWidth / static_cast<float>(shadowResolution);
+		shadowCenter.SetX(std::round(shadowCenter.GetX() / texelSize) * texelSize);
+		shadowCenter.SetY(std::round(shadowCenter.GetY() / texelSize) * texelSize);
+		shadowCenter.SetZ(std::round(shadowCenter.GetZ() / texelSize) * texelSize);
+
+		JPH::Vec3 lightPos = shadowCenter + sunDirection * 150.0f;
+		JPH::Mat44 lightView = Math::CreateLookAt(lightPos, shadowCenter, JPH::Vec3::sAxisY());
+
+		float halfWidth = shadowWidth * 0.5f;
+		JPH::Mat44 lightProj =
+			Math::CreateOrtho(-halfWidth, halfWidth, -halfWidth, halfWidth, 0.1f, 400.0f);
+		JPH::Mat44 shadowProjView = lightProj * lightView;
+
+		cam.shadowFrustum.Update(shadowProjView);
+	}
+
 	if (!CullingStats::EnableCulling) {
 		outVisible.assign(entities.begin(), entities.end());
 		outVisibleShadow.assign(entities.begin(), entities.end());
@@ -135,14 +180,6 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible,
 	outVisible.clear();
 	outVisibleShadow.clear();
 	auto meshes = reg.GetRawArray<MeshComponent>();
-
-	bool isFullBright = false;
-	auto settingsEntities = reg.GetEntitiesWith<GlobalSettingsTagComponent>();
-	if (!settingsEntities.empty()) {
-		if (auto* pp = reg.Get<PostProcessSettingsComponent>(settingsEntities[0])) {
-			isFullBright = (pp->fullBright != 0);
-		}
-	}
 
 	for (size_t i = 0; i < entities.size(); ++i) {
 		Entity e = entities[i];

@@ -55,7 +55,10 @@ struct VSOutput {
 VSOutput VSMain(uint vertexID : SV_VertexID) {
 	VSOutput output;
 	output.uv = float2((vertexID << 1) & 2, vertexID & 2);
-	output.pos = float4(output.uv.x * 2.0f - 1.0f, 1.0f - output.uv.y * 2.0f, 0.0f, 1.0f);
+
+	// Flip-free projection; top-left of the texture maps straight to top-left of clip space (-1,
+	// -1)
+	output.pos = float4(output.uv.x * 2.0f - 1.0f, output.uv.y * 2.0f - 1.0f, 0.0f, 1.0f);
 	return output;
 }
 
@@ -75,7 +78,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
 	float3 worldPos = ReconstructWorldPos(input.uv, depth, pc.invViewProj);
 
-	// NEW: Define viewDepth here at the top of PSMain
 	float viewDepth = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
 
 	float3 V = normalize(pc.camPos.xyz - worldPos);
@@ -91,7 +93,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	float3 H_sun = normalize(V + L_sun + 1e-5f);
 	float NdotL_sun = saturate(dot(N, L_sun));
 
-	// CHANGED: Flat, fast, branchless cascade selection
 	uint cascadeIndex = 0;
 	if (viewDepth > frame.cascadeSplits.x)
 		cascadeIndex = 1;
@@ -107,7 +108,9 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
 	// Transform position to the selected light-space matrix
 	float4 shadowPos = mul(frame.lightSpaceMatrices[cascadeIndex], float4(biasedWorldPos, 1.0f));
-	shadowPos.xy = shadowPos.xy * float2(0.5f, -0.5f) + 0.5f * shadowPos.w;
+
+	// Flipped Y multiplier removed; mapping now matches Vulkan's native Y-down coordinate space
+	shadowPos.xy = shadowPos.xy * 0.5f + 0.5f * shadowPos.w;
 
 	float shadow = CalculateShadowPCSS(shadowPos, N, L_sun, input.pos.xy, shadowMap, shadowSampler,
 									   pointSampler, frame.shadowResolution, cascadeIndex);
@@ -126,7 +129,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	// --- 2. Punctual and Area Lights (Clustered) ---
 	float3 directPunctual = float3(0.0f, 0.0f, 0.0f);
 
-	// RETAINED: SliceZ calculation using the relocated viewDepth
 	uint sliceZ = uint(max(0.0f, log(viewDepth) * frame.zScale + frame.zBias));
 	uint cIdx = min(uint(input.uv.x * 16.0f), 15u) + (min(uint(input.uv.y * 9.0f), 8u) * 16) +
 				(min(sliceZ, 23u) * 144);
@@ -180,6 +182,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 			directPunctual += ((1.0f - metallic) * albedoRaw.rgb * diffLTC + specLTC) *
 							  light.color * light.intensity * shadowVisibility;
 		} else { // POINT/SPOT LIGHT
+			if (light.type == 0 || light.type == 4)
+				continue;
 			float3 L_unnorm = light.position - worldPos;
 			float distToCenter = length(L_unnorm);
 			float3 L_p = L_unnorm / (distToCenter + 1e-5f);
@@ -220,22 +224,18 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 				} else if (light.shadowLayer >= 0) {
 					if (light.type == 1) {	  // POINT LIGHT (Omni-directional Cubemap)
 						float3 r = -L_unnorm; // Vector from light to pixel
-						float d = max(abs(r.x), max(abs(r.y), abs(r.z)));
-						float n = 0.1f;
-						float f = light.range;
 
-						// Reconstruct non-linear perspective depth matching Vulkan's [0.0, 1.0]
-						// range [2]
-						float currentDepth =
-							(f / (f - n)) - ((n * f) / (f - n)) / d; // <-- FIXED FORMULA
-						currentDepth -= 0.005f;						 // Bias to prevent shadow acne
+						// Reconstruct linear distance matching the exact format written to the
+						// shadow map
+						float currentDepth = (distToCenter / max(light.range, 0.001f)) - 0.005f;
 
 						shadowVisibility = punctualShadowCube.SampleCmpLevelZero(
 							shadowSampler, float4(r, light.shadowLayer), currentDepth);
 					} else if (light.type == 2) { // SPOT LIGHT (2D Perspective Array)
 						float4 sPos =
 							mul((float4x4)light.points, float4(worldPos + N * 0.05f, 1.0f));
-						sPos.xy = sPos.xy * float2(0.5f, -0.5f) + 0.5f * sPos.w;
+						// Native Vulkan positive coordinate mapping mapping [-1, 1] to [0, 1]
+						sPos.xy = sPos.xy * 0.5f + 0.5f * sPos.w;
 
 						float depthRef = (sPos.z / sPos.w) - 0.005f;
 						shadowVisibility = punctualShadow2D.SampleCmpLevelZero(

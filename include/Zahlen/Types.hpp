@@ -129,7 +129,9 @@ enum class LightType : uint32_t {
 	Point,
 	Spot,
 	Area,
+	Sun,
 };
+static_assert(sizeof(LightType) == sizeof(uint32_t));
 
 // Align structures to 16-byte boundaries to match HLSL std430 layout
 struct alignas(16) GPULight {

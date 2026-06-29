@@ -38,7 +38,10 @@ struct VSOutput {
 VSOutput VSMain(uint vertexID : SV_VertexID) {
 	VSOutput output;
 	output.uv = float2((vertexID << 1) & 2, vertexID & 2);
-	output.pos = float4(output.uv.x * 2.0f - 1.0f, 1.0f - output.uv.y * 2.0f, 0.0f, 1.0f);
+
+	// Flip-free projection; top-left of the texture maps straight to top-left of clip space (-1,
+	// -1)
+	output.pos = float4(output.uv.x * 2.0f - 1.0f, output.uv.y * 2.0f - 1.0f, 0.0f, 1.0f);
 	return output;
 }
 
@@ -143,7 +146,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 				float3 testPos = worldPos + dir * pc.aoRadius;
 
 				float4 clipPos = mul(pc.viewProj, float4(testPos, 1.0f));
-				float2 uv_sample = (clipPos.xy / clipPos.w) * float2(0.5f, -0.5f) + 0.5f;
+				// Native Vulkan positive coordinate mapping mapping [-1, 1] to [0, 1]
+				float2 uv_sample = (clipPos.xy / clipPos.w) * 0.5f + 0.5f;
 
 				if (any(uv_sample < 0.0f) || any(uv_sample > 1.0f))
 					continue;

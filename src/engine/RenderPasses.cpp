@@ -689,7 +689,8 @@ BloomPass::Execute(const FrameRecorder& recorder,
 	const auto smaaEdge_ro = smaaEdge_u;
 
 	ExecuteSubPass(smaaEdge_u, VK_ATTACHMENT_LOAD_OP_CLEAR, [&]() {
-		ctx.smaaEdgePass.WriteNext(ctx.ctx.Device(), color_ro, ctx.defaultSampler.Get());
+		ctx.smaaEdgePass.WriteNext(ctx.ctx.Device(), color_ro, ctx.defaultSampler.Get(),
+								   ctx.pointSampler.Get());
 		ctx.smaaEdgePass.Execute(cmd, metrics,
 								 VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
 	});
@@ -713,7 +714,7 @@ BloomPass::Execute(const FrameRecorder& recorder,
 
 	ExecuteSubPass(accumNext_u, VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
 		ctx.smaaBlendPass.WriteNext(ctx.ctx.Device(), color_ro, smaaWeight_ro,
-									ctx.defaultSampler.Get());
+									ctx.defaultSampler.Get(), ctx.pointSampler.Get());
 		ctx.smaaBlendPass.Execute(cmd, metrics,
 								  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
 	});

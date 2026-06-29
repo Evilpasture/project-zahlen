@@ -52,7 +52,8 @@ float3 UnpackNormalOctahedron(float2 oct) {
 }
 
 float3 ReconstructWorldPos(float2 uv, float depth, float4x4 invViewProj) {
-	float4 clipSpacePos = float4(uv.x * 2.0f - 1.0f, (1.0f - uv.y) * 2.0f - 1.0f, depth, 1.0f);
+	// UN-FLIPPED: Removed the legacy OpenGL (1.0f - uv.y) coordinate flip
+	float4 clipSpacePos = float4(uv.x * 2.0f - 1.0f, uv.y * 2.0f - 1.0f, depth, 1.0f);
 	float4 worldSpacePos = mul(invViewProj, clipSpacePos);
 	return worldSpacePos.xyz / worldSpacePos.w;
 }
@@ -291,8 +292,9 @@ float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, float3 N, o
 	float3 startNDC = startClip.xyz * invW_start;
 	float3 endNDC = endClip.xyz * invW_end;
 
-	float2 startUV = startNDC.xy * float2(0.5f, -0.5f) + 0.5f;
-	float2 endUV = endNDC.xy * float2(0.5f, -0.5f) + 0.5f;
+	// Native Vulkan positive coordinate mapping mapping [-1, 1] to [0, 1]
+	float2 startUV = startNDC.xy * 0.5f + 0.5f;
+	float2 endUV = endNDC.xy * 0.5f + 0.5f;
 
 	float2 uv_w_start = startUV * invW_start;
 	float2 uv_w_end = endUV * invW_end;
@@ -422,7 +424,6 @@ float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, float3 N, o
 	return float2(0.0f, 0.0f);
 }
 
-// resources/shaders/pbr_helpers.hlsl
 #ifndef DISABLE_RTR
 float2 RaytraceRTR(float3 worldPos, float3 N, float3 R, out float confidence,
 				   RaytracingAccelerationStructure tlas, Texture2D<float> texDepth,
@@ -449,7 +450,9 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 R, out float confidence,
 			return float2(0.0f, 0.0f);
 
 		float2 hitNDC = hitClip.xy / hitClip.w;
-		float2 hitUV = hitNDC * float2(0.5f, -0.5f) + 0.5f;
+
+		// Native Vulkan positive coordinate mapping mapping [-1, 1] to [0, 1]
+		float2 hitUV = hitNDC * 0.5f + 0.5f;
 
 		// Tighten the screen-edge fade to 3% (down from 8%) so reflections reach further
 		float2 edgeFactor = smoothstep(0.0f, 0.03f, hitUV) * smoothstep(1.0f, 0.97f, hitUV);

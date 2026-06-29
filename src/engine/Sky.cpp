@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include <Utils.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <cmath>
@@ -58,9 +57,9 @@ JPH::Vec3 GetCubeDirection(int face, float u, float v) {
 		case 1:
 			return JPH::Vec3(-1.0f, -vc, uc).Normalized(); // NEG_X
 		case 2:
-			return JPH::Vec3(uc, 1.0f, vc).Normalized(); // POS_Y
+			return JPH::Vec3(uc, 1.0f, -vc).Normalized(); // POS_Y
 		case 3:
-			return JPH::Vec3(uc, -1.0f, -vc).Normalized(); // NEG_Y
+			return JPH::Vec3(uc, -1.0f, vc).Normalized(); // NEG_Y
 		case 4:
 			return JPH::Vec3(uc, -vc, 1.0f).Normalized(); // POS_Z
 		case 5:

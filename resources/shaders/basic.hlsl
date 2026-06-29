@@ -129,7 +129,6 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID) {
 	output.tangent.w = localTangent.w;
 	output.uv = localUV;
 
-	// CHANGED: Default shadowPos to cascade 0 for forward pass compatibility
 	output.shadowPos = mul(frame.lightSpaceMatrices[0], worldPos);
 	output.color = localColor;
 	output.materialIndices = uint4(albedoIdx, normalIdx, pbrIdx, emissiveIdx);
@@ -203,7 +202,9 @@ PSOutput PSMain(VSOutput input) {
 	float prevW = max(input.prevClip.w, 0.0001f);
 	float2 ndcCurr = input.currClip.xy / currW;
 	float2 ndcPrev = input.prevClip.xy / prevW;
-	output.velocity = (ndcCurr - ndcPrev) * float2(0.5f, -0.5f);
+
+	// Native Vulkan positive coordinate mapping mapping [-1, 1] to [0, 1]
+	output.velocity = (ndcCurr - ndcPrev) * 0.5f;
 
 	return output;
 }

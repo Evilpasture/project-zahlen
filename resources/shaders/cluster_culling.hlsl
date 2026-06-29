@@ -53,8 +53,10 @@ bool ConeBehindPlane(float3 T, float3 D, float R, float r, float3 N, float d) {
 	uint list[64];
 
 	for (uint i = 0; i < frame.lightCount && count < 64; ++i) {
-		if (lights[i].type == 0) { // Directional lights cover the entire scene
-			list[count++] = i;
+		if (lights[i].type == 0 || lights[i].type == 4) {
+			// Skip completely. Directional and Sun lights are evaluated globally,
+			// saving critical cluster slots for local lights.
+			continue;
 		} else if (lights[i].type == 1 || lights[i].type == 3) { // Point and Area Lights
 			if (SphereAABB(lights[i].position, lights[i].range, b.minPoint.xyz, b.maxPoint.xyz)) {
 				list[count++] = i;

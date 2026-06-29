@@ -1193,11 +1193,12 @@ void ZHLN_BeginRendering(const VkCommandBuffer cmd,
 
 	vkCmdBeginRendering(cmd, &rendering_info);
 
+	// Standard, un-flipped viewport
 	const VkViewport viewport = {
 		.x = 0.0f,
-		.y = (float)desc->extent.height, // Start at the bottom
+		.y = 0.0f,
 		.width = (float)desc->extent.width,
-		.height = -(float)desc->extent.height, // Grow "upwards"
+		.height = (float)desc->extent.height,
 		.minDepth = 0.0f,
 		.maxDepth = 1.0f,
 	};

@@ -820,7 +820,7 @@ constexpr auto DynamicPass<ColorCount, HasDepth>::Flags(VkRenderingFlags flags) 
 template <size_t ColorCount, bool HasDepth>
 template <typename Func>
 void DynamicPass<ColorCount, HasDepth>::Execute(VkCommandBuffer cmd, Func&& func) const {
-	const VkRenderingInfo renderInfo = {
+	VkRenderingInfo rendering_info = {
 		.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
 		.pNext = nullptr,
 		.flags = _flags,
@@ -833,18 +833,23 @@ void DynamicPass<ColorCount, HasDepth>::Execute(VkCommandBuffer cmd, Func&& func
 		.pStencilAttachment = nullptr,
 	};
 
-	vkCmdBeginRendering(cmd, &renderInfo);
+	vkCmdBeginRendering(cmd, &rendering_info);
 
-	const VkViewport viewport = {.x = 0.0f,
-								 .y = (float)_extent.height,
-								 .width = (float)_extent.width,
-								 .height = -(float)_extent.height,
-								 .minDepth = 0.0f,
-								 .maxDepth = 1.0f};
+	// Standard, un-flipped viewport (No Y-flips!)
+	const VkViewport viewport = {
+		.x = 0.0f,
+		.y = 0.0f,
+		.width = (float)_extent.width,
+		.height = (float)_extent.height,
+		.minDepth = 0.0f,
+		.maxDepth = 1.0f,
+	};
 	const VkRect2D scissor = {.offset = {.x = 0, .y = 0}, .extent = _extent};
+
 	vkCmdSetViewport(cmd, 0, 1, &viewport);
 	vkCmdSetScissor(cmd, 0, 1, &scissor);
 
+	// Let the caller's drawing logic execute inside the active render pass
 	std::forward<Func>(func)();
 
 	vkCmdEndRendering(cmd);

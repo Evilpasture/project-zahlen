@@ -8,7 +8,10 @@ struct VSOutput {
 VSOutput VSMain(uint vertexID : SV_VertexID) {
 	VSOutput output;
 	output.uv = float2((vertexID << 1) & 2, vertexID & 2);
-	output.pos = float4(output.uv.x * 2.0f - 1.0f, 1.0f - output.uv.y * 2.0f, 0.0f, 1.0f);
+
+	// Flip-free projection; top-left of the texture maps straight to top-left of clip space (-1,
+	// -1)
+	output.pos = float4(output.uv.x * 2.0f - 1.0f, output.uv.y * 2.0f - 1.0f, 0.0f, 1.0f);
 	return output;
 }
 

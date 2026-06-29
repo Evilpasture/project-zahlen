@@ -198,7 +198,8 @@ using CullingLayout = Vk::DescriptorLayout<Vk::StorageBufferSlot<0>, // g_instan
 
 // Pass 1: Edge Detection Layout (Reads the main scene color)
 using SMAAEdgeLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texInput (Color)
-											Vk::SamplerSlot<1>		 // sampler
+											Vk::SamplerSlot<1>,		 // linearSampler
+											Vk::SamplerSlot<2>		 // pointSampler
 											>;
 
 // Pass 2: Blending Weight Layout (Reads edges, Area LUT, and Search LUT)
@@ -212,7 +213,8 @@ using SMAAWeightLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texEdg
 // Pass 3: Neighborhood Blending Layout (Blends original color with calculated weights)
 using SMAABlendLayout = Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texInput (Color)
 											 Vk::SampledImageSlot<1>, // texWeights
-											 Vk::SamplerSlot<2>		  // sampler
+											 Vk::SamplerSlot<2>,	  // linearSampler
+											 Vk::SamplerSlot<3>		  // pointSampler
 											 >;
 
 using ActiveGBuffer =

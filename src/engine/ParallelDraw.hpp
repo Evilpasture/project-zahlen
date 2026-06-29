@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 #include "RenderInternal.hpp"
 
@@ -69,10 +68,11 @@ inline void ParallelDrawDispatch(VkCommandBuffer primaryCmd,
 				.pInheritanceInfo = &pInherit};
 			vkBeginCommandBuffer(sec_cmd, &beginInfo);
 
+			// Standard, un-flipped viewport
 			const VkViewport viewport = {.x = 0.0f,
-										 .y = (float)extent.height,
+										 .y = 0.0f,
 										 .width = (float)extent.width,
-										 .height = -(float)extent.height,
+										 .height = (float)extent.height,
 										 .minDepth = 0.0f,
 										 .maxDepth = 1.0f};
 			const VkRect2D scissor = {.offset = {.x = 0, .y = 0}, .extent = extent};

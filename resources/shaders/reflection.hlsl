@@ -65,7 +65,10 @@ struct VSOutput {
 VSOutput VSMain(uint vertexID : SV_VertexID) {
 	VSOutput output;
 	output.uv = float2((vertexID << 1) & 2, vertexID & 2);
-	output.pos = float4(output.uv.x * 2.0f - 1.0f, 1.0f - output.uv.y * 2.0f, 0.0f, 1.0f);
+
+	// Flip-free projection; top-left of the texture maps straight to top-left of clip space (-1,
+	// -1)
+	output.pos = float4(output.uv.x * 2.0f - 1.0f, output.uv.y * 2.0f - 1.0f, 0.0f, 1.0f);
 	return output;
 }
 
@@ -153,7 +156,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	// --- ACCURATE GLOBAL IRRADIANCE OCCLUSION ---
 	// Fade out the bright blue outdoor sky dome inside your indoor probe box
 	if (frame.probeMin.w > 0.0f && boxFade > 0.0f) {
-		// FIX: Properly apply the 25.0f HDR exposure boost to the indoor ambient fallback
 		float3 indoorAmbient = float3(0.12f, 0.12f, 0.12f) * frame.ambientExposure;
 		irradiance = lerp(irradiance, indoorAmbient, boxFade);
 	}

@@ -103,21 +103,9 @@ RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& ou
 		}
 	}
 
-	JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f};
-	float sunIntensity = 0.0f;
-
-	auto sunEntities = reg.GetEntitiesWith<SunTagComponent>();
-	if (!sunEntities.empty()) {
-		Entity sunEnt = sunEntities[0];
-		if (auto* trans = reg.Get<TransformComponent>(sunEnt)) {
-			JPH::Mat44 worldMat = trans->GetMatrix();
-			sunDirection = worldMat.GetColumn3(2);
-		}
-		if (auto* light = reg.Get<LightingSystem::LightComponent>(sunEnt)) {
-			sunIntensity = light->intensity;
-		}
-	}
-	sunDirection = sunDirection.Normalized();
+	// 1. Resolve primary sunlight parameters using the centralized GetSunDirectionAndIntensity
+	// helper
+	auto [sunDirection, sunIntensity] = LightingSystem::GetSunDirectionAndIntensity(reg);
 
 	float yawRad = JPH::DegreesToRadians(cam.yaw);
 	float pitchRad = JPH::DegreesToRadians(cam.pitch);
@@ -158,9 +146,6 @@ RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& ou
 	outShadowProjView = lightProj * lightView;
 
 	cam.shadowFrustum.Update(outShadowProjView);
-
-	JPH::Mat44 biasMatrix = {JPH::Vec4(0.5f, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, -0.5f, 0.0f, 0.0f),
-							 JPH::Vec4(0.0f, 0.0f, 1.0f, 0.0f), JPH::Vec4(0.5f, 0.5f, 0.0f, 1.0f)};
 
 	AAState aaState{};
 	if (auto* taaComp = reg.Get<AASettingsComponent>(cameraEntity)) {
@@ -275,8 +260,8 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
 		if (debugLineMat.pipeline == PipelineHandle::Invalid) {
 			PipelineDesc lineDesc = {.vertexShaderData = ZHLN_Resource_BasicVertSpv,
 									 .vertexShaderSize = ZHLN_Resource_BasicVertSpv_Len,
-									 .fragShaderData = ZHLN_Resource_BasicFragSpv,
-									 .fragShaderSize = ZHLN_Resource_BasicFragSpv_Len,
+									 .fragShaderData = ZHLN_Resource_ForwardFragSpv,
+									 .fragShaderSize = ZHLN_Resource_ForwardFragSpv_Len,
 									 .doubleSided = true,
 									 .alphaBlend = true,
 									 .isLineList = true};

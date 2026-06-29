@@ -78,6 +78,13 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem,
 	idToHandleMap.resize(capacity + 1);
 	joltBodyPtrs.resize(capacity + 1);
 
+	// Explicitly zero-initialize JPH::Arrays of POD types because Jolt's Array::resize leaves them
+	// uninitialized!
+	std::memset(idToHandleMap.data(), 0,
+				idToHandleMap.size() * sizeof(decltype(idToHandleMap)::value_type));
+	std::memset((void*)joltBodyPtrs.data(), 0,
+				joltBodyPtrs.size() * sizeof(decltype(joltBodyPtrs)::value_type));
+
 	for (uint32_t i = 0; i < capacity; ++i) {
 		generations[i].store(1, std::memory_order_relaxed);
 		slotStates[i].store(SLOT_EMPTY, std::memory_order_relaxed);
@@ -104,6 +111,8 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem,
 	constraintCapacity = inMaxBodies;
 
 	constraints.resize(constraintCapacity, nullptr);
+	std::memset((void*)constraints.data(), 0,
+				constraints.size() * sizeof(decltype(constraints)::value_type));
 	constraintStates.resize(constraintCapacity, SLOT_EMPTY);
 	constraintGenerations.resize(constraintCapacity);
 	freeConstraintSlots.resize(constraintCapacity);
@@ -183,6 +192,13 @@ void PhysicsWorld::ResizeBuffers(size_t newCapacity) {
 	idToHandleMap.resize(newCapacity + 1);
 	joltBodyPtrs.resize(newCapacity + 1);
 
+	// Explicitly zero-initialize the newly added elements to prevent garbage pointer reads
+	size_t addedCount = newCapacity - oldCap;
+	std::memset(idToHandleMap.data() + (oldCap + 1), 0,
+				addedCount * sizeof(decltype(idToHandleMap)::value_type));
+	std::memset((void*)joltBodyPtrs.data() + (oldCap + 1), 0,
+				addedCount * sizeof(decltype(joltBodyPtrs)::value_type));
+
 	size_t freeIdx = freeCount.load(std::memory_order_relaxed);
 	for (size_t i = oldCap; i < newCapacity; i++) {
 		generations[i].store(1, std::memory_order_relaxed);
@@ -201,6 +217,9 @@ void PhysicsWorld::ResizeConstraintBuffers(size_t newCapacity) {
 	constraintCapacity = newCapacity;
 
 	constraints.resize(newCapacity, nullptr);
+	size_t addedCount = newCapacity - oldCap;
+	std::memset((void*)constraints.data() + oldCap, 0,
+				addedCount * sizeof(decltype(constraints)::value_type));
 	constraintStates.resize(newCapacity, SLOT_EMPTY);
 	constraintGenerations.resize(newCapacity);
 	freeConstraintSlots.resize(newCapacity);

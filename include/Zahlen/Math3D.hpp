@@ -1,9 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 #include "Types.hpp"
+
 #include <cstring>
 // clang-format off
 
@@ -27,13 +27,13 @@ inline auto CreateLookAt(JPH::Vec3Arg eye, JPH::Vec3Arg target, JPH::Vec3Arg up)
 /**
  * @brief Perspective Projection Matrix.
  * Enforces Right-Handed coordinates.
- * Flips the Y-axis to map to Vulkan's Y-Down Clip Space.
+ * Maps natively to Vulkan's Y-Down Clip Space.
  * Maps Z to [0, 1] for modern graphics APIs.
  */
 inline auto CreatePerspective(float fovRadians, float aspect, float nearZ, float farZ) {
 	float f = 1.0f / JPH::Tan(fovRadians * 0.5f);
 	return JPH::Mat44(JPH::Vec4(f / aspect, 0.0f, 0.0f, 0.0f),
-					  JPH::Vec4(0.0f, f, 0.0f, 0.0f), // POSITIVE F: No winding flip!
+					  JPH::Vec4(0.0f, -f, 0.0f, 0.0f), // FLIPPED TO NATIVE Y-DOWN
 					  JPH::Vec4(0.0f, 0.0f, farZ / (nearZ - farZ), -1.0f),
 					  JPH::Vec4(0.0f, 0.0f, (nearZ * farZ) / (nearZ - farZ), 0.0f));
 }
@@ -41,7 +41,7 @@ inline auto CreatePerspective(float fovRadians, float aspect, float nearZ, float
 /**
  * @brief Orthographic Projection Matrix.
  * Enforces Right-Handed coordinates.
- * Flips the Y-axis to map to Vulkan's Y-Down Clip Space.
+ * Maps natively to Vulkan's Y-Down Clip Space.
  * Maps Z to [0, 1] for modern graphics APIs.
  */
 inline auto CreateOrtho(float left, float right, float bottom, float top, float nearZ, float farZ) {
@@ -50,9 +50,9 @@ inline auto CreateOrtho(float left, float right, float bottom, float top, float 
 	float f_n = farZ - nearZ;
 
 	return JPH::Mat44(JPH::Vec4(2.0f / r_l, 0.0f, 0.0f, 0.0f),
-					  JPH::Vec4(0.0f, 2.0f / t_b, 0.0f, 0.0f), // POSITIVE: Keep RH-CCW
+					  JPH::Vec4(0.0f, -2.0f / t_b, 0.0f, 0.0f), // FLIPPED TO NATIVE Y-DOWN
 					  JPH::Vec4(0.0f, 0.0f, -1.0f / f_n, 0.0f),
-					  JPH::Vec4(-(right + left) / r_l, -(top + bottom) / t_b, -nearZ / f_n, 1.0f));
+					  JPH::Vec4(-(right + left) / r_l, (top + bottom) / t_b, -nearZ / f_n, 1.0f));
 }
 
 /**

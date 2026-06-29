@@ -1,4 +1,4 @@
-// resources/shaders/smaa.hlsl
+// resources/shaders/smaa_wrap.hlsl
 #pragma pack_matrix(column_major)
 
 #define SMAA_HLSL_4 1
@@ -15,13 +15,14 @@ struct PushConstants {
 // ============================================================================
 #if defined(EDGE_PASS)
 [[vk::binding(0, 0)]] Texture2D colorTex;
-[[vk::binding(1, 0)]] SamplerState smp; // Declared using the standard, un-redefined type specifier
+[[vk::binding(1, 0)]] SamplerState linearSampler;
+[[vk::binding(2, 0)]] SamplerState pointSampler;
 
 // Force subsequent SamplerState declarations inside SMAA.hlsl to compile as static internals
 #define SamplerState static SamplerState
 
-#define SMAA_SAMPLER_INTERPOLATION smp
-#define SMAA_SAMPLER_NEAREST smp
+#define SMAA_SAMPLER_INTERPOLATION linearSampler
+#define SMAA_SAMPLER_NEAREST pointSampler
 #endif
 
 #if defined(WEIGHT_PASS)
@@ -40,12 +41,13 @@ struct PushConstants {
 #if defined(BLEND_PASS)
 [[vk::binding(0, 0)]] Texture2D colorTex;
 [[vk::binding(1, 0)]] Texture2D blendTex;
-[[vk::binding(2, 0)]] SamplerState smp;
+[[vk::binding(2, 0)]] SamplerState linearSampler;
+[[vk::binding(3, 0)]] SamplerState pointSampler;
 
 #define SamplerState static SamplerState
 
-#define SMAA_SAMPLER_INTERPOLATION smp
-#define SMAA_SAMPLER_NEAREST smp
+#define SMAA_SAMPLER_INTERPOLATION linearSampler
+#define SMAA_SAMPLER_NEAREST pointSampler
 #endif
 
 // Include the core library with our static overrides active
@@ -64,7 +66,9 @@ struct EdgeVSOutput {
 EdgeVSOutput SmaaEdgeVS(uint vertexID : SV_VertexID) {
 	EdgeVSOutput output;
 	output.uv = float2((vertexID << 1) & 2, vertexID & 2);
-	output.position = float4(output.uv.x * 2.0f - 1.0f, 1.0f - output.uv.y * 2.0f, 0.0f, 1.0f);
+
+	// UN-FLIPPED: Removed legacy Y-flip
+	output.position = float4(output.uv.x * 2.0f - 1.0f, output.uv.y * 2.0f - 1.0f, 0.0f, 1.0f);
 
 	SMAAEdgeDetectionVS(output.uv, output.offset);
 	return output;
@@ -89,7 +93,9 @@ struct WeightVSOutput {
 WeightVSOutput SmaaWeightVS(uint vertexID : SV_VertexID) {
 	WeightVSOutput output;
 	output.uv = float2((vertexID << 1) & 2, vertexID & 2);
-	output.position = float4(output.uv.x * 2.0f - 1.0f, 1.0f - output.uv.y * 2.0f, 0.0f, 1.0f);
+
+	// UN-FLIPPED: Removed legacy Y-flip
+	output.position = float4(output.uv.x * 2.0f - 1.0f, output.uv.y * 2.0f - 1.0f, 0.0f, 1.0f);
 
 	SMAABlendingWeightCalculationVS(output.uv, output.pixcoord, output.offset);
 	return output;
@@ -114,7 +120,7 @@ struct BlendVSOutput {
 BlendVSOutput SmaaBlendVS(uint vertexID : SV_VertexID) {
 	BlendVSOutput output;
 	output.uv = float2((vertexID << 1) & 2, vertexID & 2);
-	output.position = float4(output.uv.x * 2.0f - 1.0f, 1.0f - output.uv.y * 2.0f, 0.0f, 1.0f);
+	output.position = float4(output.uv.x * 2.0f - 1.0f, output.uv.y * 2.0f - 1.0f, 0.0f, 1.0f);
 
 	SMAANeighborhoodBlendingVS(output.uv, output.offset);
 	return output;

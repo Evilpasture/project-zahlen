@@ -108,8 +108,7 @@ struct Camera {
 										   0.481f, 0.814f, 0.259f, 0.592f};
 
 	[[nodiscard]] JPH::Mat44 GetJitteredProjectionMatrix(float aspectRatio, uint32_t width,
-														 uint32_t height,
-														 AAState& aaState) const { // <-- CHANGED
+														 uint32_t height, AAState& aaState) const {
 		JPH::Mat44 proj = GetProjectionMatrix(aspectRatio);
 
 		if (aaState.mode == AAMode::TAA) {
@@ -132,9 +131,9 @@ struct Camera {
 			aaState.prevJitterX = prevJitterX;
 			aaState.prevJitterY = prevJitterY;
 
-			// Apply jitter to the 3rd column (index 2).
+			// Native Vulkan Y-Down: Positive jitter shifts image correctly
 			JPH::Vec4 col2 = proj.GetColumn4(2);
-			proj.SetColumn4(2, col2 + JPH::Vec4(jitterX * 2.0f, -jitterY * 2.0f, 0.0f, 0.0f));
+			proj.SetColumn4(2, col2 + JPH::Vec4(jitterX * 2.0f, jitterY * 2.0f, 0.0f, 0.0f));
 		}
 		return proj;
 	}

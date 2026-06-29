@@ -9,7 +9,9 @@ struct VSOutput {
 VSOutput VSMain(uint vertexID : SV_VertexID) {
 	VSOutput output;
 	output.uv = float2((vertexID << 1) & 2, vertexID & 2);
-	output.pos = float4(output.uv.x * 2.0f - 1.0f, 1.0f - output.uv.y * 2.0f, 0.0f, 1.0f);
+
+	// UN-FLIPPED: Removed legacy Y-flip
+	output.pos = float4(output.uv.x * 2.0f - 1.0f, output.uv.y * 2.0f - 1.0f, 0.0f, 1.0f);
 	return output;
 }
 

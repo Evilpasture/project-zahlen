@@ -20,7 +20,7 @@ zh:config({
     enableSSR = 1,
     enableTAA = 1,
     taaFeedback = 0.95,
-    ambientExposure = 1.0,
+    ambientExposure = 5.0, -- Restored to 5.0 to balance the outdoor solarium exposure
 })
 
 -- ============================================================================
@@ -47,9 +47,9 @@ function _G.StartGame()
     zh:spawn("Circus Lobby V9.glb", { physics = true, static = true })
     pomni_parts = zh:spawn("tadc_models/POMNI.glb", { animated = true })
 
-    -- Spawn dynamic directional sunlight
+    -- Spawn dynamic directional sunlight (REVERTED TO CORRECT MATHEMATICAL ORIENTATION)
     local sun = zh:spawn_light({
-        type = 0,
+        type = 4,                                 -- LightType::Sun
         rotation = { -0.575, 0.287, 0.0, 0.766 }, -- Aligned with the sky's baked sun disk
         color = { 1.0, 0.95, 0.88 },              -- Soft warm sunlight
         intensity = 180.0,
