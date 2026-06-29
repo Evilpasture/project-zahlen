@@ -996,7 +996,7 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 		reg.Add(e, MeshComponent{
 					   .mesh = part.mesh,
 					   .material = activeMat,
-					   .cullRadius = part.boundingRadius * scaleMult * prep.maxScale,
+					   .cullRadius = part.boundingRadius,
 					   .localCenter = JPH::Vec3((part.localMax[0] + part.localMin[0]) * 0.5f,
 												(part.localMax[1] + part.localMin[1]) * 0.5f,
 												(part.localMax[2] + part.localMin[2]) * 0.5f),
@@ -1065,7 +1065,7 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 				   .mesh = part.mesh,
 				   .material = activeMat,
 
-				   .cullRadius = part.boundingRadius * scaleMult * nodeMaxScale,
+				   .cullRadius = part.boundingRadius,
 
 				   .localCenter = JPH::Vec3((part.localMax[0] + part.localMin[0]) * 0.5f,
 											(part.localMax[1] + part.localMin[1]) * 0.5f,

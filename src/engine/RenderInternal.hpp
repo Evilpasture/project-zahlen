@@ -329,6 +329,13 @@ struct NativeMesh {
 	}
 };
 
+struct ShaderStageSource {
+	const char* path;
+	const unsigned char* fallbackCode;
+	size_t fallbackSize;
+	const char* entryPoint = "main";
+};
+
 struct NativeMaterial {
 	Vk::Pipeline pipeline;
 	Vk::PipelineLayout layout;
@@ -589,6 +596,12 @@ struct RenderContext::Impl {
 
 	Impl(Window& win) : window(win) {}
 
+	bool hasSkinnedThisFrame = false;
+
+	void InitialClearTargets(VkCommandBuffer cmd) noexcept;
+	void BuildTLAS(VkCommandBuffer cmd) noexcept;
+	[[nodiscard]] InstanceData ResolveInstanceData(const DrawCommand& cmdData) const noexcept;
+
 	void InitShadowResources();
 	void InitCullingResources();
 	void CompileShadowPipeline(VkDevice device, const void* shaderData, size_t shaderSize);
@@ -661,14 +674,147 @@ struct RenderContext::Impl {
 	}
 
 	bool RecreateTargets(VkExtent2D ext);
+
+	static constexpr uint32_t MAX_PUNCTUAL_LIGHTS = 4;
+
+	void RecreatePunctualShadowViews() noexcept;
+	void InitSkeletalAnimationResources();
+	void InitLightingLUTs();
+
+	[[nodiscard]] Vk::ShaderStages LoadAndCreateShaders(ShaderStageSource vs,
+														ShaderStageSource ps) const noexcept;
+	void WatchPipeline(const char* vsPath, const char* psPath,
+					   std::function<void()> rebuild_fn) noexcept;
 };
 
-struct ShaderStageSource {
-	const char* path;
-	const unsigned char* fallbackCode;
-	size_t fallbackSize;
-	const char* entryPoint = "main";
+// --- Promoted G-Buffer & Post-Process Views ---
+
+struct GBufferView {
+	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> sceneColor;
+	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> depth;
+	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> normRough;
 };
+
+struct PostProcessResources {
+	GBufferView gbuffer;
+	const Vk::Buffer& frameUniforms;
+	const Vk::Sampler& defaultSampler;
+	const Vk::Sampler& pointSampler;
+	const Vk::Sampler& clampSampler;
+};
+
+struct FrameRecorder {
+	VkCommandBuffer cmd;
+	RenderContext::Impl& ctx;
+	uint32_t frameIndex;
+	VkDescriptorSet bindlessSet;
+
+	FrameRecorder(VkCommandBuffer c, RenderContext::Impl& impl) noexcept
+		: cmd(c), ctx(impl), frameIndex(impl.frame_index),
+		  bindlessSet(impl.bindlessSets[impl.frame_index]) {}
+};
+
+template <VkImageLayout ColorL, VkImageLayout DepthL> struct SceneResources {
+	Vk::TypedImage<ColorL> sceneColor;
+	Vk::TypedImage<ColorL> velocity;
+	Vk::TypedImage<ColorL> normRough;
+	Vk::TypedImage<DepthL> depth;
+};
+
+struct GroupRange {
+	NativeMaterial* material;
+	uint32_t start;
+	uint32_t count;
+};
+
+// --- Render Pass Concept Validation ---
+
+template <typename T, typename... Args>
+concept IsRenderPass = requires(T pass, Args&&... args) {
+	{ pass.Execute(std::forward<Args>(args)...) };
+};
+
+template <typename Pass, typename... Args>
+	requires IsRenderPass<Pass, Args...>
+void RunPass(const Pass& pass, Args&&... args) {
+	pass.Execute(std::forward<Args>(args)...);
+}
+
+// --- Render Pass Specifications ---
+
+namespace Passes {
+
+struct ShadowPass {
+	static constexpr uint32_t kCubemapFaceMask = 0x3F;
+	static constexpr float kShadowClearDepth = 1.0f;
+	void Execute(const FrameRecorder& recorder) const noexcept;
+
+  private:
+	void RenderDirectionalShadows(const FrameRecorder& recorder) const noexcept;
+	void RenderPunctualShadows(const FrameRecorder& recorder) const noexcept;
+};
+
+struct MainPass {
+	void Execute(const FrameRecorder& recorder,
+				 SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+								VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>
+					 in) const noexcept;
+};
+
+struct DeferredLightingPass {
+	[[nodiscard]] auto
+	Execute(const FrameRecorder& recorder,
+			SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+						   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> in) const noexcept
+		-> Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>;
+
+  private:
+	[[nodiscard]] constexpr uint32_t DetermineLightingVariant(const GISettings& gi,
+															  bool hasRt) const noexcept;
+	[[nodiscard]] constexpr uint32_t DetermineReflectionVariant(const GISettings& gi,
+																bool hasRt) const noexcept;
+};
+
+struct ForwardPass {
+	void Execute(const FrameRecorder& recorder,
+				 Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> litColor,
+				 Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> depth) const noexcept;
+};
+
+struct BloomPass {
+	[[nodiscard]] auto
+	Execute(const FrameRecorder& recorder,
+			Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor) const noexcept
+		-> Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>;
+};
+
+struct AAPass {
+	using SceneRO = SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+								   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>;
+	using ColorImageRO = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>;
+
+	[[nodiscard]] auto Execute(const FrameRecorder& recorder, SceneRO in) const noexcept -> SceneRO;
+
+  private:
+	[[nodiscard]] auto ExecuteTAA(VkCommandBuffer cmd, const FrameRecorder& recorder,
+								  const SceneRO& in, ColorImageRO color_ro) const noexcept
+		-> ColorImageRO;
+	[[nodiscard]] auto ExecuteFXAA(VkCommandBuffer cmd, const FrameRecorder& recorder,
+								   const SceneRO& in, ColorImageRO color_ro) const noexcept
+		-> ColorImageRO;
+	[[nodiscard]] auto ExecuteSMAA(VkCommandBuffer cmd, const FrameRecorder& recorder,
+								   const SceneRO& in, ColorImageRO color_ro) const noexcept
+		-> ColorImageRO;
+};
+
+struct BlitPass {
+	void
+	Execute(const FrameRecorder& recorder,
+			Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor,
+			Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> bloomColor) const noexcept;
+};
+
+} // namespace Passes
 
 inline std::vector<uint32_t> LoadShaderSpv(const std::string& path) noexcept {
 	std::ifstream file(path, std::ios::ate | std::ios::binary);

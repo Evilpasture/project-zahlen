@@ -230,13 +230,19 @@ float3 RotateVector(float3 V, float3 lightDir) {
 float4 PSForward(VSOutput input) : SV_Target0 {
 	uint4 indices = input.materialIndices;
 	float4 baseColorFactor = input.baseColorFactor;
-	float metallicFactor = input.pbrFactors.x;
-	float roughnessFactor = input.pbrFactors.y;
 
 	float4 albedo =
 		globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
 	float3 emissiveMap = globalTextures[indices.w].Sample(defaultSampler, input.uv).rgb;
 	float3 emissive = emissiveMap * input.emissiveFactor.rgb;
+
+	// Bypass shading entirely in Fullbright Mode
+	if (frame.fullBright != 0) {
+		return float4(albedo.rgb + emissive, albedo.a);
+	}
+
+	float metallicFactor = input.pbrFactors.x;
+	float roughnessFactor = input.pbrFactors.y;
 
 	float3 N = normalize(input.normal);
 	float3 V = normalize(frame.camPos.xyz - input.worldPos);

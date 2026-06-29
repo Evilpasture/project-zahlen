@@ -40,8 +40,14 @@ bool SphereVisible(float3 center, float radius) {
 	// Extract center using the piped offset
 	float3 center = mul(inst.world, float4(inst.localCenter, 1.0f)).xyz;
 
-	// FIX: Do NOT multiply by scale here! inst.cullRadius is already scaled.
-	uint visible = SphereVisible(center, inst.cullRadius) ? 1u : 0u;
+	// Extract max scale from the world matrix columns
+	float scaleX = length(float3(inst.world._m00, inst.world._m10, inst.world._m20));
+	float scaleY = length(float3(inst.world._m01, inst.world._m11, inst.world._m21));
+	float scaleZ = length(float3(inst.world._m02, inst.world._m12, inst.world._m22));
+	float maxScale = max(scaleX, max(scaleY, scaleZ));
+
+	// Calculate visibility using the dynamically scaled radius
+	uint visible = SphereVisible(center, inst.cullRadius * maxScale) ? 1u : 0u;
 
 	bool isIndexed = inst.indexCount > 0;
 	DrawIndirectCommand cmd;

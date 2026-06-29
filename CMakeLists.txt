@@ -203,6 +203,8 @@ set(ENGINE_SOURCES
     src/engine/system/UIRenderSystem.cpp
     src/engine/system/UIInteractionSystem.cpp
     src/engine/RenderProcedural.cpp
+    src/engine/RenderPasses.cpp
+    src/engine/RenderSetup.cpp
 )
 
 find_library(ZSTD_LIBRARY NAMES zstd zstd_static HINTS "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib")

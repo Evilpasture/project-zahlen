@@ -150,20 +150,7 @@ void BuildPassHelper(RenderContext::Impl* self, Vk::PostProcessPass<LayoutT>& pa
 					 const VkPushConstantRange* pushConstants = nullptr, uint32_t pushCount = 0,
 					 bool additive = false) noexcept {
 
-	const void* vs_code = nullptr;
-	size_t vs_size = 0;
-	const void* ps_code = nullptr;
-	size_t ps_size = 0;
-	std::vector<uint32_t> disk_vs;
-	std::vector<uint32_t> disk_ps;
-
-	LoadShaderData(vs, vs_code, vs_size, disk_vs);
-	LoadShaderData(ps, ps_code, ps_size, disk_ps);
-
-	auto shaders = Vk::ShaderStages::Create(
-		self->ctx.Device(),
-		{.code = Vk::AsSpirV(vs_code), .size = vs_size, .entry_point = vs.entryPoint},
-		{.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint});
+	auto shaders = self->LoadAndCreateShaders(vs, ps);
 
 	if (pass.Build(self->ctx.Device(), shaders, colorFormats, pushConstants, pushCount, additive)) {
 		ZHLN::Log("[Shader Reload] {} Pipeline built successfully.", passName);
@@ -181,20 +168,7 @@ void BuildPassVariants(RenderContext::Impl* self, Vk::PostProcessPass<LayoutT>& 
 					   const VkPushConstantRange* pushConstants = nullptr, uint32_t pushCount = 0,
 					   bool additive = false) noexcept {
 
-	const void* vs_code = nullptr;
-	size_t vs_size = 0;
-	const void* ps_code = nullptr;
-	size_t ps_size = 0;
-	std::vector<uint32_t> disk_vs;
-	std::vector<uint32_t> disk_ps;
-
-	LoadShaderData(vs, vs_code, vs_size, disk_vs);
-	LoadShaderData(ps, ps_code, ps_size, disk_ps);
-
-	auto shaders = Vk::ShaderStages::Create(
-		self->ctx.Device(),
-		{.code = Vk::AsSpirV(vs_code), .size = vs_size, .entry_point = vs.entryPoint},
-		{.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint});
+	auto shaders = self->LoadAndCreateShaders(vs, ps);
 
 	if (pass.BuildVariants(self->ctx.Device(), shaders, colorFormats, pushConstants, pushCount,
 						   specInfos, additive)) {
@@ -205,6 +179,31 @@ void BuildPassVariants(RenderContext::Impl* self, Vk::PostProcessPass<LayoutT>& 
 }
 
 } // namespace
+
+Vk::ShaderStages RenderContext::Impl::LoadAndCreateShaders(ShaderStageSource vs,
+														   ShaderStageSource ps) const noexcept {
+	const void* vs_code = nullptr;
+	size_t vs_size = 0;
+	const void* ps_code = nullptr;
+	size_t ps_size = 0;
+	std::vector<uint32_t> disk_vs;
+	std::vector<uint32_t> disk_ps;
+
+	LoadShaderData(vs, vs_code, vs_size, disk_vs);
+	LoadShaderData(ps, ps_code, ps_size, disk_ps);
+
+	return Vk::ShaderStages::Create(
+		ctx.Device(), {.code = Vk::AsSpirV(vs_code), .size = vs_size, .entry_point = vs.entryPoint},
+		{.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint});
+}
+
+void RenderContext::Impl::WatchPipeline(const char* vsPath, const char* psPath,
+										std::function<void()> rebuild_fn) noexcept {
+	if constexpr (isDev) {
+		RegisterShaderWatcher(vsPath, rebuild_fn);
+		RegisterShaderWatcher(psPath, std::move(rebuild_fn));
+	}
+}
 
 RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	: _impl(std::make_unique<Impl>(window)) {
@@ -486,6 +485,31 @@ void RenderContext::Impl::BuildSkinningPipeline() {
 	}
 }
 
+void RenderContext::Impl::RecreatePunctualShadowViews() noexcept {
+	punctualShadowViews.clear();
+	punctualShadowViews.resize(MAX_PUNCTUAL_LIGHTS);
+	for (uint32_t i = 0; i < MAX_PUNCTUAL_LIGHTS; ++i) {
+		VkImageViewCreateInfo viewInfo = {
+			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+			.pNext = {},
+			.flags = {},
+			.image = shadowAtlas.image.Handle(),
+			.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+			.format = VK_FORMAT_D32_SFLOAT,
+			.components = {},
+			.subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+								 .baseMipLevel = 0,
+								 .levelCount = 1,
+								 .baseArrayLayer = i * 6,
+								 .layerCount = 6},
+		};
+
+		VkImageView rawView = VK_NULL_HANDLE;
+		vkCreateImageView(ctx.Device(), &viewInfo, nullptr, &rawView);
+		punctualShadowViews[i] = Vk::ImageView(ctx.Device(), rawView);
+	}
+}
+
 void RenderContext::Impl::InitShadowResources() {
 	shadowSampler = Vk::SamplerBuilder{}
 						.Linear()
@@ -504,7 +528,7 @@ void RenderContext::Impl::InitShadowResources() {
 			ctx.Device(), shadowMap.image.Handle(), i, 1);
 	}
 
-	// 1. Allocate 24-layer Shadow Atlas
+	// 1. Allocate Shadow Atlas
 	shadowAtlas = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
 		allocator, ctx, {.width = 1024, .height = 1024},
 		{.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
@@ -516,12 +540,7 @@ void RenderContext::Impl::InitShadowResources() {
 	shadowAtlas2DView = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(
 		ctx.Device(), shadowAtlas.image.Handle(), 0, 24);
 
-	uint32_t maxPointLights = 4;
-	punctualShadowViews.resize(maxPointLights);
-	for (uint32_t i = 0; i < maxPointLights; ++i) {
-		punctualShadowViews[i] = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(
-			ctx.Device(), shadowAtlas.image.Handle(), i * 6, 6);
-	}
+	RecreatePunctualShadowViews();
 
 	for (int i = 0; i < 2; ++i) {
 		frameUniformBuffers[i] =
@@ -667,40 +686,7 @@ void RenderContext::Impl::InitCullingResources() {
 	}
 }
 
-void RenderContext::Impl::InitBindless() {
-	bindlessLayout = GlobalSceneLayout::CreateLayout(ctx.Device());
-	bindlessPool = GlobalSceneLayout::CreatePool(ctx.Device(), 2);
-	bindlessSets[0] =
-		GlobalSceneLayout::Allocate(ctx.Device(), bindlessPool.Get(), bindlessLayout.Get());
-	bindlessSets[1] =
-		GlobalSceneLayout::Allocate(ctx.Device(), bindlessPool.Get(), bindlessLayout.Get());
-
-	VkSamplerCreateInfo samplerInfo = {
-		.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-		.pNext = nullptr,
-		.flags = 0,
-		.magFilter = VK_FILTER_LINEAR,
-		.minFilter = VK_FILTER_LINEAR,
-		.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
-		.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-		.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-		.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-		.mipLodBias = 0,
-		.anisotropyEnable = VK_TRUE,
-		.maxAnisotropy = ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy,
-		.compareEnable = VK_FALSE,
-		.compareOp = VK_COMPARE_OP_NEVER,
-		.minLod = 0.0f,
-		.maxLod = 0.0f,
-		.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
-		.unnormalizedCoordinates = VK_FALSE,
-	};
-	VkSampler rawSampler = VK_NULL_HANDLE;
-	vkCreateSampler(ctx.Device(), &samplerInfo, nullptr, &rawSampler);
-	globalSampler = Vk::Sampler(ctx.Device(), rawSampler);
-	// Create the math/environment sampler (ClampToEdge prevents wrap-around artifacts)
-	clampSampler = Vk::SamplerBuilder{}.Linear().ClampToEdge().Build(ctx.Device());
-
+void RenderContext::Impl::InitSkeletalAnimationResources() {
 	// Allocate our global Joint storage buffer (Supports 8192 dynamic matrices)
 	JPH::Array<JPH::Mat44> identities(8192, JPH::Mat44::sIdentity());
 	for (int i = 0; i < 2; ++i) {
@@ -718,20 +704,9 @@ void RenderContext::Impl::InitBindless() {
 										   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
 											   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
 										   VMA_MEMORY_USAGE_CPU_TO_GPU);
+}
 
-	ZHLN::Log("[RenderInit] Pre-allocating persistently mapped Double-Buffered Debug VBOs...");
-	size_t maxDebugVerts = 500000; // Large enough for dense wireframes (~32MB)
-	size_t bufferSize = maxDebugVerts * (sizeof(VertexPosition) + sizeof(VertexAttributes));
-	for (int i = 0; i < 2; ++i) {
-		auto gpu_buf = Vk::Buffer::Create(allocator.Get(), bufferSize,
-										  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-											  VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-										  VMA_MEMORY_USAGE_CPU_TO_GPU);
-
-		VkDeviceAddress address = Vk::GetBufferDeviceAddress(ctx.Device(), gpu_buf.Handle());
-		debugMeshHandles[i] = meshPool.Create(std::move(gpu_buf), maxDebugVerts, address);
-	}
-
+void RenderContext::Impl::InitLightingLUTs() {
 	stagingContext = std::make_unique<Vk::StagingContext>(allocator, ctx);
 	stagingContext->Begin();
 
@@ -783,6 +758,57 @@ void RenderContext::Impl::InitBindless() {
 
 	ltcMatView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle());
 	ltcAmpView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle());
+}
+
+void RenderContext::Impl::InitBindless() {
+	bindlessLayout = GlobalSceneLayout::CreateLayout(ctx.Device());
+	bindlessPool = GlobalSceneLayout::CreatePool(ctx.Device(), 2);
+	bindlessSets[0] =
+		GlobalSceneLayout::Allocate(ctx.Device(), bindlessPool.Get(), bindlessLayout.Get());
+	bindlessSets[1] =
+		GlobalSceneLayout::Allocate(ctx.Device(), bindlessPool.Get(), bindlessLayout.Get());
+
+	VkSamplerCreateInfo samplerInfo = {
+		.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+		.pNext = nullptr,
+		.flags = 0,
+		.magFilter = VK_FILTER_LINEAR,
+		.minFilter = VK_FILTER_LINEAR,
+		.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+		.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+		.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+		.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+		.mipLodBias = 0,
+		.anisotropyEnable = VK_TRUE,
+		.maxAnisotropy = ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy,
+		.compareEnable = VK_FALSE,
+		.compareOp = VK_COMPARE_OP_NEVER,
+		.minLod = 0.0f,
+		.maxLod = 0.0f,
+		.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
+		.unnormalizedCoordinates = VK_FALSE,
+	};
+	VkSampler rawSampler = VK_NULL_HANDLE;
+	vkCreateSampler(ctx.Device(), &samplerInfo, nullptr, &rawSampler);
+	globalSampler = Vk::Sampler(ctx.Device(), rawSampler);
+	// Create the math/environment sampler (ClampToEdge prevents wrap-around artifacts)
+	clampSampler = Vk::SamplerBuilder{}.Linear().ClampToEdge().Build(ctx.Device());
+
+	InitSkeletalAnimationResources();
+	InitLightingLUTs();
+
+	ZHLN::Log("[RenderInit] Pre-allocating persistently mapped Double-Buffered Debug VBOs...");
+	size_t maxDebugVerts = 500000; // Large enough for dense wireframes (~32MB)
+	size_t bufferSize = maxDebugVerts * (sizeof(VertexPosition) + sizeof(VertexAttributes));
+	for (int i = 0; i < 2; ++i) {
+		auto gpu_buf = Vk::Buffer::Create(allocator.Get(), bufferSize,
+										  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+											  VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+										  VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+		VkDeviceAddress address = Vk::GetBufferDeviceAddress(ctx.Device(), gpu_buf.Handle());
+		debugMeshHandles[i] = meshPool.Create(std::move(gpu_buf), maxDebugVerts, address);
+	}
 
 	// Update global descriptor bindings
 	Vk::DescriptorUpdater bindlessRegistry;
@@ -1044,44 +1070,38 @@ void RenderContext::Impl::InitPostProcessing() {
 
 	// 2. Attach FileWatchers in Development Mode
 	if constexpr (isDev) {
-		// TAA
-		RegisterShaderWatcher(SHADER_TAA_HLSL_VS_PATH, [this]() { BuildTAAPipeline(); });
-		RegisterShaderWatcher(SHADER_TAA_HLSL_PS_PATH, [this]() { BuildTAAPipeline(); });
-
-		// FXAA
-		RegisterShaderWatcher(SHADER_FXAA_HLSL_VS_PATH, [this]() { BuildFXAAPipeline(); });
-		RegisterShaderWatcher(SHADER_FXAA_HLSL_PS_PATH, [this]() { BuildFXAAPipeline(); });
+		WatchPipeline(SHADER_TAA_HLSL_VS_PATH, SHADER_TAA_HLSL_PS_PATH,
+					  [this]() { BuildTAAPipeline(); });
+		WatchPipeline(SHADER_FXAA_HLSL_VS_PATH, SHADER_FXAA_HLSL_PS_PATH,
+					  [this]() { BuildFXAAPipeline(); });
 
 		// SMAA (3 Passes)
-		RegisterShaderWatcher(SHADER_SMAA_EDGE_VS_PATH, [this]() { BuildSMAAPipeline(); });
-		RegisterShaderWatcher(SHADER_SMAA_EDGE_PS_PATH, [this]() { BuildSMAAPipeline(); });
-		RegisterShaderWatcher(SHADER_SMAA_WEIGHT_VS_PATH, [this]() { BuildSMAAPipeline(); });
-		RegisterShaderWatcher(SHADER_SMAA_WEIGHT_PS_PATH, [this]() { BuildSMAAPipeline(); });
-		RegisterShaderWatcher(SHADER_SMAA_BLEND_VS_PATH, [this]() { BuildSMAAPipeline(); });
-		RegisterShaderWatcher(SHADER_SMAA_BLEND_PS_PATH, [this]() { BuildSMAAPipeline(); });
+		WatchPipeline(SHADER_SMAA_EDGE_VS_PATH, SHADER_SMAA_EDGE_PS_PATH,
+					  [this]() { BuildSMAAPipeline(); });
+		WatchPipeline(SHADER_SMAA_WEIGHT_VS_PATH, SHADER_SMAA_WEIGHT_PS_PATH,
+					  [this]() { BuildSMAAPipeline(); });
+		WatchPipeline(SHADER_SMAA_BLEND_VS_PATH, SHADER_SMAA_BLEND_PS_PATH,
+					  [this]() { BuildSMAAPipeline(); });
 
 		// Clustered Ambient & Lighting Passes
-		RegisterShaderWatcher(SHADER_AMBIENT_HLSL_VS_PATH, [this]() { BuildAmbientPipeline(); });
-		RegisterShaderWatcher(SHADER_AMBIENT_HLSL_PS_PATH, [this]() { BuildAmbientPipeline(); });
-		RegisterShaderWatcher(SHADER_LIGHTING_HLSL_VS_PATH, [this]() { BuildLightingPipeline(); });
-		RegisterShaderWatcher(SHADER_LIGHTING_HLSL_PS_PATH, [this]() { BuildLightingPipeline(); });
+		WatchPipeline(SHADER_AMBIENT_HLSL_VS_PATH, SHADER_AMBIENT_HLSL_PS_PATH,
+					  [this]() { BuildAmbientPipeline(); });
+		WatchPipeline(SHADER_LIGHTING_HLSL_VS_PATH, SHADER_LIGHTING_HLSL_PS_PATH,
+					  [this]() { BuildLightingPipeline(); });
 
 		// Specialized Reflection Pass
-		RegisterShaderWatcher(SHADER_REFLECTION_HLSL_VS_PATH,
-							  [this]() { BuildReflectionPipelines(); });
-		RegisterShaderWatcher(SHADER_REFLECTION_HLSL_PS_PATH,
-							  [this]() { BuildReflectionPipelines(); });
+		WatchPipeline(SHADER_REFLECTION_HLSL_VS_PATH, SHADER_REFLECTION_HLSL_PS_PATH,
+					  [this]() { BuildReflectionPipelines(); });
 
-		RegisterShaderWatcher(SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH,
-							  [this]() { BuildBloomPipelines(); });
-		RegisterShaderWatcher(SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH,
-							  [this]() { BuildBloomPipelines(); });
-		RegisterShaderWatcher(SHADER_BLOOM_BLUR_HLSL_VS_PATH, [this]() { BuildBloomPipelines(); });
-		RegisterShaderWatcher(SHADER_BLOOM_BLUR_HLSL_PS_PATH, [this]() { BuildBloomPipelines(); });
+		// Bloom
+		WatchPipeline(SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH, SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH,
+					  [this]() { BuildBloomPipelines(); });
+		WatchPipeline(SHADER_BLOOM_BLUR_HLSL_VS_PATH, SHADER_BLOOM_BLUR_HLSL_PS_PATH,
+					  [this]() { BuildBloomPipelines(); });
 
 		// Final Composition / Blit Pass
-		RegisterShaderWatcher(SHADER_BLIT_HLSL_VS_PATH, [this]() { BuildBlitPipeline(); });
-		RegisterShaderWatcher(SHADER_BLIT_HLSL_PS_PATH, [this]() { BuildBlitPipeline(); });
+		WatchPipeline(SHADER_BLIT_HLSL_VS_PATH, SHADER_BLIT_HLSL_PS_PATH,
+					  [this]() { BuildBlitPipeline(); });
 	}
 
 	// 3. Generate the SMAA Area LUT via heap vector passed as span
@@ -1223,29 +1243,7 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
 	bloomBlurTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(bloomExt);
 	bloomFinalTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(bloomExt);
 
-	punctualShadowViews.clear();
-	uint32_t maxPointLights = 4;
-	punctualShadowViews.resize(maxPointLights);
-	for (uint32_t i = 0; i < maxPointLights; ++i) {
-		VkImageViewCreateInfo viewInfo = {
-			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-			.pNext = {},
-			.flags = {},
-			.image = shadowAtlas.image.Handle(),
-			.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-			.format = VK_FORMAT_D32_SFLOAT,
-			.components = {},
-			.subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
-								 .baseMipLevel = 0,
-								 .levelCount = 1,
-								 .baseArrayLayer = i * 6,
-								 .layerCount = 6},
-		};
-
-		VkImageView rawView = VK_NULL_HANDLE;
-		vkCreateImageView(ctx.Device(), &viewInfo, nullptr, &rawView);
-		punctualShadowViews[i] = Vk::ImageView(ctx.Device(), rawView);
-	}
+	RecreatePunctualShadowViews();
 
 	return true;
 }
