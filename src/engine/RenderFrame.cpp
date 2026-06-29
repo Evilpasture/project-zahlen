@@ -860,11 +860,10 @@ struct BlitPass {
 
 		ctx.blitPass.WriteNext(ctx.ctx.Device(), inColor, ctx.defaultSampler.Get(), bloomColor);
 
-		const struct BlitPushConstants {
-			float vignetteIntensity;
-			float vignettePower;
-		} pc = {.vignetteIntensity = ctx.giSettings.vignetteIntensity,
-				.vignettePower = ctx.giSettings.vignettePower};
+		RenderContext::Impl::BlitPushConstants pc = {.vignetteIntensity =
+														 ctx.giSettings.vignetteIntensity,
+													 .vignettePower = ctx.giSettings.vignettePower,
+													 .fullBright = ctx.currentUniforms.fullBright};
 
 		if (ctx.blitPass.pipeline.Valid()) {
 			Vk::DynamicPass(inColor.extent)
@@ -1349,7 +1348,9 @@ RenderResult RenderContext::EndFrame() noexcept {
 		tlasInstances.push_back(inst);
 	}
 
-	if (!tlasInstances.empty() && _impl->rtCtx.Valid()) {
+	bool isFullBright = (_impl->currentUniforms.fullBright != 0);
+
+	if (!tlasInstances.empty() && _impl->rtCtx.Valid() && !isFullBright) {
 		auto& stagingBuf = _impl->tlasStagingBuffers[_impl->frame_index];
 		auto& instanceBuf = _impl->tlasInstanceBuffers[_impl->frame_index];
 
@@ -1395,7 +1396,7 @@ RenderResult RenderContext::EndFrame() noexcept {
 
 	FrameRecorder recorder(cmd, *_impl);
 
-	{
+	if (!isFullBright) {
 		VkCommandBuffer c = cmd;
 		uint32_t fIdx = _impl->frame_index;
 
@@ -1414,9 +1415,9 @@ RenderResult RenderContext::EndFrame() noexcept {
 		Vk::BarrierBuilder()
 			.From(Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite)
 			.To(c, Vk::BarrierStage::Fragment, Vk::BarrierAccess::ShaderRead);
-	}
 
-	RunPass(Passes::ShadowPass{}, recorder);
+		RunPass(Passes::ShadowPass{}, recorder);
+	}
 
 	SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 				   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>
@@ -1432,19 +1433,29 @@ RenderResult RenderContext::EndFrame() noexcept {
 	// 1. Render the G-Buffer (Geometry Pass)
 	Passes::MainPass{}.Execute(recorder, initialState);
 
-	// 2. Compute Deferred Lighting
-	auto pp_ro = Passes::DeferredLightingPass{}.Execute(recorder, initialState);
+	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> finalColor_ro;
+	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> bloomFinal_ro;
 
-	// 3. Forward Pass
-	Passes::ForwardPass{}.Execute(recorder, pp_ro, initialState.depth);
+	if (isFullBright) {
+		// Bypass lighting, transparent forward passes, and bloom entirely on the CPU
+		finalColor_ro = initialState.sceneColor;
+		bloomFinal_ro =
+			Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(_impl->bloomFinalTarget);
+	} else {
+		// 2. Compute Deferred Lighting
+		finalColor_ro = Passes::DeferredLightingPass{}.Execute(recorder, initialState);
 
-	// 4. Bloom Pass
-	auto bloomFinal_ro = Passes::BloomPass{}.Execute(recorder, pp_ro);
+		// 3. Forward Pass
+		Passes::ForwardPass{}.Execute(recorder, finalColor_ro, initialState.depth);
+
+		// 4. Bloom Pass
+		bloomFinal_ro = Passes::BloomPass{}.Execute(recorder, finalColor_ro);
+	}
 
 	// 5. Run AA (TAA / SMAA / FXAA)
 	SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 				   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>
-		resourcesForAA = {.sceneColor = pp_ro,
+		resourcesForAA = {.sceneColor = finalColor_ro,
 						  .velocity = initialState.velocity,
 						  .normRough = initialState.normRough,
 						  .depth = initialState.depth};

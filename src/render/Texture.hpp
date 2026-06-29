@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 #include <Allocator.hpp>
 #include <RenderCore.hpp>
@@ -21,7 +20,7 @@ struct TextureAsset {
 
 	TextureAsset(TextureAsset&&) noexcept = default;
 	auto operator=(TextureAsset&&) noexcept -> TextureAsset& = default;
-	~TextureAsset() = default; 
+	~TextureAsset() = default;
 
 	// Helper to check validity
 	explicit operator bool() const { return image.Valid() && view.Valid(); }
@@ -96,7 +95,8 @@ inline auto UploadTexture(Allocator& allocator, const Context& ctx,
 							.mip_level = 0,
 							.base_array_layer = 0});
 
-	ZHLN_GenerateMipmaps(cmd, result.image.Handle(), (int32_t)textureW, (int32_t)textureH, mipLevels);
+	ZHLN_GenerateMipmaps(cmd, result.image.Handle(), (int32_t)textureW, (int32_t)textureH,
+						 mipLevels);
 
 	ZHLN_EndCommandBuffer(cmd);
 
@@ -113,4 +113,9 @@ inline auto UploadTexture(Allocator& allocator, const Context& ctx,
 
 	return result;
 }
+
+void UpdateBindlessTextureSlot(VkDevice device, uint32_t slotIndex, VkImageView view,
+							   const ZHLN::DoubleBuffered<VkDescriptorSet>& bindlessSets,
+							   uint32_t dstBinding = 0);
+
 } // namespace ZHLN::Vk

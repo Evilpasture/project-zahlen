@@ -127,6 +127,7 @@ if not ok then
             float vignettePower;
             int enableSSR;
             int enableRTR;
+            int fullBright;
             float ambientExposure;
             float probeMin[4];
             float probeMax[4];

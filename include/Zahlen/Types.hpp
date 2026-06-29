@@ -177,10 +177,10 @@ struct alignas(16) FrameUniforms {
 	float zScale;
 	float zBias;
 
-	// NEW: Depth boundaries where each cascade ends
 	alignas(16) float cascadeSplits[4];
 	int numCascades; // E.g., 4
-	float _pad_csm[3];
+	int fullBright;	 // 0 = Lit, 1 = Fullbright/Unlit
+	float _pad_csm[2];
 };
 
 // Material handle representation

@@ -26,10 +26,10 @@ struct FrameUniforms {
 	float zScale;
 	float zBias;
 
-	// NEW: To match std140 array packing, declare splits as a single float4 vector [3]
 	float4 cascadeSplits;
 	int numCascades;
-	float3 _pad_csm; // 12-byte pad to close out the final 16-byte boundary
+	int fullBright;
+	float2 _pad_csm;
 };
 
 struct Light {

@@ -4,40 +4,13 @@
 // File: src/engine/RenderResources.cpp
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
+#include "Texture.hpp"
 #include "Zahlen/Types.hpp"
 
 #include <cstddef>
 #include <utility>
 
 namespace ZHLN {
-
-void RenderContext::Impl::UpdateBindlessTextureSlot(uint32_t slotIndex, VkImageView view,
-													uint32_t dstBinding) {
-	// NOTE: Since our bindless descriptor layouts use VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT,
-	// host-side descriptor updates are fully valid even while the command buffer is executing.
-	// When migrating ImmediateCommand away from host-stalling (vkQueueWaitIdle), ensure that the
-	// GPU-side layout transition command is recorded and synchronized on the timeline before any
-	// shader reads from this slotIndex.
-	VkDescriptorImageInfo bindlessUpdate = {.sampler = VK_NULL_HANDLE,
-											.imageView = view,
-											.imageLayout =
-												VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-
-	std::array<VkWriteDescriptorSet, 2> writes = {};
-	for (int i = 0; i < 2; ++i) {
-		writes[i] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-					 .pNext = nullptr,
-					 .dstSet = bindlessSets[i],
-					 .dstBinding = dstBinding,
-					 .dstArrayElement = slotIndex,
-					 .descriptorCount = 1,
-					 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-					 .pImageInfo = &bindlessUpdate,
-					 .pBufferInfo = nullptr,
-					 .pTexelBufferView = nullptr};
-	}
-	vkUpdateDescriptorSets(ctx.Device(), 2, writes.data(), 0, nullptr);
-}
 
 // Define CompileShadowPipeline here so it compiles with vertex reflection visible
 void RenderContext::Impl::CompileShadowPipeline(VkDevice device, const void* shaderData,
@@ -224,7 +197,7 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
 								device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
 
 	uint32_t index = nextTextureIndex++;
-	UpdateBindlessTextureSlot(index, gpuView.Get(), 0);
+	Vk::UpdateBindlessTextureSlot(device, index, gpuView.Get(), bindlessSets, 0);
 
 	textureImages.push_back(std::move(gpuImage));
 	textureViews.push_back(std::move(gpuView));
@@ -307,7 +280,7 @@ uint32_t RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceD
 	auto gpuView = Vk::CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), 1);
 
 	uint32_t index = nextTextureIndex++;
-	UpdateBindlessTextureSlot(index, gpuView.Get(), 0);
+	Vk::UpdateBindlessTextureSlot(device, index, gpuView.Get(), bindlessSets, 0);
 
 	textureImages.push_back(std::move(gpuImage));
 	textureViews.push_back(std::move(gpuView));
@@ -420,7 +393,8 @@ uint32_t RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas)
 
 void RenderContext::SetShadowResolution(uint32_t resolution) {
 	auto* impl = _impl.get();
-	vkDeviceWaitIdle(impl->ctx.Device());
+	auto* device = impl->ctx.Device();
+	vkDeviceWaitIdle(device);
 
 	impl->shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
 		impl->allocator, impl->ctx, {.width = resolution, .height = resolution},
@@ -446,7 +420,7 @@ void RenderContext::SetShadowResolution(uint32_t resolution) {
 			cmd, impl->shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
 	}
 
-	impl->UpdateBindlessTextureSlot(0, impl->shadowMap.view.Get(), 2);
+	Vk::UpdateBindlessTextureSlot(device, 0, impl->shadowMap.view.Get(), impl->bindlessSets, 2);
 	ZHLN::Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);
 }
 

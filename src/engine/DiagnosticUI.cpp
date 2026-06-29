@@ -272,6 +272,11 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 		pp->enableRTR = useRtr ? 1 : 0;
 	}
 
+	bool useFullBright = pp->fullBright != 0;
+	if (ImGui::Checkbox("Fullbright Mode (Disable Lighting/Shadows)", &useFullBright)) {
+		pp->fullBright = useFullBright ? 1 : 0;
+	}
+
 	ImGui::End();
 }
 

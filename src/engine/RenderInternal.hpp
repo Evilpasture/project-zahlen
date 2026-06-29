@@ -569,6 +569,12 @@ struct RenderContext::Impl {
 		uint32_t bakeType;
 	};
 
+	struct BlitPushConstants {
+		float vignetteIntensity;
+		float vignettePower;
+		int fullBright;
+	};
+
 	Vk::ComputePass hangGpuPass;
 
 	void BuildHangGpuPipeline();
@@ -582,8 +588,6 @@ struct RenderContext::Impl {
 								   float scale, float randomness, float distortion);
 
 	Impl(Window& win) : window(win) {}
-
-	void UpdateBindlessTextureSlot(uint32_t slotIndex, VkImageView view, uint32_t dstBinding = 0);
 
 	void InitShadowResources();
 	void InitCullingResources();

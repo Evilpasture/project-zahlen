@@ -80,6 +80,7 @@ RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& ou
 	}
 
 	int enableRTR = 0;
+	int fullBright = 0;
 	JPH::Vec4 probeMin(0, 0, 0, 0);
 	JPH::Vec4 probeMax(0, 0, 0, 0);
 	JPH::Vec4 probePos(0, 0, 0, 0);
@@ -89,6 +90,7 @@ RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& ou
 	if (!settingsEntities.empty()) {
 		if (auto* pp = reg.Get<PostProcessSettingsComponent>(settingsEntities[0])) {
 			enableRTR = pp->enableRTR;
+			fullBright = pp->fullBright;
 			probeMin = JPH::Vec4(pp->probeMin.GetX(), pp->probeMin.GetY(), pp->probeMin.GetZ(),
 								 pp->useLocalProbe ? 1.0f : 0.0f);
 			probeMax =
@@ -182,6 +184,7 @@ RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& ou
 	uniforms.jitterParams =
 		JPH::Vec4(aaState.jitterX, aaState.jitterY, aaState.prevJitterX, aaState.prevJitterY);
 	uniforms.enableRTR = enableRTR;
+	uniforms.fullBright = fullBright;
 	uniforms.shadowWidth = shadowWidth;
 	uniforms.shadowResolution = shadowResolution;
 	if (!settingsEntities.empty()) {

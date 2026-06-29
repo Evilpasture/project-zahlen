@@ -136,6 +136,14 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible,
 	outVisibleShadow.clear();
 	auto meshes = reg.GetRawArray<MeshComponent>();
 
+	bool isFullBright = false;
+	auto settingsEntities = reg.GetEntitiesWith<GlobalSettingsTagComponent>();
+	if (!settingsEntities.empty()) {
+		if (auto* pp = reg.Get<PostProcessSettingsComponent>(settingsEntities[0])) {
+			isFullBright = (pp->fullBright != 0);
+		}
+	}
+
 	for (size_t i = 0; i < entities.size(); ++i) {
 		Entity e = entities[i];
 
@@ -152,8 +160,8 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible,
 			outVisible.push_back(e);
 		}
 
-		// 2. Cull against Shadow Camera Frustum
-		if (cam.shadowFrustum.IsSphereVisible(pos, meshes[i].cullRadius)) {
+		// 2. Cull against Shadow Camera Frustum (Only run if lit)
+		if (!isFullBright && cam.shadowFrustum.IsSphereVisible(pos, meshes[i].cullRadius)) {
 			outVisibleShadow.push_back(e);
 		}
 	}

@@ -557,6 +557,7 @@ function Engine:config(cfg)
     if cfg.vignettePower and pp then pp[0].vignettePower = cfg.vignettePower end
     if cfg.enableSSR ~= nil and pp then pp[0].enableSSR = cfg.enableSSR end
     if cfg.enableRTR ~= nil and pp then pp[0].enableRTR = cfg.enableRTR end
+    if cfg.fullBright ~= nil and pp then pp[0].fullBright = cfg.fullBright end
 
     if cfg.enableTAA ~= nil and aa then
         aa[0].state.mode = cfg.enableTAA == 1 and 2 or 0

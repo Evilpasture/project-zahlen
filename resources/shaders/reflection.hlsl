@@ -90,6 +90,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 	if (depth >= 1.0f)
 		return litColorRaw;
 
+	if (frame.fullBright != 0) {
+		return float4(litColorRaw.rgb, 1.0f);
+	}
+
 	float4 normRoughRaw = texNormalRoughness.SampleLevel(smp, input.uv, 0);
 	float roughness = normRoughRaw.z;
 	float metallic = normRoughRaw.w;

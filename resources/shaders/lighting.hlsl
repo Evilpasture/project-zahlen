@@ -65,6 +65,9 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 		discard;
 
 	float4 albedoRaw = texInput.SampleLevel(smp, input.uv, 0);
+	if (frame.fullBright != 0) {
+		return float4(albedoRaw.rgb, 1.0f);
+	}
 	float4 normRoughRaw = texNormalRoughness.SampleLevel(smp, input.uv, 0);
 	float3 N = UnpackNormalOctahedron(normRoughRaw.xy * 2.0f - 1.0f);
 	float roughness = normRoughRaw.z;

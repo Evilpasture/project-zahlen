@@ -22,6 +22,7 @@ add_library(zahlen_render STATIC
     Allocator.cpp
     SamplerBuilder.cpp
     StagingContext.cpp
+    Texture.cpp
 )
 set_target_properties(zahlen_render PROPERTIES POSITION_INDEPENDENT_CODE ON)
 

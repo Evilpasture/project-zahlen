@@ -1011,7 +1011,7 @@ void RenderContext::Impl::BuildBlitPipeline() {
 	VkPushConstantRange blitPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 		.offset = 0,
-		.size = 8,
+		.size = sizeof(BlitPushConstants),
 	};
 
 	BuildPassHelper(this, blitPass, "Blit",

@@ -16,6 +16,7 @@ VSOutput VSMain(uint vertexID : SV_VertexID) {
 struct PushConstants {
 	float vignetteIntensity;
 	float vignettePower;
+	int fullBright;
 };
 [[vk::push_constant]] PushConstants pc;
 
@@ -34,6 +35,11 @@ float3 ACESFilm(float3 x) {
 
 float4 PSMain(VSOutput input) : SV_Target0 {
 	float3 hdrColor = texInput.SampleLevel(smp, input.uv, 0).rgb;
+
+	// Bypasses HDR exposure, bloom, and tonemapping if fullbright is enabled
+	if (pc.fullBright != 0) {
+		return float4(hdrColor, 1.0f);
+	}
 
 	// Sample Bloom and blend additively (adjust the 0.5f intensity multiplier as needed)
 	float3 bloom = texBloom.SampleLevel(smp, input.uv, 0).rgb;

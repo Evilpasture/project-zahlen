@@ -56,6 +56,7 @@ struct EditorState {
 	bool simulationRunning = false;		// Pauses/runs physics and ALife
 	Entity selectedEntity = NullEntity; // Currently selected ECS entity
 	bool showPhysicsDebug = true;		// Keep this exactly as it was
+	bool fullBright = false;
 };
 
 EditorState g_EditorState;
@@ -160,6 +161,8 @@ void DrawEditorPanels(Engine& engine) {
 	if (ImGui::Button("⏵❘ Step Frame")) {
 		pc.Step(1.0f / 60.0f);
 	}
+	ImGui::SameLine();
+	ImGui::Checkbox("Fullbright Mode", &g_EditorState.fullBright);
 
 	ImGui::SameLine();
 	ImGui::TextDisabled("|");
@@ -491,6 +494,7 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 			uniforms.lightCount = 0;
 			uniforms.jitterParams = JPH::Vec4(s_AAState.jitterX, s_AAState.jitterY,
 											  s_AAState.prevJitterX, s_AAState.prevJitterY);
+			uniforms.fullBright = g_EditorState.fullBright ? 1 : 0;
 
 			rc.SetAAState(s_AAState);
 			Renderer::SetFrameData(rc, cam, uniforms, shadowProjView);
