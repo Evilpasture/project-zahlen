@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/engine/RenderInternal.hpp
+// File: src/render/RenderInternal.hpp
 #pragma once
 #include "Allocator.hpp"
 #include "ComputePass.hpp"
@@ -679,6 +679,10 @@ struct RenderContext::Impl {
 
 	[[nodiscard]] Vk::ShaderStages LoadAndCreateShaders(ShaderStageSource vs,
 														ShaderStageSource ps) const noexcept;
+
+	[[nodiscard]] Vk::Pipeline LoadAndCreateComputeShader(ShaderStageSource cs,
+														  VkPipelineLayout layout) const noexcept;
+
 	void WatchPipeline(const char* vsPath, const char* psPath,
 					   std::function<void()> rebuild_fn) noexcept;
 };
@@ -843,20 +847,18 @@ inline bool LoadShaderData(const ShaderStageSource& src, const void*& outData, s
 
 } // namespace ZHLN
 
-namespace ZHLN::Vk {
-template <> struct FormatOf<float[3]> {
+template <> struct ZHLN::Vk::FormatOf<float[3]> {
 	static constexpr auto value = VK_FORMAT_R32G32B32_SFLOAT;
 };
-template <> struct FormatOf<::ZHLN::Packed1010102> {
+template <> struct ZHLN::Vk::FormatOf<::ZHLN::Packed1010102> {
 	static constexpr auto value = VK_FORMAT_A2B10G10R10_UNORM_PACK32;
 };
-template <> struct FormatOf<::ZHLN::PackedHalf2> {
+template <> struct ZHLN::Vk::FormatOf<::ZHLN::PackedHalf2> {
 	static constexpr auto value = VK_FORMAT_R16G16_SFLOAT;
 };
-template <> struct FormatOf<::ZHLN::PackedRGBA8> {
+template <> struct ZHLN::Vk::FormatOf<::ZHLN::PackedRGBA8> {
 	static constexpr auto value = VK_FORMAT_R8G8B8A8_UNORM;
 };
-} // namespace ZHLN::Vk
 
 ZHLN_REFLECT_VERTEX(::ZHLN::VertexPosition, position);
 ZHLN_REFLECT_VERTEX(::ZHLN::VertexAttributes, normal, tangent, uv, color);

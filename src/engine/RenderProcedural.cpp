@@ -1,16 +1,14 @@
 #include "RenderCore.hpp"
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
+#include "Texture.hpp"
 
 #include <cstdint>
 namespace ZHLN {
 
 void RenderContext::Impl::BuildProceduralBakePipeline() {
-	proceduralBakeDescLayout = BakeLayout::CreateLayout(ctx.Device());
-	proceduralBakeDescPool = BakeLayout::CreatePool(ctx.Device(), 1); // 1 pool is sufficient
-
-	proceduralBakeSet = BakeLayout::Allocate(ctx.Device(), proceduralBakeDescPool.Get(),
-											 proceduralBakeDescLayout.Get());
+	Vk::AllocateSingleBufferedSet<BakeLayout>(ctx.Device(), proceduralBakeDescLayout,
+											  proceduralBakeDescPool, proceduralBakeSet);
 
 	VkPushConstantRange push = {
 		.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
@@ -28,7 +26,7 @@ void RenderContext::Impl::BuildProceduralBakePipeline() {
 					.entryPoint = "CSMain"},
 				   cs_code, cs_size, disk_cs);
 
-	ZHLN_ShaderDesc shader = {
+	ZHLN_ShaderDesc shaderDesc = {
 		.code = Vk::AsSpirV(cs_code), .size = cs_size, .entry_point = "CSMain"};
 
 	// Map specialization indices to driver pipeline branches
@@ -45,7 +43,7 @@ void RenderContext::Impl::BuildProceduralBakePipeline() {
 	}
 
 	ZHLN::PanicIf(!proceduralBakePass.BuildVariants(ctx.Device(), proceduralBakeDescLayout.Get(),
-													shader, specInfos, &push, 1),
+													shaderDesc, specInfos, &push, 1),
 				  "[Shader] Failed to build specialized Procedural Bake Compute variants!");
 	ZHLN::Log("[Shader] GPU Procedural Bake Compute Pipeline initialized with specialization "
 			  "variants.");
@@ -82,79 +80,31 @@ uint32_t RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t hei
 	// Write to compute descriptor set
 	BakeLayout::Write(device, proceduralBakeSet, Vk::ImageWrite{.view = writeView.Get()});
 
-	// 2. Dispatch the Compute Shader
-	Vk::CommandPool tempPool(device, ctx.PhysicalInfo().graphics_family);
+	// 2. Dispatch the Compute Shader via RAII-Managed Immediate Command Stream
+	{
+		Vk::ImmediateCommand cmd(device, ctx.GraphicsQueue(), ctx.PhysicalInfo().graphics_family);
 
-	if (!tempPool.Allocate(1)) {
-		ZHLN::Log("Failed to allocate temporary command pool for procedural baking!");
-		return 0;
+		// Transition Undefined -> General (Safe for Compute storage writes)
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd,
+																				 gpuImage.Handle());
+
+		proceduralBakePass.DispatchVariant(cmd, proceduralBakeSet, variantIdx, (width + 15) / 16,
+										   (height + 15) / 16, 1,
+										   BakePush{.width = width,
+													.height = height,
+													.scale = scale,
+													.randomness = randomness,
+													.distortion = distortion,
+													.bakeType = variantIdx});
+
+		// Transition General -> Shader Read Only (Ready for Bindless fragment reads)
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+			cmd, gpuImage.Handle());
 	}
-	VkCommandBuffer cmd = tempPool[0];
-
-	ZHLN_BeginCommandBuffer(cmd);
-
-	// Transition Undefined -> General (Safe for Compute storage writes)
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd,
-																			 gpuImage.Handle());
-
-	proceduralBakePass.Dispatch(cmd, proceduralBakeSet, (width + 15) / 16, (height + 15) / 16, 1,
-								BakePush{.width = width,
-										 .height = height,
-										 .scale = scale,
-										 .randomness = randomness,
-										 .distortion = distortion,
-										 .bakeType = variantIdx});
-
-	// Transition General -> Shader Read Only (Ready for Bindless fragment reads)
-	Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-		cmd, gpuImage.Handle());
-
-	ZHLN_EndCommandBuffer(cmd);
-
-	// Submit queue synchronously
-	VkCommandBufferSubmitInfo subInfo = {
-		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-		.pNext = {},
-		.commandBuffer = cmd,
-		.deviceMask = {},
-	};
-	VkSubmitInfo2 submit = {
-		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-		.pNext = {},
-		.flags = {},
-		.waitSemaphoreInfoCount = {},
-		.pWaitSemaphoreInfos = {},
-		.commandBufferInfoCount = 1,
-		.pCommandBufferInfos = &subInfo,
-		.signalSemaphoreInfoCount = {},
-		.pSignalSemaphoreInfos = {},
-	};
-	vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
-	vkQueueWaitIdle(ctx.GraphicsQueue());
 
 	// 3. Register our generated view into the Bindless Set
 	uint32_t index = nextTextureIndex++;
-	VkDescriptorImageInfo bindlessUpdate = {.sampler = VK_NULL_HANDLE,
-											.imageView = writeView.Get(),
-											.imageLayout =
-												VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-
-	std::array<VkWriteDescriptorSet, 2> writes = {};
-	for (int i = 0; i < 2; ++i) {
-		writes[i] = {
-			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-			.pNext = {},
-			.dstSet = bindlessSets[i],
-			.dstBinding = 0,
-			.dstArrayElement = index,
-			.descriptorCount = 1,
-			.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-			.pImageInfo = &bindlessUpdate,
-			.pBufferInfo = {},
-			.pTexelBufferView = {},
-		};
-	}
-	vkUpdateDescriptorSets(device, 2, writes.data(), 0, nullptr);
+	Vk::UpdateBindlessTextureSlot(device, index, writeView.Get(), bindlessSets, 0);
 
 	textureImages.push_back(std::move(gpuImage));
 	textureViews.push_back(std::move(writeView));

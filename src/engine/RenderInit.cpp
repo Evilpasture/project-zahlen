@@ -197,6 +197,21 @@ Vk::ShaderStages RenderContext::Impl::LoadAndCreateShaders(ShaderStageSource vs,
 		{.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint});
 }
 
+Vk::Pipeline
+RenderContext::Impl::LoadAndCreateComputeShader(ShaderStageSource cs,
+												VkPipelineLayout layout) const noexcept {
+	const void* cs_code = nullptr;
+	size_t cs_size = 0;
+	std::vector<uint32_t> disk_cs;
+
+	LoadShaderData(cs, cs_code, cs_size, disk_cs);
+
+	return Vk::ComputePipelineBuilder()
+		.Shader(Vk::AsSpirV(cs_code), cs_size, cs.entryPoint)
+		.Layout(layout)
+		.Build(ctx.Device());
+}
+
 void RenderContext::Impl::WatchPipeline(const char* vsPath, const char* psPath,
 										std::function<void()> rebuild_fn) noexcept {
 	if constexpr (isDev) {
@@ -458,25 +473,15 @@ void RenderContext::Impl::BuildSkinningPipeline() {
 										   .push_constants = &pushRange,
 										   .push_constant_count = 1};
 
-	// 1. Compile the PipelineLayout manually (storing directly inside the ComputePass)
 	skinningPass.pipelineLayout =
 		Vk::PipelineLayout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &layout_desc));
 
-	const void* cs_code = nullptr;
-	size_t cs_size = 0;
-	std::vector<uint32_t> disk_cs;
-
-	LoadShaderData({.path = SHADER_SKINNING_HLSL_CS_PATH,
-					.fallbackCode = ZHLN_Resource_SkinningCompSpv,
-					.fallbackSize = ZHLN_Resource_SkinningCompSpv_Len,
-					.entryPoint = "CSMain"},
-				   cs_code, cs_size, disk_cs);
-
-	// 2. Compile the Pipeline manually using the ComputePipelineBuilder
-	skinningPass.pipeline = Vk::ComputePipelineBuilder()
-								.Shader(Vk::AsSpirV(cs_code), cs_size, "CSMain")
-								.Layout(skinningPass.pipelineLayout.Get())
-								.Build(ctx.Device());
+	skinningPass.pipeline =
+		LoadAndCreateComputeShader({.path = SHADER_SKINNING_HLSL_CS_PATH,
+									.fallbackCode = ZHLN_Resource_SkinningCompSpv,
+									.fallbackSize = ZHLN_Resource_SkinningCompSpv_Len,
+									.entryPoint = "CSMain"},
+								   skinningPass.pipelineLayout.Get());
 
 	if (skinningPass.pipeline.Valid()) {
 		ZHLN::Log("[Shader Reload] GPU Skinning Compute pipeline built successfully.");
@@ -554,10 +559,8 @@ void RenderContext::Impl::InitShadowResources() {
 }
 
 void RenderContext::Impl::InitCullingResources() {
-	cullingLayout = CullingLayout::CreateLayout(ctx.Device());
-	cullingPool = CullingLayout::CreatePool(ctx.Device(), 2);
-	cullingSets[0] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
-	cullingSets[1] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
+	Vk::AllocateDoubleBufferedSet<CullingLayout>(ctx.Device(), cullingLayout, cullingPool,
+												 cullingSets);
 
 	for (int i = 0; i < 2; ++i) {
 		instanceDataBuffers[i] =
@@ -595,12 +598,8 @@ void RenderContext::Impl::InitCullingResources() {
 		Vk::Buffer::Create(allocator.Get(), sizeof(ClusterBounds) * numClusters,
 						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
 
-	clusterCullingDescLayout = ClusterCullingLayout::CreateLayout(ctx.Device());
-	clusterCullingPool = ClusterCullingLayout::CreatePool(ctx.Device(), 2);
-	clusterCullingSets[0] = ClusterCullingLayout::Allocate(ctx.Device(), clusterCullingPool.Get(),
-														   clusterCullingDescLayout.Get());
-	clusterCullingSets[1] = ClusterCullingLayout::Allocate(ctx.Device(), clusterCullingPool.Get(),
-														   clusterCullingDescLayout.Get());
+	Vk::AllocateDoubleBufferedSet<ClusterCullingLayout>(ctx.Device(), clusterCullingDescLayout,
+														clusterCullingPool, clusterCullingSets);
 
 	for (int i = 0; i < 2; ++i) {
 		clusterGridBuffers[i] =
@@ -761,12 +760,8 @@ void RenderContext::Impl::InitLightingLUTs() {
 }
 
 void RenderContext::Impl::InitBindless() {
-	bindlessLayout = GlobalSceneLayout::CreateLayout(ctx.Device());
-	bindlessPool = GlobalSceneLayout::CreatePool(ctx.Device(), 2);
-	bindlessSets[0] =
-		GlobalSceneLayout::Allocate(ctx.Device(), bindlessPool.Get(), bindlessLayout.Get());
-	bindlessSets[1] =
-		GlobalSceneLayout::Allocate(ctx.Device(), bindlessPool.Get(), bindlessLayout.Get());
+	Vk::AllocateDoubleBufferedSet<GlobalSceneLayout>(ctx.Device(), bindlessLayout, bindlessPool,
+													 bindlessSets);
 
 	VkSamplerCreateInfo samplerInfo = {
 		.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
@@ -774,7 +769,7 @@ void RenderContext::Impl::InitBindless() {
 		.flags = 0,
 		.magFilter = VK_FILTER_LINEAR,
 		.minFilter = VK_FILTER_LINEAR,
-		.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+		.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
 		.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
 		.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
 		.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
@@ -1249,31 +1244,20 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
 }
 
 void RenderContext::Impl::BuildHangGpuPipeline() {
-	const void* cs_code = nullptr;
-	size_t cs_size = 0;
-	std::vector<uint32_t> disk_cs;
-
-	LoadShaderData({.path = SHADER_HANG_GPU_HLSL_CS_PATH,
-					.fallbackCode = ZHLN_Resource_HangGpuCompSpv,
-					.fallbackSize = ZHLN_Resource_HangGpuCompSpv_Len,
-					.entryPoint = "CSMain"},
-				   cs_code, cs_size, disk_cs);
-
-	ZHLN_ShaderDesc desc = {.code = Vk::AsSpirV(cs_code), .size = cs_size, .entry_point = "CSMain"};
-
-	// Create an empty pipeline layout with 0 descriptor set layouts
 	ZHLN_PipelineLayoutDesc pLayoutDesc = {.set_layouts = nullptr,
 										   .set_layout_count = 0,
 										   .push_constants = nullptr,
 										   .push_constant_count = 0};
 
-	// Build the compute pipeline with the empty layout
 	hangGpuPass.pipelineLayout =
 		Vk::PipelineLayout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &pLayoutDesc));
-	hangGpuPass.pipeline = Vk::ComputePipelineBuilder()
-							   .Shader(desc)
-							   .Layout(hangGpuPass.pipelineLayout.Get())
-							   .Build(ctx.Device());
+
+	hangGpuPass.pipeline =
+		LoadAndCreateComputeShader({.path = SHADER_HANG_GPU_HLSL_CS_PATH,
+									.fallbackCode = ZHLN_Resource_HangGpuCompSpv,
+									.fallbackSize = ZHLN_Resource_HangGpuCompSpv_Len,
+									.entryPoint = "CSMain"},
+								   hangGpuPass.pipelineLayout.Get());
 
 	if (hangGpuPass.pipeline.Valid()) {
 		ZHLN::Log("[Shader Reload] Hang GPU Pipeline built successfully with empty layout.");

@@ -481,4 +481,22 @@ void DescriptorLayout<Slots...>::WriteSlot(VkDescriptorSet set, Arg&& arg,
 	}
 }
 
+template <typename LayoutT>
+inline void AllocateDoubleBufferedSet(VkDevice device, DescriptorSetLayout& outLayout,
+									  DescriptorPool& outPool,
+									  ZHLN::DoubleBuffered<VkDescriptorSet>& outSets) noexcept {
+	outLayout = LayoutT::CreateLayout(device);
+	outPool = LayoutT::CreatePool(device, 2);
+	outSets[0] = LayoutT::Allocate(device, outPool.Get(), outLayout.Get());
+	outSets[1] = LayoutT::Allocate(device, outPool.Get(), outLayout.Get());
+}
+
+template <typename LayoutT>
+inline void AllocateSingleBufferedSet(VkDevice device, DescriptorSetLayout& outLayout,
+									  DescriptorPool& outPool, VkDescriptorSet& outSet) noexcept {
+	outLayout = LayoutT::CreateLayout(device);
+	outPool = LayoutT::CreatePool(device, 1);
+	outSet = LayoutT::Allocate(device, outPool.Get(), outLayout.Get());
+}
+
 } // namespace ZHLN::Vk

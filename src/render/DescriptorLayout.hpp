@@ -221,20 +221,11 @@ template <typename... Slots> class DescriptorLayout {
 template <typename LayoutT>
 inline void AllocateDoubleBufferedSet(VkDevice device, DescriptorSetLayout& outLayout,
 									  DescriptorPool& outPool,
-									  ZHLN::DoubleBuffered<VkDescriptorSet>& outSets) noexcept {
-	outLayout = LayoutT::CreateLayout(device);
-	outPool = LayoutT::CreatePool(device, 2);
-	outSets[0] = LayoutT::Allocate(device, outPool.Get(), outLayout.Get());
-	outSets[1] = LayoutT::Allocate(device, outPool.Get(), outLayout.Get());
-}
+									  ZHLN::DoubleBuffered<VkDescriptorSet>& outSets) noexcept;
 
 template <typename LayoutT>
 inline void AllocateSingleBufferedSet(VkDevice device, DescriptorSetLayout& outLayout,
-									  DescriptorPool& outPool, VkDescriptorSet& outSet) noexcept {
-	outLayout = LayoutT::CreateLayout(device);
-	outPool = LayoutT::CreatePool(device, 1);
-	outSet = LayoutT::Allocate(device, outPool.Get(), outLayout.Get());
-}
+									  DescriptorPool& outPool, VkDescriptorSet& outSet) noexcept;
 
 } // namespace ZHLN::Vk
 
