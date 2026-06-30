@@ -6,6 +6,7 @@
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Render.hpp"
 #include "ecs/ECS.hpp"
+#include "engine/system/AnimationSystem.hpp"
 #include "engine/system/LightingSystem.hpp"
 #include "physics/Physics.hpp"
 
@@ -968,10 +969,24 @@ void PreparePrefabPhysics(const ModelPrefab& prefab, const JPH::Mat44& baseTrans
 // ----------------------------------------------------------------------------
 Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContext& pc,
 						   const ModelPart& part, const PreparedPart& prep,
-						   const SpawnParams& params, Entity rootEntity, float scaleMult) {
+						   const SpawnParams& params, Entity rootEntity, float scaleMult,
+						   cgltf_data* gltfData,
+						   std::unordered_map<cgltf_skin*, uint32_t>& allocatedSkins) {
 	BufferHandle skinnedVbo = BufferHandle::Invalid;
 	if (part.isSkinned && params.isAnimated) {
 		skinnedVbo = ctx.CreateSkinnedScratchBuffer(part.mesh.vertexCount);
+	}
+
+	uint32_t assignedJointOffset = 0;
+	if (part.isSkinned && params.isAnimated) {
+		auto it = allocatedSkins.find(part.gltfSkin);
+		if (it != allocatedSkins.end()) {
+			assignedJointOffset = it->second;
+		} else {
+			assignedJointOffset =
+				JointAllocator::Allocate(static_cast<uint32_t>(part.gltfSkin->joints_count));
+			allocatedSkins[part.gltfSkin] = assignedJointOffset;
+		}
 	}
 
 	Entity e = reg.Create();
@@ -1003,7 +1018,7 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 					   .localTransform = JPH::Mat44::sIdentity(),
 					   .prevTransform = JPH::Mat44::sIdentity(),
 					   .worldTransform = JPH::Mat44::sIdentity(),
-					   .jointOffset = part.jointOffset,
+					   .jointOffset = assignedJointOffset,
 					   .isSkinned = part.isSkinned && params.isAnimated,
 					   .skinnedVertexBuffer = skinnedVbo,
 					   .morphOffset = part.morphOffset,
@@ -1014,6 +1029,22 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 					   .gltfSkin = part.gltfSkin,
 					   .flags = flags});
 		reg.Add(e, NameComponent{.name = part.name});
+
+		if (part.isSkinned && params.isAnimated) {
+			reg.Add(e, AnimatorComponent{
+						   .currentTrackIdx = 0, // Default to first track (usually Idle)
+						   .currentTrackTime = 0.0f,
+						   .currentPlaybackSpeed = 1.0f,
+						   .currentLoop = true,
+						   .prevTrackIdx = -1,
+						   .prevTrackTime = 0.0f,
+						   .prevPlaybackSpeed = 1.0f,
+						   .blendFactor = 1.0f,
+						   .blendDuration = 0.15f,
+						   .isFinished = false,
+						   .gltfData = gltfData // Safely linked to the source asset tree
+					   });
+		}
 
 		if (prep.shape != nullptr) {
 			reg.Add(e, PhysicsComponent{Physics::CreateRigidBody(
@@ -1073,7 +1104,7 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 				   .localTransform = part.isSkinned ? JPH::Mat44::sIdentity() : part.localTransform,
 				   .prevTransform = part.isSkinned ? JPH::Mat44::sIdentity() : part.localTransform,
 				   .worldTransform = JPH::Mat44::sIdentity(),
-				   .jointOffset = part.jointOffset,
+				   .jointOffset = assignedJointOffset,
 				   .isSkinned = part.isSkinned && params.isAnimated,
 				   .skinnedVertexBuffer = skinnedVbo,
 				   .morphOffset = part.morphOffset,
@@ -1085,6 +1116,21 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 				   .flags = flags});
 		reg.Add(e, NameComponent{.name = part.name});
 		reg.Add(e, HierarchyComponent{.parent = rootEntity});
+		if (part.isSkinned && params.isAnimated) {
+			reg.Add(e, AnimatorComponent{
+						   .currentTrackIdx = 0, // Default to first track (usually Idle)
+						   .currentTrackTime = 0.0f,
+						   .currentPlaybackSpeed = 1.0f,
+						   .currentLoop = true,
+						   .prevTrackIdx = -1,
+						   .prevTrackTime = 0.0f,
+						   .prevPlaybackSpeed = 1.0f,
+						   .blendFactor = 1.0f,
+						   .blendDuration = 0.15f,
+						   .isFinished = false,
+						   .gltfData = gltfData // Safely linked to the source asset tree
+					   });
+		}
 	}
 	return e;
 }
@@ -1211,9 +1257,12 @@ uint32_t InstantiatePrefab(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 
 	float scaleMult = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
 
+	std::unordered_map<cgltf_skin*, uint32_t> allocatedSkins;
+
 	for (uint32_t i = 0; i < prefab.partCount; ++i) {
-		Entity meshEnt = InstantiateMeshPart(ctx, reg, pc, prefab.parts[i], preparedParts[i],
-											 params, rootEntity, scaleMult);
+		Entity meshEnt =
+			InstantiateMeshPart(ctx, reg, pc, prefab.parts[i], preparedParts[i], params, rootEntity,
+								scaleMult, prefab.rawData, allocatedSkins);
 		if (outBuffer != nullptr && spawnedCount < maxCount) {
 			outBuffer[startIndex + (spawnedCount - startIndex)] = meshEnt;
 		}

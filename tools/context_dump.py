@@ -32,6 +32,8 @@ def get_git_tracked_files(
     }
     include_filenames = {"CMakeLists.txt"}
 
+    exclude_paths = {"scripts/core/fennel.lua"}
+
     # Base ignore paths
     ignore_paths = {"third_party", "extern"}
     if ignore_tools:
@@ -63,6 +65,9 @@ def get_git_tracked_files(
 
             # 1. Skip paths containing globally ignored directories
             if any(part in ignore_paths for part in path_obj.parts):
+                continue
+
+            if str(path_obj) in exclude_paths:
                 continue
 
             # 2. Skip if the file or any of its parent directories are in a .DEMO folder/path

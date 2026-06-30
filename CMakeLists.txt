@@ -93,6 +93,9 @@ if(NOT MSVC)
         message(STATUS "Using default BFD linker")
         set(ZHLN_LINKER "bfd")
     endif()
+    if(UNIX AND NOT APPLE)
+        add_link_options(-rdynamic)
+    endif()
 else()
     set(ZHLN_LINKER "link.exe")
 endif()
@@ -136,7 +139,7 @@ set_target_properties(imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/render)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/threading)
-add_subdirectory(${CMAKE_SOURCE_DIR}/src/physics)  
+add_subdirectory(${CMAKE_SOURCE_DIR}/src/physics)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/ecs)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/alife)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/audio)
@@ -150,9 +153,9 @@ if(BUILD_TESTING)
     add_executable(zahlen_ssr_test src/ssr_test.cpp)
     target_link_libraries(zahlen_ssr_test PRIVATE GTest::gtest_main Jolt)
     target_include_directories(zahlen_ssr_test PRIVATE
-        ${CMAKE_SOURCE_DIR}         
-        ${CMAKE_SOURCE_DIR}/include 
-        ${CMAKE_SOURCE_DIR}/src     
+        ${CMAKE_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/src
     )
     target_compile_definitions(zahlen_ssr_test PRIVATE JPH_DOUBLE_PRECISION)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
@@ -182,7 +185,7 @@ set(ENGINE_SOURCES
     src/engine/ProfilerUI.cpp
     src/engine/DiagnosticUI.cpp
     src/engine/Text.cpp
-    src/engine/system/RenderSystem.cpp 
+    src/engine/system/RenderSystem.cpp
     src/engine/system/MovementSystem.cpp
     src/engine/system/AudioSystem.cpp
     src/engine/system/ArticulationSystem.cpp
@@ -251,7 +254,7 @@ string(REGEX REPLACE " +" " " COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST}")
 
 add_library(zahlen_engine SHARED ${ENGINE_SOURCES})
 
-target_compile_definitions(zahlen_engine PRIVATE 
+target_compile_definitions(zahlen_engine PRIVATE
     ZHLN_ENGINE_BUILD
     JPH_DOUBLE_PRECISION
     JPH_SHARED_LIBRARY
@@ -259,20 +262,21 @@ target_compile_definitions(zahlen_engine PRIVATE
     ZHLN_COMPILER_FLAGS="${COMPILER_FLAGS_LIST}"
     ZHLN_META_BUILDER="CMake ${CMAKE_VERSION}"
     ZHLN_BUILD_TOOL="${CMAKE_GENERATOR}"
-    ZHLN_TARGET_TRIPLE="${ZHLN_TARGET_TRIPLE}" 
-    ZHLN_LINKER_NAME="${ZHLN_LINKER}"           
+    ZHLN_TARGET_TRIPLE="${ZHLN_TARGET_TRIPLE}"
+    ZHLN_LINKER_NAME="${ZHLN_LINKER}"
+    ZHLN_COMPILED_SCRIPTS_DIR="${CMAKE_CURRENT_BINARY_DIR}/scripts"
 )
 
-target_sources(zahlen_engine PRIVATE 
-    ${CMAKE_SOURCE_DIR}/extern/stbi_impl.c 
+target_sources(zahlen_engine PRIVATE
+    ${CMAKE_SOURCE_DIR}/extern/stbi_impl.c
     ${CMAKE_SOURCE_DIR}/extern/cgltf_impl.c
 )
 
-target_link_libraries(zahlen_engine PRIVATE 
+target_link_libraries(zahlen_engine PRIVATE
     zahlen_render
-    zahlen_physics  
+    zahlen_physics
     zahlen_threading
-    zahlen_ecs 
+    zahlen_ecs
     zahlen_alife
     zahlen_audio
     glfw
@@ -311,7 +315,7 @@ target_include_directories(zahlen_engine PRIVATE
 
 if(NOT EXISTS "${CMAKE_SOURCE_DIR}/resources/shaders/SMAA.hlsl")
     message(STATUS "SMAA.hlsl not found. Downloading from official iryoku/smaa repository...")
-    file(DOWNLOAD 
+    file(DOWNLOAD
         "https://raw.githubusercontent.com/iryoku/smaa/master/SMAA.hlsl"
         "${CMAKE_SOURCE_DIR}/resources/shaders/SMAA.hlsl"
         SHOW_PROGRESS
@@ -320,6 +324,21 @@ if(NOT EXISTS "${CMAKE_SOURCE_DIR}/resources/shaders/SMAA.hlsl")
     list(GET DOWNLOAD_STATUS 0 DOWNLOAD_CODE)
     if(NOT DOWNLOAD_CODE EQUAL 0)
         message(FATAL_ERROR "Failed to download SMAA.hlsl: ${DOWNLOAD_STATUS}")
+    endif()
+endif()
+
+# --- AUTOMATIC FENNEL BOOTSTRAP DOWNLOADER ---
+if(NOT EXISTS "${CMAKE_SOURCE_DIR}/scripts/core/fennel.lua")
+    message(STATUS "fennel.lua not found. Downloading from official fennel-lang.org...")
+    file(DOWNLOAD
+        "https://fennel-lang.org/downloads/fennel-1.6.1.lua"
+        "${CMAKE_SOURCE_DIR}/scripts/core/fennel.lua"
+        SHOW_PROGRESS
+        STATUS DOWNLOAD_STATUS
+    )
+    list(GET DOWNLOAD_STATUS 0 DOWNLOAD_CODE)
+    if(NOT DOWNLOAD_CODE EQUAL 0)
+        message(FATAL_ERROR "Failed to download fennel.lua: ${DOWNLOAD_STATUS}")
     endif()
 endif()
 
@@ -361,14 +380,14 @@ function(compile_shaders TARGET_NAME)
 
             string(MAKE_C_IDENTIFIER "SHADER_${FILE_NAME}_${EXT}_PATH" MACRO_NAME)
             string(TOUPPER ${MACRO_NAME} MACRO_NAME)
-            
+
             target_compile_definitions(${TARGET_NAME} PRIVATE ${MACRO_NAME}="${OUTPUT_SPV}")
         endforeach()
     endforeach()
 
     add_custom_target(${TARGET_NAME}_shader_gen ALL DEPENDS ${ALL_SPV_OUTPUTS})
     add_dependencies(${TARGET_NAME} ${TARGET_NAME}_shader_gen)
-    
+
     set_source_files_properties(src/engine/Resources.c PROPERTIES OBJECT_DEPENDS "${ALL_SPV_OUTPUTS}")
 endfunction()
 
@@ -379,7 +398,7 @@ function(compile_hlsl SHADER_PATH ENTRY STAGE OUTPUT_VAR)
     endif()
 
     get_filename_component(FILE_NAME ${SHADER_PATH} NAME)
-    
+
     set(OUTPUT_SPV "${CMAKE_CURRENT_BINARY_DIR}/generated_shaders/${FILE_NAME}.${ENTRY}.${OUTPUT_VAR}.spv")
 
     set(EXTRA_ARGS ${ARGN})
@@ -402,7 +421,7 @@ compile_shaders(zahlen_engine
     "${CMAKE_SOURCE_DIR}/resources/shaders/fxaa.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/ambient.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/lighting.hlsl"
-    "${CMAKE_SOURCE_DIR}/resources/shaders/bloom_threshold.hlsl" 
+    "${CMAKE_SOURCE_DIR}/resources/shaders/bloom_threshold.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/bloom_blur.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/punctual_shadows.hlsl"
 )
@@ -455,7 +474,7 @@ add_dependencies(zahlen_engine zahlen_engine_cluster_cull)
 target_compile_definitions(zahlen_engine PRIVATE SHADER_CLUSTER_CULLING_CS_PATH="${CLUSTER_CULLING_SPV}")
 
 # Create a formal custom target to block parallel-compile race conditions
-add_custom_target(zahlen_engine_smaa_shaders ALL DEPENDS 
+add_custom_target(zahlen_engine_smaa_shaders ALL DEPENDS
     ${SMAA_EDGE_VS_SPV}
     ${SMAA_EDGE_PS_SPV}
     ${SMAA_WEIGHT_VS_SPV}
@@ -465,7 +484,7 @@ add_custom_target(zahlen_engine_smaa_shaders ALL DEPENDS
 )
 add_dependencies(zahlen_engine zahlen_engine_smaa_shaders)
 
-target_compile_definitions(zahlen_engine PRIVATE 
+target_compile_definitions(zahlen_engine PRIVATE
     SHADER_SMAA_EDGE_VS_PATH="${SMAA_EDGE_VS_SPV}"
     SHADER_SMAA_EDGE_PS_PATH="${SMAA_EDGE_PS_SPV}"
     SHADER_SMAA_WEIGHT_VS_PATH="${SMAA_WEIGHT_VS_SPV}"
@@ -474,7 +493,7 @@ target_compile_definitions(zahlen_engine PRIVATE
     SHADER_SMAA_BLEND_PS_PATH="${SMAA_BLEND_PS_SPV}"
 )
 
-set_property(SOURCE src/engine/Resources.c APPEND PROPERTY OBJECT_DEPENDS 
+set_property(SOURCE src/engine/Resources.c APPEND PROPERTY OBJECT_DEPENDS
     "${SMAA_EDGE_VS_SPV}"
     "${SMAA_EDGE_PS_SPV}"
     "${SMAA_WEIGHT_VS_SPV}"
@@ -506,22 +525,121 @@ add_custom_target(zahlen_engine_procedural_bake ALL DEPENDS ${PROCEDURAL_BAKE_CS
 add_dependencies(zahlen_engine zahlen_engine_procedural_bake)
 target_compile_definitions(zahlen_engine PRIVATE SHADER_PROCEDURAL_BAKE_CS_PATH="${PROCEDURAL_BAKE_CS_SPV}")
 
-add_executable(zahlen 
+# --- FENNEL COMPILER INTEGRATION ---
+find_program(FENNEL_BIN NAMES fennel)
+
+function(compile_fennel TARGET_NAME OUTPUT_LUA_FILES_VAR)
+    set(LUA_OUTPUTS "")
+    foreach(FNL_SRC IN LISTS ARGN)
+        get_filename_component(FILE_NAME_WE ${FNL_SRC} NAME_WLE)
+        get_filename_component(FILE_DIR ${FNL_SRC} DIRECTORY)
+
+        # Maintain relative directory structures from the source folder
+        file(RELATIVE_PATH REL_PATH "${CMAKE_SOURCE_DIR}" "${FILE_DIR}")
+        set(OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/${REL_PATH}")
+        file(MAKE_DIRECTORY "${OUT_DIR}")
+
+        set(OUTPUT_LUA "${OUT_DIR}/${FILE_NAME_WE}.lua")
+
+        if(FENNEL_BIN)
+            add_custom_command(
+                OUTPUT ${OUTPUT_LUA}
+                COMMAND ${FENNEL_BIN} --compile ${FNL_SRC} > ${OUTPUT_LUA}
+                DEPENDS ${FNL_SRC}
+                COMMENT "Fennel: Compiling ${FNL_SRC} -> ${OUTPUT_LUA}"
+                VERBATIM
+            )
+            list(APPEND LUA_OUTPUTS ${OUTPUT_LUA})
+        else()
+            message(FATAL_ERROR "Fennel compiler ('fennel') not found in PATH. Cannot compile ${FNL_SRC}")
+        endif()
+    endforeach()
+    set(${OUTPUT_LUA_FILES_VAR} ${LUA_OUTPUTS} PARENT_SCOPE)
+endfunction()
+
+# --- PREVENT CIRCULAR DIRECTORY SYMLINKS ---
+# If the build directory has a stale directory symlink, remove it so it can be
+# generated as a real folder with individual script links instead.
+if(IS_SYMLINK "${CMAKE_CURRENT_BINARY_DIR}/scripts")
+    message(STATUS "Removing stale scripts directory symlink: ${CMAKE_CURRENT_BINARY_DIR}/scripts")
+    file(REMOVE "${CMAKE_CURRENT_BINARY_DIR}/scripts")
+endif()
+
+# 1. Compile all Fennel files directly into the build folder
+compile_fennel(zahlen_engine COMPILED_LUA_FILES
+    "${CMAKE_SOURCE_DIR}/scripts/core/memoryview.fnl"
+    "${CMAKE_SOURCE_DIR}/scripts/core/zahlen.fnl"
+    "${CMAKE_SOURCE_DIR}/scripts/core/ecs.fnl"
+    "${CMAKE_SOURCE_DIR}/scripts/core/dialogue.fnl"
+    "${CMAKE_SOURCE_DIR}/scripts/core/inventory.fnl"
+    "${CMAKE_SOURCE_DIR}/scripts/core/ffi_cdef.fnl"
+    "${CMAKE_SOURCE_DIR}/scripts/gameplay.fnl"
+    "${CMAKE_SOURCE_DIR}/scripts/main_menu.fnl"
+    "${CMAKE_SOURCE_DIR}/scripts/dialogue_db.fnl"
+)
+
+# 2. Selectively copy or link static non-Fennel files (e.g. boot.lua, fennel.lua)
+file(GLOB_RECURSE STATIC_SCRIPT_FILES
+    LIST_DIRECTORIES false
+    "${CMAKE_SOURCE_DIR}/scripts/*.lua"
+    "${CMAKE_SOURCE_DIR}/scripts/*.sh"
+    "${CMAKE_SOURCE_DIR}/scripts/*.txt"
+)
+
+set(STATIC_SCRIPT_SYMLINKS "")
+foreach(STATIC_SRC IN LISTS STATIC_SCRIPT_FILES)
+    file(RELATIVE_PATH REL_FILE "${CMAKE_SOURCE_DIR}/scripts" "${STATIC_SRC}")
+    get_filename_component(REL_DIR "${REL_FILE}" DIRECTORY)
+
+    set(OUT_FILE "${CMAKE_CURRENT_BINARY_DIR}/scripts/${REL_FILE}")
+    set(OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/scripts/${REL_DIR}")
+
+    file(MAKE_DIRECTORY "${OUT_DIR}")
+
+    if(WIN32)
+        # Windows symlinking often requires elevation; copy is safer for local dev
+        add_custom_command(
+            OUTPUT "${OUT_FILE}"
+            COMMAND ${CMAKE_COMMAND} -E copy "${STATIC_SRC}" "${OUT_FILE}"
+            DEPENDS "${STATIC_SRC}"
+            COMMENT "Copying static script: ${REL_FILE}"
+            VERBATIM
+        )
+    else()
+        add_custom_command(
+            OUTPUT "${OUT_FILE}"
+            COMMAND ${CMAKE_COMMAND} -E create_symlink "${STATIC_SRC}" "${OUT_FILE}"
+            DEPENDS "${STATIC_SRC}"
+            COMMENT "Symlinking static script: ${REL_FILE}"
+            VERBATIM
+        )
+    endif()
+    list(APPEND STATIC_SCRIPT_SYMLINKS "${OUT_FILE}")
+endforeach()
+
+add_custom_target(sync_static_scripts DEPENDS ${STATIC_SCRIPT_SYMLINKS})
+
+# 3. Create a target blocking engine compilation until all scripts are generated
+add_custom_target(zahlen_fennel_compilation ALL DEPENDS ${COMPILED_LUA_FILES})
+add_dependencies(zahlen_fennel_compilation sync_static_scripts)
+add_dependencies(zahlen_engine zahlen_fennel_compilation)
+
+add_executable(zahlen
     src/main.cpp
-    src/game_main.cpp 
+    src/game_main.cpp
     src/editor_main.cpp
 )
 target_link_libraries(zahlen PRIVATE zahlen_engine imgui)
 target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)
 
-add_executable(zcook 
+add_executable(zcook
     src/zcook/main.cpp
     src/zcook/Transform.cpp
     src/zcook/GLB.cpp
     src/zcook/Cook.cpp
 )
 target_link_libraries(zcook PRIVATE zahlen_engine)
-target_include_directories(zcook PRIVATE 
+target_include_directories(zcook PRIVATE
     ${CMAKE_SOURCE_DIR}/extern/cgltf
     ${CMAKE_SOURCE_DIR}/src/zcook
 )
@@ -552,16 +670,16 @@ add_dependencies(cook_assets zcook)
 
 if(NOT MSVC)
     # Define flags that should ONLY apply to GNU/GCC
-    set(GCC_ONLY_FLAGS 
+    set(GCC_ONLY_FLAGS
         "--param=destructive-interference-size=64"
         "-Wno-interference-size"
         "-fno-exceptions"
         "-fno-rtti"
     )
-   
-    target_compile_options(zahlen_engine PRIVATE 
+
+    target_compile_options(zahlen_engine PRIVATE
         $<$<AND:$<CXX_COMPILER_ID:GNU>,$<COMPILE_LANGUAGE:CXX>>:${GCC_ONLY_FLAGS}>
-        
+
         # General warnings (always applied to non-MSVC)
         $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
     )
@@ -573,20 +691,16 @@ if(NOT MSVC)
     endif()
 endif()
 
-target_compile_options(zahlen_render PRIVATE 
+target_compile_options(zahlen_render PRIVATE
     $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU>>:-freflection>
 )
 
 add_custom_target(link_resources ALL
-    COMMAND ${CMAKE_COMMAND} 
-        -D SRC="${CMAKE_SOURCE_DIR}/resources" 
-        -D DST="${CMAKE_CURRENT_BINARY_DIR}/resources" 
+    COMMAND ${CMAKE_COMMAND}
+        -D SRC="${CMAKE_SOURCE_DIR}/resources"
+        -D DST="${CMAKE_CURRENT_BINARY_DIR}/resources"
         -P "${CMAKE_SOURCE_DIR}/cmake/CreateSymlinks.cmake"
-    COMMAND ${CMAKE_COMMAND} 
-        -D SRC="${CMAKE_SOURCE_DIR}/scripts" 
-        -D DST="${CMAKE_CURRENT_BINARY_DIR}/scripts" 
-        -P "${CMAKE_SOURCE_DIR}/cmake/CreateSymlinks.cmake"
-    COMMENT "Creating zero-copy symlinks for resources and scripts..."
+    COMMENT "Creating zero-copy symlinks for resources..."
 )
 
 add_dependencies(zahlen cook_assets)
@@ -594,7 +708,7 @@ add_dependencies(zahlen link_resources)
 
 if(USE_SANITIZERS)
     get_filename_component(CLANG_BIN_DIR ${CMAKE_CXX_COMPILER} DIRECTORY)
-    find_file(ASAN_DLL 
+    find_file(ASAN_DLL
         NAMES "clang_rt.asan_dynamic-x86_64.dll"
         PATHS "${CLANG_BIN_DIR}/../lib/clang/23/lib/windows" "${CLANG_BIN_DIR}/../lib/clang/22/lib/windows"
     )
@@ -612,7 +726,7 @@ if(COMPILER_HAS_REFLECTION)
     target_compile_options(zahlen_render PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
     target_compile_options(zahlen_engine PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
     target_compile_options(zahlen PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
-    
+
     # Propagate the preprocessor definition safely
     target_compile_definitions(zahlen_render PRIVATE __cpp_reflection=202600L)
     target_compile_definitions(zahlen_engine PRIVATE __cpp_reflection=202600L)

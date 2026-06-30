@@ -348,4 +348,27 @@ struct UITextInputComponent {
 static_assert(sizeof(UITextInputComponent) == 272,
 			  "UITextInputComponent size must be exactly 272 bytes!");
 
+struct AnimatorComponent {
+	// Track 0 (Current Active Animation)
+	int32_t currentTrackIdx = -1; // -1 means no active animation
+	float currentTrackTime = 0.0f;
+	float currentPlaybackSpeed = 1.0f;
+	bool currentLoop = true;
+
+	// Track 1 (Previous Animation - used for crossfading)
+	int32_t prevTrackIdx = -1;
+	float prevTrackTime = 0.0f;
+	float prevPlaybackSpeed = 1.0f;
+
+	// Blending State
+	float blendFactor = 1.0f;	 // 1.0 = fully Track 0, < 1.0 = blending from Track 1
+	float blendDuration = 0.15f; // Transition duration in seconds
+
+	// Scripting / Event Interface
+	bool isFinished = false; // True when a non-looping animation reaches the end
+
+	// Pointer to the shared model's asset tree (cgltf_data*)
+	void* gltfData = nullptr;
+};
+
 } // namespace ZHLN

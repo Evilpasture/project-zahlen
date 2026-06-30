@@ -132,11 +132,20 @@ LuaScriptRuntime::~LuaScriptRuntime() {
 	Shutdown();
 }
 
-void LuaScriptRuntime::Initialize(Engine*) {
+void LuaScriptRuntime::Initialize(Engine* engine) {
 	if (L == nullptr) {
 		return;
 	}
 
+#ifdef ZHLN_COMPILED_SCRIPTS_DIR
+	// Append the compiled build scripts directory to package.path
+	// so the runtime can always locate compiled Fennel output files.
+	std::string appendPath = std::format("package.path = package.path .. ';{}/?.lua;{}/?/init.lua'",
+										 ZHLN_COMPILED_SCRIPTS_DIR, ZHLN_COMPILED_SCRIPTS_DIR);
+	luaL_dostring(L, appendPath.c_str());
+#endif
+
+	// Load the C++ memoryview binding first
 	lua_getglobal(L, "require");
 	lua_pushstring(L, "scripts.core.memoryview");
 	if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
@@ -144,6 +153,9 @@ void LuaScriptRuntime::Initialize(Engine*) {
 			  lua_tostring(L, -1));
 	}
 	lua_pop(L, 1);
+
+	// Execute our Fennel bootstrapper
+	RunFile("scripts/boot.lua");
 }
 
 void LuaScriptRuntime::Shutdown() {
