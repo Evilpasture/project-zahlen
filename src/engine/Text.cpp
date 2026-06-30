@@ -13,16 +13,6 @@
 
 namespace ZHLN::GUI {
 
-auto CreateOrthoMatrix(float width, float height) -> JPH::Mat44 {
-	float r = width;
-	float b = height;
-
-	// Scale and translation parameters simplified; no negative scaling or inverted translations
-	// needed
-	return {JPH::Vec4(2.0f / r, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, 2.0f / b, 0.0f, 0.0f),
-			JPH::Vec4(0.0f, 0.0f, 1.0f, 0.0f), JPH::Vec4(-1.0f, -1.0f, 0.0f, 1.0f)};
-}
-
 auto CreateTextMesh(RenderContext& ctx, const FontAtlas& font, const std::string& text, float x,
 					float y, float scale, const JPH::Vec4& color) -> Mesh {
 	if (text.empty()) {

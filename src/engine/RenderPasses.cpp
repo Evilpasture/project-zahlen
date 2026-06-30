@@ -4,7 +4,7 @@
 #include "ParallelDraw.hpp"
 #include "RenderInternal.hpp"
 #include "RenderParams.hpp"
-#include "Zahlen/GUI.hpp"
+#include "Zahlen/Math3D.hpp"
 #include "backends/imgui_impl_vulkan.h"
 #include "imgui.h"
 
@@ -766,7 +766,7 @@ void BlitPass::Execute(
 				if (!ctx.uiDrawQueue.empty()) {
 					UIObjectConstants uipc{};
 					uipc.orthoMatrix =
-						GUI::CreateOrthoMatrix(inColor.extent.width, inColor.extent.height);
+						Math::CreateOrthoMatrix(inColor.extent.width, inColor.extent.height);
 
 					VkRect2D defaultScissor = {
 						.offset = {.x = 0, .y = 0},

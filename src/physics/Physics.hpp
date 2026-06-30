@@ -26,6 +26,13 @@
 
 namespace ZHLN {
 
+namespace Layers {
+enum ID : JPH::ObjectLayer { NON_MOVING = 0, MOVING = 1, NUM_LAYERS = 2 };
+}
+namespace BroadPhaseLayers {
+enum ID : uint8_t { NON_MOVING = 0, MOVING = 1, NUM_LAYERS = 2 };
+}
+
 namespace Physics {
 struct PhysicsWorld;
 struct DebugDrawData;

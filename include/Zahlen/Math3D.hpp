@@ -124,6 +124,16 @@ inline JPH::AABox CalculateFrustumAABB(const JPH::Mat44& viewProj) {
 	return bounds;
 }
 
+inline auto CreateOrthoMatrix(float width, float height) -> JPH::Mat44 {
+	float r = width;
+	float b = height;
+
+	// Scale and translation parameters simplified; no negative scaling or inverted translations
+	// needed
+	return {JPH::Vec4(2.0f / r, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, 2.0f / b, 0.0f, 0.0f),
+			JPH::Vec4(0.0f, 0.0f, 1.0f, 0.0f), JPH::Vec4(-1.0f, -1.0f, 0.0f, 1.0f)};
+}
+
 constexpr Packed1010102 PackNormal(float x, float y, float z, float w = 0.0f) {
 	uint32_t xs = (uint32_t)((x * 0.5f + 0.5f) * 1023.0f) & 0x3FF;
 	uint32_t ys = (uint32_t)((y * 0.5f + 0.5f) * 1023.0f) & 0x3FF;

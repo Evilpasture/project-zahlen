@@ -103,12 +103,6 @@ template <typename T> static void ReallocateStandard(T*& ptr, size_t old_count, 
 }
 
 // --- Jolt Boilerplate: Layers & Filters ---
-namespace Layers {
-enum ID : JPH::ObjectLayer { NON_MOVING = 0, MOVING = 1, NUM_LAYERS = 2 };
-}
-namespace BroadPhaseLayers {
-enum ID : uint8_t { NON_MOVING = 0, MOVING = 1, NUM_LAYERS = 2 };
-}
 
 class BPLayerInterfaceImpl final : public JPH::BroadPhaseLayerInterface {
 	JPH::BroadPhaseLayer mObjectToBroadPhase[Layers::NUM_LAYERS]{};
@@ -415,7 +409,8 @@ JPH::ShapeRefC GetOrCreateShape(PhysicsContext& ctx, Physics::ShapeType type, fl
 		}
 
 		if (shape == nullptr) {
-			ZHLN::Panic("Failed to create Jolt Shape! Degenerate parameters?");
+			ZHLN::Log("Failed to create Jolt Shape! Degenerate parameters?");
+			return nullptr;
 		}
 
 		// 4. Store in cache
