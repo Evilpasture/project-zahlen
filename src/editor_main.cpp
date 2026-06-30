@@ -23,7 +23,6 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
-#include <Zahlen/physics/Physics_C.h>
 #include <algorithm>
 #include <array>
 #include <chrono>
