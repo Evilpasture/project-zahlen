@@ -29,6 +29,7 @@ def get_git_tracked_files(
         ".sh",
         ".py",
         ".inl",
+        ".fnl",
     }
     include_filenames = {"CMakeLists.txt"}
 
@@ -121,6 +122,8 @@ def generate_snapshot_string(tracked_files, target_dir):
             lang = "bash"
         elif ext == ".md":
             lang = "markdown"
+        elif ext == ".fnl":
+            lang = "fennel"
         else:
             lang = "c"
 

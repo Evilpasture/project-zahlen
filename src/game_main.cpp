@@ -422,7 +422,7 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine,
 	}
 
 	ZHLN::Log("Window active and presenting. Loading scene assets...");
-	scriptRunner.RunFile(s_GameplayFile);
+	scriptRunner.CallUpdate(engine.get(), 0.0f);
 
 	float physicsAccumulator = 0.0f;
 	const double targetFrameTime =

@@ -264,7 +264,7 @@ target_compile_definitions(zahlen_engine PRIVATE
     ZHLN_BUILD_TOOL="${CMAKE_GENERATOR}"
     ZHLN_TARGET_TRIPLE="${ZHLN_TARGET_TRIPLE}"
     ZHLN_LINKER_NAME="${ZHLN_LINKER}"
-    ZHLN_COMPILED_SCRIPTS_DIR="${CMAKE_CURRENT_BINARY_DIR}/scripts"
+    ZHLN_COMPILED_SCRIPTS_DIR="${CMAKE_CURRENT_BINARY_DIR}"
 )
 
 target_sources(zahlen_engine PRIVATE
@@ -544,7 +544,7 @@ function(compile_fennel TARGET_NAME OUTPUT_LUA_FILES_VAR)
         if(FENNEL_BIN)
             add_custom_command(
                 OUTPUT ${OUTPUT_LUA}
-                COMMAND ${FENNEL_BIN} --compile ${FNL_SRC} > ${OUTPUT_LUA}
+                COMMAND ${FENNEL_BIN} --use-bit-lib --compile ${FNL_SRC} > ${OUTPUT_LUA}
                 DEPENDS ${FNL_SRC}
                 COMMENT "Fennel: Compiling ${FNL_SRC} -> ${OUTPUT_LUA}"
                 VERBATIM

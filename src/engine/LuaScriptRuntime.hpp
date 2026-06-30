@@ -24,6 +24,7 @@ class LuaScriptRuntime : public IScriptRuntime {
 
   private:
 	lua_State* L = nullptr;
+	bool _initialized = false;
 };
 
 } // namespace ZHLN
