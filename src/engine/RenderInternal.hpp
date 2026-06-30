@@ -348,33 +348,23 @@ static constexpr uint32_t kGpuCullingMaxBatches = 256;
 static constexpr uint32_t kGpuCullingMaxVisibleInstances =
 	kGpuCullingMaxInstances * kGpuCullingMaxBatches;
 
+/**
+ * @brief Heavily optimized, cache-line-friendly CPU draw command.
+ * All redundant texture indexing and geometric properties have been stripped [3].
+ */
 struct DrawCommand {
-	NativeMaterial* material;
-	NativeMesh* posMesh;   // Points to the positions stream NativeMesh
-	NativeMesh* attrMesh;  // Points to the attributes stream NativeMesh
-	NativeMesh* skinMesh;  // Points to the skinning stream NativeMesh (nullptr if unskinned)
-	NativeMesh* indexMesh; // Points to the index buffer stream NativeMesh (nullptr if non-indexed)
-	JPH::Mat44 transform;
-	JPH::Mat44 prevTransform;
-	uint32_t albedoIndex;
-	uint32_t normalIndex;
-	uint32_t pbrIndex;
-	uint32_t emissiveIndex;
-	float cullRadius;
-	std::array<float, 3> localCenter;
-	float metallicFactor;
-	float roughnessFactor;
-	float alphaCutoff;
-	uint32_t alphaMode;
-	uint32_t jointOffset;
-	std::array<float, 4> baseColorFactor;
-	std::array<float, 4> emissiveFactor;
-	uint32_t morphOffset;
-	uint32_t activeMorphCount;
-	std::array<float, 4> morphWeights;
-	uint32_t indexCount;
-	BufferHandle skinnedVertexBuffer;
-	DrawFlags flags;
+	InstanceData
+		instanceData; // 272 bytes (contains world, prevWorld, indexes, factor overrides, etc.)
+	NativeMaterial* material;		   // 8 bytes
+	NativeMesh* posMesh;			   // 8 bytes
+	NativeMesh* attrMesh;			   // 8 bytes
+	NativeMesh* skinMesh;			   // 8 bytes
+	BufferHandle skinnedVertexBuffer;  // 8 bytes
+	uint32_t jointOffset;			   // 4 bytes
+	uint32_t morphOffset;			   // 4 bytes
+	uint32_t activeMorphCount;		   // 4 bytes
+	std::array<float, 4> morphWeights; // 16 bytes
+	DrawFlags flags;				   // 4 bytes
 };
 
 static_assert(std::is_trivially_copyable_v<DrawCommand> &&
@@ -602,7 +592,6 @@ struct RenderContext::Impl {
 
 	void InitialClearTargets(VkCommandBuffer cmd) noexcept;
 	void BuildTLAS(VkCommandBuffer cmd) noexcept;
-	[[nodiscard]] InstanceData ResolveInstanceData(const DrawCommand& cmdData) const noexcept;
 
 	void InitShadowResources();
 	void InitCullingResources();
@@ -631,6 +620,11 @@ struct RenderContext::Impl {
 	void SortDrawQueue();
 	ZHLN_FrameResult SubmitFrame();
 	void InitializeSystemTextures();
+
+	// Persistent, reusable memory block to prevent dynamic heap reallocations
+	ZHLN::Array<VkAccelerationStructureInstanceKHR> tlasInstancesScratch;
+
+	template <bool FullBright> void RecordSceneFrame(VkCommandBuffer cmd);
 
 	~Impl() {
 		if (ctx.Device() != VK_NULL_HANDLE) {

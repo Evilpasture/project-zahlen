@@ -9,7 +9,6 @@
 #include "imgui.h"
 
 #include <array>
-#include <bit>
 #include <threading/TaskSystem.hpp>
 
 namespace ZHLN {
@@ -21,6 +20,11 @@ namespace {
 // ============================================================================
 
 enum class RenderPassType : uint8_t { Main, Shadow };
+
+// flags & 0xFF == 2 marks an instance as forward-only (transparent / non-deferred).
+[[nodiscard]] constexpr bool IsForwardOnly(uint32_t instanceFlags) noexcept {
+	return (instanceFlags & 0xFF) == 2;
+}
 
 [[nodiscard]] inline const NativeMaterial* ToNative(const void* material) noexcept {
 	return std::bit_cast<const NativeMaterial*>(material);
@@ -50,8 +54,11 @@ inline void SubmitDrawInstanced(VkCommandBuffer cmd, const DrawCommand& drawCmd,
 		(pipelineOverride != VK_NULL_HANDLE) ? pipelineOverride : nativeMat->pipeline.Get();
 	const VkPipelineLayout layout =
 		(layoutOverride != VK_NULL_HANDLE) ? layoutOverride : nativeMat->layout.Get();
-	const uint32_t vertexCount =
-		drawCmd.indexMesh ? drawCmd.indexCount : drawCmd.posMesh->vertexCount;
+
+	// Resolved from pre-assembled GPU structure
+	const uint32_t vertexCount = drawCmd.instanceData.iboAddress != 0
+									 ? drawCmd.instanceData.indexCount
+									 : drawCmd.instanceData.vertexCount;
 
 	Vk::DrawInstanced(cmd,
 					  {.pipeline = pipeline,
@@ -179,7 +186,7 @@ struct CpuCullingPolicy {
 						}
 
 						if (!ToNative(drawCmd.material)->pipeline.Valid() ||
-							drawCmd.alphaMode == 2) {
+							IsForwardOnly(drawCmd.instanceData.flags)) {
 							return;
 						}
 
@@ -236,7 +243,8 @@ void ShadowPass::RenderDirectionalShadows(const FrameRecorder& recorder) const n
 		ExecuteCascadePass(cascade, [&]() {
 			for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
 				const auto& draw = ctx.drawQueue[i];
-				if (!IsVisibleIn(draw.flags, RenderPassType::Shadow) || draw.alphaMode == 2) {
+				if (!IsVisibleIn(draw.flags, RenderPassType::Shadow) ||
+					IsForwardOnly(draw.instanceData.flags)) {
 					continue;
 				}
 
@@ -286,14 +294,15 @@ void ShadowPass::RenderPunctualShadows(const FrameRecorder& recorder) const noex
 		ExecutePunctualPass(subViewImage, [&]() {
 			for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
 				const auto& draw = ctx.drawQueue[i];
-				if (draw.alphaMode == 2) {
+				if (IsForwardOnly(draw.instanceData.flags)) {
 					continue;
 				}
 
-				JPH::Vec3 meshPos = draw.transform.GetTranslation();
+				// Resolved from InstanceData world matrix
+				JPH::Vec3 meshPos = draw.instanceData.world.GetTranslation();
 				JPH::Vec3 lightPos(light.position[0], light.position[1], light.position[2]);
 				float distToLight = (meshPos - lightPos).Length();
-				float maxRange = light.range + draw.cullRadius;
+				float maxRange = light.range + draw.instanceData.cullRadius;
 
 				if (distToLight > maxRange) {
 					continue;
@@ -352,7 +361,7 @@ void MainPass::Execute(const FrameRecorder& recorder,
 		const auto& drawCmd = ctx.drawQueue[i];
 		const auto* const drawMat = ToNative(drawCmd.material);
 
-		if (drawCmd.alphaMode == 2) {
+		if (IsForwardOnly(drawCmd.instanceData.flags)) {
 			currentMaterial = nullptr;
 			continue;
 		}
@@ -512,7 +521,8 @@ void ForwardPass::Execute(
 		.Execute(cmd, [&]() {
 			for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
 				const auto& drawCmd = ctx.drawQueue[i];
-				if (drawCmd.alphaMode == 2 && ToNative(drawCmd.material)->pipeline.Valid()) {
+				if (IsForwardOnly(drawCmd.instanceData.flags) &&
+					ToNative(drawCmd.material)->pipeline.Valid()) {
 					const ObjectConstants pushConstants = {.instanceId = i, .isShadowPass = 0};
 					SubmitDrawInstanced(cmd, drawCmd, i, recorder.bindlessSet, pushConstants);
 				}

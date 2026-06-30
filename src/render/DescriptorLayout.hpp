@@ -11,7 +11,6 @@
 
 namespace ZHLN::Vk {
 
-// Reporting helpers for descriptor utilities
 void ReportBindlessRegistryExceeded(uint32_t bindingID, uint32_t capacity) noexcept;
 
 // ============================================================================
@@ -214,6 +213,28 @@ template <typename... Slots> class DescriptorLayout {
 						  VkWriteDescriptorSetAccelerationStructureKHR& asInfo,
 						  VkWriteDescriptorSet& write) noexcept;
 };
+
+// ============================================================================
+// Automatic Allocation Helpers
+// ============================================================================
+
+template <typename LayoutT>
+inline void AllocateDoubleBufferedSet(VkDevice device, DescriptorSetLayout& outLayout,
+									  DescriptorPool& outPool,
+									  ZHLN::DoubleBuffered<VkDescriptorSet>& outSets) noexcept {
+	outLayout = LayoutT::CreateLayout(device);
+	outPool = LayoutT::CreatePool(device, 2);
+	outSets[0] = LayoutT::Allocate(device, outPool.Get(), outLayout.Get());
+	outSets[1] = LayoutT::Allocate(device, outPool.Get(), outLayout.Get());
+}
+
+template <typename LayoutT>
+inline void AllocateSingleBufferedSet(VkDevice device, DescriptorSetLayout& outLayout,
+									  DescriptorPool& outPool, VkDescriptorSet& outSet) noexcept {
+	outLayout = LayoutT::CreateLayout(device);
+	outPool = LayoutT::CreatePool(device, 1);
+	outSet = LayoutT::Allocate(device, outPool.Get(), outLayout.Get());
+}
 
 } // namespace ZHLN::Vk
 

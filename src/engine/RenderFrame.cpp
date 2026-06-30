@@ -35,6 +35,86 @@ inline RenderFrameResult MapFrameResult(ZHLN_FrameResult res) noexcept {
 	return {weights[0], weights[1], weights[2], weights[3]};
 }
 
+// --- MODERN C++23 TEMPLATE ABSTRACTIONS ---
+
+/**
+ * @brief Checks if any of the provided pointers are null using compile-time fold expressions.
+ */
+template <typename... Ptrs> [[nodiscard]] constexpr bool AnyNull(Ptrs... ptrs) noexcept {
+	return (... || (ptrs == nullptr));
+}
+
+/**
+ * @brief Batch transitions a tuple/pack of Vulkan images to a target layout using std::apply.
+ */
+template <VkImageLayout L, typename Tuple>
+[[nodiscard]] auto TransitionAllTo(VkCommandBuffer cmd, const Tuple& atts) {
+	return std::apply([&](const auto&... a) { return Vk::TransitionBatch<L>(cmd, a...); }, atts);
+}
+
+/**
+ * @brief Compile-time-friendly scope guard that automatically transitions depth/stencil
+ * attachments back to ReadOnly on destruction.
+ */
+template <typename ImageT, VkImageLayout Final> class ScopedTransition {
+  public:
+	ScopedTransition(VkCommandBuffer cmd, ImageT& image, Vk::Tag<Final> transitionTag)
+		: cmd_(cmd), image_(Vk::Transition(cmd, image, transitionTag)) {}
+	~ScopedTransition() { [[maybe_unused]] auto _ = Vk::Transition(cmd_, image_, Vk::AsReadOnly); }
+	auto& Get() { return image_; }
+
+  private:
+	VkCommandBuffer cmd_;
+	Vk::TypedImage<Final> image_;
+};
+
+// Deduction guide for ScopedTransition CTAD
+template <typename ImageT, VkImageLayout Final>
+ScopedTransition(VkCommandBuffer, ImageT&, Vk::Tag<Final>) -> ScopedTransition<ImageT, Final>;
+
+/**
+ * @brief Automatically ties, transitions, clears, and prepares a color attachment group.
+ */
+template <typename... Images>
+[[nodiscard]] auto ClearAndPrepareGroup(VkCommandBuffer cmd, VkExtent2D extent, Color4 clear,
+										Images&... imgs) {
+	auto bundle = Vk::TieTargets(imgs...);
+	auto atts = bundle.template Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd);
+	Vk::DynamicPass(extent)
+		.AddColorGroup(atts, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, clear)
+		.Execute(cmd, []() {});
+	return TransitionAllTo<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, atts);
+}
+
+/**
+ * @brief Inline barrier wrapper for the compute-to-vertex synchronization boundary.
+ */
+inline void BarrierComputeWriteToVertexRead(VkCommandBuffer cmd) {
+	Vk::BarrierBuilder()
+		.From(Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite)
+		.To(cmd, Vk::BarrierStage::Vertex, Vk::BarrierAccess::ShaderRead);
+}
+
+/**
+ * @brief Inline barrier wrapper for the cluster-culling internal sync.
+ */
+inline void BarrierClusterCullingSync(VkCommandBuffer cmd) {
+	Vk::BarrierBuilder()
+		.From(Vk::BarrierStage::Transfer | Vk::BarrierStage::Compute,
+			  Vk::BarrierAccess::TransferWrite | Vk::BarrierAccess::ShaderWrite)
+		.To(cmd, Vk::BarrierStage::Compute,
+			Vk::BarrierAccess::ShaderRead | Vk::BarrierAccess::ShaderWrite);
+}
+
+/**
+ * @brief Inline barrier wrapper for compute-write to fragment-read synchronization.
+ */
+inline void BarrierComputeWriteToFragmentRead(VkCommandBuffer cmd) {
+	Vk::BarrierBuilder()
+		.From(Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite)
+		.To(cmd, Vk::BarrierStage::Fragment, Vk::BarrierAccess::ShaderRead);
+}
+
 } // namespace
 
 // ============================================================================
@@ -69,58 +149,33 @@ std::optional<Extent2D> RenderContext::GetFramebufferSize() const {
 }
 
 void RenderContext::Impl::InitialClearTargets(VkCommandBuffer cmd) noexcept {
+	// Scope-guarded transitions for depth/stencil buffers (reverts to AsReadOnly in destructor)
+	ScopedTransition sShadowMap(cmd, shadowMap, Vk::AsDepthAttachment);
+	ScopedTransition sShadowAtlas(cmd, shadowAtlas, Vk::AsDepthAttachment);
+	ScopedTransition depth(cmd, presentation.depthTarget, Vk::AsDepthAttachment);
+
+	// Re-map main G-Buffer color attachments
 	auto mainBundle = Vk::TieTargets(sceneColor, velocityBuffer, accumBuffers[0], accumBuffers[1],
 									 normalRoughnessBuffer);
-	auto ppBundle = Vk::TieTargets(postProcessTarget, ambientTarget, lightingTarget, smaaEdgeTarget,
-								   smaaWeightTarget);
-	auto bloomBundle = Vk::TieTargets(bloomThresholdTarget, bloomBlurTarget, bloomFinalTarget);
-
 	auto mainAtts = mainBundle.Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd);
-	auto ppAtts = ppBundle.Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd);
-	auto bloomAtts = bloomBundle.Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd);
-
-	auto sShadowMap_att = Vk::Transition(cmd, shadowMap, Vk::AsDepthAttachment);
-	auto sShadowAtlas_att = Vk::Transition(cmd, shadowAtlas, Vk::AsDepthAttachment);
-	auto depth_att = Vk::Transition(cmd, presentation.depthTarget, Vk::AsDepthAttachment);
 
 	Vk::DynamicPass(presentation.swapchain.Get().extent)
 		.AddColorGroup(mainAtts, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
 					   {.r = 0, .g = 0, .b = 0, .a = 0})
-		.AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+		.AddDepth(depth.Get(), VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
 				  kClearDepthValue)
 		.Execute(cmd, []() {});
 
-	Vk::DynamicPass(presentation.swapchain.Get().extent)
-		.AddColorGroup(ppAtts, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-					   kClearColorBlack)
-		.Execute(cmd, []() {});
+	auto mainRo = TransitionAllTo<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, mainAtts);
 
-	Vk::DynamicPass(bloomThresholdTarget.extent)
-		.AddColorGroup(bloomAtts, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-					   kClearColorBlack)
-		.Execute(cmd, []() {});
+	// Modernized clear pipelines for pure color groups
+	[[maybe_unused]] auto ppRo = ClearAndPrepareGroup(
+		cmd, presentation.swapchain.Get().extent, kClearColorBlack, postProcessTarget,
+		ambientTarget, lightingTarget, smaaEdgeTarget, smaaWeightTarget);
 
-	[[maybe_unused]] auto mainRo = std::apply(
-		[&](const auto&... atts) {
-			return Vk::TransitionBatch<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, atts...);
-		},
-		mainAtts);
-
-	[[maybe_unused]] auto ppRo = std::apply(
-		[&](const auto&... atts) {
-			return Vk::TransitionBatch<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, atts...);
-		},
-		ppAtts);
-
-	[[maybe_unused]] auto bloomRo = std::apply(
-		[&](const auto&... atts) {
-			return Vk::TransitionBatch<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, atts...);
-		},
-		bloomAtts);
-
-	[[maybe_unused]] auto sDepth_ro = Vk::Transition(cmd, depth_att, Vk::AsReadOnly);
-	[[maybe_unused]] auto sShadowMap_ro = Vk::Transition(cmd, sShadowMap_att, Vk::AsReadOnly);
-	[[maybe_unused]] auto sShadowAtlas_ro = Vk::Transition(cmd, sShadowAtlas_att, Vk::AsReadOnly);
+	[[maybe_unused]] auto bloomRo =
+		ClearAndPrepareGroup(cmd, bloomThresholdTarget.extent, kClearColorBlack,
+							 bloomThresholdTarget, bloomBlurTarget, bloomFinalTarget);
 
 	for (int i = 0; i < 2; ++i) {
 		taaPass.WriteIndex(ctx.Device(), i, std::get<0>(mainRo),
@@ -145,8 +200,7 @@ void RenderContext::Impl::DispatchSkinningPasses() {
 			auto* skinMesh = drawCmd.skinMesh;
 			auto* scratchMesh = meshPool.Resolve(drawCmd.skinnedVertexBuffer);
 
-			if ((posMesh == nullptr) || (attrMesh == nullptr) || (skinMesh == nullptr) ||
-				(scratchMesh == nullptr)) {
+			if (AnyNull(posMesh, attrMesh, skinMesh, scratchMesh)) {
 				continue;
 			}
 
@@ -173,9 +227,7 @@ void RenderContext::Impl::DispatchSkinningPasses() {
 		}
 	}
 
-	Vk::BarrierBuilder()
-		.From(Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite)
-		.To(cmd, Vk::BarrierStage::Vertex, Vk::BarrierAccess::ShaderRead);
+	BarrierComputeWriteToVertexRead(cmd);
 }
 
 RenderResult RenderContext::BeginFrame() noexcept {
@@ -285,73 +337,14 @@ ZHLN_FrameResult RenderContext::Impl::SubmitFrame() {
 // InstanceData & TLAS Assembly Operations
 // ============================================================================
 
-InstanceData RenderContext::Impl::ResolveInstanceData(const DrawCommand& cmdData) const noexcept {
-	auto* posMesh = (cmdData.skinnedVertexBuffer != BufferHandle::Invalid)
-						? meshPool.Resolve(cmdData.skinnedVertexBuffer)
-						: cmdData.posMesh;
-
-	auto* attrMesh = cmdData.attrMesh;
-	auto* skinMesh = cmdData.skinMesh;
-	auto* idxMesh = cmdData.indexMesh;
-
-	if (posMesh == nullptr || attrMesh == nullptr) {
-		return {};
-	}
-
-	uint64_t posAddr = posMesh->vboAddress;
-	uint64_t attrAddr = attrMesh->vboAddress;
-	uint64_t skinAddr = (skinMesh != nullptr) ? skinMesh->vboAddress : 0;
-
-	if (posMesh == attrMesh) {
-		attrAddr = posMesh->vboAddress + (500000 * sizeof(VertexPosition));
-	} else if (cmdData.skinnedVertexBuffer != BufferHandle::Invalid) {
-		attrAddr = posMesh->vboAddress + (cmdData.posMesh->vertexCount * sizeof(VertexPosition));
-	}
-
-	uint32_t isSkinned = (cmdData.skinnedVertexBuffer == BufferHandle::Invalid &&
-						  (cmdData.flags & DrawFlags::Skinned) != DrawFlags::None)
-							 ? 1u
-							 : 0u;
-
-	uint32_t activeMorphCount = cmdData.activeMorphCount;
-	if (cmdData.skinnedVertexBuffer != BufferHandle::Invalid) {
-		activeMorphCount = 0; // Displacement is evaluated on GPU pre-skinning
-	}
-
-	return InstanceData{
-		.world = cmdData.transform,
-		.prevWorld = cmdData.prevTransform,
-		.posAddress = posAddr,
-		.attrAddress = attrAddr,
-		.skinAddress = skinAddr,
-		.iboAddress = (idxMesh != nullptr) ? idxMesh->vboAddress : 0,
-		.vertexCount = cmdData.posMesh->vertexCount,
-		.indexCount = cmdData.indexCount,
-		.texIndices0 = (cmdData.normalIndex << 16) | (cmdData.albedoIndex & 0xFFFF),
-		.texIndices1 = (cmdData.emissiveIndex << 16) | (cmdData.pbrIndex & 0xFFFF),
-		.cullRadius = cmdData.cullRadius,
-		.metallicFactor = cmdData.metallicFactor,
-		.roughnessFactor = cmdData.roughnessFactor,
-		.alphaCutoff = cmdData.alphaCutoff,
-		.flags = (isSkinned << 8) | (cmdData.alphaMode & 0xFF),
-		.jointOffset = cmdData.jointOffset,
-		.morphOffset = cmdData.morphOffset,
-		.activeMorphCount = activeMorphCount,
-		.localCenter = cmdData.localCenter,
-		._paddingCenter = {},
-		.morphWeights = cmdData.morphWeights,
-		.baseColorFactor = cmdData.baseColorFactor,
-		.emissiveFactor = cmdData.emissiveFactor,
-	};
-}
-
 void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 	if (!rtCtx.Valid() || drawQueue.empty()) {
 		return;
 	}
 
-	std::vector<VkAccelerationStructureInstanceKHR> tlasInstances;
-	tlasInstances.reserve(drawQueue.size());
+	// Persistent, reusable memory block to prevent dynamic heap reallocations
+	tlasInstancesScratch.clear();
+	tlasInstancesScratch.reserve(drawQueue.size());
 
 	for (uint32_t i = 0; i < drawQueue.size(); ++i) {
 		const auto& drawCmd = drawQueue[i];
@@ -369,7 +362,9 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 		}
 
 		VkAccelerationStructureInstanceKHR inst{};
-		const auto& t = drawCmd.transform;
+
+		// Unpacked fields: Read directly from pre-assembled InstanceData to omit duplicate matrices
+		const auto& t = drawCmd.instanceData.world;
 
 		for (int row = 0; row < 3; ++row) {
 			for (int col = 0; col < 4; ++col) {
@@ -381,22 +376,22 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 		inst.mask = 0xFF;
 		inst.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
 		inst.accelerationStructureReference = mesh->blasAddress;
-		tlasInstances.push_back(inst);
+		tlasInstancesScratch.push_back(inst);
 	}
 
-	if (tlasInstances.empty()) {
+	if (tlasInstancesScratch.empty()) {
 		return;
 	}
 
 	auto& stagingBuf = tlasStagingBuffers[frame_index];
 	auto& instanceBuf = tlasInstanceBuffers[frame_index];
 
-	std::memcpy(stagingBuf.Map().data, tlasInstances.data(),
-				tlasInstances.size() * sizeof(VkAccelerationStructureInstanceKHR));
+	std::memcpy(stagingBuf.Map().data, tlasInstancesScratch.data(),
+				tlasInstancesScratch.size() * sizeof(VkAccelerationStructureInstanceKHR));
 
 	ZHLN_BufferCopyDesc copy = {.src = stagingBuf.Handle(),
 								.dst = instanceBuf.Handle(),
-								.size = tlasInstances.size() *
+								.size = tlasInstancesScratch.size() *
 										sizeof(VkAccelerationStructureInstanceKHR),
 								.src_offset = 0,
 								.dst_offset = 0};
@@ -414,13 +409,80 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 	rtCtx.CmdBuildTlas(
 		cmd, geom, tlas[frame_index],
 		Vk::GetBufferDeviceAddress(ctx.Device(), tlasScratchBuffer[frame_index].Handle()),
-		static_cast<uint32_t>(tlasInstances.size()));
+		static_cast<uint32_t>(tlasInstancesScratch.size()));
 
 	Vk::MemoryBarrier(cmd, {.src_stage = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
 							.src_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
 							.dst_stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
 							.dst_access = VK_ACCESS_2_SHADER_READ_BIT});
 }
+
+// ============================================================================
+// Compile-Time Scene Recording Dispatches
+// ============================================================================
+
+template <bool FullBright> void RenderContext::Impl::RecordSceneFrame(VkCommandBuffer cmd) {
+	if constexpr (!FullBright) {
+		BuildTLAS(cmd);
+	}
+
+	FrameRecorder recorder(cmd, *this);
+
+	if constexpr (!FullBright) {
+		uint32_t fIdx = frame_index;
+
+		clusterBoundsPass.Dispatch(cmd, clusterCullingSets[fIdx], 1, 1, 24);
+		Vk::FillBuffer(cmd, globalCounterBuffers[fIdx]);
+
+		BarrierClusterCullingSync(cmd);
+
+		clusterCullingPass.Dispatch(cmd, clusterCullingSets[fIdx], 1, 1, 24);
+
+		BarrierComputeWriteToFragmentRead(cmd);
+
+		RunPass(Passes::ShadowPass{}, recorder);
+	}
+
+	SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>
+		initialState = {
+			.sceneColor = Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(sceneColor),
+			.velocity = Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(velocityBuffer),
+			.normRough =
+				Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(normalRoughnessBuffer),
+			.depth = Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+				presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT)};
+
+	Passes::MainPass{}.Execute(recorder, initialState);
+
+	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> finalColor_ro;
+	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> bloomFinal_ro;
+
+	if constexpr (FullBright) {
+		finalColor_ro = initialState.sceneColor;
+		Passes::ForwardPass{}.Execute(recorder, finalColor_ro, initialState.depth);
+		bloomFinal_ro =
+			Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(bloomFinalTarget);
+	} else {
+		finalColor_ro = Passes::DeferredLightingPass{}.Execute(recorder, initialState);
+		Passes::ForwardPass{}.Execute(recorder, finalColor_ro, initialState.depth);
+		bloomFinal_ro = Passes::BloomPass{}.Execute(recorder, finalColor_ro);
+	}
+
+	SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>
+		resourcesForAA = {.sceneColor = finalColor_ro,
+						  .velocity = initialState.velocity,
+						  .normRough = initialState.normRough,
+						  .depth = initialState.depth};
+
+	auto aa_ro = Passes::AAPass{}.Execute(recorder, resourcesForAA);
+	Passes::BlitPass{}.Execute(recorder, aa_ro.sceneColor, bloomFinal_ro);
+}
+
+// Explicit instantiations to prevent translation unit linkage issues
+template void RenderContext::Impl::RecordSceneFrame<true>(VkCommandBuffer);
+template void RenderContext::Impl::RecordSceneFrame<false>(VkCommandBuffer);
 
 RenderResult RenderContext::EndFrame() noexcept {
 	ZHLN_PROFILE_SCOPE("Render (CPU Record)");
@@ -445,78 +507,18 @@ RenderResult RenderContext::EndFrame() noexcept {
 		auto mapped = _impl->instanceDataBuffers[_impl->frame_index].Map();
 		auto* dst = static_cast<InstanceData*>(mapped.data);
 
+		// Zero-overhead linear copy of pre-assembled GPU structures (pointer-chasing eliminated)
 		for (uint32_t i = 0; i < drawCount; ++i) {
-			dst[i] = _impl->ResolveInstanceData(_impl->drawQueue[i]);
+			dst[i] = _impl->drawQueue[i].instanceData;
 		}
 	}
 
-	bool isFullBright = (_impl->currentUniforms.fullBright != 0);
-	if (!isFullBright) {
-		_impl->BuildTLAS(cmd);
-	}
-
-	FrameRecorder recorder(cmd, *_impl);
-
-	if (!isFullBright) {
-		VkCommandBuffer c = cmd;
-		uint32_t fIdx = _impl->frame_index;
-
-		_impl->clusterBoundsPass.Dispatch(c, _impl->clusterCullingSets[fIdx], 1, 1, 24);
-
-		Vk::FillBuffer(c, _impl->globalCounterBuffers[fIdx]);
-
-		Vk::BarrierBuilder()
-			.From(Vk::BarrierStage::Transfer | Vk::BarrierStage::Compute,
-				  Vk::BarrierAccess::TransferWrite | Vk::BarrierAccess::ShaderWrite)
-			.To(c, Vk::BarrierStage::Compute,
-				Vk::BarrierAccess::ShaderRead | Vk::BarrierAccess::ShaderWrite);
-
-		_impl->clusterCullingPass.Dispatch(c, _impl->clusterCullingSets[fIdx], 1, 1, 24);
-
-		Vk::BarrierBuilder()
-			.From(Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite)
-			.To(c, Vk::BarrierStage::Fragment, Vk::BarrierAccess::ShaderRead);
-
-		RunPass(Passes::ShadowPass{}, recorder);
-	}
-
-	SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-				   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>
-		initialState = {.sceneColor = Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-							_impl->sceneColor),
-						.velocity = Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-							_impl->velocityBuffer),
-						.normRough = Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-							_impl->normalRoughnessBuffer),
-						.depth = Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-							_impl->presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT)};
-
-	Passes::MainPass{}.Execute(recorder, initialState);
-
-	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> finalColor_ro;
-	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> bloomFinal_ro;
-
-	if (isFullBright) {
-		finalColor_ro = initialState.sceneColor;
-		Passes::ForwardPass{}.Execute(recorder, finalColor_ro, initialState.depth);
-		bloomFinal_ro =
-			Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(_impl->bloomFinalTarget);
+	// Hot-path branch optimization: dispatch using compile-time constants
+	if (_impl->currentUniforms.fullBright != 0) {
+		_impl->RecordSceneFrame<true>(cmd);
 	} else {
-		finalColor_ro = Passes::DeferredLightingPass{}.Execute(recorder, initialState);
-		Passes::ForwardPass{}.Execute(recorder, finalColor_ro, initialState.depth);
-		bloomFinal_ro = Passes::BloomPass{}.Execute(recorder, finalColor_ro);
+		_impl->RecordSceneFrame<false>(cmd);
 	}
-
-	SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-				   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>
-		resourcesForAA = {.sceneColor = finalColor_ro,
-						  .velocity = initialState.velocity,
-						  .normRough = initialState.normRough,
-						  .depth = initialState.depth};
-
-	auto aa_ro = Passes::AAPass{}.Execute(recorder, resourcesForAA);
-
-	Passes::BlitPass{}.Execute(recorder, aa_ro.sceneColor, bloomFinal_ro);
 
 	ZHLN_EndCommandBuffer(cmd);
 
@@ -584,12 +586,9 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 	}
 
 	auto* posMesh = impl->meshPool.Resolve(mesh.posBuffer);
-	if (posMesh == nullptr) [[unlikely]] {
-		return;
-	}
-
 	auto* attrMesh = impl->meshPool.Resolve(mesh.attrBuffer);
-	if (attrMesh == nullptr) [[unlikely]] {
+	auto* nativeMaterial = impl->materialPool.Resolve(material.pipeline);
+	if (AnyNull(attrMesh, posMesh, nativeMaterial)) [[unlikely]] {
 		return;
 	}
 
@@ -601,45 +600,75 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 								? impl->meshPool.Resolve(mesh.indexBuffer)
 								: nullptr;
 
-	auto* nativeMaterial = impl->materialPool.Resolve(material.pipeline);
-	if (nativeMaterial == nullptr) [[unlikely]] {
-		return;
-	}
-
 	if (params.skinnedVertexBuffer != BufferHandle::Invalid) {
 		impl->hasSkinnedThisFrame = true;
 	}
 
-	impl->drawQueue.push_back(DrawCommand{
-		.material = nativeMaterial,
-		.posMesh = posMesh,
-		.attrMesh = attrMesh,
-		.skinMesh = skinMesh,
-		.indexMesh = nativeIndexMesh,
-		.transform = params.transform,
-		.prevTransform = params.prevTransform,
-		.albedoIndex = material.albedoIndex,
-		.normalIndex = material.normalIndex,
-		.pbrIndex = material.pbrIndex,
-		.emissiveIndex = material.emissiveIndex,
+	// Resolve the correct positioning target for skinned versus non-skinned draw streams
+	auto* finalPosMesh = (params.skinnedVertexBuffer != BufferHandle::Invalid)
+							 ? impl->meshPool.Resolve(params.skinnedVertexBuffer)
+							 : posMesh;
+
+	uint64_t posAddr = (finalPosMesh != nullptr) ? finalPosMesh->vboAddress : 0;
+	uint64_t attrAddr = (attrMesh != nullptr) ? attrMesh->vboAddress : 0;
+
+	// Safely offset the attribute layout bounds using static array increments
+	if (posMesh == attrMesh && posMesh != nullptr) {
+		attrAddr = posMesh->vboAddress + (500000 * sizeof(VertexPosition));
+	} else if (params.skinnedVertexBuffer != BufferHandle::Invalid && posMesh != nullptr) {
+		attrAddr = finalPosMesh->vboAddress + (posMesh->vertexCount * sizeof(VertexPosition));
+	}
+
+	uint32_t isSkinned = (params.skinnedVertexBuffer == BufferHandle::Invalid &&
+						  (params.flags & DrawFlags::Skinned) != DrawFlags::None)
+							 ? 1u
+							 : 0u;
+
+	uint32_t activeMorphCount = params.activeMorphCount;
+	if (params.skinnedVertexBuffer != BufferHandle::Invalid) {
+		activeMorphCount = 0; // Displacement is evaluated on GPU pre-skinning
+	}
+
+	// Pre-assemble the GPU structure directly on the calling thread
+	InstanceData inst = {
+		.world = params.transform,
+		.prevWorld = params.prevTransform,
+		.posAddress = posAddr,
+		.attrAddress = attrAddr,
+		.skinAddress = (skinMesh != nullptr) ? skinMesh->vboAddress : 0,
+		.iboAddress = (nativeIndexMesh != nullptr) ? nativeIndexMesh->vboAddress : 0,
+		.vertexCount = (posMesh != nullptr) ? posMesh->vertexCount : 0,
+		.indexCount = mesh.indexCount,
+		.texIndices0 = (material.normalIndex << 16) | (material.albedoIndex & 0xFFFF),
+		.texIndices1 = (material.emissiveIndex << 16) | (material.pbrIndex & 0xFFFF),
 		.cullRadius = params.cullRadius,
-		.localCenter = params.localCenter,
 		.metallicFactor = params.metallic >= 0.0f ? params.metallic : material.metallicFactor,
 		.roughnessFactor = params.roughness >= 0.0f ? params.roughness : material.roughnessFactor,
 		.alphaCutoff = material.alphaCutoff,
-		.alphaMode = material.alphaMode,
+		.flags = (isSkinned << 8) | (material.alphaMode & 0xFF),
 		.jointOffset = params.jointOffset,
+		.morphOffset = params.morphOffset,
+		.activeMorphCount = activeMorphCount,
+		.localCenter = {params.localCenter[0], params.localCenter[1], params.localCenter[2]},
+		._paddingCenter = {},
+		.morphWeights = UnpackMorphWeights(params.morphWeights),
 		.baseColorFactor = {material.baseColorFactor[0], material.baseColorFactor[1],
 							material.baseColorFactor[2], material.baseColorFactor[3]},
 		.emissiveFactor = {material.emissiveFactor[0], material.emissiveFactor[1],
 						   material.emissiveFactor[2], material.emissiveFactor[3]},
-		.morphOffset = params.morphOffset,
-		.activeMorphCount = params.activeMorphCount,
-		.morphWeights = UnpackMorphWeights(params.morphWeights),
-		.indexCount = mesh.indexCount,
-		.skinnedVertexBuffer = params.skinnedVertexBuffer,
-		.flags = params.flags,
-	});
+	};
+
+	impl->drawQueue.push_back(DrawCommand{.instanceData = inst,
+										  .material = nativeMaterial,
+										  .posMesh = posMesh,
+										  .attrMesh = attrMesh,
+										  .skinMesh = skinMesh,
+										  .skinnedVertexBuffer = params.skinnedVertexBuffer,
+										  .jointOffset = params.jointOffset,
+										  .morphOffset = params.morphOffset,
+										  .activeMorphCount = params.activeMorphCount,
+										  .morphWeights = UnpackMorphWeights(params.morphWeights),
+										  .flags = params.flags});
 }
 
 void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex, bool useScissor,
@@ -651,7 +680,7 @@ void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex, bool useSc
 
 	auto* posMesh = impl->meshPool.Resolve(mesh.posBuffer);
 	auto* attrMesh = impl->meshPool.Resolve(mesh.attrBuffer);
-	if (posMesh == nullptr || attrMesh == nullptr) [[unlikely]] {
+	if (AnyNull(posMesh, attrMesh)) [[unlikely]] {
 		return;
 	}
 

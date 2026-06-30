@@ -196,7 +196,7 @@ void PhysicsWorld::ResizeBuffers(size_t newCapacity) {
 	size_t addedCount = newCapacity - oldCap;
 	std::memset(idToHandleMap.data() + (oldCap + 1), 0,
 				addedCount * sizeof(decltype(idToHandleMap)::value_type));
-	std::memset((void*)joltBodyPtrs.data() + (oldCap + 1), 0,
+	std::memset((void*)(joltBodyPtrs.data() + (oldCap + 1)), 0,
 				addedCount * sizeof(decltype(joltBodyPtrs)::value_type));
 
 	size_t freeIdx = freeCount.load(std::memory_order_relaxed);
@@ -218,7 +218,7 @@ void PhysicsWorld::ResizeConstraintBuffers(size_t newCapacity) {
 
 	constraints.resize(newCapacity, nullptr);
 	size_t addedCount = newCapacity - oldCap;
-	std::memset((void*)constraints.data() + oldCap, 0,
+	std::memset((void*)(constraints.data() + oldCap), 0,
 				addedCount * sizeof(decltype(constraints)::value_type));
 	constraintStates.resize(newCapacity, SLOT_EMPTY);
 	constraintGenerations.resize(newCapacity);
