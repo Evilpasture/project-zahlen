@@ -63,18 +63,26 @@ struct PipelineConfig {
 };
 
 // ============================================================================
-// PipelineBuilder — fluent interface over PipelineConfig
+// PipelineBuilder — strongly-typed typestate builder
 // ============================================================================
 
-class PipelineBuilder {
+template <size_t ColorCount = 1, bool HasDepth = true> class PipelineBuilder {
   public:
 	PipelineBuilder() = default;
+	explicit PipelineBuilder(PipelineConfig cfg) noexcept : _cfg(std::move(cfg)) {}
 
-	auto Shaders(const ShaderStages& s) noexcept -> PipelineBuilder&;
-	auto Layout(VkPipelineLayout l) noexcept -> PipelineBuilder&;
+	// --- Same-Type Modifiers (Chaining lvalue returns) ---
 
-	// TMP: pulls bindings/attributes directly from your VertexTraits<T>
-	// This remains in the header as it is a template method.
+	auto Shaders(const ShaderStages& s) noexcept -> PipelineBuilder& {
+		_cfg.stages = s.Get();
+		return *this;
+	}
+
+	auto Layout(VkPipelineLayout l) noexcept -> PipelineBuilder& {
+		_cfg.layout = l;
+		return *this;
+	}
+
 	template <IsVertex V> auto Vertex() noexcept -> PipelineBuilder& {
 		static constexpr auto bindings = VertexTraits<V>::Bindings();
 		static constexpr auto attributes = VertexTraits<V>::Attributes();
@@ -85,37 +93,175 @@ class PipelineBuilder {
 		return *this;
 	}
 
-	auto ColorFormats(std::initializer_list<VkFormat> formats) noexcept -> PipelineBuilder&;
-	auto ColorFormats(std::span<const VkFormat> formats) noexcept -> PipelineBuilder&;
-	auto DepthFormat(VkFormat f) noexcept -> PipelineBuilder&;
-	auto DepthOnly() noexcept -> PipelineBuilder&;
+	auto Topology(VkPrimitiveTopology t) noexcept -> PipelineBuilder& {
+		_cfg.topology = t;
+		return *this;
+	}
 
-	auto Topology(VkPrimitiveTopology t) noexcept -> PipelineBuilder&;
-	auto Wireframe() noexcept -> PipelineBuilder&;
-	auto CullNone() noexcept -> PipelineBuilder&;
-	auto CullFront() noexcept -> PipelineBuilder&;
-	auto CullBack() noexcept -> PipelineBuilder&;
-	[[gnu::warning(R"(
-Forbidden. Use CCW whenever necessary.
-This is for fixing weird assets.
-)")]]
-	auto WindingCW() noexcept -> PipelineBuilder&;
+	auto Wireframe() noexcept -> PipelineBuilder& {
+		_cfg.polygon_mode = VK_POLYGON_MODE_LINE;
+		return *this;
+	}
 
-	auto DepthTest(bool v) noexcept -> PipelineBuilder&;
-	auto DepthWrite(bool v) noexcept -> PipelineBuilder&;
-	auto NoDepth() noexcept -> PipelineBuilder&;
+	auto CullNone() noexcept -> PipelineBuilder& {
+		_cfg.cull_mode = VK_CULL_MODE_NONE;
+		return *this;
+	}
 
-	auto AlphaBlend() noexcept -> PipelineBuilder&;
+	auto CullFront() noexcept -> PipelineBuilder& {
+		_cfg.cull_mode = VK_CULL_MODE_FRONT_BIT;
+		return *this;
+	}
 
-	auto AdditiveBlend() noexcept -> PipelineBuilder&;
+	auto CullBack() noexcept -> PipelineBuilder& {
+		_cfg.cull_mode = VK_CULL_MODE_BACK_BIT;
+		return *this;
+	}
 
-	auto Specialization(const VkSpecializationInfo* info) noexcept -> PipelineBuilder&;
+	[[gnu::warning("Forbidden. Use CCW whenever necessary.")]]
+	auto WindingCW() noexcept -> PipelineBuilder& {
+		_cfg.front_face = VK_FRONT_FACE_CLOCKWISE;
+		return *this;
+	}
+
+	auto DepthTest(bool v) noexcept -> PipelineBuilder& {
+		_cfg.depth_test = v;
+		return *this;
+	}
+
+	auto DepthWrite(bool v) noexcept -> PipelineBuilder& {
+		_cfg.depth_write = v;
+		return *this;
+	}
+
+	auto AlphaBlend() noexcept -> PipelineBuilder& {
+		_cfg.blend_enable = true;
+		return *this;
+	}
+
+	auto AdditiveBlend() noexcept -> PipelineBuilder& {
+		_cfg.blend_enable = true;
+		_cfg.additive_blend = true;
+		return *this;
+	}
+
+	auto Specialization(const VkSpecializationInfo* info) noexcept -> PipelineBuilder& {
+		_cfg.specialization_info = info;
+		return *this;
+	}
+
+	// --- Legacy Lvalue Modifiers (Ref-qualified with & to allow && overloads) ---
+
+	auto ColorFormats(std::initializer_list<VkFormat> formats) & noexcept -> PipelineBuilder& {
+		_cfg.color_formats = formats;
+		return *this;
+	}
+
+	auto ColorFormats(std::span<const VkFormat> formats) & noexcept -> PipelineBuilder& {
+		_cfg.color_formats.assign(formats.begin(), formats.end());
+		return *this;
+	}
+
+	auto DepthFormat(VkFormat f) & noexcept -> PipelineBuilder& {
+		_cfg.depth_format = f;
+		return *this;
+	}
+
+	auto DepthOnly() & noexcept -> PipelineBuilder& {
+		_cfg.color_formats.clear();
+		_cfg.depth_test = true;
+		_cfg.depth_write = true;
+		return *this;
+	}
+
+	auto NoDepth() & noexcept -> PipelineBuilder& {
+		_cfg.depth_test = false;
+		_cfg.depth_write = false;
+		_cfg.depth_format = VK_FORMAT_UNDEFINED;
+		return *this;
+	}
 
 	[[nodiscard("Pipeline creation may fail; verify validity before use")]]
-	auto Build(VkDevice device) const noexcept -> Pipeline;
+	auto Build(VkDevice device) const& noexcept -> Pipeline {
+		const auto result = Validate();
+		if (result != PipelineBuilderResult::Succeeded) {
+			ReportPipelineBuilderError(result);
+			return {};
+		}
+
+		const ZHLN_GraphicsPipelineDesc desc = GetDesc();
+		return Pipeline(device, ZHLN_CreateGraphicsPipeline(device, &desc));
+	}
+
+	// --- Modern Rvalue Typestate Modifiers (Ref-qualified with &&) ---
+
+	[[nodiscard]] auto DepthOnly() && noexcept -> PipelineBuilder<0, true> {
+		_cfg.color_formats.clear();
+		_cfg.depth_test = true;
+		_cfg.depth_write = true;
+		return PipelineBuilder<0, true>{std::move(_cfg)};
+	}
+
+	[[nodiscard]] auto NoDepth() && noexcept -> PipelineBuilder<ColorCount, false> {
+		_cfg.depth_test = false;
+		_cfg.depth_write = false;
+		_cfg.depth_format = VK_FORMAT_UNDEFINED;
+		return PipelineBuilder<ColorCount, false>{std::move(_cfg)};
+	}
+
+	template <size_t N>
+	[[nodiscard]] auto ColorFormats(const std::array<VkFormat, N>& formats) && noexcept
+		-> PipelineBuilder<N, HasDepth> {
+		_cfg.color_formats.assign(formats.begin(), formats.end());
+		return PipelineBuilder<N, HasDepth>{std::move(_cfg)};
+	}
+
+	[[nodiscard]] auto Build(VkDevice device) const&& noexcept
+		-> TypedPipeline<ColorCount, HasDepth> {
+		const auto result = Validate();
+		if (result != PipelineBuilderResult::Succeeded) {
+			ReportPipelineBuilderError(result);
+			return {};
+		}
+
+		const ZHLN_GraphicsPipelineDesc desc = GetDesc();
+		return TypedPipeline<ColorCount, HasDepth>{
+			Pipeline(device, ZHLN_CreateGraphicsPipeline(device, &desc))};
+	}
 
   private:
-	[[nodiscard]] auto Validate() const noexcept -> PipelineBuilderResult;
+	[[nodiscard]] auto Validate() const noexcept -> PipelineBuilderResult {
+		if (_cfg.stages == nullptr) {
+			return PipelineBuilderResult::MissingShaders;
+		}
+		if (_cfg.layout == VK_NULL_HANDLE) {
+			return PipelineBuilderResult::MissingLayout;
+		}
+		return PipelineBuilderResult::Succeeded;
+	}
+
+	[[nodiscard]] constexpr auto GetDesc() const noexcept -> ZHLN_GraphicsPipelineDesc {
+		return {
+			.stages = _cfg.stages,
+			.layout = _cfg.layout,
+			.vertex_bindings = _cfg.bindings,
+			.vertex_attributes = _cfg.attributes,
+			.vertex_binding_count = _cfg.bindingCount,
+			.attribute_count = _cfg.attributeCount,
+			.color_formats = _cfg.color_formats.data(),
+			.color_format_count = static_cast<uint32_t>(_cfg.color_formats.size()),
+			.depth_format = _cfg.depth_format,
+			.topology = _cfg.topology,
+			.polygon_mode = _cfg.polygon_mode,
+			.cull_mode = _cfg.cull_mode,
+			.front_face = _cfg.front_face,
+			.depth_test = _cfg.depth_test,
+			.depth_write = _cfg.depth_write,
+			.blend_enable = _cfg.blend_enable,
+			.additive_blend = _cfg.additive_blend,
+			.specialization_info = _cfg.specialization_info,
+		};
+	}
 
 	PipelineConfig _cfg;
 };

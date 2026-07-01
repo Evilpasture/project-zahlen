@@ -386,6 +386,8 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 	auto& stagingBuf = tlasStagingBuffers[frame_index];
 	auto& instanceBuf = tlasInstanceBuffers[frame_index];
 
+	ZHLN::Assert(tlasInstancesScratch.size() * sizeof(VkAccelerationStructureInstanceKHR) <=
+				 stagingBuf.Size());
 	std::memcpy(stagingBuf.Map().data, tlasInstancesScratch.data(),
 				tlasInstancesScratch.size() * sizeof(VkAccelerationStructureInstanceKHR));
 
@@ -420,64 +422,133 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 // ============================================================================
 // Compile-Time Scene Recording Dispatches
 // ============================================================================
-
-template <bool FullBright> void RenderContext::Impl::RecordSceneFrame(VkCommandBuffer cmd) {
-	if constexpr (!FullBright) {
-		BuildTLAS(cmd);
+namespace {
+struct TLASBuildStep {
+	void Execute(RenderContext::Impl* impl, VkCommandBuffer cmd, const FrameRecorder& /*unused*/,
+				 RenderContext::Impl::RenderState& /*unused*/) const noexcept {
+		impl->BuildTLAS(cmd);
 	}
+};
 
-	FrameRecorder recorder(cmd, *this);
-
-	if constexpr (!FullBright) {
-		uint32_t fIdx = frame_index;
-
-		clusterBoundsPass.Dispatch(cmd, clusterCullingSets[fIdx], 1, 1, 24);
-		Vk::FillBuffer(cmd, globalCounterBuffers[fIdx]);
-
+struct ClusterCullingStep {
+	void Execute(RenderContext::Impl* impl, VkCommandBuffer cmd, const FrameRecorder& recorder,
+				 RenderContext::Impl::RenderState& /*unused*/) const noexcept {
+		uint32_t fIdx = impl->frame_index;
+		impl->clusterBoundsPass.Dispatch(cmd, impl->clusterCullingSets[fIdx], 1, 1, 24);
+		Vk::FillBuffer(cmd, impl->globalCounterBuffers[fIdx]);
 		BarrierClusterCullingSync(cmd);
-
-		clusterCullingPass.Dispatch(cmd, clusterCullingSets[fIdx], 1, 1, 24);
-
+		impl->clusterCullingPass.Dispatch(cmd, impl->clusterCullingSets[fIdx], 1, 1, 24);
 		BarrierComputeWriteToFragmentRead(cmd);
-
 		RunPass(Passes::ShadowPass{}, recorder);
 	}
+};
 
-	SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-				   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>
-		initialState = {
-			.sceneColor = Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(sceneColor),
-			.velocity = Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(velocityBuffer),
-			.normRough =
-				Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(normalRoughnessBuffer),
+struct SetupInitialStateStep {
+	void Execute(RenderContext::Impl* impl, VkCommandBuffer /*unused*/,
+				 const FrameRecorder& /*unused*/,
+				 RenderContext::Impl::RenderState& state) const noexcept {
+		state.initialState = {
+			.sceneColor =
+				Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(impl->sceneColor),
+			.velocity =
+				Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(impl->velocityBuffer),
+			.normRough = Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+				impl->normalRoughnessBuffer),
 			.depth = Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-				presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT)};
-
-	Passes::MainPass{}.Execute(recorder, initialState);
-
-	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> finalColor_ro;
-	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> bloomFinal_ro;
-
-	if constexpr (FullBright) {
-		finalColor_ro = initialState.sceneColor;
-		Passes::ForwardPass{}.Execute(recorder, finalColor_ro, initialState.depth);
-		bloomFinal_ro =
-			Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(bloomFinalTarget);
-	} else {
-		finalColor_ro = Passes::DeferredLightingPass{}.Execute(recorder, initialState);
-		Passes::ForwardPass{}.Execute(recorder, finalColor_ro, initialState.depth);
-		bloomFinal_ro = Passes::BloomPass{}.Execute(recorder, finalColor_ro);
+				impl->presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT)};
 	}
+};
 
-	SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-				   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>
-		resourcesForAA = {.sceneColor = finalColor_ro,
-						  .velocity = initialState.velocity,
-						  .normRough = initialState.normRough,
-						  .depth = initialState.depth};
+struct MainPassStep {
+	void Execute(RenderContext::Impl* /*unused*/, VkCommandBuffer /*unused*/,
+				 const FrameRecorder& recorder,
+				 RenderContext::Impl::RenderState& state) const noexcept {
+		Passes::MainPass{}.Execute(recorder, state.initialState);
+	}
+};
 
-	auto aa_ro = Passes::AAPass{}.Execute(recorder, resourcesForAA);
-	Passes::BlitPass{}.Execute(recorder, aa_ro.sceneColor, bloomFinal_ro);
+struct LightingPassStep {
+	void Execute(RenderContext::Impl* /*unused*/, VkCommandBuffer /*unused*/,
+				 const FrameRecorder& recorder,
+				 RenderContext::Impl::RenderState& state) const noexcept {
+		state.finalColor = Passes::DeferredLightingPass{}.Execute(recorder, state.initialState);
+	}
+};
+
+struct FullBrightSetupStep {
+	void Execute(RenderContext::Impl* /*unused*/, VkCommandBuffer /*unused*/,
+				 const FrameRecorder& /*unused*/,
+				 RenderContext::Impl::RenderState& state) const noexcept {
+		state.finalColor = state.initialState.sceneColor;
+	}
+};
+
+struct ForwardPassStep {
+	void Execute(RenderContext::Impl* /*unused*/, VkCommandBuffer /*unused*/,
+				 const FrameRecorder& recorder,
+				 RenderContext::Impl::RenderState& state) const noexcept {
+		Passes::ForwardPass{}.Execute(recorder, state.finalColor, state.initialState.depth);
+	}
+};
+
+struct BloomPassStep {
+	void Execute(RenderContext::Impl* /*unused*/, VkCommandBuffer /*unused*/,
+				 const FrameRecorder& recorder,
+				 RenderContext::Impl::RenderState& state) const noexcept {
+		state.bloomFinal = Passes::BloomPass{}.Execute(recorder, state.finalColor);
+	}
+};
+
+struct FullBrightBloomStep {
+	void Execute(RenderContext::Impl* impl, VkCommandBuffer /*unused*/,
+				 const FrameRecorder& /*unused*/,
+				 RenderContext::Impl::RenderState& state) const noexcept {
+		state.bloomFinal =
+			Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(impl->bloomFinalTarget);
+	}
+};
+
+struct AAPassStep {
+	void Execute(RenderContext::Impl* /*unused*/, VkCommandBuffer /*unused*/,
+				 const FrameRecorder& recorder,
+				 RenderContext::Impl::RenderState& state) const noexcept {
+		state.resourcesForAA = {.sceneColor = state.finalColor,
+								.velocity = state.initialState.velocity,
+								.normRough = state.initialState.normRough,
+								.depth = state.initialState.depth};
+		state.aaResult = Passes::AAPass{}.Execute(recorder, state.resourcesForAA);
+	}
+};
+
+struct BlitPassStep {
+	void Execute(RenderContext::Impl* /*unused*/, VkCommandBuffer /*unused*/,
+				 const FrameRecorder& recorder,
+				 RenderContext::Impl::RenderState& state) const noexcept {
+		Passes::BlitPass{}.Execute(recorder, state.aaResult.sceneColor, state.bloomFinal);
+	}
+};
+} // namespace
+
+template <bool FullBright> [[nodiscard]] consteval auto GetPassSteps() noexcept {
+	if constexpr (FullBright) {
+		return std::make_tuple(SetupInitialStateStep{}, MainPassStep{}, FullBrightSetupStep{},
+							   ForwardPassStep{}, FullBrightBloomStep{}, AAPassStep{},
+							   BlitPassStep{});
+	} else {
+		return std::make_tuple(TLASBuildStep{}, ClusterCullingStep{}, SetupInitialStateStep{},
+							   MainPassStep{}, LightingPassStep{}, ForwardPassStep{},
+							   BloomPassStep{}, AAPassStep{}, BlitPassStep{});
+	}
+}
+
+template <bool FullBright> void RenderContext::Impl::RecordSceneFrame(VkCommandBuffer cmd) {
+	FrameRecorder recorder(cmd, *this);
+	RenderState state{};
+
+	constexpr auto steps = GetPassSteps<FullBright>();
+
+	// Unpack and execute the flat rendering timeline sequentially
+	std::apply([&](auto&&... step) { (step.Execute(this, cmd, recorder, state), ...); }, steps);
 }
 
 // Explicit instantiations to prevent translation unit linkage issues
@@ -535,7 +606,8 @@ RenderResult RenderContext::EndFrame() noexcept {
 
 void RenderContext::Impl::ProvokeDeviceLostInternal() const {
 	if (!hangGpuPass.pipeline.Valid()) {
-		ZHLN::Log("ERROR: Cannot provoke device lost because the Hang GPU pipeline is invalid.");
+		ZHLN::Log("ERROR: Cannot provoke device lost because the Hang GPU pipeline is invalid. "
+				  "Check your build.");
 		return;
 	}
 
@@ -589,6 +661,7 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 	auto* attrMesh = impl->meshPool.Resolve(mesh.attrBuffer);
 	auto* nativeMaterial = impl->materialPool.Resolve(material.pipeline);
 	if (AnyNull(attrMesh, posMesh, nativeMaterial)) [[unlikely]] {
+		ZHLN::Assert(false);
 		return;
 	}
 

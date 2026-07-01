@@ -16,9 +16,9 @@ namespace ZHLN {
 void RenderContext::Impl::CompileShadowPipeline(VkDevice device, const void* shaderData,
 												size_t shaderSize) {
 	auto v_desc = Vk::CreateShaderDesc(Vk::AsSpirV(shaderData), shaderSize);
-	ZHLN_ShaderDesc f_desc = {.code = Vk::AsSpirV(&ZHLN_Resource_ShadowFragSpv[0]),
-							  .size = ZHLN_Resource_ShadowFragSpv_Len,
-							  .entry_point = "PSShadow"};
+	ZHLN_ShaderDesc f_desc = {.code = Vk::AsSpirV(::ZHLN::Resource::GetShadowFragSpv().data()),
+							  .size = ::ZHLN::Resource::GetShadowFragSpv().size(),
+							  .entry_point = nullptr}; // Allow SPIR-V reflection to find "PSShadow"
 
 	auto shaders = Vk::ShaderStages::Create(device, v_desc, f_desc);
 
@@ -32,7 +32,7 @@ void RenderContext::Impl::CompileShadowPipeline(VkDevice device, const void* sha
 	shadowPipeline = Vk::PipelineBuilder{}
 						 .Shaders(shaders)
 						 .Layout(shadowPipelineLayout.Get())
-						 .DepthOnly()
+						 .DepthOnly() // Consumes Builder<1, true> -> Returns Builder<0, true>
 						 .DepthFormat(VK_FORMAT_D32_SFLOAT)
 						 .CullNone()
 						 .Build(device);

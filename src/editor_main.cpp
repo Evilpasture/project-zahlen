@@ -524,10 +524,10 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 			}
 
 			if (debugLineMat.pipeline == PipelineHandle::Invalid) {
-				PipelineDesc lineDesc = {.vertexShaderData = ZHLN_Resource_BasicVertSpv,
-										 .vertexShaderSize = ZHLN_Resource_BasicVertSpv_Len,
-										 .fragShaderData = ZHLN_Resource_BasicFragSpv,
-										 .fragShaderSize = ZHLN_Resource_BasicFragSpv_Len,
+				PipelineDesc lineDesc = {.vertexShaderData = ::ZHLN::Resource::GetBasicProgram().vertex.data(),
+										 .vertexShaderSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetBasicProgram().vertex.size()),
+										 .fragShaderData = ::ZHLN::Resource::GetBasicProgram().fragment.data(),
+										 .fragShaderSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetBasicProgram().fragment.size()),
 										 .doubleSided = true,
 										 .alphaBlend = true,
 										 .isLineList = true};

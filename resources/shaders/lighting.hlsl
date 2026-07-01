@@ -39,7 +39,9 @@ struct ClusterVolume {
 [[vk::binding(12, 0)]] StructuredBuffer<uint> clusterIndexList;
 [[vk::binding(13, 0)]] Texture2D<float4> texAmbient;
 [[vk::binding(14, 0)]] SamplerState pointSampler;
+#ifndef DISABLE_RTR
 [[vk::binding(15, 0)]] RaytracingAccelerationStructure tlas;
+#endif
 
 // --- Punctual Shadow Maps ---
 [[vk::binding(16, 0)]] TextureCubeArray<float> punctualShadowCube; //  Omni-directional shadows
@@ -153,6 +155,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 										  light.points, light.twoSided == 1);
 
 			float shadowVisibility = 1.0f;
+#ifndef DISABLE_RTR
 			if (ENABLE_RTR != 0 && pc.enableRTR != 0) {
 				float3 L_center = ((light.points[0].xyz + light.points[1].xyz +
 									light.points[2].xyz + light.points[3].xyz) *
@@ -178,6 +181,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 					shadowVisibility = 0.0f;
 				}
 			}
+#endif
 
 			directPunctual += ((1.0f - metallic) * albedoRaw.rgb * diffLTC + specLTC) *
 							  light.color * light.intensity * shadowVisibility;
@@ -204,6 +208,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 				float3 kD_p = (1.0f - F_p) * (1.0f - metallic);
 
 				float shadowVisibility = 1.0f;
+#ifndef DISABLE_RTR
 				if (ENABLE_RTR != 0 && pc.enableRTR != 0) {
 					RayDesc ray;
 					ray.Origin = worldPos + N * 0.01f;
@@ -221,7 +226,9 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 					if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
 						shadowVisibility = 0.0f;
 					}
-				} else if (light.shadowLayer >= 0) {
+				} else
+#endif
+					if (light.shadowLayer >= 0) {
 					if (light.type == 1) {	  // POINT LIGHT (Omni-directional Cubemap)
 						float3 r = -L_unnorm; // Vector from light to pixel
 

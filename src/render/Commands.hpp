@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 #include "RenderCore.hpp"
 
@@ -41,7 +40,6 @@ inline void DrawBatch(const VkCommandBuffer cmd, const DrawBatchConfig& cfg, Loo
 		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, cfg.layout, 0, 1, &cfg.set, 0,
 								nullptr);
 	}
-	
 
 	// 2. Dynamic Recording
 	// We provide a 'binder' lambda back to the user to record individual instances
@@ -53,7 +51,31 @@ inline void DrawBatch(const VkCommandBuffer cmd, const DrawBatchConfig& cfg, Loo
 	};
 
 	// Forward the loop to ensure the caller's value category is preserved
-    std::forward<LoopFn>(loop)(record); 
+	std::forward<LoopFn>(loop)(record);
+}
+
+/**
+ * @brief High-performance, strongly-typed bindless batch drawer.
+ * Binds the pipeline and global bindless set once, exposing an optimized draw callback.
+ */
+template <size_t ColorCount, bool HasDepth, typename LoopFn>
+inline void DrawBindlessBatch(const VkCommandBuffer cmd,
+							  const TypedPipeline<ColorCount, HasDepth>& pipeline,
+							  VkPipelineLayout layout, VkDescriptorSet bindlessSet,
+							  VkShaderStageFlags pushStages, LoopFn&& loop) {
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
+
+	if (bindlessSet != VK_NULL_HANDLE) {
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &bindlessSet, 0,
+								nullptr);
+	}
+
+	auto draw = [&](uint32_t vertexCount, uint32_t instanceIdx, const auto& pc) {
+		Push(cmd, layout, pushStages, pc);
+		vkCmdDraw(cmd, vertexCount, 1, 0, instanceIdx);
+	};
+
+	std::forward<LoopFn>(loop)(draw);
 }
 
 } // namespace ZHLN::Vk

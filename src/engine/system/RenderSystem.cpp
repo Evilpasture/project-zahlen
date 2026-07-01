@@ -258,10 +258,10 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
 		}
 
 		if (debugLineMat.pipeline == PipelineHandle::Invalid) {
-			PipelineDesc lineDesc = {.vertexShaderData = ZHLN_Resource_BasicVertSpv,
-									 .vertexShaderSize = ZHLN_Resource_BasicVertSpv_Len,
-									 .fragShaderData = ZHLN_Resource_ForwardFragSpv,
-									 .fragShaderSize = ZHLN_Resource_ForwardFragSpv_Len,
+			PipelineDesc lineDesc = {.vertexShaderData = ::ZHLN::Resource::GetBasicProgram().vertex.data(),
+									 .vertexShaderSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetBasicProgram().vertex.size()),
+									 .fragShaderData = ::ZHLN::Resource::GetForwardFragSpv().data(),
+									 .fragShaderSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetForwardFragSpv().size()),
 									 .doubleSided = true,
 									 .alphaBlend = true,
 									 .isLineList = true};

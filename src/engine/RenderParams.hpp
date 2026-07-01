@@ -4,12 +4,16 @@
 // RenderParams.hpp
 #pragma once
 
+#include "DescriptorLayout.hpp"
 #include "RenderCore.hpp"
+#include "Zahlen/Config.hpp"
 
 #include <tuple>
 #include <vulkan/vulkan_core.h>
 
 namespace ZHLN {
+
+using EngineASType = std::conditional_t<isMac, Vk::SkipWrite, const VkAccelerationStructureKHR*>;
 
 struct AmbientPassParams {
 	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> sceneColor;
@@ -45,7 +49,7 @@ struct LightingPassParams {
 	VkBuffer lightIndexListBuffer = VK_NULL_HANDLE;
 	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> ambientTarget;
 	VkSampler pointSampler = VK_NULL_HANDLE;
-	const VkAccelerationStructureKHR* tlas = nullptr;
+	EngineASType tlas{};
 	VkImageView shadowAtlasCubeView = VK_NULL_HANDLE;
 	VkImageView shadowAtlas2DView = VK_NULL_HANDLE;
 
@@ -66,7 +70,7 @@ struct ReflectionPassParams {
 	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> normRough;
 	VkSampler pointSampler = VK_NULL_HANDLE;
 	VkImageView prefilteredView = VK_NULL_HANDLE;
-	const VkAccelerationStructureKHR* tlas = nullptr;
+	EngineASType tlas{};
 	VkBuffer frameUniformBuffer = VK_NULL_HANDLE;
 	VkImageView brdfLutView = VK_NULL_HANDLE;
 	VkSampler clampSampler = VK_NULL_HANDLE;

@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "Commands.hpp"
 #include "ParallelDraw.hpp"
 #include "RenderInternal.hpp"
 #include "RenderParams.hpp"
@@ -241,19 +242,27 @@ void ShadowPass::RenderDirectionalShadows(const FrameRecorder& recorder) const n
 
 	for (uint32_t cascade = 0; cascade < RenderContext::Impl::NUM_CASCADES; ++cascade) {
 		ExecuteCascadePass(cascade, [&]() {
-			for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
-				const auto& draw = ctx.drawQueue[i];
-				if (!IsVisibleIn(draw.flags, RenderPassType::Shadow) ||
-					IsForwardOnly(draw.instanceData.flags)) {
-					continue;
-				}
+			// Highly abstracted, type-safe, and 100% free of raw Vulkan calls!
+			Vk::DrawBindlessBatch(
+				cmd, ctx.shadowPipeline, ctx.shadowPipelineLayout.Get(), recorder.bindlessSet,
+				VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, [&](auto draw) {
+					for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
+						const auto& drawCmd = ctx.drawQueue[i];
+						if (!IsVisibleIn(drawCmd.flags, RenderPassType::Shadow) ||
+							IsForwardOnly(drawCmd.instanceData.flags)) {
+							continue;
+						}
 
-				const ObjectConstants pushConstants = {.instanceId = i,
-													   .isShadowPass = cascade + 1};
-				SubmitDrawInstanced(cmd, draw, i, recorder.bindlessSet, pushConstants,
-									ctx.shadowPipeline.Get(), ctx.shadowPipelineLayout.Get(),
-									VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
-			}
+						const ObjectConstants pushConstants = {.instanceId = i,
+															   .isShadowPass = cascade + 1};
+
+						uint32_t vertexCount = drawCmd.instanceData.iboAddress != 0
+												   ? drawCmd.instanceData.indexCount
+												   : drawCmd.instanceData.vertexCount;
+
+						draw(vertexCount, i, pushConstants);
+					}
+				});
 		});
 	}
 }
@@ -292,30 +301,36 @@ void ShadowPass::RenderPunctualShadows(const FrameRecorder& recorder) const noex
 			.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
 
 		ExecutePunctualPass(subViewImage, [&]() {
-			for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
-				const auto& draw = ctx.drawQueue[i];
-				if (IsForwardOnly(draw.instanceData.flags)) {
-					continue;
-				}
+			// Identical abstraction used for Punctual Spot / Point lights
+			Vk::DrawBindlessBatch(
+				cmd, ctx.punctualShadowPipeline, ctx.punctualShadowPipelineLayout.Get(),
+				recorder.bindlessSet, VK_SHADER_STAGE_VERTEX_BIT, [&](auto draw) {
+					for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
+						const auto& drawCmd = ctx.drawQueue[i];
+						if (IsForwardOnly(drawCmd.instanceData.flags)) {
+							continue;
+						}
 
-				// Resolved from InstanceData world matrix
-				JPH::Vec3 meshPos = draw.instanceData.world.GetTranslation();
-				JPH::Vec3 lightPos(light.position[0], light.position[1], light.position[2]);
-				float distToLight = (meshPos - lightPos).Length();
-				float maxRange = light.range + draw.instanceData.cullRadius;
+						JPH::Vec3 meshPos = drawCmd.instanceData.world.GetTranslation();
+						JPH::Vec3 lightPos(light.position[0], light.position[1], light.position[2]);
+						float distToLight = (meshPos - lightPos).Length();
+						float maxRange = light.range + drawCmd.instanceData.cullRadius;
 
-				if (distToLight > maxRange) {
-					continue;
-				}
+						if (distToLight > maxRange) {
+							continue;
+						}
 
-				const struct PunctualPush {
-					uint32_t lightIdx;
-				} pc = {l_idx};
+						const struct PunctualPush {
+							uint32_t lightIdx;
+						} pc = {l_idx};
 
-				SubmitDrawInstanced(
-					cmd, draw, i, recorder.bindlessSet, pc, ctx.punctualShadowPipeline.Get(),
-					ctx.punctualShadowPipelineLayout.Get(), VK_SHADER_STAGE_VERTEX_BIT);
-			}
+						uint32_t vertexCount = drawCmd.instanceData.iboAddress != 0
+												   ? drawCmd.instanceData.indexCount
+												   : drawCmd.instanceData.vertexCount;
+
+						draw(vertexCount, i, pc);
+					}
+				});
 		});
 	}
 }
@@ -401,6 +416,15 @@ void MainPass::Execute(const FrameRecorder& recorder,
 	VkDevice device = ctx.ctx.Device();
 	uint32_t fIdx = recorder.frameIndex;
 
+	// ughhh please Khronos wizards give us a better translation layer for MacOS
+	auto GetTLAS = [](const FrameRecorder& rec) noexcept {
+		if constexpr (isMac) {
+			return Vk::SkipWrite{};
+		} else {
+			return rec.ctx.rtCtx.Valid() ? &rec.ctx.tlas.Current() : nullptr;
+		}
+	};
+
 	Profiler::ScopedGpuProfile<Stages::PostProcessPass, FrameProfiler> timer(cmd, fIdx,
 																			 ctx.gpuProfiler);
 
@@ -471,7 +495,7 @@ void MainPass::Execute(const FrameRecorder& recorder,
 						   .lightIndexListBuffer = ctx.lightIndexListBuffers[fIdx].Handle(),
 						   .ambientTarget = ambient_ro,
 						   .pointSampler = res.pointSampler.Get(),
-						   .tlas = ctx.rtCtx.Valid() ? &ctx.tlas.Current() : nullptr,
+						   .tlas = GetTLAS(recorder),
 						   .shadowAtlasCubeView = ctx.shadowAtlasCubeView.Get(),
 						   .shadowAtlas2DView = ctx.shadowAtlas2DView.Get()});
 
@@ -485,7 +509,7 @@ void MainPass::Execute(const FrameRecorder& recorder,
 							 .normRough = res.gbuffer.normRough,
 							 .pointSampler = res.pointSampler.Get(),
 							 .prefilteredView = ctx.iblPayload.prefilteredView.Get(),
-							 .tlas = ctx.rtCtx.Valid() ? &ctx.tlas.Current() : nullptr,
+							 .tlas = GetTLAS(recorder),
 							 .frameUniformBuffer = res.frameUniforms.Handle(),
 							 .brdfLutView = ctx.iblPayload.brdfLutView.Get(),
 							 .clampSampler = res.clampSampler.Get(),

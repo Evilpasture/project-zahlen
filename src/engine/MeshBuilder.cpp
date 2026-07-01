@@ -16,15 +16,15 @@ namespace ZHLN::AssetFactory {
 
 Material CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend) {
 	PipelineDesc desc;
-	desc.vertexShaderData = ZHLN_Resource_BasicVertSpv;
-	desc.vertexShaderSize = ZHLN_Resource_BasicVertSpv_Len;
+	desc.vertexShaderData = ::ZHLN::Resource::GetBasicProgram().vertex.data();
+	desc.vertexShaderSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetBasicProgram().vertex.size());
 
 	if (alphaBlend) {
-		desc.fragShaderData = ZHLN_Resource_ForwardFragSpv;
-		desc.fragShaderSize = ZHLN_Resource_ForwardFragSpv_Len;
+		desc.fragShaderData = ::ZHLN::Resource::GetForwardFragSpv().data();
+		desc.fragShaderSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetForwardFragSpv().size());
 	} else {
-		desc.fragShaderData = ZHLN_Resource_BasicFragSpv;
-		desc.fragShaderSize = ZHLN_Resource_BasicFragSpv_Len;
+		desc.fragShaderData = ::ZHLN::Resource::GetBasicProgram().fragment.data();
+		desc.fragShaderSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetBasicProgram().fragment.size());
 	}
 
 	desc.doubleSided = doubleSided;

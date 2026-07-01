@@ -13,6 +13,7 @@
 #include <Zahlen/Font8x8.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
+#include <algorithm>
 #include <cstddef>
 #include <fontconfig/fontconfig.h>
 #include <stb_image.h>
@@ -53,7 +54,7 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
 	Log("Loading TrueType system font: {}", fontPath);
 
 	FILE* f = std::fopen(fontPath.c_str(), "rb");
-	if (!f) {
+	if (f == nullptr) {
 		Log("ERROR: Failed to open system font file: {}", fontPath);
 		return 0;
 	}
@@ -64,6 +65,10 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
 	std::vector<uint8_t> fontBuffer(size);
 	std::fread(fontBuffer.data(), 1, size, f);
 	std::fclose(f);
+
+	// Resolve starting offset for font collections (like macOS .ttc files)
+	int fontOffset = stbtt_GetFontOffsetForIndex(fontBuffer.data(), 0);
+	fontOffset = std::max(fontOffset, 0); // Fallback to standard behavior for standard TTF
 
 	// Setup a clean 512x512 alpha map
 	const uint32_t atlasSize = 512;
@@ -80,9 +85,9 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
 	auto* uiSettings = reg.Get<UISettingsComponent>(uiSettingsEntities[0]);
 
 	stbtt_bakedchar bakedChars[96]; // ASCII 32 - 127
-	// Bake 24pt anti-aliased glyphs into the alpha channel
-	int result = stbtt_BakeFontBitmap(fontBuffer.data(), 0, 24.0f, alphaBitmap.data(), atlasSize,
-									  atlasSize, 32, 96, bakedChars);
+									// Bake 24pt anti-aliased glyphs into the alpha channel
+	int result = stbtt_BakeFontBitmap(fontBuffer.data(), fontOffset, 24.0f, alphaBitmap.data(),
+									  atlasSize, atlasSize, 32, 96, bakedChars);
 
 	if (result <= 0) {
 		Log("ERROR: stb_truetype failed to bake font bitmap!");

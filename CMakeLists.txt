@@ -186,7 +186,6 @@ set(ENGINE_SOURCES
     src/engine/AssetManager.cpp
     src/engine/Window.cpp
     src/engine/Input.cpp
-    src/engine/Resources.c
     src/engine/Platform.cpp
     src/engine/Scripting.cpp
     src/engine/LuaScriptRuntime.cpp
@@ -429,7 +428,6 @@ compile_shaders(zahlen_engine
     "${CMAKE_SOURCE_DIR}/resources/shaders/ui.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/fxaa.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/ambient.hlsl"
-    "${CMAKE_SOURCE_DIR}/resources/shaders/lighting.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/bloom_threshold.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/bloom_blur.hlsl"
     "${CMAKE_SOURCE_DIR}/resources/shaders/punctual_shadows.hlsl"
@@ -461,6 +459,21 @@ add_custom_target(zahlen_engine_reflection_nort_shader ALL DEPENDS ${REFLECTION_
 add_dependencies(zahlen_engine zahlen_engine_reflection_nort_shader)
 target_compile_definitions(zahlen_engine PRIVATE SHADER_REFLECTION_NORT_HLSL_VS_PATH="${REFLECTION_NORT_VS_SPV}" SHADER_REFLECTION_NORT_HLSL_PS_PATH="${REFLECTION_NORT_PS_SPV}")
 set_property(SOURCE src/engine/Resources.c APPEND PROPERTY OBJECT_DEPENDS "${REFLECTION_NORT_VS_SPV}" "${REFLECTION_NORT_PS_SPV}")
+
+# Lighting shaders (RT vs NoRT)
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/lighting.hlsl" VSMain vs_6_5 LIGHTING_VS_SPV)
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/lighting.hlsl" PSMain ps_6_5 LIGHTING_PS_SPV)
+add_custom_target(zahlen_engine_lighting_shader ALL DEPENDS ${LIGHTING_VS_SPV} ${LIGHTING_PS_SPV})
+add_dependencies(zahlen_engine zahlen_engine_lighting_shader)
+target_compile_definitions(zahlen_engine PRIVATE SHADER_LIGHTING_HLSL_VS_PATH="${LIGHTING_VS_SPV}" SHADER_LIGHTING_HLSL_PS_PATH="${LIGHTING_PS_SPV}")
+set_property(SOURCE src/engine/Resources.c APPEND PROPERTY OBJECT_DEPENDS "${LIGHTING_VS_SPV}" "${LIGHTING_PS_SPV}")
+
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/lighting.hlsl" VSMain vs_6_5 LIGHTING_NORT_VS_SPV "-DDISABLE_RTR")
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/lighting.hlsl" PSMain ps_6_5 LIGHTING_NORT_PS_SPV "-DDISABLE_RTR")
+add_custom_target(zahlen_engine_lighting_nort_shader ALL DEPENDS ${LIGHTING_NORT_VS_SPV} ${LIGHTING_NORT_PS_SPV})
+add_dependencies(zahlen_engine_lighting_nort_shader)
+target_compile_definitions(zahlen_engine PRIVATE SHADER_LIGHTING_NORT_HLSL_VS_PATH="${LIGHTING_NORT_VS_SPV}" SHADER_LIGHTING_NORT_HLSL_PS_PATH="${LIGHTING_NORT_PS_SPV}")
+set_property(SOURCE src/engine/Resources.c APPEND PROPERTY OBJECT_DEPENDS "${LIGHTING_NORT_VS_SPV}" "${LIGHTING_NORT_PS_SPV}")
 
 
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa_wrap.hlsl" SmaaEdgeVS vs_6_5 SMAA_EDGE_VS_SPV "-DEDGE_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=0")

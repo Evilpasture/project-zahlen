@@ -180,6 +180,30 @@ using DescriptorSetLayout = DeviceHandle<VkDescriptorSetLayout, ZHLN_DestroyDesc
 using DescriptorPool = DeviceHandle<VkDescriptorPool, ZHLN_DestroyDescriptorPool>;
 
 // ============================================================================
+// Type safe Pipeline
+// ============================================================================
+
+template <size_t ColorCount, bool HasDepth> class TypedPipeline {
+  public:
+	Pipeline handle;
+
+	TypedPipeline() = default;
+	explicit TypedPipeline(Pipeline&& p) noexcept : handle(std::move(p)) {}
+
+	// Allow move assignment from raw legacy Pipeline
+	TypedPipeline& operator=(Pipeline&& p) noexcept {
+		handle = std::move(p);
+		return *this;
+	}
+
+	[[nodiscard]] VkPipeline Get() const noexcept { return handle.Get(); }
+	[[nodiscard]] bool Valid() const noexcept { return handle.Valid(); }
+	explicit operator bool() const noexcept { return Valid(); }
+
+	[[nodiscard]] Pipeline Release() noexcept { return std::move(handle); }
+};
+
+// ============================================================================
 // Context RAII
 // ============================================================================
 
@@ -729,6 +753,11 @@ template <size_t ColorCount = 0, bool HasDepth = false> class DynamicPass {
 	template <typename Func> void Execute(VkCommandBuffer cmd, Func&& func) const;
 
 	constexpr auto ViewMask(uint32_t mask) noexcept -> DynamicPass<ColorCount, HasDepth>&;
+
+	void Bind(VkCommandBuffer cmd,
+			  const TypedPipeline<ColorCount, HasDepth>& pipeline) const noexcept {
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
+	}
 
   private:
 	template <size_t C, bool D> friend class DynamicPass;

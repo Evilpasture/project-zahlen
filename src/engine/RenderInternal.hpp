@@ -41,6 +41,10 @@ struct IBLPayload {
 
 namespace ZHLN {
 
+template <uint32_t B, VkShaderStageFlags S = VK_SHADER_STAGE_FRAGMENT_BIT>
+using EngineAS =
+	std::conditional_t<isMac, Vk::SampledImageSlot<B, S>, Vk::AccelerationStructureSlot<B, S>>;
+
 // ============================================================================
 // GenerationalPool Template
 // ============================================================================
@@ -167,8 +171,8 @@ using GlobalSceneLayout = Vk::DescriptorLayout<
 	Vk::SamplerSlot<11, VK_SHADER_STAGE_FRAGMENT_BIT>,		// Clamping
 	Vk::SampledImageSlot<12, VK_SHADER_STAGE_FRAGMENT_BIT>, // LTC Matrix
 	Vk::SampledImageSlot<13, VK_SHADER_STAGE_FRAGMENT_BIT>, // LTC Amplitude
-	Vk::StorageBufferSlot<14, VK_SHADER_STAGE_VERTEX_BIT>	// Previous Joint matrices (SSBO)
-	>;
+	Vk::StorageBufferSlot<14, VK_SHADER_STAGE_VERTEX_BIT>,	// Previous Joint matrices (SSBO)
+	EngineAS<15, VK_SHADER_STAGE_FRAGMENT_BIT>>;
 
 using TAALayout =
 	Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SampledImageSlot<1>, Vk::SampledImageSlot<2>,
@@ -260,7 +264,7 @@ using LightingLayout = Vk::DescriptorLayout<
 	Vk::StorageBufferSlot<12, VK_SHADER_STAGE_FRAGMENT_BIT>, // clusterIndexList
 	Vk::SampledImageSlot<13, VK_SHADER_STAGE_FRAGMENT_BIT>,	 // texAmbient (Pass 1 Output)
 	Vk::SamplerSlot<14, VK_SHADER_STAGE_FRAGMENT_BIT>,		 // pointSampler
-	Vk::AccelerationStructureSlot<15>,						 // TLAS
+	EngineAS<15, VK_SHADER_STAGE_FRAGMENT_BIT>,				 // TLAS
 	Vk::SampledImageSlot<16, VK_SHADER_STAGE_FRAGMENT_BIT>,	 // punctualShadowCube (Point)
 	Vk::SampledImageSlot<17, VK_SHADER_STAGE_FRAGMENT_BIT>	 // punctualShadow2D (Spot)
 	>;
@@ -272,7 +276,7 @@ using ReflectionLayout =
 						 Vk::SampledImageSlot<3>,						   // texNormalRoughness
 						 Vk::SamplerSlot<4>,							   // pointSampler
 						 Vk::SampledImageSlot<5>,						   // texEnvMap
-						 Vk::AccelerationStructureSlot<6>,				   // TLAS
+						 EngineAS<6, VK_SHADER_STAGE_FRAGMENT_BIT>,		   // TLAS
 						 Vk::UniformSlot<7, VK_SHADER_STAGE_FRAGMENT_BIT>, // frame
 						 Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>, // brdfLUT
 						 Vk::SamplerSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,		// clampSampler
@@ -385,9 +389,29 @@ struct WorkerCmdContext {
 	std::array<ZHLN::Atomic<uint32_t>, 2> cmdCount{};
 };
 
+template <VkImageLayout ColorL, VkImageLayout DepthL> struct SceneResources {
+	Vk::TypedImage<ColorL> sceneColor;
+	Vk::TypedImage<ColorL> velocity;
+	Vk::TypedImage<ColorL> normRough;
+	Vk::TypedImage<DepthL> depth;
+};
+
 // --- Impl Struct ---
 
 struct RenderContext::Impl {
+	struct RenderState {
+		SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+					   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>
+			initialState;
+		Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> finalColor;
+		Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> bloomFinal;
+		SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+					   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>
+			resourcesForAA;
+		SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+					   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>
+			aaResult;
+	};
 	Window& window;
 	String64 appName;
 	Vk::Context ctx;
@@ -520,9 +544,9 @@ struct RenderContext::Impl {
 	ZHLN::DoubleBuffered<Vk::Buffer> instanceDataBuffers;
 	ZHLN::DoubleBuffered<Vk::Buffer> indirectCommandsBuffers;
 	ZHLN::DoubleBuffered<Vk::Buffer> jointBuffers; // Global Joint Transforms SSBO
-	Vk::Pipeline shadowPipeline;
+	Vk::TypedPipeline<0, true> shadowPipeline;
 	Vk::PipelineLayout shadowPipelineLayout;
-	Vk::Pipeline punctualShadowPipeline;
+	Vk::TypedPipeline<0, true> punctualShadowPipeline;
 	Vk::PipelineLayout punctualShadowPipelineLayout;
 	Vk::ComputePass cullingPass;
 
@@ -714,13 +738,6 @@ struct FrameRecorder {
 		  bindlessSet(impl.bindlessSets[impl.frame_index]) {}
 };
 
-template <VkImageLayout ColorL, VkImageLayout DepthL> struct SceneResources {
-	Vk::TypedImage<ColorL> sceneColor;
-	Vk::TypedImage<ColorL> velocity;
-	Vk::TypedImage<ColorL> normRough;
-	Vk::TypedImage<DepthL> depth;
-};
-
 struct GroupRange {
 	NativeMaterial* material;
 	uint32_t start;
@@ -750,6 +767,8 @@ struct ShadowPass {
 	void Execute(const FrameRecorder& recorder) const noexcept;
 
   private:
+	void extracted(const FrameRecorder& recorder, VkCommandBuffer& cmd,
+				   RenderContext::Impl& ctx) const;
 	void RenderDirectionalShadows(const FrameRecorder& recorder) const noexcept;
 	void RenderPunctualShadows(const FrameRecorder& recorder) const noexcept;
 };
