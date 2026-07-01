@@ -61,30 +61,30 @@ template <> struct ResourceCheck<true> {
 /**
  * @brief 100% Compile-Time Static Dispatch Resource Manager.
  * Zero heap allocations, zero indirection, and perfect inlining.
+ * Enforces single-use consumption at compile time via rvalue ref-qualifiers.
  */
 template <typename... Resources> class StaticResourceManager {
   public:
 	constexpr explicit StaticResourceManager(Resources*... resources) noexcept
 		: _resources(resources...) {}
 
-	void FlipAll() noexcept {
+	StaticResourceManager(const StaticResourceManager&) = delete;
+	StaticResourceManager(StaticResourceManager&&) = delete;
+	StaticResourceManager& operator=(const StaticResourceManager&) = delete;
+	StaticResourceManager& operator=(StaticResourceManager&&) = delete;
+
+	void FlipAll() & = delete; // because i'm dumb and i want the compiler to protect me
+
+	void FlipAll() && noexcept {
 		std::apply(
 			[](auto*... r) {
-				// Define a helper lambda that checks for the Flip method at compile time
 				auto flip_single = [](auto* resource) {
-					// 1. Evaluate the constraint into a compile-time constant
 					constexpr bool can_flip = requires { resource->Flip(); };
-
-					// 2. Pass it to your custom warning diagnostic mechanism
 					Detail::ResourceCheck<can_flip>::emit();
-
-					// 3. Conditionally compile the execution code
 					if constexpr (can_flip) {
 						resource->Flip();
 					}
 				};
-
-				// Expand the fold expression using our conditional helper
 				(flip_single(r), ...);
 			},
 			_resources);

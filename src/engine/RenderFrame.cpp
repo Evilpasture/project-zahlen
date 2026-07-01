@@ -276,14 +276,14 @@ ZHLN_FrameResult RenderContext::Impl::SubmitFrame() {
 		resized = true;
 	}
 
-	auto manager = StaticResourceManager(
+	StaticResourceManager(
 		&accumBuffers, &taaPass, &fxaaPass, &smaaEdgePass, &smaaWeightPass, &smaaBlendPass,
 		&ambientPass, &lightingPass, &reflectionPass, &blitPass, &bloomThresholdPass,
 		&bloomBlurHPass, &bloomBlurVPass, &frameUniformBuffers, &lightStorageBuffers,
 		&instanceDataBuffers, &indirectCommandsBuffers, &shadowIndirectBuffers, &jointBuffers,
 		&bindlessSets, &tlas, &tlasBuffer, &tlasScratchBuffer, &clusterGridBuffers,
-		&lightIndexListBuffers, &globalCounterBuffers, &clusterCullingSets);
-	manager.FlipAll();
+		&lightIndexListBuffers, &globalCounterBuffers, &clusterCullingSets)
+		.FlipAll();
 
 	frame_index = (frame_index + 1) % 2;
 	current_cmd = VK_NULL_HANDLE;
