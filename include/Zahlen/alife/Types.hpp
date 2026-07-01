@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #include <Zahlen/Entity.hpp>
@@ -22,7 +21,10 @@ constexpr uint32_t END_OF_LIST = 0xFFFFFFFF;
 enum class State : uint8_t { Offline, Online, Dead };
 enum class TaskType : uint8_t { Idle = 0, GotoHub, Patrol, Hunt };
 enum class EventType : uint8_t { StateChange, Death, NodeReached };
-
+#ifdef __clang__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnested-anon-types"
+#endif
 struct Event {
 	EventType type;
 	Entity subject;
@@ -39,6 +41,9 @@ struct Event {
 		} node_reached;
 	};
 };
+#ifdef __clang__
+#pragma GCC diagnostic pop
+#endif
 
 /**
  * @brief Native Zahlen ECS Component for Artificial Life.

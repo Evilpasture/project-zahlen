@@ -83,31 +83,7 @@ endif()
 # Demo Utilities (Shared PIMPL Window Abstraction)
 # ----------------------------------------------------------------------------
 
-set(DEMO_UTILS_SRCS demo_utils/DemoWindow.hpp)
-
-if(APPLE)
-    list(APPEND DEMO_UTILS_SRCS demo_utils/DemoWindow_mac.mm)
-elseif(WIN32)
-    list(APPEND DEMO_UTILS_SRCS demo_utils/DemoWindow_win32.cpp)
-elseif(UNIX AND NOT APPLE) # Linux/BSD
-    list(APPEND DEMO_UTILS_SRCS demo_utils/DemoWindow_linux.cpp)
-endif()
-
-add_library(zahlen_demo_utils STATIC ${DEMO_UTILS_SRCS})
-target_link_libraries(zahlen_demo_utils PUBLIC zahlen_render Vulkan::Vulkan)
-
-if(APPLE)
-    set_source_files_properties(demo_utils/DemoWindow_mac.mm PROPERTIES LANGUAGE OBJCXX)
-    target_link_libraries(zahlen_demo_utils PUBLIC "-framework Cocoa" "-framework QuartzCore")
-elseif(WIN32)
-    target_link_libraries(zahlen_demo_utils PUBLIC user32.lib kernel32.lib)
-elseif(UNIX AND NOT APPLE)
-    # Find X11
-    find_package(X11 REQUIRED)
-    target_link_libraries(zahlen_demo_utils PUBLIC X11)
-    # Vulkan headers on Linux need to know we are using Xlib
-    target_compile_definitions(zahlen_demo_utils PUBLIC VK_USE_PLATFORM_XLIB_KHR)
-endif()
+add_subdirectory(demo_utils)
 
 # ----------------------------------------------------------------------------
 # HLSL Shader Compilation (using DXC from Vulkan SDK)

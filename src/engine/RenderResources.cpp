@@ -514,4 +514,8 @@ auto RenderContext::BakeProceduralTexture(uint32_t width, uint32_t height, uint3
 	return _impl->BakeProceduralTexture(width, height, variantIdx, scale, randomness, 0.0f);
 }
 
+void RenderContext::ProvokeDeviceLost() {
+	_impl->ProvokeDeviceLostInternal();
+}
+
 } // namespace ZHLN

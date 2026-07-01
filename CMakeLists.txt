@@ -109,7 +109,12 @@ if(ZHLN_DEV_MODE)
     add_compile_definitions(ZHLN_DEV_MODE)
 endif()
 
-set(MI_OVERRIDE ON CACHE BOOL "" FORCE)
+if(APPLE)
+    set(MI_OVERRIDE OFF CACHE BOOL "" FORCE) # Avoid macOS zone interposition bugs
+else()
+    set(MI_OVERRIDE ON CACHE BOOL "" FORCE)  # Stable on Linux and Windows
+endif()
+
 set(MI_BUILD_SHARED OFF CACHE BOOL "" FORCE) # Build static lib for easy embedding
 set(MI_BUILD_OBJECT OFF CACHE BOOL "" FORCE)
 set(MI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -133,6 +138,10 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/extern/VulkanMemoryAllocator SYSTEM)
 add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/SPIRV-Reflect)
 add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/imgui)
 set_target_properties(imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+if(APPLE)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion")
+endif()
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/render)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/threading)
@@ -521,6 +530,7 @@ add_executable(zcook
     src/zcook/Cook.cpp
 )
 target_link_libraries(zcook PRIVATE zahlen_engine)
+target_compile_definitions(zcook PRIVATE JPH_DOUBLE_PRECISION)
 target_include_directories(zcook PRIVATE 
     ${CMAKE_SOURCE_DIR}/extern/cgltf
     ${CMAKE_SOURCE_DIR}/src/zcook
