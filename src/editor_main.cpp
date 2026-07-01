@@ -524,13 +524,18 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 			}
 
 			if (debugLineMat.pipeline == PipelineHandle::Invalid) {
-				PipelineDesc lineDesc = {.vertexShaderData = ::ZHLN::Resource::GetBasicProgram().vertex.data(),
-										 .vertexShaderSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetBasicProgram().vertex.size()),
-										 .fragShaderData = ::ZHLN::Resource::GetBasicProgram().fragment.data(),
-										 .fragShaderSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetBasicProgram().fragment.size()),
-										 .doubleSided = true,
-										 .alphaBlend = true,
-										 .isLineList = true};
+				PipelineDesc lineDesc = {
+					.vertexShaderData =
+						Resource::GetShaderProgram(Resource::ShaderID::Basic).vertex.data(),
+					.vertexShaderSize = static_cast<std::uint32_t>(
+						Resource::GetShaderProgram(Resource::ShaderID::Basic).vertex.size()),
+					.fragShaderData =
+						Resource::GetShaderProgram(Resource::ShaderID::Basic).fragment.data(),
+					.fragShaderSize = static_cast<std::uint32_t>(
+						Resource::GetShaderProgram(Resource::ShaderID::Basic).fragment.size()),
+					.doubleSided = true,
+					.alphaBlend = true,
+					.isLineList = true};
 				debugLineMat = rc.CreateMaterial(lineDesc);
 				debugLineMat.albedoIndex = 1;
 

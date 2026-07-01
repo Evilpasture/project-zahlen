@@ -405,11 +405,12 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 
 	_impl->BuildHangGpuPipeline();
 
-	_impl->CompileShadowPipeline(_impl->ctx.Device(), &::ZHLN::Resource::GetBasicProgram().vertex.data()[0],
-								 static_cast<std::uint32_t>(::ZHLN::Resource::GetBasicProgram().vertex.size()));
-	_impl->CompilePunctualShadowPipeline(_impl->ctx.Device(),
-										 &::ZHLN::Resource::GetPunctualShadowsProgram().vertex.data()[0],
-										 static_cast<std::uint32_t>(::ZHLN::Resource::GetPunctualShadowsProgram().vertex.size()));
+	_impl->CompileShadowPipeline(
+		_impl->ctx.Device(),
+		Resource::ShaderPair{.vertex = Resource::GetShaderProgram(Resource::ShaderID::Basic).vertex,
+							 .fragment = Resource::shadow_frag});
+	_impl->CompilePunctualShadowPipeline(
+		_impl->ctx.Device(), Resource::GetShaderProgram(Resource::ShaderID::PunctualShadows));
 
 	if (!_impl->presentation.Init(_impl->ctx, _impl->allocator, _impl->surface.Get(), width, height,
 								  cfg.vsync)) {
@@ -476,12 +477,10 @@ void RenderContext::Impl::BuildSkinningPipeline() {
 	skinningPass.pipelineLayout =
 		Vk::PipelineLayout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &layout_desc));
 
-	skinningPass.pipeline =
-		LoadAndCreateComputeShader({.path = SHADER_SKINNING_HLSL_CS_PATH,
-									.fallbackCode = ::ZHLN::Resource::GetSkinningCompSpv().data(),
-									.fallbackSize = ::ZHLN::Resource::GetSkinningCompSpv().size(),
-									.entryPoint = "CSMain"},
-								   skinningPass.pipelineLayout.Get());
+	skinningPass.pipeline = LoadAndCreateComputeShader({.path = SHADER_SKINNING_HLSL_CS_PATH,
+														.fallback = Resource::skinning_comp,
+														.entryPoint = "CSMain"},
+													   skinningPass.pipelineLayout.Get());
 
 	if (skinningPass.pipeline.Valid()) {
 		ZHLN::Log("[Shader Reload] GPU Skinning Compute pipeline built successfully.");
@@ -585,9 +584,7 @@ void RenderContext::Impl::InitCullingResources() {
 		.size = kCullingPushSize,
 	};
 
-ZHLN_ShaderDesc cullingShader = {.code = Vk::AsSpirV(::ZHLN::Resource::GetCullingCompSpv().data()),
-					 .size = ::ZHLN::Resource::GetCullingCompSpv().size(),
-									 .entry_point = "CSMain"};
+	auto cullingShader = Vk::CreateShaderDesc(Resource::culling_comp);
 
 	if (!cullingPass.Build(ctx.Device(), cullingLayout.Get(), cullingShader, &cullingPush, 1)) {
 		ZHLN::Panic("FATAL: Failed to compile or build the Compute Culling Pipeline.");
@@ -624,16 +621,13 @@ ZHLN_ShaderDesc cullingShader = {.code = Vk::AsSpirV(::ZHLN::Resource::GetCullin
 		);
 	}
 
-	ZHLN_ShaderDesc bDesc = {.code = Vk::AsSpirV(::ZHLN::Resource::GetClusterBoundsSpv().data()),
-							 .size = ::ZHLN::Resource::GetClusterBoundsSpv().size(),
-							 .entry_point = "CSMain"};
+	auto bDesc =
+		Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::ClusterBounds).vertex);
+	auto cDesc =
+		Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::ClusterCulling).vertex);
 	if (!clusterBoundsPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), bDesc)) {
 		ZHLN::Panic("FATAL: Failed to build Cluster Bounds Pass!");
 	}
-
-	ZHLN_ShaderDesc cDesc = {.code = Vk::AsSpirV(::ZHLN::Resource::GetClusterCullingSpv().data()),
-							 .size = ::ZHLN::Resource::GetClusterCullingSpv().size(),
-							 .entry_point = "CSMain"};
 	if (!clusterCullingPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), cDesc)) {
 		ZHLN::Panic("FATAL: Failed to build Cluster Culling Pass!");
 	}
@@ -711,13 +705,12 @@ void RenderContext::Impl::InitLightingLUTs() {
 
 	iblPayload = Vk::IBLProcessor::Bake(*this, *stagingContext);
 
-	// Pass 4: LTC Area Light LUT Uploads (Direct embedded memory blast)
 	ZHLN::Log("[IBL] Uploading Linearly Transformed Cosines (LTC) LUTs...");
 
 	VkImageCreateInfo ltcInfo = {
 		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-		.pNext = nullptr,
-		.flags = 0,
+		.pNext = {},
+		.flags = {},
 		.imageType = VK_IMAGE_TYPE_2D,
 		.format = VK_FORMAT_R16G16B16A16_SFLOAT,
 		.extent = {.width = 64, .height = 64, .depth = 1},
@@ -732,29 +725,44 @@ void RenderContext::Impl::InitLightingLUTs() {
 		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
 	};
 
-	ltcMatImage = Vk::Image::Create(allocator.Get(), ltcInfo, VMA_MEMORY_USAGE_GPU_ONLY);
-	ltcAmpImage = Vk::Image::Create(allocator.Get(), ltcInfo, VMA_MEMORY_USAGE_GPU_ONLY);
-
-	const size_t matRawSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetLtcMatBin().size()) - 128;
-	const size_t ampRawSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetLtcAmpBin().size()) - 128;
+	using namespace Resource;
+	const size_t matRawSize = ltc_mat.size() - 128;
+	const size_t ampRawSize = ltc_amp.size() - 128;
 
 	Vk::Buffer ltcStaging =
 		Vk::Buffer::Create(allocator.Get(), matRawSize + ampRawSize,
 						   VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 
 	auto mapped = ltcStaging.Map();
-	char* stagePtr = static_cast<char*>(mapped.data);
+	char* const stageBasePtr = static_cast<char*>(mapped.data);
 
-	std::memcpy(stagePtr, ::ZHLN::Resource::GetLtcMatBin().data() + 128, matRawSize);
-	std::memcpy(stagePtr + matRawSize, ::ZHLN::Resource::GetLtcAmpBin().data() + 128, ampRawSize);
+	struct LUTUploadItem {
+		Vk::Image& targetImage;
+		std::span<const uint8_t> rawData;
+		size_t rawSize;
+		size_t bufferOffset;
+	};
 
-	stagingContext->UploadImage2DBuffer(ltcMatImage.Handle(), 64, 64, 1, ltcStaging.Handle(), 0);
-	stagingContext->UploadImage2DBuffer(ltcAmpImage.Handle(), 64, 64, 1, ltcStaging.Handle(),
-										matRawSize);
+	std::array<LUTUploadItem, 2> uploads = {
+		{{.targetImage = ltcMatImage, .rawData = ltc_mat, .rawSize = matRawSize, .bufferOffset = 0},
+		 {.targetImage = ltcAmpImage,
+		  .rawData = ltc_amp,
+		  .rawSize = ampRawSize,
+		  .bufferOffset = matRawSize}}};
+
+	for (const auto& item : uploads) {
+		item.targetImage = Vk::Image::Create(allocator.Get(), ltcInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+
+		std::memcpy(stageBasePtr + item.bufferOffset, item.rawData.data() + 128, item.rawSize);
+
+		stagingContext->UploadImage2DBuffer(item.targetImage.Handle(), 64, 64, 1,
+											ltcStaging.Handle(), item.bufferOffset);
+	}
+
 	stagingContext->AddBuffer(std::move(ltcStaging));
-
 	stagingContext->ExecuteAsync();
 
+	// 4. Create image views safely outside the async execution line
 	ltcMatView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle());
 	ltcAmpView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle());
 }
@@ -839,12 +847,10 @@ void RenderContext::Impl::BuildTAAPipeline() {
 
 	BuildPassHelper(this, taaPass, "TAA",
 					{.path = SHADER_TAA_HLSL_VS_PATH,
-					 .fallbackCode = ::ZHLN::Resource::GetTaaProgram().vertex.data(),
-					 .fallbackSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetTaaProgram().vertex.size()),
+					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::Taa).vertex,
 					 .entryPoint = "VSMain"},
 					{.path = SHADER_TAA_HLSL_PS_PATH,
-					 .fallbackCode = ::ZHLN::Resource::GetTaaProgram().fragment.data(),
-					 .fallbackSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetTaaProgram().fragment.size()),
+					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::Taa).fragment,
 					 .entryPoint = "PSMain"},
 					{VK_FORMAT_R16G16B16A16_SFLOAT}, &taaPush, 1);
 }
@@ -855,12 +861,10 @@ void RenderContext::Impl::BuildFXAAPipeline() {
 
 	BuildPassHelper(this, fxaaPass, "FXAA",
 					{.path = SHADER_FXAA_HLSL_VS_PATH,
-					 .fallbackCode = ::ZHLN::Resource::GetFxaaProgram().vertex.data(),
-					 .fallbackSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetFxaaProgram().vertex.size()),
+					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::Fxaa).vertex,
 					 .entryPoint = "VSMain"},
 					{.path = SHADER_FXAA_HLSL_PS_PATH,
-					 .fallbackCode = ::ZHLN::Resource::GetFxaaProgram().fragment.data(),
-					 .fallbackSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetFxaaProgram().fragment.size()),
+					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::Fxaa).fragment,
 					 .entryPoint = "PSMain"},
 					{VK_FORMAT_R16G16B16A16_SFLOAT}, &fxaaPush, 1);
 }
@@ -873,34 +877,29 @@ void RenderContext::Impl::BuildSMAAPipeline() {
 
 	BuildPassHelper(this, smaaEdgePass, "SMAA Edge Detection",
 					{.path = SHADER_SMAA_EDGE_VS_PATH,
-					 .fallbackCode = ::ZHLN::Resource::GetSmaaEdgeProgram().vertex.data(),
-					 .fallbackSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetSmaaEdgeProgram().vertex.size()),
+					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::SmaaEdge).vertex,
 					 .entryPoint = "SmaaEdgeVS"},
 					{.path = SHADER_SMAA_EDGE_PS_PATH,
-					 .fallbackCode = ::ZHLN::Resource::GetSmaaEdgeProgram().fragment.data(),
-					 .fallbackSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetSmaaEdgeProgram().fragment.size()),
+					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::SmaaEdge).fragment,
 					 .entryPoint = "SmaaEdgePS"},
 					{VK_FORMAT_R8G8_UNORM}, &smaaPush, 1);
 
-	BuildPassHelper(this, smaaWeightPass, "SMAA Blending Weight",
-					{.path = SHADER_SMAA_WEIGHT_VS_PATH,
-					 .fallbackCode = ::ZHLN::Resource::GetSmaaWeightProgram().vertex.data(),
-					 .fallbackSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetSmaaWeightProgram().vertex.size()),
-					 .entryPoint = "SmaaWeightVS"},
-					{.path = SHADER_SMAA_WEIGHT_PS_PATH,
-					 .fallbackCode = ::ZHLN::Resource::GetSmaaWeightProgram().fragment.data(),
-					 .fallbackSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetSmaaWeightProgram().fragment.size()),
-					 .entryPoint = "SmaaWeightPS"},
-					{VK_FORMAT_R8G8B8A8_UNORM}, &smaaPush, 1);
+	BuildPassHelper(
+		this, smaaWeightPass, "SMAA Blending Weight",
+		{.path = SHADER_SMAA_WEIGHT_VS_PATH,
+		 .fallback = Resource::GetShaderProgram(Resource::ShaderID::SmaaWeight).vertex,
+		 .entryPoint = "SmaaWeightVS"},
+		{.path = SHADER_SMAA_WEIGHT_PS_PATH,
+		 .fallback = Resource::GetShaderProgram(Resource::ShaderID::SmaaWeight).fragment,
+		 .entryPoint = "SmaaWeightPS"},
+		{VK_FORMAT_R8G8B8A8_UNORM}, &smaaPush, 1);
 
 	BuildPassHelper(this, smaaBlendPass, "SMAA Neighborhood Blend",
 					{.path = SHADER_SMAA_BLEND_VS_PATH,
-					 .fallbackCode = ::ZHLN::Resource::GetSmaaBlendProgram().vertex.data(),
-					 .fallbackSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetSmaaBlendProgram().vertex.size()),
+					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::SmaaBlend).vertex,
 					 .entryPoint = "SmaaBlendVS"},
 					{.path = SHADER_SMAA_BLEND_PS_PATH,
-					 .fallbackCode = ::ZHLN::Resource::GetSmaaBlendProgram().fragment.data(),
-					 .fallbackSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetSmaaBlendProgram().fragment.size()),
+					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::SmaaBlend).fragment,
 					 .entryPoint = "SmaaBlendPS"},
 					{VK_FORMAT_R16G16B16A16_SFLOAT}, &smaaPush, 1);
 }
@@ -911,12 +910,10 @@ void RenderContext::Impl::BuildAmbientPipeline() {
 
 	BuildPassHelper(this, ambientPass, "Ambient",
 					{.path = SHADER_AMBIENT_HLSL_VS_PATH,
-					 .fallbackCode = ::ZHLN::Resource::GetAmbientProgram().vertex.data(),
-					 .fallbackSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetAmbientProgram().vertex.size()),
+					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::Ambient).vertex,
 					 .entryPoint = "VSMain"},
 					{.path = SHADER_AMBIENT_HLSL_PS_PATH,
-					 .fallbackCode = ::ZHLN::Resource::GetAmbientProgram().fragment.data(),
-					 .fallbackSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetAmbientProgram().fragment.size()),
+					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::Ambient).fragment,
 					 .entryPoint = "PSMain"},
 					{VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush, 1);
 }
@@ -945,20 +942,15 @@ void RenderContext::Impl::BuildLightingPipeline() {
 	const char* psPath = hasRt ? SHADER_LIGHTING_HLSL_PS_PATH : SHADER_LIGHTING_NORT_HLSL_PS_PATH;
 
 	// Declared as const unsigned char* to match ShaderStageSource
-	const unsigned char* vsCode =
-		hasRt ? ::ZHLN::Resource::GetLightingProgram().vertex.data() : ::ZHLN::Resource::GetLightingNortProgram().vertex.data();
-	size_t vsSize =
-		hasRt ? static_cast<std::uint32_t>(::ZHLN::Resource::GetLightingProgram().vertex.size()) : static_cast<std::uint32_t>(::ZHLN::Resource::GetLightingNortProgram().vertex.size());
-	const unsigned char* psCode =
-		hasRt ? ::ZHLN::Resource::GetLightingProgram().fragment.data() : ::ZHLN::Resource::GetLightingNortProgram().fragment.data();
-	size_t psSize =
-		hasRt ? static_cast<std::uint32_t>(::ZHLN::Resource::GetLightingProgram().fragment.size()) : static_cast<std::uint32_t>(::ZHLN::Resource::GetLightingNortProgram().fragment.size());
+	auto vsSpan = hasRt ? Resource::GetShaderProgram(Resource::ShaderID::Lighting).vertex
+						: Resource::GetShaderProgram(Resource::ShaderID::LightingNort).vertex;
+	auto psSpan = hasRt ? Resource::GetShaderProgram(Resource::ShaderID::Lighting).fragment
+						: Resource::GetShaderProgram(Resource::ShaderID::LightingNort).fragment;
 
-	BuildPassVariants(
-		this, lightingPass, "Lighting",
-		{.path = vsPath, .fallbackCode = vsCode, .fallbackSize = vsSize, .entryPoint = "VSMain"},
-		{.path = psPath, .fallbackCode = psCode, .fallbackSize = psSize, .entryPoint = "PSMain"},
-		{VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1);
+	BuildPassVariants(this, lightingPass, "Lighting",
+					  {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
+					  {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"},
+					  {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1);
 }
 
 void RenderContext::Impl::BuildReflectionPipelines() {
@@ -992,33 +984,27 @@ void RenderContext::Impl::BuildReflectionPipelines() {
 		hasRt ? SHADER_REFLECTION_HLSL_PS_PATH : SHADER_REFLECTION_NORT_HLSL_PS_PATH;
 
 	// Declared as const unsigned char* to match ShaderStageSource
-	const unsigned char* vsCode =
-		hasRt ? ::ZHLN::Resource::GetReflectionProgram().vertex.data() : ::ZHLN::Resource::GetReflectionNortProgram().vertex.data();
-	size_t vsSize =
-		hasRt ? static_cast<std::uint32_t>(::ZHLN::Resource::GetReflectionProgram().vertex.size()) : static_cast<std::uint32_t>(::ZHLN::Resource::GetReflectionNortProgram().vertex.size());
-	const unsigned char* psCode =
-		hasRt ? ::ZHLN::Resource::GetReflectionProgram().fragment.data() : ::ZHLN::Resource::GetReflectionNortProgram().fragment.data();
-	size_t psSize =
-		hasRt ? static_cast<std::uint32_t>(::ZHLN::Resource::GetReflectionProgram().fragment.size()) : static_cast<std::uint32_t>(::ZHLN::Resource::GetReflectionNortProgram().fragment.size());
+	auto vsSpan = hasRt ? Resource::GetShaderProgram(Resource::ShaderID::Reflection).vertex
+						: Resource::GetShaderProgram(Resource::ShaderID::ReflectionNort).vertex;
+	auto psSpan = hasRt ? Resource::GetShaderProgram(Resource::ShaderID::Reflection).fragment
+						: Resource::GetShaderProgram(Resource::ShaderID::ReflectionNort).fragment;
 
-	BuildPassVariants(
-		this, reflectionPass, "Reflection",
-		{.path = vsPath, .fallbackCode = vsCode, .fallbackSize = vsSize, .entryPoint = "VSMain"},
-		{.path = psPath, .fallbackCode = psCode, .fallbackSize = psSize, .entryPoint = "PSMain"},
-		{VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1);
+	BuildPassVariants(this, reflectionPass, "Reflection",
+					  {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
+					  {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"},
+					  {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1);
 }
 
 void RenderContext::Impl::BuildBloomPipelines() {
-	BuildPassHelper(this, bloomThresholdPass, "Bloom Threshold",
-					{.path = SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH,
-					 .fallbackCode = ::ZHLN::Resource::GetBloomThresholdProgram().vertex.data(),
-					 .fallbackSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetBloomThresholdProgram().vertex.size()),
-					 .entryPoint = "VSMain"},
-					{.path = SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH,
-					 .fallbackCode = ::ZHLN::Resource::GetBloomThresholdProgram().fragment.data(),
-					 .fallbackSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetBloomThresholdProgram().fragment.size()),
-					 .entryPoint = "PSMain"},
-					{VK_FORMAT_R16G16B16A16_SFLOAT});
+	BuildPassHelper(
+		this, bloomThresholdPass, "Bloom Threshold",
+		{.path = SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH,
+		 .fallback = Resource::GetShaderProgram(Resource::ShaderID::BloomThreshold).vertex,
+		 .entryPoint = "VSMain"},
+		{.path = SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH,
+		 .fallback = Resource::GetShaderProgram(Resource::ShaderID::BloomThreshold).fragment,
+		 .entryPoint = "PSMain"},
+		{VK_FORMAT_R16G16B16A16_SFLOAT});
 
 	VkPushConstantRange blurPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 									.offset = 0,
@@ -1026,23 +1012,19 @@ void RenderContext::Impl::BuildBloomPipelines() {
 
 	BuildPassHelper(this, bloomBlurHPass, "Bloom Blur H",
 					{.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH,
-					 .fallbackCode = ::ZHLN::Resource::GetBloomBlurProgram().vertex.data(),
-					 .fallbackSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetBloomBlurProgram().vertex.size()),
+					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::BloomBlur).vertex,
 					 .entryPoint = "VSMain"},
 					{.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH,
-					 .fallbackCode = ::ZHLN::Resource::GetBloomBlurProgram().fragment.data(),
-					 .fallbackSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetBloomBlurProgram().fragment.size()),
+					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::BloomBlur).fragment,
 					 .entryPoint = "PSMain"},
 					{VK_FORMAT_R16G16B16A16_SFLOAT}, &blurPush, 1);
 
 	BuildPassHelper(this, bloomBlurVPass, "Bloom Blur V",
 					{.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH,
-					 .fallbackCode = ::ZHLN::Resource::GetBloomBlurProgram().vertex.data(),
-					 .fallbackSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetBloomBlurProgram().vertex.size()),
+					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::BloomBlur).vertex,
 					 .entryPoint = "VSMain"},
 					{.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH,
-					 .fallbackCode = ::ZHLN::Resource::GetBloomBlurProgram().fragment.data(),
-					 .fallbackSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetBloomBlurProgram().fragment.size()),
+					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::BloomBlur).fragment,
 					 .entryPoint = "PSMain"},
 					{VK_FORMAT_R16G16B16A16_SFLOAT}, &blurPush, 1);
 }
@@ -1056,12 +1038,10 @@ void RenderContext::Impl::BuildBlitPipeline() {
 
 	BuildPassHelper(this, blitPass, "Blit",
 					{.path = SHADER_BLIT_HLSL_VS_PATH,
-					 .fallbackCode = ::ZHLN::Resource::GetBlitProgram().vertex.data(),
-					 .fallbackSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetBlitProgram().vertex.size()),
+					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::Blit).vertex,
 					 .entryPoint = "VSMain"},
 					{.path = SHADER_BLIT_HLSL_PS_PATH,
-					 .fallbackCode = ::ZHLN::Resource::GetBlitProgram().fragment.data(),
-					 .fallbackSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetBlitProgram().fragment.size()),
+					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::Blit).fragment,
 					 .entryPoint = "PSMain"},
 					{presentation.swapchain.Get().format}, &blitPush, 1);
 }
@@ -1161,16 +1141,13 @@ void RenderContext::Impl::SetupUI(GLFWwindow* window) {
 	vkCreateDescriptorPool(ctx.Device(), &pool_info, nullptr, &rawPool);
 	uiPool = Vk::DescriptorPool(ctx.Device(), rawPool);
 
-	auto uiShaders = Vk::ShaderStages::Create(
-		ctx.Device(),
-		Vk::CreateShaderDesc(Vk::AsSpirV(&::ZHLN::Resource::GetUiProgram().vertex.data()[0]), static_cast<std::uint32_t>(::ZHLN::Resource::GetUiProgram().vertex.size())),
-		Vk::CreateShaderDesc(Vk::AsSpirV(&::ZHLN::Resource::GetUiProgram().fragment.data()[0]),
-							 static_cast<std::uint32_t>(::ZHLN::Resource::GetUiProgram().fragment.size())));
+	auto uiShaders =
+		Vk::ShaderStages::Create(ctx.Device(), Resource::GetShaderProgram(Resource::ShaderID::Ui));
 
-	VkPushConstantRange uiPush = {
-		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-		.offset = 0,
-		.size = sizeof(UIObjectConstants)}; // Now sizes dynamically to 80 bytes
+	VkPushConstantRange uiPush = {.stageFlags =
+									  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+								  .offset = 0,
+								  .size = sizeof(UIObjectConstants)};
 	VkDescriptorSetLayout rawLayout = bindlessLayout.Get();
 	ZHLN_PipelineLayoutDesc uiLayoutDesc = {.set_layouts = &rawLayout,
 											.set_layout_count = 1,
@@ -1271,13 +1248,10 @@ void RenderContext::Impl::BuildHangGpuPipeline() {
 	hangGpuPass.pipelineLayout =
 		Vk::PipelineLayout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &pLayoutDesc));
 
-	hangGpuPass.pipeline =
-		LoadAndCreateComputeShader({.path = SHADER_HANG_GPU_HLSL_CS_PATH,
-									.fallbackCode = ::ZHLN::Resource::GetHangGpuCompSpv().data(),
-									.fallbackSize = ::ZHLN::Resource::GetHangGpuCompSpv().size(),
-									.entryPoint = "CSMain"},
-								   hangGpuPass.pipelineLayout.Get());
-
+	hangGpuPass.pipeline = LoadAndCreateComputeShader({.path = SHADER_HANG_GPU_HLSL_CS_PATH,
+													   .fallback = Resource::hang_gpu_comp,
+													   .entryPoint = "CSMain"},
+													  hangGpuPass.pipelineLayout.Get());
 	if (hangGpuPass.pipeline.Valid()) {
 		ZHLN::Log("[Shader Reload] Hang GPU Pipeline built successfully with empty layout.");
 	} else {

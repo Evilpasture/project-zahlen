@@ -16,15 +16,17 @@ namespace ZHLN::AssetFactory {
 
 Material CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend) {
 	PipelineDesc desc;
-	desc.vertexShaderData = ::ZHLN::Resource::GetBasicProgram().vertex.data();
-	desc.vertexShaderSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetBasicProgram().vertex.size());
+	desc.vertexShaderData = Resource::GetShaderProgram(Resource::ShaderID::Basic).vertex.data();
+	desc.vertexShaderSize = static_cast<std::uint32_t>(
+		Resource::GetShaderProgram(Resource::ShaderID::Basic).vertex.size());
 
 	if (alphaBlend) {
-		desc.fragShaderData = ::ZHLN::Resource::GetForwardFragSpv().data();
-		desc.fragShaderSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetForwardFragSpv().size());
+		desc.fragShaderData = Resource::forward_frag.data();
+		desc.fragShaderSize = static_cast<std::uint32_t>(Resource::forward_frag.size());
 	} else {
-		desc.fragShaderData = ::ZHLN::Resource::GetBasicProgram().fragment.data();
-		desc.fragShaderSize = static_cast<std::uint32_t>(::ZHLN::Resource::GetBasicProgram().fragment.size());
+		desc.fragShaderData = Resource::GetShaderProgram(Resource::ShaderID::Basic).fragment.data();
+		desc.fragShaderSize = static_cast<std::uint32_t>(
+			Resource::GetShaderProgram(Resource::ShaderID::Basic).fragment.size());
 	}
 
 	desc.doubleSided = doubleSided;

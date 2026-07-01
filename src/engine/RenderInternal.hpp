@@ -11,6 +11,7 @@
 #include "PresentationContext.hpp"
 #include "RenderCore.hpp"
 #include "RenderTarget.hpp"
+#include "Resources.hpp"
 #include "StagingContext.hpp"
 #include "Vertex.hpp"
 #include "detail/Array.hpp"
@@ -337,8 +338,7 @@ struct NativeMesh {
 
 struct ShaderStageSource {
 	const char* path;
-	const unsigned char* fallbackCode;
-	size_t fallbackSize;
+	std::span<const std::uint8_t> fallback;
 	const char* entryPoint = "main";
 };
 
@@ -619,8 +619,8 @@ struct RenderContext::Impl {
 
 	void InitShadowResources();
 	void InitCullingResources();
-	void CompileShadowPipeline(VkDevice device, const void* shaderData, size_t shaderSize);
-	void CompilePunctualShadowPipeline(VkDevice device, const void* shaderData, size_t shaderSize);
+	void CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
+	void CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
 	void InitBindless();
 	void BuildTAAPipeline();
 	void BuildFXAAPipeline();
@@ -631,6 +631,7 @@ struct RenderContext::Impl {
 	void BuildBlitPipeline();
 	void BuildBloomPipelines();
 	void InitPostProcessing();
+	void extracted();
 	void SetupUI(GLFWwindow* window);
 
 	// Core Vulkan allocation implementation
@@ -848,11 +849,10 @@ inline std::vector<uint32_t> LoadShaderSpv(const std::string& path) noexcept {
 	return buffer;
 }
 
-// Redirects shader source to disk data if available, falling back to embedded bytes
 inline bool LoadShaderData(const ShaderStageSource& src, const void*& outData, size_t& outSize,
 						   std::vector<uint32_t>& diskBuffer) {
-	outData = src.fallbackCode;
-	outSize = src.fallbackSize;
+	outData = src.fallback.data();
+	outSize = src.fallback.size_bytes();
 	if constexpr (isDev) {
 		diskBuffer = LoadShaderSpv(src.path);
 		if (!diskBuffer.empty()) {

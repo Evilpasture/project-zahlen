@@ -12,15 +12,9 @@
 
 namespace ZHLN {
 
-// Define CompileShadowPipeline here so it compiles with vertex reflection visible
-void RenderContext::Impl::CompileShadowPipeline(VkDevice device, const void* shaderData,
-												size_t shaderSize) {
-	auto v_desc = Vk::CreateShaderDesc(Vk::AsSpirV(shaderData), shaderSize);
-	ZHLN_ShaderDesc f_desc = {.code = Vk::AsSpirV(::ZHLN::Resource::GetShadowFragSpv().data()),
-							  .size = ::ZHLN::Resource::GetShadowFragSpv().size(),
-							  .entry_point = nullptr}; // Allow SPIR-V reflection to find "PSShadow"
-
-	auto shaders = Vk::ShaderStages::Create(device, v_desc, f_desc);
+void RenderContext::Impl::CompileShadowPipeline(VkDevice device,
+												const Resource::ShaderPair& shaderData) {
+	auto shaders = Vk::ShaderStages::Create(device, shaderData, "VSMain", "PSShadow");
 
 	shadowPipelineLayout =
 		Vk::PipelineLayoutBuilder(device)
@@ -32,16 +26,15 @@ void RenderContext::Impl::CompileShadowPipeline(VkDevice device, const void* sha
 	shadowPipeline = Vk::PipelineBuilder{}
 						 .Shaders(shaders)
 						 .Layout(shadowPipelineLayout.Get())
-						 .DepthOnly() // Consumes Builder<1, true> -> Returns Builder<0, true>
+						 .DepthOnly()
 						 .DepthFormat(VK_FORMAT_D32_SFLOAT)
 						 .CullNone()
 						 .Build(device);
 }
 
-void RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const void* shaderData,
-														size_t shaderSize) {
-	auto v_desc = Vk::CreateShaderDesc(Vk::AsSpirV(shaderData), shaderSize);
-	auto shaders = Vk::ShaderStages::Create(device, v_desc, {}); // Depth-only, no fragment shader!
+void RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device,
+														const Resource::ShaderPair& shaderData) {
+	auto shaders = Vk::ShaderStages::Create(device, shaderData);
 
 	punctualShadowPipelineLayout =
 		Vk::PipelineLayoutBuilder(device)
@@ -49,14 +42,13 @@ void RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const v
 			.AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT, sizeof(uint32_t))
 			.Build();
 
-	punctualShadowPipeline =
-		Vk::PipelineBuilder{}
-			.Shaders(shaders)
-			.Layout(punctualShadowPipelineLayout.Get())
-			.DepthOnly()
-			.DepthFormat(VK_FORMAT_D32_SFLOAT)
-			.CullNone() // Windings can flip depending on cubemap faces; CullNone ensures no gaps
-			.Build(device);
+	punctualShadowPipeline = Vk::PipelineBuilder{}
+								 .Shaders(shaders)
+								 .Layout(punctualShadowPipelineLayout.Get())
+								 .DepthOnly()
+								 .DepthFormat(VK_FORMAT_D32_SFLOAT)
+								 .CullNone()
+								 .Build(device);
 }
 
 auto RenderContext::GetRendererName() const -> const char* {

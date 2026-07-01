@@ -24,8 +24,7 @@ void RenderContext::Impl::BuildProceduralBakePipeline() {
 	std::vector<uint32_t> disk_cs;
 
 	LoadShaderData({.path = SHADER_PROCEDURAL_BAKE_CS_PATH,
-					.fallbackCode = ::ZHLN::Resource::GetProceduralBakeCompSpv().data(),
-					.fallbackSize = ::ZHLN::Resource::GetProceduralBakeCompSpv().size(),
+					.fallback = Resource::procedural_bake_comp,
 					.entryPoint = "CSMain"},
 				   cs_code, cs_size, disk_cs);
 
