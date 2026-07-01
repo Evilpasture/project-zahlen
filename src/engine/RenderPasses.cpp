@@ -5,6 +5,7 @@
 #include "ParallelDraw.hpp"
 #include "RenderInternal.hpp"
 #include "RenderParams.hpp"
+#include "Zahlen/Camera.hpp"
 #include "Zahlen/Math3D.hpp"
 #include "backends/imgui_impl_vulkan.h"
 #include "imgui.h"
@@ -212,126 +213,187 @@ void ExecutePass(const FrameRecorder& recorder, const ZHLN::Array<GroupRange>& g
 namespace Passes {
 
 void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
-	RenderDirectionalShadows(recorder);
-	RenderPunctualShadows(recorder);
-}
-
-void ShadowPass::RenderDirectionalShadows(const FrameRecorder& recorder) const noexcept {
 	VkCommandBuffer cmd = recorder.cmd;
 	auto& ctx = recorder.ctx;
 
-	Profiler::ScopedGpuProfile<Stages::ShadowPass, FrameProfiler> timer(cmd, recorder.frameIndex,
-																		ctx.gpuProfiler);
-
-	auto ExecuteCascadePass = [&](uint32_t cascade, auto&& recordFn) {
-		Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> cascadeLayerImage = {
-			.handle = ctx.shadowMap.image.Handle(),
-			.view = ctx.shadowCascadeViews[cascade].Get(),
-			.extent = ctx.shadowMap.extent,
-			.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
-
-		auto [cascade_att, scope] =
-			Vk::ScopedBarrier<Vk::ShaderReadState, Vk::DepthAttachmentState>(
-				cmd, cascadeLayerImage, VK_IMAGE_ASPECT_DEPTH_BIT);
-
-		Vk::DynamicPass(cascadeLayerImage.extent)
-			.AddDepth(cascade_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-					  kShadowClearDepth)
-			.Execute(cmd, std::forward<decltype(recordFn)>(recordFn));
-	};
-
-	for (uint32_t cascade = 0; cascade < RenderContext::Impl::NUM_CASCADES; ++cascade) {
-		ExecuteCascadePass(cascade, [&]() {
-			// Highly abstracted, type-safe, and 100% free of raw Vulkan calls!
-			Vk::DrawBindlessBatch(
-				cmd, ctx.shadowPipeline, ctx.shadowPipelineLayout.Get(), recorder.bindlessSet,
-				VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, [&](auto draw) {
-					for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
-						const auto& drawCmd = ctx.drawQueue[i];
-						if (!IsVisibleIn(drawCmd.flags, RenderPassType::Shadow) ||
-							IsForwardOnly(drawCmd.instanceData.flags)) {
-							continue;
-						}
-
-						const ObjectConstants pushConstants = {.instanceId = i,
-															   .isShadowPass = cascade + 1};
-
-						uint32_t vertexCount = drawCmd.instanceData.iboAddress != 0
-												   ? drawCmd.instanceData.indexCount
-												   : drawCmd.instanceData.vertexCount;
-
-						draw(vertexCount, i, pushConstants);
-					}
-				});
-		});
-	}
-}
-
-void ShadowPass::RenderPunctualShadows(const FrameRecorder& recorder) const noexcept {
-	VkCommandBuffer cmd = recorder.cmd;
-	auto& ctx = recorder.ctx;
-
-	if (!ctx.punctualShadowPipeline.Valid() || ctx.punctualShadowViews.empty()) {
-		return;
+	// 1. Initialize frustums for all 4 cascades on the stack using existing SIMD structures
+	std::array<Frustum, RenderContext::Impl::NUM_CASCADES> cascadeFrustums{};
+	for (uint32_t c = 0; c < RenderContext::Impl::NUM_CASCADES; ++c) {
+		cascadeFrustums[c].Update(ctx.currentUniforms.lightSpaceMatrices[c]);
 	}
 
-	auto [atlas_att, scope] = Vk::ScopedBarrier<Vk::ShaderReadState, Vk::DepthAttachmentState>(
-		cmd, ctx.shadowAtlas, VK_IMAGE_ASPECT_DEPTH_BIT);
+	// 2. Map our double-buffered shadow indirect command buffer (CPU_TO_GPU memory)
+	auto mapped = ctx.shadowIndirectBuffers[recorder.frameIndex].Map();
+	auto* indirectCmdsBase = static_cast<VkDrawIndirectCommand*>(mapped.data);
 
-	auto ExecutePunctualPass =
-		[&](const Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>& subViewImage,
-			auto&& recordFn) {
-			Vk::DynamicPass(subViewImage.extent)
-				.ViewMask(kCubemapFaceMask)
-				.AddDepth(subViewImage, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+	// Track write-pointers (offsets) for all 8 potential shadow passes
+	// [0..3] are Cascades, [4..7] are Punctual Lights
+	std::array<uint32_t, 8> passWriteOffsets{};
+
+	for (uint32_t c = 0; c < 4; ++c) {
+		passWriteOffsets[c] = c * kGpuCullingMaxInstances;
+	}
+	for (uint32_t l = 0; l < 4; ++l) {
+		passWriteOffsets[4 + l] = (4 + l) * kGpuCullingMaxInstances;
+	}
+
+	// Track actual draw counts for each pass
+	std::array<uint32_t, 8> passDrawCounts = {0, 0, 0, 0, 0, 0, 0, 0};
+
+	// 3. SINGLE CACHE-COHERENT MEMORY SWEEP (O(N))
+	for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
+		const auto& drawCmd = ctx.drawQueue[i];
+
+		// Fast skip if the mesh is not a shadow caster or is forward-only
+		if (!IsVisibleIn(drawCmd.flags, RenderPassType::Shadow) ||
+			IsForwardOnly(drawCmd.instanceData.flags)) {
+			continue;
+		}
+
+		uint32_t vertexCount = drawCmd.instanceData.iboAddress != 0
+								   ? drawCmd.instanceData.indexCount
+								   : drawCmd.instanceData.vertexCount;
+
+		JPH::Vec3 meshPos = drawCmd.instanceData.world.GetTranslation();
+		float radius = drawCmd.instanceData.cullRadius;
+
+		// --- Check Cascades (0 to 3) ---
+		for (uint32_t c = 0; c < RenderContext::Impl::NUM_CASCADES; ++c) {
+			if (cascadeFrustums[c].IsSphereVisible(meshPos, radius)) {
+				uint32_t writeIdx = passWriteOffsets[c] + passDrawCounts[c];
+				indirectCmdsBase[writeIdx] = {.vertexCount = vertexCount,
+											  .instanceCount = 1,
+											  .firstVertex = 0,
+											  .firstInstance = i};
+				passDrawCounts[c]++;
+			}
+		}
+
+		// --- Check Punctual Lights (4 to 7) ---
+		for (const auto& light : ctx.mappedLights) {
+			if (light.shadowLayer < 0 || light.type != LightType::Point) {
+				continue;
+			}
+
+			// Map the shadowLayer directly to our [4..7] slots
+			uint32_t slotIdx = 4 + light.shadowLayer;
+			ZHLN::Assert(passDrawCounts[slotIdx] < kGpuCullingMaxInstances);
+			if (slotIdx >= 8) {
+				continue;
+			}
+
+			JPH::Vec3 lightPos(light.position[0], light.position[1], light.position[2]);
+
+			// Use squared length to avoid the expensive square root calculation
+			float distToLightSq = (meshPos - lightPos).LengthSq();
+			float maxRange = light.range + radius;
+			float maxRangeSq = maxRange * maxRange;
+
+			if (distToLightSq <= maxRangeSq) {
+				uint32_t writeIdx = passWriteOffsets[slotIdx] + passDrawCounts[slotIdx];
+				indirectCmdsBase[writeIdx] = {.vertexCount = vertexCount,
+											  .instanceCount = 1,
+											  .firstVertex = 0,
+											  .firstInstance = i};
+				passDrawCounts[slotIdx]++;
+			}
+		}
+	}
+
+	// 4. DISPATCH DIRECTIONAL SHADOW CASCADES (MDI)
+	{
+		Profiler::ScopedGpuProfile<Stages::ShadowPass, FrameProfiler> timer(
+			cmd, recorder.frameIndex, ctx.gpuProfiler);
+
+		auto ExecuteCascadePass = [&](uint32_t cascade, auto&& recordFn) {
+			Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> cascadeLayerImage = {
+				.handle = ctx.shadowMap.image.Handle(),
+				.view = ctx.shadowCascadeViews[cascade].Get(),
+				.extent = ctx.shadowMap.extent,
+				.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
+
+			auto [cascade_att, scope] =
+				Vk::ScopedBarrier<Vk::ShaderReadState, Vk::DepthAttachmentState>(
+					cmd, cascadeLayerImage, VK_IMAGE_ASPECT_DEPTH_BIT);
+
+			Vk::DynamicPass(cascadeLayerImage.extent)
+				.AddDepth(cascade_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
 						  kShadowClearDepth)
 				.Execute(cmd, std::forward<decltype(recordFn)>(recordFn));
 		};
 
-	for (uint32_t l_idx = 0; l_idx < ctx.mappedLights.size(); ++l_idx) {
-		const auto& light = ctx.mappedLights[l_idx];
-		if (light.shadowLayer < 0 || light.type != LightType::Point) {
-			continue;
+		for (uint32_t cascade = 0; cascade < RenderContext::Impl::NUM_CASCADES; ++cascade) {
+			uint32_t drawCount = passDrawCounts[cascade];
+			if (drawCount == 0) {
+				continue;
+			}
+
+			ExecuteCascadePass(cascade, [&]() {
+				Vk::DrawIndirect(
+					cmd,
+					{.pipeline = ctx.shadowPipeline.Get(),
+					 .layout = ctx.shadowPipelineLayout.Get(),
+					 .set = recorder.bindlessSet,
+					 .argumentBuffer = ctx.shadowIndirectBuffers[recorder.frameIndex].Handle(),
+					 .offset = passWriteOffsets[cascade] * sizeof(VkDrawIndirectCommand),
+					 .drawCount = drawCount,
+					 .stride = sizeof(VkDrawIndirectCommand)},
+					ObjectConstants{.instanceId = kGpuCullingSentinel, .isShadowPass = cascade + 1},
+					VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+			});
 		}
+	}
 
-		Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> subViewImage = {
-			.handle = ctx.shadowAtlas.image.Handle(),
-			.view = ctx.punctualShadowViews[light.shadowLayer].Get(),
-			.extent = {.width = 1024, .height = 1024},
-			.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
+	// 5. DISPATCH PUNCTUAL SHADOWS (MDI)
+	if (ctx.punctualShadowPipeline.Valid() && !ctx.punctualShadowViews.empty()) {
+		auto [atlas_att, scope] = Vk::ScopedBarrier<Vk::ShaderReadState, Vk::DepthAttachmentState>(
+			cmd, ctx.shadowAtlas, VK_IMAGE_ASPECT_DEPTH_BIT);
 
-		ExecutePunctualPass(subViewImage, [&]() {
-			// Identical abstraction used for Punctual Spot / Point lights
-			Vk::DrawBindlessBatch(
-				cmd, ctx.punctualShadowPipeline, ctx.punctualShadowPipelineLayout.Get(),
-				recorder.bindlessSet, VK_SHADER_STAGE_VERTEX_BIT, [&](auto draw) {
-					for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
-						const auto& drawCmd = ctx.drawQueue[i];
-						if (IsForwardOnly(drawCmd.instanceData.flags)) {
-							continue;
-						}
+		auto ExecutePunctualPass =
+			[&](const Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>& subViewImage,
+				auto&& recordFn) {
+				Vk::DynamicPass(subViewImage.extent)
+					.ViewMask(kCubemapFaceMask)
+					.AddDepth(subViewImage, VK_ATTACHMENT_LOAD_OP_CLEAR,
+							  VK_ATTACHMENT_STORE_OP_STORE, kShadowClearDepth)
+					.Execute(cmd, std::forward<decltype(recordFn)>(recordFn));
+			};
 
-						JPH::Vec3 meshPos = drawCmd.instanceData.world.GetTranslation();
-						JPH::Vec3 lightPos(light.position[0], light.position[1], light.position[2]);
-						float distToLight = (meshPos - lightPos).Length();
-						float maxRange = light.range + drawCmd.instanceData.cullRadius;
+		for (uint32_t l_idx = 0; l_idx < ctx.mappedLights.size(); ++l_idx) {
+			const auto& light = ctx.mappedLights[l_idx];
+			if (light.shadowLayer < 0 || light.type != LightType::Point) {
+				continue;
+			}
 
-						if (distToLight > maxRange) {
-							continue;
-						}
+			uint32_t slotIdx = 4 + light.shadowLayer;
+			uint32_t drawCount = passDrawCounts[slotIdx];
+			if (drawCount == 0) {
+				continue;
+			}
 
-						const struct PunctualPush {
-							uint32_t lightIdx;
-						} pc = {l_idx};
+			Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> subViewImage = {
+				.handle = ctx.shadowAtlas.image.Handle(),
+				.view = ctx.punctualShadowViews[light.shadowLayer].Get(),
+				.extent = {.width = 1024, .height = 1024},
+				.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
 
-						uint32_t vertexCount = drawCmd.instanceData.iboAddress != 0
-												   ? drawCmd.instanceData.indexCount
-												   : drawCmd.instanceData.vertexCount;
+			ExecutePunctualPass(subViewImage, [&]() {
+				const struct PunctualPush {
+					uint32_t lightIdx;
+				} pc = {l_idx};
 
-						draw(vertexCount, i, pc);
-					}
-				});
-		});
+				Vk::DrawIndirect(
+					cmd,
+					{.pipeline = ctx.punctualShadowPipeline.Get(),
+					 .layout = ctx.punctualShadowPipelineLayout.Get(),
+					 .set = recorder.bindlessSet,
+					 .argumentBuffer = ctx.shadowIndirectBuffers[recorder.frameIndex].Handle(),
+					 .offset = passWriteOffsets[slotIdx] * sizeof(VkDrawIndirectCommand),
+					 .drawCount = drawCount,
+					 .stride = sizeof(VkDrawIndirectCommand)},
+					pc, VK_SHADER_STAGE_VERTEX_BIT);
+			});
+		}
 	}
 }
 

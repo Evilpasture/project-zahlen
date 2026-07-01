@@ -554,6 +554,10 @@ void RenderContext::Impl::InitShadowResources() {
 		lightStorageBuffers[i] =
 			Vk::Buffer::Create(allocator.Get(), sizeof(GPULight) * 128,
 							   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+		shadowIndirectBuffers[i] = Vk::Buffer::Create(
+			allocator.Get(), sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances * 8,
+			VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 	}
 }
 

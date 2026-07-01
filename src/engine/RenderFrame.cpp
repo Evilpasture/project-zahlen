@@ -280,9 +280,9 @@ ZHLN_FrameResult RenderContext::Impl::SubmitFrame() {
 		&accumBuffers, &taaPass, &fxaaPass, &smaaEdgePass, &smaaWeightPass, &smaaBlendPass,
 		&ambientPass, &lightingPass, &reflectionPass, &blitPass, &bloomThresholdPass,
 		&bloomBlurHPass, &bloomBlurVPass, &frameUniformBuffers, &lightStorageBuffers,
-		&instanceDataBuffers, &indirectCommandsBuffers, &jointBuffers, &bindlessSets, &tlas,
-		&tlasBuffer, &tlasScratchBuffer, &clusterGridBuffers, &lightIndexListBuffers,
-		&globalCounterBuffers, &clusterCullingSets);
+		&instanceDataBuffers, &indirectCommandsBuffers, &shadowIndirectBuffers, &jointBuffers,
+		&bindlessSets, &tlas, &tlasBuffer, &tlasScratchBuffer, &clusterGridBuffers,
+		&lightIndexListBuffers, &globalCounterBuffers, &clusterCullingSets);
 	manager.FlipAll();
 
 	frame_index = (frame_index + 1) % 2;

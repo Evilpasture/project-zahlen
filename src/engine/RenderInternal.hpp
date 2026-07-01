@@ -543,6 +543,7 @@ struct RenderContext::Impl {
 
 	ZHLN::DoubleBuffered<Vk::Buffer> instanceDataBuffers;
 	ZHLN::DoubleBuffered<Vk::Buffer> indirectCommandsBuffers;
+	ZHLN::DoubleBuffered<Vk::Buffer> shadowIndirectBuffers;
 	ZHLN::DoubleBuffered<Vk::Buffer> jointBuffers; // Global Joint Transforms SSBO
 	Vk::TypedPipeline<0, true> shadowPipeline;
 	Vk::PipelineLayout shadowPipelineLayout;
@@ -766,12 +767,6 @@ struct ShadowPass {
 	static constexpr uint32_t kCubemapFaceMask = 0x3F;
 	static constexpr float kShadowClearDepth = 1.0f;
 	void Execute(const FrameRecorder& recorder) const noexcept;
-
-  private:
-	void extracted(const FrameRecorder& recorder, VkCommandBuffer& cmd,
-				   RenderContext::Impl& ctx) const;
-	void RenderDirectionalShadows(const FrameRecorder& recorder) const noexcept;
-	void RenderPunctualShadows(const FrameRecorder& recorder) const noexcept;
 };
 
 struct MainPass {
