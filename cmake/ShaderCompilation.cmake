@@ -43,7 +43,8 @@ function(compile_shaders TARGET_NAME)
             string(MAKE_C_IDENTIFIER "SHADER_${FILE_NAME}_${EXT}_PATH" MACRO_NAME)
             string(TOUPPER ${MACRO_NAME} MACRO_NAME)
 
-            target_compile_definitions(${TARGET_NAME} PRIVATE ${MACRO_NAME}="${OUTPUT_SPV}")
+            # --- FIXED: Propagation to dependent targets ---
+            target_compile_definitions(${TARGET_NAME} PUBLIC ${MACRO_NAME}="${OUTPUT_SPV}")
         endforeach()
     endforeach()
 
@@ -93,13 +94,13 @@ compile_shaders(zahlen_engine
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/culling.hlsl" CSMain cs_6_0 CULLING_COMP_SPV)
 add_custom_target(zahlen_engine_culling_shader ALL DEPENDS ${CULLING_COMP_SPV})
 add_dependencies(zahlen_engine zahlen_engine_culling_shader)
-target_compile_definitions(zahlen_engine PRIVATE SHADER_CULLING_HLSL_CS_PATH="${CULLING_COMP_SPV}")
+target_compile_definitions(zahlen_engine PUBLIC SHADER_CULLING_HLSL_CS_PATH="${CULLING_COMP_SPV}")
 list(APPEND ALL_GENERATED_SPVS ${CULLING_COMP_SPV})
 
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/basic.hlsl" PSShadow ps_6_0 SHADOW_FRAG_SPV)
 add_custom_target(zahlen_engine_shadow_shader ALL DEPENDS ${SHADOW_FRAG_SPV})
 add_dependencies(zahlen_engine zahlen_engine_shadow_shader)
-target_compile_definitions(zahlen_engine PRIVATE SHADOW_HLSL_PS_PATH="${SHADOW_FRAG_SPV}")
+target_compile_definitions(zahlen_engine PUBLIC SHADER_SHADOW_HLSL_PS_PATH="${SHADOW_FRAG_SPV}")
 list(APPEND ALL_GENERATED_SPVS ${SHADOW_FRAG_SPV})
 
 # Reflections shaders (RT vs NoRT)
@@ -107,14 +108,14 @@ compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/reflection.hlsl" VSMain vs_6
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/reflection.hlsl" PSMain ps_6_5 REFLECTION_PS_SPV)
 add_custom_target(zahlen_engine_reflection_shader ALL DEPENDS ${REFLECTION_VS_SPV} ${REFLECTION_PS_SPV})
 add_dependencies(zahlen_engine zahlen_engine_reflection_shader)
-target_compile_definitions(zahlen_engine PRIVATE SHADER_REFLECTION_HLSL_VS_PATH="${REFLECTION_VS_SPV}" SHADER_REFLECTION_HLSL_PS_PATH="${REFLECTION_PS_SPV}")
+target_compile_definitions(zahlen_engine PUBLIC SHADER_REFLECTION_HLSL_VS_PATH="${REFLECTION_VS_SPV}" SHADER_REFLECTION_HLSL_PS_PATH="${REFLECTION_PS_SPV}")
 list(APPEND ALL_GENERATED_SPVS ${REFLECTION_VS_SPV} ${REFLECTION_PS_SPV})
 
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/reflection.hlsl" VSMain vs_6_5 REFLECTION_NORT_VS_SPV "-DDISABLE_RTR")
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/reflection.hlsl" PSMain ps_6_5 REFLECTION_NORT_PS_SPV "-DDISABLE_RTR")
 add_custom_target(zahlen_engine_reflection_nort_shader ALL DEPENDS ${REFLECTION_NORT_VS_SPV} ${REFLECTION_NORT_PS_SPV})
-add_dependencies(zahlen_engine zahlen_engine_reflection_nort_shader) # FIXED
-target_compile_definitions(zahlen_engine PRIVATE SHADER_REFLECTION_NORT_HLSL_VS_PATH="${REFLECTION_NORT_VS_SPV}" SHADER_REFLECTION_NORT_HLSL_PS_PATH="${REFLECTION_NORT_PS_SPV}")
+add_dependencies(zahlen_engine zahlen_engine_reflection_nort_shader)
+target_compile_definitions(zahlen_engine PUBLIC SHADER_REFLECTION_NORT_HLSL_VS_PATH="${REFLECTION_NORT_VS_SPV}" SHADER_REFLECTION_NORT_HLSL_PS_PATH="${REFLECTION_NORT_PS_SPV}")
 list(APPEND ALL_GENERATED_SPVS ${REFLECTION_NORT_VS_SPV} ${REFLECTION_NORT_PS_SPV})
 
 # Lighting shaders (RT vs NoRT)
@@ -122,15 +123,15 @@ compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/lighting.hlsl" VSMain vs_6_5
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/lighting.hlsl" PSMain ps_6_5 LIGHTING_PS_SPV)
 add_custom_target(zahlen_engine_lighting_shader ALL DEPENDS ${LIGHTING_VS_SPV} ${LIGHTING_PS_SPV})
 add_dependencies(zahlen_engine zahlen_engine_lighting_shader)
-target_compile_definitions(zahlen_engine PRIVATE SHADER_LIGHTING_HLSL_VS_PATH="${LIGHTING_VS_SPV}" SHADER_LIGHTING_HLSL_PS_PATH="${LIGHTING_PS_SPV}")
+target_compile_definitions(zahlen_engine PUBLIC SHADER_LIGHTING_HLSL_VS_PATH="${LIGHTING_VS_SPV}" SHADER_LIGHTING_HLSL_PS_PATH="${LIGHTING_PS_SPV}")
 list(APPEND ALL_GENERATED_SPVS ${LIGHTING_VS_SPV} ${LIGHTING_PS_SPV})
 
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/lighting.hlsl" VSMain vs_6_5 LIGHTING_NORT_VS_SPV "-DDISABLE_RTR")
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/lighting.hlsl" PSMain ps_6_5 LIGHTING_NORT_PS_SPV "-DDISABLE_RTR")
 add_custom_target(zahlen_engine_lighting_nort_shader ALL DEPENDS ${LIGHTING_NORT_VS_SPV} ${LIGHTING_NORT_PS_SPV})
-add_dependencies(zahlen_engine zahlen_engine_lighting_nort_shader) # FIXED
-target_compile_definitions(zahlen_engine PRIVATE SHADER_LIGHTING_NORT_HLSL_VS_PATH="${LIGHTING_NORT_VS_SPV}" SHADER_LIGHTING_NORT_HLSL_PS_PATH="${LIGHTING_NORT_PS_SPV}")
-list(APPEND ALL_GENERATED_SPVS ${LIGHTING_NORT_VA_SPV} ${LIGHTING_NORT_PS_SPV})
+add_dependencies(zahlen_engine zahlen_engine_lighting_nort_shader)
+target_compile_definitions(zahlen_engine PUBLIC SHADER_LIGHTING_NORT_HLSL_VS_PATH="${LIGHTING_NORT_VS_SPV}" SHADER_LIGHTING_NORT_HLSL_PS_PATH="${LIGHTING_NORT_PS_SPV}")
+list(APPEND ALL_GENERATED_SPVS ${LIGHTING_NORT_VS_SPV} ${LIGHTING_NORT_PS_SPV})
 
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa_wrap.hlsl" SmaaEdgeVS vs_6_5 SMAA_EDGE_VS_SPV "-DEDGE_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=0")
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa_wrap.hlsl" SmaaEdgePS ps_6_5 SMAA_EDGE_PS_SPV "-DEDGE_PASS -DSMAA_INCLUDE_VS=0 -DSMAA_INCLUDE_PS=1")
@@ -144,13 +145,13 @@ compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/smaa_wrap.hlsl" SmaaBlendPS 
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/cluster_bounds.hlsl" CSMain cs_6_0 CLUSTER_BOUNDS_SPV)
 add_custom_target(zahlen_engine_cluster_bounds ALL DEPENDS ${CLUSTER_BOUNDS_SPV})
 add_dependencies(zahlen_engine zahlen_engine_cluster_bounds)
-target_compile_definitions(zahlen_engine PRIVATE SHADER_CLUSTER_BOUNDS_CS_PATH="${CLUSTER_BOUNDS_SPV}")
+target_compile_definitions(zahlen_engine PUBLIC SHADER_CLUSTER_BOUNDS_CS_PATH="${CLUSTER_BOUNDS_SPV}")
 list(APPEND ALL_GENERATED_SPVS ${CLUSTER_BOUNDS_SPV})
 
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/cluster_culling.hlsl" CSMain cs_6_0 CLUSTER_CULLING_SPV)
 add_custom_target(zahlen_engine_cluster_cull ALL DEPENDS ${CLUSTER_CULLING_SPV})
 add_dependencies(zahlen_engine zahlen_engine_cluster_cull)
-target_compile_definitions(zahlen_engine PRIVATE SHADER_CLUSTER_CULLING_CS_PATH="${CLUSTER_CULLING_SPV}")
+target_compile_definitions(zahlen_engine PUBLIC SHADER_CLUSTER_CULLING_CS_PATH="${CLUSTER_CULLING_SPV}")
 list(APPEND ALL_GENERATED_SPVS ${CLUSTER_CULLING_SPV})
 
 # Create a formal custom target to block parallel-compile race conditions
@@ -164,7 +165,7 @@ add_custom_target(zahlen_engine_smaa_shaders ALL DEPENDS
 )
 add_dependencies(zahlen_engine zahlen_engine_smaa_shaders)
 
-target_compile_definitions(zahlen_engine PRIVATE
+target_compile_definitions(zahlen_engine PUBLIC
     SHADER_SMAA_EDGE_VS_PATH="${SMAA_EDGE_VS_SPV}"
     SHADER_SMAA_EDGE_PS_PATH="${SMAA_EDGE_PS_SPV}"
     SHADER_SMAA_WEIGHT_VS_PATH="${SMAA_WEIGHT_VS_SPV}"
@@ -184,32 +185,31 @@ list(APPEND ALL_GENERATED_SPVS
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/skinning.hlsl" CSMain cs_6_0 SKINNING_COMP_SPV)
 add_custom_target(zahlen_engine_skinning_shader ALL DEPENDS ${SKINNING_COMP_SPV})
 add_dependencies(zahlen_engine zahlen_engine_skinning_shader)
-target_compile_definitions(zahlen_engine PRIVATE SHADER_SKINNING_HLSL_CS_PATH="${SKINNING_COMP_SPV}")
+target_compile_definitions(zahlen_engine PUBLIC SHADER_SKINNING_HLSL_CS_PATH="${SKINNING_COMP_SPV}")
 list(APPEND ALL_GENERATED_SPVS ${SKINNING_COMP_SPV})
 
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/basic.hlsl" PSForward ps_6_0 FORWARD_FRAG_SPV "-DFORWARD_PASS")
 add_custom_target(zahlen_engine_forward_shader ALL DEPENDS ${FORWARD_FRAG_SPV})
 add_dependencies(zahlen_engine zahlen_engine_forward_shader)
-target_compile_definitions(zahlen_engine PRIVATE SHADER_FORWARD_HLSL_PS_PATH="${FORWARD_FRAG_SPV}")
+target_compile_definitions(zahlen_engine PUBLIC SHADER_FORWARD_HLSL_PS_PATH="${FORWARD_FRAG_SPV}")
 list(APPEND ALL_GENERATED_SPVS ${FORWARD_FRAG_SPV})
 
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/hang_gpu.hlsl" CSMain cs_6_0 HANG_GPU_COMP_SPV)
 add_custom_target(zahlen_engine_hang_gpu_shader ALL DEPENDS ${HANG_GPU_COMP_SPV})
 add_dependencies(zahlen_engine zahlen_engine_hang_gpu_shader)
-target_compile_definitions(zahlen_engine PRIVATE SHADER_HANG_GPU_HLSL_CS_PATH="${HANG_GPU_COMP_SPV}")
+target_compile_definitions(zahlen_engine PUBLIC SHADER_HANG_GPU_HLSL_CS_PATH="${HANG_GPU_COMP_SPV}")
 list(APPEND ALL_GENERATED_SPVS ${HANG_GPU_COMP_SPV})
 
 compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/procedural_bake.hlsl" CSMain cs_6_0 PROCEDURAL_BAKE_CS_SPV)
 add_custom_target(zahlen_engine_procedural_bake ALL DEPENDS ${PROCEDURAL_BAKE_CS_SPV})
 add_dependencies(zahlen_engine zahlen_engine_procedural_bake)
-target_compile_definitions(zahlen_engine PRIVATE SHADER_PROCEDURAL_BAKE_CS_PATH="${PROCEDURAL_BAKE_CS_SPV}")
+target_compile_definitions(zahlen_engine PUBLIC SHADER_PROCEDURAL_BAKE_CS_PATH="${PROCEDURAL_BAKE_CS_SPV}")
 list(APPEND ALL_GENERATED_SPVS ${PROCEDURAL_BAKE_CS_SPV})
 
-# Resolve source file target boundaries with absolute paths
+# Set the target-wide object dependency rule (fallback for non-Ninja generators)
 set(ENGINE_SOURCES_ABS "")
 foreach(src IN LISTS ENGINE_SOURCES)
     get_filename_component(src_abs "${src}" ABSOLUTE)
     list(APPEND ENGINE_SOURCES_ABS "${src_abs}")
 endforeach()
-
 set_source_files_properties(${ENGINE_SOURCES_ABS} PROPERTIES OBJECT_DEPENDS "${ALL_GENERATED_SPVS}")

@@ -141,7 +141,7 @@ inline constexpr std::uint8_t culling_comp_raw[] = {
 };
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
 inline constexpr std::uint8_t shadow_frag_raw[] = {
-#embed SHADOW_HLSL_PS_PATH
+#embed SHADER_SHADOW_HLSL_PS_PATH
 };
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
 inline constexpr std::uint8_t cluster_bounds_raw[] = {
@@ -183,66 +183,94 @@ inline constexpr std::uint8_t ltc_amp_raw[] = {
 
 #pragma clang diagnostic pop
 
-// Expose safe, modern constexpr std::array structures globally
-inline constexpr auto basic_vs = std::to_array(basic_vs_raw);
-inline constexpr auto basic_ps = std::to_array(basic_ps_raw);
+// Expose safe, modern constexpr std::span structures globally
+inline constexpr std::span<const std::uint8_t> basic_vs{basic_vs_raw, sizeof(basic_vs_raw)};
+inline constexpr std::span<const std::uint8_t> basic_ps{basic_ps_raw, sizeof(basic_ps_raw)};
 
-inline constexpr auto blit_vs = std::to_array(blit_vs_raw);
-inline constexpr auto blit_ps = std::to_array(blit_ps_raw);
+inline constexpr std::span<const std::uint8_t> blit_vs{blit_vs_raw, sizeof(blit_vs_raw)};
+inline constexpr std::span<const std::uint8_t> blit_ps{blit_ps_raw, sizeof(blit_ps_raw)};
 
-inline constexpr auto taa_vs = std::to_array(taa_vs_raw);
-inline constexpr auto taa_ps = std::to_array(taa_ps_raw);
+inline constexpr std::span<const std::uint8_t> taa_vs{taa_vs_raw, sizeof(taa_vs_raw)};
+inline constexpr std::span<const std::uint8_t> taa_ps{taa_ps_raw, sizeof(taa_ps_raw)};
 
-inline constexpr auto ui_vs = std::to_array(ui_vs_raw);
-inline constexpr auto ui_ps = std::to_array(ui_ps_raw);
+inline constexpr std::span<const std::uint8_t> ui_vs{ui_vs_raw, sizeof(ui_vs_raw)};
+inline constexpr std::span<const std::uint8_t> ui_ps{ui_ps_raw, sizeof(ui_ps_raw)};
 
-inline constexpr auto ambient_vs = std::to_array(ambient_vs_raw);
-inline constexpr auto ambient_ps = std::to_array(ambient_ps_raw);
+inline constexpr std::span<const std::uint8_t> ambient_vs{ambient_vs_raw, sizeof(ambient_vs_raw)};
+inline constexpr std::span<const std::uint8_t> ambient_ps{ambient_ps_raw, sizeof(ambient_ps_raw)};
 
-inline constexpr auto lighting_vs = std::to_array(lighting_vs_raw);
-inline constexpr auto lighting_ps = std::to_array(lighting_ps_raw);
+inline constexpr std::span<const std::uint8_t> lighting_vs{lighting_vs_raw,
+														   sizeof(lighting_vs_raw)};
+inline constexpr std::span<const std::uint8_t> lighting_ps{lighting_ps_raw,
+														   sizeof(lighting_ps_raw)};
 
-inline constexpr auto reflection_vs = std::to_array(reflection_vs_raw);
-inline constexpr auto reflection_ps = std::to_array(reflection_ps_raw);
+inline constexpr std::span<const std::uint8_t> reflection_vs{reflection_vs_raw,
+															 sizeof(reflection_vs_raw)};
+inline constexpr std::span<const std::uint8_t> reflection_ps{reflection_ps_raw,
+															 sizeof(reflection_ps_raw)};
 
-inline constexpr auto reflection_nort_vs = std::to_array(reflection_nort_vs_raw);
-inline constexpr auto reflection_nort_ps = std::to_array(reflection_nort_ps_raw);
+inline constexpr std::span<const std::uint8_t> reflection_nort_vs{reflection_nort_vs_raw,
+																  sizeof(reflection_nort_vs_raw)};
+inline constexpr std::span<const std::uint8_t> reflection_nort_ps{reflection_nort_ps_raw,
+																  sizeof(reflection_nort_ps_raw)};
 
-inline constexpr auto fxaa_vs = std::to_array(fxaa_vs_raw);
-inline constexpr auto fxaa_ps = std::to_array(fxaa_ps_raw);
+inline constexpr std::span<const std::uint8_t> fxaa_vs{fxaa_vs_raw, sizeof(fxaa_vs_raw)};
+inline constexpr std::span<const std::uint8_t> fxaa_ps{fxaa_ps_raw, sizeof(fxaa_ps_raw)};
 
-inline constexpr auto smaa_edge_vs = std::to_array(smaa_edge_vs_raw);
-inline constexpr auto smaa_edge_ps = std::to_array(smaa_edge_ps_raw);
+inline constexpr std::span<const std::uint8_t> smaa_edge_vs{smaa_edge_vs_raw,
+															sizeof(smaa_edge_vs_raw)};
+inline constexpr std::span<const std::uint8_t> smaa_edge_ps{smaa_edge_ps_raw,
+															sizeof(smaa_edge_ps_raw)};
 
-inline constexpr auto smaa_weight_vs = std::to_array(smaa_weight_vs_raw);
-inline constexpr auto smaa_weight_ps = std::to_array(smaa_weight_ps_raw);
+inline constexpr std::span<const std::uint8_t> smaa_weight_vs{smaa_weight_vs_raw,
+															  sizeof(smaa_weight_vs_raw)};
+inline constexpr std::span<const std::uint8_t> smaa_weight_ps{smaa_weight_ps_raw,
+															  sizeof(smaa_weight_ps_raw)};
 
-inline constexpr auto smaa_blend_vs = std::to_array(smaa_blend_vs_raw);
-inline constexpr auto smaa_blend_ps = std::to_array(smaa_blend_ps_raw);
+inline constexpr std::span<const std::uint8_t> smaa_blend_vs{smaa_blend_vs_raw,
+															 sizeof(smaa_blend_vs_raw)};
+inline constexpr std::span<const std::uint8_t> smaa_blend_ps{smaa_blend_ps_raw,
+															 sizeof(smaa_blend_ps_raw)};
 
-inline constexpr auto bloom_threshold_vs = std::to_array(bloom_threshold_vs_raw);
-inline constexpr auto bloom_threshold_ps = std::to_array(bloom_threshold_ps_raw);
+inline constexpr std::span<const std::uint8_t> bloom_threshold_vs{bloom_threshold_vs_raw,
+																  sizeof(bloom_threshold_vs_raw)};
+inline constexpr std::span<const std::uint8_t> bloom_threshold_ps{bloom_threshold_ps_raw,
+																  sizeof(bloom_threshold_ps_raw)};
 
-inline constexpr auto bloom_blur_vs = std::to_array(bloom_blur_vs_raw);
-inline constexpr auto bloom_blur_ps = std::to_array(bloom_blur_ps_raw);
+inline constexpr std::span<const std::uint8_t> bloom_blur_vs{bloom_blur_vs_raw,
+															 sizeof(bloom_blur_vs_raw)};
+inline constexpr std::span<const std::uint8_t> bloom_blur_ps{bloom_blur_ps_raw,
+															 sizeof(bloom_blur_ps_raw)};
 
-inline constexpr auto punctual_shadows_vs = std::to_array(punctual_shadows_vs_raw);
-inline constexpr auto punctual_shadows_ps = std::to_array(punctual_shadows_ps_raw);
+inline constexpr std::span<const std::uint8_t> punctual_shadows_vs{punctual_shadows_vs_raw,
+																   sizeof(punctual_shadows_vs_raw)};
+inline constexpr std::span<const std::uint8_t> punctual_shadows_ps{punctual_shadows_ps_raw,
+																   sizeof(punctual_shadows_ps_raw)};
 
-inline constexpr auto lighting_nort_vs = std::to_array(lighting_nort_vs_raw);
-inline constexpr auto lighting_nort_ps = std::to_array(lighting_nort_ps_raw);
+inline constexpr std::span<const std::uint8_t> lighting_nort_vs{lighting_nort_vs_raw,
+																sizeof(lighting_nort_vs_raw)};
+inline constexpr std::span<const std::uint8_t> lighting_nort_ps{lighting_nort_ps_raw,
+																sizeof(lighting_nort_ps_raw)};
 
-inline constexpr auto culling_comp = std::to_array(culling_comp_raw);
-inline constexpr auto shadow_frag = std::to_array(shadow_frag_raw);
-inline constexpr auto cluster_bounds = std::to_array(cluster_bounds_raw);
-inline constexpr auto cluster_culling = std::to_array(cluster_culling_raw);
-inline constexpr auto skinning_comp = std::to_array(skinning_comp_raw);
-inline constexpr auto forward_frag = std::to_array(forward_frag_raw);
-inline constexpr auto hang_gpu_comp = std::to_array(hang_gpu_comp_raw);
-inline constexpr auto procedural_bake_comp = std::to_array(procedural_bake_comp_raw);
+inline constexpr std::span<const std::uint8_t> culling_comp{culling_comp_raw,
+															sizeof(culling_comp_raw)};
+inline constexpr std::span<const std::uint8_t> shadow_frag{shadow_frag_raw,
+														   sizeof(shadow_frag_raw)};
+inline constexpr std::span<const std::uint8_t> cluster_bounds{cluster_bounds_raw,
+															  sizeof(cluster_bounds_raw)};
+inline constexpr std::span<const std::uint8_t> cluster_culling{cluster_culling_raw,
+															   sizeof(cluster_culling_raw)};
+inline constexpr std::span<const std::uint8_t> skinning_comp{skinning_comp_raw,
+															 sizeof(skinning_comp_raw)};
+inline constexpr std::span<const std::uint8_t> forward_frag{forward_frag_raw,
+															sizeof(forward_frag_raw)};
+inline constexpr std::span<const std::uint8_t> hang_gpu_comp{hang_gpu_comp_raw,
+															 sizeof(hang_gpu_comp_raw)};
+inline constexpr std::span<const std::uint8_t> procedural_bake_comp{
+	procedural_bake_comp_raw, sizeof(procedural_bake_comp_raw)};
 
-inline constexpr auto ltc_mat = std::to_array(ltc_mat_raw);
-inline constexpr auto ltc_amp = std::to_array(ltc_amp_raw);
+inline constexpr std::span<const std::uint8_t> ltc_mat{ltc_mat_raw, sizeof(ltc_mat_raw)};
+inline constexpr std::span<const std::uint8_t> ltc_amp{ltc_amp_raw, sizeof(ltc_amp_raw)};
 
 [[nodiscard]] constexpr ShaderPair GetBasicProgram() noexcept {
 	return {.vertex = basic_vs, .fragment = basic_ps};
