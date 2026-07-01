@@ -22,7 +22,8 @@ RUN pacman -S --needed --noconfirm \
     seatd \
     fontconfig \
     zstd \
-    gtest
+    gtest \
+    fennel
 
 ENV CC=clang
 ENV CXX=clang++
