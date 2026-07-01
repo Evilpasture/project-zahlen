@@ -2,250 +2,342 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <array>
 #include <cstdint>
 #include <span>
 
-// NOLINTBEGIN(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
 namespace ZHLN::Resource {
 
 struct ShaderPair {
-    std::span<const std::uint8_t> vertex;
-    std::span<const std::uint8_t> fragment;
+	std::span<const std::uint8_t> vertex;
+	std::span<const std::uint8_t> fragment;
 };
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wc23-extensions"
+
+namespace {
+
+// NOLINTBEGIN(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
+
+// We use anonymous C-style arrays solely for preprocessor size-deduction.
+// They are immediately converted to std::array and are not exposed globally.
+
+inline constexpr std::uint8_t basic_vs_raw[] = {
+#embed SHADER_BASIC_HLSL_VS_PATH
+};
+inline constexpr std::uint8_t basic_ps_raw[] = {
+#embed SHADER_BASIC_HLSL_PS_PATH
+};
+
+inline constexpr std::uint8_t blit_vs_raw[] = {
+#embed SHADER_BLIT_HLSL_VS_PATH
+};
+inline constexpr std::uint8_t blit_ps_raw[] = {
+#embed SHADER_BLIT_HLSL_PS_PATH
+};
+
+inline constexpr std::uint8_t taa_vs_raw[] = {
+#embed SHADER_TAA_HLSL_VS_PATH
+};
+inline constexpr std::uint8_t taa_ps_raw[] = {
+#embed SHADER_TAA_HLSL_PS_PATH
+};
+
+inline constexpr std::uint8_t ui_vs_raw[] = {
+#embed SHADER_UI_HLSL_VS_PATH
+};
+inline constexpr std::uint8_t ui_ps_raw[] = {
+#embed SHADER_UI_HLSL_PS_PATH
+};
+
+inline constexpr std::uint8_t ambient_vs_raw[] = {
+#embed SHADER_AMBIENT_HLSL_VS_PATH
+};
+inline constexpr std::uint8_t ambient_ps_raw[] = {
+#embed SHADER_AMBIENT_HLSL_PS_PATH
+};
+
+inline constexpr std::uint8_t lighting_vs_raw[] = {
+#embed SHADER_LIGHTING_HLSL_VS_PATH
+};
+inline constexpr std::uint8_t lighting_ps_raw[] = {
+#embed SHADER_LIGHTING_HLSL_PS_PATH
+};
+
+inline constexpr std::uint8_t reflection_vs_raw[] = {
+#embed SHADER_REFLECTION_HLSL_VS_PATH
+};
+inline constexpr std::uint8_t reflection_ps_raw[] = {
+#embed SHADER_REFLECTION_HLSL_PS_PATH
+};
+
+inline constexpr std::uint8_t reflection_nort_vs_raw[] = {
+#embed SHADER_REFLECTION_NORT_HLSL_VS_PATH
+};
+inline constexpr std::uint8_t reflection_nort_ps_raw[] = {
+#embed SHADER_REFLECTION_NORT_HLSL_PS_PATH
+};
+
+inline constexpr std::uint8_t fxaa_vs_raw[] = {
+#embed SHADER_FXAA_HLSL_VS_PATH
+};
+inline constexpr std::uint8_t fxaa_ps_raw[] = {
+#embed SHADER_FXAA_HLSL_PS_PATH
+};
+
+inline constexpr std::uint8_t smaa_edge_vs_raw[] = {
+#embed SHADER_SMAA_EDGE_VS_PATH
+};
+inline constexpr std::uint8_t smaa_edge_ps_raw[] = {
+#embed SHADER_SMAA_EDGE_PS_PATH
+};
+
+inline constexpr std::uint8_t smaa_weight_vs_raw[] = {
+#embed SHADER_SMAA_WEIGHT_VS_PATH
+};
+inline constexpr std::uint8_t smaa_weight_ps_raw[] = {
+#embed SHADER_SMAA_WEIGHT_PS_PATH
+};
+
+inline constexpr std::uint8_t smaa_blend_vs_raw[] = {
+#embed SHADER_SMAA_BLEND_VS_PATH
+};
+inline constexpr std::uint8_t smaa_blend_ps_raw[] = {
+#embed SHADER_SMAA_BLEND_PS_PATH
+};
+
+inline constexpr std::uint8_t bloom_threshold_vs_raw[] = {
+#embed SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH
+};
+inline constexpr std::uint8_t bloom_threshold_ps_raw[] = {
+#embed SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH
+};
+
+inline constexpr std::uint8_t bloom_blur_vs_raw[] = {
+#embed SHADER_BLOOM_BLUR_HLSL_VS_PATH
+};
+inline constexpr std::uint8_t bloom_blur_ps_raw[] = {
+#embed SHADER_BLOOM_BLUR_HLSL_PS_PATH
+};
+
+inline constexpr std::uint8_t punctual_shadows_vs_raw[] = {
+#embed SHADER_PUNCTUAL_SHADOWS_HLSL_VS_PATH
+};
+inline constexpr std::uint8_t punctual_shadows_ps_raw[] = {
+#embed SHADER_PUNCTUAL_SHADOWS_HLSL_PS_PATH
+};
+
+inline constexpr std::uint8_t lighting_nort_vs_raw[] = {
+#embed SHADER_LIGHTING_NORT_HLSL_VS_PATH
+};
+inline constexpr std::uint8_t lighting_nort_ps_raw[] = {
+#embed SHADER_LIGHTING_NORT_HLSL_PS_PATH
+};
+
+inline constexpr std::uint8_t culling_comp_raw[] = {
+#embed SHADER_CULLING_HLSL_CS_PATH
+};
+inline constexpr std::uint8_t shadow_frag_raw[] = {
+#embed SHADER_SHADOW_HLSL_PS_PATH
+};
+inline constexpr std::uint8_t cluster_bounds_raw[] = {
+#embed SHADER_CLUSTER_BOUNDS_CS_PATH
+};
+inline constexpr std::uint8_t cluster_culling_raw[] = {
+#embed SHADER_CLUSTER_CULLING_CS_PATH
+};
+inline constexpr std::uint8_t skinning_comp_raw[] = {
+#embed SHADER_SKINNING_HLSL_CS_PATH
+};
+inline constexpr std::uint8_t forward_frag_raw[] = {
+#embed SHADER_FORWARD_HLSL_PS_PATH
+};
+inline constexpr std::uint8_t hang_gpu_comp_raw[] = {
+#embed SHADER_HANG_GPU_HLSL_CS_PATH
+};
+inline constexpr std::uint8_t procedural_bake_comp_raw[] = {
+#embed SHADER_PROCEDURAL_BAKE_CS_PATH
+};
+
+inline constexpr std::uint8_t ltc_mat_raw[] = {
+#embed "../../resources/shaders/ltc_mat.dds"
+};
+inline constexpr std::uint8_t ltc_amp_raw[] = {
+#embed "../../resources/shaders/ltc_amp.dds"
+};
+
+// NOLINTEND(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
+
+} // namespace
+
+#pragma clang diagnostic pop
+
+// Expose safe, modern constexpr std::array structures globally
+inline constexpr auto basic_vs = std::to_array(basic_vs_raw);
+inline constexpr auto basic_ps = std::to_array(basic_ps_raw);
+
+inline constexpr auto blit_vs = std::to_array(blit_vs_raw);
+inline constexpr auto blit_ps = std::to_array(blit_ps_raw);
+
+inline constexpr auto taa_vs = std::to_array(taa_vs_raw);
+inline constexpr auto taa_ps = std::to_array(taa_ps_raw);
+
+inline constexpr auto ui_vs = std::to_array(ui_vs_raw);
+inline constexpr auto ui_ps = std::to_array(ui_ps_raw);
+
+inline constexpr auto ambient_vs = std::to_array(ambient_vs_raw);
+inline constexpr auto ambient_ps = std::to_array(ambient_ps_raw);
+
+inline constexpr auto lighting_vs = std::to_array(lighting_vs_raw);
+inline constexpr auto lighting_ps = std::to_array(lighting_ps_raw);
+
+inline constexpr auto reflection_vs = std::to_array(reflection_vs_raw);
+inline constexpr auto reflection_ps = std::to_array(reflection_ps_raw);
+
+inline constexpr auto reflection_nort_vs = std::to_array(reflection_nort_vs_raw);
+inline constexpr auto reflection_nort_ps = std::to_array(reflection_nort_ps_raw);
+
+inline constexpr auto fxaa_vs = std::to_array(fxaa_vs_raw);
+inline constexpr auto fxaa_ps = std::to_array(fxaa_ps_raw);
+
+inline constexpr auto smaa_edge_vs = std::to_array(smaa_edge_vs_raw);
+inline constexpr auto smaa_edge_ps = std::to_array(smaa_edge_ps_raw);
+
+inline constexpr auto smaa_weight_vs = std::to_array(smaa_weight_vs_raw);
+inline constexpr auto smaa_weight_ps = std::to_array(smaa_weight_ps_raw);
+
+inline constexpr auto smaa_blend_vs = std::to_array(smaa_blend_vs_raw);
+inline constexpr auto smaa_blend_ps = std::to_array(smaa_blend_ps_raw);
+
+inline constexpr auto bloom_threshold_vs = std::to_array(bloom_threshold_vs_raw);
+inline constexpr auto bloom_threshold_ps = std::to_array(bloom_threshold_ps_raw);
+
+inline constexpr auto bloom_blur_vs = std::to_array(bloom_blur_vs_raw);
+inline constexpr auto bloom_blur_ps = std::to_array(bloom_blur_ps_raw);
+
+inline constexpr auto punctual_shadows_vs = std::to_array(punctual_shadows_vs_raw);
+inline constexpr auto punctual_shadows_ps = std::to_array(punctual_shadows_ps_raw);
+
+inline constexpr auto lighting_nort_vs = std::to_array(lighting_nort_vs_raw);
+inline constexpr auto lighting_nort_ps = std::to_array(lighting_nort_ps_raw);
+
+inline constexpr auto culling_comp = std::to_array(culling_comp_raw);
+inline constexpr auto shadow_frag = std::to_array(shadow_frag_raw);
+inline constexpr auto cluster_bounds = std::to_array(cluster_bounds_raw);
+inline constexpr auto cluster_culling = std::to_array(cluster_culling_raw);
+inline constexpr auto skinning_comp = std::to_array(skinning_comp_raw);
+inline constexpr auto forward_frag = std::to_array(forward_frag_raw);
+inline constexpr auto hang_gpu_comp = std::to_array(hang_gpu_comp_raw);
+inline constexpr auto procedural_bake_comp = std::to_array(procedural_bake_comp_raw);
+
+inline constexpr auto ltc_mat = std::to_array(ltc_mat_raw);
+inline constexpr auto ltc_amp = std::to_array(ltc_amp_raw);
+
 [[nodiscard]] constexpr ShaderPair GetBasicProgram() noexcept {
-    static constexpr const std::uint8_t vtx[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/basic.hlsl.VS.spv"
-};
-    static constexpr const std::uint8_t frag[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/basic.hlsl.PS.spv"
-};
-    return {.vertex = vtx, .fragment = frag};
+	return {.vertex = basic_vs, .fragment = basic_ps};
 }
 
 [[nodiscard]] constexpr ShaderPair GetBlitProgram() noexcept {
-    static constexpr const std::uint8_t vtx[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/blit.hlsl.VS.spv"
-};
-    static constexpr const std::uint8_t frag[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/blit.hlsl.PS.spv"
-};
-    return {.vertex = vtx, .fragment = frag};
+	return {.vertex = blit_vs, .fragment = blit_ps};
 }
 
 [[nodiscard]] constexpr ShaderPair GetTaaProgram() noexcept {
-    static constexpr const std::uint8_t vtx[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/taa.hlsl.VS.spv"
-};
-    static constexpr const std::uint8_t frag[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/taa.hlsl.PS.spv"
-};
-    return {.vertex = vtx, .fragment = frag};
+	return {.vertex = taa_vs, .fragment = taa_ps};
 }
 
 [[nodiscard]] constexpr ShaderPair GetUiProgram() noexcept {
-    static constexpr const std::uint8_t vtx[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/ui.hlsl.VS.spv"
-};
-    static constexpr const std::uint8_t frag[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/ui.hlsl.PS.spv"
-};
-    return {.vertex = vtx, .fragment = frag};
+	return {.vertex = ui_vs, .fragment = ui_ps};
 }
 
 [[nodiscard]] constexpr ShaderPair GetAmbientProgram() noexcept {
-    static constexpr const std::uint8_t vtx[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/ambient.hlsl.VS.spv"
-};
-    static constexpr const std::uint8_t frag[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/ambient.hlsl.PS.spv"
-};
-    return {.vertex = vtx, .fragment = frag};
+	return {.vertex = ambient_vs, .fragment = ambient_ps};
 }
 
 [[nodiscard]] constexpr ShaderPair GetLightingProgram() noexcept {
-    static constexpr const std::uint8_t vtx[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/lighting.hlsl.VSMain.LIGHTING_VS_SPV.spv"
-};
-    static constexpr const std::uint8_t frag[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/lighting.hlsl.PSMain.LIGHTING_PS_SPV.spv"
-};
-    return {.vertex = vtx, .fragment = frag};
+	return {.vertex = lighting_vs, .fragment = lighting_ps};
 }
 
 [[nodiscard]] constexpr ShaderPair GetReflectionProgram() noexcept {
-    static constexpr const std::uint8_t vtx[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/reflection.hlsl.VSMain.REFLECTION_VS_SPV.spv"
-};
-    static constexpr const std::uint8_t frag[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/reflection.hlsl.PSMain.REFLECTION_PS_SPV.spv"
-};
-    return {.vertex = vtx, .fragment = frag};
+	return {.vertex = reflection_vs, .fragment = reflection_ps};
 }
 
 [[nodiscard]] constexpr ShaderPair GetReflectionNortProgram() noexcept {
-    static constexpr const std::uint8_t vtx[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/reflection.hlsl.VSMain.REFLECTION_NORT_VS_SPV.spv"
-};
-    static constexpr const std::uint8_t frag[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/reflection.hlsl.PSMain.REFLECTION_NORT_PS_SPV.spv"
-};
-    return {.vertex = vtx, .fragment = frag};
+	return {.vertex = reflection_nort_vs, .fragment = reflection_nort_ps};
 }
 
 [[nodiscard]] constexpr ShaderPair GetFxaaProgram() noexcept {
-    static constexpr const std::uint8_t vtx[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/fxaa.hlsl.VS.spv"
-};
-    static constexpr const std::uint8_t frag[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/fxaa.hlsl.PS.spv"
-};
-    return {.vertex = vtx, .fragment = frag};
+	return {.vertex = fxaa_vs, .fragment = fxaa_ps};
 }
 
 [[nodiscard]] constexpr ShaderPair GetSmaaEdgeProgram() noexcept {
-    static constexpr const std::uint8_t vtx[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/smaa_wrap.hlsl.SmaaEdgeVS.SMAA_EDGE_VS_SPV.spv"
-};
-    static constexpr const std::uint8_t frag[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/smaa_wrap.hlsl.SmaaEdgePS.SMAA_EDGE_PS_SPV.spv"
-};
-    return {.vertex = vtx, .fragment = frag};
+	return {.vertex = smaa_edge_vs, .fragment = smaa_edge_ps};
 }
 
 [[nodiscard]] constexpr ShaderPair GetSmaaWeightProgram() noexcept {
-    static constexpr const std::uint8_t vtx[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/smaa_wrap.hlsl.SmaaWeightVS.SMAA_WEIGHT_VS_SPV.spv"
-};
-    static constexpr const std::uint8_t frag[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/smaa_wrap.hlsl.SmaaWeightPS.SMAA_WEIGHT_PS_SPV.spv"
-};
-    return {.vertex = vtx, .fragment = frag};
+	return {.vertex = smaa_weight_vs, .fragment = smaa_weight_ps};
 }
 
 [[nodiscard]] constexpr ShaderPair GetSmaaBlendProgram() noexcept {
-    static constexpr const std::uint8_t vtx[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/smaa_wrap.hlsl.SmaaBlendVS.SMAA_BLEND_VS_SPV.spv"
-};
-    static constexpr const std::uint8_t frag[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/smaa_wrap.hlsl.SmaaBlendPS.SMAA_BLEND_PS_SPV.spv"
-};
-    return {.vertex = vtx, .fragment = frag};
+	return {.vertex = smaa_blend_vs, .fragment = smaa_blend_ps};
 }
 
 [[nodiscard]] constexpr ShaderPair GetBloomThresholdProgram() noexcept {
-    static constexpr const std::uint8_t vtx[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/bloom_threshold.hlsl.VS.spv"
-};
-    static constexpr const std::uint8_t frag[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/bloom_threshold.hlsl.PS.spv"
-};
-    return {.vertex = vtx, .fragment = frag};
+	return {.vertex = bloom_threshold_vs, .fragment = bloom_threshold_ps};
 }
 
 [[nodiscard]] constexpr ShaderPair GetBloomBlurProgram() noexcept {
-    static constexpr const std::uint8_t vtx[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/bloom_blur.hlsl.VS.spv"
-};
-    static constexpr const std::uint8_t frag[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/bloom_blur.hlsl.PS.spv"
-};
-    return {.vertex = vtx, .fragment = frag};
+	return {.vertex = bloom_blur_vs, .fragment = bloom_blur_ps};
 }
 
 [[nodiscard]] constexpr ShaderPair GetPunctualShadowsProgram() noexcept {
-    static constexpr const std::uint8_t vtx[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/punctual_shadows.hlsl.VS.spv"
-};
-    static constexpr const std::uint8_t frag[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/punctual_shadows.hlsl.PS.spv"
-};
-    return {.vertex = vtx, .fragment = frag};
+	return {.vertex = punctual_shadows_vs, .fragment = punctual_shadows_ps};
 }
 
 [[nodiscard]] constexpr ShaderPair GetLightingNortProgram() noexcept {
-    static constexpr const std::uint8_t vtx[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/lighting.hlsl.VSMain.LIGHTING_NORT_VS_SPV.spv"
-};
-    static constexpr const std::uint8_t frag[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/lighting.hlsl.PSMain.LIGHTING_NORT_PS_SPV.spv"
-};
-    return {.vertex = vtx, .fragment = frag};
+	return {.vertex = lighting_nort_vs, .fragment = lighting_nort_ps};
 }
 
 // --- STANDALONE RESOURCING ---
 
 [[nodiscard]] constexpr std::span<const std::uint8_t> GetCullingCompSpv() noexcept {
-    static constexpr const std::uint8_t kData[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/culling.hlsl.CSMain.CULLING_COMP_SPV.spv"
-};
-    return kData;
+	return culling_comp;
 }
 
 [[nodiscard]] constexpr std::span<const std::uint8_t> GetShadowFragSpv() noexcept {
-    static constexpr const std::uint8_t kData[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/basic.hlsl.PSShadow.SHADOW_FRAG_SPV.spv"
-};
-    return kData;
+	return shadow_frag;
 }
 
 [[nodiscard]] constexpr std::span<const std::uint8_t> GetClusterBoundsSpv() noexcept {
-    static constexpr const std::uint8_t kData[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/cluster_bounds.hlsl.CSMain.CLUSTER_BOUNDS_SPV.spv"
-};
-    return kData;
+	return cluster_bounds;
 }
 
 [[nodiscard]] constexpr std::span<const std::uint8_t> GetClusterCullingSpv() noexcept {
-    static constexpr const std::uint8_t kData[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/cluster_culling.hlsl.CSMain.CLUSTER_CULLING_SPV.spv"
-};
-    return kData;
+	return cluster_culling;
 }
 
 [[nodiscard]] constexpr std::span<const std::uint8_t> GetSkinningCompSpv() noexcept {
-    static constexpr const std::uint8_t kData[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/skinning.hlsl.CSMain.SKINNING_COMP_SPV.spv"
-};
-    return kData;
+	return skinning_comp;
 }
 
 [[nodiscard]] constexpr std::span<const std::uint8_t> GetForwardFragSpv() noexcept {
-    static constexpr const std::uint8_t kData[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/basic.hlsl.PSForward.FORWARD_FRAG_SPV.spv"
-};
-    return kData;
+	return forward_frag;
 }
 
 [[nodiscard]] constexpr std::span<const std::uint8_t> GetHangGpuCompSpv() noexcept {
-    static constexpr const std::uint8_t kData[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/hang_gpu.hlsl.CSMain.HANG_GPU_COMP_SPV.spv"
-};
-    return kData;
+	return hang_gpu_comp;
 }
 
 [[nodiscard]] constexpr std::span<const std::uint8_t> GetProceduralBakeCompSpv() noexcept {
-    static constexpr const std::uint8_t kData[] = {
-    #embed "/home/Enwifi/projects/project-zahlen/build/generated_shaders/procedural_bake.hlsl.CSMain.PROCEDURAL_BAKE_CS_SPV.spv"
-};
-    return kData;
+	return procedural_bake_comp;
 }
 
 [[nodiscard]] constexpr std::span<const std::uint8_t> GetLtcMatBin() noexcept {
-    static constexpr const std::uint8_t kData[] = {
-    #embed "../../resources/shaders/ltc_mat.dds"
-};
-    return kData;
+	return ltc_mat;
 }
 
 [[nodiscard]] constexpr std::span<const std::uint8_t> GetLtcAmpBin() noexcept {
-    static constexpr const std::uint8_t kData[] = {
-    #embed "../../resources/shaders/ltc_amp.dds"
-};
-    return kData;
+	return ltc_amp;
 }
 
 } // namespace ZHLN::Resource
-
-// NOLINTEND(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
-
