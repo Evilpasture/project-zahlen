@@ -111,7 +111,7 @@ void WriteBenchmarkLog(std::vector<double> frameTimes) {
 	}
 }
 
-std::string s_GameplayFile = "scripts/gameplay_template.lua";
+std::string s_GameplayFile = "scripts/gameplay.fnl";
 
 // ============================================================================
 // Flattened System Wrappers (For 100% Predictable Function Pointers)
@@ -275,7 +275,7 @@ bool InitializeGame(Engine& engine) {
 		UsableComponent, ContainerComponent, TriggerComponent, DebugSettingsComponent,
 		SunTagComponent, FreeCamTagComponent, ShadowSettingsComponent, UIRectComponent,
 		UIPanelComponent, UIButtonComponent, UIDragComponent, UIStackComponent,
-		UITextInputComponent>();
+		UITextInputComponent, AnimatorComponent>();
 
 	// Spawn a blank, static camera just to render the main menu
 	Entity cameraEntity = reg.Create();
@@ -422,7 +422,7 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine,
 	}
 
 	ZHLN::Log("Window active and presenting. Loading scene assets...");
-	scriptRunner.RunFile(s_GameplayFile);
+	scriptRunner.CallUpdate(engine.get(), 0.0f);
 
 	float physicsAccumulator = 0.0f;
 	const double targetFrameTime =

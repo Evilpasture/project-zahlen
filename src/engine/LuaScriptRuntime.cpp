@@ -132,11 +132,21 @@ LuaScriptRuntime::~LuaScriptRuntime() {
 	Shutdown();
 }
 
-void LuaScriptRuntime::Initialize(Engine*) {
-	if (L == nullptr) {
+void LuaScriptRuntime::Initialize(Engine* engine) {
+	if (_initialized || L == nullptr) {
 		return;
 	}
+	_initialized = true;
 
+#ifdef ZHLN_COMPILED_SCRIPTS_DIR
+	// Append the compiled build scripts directory to package.path
+	// so the runtime can always locate compiled Fennel output files.
+	std::string appendPath = std::format("package.path = package.path .. ';{}/?.lua;{}/?/init.lua'",
+										 ZHLN_COMPILED_SCRIPTS_DIR, ZHLN_COMPILED_SCRIPTS_DIR);
+	luaL_dostring(L, appendPath.c_str());
+#endif
+
+	// Load the C++ memoryview binding first
 	lua_getglobal(L, "require");
 	lua_pushstring(L, "scripts.core.memoryview");
 	if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
@@ -144,12 +154,16 @@ void LuaScriptRuntime::Initialize(Engine*) {
 			  lua_tostring(L, -1));
 	}
 	lua_pop(L, 1);
+
+	// Execute our Fennel bootstrapper
+	RunFile("scripts/boot.lua");
 }
 
 void LuaScriptRuntime::Shutdown() {
 	if (L != nullptr) {
 		lua_close(L);
 		L = nullptr;
+		_initialized = false;
 	}
 }
 
@@ -170,7 +184,7 @@ void LuaScriptRuntime::ExecuteString(std::string_view code) {
 	}
 	if (luaL_dostring(L, code.data()) != LUA_OK) {
 		std::string err = lua_tostring(L, -1);
-		ZHLN::GameConsole::Log("Lua Error: " + err, {1.0f, 0.4f, 0.4f, 1.0f});
+		ZHLN::GameConsole::Log("Lua Error: " + err, {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
 		lua_pop(L, 1);
 	}
 }
@@ -181,19 +195,31 @@ void LuaScriptRuntime::ReloadFile(std::string_view path) {
 	}
 	std::string moduleName = std::string(path);
 
+	// Strip leading path components like "build/" if present
+	if (size_t pos = moduleName.find("scripts/"); pos != std::string::npos) {
+		moduleName = moduleName.substr(pos);
+	}
+
 	if (size_t pos = moduleName.find(".lua"); pos != std::string::npos) {
 		moduleName.erase(pos);
 	}
-	std::replace(moduleName.begin(), moduleName.end(), '/', '.');
+	if (size_t pos = moduleName.find(".fnl"); pos != std::string::npos) {
+		moduleName.erase(pos);
+	}
+	std::ranges::replace(moduleName, '/', '.');
 
-	std::string resetCode = std::format("package.loaded['{}'] = nil", moduleName);
-	luaL_dostring(L, resetCode.c_str());
+	// Safely clear cache and run through package searchers (including Fennel's JIT)
+	std::string resetCode =
+		std::format("package.loaded['{}'] = nil; require('{}')", moduleName, moduleName);
 
-	RunFile(path);
-
-	Log("Script Hot-Reloaded: {}", path);
-	ZHLN::GameConsole::Log("Hot-Reloaded: " + std::string(path),
-						   {.r = 0.2f, .g = 0.8f, .b = 1.0f, .a = 1.0f});
+	if (luaL_dostring(L, resetCode.c_str()) != LUA_OK) {
+		Log("Lua Error reloading module {}: {}", moduleName, lua_tostring(L, -1));
+		lua_pop(L, 1);
+	} else {
+		Log("Script Hot-Reloaded: {}", path);
+		ZHLN::GameConsole::Log("Hot-Reloaded: " + std::string(path),
+							   {.r = 0.2f, .g = 0.8f, .b = 1.0f, .a = 1.0f});
+	}
 }
 
 void LuaScriptRuntime::TickUpdate(Engine* engine, float dt) {

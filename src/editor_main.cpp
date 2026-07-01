@@ -294,6 +294,7 @@ bool InitializeEditorScene(Engine& engine) {
 
 	// Register visual and physical components
 	reg.RegisterComponent<MeshComponent>("MeshComponent");
+	reg.RegisterComponent<AnimatorComponent>("AnimatorComponent");
 	reg.RegisterComponent<PhysicsComponent>("PhysicsComponent");
 	reg.RegisterComponent<PhysicsStateComponent>("PhysicsStateComponent");
 	reg.RegisterComponent<MovementComponent>("MovementComponent");
@@ -301,6 +302,7 @@ bool InitializeEditorScene(Engine& engine) {
 	reg.RegisterComponent<NameComponent>("NameComponent");
 	reg.RegisterComponent<TargetCameraComponent>("TargetCameraComponent");
 	reg.RegisterComponent<PBRComponent>("PBRComponent");
+	reg.RegisterComponent<TransformComponent>("TransformComponent");
 
 	ZHLN::Log("Initializing Editor Workspace Scene...");
 	int terrainSize = 128;
