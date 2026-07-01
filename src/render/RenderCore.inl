@@ -751,16 +751,11 @@ constexpr auto DynamicPass<ColorCount, HasDepth>::AddColorGroup(
 	const std::tuple<TypedImages...>& imageTuple, VkAttachmentLoadOp loadOp,
 	VkAttachmentStoreOp storeOp, const ZHLN::Color4& clearColor) noexcept
 	-> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth> {
-
 	constexpr size_t AddedCount = sizeof...(TypedImages);
 	std::array<VkRenderingAttachmentInfo, ColorCount + AddedCount> nextColors{};
-
-	// 1. Preserve existing attachments
 	for (size_t i = 0; i < ColorCount; ++i) {
 		nextColors[i] = _colors[i];
 	}
-
-	// 2. Unpack tuple into parameter pack and populate remaining slots branchlessly
 	std::apply(
 		[&](const auto&... img) {
 			size_t offset = ColorCount;
@@ -779,7 +774,6 @@ constexpr auto DynamicPass<ColorCount, HasDepth>::AddColorGroup(
 			 ...);
 		},
 		imageTuple);
-
 	return DynamicPass<ColorCount + AddedCount, HasDepth>(std::move(*this), std::move(nextColors),
 														  _depth);
 }

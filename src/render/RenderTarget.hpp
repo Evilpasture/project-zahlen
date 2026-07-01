@@ -84,6 +84,14 @@ template <VkImageLayout TargetLayout, typename... Resources>
 	return std::make_tuple(TransitionSingle<TargetLayout>(cmd, resources)...);
 }
 
+/**
+ * @brief Batch transitions a tuple/pack of Vulkan images to a target layout using std::apply.
+ */
+template <VkImageLayout L, typename Tuple>
+[[nodiscard]] auto TransitionAllTo(VkCommandBuffer cmd, const Tuple& atts) {
+	return std::apply([&](const auto&... a) { return Vk::TransitionBatch<L>(cmd, a...); }, atts);
+}
+
 template <typename... Targets> struct RenderTargetBundle {
 	std::tuple<Targets&...> targets;
 
@@ -109,6 +117,20 @@ template <typename... Targets> struct RenderTargetBundle {
 // CTAD Factory
 template <typename... Ts> [[nodiscard]] constexpr auto TieTargets(Ts&... tgts) noexcept {
 	return RenderTargetBundle<Ts...>(tgts...);
+}
+
+/**
+ * @brief Automatically ties, transitions, clears, and prepares a color attachment group.
+ */
+template <typename... Images>
+[[nodiscard]] auto ClearAndPrepareGroup(VkCommandBuffer cmd, VkExtent2D extent, Color4 clear,
+										Images&... imgs) {
+	auto bundle = Vk::TieTargets(imgs...);
+	auto atts = bundle.template Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd);
+	Vk::DynamicPass(extent)
+		.AddColorGroup(atts, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, clear)
+		.Execute(cmd, []() {});
+	return TransitionAllTo<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, atts);
 }
 
 } // namespace ZHLN::Vk

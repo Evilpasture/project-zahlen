@@ -746,6 +746,26 @@ template <VkImageLayout TargetLayout, VkImageLayout OldLayout>
 [[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout>& img,
 										Tag<TargetLayout> /*unused*/) noexcept;
 
+/**
+ * @brief Compile-time-friendly scope guard that automatically transitions depth/stencil
+ * attachments back to ReadOnly on destruction.
+ */
+template <typename ImageT, VkImageLayout Final> class ScopedTransition {
+  public:
+	ScopedTransition(VkCommandBuffer cmd, ImageT& image, Vk::Tag<Final> transitionTag)
+		: cmd_(cmd), image_(Transition(cmd, image, transitionTag)) {}
+	~ScopedTransition() { [[maybe_unused]] auto _ = Transition(cmd_, image_, Vk::AsReadOnly); }
+	auto& Get() { return image_; }
+
+  private:
+	VkCommandBuffer cmd_;
+	Vk::TypedImage<Final> image_;
+};
+
+// Deduction guide for ScopedTransition CTAD
+template <typename ImageT, VkImageLayout Final>
+ScopedTransition(VkCommandBuffer, ImageT&, Vk::Tag<Final>) -> ScopedTransition<ImageT, Final>;
+
 template <size_t ColorCount = 0, bool HasDepth = false> class DynamicPass {
   public:
 	constexpr explicit DynamicPass(VkExtent2D extent) noexcept : _extent(extent) {}

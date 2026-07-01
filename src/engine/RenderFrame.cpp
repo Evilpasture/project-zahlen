@@ -45,48 +45,6 @@ template <typename... Ptrs> [[nodiscard]] constexpr bool AnyNull(Ptrs... ptrs) n
 }
 
 /**
- * @brief Batch transitions a tuple/pack of Vulkan images to a target layout using std::apply.
- */
-template <VkImageLayout L, typename Tuple>
-[[nodiscard]] auto TransitionAllTo(VkCommandBuffer cmd, const Tuple& atts) {
-	return std::apply([&](const auto&... a) { return Vk::TransitionBatch<L>(cmd, a...); }, atts);
-}
-
-/**
- * @brief Compile-time-friendly scope guard that automatically transitions depth/stencil
- * attachments back to ReadOnly on destruction.
- */
-template <typename ImageT, VkImageLayout Final> class ScopedTransition {
-  public:
-	ScopedTransition(VkCommandBuffer cmd, ImageT& image, Vk::Tag<Final> transitionTag)
-		: cmd_(cmd), image_(Vk::Transition(cmd, image, transitionTag)) {}
-	~ScopedTransition() { [[maybe_unused]] auto _ = Vk::Transition(cmd_, image_, Vk::AsReadOnly); }
-	auto& Get() { return image_; }
-
-  private:
-	VkCommandBuffer cmd_;
-	Vk::TypedImage<Final> image_;
-};
-
-// Deduction guide for ScopedTransition CTAD
-template <typename ImageT, VkImageLayout Final>
-ScopedTransition(VkCommandBuffer, ImageT&, Vk::Tag<Final>) -> ScopedTransition<ImageT, Final>;
-
-/**
- * @brief Automatically ties, transitions, clears, and prepares a color attachment group.
- */
-template <typename... Images>
-[[nodiscard]] auto ClearAndPrepareGroup(VkCommandBuffer cmd, VkExtent2D extent, Color4 clear,
-										Images&... imgs) {
-	auto bundle = Vk::TieTargets(imgs...);
-	auto atts = bundle.template Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd);
-	Vk::DynamicPass(extent)
-		.AddColorGroup(atts, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, clear)
-		.Execute(cmd, []() {});
-	return TransitionAllTo<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, atts);
-}
-
-/**
  * @brief Inline barrier wrapper for the compute-to-vertex synchronization boundary.
  */
 inline void BarrierComputeWriteToVertexRead(VkCommandBuffer cmd) {
@@ -150,9 +108,9 @@ std::optional<Extent2D> RenderContext::GetFramebufferSize() const {
 
 void RenderContext::Impl::InitialClearTargets(VkCommandBuffer cmd) noexcept {
 	// Scope-guarded transitions for depth/stencil buffers (reverts to AsReadOnly in destructor)
-	ScopedTransition sShadowMap(cmd, shadowMap, Vk::AsDepthAttachment);
-	ScopedTransition sShadowAtlas(cmd, shadowAtlas, Vk::AsDepthAttachment);
-	ScopedTransition depth(cmd, presentation.depthTarget, Vk::AsDepthAttachment);
+	Vk::ScopedTransition sShadowMap(cmd, shadowMap, Vk::AsDepthAttachment);
+	Vk::ScopedTransition sShadowAtlas(cmd, shadowAtlas, Vk::AsDepthAttachment);
+	Vk::ScopedTransition depth(cmd, presentation.depthTarget, Vk::AsDepthAttachment);
 
 	// Re-map main G-Buffer color attachments
 	auto mainBundle = Vk::TieTargets(sceneColor, velocityBuffer, accumBuffers[0], accumBuffers[1],
