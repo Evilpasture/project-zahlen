@@ -135,34 +135,44 @@ inline constexpr std::uint8_t lighting_nort_ps_raw[] = {
 #embed SHADER_LIGHTING_NORT_HLSL_PS_PATH
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
 inline constexpr std::uint8_t culling_comp_raw[] = {
 #embed SHADER_CULLING_HLSL_CS_PATH
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
 inline constexpr std::uint8_t shadow_frag_raw[] = {
-#embed SHADER_SHADOW_HLSL_PS_PATH
+#embed SHADOW_HLSL_PS_PATH
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
 inline constexpr std::uint8_t cluster_bounds_raw[] = {
 #embed SHADER_CLUSTER_BOUNDS_CS_PATH
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
 inline constexpr std::uint8_t cluster_culling_raw[] = {
 #embed SHADER_CLUSTER_CULLING_CS_PATH
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
 inline constexpr std::uint8_t skinning_comp_raw[] = {
 #embed SHADER_SKINNING_HLSL_CS_PATH
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
 inline constexpr std::uint8_t forward_frag_raw[] = {
 #embed SHADER_FORWARD_HLSL_PS_PATH
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
 inline constexpr std::uint8_t hang_gpu_comp_raw[] = {
 #embed SHADER_HANG_GPU_HLSL_CS_PATH
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
 inline constexpr std::uint8_t procedural_bake_comp_raw[] = {
 #embed SHADER_PROCEDURAL_BAKE_CS_PATH
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
 inline constexpr std::uint8_t ltc_mat_raw[] = {
 #embed "../../resources/shaders/ltc_mat.dds"
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
 inline constexpr std::uint8_t ltc_amp_raw[] = {
 #embed "../../resources/shaders/ltc_amp.dds"
 };
