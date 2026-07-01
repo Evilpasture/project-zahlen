@@ -193,6 +193,7 @@ set(ENGINE_SOURCES
     src/engine/ProfilerUI.cpp
     src/engine/DiagnosticUI.cpp
     src/engine/Text.cpp
+    src/engine/Resources.cpp
     src/engine/system/RenderSystem.cpp
     src/engine/system/MovementSystem.cpp
     src/engine/system/AudioSystem.cpp
