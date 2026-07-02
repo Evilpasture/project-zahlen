@@ -510,4 +510,13 @@ void RenderContext::ProvokeDeviceLost() {
 	_impl->ProvokeDeviceLostInternal();
 }
 
+void RenderContext::Impl::RegisterPipeline(const PipelineRegistration& reg) noexcept {
+	reg.build();
+	if constexpr (isDev) {
+		for (const auto* path : reg.watchPaths) {
+			RegisterShaderWatcher(path, reg.build);
+		}
+	}
+}
+
 } // namespace ZHLN

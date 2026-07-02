@@ -569,6 +569,8 @@ struct RenderContext::Impl {
 	Vk::ComputePass skinningPass;
 	Vk::PipelineLayout skinningPipelineLayout;
 
+	void InitSubsystems(const RenderConfig& cfg, int width, int height);
+
 	struct alignas(8) SkinningConstants {
 		uint64_t inPosAddr;
 		uint64_t inAttrAddr;
@@ -602,6 +604,15 @@ struct RenderContext::Impl {
 	Vk::ComputePass hangGpuPass;
 
 	void BuildHangGpuPipeline();
+
+	struct PipelineRegistration {
+		const char* name;
+		std::function<void()> build;
+		std::vector<const char*> watchPaths;
+	};
+
+	void RegisterPipeline(const PipelineRegistration& reg) noexcept;
+
 	void ProvokeDeviceLostInternal() const;
 
 	void BuildSkinningPipeline();
@@ -857,6 +868,12 @@ inline bool LoadShaderData(const ShaderStageSource& src, const void*& outData, s
 		}
 	}
 	return false;
+}
+
+template <typename T = Vk::Buffer, typename... Args>
+DoubleBuffered<T> CreateDoubleBuffered(Vk::Allocator& alloc, Args&&... args) {
+	return DoubleBuffered<T>{T::Create(alloc.Get(), std::forward<Args>(args)...),
+							 T::Create(alloc.Get(), std::forward<Args>(args)...)};
 }
 
 } // namespace ZHLN

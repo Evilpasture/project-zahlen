@@ -35,8 +35,6 @@ inline RenderFrameResult MapFrameResult(ZHLN_FrameResult res) noexcept {
 	return {weights[0], weights[1], weights[2], weights[3]};
 }
 
-// --- MODERN C++23 TEMPLATE ABSTRACTIONS ---
-
 /**
  * @brief Checks if any of the provided pointers are null using compile-time fold expressions.
  */

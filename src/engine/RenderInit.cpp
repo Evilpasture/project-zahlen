@@ -29,6 +29,68 @@ struct HardwareCaps {
 	bool supportsInt64 = false;
 };
 
+class HardwareCapsProber {
+  public:
+	explicit HardwareCapsProber(VkPhysicalDevice physicalDevice, uint32_t apiVersion) noexcept
+		: _physicalDevice(physicalDevice), _apiVersion(apiVersion) {}
+
+	auto ProbeInt64(bool& target) && noexcept -> HardwareCapsProber&& {
+		VkPhysicalDeviceFeatures2 features2 = {.sType =
+												   VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+		vkGetPhysicalDeviceFeatures2(_physicalDevice, &features2);
+		target = (features2.features.shaderInt64 == VK_TRUE);
+		return std::move(*this);
+	}
+
+	auto ProbeDrawIndirectCount(bool& target) && noexcept -> HardwareCapsProber&& {
+		bool hasExt =
+			ZHLN::Vk::IsDeviceExtensionSupported(_physicalDevice, "VK_KHR_draw_indirect_count");
+		if (hasExt || _apiVersion >= VK_API_VERSION_1_2) {
+			VkPhysicalDeviceFeatures2 features2 = {
+				.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+			VkPhysicalDeviceVulkan12Features features12 = {
+				.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+			features2.pNext = &features12;
+			vkGetPhysicalDeviceFeatures2(_physicalDevice, &features2);
+			target = (features12.drawIndirectCount == VK_TRUE);
+		} else {
+			target = false;
+		}
+		return std::move(*this);
+	}
+
+	auto ProbeRayTracing(bool& target) && noexcept -> HardwareCapsProber&& {
+		bool hasAS = ZHLN::Vk::IsDeviceExtensionSupported(
+			_physicalDevice, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+		bool hasRQ =
+			ZHLN::Vk::IsDeviceExtensionSupported(_physicalDevice, VK_KHR_RAY_QUERY_EXTENSION_NAME);
+		bool hasDFO = ZHLN::Vk::IsDeviceExtensionSupported(
+			_physicalDevice, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+
+		if (hasAS && hasRQ && hasDFO) {
+			VkPhysicalDeviceFeatures2 features2 = {
+				.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+			VkPhysicalDeviceRayQueryFeaturesKHR rqFeatures = {
+				.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
+			VkPhysicalDeviceAccelerationStructureFeaturesKHR asFeatures = {
+				.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+				.pNext = &rqFeatures};
+			features2.pNext = &asFeatures;
+			vkGetPhysicalDeviceFeatures2(_physicalDevice, &features2);
+
+			target =
+				(asFeatures.accelerationStructure == VK_TRUE) && (rqFeatures.rayQuery == VK_TRUE);
+		} else {
+			target = false;
+		}
+		return std::move(*this);
+	}
+
+  private:
+	VkPhysicalDevice _physicalDevice;
+	uint32_t _apiVersion;
+};
+
 /**
  * @brief Safely queries the physical device's capabilities.
  * Prevents device initialization crashes by checking extension support
@@ -36,103 +98,10 @@ struct HardwareCaps {
  */
 HardwareCaps ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion) noexcept {
 	HardwareCaps caps{};
-
-	// 1. Query general physical device features
-	VkPhysicalDeviceFeatures2 features2 = {
-		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = nullptr, .features = {}};
-	vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
-	caps.supportsInt64 = (features2.features.shaderInt64 == VK_TRUE);
-
-	// 2. Query Vulkan 1.2+ features (such as drawIndirectCount)
-	bool hasIndirectCountExt =
-		ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice, "VK_KHR_draw_indirect_count");
-	if (hasIndirectCountExt || apiVersion >= VK_API_VERSION_1_2) {
-		VkPhysicalDeviceVulkan12Features features12 = {
-			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-			.pNext = {},
-			.samplerMirrorClampToEdge = {},
-			.drawIndirectCount = {},
-			.storageBuffer8BitAccess = {},
-			.uniformAndStorageBuffer8BitAccess = {},
-			.storagePushConstant8 = {},
-			.shaderBufferInt64Atomics = {},
-			.shaderSharedInt64Atomics = {},
-			.shaderFloat16 = {},
-			.shaderInt8 = {},
-			.descriptorIndexing = {},
-			.shaderInputAttachmentArrayDynamicIndexing = {},
-			.shaderUniformTexelBufferArrayDynamicIndexing = {},
-			.shaderStorageTexelBufferArrayDynamicIndexing = {},
-			.shaderUniformBufferArrayNonUniformIndexing = {},
-			.shaderSampledImageArrayNonUniformIndexing = {},
-			.shaderStorageBufferArrayNonUniformIndexing = {},
-			.shaderStorageImageArrayNonUniformIndexing = {},
-			.shaderInputAttachmentArrayNonUniformIndexing = {},
-			.shaderUniformTexelBufferArrayNonUniformIndexing = {},
-			.shaderStorageTexelBufferArrayNonUniformIndexing = {},
-			.descriptorBindingUniformBufferUpdateAfterBind = {},
-			.descriptorBindingSampledImageUpdateAfterBind = {},
-			.descriptorBindingStorageImageUpdateAfterBind = {},
-			.descriptorBindingStorageBufferUpdateAfterBind = {},
-			.descriptorBindingUniformTexelBufferUpdateAfterBind = {},
-			.descriptorBindingStorageTexelBufferUpdateAfterBind = {},
-			.descriptorBindingUpdateUnusedWhilePending = {},
-			.descriptorBindingPartiallyBound = {},
-			.descriptorBindingVariableDescriptorCount = {},
-			.runtimeDescriptorArray = {},
-			.samplerFilterMinmax = {},
-			.scalarBlockLayout = {},
-			.imagelessFramebuffer = {},
-			.uniformBufferStandardLayout = {},
-			.shaderSubgroupExtendedTypes = {},
-			.separateDepthStencilLayouts = {},
-			.hostQueryReset = {},
-			.timelineSemaphore = {},
-			.bufferDeviceAddress = {},
-			.bufferDeviceAddressCaptureReplay = {},
-			.bufferDeviceAddressMultiDevice = {},
-			.vulkanMemoryModel = {},
-			.vulkanMemoryModelDeviceScope = {},
-			.vulkanMemoryModelAvailabilityVisibilityChains = {},
-			.shaderOutputViewportIndex = {},
-			.shaderOutputLayer = {},
-			.subgroupBroadcastDynamicId = {},
-		};
-
-		features2.pNext = &features12;
-		vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
-		caps.supportsDrawIndirectCount = (features12.drawIndirectCount == VK_TRUE);
-	}
-
-	// 3. Query Ray Tracing features conditionally to prevent driver validation faults
-	bool hasAS = ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice,
-													  VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
-	bool hasRQ =
-		ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice, VK_KHR_RAY_QUERY_EXTENSION_NAME);
-	bool hasDFO = ZHLN::Vk::IsDeviceExtensionSupported(
-		physicalDevice, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
-
-	if (hasAS && hasRQ && hasDFO) {
-		VkPhysicalDeviceRayQueryFeaturesKHR rqFeatures = {
-			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
-			.pNext = nullptr,
-			.rayQuery = {}};
-		VkPhysicalDeviceAccelerationStructureFeaturesKHR asFeatures = {
-			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
-			.pNext = &rqFeatures,
-			.accelerationStructure = {},
-			.accelerationStructureCaptureReplay = {},
-			.accelerationStructureIndirectBuild = {},
-			.accelerationStructureHostCommands = {},
-			.descriptorBindingAccelerationStructureUpdateAfterBind = {},
-		};
-		features2.pNext = &asFeatures;
-		vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
-
-		caps.supportsRayTracing =
-			(asFeatures.accelerationStructure == VK_TRUE) && (rqFeatures.rayQuery == VK_TRUE);
-	}
-
+	HardwareCapsProber(physicalDevice, apiVersion)
+		.ProbeInt64(caps.supportsInt64)
+		.ProbeDrawIndirectCount(caps.supportsDrawIndirectCount)
+		.ProbeRayTracing(caps.supportsRayTracing);
 	return caps;
 }
 
@@ -140,7 +109,228 @@ HardwareCaps ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion)
 
 namespace ZHLN {
 
+void RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int height) {
+	if (!allocator.Init(ctx)) {
+		ZHLN::Panic("FATAL: Vulkan Memory Allocator (VMA) failed to initialize");
+	}
+
+	auto caps = ProbeHardware(ctx.Physical(), ctx.PhysicalInfo().properties.properties.apiVersion);
+	if (!caps.supportsRayTracing || !rtCtx.Init(ctx.Device())) {
+		ZHLN::Log("WARNING: Raytracing context failed to initialize. RTR will be disabled.");
+	} else {
+		ZHLN::Log("Raytracing context initialized successfully.");
+	}
+
+	gpuProfiler.Init(ctx.Device(), ctx.Physical(), ctx.PhysicalInfo().graphics_family);
+
+	InitShadowResources();
+	InitCullingResources();
+	InitBindless();
+
+	BuildHangGpuPipeline();
+
+	CompileShadowPipeline(
+		ctx.Device(),
+		Resource::ShaderPair{.vertex = Resource::GetShaderProgram(Resource::ShaderID::Basic).vertex,
+							 .fragment = Resource::shadow_frag});
+	CompilePunctualShadowPipeline(ctx.Device(),
+								  Resource::GetShaderProgram(Resource::ShaderID::PunctualShadows));
+
+	if (!presentation.Init(ctx, allocator, surface.Get(), width, height, cfg.vsync)) {
+		ZHLN::Panic("FATAL: Presentation Context initialization failed");
+	}
+
+	sync = Vk::FrameSync<2>::Create(ctx.Device());
+	pools = Vk::CommandPools<2>::Create(
+		ctx.Device(), {.queue_family = ctx.PhysicalInfo().graphics_family, .buffers_per_pool = 1});
+
+	InitializeSystemTextures();
+
+	InitPostProcessing();
+	SetupUI(window.IsTTY() ? nullptr : static_cast<GLFWwindow*>(window.GetNativeHandle()));
+
+	uint32_t workerCount = TaskSystem::GetWorkerCount() + 1;
+	if (workerCount == 0) {
+		workerCount = 1;
+	}
+	workerCmds.resize(workerCount);
+
+	for (auto& worker : workerCmds) {
+		for (auto& pool : worker.pools) {
+			pool = Vk::CommandPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+
+			if (!pool.AllocateSecondary(256)) {
+				ZHLN::Panic(
+					"FATAL: Failed to pre-allocate secondary command buffers for worker threads.");
+			}
+		}
+	}
+}
+
 namespace {
+
+std::vector<const char*> GetPlatformInstanceExtensions(Window& window,
+													   bool enableValidation) noexcept {
+	std::vector<const char*> inst_exts;
+	if (window.IsTTY()) {
+		inst_exts = TTYBackend::GetRequiredInstanceExtensions();
+	} else {
+		uint32_t glfwExtensionCount = 0;
+		const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+
+		if (glfwExtensionCount > 0 && glfwExtensions != nullptr) {
+			inst_exts.assign(glfwExtensions, glfwExtensions + glfwExtensionCount);
+		} else {
+			inst_exts.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+			if constexpr (isWindows) {
+				inst_exts.push_back("VK_KHR_win32_surface");
+			} else if constexpr (isMac) {
+				inst_exts.push_back("VK_EXT_metal_surface");
+			} else {
+				inst_exts.push_back("VK_KHR_xcb_surface");
+				inst_exts.push_back("VK_KHR_xlib_surface");
+				inst_exts.push_back("VK_KHR_wayland_surface");
+			}
+		}
+		inst_exts.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
+		inst_exts.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+	}
+	if (enableValidation) {
+		inst_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+	}
+	if constexpr (isMac) {
+		inst_exts.push_back("VK_KHR_portability_enumeration");
+	}
+	return inst_exts;
+}
+
+VkInstance CreateVulkanInstance(const char* appName, uint32_t appVersion,
+								const std::vector<const char*>& extensions,
+								bool enableValidation) noexcept {
+	ZHLN_InstanceDesc inst_desc = {.app_name = {},
+								   .version = appVersion,
+								   .extension_count = static_cast<uint32_t>(extensions.size()),
+								   .severity_flags =
+									   VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+									   VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+								   .extensions = extensions.data(),
+								   .enable_validation = enableValidation};
+
+	size_t i = 0;
+	for (; i < 63 && appName[i] != '\0'; ++i) {
+		inst_desc.app_name[i] = appName[i];
+	}
+	inst_desc.app_name[i] = '\0';
+
+	return ZHLN_CreateInstance(&inst_desc);
+}
+
+VkSurfaceKHR CreateVulkanSurfaceBeforeDeviceSelection(VkInstance instance, Window& window,
+													  int& outWidth, int& outHeight) noexcept {
+	if (window.IsTTY()) {
+		return VK_NULL_HANDLE;
+	}
+	VkSurfaceKHR raw_surface = VK_NULL_HANDLE;
+	auto* glfwWin = static_cast<GLFWwindow*>(window.GetNativeHandle());
+	VkResult err = glfwCreateWindowSurface(instance, glfwWin, nullptr, &raw_surface);
+	if (!Vk::CheckResult(err, "Window Surface") || raw_surface == VK_NULL_HANDLE) {
+		ZHLN::Panic("FATAL: Failed to create GLFW Vulkan window surface!");
+	}
+	glfwGetFramebufferSize(glfwWin, &outWidth, &outHeight);
+	return raw_surface;
+}
+
+VkSurfaceKHR CreateVulkanSurfaceAfterDeviceSelection(VkInstance instance, VkPhysicalDevice physical,
+													 Window& window, int& outWidth,
+													 int& outHeight) noexcept {
+	if (!window.IsTTY()) {
+		return VK_NULL_HANDLE;
+	}
+	uint32_t hwWidth = 0;
+	uint32_t hwHeight = 0;
+	VkSurfaceKHR raw_surface =
+		TTYBackend::CreateSurface(instance, physical, window.GetTTYContext(), hwWidth, hwHeight);
+	outWidth = hwWidth;
+	outHeight = hwHeight;
+	window.SetSize(hwWidth, hwHeight);
+	return raw_surface;
+}
+
+ZHLN_PhysicalDeviceInfo SelectDevice(VkInstance instance, VkSurfaceKHR surface) noexcept {
+	ZHLN_DeviceSelectDesc select_desc = {
+		.instance = instance, .surface = surface, .score_fn = nullptr, .score_userdata = nullptr};
+	return ZHLN_SelectPhysicalDevice(&select_desc);
+}
+
+auto BuildFeatureChain(const HardwareCaps& caps) noexcept {
+	return Vk::FeatureChainBuilder()
+		.Require<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>(
+			[](auto& f) { f.swapchainMaintenance1 = VK_TRUE; })
+		.Require<VkPhysicalDeviceVulkan11Features>([](auto& f) {
+			f.multiview = VK_TRUE;
+			f.storageBuffer16BitAccess = VK_TRUE;
+			f.uniformAndStorageBuffer16BitAccess = VK_TRUE;
+		})
+		.Require<VkPhysicalDeviceVulkan13Features>([](auto& f) {
+			f.synchronization2 = VK_TRUE;
+			f.dynamicRendering = VK_TRUE;
+			f.shaderDemoteToHelperInvocation = VK_TRUE;
+		})
+		.Require<VkPhysicalDeviceVulkan12Features>([&](auto& f) {
+			f.descriptorIndexing = VK_TRUE;
+			f.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+			f.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+			f.descriptorBindingPartiallyBound = VK_TRUE;
+			f.runtimeDescriptorArray = VK_TRUE;
+			f.bufferDeviceAddress = VK_TRUE;
+			f.hostQueryReset = VK_TRUE;
+			f.drawIndirectCount = caps.supportsDrawIndirectCount ? VK_TRUE : VK_FALSE;
+			f.bufferDeviceAddress = VK_TRUE;
+			f.uniformAndStorageBuffer8BitAccess = VK_TRUE;
+		})
+		.Optional<VkPhysicalDeviceAccelerationStructureFeaturesKHR>(
+			caps.supportsRayTracing, [](auto& f) { f.accelerationStructure = VK_TRUE; })
+		.Optional<VkPhysicalDeviceRayQueryFeaturesKHR>(caps.supportsRayTracing,
+													   [](auto& f) { f.rayQuery = VK_TRUE; })
+		.Require<VkPhysicalDeviceFeatures2>([&](auto& f) {
+			f.features.multiDrawIndirect = VK_TRUE;
+			f.features.samplerAnisotropy = VK_TRUE;
+			f.features.drawIndirectFirstInstance = VK_TRUE;
+			f.features.shaderInt64 = caps.supportsInt64 ? VK_TRUE : VK_FALSE;
+			f.features.imageCubeArray = VK_TRUE;
+		})
+		.Build();
+}
+
+std::vector<const char*> GetDeviceExtensions(const HardwareCaps& caps) noexcept {
+	std::vector<const char*> dev_exts = {
+		VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
+		VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME, "VK_EXT_robustness2"};
+
+	if (caps.supportsRayTracing) {
+		dev_exts.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+		dev_exts.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+		dev_exts.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+	}
+
+	if constexpr (isMac) {
+		dev_exts.push_back("VK_KHR_portability_subset");
+	}
+	return dev_exts;
+}
+
+Vk::Context CreateLogicalDevice(VkInstance instance, VkSurfaceKHR surface,
+								const ZHLN_PhysicalDeviceInfo& physical,
+								const std::vector<const char*>& extensions,
+								const VkPhysicalDeviceFeatures2* features,
+								bool enableValidation) noexcept {
+	ZHLN_DeviceDesc dev_desc = {.physical = &physical,
+								.extensions = extensions.data(),
+								.extension_count = static_cast<uint32_t>(extensions.size()),
+								.features = features,
+								.enable_validation = enableValidation};
+	return Vk::Context::Create(instance, surface, physical, dev_desc);
+}
 
 // Generic helper for standard PostProcessPass compilation
 template <typename LayoutT>
@@ -222,90 +412,35 @@ void RenderContext::Impl::WatchPipeline(const char* vsPath, const char* psPath,
 
 RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	: _impl(std::make_unique<Impl>(window)) {
-	std::vector<const char*> inst_exts;
-	if (window.IsTTY()) {
-		inst_exts = TTYBackend::GetRequiredInstanceExtensions();
-		inst_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-	} else {
-		uint32_t glfwExtensionCount = 0;
-		const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
 
-		if (glfwExtensionCount > 0 && glfwExtensions != nullptr) {
-			inst_exts.assign(glfwExtensions, glfwExtensions + glfwExtensionCount);
-		} else {
-			// FALLBACK: If GLFW fails to detect Vulkan (common under RenderDoc/Vulkan layers on
-			// Linux), force-inject the standard platform extensions. ZHLN_CreateInstance will
-			// safely filter out any unsupported ones.
-			inst_exts.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
-			if constexpr (isWindows) {
-				inst_exts.push_back("VK_KHR_win32_surface");
-			} else if constexpr (isMac) {
-				inst_exts.push_back("VK_EXT_metal_surface");
-			} else {
-				inst_exts.push_back("VK_KHR_xcb_surface");
-				inst_exts.push_back("VK_KHR_xlib_surface");
-				inst_exts.push_back("VK_KHR_wayland_surface");
-			}
-		}
-		inst_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-		inst_exts.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
-		inst_exts.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
-	}
-	if constexpr (isMac) {
-		inst_exts.push_back("VK_KHR_portability_enumeration");
-	}
 	_impl->appName = cfg.appName;
-	ZHLN_InstanceDesc inst_desc = {.app_name = {},
-								   .version = VK_MAKE_API_VERSION(0, 1, 0, 0),
-								   .extension_count = static_cast<uint32_t>(inst_exts.size()),
-								   .severity_flags =
-									   VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-									   VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
-								   .extensions = inst_exts.data(),
-								   .enable_validation = cfg.enableValidation};
-	_impl->appName.copy_to(inst_desc.app_name);
 
-	// 1. Create Instance
-	VkInstance instance = ZHLN_CreateInstance(&inst_desc);
+	// Phase 1: Instance extensions selection
+	auto inst_exts = GetPlatformInstanceExtensions(window, cfg.enableValidation);
+
+	// Phase 2: Instance creation
+	VkInstance instance = CreateVulkanInstance(
+		_impl->appName.c_str(), VK_MAKE_API_VERSION(0, 1, 0, 0), inst_exts, cfg.enableValidation);
 	if (instance == VK_NULL_HANDLE) {
 		ZHLN::Panic("FATAL: Failed to create Vulkan Instance!");
 	}
 
-	// 2. Create Surface (If using Windowed Mode)
-	VkSurfaceKHR raw_surface = VK_NULL_HANDLE;
+	// Phase 3: Surface creation (Before device selection for windowed)
 	int width = 0;
 	int height = 0;
+	VkSurfaceKHR raw_surface =
+		CreateVulkanSurfaceBeforeDeviceSelection(instance, window, width, height);
 
-	if (!window.IsTTY()) {
-		auto* glfwWin = static_cast<GLFWwindow*>(window.GetNativeHandle());
-		VkResult err = glfwCreateWindowSurface(instance, glfwWin, nullptr, &raw_surface);
-		if (!Vk::CheckResult(err, "Window Surface") || raw_surface == VK_NULL_HANDLE) {
-			ZHLN::Panic("FATAL: Failed to create GLFW Vulkan window surface!");
-		}
-		glfwGetFramebufferSize(glfwWin, &width, &height);
-	}
-
-	// 3. Select Physical Device
-	ZHLN_DeviceSelectDesc select_desc = {.instance = instance,
-										 .surface = raw_surface,
-										 .score_fn = nullptr,
-										 .score_userdata = nullptr};
-
-	ZHLN_PhysicalDeviceInfo physicalInfo = ZHLN_SelectPhysicalDevice(&select_desc);
+	// Phase 4: Device selection
+	ZHLN_PhysicalDeviceInfo physicalInfo = SelectDevice(instance, raw_surface);
 	if (physicalInfo.handle == VK_NULL_HANDLE) {
 		ZHLN::Panic("FATAL: Failed to select a suitable physical device.");
 	}
 
-	// 4. Create Surface (If using TTY Mode)
+	// Phase 5: Surface creation (After device selection for TTY)
 	if (window.IsTTY()) {
-		uint32_t hwWidth = 0;
-		uint32_t hwHeight = 0;
-		raw_surface = TTYBackend::CreateSurface(instance, physicalInfo.handle,
-												window.GetTTYContext(), hwWidth, hwHeight);
-		width = hwWidth;
-		height = hwHeight;
-		window.SetSize(width, height);
-
+		raw_surface = CreateVulkanSurfaceAfterDeviceSelection(instance, physicalInfo.handle, window,
+															  width, height);
 		if (raw_surface == VK_NULL_HANDLE) {
 			ZHLN::Panic("FATAL: Failed to create TTY Vulkan Surface!");
 		}
@@ -313,136 +448,28 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 
 	_impl->surface = Vk::Surface(instance, raw_surface);
 
-	// 5. Query hardware capabilities declaratively
-	auto caps = ProbeHardware(physicalInfo.handle, physicalInfo.properties.properties.apiVersion);
+	// Phase 6: Capability detection
+	HardwareCaps caps{};
+	HardwareCapsProber(physicalInfo.handle, physicalInfo.properties.properties.apiVersion)
+		.ProbeInt64(caps.supportsInt64)
+		.ProbeDrawIndirectCount(caps.supportsDrawIndirectCount)
+		.ProbeRayTracing(caps.supportsRayTracing);
 
-	// 6. Build the Feature Chain dynamically using the probed capabilities
-	auto features =
-		Vk::FeatureChainBuilder()
-			.Require<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>(
-				[](auto& f) { f.swapchainMaintenance1 = VK_TRUE; })
-			.Require<VkPhysicalDeviceVulkan11Features>([](auto& f) {
-				f.multiview = VK_TRUE;
-				f.storageBuffer16BitAccess = VK_TRUE;
-				f.uniformAndStorageBuffer16BitAccess = VK_TRUE;
-			})
-			.Require<VkPhysicalDeviceVulkan13Features>([](auto& f) {
-				f.synchronization2 = VK_TRUE;
-				f.dynamicRendering = VK_TRUE;
-				f.shaderDemoteToHelperInvocation = VK_TRUE;
-			})
-			.Require<VkPhysicalDeviceVulkan12Features>([&](auto& f) {
-				f.descriptorIndexing = VK_TRUE;
-				f.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
-				f.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
-				f.descriptorBindingPartiallyBound = VK_TRUE;
-				f.runtimeDescriptorArray = VK_TRUE;
-				f.bufferDeviceAddress = VK_TRUE;
-				f.hostQueryReset = VK_TRUE;
-				f.drawIndirectCount = caps.supportsDrawIndirectCount ? VK_TRUE : VK_FALSE;
-				f.bufferDeviceAddress = VK_TRUE;
-				f.uniformAndStorageBuffer8BitAccess = VK_TRUE;
-			})
-			.Optional<VkPhysicalDeviceAccelerationStructureFeaturesKHR>(
-				caps.supportsRayTracing, [](auto& f) { f.accelerationStructure = VK_TRUE; })
-			.Optional<VkPhysicalDeviceRayQueryFeaturesKHR>(caps.supportsRayTracing,
-														   [](auto& f) { f.rayQuery = VK_TRUE; })
-			.Require<VkPhysicalDeviceFeatures2>([&](auto& f) {
-				f.features.multiDrawIndirect = VK_TRUE;
-				f.features.samplerAnisotropy = VK_TRUE;
-				f.features.drawIndirectFirstInstance = VK_TRUE;
-				f.features.shaderInt64 = caps.supportsInt64 ? VK_TRUE : VK_FALSE;
-				f.features.imageCubeArray = VK_TRUE;
-			})
-			.Build();
+	// Phase 7: Feature negotiation
+	auto features = BuildFeatureChain(caps);
 
-	// 7. Conditionally add Device Extensions to match hardware features
-	std::vector<const char*> dev_exts = {
-		VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
-		VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME, "VK_EXT_robustness2"};
+	// Phase 8: Device extension building
+	auto dev_exts = GetDeviceExtensions(caps);
 
-	if (caps.supportsRayTracing) {
-		dev_exts.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
-		dev_exts.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
-		dev_exts.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
-	}
-
-	if constexpr (isMac) {
-		dev_exts.push_back("VK_KHR_portability_subset");
-	}
-
-	ZHLN_DeviceDesc dev_desc = {
-		.physical = &physicalInfo, // Points directly to the local info struct on the stack
-		.extensions = dev_exts.data(),
-		.extension_count = static_cast<uint32_t>(dev_exts.size()),
-		.features = features.GetRoot(),
-		.enable_validation = cfg.enableValidation};
-
-	// 8. Initialize Logical Device Context via the split Creation method
-	_impl->ctx = Vk::Context::Create(instance, raw_surface, physicalInfo, dev_desc);
-
+	// Phase 9: Device creation
+	_impl->ctx = CreateLogicalDevice(instance, raw_surface, physicalInfo, dev_exts,
+									 features.GetRoot(), cfg.enableValidation);
 	if (!_impl->ctx.Valid()) {
-		ZHLN::Panic("FATAL: Vulkan Context failed to initialize. Please check your Vulkan drivers, "
-					"layers, or RenderDoc environment.");
+		ZHLN::Panic("FATAL: Failed to create Logical Device!");
 	}
 
-	if (!_impl->allocator.Init(_impl->ctx)) {
-		ZHLN::Panic("FATAL: Vulkan Memory Allocator (VMA) failed to initialize");
-	}
-
-	if (!caps.supportsRayTracing || !_impl->rtCtx.Init(_impl->ctx.Device())) {
-		ZHLN::Log("WARNING: Raytracing context failed to initialize. RTR will be disabled.");
-	} else {
-		ZHLN::Log("Raytracing context initialized successfully.");
-	}
-
-	_impl->gpuProfiler.Init(_impl->ctx.Device(), _impl->ctx.Physical(),
-							_impl->ctx.PhysicalInfo().graphics_family);
-
-	_impl->InitShadowResources();
-	_impl->InitCullingResources();
-	_impl->InitBindless();
-
-	_impl->BuildHangGpuPipeline();
-
-	_impl->CompileShadowPipeline(
-		_impl->ctx.Device(),
-		Resource::ShaderPair{.vertex = Resource::GetShaderProgram(Resource::ShaderID::Basic).vertex,
-							 .fragment = Resource::shadow_frag});
-	_impl->CompilePunctualShadowPipeline(
-		_impl->ctx.Device(), Resource::GetShaderProgram(Resource::ShaderID::PunctualShadows));
-
-	if (!_impl->presentation.Init(_impl->ctx, _impl->allocator, _impl->surface.Get(), width, height,
-								  cfg.vsync)) {
-		ZHLN::Panic("FATAL: Presentation Context initialization failed");
-	}
-
-	_impl->sync = Vk::FrameSync<2>::Create(_impl->ctx.Device());
-	_impl->pools = Vk::CommandPools<2>::Create(
-		_impl->ctx.Device(),
-		{.queue_family = _impl->ctx.PhysicalInfo().graphics_family, .buffers_per_pool = 1});
-
-	_impl->InitializeSystemTextures();
-
-	_impl->InitPostProcessing();
-	_impl->SetupUI(window.IsTTY() ? nullptr : static_cast<GLFWwindow*>(window.GetNativeHandle()));
-
-	uint32_t workerCount = TaskSystem::GetWorkerCount() + 1;
-	if (workerCount == 0) {
-		workerCount = 1;
-	}
-	_impl->workerCmds.resize(workerCount);
-
-	for (auto& worker : _impl->workerCmds) {
-		for (auto& pool : worker.pools) {
-			pool = Vk::CommandPool(_impl->ctx.Device(), _impl->ctx.PhysicalInfo().graphics_family);
-
-			if (!pool.AllocateSecondary(256)) {
-				ZHLN::Panic(
-					"FATAL: Failed to pre-allocate secondary command buffers for worker threads.");
-			}
-		}
-	}
+	// Phase 10: Subsystem initialization
+	_impl->InitSubsystems(cfg, width, height);
 }
 
 RenderContext::~RenderContext() {
@@ -546,19 +573,17 @@ void RenderContext::Impl::InitShadowResources() {
 
 	RecreatePunctualShadowViews();
 
-	for (int i = 0; i < 2; ++i) {
-		frameUniformBuffers[i] =
-			Vk::Buffer::Create(allocator.Get(), sizeof(FrameUniforms),
-							   VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	frameUniformBuffers =
+		CreateDoubleBuffered(allocator, sizeof(FrameUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+							 VMA_MEMORY_USAGE_CPU_TO_GPU);
 
-		lightStorageBuffers[i] =
-			Vk::Buffer::Create(allocator.Get(), sizeof(GPULight) * 128,
-							   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	lightStorageBuffers =
+		CreateDoubleBuffered(allocator, sizeof(GPULight) * 128, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+							 VMA_MEMORY_USAGE_CPU_TO_GPU);
 
-		shadowIndirectBuffers[i] = Vk::Buffer::Create(
-			allocator.Get(), sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances * 8,
-			VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
-	}
+	shadowIndirectBuffers =
+		CreateDoubleBuffered(allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances * 8,
+							 VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 }
 
 void RenderContext::Impl::InitCullingResources() {
@@ -1052,63 +1077,46 @@ void RenderContext::Impl::BuildBlitPipeline() {
 
 void RenderContext::Impl::InitPostProcessing() {
 	defaultSampler = Vk::SamplerBuilder{}.Linear().ClampToEdge().Build(ctx.Device());
-
-	// Create the nearest-neighbor sampler
 	pointSampler = Vk::SamplerBuilder{}.Nearest().ClampToEdge().Build(ctx.Device());
 
-	// 1. Initial Compilation Passes (Reads from disk if available, otherwise falls back to memory)
-	BuildTAAPipeline();
-	BuildFXAAPipeline();
-	BuildSMAAPipeline();
-	BuildAmbientPipeline();
-	BuildLightingPipeline();
-	BuildReflectionPipelines();
-	BuildBloomPipelines();
-	BuildBlitPipeline();
+	// Unified build and watch registration
+	RegisterPipeline({.name = "TAA",
+					  .build = [this]() { BuildTAAPipeline(); },
+					  .watchPaths = {SHADER_TAA_HLSL_VS_PATH, SHADER_TAA_HLSL_PS_PATH}});
+	RegisterPipeline({.name = "FXAA",
+					  .build = [this]() { BuildFXAAPipeline(); },
+					  .watchPaths = {SHADER_FXAA_HLSL_VS_PATH, SHADER_FXAA_HLSL_PS_PATH}});
+	RegisterPipeline({.name = "SMAA",
+					  .build = [this]() { BuildSMAAPipeline(); },
+					  .watchPaths = {SHADER_SMAA_EDGE_VS_PATH, SHADER_SMAA_EDGE_PS_PATH,
+									 SHADER_SMAA_WEIGHT_VS_PATH, SHADER_SMAA_WEIGHT_PS_PATH,
+									 SHADER_SMAA_BLEND_VS_PATH, SHADER_SMAA_BLEND_PS_PATH}});
+	RegisterPipeline({.name = "Ambient",
+					  .build = [this]() { BuildAmbientPipeline(); },
+					  .watchPaths = {SHADER_AMBIENT_HLSL_VS_PATH, SHADER_AMBIENT_HLSL_PS_PATH}});
+	RegisterPipeline(
+		{.name = "Lighting",
+		 .build = [this]() { BuildLightingPipeline(); },
+		 .watchPaths = {SHADER_LIGHTING_HLSL_VS_PATH, SHADER_LIGHTING_HLSL_PS_PATH,
+						SHADER_LIGHTING_NORT_HLSL_VS_PATH, SHADER_LIGHTING_NORT_HLSL_PS_PATH}});
+	RegisterPipeline(
+		{.name = "Reflection",
+		 .build = [this]() { BuildReflectionPipelines(); },
+		 .watchPaths = {SHADER_REFLECTION_HLSL_VS_PATH, SHADER_REFLECTION_HLSL_PS_PATH,
+						SHADER_REFLECTION_NORT_HLSL_VS_PATH, SHADER_REFLECTION_NORT_HLSL_PS_PATH}});
+	RegisterPipeline(
+		{.name = "Bloom",
+		 .build = [this]() { BuildBloomPipelines(); },
+		 .watchPaths = {SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH, SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH,
+						SHADER_BLOOM_BLUR_HLSL_VS_PATH, SHADER_BLOOM_BLUR_HLSL_PS_PATH}});
+	RegisterPipeline({.name = "Blit",
+					  .build = [this]() { BuildBlitPipeline(); },
+					  .watchPaths = {SHADER_BLIT_HLSL_VS_PATH, SHADER_BLIT_HLSL_PS_PATH}});
 
-	// 2. Attach FileWatchers in Development Mode
-	if constexpr (isDev) {
-		WatchPipeline(SHADER_TAA_HLSL_VS_PATH, SHADER_TAA_HLSL_PS_PATH,
-					  [this]() { BuildTAAPipeline(); });
-		WatchPipeline(SHADER_FXAA_HLSL_VS_PATH, SHADER_FXAA_HLSL_PS_PATH,
-					  [this]() { BuildFXAAPipeline(); });
-
-		// SMAA (3 Passes)
-		WatchPipeline(SHADER_SMAA_EDGE_VS_PATH, SHADER_SMAA_EDGE_PS_PATH,
-					  [this]() { BuildSMAAPipeline(); });
-		WatchPipeline(SHADER_SMAA_WEIGHT_VS_PATH, SHADER_SMAA_WEIGHT_PS_PATH,
-					  [this]() { BuildSMAAPipeline(); });
-		WatchPipeline(SHADER_SMAA_BLEND_VS_PATH, SHADER_SMAA_BLEND_PS_PATH,
-					  [this]() { BuildSMAAPipeline(); });
-
-		// Clustered Ambient & Lighting Passes
-		WatchPipeline(SHADER_AMBIENT_HLSL_VS_PATH, SHADER_AMBIENT_HLSL_PS_PATH,
-					  [this]() { BuildAmbientPipeline(); });
-		WatchPipeline(SHADER_LIGHTING_HLSL_VS_PATH, SHADER_LIGHTING_HLSL_PS_PATH,
-					  [this]() { BuildLightingPipeline(); });
-
-		// Specialized Reflection Pass
-		WatchPipeline(SHADER_REFLECTION_HLSL_VS_PATH, SHADER_REFLECTION_HLSL_PS_PATH,
-					  [this]() { BuildReflectionPipelines(); });
-
-		// Bloom
-		WatchPipeline(SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH, SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH,
-					  [this]() { BuildBloomPipelines(); });
-		WatchPipeline(SHADER_BLOOM_BLUR_HLSL_VS_PATH, SHADER_BLOOM_BLUR_HLSL_PS_PATH,
-					  [this]() { BuildBloomPipelines(); });
-
-		// Final Composition / Blit Pass
-		WatchPipeline(SHADER_BLIT_HLSL_VS_PATH, SHADER_BLIT_HLSL_PS_PATH,
-					  [this]() { BuildBlitPipeline(); });
-	}
-
-	// 3. Generate the SMAA Area LUT via heap vector passed as span
-	std::vector<uint32_t> smaaAreaPixels(static_cast<size_t>(160 * 560));
-	ZHLN::PBR::FillSmaaAreaTex(smaaAreaPixels); // Implicit conversion to std::span
-
-	// 4. Generate the SMAA Search LUT via heap vector passed as span
-	std::vector<uint32_t> smaaSearchPixels(static_cast<size_t>(64 * 16));
-	ZHLN::PBR::FillSmaaSearchTex(smaaSearchPixels); // Implicit conversion to std::span
+	ZHLN::Array<uint32_t> smaaAreaPixels(static_cast<size_t>(160 * 560));
+	ZHLN::PBR::FillSmaaAreaTex(smaaAreaPixels);
+	ZHLN::Array<uint32_t> smaaSearchPixels(static_cast<size_t>(64 * 16));
+	ZHLN::PBR::FillSmaaSearchTex(smaaSearchPixels);
 	smaaAreaTexIdx = CreateTextureInternal(smaaAreaPixels.data(), 160, 560, false);
 	smaaSearchTexIdx = CreateTextureInternal(smaaSearchPixels.data(), 64, 16, false);
 }

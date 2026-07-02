@@ -30,6 +30,9 @@ template <typename T> class DoubleBuffered {
   public:
 	DoubleBuffered() = default;
 
+	constexpr DoubleBuffered(T&& first, T&& second) noexcept
+		: _data{std::move(first), std::move(second)} {}
+
 	[[nodiscard]] auto Current() noexcept -> T&;
 	[[nodiscard]] auto Current() const noexcept -> const T&;
 
