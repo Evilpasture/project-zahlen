@@ -145,7 +145,7 @@ template <VkFormat F> struct ResourceTraits<RenderTarget<F>> {
 	}
 	static constexpr auto GetView(const RenderTarget<F>& res) noexcept { return res.view.Get(); }
 	static constexpr auto GetExtent(const RenderTarget<F>& res) noexcept { return res.extent; }
-	static constexpr auto GetAspect(const RenderTarget<F>& res) noexcept {
+	static constexpr auto GetAspect(const RenderTarget<F>& /*res*/) noexcept {
 		return GetFormatAspect(F);
 	}
 };

@@ -160,6 +160,12 @@ void StagingContext::AddBuffer(Buffer&& buf) {
 void StagingContext::ExecuteAsync() {
 	ZHLN_EndCommandBuffer(_cmd);
 
+	// Destroy the previous fence if this context is being reused
+	if (_fence != VK_NULL_HANDLE) {
+		vkDestroyFence(_ctx->Device(), _fence, nullptr);
+		_fence = VK_NULL_HANDLE;
+	}
+
 	VkFenceCreateInfo fenceInfo = {
 		.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .pNext = nullptr, .flags = 0};
 	vkCreateFence(_ctx->Device(), &fenceInfo, nullptr, &_fence);
