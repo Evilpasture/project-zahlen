@@ -573,7 +573,8 @@ void RenderContext::Impl::InitCullingResources() {
 	constexpr auto numClusters = static_cast<size_t>(16 * 9 * 24); // 3456
 	clusterBoundsBuffer =
 		Vk::Buffer::Create(allocator.Get(), sizeof(ClusterBounds) * numClusters,
-						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+						   VMA_MEMORY_USAGE_GPU_ONLY);
 
 	Vk::AllocateDoubleBufferedSet<ClusterCullingLayout>(ctx.Device(), clusterCullingDescLayout,
 														clusterCullingPool, clusterCullingSets);

@@ -77,6 +77,16 @@ void SetFrameData(RenderContext& ctx, const Camera& cam, const FrameUniforms& un
 	impl->shadowProjView = shadowProjView;
 	impl->currentUniforms = uniforms;
 
+	VkExtent2D res = impl->sceneColor.extent;
+	float aspect = (res.height > 0) ? (float)res.width / res.height : 1.777f;
+
+	// Check if projection bounds need an update
+	if (aspect != impl->lastAspectRatio || cam.fov != impl->lastFov) {
+		impl->lastAspectRatio = aspect;
+		impl->lastFov = cam.fov;
+		impl->UploadClusterBounds(cam.GetProjectionMatrix(aspect));
+	}
+
 	// Snapping and cascade projections
 	float cascadeSplits[4];
 	cascadeSplits[0] = cam.nearZ + (cam.farZ - cam.nearZ) * 0.08f;
@@ -93,8 +103,6 @@ void SetFrameData(RenderContext& ctx, const Camera& cam, const FrameUniforms& un
 	JPH::Mat44 lightView =
 		Math::CreateLookAt(sunDir * 100.0f, JPH::Vec3::sZero(), JPH::Vec3::sAxisY());
 
-	VkExtent2D res = impl->sceneColor.extent;
-	float aspect = (res.height > 0) ? (float)res.width / res.height : 1.777f;
 	float tanHalfFov = std::tan(JPH::DegreesToRadians(cam.fov * 0.5f));
 
 	for (uint32_t i = 0; i < RenderContext::Impl::NUM_CASCADES; ++i) {

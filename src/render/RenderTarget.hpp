@@ -72,18 +72,13 @@ Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget<F>& rt,
 
 template <VkImageLayout TargetLayout, typename T>
 constexpr auto TransitionSingle(VkCommandBuffer cmd, const T& res) noexcept {
-	if constexpr (requires { res.State(); }) { // RenderTarget<F>
-		return Vk::Transition<TargetLayout>(cmd, res.State());
-	} else { // TypedImage<Layout>
-		return Vk::Transition<TargetLayout>(cmd, res);
-	}
+	// Simply fetch from index 0 of our unified batch transition
+	return std::get<0>(TransitionBatch<TargetLayout>(cmd, res));
 }
 
 template <VkImageLayout TargetLayout, typename... Resources>
 [[nodiscard]] constexpr auto TransitionBatch(VkCommandBuffer cmd,
-											 const Resources&... resources) noexcept {
-	return std::make_tuple(TransitionSingle<TargetLayout>(cmd, resources)...);
-}
+											 const Resources&... resources) noexcept;
 
 /**
  * @brief Batch transitions a tuple/pack of Vulkan images to a target layout using std::apply.

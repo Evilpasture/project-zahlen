@@ -70,6 +70,13 @@ inline void BarrierComputeWriteToFragmentRead(VkCommandBuffer cmd) {
 		.To(cmd, Vk::BarrierStage::Fragment, Vk::BarrierAccess::ShaderRead);
 }
 
+inline void BarrierCounterReset(VkCommandBuffer cmd) {
+	Vk::BarrierBuilder()
+		.From(Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferWrite)
+		.To(cmd, Vk::BarrierStage::Compute,
+			Vk::BarrierAccess::ShaderRead | Vk::BarrierAccess::ShaderWrite);
+}
+
 } // namespace
 
 // ============================================================================
@@ -389,9 +396,10 @@ struct ClusterCullingStep {
 	void Execute(RenderContext::Impl* impl, VkCommandBuffer cmd, const FrameRecorder& recorder,
 				 RenderContext::Impl::RenderState& /*unused*/) const noexcept {
 		uint32_t fIdx = impl->frame_index;
-		impl->clusterBoundsPass.Dispatch(cmd, impl->clusterCullingSets[fIdx], 1, 1, 24);
 		Vk::FillBuffer(cmd, impl->globalCounterBuffers[fIdx]);
-		BarrierClusterCullingSync(cmd);
+
+		BarrierCounterReset(cmd);
+
 		impl->clusterCullingPass.Dispatch(cmd, impl->clusterCullingSets[fIdx], 1, 1, 24);
 		BarrierComputeWriteToFragmentRead(cmd);
 		RunPass(Passes::ShadowPass{}, recorder);

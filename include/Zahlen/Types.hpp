@@ -150,7 +150,7 @@ struct alignas(16) GPULight {
 	float outerConeCos;
 	uint32_t twoSided;	 // 0 = Single-Sided, 1 = Double-Sided Area Light
 	int32_t shadowLayer; // -1 if no shadow, >= 0 for Atlas layer index
-	float pad[3];
+	float positionView[3];
 };
 static_assert(sizeof(GPULight) == 144);
 

@@ -552,4 +552,78 @@ void RenderContext::Impl::RegisterPipeline(const PipelineRegistration& reg) noex
 	}
 }
 
+void RenderContext::Impl::UploadClusterBounds(const JPH::Mat44& proj) {
+	ZHLN::Array<ClusterBounds> cpuBounds(static_cast<size_t>(16 * 9 * 24));
+	JPH::Mat44 invProj = proj.Inversed();
+
+	float tsX = 2.0f / 16.0f;
+	float tsY = 2.0f / 9.0f;
+
+	auto Unproject = [&](const JPH::Vec4& coord) {
+		JPH::Vec4 res = invProj * coord;
+		return JPH::Vec3(res.GetX() / res.GetW(), res.GetY() / res.GetW(), res.GetZ() / res.GetW());
+	};
+
+	for (uint32_t z = 0; z < 24; ++z) {
+		float n = 0.1f;
+		float f = 1000.0f;
+		float sNear = n * std::pow(f / n, (float)z / 24.0f);
+		float sFar = n * std::pow(f / n, (float)(z + 1) / 24.0f);
+
+		float tNear = (sNear - n) / (f - n);
+		float tFar = (sFar - n) / (f - n);
+
+		for (uint32_t y = 0; y < 9; ++y) {
+			for (uint32_t x = 0; x < 16; ++x) {
+				uint32_t cIdx = x + (y * 16) + (z * 144);
+
+				std::array<JPH::Vec4, 4> ndc{
+					{JPH::Vec4(-1.0f + x * tsX, -1.0f + y * tsY, 0.0f, 1.0f),
+					 JPH::Vec4(-1.0f + (x + 1) * tsX, -1.0f + y * tsY, 0.0f, 1.0f),
+					 JPH::Vec4(-1.0f + (x + 1) * tsX, -1.0f + (y + 1) * tsY, 0.0f, 1.0f),
+					 JPH::Vec4(-1.0f + x * tsX, -1.0f + (y + 1) * tsY, 0.0f, 1.0f)}};
+
+				std::array<JPH::Vec3, 4> pNear{};
+				std::array<JPH::Vec3, 4> pFar{};
+				for (int i = 0; i < 4; ++i) {
+					pNear[i] = Unproject(JPH::Vec4(ndc[i].GetX(), ndc[i].GetY(), 0.0f, 1.0f));
+					pFar[i] = Unproject(JPH::Vec4(ndc[i].GetX(), ndc[i].GetY(), 1.0f, 1.0f));
+				}
+
+				JPH::Vec3 pMin(1e30f, 1e30f, 1e30f);
+				JPH::Vec3 pMax(-1e30f, -1e30f, -1e30f);
+
+				for (int j = 0; j < 4; ++j) {
+					JPH::Vec3 ptNear = pNear[j] + (pFar[j] - pNear[j]) * tNear;
+					JPH::Vec3 ptFar = pNear[j] + (pFar[j] - pNear[j]) * tFar;
+					pMin = JPH::Vec3::sMin(pMin, JPH::Vec3::sMin(ptNear, ptFar));
+					pMax = JPH::Vec3::sMax(pMax, JPH::Vec3::sMax(ptNear, ptFar));
+				}
+
+				cpuBounds[cIdx].minPoint = JPH::Vec4(pMin.GetX(), pMin.GetY(), pMin.GetZ(), 1.0f);
+				cpuBounds[cIdx].maxPoint = JPH::Vec4(pMax.GetX(), pMax.GetY(), pMax.GetZ(), 1.0f);
+			}
+		}
+	}
+
+	// Direct staging copy to GPU (Runs on main thread outside active render pass)
+	Vk::ImmediateCommand cmd(ctx.Device(), const_cast<Vk::StagingRingBuffer&>(stagingRingBuffer));
+	auto stagingAlloc = cmd.AllocateStaging(cpuBounds.size() * sizeof(ClusterBounds));
+	std::memcpy(stagingAlloc.mappedData, cpuBounds.data(),
+				cpuBounds.size() * sizeof(ClusterBounds));
+
+	const ZHLN_BufferCopyDesc copy = {
+		.src = stagingAlloc.buffer,
+		.dst = clusterBoundsBuffer.Handle(),
+		.size = static_cast<VkDeviceSize>(cpuBounds.size() * sizeof(ClusterBounds)),
+		.src_offset = stagingAlloc.offset,
+		.dst_offset = 0};
+	ZHLN_CmdCopyBuffer(cmd, &copy);
+
+	Vk::MemoryBarrier(cmd, {.src_stage = VK_PIPELINE_STAGE_2_COPY_BIT,
+							.src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+							.dst_stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+							.dst_access = VK_ACCESS_2_SHADER_READ_BIT});
+}
+
 } // namespace ZHLN

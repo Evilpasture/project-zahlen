@@ -45,7 +45,7 @@ struct Light {
 	float outerConeCos;
 	uint twoSided;
 	int shadowLayer;
-	float3 pad;
+	float3 positionView;
 };
 
 #endif // UNIFORMS_HLSL

@@ -13,6 +13,7 @@
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Types.hpp>
 #include <array>
+#include <cstddef>
 #include <detail/MemoryPool.hpp>
 #include <fstream>
 #include <memory>
@@ -716,6 +717,11 @@ struct RenderContext::Impl {
 
 	void WatchPipeline(const char* vsPath, const char* psPath,
 					   std::function<void()> rebuild_fn) noexcept;
+
+	float lastAspectRatio = 0.0f;
+	float lastFov = 0.0f;
+
+	void UploadClusterBounds(const JPH::Mat44& proj);
 };
 
 // --- Promoted G-Buffer & Post-Process Views ---

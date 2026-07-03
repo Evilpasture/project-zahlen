@@ -3,16 +3,17 @@
 
 #include "LightingSystem.hpp"
 
+#include "Zahlen/Camera.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Entity.hpp"
 #include "Zahlen/Render.hpp"
 #include "Zahlen/Types.hpp"
+#include "detail/Array.hpp"
 #include "ecs/ECS.hpp"
 
 #include <algorithm>
 #include <cstring>
-#include <vector>
 
 namespace ZHLN {
 
@@ -73,7 +74,7 @@ void LightingSystem::Update(Engine& engine, [[maybe_unused]] float dt) {
 			Entity entity;
 			float distSq;
 		};
-		std::vector<LightDistance> lightDistances;
+		ZHLN::Array<LightDistance> lightDistances;
 
 		if (auto* playerTrans = reg.Get<TransformComponent>(playerEnt)) {
 			JPH::Vec3 playerPos = playerTrans->position;
@@ -110,7 +111,8 @@ void LightingSystem::Update(Engine& engine, [[maybe_unused]] float dt) {
 	}
 
 	// 2. COMPILE GPU LIGHTS
-	std::vector<GPULight> sceneLights;
+	ZHLN::Array<GPULight> sceneLights;
+	JPH::Mat44 viewMatrix = engine.GetCamera().GetViewMatrix();
 	auto lightEntities = reg.GetEntitiesWith<LightComponent>();
 	sceneLights.reserve(lightEntities.size());
 
@@ -131,11 +133,16 @@ void LightingSystem::Update(Engine& engine, [[maybe_unused]] float dt) {
 		if (trans != nullptr) {
 			std::memcpy(gpuLight.position, &trans->position, sizeof(float) * 3);
 
-			// Extract direction dynamically from rotation matrix for rotatable lights
+			// Transform position to view-space for cluster culling
+			JPH::Vec3 posView = viewMatrix * trans->position;
+			gpuLight.positionView[0] = posView.GetX();
+			gpuLight.positionView[1] = posView.GetY();
+			gpuLight.positionView[2] = posView.GetZ();
+
 			if (light->type == LightType::Directional || light->type == LightType::Spot ||
 				light->type == LightType::Sun) {
 				JPH::Mat44 worldMat = trans->GetMatrix();
-				JPH::Vec3 dir = -worldMat.GetColumn3(2); // Local -Z represents forward direction
+				JPH::Vec3 dir = -worldMat.GetColumn3(2);
 				dir = dir.Normalized();
 				gpuLight.direction[0] = dir.GetX();
 				gpuLight.direction[1] = dir.GetY();
