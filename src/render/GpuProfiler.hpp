@@ -5,12 +5,9 @@
 
 #pragma once
 
-#include <array>
-#include <concepts>
-#include <cstdint>
-#include <string_view>
-#include <utility>
-#include <vulkan/vulkan.h>
+#ifndef ZHLN_RENDERING_HPP_INCLUDED
+#error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
+#endif
 
 namespace ZHLN::Profiler {
 

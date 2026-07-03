@@ -5,10 +5,9 @@
 
 #pragma once
 
-#include <cstring>
-#include <memory>
-#include <vk_mem_alloc.h>
-#include <vulkan/vulkan.h>
+#ifndef ZHLN_RENDERING_HPP_INCLUDED
+#error "Please include <src/render/Rendering.hpp> before including any other render headers."
+#endif
 
 namespace ZHLN::Vk {
 

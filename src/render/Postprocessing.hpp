@@ -3,12 +3,9 @@
 
 // src/render/Postprocessing.hpp
 #pragma once
-#include "PipelineBuilder.hpp"
-#include "RenderCore.hpp"
-
-#include <tuple>
-#include <type_traits>
-#include <utility>
+#ifndef ZHLN_RENDERING_HPP_INCLUDED
+#error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
+#endif
 
 namespace ZHLN::Vk {
 

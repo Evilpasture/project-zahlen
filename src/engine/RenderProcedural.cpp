@@ -1,6 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
-
+// clang-format off
+#include "Rendering.hpp"
+// clang-format on
 #include "RenderCore.hpp"
 #include "RenderInternal.hpp"
 #include "Resources.hpp"

@@ -14,6 +14,7 @@ add_library(zahlen_render STATIC
     VmaImplementation.cpp
     RenderCore.h
     RenderCore.hpp
+    Rendering.hpp 
     RenderCore.cpp
     Allocator.hpp
     StagingContext.hpp
@@ -64,6 +65,10 @@ target_include_directories(zahlen_render PUBLIC
 target_compile_definitions(zahlen_render PRIVATE
     VMA_STATIC_VULKAN_FUNCTIONS=0
     VMA_DYNAMIC_VULKAN_FUNCTIONS=1
+)
+
+target_precompile_headers(zahlen_render PRIVATE 
+    "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/Rendering.hpp>"
 )
 
 add_definitions(-D_CRT_SECURE_NO_WARNINGS)

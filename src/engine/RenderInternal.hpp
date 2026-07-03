@@ -3,6 +3,9 @@
 
 // File: src/render/RenderInternal.hpp
 #pragma once
+// clang-format off
+#include "Rendering.hpp"
+// clang-format on
 #include "Allocator.hpp"
 #include "ComputePass.hpp"
 #include "DescriptorLayout.hpp"

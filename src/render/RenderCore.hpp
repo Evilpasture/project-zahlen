@@ -3,17 +3,9 @@
 
 #pragma once
 
-#include "RenderCore.h"
-
-#include <array>
-#include <bit>
-#include <concepts>
-#include <cstdlib>
-#include <expected>
-#include <filesystem>
-#include <source_location>
-#include <span>
-#include <type_traits>
+#ifndef ZHLN_RENDERING_HPP_INCLUDED
+#error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
+#endif
 
 namespace ZHLN {
 

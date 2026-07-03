@@ -1,16 +1,13 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // src/render/StagingContext.hpp
 
 #pragma once
 
-#include "RenderCore.hpp"
-
-#include <cstddef>
-#include <cstring>
-#include <vector>
+#ifndef ZHLN_RENDERING_HPP_INCLUDED
+#error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
+#endif
 
 namespace ZHLN::Vk {
 

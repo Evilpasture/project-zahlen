@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-
-#include "RenderCore.hpp"
-
-#include <array>
-#include <type_traits>
-#include <vulkan/vulkan.h>
+#ifndef ZHLN_RENDERING_HPP_INCLUDED
+#error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
+#endif
 
 namespace ZHLN::Vk {
 

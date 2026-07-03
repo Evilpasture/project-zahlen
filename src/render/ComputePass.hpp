@@ -3,8 +3,9 @@
 
 // src/render/ComputePass.hpp
 #pragma once
-#include "PipelineBuilder.hpp"
-#include "RenderCore.hpp"
+#ifndef ZHLN_RENDERING_HPP_INCLUDED
+#error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
+#endif
 
 namespace ZHLN::Vk {
 

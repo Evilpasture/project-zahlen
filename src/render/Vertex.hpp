@@ -3,14 +3,9 @@
 
 #pragma once
 
-#include <array>
-#include <concepts>
-#include <cstddef>
-#ifdef __cpp_reflection
-#include <meta>
+#ifndef ZHLN_RENDERING_HPP_INCLUDED
+#error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
 #endif
-#include <type_traits>
-#include <vulkan/vulkan.h>
 
 namespace ZHLN::Vk {
 

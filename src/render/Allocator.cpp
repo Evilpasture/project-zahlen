@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // src/render/Allocator.cpp
-
+// clang-format off
+#include "Rendering.hpp"
+// clang-format on
 #include "Allocator.hpp"
 
 #include "RenderCore.hpp"

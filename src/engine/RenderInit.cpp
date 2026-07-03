@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // File: src/engine/RenderInit.cpp
+// clang-format off
+#include "Rendering.hpp"
+// clang-format on
 #include "IBLProcessor.hpp"
 #include "RenderCore.hpp"
 #include "RenderInternal.hpp"

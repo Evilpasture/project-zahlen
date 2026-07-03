@@ -3,7 +3,9 @@
 
 // RenderParams.hpp
 #pragma once
-
+// clang-format off
+#include "Rendering.hpp"
+// clang-format on
 #include "DescriptorLayout.hpp"
 #include "RenderCore.hpp"
 #include "Zahlen/Config.hpp"

@@ -6,6 +6,9 @@
 #define VK_USE_PLATFORM_METAL_EXT
 #import <Cocoa/Cocoa.h>
 #import <QuartzCore/CAMetalLayer.h>
+// clang-format off
+#include "../Rendering.hpp"
+// clang-format on
 #include "../RenderCore.hpp"
 #include "DemoWindow.hpp"
 

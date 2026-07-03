@@ -1,14 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
-#include <Utils.hpp>
-#include <algorithm>
-#include <cmath>
-#include <cstddef>
-#include <cstdint>
-#include <vector>
+#ifndef ZHLN_RENDERING_HPP_INCLUDED
+#error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
+#endif
 
 namespace ZHLN::Texture {
 
@@ -315,7 +311,7 @@ inline auto BlendColors(uint32_t bg, float r, float g, float b, float alpha) -> 
 	return PackColor(outR, outG, outB);
 }
 
-static auto GenerateOrganicBlades(uint32_t W, uint32_t H) -> std::vector<Blade> {
+inline auto GenerateOrganicBlades(uint32_t W, uint32_t H) -> std::vector<Blade> {
 	std::vector<Blade> blades;
 	float density = 1.5f; // Adjust for thicker/thinner grass fields
 
