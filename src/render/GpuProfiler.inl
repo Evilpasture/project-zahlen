@@ -3,8 +3,6 @@
 #pragma once
 #include "GpuProfiler.hpp"
 
-#include <vector>
-
 namespace ZHLN::Profiler {
 
 // ============================================================================

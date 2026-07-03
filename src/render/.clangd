@@ -1,0 +1,5 @@
+# .clangd
+If:
+  PathMatch: src/render/.*\.hpp
+CompileFlags:
+  Add: [-include, src/render/Rendering.hpp]
