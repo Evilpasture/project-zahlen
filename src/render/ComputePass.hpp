@@ -24,10 +24,14 @@ struct ComputePass {
 											   .push_constant_count = pushCount};
 		pipelineLayout = PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &pLayoutDesc));
 
-		pipeline =
+		auto p_res =
 			ComputePipelineBuilder().Shader(shader).Layout(pipelineLayout.Get()).Build(device);
 
-		return pipeline.Valid();
+		if (!p_res) {
+			return false;
+		}
+		pipeline = std::move(*p_res);
+		return true;
 	}
 
 	[[nodiscard]] bool BuildVariants(VkDevice device, VkDescriptorSetLayout descriptorLayout,
@@ -45,16 +49,16 @@ struct ComputePass {
 		pipelines.reserve(specInfos.size());
 
 		for (const auto& spec : specInfos) {
-			auto p = ComputePipelineBuilder()
-						 .Shader(shader)
-						 .Layout(pipelineLayout.Get())
-						 .Specialization(&spec)
-						 .Build(device);
+			auto p_res = ComputePipelineBuilder()
+							 .Shader(shader)
+							 .Layout(pipelineLayout.Get())
+							 .Specialization(&spec)
+							 .Build(device);
 
-			if (!p.Valid()) {
+			if (!p_res) {
 				return false;
 			}
-			pipelines.push_back(std::move(p));
+			pipelines.push_back(std::move(*p_res));
 		}
 		return !pipelines.empty();
 	}

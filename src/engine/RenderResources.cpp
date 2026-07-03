@@ -6,6 +6,7 @@
 #include "Resources.hpp"
 #include "Zahlen/Types.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <utility>
 
@@ -22,13 +23,19 @@ void RenderContext::Impl::CompileShadowPipeline(VkDevice device,
 							 sizeof(ObjectConstants))
 			.Build();
 
-	shadowPipeline = Vk::PipelineBuilder{}
-						 .Shaders(shaders)
-						 .Layout(shadowPipelineLayout.Get())
-						 .DepthOnly()
-						 .DepthFormat(VK_FORMAT_D32_SFLOAT)
-						 .CullNone()
-						 .Build(device);
+	auto shadowPipelineRes = Vk::PipelineBuilder{}
+								 .Shaders(shaders)
+								 .Layout(shadowPipelineLayout.Get())
+								 .DepthOnly()
+								 .DepthFormat(VK_FORMAT_D32_SFLOAT)
+								 .CullNone()
+								 .Build(device);
+
+	if (shadowPipelineRes) {
+		shadowPipeline = std::move(*shadowPipelineRes);
+	} else {
+		ZHLN::Panic("FATAL: Failed to build Shadow Pipeline!");
+	}
 }
 
 void RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device,
@@ -41,13 +48,19 @@ void RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device,
 			.AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT, sizeof(uint32_t))
 			.Build();
 
-	punctualShadowPipeline = Vk::PipelineBuilder{}
-								 .Shaders(shaders)
-								 .Layout(punctualShadowPipelineLayout.Get())
-								 .DepthOnly()
-								 .DepthFormat(VK_FORMAT_D32_SFLOAT)
-								 .CullNone()
-								 .Build(device);
+	auto punctualShadowPipelineRes = Vk::PipelineBuilder{}
+										 .Shaders(shaders)
+										 .Layout(punctualShadowPipelineLayout.Get())
+										 .DepthOnly()
+										 .DepthFormat(VK_FORMAT_D32_SFLOAT)
+										 .CullNone()
+										 .Build(device);
+
+	if (punctualShadowPipelineRes) {
+		punctualShadowPipeline = std::move(*punctualShadowPipelineRes);
+	} else {
+		ZHLN::Panic("FATAL: Failed to build Punctual Shadow Pipeline!");
+	}
 }
 
 auto RenderContext::GetRendererName() const -> const char* {
@@ -124,9 +137,12 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 		pipeline.Topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST);
 	}
 
-	auto finalPipeline = pipeline.Build(impl->ctx.Device());
+	auto finalPipelineRes = pipeline.Build(impl->ctx.Device());
+	if (!finalPipelineRes) {
+		ZHLN::Panic("FATAL: Failed to compile Material Pipeline!");
+	}
 
-	return {.pipeline = impl->materialPool.Create(std::move(finalPipeline), std::move(layout)),
+	return {.pipeline = impl->materialPool.Create(std::move(*finalPipelineRes), std::move(layout)),
 			.alphaMode = desc.alphaBlend ? 2u : 0u};
 }
 
@@ -157,29 +173,26 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
 
 	auto gpuImage = Vk::Image::Create(allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 
-	auto staging = Vk::Buffer::Create(allocator.Get(), imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-									  VMA_MEMORY_USAGE_CPU_ONLY);
-	std::memcpy(staging.Map().data, data, imageSize);
-
 	{
-		Vk::ImmediateCommand cmd(device, ctx.GraphicsQueue(), ctx.PhysicalInfo().graphics_family);
+		Vk::ImmediateCommand cmd(device, stagingRingBuffer);
+
+		auto stagingAlloc = cmd.AllocateStaging(imageSize);
+		std::memcpy(stagingAlloc.mappedData, data, imageSize);
 
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
 			cmd, gpuImage.Handle());
 
-		ZHLN_BufferImageCopyDesc copyRegion = {.buffer = staging.Handle(),
+		ZHLN_BufferImageCopyDesc copyRegion = {.buffer = stagingAlloc.buffer,
 											   .image = gpuImage.Handle(),
 											   .layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 											   .width = width,
 											   .height = height,
-											   .buffer_offset = 0,
+											   .buffer_offset = stagingAlloc.offset,
 											   .mip_level = 0,
 											   .base_array_layer = 0};
 		ZHLN_CmdCopyBufferToImage(cmd, &copyRegion);
 
 		ZHLN_GenerateMipmaps(cmd, gpuImage.Handle(), width, height, mipLevels);
-
-		cmd.KeepAlive(std::move(staging));
 	}
 
 	auto gpuView = isSRGB ? Vk::CreateView<VK_FORMAT_R8G8B8A8_SRGB>(
@@ -221,18 +234,14 @@ uint32_t RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceD
 
 	auto gpuImage = Vk::Image::Create(allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 
-	Vk::Buffer staging = Vk::Buffer::Create(
-		allocator.Get(), faceSize * 6, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
-
 	{
-		auto mapped = staging.Map();
+		Vk::ImmediateCommand cmd(device, stagingRingBuffer);
+
+		auto stagingAlloc = cmd.AllocateStaging(faceSize * 6);
 		for (uint32_t i = 0; i < 6; ++i) {
-			std::memcpy(static_cast<char*>(mapped.data) + (i * faceSize), faceData[i], faceSize);
+			std::memcpy(static_cast<char*>(stagingAlloc.mappedData) + (i * faceSize), faceData[i],
+						faceSize);
 		}
-	}
-
-	{
-		Vk::ImmediateCommand cmd(device, ctx.GraphicsQueue(), ctx.PhysicalInfo().graphics_family);
 
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
 			cmd, gpuImage.Handle());
@@ -242,7 +251,7 @@ uint32_t RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceD
 		for (uint32_t i = 0; i < 6; ++i) {
 			regions[i] = {.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
 						  .pNext = nullptr,
-						  .bufferOffset = i * faceSize,
+						  .bufferOffset = stagingAlloc.offset + (i * faceSize),
 						  .bufferRowLength = 0,
 						  .bufferImageHeight = 0,
 						  .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -255,7 +264,7 @@ uint32_t RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceD
 
 		VkCopyBufferToImageInfo2 copyInfo = {.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
 											 .pNext = nullptr,
-											 .srcBuffer = staging.Handle(),
+											 .srcBuffer = stagingAlloc.buffer,
 											 .dstImage = gpuImage.Handle(),
 											 .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 											 .regionCount = static_cast<uint32_t>(regions.size()),
@@ -264,8 +273,6 @@ uint32_t RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceD
 
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
-
-		cmd.KeepAlive(std::move(staging));
 	}
 
 	auto gpuView = Vk::CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), 1);
@@ -293,10 +300,18 @@ auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data,
 	auto gpu_buf = Vk::Buffer::Create(allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY);
 
 	{
-		Vk::ImmediateCommand cmd(ctx.Device(), ctx.GraphicsQueue(),
-								 ctx.PhysicalInfo().graphics_family);
-		auto staging = Vk::UploadToBuffer(allocator.Get(), cmd, gpu_buf, data, size);
-		cmd.KeepAlive(std::move(staging));
+		Vk::ImmediateCommand cmd(ctx.Device(),
+								 const_cast<Vk::StagingRingBuffer&>(stagingRingBuffer));
+		auto stagingAlloc = cmd.AllocateStaging(size);
+		std::memcpy(stagingAlloc.mappedData, data, size);
+
+		const ZHLN_BufferCopyDesc copy = {.src = stagingAlloc.buffer,
+										  .dst = gpu_buf.Handle(),
+										  .size = static_cast<VkDeviceSize>(size),
+										  .src_offset = stagingAlloc.offset,
+										  .dst_offset = 0};
+
+		ZHLN_CmdCopyBuffer(cmd, &copy);
 	}
 
 	VkBufferDeviceAddressInfo bdaInfo = {
@@ -400,8 +415,7 @@ void RenderContext::SetShadowResolution(uint32_t resolution) {
 	}
 
 	{
-		Vk::ImmediateCommand cmd(impl->ctx.Device(), impl->ctx.GraphicsQueue(),
-								 impl->ctx.PhysicalInfo().graphics_family);
+		Vk::ImmediateCommand cmd(impl->ctx.Device(), impl->stagingRingBuffer);
 
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
 			cmd, impl->shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
@@ -467,12 +481,32 @@ void RenderContext::BuildMeshBLAS(Mesh& mesh) {
 											VMA_MEMORY_USAGE_GPU_ONLY);
 
 	{
-		Vk::ImmediateCommand cmd(impl->ctx.Device(), impl->ctx.GraphicsQueue(),
-								 impl->ctx.PhysicalInfo().graphics_family);
-		impl->rtCtx.CmdBuildBlas(cmd, geom, nativePosMesh->blas,
-								 Vk::GetBufferDeviceAddress(impl->ctx.Device(), scratch.Handle()),
-								 primitiveCount);
-		cmd.KeepAlive(std::move(scratch));
+		Vk::CommandPool tempPool(impl->ctx.Device(), impl->ctx.PhysicalInfo().graphics_family);
+		if (tempPool.Allocate(1)) {
+			VkCommandBuffer tempCmd = tempPool[0];
+			ZHLN_BeginCommandBuffer(tempCmd);
+
+			// Synchronize the vertex/index buffer copy writes with the BLAS build reads
+			Vk::MemoryBarrier(
+				tempCmd, {.src_stage = VK_PIPELINE_STAGE_2_COPY_BIT,
+						  .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+						  .dst_stage = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+						  .dst_access = VK_ACCESS_2_SHADER_READ_BIT});
+
+			impl->rtCtx.CmdBuildBlas(
+				tempCmd, geom, nativePosMesh->blas,
+				Vk::GetBufferDeviceAddress(impl->ctx.Device(), scratch.Handle()), primitiveCount);
+			ZHLN_EndCommandBuffer(tempCmd);
+
+			VkCommandBufferSubmitInfo subInfo = {
+				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = tempCmd};
+			VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+									.commandBufferInfoCount = 1,
+									.pCommandBufferInfos = &subInfo};
+
+			vkQueueSubmit2(impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
+			vkQueueWaitIdle(impl->ctx.GraphicsQueue());
+		}
 	}
 }
 

@@ -90,8 +90,10 @@ typedef struct ZHLN_PhysicalDeviceInfo {
 	VkPhysicalDeviceMemoryProperties2 memory; /**< Heap and memory type info */
 	uint32_t graphics_family;				  /**< Index of the graphics queue family */
 	uint32_t present_family;				  /**< Index of the presentation queue family */
+	uint32_t transfer_family;				  /**< Index of the dedicated transfer queue family */
 	bool has_graphics;						  /**< True if a graphics queue was found */
 	bool has_present;						  /**< True if presentation is supported on 'surface' */
+	bool has_transfer;						  /**< True if dedicated transfer is supported */
 } ZHLN_PhysicalDeviceInfo;
 
 /**
@@ -136,6 +138,7 @@ typedef struct ZHLN_Device {
 	VkDevice handle;
 	VkQueue graphics_queue;
 	VkQueue present_queue;
+	VkQueue transfer_queue; /**< Dedicated async transfer queue */
 } ZHLN_Device;
 
 [[nodiscard]]
@@ -386,6 +389,8 @@ typedef struct ZHLN_FrameSubmitDesc {
 	const VkFence inFlight;
 	const VkSwapchainKHR swapchain;
 	const uint32_t imageIndex;
+	const VkSemaphore stagingSemaphore; /**< Timeline semaphore for transfer queue sync */
+	const uint64_t stagingWaitValue;	/**< Target timeline value to wait on */
 } ZHLN_FrameSubmitDesc;
 
 [[nodiscard]]

@@ -229,7 +229,8 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
 	const VkValidationFeatureEnableEXT enables[] = {
 		VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT,
 		VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT,
-		VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT};
+		VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT,
+		VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT};
 	const VkValidationFeaturesEXT features = {.sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT,
 											  .enabledValidationFeatureCount = 2,
 											  .pEnabledValidationFeatures = enables};
@@ -287,20 +288,46 @@ static int32_t ZHLN_Internal_DefaultScoreFn(const ZHLN_PhysicalDeviceInfo* const
 static void ZHLN_Internal_QueryQueueFamilies(const VkPhysicalDevice device,
 											 const VkSurfaceKHR surface,
 											 uint32_t* const restrict out_graphics,
-											 uint32_t* const restrict out_present) {
+											 uint32_t* const restrict out_present,
+											 uint32_t* const restrict out_transfer) {
 	*out_graphics = UINT32_MAX;
 	*out_present = UINT32_MAX;
+	*out_transfer = UINT32_MAX;
 
 	uint32_t count = 0;
 	vkGetPhysicalDeviceQueueFamilyProperties(device, &count, nullptr);
 
 	VkQueueFamilyProperties families[64] = {};
-	count = ZHLN_Min(count, 64); // clamp; no heap alloc in C layer
+	count = ZHLN_Min(count, 64);
 	vkGetPhysicalDeviceQueueFamilyProperties(device, &count, families);
+
+	// First pass: Find dedicated transfer queue (has transfer bit, but no graphics/compute)
+	for (uint32_t i = 0; i < count; ++i) {
+		if ((families[i].queueFlags & VK_QUEUE_TRANSFER_BIT) &&
+			!(families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
+			!(families[i].queueFlags & VK_QUEUE_COMPUTE_BIT)) {
+			*out_transfer = i;
+			break;
+		}
+	}
+
+	// Fallback to non-dedicated transfer families
+	if (*out_transfer == UINT32_MAX) {
+		for (uint32_t i = 0; i < count; ++i) {
+			if ((families[i].queueFlags & VK_QUEUE_TRANSFER_BIT) &&
+				!(families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
+				*out_transfer = i;
+				break;
+			}
+		}
+	}
 
 	for (uint32_t i = 0; i < count; ++i) {
 		if (families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT && *out_graphics == UINT32_MAX) {
 			*out_graphics = i;
+			if (*out_transfer == UINT32_MAX) {
+				*out_transfer = i;
+			}
 		}
 
 		if (surface != VK_NULL_HANDLE && *out_present == UINT32_MAX) {
@@ -352,10 +379,11 @@ ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* const restrict desc) {
 		vkGetPhysicalDeviceMemoryProperties2(devices[i], &info.memory);
 
 		ZHLN_Internal_QueryQueueFamilies(devices[i], desc->surface, &info.graphics_family,
-										 &info.present_family);
+										 &info.present_family, &info.transfer_family);
 
 		info.has_graphics = (info.graphics_family != UINT32_MAX);
 		info.has_present = (info.present_family != UINT32_MAX);
+		info.has_transfer = (info.transfer_family != UINT32_MAX);
 
 		const int32_t score = score_fn(&info, desc->score_userdata);
 		if (score > best_score) {
@@ -411,15 +439,29 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
 	}
 
 	// --- Queue Creation ---
-	// Deduplicate: if graphics and present are the same family, only create one queue
-	const uint32_t unique_families[2] = {
+	const uint32_t queue_candidates[3] = {
 		desc->physical->graphics_family,
 		desc->physical->present_family,
+		desc->physical->transfer_family,
 	};
-	const uint32_t unique_count = (unique_families[0] == unique_families[1]) ? 1U : 2U;
+
+	uint32_t unique_families[3] = {0};
+	uint32_t unique_count = 0;
+	for (uint32_t i = 0; i < 3; ++i) {
+		bool is_duplicate = false;
+		for (uint32_t j = 0; j < unique_count; ++j) {
+			if (queue_candidates[i] == unique_families[j]) {
+				is_duplicate = true;
+				break;
+			}
+		}
+		if (!is_duplicate) {
+			unique_families[unique_count++] = queue_candidates[i];
+		}
+	}
 
 	const float priority = 1.0F;
-	VkDeviceQueueCreateInfo queue_infos[2] = {};
+	VkDeviceQueueCreateInfo queue_infos[3] = {};
 	for (uint32_t i = 0; i < unique_count; ++i) {
 		queue_infos[i] = (VkDeviceQueueCreateInfo){
 			.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
@@ -461,19 +503,17 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
 	// --- Queue Retrieval ---
 	VkQueue graphics_queue = VK_NULL_HANDLE;
 	VkQueue present_queue = VK_NULL_HANDLE;
-	vkGetDeviceQueue(handle, desc->physical->graphics_family, 0, &graphics_queue);
+	VkQueue transfer_queue = VK_NULL_HANDLE;
 
-	// If families are the same, present_queue is just an alias — no second call needed
-	present_queue =
-		(unique_count == 1)
-			? graphics_queue
-			: (vkGetDeviceQueue(handle, desc->physical->present_family, 0, &present_queue),
-			   present_queue);
+	vkGetDeviceQueue(handle, desc->physical->graphics_family, 0, &graphics_queue);
+	vkGetDeviceQueue(handle, desc->physical->present_family, 0, &present_queue);
+	vkGetDeviceQueue(handle, desc->physical->transfer_family, 0, &transfer_queue);
 
 	return (ZHLN_Device){
 		.handle = handle,
 		.graphics_queue = graphics_queue,
 		.present_queue = present_queue,
+		.transfer_queue = transfer_queue,
 	};
 }
 
@@ -1256,22 +1296,34 @@ void ZHLN_EndRendering(const VkCommandBuffer cmd) {
 
 [[nodiscard]]
 ZHLN_FrameResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* const restrict desc) {
-	// Accessing via -> (Pointer access)
 	const VkCommandBufferSubmitInfo cmd_info = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = desc->cmd};
 
-	const VkSemaphoreSubmitInfo wait_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-											 .semaphore = desc->imageAvailable,
-											 .stageMask =
-												 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT};
+	VkSemaphoreSubmitInfo wait_infos[2] = {};
+	uint32_t wait_count = 0;
+
+	// Wait 1: Presentation engine sync
+	wait_infos[wait_count++] =
+		(VkSemaphoreSubmitInfo){.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+								.semaphore = desc->imageAvailable,
+								.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT};
+
+	// Wait 2: Staging/Transfer synchronization
+	if (desc->stagingSemaphore != VK_NULL_HANDLE && desc->stagingWaitValue > 0) {
+		wait_infos[wait_count++] =
+			(VkSemaphoreSubmitInfo){.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+									.semaphore = desc->stagingSemaphore,
+									.value = desc->stagingWaitValue,
+									.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT};
+	}
 
 	const VkSemaphoreSubmitInfo signal_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
 											   .semaphore = desc->renderFinished,
 											   .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT};
 
 	const VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-								  .waitSemaphoreInfoCount = 1,
-								  .pWaitSemaphoreInfos = &wait_info,
+								  .waitSemaphoreInfoCount = wait_count,
+								  .pWaitSemaphoreInfos = wait_infos,
 								  .commandBufferInfoCount = 1,
 								  .pCommandBufferInfos = &cmd_info,
 								  .signalSemaphoreInfoCount = 1,

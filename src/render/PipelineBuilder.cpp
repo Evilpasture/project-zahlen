@@ -68,11 +68,12 @@ auto ComputePipelineBuilder::Specialization(const VkSpecializationInfo* info) no
 	return *this;
 }
 
-auto ComputePipelineBuilder::Build(const VkDevice device) const noexcept -> Pipeline {
+auto ComputePipelineBuilder::Build(const VkDevice device) const noexcept
+	-> std::expected<Pipeline, PipelineBuilderResult> {
 	const auto result = Validate();
 	if (result != PipelineBuilderResult::Succeeded) {
 		ReportComputePipelineBuilderError(result);
-		return {};
+		return std::unexpected(result);
 	}
 
 	const ZHLN_ComputePipelineDesc desc = {
@@ -81,7 +82,7 @@ auto ComputePipelineBuilder::Build(const VkDevice device) const noexcept -> Pipe
 		.specialization_info = _specialization_info,
 	};
 
-	return {device, ZHLN_CreateComputePipeline(device, &desc)};
+	return Pipeline(device, ZHLN_CreateComputePipeline(device, &desc));
 }
 
 auto ComputePipelineBuilder::Validate() const noexcept -> PipelineBuilderResult {

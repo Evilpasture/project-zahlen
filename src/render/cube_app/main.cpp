@@ -15,18 +15,23 @@
 // ----------------------------------------------------------------------------
 // Vulkan App
 // ----------------------------------------------------------------------------
-static std::vector<uint32_t> LoadSpirv(const std::filesystem::path& path) {
-	if (!std::filesystem::exists(path))
+namespace {
+[[nodiscard]] std::vector<uint32_t> LoadSpirv(const std::filesystem::path& path) {
+	if (!std::filesystem::exists(path)) {
 		return {};
+	}
 	std::ifstream file(path, std::ios::ate | std::ios::binary);
-	if (!file.is_open())
+	if (!file.is_open()) {
 		return {};
+	}
 	const size_t file_size = static_cast<size_t>(file.tellg());
 	std::vector<uint32_t> buffer(file_size / sizeof(uint32_t));
 	file.seekg(0);
-	file.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(file_size));
+	file.read(static_cast<char*>(static_cast<void*>(buffer.data())),
+			  static_cast<std::streamsize>(file_size));
 	return buffer;
 }
+} // namespace
 
 // Define the Descriptor Layout using the TMP Builder
 using CubeLayout = ZHLN::Vk::DescriptorLayout<ZHLN::Vk::SampledImageSlot<0>, // Texture
@@ -36,7 +41,7 @@ using CubeLayout = ZHLN::Vk::DescriptorLayout<ZHLN::Vk::SampledImageSlot<0>, // 
 int main() {
 	// 1. OS Window Creation
 	ZHLN::Demo::WindowState win = ZHLN::Demo::InitWindow(800, 600, "ZHLN Engine - Cube");
-	if (!win.os_window) {
+	if (win.os_window == nullptr) {
 		std::println(stderr, "Failed to create OS window. Exiting.");
 		return -1;
 	}
@@ -92,7 +97,13 @@ int main() {
 								.features = &feat2,
 								.enable_validation = true};
 
-	auto ctx = ZHLN::Vk::Context::Create(inst_desc, {VK_NULL_HANDLE, VK_NULL_HANDLE}, dev_desc);
+	auto ctx = ZHLN::Vk::Context::Create(inst_desc,
+										 ZHLN_DeviceSelectDesc{.instance = VK_NULL_HANDLE,
+															   .surface = VK_NULL_HANDLE,
+															   .score_fn = nullptr,
+															   .score_userdata = nullptr},
+										 dev_desc);
+
 	if (!ctx) {
 		std::println(stderr, "FATAL: Failed to create Vulkan Context.");
 		return -1;
@@ -103,8 +114,9 @@ int main() {
 	ZHLN::Vk::Surface surface(ctx.Instance(), raw_surface);
 
 	ZHLN::Vk::Allocator allocator;
-	if (!allocator.Init(ctx))
+	if (!allocator.Init(ctx)) {
 		return -1;
+	}
 
 	ZHLN::Vk::Swapchain swapchain(ctx.Device(), {});
 	auto sync = ZHLN::Vk::FrameSync<3>::Create(ctx.Device());
@@ -123,7 +135,7 @@ int main() {
 		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 		.imageType = VK_IMAGE_TYPE_2D,
 		.format = VK_FORMAT_R8G8B8A8_UNORM,
-		.extent = {TEX_W, TEX_H, 1},
+		.extent = {.width = TEX_W, .height = TEX_H, .depth = 1},
 		.mipLevels = 1,
 		.arrayLayers = 1,
 		.samples = VK_SAMPLE_COUNT_1_BIT,
@@ -135,12 +147,14 @@ int main() {
 
 	ZHLN::Vk::Image cube_texture_image =
 		ZHLN::Vk::Image::Create(allocator.Get(), tex_info, VMA_MEMORY_USAGE_GPU_ONLY);
-	if (!cube_texture_image.Valid())
+	if (!cube_texture_image.Valid()) {
 		return -1;
+	}
 
 	ZHLN::Vk::CommandPool setupPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-	if (!setupPool.Allocate(1))
+	if (!setupPool.Allocate(1)) {
 		return -1;
+	}
 
 	VkCommandBuffer setupCmd = setupPool[0];
 
@@ -188,8 +202,9 @@ int main() {
 	VkDescriptorSet cube_descriptor_set =
 		CubeLayout::Allocate(ctx.Device(), cube_desc_pool.Get(), cube_desc_layout.Get());
 	CubeLayout::Write(ctx.Device(), cube_descriptor_set,
-					  ZHLN::Vk::ImageWrite{cube_texture_view.Get()},
-					  ZHLN::Vk::SamplerWrite{cube_sampler.Get()});
+					  ZHLN::Vk::ImageWrite{.view = cube_texture_view.Get(),
+										   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+					  ZHLN::Vk::SamplerWrite{.sampler = cube_sampler.Get()});
 
 	// =========================================================================
 	// 6. Pipeline Setup
@@ -212,17 +227,17 @@ int main() {
 	ZHLN::Vk::PipelineLayout layout(ctx.Device(),
 									ZHLN_CreatePipelineLayout(ctx.Device(), &layout_desc));
 
-	auto pipeline = ZHLN::Vk::PipelineBuilder{}
-						.Shaders(shaders)
-						.Layout(layout.Get())
-						.ColorFormats({VK_FORMAT_B8G8R8A8_SRGB})
-						.DepthFormat(VK_FORMAT_D32_SFLOAT)
-						.DepthTest(true)
-						.DepthWrite(true)
-						.CullBack()
-						.Build(ctx.Device());
+	auto pipelineRes = ZHLN::Vk::PipelineBuilder{}
+						   .Shaders(shaders)
+						   .Layout(layout.Get())
+						   .ColorFormats({VK_FORMAT_B8G8R8A8_SRGB})
+						   .DepthFormat(VK_FORMAT_D32_SFLOAT)
+						   .DepthTest(true)
+						   .DepthWrite(true)
+						   .CullBack()
+						   .Build(ctx.Device());
 
-	if (!pipeline.Valid()) {
+	if (!pipelineRes) {
 		std::println(stderr, "FATAL: Failed to create cube graphics pipeline.");
 		return -1;
 	}
@@ -235,7 +250,10 @@ int main() {
 		vkDeviceWaitIdle(ctx.Device());
 		depth_initialized = false;
 
-		ZHLN_Device raw_dev = {ctx.Device(), ctx.GraphicsQueue(), ctx.PresentQueue()};
+		ZHLN_Device raw_dev = {.handle = ctx.Device(),
+							   .graphics_queue = ctx.GraphicsQueue(),
+							   .present_queue = ctx.PresentQueue(),
+							   .transfer_queue = ctx.TransferQueue()};
 		ZHLN_PhysicalDeviceInfo raw_phys = ctx.PhysicalInfo();
 		ZHLN_SwapchainDesc s_desc = {.device = &raw_dev,
 									 .physical = &raw_phys,
@@ -244,8 +262,9 @@ int main() {
 									 .height = win.height,
 									 .vsync = true,
 									 .old_swapchain = swapchain.Get().handle};
-		if (!swapchain.Rebuild(s_desc))
+		if (!swapchain.Rebuild(s_desc)) {
 			return false;
+		}
 
 		present_semaphores.Rebuild(ctx.Device(), swapchain.Get().image_count);
 
@@ -253,7 +272,7 @@ int main() {
 			.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 			.imageType = VK_IMAGE_TYPE_2D,
 			.format = VK_FORMAT_D32_SFLOAT,
-			.extent = {win.width, win.height, 1},
+			.extent = {.width = win.width, .height = win.height, .depth = 1},
 			.mipLevels = 1,
 			.arrayLayers = 1,
 			.samples = VK_SAMPLE_COUNT_1_BIT,
@@ -276,16 +295,19 @@ int main() {
 	while (win.running) {
 		ZHLN::Demo::ProcessEvents(win);
 
-		if (win.width == 0 || win.height == 0)
+		if (win.width == 0 || win.height == 0) {
 			continue;
+		}
 		if (win.resized) {
-			if (!rebuild())
+			if (!rebuild()) {
 				break;
+			}
 			win.resized = false;
 		}
 
-		if (!swapchain.Valid() || swapchain.Get().extent.width == 0)
+		if (!swapchain.Valid() || swapchain.Get().extent.width == 0) {
 			continue;
+		}
 
 		const auto now = std::chrono::high_resolution_clock::now();
 		const float elapsed = std::chrono::duration<float>(now - when).count();
@@ -318,7 +340,7 @@ int main() {
 
 			{
 				ZHLN::Vk::ScopedRendering render(cmd, pass);
-				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
+				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineRes->Get());
 
 				vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout.Get(), 0, 1,
 										&cube_descriptor_set, 0, nullptr);
@@ -357,7 +379,9 @@ int main() {
 										   .renderFinished = present_semaphores[image_index],
 										   .inFlight = frame_sync.in_flight,
 										   .swapchain = swapchain.Get().handle,
-										   .imageIndex = image_index};
+										   .imageIndex = image_index,
+										   .stagingSemaphore = VK_NULL_HANDLE,
+										   .stagingWaitValue = 0};
 
 		if (ZHLN::Vk::SubmitAndPresent(submitDesc) != ZHLN_FrameResult_Ok) {
 			win.resized = true;

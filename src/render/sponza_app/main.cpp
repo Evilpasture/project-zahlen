@@ -32,15 +32,29 @@
 ZHLN_REFLECT_VERTEX(ZHLN::Vk::Vertex, pos, norm, tangent, uv0, uv1);
 
 // ============================================================================
-// Types & RAII Wrappers
+// Types & RAII Wrappers (Enclosed inside anonymous namespace for internal linkage)
 // ============================================================================
-
+namespace {
 struct GltfData {
 	cgltf_data* ptr = nullptr;
 	~GltfData() {
-		if (ptr) {
+		if (ptr != nullptr) {
 			cgltf_free(ptr);
 		}
+	}
+
+	GltfData() = default;
+	GltfData(const GltfData&) = delete;
+	auto operator=(const GltfData&) -> GltfData& = delete;
+	GltfData(GltfData&& other) noexcept : ptr(std::exchange(other.ptr, nullptr)) {}
+	auto operator=(GltfData&& other) noexcept -> GltfData& {
+		if (this != &other) {
+			if (ptr != nullptr) {
+				cgltf_free(ptr);
+			}
+			ptr = std::exchange(other.ptr, nullptr);
+		}
+		return *this;
 	}
 
 	[[nodiscard]] static GltfData Load(const std::string& path) {
@@ -48,7 +62,7 @@ struct GltfData {
 		cgltf_options opts{};
 		if (cgltf_parse_file(&opts, path.c_str(), &d.ptr) != cgltf_result_success ||
 			cgltf_load_buffers(&opts, d.ptr, path.c_str()) != cgltf_result_success) {
-			if (d.ptr) {
+			if (d.ptr != nullptr) {
 				cgltf_free(d.ptr);
 				d.ptr = nullptr;
 			}
@@ -201,22 +215,23 @@ static Scene BuildScene(cgltf_data* data) {
 			for (cgltf_size a = 0; a < prim->attributes_count; ++a) {
 				cgltf_attribute* attr = &prim->attributes[a];
 				for (cgltf_size v = 0; v < vertexCount; ++v) {
-					if (attr->type == cgltf_attribute_type_position)
+					if (attr->type == cgltf_attribute_type_position) {
 						cgltf_accessor_read_float(attr->data, v,
 												  scene.vertices[startVert + v].pos.data(), 3);
-					else if (attr->type == cgltf_attribute_type_normal)
+					} else if (attr->type == cgltf_attribute_type_normal) {
 						cgltf_accessor_read_float(attr->data, v,
 												  scene.vertices[startVert + v].norm.data(), 3);
-					else if (attr->type == cgltf_attribute_type_tangent)
+					} else if (attr->type == cgltf_attribute_type_tangent) {
 						cgltf_accessor_read_float(attr->data, v,
 												  scene.vertices[startVert + v].tangent.data(), 4);
-					else if (attr->type == cgltf_attribute_type_texcoord) {
-						if (attr->index == 0) // UV0
+					} else if (attr->type == cgltf_attribute_type_texcoord) {
+						if (attr->index == 0) { // UV0
 							cgltf_accessor_read_float(attr->data, v,
 													  scene.vertices[startVert + v].uv0.data(), 2);
-						else if (attr->index == 1) // UV1
+						} else if (attr->index == 1) { // UV1
 							cgltf_accessor_read_float(attr->data, v,
 													  scene.vertices[startVert + v].uv1.data(), 2);
+						}
 					}
 				}
 			}
@@ -238,10 +253,10 @@ static Scene BuildScene(cgltf_data* data) {
 			continue;
 		}
 
-		float matrix[16];
-		cgltf_node_transform_world(node, matrix);
-		Mat4 worldMat;
-		std::copy(matrix, matrix + 16, worldMat.data.begin());
+		std::array<float, 16> matrix{};
+		cgltf_node_transform_world(node, matrix.data());
+		Mat4 worldMat{};
+		std::copy(matrix.begin(), matrix.end(), worldMat.data.begin());
 
 		size_t meshIdx = node->mesh - data->meshes;
 		for (size_t primIdx : meshPrimIndices[meshIdx]) {
@@ -305,6 +320,7 @@ struct FpsCounter {
 						   1000.0f / fps, drawCallCount);
 	}
 };
+} // namespace
 
 // ============================================================================
 // main
@@ -380,7 +396,12 @@ auto main() -> int {
 								.enable_validation = true};
 
 	// --- 4. Context Creation ---
-	auto ctx = ZHLN::Vk::Context::Create(inst_desc, {VK_NULL_HANDLE, VK_NULL_HANDLE}, dev_desc);
+	auto ctx = ZHLN::Vk::Context::Create(inst_desc,
+										 ZHLN_DeviceSelectDesc{.instance = VK_NULL_HANDLE,
+															   .surface = VK_NULL_HANDLE,
+															   .score_fn = nullptr,
+															   .score_userdata = nullptr},
+										 dev_desc);
 
 	if (!ctx) {
 		std::println(stderr, "Context creation failed. Check if your GPU supports Vulkan 1.3 and "
@@ -434,8 +455,8 @@ auto main() -> int {
 		}
 
 		// 2. Only add ACTUAL point/spot lights (lamps) to the buffer
-		float matrix[16];
-		cgltf_node_transform_world(node, matrix);
+		std::array<float, 16> matrix{};
+		cgltf_node_transform_world(node, matrix.data());
 
 		ZHLN::Vk::Passes::Light l{};
 		l.type = (uint32_t)node->light->type;
@@ -624,7 +645,7 @@ auto main() -> int {
 		materials[i].emissiveIdx = blackTexIdx; // Default to black
 
 		// Only assign emissive if it actually exists in the glTF
-		if (mat->has_emissive_strength || (mat->emissive_texture.texture)) {
+		if (mat->has_emissive_strength || (mat->emissive_texture.texture != nullptr)) {
 			if ((mat->emissive_texture.texture != nullptr) &&
 				(mat->emissive_texture.texture->image != nullptr)) {
 				int imgIdx = static_cast<int>(mat->emissive_texture.texture->image - gltf->images);
@@ -641,7 +662,7 @@ auto main() -> int {
 
 		// 1. Assign Albedo (Base Color)
 		if (mat->has_pbr_metallic_roughness &&
-			mat->pbr_metallic_roughness.base_color_texture.texture) {
+			(mat->pbr_metallic_roughness.base_color_texture.texture != nullptr)) {
 			cgltf_texture* tex = mat->pbr_metallic_roughness.base_color_texture.texture;
 			if (tex->image != nullptr) {
 				int imgIdx = static_cast<int>(tex->image - gltf->images);
@@ -710,13 +731,18 @@ auto main() -> int {
 	auto fxaaShaders = ZHLN::Vk::ShaderStages::FromFiles(
 		ctx.Device(), "fxaa.hlsl.VSMain.spv", "fxaa.hlsl.PSMain.spv", "VSMain", "PSMain");
 
-	auto fxaaPipeline = ZHLN::Vk::PipelineBuilder{}
-							.Shaders(fxaaShaders)
-							.Layout(fxaaPipelineLayout.Get())
-							.ColorFormats({VK_FORMAT_B8G8R8A8_SRGB}) // Output to swapchain
-							.NoDepth()
-							.CullNone()
-							.Build(ctx.Device());
+	auto fxaaPipelineRes = ZHLN::Vk::PipelineBuilder{}
+							   .Shaders(fxaaShaders)
+							   .Layout(fxaaPipelineLayout.Get())
+							   .ColorFormats({VK_FORMAT_B8G8R8A8_SRGB}) // Output to swapchain
+							   .NoDepth()
+							   .CullNone()
+							   .Build(ctx.Device());
+
+	if (!fxaaPipelineRes) {
+		std::println(stderr, "FATAL: Failed to build FXAA pipeline.");
+		return -1;
+	}
 
 	// --- Pipelines (Via Factory & Builder) ---
 	auto shaders = ZHLN::Vk::ShaderStages::FromFiles(ctx.Device(), paths.vert_spv, paths.frag_spv,
@@ -747,23 +773,33 @@ auto main() -> int {
 	ZHLN::Vk::PipelineLayout shadowLayout(
 		ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &shadowLayoutDesc));
 
-	auto pipeline = ZHLN::Vk::PipelineBuilder{}
-						.Shaders(shaders)
-						.Layout(pipelineLayout.Get())
-						.Vertex<ZHLN::Vk::Vertex>()
-						.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
-						.DepthFormat(VK_FORMAT_D32_SFLOAT)
-						.WindingCW()
-						.CullBack()
-						.Build(ctx.Device());
+	auto pipelineRes = ZHLN::Vk::PipelineBuilder{}
+						   .Shaders(shaders)
+						   .Layout(pipelineLayout.Get())
+						   .Vertex<ZHLN::Vk::Vertex>()
+						   .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
+						   .DepthFormat(VK_FORMAT_D32_SFLOAT)
+						   .WindingCW()
+						   .CullBack()
+						   .Build(ctx.Device());
 
-	auto shadowPipeline = ZHLN::Vk::PipelineBuilder{}
-							  .Shaders(shadowShaders)
-							  .Layout(shadowLayout.Get())
-							  .Vertex<ZHLN::Vk::Vertex>()
-							  .DepthOnly()
-							  .CullNone()
-							  .Build(ctx.Device());
+	if (!pipelineRes) {
+		std::println(stderr, "FATAL: Failed to build main PBR pipeline.");
+		return -1;
+	}
+
+	auto shadowPipelineRes = ZHLN::Vk::PipelineBuilder{}
+								 .Shaders(shadowShaders)
+								 .Layout(shadowLayout.Get())
+								 .Vertex<ZHLN::Vk::Vertex>()
+								 .DepthOnly()
+								 .CullNone()
+								 .Build(ctx.Device());
+
+	if (!shadowPipelineRes) {
+		std::println(stderr, "FATAL: Failed to build shadow pipeline.");
+		return -1;
+	}
 
 	// --- Frame loop resources ---
 	auto sync = ZHLN::Vk::FrameSync<3>::Create(ctx.Device());
@@ -898,15 +934,15 @@ auto main() -> int {
 			.ibo = ibo.Handle()};
 
 		// 3. Define the Pass Configurations
-		AppFrameData frameData = {.shadowData = {.pipeline = shadowPipeline.Get(),
+		AppFrameData frameData = {.shadowData = {.pipeline = shadowPipelineRes->Get(),
 												 .layout = shadowLayout.Get(),
 												 .drawCalls = &pbrCalls,
 												 .scene = &sceneCtx},
-								  .pbrData = {.pipeline = pipeline.Get(),
+								  .pbrData = {.pipeline = pipelineRes->Get(),
 											  .layout = pipelineLayout.Get(),
 											  .drawCalls = &pbrCalls,
 											  .scene = &sceneCtx},
-								  .fxaaData = {.pipeline = fxaaPipeline.Get(),
+								  .fxaaData = {.pipeline = fxaaPipelineRes->Get(),
 											   .layout = fxaaPipelineLayout.Get(),
 											   .set = fxaaSet}};
 
@@ -972,7 +1008,9 @@ auto main() -> int {
 											   presentation.presentSemaphores[image_index],
 										   .inFlight = frame_sync.in_flight,
 										   .swapchain = presentation.swapchain.Get().handle,
-										   .imageIndex = image_index};
+										   .imageIndex = image_index,
+										   .stagingSemaphore = VK_NULL_HANDLE,
+										   .stagingWaitValue = 0};
 
 		if (ZHLN::Vk::SubmitAndPresent(submitDesc) != ZHLN_FrameResult_Ok) {
 			win.resized = true;

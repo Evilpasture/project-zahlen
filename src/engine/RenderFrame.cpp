@@ -354,7 +354,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 								.dst_offset = 0};
 	ZHLN_CmdCopyBuffer(cmd, &copy);
 
-	Vk::MemoryBarrier(cmd, {.src_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+	Vk::MemoryBarrier(cmd, {.src_stage = VK_PIPELINE_STAGE_2_COPY_BIT,
 							.src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
 							.dst_stage = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
 							.dst_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |

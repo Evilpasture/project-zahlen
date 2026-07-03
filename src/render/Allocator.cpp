@@ -208,37 +208,223 @@ auto Image::Create(VmaAllocator allocator, const VkImageCreateInfo& info, VmaMem
 }
 
 // ============================================================================
-// Immediate Command PIMPL Implementation
+// StagingRingBuffer Implementation
+// ============================================================================
+
+StagingRingBuffer::StagingRingBuffer(StagingRingBuffer&& other) noexcept
+	: _allocator(std::exchange(other._allocator, nullptr)),
+	  _device(std::exchange(other._device, VK_NULL_HANDLE)),
+	  _queue(std::exchange(other._queue, VK_NULL_HANDLE)),
+	  _queueFamily(std::exchange(other._queueFamily, 0xFFFFFFFF)),
+	  _stagingBuffer(std::move(other._stagingBuffer)),
+	  _mappedRegion(std::move(other._mappedRegion)),
+	  _mappedPtr(std::exchange(other._mappedPtr, nullptr)),
+	  _capacity(std::exchange(other._capacity, 0)), _head(std::exchange(other._head, 0)),
+	  _tail(std::exchange(other._tail, 0)),
+	  _timelineSemaphore(std::exchange(other._timelineSemaphore, VK_NULL_HANDLE)),
+	  _timelineValue(std::exchange(other._timelineValue, 0)),
+	  _activeAllocations(std::move(other._activeAllocations)),
+	  _retiredPools(std::move(other._retiredPools)) {}
+
+auto StagingRingBuffer::operator=(StagingRingBuffer&& other) noexcept -> StagingRingBuffer& {
+	if (this != &other) {
+		Cleanup();
+		_allocator = std::exchange(other._allocator, nullptr);
+		_device = std::exchange(other._device, VK_NULL_HANDLE);
+		_queue = std::exchange(other._queue, VK_NULL_HANDLE);
+		_queueFamily = std::exchange(other._queueFamily, 0xFFFFFFFF);
+		_stagingBuffer = std::move(other._stagingBuffer);
+		_mappedRegion = std::move(other._mappedRegion);
+		_mappedPtr = std::exchange(other._mappedPtr, nullptr);
+		_capacity = std::exchange(other._capacity, 0);
+		_head = std::exchange(other._head, 0);
+		_tail = std::exchange(other._tail, 0);
+		_timelineSemaphore = std::exchange(other._timelineSemaphore, VK_NULL_HANDLE);
+		_timelineValue = std::exchange(other._timelineValue, 0);
+		_activeAllocations = std::move(other._activeAllocations);
+		_retiredPools = std::move(other._retiredPools);
+	}
+	return *this;
+}
+
+auto StagingRingBuffer::Init(VmaAllocator allocator, VkDevice device, VkQueue queue,
+							 uint32_t queueFamily, VkDeviceSize capacity) noexcept -> bool {
+	_allocator = allocator;
+	_device = device;
+	_queue = queue;
+	_queueFamily = queueFamily;
+	_capacity = capacity;
+
+	VkSemaphoreTypeCreateInfo typeInfo = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+										  .pNext = nullptr,
+										  .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,
+										  .initialValue = 0};
+	VkSemaphoreCreateInfo semInfo = {
+		.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &typeInfo, .flags = 0};
+	if (vkCreateSemaphore(_device, &semInfo, nullptr, &_timelineSemaphore) != VK_SUCCESS) {
+		return false;
+	}
+
+	_stagingBuffer = Buffer::Create(_allocator, _capacity, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+									VMA_MEMORY_USAGE_CPU_ONLY);
+	if (!_stagingBuffer.Valid()) {
+		vkDestroySemaphore(_device, _timelineSemaphore, nullptr);
+		_timelineSemaphore = VK_NULL_HANDLE;
+		return false;
+	}
+
+	_mappedRegion = _stagingBuffer.Map();
+	_mappedPtr = _mappedRegion.data;
+	return true;
+}
+
+void StagingRingBuffer::Cleanup() noexcept {
+	if (_device != VK_NULL_HANDLE) {
+		_mappedRegion = {};	 // Clean up mapping wrapper
+		_stagingBuffer = {}; // Clean up buffer handle
+		for (auto& rp : _retiredPools) {
+			vkDestroyCommandPool(_device, rp.pool, nullptr);
+		}
+		_retiredPools.clear();
+		if (_timelineSemaphore != VK_NULL_HANDLE) {
+			vkDestroySemaphore(_device, _timelineSemaphore, nullptr);
+			_timelineSemaphore = VK_NULL_HANDLE;
+		}
+	}
+}
+
+void StagingRingBuffer::Recycle() noexcept {
+	if (_timelineSemaphore == VK_NULL_HANDLE) {
+		return;
+	}
+
+	uint64_t completedValue = 0;
+	vkGetSemaphoreCounterValue(_device, _timelineSemaphore, &completedValue);
+
+	// Guard against unsubmitted allocations (timelineValue == 0)
+	while (!_activeAllocations.empty() && _activeAllocations.front().timelineValue > 0 &&
+		   _activeAllocations.front().timelineValue <= completedValue) {
+		_tail = (_activeAllocations.front().offset + _activeAllocations.front().size) % _capacity;
+		_activeAllocations.erase(_activeAllocations.begin());
+	}
+
+	for (auto it = _retiredPools.begin(); it != _retiredPools.end();) {
+		if (it->timelineValue <= completedValue) {
+			vkDestroyCommandPool(_device, it->pool, nullptr);
+			it = _retiredPools.erase(it);
+		} else {
+			++it;
+		}
+	}
+}
+
+void StagingRingBuffer::RetirePool(VkCommandPool pool, uint64_t timelineValue) noexcept {
+	_retiredPools.push_back({.pool = pool, .timelineValue = timelineValue});
+}
+
+auto StagingRingBuffer::Allocate(VkDeviceSize size, VkDeviceSize alignment) noexcept -> Allocation {
+	Recycle();
+
+	VkDeviceSize alignedHead = (_head + alignment - 1) & ~(alignment - 1);
+	bool wrap = false;
+
+	if (alignedHead + size > _capacity) {
+		alignedHead = 0;
+		wrap = true;
+	}
+
+	while (true) {
+		bool hasSpace = false;
+
+		if (_activeAllocations.empty()) {
+			hasSpace = true;
+		} else if (_tail <= _head) {
+			if (wrap) {
+				hasSpace = (size < _tail);
+			} else {
+				hasSpace = true;
+			}
+		} else {
+			if (wrap) {
+				hasSpace = false; // Cannot wrap if active region already wraps
+			} else {
+				hasSpace = (alignedHead + size < _tail);
+			}
+		}
+
+		if (hasSpace) {
+			break;
+		}
+
+		if (_activeAllocations.empty()) {
+			return {}; // Out of memory boundaries
+		}
+
+		uint64_t waitVal = _activeAllocations.front().timelineValue;
+		if (waitVal == 0) {
+			break; // Avoid waiting on unsubmitted allocations
+		}
+
+		VkSemaphoreWaitInfo waitInfo = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+										.pNext = nullptr,
+										.flags = 0,
+										.semaphoreCount = 1,
+										.pSemaphores = &_timelineSemaphore,
+										.pValues = &waitVal};
+		vkWaitSemaphores(_device, &waitInfo, UINT64_MAX);
+		Recycle();
+	}
+
+	_head = alignedHead + size;
+	_activeAllocations.push_back({.offset = alignedHead, .size = size, .timelineValue = 0});
+
+	return {.buffer = _stagingBuffer.Handle(),
+			.offset = alignedHead,
+			.mappedData = static_cast<char*>(_mappedPtr) + alignedHead,
+			.timelineValue = 0};
+}
+
+auto StagingRingBuffer::Submit(VkCommandBuffer cmd) noexcept -> uint64_t {
+	_timelineValue++;
+
+	for (auto& alloc : _activeAllocations) {
+		if (alloc.timelineValue == 0) {
+			alloc.timelineValue = _timelineValue;
+		}
+	}
+
+	VkCommandBufferSubmitInfo cmdInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+										 .commandBuffer = cmd};
+
+	VkSemaphoreSubmitInfo signalInfo = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+										.semaphore = _timelineSemaphore,
+										.value = _timelineValue,
+										.stageMask = VK_PIPELINE_STAGE_2_COPY_BIT};
+
+	VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+							.commandBufferInfoCount = 1,
+							.pCommandBufferInfos = &cmdInfo,
+							.signalSemaphoreInfoCount = 1,
+							.pSignalSemaphoreInfos = &signalInfo};
+
+	vkQueueSubmit2(_queue, 1, &submit, VK_NULL_HANDLE);
+	return _timelineValue;
+}
+
+// ============================================================================
+// Immediate Command PIMPL Implementation (Refactored)
 // ============================================================================
 
 struct ImmediateCommand::Impl {
 	VkDevice device = VK_NULL_HANDLE;
-	VkQueue queue = VK_NULL_HANDLE;
 	VkCommandPool pool = VK_NULL_HANDLE;
 	VkCommandBuffer cmd = VK_NULL_HANDLE;
-	std::vector<Buffer> resources;
+	StagingRingBuffer* ringBuffer = nullptr;
 
-	Impl(Impl&& other) noexcept
-		: device(std::exchange(other.device, VK_NULL_HANDLE)),
-		  queue(std::exchange(other.queue, VK_NULL_HANDLE)),
-		  pool(std::exchange(other.pool, VK_NULL_HANDLE)),
-		  cmd(std::exchange(other.cmd, VK_NULL_HANDLE)), resources(std::move(other.resources)) {}
-	Impl& operator=(Impl&& other) noexcept {
-		if (this != &other) {
-			// Let the destructor handle existing resources cleanly
-			this->~Impl();
+	Impl(VkDevice dev, StagingRingBuffer& rb) noexcept : device(dev), ringBuffer(&rb) {
 
-			device = std::exchange(other.device, VK_NULL_HANDLE);
-			queue = std::exchange(other.queue, VK_NULL_HANDLE);
-			pool = std::exchange(other.pool, VK_NULL_HANDLE);
-			cmd = std::exchange(other.cmd, VK_NULL_HANDLE);
-			resources = std::move(other.resources);
-		}
-		return *this;
-	}
-	Impl(const Impl&) = delete;
-	Impl& operator=(const Impl&) = delete;
-	Impl(VkDevice dev, VkQueue q, uint32_t queueFamily) noexcept : device(dev), queue(q) {
+		uint32_t queueFamily = rb.GetQueueFamily();
+
 		VkCommandPoolCreateInfo poolInfo = {
 			.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
 			.pNext = {},
@@ -268,45 +454,20 @@ struct ImmediateCommand::Impl {
 	~Impl() noexcept {
 		if (cmd != VK_NULL_HANDLE) {
 			vkEndCommandBuffer(cmd);
-
-			VkCommandBufferSubmitInfo subInfo = {
-				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-				.pNext = {},
-				.commandBuffer = cmd,
-				.deviceMask = {},
-			};
-			VkSubmitInfo2 submit = {
-				.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-				.pNext = {},
-				.flags = {},
-				.waitSemaphoreInfoCount = {},
-				.pWaitSemaphoreInfos = {},
-				.commandBufferInfoCount = 1,
-				.pCommandBufferInfos = &subInfo,
-				.signalSemaphoreInfoCount = {},
-				.pSignalSemaphoreInfos = {},
-			};
-
-			vkQueueSubmit2(queue, 1, &submit, VK_NULL_HANDLE);
-			vkQueueWaitIdle(queue);
-		}
-
-		// Staging buffers are safely destroyed here, after the queue becomes idle
-		resources.clear();
-
-		if (pool != VK_NULL_HANDLE) {
-			vkDestroyCommandPool(device, pool, nullptr);
+			uint64_t submitVal = ringBuffer->Submit(cmd);
+			ringBuffer->RetirePool(pool, submitVal);
 		}
 	}
 };
 
-ImmediateCommand::ImmediateCommand(VkDevice dev, VkQueue q, uint32_t queueFamily) noexcept
-	: _impl(std::make_unique<Impl>(dev, q, queueFamily)) {}
+ImmediateCommand::ImmediateCommand(VkDevice dev, StagingRingBuffer& ringBuffer) noexcept
+	: _impl(std::make_unique<Impl>(dev, ringBuffer)) {}
 
 ImmediateCommand::~ImmediateCommand() noexcept = default;
 
-void ImmediateCommand::KeepAlive(Buffer&& buffer) {
-	_impl->resources.push_back(std::move(buffer));
+auto ImmediateCommand::AllocateStaging(VkDeviceSize size, VkDeviceSize alignment) noexcept
+	-> StagingRingBuffer::Allocation {
+	return _impl->ringBuffer->Allocate(size, alignment);
 }
 
 ImmediateCommand::operator VkCommandBuffer() const noexcept {

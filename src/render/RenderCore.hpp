@@ -166,6 +166,7 @@ template <typename T, auto DeleterFn> class DeviceHandle {
 	T _raw = VK_NULL_HANDLE;
 };
 
+// NOTE: RAII handles which call destructors from C. Inlinable with LTO.
 using ShaderModule = DeviceHandle<VkShaderModule, ZHLN_DestroyShaderModule>;
 using PipelineLayout = DeviceHandle<VkPipelineLayout, ZHLN_DestroyPipelineLayout>;
 using Pipeline = DeviceHandle<VkPipeline, ZHLN_DestroyPipeline>;
@@ -286,6 +287,7 @@ class Context {
 	[[nodiscard]] auto Device() const noexcept -> VkDevice { return _device.handle; }
 	[[nodiscard]] auto GraphicsQueue() const noexcept -> VkQueue { return _device.graphics_queue; }
 	[[nodiscard]] auto PresentQueue() const noexcept -> VkQueue { return _device.present_queue; }
+	[[nodiscard]] auto TransferQueue() const noexcept -> VkQueue { return _device.transfer_queue; }
 	[[nodiscard]] auto Physical() const noexcept -> VkPhysicalDevice { return _physical.handle; }
 	[[nodiscard]] auto PhysicalInfo() const noexcept -> const ZHLN_PhysicalDeviceInfo& {
 		return _physical;
@@ -773,11 +775,20 @@ inline constexpr ColorToReadTrans ColorToRead{};
 // Frame Execution
 // ============================================================================
 
+// Overload 1: Standard frame drawing (forwards to Overload 2 with null sync parameters)
 template <uint32_t N, typename Record, typename Rebuild>
 	requires RecordFn<Record> && RebuildFn<Rebuild>
 auto DrawFrame(const Context& ctx, const Swapchain& swapchain, const FrameSync<N>& sync,
 			   const CommandPools<N>& pools, uint32_t& frame_index, Record&& record,
 			   Rebuild&& rebuild) noexcept -> ZHLN_FrameResult;
+
+// Overload 2: Frame drawing with async timeline staging synchronization
+template <uint32_t N, typename Record, typename Rebuild>
+	requires RecordFn<Record> && RebuildFn<Rebuild>
+auto DrawFrame(const Context& ctx, const Swapchain& swapchain, const FrameSync<N>& sync,
+			   const CommandPools<N>& pools, uint32_t& frame_index, VkSemaphore stagingSemaphore,
+			   uint64_t stagingWaitValue, Record&& record, Rebuild&& rebuild) noexcept
+	-> ZHLN_FrameResult;
 
 [[nodiscard]] auto SubmitAndPresent(const ZHLN_FrameSubmitDesc& desc) noexcept -> ZHLN_FrameResult;
 

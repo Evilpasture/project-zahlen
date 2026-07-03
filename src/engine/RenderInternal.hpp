@@ -413,6 +413,7 @@ struct RenderContext::Impl {
 	Vk::PresentationContext presentation;
 	Vk::FrameSync<2> sync;
 	Vk::CommandPools<2> pools;
+	Vk::StagingRingBuffer stagingRingBuffer;
 
 	// These declarations are now mathematically tied to ActiveGBuffer
 	Vk::RenderTarget<ActiveGBuffer::get<0>()> sceneColor;

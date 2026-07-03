@@ -643,6 +643,16 @@ template <uint32_t N, typename Record, typename Rebuild>
 inline auto DrawFrame(const Context& ctx, const Swapchain& swapchain, const FrameSync<N>& sync,
 					  const CommandPools<N>& pools, uint32_t& frame_index, Record&& record,
 					  Rebuild&& rebuild) noexcept -> ZHLN_FrameResult {
+	return DrawFrame<N>(ctx, swapchain, sync, pools, frame_index, VK_NULL_HANDLE, 0,
+						std::forward<Record>(record), std::forward<Rebuild>(rebuild));
+}
+
+template <uint32_t N, typename Record, typename Rebuild>
+	requires RecordFn<Record> && RebuildFn<Rebuild>
+inline auto DrawFrame(const Context& ctx, const Swapchain& swapchain, const FrameSync<N>& sync,
+					  const CommandPools<N>& pools, uint32_t& frame_index,
+					  VkSemaphore stagingSemaphore, uint64_t stagingWaitValue, Record&& record,
+					  Rebuild&& rebuild) noexcept -> ZHLN_FrameResult {
 	const ZHLN_FrameSync& s = sync[frame_index];
 	const ZHLN_CommandPool& pool = pools[frame_index];
 	const VkCommandBuffer cmd = pools.Cmd(frame_index);
@@ -668,6 +678,8 @@ inline auto DrawFrame(const Context& ctx, const Swapchain& swapchain, const Fram
 		.inFlight = s.in_flight,
 		.swapchain = swapchain.Get().handle,
 		.imageIndex = image_index,
+		.stagingSemaphore = stagingSemaphore,
+		.stagingWaitValue = stagingWaitValue,
 	};
 
 	result = ZHLN_SubmitAndPresent(&submit_desc);

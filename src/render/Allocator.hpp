@@ -127,15 +127,87 @@ void FillBuffer(VkCommandBuffer cmd, const Buffer& buffer, VkDeviceSize offset =
 }
 
 // ============================================================================
+// Staging Ring Buffer (Timeline Semaphore Synchronized)
+// ============================================================================
+
+class StagingRingBuffer {
+  public:
+	struct Allocation {
+		VkBuffer buffer = VK_NULL_HANDLE;
+		VkDeviceSize offset = 0;
+		void* mappedData = nullptr;
+		uint64_t timelineValue = 0;
+	};
+
+	StagingRingBuffer() = default;
+	~StagingRingBuffer() noexcept { Cleanup(); }
+
+	StagingRingBuffer(const StagingRingBuffer&) = delete;
+	auto operator=(const StagingRingBuffer&) -> StagingRingBuffer& = delete;
+
+	StagingRingBuffer(StagingRingBuffer&& other) noexcept;
+	auto operator=(StagingRingBuffer&& other) noexcept -> StagingRingBuffer&;
+
+	[[nodiscard]] auto Init(VmaAllocator allocator, VkDevice device, VkQueue queue,
+							uint32_t queueFamily, VkDeviceSize capacity) noexcept -> bool;
+	void Cleanup() noexcept;
+
+	[[nodiscard]] auto Allocate(VkDeviceSize size, VkDeviceSize alignment = 4) noexcept
+		-> Allocation;
+	auto Submit(VkCommandBuffer cmd) noexcept -> uint64_t;
+	void Recycle() noexcept;
+
+	void RetirePool(VkCommandPool pool, uint64_t timelineValue) noexcept;
+
+	[[nodiscard]] auto GetSemaphore() const noexcept -> VkSemaphore { return _timelineSemaphore; }
+	[[nodiscard]] auto GetCurrentValue() const noexcept -> uint64_t { return _timelineValue; }
+	[[nodiscard]] auto GetQueueFamily() const noexcept -> uint32_t { return _queueFamily; }
+	[[nodiscard]] auto Valid() const noexcept -> bool {
+		return _timelineSemaphore != VK_NULL_HANDLE;
+	}
+
+  private:
+	VmaAllocator _allocator = nullptr;
+	VkDevice _device = VK_NULL_HANDLE;
+	VkQueue _queue = VK_NULL_HANDLE;
+	uint32_t _queueFamily = 0xFFFFFFFF;
+
+	Buffer _stagingBuffer;
+	Buffer::MappedRegion _mappedRegion;
+	void* _mappedPtr = nullptr;
+	VkDeviceSize _capacity = 0;
+
+	VkDeviceSize _head = 0;
+	VkDeviceSize _tail = 0;
+
+	VkSemaphore _timelineSemaphore = VK_NULL_HANDLE;
+	uint64_t _timelineValue = 0;
+
+	struct ActiveAllocation {
+		VkDeviceSize offset;
+		VkDeviceSize size;
+		uint64_t timelineValue;
+	};
+	std::vector<ActiveAllocation> _activeAllocations;
+
+	struct RetiredPool {
+		VkCommandPool pool;
+		uint64_t timelineValue;
+	};
+	std::vector<RetiredPool> _retiredPools;
+};
+
+// ============================================================================
 // Immediate Command RAII Wrapper (Staging/Initial Uploads)
 // ============================================================================
 
 class ImmediateCommand {
   public:
-	ImmediateCommand(VkDevice dev, VkQueue q, uint32_t queueFamily) noexcept;
+	ImmediateCommand(VkDevice dev, StagingRingBuffer& ringBuffer) noexcept;
 	~ImmediateCommand() noexcept;
 
-	void KeepAlive(Buffer&& buffer);
+	[[nodiscard]] auto AllocateStaging(VkDeviceSize size, VkDeviceSize alignment = 4) noexcept
+		-> StagingRingBuffer::Allocation;
 
 	operator VkCommandBuffer() const noexcept;
 

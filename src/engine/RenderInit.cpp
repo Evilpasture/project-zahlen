@@ -87,6 +87,12 @@ void RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int
 		ZHLN::Panic("FATAL: Vulkan Memory Allocator (VMA) failed to initialize");
 	}
 
+	if (!stagingRingBuffer.Init(allocator.Get(), ctx.Device(), ctx.GraphicsQueue(),
+								ctx.PhysicalInfo().graphics_family,
+								static_cast<VkDeviceSize>(64 * 1024 * 1024))) {
+		ZHLN::Panic("FATAL: Failed to initialize Staging Ring Buffer!");
+	}
+
 	bool supportsRayTracing = CheckRayTracingSupport(ctx.Physical());
 	if (!supportsRayTracing || !rtCtx.Init(ctx.Device())) {
 		ZHLN::Log("WARNING: Raytracing context failed to initialize. RTR will be disabled.");
@@ -226,6 +232,7 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
 			f.runtimeDescriptorArray = VK_TRUE;
 			f.bufferDeviceAddress = VK_TRUE;
 			f.hostQueryReset = VK_TRUE;
+			f.timelineSemaphore = VK_TRUE;
 			f.drawIndirectCount = caps.supportsDrawIndirectCount ? VK_TRUE : VK_FALSE;
 			f.bufferDeviceAddress = VK_TRUE;
 			f.uniformAndStorageBuffer8BitAccess = VK_TRUE;
@@ -338,10 +345,15 @@ RenderContext::Impl::LoadAndCreateComputeShader(ShaderStageSource cs,
 
 	LoadShaderData(cs, cs_code, cs_size, disk_cs);
 
-	return Vk::ComputePipelineBuilder()
-		.Shader(Vk::AsSpirV(cs_code), cs_size, cs.entryPoint)
-		.Layout(layout)
-		.Build(ctx.Device());
+	auto p_res = Vk::ComputePipelineBuilder()
+					 .Shader(Vk::AsSpirV(cs_code), cs_size, cs.entryPoint)
+					 .Layout(layout)
+					 .Build(ctx.Device());
+
+	if (!p_res) {
+		return {};
+	}
+	return std::move(*p_res);
 }
 
 void RenderContext::Impl::WatchPipeline(const char* vsPath, const char* psPath,
@@ -1112,14 +1124,20 @@ void RenderContext::Impl::SetupUI(GLFWwindow* window) {
 
 	VkFormat swapchainFormat = presentation.swapchain.Get().format;
 
-	uiPipeline = Vk::PipelineBuilder{}
-					 .Shaders(uiShaders)
-					 .Layout(uiPipelineLayout.Get())
-					 .ColorFormats({swapchainFormat})
-					 .NoDepth()
-					 .AlphaBlend()
-					 .CullNone()
-					 .Build(ctx.Device());
+	auto uiPipelineRes = Vk::PipelineBuilder{}
+							 .Shaders(uiShaders)
+							 .Layout(uiPipelineLayout.Get())
+							 .ColorFormats(std::array{swapchainFormat})
+							 .NoDepth()
+							 .AlphaBlend()
+							 .CullNone()
+							 .Build(ctx.Device());
+
+	if (uiPipelineRes) {
+		uiPipeline = std::move(*uiPipelineRes);
+	} else {
+		ZHLN::Panic("FATAL: Failed to build UI Pipeline!");
+	}
 
 	// --- ONLY RUN THE IMGUI/GLFW PORTION IF WINDOW IS VALID ---
 	if (window != nullptr) {

@@ -15,8 +15,9 @@
 auto main() -> int {
 	// 1. OS Window Creation
 	ZHLN::Demo::WindowState win = ZHLN::Demo::InitWindow(800, 600, "ZHLN Engine - Modern Triangle");
-	if (!win.os_window)
+	if (win.os_window == nullptr) {
 		return -1;
+	}
 
 	// 2. Instance & Device Feature Setup (Modernized via FeatureFactory)
 	ZHLN_InstanceDesc inst_desc = ZHLN_DEFAULT_INSTANCE_DESC;
@@ -65,9 +66,16 @@ auto main() -> int {
 								.features = features.GetRoot(),
 								.enable_validation = true};
 
-	auto ctx = ZHLN::Vk::Context::Create(inst_desc, {VK_NULL_HANDLE, VK_NULL_HANDLE}, dev_desc);
-	if (!ctx)
+	auto ctx = ZHLN::Vk::Context::Create(inst_desc,
+										 ZHLN_DeviceSelectDesc{.instance = VK_NULL_HANDLE,
+															   .surface = VK_NULL_HANDLE,
+															   .score_fn = nullptr,
+															   .score_userdata = nullptr},
+										 dev_desc);
+
+	if (!ctx) {
 		return -1;
+	}
 
 	// 3. Surface & RAII Resources
 	VkSurfaceKHR raw_surface = ZHLN::Demo::CreateSurface(ctx.Instance(), win);
@@ -83,28 +91,33 @@ auto main() -> int {
 	auto shaders = ZHLN::Vk::ShaderStages::FromFiles(
 		ctx.Device(), "triangle.hlsl.VSMain.spv", "triangle.hlsl.PSMain.spv", "VSMain", "PSMain");
 
-	if (!shaders.Valid())
+	if (!shaders.Valid()) {
 		return -1;
+	}
 
 	ZHLN_PipelineLayoutDesc layout_desc = {};
 	ZHLN::Vk::PipelineLayout layout(ctx.Device(),
 									ZHLN_CreatePipelineLayout(ctx.Device(), &layout_desc));
 
-	auto pipeline = ZHLN::Vk::PipelineBuilder{}
-						.Shaders(shaders)
-						.Layout(layout.Get())
-						.ColorFormats({VK_FORMAT_B8G8R8A8_SRGB})
-						.NoDepth()
-						.CullNone()
-						.Build(ctx.Device());
+	auto pipelineRes = ZHLN::Vk::PipelineBuilder{}
+						   .Shaders(shaders)
+						   .Layout(layout.Get())
+						   .ColorFormats({VK_FORMAT_B8G8R8A8_SRGB})
+						   .NoDepth()
+						   .CullNone()
+						   .Build(ctx.Device());
 
-	if (!pipeline.Valid())
+	if (!pipelineRes) {
 		return -1;
+	}
 
 	// 5. Rebuild Helper
 	auto rebuild = [&]() {
 		vkDeviceWaitIdle(ctx.Device());
-		ZHLN_Device raw_dev = {ctx.Device(), ctx.GraphicsQueue(), ctx.PresentQueue()};
+		ZHLN_Device raw_dev = {.handle = ctx.Device(),
+							   .graphics_queue = ctx.GraphicsQueue(),
+							   .present_queue = ctx.PresentQueue(),
+							   .transfer_queue = ctx.TransferQueue()};
 		ZHLN_PhysicalDeviceInfo raw_phys = ctx.PhysicalInfo();
 		ZHLN_SwapchainDesc s_desc = {.device = &raw_dev,
 									 .physical = &raw_phys,
@@ -124,12 +137,15 @@ auto main() -> int {
 
 	while (win.running) {
 		ZHLN::Demo::ProcessEvents(win);
-		if (win.width == 0 || win.height == 0)
+		if (win.width == 0 || win.height == 0) {
 			continue;
-		if (win.resized)
+		}
+		if (win.resized) {
 			rebuild();
-		if (!swapchain.Valid() || swapchain.Get().extent.width == 0)
+		}
+		if (!swapchain.Valid() || swapchain.Get().extent.width == 0) {
 			continue;
+		}
 
 		const ZHLN_FrameSync& frame_sync = sync[frame_index];
 		ZHLN_CommandPool& pool = pools[frame_index];
@@ -162,9 +178,9 @@ auto main() -> int {
 		ZHLN::Vk::DynamicPass(
 			swapchain.Get().extent) // Compile-time deduced starting state via CTAD [1]
 			.AddColor(swap_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-					  {0.01f, 0.01f, 0.02f, 1.0f})
+					  ZHLN::Color4{.r = 0.01f, .g = 0.01f, .b = 0.02f, .a = 1.0f})
 			.Execute(cmd, [&]() {
-				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
+				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineRes->Get());
 				vkCmdDraw(cmd, 3, 1, 0, 0);
 			});
 
@@ -180,7 +196,9 @@ auto main() -> int {
 										   .renderFinished = present_semaphores[image_index],
 										   .inFlight = frame_sync.in_flight,
 										   .swapchain = swapchain.Get().handle,
-										   .imageIndex = image_index};
+										   .imageIndex = image_index,
+										   .stagingSemaphore = VK_NULL_HANDLE,
+										   .stagingWaitValue = 0};
 
 		if (ZHLN::Vk::SubmitAndPresent(submitDesc) != ZHLN_FrameResult_Ok) {
 			win.resized = true;

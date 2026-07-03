@@ -181,11 +181,11 @@ template <size_t ColorCount = 1, bool HasDepth = true> class PipelineBuilder {
 	}
 
 	[[nodiscard("Pipeline creation may fail; verify validity before use")]]
-	auto Build(VkDevice device) const& noexcept -> Pipeline {
+	auto Build(VkDevice device) const& noexcept -> std::expected<Pipeline, PipelineBuilderResult> {
 		const auto result = Validate();
 		if (result != PipelineBuilderResult::Succeeded) {
 			ReportPipelineBuilderError(result);
-			return {};
+			return std::unexpected(result);
 		}
 
 		const ZHLN_GraphicsPipelineDesc desc = GetDesc();
@@ -216,11 +216,11 @@ template <size_t ColorCount = 1, bool HasDepth = true> class PipelineBuilder {
 	}
 
 	[[nodiscard]] auto Build(VkDevice device) const&& noexcept
-		-> TypedPipeline<ColorCount, HasDepth> {
+		-> std::expected<TypedPipeline<ColorCount, HasDepth>, PipelineBuilderResult> {
 		const auto result = Validate();
 		if (result != PipelineBuilderResult::Succeeded) {
 			ReportPipelineBuilderError(result);
-			return {};
+			return std::unexpected(result);
 		}
 
 		const ZHLN_GraphicsPipelineDesc desc = GetDesc();
@@ -279,7 +279,8 @@ class ComputePipelineBuilder {
 	auto Layout(VkPipelineLayout l) noexcept -> ComputePipelineBuilder&;
 	auto Specialization(const VkSpecializationInfo* info) noexcept -> ComputePipelineBuilder&;
 
-	[[nodiscard]] auto Build(VkDevice device) const noexcept -> Pipeline;
+	[[nodiscard]] auto Build(VkDevice device) const noexcept
+		-> std::expected<Pipeline, PipelineBuilderResult>;
 
   private:
 	[[nodiscard]] auto Validate() const noexcept -> PipelineBuilderResult;

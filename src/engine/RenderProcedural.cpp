@@ -81,7 +81,7 @@ uint32_t RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t hei
 
 	// 2. Dispatch the Compute Shader via RAII-Managed Immediate Command Stream
 	{
-		Vk::ImmediateCommand cmd(device, ctx.GraphicsQueue(), ctx.PhysicalInfo().graphics_family);
+		Vk::ImmediateCommand cmd(device, stagingRingBuffer);
 
 		// Transition Undefined -> General (Safe for Compute storage writes)
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd,

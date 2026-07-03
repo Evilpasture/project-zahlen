@@ -45,8 +45,12 @@ template <typename LayoutT> struct PostProcessPass {
 			builder.AdditiveBlend();
 		}
 
-		pipeline = builder.Build(device);
-		return pipeline.Valid();
+		auto p_res = builder.Build(device);
+		if (!p_res) {
+			return false;
+		}
+		pipeline = std::move(*p_res);
+		return true;
 	}
 
 	[[nodiscard]] bool BuildVariants(VkDevice device, const ShaderStages& shaders,
@@ -82,11 +86,11 @@ template <typename LayoutT> struct PostProcessPass {
 				builder.AdditiveBlend();
 			}
 
-			Pipeline p = builder.Build(device);
-			if (!p.Valid()) {
+			auto p_res = builder.Build(device);
+			if (!p_res) {
 				return false;
 			}
-			pipelines.push_back(std::move(p));
+			pipelines.push_back(std::move(*p_res));
 		}
 
 		return !pipelines.empty();
