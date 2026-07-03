@@ -1,15 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// clang-format off
 #include "Rendering.hpp"
-// clang-format on
-#include "Allocator.hpp"
-#include "DescriptorLayout.hpp"
-#include "PipelineBuilder.hpp"
-#include "RenderCore.hpp"
-#include "SamplerBuilder.hpp"
-#include "TextureUtils.hpp"
 #include "demo_utils/DemoWindow.hpp"
 #include "math.hpp"
 
