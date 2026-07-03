@@ -89,7 +89,7 @@ template <typename... Args> [[nodiscard]] consteval auto MakeAttributeArray(Args
 	return attrs;
 }
 
-#ifdef __cpp_reflection
+#if defined(__cpp_reflection) && !defined(__clang__)
 // ============================================================================
 // C++26 Automatic Layout Reflection Engine (Primary Template)
 // ============================================================================

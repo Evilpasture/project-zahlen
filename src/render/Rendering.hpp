@@ -7,32 +7,13 @@
 
 #define ZHLN_RENDERING_HPP_INCLUDED
 
-// ============================================================================
-// External APIs & Library Config
-// ============================================================================
-#include <spirv_reflect.h>
-#include <vk_mem_alloc.h>
-#include <vulkan/vulkan.h>
-
-// On Linux platforms, Vulkan implicitly includes X11 headers when utilizing XLIB.
-// These headers define global macros such as "None", "Success", "Bool", and "Status",
-// which pollute the namespace and conflict with our clean C++ enums/classes.
-#ifdef None
-#undef None
-#endif
-#ifdef Success
-#undef Success
-#endif
-#ifdef Bool
-#undef Bool
-#endif
-#ifdef Status
-#undef Status
-#endif
+#include "RenderingPCH.h" // IWYU pragma: keep
 
 // ============================================================================
 // Standard Library Includes (Ordered)
 // ============================================================================
+// clang-format off
+// IWYU pragma: begin_exports
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -54,7 +35,7 @@
 #include <utility>
 #include <variant>
 #include <vector>
-#ifdef __cpp_reflection
+#if defined(__cpp_reflection) && !defined(__clang__)
 #include <meta>
 #endif
 
@@ -85,3 +66,4 @@
 #include "Texture.hpp"
 #include "TextureUtils.hpp"
 // clang-format on
+// IWYU pragma: end_exports

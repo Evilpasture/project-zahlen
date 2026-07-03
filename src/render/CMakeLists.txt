@@ -14,7 +14,7 @@ add_library(zahlen_render STATIC
     VmaImplementation.cpp
     RenderCore.h
     RenderCore.hpp
-    Rendering.hpp 
+    Rendering.hpp
     RenderCore.cpp
     Allocator.hpp
     StagingContext.hpp
@@ -67,8 +67,8 @@ target_compile_definitions(zahlen_render PRIVATE
     VMA_DYNAMIC_VULKAN_FUNCTIONS=1
 )
 
-target_precompile_headers(zahlen_render PRIVATE 
-    "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/Rendering.hpp>"
+target_precompile_headers(zahlen_render PRIVATE
+    "$<$<COMPILE_LANGUAGE:C>:${CMAKE_CURRENT_SOURCE_DIR}/RenderingPCH.h>"
 )
 
 add_definitions(-D_CRT_SECURE_NO_WARNINGS)
@@ -105,18 +105,18 @@ endif()
 # Usage: compile_hlsl(FILE ENTRY_POINT STAGE[vs/ps] OUTPUT_VAR)
 function(compile_hlsl SHADER_PATH ENTRY STAGE OUTPUT_VAR)
     get_filename_component(FILE_NAME ${SHADER_PATH} NAME)
-    
+
     # Generate a unique output name (e.g., cube.hlsl.VSMain.spv)
     set(SPV_OUT "${CMAKE_CURRENT_BINARY_DIR}/${FILE_NAME}.${ENTRY}.spv")
-    
+
     add_custom_command(
         OUTPUT "${SPV_OUT}"
-        COMMAND ${DXC_EXECUTABLE} 
+        COMMAND ${DXC_EXECUTABLE}
                 -T ${STAGE}_6_0   # Target Profile: vs_6_0 or ps_6_0
                 -E ${ENTRY}       # Entry Point name
                 -spirv            # Output SPIR-V
-                -fspv-target-env=vulkan1.3 
-                "${SHADER_PATH}" 
+                -fspv-target-env=vulkan1.3
+                "${SHADER_PATH}"
                 -Fo "${SPV_OUT}"
         DEPENDS "${SHADER_PATH}"
         COMMENT "Compiling HLSL: ${FILE_NAME} [${ENTRY}] -> ${STAGE}"
@@ -167,17 +167,17 @@ target_include_directories(zahlen_crt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(zahlen_crt PRIVATE cxx_std_23)
 
 # 7. Sponza Executable
-add_executable(zahlen_sponza sponza_app/main.cpp 
-    ${SPONZA_VERT_SPV} 
-    ${SPONZA_FRAG_SPV} 
-    ${SPONZA_SHADOW_VERT_SPV} 
+add_executable(zahlen_sponza sponza_app/main.cpp
+    ${SPONZA_VERT_SPV}
+    ${SPONZA_FRAG_SPV}
+    ${SPONZA_SHADOW_VERT_SPV}
     ${SPONZA_SHADOW_FRAG_SPV}
-    ${SPONZA_FXAA_VERT_SPV} 
+    ${SPONZA_FXAA_VERT_SPV}
     ${SPONZA_FXAA_FRAG_SPV}
 )
 target_link_libraries(zahlen_sponza PRIVATE zahlen_demo_utils)
-target_include_directories(zahlen_sponza PRIVATE 
-    ${CMAKE_CURRENT_SOURCE_DIR} 
+target_include_directories(zahlen_sponza PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/extern/cgltf
     ${CMAKE_SOURCE_DIR}/extern/stb
 )
@@ -189,16 +189,16 @@ set(RAW_TRIANGLE_HLSL "${CMAKE_CURRENT_SOURCE_DIR}/raw_triangle_app/raw_triangle
 compile_hlsl("${RAW_TRIANGLE_HLSL}" VSMain vs RAW_TRI_VERT_SPV)
 compile_hlsl("${RAW_TRIANGLE_HLSL}" PSMain ps RAW_TRI_FRAG_SPV)
 
-add_executable(zahlen_raw_triangle 
-    raw_triangle_app/main.cpp 
-    ${RAW_TRI_VERT_SPV} 
+add_executable(zahlen_raw_triangle
+    raw_triangle_app/main.cpp
+    ${RAW_TRI_VERT_SPV}
     ${RAW_TRI_FRAG_SPV}
 )
 
 # Standard C-API Vulkan and GLFW only, no "zahlen_render" linkage
 target_link_libraries(zahlen_raw_triangle PRIVATE Vulkan::Vulkan glfw)
 
-target_include_directories(zahlen_raw_triangle PRIVATE 
+target_include_directories(zahlen_raw_triangle PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}
 )
