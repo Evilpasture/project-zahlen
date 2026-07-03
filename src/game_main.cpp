@@ -15,6 +15,7 @@
 #include "engine/system/InputSystem.hpp"
 #include "engine/system/LightingSystem.hpp"
 #include "engine/system/PhysicsStateSystem.hpp"
+#include "engine/system/PhysicsSystem.hpp"
 #include "engine/system/RenderSystem.hpp"
 #include "engine/system/TargetCameraSystem.hpp"
 #include "engine/system/TransformSystem.hpp"
@@ -54,7 +55,6 @@ using namespace ZHLN::ECS;
 
 namespace ZHLN {
 void UISystem(Engine& engine, ScriptRunner& scriptRunner);
-void MovementSystem(Engine& engine, float dt);
 } // namespace ZHLN
 
 namespace {
@@ -303,7 +303,7 @@ bool InitializeGame(Engine& engine) {
 	return true;
 }
 
-void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, ScriptRunner& scriptRunner,
+void UpdateGame(Engine& engine, float dt, ScriptRunner& scriptRunner,
 				FileWatcher& gameplayWatcher) {
 	static InputSystem inputSystem;
 	inputSystem.Update(engine);
@@ -322,23 +322,9 @@ void UpdateGame(Engine& engine, float dt, float& physicsAccumulator, ScriptRunne
 
 	inputSystem.PlayerInputTranslate(engine, engine.GetCamera());
 
-	float cappedDt = std::min(dt, 0.1f);
-	physicsAccumulator += cappedDt;
-	constexpr float targetDt = 1.0f / 60.0f;
-
-	physicsAccumulator = std::min(physicsAccumulator, targetDt * 4.0f);
-
-	{
-		ZHLN_PROFILE_SCOPE("ECS System: Physics & Movement");
-		while (physicsAccumulator >= targetDt) {
-			MovementSystem(engine, targetDt);
-			engine.GetPhysicsContext().Step(targetDt);
-			ZHLN::PhysicsStateSystem::WriteBack(engine);
-			physicsAccumulator -= targetDt;
-		}
-	}
-
-	engine.GetCurrentAlpha() = physicsAccumulator / targetDt;
+	// Consolidate and execute the physical simulation loop
+	static PhysicsSystem physicsSystem;
+	physicsSystem.Update(engine, dt);
 
 	{
 		ZHLN_PROFILE_SCOPE("ECS System: Script/Lua Update");
@@ -421,10 +407,10 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine,
 		}
 	}
 
-	ZHLN::Log("Window active and presenting. Loading scene assets...");
+	ZHLN::Log("Window active and presenting. Loading scene assets... ");
 	scriptRunner.CallUpdate(engine.get(), 0.0f);
 
-	float physicsAccumulator = 0.0f;
+	// float physicsAccumulator = 0.0f; <--- REMOVED (Now managed inside PhysicsSystem)
 	const double targetFrameTime =
 		options.fpsLimit > 0 ? 1.0 / static_cast<double>(options.fpsLimit) : 0.0;
 
@@ -477,7 +463,8 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine,
 			continue;
 		}
 
-		UpdateGame(*engine, rawDt, physicsAccumulator, scriptRunner, gameplayWatcher);
+		// Simplified game update loop signature
+		UpdateGame(*engine, rawDt, scriptRunner, gameplayWatcher);
 
 		auto render_res = RenderGame(*engine, rawDt);
 		if (!render_res) {

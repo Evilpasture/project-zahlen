@@ -202,6 +202,7 @@ set(ENGINE_SOURCES
     src/engine/Sky.cpp
     src/engine/BRDFLUT.cpp
     src/engine/GizmoUI.cpp
+    src/engine/system/PhysicsSystem.cpp
     src/engine/CommandLine.cpp
     src/engine/system/TargetCameraSystem.cpp
     src/engine/TTYBackend.cpp
