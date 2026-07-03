@@ -33,8 +33,11 @@ class HardwareCapsProber {
 		: _physicalDevice(physicalDevice), _apiVersion(apiVersion) {}
 
 	auto ProbeInt64(bool& target) && noexcept -> HardwareCapsProber&& {
-		VkPhysicalDeviceFeatures2 features2 = {.sType =
-												   VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+		VkPhysicalDeviceFeatures2 features2 = {
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+			.pNext = {},
+			.features = {},
+		};
 		vkGetPhysicalDeviceFeatures2(_physicalDevice, &features2);
 		target = (features2.features.shaderInt64 == VK_TRUE);
 		return std::move(*this);
@@ -291,12 +294,12 @@ Vk::Context CreateLogicalDevice(VkInstance instance, VkSurfaceKHR surface,
 								const std::vector<const char*>& extensions,
 								const VkPhysicalDeviceFeatures2* features,
 								bool enableValidation) noexcept {
-	ZHLN_DeviceDesc dev_desc = {.physical = &physical,
+	return Vk::Context::Create(instance, surface, physical,
+							   {.physical = &physical,
 								.extensions = extensions.data(),
 								.extension_count = static_cast<uint32_t>(extensions.size()),
 								.features = features,
-								.enable_validation = enableValidation};
-	return Vk::Context::Create(instance, surface, physical, dev_desc);
+								.enable_validation = enableValidation});
 }
 
 // Generic helper for standard PostProcessPass compilation
@@ -395,7 +398,7 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	// Phase 3: Surface creation (Before device selection for windowed/GLFW)
 	int width = 0;
 	int height = 0;
-	VkSurfaceKHR raw_surface =
+	auto* raw_surface =
 		static_cast<VkSurfaceKHR>(window.CreateVulkanSurface(instance, nullptr, width, height));
 
 	// Phase 4: Device selection
@@ -733,25 +736,27 @@ void RenderContext::Impl::InitLightingLUTs() {
 	char* const stageBasePtr = static_cast<char*>(mapped.data);
 
 	struct LUTUploadItem {
-		Vk::Image& targetImage;
+		Vk::Image* targetImage;
 		std::span<const uint8_t> rawData;
 		size_t rawSize;
 		size_t bufferOffset;
 	};
 
-	std::array<LUTUploadItem, 2> uploads = {
-		{{.targetImage = ltcMatImage, .rawData = ltc_mat, .rawSize = matRawSize, .bufferOffset = 0},
-		 {.targetImage = ltcAmpImage,
-		  .rawData = ltc_amp,
-		  .rawSize = ampRawSize,
-		  .bufferOffset = matRawSize}}};
+	std::array<LUTUploadItem, 2> uploads = {{{.targetImage = &ltcMatImage,
+											  .rawData = ltc_mat,
+											  .rawSize = matRawSize,
+											  .bufferOffset = 0},
+											 {.targetImage = &ltcAmpImage,
+											  .rawData = ltc_amp,
+											  .rawSize = ampRawSize,
+											  .bufferOffset = matRawSize}}};
 
 	for (const auto& item : uploads) {
-		item.targetImage = Vk::Image::Create(allocator.Get(), ltcInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+		*item.targetImage = Vk::Image::Create(allocator.Get(), ltcInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 
 		std::memcpy(stageBasePtr + item.bufferOffset, item.rawData.data() + 128, item.rawSize);
 
-		stagingContext->UploadImage2DBuffer(item.targetImage.Handle(), 64, 64, 1,
+		stagingContext->UploadImage2DBuffer(item.targetImage->Handle(), 64, 64, 1,
 											ltcStaging.Handle(), item.bufferOffset);
 	}
 
