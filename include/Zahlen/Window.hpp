@@ -30,7 +30,6 @@ class ZHLN_API Window {
 	struct Impl;
 	[[nodiscard]] Impl* GetImpl() const { return _impl.get(); }
 
-	// Returns the underlying LLGL::Window* as a void* to keep headers clean
 	[[nodiscard]] void* GetNativeHandle() const;
 
 	void Close();
@@ -38,6 +37,23 @@ class ZHLN_API Window {
 	[[nodiscard]] bool IsTTY() const;
 	[[nodiscard]] void* GetTTYContext() const;
 	bool ReinitTTY();
+
+	/**
+	 * @brief Creates a Vulkan surface for the active window platform.
+	 *
+	 * For non-TTY windows (e.g. GLFW), this should be called before physical device selection,
+	 * passing nullptr for the physicalDevice.
+	 * For TTY windows (e.g. KMS/DRM), this must be called after physical device selection,
+	 * passing the selected physicalDevice.
+	 *
+	 * @param instance The raw VkInstance pointer.
+	 * @param physicalDevice The raw VkPhysicalDevice pointer (required for TTY/KMS).
+	 * @param outWidth Reference to store the output surface width.
+	 * @param outHeight Reference to store the output surface height.
+	 * @return The created raw VkSurfaceKHR as a void*, or nullptr if not ready.
+	 */
+	[[nodiscard]] void* CreateVulkanSurface(void* instance, void* physicalDevice, int& outWidth,
+											int& outHeight) noexcept;
 
   private:
 	std::unique_ptr<Impl> _impl;

@@ -273,4 +273,43 @@ bool Window::ReinitTTY() {
 	return false;
 }
 
+void* Window::CreateVulkanSurface(void* instance, void* physicalDevice, int& outWidth,
+								  int& outHeight) noexcept {
+	if (_impl->is_tty) {
+		// TTY surface creation requires a physical device and must occur after selection
+		if (physicalDevice == nullptr) {
+			return nullptr;
+		}
+
+		uint32_t hwWidth = 0;
+		uint32_t hwHeight = 0;
+		VkSurfaceKHR raw_surface = TTYBackend::CreateSurface(
+			static_cast<VkInstance>(instance), static_cast<VkPhysicalDevice>(physicalDevice),
+			_impl->tty_context, hwWidth, hwHeight);
+
+		outWidth = static_cast<int>(hwWidth);
+		outHeight = static_cast<int>(hwHeight);
+		_impl->width = hwWidth;
+		_impl->height = hwHeight;
+
+		return static_cast<void*>(raw_surface);
+	} else {
+		// Standard window surface creation occurs before physical device selection
+		if (physicalDevice != nullptr) {
+			return nullptr;
+		}
+
+		VkSurfaceKHR raw_surface = VK_NULL_HANDLE;
+		VkResult err = glfwCreateWindowSurface(static_cast<VkInstance>(instance), _impl->handle,
+											   nullptr, &raw_surface);
+
+		if (err != VK_SUCCESS || raw_surface == VK_NULL_HANDLE) {
+			ZHLN::Panic("FATAL: Failed to create GLFW Vulkan window surface!");
+		}
+
+		glfwGetFramebufferSize(_impl->handle, &outWidth, &outHeight);
+		return static_cast<void*>(raw_surface);
+	}
+}
+
 } // namespace ZHLN

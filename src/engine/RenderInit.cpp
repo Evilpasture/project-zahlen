@@ -228,37 +228,6 @@ VkInstance CreateVulkanInstance(const char* appName, uint32_t appVersion,
 	return ZHLN_CreateInstance(&inst_desc);
 }
 
-VkSurfaceKHR CreateVulkanSurfaceBeforeDeviceSelection(VkInstance instance, Window& window,
-													  int& outWidth, int& outHeight) noexcept {
-	if (window.IsTTY()) {
-		return VK_NULL_HANDLE;
-	}
-	VkSurfaceKHR raw_surface = VK_NULL_HANDLE;
-	auto* glfwWin = static_cast<GLFWwindow*>(window.GetNativeHandle());
-	VkResult err = glfwCreateWindowSurface(instance, glfwWin, nullptr, &raw_surface);
-	if (!Vk::CheckResult(err, "Window Surface") || raw_surface == VK_NULL_HANDLE) {
-		ZHLN::Panic("FATAL: Failed to create GLFW Vulkan window surface!");
-	}
-	glfwGetFramebufferSize(glfwWin, &outWidth, &outHeight);
-	return raw_surface;
-}
-
-VkSurfaceKHR CreateVulkanSurfaceAfterDeviceSelection(VkInstance instance, VkPhysicalDevice physical,
-													 Window& window, int& outWidth,
-													 int& outHeight) noexcept {
-	if (!window.IsTTY()) {
-		return VK_NULL_HANDLE;
-	}
-	uint32_t hwWidth = 0;
-	uint32_t hwHeight = 0;
-	VkSurfaceKHR raw_surface =
-		TTYBackend::CreateSurface(instance, physical, window.GetTTYContext(), hwWidth, hwHeight);
-	outWidth = hwWidth;
-	outHeight = hwHeight;
-	window.SetSize(hwWidth, hwHeight);
-	return raw_surface;
-}
-
 ZHLN_PhysicalDeviceInfo SelectDevice(VkInstance instance, VkSurfaceKHR surface) noexcept {
 	ZHLN_DeviceSelectDesc select_desc = {
 		.instance = instance, .surface = surface, .score_fn = nullptr, .score_userdata = nullptr};
@@ -428,11 +397,11 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 		ZHLN::Panic("FATAL: Failed to create Vulkan Instance!");
 	}
 
-	// Phase 3: Surface creation (Before device selection for windowed)
+	// Phase 3: Surface creation (Before device selection for windowed/GLFW)
 	int width = 0;
 	int height = 0;
 	VkSurfaceKHR raw_surface =
-		CreateVulkanSurfaceBeforeDeviceSelection(instance, window, width, height);
+		static_cast<VkSurfaceKHR>(window.CreateVulkanSurface(instance, nullptr, width, height));
 
 	// Phase 4: Device selection
 	ZHLN_PhysicalDeviceInfo physicalInfo = SelectDevice(instance, raw_surface);
@@ -442,8 +411,8 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 
 	// Phase 5: Surface creation (After device selection for TTY)
 	if (window.IsTTY()) {
-		raw_surface = CreateVulkanSurfaceAfterDeviceSelection(instance, physicalInfo.handle, window,
-															  width, height);
+		raw_surface = static_cast<VkSurfaceKHR>(
+			window.CreateVulkanSurface(instance, physicalInfo.handle, width, height));
 		if (raw_surface == VK_NULL_HANDLE) {
 			ZHLN::Panic("FATAL: Failed to create TTY Vulkan Surface!");
 		}
