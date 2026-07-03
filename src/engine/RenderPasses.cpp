@@ -1,15 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
-// clang-format off
-#include "Rendering.hpp"
-// clang-format on
-#include "Commands.hpp"
-#include "ParallelDraw.hpp"
 #include "RenderInternal.hpp"
 #include "RenderParams.hpp"
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Math3D.hpp"
 #include "backends/imgui_impl_vulkan.h"
+#include "engine/ParallelDraw.hpp"
 #include "imgui.h"
 
 #include <array>

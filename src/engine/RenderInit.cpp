@@ -2,15 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // File: src/engine/RenderInit.cpp
-// clang-format off
-#include "Rendering.hpp"
-// clang-format on
 #include "IBLProcessor.hpp"
-#include "RenderCore.hpp"
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
 #include "SMAALUTGenerator.hpp"
-#include "SamplerBuilder.hpp"
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_vulkan.h"
 #include "engine/TTYBackend.hpp"

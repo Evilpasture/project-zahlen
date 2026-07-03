@@ -2,12 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // File: src/engine/RenderResources.cpp
-// clang-format off
-#include "Rendering.hpp"
-// clang-format on
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
-#include "Texture.hpp"
 #include "Zahlen/Types.hpp"
 
 #include <cstddef>

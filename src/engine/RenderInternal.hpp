@@ -3,22 +3,10 @@
 
 // File: src/render/RenderInternal.hpp
 #pragma once
-// clang-format off
 #include "Rendering.hpp"
-// clang-format on
-#include "Allocator.hpp"
-#include "ComputePass.hpp"
-#include "DescriptorLayout.hpp"
-#include "GpuProfiler.hpp"
-#include "Postprocessing.hpp"
-#include "PresentationContext.hpp"
-#include "RenderCore.hpp"
-#include "RenderTarget.hpp"
-#include "Resources.hpp"
-#include "StagingContext.hpp"
-#include "Vertex.hpp"
 #include "detail/Array.hpp"
 #include "engine/FileWatcher.hpp"
+#include "engine/Resources.hpp"
 
 #include <GLFW/glfw3.h>
 #include <Zahlen/Log.hpp>
