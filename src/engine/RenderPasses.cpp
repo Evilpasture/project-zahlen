@@ -19,6 +19,17 @@ namespace ZHLN {
 
 namespace {
 
+template <typename TargetImageT, typename RecordFn>
+inline void DispatchPostProcessPass(VkCommandBuffer cmd, TargetImageT& targetImage,
+									VkAttachmentLoadOp loadOp, RecordFn&& recordFn,
+									VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+									const Color4& clearColor = kClearColorBlack) noexcept {
+	auto [attachment, scope] = Vk::ReadToColor(cmd, targetImage);
+	Vk::DynamicPass(targetImage.extent)
+		.AddColor(attachment, loadOp, storeOp, clearColor)
+		.Execute(cmd, std::forward<RecordFn>(recordFn));
+}
+
 // ============================================================================
 // Private Core Refactoring Helpers
 // ============================================================================
@@ -256,18 +267,22 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 								   ? drawCmd.instanceData.indexCount
 								   : drawCmd.instanceData.vertexCount;
 
+		auto writeDraw = [&](uint32_t passIdx) {
+			uint32_t writeIdx = passWriteOffsets[passIdx] + passDrawCounts[passIdx];
+			indirectCmdsBase[writeIdx] = {.vertexCount = vertexCount,
+										  .instanceCount = 1,
+										  .firstVertex = 0,
+										  .firstInstance = i};
+			passDrawCounts[passIdx]++;
+		};
+
 		JPH::Vec3 meshPos = drawCmd.instanceData.world.GetTranslation();
 		float radius = drawCmd.instanceData.cullRadius;
 
 		// --- Check Cascades (0 to 3) ---
 		for (uint32_t c = 0; c < RenderContext::Impl::NUM_CASCADES; ++c) {
 			if (cascadeFrustums[c].IsSphereVisible(meshPos, radius)) {
-				uint32_t writeIdx = passWriteOffsets[c] + passDrawCounts[c];
-				indirectCmdsBase[writeIdx] = {.vertexCount = vertexCount,
-											  .instanceCount = 1,
-											  .firstVertex = 0,
-											  .firstInstance = i};
-				passDrawCounts[c]++;
+				writeDraw(c);
 			}
 		}
 
@@ -279,10 +294,11 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 
 			// Map the shadowLayer directly to our [4..7] slots
 			uint32_t slotIdx = 4 + light.shadowLayer;
-			ZHLN::Assert(passDrawCounts[slotIdx] < kGpuCullingMaxInstances);
 			if (slotIdx >= 8) {
 				continue;
 			}
+
+			ZHLN::Assert(passDrawCounts[slotIdx] < kGpuCullingMaxInstances);
 
 			JPH::Vec3 lightPos(light.position[0], light.position[1], light.position[2]);
 
@@ -292,12 +308,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 			float maxRangeSq = maxRange * maxRange;
 
 			if (distToLightSq <= maxRangeSq) {
-				uint32_t writeIdx = passWriteOffsets[slotIdx] + passDrawCounts[slotIdx];
-				indirectCmdsBase[writeIdx] = {.vertexCount = vertexCount,
-											  .instanceCount = 1,
-											  .firstVertex = 0,
-											  .firstInstance = i};
-				passDrawCounts[slotIdx]++;
+				writeDraw(slotIdx);
 			}
 		}
 	}
@@ -636,31 +647,24 @@ BloomPass::Execute(const FrameRecorder& recorder,
 	const auto bloomFinal_u =
 		AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.bloomFinalTarget);
 
-	{
-		const auto [bloomThreshold_att, scope] = Vk::ReadToColor(cmd, bloomThreshold_u);
-		ctx.bloomThresholdPass.WriteNext(device, inColor, ctx.defaultSampler.Get());
-
-		Vk::DynamicPass(ctx.bloomThresholdTarget.extent)
-			.AddColor(bloomThreshold_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
-			.Execute(cmd, [&]() { ctx.bloomThresholdPass.Execute(cmd); });
-	}
+	// Threshold Pass
+	ctx.bloomThresholdPass.WriteNext(device, inColor, ctx.defaultSampler.Get());
+	DispatchPostProcessPass(cmd, bloomThreshold_u, VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+							[&]() { ctx.bloomThresholdPass.Execute(cmd); });
 
 	struct BlurPushConstants {
 		int horizontal;
 		float texelSize;
 	};
 
+	// Blur Passes
 	auto DispatchBlurPass = [&](auto& passObject, auto inputImage, auto targetImage, int horizontal,
 								float texelSize) noexcept {
-		const auto [targetAttachment, scope] = Vk::ReadToColor(cmd, targetImage);
 		passObject.WriteNext(device, inputImage, ctx.defaultSampler.Get());
-
-		Vk::DynamicPass(targetImage.extent)
-			.AddColor(targetAttachment, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
-			.Execute(cmd, [&]() {
-				passObject.Execute(
-					cmd, BlurPushConstants{.horizontal = horizontal, .texelSize = texelSize});
-			});
+		DispatchPostProcessPass(cmd, targetImage, VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
+			passObject.Execute(cmd,
+							   BlurPushConstants{.horizontal = horizontal, .texelSize = texelSize});
+		});
 	};
 
 	DispatchBlurPass(ctx.bloomBlurHPass, bloomThreshold_u, bloomBlur_u, 1,
@@ -705,23 +709,17 @@ BloomPass::Execute(const FrameRecorder& recorder,
 	const auto accumNext_u =
 		AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.accumBuffers.Next());
 
-	{
-		auto [accumNext_att, scope] = Vk::ReadToColor(cmd, accumNext_u);
+	struct TAAPushConstants {
+		float feedback;
+	};
 
-		struct TAAPushConstants {
-			float feedback;
-		};
+	DispatchPostProcessPass(cmd, accumNext_u, VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
+		ctx.taaPass.WriteNext(ctx.ctx.Device(), color_ro, accumCurr_ro, in.velocity,
+							  ctx.defaultSampler.Get(),
+							  ctx.frameUniformBuffers[recorder.frameIndex].Handle());
 
-		Vk::DynamicPass(in.sceneColor.extent)
-			.AddColor(accumNext_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
-			.Execute(cmd, [&]() {
-				ctx.taaPass.WriteNext(ctx.ctx.Device(), color_ro, accumCurr_ro, in.velocity,
-									  ctx.defaultSampler.Get(),
-									  ctx.frameUniformBuffers[recorder.frameIndex].Handle());
-
-				ctx.taaPass.Execute(cmd, TAAPushConstants{.feedback = ctx.aaState.taaFeedback});
-			});
-	}
+		ctx.taaPass.Execute(cmd, TAAPushConstants{.feedback = ctx.aaState.taaFeedback});
+	});
 
 	return accumNext_u;
 }
@@ -733,30 +731,24 @@ BloomPass::Execute(const FrameRecorder& recorder,
 	const auto accumNext_u =
 		AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.accumBuffers.Next());
 
-	{
-		auto [accumNext_att, scope] = Vk::ReadToColor(cmd, accumNext_u);
+	struct FXAAPushConstants {
+		float rcpFrameX;
+		float rcpFrameY;
+		float subpix;
+		float edgeThreshold;
+		float edgeThresholdMin;
+		float _pad;
+	} pc = {.rcpFrameX = 1.0f / (float)in.sceneColor.extent.width,
+			.rcpFrameY = 1.0f / (float)in.sceneColor.extent.height,
+			.subpix = ctx.aaState.fxaaSubpix,
+			.edgeThreshold = ctx.aaState.fxaaEdgeThreshold,
+			.edgeThresholdMin = ctx.aaState.fxaaEdgeThresholdMin,
+			._pad = 0.0f};
 
-		struct FXAAPushConstants {
-			float rcpFrameX;
-			float rcpFrameY;
-			float subpix;
-			float edgeThreshold;
-			float edgeThresholdMin;
-			float _pad;
-		} pc = {.rcpFrameX = 1.0f / (float)in.sceneColor.extent.width,
-				.rcpFrameY = 1.0f / (float)in.sceneColor.extent.height,
-				.subpix = ctx.aaState.fxaaSubpix,
-				.edgeThreshold = ctx.aaState.fxaaEdgeThreshold,
-				.edgeThresholdMin = ctx.aaState.fxaaEdgeThresholdMin,
-				._pad = 0.0f};
-
-		Vk::DynamicPass(in.sceneColor.extent)
-			.AddColor(accumNext_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
-			.Execute(cmd, [&]() {
-				ctx.fxaaPass.WriteNext(ctx.ctx.Device(), color_ro, ctx.defaultSampler.Get());
-				ctx.fxaaPass.Execute(cmd, pc);
-			});
-	}
+	DispatchPostProcessPass(cmd, accumNext_u, VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
+		ctx.fxaaPass.WriteNext(ctx.ctx.Device(), color_ro, ctx.defaultSampler.Get());
+		ctx.fxaaPass.Execute(cmd, pc);
+	});
 
 	return accumNext_u;
 }
@@ -775,18 +767,11 @@ BloomPass::Execute(const FrameRecorder& recorder,
 				 .width = (float)in.sceneColor.extent.width,
 				 .height = (float)in.sceneColor.extent.height};
 
-	auto ExecuteSubPass = [&](auto& targetImage, VkAttachmentLoadOp loadOp, auto&& recordFn) {
-		auto [attachment, scope] = Vk::ReadToColor(cmd, targetImage);
-		Vk::DynamicPass(in.sceneColor.extent)
-			.AddColor(attachment, loadOp, VK_ATTACHMENT_STORE_OP_STORE, kClearColorBlack)
-			.Execute(cmd, std::forward<decltype(recordFn)>(recordFn));
-	};
-
 	const auto smaaEdge_u =
 		AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.smaaEdgeTarget);
 	const auto smaaEdge_ro = smaaEdge_u;
 
-	ExecuteSubPass(smaaEdge_u, VK_ATTACHMENT_LOAD_OP_CLEAR, [&]() {
+	DispatchPostProcessPass(cmd, smaaEdge_u, VK_ATTACHMENT_LOAD_OP_CLEAR, [&]() {
 		ctx.smaaEdgePass.WriteNext(ctx.ctx.Device(), color_ro, ctx.defaultSampler.Get(),
 								   ctx.pointSampler.Get());
 		ctx.smaaEdgePass.Execute(cmd, metrics,
@@ -797,7 +782,7 @@ BloomPass::Execute(const FrameRecorder& recorder,
 		AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.smaaWeightTarget);
 	const auto smaaWeight_ro = smaaWeight_u;
 
-	ExecuteSubPass(smaaWeight_u, VK_ATTACHMENT_LOAD_OP_CLEAR, [&]() {
+	DispatchPostProcessPass(cmd, smaaWeight_u, VK_ATTACHMENT_LOAD_OP_CLEAR, [&]() {
 		const auto& [areaView, searchView] =
 			std::tie(ctx.textureViews[ctx.smaaAreaTexIdx], ctx.textureViews[ctx.smaaSearchTexIdx]);
 
@@ -810,7 +795,7 @@ BloomPass::Execute(const FrameRecorder& recorder,
 	const auto accumNext_u =
 		AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.accumBuffers.Next());
 
-	ExecuteSubPass(accumNext_u, VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
+	DispatchPostProcessPass(cmd, accumNext_u, VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
 		ctx.smaaBlendPass.WriteNext(ctx.ctx.Device(), color_ro, smaaWeight_ro,
 									ctx.defaultSampler.Get(), ctx.pointSampler.Get());
 		ctx.smaaBlendPass.Execute(cmd, metrics,
