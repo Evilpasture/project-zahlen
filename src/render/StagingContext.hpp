@@ -44,8 +44,8 @@ class StagingContext {
 	void Wait() noexcept;
 
   private:
-	Allocator& _allocator;
-	const Context& _ctx;
+	Allocator* _allocator = nullptr;
+	const Context* _ctx = nullptr;
 	CommandPool _cmdPool;
 	VkCommandBuffer _cmd = VK_NULL_HANDLE;
 	std::vector<Buffer> _stagingBuffers;

@@ -104,15 +104,14 @@ template <typename Layout, uint32_t BindingID> class BindlessRegistry {
   public:
 	BindlessRegistry() = default;
 
-	void Init(const VkDevice device, const VkDescriptorSet set);
+	void Init(VkDevice device, VkDescriptorSet set);
 
-	auto RegisterImage(const VkImageView view,
-					   const VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
-		-> uint32_t
+	auto RegisterImage(VkImageView view,
+					   VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) -> uint32_t
 		requires(Slot::type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
 
-	auto RegisterCombined(const VkImageView view, const VkSampler sampler,
-						  const VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+	auto RegisterCombined(VkImageView view, VkSampler sampler,
+						  VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
 		-> uint32_t
 		requires(Slot::type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
@@ -205,7 +204,7 @@ template <typename... Slots> class DescriptorLayout {
 						 std::index_sequence<I...> /*unused*/) noexcept;
 
 	template <size_t I, typename Slot, typename Arg>
-	static void WriteSlot(VkDescriptorSet set, Arg&& arg, VkDescriptorImageInfo& imageInfo,
+	static void WriteSlot(VkDescriptorSet set, const Arg& arg, VkDescriptorImageInfo& imageInfo,
 						  VkDescriptorBufferInfo& bufferInfo,
 						  VkWriteDescriptorSetAccelerationStructureKHR& asInfo,
 						  VkWriteDescriptorSet& write) noexcept;

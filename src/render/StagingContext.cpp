@@ -15,12 +15,12 @@
 namespace ZHLN::Vk {
 
 StagingContext::StagingContext(Allocator& allocator, const Context& ctx)
-	: _allocator(allocator), _ctx(ctx) {}
+	: _allocator(&allocator), _ctx(&ctx) {}
 
 StagingContext::~StagingContext() {
 	// Destructor automatically cleans up the fence
 	if (_fence != VK_NULL_HANDLE) {
-		vkDestroyFence(_ctx.Device(), _fence, nullptr);
+		vkDestroyFence(_ctx->Device(), _fence, nullptr);
 	}
 }
 
@@ -31,7 +31,7 @@ StagingContext::StagingContext(StagingContext&& other) noexcept
 	  _fence(std::exchange(other._fence, VK_NULL_HANDLE)) {}
 
 void StagingContext::Begin() {
-	_cmdPool = CommandPool(_ctx.Device(), _ctx.PhysicalInfo().graphics_family);
+	_cmdPool = CommandPool(_ctx->Device(), _ctx->PhysicalInfo().graphics_family);
 	[[maybe_unused]] bool ok = _cmdPool.Allocate(1);
 	_cmd = _cmdPool[0];
 	ZHLN_BeginCommandBuffer(_cmd);
@@ -39,7 +39,7 @@ void StagingContext::Begin() {
 
 void StagingContext::UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels,
 								   const void* data, size_t bytes) {
-	Buffer staging = Buffer::Create(_allocator.Get(), bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+	Buffer staging = Buffer::Create(_allocator->Get(), bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
 									VMA_MEMORY_USAGE_CPU_ONLY);
 	if (auto mapped = staging.Map(); mapped.data) {
 		std::memcpy(mapped.data, data, bytes);
@@ -162,7 +162,7 @@ void StagingContext::ExecuteAsync() {
 
 	VkFenceCreateInfo fenceInfo = {
 		.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .pNext = nullptr, .flags = 0};
-	vkCreateFence(_ctx.Device(), &fenceInfo, nullptr, &_fence);
+	vkCreateFence(_ctx->Device(), &fenceInfo, nullptr, &_fence);
 
 	VkCommandBufferSubmitInfo subInfo = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
@@ -181,12 +181,12 @@ void StagingContext::ExecuteAsync() {
 		.signalSemaphoreInfoCount = {},
 		.pSignalSemaphoreInfos = {},
 	};
-	vkQueueSubmit2(_ctx.GraphicsQueue(), 1, &submit, _fence);
+	vkQueueSubmit2(_ctx->GraphicsQueue(), 1, &submit, _fence);
 }
 
 void StagingContext::Wait() noexcept {
 	if (_fence != VK_NULL_HANDLE) {
-		vkWaitForFences(_ctx.Device(), 1, &_fence, VK_TRUE, UINT64_MAX);
+		vkWaitForFences(_ctx->Device(), 1, &_fence, VK_TRUE, UINT64_MAX);
 	}
 }
 

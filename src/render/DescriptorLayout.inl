@@ -330,7 +330,7 @@ void DescriptorLayout<Slots...>::WriteAll(
 
 template <typename... Slots>
 template <size_t I, typename Slot, typename Arg>
-void DescriptorLayout<Slots...>::WriteSlot(VkDescriptorSet set, Arg&& arg,
+void DescriptorLayout<Slots...>::WriteSlot(VkDescriptorSet set, const Arg& arg,
 										   VkDescriptorImageInfo& imageInfo,
 										   VkDescriptorBufferInfo& bufferInfo,
 										   VkWriteDescriptorSetAccelerationStructureKHR& asInfo,

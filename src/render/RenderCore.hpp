@@ -62,7 +62,7 @@ template <typename... Resources> class StaticResourceManager {
   public:
 	constexpr explicit StaticResourceManager(Resources*... resources) noexcept
 		: _resources(resources...) {}
-
+	~StaticResourceManager() = default;
 	StaticResourceManager(const StaticResourceManager&) = delete;
 	StaticResourceManager(StaticResourceManager&&) = delete;
 	StaticResourceManager& operator=(const StaticResourceManager&) = delete;
@@ -750,6 +750,10 @@ template <typename ImageT, VkImageLayout Final> class ScopedTransition {
 	ScopedTransition(VkCommandBuffer cmd, ImageT& image, Vk::Tag<Final> transitionTag)
 		: cmd_(cmd), image_(Transition(cmd, image, transitionTag)) {}
 	~ScopedTransition() { [[maybe_unused]] auto _ = Transition(cmd_, image_, Vk::AsReadOnly); }
+	ScopedTransition(const ScopedTransition&) = delete;
+	ScopedTransition& operator=(const ScopedTransition&) = delete;
+	ScopedTransition(ScopedTransition&&) = delete;
+	ScopedTransition& operator=(ScopedTransition&&) = delete;
 	auto& Get() { return image_; }
 
   private:

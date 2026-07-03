@@ -87,8 +87,9 @@ inline void GpuProfiler<Stages...>::Init(VkDevice device, VkPhysicalDevice physi
 
 template <GpuStageTag... Stages>
 inline void GpuProfiler<Stages...>::Reset(uint32_t frameIndex) noexcept {
-	if (!_enabled)
+	if (!_enabled) {
 		return;
+	}
 	uint32_t slot = frameIndex % 2;
 	vkResetQueryPool(_device, _pools[slot], 0, kQueryCount);
 	_recordedMasks[slot] = 0;
@@ -158,7 +159,7 @@ inline void GpuProfiler<Stages...>::RetrieveResults(uint32_t frameIndex, float t
 						durationMS = static_cast<float>(stageResults[1] - stageResults[0]) *
 									 timestampPeriod / 1000000.0f;
 					}
-					callback(Stage::name, durationMS);
+					std::forward<Func>(callback)(Stage::name, durationMS);
 				}
 			}
 		}.template operator()<Stages>(),
