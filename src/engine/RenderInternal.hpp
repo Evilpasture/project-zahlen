@@ -43,8 +43,10 @@ struct IBLPayload {
 namespace ZHLN {
 
 template <uint32_t B, VkShaderStageFlags S = VK_SHADER_STAGE_FRAGMENT_BIT>
-using EngineAS =
-	std::conditional_t<isMac, Vk::SampledImageSlot<B, S>, Vk::AccelerationStructureSlot<B, S>>;
+using EngineAS = std::conditional_t<isMac,
+									Vk::BindingSlot<B, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, S, 1,
+													VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT>,
+									Vk::AccelerationStructureSlot<B, S>>;
 
 // ============================================================================
 // GenerationalPool Template

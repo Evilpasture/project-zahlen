@@ -5,21 +5,6 @@
 
 namespace ZHLN::Resource {
 
-template <size_t VSize, size_t FSize> struct EmbeddedShaderPair {
-	uint8_t vertex_data[VSize];
-	uint8_t fragment_data[FSize];
-	constexpr operator ShaderPair() const noexcept {
-		return {.vertex = (VSize == 0) ? std::span<const uint8_t>{}
-									   : std::span<const uint8_t>{vertex_data, VSize},
-				.fragment = (FSize == 0) ? std::span<const uint8_t>{}
-										 : std::span<const uint8_t>{fragment_data, FSize}};
-	}
-};
-
-template <size_t VSize, size_t FSize>
-EmbeddedShaderPair(const uint8_t (&)[VSize], const uint8_t (&)[FSize])
-	-> EmbeddedShaderPair<VSize, FSize>;
-
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wc23-extensions"
@@ -27,150 +12,159 @@ EmbeddedShaderPair(const uint8_t (&)[VSize], const uint8_t (&)[FSize])
 
 // NOLINTBEGIN(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
 
-constexpr auto basic_shaders_storage = EmbeddedShaderPair{.vertex_data =
-															  {
+// --- Basic Shaders ---
+constexpr uint8_t basic_vs_raw[] = {
 #embed SHADER_BASIC_HLSL_VS_PATH
-															  },
-														  .fragment_data = {
+};
+constexpr uint8_t basic_ps_raw[] = {
 #embed SHADER_BASIC_HLSL_PS_PATH
-														  }};
-extern const ShaderPair basic_shaders = basic_shaders_storage;
+};
+extern const ShaderPair basic_shaders{.vertex = basic_vs_raw, .fragment = basic_ps_raw};
 
-constexpr auto blit_shaders_storage = EmbeddedShaderPair{.vertex_data =
-															 {
+// --- Blit Shaders ---
+constexpr uint8_t blit_vs_raw[] = {
 #embed SHADER_BLIT_HLSL_VS_PATH
-															 },
-														 .fragment_data = {
+};
+constexpr uint8_t blit_ps_raw[] = {
 #embed SHADER_BLIT_HLSL_PS_PATH
-														 }};
-extern const ShaderPair blit_shaders = blit_shaders_storage;
+};
+extern const ShaderPair blit_shaders{.vertex = blit_vs_raw, .fragment = blit_ps_raw};
 
-constexpr auto taa_shaders_storage = EmbeddedShaderPair{.vertex_data =
-															{
+// --- TAA Shaders ---
+constexpr uint8_t taa_vs_raw[] = {
 #embed SHADER_TAA_HLSL_VS_PATH
-															},
-														.fragment_data = {
+};
+constexpr uint8_t taa_ps_raw[] = {
 #embed SHADER_TAA_HLSL_PS_PATH
-														}};
-extern const ShaderPair taa_shaders = taa_shaders_storage;
+};
+extern const ShaderPair taa_shaders{.vertex = taa_vs_raw, .fragment = taa_ps_raw};
 
-constexpr auto ui_shaders_storage = EmbeddedShaderPair{.vertex_data =
-														   {
+// --- UI Shaders ---
+constexpr uint8_t ui_vs_raw[] = {
 #embed SHADER_UI_HLSL_VS_PATH
-														   },
-													   .fragment_data = {
+};
+constexpr uint8_t ui_ps_raw[] = {
 #embed SHADER_UI_HLSL_PS_PATH
-													   }};
-extern const ShaderPair ui_shaders = ui_shaders_storage;
+};
+extern const ShaderPair ui_shaders{.vertex = ui_vs_raw, .fragment = ui_ps_raw};
 
-constexpr auto ambient_shaders_storage = EmbeddedShaderPair{.vertex_data =
-																{
+// --- Ambient Shaders ---
+constexpr uint8_t ambient_vs_raw[] = {
 #embed SHADER_AMBIENT_HLSL_VS_PATH
-																},
-															.fragment_data = {
+};
+constexpr uint8_t ambient_ps_raw[] = {
 #embed SHADER_AMBIENT_HLSL_PS_PATH
-															}};
-extern const ShaderPair ambient_shaders = ambient_shaders_storage;
+};
+extern const ShaderPair ambient_shaders{.vertex = ambient_vs_raw, .fragment = ambient_ps_raw};
 
-constexpr auto lighting_shaders_storage = EmbeddedShaderPair{.vertex_data =
-																 {
+// --- Lighting Shaders ---
+constexpr uint8_t lighting_vs_raw[] = {
 #embed SHADER_LIGHTING_HLSL_VS_PATH
-																 },
-															 .fragment_data = {
+};
+constexpr uint8_t lighting_ps_raw[] = {
 #embed SHADER_LIGHTING_HLSL_PS_PATH
-															 }};
-extern const ShaderPair lighting_shaders = lighting_shaders_storage;
+};
+extern const ShaderPair lighting_shaders{.vertex = lighting_vs_raw, .fragment = lighting_ps_raw};
 
-constexpr auto reflection_shaders_storage = EmbeddedShaderPair{.vertex_data =
-																   {
+// --- Reflection Shaders ---
+constexpr uint8_t reflection_vs_raw[] = {
 #embed SHADER_REFLECTION_HLSL_VS_PATH
-																   },
-															   .fragment_data = {
+};
+constexpr uint8_t reflection_ps_raw[] = {
 #embed SHADER_REFLECTION_HLSL_PS_PATH
-															   }};
-extern const ShaderPair reflection_shaders = reflection_shaders_storage;
+};
+extern const ShaderPair reflection_shaders{.vertex = reflection_vs_raw,
+										   .fragment = reflection_ps_raw};
 
-constexpr auto reflection_nort_shaders_storage = EmbeddedShaderPair{.vertex_data =
-																		{
+// --- Reflection NoRT Shaders ---
+constexpr uint8_t reflection_nort_vs_raw[] = {
 #embed SHADER_REFLECTION_NORT_HLSL_VS_PATH
-																		},
-																	.fragment_data = {
+};
+constexpr uint8_t reflection_nort_ps_raw[] = {
 #embed SHADER_REFLECTION_NORT_HLSL_PS_PATH
-																	}};
-extern const ShaderPair reflection_nort_shaders = reflection_nort_shaders_storage;
+};
+extern const ShaderPair reflection_nort_shaders{.vertex = reflection_nort_vs_raw,
+												.fragment = reflection_nort_ps_raw};
 
-constexpr auto fxaa_shaders_storage = EmbeddedShaderPair{.vertex_data =
-															 {
+// --- FXAA Shaders ---
+constexpr uint8_t fxaa_vs_raw[] = {
 #embed SHADER_FXAA_HLSL_VS_PATH
-															 },
-														 .fragment_data = {
+};
+constexpr uint8_t fxaa_ps_raw[] = {
 #embed SHADER_FXAA_HLSL_PS_PATH
-														 }};
-extern const ShaderPair fxaa_shaders = fxaa_shaders_storage;
+};
+extern const ShaderPair fxaa_shaders{.vertex = fxaa_vs_raw, .fragment = fxaa_ps_raw};
 
-constexpr auto smaa_edge_shaders_storage = EmbeddedShaderPair{.vertex_data =
-																  {
+// --- SMAA Edge Shaders ---
+constexpr uint8_t smaa_edge_vs_raw[] = {
 #embed SHADER_SMAA_EDGE_VS_PATH
-																  },
-															  .fragment_data = {
+};
+constexpr uint8_t smaa_edge_ps_raw[] = {
 #embed SHADER_SMAA_EDGE_PS_PATH
-															  }};
-extern const ShaderPair smaa_edge_shaders = smaa_edge_shaders_storage;
+};
+extern const ShaderPair smaa_edge_shaders{.vertex = smaa_edge_vs_raw, .fragment = smaa_edge_ps_raw};
 
-constexpr auto smaa_weight_shaders_storage = EmbeddedShaderPair{.vertex_data =
-																	{
+// --- SMAA Weight Shaders ---
+constexpr uint8_t smaa_weight_vs_raw[] = {
 #embed SHADER_SMAA_WEIGHT_VS_PATH
-																	},
-																.fragment_data = {
+};
+constexpr uint8_t smaa_weight_ps_raw[] = {
 #embed SHADER_SMAA_WEIGHT_PS_PATH
-																}};
-extern const ShaderPair smaa_weight_shaders = smaa_weight_shaders_storage;
+};
+extern const ShaderPair smaa_weight_shaders{.vertex = smaa_weight_vs_raw,
+											.fragment = smaa_weight_ps_raw};
 
-constexpr auto smaa_blend_shaders_storage = EmbeddedShaderPair{.vertex_data =
-																   {
+// --- SMAA Blend Shaders ---
+constexpr uint8_t smaa_blend_vs_raw[] = {
 #embed SHADER_SMAA_BLEND_VS_PATH
-																   },
-															   .fragment_data = {
+};
+constexpr uint8_t smaa_blend_ps_raw[] = {
 #embed SHADER_SMAA_BLEND_PS_PATH
-															   }};
-extern const ShaderPair smaa_blend_shaders = smaa_blend_shaders_storage;
+};
+extern const ShaderPair smaa_blend_shaders{.vertex = smaa_blend_vs_raw,
+										   .fragment = smaa_blend_ps_raw};
 
-constexpr auto bloom_threshold_shaders_storage = EmbeddedShaderPair{.vertex_data =
-																		{
+// --- Bloom Threshold Shaders ---
+constexpr uint8_t bloom_threshold_vs_raw[] = {
 #embed SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH
-																		},
-																	.fragment_data = {
+};
+constexpr uint8_t bloom_threshold_ps_raw[] = {
 #embed SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH
-																	}};
-extern const ShaderPair bloom_threshold_shaders = bloom_threshold_shaders_storage;
+};
+extern const ShaderPair bloom_threshold_shaders{.vertex = bloom_threshold_vs_raw,
+												.fragment = bloom_threshold_ps_raw};
 
-constexpr auto bloom_blur_shaders_storage = EmbeddedShaderPair{.vertex_data =
-																   {
+// --- Bloom Blur Shaders ---
+constexpr uint8_t bloom_blur_vs_raw[] = {
 #embed SHADER_BLOOM_BLUR_HLSL_VS_PATH
-																   },
-															   .fragment_data = {
+};
+constexpr uint8_t bloom_blur_ps_raw[] = {
 #embed SHADER_BLOOM_BLUR_HLSL_PS_PATH
-															   }};
-extern const ShaderPair bloom_blur_shaders = bloom_blur_shaders_storage;
+};
+extern const ShaderPair bloom_blur_shaders{.vertex = bloom_blur_vs_raw,
+										   .fragment = bloom_blur_ps_raw};
 
-constexpr auto punctual_shadows_shaders_storage = EmbeddedShaderPair{.vertex_data =
-																		 {
+// --- Punctual Shadows Shaders ---
+constexpr uint8_t punctual_shadows_vs_raw[] = {
 #embed SHADER_PUNCTUAL_SHADOWS_HLSL_VS_PATH
-																		 },
-																	 .fragment_data = {
+};
+constexpr uint8_t punctual_shadows_ps_raw[] = {
 #embed SHADER_PUNCTUAL_SHADOWS_HLSL_PS_PATH
-																	 }};
-extern const ShaderPair punctual_shadows_shaders = punctual_shadows_shaders_storage;
+};
+extern const ShaderPair punctual_shadows_shaders{.vertex = punctual_shadows_vs_raw,
+												 .fragment = punctual_shadows_ps_raw};
 
-constexpr auto lighting_nort_shaders_storage = EmbeddedShaderPair{.vertex_data =
-																	  {
+// --- Lighting NoRT Shaders ---
+constexpr uint8_t lighting_nort_vs_raw[] = {
 #embed SHADER_LIGHTING_NORT_HLSL_VS_PATH
-																	  },
-																  .fragment_data = {
+};
+constexpr uint8_t lighting_nort_ps_raw[] = {
 #embed SHADER_LIGHTING_NORT_HLSL_PS_PATH
-																  }};
-extern const ShaderPair lighting_nort_shaders = lighting_nort_shaders_storage;
+};
+extern const ShaderPair lighting_nort_shaders{.vertex = lighting_nort_vs_raw,
+											  .fragment = lighting_nort_ps_raw};
 
+// --- Single Shaders and Binary Resources ---
 constexpr uint8_t culling_comp_raw[] = {
 #embed SHADER_CULLING_HLSL_CS_PATH
 };
