@@ -175,6 +175,64 @@ using DescriptorSetLayout = DeviceHandle<VkDescriptorSetLayout, ZHLN_DestroyDesc
 using DescriptorPool = DeviceHandle<VkDescriptorPool, ZHLN_DestroyDescriptorPool>;
 
 // ============================================================================
+// VMA RAII Handles
+// ============================================================================
+
+inline void VmaUnmapDeleter(VmaAllocator allocator, [[maybe_unused]] void* ptr,
+							VmaAllocation allocation) noexcept {
+	if (allocator != nullptr && allocation != nullptr) {
+		vmaFlushAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
+		vmaUnmapMemory(allocator, allocation);
+	}
+}
+
+template <typename T, auto DeleterFn> class VmaHandle {
+  public:
+	VmaHandle() noexcept = default;
+	VmaHandle(VmaAllocator allocator, T handle, VmaAllocation allocation) noexcept
+		: _allocator(allocator), _handle(handle), _allocation(allocation) {}
+	~VmaHandle() noexcept { Cleanup(); }
+
+	VmaHandle(const VmaHandle&) = delete;
+	auto operator=(const VmaHandle&) -> VmaHandle& = delete;
+
+	VmaHandle(VmaHandle&& other) noexcept
+		: _allocator(std::exchange(other._allocator, nullptr)),
+		  _handle(std::exchange(other._handle, T{})),
+		  _allocation(std::exchange(other._allocation, nullptr)) {}
+
+	auto operator=(VmaHandle&& other) noexcept -> VmaHandle& {
+		if (this != &other) {
+			Cleanup();
+			_allocator = std::exchange(other._allocator, nullptr);
+			_handle = std::exchange(other._handle, T{});
+			_allocation = std::exchange(other._allocation, nullptr);
+		}
+		return *this;
+	}
+
+	[[nodiscard]] auto Get() const noexcept -> T { return _handle; }
+	[[nodiscard]] auto Allocation() const noexcept -> VmaAllocation { return _allocation; }
+	[[nodiscard]] auto Allocator() const noexcept -> VmaAllocator { return _allocator; }
+	[[nodiscard]] auto Valid() const noexcept -> bool { return _handle != T{}; }
+	explicit operator bool() const noexcept { return Valid(); }
+
+	void Cleanup() noexcept {
+		if (_handle != T{}) {
+			DeleterFn(_allocator, _handle, _allocation);
+			_handle = T{};
+			_allocation = nullptr;
+			_allocator = nullptr;
+		}
+	}
+
+  private:
+	VmaAllocator _allocator = nullptr;
+	T _handle = T{};
+	VmaAllocation _allocation = nullptr;
+};
+
+// ============================================================================
 // Type safe Pipeline
 // ============================================================================
 
@@ -730,6 +788,8 @@ void ExecuteCommands(const VkCommandBuffer primary,
 // Dynamic Render Pass Builder
 // ============================================================================
 
+static constexpr size_t kMaxColorAttachments = 8;
+
 template <VkImageLayout Layout> struct Tag {};
 
 inline constexpr Tag<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> AsColorAttachment;
@@ -769,16 +829,17 @@ template <size_t ColorCount = 0, bool HasDepth = false> class DynamicPass {
   public:
 	constexpr explicit DynamicPass(VkExtent2D extent) noexcept : _extent(extent) {}
 
+	// Inter-state move constructor
 	template <size_t InsideCount, bool InsideDepth>
-	constexpr DynamicPass(const DynamicPass<InsideCount, InsideDepth>&& other,
-						  std::array<VkRenderingAttachmentInfo, ColorCount>&& colors,
-						  VkRenderingAttachmentInfo depth) noexcept;
+	constexpr explicit DynamicPass(DynamicPass<InsideCount, InsideDepth>&& other) noexcept
+		: _extent(other._extent), _flags(other._flags), _colors(std::move(other)._colors),
+		  _depth(other._depth), _viewMask(other._viewMask) {}
 
 	template <VkImageLayout Layout>
-	constexpr auto
-	AddColor(const TypedImage<Layout>& img, VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
-			 VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-			 const ZHLN::Color4& clearColor = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f}) noexcept
+	constexpr auto AddColor(
+		const TypedImage<Layout>& img, VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+		VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+		const ZHLN::Color4& clearColor = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f}) && noexcept
 		-> DynamicPass<ColorCount + 1, HasDepth>;
 
 	template <typename... TypedImages>
@@ -786,20 +847,20 @@ template <size_t ColorCount = 0, bool HasDepth = false> class DynamicPass {
 		const std::tuple<TypedImages...>& imageTuple,
 		VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
 		VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-		const ZHLN::Color4& clearColor = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f}) noexcept
+		const ZHLN::Color4& clearColor = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f}) && noexcept
 		-> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth>;
 
 	template <VkImageLayout Layout>
 	constexpr auto AddDepth(const TypedImage<Layout>& img,
 							VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
 							VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-							float clearVal = 1.0f) noexcept -> DynamicPass<ColorCount, true>;
+							float clearVal = 1.0f) && noexcept -> DynamicPass<ColorCount, true>;
 
-	constexpr auto Flags(VkRenderingFlags flags) noexcept -> DynamicPass<ColorCount, HasDepth>&;
+	constexpr auto Flags(VkRenderingFlags flags) && noexcept -> DynamicPass<ColorCount, HasDepth>&&;
 
 	template <typename Func> void Execute(VkCommandBuffer cmd, Func&& func) const;
 
-	constexpr auto ViewMask(uint32_t mask) noexcept -> DynamicPass<ColorCount, HasDepth>&;
+	constexpr auto ViewMask(uint32_t mask) && noexcept -> DynamicPass<ColorCount, HasDepth>&&;
 
 	void Bind(VkCommandBuffer cmd,
 			  const TypedPipeline<ColorCount, HasDepth>& pipeline) const noexcept {
@@ -811,9 +872,9 @@ template <size_t ColorCount = 0, bool HasDepth = false> class DynamicPass {
 
 	[[nodiscard]] constexpr auto GetDepthPtr() const noexcept -> const VkRenderingAttachmentInfo*;
 
-	VkExtent2D _extent;
+	VkExtent2D _extent{};
 	VkRenderingFlags _flags = 0;
-	std::array<VkRenderingAttachmentInfo, ColorCount> _colors{};
+	std::array<VkRenderingAttachmentInfo, kMaxColorAttachments> _colors{};
 	VkRenderingAttachmentInfo _depth{};
 	uint32_t _viewMask = 0;
 };

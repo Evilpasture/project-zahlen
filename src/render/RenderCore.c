@@ -375,9 +375,14 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
 	uint32_t available_count = 0;
 	vkEnumerateDeviceExtensionProperties(desc->physical->handle, nullptr, &available_count,
 										 nullptr);
-	VkExtensionProperties available_exts[available_count];
-	vkEnumerateDeviceExtensionProperties(desc->physical->handle, nullptr, &available_count,
-										 available_exts);
+
+	VkExtensionProperties* available_exts = NULL;
+	if (available_count > 0) {
+		available_exts =
+			(VkExtensionProperties*)malloc(available_count * sizeof(VkExtensionProperties));
+		vkEnumerateDeviceExtensionProperties(desc->physical->handle, nullptr, &available_count,
+											 available_exts);
+	}
 
 	const char* active_exts[32];
 	uint32_t active_count = 0;
@@ -385,16 +390,24 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
 	for (uint32_t i = 0; i < desc->extension_count; ++i) {
 		bool found = false;
 		for (uint32_t j = 0; j < available_count; ++j) {
-			if (strcmp(desc->extensions[i], available_exts[j].extensionName) == 0) {
+			if (available_exts != NULL &&
+				strcmp(desc->extensions[i], available_exts[j].extensionName) == 0) {
 				found = true;
 				break;
 			}
 		}
 		if (found) {
-			active_exts[active_count++] = desc->extensions[i];
+			if (active_count < 32) {
+				active_exts[active_count++] = desc->extensions[i];
+			}
 		} else {
 			fprintf(stderr, "[VULKAN] Skipping unsupported extension: %s\n", desc->extensions[i]);
 		}
+	}
+
+	// Free the heap allocation as soon as we are done filtering the active extensions
+	if (available_exts != nullptr) {
+		free(available_exts);
 	}
 
 	// --- Queue Creation ---
@@ -879,6 +892,30 @@ ZHLN_FrameResult ZHLN_PresentFrame(const ZHLN_PresentDesc* const restrict desc) 
 	}
 }
 
+[[nodiscard]]
+uint32_t ZHLN_DetectShaderViewMask(const ZHLN_ShaderDesc* const restrict desc) {
+	if (desc->code == nullptr || desc->size == 0) {
+		return 0;
+	}
+
+	SpvReflectShaderModule module;
+	SpvReflectResult result = spvReflectCreateShaderModule(desc->size, desc->code, &module);
+	if (result != SPV_REFLECT_RESULT_SUCCESS) {
+		return 0;
+	}
+
+	uint32_t viewMask = 0;
+	for (uint32_t i = 0; i < module.input_variable_count; ++i) {
+		if (module.input_variables[i]->built_in == SpvBuiltInViewIndex) {
+			viewMask = 0x3F; // Default 6-face cubemap multiview mask
+			break;
+		}
+	}
+
+	spvReflectDestroyShaderModule(&module);
+	return viewMask;
+}
+
 VkShaderModule ZHLN_CreateShaderModule(const VkDevice device,
 									   const ZHLN_ShaderDesc* const restrict desc) {
 	if (!desc->code || desc->size == 0 || desc->size % 4 != 0) {
@@ -908,6 +945,7 @@ bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* const restrict desc,
 		return false;
 	}
 	out->vert.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	out->vert.view_mask = 0;
 
 	if (desc->frag.code && desc->frag.size > 0) {
 		out->frag.handle = ZHLN_CreateShaderModule(desc->device, &desc->frag);
@@ -916,9 +954,11 @@ bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* const restrict desc,
 			return false;
 		}
 		out->frag.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+		out->frag.view_mask = 0;
 	} else {
 		out->frag.handle = VK_NULL_HANDLE;
 		out->frag.stage = (VkShaderStageFlagBits)0;
+		out->frag.view_mask = 0;
 	}
 
 	// --- SAFELY RESOLVE ENTRY POINTS ---
@@ -1125,6 +1165,8 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device,
 		.colorAttachmentCount = desc->color_format_count,
 		.pColorAttachmentFormats = desc->color_format_count > 0 ? desc->color_formats : nullptr,
 		.depthAttachmentFormat = desc->depth_format,
+		.viewMask =
+			desc->stages ? (desc->stages->vert.view_mask | desc->stages->frag.view_mask) : 0,
 	};
 
 	const VkGraphicsPipelineCreateInfo pipeline_info = {

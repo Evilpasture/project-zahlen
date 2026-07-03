@@ -221,6 +221,7 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess, const char*
 }
 
 Engine::~Engine() {
+	_impl->registry.Clear();
 	_impl->physicsContext.reset();
 	_impl->renderContext.reset();
 	_impl->window.reset();

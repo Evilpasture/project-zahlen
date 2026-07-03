@@ -49,14 +49,57 @@ auto FeatureChain<Ts...>::Require(Func&& configure) && {
 	return FeatureChain<Ts..., T>(std::tuple_cat(std::move(_features), std::make_tuple(node)));
 }
 
+// Helpers for automated runtime support checking
+template <typename T>
+[[nodiscard]] inline auto QueryFeatureSupport(VkPhysicalDevice physicalDevice) noexcept -> T {
+	T features{};
+	features.sType = GetStructureType<T>();
+	features.pNext = nullptr;
+
+	if (physicalDevice != VK_NULL_HANDLE) {
+		VkPhysicalDeviceFeatures2 features2{};
+		features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+		features2.pNext = &features;
+		vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
+	}
+	return features;
+}
+
+template <typename T>
+[[nodiscard]] inline auto IsSubsetOf(const T& requested, const T& supported) noexcept -> bool {
+	struct DummyHeader {
+		VkStructureType sType;
+		void* pNext;
+		VkBool32 firstFeature;
+	};
+	constexpr size_t start_offset = offsetof(DummyHeader, firstFeature);
+
+	if constexpr (start_offset < sizeof(T)) {
+		const size_t bool_count = (sizeof(T) - start_offset) / sizeof(VkBool32);
+		const auto* req_bools = reinterpret_cast<const VkBool32*>(
+			reinterpret_cast<const char*>(&requested) + start_offset);
+		const auto* sup_bools = reinterpret_cast<const VkBool32*>(
+			reinterpret_cast<const char*>(&supported) + start_offset);
+
+		for (size_t i = 0; i < bool_count; ++i) {
+			if (req_bools[i] != VK_FALSE && sup_bools[i] == VK_FALSE) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
 template <typename... Ts>
 template <typename T, typename Func>
-auto FeatureChain<Ts...>::Optional(bool condition, Func&& configure) && {
-	T feature{};
-	if (condition) {
-		configure(feature);
-	}
-	FeatureNode<T> node{.feature = feature, .active = condition};
+auto FeatureChain<Ts...>::Optional(VkPhysicalDevice physicalDevice, Func&& configure) && {
+	T requested{};
+	std::forward<Func>(configure)(requested);
+
+	T supported = QueryFeatureSupport<T>(physicalDevice);
+	bool condition = IsSubsetOf(requested, supported);
+
+	FeatureNode<T> node{.feature = requested, .active = condition};
 	return FeatureChain<Ts..., T>(std::tuple_cat(std::move(_features), std::make_tuple(node)));
 }
 
@@ -121,8 +164,8 @@ template <typename T, typename Func> auto FeatureChainBuilder::Require(Func&& co
 }
 
 template <typename T, typename Func>
-auto FeatureChainBuilder::Optional(bool condition, Func&& configure) {
-	return FeatureChain<>().template Optional<T>(condition, std::forward<Func>(configure));
+auto FeatureChainBuilder::Optional(VkPhysicalDevice physicalDevice, Func&& configure) {
+	return FeatureChain<>().template Optional<T>(physicalDevice, std::forward<Func>(configure));
 }
 
 // ============================================================================

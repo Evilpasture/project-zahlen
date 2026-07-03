@@ -165,7 +165,8 @@ template <typename Key, typename Value, size_t InitialCapacity = 32> class HashM
 #endif
 		size_t hash = FNV_offset_basis;
 		for (size_t i = 0; i < length; ++i) {
-			hash ^= static_cast<size_t>(str[i]);
+			// Safe access that prevents UBSan from assuming 8-byte natural alignment
+			hash ^= static_cast<size_t>(static_cast<uint8_t>(str[i]));
 			hash *= FNV_prime;
 		}
 		return hash;
@@ -191,8 +192,9 @@ template <typename Key, typename Value, size_t InitialCapacity = 32> class HashM
 							   key.data();
 							   key.length();
 						   }) {
-			return HashRawBytes(std::bit_cast<const char*>(key.data()),
-								key.length() * sizeof(*key.data()));
+			// Safely cast the data pointer to a byte-oriented character stream
+			const char* data_ptr = reinterpret_cast<const char*>(key.data());
+			return HashRawBytes(data_ptr, key.length() * sizeof(*key.data()));
 		} else {
 			// Static assert prevents compilations with unhandled types,
 			// forcing you to maintain a clean dependency structure.

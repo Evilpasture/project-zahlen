@@ -85,7 +85,9 @@ template <typename T> constexpr std::string_view BoxedName() {
 
 class ZHLN_API SparseSet {
   public:
-	SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr);
+	using DestructorFn = void (*)(void*);
+	SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr,
+			  DestructorFn destructor = nullptr);
 	~SparseSet();
 
 	SparseSet(const SparseSet&) = delete;
@@ -119,6 +121,7 @@ class ZHLN_API SparseSet {
 	size_t _sparseCapacity = 0;
 
 	BufferSync* _sync;
+	DestructorFn _destructor = nullptr;
 
 	void ResizeSparse(uint32_t required);
 	void ResizeDense();
@@ -158,7 +161,11 @@ class ZHLN_API Registry {
 		uint32_t id = ComponentFamily::GetTypeID<T>();
 		EnsureComponentCapacity(id);
 		if (!_components[id]) {
-			_components[id] = new SparseSet(sizeof(T), alignof(T), &this->sync);
+			typename SparseSet::DestructorFn dt = nullptr;
+			if constexpr (requires(T* t) { T::OnDestroy(t); }) {
+				dt = [](void* ptr) { T::OnDestroy(static_cast<T*>(ptr)); };
+			}
+			_components[id] = new SparseSet(sizeof(T), alignof(T), &this->sync, dt);
 		}
 	}
 
@@ -171,7 +178,11 @@ class ZHLN_API Registry {
 		uint32_t id = ComponentFamily::GetTypeID<T>();
 		EnsureComponentCapacity(id);
 		if (!_components[id]) {
-			_components[id] = new SparseSet(sizeof(T), alignof(T), &this->sync);
+			typename SparseSet::DestructorFn dt = nullptr;
+			if constexpr (requires(T* t) { T::OnDestroy(t); }) {
+				dt = [](void* ptr) { T::OnDestroy(static_cast<T*>(ptr)); };
+			}
+			_components[id] = new SparseSet(sizeof(T), alignof(T), &this->sync, dt);
 		}
 		_components[id]->Insert(entity, &component);
 		return *static_cast<T*>(_components[id]->Get(entity));
@@ -220,7 +231,11 @@ class ZHLN_API Registry {
 
 		EnsureComponentCapacity(id);
 		if (!_components[id]) {
-			_components[id] = new SparseSet(sizeof(T), alignof(T), &this->sync);
+			typename SparseSet::DestructorFn dt = nullptr;
+			if constexpr (requires(T* t) { T::OnDestroy(t); }) {
+				dt = [](void* ptr) { T::OnDestroy(static_cast<T*>(ptr)); };
+			}
+			_components[id] = new SparseSet(sizeof(T), alignof(T), &this->sync, dt);
 		}
 	}
 

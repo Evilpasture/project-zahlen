@@ -89,6 +89,8 @@ auto ShaderStages::Create(const VkDevice device, const ZHLN_ShaderDesc& vert,
 	if (!ZHLN_CreateShaderStages(&desc, &stages)) {
 		return {};
 	}
+	stages.vert.view_mask = ZHLN_DetectShaderViewMask(&vert);
+	stages.frag.view_mask = ZHLN_DetectShaderViewMask(&frag);
 	return {device, stages};
 }
 

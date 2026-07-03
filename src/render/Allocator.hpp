@@ -48,20 +48,21 @@ class Allocator {
 class Buffer {
   public:
 	Buffer() = default;
-	~Buffer() noexcept;
+	~Buffer() noexcept = default;
 
 	Buffer(const Buffer&) = delete;
 	auto operator=(const Buffer&) -> Buffer& = delete;
 
-	Buffer(Buffer&& other) noexcept;
-	auto operator=(Buffer&& other) noexcept -> Buffer&;
+	Buffer(Buffer&& other) noexcept = default;
+	auto operator=(Buffer&& other) noexcept -> Buffer& = default;
 
 	[[nodiscard]] static auto Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage,
 									 VmaMemoryUsage mem_usage) noexcept -> Buffer;
 
 	struct MappedRegion {
+		MappedRegion() = default;
 		MappedRegion(VmaAllocator alloc, VmaAllocation allocation, void* ptr) noexcept;
-		~MappedRegion() noexcept;
+		~MappedRegion() noexcept = default;
 
 		MappedRegion(const MappedRegion&) = delete;
 		auto operator=(const MappedRegion&) -> MappedRegion& = delete;
@@ -74,21 +75,18 @@ class Buffer {
 		void* data = nullptr;
 
 	  private:
-		VmaAllocator _alloc = VK_NULL_HANDLE;
-		VmaAllocation _allocation = VK_NULL_HANDLE;
+		VmaHandle<void*, VmaUnmapDeleter> _handle;
 	};
 
 	[[nodiscard]] auto Map() noexcept -> MappedRegion;
 
-	[[nodiscard]] auto Handle() const noexcept -> VkBuffer { return _handle; }
+	[[nodiscard]] auto Handle() const noexcept -> VkBuffer { return _handle.Get(); }
 	[[nodiscard]] auto Size() const noexcept -> size_t { return _info.size; }
-	[[nodiscard]] auto Valid() const noexcept -> bool { return _handle != VK_NULL_HANDLE; }
+	[[nodiscard]] auto Valid() const noexcept -> bool { return _handle.Valid(); }
 	explicit operator bool() const noexcept { return Valid(); }
 
   private:
-	VmaAllocator _allocator = nullptr;
-	VkBuffer _handle = VK_NULL_HANDLE;
-	VmaAllocation _allocation = nullptr;
+	VmaHandle<VkBuffer, vmaDestroyBuffer> _handle;
 	VmaAllocationInfo _info = {};
 };
 
@@ -104,23 +102,21 @@ class Image {
 	Image() = default;
 	Image(const Image&) = delete;
 	auto operator=(const Image&) -> Image& = delete;
-	~Image();
+	~Image() noexcept = default;
 
-	Image(Image&& other) noexcept;
-	auto operator=(Image&& other) noexcept -> Image&;
+	Image(Image&& other) noexcept = default;
+	auto operator=(Image&& other) noexcept -> Image& = default;
 
 	static auto Create(VmaAllocator allocator, const VkImageCreateInfo& info,
 					   VmaMemoryUsage mem_usage) -> Image;
 
-	[[nodiscard]] auto Valid() const noexcept -> bool { return _handle != VK_NULL_HANDLE; }
+	[[nodiscard]] auto Valid() const noexcept -> bool { return _handle.Valid(); }
 	explicit operator bool() const noexcept { return Valid(); }
 
-	[[nodiscard]] auto Handle() const -> VkImage { return _handle; }
+	[[nodiscard]] auto Handle() const -> VkImage { return _handle.Get(); }
 
   private:
-	VmaAllocator _allocator = nullptr;
-	VkImage _handle = VK_NULL_HANDLE;
-	VmaAllocation _allocation = nullptr;
+	VmaHandle<VkImage, vmaDestroyImage> _handle;
 };
 
 template <typename T = uint32_t>

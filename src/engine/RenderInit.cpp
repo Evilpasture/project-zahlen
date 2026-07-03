@@ -22,7 +22,6 @@
 namespace {
 
 struct HardwareCaps {
-	bool supportsRayTracing = false;
 	bool supportsDrawIndirectCount = false;
 	bool supportsInt64 = false;
 };
@@ -35,8 +34,6 @@ class HardwareCapsProber {
 	auto ProbeInt64(bool& target) && noexcept -> HardwareCapsProber&& {
 		VkPhysicalDeviceFeatures2 features2 = {
 			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-			.pNext = {},
-			.features = {},
 		};
 		vkGetPhysicalDeviceFeatures2(_physicalDevice, &features2);
 		target = (features2.features.shaderInt64 == VK_TRUE);
@@ -60,50 +57,25 @@ class HardwareCapsProber {
 		return std::move(*this);
 	}
 
-	auto ProbeRayTracing(bool& target) && noexcept -> HardwareCapsProber&& {
-		bool hasAS = ZHLN::Vk::IsDeviceExtensionSupported(
-			_physicalDevice, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
-		bool hasRQ =
-			ZHLN::Vk::IsDeviceExtensionSupported(_physicalDevice, VK_KHR_RAY_QUERY_EXTENSION_NAME);
-		bool hasDFO = ZHLN::Vk::IsDeviceExtensionSupported(
-			_physicalDevice, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
-
-		if (hasAS && hasRQ && hasDFO) {
-			VkPhysicalDeviceFeatures2 features2 = {
-				.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-			VkPhysicalDeviceRayQueryFeaturesKHR rqFeatures = {
-				.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
-			VkPhysicalDeviceAccelerationStructureFeaturesKHR asFeatures = {
-				.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
-				.pNext = &rqFeatures};
-			features2.pNext = &asFeatures;
-			vkGetPhysicalDeviceFeatures2(_physicalDevice, &features2);
-
-			target =
-				(asFeatures.accelerationStructure == VK_TRUE) && (rqFeatures.rayQuery == VK_TRUE);
-		} else {
-			target = false;
-		}
-		return std::move(*this);
-	}
-
   private:
 	VkPhysicalDevice _physicalDevice;
 	uint32_t _apiVersion;
 };
 
-/**
- * @brief Safely queries the physical device's capabilities.
- * Prevents device initialization crashes by checking extension support
- * before appending structures to the pNext query chain.
- */
 HardwareCaps ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion) noexcept {
 	HardwareCaps caps{};
 	HardwareCapsProber(physicalDevice, apiVersion)
 		.ProbeInt64(caps.supportsInt64)
-		.ProbeDrawIndirectCount(caps.supportsDrawIndirectCount)
-		.ProbeRayTracing(caps.supportsRayTracing);
+		.ProbeDrawIndirectCount(caps.supportsDrawIndirectCount);
 	return caps;
+}
+
+bool CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept {
+	return ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice,
+												VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
+		   ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice, VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
+		   ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice,
+												VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
 }
 
 } // namespace
@@ -115,8 +87,8 @@ void RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int
 		ZHLN::Panic("FATAL: Vulkan Memory Allocator (VMA) failed to initialize");
 	}
 
-	auto caps = ProbeHardware(ctx.Physical(), ctx.PhysicalInfo().properties.properties.apiVersion);
-	if (!caps.supportsRayTracing || !rtCtx.Init(ctx.Device())) {
+	bool supportsRayTracing = CheckRayTracingSupport(ctx.Physical());
+	if (!supportsRayTracing || !rtCtx.Init(ctx.Device())) {
 		ZHLN::Log("WARNING: Raytracing context failed to initialize. RTR will be disabled.");
 	} else {
 		ZHLN::Log("Raytracing context initialized successfully.");
@@ -232,7 +204,7 @@ ZHLN_PhysicalDeviceInfo SelectDevice(VkInstance instance, VkSurfaceKHR surface) 
 	return ZHLN_SelectPhysicalDevice(&select_desc);
 }
 
-auto BuildFeatureChain(const HardwareCaps& caps) noexcept {
+auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps) noexcept {
 	return Vk::FeatureChainBuilder()
 		.Require<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>(
 			[](auto& f) { f.swapchainMaintenance1 = VK_TRUE; })
@@ -259,8 +231,8 @@ auto BuildFeatureChain(const HardwareCaps& caps) noexcept {
 			f.uniformAndStorageBuffer8BitAccess = VK_TRUE;
 		})
 		.Optional<VkPhysicalDeviceAccelerationStructureFeaturesKHR>(
-			caps.supportsRayTracing, [](auto& f) { f.accelerationStructure = VK_TRUE; })
-		.Optional<VkPhysicalDeviceRayQueryFeaturesKHR>(caps.supportsRayTracing,
+			physicalDevice, [](auto& f) { f.accelerationStructure = VK_TRUE; })
+		.Optional<VkPhysicalDeviceRayQueryFeaturesKHR>(physicalDevice,
 													   [](auto& f) { f.rayQuery = VK_TRUE; })
 		.Require<VkPhysicalDeviceFeatures2>([&](auto& f) {
 			f.features.multiDrawIndirect = VK_TRUE;
@@ -272,12 +244,12 @@ auto BuildFeatureChain(const HardwareCaps& caps) noexcept {
 		.Build();
 }
 
-std::vector<const char*> GetDeviceExtensions(const HardwareCaps& caps) noexcept {
+std::vector<const char*> GetDeviceExtensions(VkPhysicalDevice physicalDevice) noexcept {
 	std::vector<const char*> dev_exts = {
 		VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
 		VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME, "VK_EXT_robustness2"};
 
-	if (caps.supportsRayTracing) {
+	if (CheckRayTracingSupport(physicalDevice)) {
 		dev_exts.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
 		dev_exts.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
 		dev_exts.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
@@ -419,17 +391,14 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	_impl->surface = Vk::Surface(instance, raw_surface);
 
 	// Phase 6: Capability detection
-	HardwareCaps caps{};
-	HardwareCapsProber(physicalInfo.handle, physicalInfo.properties.properties.apiVersion)
-		.ProbeInt64(caps.supportsInt64)
-		.ProbeDrawIndirectCount(caps.supportsDrawIndirectCount)
-		.ProbeRayTracing(caps.supportsRayTracing);
+	HardwareCaps caps =
+		ProbeHardware(physicalInfo.handle, physicalInfo.properties.properties.apiVersion);
 
 	// Phase 7: Feature negotiation
-	auto features = BuildFeatureChain(caps);
+	auto features = BuildFeatureChain(physicalInfo.handle, caps);
 
 	// Phase 8: Device extension building
-	auto dev_exts = GetDeviceExtensions(caps);
+	auto dev_exts = GetDeviceExtensions(physicalInfo.handle);
 
 	// Phase 9: Device creation
 	_impl->ctx = CreateLogicalDevice(instance, raw_surface, physicalInfo, dev_exts,

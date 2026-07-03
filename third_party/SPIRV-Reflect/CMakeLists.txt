@@ -13,4 +13,5 @@ set_target_properties(spirv_reflect PROPERTIES
     C_STANDARD 11
     C_STANDARD_REQUIRED ON
     C_EXTENSIONS OFF
+    POSITION_INDEPENDENT_CODE ON
 )

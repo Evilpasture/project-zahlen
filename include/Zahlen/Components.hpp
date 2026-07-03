@@ -114,7 +114,17 @@ struct RagdollComponent {
 	uint32_t jointCount = 0;
 	uint32_t _padding = 0;
 	void* gltfSkin = nullptr;
+	// NOTE: We need to manually destroy the ragdoll instance when the component is destroyed to
+	// avoid a leak.
+	static void OnDestroy(RagdollComponent* r) noexcept {
+		if (r->ragdollInstance != nullptr) {
+			r->ragdollInstance->Release();
+			r->ragdollInstance = nullptr;
+		}
+	}
 };
+
+static_assert(std::is_trivially_copyable_v<RagdollComponent>);
 
 struct NameComponent {
 	String64 name;

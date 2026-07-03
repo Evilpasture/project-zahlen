@@ -267,6 +267,7 @@ typedef struct ZHLN_Shader {
 	VkShaderModule handle;
 	VkShaderStageFlagBits stage;
 	char entry_point[64];
+	uint32_t view_mask;
 } ZHLN_Shader;
 
 typedef struct ZHLN_ShaderStages {
@@ -279,6 +280,9 @@ typedef struct ZHLN_ShaderStagesDesc {
 	const ZHLN_ShaderDesc vert;
 	const ZHLN_ShaderDesc frag;
 } ZHLN_ShaderStagesDesc;
+
+[[nodiscard]]
+uint32_t ZHLN_DetectShaderViewMask(const ZHLN_ShaderDesc* ZHLN_RESTRICT desc);
 
 [[nodiscard]]
 VkShaderModule ZHLN_CreateShaderModule(VkDevice device, const ZHLN_ShaderDesc* ZHLN_RESTRICT desc);

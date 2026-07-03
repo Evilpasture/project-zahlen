@@ -704,74 +704,62 @@ inline void ExecuteCommands(const VkCommandBuffer primary,
 // ============================================================================
 
 template <size_t ColorCount, bool HasDepth>
-template <size_t InsideCount, bool InsideDepth>
-constexpr DynamicPass<ColorCount, HasDepth>::DynamicPass(
-	const DynamicPass<InsideCount, InsideDepth>&& other,
-	std::array<VkRenderingAttachmentInfo, ColorCount>&& colors,
-	VkRenderingAttachmentInfo depth) noexcept
-	: _extent(other._extent), _flags(other._flags), _colors(std::move(colors)), _depth(depth) {}
-
-template <size_t ColorCount, bool HasDepth>
 template <VkImageLayout Layout>
-constexpr auto DynamicPass<ColorCount, HasDepth>::AddColor(const TypedImage<Layout>& img,
-														   VkAttachmentLoadOp loadOp,
-														   VkAttachmentStoreOp storeOp,
-														   const ZHLN::Color4& clearColor) noexcept
+constexpr auto
+DynamicPass<ColorCount, HasDepth>::AddColor(const TypedImage<Layout>& img,
+											VkAttachmentLoadOp loadOp, VkAttachmentStoreOp storeOp,
+											const ZHLN::Color4& clearColor) && noexcept
 	-> DynamicPass<ColorCount + 1, HasDepth> {
+	static_assert(ColorCount < kMaxColorAttachments,
+				  "ZHLN Error: DynamicPass exceeded maximum color attachments (8).");
 	static_assert(Layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL ||
 				  Layout == VK_IMAGE_LAYOUT_GENERAL);
 
-	std::array<VkRenderingAttachmentInfo, ColorCount + 1> nextColors{};
-	for (size_t i = 0; i < ColorCount; ++i) {
-		nextColors[i] = _colors[i];
-	}
+	_colors[ColorCount] = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+						   .pNext = nullptr,
+						   .imageView = img.view,
+						   .imageLayout = Layout,
+						   .resolveMode = VK_RESOLVE_MODE_NONE,
+						   .resolveImageView = VK_NULL_HANDLE,
+						   .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+						   .loadOp = loadOp,
+						   .storeOp = storeOp,
+						   .clearValue = {.color = {.float32 = {clearColor.r, clearColor.g,
+																clearColor.b, clearColor.a}}}};
 
-	nextColors[ColorCount] = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-							  .pNext = nullptr,
-							  .imageView = img.view,
-							  .imageLayout = Layout,
-							  .resolveMode = VK_RESOLVE_MODE_NONE,
-							  .resolveImageView = VK_NULL_HANDLE,
-							  .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-							  .loadOp = loadOp,
-							  .storeOp = storeOp,
-							  .clearValue = {.color = {.float32 = {clearColor.r, clearColor.g,
-																   clearColor.b, clearColor.a}}}};
-
-	return DynamicPass<ColorCount + 1, HasDepth>(std::move(*this), std::move(nextColors), _depth);
+	return DynamicPass<ColorCount + 1, HasDepth>(std::move(*this));
 }
 
 template <size_t ColorCount, bool HasDepth>
 template <typename... TypedImages>
 constexpr auto DynamicPass<ColorCount, HasDepth>::AddColorGroup(
 	const std::tuple<TypedImages...>& imageTuple, VkAttachmentLoadOp loadOp,
-	VkAttachmentStoreOp storeOp, const ZHLN::Color4& clearColor) noexcept
+	VkAttachmentStoreOp storeOp, const ZHLN::Color4& clearColor) && noexcept
 	-> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth> {
 	constexpr size_t AddedCount = sizeof...(TypedImages);
-	std::array<VkRenderingAttachmentInfo, ColorCount + AddedCount> nextColors{};
-	for (size_t i = 0; i < ColorCount; ++i) {
-		nextColors[i] = _colors[i];
-	}
+	static_assert(ColorCount + AddedCount <= kMaxColorAttachments,
+				  "ZHLN Error: DynamicPass exceeded maximum color attachments (8).");
+
 	std::apply(
 		[&](const auto&... img) {
 			size_t offset = ColorCount;
-			((nextColors[offset++] =
-				  {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-				   .pNext = nullptr,
-				   .imageView = img.view,
-				   .imageLayout = std::remove_cvref_t<decltype(img)>::layout,
-				   .resolveMode = VK_RESOLVE_MODE_NONE,
-				   .resolveImageView = VK_NULL_HANDLE,
-				   .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-				   .loadOp = loadOp,
-				   .storeOp = storeOp,
-				   .clearValue = {.color = {.float32 = {clearColor.r, clearColor.g, clearColor.b,
-														clearColor.a}}}}),
+			((_colors[offset++] = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+								   .pNext = nullptr,
+								   .imageView = img.view,
+								   .imageLayout = std::remove_cvref_t<decltype(img)>::layout,
+								   .resolveMode = VK_RESOLVE_MODE_NONE,
+								   .resolveImageView = VK_NULL_HANDLE,
+								   .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+								   .loadOp = loadOp,
+								   .storeOp = storeOp,
+								   .clearValue = {.color = {.float32 = {clearColor.r, clearColor.g,
+																		clearColor.b,
+																		clearColor.a}}}}),
 			 ...);
 		},
 		imageTuple);
-	return DynamicPass<ColorCount + AddedCount, HasDepth>(std::move(*this), std::move(nextColors),
-														  _depth);
+
+	return DynamicPass<ColorCount + AddedCount, HasDepth>(std::move(*this));
 }
 
 template <size_t ColorCount, bool HasDepth>
@@ -779,32 +767,31 @@ template <VkImageLayout Layout>
 constexpr auto DynamicPass<ColorCount, HasDepth>::AddDepth(const TypedImage<Layout>& img,
 														   VkAttachmentLoadOp loadOp,
 														   VkAttachmentStoreOp storeOp,
-														   float clearVal) noexcept
+														   float clearVal) && noexcept
 	-> DynamicPass<ColorCount, true> {
 	static_assert(!HasDepth, "ZHLN Execution Error: Depth target already bound to this pass.");
 	static_assert(Layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL ||
 				  Layout == VK_IMAGE_LAYOUT_GENERAL);
 
-	VkRenderingAttachmentInfo nextDepth = {
-		.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-		.pNext = nullptr,
-		.imageView = img.view,
-		.imageLayout = Layout,
-		.resolveMode = VK_RESOLVE_MODE_NONE,
-		.resolveImageView = VK_NULL_HANDLE,
-		.resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-		.loadOp = loadOp,
-		.storeOp = storeOp,
-		.clearValue = {.depthStencil = {.depth = clearVal, .stencil = 0}}};
+	_depth = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+			  .pNext = nullptr,
+			  .imageView = img.view,
+			  .imageLayout = Layout,
+			  .resolveMode = VK_RESOLVE_MODE_NONE,
+			  .resolveImageView = VK_NULL_HANDLE,
+			  .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			  .loadOp = loadOp,
+			  .storeOp = storeOp,
+			  .clearValue = {.depthStencil = {.depth = clearVal, .stencil = 0}}};
 
-	return DynamicPass<ColorCount, true>(std::move(*this), std::move(_colors), nextDepth);
+	return DynamicPass<ColorCount, true>(std::move(*this));
 }
 
 template <size_t ColorCount, bool HasDepth>
-constexpr auto DynamicPass<ColorCount, HasDepth>::Flags(VkRenderingFlags flags) noexcept
-	-> DynamicPass<ColorCount, HasDepth>& {
+constexpr auto DynamicPass<ColorCount, HasDepth>::Flags(VkRenderingFlags flags) && noexcept
+	-> DynamicPass<ColorCount, HasDepth>&& {
 	_flags = flags;
-	return *this;
+	return std::move(*this);
 }
 
 template <size_t ColorCount, bool HasDepth>
@@ -846,10 +833,10 @@ void DynamicPass<ColorCount, HasDepth>::Execute(VkCommandBuffer cmd, Func&& func
 }
 
 template <size_t ColorCount, bool HasDepth>
-constexpr auto DynamicPass<ColorCount, HasDepth>::ViewMask(uint32_t mask) noexcept
-	-> DynamicPass<ColorCount, HasDepth>& {
+constexpr auto DynamicPass<ColorCount, HasDepth>::ViewMask(uint32_t mask) && noexcept
+	-> DynamicPass<ColorCount, HasDepth>&& {
 	_viewMask = mask;
-	return *this;
+	return std::move(*this);
 }
 
 template <size_t ColorCount, bool HasDepth>

@@ -58,10 +58,16 @@ static void* ReallocAligned(void* oldPtr, size_t oldSize, size_t newSize, size_t
 // SparseSet
 // ============================================================================
 
-SparseSet::SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr)
-	: _elementSize(elementSize), _alignment(alignment), _sync(syncPtr) {}
+SparseSet::SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr,
+					 DestructorFn destructor)
+	: _elementSize(elementSize), _alignment(alignment), _sync(syncPtr), _destructor(destructor) {}
 
 SparseSet::~SparseSet() {
+	if (_destructor != nullptr && _data != nullptr) {
+		for (size_t i = 0; i < _count; ++i) {
+			_destructor(_data + (i * _elementSize));
+		}
+	}
 	if (_sparse != nullptr) {
 		::operator delete[](_sparse, std::align_val_t{alignof(uint32_t)});
 	}
@@ -152,6 +158,10 @@ void SparseSet::Remove(Entity entity) {
 		return;
 	}
 
+	if (_destructor != nullptr) {
+		_destructor(_data + (denseIdx * _elementSize));
+	}
+
 	uint32_t lastIdx = (uint32_t)_count - 1;
 	if (denseIdx != lastIdx) {
 		Entity lastEntity = _dense[lastIdx];
@@ -176,6 +186,11 @@ void* SparseSet::Get(Entity entity) const noexcept {
 }
 
 void SparseSet::Clear() noexcept {
+	if (_destructor != nullptr && _data != nullptr) {
+		for (size_t i = 0; i < _count; ++i) {
+			_destructor(_data + (i * _elementSize));
+		}
+	}
 	if (_sparse != nullptr) {
 		std::memset(_sparse, 0xFF, _sparseCapacity * sizeof(uint32_t));
 	}

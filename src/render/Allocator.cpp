@@ -97,33 +97,11 @@ auto Allocator::Init(const Context& ctx) noexcept -> bool {
 // Buffer RAII
 // ============================================================================
 
-Buffer::~Buffer() noexcept {
-	if (_handle != VK_NULL_HANDLE) {
-		vmaDestroyBuffer(_allocator, _handle, _allocation);
-	}
-}
-
-Buffer::Buffer(Buffer&& other) noexcept
-	: _allocator(other._allocator), _handle(std::exchange(other._handle, VK_NULL_HANDLE)),
-	  _allocation(std::exchange(other._allocation, nullptr)), _info(other._info) {}
-
-auto Buffer::operator=(Buffer&& other) noexcept -> Buffer& {
-	if (this != &other) {
-		if (_handle != VK_NULL_HANDLE) {
-			vmaDestroyBuffer(_allocator, _handle, _allocation);
-		}
-		_allocator = other._allocator;
-		_handle = std::exchange(other._handle, VK_NULL_HANDLE);
-		_allocation = std::exchange(other._allocation, nullptr);
-		_info = other._info;
-	}
-	return *this;
-}
-
 auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage,
 					VmaMemoryUsage mem_usage) noexcept -> Buffer {
-	Buffer b;
-	b._allocator = allocator;
+	VkBuffer buffer = VK_NULL_HANDLE;
+	VmaAllocation alloc = nullptr;
+	VmaAllocationInfo info = {};
 
 	const VkBufferCreateInfo buffer_info = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
 											.pNext = nullptr,
@@ -144,51 +122,35 @@ auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usag
 												.priority = 0.0F,
 												.minAlignment = 0};
 
-	if (vmaCreateBuffer(allocator, &buffer_info, &alloc_info, &b._handle, &b._allocation,
-						&b._info) != VK_SUCCESS) {
+	if (vmaCreateBuffer(allocator, &buffer_info, &alloc_info, &buffer, &alloc, &info) !=
+		VK_SUCCESS) {
 		return {};
 	}
 
+	Buffer b;
+	b._handle = {allocator, buffer, alloc};
+	b._info = info;
 	return b;
 }
 
 Buffer::MappedRegion::MappedRegion(VmaAllocator alloc, VmaAllocation allocation, void* ptr) noexcept
-	: data(ptr), _alloc(alloc), _allocation(allocation) {}
-
-Buffer::MappedRegion::~MappedRegion() noexcept {
-	if (_alloc != VK_NULL_HANDLE) {
-		vmaFlushAllocation(_alloc, _allocation, 0, VK_WHOLE_SIZE);
-		vmaUnmapMemory(_alloc, _allocation);
-	}
-}
+	: data(ptr), _handle(alloc, ptr, allocation) {}
 
 Buffer::MappedRegion::MappedRegion(MappedRegion&& other) noexcept
-	: data(other.data), _alloc(other._alloc), _allocation(other._allocation) {
-	other.data = nullptr;
-	other._alloc = VK_NULL_HANDLE;
-}
+	: data(std::exchange(other.data, nullptr)), _handle(std::move(other._handle)) {}
 
 auto Buffer::MappedRegion::operator=(MappedRegion&& other) noexcept -> MappedRegion& {
 	if (this != &other) {
-		if (_alloc != VK_NULL_HANDLE) {
-			vmaFlushAllocation(_alloc, _allocation, 0, VK_WHOLE_SIZE);
-			vmaUnmapMemory(_alloc, _allocation);
-		}
-
-		data = other.data;
-		_alloc = other._alloc;
-		_allocation = other._allocation;
-
-		other.data = nullptr;
-		other._alloc = VK_NULL_HANDLE;
+		data = std::exchange(other.data, nullptr);
+		_handle = std::move(other._handle);
 	}
 	return *this;
 }
 
 auto Buffer::Map() noexcept -> MappedRegion {
 	void* ptr = nullptr;
-	vmaMapMemory(_allocator, _allocation, &ptr);
-	return {_allocator, _allocation, ptr};
+	vmaMapMemory(_handle.Allocator(), _handle.Allocation(), &ptr);
+	return {_handle.Allocator(), _handle.Allocation(), ptr};
 }
 
 // ============================================================================
@@ -224,39 +186,25 @@ auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst, co
 // Image RAII
 // ============================================================================
 
-Image::~Image() {
-	if (_handle != VK_NULL_HANDLE) {
-		vmaDestroyImage(_allocator, _handle, _allocation);
-	}
-}
-
-Image::Image(Image&& other) noexcept
-	: _allocator(other._allocator), _handle(std::exchange(other._handle, nullptr)),
-	  _allocation(std::exchange(other._allocation, nullptr)) {}
-
-auto Image::operator=(Image&& other) noexcept -> Image& {
-	if (this != &other) {
-		if (_handle != VK_NULL_HANDLE) {
-			vmaDestroyImage(_allocator, _handle, _allocation);
-		}
-		_allocator = other._allocator;
-		_handle = std::exchange(other._handle, nullptr);
-		_allocation = std::exchange(other._allocation, nullptr);
-	}
-	return *this;
-}
-
 auto Image::Create(VmaAllocator allocator, const VkImageCreateInfo& info, VmaMemoryUsage mem_usage)
 	-> Image {
-	Image img;
-	img._allocator = allocator;
-	VmaAllocationCreateInfo alloc_info = {};
-	alloc_info.usage = mem_usage;
-	if (vmaCreateImage(allocator, &info, &alloc_info, &img._handle, &img._allocation, nullptr) !=
-		VK_SUCCESS) {
+	VkImage img = VK_NULL_HANDLE;
+	VmaAllocation alloc = nullptr;
+	const VmaAllocationCreateInfo alloc_info = {.flags = {},
+												.usage = mem_usage,
+												.requiredFlags = {},
+												.preferredFlags = {},
+												.memoryTypeBits = {},
+												.pool = {},
+												.pUserData = {},
+												.priority = {},
+												.minAlignment = {}};
+	if (vmaCreateImage(allocator, &info, &alloc_info, &img, &alloc, nullptr) != VK_SUCCESS) {
 		return {};
 	}
-	return img;
+	Image res;
+	res._handle = {allocator, img, alloc};
+	return res;
 }
 
 // ============================================================================

@@ -514,6 +514,10 @@ if(NOT MSVC)
         # General warnings (always applied to non-MSVC)
         $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
     )
+
+    target_compile_options(zahlen PRIVATE
+        $<$<AND:$<CXX_COMPILER_ID:GNU>,$<COMPILE_LANGUAGE:CXX>>:-fno-exceptions -fno-rtti>
+    )
     if(WIN32)
         target_link_options(zahlen_engine PRIVATE -Xlinker /subsystem:console)
         target_compile_options(zahlen_engine PRIVATE -Wno-microsoft-anon-tag -Wno-unknown-pragmas -Wno-unused-parameter)

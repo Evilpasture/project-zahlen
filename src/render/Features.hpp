@@ -32,7 +32,8 @@ template <typename... Ts> class FeatureChain {
 
 	template <typename T, typename Func> auto Require(Func&& configure) &&;
 
-	template <typename T, typename Func> auto Optional(bool condition, Func&& configure) &&;
+	template <typename T, typename Func>
+	auto Optional(VkPhysicalDevice physicalDevice, Func&& configure) &&;
 
 	FeatureChain<Ts...>& Build();
 
@@ -43,7 +44,8 @@ class FeatureChainBuilder {
   public:
 	template <typename T, typename Func> auto Require(Func&& configure);
 
-	template <typename T, typename Func> auto Optional(bool condition, Func&& configure);
+	template <typename T, typename Func>
+	auto Optional(VkPhysicalDevice physicalDevice, Func&& configure);
 };
 
 struct FeatureFactory {

@@ -69,6 +69,7 @@ target_compile_definitions(zahlen_render PRIVATE
 
 target_precompile_headers(zahlen_render PRIVATE
     "$<$<COMPILE_LANGUAGE:C>:${CMAKE_CURRENT_SOURCE_DIR}/RenderingPCH.h>"
+    "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/Rendering.hpp>"
 )
 
 add_definitions(-D_CRT_SECURE_NO_WARNINGS)
