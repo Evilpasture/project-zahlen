@@ -45,26 +45,23 @@ template <typename... Ptrs> [[nodiscard]] constexpr bool AnyNull(Ptrs... ptrs) n
 /**
  * @brief Inline barrier wrapper for the compute-to-vertex synchronization boundary.
  */
-inline void BarrierComputeWriteToVertexRead(VkCommandBuffer cmd) {
-	Vk::BarrierBuilder()
-		.From(Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite)
-		.To(cmd, Vk::BarrierStage::Vertex, Vk::BarrierAccess::ShaderRead);
+inline void BarrierComputeWriteToVertexRead(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd) {
+	Vk::BeginBarrier<Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite>(cmd)
+		.TransitionTo<Vk::BarrierStage::Vertex, Vk::BarrierAccess::ShaderRead>();
 }
 
 /**
  * @brief Inline barrier wrapper for compute-write to fragment-read synchronization.
  */
-inline void BarrierComputeWriteToFragmentRead(VkCommandBuffer cmd) {
-	Vk::BarrierBuilder()
-		.From(Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite)
-		.To(cmd, Vk::BarrierStage::Fragment, Vk::BarrierAccess::ShaderRead);
+inline void BarrierComputeWriteToFragmentRead(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd) {
+	Vk::BeginBarrier<Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite>(cmd)
+		.TransitionTo<Vk::BarrierStage::Fragment, Vk::BarrierAccess::ShaderRead>();
 }
 
-inline void BarrierCounterReset(VkCommandBuffer cmd) {
-	Vk::BarrierBuilder()
-		.From(Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferWrite)
-		.To(cmd, Vk::BarrierStage::Compute,
-			Vk::BarrierAccess::ShaderRead | Vk::BarrierAccess::ShaderWrite);
+inline void BarrierCounterReset(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd) {
+	Vk::BeginBarrier<Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferWrite>(cmd)
+		.TransitionTo<Vk::BarrierStage::Compute,
+					  Vk::BarrierAccess::ShaderRead | Vk::BarrierAccess::ShaderWrite>();
 }
 
 } // namespace
@@ -179,7 +176,7 @@ void RenderContext::Impl::DispatchSkinningPasses() {
 		}
 	}
 
-	BarrierComputeWriteToVertexRead(cmd);
+	BarrierComputeWriteToVertexRead(Vk::CommandBuffer<Vk::QueueType::Graphics>{cmd});
 }
 
 RenderResult RenderContext::BeginFrame() noexcept {
@@ -403,10 +400,10 @@ struct ClusterCullingStep {
 		uint32_t fIdx = impl->frame_index;
 		Vk::FillBuffer(cmd, impl->globalCounterBuffers[fIdx]);
 
-		BarrierCounterReset(cmd);
+		BarrierCounterReset({cmd});
 
 		impl->clusterCullingPass.Dispatch(cmd, impl->clusterCullingSets[fIdx], 1, 1, 24);
-		BarrierComputeWriteToFragmentRead(cmd);
+		BarrierComputeWriteToFragmentRead({cmd});
 		RunPass(Passes::ShadowPass{}, recorder);
 	}
 };
@@ -509,7 +506,8 @@ template <bool FullBright> [[nodiscard]] consteval auto GetPassSteps() noexcept 
 	}
 }
 
-template <bool FullBright> void RenderContext::Impl::RecordSceneFrame(VkCommandBuffer cmd) {
+template <bool FullBright>
+void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd) {
 	FrameRecorder recorder(cmd, *this);
 	RenderState state{};
 
@@ -520,8 +518,10 @@ template <bool FullBright> void RenderContext::Impl::RecordSceneFrame(VkCommandB
 }
 
 // Explicit instantiations to prevent translation unit linkage issues
-template void RenderContext::Impl::RecordSceneFrame<true>(VkCommandBuffer);
-template void RenderContext::Impl::RecordSceneFrame<false>(VkCommandBuffer);
+template void
+	RenderContext::Impl::RecordSceneFrame<true>(Vk::CommandBuffer<Vk::QueueType::Graphics>);
+template void
+	RenderContext::Impl::RecordSceneFrame<false>(Vk::CommandBuffer<Vk::QueueType::Graphics>);
 
 RenderResult RenderContext::EndFrame() noexcept {
 	ZHLN_PROFILE_SCOPE("Render (CPU Record)");
@@ -554,9 +554,9 @@ RenderResult RenderContext::EndFrame() noexcept {
 
 	// Hot-path branch optimization: dispatch using compile-time constants
 	if (_impl->currentUniforms.fullBright != 0) {
-		_impl->RecordSceneFrame<true>(cmd);
+		_impl->RecordSceneFrame<true>({cmd});
 	} else {
-		_impl->RecordSceneFrame<false>(cmd);
+		_impl->RecordSceneFrame<false>({cmd});
 	}
 
 	ZHLN_EndCommandBuffer(cmd);

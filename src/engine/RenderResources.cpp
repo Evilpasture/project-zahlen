@@ -520,7 +520,8 @@ void RenderContext::BuildMeshBLAS(Mesh& mesh) {
 											VMA_MEMORY_USAGE_GPU_ONLY);
 
 	{
-		Vk::CommandPool tempPool(impl->ctx.Device(), impl->ctx.PhysicalInfo().graphics_family);
+		Vk::CommandPool<Vk::QueueType::Graphics> tempPool(impl->ctx.Device(),
+														  impl->ctx.PhysicalInfo().graphics_family);
 		if (tempPool.Allocate(1)) {
 			VkCommandBuffer tempCmd = tempPool[0];
 			ZHLN_BeginCommandBuffer(tempCmd);

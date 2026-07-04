@@ -125,9 +125,9 @@ struct GpuCullingPolicy {
 		ctx.cullingPass.Dispatch(cmd, ctx.cullingSets[recorder.frameIndex], (drawCount + 63) / 64,
 								 1, 1, planes);
 
-		Vk::BarrierBuilder()
-			.From(Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite)
-			.To(cmd, Vk::BarrierStage::Indirect, Vk::BarrierAccess::IndirectRead);
+		Vk::BeginBarrier<Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite>(
+			Vk::CommandBuffer<Vk::QueueType::Graphics>{cmd})
+			.TransitionTo<Vk::BarrierStage::Indirect, Vk::BarrierAccess::IndirectRead>();
 
 		Vk::DynamicPass(color_att.extent)
 			.AddColor(color_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,

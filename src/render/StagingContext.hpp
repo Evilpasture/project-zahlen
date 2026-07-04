@@ -46,7 +46,7 @@ class StagingContext {
   private:
 	Allocator* _allocator = nullptr;
 	const Context* _ctx = nullptr;
-	CommandPool _cmdPool;
+	CommandPool<QueueType::Graphics> _cmdPool;
 	VkCommandBuffer _cmd = VK_NULL_HANDLE;
 	std::vector<Buffer> _stagingBuffers;
 	VkFence _fence = VK_NULL_HANDLE; // Owned internally

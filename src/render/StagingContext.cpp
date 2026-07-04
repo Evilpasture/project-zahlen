@@ -31,7 +31,8 @@ StagingContext::StagingContext(StagingContext&& other) noexcept
 	  _fence(std::exchange(other._fence, VK_NULL_HANDLE)) {}
 
 void StagingContext::Begin() {
-	_cmdPool = CommandPool(_ctx->Device(), _ctx->PhysicalInfo().graphics_family);
+	_cmdPool =
+		CommandPool<QueueType::Graphics>(_ctx->Device(), _ctx->PhysicalInfo().graphics_family);
 	[[maybe_unused]] bool ok = _cmdPool.Allocate(1);
 	_cmd = _cmdPool[0];
 	ZHLN_BeginCommandBuffer(_cmd);

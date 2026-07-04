@@ -330,22 +330,25 @@ inline auto FrameSync<N>::Create(const VkDevice device) noexcept -> FrameSync {
 	return fs;
 }
 
-inline CommandPool::CommandPool(const VkDevice device, const uint32_t queue_family) {
+template <Vk::QueueType QType>
+inline CommandPool<QType>::CommandPool(const VkDevice device, const uint32_t queue_family) {
 	if (ZHLN_CreateCommandPool(device, queue_family, &_raw)) {
 		_device = device;
 	}
 }
 
-inline CommandPool::~CommandPool() {
+template <Vk::QueueType QType> inline CommandPool<QType>::~CommandPool() {
 	if (_device != VK_NULL_HANDLE) {
 		ZHLN_DestroyCommandPool(_device, &_raw);
 	}
 }
 
-constexpr CommandPool::CommandPool(CommandPool&& other) noexcept
+template <Vk::QueueType QType>
+constexpr CommandPool<QType>::CommandPool(CommandPool&& other) noexcept
 	: _device(std::exchange(other._device, VK_NULL_HANDLE)), _raw(std::exchange(other._raw, {})) {}
 
-inline auto CommandPool::operator=(CommandPool&& other) noexcept -> CommandPool& {
+template <Vk::QueueType QType>
+inline auto CommandPool<QType>::operator=(CommandPool&& other) noexcept -> CommandPool<QType>& {
 	if (this != &other) {
 		if (_device != VK_NULL_HANDLE) {
 			ZHLN_DestroyCommandPool(_device, &_raw);
@@ -356,33 +359,35 @@ inline auto CommandPool::operator=(CommandPool&& other) noexcept -> CommandPool&
 	return *this;
 }
 
-inline auto CommandPool::Allocate(const uint32_t count) -> bool {
+template <Vk::QueueType QType>
+inline auto CommandPool<QType>::Allocate(const uint32_t count) -> bool {
 	if (!Valid()) {
 		return false;
 	}
 	return ZHLN_AllocateCommandBuffers(_device, &_raw, count);
 }
 
-inline auto CommandPool::AllocateSecondary(const uint32_t count) -> bool {
+template <Vk::QueueType QType>
+inline auto CommandPool<QType>::AllocateSecondary(const uint32_t count) -> bool {
 	if (!Valid()) {
 		return false;
 	}
 	return ZHLN_AllocateSecondaryCommandBuffers(_device, &_raw, count);
 }
 
-inline void CommandPool::Reset() noexcept {
+template <Vk::QueueType QType> inline void CommandPool<QType>::Reset() noexcept {
 	if (Valid()) {
 		ZHLN_ResetCommandPool(_device, &_raw);
 	}
 }
 
-template <uint32_t N>
+template <uint32_t N, Vk::QueueType QType>
 	requires(N > 0 && N <= 8)
-inline auto CommandPools<N>::Create(const VkDevice device, const Description& desc) noexcept
+inline auto CommandPools<N, QType>::Create(const VkDevice device, const Description& desc) noexcept
 	-> CommandPools {
 	CommandPools cp;
 	for (auto& pool : cp._pools) {
-		pool = CommandPool(device, desc.queue_family);
+		pool = CommandPool<QType>(device, desc.queue_family);
 		if (!pool || !pool.Allocate(desc.buffers_per_pool)) {
 			return {};
 		}
@@ -655,8 +660,8 @@ inline void Push(const VkCommandBuffer cmd, const VkPipelineLayout layout,
 template <uint32_t N, typename Record, typename Rebuild>
 	requires RecordFn<Record> && RebuildFn<Rebuild>
 inline auto DrawFrame(const Context& ctx, const Swapchain& swapchain, const FrameSync<N>& sync,
-					  const CommandPools<N>& pools, uint32_t& frame_index, Record&& record,
-					  Rebuild&& rebuild) noexcept -> ZHLN_FrameResult {
+					  const CommandPools<N, QueueType::Graphics>& pools, uint32_t& frame_index,
+					  Record&& record, Rebuild&& rebuild) noexcept -> ZHLN_FrameResult {
 	return DrawFrame<N>(ctx, swapchain, sync, pools, frame_index, VK_NULL_HANDLE, 0,
 						std::forward<Record>(record), std::forward<Rebuild>(rebuild));
 }
@@ -664,7 +669,7 @@ inline auto DrawFrame(const Context& ctx, const Swapchain& swapchain, const Fram
 template <uint32_t N, typename Record, typename Rebuild>
 	requires RecordFn<Record> && RebuildFn<Rebuild>
 inline auto DrawFrame(const Context& ctx, const Swapchain& swapchain, const FrameSync<N>& sync,
-					  const CommandPools<N>& pools, uint32_t& frame_index,
+					  const CommandPools<N, QueueType::Graphics>& pools, uint32_t& frame_index,
 					  VkSemaphore stagingSemaphore, uint64_t stagingWaitValue, Record&& record,
 					  Rebuild&& rebuild) noexcept -> ZHLN_FrameResult {
 	const ZHLN_FrameSync& s = sync[frame_index];

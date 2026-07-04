@@ -2,12 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // src/render/Allocator.cpp
-// clang-format off
-#include "Rendering.hpp"
-// clang-format on
-#include "Allocator.hpp"
 
-#include "RenderCore.hpp"
+#include "RenderQueue.hpp"
+#include "Rendering.hpp"
 
 #include <cstring>
 #include <sys/types.h>
@@ -429,31 +426,26 @@ auto StagingRingBuffer::Submit(VkCommandBuffer cmd) noexcept -> uint64_t {
 // Immediate Command PIMPL Implementation (Refactored)
 // ============================================================================
 
-struct ImmediateCommand::Impl {
+template <QueueType QType> struct ImmediateCommand<QType>::Impl {
 	VkDevice device = VK_NULL_HANDLE;
 	VkCommandPool pool = VK_NULL_HANDLE;
 	VkCommandBuffer cmd = VK_NULL_HANDLE;
 	StagingRingBuffer* ringBuffer = nullptr;
 
-	Impl(const Impl&) = delete;
-	Impl(Impl&&) = delete;
-	Impl& operator=(const Impl&) = delete;
-	Impl& operator=(Impl&&) = delete;
 	Impl(VkDevice dev, StagingRingBuffer& rb) noexcept : device(dev), ringBuffer(&rb) {
-
 		uint32_t queueFamily = rb.GetQueueFamily();
 
 		VkCommandPoolCreateInfo poolInfo = {
 			.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-			.pNext = {},
-			.flags = {},
+			.pNext = nullptr,
+			.flags = 0,
 			.queueFamilyIndex = queueFamily,
 		};
 		vkCreateCommandPool(device, &poolInfo, nullptr, &pool);
 
 		VkCommandBufferAllocateInfo allocInfo = {
 			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-			.pNext = {},
+			.pNext = nullptr,
 			.commandPool = pool,
 			.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
 			.commandBufferCount = 1,
@@ -462,9 +454,9 @@ struct ImmediateCommand::Impl {
 
 		VkCommandBufferBeginInfo beginInfo = {
 			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-			.pNext = {},
+			.pNext = nullptr,
 			.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-			.pInheritanceInfo = {},
+			.pInheritanceInfo = nullptr,
 		};
 		vkBeginCommandBuffer(cmd, &beginInfo);
 	}
@@ -478,18 +470,28 @@ struct ImmediateCommand::Impl {
 	}
 };
 
-ImmediateCommand::ImmediateCommand(VkDevice dev, StagingRingBuffer& ringBuffer) noexcept
+template <QueueType QType>
+ImmediateCommand<QType>::ImmediateCommand(VkDevice dev, StagingRingBuffer& ringBuffer) noexcept
 	: _impl(std::make_unique<Impl>(dev, ringBuffer)) {}
 
-ImmediateCommand::~ImmediateCommand() noexcept = default;
+template <QueueType QType> ImmediateCommand<QType>::~ImmediateCommand() noexcept = default;
 
-auto ImmediateCommand::AllocateStaging(VkDeviceSize size, VkDeviceSize alignment) noexcept
+template <QueueType QType>
+auto ImmediateCommand<QType>::AllocateStaging(VkDeviceSize size, VkDeviceSize alignment) noexcept
 	-> StagingRingBuffer::Allocation {
 	return _impl->ringBuffer->Allocate(size, alignment);
 }
 
-ImmediateCommand::operator VkCommandBuffer() const noexcept {
-	return _impl->cmd;
+template <QueueType QType> ImmediateCommand<QType>::operator CommandBuffer<QType>() const noexcept {
+	return CommandBuffer<QType>{_impl->cmd};
 }
+
+template <QueueType QType> ImmediateCommand<QType>::operator VkCommandBuffer() const noexcept {
+	return _impl->cmd; // Directly return the raw Vulkan handle
+}
+
+template class ImmediateCommand<QueueType::Graphics>;
+template class ImmediateCommand<QueueType::Compute>;
+template class ImmediateCommand<QueueType::Transfer>;
 
 } // namespace ZHLN::Vk

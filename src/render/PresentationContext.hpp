@@ -45,11 +45,10 @@ class PresentationContext {
 
 		vkDeviceWaitIdle(_ctx->Device());
 
-		const ZHLN_Device rawDev = {
-			.handle = _ctx->Device(),
-			.graphics_queue = _ctx->GraphicsQueue(),
-			.present_queue = _ctx->PresentQueue(),
-		};
+		const ZHLN_Device rawDev = {.handle = _ctx->Device(),
+									.graphics_queue = _ctx->GraphicsQueue(),
+									.present_queue = _ctx->PresentQueue(),
+									.transfer_queue = _ctx->TransferQueue()};
 		const ZHLN_PhysicalDeviceInfo rawPhys = _ctx->PhysicalInfo();
 		ZHLN_SwapchainDesc s_desc = {
 			.device = &rawDev,

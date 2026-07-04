@@ -380,7 +380,7 @@ struct UIDrawCommand {
 };
 
 struct WorkerCmdContext {
-	std::array<Vk::CommandPool, 2> pools;
+	std::array<Vk::CommandPool<Vk::QueueType::Graphics>, 2> pools;
 	std::array<ZHLN::Atomic<uint32_t>, 2> cmdCount{};
 };
 
@@ -664,7 +664,8 @@ struct RenderContext::Impl {
 	// Persistent, reusable memory block to prevent dynamic heap reallocations
 	ZHLN::Array<VkAccelerationStructureInstanceKHR> tlasInstancesScratch;
 
-	template <bool FullBright> void RecordSceneFrame(VkCommandBuffer cmd);
+	template <bool FullBright>
+	void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd);
 
 	~Impl() {
 		if (ctx.Device() != VK_NULL_HANDLE) {
@@ -749,13 +750,17 @@ struct PostProcessResources {
 };
 
 struct FrameRecorder {
-	VkCommandBuffer cmd;
+	Vk::CommandBuffer<Vk::QueueType::Graphics> cmd;
 	RenderContext::Impl& ctx;
 	uint32_t frameIndex;
 	VkDescriptorSet bindlessSet;
 
-	FrameRecorder(VkCommandBuffer c, RenderContext::Impl& impl) noexcept
+	FrameRecorder(Vk::CommandBuffer<Vk::QueueType::Graphics> c, RenderContext::Impl& impl) noexcept
 		: cmd(c), ctx(impl), frameIndex(impl.frame_index),
+		  bindlessSet(impl.bindlessSets[impl.frame_index]) {}
+
+	FrameRecorder(VkCommandBuffer c, RenderContext::Impl& impl) noexcept
+		: cmd({c}), ctx(impl), frameIndex(impl.frame_index),
 		  bindlessSet(impl.bindlessSets[impl.frame_index]) {}
 };
 
