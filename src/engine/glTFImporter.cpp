@@ -13,8 +13,8 @@
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/ScaledShape.h>
-#include <Zahlen/AssetFactory.hpp>
-#include <Zahlen/AssetManager.hpp>
+#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <algorithm>
@@ -29,7 +29,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace ZHLN::AssetFactory {
+namespace ZHLN::CreativeWorksFactory {
 
 // Declare shared caches (linked externally by AnimationSystem)
 std::unordered_map<std::string, cgltf_data*> s_GLBCache;
@@ -770,8 +770,9 @@ static CompiledPrimitive GetOrCreateCompiledPrimitive(
 // REFACTORED MAIN IMPORT FUNCTION
 // ============================================================================
 
-ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::string_view path) {
-	uint64_t hash = HashAssetPath(path);
+ModelPrefab* LoadModelPrefab(RenderContext& ctx, CreativeWorksManager& assetMgr,
+							 std::string_view path) {
+	uint64_t hash = HashCreativeWorkPath(path);
 	if (auto* cached = assetMgr.GetCachedPrefab(hash)) {
 		return cached;
 	}
@@ -1412,7 +1413,7 @@ void SetupPlayerRagdoll([[maybe_unused]] RenderContext& rc, PhysicsContext& pc, 
 }
 
 void ReuploadAllPrefabs(
-	RenderContext& ctx, AssetManager& assetMgr,
+	RenderContext& ctx, CreativeWorksManager& assetMgr,
 	std::unordered_map<BufferHandle, std::pair<Mesh, Material>>& outMeshRebuildMap) {
 	// 1. Query the actual number of active cached prefabs
 	uint32_t count = assetMgr.GetCachedPrefabs(nullptr, 0);
@@ -1467,7 +1468,8 @@ void ReuploadAllPrefabs(
 	}
 }
 
-void RebuildVulkanResources(RenderContext& ctx, AssetManager& assetMgr, ECS::Registry& reg) {
+void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& assetMgr,
+							ECS::Registry& reg) {
 	ZHLN::Log("[Engine] Re-uploading all textures and meshes to new Vulkan device...");
 
 	// 1. Re-bake system font atlas
@@ -1513,4 +1515,4 @@ void RebuildVulkanResources(RenderContext& ctx, AssetManager& assetMgr, ECS::Reg
 	}
 }
 
-} // namespace ZHLN::AssetFactory
+} // namespace ZHLN::CreativeWorksFactory

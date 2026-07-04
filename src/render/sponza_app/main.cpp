@@ -87,7 +87,7 @@ struct DrawCall {
 
 // With bindless, a material no longer holds a descriptor set.
 // It just holds the integer index into the global texture array.
-struct MaterialAsset {
+struct MaterialCreativeWork {
 	uint32_t albedoIdx;
 	uint32_t normalIdx;
 	uint32_t pbrIdx;
@@ -141,7 +141,7 @@ static std::vector<uint32_t> LoadSpirv(const std::filesystem::path& path) {
 	return exists;
 }
 
-struct AssetPaths {
+struct CreativeWorkPaths {
 	std::string asset_prefix;
 	std::string shader_prefix;
 	std::string gltf;
@@ -156,8 +156,8 @@ struct AssetPaths {
 	}
 };
 
-static AssetPaths ResolvePaths() {
-	AssetPaths p;
+static CreativeWorkPaths ResolvePaths() {
+	CreativeWorkPaths p;
 	p.asset_prefix = "resources/assets/main_sponza/";
 #ifdef SHADER_DIR
 	p.shader_prefix = SHADER_DIR;
@@ -270,7 +270,7 @@ static Scene BuildScene(cgltf_data* data) {
 
 // File-based wrapper
 template <VkFormat F>
-static ZHLN::Vk::TextureAsset
+static ZHLN::Vk::TextureCreativeWork
 UploadTextureFromFile(ZHLN::Vk::Allocator& allocator, const ZHLN::Vk::Context& ctx,
 					  const VkImageCreateInfo& baseInfo, const std::string& fullPath) {
 	int tw = 0;
@@ -288,7 +288,7 @@ UploadTextureFromFile(ZHLN::Vk::Allocator& allocator, const ZHLN::Vk::Context& c
 		.width = static_cast<uint32_t>(tw), .height = static_cast<uint32_t>(th), .depth = 1};
 
 	// Specify <F> here!
-	ZHLN::Vk::TextureAsset result = ZHLN::Vk::UploadTexture<F>(allocator, ctx, info, pixels);
+	ZHLN::Vk::TextureCreativeWork result = ZHLN::Vk::UploadTexture<F>(allocator, ctx, info, pixels);
 
 	stbi_image_free(pixels);
 
@@ -327,7 +327,7 @@ struct FpsCounter {
 // ============================================================================
 
 auto main() -> int {
-	const AssetPaths paths = ResolvePaths();
+	const CreativeWorkPaths paths = ResolvePaths();
 	ZHLN::Demo::WindowState win =
 		ZHLN::Demo::InitWindow(1280, 720, "ZHLN Engine - Sponza Bindless");
 
@@ -533,15 +533,15 @@ auto main() -> int {
 	VkImageCreateInfo dummyInfo = texBaseInfo;
 	dummyInfo.extent = {.width = 1, .height = 1, .depth = 1};
 
-	ZHLN::Vk::TextureAsset dummyTex =
+	ZHLN::Vk::TextureCreativeWork dummyTex =
 		ZHLN::Vk::UploadTexture<VK_FORMAT_R8G8B8A8_UNORM>(allocator, ctx, dummyInfo, &white_pixel);
 
 	uint32_t black_pixel = 0xFF000000; // Alpha 1.0, RGB 0.0
-	ZHLN::Vk::TextureAsset blackTex =
+	ZHLN::Vk::TextureCreativeWork blackTex =
 		ZHLN::Vk::UploadTexture<VK_FORMAT_R8G8B8A8_UNORM>(allocator, ctx, dummyInfo, &black_pixel);
 
 	// --- Textures Loop ---
-	std::vector<ZHLN::Vk::TextureAsset> textures(gltf->images_count);
+	std::vector<ZHLN::Vk::TextureCreativeWork> textures(gltf->images_count);
 	std::println("Uploading {} textures...", gltf->images_count);
 	for (cgltf_size i = 0; i < gltf->images_count; ++i) {
 		ZHLN::Demo::ProcessEvents(win);
@@ -633,7 +633,7 @@ auto main() -> int {
 	}
 
 	// Setup materials to point to correct bindless index
-	std::vector<MaterialAsset> materials(gltf->materials_count);
+	std::vector<MaterialCreativeWork> materials(gltf->materials_count);
 	for (cgltf_size i = 0; i < gltf->materials_count; ++i) {
 		cgltf_material* mat = &gltf->materials[i];
 
@@ -707,7 +707,7 @@ auto main() -> int {
 			materials[i].emissiveIdx = bindlessTextureIndices[imgIdx];
 		}
 	}
-	MaterialAsset fallbackMat = {.albedoIdx = fallbackTexIdx, .normalIdx = fallbackTexIdx};
+	MaterialCreativeWork fallbackMat = {.albedoIdx = fallbackTexIdx, .normalIdx = fallbackTexIdx};
 
 	// --- Post processing ---
 

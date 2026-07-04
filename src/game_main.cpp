@@ -23,7 +23,7 @@
 #include "imgui.h"
 #include "physics/Physics.hpp"
 
-#include <Zahlen/AssetFactory.hpp>
+#include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/Components.hpp>
@@ -262,8 +262,8 @@ bool InitializeGame(Engine& engine) {
 	auto& reg = engine.GetRegistry();
 	auto& pc = engine.GetPhysicsContext();
 
-	Mesh lineMesh = AssetFactory::CreateBox(rc, {0.01f, 0.01f, 0.5f}, {0.0f, 1.0f, 1.0f, 1.0f});
-	Material lineMat = AssetFactory::CreateBasicMaterial(rc);
+	Mesh lineMesh = CreativeWorksFactory::CreateBox(rc, {0.01f, 0.01f, 0.5f}, {0.0f, 1.0f, 1.0f, 1.0f});
+	Material lineMat = CreativeWorksFactory::CreateBasicMaterial(rc);
 
 	reg.RegisterComponents<
 		TransformComponent, MeshComponent, PhysicsComponent, PhysicsStateComponent,
@@ -296,7 +296,7 @@ bool InitializeGame(Engine& engine) {
 
 	Entity uiSettings = reg.Create();
 	reg.Add(uiSettings, UISettingsComponent{});
-	AssetFactory::CreateFontAtlasTexture(rc);
+	CreativeWorksFactory::CreateFontAtlasTexture(rc);
 
 	BuildSystemGraphs(engine);
 

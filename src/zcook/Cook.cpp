@@ -9,7 +9,7 @@
 #include "Transform.hpp"
 #include "threading/TaskSystem.hpp"
 
-#include <Zahlen/AssetManager.hpp>
+#include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Types.hpp>
 #include <algorithm>
@@ -204,7 +204,7 @@ int CookAnimation(int argc, char** argv) {
 		const auto& sampler = anim.samplers[channel.samplerId];
 
 		CookedAnimTrack track{};
-		track.targetNodeHash = HashAssetPath(channel.targetNodeId);
+		track.targetNodeHash = HashCreativeWorkPath(channel.targetNodeId);
 
 		if (channel.targetPath == "translation") {
 			track.pathType = 0;
@@ -393,7 +393,7 @@ int PackArchive(int argc, char** argv) {
 		}
 
 		PakEntry pakEntry{};
-		pakEntry.pathHash = HashAssetPath(entry.vpath);
+		pakEntry.pathHash = HashCreativeWorkPath(entry.vpath);
 		pakEntry.offset = sizeof(PakHeader) + currentPayloadSize;
 		pakEntry.compressedSize = entry.size;
 		pakEntry.uncompressedSize = entry.size;

@@ -6,13 +6,13 @@
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Render.hpp"
 
-#include <Zahlen/AssetFactory.hpp>
+#include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <cmath>
 #include <cstring>
 #include <vector>
 
-namespace ZHLN::AssetFactory {
+namespace ZHLN::CreativeWorksFactory {
 
 Material CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend) {
 	PipelineDesc desc;
@@ -371,4 +371,4 @@ Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float m
 	return finalMesh;
 }
 
-} // namespace ZHLN::AssetFactory
+} // namespace ZHLN::CreativeWorksFactory

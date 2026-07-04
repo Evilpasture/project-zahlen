@@ -16,7 +16,7 @@
 
 #include <GLFW/glfw3.h>
 #include <Jolt/Physics/Collision/CastResult.h>
-#include <Zahlen/AssetFactory.hpp>
+#include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
@@ -310,11 +310,11 @@ bool InitializeEditorScene(Engine& engine) {
 	float terrainMaxHeight = 25.0f;
 	std::vector<float> terrainHeights(static_cast<size_t>(terrainSize * terrainSize));
 
-	Mesh terrainMesh = AssetFactory::CreateTerrain(rc, terrainSize, terrainWorldSize,
+	Mesh terrainMesh = CreativeWorksFactory::CreateTerrain(rc, terrainSize, terrainWorldSize,
 												   terrainMaxHeight, terrainHeights.data());
 	auto terrainShape =
 		Physics::CreateHeightFieldShape(terrainHeights, terrainSize, terrainWorldSize);
-	Material material = AssetFactory::CreateBasicMaterial(rc);
+	Material material = CreativeWorksFactory::CreateBasicMaterial(rc);
 
 	Entity terrainEnt = reg.Create();
 	reg.Add(terrainEnt,
@@ -328,7 +328,7 @@ bool InitializeEditorScene(Engine& engine) {
 	auto boxShape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Box, 2.0f, 2.0f, 2.0f);
 	for (int i = 0; i < 5; ++i) {
 		Entity box = reg.Create();
-		reg.Add(box, MeshComponent{.mesh = AssetFactory::CreateBox(rc, {2, 2, 2}),
+		reg.Add(box, MeshComponent{.mesh = CreativeWorksFactory::CreateBox(rc, {2, 2, 2}),
 								   .material = material,
 								   .cullRadius = 10.f});
 		reg.Add(box, PhysicsComponent{Physics::CreateRigidBody(

@@ -14,7 +14,7 @@
 #include "backends/imgui_impl_vulkan.h"
 #include "imgui.h"
 
-#include <Zahlen/AssetManager.hpp>
+#include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Engine.hpp>
@@ -63,8 +63,8 @@ static void InitRenderDocAPI() {
 	}
 }
 
-namespace AssetFactory {
-void RebuildVulkanResources(RenderContext& ctx, AssetManager& assetMgr, ECS::Registry& reg);
+namespace CreativeWorksFactory {
+void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& assetMgr, ECS::Registry& reg);
 }
 
 struct EngineImpl {
@@ -74,7 +74,7 @@ struct EngineImpl {
 	std::unique_ptr<PhysicsContext> physicsContext;
 	std::unique_ptr<AudioContext> audioContext;
 	std::unique_ptr<ALife::Simulator> alifeSimulator;
-	std::unique_ptr<AssetManager> assetManager;
+	std::unique_ptr<CreativeWorksManager> assetManager;
 
 	Camera mainCamera;
 	ECS::Registry registry;
@@ -110,7 +110,7 @@ void Engine::HandleDeviceLost() noexcept {
 	_impl->renderContext = std::make_unique<RenderContext>(*_impl->window, _impl->config.render);
 
 	// 2. Perform True Rebinding Recovery (Zero physics/registry/scripting resets)
-	AssetFactory::RebuildVulkanResources(*_impl->renderContext, *_impl->assetManager,
+	CreativeWorksFactory::RebuildVulkanResources(*_impl->renderContext, *_impl->assetManager,
 										 _impl->registry);
 
 	ZHLN::Log("[Engine] Hardware hot-rebuild completed successfully. All visual assets rebound to "
@@ -202,7 +202,7 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess, const char*
 	_impl->physicsContext = std::make_unique<PhysicsContext>(cfg.physics);
 	_impl->audioContext = std::make_unique<AudioContext>();
 	_impl->alifeSimulator = std::make_unique<ALife::Simulator>();
-	_impl->assetManager = std::make_unique<AssetManager>();
+	_impl->assetManager = std::make_unique<CreativeWorksManager>();
 
 	_impl->updateGraph = std::make_unique<ECS::SystemGraph>();
 	_impl->renderGraph = std::make_unique<ECS::SystemGraph>();
@@ -308,7 +308,7 @@ Camera& Engine::GetCamera() {
 ALife::Simulator& Engine::GetALife() {
 	return *_impl->alifeSimulator;
 }
-AssetManager& Engine::GetAssetManager() {
+CreativeWorksManager& Engine::GetCreativeWorksManager() {
 	return *_impl->assetManager;
 }
 AudioContext& Engine::GetAudioContext() {

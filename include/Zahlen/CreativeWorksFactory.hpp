@@ -13,13 +13,13 @@
 
 namespace ZHLN {
 class RenderContext;
-class AssetManager;
+class CreativeWorksManager;
 namespace ECS {
 class Registry;
 }
 } // namespace ZHLN
 
-namespace ZHLN::AssetFactory {
+namespace ZHLN::CreativeWorksFactory {
 Mesh CreateTetrahedron(RenderContext& ctx);
 Mesh CreatePlane(RenderContext& ctx, float extent = 10.0f,
 				 const JPH::Vec4& color = {0.6f, 0.6f, 0.6f, 1.0f});
@@ -31,8 +31,8 @@ Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float m
 
 uint32_t CreateFontAtlasTexture(RenderContext& ctx);
 
-Mesh LoadCookedMesh(RenderContext& ctx, AssetManager& assetMgr, std::string_view virtualPath);
-uint32_t LoadCookedTexture(RenderContext& ctx, AssetManager& assetMgr,
+Mesh LoadCookedMesh(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view virtualPath);
+uint32_t LoadCookedTexture(RenderContext& ctx, CreativeWorksManager& assetMgr,
 						   std::string_view virtualPath);
 
 struct SpawnParams {
@@ -50,7 +50,7 @@ struct SpawnParams {
 	Material materialOverride = {.pipeline = PipelineHandle::Invalid};
 };
 
-ModelPrefab* LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::string_view path);
+ModelPrefab* LoadModelPrefab(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path);
 
 // Returns the number of entities actually spawned and populated into outBuffer (if provided)
 uint32_t InstantiatePrefab(RenderContext& ctx, ECS::Registry& reg, PhysicsContext& pc,
@@ -61,4 +61,4 @@ Material CreateToonMaterial(RenderContext& ctx, bool doubleSided = false, bool a
 
 void SetupPlayerRagdoll(RenderContext& rc, PhysicsContext& pc, ECS::Registry& reg,
 						Entity playerEntity, std::span<const Entity> visualParts);
-} // namespace ZHLN::AssetFactory
+} // namespace ZHLN::CreativeWorksFactory

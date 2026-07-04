@@ -11,10 +11,10 @@
 #include "engine/system/AnimationSystem.hpp"
 #include "engine/system/InputSystem.hpp"
 
-#include <Zahlen/AssetFactory.hpp>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Console.hpp>
+#include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
@@ -438,20 +438,20 @@ void InitComponentRegistry() {
 // DECOUPLED SUBSYSTEM COMMAND REGISTERS
 // ============================================================================
 
-void RegisterAssetCommands() {
+void RegisterCreativeWorkCommands() {
 	RegisterCmd("SpawnPrefab", MakeCmd<SpawnPrefabArgs>([](ZHLN::Engine* engine,
 														   const SpawnPrefabArgs& a) -> uint64_t {
 					auto& rc = engine->GetRenderContext();
 					auto& reg = engine->GetRegistry();
 					auto& pc = engine->GetPhysicsContext();
 
-					auto* prefab =
-						ZHLN::AssetFactory::LoadModelPrefab(rc, engine->GetAssetManager(), a.path);
+					auto* prefab = ZHLN::CreativeWorksFactory::LoadModelPrefab(
+						rc, engine->GetCreativeWorksManager(), a.path);
 					if (!prefab) {
 						return 0;
 					}
 
-					ZHLN::AssetFactory::SpawnParams params;
+					ZHLN::CreativeWorksFactory::SpawnParams params;
 					params.position = JPH::RVec3(a.px, a.py, a.pz);
 					params.createPhysics = (a.createPhysics != 0);
 					params.isStaticPhysics = (a.isStatic != 0);
@@ -459,7 +459,7 @@ void RegisterAssetCommands() {
 					params.useBoxColliders = false;
 
 					std::vector<ZHLN::Entity> temp_buffer(a.maxCount);
-					uint32_t count = ZHLN::AssetFactory::InstantiatePrefab(
+					uint32_t count = ZHLN::CreativeWorksFactory::InstantiatePrefab(
 						rc, reg, pc, *prefab, params, temp_buffer.data(), a.maxCount);
 
 					uint32_t writtenCount = std::min(count, a.maxCount);
@@ -476,24 +476,24 @@ void RegisterAssetCommands() {
 			for (uint32_t i = 0; i < a.count; ++i) {
 				parts[i] = ZHLN::Entity::Unpack(a.visualParts[i]);
 			}
-			ZHLN::AssetFactory::SetupPlayerRagdoll(
+			ZHLN::CreativeWorksFactory::SetupPlayerRagdoll(
 				engine->GetRenderContext(), engine->GetPhysicsContext(), engine->GetRegistry(),
 				ZHLN::Entity::Unpack(a.playerEntity), parts);
 			return 1;
 		}));
 
-	RegisterCmd("CreateBox", MakeCmd<CreateBoxArgs>([](ZHLN::Engine* engine,
-													   const CreateBoxArgs& a) -> uint64_t {
-					ZHLN::Mesh mesh = ZHLN::AssetFactory::CreateBox(engine->GetRenderContext(),
-																	JPH::Vec3(a.hx, a.hy, a.hz),
-																	JPH::Vec4(a.r, a.g, a.b, a.a));
-					return static_cast<uint64_t>(mesh.posBuffer);
-				}));
+	RegisterCmd("CreateBox", MakeCmd<CreateBoxArgs>(
+								 [](ZHLN::Engine* engine, const CreateBoxArgs& a) -> uint64_t {
+									 ZHLN::Mesh mesh = ZHLN::CreativeWorksFactory::CreateBox(
+										 engine->GetRenderContext(), JPH::Vec3(a.hx, a.hy, a.hz),
+										 JPH::Vec4(a.r, a.g, a.b, a.a));
+									 return static_cast<uint64_t>(mesh.posBuffer);
+								 }));
 
 	RegisterCmd("CreateBasicMaterial",
 				MakeCmd<CreateMaterialArgs>(
 					[](ZHLN::Engine* engine, const CreateMaterialArgs& a) -> uint64_t {
-						ZHLN::Material mat = ZHLN::AssetFactory::CreateBasicMaterial(
+						ZHLN::Material mat = ZHLN::CreativeWorksFactory::CreateBasicMaterial(
 							engine->GetRenderContext(), false, a.a < 1.0f);
 						mat.baseColorFactor[0] = a.r;
 						mat.baseColorFactor[1] = a.g;
@@ -518,20 +518,20 @@ void RegisterAssetCommands() {
 
 			switch (type) {
 				case ZHLN::Physics::ShapeType::Sphere:
-					mesh = ZHLN::AssetFactory::CreateBox(rc, JPH::Vec3(a.p1, a.p1, a.p1),
-														 {a.r, a.g, a.b, a.a});
+					mesh = ZHLN::CreativeWorksFactory::CreateBox(rc, JPH::Vec3(a.p1, a.p1, a.p1),
+																{a.r, a.g, a.b, a.a});
 					shape = ZHLN::Physics::GetOrCreateShape(pc, type, a.p1);
 					cullRadius = a.p1 * 2.0f;
 					break;
 				case ZHLN::Physics::ShapeType::Plane:
-					mesh = ZHLN::AssetFactory::CreatePlane(rc, a.p1, {a.r, a.g, a.b, a.a});
+					mesh = ZHLN::CreativeWorksFactory::CreatePlane(rc, a.p1, {a.r, a.g, a.b, a.a});
 					shape = ZHLN::Physics::GetOrCreateShape(pc, type, 0.0f, 1.0f, 0.0f, 0.0f);
 					cullRadius = a.p1 * 2.0f;
 					break;
 				case ZHLN::Physics::ShapeType::Box:
 				default:
-					mesh = ZHLN::AssetFactory::CreateBox(rc, JPH::Vec3(a.p1, a.p2, a.p3),
-														 {a.r, a.g, a.b, a.a});
+					mesh = ZHLN::CreativeWorksFactory::CreateBox(rc, JPH::Vec3(a.p1, a.p2, a.p3),
+																{a.r, a.g, a.b, a.a});
 					shape = ZHLN::Physics::GetOrCreateShape(pc, ZHLN::Physics::ShapeType::Box, a.p1,
 															a.p2, a.p3);
 					cullRadius = std::max({a.p1, a.p2, a.p3}) * 2.0f;
@@ -540,7 +540,8 @@ void RegisterAssetCommands() {
 
 			bool isTransparent = (a.a < 1.0f);
 
-			ZHLN::Material mat = ZHLN::AssetFactory::CreateBasicMaterial(rc, false, isTransparent);
+			ZHLN::Material mat =
+				ZHLN::CreativeWorksFactory::CreateBasicMaterial(rc, false, isTransparent);
 			mat.baseColorFactor[0] = a.r;
 			mat.baseColorFactor[1] = a.g;
 			mat.baseColorFactor[2] = a.b;
@@ -1103,7 +1104,7 @@ void RegisterFFICommands() {
 	}
 	InitComponentRegistry();
 
-	RegisterAssetCommands();
+	RegisterCreativeWorkCommands();
 	RegisterPhysicsCommands();
 	RegisterInputAndCameraCommands();
 	RegisterAudioCommands();

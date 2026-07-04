@@ -1,15 +1,15 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/engine/AssetFactory.cpp
+// File: src/engine/CreativeWorksFactory.cpp
 
-#include "Zahlen/AssetManager.hpp"
+#include "Zahlen/CreativeWorksManager.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Render.hpp"
 #include "ecs/ECS.hpp"
 
-#include <Zahlen/AssetFactory.hpp>
+#include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Font8x8.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -20,7 +20,7 @@
 #define STB_TRUETYPE_IMPLEMENTATION
 #include <stb_truetype.h>
 
-namespace ZHLN::AssetFactory {
+namespace ZHLN::CreativeWorksFactory {
 
 // Queries Fontconfig to find the absolute file path of any font on your Arch Linux machine
 static std::string FindSystemFont(const char* fontName) {
@@ -121,7 +121,7 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
 	return texIdx;
 }
 
-Mesh LoadCookedMesh(RenderContext& ctx, [[maybe_unused]] AssetManager& assetMgr,
+Mesh LoadCookedMesh(RenderContext& ctx, [[maybe_unused]] CreativeWorksManager& assetMgr,
 					std::string_view virtualPath) {
 	if constexpr (isDev) {
 		auto* prefab = LoadModelPrefab(ctx, assetMgr, virtualPath);
@@ -130,8 +130,8 @@ Mesh LoadCookedMesh(RenderContext& ctx, [[maybe_unused]] AssetManager& assetMgr,
 		}
 		return {};
 	} else {
-		AssetLoadRequest req;
-		req.assetID = HashAssetPath(virtualPath);
+		CreativeWorkLoadRequest req;
+		req.assetID = HashCreativeWorkPath(virtualPath);
 
 		if (!assetMgr.LoadSync(req)) {
 			Log("ERROR: Failed to load cooked mesh from PAK: {}", virtualPath);
@@ -178,7 +178,7 @@ Mesh LoadCookedMesh(RenderContext& ctx, [[maybe_unused]] AssetManager& assetMgr,
 	}
 }
 
-uint32_t LoadCookedTexture(RenderContext& ctx, [[maybe_unused]] AssetManager& assetMgr,
+uint32_t LoadCookedTexture(RenderContext& ctx, [[maybe_unused]] CreativeWorksManager& assetMgr,
 						   std::string_view virtualPath) {
 	if constexpr (isDev) {
 		std::string rawPath = "resources/assets/" + std::string(virtualPath);
@@ -196,8 +196,8 @@ uint32_t LoadCookedTexture(RenderContext& ctx, [[maybe_unused]] AssetManager& as
 		stbi_image_free(pixels);
 		return textureIndex;
 	} else {
-		AssetLoadRequest req;
-		req.assetID = HashAssetPath(virtualPath);
+		CreativeWorkLoadRequest req;
+		req.assetID = HashCreativeWorkPath(virtualPath);
 
 		if (!assetMgr.LoadSync(req)) {
 			Log("ERROR: Failed to load texture from PAK: {}", virtualPath);
@@ -213,18 +213,18 @@ uint32_t LoadCookedTexture(RenderContext& ctx, [[maybe_unused]] AssetManager& as
 
 		if (pixels == nullptr) {
 			Log("ERROR: STB failed to decode image: {}", virtualPath);
-			assetMgr.FreeAssetMemory(req);
+			assetMgr.FreeCreativeWorkMemory(req);
 			return 0;
 		}
 
 		uint32_t textureIndex = ctx.CreateTexture(pixels, width, height);
 
 		stbi_image_free(pixels);
-		assetMgr.FreeAssetMemory(req);
+		assetMgr.FreeCreativeWorkMemory(req);
 
 		Log("Loaded Cooked Texture: {} (Bindless Index: {})", virtualPath, textureIndex);
 		return textureIndex;
 	}
 }
 
-} // namespace ZHLN::AssetFactory
+} // namespace ZHLN::CreativeWorksFactory

@@ -3,7 +3,7 @@
 
 #include "threading/TaskSystem.hpp"
 
-#include <Zahlen/AssetManager.hpp>
+#include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <cgltf.h>
@@ -27,7 +27,7 @@ struct PakArchive {
 	Platform::MappedFile mapped;
 };
 
-AssetManager::~AssetManager() {
+CreativeWorksManager::~CreativeWorksManager() {
 	for (size_t i = 0; i < _archiveCount; ++i) {
 		Platform::CloseMappedFile(_archives[i]->mapped);
 		delete _archives[i];
@@ -43,7 +43,7 @@ AssetManager::~AssetManager() {
 	delete[] _archives;
 }
 
-bool AssetManager::MountPak(std::string_view pakFilePath) {
+bool CreativeWorksManager::MountPak(std::string_view pakFilePath) {
 	auto* archive = new PakArchive();
 	archive->path = pakFilePath;
 	archive->mapped = Platform::OpenMappedFile(archive->path.c_str());
@@ -87,7 +87,7 @@ bool AssetManager::MountPak(std::string_view pakFilePath) {
 	return true;
 }
 
-void AssetManager::LoadAsync(RestrictSpan<AssetLoadRequest> requests,
+void CreativeWorksManager::LoadAsync(RestrictSpan<CreativeWorkLoadRequest> requests,
 							 TaskSystem::Counter* counter) {
 	if (requests.size() == 0) {
 		return;
@@ -97,11 +97,11 @@ void AssetManager::LoadAsync(RestrictSpan<AssetLoadRequest> requests,
 	tasks.reserve(requests.size());
 
 	for (auto& request : requests) {
-		auto* jobPayload = new std::pair<AssetManager*, AssetLoadRequest*>(this, &request);
+		auto* jobPayload = new std::pair<CreativeWorksManager*, CreativeWorkLoadRequest*>(this, &request);
 
 		tasks.push_back({.func = [](void* arg) -> void {
 							 auto* payload =
-								 static_cast<std::pair<AssetManager*, AssetLoadRequest*>*>(arg);
+								 static_cast<std::pair<CreativeWorksManager*, CreativeWorkLoadRequest*>*>(arg);
 							 payload->first->ExecuteLoad(payload->second);
 							 delete payload;
 						 },
@@ -111,12 +111,12 @@ void AssetManager::LoadAsync(RestrictSpan<AssetLoadRequest> requests,
 	TaskSystem::Dispatch(tasks, counter);
 }
 
-bool AssetManager::LoadSync(AssetLoadRequest& request) {
+bool CreativeWorksManager::LoadSync(CreativeWorkLoadRequest& request) {
 	ExecuteLoad(&request);
 	return request.success;
 }
 
-void AssetManager::ExecuteLoad(AssetLoadRequest* req) {
+void CreativeWorksManager::ExecuteLoad(CreativeWorkLoadRequest* req) {
 	PakEntry entry{};
 	PakArchive* archive = nullptr;
 
@@ -151,19 +151,19 @@ void AssetManager::ExecuteLoad(AssetLoadRequest* req) {
 			ZSTD_decompress(req->outData, entry.uncompressedSize, payloadRaw, entry.compressedSize);
 		if (ZSTD_isError(result)) {
 			Log("ERROR: Zstd decompression failed for asset ID: {:X}", req->assetID);
-			FreeAssetMemory(*req);
+			FreeCreativeWorkMemory(*req);
 			req->success = false;
 			return;
 		}
 #else
-		Log("FATAL: Engine built without ZStd support! Cannot decompress Asset.");
-		FreeAssetMemory(*req);
+		Log("FATAL: Engine built without ZStd support! Cannot decompress CreativeWork.");
+		FreeCreativeWorkMemory(*req);
 		req->success = false;
 		return;
 #endif
 	} else if (entry.compression == 1) { // LZ4 Placeholder
 		Log("ERROR: LZ4 compression not currently implemented.");
-		FreeAssetMemory(*req);
+		FreeCreativeWorkMemory(*req);
 		req->success = false;
 		return;
 	}
@@ -171,14 +171,14 @@ void AssetManager::ExecuteLoad(AssetLoadRequest* req) {
 	req->success = true;
 }
 
-void AssetManager::FreeAssetMemory(AssetLoadRequest& req) {
+void CreativeWorksManager::FreeCreativeWorkMemory(CreativeWorkLoadRequest& req) {
 	if (!req.isZeroCopy && (req.outData != nullptr)) {
 		::operator delete[](req.outData, std::align_val_t{16});
 	}
 	req.outData = nullptr;
 }
 
-ModelPrefab* AssetManager::GetCachedPrefab(uint64_t hash) {
+ModelPrefab* CreativeWorksManager::GetCachedPrefab(uint64_t hash) {
 	ZHLN_LOCK(_prefabMutex) {
 		const auto* entry = _prefabCache.Find(hash);
 		if (entry != nullptr) {
@@ -188,7 +188,7 @@ ModelPrefab* AssetManager::GetCachedPrefab(uint64_t hash) {
 	}
 }
 
-void AssetManager::CachePrefab(uint64_t hash, ModelPrefab* prefab) {
+void CreativeWorksManager::CachePrefab(uint64_t hash, ModelPrefab* prefab) {
 	ZHLN_LOCK(_prefabMutex) {
 		_prefabCache.Insert(hash, prefab);
 		if (_prefabsCount >= _prefabsCapacity) {
@@ -205,7 +205,7 @@ void AssetManager::CachePrefab(uint64_t hash, ModelPrefab* prefab) {
 	}
 }
 
-void AssetManager::ClearCache() noexcept {
+void CreativeWorksManager::ClearCache() noexcept {
 	ZHLN_LOCK(_prefabMutex) {
 		// 1. Clear the lookup hash map
 		_prefabCache.Clear();
@@ -222,7 +222,7 @@ void AssetManager::ClearCache() noexcept {
 	}
 }
 
-uint32_t AssetManager::GetCachedPrefabs(ModelPrefab** outPrefabs, uint32_t maxCount) {
+uint32_t CreativeWorksManager::GetCachedPrefabs(ModelPrefab** outPrefabs, uint32_t maxCount) {
 	ZHLN_LOCK(_prefabMutex) {
 		if (outPrefabs == nullptr || maxCount == 0) {
 			return static_cast<uint32_t>(_prefabsCount);

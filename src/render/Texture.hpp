@@ -10,18 +10,18 @@
 // Texture
 // ============================================================================
 namespace ZHLN::Vk {
-struct TextureAsset {
+struct TextureCreativeWork {
 	ZHLN::Vk::Image image;
 	ZHLN::Vk::ImageView view;
 
 	// Explicitly Move-Only
-	TextureAsset() = default;
-	TextureAsset(const TextureAsset&) = delete;
-	auto operator=(const TextureAsset&) -> TextureAsset& = delete;
+	TextureCreativeWork() = default;
+	TextureCreativeWork(const TextureCreativeWork&) = delete;
+	auto operator=(const TextureCreativeWork&) -> TextureCreativeWork& = delete;
 
-	TextureAsset(TextureAsset&&) noexcept = default;
-	auto operator=(TextureAsset&&) noexcept -> TextureAsset& = default;
-	~TextureAsset() = default;
+	TextureCreativeWork(TextureCreativeWork&&) noexcept = default;
+	auto operator=(TextureCreativeWork&&) noexcept -> TextureCreativeWork& = default;
+	~TextureCreativeWork() = default;
 
 	// Helper to check validity
 	explicit operator bool() const { return image.Valid() && view.Valid(); }
@@ -35,7 +35,7 @@ template <VkFormat F>
 [[nodiscard]]
 inline auto UploadTexture(Allocator& allocator, const Context& ctx,
 						  const VkImageCreateInfo& baseInfo, const void* pixelData)
-	-> TextureAsset {
+	-> TextureCreativeWork {
 	// TMP Safety Check: Prevent Apple/Metal R8G8B8 errors at compile-time
 	if constexpr (F == VK_FORMAT_R8G8B8_UNORM || F == VK_FORMAT_B8G8R8_UNORM) {
 		static_assert(F != VK_FORMAT_R8G8B8_UNORM && F != VK_FORMAT_B8G8R8_UNORM,
@@ -43,7 +43,7 @@ inline auto UploadTexture(Allocator& allocator, const Context& ctx,
 					  "Please use a 32-bit format like VK_FORMAT_R8G8B8A8_UNORM.");
 	}
 
-	TextureAsset result;
+	TextureCreativeWork result;
 	const uint32_t textureW = baseInfo.extent.width;
 	const uint32_t textureH = baseInfo.extent.height;
 

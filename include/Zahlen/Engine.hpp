@@ -20,7 +20,7 @@ class Window;
 class RenderContext;
 class PhysicsContext;
 class AudioContext;
-class AssetManager;
+class CreativeWorksManager;
 struct Camera;
 struct EngineImpl;
 
@@ -59,7 +59,7 @@ class ZHLN_API Engine {
 	InputContext& GetInput();
 	Camera& GetCamera();
 	ALife::Simulator& GetALife();
-	AssetManager& GetAssetManager();
+	CreativeWorksManager& GetCreativeWorksManager();
 	AudioContext& GetAudioContext();
 	ECS::Registry& GetRegistry();
 

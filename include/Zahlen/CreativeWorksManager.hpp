@@ -22,7 +22,7 @@ struct ModelPrefab;
 // Hashing Utility
 // ============================================================================
 
-constexpr uint64_t HashAssetPath(std::string_view path) noexcept {
+constexpr uint64_t HashCreativeWorkPath(std::string_view path) noexcept {
 	uint64_t hash = 0xcbf29ce484222325ull;
 	for (char c : path) {
 		hash ^= static_cast<uint64_t>(c);
@@ -92,10 +92,10 @@ struct CookedAnimTrack {
 #pragma pack(pop)
 
 // ============================================================================
-// Asset Manager
+// CreativeWork Manager
 // ============================================================================
 
-struct AssetLoadRequest {
+struct CreativeWorkLoadRequest {
 	uint64_t assetID = 0;
 	void* outData = nullptr;
 	size_t outSize = 0;
@@ -108,14 +108,14 @@ struct CatalogEntry {
 	struct PakArchive* archive;
 };
 
-class AssetManager {
+class CreativeWorksManager {
   public:
-	AssetManager() = default;
-	~AssetManager();
+	CreativeWorksManager() = default;
+	~CreativeWorksManager();
 
 	// Non-copyable
-	AssetManager(const AssetManager&) = delete;
-	AssetManager& operator=(const AssetManager&) = delete;
+	CreativeWorksManager(const CreativeWorksManager&) = delete;
+	CreativeWorksManager& operator=(const CreativeWorksManager&) = delete;
 
 	/**
 	 * @brief Mounts a .pak file into the virtual file system.
@@ -128,24 +128,24 @@ class AssetManager {
 	 * @param requests Span of requests to fulfill.
 	 * @param counter Task counter to wait on.
 	 */
-	void LoadAsync(RestrictSpan<AssetLoadRequest> requests, TaskSystem::Counter* counter);
+	void LoadAsync(RestrictSpan<CreativeWorkLoadRequest> requests, TaskSystem::Counter* counter);
 
 	/**
 	 * @brief Synchronously loads an asset. Blocks the calling thread/fiber.
 	 */
-	bool LoadSync(AssetLoadRequest& request);
+	bool LoadSync(CreativeWorkLoadRequest& request);
 
 	/**
-	 * @brief Safely frees memory allocated by the AssetManager.
+	 * @brief Safely frees memory allocated by the CreativeWorksManager.
 	 */
-	void FreeAssetMemory(AssetLoadRequest& req);
+	void FreeCreativeWorkMemory(CreativeWorkLoadRequest& req);
 
 	/**
 	 * @brief Fetches a cached ModelPrefab, or returns nullptr if not loaded.
 	 */
 	ModelPrefab* GetCachedPrefab(uint64_t hash);
 
-	// Internal hook for the AssetFactory to register a newly loaded Prefab
+	// Internal hook for the CreativeWorksFactory to register a newly loaded Prefab
 	void CachePrefab(uint64_t hash, ModelPrefab* prefab);
 
 	/**
@@ -162,7 +162,7 @@ class AssetManager {
 	uint32_t GetCachedPrefabs(struct ModelPrefab** outPrefabs, uint32_t maxCount);
 
   private:
-	void ExecuteLoad(AssetLoadRequest* req);
+	void ExecuteLoad(CreativeWorkLoadRequest* req);
 
 	struct PakArchive** _archives = nullptr;
 	size_t _archiveCount = 0;

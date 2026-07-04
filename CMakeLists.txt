@@ -179,11 +179,11 @@ set(ENGINE_SOURCES
     src/engine/RenderInit.cpp
     src/engine/RenderResources.cpp
     src/engine/Engine.cpp
-    src/engine/AssetFactory.cpp
+    src/engine/CreativeWorksFactory.cpp
     src/engine/MeshBuilder.cpp
     src/engine/glTFImporter.cpp
     src/engine/system/AnimationSystem.cpp
-    src/engine/AssetManager.cpp
+    src/engine/CreativeWorksManager.cpp
     src/engine/Window.cpp
     src/engine/Input.cpp
     src/engine/Platform.cpp
