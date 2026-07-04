@@ -719,6 +719,18 @@ template <VkImageLayout NewLayout, VkImageLayout OldLayout>
 
 void CopyBufferToImage(const VkCommandBuffer cmd, const ZHLN_BufferImageCopyDesc& desc) noexcept;
 
+template <size_t RegionCount>
+[[nodiscard]] constexpr auto
+CreateCopyRegions(VkDeviceSize baseOffset, VkDeviceSize regionSize, VkExtent3D extent,
+				  VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT, uint32_t mipLevel = 0,
+				  uint32_t baseArrayLayer = 0) noexcept
+	-> std::array<VkBufferImageCopy2, RegionCount>;
+
+template <size_t RegionCount>
+inline void CopyBufferToImage(VkCommandBuffer cmd, VkBuffer srcBuffer, VkImage dstImage,
+							  const std::array<VkBufferImageCopy2, RegionCount>& regions,
+							  VkImageLayout layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) noexcept;
+
 template <GpuTriviallyCopyable T>
 void Push(const VkCommandBuffer cmd, const VkPipelineLayout layout, const VkShaderStageFlags stages,
 		  const T& value) noexcept;
@@ -788,6 +800,10 @@ auto DrawFrame(const Context& ctx, const Swapchain& swapchain, const FrameSync<N
 			   Rebuild&& rebuild) noexcept -> ZHLN_FrameResult;
 
 [[nodiscard]] auto SubmitAndPresent(const ZHLN_FrameSubmitDesc& desc) noexcept -> ZHLN_FrameResult;
+
+void SubmitAndWait(VkQueue queue, VkCommandBuffer cmd, VkSemaphore waitSemaphore = VK_NULL_HANDLE,
+				   uint64_t waitValue = 0,
+				   VkPipelineStageFlags2 waitStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT) noexcept;
 
 void ExecuteCommands(const VkCommandBuffer primary,
 					 const std::span<const VkCommandBuffer> secondaries) noexcept;

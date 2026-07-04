@@ -137,4 +137,15 @@ template <BarrierStage SrcStage, BarrierAccess SrcAccess, QueueType QType>
 [[nodiscard]] constexpr auto BeginBarrier(CommandBuffer<QType> cmd) noexcept {
 	return ConstrainedBarrier<QType, SrcStage, SrcAccess>{cmd};
 }
+
+struct BufferQueueBarrier {
+	VkBufferMemoryBarrier2 release;
+	VkBufferMemoryBarrier2 acquire;
+
+	[[nodiscard]] static auto Create(const ZHLN_BufferQueueBarrierDesc& desc) noexcept
+		-> BufferQueueBarrier {
+		auto raw = ZHLN_CreateBufferQueueBarrier(&desc);
+		return {.release = raw.release, .acquire = raw.acquire};
+	}
+};
 } // namespace ZHLN::Vk

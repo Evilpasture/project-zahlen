@@ -242,18 +242,7 @@ RenderResult RenderContext::BeginFrame() noexcept {
 	_impl->current_cmd = _impl->pools.Cmd(_impl->frame_index);
 	ZHLN_BeginCommandBuffer(_impl->current_cmd);
 
-	ZHLN_LOCK(_impl->pendingAcquires.mutex) {
-		if (!_impl->pendingAcquires.buffers.empty()) {
-			VkDependencyInfo depInfo{};
-			depInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-			depInfo.bufferMemoryBarrierCount =
-				static_cast<uint32_t>(_impl->pendingAcquires.buffers.size());
-			depInfo.pBufferMemoryBarriers = _impl->pendingAcquires.buffers.data();
-
-			vkCmdPipelineBarrier2(_impl->current_cmd, &depInfo);
-			_impl->pendingAcquires.buffers.clear();
-		}
-	}
+	_impl->pendingAcquires.Drain(_impl->current_cmd);
 
 	if (_impl->needsInitialClear) {
 		_impl->InitialClearTargets(_impl->current_cmd);
@@ -355,13 +344,8 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 	std::memcpy(stagingBuf.Map().data, tlasInstancesScratch.data(),
 				tlasInstancesScratch.size() * sizeof(VkAccelerationStructureInstanceKHR));
 
-	ZHLN_BufferCopyDesc copy = {.src = stagingBuf.Handle(),
-								.dst = instanceBuf.Handle(),
-								.size = tlasInstancesScratch.size() *
-										sizeof(VkAccelerationStructureInstanceKHR),
-								.src_offset = 0,
-								.dst_offset = 0};
-	ZHLN_CmdCopyBuffer(cmd, &copy);
+	Vk::CopyBuffer(cmd, stagingBuf, instanceBuf,
+				   tlasInstancesScratch.size() * sizeof(VkAccelerationStructureInstanceKHR));
 
 	Vk::MemoryBarrier(cmd, {.src_stage = VK_PIPELINE_STAGE_2_COPY_BIT,
 							.src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,

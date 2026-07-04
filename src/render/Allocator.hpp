@@ -119,11 +119,22 @@ class Image {
 	VmaHandle<VkImage, vmaDestroyImage> _handle;
 };
 
+// ============================================================================
+// Buffer Utilities
+// ============================================================================
+
 template <typename T = uint32_t>
 void FillBuffer(VkCommandBuffer cmd, const Buffer& buffer, VkDeviceSize offset = 0, T data = 0) {
 	static_assert(sizeof(T) % 4 == 0, "Type must be 4-byte aligned for vkCmdFillBuffer");
 
 	vkCmdFillBuffer(cmd, buffer.Handle(), offset, sizeof(T), data);
+}
+
+inline void CopyBuffer(VkCommandBuffer cmd, const Buffer& src, const Buffer& dst,
+					   VkDeviceSize size) {
+	ZHLN_BufferCopyDesc copy = {
+		.src = src.Handle(), .dst = dst.Handle(), .size = size, .src_offset = 0, .dst_offset = 0};
+	ZHLN_CmdCopyBuffer(cmd, &copy);
 }
 
 // ============================================================================

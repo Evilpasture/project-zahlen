@@ -651,6 +651,42 @@ inline void CopyBufferToImage(const VkCommandBuffer cmd,
 	ZHLN_CmdCopyBufferToImage(cmd, &desc);
 }
 
+template <size_t RegionCount>
+constexpr auto CreateCopyRegions(VkDeviceSize baseOffset, VkDeviceSize regionSize,
+								 VkExtent3D extent, VkImageAspectFlags aspect, uint32_t mipLevel,
+								 uint32_t baseArrayLayer) noexcept
+	-> std::array<VkBufferImageCopy2, RegionCount> {
+	std::array<VkBufferImageCopy2, RegionCount> regions{};
+	for (uint32_t i = 0; i < RegionCount; ++i) {
+		regions[i] = {.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
+					  .pNext = nullptr,
+					  .bufferOffset = baseOffset + (i * regionSize),
+					  .bufferRowLength = 0,
+					  .bufferImageHeight = 0,
+					  .imageSubresource = {.aspectMask = aspect,
+										   .mipLevel = mipLevel,
+										   .baseArrayLayer = baseArrayLayer + i,
+										   .layerCount = 1},
+					  .imageOffset = {0, 0, 0},
+					  .imageExtent = extent};
+	}
+	return regions;
+}
+
+template <size_t RegionCount>
+inline void CopyBufferToImage(VkCommandBuffer cmd, VkBuffer srcBuffer, VkImage dstImage,
+							  const std::array<VkBufferImageCopy2, RegionCount>& regions,
+							  VkImageLayout layout) noexcept {
+	VkCopyBufferToImageInfo2 copyInfo = {.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
+										 .pNext = nullptr,
+										 .srcBuffer = srcBuffer,
+										 .dstImage = dstImage,
+										 .dstImageLayout = layout,
+										 .regionCount = static_cast<uint32_t>(RegionCount),
+										 .pRegions = regions.data()};
+	vkCmdCopyBufferToImage2(cmd, &copyInfo);
+}
+
 template <GpuTriviallyCopyable T>
 inline void Push(const VkCommandBuffer cmd, const VkPipelineLayout layout,
 				 const VkShaderStageFlags stages, const T& value) noexcept {

@@ -1772,6 +1772,36 @@ void ZHLN_CmdMemoryBarrier(const VkCommandBuffer cmd,
 	vkCmdPipelineBarrier2(cmd, &dependency_info);
 }
 
+[[nodiscard]]
+ZHLN_BufferQueueBarrier
+ZHLN_CreateBufferQueueBarrier(const ZHLN_BufferQueueBarrierDesc* const restrict desc) {
+	const VkBufferMemoryBarrier2 base = {.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+										 .pNext = nullptr,
+										 .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
+										 .srcAccessMask = 0,
+										 .dstStageMask = VK_PIPELINE_STAGE_2_NONE,
+										 .dstAccessMask = 0,
+										 .srcQueueFamilyIndex = desc->src_queue_family,
+										 .dstQueueFamilyIndex = desc->dst_queue_family,
+										 .buffer = desc->buffer,
+										 .offset = 0,
+										 .size = desc->size};
+
+	VkBufferMemoryBarrier2 rel = base;
+	rel.srcStageMask = desc->src_stage;
+	rel.srcAccessMask = desc->src_access;
+	rel.dstStageMask = VK_PIPELINE_STAGE_2_NONE;
+	rel.dstAccessMask = 0;
+
+	VkBufferMemoryBarrier2 acq = base;
+	acq.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
+	acq.srcAccessMask = 0;
+	acq.dstStageMask = desc->dst_stage;
+	acq.dstAccessMask = desc->dst_access;
+
+	return (ZHLN_BufferQueueBarrier){.release = rel, .acquire = acq};
+}
+
 VkDeviceAddress ZHLN_GetBufferDeviceAddress(VkDevice device, VkBuffer buffer) {
 	VkBufferDeviceAddressInfo info = {.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
 									  .buffer = buffer};

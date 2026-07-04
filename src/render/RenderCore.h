@@ -542,6 +542,26 @@ typedef struct ZHLN_MemoryBarrierDesc {
 
 void ZHLN_CmdMemoryBarrier(VkCommandBuffer cmd, const ZHLN_MemoryBarrierDesc* ZHLN_RESTRICT desc);
 
+typedef struct ZHLN_BufferQueueBarrierDesc {
+	VkBuffer buffer;
+	VkDeviceSize size;
+	uint32_t src_queue_family;
+	uint32_t dst_queue_family;
+	VkPipelineStageFlags2 src_stage;
+	VkAccessFlags2 src_access;
+	VkPipelineStageFlags2 dst_stage;
+	VkAccessFlags2 dst_access;
+} ZHLN_BufferQueueBarrierDesc;
+
+typedef struct ZHLN_BufferQueueBarrier {
+	VkBufferMemoryBarrier2 release;
+	VkBufferMemoryBarrier2 acquire;
+} ZHLN_BufferQueueBarrier;
+
+[[nodiscard]]
+ZHLN_BufferQueueBarrier
+ZHLN_CreateBufferQueueBarrier(const ZHLN_BufferQueueBarrierDesc* ZHLN_RESTRICT desc);
+
 /* --- HARDWARE RAY TRACING --- */
 
 VkDeviceAddress ZHLN_GetBufferDeviceAddress(VkDevice device, VkBuffer buffer);

@@ -249,31 +249,12 @@ uint32_t RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceD
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
 			cmd, gpuImage.Handle());
 
-		// Batch all six cubemap faces into a single copy pipeline dispatch
-		std::array<VkBufferImageCopy2, 6> regions{};
-		for (uint32_t i = 0; i < 6; ++i) {
-			regions[i] =
-				VkBufferImageCopy2{.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
-								   .pNext = nullptr,
-								   .bufferOffset = stagingAlloc.offset + (i * faceSize),
-								   .bufferRowLength = 0,
-								   .bufferImageHeight = 0,
-								   .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-														.mipLevel = 0,
-														.baseArrayLayer = i,
-														.layerCount = 1},
-								   .imageOffset = {.x = 0, .y = 0, .z = 0},
-								   .imageExtent = {.width = width, .height = height, .depth = 1}};
-		}
+		// 1. Generate the 6 cubemap regions on the stack (zero-overhead compile-time loop)
+		auto regions = Vk::CreateCopyRegions<6>(stagingAlloc.offset, faceSize,
+												{.width = width, .height = height, .depth = {}});
 
-		VkCopyBufferToImageInfo2 copyInfo = {.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
-											 .pNext = nullptr,
-											 .srcBuffer = stagingAlloc.buffer,
-											 .dstImage = gpuImage.Handle(),
-											 .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-											 .regionCount = static_cast<uint32_t>(regions.size()),
-											 .pRegions = regions.data()};
-		vkCmdCopyBufferToImage2(cmd, &copyInfo);
+		// 2. Dispatch the copy using the new type-safe overload (layout defaults to TRANSFER_DST)
+		Vk::CopyBufferToImage(cmd, stagingAlloc.buffer, gpuImage.Handle(), regions);
 
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
@@ -320,35 +301,31 @@ auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data,
 		ZHLN_CmdCopyBuffer(cmd, &copy);
 
 		if (diffQueue) {
-			VkBufferMemoryBarrier2 releaseBarrier = {
-				.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-				.pNext = nullptr,
-				.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-				.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-				.dstStageMask = VK_PIPELINE_STAGE_2_NONE,
-				.dstAccessMask = 0,
-				.srcQueueFamilyIndex = ctx.PhysicalInfo().transfer_family,
-				.dstQueueFamilyIndex = ctx.PhysicalInfo().graphics_family,
-				.buffer = gpu_buf.Handle(),
-				.offset = 0,
-				.size = size};
+			auto [release, acquire] = Vk::BufferQueueBarrier::Create(
+				{.buffer = gpu_buf.Handle(),
+				 .size = size,
+				 .src_queue_family = ctx.PhysicalInfo().transfer_family,
+				 .dst_queue_family = ctx.PhysicalInfo().graphics_family,
+				 .src_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+				 .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+				 .dst_stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+				 .dst_access = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT});
 
-			VkDependencyInfo depInfo{};
-			depInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-			depInfo.bufferMemoryBarrierCount = 1;
-			depInfo.pBufferMemoryBarriers = &releaseBarrier;
-
+			VkDependencyInfo depInfo = {
+				.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+				.pNext = {},
+				.dependencyFlags = {},
+				.memoryBarrierCount = {},
+				.pMemoryBarriers = {},
+				.bufferMemoryBarrierCount = 1,
+				.pBufferMemoryBarriers = &release,
+				.imageMemoryBarrierCount = {},
+				.pImageMemoryBarriers = {},
+			};
 			vkCmdPipelineBarrier2(cmd, &depInfo);
 
-			VkBufferMemoryBarrier2 acquireBarrier = releaseBarrier;
-			acquireBarrier.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
-			acquireBarrier.srcAccessMask = 0;
-			acquireBarrier.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-			acquireBarrier.dstAccessMask =
-				VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
-
 			ZHLN_LOCK(pendingAcquires.mutex) {
-				pendingAcquires.buffers.push_back(acquireBarrier);
+				pendingAcquires.buffers.push_back(acquire);
 			}
 		}
 	}
@@ -520,25 +497,13 @@ void RenderContext::BuildMeshBLAS(Mesh& mesh) {
 											VMA_MEMORY_USAGE_GPU_ONLY);
 
 	{
-		Vk::CommandPool<Vk::QueueType::Graphics> tempPool(impl->ctx.Device(),
-														  impl->ctx.PhysicalInfo().graphics_family);
+		Vk::CommandPool tempPool(impl->ctx.Device(), impl->ctx.PhysicalInfo().graphics_family);
 		if (tempPool.Allocate(1)) {
 			VkCommandBuffer tempCmd = tempPool[0];
 			ZHLN_BeginCommandBuffer(tempCmd);
 
-			// 1. DRAIN PENDING ACQUIRE BARRIERS (For Queue Family Ownership Transfer)
-			ZHLN_LOCK(impl->pendingAcquires.mutex) {
-				if (!impl->pendingAcquires.buffers.empty()) {
-					VkDependencyInfo depInfo{};
-					depInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-					depInfo.bufferMemoryBarrierCount =
-						static_cast<uint32_t>(impl->pendingAcquires.buffers.size());
-					depInfo.pBufferMemoryBarriers = impl->pendingAcquires.buffers.data();
-
-					vkCmdPipelineBarrier2(tempCmd, &depInfo);
-					impl->pendingAcquires.buffers.clear();
-				}
-			}
+			// 1. Cleanly drain pending family ownership acquires (locks and C-structs are hidden)
+			impl->pendingAcquires.Drain(tempCmd);
 
 			// Synchronize the vertex/index buffer copy writes with the BLAS build reads
 			Vk::MemoryBarrier(
@@ -552,41 +517,11 @@ void RenderContext::BuildMeshBLAS(Mesh& mesh) {
 				Vk::GetBufferDeviceAddress(impl->ctx.Device(), scratch.Handle()), primitiveCount);
 			ZHLN_EndCommandBuffer(tempCmd);
 
-			VkCommandBufferSubmitInfo subInfo = {
-				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-				.pNext = {},
-				.commandBuffer = tempCmd,
-				.deviceMask = {},
-			};
-
-			// 2. CONFIGURE THE TIMELINE SEMAPHORE WAIT INFO
-			VkSemaphoreSubmitInfo waitInfo{};
-			uint32_t waitCount = 0;
-			if (impl->transferRingBuffer.GetSemaphore() != VK_NULL_HANDLE &&
-				impl->transferRingBuffer.GetCurrentValue() > 0) {
-				waitInfo = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-							.pNext = nullptr,
-							.semaphore = impl->transferRingBuffer.GetSemaphore(),
-							.value = impl->transferRingBuffer.GetCurrentValue(),
-							.stageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-							.deviceIndex = 0};
-				waitCount = 1;
-			}
-
-			VkSubmitInfo2 submit = {
-				.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-				.pNext = {},
-				.flags = {},
-				.waitSemaphoreInfoCount = waitCount,
-				.pWaitSemaphoreInfos = waitCount > 0 ? &waitInfo : nullptr,
-				.commandBufferInfoCount = 1,
-				.pCommandBufferInfos = &subInfo,
-				.signalSemaphoreInfoCount = {},
-				.pSignalSemaphoreInfos = {},
-			};
-
-			vkQueueSubmit2(impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
-			vkQueueWaitIdle(impl->ctx.GraphicsQueue());
+			// 2. Synchronously submit and wait on the transfer staging timeline semaphore
+			Vk::SubmitAndWait(impl->ctx.GraphicsQueue(), tempCmd,
+							  impl->transferRingBuffer.GetSemaphore(),
+							  impl->transferRingBuffer.GetCurrentValue(),
+							  VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR);
 		}
 	}
 }

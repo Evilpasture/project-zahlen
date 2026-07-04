@@ -247,4 +247,40 @@ bool RayTracingContext::Init(VkDevice device) noexcept {
 	return ok;
 }
 
+void SubmitAndWait(VkQueue queue, VkCommandBuffer cmd, VkSemaphore waitSemaphore,
+				   uint64_t waitValue, VkPipelineStageFlags2 waitStage) noexcept {
+	VkCommandBufferSubmitInfo cmdInfo = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+		.pNext = {},
+		.commandBuffer = cmd,
+		.deviceMask = {},
+	};
+
+	VkSemaphoreSubmitInfo waitInfo = {
+		.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+		.pNext = {},
+		.semaphore = waitSemaphore,
+		.value = waitValue,
+		.stageMask = waitStage,
+		.deviceIndex = {},
+	};
+
+	uint32_t waitCount = (waitSemaphore != VK_NULL_HANDLE && waitValue > 0) ? 1 : 0;
+
+	VkSubmitInfo2 submit = {
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+		.pNext = {},
+		.flags = {},
+		.waitSemaphoreInfoCount = waitCount,
+		.pWaitSemaphoreInfos = waitCount > 0 ? &waitInfo : nullptr,
+		.commandBufferInfoCount = 1,
+		.pCommandBufferInfos = &cmdInfo,
+		.signalSemaphoreInfoCount = {},
+		.pSignalSemaphoreInfos = {},
+	};
+
+	vkQueueSubmit2(queue, 1, &submit, VK_NULL_HANDLE);
+	vkQueueWaitIdle(queue);
+}
+
 } // namespace ZHLN::Vk

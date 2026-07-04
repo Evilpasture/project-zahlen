@@ -5,6 +5,7 @@
 #pragma once
 #include "Rendering.hpp"
 #include "detail/Array.hpp"
+#include "detail/ControlFlow.hpp"
 #include "engine/FileWatcher.hpp"
 #include "engine/Resources.hpp"
 #include "threading/Mutex.hpp"
@@ -559,6 +560,26 @@ struct RenderContext::Impl {
 	struct PendingAcquires {
 		ZHLN::Mutex mutex;
 		ZHLN::Array<VkBufferMemoryBarrier2> buffers;
+
+		void Drain(VkCommandBuffer cmd) noexcept {
+			ZHLN_LOCK(mutex) {
+				if (!buffers.empty()) {
+					VkDependencyInfo depInfo = {
+						.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+						.pNext = {},
+						.dependencyFlags = {},
+						.memoryBarrierCount = {},
+						.pMemoryBarriers = {},
+						.bufferMemoryBarrierCount = static_cast<uint32_t>(buffers.size()),
+						.pBufferMemoryBarriers = buffers.data(),
+						.imageMemoryBarrierCount = {},
+						.pImageMemoryBarriers = {},
+					};
+					vkCmdPipelineBarrier2(cmd, &depInfo);
+					buffers.clear();
+				}
+			}
+		}
 	};
 	mutable PendingAcquires pendingAcquires;
 	Vk::StagingRingBuffer transferRingBuffer;
