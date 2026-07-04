@@ -7,6 +7,7 @@
 #include "detail/Array.hpp"
 #include "engine/FileWatcher.hpp"
 #include "engine/Resources.hpp"
+#include "threading/Mutex.hpp"
 
 #include <GLFW/glfw3.h>
 #include <Zahlen/Log.hpp>
@@ -554,6 +555,13 @@ struct RenderContext::Impl {
 
 	Vk::Buffer morphDeltasBuffer; // Holds all packed morph target deltas
 	uint32_t nextMorphDeltaIndex = 0;
+
+	struct PendingAcquires {
+		ZHLN::Mutex mutex;
+		ZHLN::Array<VkBufferMemoryBarrier2> buffers;
+	};
+	mutable PendingAcquires pendingAcquires;
+	Vk::StagingRingBuffer transferRingBuffer;
 
 	ZHLN::DoubleBuffered<BufferHandle> debugMeshHandles;
 

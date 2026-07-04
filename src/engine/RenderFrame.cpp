@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "RenderInternal.hpp"
 #include "Zahlen/Profiler.hpp"
+#include "detail/ControlFlow.hpp"
 #include "detail/RadixSort.hpp"
 
 #include <array>
@@ -244,6 +245,19 @@ RenderResult RenderContext::BeginFrame() noexcept {
 	_impl->current_cmd = _impl->pools.Cmd(_impl->frame_index);
 	ZHLN_BeginCommandBuffer(_impl->current_cmd);
 
+	ZHLN_LOCK(_impl->pendingAcquires.mutex) {
+		if (!_impl->pendingAcquires.buffers.empty()) {
+			VkDependencyInfo depInfo{};
+			depInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+			depInfo.bufferMemoryBarrierCount =
+				static_cast<uint32_t>(_impl->pendingAcquires.buffers.size());
+			depInfo.pBufferMemoryBarriers = _impl->pendingAcquires.buffers.data();
+
+			vkCmdPipelineBarrier2(_impl->current_cmd, &depInfo);
+			_impl->pendingAcquires.buffers.clear();
+		}
+	}
+
 	if (_impl->needsInitialClear) {
 		_impl->InitialClearTargets(_impl->current_cmd);
 		_impl->needsInitialClear = false;
@@ -262,7 +276,9 @@ ZHLN_FrameResult RenderContext::Impl::SubmitFrame() {
 										   presentation.presentSemaphores[current_image_index],
 									   .inFlight = s.in_flight,
 									   .swapchain = presentation.swapchain.Get().handle,
-									   .imageIndex = current_image_index};
+									   .imageIndex = current_image_index,
+									   .stagingSemaphore = transferRingBuffer.GetSemaphore(),
+									   .stagingWaitValue = transferRingBuffer.GetCurrentValue()};
 
 	ZHLN_FrameResult res = Vk::SubmitAndPresent(submitDesc);
 	if (res != ZHLN_FrameResult_Ok) {

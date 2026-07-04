@@ -5,6 +5,7 @@
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
 #include "Zahlen/Types.hpp"
+#include "detail/ControlFlow.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -159,7 +160,7 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
 		.flags = 0,
 		.imageType = VK_IMAGE_TYPE_2D,
 		.format = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM,
-		.extent{.width = width, .height = height, .depth = 1},
+		.extent = {.width = width, .height = height, .depth = 1},
 		.mipLevels = mipLevels,
 		.arrayLayers = 1,
 		.samples = VK_SAMPLE_COUNT_1_BIT,
@@ -174,6 +175,7 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
 	auto gpuImage = Vk::Image::Create(allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 
 	{
+		// Textures are bound back to the graphics queue staging buffer (Safe blitting & stages)
 		Vk::ImmediateCommand cmd(device, stagingRingBuffer);
 
 		auto stagingAlloc = cmd.AllocateStaging(imageSize);
@@ -220,21 +222,22 @@ uint32_t RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceD
 		.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
 		.imageType = VK_IMAGE_TYPE_2D,
 		.format = VK_FORMAT_R8G8B8A8_UNORM,
-		.extent{.width = width, .height = height, .depth = 1},
+		.extent = {.width = width, .height = height, .depth = 1},
 		.mipLevels = 1,
 		.arrayLayers = 6,
 		.samples = VK_SAMPLE_COUNT_1_BIT,
 		.tiling = VK_IMAGE_TILING_OPTIMAL,
 		.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
 		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-		.queueFamilyIndexCount = {},
-		.pQueueFamilyIndices = {},
+		.queueFamilyIndexCount = 0,
+		.pQueueFamilyIndices = nullptr,
 		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
 	};
 
 	auto gpuImage = Vk::Image::Create(allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 
 	{
+		// Textures are bound back to the graphics queue staging buffer (Safe blitting & stages)
 		Vk::ImmediateCommand cmd(device, stagingRingBuffer);
 
 		auto stagingAlloc = cmd.AllocateStaging(faceSize * 6);
@@ -249,17 +252,18 @@ uint32_t RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceD
 		// Batch all six cubemap faces into a single copy pipeline dispatch
 		std::array<VkBufferImageCopy2, 6> regions{};
 		for (uint32_t i = 0; i < 6; ++i) {
-			regions[i] = {.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
-						  .pNext = nullptr,
-						  .bufferOffset = stagingAlloc.offset + (i * faceSize),
-						  .bufferRowLength = 0,
-						  .bufferImageHeight = 0,
-						  .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-											   .mipLevel = 0,
-											   .baseArrayLayer = i,
-											   .layerCount = 1},
-						  .imageOffset = {.x = 0, .y = 0, .z = 0},
-						  .imageExtent = {.width = width, .height = height, .depth = 1}};
+			regions[i] =
+				VkBufferImageCopy2{.sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
+								   .pNext = nullptr,
+								   .bufferOffset = stagingAlloc.offset + (i * faceSize),
+								   .bufferRowLength = 0,
+								   .bufferImageHeight = 0,
+								   .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+														.mipLevel = 0,
+														.baseArrayLayer = i,
+														.layerCount = 1},
+								   .imageOffset = {.x = 0, .y = 0, .z = 0},
+								   .imageExtent = {.width = width, .height = height, .depth = 1}};
 		}
 
 		VkCopyBufferToImageInfo2 copyInfo = {.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
@@ -297,11 +301,13 @@ auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data,
 		usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
 	}
 
+	bool diffQueue = ctx.PhysicalInfo().graphics_family != ctx.PhysicalInfo().transfer_family;
+
 	auto gpu_buf = Vk::Buffer::Create(allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY);
 
 	{
 		Vk::ImmediateCommand cmd(ctx.Device(),
-								 const_cast<Vk::StagingRingBuffer&>(stagingRingBuffer));
+								 const_cast<Vk::StagingRingBuffer&>(transferRingBuffer));
 		auto stagingAlloc = cmd.AllocateStaging(size);
 		std::memcpy(stagingAlloc.mappedData, data, size);
 
@@ -312,6 +318,39 @@ auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data,
 										  .dst_offset = 0};
 
 		ZHLN_CmdCopyBuffer(cmd, &copy);
+
+		if (diffQueue) {
+			VkBufferMemoryBarrier2 releaseBarrier = {
+				.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+				.pNext = nullptr,
+				.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+				.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+				.dstStageMask = VK_PIPELINE_STAGE_2_NONE,
+				.dstAccessMask = 0,
+				.srcQueueFamilyIndex = ctx.PhysicalInfo().transfer_family,
+				.dstQueueFamilyIndex = ctx.PhysicalInfo().graphics_family,
+				.buffer = gpu_buf.Handle(),
+				.offset = 0,
+				.size = size};
+
+			VkDependencyInfo depInfo{};
+			depInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+			depInfo.bufferMemoryBarrierCount = 1;
+			depInfo.pBufferMemoryBarriers = &releaseBarrier;
+
+			vkCmdPipelineBarrier2(cmd, &depInfo);
+
+			VkBufferMemoryBarrier2 acquireBarrier = releaseBarrier;
+			acquireBarrier.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
+			acquireBarrier.srcAccessMask = 0;
+			acquireBarrier.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+			acquireBarrier.dstAccessMask =
+				VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+
+			ZHLN_LOCK(pendingAcquires.mutex) {
+				pendingAcquires.buffers.push_back(acquireBarrier);
+			}
+		}
 	}
 
 	VkBufferDeviceAddressInfo bdaInfo = {
@@ -486,6 +525,20 @@ void RenderContext::BuildMeshBLAS(Mesh& mesh) {
 			VkCommandBuffer tempCmd = tempPool[0];
 			ZHLN_BeginCommandBuffer(tempCmd);
 
+			// 1. DRAIN PENDING ACQUIRE BARRIERS (For Queue Family Ownership Transfer)
+			ZHLN_LOCK(impl->pendingAcquires.mutex) {
+				if (!impl->pendingAcquires.buffers.empty()) {
+					VkDependencyInfo depInfo{};
+					depInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+					depInfo.bufferMemoryBarrierCount =
+						static_cast<uint32_t>(impl->pendingAcquires.buffers.size());
+					depInfo.pBufferMemoryBarriers = impl->pendingAcquires.buffers.data();
+
+					vkCmdPipelineBarrier2(tempCmd, &depInfo);
+					impl->pendingAcquires.buffers.clear();
+				}
+			}
+
 			// Synchronize the vertex/index buffer copy writes with the BLAS build reads
 			Vk::MemoryBarrier(
 				tempCmd, {.src_stage = VK_PIPELINE_STAGE_2_COPY_BIT,
@@ -499,10 +552,37 @@ void RenderContext::BuildMeshBLAS(Mesh& mesh) {
 			ZHLN_EndCommandBuffer(tempCmd);
 
 			VkCommandBufferSubmitInfo subInfo = {
-				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = tempCmd};
-			VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-									.commandBufferInfoCount = 1,
-									.pCommandBufferInfos = &subInfo};
+				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+				.pNext = {},
+				.commandBuffer = tempCmd,
+				.deviceMask = {},
+			};
+
+			// 2. CONFIGURE THE TIMELINE SEMAPHORE WAIT INFO
+			VkSemaphoreSubmitInfo waitInfo{};
+			uint32_t waitCount = 0;
+			if (impl->transferRingBuffer.GetSemaphore() != VK_NULL_HANDLE &&
+				impl->transferRingBuffer.GetCurrentValue() > 0) {
+				waitInfo = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+							.pNext = nullptr,
+							.semaphore = impl->transferRingBuffer.GetSemaphore(),
+							.value = impl->transferRingBuffer.GetCurrentValue(),
+							.stageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+							.deviceIndex = 0};
+				waitCount = 1;
+			}
+
+			VkSubmitInfo2 submit = {
+				.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+				.pNext = {},
+				.flags = {},
+				.waitSemaphoreInfoCount = waitCount,
+				.pWaitSemaphoreInfos = waitCount > 0 ? &waitInfo : nullptr,
+				.commandBufferInfoCount = 1,
+				.pCommandBufferInfos = &subInfo,
+				.signalSemaphoreInfoCount = {},
+				.pSignalSemaphoreInfos = {},
+			};
 
 			vkQueueSubmit2(impl->ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
 			vkQueueWaitIdle(impl->ctx.GraphicsQueue());
@@ -607,7 +687,7 @@ void RenderContext::Impl::UploadClusterBounds(const JPH::Mat44& proj) {
 	}
 
 	// Direct staging copy to GPU (Runs on main thread outside active render pass)
-	Vk::ImmediateCommand cmd(ctx.Device(), const_cast<Vk::StagingRingBuffer&>(stagingRingBuffer));
+	Vk::ImmediateCommand cmd(ctx.Device(), stagingRingBuffer);
 	auto stagingAlloc = cmd.AllocateStaging(cpuBounds.size() * sizeof(ClusterBounds));
 	std::memcpy(stagingAlloc.mappedData, cpuBounds.data(),
 				cpuBounds.size() * sizeof(ClusterBounds));

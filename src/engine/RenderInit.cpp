@@ -93,6 +93,12 @@ void RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int
 		ZHLN::Panic("FATAL: Failed to initialize Staging Ring Buffer!");
 	}
 
+	if (!transferRingBuffer.Init(allocator.Get(), ctx.Device(), ctx.TransferQueue(),
+								 ctx.PhysicalInfo().transfer_family,
+								 static_cast<VkDeviceSize>(64 * 1024 * 1024))) {
+		ZHLN::Panic("FATAL: Failed to initialize Transfer Ring Buffer!");
+	}
+
 	bool supportsRayTracing = CheckRayTracingSupport(ctx.Physical());
 	if (!supportsRayTracing || !rtCtx.Init(ctx.Device())) {
 		ZHLN::Log("WARNING: Raytracing context failed to initialize. RTR will be disabled.");
