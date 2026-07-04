@@ -111,7 +111,7 @@ void WriteBenchmarkLog(std::vector<double> frameTimes) {
 	}
 }
 
-std::string s_GameplayFile = "scripts/gameplay.fnl";
+std::string s_GameplayFile = "scripts/gameplay_template.fnl";
 
 // ============================================================================
 // Flattened System Wrappers (For 100% Predictable Function Pointers)

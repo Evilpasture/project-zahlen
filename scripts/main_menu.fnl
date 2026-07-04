@@ -40,28 +40,7 @@
          (when Menu.logo_entities
            (each [_ ent (ipairs Menu.logo_entities)]
              (zh.ecs:add ent :PBRComponent {:roughness 0.3 :metallic 0.0})))
-         ;; 4. Spawn Studio Lighting
-         (set Menu.menu_sun
-              (zh:spawn_light {:type 0
-                               :direction [0.0 -0.2 -1.0]
-                               :color [1.0 1.0 1.0]
-                               :intensity 500.0}))
-         (zh.ecs:add Menu.menu_sun :SunTagComponent)
-         (set Menu.point_light_1
-              (zh:spawn_light {:type 1
-                               :position [-4.0 2.0 4.0]
-                               :color [1.0 0.9 0.8]
-                               :intensity 1500.0
-                               :radius 0.5
-                               :range 50.0}))
-         (set Menu.point_light_2
-              (zh:spawn_light {:type 1
-                               :position [4.0 1.0 4.0]
-                               :color [0.8 0.9 1.0]
-                               :intensity 1500.0
-                               :radius 0.5
-                               :range 50.0}))
-         ;; Start Menu Music
+         ;; 4. Start Menu Music
          (set Menu.theme_music
               (zh.audio:create_instance :resources/assets/audio/theme.mp3 false))
          (when (and Menu.theme_music (not= Menu.theme_music ull-0))
