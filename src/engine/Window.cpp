@@ -119,8 +119,24 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
 
 			glfwSetCursorPosCallback(_impl->handle, [](GLFWwindow* win, double xpos, double ypos) {
 				auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
-				self->_impl->input->InjectLocalMotion(static_cast<float>(xpos),
-													  static_cast<float>(ypos));
+
+				// Query both the virtual window size (points) and physical framebuffer size
+				// (pixels)
+				int winWidth = 0;
+				int winHeight = 0;
+				glfwGetWindowSize(win, &winWidth, &winHeight);
+
+				int fbWidth = 0;
+				int fbHeight = 0;
+				glfwGetFramebufferSize(win, &fbWidth, &fbHeight);
+
+				// Calculate the High-DPI / Retina scale factors
+				float scaleX = (winWidth > 0) ? (float)fbWidth / (float)winWidth : 1.0f;
+				float scaleY = (winHeight > 0) ? (float)fbHeight / (float)winHeight : 1.0f;
+
+				// Inject the adjusted pixel-pace coordinates into the input system
+				self->_impl->input->InjectLocalMotion(static_cast<float>(xpos) * scaleX,
+													  static_cast<float>(ypos) * scaleY);
 			});
 
 			glfwSetFramebufferSizeCallback(
