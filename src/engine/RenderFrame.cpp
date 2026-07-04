@@ -51,17 +51,6 @@ inline void BarrierComputeWriteToVertexRead(VkCommandBuffer cmd) {
 }
 
 /**
- * @brief Inline barrier wrapper for the cluster-culling internal sync.
- */
-inline void BarrierClusterCullingSync(VkCommandBuffer cmd) {
-	Vk::BarrierBuilder()
-		.From(Vk::BarrierStage::Transfer | Vk::BarrierStage::Compute,
-			  Vk::BarrierAccess::TransferWrite | Vk::BarrierAccess::ShaderWrite)
-		.To(cmd, Vk::BarrierStage::Compute,
-			Vk::BarrierAccess::ShaderRead | Vk::BarrierAccess::ShaderWrite);
-}
-
-/**
  * @brief Inline barrier wrapper for compute-write to fragment-read synchronization.
  */
 inline void BarrierComputeWriteToFragmentRead(VkCommandBuffer cmd) {
