@@ -5,6 +5,23 @@
 
 #pragma once
 
+#if defined(ZHLN_LEGACY_VULKAN_1_1)
+#include "legacy/DynamicPass.hpp"
+#include "legacy/PassCache.hpp"
+// Alias modern namespace target to the legacy Vulkan 1.1 implementation
+namespace ZHLN::Vk {
+static constexpr auto isLegacy = true;
+
+using namespace Vk11;
+} // namespace ZHLN::Vk
+#else
+// Default: Alias modern namespace target directly to standard Vulkan 1.3
+namespace ZHLN::Vk {
+static constexpr auto isLegacy = false;
+}
+
+#endif
+
 #define ZHLN_RENDERING_HPP_INCLUDED
 
 #include "RenderingPCH.h" // IWYU pragma: keep

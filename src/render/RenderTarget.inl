@@ -27,7 +27,8 @@ inline auto RenderTarget<F>::State() const noexcept -> TypedImage<VK_IMAGE_LAYOU
 	return {.handle = image.Handle(),
 			.view = view.Get(),
 			.extent = extent,
-			.aspect = GetFormatAspect(F)};
+			.aspect = GetFormatAspect(F),
+			.format = F};
 }
 
 template <VkFormat F>
@@ -136,6 +137,7 @@ template <VkImageLayout Layout> struct ResourceTraits<TypedImage<Layout>> {
 	static constexpr auto GetView(const TypedImage<Layout>& res) noexcept { return res.view; }
 	static constexpr auto GetExtent(const TypedImage<Layout>& res) noexcept { return res.extent; }
 	static constexpr auto GetAspect(const TypedImage<Layout>& res) noexcept { return res.aspect; }
+	static constexpr auto GetFormat(const TypedImage<Layout>& res) noexcept { return res.format; }
 };
 
 template <VkFormat F> struct ResourceTraits<RenderTarget<F>> {
@@ -148,6 +150,7 @@ template <VkFormat F> struct ResourceTraits<RenderTarget<F>> {
 	static constexpr auto GetAspect(const RenderTarget<F>& /*res*/) noexcept {
 		return GetFormatAspect(F);
 	}
+	static constexpr auto GetFormat(const RenderTarget<F>&) noexcept { return F; }
 };
 
 } // namespace detail
@@ -218,7 +221,8 @@ template <VkImageLayout TargetLayout, typename... Resources>
 			return TypedImage<TargetLayout>{.handle = Traits::GetImage(res),
 											.view = Traits::GetView(res),
 											.extent = Traits::GetExtent(res),
-											.aspect = Traits::GetAspect(res)};
+											.aspect = Traits::GetAspect(res),
+											.format = Traits::GetFormat(res)};
 		};
 
 		return std::make_tuple(make_typed(resources)...);

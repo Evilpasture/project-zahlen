@@ -67,7 +67,7 @@ template <typename... Targets> struct GBufferLayout {
 template <VkImageLayout L, VkFormat F>
 Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget<F>& rt,
 							   VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
-	return {rt.image.Handle(), rt.view.Get(), rt.extent, aspect};
+	return {rt.image.Handle(), rt.view.Get(), rt.extent, aspect, F};
 }
 
 template <VkImageLayout TargetLayout, typename T>

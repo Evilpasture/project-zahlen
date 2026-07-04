@@ -104,6 +104,8 @@ template <VkImageLayout Layout> struct TypedImage {
 	VkImageView view = VK_NULL_HANDLE;
 	VkExtent2D extent{};
 	VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+
+	VkFormat format = VK_FORMAT_UNDEFINED; // Compatibility for 1.1
 };
 
 // ============================================================================
