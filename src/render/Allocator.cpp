@@ -393,19 +393,33 @@ auto StagingRingBuffer::Submit(VkCommandBuffer cmd) noexcept -> uint64_t {
 		}
 	}
 
-	VkCommandBufferSubmitInfo cmdInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-										 .commandBuffer = cmd};
+	VkCommandBufferSubmitInfo cmdInfo = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+		.pNext = {},
+		.commandBuffer = cmd,
+		.deviceMask = {},
+	};
 
-	VkSemaphoreSubmitInfo signalInfo = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-										.semaphore = _timelineSemaphore,
-										.value = _timelineValue,
-										.stageMask = VK_PIPELINE_STAGE_2_COPY_BIT};
+	VkSemaphoreSubmitInfo signalInfo = {
+		.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+		.pNext = {},
+		.semaphore = _timelineSemaphore,
+		.value = _timelineValue,
+		.stageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+		.deviceIndex = {},
+	};
 
-	VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-							.commandBufferInfoCount = 1,
-							.pCommandBufferInfos = &cmdInfo,
-							.signalSemaphoreInfoCount = 1,
-							.pSignalSemaphoreInfos = &signalInfo};
+	VkSubmitInfo2 submit = {
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+		.pNext = {},
+		.flags = {},
+		.waitSemaphoreInfoCount = {},
+		.pWaitSemaphoreInfos = {},
+		.commandBufferInfoCount = 1,
+		.pCommandBufferInfos = &cmdInfo,
+		.signalSemaphoreInfoCount = 1,
+		.pSignalSemaphoreInfos = &signalInfo,
+	};
 
 	vkQueueSubmit2(_queue, 1, &submit, VK_NULL_HANDLE);
 	return _timelineValue;
@@ -421,6 +435,10 @@ struct ImmediateCommand::Impl {
 	VkCommandBuffer cmd = VK_NULL_HANDLE;
 	StagingRingBuffer* ringBuffer = nullptr;
 
+	Impl(const Impl&) = delete;
+	Impl(Impl&&) = delete;
+	Impl& operator=(const Impl&) = delete;
+	Impl& operator=(Impl&&) = delete;
 	Impl(VkDevice dev, StagingRingBuffer& rb) noexcept : device(dev), ringBuffer(&rb) {
 
 		uint32_t queueFamily = rb.GetQueueFamily();

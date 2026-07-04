@@ -32,9 +32,8 @@ class HardwareCapsProber {
 		: _physicalDevice(physicalDevice), _apiVersion(apiVersion) {}
 
 	auto ProbeInt64(bool& target) && noexcept -> HardwareCapsProber&& {
-		VkPhysicalDeviceFeatures2 features2 = {
-			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-		};
+		VkPhysicalDeviceFeatures2 features2{};
+		features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
 		vkGetPhysicalDeviceFeatures2(_physicalDevice, &features2);
 		target = (features2.features.shaderInt64 == VK_TRUE);
 		return std::move(*this);
@@ -44,10 +43,11 @@ class HardwareCapsProber {
 		bool hasExt =
 			ZHLN::Vk::IsDeviceExtensionSupported(_physicalDevice, "VK_KHR_draw_indirect_count");
 		if (hasExt || _apiVersion >= VK_API_VERSION_1_2) {
-			VkPhysicalDeviceFeatures2 features2 = {
-				.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-			VkPhysicalDeviceVulkan12Features features12 = {
-				.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+			VkPhysicalDeviceFeatures2 features2{};
+
+			features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+			VkPhysicalDeviceVulkan12Features features12{};
+			features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
 			features2.pNext = &features12;
 			vkGetPhysicalDeviceFeatures2(_physicalDevice, &features2);
 			target = (features12.drawIndirectCount == VK_TRUE);
