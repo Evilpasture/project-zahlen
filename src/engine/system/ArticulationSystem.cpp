@@ -105,7 +105,7 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
 		animPose.SetSkeleton(skel);
 		animPose.SetRootOffset(capsuleWorldPos); // <-- Set root to player's actual position!
 
-		std::vector<JPH::Mat44> localJoints(ragComp.jointCount, JPH::Mat44::sIdentity());
+		JPH::Array<JPH::Mat44> localJoints(ragComp.jointCount, JPH::Mat44::sIdentity());
 		for (uint32_t j = 0; j < ragComp.jointCount; ++j) {
 			// High-performance O(1) index-based joint node mapping
 			const cgltf_node* jointNode = (j < skin->joints_count) ? skin->joints[j] : nullptr;
@@ -119,7 +119,7 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
 		}
 
 		// Propagate local-space matrices into model-space hierarchical matrices
-		std::vector<JPH::Mat44> modelJoints(ragComp.jointCount, JPH::Mat44::sIdentity());
+		JPH::Array<JPH::Mat44> modelJoints(ragComp.jointCount, JPH::Mat44::sIdentity());
 		for (uint32_t j = 0; j < ragComp.jointCount; ++j) {
 			int parentIdx = skel->GetJoint(j).mParentJointIndex;
 			if (parentIdx >= 0) {
@@ -176,8 +176,7 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
 		// 4. READ-BACK & GPU INVERSE-BIND SKINNING
 		// ====================================================================
 		if (ragComp.state == RagdollState::Limp || ragComp.state == RagdollState::KeyframeMotor) {
-			std::vector<JPH::Mat44> physicalWorldJoints(ragComp.jointCount,
-														JPH::Mat44::sIdentity());
+			JPH::Array<JPH::Mat44> physicalWorldJoints(ragComp.jointCount, JPH::Mat44::sIdentity());
 			JPH::RVec3 actualRootOffset = JPH::RVec3::sZero();
 
 			ZHLN_LOCK(world.sync.shadowLock) {
@@ -202,7 +201,7 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
 			// InverseBindMatrix This transforms from mesh-local to root-relative space, which is
 			// then brought to world space by the mesh's TransformComponent (positioned at
 			// actualRootOffset).
-			std::vector<JPH::Mat44> finalSkinningMatrices(ragComp.jointCount);
+			JPH::Array<JPH::Mat44> finalSkinningMatrices(ragComp.jointCount);
 			JPH::Mat44 invRoot = JPH::Mat44::sTranslation(-JPH::Vec3(actualRootOffset));
 
 			for (uint32_t j = 0; j < ragComp.jointCount; ++j) {
