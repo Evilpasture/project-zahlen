@@ -19,7 +19,7 @@ auto main() -> int {
 		return -1;
 	}
 
-	// 2. Instance & Device Feature Setup (Modernized via FeatureFactory)
+	// 2. Instance & Device Feature Setup
 	ZHLN_InstanceDesc inst_desc = ZHLN_DEFAULT_INSTANCE_DESC;
 	auto inst_exts = ZHLN::Demo::GetRequiredInstanceExtensions();
 	inst_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
@@ -37,7 +37,6 @@ auto main() -> int {
 	inst_desc.extensions = inst_exts.data();
 	inst_desc.extension_count = static_cast<uint32_t>(inst_exts.size());
 
-	// Compile-time feature chain building
 	auto features =
 		ZHLN::Vk::FeatureChainBuilder()
 			.Require<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>([has_maint1](auto& f) {
@@ -72,25 +71,25 @@ auto main() -> int {
 															   .score_fn = nullptr,
 															   .score_userdata = nullptr},
 										 dev_desc);
-
 	if (!ctx) {
 		return -1;
 	}
 
-	// 3. Surface & RAII Resources
-	VkSurfaceKHR raw_surface = ZHLN::Demo::CreateSurface(ctx.Instance(), win);
-	ZHLN::Vk::Surface surface(ctx.Instance(), raw_surface);
+	// 3. Surface, Memory Allocator & Presentation Context
+	ZHLN::Vk::Surface surface(ctx.Instance(), ZHLN::Demo::CreateSurface(ctx.Instance(), win));
+	ZHLN::Vk::Allocator allocator;
+	allocator.Init(ctx);
 
-	ZHLN::Vk::Swapchain swapchain(ctx.Device(), {});
+	ZHLN::Vk::PresentationContext pres;
+	pres.Init(ctx, allocator, surface.Get(), win.width, win.height, true);
+
 	auto sync = ZHLN::Vk::FrameSync<3>::Create(ctx.Device());
 	auto pools = ZHLN::Vk::CommandPools<3>::Create(
 		ctx.Device(), {.queue_family = ctx.PhysicalInfo().graphics_family, .buffers_per_pool = 1});
-	ZHLN::Vk::SemaphorePool present_semaphores;
 
 	// 4. Pipeline Setup
 	auto shaders = ZHLN::Vk::ShaderStages::FromFiles(
 		ctx.Device(), "triangle.hlsl.VSMain.spv", "triangle.hlsl.PSMain.spv", "VSMain", "PSMain");
-
 	if (!shaders.Valid()) {
 		return -1;
 	}
@@ -106,28 +105,13 @@ auto main() -> int {
 						   .NoDepth()
 						   .CullNone()
 						   .Build(ctx.Device());
-
 	if (!pipelineRes) {
 		return -1;
 	}
 
-	// 5. Rebuild Helper
+	// 5. Minimal Rebuild Callback
 	auto rebuild = [&]() {
-		vkDeviceWaitIdle(ctx.Device());
-		ZHLN_Device raw_dev = {.handle = ctx.Device(),
-							   .graphics_queue = ctx.GraphicsQueue(),
-							   .present_queue = ctx.PresentQueue(),
-							   .transfer_queue = ctx.TransferQueue()};
-		ZHLN_PhysicalDeviceInfo raw_phys = ctx.PhysicalInfo();
-		ZHLN_SwapchainDesc s_desc = {.device = &raw_dev,
-									 .physical = &raw_phys,
-									 .surface = surface.Get(),
-									 .width = win.width,
-									 .height = win.height,
-									 .vsync = true,
-									 .old_swapchain = swapchain.Get().handle};
-		swapchain.Rebuild(s_desc);
-		present_semaphores.Rebuild(ctx.Device(), swapchain.Get().image_count);
+		pres.Rebuild(win.width, win.height);
 		win.resized = false;
 	};
 
@@ -143,67 +127,35 @@ auto main() -> int {
 		if (win.resized) {
 			rebuild();
 		}
-		if (!swapchain.Valid() || swapchain.Get().extent.width == 0) {
+		if (!pres.swapchain.Valid() || pres.swapchain.Get().extent.width == 0) {
 			continue;
 		}
 
-		const ZHLN_FrameSync& frame_sync = sync[frame_index];
-		ZHLN_CommandPool& pool = pools[frame_index];
-		VkCommandBuffer cmd = pools.Cmd(frame_index);
+		// DrawFrame handles synchronization, image acquisition, recording boundaries, and
+		// submission.
+		ZHLN::Vk::DrawFrame(
+			ctx, pres.swapchain, sync, pools, frame_index,
+			[&](VkCommandBuffer cmd, uint32_t image_index) {
+				ZHLN::Vk::TypedImage<VK_IMAGE_LAYOUT_UNDEFINED> swap_u = {
+					.handle = pres.swapchain.Get().images[image_index],
+					.view = pres.swapchain.Get().views[image_index],
+					.extent = pres.swapchain.Get().extent,
+					.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
 
-		ZHLN_WaitAndResetFrame(ctx.Device(), frame_sync.in_flight, &pool);
+				auto swap_att =
+					ZHLN::Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, swap_u);
 
-		uint32_t image_index = 0;
-		ZHLN_AcquireDesc acq = {.swapchain = swapchain.Get().handle,
-								.image_available = frame_sync.image_available,
-								.timeout_ns = UINT64_MAX};
-		if (ZHLN_AcquireImage(ctx.Device(), &acq, &image_index) == ZHLN_FrameResult_OutOfDate) {
-			win.resized = true;
-			continue;
-		}
+				ZHLN::Vk::DynamicPass(pres.swapchain.Get().extent)
+					.AddColor(swap_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+							  ZHLN::Color4{.r = 0.01f, .g = 0.01f, .b = 0.02f, .a = 1.0f})
+					.Execute(cmd, [&]() {
+						vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineRes->Get());
+						vkCmdDraw(cmd, 3, 1, 0, 0);
+					});
 
-		ZHLN_BeginCommandBuffer(cmd);
-
-		// --- MODERN TYPE-SAFE IMAGE LAYOUT STATE ---
-		ZHLN::Vk::TypedImage<VK_IMAGE_LAYOUT_UNDEFINED> swap_u = {
-			.handle = swapchain.Get().images[image_index],
-			.view = swapchain.Get().views[image_index],
-			.extent = swapchain.Get().extent,
-			.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
-
-		// Transition the image's layout; statically tracked by the compiler
-		auto swap_att = ZHLN::Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, swap_u);
-
-		// --- MODERN FLUENT RENDER PASS EXECUTION ---
-		ZHLN::Vk::DynamicPass(
-			swapchain.Get().extent) // Compile-time deduced starting state via CTAD [1]
-			.AddColor(swap_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-					  ZHLN::Color4{.r = 0.01f, .g = 0.01f, .b = 0.02f, .a = 1.0f})
-			.Execute(cmd, [&]() {
-				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineRes->Get());
-				vkCmdDraw(cmd, 3, 1, 0, 0);
-			});
-
-		// Transition image state back to present source
-		auto swap_pres = ZHLN::Vk::Transition<VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, swap_att);
-
-		ZHLN_EndCommandBuffer(cmd);
-
-		ZHLN_FrameSubmitDesc submitDesc = {.graphicsQueue = ctx.GraphicsQueue(),
-										   .presentQueue = ctx.PresentQueue(),
-										   .cmd = cmd,
-										   .imageAvailable = frame_sync.image_available,
-										   .renderFinished = present_semaphores[image_index],
-										   .inFlight = frame_sync.in_flight,
-										   .swapchain = swapchain.Get().handle,
-										   .imageIndex = image_index,
-										   .stagingSemaphore = VK_NULL_HANDLE,
-										   .stagingWaitValue = 0};
-
-		if (ZHLN::Vk::SubmitAndPresent(submitDesc) != ZHLN_FrameResult_Ok) {
-			win.resized = true;
-		}
-		frame_index = (frame_index + 1) % 3;
+				ZHLN::Vk::Transition<VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, swap_att);
+			},
+			rebuild);
 	}
 
 	vkDeviceWaitIdle(ctx.Device());
