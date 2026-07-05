@@ -83,5 +83,6 @@ static constexpr auto isLegacy = false;
 #include "PresentationContext.hpp"
 #include "Texture.hpp"
 #include "TextureUtils.hpp"
+#include "ParallelRecorder.hpp"
 // clang-format on
 // IWYU pragma: end_exports

@@ -552,6 +552,9 @@ struct RenderContext::Impl {
 	Vk::Pipeline uiPipeline;
 	Vk::PipelineLayout uiPipelineLayout;
 
+	// Allocate 2 parallel recording slots (Slot 0 = Shadow, Slot 1 = Main)
+	DoubleBuffered<Vk::ParallelCommandRecorder<2>> parallelRecorder;
+
 	GISettings giSettings{};
 
 	Vk::Buffer morphDeltasBuffer; // Holds all packed morph target deltas

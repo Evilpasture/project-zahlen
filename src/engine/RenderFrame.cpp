@@ -4,6 +4,7 @@
 #include "Zahlen/Profiler.hpp"
 #include "detail/ControlFlow.hpp"
 #include "detail/RadixSort.hpp"
+#include "engine/Scheduler.hpp"
 
 #include <array>
 #include <cstring>
@@ -277,7 +278,7 @@ ZHLN_FrameResult RenderContext::Impl::SubmitFrame() {
 		&bloomBlurHPass, &bloomBlurVPass, &frameUniformBuffers, &lightStorageBuffers,
 		&instanceDataBuffers, &indirectCommandsBuffers, &shadowIndirectBuffers, &jointBuffers,
 		&bindlessSets, &tlas, &tlasBuffer, &tlasScratchBuffer, &clusterGridBuffers,
-		&lightIndexListBuffers, &globalCounterBuffers, &clusterCullingSets)
+		&lightIndexListBuffers, &globalCounterBuffers, &clusterCullingSets, &parallelRecorder)
 		.FlipAll();
 
 	frame_index = (frame_index + 1) % 2;
@@ -378,8 +379,9 @@ struct TLASBuildStep {
 	}
 };
 
-struct ClusterCullingStep {
-	void Execute(RenderContext::Impl* impl, VkCommandBuffer cmd, const FrameRecorder& recorder,
+// Step that only handles the light clustering compute dispatch
+struct ClusterCullingStepOnly {
+	void Execute(RenderContext::Impl* impl, VkCommandBuffer cmd, const FrameRecorder& /*unused*/,
 				 RenderContext::Impl::RenderState& /*unused*/) const noexcept {
 		uint32_t fIdx = impl->frame_index;
 		Vk::FillBuffer(cmd, impl->globalCounterBuffers[fIdx]);
@@ -388,7 +390,32 @@ struct ClusterCullingStep {
 
 		impl->clusterCullingPass.Dispatch(cmd, impl->clusterCullingSets[fIdx], 1, 1, 24);
 		BarrierComputeWriteToFragmentRead({cmd});
-		RunPass(Passes::ShadowPass{}, recorder);
+		// We do not run ShadowPass sequentially here anymore
+	}
+};
+
+// Compile-time step that records ShadowPass and MainPass concurrently
+struct ParallelPrePassStep {
+	void Execute(RenderContext::Impl* impl, VkCommandBuffer cmd, const FrameRecorder& /*unused*/,
+				 RenderContext::Impl::RenderState& state) const noexcept {
+
+		// FIX: Fetch the current frame's parallel recorder slot
+		auto& recorder = impl->parallelRecorder.Current();
+		recorder.Reset();
+		TaskSystemScheduler scheduler;
+
+		recorder.Record(
+			scheduler,
+			[&](Vk::RecordingSlot slot) {
+				FrameRecorder shadowRecorder(slot.cmd, *impl);
+				Passes::ShadowPass{}.Execute(shadowRecorder);
+			},
+			[&](Vk::RecordingSlot slot) {
+				FrameRecorder mainRecorder(slot.cmd, *impl);
+				Passes::MainPass{}.Execute(mainRecorder, state.initialState);
+			});
+
+		Vk::ExecuteCommands(cmd, recorder.GetCommandBuffers());
 	}
 };
 
@@ -484,9 +511,11 @@ template <bool FullBright> [[nodiscard]] consteval auto GetPassSteps() noexcept 
 							   ForwardPassStep{}, FullBrightBloomStep{}, AAPassStep{},
 							   BlitPassStep{});
 	} else {
-		return std::make_tuple(TLASBuildStep{}, ClusterCullingStep{}, SetupInitialStateStep{},
-							   MainPassStep{}, LightingPassStep{}, ForwardPassStep{},
-							   BloomPassStep{}, AAPassStep{}, BlitPassStep{});
+		return std::make_tuple(TLASBuildStep{}, ClusterCullingStepOnly{}, // 1. Run culling compute
+							   SetupInitialStateStep{},					  // 2. Wrap state pointers
+							   ParallelPrePassStep{}, // 3. Parallel record Shadow + Main G-Buffer
+							   LightingPassStep{}, ForwardPassStep{}, BloomPassStep{}, AAPassStep{},
+							   BlitPassStep{});
 	}
 }
 

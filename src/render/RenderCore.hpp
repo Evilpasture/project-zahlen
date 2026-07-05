@@ -93,6 +93,16 @@ template <typename... Resources> class StaticResourceManager {
 
 namespace ZHLN::Vk {
 
+static constexpr VkCommandBufferInheritanceInfo NullInheritanceInfo = {
+	.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO,
+	.pNext = nullptr,
+	.renderPass = VK_NULL_HANDLE, // Ignored in Dynamic Rendering
+	.subpass = 0,
+	.framebuffer = VK_NULL_HANDLE,
+	.occlusionQueryEnable = VK_FALSE,
+	.queryFlags = 0,
+	.pipelineStatistics = 0};
+
 /**
  * @brief Zero-overhead, compile-time layout tracker.
  * Memory footprint is identical to passing raw handles, but the compiler enforces state.
