@@ -1,13 +1,12 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// src/render/ParallelDraw.hpp
 #pragma once
-#include "RenderInternal.hpp"
-
-#include <Jolt/Core/Array.h>
-#include <Jolt/Jolt.h>
 #include <span>
-#include <threading/TaskSystem.hpp>
+#include <utility>
+#include <vector>
+#include <vulkan/vulkan.h>
 
 namespace ZHLN::Vk {
 
@@ -17,16 +16,21 @@ struct SecondaryInheritance {
 };
 
 /**
- * @brief Internal engine-level helper to parallelize secondary command buffer recording
- * and synchronize the drawing pipeline across fiber-scheduler tasks.
+ * @brief Fully decoupled, template-driven parallel command recorder.
+ * Accepts any custom scheduler policy and command buffer allocator.
  */
-template <typename RecordFn>
+template <typename SchedulerT, typename CmdProviderFn, typename RecordFn>
 inline void ParallelDrawDispatch(VkCommandBuffer primaryCmd,
 								 const SecondaryInheritance& inheritDesc, VkExtent2D extent,
-								 uint32_t drawCount, uint32_t chunkSize, uint32_t frameIndex,
-								 std::span<WorkerCmdContext> workerCmds, RecordFn&& recordFn) {
+								 uint32_t drawCount, uint32_t chunkSize, SchedulerT&& scheduler,
+								 CmdProviderFn&& cmdProvider, RecordFn&& recordFn) {
+
 	uint32_t numChunks = (drawCount + chunkSize - 1) / chunkSize;
-	JPH::Array<VkCommandBuffer> secondaries(numChunks);
+	if (numChunks == 0) {
+		return;
+	}
+
+	std::vector<VkCommandBuffer> secondaries(numChunks, VK_NULL_HANDLE);
 
 	const VkCommandBufferInheritanceRenderingInfo inherit = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
@@ -35,7 +39,7 @@ inline void ParallelDrawDispatch(VkCommandBuffer primaryCmd,
 		.viewMask = 0,
 		.colorAttachmentCount = static_cast<uint32_t>(inheritDesc.colorFormats.size()),
 		.pColorAttachmentFormats = inheritDesc.colorFormats.data(),
-		.depthAttachmentFormat = inheritDesc.depthFormat, // Fixed typo
+		.depthAttachmentFormat = inheritDesc.depthFormat,
 		.stencilAttachmentFormat = VK_FORMAT_UNDEFINED,
 		.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT};
 
@@ -49,16 +53,11 @@ inline void ParallelDrawDispatch(VkCommandBuffer primaryCmd,
 		.queryFlags = 0,
 		.pipelineStatistics = 0};
 
-	TaskSystem::ParallelFor(
-		drawCount, chunkSize, [&](uint32_t start, uint32_t end, uint32_t chunkIdx) -> void {
-			uint32_t wIdx = TaskSystem::GetWorkerIndex();
-			if (wIdx >= workerCmds.size()) {
-				wIdx = (uint32_t)(workerCmds.size() - 1);
-			}
-
-			uint32_t localCmdIdx =
-				workerCmds[wIdx].cmdCount[frameIndex].fetch_add(1, std::memory_order_relaxed);
-			VkCommandBuffer sec_cmd = workerCmds[wIdx].pools[frameIndex][localCmdIdx];
+	// Parallel execution delegated to the compile-time injected scheduler policy
+	std::forward<SchedulerT>(scheduler).ParallelFor(
+		drawCount, chunkSize, [&](uint32_t start, uint32_t end, uint32_t chunkIdx) noexcept {
+			// Fetch the task-local command buffer via the callback lambda
+			VkCommandBuffer sec_cmd = std::forward<CmdProviderFn>(cmdProvider)(chunkIdx);
 
 			const VkCommandBufferBeginInfo beginInfo = {
 				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -66,6 +65,7 @@ inline void ParallelDrawDispatch(VkCommandBuffer primaryCmd,
 				.flags = VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT |
 						 VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
 				.pInheritanceInfo = &pInherit};
+
 			vkBeginCommandBuffer(sec_cmd, &beginInfo);
 
 			// Standard, un-flipped viewport
@@ -83,11 +83,14 @@ inline void ParallelDrawDispatch(VkCommandBuffer primaryCmd,
 				recordFn(sec_cmd, i);
 			}
 
-			ZHLN_EndCommandBuffer(sec_cmd);
+			vkEndCommandBuffer(sec_cmd);
 			secondaries[chunkIdx] = sec_cmd;
 		});
 
-	Vk::ExecuteCommands(primaryCmd, secondaries);
+	if (!secondaries.empty()) {
+		vkCmdExecuteCommands(primaryCmd, static_cast<uint32_t>(secondaries.size()),
+							 secondaries.data());
+	}
 }
 
 } // namespace ZHLN::Vk

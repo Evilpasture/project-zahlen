@@ -1,11 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "ParallelDraw.hpp"
 #include "RenderInternal.hpp"
 #include "RenderParams.hpp"
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Math3D.hpp"
 #include "backends/imgui_impl_vulkan.h"
-#include "engine/ParallelDraw.hpp"
 #include "imgui.h"
 
 #include <array>
@@ -29,7 +29,11 @@ inline void DispatchPostProcessPass(VkCommandBuffer cmd, TargetImageT& targetIma
 // ============================================================================
 // Private Core Refactoring Helpers
 // ============================================================================
-
+struct TaskSystemSchedulerAdapter {
+	void ParallelFor(uint32_t count, uint32_t chunkSize, auto&& func) const {
+		TaskSystem::ParallelFor(count, chunkSize, std::forward<decltype(func)>(func));
+	}
+};
 enum class RenderPassType : uint8_t { Main, Shadow };
 
 // flags & 0xFF == 2 marks an instance as forward-only (transparent / non-deferred).
@@ -188,19 +192,33 @@ struct CpuCullingPolicy {
 					cmd,
 					Vk::SecondaryInheritance{.colorFormats = colorFormats,
 											 .depthFormat = VK_FORMAT_D32_SFLOAT},
-					color_att.extent, drawCount, kParallelChunkSize, recorder.frameIndex,
-					std::span<WorkerCmdContext>(ctx.workerCmds.data(), ctx.workerCmds.size()),
+					color_att.extent, drawCount, kParallelChunkSize,
+
+					// 1. Inject the scheduler adapter
+					TaskSystemSchedulerAdapter{},
+
+					// 2. Inject the command buffer resolver callback
+					[&]([[maybe_unused]] uint32_t chunkIdx) -> VkCommandBuffer {
+						uint32_t wIdx = TaskSystem::GetWorkerIndex();
+						if (wIdx >= ctx.workerCmds.size()) {
+							wIdx = (uint32_t)(ctx.workerCmds.size() - 1);
+						}
+						uint32_t localCmdIdx =
+							ctx.workerCmds[wIdx].cmdCount[recorder.frameIndex].fetch_add(
+								1, std::memory_order_relaxed);
+						return ctx.workerCmds[wIdx].pools[recorder.frameIndex][localCmdIdx];
+					},
+
+					// 3. Inject the draw recording function
 					[&](VkCommandBuffer sec_cmd, uint32_t i) {
 						const auto& drawCmd = ctx.drawQueue[i];
 						if (!IsVisibleIn(drawCmd.flags, RenderPassType::Main)) {
 							return;
 						}
-
 						if (!ToNative(drawCmd.material)->pipeline.Valid() ||
 							IsForwardOnly(drawCmd.instanceData.flags)) {
 							return;
 						}
-
 						const ObjectConstants pushConstants = {.instanceId = i, .isShadowPass = 0};
 						SubmitDrawInstanced(sec_cmd, drawCmd, i, recorder.bindlessSet,
 											pushConstants);
