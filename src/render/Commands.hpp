@@ -78,4 +78,29 @@ inline void DrawBindlessBatch(const VkCommandBuffer cmd,
 	std::forward<LoopFn>(loop)(draw);
 }
 
+// ============================================================================
+// Immediate Command RAII Wrapper (Staging/Initial Uploads)
+// ============================================================================
+
+template <QueueType QType = QueueType::Graphics> class ImmediateCommand {
+  public:
+	ImmediateCommand(VkDevice dev, StagingRingBuffer& ringBuffer) noexcept;
+	~ImmediateCommand() noexcept;
+
+	[[nodiscard]] auto AllocateStaging(VkDeviceSize size, VkDeviceSize alignment = 4) noexcept
+		-> StagingRingBuffer::Allocation;
+
+	operator CommandBuffer<QType>() const noexcept;
+	operator VkCommandBuffer() const noexcept;
+
+	ImmediateCommand(const ImmediateCommand&) = delete;
+	auto operator=(const ImmediateCommand&) -> ImmediateCommand& = delete;
+	ImmediateCommand(ImmediateCommand&&) = delete;
+	auto operator=(ImmediateCommand&&) -> ImmediateCommand& = delete;
+
+  private:
+	struct Impl;
+	std::unique_ptr<Impl> _impl;
+};
+
 } // namespace ZHLN::Vk

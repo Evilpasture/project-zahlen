@@ -3,11 +3,9 @@
 
 // src/render/ParallelDraw.hpp
 #pragma once
-#include <concepts>
-#include <span>
-#include <utility>
-#include <vector>
-#include <vulkan/vulkan.h>
+#ifndef ZHLN_RENDERING_HPP_INCLUDED
+#error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
+#endif
 
 namespace ZHLN::Vk {
 
@@ -18,7 +16,7 @@ struct SecondaryInheritance {
 
 namespace detail {
 // Archetype callback to test scheduler invocation without using lambdas in unevaluated contexts
-struct DummyParallelForCallback {
+struct ParallelForCallback {
 	void operator()(uint32_t start, uint32_t end, uint32_t chunkIdx) const noexcept {}
 };
 } // namespace detail
@@ -29,7 +27,7 @@ struct DummyParallelForCallback {
  */
 template <typename S>
 concept ParallelScheduler = requires(S&& s, uint32_t count, uint32_t chunkSize) {
-	s.ParallelFor(count, chunkSize, detail::DummyParallelForCallback{});
+	s.ParallelFor(count, chunkSize, detail::ParallelForCallback{});
 };
 
 /**
@@ -104,10 +102,7 @@ inline void ParallelDrawDispatch(VkCommandBuffer primaryCmd,
 			secondaries[chunkIdx] = sec_cmd;
 		});
 
-	if (!secondaries.empty()) {
-		vkCmdExecuteCommands(primaryCmd, static_cast<uint32_t>(secondaries.size()),
-							 secondaries.data());
-	}
+	Vk::ExecuteCommands(primaryCmd, secondaries);
 }
 
 } // namespace ZHLN::Vk

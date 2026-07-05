@@ -1,6 +1,5 @@
 // src/engine/Scheduler.hpp
 #pragma once
-#include "RenderInternal.hpp"
 
 #include <array>
 #include <threading/TaskSystem.hpp>

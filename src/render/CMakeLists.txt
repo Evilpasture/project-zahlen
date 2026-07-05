@@ -17,6 +17,7 @@ add_library(zahlen_render STATIC
     Rendering.hpp
     RenderCore.cpp
     Allocator.hpp
+    Commands.cpp
     StagingContext.hpp
     PipelineBuilder.cpp
     DescriptorLayout.cpp
