@@ -555,6 +555,9 @@ struct RenderContext::Impl {
 	// Allocate 2 parallel recording slots (Slot 0 = Shadow, Slot 1 = Main)
 	DoubleBuffered<Vk::ParallelCommandRecorder<2>> parallelRecorder;
 
+	Vk::DeletionQueue deletionQueue;
+	std::optional<Vk::ScopedDeletionQueue> activeQueueGuard; // Main thread scope guard
+
 	GISettings giSettings{};
 
 	Vk::Buffer morphDeltasBuffer; // Holds all packed morph target deltas

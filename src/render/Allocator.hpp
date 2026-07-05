@@ -233,4 +233,52 @@ template <QueueType QType = QueueType::Graphics> class ImmediateCommand {
 	std::unique_ptr<Impl> _impl;
 };
 
+// ============================================================================
+// Deferred Destruction Queue (Zero-Overhead Memory Reclamation)
+// ============================================================================
+
+struct DeferredDeletionEntry {
+	enum class Type : uint8_t { Buffer, Image };
+	Type type;
+	VmaAllocator allocator;
+	VmaAllocation allocation;
+	union {
+		VkBuffer buffer;
+		VkImage image;
+	};
+};
+
+class DeletionQueue {
+  public:
+	DeletionQueue() = default;
+	~DeletionQueue();
+
+	DeletionQueue(const DeletionQueue&) = delete;
+	DeletionQueue& operator=(const DeletionQueue&) = delete;
+
+	void Init(uint32_t doubleBufferCount) noexcept;
+	void EnqueueBuffer(VmaAllocator allocator, VkBuffer buffer, VmaAllocation allocation) noexcept;
+	void EnqueueImage(VmaAllocator allocator, VkImage image, VmaAllocation allocation) noexcept;
+	void BeginFrame(uint32_t frameIndex) noexcept;
+
+  private:
+	void CleanupQueue(std::vector<DeferredDeletionEntry>& queue) noexcept;
+
+	std::vector<std::vector<DeferredDeletionEntry>> _queues;
+	uint32_t _currentFrameIndex = 0;
+};
+
+// Thread-local scope guard hook
+
+struct ScopedDeletionQueue {
+	DeletionQueue* prev;
+	explicit ScopedDeletionQueue(DeletionQueue& queue) noexcept : prev(t_activeDeletionQueue) {
+		t_activeDeletionQueue = &queue;
+	}
+	~ScopedDeletionQueue() noexcept { t_activeDeletionQueue = prev; }
+
+	ScopedDeletionQueue(const ScopedDeletionQueue&) = delete;
+	ScopedDeletionQueue& operator=(const ScopedDeletionQueue&) = delete;
+};
+
 } // namespace ZHLN::Vk

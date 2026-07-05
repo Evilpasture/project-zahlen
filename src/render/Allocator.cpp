@@ -494,4 +494,67 @@ template class ImmediateCommand<QueueType::Graphics>;
 template class ImmediateCommand<QueueType::Compute>;
 template class ImmediateCommand<QueueType::Transfer>;
 
+thread_local DeletionQueue* t_activeDeletionQueue = nullptr;
+
+void DeferVmaDestruction(VmaAllocator allocator, VkBuffer buffer,
+						 VmaAllocation allocation) noexcept {
+	if (t_activeDeletionQueue != nullptr) {
+		t_activeDeletionQueue->EnqueueBuffer(allocator, buffer, allocation);
+	}
+}
+
+void DeferVmaDestruction(VmaAllocator allocator, VkImage image, VmaAllocation allocation) noexcept {
+	if (t_activeDeletionQueue != nullptr) {
+		t_activeDeletionQueue->EnqueueImage(allocator, image, allocation);
+	}
+}
+
+// ============================================================================
+// DeletionQueue Implementation
+// ============================================================================
+
+DeletionQueue::~DeletionQueue() {
+	for (auto& queue : _queues) {
+		CleanupQueue(queue);
+	}
+}
+
+void DeletionQueue::Init(uint32_t doubleBufferCount) noexcept {
+	_queues.resize(doubleBufferCount);
+	_currentFrameIndex = 0;
+}
+
+void DeletionQueue::EnqueueBuffer(VmaAllocator allocator, VkBuffer buffer,
+								  VmaAllocation allocation) noexcept {
+	_queues[_currentFrameIndex].push_back({.type = DeferredDeletionEntry::Type::Buffer,
+										   .allocator = allocator,
+										   .allocation = allocation,
+										   .buffer = buffer});
+}
+
+void DeletionQueue::EnqueueImage(VmaAllocator allocator, VkImage image,
+								 VmaAllocation allocation) noexcept {
+	_queues[_currentFrameIndex].push_back({.type = DeferredDeletionEntry::Type::Image,
+										   .allocator = allocator,
+										   .allocation = allocation,
+										   .image = image});
+}
+
+void DeletionQueue::BeginFrame(uint32_t frameIndex) noexcept {
+	_currentFrameIndex = frameIndex % _queues.size();
+	// Safe to reclaim memory now! The fence for this frame slot has finished [c].
+	CleanupQueue(_queues[_currentFrameIndex]);
+}
+
+void DeletionQueue::CleanupQueue(std::vector<DeferredDeletionEntry>& queue) noexcept {
+	for (const auto& entry : queue) {
+		if (entry.type == DeferredDeletionEntry::Type::Buffer) {
+			vmaDestroyBuffer(entry.allocator, entry.buffer, entry.allocation);
+		} else {
+			vmaDestroyImage(entry.allocator, entry.image, entry.allocation);
+		}
+	}
+	queue.clear();
+}
+
 } // namespace ZHLN::Vk

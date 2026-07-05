@@ -7,10 +7,46 @@ namespace ZHLN::Vk {
 // ============================================================================
 
 template <typename Layout, uint32_t BindingID>
-void BindlessRegistry<Layout, BindingID>::Init(const VkDevice device, const VkDescriptorSet set) {
+void BindlessRegistry<Layout, BindingID>::Init(const VkDevice device, const VkDescriptorSet set,
+											   VkImageView defaultView, VkSampler defaultSampler) {
 	_device = device;
 	_set = set;
 	_nextSlot = 0;
+	_defaultView = defaultView;
+	_defaultSampler = defaultSampler;
+	_freeSlots.clear();
+}
+
+template <typename Layout, uint32_t BindingID>
+void BindlessRegistry<Layout, BindingID>::Free(uint32_t slot) {
+	if (slot >= _nextSlot) [[unlikely]] {
+		return; // Guard against out-of-bounds or invalid frees
+	}
+
+	// Reclaim the slot index
+	_freeSlots.push_back(slot);
+
+	// Overwrite the freed slot with the default fallback to avoid dangling descriptors on the GPU
+	if (_defaultView != VK_NULL_HANDLE) {
+		const VkDescriptorImageInfo imageInfo = {
+			.sampler = _defaultSampler,
+			.imageView = _defaultView,
+			.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		};
+		const VkWriteDescriptorSet write = {
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.pNext = nullptr,
+			.dstSet = _set,
+			.dstBinding = Slot::binding,
+			.dstArrayElement = slot,
+			.descriptorCount = 1,
+			.descriptorType = Slot::type,
+			.pImageInfo = &imageInfo,
+			.pBufferInfo = nullptr,
+			.pTexelBufferView = nullptr,
+		};
+		vkUpdateDescriptorSets(_device, 1, &write, 0, nullptr);
+	}
 }
 
 template <typename Layout, uint32_t BindingID>
@@ -33,12 +69,20 @@ auto BindlessRegistry<Layout, BindingID>::RegisterCombined(const VkImageView vie
 template <typename Layout, uint32_t BindingID>
 auto BindlessRegistry<Layout, BindingID>::UpdateDescriptor(VkImageView view, VkSampler sampler,
 														   VkImageLayout layout) -> uint32_t {
-	if (_nextSlot >= Slot::count) [[unlikely]] {
-		ReportBindlessRegistryExceeded(BindingID, Slot::count);
-		std::abort();
+	uint32_t slot = 0;
+
+	// Reuse a slot from the free-list if available
+	if (!_freeSlots.empty()) {
+		slot = _freeSlots.back();
+		_freeSlots.pop_back();
+	} else {
+		if (_nextSlot >= Slot::count) [[unlikely]] {
+			ReportBindlessRegistryExceeded(BindingID, Slot::count);
+			std::abort();
+		}
+		slot = _nextSlot++;
 	}
 
-	const uint32_t slot = _nextSlot++;
 	const VkDescriptorImageInfo imageInfo = {
 		.sampler = sampler,
 		.imageView = view,

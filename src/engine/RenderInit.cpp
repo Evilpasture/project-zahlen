@@ -154,6 +154,7 @@ void RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int
 	// Initialize the parallel recorder with 2 slots on the Graphics Queue family
 	parallelRecorder[0].Init(ctx.Device(), ctx.PhysicalInfo().graphics_family);
 	parallelRecorder[1].Init(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+	deletionQueue.Init(2);
 }
 
 namespace {

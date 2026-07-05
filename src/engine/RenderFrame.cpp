@@ -193,6 +193,8 @@ RenderResult RenderContext::BeginFrame() noexcept {
 	if (wait_res == ZHLN_FrameResult_DeviceLost) {
 		return std::unexpected(RenderFrameResult::DeviceLost);
 	}
+	_impl->deletionQueue.BeginFrame(_impl->frame_index);
+	_impl->activeQueueGuard.emplace(_impl->deletionQueue);
 
 	float timestampPeriod = _impl->ctx.PhysicalInfo().properties.properties.limits.timestampPeriod;
 	_impl->gpuProfiler.RetrieveResults(
@@ -537,6 +539,12 @@ template void
 	RenderContext::Impl::RecordSceneFrame<false>(Vk::CommandBuffer<Vk::QueueType::Graphics>);
 
 RenderResult RenderContext::EndFrame() noexcept {
+	// This guarantees that activeQueueGuard.reset() is called on ALL exit paths.
+	struct EndFrameGuard {
+		RenderContext::Impl* impl;
+		~EndFrameGuard() { impl->activeQueueGuard.reset(); }
+	} frameGuard{_impl.get()};
+
 	ZHLN_PROFILE_SCOPE("Render (CPU Record)");
 	if (_impl->current_cmd == VK_NULL_HANDLE) {
 		_impl->drawQueue.clear();

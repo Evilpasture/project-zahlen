@@ -191,6 +191,14 @@ using DescriptorPool = DeviceHandle<VkDescriptorPool, ZHLN_DestroyDescriptorPool
 // VMA RAII Handles
 // ============================================================================
 
+class DeletionQueue;
+extern thread_local DeletionQueue* t_activeDeletionQueue;
+
+// Overloaded C-helpers to decouple VmaHandle from DeletionQueue definition
+void DeferVmaDestruction(VmaAllocator allocator, VkBuffer buffer,
+						 VmaAllocation allocation) noexcept;
+void DeferVmaDestruction(VmaAllocator allocator, VkImage image, VmaAllocation allocation) noexcept;
+
 inline void VmaUnmapDeleter(VmaAllocator allocator, [[maybe_unused]] void* ptr,
 							VmaAllocation allocation) noexcept {
 	if (allocator != nullptr && allocation != nullptr) {
@@ -232,7 +240,17 @@ template <typename T, auto DeleterFn> class VmaHandle {
 
 	void Cleanup() noexcept {
 		if (_handle != T{}) {
-			DeleterFn(_allocator, _handle, _allocation);
+			if (ZHLN::Vk::t_activeDeletionQueue != nullptr) {
+				if constexpr (std::is_same_v<T, VkBuffer>) {
+					DeferVmaDestruction(_allocator, _handle, _allocation);
+				} else if constexpr (std::is_same_v<T, VkImage>) {
+					DeferVmaDestruction(_allocator, _handle, _allocation);
+				} else {
+					DeleterFn(_allocator, _handle, _allocation);
+				}
+			} else {
+				DeleterFn(_allocator, _handle, _allocation);
+			}
 			_handle = T{};
 			_allocation = nullptr;
 			_allocator = nullptr;

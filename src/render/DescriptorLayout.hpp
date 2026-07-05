@@ -104,7 +104,8 @@ template <typename Layout, uint32_t BindingID> class BindlessRegistry {
   public:
 	BindlessRegistry() = default;
 
-	void Init(VkDevice device, VkDescriptorSet set);
+	void Init(VkDevice device, VkDescriptorSet set, VkImageView defaultView = VK_NULL_HANDLE,
+			  VkSampler defaultSampler = VK_NULL_HANDLE);
 
 	auto RegisterImage(VkImageView view,
 					   VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) -> uint32_t
@@ -115,8 +116,14 @@ template <typename Layout, uint32_t BindingID> class BindlessRegistry {
 		-> uint32_t
 		requires(Slot::type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
+	// Safely release a slot back to the pool and overwrite it with the default fallback
+	void Free(uint32_t slot);
+
 	[[nodiscard]] constexpr auto Capacity() const noexcept -> uint32_t { return Slot::count; }
-	[[nodiscard]] auto Size() const noexcept -> uint32_t { return _nextSlot; }
+	[[nodiscard]] auto Size() const noexcept -> uint32_t {
+		return _nextSlot - static_cast<uint32_t>(_freeSlots.size());
+	}
+	[[nodiscard]] auto HighWaterMark() const noexcept -> uint32_t { return _nextSlot; }
 
   private:
 	auto UpdateDescriptor(VkImageView view, VkSampler sampler, VkImageLayout layout) -> uint32_t;
@@ -124,6 +131,10 @@ template <typename Layout, uint32_t BindingID> class BindlessRegistry {
 	VkDevice _device = VK_NULL_HANDLE;
 	VkDescriptorSet _set = VK_NULL_HANDLE;
 	uint32_t _nextSlot = 0;
+
+	VkImageView _defaultView = VK_NULL_HANDLE;
+	VkSampler _defaultSampler = VK_NULL_HANDLE;
+	std::vector<uint32_t> _freeSlots;
 };
 
 // ============================================================================
