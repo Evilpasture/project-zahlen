@@ -1,5 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
+
 #include "RenderInternal.hpp"
 #include "Zahlen/Profiler.hpp"
 #include "detail/RadixSort.hpp"
@@ -8,8 +9,30 @@
 #include <array>
 #include <cstring>
 #include <threading/TaskSystem.hpp>
+#include <tuple>
+#include <type_traits>
+#include <utility>
 
 namespace ZHLN {
+
+// ============================================================================
+// Hoisted Uniform Structures
+// ============================================================================
+
+struct PPPushConstants {
+	JPH::Mat44 invViewProj;
+	JPH::Mat44 viewProj;
+	alignas(16) std::array<float, 4> camPos;
+	int giMode;
+	float aoRadius;
+	float aoBias;
+	float aoPower;
+	float giIntensity;
+	int giSamples;
+	int enableSSR;
+	int enableRTR;
+	int _pad;
+};
 
 namespace {
 
@@ -60,10 +83,68 @@ inline void DispatchPostProcessPass(VkCommandBuffer cmd, TargetImageT& targetIma
 									VkAttachmentLoadOp loadOp, RecordFn&& recordFn,
 									VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE,
 									const Color4& clearColor = kClearColorBlack) noexcept {
+	// Revert from ReadToColor (which issues redundant barriers) to AssumeLayout
 	auto attachment = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(targetImage);
 	Vk::DynamicPass(targetImage.extent)
 		.AddColor(attachment, loadOp, storeOp, clearColor)
 		.Execute(cmd, std::forward<RecordFn>(recordFn));
+}
+
+struct TaskSystemSchedulerAdapter {
+	void ParallelFor(uint32_t count, uint32_t chunkSize, auto&& func) const {
+		TaskSystem::ParallelFor(count, chunkSize, std::forward<decltype(func)>(func));
+	}
+};
+enum class RenderPassType : uint8_t { Main, Shadow };
+
+// flags & 0xFF == 2 marks an instance as forward-only (transparent / non-deferred).
+[[nodiscard]] constexpr bool IsForwardOnly(uint32_t instanceFlags) noexcept {
+	return (instanceFlags & 0xFF) == 2;
+}
+
+[[nodiscard]] inline const NativeMaterial* ToNative(const void* material) noexcept {
+	return std::bit_cast<const NativeMaterial*>(material);
+}
+
+[[nodiscard]] inline bool IsVisibleIn(DrawFlags flags, RenderPassType passType) noexcept {
+	const bool hasMain = (flags & DrawFlags::VisibleInMain) != DrawFlags::None;
+	const bool hasShadow = (flags & DrawFlags::VisibleInShadow) != DrawFlags::None;
+
+	if (!hasMain && !hasShadow) {
+		return true;
+	}
+
+	return (passType == RenderPassType::Main) ? hasMain : hasShadow;
+}
+
+template <typename T>
+inline void SubmitDrawInstanced(VkCommandBuffer cmd, const DrawCommand& drawCmd,
+								uint32_t instanceIdx, VkDescriptorSet bindlessSet,
+								const T& pushConstants,
+								VkPipeline pipelineOverride = VK_NULL_HANDLE,
+								VkPipelineLayout layoutOverride = VK_NULL_HANDLE,
+								VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT |
+															VK_SHADER_STAGE_FRAGMENT_BIT) noexcept {
+	const auto* nativeMat = ToNative(drawCmd.material);
+	const VkPipeline pipeline =
+		(pipelineOverride != VK_NULL_HANDLE) ? pipelineOverride : nativeMat->pipeline.Get();
+	const VkPipelineLayout layout =
+		(layoutOverride != VK_NULL_HANDLE) ? layoutOverride : nativeMat->layout.Get();
+
+	// Resolved from pre-assembled GPU structure
+	const uint32_t vertexCount = drawCmd.instanceData.iboAddress != 0
+									 ? drawCmd.instanceData.indexCount
+									 : drawCmd.instanceData.vertexCount;
+
+	Vk::DrawInstanced(cmd,
+					  {.pipeline = pipeline,
+					   .layout = layout,
+					   .set = bindlessSet,
+					   .vertexCount = vertexCount,
+					   .instanceCount = 1,
+					   .firstVertex = 0,
+					   .firstInstance = instanceIdx},
+					  pushConstants, stages);
 }
 
 // ----------------------------------------------------------------------------
@@ -371,20 +452,345 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 							.dst_access = VK_ACCESS_2_SHADER_READ_BIT});
 }
 
+// ============================================================================
+// Zero-Copy Pass Construction Factory
+// ============================================================================
+
+struct PassFactory {
+	RenderContext::Impl& self;
+	VkCommandBuffer cmd;
+	uint32_t fIdx;
+	VkDevice device;
+	FrameRecorder& recorder;
+	const PPPushConstants& pc;
+	uint32_t lightVariant;
+	uint32_t reflVariant;
+
+	[[nodiscard]] auto GetTLAS() const noexcept {
+		if constexpr (isMac) {
+			return Vk::SkipWrite{};
+		} else {
+			return self.rtCtx.Valid() ? (const VkAccelerationStructureKHR*)&self.tlas.Current()
+									  : (const VkAccelerationStructureKHR*)nullptr;
+		}
+	}
+
+	template <Vk::ResourceName Name, typename TargetRes, typename... InputRes, typename TargetT,
+			  typename RecordFn>
+	auto MakePP(TargetT& target, RecordFn&& record) const noexcept {
+		return Vk::MakePass<Name, Vk::ShaderRead<InputRes>..., Vk::ColorWrite<TargetRes>>(
+			[&target, record = std::forward<RecordFn>(record)](VkCommandBuffer c) noexcept {
+				DispatchPostProcessPass(c, target, VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+										[&]() { record(c); });
+			});
+	}
+
+	[[nodiscard]] auto MakeMainPass() const noexcept {
+		return Vk::MakePass<"Main", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>,
+							Vk::ColorWrite<Res_NormRough>, Vk::DepthWrite<Res_Depth>>(
+			[this](VkCommandBuffer c) noexcept {
+				FrameRecorder mainRec(c, self);
+				Passes::MainPass{}.Execute(
+					mainRec,
+					SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+								   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>{
+						.sceneColor = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+							self.sceneColor),
+						.velocity = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+							self.velocityBuffer),
+						.normRough = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+							self.normalRoughnessBuffer),
+						.depth = Vk::AssumeLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+							self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT)});
+			});
+	}
+
+	[[nodiscard]] auto MakeShadowPass() const noexcept {
+		return Vk::MakePass<"MainShadow", Vk::ColorWrite<Res_SceneColor>,
+							Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>,
+							Vk::DepthWrite<Res_Depth>, Vk::DepthWrite<Res_ShadowMap>,
+							Vk::DepthWrite<Res_ShadowAtlas>>([this](VkCommandBuffer c) noexcept {
+			auto& rec = self.parallelRecorder.Current();
+			rec.Reset();
+			TaskSystemScheduler scheduler;
+			rec.Record(
+				scheduler,
+				[&](Vk::RecordingSlot slot) noexcept {
+					FrameRecorder shadowRec(slot.cmd, self);
+					Passes::ShadowPass{}.Execute(shadowRec);
+				},
+				[&](Vk::RecordingSlot slot) noexcept {
+					FrameRecorder mainRec(slot.cmd, self);
+					Passes::MainPass{}.Execute(
+						mainRec,
+						SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+									   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>{
+							.sceneColor =
+								Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+									self.sceneColor),
+							.velocity = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+								self.velocityBuffer),
+							.normRough = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+								self.normalRoughnessBuffer),
+							.depth = Vk::AssumeLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+								self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT)});
+				});
+			Vk::ExecuteCommands(c, rec.GetCommandBuffers());
+		});
+	}
+
+	[[nodiscard]] auto MakeAmbientPass() const noexcept {
+		return MakePP<"Ambient", Res_Ambient, Res_SceneColor, Res_NormRough, Res_Depth>(
+			self.ambientTarget, [this](VkCommandBuffer c) noexcept {
+				self.ambientPass.WriteNext(
+					device,
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.sceneColor),
+					self.defaultSampler.Get(),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+						self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+						self.normalRoughnessBuffer),
+					self.pointSampler.Get(), self.iblPayload.prefilteredView.Get(),
+					self.iblPayload.brdfLutView.Get(), self.clampSampler.Get(),
+					self.frameUniformBuffers[fIdx].Handle());
+				self.ambientPass.Execute(c, pc);
+			});
+	}
+
+	[[nodiscard]] auto MakeLightingPass() const noexcept {
+		return MakePP<"Lighting", Res_Lighting, Res_SceneColor, Res_NormRough, Res_Depth,
+					  Res_Ambient, Res_ShadowMap, Res_ShadowAtlas>(
+			self.lightingTarget, [this](VkCommandBuffer c) noexcept {
+				self.lightingPass.WriteNext(
+					device,
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.sceneColor),
+					self.defaultSampler.Get(),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+						self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+						self.normalRoughnessBuffer),
+					self.lightStorageBuffers[fIdx].Handle(),
+					self.frameUniformBuffers[fIdx].Handle(), self.shadowMap.view.Get(),
+					self.shadowSampler.Get(), self.ltcMatView.Get(), self.ltcAmpView.Get(),
+					self.clampSampler.Get(), self.clusterGridBuffers[fIdx].Handle(),
+					self.lightIndexListBuffers[fIdx].Handle(),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.ambientTarget),
+					self.pointSampler.Get(), GetTLAS(), self.shadowAtlasCubeView.Get(),
+					self.shadowAtlas2DView.Get());
+				self.lightingPass.ExecuteVariant(c, lightVariant, pc);
+			});
+	}
+
+	[[nodiscard]] auto MakeReflectionPass() const noexcept {
+		return MakePP<"Reflection", Res_PostProcess, Res_SceneColor, Res_NormRough, Res_Depth,
+					  Res_Lighting, Res_ShadowMap, Res_ShadowAtlas>(
+			self.postProcessTarget, [this](VkCommandBuffer c) noexcept {
+				self.reflectionPass.WriteNext(
+					device,
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.sceneColor),
+					self.defaultSampler.Get(),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+						self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+						self.normalRoughnessBuffer),
+					self.pointSampler.Get(), self.iblPayload.prefilteredView.Get(), GetTLAS(),
+					self.frameUniformBuffers[fIdx].Handle(), self.iblPayload.brdfLutView.Get(),
+					self.clampSampler.Get(),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+						self.lightingTarget));
+				self.reflectionPass.ExecuteVariant(c, reflVariant, pc);
+			});
+	}
+
+	template <bool FullBright> [[nodiscard]] auto MakeForwardPass() const noexcept {
+		using ColorTargetRes = std::conditional_t<FullBright, Res_SceneColor, Res_PostProcess>;
+		auto& targetImage = [&]() -> auto& {
+			if constexpr (FullBright) {
+				return self.sceneColor;
+			} else {
+				return self.postProcessTarget;
+			}
+		}();
+
+		return Vk::MakePass<"Forward", Vk::ColorWrite<ColorTargetRes>, Vk::DepthWrite<Res_Depth>>(
+			[this, &targetImage](VkCommandBuffer c) noexcept {
+				FrameRecorder fwdRecorder(c, self);
+				Passes::ForwardPass{}.Execute(
+					fwdRecorder,
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(targetImage),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+						self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT));
+			});
+	}
+
+	template <bool FullBright, typename BloomLambdaT>
+	auto MakeBloomPass(BloomLambdaT&& bloomLambda) const noexcept {
+		using BloomInputRes = std::conditional_t<FullBright, Res_SceneColor, Res_PostProcess>;
+		auto& bloomInputImage = [&]() -> auto& {
+			if constexpr (FullBright) {
+				return self.sceneColor;
+			} else {
+				return self.postProcessTarget;
+			}
+		}();
+
+		return Vk::MakePass<"Bloom", Vk::ShaderRead<BloomInputRes>, Vk::ColorWrite<Res_BloomFinal>>(
+			[bloomLambda = std::forward<BloomLambdaT>(bloomLambda),
+			 &bloomInputImage](VkCommandBuffer c) noexcept { bloomLambda(c, bloomInputImage); });
+	}
+
+	template <bool FullBright, AAMode Mode, typename AALambdaT>
+	auto MakeAAPass(AALambdaT&& aaLambda) const noexcept {
+		using AAColorInputRes = std::conditional_t<FullBright, Res_SceneColor, Res_PostProcess>;
+		auto& aaColorInputImage = [&]() -> auto& {
+			if constexpr (FullBright) {
+				return self.sceneColor;
+			} else {
+				return self.postProcessTarget;
+			}
+		}();
+
+		return Vk::MakePass<"AA", Vk::ShaderRead<AAColorInputRes>, Vk::ShaderRead<Res_Velocity>,
+							Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>,
+							Vk::ColorWrite<Res_AccumNext>, Vk::ColorWrite<Res_SmaaEdge>,
+							Vk::ColorWrite<Res_SmaaWeight>, Vk::ShaderRead<Res_AccumCurr>>(
+			[aaLambda = std::forward<AALambdaT>(aaLambda),
+			 &aaColorInputImage](VkCommandBuffer c) noexcept { aaLambda(c, aaColorInputImage); });
+	}
+
+	template <bool FullBright, AAMode Mode, typename GetSwapchainImageT>
+	auto MakeBlitPass(GetSwapchainImageT&& getSwapchainImage) const noexcept {
+		using BlitInputRes =
+			std::conditional_t<Mode != AAMode::None, Res_AccumNext,
+							   std::conditional_t<FullBright, Res_SceneColor, Res_PostProcess>>;
+		auto& blitInputImage = [&]() -> auto& {
+			if constexpr (Mode != AAMode::None) {
+				return self.accumBuffers.Next();
+			} else {
+				if constexpr (FullBright) {
+					return self.sceneColor;
+				} else {
+					return self.postProcessTarget;
+				}
+			}
+		}();
+
+		return Vk::MakePass<"Blit", Vk::ShaderRead<BlitInputRes>, Vk::ShaderRead<Res_BloomFinal>,
+							Vk::ColorWrite<Res_Swapchain>>(
+			[this, &blitInputImage,
+			 getSwapchainImage =
+				 std::forward<GetSwapchainImageT>(getSwapchainImage)](VkCommandBuffer c) noexcept {
+				FrameRecorder blitRecorder(c, self);
+				Passes::BlitPass{}.Execute(
+					blitRecorder,
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(blitInputImage),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+						self.bloomFinalTarget),
+					getSwapchainImage(), FullBright ? 1 : 0);
+			});
+	}
+};
+
+// ============================================================================
+// Multi-Axis Frame Graph Generator
+// ============================================================================
+
+template <bool FullBright, AAMode Mode, typename BloomLambdaT, typename AALambdaT,
+		  typename GetSwapchainImageT>
+auto BuildFrameGraph(const PassFactory& factory, BloomLambdaT&& bloomLambda, AALambdaT&& aaLambda,
+					 GetSwapchainImageT&& getSwapchainImage) {
+	auto corePasses = [&] {
+		if constexpr (FullBright) {
+			return std::tuple{factory.MakeMainPass(),
+							  factory.template MakeForwardPass<FullBright>()};
+		} else {
+			return std::tuple{factory.MakeShadowPass(), factory.MakeAmbientPass(),
+							  factory.MakeLightingPass(), factory.MakeReflectionPass(),
+							  factory.template MakeForwardPass<FullBright>()};
+		}
+	}();
+
+	auto bloomPass = std::tuple{
+		factory.template MakeBloomPass<FullBright>(std::forward<BloomLambdaT>(bloomLambda))};
+
+	auto tailPasses = [&] {
+		if constexpr (Mode != AAMode::None) {
+			return std::tuple{
+				factory.template MakeAAPass<FullBright, Mode>(std::forward<AALambdaT>(aaLambda)),
+				factory.template MakeBlitPass<FullBright, Mode>(
+					std::forward<GetSwapchainImageT>(getSwapchainImage))};
+		} else {
+			return std::tuple{factory.template MakeBlitPass<FullBright, Mode>(
+				std::forward<GetSwapchainImageT>(getSwapchainImage))};
+		}
+	}();
+
+	return std::apply(
+		[](auto&&... passes) { return Vk::CompileTimeFrameGraph(std::move(passes)...); },
+		std::tuple_cat(std::move(corePasses), std::move(bloomPass), std::move(tailPasses)));
+}
+namespace {
+template <bool FullBright, AAMode Mode, typename BloomLambdaT, typename AALambdaT,
+		  typename GetSwapchainImageT>
+void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const PassFactory& factory,
+					   BloomLambdaT&& bloomLambda, AALambdaT&& aaLambda,
+					   GetSwapchainImageT&& getSwapchainImage) {
+	auto graph = BuildFrameGraph<FullBright, Mode>(
+		factory, std::forward<BloomLambdaT>(bloomLambda), std::forward<AALambdaT>(aaLambda),
+		std::forward<GetSwapchainImageT>(getSwapchainImage));
+	typename decltype(graph)::Binder binder;
+
+	binder.template Bind<Res_SceneColor>(self.sceneColor.image.Handle(),
+										 self.sceneColor.view.Get());
+	binder.template Bind<Res_Velocity>(self.velocityBuffer.image.Handle(),
+									   self.velocityBuffer.view.Get());
+	binder.template Bind<Res_NormRough>(self.normalRoughnessBuffer.image.Handle(),
+										self.normalRoughnessBuffer.view.Get());
+	binder.template Bind<Res_Depth>(self.presentation.depthTarget.image.Handle(),
+									self.presentation.depthTarget.view.Get());
+	binder.template Bind<Res_BloomThresh>(self.bloomThresholdTarget.image.Handle(),
+										  self.bloomThresholdTarget.view.Get());
+	binder.template Bind<Res_BloomBlur>(self.bloomBlurTarget.image.Handle(),
+										self.bloomBlurTarget.view.Get());
+	binder.template Bind<Res_BloomFinal>(self.bloomFinalTarget.image.Handle(),
+										 self.bloomFinalTarget.view.Get());
+	binder.template Bind<Res_Swapchain>(
+		self.presentation.swapchain.Get().images[self.current_image_index],
+		self.presentation.swapchain.Get().views[self.current_image_index]);
+
+	if constexpr (Mode != AAMode::None) {
+		binder.template Bind<Res_AccumCurr>(self.accumBuffers.Current().image.Handle(),
+											self.accumBuffers.Current().view.Get());
+		binder.template Bind<Res_AccumNext>(self.accumBuffers.Next().image.Handle(),
+											self.accumBuffers.Next().view.Get());
+		binder.template Bind<Res_SmaaEdge>(self.smaaEdgeTarget.image.Handle(),
+										   self.smaaEdgeTarget.view.Get());
+		binder.template Bind<Res_SmaaWeight>(self.smaaWeightTarget.image.Handle(),
+											 self.smaaWeightTarget.view.Get());
+	}
+
+	if constexpr (!FullBright) {
+		binder.template Bind<Res_ShadowMap>(self.shadowMap.image.Handle(),
+											self.shadowMap.view.Get());
+		binder.template Bind<Res_ShadowAtlas>(self.shadowAtlas.image.Handle(),
+											  self.shadowAtlas.view.Get());
+		binder.template Bind<Res_Ambient>(self.ambientTarget.image.Handle(),
+										  self.ambientTarget.view.Get());
+		binder.template Bind<Res_Lighting>(self.lightingTarget.image.Handle(),
+										   self.lightingTarget.view.Get());
+		binder.template Bind<Res_PostProcess>(self.postProcessTarget.image.Handle(),
+											  self.postProcessTarget.view.Get());
+	}
+
+	graph.Execute(cmd, binder);
+}
+} // namespace
+
 template <bool FullBright>
 void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd) {
 	uint32_t imageIdx = current_image_index;
 	VkDevice device = ctx.Device();
 	uint32_t fIdx = frame_index;
-
-	auto GetTLAS = [&]() {
-		if constexpr (isMac) {
-			return Vk::SkipWrite{};
-		} else {
-			return rtCtx.Valid() ? (const VkAccelerationStructureKHR*)&tlas.Current()
-								 : (const VkAccelerationStructureKHR*)nullptr;
-		}
-	};
 
 	using namespace ZHLN::Vk;
 	FrameRecorder recorder(cmd, *this);
@@ -398,46 +804,7 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
 				.format = presentation.swapchain.Get().format};
 	};
 
-	auto bindBase = [&](auto& binder) {
-		binder.template Bind<Res_SceneColor>(sceneColor.image.Handle(), sceneColor.view.Get());
-		binder.template Bind<Res_Velocity>(velocityBuffer.image.Handle(),
-										   velocityBuffer.view.Get());
-		binder.template Bind<Res_NormRough>(normalRoughnessBuffer.image.Handle(),
-											normalRoughnessBuffer.view.Get());
-		binder.template Bind<Res_Depth>(presentation.depthTarget.image.Handle(),
-										presentation.depthTarget.view.Get());
-		binder.template Bind<Res_BloomThresh>(bloomThresholdTarget.image.Handle(),
-											  bloomThresholdTarget.view.Get());
-		binder.template Bind<Res_BloomBlur>(bloomBlurTarget.image.Handle(),
-											bloomBlurTarget.view.Get());
-		binder.template Bind<Res_BloomFinal>(bloomFinalTarget.image.Handle(),
-											 bloomFinalTarget.view.Get());
-		binder.template Bind<Res_Swapchain>(presentation.swapchain.Get().images[imageIdx],
-											presentation.swapchain.Get().views[imageIdx]);
-	};
-
-	auto bindAA = [&](auto& binder) {
-		binder.template Bind<Res_AccumCurr>(accumBuffers.Current().image.Handle(),
-											accumBuffers.Current().view.Get());
-		binder.template Bind<Res_AccumNext>(accumBuffers.Next().image.Handle(),
-											accumBuffers.Next().view.Get());
-		binder.template Bind<Res_SmaaEdge>(smaaEdgeTarget.image.Handle(),
-										   smaaEdgeTarget.view.Get());
-		binder.template Bind<Res_SmaaWeight>(smaaWeightTarget.image.Handle(),
-											 smaaWeightTarget.view.Get());
-	};
-
-	auto bindDeferred = [&](auto& binder) {
-		binder.template Bind<Res_ShadowMap>(shadowMap.image.Handle(), shadowMap.view.Get());
-		binder.template Bind<Res_ShadowAtlas>(shadowAtlas.image.Handle(), shadowAtlas.view.Get());
-		binder.template Bind<Res_Ambient>(ambientTarget.image.Handle(), ambientTarget.view.Get());
-		binder.template Bind<Res_Lighting>(lightingTarget.image.Handle(),
-										   lightingTarget.view.Get());
-		binder.template Bind<Res_PostProcess>(postProcessTarget.image.Handle(),
-											  postProcessTarget.view.Get());
-	};
-
-	auto bloomLambda = [&]([[maybe_unused]] VkCommandBuffer c, const auto& inputColor) {
+	auto bloomLambda = [&]([[maybe_unused]] VkCommandBuffer c, const auto& inputColor) noexcept {
 		Profiler::ScopedGpuProfile<Stages::BloomPass, FrameProfiler> timer(c, fIdx, gpuProfiler);
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 							 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
@@ -480,8 +847,13 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
 		});
 	};
 
-	auto aaLambda = [&]([[maybe_unused]] VkCommandBuffer c, const auto& inputColor) {
+	auto aaLambda = [&]([[maybe_unused]] VkCommandBuffer c, const auto& inputColor) noexcept {
 		Profiler::ScopedGpuProfile<Stages::AAPass, FrameProfiler> timer(c, fIdx, gpuProfiler);
+		const auto smaaEdge_ro =
+			AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(smaaEdgeTarget);
+		const auto smaaWeight_ro =
+			AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(smaaWeightTarget);
+
 		if (aaState.mode == AAMode::TAA && taaPass.pipeline.Valid()) {
 			struct TAAPushConstants {
 				float feedback;
@@ -543,11 +915,11 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
 				c, smaaWeightTarget.image.Handle());
 
 			DispatchPostProcessPass(c, smaaWeightTarget, VK_ATTACHMENT_LOAD_OP_CLEAR, [&]() {
-				smaaWeightPass.WriteNext(
-					device,
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(smaaEdgeTarget),
-					textureViews[smaaAreaTexIdx].Get(), textureViews[smaaSearchTexIdx].Get(),
-					defaultSampler.Get(), pointSampler.Get());
+				const auto& [areaView, searchView] =
+					std::tie(textureViews[smaaAreaTexIdx], textureViews[smaaSearchTexIdx]);
+
+				smaaWeightPass.WriteNext(device, smaaEdge_ro, areaView, searchView,
+										 defaultSampler.Get(), pointSampler.Get());
 				smaaWeightPass.Execute(c, metrics,
 									   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
 			});
@@ -556,10 +928,8 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
 				c, smaaWeightTarget.image.Handle());
 
 			DispatchPostProcessPass(c, accumBuffers.Next(), VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
-				smaaBlendPass.WriteNext(
-					device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor),
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(smaaWeightTarget),
-					defaultSampler.Get(), pointSampler.Get());
+				smaaBlendPass.WriteNext(device, inputColor, smaaWeight_ro, defaultSampler.Get(),
+										pointSampler.Get());
 				smaaBlendPass.Execute(c, metrics,
 									  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
 			});
@@ -576,327 +946,51 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
 		}
 	};
 
-	if constexpr (FullBright) {
-		auto mainPass =
-			Vk::MakePass<"Main", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>,
-						 Vk::ColorWrite<Res_NormRough>, Vk::DepthWrite<Res_Depth>>(
-				[&]([[maybe_unused]] VkCommandBuffer c) {
-					Passes::MainPass{}.Execute(
-						recorder,
-						SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-									   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>{
-							.sceneColor =
-								Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-									sceneColor),
-							.velocity = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-								velocityBuffer),
-							.normRough = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-								normalRoughnessBuffer),
-							.depth = Vk::AssumeLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-								presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT)});
-				});
-		auto fwdPass =
-			Vk::MakePass<"Forward", Vk::ColorWrite<Res_SceneColor>, Vk::DepthWrite<Res_Depth>>(
-				[&]([[maybe_unused]] VkCommandBuffer c) {
-					Passes::ForwardPass{}.Execute(
-						recorder,
-						Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(sceneColor),
-						Vk::AssumeLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-							presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT));
-				});
-		auto bloomPass =
-			Vk::MakePass<"BloomFB", Vk::ShaderRead<Res_SceneColor>, Vk::ColorWrite<Res_BloomFinal>>(
-				[&]([[maybe_unused]] VkCommandBuffer c) { bloomLambda(c, sceneColor); });
+	uint32_t lightVariant = (giSettings.enableRTR && rtCtx.Valid()) ? 1 : 0;
+	uint32_t reflVariant =
+		(giSettings.enableSSR ? 1 : 0) | ((giSettings.enableRTR && rtCtx.Valid()) ? 2 : 0);
 
-		auto blitPassAA =
-			Vk::MakePass<"BlitAA", Vk::ShaderRead<Res_AccumNext>, Vk::ShaderRead<Res_BloomFinal>,
-						 Vk::ColorWrite<Res_Swapchain>>([&]([[maybe_unused]] VkCommandBuffer c) {
-				Passes::BlitPass{}.Execute(
-					recorder,
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(accumBuffers.Next()),
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(bloomFinalTarget),
-					getSwapchainImage(), 1);
-			});
-		auto blitPassNoAA =
-			Vk::MakePass<"BlitNoAA", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_BloomFinal>,
-						 Vk::ColorWrite<Res_Swapchain>>([&]([[maybe_unused]] VkCommandBuffer c) {
-				Passes::BlitPass{}.Execute(
-					recorder,
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(sceneColor),
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(bloomFinalTarget),
-					getSwapchainImage(), 1);
-			});
+	PPPushConstants pc = {.invViewProj = current_view_proj.Inversed(),
+						  .viewProj = current_view_proj,
+						  .camPos = {currentUniforms.camPos[0], currentUniforms.camPos[1],
+									 currentUniforms.camPos[2], currentUniforms.camPos[3]},
+						  .giMode = giSettings.mode,
+						  .aoRadius = giSettings.aoRadius,
+						  .aoBias = giSettings.aoBias,
+						  .aoPower = giSettings.aoPower,
+						  .giIntensity = giSettings.giIntensity,
+						  .giSamples = giSettings.giSamples,
+						  .enableSSR = giSettings.enableSSR,
+						  .enableRTR =
+							  (tlas.Current() != VK_NULL_HANDLE) ? giSettings.enableRTR : 0,
+						  ._pad = {}};
 
-		if (static_cast<int>(aaState.mode) != 0) {
-			auto aaPass =
-				Vk::MakePass<"AAFB", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_Velocity>,
-							 Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>,
-							 Vk::ColorWrite<Res_AccumNext>, Vk::ColorWrite<Res_SmaaEdge>,
-							 Vk::ColorWrite<Res_SmaaWeight>, Vk::ShaderRead<Res_AccumCurr>>(
-					[&]([[maybe_unused]] VkCommandBuffer c) { aaLambda(c, sceneColor); });
-			auto graph = Vk::CompileTimeFrameGraph(std::move(mainPass), std::move(fwdPass),
-												   std::move(bloomPass), std::move(aaPass),
-												   std::move(blitPassAA));
-			typename decltype(graph)::Binder binder;
-			bindBase(binder);
-			bindAA(binder);
-			graph.Execute(cmd, binder);
-		} else {
-			auto graph = Vk::CompileTimeFrameGraph(std::move(mainPass), std::move(fwdPass),
-												   std::move(bloomPass), std::move(blitPassNoAA));
-			typename decltype(graph)::Binder binder;
-			bindBase(binder);
-			graph.Execute(cmd, binder);
-		}
-	} else {
-		BuildTLAS(cmd);
-		Vk::FillBuffer(cmd, globalCounterBuffers[fIdx]);
-		BarrierCounterReset(cmd);
-		clusterCullingPass.Dispatch(cmd, clusterCullingSets[fIdx], 1, 1, 24);
-		BarrierComputeWriteToFragmentRead(cmd);
+	PassFactory factory{.self = *this,
+						.cmd = cmd,
+						.fIdx = fIdx,
+						.device = device,
+						.recorder = recorder,
+						.pc = pc,
+						.lightVariant = lightVariant,
+						.reflVariant = reflVariant};
 
-		auto mainShadowPass =
-			Vk::MakePass<"MainShadow", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>,
-						 Vk::ColorWrite<Res_NormRough>, Vk::DepthWrite<Res_Depth>,
-						 Vk::DepthWrite<Res_ShadowMap>, Vk::DepthWrite<Res_ShadowAtlas>>(
-				[&](VkCommandBuffer c) {
-					auto& rec = parallelRecorder.Current();
-					rec.Reset();
-					TaskSystemScheduler scheduler;
-					rec.Record(
-						scheduler,
-						[&](Vk::RecordingSlot slot) {
-							FrameRecorder shadowRec(slot.cmd, *this);
-							Passes::ShadowPass{}.Execute(shadowRec);
-						},
-						[&](Vk::RecordingSlot slot) {
-							FrameRecorder mainRec(slot.cmd, *this);
-							Passes::MainPass{}.Execute(
-								mainRec,
-								SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-											   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>{
-									.sceneColor =
-										Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-											sceneColor),
-									.velocity =
-										Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-											velocityBuffer),
-									.normRough =
-										Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-											normalRoughnessBuffer),
-									.depth =
-										Vk::AssumeLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-											presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT)});
-						});
-					Vk::ExecuteCommands(c, rec.GetCommandBuffers());
-				});
-
-		auto ambientPass = Vk::MakePass<"Ambient", Vk::ShaderRead<Res_SceneColor>,
-										Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>,
-										Vk::ColorWrite<Res_Ambient>>([&](VkCommandBuffer c) {
-			struct PPPushConstants {
-				JPH::Mat44 invVP;
-				JPH::Mat44 vp;
-				alignas(16) std::array<float, 4> cPos;
-				int giM;
-				float aoR;
-				float aoB;
-				float aoP;
-				float giI;
-				int giS;
-				int eSSR;
-				int eRTR;
-				int _pad;
-			} pc = {.invVP = current_view_proj.Inversed(),
-					.vp = current_view_proj,
-					.cPos = {currentUniforms.camPos[0], currentUniforms.camPos[1],
-							 currentUniforms.camPos[2], currentUniforms.camPos[3]},
-					.giM = giSettings.mode,
-					.aoR = giSettings.aoRadius,
-					.aoB = giSettings.aoBias,
-					.aoP = giSettings.aoPower,
-					.giI = giSettings.giIntensity,
-					.giS = giSettings.giSamples,
-					.eSSR = giSettings.enableSSR,
-					.eRTR = (tlas.Current() != VK_NULL_HANDLE) ? giSettings.enableRTR : 0,
-					._pad = {}};
-			DispatchPostProcessPass(c, ambientTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
-				this->ambientPass.WriteNext(
-					device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(sceneColor),
-					defaultSampler.Get(),
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-						presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-						normalRoughnessBuffer),
-					pointSampler.Get(), iblPayload.prefilteredView.Get(),
-					iblPayload.brdfLutView.Get(), clampSampler.Get(),
-					frameUniformBuffers[fIdx].Handle());
-				this->ambientPass.Execute(c, pc);
-			});
-		});
-
-		auto lightPass =
-			Vk::MakePass<"Lighting", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>,
-						 Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_Ambient>,
-						 Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>,
-						 Vk::ColorWrite<Res_Lighting>>([&](VkCommandBuffer c) {
-				uint32_t lVar = (giSettings.enableRTR && rtCtx.Valid()) ? 1 : 0;
-				struct PPPushConstants {
-					JPH::Mat44 invVP;
-					JPH::Mat44 vp;
-					alignas(16) std::array<float, 4> cPos;
-					int giM;
-					float aoR;
-					float aoB;
-					float aoP;
-					float giI;
-					int giS;
-					int eSSR;
-					int eRTR;
-					int _pad;
-				} pc = {.invVP = current_view_proj.Inversed(),
-						.vp = current_view_proj,
-						.cPos = {currentUniforms.camPos[0], currentUniforms.camPos[1],
-								 currentUniforms.camPos[2], currentUniforms.camPos[3]},
-						.giM = giSettings.mode,
-						.aoR = giSettings.aoRadius,
-						.aoB = giSettings.aoBias,
-						.aoP = giSettings.aoPower,
-						.giI = giSettings.giIntensity,
-						.giS = giSettings.giSamples,
-						.eSSR = giSettings.enableSSR,
-						.eRTR = (tlas.Current() != VK_NULL_HANDLE) ? giSettings.enableRTR : 0,
-						._pad = {}};
-				DispatchPostProcessPass(c, lightingTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
-					this->lightingPass.WriteNext(
-						device,
-						Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(sceneColor),
-						defaultSampler.Get(),
-						Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-							presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
-						Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-							normalRoughnessBuffer),
-						lightStorageBuffers[fIdx].Handle(), frameUniformBuffers[fIdx].Handle(),
-						shadowMap.view.Get(), shadowSampler.Get(), ltcMatView.Get(),
-						ltcAmpView.Get(), clampSampler.Get(), clusterGridBuffers[fIdx].Handle(),
-						lightIndexListBuffers[fIdx].Handle(),
-						Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ambientTarget),
-						pointSampler.Get(), GetTLAS(), shadowAtlasCubeView.Get(),
-						shadowAtlas2DView.Get());
-					this->lightingPass.ExecuteVariant(c, lVar, pc);
-				});
-			});
-
-		auto reflPass = Vk::MakePass<"Reflection", Vk::ShaderRead<Res_SceneColor>,
-									 Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>,
-									 Vk::ShaderRead<Res_Lighting>, Vk::ShaderRead<Res_ShadowMap>,
-									 Vk::ShaderRead<Res_ShadowAtlas>,
-									 Vk::ColorWrite<Res_PostProcess>>([&](VkCommandBuffer c) {
-			uint32_t rVar =
-				(giSettings.enableSSR ? 1 : 0) | ((giSettings.enableRTR && rtCtx.Valid()) ? 2 : 0);
-			struct PPPushConstants {
-				JPH::Mat44 invVP;
-				JPH::Mat44 vp;
-				alignas(16) std::array<float, 4> cPos;
-				int giM;
-				float aoR;
-				float aoB;
-				float aoP;
-				float giI;
-				int giS;
-				int eSSR;
-				int eRTR;
-				int _pad;
-			} pc = {.invVP = current_view_proj.Inversed(),
-					.vp = current_view_proj,
-					.cPos = {currentUniforms.camPos[0], currentUniforms.camPos[1],
-							 currentUniforms.camPos[2], currentUniforms.camPos[3]},
-					.giM = giSettings.mode,
-					.aoR = giSettings.aoRadius,
-					.aoB = giSettings.aoBias,
-					.aoP = giSettings.aoPower,
-					.giI = giSettings.giIntensity,
-					.giS = giSettings.giSamples,
-					.eSSR = giSettings.enableSSR,
-					.eRTR = (tlas.Current() != VK_NULL_HANDLE) ? giSettings.enableRTR : 0,
-					._pad = {}};
-			DispatchPostProcessPass(c, postProcessTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
-				this->reflectionPass.WriteNext(
-					device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(sceneColor),
-					defaultSampler.Get(),
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-						presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-						normalRoughnessBuffer),
-					pointSampler.Get(), iblPayload.prefilteredView.Get(), GetTLAS(),
-					frameUniformBuffers[fIdx].Handle(), iblPayload.brdfLutView.Get(),
-					clampSampler.Get(),
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(lightingTarget));
-				this->reflectionPass.ExecuteVariant(c, rVar, pc);
-			});
-		});
-
-		auto fwdPass =
-			Vk::MakePass<"Forward", Vk::ColorWrite<Res_PostProcess>, Vk::DepthWrite<Res_Depth>>(
-				[&]([[maybe_unused]] VkCommandBuffer c) {
-					Passes::ForwardPass{}.Execute(
-						recorder,
-						Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-							postProcessTarget),
-						Vk::AssumeLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-							presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT));
-				});
-
-		auto bloomPass =
-			Vk::MakePass<"Bloom", Vk::ShaderRead<Res_PostProcess>, Vk::ColorWrite<Res_BloomFinal>>(
-				[&]([[maybe_unused]] VkCommandBuffer c) { bloomLambda(c, postProcessTarget); });
-
-		auto blitPassAA =
-			Vk::MakePass<"BlitAA", Vk::ShaderRead<Res_AccumNext>, Vk::ShaderRead<Res_BloomFinal>,
-						 Vk::ColorWrite<Res_Swapchain>>([&]([[maybe_unused]] VkCommandBuffer c) {
-				Passes::BlitPass{}.Execute(
-					recorder,
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(accumBuffers.Next()),
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(bloomFinalTarget),
-					getSwapchainImage(), 0);
-			});
-		auto blitPassNoAA =
-			Vk::MakePass<"BlitNoAA", Vk::ShaderRead<Res_PostProcess>,
-						 Vk::ShaderRead<Res_BloomFinal>,
-						 Vk::ColorWrite<Res_Swapchain>>([&]([[maybe_unused]] VkCommandBuffer c) {
-				Passes::BlitPass{}.Execute(
-					recorder,
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(postProcessTarget),
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(bloomFinalTarget),
-					getSwapchainImage(), 0);
-			});
-
-		if (static_cast<int>(aaState.mode) != 0) {
-			auto aaPass =
-				Vk::MakePass<"AA", Vk::ShaderRead<Res_PostProcess>, Vk::ShaderRead<Res_Velocity>,
-							 Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>,
-							 Vk::ColorWrite<Res_AccumNext>, Vk::ColorWrite<Res_SmaaEdge>,
-							 Vk::ColorWrite<Res_SmaaWeight>, Vk::ShaderRead<Res_AccumCurr>>(
-					[&]([[maybe_unused]] VkCommandBuffer c) { aaLambda(c, postProcessTarget); });
-			auto graph = Vk::CompileTimeFrameGraph(
-				std::move(mainShadowPass), std::move(ambientPass), std::move(lightPass),
-				std::move(reflPass), std::move(fwdPass), std::move(bloomPass), std::move(aaPass),
-				std::move(blitPassAA));
-			typename decltype(graph)::Binder binder;
-			bindBase(binder);
-			bindDeferred(binder);
-			bindAA(binder);
-			graph.Execute(cmd, binder);
-		} else {
-			auto graph = Vk::CompileTimeFrameGraph(std::move(mainShadowPass),
-												   std::move(ambientPass), std::move(lightPass),
-												   std::move(reflPass), std::move(fwdPass),
-												   std::move(bloomPass), std::move(blitPassNoAA));
-			typename decltype(graph)::Binder binder;
-			bindBase(binder);
-			bindDeferred(binder);
-			graph.Execute(cmd, binder);
-		}
+	switch (aaState.mode) {
+		case AAMode::None:
+			ExecuteFrameGraph<FullBright, AAMode::None>(*this, cmd, factory, bloomLambda, aaLambda,
+														getSwapchainImage);
+			break;
+		case AAMode::FXAA:
+			ExecuteFrameGraph<FullBright, AAMode::FXAA>(*this, cmd, factory, bloomLambda, aaLambda,
+														getSwapchainImage);
+			break;
+		case AAMode::TAA:
+			ExecuteFrameGraph<FullBright, AAMode::TAA>(*this, cmd, factory, bloomLambda, aaLambda,
+													   getSwapchainImage);
+			break;
+		case AAMode::SMAA:
+			ExecuteFrameGraph<FullBright, AAMode::SMAA>(*this, cmd, factory, bloomLambda, aaLambda,
+														getSwapchainImage);
+			break;
 	}
 }
 

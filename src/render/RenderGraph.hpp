@@ -121,13 +121,70 @@ template <typename Head, typename... Tail> struct CollectAllResources<Head, Tail
 template <typename Target, typename... Ts>
 consteval auto GetResourceIndexImpl(TypeList<Ts...> /*unused*/) -> size_t {
 	size_t idx = 0;
-	((std::is_same_v<Target, Ts> ? true : (++idx, false)) || ...);
+	[[maybe_unused]] bool found = ((std::is_same_v<Target, Ts> ? true : (++idx, false)) || ...);
 	return idx;
 }
 
+// ============================================================================
+// Zero-Allocation Compile-Time String Formatter
+// ============================================================================
+
+template <size_t Capacity> struct ConstexprString {
+	std::array<char, Capacity> data_buffer{};
+	size_t length = 0;
+
+	constexpr void append(std::string_view sv) noexcept {
+		size_t to_copy = std::min(sv.size(), Capacity - 1 - length);
+		for (size_t i = 0; i < to_copy; ++i) {
+			data_buffer[length + i] = sv[i];
+		}
+		length += to_copy;
+		data_buffer[length] = '\0';
+	}
+
+	[[nodiscard]] constexpr auto string_view() const noexcept -> std::string_view {
+		return std::string_view(data_buffer.data(), length);
+	}
+};
+
 template <typename ResourceList, typename Target> consteval auto GetResourceIndex() -> size_t {
 	constexpr size_t idx = GetResourceIndexImpl<Target>(ResourceList{});
-	static_assert(idx < ResourceList::size, "Resource type is not registered in any pass.");
+
+	if constexpr (idx >= ResourceList::size) {
+		// Generate a beautifully formatted, highly noticeable compile-time error block
+		constexpr auto errorMessage = []() consteval {
+			ConstexprString<2048> msg{};
+			msg.append("\n\n");
+			msg.append("==========================================================================="
+					   "=====\n");
+			msg.append("  [GRAPH COMPILATION ERROR]\n");
+			msg.append("==========================================================================="
+					   "=====\n\n");
+			msg.append("  The requested resource is not registered in this Frame Graph!\n\n");
+			msg.append("  Missing Resource:\n");
+			msg.append("    - \"");
+			msg.append(std::string_view(Target::name.value.data(), Target::name.value.size()));
+			msg.append("\"\n\n");
+			msg.append("  Registered Resources in this Graph:\n");
+
+			auto appendName = [&]<typename R>() {
+				msg.append("    - \"");
+				msg.append(std::string_view(R::name.value.data(), R::name.value.size()));
+				msg.append("\"\n");
+			};
+
+			[&]<typename... Us>(TypeList<Us...>) {
+				(appendName.template operator()<Us>(), ...);
+			}(ResourceList{});
+
+			msg.append("==========================================================================="
+					   "=====\n\n");
+			return msg;
+		}();
+
+		static_assert(idx < ResourceList::size, errorMessage.string_view());
+	}
+
 	return idx;
 }
 
