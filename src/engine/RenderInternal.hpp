@@ -288,8 +288,14 @@ struct MainPass {
 struct AAPass {
 	static constexpr std::string_view name = "[GPU] Anti-Aliasing";
 };
-struct BloomPass {
-	static constexpr std::string_view name = "[GPU] Bloom Pass";
+struct BloomThreshPass {
+	static constexpr std::string_view name = "[GPU] Bloom Threshold";
+};
+struct BloomBlurHPass {
+	static constexpr std::string_view name = "[GPU] Bloom Blur H";
+};
+struct BloomBlurVPass {
+	static constexpr std::string_view name = "[GPU] Bloom Blur V";
 };
 struct BlitPass {
 	static constexpr std::string_view name = "[GPU] Blit/Composite";
@@ -301,7 +307,8 @@ struct PostProcessPass {
 
 using FrameProfiler =
 	Profiler::GpuProfiler<Stages::ShadowPass, Stages::MainPass, Stages::AAPass,
-						  Stages::PostProcessPass, Stages::BloomPass, Stages::BlitPass>;
+						  Stages::PostProcessPass, Stages::BloomThreshPass, Stages::BloomBlurHPass,
+						  Stages::BloomBlurVPass, Stages::BlitPass>;
 
 struct NativeMesh {
 	VkDevice device = VK_NULL_HANDLE;
@@ -595,6 +602,21 @@ struct RenderContext::Impl {
 	Vk::PipelineLayout skinningPipelineLayout;
 
 	void InitSubsystems(const RenderConfig& cfg, int width, int height);
+
+	struct PPPushConstants {
+		JPH::Mat44 invViewProj;
+		JPH::Mat44 viewProj;
+		alignas(16) std::array<float, 4> camPos;
+		int giMode;
+		float aoRadius;
+		float aoBias;
+		float aoPower;
+		float giIntensity;
+		int giSamples;
+		int enableSSR;
+		int enableRTR;
+		int _pad;
+	};
 
 	struct alignas(8) SkinningConstants {
 		uint64_t inPosAddr;

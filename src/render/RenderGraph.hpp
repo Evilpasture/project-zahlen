@@ -33,6 +33,12 @@ template <typename... Ts> struct TypeList {
 	template <size_t I> using type = Ts...[I];
 };
 
+template <> struct TypeList<> {
+	static constexpr size_t size = 0;
+
+	template <size_t I> using type = void; // Safe fallback, never indexed
+};
+
 template <ResourceName Name, VkFormat Format, VkImageAspectFlags Aspect, bool IsSwapchain = false>
 struct GraphImage {
 	static constexpr auto name = Name;
@@ -52,7 +58,8 @@ struct Usage {
 template <typename Image>
 using ColorWrite =
 	Usage<Image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-		  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT>;
+		  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+		  VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT>;
 
 template <typename Image>
 using ShaderRead = Usage<Image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -64,15 +71,87 @@ using DepthWrite = Usage<
 	VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
 	VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT>;
 
-template <ResourceName Name, typename UsagesList, typename RecordFn> struct GraphPass {
+template <ResourceName Name, typename UsagesList, typename RecordFn_T> struct GraphPass {
 	static constexpr auto name = Name;
 	using Usages = UsagesList;
+	using RecordFn = RecordFn_T;
 	RecordFn record;
 };
 
-// Modernized: Pack Usages directly into TypeList instead of std::tuple
+namespace detail {
+
+// Bypass token for authorized framework-level render pass builders
+struct BypassGraphicsCheckToken {};
+
+// Type traits to identify rasterization/attachment writes
+template <typename U> struct IsColorAttachment : std::false_type {};
+
+template <typename Image, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access>
+struct IsColorAttachment<Usage<Image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, Stage, Access>>
+	: std::true_type {};
+
+template <typename U> struct IsDepthAttachment : std::false_type {};
+
+template <typename Image, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access>
+struct IsDepthAttachment<Usage<Image, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, Stage, Access>>
+	: std::true_type {};
+
+// 1. ADDED: Metaprogramming list filter
+template <typename InList, typename OutList, template <typename> class Predicate> struct FilterImpl;
+
+template <typename OutList, template <typename> class Predicate>
+struct FilterImpl<TypeList<>, OutList, Predicate> {
+	using type = OutList;
+};
+
+template <typename Head, typename... Tail, typename... Out, template <typename> class Predicate>
+struct FilterImpl<TypeList<Head, Tail...>, TypeList<Out...>, Predicate> {
+	using type = typename std::conditional_t<
+		Predicate<Head>::value,
+		FilterImpl<TypeList<Tail...>, TypeList<Out..., typename Head::Resource>, Predicate>,
+		FilterImpl<TypeList<Tail...>, TypeList<Out...>, Predicate>>::type;
+};
+
+template <typename List, template <typename> class Predicate>
+using Filter = typename FilterImpl<List, TypeList<>, Predicate>::type;
+
+} // namespace detail
+
+/**
+ * @brief SAFE, compile-time verified pass builder.
+ * Triggers a static assertion if rasterization attachments are used directly.
+ */
 template <ResourceName Name, typename... Usages, typename RecordFn>
 constexpr auto MakePass(RecordFn&& record) {
+	constexpr bool hasGraphics = (detail::IsColorAttachment<Usages>::value || ...) ||
+								 (detail::IsDepthAttachment<Usages>::value || ...);
+
+	// 2. CHANGED: Block direct raw VkCommandBuffer parameters for graphics passes
+	if constexpr (hasGraphics) {
+		static_assert(
+			!std::is_invocable_v<RecordFn, VkCommandBuffer>,
+			"\n\n================================================================================\n"
+			"  [COMPILER ERROR] Render pass safety violation detected!\n"
+			"================================================================================\n\n"
+			"  Direct use of MakePass with ColorWrite or DepthWrite is not allowed.\n"
+			"  Recording draw calls outside of an active Vulkan RenderPass causes undefined "
+			"behaviour.\n\n"
+			"  Resolution:\n"
+			"    - Write your lambdas to accept 'auto& ctx' instead of raw VkCommandBuffer.\n"
+			"    - The graph executor will automatically open and close the RenderPass for you.\n\n"
+			"================================================================================\n");
+	}
+
+	return GraphPass<Name, TypeList<Usages...>, RecordFn>{std::forward<RecordFn>(record)};
+}
+
+/**
+ * @brief UNSAFE / Framework-only pass builder.
+ * Required for internal wrappers that manually handle render pass boundaries.
+ */
+template <ResourceName Name, typename... Usages, typename RecordFn>
+constexpr auto MakePassUnsafe(RecordFn&& record,
+							  [[maybe_unused]] detail::BypassGraphicsCheckToken unused = {}) {
 	return GraphPass<Name, TypeList<Usages...>, RecordFn>{std::forward<RecordFn>(record)};
 }
 
@@ -265,14 +344,16 @@ template <typename ResourceList, typename... Passes> consteval auto ComputeState
 struct GraphResource {
 	VkImage handle = VK_NULL_HANDLE;
 	VkImageView view = VK_NULL_HANDLE;
+	VkExtent2D extent{};
 };
 
 template <typename ResourceList> class ResourceBinder {
   public:
-	template <typename Image> constexpr void Bind(VkImage handle, VkImageView view) noexcept {
+	template <typename Image>
+	constexpr void Bind(VkImage handle, VkImageView view, VkExtent2D extent) noexcept {
 		constexpr size_t idx = detail::GetResourceIndexImpl<Image>(ResourceList{});
 		if constexpr (idx < ResourceList::size) {
-			_resources[idx] = {handle, view};
+			_resources[idx] = {handle, view, extent};
 		}
 	}
 
@@ -284,6 +365,11 @@ template <typename ResourceList> class ResourceBinder {
   private:
 	std::array<GraphResource, ResourceList::size> _resources{};
 };
+
+// 3. ADDED: Forward declare RasterPassContext to satisfy CompileTimeFrameGraph dependencies
+template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex,
+		  typename... Passes>
+class RasterPassContext;
 
 template <typename... Passes> class CompileTimeFrameGraph {
   public:
@@ -315,6 +401,7 @@ template <typename... Passes> class CompileTimeFrameGraph {
 	void ExecutePass(VkCommandBuffer cmd, const std::array<GraphResource, NumResources>& bindings,
 					 const PassType& pass) const {
 		using Usages = typename PassType::Usages;
+		using RecordFn = typename PassType::RecordFn; // Query the lambda's signature
 		constexpr size_t usageCount = Usages::size;
 
 		std::array<VkImageMemoryBarrier2, usageCount> barriers{};
@@ -322,11 +409,10 @@ template <typename... Passes> class CompileTimeFrameGraph {
 
 		[&]<size_t... Us>(std::index_sequence<Us...>) {
 			(
-				[&]<size_t U>() {
-					using UsageType = typename Usages::template type<U>;
+				[&]() {
+					using UsageType = typename Usages::template type<Us>;
 					using Img = typename UsageType::Resource;
 
-					// Fix 1: Added detail:: namespace prefix
 					constexpr size_t rIdx = detail::GetResourceIndex<Resources, Img>();
 					constexpr detail::ResourceState prevState = StateTable[PassIndex][rIdx];
 					const auto& resource = bindings[rIdx];
@@ -360,13 +446,11 @@ template <typename... Passes> class CompileTimeFrameGraph {
 												 .baseArrayLayer = 0,
 												 .layerCount = VK_REMAINING_ARRAY_LAYERS}};
 					}
-				}.template operator()<Us>(),
+				}(),
 				...);
 		}(std::make_index_sequence<usageCount>{});
 
 		if (barrierIdx > 0) {
-			// Fix 2: Explicitly initialize all struct members to suppress
-			// -Wmissing-field-initializers
 			VkDependencyInfo depInfo = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
 										.pNext = nullptr,
 										.dependencyFlags = 0,
@@ -380,10 +464,232 @@ template <typename... Passes> class CompileTimeFrameGraph {
 			vkCmdPipelineBarrier2(cmd, &depInfo);
 		}
 
-		pass.record(cmd);
+		using ColorWrites = detail::Filter<Usages, detail::IsColorAttachment>;
+		using DepthWrites = detail::Filter<Usages, detail::IsDepthAttachment>;
+		constexpr bool isGraphics = (ColorWrites::size > 0) || (DepthWrites::size > 0);
+
+		if constexpr (isGraphics) {
+			// Check if the lambda expects a raw VkCommandBuffer (Manual Pass)
+			if constexpr (std::is_invocable_v<RecordFn, VkCommandBuffer>) {
+				// Manual Pass: Execute raw, allowing the custom DynamicPass inside to handle
+				// boundaries
+				pass.record(cmd);
+			} else {
+				// Automatic Pass: Wrap the execution inside the automatic RasterPassContext
+				RasterPassContext<Resources, ColorWrites, DepthWrites, PassIndex, Passes...> ctx(
+					cmd, bindings);
+				pass.record(ctx);
+			}
+		} else {
+			// Compute/Transfer pass
+			pass.record(cmd);
+		}
 	}
 
 	std::tuple<Passes...> _passes;
 };
+
+// ============================================================================
+// Automatic RenderPass Execution Context
+// ============================================================================
+
+// 5. ADDED: Generic fallback for Clear Colors (overridden by engine-level specializations)
+template <typename Tag> struct ClearColorOf {
+	static constexpr Color4 value = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f}; // Default: Black
+};
+
+// 6. ADDED: Non-leaking RAII RasterPassContext class template
+template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex,
+		  typename... Passes>
+class RasterPassContext {
+  public:
+	RasterPassContext(VkCommandBuffer cmd,
+					  const std::array<GraphResource, ResourceList::size>& bindings) noexcept
+		: m_cmd(cmd) {
+
+		m_extent = {};
+		ResolveExtent(bindings, std::make_index_sequence<ColorWrites::size>{},
+					  std::make_index_sequence<DepthWrites::size>{});
+
+		uint32_t colorCount = 0;
+		BuildColorAttachments(bindings, colorCount, std::make_index_sequence<ColorWrites::size>{});
+
+		VkRenderingAttachmentInfo depthAttachment{};
+		bool hasDepth = BuildDepthAttachment(bindings, depthAttachment,
+											 std::make_index_sequence<DepthWrites::size>{});
+
+		VkRenderingInfo rendering_info = {
+			.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+			.pNext = nullptr,
+			.flags = 0,
+			.renderArea = {.offset = {.x = 0, .y = 0}, .extent = m_extent},
+			.layerCount = 1,
+			.viewMask = 0,
+			.colorAttachmentCount = colorCount,
+			.pColorAttachments = colorCount > 0 ? m_colors.data() : nullptr,
+			.pDepthAttachment = hasDepth ? &depthAttachment : nullptr,
+			.pStencilAttachment = nullptr,
+		};
+
+		vkCmdBeginRendering(m_cmd, &rendering_info);
+
+		const VkViewport viewport = {.x = 0.0f,
+									 .y = 0.0f,
+									 .width = (float)m_extent.width,
+									 .height = (float)m_extent.height,
+									 .minDepth = 0.0f,
+									 .maxDepth = 1.0f};
+		const VkRect2D scissor = {.offset = {.x = 0, .y = 0}, .extent = m_extent};
+		vkCmdSetViewport(m_cmd, 0, 1, &viewport);
+		vkCmdSetScissor(m_cmd, 0, 1, &scissor);
+	}
+
+	~RasterPassContext() noexcept { vkCmdEndRendering(m_cmd); }
+
+	[[nodiscard]] VkCommandBuffer Cmd() const noexcept { return m_cmd; }
+	[[nodiscard]] VkExtent2D Extent() const noexcept { return m_extent; }
+
+  private:
+	VkCommandBuffer m_cmd;
+	VkExtent2D m_extent{};
+	std::array<VkRenderingAttachmentInfo, kMaxColorAttachments> m_colors{};
+
+	template <size_t... Is, size_t... Js>
+	void ResolveExtent(const std::array<GraphResource, ResourceList::size>& bindings,
+					   std::index_sequence<Is...> /*unused*/,
+					   std::index_sequence<Js...> /*unused*/) noexcept {
+		(([&]() {
+			 if (m_extent.width == 0) {
+				 using Img = typename ColorWrites::template type<Is>;
+				 m_extent = bindings[detail::GetResourceIndex<ResourceList, Img>()].extent;
+			 }
+		 }()),
+		 ...);
+
+		if (m_extent.width == 0) {
+			(([&]() {
+				 if (m_extent.width == 0) {
+					 using Img = typename DepthWrites::template type<Js>;
+					 m_extent = bindings[detail::GetResourceIndex<ResourceList, Img>()].extent;
+				 }
+			 }()),
+			 ...);
+		}
+	}
+
+	template <size_t... Is>
+	void BuildColorAttachments(const std::array<GraphResource, ResourceList::size>& bindings,
+							   uint32_t& colorCount, std::index_sequence<Is...>) noexcept {
+		(([&]() {
+			 using Img = typename ColorWrites::template type<Is>;
+			 constexpr size_t rIdx = detail::GetResourceIndex<ResourceList, Img>();
+			 const auto& res = bindings[rIdx];
+
+			 // Resolve loadOp dynamically from the compile-time layout history!
+			 constexpr auto prevState =
+				 CompileTimeFrameGraph<Passes...>::StateTable[PassIndex][rIdx];
+			 VkAttachmentLoadOp loadOp = (prevState.layout == VK_IMAGE_LAYOUT_UNDEFINED)
+											 ? VK_ATTACHMENT_LOAD_OP_CLEAR
+											 : VK_ATTACHMENT_LOAD_OP_LOAD;
+
+			 constexpr Color4 clearColor = ClearColorOf<Img>::value;
+
+			 m_colors[colorCount++] = {
+				 .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+				 .pNext = nullptr,
+				 .imageView = res.view,
+				 .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+				 .resolveMode = VK_RESOLVE_MODE_NONE,
+				 .resolveImageView = VK_NULL_HANDLE,
+				 .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+				 .loadOp = loadOp,
+				 .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+				 .clearValue = {.color = {.float32 = {clearColor.r, clearColor.g, clearColor.b,
+													  clearColor.a}}}};
+		 }()),
+		 ...);
+	}
+
+	template <size_t... Js>
+	bool BuildDepthAttachment(const std::array<GraphResource, ResourceList::size>& bindings,
+							  VkRenderingAttachmentInfo& outDepth,
+							  std::index_sequence<Js...> /*unused*/) noexcept {
+		if constexpr (DepthWrites::size == 0) {
+			return false;
+		} else {
+			using Img = typename DepthWrites::template type<0>;
+			constexpr size_t rIdx = detail::GetResourceIndex<ResourceList, Img>();
+			const auto& res = bindings[rIdx];
+
+			constexpr auto prevState =
+				CompileTimeFrameGraph<Passes...>::StateTable[PassIndex][rIdx];
+			VkAttachmentLoadOp loadOp = (prevState.layout == VK_IMAGE_LAYOUT_UNDEFINED)
+											? VK_ATTACHMENT_LOAD_OP_CLEAR
+											: VK_ATTACHMENT_LOAD_OP_LOAD;
+
+			outDepth = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+						.pNext = nullptr,
+						.imageView = res.view,
+						.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+						.resolveMode = VK_RESOLVE_MODE_NONE,
+						.resolveImageView = VK_NULL_HANDLE,
+						.resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+						.loadOp = loadOp,
+						.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+						.clearValue = {.depthStencil = {.depth = 1.0f, .stencil = 0}}};
+			return true;
+		}
+	}
+};
+
+/**
+ * @brief Pack compile-time resource tags alongside runtime Vulkan handles.
+ */
+template <typename Tag> struct GraphImageRef {
+	using TagType = Tag;
+	VkImage handle = VK_NULL_HANDLE;
+	VkImageView view = VK_NULL_HANDLE;
+	VkExtent2D extent{};
+};
+
+/**
+ * @brief Factory helper to construct a GraphImageRef from a RenderTarget<F>
+ */
+template <typename Tag, typename T> constexpr auto MakeRef(const T& resource) noexcept {
+	if constexpr (requires { resource.image.Handle(); }) {
+		return GraphImageRef<Tag>{.handle = resource.image.Handle(),
+								  .view = resource.view.Get(),
+								  .extent = resource.extent};
+	} else if constexpr (requires { resource.handle; }) {
+		return GraphImageRef<Tag>{
+			.handle = resource.handle, .view = resource.view, .extent = resource.extent};
+	} else {
+		static_assert(sizeof(T) == 0, "MakeRef: Unsupported resource type");
+	}
+}
+
+/**
+ * @brief Factory helper to construct a GraphImageRef from raw Vulkan handles (with default empty
+ * extent)
+ */
+template <typename Tag> constexpr auto MakeRef(VkImage handle, VkImageView view) noexcept {
+	return GraphImageRef<Tag>{.handle = handle, .view = view, .extent = {}};
+}
+
+/**
+ * @brief Factory helper to construct a GraphImageRef from raw Vulkan handles
+ */
+template <typename Tag>
+constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent) noexcept {
+	return GraphImageRef<Tag>{.handle = handle, .view = view, .extent = extent};
+}
+
+/**
+ * @brief Automates the binding of multiple resources using a fold expression
+ */
+template <typename BinderT, typename... Refs>
+constexpr void AutoBind(BinderT& binder, const Refs&... refs) noexcept {
+	(binder.template Bind<typename Refs::TagType>(refs.handle, refs.view, refs.extent), ...);
+}
 
 } // namespace ZHLN::Vk
