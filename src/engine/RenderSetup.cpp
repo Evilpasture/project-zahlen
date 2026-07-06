@@ -96,6 +96,7 @@ void SetFrameData(RenderContext& ctx, const Camera& cam, const FrameUniforms& un
 
 	FrameUniforms gpuUniforms = uniforms;
 	std::memcpy(gpuUniforms.cascadeSplits, cascadeSplits, sizeof(float) * 4);
+	std::memcpy(gpuUniforms.sh, impl->iblPayload.shCoeffs.data(), sizeof(JPH::Vec4) * 9);
 
 	// Update Cascade light space matrices
 	JPH::Vec3 sunDir =

@@ -467,8 +467,8 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 R, out float confidence,
 
 			float depthDiff = abs(distToHit - distToSampled);
 
-			// DYNAMIC TOLERANCE: Scales gracefully based on how far the ray traveled
-			float maxDiff = 1.0f + rayT * 0.15f;
+			float maxDiff = 0.15f + rayT * 0.02f; // 15cm base tolerance (down from 1.0m)
+
 			float depthMask = smoothstep(maxDiff, maxDiff * 0.2f, depthDiff);
 			confidence *= depthMask;
 		}

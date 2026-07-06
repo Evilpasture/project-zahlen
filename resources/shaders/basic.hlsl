@@ -177,6 +177,13 @@ PSOutput PSMain(VSOutput input) {
 	float roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.045f);
 	float metallic = (indices.z == 0 ? 1.0f : pbr.b) * metallicFactor;
 
+	// === FIX: If the pixel belongs to a skinned mesh, set roughness to exactly 0.0 ===
+	if (input.alphaMode == 1 ||
+		(obj.instanceId != 4294967295u && (g_instances[obj.instanceId].flags >> 8 & 0xFF) != 0)) {
+		roughness = 0.0f; // Magic value indicating "Do Not Reflect"
+	}
+	// ===============================================================================
+
 	float3 N = normalize(input.normal);
 	float3 worldNormal = N;
 

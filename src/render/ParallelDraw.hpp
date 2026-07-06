@@ -17,7 +17,8 @@ struct SecondaryInheritance {
 namespace detail {
 // Archetype callback to test scheduler invocation without using lambdas in unevaluated contexts
 struct ParallelForCallback {
-	void operator()(uint32_t start, uint32_t end, uint32_t chunkIdx) const noexcept {}
+	void operator()([[maybe_unused]] uint32_t start, [[maybe_unused]] uint32_t end,
+					[[maybe_unused]] uint32_t chunkIdx) const noexcept {}
 };
 } // namespace detail
 

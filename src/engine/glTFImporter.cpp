@@ -1005,6 +1005,10 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 		flags |= DrawFlags::ExcludeFromTLAS;
 	}
 
+	if (params.isAnimated) {
+		flags |= DrawFlags::ExcludeFromTLAS;
+	}
+
 	if (params.createPhysics) {
 		reg.Add(e, TransformComponent{.position = prep.translation,
 									  .rotation = prep.rotation,

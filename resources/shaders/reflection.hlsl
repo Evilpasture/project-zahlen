@@ -191,8 +191,15 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 #endif
 
 		if (confidence > 0.0f) {
-			confidence *= saturate(dot(R, N) * 10.0f);
-			reflectionColor = texLighting.SampleLevel(smp, hitUV, 0).rgb;
+			// === FIX: Reject reflection if the hit pixel belongs to a skinned mesh ===
+			float4 hitNormRough = texNormalRoughness.SampleLevel(smp, hitUV, 0);
+			if (hitNormRough.z == 0.0f) {
+				confidence = 0.0f; // Exclude completely!
+			} else {
+				confidence *= saturate(dot(R, N) * 10.0f);
+				reflectionColor = texLighting.SampleLevel(smp, hitUV, 0).rgb;
+			}
+			// =========================================================================
 		}
 
 		float3 localReflection = lerp(specularIBL, reflectionColor * FssEss, confidence);

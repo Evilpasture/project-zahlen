@@ -16,9 +16,9 @@
 
 #include <GLFW/glfw3.h>
 #include <Jolt/Physics/Collision/CastResult.h>
-#include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/Components.hpp>
+#include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -311,7 +311,7 @@ bool InitializeEditorScene(Engine& engine) {
 	std::vector<float> terrainHeights(static_cast<size_t>(terrainSize * terrainSize));
 
 	Mesh terrainMesh = CreativeWorksFactory::CreateTerrain(rc, terrainSize, terrainWorldSize,
-												   terrainMaxHeight, terrainHeights.data());
+														   terrainMaxHeight, terrainHeights.data());
 	auto terrainShape =
 		Physics::CreateHeightFieldShape(terrainHeights, terrainSize, terrainWorldSize);
 	Material material = CreativeWorksFactory::CreateBasicMaterial(rc);
@@ -493,6 +493,7 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 			std::memcpy(&uniforms.lightDir[0], &sunDirection, sizeof(float) * 3);
 			uniforms.lightDir[3] = 10.0f;
 			uniforms.lightCount = 0;
+			uniforms.ambientExposure = 5.0f;
 			uniforms.jitterParams = JPH::Vec4(s_AAState.jitterX, s_AAState.jitterY,
 											  s_AAState.prevJitterX, s_AAState.prevJitterY);
 			uniforms.fullBright = g_EditorState.fullBright ? 1 : 0;

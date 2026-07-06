@@ -254,25 +254,7 @@ RenderResult RenderContext::BeginFrame() noexcept {
 		_impl->stagingContext.reset();
 	}
 
-	// Safely synchronize staging uploads
-	if (_impl->stagingRingBuffer.Valid()) {
-		VkSemaphore sem = _impl->stagingRingBuffer.GetSemaphore();
-		uint64_t currentVal = _impl->stagingRingBuffer.GetCurrentValue();
-
-		if (currentVal > 0) {
-			uint64_t completedValue = 0;
-			vkGetSemaphoreCounterValue(_impl->ctx.Device(), sem, &completedValue);
-
-			// Only stall the CPU if there is an active, uncompleted GPU upload in-flight
-			if (completedValue < currentVal) {
-				// Sledgehammer wait to satisfy Vulkan Validation Layer state tracking limitations
-				vkDeviceWaitIdle(_impl->ctx.Device());
-				_impl->stagingRingBuffer.Recycle();
-			}
-		}
-	}
-
-	const ZHLN_FrameSync& s = _impl->sync[_impl->frame_index];
+	const auto& s = _impl->sync[_impl->frame_index];
 
 	auto wait_res =
 		ZHLN_WaitAndResetFrame(_impl->ctx.Device(), s.in_flight, _impl->pools[_impl->frame_index]);
@@ -565,6 +547,8 @@ struct PassFactory {
 							Vk::ShaderRead<Res_Lighting>, Vk::ShaderRead<Res_ShadowMap>,
 							Vk::ShaderRead<Res_ShadowAtlas>, Vk::ColorWrite<Res_PostProcess>>(
 			[this](auto& ctx) noexcept {
+				Profiler::ScopedGpuProfile<Stages::PostProcessPass, FrameProfiler> timer(
+					ctx.Cmd(), fIdx, self.gpuProfiler);
 				self.reflectionPass.WriteNext(
 					device,
 					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.sceneColor),
@@ -1008,6 +992,7 @@ RenderResult RenderContext::EndFrame() noexcept {
 			dst[i] = _impl->drawQueue[i].instanceData;
 		}
 	}
+	_impl->BuildTLAS(cmd);
 
 	if (_impl->currentUniforms.fullBright != 0) {
 		_impl->RecordSceneFrame<true>(Vk::CommandBuffer<Vk::QueueType::Graphics>{cmd});
