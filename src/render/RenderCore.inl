@@ -944,6 +944,35 @@ inline void DrawIndirect(VkCommandBuffer cmd, const DrawIndirectState& state,
 	vkCmdDrawIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount, state.stride);
 }
 
+template <GpuTriviallyCopyable T>
+inline void DrawIndexedIndirect(VkCommandBuffer cmd, const DrawIndexedIndirectState& state,
+								const T& pushConstants, VkShaderStageFlags stages) noexcept {
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state.pipeline);
+	if (state.set != VK_NULL_HANDLE) {
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state.layout, 0, 1,
+								&state.set, 0, nullptr);
+	}
+	vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
+
+	vkCmdDrawIndexedIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount,
+							 state.stride);
+}
+
+template <GpuTriviallyCopyable T>
+inline void DrawIndexedIndirectCount(VkCommandBuffer cmd,
+									 const DrawIndexedIndirectCountState& state,
+									 const T& pushConstants, VkShaderStageFlags stages) noexcept {
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state.pipeline);
+	if (state.set != VK_NULL_HANDLE) {
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state.layout, 0, 1,
+								&state.set, 0, nullptr);
+	}
+	vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
+
+	vkCmdDrawIndexedIndirectCount(cmd, state.argumentBuffer, state.offset, state.countBuffer,
+								  state.countBufferOffset, state.maxDrawCount, state.stride);
+}
+
 // ============================================================================
 // Surface Implementation
 // ============================================================================

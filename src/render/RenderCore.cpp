@@ -32,7 +32,7 @@ VkInstance CreateInstance(std::string_view appName, uint32_t appVersion,
 								   .extensions = c_strings.data(),
 								   .enable_validation = enableValidation};
 
-	const size_t copy_size = std::min(appName.size(), sizeof(inst_desc.app_name) - 1);
+	const size_t copy_size = ZHLN::Min(appName.size(), sizeof(inst_desc.app_name) - 1);
 	std::memcpy(inst_desc.app_name, appName.data(), copy_size);
 	inst_desc.app_name[copy_size] = '\0';
 

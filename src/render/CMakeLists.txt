@@ -21,6 +21,7 @@ add_library(zahlen_render STATIC
     StagingContext.hpp
     PipelineBuilder.cpp
     DescriptorLayout.cpp
+    DescriptorHeap.cpp
     Allocator.cpp
     SamplerBuilder.cpp
     StagingContext.cpp

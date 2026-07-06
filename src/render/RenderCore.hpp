@@ -979,6 +979,46 @@ void DrawIndirect(VkCommandBuffer cmd, const DrawIndirectState& state, const T& 
 											  VK_SHADER_STAGE_FRAGMENT_BIT);
 
 // ============================================================================
+// Explicit GPU-Driven Draw Indirect Utilities
+// ============================================================================
+
+struct DrawIndexedIndirectState {
+	VkPipeline pipeline = VK_NULL_HANDLE;
+	VkPipelineLayout layout = VK_NULL_HANDLE;
+	VkDescriptorSet set = VK_NULL_HANDLE;
+	VkBuffer argumentBuffer =
+		VK_NULL_HANDLE;		 // Buffer containing VkDrawIndexedIndirectCommand structs
+	VkDeviceSize offset = 0; // Byte offset into argumentBuffer
+	uint32_t drawCount = 0;	 // Number of draw commands to execute
+	uint32_t stride = 0;	 // Stride (sizeof(VkDrawIndexedIndirectCommand))
+};
+
+struct DrawIndexedIndirectCountState {
+	VkPipeline pipeline = VK_NULL_HANDLE;
+	VkPipelineLayout layout = VK_NULL_HANDLE;
+	VkDescriptorSet set = VK_NULL_HANDLE;
+	VkBuffer argumentBuffer =
+		VK_NULL_HANDLE;					   // Buffer containing VkDrawIndexedIndirectCommand structs
+	VkDeviceSize offset = 0;			   // Byte offset into argumentBuffer
+	VkBuffer countBuffer = VK_NULL_HANDLE; // Buffer containing a single uint32_t draw count
+	VkDeviceSize countBufferOffset = 0;	   // Byte offset into countBuffer
+	uint32_t maxDrawCount = 0;			   // Upper limit to prevent out-of-bound draws
+	uint32_t stride = 0;				   // Stride (sizeof(VkDrawIndexedIndirectCommand))
+};
+
+template <GpuTriviallyCopyable T>
+void DrawIndexedIndirect(VkCommandBuffer cmd, const DrawIndexedIndirectState& state,
+						 const T& pushConstants,
+						 VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT |
+													 VK_SHADER_STAGE_FRAGMENT_BIT) noexcept;
+
+template <GpuTriviallyCopyable T>
+void DrawIndexedIndirectCount(VkCommandBuffer cmd, const DrawIndexedIndirectCountState& state,
+							  const T& pushConstants,
+							  VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT |
+														  VK_SHADER_STAGE_FRAGMENT_BIT) noexcept;
+
+// ============================================================================
 // Surface helpers
 // ============================================================================
 
