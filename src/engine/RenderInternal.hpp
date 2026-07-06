@@ -157,10 +157,11 @@ using GlobalSceneLayout = Vk::DescriptorLayout<
 																				   // (UBO)
 	Vk::StorageBufferSlot<3, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT>, // Lights
 																						 // (SSBO)
-	Vk::StorageBufferSlot<4, VK_SHADER_STAGE_VERTEX_BIT>,  // Instance buffer (SSBO)
-	Vk::StorageBufferSlot<5, VK_SHADER_STAGE_VERTEX_BIT>,  // Joint matrices (SSBO)
-	Vk::StorageBufferSlot<6, VK_SHADER_STAGE_VERTEX_BIT>,  // Previous Joint matrices (SSBO)
-	Vk::StorageBufferSlot<7, VK_SHADER_STAGE_VERTEX_BIT>,  // Morph target deltas (SSBO)
+	Vk::StorageBufferSlot<4, VK_SHADER_STAGE_VERTEX_BIT |
+								 VK_SHADER_STAGE_FRAGMENT_BIT>, // Instance buffer (SSBO)
+	Vk::StorageBufferSlot<5, VK_SHADER_STAGE_VERTEX_BIT>,		// Joint matrices (SSBO)
+	Vk::StorageBufferSlot<6, VK_SHADER_STAGE_VERTEX_BIT>,		// Previous Joint matrices (SSBO)
+	Vk::StorageBufferSlot<7, VK_SHADER_STAGE_VERTEX_BIT>,		// Morph target deltas (SSBO)
 	Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>, // Pre-filtered Cubemap (Specular IBL)
 	Vk::SampledImageSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>, // 2D BRDF LUT (2D Texture)
 	Vk::SamplerSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>	   // Clamping Sampler
