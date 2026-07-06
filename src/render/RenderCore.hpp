@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "RenderCore.h"
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
 #error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
 #endif
@@ -290,6 +291,12 @@ template <size_t ColorCount, bool HasDepth> class TypedPipeline {
 // ============================================================================
 // Context RAII
 // ============================================================================
+
+VkInstance CreateInstance(std::string_view appName, uint32_t appVersion,
+						  std::span<const std::string_view> extensions,
+						  bool enableValidation) noexcept;
+
+ZHLN_PhysicalDeviceInfo SelectDevice(VkInstance instance, VkSurfaceKHR surface) noexcept;
 
 class Context {
   public:

@@ -28,7 +28,7 @@ bool IsRunning(void* context);
 void ProcessEvents(void* context, InputContext* input);
 
 // Required extensions for VK_KHR_display
-std::vector<const char*> GetRequiredInstanceExtensions();
+std::vector<std::string_view> GetRequiredInstanceExtensions();
 
 // Creates the Vulkan Surface directly on the physical monitor
 VkSurfaceKHR CreateSurface(VkInstance instance, VkPhysicalDevice physical, void* context,

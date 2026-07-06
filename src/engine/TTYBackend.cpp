@@ -382,7 +382,7 @@ void ProcessEvents(void* context, InputContext* input) {
 	}
 }
 
-std::vector<const char*> GetRequiredInstanceExtensions() {
+std::vector<std::string_view> GetRequiredInstanceExtensions() {
 	return {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_DISPLAY_EXTENSION_NAME,
 			VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
 			VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME};
@@ -498,7 +498,7 @@ void* Init(uint32_t, uint32_t) {
 void Shutdown(void*) {}
 void EmergencyRestore() {}
 void ProcessEvents(void*, InputContext*) {}
-std::vector<const char*> GetRequiredInstanceExtensions() {
+std::vector<std::string_view> GetRequiredInstanceExtensions() {
 	return {};
 }
 VkSurfaceKHR CreateSurface(VkInstance, VkPhysicalDevice, void*, uint32_t&, uint32_t&) {

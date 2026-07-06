@@ -159,9 +159,10 @@ void RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int
 
 namespace {
 
-std::vector<const char*> GetPlatformInstanceExtensions(Window& window,
-													   bool enableValidation) noexcept {
-	std::vector<const char*> inst_exts;
+std::vector<std::string_view> GetPlatformInstanceExtensions(Window& window,
+															bool enableValidation) noexcept {
+	std::vector<std::string_view> inst_exts;
+
 	if (window.IsTTY()) {
 		inst_exts = TTYBackend::GetRequiredInstanceExtensions();
 	} else {
@@ -185,40 +186,16 @@ std::vector<const char*> GetPlatformInstanceExtensions(Window& window,
 		inst_exts.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
 		inst_exts.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
 	}
+
 	if (enableValidation) {
 		inst_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 	}
+
 	if constexpr (isMac) {
 		inst_exts.push_back("VK_KHR_portability_enumeration");
 	}
+
 	return inst_exts;
-}
-
-VkInstance CreateVulkanInstance(const char* appName, uint32_t appVersion,
-								const std::vector<const char*>& extensions,
-								bool enableValidation) noexcept {
-	ZHLN_InstanceDesc inst_desc = {.app_name = {},
-								   .version = appVersion,
-								   .extension_count = static_cast<uint32_t>(extensions.size()),
-								   .severity_flags =
-									   VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-									   VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
-								   .extensions = extensions.data(),
-								   .enable_validation = enableValidation};
-
-	size_t i = 0;
-	for (; i < 63 && appName[i] != '\0'; ++i) {
-		inst_desc.app_name[i] = appName[i];
-	}
-	inst_desc.app_name[i] = '\0';
-
-	return ZHLN_CreateInstance(&inst_desc);
-}
-
-ZHLN_PhysicalDeviceInfo SelectDevice(VkInstance instance, VkSurfaceKHR surface) noexcept {
-	ZHLN_DeviceSelectDesc select_desc = {
-		.instance = instance, .surface = surface, .score_fn = nullptr, .score_userdata = nullptr};
-	return ZHLN_SelectPhysicalDevice(&select_desc);
 }
 
 auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps) noexcept {
@@ -384,7 +361,7 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	auto inst_exts = GetPlatformInstanceExtensions(window, cfg.enableValidation);
 
 	// Phase 2: Instance creation
-	VkInstance instance = CreateVulkanInstance(
+	VkInstance instance = Vk::CreateInstance(
 		_impl->appName.c_str(), VK_MAKE_API_VERSION(0, 1, 0, 0), inst_exts, cfg.enableValidation);
 	if (instance == VK_NULL_HANDLE) {
 		ZHLN::Panic("FATAL: Failed to create Vulkan Instance!");
@@ -397,7 +374,7 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 		static_cast<VkSurfaceKHR>(window.CreateVulkanSurface(instance, nullptr, width, height));
 
 	// Phase 4: Device selection
-	ZHLN_PhysicalDeviceInfo physicalInfo = SelectDevice(instance, raw_surface);
+	auto physicalInfo = Vk::SelectDevice(instance, raw_surface);
 	if (physicalInfo.handle == VK_NULL_HANDLE) {
 		ZHLN::Panic("FATAL: Failed to select a suitable physical device.");
 	}
