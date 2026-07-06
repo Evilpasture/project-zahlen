@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
-#include "RenderParams.hpp"
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Math3D.hpp"
 #include "backends/imgui_impl_vulkan.h"
@@ -14,21 +13,6 @@
 namespace ZHLN {
 
 namespace {
-
-template <typename TargetImageT, typename RecordFn>
-inline void DispatchPostProcessPass(VkCommandBuffer cmd, TargetImageT& targetImage,
-									VkAttachmentLoadOp loadOp, RecordFn&& recordFn,
-									VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-									const Color4& clearColor = kClearColorBlack) noexcept {
-	auto [attachment, scope] = Vk::ReadToColor(cmd, targetImage);
-	Vk::DynamicPass(targetImage.extent)
-		.AddColor(attachment, loadOp, storeOp, clearColor)
-		.Execute(cmd, std::forward<RecordFn>(recordFn));
-}
-
-// ============================================================================
-// Private Core Refactoring Helpers
-// ============================================================================
 struct TaskSystemSchedulerAdapter {
 	void ParallelFor(uint32_t count, uint32_t chunkSize, auto&& func) const {
 		TaskSystem::ParallelFor(count, chunkSize, std::forward<decltype(func)>(func));
@@ -36,7 +20,6 @@ struct TaskSystemSchedulerAdapter {
 };
 enum class RenderPassType : uint8_t { Main, Shadow };
 
-// flags & 0xFF == 2 marks an instance as forward-only (transparent / non-deferred).
 [[nodiscard]] constexpr bool IsForwardOnly(uint32_t instanceFlags) noexcept {
 	return (instanceFlags & 0xFF) == 2;
 }
@@ -70,7 +53,6 @@ inline void SubmitDrawInstanced(VkCommandBuffer cmd, const DrawCommand& drawCmd,
 	const VkPipelineLayout layout =
 		(layoutOverride != VK_NULL_HANDLE) ? layoutOverride : nativeMat->layout.Get();
 
-	// Resolved from pre-assembled GPU structure
 	const uint32_t vertexCount = drawCmd.instanceData.iboAddress != 0
 									 ? drawCmd.instanceData.indexCount
 									 : drawCmd.instanceData.vertexCount;
@@ -85,12 +67,7 @@ inline void SubmitDrawInstanced(VkCommandBuffer cmd, const DrawCommand& drawCmd,
 					   .firstInstance = instanceIdx},
 					  pushConstants, stages);
 }
-
 } // namespace
-
-// ============================================================================
-// Culling Policy Implementations
-// ============================================================================
 
 struct GpuCullingPolicy {
 	static void
@@ -194,10 +171,7 @@ struct CpuCullingPolicy {
 											 .depthFormat = VK_FORMAT_D32_SFLOAT},
 					color_att.extent, drawCount, kParallelChunkSize,
 
-					// 1. Inject the scheduler adapter
 					TaskSystemSchedulerAdapter{},
-
-					// 2. Inject the command buffer resolver callback
 					[&]([[maybe_unused]] uint32_t chunkIdx) -> VkCommandBuffer {
 						uint32_t wIdx = TaskSystem::GetWorkerIndex();
 						if (wIdx >= ctx.workerCmds.size()) {
@@ -208,8 +182,6 @@ struct CpuCullingPolicy {
 								1, std::memory_order_relaxed);
 						return ctx.workerCmds[wIdx].pools[recorder.frameIndex][localCmdIdx];
 					},
-
-					// 3. Inject the draw recording function
 					[&](VkCommandBuffer sec_cmd, uint32_t i) {
 						const auto& drawCmd = ctx.drawQueue[i];
 						if (!IsVisibleIn(drawCmd.flags, RenderPassType::Main)) {
@@ -233,30 +205,21 @@ void ExecutePass(const FrameRecorder& recorder, const ZHLN::Array<GroupRange>& g
 	CullingPolicy::Record(recorder, groups, drawCount, std::forward<Args>(args)...);
 }
 
-// ============================================================================
-// RenderPass Implementation
-// ============================================================================
-
 namespace Passes {
 
 void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 	VkCommandBuffer cmd = recorder.cmd;
 	auto& ctx = recorder.ctx;
 
-	// 1. Initialize frustums for all 4 cascades on the stack using existing SIMD structures
 	std::array<Frustum, RenderContext::Impl::NUM_CASCADES> cascadeFrustums{};
 	for (uint32_t c = 0; c < RenderContext::Impl::NUM_CASCADES; ++c) {
 		cascadeFrustums[c].Update(ctx.currentUniforms.lightSpaceMatrices[c]);
 	}
 
-	// 2. Map our double-buffered shadow indirect command buffer (CPU_TO_GPU memory)
 	auto mapped = ctx.shadowIndirectBuffers[recorder.frameIndex].Map();
 	auto* indirectCmdsBase = static_cast<VkDrawIndirectCommand*>(mapped.data);
 
-	// Track write-pointers (offsets) for all 8 potential shadow passes
-	// [0..3] are Cascades, [4..7] are Punctual Lights
 	std::array<uint32_t, 8> passWriteOffsets{};
-
 	for (uint32_t c = 0; c < 4; ++c) {
 		passWriteOffsets[c] = c * kGpuCullingMaxInstances;
 	}
@@ -264,14 +227,11 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 		passWriteOffsets[4 + l] = (4 + l) * kGpuCullingMaxInstances;
 	}
 
-	// Track actual draw counts for each pass
 	std::array<uint32_t, 8> passDrawCounts = {0, 0, 0, 0, 0, 0, 0, 0};
 
-	// 3. SINGLE CACHE-COHERENT MEMORY SWEEP (O(N))
 	for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
 		const auto& drawCmd = ctx.drawQueue[i];
 
-		// Fast skip if the mesh is not a shadow caster or is forward-only
 		if (!IsVisibleIn(drawCmd.flags, RenderPassType::Shadow) ||
 			IsForwardOnly(drawCmd.instanceData.flags)) {
 			continue;
@@ -293,41 +253,32 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 		JPH::Vec3 meshPos = drawCmd.instanceData.world.GetTranslation();
 		float radius = drawCmd.instanceData.cullRadius;
 
-		// --- Check Cascades (0 to 3) ---
 		for (uint32_t c = 0; c < RenderContext::Impl::NUM_CASCADES; ++c) {
 			if (cascadeFrustums[c].IsSphereVisible(meshPos, radius)) {
 				writeDraw(c);
 			}
 		}
 
-		// --- Check Punctual Lights (4 to 7) ---
 		for (const auto& light : ctx.mappedLights) {
 			if (light.shadowLayer < 0 || light.type != LightType::Point) {
 				continue;
 			}
 
-			// Map the shadowLayer directly to our [4..7] slots
 			uint32_t slotIdx = 4 + light.shadowLayer;
 			if (slotIdx >= 8) {
 				continue;
 			}
 
-			ZHLN::Assert(passDrawCounts[slotIdx] < kGpuCullingMaxInstances);
-
 			JPH::Vec3 lightPos(light.position[0], light.position[1], light.position[2]);
-
-			// Use squared length to avoid the expensive square root calculation
 			float distToLightSq = (meshPos - lightPos).LengthSq();
 			float maxRange = light.range + radius;
-			float maxRangeSq = maxRange * maxRange;
 
-			if (distToLightSq <= maxRangeSq) {
+			if (distToLightSq <= (maxRange * maxRange)) {
 				writeDraw(slotIdx);
 			}
 		}
 	}
 
-	// 4. DISPATCH DIRECTIONAL SHADOW CASCADES (MDI)
 	{
 		Profiler::ScopedGpuProfile<Stages::ShadowPass, FrameProfiler> timer(
 			cmd, recorder.frameIndex, ctx.gpuProfiler);
@@ -339,13 +290,9 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 				.extent = ctx.shadowMap.extent,
 				.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
 
-			auto [cascade_att, scope] =
-				Vk::ScopedBarrier<Vk::ShaderReadState, Vk::DepthAttachmentState>(
-					cmd, cascadeLayerImage, VK_IMAGE_ASPECT_DEPTH_BIT);
-
 			Vk::DynamicPass(cascadeLayerImage.extent)
-				.AddDepth(cascade_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-						  kShadowClearDepth)
+				.AddDepth(cascadeLayerImage, VK_ATTACHMENT_LOAD_OP_CLEAR,
+						  VK_ATTACHMENT_STORE_OP_STORE, kShadowClearDepth)
 				.Execute(cmd, std::forward<decltype(recordFn)>(recordFn));
 		};
 
@@ -371,11 +318,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 		}
 	}
 
-	// 5. DISPATCH PUNCTUAL SHADOWS (MDI)
 	if (ctx.punctualShadowPipeline.Valid() && !ctx.punctualShadowViews.empty()) {
-		auto [atlas_att, scope] = Vk::ScopedBarrier<Vk::ShaderReadState, Vk::DepthAttachmentState>(
-			cmd, ctx.shadowAtlas, VK_IMAGE_ASPECT_DEPTH_BIT);
-
 		auto ExecutePunctualPass =
 			[&](const Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>& subViewImage,
 				auto&& recordFn) {
@@ -425,8 +368,8 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 }
 
 void MainPass::Execute(const FrameRecorder& recorder,
-					   SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-									  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>
+					   SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+									  VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>
 						   in) const noexcept {
 	VkCommandBuffer cmd = recorder.cmd;
 	auto& ctx = recorder.ctx;
@@ -434,23 +377,16 @@ void MainPass::Execute(const FrameRecorder& recorder,
 	Profiler::ScopedGpuProfile<Stages::MainPass, FrameProfiler> timer(cmd, recorder.frameIndex,
 																	  ctx.gpuProfiler);
 
-	const auto [color_att, scope1] = Vk::ReadToColor(cmd, in.sceneColor);
-	const auto [vel_att, scope2] = Vk::ReadToColor(cmd, in.velocity);
-	const auto [norm_att, scope3] = Vk::ReadToColor(cmd, in.normRough);
-	const auto [depth_att, scope4] =
-		Vk::ScopedBarrier<Vk::ShaderReadState, Vk::DepthAttachmentState>(cmd, in.depth,
-																		 VK_IMAGE_ASPECT_DEPTH_BIT);
-
 	const auto drawCount = static_cast<uint32_t>(ctx.drawQueue.size());
 	if (drawCount == 0) {
-		Vk::DynamicPass(color_att.extent)
-			.AddColor(color_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+		Vk::DynamicPass(in.sceneColor.extent)
+			.AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
 					  kClearColorScene)
-			.AddColor(vel_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+			.AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
 					  kClearColorVelocity)
-			.AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+			.AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
 					  kClearColorNormalRoughness)
-			.AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+			.AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
 					  kClearDepthValue)
 			.Execute(cmd, []() {});
 		return;
@@ -471,8 +407,7 @@ void MainPass::Execute(const FrameRecorder& recorder,
 		}
 
 		if (i == 0 || drawMat != currentMaterial) {
-			groups.push_back(GroupRange{
-				.material = const_cast<NativeMaterial*>(drawMat), .start = i, .count = 1});
+			groups.push_back(GroupRange{.material = drawMat, .start = i, .count = 1});
 			currentMaterial = drawMat;
 		} else {
 			groups.back().count++;
@@ -486,151 +421,24 @@ void MainPass::Execute(const FrameRecorder& recorder,
 	}();
 
 	if (useGpuCulling) {
-		ExecutePass<GpuCullingPolicy>(recorder, groups, drawCount, color_att, vel_att, norm_att,
-									  depth_att);
+		ExecutePass<GpuCullingPolicy>(recorder, groups, drawCount, in.sceneColor, in.velocity,
+									  in.normRough, in.depth);
 	} else {
-		ExecutePass<CpuCullingPolicy>(recorder, groups, drawCount, color_att, vel_att, norm_att,
-									  depth_att);
+		ExecutePass<CpuCullingPolicy>(recorder, groups, drawCount, in.sceneColor, in.velocity,
+									  in.normRough, in.depth);
 	}
-}
-
-[[nodiscard]] auto DeferredLightingPass::Execute(
-	const FrameRecorder& recorder,
-	SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-				   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> in) const noexcept
-	-> Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-
-	VkCommandBuffer cmd = recorder.cmd;
-	auto& ctx = recorder.ctx;
-	VkDevice device = ctx.ctx.Device();
-	uint32_t fIdx = recorder.frameIndex;
-
-	// ughhh please Khronos wizards give us a better translation layer for MacOS
-	auto GetTLAS = [](const FrameRecorder& rec) noexcept {
-		if constexpr (isMac) {
-			return Vk::SkipWrite{};
-		} else {
-			return rec.ctx.rtCtx.Valid() ? &rec.ctx.tlas.Current() : nullptr;
-		}
-	};
-
-	Profiler::ScopedGpuProfile<Stages::PostProcessPass, FrameProfiler> timer(cmd, fIdx,
-																			 ctx.gpuProfiler);
-
-	struct PPPushConstants {
-		JPH::Mat44 invViewProj;
-		JPH::Mat44 viewProj;
-		alignas(16) std::array<float, 4> camPos;
-		int giMode;
-		float aoRadius;
-		float aoBias;
-		float aoPower;
-		float giIntensity;
-		int giSamples;
-		int enableSSR;
-		int enableRTR;
-		int _pad;
-	} pc = {
-		.invViewProj = ctx.current_view_proj.Inversed(),
-		.viewProj = ctx.current_view_proj,
-		.camPos = {ctx.currentUniforms.camPos[0], ctx.currentUniforms.camPos[1],
-				   ctx.currentUniforms.camPos[2], ctx.currentUniforms.camPos[3]},
-		.giMode = ctx.giSettings.mode,
-		.aoRadius = ctx.giSettings.aoRadius,
-		.aoBias = ctx.giSettings.aoBias,
-		.aoPower = ctx.giSettings.aoPower,
-		.giIntensity = ctx.giSettings.giIntensity,
-		.giSamples = ctx.giSettings.giSamples,
-		.enableSSR = ctx.giSettings.enableSSR,
-		.enableRTR = (ctx.tlas.Current() != VK_NULL_HANDLE) ? ctx.giSettings.enableRTR : 0,
-		._pad = {},
-	};
-
-	PostProcessResources res = {
-		.gbuffer = {.sceneColor = in.sceneColor, .depth = in.depth, .normRough = in.normRough},
-		.frameUniforms = ctx.frameUniformBuffers[fIdx],
-		.defaultSampler = ctx.defaultSampler,
-		.pointSampler = ctx.pointSampler,
-		.clampSampler = ctx.clampSampler};
-
-	auto ambient_ro = ctx.ambientPass.ExecuteWithTransitions(
-		cmd, device, ctx.ambientTarget, pc,
-		AmbientPassParams{.sceneColor = res.gbuffer.sceneColor,
-						  .defaultSampler = res.defaultSampler.Get(),
-						  .depth = res.gbuffer.depth,
-						  .normRough = res.gbuffer.normRough,
-						  .pointSampler = res.pointSampler.Get(),
-						  .prefilteredView = ctx.iblPayload.prefilteredView.Get(),
-						  .brdfLutView = ctx.iblPayload.brdfLutView.Get(),
-						  .clampSampler = res.clampSampler.Get(),
-						  .frameUniformBuffer = res.frameUniforms.Handle()});
-
-	uint32_t lightVariant = DetermineLightingVariant(ctx.giSettings, ctx.rtCtx.Valid());
-
-	auto light_ro = ctx.lightingPass.ExecuteVariantWithTransitions(
-		cmd, device, ctx.lightingTarget, lightVariant, pc,
-		LightingPassParams{.sceneColor = res.gbuffer.sceneColor,
-						   .defaultSampler = res.defaultSampler.Get(),
-						   .depth = res.gbuffer.depth,
-						   .normRough = res.gbuffer.normRough,
-						   .lightStorageBuffer = ctx.lightStorageBuffers[fIdx].Handle(),
-						   .frameUniformBuffer = res.frameUniforms.Handle(),
-						   .shadowMapView = ctx.shadowMap.view.Get(),
-						   .shadowSampler = ctx.shadowSampler.Get(),
-						   .ltcMatView = ctx.ltcMatView.Get(),
-						   .ltcAmpView = ctx.ltcAmpView.Get(),
-						   .clampSampler = res.clampSampler.Get(),
-						   .clusterGridBuffer = ctx.clusterGridBuffers[fIdx].Handle(),
-						   .lightIndexListBuffer = ctx.lightIndexListBuffers[fIdx].Handle(),
-						   .ambientTarget = ambient_ro,
-						   .pointSampler = res.pointSampler.Get(),
-						   .tlas = GetTLAS(recorder),
-						   .shadowAtlasCubeView = ctx.shadowAtlasCubeView.Get(),
-						   .shadowAtlas2DView = ctx.shadowAtlas2DView.Get()});
-
-	uint32_t reflVariant = DetermineReflectionVariant(ctx.giSettings, ctx.rtCtx.Valid());
-
-	return ctx.reflectionPass.ExecuteVariantWithTransitions(
-		cmd, device, ctx.postProcessTarget, reflVariant, pc,
-		ReflectionPassParams{.sceneColor = res.gbuffer.sceneColor,
-							 .defaultSampler = res.defaultSampler.Get(),
-							 .depth = res.gbuffer.depth,
-							 .normRough = res.gbuffer.normRough,
-							 .pointSampler = res.pointSampler.Get(),
-							 .prefilteredView = ctx.iblPayload.prefilteredView.Get(),
-							 .tlas = GetTLAS(recorder),
-							 .frameUniformBuffer = res.frameUniforms.Handle(),
-							 .brdfLutView = ctx.iblPayload.brdfLutView.Get(),
-							 .clampSampler = res.clampSampler.Get(),
-							 .lightingTarget = light_ro});
-}
-
-[[nodiscard]] constexpr uint32_t
-DeferredLightingPass::DetermineLightingVariant(const GISettings& gi, bool hasRt) const noexcept {
-	return (gi.enableRTR && hasRt) ? 1 : 0;
-}
-
-[[nodiscard]] constexpr uint32_t
-DeferredLightingPass::DetermineReflectionVariant(const GISettings& gi, bool hasRt) const noexcept {
-	return (gi.enableSSR ? 1 : 0) | ((gi.enableRTR && hasRt) ? 2 : 0);
 }
 
 void ForwardPass::Execute(
 	const FrameRecorder& recorder,
-	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> litColor,
-	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> depth) const noexcept {
-
+	Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> litColor,
+	Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> depth) const noexcept {
 	VkCommandBuffer cmd = recorder.cmd;
 	const auto& ctx = recorder.ctx;
 
-	const auto [color_att, color_scope] = Vk::ReadToColor(cmd, litColor);
-	const auto [depth_att, depth_scope] =
-		Vk::ScopedBarrier<Vk::ShaderReadState, Vk::DepthAttachmentState>(cmd, depth,
-																		 VK_IMAGE_ASPECT_DEPTH_BIT);
-
-	Vk::DynamicPass(color_att.extent)
-		.AddColor(color_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-		.AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+	Vk::DynamicPass(litColor.extent)
+		.AddColor(litColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+		.AddDepth(depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
 		.Execute(cmd, [&]() {
 			for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
 				const auto& drawCmd = ctx.drawQueue[i];
@@ -643,211 +451,30 @@ void ForwardPass::Execute(
 		});
 }
 
-[[nodiscard]] auto
-BloomPass::Execute(const FrameRecorder& recorder,
-				   Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor) const noexcept
-	-> Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-	VkCommandBuffer cmd = recorder.cmd;
-	const auto& ctx = recorder.ctx;
-	VkDevice device = ctx.ctx.Device();
-
-	Profiler::ScopedGpuProfile<Stages::BloomPass, FrameProfiler> timer(cmd, recorder.frameIndex,
-																	   ctx.gpuProfiler);
-
-	const auto bloomThreshold_u =
-		AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.bloomThresholdTarget);
-	const auto bloomBlur_u =
-		AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.bloomBlurTarget);
-	const auto bloomFinal_u =
-		AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.bloomFinalTarget);
-
-	// Threshold Pass
-	ctx.bloomThresholdPass.WriteNext(device, inColor, ctx.defaultSampler.Get());
-	DispatchPostProcessPass(cmd, bloomThreshold_u, VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-							[&]() { ctx.bloomThresholdPass.Execute(cmd); });
-
-	struct BlurPushConstants {
-		int horizontal;
-		float texelSize;
-	};
-
-	// Blur Passes
-	auto DispatchBlurPass = [&](auto& passObject, auto inputImage, auto targetImage, int horizontal,
-								float texelSize) noexcept {
-		passObject.WriteNext(device, inputImage, ctx.defaultSampler.Get());
-		DispatchPostProcessPass(cmd, targetImage, VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
-			passObject.Execute(cmd,
-							   BlurPushConstants{.horizontal = horizontal, .texelSize = texelSize});
-		});
-	};
-
-	DispatchBlurPass(ctx.bloomBlurHPass, bloomThreshold_u, bloomBlur_u, 1,
-					 1.0f / (float)ctx.bloomThresholdTarget.extent.width);
-
-	DispatchBlurPass(ctx.bloomBlurVPass, bloomBlur_u, bloomFinal_u, 0,
-					 1.0f / (float)ctx.bloomBlurTarget.extent.height);
-
-	return bloomFinal_u;
-}
-
-[[nodiscard]] auto AAPass::Execute(const FrameRecorder& recorder, SceneRO in) const noexcept
-	-> SceneRO {
-	VkCommandBuffer cmd = recorder.cmd;
-	auto& ctx = recorder.ctx;
-
-	Profiler::ScopedGpuProfile<Stages::AAPass, FrameProfiler> timer(cmd, recorder.frameIndex,
-																	ctx.gpuProfiler);
-
-	auto color_ro = in.sceneColor;
-
-	if (ctx.aaState.mode == AAMode::TAA && ctx.taaPass.pipeline.Valid()) {
-		color_ro = ExecuteTAA(cmd, recorder, in, color_ro);
-	} else if (ctx.aaState.mode == AAMode::FXAA && ctx.fxaaPass.pipeline.Valid()) {
-		color_ro = ExecuteFXAA(cmd, recorder, in, color_ro);
-	} else if (ctx.aaState.mode == AAMode::SMAA && ctx.smaaEdgePass.pipeline.Valid()) {
-		color_ro = ExecuteSMAA(cmd, recorder, in, color_ro);
-	}
-
-	return {.sceneColor = color_ro,
-			.velocity = in.velocity,
-			.normRough = in.normRough,
-			.depth = in.depth};
-}
-
-[[nodiscard]] auto AAPass::ExecuteTAA(VkCommandBuffer cmd, const FrameRecorder& recorder,
-									  const SceneRO& in, ColorImageRO color_ro) const noexcept
-	-> ColorImageRO {
-	const auto& ctx = recorder.ctx;
-	const auto accumCurr_ro =
-		AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.accumBuffers.Current());
-	const auto accumNext_u =
-		AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.accumBuffers.Next());
-
-	struct TAAPushConstants {
-		float feedback;
-	};
-
-	DispatchPostProcessPass(cmd, accumNext_u, VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
-		ctx.taaPass.WriteNext(ctx.ctx.Device(), color_ro, accumCurr_ro, in.velocity,
-							  ctx.defaultSampler.Get(),
-							  ctx.frameUniformBuffers[recorder.frameIndex].Handle());
-
-		ctx.taaPass.Execute(cmd, TAAPushConstants{.feedback = ctx.aaState.taaFeedback});
-	});
-
-	return accumNext_u;
-}
-
-[[nodiscard]] auto AAPass::ExecuteFXAA(VkCommandBuffer cmd, const FrameRecorder& recorder,
-									   const SceneRO& in, ColorImageRO color_ro) const noexcept
-	-> ColorImageRO {
-	const auto& ctx = recorder.ctx;
-	const auto accumNext_u =
-		AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.accumBuffers.Next());
-
-	struct FXAAPushConstants {
-		float rcpFrameX;
-		float rcpFrameY;
-		float subpix;
-		float edgeThreshold;
-		float edgeThresholdMin;
-		float _pad;
-	} pc = {.rcpFrameX = 1.0f / (float)in.sceneColor.extent.width,
-			.rcpFrameY = 1.0f / (float)in.sceneColor.extent.height,
-			.subpix = ctx.aaState.fxaaSubpix,
-			.edgeThreshold = ctx.aaState.fxaaEdgeThreshold,
-			.edgeThresholdMin = ctx.aaState.fxaaEdgeThresholdMin,
-			._pad = 0.0f};
-
-	DispatchPostProcessPass(cmd, accumNext_u, VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
-		ctx.fxaaPass.WriteNext(ctx.ctx.Device(), color_ro, ctx.defaultSampler.Get());
-		ctx.fxaaPass.Execute(cmd, pc);
-	});
-
-	return accumNext_u;
-}
-
-[[nodiscard]] auto AAPass::ExecuteSMAA(VkCommandBuffer cmd, const FrameRecorder& recorder,
-									   const SceneRO& in, ColorImageRO color_ro) const noexcept
-	-> ColorImageRO {
-	const auto& ctx = recorder.ctx;
-	struct SMAAMetrics {
-		float rcpWidth;
-		float rcpHeight;
-		float width;
-		float height;
-	} metrics = {.rcpWidth = 1.0f / (float)in.sceneColor.extent.width,
-				 .rcpHeight = 1.0f / (float)in.sceneColor.extent.height,
-				 .width = (float)in.sceneColor.extent.width,
-				 .height = (float)in.sceneColor.extent.height};
-
-	const auto smaaEdge_u =
-		AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.smaaEdgeTarget);
-	const auto smaaEdge_ro = smaaEdge_u;
-
-	DispatchPostProcessPass(cmd, smaaEdge_u, VK_ATTACHMENT_LOAD_OP_CLEAR, [&]() {
-		ctx.smaaEdgePass.WriteNext(ctx.ctx.Device(), color_ro, ctx.defaultSampler.Get(),
-								   ctx.pointSampler.Get());
-		ctx.smaaEdgePass.Execute(cmd, metrics,
-								 VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
-	});
-
-	const auto smaaWeight_u =
-		AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.smaaWeightTarget);
-	const auto smaaWeight_ro = smaaWeight_u;
-
-	DispatchPostProcessPass(cmd, smaaWeight_u, VK_ATTACHMENT_LOAD_OP_CLEAR, [&]() {
-		const auto& [areaView, searchView] =
-			std::tie(ctx.textureViews[ctx.smaaAreaTexIdx], ctx.textureViews[ctx.smaaSearchTexIdx]);
-
-		ctx.smaaWeightPass.WriteNext(ctx.ctx.Device(), smaaEdge_ro, areaView, searchView,
-									 ctx.defaultSampler.Get(), ctx.pointSampler.Get());
-		ctx.smaaWeightPass.Execute(cmd, metrics,
-								   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
-	});
-
-	const auto accumNext_u =
-		AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ctx.accumBuffers.Next());
-
-	DispatchPostProcessPass(cmd, accumNext_u, VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
-		ctx.smaaBlendPass.WriteNext(ctx.ctx.Device(), color_ro, smaaWeight_ro,
-									ctx.defaultSampler.Get(), ctx.pointSampler.Get());
-		ctx.smaaBlendPass.Execute(cmd, metrics,
-								  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
-	});
-
-	return accumNext_u;
-}
-
-void BlitPass::Execute(
-	const FrameRecorder& recorder, Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor,
-	Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> bloomColor) const noexcept {
+void BlitPass::Execute(const FrameRecorder& recorder,
+					   Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor,
+					   Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> bloomColor,
+					   Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> swapchainTarget,
+					   int fullBright) const noexcept {
 	VkCommandBuffer cmd = recorder.cmd;
 	auto& ctx = recorder.ctx;
 
 	Profiler::ScopedGpuProfile<Stages::BlitPass, FrameProfiler> timer(cmd, recorder.frameIndex,
 																	  ctx.gpuProfiler);
 
-	uint32_t imageIdx = ctx.current_image_index;
-	Vk::TypedImage<VK_IMAGE_LAYOUT_UNDEFINED> swap_u = {
-		.handle = ctx.presentation.swapchain.Get().images[imageIdx],
-		.view = ctx.presentation.swapchain.Get().views[imageIdx],
-		.extent = inColor.extent,
-		.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
-
-	// 1. One-way transition for Swapchain (Undefined -> ColorAttachment)
-	auto swap_att = Vk::IssueBarrier<Vk::UndefinedState, Vk::ColorAttachmentState>(cmd, swap_u);
-
 	ctx.blitPass.WriteNext(ctx.ctx.Device(), inColor, ctx.defaultSampler.Get(), bloomColor);
 
-	RenderContext::Impl::BlitPushConstants pc = {.vignetteIntensity =
-													 ctx.giSettings.vignetteIntensity,
-												 .vignettePower = ctx.giSettings.vignettePower,
-												 .fullBright = ctx.currentUniforms.fullBright};
+	struct BlitPushConstants {
+		float vignetteIntensity;
+		float vignettePower;
+		int fullBright;
+	} pc = {.vignetteIntensity = ctx.giSettings.vignetteIntensity,
+			.vignettePower = ctx.giSettings.vignettePower,
+			.fullBright = fullBright};
 
 	if (ctx.blitPass.pipeline.Valid()) {
 		Vk::DynamicPass(inColor.extent)
-			.AddColor(swap_att, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+			.AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE)
 			.Execute(cmd, [&]() {
 				ctx.blitPass.Execute(cmd, pc);
 				if (!ctx.uiDrawQueue.empty()) {
@@ -891,9 +518,8 @@ void BlitPass::Execute(
 				}
 			});
 	}
-
-	// 2. Final pipeline barrier to pass off to OS presentation engine (ColorAttachment -> Present)
-	Vk::IssueBarrier<Vk::ColorAttachmentState, Vk::PresentState>(cmd, swap_att);
+	Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(
+		cmd, swapchainTarget.handle);
 }
 
 } // namespace Passes

@@ -78,23 +78,17 @@ float2 PackNormalOctahedron(float3 N) {
 [[vk::push_constant]] ObjectConstants obj;
 
 [[vk::binding(0, 0)]] Texture2D globalTextures[];
-
 [[vk::binding(1, 0)]] SamplerState defaultSampler;
-[[vk::binding(2, 0)]] Texture2DArray<float> shadowMap;
-[[vk::binding(3, 0)]] SamplerComparisonState shadowSampler;
-[[vk::binding(4, 0)]] ConstantBuffer<FrameUniforms> frame;
-[[vk::binding(5, 0)]] StructuredBuffer<Light> lights;
-[[vk::binding(6, 0)]] StructuredBuffer<InstanceData> g_instances;
-[[vk::binding(7, 0)]] StructuredBuffer<GPUJoint> g_joints;
+[[vk::binding(2, 0)]] ConstantBuffer<FrameUniforms> frame;
+[[vk::binding(3, 0)]] StructuredBuffer<Light> lights;
+[[vk::binding(4, 0)]] StructuredBuffer<InstanceData> g_instances;
+[[vk::binding(5, 0)]] StructuredBuffer<GPUJoint> g_joints;
+[[vk::binding(6, 0)]] StructuredBuffer<GPUJoint> g_prevJoints;
+[[vk::binding(7, 0)]] StructuredBuffer<float4> g_morphDeltas;
 
 [[vk::binding(8, 0)]] TextureCube prefilteredMap;
 [[vk::binding(9, 0)]] Texture2D brdfLUT;
-[[vk::binding(10, 0)]] StructuredBuffer<float4> g_morphDeltas;
-[[vk::binding(11, 0)]] SamplerState clampSampler;
-[[vk::binding(12, 0)]] Texture2D ltc_mat;
-[[vk::binding(13, 0)]] Texture2D ltc_amp;
-[[vk::binding(14, 0)]] StructuredBuffer<GPUJoint> g_prevJoints;
-[[vk::binding(15, 0)]] RaytracingAccelerationStructure tlas;
+[[vk::binding(10, 0)]] SamplerState clampSampler;
 
 struct VSOutput {
 	float4 pos : SV_Position;

@@ -1,3 +1,7 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// src/render/RenderGraph.hpp
 #pragma once
 
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
@@ -10,22 +14,33 @@ namespace ZHLN::Vk {
 // Compile-Time Resource Identification & Tagging
 // ============================================================================
 
-// Fixed-string wrapper for NTTP
 template <size_t N> struct ResourceName {
 	std::array<char, N> value{};
 
 	// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
-	constexpr ResourceName(const char (&str)[N]) { std::copy_n(str, N, value.begin()); }
+	constexpr ResourceName(const char (&str)[N]) {
+		for (size_t i = 0; i < N; ++i) {
+			value[i] = str[i];
+		}
+	}
 };
 
-// Represents a virtual image inside the compile-time graph
-template <ResourceName Name, VkFormat Format, VkImageAspectFlags Aspect> struct GraphImage {
+// Defined early so GraphPass and MakePass can resolve it during compilation
+template <typename... Ts> struct TypeList {
+	static constexpr size_t size = sizeof...(Ts);
+
+	// C++26 Pack Indexing on Types: T...[N]
+	template <size_t I> using type = Ts...[I];
+};
+
+template <ResourceName Name, VkFormat Format, VkImageAspectFlags Aspect, bool IsSwapchain = false>
+struct GraphImage {
 	static constexpr auto name = Name;
 	static constexpr VkFormat format = Format;
 	static constexpr VkImageAspectFlags aspect = Aspect;
+	static constexpr bool is_swapchain = IsSwapchain;
 };
 
-// Represents how a pass accesses an image
 template <typename Image, VkImageLayout Layout, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access>
 struct Usage {
 	using Resource = Image;
@@ -34,7 +49,6 @@ struct Usage {
 	static constexpr VkAccessFlags2 access = Access;
 };
 
-// Common usages
 template <typename Image>
 using ColorWrite =
 	Usage<Image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -45,30 +59,26 @@ using ShaderRead = Usage<Image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 						 VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT>;
 
 template <typename Image>
-using DepthWrite = Usage<Image, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-						 VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-							 VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-						 VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT>;
+using DepthWrite = Usage<
+	Image, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+	VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+	VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT>;
 
-template <ResourceName Name, typename UsagesTuple, typename RecordFn> struct GraphPass {
+template <ResourceName Name, typename UsagesList, typename RecordFn> struct GraphPass {
 	static constexpr auto name = Name;
-	using Usages = UsagesTuple;
+	using Usages = UsagesList;
 	RecordFn record;
 };
 
-// Helper factory to create passes
+// Modernized: Pack Usages directly into TypeList instead of std::tuple
 template <ResourceName Name, typename... Usages, typename RecordFn>
 constexpr auto MakePass(RecordFn&& record) {
-	return GraphPass<Name, std::tuple<Usages...>, RecordFn>{std::forward<RecordFn>(record)};
+	return GraphPass<Name, TypeList<Usages...>, RecordFn>{std::forward<RecordFn>(record)};
 }
 
 // ============================================================================
 // Compile-Time Meta-Programming & Graph Topology Discovery
 // ============================================================================
-
-template <typename... Ts> struct TypeList {
-	static constexpr size_t size = sizeof...(Ts);
-};
 
 namespace detail {
 
@@ -87,13 +97,13 @@ template <typename List1> struct MergeLists<List1, TypeList<>> {
 
 template <typename List1, typename Head, typename... Tail>
 struct MergeLists<List1, TypeList<Head, Tail...>> {
-	using type =
-		typename MergeLists<typename AppendUnique<List1, Head>::type, TypeList<Tail...>>::type;
+	using HeadResources = typename AppendUnique<List1, Head>::type;
+	using type = typename MergeLists<HeadResources, TypeList<Tail...>>::type;
 };
 
-template <typename UsagesTuple> struct ExtractResources;
+template <typename UsagesList> struct ExtractResources;
 
-template <typename... Usages> struct ExtractResources<std::tuple<Usages...>> {
+template <typename... Usages> struct ExtractResources<TypeList<Usages...>> {
 	using type = TypeList<typename Usages::Resource...>;
 };
 
@@ -107,20 +117,12 @@ template <typename Head, typename... Tail> struct CollectAllResources<Head, Tail
 	using type = typename MergeLists<HeadResources, TailResources>::type;
 };
 
+// Modernized: Elegant short-circuiting fold expression finding type index
 template <typename Target, typename... Ts>
 consteval auto GetResourceIndexImpl(TypeList<Ts...> /*unused*/) -> size_t {
-	size_t index = 0;
-	bool found = false;
-	auto check = [&]<typename T>() {
-		if (std::is_same_v<T, Target>) {
-			found = true;
-		}
-		if (!found) {
-			index++;
-		}
-	};
-	(check.template operator()<Ts>(), ...);
-	return index;
+	size_t idx = 0;
+	((std::is_same_v<Target, Ts> ? true : (++idx, false)) || ...);
+	return idx;
 }
 
 template <typename ResourceList, typename Target> consteval auto GetResourceIndex() -> size_t {
@@ -128,10 +130,6 @@ template <typename ResourceList, typename Target> consteval auto GetResourceInde
 	static_assert(idx < ResourceList::size, "Resource type is not registered in any pass.");
 	return idx;
 }
-
-// ============================================================================
-// Flat Compile-Time State Transition Table
-// ============================================================================
 
 struct ResourceState {
 	VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -144,42 +142,68 @@ template <typename ResourceList, typename... Passes> consteval auto ComputeState
 	constexpr size_t NumResources = ResourceList::size;
 
 	std::array<std::array<ResourceState, NumResources>, NumPasses> table{};
-
 	std::array<ResourceState, NumResources> currentStates{};
-	for (size_t r = 0; r < NumResources; ++r) {
-		currentStates[r] = {.layout = VK_IMAGE_LAYOUT_UNDEFINED,
-							.stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-							.access = 0};
-	}
 
-	size_t passIdx = 0;
-	auto processPass = [&]<typename Pass>() {
-		table[passIdx] = currentStates;
+	// Modernized: fold over indices directly
+	[&]<size_t... Is>(std::index_sequence<Is...>) {
+		((currentStates[Is] = {.layout = VK_IMAGE_LAYOUT_UNDEFINED,
+							   .stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+							   .access = 0}),
+		 ...);
+	}(std::make_index_sequence<NumResources>{});
 
-		using Usages = typename Pass::Usages;
-		auto updateUsage = [&]<typename U>() {
-			using Img = typename U::Resource;
-			constexpr size_t rIdx = GetResourceIndex<ResourceList, Img>();
-			currentStates[rIdx] = {.layout = U::layout, .stage = U::stage, .access = U::access};
+	auto simulatePasses = [&](bool record) noexcept(false) {
+		size_t passIdx = 0;
+		auto processPass = [&]<typename Pass>() noexcept(false) {
+			if (record) {
+				table[passIdx] = currentStates;
+			}
+
+			using Usages = typename Pass::Usages;
+
+			// Modernized: Standard C++26 index fold over TypeList usages
+			[&]<size_t... Is>(std::index_sequence<Is...>) {
+				(
+					[&]<size_t I>() {
+						using U = typename Usages::template type<I>;
+						using Img = typename U::Resource;
+						constexpr size_t rIdx = GetResourceIndex<ResourceList, Img>();
+						currentStates[rIdx] = {
+							.layout = U::layout, .stage = U::stage, .access = U::access};
+					}.template operator()<Is>(),
+					...);
+			}(std::make_index_sequence<Usages::size>{});
+
+			passIdx++;
 		};
 
-		[&]<size_t... Is>(std::index_sequence<Is...>) {
-			(updateUsage.template operator()<std::tuple_element_t<Is, Usages>>(), ...);
-		}(std::make_index_sequence<std::tuple_size_v<Usages>>{});
-
-		passIdx++;
+		(processPass.template operator()<Passes>(), ...);
 	};
 
-	(processPass.template operator()<Passes>(), ...);
+	// First pass to simulate end-of-frame states
+	simulatePasses(false);
+
+	// Reset swapchain images to UNDEFINED (C++26 index fold + nested if constexpr)
+	[&]<size_t... Is>(std::index_sequence<Is...>) {
+		(
+			[&]<size_t I>() {
+				using R = typename ResourceList::template type<I>;
+				if constexpr (R::is_swapchain) {
+					currentStates[I] = {.layout = VK_IMAGE_LAYOUT_UNDEFINED,
+										.stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+										.access = 0};
+				}
+			}.template operator()<Is>(),
+			...);
+	}(std::make_index_sequence<NumResources>{});
+
+	// Second pass to record actual valid looped states
+	simulatePasses(true);
 
 	return table;
 }
 
 } // namespace detail
-
-// ============================================================================
-// Type-Safe Flat Runtime Resource Bindings
-// ============================================================================
 
 struct GraphResource {
 	VkImage handle = VK_NULL_HANDLE;
@@ -189,8 +213,10 @@ struct GraphResource {
 template <typename ResourceList> class ResourceBinder {
   public:
 	template <typename Image> constexpr void Bind(VkImage handle, VkImageView view) noexcept {
-		constexpr size_t idx = detail::GetResourceIndex<ResourceList, Image>();
-		_resources[idx] = {handle, view};
+		constexpr size_t idx = detail::GetResourceIndexImpl<Image>(ResourceList{});
+		if constexpr (idx < ResourceList::size) {
+			_resources[idx] = {handle, view};
+		}
 	}
 
 	constexpr auto GetBindings() const noexcept
@@ -202,10 +228,6 @@ template <typename ResourceList> class ResourceBinder {
 	std::array<GraphResource, ResourceList::size> _resources{};
 };
 
-// ============================================================================
-// Zero-Overhead Compile-Time Frame Graph
-// ============================================================================
-
 template <typename... Passes> class CompileTimeFrameGraph {
   public:
 	using Resources = typename detail::CollectAllResources<Passes...>::type;
@@ -214,7 +236,6 @@ template <typename... Passes> class CompileTimeFrameGraph {
 	static constexpr size_t NumPasses = sizeof...(Passes);
 	static constexpr size_t NumResources = Resources::size;
 
-	// Computed completely once during compilation
 	static constexpr auto StateTable = detail::ComputeStateTable<Resources, Passes...>();
 
 	constexpr explicit CompileTimeFrameGraph(Passes&&... passes) : _passes(std::move(passes)...) {}
@@ -223,9 +244,9 @@ template <typename... Passes> class CompileTimeFrameGraph {
 		const auto& bindings = binder.GetBindings();
 
 		std::apply(
-			[&](const auto&... passPack) {
-				[&]<size_t... Is>(std::index_sequence<Is...>) {
-					// passPack...[Is] uses native C++26 value-level pack indexing [P2662R3]
+			[&](const auto&... passPack) noexcept(false) {
+				[&]<size_t... Is>(std::index_sequence<Is...>) noexcept(false) {
+					// C++26 Pack Indexing on Values: pack_name...[Index]
 					(ExecutePass<Is>(cmd, bindings, passPack...[Is]), ...);
 				}(std::make_index_sequence<NumPasses>{});
 			},
@@ -237,59 +258,71 @@ template <typename... Passes> class CompileTimeFrameGraph {
 	void ExecutePass(VkCommandBuffer cmd, const std::array<GraphResource, NumResources>& bindings,
 					 const PassType& pass) const {
 		using Usages = typename PassType::Usages;
-		constexpr size_t usageCount = std::tuple_size_v<Usages>;
+		constexpr size_t usageCount = Usages::size;
 
 		std::array<VkImageMemoryBarrier2, usageCount> barriers{};
 		size_t barrierIdx = 0;
 
 		[&]<size_t... Us>(std::index_sequence<Us...>) {
-			auto buildBarrier = [&]<size_t U>() {
-				using UsageType = std::tuple_element_t<U, Usages>;
-				using Img = typename UsageType::Resource;
+			(
+				[&]<size_t U>() {
+					using UsageType = typename Usages::template type<U>;
+					using Img = typename UsageType::Resource;
 
-				constexpr size_t rIdx = detail::GetResourceIndex<Resources, Img>();
+					// Fix 1: Added detail:: namespace prefix
+					constexpr size_t rIdx = detail::GetResourceIndex<Resources, Img>();
+					constexpr detail::ResourceState prevState = StateTable[PassIndex][rIdx];
+					const auto& resource = bindings[rIdx];
 
-				// O(1) Pass-State lookup instead of O(N^2) recursive templates
-				constexpr detail::ResourceState prevState = StateTable[PassIndex][rIdx];
+					constexpr VkAccessFlags2 writeMask =
+						VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
+						VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+						VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_HOST_WRITE_BIT |
+						VK_ACCESS_2_MEMORY_WRITE_BIT;
+					constexpr bool isWrite = (UsageType::access & writeMask) != 0;
 
-				// O(1) Direct array access for handles instead of nested tuple searches
-				const auto& resource = bindings[rIdx];
-
-				if (prevState.layout != UsageType::layout ||
-					prevState.layout == VK_IMAGE_LAYOUT_UNDEFINED) {
-					barriers[barrierIdx++] = VkImageMemoryBarrier2{
-						.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-						.pNext = nullptr,
-						.srcStageMask = prevState.stage,
-						.srcAccessMask = prevState.access,
-						.dstStageMask = UsageType::stage,
-						.dstAccessMask = UsageType::access,
-						.oldLayout = prevState.layout,
-						.newLayout = UsageType::layout,
-						.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-						.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-						.image = resource.handle,
-						.subresourceRange = {.aspectMask = Img::aspect,
-											 .baseMipLevel = 0,
-											 .levelCount = VK_REMAINING_MIP_LEVELS,
-											 .baseArrayLayer = 0,
-											 .layerCount = VK_REMAINING_ARRAY_LAYERS}};
-				}
-			};
-			(buildBarrier.template operator()<Us>(), ...);
+					if (prevState.layout != UsageType::layout ||
+						prevState.stage != UsageType::stage ||
+						prevState.access != UsageType::access ||
+						prevState.layout == VK_IMAGE_LAYOUT_UNDEFINED || isWrite) {
+						barriers[barrierIdx++] = VkImageMemoryBarrier2{
+							.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+							.pNext = nullptr,
+							.srcStageMask = prevState.stage,
+							.srcAccessMask = prevState.access,
+							.dstStageMask = UsageType::stage,
+							.dstAccessMask = UsageType::access,
+							.oldLayout = prevState.layout,
+							.newLayout = UsageType::layout,
+							.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+							.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+							.image = resource.handle,
+							.subresourceRange = {.aspectMask = Img::aspect,
+												 .baseMipLevel = 0,
+												 .levelCount = VK_REMAINING_MIP_LEVELS,
+												 .baseArrayLayer = 0,
+												 .layerCount = VK_REMAINING_ARRAY_LAYERS}};
+					}
+				}.template operator()<Us>(),
+				...);
 		}(std::make_index_sequence<usageCount>{});
 
-		// Submit the grouped pipeline barrier
 		if (barrierIdx > 0) {
+			// Fix 2: Explicitly initialize all struct members to suppress
+			// -Wmissing-field-initializers
 			VkDependencyInfo depInfo = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
 										.pNext = nullptr,
+										.dependencyFlags = 0,
+										.memoryBarrierCount = 0,
+										.pMemoryBarriers = nullptr,
+										.bufferMemoryBarrierCount = 0,
+										.pBufferMemoryBarriers = nullptr,
 										.imageMemoryBarrierCount =
 											static_cast<uint32_t>(barrierIdx),
 										.pImageMemoryBarriers = barriers.data()};
 			vkCmdPipelineBarrier2(cmd, &depInfo);
 		}
 
-		// Execute pass record lambda
 		pass.record(cmd);
 	}
 

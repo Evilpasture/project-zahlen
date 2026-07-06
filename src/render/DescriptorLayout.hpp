@@ -36,22 +36,28 @@ using BindlessCombinedImageSamplerSlot =
 	BindingSlot<B, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, S, Count, kBindlessFlags>;
 
 template <uint32_t B, VkShaderStageFlags S = VK_SHADER_STAGE_FRAGMENT_BIT>
-using SampledImageSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, S>;
+using SampledImageSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, S, 1,
+									 VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT>;
 
 template <uint32_t B, VkShaderStageFlags S = VK_SHADER_STAGE_FRAGMENT_BIT>
-using SamplerSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_SAMPLER, S>;
+using SamplerSlot =
+	BindingSlot<B, VK_DESCRIPTOR_TYPE_SAMPLER, S, 1, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT>;
 
 template <uint32_t B, VkShaderStageFlags S = VK_SHADER_STAGE_FRAGMENT_BIT>
-using CombinedImageSamplerSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, S>;
+using CombinedImageSamplerSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, S, 1,
+											 VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT>;
 
 template <uint32_t B, VkShaderStageFlags S = VK_SHADER_STAGE_COMPUTE_BIT>
-using StorageImageSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, S>;
+using StorageImageSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, S, 1,
+									 VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT>;
 
 template <uint32_t B, VkShaderStageFlags S = VK_SHADER_STAGE_VERTEX_BIT>
-using UniformSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, S>;
+using UniformSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, S, 1,
+								VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT>;
 
 template <uint32_t B, VkShaderStageFlags S = VK_SHADER_STAGE_COMPUTE_BIT>
-using StorageBufferSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, S>;
+using StorageBufferSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, S, 1,
+									  VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT>;
 
 template <uint32_t B, VkShaderStageFlags S = VK_SHADER_STAGE_FRAGMENT_BIT>
 using AccelerationStructureSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, S,

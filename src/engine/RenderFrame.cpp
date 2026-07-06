@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "RenderInternal.hpp"
 #include "Zahlen/Profiler.hpp"
-#include "detail/ControlFlow.hpp"
 #include "detail/RadixSort.hpp"
 #include "engine/Scheduler.hpp"
 
@@ -36,24 +35,15 @@ inline RenderFrameResult MapFrameResult(ZHLN_FrameResult res) noexcept {
 	return {weights[0], weights[1], weights[2], weights[3]};
 }
 
-/**
- * @brief Checks if any of the provided pointers are null using compile-time fold expressions.
- */
 template <typename... Ptrs> [[nodiscard]] constexpr bool AnyNull(Ptrs... ptrs) noexcept {
 	return (... || (ptrs == nullptr));
 }
 
-/**
- * @brief Inline barrier wrapper for the compute-to-vertex synchronization boundary.
- */
 inline void BarrierComputeWriteToVertexRead(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd) {
 	Vk::BeginBarrier<Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite>(cmd)
 		.TransitionTo<Vk::BarrierStage::Vertex, Vk::BarrierAccess::ShaderRead>();
 }
 
-/**
- * @brief Inline barrier wrapper for compute-write to fragment-read synchronization.
- */
 inline void BarrierComputeWriteToFragmentRead(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd) {
 	Vk::BeginBarrier<Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite>(cmd)
 		.TransitionTo<Vk::BarrierStage::Fragment, Vk::BarrierAccess::ShaderRead>();
@@ -64,6 +54,52 @@ inline void BarrierCounterReset(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd) 
 		.TransitionTo<Vk::BarrierStage::Compute,
 					  Vk::BarrierAccess::ShaderRead | Vk::BarrierAccess::ShaderWrite>();
 }
+
+template <typename TargetImageT, typename RecordFn>
+inline void DispatchPostProcessPass(VkCommandBuffer cmd, TargetImageT& targetImage,
+									VkAttachmentLoadOp loadOp, RecordFn&& recordFn,
+									VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+									const Color4& clearColor = kClearColorBlack) noexcept {
+	auto attachment = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(targetImage);
+	Vk::DynamicPass(targetImage.extent)
+		.AddColor(attachment, loadOp, storeOp, clearColor)
+		.Execute(cmd, std::forward<RecordFn>(recordFn));
+}
+
+// ----------------------------------------------------------------------------
+// Frame Graph Resource Tags
+// ----------------------------------------------------------------------------
+
+using Res_SceneColor =
+	Vk::GraphImage<"SceneColor", VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_Velocity = Vk::GraphImage<"Velocity", VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_NormRough =
+	Vk::GraphImage<"NormRough", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_Depth = Vk::GraphImage<"Depth", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
+using Res_ShadowMap = Vk::GraphImage<"ShadowMap", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
+using Res_ShadowAtlas =
+	Vk::GraphImage<"ShadowAtlas", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
+using Res_Ambient =
+	Vk::GraphImage<"Ambient", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_Lighting =
+	Vk::GraphImage<"Lighting", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_PostProcess =
+	Vk::GraphImage<"PostProcess", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_BloomThresh =
+	Vk::GraphImage<"BloomThresh", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_BloomBlur =
+	Vk::GraphImage<"BloomBlur", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_BloomFinal =
+	Vk::GraphImage<"BloomFinal", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_AccumCurr =
+	Vk::GraphImage<"AccumCurr", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_AccumNext =
+	Vk::GraphImage<"AccumNext", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_SmaaEdge = Vk::GraphImage<"SmaaEdge", VK_FORMAT_R8G8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_SmaaWeight =
+	Vk::GraphImage<"SmaaWeight", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_Swapchain =
+	Vk::GraphImage<"Swapchain", VK_FORMAT_B8G8R8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, true>;
 
 } // namespace
 
@@ -98,41 +134,7 @@ std::optional<Extent2D> RenderContext::GetFramebufferSize() const {
 	return size;
 }
 
-void RenderContext::Impl::InitialClearTargets(VkCommandBuffer cmd) noexcept {
-	// Scope-guarded transitions for depth/stencil buffers (reverts to AsReadOnly in destructor)
-	Vk::ScopedTransition sShadowMap(cmd, shadowMap, Vk::AsDepthAttachment);
-	Vk::ScopedTransition sShadowAtlas(cmd, shadowAtlas, Vk::AsDepthAttachment);
-	Vk::ScopedTransition depth(cmd, presentation.depthTarget, Vk::AsDepthAttachment);
-
-	// Re-map main G-Buffer color attachments
-	auto mainBundle = Vk::TieTargets(sceneColor, velocityBuffer, accumBuffers[0], accumBuffers[1],
-									 normalRoughnessBuffer);
-	auto mainAtts = mainBundle.Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd);
-
-	Vk::DynamicPass(presentation.swapchain.Get().extent)
-		.AddColorGroup(mainAtts, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-					   {.r = 0, .g = 0, .b = 0, .a = 0})
-		.AddDepth(depth.Get(), VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
-				  kClearDepthValue)
-		.Execute(cmd, []() {});
-
-	auto mainRo = TransitionAllTo<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, mainAtts);
-
-	// Modernized clear pipelines for pure color groups
-	[[maybe_unused]] auto ppRo = ClearAndPrepareGroup(
-		cmd, presentation.swapchain.Get().extent, kClearColorBlack, postProcessTarget,
-		ambientTarget, lightingTarget, smaaEdgeTarget, smaaWeightTarget);
-
-	[[maybe_unused]] auto bloomRo =
-		ClearAndPrepareGroup(cmd, bloomThresholdTarget.extent, kClearColorBlack,
-							 bloomThresholdTarget, bloomBlurTarget, bloomFinalTarget);
-
-	for (int i = 0; i < 2; ++i) {
-		taaPass.WriteIndex(ctx.Device(), i, std::get<0>(mainRo),
-						   i == 0 ? std::get<3>(mainRo) : std::get<2>(mainRo), std::get<1>(mainRo),
-						   defaultSampler.Get(), frameUniformBuffers[i].Handle());
-	}
-}
+void RenderContext::Impl::InitialClearTargets([[maybe_unused]] VkCommandBuffer cmd) noexcept {}
 
 void RenderContext::Impl::DispatchSkinningPasses() {
 	if (!hasSkinnedThisFrame) {
@@ -184,6 +186,24 @@ RenderResult RenderContext::BeginFrame() noexcept {
 	if (_impl->stagingContext) {
 		_impl->stagingContext->Wait();
 		_impl->stagingContext.reset();
+	}
+
+	// Safely synchronize staging uploads
+	if (_impl->stagingRingBuffer.Valid()) {
+		VkSemaphore sem = _impl->stagingRingBuffer.GetSemaphore();
+		uint64_t currentVal = _impl->stagingRingBuffer.GetCurrentValue();
+
+		if (currentVal > 0) {
+			uint64_t completedValue = 0;
+			vkGetSemaphoreCounterValue(_impl->ctx.Device(), sem, &completedValue);
+
+			// Only stall the CPU if there is an active, uncompleted GPU upload in-flight
+			if (completedValue < currentVal) {
+				// Sledgehammer wait to satisfy Vulkan Validation Layer state tracking limitations
+				vkDeviceWaitIdle(_impl->ctx.Device());
+				_impl->stagingRingBuffer.Recycle();
+			}
+		}
 	}
 
 	const ZHLN_FrameSync& s = _impl->sync[_impl->frame_index];
@@ -247,11 +267,6 @@ RenderResult RenderContext::BeginFrame() noexcept {
 
 	_impl->pendingAcquires.Drain(_impl->current_cmd);
 
-	if (_impl->needsInitialClear) {
-		_impl->InitialClearTargets(_impl->current_cmd);
-		_impl->needsInitialClear = false;
-	}
-
 	return {};
 }
 
@@ -289,16 +304,11 @@ ZHLN_FrameResult RenderContext::Impl::SubmitFrame() {
 	return res;
 }
 
-// ============================================================================
-// InstanceData & TLAS Assembly Operations
-// ============================================================================
-
 void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 	if (!rtCtx.Valid() || drawQueue.empty()) {
 		return;
 	}
 
-	// Persistent, reusable memory block to prevent dynamic heap reallocations
 	tlasInstancesScratch.clear();
 	tlasInstancesScratch.reserve(drawQueue.size());
 
@@ -306,20 +316,13 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 		const auto& drawCmd = drawQueue[i];
 		auto* mesh = drawCmd.posMesh;
 
-		if (mesh == nullptr) {
-			continue;
-		}
-
-		bool isSkinned = (drawCmd.flags & DrawFlags::Skinned) != DrawFlags::None;
-		bool isExcluded = (drawCmd.flags & DrawFlags::ExcludeFromTLAS) != DrawFlags::None;
-
-		if (mesh->blasAddress == 0 || isSkinned || isExcluded) {
+		if (mesh == nullptr || mesh->blasAddress == 0 ||
+			((drawCmd.flags & DrawFlags::Skinned) != DrawFlags::None) ||
+			((drawCmd.flags & DrawFlags::ExcludeFromTLAS) != DrawFlags::None)) {
 			continue;
 		}
 
 		VkAccelerationStructureInstanceKHR inst{};
-
-		// Unpacked fields: Read directly from pre-assembled InstanceData to omit duplicate matrices
 		const auto& t = drawCmd.instanceData.world;
 
 		for (int row = 0; row < 3; ++row) {
@@ -342,8 +345,6 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 	auto& stagingBuf = tlasStagingBuffers[frame_index];
 	auto& instanceBuf = tlasInstanceBuffers[frame_index];
 
-	ZHLN::Assert(tlasInstancesScratch.size() * sizeof(VkAccelerationStructureInstanceKHR) <=
-				 stagingBuf.Size());
 	std::memcpy(stagingBuf.Map().data, tlasInstancesScratch.data(),
 				tlasInstancesScratch.size() * sizeof(VkAccelerationStructureInstanceKHR));
 
@@ -370,179 +371,549 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 							.dst_access = VK_ACCESS_2_SHADER_READ_BIT});
 }
 
-// ============================================================================
-// Compile-Time Scene Recording Dispatches
-// ============================================================================
-namespace {
-struct TLASBuildStep {
-	void Execute(RenderContext::Impl* impl, VkCommandBuffer cmd, const FrameRecorder& /*unused*/,
-				 RenderContext::Impl::RenderState& /*unused*/) const noexcept {
-		impl->BuildTLAS(cmd);
-	}
-};
-
-// Step that only handles the light clustering compute dispatch
-struct ClusterCullingStepOnly {
-	void Execute(RenderContext::Impl* impl, VkCommandBuffer cmd, const FrameRecorder& /*unused*/,
-				 RenderContext::Impl::RenderState& /*unused*/) const noexcept {
-		uint32_t fIdx = impl->frame_index;
-		Vk::FillBuffer(cmd, impl->globalCounterBuffers[fIdx]);
-
-		BarrierCounterReset({cmd});
-
-		impl->clusterCullingPass.Dispatch(cmd, impl->clusterCullingSets[fIdx], 1, 1, 24);
-		BarrierComputeWriteToFragmentRead({cmd});
-		// We do not run ShadowPass sequentially here anymore
-	}
-};
-
-// Compile-time step that records ShadowPass and MainPass concurrently
-struct ParallelPrePassStep {
-	void Execute(RenderContext::Impl* impl, VkCommandBuffer cmd, const FrameRecorder& /*unused*/,
-				 RenderContext::Impl::RenderState& state) const noexcept {
-
-		// FIX: Fetch the current frame's parallel recorder slot
-		auto& recorder = impl->parallelRecorder.Current();
-		recorder.Reset();
-		TaskSystemScheduler scheduler;
-
-		recorder.Record(
-			scheduler,
-			[&](Vk::RecordingSlot slot) {
-				FrameRecorder shadowRecorder(slot.cmd, *impl);
-				Passes::ShadowPass{}.Execute(shadowRecorder);
-			},
-			[&](Vk::RecordingSlot slot) {
-				FrameRecorder mainRecorder(slot.cmd, *impl);
-				Passes::MainPass{}.Execute(mainRecorder, state.initialState);
-			});
-
-		Vk::ExecuteCommands(cmd, recorder.GetCommandBuffers());
-	}
-};
-
-struct SetupInitialStateStep {
-	void Execute(RenderContext::Impl* impl, VkCommandBuffer /*unused*/,
-				 const FrameRecorder& /*unused*/,
-				 RenderContext::Impl::RenderState& state) const noexcept {
-		state.initialState = {
-			.sceneColor =
-				Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(impl->sceneColor),
-			.velocity =
-				Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(impl->velocityBuffer),
-			.normRough = Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-				impl->normalRoughnessBuffer),
-			.depth = Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-				impl->presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT)};
-	}
-};
-
-struct MainPassStep {
-	void Execute(RenderContext::Impl* /*unused*/, VkCommandBuffer /*unused*/,
-				 const FrameRecorder& recorder,
-				 RenderContext::Impl::RenderState& state) const noexcept {
-		Passes::MainPass{}.Execute(recorder, state.initialState);
-	}
-};
-
-struct LightingPassStep {
-	void Execute(RenderContext::Impl* /*unused*/, VkCommandBuffer /*unused*/,
-				 const FrameRecorder& recorder,
-				 RenderContext::Impl::RenderState& state) const noexcept {
-		state.finalColor = Passes::DeferredLightingPass{}.Execute(recorder, state.initialState);
-	}
-};
-
-struct FullBrightSetupStep {
-	void Execute(RenderContext::Impl* /*unused*/, VkCommandBuffer /*unused*/,
-				 const FrameRecorder& /*unused*/,
-				 RenderContext::Impl::RenderState& state) const noexcept {
-		state.finalColor = state.initialState.sceneColor;
-	}
-};
-
-struct ForwardPassStep {
-	void Execute(RenderContext::Impl* /*unused*/, VkCommandBuffer /*unused*/,
-				 const FrameRecorder& recorder,
-				 RenderContext::Impl::RenderState& state) const noexcept {
-		Passes::ForwardPass{}.Execute(recorder, state.finalColor, state.initialState.depth);
-	}
-};
-
-struct BloomPassStep {
-	void Execute(RenderContext::Impl* /*unused*/, VkCommandBuffer /*unused*/,
-				 const FrameRecorder& recorder,
-				 RenderContext::Impl::RenderState& state) const noexcept {
-		state.bloomFinal = Passes::BloomPass{}.Execute(recorder, state.finalColor);
-	}
-};
-
-struct FullBrightBloomStep {
-	void Execute(RenderContext::Impl* impl, VkCommandBuffer /*unused*/,
-				 const FrameRecorder& /*unused*/,
-				 RenderContext::Impl::RenderState& state) const noexcept {
-		state.bloomFinal =
-			Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(impl->bloomFinalTarget);
-	}
-};
-
-struct AAPassStep {
-	void Execute(RenderContext::Impl* /*unused*/, VkCommandBuffer /*unused*/,
-				 const FrameRecorder& recorder,
-				 RenderContext::Impl::RenderState& state) const noexcept {
-		state.resourcesForAA = {.sceneColor = state.finalColor,
-								.velocity = state.initialState.velocity,
-								.normRough = state.initialState.normRough,
-								.depth = state.initialState.depth};
-		state.aaResult = Passes::AAPass{}.Execute(recorder, state.resourcesForAA);
-	}
-};
-
-struct BlitPassStep {
-	void Execute(RenderContext::Impl* /*unused*/, VkCommandBuffer /*unused*/,
-				 const FrameRecorder& recorder,
-				 RenderContext::Impl::RenderState& state) const noexcept {
-		Passes::BlitPass{}.Execute(recorder, state.aaResult.sceneColor, state.bloomFinal);
-	}
-};
-} // namespace
-
-template <bool FullBright> [[nodiscard]] consteval auto GetPassSteps() noexcept {
-	if constexpr (FullBright) {
-		return std::make_tuple(SetupInitialStateStep{}, MainPassStep{}, FullBrightSetupStep{},
-							   ForwardPassStep{}, FullBrightBloomStep{}, AAPassStep{},
-							   BlitPassStep{});
-	} else {
-		return std::make_tuple(TLASBuildStep{}, ClusterCullingStepOnly{}, // 1. Run culling compute
-							   SetupInitialStateStep{},					  // 2. Wrap state pointers
-							   ParallelPrePassStep{}, // 3. Parallel record Shadow + Main G-Buffer
-							   LightingPassStep{}, ForwardPassStep{}, BloomPassStep{}, AAPassStep{},
-							   BlitPassStep{});
-	}
-}
-
 template <bool FullBright>
 void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd) {
+	uint32_t imageIdx = current_image_index;
+	VkDevice device = ctx.Device();
+	uint32_t fIdx = frame_index;
+
+	auto GetTLAS = [&]() {
+		if constexpr (isMac) {
+			return Vk::SkipWrite{};
+		} else {
+			return rtCtx.Valid() ? (const VkAccelerationStructureKHR*)&tlas.Current()
+								 : (const VkAccelerationStructureKHR*)nullptr;
+		}
+	};
+
+	using namespace ZHLN::Vk;
 	FrameRecorder recorder(cmd, *this);
-	RenderState state{};
 
-	constexpr auto steps = GetPassSteps<FullBright>();
+	// Safe builder for explicitly typed swapchain images
+	auto getSwapchainImage = [&]() -> Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {
+		return {.handle = presentation.swapchain.Get().images[imageIdx],
+				.view = presentation.swapchain.Get().views[imageIdx],
+				.extent = sceneColor.extent,
+				.aspect = VK_IMAGE_ASPECT_COLOR_BIT,
+				.format = presentation.swapchain.Get().format};
+	};
 
-	// Unpack and execute the flat rendering timeline sequentially
-	std::apply([&](auto&&... step) { (step.Execute(this, cmd, recorder, state), ...); }, steps);
+	auto bindBase = [&](auto& binder) {
+		binder.template Bind<Res_SceneColor>(sceneColor.image.Handle(), sceneColor.view.Get());
+		binder.template Bind<Res_Velocity>(velocityBuffer.image.Handle(),
+										   velocityBuffer.view.Get());
+		binder.template Bind<Res_NormRough>(normalRoughnessBuffer.image.Handle(),
+											normalRoughnessBuffer.view.Get());
+		binder.template Bind<Res_Depth>(presentation.depthTarget.image.Handle(),
+										presentation.depthTarget.view.Get());
+		binder.template Bind<Res_BloomThresh>(bloomThresholdTarget.image.Handle(),
+											  bloomThresholdTarget.view.Get());
+		binder.template Bind<Res_BloomBlur>(bloomBlurTarget.image.Handle(),
+											bloomBlurTarget.view.Get());
+		binder.template Bind<Res_BloomFinal>(bloomFinalTarget.image.Handle(),
+											 bloomFinalTarget.view.Get());
+		binder.template Bind<Res_Swapchain>(presentation.swapchain.Get().images[imageIdx],
+											presentation.swapchain.Get().views[imageIdx]);
+	};
+
+	auto bindAA = [&](auto& binder) {
+		binder.template Bind<Res_AccumCurr>(accumBuffers.Current().image.Handle(),
+											accumBuffers.Current().view.Get());
+		binder.template Bind<Res_AccumNext>(accumBuffers.Next().image.Handle(),
+											accumBuffers.Next().view.Get());
+		binder.template Bind<Res_SmaaEdge>(smaaEdgeTarget.image.Handle(),
+										   smaaEdgeTarget.view.Get());
+		binder.template Bind<Res_SmaaWeight>(smaaWeightTarget.image.Handle(),
+											 smaaWeightTarget.view.Get());
+	};
+
+	auto bindDeferred = [&](auto& binder) {
+		binder.template Bind<Res_ShadowMap>(shadowMap.image.Handle(), shadowMap.view.Get());
+		binder.template Bind<Res_ShadowAtlas>(shadowAtlas.image.Handle(), shadowAtlas.view.Get());
+		binder.template Bind<Res_Ambient>(ambientTarget.image.Handle(), ambientTarget.view.Get());
+		binder.template Bind<Res_Lighting>(lightingTarget.image.Handle(),
+										   lightingTarget.view.Get());
+		binder.template Bind<Res_PostProcess>(postProcessTarget.image.Handle(),
+											  postProcessTarget.view.Get());
+	};
+
+	auto bloomLambda = [&]([[maybe_unused]] VkCommandBuffer c, const auto& inputColor) {
+		Profiler::ScopedGpuProfile<Stages::BloomPass, FrameProfiler> timer(c, fIdx, gpuProfiler);
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+							 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+			c, bloomThresholdTarget.image.Handle());
+		DispatchPostProcessPass(c, bloomThresholdTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
+			bloomThresholdPass.WriteNext(
+				device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor),
+				defaultSampler.Get());
+			bloomThresholdPass.Execute(c);
+		});
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+			c, bloomThresholdTarget.image.Handle());
+
+		struct BlurPushConstants {
+			int horizontal;
+			float texelSize;
+		};
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+							 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+			c, bloomBlurTarget.image.Handle());
+		DispatchPostProcessPass(c, bloomBlurTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
+			bloomBlurHPass.WriteNext(
+				device,
+				Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(bloomThresholdTarget),
+				defaultSampler.Get());
+			bloomBlurHPass.Execute(
+				c, BlurPushConstants{1, 1.0f / (float)bloomThresholdTarget.extent.width});
+		});
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+			c, bloomBlurTarget.image.Handle());
+
+		DispatchPostProcessPass(c, bloomFinalTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
+			bloomBlurVPass.WriteNext(
+				device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(bloomBlurTarget),
+				defaultSampler.Get());
+			bloomBlurVPass.Execute(
+				c, BlurPushConstants{0, 1.0f / (float)bloomBlurTarget.extent.height});
+		});
+	};
+
+	auto aaLambda = [&]([[maybe_unused]] VkCommandBuffer c, const auto& inputColor) {
+		Profiler::ScopedGpuProfile<Stages::AAPass, FrameProfiler> timer(c, fIdx, gpuProfiler);
+		if (aaState.mode == AAMode::TAA && taaPass.pipeline.Valid()) {
+			struct TAAPushConstants {
+				float feedback;
+			};
+			DispatchPostProcessPass(c, accumBuffers.Next(), VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
+				taaPass.WriteNext(
+					device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+						accumBuffers.Current()),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(velocityBuffer),
+					defaultSampler.Get(), frameUniformBuffers[fIdx].Handle());
+				taaPass.Execute(c, TAAPushConstants{.feedback = aaState.taaFeedback});
+			});
+		} else if (aaState.mode == AAMode::FXAA && fxaaPass.pipeline.Valid()) {
+			struct FXAAPushConstants {
+				float rcpFrameX;
+				float rcpFrameY;
+				float subpix;
+				float edgeThreshold;
+				float edgeThresholdMin;
+				float _pad;
+			} pc = {.rcpFrameX = 1.0f / (float)inputColor.extent.width,
+					.rcpFrameY = 1.0f / (float)inputColor.extent.height,
+					.subpix = aaState.fxaaSubpix,
+					.edgeThreshold = aaState.fxaaEdgeThreshold,
+					.edgeThresholdMin = aaState.fxaaEdgeThresholdMin,
+					._pad = 0.0f};
+			DispatchPostProcessPass(c, accumBuffers.Next(), VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
+				fxaaPass.WriteNext(
+					device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor),
+					defaultSampler.Get());
+				fxaaPass.Execute(c, pc);
+			});
+		} else if (aaState.mode == AAMode::SMAA && smaaEdgePass.pipeline.Valid()) {
+			struct SMAAMetrics {
+				float rcpWidth;
+				float rcpHeight;
+				float width;
+				float height;
+			} metrics = {.rcpWidth = 1.0f / (float)inputColor.extent.width,
+						 .rcpHeight = 1.0f / (float)inputColor.extent.height,
+						 .width = (float)inputColor.extent.width,
+						 .height = (float)inputColor.extent.height};
+			Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+								 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+				c, smaaEdgeTarget.image.Handle());
+			DispatchPostProcessPass(c, smaaEdgeTarget, VK_ATTACHMENT_LOAD_OP_CLEAR, [&]() {
+				smaaEdgePass.WriteNext(
+					device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor),
+					defaultSampler.Get(), pointSampler.Get());
+				smaaEdgePass.Execute(c, metrics,
+									 VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+			});
+			Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+								 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+				c, smaaEdgeTarget.image.Handle());
+			Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+								 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+				c, smaaWeightTarget.image.Handle());
+
+			DispatchPostProcessPass(c, smaaWeightTarget, VK_ATTACHMENT_LOAD_OP_CLEAR, [&]() {
+				smaaWeightPass.WriteNext(
+					device,
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(smaaEdgeTarget),
+					textureViews[smaaAreaTexIdx].Get(), textureViews[smaaSearchTexIdx].Get(),
+					defaultSampler.Get(), pointSampler.Get());
+				smaaWeightPass.Execute(c, metrics,
+									   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+			});
+			Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+								 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+				c, smaaWeightTarget.image.Handle());
+
+			DispatchPostProcessPass(c, accumBuffers.Next(), VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
+				smaaBlendPass.WriteNext(
+					device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(smaaWeightTarget),
+					defaultSampler.Get(), pointSampler.Get());
+				smaaBlendPass.Execute(c, metrics,
+									  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+			});
+		} else {
+			DispatchPostProcessPass(c, accumBuffers.Next(), VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
+				blitPass.WriteNext(
+					device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor),
+					defaultSampler.Get(),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor));
+				BlitPushConstants pc = {
+					.vignetteIntensity = 0.0f, .vignettePower = 0.0f, .fullBright = 0};
+				blitPass.Execute(c, pc);
+			});
+		}
+	};
+
+	if constexpr (FullBright) {
+		auto mainPass =
+			Vk::MakePass<"Main", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>,
+						 Vk::ColorWrite<Res_NormRough>, Vk::DepthWrite<Res_Depth>>(
+				[&]([[maybe_unused]] VkCommandBuffer c) {
+					Passes::MainPass{}.Execute(
+						recorder,
+						SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+									   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>{
+							.sceneColor =
+								Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+									sceneColor),
+							.velocity = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+								velocityBuffer),
+							.normRough = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+								normalRoughnessBuffer),
+							.depth = Vk::AssumeLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+								presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT)});
+				});
+		auto fwdPass =
+			Vk::MakePass<"Forward", Vk::ColorWrite<Res_SceneColor>, Vk::DepthWrite<Res_Depth>>(
+				[&]([[maybe_unused]] VkCommandBuffer c) {
+					Passes::ForwardPass{}.Execute(
+						recorder,
+						Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(sceneColor),
+						Vk::AssumeLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+							presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT));
+				});
+		auto bloomPass =
+			Vk::MakePass<"BloomFB", Vk::ShaderRead<Res_SceneColor>, Vk::ColorWrite<Res_BloomFinal>>(
+				[&]([[maybe_unused]] VkCommandBuffer c) { bloomLambda(c, sceneColor); });
+
+		auto blitPassAA =
+			Vk::MakePass<"BlitAA", Vk::ShaderRead<Res_AccumNext>, Vk::ShaderRead<Res_BloomFinal>,
+						 Vk::ColorWrite<Res_Swapchain>>([&]([[maybe_unused]] VkCommandBuffer c) {
+				Passes::BlitPass{}.Execute(
+					recorder,
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(accumBuffers.Next()),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(bloomFinalTarget),
+					getSwapchainImage(), 1);
+			});
+		auto blitPassNoAA =
+			Vk::MakePass<"BlitNoAA", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_BloomFinal>,
+						 Vk::ColorWrite<Res_Swapchain>>([&]([[maybe_unused]] VkCommandBuffer c) {
+				Passes::BlitPass{}.Execute(
+					recorder,
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(sceneColor),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(bloomFinalTarget),
+					getSwapchainImage(), 1);
+			});
+
+		if (static_cast<int>(aaState.mode) != 0) {
+			auto aaPass =
+				Vk::MakePass<"AAFB", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_Velocity>,
+							 Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>,
+							 Vk::ColorWrite<Res_AccumNext>, Vk::ColorWrite<Res_SmaaEdge>,
+							 Vk::ColorWrite<Res_SmaaWeight>, Vk::ShaderRead<Res_AccumCurr>>(
+					[&]([[maybe_unused]] VkCommandBuffer c) { aaLambda(c, sceneColor); });
+			auto graph = Vk::CompileTimeFrameGraph(std::move(mainPass), std::move(fwdPass),
+												   std::move(bloomPass), std::move(aaPass),
+												   std::move(blitPassAA));
+			typename decltype(graph)::Binder binder;
+			bindBase(binder);
+			bindAA(binder);
+			graph.Execute(cmd, binder);
+		} else {
+			auto graph = Vk::CompileTimeFrameGraph(std::move(mainPass), std::move(fwdPass),
+												   std::move(bloomPass), std::move(blitPassNoAA));
+			typename decltype(graph)::Binder binder;
+			bindBase(binder);
+			graph.Execute(cmd, binder);
+		}
+	} else {
+		BuildTLAS(cmd);
+		Vk::FillBuffer(cmd, globalCounterBuffers[fIdx]);
+		BarrierCounterReset(cmd);
+		clusterCullingPass.Dispatch(cmd, clusterCullingSets[fIdx], 1, 1, 24);
+		BarrierComputeWriteToFragmentRead(cmd);
+
+		auto mainShadowPass =
+			Vk::MakePass<"MainShadow", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>,
+						 Vk::ColorWrite<Res_NormRough>, Vk::DepthWrite<Res_Depth>,
+						 Vk::DepthWrite<Res_ShadowMap>, Vk::DepthWrite<Res_ShadowAtlas>>(
+				[&](VkCommandBuffer c) {
+					auto& rec = parallelRecorder.Current();
+					rec.Reset();
+					TaskSystemScheduler scheduler;
+					rec.Record(
+						scheduler,
+						[&](Vk::RecordingSlot slot) {
+							FrameRecorder shadowRec(slot.cmd, *this);
+							Passes::ShadowPass{}.Execute(shadowRec);
+						},
+						[&](Vk::RecordingSlot slot) {
+							FrameRecorder mainRec(slot.cmd, *this);
+							Passes::MainPass{}.Execute(
+								mainRec,
+								SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+											   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>{
+									.sceneColor =
+										Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+											sceneColor),
+									.velocity =
+										Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+											velocityBuffer),
+									.normRough =
+										Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+											normalRoughnessBuffer),
+									.depth =
+										Vk::AssumeLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+											presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT)});
+						});
+					Vk::ExecuteCommands(c, rec.GetCommandBuffers());
+				});
+
+		auto ambientPass = Vk::MakePass<"Ambient", Vk::ShaderRead<Res_SceneColor>,
+										Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>,
+										Vk::ColorWrite<Res_Ambient>>([&](VkCommandBuffer c) {
+			struct PPPushConstants {
+				JPH::Mat44 invVP;
+				JPH::Mat44 vp;
+				alignas(16) std::array<float, 4> cPos;
+				int giM;
+				float aoR;
+				float aoB;
+				float aoP;
+				float giI;
+				int giS;
+				int eSSR;
+				int eRTR;
+				int _pad;
+			} pc = {.invVP = current_view_proj.Inversed(),
+					.vp = current_view_proj,
+					.cPos = {currentUniforms.camPos[0], currentUniforms.camPos[1],
+							 currentUniforms.camPos[2], currentUniforms.camPos[3]},
+					.giM = giSettings.mode,
+					.aoR = giSettings.aoRadius,
+					.aoB = giSettings.aoBias,
+					.aoP = giSettings.aoPower,
+					.giI = giSettings.giIntensity,
+					.giS = giSettings.giSamples,
+					.eSSR = giSettings.enableSSR,
+					.eRTR = (tlas.Current() != VK_NULL_HANDLE) ? giSettings.enableRTR : 0,
+					._pad = {}};
+			DispatchPostProcessPass(c, ambientTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
+				this->ambientPass.WriteNext(
+					device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(sceneColor),
+					defaultSampler.Get(),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+						presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+						normalRoughnessBuffer),
+					pointSampler.Get(), iblPayload.prefilteredView.Get(),
+					iblPayload.brdfLutView.Get(), clampSampler.Get(),
+					frameUniformBuffers[fIdx].Handle());
+				this->ambientPass.Execute(c, pc);
+			});
+		});
+
+		auto lightPass =
+			Vk::MakePass<"Lighting", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>,
+						 Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_Ambient>,
+						 Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>,
+						 Vk::ColorWrite<Res_Lighting>>([&](VkCommandBuffer c) {
+				uint32_t lVar = (giSettings.enableRTR && rtCtx.Valid()) ? 1 : 0;
+				struct PPPushConstants {
+					JPH::Mat44 invVP;
+					JPH::Mat44 vp;
+					alignas(16) std::array<float, 4> cPos;
+					int giM;
+					float aoR;
+					float aoB;
+					float aoP;
+					float giI;
+					int giS;
+					int eSSR;
+					int eRTR;
+					int _pad;
+				} pc = {.invVP = current_view_proj.Inversed(),
+						.vp = current_view_proj,
+						.cPos = {currentUniforms.camPos[0], currentUniforms.camPos[1],
+								 currentUniforms.camPos[2], currentUniforms.camPos[3]},
+						.giM = giSettings.mode,
+						.aoR = giSettings.aoRadius,
+						.aoB = giSettings.aoBias,
+						.aoP = giSettings.aoPower,
+						.giI = giSettings.giIntensity,
+						.giS = giSettings.giSamples,
+						.eSSR = giSettings.enableSSR,
+						.eRTR = (tlas.Current() != VK_NULL_HANDLE) ? giSettings.enableRTR : 0,
+						._pad = {}};
+				DispatchPostProcessPass(c, lightingTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
+					this->lightingPass.WriteNext(
+						device,
+						Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(sceneColor),
+						defaultSampler.Get(),
+						Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+							presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
+						Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+							normalRoughnessBuffer),
+						lightStorageBuffers[fIdx].Handle(), frameUniformBuffers[fIdx].Handle(),
+						shadowMap.view.Get(), shadowSampler.Get(), ltcMatView.Get(),
+						ltcAmpView.Get(), clampSampler.Get(), clusterGridBuffers[fIdx].Handle(),
+						lightIndexListBuffers[fIdx].Handle(),
+						Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(ambientTarget),
+						pointSampler.Get(), GetTLAS(), shadowAtlasCubeView.Get(),
+						shadowAtlas2DView.Get());
+					this->lightingPass.ExecuteVariant(c, lVar, pc);
+				});
+			});
+
+		auto reflPass = Vk::MakePass<"Reflection", Vk::ShaderRead<Res_SceneColor>,
+									 Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>,
+									 Vk::ShaderRead<Res_Lighting>, Vk::ShaderRead<Res_ShadowMap>,
+									 Vk::ShaderRead<Res_ShadowAtlas>,
+									 Vk::ColorWrite<Res_PostProcess>>([&](VkCommandBuffer c) {
+			uint32_t rVar =
+				(giSettings.enableSSR ? 1 : 0) | ((giSettings.enableRTR && rtCtx.Valid()) ? 2 : 0);
+			struct PPPushConstants {
+				JPH::Mat44 invVP;
+				JPH::Mat44 vp;
+				alignas(16) std::array<float, 4> cPos;
+				int giM;
+				float aoR;
+				float aoB;
+				float aoP;
+				float giI;
+				int giS;
+				int eSSR;
+				int eRTR;
+				int _pad;
+			} pc = {.invVP = current_view_proj.Inversed(),
+					.vp = current_view_proj,
+					.cPos = {currentUniforms.camPos[0], currentUniforms.camPos[1],
+							 currentUniforms.camPos[2], currentUniforms.camPos[3]},
+					.giM = giSettings.mode,
+					.aoR = giSettings.aoRadius,
+					.aoB = giSettings.aoBias,
+					.aoP = giSettings.aoPower,
+					.giI = giSettings.giIntensity,
+					.giS = giSettings.giSamples,
+					.eSSR = giSettings.enableSSR,
+					.eRTR = (tlas.Current() != VK_NULL_HANDLE) ? giSettings.enableRTR : 0,
+					._pad = {}};
+			DispatchPostProcessPass(c, postProcessTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
+				this->reflectionPass.WriteNext(
+					device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(sceneColor),
+					defaultSampler.Get(),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+						presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+						normalRoughnessBuffer),
+					pointSampler.Get(), iblPayload.prefilteredView.Get(), GetTLAS(),
+					frameUniformBuffers[fIdx].Handle(), iblPayload.brdfLutView.Get(),
+					clampSampler.Get(),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(lightingTarget));
+				this->reflectionPass.ExecuteVariant(c, rVar, pc);
+			});
+		});
+
+		auto fwdPass =
+			Vk::MakePass<"Forward", Vk::ColorWrite<Res_PostProcess>, Vk::DepthWrite<Res_Depth>>(
+				[&]([[maybe_unused]] VkCommandBuffer c) {
+					Passes::ForwardPass{}.Execute(
+						recorder,
+						Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+							postProcessTarget),
+						Vk::AssumeLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+							presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT));
+				});
+
+		auto bloomPass =
+			Vk::MakePass<"Bloom", Vk::ShaderRead<Res_PostProcess>, Vk::ColorWrite<Res_BloomFinal>>(
+				[&]([[maybe_unused]] VkCommandBuffer c) { bloomLambda(c, postProcessTarget); });
+
+		auto blitPassAA =
+			Vk::MakePass<"BlitAA", Vk::ShaderRead<Res_AccumNext>, Vk::ShaderRead<Res_BloomFinal>,
+						 Vk::ColorWrite<Res_Swapchain>>([&]([[maybe_unused]] VkCommandBuffer c) {
+				Passes::BlitPass{}.Execute(
+					recorder,
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(accumBuffers.Next()),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(bloomFinalTarget),
+					getSwapchainImage(), 0);
+			});
+		auto blitPassNoAA =
+			Vk::MakePass<"BlitNoAA", Vk::ShaderRead<Res_PostProcess>,
+						 Vk::ShaderRead<Res_BloomFinal>,
+						 Vk::ColorWrite<Res_Swapchain>>([&]([[maybe_unused]] VkCommandBuffer c) {
+				Passes::BlitPass{}.Execute(
+					recorder,
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(postProcessTarget),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(bloomFinalTarget),
+					getSwapchainImage(), 0);
+			});
+
+		if (static_cast<int>(aaState.mode) != 0) {
+			auto aaPass =
+				Vk::MakePass<"AA", Vk::ShaderRead<Res_PostProcess>, Vk::ShaderRead<Res_Velocity>,
+							 Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>,
+							 Vk::ColorWrite<Res_AccumNext>, Vk::ColorWrite<Res_SmaaEdge>,
+							 Vk::ColorWrite<Res_SmaaWeight>, Vk::ShaderRead<Res_AccumCurr>>(
+					[&]([[maybe_unused]] VkCommandBuffer c) { aaLambda(c, postProcessTarget); });
+			auto graph = Vk::CompileTimeFrameGraph(
+				std::move(mainShadowPass), std::move(ambientPass), std::move(lightPass),
+				std::move(reflPass), std::move(fwdPass), std::move(bloomPass), std::move(aaPass),
+				std::move(blitPassAA));
+			typename decltype(graph)::Binder binder;
+			bindBase(binder);
+			bindDeferred(binder);
+			bindAA(binder);
+			graph.Execute(cmd, binder);
+		} else {
+			auto graph = Vk::CompileTimeFrameGraph(std::move(mainShadowPass),
+												   std::move(ambientPass), std::move(lightPass),
+												   std::move(reflPass), std::move(fwdPass),
+												   std::move(bloomPass), std::move(blitPassNoAA));
+			typename decltype(graph)::Binder binder;
+			bindBase(binder);
+			bindDeferred(binder);
+			graph.Execute(cmd, binder);
+		}
+	}
 }
 
-// Explicit instantiations to prevent translation unit linkage issues
 template void
 	RenderContext::Impl::RecordSceneFrame<true>(Vk::CommandBuffer<Vk::QueueType::Graphics>);
 template void
 	RenderContext::Impl::RecordSceneFrame<false>(Vk::CommandBuffer<Vk::QueueType::Graphics>);
 
 RenderResult RenderContext::EndFrame() noexcept {
-	// This guarantees that activeQueueGuard.reset() is called on ALL exit paths.
 	struct EndFrameGuard {
 		RenderContext::Impl* impl;
+		EndFrameGuard(RenderContext::Impl* i) : impl(i) {}
 		~EndFrameGuard() { impl->activeQueueGuard.reset(); }
+		EndFrameGuard(const EndFrameGuard&) = delete;
+		EndFrameGuard& operator=(const EndFrameGuard&) = delete;
+		EndFrameGuard(EndFrameGuard&&) = delete;
+		EndFrameGuard& operator=(EndFrameGuard&&) = delete;
 	} frameGuard{_impl.get()};
 
 	ZHLN_PROFILE_SCOPE("Render (CPU Record)");
@@ -566,18 +937,15 @@ RenderResult RenderContext::EndFrame() noexcept {
 	if (drawCount > 0) {
 		auto mapped = _impl->instanceDataBuffers[_impl->frame_index].Map();
 		auto* dst = static_cast<InstanceData*>(mapped.data);
-
-		// Zero-overhead linear copy of pre-assembled GPU structures (pointer-chasing eliminated)
 		for (uint32_t i = 0; i < drawCount; ++i) {
 			dst[i] = _impl->drawQueue[i].instanceData;
 		}
 	}
 
-	// Hot-path branch optimization: dispatch using compile-time constants
 	if (_impl->currentUniforms.fullBright != 0) {
-		_impl->RecordSceneFrame<true>({cmd});
+		_impl->RecordSceneFrame<true>(Vk::CommandBuffer<Vk::QueueType::Graphics>{cmd});
 	} else {
-		_impl->RecordSceneFrame<false>({cmd});
+		_impl->RecordSceneFrame<false>(Vk::CommandBuffer<Vk::QueueType::Graphics>{cmd});
 	}
 
 	ZHLN_EndCommandBuffer(cmd);
@@ -595,8 +963,6 @@ RenderResult RenderContext::EndFrame() noexcept {
 
 void RenderContext::Impl::ProvokeDeviceLostInternal() const {
 	if (!hangGpuPass.pipeline.Valid()) {
-		ZHLN::Log("ERROR: Cannot provoke device lost because the Hang GPU pipeline is invalid. "
-				  "Check your build.");
 		return;
 	}
 
@@ -657,7 +1023,6 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 	auto* skinMesh = mesh.skinBuffer != BufferHandle::Invalid
 						 ? impl->meshPool.Resolve(mesh.skinBuffer)
 						 : nullptr;
-
 	auto* nativeIndexMesh = mesh.indexBuffer != BufferHandle::Invalid
 								? impl->meshPool.Resolve(mesh.indexBuffer)
 								: nullptr;
@@ -666,7 +1031,6 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 		impl->hasSkinnedThisFrame = true;
 	}
 
-	// Resolve the correct positioning target for skinned versus non-skinned draw streams
 	auto* finalPosMesh = (params.skinnedVertexBuffer != BufferHandle::Invalid)
 							 ? impl->meshPool.Resolve(params.skinnedVertexBuffer)
 							 : posMesh;
@@ -674,7 +1038,6 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 	uint64_t posAddr = (finalPosMesh != nullptr) ? finalPosMesh->vboAddress : 0;
 	uint64_t attrAddr = (attrMesh != nullptr) ? attrMesh->vboAddress : 0;
 
-	// Safely offset the attribute layout bounds using static array increments
 	if (posMesh == attrMesh && posMesh != nullptr) {
 		attrAddr = posMesh->vboAddress + (500000 * sizeof(VertexPosition));
 	} else if (params.skinnedVertexBuffer != BufferHandle::Invalid && posMesh != nullptr) {
@@ -685,13 +1048,9 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 						  (params.flags & DrawFlags::Skinned) != DrawFlags::None)
 							 ? 1u
 							 : 0u;
+	uint32_t activeMorphCount =
+		(params.skinnedVertexBuffer != BufferHandle::Invalid) ? 0 : params.activeMorphCount;
 
-	uint32_t activeMorphCount = params.activeMorphCount;
-	if (params.skinnedVertexBuffer != BufferHandle::Invalid) {
-		activeMorphCount = 0; // Displacement is evaluated on GPU pre-skinning
-	}
-
-	// Pre-assemble the GPU structure directly on the calling thread
 	InstanceData inst = {
 		.world = params.transform,
 		.prevWorld = params.prevTransform,
@@ -721,7 +1080,7 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
 	};
 
 	impl->drawQueue.push_back(DrawCommand{.instanceData = inst,
-										  .material = nativeMaterial,
+										  .material = const_cast<NativeMaterial*>(nativeMaterial),
 										  .posMesh = posMesh,
 										  .attrMesh = attrMesh,
 										  .skinMesh = skinMesh,
@@ -742,9 +1101,8 @@ void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex, bool useSc
 
 	auto* posMesh = impl->meshPool.Resolve(mesh.posBuffer);
 	auto* attrMesh = impl->meshPool.Resolve(mesh.attrBuffer);
-	if (AnyNull(posMesh, attrMesh)) [[unlikely]] {
+	if (AnyNull(posMesh, attrMesh)) [[unlikely]]
 		return;
-	}
 
 	impl->uiDrawQueue.push_back({.posMesh = posMesh,
 								 .attrMesh = attrMesh,

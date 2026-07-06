@@ -6,8 +6,8 @@
 #include "common.hlsl"
 
 // 2. Redeclare only the exact resources this specialized pass needs [2, 3]
-[[vk::binding(6, 0)]] StructuredBuffer<InstanceData> g_instances;
-[[vk::binding(5, 0)]] StructuredBuffer<Light> lights;
+[[vk::binding(4, 0)]] StructuredBuffer<InstanceData> g_instances;
+[[vk::binding(3, 0)]] StructuredBuffer<Light> lights;
 
 struct PushConstants {
 	uint lightIndex;

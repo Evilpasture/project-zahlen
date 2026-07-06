@@ -153,23 +153,18 @@ static constexpr float kClearDepthValue = 1.0f;
 using GlobalSceneLayout = Vk::DescriptorLayout<
 	Vk::BindlessSampledImageSlot<0, 4096>, // Bindless textures
 	Vk::SamplerSlot<1>,					   // Default linear sampler
-	Vk::SampledImageSlot<2>,			   // Shadow Map (Depth)
-	Vk::SamplerSlot<3>,					   // Shadow Map comparison sampler
-	Vk::UniformSlot<4, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT>, // FrameUniforms
+	Vk::UniformSlot<2, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT>, // FrameUniforms
 																				   // (UBO)
-	Vk::StorageBufferSlot<5, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT>, // Lights
+	Vk::StorageBufferSlot<3, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT>, // Lights
 																						 // (SSBO)
-	Vk::StorageBufferSlot<6, VK_SHADER_STAGE_VERTEX_BIT>, // Instance buffer (SSBO)
-	Vk::StorageBufferSlot<7, VK_SHADER_STAGE_VERTEX_BIT>, // Joint matrices (SSBO)
-
-	Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>,	// Pre-filtered Cubemap (Specular IBL)
-	Vk::SampledImageSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,	// 2D BRDF LUT (2D Texture)
-	Vk::StorageBufferSlot<10, VK_SHADER_STAGE_VERTEX_BIT>,	// Morph target deltas (SSBO)
-	Vk::SamplerSlot<11, VK_SHADER_STAGE_FRAGMENT_BIT>,		// Clamping
-	Vk::SampledImageSlot<12, VK_SHADER_STAGE_FRAGMENT_BIT>, // LTC Matrix
-	Vk::SampledImageSlot<13, VK_SHADER_STAGE_FRAGMENT_BIT>, // LTC Amplitude
-	Vk::StorageBufferSlot<14, VK_SHADER_STAGE_VERTEX_BIT>,	// Previous Joint matrices (SSBO)
-	EngineAS<15, VK_SHADER_STAGE_FRAGMENT_BIT>>;
+	Vk::StorageBufferSlot<4, VK_SHADER_STAGE_VERTEX_BIT>,  // Instance buffer (SSBO)
+	Vk::StorageBufferSlot<5, VK_SHADER_STAGE_VERTEX_BIT>,  // Joint matrices (SSBO)
+	Vk::StorageBufferSlot<6, VK_SHADER_STAGE_VERTEX_BIT>,  // Previous Joint matrices (SSBO)
+	Vk::StorageBufferSlot<7, VK_SHADER_STAGE_VERTEX_BIT>,  // Morph target deltas (SSBO)
+	Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>, // Pre-filtered Cubemap (Specular IBL)
+	Vk::SampledImageSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>, // 2D BRDF LUT (2D Texture)
+	Vk::SamplerSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>	   // Clamping Sampler
+	>;
 
 using TAALayout =
 	Vk::DescriptorLayout<Vk::SampledImageSlot<0>, Vk::SampledImageSlot<1>, Vk::SampledImageSlot<2>,
@@ -792,7 +787,7 @@ struct FrameRecorder {
 };
 
 struct GroupRange {
-	NativeMaterial* material;
+	const NativeMaterial* material;
 	uint32_t start;
 	uint32_t count;
 };
@@ -822,8 +817,8 @@ struct ShadowPass {
 
 struct MainPass {
 	void Execute(const FrameRecorder& recorder,
-				 SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-								VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>
+				 SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+								VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>
 					 in) const noexcept;
 };
 
@@ -843,8 +838,8 @@ struct DeferredLightingPass {
 
 struct ForwardPass {
 	void Execute(const FrameRecorder& recorder,
-				 Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> litColor,
-				 Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> depth) const noexcept;
+				 Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> litColor,
+				 Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> depth) const noexcept;
 };
 
 struct BloomPass {
@@ -874,10 +869,11 @@ struct AAPass {
 };
 
 struct BlitPass {
-	void
-	Execute(const FrameRecorder& recorder,
-			Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor,
-			Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> bloomColor) const noexcept;
+	void Execute(const FrameRecorder& recorder,
+				 Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor,
+				 Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> bloomColor,
+				 Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> swapchainTarget,
+				 int fullBright) const noexcept;
 };
 
 } // namespace Passes
