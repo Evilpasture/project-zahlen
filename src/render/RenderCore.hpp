@@ -973,10 +973,28 @@ struct DrawIndirectState {
 	VkDeviceSize countBufferOffset = 0;	   // Offset inside count buffer
 };
 
+struct DrawIndirectCountState {
+	VkPipeline pipeline = VK_NULL_HANDLE;
+	VkPipelineLayout layout = VK_NULL_HANDLE;
+	VkDescriptorSet set = VK_NULL_HANDLE;
+	VkBuffer argumentBuffer = VK_NULL_HANDLE;
+	VkDeviceSize offset = 0;
+	VkBuffer countBuffer = VK_NULL_HANDLE;
+	VkDeviceSize countBufferOffset = 0;
+	uint32_t maxDrawCount = 0;
+	uint32_t stride = 0;
+};
+
 template <GpuTriviallyCopyable T>
 void DrawIndirect(VkCommandBuffer cmd, const DrawIndirectState& state, const T& pushConstants,
 				  VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT |
 											  VK_SHADER_STAGE_FRAGMENT_BIT);
+
+template <GpuTriviallyCopyable T>
+void DrawIndirectCount(VkCommandBuffer cmd, const DrawIndirectCountState& state,
+					   const T& pushConstants,
+					   VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT |
+												   VK_SHADER_STAGE_FRAGMENT_BIT) noexcept;
 
 // ============================================================================
 // Explicit GPU-Driven Draw Indirect Utilities

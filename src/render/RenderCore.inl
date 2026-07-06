@@ -945,6 +945,21 @@ inline void DrawIndirect(VkCommandBuffer cmd, const DrawIndirectState& state,
 }
 
 template <GpuTriviallyCopyable T>
+void DrawIndirectCount(VkCommandBuffer cmd, const DrawIndirectCountState& state,
+					   const T& pushConstants, VkShaderStageFlags stages) noexcept {
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state.pipeline);
+	if (state.set != VK_NULL_HANDLE) {
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state.layout, 0, 1,
+								&state.set, 0, nullptr);
+	}
+	vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
+
+	// Non-indexed Multi-Draw Indirect with dynamic GPU count
+	vkCmdDrawIndirectCount(cmd, state.argumentBuffer, state.offset, state.countBuffer,
+						   state.countBufferOffset, state.maxDrawCount, state.stride);
+}
+
+template <GpuTriviallyCopyable T>
 inline void DrawIndexedIndirect(VkCommandBuffer cmd, const DrawIndexedIndirectState& state,
 								const T& pushConstants, VkShaderStageFlags stages) noexcept {
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state.pipeline);
