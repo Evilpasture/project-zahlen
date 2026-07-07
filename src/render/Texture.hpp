@@ -102,10 +102,22 @@ inline auto UploadTexture(Allocator& allocator, const Context& ctx,
 	ZHLN_EndCommandBuffer(cmd);
 
 	const VkCommandBufferSubmitInfo subInfo = {
-		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cmd};
-	const VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-								  .commandBufferInfoCount = 1,
-								  .pCommandBufferInfos = &subInfo};
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+		.pNext = {},
+		.commandBuffer = cmd,
+		.deviceMask = {},
+	};
+	const VkSubmitInfo2 submit = {
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+		.pNext = {},
+		.flags = {},
+		.waitSemaphoreInfoCount = {},
+		.pWaitSemaphoreInfos = {},
+		.commandBufferInfoCount = 1,
+		.pCommandBufferInfos = &subInfo,
+		.signalSemaphoreInfoCount = {},
+		.pSignalSemaphoreInfos = {},
+	};
 	vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
 	vkQueueWaitIdle(ctx.GraphicsQueue());
 
