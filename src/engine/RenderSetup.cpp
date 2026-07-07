@@ -72,7 +72,6 @@ void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj,
 void SetFrameData(RenderContext& ctx, const Camera& cam, const FrameUniforms& uniforms,
 				  const JPH::Mat44& shadowProjView) {
 	auto* impl = ctx.GetImpl();
-	uint32_t fIdx = impl->frame_index;
 
 	impl->shadowProjView = shadowProjView;
 	impl->currentUniforms = uniforms;
@@ -115,7 +114,7 @@ void SetFrameData(RenderContext& ctx, const Camera& cam, const FrameUniforms& un
 										   tanHalfFov, uniforms.shadowResolution);
 	}
 
-	std::memcpy(impl->frameUniformBuffers[fIdx].Map().data, &gpuUniforms, sizeof(FrameUniforms));
+	std::memcpy(impl->frameUniformBuffers->Map().data, &gpuUniforms, sizeof(FrameUniforms));
 }
 
 void SetGISettings(RenderContext& ctx, const GISettings& settings) {
@@ -127,8 +126,7 @@ void SetLights(RenderContext& ctx, const GPULight* lights, uint32_t count) {
 	auto* impl = ctx.GetImpl();
 	uint32_t safeCount = std::min(count, 128u);
 	if (safeCount > 0 && lights != nullptr) {
-		std::memcpy(impl->lightStorageBuffers[impl->frame_index].Map().data, lights,
-					sizeof(GPULight) * safeCount);
+		std::memcpy(impl->lightStorageBuffers->Map().data, lights, sizeof(GPULight) * safeCount);
 		impl->mappedLights.assign(lights, lights + safeCount);
 	} else {
 		impl->mappedLights.clear();

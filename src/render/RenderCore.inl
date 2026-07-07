@@ -1,39 +1,9 @@
 #pragma once
 
 #include "RenderCore.hpp"
+#include "Rendering.hpp"
 
 // NOLINTBEGIN(misc-misplaced-const)
-
-namespace ZHLN {
-
-// ============================================================================
-// DoubleBuffered Implementation
-// ============================================================================
-
-template <typename T> inline auto DoubleBuffered<T>::Current() noexcept -> T& {
-	return _data[_index];
-}
-template <typename T> inline auto DoubleBuffered<T>::Current() const noexcept -> const T& {
-	return _data[_index];
-}
-template <typename T> inline auto DoubleBuffered<T>::Next() noexcept -> T& {
-	return _data[1 - _index];
-}
-template <typename T> inline auto DoubleBuffered<T>::Next() const noexcept -> const T& {
-	return _data[1 - _index];
-}
-template <typename T> inline auto DoubleBuffered<T>::operator[](uint32_t idx) noexcept -> T& {
-	return _data[idx % 2];
-}
-template <typename T>
-inline auto DoubleBuffered<T>::operator[](uint32_t idx) const noexcept -> const T& {
-	return _data[idx % 2];
-}
-template <typename T> inline void DoubleBuffered<T>::Flip() noexcept {
-	_index = 1 - _index;
-}
-
-} // namespace ZHLN
 
 namespace ZHLN::Vk {
 
@@ -731,17 +701,19 @@ template <uint32_t N, typename Record, typename Rebuild>
 	requires RecordFn<Record> && RebuildFn<Rebuild>
 inline auto DrawFrame(const Context& ctx, const Swapchain& swapchain, const FrameSync<N>& sync,
 					  const CommandPools<N, QueueType::Graphics>& pools, uint32_t& frame_index,
-					  Record&& record, Rebuild&& rebuild) noexcept -> ZHLN_FrameResult {
-	return DrawFrame<N>(ctx, swapchain, sync, pools, frame_index, VK_NULL_HANDLE, 0,
-						std::forward<Record>(record), std::forward<Rebuild>(rebuild));
+					  const SemaphorePool& presentSemaphores, Record&& record,
+					  Rebuild&& rebuild) noexcept -> ZHLN_FrameResult {
+	return DrawFrame<N>(ctx, swapchain, sync, pools, frame_index, presentSemaphores, VK_NULL_HANDLE,
+						0, std::forward<Record>(record), std::forward<Rebuild>(rebuild));
 }
 
 template <uint32_t N, typename Record, typename Rebuild>
 	requires RecordFn<Record> && RebuildFn<Rebuild>
 inline auto DrawFrame(const Context& ctx, const Swapchain& swapchain, const FrameSync<N>& sync,
 					  const CommandPools<N, QueueType::Graphics>& pools, uint32_t& frame_index,
-					  VkSemaphore stagingSemaphore, uint64_t stagingWaitValue, Record&& record,
-					  Rebuild&& rebuild) noexcept -> ZHLN_FrameResult {
+					  const SemaphorePool& presentSemaphores, VkSemaphore stagingSemaphore,
+					  uint64_t stagingWaitValue, Record&& record, Rebuild&& rebuild) noexcept
+	-> ZHLN_FrameResult {
 	const ZHLN_FrameSync& s = sync[frame_index];
 	const ZHLN_CommandPool& pool = pools[frame_index];
 	const VkCommandBuffer cmd = pools.Cmd(frame_index);
@@ -753,7 +725,6 @@ inline auto DrawFrame(const Context& ctx, const Swapchain& swapchain, const Fram
 		std::invoke(std::forward<Rebuild>(rebuild));
 		return result;
 	}
-
 	ZHLN_BeginCommandBuffer(cmd);
 	std::invoke(std::forward<Record>(record), cmd, image_index);
 	ZHLN_EndCommandBuffer(cmd);
@@ -763,7 +734,7 @@ inline auto DrawFrame(const Context& ctx, const Swapchain& swapchain, const Fram
 		.presentQueue = ctx.PresentQueue(),
 		.cmd = cmd,
 		.imageAvailable = s.image_available,
-		.renderFinished = s.render_finished,
+		.renderFinished = presentSemaphores[image_index],
 		.inFlight = s.in_flight,
 		.swapchain = swapchain.Get().handle,
 		.imageIndex = image_index,

@@ -344,8 +344,7 @@ auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHa
 
 void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData,
 										size_t attrSize, uint32_t vertexCount) noexcept {
-	uint32_t frameIdx = _impl->frame_index;
-	auto* nativeMesh = _impl->meshPool.Resolve(_impl->debugMeshHandles[frameIdx]);
+	auto* nativeMesh = _impl->meshPool.Resolve(_impl->debugMeshHandles[]);
 	if (nativeMesh == nullptr) {
 		return;
 	}
@@ -363,7 +362,7 @@ void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, con
 }
 
 BufferHandle RenderContext::GetDebugMeshBuffer() const noexcept {
-	return _impl->debugMeshHandles[_impl->frame_index];
+	return _impl->debugMeshHandles[];
 }
 
 void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices,
@@ -371,7 +370,7 @@ void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matri
 	if (count == 0) {
 		return;
 	}
-	auto mappedRegion = _impl->jointBuffers[_impl->frame_index].Map();
+	auto mappedRegion = _impl->jointBuffers->Map();
 	auto* gpuJoints = std::bit_cast<JPH::Mat44*>(mappedRegion.data);
 
 	std::memcpy(gpuJoints + offset, matrices, count * sizeof(JPH::Mat44));

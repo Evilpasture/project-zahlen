@@ -99,8 +99,7 @@ struct GpuCullingPolicy {
 		planes.planes[5] = NormalizePlane(r3 - r2);
 		planes.drawCount = drawCount;
 
-		ctx.cullingPass.Dispatch(cmd, ctx.cullingSets[recorder.frameIndex], (drawCount + 63) / 64,
-								 1, 1, planes);
+		ctx.cullingPass.Dispatch(cmd, ctx.cullingSets[], (drawCount + 63) / 64, 1, 1, planes);
 
 		Vk::BeginBarrier<Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite>(
 			Vk::CommandBuffer<Vk::QueueType::Graphics>{cmd})
@@ -127,8 +126,7 @@ struct GpuCullingPolicy {
 						{.pipeline = group.material->pipeline.Get(),
 						 .layout = group.material->layout.Get(),
 						 .set = recorder.bindlessSet,
-						 .argumentBuffer =
-							 ctx.indirectCommandsBuffers[recorder.frameIndex].Handle(),
+						 .argumentBuffer = ctx.indirectCommandsBuffers->Handle(),
 						 .offset = group.start * stride,
 						 .drawCount = group.count,
 						 .stride = static_cast<uint32_t>(stride)},
@@ -212,7 +210,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 		cascadeFrustums[c].Update(ctx.currentUniforms.lightSpaceMatrices[c]);
 	}
 
-	auto mapped = ctx.shadowIndirectBuffers[recorder.frameIndex].Map();
+	auto mapped = ctx.shadowIndirectBuffers->Map();
 	auto* indirectCmdsBase = static_cast<VkDrawIndirectCommand*>(mapped.data);
 
 	std::array<uint32_t, 8> passWriteOffsets{};
@@ -304,7 +302,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 					{.pipeline = ctx.shadowPipeline.Get(),
 					 .layout = ctx.shadowPipelineLayout.Get(),
 					 .set = recorder.bindlessSet,
-					 .argumentBuffer = ctx.shadowIndirectBuffers[recorder.frameIndex].Handle(),
+					 .argumentBuffer = ctx.shadowIndirectBuffers->Handle(),
 					 .offset = passWriteOffsets[cascade] * sizeof(VkDrawIndirectCommand),
 					 .drawCount = drawCount,
 					 .stride = sizeof(VkDrawIndirectCommand)},
@@ -353,7 +351,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 					{.pipeline = ctx.punctualShadowPipeline.Get(),
 					 .layout = ctx.punctualShadowPipelineLayout.Get(),
 					 .set = recorder.bindlessSet,
-					 .argumentBuffer = ctx.shadowIndirectBuffers[recorder.frameIndex].Handle(),
+					 .argumentBuffer = ctx.shadowIndirectBuffers->Handle(),
 					 .offset = passWriteOffsets[slotIdx] * sizeof(VkDrawIndirectCommand),
 					 .drawCount = drawCount,
 					 .stride = sizeof(VkDrawIndirectCommand)},
@@ -411,8 +409,7 @@ void MainPass::Execute(const FrameRecorder& recorder,
 	}
 
 	const bool useGpuCulling = [&]() {
-		return ctx.cullingPass.pipeline.Valid() &&
-			   ctx.indirectCommandsBuffers[recorder.frameIndex].Valid() &&
+		return ctx.cullingPass.pipeline.Valid() && ctx.indirectCommandsBuffers->Valid() &&
 			   (drawCount <= kGpuCullingMaxInstances);
 	}();
 

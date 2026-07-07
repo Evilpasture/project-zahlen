@@ -9,53 +9,31 @@
 #include "RenderCore.hpp"
 #include "demo_utils/DemoWindow.hpp"
 
-#include <filesystem>
 #include <vector>
 
 auto main() -> int {
 	// 1. OS Window Creation
 	ZHLN::Demo::WindowState win = ZHLN::Demo::InitWindow(800, 600, "ZHLN Engine - Modern Triangle");
-	if (win.os_window == nullptr) {
+	if (win.os_window == nullptr)
 		return -1;
-	}
 
 	// 2. Instance & Device Feature Setup
 	ZHLN_InstanceDesc inst_desc = ZHLN_DEFAULT_INSTANCE_DESC;
 	auto inst_exts = ZHLN::Demo::GetRequiredInstanceExtensions();
-	inst_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-	inst_exts.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
-
-	bool has_maint1 =
-		ZHLN::Vk::IsInstanceExtensionSupported(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
-	if (has_maint1) {
-		inst_exts.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
-	}
-
 #ifdef __APPLE__
 	inst_exts.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
 #endif
 	inst_desc.extensions = inst_exts.data();
 	inst_desc.extension_count = static_cast<uint32_t>(inst_exts.size());
 
-	auto features =
-		ZHLN::Vk::FeatureChainBuilder()
-			.Require<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>([has_maint1](auto& f) {
-				f.swapchainMaintenance1 = has_maint1 ? VK_TRUE : VK_FALSE;
-			})
-			.Require<VkPhysicalDeviceVulkan13Features>([](auto& f) {
-				f.synchronization2 = VK_TRUE;
-				f.dynamicRendering = VK_TRUE;
-			})
-			.Require<VkPhysicalDeviceVulkan12Features>(
-				[](auto& f) { f.bufferDeviceAddress = VK_TRUE; })
-			.Require<VkPhysicalDeviceFeatures2>([](auto& _) {})
-			.Build();
+	auto features = ZHLN::Vk::FeatureChainBuilder()
+						.Require<VkPhysicalDeviceVulkan13Features>([](auto& f) {
+							f.synchronization2 = VK_TRUE;
+							f.dynamicRendering = VK_TRUE;
+						})
+						.Build();
 
 	std::vector<const char*> dev_exts = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
-	if (has_maint1) {
-		dev_exts.push_back(VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME);
-		dev_exts.push_back(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME);
-	}
 #ifdef __APPLE__
 	dev_exts.push_back("VK_KHR_portability_subset");
 #endif
@@ -65,15 +43,9 @@ auto main() -> int {
 								.features = features.GetRoot(),
 								.enable_validation = true};
 
-	auto ctx = ZHLN::Vk::Context::Create(inst_desc,
-										 ZHLN_DeviceSelectDesc{.instance = VK_NULL_HANDLE,
-															   .surface = VK_NULL_HANDLE,
-															   .score_fn = nullptr,
-															   .score_userdata = nullptr},
-										 dev_desc);
-	if (!ctx) {
+	auto ctx = ZHLN::Vk::Context::Create(inst_desc, {}, dev_desc);
+	if (!ctx)
 		return -1;
-	}
 
 	// 3. Surface, Memory Allocator & Presentation Context
 	ZHLN::Vk::Surface surface(ctx.Instance(), ZHLN::Demo::CreateSurface(ctx.Instance(), win));
@@ -90,13 +62,11 @@ auto main() -> int {
 	// 4. Pipeline Setup
 	auto shaders = ZHLN::Vk::ShaderStages::FromFiles(
 		ctx.Device(), "triangle.hlsl.VSMain.spv", "triangle.hlsl.PSMain.spv", "VSMain", "PSMain");
-	if (!shaders.Valid()) {
+	if (!shaders.Valid())
 		return -1;
-	}
 
-	ZHLN_PipelineLayoutDesc layout_desc = {};
-	ZHLN::Vk::PipelineLayout layout(ctx.Device(),
-									ZHLN_CreatePipelineLayout(ctx.Device(), &layout_desc));
+	// Refactored to use the framework's native layout builder
+	ZHLN::Vk::PipelineLayout layout = ZHLN::Vk::PipelineLayoutBuilder(ctx.Device()).Build();
 
 	auto pipelineRes = ZHLN::Vk::PipelineBuilder{}
 						   .Shaders(shaders)
@@ -105,9 +75,8 @@ auto main() -> int {
 						   .NoDepth()
 						   .CullNone()
 						   .Build(ctx.Device());
-	if (!pipelineRes) {
+	if (!pipelineRes)
 		return -1;
-	}
 
 	// 5. Minimal Rebuild Callback
 	auto rebuild = [&]() {
@@ -121,29 +90,22 @@ auto main() -> int {
 
 	while (win.running) {
 		ZHLN::Demo::ProcessEvents(win);
-		if (win.width == 0 || win.height == 0) {
+		if (win.width == 0 || win.height == 0)
 			continue;
-		}
-		if (win.resized) {
+		if (win.resized)
 			rebuild();
-		}
-		if (!pres.swapchain.Valid() || pres.swapchain.Get().extent.width == 0) {
+		if (!pres.swapchain.Valid() || pres.swapchain.Get().extent.width == 0)
 			continue;
-		}
 
-		// DrawFrame handles synchronization, image acquisition, recording boundaries, and
-		// submission.
 		ZHLN::Vk::DrawFrame(
-			ctx, pres.swapchain, sync, pools, frame_index,
+			ctx, pres.swapchain, sync, pools, frame_index, pres.presentSemaphores,
 			[&](VkCommandBuffer cmd, uint32_t image_index) {
-				ZHLN::Vk::TypedImage<VK_IMAGE_LAYOUT_UNDEFINED> swap_u = {
-					.handle = pres.swapchain.Get().images[image_index],
-					.view = pres.swapchain.Get().views[image_index],
-					.extent = pres.swapchain.Get().extent,
-					.aspect = VK_IMAGE_ASPECT_COLOR_BIT};
-
-				auto swap_att =
-					ZHLN::Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, swap_u);
+				auto swap_att = ZHLN::Vk::Transition<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+													 VK_IMAGE_LAYOUT_UNDEFINED>(
+					cmd, {.handle = pres.swapchain.Get().images[image_index],
+						  .view = pres.swapchain.Get().views[image_index],
+						  .extent = pres.swapchain.Get().extent,
+						  .aspect = VK_IMAGE_ASPECT_COLOR_BIT});
 
 				ZHLN::Vk::DynamicPass(pres.swapchain.Get().extent)
 					.AddColor(swap_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,

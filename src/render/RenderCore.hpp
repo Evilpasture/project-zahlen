@@ -16,31 +16,37 @@ struct Color4 {
 
 // NOLINTBEGIN(misc-misplaced-const, readability-avoid-const-params-in-decls)
 
-/**
- * @brief Thread-safe-ish ping-pong buffer for temporal rendering state.
- */
-template <typename T> class DoubleBuffered {
-  public:
-	DoubleBuffered() = default;
+template <typename T> struct PerFrame {
+	std::array<T, 2> data{};
+	uint32_t idx = 0;
 
-	constexpr DoubleBuffered(T&& first, T&& second) noexcept
-		: _data{std::move(first), std::move(second)} {}
+	PerFrame() = default;
 
-	[[nodiscard]] auto Current() noexcept -> T&;
-	[[nodiscard]] auto Current() const noexcept -> const T&;
+	constexpr PerFrame(T first, T second) noexcept : data{{std::move(first), std::move(second)}} {}
 
-	[[nodiscard]] auto Next() noexcept -> T&;
-	[[nodiscard]] auto Next() const noexcept -> const T&;
+	// C++23 Zero-Argument Subscript Overload for []
+	[[nodiscard]] constexpr T& operator[]() noexcept { return data[idx]; }
+	[[nodiscard]] constexpr const T& operator[]() const noexcept { return data[idx]; }
 
-	[[nodiscard]] auto operator[](uint32_t idx) noexcept -> T&;
-	[[nodiscard]] auto operator[](uint32_t idx) const noexcept -> const T&;
+	// Standard Single-Argument Subscript Overload for [i]
+	[[nodiscard]] constexpr T& operator[](uint32_t i) noexcept { return data[i % 2]; }
+	[[nodiscard]] constexpr const T& operator[](uint32_t i) const noexcept { return data[i % 2]; }
 
-	void Flip() noexcept;
+	// Keep existing pointer and helper APIs
+	[[nodiscard]] constexpr T& operator*() noexcept { return data[idx]; }
+	[[nodiscard]] constexpr const T& operator*() const noexcept { return data[idx]; }
+	[[nodiscard]] constexpr T* operator->() noexcept { return &data[idx]; }
+	[[nodiscard]] constexpr const T* operator->() const noexcept { return &data[idx]; }
+	[[nodiscard]] constexpr T& Current() noexcept { return data[idx]; }
+	[[nodiscard]] constexpr const T& Current() const noexcept { return data[idx]; }
+	[[nodiscard]] constexpr T& Next() noexcept { return data[idx ^ 1]; }
+	[[nodiscard]] constexpr const T& Next() const noexcept { return data[idx ^ 1]; }
 
-  private:
-	std::array<T, 2> _data{};
-	uint32_t _index = 0;
+	void Advance() noexcept { idx ^= 1; }
+	void Flip() noexcept { idx ^= 1; }
 };
+
+template <typename T> using DoubleBuffered = PerFrame<T>;
 
 namespace Detail {
 template <bool Condition> struct ResourceCheck {
@@ -875,19 +881,22 @@ inline constexpr ColorToReadTrans ColorToRead{};
 // ============================================================================
 // Frame Execution
 // ============================================================================
+class SemaphorePool;
 
 template <uint32_t N, typename Record, typename Rebuild>
 	requires RecordFn<Record> && RebuildFn<Rebuild>
 auto DrawFrame(const Context& ctx, const Swapchain& swapchain, const FrameSync<N>& sync,
 			   const CommandPools<N, QueueType::Graphics>& pools, uint32_t& frame_index,
-			   Record&& record, Rebuild&& rebuild) noexcept -> ZHLN_FrameResult;
+			   const SemaphorePool& presentSemaphores, Record&& record, Rebuild&& rebuild) noexcept
+	-> ZHLN_FrameResult;
 
 template <uint32_t N, typename Record, typename Rebuild>
 	requires RecordFn<Record> && RebuildFn<Rebuild>
 auto DrawFrame(const Context& ctx, const Swapchain& swapchain, const FrameSync<N>& sync,
 			   const CommandPools<N, QueueType::Graphics>& pools, uint32_t& frame_index,
-			   VkSemaphore stagingSemaphore, uint64_t stagingWaitValue, Record&& record,
-			   Rebuild&& rebuild) noexcept -> ZHLN_FrameResult;
+			   const SemaphorePool& presentSemaphores, VkSemaphore stagingSemaphore,
+			   uint64_t stagingWaitValue, Record&& record, Rebuild&& rebuild) noexcept
+	-> ZHLN_FrameResult;
 
 [[nodiscard]] auto SubmitAndPresent(const ZHLN_FrameSubmitDesc& desc) noexcept -> ZHLN_FrameResult;
 

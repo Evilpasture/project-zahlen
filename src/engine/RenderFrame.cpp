@@ -198,8 +198,7 @@ void RenderContext::Impl::DispatchSkinningPasses() {
 				.outPosAddr = scratchMesh->vboAddress,
 				.outAttrAddr =
 					scratchMesh->vboAddress + (scratchMesh->vertexCount * sizeof(VertexPosition)),
-				.jointsAddr =
-					Vk::GetBufferDeviceAddress(ctx.Device(), jointBuffers[frame_index].Handle()),
+				.jointsAddr = Vk::GetBufferDeviceAddress(ctx.Device(), jointBuffers->Handle()),
 				.morphDeltasAddr =
 					Vk::GetBufferDeviceAddress(ctx.Device(), morphDeltasBuffer.Handle()),
 				.vertexCount = posMesh->vertexCount,
@@ -312,7 +311,8 @@ ZHLN_FrameResult RenderContext::Impl::SubmitFrame() {
 		&bloomBlurHPass, &bloomBlurVPass, &frameUniformBuffers, &lightStorageBuffers,
 		&instanceDataBuffers, &indirectCommandsBuffers, &shadowIndirectBuffers, &jointBuffers,
 		&bindlessSets, &tlas, &tlasBuffer, &tlasScratchBuffer, &clusterGridBuffers,
-		&lightIndexListBuffers, &globalCounterBuffers, &clusterCullingSets, &parallelRecorder)
+		&lightIndexListBuffers, &globalCounterBuffers, &clusterCullingSets, &parallelRecorder,
+		&tlasInstanceBuffers, &tlasStagingBuffers, &debugMeshHandles, &cullingSets)
 		.FlipAll();
 
 	frame_index = (frame_index + 1) % 2;
@@ -359,8 +359,8 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 		return;
 	}
 
-	auto& stagingBuf = tlasStagingBuffers[frame_index];
-	auto& instanceBuf = tlasInstanceBuffers[frame_index];
+	auto& stagingBuf = tlasStagingBuffers[];
+	auto& instanceBuf = tlasInstanceBuffers[];
 
 	std::memcpy(stagingBuf.Map().data, tlasInstancesScratch.data(),
 				tlasInstancesScratch.size() * sizeof(VkAccelerationStructureInstanceKHR));
@@ -377,10 +377,9 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 	ZHLN_TlasGeometryDesc geom = {
 		.instance_data = Vk::GetBufferDeviceAddress(ctx.Device(), instanceBuf.Handle())};
 
-	rtCtx.CmdBuildTlas(
-		cmd, geom, tlas[frame_index],
-		Vk::GetBufferDeviceAddress(ctx.Device(), tlasScratchBuffer[frame_index].Handle()),
-		tlasInstancesScratch.size());
+	rtCtx.CmdBuildTlas(cmd, geom, tlas[],
+					   Vk::GetBufferDeviceAddress(ctx.Device(), tlasScratchBuffer->Handle()),
+					   tlasInstancesScratch.size());
 
 	Vk::MemoryBarrier(cmd, {.src_stage = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
 							.src_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
@@ -407,6 +406,15 @@ struct PassFactory {
 			return Vk::SkipWrite{};
 		} else {
 			return self.rtCtx.Valid() ? &self.tlas.Current() : VK_NULL_HANDLE;
+		}
+	}
+
+	// Helper to resolve the correct color target based on fullbright configuration
+	template <bool FullBright> [[nodiscard]] auto& ColorTarget() const noexcept {
+		if constexpr (FullBright) {
+			return self.sceneColor;
+		} else {
+			return self.postProcessTarget;
 		}
 	}
 
@@ -477,7 +485,7 @@ struct PassFactory {
 					self.normalRoughnessBuffer),
 				self.pointSampler.Get(), self.iblPayload.prefilteredView.Get(),
 				self.iblPayload.brdfLutView.Get(), self.clampSampler.Get(),
-				self.frameUniformBuffers[fIdx].Handle());
+				self.frameUniformBuffers->Handle());
 			self.ambientPass.Execute(ctx.Cmd(), pc);
 		});
 	}
@@ -496,11 +504,10 @@ struct PassFactory {
 						self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
 					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
 						self.normalRoughnessBuffer),
-					self.lightStorageBuffers[fIdx].Handle(),
-					self.frameUniformBuffers[fIdx].Handle(), self.shadowMap.view.Get(),
-					self.shadowSampler.Get(), self.ltcMatView.Get(), self.ltcAmpView.Get(),
-					self.clampSampler.Get(), self.clusterGridBuffers[fIdx].Handle(),
-					self.lightIndexListBuffers[fIdx].Handle(),
+					self.lightStorageBuffers->Handle(), self.frameUniformBuffers->Handle(),
+					self.shadowMap.view.Get(), self.shadowSampler.Get(), self.ltcMatView.Get(),
+					self.ltcAmpView.Get(), self.clampSampler.Get(),
+					self.clusterGridBuffers->Handle(), self.lightIndexListBuffers->Handle(),
 					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.ambientTarget),
 					self.pointSampler.Get(), GetTLAS(), self.shadowAtlasCubeView.Get(),
 					self.shadowAtlas2DView.Get());
@@ -525,7 +532,7 @@ struct PassFactory {
 					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
 						self.normalRoughnessBuffer),
 					self.pointSampler.Get(), self.iblPayload.prefilteredView.Get(), GetTLAS(),
-					self.frameUniformBuffers[fIdx].Handle(), self.iblPayload.brdfLutView.Get(),
+					self.frameUniformBuffers->Handle(), self.iblPayload.brdfLutView.Get(),
 					self.clampSampler.Get(),
 					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
 						self.lightingTarget));
@@ -535,13 +542,7 @@ struct PassFactory {
 
 	template <bool FullBright> [[nodiscard]] auto MakeForwardPass() const noexcept {
 		using ColorTargetRes = std::conditional_t<FullBright, Res_SceneColor, Res_PostProcess>;
-		auto& targetImage = [&]() -> auto& {
-			if constexpr (FullBright) {
-				return self.sceneColor;
-			} else {
-				return self.postProcessTarget;
-			}
-		}();
+		auto& targetImage = ColorTarget<FullBright>();
 
 		return Vk::Passieren<"Forward", Vk::ColorWrite<ColorTargetRes>, Vk::DepthWrite<Res_Depth>>(
 			[this, &targetImage](VkCommandBuffer c) noexcept {
@@ -556,13 +557,7 @@ struct PassFactory {
 
 	template <bool FullBright> [[nodiscard]] auto MakeBloomThresholdPass() const noexcept {
 		using BloomInputRes = std::conditional_t<FullBright, Res_SceneColor, Res_PostProcess>;
-		const auto& inputColor = [&]() -> auto& {
-			if constexpr (FullBright) {
-				return self.sceneColor;
-			} else {
-				return self.postProcessTarget;
-			}
-		}();
+		const auto& inputColor = ColorTarget<FullBright>();
 		return Vk::MakePass<"BloomThreshold", Vk::ShaderRead<BloomInputRes>,
 							Vk::ColorWrite<Res_BloomThresh>>(
 			[this, &inputColor](auto& ctx) noexcept {
@@ -619,13 +614,7 @@ struct PassFactory {
 	template <bool FullBright, AAMode Mode, typename AALambdaT>
 	auto MakeAAPass(AALambdaT&& aaLambda) const noexcept {
 		using AAColorInputRes = std::conditional_t<FullBright, Res_SceneColor, Res_PostProcess>;
-		auto& aaColorInputImage = [&]() -> auto& {
-			if constexpr (FullBright) {
-				return self.sceneColor;
-			} else {
-				return self.postProcessTarget;
-			}
-		}();
+		auto& aaColorInputImage = ColorTarget<FullBright>();
 
 		return Vk::Passieren<"AA", Vk::ShaderRead<AAColorInputRes>, Vk::ShaderRead<Res_Velocity>,
 							 Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>,
@@ -644,11 +633,7 @@ struct PassFactory {
 			if constexpr (Mode != AAMode::None) {
 				return self.accumBuffers.Next();
 			} else {
-				if constexpr (FullBright) {
-					return self.sceneColor;
-				} else {
-					return self.postProcessTarget;
-				}
+				return ColorTarget<FullBright>();
 			}
 		}();
 
@@ -957,7 +942,7 @@ RenderResult RenderContext::EndFrame() noexcept {
 
 	auto drawCount = _impl->drawQueue.size();
 	if (drawCount > 0) {
-		auto mapped = _impl->instanceDataBuffers[_impl->frame_index].Map();
+		auto mapped = _impl->instanceDataBuffers->Map();
 		auto* dst = static_cast<InstanceData*>(mapped.data);
 		for (size_t i = 0; i < drawCount; ++i) {
 			dst[i] = _impl->drawQueue[i].instanceData;
