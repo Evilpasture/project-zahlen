@@ -7,7 +7,6 @@
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
 #error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
 #endif
-
 namespace ZHLN::Vk {
 
 // ============================================================================
@@ -693,3 +692,215 @@ constexpr void AutoBind(BinderT& binder, const Refs&... refs) noexcept {
 }
 
 } // namespace ZHLN::Vk
+
+namespace ZHLN::Vk::Debug {
+
+// Compile-time string builder with integer formatting support
+template <size_t Capacity> struct VisualizerString {
+	std::array<char, Capacity> data_buffer{};
+	size_t length = 0;
+
+	constexpr void append(std::string_view sv) noexcept {
+		size_t to_copy = std::min(sv.size(), Capacity - 1 - length);
+		for (size_t i = 0; i < to_copy; ++i) {
+			data_buffer[length + i] = sv[i];
+		}
+		length += to_copy;
+		data_buffer[length] = '\0';
+	}
+
+	constexpr void append_int(size_t val) noexcept {
+		if (val == 0) {
+			append("0");
+			return;
+		}
+		char temp[24]{};
+		size_t i = 0;
+		while (val > 0 && i < 23) {
+			temp[i++] = '0' + (val % 10);
+			val /= 10;
+		}
+		for (size_t j = 0; j < i / 2; ++j) {
+			std::swap(temp[j], temp[i - 1 - j]);
+		}
+		append(std::string_view(temp, i));
+	}
+
+	[[nodiscard]] constexpr auto string_view() const noexcept -> std::string_view {
+		return std::string_view(data_buffer.data(), length);
+	}
+};
+
+// Extractor trait to inspect passes and states
+template <typename T> struct GraphVisualizer;
+
+template <typename... Passes> struct GraphVisualizer<CompileTimeFrameGraph<Passes...>> {
+	using GraphT = CompileTimeFrameGraph<Passes...>;
+	using Resources = typename GraphT::Resources;
+	static constexpr size_t NumPasses = GraphT::NumPasses;
+	static constexpr size_t NumResources = Resources::size;
+
+	static constexpr std::string_view LayoutToString(VkImageLayout layout) {
+		switch (layout) {
+			case VK_IMAGE_LAYOUT_UNDEFINED:
+				return "UNDEFINED";
+			case VK_IMAGE_LAYOUT_GENERAL:
+				return "GENERAL";
+			case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+				return "COLOR_ATTACH_OPTIMAL";
+			case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+				return "DEPTH_STENCIL_ATTACH_OPTIMAL";
+			case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+				return "SHADER_READ_ONLY";
+			case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+				return "TRANSFER_SRC";
+			case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+				return "TRANSFER_DST";
+			case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL:
+				return "DEPTH_ATTACH_OPTIMAL";
+			case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
+				return "PRESENT_SRC_KHR";
+			default:
+				return "UNKNOWN_OR_CUSTOM_LAYOUT";
+		}
+	}
+
+	static constexpr std::string_view StageToString(VkPipelineStageFlags2 stage) {
+		if (stage == VK_PIPELINE_STAGE_2_NONE)
+			return "NONE";
+		if (stage == VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT)
+			return "TOP_OF_PIPE";
+		if (stage == VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT)
+			return "BOTTOM_OF_PIPE";
+
+		if (stage & VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
+			return "COLOR_ATTACHMENT_OUTPUT";
+		if (stage & VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT)
+			return "FRAGMENT_SHADER";
+		if (stage & (VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+					 VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT))
+			return "DEPTH_STENCIL_TESTS";
+		if (stage & VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT)
+			return "COMPUTE_SHADER";
+		if (stage & VK_PIPELINE_STAGE_2_TRANSFER_BIT)
+			return "TRANSFER";
+
+		return "COMBINED_OR_OTHER_STAGES";
+	}
+
+	static constexpr std::string_view AccessToString(VkAccessFlags2 access) {
+		if (access == 0) {
+			return "NONE";
+		}
+		if (access & VK_ACCESS_2_SHADER_WRITE_BIT) {
+			return "SHADER_WRITE";
+		}
+		if (access & VK_ACCESS_2_SHADER_READ_BIT) {
+			return "SHADER_READ";
+		}
+		if (access & VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT) {
+			return "COLOR_WRITE";
+		}
+		if (access & VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT) {
+			return "DEPTH_WRITE";
+		}
+		if (access & VK_ACCESS_2_TRANSFER_WRITE_BIT) {
+			return "TRANSFER_WRITE";
+		}
+		if (access & VK_ACCESS_2_TRANSFER_READ_BIT) {
+			return "TRANSFER_READ";
+		}
+		return "COMBINED_OR_OTHER_ACCESS";
+	}
+
+	static consteval auto Visualize() {
+		VisualizerString<16384> msg{};
+		msg.append("\n\n");
+		msg.append(
+			"================================================================================\n");
+		msg.append("  [RENDER GRAPH COMPILE-TIME STATE TABLE VISUALIZATION]\n");
+		msg.append(
+			"================================================================================\n\n");
+
+		msg.append("  Total Registered Resources: ");
+		msg.append_int(NumResources);
+		msg.append("\n");
+		msg.append("  Total Passes: ");
+		msg.append_int(NumPasses);
+		msg.append("\n\n");
+
+		msg.append("  --- REGISTERED RESOURCES ---\n");
+		size_t rIdx = 0;
+		auto printResource = [&]<typename R>() {
+			msg.append("    [Resource ");
+			msg.append_int(rIdx);
+			msg.append("]: \"");
+			msg.append(std::string_view(
+				R::name.value.data())); // Safety construct from null-terminated ptr
+			msg.append("\"");
+			if constexpr (R::is_swapchain) {
+				msg.append(" (SWAPCHAIN)");
+			}
+			msg.append("\n");
+			rIdx++;
+		};
+		[&]<typename... Us>(TypeList<Us...>) {
+			(printResource.template operator()<Us>(), ...);
+		}(Resources{});
+
+		msg.append("\n  --- PASS STATE TRANSITIONS (AT ENTRY TO PASS) ---\n");
+
+		size_t passIdx = 0;
+		auto printPass = [&]<typename Pass>() {
+			msg.append("  ● Pass [");
+			msg.append_int(passIdx);
+			msg.append("]: \"");
+			msg.append(std::string_view(Pass::name.value.data()));
+			msg.append("\"\n");
+
+			size_t resIdx = 0;
+			auto printResourceState = [&]<typename Res>() {
+				const auto state = GraphT::StateTable[passIdx][resIdx];
+				msg.append("      ↳ Resource [");
+				msg.append_int(resIdx);
+				msg.append("] (\"");
+				msg.append(std::string_view(Res::name.value.data()));
+				msg.append("\")\n");
+
+				msg.append("          Layout: ");
+				msg.append(LayoutToString(state.layout));
+				msg.append("\n");
+
+				msg.append("          Stage : ");
+				msg.append(StageToString(state.stage));
+				msg.append("\n");
+
+				msg.append("          Access: ");
+				msg.append(AccessToString(state.access));
+				msg.append("\n");
+
+				resIdx++;
+			};
+
+			[&]<typename... Us>(TypeList<Us...>) {
+				(printResourceState.template operator()<Us>(), ...);
+			}(Resources{});
+
+			msg.append("\n");
+			passIdx++;
+		};
+
+		(printPass.template operator()<Passes>(), ...);
+
+		msg.append(
+			"================================================================================\n\n");
+		return msg;
+	}
+};
+
+// Intentionally fails compilation when instantiated, printing the formatted visualization
+template <typename GraphT> struct ForceGraphVisualization {
+	static_assert(sizeof(GraphT) == 0, GraphVisualizer<GraphT>::Visualize().string_view());
+};
+
+} // namespace ZHLN::Vk::Debug
