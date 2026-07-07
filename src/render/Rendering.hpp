@@ -52,6 +52,7 @@ static constexpr auto isLegacy = false;
 #include <utility>
 #include <variant>
 #include <vector>
+#include <atomic>
 #if defined(__cpp_reflection) && !defined(__clang__)
 #include <meta>
 #endif

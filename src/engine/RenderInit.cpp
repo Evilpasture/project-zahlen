@@ -107,6 +107,8 @@ void RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int
 	}
 
 	gpuProfiler.Init(ctx.Device(), ctx.Physical(), ctx.PhysicalInfo().graphics_family);
+	graphicsCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+	transferCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().transfer_family);
 
 	InitShadowResources();
 	InitCullingResources();
@@ -511,18 +513,21 @@ void RenderContext::Impl::InitShadowResources() {
 		ctx.Device(), shadowAtlas.image.Handle(), 0, 24);
 
 	{
-		Vk::ImmediateCommand cmd(ctx.Device(), stagingRingBuffer);
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-			cmd, shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-			cmd, shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+		Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
+			Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED,
+								 VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+				cmd, shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+			Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+								 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+				cmd, shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
 
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-			cmd, shadowAtlas.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-			cmd, shadowAtlas.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+			Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED,
+								 VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+				cmd, shadowAtlas.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+			Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+								 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+				cmd, shadowAtlas.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+		});
 	}
 
 	RecreatePunctualShadowViews();
@@ -1206,36 +1211,37 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
 
 	// Transition all newly allocated render targets to their correct default layouts
 	{
-		Vk::ImmediateCommand cmd(ctx.Device(), stagingRingBuffer);
+		Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
+			std::array<VkImage, 13> colorTargets = {sceneColor.image.Handle(),
+													velocityBuffer.image.Handle(),
+													accumBuffers[0].image.Handle(),
+													accumBuffers[1].image.Handle(),
+													normalRoughnessBuffer.image.Handle(),
+													postProcessTarget.image.Handle(),
+													ambientTarget.image.Handle(),
+													lightingTarget.image.Handle(),
+													smaaEdgeTarget.image.Handle(),
+													smaaWeightTarget.image.Handle(),
+													bloomThresholdTarget.image.Handle(),
+													bloomBlurTarget.image.Handle(),
+													bloomFinalTarget.image.Handle()};
 
-		std::array<VkImage, 13> colorTargets = {sceneColor.image.Handle(),
-												velocityBuffer.image.Handle(),
-												accumBuffers[0].image.Handle(),
-												accumBuffers[1].image.Handle(),
-												normalRoughnessBuffer.image.Handle(),
-												postProcessTarget.image.Handle(),
-												ambientTarget.image.Handle(),
-												lightingTarget.image.Handle(),
-												smaaEdgeTarget.image.Handle(),
-												smaaWeightTarget.image.Handle(),
-												bloomThresholdTarget.image.Handle(),
-												bloomBlurTarget.image.Handle(),
-												bloomFinalTarget.image.Handle()};
+			for (VkImage img : colorTargets) {
+				Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED,
+									 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+					cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+				Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+									 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+					cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+			}
 
-		for (VkImage img : colorTargets) {
 			Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED,
-								 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-				cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-			Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+								 VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+				cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+			Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
 								 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-				cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-		}
-
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-			cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-			cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+				cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+		});
 	}
 
 	return true;

@@ -52,17 +52,6 @@ inline void BarrierComputeWriteToVertexRead(Vk::CommandBuffer<Vk::QueueType::Gra
 		.TransitionTo<Vk::BarrierStage::Vertex, Vk::BarrierAccess::ShaderRead>();
 }
 
-inline void BarrierComputeWriteToFragmentRead(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd) {
-	Vk::BeginBarrier<Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite>(cmd)
-		.TransitionTo<Vk::BarrierStage::Fragment, Vk::BarrierAccess::ShaderRead>();
-}
-
-inline void BarrierCounterReset(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd) {
-	Vk::BeginBarrier<Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferWrite>(cmd)
-		.TransitionTo<Vk::BarrierStage::Compute,
-					  Vk::BarrierAccess::ShaderRead | Vk::BarrierAccess::ShaderWrite>();
-}
-
 template <typename TargetImageT, typename RecordFn>
 inline void DispatchPostProcessPass(VkCommandBuffer cmd, TargetImageT& targetImage,
 									VkAttachmentLoadOp loadOp, RecordFn&& recordFn,
@@ -82,26 +71,6 @@ struct TaskSystemSchedulerAdapter {
 };
 enum class RenderPassType : uint8_t { Main, Shadow };
 
-// flags & 0xFF == 2 marks an instance as forward-only (transparent / non-deferred).
-[[nodiscard]] constexpr bool IsForwardOnly(uint32_t instanceFlags) noexcept {
-	return (instanceFlags & 0xFF) == 2;
-}
-
-[[nodiscard]] inline const NativeMaterial* ToNative(const void* material) noexcept {
-	return std::bit_cast<const NativeMaterial*>(material);
-}
-
-[[nodiscard]] inline bool IsVisibleIn(DrawFlags flags, RenderPassType passType) noexcept {
-	const bool hasMain = (flags & DrawFlags::VisibleInMain) != DrawFlags::None;
-	const bool hasShadow = (flags & DrawFlags::VisibleInShadow) != DrawFlags::None;
-
-	if (!hasMain && !hasShadow) {
-		return true;
-	}
-
-	return (passType == RenderPassType::Main) ? hasMain : hasShadow;
-}
-
 template <typename T>
 inline void SubmitDrawInstanced(VkCommandBuffer cmd, const DrawCommand& drawCmd,
 								uint32_t instanceIdx, VkDescriptorSet bindlessSet,
@@ -110,7 +79,7 @@ inline void SubmitDrawInstanced(VkCommandBuffer cmd, const DrawCommand& drawCmd,
 								VkPipelineLayout layoutOverride = VK_NULL_HANDLE,
 								VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT |
 															VK_SHADER_STAGE_FRAGMENT_BIT) noexcept {
-	const auto* nativeMat = ToNative(drawCmd.material);
+	const auto* nativeMat = drawCmd.material;
 	const VkPipeline pipeline =
 		(pipelineOverride != VK_NULL_HANDLE) ? pipelineOverride : nativeMat->pipeline.Get();
 	const VkPipelineLayout layout =
@@ -411,7 +380,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 	rtCtx.CmdBuildTlas(
 		cmd, geom, tlas[frame_index],
 		Vk::GetBufferDeviceAddress(ctx.Device(), tlasScratchBuffer[frame_index].Handle()),
-		static_cast<uint32_t>(tlasInstancesScratch.size()));
+		tlasInstancesScratch.size());
 
 	Vk::MemoryBarrier(cmd, {.src_stage = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
 							.src_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
@@ -437,8 +406,7 @@ struct PassFactory {
 		if constexpr (isMac) {
 			return Vk::SkipWrite{};
 		} else {
-			return self.rtCtx.Valid() ? (const VkAccelerationStructureKHR*)&self.tlas.Current()
-									  : (const VkAccelerationStructureKHR*)nullptr;
+			return self.rtCtx.Valid() ? &self.tlas.Current() : VK_NULL_HANDLE;
 		}
 	}
 
@@ -987,20 +955,20 @@ RenderResult RenderContext::EndFrame() noexcept {
 
 	_impl->SortDrawQueue();
 
-	auto drawCount = static_cast<uint32_t>(_impl->drawQueue.size());
+	auto drawCount = _impl->drawQueue.size();
 	if (drawCount > 0) {
 		auto mapped = _impl->instanceDataBuffers[_impl->frame_index].Map();
 		auto* dst = static_cast<InstanceData*>(mapped.data);
-		for (uint32_t i = 0; i < drawCount; ++i) {
+		for (size_t i = 0; i < drawCount; ++i) {
 			dst[i] = _impl->drawQueue[i].instanceData;
 		}
 	}
 	_impl->BuildTLAS(cmd);
 
 	if (_impl->currentUniforms.fullBright != 0) {
-		_impl->RecordSceneFrame<true>(Vk::CommandBuffer<Vk::QueueType::Graphics>{cmd});
+		_impl->RecordSceneFrame<true>({cmd});
 	} else {
-		_impl->RecordSceneFrame<false>(Vk::CommandBuffer<Vk::QueueType::Graphics>{cmd});
+		_impl->RecordSceneFrame<false>({cmd});
 	}
 
 	ZHLN_EndCommandBuffer(cmd);
@@ -1021,40 +989,15 @@ void RenderContext::Impl::ProvokeDeviceLostInternal() const {
 		return;
 	}
 
-	VkCommandBuffer cmd = current_cmd;
-	bool submitQueue = false;
-	Vk::CommandPool tempPool;
-
-	if (cmd == VK_NULL_HANDLE) {
-		tempPool = Vk::CommandPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-		if (!tempPool.Allocate(1)) {
-			return;
-		}
-		cmd = tempPool[0];
-		ZHLN_BeginCommandBuffer(cmd);
-		submitQueue = true;
-	}
-
-	hangGpuPass.Bind(cmd);
-	hangGpuPass.Dispatch(cmd, 512, 512, 1);
-
-	if (submitQueue) {
-		ZHLN_EndCommandBuffer(cmd);
-		VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-											 .pNext = nullptr,
-											 .commandBuffer = cmd,
-											 .deviceMask = 0};
-		VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-								.pNext = nullptr,
-								.flags = 0,
-								.waitSemaphoreInfoCount = 0,
-								.pWaitSemaphoreInfos = nullptr,
-								.commandBufferInfoCount = 1,
-								.pCommandBufferInfos = &subInfo,
-								.signalSemaphoreInfoCount = 0,
-								.pSignalSemaphoreInfos = nullptr};
-		vkQueueSubmit2(ctx.GraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
-		vkQueueWaitIdle(ctx.GraphicsQueue());
+	if (current_cmd != VK_NULL_HANDLE) {
+		hangGpuPass.Bind(current_cmd);
+		hangGpuPass.Dispatch(current_cmd, 512, 512, 1);
+	} else {
+		// Grab from pre-allocated ring and execute blocking CPU stall until GPU page faults
+		Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](auto cmd) {
+			hangGpuPass.Bind(cmd);
+			hangGpuPass.Dispatch(cmd, 512, 512, 1);
+		});
 	}
 }
 

@@ -24,10 +24,6 @@ enum class RenderPassType : uint8_t { Main, Shadow };
 	return (instanceFlags & 0xFF) == 2;
 }
 
-[[nodiscard]] inline const NativeMaterial* ToNative(const void* material) noexcept {
-	return std::bit_cast<const NativeMaterial*>(material);
-}
-
 [[nodiscard]] inline bool IsVisibleIn(DrawFlags flags, RenderPassType passType) noexcept {
 	const bool hasMain = (flags & DrawFlags::VisibleInMain) != DrawFlags::None;
 	const bool hasShadow = (flags & DrawFlags::VisibleInShadow) != DrawFlags::None;
@@ -47,7 +43,7 @@ inline void SubmitDrawInstanced(VkCommandBuffer cmd, const DrawCommand& drawCmd,
 								VkPipelineLayout layoutOverride = VK_NULL_HANDLE,
 								VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT |
 															VK_SHADER_STAGE_FRAGMENT_BIT) noexcept {
-	const auto* nativeMat = ToNative(drawCmd.material);
+	const auto* nativeMat = drawCmd.material;
 	const VkPipeline pipeline =
 		(pipelineOverride != VK_NULL_HANDLE) ? pipelineOverride : nativeMat->pipeline.Get();
 	const VkPipelineLayout layout =
@@ -187,7 +183,7 @@ struct CpuCullingPolicy {
 						if (!IsVisibleIn(drawCmd.flags, RenderPassType::Main)) {
 							return;
 						}
-						if (!ToNative(drawCmd.material)->pipeline.Valid() ||
+						if (!drawCmd.material->pipeline.Valid() ||
 							IsForwardOnly(drawCmd.instanceData.flags)) {
 							return;
 						}
@@ -399,7 +395,7 @@ void MainPass::Execute(const FrameRecorder& recorder,
 
 	for (uint32_t i = 0; i < drawCount; ++i) {
 		const auto& drawCmd = ctx.drawQueue[i];
-		const auto* const drawMat = ToNative(drawCmd.material);
+		const auto* const drawMat = drawCmd.material;
 
 		if (IsForwardOnly(drawCmd.instanceData.flags)) {
 			currentMaterial = nullptr;
@@ -443,7 +439,7 @@ void ForwardPass::Execute(
 			for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
 				const auto& drawCmd = ctx.drawQueue[i];
 				if (IsForwardOnly(drawCmd.instanceData.flags) &&
-					ToNative(drawCmd.material)->pipeline.Valid()) {
+					drawCmd.material->pipeline.Valid()) {
 					const ObjectConstants pushConstants = {.instanceId = i, .isShadowPass = 0};
 					SubmitDrawInstanced(cmd, drawCmd, i, recorder.bindlessSet, pushConstants);
 				}

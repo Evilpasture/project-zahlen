@@ -421,6 +421,9 @@ struct RenderContext::Impl {
 	Vk::CommandPools<2> pools;
 	Vk::StagingRingBuffer stagingRingBuffer;
 
+	mutable Vk::CommandRing<Vk::QueueType::Graphics, 8> graphicsCmdRing;
+	mutable Vk::CommandRing<Vk::QueueType::Transfer, 8> transferCmdRing;
+
 	// These declarations are now mathematically tied to ActiveGBuffer
 	Vk::RenderTarget<ActiveGBuffer::get<0>()> sceneColor;
 	Vk::RenderTarget<ActiveGBuffer::get<1>()> velocityBuffer;
@@ -591,7 +594,7 @@ struct RenderContext::Impl {
 		}
 	};
 	mutable PendingAcquires pendingAcquires;
-	Vk::StagingRingBuffer transferRingBuffer;
+	mutable Vk::StagingRingBuffer transferRingBuffer;
 
 	ZHLN::DoubleBuffered<BufferHandle> debugMeshHandles;
 
@@ -691,7 +694,6 @@ struct RenderContext::Impl {
 	void BuildBlitPipeline();
 	void BuildBloomPipelines();
 	void InitPostProcessing();
-	void extracted();
 	void SetupUI(GLFWwindow* window);
 
 	// Core Vulkan allocation implementation
@@ -713,6 +715,8 @@ struct RenderContext::Impl {
 	void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd);
 
 	~Impl() {
+		graphicsCmdRing.Cleanup();
+		transferCmdRing.Cleanup();
 		if (ctx.Device() != VK_NULL_HANDLE) {
 			for (uint32_t i = 0; i < 2; ++i) {
 				if (tlas[i] != VK_NULL_HANDLE) {

@@ -148,4 +148,5 @@ struct BufferQueueBarrier {
 		return {.release = raw.release, .acquire = raw.acquire};
 	}
 };
+
 } // namespace ZHLN::Vk
