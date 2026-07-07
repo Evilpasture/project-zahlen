@@ -1405,7 +1405,9 @@ ZHLN_FrameResult ZHLN_WaitAndResetFrame(const VkDevice device, const VkFence in_
 void ZHLN_BeginCommandBuffer(const VkCommandBuffer cmd) {
 	const VkCommandBufferBeginInfo info = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		.pNext = nullptr,
 		.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+		.pInheritanceInfo = nullptr,
 	};
 	vkBeginCommandBuffer(cmd, &info);
 }

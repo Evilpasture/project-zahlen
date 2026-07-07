@@ -208,6 +208,16 @@ class StagingRingBuffer {
 	std::vector<RetiredPool> _retiredPools;
 };
 
+inline void CopyRingBuffer(VkCommandBuffer cmd, StagingRingBuffer::Allocation stagingAlloc,
+						   const Vk::Buffer& buffer, VkDeviceSize size) {
+	const ZHLN_BufferCopyDesc copy = {.src = stagingAlloc.buffer,
+									  .dst = buffer.Handle(),
+									  .size = size,
+									  .src_offset = stagingAlloc.offset,
+									  .dst_offset = 0};
+	ZHLN_CmdCopyBuffer(cmd, &copy);
+}
+
 // ============================================================================
 // Deferred Destruction Queue (Zero-Overhead Memory Reclamation)
 // ============================================================================

@@ -32,18 +32,12 @@ template <QueueType QType> struct ImmediateCommand<QType>::Impl {
 		};
 		vkAllocateCommandBuffers(device, &allocInfo, &cmd);
 
-		VkCommandBufferBeginInfo beginInfo = {
-			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-			.pNext = nullptr,
-			.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-			.pInheritanceInfo = nullptr,
-		};
-		vkBeginCommandBuffer(cmd, &beginInfo);
+		ZHLN_BeginCommandBuffer(cmd);
 	}
 
 	~Impl() noexcept {
 		if (cmd != VK_NULL_HANDLE) {
-			vkEndCommandBuffer(cmd);
+			ZHLN_EndCommandBuffer(cmd);
 			uint64_t submitVal = ringBuffer->Submit(cmd);
 			ringBuffer->RetirePool(pool, submitVal);
 		}

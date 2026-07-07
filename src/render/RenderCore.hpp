@@ -343,6 +343,12 @@ class Context {
 	ZHLN_Device _device = {};
 };
 
+inline void WaitIdle(VkDevice device) noexcept {
+	vkDeviceWaitIdle(device);
+}
+
+inline auto GetBufferDeviceAddress(VkDevice device, VkBuffer buffer) noexcept -> VkDeviceAddress;
+
 // ============================================================================
 // Swapchain RAII
 // ============================================================================

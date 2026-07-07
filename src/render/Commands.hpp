@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include "RenderCore.h"
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
 #error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
 #endif
@@ -101,6 +102,24 @@ template <QueueType QType = QueueType::Graphics> class ImmediateCommand {
   private:
 	struct Impl;
 	std::unique_ptr<Impl> _impl;
+};
+
+// Simple RAII wrapper.
+class CommandBufferGuard {
+  public:
+	CommandBufferGuard(VkCommandBuffer cmdBuffer) : cmd(cmdBuffer) { ZHLN_BeginCommandBuffer(cmd); }
+
+	~CommandBufferGuard() { ZHLN_EndCommandBuffer(cmd); }
+
+	[[nodiscard]] VkCommandBuffer get() const { return cmd; }
+
+	CommandBufferGuard(const CommandBufferGuard&) = delete;
+	CommandBufferGuard(CommandBufferGuard&&) = delete;
+	CommandBufferGuard& operator=(const CommandBufferGuard&) = delete;
+	CommandBufferGuard& operator=(CommandBufferGuard&&) = delete;
+
+  private:
+	VkCommandBuffer cmd{};
 };
 
 } // namespace ZHLN::Vk

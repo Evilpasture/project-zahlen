@@ -32,11 +32,8 @@ void RenderContext::Impl::CompileShadowPipeline(VkDevice device,
 								 .CullNone()
 								 .Build(device);
 
-	if (shadowPipelineRes) {
-		shadowPipeline = std::move(*shadowPipelineRes);
-	} else {
-		ZHLN::Panic("FATAL: Failed to build Shadow Pipeline!");
-	}
+	ZHLN::PanicIf(!shadowPipelineRes, "FATAL: Failed to build Shadow Pipeline!");
+	shadowPipeline = std::move(*shadowPipelineRes);
 }
 
 void RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device,
@@ -57,11 +54,8 @@ void RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device,
 										 .CullNone()
 										 .Build(device);
 
-	if (punctualShadowPipelineRes) {
-		punctualShadowPipeline = std::move(*punctualShadowPipelineRes);
-	} else {
-		ZHLN::Panic("FATAL: Failed to build Punctual Shadow Pipeline!");
-	}
+	ZHLN::PanicIf(!punctualShadowPipelineRes, "FATAL: Failed to build Punctual Shadow Pipeline!");
+	punctualShadowPipeline = std::move(*punctualShadowPipelineRes);
 }
 
 auto RenderContext::GetRendererName() const -> const char* {
@@ -330,14 +324,7 @@ auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data,
 		}
 	}
 
-	VkBufferDeviceAddressInfo bdaInfo = {
-		.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-		.pNext = {},
-		.buffer = gpu_buf.Handle(),
-	};
-	VkDeviceAddress address = vkGetBufferDeviceAddress(ctx.Device(), &bdaInfo);
-
-	return {std::move(gpu_buf), address};
+	return {std::move(gpu_buf), Vk::GetBufferDeviceAddress(ctx.Device(), gpu_buf.Handle())};
 }
 
 auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB)
@@ -416,7 +403,7 @@ uint32_t RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas)
 void RenderContext::SetShadowResolution(uint32_t resolution) {
 	auto* impl = _impl.get();
 	auto* device = impl->ctx.Device();
-	vkDeviceWaitIdle(device);
+	Vk::WaitIdle(device);
 
 	impl->shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
 		impl->allocator, impl->ctx, {.width = resolution, .height = resolution},
@@ -500,23 +487,23 @@ void RenderContext::BuildMeshBLAS(Mesh& mesh) {
 		Vk::CommandPool tempPool(impl->ctx.Device(), impl->ctx.PhysicalInfo().graphics_family);
 		if (tempPool.Allocate(1)) {
 			VkCommandBuffer tempCmd = tempPool[0];
-			ZHLN_BeginCommandBuffer(tempCmd);
+			{
+				Vk::CommandBufferGuard guard(tempCmd);
+				// 1. Cleanly drain pending family ownership acquires (locks and C-structs are
+				// hidden)
+				impl->pendingAcquires.Drain(tempCmd);
 
-			// 1. Cleanly drain pending family ownership acquires (locks and C-structs are hidden)
-			impl->pendingAcquires.Drain(tempCmd);
-
-			// Synchronize the vertex/index buffer copy writes with the BLAS build reads
-			Vk::MemoryBarrier(
-				tempCmd, {.src_stage = VK_PIPELINE_STAGE_2_COPY_BIT,
-						  .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-						  .dst_stage = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-						  .dst_access = VK_ACCESS_2_SHADER_READ_BIT});
-
-			impl->rtCtx.CmdBuildBlas(
-				tempCmd, geom, nativePosMesh->blas,
-				Vk::GetBufferDeviceAddress(impl->ctx.Device(), scratch.Handle()), primitiveCount);
-			ZHLN_EndCommandBuffer(tempCmd);
-
+				// Synchronize the vertex/index buffer copy writes with the BLAS build reads
+				Vk::MemoryBarrier(
+					tempCmd, {.src_stage = VK_PIPELINE_STAGE_2_COPY_BIT,
+							  .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+							  .dst_stage = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+							  .dst_access = VK_ACCESS_2_SHADER_READ_BIT});
+				impl->rtCtx.CmdBuildBlas(
+					tempCmd, geom, nativePosMesh->blas,
+					Vk::GetBufferDeviceAddress(impl->ctx.Device(), scratch.Handle()),
+					primitiveCount);
+			}
 			// 2. Synchronously submit and wait on the transfer staging timeline semaphore
 			Vk::SubmitAndWait(impl->ctx.GraphicsQueue(), tempCmd,
 							  impl->transferRingBuffer.GetSemaphore(),
@@ -628,13 +615,8 @@ void RenderContext::Impl::UploadClusterBounds(const JPH::Mat44& proj) {
 	std::memcpy(stagingAlloc.mappedData, cpuBounds.data(),
 				cpuBounds.size() * sizeof(ClusterBounds));
 
-	const ZHLN_BufferCopyDesc copy = {
-		.src = stagingAlloc.buffer,
-		.dst = clusterBoundsBuffer.Handle(),
-		.size = static_cast<VkDeviceSize>(cpuBounds.size() * sizeof(ClusterBounds)),
-		.src_offset = stagingAlloc.offset,
-		.dst_offset = 0};
-	ZHLN_CmdCopyBuffer(cmd, &copy);
+	Vk::CopyRingBuffer(cmd, stagingAlloc, clusterBoundsBuffer,
+					   cpuBounds.size() * sizeof(ClusterBounds));
 
 	Vk::MemoryBarrier(cmd, {.src_stage = VK_PIPELINE_STAGE_2_COPY_BIT,
 							.src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
