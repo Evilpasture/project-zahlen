@@ -81,8 +81,7 @@ auto SamplerBuilder::DepthCompare(VkCompareOp op) noexcept -> SamplerBuilder& {
 }
 
 auto SamplerBuilder::Build(VkDevice device) const noexcept -> Sampler {
-	VkSampler sampler = VK_NULL_HANDLE;
-	vkCreateSampler(device, &_info, nullptr, &sampler);
+	VkSampler sampler = ZHLN_CreateSampler(device, &_info);
 	return {device, sampler};
 }
 

@@ -1634,6 +1634,12 @@ void ZHLN_DestroyImageView(const VkDevice device, const VkImageView view) {
 	vkDestroyImageView(device, view, nullptr);
 }
 
+VkSampler ZHLN_CreateSampler(VkDevice device, const VkSamplerCreateInfo* desc) {
+	VkSampler sampler = VK_NULL_HANDLE;
+	vkCreateSampler(device, desc, nullptr, &sampler);
+	return sampler;
+}
+
 void ZHLN_DestroySampler(const VkDevice device, const VkSampler sampler) {
 	vkDestroySampler(device, sampler, nullptr);
 }

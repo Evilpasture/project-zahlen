@@ -82,52 +82,6 @@ template <VkFormat F> inline RenderTarget<F>::operator bool() const noexcept {
 
 namespace detail {
 
-struct LayoutSyncInfo {
-	VkPipelineStageFlags2 stage;
-	VkAccessFlags2 access;
-};
-
-// Maps Vulkan Image Layouts to Stage and Access flags using Synchronization2
-constexpr auto GetSyncInfo(VkImageLayout layout, bool isSource) noexcept -> LayoutSyncInfo {
-	switch (layout) {
-		case VK_IMAGE_LAYOUT_UNDEFINED:
-			return {.stage = VK_PIPELINE_STAGE_2_NONE, .access = 0};
-
-		case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
-			return {.stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-					.access = isSource ? VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT
-									   : (VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
-										  VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT)};
-
-		case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL:
-		case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
-			return {.stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-							 VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-					.access = isSource ? VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
-									   : (VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-										  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT)};
-
-		case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
-			return {.stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
-							 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-					.access = VK_ACCESS_2_SHADER_READ_BIT};
-
-		case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
-			return {.stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, .access = 0};
-
-		case VK_IMAGE_LAYOUT_GENERAL:
-			return {.stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-					.access = isSource
-								  ? (VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT)
-								  : (VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT)};
-
-		default:
-			return {.stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-					.access =
-						isSource ? VK_ACCESS_2_MEMORY_WRITE_BIT : VK_ACCESS_2_MEMORY_READ_BIT};
-	}
-}
-
 // Uniformly unpacks RenderTarget<F> or TypedImage<Layout> configurations
 template <typename T> struct ResourceTraits;
 
@@ -150,7 +104,7 @@ template <VkFormat F> struct ResourceTraits<RenderTarget<F>> {
 	static constexpr auto GetAspect(const RenderTarget<F>& /*res*/) noexcept {
 		return GetFormatAspect(F);
 	}
-	static constexpr auto GetFormat(const RenderTarget<F>&) noexcept { return F; }
+	static constexpr auto GetFormat(const RenderTarget<F>& /*unused*/) noexcept { return F; }
 };
 
 } // namespace detail

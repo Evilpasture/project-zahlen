@@ -347,7 +347,7 @@ inline void WaitIdle(VkDevice device) noexcept {
 	vkDeviceWaitIdle(device);
 }
 
-inline auto GetBufferDeviceAddress(VkDevice device, VkBuffer buffer) noexcept -> VkDeviceAddress;
+inline constexpr auto& GetBufferDeviceAddress = ZHLN_GetBufferDeviceAddress;
 
 // ============================================================================
 // Swapchain RAII
@@ -681,9 +681,6 @@ class ScopedRendering {
 void ImageBarrier(const VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc& desc) noexcept;
 
 void MemoryBarrier(const VkCommandBuffer cmd, const ZHLN_MemoryBarrierDesc& desc) noexcept;
-
-[[nodiscard]] auto GetBufferDeviceAddress(VkDevice device, VkBuffer buffer) noexcept
-	-> VkDeviceAddress;
 
 class RayTracingContext {
   public:

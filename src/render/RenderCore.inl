@@ -417,10 +417,6 @@ inline void MemoryBarrier(const VkCommandBuffer cmd, const ZHLN_MemoryBarrierDes
 	ZHLN_CmdMemoryBarrier(cmd, &desc);
 }
 
-inline auto GetBufferDeviceAddress(VkDevice device, VkBuffer buffer) noexcept -> VkDeviceAddress {
-	return ZHLN_GetBufferDeviceAddress(device, buffer);
-}
-
 inline void
 RayTracingContext::GetBlasSizes(const ZHLN_BlasGeometryDesc& desc, uint32_t primCount,
 								ZHLN_AccelerationStructureSizes& outSizes) const noexcept {
@@ -460,48 +456,86 @@ inline void RayTracingContext::CmdBuildTlas(VkCommandBuffer cmd, const ZHLN_Tlas
 	ZHLN_CmdBuildTlas(&_raw, cmd, &desc, dst, scratch, instanceCount);
 }
 
-template <> struct LayoutTraits<VK_IMAGE_LAYOUT_UNDEFINED> {
-	static constexpr VkAccessFlags2 access = 0;
-	static constexpr VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+// ============================================================================
+// Centralized Layout State Translation Engine
+// ============================================================================
+
+namespace detail {
+
+struct LayoutSyncInfo {
+	VkPipelineStageFlags2 stage;
+	VkAccessFlags2 access;
 };
 
-template <> struct LayoutTraits<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {
-	static constexpr VkAccessFlags2 access =
-		VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-	static constexpr VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-};
+// Unified constexpr layout state query used by both templates and runtime boundaries
+[[nodiscard]] constexpr auto GetSyncInfo(VkImageLayout layout, bool isSource) noexcept
+	-> LayoutSyncInfo {
+	switch (layout) {
+		case VK_IMAGE_LAYOUT_UNDEFINED:
+			return {.stage = VK_PIPELINE_STAGE_2_NONE, .access = 0};
 
-template <> struct LayoutTraits<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-	static constexpr VkAccessFlags2 access = VK_ACCESS_2_SHADER_READ_BIT;
-	static constexpr VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-};
+		case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+			return {.stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+					.access = isSource ? VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT
+									   : (VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
+										  VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT)};
 
-template <> struct LayoutTraits<VK_IMAGE_LAYOUT_PRESENT_SRC_KHR> {
-	static constexpr VkAccessFlags2 access = VK_ACCESS_2_NONE;
-	static constexpr VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-};
+		case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL:
+		case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+			return {.stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+							 VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+					.access = isSource ? VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
+									   : (VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+										  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT)};
 
-template <> struct LayoutTraits<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> {
-	static constexpr VkAccessFlags2 access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-											 VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+		case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+			return {.stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+							 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+					.access = VK_ACCESS_2_SHADER_READ_BIT};
+
+		case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
+			return {.stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, .access = 0};
+
+		case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+			return {.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+					.access = VK_ACCESS_2_TRANSFER_WRITE_BIT};
+
+		case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+			return {.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+					.access = VK_ACCESS_2_TRANSFER_READ_BIT};
+
+		case VK_IMAGE_LAYOUT_GENERAL:
+			return {.stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+					.access = isSource
+								  ? (VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT)
+								  : (VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT)};
+
+		default:
+			return {.stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+					.access =
+						isSource ? VK_ACCESS_2_MEMORY_WRITE_BIT : VK_ACCESS_2_MEMORY_READ_BIT};
+	}
+}
+
+} // namespace detail
+
+// ============================================================================
+// LayoutTraits - Driven statically by the constexpr engine
+// ============================================================================
+
+template <VkImageLayout Layout> struct LayoutTraits {
+	static constexpr auto info = detail::GetSyncInfo(Layout, false);
+
+	// Precise overrides to guarantee 100% binary-identical value mapping to old specialization
+	// list:
 	static constexpr VkPipelineStageFlags2 stage =
-		VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
-};
+		(Layout == VK_IMAGE_LAYOUT_UNDEFINED) ? VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT
+		: (Layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+			? VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
+		: (Layout == VK_IMAGE_LAYOUT_GENERAL) ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
+											  : info.stage;
 
-template <> struct LayoutTraits<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL> {
-	static constexpr VkAccessFlags2 access = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-	static constexpr VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-};
-
-template <> struct LayoutTraits<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL> {
-	static constexpr VkAccessFlags2 access = VK_ACCESS_2_TRANSFER_READ_BIT;
-	static constexpr VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-};
-
-template <> struct LayoutTraits<VK_IMAGE_LAYOUT_GENERAL> {
-	static constexpr VkAccessFlags2 access =
-		VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
-	static constexpr VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+	static constexpr VkAccessFlags2 access = info.access;
 };
 
 template <VkImageLayout OldLayout, VkImageLayout NewLayout>

@@ -81,10 +81,33 @@ auto DescriptorHeap::Init(const Context& ctx, Allocator& allocator, DescriptorHe
 
 	VkPhysicalDeviceDescriptorHeapPropertiesEXT props = {
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT,
-		.pNext = nullptr};
+		.pNext = nullptr,
+		.samplerHeapAlignment = {},
+		.resourceHeapAlignment = {},
+		.maxSamplerHeapSize = {},
+		.maxResourceHeapSize = {},
+		.minSamplerHeapReservedRange = {},
+		.minSamplerHeapReservedRangeWithEmbedded = {},
+		.minResourceHeapReservedRange = {},
+		.samplerDescriptorSize = {},
+		.imageDescriptorSize = {},
+		.bufferDescriptorSize = {},
+		.samplerDescriptorAlignment = {},
+		.imageDescriptorAlignment = {},
+		.bufferDescriptorAlignment = {},
+		.maxPushDataSize = {},
+		.imageCaptureReplayOpaqueDataSize = {},
+		.maxDescriptorHeapEmbeddedSamplers = {},
+		.samplerYcbcrConversionCount = {},
+		.sparseDescriptorHeaps = {},
+		.protectedDescriptorHeaps = {},
+	};
 
-	VkPhysicalDeviceProperties2 props2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-										  .pNext = &props};
+	VkPhysicalDeviceProperties2 props2 = {
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+		.pNext = &props,
+		.properties = {},
+	};
 	vkGetPhysicalDeviceProperties2(ctx.Physical(), &props2);
 
 	if (type == DescriptorHeapType::Sampler) {
@@ -171,8 +194,8 @@ void ResourceWriteBatch::AddBuffer(uint32_t slot, VkDeviceAddress address, VkDev
 
 void ResourceWriteBatch::Flush(VkDevice device, PFN_vkWriteResourceDescriptorsEXT writeFn,
 							   void* mappedPtr, VkDeviceSize stride) noexcept {
-	const uint32_t totalCount = static_cast<uint32_t>(_impl->slots.size());
-	if (totalCount == 0 || !writeFn) {
+	const auto totalCount = static_cast<uint32_t>(_impl->slots.size());
+	if (totalCount == 0 || (writeFn == nullptr)) {
 		return;
 	}
 
@@ -183,9 +206,12 @@ void ResourceWriteBatch::Flush(VkDevice device, PFN_vkWriteResourceDescriptorsEX
 	uint32_t bufIdx = 0;
 
 	for (uint32_t i = 0; i < totalCount; ++i) {
-		resourceInfos[i] = {.sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT,
-							.pNext = nullptr,
-							.type = _impl->types[i]};
+		resourceInfos[i] = {
+			.sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT,
+			.pNext = nullptr,
+			.type = _impl->types[i],
+			.data = {},
+		};
 
 		if (_impl->types[i] == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ||
 			_impl->types[i] == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
@@ -230,8 +256,8 @@ void SamplerWriteBatch::AddSampler(uint32_t slot, const VkSamplerCreateInfo& cre
 
 void SamplerWriteBatch::Flush(VkDevice device, PFN_vkWriteSamplerDescriptorsEXT writeFn,
 							  void* mappedPtr, VkDeviceSize stride) noexcept {
-	const uint32_t totalCount = static_cast<uint32_t>(_impl->slots.size());
-	if (totalCount == 0 || !writeFn) {
+	const auto totalCount = static_cast<uint32_t>(_impl->slots.size());
+	if (totalCount == 0 || (writeFn == nullptr)) {
 		return;
 	}
 
