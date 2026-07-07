@@ -168,29 +168,26 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
 
 	auto gpuImage = Vk::Image::Create(allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 
-	{
-		// Textures are bound back to the graphics queue staging buffer (Safe blitting & stages)
-		auto stagingAlloc = stagingRingBuffer.Allocate(imageSize);
-		std::memcpy(stagingAlloc.mappedData, data, imageSize);
+	// Textures are bound back to the graphics queue staging buffer (Safe blitting & stages)
+	auto stagingAlloc = stagingRingBuffer.Allocate(imageSize);
+	std::memcpy(stagingAlloc.mappedData, data, imageSize);
 
-		Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
-			Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
-				cmd, gpuImage.Handle());
+	Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
+			cmd, gpuImage.Handle());
 
-			ZHLN_BufferImageCopyDesc copyRegion = {.buffer = stagingAlloc.buffer,
-												   .image = gpuImage.Handle(),
-												   .layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-												   .width = width,
-												   .height = height,
-												   .buffer_offset = stagingAlloc.offset,
-												   .mip_level = 0,
-												   .base_array_layer = 0};
-			Vk::CopyBufferToImage(cmd, copyRegion);
+		ZHLN_BufferImageCopyDesc copyRegion = {.buffer = stagingAlloc.buffer,
+											   .image = gpuImage.Handle(),
+											   .layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+											   .width = width,
+											   .height = height,
+											   .buffer_offset = stagingAlloc.offset,
+											   .mip_level = 0,
+											   .base_array_layer = 0};
+		Vk::CopyBufferToImage(cmd, copyRegion);
 
-			ZHLN_GenerateMipmaps(cmd, gpuImage.Handle(), (int32_t)width, (int32_t)height,
-								 mipLevels);
-		});
-	}
+		Vk::GenerateMipmaps(cmd, gpuImage.Handle(), width, height);
+	});
 
 	auto gpuView = isSRGB ? Vk::CreateView<VK_FORMAT_R8G8B8A8_SRGB>(
 								device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels)
@@ -231,30 +228,28 @@ uint32_t RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceD
 
 	auto gpuImage = Vk::Image::Create(allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 
-	{
-		// Textures are bound back to the graphics queue staging buffer (Safe blitting & stages)
-		auto stagingAlloc = stagingRingBuffer.Allocate(faceSize * 6);
-		for (uint32_t i = 0; i < 6; ++i) {
-			std::memcpy(static_cast<char*>(stagingAlloc.mappedData) + (i * faceSize), faceData[i],
-						faceSize);
-		}
-
-		Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
-			Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
-				cmd, gpuImage.Handle());
-
-			// 1. Generate the 6 cubemap regions on the stack (zero-overhead compile-time loop)
-			auto regions = Vk::CreateCopyRegions<6>(
-				stagingAlloc.offset, faceSize, {.width = width, .height = height, .depth = {}});
-
-			// 2. Dispatch the copy using the new type-safe overload (layout defaults to
-			// TRANSFER_DST)
-			Vk::CopyBufferToImage(cmd, stagingAlloc.buffer, gpuImage.Handle(), regions);
-
-			Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-								 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
-		});
+	// Textures are bound back to the graphics queue staging buffer (Safe blitting & stages)
+	auto stagingAlloc = stagingRingBuffer.Allocate(faceSize * 6);
+	for (uint32_t i = 0; i < 6; ++i) {
+		std::memcpy(static_cast<char*>(stagingAlloc.mappedData) + (i * faceSize), faceData[i],
+					faceSize);
 	}
+
+	Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
+			cmd, gpuImage.Handle());
+
+		// 1. Generate the 6 cubemap regions on the stack (zero-overhead compile-time loop)
+		auto regions = Vk::CreateCopyRegions<6>(stagingAlloc.offset, faceSize,
+												{.width = width, .height = height, .depth = {}});
+
+		// 2. Dispatch the copy using the new type-safe overload (layout defaults to
+		// TRANSFER_DST)
+		Vk::CopyBufferToImage(cmd, stagingAlloc.buffer, gpuImage.Handle(), regions);
+
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
+	});
 
 	auto gpuView = Vk::CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), 1);
 
@@ -282,50 +277,41 @@ auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data,
 
 	auto gpu_buf = Vk::Buffer::Create(allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY);
 
-	{
-		auto stagingAlloc = transferRingBuffer.Allocate(size);
-		std::memcpy(stagingAlloc.mappedData, data, size);
+	auto stagingAlloc = transferRingBuffer.Allocate(size);
+	std::memcpy(stagingAlloc.mappedData, data, size);
 
-		Vk::ExecuteImmediate<Vk::QueueType::Transfer>(
-			ctx, transferCmdRing, transferRingBuffer, [&](VkCommandBuffer cmd) {
-				const ZHLN_BufferCopyDesc copy = {.src = stagingAlloc.buffer,
-												  .dst = gpu_buf.Handle(),
-												  .size = static_cast<VkDeviceSize>(size),
-												  .src_offset = stagingAlloc.offset,
-												  .dst_offset = 0};
+	Vk::ExecuteImmediate<Vk::QueueType::Transfer>(
+		ctx, transferCmdRing, transferRingBuffer, [&](VkCommandBuffer cmd) {
+			Vk::CopyRingBuffer(cmd, stagingAlloc, gpu_buf, size);
+			if (diffQueue) {
+				auto [release, acquire] = Vk::BufferQueueBarrier::Create(
+					{.buffer = gpu_buf.Handle(),
+					 .size = size,
+					 .src_queue_family = ctx.PhysicalInfo().transfer_family,
+					 .dst_queue_family = ctx.PhysicalInfo().graphics_family,
+					 .src_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+					 .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+					 .dst_stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+					 .dst_access = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT});
 
-				ZHLN_CmdCopyBuffer(cmd, &copy);
+				VkDependencyInfo depInfo = {
+					.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+					.pNext = {},
+					.dependencyFlags = {},
+					.memoryBarrierCount = {},
+					.pMemoryBarriers = {},
+					.bufferMemoryBarrierCount = 1,
+					.pBufferMemoryBarriers = &release,
+					.imageMemoryBarrierCount = {},
+					.pImageMemoryBarriers = {},
+				};
+				vkCmdPipelineBarrier2(cmd, &depInfo);
 
-				if (diffQueue) {
-					auto [release, acquire] = Vk::BufferQueueBarrier::Create(
-						{.buffer = gpu_buf.Handle(),
-						 .size = size,
-						 .src_queue_family = ctx.PhysicalInfo().transfer_family,
-						 .dst_queue_family = ctx.PhysicalInfo().graphics_family,
-						 .src_stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-						 .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-						 .dst_stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-						 .dst_access = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT});
-
-					VkDependencyInfo depInfo = {
-						.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-						.pNext = {},
-						.dependencyFlags = {},
-						.memoryBarrierCount = {},
-						.pMemoryBarriers = {},
-						.bufferMemoryBarrierCount = 1,
-						.pBufferMemoryBarriers = &release,
-						.imageMemoryBarrierCount = {},
-						.pImageMemoryBarriers = {},
-					};
-					vkCmdPipelineBarrier2(cmd, &depInfo);
-
-					ZHLN_LOCK(pendingAcquires.mutex) {
-						pendingAcquires.buffers.push_back(acquire);
-					}
+				ZHLN_LOCK(pendingAcquires.mutex) {
+					pendingAcquires.buffers.push_back(acquire);
 				}
-			});
-	}
+			}
+		});
 
 	return {std::move(gpu_buf), Vk::GetBufferDeviceAddress(ctx.Device(), gpu_buf.Handle())};
 }
@@ -420,17 +406,14 @@ void RenderContext::SetShadowResolution(uint32_t resolution) {
 			impl->ctx.Device(), impl->shadowMap.image.Handle(), i, 1);
 	}
 
-	{
-		Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) {
-			Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED,
-								 VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-				cmd, impl->shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+	Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) {
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+			cmd, impl->shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
 
-			Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-								 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-				cmd, impl->shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
-		});
-	}
+		Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+			cmd, impl->shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+	});
 
 	Vk::UpdateBindlessTextureSlot(device, 0, impl->shadowMap.view.Get(), impl->bindlessSets, 2);
 	ZHLN::Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);
