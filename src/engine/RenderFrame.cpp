@@ -443,31 +443,30 @@ struct PassFactory {
 	}
 
 	[[nodiscard]] auto MakeMainPass() const noexcept {
-		return Vk::MakePassUnsafe<"Main", Vk::ColorWrite<Res_SceneColor>,
-								  Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>,
-								  Vk::DepthWrite<Res_Depth>>([this](VkCommandBuffer c) noexcept {
-			FrameRecorder mainRec(c, self);
-			Passes::MainPass{}.Execute(
-				mainRec,
-				SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-							   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>{
-					.sceneColor =
-						Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(self.sceneColor),
-					.velocity = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-						self.velocityBuffer),
-					.normRough = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-						self.normalRoughnessBuffer),
-					.depth = Vk::AssumeLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-						self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT)});
-		});
+		return Vk::Passieren<"Main", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>,
+							 Vk::ColorWrite<Res_NormRough>, Vk::DepthWrite<Res_Depth>>(
+			[this](VkCommandBuffer c) noexcept {
+				FrameRecorder mainRec(c, self);
+				Passes::MainPass{}.Execute(
+					mainRec,
+					SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+								   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>{
+						.sceneColor = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+							self.sceneColor),
+						.velocity = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+							self.velocityBuffer),
+						.normRough = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+							self.normalRoughnessBuffer),
+						.depth = Vk::AssumeLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+							self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT)});
+			});
 	}
 
 	[[nodiscard]] auto MakeShadowPass() const noexcept {
-		return Vk::MakePassUnsafe<"MainShadow", Vk::ColorWrite<Res_SceneColor>,
-								  Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>,
-								  Vk::DepthWrite<Res_Depth>, Vk::DepthWrite<Res_ShadowMap>,
-								  Vk::DepthWrite<Res_ShadowAtlas>>([this](
-																	   VkCommandBuffer c) noexcept {
+		return Vk::Passieren<"MainShadow", Vk::ColorWrite<Res_SceneColor>,
+							 Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>,
+							 Vk::DepthWrite<Res_Depth>, Vk::DepthWrite<Res_ShadowMap>,
+							 Vk::DepthWrite<Res_ShadowAtlas>>([this](VkCommandBuffer c) noexcept {
 			auto& rec = self.parallelRecorder.Current();
 			rec.Reset();
 			TaskSystemScheduler scheduler;
@@ -576,8 +575,7 @@ struct PassFactory {
 			}
 		}();
 
-		return Vk::MakePassUnsafe<"Forward", Vk::ColorWrite<ColorTargetRes>,
-								  Vk::DepthWrite<Res_Depth>>(
+		return Vk::Passieren<"Forward", Vk::ColorWrite<ColorTargetRes>, Vk::DepthWrite<Res_Depth>>(
 			[this, &targetImage](VkCommandBuffer c) noexcept {
 				FrameRecorder fwdRecorder(c, self);
 				Passes::ForwardPass{}.Execute(
@@ -661,11 +659,10 @@ struct PassFactory {
 			}
 		}();
 
-		return Vk::MakePassUnsafe<"AA", Vk::ShaderRead<AAColorInputRes>,
-								  Vk::ShaderRead<Res_Velocity>, Vk::ShaderRead<Res_NormRough>,
-								  Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_AccumNext>,
-								  Vk::ShaderRead<Res_SmaaEdge>, Vk::ShaderRead<Res_SmaaWeight>,
-								  Vk::ShaderRead<Res_AccumCurr>>(
+		return Vk::Passieren<"AA", Vk::ShaderRead<AAColorInputRes>, Vk::ShaderRead<Res_Velocity>,
+							 Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>,
+							 Vk::ColorWrite<Res_AccumNext>, Vk::ShaderRead<Res_SmaaEdge>,
+							 Vk::ShaderRead<Res_SmaaWeight>, Vk::ShaderRead<Res_AccumCurr>>(
 			[aaLambda = std::forward<AALambdaT>(aaLambda),
 			 &aaColorInputImage](VkCommandBuffer c) noexcept { aaLambda(c, aaColorInputImage); });
 	}
@@ -687,8 +684,8 @@ struct PassFactory {
 			}
 		}();
 
-		return Vk::MakePassUnsafe<"Blit", Vk::ShaderRead<BlitInputRes>,
-								  Vk::ShaderRead<Res_BloomFinal>, Vk::ColorWrite<Res_Swapchain>>(
+		return Vk::Passieren<"Blit", Vk::ShaderRead<BlitInputRes>, Vk::ShaderRead<Res_BloomFinal>,
+							 Vk::ColorWrite<Res_Swapchain>>(
 			[this, &blitInputImage,
 			 getSwapchainImage =
 				 std::forward<GetSwapchainImageT>(getSwapchainImage)](VkCommandBuffer c) noexcept {

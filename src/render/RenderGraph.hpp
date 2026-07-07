@@ -122,6 +122,18 @@ struct ResourceState {
 	VkAccessFlags2 access = 0;
 };
 
+constexpr VkAccessFlags2 WriteMask =
+	VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
+	VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT |
+	VK_ACCESS_2_HOST_WRITE_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+
+template <ResourceState Prev, typename Usage> struct NeedsBarrier {
+	static constexpr bool value = (Prev.layout != Usage::layout) || (Prev.stage != Usage::stage) ||
+								  (Prev.access != Usage::access) ||
+								  (Prev.layout == VK_IMAGE_LAYOUT_UNDEFINED) ||
+								  ((Usage::access & WriteMask) != 0);
+};
+
 template <typename ResourceList, typename... Passes> consteval auto ComputeStateTable();
 
 } // namespace detail
@@ -138,8 +150,8 @@ constexpr auto MakePass(RecordFn&& record);
  * Required for internal wrappers that manually handle render pass boundaries.
  */
 template <ResourceName Name, typename... Usages, typename RecordFn>
-constexpr auto MakePassUnsafe(RecordFn&& record,
-							  [[maybe_unused]] detail::BypassGraphicsCheckToken unused = {});
+constexpr auto Passieren(RecordFn&& record,
+						 [[maybe_unused]] detail::BypassGraphicsCheckToken unused = {});
 
 struct GraphResource {
 	VkImage handle = VK_NULL_HANDLE;
@@ -179,6 +191,45 @@ template <typename... Passes> class CompileTimeFrameGraph {
 	void Execute(VkCommandBuffer cmd, const Binder& binder) const;
 
   private:
+	template <size_t PassIndex, typename PassType> static consteval size_t CountRequiredBarriers() {
+		using Usages = typename PassType::Usages;
+		return []<size_t... Is>(std::index_sequence<Is...>) {
+			size_t count = 0;
+			((count +=
+			  []() {
+				  using UsageType = typename Usages::template type<Is>;
+				  using Img = typename UsageType::Resource;
+				  constexpr size_t rIdx = detail::GetResourceIndex<Resources, Img>();
+				  constexpr detail::ResourceState prevState = StateTable[PassIndex][rIdx];
+				  return detail::NeedsBarrier<prevState, UsageType>::value ? 1 : 0;
+			  }()),
+			 ...);
+			return count;
+		}(std::make_index_sequence<Usages::size>{});
+	}
+
+	template <size_t PassIndex, typename PassType, size_t BarrierCount>
+	static consteval std::array<size_t, BarrierCount> GetBarrierUsageIndices() {
+		std::array<size_t, BarrierCount> indices{};
+		using Usages = typename PassType::Usages;
+
+		[&]<size_t... Is>(std::index_sequence<Is...>) {
+			size_t writeIdx = 0;
+			(([&]() {
+				 using UsageType = typename Usages::template type<Is>;
+				 using Img = typename UsageType::Resource;
+				 constexpr size_t rIdx = detail::GetResourceIndex<Resources, Img>();
+				 constexpr detail::ResourceState prevState = StateTable[PassIndex][rIdx];
+				 if constexpr (detail::NeedsBarrier<prevState, UsageType>::value) {
+					 indices[writeIdx++] = Is;
+				 }
+			 }()),
+			 ...);
+		}(std::make_index_sequence<Usages::size>{});
+
+		return indices;
+	}
+
 	template <size_t PassIndex, typename PassType>
 	void ExecutePass(VkCommandBuffer cmd, const std::array<GraphResource, NumResources>& bindings,
 					 const PassType& pass) const;

@@ -217,8 +217,8 @@ constexpr auto MakePass(RecordFn&& record) {
 }
 
 template <ResourceName Name, typename... Usages, typename RecordFn>
-constexpr auto MakePassUnsafe(RecordFn&& record,
-							  [[maybe_unused]] detail::BypassGraphicsCheckToken unused) {
+constexpr auto Passieren(RecordFn&& record,
+						 [[maybe_unused]] detail::BypassGraphicsCheckToken unused) {
 	return GraphPass<Name, TypeList<Usages...>, RecordFn>{std::forward<RecordFn>(record)};
 }
 
@@ -270,32 +270,25 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
 	const PassType& pass) const {
 	using Usages = typename PassType::Usages;
 	using RecordFn = typename PassType::RecordFn;
-	constexpr size_t usageCount = Usages::size;
 
-	std::array<VkImageMemoryBarrier2, usageCount> barriers{};
-	size_t barrierIdx = 0;
+	constexpr size_t BarrierCount = CountRequiredBarriers<PassIndex, PassType>();
 
-	[&]<size_t... Us>(std::index_sequence<Us...>) {
-		(
-			[&]() {
-				using UsageType = typename Usages::template type<Us>;
-				using Img = typename UsageType::Resource;
+	if constexpr (BarrierCount > 0) {
+		constexpr auto ActiveIndices = GetBarrierUsageIndices<PassIndex, PassType, BarrierCount>();
+		std::array<VkImageMemoryBarrier2, BarrierCount> barriers{};
 
-				constexpr size_t rIdx = detail::GetResourceIndex<Resources, Img>();
-				constexpr detail::ResourceState prevState = StateTable[PassIndex][rIdx];
-				const auto& resource = bindings[rIdx];
+		[&]<size_t... Bs>(std::index_sequence<Bs...>) {
+			(
+				[&]() {
+					constexpr size_t Us = ActiveIndices[Bs];
+					using UsageType = typename Usages::template type<Us>;
+					using Img = typename UsageType::Resource;
 
-				constexpr VkAccessFlags2 writeMask =
-					VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
-					VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
-					VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_HOST_WRITE_BIT |
-					VK_ACCESS_2_MEMORY_WRITE_BIT;
-				constexpr bool isWrite = (UsageType::access & writeMask) != 0;
+					constexpr size_t rIdx = detail::GetResourceIndex<Resources, Img>();
+					constexpr detail::ResourceState prevState = StateTable[PassIndex][rIdx];
+					const auto& resource = bindings[rIdx];
 
-				if (prevState.layout != UsageType::layout || prevState.stage != UsageType::stage ||
-					prevState.access != UsageType::access ||
-					prevState.layout == VK_IMAGE_LAYOUT_UNDEFINED || isWrite) {
-					barriers[barrierIdx++] = VkImageMemoryBarrier2{
+					barriers[Bs] = VkImageMemoryBarrier2{
 						.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
 						.pNext = nullptr,
 						.srcStageMask = prevState.stage,
@@ -312,12 +305,10 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
 											 .levelCount = VK_REMAINING_MIP_LEVELS,
 											 .baseArrayLayer = 0,
 											 .layerCount = VK_REMAINING_ARRAY_LAYERS}};
-				}
-			}(),
-			...);
-	}(std::make_index_sequence<usageCount>{});
+				}(),
+				...);
+		}(std::make_index_sequence<BarrierCount>{});
 
-	if (barrierIdx > 0) {
 		VkDependencyInfo depInfo = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
 									.pNext = nullptr,
 									.dependencyFlags = 0,
@@ -325,7 +316,7 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
 									.pMemoryBarriers = nullptr,
 									.bufferMemoryBarrierCount = 0,
 									.pBufferMemoryBarriers = nullptr,
-									.imageMemoryBarrierCount = static_cast<uint32_t>(barrierIdx),
+									.imageMemoryBarrierCount = static_cast<uint32_t>(BarrierCount),
 									.pImageMemoryBarriers = barriers.data()};
 		vkCmdPipelineBarrier2(cmd, &depInfo);
 	}
@@ -521,7 +512,7 @@ template <typename Tag, typename T> constexpr auto MakeRef(const T& resource) no
 		return GraphImageRef<Tag>{
 			.handle = resource.handle, .view = resource.view, .extent = resource.extent};
 	} else {
-		static_assert(sizeof(T) == 0, "MakeRef: Unsupported resource type");
+		static_assert(sizeof(T) == 0, "Unsupported resource type while making a graph reference");
 	}
 }
 
@@ -548,9 +539,11 @@ constexpr void AutoBind(BinderT& binder, const Refs&... refs) noexcept {
 namespace ZHLN::Vk::Debug {
 
 // Compile-time trait to check if a resource is referenced in a pass's usages
+namespace {
 template <typename UsagesList, typename Target> struct IsResourceInUsages {
 	static constexpr bool value = false;
 };
+} // namespace
 
 template <typename... Us, typename Target> struct IsResourceInUsages<TypeList<Us...>, Target> {
 	static constexpr bool value = (std::is_same_v<typename Us::Resource, Target> || ...);
