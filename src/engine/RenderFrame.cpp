@@ -664,7 +664,7 @@ struct PassFactory {
 		return Vk::MakePassUnsafe<"AA", Vk::ShaderRead<AAColorInputRes>,
 								  Vk::ShaderRead<Res_Velocity>, Vk::ShaderRead<Res_NormRough>,
 								  Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_AccumNext>,
-								  Vk::ColorWrite<Res_SmaaEdge>, Vk::ColorWrite<Res_SmaaWeight>,
+								  Vk::ShaderRead<Res_SmaaEdge>, Vk::ShaderRead<Res_SmaaWeight>,
 								  Vk::ShaderRead<Res_AccumCurr>>(
 			[aaLambda = std::forward<AALambdaT>(aaLambda),
 			 &aaColorInputImage](VkCommandBuffer c) noexcept { aaLambda(c, aaColorInputImage); });
@@ -748,6 +748,12 @@ void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const Pas
 	auto graph =
 		BuildFrameGraph<FullBright, Mode>(factory, std::forward<AALambdaT>(aaLambda),
 										  std::forward<GetSwapchainImageT>(getSwapchainImage));
+	if constexpr (false) { // Debug break.
+		if constexpr (!FullBright && Mode == AAMode::TAA) {
+			static_assert(sizeof(decltype(graph)) == 0,
+						  Vk::Debug::GraphVisualizer<decltype(graph)>::Visualize().string_view());
+		}
+	}
 	typename decltype(graph)::Binder binder;
 
 	// Bind common resources
