@@ -575,8 +575,14 @@ void RenderContext::Impl::InitCullingResources() {
 	}
 
 	constexpr auto numClusters = static_cast<size_t>(16 * 9 * 24); // 3456
+
 	clusterBoundsBuffer =
-		Vk::Buffer::Create(allocator.Get(), sizeof(ClusterBounds) * numClusters,
+		Vk::Buffer::Create(allocator.Get(),
+						   sizeof(
+							   /* Don't remove the struct tag here or else the compiler will think
+								* it's Resource::ShaderID::ClusterBounds. */
+							   struct ClusterBounds) *
+							   numClusters,
 						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 						   VMA_MEMORY_USAGE_GPU_ONLY);
 
