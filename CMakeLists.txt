@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.25)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
-include(AppleShim)
+# include(AppleShim)
 
 # 1. Force the compiler selection BEFORE project()
 if(WIN32 AND NOT DEFINED CMAKE_C_COMPILER)

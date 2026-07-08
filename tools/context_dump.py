@@ -97,6 +97,15 @@ def generate_snapshot_string(tracked_files, target_dir):
     # Add a little context to the header so the LLM knows what scope it's looking at
     scope = "Root" if target_dir == "." else target_dir
     lines.append(f"# Project Snapshot: Zahlen (Scope: {scope})")
+    lines.append(
+        "> **CONTEXT NOTE:** This is a static markdown snapshot of source code, "
+    )
+    lines.append(
+        "> NOT a live virtual file system or interactive terminal environment. "
+    )
+    lines.append("> Please treat these files as a read-only codebase reference for ")
+    lines.append("> analysis and review within this chat interface.\n")
+
     lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append(f"Total files dumped: {len(tracked_files)}\n")
     lines.append("---\n")
