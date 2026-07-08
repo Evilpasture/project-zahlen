@@ -77,7 +77,7 @@ template <BarrierAccess Access>
 struct IsAccessValid<QueueType::Graphics, Access> : std::true_type {};
 
 // --- 2. COMPUTE QUEUE: Supports Compute, Transfer, and Host ---
-template <> struct IsStageValid<QueueType::Compute, BarrierStage::None> : std::true_type {};
+template <> struct IsStageValid<QueueType::Compute, BarrierStage::StageNone> : std::true_type {};
 template <> struct IsStageValid<QueueType::Compute, BarrierStage::Compute> : std::true_type {};
 template <> struct IsStageValid<QueueType::Compute, BarrierStage::Transfer> : std::true_type {};
 template <> struct IsStageValid<QueueType::Compute, BarrierStage::Host> : std::true_type {};
@@ -93,7 +93,7 @@ struct IsAccessValid<QueueType::Compute, Access>
 							static_cast<VkAccessFlags2>(BarrierAccess::HostWrite))) == 0> {};
 
 // --- 3. TRANSFER QUEUE: Only supports Transfer (Copy/Clear) ---
-template <> struct IsStageValid<QueueType::Transfer, BarrierStage::None> : std::true_type {};
+template <> struct IsStageValid<QueueType::Transfer, BarrierStage::StageNone> : std::true_type {};
 template <> struct IsStageValid<QueueType::Transfer, BarrierStage::Transfer> : std::true_type {};
 
 template <BarrierAccess Access>
