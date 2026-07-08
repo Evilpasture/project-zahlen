@@ -482,8 +482,7 @@ struct LayoutSyncInfo {
 
 		default:
 			return {.stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-					.access =
-						isSource ? VK_ACCESS_2_MEMORY_WRITE_BIT : VK_ACCESS_2_MEMORY_READ_BIT};
+					.access = isSource ? VK_ACCESS_2_MEMORY_WRITE_BIT : VK_ACCESS_2_MEMORY_READ_BIT};
 	}
 }
 
@@ -592,8 +591,7 @@ auto ScopedBarrier(VkCommandBuffer cmd, const T& resource,
 template <typename T> struct TargetFormat;
 
 template <typename InState, typename OutState, typename T>
-inline auto IssueBarrier(VkCommandBuffer cmd, const T& resource,
-						 VkImageAspectFlags aspectOverride) {
+inline auto IssueBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFlags aspectOverride) {
 	constexpr VkImageLayout inLayout = LayoutMap<InState>::value;
 	constexpr VkImageLayout outLayout = LayoutMap<OutState>::value;
 
@@ -697,49 +695,56 @@ inline void Push(const VkCommandBuffer cmd, const VkPipelineLayout layout,
 	ZHLN_PushConstants(cmd, layout, stages, &value, sizeof(T));
 }
 
-template <uint32_t N, typename Record, typename Rebuild>
+template <uint32_t N, bool WaitOnFence, typename Record, typename Rebuild>
 	requires RecordFn<Record> && RebuildFn<Rebuild>
-inline auto DrawFrame(const Context& ctx, const Swapchain& swapchain, const FrameSync<N>& sync,
-					  const CommandPools<N, QueueType::Graphics>& pools, uint32_t& frame_index,
-					  const SemaphorePool& presentSemaphores, Record&& record,
+inline auto DrawFrame(const DrawFrameDesc<N>& desc, uint32_t& frame_index, Record&& record,
 					  Rebuild&& rebuild) noexcept -> ZHLN_FrameResult {
-	return DrawFrame<N>(ctx, swapchain, sync, pools, frame_index, presentSemaphores, VK_NULL_HANDLE,
-						0, std::forward<Record>(record), std::forward<Rebuild>(rebuild));
-}
-
-template <uint32_t N, typename Record, typename Rebuild>
-	requires RecordFn<Record> && RebuildFn<Rebuild>
-inline auto DrawFrame(const Context& ctx, const Swapchain& swapchain, const FrameSync<N>& sync,
-					  const CommandPools<N, QueueType::Graphics>& pools, uint32_t& frame_index,
-					  const SemaphorePool& presentSemaphores, VkSemaphore stagingSemaphore,
-					  uint64_t stagingWaitValue, Record&& record, Rebuild&& rebuild) noexcept
-	-> ZHLN_FrameResult {
-	const ZHLN_FrameSync& s = sync[frame_index];
-	const ZHLN_CommandPool& pool = pools[frame_index];
-	const VkCommandBuffer cmd = pools.Cmd(frame_index);
+	const ZHLN_FrameSync& s = desc.sync[frame_index];
+	const ZHLN_CommandPool& pool = desc.pools[frame_index];
+	const VkCommandBuffer cmd = desc.pools.Cmd(frame_index);
 
 	uint32_t image_index = 0;
-	auto result =
-		ZHLN_WaitAndAcquireImage(ctx.Device(), swapchain.Get().handle, &s, &pool, &image_index);
+	ZHLN_FrameResult result = ZHLN_FrameResult_Ok;
+
+	if constexpr (WaitOnFence) {
+		// Default standard path: block on fence and reset cmd pool
+		result = ZHLN_WaitAndAcquireImage(desc.ctx.Device(), desc.swapchain.Get().handle, &s, &pool,
+										  &image_index);
+	} else {
+		// Paced path: The CPU has already waited for s.in_flight in SyncFrameBoundary.
+		// We simply reset the signaled fence, reset the command pool, and acquire the next
+		// swapchain image.
+		vkResetFences(desc.ctx.Device(), 1, &s.in_flight);
+		ZHLN_ResetCommandPool(desc.ctx.Device(), &pool);
+
+		ZHLN_AcquireDesc acquire_desc = {
+			.swapchain = desc.swapchain.Get().handle,
+			.image_available = s.image_available,
+			.timeout_ns = UINT64_MAX,
+		};
+		result = ZHLN_AcquireImage(desc.ctx.Device(), &acquire_desc, &image_index);
+	}
+
 	if (result == ZHLN_FrameResult_OutOfDate) [[unlikely]] {
 		std::invoke(std::forward<Rebuild>(rebuild));
 		return result;
 	}
+
 	ZHLN_BeginCommandBuffer(cmd);
 	std::invoke(std::forward<Record>(record), cmd, image_index);
 	ZHLN_EndCommandBuffer(cmd);
 
 	const ZHLN_FrameSubmitDesc submit_desc = {
-		.graphicsQueue = ctx.GraphicsQueue(),
-		.presentQueue = ctx.PresentQueue(),
+		.graphicsQueue = desc.ctx.GraphicsQueue(),
+		.presentQueue = desc.ctx.PresentQueue(),
 		.cmd = cmd,
 		.imageAvailable = s.image_available,
-		.renderFinished = presentSemaphores[image_index],
+		.renderFinished = desc.presentSemaphores[image_index],
 		.inFlight = s.in_flight,
-		.swapchain = swapchain.Get().handle,
+		.swapchain = desc.swapchain.Get().handle,
 		.imageIndex = image_index,
-		.stagingSemaphore = stagingSemaphore,
-		.stagingWaitValue = stagingWaitValue,
+		.stagingSemaphore = desc.stagingSemaphore,
+		.stagingWaitValue = desc.stagingWaitValue,
 	};
 
 	result = ZHLN_SubmitAndPresent(&submit_desc);
@@ -766,8 +771,7 @@ inline auto SubmitAndPresent(const ZHLN_FrameSubmitDesc& desc) noexcept -> ZHLN_
 inline void ExecuteCommands(const VkCommandBuffer primary,
 							const std::span<const VkCommandBuffer> secondaries) noexcept {
 	if (!secondaries.empty()) {
-		vkCmdExecuteCommands(primary, static_cast<uint32_t>(secondaries.size()),
-							 secondaries.data());
+		vkCmdExecuteCommands(primary, static_cast<uint32_t>(secondaries.size()), secondaries.data());
 	}
 }
 
@@ -974,8 +978,7 @@ inline void DrawIndexedIndirect(VkCommandBuffer cmd, const DrawIndexedIndirectSt
 	}
 	vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
 
-	vkCmdDrawIndexedIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount,
-							 state.stride);
+	vkCmdDrawIndexedIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount, state.stride);
 }
 
 template <GpuTriviallyCopyable T>

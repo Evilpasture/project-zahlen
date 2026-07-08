@@ -77,8 +77,7 @@ void RenderContext::SetResolution([[maybe_unused]] const Extent2D& res) {
 auto RenderContext::CreateVertexBuffer(const void* data, size_t size, uint32_t stride)
 	-> BufferHandle {
 	auto [gpu_buf, address] = _impl->CreateGPUBuffer(size, data, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-	return _impl->meshPool.Create(std::move(gpu_buf), static_cast<uint32_t>(size / stride),
-								  address);
+	return _impl->meshPool.Create(std::move(gpu_buf), static_cast<uint32_t>(size / stride), address);
 }
 
 auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHandle {
@@ -106,13 +105,11 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 	auto layout = Vk::PipelineLayoutBuilder(impl->ctx.Device())
 					  .AddDescriptorSetLayout(impl->bindlessLayout.Get())
 					  .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-									   sizeof(ZHLN::ObjectConstants))
+									   sizeof(ObjectConstants))
 					  .Build();
 
-	auto pipeline = Vk::PipelineBuilder{}
-						.Shaders(shaders)
-						.Layout(layout.Get())
-						.DepthFormat(VK_FORMAT_D32_SFLOAT);
+	auto pipeline =
+		Vk::PipelineBuilder{}.Shaders(shaders).Layout(layout.Get()).DepthFormat(VK_FORMAT_D32_SFLOAT);
 
 	if (desc.doubleSided) {
 		pipeline.CullNone();
@@ -143,7 +140,7 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 
 auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width, uint32_t height,
 												bool isSRGB) -> uint32_t {
-	const VkDevice device = ctx.Device();
+	auto* const device = ctx.Device();
 	const size_t imageSize = static_cast<size_t>(width) * height * 4;
 
 	uint32_t mipLevels = std::bit_width(std::max(width, height));
@@ -176,15 +173,14 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
 			cmd, gpuImage.Handle());
 
-		ZHLN_BufferImageCopyDesc copyRegion = {.buffer = stagingAlloc.buffer,
-											   .image = gpuImage.Handle(),
-											   .layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-											   .width = width,
-											   .height = height,
-											   .buffer_offset = stagingAlloc.offset,
-											   .mip_level = 0,
-											   .base_array_layer = 0};
-		Vk::CopyBufferToImage(cmd, copyRegion);
+		Vk::CopyBufferToImage(cmd, {.buffer = stagingAlloc.buffer,
+									.image = gpuImage.Handle(),
+									.layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+									.width = width,
+									.height = height,
+									.buffer_offset = stagingAlloc.offset,
+									.mip_level = 0,
+									.base_array_layer = 0});
 
 		Vk::GenerateMipmaps(cmd, gpuImage.Handle(), width, height);
 	});
@@ -205,7 +201,7 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
 
 uint32_t RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData, uint32_t width,
 														uint32_t height) {
-	const VkDevice device = ctx.Device();
+	auto* const device = ctx.Device();
 	const size_t faceSize = static_cast<size_t>(width) * height * 4;
 
 	const VkImageCreateInfo imgInfo = {
@@ -597,8 +593,7 @@ void RenderContext::Impl::UploadClusterBounds(const JPH::Mat44& proj) {
 
 	// Direct staging copy to GPU (Runs on main thread outside active render pass)
 	auto stagingAlloc = stagingRingBuffer.Allocate(cpuBounds.size() * sizeof(ClusterBounds));
-	std::memcpy(stagingAlloc.mappedData, cpuBounds.data(),
-				cpuBounds.size() * sizeof(ClusterBounds));
+	std::memcpy(stagingAlloc.mappedData, cpuBounds.data(), cpuBounds.size() * sizeof(ClusterBounds));
 
 	Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
 		Vk::CopyRingBuffer(cmd, stagingAlloc, clusterBoundsBuffer,

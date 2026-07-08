@@ -98,11 +98,52 @@ struct PreparedPart {
 	JPH::ShapeRefC shape = nullptr;
 };
 
-// Procedural image processing on the CPU (Runs in Parallel)
+// Helper function to handle a single downsample pass (flattens 4 levels of loops)
+static unsigned char* DownsampleHalfSize(const unsigned char* src, uint32_t currentW,
+										 uint32_t currentH) {
+	uint32_t nextW = currentW / 2;
+	uint32_t nextH = currentH / 2;
+
+	auto* dst = static_cast<unsigned char*>(std::malloc(static_cast<size_t>(nextW) * nextH * 4));
+	if (dst == nullptr) {
+		return nullptr;
+	}
+
+	for (uint32_t y = 0; y < nextH; ++y) {
+		for (uint32_t x = 0; x < nextW; ++x) {
+			uint32_t srcX = x * 2;
+			uint32_t srcY = y * 2;
+
+			uint32_t r = 0;
+			uint32_t g = 0;
+			uint32_t b = 0;
+			uint32_t a = 0;
+
+			for (uint32_t dy = 0; dy < 2; ++dy) {
+				for (uint32_t dx = 0; dx < 2; ++dx) {
+					auto srcIdx = (((static_cast<size_t>(srcY) + dy) * currentW + (srcX + dx)) * 4);
+					r += src[srcIdx + 0];
+					g += src[srcIdx + 1];
+					b += src[srcIdx + 2];
+					a += src[srcIdx + 3];
+				}
+			}
+
+			size_t dstIdx = (static_cast<size_t>(y) * nextW + x) * 4;
+			dst[dstIdx + 0] = static_cast<unsigned char>(r / 4);
+			dst[dstIdx + 1] = static_cast<unsigned char>(g / 4);
+			dst[dstIdx + 2] = static_cast<unsigned char>(b / 4);
+			dst[dstIdx + 3] = static_cast<unsigned char>(a / 4);
+		}
+	}
+	return dst;
+}
+
 static void DecodeAndRescaleTexture(CPUTextureJob& job) {
 	int channels = 0;
 	unsigned char* pixels = nullptr;
 
+	// 1. Decode Image Data
 	if (job.image->buffer_view != nullptr) {
 		const char* bufferData =
 			(const char*)job.image->buffer_view->buffer->data + job.image->buffer_view->offset;
@@ -119,82 +160,58 @@ static void DecodeAndRescaleTexture(CPUTextureJob& job) {
 		return;
 	}
 
+	// 2. Determine Scale Requirements
 	auto w = static_cast<uint32_t>(job.width);
 	auto h = static_cast<uint32_t>(job.height);
-
 	constexpr uint32_t MAX_TEX_DIM = 1024;
 
-	if (w > MAX_TEX_DIM || h > MAX_TEX_DIM) {
-		uint32_t targetW = w;
-		uint32_t targetH = h;
-		uint32_t scaleSteps = 0;
+	if (w <= MAX_TEX_DIM && h <= MAX_TEX_DIM) {
+		job.decodedPixels = pixels;
+		return;
+	}
 
-		while (targetW > MAX_TEX_DIM || targetH > MAX_TEX_DIM) {
-			targetW /= 2;
-			targetH /= 2;
-			scaleSteps++;
+	uint32_t targetW = w;
+	uint32_t targetH = h;
+	uint32_t scaleSteps = 0;
+
+	while (targetW > MAX_TEX_DIM || targetH > MAX_TEX_DIM) {
+		targetW /= 2;
+		targetH /= 2;
+		scaleSteps++;
+	}
+
+	if (targetW == 0 || targetH == 0 || scaleSteps == 0) {
+		job.decodedPixels = pixels;
+		return;
+	}
+
+	// 3. Process Rescaling Loop
+	unsigned char* currentSrc = pixels;
+	uint32_t currentW = w;
+	uint32_t currentH = h;
+
+	for (uint32_t step = 0; step < scaleSteps; ++step) {
+		unsigned char* nextDst = DownsampleHalfSize(currentSrc, currentW, currentH);
+		if (nextDst == nullptr) {
+			break; // Memory allocation failed, halt downsampling early
 		}
 
-		if (targetW > 0 && targetH > 0 && scaleSteps > 0) {
-			unsigned char* currentSrc = pixels;
-			uint32_t currentW = w;
-			uint32_t currentH = h;
-
-			for (uint32_t step = 0; step < scaleSteps; ++step) {
-				uint32_t nextW = currentW / 2;
-				uint32_t nextH = currentH / 2;
-				auto* nextDst = static_cast<unsigned char*>(
-					std::malloc(static_cast<size_t>(nextW) * nextH * 4));
-
-				if (nextDst != nullptr) {
-					for (uint32_t y = 0; y < nextH; ++y) {
-						for (uint32_t x = 0; x < nextW; ++x) {
-							uint32_t srcX = x * 2;
-							uint32_t srcY = y * 2;
-
-							uint32_t r = 0;
-							uint32_t g = 0;
-							uint32_t b = 0;
-							uint32_t a = 0;
-							for (uint32_t dy = 0; dy < 2; ++dy) {
-								for (uint32_t dx = 0; dx < 2; ++dx) {
-									auto srcIdx = static_cast<size_t>(((srcY + dy) * currentW) +
-																	  (srcX + dx)) *
-												  4;
-									r += currentSrc[srcIdx + 0];
-									g += currentSrc[srcIdx + 1];
-									b += currentSrc[srcIdx + 2];
-									a += currentSrc[srcIdx + 3];
-								}
-							}
-
-							auto dstIdx = static_cast<size_t>((y * nextW + x)) * 4;
-							nextDst[dstIdx + 0] = static_cast<unsigned char>(r / 4);
-							nextDst[dstIdx + 1] = static_cast<unsigned char>(g / 4);
-							nextDst[dstIdx + 2] = static_cast<unsigned char>(b / 4);
-							nextDst[dstIdx + 3] = static_cast<unsigned char>(a / 4);
-						}
-					}
-
-					if (currentSrc != pixels) {
-						std::free(currentSrc);
-					}
-					currentSrc = nextDst;
-					currentW = nextW;
-					currentH = nextH;
-				} else {
-					break;
-				}
-			}
-
-			if (currentSrc != pixels) {
-				stbi_image_free(pixels);
-				pixels = currentSrc;
-				job.width = static_cast<int>(currentW);
-				job.height = static_cast<int>(currentH);
-				job.wasRescaled = true;
-			}
+		if (currentSrc != pixels) {
+			std::free(currentSrc);
 		}
+
+		currentSrc = nextDst;
+		currentW /= 2;
+		currentH /= 2;
+	}
+
+	// 4. Update Job State
+	if (currentSrc != pixels) {
+		stbi_image_free(pixels);
+		pixels = currentSrc;
+		job.width = static_cast<int>(currentW);
+		job.height = static_cast<int>(currentH);
+		job.wasRescaled = true;
 	}
 
 	job.decodedPixels = pixels;
@@ -1077,9 +1094,6 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 							part.localTransform.GetColumn3(1).Length(),
 							part.localTransform.GetColumn3(2).Length());
 
-		float nodeMaxScale = std::max(
-			{std::abs(nodeScale.GetX()), std::abs(nodeScale.GetY()), std::abs(nodeScale.GetZ())});
-
 		JPH::Vec3 nc0 = nodeScale.GetX() > 1e-6f
 							? part.localTransform.GetColumn3(0) / nodeScale.GetX()
 							: JPH::Vec3::sAxisX();
@@ -1472,8 +1486,7 @@ void ReuploadAllPrefabs(
 	}
 }
 
-void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& assetMgr,
-							ECS::Registry& reg) {
+void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& assetMgr, ECS::Registry& reg) {
 	ZHLN::Log("[Engine] Re-uploading all textures and meshes to new Vulkan device...");
 
 	// 1. Re-bake system font atlas

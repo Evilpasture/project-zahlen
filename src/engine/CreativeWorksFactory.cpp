@@ -3,8 +3,8 @@
 
 // File: src/engine/CreativeWorksFactory.cpp
 
-#include "Zahlen/CreativeWorksManager.hpp"
 #include "Zahlen/Components.hpp"
+#include "Zahlen/CreativeWorksManager.hpp"
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Render.hpp"
 #include "ecs/ECS.hpp"
@@ -22,7 +22,6 @@
 
 namespace ZHLN::CreativeWorksFactory {
 
-// Queries Fontconfig to find the absolute file path of any font on your Arch Linux machine
 static std::string FindSystemFont(const char* fontName) {
 	FcConfig* config = FcInitLoadConfigAndFonts();
 	FcPattern* pat = FcNameParse(reinterpret_cast<const FcChar8*>(fontName));

@@ -87,14 +87,14 @@ void SetFrameData(RenderContext& ctx, const Camera& cam, const FrameUniforms& un
 	}
 
 	// Snapping and cascade projections
-	float cascadeSplits[4];
+	std::array<float, 4> cascadeSplits{};
 	cascadeSplits[0] = cam.nearZ + (cam.farZ - cam.nearZ) * 0.08f;
 	cascadeSplits[1] = cam.nearZ + (cam.farZ - cam.nearZ) * 0.22f;
 	cascadeSplits[2] = cam.nearZ + (cam.farZ - cam.nearZ) * 0.55f;
 	cascadeSplits[3] = cam.nearZ + (cam.farZ - cam.nearZ) * 1.0f;
 
 	FrameUniforms gpuUniforms = uniforms;
-	std::memcpy(gpuUniforms.cascadeSplits, cascadeSplits, sizeof(float) * 4);
+	std::memcpy(gpuUniforms.cascadeSplits, cascadeSplits.data(), sizeof(float) * 4);
 	std::memcpy(gpuUniforms.sh, impl->iblPayload.shCoeffs.data(), sizeof(JPH::Vec4) * 9);
 
 	// Update Cascade light space matrices

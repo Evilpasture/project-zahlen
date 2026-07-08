@@ -482,6 +482,12 @@ class FrameSync {
 	std::array<ZHLN_FrameSync, N> _frames = {};
 };
 
+template <uint32_t N>
+[[nodiscard]] inline auto SyncFrameBoundary(const Context& ctx, const FrameSync<N>& sync,
+											uint32_t frame_index) noexcept -> VkResult {
+	return vkWaitForFences(ctx.Device(), 1, &sync[frame_index].in_flight, VK_TRUE, UINT64_MAX);
+}
+
 template <Vk::QueueType QType> class CommandPool {
   public:
 	CommandPool() = default;
@@ -881,20 +887,20 @@ inline constexpr ColorToReadTrans ColorToRead{};
 // ============================================================================
 class SemaphorePool;
 
-template <uint32_t N, typename Record, typename Rebuild>
-	requires RecordFn<Record> && RebuildFn<Rebuild>
-auto DrawFrame(const Context& ctx, const Swapchain& swapchain, const FrameSync<N>& sync,
-			   const CommandPools<N, QueueType::Graphics>& pools, uint32_t& frame_index,
-			   const SemaphorePool& presentSemaphores, Record&& record, Rebuild&& rebuild) noexcept
-	-> ZHLN_FrameResult;
+template <uint32_t N> struct DrawFrameDesc {
+	const Context& ctx;
+	const Swapchain& swapchain;
+	const FrameSync<N>& sync;
+	const CommandPools<N, QueueType::Graphics>& pools;
+	const SemaphorePool& presentSemaphores;
+	VkSemaphore stagingSemaphore = VK_NULL_HANDLE;
+	uint64_t stagingWaitValue = 0;
+};
 
-template <uint32_t N, typename Record, typename Rebuild>
+template <uint32_t N, bool WaitOnFence = true, typename Record, typename Rebuild>
 	requires RecordFn<Record> && RebuildFn<Rebuild>
-auto DrawFrame(const Context& ctx, const Swapchain& swapchain, const FrameSync<N>& sync,
-			   const CommandPools<N, QueueType::Graphics>& pools, uint32_t& frame_index,
-			   const SemaphorePool& presentSemaphores, VkSemaphore stagingSemaphore,
-			   uint64_t stagingWaitValue, Record&& record, Rebuild&& rebuild) noexcept
-	-> ZHLN_FrameResult;
+auto DrawFrame(const DrawFrameDesc<N>& desc, uint32_t& frame_index, Record&& record,
+			   Rebuild&& rebuild) noexcept -> ZHLN_FrameResult;
 
 [[nodiscard]] auto SubmitAndPresent(const ZHLN_FrameSubmitDesc& desc) noexcept -> ZHLN_FrameResult;
 

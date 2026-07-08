@@ -6,7 +6,7 @@
 namespace ZHLN::Vk {
 // NOLINTNEXTLINE(performance-enum-size)
 enum class BarrierStage : VkPipelineStageFlags2 {
-	None = 0,
+	StageNone = 0,
 	Compute = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
 	Fragment = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
 	Vertex = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
@@ -17,7 +17,7 @@ enum class BarrierStage : VkPipelineStageFlags2 {
 
 // NOLINTNEXTLINE(performance-enum-size)
 enum class BarrierAccess : VkAccessFlags2 {
-	None = 0,
+	AccessNone = 0,
 	ShaderRead = VK_ACCESS_2_SHADER_READ_BIT,
 	ShaderWrite = VK_ACCESS_2_SHADER_WRITE_BIT,
 	IndirectRead = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,

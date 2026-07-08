@@ -113,7 +113,6 @@ int& GameConsole::HistoryPos() {
 size_t GameConsole::GetEntryCount() noexcept {
 	ZHLN_LOCK(s_Mutex) {
 		return s_Entries.size();
-#include <print>
 	}
 }
 

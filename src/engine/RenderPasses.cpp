@@ -25,8 +25,9 @@ enum class RenderPassType : uint8_t { Main, Shadow };
 }
 
 [[nodiscard]] inline bool IsVisibleIn(DrawFlags flags, RenderPassType passType) noexcept {
-	const bool hasMain = (flags & DrawFlags::VisibleInMain) != DrawFlags::None;
-	const bool hasShadow = (flags & DrawFlags::VisibleInShadow) != DrawFlags::None;
+	using enum DrawFlags;
+	const bool hasMain = (flags & VisibleInMain) != None;
+	const bool hasShadow = (flags & VisibleInShadow) != None;
 
 	if (!hasMain && !hasShadow) {
 		return true;
@@ -44,9 +45,9 @@ inline void SubmitDrawInstanced(VkCommandBuffer cmd, const DrawCommand& drawCmd,
 								VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT |
 															VK_SHADER_STAGE_FRAGMENT_BIT) noexcept {
 	const auto* nativeMat = drawCmd.material;
-	const VkPipeline pipeline =
+	auto* const pipeline =
 		(pipelineOverride != VK_NULL_HANDLE) ? pipelineOverride : nativeMat->pipeline.Get();
-	const VkPipelineLayout layout =
+	auto* const layout =
 		(layoutOverride != VK_NULL_HANDLE) ? layoutOverride : nativeMat->layout.Get();
 
 	const uint32_t vertexCount = drawCmd.instanceData.iboAddress != 0
@@ -66,12 +67,12 @@ inline void SubmitDrawInstanced(VkCommandBuffer cmd, const DrawCommand& drawCmd,
 } // namespace
 
 struct GpuCullingPolicy {
-	static void
-	Record(const FrameRecorder& recorder, const ZHLN::Array<GroupRange>& groups, uint32_t drawCount,
-		   Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> color_att,
-		   Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> vel_att,
-		   Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> norm_att,
-		   Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> depth_att) noexcept {
+	static void Record(const FrameRecorder& recorder, const ZHLN::Array<GroupRange>& groups,
+					   uint32_t drawCount,
+					   Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> color_att,
+					   Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> vel_att,
+					   Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> norm_att,
+					   Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> depth_att) noexcept {
 		VkCommandBuffer cmd = recorder.cmd;
 		auto& ctx = recorder.ctx;
 
@@ -100,10 +101,11 @@ struct GpuCullingPolicy {
 		planes.drawCount = drawCount;
 
 		ctx.cullingPass.Dispatch(cmd, ctx.cullingSets[], (drawCount + 63) / 64, 1, 1, planes);
+		using enum Vk::BarrierStage;
+		using enum Vk::BarrierAccess;
 
-		Vk::BeginBarrier<Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite>(
-			Vk::CommandBuffer<Vk::QueueType::Graphics>{cmd})
-			.TransitionTo<Vk::BarrierStage::Indirect, Vk::BarrierAccess::IndirectRead>();
+		Vk::BeginBarrier<Compute, ShaderWrite>(Vk::CommandBuffer<Vk::QueueType::Graphics>{cmd})
+			.TransitionTo<Indirect, IndirectRead>();
 
 		Vk::DynamicPass(color_att.extent)
 			.AddColor(color_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
@@ -137,12 +139,12 @@ struct GpuCullingPolicy {
 };
 
 struct CpuCullingPolicy {
-	static void
-	Record(const FrameRecorder& recorder, const ZHLN::Array<GroupRange>& /*groups*/,
-		   uint32_t drawCount, Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> color_att,
-		   Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> vel_att,
-		   Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> norm_att,
-		   Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> depth_att) noexcept {
+	static void Record(const FrameRecorder& recorder, const ZHLN::Array<GroupRange>& /*groups*/,
+					   uint32_t drawCount,
+					   Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> color_att,
+					   Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> vel_att,
+					   Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> norm_att,
+					   Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> depth_att) noexcept {
 		VkCommandBuffer cmd = recorder.cmd;
 		auto& ctx = recorder.ctx;
 
@@ -202,6 +204,8 @@ void ExecutePass(const FrameRecorder& recorder, const ZHLN::Array<GroupRange>& g
 namespace Passes {
 
 void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
+	using enum LightType;
+	using enum RenderPassType;
 	VkCommandBuffer cmd = recorder.cmd;
 	auto& ctx = recorder.ctx;
 
@@ -226,8 +230,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 	for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
 		const auto& drawCmd = ctx.drawQueue[i];
 
-		if (!IsVisibleIn(drawCmd.flags, RenderPassType::Shadow) ||
-			IsForwardOnly(drawCmd.instanceData.flags)) {
+		if (!IsVisibleIn(drawCmd.flags, Shadow) || IsForwardOnly(drawCmd.instanceData.flags)) {
 			continue;
 		}
 
@@ -254,7 +257,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 		}
 
 		for (const auto& light : ctx.mappedLights) {
-			if (light.shadowLayer < 0 || light.type != LightType::Point) {
+			if (light.shadowLayer < 0 || light.type != Point) {
 				continue;
 			}
 
@@ -325,7 +328,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 
 		for (uint32_t l_idx = 0; l_idx < ctx.mappedLights.size(); ++l_idx) {
 			const auto& light = ctx.mappedLights[l_idx];
-			if (light.shadowLayer < 0 || light.type != LightType::Point) {
+			if (light.shadowLayer < 0 || light.type != Point) {
 				continue;
 			}
 
@@ -365,7 +368,7 @@ void MainPass::Execute(const FrameRecorder& recorder,
 					   SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 									  VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>
 						   in) const noexcept {
-	VkCommandBuffer cmd = recorder.cmd;
+	auto cmd = recorder.cmd;
 	auto& ctx = recorder.ctx;
 
 	Profiler::ScopedGpuProfile<Stages::MainPass, FrameProfiler> timer(cmd, recorder.frameIndex,

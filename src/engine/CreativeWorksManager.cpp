@@ -88,7 +88,7 @@ bool CreativeWorksManager::MountPak(std::string_view pakFilePath) {
 }
 
 void CreativeWorksManager::LoadAsync(RestrictSpan<CreativeWorkLoadRequest> requests,
-							 TaskSystem::Counter* counter) {
+									 TaskSystem::Counter* counter) {
 	if (requests.size() == 0) {
 		return;
 	}
@@ -97,15 +97,17 @@ void CreativeWorksManager::LoadAsync(RestrictSpan<CreativeWorkLoadRequest> reque
 	tasks.reserve(requests.size());
 
 	for (auto& request : requests) {
-		auto* jobPayload = new std::pair<CreativeWorksManager*, CreativeWorkLoadRequest*>(this, &request);
+		auto* jobPayload =
+			new std::pair<CreativeWorksManager*, CreativeWorkLoadRequest*>(this, &request);
 
-		tasks.push_back({.func = [](void* arg) -> void {
-							 auto* payload =
-								 static_cast<std::pair<CreativeWorksManager*, CreativeWorkLoadRequest*>*>(arg);
-							 payload->first->ExecuteLoad(payload->second);
-							 delete payload;
-						 },
-						 .arg = jobPayload});
+		tasks.push_back(
+			{.func = [](void* arg) -> void {
+				 auto* payload =
+					 static_cast<std::pair<CreativeWorksManager*, CreativeWorkLoadRequest*>*>(arg);
+				 payload->first->ExecuteLoad(payload->second);
+				 delete payload;
+			 },
+			 .arg = jobPayload});
 	}
 
 	TaskSystem::Dispatch(tasks, counter);

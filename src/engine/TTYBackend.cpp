@@ -54,29 +54,30 @@ struct TTYState {
 static TTYState* g_CrashState = nullptr;
 
 static KeyCode MapEvdevKey(uint16_t code) {
+	using enum KeyCode;
 	switch (code) {
 		case KEY_W:
-			return KeyCode::W;
+			return W;
 		case KEY_A:
-			return KeyCode::A;
+			return A;
 		case KEY_S:
-			return KeyCode::S;
+			return S;
 		case KEY_D:
-			return KeyCode::D;
+			return D;
 		case KEY_LEFTSHIFT:
-			return KeyCode::LShift;
+			return LShift;
 		case KEY_SPACE:
-			return KeyCode::Space;
+			return Space;
 		case KEY_ESC:
-			return KeyCode::Escape;
+			return Escape;
 		case KEY_R:
-			return KeyCode::R;
+			return R;
 		case BTN_LEFT:
-			return KeyCode::RButton;
+			return LButton;
 		case BTN_RIGHT:
-			return KeyCode::RButton;
+			return RButton;
 		default:
-			return KeyCode::Unknown;
+			return Unknown;
 	}
 }
 

@@ -22,17 +22,18 @@ namespace ZHLN {
 namespace {
 
 inline RenderFrameResult MapFrameResult(ZHLN_FrameResult res) noexcept {
+	using enum RenderFrameResult;
 	switch (res) {
 		case ZHLN_FrameResult_Ok:
-			return RenderFrameResult::Success;
+			return Success;
 		case ZHLN_FrameResult_Suboptimal:
-			return RenderFrameResult::Suboptimal;
+			return Suboptimal;
 		case ZHLN_FrameResult_OutOfDate:
-			return RenderFrameResult::OutOfDate;
+			return OutOfDate;
 		case ZHLN_FrameResult_DeviceLost:
-			return RenderFrameResult::DeviceLost;
+			return DeviceLost;
 		default:
-			return RenderFrameResult::Error;
+			return Error;
 	}
 }
 
@@ -79,10 +80,10 @@ inline void SubmitDrawInstanced(VkCommandBuffer cmd, const DrawCommand& drawCmd,
 								VkPipelineLayout layoutOverride = VK_NULL_HANDLE,
 								VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT |
 															VK_SHADER_STAGE_FRAGMENT_BIT) noexcept {
-	const auto* nativeMat = drawCmd.material;
-	const VkPipeline pipeline =
+	const auto* const nativeMat = drawCmd.material;
+	const auto* const pipeline =
 		(pipelineOverride != VK_NULL_HANDLE) ? pipelineOverride : nativeMat->pipeline.Get();
-	const VkPipelineLayout layout =
+	const auto* const layout =
 		(layoutOverride != VK_NULL_HANDLE) ? layoutOverride : nativeMat->layout.Get();
 
 	// Resolved from pre-assembled GPU structure
@@ -174,7 +175,7 @@ void RenderContext::Impl::DispatchSkinningPasses() {
 	}
 
 	ZHLN_PROFILE_SCOPE("GPU Compute Skinning");
-	VkCommandBuffer cmd = current_cmd;
+	auto* const cmd = current_cmd;
 	skinningPass.Bind(cmd);
 
 	for (const auto& drawCmd : drawQueue) {
@@ -221,29 +222,36 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 	tlasInstancesScratch.clear();
 	tlasInstancesScratch.reserve(drawQueue.size());
 
+	using enum DrawFlags;
+
 	for (uint32_t i = 0; i < drawQueue.size(); ++i) {
 		const auto& drawCmd = drawQueue[i];
 		auto* mesh = drawCmd.posMesh;
 
-		if (mesh == nullptr || mesh->blasAddress == 0 ||
-			((drawCmd.flags & DrawFlags::Skinned) != DrawFlags::None) ||
-			((drawCmd.flags & DrawFlags::ExcludeFromTLAS) != DrawFlags::None)) {
+		if (mesh == nullptr || mesh->blasAddress == 0 || ((drawCmd.flags & Skinned) != None) ||
+			((drawCmd.flags & ExcludeFromTLAS) != None)) {
 			continue;
 		}
 
-		VkAccelerationStructureInstanceKHR inst{};
 		const auto& t = drawCmd.instanceData.world;
 
-		for (int row = 0; row < 3; ++row) {
-			for (int col = 0; col < 4; ++col) {
-				inst.transform.matrix[row][col] = t(row, col);
-			}
-		}
+		VkAccelerationStructureInstanceKHR inst{
+			.transform =
+				[&]() {
+					VkTransformMatrixKHR m;
+					for (int row = 0; row < 3; ++row) {
+						for (int col = 0; col < 4; ++col) {
+							m.matrix[row][col] = t(row, col);
+						}
+					}
+					return m;
+				}(),
+			.instanceCustomIndex = i,
+			.mask = 0xFF,
+			.instanceShaderBindingTableRecordOffset = 0,
+			.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR,
+			.accelerationStructureReference = mesh->blasAddress};
 
-		inst.instanceCustomIndex = i;
-		inst.mask = 0xFF;
-		inst.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-		inst.accelerationStructureReference = mesh->blasAddress;
 		tlasInstancesScratch.push_back(inst);
 	}
 
@@ -516,11 +524,12 @@ struct PassFactory {
 
 	template <bool FullBright, AAMode Mode, typename GetSwapchainImageT>
 	auto MakeBlitPass(GetSwapchainImageT&& getSwapchainImage) const noexcept {
+		using enum AAMode;
 		using BlitInputRes =
-			std::conditional_t<Mode != AAMode::None, Res_AccumNext,
+			std::conditional_t<Mode != None, Res_AccumNext,
 							   std::conditional_t<FullBright, Res_SceneColor, Res_PostProcess>>;
 		const auto& blitInputImage = [&]() -> auto& {
-			if constexpr (Mode != AAMode::None) {
+			if constexpr (Mode != None) {
 				return self.accumBuffers.Next();
 			} else {
 				return ColorTarget<FullBright>();
@@ -650,6 +659,7 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
 	uint32_t fIdx = frame_index;
 
 	using namespace ZHLN::Vk;
+	using enum AAMode;
 	FrameRecorder recorder(cmd, *this);
 
 	// Safe builder for explicitly typed swapchain images
@@ -668,7 +678,7 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
 		const auto smaaWeight_ro =
 			AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(smaaWeightTarget);
 
-		if (aaState.mode == AAMode::TAA && taaPass.pipeline.Valid()) {
+		if (aaState.mode == TAA && taaPass.pipeline.Valid()) {
 			struct TAAPushConstants {
 				float feedback;
 			};
@@ -681,7 +691,7 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
 					defaultSampler.Get(), frameUniformBuffers[fIdx].Handle());
 				taaPass.Execute(c, TAAPushConstants{.feedback = aaState.taaFeedback});
 			});
-		} else if (aaState.mode == AAMode::FXAA && fxaaPass.pipeline.Valid()) {
+		} else if (aaState.mode == FXAA && fxaaPass.pipeline.Valid()) {
 			struct FXAAPushConstants {
 				float rcpFrameX;
 				float rcpFrameY;
@@ -701,7 +711,7 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
 					defaultSampler.Get());
 				fxaaPass.Execute(c, pc);
 			});
-		} else if (aaState.mode == AAMode::SMAA && smaaEdgePass.pipeline.Valid()) {
+		} else if (aaState.mode == SMAA && smaaEdgePass.pipeline.Valid()) {
 			struct SMAAMetrics {
 				float rcpWidth;
 				float rcpHeight;
@@ -753,9 +763,9 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
 					device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor),
 					defaultSampler.Get(),
 					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor));
-				BlitPushConstants pc = {
-					.vignetteIntensity = 0.0f, .vignettePower = 0.0f, .fullBright = 0};
-				blitPass.Execute(c, pc);
+				blitPass.Execute(c, BlitPushConstants{.vignetteIntensity = 0.0f,
+													  .vignettePower = 0.0f,
+													  .fullBright = 0});
 			});
 		}
 	};
@@ -787,21 +797,17 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
 		.reflVariant = reflVariant};
 
 	switch (aaState.mode) {
-		case AAMode::None:
-			ExecuteFrameGraph<FullBright, AAMode::None>(*this, cmd, factory, aaLambda,
-														getSwapchainImage);
+		case None:
+			ExecuteFrameGraph<FullBright, None>(*this, cmd, factory, aaLambda, getSwapchainImage);
 			break;
-		case AAMode::FXAA:
-			ExecuteFrameGraph<FullBright, AAMode::FXAA>(*this, cmd, factory, aaLambda,
-														getSwapchainImage);
+		case FXAA:
+			ExecuteFrameGraph<FullBright, FXAA>(*this, cmd, factory, aaLambda, getSwapchainImage);
 			break;
-		case AAMode::TAA:
-			ExecuteFrameGraph<FullBright, AAMode::TAA>(*this, cmd, factory, aaLambda,
-													   getSwapchainImage);
+		case TAA:
+			ExecuteFrameGraph<FullBright, TAA>(*this, cmd, factory, aaLambda, getSwapchainImage);
 			break;
-		case AAMode::SMAA:
-			ExecuteFrameGraph<FullBright, AAMode::SMAA>(*this, cmd, factory, aaLambda,
-														getSwapchainImage);
+		case SMAA:
+			ExecuteFrameGraph<FullBright, SMAA>(*this, cmd, factory, aaLambda, getSwapchainImage);
 			break;
 	}
 }
@@ -858,6 +864,8 @@ RenderResult RenderContext::EndFrame() noexcept {
 		EndFrameGuard& operator=(EndFrameGuard&&) = delete;
 	} frameGuard{_impl.get()};
 
+	using enum RenderFrameResult;
+
 	ZHLN_PROFILE_SCOPE("Render (CPU Record)");
 	if (_impl->current_cmd == VK_NULL_HANDLE) {
 		_impl->drawQueue.clear();
@@ -865,54 +873,57 @@ RenderResult RenderContext::EndFrame() noexcept {
 		return std::unexpected(RenderFrameResult::Error);
 	}
 
-	auto record_fn = [&](VkCommandBuffer cmd, uint32_t image_index) {
-		_impl->current_cmd = cmd;
-		_impl->current_image_index = image_index;
+	auto res = Vk::DrawFrame<2, false>(
+		{.ctx = _impl->ctx,
+		 .swapchain = _impl->presentation.swapchain,
+		 .sync = _impl->sync,
+		 .pools = _impl->pools,
+		 .presentSemaphores = _impl->presentation.presentSemaphores,
+		 .stagingSemaphore = _impl->transferRingBuffer.GetSemaphore(),
+		 .stagingWaitValue = _impl->transferRingBuffer.GetCurrentValue()},
+		_impl->frame_index,
+		[this](VkCommandBuffer cmd, uint32_t image_index) {
+			_impl->current_cmd = cmd;
+			_impl->current_image_index = image_index;
 
-		// Safe Synchronized Query Readback & Reset
-		// At this point, Vk::DrawFrame has already waited for the fence to signal.
-		float timestampPeriod =
-			_impl->ctx.PhysicalInfo().properties.properties.limits.timestampPeriod;
-		_impl->gpuProfiler.RetrieveResults(
-			_impl->frame_index, timestampPeriod,
-			[](std::string_view name, float durationMS) { CPUProfiler::Record(name, durationMS); });
-		_impl->gpuProfiler.Reset(_impl->frame_index);
+			// Safe Synchronized Query Readback & Reset
+			float timestampPeriod =
+				_impl->ctx.PhysicalInfo().properties.properties.limits.timestampPeriod;
+			_impl->gpuProfiler.RetrieveResults(_impl->frame_index, timestampPeriod,
+											   [](std::string_view name, float durationMS) {
+												   CPUProfiler::Record(name, durationMS);
+											   });
+			_impl->gpuProfiler.Reset(_impl->frame_index);
 
-		_impl->pendingAcquires.Drain(cmd);
+			_impl->pendingAcquires.Drain(cmd);
 
-		_impl->DispatchSkinningPasses();
+			_impl->DispatchSkinningPasses();
 
-		if (_impl->drawQueue.size() > kGpuCullingMaxInstances) {
-			_impl->drawQueue.resize(kGpuCullingMaxInstances);
-		}
-
-		_impl->SortDrawQueue();
-
-		auto drawCount = _impl->drawQueue.size();
-		if (drawCount > 0) {
-			auto mapped = _impl->instanceDataBuffers->Map();
-			auto* dst = static_cast<InstanceData*>(mapped.data);
-			for (size_t i = 0; i < drawCount; ++i) {
-				dst[i] = _impl->drawQueue[i].instanceData;
+			if (_impl->drawQueue.size() > kGpuCullingMaxInstances) {
+				_impl->drawQueue.resize(kGpuCullingMaxInstances);
 			}
-		}
-		_impl->BuildTLAS(cmd);
 
-		if (_impl->currentUniforms.fullBright != 0) {
-			_impl->RecordSceneFrame<true>({cmd});
-		} else {
-			_impl->RecordSceneFrame<false>({cmd});
-		}
-	};
+			_impl->SortDrawQueue();
 
-	auto rebuild_fn = [&]() { _impl->resized = true; };
+			auto drawCount = _impl->drawQueue.size();
+			if (drawCount > 0) {
+				auto mapped = _impl->instanceDataBuffers->Map();
+				auto* dst = static_cast<InstanceData*>(mapped.data);
+				for (size_t i = 0; i < drawCount; ++i) {
+					dst[i] = _impl->drawQueue[i].instanceData;
+				}
+			}
+			_impl->BuildTLAS(cmd);
 
-	auto res = Vk::DrawFrame<2>(
-		_impl->ctx, _impl->presentation.swapchain, _impl->sync, _impl->pools, _impl->frame_index,
-		_impl->presentation.presentSemaphores, _impl->transferRingBuffer.GetSemaphore(),
-		_impl->transferRingBuffer.GetCurrentValue(), record_fn, rebuild_fn);
+			if (_impl->currentUniforms.fullBright != 0) {
+				_impl->RecordSceneFrame<true>({cmd});
+			} else {
+				_impl->RecordSceneFrame<false>({cmd});
+			}
+		},
+		[this]() { _impl->resized = true; });
 
-	if (res != ZHLN_FrameResult_Ok) {
+	if (res != ZHLN_FrameResult_Ok && res != ZHLN_FrameResult_Suboptimal) {
 		_impl->drawQueue.clear();
 		_impl->uiDrawQueue.clear();
 		_impl->current_cmd = VK_NULL_HANDLE;
@@ -920,6 +931,7 @@ RenderResult RenderContext::EndFrame() noexcept {
 		return std::unexpected(MapFrameResult(res));
 	}
 
+	// Flip double-buffered resources to prepare for the next frame
 	StaticResourceManager(
 		&_impl->accumBuffers, &_impl->taaPass, &_impl->fxaaPass, &_impl->smaaEdgePass,
 		&_impl->smaaWeightPass, &_impl->smaaBlendPass, &_impl->ambientPass, &_impl->lightingPass,
@@ -937,6 +949,15 @@ RenderResult RenderContext::EndFrame() noexcept {
 	_impl->uiDrawQueue.clear();
 	_impl->current_cmd = VK_NULL_HANDLE;
 	_impl->hasSkinnedThisFrame = false;
+
+	VkResult wait_res = Vk::SyncFrameBoundary(_impl->ctx, _impl->sync, _impl->frame_index);
+	if (wait_res == VK_ERROR_DEVICE_LOST) {
+		return std::unexpected(DeviceLost);
+	}
+
+	if (res == ZHLN_FrameResult_Suboptimal) {
+		return std::unexpected(Suboptimal);
+	}
 
 	return {};
 }
@@ -961,6 +982,8 @@ void RenderContext::Impl::ProvokeDeviceLostInternal() const {
 namespace Renderer {
 
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const DrawParams& params) {
+	using enum DrawFlags;
+	using enum BufferHandle;
 	auto* impl = ctx.GetImpl();
 	if (impl->current_cmd == VK_NULL_HANDLE) {
 		return;
@@ -974,18 +997,15 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
 		return;
 	}
 
-	auto* skinMesh = mesh.skinBuffer != BufferHandle::Invalid
-						 ? impl->meshPool.Resolve(mesh.skinBuffer)
-						 : nullptr;
-	auto* nativeIndexMesh = mesh.indexBuffer != BufferHandle::Invalid
-								? impl->meshPool.Resolve(mesh.indexBuffer)
-								: nullptr;
+	auto* skinMesh = mesh.skinBuffer != Invalid ? impl->meshPool.Resolve(mesh.skinBuffer) : nullptr;
+	auto* nativeIndexMesh =
+		mesh.indexBuffer != Invalid ? impl->meshPool.Resolve(mesh.indexBuffer) : nullptr;
 
-	if (params.skinnedVertexBuffer != BufferHandle::Invalid) {
+	if (params.skinnedVertexBuffer != Invalid) {
 		impl->hasSkinnedThisFrame = true;
 	}
 
-	auto* finalPosMesh = (params.skinnedVertexBuffer != BufferHandle::Invalid)
+	auto* finalPosMesh = (params.skinnedVertexBuffer != Invalid)
 							 ? impl->meshPool.Resolve(params.skinnedVertexBuffer)
 							 : posMesh;
 
@@ -994,16 +1014,14 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
 
 	if (posMesh == attrMesh && posMesh != nullptr) {
 		attrAddr = posMesh->vboAddress + (500000 * sizeof(VertexPosition));
-	} else if (params.skinnedVertexBuffer != BufferHandle::Invalid && posMesh != nullptr) {
+	} else if (params.skinnedVertexBuffer != Invalid && posMesh != nullptr) {
 		attrAddr = finalPosMesh->vboAddress + (posMesh->vertexCount * sizeof(VertexPosition));
 	}
 
-	uint32_t isSkinned = (params.skinnedVertexBuffer == BufferHandle::Invalid &&
-						  (params.flags & DrawFlags::Skinned) != DrawFlags::None)
-							 ? 1u
-							 : 0u;
+	uint32_t isSkinned =
+		(params.skinnedVertexBuffer == Invalid && (params.flags & Skinned) != None) ? 1u : 0u;
 	uint32_t activeMorphCount =
-		(params.skinnedVertexBuffer != BufferHandle::Invalid) ? 0 : params.activeMorphCount;
+		(params.skinnedVertexBuffer != Invalid) ? 0 : params.activeMorphCount;
 
 	InstanceData inst = {
 		.world = params.transform,
@@ -1034,7 +1052,7 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
 	};
 
 	impl->drawQueue.push_back(DrawCommand{.instanceData = inst,
-										  .material = const_cast<NativeMaterial*>(nativeMaterial),
+										  .material = nativeMaterial,
 										  .posMesh = posMesh,
 										  .attrMesh = attrMesh,
 										  .skinMesh = skinMesh,

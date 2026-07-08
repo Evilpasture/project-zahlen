@@ -83,6 +83,7 @@ bool CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept {
 namespace ZHLN {
 
 void RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int height) {
+	using enum Resource::ShaderID;
 	if (!allocator.Init(ctx)) {
 		ZHLN::Panic("FATAL: Vulkan Memory Allocator (VMA) failed to initialize");
 	}
@@ -116,12 +117,10 @@ void RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int
 
 	BuildHangGpuPipeline();
 
-	CompileShadowPipeline(
-		ctx.Device(),
-		Resource::ShaderPair{.vertex = Resource::GetShaderProgram(Resource::ShaderID::Basic).vertex,
-							 .fragment = Resource::shadow_frag});
-	CompilePunctualShadowPipeline(ctx.Device(),
-								  Resource::GetShaderProgram(Resource::ShaderID::PunctualShadows));
+	CompileShadowPipeline(ctx.Device(),
+						  Resource::ShaderPair{.vertex = Resource::GetShaderProgram(Basic).vertex,
+											   .fragment = Resource::shadow_frag});
+	CompilePunctualShadowPipeline(ctx.Device(), Resource::GetShaderProgram(PunctualShadows));
 
 	if (!presentation.Init(ctx, allocator, surface.Get(), width, height, cfg.vsync)) {
 		ZHLN::Panic("FATAL: Presentation Context initialization failed");
@@ -542,6 +541,7 @@ void RenderContext::Impl::InitShadowResources() {
 }
 
 void RenderContext::Impl::InitCullingResources() {
+	using enum Resource::ShaderID;
 	Vk::AllocateDoubleBufferedSet<CullingLayout>(ctx.Device(), cullingLayout, cullingPool,
 												 cullingSets);
 
@@ -606,10 +606,8 @@ void RenderContext::Impl::InitCullingResources() {
 		);
 	}
 
-	auto bDesc =
-		Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::ClusterBounds).vertex);
-	auto cDesc =
-		Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::ClusterCulling).vertex);
+	auto bDesc = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterBounds).vertex);
+	auto cDesc = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterCulling).vertex);
 	if (!clusterBoundsPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), bDesc)) {
 		ZHLN::Panic("FATAL: Failed to build Cluster Bounds Pass!");
 	}
@@ -714,7 +712,7 @@ void RenderContext::Impl::InitLightingLUTs() {
 	const size_t matRawSize = ltc_mat.size() - 128;
 	const size_t ampRawSize = ltc_amp.size() - 128;
 
-	Vk::Buffer ltcStaging =
+	auto ltcStaging =
 		Vk::Buffer::Create(allocator.Get(), matRawSize + ampRawSize,
 						   VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 
@@ -728,14 +726,12 @@ void RenderContext::Impl::InitLightingLUTs() {
 		size_t bufferOffset;
 	};
 
-	std::array<LUTUploadItem, 2> uploads = {{{.targetImage = &ltcMatImage,
-											  .rawData = ltc_mat,
-											  .rawSize = matRawSize,
-											  .bufferOffset = 0},
-											 {.targetImage = &ltcAmpImage,
-											  .rawData = ltc_amp,
-											  .rawSize = ampRawSize,
-											  .bufferOffset = matRawSize}}};
+	std::array<LUTUploadItem, 2> uploads = {
+		{{.targetImage = &ltcMatImage, .rawData = ltc_mat, .rawSize = matRawSize, .bufferOffset = 0},
+		 {.targetImage = &ltcAmpImage,
+		  .rawData = ltc_amp,
+		  .rawSize = ampRawSize,
+		  .bufferOffset = matRawSize}}};
 
 	for (const auto& item : uploads) {
 		*item.targetImage = Vk::Image::Create(allocator.Get(), ltcInfo, VMA_MEMORY_USAGE_GPU_ONLY);
@@ -820,17 +816,18 @@ void RenderContext::Impl::InitBindless() {
 		bindlessRegistry.UpdateSet(ctx.Device(), bindlessSets[i]);
 	}
 }
-
+using enum Resource::ShaderID;
 void RenderContext::Impl::BuildTAAPipeline() {
+
 	VkPushConstantRange taaPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float)};
 
 	BuildPassHelper(this, taaPass, "TAA",
 					{.path = SHADER_TAA_HLSL_VS_PATH,
-					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::Taa).vertex,
+					 .fallback = Resource::GetShaderProgram(Taa).vertex,
 					 .entryPoint = "VSMain"},
 					{.path = SHADER_TAA_HLSL_PS_PATH,
-					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::Taa).fragment,
+					 .fallback = Resource::GetShaderProgram(Taa).fragment,
 					 .entryPoint = "PSMain"},
 					{VK_FORMAT_R16G16B16A16_SFLOAT}, &taaPush, 1);
 }
@@ -841,10 +838,10 @@ void RenderContext::Impl::BuildFXAAPipeline() {
 
 	BuildPassHelper(this, fxaaPass, "FXAA",
 					{.path = SHADER_FXAA_HLSL_VS_PATH,
-					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::Fxaa).vertex,
+					 .fallback = Resource::GetShaderProgram(Fxaa).vertex,
 					 .entryPoint = "VSMain"},
 					{.path = SHADER_FXAA_HLSL_PS_PATH,
-					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::Fxaa).fragment,
+					 .fallback = Resource::GetShaderProgram(Fxaa).fragment,
 					 .entryPoint = "PSMain"},
 					{VK_FORMAT_R16G16B16A16_SFLOAT}, &fxaaPush, 1);
 }
@@ -857,29 +854,28 @@ void RenderContext::Impl::BuildSMAAPipeline() {
 
 	BuildPassHelper(this, smaaEdgePass, "SMAA Edge Detection",
 					{.path = SHADER_SMAA_EDGE_VS_PATH,
-					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::SmaaEdge).vertex,
+					 .fallback = Resource::GetShaderProgram(SmaaEdge).vertex,
 					 .entryPoint = "SmaaEdgeVS"},
 					{.path = SHADER_SMAA_EDGE_PS_PATH,
-					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::SmaaEdge).fragment,
+					 .fallback = Resource::GetShaderProgram(SmaaEdge).fragment,
 					 .entryPoint = "SmaaEdgePS"},
 					{VK_FORMAT_R8G8_UNORM}, &smaaPush, 1);
 
-	BuildPassHelper(
-		this, smaaWeightPass, "SMAA Blending Weight",
-		{.path = SHADER_SMAA_WEIGHT_VS_PATH,
-		 .fallback = Resource::GetShaderProgram(Resource::ShaderID::SmaaWeight).vertex,
-		 .entryPoint = "SmaaWeightVS"},
-		{.path = SHADER_SMAA_WEIGHT_PS_PATH,
-		 .fallback = Resource::GetShaderProgram(Resource::ShaderID::SmaaWeight).fragment,
-		 .entryPoint = "SmaaWeightPS"},
-		{VK_FORMAT_R8G8B8A8_UNORM}, &smaaPush, 1);
+	BuildPassHelper(this, smaaWeightPass, "SMAA Blending Weight",
+					{.path = SHADER_SMAA_WEIGHT_VS_PATH,
+					 .fallback = Resource::GetShaderProgram(SmaaWeight).vertex,
+					 .entryPoint = "SmaaWeightVS"},
+					{.path = SHADER_SMAA_WEIGHT_PS_PATH,
+					 .fallback = Resource::GetShaderProgram(SmaaWeight).fragment,
+					 .entryPoint = "SmaaWeightPS"},
+					{VK_FORMAT_R8G8B8A8_UNORM}, &smaaPush, 1);
 
 	BuildPassHelper(this, smaaBlendPass, "SMAA Neighborhood Blend",
 					{.path = SHADER_SMAA_BLEND_VS_PATH,
-					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::SmaaBlend).vertex,
+					 .fallback = Resource::GetShaderProgram(SmaaBlend).vertex,
 					 .entryPoint = "SmaaBlendVS"},
 					{.path = SHADER_SMAA_BLEND_PS_PATH,
-					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::SmaaBlend).fragment,
+					 .fallback = Resource::GetShaderProgram(SmaaBlend).fragment,
 					 .entryPoint = "SmaaBlendPS"},
 					{VK_FORMAT_R16G16B16A16_SFLOAT}, &smaaPush, 1);
 }
@@ -890,10 +886,10 @@ void RenderContext::Impl::BuildAmbientPipeline() {
 
 	BuildPassHelper(this, ambientPass, "Ambient",
 					{.path = SHADER_AMBIENT_HLSL_VS_PATH,
-					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::Ambient).vertex,
+					 .fallback = Resource::GetShaderProgram(Ambient).vertex,
 					 .entryPoint = "VSMain"},
 					{.path = SHADER_AMBIENT_HLSL_PS_PATH,
-					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::Ambient).fragment,
+					 .fallback = Resource::GetShaderProgram(Ambient).fragment,
 					 .entryPoint = "PSMain"},
 					{VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush, 1);
 }
@@ -922,10 +918,10 @@ void RenderContext::Impl::BuildLightingPipeline() {
 	const char* psPath = hasRt ? SHADER_LIGHTING_HLSL_PS_PATH : SHADER_LIGHTING_NORT_HLSL_PS_PATH;
 
 	// Declared as const unsigned char* to match ShaderStageSource
-	auto vsSpan = hasRt ? Resource::GetShaderProgram(Resource::ShaderID::Lighting).vertex
-						: Resource::GetShaderProgram(Resource::ShaderID::LightingNort).vertex;
-	auto psSpan = hasRt ? Resource::GetShaderProgram(Resource::ShaderID::Lighting).fragment
-						: Resource::GetShaderProgram(Resource::ShaderID::LightingNort).fragment;
+	auto vsSpan = hasRt ? Resource::GetShaderProgram(Lighting).vertex
+						: Resource::GetShaderProgram(LightingNort).vertex;
+	auto psSpan = hasRt ? Resource::GetShaderProgram(Lighting).fragment
+						: Resource::GetShaderProgram(LightingNort).fragment;
 
 	BuildPassVariants(this, lightingPass, "Lighting",
 					  {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
@@ -964,9 +960,9 @@ void RenderContext::Impl::BuildReflectionPipelines() {
 		hasRt ? SHADER_REFLECTION_HLSL_PS_PATH : SHADER_REFLECTION_NORT_HLSL_PS_PATH;
 
 	// Declared as const unsigned char* to match ShaderStageSource
-	auto vsSpan = hasRt ? Resource::GetShaderProgram(Resource::ShaderID::Reflection).vertex
+	auto vsSpan = hasRt ? Resource::GetShaderProgram(Reflection).vertex
 						: Resource::GetShaderProgram(Resource::ShaderID::ReflectionNort).vertex;
-	auto psSpan = hasRt ? Resource::GetShaderProgram(Resource::ShaderID::Reflection).fragment
+	auto psSpan = hasRt ? Resource::GetShaderProgram(Reflection).fragment
 						: Resource::GetShaderProgram(Resource::ShaderID::ReflectionNort).fragment;
 
 	BuildPassVariants(this, reflectionPass, "Reflection",
@@ -976,15 +972,14 @@ void RenderContext::Impl::BuildReflectionPipelines() {
 }
 
 void RenderContext::Impl::BuildBloomPipelines() {
-	BuildPassHelper(
-		this, bloomThresholdPass, "Bloom Threshold",
-		{.path = SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH,
-		 .fallback = Resource::GetShaderProgram(Resource::ShaderID::BloomThreshold).vertex,
-		 .entryPoint = "VSMain"},
-		{.path = SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH,
-		 .fallback = Resource::GetShaderProgram(Resource::ShaderID::BloomThreshold).fragment,
-		 .entryPoint = "PSMain"},
-		{VK_FORMAT_R16G16B16A16_SFLOAT});
+	BuildPassHelper(this, bloomThresholdPass, "Bloom Threshold",
+					{.path = SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH,
+					 .fallback = Resource::GetShaderProgram(BloomThreshold).vertex,
+					 .entryPoint = "VSMain"},
+					{.path = SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH,
+					 .fallback = Resource::GetShaderProgram(BloomThreshold).fragment,
+					 .entryPoint = "PSMain"},
+					{VK_FORMAT_R16G16B16A16_SFLOAT});
 
 	VkPushConstantRange blurPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 									.offset = 0,
@@ -992,19 +987,19 @@ void RenderContext::Impl::BuildBloomPipelines() {
 
 	BuildPassHelper(this, bloomBlurHPass, "Bloom Blur H",
 					{.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH,
-					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::BloomBlur).vertex,
+					 .fallback = Resource::GetShaderProgram(BloomBlur).vertex,
 					 .entryPoint = "VSMain"},
 					{.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH,
-					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::BloomBlur).fragment,
+					 .fallback = Resource::GetShaderProgram(BloomBlur).fragment,
 					 .entryPoint = "PSMain"},
 					{VK_FORMAT_R16G16B16A16_SFLOAT}, &blurPush, 1);
 
 	BuildPassHelper(this, bloomBlurVPass, "Bloom Blur V",
 					{.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH,
-					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::BloomBlur).vertex,
+					 .fallback = Resource::GetShaderProgram(BloomBlur).vertex,
 					 .entryPoint = "VSMain"},
 					{.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH,
-					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::BloomBlur).fragment,
+					 .fallback = Resource::GetShaderProgram(BloomBlur).fragment,
 					 .entryPoint = "PSMain"},
 					{VK_FORMAT_R16G16B16A16_SFLOAT}, &blurPush, 1);
 }
@@ -1018,10 +1013,10 @@ void RenderContext::Impl::BuildBlitPipeline() {
 
 	BuildPassHelper(this, blitPass, "Blit",
 					{.path = SHADER_BLIT_HLSL_VS_PATH,
-					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::Blit).vertex,
+					 .fallback = Resource::GetShaderProgram(Blit).vertex,
 					 .entryPoint = "VSMain"},
 					{.path = SHADER_BLIT_HLSL_PS_PATH,
-					 .fallback = Resource::GetShaderProgram(Resource::ShaderID::Blit).fragment,
+					 .fallback = Resource::GetShaderProgram(Blit).fragment,
 					 .entryPoint = "PSMain"},
 					{presentation.swapchain.Get().format}, &blitPush, 1);
 }
@@ -1096,7 +1091,7 @@ void RenderContext::Impl::SetupUI(GLFWwindow* window) {
 		.pNext = nullptr,
 		.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
 		.maxSets = 1000,
-		.poolSizeCount = (uint32_t)std::size(pool_sizes),
+		.poolSizeCount = std::size(pool_sizes),
 		.pPoolSizes = pool_sizes.data(),
 	};
 
@@ -1104,8 +1099,7 @@ void RenderContext::Impl::SetupUI(GLFWwindow* window) {
 	vkCreateDescriptorPool(ctx.Device(), &pool_info, nullptr, &rawPool);
 	uiPool = Vk::DescriptorPool(ctx.Device(), rawPool);
 
-	auto uiShaders =
-		Vk::ShaderStages::Create(ctx.Device(), Resource::GetShaderProgram(Resource::ShaderID::Ui));
+	auto uiShaders = Vk::ShaderStages::Create(ctx.Device(), Resource::GetShaderProgram(Ui));
 
 	VkPushConstantRange uiPush = {.stageFlags =
 									  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -1222,8 +1216,7 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
 												bloomFinalTarget.image.Handle()};
 
 		for (VkImage img : colorTargets) {
-			Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED,
-								 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+			Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
 				cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
 			Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 								 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(

@@ -217,24 +217,27 @@ struct GetTrackNameArgs {
 #pragma pack(pop)
 
 void SafeDestroyEntity(ZHLN::Engine* engine, ZHLN::Entity entity) {
+	using namespace ZHLN;
+	using namespace ZHLN::ECS;
+	using enum BufferHandle;
 	auto& reg = engine->GetRegistry();
 
-	std::vector<ZHLN::Entity> childrenToDestroy;
+	std::vector<Entity> childrenToDestroy;
 
-	uint32_t hierarchyID = ZHLN::ECS::ComponentFamily::GetTypeID<ZHLN::HierarchyComponent>();
+	uint32_t hierarchyID = ComponentFamily::GetTypeID<HierarchyComponent>();
 	auto hEntities = reg.GetEntitiesByFamilyID(hierarchyID);
-	for (ZHLN::Entity e : hEntities) {
-		if (auto* hier = reg.Get<ZHLN::HierarchyComponent>(e)) {
+	for (Entity e : hEntities) {
+		if (auto* hier = reg.Get<HierarchyComponent>(e)) {
 			if (hier->parent == entity) {
 				childrenToDestroy.push_back(e);
 			}
 		}
 	}
 
-	uint32_t uiRectID = ZHLN::ECS::ComponentFamily::GetTypeID<ZHLN::UIRectComponent>();
+	uint32_t uiRectID = ComponentFamily::GetTypeID<UIRectComponent>();
 	auto uEntities = reg.GetEntitiesByFamilyID(uiRectID);
-	for (ZHLN::Entity e : uEntities) {
-		if (auto* rect = reg.Get<ZHLN::UIRectComponent>(e)) {
+	for (Entity e : uEntities) {
+		if (auto* rect = reg.Get<UIRectComponent>(e)) {
 			if (rect->parentEntity == entity) {
 				childrenToDestroy.push_back(e);
 			}
@@ -519,7 +522,7 @@ void RegisterCreativeWorkCommands() {
 			switch (type) {
 				case ZHLN::Physics::ShapeType::Sphere:
 					mesh = ZHLN::CreativeWorksFactory::CreateBox(rc, JPH::Vec3(a.p1, a.p1, a.p1),
-																{a.r, a.g, a.b, a.a});
+																 {a.r, a.g, a.b, a.a});
 					shape = ZHLN::Physics::GetOrCreateShape(pc, type, a.p1);
 					cullRadius = a.p1 * 2.0f;
 					break;
@@ -531,7 +534,7 @@ void RegisterCreativeWorkCommands() {
 				case ZHLN::Physics::ShapeType::Box:
 				default:
 					mesh = ZHLN::CreativeWorksFactory::CreateBox(rc, JPH::Vec3(a.p1, a.p2, a.p3),
-																{a.r, a.g, a.b, a.a});
+																 {a.r, a.g, a.b, a.a});
 					shape = ZHLN::Physics::GetOrCreateShape(pc, ZHLN::Physics::ShapeType::Box, a.p1,
 															a.p2, a.p3);
 					cullRadius = std::max({a.p1, a.p2, a.p3}) * 2.0f;
@@ -587,48 +590,44 @@ void RegisterCreativeWorkCommands() {
 												.rotation = JPH::Quat(a.rx, a.ry, a.rz, a.rw),
 												.scale = {1.0f, 1.0f, 1.0f}});
 			reg.Add(e, ZHLN::NameComponent{.name = ZHLN::String64("SpawnedLight")});
-			reg.Add(e,
-					ZHLN::LightingSystem::LightComponent{.type = a.type,
-														 .color = JPH::Vec3(a.r, a.g, a.b),
-														 .intensity = a.intensity,
-														 .radius = a.radius,
-														 .direction = JPH::Vec3(a.dx, a.dy, a.dz),
-														 .range = a.range,
-														 .points = {},
-														 .twoSided = a.twoSided});
+			reg.Add(e, ZHLN::LightingSystem::LightComponent{.type = a.type,
+															.color = JPH::Vec3(a.r, a.g, a.b),
+															.intensity = a.intensity,
+															.radius = a.radius,
+															.direction = JPH::Vec3(a.dx, a.dy, a.dz),
+															.range = a.range,
+															.points = {},
+															.twoSided = a.twoSided});
 			return e.Pack();
 		}));
 }
 
 void RegisterPhysicsCommands() {
-	RegisterCmd(
-		"GetPhysicsPositions",
-		MakeCmd<GetBufferArgs>([](ZHLN::Engine* engine, const GetBufferArgs& a) -> uint64_t {
-			const auto& world = engine->GetPhysicsContext().GetWorld();
-			*a.outView = ZHLN::ViewComposer::Build(&world, world.positions,
-												   (sizeof(JPH::Real) == 8) ? "d" : "f",
-												   world.count.load(), 4);
-			return 0;
-		}));
+	RegisterCmd("GetPhysicsPositions",
+				MakeCmd<GetBufferArgs>([](ZHLN::Engine* engine, const GetBufferArgs& a) -> uint64_t {
+					const auto& world = engine->GetPhysicsContext().GetWorld();
+					*a.outView = ZHLN::ViewComposer::Build(&world, world.positions,
+														   (sizeof(JPH::Real) == 8) ? "d" : "f",
+														   world.count.load(), 4);
+					return 0;
+				}));
 
-	RegisterCmd(
-		"GetPhysicsLinearVelocities",
-		MakeCmd<GetBufferArgs>([](ZHLN::Engine* engine, const GetBufferArgs& a) -> uint64_t {
-			const auto& world = engine->GetPhysicsContext().GetWorld();
-			*a.outView = ZHLN::ViewComposer::Build(&world, world.linearVelocities, "f",
-												   world.count.load(), 4);
-			return 0;
-		}));
+	RegisterCmd("GetPhysicsLinearVelocities",
+				MakeCmd<GetBufferArgs>([](ZHLN::Engine* engine, const GetBufferArgs& a) -> uint64_t {
+					const auto& world = engine->GetPhysicsContext().GetWorld();
+					*a.outView = ZHLN::ViewComposer::Build(&world, world.linearVelocities, "f",
+														   world.count.load(), 4);
+					return 0;
+				}));
 
-	RegisterCmd(
-		"GetPhysicsContactEvents",
-		MakeCmd<GetBufferArgs>([](ZHLN::Engine* engine, const GetBufferArgs& a) -> uint64_t {
-			auto events = ZHLN::Physics::GetContactEvents(engine->GetPhysicsContext());
-			const char* fmt = (sizeof(JPH::Real) == 8) ? "EvtD" : "EvtF";
-			*a.outView = ZHLN::ViewComposer::Build(&engine->GetPhysicsContext().GetWorld(),
-												   events.first, fmt, events.second);
-			return 0;
-		}));
+	RegisterCmd("GetPhysicsContactEvents",
+				MakeCmd<GetBufferArgs>([](ZHLN::Engine* engine, const GetBufferArgs& a) -> uint64_t {
+					auto events = ZHLN::Physics::GetContactEvents(engine->GetPhysicsContext());
+					const char* fmt = (sizeof(JPH::Real) == 8) ? "EvtD" : "EvtF";
+					*a.outView = ZHLN::ViewComposer::Build(&engine->GetPhysicsContext().GetWorld(),
+														   events.first, fmt, events.second);
+					return 0;
+				}));
 
 	RegisterCmd(
 		"SetCharacterVelocity",
@@ -838,13 +837,12 @@ void RegisterAudioCommands() {
 					return 0;
 				}));
 
-	RegisterCmd("DestroySoundInstance",
-				MakeCmd<SoundInstanceArgs>(
-					[](ZHLN::Engine* engine, const SoundInstanceArgs& a) -> uint64_t {
-						engine->GetAudioContext().DestroySoundInstance(
-							reinterpret_cast<void*>(a.handle));
-						return 0;
-					}));
+	RegisterCmd(
+		"DestroySoundInstance",
+		MakeCmd<SoundInstanceArgs>([](ZHLN::Engine* engine, const SoundInstanceArgs& a) -> uint64_t {
+			engine->GetAudioContext().DestroySoundInstance(reinterpret_cast<void*>(a.handle));
+			return 0;
+		}));
 }
 
 void RegisterECSCommands() {
@@ -996,9 +994,8 @@ void RegisterSystemCommands() {
 					ZHLN::Entity charPhys =
 						ZHLN::Physics::CreateCharacter(pc, JPH::RVec3(0.0f, 3.0f, 0.0f));
 					reg.Add(playerEntity, PhysicsComponent{charPhys});
-					reg.Add(playerEntity,
-							PhysicsStateComponent{.currPosition = {0.0f, 3.0f, 0.0f},
-												  .prevPosition = {0.0f, 3.0f, 0.0f}});
+					reg.Add(playerEntity, PhysicsStateComponent{.currPosition = {0.0f, 3.0f, 0.0f},
+																.prevPosition = {0.0f, 3.0f, 0.0f}});
 
 					// 3. Attach Camera Tracking logic to the blank menu camera
 					auto camEnts = reg.GetEntitiesWith<ZHLN::MainCameraTagComponent>();
@@ -1056,46 +1053,45 @@ void RegisterSystemCommands() {
 			return 0;
 		}));
 
-	RegisterCmd(
-		"PlayAnimationTrack",
-		MakeCmd<PlayTrackArgs>([](ZHLN::Engine* engine, const PlayTrackArgs& a) -> uint64_t {
-			auto& reg = engine->GetRegistry();
+	RegisterCmd("PlayAnimationTrack",
+				MakeCmd<PlayTrackArgs>([](ZHLN::Engine* engine, const PlayTrackArgs& a) -> uint64_t {
+					auto& reg = engine->GetRegistry();
 
-			auto entity = ZHLN::Entity::Unpack(a.entityRaw);
-			if (auto* anim = reg.Get<ZHLN::AnimatorComponent>(entity)) {
-				if (anim->gltfData != nullptr) {
-					auto* data = static_cast<cgltf_data*>(anim->gltfData);
-					if (a.trackIndex >= 0 &&
-						a.trackIndex < static_cast<int32_t>(data->animations_count)) {
-						// Manage the crossfading transition state machine
-						if (anim->currentTrackIdx != a.trackIndex) {
-							anim->prevTrackIdx = anim->currentTrackIdx;
-							anim->prevTrackTime = anim->currentTrackTime;
-							anim->prevPlaybackSpeed = anim->currentPlaybackSpeed;
+					auto entity = ZHLN::Entity::Unpack(a.entityRaw);
+					if (auto* anim = reg.Get<ZHLN::AnimatorComponent>(entity)) {
+						if (anim->gltfData != nullptr) {
+							auto* data = static_cast<cgltf_data*>(anim->gltfData);
+							if (a.trackIndex >= 0 &&
+								a.trackIndex < static_cast<int32_t>(data->animations_count)) {
+								// Manage the crossfading transition state machine
+								if (anim->currentTrackIdx != a.trackIndex) {
+									anim->prevTrackIdx = anim->currentTrackIdx;
+									anim->prevTrackTime = anim->currentTrackTime;
+									anim->prevPlaybackSpeed = anim->currentPlaybackSpeed;
 
-							anim->currentTrackIdx = a.trackIndex;
-							anim->currentTrackTime = 0.0f;
-							anim->currentPlaybackSpeed = a.playbackSpeed;
-							anim->currentLoop = (a.loop != 0);
+									anim->currentTrackIdx = a.trackIndex;
+									anim->currentTrackTime = 0.0f;
+									anim->currentPlaybackSpeed = a.playbackSpeed;
+									anim->currentLoop = (a.loop != 0);
 
-							anim->blendFactor = 0.0f;
-							anim->blendDuration = a.blendDuration;
-							anim->isFinished = false;
-						} else {
-							// If targeting the same track, update playback properties
-							anim->currentLoop = (a.loop != 0);
-							anim->currentPlaybackSpeed = a.playbackSpeed;
-							if (anim->isFinished && anim->currentLoop) {
-								anim->isFinished = false;
-								anim->currentTrackTime = 0.0f;
+									anim->blendFactor = 0.0f;
+									anim->blendDuration = a.blendDuration;
+									anim->isFinished = false;
+								} else {
+									// If targeting the same track, update playback properties
+									anim->currentLoop = (a.loop != 0);
+									anim->currentPlaybackSpeed = a.playbackSpeed;
+									if (anim->isFinished && anim->currentLoop) {
+										anim->isFinished = false;
+										anim->currentTrackTime = 0.0f;
+									}
+								}
+								return 1;
 							}
 						}
-						return 1;
 					}
-				}
-			}
-			return 0;
-		}));
+					return 0;
+				}));
 }
 
 void RegisterFFICommands() {
