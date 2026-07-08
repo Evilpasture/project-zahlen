@@ -677,7 +677,6 @@ struct RenderContext::Impl {
 
 	bool hasSkinnedThisFrame = false;
 
-	void InitialClearTargets(VkCommandBuffer cmd) noexcept;
 	void BuildTLAS(VkCommandBuffer cmd) noexcept;
 
 	void InitShadowResources();
@@ -698,8 +697,7 @@ struct RenderContext::Impl {
 
 	// Core Vulkan allocation implementation
 	uint32_t CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB);
-	uint32_t CreateTextureCubeInternal(const void* const* faceData, uint32_t width,
-									   uint32_t height);
+	uint32_t CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height);
 
 	auto CreateGPUBuffer(size_t size, const void* data, VkBufferUsageFlags functionalUsage) const
 		-> std::pair<Vk::Buffer, VkDeviceAddress>;

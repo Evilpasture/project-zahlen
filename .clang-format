@@ -13,4 +13,5 @@ ReflowComments: true
 SpacesBeforeTrailingComments: 1
 IndentCaseLabels: true
 ContinuationIndentWidth: 4
-
+PenaltyBreakTemplateDeclaration: 10
+PenaltyExcessCharacter: 50

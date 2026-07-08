@@ -45,6 +45,10 @@
 #include <unistd.h>
 #endif
 
+namespace ZHLN {
+extern std::string_view GetRenderGraphDump() noexcept;
+}
+
 namespace {
 
 auto GetPID() noexcept {
@@ -119,6 +123,7 @@ Options:
   --quiet                  Disable all logging outputs (silent mode)
   --renderdoc <on|off>     Load RenderDoc library at startup (default: off)
   --benchmark              Run the benchmark suite
+  --print-graph            Print the compile-time generated render graph and exit
   --debug-attach           Wait for a program to attach to the running engine process
 
 Environment Variables:
@@ -272,22 +277,27 @@ constexpr std::array Handlers = {
 					   opt.benchmark = true;
 					   return {};
 				   }},
-	CommandHandler{
-		.key = "--debug-attach",
-		.shortKey = "",
-		.action = [](ZHLN::CommandLineOptions&,
-					 std::string_view) -> std::expected<void, ZHLN::EngineError> {
-			std::println(R"(
+	CommandHandler{.key = "--debug-attach",
+				   .shortKey = "",
+				   .action = [](ZHLN::CommandLineOptions&,
+								std::string_view) -> std::expected<void, ZHLN::EngineError> {
+					   std::println(R"(
 Waiting for attachment. PID: {}
 Press ENTER to continue.
 )",
-						 GetPID());
+									GetPID());
 
-			std::cin.get();
-			return {};
-		},
-	}
-
+					   std::cin.get();
+					   return {};
+				   }},
+	CommandHandler{.key = "--print-graph",
+				   .shortKey = "",
+				   .action = [](ZHLN::CommandLineOptions&,
+								std::string_view) -> std::expected<void, ZHLN::EngineError> {
+					   std::println("{}", ZHLN::GetRenderGraphDump());
+					   return std::unexpected(
+						   ZHLN::EngineError{.msg = {}, .code = EXIT_SUCCESS, .silent = true});
+				   }},
 };
 
 } // namespace

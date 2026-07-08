@@ -80,7 +80,7 @@ inline void DrawBindlessBatch(const VkCommandBuffer cmd,
 }
 
 // ============================================================================
-// Immediate Command RAII Wrapper (Staging/Initial Uploads)
+// Immediate Commands
 // ============================================================================
 
 template <QueueType QType, size_t Capacity = 8> class CommandRing {

@@ -148,8 +148,7 @@ void RenderContext::Impl::SortDrawQueue() {
 	ZHLN::Array<SortItem> temp(drawCount);
 
 	for (uint32_t i = 0; i < drawCount; ++i) {
-		items[i] = {.key = SortKey::Pack(drawQueue[i].material, drawQueue[i].posMesh),
-					.payload = i};
+		items[i] = {.key = SortKey::Pack(drawQueue[i].material, drawQueue[i].posMesh), .payload = i};
 	}
 
 	RadixSort64(items.data(), temp.data(), drawCount);
@@ -168,8 +167,6 @@ std::optional<Extent2D> RenderContext::GetFramebufferSize() const {
 	}
 	return size;
 }
-
-void RenderContext::Impl::InitialClearTargets([[maybe_unused]] VkCommandBuffer cmd) noexcept {}
 
 void RenderContext::Impl::DispatchSkinningPasses() {
 	if (!hasSkinnedThisFrame) {
@@ -458,9 +455,8 @@ struct PassFactory {
 						mainRec,
 						SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 									   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>{
-							.sceneColor =
-								Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-									self.sceneColor),
+							.sceneColor = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+								self.sceneColor),
 							.velocity = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
 								self.velocityBuffer),
 							.normRough = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
@@ -473,21 +469,22 @@ struct PassFactory {
 	}
 
 	[[nodiscard]] auto MakeAmbientPass() const noexcept {
-		return Vk::MakePass<"Ambient", Vk::ShaderRead<Res_SceneColor>,
-							Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>,
-							Vk::ColorWrite<Res_Ambient>>([this](auto& ctx) noexcept {
-			self.ambientPass.WriteNext(
-				device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.sceneColor),
-				self.defaultSampler.Get(),
-				Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-					self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
-				Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-					self.normalRoughnessBuffer),
-				self.pointSampler.Get(), self.iblPayload.prefilteredView.Get(),
-				self.iblPayload.brdfLutView.Get(), self.clampSampler.Get(),
-				self.frameUniformBuffers->Handle());
-			self.ambientPass.Execute(ctx.Cmd(), pc);
-		});
+		return Vk::MakePass<"Ambient", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>,
+							Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_Ambient>>(
+			[this](auto& ctx) noexcept {
+				self.ambientPass.WriteNext(
+					device,
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.sceneColor),
+					self.defaultSampler.Get(),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+						self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+						self.normalRoughnessBuffer),
+					self.pointSampler.Get(), self.iblPayload.prefilteredView.Get(),
+					self.iblPayload.brdfLutView.Get(), self.clampSampler.Get(),
+					self.frameUniformBuffers->Handle());
+				self.ambientPass.Execute(ctx.Cmd(), pc);
+			});
 	}
 
 	[[nodiscard]] auto MakeLightingPass() const noexcept {
@@ -534,8 +531,7 @@ struct PassFactory {
 					self.pointSampler.Get(), self.iblPayload.prefilteredView.Get(), GetTLAS(),
 					self.frameUniformBuffers->Handle(), self.iblPayload.brdfLutView.Get(),
 					self.clampSampler.Get(),
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-						self.lightingTarget));
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.lightingTarget));
 				self.reflectionPass.ExecuteVariant(ctx.Cmd(), reflVariant, pc);
 			});
 	}
@@ -579,11 +575,10 @@ struct PassFactory {
 							Vk::ColorWrite<Res_BloomBlur>>([this](auto& ctx) noexcept {
 			Profiler::ScopedGpuProfile<Stages::BloomBlurHPass, FrameProfiler> timer(
 				ctx.Cmd(), fIdx, self.gpuProfiler);
-			self.bloomBlurHPass.WriteNext(
-				device,
-				Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-					self.bloomThresholdTarget),
-				self.defaultSampler.Get());
+			self.bloomBlurHPass.WriteNext(device,
+										  Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+											  self.bloomThresholdTarget),
+										  self.defaultSampler.Get());
 			self.bloomBlurHPass.Execute(
 				ctx.Cmd(), BlurPushConstants{
 							   .horizontal = 1,
@@ -698,12 +693,6 @@ void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const Pas
 	auto graph =
 		BuildFrameGraph<FullBright, Mode>(factory, std::forward<AALambdaT>(aaLambda),
 										  std::forward<GetSwapchainImageT>(getSwapchainImage));
-	if constexpr (false) { // Debug break.
-		if constexpr (!FullBright && Mode == AAMode::TAA) {
-			static_assert(sizeof(decltype(graph)) == 0,
-						  Vk::Debug::GraphVisualizer<decltype(graph)>::Visualize().string_view());
-		}
-	}
 	typename decltype(graph)::Binder binder;
 
 	// Bind common resources
@@ -743,6 +732,21 @@ void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const Pas
 	graph.Execute(cmd, binder);
 }
 } // namespace
+
+consteval std::string_view GetRenderGraphDump() noexcept {
+	auto dummyAA = [](VkCommandBuffer, const auto&) noexcept {};
+	auto dummySwap = []() noexcept -> Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {
+		return {};
+	};
+
+	// Deduce the graph structure via template instantiation without running any code
+	using DummyGraphT = decltype(BuildFrameGraph<false, AAMode::TAA>(std::declval<PassFactory>(),
+																	 dummyAA, dummySwap));
+
+	// Bake the resulting string directly into the executable's read-only memory
+	static constexpr auto viz = Vk::Debug::GraphVisualizer<DummyGraphT>::Visualize();
+	return viz.string_view();
+}
 
 template <bool FullBright>
 void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd) {
@@ -988,8 +992,7 @@ void RenderContext::Impl::ProvokeDeviceLostInternal() const {
 
 namespace Renderer {
 
-void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh,
-		  const DrawParams& params) {
+void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const DrawParams& params) {
 	auto* impl = ctx.GetImpl();
 	if (impl->current_cmd == VK_NULL_HANDLE) {
 		return;
