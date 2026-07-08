@@ -553,8 +553,8 @@ struct PassFactory {
 					self.bloomUpPass[2].Execute(
 						ctx.Cmd(), KawasePushConstants{
 									   .mode = 1,
-									   .rcpWidth = 1.0f / (float)self.bloomDown3.extent.width,
-									   .rcpHeight = 1.0f / (float)self.bloomDown3.extent.height,
+									   .rcpWidth = 1.0f / (float)self.bloomDown2.extent.width,
+									   .rcpHeight = 1.0f / (float)self.bloomDown2.extent.height,
 									   .padding = 0.0f});
 				});
 		} else if constexpr (Index == 1) {
@@ -567,11 +567,11 @@ struct PassFactory {
 						self.defaultSampler.Get(),
 						Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.bloomDown1));
 					self.bloomUpPass[1].Execute(
-						ctx.Cmd(),
-						KawasePushConstants{.mode = 1,
-											.rcpWidth = 1.0f / (float)self.bloomUp2.extent.width,
-											.rcpHeight = 1.0f / (float)self.bloomUp2.extent.height,
-											.padding = 0.0f});
+						ctx.Cmd(), KawasePushConstants{
+									   .mode = 1,
+									   .rcpWidth = 1.0f / (float)self.bloomDown1.extent.width,
+									   .rcpHeight = 1.0f / (float)self.bloomDown1.extent.height,
+									   .padding = 0.0f});
 				});
 		} else {
 			return Vk::MakePass<"BloomUp0", Vk::ShaderRead<Res_BloomUp1>,
@@ -585,10 +585,11 @@ struct PassFactory {
 							self.bloomThresholdTarget));
 					self.bloomUpPass[0].Execute(
 						ctx.Cmd(),
-						KawasePushConstants{.mode = 1,
-											.rcpWidth = 1.0f / (float)self.bloomUp1.extent.width,
-											.rcpHeight = 1.0f / (float)self.bloomUp1.extent.height,
-											.padding = 0.0f});
+						KawasePushConstants{
+							.mode = 1,
+							.rcpWidth = 1.0f / (float)self.bloomThresholdTarget.extent.width,
+							.rcpHeight = 1.0f / (float)self.bloomThresholdTarget.extent.height,
+							.padding = 0.0f});
 				});
 		}
 	}
