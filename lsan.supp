@@ -1,0 +1,6 @@
+leak:libfontconfig
+leak:libgtk-3
+leak:libdecor
+leak:libcairo
+leak:libpango
+leak:libdbus
