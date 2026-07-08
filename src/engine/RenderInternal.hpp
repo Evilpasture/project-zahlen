@@ -703,7 +703,6 @@ struct RenderContext::Impl {
 		-> std::pair<Vk::Buffer, VkDeviceAddress>;
 
 	void SortDrawQueue();
-	ZHLN_FrameResult SubmitFrame();
 	void InitializeSystemTextures();
 
 	// Persistent, reusable memory block to prevent dynamic heap reallocations

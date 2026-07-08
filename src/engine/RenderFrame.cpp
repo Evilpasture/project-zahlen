@@ -213,111 +213,6 @@ void RenderContext::Impl::DispatchSkinningPasses() {
 	BarrierComputeWriteToVertexRead(Vk::CommandBuffer<Vk::QueueType::Graphics>{cmd});
 }
 
-RenderResult RenderContext::BeginFrame() noexcept {
-	if (_impl->stagingContext) {
-		_impl->stagingContext->Wait();
-		_impl->stagingContext.reset();
-	}
-
-	const auto& s = _impl->sync[_impl->frame_index];
-
-	auto wait_res =
-		ZHLN_WaitAndResetFrame(_impl->ctx.Device(), s.in_flight, _impl->pools[_impl->frame_index]);
-	if (wait_res == ZHLN_FrameResult_DeviceLost) {
-		return std::unexpected(RenderFrameResult::DeviceLost);
-	}
-	_impl->deletionQueue.BeginFrame(_impl->frame_index);
-	_impl->activeQueueGuard.emplace(_impl->deletionQueue);
-
-	float timestampPeriod = _impl->ctx.PhysicalInfo().properties.properties.limits.timestampPeriod;
-	_impl->gpuProfiler.RetrieveResults(
-		_impl->frame_index, timestampPeriod,
-		[](std::string_view name, float durationMS) { CPUProfiler::Record(name, durationMS); });
-	_impl->gpuProfiler.Reset(_impl->frame_index);
-
-	for (auto& worker : _impl->workerCmds) {
-		worker.cmdCount[_impl->frame_index].store(0, std::memory_order_relaxed);
-		worker.pools[_impl->frame_index].Reset();
-	}
-
-	if (_impl->resized) {
-		auto fbSize = GetFramebufferSize();
-		if (!fbSize.has_value()) {
-			return std::unexpected(RenderFrameResult::OutOfDate);
-		}
-
-		VkExtent2D ext = {.width = fbSize->width, .height = fbSize->height};
-
-		if (!_impl->RecreateTargets(ext)) {
-			return std::unexpected(RenderFrameResult::Error);
-		}
-
-		_impl->needsInitialClear = true;
-		_impl->resized = false;
-	}
-
-	ZHLN_AcquireDesc acq = {.swapchain = _impl->presentation.swapchain.Get().handle,
-							.image_available = s.image_available,
-							.timeout_ns = UINT64_MAX};
-
-	auto acq_res = ZHLN_AcquireImage(_impl->ctx.Device(), &acq, &_impl->current_image_index);
-	if (acq_res == ZHLN_FrameResult_OutOfDate || acq_res == ZHLN_FrameResult_Suboptimal) {
-		_impl->resized = true;
-		_impl->current_cmd = VK_NULL_HANDLE;
-		return std::unexpected(MapFrameResult(acq_res));
-	}
-	if (acq_res == ZHLN_FrameResult_DeviceLost) {
-		_impl->current_cmd = VK_NULL_HANDLE;
-		return std::unexpected(RenderFrameResult::DeviceLost);
-	}
-	if (acq_res == ZHLN_FrameResult_Error) {
-		_impl->current_cmd = VK_NULL_HANDLE;
-		return std::unexpected(RenderFrameResult::Error);
-	}
-
-	_impl->current_cmd = _impl->pools.Cmd(_impl->frame_index);
-	ZHLN_BeginCommandBuffer(_impl->current_cmd);
-
-	_impl->pendingAcquires.Drain(_impl->current_cmd);
-
-	return {};
-}
-
-ZHLN_FrameResult RenderContext::Impl::SubmitFrame() {
-	const ZHLN_FrameSync& s = sync[frame_index];
-	ZHLN_FrameSubmitDesc submitDesc = {.graphicsQueue = ctx.GraphicsQueue(),
-									   .presentQueue = ctx.PresentQueue(),
-									   .cmd = current_cmd,
-									   .imageAvailable = s.image_available,
-									   .renderFinished =
-										   presentation.presentSemaphores[current_image_index],
-									   .inFlight = s.in_flight,
-									   .swapchain = presentation.swapchain.Get().handle,
-									   .imageIndex = current_image_index,
-									   .stagingSemaphore = transferRingBuffer.GetSemaphore(),
-									   .stagingWaitValue = transferRingBuffer.GetCurrentValue()};
-
-	ZHLN_FrameResult res = Vk::SubmitAndPresent(submitDesc);
-	if (res != ZHLN_FrameResult_Ok) {
-		resized = true;
-	}
-
-	StaticResourceManager(
-		&accumBuffers, &taaPass, &fxaaPass, &smaaEdgePass, &smaaWeightPass, &smaaBlendPass,
-		&ambientPass, &lightingPass, &reflectionPass, &blitPass, &bloomThresholdPass,
-		&bloomBlurHPass, &bloomBlurVPass, &frameUniformBuffers, &lightStorageBuffers,
-		&instanceDataBuffers, &indirectCommandsBuffers, &shadowIndirectBuffers, &jointBuffers,
-		&bindlessSets, &tlas, &tlasBuffer, &tlasScratchBuffer, &clusterGridBuffers,
-		&lightIndexListBuffers, &globalCounterBuffers, &clusterCullingSets, &parallelRecorder,
-		&tlasInstanceBuffers, &tlasStagingBuffers, &debugMeshHandles, &cullingSets)
-		.FlipAll();
-
-	frame_index = (frame_index + 1) % 2;
-	current_cmd = VK_NULL_HANDLE;
-	hasSkinnedThisFrame = false;
-	return res;
-}
-
 void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 	if (!rtCtx.Valid() || drawQueue.empty()) {
 		return;
@@ -916,6 +811,42 @@ template void
 template void
 	RenderContext::Impl::RecordSceneFrame<false>(Vk::CommandBuffer<Vk::QueueType::Graphics>);
 
+RenderResult RenderContext::BeginFrame() noexcept {
+	if (_impl->stagingContext) {
+		_impl->stagingContext->Wait();
+		_impl->stagingContext.reset();
+	}
+
+	_impl->deletionQueue.BeginFrame(_impl->frame_index);
+	_impl->activeQueueGuard.emplace(_impl->deletionQueue);
+
+	for (auto& worker : _impl->workerCmds) {
+		worker.cmdCount[_impl->frame_index].store(0, std::memory_order_relaxed);
+		worker.pools[_impl->frame_index].Reset();
+	}
+
+	if (_impl->resized) {
+		auto fbSize = GetFramebufferSize();
+		if (!fbSize.has_value()) {
+			return std::unexpected(RenderFrameResult::OutOfDate);
+		}
+
+		VkExtent2D ext = {.width = fbSize->width, .height = fbSize->height};
+
+		if (!_impl->RecreateTargets(ext)) {
+			return std::unexpected(RenderFrameResult::Error);
+		}
+
+		_impl->needsInitialClear = true;
+		_impl->resized = false;
+	}
+
+	// Set a non-null placeholder value to indicate that frame tracking is active
+	_impl->current_cmd = reinterpret_cast<VkCommandBuffer>(1);
+
+	return {};
+}
+
 RenderResult RenderContext::EndFrame() noexcept {
 	struct EndFrameGuard {
 		RenderContext::Impl* impl;
@@ -934,41 +865,78 @@ RenderResult RenderContext::EndFrame() noexcept {
 		return std::unexpected(RenderFrameResult::Error);
 	}
 
-	_impl->DispatchSkinningPasses();
+	auto record_fn = [&](VkCommandBuffer cmd, uint32_t image_index) {
+		_impl->current_cmd = cmd;
+		_impl->current_image_index = image_index;
 
-	VkCommandBuffer cmd = _impl->current_cmd;
+		// Safe Synchronized Query Readback & Reset
+		// At this point, Vk::DrawFrame has already waited for the fence to signal.
+		float timestampPeriod =
+			_impl->ctx.PhysicalInfo().properties.properties.limits.timestampPeriod;
+		_impl->gpuProfiler.RetrieveResults(
+			_impl->frame_index, timestampPeriod,
+			[](std::string_view name, float durationMS) { CPUProfiler::Record(name, durationMS); });
+		_impl->gpuProfiler.Reset(_impl->frame_index);
 
-	if (_impl->drawQueue.size() > kGpuCullingMaxInstances) {
-		_impl->drawQueue.resize(kGpuCullingMaxInstances);
-	}
+		_impl->pendingAcquires.Drain(cmd);
 
-	_impl->SortDrawQueue();
+		_impl->DispatchSkinningPasses();
 
-	auto drawCount = _impl->drawQueue.size();
-	if (drawCount > 0) {
-		auto mapped = _impl->instanceDataBuffers->Map();
-		auto* dst = static_cast<InstanceData*>(mapped.data);
-		for (size_t i = 0; i < drawCount; ++i) {
-			dst[i] = _impl->drawQueue[i].instanceData;
+		if (_impl->drawQueue.size() > kGpuCullingMaxInstances) {
+			_impl->drawQueue.resize(kGpuCullingMaxInstances);
 		}
-	}
-	_impl->BuildTLAS(cmd);
 
-	if (_impl->currentUniforms.fullBright != 0) {
-		_impl->RecordSceneFrame<true>({cmd});
-	} else {
-		_impl->RecordSceneFrame<false>({cmd});
-	}
+		_impl->SortDrawQueue();
 
-	ZHLN_EndCommandBuffer(cmd);
+		auto drawCount = _impl->drawQueue.size();
+		if (drawCount > 0) {
+			auto mapped = _impl->instanceDataBuffers->Map();
+			auto* dst = static_cast<InstanceData*>(mapped.data);
+			for (size_t i = 0; i < drawCount; ++i) {
+				dst[i] = _impl->drawQueue[i].instanceData;
+			}
+		}
+		_impl->BuildTLAS(cmd);
 
-	auto res = _impl->SubmitFrame();
+		if (_impl->currentUniforms.fullBright != 0) {
+			_impl->RecordSceneFrame<true>({cmd});
+		} else {
+			_impl->RecordSceneFrame<false>({cmd});
+		}
+	};
+
+	auto rebuild_fn = [&]() { _impl->resized = true; };
+
+	auto res = Vk::DrawFrame<2>(
+		_impl->ctx, _impl->presentation.swapchain, _impl->sync, _impl->pools, _impl->frame_index,
+		_impl->presentation.presentSemaphores, _impl->transferRingBuffer.GetSemaphore(),
+		_impl->transferRingBuffer.GetCurrentValue(), record_fn, rebuild_fn);
+
 	if (res != ZHLN_FrameResult_Ok) {
+		_impl->drawQueue.clear();
+		_impl->uiDrawQueue.clear();
+		_impl->current_cmd = VK_NULL_HANDLE;
+		_impl->hasSkinnedThisFrame = false;
 		return std::unexpected(MapFrameResult(res));
 	}
 
+	StaticResourceManager(
+		&_impl->accumBuffers, &_impl->taaPass, &_impl->fxaaPass, &_impl->smaaEdgePass,
+		&_impl->smaaWeightPass, &_impl->smaaBlendPass, &_impl->ambientPass, &_impl->lightingPass,
+		&_impl->reflectionPass, &_impl->blitPass, &_impl->bloomThresholdPass,
+		&_impl->bloomBlurHPass, &_impl->bloomBlurVPass, &_impl->frameUniformBuffers,
+		&_impl->lightStorageBuffers, &_impl->instanceDataBuffers, &_impl->indirectCommandsBuffers,
+		&_impl->shadowIndirectBuffers, &_impl->jointBuffers, &_impl->bindlessSets, &_impl->tlas,
+		&_impl->tlasBuffer, &_impl->tlasScratchBuffer, &_impl->clusterGridBuffers,
+		&_impl->lightIndexListBuffers, &_impl->globalCounterBuffers, &_impl->clusterCullingSets,
+		&_impl->parallelRecorder, &_impl->tlasInstanceBuffers, &_impl->tlasStagingBuffers,
+		&_impl->debugMeshHandles, &_impl->cullingSets)
+		.FlipAll();
+
 	_impl->drawQueue.clear();
 	_impl->uiDrawQueue.clear();
+	_impl->current_cmd = VK_NULL_HANDLE;
+	_impl->hasSkinnedThisFrame = false;
 
 	return {};
 }
