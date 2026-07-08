@@ -75,7 +75,7 @@ template <typename... Resources> class StaticResourceManager {
 	StaticResourceManager& operator=(const StaticResourceManager&) = delete;
 	StaticResourceManager& operator=(StaticResourceManager&&) = delete;
 
-	void FlipAll() & = delete; // because i'm dumb and i want the compiler to protect me
+	void FlipAll() & = delete;
 
 	void FlipAll() && noexcept {
 		std::apply(
@@ -202,8 +202,7 @@ class DeletionQueue;
 extern thread_local DeletionQueue* t_activeDeletionQueue;
 
 // Overloaded C-helpers to decouple VmaHandle from DeletionQueue definition
-void DeferVmaDestruction(VmaAllocator allocator, VkBuffer buffer,
-						 VmaAllocation allocation) noexcept;
+void DeferVmaDestruction(VmaAllocator allocator, VkBuffer buffer, VmaAllocation allocation) noexcept;
 void DeferVmaDestruction(VmaAllocator allocator, VkImage image, VmaAllocation allocation) noexcept;
 
 inline void VmaUnmapDeleter(VmaAllocator allocator, [[maybe_unused]] void* ptr,
@@ -753,8 +752,7 @@ class RayTracingContext {
 					  ZHLN_AccelerationStructureSizes& outSizes) const noexcept;
 
 	[[nodiscard]] VkAccelerationStructureKHR
-	CreateAS(VkBuffer buffer, VkDeviceSize size,
-			 ZHLN_AccelerationStructureType type) const noexcept;
+	CreateAS(VkBuffer buffer, VkDeviceSize size, ZHLN_AccelerationStructureType type) const noexcept;
 	void DestroyAS(VkAccelerationStructureKHR as) const noexcept;
 	[[nodiscard]] VkDeviceAddress GetASAddress(VkAccelerationStructureKHR as) const noexcept;
 

@@ -562,9 +562,4 @@ if(COMPILER_HAS_REFLECTION)
     target_compile_options(zahlen_render PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
     target_compile_options(zahlen_engine PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
     target_compile_options(zahlen PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
-
-    # Propagate the preprocessor definition safely
-    target_compile_definitions(zahlen_render PRIVATE __cpp_reflection=202600L)
-    target_compile_definitions(zahlen_engine PRIVATE __cpp_reflection=202600L)
-    target_compile_definitions(zahlen PRIVATE __cpp_reflection=202600L)
 endif()

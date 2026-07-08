@@ -89,7 +89,7 @@ template <typename... Args> [[nodiscard]] consteval auto MakeAttributeArray(Args
 	return attrs;
 }
 
-#if defined(__cpp_reflection) && !defined(__clang__)
+#if defined(__cpp_impl_reflection) && !defined(__clang__)
 // ============================================================================
 // C++26 Automatic Layout Reflection Engine (Primary Template)
 // ============================================================================
@@ -190,7 +190,7 @@ concept IsVertex = requires {
 	ZHLN_EXPAND(ZHLN_GET_MACRO(__VA_ARGS__, ZHLN_MAP_8, ZHLN_MAP_7, ZHLN_MAP_6, ZHLN_MAP_5,        \
 							   ZHLN_MAP_4, ZHLN_MAP_3, ZHLN_MAP_2, ZHLN_MAP_1)(Type, __VA_ARGS__))
 
-#ifdef __cpp_reflection
+#ifdef __cpp_impl_reflection
 #define ZHLN_REFLECT_VERTEX(Type, ...)                                                             \
 	static_assert(::ZHLN::Vk::IsVertex<Type>,                                                      \
 				  "Type '" #Type "' failed automatic C++26 vertex layout validation.");
