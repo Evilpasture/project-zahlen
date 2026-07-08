@@ -123,8 +123,16 @@ using Res_PostProcess =
 	Vk::GraphImage<"PostProcess", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_BloomThresh =
 	Vk::GraphImage<"BloomThresh", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_BloomBlur =
-	Vk::GraphImage<"BloomBlur", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_BloomDown1 =
+	Vk::GraphImage<"BloomDown1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_BloomDown2 =
+	Vk::GraphImage<"BloomDown2", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_BloomDown3 =
+	Vk::GraphImage<"BloomDown3", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_BloomUp2 =
+	Vk::GraphImage<"BloomUp2", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_BloomUp1 =
+	Vk::GraphImage<"BloomUp1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_BloomFinal =
 	Vk::GraphImage<"BloomFinal", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_AccumCurr =
@@ -145,20 +153,28 @@ using Res_Swapchain =
 
 void RenderContext::Impl::SortDrawQueue() {
 	auto drawCount = static_cast<uint32_t>(drawQueue.size());
-	ZHLN::Array<SortItem> items(drawCount);
-	ZHLN::Array<SortItem> temp(drawCount);
-
-	for (uint32_t i = 0; i < drawCount; ++i) {
-		items[i] = {.key = SortKey::Pack(drawQueue[i].material, drawQueue[i].posMesh), .payload = i};
+	if (drawCount == 0) {
+		return;
 	}
 
-	RadixSort64(items.data(), temp.data(), drawCount);
+	sortItemsScratch.resize(drawCount);
+	sortTempScratch.resize(drawCount);
+	sortDrawQueueScratch.resize(drawCount);
 
-	ZHLN::Array<DrawCommand> sortedDrawQueue(drawCount);
 	for (uint32_t i = 0; i < drawCount; ++i) {
-		sortedDrawQueue[i] = drawQueue[items[i].payload];
+		sortItemsScratch[i] = {.key = SortKey::Pack(drawQueue[i].material, drawQueue[i].posMesh),
+							   .payload = i};
 	}
-	drawQueue = std::move(sortedDrawQueue);
+
+	RadixSort64(sortItemsScratch.data(), sortTempScratch.data(), drawCount);
+
+	for (uint32_t i = 0; i < drawCount; ++i) {
+		sortDrawQueueScratch[i] = drawQueue[sortItemsScratch[i].payload];
+	}
+
+	// Copy elements back. Because drawQueue already has the capacity, this performs a raw data copy
+	// with zero allocations.
+	drawQueue = sortDrawQueueScratch;
 }
 
 std::optional<Extent2D> RenderContext::GetFramebufferSize() const {
@@ -469,44 +485,112 @@ struct PassFactory {
 			});
 	}
 
-	[[nodiscard]] auto MakeBloomBlurHPass() const noexcept {
-		struct BlurPushConstants {
-			int horizontal;
-			float texelSize;
-		};
-		return Vk::MakePass<"BloomBlurH", Vk::ShaderRead<Res_BloomThresh>,
-							Vk::ColorWrite<Res_BloomBlur>>([this](auto& ctx) noexcept {
-			Profiler::ScopedGpuProfile<Stages::BloomBlurHPass, FrameProfiler> timer(
-				ctx.Cmd(), fIdx, self.gpuProfiler);
-			self.bloomBlurHPass.WriteNext(device,
-										  Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-											  self.bloomThresholdTarget),
-										  self.defaultSampler.Get());
-			self.bloomBlurHPass.Execute(
-				ctx.Cmd(), BlurPushConstants{
-							   .horizontal = 1,
-							   .texelSize = 1.0f / (float)self.bloomThresholdTarget.extent.width});
-		});
+	struct KawasePushConstants {
+		int mode;
+		float rcpWidth;
+		float rcpHeight;
+		float padding;
+	};
+
+	template <size_t Index> [[nodiscard]] auto MakeBloomDownPass() const noexcept {
+		if constexpr (Index == 0) {
+			return Vk::MakePass<"BloomDown0", Vk::ShaderRead<Res_BloomThresh>,
+								Vk::ColorWrite<Res_BloomDown1>>([this](auto& ctx) noexcept {
+				self.bloomDownPass[0].WriteNext(
+					device,
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+						self.bloomThresholdTarget),
+					self.defaultSampler.Get(), Vk::SkipWrite{});
+				self.bloomDownPass[0].Execute(
+					ctx.Cmd(),
+					KawasePushConstants{
+						.mode = 0,
+						.rcpWidth = 1.0f / (float)self.bloomThresholdTarget.extent.width,
+						.rcpHeight = 1.0f / (float)self.bloomThresholdTarget.extent.height,
+						.padding = 0.0f});
+			});
+		} else if constexpr (Index == 1) {
+			return Vk::MakePass<"BloomDown1", Vk::ShaderRead<Res_BloomDown1>,
+								Vk::ColorWrite<Res_BloomDown2>>([this](auto& ctx) noexcept {
+				self.bloomDownPass[1].WriteNext(
+					device,
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.bloomDown1),
+					self.defaultSampler.Get(), Vk::SkipWrite{});
+				self.bloomDownPass[1].Execute(
+					ctx.Cmd(),
+					KawasePushConstants{.mode = 0,
+										.rcpWidth = 1.0f / (float)self.bloomDown1.extent.width,
+										.rcpHeight = 1.0f / (float)self.bloomDown1.extent.height,
+										.padding = 0.0f});
+			});
+		} else {
+			return Vk::MakePass<"BloomDown2", Vk::ShaderRead<Res_BloomDown2>,
+								Vk::ColorWrite<Res_BloomDown3>>([this](auto& ctx) noexcept {
+				self.bloomDownPass[2].WriteNext(
+					device,
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.bloomDown2),
+					self.defaultSampler.Get(), Vk::SkipWrite{});
+				self.bloomDownPass[2].Execute(
+					ctx.Cmd(),
+					KawasePushConstants{.mode = 0,
+										.rcpWidth = 1.0f / (float)self.bloomDown2.extent.width,
+										.rcpHeight = 1.0f / (float)self.bloomDown2.extent.height,
+										.padding = 0.0f});
+			});
+		}
 	}
 
-	[[nodiscard]] auto MakeBloomBlurVPass() const noexcept {
-		struct BlurPushConstants {
-			int horizontal;
-			float texelSize;
-		};
-		return Vk::MakePass<"BloomBlurV", Vk::ShaderRead<Res_BloomBlur>,
-							Vk::ColorWrite<Res_BloomFinal>>([this](auto& ctx) noexcept {
-			Profiler::ScopedGpuProfile<Stages::BloomBlurVPass, FrameProfiler> timer(
-				ctx.Cmd(), fIdx, self.gpuProfiler);
-			self.bloomBlurVPass.WriteNext(
-				device,
-				Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.bloomBlurTarget),
-				self.defaultSampler.Get());
-			self.bloomBlurVPass.Execute(
-				ctx.Cmd(),
-				BlurPushConstants{.horizontal = 0,
-								  .texelSize = 1.0f / (float)self.bloomBlurTarget.extent.height});
-		});
+	template <size_t Index> [[nodiscard]] auto MakeBloomUpPass() const noexcept {
+		if constexpr (Index == 2) {
+			return Vk::MakePass<"BloomUp2", Vk::ShaderRead<Res_BloomDown3>,
+								Vk::ShaderRead<Res_BloomDown2>, Vk::ColorWrite<Res_BloomUp2>>(
+				[this](auto& ctx) noexcept {
+					self.bloomUpPass[2].WriteNext(
+						device,
+						Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.bloomDown3),
+						self.defaultSampler.Get(),
+						Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.bloomDown2));
+					self.bloomUpPass[2].Execute(
+						ctx.Cmd(), KawasePushConstants{
+									   .mode = 1,
+									   .rcpWidth = 1.0f / (float)self.bloomDown3.extent.width,
+									   .rcpHeight = 1.0f / (float)self.bloomDown3.extent.height,
+									   .padding = 0.0f});
+				});
+		} else if constexpr (Index == 1) {
+			return Vk::MakePass<"BloomUp1", Vk::ShaderRead<Res_BloomUp2>,
+								Vk::ShaderRead<Res_BloomDown1>, Vk::ColorWrite<Res_BloomUp1>>(
+				[this](auto& ctx) noexcept {
+					self.bloomUpPass[1].WriteNext(
+						device,
+						Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.bloomUp2),
+						self.defaultSampler.Get(),
+						Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.bloomDown1));
+					self.bloomUpPass[1].Execute(
+						ctx.Cmd(),
+						KawasePushConstants{.mode = 1,
+											.rcpWidth = 1.0f / (float)self.bloomUp2.extent.width,
+											.rcpHeight = 1.0f / (float)self.bloomUp2.extent.height,
+											.padding = 0.0f});
+				});
+		} else {
+			return Vk::MakePass<"BloomUp0", Vk::ShaderRead<Res_BloomUp1>,
+								Vk::ShaderRead<Res_BloomThresh>, Vk::ColorWrite<Res_BloomFinal>>(
+				[this](auto& ctx) noexcept {
+					self.bloomUpPass[0].WriteNext(
+						device,
+						Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.bloomUp1),
+						self.defaultSampler.Get(),
+						Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+							self.bloomThresholdTarget));
+					self.bloomUpPass[0].Execute(
+						ctx.Cmd(),
+						KawasePushConstants{.mode = 1,
+											.rcpWidth = 1.0f / (float)self.bloomUp1.extent.width,
+											.rcpHeight = 1.0f / (float)self.bloomUp1.extent.height,
+											.padding = 0.0f});
+				});
+		}
 	}
 
 	template <bool FullBright, AAMode Mode, typename AALambdaT>
@@ -570,9 +654,14 @@ auto BuildFrameGraph(const PassFactory& factory, AALambdaT&& aaLambda,
 		}
 	}();
 
-	// Sequence the individual bloom sub-passes
+	// Sequence the multi-scale Dual Kawase Downsample / Upsample chain
 	auto bloomPasses = std::tuple{factory.template MakeBloomThresholdPass<FullBright>(),
-								  factory.MakeBloomBlurHPass(), factory.MakeBloomBlurVPass()};
+								  factory.template MakeBloomDownPass<0>(),
+								  factory.template MakeBloomDownPass<1>(),
+								  factory.template MakeBloomDownPass<2>(),
+								  factory.template MakeBloomUpPass<2>(),
+								  factory.template MakeBloomUpPass<1>(),
+								  factory.template MakeBloomUpPass<0>()};
 
 	auto tailPasses = [&] {
 		if constexpr (Mode != AAMode::None) {
@@ -605,14 +694,19 @@ void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const Pas
 	auto normRoughRef = MakeRef<Res_NormRough>(self.normalRoughnessBuffer);
 	auto depthRef = MakeRef<Res_Depth>(self.presentation.depthTarget);
 	auto bloomThreshRef = MakeRef<Res_BloomThresh>(self.bloomThresholdTarget);
-	auto bloomBlurRef = MakeRef<Res_BloomBlur>(self.bloomBlurTarget);
+	auto bloomDown1Ref = MakeRef<Res_BloomDown1>(self.bloomDown1);
+	auto bloomDown2Ref = MakeRef<Res_BloomDown2>(self.bloomDown2);
+	auto bloomDown3Ref = MakeRef<Res_BloomDown3>(self.bloomDown3);
+	auto bloomUp2Ref = MakeRef<Res_BloomUp2>(self.bloomUp2);
+	auto bloomUp1Ref = MakeRef<Res_BloomUp1>(self.bloomUp1);
 	auto bloomFinalRef = MakeRef<Res_BloomFinal>(self.bloomFinalTarget);
 	auto swapchainRef = Vk::MakeRef<Res_Swapchain>(
 		self.presentation.swapchain.Get().images[self.current_image_index],
 		self.presentation.swapchain.Get().views[self.current_image_index], self.sceneColor.extent);
 
 	AutoBind(binder, sceneColorRef, velocityRef, normRoughRef, depthRef, bloomThreshRef,
-			 bloomBlurRef, bloomFinalRef, swapchainRef);
+			 bloomDown1Ref, bloomDown2Ref, bloomDown3Ref, bloomUp2Ref, bloomUp1Ref, bloomFinalRef,
+			 swapchainRef);
 
 	if constexpr (Mode != AAMode::None) {
 		auto accumCurrRef = MakeRef<Res_AccumCurr>(self.accumBuffers.Current());
@@ -866,91 +960,99 @@ RenderResult RenderContext::EndFrame() noexcept {
 
 	using enum RenderFrameResult;
 
-	ZHLN_PROFILE_SCOPE("Render (CPU Record)");
-	if (_impl->current_cmd == VK_NULL_HANDLE) {
-		_impl->drawQueue.clear();
-		_impl->uiDrawQueue.clear();
-		return std::unexpected(RenderFrameResult::Error);
-	}
+	ZHLN_FrameResult res = ZHLN_FrameResult_Ok;
 
-	auto res = Vk::DrawFrame<2, false>(
-		{.ctx = _impl->ctx,
-		 .swapchain = _impl->presentation.swapchain,
-		 .sync = _impl->sync,
-		 .pools = _impl->pools,
-		 .presentSemaphores = _impl->presentation.presentSemaphores,
-		 .stagingSemaphore = _impl->transferRingBuffer.GetSemaphore(),
-		 .stagingWaitValue = _impl->transferRingBuffer.GetCurrentValue()},
-		_impl->frame_index,
-		[this](VkCommandBuffer cmd, uint32_t image_index) {
-			_impl->current_cmd = cmd;
-			_impl->current_image_index = image_index;
+	// 1. Isolate the active CPU recording work in an inner block to exclude GPU/VSync blocking times
+	{
+		ZHLN_PROFILE_SCOPE("Render (CPU Record)");
+		if (_impl->current_cmd == VK_NULL_HANDLE) {
+			_impl->drawQueue.clear();
+			_impl->uiDrawQueue.clear();
+			return std::unexpected(RenderFrameResult::Error);
+		}
 
-			// Safe Synchronized Query Readback & Reset
-			float timestampPeriod =
-				_impl->ctx.PhysicalInfo().properties.properties.limits.timestampPeriod;
-			_impl->gpuProfiler.RetrieveResults(_impl->frame_index, timestampPeriod,
-											   [](std::string_view name, float durationMS) {
-												   CPUProfiler::Record(name, durationMS);
-											   });
-			_impl->gpuProfiler.Reset(_impl->frame_index);
+		res = Vk::DrawFrame<2, false>(
+			{.ctx = _impl->ctx,
+			 .swapchain = _impl->presentation.swapchain,
+			 .sync = _impl->sync,
+			 .pools = _impl->pools,
+			 .presentSemaphores = _impl->presentation.presentSemaphores,
+			 .stagingSemaphore = _impl->transferRingBuffer.GetSemaphore(),
+			 .stagingWaitValue = _impl->transferRingBuffer.GetCurrentValue()},
+			_impl->frame_index,
+			[this](VkCommandBuffer cmd, uint32_t image_index) {
+				_impl->current_cmd = cmd;
+				_impl->current_image_index = image_index;
 
-			_impl->pendingAcquires.Drain(cmd);
+				// Safe Synchronized Query Readback & Reset
+				float timestampPeriod =
+					_impl->ctx.PhysicalInfo().properties.properties.limits.timestampPeriod;
+				_impl->gpuProfiler.RetrieveResults(_impl->frame_index, timestampPeriod,
+												   [](std::string_view name, float durationMS) {
+													   CPUProfiler::Record(name, durationMS);
+												   });
+				_impl->gpuProfiler.Reset(_impl->frame_index);
 
-			_impl->DispatchSkinningPasses();
+				_impl->pendingAcquires.Drain(cmd);
 
-			if (_impl->drawQueue.size() > kGpuCullingMaxInstances) {
-				_impl->drawQueue.resize(kGpuCullingMaxInstances);
-			}
+				_impl->DispatchSkinningPasses();
 
-			_impl->SortDrawQueue();
-
-			auto drawCount = _impl->drawQueue.size();
-			if (drawCount > 0) {
-				auto mapped = _impl->instanceDataBuffers->Map();
-				auto* dst = static_cast<InstanceData*>(mapped.data);
-				for (size_t i = 0; i < drawCount; ++i) {
-					dst[i] = _impl->drawQueue[i].instanceData;
+				if (_impl->drawQueue.size() > kGpuCullingMaxInstances) {
+					_impl->drawQueue.resize(kGpuCullingMaxInstances);
 				}
-			}
-			_impl->BuildTLAS(cmd);
 
-			if (_impl->currentUniforms.fullBright != 0) {
-				_impl->RecordSceneFrame<true>({cmd});
-			} else {
-				_impl->RecordSceneFrame<false>({cmd});
-			}
-		},
-		[this]() { _impl->resized = true; });
+				_impl->SortDrawQueue();
 
-	if (res != ZHLN_FrameResult_Ok && res != ZHLN_FrameResult_Suboptimal) {
+				auto drawCount = _impl->drawQueue.size();
+				if (drawCount > 0) {
+					auto mapped = _impl->instanceDataBuffers->Map();
+					auto* dst = static_cast<InstanceData*>(mapped.data);
+					for (size_t i = 0; i < drawCount; ++i) {
+						dst[i] = _impl->drawQueue[i].instanceData;
+					}
+				}
+				_impl->BuildTLAS(cmd);
+
+				if (_impl->currentUniforms.fullBright != 0) {
+					_impl->RecordSceneFrame<true>({cmd});
+				} else {
+					_impl->RecordSceneFrame<false>({cmd});
+				}
+			},
+			[this]() { _impl->resized = true; });
+
+		if (res != ZHLN_FrameResult_Ok && res != ZHLN_FrameResult_Suboptimal) {
+			_impl->drawQueue.clear();
+			_impl->uiDrawQueue.clear();
+			_impl->current_cmd = VK_NULL_HANDLE;
+			_impl->hasSkinnedThisFrame = false;
+			return std::unexpected(MapFrameResult(res));
+		}
+
+		// Flip double-buffered resources to prepare for the next frame
+		StaticResourceManager(
+			&_impl->accumBuffers, &_impl->taaPass, &_impl->fxaaPass, &_impl->smaaEdgePass,
+			&_impl->smaaWeightPass, &_impl->smaaBlendPass, &_impl->ambientPass,
+			&_impl->lightingPass, &_impl->reflectionPass, &_impl->blitPass,
+			&_impl->bloomThresholdPass, _impl->bloomDownPass.data(), &_impl->bloomDownPass[1],
+			&_impl->bloomDownPass[2], _impl->bloomUpPass.data(), &_impl->bloomUpPass[1],
+			&_impl->bloomUpPass[2], &_impl->frameUniformBuffers, &_impl->lightStorageBuffers,
+			&_impl->instanceDataBuffers, &_impl->indirectCommandsBuffers,
+			&_impl->shadowIndirectBuffers, &_impl->jointBuffers, &_impl->bindlessSets, &_impl->tlas,
+			&_impl->tlasBuffer, &_impl->tlasScratchBuffer, &_impl->clusterGridBuffers,
+			&_impl->lightIndexListBuffers, &_impl->globalCounterBuffers, &_impl->clusterCullingSets,
+			&_impl->parallelRecorder, &_impl->tlasInstanceBuffers, &_impl->tlasStagingBuffers,
+			&_impl->debugMeshHandles, &_impl->cullingSets)
+			.FlipAll();
+
 		_impl->drawQueue.clear();
 		_impl->uiDrawQueue.clear();
 		_impl->current_cmd = VK_NULL_HANDLE;
 		_impl->hasSkinnedThisFrame = false;
-		return std::unexpected(MapFrameResult(res));
-	}
+	} // <-- The profile timer is destroyed here, committing only the actual recording work
 
-	// Flip double-buffered resources to prepare for the next frame
-	StaticResourceManager(
-		&_impl->accumBuffers, &_impl->taaPass, &_impl->fxaaPass, &_impl->smaaEdgePass,
-		&_impl->smaaWeightPass, &_impl->smaaBlendPass, &_impl->ambientPass, &_impl->lightingPass,
-		&_impl->reflectionPass, &_impl->blitPass, &_impl->bloomThresholdPass,
-		&_impl->bloomBlurHPass, &_impl->bloomBlurVPass, &_impl->frameUniformBuffers,
-		&_impl->lightStorageBuffers, &_impl->instanceDataBuffers, &_impl->indirectCommandsBuffers,
-		&_impl->shadowIndirectBuffers, &_impl->jointBuffers, &_impl->bindlessSets, &_impl->tlas,
-		&_impl->tlasBuffer, &_impl->tlasScratchBuffer, &_impl->clusterGridBuffers,
-		&_impl->lightIndexListBuffers, &_impl->globalCounterBuffers, &_impl->clusterCullingSets,
-		&_impl->parallelRecorder, &_impl->tlasInstanceBuffers, &_impl->tlasStagingBuffers,
-		&_impl->debugMeshHandles, &_impl->cullingSets)
-		.FlipAll();
-
-	_impl->drawQueue.clear();
-	_impl->uiDrawQueue.clear();
-	_impl->current_cmd = VK_NULL_HANDLE;
-	_impl->hasSkinnedThisFrame = false;
-
-	VkResult wait_res = Vk::SyncFrameBoundary(_impl->ctx, _impl->sync, _impl->frame_index);
+	// 2. Perform the blocking GPU synchronization outside of the CPU Record timer
+	auto wait_res = Vk::SyncFrameBoundary(_impl->ctx, _impl->sync, _impl->frame_index);
 	if (wait_res == VK_ERROR_DEVICE_LOST) {
 		return std::unexpected(DeviceLost);
 	}

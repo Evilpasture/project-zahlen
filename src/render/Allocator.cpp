@@ -109,15 +109,21 @@ auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usag
 											.queueFamilyIndexCount = 0,
 											.pQueueFamilyIndices = nullptr};
 
-	const VmaAllocationCreateInfo alloc_info = {.flags = 0,
-												.usage = mem_usage,
-												.requiredFlags = 0,
-												.preferredFlags = 0,
-												.memoryTypeBits = 0,
-												.pool = nullptr,
-												.pUserData = nullptr,
-												.priority = 0.0F,
-												.minAlignment = 0};
+	VmaAllocationCreateInfo alloc_info = {.flags = 0,
+										  .usage = mem_usage,
+										  .requiredFlags = 0,
+										  .preferredFlags = 0,
+										  .memoryTypeBits = 0,
+										  .pool = nullptr,
+										  .pUserData = nullptr,
+										  .priority = 0.0F,
+										  .minAlignment = 0};
+
+	// Automatically request persistent mapping for host-visible memory types
+	if (mem_usage == VMA_MEMORY_USAGE_CPU_ONLY || mem_usage == VMA_MEMORY_USAGE_CPU_TO_GPU ||
+		mem_usage == VMA_MEMORY_USAGE_GPU_TO_CPU) {
+		alloc_info.flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT;
+	}
 
 	if (vmaCreateBuffer(allocator, &buffer_info, &alloc_info, &buffer, &alloc, &info) !=
 		VK_SUCCESS) {
@@ -145,6 +151,10 @@ auto Buffer::MappedRegion::operator=(MappedRegion&& other) noexcept -> MappedReg
 }
 
 auto Buffer::Map() noexcept -> MappedRegion {
+	// If the buffer is already persistently mapped, bypass expensive vmaMapMemory system calls
+	if (_info.pMappedData != nullptr) {
+		return {nullptr, nullptr, _info.pMappedData};
+	}
 	void* ptr = nullptr;
 	vmaMapMemory(_handle.Allocator(), _handle.Allocation(), &ptr);
 	return {_handle.Allocator(), _handle.Allocation(), ptr};

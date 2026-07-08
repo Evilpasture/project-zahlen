@@ -6,6 +6,7 @@
 #include "Rendering.hpp"
 #include "detail/Array.hpp"
 #include "detail/ControlFlow.hpp"
+#include "detail/RadixSort.hpp"
 #include "engine/FileWatcher.hpp"
 #include "engine/Resources.hpp"
 #include "threading/Mutex.hpp"
@@ -279,6 +280,12 @@ using ReflectionLayout =
 
 using BakeLayout = Vk::DescriptorLayout<Vk::StorageImageSlot<0>>;
 
+using KawaseLayout =
+	Vk::DescriptorLayout<Vk::SampledImageSlot<0>, // texInput (current source)
+						 Vk::SamplerSlot<1>,	  // sampler
+						 Vk::SampledImageSlot<2>  // texLow (downsampled source for combine)
+						 >;
+
 namespace Stages {
 struct ShadowPass {
 	static constexpr std::string_view name = "[GPU] Shadow Map";
@@ -432,9 +439,6 @@ struct RenderContext::Impl {
 	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> lightingTarget;
 	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> postProcessTarget;
 	DoubleBuffered<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumBuffers;
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomThresholdTarget;
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomBlurTarget;
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomFinalTarget;
 
 	Vk::PostProcessPass<TAALayout> taaPass;
 	Vk::PostProcessPass<FXAALayout> fxaaPass;
@@ -450,8 +454,17 @@ struct RenderContext::Impl {
 	Vk::PostProcessPass<ReflectionLayout> reflectionPass;
 	Vk::PostProcessPass<BlitLayout> blitPass;
 	Vk::PostProcessPass<BloomThresholdLayout> bloomThresholdPass;
-	Vk::PostProcessPass<BlurLayout> bloomBlurHPass;
-	Vk::PostProcessPass<BlurLayout> bloomBlurVPass;
+	std::array<Vk::PostProcessPass<KawaseLayout>, 3> bloomDownPass;
+	std::array<Vk::PostProcessPass<KawaseLayout>, 3> bloomUpPass;
+
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomThresholdTarget;
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomDown1;
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomDown2;
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomDown3;
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomUp2;
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomUp1;
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomFinalTarget;
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomBlurTarget;
 
 	Vk::RenderTarget<VK_FORMAT_R8G8_UNORM> smaaEdgeTarget;
 	Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM> smaaWeightTarget;
@@ -707,6 +720,9 @@ struct RenderContext::Impl {
 
 	// Persistent, reusable memory block to prevent dynamic heap reallocations
 	ZHLN::Array<VkAccelerationStructureInstanceKHR> tlasInstancesScratch;
+	ZHLN::Array<SortItem> sortItemsScratch;
+	ZHLN::Array<SortItem> sortTempScratch;
+	ZHLN::Array<DrawCommand> sortDrawQueueScratch;
 
 	template <bool FullBright>
 	void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd);

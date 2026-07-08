@@ -978,6 +978,7 @@ void RenderContext::Impl::BuildReflectionPipelines() {
 }
 
 void RenderContext::Impl::BuildBloomPipelines() {
+	using enum Resource::ShaderID;
 	BuildPassHelper(this, bloomThresholdPass, "Bloom Threshold",
 					{.path = SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH,
 					 .fallback = Resource::GetShaderProgram(BloomThreshold).vertex,
@@ -987,27 +988,33 @@ void RenderContext::Impl::BuildBloomPipelines() {
 					 .entryPoint = "PSMain"},
 					{VK_FORMAT_R16G16B16A16_SFLOAT});
 
-	VkPushConstantRange blurPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-									.offset = 0,
-									.size = sizeof(int) + sizeof(float)};
+	VkPushConstantRange kawasePush = {
+		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+		.offset = 0,
+		.size = 16 // Holds Mode (int), Width (float), Height (float), Padding (float)
+	};
 
-	BuildPassHelper(this, bloomBlurHPass, "Bloom Blur H",
-					{.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH,
-					 .fallback = Resource::GetShaderProgram(BloomBlur).vertex,
-					 .entryPoint = "VSMain"},
-					{.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH,
-					 .fallback = Resource::GetShaderProgram(BloomBlur).fragment,
-					 .entryPoint = "PSMain"},
-					{VK_FORMAT_R16G16B16A16_SFLOAT}, &blurPush, 1);
+	for (int i = 0; i < 3; ++i) {
+		std::string downName = std::format("Bloom Downsample {}", i);
+		BuildPassHelper(this, bloomDownPass[i], downName.c_str(),
+						{.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH,
+						 .fallback = Resource::GetShaderProgram(BloomBlur).vertex,
+						 .entryPoint = "VSMain"},
+						{.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH,
+						 .fallback = Resource::GetShaderProgram(BloomBlur).fragment,
+						 .entryPoint = "PSMain"},
+						{VK_FORMAT_R16G16B16A16_SFLOAT}, &kawasePush, 1);
 
-	BuildPassHelper(this, bloomBlurVPass, "Bloom Blur V",
-					{.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH,
-					 .fallback = Resource::GetShaderProgram(BloomBlur).vertex,
-					 .entryPoint = "VSMain"},
-					{.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH,
-					 .fallback = Resource::GetShaderProgram(BloomBlur).fragment,
-					 .entryPoint = "PSMain"},
-					{VK_FORMAT_R16G16B16A16_SFLOAT}, &blurPush, 1);
+		std::string upName = std::format("Bloom Upsample {}", i);
+		BuildPassHelper(this, bloomUpPass[i], upName.c_str(),
+						{.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH,
+						 .fallback = Resource::GetShaderProgram(BloomBlur).vertex,
+						 .entryPoint = "VSMain"},
+						{.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH,
+						 .fallback = Resource::GetShaderProgram(BloomBlur).fragment,
+						 .entryPoint = "PSMain"},
+						{VK_FORMAT_R16G16B16A16_SFLOAT}, &kawasePush, 1);
+	}
 }
 
 void RenderContext::Impl::BuildBlitPipeline() {
@@ -1197,31 +1204,43 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
 	smaaEdgeTarget = CreateDefaultTarget<VK_FORMAT_R8G8_UNORM>(ext);
 	smaaWeightTarget = CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext);
 
-	VkExtent2D bloomExt = {.width = std::max(1u, ext.width / 4),
-						   .height = std::max(1u, ext.height / 4)};
-	bloomThresholdTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(bloomExt);
-	bloomBlurTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(bloomExt);
-	bloomFinalTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(bloomExt);
+	VkExtent2D ext2 = {.width = std::max(1u, ext.width / 2), .height = std::max(1u, ext.height / 2)};
+	VkExtent2D ext4 = {.width = std::max(1u, ext.width / 4), .height = std::max(1u, ext.height / 4)};
+	VkExtent2D ext8 = {.width = std::max(1u, ext.width / 8), .height = std::max(1u, ext.height / 8)};
+	VkExtent2D ext16 = {.width = std::max(1u, ext.width / 16),
+						.height = std::max(1u, ext.height / 16)};
+
+	bloomThresholdTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2);
+	bloomDown1 = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4);
+	bloomDown2 = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext8);
+	bloomDown3 = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext16);
+	bloomUp2 = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext8);
+	bloomUp1 = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4);
+	bloomFinalTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2);
 
 	RecreatePunctualShadowViews();
 
 	// Transition all newly allocated render targets to their correct default layouts
 	Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
-		std::array<VkImage, 13> colorTargets = {sceneColor.image.Handle(),
-												velocityBuffer.image.Handle(),
-												accumBuffers[0].image.Handle(),
-												accumBuffers[1].image.Handle(),
-												normalRoughnessBuffer.image.Handle(),
-												postProcessTarget.image.Handle(),
-												ambientTarget.image.Handle(),
-												lightingTarget.image.Handle(),
-												smaaEdgeTarget.image.Handle(),
-												smaaWeightTarget.image.Handle(),
-												bloomThresholdTarget.image.Handle(),
-												bloomBlurTarget.image.Handle(),
-												bloomFinalTarget.image.Handle()};
+		std::array colorTargets = {sceneColor.image.Handle(),
+								   velocityBuffer.image.Handle(),
+								   accumBuffers[0].image.Handle(),
+								   accumBuffers[1].image.Handle(),
+								   normalRoughnessBuffer.image.Handle(),
+								   postProcessTarget.image.Handle(),
+								   ambientTarget.image.Handle(),
+								   lightingTarget.image.Handle(),
+								   smaaEdgeTarget.image.Handle(),
+								   smaaWeightTarget.image.Handle(),
+								   bloomThresholdTarget.image.Handle(),
+								   bloomDown1.image.Handle(),
+								   bloomDown2.image.Handle(),
+								   bloomDown3.image.Handle(),
+								   bloomUp2.image.Handle(),
+								   bloomUp1.image.Handle(),
+								   bloomFinalTarget.image.Handle()};
 
-		for (VkImage img : colorTargets) {
+		for (auto* const img : colorTargets) {
 			Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
 				cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
 			Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,

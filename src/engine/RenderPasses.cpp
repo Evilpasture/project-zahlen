@@ -227,6 +227,18 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 
 	std::array<uint32_t, 8> passDrawCounts = {0, 0, 0, 0, 0, 0, 0, 0};
 
+	// 1. Pre-filter active shadow-casting point lights once to eliminate redundant loop overhead
+	std::array<const GPULight*, 4> activeShadowLights{};
+	uint32_t activeShadowLightCount = 0;
+	for (const auto& light : ctx.mappedLights) {
+		if (light.shadowLayer >= 0 && light.type == Point) {
+			activeShadowLights[activeShadowLightCount++] = &light;
+			if (activeShadowLightCount >= 4) {
+				break;
+			}
+		}
+	}
+
 	for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
 		const auto& drawCmd = ctx.drawQueue[i];
 
@@ -256,19 +268,17 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 			}
 		}
 
-		for (const auto& light : ctx.mappedLights) {
-			if (light.shadowLayer < 0 || light.type != Point) {
-				continue;
-			}
-
-			uint32_t slotIdx = 4 + light.shadowLayer;
+		// 2. Iterate only over pre-filtered shadow-casting lights instead of the entire scene light list
+		for (uint32_t l = 0; l < activeShadowLightCount; ++l) {
+			const auto* light = activeShadowLights[l];
+			uint32_t slotIdx = 4 + light->shadowLayer;
 			if (slotIdx >= 8) {
 				continue;
 			}
 
-			JPH::Vec3 lightPos(light.position[0], light.position[1], light.position[2]);
+			JPH::Vec3 lightPos(light->position[0], light->position[1], light->position[2]);
 			float distToLightSq = (meshPos - lightPos).LengthSq();
-			float maxRange = light.range + radius;
+			float maxRange = light->range + radius;
 
 			if (distToLightSq <= (maxRange * maxRange)) {
 				writeDraw(slotIdx);

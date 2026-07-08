@@ -9,34 +9,71 @@ struct VSOutput {
 VSOutput VSMain(uint vertexID : SV_VertexID) {
 	VSOutput output;
 	output.uv = float2((vertexID << 1) & 2, vertexID & 2);
-
-	// UN-FLIPPED: Removed legacy Y-flip
 	output.pos = float4(output.uv.x * 2.0f - 1.0f, output.uv.y * 2.0f - 1.0f, 0.0f, 1.0f);
 	return output;
 }
 
 struct PushConstants {
-	int horizontal;
-	float texelSize;
+	int mode; // 0 = Downsample, 1 = Upsample
+	float rcpWidth;
+	float rcpHeight;
+	float padding;
 };
 [[vk::push_constant]] PushConstants pc;
 
 [[vk::binding(0, 0)]] Texture2D<float4> texInput;
 [[vk::binding(1, 0)]] SamplerState smp;
-
-// Standard Gaussian weights
-static const float weights[5] = {0.2270270270f, 0.1945945946f, 0.1216216216f, 0.0540540541f,
-								 0.0162162162f};
+[[vk::binding(2, 0)]] Texture2D<float4> texLow;
 
 float4 PSMain(VSOutput input) : SV_Target0 {
-	float2 texelOffset =
-		pc.horizontal != 0 ? float2(pc.texelSize, 0.0f) : float2(0.0f, pc.texelSize);
-	float3 result = texInput.SampleLevel(smp, input.uv, 0).rgb * weights[0];
+	float2 texelSize = float2(pc.rcpWidth, pc.rcpHeight);
 
-	for (int i = 1; i < 5; ++i) {
-		result += texInput.SampleLevel(smp, input.uv + texelOffset * (float)i, 0).rgb * weights[i];
-		result += texInput.SampleLevel(smp, input.uv - texelOffset * (float)i, 0).rgb * weights[i];
+	if (pc.mode == 0) {
+		// --- DUAL KAWASE DOWNSAMPLE ---
+		// Bilinear average of 4 samples offset by half a texel to capture 16 pixels of detail
+		float2 halfPixel = texelSize * 0.5f;
+		float3 sum = 0.0f;
+		sum += texInput.SampleLevel(smp, input.uv + float2(-halfPixel.x, -halfPixel.y), 0).rgb;
+		sum += texInput.SampleLevel(smp, input.uv + float2(halfPixel.x, -halfPixel.y), 0).rgb;
+		sum += texInput.SampleLevel(smp, input.uv + float2(-halfPixel.x, halfPixel.y), 0).rgb;
+		sum += texInput.SampleLevel(smp, input.uv + float2(halfPixel.x, halfPixel.y), 0).rgb;
+		return float4(sum * 0.25f, 1.0f);
+	} else {
+		// --- DUAL KAWASE UPSAMPLE ---
+		// 8 taps (4 corners weighted 1, 4 edges weighted 2)
+		float2 halfPixel = texelSize * 0.5f;
+		float3 sum = 0.0f;
+
+		// Corners (Weight 1)
+		sum += texInput
+				   .SampleLevel(smp, input.uv + float2(-halfPixel.x * 2.0f, -halfPixel.y * 2.0f), 0)
+				   .rgb *
+			   1.0f;
+		sum +=
+			texInput.SampleLevel(smp, input.uv + float2(halfPixel.x * 2.0f, -halfPixel.y * 2.0f), 0)
+				.rgb *
+			1.0f;
+		sum +=
+			texInput.SampleLevel(smp, input.uv + float2(-halfPixel.x * 2.0f, halfPixel.y * 2.0f), 0)
+				.rgb *
+			1.0f;
+		sum +=
+			texInput.SampleLevel(smp, input.uv + float2(halfPixel.x * 2.0f, halfPixel.y * 2.0f), 0)
+				.rgb *
+			1.0f;
+
+		// Edges (Weight 2)
+		sum +=
+			texInput.SampleLevel(smp, input.uv + float2(-halfPixel.x * 2.0f, 0.0f), 0).rgb * 2.0f;
+		sum += texInput.SampleLevel(smp, input.uv + float2(halfPixel.x * 2.0f, 0.0f), 0).rgb * 2.0f;
+		sum +=
+			texInput.SampleLevel(smp, input.uv + float2(0.0f, -halfPixel.y * 2.0f), 0).rgb * 2.0f;
+		sum += texInput.SampleLevel(smp, input.uv + float2(0.0f, halfPixel.y * 2.0f), 0).rgb * 2.0f;
+
+		float3 upsampled = sum / 12.0f;
+
+		// Additive combine with corresponding same-resolution downsample stage
+		float3 low = texLow.SampleLevel(smp, input.uv, 0).rgb;
+		return float4(upsampled + low, 1.0f);
 	}
-
-	return float4(result, 1.0f);
 }

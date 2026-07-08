@@ -148,10 +148,10 @@ inline void GpuProfiler<Stages...>::RetrieveResults(uint32_t frameIndex, float t
 				constexpr uint32_t startIdx = stageIdx * 2;
 				std::array<uint64_t, 2> stageResults{};
 
+				// Removed VK_QUERY_RESULT_WAIT_BIT to prevent hard CPU execution stalls
 				VkResult res = vkGetQueryPoolResults(
 					_device, pool, startIdx, 2, stageResults.size() * sizeof(uint64_t),
-					stageResults.data(), sizeof(uint64_t),
-					VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+					stageResults.data(), sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
 
 				if (res == VK_SUCCESS) {
 					float durationMS = 0.0f;
