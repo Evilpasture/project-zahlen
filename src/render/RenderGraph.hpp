@@ -61,10 +61,11 @@ using ShaderRead = Usage<Image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 						 VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT>;
 
 template <typename Image>
-using DepthWrite = Usage<
-	Image, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-	VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-	VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT>;
+using DepthWrite =
+	Usage<Image, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+		  VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+		  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+			  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT>;
 
 template <ResourceName Name, typename UsagesList, typename RecordFn_T> struct GraphPass {
 	static constexpr auto name = Name;
@@ -120,6 +121,7 @@ struct ResourceState {
 	VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
 	VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE;
 	VkAccessFlags2 access = 0;
+	size_t last_write_pass = 999999;
 };
 
 constexpr VkAccessFlags2 WriteMask =
@@ -127,11 +129,11 @@ constexpr VkAccessFlags2 WriteMask =
 	VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT |
 	VK_ACCESS_2_HOST_WRITE_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
 
-template <ResourceState Prev, typename Usage> struct NeedsBarrier {
-	static constexpr bool value = (Prev.layout != Usage::layout) || (Prev.stage != Usage::stage) ||
-								  (Prev.access != Usage::access) ||
-								  (Prev.layout == VK_IMAGE_LAYOUT_UNDEFINED) ||
-								  ((Usage::access & WriteMask) != 0);
+template <ResourceState Prev, typename Usage, size_t PassIndex> struct NeedsBarrier {
+	static constexpr bool value =
+		(Prev.layout != Usage::layout) || (Prev.stage != Usage::stage) ||
+		(Prev.access != Usage::access) || (Prev.layout == VK_IMAGE_LAYOUT_UNDEFINED) ||
+		(((Usage::access & WriteMask) != 0) && (Prev.last_write_pass < PassIndex));
 };
 
 template <typename ResourceList, typename... Passes> consteval auto ComputeStateTable();
@@ -201,7 +203,7 @@ template <typename... Passes> class CompileTimeFrameGraph {
 				  using Img = typename UsageType::Resource;
 				  constexpr size_t rIdx = detail::GetResourceIndex<Resources, Img>();
 				  constexpr detail::ResourceState prevState = StateTable[PassIndex][rIdx];
-				  return detail::NeedsBarrier<prevState, UsageType>::value ? 1 : 0;
+				  return detail::NeedsBarrier<prevState, UsageType, PassIndex>::value ? 1 : 0;
 			  }()),
 			 ...);
 			return count;
@@ -220,7 +222,7 @@ template <typename... Passes> class CompileTimeFrameGraph {
 				 using Img = typename UsageType::Resource;
 				 constexpr size_t rIdx = detail::GetResourceIndex<Resources, Img>();
 				 constexpr detail::ResourceState prevState = StateTable[PassIndex][rIdx];
-				 if constexpr (detail::NeedsBarrier<prevState, UsageType>::value) {
+				 if constexpr (detail::NeedsBarrier<prevState, UsageType, PassIndex>::value) {
 					 indices[writeIdx++] = Is;
 				 }
 			 }()),

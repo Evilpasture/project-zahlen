@@ -133,10 +133,12 @@ template <typename ResourceList, typename... Passes> consteval auto ComputeState
 	std::array<std::array<ResourceState, NumResources>, NumPasses> table{};
 	std::array<ResourceState, NumResources> currentStates{};
 
+	// Warm up simulation state
 	[&]<size_t... Is>(std::index_sequence<Is...>) {
 		((currentStates[Is] = {.layout = VK_IMAGE_LAYOUT_UNDEFINED,
 							   .stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-							   .access = 0}),
+							   .access = 0,
+							   .last_write_pass = 999999}),
 		 ...);
 	}(std::make_index_sequence<NumResources>{});
 
@@ -155,8 +157,16 @@ template <typename ResourceList, typename... Passes> consteval auto ComputeState
 						using U = typename Usages::template type<I>;
 						using Img = typename U::Resource;
 						constexpr size_t rIdx = GetResourceIndex<ResourceList, Img>();
+
+						constexpr bool isWrite = (U::access & WriteMask) != 0;
+
 						currentStates[rIdx] = {
-							.layout = U::layout, .stage = U::stage, .access = U::access};
+							.layout = U::layout,
+							.stage = U::stage,
+							.access = U::access,
+							// Track when the resource was last modified in this frame cycle
+							.last_write_pass =
+								isWrite ? passIdx : currentStates[rIdx].last_write_pass};
 					}.template operator()<Is>(),
 					...);
 			}(std::make_index_sequence<Usages::size>{});
@@ -176,7 +186,8 @@ template <typename ResourceList, typename... Passes> consteval auto ComputeState
 				if constexpr (R::is_swapchain) {
 					currentStates[I] = {.layout = VK_IMAGE_LAYOUT_UNDEFINED,
 										.stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-										.access = 0};
+										.access = 0,
+										.last_write_pass = 999999};
 				}
 			}.template operator()<Is>(),
 			...);
