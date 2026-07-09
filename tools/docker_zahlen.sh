@@ -1,1 +1,4 @@
+# Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 docker run -it --rm   --device nvidia.com/gpu=all   -e NVIDIA_DRIVER_CAPABILITIES=all   -e WAYLAND_DISPLAY=$WAYLAND_DISPLAY   -e XDG_RUNTIME_DIR=/tmp   -v $XDG_RUNTIME_DIR/$WAYLAND_DISPLAY:/tmp/$WAYLAND_DISPLAY   zahlen:latest
