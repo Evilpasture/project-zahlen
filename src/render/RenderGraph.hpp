@@ -28,6 +28,12 @@ template <typename... Ts> struct TypeList {
 	template <size_t I> using type = Ts...[I];
 };
 
+// Compile-time frame graph membership predicate
+template <typename List, typename Target> struct IsInList;
+template <typename... Ts, typename Target> struct IsInList<Vk::TypeList<Ts...>, Target> {
+	static constexpr bool value = (std::is_same_v<Ts, Target> || ...);
+};
+
 template <> struct TypeList<> {
 	static constexpr size_t size = 0;
 

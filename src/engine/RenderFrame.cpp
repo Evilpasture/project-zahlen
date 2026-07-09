@@ -3,7 +3,9 @@
 
 #include "RenderInternal.hpp"
 #include "Zahlen/Profiler.hpp"
+#include "detail/Loop.hpp"
 #include "detail/RadixSort.hpp"
+#include "detail/Reflection.hpp"
 #include "engine/Scheduler.hpp"
 
 #include <array>
@@ -101,49 +103,6 @@ inline void SubmitDrawInstanced(VkCommandBuffer cmd, const DrawCommand& drawCmd,
 					   .firstInstance = instanceIdx},
 					  pushConstants, stages);
 }
-
-// ----------------------------------------------------------------------------
-// Frame Graph Resource Tags
-// ----------------------------------------------------------------------------
-
-using Res_SceneColor =
-	Vk::GraphImage<"SceneColor", VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_Velocity = Vk::GraphImage<"Velocity", VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_NormRough =
-	Vk::GraphImage<"NormRough", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_Depth = Vk::GraphImage<"Depth", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
-using Res_ShadowMap = Vk::GraphImage<"ShadowMap", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
-using Res_ShadowAtlas =
-	Vk::GraphImage<"ShadowAtlas", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
-using Res_Ambient =
-	Vk::GraphImage<"Ambient", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_Lighting =
-	Vk::GraphImage<"Lighting", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_PostProcess =
-	Vk::GraphImage<"PostProcess", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_BloomThresh =
-	Vk::GraphImage<"BloomThresh", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_BloomDown1 =
-	Vk::GraphImage<"BloomDown1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_BloomDown2 =
-	Vk::GraphImage<"BloomDown2", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_BloomDown3 =
-	Vk::GraphImage<"BloomDown3", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_BloomUp2 =
-	Vk::GraphImage<"BloomUp2", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_BloomUp1 =
-	Vk::GraphImage<"BloomUp1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_BloomFinal =
-	Vk::GraphImage<"BloomFinal", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_AccumCurr =
-	Vk::GraphImage<"AccumCurr", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_AccumNext =
-	Vk::GraphImage<"AccumNext", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_SmaaEdge = Vk::GraphImage<"SmaaEdge", VK_FORMAT_R8G8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_SmaaWeight =
-	Vk::GraphImage<"SmaaWeight", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_Swapchain =
-	Vk::GraphImage<"Swapchain", VK_FORMAT_B8G8R8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, true>;
 
 } // namespace
 
@@ -648,44 +607,49 @@ void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const Pas
 		BuildFrameGraph<FullBright, Mode>(factory, std::forward<AALambdaT>(aaLambda),
 										  std::forward<GetSwapchainImageT>(getSwapchainImage));
 	typename decltype(graph)::Binder binder;
+	using Resources = typename decltype(graph)::Resources;
+	using GraphRes = RenderContext::Impl::GraphResources;
+	using Meta = GraphRes::ReflectMetadata;
 
-	// Bind common resources
-	auto sceneColorRef = MakeRef<Res_SceneColor>(self.sceneColor);
-	auto velocityRef = MakeRef<Res_Velocity>(self.velocityBuffer);
-	auto normRoughRef = MakeRef<Res_NormRough>(self.normalRoughnessBuffer);
-	auto depthRef = MakeRef<Res_Depth>(self.presentation.depthTarget);
-	auto bloomThreshRef = MakeRef<Res_BloomThresh>(self.bloomThresholdTarget);
-	auto bloomDown1Ref = MakeRef<Res_BloomDown1>(self.bloomDown1);
-	auto bloomDown2Ref = MakeRef<Res_BloomDown2>(self.bloomDown2);
-	auto bloomDown3Ref = MakeRef<Res_BloomDown3>(self.bloomDown3);
-	auto bloomUp2Ref = MakeRef<Res_BloomUp2>(self.bloomUp2);
-	auto bloomUp1Ref = MakeRef<Res_BloomUp1>(self.bloomUp1);
-	auto bloomFinalRef = MakeRef<Res_BloomFinal>(self.bloomFinalTarget);
-	auto swapchainRef = Vk::MakeRef<Res_Swapchain>(
-		self.presentation.swapchain.Get().images[self.current_image_index],
-		self.presentation.swapchain.Get().views[self.current_image_index], self.sceneColor.extent);
+	constexpr size_t fieldCount = Reflect::FieldCount<GraphRes>();
 
-	AutoBind(binder, sceneColorRef, velocityRef, normRoughRef, depthRef, bloomThreshRef,
-			 bloomDown1Ref, bloomDown2Ref, bloomDown3Ref, bloomUp2Ref, bloomUp1Ref, bloomFinalRef,
-			 swapchainRef);
+	// ZHLN::Unroll provides a compile-time integral_constant index, avoiding reflection tokens here
+	ZHLN::Unroll<fieldCount>([&](auto ic) {
+		constexpr size_t I = decltype(ic)::value;
+		constexpr size_t metaI = Reflect::MapFieldIndex<GraphRes, Meta>(I);
 
-	if constexpr (Mode != AAMode::None) {
-		auto accumCurrRef = MakeRef<Res_AccumCurr>(self.accumBuffers.Current());
-		auto accumNextRef = MakeRef<Res_AccumNext>(self.accumBuffers.Next());
-		auto smaaEdgeRef = MakeRef<Res_SmaaEdge>(self.smaaEdgeTarget);
-		auto smaaWeightRef = MakeRef<Res_SmaaWeight>(self.smaaWeightTarget);
+		// Only bind if this field is actually mapped in ReflectMetadata
+		if constexpr (metaI != static_cast<size_t>(-1)) {
+			using Tag = Reflect::FieldType<metaI, Meta>;
 
-		AutoBind(binder, accumCurrRef, accumNextRef, smaaEdgeRef, smaaWeightRef);
+			if constexpr (Vk::IsInList<Resources, Tag>::value) {
+				// TieFields guarantees an lvalue reference tuple, entirely avoiding copy constructors
+				auto& image = std::get<I>(Reflect::TieFields(self.graphResources));
+				auto ref = Vk::MakeRef<Tag>(image);
+				binder.template Bind<Tag>(ref.handle, ref.view, ref.extent);
+			}
+		}
+	});
+
+	// Genuine exceptions — not representable as a plain stored field, handled explicitly:
+	if constexpr (Vk::IsInList<Resources, Res_Depth>::value) {
+		auto ref = Vk::MakeRef<Res_Depth>(self.presentation.depthTarget);
+		binder.template Bind<Res_Depth>(ref.handle, ref.view, ref.extent);
 	}
-
-	if constexpr (!FullBright) {
-		auto shadowMapRef = MakeRef<Res_ShadowMap>(self.shadowMap);
-		auto shadowAtlasRef = MakeRef<Res_ShadowAtlas>(self.shadowAtlas);
-		auto ambientRef = MakeRef<Res_Ambient>(self.ambientTarget);
-		auto lightingRef = MakeRef<Res_Lighting>(self.lightingTarget);
-		auto postProcessRef = MakeRef<Res_PostProcess>(self.postProcessTarget);
-
-		AutoBind(binder, shadowMapRef, shadowAtlasRef, ambientRef, lightingRef, postProcessRef);
+	if constexpr (Vk::IsInList<Resources, Res_AccumCurr>::value) {
+		auto ref = Vk::MakeRef<Res_AccumCurr>(self.accumBuffers.Current());
+		binder.template Bind<Res_AccumCurr>(ref.handle, ref.view, ref.extent);
+	}
+	if constexpr (Vk::IsInList<Resources, Res_AccumNext>::value) {
+		auto ref = Vk::MakeRef<Res_AccumNext>(self.accumBuffers.Next());
+		binder.template Bind<Res_AccumNext>(ref.handle, ref.view, ref.extent);
+	}
+	if constexpr (Vk::IsInList<Resources, Res_Swapchain>::value) {
+		const auto& sc = self.presentation.swapchain.Get();
+		auto ref =
+			Vk::MakeRef<Res_Swapchain>(sc.images[self.current_image_index],
+									   sc.views[self.current_image_index], self.sceneColor.extent);
+		binder.template Bind<Res_Swapchain>(ref.handle, ref.view, ref.extent);
 	}
 
 	graph.Execute(cmd, binder);

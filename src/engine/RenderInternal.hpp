@@ -402,9 +402,54 @@ template <VkImageLayout ColorL, VkImageLayout DepthL> struct SceneResources {
 	Vk::TypedImage<DepthL> depth;
 };
 
+// ============================================================================
+// Frame Graph Resource Tags (Declared Before PIMPL Struct)
+// ============================================================================
+using Res_SceneColor =
+	Vk::GraphImage<"SceneColor", VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_Velocity = Vk::GraphImage<"Velocity", VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_NormRough =
+	Vk::GraphImage<"NormRough", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_Depth = Vk::GraphImage<"Depth", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
+using Res_ShadowMap = Vk::GraphImage<"ShadowMap", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
+using Res_ShadowAtlas =
+	Vk::GraphImage<"ShadowAtlas", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
+using Res_Ambient =
+	Vk::GraphImage<"Ambient", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_Lighting =
+	Vk::GraphImage<"Lighting", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_PostProcess =
+	Vk::GraphImage<"PostProcess", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_BloomThresh =
+	Vk::GraphImage<"BloomThresh", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_BloomDown1 =
+	Vk::GraphImage<"BloomDown1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_BloomDown2 =
+	Vk::GraphImage<"BloomDown2", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_BloomDown3 =
+	Vk::GraphImage<"BloomDown3", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_BloomUp2 =
+	Vk::GraphImage<"BloomUp2", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_BloomUp1 =
+	Vk::GraphImage<"BloomUp1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_BloomFinal =
+	Vk::GraphImage<"BloomFinal", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_AccumCurr =
+	Vk::GraphImage<"AccumCurr", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_AccumNext =
+	Vk::GraphImage<"AccumNext", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_SmaaEdge = Vk::GraphImage<"SmaaEdge", VK_FORMAT_R8G8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_SmaaWeight =
+	Vk::GraphImage<"SmaaWeight", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_Swapchain =
+	Vk::GraphImage<"Swapchain", VK_FORMAT_B8G8R8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, true>;
+
 // --- Impl Struct ---
 
 struct RenderContext::Impl {
+	// ============================================================================
+	// Nested Types & Reflection Metadata
+	// ============================================================================
 	struct RenderState {
 		SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 					   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>
@@ -418,6 +463,55 @@ struct RenderContext::Impl {
 					   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>
 			aaResult;
 	};
+
+	struct GraphResources {
+		Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32> sceneColor;
+		Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT> velocityBuffer;
+		Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM> normalRoughnessBuffer;
+		Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> ambientTarget;
+		Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> lightingTarget;
+		Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> postProcessTarget;
+		Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomThresholdTarget;
+		Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomDown1;
+		Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomDown2;
+		Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomDown3;
+		Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomUp2;
+		Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomUp1;
+		Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomFinalTarget;
+		Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomBlurTarget;
+		Vk::RenderTarget<VK_FORMAT_R8G8_UNORM> smaaEdgeTarget;
+		Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM> smaaWeightTarget;
+		Vk::RenderTarget<VK_FORMAT_D32_SFLOAT> shadowMap;
+		Vk::RenderTarget<VK_FORMAT_D32_SFLOAT> shadowAtlas;
+
+		struct ReflectMetadata {
+			Res_SceneColor sceneColor;
+			Res_Velocity velocityBuffer;
+			Res_NormRough normalRoughnessBuffer;
+			Res_Ambient ambientTarget;
+			Res_Lighting lightingTarget;
+			Res_PostProcess postProcessTarget;
+			Res_BloomThresh bloomThresholdTarget;
+			Res_BloomDown1 bloomDown1;
+			Res_BloomDown2 bloomDown2;
+			Res_BloomDown3 bloomDown3;
+			Res_BloomUp2 bloomUp2;
+			Res_BloomUp1 bloomUp1;
+			Res_BloomFinal bloomFinalTarget;
+			Res_SmaaEdge smaaEdgeTarget;
+			Res_SmaaWeight smaaWeightTarget;
+			Res_ShadowMap shadowMap;
+			Res_ShadowAtlas shadowAtlas;
+		};
+	};
+
+	static constexpr uint32_t SHADOW_RES = 2048;
+	static constexpr uint32_t NUM_CASCADES = 4;
+	static constexpr uint32_t MAX_PUNCTUAL_LIGHTS = 4;
+
+	// ============================================================================
+	// Core System Properties (64-Bit / High Alignment)
+	// ============================================================================
 	Window& window;
 	String64 appName;
 	Vk::Context ctx;
@@ -427,160 +521,22 @@ struct RenderContext::Impl {
 	Vk::FrameSync<2> sync;
 	Vk::CommandPools<2> pools;
 	Vk::StagingRingBuffer stagingRingBuffer;
+	mutable Vk::StagingRingBuffer transferRingBuffer;
 
 	mutable Vk::CommandRing<Vk::QueueType::Graphics, 8> graphicsCmdRing;
 	mutable Vk::CommandRing<Vk::QueueType::Transfer, 8> transferCmdRing;
 
-	// These declarations are now mathematically tied to ActiveGBuffer
-	Vk::RenderTarget<ActiveGBuffer::get<0>()> sceneColor;
-	Vk::RenderTarget<ActiveGBuffer::get<1>()> velocityBuffer;
-	Vk::RenderTarget<ActiveGBuffer::get<2>()> normalRoughnessBuffer;
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> ambientTarget;
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> lightingTarget;
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> postProcessTarget;
-	DoubleBuffered<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumBuffers;
-
-	Vk::PostProcessPass<TAALayout> taaPass;
-	Vk::PostProcessPass<FXAALayout> fxaaPass;
-	Vk::PostProcessPass<SMAAEdgeLayout> smaaEdgePass;
-	Vk::PostProcessPass<SMAAWeightLayout> smaaWeightPass;
-	Vk::PostProcessPass<SMAABlendLayout> smaaBlendPass;
-
-	uint32_t smaaAreaTexIdx = 0;
-	uint32_t smaaSearchTexIdx = 0;
-
-	Vk::PostProcessPass<AmbientLayout> ambientPass;
-	Vk::PostProcessPass<LightingLayout> lightingPass;
-	Vk::PostProcessPass<ReflectionLayout> reflectionPass;
-	Vk::PostProcessPass<BlitLayout> blitPass;
-	Vk::PostProcessPass<BloomThresholdLayout> bloomThresholdPass;
-	std::array<Vk::PostProcessPass<KawaseLayout>, 3> bloomDownPass;
-	std::array<Vk::PostProcessPass<KawaseLayout>, 3> bloomUpPass;
-
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomThresholdTarget;
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomDown1;
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomDown2;
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomDown3;
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomUp2;
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomUp1;
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomFinalTarget;
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> bloomBlurTarget;
-
-	Vk::RenderTarget<VK_FORMAT_R8G8_UNORM> smaaEdgeTarget;
-	Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM> smaaWeightTarget;
-
-	Vk::ComputePass clusterBoundsPass;
-	Vk::ComputePass clusterCullingPass;
-
-	Vk::DescriptorSetLayout clusterCullingDescLayout;
-	Vk::DescriptorPool clusterCullingPool;
-	ZHLN::DoubleBuffered<VkDescriptorSet> clusterCullingSets;
-
-	Vk::Buffer clusterBoundsBuffer;
-	ZHLN::DoubleBuffered<Vk::Buffer> clusterGridBuffers;
-	ZHLN::DoubleBuffered<Vk::Buffer> lightIndexListBuffers;
-	ZHLN::DoubleBuffered<Vk::Buffer> globalCounterBuffers;
-
-	Vk::Sampler defaultSampler;
-	Vk::Sampler pointSampler;
-
-	Vk::ComputePass proceduralBakePass;
-	Vk::DescriptorSetLayout proceduralBakeDescLayout;
-	Vk::DescriptorPool proceduralBakeDescPool;
-	VkDescriptorSet proceduralBakeSet{};
-
-	uint32_t frame_index = 0;
-	bool resized = true;
-	bool needsInitialClear = true;
 	VkCommandBuffer current_cmd = VK_NULL_HANDLE;
-	uint32_t current_image_index = 0;
 
-	JPH::Mat44 current_view_proj{};
-	JPH::Mat44 unjittered_view_proj{};
-	JPH::Mat44 shadowProjView{};
-	FrameUniforms currentUniforms{};
-
-	// Generational pools (Expanded to provide massive headroom for SoA split streams)
-	GenerationalPool<NativeMesh, 8192, BufferHandle> meshPool;
-	GenerationalPool<NativeMaterial, 2048, PipelineHandle> materialPool;
-
-	ZHLN::Array<DrawCommand> drawQueue;
-	ZHLN::Array<WorkerCmdContext> workerCmds;
-
-	bool depth_ready = false;
-	Vk::DescriptorPool uiPool;
-
-	Vk::DescriptorSetLayout bindlessLayout;
-	Vk::DescriptorPool bindlessPool;
-	ZHLN::DoubleBuffered<VkDescriptorSet> bindlessSets;
-	Vk::Sampler globalSampler;
-
-	uint32_t nextTextureIndex = 0;
-	ZHLN::Array<Vk::Image> textureImages;
-	ZHLN::Array<Vk::ImageView> textureViews;
-
-	Vk::DescriptorSetLayout cullingLayout;
-	Vk::DescriptorPool cullingPool;
-	ZHLN::DoubleBuffered<VkDescriptorSet> cullingSets;
-
-	static constexpr uint32_t SHADOW_RES = 2048;
-	static constexpr uint32_t NUM_CASCADES = 4;
-
-	Vk::RenderTarget<VK_FORMAT_D32_SFLOAT> shadowMap;
-	Vk::Sampler shadowSampler;
-	Vk::Sampler clampSampler;
-
-	ZHLN::Array<Vk::ImageView> shadowCascadeViews;
-
-	Vk::RenderTarget<VK_FORMAT_D32_SFLOAT> shadowAtlas;
-	Vk::ImageView shadowAtlasCubeView;
-	Vk::ImageView shadowAtlas2DView;
-
-	ZHLN::Array<Vk::ImageView> punctualShadowViews;
-	ZHLN::Array<GPULight> mappedLights;
-
-	Vk::Image ltcMatImage;
-	Vk::ImageView ltcMatView;
-	Vk::Image ltcAmpImage;
-	Vk::ImageView ltcAmpView;
-
-	Vk::IBLPayload iblPayload;
+	// ============================================================================
+	// Staging, Memory Reclamation & Multithreading
+	// ============================================================================
 	std::unique_ptr<Vk::StagingContext> stagingContext;
-
-	Vk::RayTracingContext rtCtx;
-	DoubleBuffered<VkAccelerationStructureKHR> tlas;
-	DoubleBuffered<Vk::Buffer> tlasBuffer;
-	DoubleBuffered<Vk::Buffer> tlasScratchBuffer;
-	DoubleBuffered<Vk::Buffer> tlasInstanceBuffers;
-	DoubleBuffered<Vk::Buffer> tlasStagingBuffers;
-
-	ZHLN::DoubleBuffered<Vk::Buffer> frameUniformBuffers;
-	ZHLN::DoubleBuffered<Vk::Buffer> lightStorageBuffers;
-
-	ZHLN::DoubleBuffered<Vk::Buffer> instanceDataBuffers;
-	ZHLN::DoubleBuffered<Vk::Buffer> indirectCommandsBuffers;
-	ZHLN::DoubleBuffered<Vk::Buffer> shadowIndirectBuffers;
-	ZHLN::DoubleBuffered<Vk::Buffer> jointBuffers; // Global Joint Transforms SSBO
-	Vk::TypedPipeline<0, true> shadowPipeline;
-	Vk::PipelineLayout shadowPipelineLayout;
-	Vk::TypedPipeline<0, true> punctualShadowPipeline;
-	Vk::PipelineLayout punctualShadowPipelineLayout;
-	Vk::ComputePass cullingPass;
-
-	ZHLN::Array<UIDrawCommand> uiDrawQueue;
-	Vk::Pipeline uiPipeline;
-	Vk::PipelineLayout uiPipelineLayout;
-
-	// Allocate 2 parallel recording slots (Slot 0 = Shadow, Slot 1 = Main)
-	DoubleBuffered<Vk::ParallelCommandRecorder<2>> parallelRecorder;
-
 	Vk::DeletionQueue deletionQueue;
-	std::optional<Vk::ScopedDeletionQueue> activeQueueGuard; // Main thread scope guard
+	std::optional<Vk::ScopedDeletionQueue> activeQueueGuard;
 
-	GISettings giSettings{};
-
-	Vk::Buffer morphDeltasBuffer; // Holds all packed morph target deltas
-	uint32_t nextMorphDeltaIndex = 0;
+	ZHLN::Array<WorkerCmdContext> workerCmds;
+	DoubleBuffered<Vk::ParallelCommandRecorder<2>> parallelRecorder;
 
 	struct PendingAcquires {
 		ZHLN::Mutex mutex{};
@@ -607,16 +563,221 @@ struct RenderContext::Impl {
 		}
 	};
 	mutable PendingAcquires pendingAcquires;
-	mutable Vk::StagingRingBuffer transferRingBuffer;
 
+	// ============================================================================
+	// Reflected Graph Resources & Backward-Compatible Aliases
+	// ============================================================================
+	GraphResources graphResources;
+
+	Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>& sceneColor{graphResources.sceneColor};
+	Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT>& velocityBuffer{graphResources.velocityBuffer};
+	Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>& normalRoughnessBuffer{
+		graphResources.normalRoughnessBuffer};
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& ambientTarget{graphResources.ambientTarget};
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& lightingTarget{graphResources.lightingTarget};
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& postProcessTarget{
+		graphResources.postProcessTarget};
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& bloomThresholdTarget{
+		graphResources.bloomThresholdTarget};
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& bloomDown1{graphResources.bloomDown1};
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& bloomDown2{graphResources.bloomDown2};
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& bloomDown3{graphResources.bloomDown3};
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& bloomUp2{graphResources.bloomUp2};
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& bloomUp1{graphResources.bloomUp1};
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& bloomFinalTarget{
+		graphResources.bloomFinalTarget};
+	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& bloomBlurTarget{graphResources.bloomBlurTarget};
+	Vk::RenderTarget<VK_FORMAT_R8G8_UNORM>& smaaEdgeTarget{graphResources.smaaEdgeTarget};
+	Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>& smaaWeightTarget{graphResources.smaaWeightTarget};
+	Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>& shadowMap{graphResources.shadowMap};
+	Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>& shadowAtlas{graphResources.shadowAtlas};
+
+	DoubleBuffered<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumBuffers;
+
+	// ============================================================================
+	// Textures, Heaps & Bindless Descriptors
+	// ============================================================================
+	Vk::DescriptorSetLayout bindlessLayout;
+	Vk::DescriptorPool bindlessPool;
+	ZHLN::DoubleBuffered<VkDescriptorSet> bindlessSets;
+
+	Vk::Sampler globalSampler;
+	Vk::Sampler clampSampler;
+	Vk::Sampler defaultSampler;
+	Vk::Sampler pointSampler;
+
+	ZHLN::Array<Vk::Image> textureImages;
+	ZHLN::Array<Vk::ImageView> textureViews;
+
+	// ============================================================================
+	// Pipeline Objects & Compute Passes
+	// ============================================================================
+	Vk::PostProcessPass<TAALayout> taaPass;
+	Vk::PostProcessPass<FXAALayout> fxaaPass;
+	Vk::PostProcessPass<SMAAEdgeLayout> smaaEdgePass;
+	Vk::PostProcessPass<SMAAWeightLayout> smaaWeightPass;
+	Vk::PostProcessPass<SMAABlendLayout> smaaBlendPass;
+
+	Vk::PostProcessPass<AmbientLayout> ambientPass;
+	Vk::PostProcessPass<LightingLayout> lightingPass;
+	Vk::PostProcessPass<ReflectionLayout> reflectionPass;
+	Vk::PostProcessPass<BlitLayout> blitPass;
+	Vk::PostProcessPass<BloomThresholdLayout> bloomThresholdPass;
+	std::array<Vk::PostProcessPass<KawaseLayout>, 3> bloomDownPass;
+	std::array<Vk::PostProcessPass<KawaseLayout>, 3> bloomUpPass;
+
+	Vk::ComputePass clusterBoundsPass;
+	Vk::ComputePass clusterCullingPass;
+	Vk::ComputePass cullingPass;
+	Vk::ComputePass skinningPass;
+	Vk::ComputePass proceduralBakePass;
+	Vk::ComputePass hangGpuPass;
+
+	Vk::PipelineLayout skinningPipelineLayout;
+	Vk::PipelineLayout shadowPipelineLayout;
+	Vk::PipelineLayout punctualShadowPipelineLayout;
+
+	Vk::TypedPipeline<0, true> shadowPipeline;
+	Vk::TypedPipeline<0, true> punctualShadowPipeline;
+
+	// ============================================================================
+	// GPU Storage & Double-Buffered Work Buffers
+	// ============================================================================
+	Vk::Buffer clusterBoundsBuffer;
+	ZHLN::DoubleBuffered<Vk::Buffer> clusterGridBuffers;
+	ZHLN::DoubleBuffered<Vk::Buffer> lightIndexListBuffers;
+	ZHLN::DoubleBuffered<Vk::Buffer> globalCounterBuffers;
+
+	ZHLN::DoubleBuffered<Vk::Buffer> frameUniformBuffers;
+	ZHLN::DoubleBuffered<Vk::Buffer> lightStorageBuffers;
+
+	ZHLN::DoubleBuffered<Vk::Buffer> instanceDataBuffers;
+	ZHLN::DoubleBuffered<Vk::Buffer> indirectCommandsBuffers;
+	ZHLN::DoubleBuffered<Vk::Buffer> shadowIndirectBuffers;
+	ZHLN::DoubleBuffered<Vk::Buffer> jointBuffers;
+	Vk::Buffer morphDeltasBuffer;
+
+	// ============================================================================
+	// Descriptor Sets, Culling, Shadows & Lighting LUTs
+	// ============================================================================
+	Vk::DescriptorSetLayout cullingLayout;
+	Vk::DescriptorPool cullingPool;
+	ZHLN::DoubleBuffered<VkDescriptorSet> cullingSets;
+
+	Vk::DescriptorSetLayout clusterCullingDescLayout;
+	Vk::DescriptorPool clusterCullingPool;
+	ZHLN::DoubleBuffered<VkDescriptorSet> clusterCullingSets;
+
+	Vk::DescriptorSetLayout proceduralBakeDescLayout;
+	Vk::DescriptorPool proceduralBakeDescPool;
+	VkDescriptorSet proceduralBakeSet = VK_NULL_HANDLE;
+
+	ZHLN::Array<Vk::ImageView> shadowCascadeViews;
+	Vk::ImageView shadowAtlasCubeView;
+	Vk::ImageView shadowAtlas2DView;
+	ZHLN::Array<Vk::ImageView> punctualShadowViews;
+	Vk::Sampler shadowSampler;
+
+	Vk::Image ltcMatImage;
+	Vk::ImageView ltcMatView;
+	Vk::Image ltcAmpImage;
+	Vk::ImageView ltcAmpView;
+
+	Vk::IBLPayload iblPayload;
+
+	// ============================================================================
+	// Generational Memory Pools & Draw Commands
+	// ============================================================================
+	GenerationalPool<NativeMesh, 8192, BufferHandle> meshPool;
+	GenerationalPool<NativeMaterial, 2048, PipelineHandle> materialPool;
+
+	ZHLN::Array<DrawCommand> drawQueue;
+	ZHLN::Array<GPULight> mappedLights;
 	ZHLN::DoubleBuffered<BufferHandle> debugMeshHandles;
 
-	AAState aaState{};
+	// ============================================================================
+	// User Interface Rendering (Vulkan Bound)
+	// ============================================================================
+	Vk::DescriptorPool uiPool;
+	Vk::Pipeline uiPipeline;
+	Vk::PipelineLayout uiPipelineLayout;
+	ZHLN::Array<UIDrawCommand> uiDrawQueue;
 
+	// ============================================================================
+	// Hardware Ray Tracing Context (TLAS)
+	// ============================================================================
+	Vk::RayTracingContext rtCtx;
+	DoubleBuffered<VkAccelerationStructureKHR> tlas;
+	DoubleBuffered<Vk::Buffer> tlasBuffer;
+	DoubleBuffered<Vk::Buffer> tlasScratchBuffer;
+	DoubleBuffered<Vk::Buffer> tlasInstanceBuffers;
+	DoubleBuffered<Vk::Buffer> tlasStagingBuffers;
+
+	// ============================================================================
+	// Local Configuration & Math Tracking States
+	// ============================================================================
+	JPH::Mat44 current_view_proj = JPH::Mat44::sIdentity();
+	JPH::Mat44 unjittered_view_proj = JPH::Mat44::sIdentity();
+	JPH::Mat44 shadowProjView = JPH::Mat44::sIdentity();
+	FrameUniforms currentUniforms{};
+
+	GISettings giSettings{};
+	AAState aaState{};
 	FrameProfiler gpuProfiler;
 
-	Vk::ComputePass skinningPass;
-	Vk::PipelineLayout skinningPipelineLayout;
+	// ============================================================================
+	// Hot-Reloading & Code Watchers
+	// ============================================================================
+	struct WatchableShader {
+		std::string path;
+		FileWatcher watcher;
+		std::function<void()> reloadCallback;
+	};
+
+	ZHLN::Array<WatchableShader> shaderWatchers;
+
+	// ============================================================================
+	// Primitives / State Boundaries (Grouped at Tail to Minimize Padding)
+	// ============================================================================
+	uint32_t frame_index = 0;
+	uint32_t current_image_index = 0;
+	uint32_t nextTextureIndex = 0;
+	uint32_t nextMorphDeltaIndex = 0;
+	uint32_t smaaAreaTexIdx = 0;
+	uint32_t smaaSearchTexIdx = 0;
+
+	float lastAspectRatio = 0.0f;
+	float lastFov = 0.0f;
+
+	bool resized = true;
+	bool needsInitialClear = true;
+	bool depth_ready = false;
+	bool hasSkinnedThisFrame = false;
+
+	// ============================================================================
+	// Helper Structures & Temporary Stack Scratches
+	// ============================================================================
+	ZHLN::Array<VkAccelerationStructureInstanceKHR> tlasInstancesScratch;
+	ZHLN::Array<SortItem> sortItemsScratch;
+	ZHLN::Array<SortItem> sortTempScratch;
+	ZHLN::Array<DrawCommand> sortDrawQueueScratch;
+
+	// ============================================================================
+	// API Signatures & Execution Hooks
+	// ============================================================================
+	Impl(Window& win) : window(win) {}
+
+	~Impl() {
+		graphicsCmdRing.Cleanup();
+		transferCmdRing.Cleanup();
+		if (ctx.Device() != VK_NULL_HANDLE) {
+			for (uint32_t i = 0; i < 2; ++i) {
+				if (tlas[i] != VK_NULL_HANDLE) {
+					rtCtx.DestroyAS(tlas[i]);
+				}
+			}
+		}
+	}
 
 	void InitSubsystems(const RenderConfig& cfg, int width, int height);
 
@@ -665,10 +826,6 @@ struct RenderContext::Impl {
 		int fullBright;
 	};
 
-	Vk::ComputePass hangGpuPass;
-
-	void BuildHangGpuPipeline();
-
 	struct PipelineRegistration {
 		const char* name;
 		std::function<void()> build;
@@ -676,7 +833,6 @@ struct RenderContext::Impl {
 	};
 
 	void RegisterPipeline(const PipelineRegistration& reg) noexcept;
-
 	void ProvokeDeviceLostInternal() const;
 
 	void BuildSkinningPipeline();
@@ -685,10 +841,6 @@ struct RenderContext::Impl {
 	void BuildProceduralBakePipeline();
 	uint32_t BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx,
 								   float scale, float randomness, float distortion);
-
-	Impl(Window& win) : window(win) {}
-
-	bool hasSkinnedThisFrame = false;
 
 	void BuildTLAS(VkCommandBuffer cmd) noexcept;
 
@@ -705,10 +857,10 @@ struct RenderContext::Impl {
 	void BuildReflectionPipelines();
 	void BuildBlitPipeline();
 	void BuildBloomPipelines();
+	void BuildHangGpuPipeline();
 	void InitPostProcessing();
 	void SetupUI(GLFWwindow* window);
 
-	// Core Vulkan allocation implementation
 	uint32_t CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB);
 	uint32_t CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height);
 
@@ -718,52 +870,11 @@ struct RenderContext::Impl {
 	void SortDrawQueue();
 	void InitializeSystemTextures();
 
-	// Persistent, reusable memory block to prevent dynamic heap reallocations
-	ZHLN::Array<VkAccelerationStructureInstanceKHR> tlasInstancesScratch;
-	ZHLN::Array<SortItem> sortItemsScratch;
-	ZHLN::Array<SortItem> sortTempScratch;
-	ZHLN::Array<DrawCommand> sortDrawQueueScratch;
-
 	template <bool FullBright>
 	void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd);
 
-	~Impl() {
-		graphicsCmdRing.Cleanup();
-		transferCmdRing.Cleanup();
-		if (ctx.Device() != VK_NULL_HANDLE) {
-			for (uint32_t i = 0; i < 2; ++i) {
-				if (tlas[i] != VK_NULL_HANDLE) {
-					rtCtx.DestroyAS(tlas[i]);
-				}
-			}
-		}
-	}
-
-	struct WatchableShader {
-		std::string path;
-		FileWatcher watcher;
-		std::function<void()> reloadCallback;
-	};
-
-	ZHLN::Array<WatchableShader> shaderWatchers;
-
 	void RegisterShaderWatcher(const char* path, std::function<void()> callback);
-
-	void CheckShaderWatchers() noexcept {
-		if constexpr (isDev) {
-			bool anyReloaded = false;
-			for (auto& watcher : shaderWatchers) {
-				if (watcher.watcher.CheckModified()) {
-					if (!anyReloaded) {
-						// Prevent write-after-read race conditions by forcing GPU idle
-						vkDeviceWaitIdle(ctx.Device());
-						anyReloaded = true;
-					}
-					watcher.reloadCallback();
-				}
-			}
-		}
-	}
+	void CheckShaderWatchers() noexcept;
 
 	template <VkFormat F>
 	auto CreateDefaultTarget(VkExtent2D ext, VkImageUsageFlags extraFlags = 0) {
@@ -773,8 +884,6 @@ struct RenderContext::Impl {
 	}
 
 	bool RecreateTargets(VkExtent2D ext);
-
-	static constexpr uint32_t MAX_PUNCTUAL_LIGHTS = 4;
 
 	void RecreatePunctualShadowViews() noexcept;
 	void InitSkeletalAnimationResources();
@@ -788,9 +897,6 @@ struct RenderContext::Impl {
 
 	void WatchPipeline(const char* vsPath, const char* psPath,
 					   std::function<void()> rebuild_fn) noexcept;
-
-	float lastAspectRatio = 0.0f;
-	float lastFov = 0.0f;
 
 	void UploadClusterBounds(const JPH::Mat44& proj);
 };

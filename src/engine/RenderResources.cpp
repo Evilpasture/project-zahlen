@@ -138,6 +138,22 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 			.alphaMode = desc.alphaBlend ? 2u : 0u};
 }
 
+void RenderContext::Impl::CheckShaderWatchers() noexcept {
+	if constexpr (isDev) {
+		bool anyReloaded = false;
+		for (auto& watcher : shaderWatchers) {
+			if (watcher.watcher.CheckModified()) {
+				if (!anyReloaded) {
+					// Prevent write-after-read race conditions by forcing GPU idle
+					vkDeviceWaitIdle(ctx.Device());
+					anyReloaded = true;
+				}
+				watcher.reloadCallback();
+			}
+		}
+	}
+}
+
 auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width, uint32_t height,
 												bool isSRGB) -> uint32_t {
 	auto* const device = ctx.Device();
