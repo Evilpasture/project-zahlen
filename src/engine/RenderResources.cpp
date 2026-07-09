@@ -410,7 +410,6 @@ void RenderContext::SetShadowResolution(uint32_t resolution) {
 			cmd, impl->shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
 	});
 
-	Vk::UpdateBindlessTextureSlot(device, 0, impl->shadowMap.view.Get(), impl->bindlessSets, 2);
 	ZHLN::Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);
 }
 
