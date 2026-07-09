@@ -169,7 +169,7 @@ void DrawEditorPanels(Engine& engine) {
 
 	// 2. Scene Hierarchy Window
 	ImGui::Begin("Scene Hierarchy");
-	auto entities = reg.GetEntitiesWith<MeshComponent>();
+	auto entities = reg.GetEntitiesWith<Components::MeshComponent>();
 	for (auto e : entities) {
 		std::string label = std::format("Entity [Index: {}, Gen: {}]", e.index, e.generation);
 		bool isSelected = (g_EditorState.selectedEntity == e);
@@ -187,7 +187,7 @@ void DrawEditorPanels(Engine& engine) {
 		ImGui::Separator();
 
 		// Mesh Component Panel
-		if (auto* mesh = reg.Get<MeshComponent>(e)) {
+		if (auto* mesh = reg.Get<Components::MeshComponent>(e)) {
 			if (ImGui::CollapsingHeader("Mesh Component", ImGuiTreeNodeFlags_DefaultOpen)) {
 				ImGui::TextUnformatted(std::format("Vertices: {}", mesh->mesh.vertexCount).c_str());
 				ImGui::DragFloat("Cull Radius", &mesh->cullRadius, 0.1f, 0.5f, 200.0f);
@@ -195,7 +195,7 @@ void DrawEditorPanels(Engine& engine) {
 		}
 
 		// PBR Component Panel
-		if (auto* pbr = reg.Get<PBRComponent>(e)) {
+		if (auto* pbr = reg.Get<Components::PBRComponent>(e)) {
 			if (ImGui::CollapsingHeader("PBR Component", ImGuiTreeNodeFlags_DefaultOpen)) {
 				ImGui::SliderFloat("Roughness", &pbr->roughness, 0.0f, 1.0f);
 				ImGui::SliderFloat("Metallic", &pbr->metallic, 0.0f, 1.0f);
@@ -203,7 +203,7 @@ void DrawEditorPanels(Engine& engine) {
 		}
 
 		// Physics Component Panel (Direct Jolt Teleportation)
-		if (auto* phys = reg.Get<PhysicsComponent>(e)) {
+		if (auto* phys = reg.Get<Components::PhysicsComponent>(e)) {
 			if (ImGui::CollapsingHeader("Physics Component", ImGuiTreeNodeFlags_DefaultOpen)) {
 				// Fix: Access Jolt BodyIDs using the const-safe free function
 				JPH::BodyID bid = Physics::GetBodyID(world, phys->physicsHandle);
@@ -231,7 +231,7 @@ void DrawEditorPanels(Engine& engine) {
 		}
 
 		// ALife Component Panel
-		if (auto* alife = reg.Get<ALife::ALifeComponent>(e)) {
+		if (auto* alife = reg.Get<Components::ALifeComponent>(e)) {
 			if (ImGui::CollapsingHeader("ALife Component", ImGuiTreeNodeFlags_DefaultOpen)) {
 				ImGui::SliderInt("Health", &alife->health, 0, 100);
 				ImGui::SliderInt("Power", &alife->power, 0, 100);
@@ -293,16 +293,16 @@ bool InitializeEditorScene(Engine& engine) {
 	auto& cam = engine.GetCamera();
 
 	// Register visual and physical components
-	reg.RegisterComponent<MeshComponent>("MeshComponent");
-	reg.RegisterComponent<AnimatorComponent>("AnimatorComponent");
-	reg.RegisterComponent<PhysicsComponent>("PhysicsComponent");
-	reg.RegisterComponent<PhysicsStateComponent>("PhysicsStateComponent");
-	reg.RegisterComponent<MovementComponent>("MovementComponent");
-	reg.RegisterComponent<ALife::ALifeComponent>("ALifeComponent");
-	reg.RegisterComponent<NameComponent>("NameComponent");
-	reg.RegisterComponent<TargetCameraComponent>("TargetCameraComponent");
-	reg.RegisterComponent<PBRComponent>("PBRComponent");
-	reg.RegisterComponent<TransformComponent>("TransformComponent");
+	reg.RegisterComponent<Components::MeshComponent>("MeshComponent");
+	reg.RegisterComponent<Components::AnimatorComponent>("AnimatorComponent");
+	reg.RegisterComponent<Components::PhysicsComponent>("PhysicsComponent");
+	reg.RegisterComponent<Components::PhysicsStateComponent>("PhysicsStateComponent");
+	reg.RegisterComponent<Components::MovementComponent>("MovementComponent");
+	reg.RegisterComponent<Components::ALifeComponent>("ALifeComponent");
+	reg.RegisterComponent<Components::NameComponent>("NameComponent");
+	reg.RegisterComponent<Components::TargetCameraComponent>("CameraComponent");
+	reg.RegisterComponent<Components::PBRComponent>("PBRComponent");
+	reg.RegisterComponent<Components::TransformComponent>("TransformComponent");
 
 	ZHLN::Log("Initializing Editor Workspace Scene...");
 	int terrainSize = 128;
@@ -324,27 +324,29 @@ bool InitializeEditorScene(Engine& engine) {
 	Material material = material_res.value();
 
 	Entity terrainEnt = reg.Create();
-	reg.Add(terrainEnt,
-			MeshComponent{.mesh = terrainMesh, .material = material, .cullRadius = 300.0f},
-			PhysicsComponent{Physics::CreateRigidBody(pc, terrainShape, {0.0f, 0.0f, 0.0f},
-													  JPH::Quat::sIdentity(),
-													  JPH::EMotionType::Static, 0)},
-			PhysicsStateComponent{});
+	reg.Add(
+		terrainEnt,
+		Components::MeshComponent{.mesh = terrainMesh, .material = material, .cullRadius = 300.0f},
+		Components::PhysicsComponent{Physics::CreateRigidBody(pc, terrainShape, {0.0f, 0.0f, 0.0f},
+															  JPH::Quat::sIdentity(),
+															  JPH::EMotionType::Static, 0)},
+		Components::PhysicsStateComponent{});
 
 	// Place 3D selection test boxes
 	auto boxShape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Box, 2.0f, 2.0f, 2.0f);
 	for (int i = 0; i < 5; ++i) {
 		Entity box = reg.Create();
-		reg.Add(box, MeshComponent{.mesh = CreativeWorksFactory::CreateBox(rc, {2, 2, 2}),
-								   .material = material,
-								   .cullRadius = 10.f});
-		reg.Add(box, PhysicsComponent{Physics::CreateRigidBody(
+		reg.Add(box,
+				Components::MeshComponent{.mesh = CreativeWorksFactory::CreateBox(rc, {2, 2, 2}),
+										  .material = material,
+										  .cullRadius = 10.f});
+		reg.Add(box, Components::PhysicsComponent{Physics::CreateRigidBody(
 						 pc, boxShape, {i * 6.0f, 15.0f, 0.0f}, JPH::Quat::sIdentity(),
 						 JPH::EMotionType::Dynamic, 1)});
-		reg.Add(box, PhysicsStateComponent{.currPosition = {i * 6.0f, 15.0f, 0.0f},
-										   .prevPosition = {i * 6.0f, 15.0f, 0.0f},
-										   .currRotation = JPH::Quat::sIdentity(),
-										   .prevRotation = JPH::Quat::sIdentity()});
+		reg.Add(box, Components::PhysicsStateComponent{.currPosition = {i * 6.0f, 15.0f, 0.0f},
+													   .prevPosition = {i * 6.0f, 15.0f, 0.0f},
+													   .currRotation = JPH::Quat::sIdentity(),
+													   .prevRotation = JPH::Quat::sIdentity()});
 	}
 
 	pc.OptimizeBroadphase();
@@ -609,17 +611,17 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 			if (!g_EditorState.showPhysicsDebug) {
 				ZHLN_LOCK(worldState.sync.shadowLock) {
 					for (Entity e : s_VisibleEntities) {
-						auto* mesh = reg.Get<MeshComponent>(e);
+						auto* mesh = reg.Get<Components::MeshComponent>(e);
 						if (mesh == nullptr) {
 							continue;
 						}
 
 						JPH::Mat44 currentTransform{};
-						auto* trans = reg.Get<TransformComponent>(e);
+						auto* trans = reg.Get<Components::TransformComponent>(e);
 
 						if (trans != nullptr) {
 							currentTransform = trans->GetMatrix() * mesh->localTransform;
-						} else if (auto* alifeComp = reg.Get<ALife::ALifeComponent>(e)) {
+						} else if (auto* alifeComp = reg.Get<Components::ALifeComponent>(e)) {
 							currentTransform = Math::CreateTransform(JPH::Vec3(alifeComp->position),
 																	 JPH::Quat::sIdentity()) *
 											   mesh->localTransform;
@@ -643,7 +645,7 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 				}
 			}
 
-			CullingStats::TotalObjects = reg.GetEntitiesWith<MeshComponent>().size();
+			CullingStats::TotalObjects = reg.GetEntitiesWith<Components::MeshComponent>().size();
 			CullingStats::CulledObjects = CullingStats::TotalObjects - s_VisibleEntities.size();
 
 			auto end_res = rc.EndFrame(); // <-- FIXED: Capture expected
@@ -655,12 +657,12 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 
 			s_PrevUnjitteredVp = unjitteredVp;
 
-			auto allEntities = reg.GetEntitiesWith<MeshComponent>();
+			auto allEntities = reg.GetEntitiesWith<Components::MeshComponent>();
 			for (Entity e : allEntities) {
-				auto* mesh = reg.Get<MeshComponent>(e);
+				auto* mesh = reg.Get<Components::MeshComponent>(e);
 				if (mesh != nullptr) {
 					JPH::Mat44 currentTransform{};
-					auto* phys = reg.Get<PhysicsComponent>(e);
+					auto* phys = reg.Get<Components::PhysicsComponent>(e);
 					if (phys != nullptr) {
 						uint32_t dense = worldState.slotToDense[phys->physicsHandle.index];
 						const size_t base = static_cast<size_t>(dense) * 4;
@@ -670,7 +672,7 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 									  worldState.rotations[base + 2],
 									  worldState.rotations[base + 3]);
 						currentTransform = Math::CreateTransform(pos, rot) * mesh->localTransform;
-					} else if (auto* alifeComp = reg.Get<ALife::ALifeComponent>(e)) {
+					} else if (auto* alifeComp = reg.Get<Components::ALifeComponent>(e)) {
 						currentTransform = Math::CreateTransform(JPH::Vec3(alifeComp->position),
 																 JPH::Quat::sIdentity()) *
 										   mesh->localTransform;

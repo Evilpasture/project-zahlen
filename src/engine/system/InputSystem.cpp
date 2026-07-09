@@ -16,8 +16,8 @@ void InputSystem::Update(Engine& engine) {
 	auto& reg = engine.GetRegistry();
 	auto mouse = input.GetMouse();
 
-	for (Entity e : reg.GetEntitiesWith<InputComponent>()) {
-		if (auto* ic = reg.Get<InputComponent>(e)) {
+	for (Entity e : reg.GetEntitiesWith<Components::InputComponent>()) {
+		if (auto* ic = reg.Get<Components::InputComponent>(e)) {
 			float moveX = 0.0f;
 			float moveZ = 0.0f;
 			if (input.IsKeyDown(KeyCode::W)) {
@@ -65,11 +65,11 @@ void InputSystem::Update(Engine& engine) {
 void InputSystem::PlayerInputTranslate(Engine& engine, const Camera& cam) {
 	auto& reg = engine.GetRegistry();
 
-	auto camEnts = reg.GetEntitiesWith<MainCameraTagComponent>();
-	if (!camEnts.empty() && reg.Get<FreeCamTagComponent>(camEnts[0]) != nullptr) {
+	auto camEnts = reg.GetEntitiesWith<Components::MainCameraTagComponent>();
+	if (!camEnts.empty() && reg.Get<Components::FreeCamTagComponent>(camEnts[0]) != nullptr) {
 		// Zero out player intent so they stand frozen in an Idle pose
-		for (Entity e : reg.GetEntitiesWith<MovementComponent>()) {
-			if (auto* move = reg.Get<MovementComponent>(e)) {
+		for (Entity e : reg.GetEntitiesWith<Components::MovementComponent>()) {
+			if (auto* move = reg.Get<Components::MovementComponent>(e)) {
 				move->inputX = 0.0f;
 				move->inputZ = 0.0f;
 				move->jumpRequested = false;
@@ -78,9 +78,9 @@ void InputSystem::PlayerInputTranslate(Engine& engine, const Camera& cam) {
 		return;
 	}
 
-	for (Entity e : reg.GetEntitiesWith<MovementComponent>()) {
-		auto* move = reg.Get<MovementComponent>(e);
-		auto* input = reg.Get<InputComponent>(e);
+	for (Entity e : reg.GetEntitiesWith<Components::MovementComponent>()) {
+		auto* move = reg.Get<Components::MovementComponent>(e);
+		auto* input = reg.Get<Components::InputComponent>(e);
 		if ((move == nullptr) || (input == nullptr)) {
 			continue;
 		}

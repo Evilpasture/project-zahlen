@@ -100,8 +100,8 @@ struct ObjectConstants {
 	uint32_t instanceId;
 	uint32_t isShadowPass;
 };
-static_assert(sizeof(ObjectConstants) == 8, "ObjectConstants must match HLSL alignment.");
-static_assert(sizeof(InstanceData) == 272, "InstanceData must match HLSL alignment.");
+static_assert(sizeof(ObjectConstants) == 8);
+static_assert(sizeof(InstanceData) == 272);
 // --- Opaque Resource Handles ---
 // These abstract away Vulkan objects completely.
 // NOLINTBEGIN(performance-enum-size)
@@ -110,15 +110,16 @@ enum class PipelineHandle : uint64_t { Invalid = 0 };
 enum class ResourceGroupHandle : uint64_t { Invalid = 0 };
 // NOLINTEND(performance-enum-size)
 
-static_assert(sizeof(BufferHandle) == 8, "BufferHandle must be 64 bits!");
-static_assert(sizeof(PipelineHandle) == 8, "PipelineHandle must be 64 bits!");
-static_assert(sizeof(ResourceGroupHandle) == 8, "ResourceGroupHandle must be 64 bits!");
+static_assert(sizeof(BufferHandle) == 8);
+static_assert(sizeof(PipelineHandle) == 8);
+static_assert(sizeof(ResourceGroupHandle) == 8);
 
 struct Mesh {
-	BufferHandle posBuffer = BufferHandle::Invalid;
-	BufferHandle attrBuffer = BufferHandle::Invalid;
-	BufferHandle skinBuffer = BufferHandle::Invalid;
-	BufferHandle indexBuffer = BufferHandle::Invalid;
+	using enum BufferHandle;
+	BufferHandle posBuffer = Invalid;
+	BufferHandle attrBuffer = Invalid;
+	BufferHandle skinBuffer = Invalid;
+	BufferHandle indexBuffer = Invalid;
 	uint32_t vertexCount = 0;
 	uint32_t indexCount = 0;
 };
@@ -232,6 +233,16 @@ struct AAState {
 	float fxaaSubpix = 0.75f;
 	float fxaaEdgeThreshold = 0.166f;
 	float fxaaEdgeThresholdMin = 0.0833f;
+};
+
+struct GlyphMetric {
+	float x0, y0, x1, y1;
+	float xoff, yoff, xadvance;
+};
+
+struct FontAtlas {
+	uint32_t textureIndex = 0;
+	GlyphMetric glyphs[96]{};
 };
 
 template <typename T> inline constexpr bool EnableEnumFlags = false;

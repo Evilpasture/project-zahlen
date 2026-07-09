@@ -17,8 +17,8 @@ class UILayoutSystem {
 		float height;
 	};
 	void ResolveLayouts(ECS::Registry& reg, const UIViewport& viewport) {
-		auto entities = reg.GetEntitiesWith<UIRectComponent>();
-		auto rects = reg.GetRawArray<UIRectComponent>();
+		auto entities = reg.GetEntitiesWith<Components::UIRectComponent>();
+		auto rects = reg.GetRawArray<Components::UIRectComponent>();
 
 		if (entities.empty()) {
 			return;
@@ -45,7 +45,7 @@ class UILayoutSystem {
 		// 2. Solve layouts linearly
 		for (const auto& entry : sortedEntries) {
 			Entity e = entities[entry.rawIndex];
-			UIRectComponent& rect = rects[entry.rawIndex];
+			Components::UIRectComponent& rect = rects[entry.rawIndex];
 			Entity parent = rect.parentEntity;
 
 			// Resolve parent bounds (default to viewport if root)
@@ -55,7 +55,7 @@ class UILayoutSystem {
 			float pMaxY = viewport.height;
 
 			if (parent != NullEntity && reg.IsAlive(parent)) {
-				if (auto* pRect = reg.Get<UIRectComponent>(parent)) {
+				if (auto* pRect = reg.Get<Components::UIRectComponent>(parent)) {
 					pMinX = pRect->computedAbsMinX;
 					pMinY = pRect->computedAbsMinY;
 					pMaxX = pRect->computedAbsMaxX;
@@ -68,7 +68,7 @@ class UILayoutSystem {
 
 			// --- STACK CONTAINER POSITION OVERRIDE ---
 			if (parent != NullEntity && reg.IsAlive(parent)) {
-				if (auto* stack = reg.Get<UIStackComponent>(parent)) {
+				if (auto* stack = reg.Get<Components::UIStackComponent>(parent)) {
 					const float* offsetPtr = stackOffsets.Find(parent.Pack());
 					float currentOffset = (offsetPtr != nullptr) ? *offsetPtr : stack->padding;
 
@@ -112,7 +112,7 @@ class UILayoutSystem {
 
 			// --- UPDATE STACK ACCUMULATOR OFFSET ---
 			if (parent != NullEntity && reg.IsAlive(parent)) {
-				if (auto* stack = reg.Get<UIStackComponent>(parent)) {
+				if (auto* stack = reg.Get<Components::UIStackComponent>(parent)) {
 					float nextOffset = 0.0f;
 					if (stack->direction == StackDirection::Vertical) {
 						float height = rect.computedAbsMaxY - rect.computedAbsMinY;
@@ -128,7 +128,7 @@ class UILayoutSystem {
 			// If absolute position changed, mark the panel dirty to force a mesh rebuild
 			if (rect.computedAbsMinX != oldMinX || rect.computedAbsMinY != oldMinY ||
 				rect.computedAbsMaxX != oldMaxX || rect.computedAbsMaxY != oldMaxY) {
-				if (auto* panel = reg.Get<UIPanelComponent>(e)) {
+				if (auto* panel = reg.Get<Components::UIPanelComponent>(e)) {
 					panel->isDirty = true;
 				}
 			}

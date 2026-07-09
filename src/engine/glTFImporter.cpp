@@ -927,11 +927,11 @@ JPH::Mat44 GetNodeWorldMat(const cgltf_node* node, const JPH::Mat44& baseTransfo
 // ----------------------------------------------------------------------------
 Entity SpawnPrefabRoot(ECS::Registry& reg, std::string_view vPath, const SpawnParams& p) {
 	Entity root = reg.Create();
-	reg.Add(root, TransformComponent{
+	reg.Add(root, Components::TransformComponent{
 					  .position = JPH::Vec3(p.position), // Natively casts RVec3 to float Vec3
 					  .rotation = p.rotation,
 					  .scale = p.scale});
-	reg.Add(root, NameComponent{.name = String64("Root_" + std::string(vPath))});
+	reg.Add(root, Components::NameComponent{.name = String64("Root_" + std::string(vPath))});
 	return root;
 }
 
@@ -1037,10 +1037,10 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 	}
 
 	if (params.createPhysics) {
-		reg.Add(e, TransformComponent{.position = prep.translation,
-									  .rotation = prep.rotation,
-									  .scale = prep.scale});
-		reg.Add(e, MeshComponent{
+		reg.Add(e, Components::TransformComponent{.position = prep.translation,
+												  .rotation = prep.rotation,
+												  .scale = prep.scale});
+		reg.Add(e, Components::MeshComponent{
 					   .mesh = part.mesh,
 					   .material = activeMat,
 					   .cullRadius = part.boundingRadius,
@@ -1060,10 +1060,10 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 					   .gltfNode = part.gltfNode,
 					   .gltfSkin = part.gltfSkin,
 					   .flags = flags});
-		reg.Add(e, NameComponent{.name = part.name});
+		reg.Add(e, Components::NameComponent{.name = part.name});
 
 		if (part.isSkinned && params.isAnimated) {
-			reg.Add(e, AnimatorComponent{
+			reg.Add(e, Components::AnimatorComponent{
 						   .currentTrackIdx = 0, // Default to first track (usually Idle)
 						   .currentTrackTime = 0.0f,
 						   .currentPlaybackSpeed = 1.0f,
@@ -1079,7 +1079,7 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 		}
 
 		if (prep.shape != nullptr) {
-			reg.Add(e, PhysicsComponent{Physics::CreateRigidBody(
+			reg.Add(e, Components::PhysicsComponent{Physics::CreateRigidBody(
 						   pc, prep.shape, JPH::RVec3(prep.translation), prep.rotation,
 						   params.isStaticPhysics ? JPH::EMotionType::Static
 												  : JPH::EMotionType::Dynamic,
@@ -1091,10 +1091,10 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 			// ONLY ADD INTERPOLATION STATE TO DYNAMIC (MOVING) OBJECTS
 			// ============================================================================
 			if (!params.isStaticPhysics) {
-				reg.Add(e, PhysicsStateComponent{.currPosition = prep.translation,
-												 .prevPosition = prep.translation,
-												 .currRotation = prep.rotation,
-												 .prevRotation = prep.rotation});
+				reg.Add(e, Components::PhysicsStateComponent{.currPosition = prep.translation,
+															 .prevPosition = prep.translation,
+															 .currRotation = prep.rotation,
+															 .prevRotation = prep.rotation});
 			}
 			// ============================================================================
 		}
@@ -1117,11 +1117,11 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 		JPH::Mat44 nRotMat(JPH::Vec4(nc0, 0), JPH::Vec4(nc1, 0), JPH::Vec4(nc2, 0),
 						   JPH::Vec4(0, 0, 0, 1));
 
-		reg.Add(e, TransformComponent{.position = nodePos,
-									  .rotation = nRotMat.GetQuaternion().Normalized(),
-									  .scale = nodeScale});
+		reg.Add(e, Components::TransformComponent{.position = nodePos,
+												  .rotation = nRotMat.GetQuaternion().Normalized(),
+												  .scale = nodeScale});
 		reg.Add(
-			e, MeshComponent{
+			e, Components::MeshComponent{
 				   .mesh = part.mesh,
 				   .material = activeMat,
 
@@ -1143,10 +1143,10 @@ Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 				   .gltfNode = part.gltfNode,
 				   .gltfSkin = part.gltfSkin,
 				   .flags = flags});
-		reg.Add(e, NameComponent{.name = part.name});
-		reg.Add(e, HierarchyComponent{.parent = rootEntity});
+		reg.Add(e, Components::NameComponent{.name = part.name});
+		reg.Add(e, Components::HierarchyComponent{.parent = rootEntity});
 		if (part.isSkinned && params.isAnimated) {
-			reg.Add(e, AnimatorComponent{
+			reg.Add(e, Components::AnimatorComponent{
 						   .currentTrackIdx = 0, // Default to first track (usually Idle)
 						   .currentTrackTime = 0.0f,
 						   .currentPlaybackSpeed = 1.0f,
@@ -1185,19 +1185,20 @@ Entity TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part,
 					   (part.localMax[2] - part.localMin[2]);
 
 	Entity glowEnt = reg.Create();
-	reg.Add(glowEnt, TransformComponent{.position = worldMat * localCenter,
-										.rotation = JPH::Quat::sIdentity(),
-										.scale = JPH::Vec3::sReplicate(1.0f)});
-	reg.Add(glowEnt, NameComponent{.name = String64("Glow_" + std::string(part.name.c_str()))});
-	reg.Add(glowEnt, LightingSystem::LightComponent{
-						 .type = LightType::Point,
-						 .color = JPH::Vec3(ef[0], ef[1], ef[2]),
-						 .intensity = lum * 35.0f,
-						 .radius = std::max(partExtent * scaleMult * 0.15f, 0.05f),
-						 .direction = JPH::Vec3(0, -1, 0),
-						 .range = std::max(partExtent * scaleMult * 2.5f, 3.0f),
-						 .points = {},
-						 .twoSided = 0});
+	reg.Add(glowEnt, Components::TransformComponent{.position = worldMat * localCenter,
+													.rotation = JPH::Quat::sIdentity(),
+													.scale = JPH::Vec3::sReplicate(1.0f)});
+	reg.Add(glowEnt,
+			Components::NameComponent{.name = String64("Glow_" + std::string(part.name.c_str()))});
+	reg.Add(glowEnt,
+			Components::LightComponent{.type = LightType::Point,
+									   .color = JPH::Vec3(ef[0], ef[1], ef[2]),
+									   .intensity = lum * 35.0f,
+									   .radius = std::max(partExtent * scaleMult * 0.15f, 0.05f),
+									   .direction = JPH::Vec3(0, -1, 0),
+									   .range = std::max(partExtent * scaleMult * 2.5f, 3.0f),
+									   .points = {},
+									   .twoSided = 0});
 	return glowEnt;
 }
 
@@ -1228,12 +1229,14 @@ uint32_t InstantiateAuthoredLights(ECS::Registry& reg, const cgltf_data* rawData
 																   : LightType::Point;
 
 		Entity ent = reg.Create();
-		reg.Add(ent, TransformComponent{.position = worldMat.GetTranslation(),
-										.rotation = worldMat.GetQuaternion().Normalized(),
-										.scale = JPH::Vec3::sReplicate(1.0f)});
-		reg.Add(ent, NameComponent{.name = (node->name != nullptr) ? String64(node->name)
-																   : String64("GLB_Light")});
-		reg.Add(ent, LightingSystem::LightComponent{
+		reg.Add(ent,
+				Components::TransformComponent{.position = worldMat.GetTranslation(),
+											   .rotation = worldMat.GetQuaternion().Normalized(),
+											   .scale = JPH::Vec3::sReplicate(1.0f)});
+		reg.Add(ent,
+				Components::NameComponent{.name = (node->name != nullptr) ? String64(node->name)
+																		  : String64("GLB_Light")});
+		reg.Add(ent, Components::LightComponent{
 						 .type = type,
 						 .color = JPH::Vec3(l->color[0], l->color[1], l->color[2]),
 						 .intensity = l->intensity,
@@ -1335,7 +1338,7 @@ void SetupPlayerRagdoll([[maybe_unused]] RenderContext& rc, PhysicsContext& pc, 
 						Entity playerEntity, std::span<const Entity> visualParts) {
 	const cgltf_skin* pomniSkin = nullptr;
 	for (Entity part : visualParts) {
-		if (auto* meshComp = reg.Get<MeshComponent>(part)) {
+		if (auto* meshComp = reg.Get<Components::MeshComponent>(part)) {
 			if (meshComp->gltfSkin != nullptr) {
 				pomniSkin = static_cast<const cgltf_skin*>(meshComp->gltfSkin);
 				break;
@@ -1422,18 +1425,19 @@ void SetupPlayerRagdoll([[maybe_unused]] RenderContext& rc, PhysicsContext& pc, 
 
 		uint32_t jointOffset = 0;
 		if (!visualParts.empty()) {
-			if (auto* meshComp = reg.Get<MeshComponent>(visualParts[0])) {
+			if (auto* meshComp = reg.Get<Components::MeshComponent>(visualParts[0])) {
 				jointOffset = meshComp->jointOffset;
 			}
 		}
 
-		reg.Add(playerEntity, RagdollComponent{.ragdollInstance = ragdollInstance.GetPtr(),
-											   .state = RagdollState::Inactive,
-											   .prevState = RagdollState::Inactive,
-											   .isAddedToPhysics = 0,
-											   .jointOffset = jointOffset,
-											   .jointCount = (uint32_t)pomniSkin->joints_count,
-											   .gltfSkin = const_cast<cgltf_skin*>(pomniSkin)});
+		reg.Add(playerEntity,
+				Components::RagdollComponent{.ragdollInstance = ragdollInstance.GetPtr(),
+											 .state = RagdollState::Inactive,
+											 .prevState = RagdollState::Inactive,
+											 .isAddedToPhysics = 0,
+											 .jointOffset = jointOffset,
+											 .jointCount = (uint32_t)pomniSkin->joints_count,
+											 .gltfSkin = const_cast<cgltf_skin*>(pomniSkin)});
 		Log("Skeletal Ragdoll successfully generated with simplified key bones.");
 	} else {
 		Log("WARNING: SetupPlayerRagdoll failed because no skeletal skin was found.");
@@ -1509,10 +1513,10 @@ void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& assetMgr, 
 	ReuploadAllPrefabs(ctx, assetMgr, meshRebuildMap);
 
 	// 4. Update existing MeshComponents in the registry
-	auto entities = reg.GetEntitiesWith<MeshComponent>();
-	auto meshes = reg.GetRawArray<MeshComponent>();
+	auto entities = reg.GetEntitiesWith<Components::MeshComponent>();
+	auto meshes = reg.GetRawArray<Components::MeshComponent>();
 	for (size_t i = 0; i < entities.size(); ++i) {
-		MeshComponent& meshComp = meshes[i];
+		Components::MeshComponent& meshComp = meshes[i];
 
 		// Extract the old VBO handle to look up its newly compiled counterpart
 		BufferHandle oldPosBuffer = meshComp.mesh.posBuffer;
@@ -1533,8 +1537,8 @@ void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& assetMgr, 
 	}
 
 	// 5. Reset TextComponents so they rebuild their mesh buffers on the next frame
-	for (Entity e : reg.GetEntitiesWith<TextComponent>()) {
-		if (auto* text = reg.Get<TextComponent>(e)) {
+	for (Entity e : reg.GetEntitiesWith<Components::TextComponent>()) {
+		if (auto* text = reg.Get<Components::TextComponent>(e)) {
 			text->mesh.posBuffer = BufferHandle::Invalid;
 			text->mesh.attrBuffer = BufferHandle::Invalid;
 			text->mesh.indexBuffer = BufferHandle::Invalid;

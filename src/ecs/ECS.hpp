@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Entity.hpp>
@@ -10,6 +9,7 @@
 #include <Zahlen/Sync.hpp>
 #include <cstddef>
 #include <detail/HashMap.hpp>
+#include <detail/Reflection.hpp>
 #include <detail/Span.hpp>
 #include <source_location>
 #include <span>
@@ -17,6 +17,13 @@
 #include <threading/Mutex.hpp>
 
 namespace ZHLN::ECS {
+
+template <typename T, typename = void> struct is_complete : std::false_type {};
+
+template <typename T> struct is_complete<T, std::void_t<decltype(sizeof(T))>> : std::true_type {};
+
+template <typename T>
+concept CompleteType = is_complete<T>::value;
 
 constexpr uint32_t HashTypeName(std::string_view str) {
 	uint32_t hash = 2166136261u;
@@ -28,11 +35,16 @@ constexpr uint32_t HashTypeName(std::string_view str) {
 }
 
 template <typename T> consteval uint32_t GetTypeHash() {
-	// The resolved function name contains the template parameter (e.g., "[with T = MeshComponent]")
+	// The resolved function name contains the template parameter (e.g., "[with T =
+	// Components::MeshComponent]")
 	return HashTypeName(std::source_location::current().function_name());
 }
 
 template <typename T> constexpr std::string_view BoxedName() {
+	// If the type was generated via SchemaType, extract its name NTTP directly
+	if constexpr (requires { ZHLN::Reflect::GetSchemaNameOf(static_cast<T*>(nullptr)); }) {
+		return ZHLN::Reflect::GetSchemaNameOf(static_cast<T*>(nullptr));
+	}
 #if defined(__clang__) || defined(__GNUC__)
 	// GCC & Clang format: "constexpr std::string_view BoxedName() [with T = Type]"
 	std::string_view name = __PRETTY_FUNCTION__;
@@ -74,7 +86,8 @@ template <typename T> constexpr std::string_view BoxedName() {
 		name.remove_prefix(6);
 	}
 
-	// Strip namespace qualifiers (e.g., "ZHLN::ALife::ALifeComponent" -> "ALifeComponent")
+	// Strip namespace qualifiers (e.g., "ZHLN::ALife::Components::ALifeComponent" ->
+	// "Components::ALifeComponent")
 	size_t last_colon = name.find_last_of(':');
 	if (last_colon != std::string_view::npos) {
 		name.remove_prefix(last_colon + 1);
@@ -131,7 +144,9 @@ class ZHLN_API ComponentFamily {
   public:
 	static uint32_t ResolveDenseID(uint32_t typeHash) noexcept;
 
-	template <typename T> static uint32_t GetTypeID() noexcept {
+	template <typename T>
+		requires CompleteType<T>
+	static uint32_t GetTypeID() noexcept {
 		static uint32_t denseID = ResolveDenseID(GetTypeHash<T>());
 		return denseID;
 	}
@@ -174,6 +189,15 @@ class ZHLN_API Registry {
 		(RegisterComponent<Components>(BoxedName<Components>()), ...);
 	}
 
+	/**
+	 * @brief Automatically discovers and registers all nested component structures
+	 * declared within a given container class using compile-time reflection.
+	 */
+	template <typename Container> void RegisterAllComponentsIn() {
+		ZHLN::Reflect::ForEachNestedType<Container>(
+			[this]<typename Comp>() { this->RegisterComponent<Comp>(BoxedName<Comp>()); });
+	}
+
 	template <typename T> T& Add(Entity entity, T&& component) {
 		uint32_t id = ComponentFamily::GetTypeID<T>();
 		EnsureComponentCapacity(id);
@@ -199,7 +223,9 @@ class ZHLN_API Registry {
 		}
 	}
 
-	template <typename T> T* Get(Entity entity) const noexcept {
+	template <typename T>
+		requires CompleteType<T>
+	T* Get(Entity entity) const noexcept {
 		uint32_t id = ComponentFamily::GetTypeID<T>();
 		if (id >= _compCapacity || !_components[id]) {
 			return nullptr;
@@ -207,7 +233,9 @@ class ZHLN_API Registry {
 		return static_cast<T*>(_components[id]->Get(entity));
 	}
 
-	template <typename T> ZHLN::RestrictSpan<T> GetRawArray() const noexcept {
+	template <typename T>
+		requires CompleteType<T>
+	ZHLN::RestrictSpan<T> GetRawArray() const noexcept {
 		uint32_t id = ComponentFamily::GetTypeID<T>();
 		if (id >= _compCapacity || !_components[id]) {
 			ZHLN::Log("Unknown component: {}", BoxedName<T>());
@@ -217,7 +245,9 @@ class ZHLN_API Registry {
 		return ZHLN::RestrictSpan<T>(reinterpret_cast<T*>(set->GetDataArray()), set->Count());
 	}
 
-	template <typename T> std::span<const Entity> GetEntitiesWith() const noexcept {
+	template <typename T>
+		requires CompleteType<T>
+	std::span<const Entity> GetEntitiesWith() const noexcept {
 		uint32_t id = ComponentFamily::GetTypeID<T>();
 		if (id >= _compCapacity || !_components[id]) {
 			return {};

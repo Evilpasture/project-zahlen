@@ -51,13 +51,13 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 	auto& reg = engine.GetRegistry();
 	auto& cam = engine.GetCamera();
 
-	auto cameraEntities = reg.GetEntitiesWith<TargetCameraComponent>();
+	auto cameraEntities = reg.GetEntitiesWith<Components::TargetCameraComponent>();
 	if (cameraEntities.empty()) {
 		return;
 	}
 
 	Entity camEnt = cameraEntities[0];
-	auto* camComp = reg.Get<TargetCameraComponent>(camEnt);
+	auto* camComp = reg.Get<Components::TargetCameraComponent>(camEnt);
 	if ((camComp == nullptr) || !reg.IsAlive(camComp->target)) {
 		return;
 	}
@@ -65,13 +65,13 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 	// ========================================================================
 	// FREE-CAM INTERCEPTION BRANCH
 	// ========================================================================
-	if (reg.Get<FreeCamTagComponent>(camEnt) != nullptr) {
+	if (reg.Get<Components::FreeCamTagComponent>(camEnt) != nullptr) {
 		const auto& input = engine.GetInput();
 
-		// 1. Resolve dynamic fly speed from player's MovementComponent
+		// 1. Resolve dynamic fly speed from player's Components::MovementComponent
 		float baseSpeed = 12.0f;
 		if (reg.IsAlive(camComp->target)) {
-			if (auto* targetMove = reg.Get<MovementComponent>(camComp->target)) {
+			if (auto* targetMove = reg.Get<Components::MovementComponent>(camComp->target)) {
 				baseSpeed = targetMove->speed;
 			}
 		}
@@ -123,7 +123,7 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 	JPH::Vec3 targetPos = JPH::Vec3::sZero();
 
 	// 1. Resolve Target Position
-	if (auto* state = reg.Get<PhysicsStateComponent>(targetEnt)) {
+	if (auto* state = reg.Get<Components::PhysicsStateComponent>(targetEnt)) {
 		// --- FIX: If camera smoothing is active, target the raw latest physics frame. ---
 		// --- If snapping is active, target the linearly-interpolated position.         ---
 		if (camComp->stiffness > 0.0f) {
@@ -133,9 +133,9 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 			targetPos =
 				state->prevPosition + clampedAlpha * (state->currPosition - state->prevPosition);
 		}
-	} else if (auto* trans = reg.Get<TransformComponent>(targetEnt)) {
+	} else if (auto* trans = reg.Get<Components::Components::TransformComponent>(targetEnt)) {
 		targetPos = JPH::Vec3(trans->position[0], trans->position[1], trans->position[2]);
-	} else if (auto* meshComp = reg.Get<MeshComponent>(targetEnt)) {
+	} else if (auto* meshComp = reg.Get<Components::MeshComponent>(targetEnt)) {
 		targetPos = meshComp->localTransform.GetTranslation();
 	}
 

@@ -3,6 +3,7 @@
 
 #pragma once
 // clang-format off
+#include "Zahlen/Components.hpp"
 #include "detail/Atomic.hpp"
 #include <Jolt/Jolt.h>
 #include <Jolt/Core/Array.h>
@@ -19,7 +20,6 @@ struct cgltf_skin;
 
 namespace ZHLN {
 class RenderContext;
-struct AnimatorComponent;
 namespace ECS {
 class Registry;
 }
@@ -58,9 +58,10 @@ class ZHLN_API AnimationSystem {
 	void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt);
 
   private:
-	void UpdateAnimatorState(AnimatorComponent& anim, cgltf_data* data, float dt) const noexcept;
+	void UpdateAnimatorState(Components::AnimatorComponent& anim, cgltf_data* data,
+							 float dt) const noexcept;
 
-	void SampleAndBlendPose(const AnimatorComponent& anim, cgltf_data* data,
+	void SampleAndBlendPose(const Components::AnimatorComponent& anim, cgltf_data* data,
 							SampledTransformMap& outTransforms) const noexcept;
 
 	static void SampleAnimation(cgltf_animation& anim, float animTime,

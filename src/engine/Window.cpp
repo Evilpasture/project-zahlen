@@ -168,8 +168,8 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
 				if (action == GLFW_PRESS || action == GLFW_REPEAT) {
 					if (auto* engine = GetEngineContext()) {
 						auto& reg = engine->GetRegistry();
-						for (Entity e : reg.GetEntitiesWith<UITextInputComponent>()) {
-							auto* input = reg.Get<UITextInputComponent>(e);
+						for (Entity e : reg.GetEntitiesWith<Components::UITextInputComponent>()) {
+							auto* input = reg.Get<Components::UITextInputComponent>(e);
 							if (input && input->isFocused) {
 								std::string_view curr = input->text;
 
@@ -182,7 +182,7 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
 									input->cursorIndex--;
 
 									// Force immediate redraw
-									if (auto* text = reg.Get<TextComponent>(e)) {
+									if (auto* text = reg.Get<Components::TextComponent>(e)) {
 										text->mesh.posBuffer = BufferHandle::Invalid;
 									}
 								} else if (key == GLFW_KEY_LEFT && input->cursorIndex > 0) {
@@ -201,8 +201,8 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
 			glfwSetCharCallback(_impl->handle, [](GLFWwindow* win, unsigned int codepoint) {
 				if (auto* engine = GetEngineContext()) {
 					auto& reg = engine->GetRegistry();
-					for (Entity e : reg.GetEntitiesWith<UITextInputComponent>()) {
-						auto* input = reg.Get<UITextInputComponent>(e);
+					for (Entity e : reg.GetEntitiesWith<Components::UITextInputComponent>()) {
+						auto* input = reg.Get<Components::UITextInputComponent>(e);
 						if (input && input->isFocused) {
 							// Append only printable ASCII characters within buffer limits
 							if (codepoint >= 32 && codepoint <= 126 && input->text.size() < 255) {
@@ -214,7 +214,7 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
 								input->cursorIndex++;
 
 								// Force immediate redraw
-								if (auto* text = reg.Get<TextComponent>(e)) {
+								if (auto* text = reg.Get<Components::TextComponent>(e)) {
 									text->mesh.posBuffer = BufferHandle::Invalid;
 								}
 							}

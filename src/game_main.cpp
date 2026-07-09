@@ -5,7 +5,6 @@
 #include "Zahlen/Audio.hpp"
 #include "Zahlen/CommandLine.hpp"
 #include "Zahlen/Input.hpp"
-#include "Zahlen/alife/Types.hpp"
 #include "ecs/ECS.hpp"
 #include "ecs/EntityCommandBuffer.hpp"
 #include "ecs/SystemGraph.hpp"
@@ -41,6 +40,7 @@
 #include <engine/system/InteractionSystem.hpp>
 #include <engine/system/UIInteractionSystem.hpp>
 #include <expected>
+#include <meta>
 #include <physics/PhysicsWorld.hpp>
 #include <print>
 #include <threading/Mutex.hpp>
@@ -165,8 +165,8 @@ void Sys_PostProcess(Engine& engine, float /*dt*/) {
 	auto& reg = engine.GetRegistry();
 	auto& rc = engine.GetRenderContext();
 
-	for (Entity e : reg.GetEntitiesWith<PostProcessSettingsComponent>()) {
-		if (auto* pp = reg.Get<PostProcessSettingsComponent>(e)) {
+	for (Entity e : reg.GetEntitiesWith<Components::PostProcessSettingsComponent>()) {
+		if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(e)) {
 			Renderer::SetGISettings(rc, {.mode = pp->giMode,
 										 .aoRadius = pp->aoRadius,
 										 .aoBias = pp->aoBias,
@@ -185,41 +185,44 @@ void BuildSystemGraphs(Engine& engine) {
 	auto& updateGraph = engine.GetUpdateGraph();
 	auto& renderGraph = engine.GetRenderGraph();
 
-	updateGraph.AddSystem(
-		{.update_func = Sys_VisualInterpolation,
-		 .name = "VisualInterpolationSystem",
-		 .access_pattern = {Read<PhysicsStateComponent>(), Write<TransformComponent>()},
-		 .enabled = true});
+	updateGraph.AddSystem({.update_func = Sys_VisualInterpolation,
+						   .name = "VisualInterpolationSystem",
+						   .access_pattern = {Read<Components::PhysicsStateComponent>(),
+											  Write<Components::TransformComponent>()},
+						   .enabled = true});
 
 	updateGraph.AddSystem({.update_func = Sys_Animation,
 						   .name = "AnimationSystem",
-						   .access_pattern = {Read<MovementComponent>(), Write<MeshComponent>()},
+						   .access_pattern = {Read<Components::MovementComponent>(),
+											  Write<Components::MeshComponent>()},
 						   .enabled = true});
 
 	updateGraph.AddSystem(
 		{.update_func = Sys_Articulation,
 		 .name = "ArticulationSystem",
-		 .access_pattern = {Read<PhysicsComponent>(), Read<MeshComponent>(),
-							Write<RagdollComponent>(), Write<TransformComponent>()},
+		 .access_pattern = {Read<Components::PhysicsComponent>(), Read<Components::MeshComponent>(),
+							Write<Components::RagdollComponent>(),
+							Write<Components::TransformComponent>()},
 		 .enabled = true});
 
 	updateGraph.AddSystem({.update_func = Sys_Transform,
 						   .name = "TransformSystem",
-						   .access_pattern = {Read<HierarchyComponent>(),
-											  Read<TransformComponent>(), Write<MeshComponent>()},
+						   .access_pattern = {Read<Components::HierarchyComponent>(),
+											  Read<Components::TransformComponent>(),
+											  Write<Components::MeshComponent>()},
 						   .enabled = true});
 
 	updateGraph.AddSystem({.update_func = Sys_PostProcess,
 						   .name = "PostProcessSystem",
-						   .access_pattern = {Read<PostProcessSettingsComponent>()},
+						   .access_pattern = {Read<Components::PostProcessSettingsComponent>()},
 						   .enabled = true});
 
-	updateGraph.AddSystem(
-		{.update_func = Sys_Audio,
-		 .name = "AudioSystem",
-		 .access_pattern = {Read<PhysicsComponent>(), Read<ALife::ALifeComponent>(),
-							Write<AudioSourceComponent>()},
-		 .enabled = true});
+	updateGraph.AddSystem({.update_func = Sys_Audio,
+						   .name = "AudioSystem",
+						   .access_pattern = {Read<Components::PhysicsComponent>(),
+											  Read<Components::ALifeComponent>(),
+											  Write<Components::AudioSourceComponent>()},
+						   .enabled = true});
 
 	updateGraph.AddSystem({.update_func = Sys_ParticleSpawner,
 						   .name = "ParticleSpawnerExample",
@@ -232,9 +235,12 @@ void BuildSystemGraphs(Engine& engine) {
 								   sys.Update(eng, dt);
 							   },
 						   .name = "InteractionSystem",
-						   .access_pattern = {Write<TriggerComponent>(), Write<ContainerComponent>(),
-											  Write<PickupComponent>(), Read<ItemBaseComponent>(),
-											  Read<UsableComponent>(), Read<MovementComponent>()},
+						   .access_pattern = {Write<Components::TriggerComponent>(),
+											  Write<Components::ContainerComponent>(),
+											  Write<Components::PickupComponent>(),
+											  Read<Components::ItemBaseComponent>(),
+											  Read<Components::UsableComponent>(),
+											  Read<Components::MovementComponent>()},
 						   .enabled = true});
 
 	updateGraph.Compile();
@@ -242,14 +248,15 @@ void BuildSystemGraphs(Engine& engine) {
 	renderGraph.AddSystem(
 		{.update_func = Sys_Culling,
 		 .name = "CullingSystem",
-		 .access_pattern = {Read<MeshComponent>(), Read<CameraSystem::CameraComponent>()},
+		 .access_pattern = {Read<Components::MeshComponent>(), Read<Components::CameraComponent>()},
 		 .enabled = true});
 
 	renderGraph.AddSystem(
 		{.update_func = Sys_Lighting,
 		 .name = "LightingSystem",
-		 .access_pattern = {Read<LightingSystem::LightComponent>(), Read<TransformComponent>(),
-							Read<NameComponent>(), Write<MeshComponent>()},
+		 .access_pattern = {Read<Components::LightComponent>(),
+							Read<Components::TransformComponent>(),
+							Read<Components::NameComponent>(), Write<Components::MeshComponent>()},
 		 .enabled = true});
 
 	renderGraph.Compile();
@@ -271,36 +278,27 @@ bool InitializeGame(Engine& engine) {
 	}
 	Material lineMat = lineMat_res.value();
 
-	reg.RegisterComponents<
-		TransformComponent, MeshComponent, PhysicsComponent, PhysicsStateComponent,
-		MovementComponent, ALife::ALifeComponent, RagdollComponent, NameComponent,
-		TargetCameraComponent, InputSystem::InputComponent, LightingSystem::LightComponent,
-		PostProcessSettingsComponent, CameraSystem::CameraComponent, PlayerTagComponent,
-		MainCameraTagComponent, GlobalSettingsTagComponent, AASettingsComponent, TextComponent,
-		UISettingsComponent, AudioSourceComponent, PBRComponent, ItemBaseComponent, PickupComponent,
-		UsableComponent, ContainerComponent, TriggerComponent, DebugSettingsComponent,
-		SunTagComponent, FreeCamTagComponent, ShadowSettingsComponent, UIRectComponent,
-		UIPanelComponent, UIButtonComponent, UIDragComponent, UIStackComponent,
-		UITextInputComponent, AnimatorComponent>();
+	reg.RegisterAllComponentsIn<ZHLN::Components>();
 
 	// Spawn a blank, static camera just to render the main menu
 	Entity cameraEntity = reg.Create();
-	reg.Add(cameraEntity, MainCameraTagComponent{});
-	reg.Add(cameraEntity, CameraSystem::CameraComponent{});
-	reg.Add(cameraEntity, AASettingsComponent{.state = {.mode = AAMode::TAA, .taaFeedback = 0.95f}});
+	reg.Add(cameraEntity, Components::MainCameraTagComponent{});
+	reg.Add(cameraEntity, Components::CameraComponent{});
+	reg.Add(cameraEntity,
+			Components::AASettingsComponent{.state = {.mode = AAMode::TAA, .taaFeedback = 0.95f}});
 
 	Entity settingsEntity = reg.Create();
-	reg.Add(settingsEntity, GlobalSettingsTagComponent{});
-	reg.Add(settingsEntity, PostProcessSettingsComponent{});
-	reg.Add(settingsEntity, ShadowSettingsComponent{});
-	reg.Add(settingsEntity,
-			DebugSettingsComponent{.debugLineVbo = static_cast<uint64_t>(lineMesh.posBuffer),
-								   .debugLinePipeline = static_cast<uint64_t>(lineMat.pipeline),
-								   .debugLineAlbedo = lineMat.albedoIndex,
-								   .physicsDrawMode = 0});
+	reg.Add(settingsEntity, Components::GlobalSettingsTagComponent{});
+	reg.Add(settingsEntity, Components::PostProcessSettingsComponent{});
+	reg.Add(settingsEntity, Components::ShadowSettingsComponent{});
+	reg.Add(settingsEntity, Components::DebugSettingsComponent{
+								.debugLineVbo = static_cast<uint64_t>(lineMesh.posBuffer),
+								.debugLinePipeline = static_cast<uint64_t>(lineMat.pipeline),
+								.debugLineAlbedo = lineMat.albedoIndex,
+								.physicsDrawMode = 0});
 
 	Entity uiSettings = reg.Create();
-	reg.Add(uiSettings, UISettingsComponent{});
+	reg.Add(uiSettings, Components::UISettingsComponent{});
 	CreativeWorksFactory::CreateFontAtlasTexture(rc);
 
 	BuildSystemGraphs(engine);

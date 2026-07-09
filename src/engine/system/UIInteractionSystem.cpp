@@ -16,8 +16,8 @@ void UIInteractionSystem::Update(Engine& engine) {
 	auto& input = engine.GetInput();
 	auto mouse = input.GetMouse();
 
-	auto entities = reg.GetEntitiesWith<UIRectComponent>();
-	auto rects = reg.GetRawArray<UIRectComponent>();
+	auto entities = reg.GetEntitiesWith<Components::UIRectComponent>();
+	auto rects = reg.GetRawArray<Components::UIRectComponent>();
 
 	if (entities.empty()) {
 		return;
@@ -26,13 +26,13 @@ void UIInteractionSystem::Update(Engine& engine) {
 	bool leftMouseDown = input.IsMouseButtonDown(KeyCode::LButton);
 
 	// 1. Process active dragging
-	for (Entity e : reg.GetEntitiesWith<UIDragComponent>()) {
-		auto* drag = reg.Get<UIDragComponent>(e);
+	for (Entity e : reg.GetEntitiesWith<Components::UIDragComponent>()) {
+		auto* drag = reg.Get<Components::UIDragComponent>(e);
 		if (drag->isDragging) {
 			if (!leftMouseDown) {
 				drag->isDragging = false;
 			} else {
-				if (auto* targetRect = reg.Get<UIRectComponent>(drag->targetEntity)) {
+				if (auto* targetRect = reg.Get<Components::UIRectComponent>(drag->targetEntity)) {
 					targetRect->x += mouse.deltaX;
 					targetRect->y += mouse.deltaY;
 				}
@@ -50,8 +50,7 @@ void UIInteractionSystem::Update(Engine& engine) {
 	for (size_t i = 0; i < entities.size(); ++i) {
 		sortedEntries.push_back({.rawIndex = i, .depth = rects[i].hierarchyDepth});
 	}
-	std::ranges::sort(sortedEntries,
-					  [](const auto& a, const auto& b) { return a.depth > b.depth; });
+	std::ranges::sort(sortedEntries, [](const auto& a, const auto& b) { return a.depth > b.depth; });
 
 	bool clickConsumed = false;
 	bool focusCaptured = false;
@@ -59,7 +58,7 @@ void UIInteractionSystem::Update(Engine& engine) {
 	for (const auto& entry : sortedEntries) {
 		Entity e = entities[entry.rawIndex];
 		const auto& rect = rects[entry.rawIndex];
-		auto* button = reg.Get<UIButtonComponent>(e);
+		auto* button = reg.Get<Components::UIButtonComponent>(e);
 
 		if (button == nullptr) {
 			continue;
@@ -82,15 +81,15 @@ void UIInteractionSystem::Update(Engine& engine) {
 				button->Set(UIButton::Pressed, true);
 
 				// Handle drag start
-				if (auto* drag = reg.Get<UIDragComponent>(e)) {
+				if (auto* drag = reg.Get<Components::UIDragComponent>(e)) {
 					drag->isDragging = true;
 				}
 
 				// Handle focus capture
-				if (reg.Get<UITextInputComponent>(e) != nullptr) {
+				if (reg.Get<Components::UITextInputComponent>(e) != nullptr) {
 					focusCaptured = true;
-					for (Entity other : reg.GetEntitiesWith<UITextInputComponent>()) {
-						if (auto* inputComp = reg.Get<UITextInputComponent>(other)) {
+					for (Entity other : reg.GetEntitiesWith<Components::UITextInputComponent>()) {
+						if (auto* inputComp = reg.Get<Components::UITextInputComponent>(other)) {
 							inputComp->isFocused = (other == e);
 						}
 					}
@@ -112,8 +111,8 @@ void UIInteractionSystem::Update(Engine& engine) {
 
 	// If clicked blank space outside any text fields, clear active focus
 	if (leftMouseDown && !focusCaptured) {
-		for (Entity e : reg.GetEntitiesWith<UITextInputComponent>()) {
-			if (auto* inputComp = reg.Get<UITextInputComponent>(e)) {
+		for (Entity e : reg.GetEntitiesWith<Components::UITextInputComponent>()) {
+			if (auto* inputComp = reg.Get<Components::UITextInputComponent>(e)) {
 				inputComp->isFocused = false;
 			}
 		}

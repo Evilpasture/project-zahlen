@@ -24,11 +24,11 @@ LightingSystem::GetSunDirectionAndIntensity(const ECS::Registry& reg) noexcept {
 	float sunIntensity = 180.0f;	 // Default fallback solar constant
 	bool sunFound = false;
 
-	// Search for any LightComponent explicitly marked as LightType::Sun
-	for (Entity e : reg.GetEntitiesWith<LightComponent>()) {
-		auto* light = reg.Get<LightComponent>(e);
+	// Search for any Components::LightComponent explicitly marked as LightType::Sun
+	for (Entity e : reg.GetEntitiesWith<Components::LightComponent>()) {
+		auto* light = reg.Get<Components::LightComponent>(e);
 		if (light->type == LightType::Sun) {
-			if (auto* trans = reg.Get<TransformComponent>(e)) {
+			if (auto* trans = reg.Get<Components::Components::TransformComponent>(e)) {
 				JPH::Mat44 worldMat = trans->GetMatrix();
 				// Local +Z is backward (pointing TO the sun) because local -Z is forward (pointing
 				// away)
@@ -42,14 +42,14 @@ LightingSystem::GetSunDirectionAndIntensity(const ECS::Registry& reg) noexcept {
 
 	// Fallback to legacy tag search if no explicit Sun type was registered
 	if (!sunFound) {
-		auto sunEntities = reg.GetEntitiesWith<SunTagComponent>();
+		auto sunEntities = reg.GetEntitiesWith<Components::SunTagComponent>();
 		if (!sunEntities.empty()) {
 			Entity sunEnt = sunEntities[0];
-			if (auto* trans = reg.Get<TransformComponent>(sunEnt)) {
+			if (auto* trans = reg.Get<Components::Components::TransformComponent>(sunEnt)) {
 				JPH::Mat44 worldMat = trans->GetMatrix();
 				sunDirection = worldMat.GetColumn3(2);
 			}
-			if (auto* light = reg.Get<LightComponent>(sunEnt)) {
+			if (auto* light = reg.Get<Components::LightComponent>(sunEnt)) {
 				sunIntensity = light->intensity;
 			}
 		}
@@ -64,7 +64,7 @@ void LightingSystem::Update(Engine& engine, [[maybe_unused]] float dt) {
 
 	// 1. DYNAMIC SHADOW ALLOCATION FOR PUNCTUAL LIGHTS
 	Entity playerEnt = NullEntity;
-	for (Entity e : reg.GetEntitiesWith<PlayerTagComponent>()) {
+	for (Entity e : reg.GetEntitiesWith<Components::PlayerTagComponent>()) {
 		playerEnt = e;
 		break;
 	}
@@ -76,16 +76,16 @@ void LightingSystem::Update(Engine& engine, [[maybe_unused]] float dt) {
 		};
 		ZHLN::Array<LightDistance> lightDistances;
 
-		if (auto* playerTrans = reg.Get<TransformComponent>(playerEnt)) {
+		if (auto* playerTrans = reg.Get<Components::Components::TransformComponent>(playerEnt)) {
 			JPH::Vec3 playerPos = playerTrans->position;
 
-			for (Entity e : reg.GetEntitiesWith<LightComponent>()) {
-				auto* light = reg.Get<LightComponent>(e);
+			for (Entity e : reg.GetEntitiesWith<Components::LightComponent>()) {
+				auto* light = reg.Get<Components::LightComponent>(e);
 				light->shadowLayer = -1; // Reset to disabled initially
 
 				// Punctual shadows are only allocated to local point/spot lights
 				if (light->type == LightType::Point || light->type == LightType::Spot) {
-					if (auto* trans = reg.Get<TransformComponent>(e)) {
+					if (auto* trans = reg.Get<Components::Components::TransformComponent>(e)) {
 						float dSq = (trans->position - playerPos).LengthSq();
 						lightDistances.push_back({.entity = e, .distSq = dSq});
 					}
@@ -97,14 +97,15 @@ void LightingSystem::Update(Engine& engine, [[maybe_unused]] float dt) {
 				return a.distSq < b.distSq;
 			});
 
-			auto shadowEntities = reg.GetEntitiesWith<ShadowSettingsComponent>();
+			auto shadowEntities = reg.GetEntitiesWith<Components::ShadowSettingsComponent>();
 			if (!shadowEntities.empty()) {
-				auto* shadowSettings = reg.Get<ShadowSettingsComponent>(shadowEntities[0]);
+				auto* shadowSettings =
+					reg.Get<Components::ShadowSettingsComponent>(shadowEntities[0]);
 				uint32_t shadowCasters =
 					std::min(static_cast<uint32_t>(shadowSettings->maxPunctualShadows),
 							 static_cast<uint32_t>(lightDistances.size()));
 				for (uint32_t i = 0; i < shadowCasters; ++i) {
-					reg.Get<LightComponent>(lightDistances[i].entity)->shadowLayer = i;
+					reg.Get<Components::LightComponent>(lightDistances[i].entity)->shadowLayer = i;
 				}
 			}
 		}
@@ -113,12 +114,12 @@ void LightingSystem::Update(Engine& engine, [[maybe_unused]] float dt) {
 	// 2. COMPILE GPU LIGHTS
 	ZHLN::Array<GPULight> sceneLights;
 	JPH::Mat44 viewMatrix = engine.GetCamera().GetViewMatrix();
-	auto lightEntities = reg.GetEntitiesWith<LightComponent>();
+	auto lightEntities = reg.GetEntitiesWith<Components::LightComponent>();
 	sceneLights.reserve(lightEntities.size());
 
 	for (Entity e : lightEntities) {
-		auto* light = reg.Get<LightComponent>(e);
-		auto* trans = reg.Get<TransformComponent>(e);
+		auto* light = reg.Get<Components::LightComponent>(e);
+		auto* trans = reg.Get<Components::Components::TransformComponent>(e);
 
 		GPULight gpuLight{};
 		gpuLight.type = light->type;

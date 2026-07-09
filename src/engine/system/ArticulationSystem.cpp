@@ -25,8 +25,8 @@ static void VerifyArticulationStateConsistency(const ECS::Registry& reg) noexcep
 	}
 	testsRun = true;
 
-	auto entities = reg.GetEntitiesWith<RagdollComponent>();
-	auto ragdolls = reg.GetRawArray<RagdollComponent>();
+	auto entities = reg.GetEntitiesWith<Components::RagdollComponent>();
+	auto ragdolls = reg.GetRawArray<Components::RagdollComponent>();
 
 	for (size_t i = 0; i < entities.size(); ++i) {
 		Entity e = entities[i];
@@ -69,20 +69,19 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
 	const auto& world = engine.GetPhysicsContext().GetWorld();
 	auto& rc = engine.GetRenderContext();
 
-	auto entities = reg.GetEntitiesWith<RagdollComponent>();
-	auto ragdolls = reg.GetRawArray<RagdollComponent>();
+	auto entities = reg.GetEntitiesWith<Components::RagdollComponent>();
+	auto ragdolls = reg.GetRawArray<Components::RagdollComponent>();
 
 	for (size_t i = 0; i < entities.size(); ++i) {
 		Entity e = entities[i];
-		RagdollComponent& ragComp = ragdolls[i];
-		auto* phys = reg.Get<PhysicsComponent>(e);
+		Components::RagdollComponent& ragComp = ragdolls[i];
+		auto* phys = reg.Get<Components::PhysicsComponent>(e);
 
 		if ((ragComp.ragdollInstance == nullptr) || (ragComp.gltfSkin == nullptr)) {
 			continue;
 		}
 
-		if (ragComp.state == RagdollState::Inactive &&
-			ragComp.prevState == RagdollState::Inactive) {
+		if (ragComp.state == RagdollState::Inactive && ragComp.prevState == RagdollState::Inactive) {
 			continue;
 		}
 
@@ -183,14 +182,14 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
 				ragdoll->GetPose(actualRootOffset, physicalWorldJoints.data());
 			}
 
-			// Resolve jointOffset and update the TransformComponent of visual meshes
+			// Resolve jointOffset and update the Components::TransformComponent of visual meshes
 			uint32_t jointOffset = ragComp.jointOffset;
-			auto allEntities = reg.GetEntitiesWith<MeshComponent>();
-			auto allMeshes = reg.GetRawArray<MeshComponent>();
+			auto allEntities = reg.GetEntitiesWith<Components::MeshComponent>();
+			auto allMeshes = reg.GetRawArray<Components::MeshComponent>();
 			for (size_t k = 0; k < allEntities.size(); ++k) {
 				if (allMeshes[k].gltfSkin == skin) {
 					jointOffset = allMeshes[k].jointOffset;
-					if (auto* trans = reg.Get<TransformComponent>(allEntities[k])) {
+					if (auto* trans = reg.Get<Components::Components::TransformComponent>(allEntities[k])) {
 						trans->position = JPH::Vec3(actualRootOffset);
 						trans->rotation = JPH::Quat::sIdentity();
 					}
@@ -199,7 +198,7 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
 
 			// Calculate final skinning matrices: Final = InvRoot * PhysicalWorld *
 			// InverseBindMatrix This transforms from mesh-local to root-relative space, which is
-			// then brought to world space by the mesh's TransformComponent (positioned at
+			// then brought to world space by the mesh's Components::TransformComponent (positioned at
 			// actualRootOffset).
 			JPH::Array<JPH::Mat44> finalSkinningMatrices(ragComp.jointCount);
 			JPH::Mat44 invRoot = JPH::Mat44::sTranslation(-JPH::Vec3(actualRootOffset));

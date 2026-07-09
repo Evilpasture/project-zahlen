@@ -112,8 +112,9 @@ inline JPH::AABox CalculateFrustumAABB(const JPH::Mat44& viewProj) {
 			for (float x : {-1.0f, 1.0f}) {
 				JPH::Vec4 worldPos = invVP * JPH::Vec4(x, y, z, 1.0f);
 				float w = worldPos.GetW();
-				if (std::abs(w) < 1e-6f)
+				if (std::abs(w) < 1e-6f) {
 					continue;
+				}
 				bounds.Encapsulate(
 					JPH::Vec3(worldPos.GetX() / w, worldPos.GetY() / w, worldPos.GetZ() / w));
 			}
@@ -161,12 +162,14 @@ inline uint16_t FloatToHalf(float f) {
 	uint32_t m = i & 0x007FFFFF;
 
 	// Handle Zero or extremely small denormals
-	if (e <= -15)
+	if (e <= -15) {
 		return (uint16_t)s;
+	}
 
 	// Handle Exponent overflow (for values > 65504)
-	if (e > 15)
+	if (e > 15) {
 		return (uint16_t)(s | 0x7C00);
+	}
 
 	// Re-bias exponent and pack
 	return (uint16_t)(s | ((e + 15) << 10) | (m >> 13));

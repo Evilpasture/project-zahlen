@@ -112,7 +112,7 @@ auto CreateTextMesh(RenderContext& ctx, const FontAtlas& font, const std::string
 				.indexCount = 0};
 }
 
-auto CreatePanelMesh(RenderContext& ctx, const UIRectComponent& rect, const UIPanelComponent& panel)
+auto CreatePanelMesh(RenderContext& ctx, const Components::UIRectComponent& rect, const Components::UIPanelComponent& panel)
 	-> Mesh {
 
 	float x0 = rect.computedAbsMinX;

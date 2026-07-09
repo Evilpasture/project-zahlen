@@ -37,10 +37,10 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 	auto& reg = engine.GetRegistry();
 
 	// 1. Retrieve the Shadow Settings Component safely
-	auto shadowSettingsEntities = reg.GetEntitiesWith<ShadowSettingsComponent>();
-	ShadowSettingsComponent* shadowSettings = nullptr;
+	auto shadowSettingsEntities = reg.GetEntitiesWith<Components::ShadowSettingsComponent>();
+	Components::ShadowSettingsComponent* shadowSettings = nullptr;
 	if (!shadowSettingsEntities.empty()) {
-		shadowSettings = reg.Get<ShadowSettingsComponent>(shadowSettingsEntities[0]);
+		shadowSettings = reg.Get<Components::ShadowSettingsComponent>(shadowSettingsEntities[0]);
 	}
 
 	if (shadowSettings != nullptr) {
@@ -101,13 +101,13 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 
 		// 1. Fetch player entity position
 		Entity playerEnt = NullEntity;
-		for (Entity e : reg.GetEntitiesWith<MovementComponent>()) {
+		for (Entity e : reg.GetEntitiesWith<Components::MovementComponent>()) {
 			playerEnt = e;
 			break;
 		}
 
 		if (playerEnt != NullEntity) {
-			if (auto* trans = reg.Get<TransformComponent>(playerEnt)) {
+			if (auto* trans = reg.Get<Components::TransformComponent>(playerEnt)) {
 				ImGui::Text("Player Pos:  X: %.2f, Y: %.2f, Z: %.2f", trans->position.GetX(),
 							trans->position.GetY(), trans->position.GetZ());
 			}
@@ -123,14 +123,14 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 	}
 	ImGui::End();
 
-	auto settingsEntities = reg.GetEntitiesWith<GlobalSettingsTagComponent>();
+	auto settingsEntities = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
 	if (settingsEntities.empty()) {
 		return;
 	}
 
 	Entity settingsEnt = settingsEntities[0];
-	auto* pp = reg.Get<PostProcessSettingsComponent>(settingsEnt);
-	auto* dbg = reg.Get<DebugSettingsComponent>(settingsEnt);
+	auto* pp = reg.Get<Components::PostProcessSettingsComponent>(settingsEnt);
+	auto* dbg = reg.Get<Components::DebugSettingsComponent>(settingsEnt);
 
 	if ((pp == nullptr) || (dbg == nullptr)) {
 		return;
@@ -149,17 +149,17 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 						   "  [Punctual shadows disabled (0ms overhead)]");
 	}
 
-	auto camEnts = reg.GetEntitiesWith<MainCameraTagComponent>();
+	auto camEnts = reg.GetEntitiesWith<Components::MainCameraTagComponent>();
 	if (!camEnts.empty()) {
 		Entity camEnt = camEnts[0];
-		bool isFreeCam = (reg.Get<FreeCamTagComponent>(camEnt) != nullptr);
+		bool isFreeCam = (reg.Get<Components::FreeCamTagComponent>(camEnt) != nullptr);
 
 		ImGui::SeparatorText("Camera Controls");
 		if (ImGui::Checkbox("Free Cam Mode (Fly)", &isFreeCam)) {
 			if (isFreeCam) {
-				reg.Add(camEnt, FreeCamTagComponent{});
+				reg.Add(camEnt, Components::FreeCamTagComponent{});
 			} else {
-				reg.Remove<FreeCamTagComponent>(camEnt);
+				reg.Remove<Components::FreeCamTagComponent>(camEnt);
 			}
 		}
 		if (isFreeCam) {
@@ -178,14 +178,14 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 	ImGui::Text("PBR Materials & Lights Controller");
 	ImGui::Separator();
 
-	PBRComponent* floorPbr = nullptr;
-	for (Entity e : reg.GetEntitiesWith<PBRComponent>()) {
-		if (auto* nameComp = reg.Get<NameComponent>(e)) {
+	Components::PBRComponent* floorPbr = nullptr;
+	for (Entity e : reg.GetEntitiesWith<Components::PBRComponent>()) {
+		if (auto* nameComp = reg.Get<Components::NameComponent>(e)) {
 			std::string nameLower(nameComp->name.c_str());
 			std::ranges::transform(nameLower, nameLower.begin(), ::tolower);
 			if (nameLower.contains("floor") || nameLower.contains("ground") ||
 				nameLower.contains("lobby")) {
-				floorPbr = reg.Get<PBRComponent>(e);
+				floorPbr = reg.Get<Components::PBRComponent>(e);
 				break;
 			}
 		}
@@ -197,8 +197,8 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 	}
 
 	int lightIdx = 1;
-	for (Entity e : reg.GetEntitiesWith<LightingSystem::LightComponent>()) {
-		if (auto* light = reg.Get<LightingSystem::LightComponent>(e)) {
+	for (Entity e : reg.GetEntitiesWith<Components::LightComponent>()) {
+		if (auto* light = reg.Get<Components::LightComponent>(e)) {
 			if (light->type == LightType::Point) {
 				std::string labelInt = std::format("Point Light {} Intensity", lightIdx);
 				std::string labelRad = std::format("Point Light {} Radius", lightIdx);

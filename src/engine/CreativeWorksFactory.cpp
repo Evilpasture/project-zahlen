@@ -73,15 +73,15 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
 	const uint32_t atlasSize = 512;
 	std::vector<uint8_t> alphaBitmap(static_cast<size_t>(atlasSize * atlasSize), 0);
 
-	// Retrieve active font settings from your UISettingsComponent
+	// Retrieve active font settings from your Components::UISettingsComponent
 	auto* engine = GetEngineContext();
 	auto& reg = engine->GetRegistry();
 
-	auto uiSettingsEntities = reg.GetEntitiesWith<UISettingsComponent>();
+	auto uiSettingsEntities = reg.GetEntitiesWith<Components::UISettingsComponent>();
 	if (uiSettingsEntities.empty()) {
 		return 0;
 	}
-	auto* uiSettings = reg.Get<UISettingsComponent>(uiSettingsEntities[0]);
+	auto* uiSettings = reg.Get<Components::UISettingsComponent>(uiSettingsEntities[0]);
 
 	stbtt_bakedchar bakedChars[96]; // ASCII 32 - 127
 									// Bake 24pt anti-aliased glyphs into the alpha channel

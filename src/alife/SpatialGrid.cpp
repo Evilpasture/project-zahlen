@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
+#include <Zahlen/Components.hpp>
 #include <Zahlen/alife/SpatialGrid.hpp>
 #include <cmath>
 #include <ecs/ECS.hpp>
@@ -32,7 +32,7 @@ int32_t SpatialGrid::GetCellIndex(JPH::RVec3Arg pos) const noexcept {
 }
 
 void SpatialGrid::UpdateEntity(ECS::Registry& reg, Entity handle, JPH::RVec3Arg old_pos) {
-	auto* comp = reg.Get<ALifeComponent>(handle);
+	auto* comp = reg.Get<Components::ALifeComponent>(handle);
 	if (!comp)
 		return;
 
@@ -53,12 +53,12 @@ void SpatialGrid::UpdateEntity(ECS::Registry& reg, Entity handle, JPH::RVec3Arg 
 		while (*curr != END_OF_LIST) {
 			if (*curr == handle.index) {
 				Entity dummy{.index = *curr, .generation = 0};
-				auto* curr_comp = reg.Get<ALifeComponent>(dummy);
+				auto* curr_comp = reg.Get<Components::ALifeComponent>(dummy);
 				*curr = curr_comp ? curr_comp->next_in_grid : END_OF_LIST;
 				break;
 			}
 			Entity dummy{.index = *curr, .generation = 0};
-			auto* curr_comp = reg.Get<ALifeComponent>(dummy);
+			auto* curr_comp = reg.Get<Components::ALifeComponent>(dummy);
 			if (!curr_comp)
 				break;
 			curr = &curr_comp->next_in_grid;
@@ -73,7 +73,7 @@ void SpatialGrid::UpdateEntity(ECS::Registry& reg, Entity handle, JPH::RVec3Arg 
 }
 
 void SpatialGrid::RemoveEntity(ECS::Registry& reg, Entity handle) {
-	auto* comp = reg.Get<ALifeComponent>(handle);
+	auto* comp = reg.Get<Components::ALifeComponent>(handle);
 	if (!comp)
 		return;
 
@@ -83,7 +83,7 @@ void SpatialGrid::RemoveEntity(ECS::Registry& reg, Entity handle) {
 		while (*curr != END_OF_LIST) {
 			if (*curr == handle.index) {
 				Entity dummy{.index = handle.index, .generation = 0};
-				auto* curr_comp = reg.Get<ALifeComponent>(dummy);
+				auto* curr_comp = reg.Get<Components::ALifeComponent>(dummy);
 
 				*curr = curr_comp ? curr_comp->next_in_grid : END_OF_LIST;
 
@@ -93,7 +93,7 @@ void SpatialGrid::RemoveEntity(ECS::Registry& reg, Entity handle) {
 				break;
 			}
 			Entity dummy{.index = *curr, .generation = 0};
-			auto* curr_comp = reg.Get<ALifeComponent>(dummy);
+			auto* curr_comp = reg.Get<Components::ALifeComponent>(dummy);
 			if (!curr_comp)
 				break;
 			curr = &curr_comp->next_in_grid;
@@ -124,7 +124,7 @@ uint32_t SpatialGrid::Query(const ECS::Registry& reg, JPH::RVec3Arg pos, float r
 			while (slot_idx != END_OF_LIST) {
 				// Generational bypass: we can lookup safely by index only
 				Entity dummy{.index = slot_idx, .generation = 0};
-				auto* comp = reg.Get<ALifeComponent>(dummy);
+				auto* comp = reg.Get<Components::ALifeComponent>(dummy);
 				if (!comp)
 					break;
 

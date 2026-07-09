@@ -17,7 +17,7 @@ void InteractionSystem::Update(Engine& engine, float dt) {
 	auto& input = engine.GetInput();
 
 	Entity playerEnt = NullEntity;
-	for (Entity e : reg.GetEntitiesWith<MovementComponent>()) {
+	for (Entity e : reg.GetEntitiesWith<Components::MovementComponent>()) {
 		playerEnt = e;
 		break;
 	}
@@ -26,15 +26,15 @@ void InteractionSystem::Update(Engine& engine, float dt) {
 		return;
 	}
 
-	auto* playerTrans = reg.Get<TransformComponent>(playerEnt);
+	auto* playerTrans = reg.Get<Components::Components::TransformComponent>(playerEnt);
 	if (playerTrans == nullptr) {
 		return;
 	}
 
 	JPH::Vec3 playerPos = playerTrans->position;
 
-	auto triggerEntities = reg.GetEntitiesWith<TriggerComponent>();
-	auto triggers = reg.GetRawArray<TriggerComponent>();
+	auto triggerEntities = reg.GetEntitiesWith<Components::TriggerComponent>();
+	auto triggers = reg.GetRawArray<Components::TriggerComponent>();
 
 	bool interactPressed = input.IsKeyDown(KeyCode::E);
 	static bool wasInteractPressed = false;
@@ -43,50 +43,50 @@ void InteractionSystem::Update(Engine& engine, float dt) {
 
 	for (size_t i = 0; i < triggerEntities.size(); ++i) {
 		Entity triggerEnt = triggerEntities[i];
-		TriggerComponent& trigger = triggers[i];
+		Components::TriggerComponent& trigger = triggers[i];
 
 		// 1. Bitwise check for Active state
-		if (!(trigger.flags & TriggerComponent::Active)) {
-			trigger.flags &= ~TriggerComponent::PlayerInside;
+		if (!(trigger.flags & Components::TriggerComponent::Active)) {
+			trigger.flags &= ~Components::TriggerComponent::PlayerInside;
 			continue;
 		}
 
-		auto* trans = reg.Get<TransformComponent>(triggerEnt);
+		auto* trans = reg.Get<Components::Components::TransformComponent>(triggerEnt);
 		if (trans == nullptr) {
 			continue;
 		}
 
 		float dist = (trans->position - playerPos).Length();
 		if (dist <= trigger.radius) {
-			trigger.flags |= TriggerComponent::PlayerInside;
+			trigger.flags |= Components::TriggerComponent::PlayerInside;
 
 			if (interactJustPressed) {
 				bool processed = false;
 
 				// Handle Pickups
-				if (auto* pickup = reg.Get<PickupComponent>(triggerEnt)) {
-					auto* itemBase = reg.Get<ItemBaseComponent>(triggerEnt);
+				if (auto* pickup = reg.Get<Components::PickupComponent>(triggerEnt)) {
+					auto* itemBase = reg.Get<Components::ItemBaseComponent>(triggerEnt);
 					if (itemBase != nullptr) {
-						auto* container = reg.Get<ContainerComponent>(playerEnt);
+						auto* container = reg.Get<Components::ContainerComponent>(playerEnt);
 						if (container == nullptr) {
-							container = &reg.Add(playerEnt, ContainerComponent{});
+							container = &reg.Add(playerEnt, Components::ContainerComponent{});
 						}
 
-						if (container->count < ContainerComponent::MAX_SLOTS) {
+						if (container->count < Components::ContainerComponent::MAX_SLOTS) {
 							container->slots[container->count++] = triggerEnt;
 							pickup->isPickedUp = 1;
 
-							if (auto* phys = reg.Get<PhysicsComponent>(triggerEnt)) {
+							if (auto* phys = reg.Get<Components::PhysicsComponent>(triggerEnt)) {
 								Physics::DestroyBody(engine.GetPhysicsContext(),
 													 phys->physicsHandle);
-								reg.Remove<PhysicsComponent>(triggerEnt);
+								reg.Remove<Components::PhysicsComponent>(triggerEnt);
 							}
-							if (auto* mesh = reg.Get<MeshComponent>(triggerEnt)) {
-								reg.Remove<MeshComponent>(triggerEnt);
+							if (reg.Get<Components::MeshComponent>(triggerEnt) != nullptr) {
+								reg.Remove<Components::MeshComponent>(triggerEnt);
 							}
 
-							trigger.flags &= ~TriggerComponent::Active;
-							trigger.flags &= ~TriggerComponent::PlayerInside;
+							trigger.flags &= ~Components::TriggerComponent::Active;
+							trigger.flags &= ~Components::TriggerComponent::PlayerInside;
 							processed = true;
 
 							Log("Picked up item hash ID: {}", itemBase->id);
@@ -100,7 +100,7 @@ void InteractionSystem::Update(Engine& engine, float dt) {
 
 				// Handle Usables (Integer Hash Matching)
 				if (!processed) {
-					if (auto* usable = reg.Get<UsableComponent>(triggerEnt)) {
+					if (auto* usable = reg.Get<Components::UsableComponent>(triggerEnt)) {
 						if (usable->scriptHash != 0) {
 							Log("Interacted! Dispatching event for script hash: {:#X}",
 								usable->scriptHash);
@@ -113,7 +113,7 @@ void InteractionSystem::Update(Engine& engine, float dt) {
 				}
 			}
 		} else {
-			trigger.flags &= ~TriggerComponent::PlayerInside;
+			trigger.flags &= ~Components::TriggerComponent::PlayerInside;
 		}
 	}
 }
