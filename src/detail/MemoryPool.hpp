@@ -34,8 +34,8 @@ template <typename T, size_t BlockCount = 1024> class ObjectPool {
 
 		void lock() noexcept {
 			bool expected = false;
-			while (!locked.compare_exchange_weak(expected, true, std::memory_order_acquire,
-												 std::memory_order_relaxed)) {
+			while (!locked.compare_exchange_weak(expected, true, std::memory_order::acquire,
+												 std::memory_order::relaxed)) {
 				expected = false;
 #if defined(__x86_64__) || defined(_M_X64)
 				_mm_pause();
@@ -47,7 +47,7 @@ template <typename T, size_t BlockCount = 1024> class ObjectPool {
 			}
 		}
 
-		void unlock() noexcept { locked.store(false, std::memory_order_release); }
+		void unlock() noexcept { locked.store(false, std::memory_order::release); }
 	};
 
   private:

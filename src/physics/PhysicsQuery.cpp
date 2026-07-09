@@ -39,7 +39,7 @@ static bool TryGetValidHandle(const PhysicsWorld& world, JPH::BodyID bodyID,
 		return false;
 	}
 
-	const uint8_t state = world.slotStates[handle.index].load(std::memory_order_acquire);
+	const uint8_t state = world.slotStates[handle.index].load(std::memory_order::acquire);
 
 	// Using the simplified C++ predicate
 	const SlotPredicate pred = GetSlotPredicate(state);
@@ -58,7 +58,7 @@ RaycastResult Raycast(const PhysicsContext& ctx, JPH::RVec3Arg origin, JPH::Vec3
 					  float maxDistance, ZHLN::Entity ignore) {
 	const auto& world = ctx.GetWorld();
 
-	if (world.isStepping.load(std::memory_order_relaxed))
+	if (world.isStepping.load(std::memory_order::relaxed))
 		return {};
 
 	float lengthSq = direction.LengthSq();
@@ -101,7 +101,7 @@ ShapeCastResult Shapecast(const PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::
 						  JPH::QuatArg rot, JPH::Vec3Arg direction, float maxDistance,
 						  ZHLN::Entity ignore) {
 	const auto& world = ctx.GetWorld();
-	if (world.isStepping.load(std::memory_order_relaxed))
+	if (world.isStepping.load(std::memory_order::relaxed))
 		return {};
 
 	float lengthSq = direction.LengthSq();
@@ -146,7 +146,7 @@ ShapeCastResult Shapecast(const PhysicsContext& ctx, JPH::ShapeRefC shape, JPH::
 void OverlapSphere(const PhysicsContext& ctx, JPH::RVec3Arg center, float radius,
 				   JPH::Array<ZHLN::Entity>& outResults) {
 	const auto& world = ctx.GetWorld();
-	if (world.isStepping.load(std::memory_order_relaxed))
+	if (world.isStepping.load(std::memory_order::relaxed))
 		return;
 
 	JPH::SphereShapeSettings settings(radius);
@@ -170,7 +170,7 @@ void OverlapSphere(const PhysicsContext& ctx, JPH::RVec3Arg center, float radius
 void OverlapAABB(const PhysicsContext& ctx, JPH::RVec3Arg minBox, JPH::RVec3Arg maxBox,
 				 JPH::Array<ZHLN::Entity>& outResults) {
 	const auto& world = ctx.GetWorld();
-	if (world.isStepping.load(std::memory_order_relaxed))
+	if (world.isStepping.load(std::memory_order::relaxed))
 		return;
 
 	JPH::AABox box((JPH::Vec3)minBox, (JPH::Vec3)maxBox);
@@ -190,7 +190,7 @@ void OverlapAABB(const PhysicsContext& ctx, JPH::RVec3Arg minBox, JPH::RVec3Arg 
 void QueryAABB(const PhysicsContext& ctx, JPH::Vec3Arg min, JPH::Vec3Arg max,
 			   JPH::Array<ZHLN::Entity>& outEntities) {
 	const auto& world = ctx.GetWorld();
-	if (world.isStepping.load(std::memory_order_relaxed))
+	if (world.isStepping.load(std::memory_order::relaxed))
 		return;
 
 	JPH::AABox box(min, max);
@@ -218,7 +218,7 @@ void FrustumCull(const PhysicsContext& ctx, const JPH::Mat44& viewProj, const Fr
 				 JPH::Array<ZHLN::Entity>& outEntities) {
 	const auto& world = ctx.GetWorld();
 
-	if (world.isStepping.load(std::memory_order_relaxed)) {
+	if (world.isStepping.load(std::memory_order::relaxed)) {
 		return;
 	}
 

@@ -145,7 +145,7 @@ template <QueueType QType, size_t Capacity = 8> class CommandRing {
 	};
 
 	[[nodiscard]] auto Acquire() noexcept -> Slot {
-		uint32_t slotIdx = _index.fetch_add(1, std::memory_order_relaxed) % Capacity;
+		uint32_t slotIdx = _index.fetch_add(1, std::memory_order::relaxed) % Capacity;
 
 		// If the GPU is still processing this slot's last submission, block here
 		vkWaitForFences(_device, 1, &_fences[slotIdx], VK_TRUE, UINT64_MAX);

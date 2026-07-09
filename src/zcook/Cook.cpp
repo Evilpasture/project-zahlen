@@ -309,7 +309,7 @@ int PackArchive(int argc, char** argv) {
 					entry.success = true;
 					std::fclose(f);
 				}
-				const uint32_t current = loadedCount.fetch_add(1, std::memory_order_relaxed) + 1;
+				const uint32_t current = loadedCount.fetch_add(1, std::memory_order::relaxed) + 1;
 				if (current % 10 == 0 || current == totalFiles) {
 					std::lock_guard<ZHLN::Mutex> lock(printMutex);
 					std::print("\r[zcook] Loading assets: {}/{} ({:.1f}%)", current, totalFiles,

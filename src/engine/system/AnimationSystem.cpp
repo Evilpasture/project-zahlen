@@ -17,7 +17,7 @@
 
 namespace ZHLN {
 uint32_t JointAllocator::Allocate(uint32_t count) noexcept {
-	uint32_t offset = nextOffset.fetch_add(count, std::memory_order_relaxed);
+	uint32_t offset = nextOffset.fetch_add(count, std::memory_order::relaxed);
 	if (offset + count > 8192) [[unlikely]] {
 		ZHLN::Log("[JointAllocator] WARNING: Exceeded maximum joint matrix capacity (8192)!");
 	}

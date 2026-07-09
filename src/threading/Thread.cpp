@@ -155,13 +155,13 @@ Fiber* Fiber::Create(size_t stackSize, FiberFunc func, void* arg) noexcept {
 
 void Fiber::Resume(Fiber* target) noexcept {
 	//  Ensure the target OS thread has fully vacated this stack before we jump into it!
-	while (target->isRunning.load(std::memory_order_acquire)) {
+	while (target->isRunning.load(std::memory_order::acquire)) {
 		CPURelax();
 	}
 
 	Fiber* self = t_currentFiber;
 	target->caller = self;
-	target->isRunning.store(true, std::memory_order_release);
+	target->isRunning.store(true, std::memory_order::release);
 
 	SwapTEB(target);
 	t_currentFiber = target;
@@ -170,7 +170,7 @@ void Fiber::Resume(Fiber* target) noexcept {
 	ZHLN_Switch(&self->stackPointer, target->stackPointer);
 
 	// WE ARE BACK! The target has yielded to us, meaning it is safely off its stack!
-	target->isRunning.store(false, std::memory_order_release);
+	target->isRunning.store(false, std::memory_order::release);
 }
 
 void Fiber::Yield() noexcept {

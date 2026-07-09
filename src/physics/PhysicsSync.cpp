@@ -173,7 +173,7 @@ inline void ExecuteSyncPass(const uint32_t active_count,
 		const auto gen = static_cast<uint32_t>(handle >> 32);
 
 		const uint32_t safe_slot = (slot < map.slot_capacity) ? slot : 0;
-		const uint32_t current_gen = map.generations[safe_slot].load(std::memory_order_relaxed);
+		const uint32_t current_gen = map.generations[safe_slot].load(std::memory_order::relaxed);
 
 		// 3. Panic if we find a garbage non-zero slot index exceeding capacity (indicates corrupted
 		// UserData)

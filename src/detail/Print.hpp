@@ -34,7 +34,7 @@ class SignalSafePool {
 	static constexpr size_t BufferCount = 16;
 
 	static char* Acquire(size_t& out_idx) noexcept {
-		uint32_t mask = s_allocatedMask.load(std::memory_order_relaxed);
+		uint32_t mask = s_allocatedMask.load(std::memory_order::relaxed);
 		while (true) {
 			uint32_t free_bit = ~mask;
 			uint32_t active_free_bits = free_bit & ((1u << BufferCount) - 1);
@@ -43,8 +43,8 @@ class SignalSafePool {
 			}
 			uint32_t idx = std::countr_zero(active_free_bits);
 			uint32_t new_mask = mask | (1u << idx);
-			if (s_allocatedMask.compare_exchange_weak(mask, new_mask, std::memory_order_acquire,
-													  std::memory_order_relaxed)) {
+			if (s_allocatedMask.compare_exchange_weak(mask, new_mask, std::memory_order::acquire,
+													  std::memory_order::relaxed)) {
 				out_idx = idx;
 				return s_pool[idx];
 			}
@@ -52,7 +52,7 @@ class SignalSafePool {
 	}
 
 	static void Release(size_t idx) noexcept {
-		s_allocatedMask.fetch_and(~(1u << idx), std::memory_order_release);
+		s_allocatedMask.fetch_and(~(1u << idx), std::memory_order::release);
 	}
 
 	static const char* GetBuffer(size_t idx) noexcept { return s_pool[idx]; }

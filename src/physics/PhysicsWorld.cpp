@@ -86,13 +86,13 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem,
 				joltBodyPtrs.size() * sizeof(decltype(joltBodyPtrs)::value_type));
 
 	for (uint32_t i = 0; i < capacity; ++i) {
-		generations[i].store(1, std::memory_order_relaxed);
-		slotStates[i].store(SLOT_EMPTY, std::memory_order_relaxed);
+		generations[i].store(1, std::memory_order::relaxed);
+		slotStates[i].store(SLOT_EMPTY, std::memory_order::relaxed);
 		freeSlots[i] = (capacity - 1) - i;
 	}
 
-	count.store(0, std::memory_order_relaxed);
-	freeCount.store(capacity, std::memory_order_relaxed);
+	count.store(0, std::memory_order::relaxed);
+	freeCount.store(capacity, std::memory_order::relaxed);
 
 	commandCapacity = 64;
 	commandCount = 0;
@@ -118,7 +118,7 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem,
 	freeConstraintSlots.resize(constraintCapacity);
 
 	for (uint32_t i = 0; i < constraintCapacity; ++i) {
-		constraintGenerations[i].store(1, std::memory_order_relaxed);
+		constraintGenerations[i].store(1, std::memory_order::relaxed);
 		freeConstraintSlots[i] = (constraintCapacity - 1) - i;
 	}
 
@@ -199,13 +199,13 @@ void PhysicsWorld::ResizeBuffers(size_t newCapacity) {
 	std::memset((void*)(joltBodyPtrs.data() + (oldCap + 1)), 0,
 				addedCount * sizeof(decltype(joltBodyPtrs)::value_type));
 
-	size_t freeIdx = freeCount.load(std::memory_order_relaxed);
+	size_t freeIdx = freeCount.load(std::memory_order::relaxed);
 	for (size_t i = oldCap; i < newCapacity; i++) {
-		generations[i].store(1, std::memory_order_relaxed);
-		slotStates[i].store(SLOT_EMPTY, std::memory_order_relaxed);
+		generations[i].store(1, std::memory_order::relaxed);
+		slotStates[i].store(SLOT_EMPTY, std::memory_order::relaxed);
 		freeSlots[freeIdx++] = static_cast<uint32_t>(i);
 	}
-	freeCount.store(freeIdx, std::memory_order_release);
+	freeCount.store(freeIdx, std::memory_order::release);
 }
 
 void PhysicsWorld::ResizeConstraintBuffers(size_t newCapacity) {
@@ -225,28 +225,28 @@ void PhysicsWorld::ResizeConstraintBuffers(size_t newCapacity) {
 	freeConstraintSlots.resize(newCapacity);
 
 	for (size_t i = oldCap; i < newCapacity; i++) {
-		constraintGenerations[i].store(1, std::memory_order_relaxed);
+		constraintGenerations[i].store(1, std::memory_order::relaxed);
 		freeConstraintSlots[freeConstraintCount++] = static_cast<uint32_t>(i);
 	}
 }
 
 ZHLN::Entity PhysicsWorld::AllocateHandle() {
-	size_t available = freeCount.load(std::memory_order_acquire);
+	size_t available = freeCount.load(std::memory_order::acquire);
 	if (available == 0) {
 		ResizeBuffers(capacity * 2);
-		available = freeCount.load(std::memory_order_acquire);
+		available = freeCount.load(std::memory_order::acquire);
 	}
 
 	uint32_t slot = freeSlots[--available];
-	freeCount.store(available, std::memory_order_release);
+	freeCount.store(available, std::memory_order::release);
 
-	uint32_t gen = generations[slot].load(std::memory_order_relaxed);
+	uint32_t gen = generations[slot].load(std::memory_order::relaxed);
 	return ZHLN::Entity{.index = slot, .generation = gen};
 }
 
 void PhysicsWorld::RemoveBodySlot(uint32_t slot) {
 	const uint32_t denseIdx = slotToDense[slot];
-	const uint32_t lastDense = static_cast<uint32_t>(count.load(std::memory_order_acquire)) - 1;
+	const uint32_t lastDense = static_cast<uint32_t>(count.load(std::memory_order::acquire)) - 1;
 
 	if (denseIdx != lastDense) {
 		for (int i = 0; i < 4; ++i) {
@@ -269,12 +269,12 @@ void PhysicsWorld::RemoveBodySlot(uint32_t slot) {
 		denseToSlot[denseIdx] = moverSlot;
 	}
 
-	generations[slot].fetch_add(1, std::memory_order_relaxed);
-	slotStates[slot].store(SLOT_EMPTY, std::memory_order_release);
+	generations[slot].fetch_add(1, std::memory_order::relaxed);
+	slotStates[slot].store(SLOT_EMPTY, std::memory_order::release);
 
-	size_t fIdx = freeCount.fetch_add(1, std::memory_order_relaxed);
+	size_t fIdx = freeCount.fetch_add(1, std::memory_order::relaxed);
 	freeSlots[fIdx] = slot;
-	count.fetch_sub(1, std::memory_order_release);
+	count.fetch_sub(1, std::memory_order::release);
 }
 
 ConstraintHandle PhysicsWorld::AllocateConstraintHandle() {
@@ -284,13 +284,13 @@ ConstraintHandle PhysicsWorld::AllocateConstraintHandle() {
 	}
 
 	uint32_t slot = freeConstraintSlots[--freeConstraintCount];
-	uint32_t gen = constraintGenerations[slot].load(std::memory_order_relaxed);
+	uint32_t gen = constraintGenerations[slot].load(std::memory_order::relaxed);
 	return ConstraintHandle{.index = slot, .generation = gen};
 }
 
 void PhysicsWorld::RemoveConstraintSlot(uint32_t slot) {
 	// Increment generation so old handles become invalid
-	constraintGenerations[slot].fetch_add(1, std::memory_order_relaxed);
+	constraintGenerations[slot].fetch_add(1, std::memory_order::relaxed);
 	constraintStates[slot] = SLOT_EMPTY;
 
 	// Return slot to free list
@@ -298,7 +298,7 @@ void PhysicsWorld::RemoveConstraintSlot(uint32_t slot) {
 }
 
 JPH::Array<std::byte> PhysicsWorld::SaveState() const {
-	size_t currentCount = count.load(std::memory_order_acquire);
+	size_t currentCount = count.load(std::memory_order::acquire);
 	size_t slotCap = slotCapacity;
 
 	// 1. Calculate Sizes
@@ -336,7 +336,7 @@ JPH::Array<std::byte> PhysicsWorld::SaveState() const {
 
 		// 4. Write Mapping Tables (Atomics must be loaded)
 		for (size_t i = 0; i < slotCap; ++i) {
-			uint32_t g = generations[i].load(std::memory_order_relaxed);
+			uint32_t g = generations[i].load(std::memory_order::relaxed);
 			std::memcpy(ptr, &g, sizeof(uint32_t));
 			ptr += sizeof(uint32_t);
 		}
@@ -347,7 +347,7 @@ JPH::Array<std::byte> PhysicsWorld::SaveState() const {
 		ptr += (slotCap * sizeof(uint32_t));
 
 		for (size_t i = 0; i < slotCap; ++i) {
-			auto s = static_cast<std::byte>(slotStates[i].load(std::memory_order_relaxed));
+			auto s = static_cast<std::byte>(slotStates[i].load(std::memory_order::relaxed));
 			*ptr = s;
 			ptr += 1;
 		}
@@ -389,7 +389,7 @@ bool PhysicsWorld::LoadState(const uint8_t* data, size_t size) {
 		for (size_t i = 0; i < slotCapacity; ++i) {
 			uint32_t g;
 			std::memcpy(&g, ptr, sizeof(uint32_t));
-			generations[i].store(g, std::memory_order_relaxed);
+			generations[i].store(g, std::memory_order::relaxed);
 			ptr += sizeof(uint32_t);
 		}
 		std::memcpy(slotToDense.data(), ptr, slotCapacity * sizeof(uint32_t));
@@ -398,7 +398,7 @@ bool PhysicsWorld::LoadState(const uint8_t* data, size_t size) {
 		ptr += (slotCapacity * sizeof(uint32_t));
 
 		for (size_t i = 0; i < slotCapacity; ++i) {
-			slotStates[i].store(*ptr, std::memory_order_relaxed);
+			slotStates[i].store(*ptr, std::memory_order::relaxed);
 			ptr += 1;
 		}
 
@@ -409,8 +409,8 @@ bool PhysicsWorld::LoadState(const uint8_t* data, size_t size) {
 				freeSlots[newFreeCount++] = i;
 			}
 		}
-		freeCount.store(newFreeCount, std::memory_order_release);
-		count.store(savedCount, std::memory_order_release);
+		freeCount.store(newFreeCount, std::memory_order::release);
+		count.store(savedCount, std::memory_order::release);
 		time = header->worldTime;
 	}
 

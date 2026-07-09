@@ -291,12 +291,12 @@ namespace {
 
 struct SyncPolicy {
 	static void Acquire(BufferSync* sync) {
-		if (sync->viewExportCount.fetch_add(1, std::memory_order_acquire) == 0) {
+		if (sync->viewExportCount.fetch_add(1, std::memory_order::acquire) == 0) {
 			sync->shadowLock.lock();
 		}
 	}
 	static void Release(BufferSync* sync) {
-		if (sync->viewExportCount.fetch_sub(1, std::memory_order_release) == 1) {
+		if (sync->viewExportCount.fetch_sub(1, std::memory_order::release) == 1) {
 			sync->shadowLock.unlock();
 		}
 	}

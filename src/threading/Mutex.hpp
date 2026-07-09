@@ -43,8 +43,8 @@ class Mutex {
 		}
 
 		uint8_t expected = UNLOCKED;
-		if (_bits.compare_exchange_strong(expected, LOCKED, std::memory_order_acquire,
-										  std::memory_order_relaxed)) [[likely]] {
+		if (_bits.compare_exchange_strong(expected, LOCKED, std::memory_order::acquire,
+										  std::memory_order::relaxed)) [[likely]] {
 			if constexpr (kIsDebugMutex) {
 				PostLock();
 			}
@@ -61,8 +61,8 @@ class Mutex {
 		}
 
 		uint8_t expected = LOCKED;
-		if (_bits.compare_exchange_strong(expected, UNLOCKED, std::memory_order_release,
-										  std::memory_order_relaxed)) [[likely]] {
+		if (_bits.compare_exchange_strong(expected, UNLOCKED, std::memory_order::release,
+										  std::memory_order::relaxed)) [[likely]] {
 			return;
 		}
 		UnlockSlow();
@@ -75,8 +75,8 @@ class Mutex {
 		}
 
 		uint8_t expected = UNLOCKED;
-		bool success = _bits.compare_exchange_strong(expected, LOCKED, std::memory_order_acquire,
-													 std::memory_order_relaxed);
+		bool success = _bits.compare_exchange_strong(expected, LOCKED, std::memory_order::acquire,
+													 std::memory_order::relaxed);
 		if constexpr (kIsDebugMutex) {
 			if (success) {
 				PostLock();

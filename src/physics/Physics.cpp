@@ -303,10 +303,10 @@ void PhysicsContext::Step(float deltaTime) {
 	}
 
 	// Resets the counter so Jolt overwrites last frame's collisions
-	world.contactCount.store(0, std::memory_order_relaxed);
+	world.contactCount.store(0, std::memory_order::relaxed);
 
 	// --- 2. JOLT UPDATE PHASE ---
-	world.isStepping.store(true, std::memory_order_release);
+	world.isStepping.store(true, std::memory_order::release);
 
 	_impl->physicsSystem.Update(deltaTime, 2, _impl->tempAllocator.get(), &_impl->jobSystem);
 
@@ -330,7 +330,7 @@ void PhysicsContext::Step(float deltaTime) {
 		world.Synchronize(&_impl->physicsSystem, _impl->activeCharacters);
 	}
 
-	world.isStepping.store(false, std::memory_order_release);
+	world.isStepping.store(false, std::memory_order::release);
 }
 
 const Physics::PhysicsWorld& PhysicsContext::GetWorld() const {
@@ -434,7 +434,7 @@ JPH::BodyID PhysicsWorld::GetBodyID(ZHLN::Entity handle) {
 	}
 
 	// Check generation: Source of Truth check
-	if (generations[handle.index].load(std::memory_order_acquire) != handle.generation) {
+	if (generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
 		return {}; // Stale handle
 	}
 
@@ -447,7 +447,7 @@ JPH::BodyID GetBodyID(const PhysicsWorld& world, ZHLN::Entity handle) {
 		return {};
 	}
 
-	if (world.generations[handle.index].load(std::memory_order_acquire) != handle.generation) {
+	if (world.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
 		return {};
 	}
 
@@ -464,11 +464,11 @@ void DestroyBody(PhysicsContext& ctx, ZHLN::Entity handle) {
 	}
 
 	// Source-of-truth generational check
-	if (world.generations[slot].load(std::memory_order_acquire) != handle.generation) {
+	if (world.generations[slot].load(std::memory_order::acquire) != handle.generation) {
 		return;
 	}
 
-	const uint8_t state = world.slotStates[slot].load(std::memory_order_acquire);
+	const uint8_t state = world.slotStates[slot].load(std::memory_order::acquire);
 	const SlotPredicate pred = GetSlotPredicate(state);
 
 	// If it's already EMPTY or PENDING_DESTROY, don't queue it again
@@ -477,7 +477,7 @@ void DestroyBody(PhysicsContext& ctx, ZHLN::Entity handle) {
 	}
 
 	// Immediately mark as doomed so queries ignore it
-	world.slotStates[slot].store(SLOT_PENDING_DESTROY, std::memory_order_release);
+	world.slotStates[slot].store(SLOT_PENDING_DESTROY, std::memory_order::release);
 
 	// Lock the shadow buffer to queue the command safely
 	ZHLN_LOCK(world.sync.shadowLock) {
@@ -562,15 +562,15 @@ ZHLN::Entity CreateRigidBody(PhysicsContext& ctx, const JPH::ShapeRefC& shape, J
 														   : JPH::EActivation::Activate);
 
 		// Map into the Dense SoA
-		auto dense = static_cast<uint32_t>(world.count.fetch_add(1, std::memory_order_relaxed));
+		auto dense = static_cast<uint32_t>(world.count.fetch_add(1, std::memory_order::relaxed));
 		world.bodyIDs[dense] = id;
 		world.slotToDense[handle.index] = dense;
 		world.denseToSlot[dense] = handle.index;
-		world.slotStates[handle.index].store(SLOT_ALIVE, std::memory_order_release);
+		world.slotStates[handle.index].store(SLOT_ALIVE, std::memory_order::release);
 
 		// Update Fast-Mapping for callbacks
 		const uint32_t j_idx = id.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
-		world.idToHandleMap[j_idx].store(handle.Pack(), std::memory_order_release);
+		world.idToHandleMap[j_idx].store(handle.Pack(), std::memory_order::release);
 
 		// Warm up shadow buffers so the very first render frame has valid interpolation states
 		world.positions[dense * 4 + 0] = pos.GetX();
@@ -684,11 +684,11 @@ ZHLN::Entity CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position, uint32
 		impl->activeCharacters.push_back(character);
 
 		// SoA Sync & Warm-up
-		auto dense = static_cast<uint32_t>(world.count.fetch_add(1, std::memory_order_relaxed));
+		auto dense = static_cast<uint32_t>(world.count.fetch_add(1, std::memory_order::relaxed));
 		world.slotToDense[handle.index] = dense;
 		world.denseToSlot[dense] = handle.index;
 		world.bodyIDs[dense] = JPH::BodyID();
-		world.slotStates[handle.index].store(SLOT_CHARACTER, std::memory_order_release);
+		world.slotStates[handle.index].store(SLOT_CHARACTER, std::memory_order::release);
 		world.categories[dense] = category;
 		world.masks[dense] = mask;
 
@@ -837,7 +837,7 @@ std::pair<const ContactEvent*, size_t> GetContactEvents(const PhysicsContext& ct
 	const auto& world = ctx.GetImpl()->world;
 
 	// Clamp the count to capacity in case the buffer overflowed
-	size_t count = world.contactCount.load(std::memory_order_acquire);
+	size_t count = world.contactCount.load(std::memory_order::acquire);
 	count = std::min(count, world.contactCapacity);
 
 	return {world.contactBuffer.data(), count};

@@ -29,14 +29,14 @@ template <size_t N = 100> struct ProfileDataInternal {
 	ZHLN::Atomic<float> rollingAverageMS;
 
 	void Push(float value) noexcept {
-		size_t idx = writeIndex.fetch_add(1, std::memory_order_relaxed) % N;
-		history[idx].store(value, std::memory_order_relaxed);
-		latestValue.store(value, std::memory_order_relaxed);
+		size_t idx = writeIndex.fetch_add(1, std::memory_order::relaxed) % N;
+		history[idx].store(value, std::memory_order::relaxed);
+		latestValue.store(value, std::memory_order::relaxed);
 
 		// Lock-free rolling average update
-		float avg = rollingAverageMS.load(std::memory_order_relaxed);
+		float avg = rollingAverageMS.load(std::memory_order::relaxed);
 		float nextAvg = avg * 0.95f + value * 0.05f;
-		rollingAverageMS.store(nextAvg, std::memory_order_relaxed);
+		rollingAverageMS.store(nextAvg, std::memory_order::relaxed);
 	}
 };
 
@@ -74,22 +74,22 @@ void CPUProfiler::IterateMetrics(MetricCallback callback, void* userData) noexce
 	}
 
 	s_Metrics.Iterate([&](const std::string& name, const ProfileDataInternal<100>& data) {
-		float cpuTime = data.latestValue.load(std::memory_order_relaxed);
-		float rollingAvg = data.rollingAverageMS.load(std::memory_order_relaxed);
+		float cpuTime = data.latestValue.load(std::memory_order::relaxed);
+		float rollingAvg = data.rollingAverageMS.load(std::memory_order::relaxed);
 
-		size_t count = data.writeIndex.load(std::memory_order_relaxed);
+		size_t count = data.writeIndex.load(std::memory_order::relaxed);
 		size_t limit = std::min(count, size_t(100));
 
 		// Reconstruct chronological history on the stack with zero allocations
 		std::array<float, 100> flatHistory{};
 		if (count < 100) {
 			for (size_t j = 0; j < count; ++j) {
-				flatHistory[j] = data.history[j].load(std::memory_order_relaxed);
+				flatHistory[j] = data.history[j].load(std::memory_order::relaxed);
 			}
 		} else {
 			size_t startIdx = count % 100;
 			for (size_t j = 0; j < 100; ++j) {
-				flatHistory[j] = data.history[(startIdx + j) % 100].load(std::memory_order_relaxed);
+				flatHistory[j] = data.history[(startIdx + j) % 100].load(std::memory_order::relaxed);
 			}
 		}
 

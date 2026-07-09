@@ -69,7 +69,7 @@ void PhysicsStateSystem::WriteBack(Engine& engine) noexcept {
 			size_t base = static_cast<size_t>(dense) * 4;
 
 			bool isCharacter = (world.slotStates[phys.physicsHandle.index].load(
-									std::memory_order_relaxed) == Physics::SLOT_CHARACTER);
+									std::memory_order::relaxed) == Physics::SLOT_CHARACTER);
 
 			// Read directly from Jolt's robust double-buffered history
 			state->lastPhysicsSyncFrame = engine.GetCurrentFrame();

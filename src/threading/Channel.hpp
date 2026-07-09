@@ -37,7 +37,7 @@ template <typename T> class Channel {
 				_waiters.pop();
 
 				*waiter.outMsg = std::move(msg);
-				waiter.signaled->store(true, std::memory_order_release);
+				waiter.signaled->store(true, std::memory_order::release);
 
 				// Return the fiber to the task system queue
 				TaskSystem::WakeUp(waiter.fiber);
@@ -81,7 +81,7 @@ template <typename T> class Channel {
 		}
 
 		// Suspend the fiber back to the worker thread scheduler
-		while (!signaled.load(std::memory_order_acquire)) {
+		while (!signaled.load(std::memory_order::acquire)) {
 			Fiber::Yield();
 		}
 

@@ -60,7 +60,7 @@ void SystemGraph::Execute(ZHLN::Engine& engine, float dt) {
 
 	uint32_t enabledCount = 0;
 	for (auto& _node : _nodes) {
-		_node.currentDependencyCount.store(_node.initialDependencyCount, std::memory_order_relaxed);
+		_node.currentDependencyCount.store(_node.initialDependencyCount, std::memory_order::relaxed);
 		if (_node.info.enabled) {
 			enabledCount++;
 		}
@@ -70,7 +70,7 @@ void SystemGraph::Execute(ZHLN::Engine& engine, float dt) {
 		return;
 	}
 
-	_completionCounter.store(enabledCount, std::memory_order_release);
+	_completionCounter.store(enabledCount, std::memory_order::release);
 
 	std::vector<TaskSystem::Task> initialTasks;
 	initialTasks.reserve(_entryNodes.size());
@@ -97,7 +97,7 @@ void SystemGraph::DispatchNode(uint32_t nodeIdx) {
 
 	if (node.info.enabled) {
 		node.info.update_func(*_currentEngine, _currentDt);
-		_completionCounter.fetch_sub(1, std::memory_order_release);
+		_completionCounter.fetch_sub(1, std::memory_order::release);
 	}
 
 	std::vector<TaskSystem::Task> nextTasks;

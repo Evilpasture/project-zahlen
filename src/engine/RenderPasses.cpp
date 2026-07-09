@@ -175,7 +175,7 @@ struct CpuCullingPolicy {
 						}
 						uint32_t localCmdIdx =
 							ctx.workerCmds[wIdx].cmdCount[recorder.frameIndex].fetch_add(
-								1, std::memory_order_relaxed);
+								1, std::memory_order::relaxed);
 						return ctx.workerCmds[wIdx].pools[recorder.frameIndex][localCmdIdx];
 					},
 					[&](VkCommandBuffer sec_cmd, uint32_t i) {

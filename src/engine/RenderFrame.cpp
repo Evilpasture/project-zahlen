@@ -861,7 +861,7 @@ RenderResult RenderContext::BeginFrame() noexcept {
 	_impl->activeQueueGuard.emplace(_impl->deletionQueue);
 
 	for (auto& worker : _impl->workerCmds) {
-		worker.cmdCount[_impl->frame_index].store(0, std::memory_order_relaxed);
+		worker.cmdCount[_impl->frame_index].store(0, std::memory_order::relaxed);
 		worker.pools[_impl->frame_index].Reset();
 	}
 

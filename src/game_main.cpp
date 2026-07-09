@@ -21,7 +21,6 @@
 #include "engine/system/TransformSystem.hpp"
 #include "engine/system/UIRenderSystem.hpp"
 #include "imgui.h"
-#include "physics/Physics.hpp"
 
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
@@ -445,9 +444,8 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine,
 		float rawDt = std::min(static_cast<float>(elapsed), 0.1f);
 
 		double target = elapsed;
-		constexpr std::array<double, 7> snapTargets = {{1.0 / 60.0, 1.0 / 75.0, 1.0 / 90.0,
-														1.0 / 120.0, 1.0 / 144.0, 1.0 / 240.0,
-														1.0 / 360.0}};
+		constexpr std::array snapTargets = {1.0 / 60.0,	 1.0 / 75.0,  1.0 / 90.0, 1.0 / 120.0,
+											1.0 / 144.0, 1.0 / 240.0, 1.0 / 360.0};
 		for (double t : snapTargets) {
 			if (std::abs(elapsed - t) < 0.001) {
 				target = t;

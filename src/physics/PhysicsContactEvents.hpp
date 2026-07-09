@@ -37,7 +37,7 @@ class ContactListener final : public JPH::ContactListener {
 	}
 
 	void OnContactRemoved(const JPH::SubShapeIDPair& pair) override {
-		size_t idx = _world->contactCount.fetch_add(1, std::memory_order_relaxed);
+		size_t idx = _world->contactCount.fetch_add(1, std::memory_order::relaxed);
 		if (idx >= _world->contactCapacity) {
 			return;
 		}
@@ -53,18 +53,18 @@ class ContactListener final : public JPH::ContactListener {
 	uint32_t GetDense(JPH::BodyID id) {
 		uint32_t j_idx = id.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
 		ZHLN::Entity h =
-			ZHLN::Entity::Unpack(_world->idToHandleMap[j_idx].load(std::memory_order_relaxed));
+			ZHLN::Entity::Unpack(_world->idToHandleMap[j_idx].load(std::memory_order::relaxed));
 		return (h.index < _world->slotCapacity) ? _world->slotToDense[h.index] : 0xFFFFFFFF;
 	}
 
 	ZHLN::Entity GetHandle(JPH::BodyID id) {
 		uint32_t j_idx = id.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
-		return ZHLN::Entity::Unpack(_world->idToHandleMap[j_idx].load(std::memory_order_relaxed));
+		return ZHLN::Entity::Unpack(_world->idToHandleMap[j_idx].load(std::memory_order::relaxed));
 	}
 
 	void Record(ContactType type, const JPH::Body& b1, const JPH::Body& b2,
 				const JPH::ContactManifold& manifold) noexcept {
-		size_t idx = _world->contactCount.fetch_add(1, std::memory_order_relaxed);
+		size_t idx = _world->contactCount.fetch_add(1, std::memory_order::relaxed);
 		if (idx >= _world->contactCapacity) {
 			return;
 		}
@@ -104,7 +104,7 @@ class ContactListener final : public JPH::ContactListener {
 			ev.impulse = std::abs(normalVel);
 			ev.slidingSpeed = dv.LengthSq() - (normalVel * normalVel);
 		}
-		std::atomic_thread_fence(std::memory_order_release);
+		std::atomic_thread_fence(std::memory_order::release);
 	}
 };
 
@@ -150,7 +150,7 @@ class CharacterListener final : public JPH::CharacterContactListener {
 
 	bool Filter(uint64_t u1, JPH::BodyID id2) {
 		uint32_t j_idx2 = id2.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
-		uint64_t u2 = _world->idToHandleMap[j_idx2].load(std::memory_order_relaxed);
+		uint64_t u2 = _world->idToHandleMap[j_idx2].load(std::memory_order::relaxed);
 		if (u2 == 0) {
 			return false;
 		}

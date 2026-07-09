@@ -82,19 +82,19 @@ static void AddLockEdge(const Mutex* from, const Mutex* to) noexcept {
 }
 
 void Mutex::ClearOwner() noexcept {
-	_hasOwner.store(false, std::memory_order_release);
+	_hasOwner.store(false, std::memory_order::release);
 }
 
 void Mutex::CheckPreLock() noexcept {
-	uint8_t bits = _bits.load(std::memory_order_relaxed);
+	uint8_t bits = _bits.load(std::memory_order::relaxed);
 	if (bits & POISONED) [[unlikely]] {
 		std::println(stderr, "[ZHLN FATAL] Attempting to lock a POISONED mutex!");
 		std::abort();
 	}
 
 	if (bits & LOCKED) {
-		if (_hasOwner.load(std::memory_order_acquire)) {
-			if (GetCurrentContextId() == _owner.load(std::memory_order_relaxed)) {
+		if (_hasOwner.load(std::memory_order::acquire)) {
+			if (GetCurrentContextId() == _owner.load(std::memory_order::relaxed)) {
 				std::println(stderr, "[ZHLN FATAL] DEADLOCK DETECTED: Recursive locking!");
 				std::abort();
 			}
@@ -103,8 +103,8 @@ void Mutex::CheckPreLock() noexcept {
 }
 
 void Mutex::PostLock() noexcept {
-	_owner.store(GetCurrentContextId(), std::memory_order_relaxed);
-	_hasOwner.store(true, std::memory_order_release);
+	_owner.store(GetCurrentContextId(), std::memory_order::relaxed);
+	_hasOwner.store(true, std::memory_order::release);
 
 	for (size_t i = 0; i < t_heldLocksCount; i++) {
 		AddLockEdge(t_heldLocks[i], this);
@@ -115,11 +115,11 @@ void Mutex::PostLock() noexcept {
 }
 
 void Mutex::PreUnlock() noexcept {
-	if (!_hasOwner.load(std::memory_order_acquire)) [[unlikely]] {
+	if (!_hasOwner.load(std::memory_order::acquire)) [[unlikely]] {
 		std::println(stderr, "[ZHLN FATAL] Unlocking a mutex that has no owner!");
 		std::abort();
 	}
-	if (GetCurrentContextId() != _owner.load(std::memory_order_relaxed)) [[unlikely]] {
+	if (GetCurrentContextId() != _owner.load(std::memory_order::relaxed)) [[unlikely]] {
 		std::println(stderr, "[ZHLN FATAL] Unlocking a mutex owned by another thread!");
 		std::abort();
 	}
@@ -194,11 +194,11 @@ void Mutex::LockSlow() noexcept {
 
 	// PHASE 1: Adaptive Exponential Backoff
 	for (int i = 0; i < MAX_SPIN_COUNT; i++) {
-		uint8_t val = _bits.load(std::memory_order_relaxed);
+		uint8_t val = _bits.load(std::memory_order::relaxed);
 
 		if (!(val & LOCKED)) {
-			if (_bits.compare_exchange_weak(val, val | LOCKED, std::memory_order_acquire,
-											std::memory_order_relaxed)) {
+			if (_bits.compare_exchange_weak(val, val | LOCKED, std::memory_order::acquire,
+											std::memory_order::relaxed)) {
 				if constexpr (kIsDebugMutex) {
 					PostLock();
 				}
@@ -220,11 +220,11 @@ void Mutex::LockSlow() noexcept {
 
 	// PHASE 2: Parking
 	for (;;) {
-		uint8_t val = _bits.load(std::memory_order_relaxed);
+		uint8_t val = _bits.load(std::memory_order::relaxed);
 
 		if (!(val & LOCKED)) {
-			if (_bits.compare_exchange_weak(val, val | LOCKED, std::memory_order_acquire,
-											std::memory_order_relaxed)) {
+			if (_bits.compare_exchange_weak(val, val | LOCKED, std::memory_order::acquire,
+											std::memory_order::relaxed)) {
 				if constexpr (kIsDebugMutex) {
 					PostLock();
 				}
@@ -234,8 +234,8 @@ void Mutex::LockSlow() noexcept {
 		}
 
 		if (!(val & HAS_WAITERS)) {
-			if (!_bits.compare_exchange_weak(val, val | HAS_WAITERS, std::memory_order_relaxed,
-											 std::memory_order_relaxed)) {
+			if (!_bits.compare_exchange_weak(val, val | HAS_WAITERS, std::memory_order::relaxed,
+											 std::memory_order::relaxed)) {
 				continue;
 			}
 		}
@@ -250,11 +250,11 @@ void Mutex::LockSlow() noexcept {
 		node.address = this;
 		node.fiber = is_worker_fiber ? self : nullptr;
 		node.next = nullptr;
-		node.signaled.store(false, std::memory_order_relaxed);
+		node.signaled.store(false, std::memory_order::relaxed);
 
 		std::unique_lock<std::mutex> lock(bucket->mutex);
 
-		val = _bits.load(std::memory_order_relaxed);
+		val = _bits.load(std::memory_order::relaxed);
 		if (!(val & LOCKED) || !(val & HAS_WAITERS)) [[unlikely]] {
 			lock.unlock();
 			continue;
@@ -265,11 +265,11 @@ void Mutex::LockSlow() noexcept {
 
 		if (!is_worker_fiber) {
 			// Main Thread / OS Thread: Block using Condition Variable
-			node.cond.wait(lock, [&]() { return node.signaled.load(std::memory_order_acquire); });
+			node.cond.wait(lock, [&]() { return node.signaled.load(std::memory_order::acquire); });
 		} else {
 			// worker Fiber: Yield back to the parent
 			lock.unlock();
-			while (!node.signaled.load(std::memory_order_acquire)) {
+			while (!node.signaled.load(std::memory_order::acquire)) {
 				YieldFiber();
 			}
 		}
@@ -277,11 +277,11 @@ void Mutex::LockSlow() noexcept {
 }
 
 void Mutex::UnlockSlow() noexcept {
-	uint8_t val = _bits.load(std::memory_order_relaxed);
+	uint8_t val = _bits.load(std::memory_order::relaxed);
 	for (;;) {
 		uint8_t desired = val & ~LOCKED;
-		if (_bits.compare_exchange_weak(val, desired, std::memory_order_release,
-										std::memory_order_relaxed)) {
+		if (_bits.compare_exchange_weak(val, desired, std::memory_order::release,
+										std::memory_order::relaxed)) {
 			if (!(val & HAS_WAITERS)) {
 				return;
 			}
@@ -310,17 +310,17 @@ void Mutex::UnlockSlow() noexcept {
 	}
 
 	if (!more) {
-		val = _bits.load(std::memory_order_relaxed);
+		val = _bits.load(std::memory_order::relaxed);
 		for (;;) {
-			if (_bits.compare_exchange_weak(val, val & ~HAS_WAITERS, std::memory_order_relaxed,
-											std::memory_order_relaxed)) {
+			if (_bits.compare_exchange_weak(val, val & ~HAS_WAITERS, std::memory_order::relaxed,
+											std::memory_order::relaxed)) {
 				break;
 			}
 		}
 	}
 
 	if (to_wake != nullptr) {
-		to_wake->signaled.store(true, std::memory_order_release);
+		to_wake->signaled.store(true, std::memory_order::release);
 		if (to_wake->fiber == nullptr) {
 			to_wake->cond.notify_one();
 		} else {

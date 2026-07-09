@@ -80,7 +80,7 @@ SparseSet::~SparseSet() {
 }
 
 void SparseSet::ResizeSparse(uint32_t required) {
-	if ((_sync != nullptr) && _sync->viewExportCount.load(std::memory_order_acquire) > 0) {
+	if ((_sync != nullptr) && _sync->viewExportCount.load(std::memory_order::acquire) > 0) {
 		ZHLN::Panic("FFI MEMORY VIOLATION: SparseSet Sparse Resize");
 	}
 
@@ -99,7 +99,7 @@ void SparseSet::ResizeSparse(uint32_t required) {
 }
 
 void SparseSet::ResizeDense() {
-	if ((_sync != nullptr) && _sync->viewExportCount.load(std::memory_order_acquire) > 0) {
+	if ((_sync != nullptr) && _sync->viewExportCount.load(std::memory_order::acquire) > 0) {
 		ZHLN::Panic("FFI MEMORY VIOLATION: SparseSet Dense Resize");
 	}
 
@@ -230,7 +230,7 @@ BufferView SparseSet::GetEntityView(const void* owner) const noexcept {
 // ============================================================================
 
 Registry::Registry() {
-	sync.viewExportCount.store(0, std::memory_order_relaxed);
+	sync.viewExportCount.store(0, std::memory_order::relaxed);
 	std::memset(&sync.shadowLock, 0, sizeof(sync.shadowLock));
 }
 

@@ -83,11 +83,11 @@ static std::atomic<void*> s_FaultAddr{nullptr};
 static std::atomic<LogLevel> s_LogLevel{LogLevel::Moderate};
 
 void SetLogLevel(LogLevel level) noexcept {
-	s_LogLevel.store(level, std::memory_order_release);
+	s_LogLevel.store(level, std::memory_order::release);
 }
 
 LogLevel GetLogLevel() noexcept {
-	return s_LogLevel.load(std::memory_order_acquire);
+	return s_LogLevel.load(std::memory_order::acquire);
 }
 
 // Low-level writer strictly dedicated to signal handler pathways
@@ -184,7 +184,7 @@ auto GetPoorMansStacktrace() -> std::string {
 
 void InternalWriteLog(uint8_t channel, const char* file, uint32_t line, std::string_view message) {
 	// Guard against Quiet mode
-	if (s_LogLevel.load(std::memory_order_acquire) == LogLevel::Quiet) {
+	if (s_LogLevel.load(std::memory_order::acquire) == LogLevel::Quiet) {
 		return;
 	}
 
@@ -219,14 +219,14 @@ void InternalWriteLog(uint8_t channel, const char* file, uint32_t line, std::str
 // Note: Emergency panic / crash dumps are kept unfiltered to preserve crash visibility.
 [[noreturn]] void InternalPanic(const char* file, uint32_t line, std::string_view message) {
 	// Force enable output for catastrophic crashes
-	s_LogLevel.store(LogLevel::Verbose, std::memory_order_release);
+	s_LogLevel.store(LogLevel::Verbose, std::memory_order::release);
 	InternalWriteLog(static_cast<uint8_t>(LogChannel::StdErr), file, line, message);
 	std::println(stderr, "Stack Trace:\n{}", GetPoorMansStacktrace());
 	std::abort();
 }
 
 void LogManual(std::string_view file, int line, std::string_view message, const char* color) {
-	if (s_LogLevel.load(std::memory_order_acquire) == LogLevel::Quiet) {
+	if (s_LogLevel.load(std::memory_order::acquire) == LogLevel::Quiet) {
 		return;
 	}
 

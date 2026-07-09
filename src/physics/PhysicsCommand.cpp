@@ -21,7 +21,7 @@ void PhysicsWorld::FlushCommands(Command* capturedQueue, size_t capturedCount) {
 		switch (cmd.type) {
 			case CommandType::DestroyBody: {
 				const uint32_t slot = cmd.handle.index;
-				if (generations[slot].load(std::memory_order_acquire) != cmd.handle.generation) {
+				if (generations[slot].load(std::memory_order::acquire) != cmd.handle.generation) {
 					continue;
 				}
 
@@ -45,7 +45,7 @@ void PhysicsWorld::FlushCommands(Command* capturedQueue, size_t capturedCount) {
 							 "during DestroyBody!",
 							 joltIdx, idToHandleMap.size(), joltBodyPtrs.size());
 
-				idToHandleMap[joltIdx].store(0, std::memory_order_release);
+				idToHandleMap[joltIdx].store(0, std::memory_order::release);
 				joltBodyPtrs[joltIdx] = nullptr;
 
 				bodyInterface->RemoveBody(bodyID);
@@ -79,7 +79,7 @@ void PhysicsWorld::FlushCommands(Command* capturedQueue, size_t capturedCount) {
 
 			case CommandType::DestroyConstraint: {
 				const uint32_t slot = cmd.cHandle.index;
-				if (constraintGenerations[slot].load(std::memory_order_acquire) ==
+				if (constraintGenerations[slot].load(std::memory_order::acquire) ==
 					cmd.cHandle.generation) {
 					if (constraints[slot] != nullptr) {
 						system->RemoveConstraint(constraints[slot]);
@@ -93,7 +93,7 @@ void PhysicsWorld::FlushCommands(Command* capturedQueue, size_t capturedCount) {
 
 			case CommandType::SetConstraintTarget: {
 				uint32_t slot = cmd.setTarget.targetCHandle.index;
-				if (constraintGenerations[slot].load(std::memory_order_relaxed) ==
+				if (constraintGenerations[slot].load(std::memory_order::relaxed) ==
 					cmd.setTarget.targetCHandle.generation) {
 					JPH::Constraint* c = constraints[slot];
 					if (c != nullptr) {
@@ -120,7 +120,7 @@ void PhysicsWorld::FlushCommands(Command* capturedQueue, size_t capturedCount) {
 
 			case CommandType::SetCollisionFilter: {
 				const uint32_t slot = cmd.setFilter.handle.index;
-				if (generations[slot].load(std::memory_order_acquire) ==
+				if (generations[slot].load(std::memory_order::acquire) ==
 					cmd.setFilter.handle.generation) {
 					uint32_t dense = slotToDense[slot];
 					categories[dense] = cmd.setFilter.category;

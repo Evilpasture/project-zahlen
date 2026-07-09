@@ -84,7 +84,7 @@ static void FiberMain(void* arg) {
 
 		// 2. Decrement counter if provided
 		if (data->counter != nullptr) {
-			data->counter->value.fetch_sub(1, std::memory_order_release);
+			data->counter->value.fetch_sub(1, std::memory_order::release);
 		}
 
 		// 3. We are done! Put ourselves back in the free pool
@@ -174,7 +174,7 @@ void Dispatch(std::span<const Task> tasks, Counter* counter) {
 	}
 
 	if (counter != nullptr) {
-		counter->value.fetch_add(tasks.size(), std::memory_order_relaxed);
+		counter->value.fetch_add(tasks.size(), std::memory_order::relaxed);
 	}
 
 	for (const auto& task : tasks) {
@@ -202,7 +202,7 @@ void Wait(Counter* counter) {
 	Fiber* self = Fiber::GetCurrent();
 	uint32_t spinCount = 0;
 
-	while (counter->value.load(std::memory_order_acquire) > 0) {
+	while (counter->value.load(std::memory_order::acquire) > 0) {
 		bool isMain = (self == nullptr || self->isMain);
 
 		if (isMain) {

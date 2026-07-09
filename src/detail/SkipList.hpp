@@ -29,8 +29,8 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 
 		void lock() noexcept {
 			bool expected = false;
-			while (!locked.compare_exchange_weak(expected, true, std::memory_order_acquire,
-												 std::memory_order_relaxed)) {
+			while (!locked.compare_exchange_weak(expected, true, std::memory_order::acquire,
+												 std::memory_order::relaxed)) {
 				expected = false;
 #if defined(__x86_64__) || defined(_M_X64)
 				_mm_pause();
@@ -42,7 +42,7 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 			}
 		}
 
-		void unlock() noexcept { locked.store(false, std::memory_order_release); }
+		void unlock() noexcept { locked.store(false, std::memory_order::release); }
 	};
 
 	struct SkipNode {
@@ -65,7 +65,7 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 	explicit SkipList(Compare comp = Compare())
 		: _head(CreateNode(Key{}, Value{}, MAX_LEVEL)), _compare(comp) {
 
-		_level.store(1, std::memory_order_relaxed);
+		_level.store(1, std::memory_order::relaxed);
 	}
 
 	~SkipList() {
@@ -80,8 +80,8 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 	// Move semantics
 	SkipList(SkipList&& other) noexcept
 		: _head(std::exchange(other._head, nullptr)), _compare(std::move(other._compare)) {
-		_level.store(other._level.load(std::memory_order_relaxed), std::memory_order_relaxed);
-		_size.store(other._size.load(std::memory_order_relaxed), std::memory_order_relaxed);
+		_level.store(other._level.load(std::memory_order::relaxed), std::memory_order::relaxed);
+		_size.store(other._size.load(std::memory_order::relaxed), std::memory_order::relaxed);
 	}
 
 	auto operator=(SkipList&& other) noexcept -> SkipList& {
@@ -92,8 +92,8 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 			}
 			_head = std::exchange(other._head, nullptr);
 			_compare = std::move(other._compare);
-			_level.store(other._level.load(std::memory_order_relaxed), std::memory_order_relaxed);
-			_size.store(other._size.load(std::memory_order_relaxed), std::memory_order_relaxed);
+			_level.store(other._level.load(std::memory_order::relaxed), std::memory_order::relaxed);
+			_size.store(other._size.load(std::memory_order::relaxed), std::memory_order::relaxed);
 		}
 		return *this;
 	}
@@ -106,22 +106,22 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 		const_cast<SkipList*>(this)->EnterReader();
 
 		const SkipNode* curr = _head;
-		uint32_t lvl = _level.load(std::memory_order_acquire);
+		uint32_t lvl = _level.load(std::memory_order::acquire);
 
 		for (int i = static_cast<int>(lvl) - 1; i >= 0; --i) {
 			const ZHLN::Atomic<SkipNode*>* forward = curr->GetForward();
-			SkipNode* next = forward[i].load(std::memory_order_acquire);
+			SkipNode* next = forward[i].load(std::memory_order::acquire);
 			while (next && _compare(next->key, key)) {
 				curr = next;
-				next = curr->GetForward()[i].load(std::memory_order_acquire);
+				next = curr->GetForward()[i].load(std::memory_order::acquire);
 			}
 		}
 
 		const ZHLN::Atomic<SkipNode*>* forward = curr->GetForward();
-		SkipNode* next = forward[0].load(std::memory_order_acquire);
+		SkipNode* next = forward[0].load(std::memory_order::acquire);
 		const Value* result = nullptr;
 
-		if (next && !next->deleted.load(std::memory_order_acquire) && !_compare(next->key, key) &&
+		if (next && !next->deleted.load(std::memory_order::acquire) && !_compare(next->key, key) &&
 			!_compare(key, next->key)) {
 			result = &next->value;
 		}
@@ -138,13 +138,13 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 		// Enter QSR reader phase
 		const_cast<SkipList*>(this)->EnterReader();
 
-		const SkipNode* curr = _head->GetForward()[0].load(std::memory_order_acquire);
+		const SkipNode* curr = _head->GetForward()[0].load(std::memory_order::acquire);
 		while (curr != nullptr) {
 			// Only yield the node if it has not been logically deleted
-			if (!curr->deleted.load(std::memory_order_acquire)) {
+			if (!curr->deleted.load(std::memory_order::acquire)) {
 				func(curr->key, curr->value);
 			}
-			curr = curr->GetForward()[0].load(std::memory_order_acquire);
+			curr = curr->GetForward()[0].load(std::memory_order::acquire);
 		}
 
 		// Exit QSR reader phase
@@ -166,10 +166,10 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 
 			// Traversing from MAX_LEVEL - 1 ensures we do not miss concurrent updates
 			for (int i = static_cast<int>(MAX_LEVEL) - 1; i >= 0; --i) {
-				SkipNode* next = curr->GetForward()[i].load(std::memory_order_relaxed);
+				SkipNode* next = curr->GetForward()[i].load(std::memory_order::relaxed);
 				while (next && _compare(next->key, key)) {
 					curr = next;
-					next = curr->GetForward()[i].load(std::memory_order_relaxed);
+					next = curr->GetForward()[i].load(std::memory_order::relaxed);
 				}
 				predecessors[i] = curr;
 				successors[i] = next;
@@ -178,7 +178,7 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 			// Check if key already exists
 			SkipNode* found = successors[0];
 			if (found && !_compare(found->key, key) && !_compare(key, found->key)) {
-				if (found->deleted.load(std::memory_order_acquire)) {
+				if (found->deleted.load(std::memory_order::acquire)) {
 					continue; // Being deleted by another thread, spin-retry
 				}
 				found->value = value; // Overwrite
@@ -202,8 +202,8 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 
 				// Validate: predecessor must not be deleted and must still point to our successor
 
-				if (pred->deleted.load(std::memory_order_acquire) ||
-					pred->GetForward()[i].load(std::memory_order_relaxed) != successors[i]) {
+				if (pred->deleted.load(std::memory_order::acquire) ||
+					pred->GetForward()[i].load(std::memory_order::relaxed) != successors[i]) {
 					valid = false;
 					break;
 				}
@@ -222,19 +222,19 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 
 			// Link new node's forward pointers
 			for (uint32_t i = 0; i < height; ++i) {
-				newNode->GetForward()[i].store(successors[i], std::memory_order_relaxed);
-				predecessors[i]->GetForward()[i].store(newNode, std::memory_order_release);
+				newNode->GetForward()[i].store(successors[i], std::memory_order::relaxed);
+				predecessors[i]->GetForward()[i].store(newNode, std::memory_order::release);
 			}
 
-			uint32_t curLvl = _level.load(std::memory_order_relaxed);
+			uint32_t curLvl = _level.load(std::memory_order::relaxed);
 			if (height > curLvl) {
-				_level.store(height, std::memory_order_release);
+				_level.store(height, std::memory_order::release);
 			}
 
 			for (auto* p : locked) {
 				p->lock.unlock();
 			}
-			_size.fetch_add(1, std::memory_order_relaxed);
+			_size.fetch_add(1, std::memory_order::relaxed);
 			return;
 		}
 	}
@@ -249,10 +249,10 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 
 			SkipNode* curr = _head;
 			for (int i = static_cast<int>(MAX_LEVEL) - 1; i >= 0; --i) {
-				SkipNode* next = curr->GetForward()[i].load(std::memory_order_relaxed);
+				SkipNode* next = curr->GetForward()[i].load(std::memory_order::relaxed);
 				while (next && _compare(next->key, key)) {
 					curr = next;
-					next = curr->GetForward()[i].load(std::memory_order_relaxed);
+					next = curr->GetForward()[i].load(std::memory_order::relaxed);
 				}
 				predecessors[i] = curr;
 				successors[i] = next;
@@ -263,7 +263,7 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 				return false; // Key not found
 			}
 
-			if (doomed->deleted.load(std::memory_order_acquire)) {
+			if (doomed->deleted.load(std::memory_order::acquire)) {
 				continue; // Already unlinking on another thread, spin-retry [1]
 			}
 
@@ -272,7 +272,7 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 			doomed->lock.lock();
 			locked.push_back(doomed);
 
-			if (doomed->deleted.load(std::memory_order_relaxed)) {
+			if (doomed->deleted.load(std::memory_order::relaxed)) {
 				doomed->lock.unlock();
 				continue;
 			}
@@ -285,8 +285,8 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 					locked.push_back(pred);
 				}
 
-				if (pred->deleted.load(std::memory_order_acquire) ||
-					pred->GetForward()[i].load(std::memory_order_relaxed) != doomed) {
+				if (pred->deleted.load(std::memory_order::acquire) ||
+					pred->GetForward()[i].load(std::memory_order::relaxed) != doomed) {
 					valid = false;
 					break;
 				}
@@ -300,26 +300,26 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 			}
 
 			// Mark logically deleted so concurrent readers know the node is dead [1]
-			doomed->deleted.store(true, std::memory_order_release);
+			doomed->deleted.store(true, std::memory_order::release);
 
 			// Unlink from predecessors
 			for (uint32_t i = 0; i < doomed->height; ++i) {
-				SkipNode* succ = doomed->GetForward()[i].load(std::memory_order_relaxed);
-				predecessors[i]->GetForward()[i].store(succ, std::memory_order_release);
+				SkipNode* succ = doomed->GetForward()[i].load(std::memory_order::relaxed);
+				predecessors[i]->GetForward()[i].store(succ, std::memory_order::release);
 			}
 
-			uint32_t lvl = _level.load(std::memory_order_relaxed);
+			uint32_t lvl = _level.load(std::memory_order::relaxed);
 			while (lvl > 1 &&
-				   _head->GetForward()[lvl - 1].load(std::memory_order_relaxed) == nullptr) {
+				   _head->GetForward()[lvl - 1].load(std::memory_order::relaxed) == nullptr) {
 				lvl--;
 			}
-			_level.store(lvl, std::memory_order_release);
+			_level.store(lvl, std::memory_order::release);
 
 			for (auto* p : locked) {
 				p->lock.unlock();
 			}
 
-			_size.fetch_sub(1, std::memory_order_relaxed);
+			_size.fetch_sub(1, std::memory_order::relaxed);
 
 			// Safely defer memory reclamation until no concurrent readers exist [1]
 			RetireNode(doomed);
@@ -328,18 +328,18 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 	}
 
 	void Clear() noexcept {
-		SkipNode* curr = _head->GetForward()[0].load(std::memory_order_relaxed);
+		SkipNode* curr = _head->GetForward()[0].load(std::memory_order::relaxed);
 		while (curr != nullptr) {
-			SkipNode* next = curr->GetForward()[0].load(std::memory_order_relaxed);
+			SkipNode* next = curr->GetForward()[0].load(std::memory_order::relaxed);
 			DestroyNode(curr);
 			curr = next;
 		}
 
 		for (uint32_t i = 0; i < MAX_LEVEL; ++i) {
-			_head->GetForward()[i].store(nullptr, std::memory_order_relaxed);
+			_head->GetForward()[i].store(nullptr, std::memory_order::relaxed);
 		}
-		_level.store(1, std::memory_order_relaxed);
-		_size.store(0, std::memory_order_relaxed);
+		_level.store(1, std::memory_order::relaxed);
+		_size.store(0, std::memory_order::relaxed);
 
 		ZHLN_LOCK(_retireMutex) {
 			for (auto* node : _retireQueue) {
@@ -349,15 +349,15 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 		}
 	}
 
-	[[nodiscard]] size_t Size() const noexcept { return _size.load(std::memory_order_relaxed); }
+	[[nodiscard]] size_t Size() const noexcept { return _size.load(std::memory_order::relaxed); }
 	[[nodiscard]] bool Empty() const noexcept { return Size() == 0; }
 
   private:
 	// --- Quiescent State Reclamation (QSR) Garbage Collector ---
-	void EnterReader() noexcept { _activeReaders.fetch_add(1, std::memory_order_acquire); }
+	void EnterReader() noexcept { _activeReaders.fetch_add(1, std::memory_order::acquire); }
 
 	void ExitReader() noexcept {
-		if (_activeReaders.fetch_sub(1, std::memory_order_release) == 1) {
+		if (_activeReaders.fetch_sub(1, std::memory_order::release) == 1) {
 			TryPurge(); // Last reader out, attempt garbage collection sweep
 		}
 	}
@@ -371,12 +371,12 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 
 	void TryPurge() {
 		// Fast-path check
-		if (_activeReaders.load(std::memory_order_acquire) == 0) {
+		if (_activeReaders.load(std::memory_order::acquire) == 0) {
 			std::vector<SkipNode*> localQueue;
 
 			ZHLN_LOCK(_retireMutex) {
 				// Re-verify under lock to prevent race conditions with newly entering readers
-				if (_activeReaders.load(std::memory_order_acquire) == 0) {
+				if (_activeReaders.load(std::memory_order::acquire) == 0) {
 					// Instantly steal the items, resetting the master tracker in O(1) time
 					localQueue = std::move(_retireQueue);
 				}
@@ -395,13 +395,13 @@ template <typename Key, typename Value, typename Compare = std::less<Key>> class
 		auto* node = ::new (mem)
 			SkipNode{.key = key, .value = value, .height = height, .deleted = {}, .lock = {}};
 
-		node->deleted.store(false, std::memory_order_relaxed);
-		node->lock.locked.store(false, std::memory_order_relaxed);
+		node->deleted.store(false, std::memory_order::relaxed);
+		node->lock.locked.store(false, std::memory_order::relaxed);
 
 		auto* forward = node->GetForward();
 		for (uint32_t i = 0; i < height; ++i) {
 			::new (&forward[i]) ZHLN::Atomic<SkipNode*>();
-			forward[i].store(nullptr, std::memory_order_relaxed);
+			forward[i].store(nullptr, std::memory_order::relaxed);
 		}
 		return node;
 	}
