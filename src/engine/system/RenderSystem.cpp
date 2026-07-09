@@ -268,12 +268,22 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
 				.doubleSided = true,
 				.alphaBlend = true,
 				.isLineList = true};
-			debugLineMat = rc.CreateMaterial(lineDesc);
+
+			auto debugLineMat_res = rc.CreateMaterial(lineDesc);
+			if (!debugLineMat_res) {
+				ZHLN::Panic("Failed to compile debug line material: {}", debugLineMat_res.error());
+			}
+			debugLineMat = debugLineMat_res.value();
 			debugLineMat.albedoIndex = 1;
 
 			PipelineDesc solidDesc = lineDesc;
 			solidDesc.isLineList = false;
-			debugSolidMat = rc.CreateMaterial(solidDesc);
+
+			auto debugSolidMat_res = rc.CreateMaterial(solidDesc);
+			if (!debugSolidMat_res) {
+				ZHLN::Panic("Failed to compile debug solid material: {}", debugSolidMat_res.error());
+			}
+			debugSolidMat = debugSolidMat_res.value();
 			debugSolidMat.albedoIndex = 1;
 		}
 

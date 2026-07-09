@@ -3,7 +3,6 @@
 
 // File: src/engine/MeshBuilder.cpp
 #include "Resources.hpp"
-#include "Zahlen/Components.hpp"
 #include "Zahlen/Render.hpp"
 
 #include <Zahlen/CreativeWorksFactory.hpp>
@@ -14,24 +13,30 @@
 
 namespace ZHLN::CreativeWorksFactory {
 
-Material CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend) {
+std::expected<Material, std::string> CreateBasicMaterial(RenderContext& ctx, bool doubleSided,
+														 bool alphaBlend) {
+	using enum Resource::ShaderID;
 	PipelineDesc desc;
-	desc.vertexShaderData = Resource::GetShaderProgram(Resource::ShaderID::Basic).vertex.data();
-	desc.vertexShaderSize = static_cast<std::uint32_t>(
-		Resource::GetShaderProgram(Resource::ShaderID::Basic).vertex.size());
+	desc.vertexShaderData = Resource::GetShaderProgram(Basic).vertex.data();
+	desc.vertexShaderSize =
+		static_cast<std::uint32_t>(Resource::GetShaderProgram(Basic).vertex.size());
 
 	if (alphaBlend) {
 		desc.fragShaderData = Resource::forward_frag.data();
 		desc.fragShaderSize = static_cast<std::uint32_t>(Resource::forward_frag.size());
 	} else {
-		desc.fragShaderData = Resource::GetShaderProgram(Resource::ShaderID::Basic).fragment.data();
-		desc.fragShaderSize = static_cast<std::uint32_t>(
-			Resource::GetShaderProgram(Resource::ShaderID::Basic).fragment.size());
+		desc.fragShaderData = Resource::GetShaderProgram(Basic).fragment.data();
+		desc.fragShaderSize =
+			static_cast<std::uint32_t>(Resource::GetShaderProgram(Basic).fragment.size());
 	}
 
 	desc.doubleSided = doubleSided;
 	desc.alphaBlend = alphaBlend;
-	Material mat = ctx.CreateMaterial(desc);
+	auto mat_res = ctx.CreateMaterial(desc);
+	if (!mat_res) {
+		return std::unexpected(mat_res.error());
+	}
+	Material mat = mat_res.value();
 	mat.albedoIndex = 1;
 	return mat;
 }

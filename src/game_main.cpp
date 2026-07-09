@@ -23,10 +23,10 @@
 #include "imgui.h"
 #include "physics/Physics.hpp"
 
-#include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/Components.hpp>
+#include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/GUI.hpp>
 #include <Zahlen/Log.hpp>
@@ -227,17 +227,16 @@ void BuildSystemGraphs(Engine& engine) {
 						   .access_pattern = {},
 						   .enabled = true});
 
-	updateGraph.AddSystem(
-		{.update_func =
-			 [](Engine& eng, float dt) {
-				 static InteractionSystem sys;
-				 sys.Update(eng, dt);
-			 },
-		 .name = "InteractionSystem",
-		 .access_pattern = {Write<TriggerComponent>(), Write<ContainerComponent>(),
-							Write<PickupComponent>(), Read<ItemBaseComponent>(),
-							Read<UsableComponent>(), Read<MovementComponent>()},
-		 .enabled = true});
+	updateGraph.AddSystem({.update_func =
+							   [](Engine& eng, float dt) {
+								   static InteractionSystem sys;
+								   sys.Update(eng, dt);
+							   },
+						   .name = "InteractionSystem",
+						   .access_pattern = {Write<TriggerComponent>(), Write<ContainerComponent>(),
+											  Write<PickupComponent>(), Read<ItemBaseComponent>(),
+											  Read<UsableComponent>(), Read<MovementComponent>()},
+						   .enabled = true});
 
 	updateGraph.Compile();
 
@@ -262,8 +261,16 @@ bool InitializeGame(Engine& engine) {
 	auto& reg = engine.GetRegistry();
 	auto& pc = engine.GetPhysicsContext();
 
-	Mesh lineMesh = CreativeWorksFactory::CreateBox(rc, {0.01f, 0.01f, 0.5f}, {0.0f, 1.0f, 1.0f, 1.0f});
-	Material lineMat = CreativeWorksFactory::CreateBasicMaterial(rc);
+	Mesh lineMesh =
+		CreativeWorksFactory::CreateBox(rc, {0.01f, 0.01f, 0.5f}, {0.0f, 1.0f, 1.0f, 1.0f});
+
+	auto lineMat_res = CreativeWorksFactory::CreateBasicMaterial(rc);
+	if (!lineMat_res) {
+		ZHLN::Log("ERROR: Failed to compile basic material during initialization: {}",
+				  lineMat_res.error());
+		return false;
+	}
+	Material lineMat = lineMat_res.value();
 
 	reg.RegisterComponents<
 		TransformComponent, MeshComponent, PhysicsComponent, PhysicsStateComponent,
@@ -281,8 +288,7 @@ bool InitializeGame(Engine& engine) {
 	Entity cameraEntity = reg.Create();
 	reg.Add(cameraEntity, MainCameraTagComponent{});
 	reg.Add(cameraEntity, CameraSystem::CameraComponent{});
-	reg.Add(cameraEntity,
-			AASettingsComponent{.state = {.mode = AAMode::TAA, .taaFeedback = 0.95f}});
+	reg.Add(cameraEntity, AASettingsComponent{.state = {.mode = AAMode::TAA, .taaFeedback = 0.95f}});
 
 	Entity settingsEntity = reg.Create();
 	reg.Add(settingsEntity, GlobalSettingsTagComponent{});
@@ -303,8 +309,7 @@ bool InitializeGame(Engine& engine) {
 	return true;
 }
 
-void UpdateGame(Engine& engine, float dt, ScriptRunner& scriptRunner,
-				FileWatcher& gameplayWatcher) {
+void UpdateGame(Engine& engine, float dt, ScriptRunner& scriptRunner, FileWatcher& gameplayWatcher) {
 	static InputSystem inputSystem;
 	inputSystem.Update(engine);
 	UIInteractionSystem::Update(engine);

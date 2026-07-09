@@ -62,7 +62,7 @@ class ZHLN_API RenderContext {
 	auto CreateIndexBuffer(const void* data, size_t size) -> BufferHandle;
 	void DestroyBuffer(BufferHandle handle);
 	auto CreateConstantBuffer(size_t size) -> BufferHandle;
-	auto CreateMaterial(const PipelineDesc& desc) -> Material;
+	[[nodiscard]] std::expected<Material, std::string> CreateMaterial(const PipelineDesc& desc);
 
 	auto CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true)
 		-> uint32_t;

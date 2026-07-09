@@ -851,6 +851,7 @@ template void
 	RenderContext::Impl::RecordSceneFrame<false>(Vk::CommandBuffer<Vk::QueueType::Graphics>);
 
 RenderResult RenderContext::BeginFrame() noexcept {
+	using enum RenderFrameResult;
 	if (_impl->stagingContext) {
 		_impl->stagingContext->Wait();
 		_impl->stagingContext.reset();
@@ -867,13 +868,13 @@ RenderResult RenderContext::BeginFrame() noexcept {
 	if (_impl->resized) {
 		auto fbSize = GetFramebufferSize();
 		if (!fbSize.has_value()) {
-			return std::unexpected(RenderFrameResult::OutOfDate);
+			return std::unexpected(OutOfDate);
 		}
 
 		VkExtent2D ext = {.width = fbSize->width, .height = fbSize->height};
 
 		if (!_impl->RecreateTargets(ext)) {
-			return std::unexpected(RenderFrameResult::Error);
+			return std::unexpected(Error);
 		}
 
 		_impl->needsInitialClear = true;
@@ -884,6 +885,10 @@ RenderResult RenderContext::BeginFrame() noexcept {
 	_impl->current_cmd = reinterpret_cast<VkCommandBuffer>(1);
 
 	return {};
+}
+
+void RenderContext::Impl::FlipSubsystems() noexcept {
+	ZHLN::Reflect::ForEachField(*this, [](auto& field) { FlipObject(field); });
 }
 
 RenderResult RenderContext::EndFrame() noexcept {
@@ -907,7 +912,7 @@ RenderResult RenderContext::EndFrame() noexcept {
 		if (_impl->current_cmd == VK_NULL_HANDLE) {
 			_impl->drawQueue.clear();
 			_impl->uiDrawQueue.clear();
-			return std::unexpected(RenderFrameResult::Error);
+			return std::unexpected(Error);
 		}
 
 		res = Vk::DrawFrame<2, false>(
@@ -969,20 +974,7 @@ RenderResult RenderContext::EndFrame() noexcept {
 		}
 
 		// Flip double-buffered resources to prepare for the next frame
-		StaticResourceManager(
-			&_impl->accumBuffers, &_impl->taaPass, &_impl->fxaaPass, &_impl->smaaEdgePass,
-			&_impl->smaaWeightPass, &_impl->smaaBlendPass, &_impl->ambientPass,
-			&_impl->lightingPass, &_impl->reflectionPass, &_impl->blitPass,
-			&_impl->bloomThresholdPass, _impl->bloomDownPass.data(), &_impl->bloomDownPass[1],
-			&_impl->bloomDownPass[2], _impl->bloomUpPass.data(), &_impl->bloomUpPass[1],
-			&_impl->bloomUpPass[2], &_impl->frameUniformBuffers, &_impl->lightStorageBuffers,
-			&_impl->instanceDataBuffers, &_impl->indirectCommandsBuffers,
-			&_impl->shadowIndirectBuffers, &_impl->jointBuffers, &_impl->bindlessSets, &_impl->tlas,
-			&_impl->tlasBuffer, &_impl->tlasScratchBuffer, &_impl->clusterGridBuffers,
-			&_impl->lightIndexListBuffers, &_impl->globalCounterBuffers, &_impl->clusterCullingSets,
-			&_impl->parallelRecorder, &_impl->tlasInstanceBuffers, &_impl->tlasStagingBuffers,
-			&_impl->debugMeshHandles, &_impl->cullingSets)
-			.FlipAll();
+		_impl->FlipSubsystems();
 
 		_impl->drawQueue.clear();
 		_impl->uiDrawQueue.clear();

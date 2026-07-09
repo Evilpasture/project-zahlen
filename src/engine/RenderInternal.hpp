@@ -759,6 +759,8 @@ struct RenderContext::Impl {
 	[[nodiscard]] std::expected<void, std::string> InitSubsystems(const RenderConfig& cfg,
 																  int width, int height);
 
+	void FlipSubsystems() noexcept;
+
 	struct PPPushConstants {
 		JPH::Mat44 invViewProj;
 		JPH::Mat44 viewProj;
@@ -813,7 +815,7 @@ struct RenderContext::Impl {
 	void RegisterPipeline(const PipelineRegistration& reg) noexcept;
 	void ProvokeDeviceLostInternal() const;
 
-	void BuildSkinningPipeline();
+	[[nodiscard]] std::expected<void, std::string> BuildSkinningPipeline();
 	void DispatchSkinningPasses();
 
 	void BuildProceduralBakePipeline();
@@ -823,20 +825,22 @@ struct RenderContext::Impl {
 	void BuildTLAS(VkCommandBuffer cmd) noexcept;
 
 	void InitShadowResources();
-	void InitCullingResources();
-	void CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
-	void CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
+	[[nodiscard]] std::expected<void, std::string> InitCullingResources();
+	[[nodiscard]] std::expected<void, std::string>
+	CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
+	[[nodiscard]] std::expected<void, std::string>
+	CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
 	void InitBindless();
-	void BuildTAAPipeline();
-	void BuildFXAAPipeline();
-	void BuildSMAAPipeline();
-	void BuildAmbientPipeline();
-	void BuildLightingPipeline();
-	void BuildReflectionPipelines();
-	void BuildBlitPipeline();
-	void BuildBloomPipelines();
-	void BuildHangGpuPipeline();
-	void InitPostProcessing();
+	[[nodiscard]] std::expected<void, std::string> BuildTAAPipeline();
+	[[nodiscard]] std::expected<void, std::string> BuildFXAAPipeline();
+	[[nodiscard]] std::expected<void, std::string> BuildSMAAPipeline();
+	[[nodiscard]] std::expected<void, std::string> BuildAmbientPipeline();
+	[[nodiscard]] std::expected<void, std::string> BuildLightingPipeline();
+	[[nodiscard]] std::expected<void, std::string> BuildReflectionPipelines();
+	[[nodiscard]] std::expected<void, std::string> BuildBlitPipeline();
+	[[nodiscard]] std::expected<void, std::string> BuildBloomPipelines();
+	[[nodiscard]] std::expected<void, std::string> BuildHangGpuPipeline();
+	[[nodiscard]] std::expected<void, std::string> InitPostProcessing();
 	void SetupUI(GLFWwindow* window);
 
 	uint32_t CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB);

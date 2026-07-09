@@ -727,8 +727,13 @@ static CompiledPrimitive GetOrCreateCompiledPrimitive(
 	}
 
 	// Map Materials and assign Bindless Indices
-	Material subMaterial =
+	auto subMaterial_res =
 		CreateBasicMaterial(ctx, primJob.doubleSided || isMirrored, primJob.alphaBlend);
+	if (!subMaterial_res) {
+		ZHLN::Panic("Failed to create primitive material in glTF Importer: {}",
+					subMaterial_res.error());
+	}
+	Material subMaterial = subMaterial_res.value();
 	subMaterial.alphaMode = primJob.alphaMode;
 	subMaterial.alphaCutoff = primJob.alphaCutoff;
 	subMaterial.metallicFactor = primJob.metallicFactor;
@@ -846,7 +851,12 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, CreativeWorksManager& assetMgr,
 		Material activeMaterial = compPrim.defaultMaterial;
 		if (isMirrored && activeMaterial.pipeline != PipelineHandle::Invalid) {
 			// Upgrade base material to a double-sided pipeline variant on mirrored nodes
-			Material mirroredMat = CreateBasicMaterial(ctx, true, activeMaterial.alphaMode == 2);
+			auto mirroredMat_res = CreateBasicMaterial(ctx, true, activeMaterial.alphaMode == 2);
+			if (!mirroredMat_res) {
+				ZHLN::Panic("Failed to compile mirrored double-sided material in glTF Importer: {}",
+							mirroredMat_res.error());
+			}
+			Material mirroredMat = mirroredMat_res.value();
 			mirroredMat.albedoIndex = activeMaterial.albedoIndex;
 			mirroredMat.normalIndex = activeMaterial.normalIndex;
 			mirroredMat.pbrIndex = activeMaterial.pbrIndex;

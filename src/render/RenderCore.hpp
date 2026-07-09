@@ -48,53 +48,27 @@ template <typename T> struct PerFrame {
 
 template <typename T> using DoubleBuffered = PerFrame<T>;
 
-namespace Detail {
-template <bool Condition> struct ResourceCheck {
-	[[gnu::warning(
-		"A static resource lived in the manager but lacks a Flip() method! It will be skipped.")]]
-	static void emit() noexcept {}
+// C++20/C++23 Concepts to evaluate layout capabilities at compile-time
+template <typename T>
+concept CanFlipDirect = requires(T& t) { t.Flip(); };
+
+template <typename T>
+concept CanFlipIterable = requires(T& t) {
+	requires !CanFlipDirect<T>;
+	t.begin();
+	t.end();
+	requires requires(typename T::value_type& item) { item.Flip(); };
 };
 
-template <> struct ResourceCheck<true> {
-	static constexpr void emit() noexcept {}
-};
-} // namespace Detail
-
-/**
- * @brief 100% Compile-Time Static Dispatch Resource Manager.
- * Zero heap allocations, zero indirection, and perfect inlining.
- * Enforces single-use consumption at compile time via rvalue ref-qualifiers.
- */
-template <typename... Resources> class StaticResourceManager {
-  public:
-	constexpr explicit StaticResourceManager(Resources*... resources) noexcept
-		: _resources(resources...) {}
-	~StaticResourceManager() = default;
-	StaticResourceManager(const StaticResourceManager&) = delete;
-	StaticResourceManager(StaticResourceManager&&) = delete;
-	StaticResourceManager& operator=(const StaticResourceManager&) = delete;
-	StaticResourceManager& operator=(StaticResourceManager&&) = delete;
-
-	void FlipAll() & = delete;
-
-	void FlipAll() && noexcept {
-		std::apply(
-			[](auto*... r) {
-				auto flip_single = [](auto* resource) {
-					constexpr bool can_flip = requires { resource->Flip(); };
-					Detail::ResourceCheck<can_flip>::emit();
-					if constexpr (can_flip) {
-						resource->Flip();
-					}
-				};
-				(flip_single(r), ...);
-			},
-			_resources);
+inline void FlipObject(auto& obj) noexcept {
+	if constexpr (CanFlipDirect<decltype(obj)>) {
+		obj.Flip();
+	} else if constexpr (CanFlipIterable<decltype(obj)>) {
+		for (auto& item : obj) {
+			item.Flip();
+		}
 	}
-
-  private:
-	std::tuple<Resources*...> _resources;
-};
+}
 
 } // namespace ZHLN
 

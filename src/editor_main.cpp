@@ -314,7 +314,14 @@ bool InitializeEditorScene(Engine& engine) {
 														   terrainMaxHeight, terrainHeights.data());
 	auto terrainShape =
 		Physics::CreateHeightFieldShape(terrainHeights, terrainSize, terrainWorldSize);
-	Material material = CreativeWorksFactory::CreateBasicMaterial(rc);
+
+	auto material_res = CreativeWorksFactory::CreateBasicMaterial(rc);
+	if (!material_res) {
+		ZHLN::Log("ERROR: Failed to compile basic material during editor initialization: {}",
+				  material_res.error());
+		return false;
+	}
+	Material material = material_res.value();
 
 	Entity terrainEnt = reg.Create();
 	reg.Add(terrainEnt,
@@ -537,12 +544,24 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 					.doubleSided = true,
 					.alphaBlend = true,
 					.isLineList = true};
-				debugLineMat = rc.CreateMaterial(lineDesc);
+
+				auto debugLineMat_res = rc.CreateMaterial(lineDesc);
+				if (!debugLineMat_res) {
+					ZHLN::Panic("Failed to compile editor debug line material: {}",
+								debugLineMat_res.error());
+				}
+				debugLineMat = debugLineMat_res.value();
 				debugLineMat.albedoIndex = 1;
 
 				PipelineDesc solidDesc = lineDesc;
 				solidDesc.isLineList = false;
-				debugSolidMat = rc.CreateMaterial(solidDesc);
+
+				auto debugSolidMat_res = rc.CreateMaterial(solidDesc);
+				if (!debugSolidMat_res) {
+					ZHLN::Panic("Failed to compile editor debug solid material: {}",
+								debugSolidMat_res.error());
+				}
+				debugSolidMat = debugSolidMat_res.value();
 				debugSolidMat.albedoIndex = 1;
 			}
 

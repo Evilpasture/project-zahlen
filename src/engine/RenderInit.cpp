@@ -113,15 +113,33 @@ std::expected<void, std::string> RenderContext::Impl::InitSubsystems(const Rende
 	transferCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().transfer_family);
 
 	InitShadowResources();
-	InitCullingResources();
+
+	auto cull_res = InitCullingResources();
+	if (!cull_res) {
+		return std::unexpected(cull_res.error());
+	}
+
 	InitBindless();
 
-	BuildHangGpuPipeline();
+	auto hang_res = BuildHangGpuPipeline();
+	if (!hang_res) {
+		return std::unexpected(hang_res.error());
+	}
 
-	CompileShadowPipeline(ctx.Device(),
-						  Resource::ShaderPair{.vertex = Resource::GetShaderProgram(Basic).vertex,
-											   .fragment = Resource::shadow_frag});
-	CompilePunctualShadowPipeline(ctx.Device(), Resource::GetShaderProgram(PunctualShadows));
+	auto shadow_res = CompileShadowPipeline(
+		ctx.Device(), Resource::ShaderPair{.vertex = Resource::GetShaderProgram(Basic).vertex,
+										   .fragment = Resource::shadow_frag});
+	if (!shadow_res) {
+		return std::unexpected(
+			std::format("Shadow pipeline compilation failed: {}", shadow_res.error()));
+	}
+
+	auto punctual_res =
+		CompilePunctualShadowPipeline(ctx.Device(), Resource::GetShaderProgram(PunctualShadows));
+	if (!punctual_res) {
+		return std::unexpected(
+			std::format("Punctual shadow pipeline compilation failed: {}", punctual_res.error()));
+	}
 
 	if (!presentation.Init(ctx, allocator, surface.Get(), width, height, cfg.vsync)) {
 		return std::unexpected("Presentation Context initialization failed.");
@@ -133,7 +151,11 @@ std::expected<void, std::string> RenderContext::Impl::InitSubsystems(const Rende
 
 	InitializeSystemTextures();
 
-	InitPostProcessing();
+	auto pp_res = InitPostProcessing();
+	if (!pp_res) {
+		return std::unexpected(pp_res.error());
+	}
+
 	SetupUI(window.IsTTY() ? nullptr : static_cast<GLFWwindow*>(window.GetNativeHandle()));
 
 	uint32_t workerCount = TaskSystem::GetWorkerCount() + 1;
@@ -284,40 +306,45 @@ Vk::Context CreateLogicalDevice(VkInstance instance, VkSurfaceKHR surface,
 								.enable_validation = enableValidation});
 }
 
-// Generic helper for standard PostProcessPass compilation
 template <typename LayoutT>
-void BuildPassHelper(RenderContext::Impl* self, Vk::PostProcessPass<LayoutT>& pass,
-					 const char* passName, ShaderStageSource vs, ShaderStageSource ps,
-					 std::initializer_list<VkFormat> colorFormats,
-					 const VkPushConstantRange* pushConstants = nullptr, uint32_t pushCount = 0,
-					 bool additive = false) noexcept {
+[[nodiscard]] std::expected<void, std::string>
+BuildPassHelper(RenderContext::Impl* self, Vk::PostProcessPass<LayoutT>& pass, const char* passName,
+				ShaderStageSource vs, ShaderStageSource ps,
+				std::initializer_list<VkFormat> colorFormats,
+				const VkPushConstantRange* pushConstants = nullptr, uint32_t pushCount = 0,
+				bool additive = false) noexcept {
 
 	auto shaders = self->LoadAndCreateShaders(vs, ps);
+	if (!shaders.Valid()) {
+		return std::unexpected(std::format("Failed to load or compile shaders for '{}'", passName));
+	}
 
 	if (pass.Build(self->ctx.Device(), shaders, colorFormats, pushConstants, pushCount, additive)) {
-		ZHLN::Log("[Shader Reload] {} Pipeline built successfully.", passName);
-	} else {
-		ZHLN::Log("[Shader Reload] {} Pipeline failed to build.", passName);
+		return {};
 	}
+	return std::unexpected(std::format("{} Pipeline failed to build.", passName));
 }
 
 // Generic helper for specialized pipeline variants (e.g. Reflections)
 template <typename LayoutT>
-void BuildPassVariants(RenderContext::Impl* self, Vk::PostProcessPass<LayoutT>& pass,
-					   const char* passName, ShaderStageSource vs, ShaderStageSource ps,
-					   std::initializer_list<VkFormat> colorFormats,
-					   std::span<const VkSpecializationInfo> specInfos,
-					   const VkPushConstantRange* pushConstants = nullptr, uint32_t pushCount = 0,
-					   bool additive = false) noexcept {
+[[nodiscard]] std::expected<void, std::string>
+BuildPassVariants(RenderContext::Impl* self, Vk::PostProcessPass<LayoutT>& pass,
+				  const char* passName, ShaderStageSource vs, ShaderStageSource ps,
+				  std::initializer_list<VkFormat> colorFormats,
+				  std::span<const VkSpecializationInfo> specInfos,
+				  const VkPushConstantRange* pushConstants = nullptr, uint32_t pushCount = 0,
+				  bool additive = false) noexcept {
 
 	auto shaders = self->LoadAndCreateShaders(vs, ps);
+	if (!shaders.Valid()) {
+		return std::unexpected(std::format("Failed to load or compile shaders for '{}'", passName));
+	}
 
 	if (pass.BuildVariants(self->ctx.Device(), shaders, colorFormats, pushConstants, pushCount,
 						   specInfos, additive)) {
-		ZHLN::Log("[Shader Reload] {} Pass variants built successfully.", passName);
-	} else {
-		ZHLN::Log("[Shader Reload] {} Pass variants failed to build.", passName);
+		return {};
 	}
+	return std::unexpected(std::format("{} Pass variants failed to build.", passName));
 }
 
 } // namespace
@@ -458,7 +485,7 @@ void RenderContext::CheckShaderReload() noexcept {
 	}
 }
 
-void RenderContext::Impl::BuildSkinningPipeline() {
+std::expected<void, std::string> RenderContext::Impl::BuildSkinningPipeline() {
 	VkPushConstantRange pushRange = {
 		.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(SkinningConstants)};
 
@@ -476,10 +503,9 @@ void RenderContext::Impl::BuildSkinningPipeline() {
 													   skinningPass.pipelineLayout.Get());
 
 	if (skinningPass.pipeline.Valid()) {
-		ZHLN::Log("[Shader Reload] GPU Skinning Compute pipeline built successfully.");
-	} else {
-		ZHLN::Log("[Shader Reload] GPU Skinning Compute pipeline failed to build.");
+		return {};
 	}
+	return std::unexpected("GPU Skinning Compute pipeline failed to build.");
 }
 
 void RenderContext::Impl::RecreatePunctualShadowViews() noexcept {
@@ -566,7 +592,7 @@ void RenderContext::Impl::InitShadowResources() {
 							 VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 }
 
-void RenderContext::Impl::InitCullingResources() {
+std::expected<void, std::string> RenderContext::Impl::InitCullingResources() {
 	using enum Resource::ShaderID;
 	Vk::AllocateDoubleBufferedSet<CullingLayout>(ctx.Device(), cullingLayout, cullingPool,
 												 cullingSets);
@@ -581,7 +607,6 @@ void RenderContext::Impl::InitCullingResources() {
 			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
 			VMA_MEMORY_USAGE_GPU_ONLY);
 
-		// Bind all three targets to the culling descriptor set
 		CullingLayout::Write(ctx.Device(), cullingSets[i],
 							 Vk::BufferWrite{.buffer = instanceDataBuffers[i].Handle()},
 							 Vk::BufferWrite{.buffer = indirectCommandsBuffers[i].Handle()});
@@ -597,18 +622,13 @@ void RenderContext::Impl::InitCullingResources() {
 	auto cullingShader = Vk::CreateShaderDesc(Resource::culling_comp);
 
 	if (!cullingPass.Build(ctx.Device(), cullingLayout.Get(), cullingShader, &cullingPush, 1)) {
-		ZHLN::Panic("FATAL: Failed to compile or build the Compute Culling Pipeline.");
+		return std::unexpected("Failed to compile or build the Compute Culling Pipeline.");
 	}
 
-	constexpr auto numClusters = static_cast<size_t>(16 * 9 * 24); // 3456
+	constexpr auto numClusters = static_cast<size_t>(16 * 9 * 24);
 
 	clusterBoundsBuffer =
-		Vk::Buffer::Create(allocator.Get(),
-						   sizeof(
-							   /* Don't remove the struct tag here or else the compiler will think
-								* it's Resource::ShaderID::ClusterBounds. */
-							   struct ClusterBounds) *
-							   numClusters,
+		Vk::Buffer::Create(allocator.Get(), sizeof(struct ClusterBounds) * numClusters,
 						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 						   VMA_MEMORY_USAGE_GPU_ONLY);
 
@@ -627,50 +647,43 @@ void RenderContext::Impl::InitCullingResources() {
 														 VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 													 VMA_MEMORY_USAGE_GPU_ONLY);
 
-		ClusterCullingLayout::Write(
-			ctx.Device(), clusterCullingSets[i],
-			Vk::BufferWrite{.buffer = clusterBoundsBuffer.Handle()},
-			Vk::BufferWrite{.buffer = clusterGridBuffers[i].Handle()},
-			Vk::BufferWrite{.buffer = lightIndexListBuffers[i].Handle()},
-			Vk::BufferWrite{.buffer = globalCounterBuffers[i].Handle()},
-			Vk::BufferWrite{.buffer = frameUniformBuffers[i].Handle()}, // Binding 4: Frame UBO
-			Vk::BufferWrite{.buffer = lightStorageBuffers[i].Handle()}	// Binding 5: Lights SSBO
-		);
+		ClusterCullingLayout::Write(ctx.Device(), clusterCullingSets[i],
+									Vk::BufferWrite{.buffer = clusterBoundsBuffer.Handle()},
+									Vk::BufferWrite{.buffer = clusterGridBuffers[i].Handle()},
+									Vk::BufferWrite{.buffer = lightIndexListBuffers[i].Handle()},
+									Vk::BufferWrite{.buffer = globalCounterBuffers[i].Handle()},
+									Vk::BufferWrite{.buffer = frameUniformBuffers[i].Handle()},
+									Vk::BufferWrite{.buffer = lightStorageBuffers[i].Handle()});
 	}
 
 	auto bDesc = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterBounds).vertex);
 	auto cDesc = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterCulling).vertex);
 	if (!clusterBoundsPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), bDesc)) {
-		ZHLN::Panic("FATAL: Failed to build Cluster Bounds Pass!");
+		return std::unexpected("Failed to build Cluster Bounds Pass!");
 	}
 	if (!clusterCullingPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), cDesc)) {
-		ZHLN::Panic("FATAL: Failed to build Cluster Culling Pass!");
+		return std::unexpected("Failed to build Cluster Culling Pass!");
 	}
 
-	// --- PRE-ALLOCATE STATIC TLAS RESOURCES ---
 	if (rtCtx.Valid()) {
 		ZHLN_AccelerationStructureSizes tlasSizes;
 		rtCtx.GetTlasSizes(kGpuCullingMaxInstances, tlasSizes);
 
 		for (int i = 0; i < 2; ++i) {
-			// Allocate TLAS Backing Storage
 			tlasBuffer[i] =
 				Vk::Buffer::Create(allocator.Get(), tlasSizes.acceleration_structure_size,
 								   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
 									   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
 								   VMA_MEMORY_USAGE_GPU_ONLY);
 
-			// Allocate TLAS Build Scratch Memory
 			tlasScratchBuffer[i] = Vk::Buffer::Create(allocator.Get(), tlasSizes.build_scratch_size,
 													  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
 														  VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
 													  VMA_MEMORY_USAGE_GPU_ONLY);
 
-			// Create Top-Level Acceleration Structure Handle
 			tlas[i] = rtCtx.CreateAS(tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size,
 									 ZHLN_AS_TYPE_TOP_LEVEL);
 
-			// Allocate GPU Instance Buffer (Reads instances into the AS builder)
 			tlasInstanceBuffers[i] = Vk::Buffer::Create(
 				allocator.Get(),
 				sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances,
@@ -679,7 +692,6 @@ void RenderContext::Impl::InitCullingResources() {
 					VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 				VMA_MEMORY_USAGE_GPU_ONLY);
 
-			// Allocate Host-Visible Staging Buffer
 			tlasStagingBuffers[i] = Vk::Buffer::Create(
 				allocator.Get(),
 				sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances,
@@ -687,11 +699,23 @@ void RenderContext::Impl::InitCullingResources() {
 		}
 	}
 
-	BuildSkinningPipeline();
-	if constexpr (isDev) {
-		// Skinning
-		RegisterShaderWatcher(SHADER_SKINNING_HLSL_CS_PATH, [this]() { BuildSkinningPipeline(); });
+	auto skin_res = BuildSkinningPipeline();
+	if (!skin_res) {
+		return skin_res;
 	}
+
+	if constexpr (isDev) {
+		RegisterShaderWatcher(SHADER_SKINNING_HLSL_CS_PATH, [this]() {
+			auto res = BuildSkinningPipeline();
+			if (!res) {
+				ZHLN::Log("ERROR: Failed to hot-reload Skinning pipeline: {}", res.error());
+			} else {
+				ZHLN::Log("[Shader Reload] Skinning pipeline hot-reloaded successfully.");
+			}
+		});
+	}
+
+	return {};
 }
 
 void RenderContext::Impl::InitSkeletalAnimationResources() {
@@ -849,84 +873,89 @@ void RenderContext::Impl::InitBindless() {
 	}
 }
 using enum Resource::ShaderID;
-void RenderContext::Impl::BuildTAAPipeline() {
-
+std::expected<void, std::string> RenderContext::Impl::BuildTAAPipeline() {
 	VkPushConstantRange taaPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float)};
 
-	BuildPassHelper(this, taaPass, "TAA",
-					{.path = SHADER_TAA_HLSL_VS_PATH,
-					 .fallback = Resource::GetShaderProgram(Taa).vertex,
-					 .entryPoint = "VSMain"},
-					{.path = SHADER_TAA_HLSL_PS_PATH,
-					 .fallback = Resource::GetShaderProgram(Taa).fragment,
-					 .entryPoint = "PSMain"},
-					{VK_FORMAT_R16G16B16A16_SFLOAT}, &taaPush, 1);
+	return BuildPassHelper(this, taaPass, "TAA",
+						   {.path = SHADER_TAA_HLSL_VS_PATH,
+							.fallback = Resource::GetShaderProgram(Taa).vertex,
+							.entryPoint = "VSMain"},
+						   {.path = SHADER_TAA_HLSL_PS_PATH,
+							.fallback = Resource::GetShaderProgram(Taa).fragment,
+							.entryPoint = "PSMain"},
+						   {VK_FORMAT_R16G16B16A16_SFLOAT}, &taaPush, 1);
 }
 
-void RenderContext::Impl::BuildFXAAPipeline() {
+std::expected<void, std::string> RenderContext::Impl::BuildFXAAPipeline() {
 	VkPushConstantRange fxaaPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float) * 6};
 
-	BuildPassHelper(this, fxaaPass, "FXAA",
-					{.path = SHADER_FXAA_HLSL_VS_PATH,
-					 .fallback = Resource::GetShaderProgram(Fxaa).vertex,
-					 .entryPoint = "VSMain"},
-					{.path = SHADER_FXAA_HLSL_PS_PATH,
-					 .fallback = Resource::GetShaderProgram(Fxaa).fragment,
-					 .entryPoint = "PSMain"},
-					{VK_FORMAT_R16G16B16A16_SFLOAT}, &fxaaPush, 1);
+	return BuildPassHelper(this, fxaaPass, "FXAA",
+						   {.path = SHADER_FXAA_HLSL_VS_PATH,
+							.fallback = Resource::GetShaderProgram(Fxaa).vertex,
+							.entryPoint = "VSMain"},
+						   {.path = SHADER_FXAA_HLSL_PS_PATH,
+							.fallback = Resource::GetShaderProgram(Fxaa).fragment,
+							.entryPoint = "PSMain"},
+						   {VK_FORMAT_R16G16B16A16_SFLOAT}, &fxaaPush, 1);
 }
 
-void RenderContext::Impl::BuildSMAAPipeline() {
+std::expected<void, std::string> RenderContext::Impl::BuildSMAAPipeline() {
 	VkPushConstantRange smaaPush = {.stageFlags =
 										VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 									.offset = 0,
 									.size = sizeof(float) * 4};
 
-	BuildPassHelper(this, smaaEdgePass, "SMAA Edge Detection",
-					{.path = SHADER_SMAA_EDGE_VS_PATH,
-					 .fallback = Resource::GetShaderProgram(SmaaEdge).vertex,
-					 .entryPoint = "SmaaEdgeVS"},
-					{.path = SHADER_SMAA_EDGE_PS_PATH,
-					 .fallback = Resource::GetShaderProgram(SmaaEdge).fragment,
-					 .entryPoint = "SmaaEdgePS"},
-					{VK_FORMAT_R8G8_UNORM}, &smaaPush, 1);
+	auto res = BuildPassHelper(this, smaaEdgePass, "SMAA Edge Detection",
+							   {.path = SHADER_SMAA_EDGE_VS_PATH,
+								.fallback = Resource::GetShaderProgram(SmaaEdge).vertex,
+								.entryPoint = "SmaaEdgeVS"},
+							   {.path = SHADER_SMAA_EDGE_PS_PATH,
+								.fallback = Resource::GetShaderProgram(SmaaEdge).fragment,
+								.entryPoint = "SmaaEdgePS"},
+							   {VK_FORMAT_R8G8_UNORM}, &smaaPush, 1);
+	if (!res) {
+		return res;
+	}
 
-	BuildPassHelper(this, smaaWeightPass, "SMAA Blending Weight",
-					{.path = SHADER_SMAA_WEIGHT_VS_PATH,
-					 .fallback = Resource::GetShaderProgram(SmaaWeight).vertex,
-					 .entryPoint = "SmaaWeightVS"},
-					{.path = SHADER_SMAA_WEIGHT_PS_PATH,
-					 .fallback = Resource::GetShaderProgram(SmaaWeight).fragment,
-					 .entryPoint = "SmaaWeightPS"},
-					{VK_FORMAT_R8G8B8A8_UNORM}, &smaaPush, 1);
+	res = BuildPassHelper(this, smaaWeightPass, "SMAA Blending Weight",
+						  {.path = SHADER_SMAA_WEIGHT_VS_PATH,
+						   .fallback = Resource::GetShaderProgram(SmaaWeight).vertex,
+						   .entryPoint = "SmaaWeightVS"},
+						  {.path = SHADER_SMAA_WEIGHT_PS_PATH,
+						   .fallback = Resource::GetShaderProgram(SmaaWeight).fragment,
+						   .entryPoint = "SmaaWeightPS"},
+						  {VK_FORMAT_R8G8B8A8_UNORM}, &smaaPush, 1);
+	if (!res) {
+		return res;
+	}
 
-	BuildPassHelper(this, smaaBlendPass, "SMAA Neighborhood Blend",
-					{.path = SHADER_SMAA_BLEND_VS_PATH,
-					 .fallback = Resource::GetShaderProgram(SmaaBlend).vertex,
-					 .entryPoint = "SmaaBlendVS"},
-					{.path = SHADER_SMAA_BLEND_PS_PATH,
-					 .fallback = Resource::GetShaderProgram(SmaaBlend).fragment,
-					 .entryPoint = "SmaaBlendPS"},
-					{VK_FORMAT_R16G16B16A16_SFLOAT}, &smaaPush, 1);
+	return BuildPassHelper(this, smaaBlendPass, "SMAA Neighborhood Blend",
+						   {.path = SHADER_SMAA_BLEND_VS_PATH,
+							.fallback = Resource::GetShaderProgram(SmaaBlend).vertex,
+							.entryPoint = "SmaaBlendVS"},
+						   {.path = SHADER_SMAA_BLEND_PS_PATH,
+							.fallback = Resource::GetShaderProgram(SmaaBlend).fragment,
+							.entryPoint = "SmaaBlendPS"},
+						   {VK_FORMAT_R16G16B16A16_SFLOAT}, &smaaPush, 1);
 }
 
-void RenderContext::Impl::BuildAmbientPipeline() {
+std::expected<void, std::string> RenderContext::Impl::BuildAmbientPipeline() {
 	VkPushConstantRange ppPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
 
-	BuildPassHelper(this, ambientPass, "Ambient",
-					{.path = SHADER_AMBIENT_HLSL_VS_PATH,
-					 .fallback = Resource::GetShaderProgram(Ambient).vertex,
-					 .entryPoint = "VSMain"},
-					{.path = SHADER_AMBIENT_HLSL_PS_PATH,
-					 .fallback = Resource::GetShaderProgram(Ambient).fragment,
-					 .entryPoint = "PSMain"},
-					{VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush, 1);
+	return BuildPassHelper(this, ambientPass, "Ambient",
+						   {.path = SHADER_AMBIENT_HLSL_VS_PATH,
+							.fallback = Resource::GetShaderProgram(Ambient).vertex,
+							.entryPoint = "VSMain"},
+						   {.path = SHADER_AMBIENT_HLSL_PS_PATH,
+							.fallback = Resource::GetShaderProgram(Ambient).fragment,
+							.entryPoint = "PSMain"},
+						   {VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush, 1);
 }
 
-void RenderContext::Impl::BuildLightingPipeline() {
+std::expected<void, std::string> RenderContext::Impl::BuildLightingPipeline() {
 	VkPushConstantRange ppPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
 
@@ -949,19 +978,18 @@ void RenderContext::Impl::BuildLightingPipeline() {
 	const char* vsPath = hasRt ? SHADER_LIGHTING_HLSL_VS_PATH : SHADER_LIGHTING_NORT_HLSL_VS_PATH;
 	const char* psPath = hasRt ? SHADER_LIGHTING_HLSL_PS_PATH : SHADER_LIGHTING_NORT_HLSL_PS_PATH;
 
-	// Declared as const unsigned char* to match ShaderStageSource
 	auto vsSpan = hasRt ? Resource::GetShaderProgram(Lighting).vertex
 						: Resource::GetShaderProgram(LightingNort).vertex;
 	auto psSpan = hasRt ? Resource::GetShaderProgram(Lighting).fragment
 						: Resource::GetShaderProgram(LightingNort).fragment;
 
-	BuildPassVariants(this, lightingPass, "Lighting",
-					  {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
-					  {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"},
-					  {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1);
+	return BuildPassVariants(this, lightingPass, "Lighting",
+							 {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
+							 {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"},
+							 {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1);
 }
 
-void RenderContext::Impl::BuildReflectionPipelines() {
+std::expected<void, std::string> RenderContext::Impl::BuildReflectionPipelines() {
 	VkPushConstantRange ppPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
 
@@ -991,112 +1019,166 @@ void RenderContext::Impl::BuildReflectionPipelines() {
 	const char* psPath =
 		hasRt ? SHADER_REFLECTION_HLSL_PS_PATH : SHADER_REFLECTION_NORT_HLSL_PS_PATH;
 
-	// Declared as const unsigned char* to match ShaderStageSource
 	auto vsSpan = hasRt ? Resource::GetShaderProgram(Reflection).vertex
 						: Resource::GetShaderProgram(Resource::ShaderID::ReflectionNort).vertex;
 	auto psSpan = hasRt ? Resource::GetShaderProgram(Reflection).fragment
 						: Resource::GetShaderProgram(Resource::ShaderID::ReflectionNort).fragment;
 
-	BuildPassVariants(this, reflectionPass, "Reflection",
-					  {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
-					  {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"},
-					  {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1);
+	return BuildPassVariants(this, reflectionPass, "Reflection",
+							 {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
+							 {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"},
+							 {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1);
 }
 
-void RenderContext::Impl::BuildBloomPipelines() {
+std::expected<void, std::string> RenderContext::Impl::BuildBloomPipelines() {
 	using enum Resource::ShaderID;
-	BuildPassHelper(this, bloomThresholdPass, "Bloom Threshold",
-					{.path = SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH,
-					 .fallback = Resource::GetShaderProgram(BloomThreshold).vertex,
-					 .entryPoint = "VSMain"},
-					{.path = SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH,
-					 .fallback = Resource::GetShaderProgram(BloomThreshold).fragment,
-					 .entryPoint = "PSMain"},
-					{VK_FORMAT_R16G16B16A16_SFLOAT});
+	auto res = BuildPassHelper(this, bloomThresholdPass, "Bloom Threshold",
+							   {.path = SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH,
+								.fallback = Resource::GetShaderProgram(BloomThreshold).vertex,
+								.entryPoint = "VSMain"},
+							   {.path = SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH,
+								.fallback = Resource::GetShaderProgram(BloomThreshold).fragment,
+								.entryPoint = "PSMain"},
+							   {VK_FORMAT_R16G16B16A16_SFLOAT});
+	if (!res) {
+		return res;
+	}
 
 	VkPushConstantRange kawasePush = {
-		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-		.offset = 0,
-		.size = 16 // Holds Mode (int), Width (float), Height (float), Padding (float)
-	};
+		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 16};
 
 	for (int i = 0; i < 3; ++i) {
 		std::string downName = std::format("Bloom Downsample {}", i);
-		BuildPassHelper(this, bloomDownPass[i], downName.c_str(),
-						{.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH,
-						 .fallback = Resource::GetShaderProgram(BloomBlur).vertex,
-						 .entryPoint = "VSMain"},
-						{.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH,
-						 .fallback = Resource::GetShaderProgram(BloomBlur).fragment,
-						 .entryPoint = "PSMain"},
-						{VK_FORMAT_R16G16B16A16_SFLOAT}, &kawasePush, 1);
+		res = BuildPassHelper(this, bloomDownPass[i], downName.c_str(),
+							  {.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH,
+							   .fallback = Resource::GetShaderProgram(BloomBlur).vertex,
+							   .entryPoint = "VSMain"},
+							  {.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH,
+							   .fallback = Resource::GetShaderProgram(BloomBlur).fragment,
+							   .entryPoint = "PSMain"},
+							  {VK_FORMAT_R16G16B16A16_SFLOAT}, &kawasePush, 1);
+		if (!res) {
+			return res;
+		}
 
 		std::string upName = std::format("Bloom Upsample {}", i);
-		BuildPassHelper(this, bloomUpPass[i], upName.c_str(),
-						{.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH,
-						 .fallback = Resource::GetShaderProgram(BloomBlur).vertex,
-						 .entryPoint = "VSMain"},
-						{.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH,
-						 .fallback = Resource::GetShaderProgram(BloomBlur).fragment,
-						 .entryPoint = "PSMain"},
-						{VK_FORMAT_R16G16B16A16_SFLOAT}, &kawasePush, 1);
+		res = BuildPassHelper(this, bloomUpPass[i], upName.c_str(),
+							  {.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH,
+							   .fallback = Resource::GetShaderProgram(BloomBlur).vertex,
+							   .entryPoint = "VSMain"},
+							  {.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH,
+							   .fallback = Resource::GetShaderProgram(BloomBlur).fragment,
+							   .entryPoint = "PSMain"},
+							  {VK_FORMAT_R16G16B16A16_SFLOAT}, &kawasePush, 1);
+		if (!res) {
+			return res;
+		}
 	}
+	return {};
 }
 
-void RenderContext::Impl::BuildBlitPipeline() {
+std::expected<void, std::string> RenderContext::Impl::BuildBlitPipeline() {
 	VkPushConstantRange blitPush = {
 		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 		.offset = 0,
 		.size = sizeof(BlitPushConstants),
 	};
 
-	BuildPassHelper(this, blitPass, "Blit",
-					{.path = SHADER_BLIT_HLSL_VS_PATH,
-					 .fallback = Resource::GetShaderProgram(Blit).vertex,
-					 .entryPoint = "VSMain"},
-					{.path = SHADER_BLIT_HLSL_PS_PATH,
-					 .fallback = Resource::GetShaderProgram(Blit).fragment,
-					 .entryPoint = "PSMain"},
-					{presentation.swapchain.Get().format}, &blitPush, 1);
+	return BuildPassHelper(this, blitPass, "Blit",
+						   {.path = SHADER_BLIT_HLSL_VS_PATH,
+							.fallback = Resource::GetShaderProgram(Blit).vertex,
+							.entryPoint = "VSMain"},
+						   {.path = SHADER_BLIT_HLSL_PS_PATH,
+							.fallback = Resource::GetShaderProgram(Blit).fragment,
+							.entryPoint = "PSMain"},
+						   {presentation.swapchain.Get().format}, &blitPush, 1);
 }
 
-void RenderContext::Impl::InitPostProcessing() {
+std::expected<void, std::string> RenderContext::Impl::InitPostProcessing() {
 	defaultSampler = Vk::SamplerBuilder{}.Linear().ClampToEdge().Build(ctx.Device());
 	pointSampler = Vk::SamplerBuilder{}.Nearest().ClampToEdge().Build(ctx.Device());
 
-	// Unified build and watch registration
-	RegisterPipeline({.name = "TAA",
-					  .build = [this]() { BuildTAAPipeline(); },
-					  .watchPaths = {SHADER_TAA_HLSL_VS_PATH, SHADER_TAA_HLSL_PS_PATH}});
-	RegisterPipeline({.name = "FXAA",
-					  .build = [this]() { BuildFXAAPipeline(); },
-					  .watchPaths = {SHADER_FXAA_HLSL_VS_PATH, SHADER_FXAA_HLSL_PS_PATH}});
-	RegisterPipeline({.name = "SMAA",
-					  .build = [this]() { BuildSMAAPipeline(); },
-					  .watchPaths = {SHADER_SMAA_EDGE_VS_PATH, SHADER_SMAA_EDGE_PS_PATH,
-									 SHADER_SMAA_WEIGHT_VS_PATH, SHADER_SMAA_WEIGHT_PS_PATH,
-									 SHADER_SMAA_BLEND_VS_PATH, SHADER_SMAA_BLEND_PS_PATH}});
-	RegisterPipeline({.name = "Ambient",
-					  .build = [this]() { BuildAmbientPipeline(); },
-					  .watchPaths = {SHADER_AMBIENT_HLSL_VS_PATH, SHADER_AMBIENT_HLSL_PS_PATH}});
-	RegisterPipeline(
-		{.name = "Lighting",
-		 .build = [this]() { BuildLightingPipeline(); },
-		 .watchPaths = {SHADER_LIGHTING_HLSL_VS_PATH, SHADER_LIGHTING_HLSL_PS_PATH,
-						SHADER_LIGHTING_NORT_HLSL_VS_PATH, SHADER_LIGHTING_NORT_HLSL_PS_PATH}});
-	RegisterPipeline(
-		{.name = "Reflection",
-		 .build = [this]() { BuildReflectionPipelines(); },
-		 .watchPaths = {SHADER_REFLECTION_HLSL_VS_PATH, SHADER_REFLECTION_HLSL_PS_PATH,
-						SHADER_REFLECTION_NORT_HLSL_VS_PATH, SHADER_REFLECTION_NORT_HLSL_PS_PATH}});
-	RegisterPipeline(
-		{.name = "Bloom",
-		 .build = [this]() { BuildBloomPipelines(); },
-		 .watchPaths = {SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH, SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH,
-						SHADER_BLOOM_BLUR_HLSL_VS_PATH, SHADER_BLOOM_BLUR_HLSL_PS_PATH}});
-	RegisterPipeline({.name = "Blit",
-					  .build = [this]() { BuildBlitPipeline(); },
-					  .watchPaths = {SHADER_BLIT_HLSL_VS_PATH, SHADER_BLIT_HLSL_PS_PATH}});
+	// Unified build and watch registration helper
+	auto register_and_check =
+		[&](const char* name, auto&& build_fn,
+			std::initializer_list<const char*> watchPaths) -> std::expected<void, std::string> {
+		auto res = build_fn();
+		if (!res) {
+			return std::unexpected(
+				std::format("Pipeline '{}' failed to compile: {}", name, res.error()));
+		}
+		if constexpr (isDev) {
+			for (const auto* path : watchPaths) {
+				RegisterShaderWatcher(path, [=, build_fn =
+													std::forward<decltype(build_fn)>(build_fn)]() {
+					auto reload_res = build_fn();
+					if (!reload_res) {
+						ZHLN::Log("ERROR: Failed to hot-reload pipeline '{}': {}", name,
+								  reload_res.error());
+					} else {
+						ZHLN::Log("[Shader Reload] Pipeline '{}' hot-reloaded successfully.", name);
+					}
+				});
+			}
+		}
+		return {};
+	};
+
+	auto res = register_and_check("TAA", [this]() { return BuildTAAPipeline(); },
+								  {SHADER_TAA_HLSL_VS_PATH, SHADER_TAA_HLSL_PS_PATH});
+	if (!res) {
+		return res;
+	}
+
+	res = register_and_check("FXAA", [this]() { return BuildFXAAPipeline(); },
+							 {SHADER_FXAA_HLSL_VS_PATH, SHADER_FXAA_HLSL_PS_PATH});
+	if (!res) {
+		return res;
+	}
+
+	res = register_and_check("SMAA", [this]() { return BuildSMAAPipeline(); },
+							 {SHADER_SMAA_EDGE_VS_PATH, SHADER_SMAA_EDGE_PS_PATH,
+							  SHADER_SMAA_WEIGHT_VS_PATH, SHADER_SMAA_WEIGHT_PS_PATH,
+							  SHADER_SMAA_BLEND_VS_PATH, SHADER_SMAA_BLEND_PS_PATH});
+	if (!res) {
+		return res;
+	}
+
+	res = register_and_check("Ambient", [this]() { return BuildAmbientPipeline(); },
+							 {SHADER_AMBIENT_HLSL_VS_PATH, SHADER_AMBIENT_HLSL_PS_PATH});
+	if (!res) {
+		return res;
+	}
+
+	res =
+		register_and_check("Lighting", [this]() { return BuildLightingPipeline(); },
+						   {SHADER_LIGHTING_HLSL_VS_PATH, SHADER_LIGHTING_HLSL_PS_PATH,
+							SHADER_LIGHTING_NORT_HLSL_VS_PATH, SHADER_LIGHTING_NORT_HLSL_PS_PATH});
+	if (!res) {
+		return res;
+	}
+
+	res = register_and_check("Reflection", [this]() { return BuildReflectionPipelines(); },
+							 {SHADER_REFLECTION_HLSL_VS_PATH, SHADER_REFLECTION_HLSL_PS_PATH,
+							  SHADER_REFLECTION_NORT_HLSL_VS_PATH,
+							  SHADER_REFLECTION_NORT_HLSL_PS_PATH});
+	if (!res) {
+		return res;
+	}
+
+	res = register_and_check("Bloom", [this]() { return BuildBloomPipelines(); },
+							 {SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH,
+							  SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH, SHADER_BLOOM_BLUR_HLSL_VS_PATH,
+							  SHADER_BLOOM_BLUR_HLSL_PS_PATH});
+	if (!res) {
+		return res;
+	}
+
+	res = register_and_check("Blit", [this]() { return BuildBlitPipeline(); },
+							 {SHADER_BLIT_HLSL_VS_PATH, SHADER_BLIT_HLSL_PS_PATH});
+	if (!res) {
+		return res;
+	}
 
 	ZHLN::Array<uint32_t> smaaAreaPixels(static_cast<size_t>(160 * 560));
 	ZHLN::PBR::FillSmaaAreaTex(smaaAreaPixels);
@@ -1104,6 +1186,8 @@ void RenderContext::Impl::InitPostProcessing() {
 	ZHLN::PBR::FillSmaaSearchTex(smaaSearchPixels);
 	smaaAreaTexIdx = CreateTextureInternal(smaaAreaPixels.data(), 160, 560, false);
 	smaaSearchTexIdx = CreateTextureInternal(smaaSearchPixels.data(), 64, 16, false);
+
+	return {};
 }
 
 void RenderContext::Impl::SetupUI(GLFWwindow* window) {
@@ -1284,7 +1368,7 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
 	return true;
 }
 
-void RenderContext::Impl::BuildHangGpuPipeline() {
+std::expected<void, std::string> RenderContext::Impl::BuildHangGpuPipeline() {
 	ZHLN_PipelineLayoutDesc pLayoutDesc = {.set_layouts = nullptr,
 										   .set_layout_count = 0,
 										   .push_constants = nullptr,
@@ -1298,11 +1382,9 @@ void RenderContext::Impl::BuildHangGpuPipeline() {
 													   .entryPoint = "CSMain"},
 													  hangGpuPass.pipelineLayout.Get());
 	if (hangGpuPass.pipeline.Valid()) {
-		ZHLN::Log("[Shader Reload] Hang GPU Pipeline built successfully with empty layout.");
-	} else {
-		ZHLN::Log("ERROR: Failed to build Hang GPU compute pipeline. This isn't a fatal error, but "
-				  "please check your build.");
+		return {};
 	}
+	return std::unexpected("Failed to build Hang GPU compute pipeline.");
 }
 
 } // namespace ZHLN

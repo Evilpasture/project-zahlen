@@ -13,9 +13,12 @@
 
 namespace ZHLN {
 
-void RenderContext::Impl::CompileShadowPipeline(VkDevice device,
-												const Resource::ShaderPair& shaderData) {
+std::expected<void, std::string>
+RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) {
 	auto shaders = Vk::ShaderStages::Create(device, shaderData, "VSMain", "PSShadow");
+	if (!shaders.Valid()) {
+		return std::unexpected("Failed to compile ShaderStages for Shadow Pipeline.");
+	}
 
 	shadowPipelineLayout =
 		Vk::PipelineLayoutBuilder(device)
@@ -32,13 +35,20 @@ void RenderContext::Impl::CompileShadowPipeline(VkDevice device,
 								 .CullNone()
 								 .Build(device);
 
-	ZHLN::PanicIf(!shadowPipelineRes, "FATAL: Failed to build Shadow Pipeline!");
+	if (!shadowPipelineRes) {
+		return std::unexpected("Failed to compile or build Shadow Pipeline.");
+	}
 	shadowPipeline = std::move(*shadowPipelineRes);
+	return {};
 }
 
-void RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device,
-														const Resource::ShaderPair& shaderData) {
+std::expected<void, std::string>
+RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device,
+												   const Resource::ShaderPair& shaderData) {
 	auto shaders = Vk::ShaderStages::Create(device, shaderData);
+	if (!shaders.Valid()) {
+		return std::unexpected("Failed to compile ShaderStages for Punctual Shadow Pipeline.");
+	}
 
 	punctualShadowPipelineLayout =
 		Vk::PipelineLayoutBuilder(device)
@@ -54,8 +64,11 @@ void RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device,
 										 .CullNone()
 										 .Build(device);
 
-	ZHLN::PanicIf(!punctualShadowPipelineRes, "FATAL: Failed to build Punctual Shadow Pipeline!");
+	if (!punctualShadowPipelineRes) {
+		return std::unexpected("Failed to compile or build Punctual Shadow Pipeline.");
+	}
 	punctualShadowPipeline = std::move(*punctualShadowPipelineRes);
+	return {};
 }
 
 auto RenderContext::GetRendererName() const -> const char* {
@@ -92,7 +105,7 @@ void RenderContext::DestroyBuffer(BufferHandle handle) {
 	}
 }
 
-auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
+std::expected<Material, std::string> RenderContext::CreateMaterial(const PipelineDesc& desc) {
 	ZHLN_ShaderDesc v_desc = {.code = Vk::AsSpirV(desc.vertexShaderData),
 							  .size = desc.vertexShaderSize,
 							  .entry_point = nullptr};
@@ -100,6 +113,9 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 							  .size = desc.fragShaderSize,
 							  .entry_point = nullptr};
 	auto shaders = Vk::ShaderStages::Create(_impl->ctx.Device(), v_desc, f_desc);
+	if (!shaders.Valid()) {
+		return std::unexpected("Failed to compile or link Material shader stages.");
+	}
 	auto* impl = _impl.get();
 
 	auto layout = Vk::PipelineLayoutBuilder(impl->ctx.Device())
@@ -131,11 +147,12 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> Material {
 
 	auto finalPipelineRes = pipeline.Build(impl->ctx.Device());
 	if (!finalPipelineRes) {
-		ZHLN::Panic("FATAL: Failed to compile Material Pipeline!");
+		return std::unexpected("Failed to build Material Graphics Pipeline.");
 	}
 
-	return {.pipeline = impl->materialPool.Create(std::move(*finalPipelineRes), std::move(layout)),
-			.alphaMode = desc.alphaBlend ? 2u : 0u};
+	return Material{.pipeline =
+						impl->materialPool.Create(std::move(*finalPipelineRes), std::move(layout)),
+					.alphaMode = desc.alphaBlend ? 2u : 0u};
 }
 
 void RenderContext::Impl::CheckShaderWatchers() noexcept {
