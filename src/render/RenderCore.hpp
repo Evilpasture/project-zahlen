@@ -247,9 +247,7 @@ template <typename T, auto DeleterFn> class VmaHandle {
 	void Cleanup() noexcept {
 		if (_handle != T{}) {
 			if (ZHLN::Vk::t_activeDeletionQueue != nullptr) {
-				if constexpr (std::is_same_v<T, VkBuffer>) {
-					DeferVmaDestruction(_allocator, _handle, _allocation);
-				} else if constexpr (std::is_same_v<T, VkImage>) {
+				if constexpr (std::is_same_v<T, VkBuffer> || std::is_same_v<T, VkImage>) {
 					DeferVmaDestruction(_allocator, _handle, _allocation);
 				} else {
 					DeleterFn(_allocator, _handle, _allocation);
@@ -356,12 +354,10 @@ inline constexpr auto& GetBufferDeviceAddress = ZHLN_GetBufferDeviceAddress;
 
 template <QueueType QType>
 [[nodiscard]] constexpr auto ResolveQueueFamily(const Context& ctx) noexcept -> uint32_t {
-	if constexpr (QType == QueueType::Graphics) {
+	if constexpr (QType == QueueType::Graphics || QType == QueueType::Compute) {
 		return ctx.PhysicalInfo().graphics_family;
 	} else if constexpr (QType == QueueType::Transfer) {
 		return ctx.PhysicalInfo().transfer_family;
-	} else if constexpr (QType == QueueType::Compute) {
-		return ctx.PhysicalInfo().graphics_family;
 	}
 }
 
@@ -370,13 +366,10 @@ template <QueueType QType>
  */
 template <QueueType QType>
 [[nodiscard]] constexpr auto ResolveQueue(const Context& ctx) noexcept -> VkQueue {
-	if constexpr (QType == QueueType::Graphics) {
+	if constexpr (QType == QueueType::Graphics || QType == QueueType::Compute) {
 		return ctx.GraphicsQueue();
 	} else if constexpr (QType == QueueType::Transfer) {
 		return ctx.TransferQueue();
-	} else if constexpr (QType == QueueType::Compute) {
-		// Fall back to graphics queue if no dedicated compute queue exists
-		return ctx.GraphicsQueue();
 	}
 }
 
@@ -386,10 +379,10 @@ template <QueueType QType>
  */
 template <QueueType QType>
 void SubmitAndWait(const Context& ctx, CommandBuffer<QType> cmd) noexcept {
-	VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-										 .pNext = nullptr,
-										 .commandBuffer = cmd,
-										 .deviceMask = 0};
+	VkCommandBufferSubmitInfo sub_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+										  .pNext = nullptr,
+										  .commandBuffer = cmd,
+										  .deviceMask = 0};
 
 	VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
 							.pNext = nullptr,
@@ -397,7 +390,7 @@ void SubmitAndWait(const Context& ctx, CommandBuffer<QType> cmd) noexcept {
 							.waitSemaphoreInfoCount = 0,
 							.pWaitSemaphoreInfos = nullptr,
 							.commandBufferInfoCount = 1,
-							.pCommandBufferInfos = &subInfo,
+							.pCommandBufferInfos = &sub_info,
 							.signalSemaphoreInfoCount = 0,
 							.pSignalSemaphoreInfos = nullptr};
 
