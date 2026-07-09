@@ -230,10 +230,8 @@ template <typename ResourceList>
 template <typename Image>
 constexpr void ResourceBinder<ResourceList>::Bind(VkImage handle, VkImageView view,
 												  VkExtent2D extent) noexcept {
-	constexpr size_t idx = detail::GetResourceIndexImpl<Image>(ResourceList{});
-	if constexpr (idx < ResourceList::size) {
-		_resources[idx] = {handle, view, extent};
-	}
+	constexpr size_t idx = detail::GetResourceIndex<ResourceList, Image>();
+	_resources[idx] = {handle, view, extent};
 }
 
 template <typename ResourceList>
