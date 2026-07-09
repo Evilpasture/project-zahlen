@@ -405,7 +405,7 @@ void RenderContext::SetShadowResolution(uint32_t resolution) {
 	auto* device = impl->ctx.Device();
 	Vk::WaitIdle(device);
 
-	impl->shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+	impl->graphResources.shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
 		impl->allocator, impl->ctx, {.width = resolution, .height = resolution},
 		{.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
 		 .arrayLayers = RenderContext::Impl::NUM_CASCADES});
@@ -414,16 +414,16 @@ void RenderContext::SetShadowResolution(uint32_t resolution) {
 	impl->shadowCascadeViews.resize(RenderContext::Impl::NUM_CASCADES);
 	for (uint32_t i = 0; i < RenderContext::Impl::NUM_CASCADES; ++i) {
 		impl->shadowCascadeViews[i] = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(
-			impl->ctx.Device(), impl->shadowMap.image.Handle(), i, 1);
+			impl->ctx.Device(), impl->graphResources.shadowMap.image.Handle(), i, 1);
 	}
 
 	Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) {
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-			cmd, impl->shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+			cmd, impl->graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
 
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
 							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-			cmd, impl->shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+			cmd, impl->graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
 	});
 
 	ZHLN::Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);

@@ -569,29 +569,6 @@ struct RenderContext::Impl {
 	// ============================================================================
 	GraphResources graphResources;
 
-	Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>& sceneColor{graphResources.sceneColor};
-	Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT>& velocityBuffer{graphResources.velocityBuffer};
-	Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>& normalRoughnessBuffer{
-		graphResources.normalRoughnessBuffer};
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& ambientTarget{graphResources.ambientTarget};
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& lightingTarget{graphResources.lightingTarget};
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& postProcessTarget{
-		graphResources.postProcessTarget};
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& bloomThresholdTarget{
-		graphResources.bloomThresholdTarget};
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& bloomDown1{graphResources.bloomDown1};
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& bloomDown2{graphResources.bloomDown2};
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& bloomDown3{graphResources.bloomDown3};
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& bloomUp2{graphResources.bloomUp2};
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& bloomUp1{graphResources.bloomUp1};
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& bloomFinalTarget{
-		graphResources.bloomFinalTarget};
-	Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>& bloomBlurTarget{graphResources.bloomBlurTarget};
-	Vk::RenderTarget<VK_FORMAT_R8G8_UNORM>& smaaEdgeTarget{graphResources.smaaEdgeTarget};
-	Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>& smaaWeightTarget{graphResources.smaaWeightTarget};
-	Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>& shadowMap{graphResources.shadowMap};
-	Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>& shadowAtlas{graphResources.shadowAtlas};
-
 	DoubleBuffered<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumBuffers;
 
 	// ============================================================================
@@ -779,7 +756,8 @@ struct RenderContext::Impl {
 		}
 	}
 
-	void InitSubsystems(const RenderConfig& cfg, int width, int height);
+	[[nodiscard]] std::expected<void, std::string> InitSubsystems(const RenderConfig& cfg,
+																  int width, int height);
 
 	struct PPPushConstants {
 		JPH::Mat44 invViewProj;

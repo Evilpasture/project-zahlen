@@ -29,12 +29,21 @@ struct PipelineDesc {
 };
 struct Camera;
 class ZHLN_API RenderContext {
+  private:
+	struct PrivateToken {
+		explicit PrivateToken() = default;
+	};
+
   public:
-	RenderContext(Window& window, const RenderConfig& cfg);
+	struct Impl;
+	RenderContext(PrivateToken, std::unique_ptr<Impl> impl) noexcept;
 	~RenderContext();
 
 	RenderContext(const RenderContext&) = delete;
 	auto operator=(const RenderContext&) -> RenderContext& = delete;
+
+	[[nodiscard]] static std::expected<std::unique_ptr<RenderContext>, std::string>
+	Create(Window& window, const RenderConfig& cfg) noexcept;
 
 	void CheckShaderReload() noexcept;
 
@@ -88,7 +97,6 @@ class ZHLN_API RenderContext {
 	auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale,
 							   float randomness) -> uint32_t;
 
-	struct Impl;
 	[[nodiscard]] auto GetImpl() const -> Impl* { return _impl.get(); }
 
   private:

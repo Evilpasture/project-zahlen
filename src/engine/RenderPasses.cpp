@@ -292,9 +292,9 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 
 		auto ExecuteCascadePass = [&](uint32_t cascade, auto&& recordFn) {
 			Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> cascadeLayerImage = {
-				.handle = ctx.shadowMap.image.Handle(),
+				.handle = ctx.graphResources.shadowMap.image.Handle(),
 				.view = ctx.shadowCascadeViews[cascade].Get(),
-				.extent = ctx.shadowMap.extent,
+				.extent = ctx.graphResources.shadowMap.extent,
 				.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};
 
 			Vk::DynamicPass(cascadeLayerImage.extent)
@@ -349,7 +349,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 			}
 
 			Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> subViewImage = {
-				.handle = ctx.shadowAtlas.image.Handle(),
+				.handle = ctx.graphResources.shadowAtlas.image.Handle(),
 				.view = ctx.punctualShadowViews[light.shadowLayer].Get(),
 				.extent = {.width = 1024, .height = 1024},
 				.aspect = VK_IMAGE_ASPECT_DEPTH_BIT};

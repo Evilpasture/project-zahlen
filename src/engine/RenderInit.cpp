@@ -82,22 +82,23 @@ bool CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept {
 
 namespace ZHLN {
 
-void RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int height) {
+std::expected<void, std::string> RenderContext::Impl::InitSubsystems(const RenderConfig& cfg,
+																	 int width, int height) {
 	using enum Resource::ShaderID;
 	if (!allocator.Init(ctx)) {
-		ZHLN::Panic("FATAL: Vulkan Memory Allocator (VMA) failed to initialize");
+		return std::unexpected("Vulkan Memory Allocator (VMA) failed to initialize.");
 	}
 
 	if (!stagingRingBuffer.Init(allocator.Get(), ctx.Device(), ctx.GraphicsQueue(),
 								ctx.PhysicalInfo().graphics_family,
 								static_cast<VkDeviceSize>(64 * 1024 * 1024))) {
-		ZHLN::Panic("FATAL: Failed to initialize Staging Ring Buffer!");
+		return std::unexpected("Failed to initialize Staging Ring Buffer.");
 	}
 
 	if (!transferRingBuffer.Init(allocator.Get(), ctx.Device(), ctx.TransferQueue(),
 								 ctx.PhysicalInfo().transfer_family,
 								 static_cast<VkDeviceSize>(64 * 1024 * 1024))) {
-		ZHLN::Panic("FATAL: Failed to initialize Transfer Ring Buffer!");
+		return std::unexpected("Failed to initialize Transfer Ring Buffer.");
 	}
 
 	bool supportsRayTracing = CheckRayTracingSupport(ctx.Physical());
@@ -123,7 +124,7 @@ void RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int
 	CompilePunctualShadowPipeline(ctx.Device(), Resource::GetShaderProgram(PunctualShadows));
 
 	if (!presentation.Init(ctx, allocator, surface.Get(), width, height, cfg.vsync)) {
-		ZHLN::Panic("FATAL: Presentation Context initialization failed");
+		return std::unexpected("Presentation Context initialization failed.");
 	}
 
 	sync = Vk::FrameSync<2>::Create(ctx.Device());
@@ -146,16 +147,29 @@ void RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int
 			pool = Vk::CommandPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
 
 			if (!pool.AllocateSecondary(256)) {
-				ZHLN::Panic(
-					"FATAL: Failed to pre-allocate secondary command buffers for worker threads.");
+				return std::unexpected(
+					"Failed to pre-allocate secondary command buffers for worker threads.");
 			}
 		}
 	}
 
-	// Initialize the parallel recorder with 2 slots on the Graphics Queue family
-	parallelRecorder[0].Init(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-	parallelRecorder[1].Init(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+	// Initialize the parallel recorder with 2 slots on the Graphics Queue family and propagate
+	// result codes
+	auto res0 = parallelRecorder[0].Init(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+	if (!res0) {
+		return std::unexpected(
+			std::format("Failed to allocate hardware command pools for parallel recorder [0]: {}",
+						ZHLN_VkResultString(res0.error())));
+	}
+	auto res1 = parallelRecorder[1].Init(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+	if (!res1) {
+		return std::unexpected(
+			std::format("Failed to allocate hardware command pools for parallel recorder [1]: {}",
+						ZHLN_VkResultString(res1.error())));
+	}
+
 	deletionQueue.Init(2);
+	return {};
 }
 
 namespace {
@@ -353,19 +367,22 @@ void RenderContext::Impl::WatchPipeline(const char* vsPath, const char* psPath,
 	}
 }
 
-RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
-	: _impl(std::make_unique<Impl>(window)) {
+RenderContext::RenderContext(PrivateToken, std::unique_ptr<Impl> impl) noexcept
+	: _impl(std::move(impl)) {}
 
-	_impl->appName = cfg.appName;
+std::expected<std::unique_ptr<RenderContext>, std::string>
+RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept {
+	auto impl = std::make_unique<Impl>(window);
+	impl->appName = cfg.appName;
 
 	// Phase 1: Instance extensions selection
 	auto inst_exts = GetPlatformInstanceExtensions(window, cfg.enableValidation);
 
 	// Phase 2: Instance creation
-	VkInstance instance = Vk::CreateInstance(
-		_impl->appName.c_str(), VK_MAKE_API_VERSION(0, 1, 0, 0), inst_exts, cfg.enableValidation);
+	VkInstance instance = Vk::CreateInstance(impl->appName.c_str(), VK_MAKE_API_VERSION(0, 1, 0, 0),
+											 inst_exts, cfg.enableValidation);
 	if (instance == VK_NULL_HANDLE) {
-		ZHLN::Panic("FATAL: Failed to create Vulkan Instance!");
+		return std::unexpected("Failed to create Vulkan Instance.");
 	}
 
 	// Phase 3: Surface creation (Before device selection for windowed/GLFW)
@@ -373,11 +390,15 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	int height = 0;
 	auto* raw_surface =
 		static_cast<VkSurfaceKHR>(window.CreateVulkanSurface(instance, nullptr, width, height));
+	if (!window.IsTTY() && raw_surface == VK_NULL_HANDLE) {
+		return std::unexpected("Failed to create GLFW Vulkan surface.");
+	}
 
 	// Phase 4: Device selection
 	auto physicalInfo = Vk::SelectDevice(instance, raw_surface);
 	if (physicalInfo.handle == VK_NULL_HANDLE) {
-		ZHLN::Panic("FATAL: Failed to select a suitable physical device.");
+		return std::unexpected(
+			"Failed to select a suitable physical device supporting the required Vulkan features.");
 	}
 
 	// Phase 5: Surface creation (After device selection for TTY)
@@ -385,11 +406,11 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 		raw_surface = static_cast<VkSurfaceKHR>(
 			window.CreateVulkanSurface(instance, physicalInfo.handle, width, height));
 		if (raw_surface == VK_NULL_HANDLE) {
-			ZHLN::Panic("FATAL: Failed to create TTY Vulkan Surface!");
+			return std::unexpected("Failed to create TTY Vulkan Surface.");
 		}
 	}
 
-	_impl->surface = Vk::Surface(instance, raw_surface);
+	impl->surface = Vk::Surface(instance, raw_surface);
 
 	// Phase 6: Capability detection
 	HardwareCaps caps =
@@ -402,14 +423,19 @@ RenderContext::RenderContext(Window& window, const RenderConfig& cfg)
 	auto dev_exts = GetDeviceExtensions(physicalInfo.handle);
 
 	// Phase 9: Device creation
-	_impl->ctx = CreateLogicalDevice(instance, raw_surface, physicalInfo, dev_exts,
-									 features.GetRoot(), cfg.enableValidation);
-	if (!_impl->ctx.Valid()) {
-		ZHLN::Panic("FATAL: Failed to create Logical Device!");
+	impl->ctx = CreateLogicalDevice(instance, raw_surface, physicalInfo, dev_exts,
+									features.GetRoot(), cfg.enableValidation);
+	if (!impl->ctx.Valid()) {
+		return std::unexpected("Failed to create Vulkan Logical Device.");
 	}
 
 	// Phase 10: Subsystem initialization
-	_impl->InitSubsystems(cfg, width, height);
+	auto status = impl->InitSubsystems(cfg, width, height);
+	if (!status) {
+		return std::unexpected(status.error());
+	}
+
+	return std::make_unique<RenderContext>(PrivateToken{}, std::move(impl));
 }
 
 RenderContext::~RenderContext() {
@@ -464,7 +490,7 @@ void RenderContext::Impl::RecreatePunctualShadowViews() noexcept {
 			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
 			.pNext = {},
 			.flags = {},
-			.image = shadowAtlas.image.Handle(),
+			.image = graphResources.shadowAtlas.image.Handle(),
 			.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
 			.format = VK_FORMAT_D32_SFLOAT,
 			.components = {},
@@ -488,7 +514,7 @@ void RenderContext::Impl::InitShadowResources() {
 						.DepthCompare()
 						.Build(ctx.Device());
 
-	shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+	graphResources.shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
 		allocator, ctx, {.width = SHADOW_RES, .height = SHADOW_RES},
 		{.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
 		 .arrayLayers = NUM_CASCADES});
@@ -496,33 +522,33 @@ void RenderContext::Impl::InitShadowResources() {
 	shadowCascadeViews.resize(NUM_CASCADES);
 	for (uint32_t i = 0; i < NUM_CASCADES; ++i) {
 		shadowCascadeViews[i] = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(
-			ctx.Device(), shadowMap.image.Handle(), i, 1);
+			ctx.Device(), graphResources.shadowMap.image.Handle(), i, 1);
 	}
 
 	// 1. Allocate Shadow Atlas
-	shadowAtlas = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+	graphResources.shadowAtlas = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
 		allocator, ctx, {.width = 1024, .height = 1024},
 		{.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
 		 .arrayLayers = 24});
 
 	// 2. Pre-allocate Views using clean C++ helper templates!
-	shadowAtlasCubeView =
-		Vk::CreateViewCubeArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), shadowAtlas.image.Handle(), 24);
+	shadowAtlasCubeView = Vk::CreateViewCubeArray<VK_FORMAT_D32_SFLOAT>(
+		ctx.Device(), graphResources.shadowAtlas.image.Handle(), 24);
 	shadowAtlas2DView = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(
-		ctx.Device(), shadowAtlas.image.Handle(), 0, 24);
+		ctx.Device(), graphResources.shadowAtlas.image.Handle(), 0, 24);
 
 	Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-			cmd, shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+			cmd, graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
 							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-			cmd, shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+			cmd, graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
 
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-			cmd, shadowAtlas.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+			cmd, graphResources.shadowAtlas.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
 		Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
 							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-			cmd, shadowAtlas.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+			cmd, graphResources.shadowAtlas.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
 	});
 
 	RecreatePunctualShadowViews();
@@ -1193,16 +1219,16 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
 		return false;
 	}
 
-	sceneColor = CreateDefaultTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>(ext);
-	velocityBuffer = CreateDefaultTarget<VK_FORMAT_R16G16_SFLOAT>(ext);
+	graphResources.sceneColor = CreateDefaultTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>(ext);
+	graphResources.velocityBuffer = CreateDefaultTarget<VK_FORMAT_R16G16_SFLOAT>(ext);
 	accumBuffers[0] = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
 	accumBuffers[1] = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
-	normalRoughnessBuffer = CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext);
-	postProcessTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
-	ambientTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
-	lightingTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
-	smaaEdgeTarget = CreateDefaultTarget<VK_FORMAT_R8G8_UNORM>(ext);
-	smaaWeightTarget = CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext);
+	graphResources.normalRoughnessBuffer = CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext);
+	graphResources.postProcessTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
+	graphResources.ambientTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
+	graphResources.lightingTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
+	graphResources.smaaEdgeTarget = CreateDefaultTarget<VK_FORMAT_R8G8_UNORM>(ext);
+	graphResources.smaaWeightTarget = CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext);
 
 	VkExtent2D ext2 = {.width = std::max(1u, ext.width / 2), .height = std::max(1u, ext.height / 2)};
 	VkExtent2D ext4 = {.width = std::max(1u, ext.width / 4), .height = std::max(1u, ext.height / 4)};
@@ -1210,35 +1236,35 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
 	VkExtent2D ext16 = {.width = std::max(1u, ext.width / 16),
 						.height = std::max(1u, ext.height / 16)};
 
-	bloomThresholdTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2);
-	bloomDown1 = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4);
-	bloomDown2 = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext8);
-	bloomDown3 = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext16);
-	bloomUp2 = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext8);
-	bloomUp1 = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4);
-	bloomFinalTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2);
+	graphResources.bloomThresholdTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2);
+	graphResources.bloomDown1 = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4);
+	graphResources.bloomDown2 = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext8);
+	graphResources.bloomDown3 = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext16);
+	graphResources.bloomUp2 = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext8);
+	graphResources.bloomUp1 = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4);
+	graphResources.bloomFinalTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2);
 
 	RecreatePunctualShadowViews();
 
 	// Transition all newly allocated render targets to their correct default layouts
 	Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
-		std::array colorTargets = {sceneColor.image.Handle(),
-								   velocityBuffer.image.Handle(),
+		std::array colorTargets = {graphResources.sceneColor.image.Handle(),
+								   graphResources.velocityBuffer.image.Handle(),
 								   accumBuffers[0].image.Handle(),
 								   accumBuffers[1].image.Handle(),
-								   normalRoughnessBuffer.image.Handle(),
-								   postProcessTarget.image.Handle(),
-								   ambientTarget.image.Handle(),
-								   lightingTarget.image.Handle(),
-								   smaaEdgeTarget.image.Handle(),
-								   smaaWeightTarget.image.Handle(),
-								   bloomThresholdTarget.image.Handle(),
-								   bloomDown1.image.Handle(),
-								   bloomDown2.image.Handle(),
-								   bloomDown3.image.Handle(),
-								   bloomUp2.image.Handle(),
-								   bloomUp1.image.Handle(),
-								   bloomFinalTarget.image.Handle()};
+								   graphResources.normalRoughnessBuffer.image.Handle(),
+								   graphResources.postProcessTarget.image.Handle(),
+								   graphResources.ambientTarget.image.Handle(),
+								   graphResources.lightingTarget.image.Handle(),
+								   graphResources.smaaEdgeTarget.image.Handle(),
+								   graphResources.smaaWeightTarget.image.Handle(),
+								   graphResources.bloomThresholdTarget.image.Handle(),
+								   graphResources.bloomDown1.image.Handle(),
+								   graphResources.bloomDown2.image.Handle(),
+								   graphResources.bloomDown3.image.Handle(),
+								   graphResources.bloomUp2.image.Handle(),
+								   graphResources.bloomUp1.image.Handle(),
+								   graphResources.bloomFinalTarget.image.Handle()};
 
 		for (auto* const img : colorTargets) {
 			Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(

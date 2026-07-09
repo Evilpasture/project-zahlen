@@ -287,9 +287,9 @@ struct PassFactory {
 	// Helper to resolve the correct color target based on fullbright configuration
 	template <bool FullBright> [[nodiscard]] auto& ColorTarget() const noexcept {
 		if constexpr (FullBright) {
-			return self.sceneColor;
+			return self.graphResources.sceneColor;
 		} else {
-			return self.postProcessTarget;
+			return self.graphResources.postProcessTarget;
 		}
 	}
 
@@ -297,10 +297,12 @@ struct PassFactory {
 	[[nodiscard]] auto BuildSceneResources() const noexcept {
 		return SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 							  VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>{
-			.sceneColor = AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(self.sceneColor),
-			.velocity = AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(self.velocityBuffer),
-			.normRough =
-				AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(self.normalRoughnessBuffer),
+			.sceneColor = AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+				self.graphResources.sceneColor),
+			.velocity = AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+				self.graphResources.velocityBuffer),
+			.normRough = AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+				self.graphResources.normalRoughnessBuffer),
 			.depth = AssumeLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
 				self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT)};
 	}
@@ -342,12 +344,13 @@ struct PassFactory {
 			[this](auto& ctx) noexcept {
 				self.ambientPass.WriteNext(
 					device,
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.sceneColor),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+						self.graphResources.sceneColor),
 					self.defaultSampler.Get(),
 					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
 						self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
 					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-						self.normalRoughnessBuffer),
+						self.graphResources.normalRoughnessBuffer),
 					self.pointSampler.Get(), self.iblPayload.prefilteredView.Get(),
 					self.iblPayload.brdfLutView.Get(), self.clampSampler.Get(),
 					self.frameUniformBuffers->Handle());
@@ -363,17 +366,19 @@ struct PassFactory {
 			[this](auto& ctx) noexcept {
 				self.lightingPass.WriteNext(
 					device,
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.sceneColor),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+						self.graphResources.sceneColor),
 					self.defaultSampler.Get(),
 					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
 						self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
 					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-						self.normalRoughnessBuffer),
+						self.graphResources.normalRoughnessBuffer),
 					self.lightStorageBuffers->Handle(), self.frameUniformBuffers->Handle(),
-					self.shadowMap.view.Get(), self.shadowSampler.Get(), self.ltcMatView.Get(),
-					self.ltcAmpView.Get(), self.clampSampler.Get(),
+					self.graphResources.shadowMap.view.Get(), self.shadowSampler.Get(),
+					self.ltcMatView.Get(), self.ltcAmpView.Get(), self.clampSampler.Get(),
 					self.clusterGridBuffers->Handle(), self.lightIndexListBuffers->Handle(),
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.ambientTarget),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+						self.graphResources.ambientTarget),
 					self.pointSampler.Get(), GetTLAS(), self.shadowAtlasCubeView.Get(),
 					self.shadowAtlas2DView.Get());
 				self.lightingPass.ExecuteVariant(ctx.Cmd(), lightVariant, pc);
@@ -390,16 +395,18 @@ struct PassFactory {
 					ctx.Cmd(), fIdx, self.gpuProfiler);
 				self.reflectionPass.WriteNext(
 					device,
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.sceneColor),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+						self.graphResources.sceneColor),
 					self.defaultSampler.Get(),
 					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
 						self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
 					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-						self.normalRoughnessBuffer),
+						self.graphResources.normalRoughnessBuffer),
 					self.pointSampler.Get(), self.iblPayload.prefilteredView.Get(), GetTLAS(),
 					self.frameUniformBuffers->Handle(), self.iblPayload.brdfLutView.Get(),
 					self.clampSampler.Get(),
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.lightingTarget));
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+						self.graphResources.lightingTarget));
 				self.reflectionPass.ExecuteVariant(ctx.Cmd(), reflVariant, pc);
 			});
 	}
@@ -470,20 +477,20 @@ struct PassFactory {
 		if constexpr (Index == 0) {
 			return Vk::MakePass<"BloomDown0", Vk::ShaderRead<Res_BloomThresh>,
 								Vk::ColorWrite<Res_BloomDown1>>([this](auto& ctx) noexcept {
-				RunKawasePass(device, ctx.Cmd(), self.bloomDownPass[0], self.bloomThresholdTarget,
-							  self.defaultSampler);
+				RunKawasePass(device, ctx.Cmd(), self.bloomDownPass[0],
+							  self.graphResources.bloomThresholdTarget, self.defaultSampler);
 			});
 		} else if constexpr (Index == 1) {
 			return Vk::MakePass<"BloomDown1", Vk::ShaderRead<Res_BloomDown1>,
 								Vk::ColorWrite<Res_BloomDown2>>([this](auto& ctx) noexcept {
-				RunKawasePass(device, ctx.Cmd(), self.bloomDownPass[1], self.bloomDown1,
-							  self.defaultSampler);
+				RunKawasePass(device, ctx.Cmd(), self.bloomDownPass[1],
+							  self.graphResources.bloomDown1, self.defaultSampler);
 			});
 		} else {
 			return Vk::MakePass<"BloomDown2", Vk::ShaderRead<Res_BloomDown2>,
 								Vk::ColorWrite<Res_BloomDown3>>([this](auto& ctx) noexcept {
-				RunKawasePass(device, ctx.Cmd(), self.bloomDownPass[2], self.bloomDown2,
-							  self.defaultSampler);
+				RunKawasePass(device, ctx.Cmd(), self.bloomDownPass[2],
+							  self.graphResources.bloomDown2, self.defaultSampler);
 			});
 		}
 	}
@@ -493,22 +500,25 @@ struct PassFactory {
 			return Vk::MakePass<"BloomUp2", Vk::ShaderRead<Res_BloomDown3>,
 								Vk::ShaderRead<Res_BloomDown2>, Vk::ColorWrite<Res_BloomUp2>>(
 				[this](auto& ctx) noexcept {
-					RunKawasePass(device, ctx.Cmd(), self.bloomUpPass[2], self.bloomDown3,
-								  self.defaultSampler, self.bloomDown2);
+					RunKawasePass(device, ctx.Cmd(), self.bloomUpPass[2],
+								  self.graphResources.bloomDown3, self.defaultSampler,
+								  self.graphResources.bloomDown2);
 				});
 		} else if constexpr (Index == 1) {
 			return Vk::MakePass<"BloomUp1", Vk::ShaderRead<Res_BloomUp2>,
 								Vk::ShaderRead<Res_BloomDown1>, Vk::ColorWrite<Res_BloomUp1>>(
 				[this](auto& ctx) noexcept {
-					RunKawasePass(device, ctx.Cmd(), self.bloomUpPass[1], self.bloomUp2,
-								  self.defaultSampler, self.bloomDown1);
+					RunKawasePass(device, ctx.Cmd(), self.bloomUpPass[1],
+								  self.graphResources.bloomUp2, self.defaultSampler,
+								  self.graphResources.bloomDown1);
 				});
 		} else {
 			return Vk::MakePass<"BloomUp0", Vk::ShaderRead<Res_BloomUp1>,
 								Vk::ShaderRead<Res_BloomThresh>, Vk::ColorWrite<Res_BloomFinal>>(
 				[this](auto& ctx) noexcept {
-					RunKawasePass(device, ctx.Cmd(), self.bloomUpPass[0], self.bloomUp1,
-								  self.defaultSampler, self.bloomThresholdTarget);
+					RunKawasePass(device, ctx.Cmd(), self.bloomUpPass[0],
+								  self.graphResources.bloomUp1, self.defaultSampler,
+								  self.graphResources.bloomThresholdTarget);
 				});
 		}
 	}
@@ -550,7 +560,7 @@ struct PassFactory {
 					blitRecorder,
 					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(blitInputImage),
 					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-						self.bloomFinalTarget),
+						self.graphResources.bloomFinalTarget),
 					getSwapchainImage(), FullBright ? 1 : 0);
 			});
 	}
@@ -646,9 +656,9 @@ void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const Pas
 	}
 	if constexpr (Vk::IsInList<Resources, Res_Swapchain>::value) {
 		const auto& sc = self.presentation.swapchain.Get();
-		auto ref =
-			Vk::MakeRef<Res_Swapchain>(sc.images[self.current_image_index],
-									   sc.views[self.current_image_index], self.sceneColor.extent);
+		auto ref = Vk::MakeRef<Res_Swapchain>(sc.images[self.current_image_index],
+											  sc.views[self.current_image_index],
+											  self.graphResources.sceneColor.extent);
 		binder.template Bind<Res_Swapchain>(ref.handle, ref.view, ref.extent);
 	}
 
@@ -685,7 +695,7 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
 	auto getSwapchainImage = [&]() -> Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {
 		return {.handle = presentation.swapchain.Get().images[imageIdx],
 				.view = presentation.swapchain.Get().views[imageIdx],
-				.extent = sceneColor.extent,
+				.extent = graphResources.sceneColor.extent,
 				.aspect = VK_IMAGE_ASPECT_COLOR_BIT,
 				.format = presentation.swapchain.Get().format};
 	};
@@ -693,9 +703,9 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
 	auto aaLambda = [&]([[maybe_unused]] VkCommandBuffer c, const auto& inputColor) noexcept {
 		Profiler::ScopedGpuProfile<Stages::AAPass, FrameProfiler> timer(c, fIdx, gpuProfiler);
 		const auto smaaEdge_ro =
-			AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(smaaEdgeTarget);
+			AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(graphResources.smaaEdgeTarget);
 		const auto smaaWeight_ro =
-			AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(smaaWeightTarget);
+			AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(graphResources.smaaWeightTarget);
 
 		if (aaState.mode == TAA && taaPass.pipeline.Valid()) {
 			struct TAAPushConstants {
@@ -706,7 +716,8 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
 					device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor),
 					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
 						accumBuffers.Current()),
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(velocityBuffer),
+					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+						graphResources.velocityBuffer),
 					defaultSampler.Get(), frameUniformBuffers[fIdx].Handle());
 				taaPass.Execute(c, TAAPushConstants{.feedback = aaState.taaFeedback});
 			});
@@ -742,33 +753,36 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
 						 .height = (float)inputColor.extent.height};
 			Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 								 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-				c, smaaEdgeTarget.image.Handle());
-			DispatchPostProcessPass(c, smaaEdgeTarget, VK_ATTACHMENT_LOAD_OP_CLEAR, [&]() {
-				smaaEdgePass.WriteNext(
-					device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor),
-					defaultSampler.Get(), pointSampler.Get());
-				smaaEdgePass.Execute(c, metrics,
-									 VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
-			});
+				c, graphResources.smaaEdgeTarget.image.Handle());
+			DispatchPostProcessPass(
+				c, graphResources.smaaEdgeTarget, VK_ATTACHMENT_LOAD_OP_CLEAR, [&]() {
+					smaaEdgePass.WriteNext(
+						device,
+						Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor),
+						defaultSampler.Get(), pointSampler.Get());
+					smaaEdgePass.Execute(c, metrics,
+										 VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+				});
 			Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 								 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-				c, smaaEdgeTarget.image.Handle());
+				c, graphResources.smaaEdgeTarget.image.Handle());
 			Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 								 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-				c, smaaWeightTarget.image.Handle());
+				c, graphResources.smaaWeightTarget.image.Handle());
 
-			DispatchPostProcessPass(c, smaaWeightTarget, VK_ATTACHMENT_LOAD_OP_CLEAR, [&]() {
-				const auto& [areaView, searchView] =
-					std::tie(textureViews[smaaAreaTexIdx], textureViews[smaaSearchTexIdx]);
+			DispatchPostProcessPass(
+				c, graphResources.smaaWeightTarget, VK_ATTACHMENT_LOAD_OP_CLEAR, [&]() {
+					const auto& [areaView, searchView] =
+						std::tie(textureViews[smaaAreaTexIdx], textureViews[smaaSearchTexIdx]);
 
-				smaaWeightPass.WriteNext(device, smaaEdge_ro, areaView, searchView,
-										 defaultSampler.Get(), pointSampler.Get());
-				smaaWeightPass.Execute(c, metrics,
-									   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
-			});
+					smaaWeightPass.WriteNext(device, smaaEdge_ro, areaView, searchView,
+											 defaultSampler.Get(), pointSampler.Get());
+					smaaWeightPass.Execute(
+						c, metrics, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+				});
 			Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 								 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-				c, smaaWeightTarget.image.Handle());
+				c, graphResources.smaaWeightTarget.image.Handle());
 
 			DispatchPostProcessPass(c, accumBuffers.Next(), VK_ATTACHMENT_LOAD_OP_DONT_CARE, [&]() {
 				smaaBlendPass.WriteNext(device, inputColor, smaaWeight_ro, defaultSampler.Get(),

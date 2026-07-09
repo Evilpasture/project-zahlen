@@ -14,9 +14,9 @@
 #include "backends/imgui_impl_vulkan.h"
 #include "imgui.h"
 
-#include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
+#include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
@@ -107,11 +107,17 @@ void Engine::HandleDeviceLost() noexcept {
 
 	// 1. Reset and Recreate Render Context (New Vulkan Device)
 	_impl->renderContext.reset();
-	_impl->renderContext = std::make_unique<RenderContext>(*_impl->window, _impl->config.render);
+
+	auto rc_res = RenderContext::Create(*_impl->window, _impl->config.render);
+	if (!rc_res) {
+		ZHLN::Panic("FATAL: Failed to recreate RenderContext during hot-rebuild: {}",
+					rc_res.error());
+	}
+	_impl->renderContext = std::move(rc_res.value());
 
 	// 2. Perform True Rebinding Recovery (Zero physics/registry/scripting resets)
 	CreativeWorksFactory::RebuildVulkanResources(*_impl->renderContext, *_impl->assetManager,
-										 _impl->registry);
+												 _impl->registry);
 
 	ZHLN::Log("[Engine] Hardware hot-rebuild completed successfully. All visual assets rebound to "
 			  "new GPU.");
@@ -198,7 +204,18 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess, const char*
 	JPH::Factory::sInstance = new JPH::Factory();
 	JPH::RegisterTypes();
 
-	_impl->renderContext = std::make_unique<RenderContext>(*_impl->window, cfg.render);
+	// Instantiate through the thread-safe static factory method and capture state
+	auto rc_res = RenderContext::Create(*_impl->window, cfg.render);
+	if (!rc_res) {
+		if (outError != nullptr) {
+			static std::string s_InitError;
+			s_InitError = std::format("RenderContext initialization failed: {}", rc_res.error());
+			*outError = s_InitError.c_str();
+		}
+		return;
+	}
+	_impl->renderContext = std::move(rc_res.value());
+
 	_impl->physicsContext = std::make_unique<PhysicsContext>(cfg.physics);
 	_impl->audioContext = std::make_unique<AudioContext>();
 	_impl->alifeSimulator = std::make_unique<ALife::Simulator>();

@@ -76,7 +76,7 @@ void SetFrameData(RenderContext& ctx, const Camera& cam, const FrameUniforms& un
 	impl->shadowProjView = shadowProjView;
 	impl->currentUniforms = uniforms;
 
-	VkExtent2D res = impl->sceneColor.extent;
+	VkExtent2D res = impl->graphResources.sceneColor.extent;
 	float aspect = (res.height > 0) ? (float)res.width / res.height : 1.777f;
 
 	// Check if projection bounds need an update

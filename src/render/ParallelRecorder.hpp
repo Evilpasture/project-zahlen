@@ -29,13 +29,20 @@ template <size_t ConcurrentSlots> class ParallelCommandRecorder {
 	ParallelCommandRecorder(ParallelCommandRecorder&&) noexcept = default;
 	auto operator=(ParallelCommandRecorder&&) noexcept -> ParallelCommandRecorder& = default;
 
-	void Init(VkDevice device, uint32_t queueFamily) {
+	[[nodiscard]] auto Init(VkDevice device, uint32_t queueFamily) noexcept
+		-> std::expected<void, VkResult> {
 		_device = device;
 		for (size_t i = 0; i < ConcurrentSlots; ++i) {
 			_pools[i] = CommandPool(_device, queueFamily);
-			_pools[i].AllocateSecondary(1);
+			if (!_pools[i].Valid()) {
+				return std::unexpected(VK_ERROR_INITIALIZATION_FAILED);
+			}
+			if (!_pools[i].AllocateSecondary(1)) {
+				return std::unexpected(VK_ERROR_OUT_OF_DEVICE_MEMORY);
+			}
 			_cmds[i] = _pools[i][0];
 		}
+		return {};
 	}
 
 	void Reset() noexcept {
