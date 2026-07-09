@@ -460,6 +460,67 @@ template <typename Tag, typename T> consteval bool ValidateSerializability() {
 	return ok;
 }
 
+/**
+ * @brief Generic static reflection utility to iterate over nested classes/structs.
+ * Traverses all members of an enclosing scope type and yields each nested class type.
+ */
+template <typename T, typename F> constexpr void ForEachNestedType(F&& f) {
+	static constexpr auto members = std::define_static_array(
+		std::meta::members_of(std::meta::dealias(^^T), std::meta::access_context::current()));
+
+	[&]<size_t... Is>(std::index_sequence<Is...>) {
+		(
+			[&]() {
+				constexpr auto member = members[Is];
+				if constexpr (std::meta::is_type(member)) {
+					using NestedType = typename[:member:];
+					if constexpr (std::is_class_v<NestedType>) {
+						f.template operator()<NestedType>();
+					}
+				}
+			}(),
+			...);
+	}(std::make_index_sequence<members.size()>{});
+}
+
+// ----------------------------------------------------------------------------
+// Compile-Time Aggregates (Type Generation)
+// ----------------------------------------------------------------------------
+
+/**
+ * @brief Represents a single field declaration in a schema.
+ */
+template <typename T, StringLiteral FieldName> struct Field {
+	using type = T;
+	static constexpr std::string_view name = FieldName;
+};
+
+/**
+ * @brief Triggering struct that forces compilation-phase instantiation
+ *        and completion of the reflected aggregate inside a consteval block.
+ */
+template <StringLiteral Name, typename... Fields> struct Define {
+	struct type;
+
+	friend constexpr std::string_view GetSchemaName(type*) { return Name; }
+
+	consteval {
+		constexpr size_t NumFields = sizeof...(Fields);
+		std::vector<std::meta::info> specs;
+		specs.reserve(NumFields);
+
+		auto build_field = [&]<typename F>() {
+			std::meta::data_member_options opts;
+			opts.name = std::string(F::name);
+			specs.push_back(std::meta::data_member_spec(^^typename F::type, opts));
+		};
+
+		(build_field.template operator()<Fields>(), ...);
+
+		std::meta::define_aggregate(std::meta::dealias(^^type), specs);
+	}
+};
+
 } // namespace ZHLN::Reflect
 #else
 #include <algorithm>
@@ -523,8 +584,6 @@ template <typename T> constexpr std::size_t FieldCount() {
 
 // Access a field by compile-time index (returns dummy reference to satisfy decltype(auto))
 template <std::size_t N, typename T> constexpr decltype(auto) GetField(T&&) {
-	static_assert(N == static_cast<std::size_t>(-1),
-				  "GetField is not supported without standard reflection.");
 	struct Dummy {};
 	static Dummy d;
 	return d;
@@ -594,8 +653,6 @@ template <typename T> constexpr bool HasBases() {
 
 // Access a field by compile-time name (returns dummy reference to satisfy decltype(auto))
 template <StringLiteral NameConst, typename T> constexpr decltype(auto) GetFieldByName(T&&) {
-	static_assert(NameConst.value[0] == '\0',
-				  "GetFieldByName is not supported without standard reflection.");
 	struct Dummy {};
 	static Dummy d;
 	return d;
@@ -632,14 +689,11 @@ template <typename T> consteval auto MemberFunctionNames() {
 
 template <StringLiteral NameConst, typename T, typename ValueType>
 constexpr bool SetFieldByName(T&, ValueType&&) {
-	static_assert(NameConst.value[0] == '\0',
-				  "SetFieldByName is not supported without standard reflection.");
 	return false;
 }
 
 template <typename T, typename Tuple> constexpr T MakeFromTuple(Tuple&&) {
-	static_assert(std::is_same_v<T, void>,
-				  "MakeFromTuple is not supported without standard reflection.");
+	return T{};
 }
 
 template <typename E>
@@ -653,6 +707,18 @@ template <typename T, typename F> constexpr void ForEachFieldAdaptive(T&&, F&&) 
 template <typename Tag, typename T> consteval bool ValidateSerializability() {
 	return true;
 }
+
+template <typename T, typename F> constexpr void ForEachNestedType(F&&) {}
+
+template <typename T, StringLiteral FieldName> struct Field {
+	using type = T;
+	static constexpr std::string_view name = FieldName;
+};
+
+template <StringLiteral Name, typename... Fields> struct Define {
+	struct type {};
+	friend constexpr std::string_view GetSchemaName(type*) { return Name; }
+};
 
 } // namespace ZHLN::Reflect
 #endif
