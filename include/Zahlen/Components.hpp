@@ -5,7 +5,7 @@
 #include "../../src/detail/String.hpp"
 #include "Entity.hpp"
 #include "Types.hpp"
-#include "Zahlen/alife/Types.hpp"
+#include "alife/Types.hpp"
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>

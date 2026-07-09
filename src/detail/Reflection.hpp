@@ -521,6 +521,12 @@ template <StringLiteral Name, typename... Fields> struct Define {
 	}
 };
 
+// This helper template takes the type explicitly as a template argument,
+// but internally calls the hidden friend unqualified using a dependent argument.
+template <typename T> constexpr std::string_view GetSchemaNameOf() noexcept {
+	return GetSchemaName(static_cast<T*>(nullptr));
+}
+
 } // namespace ZHLN::Reflect
 #else
 #include <algorithm>
@@ -719,6 +725,8 @@ template <StringLiteral Name, typename... Fields> struct Define {
 	struct type {};
 	friend constexpr std::string_view GetSchemaName(type*) { return Name; }
 };
+
+template <typename T> constexpr std::string_view GetSchemaNameOf() noexcept;
 
 } // namespace ZHLN::Reflect
 #endif

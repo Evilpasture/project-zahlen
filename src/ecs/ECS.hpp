@@ -42,8 +42,8 @@ template <typename T> consteval uint32_t GetTypeHash() {
 
 template <typename T> constexpr std::string_view BoxedName() {
 	// If the type was generated via SchemaType, extract its name NTTP directly
-	if constexpr (requires { ZHLN::Reflect::GetSchemaName(static_cast<T*>(nullptr)); }) {
-		return ZHLN::Reflect::GetSchemaName(static_cast<T*>(nullptr));
+	if constexpr (requires { ZHLN::Reflect::GetSchemaNameOf(static_cast<T*>(nullptr)); }) {
+		return ZHLN::Reflect::GetSchemaNameOf(static_cast<T*>(nullptr));
 	}
 #if defined(__clang__) || defined(__GNUC__)
 	// GCC & Clang format: "constexpr std::string_view BoxedName() [with T = Type]"
