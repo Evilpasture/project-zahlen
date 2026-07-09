@@ -156,7 +156,11 @@ std::expected<void, std::string> RenderContext::Impl::InitSubsystems(const Rende
 		return std::unexpected(pp_res.error());
 	}
 
-	SetupUI(window.IsTTY() ? nullptr : static_cast<GLFWwindow*>(window.GetNativeHandle()));
+	auto ui_res =
+		SetupUI(window.IsTTY() ? nullptr : static_cast<GLFWwindow*>(window.GetNativeHandle()));
+	if (!ui_res) {
+		return std::unexpected(std::format("UI setup failed: {}", ui_res.error()));
+	}
 
 	uint32_t workerCount = TaskSystem::GetWorkerCount() + 1;
 	if (workerCount == 0) {
@@ -1190,7 +1194,7 @@ std::expected<void, std::string> RenderContext::Impl::InitPostProcessing() {
 	return {};
 }
 
-void RenderContext::Impl::SetupUI(GLFWwindow* window) {
+std::expected<void, std::string> RenderContext::Impl::SetupUI(GLFWwindow* window) {
 	const std::array pool_sizes = {
 		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_SAMPLER, .descriptorCount = 1000},
 		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -1219,10 +1223,15 @@ void RenderContext::Impl::SetupUI(GLFWwindow* window) {
 	};
 
 	VkDescriptorPool rawPool = VK_NULL_HANDLE;
-	vkCreateDescriptorPool(ctx.Device(), &pool_info, nullptr, &rawPool);
+	if (vkCreateDescriptorPool(ctx.Device(), &pool_info, nullptr, &rawPool) != VK_SUCCESS) {
+		return std::unexpected("Failed to create UI Descriptor Pool.");
+	}
 	uiPool = Vk::DescriptorPool(ctx.Device(), rawPool);
 
 	auto uiShaders = Vk::ShaderStages::Create(ctx.Device(), Resource::GetShaderProgram(Ui));
+	if (!uiShaders.Valid()) {
+		return std::unexpected("Failed to compile or load UI ShaderStages.");
+	}
 
 	VkPushConstantRange uiPush = {.stageFlags =
 									  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -1234,8 +1243,11 @@ void RenderContext::Impl::SetupUI(GLFWwindow* window) {
 											.push_constants = &uiPush,
 											.push_constant_count = 1};
 
-	uiPipelineLayout =
-		Vk::PipelineLayout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &uiLayoutDesc));
+	VkPipelineLayout rawLayoutHandle = ZHLN_CreatePipelineLayout(ctx.Device(), &uiLayoutDesc);
+	if (rawLayoutHandle == VK_NULL_HANDLE) {
+		return std::unexpected("Failed to compile UI Pipeline Layout.");
+	}
+	uiPipelineLayout = Vk::PipelineLayout(ctx.Device(), rawLayoutHandle);
 
 	VkFormat swapchainFormat = presentation.swapchain.Get().format;
 
@@ -1248,11 +1260,12 @@ void RenderContext::Impl::SetupUI(GLFWwindow* window) {
 							 .CullNone()
 							 .Build(ctx.Device());
 
-	if (uiPipelineRes) {
-		uiPipeline = std::move(*uiPipelineRes);
-	} else {
-		ZHLN::Panic("FATAL: Failed to build UI Pipeline!");
+	if (!uiPipelineRes) {
+		return std::unexpected(
+			std::format("Failed to compile UI Graphics Pipeline (Error Code: {})",
+						static_cast<int>(uiPipelineRes.error())));
 	}
+	uiPipeline = std::move(*uiPipelineRes);
 
 	// --- ONLY RUN THE IMGUI/GLFW PORTION IF WINDOW IS VALID ---
 	if (window != nullptr) {
@@ -1294,8 +1307,12 @@ void RenderContext::Impl::SetupUI(GLFWwindow* window) {
 			.CustomShaderVertCreateInfo = {},
 			.CustomShaderFragCreateInfo = {},
 		};
-		ImGui_ImplVulkan_Init(&init_info);
+
+		if (!ImGui_ImplVulkan_Init(&init_info)) {
+			return std::unexpected("Failed to initialize ImGui Vulkan implementation.");
+		}
 	}
+	return {};
 }
 
 bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {

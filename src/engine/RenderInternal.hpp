@@ -841,7 +841,7 @@ struct RenderContext::Impl {
 	[[nodiscard]] std::expected<void, std::string> BuildBloomPipelines();
 	[[nodiscard]] std::expected<void, std::string> BuildHangGpuPipeline();
 	[[nodiscard]] std::expected<void, std::string> InitPostProcessing();
-	void SetupUI(GLFWwindow* window);
+	[[nodiscard]] std::expected<void, std::string> SetupUI(GLFWwindow* window);
 
 	uint32_t CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB);
 	uint32_t CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height);
