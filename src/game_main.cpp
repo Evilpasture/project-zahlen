@@ -5,7 +5,6 @@
 #include "Zahlen/Audio.hpp"
 #include "Zahlen/CommandLine.hpp"
 #include "Zahlen/Input.hpp"
-#include "Zahlen/alife/Types.hpp"
 #include "ecs/ECS.hpp"
 #include "ecs/EntityCommandBuffer.hpp"
 #include "ecs/SystemGraph.hpp"
@@ -41,6 +40,7 @@
 #include <engine/system/InteractionSystem.hpp>
 #include <engine/system/UIInteractionSystem.hpp>
 #include <expected>
+#include <meta>
 #include <physics/PhysicsWorld.hpp>
 #include <print>
 #include <threading/Mutex.hpp>
@@ -278,22 +278,7 @@ bool InitializeGame(Engine& engine) {
 	}
 	Material lineMat = lineMat_res.value();
 
-	reg.RegisterComponents<
-		Components::TransformComponent, Components::MeshComponent, Components::PhysicsComponent,
-		Components::PhysicsStateComponent, Components::MovementComponent,
-		Components::ALifeComponent, Components::RagdollComponent, Components::NameComponent,
-		Components::CameraComponent, Components::InputComponent, Components::LightComponent,
-		Components::PostProcessSettingsComponent, Components::CameraComponent,
-		Components::PlayerTagComponent, Components::MainCameraTagComponent,
-		Components::GlobalSettingsTagComponent, Components::AASettingsComponent,
-		Components::TextComponent, Components::UISettingsComponent, Components::AudioSourceComponent,
-		Components::PBRComponent, Components::ItemBaseComponent, Components::PickupComponent,
-		Components::UsableComponent, Components::ContainerComponent, Components::TriggerComponent,
-		Components::DebugSettingsComponent, Components::SunTagComponent,
-		Components::FreeCamTagComponent, Components::ShadowSettingsComponent,
-		Components::UIRectComponent, Components::UIPanelComponent, Components::UIButtonComponent,
-		Components::UIDragComponent, Components::UIStackComponent, Components::UITextInputComponent,
-		Components::AnimatorComponent>();
+	reg.RegisterAllComponentsIn<ZHLN::Components>();
 
 	// Spawn a blank, static camera just to render the main menu
 	Entity cameraEntity = reg.Create();

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Entity.hpp>
@@ -10,6 +9,7 @@
 #include <Zahlen/Sync.hpp>
 #include <cstddef>
 #include <detail/HashMap.hpp>
+#include <detail/Reflection.hpp>
 #include <detail/Span.hpp>
 #include <source_location>
 #include <span>
@@ -41,6 +41,10 @@ template <typename T> consteval uint32_t GetTypeHash() {
 }
 
 template <typename T> constexpr std::string_view BoxedName() {
+	// If the type was generated via SchemaType, extract its name NTTP directly
+	if constexpr (requires { ZHLN::Reflect::GetSchemaName(static_cast<T*>(nullptr)); }) {
+		return ZHLN::Reflect::GetSchemaName(static_cast<T*>(nullptr));
+	}
 #if defined(__clang__) || defined(__GNUC__)
 	// GCC & Clang format: "constexpr std::string_view BoxedName() [with T = Type]"
 	std::string_view name = __PRETTY_FUNCTION__;
@@ -183,6 +187,15 @@ class ZHLN_API Registry {
 	template <typename... Components> void RegisterComponents() {
 		// A C++17 fold expression that expands for every component in the list
 		(RegisterComponent<Components>(BoxedName<Components>()), ...);
+	}
+
+	/**
+	 * @brief Automatically discovers and registers all nested component structures
+	 * declared within a given container class using compile-time reflection.
+	 */
+	template <typename Container> void RegisterAllComponentsIn() {
+		ZHLN::Reflect::ForEachNestedType<Container>(
+			[this]<typename Comp>() { this->RegisterComponent<Comp>(BoxedName<Comp>()); });
 	}
 
 	template <typename T> T& Add(Entity entity, T&& component) {
