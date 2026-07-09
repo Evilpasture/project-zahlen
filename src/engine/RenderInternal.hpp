@@ -583,7 +583,7 @@ struct RenderContext::Impl {
 	uint32_t nextMorphDeltaIndex = 0;
 
 	struct PendingAcquires {
-		ZHLN::Mutex mutex;
+		ZHLN::Mutex mutex{};
 		ZHLN::Array<VkBufferMemoryBarrier2> buffers;
 
 		void Drain(VkCommandBuffer cmd) noexcept {
