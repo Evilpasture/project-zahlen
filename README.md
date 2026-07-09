@@ -4,11 +4,15 @@ A **simple** project that integrates Vulkan, Jolt Physics and ImGUI for hardware
 
 ## Build Requirements
 * **CMake (>= 3.25)**: Build automation tool.
-* **C++26 Compiler**: Supporting C++26 standard features (Clang, GCC, or dubiously, MSVC).
+* **C++26 Compiler with -freflection**: Supporting C++26 standard features (GCC 16.1.1 or later).
 * **C23 Compiler**: Supporting C23 standard features (such as `#embed` support).
 * **Python**: Used during the asset building phase to scan level assets and configure the parallel build rules.
 
 ## Build Instructions
+
+You can do it the hard way, or the easy way.
+
+### The Hard Way
 1. Clone the repository and its submodules:
    ```sh
    git clone --recurse-submodules https://github.com/Evilpasture/project-zahlen.git
@@ -28,6 +32,23 @@ A **simple** project that integrates Vulkan, Jolt Physics and ImGUI for hardware
    ```sh
    ./build/zahlen
    ```  
+
+### The Easy Way
+
+1. Clone the repository and its submodules:
+   ```sh
+   git clone --recurse-submodules https://github.com/Evilpasture/project-zahlen.git
+   ```
+   
+2. Run this script:
+   ```sh
+   ./tools/build.sh --gcc
+   ```
+
+3. Run the project:
+   ```sh
+   ./build/zahlen
+   ```
 
 ## System & Platform Dependencies
 
