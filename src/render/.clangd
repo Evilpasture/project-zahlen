@@ -1,5 +1,10 @@
-# .clangd
+# Treat .inl files as C++ headers globally
+CompileFlags:
+  Add: [-x, c++-header]
+
+---
+
 If:
-  PathMatch: src/render/.*\.hpp
+  PathMatch: src/render/.*\.(hpp|inl)
 CompileFlags:
   Add: [-include, src/render/Rendering.hpp]
