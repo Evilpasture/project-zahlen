@@ -4,6 +4,8 @@
 #pragma once
 
 #if defined(__cpp_impl_reflection)
+#include "Loop.hpp"
+
 #include <algorithm>
 #include <format>
 #include <meta>
@@ -61,6 +63,25 @@ template <StringLiteral Name, typename T> consteval std::size_t IndexOfField() {
 	}
 	return static_cast<std::size_t>(-1);
 }
+
+template <typename T, typename F, std::size_t Start, std::size_t Total>
+constexpr void ChunkedFieldVisitor(T&& t, F&& f) {
+	if constexpr (Start < Total) {
+		constexpr std::size_t ChunkSize = (sizeof(T) > 32) ? 4 : 8;
+		constexpr std::size_t Step = (Start + ChunkSize > Total) ? (Total - Start) : ChunkSize;
+
+		static constexpr auto members =
+			std::define_static_array(std::meta::nonstatic_data_members_of(
+				^^std::remove_cvref_t<T>, std::meta::access_context::current()));
+
+		ZHLN::Unroll<Step>([&](auto I) {
+			constexpr std::size_t Index = Start + decltype(I)::value;
+			f(t.[:members[Index]:]);
+		});
+
+		ChunkedFieldVisitor<T, F, Start + Step, Total>(std::forward<T>(t), std::forward<F>(f));
+	}
+}
 } // namespace detail
 
 template <std::ranges::range R> consteval auto Expand(R&& range) {
@@ -72,19 +93,20 @@ template <std::ranges::range R> consteval auto Expand(R&& range) {
 }
 
 template <typename T, typename F> constexpr void ForEachField(T&& t, F&& f) {
-	[:Expand(std::define_static_array(std::meta::nonstatic_data_members_of(
-		  ^^std::remove_cvref_t<T>, std::meta::access_context::current()))):] >> [&]<auto member> {
-		f(t.[:member:]);
-	};
+	static constexpr auto members = std::define_static_array(std::meta::nonstatic_data_members_of(
+		^^std::remove_cvref_t<T>, std::meta::access_context::current()));
+
+	ZHLN::Unroll<members.size()>([&](auto I) { f(t.[:members[decltype(I)::value]:]); });
 }
 
 template <typename T, typename F> constexpr void ForEachFieldWithName(T&& t, F&& f) {
-	[:Expand(std::define_static_array(std::meta::nonstatic_data_members_of(
-		  ^^std::remove_cvref_t<T>, std::meta::access_context::current()))):] >> [&]<auto member> {
-		// Fetch the name of the member at compile time
-		constexpr std::string_view name = std::meta::identifier_of(member);
-		f(name, t.[:member:]);
-	};
+	static constexpr auto members = std::define_static_array(std::meta::nonstatic_data_members_of(
+		^^std::remove_cvref_t<T>, std::meta::access_context::current()));
+
+	ZHLN::Unroll<members.size()>([&](auto I) {
+		constexpr auto member = members[decltype(I)::value];
+		f(std::meta::identifier_of(member), t.[:member:]);
+	});
 }
 
 template <typename T> constexpr auto TieFields(T&& t) {
@@ -104,14 +126,15 @@ template <typename T> constexpr bool GenericEqual(const T& lhs, const T& rhs) {
 template <typename E>
 	requires std::is_enum_v<E>
 constexpr std::string_view EnumToString(E value) {
+	static constexpr auto enumerators = std::define_static_array(std::meta::enumerators_of(^^E));
 	std::string_view result = "Unknown";
 
-	[:Expand(std::define_static_array(std::meta::enumerators_of(^^E))):] >> [&]<auto enumerator> {
-		// Splice the enumerator info directly to evaluate its value
+	ZHLN::Unroll<enumerators.size()>([&](auto I) {
+		constexpr auto enumerator = enumerators[decltype(I)::value];
 		if (value == static_cast<E>([:enumerator:])) {
 			result = std::meta::identifier_of(enumerator);
 		}
-	};
+	});
 	return result;
 }
 
@@ -413,6 +436,30 @@ consteval std::string_view EnumUnderlyingTypeName() {
 	return std::meta::display_string_of(std::meta::underlying_type(^^E));
 }
 
+template <typename T, typename F> constexpr void ForEachFieldAdaptive(T&& t, F&& f) {
+	constexpr std::size_t FieldCount = ZHLN::Reflect::FieldCount<T>();
+	detail::ChunkedFieldVisitor<T, F, 0, FieldCount>(std::forward<T>(t), std::forward<F>(f));
+}
+
+template <typename Tag, typename T> consteval bool ValidateSerializability() {
+	static constexpr auto members = std::define_static_array(
+		std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()));
+
+	bool ok = true;
+	ZHLN::Unroll<members.size()>([&](auto I) {
+		constexpr auto member = members[decltype(I)::value];
+		constexpr std::string_view name = std::meta::identifier_of(member);
+
+		if constexpr (HasTag<Tag, T>(name)) {
+			using FieldT = typename[:std::meta::type_of(member):];
+			if constexpr (!std::is_trivially_copyable_v<FieldT>) {
+				ok = false;
+			}
+		}
+	});
+	return ok;
+}
+
 } // namespace ZHLN::Reflect
 #else
 #include <algorithm>
@@ -599,6 +646,12 @@ template <typename E>
 	requires std::is_enum_v<E>
 consteval std::string_view EnumUnderlyingTypeName() {
 	return "";
+}
+
+template <typename T, typename F> constexpr void ForEachFieldAdaptive(T&&, F&&) {}
+
+template <typename Tag, typename T> consteval bool ValidateSerializability() {
+	return true;
 }
 
 } // namespace ZHLN::Reflect
