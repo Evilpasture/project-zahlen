@@ -19,10 +19,10 @@ static void VerifyRealTransforms(const ECS::Registry& reg) noexcept {
 		return;
 	}
 
-	auto entities = reg.GetEntitiesWith<MeshComponent>();
+	auto entities = reg.GetEntitiesWith<Components::MeshComponent>();
 	bool hasHierarchy = false;
 	for (Entity e : entities) {
-		const auto* hierarchy = reg.Get<HierarchyComponent>(e);
+		const auto* hierarchy = reg.Get<Components::HierarchyComponent>(e);
 		if ((hierarchy != nullptr) && hierarchy->parent != NullEntity &&
 			reg.IsAlive(hierarchy->parent)) {
 			hasHierarchy = true;
@@ -41,13 +41,13 @@ static void VerifyRealTransforms(const ECS::Registry& reg) noexcept {
 	}
 	uint64_t currentFrame = engine->GetCurrentFrame();
 
-	auto meshes = reg.GetRawArray<MeshComponent>();
+	auto meshes = reg.GetRawArray<Components::MeshComponent>();
 	for (size_t i = 0; i < entities.size(); ++i) {
 		Entity e = entities[i];
-		const auto* hierarchy = reg.Get<HierarchyComponent>(e);
+		const auto* hierarchy = reg.Get<Components::HierarchyComponent>(e);
 
 		// 1. Check for Temporal Aliasing (Is the data stale?)
-		const auto* physState = reg.Get<PhysicsStateComponent>(e);
+		const auto* physState = reg.Get<Components::PhysicsStateComponent>(e);
 		if ((physState != nullptr) && currentFrame > 1 &&
 			(physState->lastPhysicsSyncFrame < currentFrame - 1)) {
 			ZHLN::Log("[Test Fail] Stutter Warning: Entity {} has stale physics data! (Last Sync "
@@ -59,8 +59,7 @@ static void VerifyRealTransforms(const ECS::Registry& reg) noexcept {
 		const auto& mesh = meshes[i];
 		if (mesh.prevTransform != JPH::Mat44::sIdentity()) {
 			float deltaPos =
-				(mesh.worldTransform.GetTranslation() - mesh.prevTransform.GetTranslation())
-					.Length();
+				(mesh.worldTransform.GetTranslation() - mesh.prevTransform.GetTranslation()).Length();
 			if (deltaPos > 100.0f) { // Arbitrary "Speed of Light" threshold
 				ZHLN::Log("[Test Fail] Jitter Detected: Entity {} moved {} units in one frame!",
 						  e.index, deltaPos);
@@ -90,10 +89,10 @@ namespace ZHLN {
 namespace {
 // Helper to calculate the logical world-space transform of an entity
 JPH::Mat44 GetLogicalWorldTransform(const ECS::Registry& reg, Entity e) noexcept {
-	const auto* trans = reg.Get<TransformComponent>(e);
+	const auto* trans = reg.Get<Components::Components::TransformComponent>(e);
 	JPH::Mat44 localMatrix = (trans != nullptr) ? trans->GetMatrix() : JPH::Mat44::sIdentity();
 
-	const auto* hierarchy = reg.Get<HierarchyComponent>(e);
+	const auto* hierarchy = reg.Get<Components::HierarchyComponent>(e);
 	if ((hierarchy != nullptr) && hierarchy->parent != NullEntity &&
 		reg.IsAlive(hierarchy->parent)) {
 		static thread_local int recursionDepth = 0;
@@ -109,13 +108,13 @@ JPH::Mat44 GetLogicalWorldTransform(const ECS::Registry& reg, Entity e) noexcept
 }
 } // namespace
 JPH::Mat44 TransformSystem::GetWorldTransform(const ECS::Registry& reg, Entity e) const noexcept {
-	const auto* mesh = reg.Get<MeshComponent>(e);
+	const auto* mesh = reg.Get<Components::MeshComponent>(e);
 	JPH::Mat44 meshLocal = (mesh != nullptr) ? mesh->localTransform : JPH::Mat44::sIdentity();
 
-	const auto* trans = reg.Get<TransformComponent>(e);
+	const auto* trans = reg.Get<Components::Components::TransformComponent>(e);
 	JPH::Mat44 localMatrix = (trans != nullptr) ? trans->GetMatrix() : JPH::Mat44::sIdentity();
 
-	const auto* hierarchy = reg.Get<HierarchyComponent>(e);
+	const auto* hierarchy = reg.Get<Components::HierarchyComponent>(e);
 	if ((hierarchy != nullptr) && hierarchy->parent != NullEntity &&
 		reg.IsAlive(hierarchy->parent)) {
 		// Retrieve only the logical parent matrix (bypassing the parent's visual offset)
@@ -134,11 +133,11 @@ JPH::Mat44 TransformSystem::GetWorldTransform(const ECS::Registry& reg, Entity e
 }
 
 void TransformSystem::ResolveTransforms(ECS::Registry& reg) const noexcept {
-	auto entities = reg.GetEntitiesWith<MeshComponent>();
-	auto meshes = reg.GetRawArray<MeshComponent>();
+	auto entities = reg.GetEntitiesWith<Components::MeshComponent>();
+	auto meshes = reg.GetRawArray<Components::MeshComponent>();
 
 	for (size_t i = 0; i < entities.size(); ++i) {
-		MeshComponent& mesh = meshes[i];
+		Components::MeshComponent& mesh = meshes[i];
 		Entity e = entities[i];
 		mesh.worldTransform = GetWorldTransform(reg, e);
 	}
@@ -149,11 +148,11 @@ void TransformSystem::ResolveTransforms(ECS::Registry& reg) const noexcept {
 }
 
 void TransformSystem::UpdateTransformHistory(ECS::Registry& reg) noexcept {
-	auto entities = reg.GetEntitiesWith<MeshComponent>();
-	auto meshes = reg.GetRawArray<MeshComponent>();
+	auto entities = reg.GetEntitiesWith<Components::MeshComponent>();
+	auto meshes = reg.GetRawArray<Components::MeshComponent>();
 
 	for (size_t i = 0; i < entities.size(); ++i) {
-		MeshComponent& mesh = meshes[i];
+		Components::MeshComponent& mesh = meshes[i];
 		mesh.prevTransform = mesh.worldTransform;
 	}
 }

@@ -17,17 +17,17 @@ void CameraSystem::Update(Engine& engine, float dt, float alpha) {
 	auto& reg = engine.GetRegistry();
 	auto& cam = engine.GetCamera();
 
-	for (Entity camEnt : reg.GetEntitiesWith<TargetCameraComponent>()) {
+	for (Entity camEnt : reg.GetEntitiesWith<Components::CameraComponent>()) {
 
 		// ============================================================================
 		// SKIP REPOSITIONING IF IN FREE CAM MODE (Bypasses the character lock)
 		// ============================================================================
-		if (reg.Get<FreeCamTagComponent>(camEnt) != nullptr) {
+		if (reg.Get<Components::FreeCamTagComponent>(camEnt) != nullptr) {
 			continue;
 		}
 
-		auto* camComp = reg.Get<TargetCameraComponent>(camEnt);
-		auto* input = reg.Get<InputSystem::InputComponent>(camEnt);
+		auto* camComp = reg.Get<Components::TargetCameraComponent>(camEnt);
+		auto* input = reg.Get<Components::InputComponent>(camEnt);
 		if ((camComp == nullptr) || (input == nullptr) || !reg.IsAlive(camComp->target)) {
 			continue;
 		}
@@ -35,8 +35,7 @@ void CameraSystem::Update(Engine& engine, float dt, float alpha) {
 		Entity targetEnt = camComp->target;
 		JPH::Vec3 targetPos = JPH::Vec3::sZero();
 
-		if (auto* state = reg.Get<PhysicsStateComponent>(targetEnt)) {
-			// --- FIX: Apply the same spring-target logic here ---
+		if (auto* state = reg.Get<Components::PhysicsStateComponent>(targetEnt)) {
 			if (camComp->stiffness > 0.0f) {
 				targetPos = state->currPosition;
 			} else {
@@ -44,7 +43,7 @@ void CameraSystem::Update(Engine& engine, float dt, float alpha) {
 				targetPos = state->prevPosition +
 							clampedAlpha * (state->currPosition - state->prevPosition);
 			}
-		} else if (auto* trans = reg.Get<TransformComponent>(targetEnt)) {
+		} else if (auto* trans = reg.Get<Components::Components::TransformComponent>(targetEnt)) {
 			targetPos = JPH::Vec3(trans->position[0], trans->position[1], trans->position[2]);
 		}
 
@@ -101,8 +100,8 @@ void CameraSystem::Update(Engine& engine, float dt, float alpha) {
 		return;
 	}
 
-	for (Entity e : reg.GetEntitiesWith<CameraComponent>()) {
-		if (auto* cComp = reg.Get<CameraComponent>(e)) {
+	for (Entity e : reg.GetEntitiesWith<Components::CameraComponent>()) {
+		if (auto* cComp = reg.Get<Components::CameraComponent>(e)) {
 			if (cComp->frameCounter == 0) {
 				cComp->prevUnjitteredViewProj =
 					cam.GetProjectionMatrix((float)res.width / res.height) * cam.GetViewMatrix();
@@ -115,7 +114,7 @@ void CameraSystem::Update(Engine& engine, float dt, float alpha) {
 			JPH::Mat44 unjitteredProj = cam.GetProjectionMatrix((float)res.width / res.height);
 			cComp->unjitteredViewProj = unjitteredProj * cam.GetViewMatrix();
 
-			auto* aaComp = reg.Get<AASettingsComponent>(e);
+			auto* aaComp = reg.Get<Components::AASettingsComponent>(e);
 			if ((aaComp != nullptr) && aaComp->state.mode == AAMode::TAA) {
 				aaComp->state.frameIndex++;
 				cComp->viewProj =

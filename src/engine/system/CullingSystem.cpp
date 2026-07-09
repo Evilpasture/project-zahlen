@@ -27,8 +27,8 @@ void VerifyCullingResults(const ECS::Registry& reg, const JPH::Array<Entity>& vi
 	}
 	testsRun = true;
 
-	auto entities = reg.GetEntitiesWith<MeshComponent>();
-	auto meshes = reg.GetRawArray<MeshComponent>();
+	auto entities = reg.GetEntitiesWith<Components::MeshComponent>();
+	auto meshes = reg.GetRawArray<Components::MeshComponent>();
 
 	size_t expectedVisible = 0;
 	for (size_t i = 0; i < entities.size(); ++i) {
@@ -85,12 +85,12 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible,
 	auto& cam = engine.GetCamera();
 	auto& reg = engine.GetRegistry();
 
-	auto entities = reg.GetEntitiesWith<MeshComponent>();
-	auto cameraEntities = reg.GetEntitiesWith<CameraSystem::CameraComponent>();
+	auto entities = reg.GetEntitiesWith<Components::MeshComponent>();
+	auto cameraEntities = reg.GetEntitiesWith<Components::CameraComponent>();
 
-	CameraSystem::CameraComponent* cComp = nullptr;
+	Components::CameraComponent* cComp = nullptr;
 	if (!cameraEntities.empty()) {
-		cComp = reg.Get<CameraSystem::CameraComponent>(cameraEntities[0]);
+		cComp = reg.Get<Components::CameraComponent>(cameraEntities[0]);
 	}
 
 	// 1. Fetch Global Settings & Shadow Configuration values
@@ -98,16 +98,16 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible,
 	float shadowWidth = 80.0f;
 	uint32_t shadowResolution = 2048;
 
-	auto settingsEntities = reg.GetEntitiesWith<GlobalSettingsTagComponent>();
+	auto settingsEntities = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
 	if (!settingsEntities.empty()) {
-		if (auto* pp = reg.Get<PostProcessSettingsComponent>(settingsEntities[0])) {
+		if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(settingsEntities[0])) {
 			isFullBright = (pp->fullBright != 0);
 		}
 	}
 
-	auto shadowEntities = reg.GetEntitiesWith<ShadowSettingsComponent>();
+	auto shadowEntities = reg.GetEntitiesWith<Components::ShadowSettingsComponent>();
 	if (!shadowEntities.empty()) {
-		auto* shadowSettings = reg.Get<ShadowSettingsComponent>(shadowEntities[0]);
+		auto* shadowSettings = reg.Get<Components::ShadowSettingsComponent>(shadowEntities[0]);
 		shadowWidth = shadowSettings->shadowWidth;
 		shadowResolution = shadowSettings->shadowResolution;
 	}
@@ -179,7 +179,7 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible,
 
 	outVisible.clear();
 	outVisibleShadow.clear();
-	auto meshes = reg.GetRawArray<MeshComponent>();
+	auto meshes = reg.GetRawArray<Components::MeshComponent>();
 
 	for (size_t i = 0; i < entities.size(); ++i) {
 		Entity e = entities[i];
@@ -216,12 +216,12 @@ void CullingSystem::DrawDebugFrustum(Engine& engine) {
 	auto& rc = engine.GetRenderContext();
 	auto& reg = engine.GetRegistry();
 
-	auto settingsEntities = reg.GetEntitiesWith<GlobalSettingsTagComponent>();
+	auto settingsEntities = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
 	if (settingsEntities.empty()) {
 		return;
 	}
 
-	auto* dbg = reg.Get<DebugSettingsComponent>(settingsEntities[0]);
+	auto* dbg = reg.Get<Components::DebugSettingsComponent>(settingsEntities[0]);
 	if ((dbg == nullptr) || dbg->debugLineVbo == 0) {
 		return;
 	}

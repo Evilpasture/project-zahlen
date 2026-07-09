@@ -59,7 +59,7 @@ RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& ou
 	JPH::Mat44 unjitteredVp{};
 	JPH::Mat44 prevUnjitteredVp{};
 
-	auto cameraEntities = reg.GetEntitiesWith<MainCameraTagComponent>();
+	auto cameraEntities = reg.GetEntitiesWith<Components::MainCameraTagComponent>();
 	if (cameraEntities.empty()) {
 		return std::unexpected(RenderFrameResult::Error);
 	}
@@ -71,7 +71,7 @@ RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& ou
 	UIRenderSystem::Update(engine);
 	Entity cameraEntity = cameraEntities[0];
 
-	if (auto* cComp = reg.Get<CameraSystem::CameraComponent>(cameraEntity)) {
+	if (auto* cComp = reg.Get<Components::CameraComponent>(cameraEntity)) {
 		vp = cComp->viewProj;
 		unjitteredVp = cComp->unjitteredViewProj;
 		prevUnjitteredVp = cComp->prevUnjitteredViewProj;
@@ -86,9 +86,9 @@ RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& ou
 	JPH::Vec4 probePos(0, 0, 0, 0);
 	outPhysicsDrawMode = 0;
 
-	auto settingsEntities = reg.GetEntitiesWith<GlobalSettingsTagComponent>();
+	auto settingsEntities = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
 	if (!settingsEntities.empty()) {
-		if (auto* pp = reg.Get<PostProcessSettingsComponent>(settingsEntities[0])) {
+		if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(settingsEntities[0])) {
 			enableRTR = pp->enableRTR;
 			fullBright = pp->fullBright;
 			probeMin = JPH::Vec4(pp->probeMin.GetX(), pp->probeMin.GetY(), pp->probeMin.GetZ(),
@@ -98,7 +98,7 @@ RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& ou
 			probePos =
 				JPH::Vec4(pp->probePos.GetX(), pp->probePos.GetY(), pp->probePos.GetZ(), 0.0f);
 		}
-		if (auto* dbg = reg.Get<DebugSettingsComponent>(settingsEntities[0])) {
+		if (auto* dbg = reg.Get<Components::DebugSettingsComponent>(settingsEntities[0])) {
 			outPhysicsDrawMode = dbg->physicsDrawMode;
 		}
 	}
@@ -116,9 +116,9 @@ RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& ou
 	float shadowWidth = 80.0f;
 	uint32_t shadowResolution = 2048;
 
-	auto shadowEntities = reg.GetEntitiesWith<ShadowSettingsComponent>();
+	auto shadowEntities = reg.GetEntitiesWith<Components::ShadowSettingsComponent>();
 	if (!shadowEntities.empty()) {
-		auto* shadowSettings = reg.Get<ShadowSettingsComponent>(shadowEntities[0]);
+		auto* shadowSettings = reg.Get<Components::ShadowSettingsComponent>(shadowEntities[0]);
 		shadowWidth = shadowSettings->shadowWidth;
 		shadowResolution = shadowSettings->shadowResolution;
 	}
@@ -126,9 +126,9 @@ RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& ou
 	float texelSize = shadowWidth / static_cast<float>(shadowResolution);
 
 	JPH::Vec3 shadowCenter = JPH::Vec3::sZero();
-	auto playerEntities = reg.GetEntitiesWith<PlayerTagComponent>();
+	auto playerEntities = reg.GetEntitiesWith<Components::PlayerTagComponent>();
 	if (!playerEntities.empty()) {
-		if (auto* trans = reg.Get<TransformComponent>(playerEntities[0])) {
+		if (auto* trans = reg.Get<Components::Components::TransformComponent>(playerEntities[0])) {
 			shadowCenter = trans->position;
 		}
 	}
@@ -148,7 +148,7 @@ RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& ou
 	cam.shadowFrustum.Update(outShadowProjView);
 
 	AAState aaState{};
-	if (auto* taaComp = reg.Get<AASettingsComponent>(cameraEntity)) {
+	if (auto* taaComp = reg.Get<Components::AASettingsComponent>(cameraEntity)) {
 		aaState = taaComp->state;
 	}
 
@@ -162,7 +162,7 @@ RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& ou
 	std::memcpy(&uniforms.lightDir[0], &shaderLightDir, sizeof(float) * 3);
 	uniforms.lightDir[3] = sunIntensity;
 	uniforms.lightCount =
-		static_cast<uint32_t>(reg.GetEntitiesWith<LightingSystem::LightComponent>().size());
+		static_cast<uint32_t>(reg.GetEntitiesWith<Components::LightComponent>().size());
 	uniforms.probeMin = probeMin;
 	uniforms.probeMax = probeMax;
 	uniforms.probePos = probePos;
@@ -173,7 +173,7 @@ RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& ou
 	uniforms.shadowWidth = shadowWidth;
 	uniforms.shadowResolution = shadowResolution;
 	if (!settingsEntities.empty()) {
-		if (auto* pp = reg.Get<PostProcessSettingsComponent>(settingsEntities[0])) {
+		if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(settingsEntities[0])) {
 			uniforms.ambientExposure = pp->ambientExposure;
 		}
 	}
@@ -190,12 +190,12 @@ RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& ou
 	};
 
 	if (outPhysicsDrawMode == 0) {
-		for (Entity e : reg.GetEntitiesWith<MeshComponent>()) {
+		for (Entity e : reg.GetEntitiesWith<Components::MeshComponent>()) {
 			bool inMain = IsInList(mainVisible, e);
 			bool inShadow = IsInList(shadowVisible, e);
 
 			if (inMain || inShadow) {
-				auto* mesh = reg.Get<MeshComponent>(e);
+				auto* mesh = reg.Get<Components::MeshComponent>(e);
 				if (mesh == nullptr) {
 					continue;
 				}
@@ -210,7 +210,7 @@ RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& ou
 
 				float roughness = -1.0f;
 				float metallic = -1.0f;
-				if (auto* pbr = reg.Get<PBRComponent>(e)) {
+				if (auto* pbr = reg.Get<Components::Components::PBRComponent>(e)) {
 					roughness = pbr->roughness;
 					metallic = pbr->metallic;
 				}
@@ -233,7 +233,7 @@ RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& ou
 		}
 	}
 
-	CullingStats::TotalObjects = reg.GetEntitiesWith<MeshComponent>().size();
+	CullingStats::TotalObjects = reg.GetEntitiesWith<Components::MeshComponent>().size();
 	CullingStats::CulledObjects = CullingStats::TotalObjects - visibleEntities.size();
 
 	return {};

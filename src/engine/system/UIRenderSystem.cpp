@@ -32,8 +32,8 @@ void UIRenderSystem::Update(Engine& engine) {
 		reg, {.width = (float)windowSize.width, .height = (float)windowSize.height});
 
 	// 2. Gather and sort ALL UI elements by depth ascending for correct draw-order (Z-Index)
-	auto entities = reg.GetEntitiesWith<UIRectComponent>();
-	auto rects = reg.GetRawArray<UIRectComponent>();
+	auto entities = reg.GetEntitiesWith<Components::UIRectComponent>();
+	auto rects = reg.GetRawArray<Components::UIRectComponent>();
 
 	struct SortEntry {
 		size_t rawIndex;
@@ -44,8 +44,7 @@ void UIRenderSystem::Update(Engine& engine) {
 	for (size_t i = 0; i < entities.size(); ++i) {
 		sortedEntries.push_back({.rawIndex = i, .depth = rects[i].hierarchyDepth});
 	}
-	std::ranges::sort(sortedEntries,
-					  [](const auto& a, const auto& b) { return a.depth < b.depth; });
+	std::ranges::sort(sortedEntries, [](const auto& a, const auto& b) { return a.depth < b.depth; });
 
 	HashMap<uint64_t, ScissorRect> activeScissors;
 
@@ -71,7 +70,7 @@ void UIRenderSystem::Update(Engine& engine) {
 
 		// Check if the parent of this element had `clipChildren = true`
 		if (rect.parentEntity != NullEntity && reg.IsAlive(rect.parentEntity)) {
-			if (auto* parentRect = reg.Get<UIRectComponent>(rect.parentEntity)) {
+			if (auto* parentRect = reg.Get<Components::UIRectComponent>(rect.parentEntity)) {
 				if (parentRect->clipChildren) {
 					ScissorRect parentClip = {
 						.x = (int32_t)std::max(0.0f, parentRect->computedAbsMinX),
@@ -108,7 +107,7 @@ void UIRenderSystem::Update(Engine& engine) {
 		}
 
 		// C. Draw Panel
-		if (auto* panel = reg.Get<UIPanelComponent>(e)) {
+		if (auto* panel = reg.Get<Components::UIPanelComponent>(e)) {
 			if (panel->isDirty || panel->mesh.posBuffer == BufferHandle::Invalid) {
 				if (panel->mesh.posBuffer != BufferHandle::Invalid) {
 					rc.DestroyBuffer(panel->mesh.posBuffer);
@@ -122,19 +121,19 @@ void UIRenderSystem::Update(Engine& engine) {
 	}
 
 	// 3. Process Text & Text Input Components
-	auto uiSettingsEntities = reg.GetEntitiesWith<UISettingsComponent>();
+	auto uiSettingsEntities = reg.GetEntitiesWith<Components::UISettingsComponent>();
 	const FontAtlas* activeFont = nullptr;
 	if (!uiSettingsEntities.empty()) {
-		activeFont = &reg.Get<UISettingsComponent>(uiSettingsEntities[0])->fontAtlas;
+		activeFont = &reg.Get<Components::UISettingsComponent>(uiSettingsEntities[0])->fontAtlas;
 	}
 
-	for (Entity e : reg.GetEntitiesWith<TextComponent>()) {
-		auto* text = reg.Get<TextComponent>(e);
+	for (Entity e : reg.GetEntitiesWith<Components::TextComponent>()) {
+		auto* text = reg.Get<Components::TextComponent>(e);
 		float drawX = text->x;
 		float drawY = text->y;
 		bool hasRect = false;
 
-		auto* rect = reg.Get<UIRectComponent>(e);
+		auto* rect = reg.Get<Components::UIRectComponent>(e);
 		if (rect != nullptr) {
 			drawX = rect->computedAbsMinX + text->x;
 			drawY = rect->computedAbsMinY + text->y;
@@ -142,7 +141,7 @@ void UIRenderSystem::Update(Engine& engine) {
 		}
 
 		// Handle raw text input synchronization and cursor appending
-		if (auto* input = reg.Get<UITextInputComponent>(e)) {
+		if (auto* input = reg.Get<Components::UITextInputComponent>(e)) {
 			std::string_view raw = input->text;
 			std::string displayStr;
 
@@ -194,16 +193,16 @@ void UIRenderSystem::Update(Engine& engine) {
 			} else {
 				// Fallback: Check if the direct parent itself had clipping enabled
 				if (rect->parentEntity != NullEntity && reg.IsAlive(rect->parentEntity)) {
-					if (auto* parentRect = reg.Get<UIRectComponent>(rect->parentEntity)) {
+					if (auto* parentRect =
+							reg.Get<Components::UIRectComponent>(rect->parentEntity)) {
 						if (parentRect->clipChildren) {
 							currentScissor = {
 								.x = (int32_t)std::max(0.0f, parentRect->computedAbsMinX),
 								.y = (int32_t)std::max(0.0f, parentRect->computedAbsMinY),
 								.width = (uint32_t)std::max(0.0f, parentRect->computedAbsMaxX -
 																	  parentRect->computedAbsMinX),
-								.height =
-									(uint32_t)std::max(0.0f, parentRect->computedAbsMaxY -
-																 parentRect->computedAbsMinY)};
+								.height = (uint32_t)std::max(0.0f, parentRect->computedAbsMaxY -
+																	   parentRect->computedAbsMinY)};
 							useScissor = true;
 						}
 					}

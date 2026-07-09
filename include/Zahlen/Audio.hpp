@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #include <Jolt/Jolt.h>
@@ -54,19 +53,6 @@ class ZHLN_API AudioContext {
 
   private:
 	std::unique_ptr<Impl> _impl;
-};
-
-// ECS Component for placing audio sources in 3D space
-struct AudioSourceComponent {
-	std::string filepath;
-	float volume = 1.0f;
-	float pitch = 1.0f;
-	bool isLooping = false;
-	bool isSpatialized = true;
-	bool playOnStart = true;
-
-	// Managed internally by the AudioSystem/Context
-	void* nativeSound = nullptr;
 };
 
 // ECS Audio Update System

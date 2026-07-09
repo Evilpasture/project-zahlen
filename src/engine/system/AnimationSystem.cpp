@@ -38,7 +38,7 @@ JPH::Mat44 GetLocalMatrix(const cgltf_node* node,
 		s = it->second.scale;
 	}
 
-	if (node->has_matrix && it == blended.end()) {
+	if ((node->has_matrix != 0) && it == blended.end()) {
 		float m[16];
 		std::memcpy(m, node->matrix, sizeof(float) * 16);
 		return JPH::Mat44(JPH::Vec4(m[0], m[1], m[2], m[3]), JPH::Vec4(m[4], m[5], m[6], m[7]),
@@ -52,26 +52,27 @@ JPH::Mat44 GetLocalMatrix(const cgltf_node* node,
 } // namespace
 
 void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
-	auto entities = reg.GetEntitiesWith<AnimatorComponent>();
-	auto animators = reg.GetRawArray<AnimatorComponent>();
+	auto entities = reg.GetEntitiesWith<Components::AnimatorComponent>();
+	auto animators = reg.GetRawArray<Components::AnimatorComponent>();
 
-	if (entities.empty())
+	if (entities.empty()) {
 		return;
+	}
 
 	// 1. Find the total active joint capacity for the GPU upload batch
 	uint32_t totalJoints = 0;
-	for (size_t i = 0; i < entities.size(); ++i) {
-		Entity e = entities[i];
-		auto* mesh = reg.Get<MeshComponent>(e);
-		if (mesh && mesh->isSkinned && mesh->gltfSkin) {
+	for (auto e : entities) {
+		auto* mesh = reg.Get<Components::MeshComponent>(e);
+		if ((mesh != nullptr) && mesh->isSkinned && (mesh->gltfSkin != nullptr)) {
 			auto* skin = static_cast<cgltf_skin*>(mesh->gltfSkin);
 			totalJoints = std::max(totalJoints,
 								   mesh->jointOffset + static_cast<uint32_t>(skin->joints_count));
 		}
 	}
 
-	if (totalJoints == 0)
+	if (totalJoints == 0) {
 		return;
+	}
 
 	JPH::Array<JPH::Mat44> calculatedJoints;
 	calculatedJoints.resize(totalJoints, JPH::Mat44::sIdentity());
@@ -86,8 +87,8 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
 	TaskSystem::ParallelFor(entities.size(), 1, [&](uint32_t start, uint32_t end, uint32_t) {
 		for (uint32_t i = start; i < end; ++i) {
 			Entity e = entities[i];
-			AnimatorComponent& anim = animators[i];
-			auto* mesh = reg.Get<MeshComponent>(e);
+			Components::AnimatorComponent& anim = animators[i];
+			auto* mesh = reg.Get<Components::MeshComponent>(e);
 			auto& local = localData[i];
 
 			if (!mesh || !mesh->isSkinned || !mesh->gltfSkin || !anim.gltfData) {
@@ -151,10 +152,10 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
 	// 3. Write world matrix offsets back to active MeshComponents sequentially
 	for (size_t i = 0; i < entities.size(); ++i) {
 		Entity e = entities[i];
-		auto* mesh = reg.Get<MeshComponent>(e);
+		auto* mesh = reg.Get<Components::MeshComponent>(e);
 		auto& local = localData[i];
 
-		if (mesh && mesh->gltfNode) {
+		if ((mesh != nullptr) && (mesh->gltfNode != nullptr)) {
 			auto* node = static_cast<cgltf_node*>(mesh->gltfNode);
 			if ((node->weights != nullptr) && node->weights_count > 0) {
 				mesh->activeMorphCount = std::min((uint32_t)node->weights_count, 4u);
@@ -177,7 +178,7 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
 	ctx.UpdateJointMatrices(0, calculatedJoints.data(), totalJoints);
 }
 
-void AnimationSystem::UpdateAnimatorState(AnimatorComponent& anim, cgltf_data* data,
+void AnimationSystem::UpdateAnimatorState(Components::AnimatorComponent& anim, cgltf_data* data,
 										  float dt) const noexcept {
 	if (anim.currentTrackIdx < 0 ||
 		anim.currentTrackIdx >= static_cast<int32_t>(data->animations_count)) {
@@ -219,7 +220,8 @@ void AnimationSystem::UpdateAnimatorState(AnimatorComponent& anim, cgltf_data* d
 	}
 }
 
-void AnimationSystem::SampleAndBlendPose(const AnimatorComponent& anim, cgltf_data* data,
+void AnimationSystem::SampleAndBlendPose(const Components::AnimatorComponent& anim,
+										 cgltf_data* data,
 										 SampledTransformMap& outTransforms) const noexcept {
 	if (anim.currentTrackIdx < 0 ||
 		anim.currentTrackIdx >= static_cast<int32_t>(data->animations_count)) {

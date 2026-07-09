@@ -156,7 +156,7 @@ void DrawProfiler(Engine& engine) {
 			ImGui::Text("Physics Temp Allocator: %.2f MB", mb);
 
 			ImGui::Text("ECS Entities: %zu",
-						engine.GetRegistry().GetEntitiesWith<PhysicsComponent>().size());
+						engine.GetRegistry().GetEntitiesWith<Components::PhysicsComponent>().size());
 		}
 
 		// 4. RENDERER INFO
@@ -192,9 +192,9 @@ void DrawProfiler(Engine& engine) {
 
 		// 6. ANTI-ALIASING
 		if (ImGui::CollapsingHeader("Anti-Aliasing", ImGuiTreeNodeFlags_DefaultOpen)) {
-			auto aaEnts = engine.GetRegistry().GetEntitiesWith<AASettingsComponent>();
+			auto aaEnts = engine.GetRegistry().GetEntitiesWith<Components::AASettingsComponent>();
 			if (!aaEnts.empty()) {
-				auto* aaSettings = engine.GetRegistry().Get<AASettingsComponent>(aaEnts[0]);
+				auto* aaSettings = engine.GetRegistry().Get<Components::AASettingsComponent>(aaEnts[0]);
 
 				const char* aaModesList[] = {"Disabled", "FXAA (Fast Approximate)",
 											 "TAA (Temporal)", "SMAA (Subpixel Morphological)"};

@@ -224,20 +224,20 @@ void SafeDestroyEntity(ZHLN::Engine* engine, ZHLN::Entity entity) {
 
 	std::vector<Entity> childrenToDestroy;
 
-	uint32_t hierarchyID = ComponentFamily::GetTypeID<HierarchyComponent>();
+	uint32_t hierarchyID = ComponentFamily::GetTypeID<Components::HierarchyComponent>();
 	auto hEntities = reg.GetEntitiesByFamilyID(hierarchyID);
 	for (Entity e : hEntities) {
-		if (auto* hier = reg.Get<HierarchyComponent>(e)) {
+		if (auto* hier = reg.Get<Components::HierarchyComponent>(e)) {
 			if (hier->parent == entity) {
 				childrenToDestroy.push_back(e);
 			}
 		}
 	}
 
-	uint32_t uiRectID = ComponentFamily::GetTypeID<UIRectComponent>();
+	uint32_t uiRectID = ComponentFamily::GetTypeID<Components::UIRectComponent>();
 	auto uEntities = reg.GetEntitiesByFamilyID(uiRectID);
 	for (Entity e : uEntities) {
-		if (auto* rect = reg.Get<UIRectComponent>(e)) {
+		if (auto* rect = reg.Get<Components::UIRectComponent>(e)) {
 			if (rect->parentEntity == entity) {
 				childrenToDestroy.push_back(e);
 			}
@@ -248,32 +248,32 @@ void SafeDestroyEntity(ZHLN::Engine* engine, ZHLN::Entity entity) {
 		SafeDestroyEntity(engine, child);
 	}
 
-	auto* text = reg.Get<ZHLN::TextComponent>(entity);
+	auto* text = reg.Get<ZHLN::Components::TextComponent>(entity);
 	if (text != nullptr) {
-		if (text->mesh.posBuffer != ZHLN::BufferHandle::Invalid) {
+		if (text->mesh.posBuffer != Invalid) {
 			engine->GetRenderContext().DestroyBuffer(text->mesh.posBuffer);
 		}
-		if (text->mesh.attrBuffer != ZHLN::BufferHandle::Invalid) {
+		if (text->mesh.attrBuffer != Invalid) {
 			engine->GetRenderContext().DestroyBuffer(text->mesh.attrBuffer);
 		}
-		if (text->mesh.indexBuffer != ZHLN::BufferHandle::Invalid) {
+		if (text->mesh.indexBuffer != Invalid) {
 			engine->GetRenderContext().DestroyBuffer(text->mesh.indexBuffer);
 		}
 	}
 
-	auto* panel = reg.Get<ZHLN::UIPanelComponent>(entity);
+	auto* panel = reg.Get<ZHLN::Components::UIPanelComponent>(entity);
 	if (panel != nullptr) {
-		if (panel->mesh.posBuffer != ZHLN::BufferHandle::Invalid) {
+		if (panel->mesh.posBuffer != Invalid) {
 			engine->GetRenderContext().DestroyBuffer(panel->mesh.posBuffer);
 		}
-		if (panel->mesh.attrBuffer != ZHLN::BufferHandle::Invalid) {
+		if (panel->mesh.attrBuffer != Invalid) {
 			engine->GetRenderContext().DestroyBuffer(panel->mesh.attrBuffer);
 		}
 	}
 
-	auto* mesh = reg.Get<ZHLN::MeshComponent>(entity);
+	auto* mesh = reg.Get<ZHLN::Components::MeshComponent>(entity);
 	if (mesh != nullptr) {
-		if (mesh->skinnedVertexBuffer != ZHLN::BufferHandle::Invalid) {
+		if (mesh->skinnedVertexBuffer != Invalid) {
 			engine->GetRenderContext().DestroyBuffer(mesh->skinnedVertexBuffer);
 		}
 	}
@@ -417,24 +417,25 @@ void InitComponentRegistry() {
 		return;
 	}
 
-	RegisterComponentType<ZHLN::HierarchyComponent>("HierarchyComponent", "B");
-	RegisterComponentType<ZHLN::TransformComponent>("TransformComponent", "B");
-	RegisterComponentType<ZHLN::MovementComponent>("MovementComponent", "B");
-	RegisterComponentType<ZHLN::PhysicsStateComponent>("PhysicsStateComponent", "B");
-	RegisterComponentType<ZHLN::TargetCameraComponent>("TargetCameraComponent", "B");
-	RegisterComponentType<ZHLN::PBRComponent>("PBRComponent", "f", 2); // 2D array [size, 2]
-	RegisterComponentType<ZHLN::TextComponent>("TextComponent", "B");
-	RegisterComponentType<ZHLN::PostProcessSettingsComponent>("PostProcessSettingsComponent", "B");
-	RegisterComponentType<ZHLN::DebugSettingsComponent>("DebugSettingsComponent", "B");
-	RegisterComponentType<ZHLN::AASettingsComponent>("AASettingsComponent", "B");
-	RegisterComponentType<ZHLN::SunTagComponent>("SunTagComponent", "B");
-	RegisterComponentType<ZHLN::ShadowSettingsComponent>("ShadowSettingsComponent", "B");
-	RegisterComponentType<ZHLN::UIRectComponent>("UIRectComponent", "B");
-	RegisterComponentType<ZHLN::UIPanelComponent>("UIPanelComponent", "B");
-	RegisterComponentType<ZHLN::UIButtonComponent>("UIButtonComponent", "B");
-	RegisterComponentType<ZHLN::UIDragComponent>("UIDragComponent", "B");
-	RegisterComponentType<ZHLN::UIStackComponent>("UIStackComponent", "B");
-	RegisterComponentTypeReadOnly<ZHLN::PhysicsComponent>("PhysicsComponent", "Q");
+	RegisterComponentType<Components::HierarchyComponent>("HierarchyComponent", "B");
+	RegisterComponentType<Components::TransformComponent>("TransformComponent", "B");
+	RegisterComponentType<Components::MovementComponent>("MovementComponent", "B");
+	RegisterComponentType<Components::PhysicsStateComponent>("PhysicsStateComponent", "B");
+	RegisterComponentType<Components::TargetCameraComponent>("TargetCameraComponent", "B");
+	RegisterComponentType<Components::PBRComponent>("PBRComponent", "f", 2);
+	RegisterComponentType<Components::TextComponent>("TextComponent", "B");
+	RegisterComponentType<Components::PostProcessSettingsComponent>("PostProcessSettingsComponent",
+																	"B");
+	RegisterComponentType<Components::DebugSettingsComponent>("DebugSettingsComponent", "B");
+	RegisterComponentType<Components::AASettingsComponent>("AASettingsComponent", "B");
+	RegisterComponentType<Components::SunTagComponent>("SunTagComponent", "B");
+	RegisterComponentType<Components::ShadowSettingsComponent>("ShadowSettingsComponent", "B");
+	RegisterComponentType<Components::UIRectComponent>("UIRectComponent", "B");
+	RegisterComponentType<Components::UIPanelComponent>("UIPanelComponent", "B");
+	RegisterComponentType<Components::UIButtonComponent>("UIButtonComponent", "B");
+	RegisterComponentType<Components::UIDragComponent>("UIDragComponent", "B");
+	RegisterComponentType<Components::UIStackComponent>("UIStackComponent", "B");
+	RegisterComponentTypeReadOnly<Components::PhysicsComponent>("PhysicsComponent", "Q");
 }
 
 // ============================================================================
@@ -560,32 +561,32 @@ void RegisterCreativeWorkCommands() {
 			mat.baseColorFactor[2] = a.b;
 			mat.baseColorFactor[3] = a.a;
 			ZHLN::Entity e = reg.Create();
-			reg.Add(e, ZHLN::TransformComponent{.position = {a.px, a.py, a.pz},
-												.rotation = {a.rx, a.ry, a.rz, a.rw},
-												.scale = {1.0f, 1.0f, 1.0f}});
+			reg.Add(e, ZHLN::Components::TransformComponent{.position = {a.px, a.py, a.pz},
+															.rotation = {a.rx, a.ry, a.rz, a.rw},
+															.scale = {1.0f, 1.0f, 1.0f}});
 			ZHLN::DrawFlags flags = ZHLN::DrawFlags::None;
 			if (isTransparent) {
 				flags |= ZHLN::DrawFlags::ExcludeFromTLAS;
 			}
 
-			reg.Add(e, ZHLN::MeshComponent{.mesh = mesh,
-										   .material = mat,
-										   .cullRadius = cullRadius,
-										   .localTransform = JPH::Mat44::sIdentity(),
-										   .prevTransform = JPH::Mat44::sIdentity(),
-										   .flags = flags});
+			reg.Add(e, ZHLN::Components::MeshComponent{.mesh = mesh,
+													   .material = mat,
+													   .cullRadius = cullRadius,
+													   .localTransform = JPH::Mat44::sIdentity(),
+													   .prevTransform = JPH::Mat44::sIdentity(),
+													   .flags = flags});
 
 			JPH::Quat rotation(a.rx, a.ry, a.rz, a.rw);
-			reg.Add(e, ZHLN::PhysicsComponent{ZHLN::Physics::CreateRigidBody(
+			reg.Add(e, ZHLN::Components::PhysicsComponent{ZHLN::Physics::CreateRigidBody(
 						   pc, shape, JPH::RVec3(a.px, a.py, a.pz), rotation,
 						   a.isStatic ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
 						   a.isStatic ? static_cast<JPH::ObjectLayer>(0)
 									  : static_cast<JPH::ObjectLayer>(1),
 						   0)});
-			reg.Add(e, ZHLN::PhysicsStateComponent{.currPosition = {a.px, a.py, a.pz},
-												   .prevPosition = {a.px, a.py, a.pz},
-												   .currRotation = rotation,
-												   .prevRotation = rotation});
+			reg.Add(e, ZHLN::Components::PhysicsStateComponent{.currPosition = {a.px, a.py, a.pz},
+															   .prevPosition = {a.px, a.py, a.pz},
+															   .currRotation = rotation,
+															   .prevRotation = rotation});
 
 			return e.Pack();
 		}));
@@ -596,18 +597,19 @@ void RegisterCreativeWorkCommands() {
 			auto& reg = engine->GetRegistry();
 
 			ZHLN::Entity e = reg.Create();
-			reg.Add(e, ZHLN::TransformComponent{.position = {a.px, a.py, a.pz},
-												.rotation = JPH::Quat(a.rx, a.ry, a.rz, a.rw),
-												.scale = {1.0f, 1.0f, 1.0f}});
-			reg.Add(e, ZHLN::NameComponent{.name = ZHLN::String64("SpawnedLight")});
-			reg.Add(e, ZHLN::LightingSystem::LightComponent{.type = a.type,
-															.color = JPH::Vec3(a.r, a.g, a.b),
-															.intensity = a.intensity,
-															.radius = a.radius,
-															.direction = JPH::Vec3(a.dx, a.dy, a.dz),
-															.range = a.range,
-															.points = {},
-															.twoSided = a.twoSided});
+			reg.Add(e, ZHLN::Components::TransformComponent{.position = {a.px, a.py, a.pz},
+															.rotation =
+																JPH::Quat(a.rx, a.ry, a.rz, a.rw),
+															.scale = {1.0f, 1.0f, 1.0f}});
+			reg.Add(e, ZHLN::Components::NameComponent{.name = ZHLN::String64("SpawnedLight")});
+			reg.Add(e, Components::LightComponent{.type = a.type,
+												  .color = JPH::Vec3(a.r, a.g, a.b),
+												  .intensity = a.intensity,
+												  .radius = a.radius,
+												  .direction = JPH::Vec3(a.dx, a.dy, a.dz),
+												  .range = a.range,
+												  .points = {},
+												  .twoSided = a.twoSided});
 			return e.Pack();
 		}));
 }
@@ -707,7 +709,7 @@ void RegisterPhysicsCommands() {
 	RegisterCmd(
 		"SetMovementInput",
 		MakeCmd<SetMoveInputArgs>([](ZHLN::Engine* engine, const SetMoveInputArgs& a) -> uint64_t {
-			if (auto* move = engine->GetRegistry().Get<ZHLN::MovementComponent>(
+			if (auto* move = engine->GetRegistry().Get<ZHLN::Components::MovementComponent>(
 					ZHLN::Entity::Unpack(a.entityRaw))) {
 				move->inputX = a.x;
 				move->inputZ = a.z;
@@ -717,7 +719,7 @@ void RegisterPhysicsCommands() {
 
 	RegisterCmd("SetJumpIntent", MakeCmd<EntityOnlyArgs>([](ZHLN::Engine* engine,
 															const EntityOnlyArgs& a) -> uint64_t {
-					if (auto* move = engine->GetRegistry().Get<ZHLN::MovementComponent>(
+					if (auto* move = engine->GetRegistry().Get<ZHLN::Components::MovementComponent>(
 							ZHLN::Entity::Unpack(a.entityRaw))) {
 						move->jumpRequested = true;
 					}
@@ -981,50 +983,52 @@ void RegisterSystemCommands() {
 					return 1;
 				}));
 
-	RegisterCmd("InitPlayer", MakeCmd<void>([](ZHLN::Engine* engine) -> uint64_t {
-					using namespace ZHLN;
-					auto& reg = engine->GetRegistry();
-					auto& pc = engine->GetPhysicsContext();
+	RegisterCmd(
+		"InitPlayer", MakeCmd<void>([](ZHLN::Engine* engine) -> uint64_t {
+			using namespace ZHLN;
+			auto& reg = engine->GetRegistry();
+			auto& pc = engine->GetPhysicsContext();
 
-					// 1. Spawn infinite physical ground plane
-					auto groundShape = ZHLN::Physics::GetOrCreateShape(
-						pc, ZHLN::Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
-					ZHLN::Entity ground = reg.Create();
-					reg.Add(ground, PhysicsComponent{Physics::CreateRigidBody(
-										pc, groundShape, {0, 0, 0}, JPH::Quat::sIdentity(),
-										JPH::EMotionType::Static, 0)});
-					reg.Add(ground, PhysicsStateComponent{});
+			// 1. Spawn infinite physical ground plane
+			auto groundShape = ZHLN::Physics::GetOrCreateShape(pc, ZHLN::Physics::ShapeType::Plane,
+															   0.0f, 1.0f, 0.0f, 0.0f);
+			ZHLN::Entity ground = reg.Create();
+			reg.Add(ground, Components::PhysicsComponent{Physics::CreateRigidBody(
+								pc, groundShape, {0, 0, 0}, JPH::Quat::sIdentity(),
+								JPH::EMotionType::Static, 0)});
+			reg.Add(ground, Components::PhysicsStateComponent{});
 
-					// 2. Spawn the Player Character Controller
-					ZHLN::Entity playerEntity = reg.Create();
-					reg.Add(playerEntity, PlayerTagComponent{});
-					reg.Add(playerEntity, TransformComponent{.position = {0.0f, 3.0f, 0.0f}});
-					reg.Add(playerEntity, MovementComponent{});
-					reg.Add(playerEntity, ZHLN::InputSystem::InputComponent{});
-					ZHLN::Entity charPhys =
-						ZHLN::Physics::CreateCharacter(pc, JPH::RVec3(0.0f, 3.0f, 0.0f));
-					reg.Add(playerEntity, PhysicsComponent{charPhys});
-					reg.Add(playerEntity, PhysicsStateComponent{.currPosition = {0.0f, 3.0f, 0.0f},
-																.prevPosition = {0.0f, 3.0f, 0.0f}});
+			// 2. Spawn the Player Character Controller
+			ZHLN::Entity playerEntity = reg.Create();
+			reg.Add(playerEntity, Components::PlayerTagComponent{});
+			reg.Add(playerEntity, Components::TransformComponent{.position = {0.0f, 3.0f, 0.0f}});
+			reg.Add(playerEntity, Components::MovementComponent{});
+			reg.Add(playerEntity, ZHLN::Components::InputComponent{});
+			ZHLN::Entity charPhys =
+				ZHLN::Physics::CreateCharacter(pc, JPH::RVec3(0.0f, 3.0f, 0.0f));
+			reg.Add(playerEntity, Components::PhysicsComponent{charPhys});
+			reg.Add(playerEntity,
+					Components::PhysicsStateComponent{.currPosition = {0.0f, 3.0f, 0.0f},
+													  .prevPosition = {0.0f, 3.0f, 0.0f}});
 
-					// 3. Attach Camera Tracking logic to the blank menu camera
-					auto camEnts = reg.GetEntitiesWith<ZHLN::MainCameraTagComponent>();
-					if (!camEnts.empty()) {
-						ZHLN::Entity camEnt = camEnts[0];
-						reg.Add(camEnt, TargetCameraComponent{.target = playerEntity,
-															  .distance = 4.5f,
-															  .targetDistance = 4.5f,
-															  .yaw = -90.0f,
-															  .pitch = -10.0f,
-															  .stiffness = 15.0f,
-															  .vignetteIntensity = 1.10f,
-															  .vignettePower = 1.50f,
-															  .fov = 45.0f,
-															  .targetFov = 45.0f});
-						reg.Add(camEnt, ZHLN::InputSystem::InputComponent{});
-					}
-					return playerEntity.Pack();
-				}));
+			// 3. Attach Camera Tracking logic to the blank menu camera
+			auto camEnts = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
+			if (!camEnts.empty()) {
+				ZHLN::Entity camEnt = camEnts[0];
+				reg.Add(camEnt, Components::TargetCameraComponent{.target = playerEntity,
+																  .distance = 4.5f,
+																  .targetDistance = 4.5f,
+																  .yaw = -90.0f,
+																  .pitch = -10.0f,
+																  .stiffness = 15.0f,
+																  .vignetteIntensity = 1.10f,
+																  .vignettePower = 1.50f,
+																  .fov = 45.0f,
+																  .targetFov = 45.0f});
+				reg.Add(camEnt, Components::InputComponent{});
+			}
+			return playerEntity.Pack();
+		}));
 
 	RegisterCmd(
 		"GetAnimationTrackCount",
@@ -1032,7 +1036,7 @@ void RegisterSystemCommands() {
 			auto& reg = engine->GetRegistry();
 
 			auto entity = ZHLN::Entity::Unpack(a.entityRaw);
-			if (auto* anim = reg.Get<ZHLN::AnimatorComponent>(entity)) {
+			if (auto* anim = reg.Get<ZHLN::Components::AnimatorComponent>(entity)) {
 				if (anim->gltfData != nullptr) {
 					auto* data = static_cast<cgltf_data*>(anim->gltfData);
 					return static_cast<uint64_t>(data->animations_count);
@@ -1047,7 +1051,7 @@ void RegisterSystemCommands() {
 			auto& reg = engine->GetRegistry();
 
 			auto entity = ZHLN::Entity::Unpack(a.entityRaw);
-			if (auto* anim = reg.Get<ZHLN::AnimatorComponent>(entity)) {
+			if (auto* anim = reg.Get<ZHLN::Components::AnimatorComponent>(entity)) {
 				if (anim->gltfData != nullptr) {
 					auto* data = static_cast<cgltf_data*>(anim->gltfData);
 					if (a.trackIndex >= 0 &&
@@ -1068,7 +1072,7 @@ void RegisterSystemCommands() {
 					auto& reg = engine->GetRegistry();
 
 					auto entity = ZHLN::Entity::Unpack(a.entityRaw);
-					if (auto* anim = reg.Get<ZHLN::AnimatorComponent>(entity)) {
+					if (auto* anim = reg.Get<ZHLN::Components::AnimatorComponent>(entity)) {
 						if (anim->gltfData != nullptr) {
 							auto* data = static_cast<cgltf_data*>(anim->gltfData);
 							if (a.trackIndex >= 0 &&

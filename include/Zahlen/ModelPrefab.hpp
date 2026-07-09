@@ -1,13 +1,13 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
+
+#include "../../src/detail/String.hpp"
+#include "Types.hpp"
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Collision/Shape/Shape.h>
-#include <Zahlen/Types.hpp>
-#include <detail/String.hpp>
 
 // Forward declare cgltf struct to prevent leaking the library into engine headers
 struct cgltf_data;
@@ -52,11 +52,7 @@ struct ModelPrefab {
 	cgltf_data* rawData = nullptr; // Retained for animation hierarchy lookups
 
 	ModelPrefab() = default;
-	~ModelPrefab() {
-		if (parts != nullptr) {
-			delete[] parts;
-		}
-	}
+	~ModelPrefab() { delete[] parts; }
 
 	// Rule of five: Exclusively managed by pointers/unique_ptrs internally
 	ModelPrefab(const ModelPrefab&) = delete;

@@ -18,13 +18,13 @@ static void VerifyMovementStateConsistency(const ECS::Registry& reg) noexcept {
 		return;
 	}
 
-	auto entities = reg.GetEntitiesWith<MovementComponent>();
+	auto entities = reg.GetEntitiesWith<Components::MovementComponent>();
 	if (entities.empty()) {
 		return;
 	}
 	testsRun = true;
 
-	auto movements = reg.GetRawArray<MovementComponent>();
+	auto movements = reg.GetRawArray<Components::MovementComponent>();
 	for (size_t i = 0; i < entities.size(); ++i) {
 		Entity e = entities[i];
 		const auto& move = movements[i];
@@ -70,27 +70,27 @@ namespace ZHLN {
 void MovementSystem(Engine& engine, float dt) {
 	auto& reg = engine.GetRegistry();
 
-	auto entities = reg.GetEntitiesWith<MovementComponent>();
+	auto entities = reg.GetEntitiesWith<Components::MovementComponent>();
 	if (entities.empty()) {
 		return;
 	}
 
-	auto movements = reg.GetRawArray<MovementComponent>();
+	auto movements = reg.GetRawArray<Components::MovementComponent>();
 	auto& pc = engine.GetPhysicsContext();
 
 	TaskSystem::ParallelFor(entities.size(), 128, [&](uint32_t start, uint32_t end, uint32_t) {
 		for (uint32_t i = start; i < end; ++i) {
-			MovementComponent& move = movements[i];
+			Components::MovementComponent& move = movements[i];
 			Entity e = entities[i];
 			// Record previous orientation before calculating the new one
 			move.prevOrientation = move.orientation;
 
-			auto* phys = reg.Get<PhysicsComponent>(e);
+			auto* phys = reg.Get<Components::PhysicsComponent>(e);
 			if (!phys) {
 				continue;
 			}
 
-			if (auto* ragComp = reg.Get<RagdollComponent>(e)) {
+			if (auto* ragComp = reg.Get<Components::RagdollComponent>(e)) {
 				if (ragComp->state == RagdollState::Limp ||
 					ragComp->state == RagdollState::KeyframeMotor) {
 					continue;

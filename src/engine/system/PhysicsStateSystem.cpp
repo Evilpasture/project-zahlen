@@ -22,19 +22,19 @@ static void VerifyRealVisualInterpolation(Engine& engine, float alpha) noexcept 
 	}
 
 	auto& reg = engine.GetRegistry();
-	auto entities = reg.GetEntitiesWith<PhysicsStateComponent>();
+	auto entities = reg.GetEntitiesWith<Components::PhysicsStateComponent>();
 	if (entities.empty()) {
 		return; // Wait until we have at least one active physics state
 	}
 	testsRun = true;
 
-	auto states = reg.GetRawArray<PhysicsStateComponent>();
+	auto states = reg.GetRawArray<Components::PhysicsStateComponent>();
 	float clampedAlpha = std::clamp(alpha, 0.0f, 1.0f);
 
 	for (size_t i = 0; i < entities.size(); ++i) {
 		Entity e = entities[i];
 		const auto& state = states[i];
-		const auto* trans = reg.Get<TransformComponent>(e);
+		const auto* trans = reg.Get<Components::Components::TransformComponent>(e);
 		if (trans != nullptr) {
 			JPH::Vec3 expected =
 				state.prevPosition + clampedAlpha * (state.currPosition - state.prevPosition);
@@ -56,13 +56,13 @@ void PhysicsStateSystem::WriteBack(Engine& engine) noexcept {
 	auto& reg = engine.GetRegistry();
 	const auto& world = engine.GetPhysicsContext().GetWorld();
 
-	auto entities = reg.GetEntitiesWith<PhysicsComponent>();
-	auto physComps = reg.GetRawArray<PhysicsComponent>();
+	auto entities = reg.GetEntitiesWith<Components::PhysicsComponent>();
+	auto physComps = reg.GetRawArray<Components::PhysicsComponent>();
 
 	for (size_t i = 0; i < entities.size(); ++i) {
 		Entity e = entities[i];
 		auto& phys = physComps[i];
-		auto* state = reg.Get<PhysicsStateComponent>(e);
+		auto* state = reg.Get<Components::PhysicsStateComponent>(e);
 
 		if (state != nullptr) {
 			uint32_t dense = world.slotToDense[phys.physicsHandle.index];
@@ -81,10 +81,10 @@ void PhysicsStateSystem::WriteBack(Engine& engine) noexcept {
 											static_cast<float>(world.positions[base + 2]));
 
 			if (isCharacter) {
-				auto* move = reg.Get<MovementComponent>(e);
+				auto* move = reg.Get<Components::MovementComponent>(e);
 				if (move != nullptr) {
 					state->prevRotation = move->prevOrientation;
-								state->currRotation = move->orientation;
+					state->currRotation = move->orientation;
 				} else {
 					state->prevRotation = JPH::Quat::sIdentity();
 					state->currRotation = JPH::Quat::sIdentity();
@@ -103,8 +103,8 @@ void PhysicsStateSystem::WriteBack(Engine& engine) noexcept {
 
 void VisualInterpolationSystem::Update(Engine& engine, float alpha) noexcept {
 	auto& reg = engine.GetRegistry();
-	auto entities = reg.GetEntitiesWith<PhysicsStateComponent>();
-	auto states = reg.GetRawArray<PhysicsStateComponent>();
+	auto entities = reg.GetEntitiesWith<Components::PhysicsStateComponent>();
+	auto states = reg.GetRawArray<Components::PhysicsStateComponent>();
 
 	// Strict clamp prevents floating-point accumulator noise from overshooting the bounds
 	float clampedAlpha = std::clamp(alpha, 0.0f, 1.0f);
@@ -112,7 +112,7 @@ void VisualInterpolationSystem::Update(Engine& engine, float alpha) noexcept {
 	for (size_t i = 0; i < entities.size(); ++i) {
 		Entity e = entities[i];
 		auto& state = states[i];
-		auto* trans = reg.Get<TransformComponent>(e);
+		auto* trans = reg.Get<Components::Components::TransformComponent>(e);
 
 		if (trans != nullptr) {
 			trans->position =
