@@ -304,7 +304,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 }
 
 // ============================================================================
-// Zero-Copy Pass Construction Factory
+// Zero-Copy Pass Construction Factory (Refactored)
 // ============================================================================
 
 struct PassFactory {
@@ -334,23 +334,24 @@ struct PassFactory {
 		}
 	}
 
+	// Consolidated helper to build scene resource descriptions
+	[[nodiscard]] auto BuildSceneResources() const noexcept {
+		return SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+							  VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>{
+			.sceneColor = AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(self.sceneColor),
+			.velocity = AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(self.velocityBuffer),
+			.normRough =
+				AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(self.normalRoughnessBuffer),
+			.depth = AssumeLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+				self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT)};
+	}
+
 	[[nodiscard]] auto MakeMainPass() const noexcept {
 		return Vk::Passieren<"Main", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>,
 							 Vk::ColorWrite<Res_NormRough>, Vk::DepthWrite<Res_Depth>>(
 			[this](VkCommandBuffer c) noexcept {
 				FrameRecorder mainRec(c, self);
-				Passes::MainPass{}.Execute(
-					mainRec,
-					SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-								   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>{
-						.sceneColor = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-							self.sceneColor),
-						.velocity = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-							self.velocityBuffer),
-						.normRough = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-							self.normalRoughnessBuffer),
-						.depth = Vk::AssumeLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-							self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT)});
+				Passes::MainPass{}.Execute(mainRec, BuildSceneResources());
 			});
 	}
 
@@ -370,18 +371,7 @@ struct PassFactory {
 				},
 				[&](Vk::RecordingSlot slot) noexcept {
 					FrameRecorder mainRec(slot.cmd, self);
-					Passes::MainPass{}.Execute(
-						mainRec,
-						SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-									   VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>{
-							.sceneColor = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-								self.sceneColor),
-							.velocity = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-								self.velocityBuffer),
-							.normRough = Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-								self.normalRoughnessBuffer),
-							.depth = Vk::AssumeLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-								self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT)});
+					Passes::MainPass{}.Execute(mainRec, BuildSceneResources());
 				});
 			Vk::ExecuteCommands(c, rec.GetCommandBuffers());
 		});
@@ -492,50 +482,49 @@ struct PassFactory {
 		float padding;
 	};
 
+	// Downsample version (single source)
+	template <typename SrcImgT, typename PassT>
+	static void RunKawasePass(VkDevice device, VkCommandBuffer cmd, PassT& pass, const SrcImgT& src,
+							  const Vk::Sampler& defaultSampler) noexcept {
+		pass.WriteNext(device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src),
+					   defaultSampler.Get(), Vk::SkipWrite{});
+		pass.Execute(cmd, KawasePushConstants{.mode = 0,
+											  .rcpWidth = 1.0f / (float)src.extent.width,
+											  .rcpHeight = 1.0f / (float)src.extent.height,
+											  .padding = 0.0f});
+	}
+
+	// Upsample version (dual sources)
+	template <typename SrcImgT, typename SrcImg2T, typename PassT>
+	static void RunKawasePass(VkDevice device, VkCommandBuffer cmd, PassT& pass, const SrcImgT& src,
+							  const Vk::Sampler& defaultSampler, const SrcImg2T& src2) noexcept {
+		pass.WriteNext(device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src),
+					   defaultSampler.Get(),
+					   Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src2));
+		pass.Execute(cmd, KawasePushConstants{.mode = 1,
+											  .rcpWidth = 1.0f / (float)src.extent.width,
+											  .rcpHeight = 1.0f / (float)src.extent.height,
+											  .padding = 0.0f});
+	}
+
 	template <size_t Index> [[nodiscard]] auto MakeBloomDownPass() const noexcept {
 		if constexpr (Index == 0) {
 			return Vk::MakePass<"BloomDown0", Vk::ShaderRead<Res_BloomThresh>,
 								Vk::ColorWrite<Res_BloomDown1>>([this](auto& ctx) noexcept {
-				self.bloomDownPass[0].WriteNext(
-					device,
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-						self.bloomThresholdTarget),
-					self.defaultSampler.Get(), Vk::SkipWrite{});
-				self.bloomDownPass[0].Execute(
-					ctx.Cmd(),
-					KawasePushConstants{
-						.mode = 0,
-						.rcpWidth = 1.0f / (float)self.bloomThresholdTarget.extent.width,
-						.rcpHeight = 1.0f / (float)self.bloomThresholdTarget.extent.height,
-						.padding = 0.0f});
+				RunKawasePass(device, ctx.Cmd(), self.bloomDownPass[0], self.bloomThresholdTarget,
+							  self.defaultSampler);
 			});
 		} else if constexpr (Index == 1) {
 			return Vk::MakePass<"BloomDown1", Vk::ShaderRead<Res_BloomDown1>,
 								Vk::ColorWrite<Res_BloomDown2>>([this](auto& ctx) noexcept {
-				self.bloomDownPass[1].WriteNext(
-					device,
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.bloomDown1),
-					self.defaultSampler.Get(), Vk::SkipWrite{});
-				self.bloomDownPass[1].Execute(
-					ctx.Cmd(),
-					KawasePushConstants{.mode = 0,
-										.rcpWidth = 1.0f / (float)self.bloomDown1.extent.width,
-										.rcpHeight = 1.0f / (float)self.bloomDown1.extent.height,
-										.padding = 0.0f});
+				RunKawasePass(device, ctx.Cmd(), self.bloomDownPass[1], self.bloomDown1,
+							  self.defaultSampler);
 			});
 		} else {
 			return Vk::MakePass<"BloomDown2", Vk::ShaderRead<Res_BloomDown2>,
 								Vk::ColorWrite<Res_BloomDown3>>([this](auto& ctx) noexcept {
-				self.bloomDownPass[2].WriteNext(
-					device,
-					Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.bloomDown2),
-					self.defaultSampler.Get(), Vk::SkipWrite{});
-				self.bloomDownPass[2].Execute(
-					ctx.Cmd(),
-					KawasePushConstants{.mode = 0,
-										.rcpWidth = 1.0f / (float)self.bloomDown2.extent.width,
-										.rcpHeight = 1.0f / (float)self.bloomDown2.extent.height,
-										.padding = 0.0f});
+				RunKawasePass(device, ctx.Cmd(), self.bloomDownPass[2], self.bloomDown2,
+							  self.defaultSampler);
 			});
 		}
 	}
@@ -545,51 +534,22 @@ struct PassFactory {
 			return Vk::MakePass<"BloomUp2", Vk::ShaderRead<Res_BloomDown3>,
 								Vk::ShaderRead<Res_BloomDown2>, Vk::ColorWrite<Res_BloomUp2>>(
 				[this](auto& ctx) noexcept {
-					self.bloomUpPass[2].WriteNext(
-						device,
-						Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.bloomDown3),
-						self.defaultSampler.Get(),
-						Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.bloomDown2));
-					self.bloomUpPass[2].Execute(
-						ctx.Cmd(), KawasePushConstants{
-									   .mode = 1,
-									   .rcpWidth = 1.0f / (float)self.bloomDown2.extent.width,
-									   .rcpHeight = 1.0f / (float)self.bloomDown2.extent.height,
-									   .padding = 0.0f});
+					RunKawasePass(device, ctx.Cmd(), self.bloomUpPass[2], self.bloomDown3,
+								  self.defaultSampler, self.bloomDown2);
 				});
 		} else if constexpr (Index == 1) {
 			return Vk::MakePass<"BloomUp1", Vk::ShaderRead<Res_BloomUp2>,
 								Vk::ShaderRead<Res_BloomDown1>, Vk::ColorWrite<Res_BloomUp1>>(
 				[this](auto& ctx) noexcept {
-					self.bloomUpPass[1].WriteNext(
-						device,
-						Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.bloomUp2),
-						self.defaultSampler.Get(),
-						Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.bloomDown1));
-					self.bloomUpPass[1].Execute(
-						ctx.Cmd(), KawasePushConstants{
-									   .mode = 1,
-									   .rcpWidth = 1.0f / (float)self.bloomDown1.extent.width,
-									   .rcpHeight = 1.0f / (float)self.bloomDown1.extent.height,
-									   .padding = 0.0f});
+					RunKawasePass(device, ctx.Cmd(), self.bloomUpPass[1], self.bloomUp2,
+								  self.defaultSampler, self.bloomDown1);
 				});
 		} else {
 			return Vk::MakePass<"BloomUp0", Vk::ShaderRead<Res_BloomUp1>,
 								Vk::ShaderRead<Res_BloomThresh>, Vk::ColorWrite<Res_BloomFinal>>(
 				[this](auto& ctx) noexcept {
-					self.bloomUpPass[0].WriteNext(
-						device,
-						Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.bloomUp1),
-						self.defaultSampler.Get(),
-						Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-							self.bloomThresholdTarget));
-					self.bloomUpPass[0].Execute(
-						ctx.Cmd(),
-						KawasePushConstants{
-							.mode = 1,
-							.rcpWidth = 1.0f / (float)self.bloomThresholdTarget.extent.width,
-							.rcpHeight = 1.0f / (float)self.bloomThresholdTarget.extent.height,
-							.padding = 0.0f});
+					RunKawasePass(device, ctx.Cmd(), self.bloomUpPass[0], self.bloomUp1,
+								  self.defaultSampler, self.bloomThresholdTarget);
 				});
 		}
 	}
