@@ -9,6 +9,6 @@ namespace ZHLN {
 class Engine;
 class CameraSystem {
   public:
-	void Update(Engine& engine, float dt, float alpha);
+    void Update(Engine& engine, float dt, float alpha);
 };
 } // namespace ZHLN

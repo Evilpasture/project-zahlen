@@ -7,20 +7,20 @@ namespace ZHLN::Vk {
 
 class Surface {
   public:
-	Surface() = default;
-	Surface(VkInstance instance, VkSurfaceKHR surface);
-	~Surface();
+    Surface() = default;
+    Surface(VkInstance instance, VkSurfaceKHR surface);
+    ~Surface();
 
-	Surface(const Surface&) = delete;
-	auto operator=(const Surface&) -> Surface& = delete;
+    Surface(const Surface&)                    = delete;
+    auto operator=(const Surface&) -> Surface& = delete;
 
-	Surface(Surface&& other) noexcept;
-	auto operator=(Surface&& other) noexcept -> Surface&;
+    Surface(Surface&& other) noexcept;
+    auto operator=(Surface&& other) noexcept -> Surface&;
 
-	[[nodiscard]] auto Get() const -> VkSurfaceKHR;
+    [[nodiscard]] auto Get() const -> VkSurfaceKHR;
 
   private:
-	VkInstance _instance = VK_NULL_HANDLE;
-	VkSurfaceKHR _handle = VK_NULL_HANDLE;
+    VkInstance   _instance = VK_NULL_HANDLE;
+    VkSurfaceKHR _handle   = VK_NULL_HANDLE;
 };
 } // namespace ZHLN::Vk

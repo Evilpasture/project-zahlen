@@ -9,7 +9,7 @@ struct Camera;
 
 class InputSystem {
   public:
-	void Update(Engine& engine);
-	void PlayerInputTranslate(Engine& engine, const Camera& cam);
+    void Update(Engine& engine);
+    void PlayerInputTranslate(Engine& engine, const Camera& cam);
 };
 } // namespace ZHLN

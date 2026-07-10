@@ -8,23 +8,23 @@ struct lua_State;
 
 namespace ZHLN {
 
-class LuaScriptRuntime : public IScriptRuntime {
+class LuaScriptRuntime: public IScriptRuntime {
   public:
-	LuaScriptRuntime();
-	~LuaScriptRuntime() override;
+    LuaScriptRuntime();
+    ~LuaScriptRuntime() override;
 
-	void Initialize(Engine* engine) override;
-	void Shutdown() override;
+    void Initialize(Engine* engine) override;
+    void Shutdown() override;
 
-	void RunFile(std::string_view path) override;
-	void ExecuteString(std::string_view code) override;
-	void ReloadFile(std::string_view path) override;
+    void RunFile(std::string_view path) override;
+    void ExecuteString(std::string_view code) override;
+    void ReloadFile(std::string_view path) override;
 
-	void TickUpdate(Engine* engine, float dt) override;
+    void TickUpdate(Engine* engine, float dt) override;
 
   private:
-	lua_State* L = nullptr;
-	bool _initialized = false;
+    lua_State* L            = nullptr;
+    bool       _initialized = false;
 };
 
 } // namespace ZHLN

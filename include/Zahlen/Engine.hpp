@@ -38,48 +38,48 @@ class CullingSystem;
 
 class ZHLN_API Engine {
   public:
-	Engine();
-	Engine(const EngineConfig& cfg);
-	Engine(const EngineConfig& cfg, bool& outSuccess);
-	~Engine();
+    Engine();
+    Engine(const EngineConfig& cfg);
+    Engine(const EngineConfig& cfg, bool& outSuccess);
+    ~Engine();
 
-	void HandleDeviceLost() noexcept;
+    void HandleDeviceLost() noexcept;
 
-	// Static Factory: Uses a raw out-pointer to avoid <string>/<expected> dependencies
-	static std::unique_ptr<Engine> Create(const EngineConfig& cfg, const char** outError = nullptr);
+    // Static Factory: Uses a raw out-pointer to avoid <string>/<expected> dependencies
+    static std::unique_ptr<Engine> Create(const EngineConfig& cfg, const char** outError = nullptr);
 
-	[[nodiscard]] bool IsRunning() const;
-	void ProcessEvents();
-	[[nodiscard]] bool BeginFrame(bool& outDeviceLost) noexcept;
-	[[nodiscard]] bool EndFrame(bool& outDeviceLost) noexcept;
+    [[nodiscard]] bool IsRunning() const;
+    void               ProcessEvents();
+    [[nodiscard]] bool BeginFrame(bool& outDeviceLost) noexcept;
+    [[nodiscard]] bool EndFrame(bool& outDeviceLost) noexcept;
 
-	Window& GetWindow();
-	PhysicsContext& GetPhysicsContext();
-	RenderContext& GetRenderContext();
-	InputContext& GetInput();
-	Camera& GetCamera();
-	ALife::Simulator& GetALife();
-	CreativeWorksManager& GetCreativeWorksManager();
-	AudioContext& GetAudioContext();
-	ECS::Registry& GetRegistry();
+    Window&               GetWindow();
+    PhysicsContext&       GetPhysicsContext();
+    RenderContext&        GetRenderContext();
+    InputContext&         GetInput();
+    Camera&               GetCamera();
+    ALife::Simulator&     GetALife();
+    CreativeWorksManager& GetCreativeWorksManager();
+    AudioContext&         GetAudioContext();
+    ECS::Registry&        GetRegistry();
 
-	ECS::SystemGraph& GetUpdateGraph();
-	ECS::SystemGraph& GetRenderGraph();
-	ECS::EntityCommandBuffer& GetMainECB();
-	CullingSystem& GetCullingSystem();
-	JPH::Array<Entity>& GetVisibleEntities();
-	JPH::Array<Entity>& GetVisibleShadowEntities();
-	float& GetCurrentAlpha();
+    ECS::SystemGraph&         GetUpdateGraph();
+    ECS::SystemGraph&         GetRenderGraph();
+    ECS::EntityCommandBuffer& GetMainECB();
+    CullingSystem&            GetCullingSystem();
+    JPH::Array<Entity>&       GetVisibleEntities();
+    JPH::Array<Entity>&       GetVisibleShadowEntities();
+    float&                    GetCurrentAlpha();
 
-	[[nodiscard]] void* GetGameState() const;
-	void SetGameState(void* state);
-	[[nodiscard]] uint64_t GetCurrentFrame() const noexcept;
+    [[nodiscard]] void*    GetGameState() const;
+    void                   SetGameState(void* state);
+    [[nodiscard]] uint64_t GetCurrentFrame() const noexcept;
 
-	void ProvokeDeviceLost();
+    void ProvokeDeviceLost();
 
   private:
-	void InitInternal(const EngineConfig& cfg, bool& outSuccess, const char** outError = nullptr);
-	std::unique_ptr<EngineImpl> _impl;
+    void                        InitInternal(const EngineConfig& cfg, bool& outSuccess, const char** outError = nullptr);
+    std::unique_ptr<EngineImpl> _impl;
 };
 
 Engine* GetEngineContext();

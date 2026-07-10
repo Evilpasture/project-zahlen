@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 #include <cstdint>
 
@@ -18,22 +17,22 @@ enum class AccessType : uint8_t { Read = 0, Write = 1 };
 template <AccessType Access = AccessType::Read, CacheLevel Level = CacheLevel::L1>
 [[gnu::always_inline]] inline void Prefetch(const void* addr) noexcept {
 #if defined(__clang__) || defined(__GNUC__)
-	__builtin_prefetch(addr, static_cast<int>(Access), static_cast<int>(Level));
+    __builtin_prefetch(addr, static_cast<int>(Access), static_cast<int>(Level));
 #elif defined(_MSC_VER)
-	if constexpr (Access == AccessType::Write) {
+    if constexpr (Access == AccessType::Write) {
 #if defined(_M_X64) || defined(_M_IX86)
-		_m_prefetchw(const_cast<void*>(addr));
+        _m_prefetchw(const_cast<void*>(addr));
 #else
-		_mm_prefetch(static_cast<const char*>(addr), _MM_HINT_T0);
+        _mm_prefetch(static_cast<const char*>(addr), _MM_HINT_T0);
 #endif
-	} else {
-		if constexpr (Level == CacheLevel::L1)
-			_mm_prefetch(static_cast<const char*>(addr), _MM_HINT_T0);
-		else if constexpr (Level == CacheLevel::L2)
-			_mm_prefetch(static_cast<const char*>(addr), _MM_HINT_T1);
-		else
-			_mm_prefetch(static_cast<const char*>(addr), _MM_HINT_NTA);
-	}
+    } else {
+        if constexpr (Level == CacheLevel::L1)
+            _mm_prefetch(static_cast<const char*>(addr), _MM_HINT_T0);
+        else if constexpr (Level == CacheLevel::L2)
+            _mm_prefetch(static_cast<const char*>(addr), _MM_HINT_T1);
+        else
+            _mm_prefetch(static_cast<const char*>(addr), _MM_HINT_NTA);
+    }
 #endif
 }
 } // namespace ZHLN

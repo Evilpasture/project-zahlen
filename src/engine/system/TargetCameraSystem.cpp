@@ -2,202 +2,195 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TargetCameraSystem.hpp"
-
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Input.hpp"
 #include "Zahlen/Log.hpp"
 #include "ecs/ECS.hpp"
-
 #include <algorithm>
 #include <cmath>
 
 namespace ZHLN::Tests {
 static void VerifyCameraInterpolation(const Camera& cam, float alpha) noexcept {
-	static bool testsRun = false;
-	if (testsRun) {
-		return;
-	}
-	testsRun = true;
+    static bool testsRun = false;
+    if (testsRun) {
+        return;
+    }
+    testsRun = true;
 
-	// Test 1: Camera position is valid (finite)
-	if (!std::isfinite(cam.position.GetX()) || !std::isfinite(cam.position.GetY()) ||
-		!std::isfinite(cam.position.GetZ())) {
-		ZHLN::Log("[Test Fail] Camera Interpolation: Camera position contains NaN/Inf "
-				  "({:.3f}, {:.3f}, {:.3f})",
-				  cam.position.GetX(), cam.position.GetY(), cam.position.GetZ());
-	}
+    // Test 1: Camera position is valid (finite)
+    if (!std::isfinite(cam.position.GetX()) || !std::isfinite(cam.position.GetY()) || !std::isfinite(cam.position.GetZ())) {
+        ZHLN::Log(
+            "[Test Fail] Camera Interpolation: Camera position contains NaN/Inf "
+            "({:.3f}, {:.3f}, {:.3f})",
+            cam.position.GetX(), cam.position.GetY(), cam.position.GetZ()
+        );
+    }
 
-	// Test 2: FOV is in valid range
-	if (cam.fov < 1.0f || cam.fov > 180.0f) {
-		ZHLN::Log("[Test Fail] Camera Interpolation: FOV out of range: {:.2f}", cam.fov);
-	}
+    // Test 2: FOV is in valid range
+    if (cam.fov < 1.0f || cam.fov > 180.0f) {
+        ZHLN::Log("[Test Fail] Camera Interpolation: FOV out of range: {:.2f}", cam.fov);
+    }
 
-	// Test 3: Pitch is in valid range
-	if (cam.pitch < -90.0f || cam.pitch > 90.0f) {
-		ZHLN::Log("[Test Fail] Camera Interpolation: Pitch out of range: {:.2f}", cam.pitch);
-	}
+    // Test 3: Pitch is in valid range
+    if (cam.pitch < -90.0f || cam.pitch > 90.0f) {
+        ZHLN::Log("[Test Fail] Camera Interpolation: Pitch out of range: {:.2f}", cam.pitch);
+    }
 
-	// Test 4: Alpha is properly clamped
-	if (alpha < 0.0f || alpha > 1.0f) {
-		ZHLN::Log("[Test Fail] Camera Interpolation: Alpha out of bounds [0,1]: {:.4f}", alpha);
-	}
+    // Test 4: Alpha is properly clamped
+    if (alpha < 0.0f || alpha > 1.0f) {
+        ZHLN::Log("[Test Fail] Camera Interpolation: Alpha out of bounds [0,1]: {:.4f}", alpha);
+    }
 }
 } // namespace ZHLN::Tests
 
 namespace ZHLN {
 void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept {
-	auto& reg = engine.GetRegistry();
-	auto& cam = engine.GetCamera();
+    auto& reg = engine.GetRegistry();
+    auto& cam = engine.GetCamera();
 
-	auto cameraEntities = reg.GetEntitiesWith<Components::TargetCameraComponent>();
-	if (cameraEntities.empty()) {
-		return;
-	}
+    auto cameraEntities = reg.GetEntitiesWith<Components::TargetCameraComponent>();
+    if (cameraEntities.empty()) {
+        return;
+    }
 
-	Entity camEnt = cameraEntities[0];
-	auto* camComp = reg.Get<Components::TargetCameraComponent>(camEnt);
-	if ((camComp == nullptr) || !reg.IsAlive(camComp->target)) {
-		return;
-	}
+    Entity camEnt  = cameraEntities[0];
+    auto*  camComp = reg.Get<Components::TargetCameraComponent>(camEnt);
+    if ((camComp == nullptr) || !reg.IsAlive(camComp->target)) {
+        return;
+    }
 
-	// ========================================================================
-	// FREE-CAM INTERCEPTION BRANCH
-	// ========================================================================
-	if (reg.Get<Components::FreeCamTagComponent>(camEnt) != nullptr) {
-		const auto& input = engine.GetInput();
+    // ========================================================================
+    // FREE-CAM INTERCEPTION BRANCH
+    // ========================================================================
+    if (reg.Get<Components::FreeCamTagComponent>(camEnt) != nullptr) {
+        const auto& input = engine.GetInput();
 
-		// 1. Resolve dynamic fly speed from player's Components::MovementComponent
-		float baseSpeed = 12.0f;
-		if (reg.IsAlive(camComp->target)) {
-			if (auto* targetMove = reg.Get<Components::MovementComponent>(camComp->target)) {
-				baseSpeed = targetMove->speed;
-			}
-		}
+        // 1. Resolve dynamic fly speed from player's Components::MovementComponent
+        float baseSpeed = 12.0f;
+        if (reg.IsAlive(camComp->target)) {
+            if (auto* targetMove = reg.Get<Components::MovementComponent>(camComp->target)) {
+                baseSpeed = targetMove->speed;
+            }
+        }
 
-		// 2. Scale fly speed dynamically (Shift maps to 2x speed)
-		const float speed = input.IsKeyDown(KeyCode::LShift) ? (baseSpeed * 2.0f) : baseSpeed;
-		const float sensitivity = 0.15f;
+        // 2. Scale fly speed dynamically (Shift maps to 2x speed)
+        const float speed       = input.IsKeyDown(KeyCode::LShift) ? (baseSpeed * 2.0f) : baseSpeed;
+        const float sensitivity = 0.15f;
 
-		// Mouse look (Hold Right-Click to look around)
-		if (input.IsMouseButtonDown(KeyCode::RButton)) {
-			cam.yaw += input.GetMouse().deltaX * sensitivity;
-			cam.pitch =
-				std::clamp(cam.pitch - (input.GetMouse().deltaY * sensitivity), -89.0f, 89.0f);
-		}
+        // Mouse look (Hold Right-Click to look around)
+        if (input.IsMouseButtonDown(KeyCode::RButton)) {
+            cam.yaw += input.GetMouse().deltaX * sensitivity;
+            cam.pitch = std::clamp(cam.pitch - (input.GetMouse().deltaY * sensitivity), -89.0f, 89.0f);
+        }
 
-		float yawRad = JPH::DegreesToRadians(cam.yaw);
-		float pitchRad = JPH::DegreesToRadians(cam.pitch);
-		JPH::Vec3 forward(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad),
-						  JPH::Sin(yawRad) * JPH::Cos(pitchRad));
-		forward = forward.Normalized();
-		JPH::Vec3 right = forward.Cross(JPH::Vec3::sAxisY()).Normalized();
+        float     yawRad   = JPH::DegreesToRadians(cam.yaw);
+        float     pitchRad = JPH::DegreesToRadians(cam.pitch);
+        JPH::Vec3 forward(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
+        forward         = forward.Normalized();
+        JPH::Vec3 right = forward.Cross(JPH::Vec3::sAxisY()).Normalized();
 
-		JPH::Vec3 moveDir = JPH::Vec3::sZero();
-		if (input.IsKeyDown(KeyCode::W)) {
-			moveDir += forward;
-		}
-		if (input.IsKeyDown(KeyCode::S)) {
-			moveDir -= forward;
-		}
-		if (input.IsKeyDown(KeyCode::A)) {
-			moveDir -= right;
-		}
-		if (input.IsKeyDown(KeyCode::D)) {
-			moveDir += right;
-		}
+        JPH::Vec3 moveDir = JPH::Vec3::sZero();
+        if (input.IsKeyDown(KeyCode::W)) {
+            moveDir += forward;
+        }
+        if (input.IsKeyDown(KeyCode::S)) {
+            moveDir -= forward;
+        }
+        if (input.IsKeyDown(KeyCode::A)) {
+            moveDir -= right;
+        }
+        if (input.IsKeyDown(KeyCode::D)) {
+            moveDir += right;
+        }
 
-		if (moveDir.LengthSq() > 0.0f) {
-			cam.position += moveDir.Normalized() * speed * dt;
-		}
+        if (moveDir.LengthSq() > 0.0f) {
+            cam.position += moveDir.Normalized() * speed * dt;
+        }
 
-		// Keep backing component synced so toggling OFF doesn't cause a wild rotation snap
-		camComp->yaw = cam.yaw;
-		camComp->pitch = cam.pitch;
-		camComp->smoothTargetPos = cam.position;
-		return;
-	}
+        // Keep backing component synced so toggling OFF doesn't cause a wild rotation snap
+        camComp->yaw             = cam.yaw;
+        camComp->pitch           = cam.pitch;
+        camComp->smoothTargetPos = cam.position;
+        return;
+    }
 
-	Entity targetEnt = camComp->target;
-	JPH::Vec3 targetPos = JPH::Vec3::sZero();
+    Entity    targetEnt = camComp->target;
+    JPH::Vec3 targetPos = JPH::Vec3::sZero();
 
-	// 1. Resolve Target Position
-	if (auto* state = reg.Get<Components::PhysicsStateComponent>(targetEnt)) {
-		// --- FIX: If camera smoothing is active, target the raw latest physics frame. ---
-		// --- If snapping is active, target the linearly-interpolated position.         ---
-		if (camComp->stiffness > 0.0f) {
-			targetPos = state->currPosition;
-		} else {
-			float clampedAlpha = std::clamp(alpha, 0.0f, 1.0f);
-			targetPos =
-				state->prevPosition + clampedAlpha * (state->currPosition - state->prevPosition);
-		}
-	} else if (auto* trans = reg.Get<Components::Components::TransformComponent>(targetEnt)) {
-		targetPos = JPH::Vec3(trans->position[0], trans->position[1], trans->position[2]);
-	} else if (auto* meshComp = reg.Get<Components::MeshComponent>(targetEnt)) {
-		targetPos = meshComp->localTransform.GetTranslation();
-	}
+    // 1. Resolve Target Position
+    if (auto* state = reg.Get<Components::PhysicsStateComponent>(targetEnt)) {
+        // --- FIX: If camera smoothing is active, target the raw latest physics frame. ---
+        // --- If snapping is active, target the linearly-interpolated position.         ---
+        if (camComp->stiffness > 0.0f) {
+            targetPos = state->currPosition;
+        } else {
+            float clampedAlpha = std::clamp(alpha, 0.0f, 1.0f);
+            targetPos          = state->prevPosition + clampedAlpha * (state->currPosition - state->prevPosition);
+        }
+    } else if (auto* trans = reg.Get<Components::Components::TransformComponent>(targetEnt)) {
+        targetPos = JPH::Vec3(trans->position[0], trans->position[1], trans->position[2]);
+    } else if (auto* meshComp = reg.Get<Components::MeshComponent>(targetEnt)) {
+        targetPos = meshComp->localTransform.GetTranslation();
+    }
 
-	// 2. Smoothly interpolate Zoom and FOV target values
-	float wheelDelta = engine.GetInput().GetMouse().wheel;
-	if (std::abs(wheelDelta) > 0.01f) {
-		camComp->targetDistance =
-			JPH::Clamp(camComp->targetDistance - wheelDelta * 0.5f, 1.5f, 15.0f);
-	}
+    // 2. Smoothly interpolate Zoom and FOV target values
+    float wheelDelta = engine.GetInput().GetMouse().wheel;
+    if (std::abs(wheelDelta) > 0.01f) {
+        camComp->targetDistance = JPH::Clamp(camComp->targetDistance - wheelDelta * 0.5f, 1.5f, 15.0f);
+    }
 
-	if (camComp->stiffness > 0.0f) {
-		float factor = JPH::Clamp(camComp->stiffness * dt, 0.0f, 1.0f);
-		camComp->distance += (camComp->targetDistance - camComp->distance) * factor;
-		camComp->fov += (camComp->targetFov - camComp->fov) * factor;
-	} else {
-		camComp->distance = camComp->targetDistance;
-		camComp->fov = camComp->targetFov;
-	}
+    if (camComp->stiffness > 0.0f) {
+        float factor = JPH::Clamp(camComp->stiffness * dt, 0.0f, 1.0f);
+        camComp->distance += (camComp->targetDistance - camComp->distance) * factor;
+        camComp->fov += (camComp->targetFov - camComp->fov) * factor;
+    } else {
+        camComp->distance = camComp->targetDistance;
+        camComp->fov      = camComp->targetFov;
+    }
 
-	// 3. Process Mouse look and Sync to camera properties
-	const float sensitivity = 0.15f;
-	if (engine.GetInput().IsMouseButtonDown(KeyCode::RButton)) {
-		camComp->yaw += engine.GetInput().GetMouse().deltaX * sensitivity;
-		camComp->pitch = std::clamp(
-			camComp->pitch - (engine.GetInput().GetMouse().deltaY * sensitivity), -89.0f, 89.0f);
-	}
+    // 3. Process Mouse look and Sync to camera properties
+    const float sensitivity = 0.15f;
+    if (engine.GetInput().IsMouseButtonDown(KeyCode::RButton)) {
+        camComp->yaw += engine.GetInput().GetMouse().deltaX * sensitivity;
+        camComp->pitch = std::clamp(camComp->pitch - (engine.GetInput().GetMouse().deltaY * sensitivity), -89.0f, 89.0f);
+    }
 
-	cam.yaw = camComp->yaw;
-	cam.pitch = camComp->pitch;
-	cam.fov = camComp->fov;
+    cam.yaw   = camComp->yaw;
+    cam.pitch = camComp->pitch;
+    cam.fov   = camComp->fov;
 
-	// 4. Calculate Final Position
-	float yawRad = JPH::DegreesToRadians(camComp->yaw);
-	float pitchRad = JPH::DegreesToRadians(camComp->pitch);
-	JPH::Vec3 offsetDir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad),
-						JPH::Sin(yawRad) * JPH::Cos(pitchRad));
+    // 4. Calculate Final Position
+    float     yawRad   = JPH::DegreesToRadians(camComp->yaw);
+    float     pitchRad = JPH::DegreesToRadians(camComp->pitch);
+    JPH::Vec3 offsetDir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
 
-	JPH::Vec3 offsetVec = camComp->targetOffset;
+    JPH::Vec3 offsetVec = camComp->targetOffset;
 
-	// Filter out high-frequency physics collision resolution jitter from Jolt character virtual
-	JPH::Vec3 smoothTargetPos = camComp->smoothTargetPos;
+    // Filter out high-frequency physics collision resolution jitter from Jolt character virtual
+    JPH::Vec3 smoothTargetPos = camComp->smoothTargetPos;
 
-	if (camComp->hasInitSmoothTarget == 0) {
-		smoothTargetPos = targetPos;
-		camComp->hasInitSmoothTarget = 1;
-	}
+    if (camComp->hasInitSmoothTarget == 0) {
+        smoothTargetPos              = targetPos;
+        camComp->hasInitSmoothTarget = 1;
+    }
 
-	if ((targetPos - smoothTargetPos).LengthSq() > 100.0f) {
-		smoothTargetPos = targetPos; // Teleport instantly on large displacements
-	} else if (camComp->stiffness > 0.0f) {
-		float factor = 1.0f - std::exp(-camComp->stiffness * dt);
-		smoothTargetPos += (targetPos - smoothTargetPos) * factor;
-	} else {
-		smoothTargetPos = targetPos;
-	}
+    if ((targetPos - smoothTargetPos).LengthSq() > 100.0f) {
+        smoothTargetPos = targetPos; // Teleport instantly on large displacements
+    } else if (camComp->stiffness > 0.0f) {
+        float factor = 1.0f - std::exp(-camComp->stiffness * dt);
+        smoothTargetPos += (targetPos - smoothTargetPos) * factor;
+    } else {
+        smoothTargetPos = targetPos;
+    }
 
-	camComp->smoothTargetPos = smoothTargetPos;
+    camComp->smoothTargetPos = smoothTargetPos;
 
-	cam.position = smoothTargetPos - (offsetDir.Normalized() * camComp->distance) + offsetVec;
+    cam.position = smoothTargetPos - (offsetDir.Normalized() * camComp->distance) + offsetVec;
 
-	if constexpr (isDev) {
-		ZHLN::Tests::VerifyCameraInterpolation(cam, alpha);
-	}
+    if constexpr (isDev) {
+        ZHLN::Tests::VerifyCameraInterpolation(cam, alpha);
+    }
 }
 } // namespace ZHLN

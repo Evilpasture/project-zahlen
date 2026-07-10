@@ -32,8 +32,7 @@ void ProcessEvents(void* context, InputContext* input);
 std::vector<std::string_view> GetRequiredInstanceExtensions();
 
 // Creates the Vulkan Surface directly on the physical monitor
-VkSurfaceKHR CreateSurface(VkInstance instance, VkPhysicalDevice physical, void* context,
-						   uint32_t& outWidth, uint32_t& outHeight);
+VkSurfaceKHR CreateSurface(VkInstance instance, VkPhysicalDevice physical, void* context, uint32_t& outWidth, uint32_t& outHeight);
 
 // MUST be called by the crash handler to un-freeze the terminal on a segfault
 void EmergencyRestore();

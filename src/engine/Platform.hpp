@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // Abstracts OS specifics for you.
 
 #pragma once
@@ -16,14 +15,14 @@ namespace ZHLN::Platform {
 
 // --- Memory Mapping ---
 struct MappedFile {
-	void* data = nullptr;
-	size_t size = 0;
-	void* osHandle = nullptr;
-	void* osMapping = nullptr; // Used on Windows
+    void*  data      = nullptr;
+    size_t size      = 0;
+    void*  osHandle  = nullptr;
+    void*  osMapping = nullptr; // Used on Windows
 };
 
 MappedFile OpenMappedFile(const char* path);
-void CloseMappedFile(MappedFile& file);
+void       CloseMappedFile(MappedFile& file);
 
 void SetHighPriority();
 

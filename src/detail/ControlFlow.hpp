@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #include <Zahlen/Log.hpp>
@@ -16,16 +15,14 @@
  * @brief Standard Mutex Lock Macro.
  * Usage: ZHLN_LOCK(myMutex) { ... }
  */
-#define ZHLN_LOCK(mutex_ref)                                                                       \
-	ZHLN_SCOPE_BLOCK(::ZHLN::MutexGuard _zhln_guard_no_recursive_and_nesting(mutex_ref))
+#define ZHLN_LOCK(mutex_ref) ZHLN_SCOPE_BLOCK(::ZHLN::MutexGuard _zhln_guard_no_recursive_and_nesting(mutex_ref))
 
 /**
  * @brief ECS-Specific Safety Macro.
  * Checks if the registry is currently being accessed by Lua/FFI via the Buffer Protocol.
  * If a view is exported, it prevents structural changes that would reallocate memory.
  */
-#define ZHLN_FFI_GUARD(registry_ptr)                                                               \
-	ZHLN_SCOPE_BLOCK(::ZHLN::Internal::FFISafetyGuard _ffi_guard(registry_ptr))
+#define ZHLN_FFI_GUARD(registry_ptr) ZHLN_SCOPE_BLOCK(::ZHLN::Internal::FFISafetyGuard _ffi_guard(registry_ptr))
 
 namespace ZHLN::Internal {
 
@@ -34,15 +31,15 @@ namespace ZHLN::Internal {
  * Prevents structural modifications (reallocs) while raw pointers are held by scripting.
  */
 struct FFISafetyGuard {
-	// We forward declare the Registry logic here to keep this header clean
-	void* _reg;
-	explicit FFISafetyGuard(void* reg) : _reg(reg) {
-		// Logic: If (reg->view_export_count > 0) Panic("FFI Memory Violation");
-		// We'll implement this properly in ECS.cpp
-	}
-	~FFISafetyGuard() {
-		// Cleanup logic
-	}
+    // We forward declare the Registry logic here to keep this header clean
+    void* _reg;
+    explicit FFISafetyGuard(void* reg): _reg(reg) {
+        // Logic: If (reg->view_export_count > 0) Panic("FFI Memory Violation");
+        // We'll implement this properly in ECS.cpp
+    }
+    ~FFISafetyGuard() {
+        // Cleanup logic
+    }
 };
 
 } // namespace ZHLN::Internal

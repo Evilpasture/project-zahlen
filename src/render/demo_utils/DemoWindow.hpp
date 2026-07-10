@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 #include <cstdint>
 #include <vector>
@@ -10,17 +9,17 @@
 namespace ZHLN::Demo {
 
 struct WindowState {
-	uint32_t width = 800;
-	uint32_t height = 600;
-	float mouse_x = 0.0f;
-	float mouse_y = 0.0f;
-	bool running = true;
-	bool resized = false;
+    uint32_t width   = 800;
+    uint32_t height  = 600;
+    float    mouse_x = 0.0f;
+    float    mouse_y = 0.0f;
+    bool     running = true;
+    bool     resized = false;
 
-	// Opaque OS handles
-	void* os_window = nullptr;
-	void* os_instance = nullptr;
-	void* metal_layer = nullptr;
+    // Opaque OS handles
+    void* os_window   = nullptr;
+    void* os_instance = nullptr;
+    void* metal_layer = nullptr;
 };
 
 // Creates the OS Window and fills the state struct

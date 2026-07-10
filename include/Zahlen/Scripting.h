@@ -18,8 +18,7 @@ ZHLN_API struct ZHLN_Engine* ZHLN_GetEngineContext(void);
 ZHLN_API uint32_t ZHLN_GetCommandID(const char* cmdName);
 
 // 2. Dispatches via O(1) jump table
-ZHLN_API uint64_t ZHLN_DispatchCommand(struct ZHLN_Engine* engine, uint32_t cmdID,
-									   const void* args);
+ZHLN_API uint64_t ZHLN_DispatchCommand(struct ZHLN_Engine* engine, uint32_t cmdID, const void* args);
 
 #ifdef __cplusplus
 }
