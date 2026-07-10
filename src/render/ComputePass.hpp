@@ -17,51 +17,13 @@ struct ComputePass {
 	[[nodiscard]] bool Build(VkDevice device, VkDescriptorSetLayout descriptorLayout,
 							 const ZHLN_ShaderDesc& shader,
 							 const VkPushConstantRange* pushConstants = nullptr,
-							 uint32_t pushCount = 0) noexcept {
-		ZHLN_PipelineLayoutDesc pLayoutDesc = {.set_layouts = &descriptorLayout,
-											   .set_layout_count = 1,
-											   .push_constants = pushConstants,
-											   .push_constant_count = pushCount};
-		pipelineLayout = PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &pLayoutDesc));
-
-		auto p_res =
-			ComputePipelineBuilder().Shader(shader).Layout(pipelineLayout.Get()).Build(device);
-
-		if (!p_res) {
-			return false;
-		}
-		pipeline = std::move(*p_res);
-		return true;
-	}
+							 uint32_t pushCount = 0) noexcept;
 
 	[[nodiscard]] bool BuildVariants(VkDevice device, VkDescriptorSetLayout descriptorLayout,
 									 const ZHLN_ShaderDesc& shader,
 									 std::span<const VkSpecializationInfo> specInfos,
 									 const VkPushConstantRange* pushConstants = nullptr,
-									 uint32_t pushCount = 0) noexcept {
-		ZHLN_PipelineLayoutDesc pLayoutDesc = {.set_layouts = &descriptorLayout,
-											   .set_layout_count = 1,
-											   .push_constants = pushConstants,
-											   .push_constant_count = pushCount};
-		pipelineLayout = PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &pLayoutDesc));
-
-		pipelines.clear();
-		pipelines.reserve(specInfos.size());
-
-		for (const auto& spec : specInfos) {
-			auto p_res = ComputePipelineBuilder()
-							 .Shader(shader)
-							 .Layout(pipelineLayout.Get())
-							 .Specialization(&spec)
-							 .Build(device);
-
-			if (!p_res) {
-				return false;
-			}
-			pipelines.push_back(std::move(*p_res));
-		}
-		return !pipelines.empty();
-	}
+									 uint32_t pushCount = 0) noexcept;
 
 	// --- Stateful Bind and Push Helpers ---
 
@@ -74,7 +36,6 @@ struct ComputePass {
 								1, &set, 0, nullptr);
 	}
 
-	// Stateful Bind and Push Helpers for variants
 	void BindVariant(VkCommandBuffer cmd, uint32_t variantIdx) const noexcept {
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines[variantIdx].Get());
 	}

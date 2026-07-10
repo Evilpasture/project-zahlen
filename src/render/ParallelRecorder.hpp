@@ -30,42 +30,18 @@ template <size_t ConcurrentSlots> class ParallelCommandRecorder {
 	auto operator=(ParallelCommandRecorder&&) noexcept -> ParallelCommandRecorder& = default;
 
 	[[nodiscard]] auto Init(VkDevice device, uint32_t queueFamily) noexcept
-		-> std::expected<void, VkResult> {
-		_device = device;
-		for (size_t i = 0; i < ConcurrentSlots; ++i) {
-			_pools[i] = CommandPool(_device, queueFamily);
-			if (!_pools[i].Valid()) {
-				return std::unexpected(VK_ERROR_INITIALIZATION_FAILED);
-			}
-			if (!_pools[i].AllocateSecondary(1)) {
-				return std::unexpected(VK_ERROR_OUT_OF_DEVICE_MEMORY);
-			}
-			_cmds[i] = _pools[i][0];
-		}
-		return {};
-	}
+		-> std::expected<void, VkResult>;
 
-	void Reset() noexcept {
-		for (auto& pool : _pools) {
-			pool.Reset();
-		}
-	}
+	void Reset() noexcept;
 
 	/**
 	 * @brief Entry point for static parallel recording.
 	 * Enforces slot limits at compile-time and uses zero heap allocations.
 	 */
 	template <typename SchedulerPolicy, typename... Callables>
-	void Record(SchedulerPolicy&& scheduler, Callables&&... callables) {
-		static_assert(sizeof...(Callables) <= ConcurrentSlots,
-					  "The number of recording tasks exceeds the allocated "
-					  "ParallelCommandRecorder slots.");
+	void Record(SchedulerPolicy&& scheduler, Callables&&... callables);
 
-		RecordImpl(std::forward<SchedulerPolicy>(scheduler),
-				   std::make_index_sequence<sizeof...(Callables)>{},
-				   std::forward<Callables>(callables)...);
-	}
-
+	// Kept in header (3 lines)
 	[[nodiscard]] constexpr auto GetCommandBuffers() const noexcept
 		-> std::span<const VkCommandBuffer, ConcurrentSlots> {
 		return _cmds;
@@ -74,26 +50,7 @@ template <size_t ConcurrentSlots> class ParallelCommandRecorder {
   private:
 	template <typename SchedulerPolicy, size_t... Is, typename... Callables>
 	void RecordImpl(SchedulerPolicy&& scheduler, std::index_sequence<Is...> /*unused*/,
-					Callables&&... callables) {
-		// Create a temporary reference tuple of the callables. Zero runtime cost.
-		auto taskTuple = std::forward_as_tuple(std::forward<Callables>(callables)...);
-
-		// Expand the lambda pack and dispatch them to the scheduler at compile-time.
-		// Each lambda bakes the constant 'Is' directly into its generated class structure.
-		std::forward<SchedulerPolicy>(scheduler).Dispatch([this, &taskTuple]() {
-			RecordingSlot slot{.cmd = _cmds[Is], .slotIndex = static_cast<uint32_t>(Is)};
-			const VkCommandBufferBeginInfo beginInfo = {
-				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-				.pNext = nullptr,
-				.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, // Do not set CONTINUE_BIT
-																	  // since they begin their own
-																	  // render passes
-				.pInheritanceInfo = &NullInheritanceInfo};
-			vkBeginCommandBuffer(slot.cmd, &beginInfo);
-			std::get<Is>(taskTuple)(slot);
-			vkEndCommandBuffer(slot.cmd);
-		}...);
-	}
+					Callables&&... callables);
 
 	VkDevice _device = VK_NULL_HANDLE;
 	std::array<CommandPool<QueueType::Graphics>, ConcurrentSlots> _pools;
@@ -101,3 +58,5 @@ template <size_t ConcurrentSlots> class ParallelCommandRecorder {
 };
 
 } // namespace ZHLN::Vk
+
+#include "ParallelRecorder.inl"
