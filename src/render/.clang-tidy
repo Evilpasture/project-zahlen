@@ -14,12 +14,7 @@ Checks: >
   -readability-function-cognitive-complexity
 
 CheckOptions:
-  # --- C PUBLIC API (ZHLN_CreateDevice) ---
-  # Enforces the library prefix for global visibility
-  - key:             readability-identifier-naming.FunctionCase
-    value:           'PascalCase'
-  - key:             readability-identifier-naming.FunctionPrefix
-    value:           'ZHLN_'
+  # --- C PUBLIC API TYPEDEFS & CONSTANTS ---
   - key:             readability-identifier-naming.TypedefCase
     value:           'PascalCase'
   - key:             readability-identifier-naming.TypedefPrefix
@@ -28,13 +23,19 @@ CheckOptions:
     value:           'UPPER_CASE'
   - key:             readability-identifier-naming.GlobalConstantPrefix
     value:           'ZHLN_'
+  # Bypasses the ZHLN_ prefix check for namespace-scope C++ constants using PascalCase or kPascalCase
+  - key:             readability-identifier-naming.GlobalConstantIgnoredRegexp
+    value:           '^(k[A-Z]|[A-Z]|[a-z])[a-zA-Z0-9]*$'
 
-  # --- C INTERNAL LOGIC (ZHLN_Internal_DebugCallback) ---
-  # Forces static helpers to be clearly marked as private
-  - key:             readability-identifier-naming.StaticFunctionCase
-    value:           'PascalCase'
-  - key:             readability-identifier-naming.StaticFunctionPrefix
-    value:           'ZHLN_Internal_'
+  # --- C++ CLASS & STATIC CONSTANTS ---
+  # Ensures static constexpr class members (like kStageCount) use Google kPrefix style
+  - key:             readability-identifier-naming.ClassConstantCase
+    value:           'CamelCase'
+  - key:             readability-identifier-naming.ClassConstantPrefix
+    value:           'k'
+  # Automatically bypasses PascalCase meta-constants (NumPasses) and standard lowercase/snake_case trait properties
+  - key:             readability-identifier-naming.ClassConstantIgnoredRegexp
+    value:           '^([a-jl-z_][a-zA-Z0-9_]*|k[a-z0-9_][a-zA-Z0-9_]*|k|[A-Z][a-zA-Z0-9_]*)$'
 
   # --- C++ RAII LAYER (ZHLN::Vk::Handle) ---
   # Classes and Aliases in namespaces do NOT require the ZHLN_ prefix
@@ -49,35 +50,35 @@ CheckOptions:
   - key:             readability-identifier-naming.TemplateParameterCase
     value:           'PascalCase'
 
-  # --- C++ MEMBER FUNCTIONS (Handle::Get) ---
-  # Methods inside classes should be PascalCase but have NO prefix
+  # --- C++ FREE FUNCTIONS & C PUBLIC API ---
+  # Namespaced C++ free functions (e.g. ZHLN::Vk::WaitIdle) must be PascalCase with no prefix.
+  # Global-scope C-style API functions (e.g., ZHLN_CreateDevice) are bypassed via the IgnoredRegexp.
+  - key:             readability-identifier-naming.FunctionCase
+    value:           'PascalCase'
+  - key:             readability-identifier-naming.FunctionPrefix
+    value:           ''
+  - key:             readability-identifier-naming.FunctionIgnoredRegexp
+    value:           '^ZHLN_.*'
+
+  # --- C++ METHODS (covers regular + template methods; Virtual/Private/etc. fall back to this) ---
   - key:             readability-identifier-naming.MethodCase
     value:           'PascalCase'
   - key:             readability-identifier-naming.MethodPrefix
     value:           ''
 
-  # --- C++ HELPER FUNCTIONS (Inside namespaces) ---
-  # Functions like ZHLN::Vk::QuerySwapchainSupport skip the prefix
-  - key:             readability-identifier-naming.NamespaceFunctionCase
-    value:           'PascalCase'
-  - key:             readability-identifier-naming.NamespaceFunctionPrefix
-    value:           ''
-
-  - key:             readability-identifier-naming.InlineFunctionCase
-    value:           'PascalCase'
-  - key:             readability-identifier-naming.InlineFunctionPrefix
-    value:           ''
-
+  # --- constexpr is its own bucket, doesn't inherit Function/Method above ---
   - key:             readability-identifier-naming.ConstexprFunctionCase
     value:           'PascalCase'
-  - key:             readability-identifier-naming.ConstexprFunctionPrefix
-    value:           ''
+  - key:             readability-identifier-naming.ConstexprMethodCase
+    value:           'PascalCase'
 
   # --- LOCAL HYGIENE ---
   - key:             readability-identifier-naming.VariableCase
     value:           'lower_case'
+
+  # --- parameters everywhere ---
   - key:             readability-identifier-naming.ParameterCase
-    value:           'lower_case'
+    value:           'camelBack'
   
   # --- VULKAN COMPATIBILITY (sType, pNext) ---
   # Allows camelBack to match the Vulkan SDK naming

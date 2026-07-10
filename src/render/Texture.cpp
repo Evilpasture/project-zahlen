@@ -15,12 +15,12 @@ void UpdateBindlessTextureSlot(
     uint32_t                                     dstBinding
 ) {
     // We know it's always 2 for double buffering
-    constexpr size_t NumSets = 2;
+    constexpr size_t num_sets = 2;
 
-    VkDescriptorImageInfo bindlessUpdate = {.sampler = VK_NULL_HANDLE, .imageView = view, .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkDescriptorImageInfo bindless_update = {.sampler = VK_NULL_HANDLE, .imageView = view, .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 
-    std::array<VkWriteDescriptorSet, NumSets> writes {};
-    for (size_t i = 0; i < NumSets; ++i) {
+    std::array<VkWriteDescriptorSet, num_sets> writes {};
+    for (size_t i = 0; i < num_sets; ++i) {
         writes[i] = {
             .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .pNext            = {},
@@ -29,11 +29,11 @@ void UpdateBindlessTextureSlot(
             .dstArrayElement  = slotIndex,
             .descriptorCount  = 1,
             .descriptorType   = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-            .pImageInfo       = &bindlessUpdate,
+            .pImageInfo       = &bindless_update,
             .pBufferInfo      = {},
             .pTexelBufferView = {},
         };
     }
-    vkUpdateDescriptorSets(device, NumSets, writes.data(), 0, nullptr);
+    vkUpdateDescriptorSets(device, num_sets, writes.data(), 0, nullptr);
 }
 } // namespace ZHLN::Vk

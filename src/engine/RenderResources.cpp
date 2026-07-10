@@ -326,7 +326,7 @@ auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data, VkBuffe
         }
     });
 
-    return {std::move(gpu_buf), Vk::GetBufferDeviceAddress(ctx.Device(), gpu_buf.Handle())};
+    return {std::move(gpu_buf), Vk::GetBufferAddress(ctx.Device(), gpu_buf.Handle())};
 }
 
 auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> uint32_t {
@@ -346,7 +346,7 @@ auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHa
     }
     auto gpu_buf = Vk::Buffer::Create(_impl->allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY);
 
-    VkDeviceAddress address = Vk::GetBufferDeviceAddress(_impl->ctx.Device(), gpu_buf.Handle());
+    VkDeviceAddress address = Vk::GetBufferAddress(_impl->ctx.Device(), gpu_buf.Handle());
     return _impl->meshPool.Create(std::move(gpu_buf), vertexCount, address);
 }
 
@@ -490,7 +490,7 @@ void RenderContext::BuildMeshBLAS(Mesh& mesh) {
                               .dst_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
                               .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
                 );
-                impl->rtCtx.CmdBuildBlas(tempCmd, geom, nativePosMesh->blas, Vk::GetBufferDeviceAddress(impl->ctx.Device(), scratch.Handle()), primitiveCount);
+                impl->rtCtx.CmdBuildBlas(tempCmd, geom, nativePosMesh->blas, Vk::GetBufferAddress(impl->ctx.Device(), scratch.Handle()), primitiveCount);
             }
             // 2. Synchronously submit and wait on the transfer staging timeline semaphore
             Vk::SubmitAndWait(

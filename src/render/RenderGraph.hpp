@@ -218,11 +218,11 @@ class CompileTimeFrameGraph {
             size_t count = 0;
             ((count +=
               []() {
-                  using UsageType                           = typename Usages::template type<Is>;
-                  using Img                                 = typename UsageType::Resource;
-                  constexpr size_t                rIdx      = detail::GetResourceIndex<Resources, Img>();
-                  constexpr detail::ResourceState prevState = StateTable[PassIndex][rIdx];
-                  return detail::NeedsBarrier<prevState, UsageType, PassIndex>::value ? 1 : 0;
+                  using UsageType                            = typename Usages::template type<Is>;
+                  using Img                                  = typename UsageType::Resource;
+                  constexpr size_t                r_idx      = detail::GetResourceIndex<Resources, Img>();
+                  constexpr detail::ResourceState prev_state = StateTable[PassIndex][r_idx];
+                  return detail::NeedsBarrier<prev_state, UsageType, PassIndex>::value ? 1 : 0;
               }()),
              ...);
             return count;
@@ -235,14 +235,14 @@ class CompileTimeFrameGraph {
         using Usages = typename PassType::Usages;
 
         [&]<size_t... Is>(std::index_sequence<Is...>) {
-            size_t writeIdx = 0;
+            size_t write_idx = 0;
             (([&]() {
-                 using UsageType                           = typename Usages::template type<Is>;
-                 using Img                                 = typename UsageType::Resource;
-                 constexpr size_t                rIdx      = detail::GetResourceIndex<Resources, Img>();
-                 constexpr detail::ResourceState prevState = StateTable[PassIndex][rIdx];
-                 if constexpr (detail::NeedsBarrier<prevState, UsageType, PassIndex>::value) {
-                     indices[writeIdx++] = Is;
+                 using UsageType                            = typename Usages::template type<Is>;
+                 using Img                                  = typename UsageType::Resource;
+                 constexpr size_t                r_idx      = detail::GetResourceIndex<Resources, Img>();
+                 constexpr detail::ResourceState prev_state = StateTable[PassIndex][r_idx];
+                 if constexpr (detail::NeedsBarrier<prev_state, UsageType, PassIndex>::value) {
+                     indices[write_idx++] = Is;
                  }
              }()),
              ...);
@@ -263,7 +263,7 @@ class CompileTimeFrameGraph {
 
 template <typename Tag>
 struct ClearColorOf {
-    static constexpr Color4 value = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f}; // Default: Black
+    static constexpr Color4 value = {.r = 0.0F, .g = 0.0F, .b = 0.0F, .a = 1.0F}; // Default: Black
 };
 
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>

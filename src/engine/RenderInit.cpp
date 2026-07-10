@@ -801,7 +801,7 @@ std::expected<void, std::string> RenderContext::Impl::InitBindless() {
             allocator.Get(), bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
         );
 
-        auto address        = Vk::GetBufferDeviceAddress(ctx.Device(), gpu_buf.Handle());
+        auto address        = Vk::GetBufferAddress(ctx.Device(), gpu_buf.Handle());
         debugMeshHandles[i] = meshPool.Create(std::move(gpu_buf), maxDebugVerts, address);
     }
 

@@ -42,15 +42,17 @@ class PresentationContext {
             return false;
         }
 
-        vkDeviceWaitIdle(_ctx->Device());
+        if (Vk::WaitIdle(_ctx->Device()) != VK_SUCCESS) {
+            return false;
+        }
 
-        const ZHLN_Device rawDev = {
+        const ZHLN_Device raw_dev = {
             .handle = _ctx->Device(), .graphics_queue = _ctx->GraphicsQueue(), .present_queue = _ctx->PresentQueue(), .transfer_queue = _ctx->TransferQueue()
         };
-        const ZHLN_PhysicalDeviceInfo rawPhys = _ctx->PhysicalInfo();
-        ZHLN_SwapchainDesc            s_desc  = {
-            .device        = &rawDev,
-            .physical      = &rawPhys,
+        const ZHLN_PhysicalDeviceInfo raw_phys = _ctx->PhysicalInfo();
+        ZHLN_SwapchainDesc            s_desc   = {
+            .device        = &raw_dev,
+            .physical      = &raw_phys,
             .surface       = _surface,
             .width         = width,
             .height        = height,

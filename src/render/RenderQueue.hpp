@@ -55,12 +55,12 @@ struct BarrierBuilder {
         return *this;
     }
 
-    void To(VkCommandBuffer cmd, BarrierStage dst_stage, BarrierAccess dst_access) const noexcept {
+    void To(VkCommandBuffer cmd, BarrierStage dstStage, BarrierAccess dstAccess) const noexcept {
         const ZHLN_MemoryBarrierDesc desc = {
             .src_stage  = src_stage,
             .src_access = src_access,
-            .dst_stage  = static_cast<VkPipelineStageFlags2>(dst_stage),
-            .dst_access = static_cast<VkAccessFlags2>(dst_access)
+            .dst_stage  = static_cast<VkPipelineStageFlags2>(dstStage),
+            .dst_access = static_cast<VkAccessFlags2>(dstAccess)
         };
         ZHLN_CmdMemoryBarrier(cmd, &desc);
     }

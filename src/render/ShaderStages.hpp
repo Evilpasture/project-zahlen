@@ -31,7 +31,7 @@ class ShaderStages {
     auto operator=(ShaderStages&& other) noexcept -> ShaderStages&;
 
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
-    static auto Create(const VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) noexcept -> ShaderStages;
+    static auto Create(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) noexcept -> ShaderStages;
 
     template <typename T, size_t Extent1, typename U = const uint8_t, size_t Extent2 = std::dynamic_extent>
     [[nodiscard]] static auto Create(
@@ -55,10 +55,10 @@ class ShaderStages {
     [[nodiscard("Shader loading from files may fail; verify validity before use")]]
     static auto FromFiles(
         VkDevice                     device,
-        const std::filesystem::path& vert_path,
-        const std::filesystem::path& frag_path,
-        const char*                  vert_entry = "main",
-        const char*                  frag_entry = "main"
+        const std::filesystem::path& vertPath,
+        const std::filesystem::path& fragPath,
+        const char*                  vertEntry = "main",
+        const char*                  fragEntry = "main"
     ) noexcept -> ShaderStages;
 
     [[nodiscard]] constexpr auto Get() const noexcept -> const ZHLN_ShaderStages* {

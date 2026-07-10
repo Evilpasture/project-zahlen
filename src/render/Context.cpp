@@ -71,21 +71,21 @@ auto Context::operator=(Context&& other) noexcept -> Context& {
     return *this;
 }
 
-auto Context::Create(const ZHLN_InstanceDesc& instance_desc, const ZHLN_DeviceSelectDesc& select_desc, const ZHLN_DeviceDesc& device_desc) noexcept -> Context {
+auto Context::Create(const ZHLN_InstanceDesc& instanceDesc, const ZHLN_DeviceSelectDesc& selectDesc, const ZHLN_DeviceDesc& deviceDesc) noexcept -> Context {
     Context ctx;
 
-    ctx._instance = ZHLN_CreateInstance(&instance_desc);
+    ctx._instance = ZHLN_CreateInstance(&instanceDesc);
     if (ctx._instance == VK_NULL_HANDLE) {
         return {};
     }
 
-    ctx._surface = select_desc.surface;
+    ctx._surface = selectDesc.surface;
 
     const ZHLN_DeviceSelectDesc safe_select = {
         .instance       = ctx._instance,
-        .surface        = select_desc.surface,
-        .score_fn       = select_desc.score_fn,
-        .score_userdata = select_desc.score_userdata,
+        .surface        = selectDesc.surface,
+        .score_fn       = selectDesc.score_fn,
+        .score_userdata = selectDesc.score_userdata,
     };
     ctx._physical = ZHLN_SelectPhysicalDevice(&safe_select);
 
@@ -95,17 +95,17 @@ auto Context::Create(const ZHLN_InstanceDesc& instance_desc, const ZHLN_DeviceSe
 
     const ZHLN_DeviceDesc safe_device = {
         .physical          = &ctx._physical,
-        .extensions        = device_desc.extensions,
-        .extension_count   = device_desc.extension_count,
-        .features          = device_desc.features,
-        .enable_validation = device_desc.enable_validation,
+        .extensions        = deviceDesc.extensions,
+        .extension_count   = deviceDesc.extension_count,
+        .features          = deviceDesc.features,
+        .enable_validation = deviceDesc.enable_validation,
     };
     ctx._device = ZHLN_CreateDevice(&safe_device);
 
     return ctx;
 }
 
-auto Context::Create(VkInstance instance, VkSurfaceKHR surface, const ZHLN_PhysicalDeviceInfo& physical, const ZHLN_DeviceDesc& device_desc) noexcept
+auto Context::Create(VkInstance instance, VkSurfaceKHR surface, const ZHLN_PhysicalDeviceInfo& physical, const ZHLN_DeviceDesc& deviceDesc) noexcept
     -> Context {
     Context ctx;
     ctx._instance = instance;
@@ -114,10 +114,10 @@ auto Context::Create(VkInstance instance, VkSurfaceKHR surface, const ZHLN_Physi
 
     const ZHLN_DeviceDesc safe_device = {
         .physical          = &ctx._physical,
-        .extensions        = device_desc.extensions,
-        .extension_count   = device_desc.extension_count,
-        .features          = device_desc.features,
-        .enable_validation = device_desc.enable_validation,
+        .extensions        = deviceDesc.extensions,
+        .extension_count   = deviceDesc.extension_count,
+        .features          = deviceDesc.features,
+        .enable_validation = deviceDesc.enable_validation,
     };
     ctx._device = ZHLN_CreateDevice(&safe_device);
 

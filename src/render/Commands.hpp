@@ -101,32 +101,32 @@ class CommandRing {
     void Init(VkDevice device, uint32_t queueFamily) noexcept {
         _device = device;
         for (size_t i = 0; i < Capacity; ++i) {
-            VkCommandPoolCreateInfo poolInfo = {
+            VkCommandPoolCreateInfo pool_info = {
                 .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
                 .pNext            = nullptr,
                 .flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
                 .queueFamilyIndex = queueFamily
             };
-            if (vkCreateCommandPool(_device, &poolInfo, nullptr, &_pools[i]) != VK_SUCCESS) {
+            if (vkCreateCommandPool(_device, &pool_info, nullptr, &_pools[i]) != VK_SUCCESS) {
                 continue;
             }
 
-            VkCommandBufferAllocateInfo allocInfo = {
+            VkCommandBufferAllocateInfo alloc_info = {
                 .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
                 .pNext              = nullptr,
                 .commandPool        = _pools[i],
                 .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
                 .commandBufferCount = 1
             };
-            vkAllocateCommandBuffers(_device, &allocInfo, &_cmds[i]);
+            vkAllocateCommandBuffers(_device, &alloc_info, &_cmds[i]);
 
-            VkFenceCreateInfo fenceInfo = {
+            VkFenceCreateInfo fence_info = {
                 .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
                 .pNext = nullptr,
                 // Start signaled so the first Acquire() call passes through without stalling
                 .flags = VK_FENCE_CREATE_SIGNALED_BIT
             };
-            vkCreateFence(_device, &fenceInfo, nullptr, &_fences[i]);
+            vkCreateFence(_device, &fence_info, nullptr, &_fences[i]);
         }
     }
 
@@ -153,16 +153,16 @@ class CommandRing {
     };
 
     [[nodiscard]] auto Acquire() noexcept -> Slot {
-        uint32_t slotIdx = _index.fetch_add(1, std::memory_order::relaxed) % Capacity;
+        uint32_t slot_idx = _index.fetch_add(1, std::memory_order::relaxed) % Capacity;
 
         // If the GPU is still processing this slot's last submission, block here
-        vkWaitForFences(_device, 1, &_fences[slotIdx], VK_TRUE, UINT64_MAX);
-        vkResetFences(_device, 1, &_fences[slotIdx]);
+        vkWaitForFences(_device, 1, &_fences[slot_idx], VK_TRUE, UINT64_MAX);
+        vkResetFences(_device, 1, &_fences[slot_idx]);
 
         // Recycle the command pool instantly without any driver reallocation
-        vkResetCommandPool(_device, _pools[slotIdx], 0);
+        vkResetCommandPool(_device, _pools[slot_idx], 0);
 
-        return {CommandBuffer<QType> {_cmds[slotIdx]}, _fences[slotIdx]};
+        return {CommandBuffer<QType> {_cmds[slot_idx]}, _fences[slot_idx]};
     }
 
   private:
@@ -210,7 +210,7 @@ void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, Re
         std::forward<RecordFn>(record)(cmd);
     }
 
-    VkCommandBufferSubmitInfo subInfo = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .pNext = nullptr, .commandBuffer = cmd, .deviceMask = 0};
+    VkCommandBufferSubmitInfo sub_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .pNext = nullptr, .commandBuffer = cmd, .deviceMask = 0};
 
     VkSubmitInfo2 submit = {
         .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
@@ -219,7 +219,7 @@ void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, Re
         .waitSemaphoreInfoCount   = 0,
         .pWaitSemaphoreInfos      = nullptr,
         .commandBufferInfoCount   = 1,
-        .pCommandBufferInfos      = &subInfo,
+        .pCommandBufferInfos      = &sub_info,
         .signalSemaphoreInfoCount = 0,
         .pSignalSemaphoreInfos    = nullptr
     };
@@ -251,14 +251,14 @@ void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, St
     }
 
     // 2. Submit via StagingRingBuffer to stamp active allocations and signal timeline
-    uint64_t submitVal = ringBuffer.Submit(cmd);
+    uint64_t submit_val = ringBuffer.Submit(cmd);
 
     // 3. Synchronously wait on the timeline semaphore to retire the staging memory
     VkSemaphore         semaphore = ringBuffer.GetSemaphore();
-    VkSemaphoreWaitInfo waitInfo  = {
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .pNext = nullptr, .flags = 0, .semaphoreCount = 1, .pSemaphores = &semaphore, .pValues = &submitVal
+    VkSemaphoreWaitInfo wait_info = {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .pNext = nullptr, .flags = 0, .semaphoreCount = 1, .pSemaphores = &semaphore, .pValues = &submit_val
     };
-    vkWaitSemaphores(ctx.Device(), &waitInfo, UINT64_MAX);
+    vkWaitSemaphores(ctx.Device(), &wait_info, UINT64_MAX);
 
     // 4. Signal the associated fence so that CommandRing's next Acquire doesn't stall
     vkQueueSubmit2(ResolveQueue<QType>(ctx), 0, nullptr, fence);

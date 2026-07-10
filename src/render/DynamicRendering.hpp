@@ -74,7 +74,7 @@ template <VkImageLayout Layout>
 struct LayoutTraits;
 
 template <VkImageLayout OldLayout, VkImageLayout NewLayout>
-void TransitionLayout(const VkCommandBuffer cmd, const VkImage image, const VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) noexcept;
+void TransitionLayout(VkCommandBuffer cmd, VkImage image, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) noexcept;
 
 template <typename InState, typename OutState, typename T>
 auto IssueBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFlags aspectOverride = VK_IMAGE_ASPECT_NONE);
@@ -183,7 +183,7 @@ class DynamicPass {
         const TypedImage<Layout>& img,
         VkAttachmentLoadOp        loadOp     = VK_ATTACHMENT_LOAD_OP_LOAD,
         VkAttachmentStoreOp       storeOp    = VK_ATTACHMENT_STORE_OP_STORE,
-        const ZHLN::Color4&       clearColor = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f}
+        const ZHLN::Color4&       clearColor = {}
     ) && noexcept -> DynamicPass<ColorCount + 1, HasDepth>;
 
     template <typename... TypedImages>
@@ -191,7 +191,7 @@ class DynamicPass {
         const std::tuple<TypedImages...>& imageTuple,
         VkAttachmentLoadOp                loadOp     = VK_ATTACHMENT_LOAD_OP_LOAD,
         VkAttachmentStoreOp               storeOp    = VK_ATTACHMENT_STORE_OP_STORE,
-        const ZHLN::Color4&               clearColor = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f}
+        const ZHLN::Color4&               clearColor = {.r = 0.0F, .g = 0.0F, .b = 0.0F, .a = 1.0F}
     ) && noexcept -> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth>;
 
     template <VkImageLayout Layout>
@@ -199,7 +199,7 @@ class DynamicPass {
         const TypedImage<Layout>& img,
         VkAttachmentLoadOp        loadOp   = VK_ATTACHMENT_LOAD_OP_LOAD,
         VkAttachmentStoreOp       storeOp  = VK_ATTACHMENT_STORE_OP_STORE,
-        float                     clearVal = 1.0f
+        float                     clearVal = 1.0F
     ) && noexcept -> DynamicPass<ColorCount, true>;
 
     constexpr auto Flags(VkRenderingFlags flags) && noexcept -> DynamicPass<ColorCount, HasDepth>&&;

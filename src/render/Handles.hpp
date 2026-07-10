@@ -13,7 +13,7 @@ template <typename T, auto DeleterFn>
 class DeviceHandle {
   public:
     DeviceHandle() noexcept = default;
-    DeviceHandle(const VkDevice device, const T raw) noexcept;
+    DeviceHandle(VkDevice device, T raw) noexcept;
     ~DeviceHandle() noexcept;
 
     DeviceHandle(const DeviceHandle&)                    = delete;

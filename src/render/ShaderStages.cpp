@@ -28,10 +28,10 @@ auto ShaderStages::operator=(ShaderStages&& other) noexcept -> ShaderStages& {
 
 auto ShaderStages::FromFiles(
     const VkDevice               device,
-    const std::filesystem::path& vert_path,
-    const std::filesystem::path& frag_path,
-    const char*                  vert_entry,
-    const char*                  frag_entry
+    const std::filesystem::path& vertPath,
+    const std::filesystem::path& fragPath,
+    const char*                  vertEntry,
+    const char*                  fragEntry
 ) noexcept -> ShaderStages {
     auto load = [](const std::filesystem::path& path) -> std::vector<uint32_t> {
         if (path.empty()) {
@@ -48,16 +48,16 @@ auto ShaderStages::FromFiles(
         return buffer;
     };
 
-    auto vert_spv = load(vert_path);
-    auto frag_spv = load(frag_path);
+    auto vert_spv = load(vertPath);
+    auto frag_spv = load(fragPath);
 
-    if (vert_spv.empty() || (!frag_path.empty() && frag_spv.empty())) {
-        std::println(stderr, "[ZHLN::Vk] Failed to load shader files: {} or {}", vert_path.string(), frag_path.string());
+    if (vert_spv.empty() || (!fragPath.empty() && frag_spv.empty())) {
+        std::println(stderr, "[ZHLN::Vk] Failed to load shader files: {} or {}", vertPath.string(), fragPath.string());
         return {};
     }
 
-    const ZHLN_ShaderDesc v_desc = {.code = vert_spv.data(), .size = vert_spv.size() * 4, .entry_point = vert_entry};
-    const ZHLN_ShaderDesc f_desc = {.code = frag_spv.data(), .size = frag_spv.size() * 4, .entry_point = frag_entry};
+    const ZHLN_ShaderDesc v_desc = {.code = vert_spv.data(), .size = vert_spv.size() * 4, .entry_point = vertEntry};
+    const ZHLN_ShaderDesc f_desc = {.code = frag_spv.data(), .size = frag_spv.size() * 4, .entry_point = fragEntry};
 
     return Create(device, v_desc, f_desc);
 }

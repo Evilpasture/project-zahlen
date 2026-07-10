@@ -47,7 +47,7 @@ class DeletionQueue {
 // Overloaded C-helpers to decouple VmaHandle from DeletionQueue definition
 void                               DeferVmaDestruction(VmaAllocator allocator, VkBuffer buffer, VmaAllocation allocation) noexcept;
 void                               DeferVmaDestruction(VmaAllocator allocator, VkImage image, VmaAllocation allocation) noexcept;
-extern thread_local DeletionQueue* t_activeDeletionQueue;
+extern thread_local DeletionQueue* t_active_deletion_queue;
 
 template <typename T, auto DeleterFn>
 class VmaHandle {
@@ -96,7 +96,7 @@ class VmaHandle {
 
     void Cleanup() noexcept {
         if (_handle != T {}) {
-            if (ZHLN::Vk::t_activeDeletionQueue != nullptr) {
+            if (ZHLN::Vk::t_active_deletion_queue != nullptr) {
                 if constexpr (std::is_same_v<T, VkBuffer> || std::is_same_v<T, VkImage>) {
                     DeferVmaDestruction(_allocator, _handle, _allocation);
                 } else {
@@ -165,7 +165,7 @@ class Buffer {
     Buffer(Buffer&& other) noexcept                    = default;
     auto operator=(Buffer&& other) noexcept -> Buffer& = default;
 
-    [[nodiscard]] static auto Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage mem_usage) noexcept -> Buffer;
+    [[nodiscard]] static auto Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage) noexcept -> Buffer;
 
     struct MappedRegion {
         MappedRegion() = default;
@@ -233,7 +233,7 @@ class Image {
     Image(Image&& other) noexcept                    = default;
     auto operator=(Image&& other) noexcept -> Image& = default;
 
-    static auto Create(VmaAllocator allocator, const VkImageCreateInfo& info, VmaMemoryUsage mem_usage) -> Image;
+    static auto Create(VmaAllocator allocator, const VkImageCreateInfo& info, VmaMemoryUsage memUsage) -> Image;
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return _handle.Valid();
@@ -356,11 +356,11 @@ inline void CopyRingBuffer(VkCommandBuffer cmd, StagingRingBuffer::Allocation st
 
 struct ScopedDeletionQueue {
     DeletionQueue* prev;
-    explicit ScopedDeletionQueue(DeletionQueue& queue) noexcept: prev(t_activeDeletionQueue) {
-        t_activeDeletionQueue = &queue;
+    explicit ScopedDeletionQueue(DeletionQueue& queue) noexcept: prev(t_active_deletion_queue) {
+        t_active_deletion_queue = &queue;
     }
     ~ScopedDeletionQueue() noexcept {
-        t_activeDeletionQueue = prev;
+        t_active_deletion_queue = prev;
     }
 
     ScopedDeletionQueue(const ScopedDeletionQueue&)            = delete;

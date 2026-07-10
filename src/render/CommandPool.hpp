@@ -9,7 +9,7 @@ template <Vk::QueueType QType>
 class CommandPool {
   public:
     CommandPool() = default;
-    CommandPool(const VkDevice device, const uint32_t queue_family);
+    CommandPool(VkDevice device, uint32_t queueFamily);
     ~CommandPool();
 
     CommandPool(const CommandPool&)                    = delete;
@@ -32,8 +32,8 @@ class CommandPool {
         return _raw;
     }
 
-    [[nodiscard]] auto Allocate(const uint32_t count) -> bool;
-    [[nodiscard]] auto AllocateSecondary(const uint32_t count) -> bool;
+    [[nodiscard]] auto Allocate(uint32_t count) -> bool;
+    [[nodiscard]] auto AllocateSecondary(uint32_t count) -> bool;
     void               Reset() noexcept;
 
     // This is where the compiler-enforced safety is introduced!
@@ -67,7 +67,7 @@ class CommandPools {
 
     CommandPools() noexcept = default;
 
-    [[nodiscard]] static auto Create(const VkDevice device, const Description& desc) noexcept -> CommandPools;
+    [[nodiscard]] static auto Create(VkDevice device, const Description& desc) noexcept -> CommandPools;
 
     [[nodiscard]] constexpr auto operator[](const uint32_t frame) noexcept -> CommandPool<QType>& {
         return _pools[frame % N];

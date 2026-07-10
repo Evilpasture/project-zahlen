@@ -151,7 +151,7 @@ class TypedPipeline {
     }
 };
 
-inline constexpr auto& GetBufferDeviceAddress = ZHLN_GetBufferDeviceAddress;
+inline constexpr auto& GetBufferAddress = ZHLN_GetBufferDeviceAddress;
 
 std::expected<VkResult, std::string> WaitIdle(VkDevice device) noexcept;
 
@@ -239,7 +239,7 @@ struct DrawFrameDesc {
 
 template <uint32_t N, bool WaitOnFence = true, typename Record, typename Rebuild>
     requires RecordFn<Record> && RebuildFn<Rebuild>
-auto DrawFrame(const DrawFrameDesc<N>& desc, uint32_t& frame_index, Record&& record, Rebuild&& rebuild) noexcept -> ZHLN_FrameResult;
+auto DrawFrame(const DrawFrameDesc<N>& desc, uint32_t& frameIndex, Record&& record, Rebuild&& rebuild) noexcept -> ZHLN_FrameResult;
 
 [[nodiscard]] auto SubmitAndPresent(const ZHLN_FrameSubmitDesc& desc) noexcept -> ZHLN_FrameResult;
 
@@ -393,5 +393,4 @@ void GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const uint3
 
 } // namespace ZHLN::Vk
 
-#include "DynamicRendering.hpp" // Ensure dynamic rendering is layered correctly
 #include "RenderCore.inl"

@@ -93,7 +93,7 @@ auto Allocator::Init(const Context& ctx) noexcept -> bool {
 // Buffer RAII
 // ============================================================================
 [[nodiscard]]
-auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage mem_usage) noexcept -> Buffer {
+auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage) noexcept -> Buffer {
     VkBuffer          buffer = VK_NULL_HANDLE;
     VmaAllocation     alloc  = nullptr;
     VmaAllocationInfo info   = {};
@@ -111,7 +111,7 @@ auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usag
 
     VmaAllocationCreateInfo alloc_info = {
         .flags          = 0,
-        .usage          = mem_usage,
+        .usage          = memUsage,
         .requiredFlags  = 0,
         .preferredFlags = 0,
         .memoryTypeBits = 0,
@@ -122,7 +122,7 @@ auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usag
     };
 
     // Automatically request persistent mapping for host-visible memory types
-    if (mem_usage == VMA_MEMORY_USAGE_CPU_ONLY || mem_usage == VMA_MEMORY_USAGE_CPU_TO_GPU || mem_usage == VMA_MEMORY_USAGE_GPU_TO_CPU) {
+    if (memUsage == VMA_MEMORY_USAGE_CPU_ONLY || memUsage == VMA_MEMORY_USAGE_CPU_TO_GPU || memUsage == VMA_MEMORY_USAGE_GPU_TO_CPU) {
         alloc_info.flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT;
     }
 
@@ -187,12 +187,12 @@ auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst, co
 // Image RAII
 // ============================================================================
 
-auto Image::Create(VmaAllocator allocator, const VkImageCreateInfo& info, VmaMemoryUsage mem_usage) -> Image {
+auto Image::Create(VmaAllocator allocator, const VkImageCreateInfo& info, VmaMemoryUsage memUsage) -> Image {
     VkImage                       img        = VK_NULL_HANDLE;
     VmaAllocation                 alloc      = nullptr;
     const VmaAllocationCreateInfo alloc_info = {
         .flags          = {},
-        .usage          = mem_usage,
+        .usage          = memUsage,
         .requiredFlags  = {},
         .preferredFlags = {},
         .memoryTypeBits = {},
@@ -250,11 +250,11 @@ auto StagingRingBuffer::Init(VmaAllocator allocator, VkDevice device, VkQueue qu
     _queueFamily = queueFamily;
     _capacity    = capacity;
 
-    VkSemaphoreTypeCreateInfo typeInfo = {
+    VkSemaphoreTypeCreateInfo type_info = {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO, .pNext = nullptr, .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE, .initialValue = 0
     };
-    VkSemaphoreCreateInfo semInfo = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &typeInfo, .flags = 0};
-    if (vkCreateSemaphore(_device, &semInfo, nullptr, &_timelineSemaphore) != VK_SUCCESS) {
+    VkSemaphoreCreateInfo sem_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &type_info, .flags = 0};
+    if (vkCreateSemaphore(_device, &sem_info, nullptr, &_timelineSemaphore) != VK_SUCCESS) {
         return false;
     }
 
@@ -290,17 +290,17 @@ void StagingRingBuffer::Recycle() noexcept {
         return;
     }
 
-    uint64_t completedValue = 0;
-    vkGetSemaphoreCounterValue(_device, _timelineSemaphore, &completedValue);
+    uint64_t completed_value = 0;
+    vkGetSemaphoreCounterValue(_device, _timelineSemaphore, &completed_value);
 
     // Guard against unsubmitted allocations (timelineValue == 0)
-    while (!_activeAllocations.empty() && _activeAllocations.front().timelineValue > 0 && _activeAllocations.front().timelineValue <= completedValue) {
+    while (!_activeAllocations.empty() && _activeAllocations.front().timelineValue > 0 && _activeAllocations.front().timelineValue <= completed_value) {
         _tail = (_activeAllocations.front().offset + _activeAllocations.front().size) % _capacity;
         _activeAllocations.erase(_activeAllocations.begin());
     }
 
     for (auto it = _retiredPools.begin(); it != _retiredPools.end();) {
-        if (it->timelineValue <= completedValue) {
+        if (it->timelineValue <= completed_value) {
             vkDestroyCommandPool(_device, it->pool, nullptr);
             it = _retiredPools.erase(it);
         } else {
@@ -316,34 +316,34 @@ void StagingRingBuffer::RetirePool(VkCommandPool pool, uint64_t timelineValue) n
 auto StagingRingBuffer::Allocate(VkDeviceSize size, VkDeviceSize alignment) noexcept -> Allocation {
     Recycle();
 
-    VkDeviceSize alignedHead = (_head + alignment - 1) & ~(alignment - 1);
-    bool         wrap        = false;
+    VkDeviceSize aligned_head = (_head + alignment - 1) & ~(alignment - 1);
+    bool         wrap         = false;
 
-    if (alignedHead + size > _capacity) {
-        alignedHead = 0;
-        wrap        = true;
+    if (aligned_head + size > _capacity) {
+        aligned_head = 0;
+        wrap         = true;
     }
 
     while (true) {
-        bool hasSpace = false;
+        bool has_space = false;
 
         if (_activeAllocations.empty()) {
-            hasSpace = true;
+            has_space = true;
         } else if (_tail <= _head) {
             if (wrap) {
-                hasSpace = (size < _tail);
+                has_space = (size < _tail);
             } else {
-                hasSpace = true;
+                has_space = true;
             }
         } else {
             if (wrap) {
-                hasSpace = false; // Cannot wrap if active region already wraps
+                has_space = false; // Cannot wrap if active region already wraps
             } else {
-                hasSpace = (alignedHead + size < _tail);
+                has_space = (aligned_head + size < _tail);
             }
         }
 
-        if (hasSpace) {
+        if (has_space) {
             break;
         }
 
@@ -351,27 +351,27 @@ auto StagingRingBuffer::Allocate(VkDeviceSize size, VkDeviceSize alignment) noex
             return {}; // Out of memory boundaries
         }
 
-        uint64_t waitVal = _activeAllocations.front().timelineValue;
-        if (waitVal == 0) {
+        uint64_t wait_val = _activeAllocations.front().timelineValue;
+        if (wait_val == 0) {
             break; // Avoid waiting on unsubmitted allocations
         }
 
-        VkSemaphoreWaitInfo waitInfo = {
+        VkSemaphoreWaitInfo wait_info = {
             .sType          = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
             .pNext          = nullptr,
             .flags          = 0,
             .semaphoreCount = 1,
             .pSemaphores    = &_timelineSemaphore,
-            .pValues        = &waitVal
+            .pValues        = &wait_val
         };
-        vkWaitSemaphores(_device, &waitInfo, UINT64_MAX);
+        vkWaitSemaphores(_device, &wait_info, UINT64_MAX);
         Recycle();
     }
 
-    _head = alignedHead + size;
-    _activeAllocations.push_back({.offset = alignedHead, .size = size, .timelineValue = 0});
+    _head = aligned_head + size;
+    _activeAllocations.push_back({.offset = aligned_head, .size = size, .timelineValue = 0});
 
-    return {.buffer = _stagingBuffer.Handle(), .offset = alignedHead, .mappedData = static_cast<char*>(_mappedPtr) + alignedHead, .timelineValue = 0};
+    return {.buffer = _stagingBuffer.Handle(), .offset = aligned_head, .mappedData = static_cast<char*>(_mappedPtr) + aligned_head, .timelineValue = 0};
 }
 
 auto StagingRingBuffer::Submit(VkCommandBuffer cmd) noexcept -> uint64_t {
@@ -383,14 +383,14 @@ auto StagingRingBuffer::Submit(VkCommandBuffer cmd) noexcept -> uint64_t {
         }
     }
 
-    VkCommandBufferSubmitInfo cmdInfo = {
+    VkCommandBufferSubmitInfo cmd_info = {
         .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
         .pNext         = {},
         .commandBuffer = cmd,
         .deviceMask    = {},
     };
 
-    VkSemaphoreSubmitInfo signalInfo = {
+    VkSemaphoreSubmitInfo signal_info = {
         .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
         .pNext       = {},
         .semaphore   = _timelineSemaphore,
@@ -406,26 +406,26 @@ auto StagingRingBuffer::Submit(VkCommandBuffer cmd) noexcept -> uint64_t {
         .waitSemaphoreInfoCount   = {},
         .pWaitSemaphoreInfos      = {},
         .commandBufferInfoCount   = 1,
-        .pCommandBufferInfos      = &cmdInfo,
+        .pCommandBufferInfos      = &cmd_info,
         .signalSemaphoreInfoCount = 1,
-        .pSignalSemaphoreInfos    = &signalInfo,
+        .pSignalSemaphoreInfos    = &signal_info,
     };
 
     vkQueueSubmit2(_queue, 1, &submit, VK_NULL_HANDLE);
     return _timelineValue;
 }
 
-thread_local DeletionQueue* t_activeDeletionQueue = nullptr;
+thread_local DeletionQueue* t_active_deletion_queue = nullptr;
 
 void DeferVmaDestruction(VmaAllocator allocator, VkBuffer buffer, VmaAllocation allocation) noexcept {
-    if (t_activeDeletionQueue != nullptr) {
-        t_activeDeletionQueue->EnqueueBuffer(allocator, buffer, allocation);
+    if (t_active_deletion_queue != nullptr) {
+        t_active_deletion_queue->EnqueueBuffer(allocator, buffer, allocation);
     }
 }
 
 void DeferVmaDestruction(VmaAllocator allocator, VkImage image, VmaAllocation allocation) noexcept {
-    if (t_activeDeletionQueue != nullptr) {
-        t_activeDeletionQueue->EnqueueImage(allocator, image, allocation);
+    if (t_active_deletion_queue != nullptr) {
+        t_active_deletion_queue->EnqueueImage(allocator, image, allocation);
     }
 }
 

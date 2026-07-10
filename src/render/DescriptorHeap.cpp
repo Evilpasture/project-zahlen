@@ -102,15 +102,15 @@ auto DescriptorHeap::Init(const Context& ctx, Allocator& allocator, DescriptorHe
     if (type == DescriptorHeapType::Sampler) {
         _stride = AlignUp(props.samplerDescriptorSize, props.samplerDescriptorAlignment);
     } else {
-        const VkDeviceSize maxSize  = std::max(props.bufferDescriptorSize, props.imageDescriptorSize);
-        const VkDeviceSize maxAlign = std::max(props.bufferDescriptorAlignment, props.imageDescriptorAlignment);
-        _stride                     = AlignUp(maxSize, maxAlign);
+        const VkDeviceSize max_size  = std::max(props.bufferDescriptorSize, props.imageDescriptorSize);
+        const VkDeviceSize max_align = std::max(props.bufferDescriptorAlignment, props.imageDescriptorAlignment);
+        _stride                      = AlignUp(max_size, max_align);
     }
 
-    const VkDeviceSize totalBytes = _stride * _capacity;
+    const VkDeviceSize total_bytes = _stride * _capacity;
 
     _buffer = Buffer::Create(
-        allocator.Get(), totalBytes, VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
+        allocator.Get(), total_bytes, VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
     );
 
     if (!_buffer.Valid()) {
@@ -119,7 +119,7 @@ auto DescriptorHeap::Init(const Context& ctx, Allocator& allocator, DescriptorHe
 
     _mappedRegion  = _buffer.Map();
     _mappedPtr     = _mappedRegion.data;
-    _deviceAddress = GetBufferDeviceAddress(_device, _buffer.Handle());
+    _deviceAddress = GetBufferAddress(_device, _buffer.Handle());
 
     return _mappedPtr != nullptr && _deviceAddress != 0;
 }
@@ -175,19 +175,19 @@ void ResourceWriteBatch::AddBuffer(uint32_t slot, VkDeviceAddress address, VkDev
 }
 
 void ResourceWriteBatch::Flush(VkDevice device, PFN_vkWriteResourceDescriptorsEXT writeFn, void* mappedPtr, VkDeviceSize stride) noexcept {
-    const auto totalCount = static_cast<uint32_t>(_impl->slots.size());
-    if (totalCount == 0 || (writeFn == nullptr)) {
+    const auto total_count = static_cast<uint32_t>(_impl->slots.size());
+    if (total_count == 0 || (writeFn == nullptr)) {
         return;
     }
 
-    std::vector<VkResourceDescriptorInfoEXT> resourceInfos(totalCount);
-    std::vector<VkHostAddressRangeEXT>       ranges(totalCount);
+    std::vector<VkResourceDescriptorInfoEXT> resource_infos(total_count);
+    std::vector<VkHostAddressRangeEXT>       ranges(total_count);
 
-    uint32_t imgIdx = 0;
-    uint32_t bufIdx = 0;
+    uint32_t img_idx = 0;
+    uint32_t buf_idx = 0;
 
-    for (uint32_t i = 0; i < totalCount; ++i) {
-        resourceInfos[i] = {
+    for (uint32_t i = 0; i < total_count; ++i) {
+        resource_infos[i] = {
             .sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT,
             .pNext = nullptr,
             .type  = _impl->types[i],
@@ -196,15 +196,15 @@ void ResourceWriteBatch::Flush(VkDevice device, PFN_vkWriteResourceDescriptorsEX
 
         if (_impl->types[i] == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE || _impl->types[i] == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
             _impl->types[i] == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
-            resourceInfos[i].data.pImage = &_impl->imageInfos[imgIdx++];
+            resource_infos[i].data.pImage = &_impl->imageInfos[img_idx++];
         } else {
-            resourceInfos[i].data.pAddressRange = &_impl->addressRanges[bufIdx++];
+            resource_infos[i].data.pAddressRange = &_impl->addressRanges[buf_idx++];
         }
 
         ranges[i] = {.address = static_cast<uint8_t*>(mappedPtr) + (_impl->slots[i] * stride), .size = stride};
     }
 
-    writeFn(device, totalCount, resourceInfos.data(), ranges.data());
+    writeFn(device, total_count, resource_infos.data(), ranges.data());
 
     _impl->imageInfos.clear();
     _impl->addressRanges.clear();
@@ -234,17 +234,17 @@ void SamplerWriteBatch::AddSampler(uint32_t slot, const VkSamplerCreateInfo& cre
 }
 
 void SamplerWriteBatch::Flush(VkDevice device, PFN_vkWriteSamplerDescriptorsEXT writeFn, void* mappedPtr, VkDeviceSize stride) noexcept {
-    const auto totalCount = static_cast<uint32_t>(_impl->slots.size());
-    if (totalCount == 0 || (writeFn == nullptr)) {
+    const auto total_count = static_cast<uint32_t>(_impl->slots.size());
+    if (total_count == 0 || (writeFn == nullptr)) {
         return;
     }
 
-    std::vector<VkHostAddressRangeEXT> ranges(totalCount);
-    for (uint32_t i = 0; i < totalCount; ++i) {
+    std::vector<VkHostAddressRangeEXT> ranges(total_count);
+    for (uint32_t i = 0; i < total_count; ++i) {
         ranges[i] = {.address = static_cast<uint8_t*>(mappedPtr) + (_impl->slots[i] * stride), .size = stride};
     }
 
-    writeFn(device, totalCount, _impl->createInfos.data(), ranges.data());
+    writeFn(device, total_count, _impl->createInfos.data(), ranges.data());
 
     _impl->createInfos.clear();
     _impl->slots.clear();
@@ -320,12 +320,12 @@ auto HeapManager::Init(
     _staticResourceAlloc.Init(staticResourceCount);
     _staticSamplerAlloc.Init(staticSamplerCount);
 
-    const uint32_t totalResourceCount = staticResourceCount + (doubleBufferCount * dynamicResourceCount);
-    const uint32_t totalSamplerCount  = staticSamplerCount + (doubleBufferCount * dynamicSamplerCount);
+    const uint32_t total_resource_count = staticResourceCount + (doubleBufferCount * dynamicResourceCount);
+    const uint32_t total_sampler_count  = staticSamplerCount + (doubleBufferCount * dynamicSamplerCount);
 
-    bool ok = _resourceHeap.Init(ctx, allocator, DescriptorHeapType::Resource, totalResourceCount);
+    bool ok = _resourceHeap.Init(ctx, allocator, DescriptorHeapType::Resource, total_resource_count);
     if (ok) {
-        ok = _samplerHeap.Init(ctx, allocator, DescriptorHeapType::Sampler, totalSamplerCount);
+        ok = _samplerHeap.Init(ctx, allocator, DescriptorHeapType::Sampler, total_sampler_count);
     }
 
     return ok;
@@ -354,7 +354,7 @@ void HeapManager::FreeStaticSamplerSlot(uint32_t slot) noexcept {
 }
 
 auto HeapManager::AllocateDynamicResourceRange(uint32_t count) noexcept -> uint32_t {
-    const uint32_t baseSlot = _staticResourceCount + (_currentFrameIndex * _dynamicResourceCount) + _dynamicResourceAllocated;
+    const uint32_t base_slot = _staticResourceCount + (_currentFrameIndex * _dynamicResourceCount) + _dynamicResourceAllocated;
     if (_dynamicResourceAllocated + count > _dynamicResourceCount) [[unlikely]] {
         std::println(
             stderr, "[HeapManager] Resource Dynamic Heap overflow: allocated {} but max is {}", _dynamicResourceAllocated + count, _dynamicResourceCount
@@ -362,17 +362,17 @@ auto HeapManager::AllocateDynamicResourceRange(uint32_t count) noexcept -> uint3
         std::abort();
     }
     _dynamicResourceAllocated += count;
-    return baseSlot;
+    return base_slot;
 }
 
 auto HeapManager::AllocateDynamicSamplerRange(uint32_t count) noexcept -> uint32_t {
-    const uint32_t baseSlot = _staticSamplerCount + (_currentFrameIndex * _dynamicSamplerCount) + _dynamicSamplerAllocated;
+    const uint32_t base_slot = _staticSamplerCount + (_currentFrameIndex * _dynamicSamplerCount) + _dynamicSamplerAllocated;
     if (_dynamicSamplerAllocated + count > _dynamicSamplerCount) [[unlikely]] {
         std::println(stderr, "[HeapManager] Sampler Dynamic Heap overflow: allocated {} but max is {}", _dynamicSamplerAllocated + count, _dynamicSamplerCount);
         std::abort();
     }
     _dynamicSamplerAllocated += count;
-    return baseSlot;
+    return base_slot;
 }
 
 void HeapManager::FlushResourceBatch(ResourceWriteBatch& batch) noexcept {

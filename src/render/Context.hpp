@@ -24,11 +24,10 @@ class Context {
     auto operator=(Context&& other) noexcept -> Context&;
 
     [[nodiscard("Vulkan context creation may fail; check validity with Valid() or explicit bool cast")]]
-    static auto
-        Create(const ZHLN_InstanceDesc& instance_desc, const ZHLN_DeviceSelectDesc& select_desc, const ZHLN_DeviceDesc& device_desc) noexcept -> Context;
+    static auto Create(const ZHLN_InstanceDesc& instanceDesc, const ZHLN_DeviceSelectDesc& selectDesc, const ZHLN_DeviceDesc& deviceDesc) noexcept -> Context;
     [[nodiscard("Vulkan context creation may fail; check validity with Valid() or explicit bool cast")]]
     static auto
-        Create(VkInstance instance, VkSurfaceKHR surface, const ZHLN_PhysicalDeviceInfo& physical, const ZHLN_DeviceDesc& device_desc) noexcept -> Context;
+        Create(VkInstance instance, VkSurfaceKHR surface, const ZHLN_PhysicalDeviceInfo& physical, const ZHLN_DeviceDesc& deviceDesc) noexcept -> Context;
 
     [[nodiscard]] auto Instance() const noexcept -> VkInstance {
         return _instance;

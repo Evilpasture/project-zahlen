@@ -20,9 +20,9 @@ class alignas(64) SemaphorePool {
     SemaphorePool(SemaphorePool&& other) noexcept;
     auto operator=(SemaphorePool&& other) noexcept -> SemaphorePool&;
 
-    void Rebuild(const VkDevice device, const uint32_t count) noexcept;
+    void Rebuild(VkDevice device, uint32_t count) noexcept;
     [[nodiscard("Semaphore access must be checked for bounds; invalid indices will crash")]]
-    auto operator[](const uint32_t index) const noexcept -> VkSemaphore;
+    auto operator[](uint32_t index) const noexcept -> VkSemaphore;
 
     [[nodiscard]] auto Count() const noexcept -> uint32_t;
     [[nodiscard("Verify semaphore pool is initialized before use")]]

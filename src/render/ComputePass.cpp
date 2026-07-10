@@ -13,10 +13,10 @@ bool ComputePass::Build(
     const VkPushConstantRange* pushConstants,
     uint32_t                   pushCount
 ) noexcept {
-    ZHLN_PipelineLayoutDesc pLayoutDesc = {
+    ZHLN_PipelineLayoutDesc p_layout_desc = {
         .set_layouts = &descriptorLayout, .set_layout_count = 1, .push_constants = pushConstants, .push_constant_count = pushCount
     };
-    pipelineLayout = PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &pLayoutDesc));
+    pipelineLayout = PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &p_layout_desc));
 
     auto p_res = ComputePipelineBuilder().Shader(shader).Layout(pipelineLayout.Get()).Build(device);
 
@@ -35,10 +35,10 @@ bool ComputePass::BuildVariants(
     const VkPushConstantRange*            pushConstants,
     uint32_t                              pushCount
 ) noexcept {
-    ZHLN_PipelineLayoutDesc pLayoutDesc = {
+    ZHLN_PipelineLayoutDesc p_layout_desc = {
         .set_layouts = &descriptorLayout, .set_layout_count = 1, .push_constants = pushConstants, .push_constant_count = pushCount
     };
-    pipelineLayout = PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &pLayoutDesc));
+    pipelineLayout = PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &p_layout_desc));
 
     pipelines.clear();
     pipelines.reserve(specInfos.size());

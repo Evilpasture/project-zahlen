@@ -4,10 +4,7 @@
 #include "Rendering.hpp"
 // clang-format on
 #include "RenderCore.hpp"
-#include "spirv_reflect.h"
 #include <cstdlib>
-#include <fstream>
-#include <map>
 #include <print>
 
 namespace ZHLN::Vk {
@@ -32,14 +29,14 @@ std::string ReportVkError(VkResult result, const char* context, const std::sourc
 }
 
 void SubmitAndWait(VkQueue queue, VkCommandBuffer cmd, VkSemaphore waitSemaphore, uint64_t waitValue, VkPipelineStageFlags2 waitStage) noexcept {
-    VkCommandBufferSubmitInfo cmdInfo = {
+    VkCommandBufferSubmitInfo cmd_info = {
         .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
         .pNext         = {},
         .commandBuffer = cmd,
         .deviceMask    = {},
     };
 
-    VkSemaphoreSubmitInfo waitInfo = {
+    VkSemaphoreSubmitInfo wait_info = {
         .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
         .pNext       = {},
         .semaphore   = waitSemaphore,
@@ -48,16 +45,16 @@ void SubmitAndWait(VkQueue queue, VkCommandBuffer cmd, VkSemaphore waitSemaphore
         .deviceIndex = {},
     };
 
-    uint32_t waitCount = (waitSemaphore != VK_NULL_HANDLE && waitValue > 0) ? 1 : 0;
+    uint32_t wait_count = (waitSemaphore != VK_NULL_HANDLE && waitValue > 0) ? 1 : 0;
 
     VkSubmitInfo2 submit = {
         .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
         .pNext                    = {},
         .flags                    = {},
-        .waitSemaphoreInfoCount   = waitCount,
-        .pWaitSemaphoreInfos      = waitCount > 0 ? &waitInfo : nullptr,
+        .waitSemaphoreInfoCount   = wait_count,
+        .pWaitSemaphoreInfos      = wait_count > 0 ? &wait_info : nullptr,
         .commandBufferInfoCount   = 1,
-        .pCommandBufferInfos      = &cmdInfo,
+        .pCommandBufferInfos      = &cmd_info,
         .signalSemaphoreInfoCount = {},
         .pSignalSemaphoreInfos    = {},
     };

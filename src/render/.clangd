@@ -4,6 +4,14 @@ CompileFlags:
 
 ---
 
+# Treat .h files as C headers globally
+If:
+  PathMatch: .*\.h
+CompileFlags:
+  Add: [-x, c-header]
+
+---
+
 If:
   PathMatch: src/render/.*\.(hpp|inl)
 CompileFlags:

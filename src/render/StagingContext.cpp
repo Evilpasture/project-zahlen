@@ -45,7 +45,7 @@ void StagingContext::UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uin
 }
 
 void StagingContext::UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, VkBuffer stagingBuf, VkDeviceSize offset) {
-    ZHLN_ImageBarrierDesc initialBarrier = {
+    ZHLN_ImageBarrierDesc initial_barrier = {
         .image      = dstImage,
         .src_access = 0,
         .dst_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
@@ -57,9 +57,9 @@ void StagingContext::UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t 
         .base_mip   = 0,
         .mip_count  = mipLevels
     };
-    ZHLN_CmdImageBarrier(_cmd, &initialBarrier);
+    ZHLN_CmdImageBarrier(_cmd, &initial_barrier);
 
-    ZHLN_BufferImageCopyDesc copyRegion = {
+    ZHLN_BufferImageCopyDesc copy_region = {
         .buffer           = stagingBuf,
         .image            = dstImage,
         .layout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -69,12 +69,12 @@ void StagingContext::UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t 
         .mip_level        = 0,
         .base_array_layer = 0
     };
-    ZHLN_CmdCopyBufferToImage(_cmd, &copyRegion);
+    ZHLN_CmdCopyBufferToImage(_cmd, &copy_region);
 
     if (mipLevels > 1) {
         ZHLN_GenerateMipmaps(_cmd, dstImage, w, h, mipLevels);
     } else {
-        ZHLN_ImageBarrierDesc finalBarrier = {
+        ZHLN_ImageBarrierDesc final_barrier = {
             .image      = dstImage,
             .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
             .dst_access = VK_ACCESS_2_SHADER_READ_BIT,
@@ -86,12 +86,12 @@ void StagingContext::UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t 
             .base_mip   = 0,
             .mip_count  = 1
         };
-        ZHLN_CmdImageBarrier(_cmd, &finalBarrier);
+        ZHLN_CmdImageBarrier(_cmd, &final_barrier);
     }
 }
 
 void StagingContext::UploadPrefilteredCubeMap(VkImage dstImage, VkBuffer stagingBuf, uint32_t baseSize, uint32_t mipLevels) {
-    ZHLN_ImageBarrierDesc initialBarrier = {
+    ZHLN_ImageBarrierDesc initial_barrier = {
         .image      = dstImage,
         .src_access = 0,
         .dst_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
@@ -103,26 +103,26 @@ void StagingContext::UploadPrefilteredCubeMap(VkImage dstImage, VkBuffer staging
         .base_mip   = 0,
         .mip_count  = mipLevels
     };
-    ZHLN_CmdImageBarrier(_cmd, &initialBarrier);
+    ZHLN_CmdImageBarrier(_cmd, &initial_barrier);
 
-    size_t currentOffset = 0;
+    size_t current_offset = 0;
     for (uint32_t mip = 0; mip < mipLevels; ++mip) {
-        uint32_t mipSize  = baseSize >> mip;
-        auto     faceSize = static_cast<size_t>(mipSize) * mipSize * 4;
+        uint32_t mip_size  = baseSize >> mip;
+        auto     face_size = static_cast<size_t>(mip_size) * mip_size * 4;
 
         for (uint32_t face = 0; face < 6; ++face) {
             VkBufferImageCopy2 region = {
                 .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
                 .pNext             = {},
-                .bufferOffset      = currentOffset + (face * faceSize),
+                .bufferOffset      = current_offset + (face * face_size),
                 .bufferRowLength   = {},
                 .bufferImageHeight = {},
                 .imageSubresource  = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = mip, .baseArrayLayer = face, .layerCount = 1},
                 .imageOffset       = {},
-                .imageExtent       = {.width = mipSize, .height = mipSize, .depth = 1},
+                .imageExtent       = {.width = mip_size, .height = mip_size, .depth = 1},
             };
 
-            VkCopyBufferToImageInfo2 copyInfo = {
+            VkCopyBufferToImageInfo2 copy_info = {
                 .sType          = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
                 .pNext          = {},
                 .srcBuffer      = stagingBuf,
@@ -131,12 +131,12 @@ void StagingContext::UploadPrefilteredCubeMap(VkImage dstImage, VkBuffer staging
                 .regionCount    = 1,
                 .pRegions       = &region,
             };
-            vkCmdCopyBufferToImage2(_cmd, &copyInfo);
+            vkCmdCopyBufferToImage2(_cmd, &copy_info);
         }
-        currentOffset += (faceSize * 6);
+        current_offset += (face_size * 6);
     }
 
-    ZHLN_ImageBarrierDesc finalBarrier = {
+    ZHLN_ImageBarrierDesc final_barrier = {
         .image      = dstImage,
         .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
         .dst_access = VK_ACCESS_2_SHADER_READ_BIT,
@@ -148,7 +148,7 @@ void StagingContext::UploadPrefilteredCubeMap(VkImage dstImage, VkBuffer staging
         .base_mip   = 0,
         .mip_count  = mipLevels
     };
-    ZHLN_CmdImageBarrier(_cmd, &finalBarrier);
+    ZHLN_CmdImageBarrier(_cmd, &final_barrier);
 }
 
 void StagingContext::AddBuffer(Buffer&& buf) {
@@ -164,10 +164,10 @@ void StagingContext::ExecuteAsync() {
         _fence = VK_NULL_HANDLE;
     }
 
-    VkFenceCreateInfo fenceInfo = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .pNext = nullptr, .flags = 0};
-    vkCreateFence(_ctx->Device(), &fenceInfo, nullptr, &_fence);
+    VkFenceCreateInfo fence_info = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .pNext = nullptr, .flags = 0};
+    vkCreateFence(_ctx->Device(), &fence_info, nullptr, &_fence);
 
-    VkCommandBufferSubmitInfo subInfo = {
+    VkCommandBufferSubmitInfo sub_info = {
         .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
         .pNext         = {},
         .commandBuffer = _cmd,
@@ -180,7 +180,7 @@ void StagingContext::ExecuteAsync() {
         .waitSemaphoreInfoCount   = {},
         .pWaitSemaphoreInfos      = {},
         .commandBufferInfoCount   = 1,
-        .pCommandBufferInfos      = &subInfo,
+        .pCommandBufferInfos      = &sub_info,
         .signalSemaphoreInfoCount = {},
         .pSignalSemaphoreInfos    = {},
     };

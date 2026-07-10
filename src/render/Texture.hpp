@@ -45,36 +45,36 @@ inline auto UploadTexture(Allocator& allocator, const Context& ctx, const VkImag
     }
 
     TextureCreativeWork result;
-    const uint32_t      textureW = baseInfo.extent.width;
-    const uint32_t      textureH = baseInfo.extent.height;
+    const uint32_t      texture_w = baseInfo.extent.width;
+    const uint32_t      texture_h = baseInfo.extent.height;
 
-    const uint32_t mipLevels = std::bit_width(std::max(textureW, textureH));
+    const uint32_t mip_levels = std::bit_width(std::max(texture_w, texture_h));
 
-    CommandPool batchPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-    if (!batchPool.Allocate(1)) {
+    CommandPool batch_pool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+    if (!batch_pool.Allocate(1)) {
         return {};
     }
-    VkCommandBuffer cmd = batchPool[0];
+    VkCommandBuffer cmd = batch_pool[0];
 
-    VkImageCreateInfo texInfo = baseInfo;
-    texInfo.format            = F; // Force format from template
-    texInfo.mipLevels         = mipLevels;
-    texInfo.usage |= (VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    VkImageCreateInfo tex_info = baseInfo;
+    tex_info.format            = F; // Force format from template
+    tex_info.mipLevels         = mip_levels;
+    tex_info.usage |= (VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
-    result.image = Image::Create(allocator.Get(), texInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+    result.image = Image::Create(allocator.Get(), tex_info, VMA_MEMORY_USAGE_GPU_ONLY);
     if (!result.image) {
         return {};
     }
 
-    const size_t imageSize = static_cast<size_t>(textureW) * textureH * 4;
-    Buffer       staging   = Buffer::Create(allocator.Get(), imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+    const size_t image_size = static_cast<size_t>(texture_w) * texture_h * 4;
+    Buffer       staging    = Buffer::Create(allocator.Get(), image_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
     if (auto mapped = staging.Map(); mapped.data) {
-        std::memcpy(mapped.data, pixelData, imageSize);
+        std::memcpy(mapped.data, pixelData, image_size);
     }
 
     {
         CommandBufferGuard          guard(cmd);
-        const ZHLN_ImageBarrierDesc initialBarrier = {
+        const ZHLN_ImageBarrierDesc initial_barrier = {
             .image      = result.image.Handle(),
             .src_access = 0,
             .dst_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
@@ -84,25 +84,25 @@ inline auto UploadTexture(Allocator& allocator, const Context& ctx, const VkImag
             .dst_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
             .aspect     = GetFormatAspect(F),
             .base_mip   = 0,
-            .mip_count  = mipLevels
+            .mip_count  = mip_levels
         };
-        ZHLN_CmdImageBarrier(cmd, &initialBarrier);
+        ZHLN_CmdImageBarrier(cmd, &initial_barrier);
 
         CopyBufferToImage(
             cmd, {.buffer           = staging.Handle(),
                   .image            = result.image.Handle(),
                   .layout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                  .width            = textureW,
-                  .height           = textureH,
+                  .width            = texture_w,
+                  .height           = texture_h,
                   .buffer_offset    = 0,
                   .mip_level        = 0,
                   .base_array_layer = 0}
         );
 
-        ZHLN_GenerateMipmaps(cmd, result.image.Handle(), (int32_t) textureW, (int32_t) textureH, mipLevels);
+        ZHLN_GenerateMipmaps(cmd, result.image.Handle(), (int32_t) texture_w, (int32_t) texture_h, mip_levels);
     }
 
-    const VkCommandBufferSubmitInfo subInfo = {
+    const VkCommandBufferSubmitInfo sub_info = {
         .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
         .pNext         = {},
         .commandBuffer = cmd,
@@ -115,7 +115,7 @@ inline auto UploadTexture(Allocator& allocator, const Context& ctx, const VkImag
         .waitSemaphoreInfoCount   = {},
         .pWaitSemaphoreInfos      = {},
         .commandBufferInfoCount   = 1,
-        .pCommandBufferInfos      = &subInfo,
+        .pCommandBufferInfos      = &sub_info,
         .signalSemaphoreInfoCount = {},
         .pSignalSemaphoreInfos    = {},
     };
@@ -123,7 +123,7 @@ inline auto UploadTexture(Allocator& allocator, const Context& ctx, const VkImag
     vkQueueWaitIdle(ctx.GraphicsQueue());
 
     // Final View Creation
-    result.view = CreateView<F>(ctx.Device(), result.image.Handle(), GetFormatAspect(F), mipLevels);
+    result.view = CreateView<F>(ctx.Device(), result.image.Handle(), GetFormatAspect(F), mip_levels);
 
     return result;
 }

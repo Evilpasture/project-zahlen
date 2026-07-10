@@ -177,8 +177,8 @@ void RenderContext::Impl::DispatchSkinningPasses() {
                 .inSkinAddr       = skinMesh->vboAddress,
                 .outPosAddr       = scratchMesh->vboAddress,
                 .outAttrAddr      = scratchMesh->vboAddress + (scratchMesh->vertexCount * sizeof(VertexPosition)),
-                .jointsAddr       = Vk::GetBufferDeviceAddress(ctx.Device(), jointBuffers->Handle()),
-                .morphDeltasAddr  = Vk::GetBufferDeviceAddress(ctx.Device(), morphDeltasBuffer.Handle()),
+                .jointsAddr       = Vk::GetBufferAddress(ctx.Device(), jointBuffers->Handle()),
+                .morphDeltasAddr  = Vk::GetBufferAddress(ctx.Device(), morphDeltasBuffer.Handle()),
                 .vertexCount      = posMesh->vertexCount,
                 .jointOffset      = drawCmd.jointOffset,
                 .morphOffset      = drawCmd.morphOffset,
@@ -253,9 +253,9 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
               .dst_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_2_SHADER_READ_BIT}
     );
 
-    ZHLN_TlasGeometryDesc geom = {.instance_data = Vk::GetBufferDeviceAddress(ctx.Device(), instanceBuf.Handle())};
+    ZHLN_TlasGeometryDesc geom = {.instance_data = Vk::GetBufferAddress(ctx.Device(), instanceBuf.Handle())};
 
-    rtCtx.CmdBuildTlas(cmd, geom, tlas[], Vk::GetBufferDeviceAddress(ctx.Device(), tlasScratchBuffer->Handle()), tlasInstancesScratch.size());
+    rtCtx.CmdBuildTlas(cmd, geom, tlas[], Vk::GetBufferAddress(ctx.Device(), tlasScratchBuffer->Handle()), tlasInstancesScratch.size());
 
     Vk::MemoryBarrier(
         cmd, {.src_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,

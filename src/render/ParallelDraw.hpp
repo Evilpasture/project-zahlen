@@ -44,12 +44,12 @@ inline void ParallelDrawDispatch(
     CmdProviderFn&&             cmdProvider,
     RecordFn&&                  recordFn
 ) {
-    uint32_t numChunks = (drawCount + chunkSize - 1) / chunkSize;
-    if (numChunks == 0) {
+    uint32_t num_chunks = (drawCount + chunkSize - 1) / chunkSize;
+    if (num_chunks == 0) {
         return;
     }
 
-    std::vector<VkCommandBuffer> secondaries(numChunks, VK_NULL_HANDLE);
+    std::vector<VkCommandBuffer> secondaries(num_chunks, VK_NULL_HANDLE);
 
     const VkCommandBufferInheritanceRenderingInfo inherit = {
         .sType                   = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
@@ -63,7 +63,7 @@ inline void ParallelDrawDispatch(
         .rasterizationSamples    = VK_SAMPLE_COUNT_1_BIT
     };
 
-    const VkCommandBufferInheritanceInfo pInherit = {
+    const VkCommandBufferInheritanceInfo p_inherit = {
         .sType                = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO,
         .pNext                = &inherit,
         .renderPass           = VK_NULL_HANDLE,
@@ -79,17 +79,17 @@ inline void ParallelDrawDispatch(
         // Fetch the task-local command buffer via the callback lambda
         VkCommandBuffer sec_cmd = std::forward<CmdProviderFn>(cmdProvider)(chunkIdx);
 
-        const VkCommandBufferBeginInfo beginInfo = {
+        const VkCommandBufferBeginInfo begin_info = {
             .sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
             .pNext            = nullptr,
             .flags            = VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT | VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-            .pInheritanceInfo = &pInherit
+            .pInheritanceInfo = &p_inherit
         };
 
-        vkBeginCommandBuffer(sec_cmd, &beginInfo);
+        vkBeginCommandBuffer(sec_cmd, &begin_info);
 
         // Standard, un-flipped viewport
-        const VkViewport viewport = {.x = 0.0f, .y = 0.0f, .width = (float) extent.width, .height = (float) extent.height, .minDepth = 0.0f, .maxDepth = 1.0f};
+        const VkViewport viewport = {.x = 0.0F, .y = 0.0F, .width = (float) extent.width, .height = (float) extent.height, .minDepth = 0.0F, .maxDepth = 1.0F};
         const VkRect2D   scissor  = {.offset = {.x = 0, .y = 0}, .extent = extent};
         vkCmdSetViewport(sec_cmd, 0, 1, &viewport);
         vkCmdSetScissor(sec_cmd, 0, 1, &scissor);
