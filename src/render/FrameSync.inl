@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Sync.hpp"
+#include "FrameSync.hpp"
 
 namespace ZHLN::Vk {
 

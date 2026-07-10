@@ -40,4 +40,4 @@ class FrameSync {
 };
 } // namespace ZHLN::Vk
 
-#include "Sync.inl"
+#include "FrameSync.inl"

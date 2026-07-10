@@ -23,6 +23,8 @@ add_library(zahlen_render STATIC
     Texture.cpp
     Context.cpp
     Swapchain.cpp
+    ShaderStages.cpp
+    Surface.cpp
 )
 set_target_properties(zahlen_render PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
