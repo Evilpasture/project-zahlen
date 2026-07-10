@@ -13,6 +13,97 @@ namespace ZHLN::Vk {
 
 class Context; // Forward declaration
 
+struct DeferredDeletionEntry {
+	enum class Type : uint8_t { Buffer, Image };
+	Type type;
+	VmaAllocator allocator;
+	VmaAllocation allocation;
+	union {
+		VkBuffer buffer;
+		VkImage image;
+	};
+};
+
+class DeletionQueue {
+  public:
+	DeletionQueue() = default;
+	~DeletionQueue();
+
+	DeletionQueue(const DeletionQueue&) = delete;
+	DeletionQueue& operator=(const DeletionQueue&) = delete;
+
+	void Init(uint32_t doubleBufferCount) noexcept;
+	void EnqueueBuffer(VmaAllocator allocator, VkBuffer buffer, VmaAllocation allocation) noexcept;
+	void EnqueueImage(VmaAllocator allocator, VkImage image, VmaAllocation allocation) noexcept;
+	void BeginFrame(uint32_t frameIndex) noexcept;
+
+  private:
+	void CleanupQueue(std::vector<DeferredDeletionEntry>& queue) noexcept;
+
+	std::vector<std::vector<DeferredDeletionEntry>> _queues;
+	uint32_t _currentFrameIndex = 0;
+};
+
+// Overloaded C-helpers to decouple VmaHandle from DeletionQueue definition
+void DeferVmaDestruction(VmaAllocator allocator, VkBuffer buffer, VmaAllocation allocation) noexcept;
+void DeferVmaDestruction(VmaAllocator allocator, VkImage image, VmaAllocation allocation) noexcept;
+extern thread_local DeletionQueue* t_activeDeletionQueue;
+
+template <typename T, auto DeleterFn> class VmaHandle {
+  public:
+	static_assert(std::is_invocable_v<decltype(DeleterFn), VmaAllocator, T, VmaAllocation>);
+	VmaHandle() noexcept = default;
+	VmaHandle(VmaAllocator allocator, T handle, VmaAllocation allocation) noexcept
+		: _allocator(allocator), _handle(handle), _allocation(allocation) {}
+	~VmaHandle() noexcept { Cleanup(); }
+
+	VmaHandle(const VmaHandle&) = delete;
+	auto operator=(const VmaHandle&) -> VmaHandle& = delete;
+
+	VmaHandle(VmaHandle&& other) noexcept
+		: _allocator(std::exchange(other._allocator, nullptr)),
+		  _handle(std::exchange(other._handle, T{})),
+		  _allocation(std::exchange(other._allocation, nullptr)) {}
+
+	auto operator=(VmaHandle&& other) noexcept -> VmaHandle& {
+		if (this != &other) {
+			Cleanup();
+			_allocator = std::exchange(other._allocator, nullptr);
+			_handle = std::exchange(other._handle, T{});
+			_allocation = std::exchange(other._allocation, nullptr);
+		}
+		return *this;
+	}
+
+	[[nodiscard]] auto Get() const noexcept -> T { return _handle; }
+	[[nodiscard]] auto Allocation() const noexcept -> VmaAllocation { return _allocation; }
+	[[nodiscard]] auto Allocator() const noexcept -> VmaAllocator { return _allocator; }
+	[[nodiscard]] auto Valid() const noexcept -> bool { return _handle != T{}; }
+	explicit operator bool() const noexcept { return Valid(); }
+
+	void Cleanup() noexcept {
+		if (_handle != T{}) {
+			if (ZHLN::Vk::t_activeDeletionQueue != nullptr) {
+				if constexpr (std::is_same_v<T, VkBuffer> || std::is_same_v<T, VkImage>) {
+					DeferVmaDestruction(_allocator, _handle, _allocation);
+				} else {
+					DeleterFn(_allocator, _handle, _allocation);
+				}
+			} else {
+				DeleterFn(_allocator, _handle, _allocation);
+			}
+			_handle = T{};
+			_allocation = nullptr;
+			_allocator = nullptr;
+		}
+	}
+
+  private:
+	VmaAllocator _allocator = nullptr;
+	T _handle = T{};
+	VmaAllocation _allocation = nullptr;
+};
+
 // ============================================================================
 // Allocator RAII
 // ============================================================================
@@ -75,7 +166,14 @@ class Buffer {
 		void* data = nullptr;
 
 	  private:
-		VmaHandle<void*, VmaUnmapDeleter> _handle;
+		VmaHandle<void*,
+				  [](VmaAllocator allocator, void*, VmaAllocation allocation) {
+					  if (allocator != nullptr && allocation != nullptr) {
+						  vmaFlushAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
+						  vmaUnmapMemory(allocator, allocation);
+					  }
+				  }>
+			_handle;
 	};
 
 	[[nodiscard]] auto Map() noexcept -> MappedRegion;
@@ -221,37 +319,6 @@ inline void CopyRingBuffer(VkCommandBuffer cmd, StagingRingBuffer::Allocation st
 // ============================================================================
 // Deferred Destruction Queue (Zero-Overhead Memory Reclamation)
 // ============================================================================
-
-struct DeferredDeletionEntry {
-	enum class Type : uint8_t { Buffer, Image };
-	Type type;
-	VmaAllocator allocator;
-	VmaAllocation allocation;
-	union {
-		VkBuffer buffer;
-		VkImage image;
-	};
-};
-
-class DeletionQueue {
-  public:
-	DeletionQueue() = default;
-	~DeletionQueue();
-
-	DeletionQueue(const DeletionQueue&) = delete;
-	DeletionQueue& operator=(const DeletionQueue&) = delete;
-
-	void Init(uint32_t doubleBufferCount) noexcept;
-	void EnqueueBuffer(VmaAllocator allocator, VkBuffer buffer, VmaAllocation allocation) noexcept;
-	void EnqueueImage(VmaAllocator allocator, VkImage image, VmaAllocation allocation) noexcept;
-	void BeginFrame(uint32_t frameIndex) noexcept;
-
-  private:
-	void CleanupQueue(std::vector<DeferredDeletionEntry>& queue) noexcept;
-
-	std::vector<std::vector<DeferredDeletionEntry>> _queues;
-	uint32_t _currentFrameIndex = 0;
-};
 
 // Thread-local scope guard hook
 

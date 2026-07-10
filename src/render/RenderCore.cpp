@@ -14,37 +14,6 @@
 
 namespace ZHLN::Vk {
 
-VkInstance CreateInstance(std::string_view appName, uint32_t appVersion,
-						  std::span<const std::string_view> extensions,
-						  bool enableValidation) noexcept {
-	std::vector<const char*> c_strings;
-	c_strings.reserve(extensions.size());
-	for (const auto& sv : extensions) {
-		c_strings.push_back(sv.data());
-	}
-
-	ZHLN_InstanceDesc inst_desc = {.app_name = {},
-								   .version = appVersion,
-								   .extension_count = static_cast<uint32_t>(c_strings.size()),
-								   .severity_flags =
-									   VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-									   VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
-								   .extensions = c_strings.data(),
-								   .enable_validation = enableValidation};
-
-	const size_t copy_size = ZHLN::Min(appName.size(), sizeof(inst_desc.app_name) - 1);
-	std::memcpy(inst_desc.app_name, appName.data(), copy_size);
-	inst_desc.app_name[copy_size] = '\0';
-
-	return ZHLN_CreateInstance(&inst_desc);
-}
-
-ZHLN_PhysicalDeviceInfo SelectDevice(VkInstance instance, VkSurfaceKHR surface) noexcept {
-	ZHLN_DeviceSelectDesc select_desc = {
-		.instance = instance, .surface = surface, .score_fn = nullptr, .score_userdata = nullptr};
-	return ZHLN_SelectPhysicalDevice(&select_desc);
-}
-
 std::expected<VkResult, std::string> WaitIdle(VkDevice device) noexcept {
 	auto res = vkDeviceWaitIdle(device);
 	if (res != VK_SUCCESS) {

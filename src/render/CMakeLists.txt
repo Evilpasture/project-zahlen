@@ -12,13 +12,8 @@ find_package(Vulkan REQUIRED)
 add_library(zahlen_render STATIC
     RenderCore.c
     VmaImplementation.cpp
-    RenderCore.h
-    RenderCore.hpp
-    Rendering.hpp
     RenderCore.cpp
-    Allocator.hpp
     Commands.cpp
-    StagingContext.hpp
     PipelineBuilder.cpp
     DescriptorLayout.cpp
     DescriptorHeap.cpp
@@ -26,6 +21,8 @@ add_library(zahlen_render STATIC
     SamplerBuilder.cpp
     StagingContext.cpp
     Texture.cpp
+    Context.cpp
+    Swapchain.cpp
 )
 set_target_properties(zahlen_render PROPERTIES POSITION_INDEPENDENT_CODE ON)
 

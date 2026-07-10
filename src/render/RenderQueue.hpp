@@ -152,4 +152,51 @@ struct BufferQueueBarrier {
 	}
 };
 
+template <QueueType QType>
+[[nodiscard]] constexpr auto ResolveQueueFamily(const Context& ctx) noexcept -> uint32_t {
+	if constexpr (QType == QueueType::Graphics || QType == QueueType::Compute) {
+		return ctx.PhysicalInfo().graphics_family;
+	} else if constexpr (QType == QueueType::Transfer) {
+		return ctx.PhysicalInfo().transfer_family;
+	}
+}
+
+/**
+ * @brief Resolves the appropriate raw VkQueue from the context based on QueueType.
+ */
+template <QueueType QType>
+[[nodiscard]] constexpr auto ResolveQueue(const Context& ctx) noexcept -> VkQueue {
+	if constexpr (QType == QueueType::Graphics || QType == QueueType::Compute) {
+		return ctx.GraphicsQueue();
+	} else if constexpr (QType == QueueType::Transfer) {
+		return ctx.TransferQueue();
+	}
+}
+
+/**
+ * @brief Submits a strongly-typed command buffer to its corresponding queue
+ *        and blocks the CPU until execution completes.
+ */
+template <QueueType QType>
+void SubmitAndWait(const Context& ctx, CommandBuffer<QType> cmd) noexcept {
+	VkCommandBufferSubmitInfo sub_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+										  .pNext = nullptr,
+										  .commandBuffer = cmd,
+										  .deviceMask = 0};
+
+	VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+							.pNext = nullptr,
+							.flags = 0,
+							.waitSemaphoreInfoCount = 0,
+							.pWaitSemaphoreInfos = nullptr,
+							.commandBufferInfoCount = 1,
+							.pCommandBufferInfos = &sub_info,
+							.signalSemaphoreInfoCount = 0,
+							.pSignalSemaphoreInfos = nullptr};
+
+	VkQueue queue = ResolveQueue<QType>(ctx);
+	vkQueueSubmit2(queue, 1, &submit, VK_NULL_HANDLE);
+	vkQueueWaitIdle(queue);
+}
+
 } // namespace ZHLN::Vk

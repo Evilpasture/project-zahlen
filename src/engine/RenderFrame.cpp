@@ -959,7 +959,7 @@ RenderResult RenderContext::EndFrame() noexcept {
 	} // <-- The profile timer is destroyed here, committing only the actual recording work
 
 	// 2. Perform the blocking GPU synchronization outside of the CPU Record timer
-	auto wait_res = Vk::SyncFrameBoundary(_impl->ctx, _impl->sync, _impl->frame_index);
+	auto wait_res = _impl->sync.Wait(_impl->frame_index);
 	if (wait_res == VK_ERROR_DEVICE_LOST) {
 		return std::unexpected(DeviceLost);
 	}
