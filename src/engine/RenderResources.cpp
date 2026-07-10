@@ -20,12 +20,18 @@ RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource::Shad
 		return std::unexpected("Failed to compile ShaderStages for Shadow Pipeline.");
 	}
 
-	shadowPipelineLayout =
+	auto shadowPipelineLayout_res =
 		Vk::PipelineLayoutBuilder(device)
 			.AddDescriptorSetLayout(bindlessLayout.Get())
 			.AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 							 sizeof(ObjectConstants))
 			.Build();
+
+	if (!shadowPipelineLayout_res) {
+		return std::unexpected(std::format("Failed to compile Shadow Pipeline Layout: {}",
+										   Vk::ResultString(shadowPipelineLayout_res.error())));
+	}
+	shadowPipelineLayout = std::move(shadowPipelineLayout_res.value());
 
 	auto shadowPipelineRes = Vk::PipelineBuilder{}
 								 .Shaders(shaders)
@@ -50,11 +56,18 @@ RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device,
 		return std::unexpected("Failed to compile ShaderStages for Punctual Shadow Pipeline.");
 	}
 
-	punctualShadowPipelineLayout =
+	auto punctualShadowPipelineLayout_res =
 		Vk::PipelineLayoutBuilder(device)
 			.AddDescriptorSetLayout(bindlessLayout.Get())
 			.AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT, sizeof(uint32_t))
 			.Build();
+
+	if (!punctualShadowPipelineLayout_res) {
+		return std::unexpected(
+			std::format("Failed to compile Punctual Shadow Pipeline Layout: {}",
+						Vk::ResultString(punctualShadowPipelineLayout_res.error())));
+	}
+	punctualShadowPipelineLayout = std::move(punctualShadowPipelineLayout_res.value());
 
 	auto punctualShadowPipelineRes = Vk::PipelineBuilder{}
 										 .Shaders(shaders)
@@ -118,11 +131,19 @@ std::expected<Material, std::string> RenderContext::CreateMaterial(const Pipelin
 	}
 	auto* impl = _impl.get();
 
-	auto layout = Vk::PipelineLayoutBuilder(impl->ctx.Device())
-					  .AddDescriptorSetLayout(impl->bindlessLayout.Get())
-					  .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-									   sizeof(ObjectConstants))
-					  .Build();
+	// Compile the pipeline layout using the updated std::expected pattern
+	auto layout_res =
+		Vk::PipelineLayoutBuilder(impl->ctx.Device())
+			.AddDescriptorSetLayout(impl->bindlessLayout.Get())
+			.AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+							 sizeof(ObjectConstants))
+			.Build();
+
+	if (!layout_res) {
+		return std::unexpected(std::format("Failed to compile Material Pipeline Layout: {}",
+										   Vk::ResultString(layout_res.error())));
+	}
+	auto layout = std::move(*layout_res);
 
 	auto pipeline =
 		Vk::PipelineBuilder{}.Shaders(shaders).Layout(layout.Get()).DepthFormat(VK_FORMAT_D32_SFLOAT);
@@ -221,15 +242,14 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
 	auto gpuView = isSRGB ? Vk::CreateView<VK_FORMAT_R8G8B8A8_SRGB>(
 								device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels)
 						  : Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(
-								device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
 
+								device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
 	uint32_t index = nextTextureIndex++;
 	Vk::UpdateBindlessTextureSlot(device, index, gpuView.Get(), bindlessSets, 0);
-
 	textureImages.push_back(std::move(gpuImage));
 	textureViews.push_back(std::move(gpuView));
 
-	return index;
+	return index; // Return the allocated texture index to the caller
 }
 
 uint32_t RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData, uint32_t width,
@@ -417,10 +437,15 @@ uint32_t RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas)
 	return offset;
 }
 
-void RenderContext::SetShadowResolution(uint32_t resolution) {
+[[nodiscard]] std::expected<void, std::string>
+RenderContext::SetShadowResolution(uint32_t resolution) {
 	auto* impl = _impl.get();
 	auto* device = impl->ctx.Device();
-	Vk::WaitIdle(device);
+	auto res = Vk::WaitIdle(device);
+	if (res != VK_SUCCESS) {
+		return std::unexpected(std::format("Failed to wait for idle on resolution set: {}",
+										   Vk::ResultString(res.value())));
+	}
 
 	impl->graphResources.shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
 		impl->allocator, impl->ctx, {.width = resolution, .height = resolution},
@@ -444,6 +469,7 @@ void RenderContext::SetShadowResolution(uint32_t resolution) {
 	});
 
 	ZHLN::Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);
+	return {};
 }
 
 void RenderContext::SetAAState(const AAState& state) {

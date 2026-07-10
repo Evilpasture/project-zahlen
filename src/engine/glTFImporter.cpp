@@ -997,8 +997,7 @@ void PreparePrefabPhysics(const ModelPrefab& prefab, const JPH::Mat44& baseTrans
 // ----------------------------------------------------------------------------
 Entity InstantiateMeshPart(RenderContext& ctx, ECS::Registry& reg, PhysicsContext& pc,
 						   const ModelPart& part, const PreparedPart& prep,
-						   const SpawnParams& params, Entity rootEntity, float scaleMult,
-						   cgltf_data* gltfData,
+						   const SpawnParams& params, Entity rootEntity, cgltf_data* gltfData,
 						   std::unordered_map<cgltf_skin*, uint32_t>& allocatedSkins) {
 	BufferHandle skinnedVbo = BufferHandle::Invalid;
 	if (part.isSkinned && params.isAnimated) {
@@ -1292,9 +1291,8 @@ uint32_t InstantiatePrefab(RenderContext& ctx, ECS::Registry& reg, PhysicsContex
 	std::unordered_map<cgltf_skin*, uint32_t> allocatedSkins;
 
 	for (uint32_t i = 0; i < prefab.partCount; ++i) {
-		Entity meshEnt =
-			InstantiateMeshPart(ctx, reg, pc, prefab.parts[i], preparedParts[i], params, rootEntity,
-								scaleMult, prefab.rawData, allocatedSkins);
+		Entity meshEnt = InstantiateMeshPart(ctx, reg, pc, prefab.parts[i], preparedParts[i],
+											 params, rootEntity, prefab.rawData, allocatedSkins);
 		if (outBuffer != nullptr && spawnedCount < maxCount) {
 			outBuffer[startIndex + (spawnedCount - startIndex)] = meshEnt;
 		}

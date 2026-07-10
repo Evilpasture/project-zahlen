@@ -1,3 +1,4 @@
+// src/render/Features.inl
 #pragma once
 #include "Features.hpp"
 
@@ -38,15 +39,18 @@ template <typename T> [[nodiscard]] constexpr auto GetStructureType() noexcept -
 // ============================================================================
 
 template <typename... Ts>
-FeatureChain<Ts...>::FeatureChain(std::tuple<FeatureNode<Ts>...>&& t) : _features(std::move(t)) {}
+FeatureChain<Ts...>::FeatureChain(VkPhysicalDevice physicalDevice,
+								  std::tuple<FeatureNode<Ts>...>&& t)
+	: _features(std::move(t)), _physicalDevice(physicalDevice) {}
 
 template <typename... Ts>
 template <typename T, typename Func>
 auto FeatureChain<Ts...>::Require(Func&& configure) && {
 	T feature{};
-	configure(feature);
+	std::forward<Func>(configure)(feature);
 	FeatureNode<T> node{.feature = feature, .active = true};
-	return FeatureChain<Ts..., T>(std::tuple_cat(std::move(_features), std::make_tuple(node)));
+	return FeatureChain<Ts..., T>(_physicalDevice,
+								  std::tuple_cat(std::move(_features), std::make_tuple(node)));
 }
 
 // Helpers for automated runtime support checking
@@ -92,15 +96,16 @@ template <typename T>
 
 template <typename... Ts>
 template <typename T, typename Func>
-auto FeatureChain<Ts...>::Optional(VkPhysicalDevice physicalDevice, Func&& configure) && {
+auto FeatureChain<Ts...>::Optional(Func&& configure) && {
 	T requested{};
 	std::forward<Func>(configure)(requested);
 
-	T supported = QueryFeatureSupport<T>(physicalDevice);
+	T supported = QueryFeatureSupport<T>(_physicalDevice);
 	bool condition = IsSubsetOf(requested, supported);
 
 	FeatureNode<T> node{.feature = requested, .active = condition};
-	return FeatureChain<Ts..., T>(std::tuple_cat(std::move(_features), std::make_tuple(node)));
+	return FeatureChain<Ts..., T>(_physicalDevice,
+								  std::tuple_cat(std::move(_features), std::make_tuple(node)));
 }
 
 template <typename... Ts> FeatureChain<Ts...>& FeatureChain<Ts...>::Build() {
@@ -160,12 +165,13 @@ template <typename... Ts> const VkPhysicalDeviceFeatures2* FeatureChain<Ts...>::
 // ============================================================================
 
 template <typename T, typename Func> auto FeatureChainBuilder::Require(Func&& configure) {
-	return FeatureChain<>().template Require<T>(std::forward<Func>(configure));
+	return FeatureChain<>(_physicalDevice, std::make_tuple())
+		.template Require<T>(std::forward<Func>(configure));
 }
 
-template <typename T, typename Func>
-auto FeatureChainBuilder::Optional(VkPhysicalDevice physicalDevice, Func&& configure) {
-	return FeatureChain<>().template Optional<T>(physicalDevice, std::forward<Func>(configure));
+template <typename T, typename Func> auto FeatureChainBuilder::Optional(Func&& configure) {
+	return FeatureChain<>(_physicalDevice, std::make_tuple())
+		.template Optional<T>(std::forward<Func>(configure));
 }
 
 // ============================================================================

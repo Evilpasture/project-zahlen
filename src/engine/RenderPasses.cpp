@@ -225,7 +225,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 		passWriteOffsets[4 + l] = (4 + l) * kGpuCullingMaxInstances;
 	}
 
-	std::array<uint32_t, 8> passDrawCounts = {0, 0, 0, 0, 0, 0, 0, 0};
+	std::array<uint32_t, 8> passDrawCounts{};
 
 	// 1. Pre-filter active shadow-casting point lights once to eliminate redundant loop overhead
 	std::array<const GPULight*, 4> activeShadowLights{};

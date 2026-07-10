@@ -112,14 +112,18 @@ std::expected<void, std::string> RenderContext::Impl::InitSubsystems(const Rende
 	graphicsCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().graphics_family);
 	transferCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().transfer_family);
 
-	InitShadowResources();
+	if (!InitShadowResources()) {
+		return std::unexpected("Failed to initialize Shadow Resources.");
+	}
 
 	auto cull_res = InitCullingResources();
 	if (!cull_res) {
 		return std::unexpected(cull_res.error());
 	}
 
-	InitBindless();
+	if (!InitBindless()) {
+		return std::unexpected("Failed to initialize Bindless Descriptors.");
+	}
 
 	auto hang_res = BuildHangGpuPipeline();
 	if (!hang_res) {
@@ -185,13 +189,13 @@ std::expected<void, std::string> RenderContext::Impl::InitSubsystems(const Rende
 	if (!res0) {
 		return std::unexpected(
 			std::format("Failed to allocate hardware command pools for parallel recorder [0]: {}",
-						ZHLN_VkResultString(res0.error())));
+						Vk::ResultString(res0.error())));
 	}
 	auto res1 = parallelRecorder[1].Init(ctx.Device(), ctx.PhysicalInfo().graphics_family);
 	if (!res1) {
 		return std::unexpected(
 			std::format("Failed to allocate hardware command pools for parallel recorder [1]: {}",
-						ZHLN_VkResultString(res1.error())));
+						Vk::ResultString(res1.error())));
 	}
 
 	deletionQueue.Init(2);
@@ -240,7 +244,7 @@ std::vector<std::string_view> GetPlatformInstanceExtensions(Window& window,
 }
 
 auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps) noexcept {
-	return Vk::FeatureChainBuilder()
+	return Vk::FeatureChainBuilder(physicalDevice)
 		.Require<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>(
 			[](auto& f) { f.swapchainMaintenance1 = VK_TRUE; })
 		.Require<VkPhysicalDeviceVulkan11Features>([](auto& f) {
@@ -263,13 +267,11 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
 			f.hostQueryReset = VK_TRUE;
 			f.timelineSemaphore = VK_TRUE;
 			f.drawIndirectCount = caps.supportsDrawIndirectCount ? VK_TRUE : VK_FALSE;
-			f.bufferDeviceAddress = VK_TRUE;
 			f.uniformAndStorageBuffer8BitAccess = VK_TRUE;
 		})
 		.Optional<VkPhysicalDeviceAccelerationStructureFeaturesKHR>(
-			physicalDevice, [](auto& f) { f.accelerationStructure = VK_TRUE; })
-		.Optional<VkPhysicalDeviceRayQueryFeaturesKHR>(physicalDevice,
-													   [](auto& f) { f.rayQuery = VK_TRUE; })
+			[](auto& f) { f.accelerationStructure = VK_TRUE; })
+		.Optional<VkPhysicalDeviceRayQueryFeaturesKHR>([](auto& f) { f.rayQuery = VK_TRUE; })
 		.Require<VkPhysicalDeviceFeatures2>([&](auto& f) {
 			f.features.multiDrawIndirect = VK_TRUE;
 			f.features.samplerAnisotropy = VK_TRUE;
@@ -471,7 +473,10 @@ RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept {
 
 RenderContext::~RenderContext() {
 	if (_impl && (_impl->ctx.Device() != nullptr)) {
-		vkDeviceWaitIdle(_impl->ctx.Device());
+		auto res = Vk::WaitIdle(_impl->ctx.Device());
+		if (res != VK_SUCCESS) {
+			ZHLN::Log("ERROR: Failed to wait for idle on device destruction.");
+		}
 		_impl->stagingContext.reset();
 
 		// --- SAFETY: Only shut down ImGui if it was actually initialized ---
@@ -537,12 +542,18 @@ void RenderContext::Impl::RecreatePunctualShadowViews() noexcept {
 	}
 }
 
-void RenderContext::Impl::InitShadowResources() {
-	shadowSampler = Vk::SamplerBuilder{}
-						.Linear()
-						.ClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE)
-						.DepthCompare()
-						.Build(ctx.Device());
+std::expected<void, std::string> RenderContext::Impl::InitShadowResources() {
+	auto shadowResult = Vk::SamplerBuilder{}
+							.Linear()
+							.ClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE)
+							.DepthCompare()
+							.Build(ctx.Device());
+
+	if (!shadowResult) {
+		return std::unexpected(
+			std::format("Failed to create Shadow Sampler: {}", shadowResult.error()));
+	}
+	shadowSampler = std::move(*shadowResult);
 
 	graphResources.shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
 		allocator, ctx, {.width = SHADOW_RES, .height = SHADOW_RES},
@@ -594,6 +605,7 @@ void RenderContext::Impl::InitShadowResources() {
 	shadowIndirectBuffers =
 		CreateDoubleBuffered(allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances * 8,
 							 VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	return {};
 }
 
 std::expected<void, std::string> RenderContext::Impl::InitCullingResources() {
@@ -809,42 +821,38 @@ void RenderContext::Impl::InitLightingLUTs() {
 	ltcMatView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle());
 	ltcAmpView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle());
 }
-
-void RenderContext::Impl::InitBindless() {
+[[nodiscard]]
+std::expected<void, std::string> RenderContext::Impl::InitBindless() {
 	Vk::AllocateDoubleBufferedSet<GlobalSceneLayout>(ctx.Device(), bindlessLayout, bindlessPool,
 													 bindlessSets);
 
-	VkSamplerCreateInfo samplerInfo = {
-		.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-		.pNext = nullptr,
-		.flags = 0,
-		.magFilter = VK_FILTER_LINEAR,
-		.minFilter = VK_FILTER_LINEAR,
-		.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
-		.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-		.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-		.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-		.mipLodBias = 0,
-		.anisotropyEnable = VK_TRUE,
-		.maxAnisotropy = ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy,
-		.compareEnable = VK_FALSE,
-		.compareOp = VK_COMPARE_OP_NEVER,
-		.minLod = 0.0f,
-		.maxLod = 0.0f,
-		.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
-		.unnormalizedCoordinates = VK_FALSE,
-	};
-	VkSampler rawSampler = VK_NULL_HANDLE;
-	vkCreateSampler(ctx.Device(), &samplerInfo, nullptr, &rawSampler);
-	globalSampler = Vk::Sampler(ctx.Device(), rawSampler);
-	// Create the math/environment sampler (ClampToEdge prevents wrap-around artifacts)
-	clampSampler = Vk::SamplerBuilder{}.Linear().ClampToEdge().Build(ctx.Device());
+	// 1. Try building the global sampler
+	auto globalResult =
+		Vk::SamplerBuilder{}
+			.Linear()
+			.Repeat()
+			.Anisotropy(ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy)
+			.LodRange(0.0f, 0.0f)
+			.Build(ctx.Device());
+
+	if (!globalResult) {
+		return std::unexpected(std::string("Global Sampler: ") + globalResult.error());
+	}
+	globalSampler = std::move(*globalResult);
+
+	// 2. Try building the clamp sampler
+	auto clampResult = Vk::SamplerBuilder{}.Linear().ClampToEdge().Build(ctx.Device());
+
+	if (!clampResult) {
+		return std::unexpected(std::string("Clamp Sampler: ") + clampResult.error());
+	}
+	clampSampler = std::move(*clampResult);
 
 	InitSkeletalAnimationResources();
 	InitLightingLUTs();
 
 	ZHLN::Log("[RenderInit] Pre-allocating persistently mapped Double-Buffered Debug VBOs...");
-	size_t maxDebugVerts = 500000; // Large enough for dense wireframes (~32MB)
+	size_t maxDebugVerts = 500000;
 	size_t bufferSize = maxDebugVerts * (sizeof(VertexPosition) + sizeof(VertexAttributes));
 	for (int i = 0; i < 2; ++i) {
 		auto gpu_buf = Vk::Buffer::Create(allocator.Get(), bufferSize,
@@ -852,7 +860,7 @@ void RenderContext::Impl::InitBindless() {
 											  VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
 										  VMA_MEMORY_USAGE_CPU_TO_GPU);
 
-		VkDeviceAddress address = Vk::GetBufferDeviceAddress(ctx.Device(), gpu_buf.Handle());
+		auto address = Vk::GetBufferDeviceAddress(ctx.Device(), gpu_buf.Handle());
 		debugMeshHandles[i] = meshPool.Create(std::move(gpu_buf), maxDebugVerts, address);
 	}
 
@@ -875,7 +883,10 @@ void RenderContext::Impl::InitBindless() {
 
 		bindlessRegistry.UpdateSet(ctx.Device(), bindlessSets[i]);
 	}
+
+	return {}; // Everything succeeded!
 }
+
 using enum Resource::ShaderID;
 std::expected<void, std::string> RenderContext::Impl::BuildTAAPipeline() {
 	VkPushConstantRange taaPush = {
@@ -995,7 +1006,7 @@ std::expected<void, std::string> RenderContext::Impl::BuildLightingPipeline() {
 
 std::expected<void, std::string> RenderContext::Impl::BuildReflectionPipelines() {
 	VkPushConstantRange ppPush = {
-		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
+		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(PPPushConstants)};
 
 	struct SpecData {
 		int enableSSR;
@@ -1048,8 +1059,9 @@ std::expected<void, std::string> RenderContext::Impl::BuildBloomPipelines() {
 		return res;
 	}
 
-	VkPushConstantRange kawasePush = {
-		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 16};
+	VkPushConstantRange kawasePush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+									  .offset = 0,
+									  .size = sizeof(KawasePushConstants)};
 
 	for (int i = 0; i < 3; ++i) {
 		std::string downName = std::format("Bloom Downsample {}", i);
@@ -1099,8 +1111,16 @@ std::expected<void, std::string> RenderContext::Impl::BuildBlitPipeline() {
 }
 
 std::expected<void, std::string> RenderContext::Impl::InitPostProcessing() {
-	defaultSampler = Vk::SamplerBuilder{}.Linear().ClampToEdge().Build(ctx.Device());
-	pointSampler = Vk::SamplerBuilder{}.Nearest().ClampToEdge().Build(ctx.Device());
+	auto defaultResult = Vk::SamplerBuilder{}.Linear().ClampToEdge().Build(ctx.Device());
+	if (!defaultResult) {
+		std::unexpected(std::format("Failed to create default Sampler: {}", defaultResult.error()));
+	}
+	defaultSampler = std::move(*defaultResult);
+	auto pointResult = Vk::SamplerBuilder{}.Nearest().ClampToEdge().Build(ctx.Device());
+	if (!pointResult) {
+		std::unexpected(std::format("Failed to create point Sampler: {}", pointResult.error()));
+	}
+	pointSampler = std::move(*pointResult);
 
 	// Unified build and watch registration helper
 	auto register_and_check =
@@ -1195,59 +1215,45 @@ std::expected<void, std::string> RenderContext::Impl::InitPostProcessing() {
 }
 
 std::expected<void, std::string> RenderContext::Impl::SetupUI(GLFWwindow* window) {
-	const std::array pool_sizes = {
-		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_SAMPLER, .descriptorCount = 1000},
-		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-							 .descriptorCount = 1000},
-		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .descriptorCount = 1000},
-		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .descriptorCount = 1000},
-		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,
-							 .descriptorCount = 1000},
-		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,
-							 .descriptorCount = 1000},
-		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = 1000},
-		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 1000},
-		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-							 .descriptorCount = 1000},
-		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC,
-							 .descriptorCount = 1000},
-		VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, .descriptorCount = 1000}};
+	auto uiPool_res = Vk::DescriptorPoolBuilder(ctx.Device())
+						  .Flags(VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT)
+						  .MaxSets(1000)
+						  .AddSize(VK_DESCRIPTOR_TYPE_SAMPLER, 1000)
+						  .AddSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000)
+						  .AddSize(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000)
+						  .AddSize(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000)
+						  .AddSize(VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000)
+						  .AddSize(VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000)
+						  .AddSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000)
+						  .AddSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000)
+						  .AddSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000)
+						  .AddSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000)
+						  .AddSize(VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000)
+						  .Build();
 
-	const VkDescriptorPoolCreateInfo pool_info = {
-		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-		.pNext = nullptr,
-		.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-		.maxSets = 1000,
-		.poolSizeCount = std::size(pool_sizes),
-		.pPoolSizes = pool_sizes.data(),
-	};
-
-	VkDescriptorPool rawPool = VK_NULL_HANDLE;
-	if (vkCreateDescriptorPool(ctx.Device(), &pool_info, nullptr, &rawPool) != VK_SUCCESS) {
-		return std::unexpected("Failed to create UI Descriptor Pool.");
+	if (!uiPool_res) {
+		return std::unexpected(std::format("Failed to create UI Descriptor Pool: {}",
+										   Vk::ResultString(uiPool_res.error())));
 	}
-	uiPool = Vk::DescriptorPool(ctx.Device(), rawPool);
+	uiPool = std::move(uiPool_res.value());
 
 	auto uiShaders = Vk::ShaderStages::Create(ctx.Device(), Resource::GetShaderProgram(Ui));
 	if (!uiShaders.Valid()) {
 		return std::unexpected("Failed to compile or load UI ShaderStages.");
 	}
 
-	VkPushConstantRange uiPush = {.stageFlags =
-									  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-								  .offset = 0,
-								  .size = sizeof(UIObjectConstants)};
-	VkDescriptorSetLayout rawLayout = bindlessLayout.Get();
-	ZHLN_PipelineLayoutDesc uiLayoutDesc = {.set_layouts = &rawLayout,
-											.set_layout_count = 1,
-											.push_constants = &uiPush,
-											.push_constant_count = 1};
+	// Build the UI Pipeline Layout using the fluent builder
+	auto uiPipelineLayout_res =
+		Vk::PipelineLayoutBuilder(ctx.Device())
+			.AddDescriptorSetLayout(bindlessLayout.Get())
+			.AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+							 sizeof(UIObjectConstants))
+			.Build();
 
-	VkPipelineLayout rawLayoutHandle = ZHLN_CreatePipelineLayout(ctx.Device(), &uiLayoutDesc);
-	if (rawLayoutHandle == VK_NULL_HANDLE) {
+	if (!uiPipelineLayout_res) {
 		return std::unexpected("Failed to compile UI Pipeline Layout.");
 	}
-	uiPipelineLayout = Vk::PipelineLayout(ctx.Device(), rawLayoutHandle);
+	uiPipelineLayout = std::move(uiPipelineLayout_res.value());
 
 	VkFormat swapchainFormat = presentation.swapchain.Get().format;
 

@@ -448,23 +448,17 @@ struct PassFactory {
 			});
 	}
 
-	struct KawasePushConstants {
-		int mode;
-		float rcpWidth;
-		float rcpHeight;
-		float padding;
-	};
-
 	// Downsample version (single source)
 	template <typename SrcImgT, typename PassT>
 	static void RunKawasePass(VkDevice device, VkCommandBuffer cmd, PassT& pass, const SrcImgT& src,
 							  const Vk::Sampler& defaultSampler) noexcept {
 		pass.WriteNext(device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src),
 					   defaultSampler.Get(), Vk::SkipWrite{});
-		pass.Execute(cmd, KawasePushConstants{.mode = 0,
-											  .rcpWidth = 1.0f / (float)src.extent.width,
-											  .rcpHeight = 1.0f / (float)src.extent.height,
-											  .padding = 0.0f});
+		pass.Execute(cmd, RenderContext::Impl::KawasePushConstants{
+							  .mode = 0,
+							  .rcpWidth = 1.0f / (float)src.extent.width,
+							  .rcpHeight = 1.0f / (float)src.extent.height,
+							  .padding = 0.0f});
 	}
 
 	// Upsample version (dual sources)
@@ -474,10 +468,11 @@ struct PassFactory {
 		pass.WriteNext(device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src),
 					   defaultSampler.Get(),
 					   Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src2));
-		pass.Execute(cmd, KawasePushConstants{.mode = 1,
-											  .rcpWidth = 1.0f / (float)src.extent.width,
-											  .rcpHeight = 1.0f / (float)src.extent.height,
-											  .padding = 0.0f});
+		pass.Execute(cmd, RenderContext::Impl::KawasePushConstants{
+							  .mode = 1,
+							  .rcpWidth = 1.0f / (float)src.extent.width,
+							  .rcpHeight = 1.0f / (float)src.extent.height,
+							  .padding = 0.0f});
 	}
 
 	template <size_t Index> [[nodiscard]] auto MakeBloomDownPass() const noexcept {
@@ -872,10 +867,6 @@ RenderResult RenderContext::BeginFrame() noexcept {
 	return {};
 }
 
-void RenderContext::Impl::FlipSubsystems() noexcept {
-	ZHLN::Reflect::ForEachField(*this, [](auto& field) { FlipObject(field); });
-}
-
 RenderResult RenderContext::EndFrame() noexcept {
 	struct EndFrameGuard {
 		RenderContext::Impl* impl;
@@ -959,7 +950,7 @@ RenderResult RenderContext::EndFrame() noexcept {
 		}
 
 		// Flip double-buffered resources to prepare for the next frame
-		_impl->FlipSubsystems();
+		ZHLN::Reflect::ForEachField(*_impl, [](auto& field) { FlipObject(field); });
 
 		_impl->drawQueue.clear();
 		_impl->uiDrawQueue.clear();

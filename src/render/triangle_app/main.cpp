@@ -20,7 +20,7 @@ auto main() -> int {
 	inst_desc.extensions = inst_exts.data();
 	inst_desc.extension_count = static_cast<uint32_t>(inst_exts.size());
 
-	auto features = Vk::FeatureChainBuilder()
+	auto features = Vk::FeatureChainBuilder(VK_NULL_HANDLE)
 						.Require<VkPhysicalDeviceVulkan13Features>([](auto& f) {
 							f.synchronization2 = VK_TRUE;
 							f.dynamicRendering = VK_TRUE;
@@ -59,10 +59,14 @@ auto main() -> int {
 		return -1;
 	}
 
-	auto layout = Vk::PipelineLayoutBuilder(ctx.Device()).Build();
+	auto layout_res = Vk::PipelineLayoutBuilder(ctx.Device()).Build();
+	if (!layout_res) {
+		return -1;
+	}
+
 	auto pipeline = Vk::PipelineBuilder{}
 						.Shaders(shaders)
-						.Layout(layout.Get())
+						.Layout(layout_res->Get()) // <-- Accessed safely via pointer semantics
 						.ColorFormats({pres.swapchain.Get().format})
 						.NoDepth()
 						.CullNone()

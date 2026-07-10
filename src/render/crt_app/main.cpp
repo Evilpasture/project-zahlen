@@ -1,15 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// clang-format off
 #include "Rendering.hpp"
-// clang-format on
-#include "Allocator.hpp"
-#include "DescriptorLayout.hpp"
-#include "PipelineBuilder.hpp"
-#include "RenderCore.hpp"
-#include "SamplerBuilder.hpp"
-#include "TextureUtils.hpp"
 #include "demo_utils/DemoWindow.hpp"
 
 #include <chrono>
@@ -211,7 +203,13 @@ int main() {
 	// View & Sampler RAII Helpers
 	auto textureView =
 		ZHLN::Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(ctx.Device(), textureImage.Handle());
-	auto sampler = ZHLN::Vk::SamplerBuilder{}.Linear().Repeat().Build(ctx.Device());
+
+	auto sampler_res = ZHLN::Vk::SamplerBuilder{}.Linear().Repeat().Build(ctx.Device());
+	if (!sampler_res) {
+		std::println(stderr, "FATAL: Failed to build sampler: {}", sampler_res.error());
+		return -1;
+	}
+	auto sampler = std::move(*sampler_res);
 
 	// =========================================================================
 	// 5. Descriptor Sets

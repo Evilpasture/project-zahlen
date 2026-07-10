@@ -191,7 +191,13 @@ int main() {
 	// Image View & Sampler via RAII Helpers
 	auto cube_texture_view =
 		ZHLN::Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(ctx.Device(), cube_texture_image.Handle());
-	auto cube_sampler = ZHLN::Vk::SamplerBuilder{}.Linear().Repeat().Build(ctx.Device());
+
+	auto cube_sampler_res = ZHLN::Vk::SamplerBuilder{}.Linear().Repeat().Build(ctx.Device());
+	if (!cube_sampler_res) {
+		std::println(stderr, "FATAL: Failed to build cube sampler: {}", cube_sampler_res.error());
+		return -1;
+	}
+	auto cube_sampler = std::move(*cube_sampler_res);
 
 	// =========================================================================
 	// 5. Descriptor Sets for Cube Texture via TMP Backend
@@ -391,9 +397,6 @@ int main() {
 	}
 
 	vkDeviceWaitIdle(ctx.Device());
-
-	// All RAII handles (Device, Instance, Views, Images, Pipelines, Pools, Allocator)
-	// will cleanly self-destruct here without leaking or requiring explicit vkDestroy calls.
 	ZHLN::Demo::DestroyWindow(win);
 	return 0;
 }

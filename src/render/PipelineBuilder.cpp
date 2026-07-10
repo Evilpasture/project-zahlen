@@ -114,13 +114,22 @@ PipelineLayoutBuilder& PipelineLayoutBuilder::AddPushConstant(VkShaderStageFlags
 	return *this;
 }
 
-PipelineLayout PipelineLayoutBuilder::Build() const noexcept {
-	ZHLN_PipelineLayoutDesc desc = {
-		.set_layouts = _setLayouts.empty() ? nullptr : _setLayouts.data(),
-		.set_layout_count = static_cast<uint32_t>(_setLayouts.size()),
-		.push_constants = _pushConstants.empty() ? nullptr : _pushConstants.data(),
-		.push_constant_count = static_cast<uint32_t>(_pushConstants.size())};
-	return {_device, ZHLN_CreatePipelineLayout(_device, &desc)};
+auto PipelineLayoutBuilder::Build() const noexcept -> std::expected<PipelineLayout, VkResult> {
+	const VkPipelineLayoutCreateInfo info = {
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+		.pNext = nullptr,
+		.flags = 0,
+		.setLayoutCount = static_cast<uint32_t>(_setLayouts.size()),
+		.pSetLayouts = _setLayouts.empty() ? nullptr : _setLayouts.data(),
+		.pushConstantRangeCount = static_cast<uint32_t>(_pushConstants.size()),
+		.pPushConstantRanges = _pushConstants.empty() ? nullptr : _pushConstants.data()};
+
+	VkPipelineLayout layout = VK_NULL_HANDLE;
+	VkResult res = vkCreatePipelineLayout(_device, &info, nullptr, &layout);
+	if (res != VK_SUCCESS) {
+		return std::unexpected(res);
+	}
+	return PipelineLayout(_device, layout);
 }
 
 } // namespace ZHLN::Vk

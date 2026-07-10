@@ -1,12 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "engine/system/LightingSystem.hpp"
-
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <algorithm>
@@ -83,7 +82,9 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 			shadowSettings->shadowResolution = newRes;
 
 			// Trigger depth texture allocation changes
-			engine.GetRenderContext().SetShadowResolution(newRes);
+			if (auto res = engine.GetRenderContext().SetShadowResolution(newRes); !res) {
+				ZHLN::Log("ERROR: Failed to update shadow resolution: {}", res.error());
+			}
 		}
 		ImGui::End();
 	}

@@ -93,7 +93,7 @@ auto Allocator::Init(const Context& ctx) noexcept -> bool {
 // ============================================================================
 // Buffer RAII
 // ============================================================================
-
+[[nodiscard]]
 auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage,
 					VmaMemoryUsage mem_usage) noexcept -> Buffer {
 	VkBuffer buffer = VK_NULL_HANDLE;

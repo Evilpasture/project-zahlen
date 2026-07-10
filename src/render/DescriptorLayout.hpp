@@ -36,8 +36,8 @@ using BindlessCombinedImageSamplerSlot =
 	BindingSlot<B, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, S, Count, kBindlessFlags>;
 
 template <uint32_t B, VkShaderStageFlags S = VK_SHADER_STAGE_FRAGMENT_BIT>
-using SampledImageSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, S, 1,
-									 VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT>;
+using SampledImageSlot =
+	BindingSlot<B, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, S, 1, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT>;
 
 template <uint32_t B, VkShaderStageFlags S = VK_SHADER_STAGE_FRAGMENT_BIT>
 using SamplerSlot =
@@ -48,8 +48,8 @@ using CombinedImageSamplerSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_COMBINED_IMAG
 											 VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT>;
 
 template <uint32_t B, VkShaderStageFlags S = VK_SHADER_STAGE_COMPUTE_BIT>
-using StorageImageSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, S, 1,
-									 VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT>;
+using StorageImageSlot =
+	BindingSlot<B, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, S, 1, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT>;
 
 template <uint32_t B, VkShaderStageFlags S = VK_SHADER_STAGE_VERTEX_BIT>
 using UniformSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, S, 1,
@@ -225,6 +225,27 @@ template <typename... Slots> class DescriptorLayout {
 						  VkDescriptorBufferInfo& bufferInfo,
 						  VkWriteDescriptorSetAccelerationStructureKHR& asInfo,
 						  VkWriteDescriptorSet& write) noexcept;
+};
+
+// ============================================================================
+// Descriptor Pool Builder
+// ============================================================================
+
+class DescriptorPoolBuilder {
+  public:
+	explicit DescriptorPoolBuilder(VkDevice device) noexcept;
+
+	auto Flags(VkDescriptorPoolCreateFlags flags) noexcept -> DescriptorPoolBuilder&;
+	auto MaxSets(uint32_t maxSets) noexcept -> DescriptorPoolBuilder&;
+	auto AddSize(VkDescriptorType type, uint32_t count) noexcept -> DescriptorPoolBuilder&;
+
+	[[nodiscard]] auto Build() const noexcept -> std::expected<DescriptorPool, VkResult>;
+
+  private:
+	VkDevice _device;
+	VkDescriptorPoolCreateFlags _flags = 0;
+	uint32_t _maxSets = 1;
+	std::vector<VkDescriptorPoolSize> _sizes;
 };
 
 // ============================================================================

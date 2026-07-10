@@ -85,7 +85,7 @@ class ZHLN_API RenderContext {
 
 	void BuildMeshBLAS(Mesh& mesh);
 
-	void SetShadowResolution(uint32_t resolution);
+	[[nodiscard]] std::expected<void, std::string> SetShadowResolution(uint32_t resolution);
 
 	void ProvokeDeviceLost();
 

@@ -80,9 +80,23 @@ auto SamplerBuilder::DepthCompare(VkCompareOp op) noexcept -> SamplerBuilder& {
 	return *this;
 }
 
-auto SamplerBuilder::Build(VkDevice device) const noexcept -> Sampler {
-	VkSampler sampler = ZHLN_CreateSampler(device, &_info);
-	return {device, sampler};
+auto SamplerBuilder::LodRange(float minLod, float maxLod) noexcept -> SamplerBuilder& {
+	_info.minLod = minLod;
+	_info.maxLod = maxLod;
+	return *this;
+}
+
+auto SamplerBuilder::Build(VkDevice device) const noexcept -> std::expected<Sampler, std::string> {
+	if (device == VK_NULL_HANDLE) {
+		return std::unexpected("Device handle is null.");
+	}
+
+	VkSampler sampler = nullptr;
+	if (vkCreateSampler(device, &_info, nullptr, &sampler) != VK_SUCCESS) {
+		return std::unexpected("Failed to create sampler.");
+	}
+
+	return Sampler{device, sampler};
 }
 
 } // namespace ZHLN::Vk

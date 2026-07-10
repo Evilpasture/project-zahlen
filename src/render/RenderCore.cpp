@@ -45,11 +45,19 @@ ZHLN_PhysicalDeviceInfo SelectDevice(VkInstance instance, VkSurfaceKHR surface) 
 	return ZHLN_SelectPhysicalDevice(&select_desc);
 }
 
+std::expected<VkResult, std::string> WaitIdle(VkDevice device) noexcept {
+	auto res = vkDeviceWaitIdle(device);
+	if (res != VK_SUCCESS) {
+		return std::unexpected(ResultString(res));
+	}
+	return res;
+}
+
 std::string ReportVkError(VkResult result, const char* context,
 						  const std::source_location& location = std::source_location::current()) {
 	return std::format("[Vk Error] {}:{} in {}: {} failed with {}", location.file_name(),
 					   location.line(), location.function_name(), context,
-					   ZHLN_VkResultString(result));
+					   Vk::ResultString(result));
 }
 
 [[noreturn]] void ReportSemaphoreBoundsError(uint32_t index, uint32_t count) noexcept {

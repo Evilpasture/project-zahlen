@@ -1032,7 +1032,7 @@ inline auto Surface::Get() const -> VkSurfaceKHR {
 // Error Helpers Implementation
 // ============================================================================
 
-inline auto ResultString(const VkResult result) noexcept -> const char* {
+inline auto ResultString(const VkResult result) noexcept -> std::string {
 	return ZHLN_VkResultString(result);
 }
 
@@ -1163,9 +1163,10 @@ inline auto CreateView(VkDevice device, VkImage image, VkImageAspectFlags aspect
 		.mip_levels = mips,
 		.array_layers = 1,
 		.view_type = VK_IMAGE_VIEW_TYPE_2D,
-		.base_array_layer = {},
+		.base_array_layer = 0,
 	};
-	return {device, ZHLN_CreateImageView(device, &desc)};
+	VkImageView view = ZHLN_CreateImageView(device, &desc);
+	return ImageView{device, view};
 }
 
 template <VkFormat F>
@@ -1177,9 +1178,10 @@ inline auto CreateViewCube(VkDevice device, VkImage image, uint32_t mips) -> Ima
 		.mip_levels = mips,
 		.array_layers = 6,
 		.view_type = VK_IMAGE_VIEW_TYPE_CUBE,
-		.base_array_layer = {},
+		.base_array_layer = 0,
 	};
-	return {device, ZHLN_CreateImageView(device, &desc)};
+	VkImageView view = ZHLN_CreateImageView(device, &desc);
+	return ImageView{device, view};
 }
 
 template <VkFormat F>
@@ -1193,7 +1195,8 @@ inline auto CreateView2DArray(VkDevice device, VkImage image, uint32_t baseLayer
 							   .array_layers = layerCount,
 							   .view_type = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
 							   .base_array_layer = baseLayer};
-	return {device, ZHLN_CreateImageView(device, &desc)};
+	VkImageView view = ZHLN_CreateImageView(device, &desc);
+	return ImageView{device, view};
 }
 
 template <VkFormat F>
@@ -1206,7 +1209,8 @@ inline auto CreateViewCubeArray(VkDevice device, VkImage image, uint32_t arrayLa
 							   .array_layers = arrayLayers,
 							   .view_type = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY,
 							   .base_array_layer = 0};
-	return {device, ZHLN_CreateImageView(device, &desc)};
+	VkImageView view = ZHLN_CreateImageView(device, &desc);
+	return ImageView{device, view};
 }
 
 inline auto IsInstanceExtensionSupported(std::string_view extension) noexcept -> bool {

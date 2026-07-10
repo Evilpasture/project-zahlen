@@ -260,8 +260,7 @@ static Scene BuildScene(cgltf_data* data) {
 
 		size_t meshIdx = node->mesh - data->meshes;
 		for (size_t primIdx : meshPrimIndices[meshIdx]) {
-			scene.drawCalls.push_back(
-				{.mesh = &scene.primitives[primIdx], .worldMatrix = worldMat});
+			scene.drawCalls.push_back({.mesh = &scene.primitives[primIdx], .worldMatrix = worldMat});
 		}
 	}
 
@@ -582,17 +581,36 @@ auto main() -> int {
 	VkExtent2D shadowExtent = {.width = SHADOW_RES, .height = SHADOW_RES};
 
 	// --- Samplers (Via Builder) ---
-	auto defaultSampler =
+	auto defaultSampler_res =
 		ZHLN::Vk::SamplerBuilder{}.Linear().Repeat().Anisotropy(8.0f).Build(ctx.Device());
-	auto shadowSampler = ZHLN::Vk::SamplerBuilder{}
-							 .Linear()
-							 .ClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE)
-							 .DepthCompare()
-							 .Build(ctx.Device());
-	auto lightmapSampler = ZHLN::Vk::SamplerBuilder{}
-							   .Linear()
-							   .ClampToEdge() // Lightmaps MUST NOT wrap/repeat
-							   .Build(ctx.Device());
+	if (!defaultSampler_res) {
+		std::println(stderr, "FATAL: Failed to build default sampler: {}",
+					 defaultSampler_res.error());
+		return -1;
+	}
+	auto defaultSampler = std::move(*defaultSampler_res);
+
+	auto shadowSampler_res = ZHLN::Vk::SamplerBuilder{}
+								 .Linear()
+								 .ClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE)
+								 .DepthCompare()
+								 .Build(ctx.Device());
+	if (!shadowSampler_res) {
+		std::println(stderr, "FATAL: Failed to build shadow sampler: {}", shadowSampler_res.error());
+		return -1;
+	}
+	auto shadowSampler = std::move(*shadowSampler_res);
+
+	auto lightmapSampler_res = ZHLN::Vk::SamplerBuilder{}
+								   .Linear()
+								   .ClampToEdge() // Lightmaps MUST NOT wrap/repeat
+								   .Build(ctx.Device());
+	if (!lightmapSampler_res) {
+		std::println(stderr, "FATAL: Failed to build lightmap sampler: {}",
+					 lightmapSampler_res.error());
+		return -1;
+	}
+	auto lightmapSampler = std::move(*lightmapSampler_res);
 
 	// --- Global Descriptor Set Layout & Allocation ---
 	auto descLayout = SceneLayout::CreateLayout(ctx.Device());

@@ -759,8 +759,6 @@ struct RenderContext::Impl {
 	[[nodiscard]] std::expected<void, std::string> InitSubsystems(const RenderConfig& cfg,
 																  int width, int height);
 
-	void FlipSubsystems() noexcept;
-
 	struct PPPushConstants {
 		JPH::Mat44 invViewProj;
 		JPH::Mat44 viewProj;
@@ -800,6 +798,13 @@ struct RenderContext::Impl {
 		uint32_t bakeType;
 	};
 
+	struct KawasePushConstants {
+		int mode;
+		float rcpWidth;
+		float rcpHeight;
+		float padding;
+	};
+
 	struct BlitPushConstants {
 		float vignetteIntensity;
 		float vignettePower;
@@ -824,13 +829,13 @@ struct RenderContext::Impl {
 
 	void BuildTLAS(VkCommandBuffer cmd) noexcept;
 
-	void InitShadowResources();
+	[[nodiscard]] std::expected<void, std::string> InitShadowResources();
 	[[nodiscard]] std::expected<void, std::string> InitCullingResources();
 	[[nodiscard]] std::expected<void, std::string>
 	CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
 	[[nodiscard]] std::expected<void, std::string>
 	CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
-	void InitBindless();
+	[[nodiscard]] std::expected<void, std::string> InitBindless();
 	[[nodiscard]] std::expected<void, std::string> BuildTAAPipeline();
 	[[nodiscard]] std::expected<void, std::string> BuildFXAAPipeline();
 	[[nodiscard]] std::expected<void, std::string> BuildSMAAPipeline();

@@ -1,6 +1,4 @@
-// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
-// SPDX-License-Identifier: GPL-3.0-or-later
-
+// src/render/Features.hpp
 #pragma once
 
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
@@ -25,15 +23,15 @@ template <typename T> struct FeatureNode {
 
 template <typename... Ts> class FeatureChain {
 	std::tuple<FeatureNode<Ts>...> _features;
+	VkPhysicalDevice _physicalDevice = VK_NULL_HANDLE;
 
   public:
 	FeatureChain() = default;
-	FeatureChain(std::tuple<FeatureNode<Ts>...>&& t);
+	FeatureChain(VkPhysicalDevice physicalDevice, std::tuple<FeatureNode<Ts>...>&& t);
 
 	template <typename T, typename Func> auto Require(Func&& configure) &&;
 
-	template <typename T, typename Func>
-	auto Optional(VkPhysicalDevice physicalDevice, Func&& configure) &&;
+	template <typename T, typename Func> auto Optional(Func&& configure) &&;
 
 	FeatureChain<Ts...>& Build();
 
@@ -42,10 +40,15 @@ template <typename... Ts> class FeatureChain {
 
 class FeatureChainBuilder {
   public:
+	explicit FeatureChainBuilder(VkPhysicalDevice physicalDevice) noexcept
+		: _physicalDevice(physicalDevice) {}
+
 	template <typename T, typename Func> auto Require(Func&& configure);
 
-	template <typename T, typename Func>
-	auto Optional(VkPhysicalDevice physicalDevice, Func&& configure);
+	template <typename T, typename Func> auto Optional(Func&& configure);
+
+  private:
+	VkPhysicalDevice _physicalDevice;
 };
 
 struct FeatureFactory {

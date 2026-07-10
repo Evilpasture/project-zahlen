@@ -300,7 +300,7 @@ class PipelineLayoutBuilder {
 	PipelineLayoutBuilder& AddPushConstant(VkShaderStageFlags stages, uint32_t size,
 										   uint32_t offset = 0) noexcept;
 
-	[[nodiscard]] PipelineLayout Build() const noexcept;
+	[[nodiscard]] auto Build() const noexcept -> std::expected<PipelineLayout, VkResult>;
 
   private:
 	VkDevice _device;

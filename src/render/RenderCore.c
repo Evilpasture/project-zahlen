@@ -345,8 +345,7 @@ static void ZHLN_Internal_QueryQueueFamilies(const VkPhysicalDevice device,
 }
 
 [[nodiscard]]
-ZHLN_PhysicalDeviceInfo
-ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* const restrict desc) {
+ZHLN_PhysicalDeviceInfo ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* const restrict desc) {
 	ZHLN_PhysicalDeviceInfo null_result = {};
 
 	uint32_t count = 0;
@@ -401,8 +400,7 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
 
 	// --- Filter Device Extensions ---
 	uint32_t available_count = 0;
-	vkEnumerateDeviceExtensionProperties(desc->physical->handle, nullptr, &available_count,
-										 nullptr);
+	vkEnumerateDeviceExtensionProperties(desc->physical->handle, nullptr, &available_count, nullptr);
 
 	VkExtensionProperties* available_exts = NULL;
 	if (available_count > 0) {
@@ -636,8 +634,7 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
 	uint32_t image_count = support.capabilities.minImageCount + 1;
 
 	// Clamp to hardware maximum (maxImageCount == 0 means no limit)
-	if (support.capabilities.maxImageCount > 0 &&
-		image_count > support.capabilities.maxImageCount) {
+	if (support.capabilities.maxImageCount > 0 && image_count > support.capabilities.maxImageCount) {
 		image_count = support.capabilities.maxImageCount;
 	}
 
@@ -1205,8 +1202,7 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device,
 		.colorAttachmentCount = desc->color_format_count,
 		.pColorAttachmentFormats = desc->color_format_count > 0 ? desc->color_formats : nullptr,
 		.depthAttachmentFormat = desc->depth_format,
-		.viewMask =
-			desc->stages ? (desc->stages->vert.view_mask | desc->stages->frag.view_mask) : 0,
+		.viewMask = desc->stages ? (desc->stages->vert.view_mask | desc->stages->frag.view_mask) : 0,
 	};
 
 	const VkGraphicsPipelineCreateInfo pipeline_info = {
@@ -1239,8 +1235,7 @@ void ZHLN_DestroyPipeline(const VkDevice device, const VkPipeline pipeline) {
 	}
 }
 
-void ZHLN_BeginRendering(const VkCommandBuffer cmd,
-						 const ZHLN_RenderPassDesc* const restrict desc) {
+void ZHLN_BeginRendering(const VkCommandBuffer cmd, const ZHLN_RenderPassDesc* const restrict desc) {
 	VkRenderingAttachmentInfo color_attachments[4] = {};
 	for (uint32_t i = 0; i < desc->target_count; ++i) {
 		color_attachments[i] = (VkRenderingAttachmentInfo){
@@ -1633,7 +1628,7 @@ void ZHLN_DestroyImageView(const VkDevice device, const VkImageView view) {
 	}
 	vkDestroyImageView(device, view, nullptr);
 }
-
+[[nodiscard]]
 VkSampler ZHLN_CreateSampler(VkDevice device, const VkSamplerCreateInfo* desc) {
 	VkSampler sampler = VK_NULL_HANDLE;
 	vkCreateSampler(device, desc, nullptr, &sampler);
@@ -1917,8 +1912,7 @@ void ZHLN_DestroyAS(const ZHLN_RayTracingContext* ctx, VkAccelerationStructureKH
 	}
 }
 
-VkDeviceAddress ZHLN_GetASAddress(const ZHLN_RayTracingContext* ctx,
-								  VkAccelerationStructureKHR as) {
+VkDeviceAddress ZHLN_GetASAddress(const ZHLN_RayTracingContext* ctx, VkAccelerationStructureKHR as) {
 	VkAccelerationStructureDeviceAddressInfoKHR info = {
 		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
 		.accelerationStructure = as};

@@ -167,7 +167,7 @@ using Semaphore = DeviceHandle<VkSemaphore, ZHLN_DestroySemaphore>;
 using Sampler = DeviceHandle<VkSampler, ZHLN_DestroySampler>;
 using DescriptorSetLayout = DeviceHandle<VkDescriptorSetLayout, ZHLN_DestroyDescriptorSetLayout>;
 using DescriptorPool = DeviceHandle<VkDescriptorPool, ZHLN_DestroyDescriptorPool>;
-
+using ImageView = DeviceHandle<VkImageView, ZHLN_DestroyImageView>;
 // ============================================================================
 // VMA RAII Handles
 // ============================================================================
@@ -320,10 +320,6 @@ class Context {
 	ZHLN_Device _device = {};
 };
 
-inline void WaitIdle(VkDevice device) noexcept {
-	vkDeviceWaitIdle(device);
-}
-
 inline constexpr auto& GetBufferDeviceAddress = ZHLN_GetBufferDeviceAddress;
 
 template <QueueType QType>
@@ -372,6 +368,8 @@ void SubmitAndWait(const Context& ctx, CommandBuffer<QType> cmd) noexcept {
 	vkQueueSubmit2(queue, 1, &submit, VK_NULL_HANDLE);
 	vkQueueWaitIdle(queue);
 }
+
+std::expected<VkResult, std::string> WaitIdle(VkDevice device) noexcept;
 
 // ============================================================================
 // Swapchain RAII
@@ -1102,7 +1100,7 @@ std::string ReportVkError(VkResult result, const char* context,
 						  const std::source_location& location);
 [[noreturn]] void ReportSemaphoreBoundsError(uint32_t index, uint32_t count) noexcept;
 
-[[nodiscard]] auto ResultString(const VkResult result) noexcept -> const char*;
+[[nodiscard]] auto ResultString(const VkResult result) noexcept -> std::string;
 std::expected<VkResult, std::string>
 CheckResult(const VkResult result, const char* context = "",
 			const std::source_location location = std::source_location::current());
@@ -1144,8 +1142,6 @@ class alignas(64) SemaphorePool {
 // ============================================================================
 
 [[nodiscard]] constexpr auto GetFormatAspect(VkFormat format) noexcept -> VkImageAspectFlags;
-
-using ImageView = DeviceHandle<VkImageView, ZHLN_DestroyImageView>;
 
 template <VkFormat F>
 [[nodiscard]] auto CreateView(VkDevice device, VkImage image,
