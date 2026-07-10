@@ -527,6 +527,56 @@ template <typename T> constexpr std::string_view GetSchemaNameOf() noexcept {
 	return GetSchemaName(static_cast<T*>(nullptr));
 }
 
+// Walks T's fields; for any field whose name also appears in Meta,
+// calls f.template operator()<Tag>(field) where Tag is that Meta field's type.
+template <typename Meta, typename T, typename F>
+constexpr void ForEachReflectedField(T&& t, F&& f) {
+	static constexpr auto members = std::define_static_array(std::meta::nonstatic_data_members_of(
+		^^std::remove_cvref_t<T>, std::meta::access_context::current()));
+	[[maybe_unused]] static constexpr auto metaMembers = std::define_static_array(
+		std::meta::nonstatic_data_members_of(^^Meta, std::meta::access_context::current()));
+
+	ZHLN::Unroll<members.size()>([&](auto ic) {
+		constexpr size_t I = decltype(ic)::value;
+		constexpr std::string_view name = std::meta::identifier_of(members[I]);
+		constexpr auto found = [&]() consteval -> std::meta::info {
+			for (auto m : metaMembers) {
+				if (std::meta::identifier_of(m) == name)
+					return m;
+			}
+			return std::meta::info{};
+		}();
+		if constexpr (found != std::meta::info{}) {
+			using Tag = typename[:std::meta::type_of(found):];
+			f.template operator()<Tag>(t.[:members[I]:]);
+		}
+	});
+}
+
+// Calls f.template operator()<Val>() for every enumerator Val of E, at compile time.
+template <typename E, typename F>
+	requires std::is_enum_v<E>
+constexpr void ForEachEnumerator(F&& f) {
+	static constexpr auto enumerators = std::define_static_array(std::meta::enumerators_of(^^E));
+	ZHLN::Unroll<enumerators.size()>([&](auto ic) {
+		constexpr auto enumerator = enumerators[decltype(ic)::value];
+		constexpr E Val = static_cast<E>([:enumerator:]);
+		f.template operator()<Val>();
+	});
+}
+
+// Runtime enum value -> compile-time template dispatch. Calls f.template operator()<Val>()
+// for whichever enumerator Val equals `value`. No-op if value doesn't match any enumerator.
+template <typename E, typename F>
+	requires std::is_enum_v<E>
+constexpr void DispatchEnum(E value, F&& f) {
+	ForEachEnumerator<E>([&]<E Val>() {
+		if (value == Val) {
+			f.template operator()<Val>();
+		}
+	});
+}
+
 } // namespace ZHLN::Reflect
 #else
 #include <algorithm>
@@ -727,6 +777,16 @@ template <StringLiteral Name, typename... Fields> struct Define {
 };
 
 template <typename T> constexpr std::string_view GetSchemaNameOf() noexcept;
+
+template <typename Meta, typename T, typename F> constexpr void ForEachReflectedField(T&&, F&&) {}
+
+template <typename E, typename F>
+	requires std::is_enum_v<E>
+constexpr void ForEachEnumerator(F&&) {}
+
+template <typename E, typename F>
+	requires std::is_enum_v<E>
+constexpr void DispatchEnum(E, F&&) {}
 
 } // namespace ZHLN::Reflect
 #endif
