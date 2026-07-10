@@ -10,7 +10,6 @@
 #include "backends/imgui_impl_vulkan.h"
 #include "engine/TTYBackend.hpp"
 #include "imgui.h"
-
 #include <Features.hpp>
 #include <StagingContext.hpp>
 #include <cstddef>
@@ -22,1392 +21,1266 @@
 namespace {
 
 struct HardwareCaps {
-	bool supportsDrawIndirectCount = false;
-	bool supportsInt64 = false;
+    bool supportsDrawIndirectCount = false;
+    bool supportsInt64             = false;
 };
 
 class HardwareCapsProber {
   public:
-	explicit HardwareCapsProber(VkPhysicalDevice physicalDevice, uint32_t apiVersion) noexcept
-		: _physicalDevice(physicalDevice), _apiVersion(apiVersion) {}
+    explicit HardwareCapsProber(VkPhysicalDevice physicalDevice, uint32_t apiVersion) noexcept: _physicalDevice(physicalDevice), _apiVersion(apiVersion) {
+    }
 
-	auto ProbeInt64(bool& target) && noexcept -> HardwareCapsProber&& {
-		VkPhysicalDeviceFeatures2 features2{};
-		features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-		vkGetPhysicalDeviceFeatures2(_physicalDevice, &features2);
-		target = (features2.features.shaderInt64 == VK_TRUE);
-		return std::move(*this);
-	}
+    auto ProbeInt64(bool& target) && noexcept -> HardwareCapsProber&& {
+        VkPhysicalDeviceFeatures2 features2 {};
+        features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        vkGetPhysicalDeviceFeatures2(_physicalDevice, &features2);
+        target = (features2.features.shaderInt64 == VK_TRUE);
+        return std::move(*this);
+    }
 
-	auto ProbeDrawIndirectCount(bool& target) && noexcept -> HardwareCapsProber&& {
-		bool hasExt =
-			ZHLN::Vk::IsDeviceExtensionSupported(_physicalDevice, "VK_KHR_draw_indirect_count");
-		if (hasExt || _apiVersion >= VK_API_VERSION_1_2) {
-			VkPhysicalDeviceFeatures2 features2{};
+    auto ProbeDrawIndirectCount(bool& target) && noexcept -> HardwareCapsProber&& {
+        bool hasExt = ZHLN::Vk::IsDeviceExtensionSupported(_physicalDevice, "VK_KHR_draw_indirect_count");
+        if (hasExt || _apiVersion >= VK_API_VERSION_1_2) {
+            VkPhysicalDeviceFeatures2 features2 {};
 
-			features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-			VkPhysicalDeviceVulkan12Features features12{};
-			features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-			features2.pNext = &features12;
-			vkGetPhysicalDeviceFeatures2(_physicalDevice, &features2);
-			target = (features12.drawIndirectCount == VK_TRUE);
-		} else {
-			target = false;
-		}
-		return std::move(*this);
-	}
+            features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+            VkPhysicalDeviceVulkan12Features features12 {};
+            features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+            features2.pNext  = &features12;
+            vkGetPhysicalDeviceFeatures2(_physicalDevice, &features2);
+            target = (features12.drawIndirectCount == VK_TRUE);
+        } else {
+            target = false;
+        }
+        return std::move(*this);
+    }
 
   private:
-	VkPhysicalDevice _physicalDevice;
-	uint32_t _apiVersion;
+    VkPhysicalDevice _physicalDevice;
+    uint32_t         _apiVersion;
 };
 
 HardwareCaps ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion) noexcept {
-	HardwareCaps caps{};
-	HardwareCapsProber(physicalDevice, apiVersion)
-		.ProbeInt64(caps.supportsInt64)
-		.ProbeDrawIndirectCount(caps.supportsDrawIndirectCount);
-	return caps;
+    HardwareCaps caps {};
+    HardwareCapsProber(physicalDevice, apiVersion).ProbeInt64(caps.supportsInt64).ProbeDrawIndirectCount(caps.supportsDrawIndirectCount);
+    return caps;
 }
 
 bool CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept {
-	return ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice,
-												VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
-		   ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice, VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
-		   ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice,
-												VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+    return ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
+           ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice, VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
+           ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
 }
 
 } // namespace
 
 namespace ZHLN {
 
-std::expected<void, std::string> RenderContext::Impl::InitSubsystems(const RenderConfig& cfg,
-																	 int width, int height) {
-	using enum Resource::ShaderID;
-	if (!allocator.Init(ctx)) {
-		return std::unexpected("Vulkan Memory Allocator (VMA) failed to initialize.");
-	}
+std::expected<void, std::string> RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int height) {
+    using enum Resource::ShaderID;
+    if (!allocator.Init(ctx)) {
+        return std::unexpected("Vulkan Memory Allocator (VMA) failed to initialize.");
+    }
 
-	if (!stagingRingBuffer.Init(allocator.Get(), ctx.Device(), ctx.GraphicsQueue(),
-								ctx.PhysicalInfo().graphics_family,
-								static_cast<VkDeviceSize>(64 * 1024 * 1024))) {
-		return std::unexpected("Failed to initialize Staging Ring Buffer.");
-	}
+    if (!stagingRingBuffer.Init(
+            allocator.Get(), ctx.Device(), ctx.GraphicsQueue(), ctx.PhysicalInfo().graphics_family, static_cast<VkDeviceSize>(64 * 1024 * 1024)
+        )) {
+        return std::unexpected("Failed to initialize Staging Ring Buffer.");
+    }
 
-	if (!transferRingBuffer.Init(allocator.Get(), ctx.Device(), ctx.TransferQueue(),
-								 ctx.PhysicalInfo().transfer_family,
-								 static_cast<VkDeviceSize>(64 * 1024 * 1024))) {
-		return std::unexpected("Failed to initialize Transfer Ring Buffer.");
-	}
+    if (!transferRingBuffer.Init(
+            allocator.Get(), ctx.Device(), ctx.TransferQueue(), ctx.PhysicalInfo().transfer_family, static_cast<VkDeviceSize>(64 * 1024 * 1024)
+        )) {
+        return std::unexpected("Failed to initialize Transfer Ring Buffer.");
+    }
 
-	bool supportsRayTracing = CheckRayTracingSupport(ctx.Physical());
-	if (!supportsRayTracing || !rtCtx.Init(ctx.Device())) {
-		ZHLN::Log("WARNING: Raytracing context failed to initialize. RTR will be disabled.");
-	} else {
-		ZHLN::Log("Raytracing context initialized successfully.");
-	}
+    bool supportsRayTracing = CheckRayTracingSupport(ctx.Physical());
+    if (!supportsRayTracing || !rtCtx.Init(ctx.Device())) {
+        ZHLN::Log("WARNING: Raytracing context failed to initialize. RTR will be disabled.");
+    } else {
+        ZHLN::Log("Raytracing context initialized successfully.");
+    }
 
-	gpuProfiler.Init(ctx.Device(), ctx.Physical(), ctx.PhysicalInfo().graphics_family);
-	graphicsCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-	transferCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().transfer_family);
+    gpuProfiler.Init(ctx.Device(), ctx.Physical(), ctx.PhysicalInfo().graphics_family);
+    graphicsCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+    transferCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().transfer_family);
 
-	if (!InitShadowResources()) {
-		return std::unexpected("Failed to initialize Shadow Resources.");
-	}
+    if (!InitShadowResources()) {
+        return std::unexpected("Failed to initialize Shadow Resources.");
+    }
 
-	auto cull_res = InitCullingResources();
-	if (!cull_res) {
-		return std::unexpected(cull_res.error());
-	}
+    auto cull_res = InitCullingResources();
+    if (!cull_res) {
+        return std::unexpected(cull_res.error());
+    }
 
-	if (!InitBindless()) {
-		return std::unexpected("Failed to initialize Bindless Descriptors.");
-	}
+    if (!InitBindless()) {
+        return std::unexpected("Failed to initialize Bindless Descriptors.");
+    }
 
-	auto hang_res = BuildHangGpuPipeline();
-	if (!hang_res) {
-		return std::unexpected(hang_res.error());
-	}
+    auto hang_res = BuildHangGpuPipeline();
+    if (!hang_res) {
+        return std::unexpected(hang_res.error());
+    }
 
-	auto shadow_res = CompileShadowPipeline(
-		ctx.Device(), Resource::ShaderPair{.vertex = Resource::GetShaderProgram(Basic).vertex,
-										   .fragment = Resource::shadow_frag});
-	if (!shadow_res) {
-		return std::unexpected(
-			std::format("Shadow pipeline compilation failed: {}", shadow_res.error()));
-	}
+    auto shadow_res =
+        CompileShadowPipeline(ctx.Device(), Resource::ShaderPair {.vertex = Resource::GetShaderProgram(Basic).vertex, .fragment = Resource::shadow_frag});
+    if (!shadow_res) {
+        return std::unexpected(std::format("Shadow pipeline compilation failed: {}", shadow_res.error()));
+    }
 
-	auto punctual_res =
-		CompilePunctualShadowPipeline(ctx.Device(), Resource::GetShaderProgram(PunctualShadows));
-	if (!punctual_res) {
-		return std::unexpected(
-			std::format("Punctual shadow pipeline compilation failed: {}", punctual_res.error()));
-	}
+    auto punctual_res = CompilePunctualShadowPipeline(ctx.Device(), Resource::GetShaderProgram(PunctualShadows));
+    if (!punctual_res) {
+        return std::unexpected(std::format("Punctual shadow pipeline compilation failed: {}", punctual_res.error()));
+    }
 
-	if (!presentation.Init(ctx, allocator, surface.Get(), width, height, cfg.vsync)) {
-		return std::unexpected("Presentation Context initialization failed.");
-	}
+    if (!presentation.Init(ctx, allocator, surface.Get(), width, height, cfg.vsync)) {
+        return std::unexpected("Presentation Context initialization failed.");
+    }
 
-	sync = Vk::FrameSync<2>::Create(ctx.Device());
-	pools = Vk::CommandPools<2>::Create(
-		ctx.Device(), {.queue_family = ctx.PhysicalInfo().graphics_family, .buffers_per_pool = 1});
+    sync  = Vk::FrameSync<2>::Create(ctx.Device());
+    pools = Vk::CommandPools<2>::Create(ctx.Device(), {.queue_family = ctx.PhysicalInfo().graphics_family, .buffers_per_pool = 1});
 
-	InitializeSystemTextures();
+    InitializeSystemTextures();
 
-	auto pp_res = InitPostProcessing();
-	if (!pp_res) {
-		return std::unexpected(pp_res.error());
-	}
+    auto pp_res = InitPostProcessing();
+    if (!pp_res) {
+        return std::unexpected(pp_res.error());
+    }
 
-	auto ui_res =
-		SetupUI(window.IsTTY() ? nullptr : static_cast<GLFWwindow*>(window.GetNativeHandle()));
-	if (!ui_res) {
-		return std::unexpected(std::format("UI setup failed: {}", ui_res.error()));
-	}
+    auto ui_res = SetupUI(window.IsTTY() ? nullptr : static_cast<GLFWwindow*>(window.GetNativeHandle()));
+    if (!ui_res) {
+        return std::unexpected(std::format("UI setup failed: {}", ui_res.error()));
+    }
 
-	uint32_t workerCount = TaskSystem::GetWorkerCount() + 1;
-	if (workerCount == 0) {
-		workerCount = 1;
-	}
-	workerCmds.resize(workerCount);
+    uint32_t workerCount = TaskSystem::GetWorkerCount() + 1;
+    if (workerCount == 0) {
+        workerCount = 1;
+    }
+    workerCmds.resize(workerCount);
 
-	for (auto& worker : workerCmds) {
-		for (auto& pool : worker.pools) {
-			pool = Vk::CommandPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+    for (auto& worker: workerCmds) {
+        for (auto& pool: worker.pools) {
+            pool = Vk::CommandPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
 
-			if (!pool.AllocateSecondary(256)) {
-				return std::unexpected(
-					"Failed to pre-allocate secondary command buffers for worker threads.");
-			}
-		}
-	}
+            if (!pool.AllocateSecondary(256)) {
+                return std::unexpected("Failed to pre-allocate secondary command buffers for worker threads.");
+            }
+        }
+    }
 
-	// Initialize the parallel recorder with 2 slots on the Graphics Queue family and propagate
-	// result codes
-	auto res0 = parallelRecorder[0].Init(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-	if (!res0) {
-		return std::unexpected(
-			std::format("Failed to allocate hardware command pools for parallel recorder [0]: {}",
-						Vk::ResultString(res0.error())));
-	}
-	auto res1 = parallelRecorder[1].Init(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-	if (!res1) {
-		return std::unexpected(
-			std::format("Failed to allocate hardware command pools for parallel recorder [1]: {}",
-						Vk::ResultString(res1.error())));
-	}
+    // Initialize the parallel recorder with 2 slots on the Graphics Queue family and propagate
+    // result codes
+    auto res0 = parallelRecorder[0].Init(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+    if (!res0) {
+        return std::unexpected(std::format("Failed to allocate hardware command pools for parallel recorder [0]: {}", Vk::ResultString(res0.error())));
+    }
+    auto res1 = parallelRecorder[1].Init(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+    if (!res1) {
+        return std::unexpected(std::format("Failed to allocate hardware command pools for parallel recorder [1]: {}", Vk::ResultString(res1.error())));
+    }
 
-	deletionQueue.Init(2);
-	return {};
+    deletionQueue.Init(2);
+    return {};
 }
 
 namespace {
 
-std::vector<std::string_view> GetPlatformInstanceExtensions(Window& window,
-															bool enableValidation) noexcept {
-	std::vector<std::string_view> inst_exts;
+std::vector<std::string_view> GetPlatformInstanceExtensions(Window& window, bool enableValidation) noexcept {
+    std::vector<std::string_view> inst_exts;
 
-	if (window.IsTTY()) {
-		inst_exts = TTYBackend::GetRequiredInstanceExtensions();
-	} else {
-		uint32_t glfwExtensionCount = 0;
-		const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+    if (window.IsTTY()) {
+        inst_exts = TTYBackend::GetRequiredInstanceExtensions();
+    } else {
+        uint32_t     glfwExtensionCount = 0;
+        const char** glfwExtensions     = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
 
-		if (glfwExtensionCount > 0 && glfwExtensions != nullptr) {
-			inst_exts.assign(glfwExtensions, glfwExtensions + glfwExtensionCount);
-		} else {
-			inst_exts.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
-			if constexpr (isWindows) {
-				inst_exts.push_back("VK_KHR_win32_surface");
-			} else if constexpr (isMac) {
-				inst_exts.push_back("VK_EXT_metal_surface");
-			} else {
-				inst_exts.push_back("VK_KHR_xcb_surface");
-				inst_exts.push_back("VK_KHR_xlib_surface");
-				inst_exts.push_back("VK_KHR_wayland_surface");
-			}
-		}
-		inst_exts.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
-		inst_exts.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
-	}
+        if (glfwExtensionCount > 0 && glfwExtensions != nullptr) {
+            inst_exts.assign(glfwExtensions, glfwExtensions + glfwExtensionCount);
+        } else {
+            inst_exts.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+            if constexpr (isWindows) {
+                inst_exts.push_back("VK_KHR_win32_surface");
+            } else if constexpr (isMac) {
+                inst_exts.push_back("VK_EXT_metal_surface");
+            } else {
+                inst_exts.push_back("VK_KHR_xcb_surface");
+                inst_exts.push_back("VK_KHR_xlib_surface");
+                inst_exts.push_back("VK_KHR_wayland_surface");
+            }
+        }
+        inst_exts.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
+        inst_exts.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+    }
 
-	if (enableValidation) {
-		inst_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-	}
+    if (enableValidation) {
+        inst_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    }
 
-	if constexpr (isMac) {
-		inst_exts.push_back("VK_KHR_portability_enumeration");
-	}
+    if constexpr (isMac) {
+        inst_exts.push_back("VK_KHR_portability_enumeration");
+    }
 
-	return inst_exts;
+    return inst_exts;
 }
 
 auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps) noexcept {
-	return Vk::FeatureChainBuilder(physicalDevice)
-		.Require<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>(
-			[](auto& f) { f.swapchainMaintenance1 = VK_TRUE; })
-		.Require<VkPhysicalDeviceVulkan11Features>([](auto& f) {
-			f.multiview = VK_TRUE;
-			f.storageBuffer16BitAccess = VK_TRUE;
-			f.uniformAndStorageBuffer16BitAccess = VK_TRUE;
-		})
-		.Require<VkPhysicalDeviceVulkan13Features>([](auto& f) {
-			f.synchronization2 = VK_TRUE;
-			f.dynamicRendering = VK_TRUE;
-			f.shaderDemoteToHelperInvocation = VK_TRUE;
-		})
-		.Require<VkPhysicalDeviceVulkan12Features>([&](auto& f) {
-			f.descriptorIndexing = VK_TRUE;
-			f.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
-			f.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
-			f.descriptorBindingPartiallyBound = VK_TRUE;
-			f.runtimeDescriptorArray = VK_TRUE;
-			f.bufferDeviceAddress = VK_TRUE;
-			f.hostQueryReset = VK_TRUE;
-			f.timelineSemaphore = VK_TRUE;
-			f.drawIndirectCount = caps.supportsDrawIndirectCount ? VK_TRUE : VK_FALSE;
-			f.uniformAndStorageBuffer8BitAccess = VK_TRUE;
-		})
-		.Optional<VkPhysicalDeviceAccelerationStructureFeaturesKHR>(
-			[](auto& f) { f.accelerationStructure = VK_TRUE; })
-		.Optional<VkPhysicalDeviceRayQueryFeaturesKHR>([](auto& f) { f.rayQuery = VK_TRUE; })
-		.Require<VkPhysicalDeviceFeatures2>([&](auto& f) {
-			f.features.multiDrawIndirect = VK_TRUE;
-			f.features.samplerAnisotropy = VK_TRUE;
-			f.features.drawIndirectFirstInstance = VK_TRUE;
-			f.features.shaderInt64 = caps.supportsInt64 ? VK_TRUE : VK_FALSE;
-			f.features.imageCubeArray = VK_TRUE;
-		})
-		.Build();
+    return Vk::FeatureChainBuilder(physicalDevice)
+        .Require<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>([](auto& f) { f.swapchainMaintenance1 = VK_TRUE; })
+        .Require<VkPhysicalDeviceVulkan11Features>([](auto& f) {
+            f.multiview                          = VK_TRUE;
+            f.storageBuffer16BitAccess           = VK_TRUE;
+            f.uniformAndStorageBuffer16BitAccess = VK_TRUE;
+        })
+        .Require<VkPhysicalDeviceVulkan13Features>([](auto& f) {
+            f.synchronization2               = VK_TRUE;
+            f.dynamicRendering               = VK_TRUE;
+            f.shaderDemoteToHelperInvocation = VK_TRUE;
+        })
+        .Require<VkPhysicalDeviceVulkan12Features>([&](auto& f) {
+            f.descriptorIndexing                           = VK_TRUE;
+            f.shaderSampledImageArrayNonUniformIndexing    = VK_TRUE;
+            f.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+            f.descriptorBindingPartiallyBound              = VK_TRUE;
+            f.runtimeDescriptorArray                       = VK_TRUE;
+            f.bufferDeviceAddress                          = VK_TRUE;
+            f.hostQueryReset                               = VK_TRUE;
+            f.timelineSemaphore                            = VK_TRUE;
+            f.drawIndirectCount                            = caps.supportsDrawIndirectCount ? VK_TRUE : VK_FALSE;
+            f.uniformAndStorageBuffer8BitAccess            = VK_TRUE;
+        })
+        .Optional<VkPhysicalDeviceAccelerationStructureFeaturesKHR>([](auto& f) { f.accelerationStructure = VK_TRUE; })
+        .Optional<VkPhysicalDeviceRayQueryFeaturesKHR>([](auto& f) { f.rayQuery = VK_TRUE; })
+        .Require<VkPhysicalDeviceFeatures2>([&](auto& f) {
+            f.features.multiDrawIndirect         = VK_TRUE;
+            f.features.samplerAnisotropy         = VK_TRUE;
+            f.features.drawIndirectFirstInstance = VK_TRUE;
+            f.features.shaderInt64               = caps.supportsInt64 ? VK_TRUE : VK_FALSE;
+            f.features.imageCubeArray            = VK_TRUE;
+        })
+        .Build();
 }
 
 std::vector<const char*> GetDeviceExtensions(VkPhysicalDevice physicalDevice) noexcept {
-	std::vector<const char*> dev_exts = {
-		VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
-		VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME, "VK_EXT_robustness2"};
+    std::vector<const char*> dev_exts = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME, VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME, "VK_EXT_robustness2"
+    };
 
-	if (CheckRayTracingSupport(physicalDevice)) {
-		dev_exts.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
-		dev_exts.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
-		dev_exts.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
-	}
+    if (CheckRayTracingSupport(physicalDevice)) {
+        dev_exts.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+        dev_exts.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+        dev_exts.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+    }
 
-	if constexpr (isMac) {
-		dev_exts.push_back("VK_KHR_portability_subset");
-	}
-	return dev_exts;
+    if constexpr (isMac) {
+        dev_exts.push_back("VK_KHR_portability_subset");
+    }
+    return dev_exts;
 }
 
-Vk::Context CreateLogicalDevice(VkInstance instance, VkSurfaceKHR surface,
-								const ZHLN_PhysicalDeviceInfo& physical,
-								const std::vector<const char*>& extensions,
-								const VkPhysicalDeviceFeatures2* features,
-								bool enableValidation) noexcept {
-	return Vk::Context::Create(instance, surface, physical,
-							   {.physical = &physical,
-								.extensions = extensions.data(),
-								.extension_count = static_cast<uint32_t>(extensions.size()),
-								.features = features,
-								.enable_validation = enableValidation});
+Vk::Context CreateLogicalDevice(
+    VkInstance                       instance,
+    VkSurfaceKHR                     surface,
+    const ZHLN_PhysicalDeviceInfo&   physical,
+    const std::vector<const char*>&  extensions,
+    const VkPhysicalDeviceFeatures2* features,
+    bool                             enableValidation
+) noexcept {
+    return Vk::Context::Create(
+        instance, surface, physical,
+        {.physical          = &physical,
+         .extensions        = extensions.data(),
+         .extension_count   = static_cast<uint32_t>(extensions.size()),
+         .features          = features,
+         .enable_validation = enableValidation}
+    );
 }
 
 template <typename LayoutT>
-[[nodiscard]] std::expected<void, std::string>
-BuildPassHelper(RenderContext::Impl* self, Vk::PostProcessPass<LayoutT>& pass, const char* passName,
-				ShaderStageSource vs, ShaderStageSource ps,
-				std::initializer_list<VkFormat> colorFormats,
-				const VkPushConstantRange* pushConstants = nullptr, uint32_t pushCount = 0,
-				bool additive = false) noexcept {
+[[nodiscard]] std::expected<void, std::string> BuildPassHelper(
+    RenderContext::Impl*            self,
+    Vk::PostProcessPass<LayoutT>&   pass,
+    const char*                     passName,
+    ShaderStageSource               vs,
+    ShaderStageSource               ps,
+    std::initializer_list<VkFormat> colorFormats,
+    const VkPushConstantRange*      pushConstants = nullptr,
+    uint32_t                        pushCount     = 0,
+    bool                            additive      = false
+) noexcept {
+    auto shaders = self->LoadAndCreateShaders(vs, ps);
+    if (!shaders.Valid()) {
+        return std::unexpected(std::format("Failed to load or compile shaders for '{}'", passName));
+    }
 
-	auto shaders = self->LoadAndCreateShaders(vs, ps);
-	if (!shaders.Valid()) {
-		return std::unexpected(std::format("Failed to load or compile shaders for '{}'", passName));
-	}
-
-	if (pass.Build(self->ctx.Device(), shaders, colorFormats, pushConstants, pushCount, additive)) {
-		return {};
-	}
-	return std::unexpected(std::format("{} Pipeline failed to build.", passName));
+    if (pass.Build(self->ctx.Device(), shaders, colorFormats, pushConstants, pushCount, additive)) {
+        return {};
+    }
+    return std::unexpected(std::format("{} Pipeline failed to build.", passName));
 }
 
 // Generic helper for specialized pipeline variants (e.g. Reflections)
 template <typename LayoutT>
-[[nodiscard]] std::expected<void, std::string>
-BuildPassVariants(RenderContext::Impl* self, Vk::PostProcessPass<LayoutT>& pass,
-				  const char* passName, ShaderStageSource vs, ShaderStageSource ps,
-				  std::initializer_list<VkFormat> colorFormats,
-				  std::span<const VkSpecializationInfo> specInfos,
-				  const VkPushConstantRange* pushConstants = nullptr, uint32_t pushCount = 0,
-				  bool additive = false) noexcept {
+[[nodiscard]] std::expected<void, std::string> BuildPassVariants(
+    RenderContext::Impl*                  self,
+    Vk::PostProcessPass<LayoutT>&         pass,
+    const char*                           passName,
+    ShaderStageSource                     vs,
+    ShaderStageSource                     ps,
+    std::initializer_list<VkFormat>       colorFormats,
+    std::span<const VkSpecializationInfo> specInfos,
+    const VkPushConstantRange*            pushConstants = nullptr,
+    uint32_t                              pushCount     = 0,
+    bool                                  additive      = false
+) noexcept {
+    auto shaders = self->LoadAndCreateShaders(vs, ps);
+    if (!shaders.Valid()) {
+        return std::unexpected(std::format("Failed to load or compile shaders for '{}'", passName));
+    }
 
-	auto shaders = self->LoadAndCreateShaders(vs, ps);
-	if (!shaders.Valid()) {
-		return std::unexpected(std::format("Failed to load or compile shaders for '{}'", passName));
-	}
-
-	if (pass.BuildVariants(self->ctx.Device(), shaders, colorFormats, pushConstants, pushCount,
-						   specInfos, additive)) {
-		return {};
-	}
-	return std::unexpected(std::format("{} Pass variants failed to build.", passName));
+    if (pass.BuildVariants(self->ctx.Device(), shaders, colorFormats, pushConstants, pushCount, specInfos, additive)) {
+        return {};
+    }
+    return std::unexpected(std::format("{} Pass variants failed to build.", passName));
 }
 
 } // namespace
 
-Vk::ShaderStages RenderContext::Impl::LoadAndCreateShaders(ShaderStageSource vs,
-														   ShaderStageSource ps) const noexcept {
-	const void* vs_code = nullptr;
-	size_t vs_size = 0;
-	const void* ps_code = nullptr;
-	size_t ps_size = 0;
-	std::vector<uint32_t> disk_vs;
-	std::vector<uint32_t> disk_ps;
+Vk::ShaderStages RenderContext::Impl::LoadAndCreateShaders(ShaderStageSource vs, ShaderStageSource ps) const noexcept {
+    const void*           vs_code = nullptr;
+    size_t                vs_size = 0;
+    const void*           ps_code = nullptr;
+    size_t                ps_size = 0;
+    std::vector<uint32_t> disk_vs;
+    std::vector<uint32_t> disk_ps;
 
-	LoadShaderData(vs, vs_code, vs_size, disk_vs);
-	LoadShaderData(ps, ps_code, ps_size, disk_ps);
+    LoadShaderData(vs, vs_code, vs_size, disk_vs);
+    LoadShaderData(ps, ps_code, ps_size, disk_ps);
 
-	return Vk::ShaderStages::Create(
-		ctx.Device(), {.code = Vk::AsSpirV(vs_code), .size = vs_size, .entry_point = vs.entryPoint},
-		{.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint});
+    return Vk::ShaderStages::Create(
+        ctx.Device(), {.code = Vk::AsSpirV(vs_code), .size = vs_size, .entry_point = vs.entryPoint},
+        {.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint}
+    );
 }
 
-Vk::Pipeline
-RenderContext::Impl::LoadAndCreateComputeShader(ShaderStageSource cs,
-												VkPipelineLayout layout) const noexcept {
-	const void* cs_code = nullptr;
-	size_t cs_size = 0;
-	std::vector<uint32_t> disk_cs;
+Vk::Pipeline RenderContext::Impl::LoadAndCreateComputeShader(ShaderStageSource cs, VkPipelineLayout layout) const noexcept {
+    const void*           cs_code = nullptr;
+    size_t                cs_size = 0;
+    std::vector<uint32_t> disk_cs;
 
-	LoadShaderData(cs, cs_code, cs_size, disk_cs);
+    LoadShaderData(cs, cs_code, cs_size, disk_cs);
 
-	auto p_res = Vk::ComputePipelineBuilder()
-					 .Shader(Vk::AsSpirV(cs_code), cs_size, cs.entryPoint)
-					 .Layout(layout)
-					 .Build(ctx.Device());
+    auto p_res = Vk::ComputePipelineBuilder().Shader(Vk::AsSpirV(cs_code), cs_size, cs.entryPoint).Layout(layout).Build(ctx.Device());
 
-	if (!p_res) {
-		return {};
-	}
-	return std::move(*p_res);
+    if (!p_res) {
+        return {};
+    }
+    return std::move(*p_res);
 }
 
-void RenderContext::Impl::WatchPipeline(const char* vsPath, const char* psPath,
-										std::function<void()> rebuild_fn) noexcept {
-	if constexpr (isDev) {
-		RegisterShaderWatcher(vsPath, rebuild_fn);
-		RegisterShaderWatcher(psPath, std::move(rebuild_fn));
-	}
+void RenderContext::Impl::WatchPipeline(const char* vsPath, const char* psPath, std::function<void()> rebuild_fn) noexcept {
+    if constexpr (isDev) {
+        RegisterShaderWatcher(vsPath, rebuild_fn);
+        RegisterShaderWatcher(psPath, std::move(rebuild_fn));
+    }
 }
 
-RenderContext::RenderContext(PrivateToken, std::unique_ptr<Impl> impl) noexcept
-	: _impl(std::move(impl)) {}
+RenderContext::RenderContext(PrivateToken, std::unique_ptr<Impl> impl) noexcept: _impl(std::move(impl)) {
+}
 
-std::expected<std::unique_ptr<RenderContext>, std::string>
-RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept {
-	auto impl = std::make_unique<Impl>(window);
-	impl->appName = cfg.appName;
+std::expected<std::unique_ptr<RenderContext>, std::string> RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept {
+    auto impl     = std::make_unique<Impl>(window);
+    impl->appName = cfg.appName;
 
-	// Phase 1: Instance extensions selection
-	auto inst_exts = GetPlatformInstanceExtensions(window, cfg.enableValidation);
+    // Phase 1: Instance extensions selection
+    auto inst_exts = GetPlatformInstanceExtensions(window, cfg.enableValidation);
 
-	// Phase 2: Instance creation
-	VkInstance instance = Vk::CreateInstance(impl->appName.c_str(), VK_MAKE_API_VERSION(0, 1, 0, 0),
-											 inst_exts, cfg.enableValidation);
-	if (instance == VK_NULL_HANDLE) {
-		return std::unexpected("Failed to create Vulkan Instance.");
-	}
+    // Phase 2: Instance creation
+    VkInstance instance = Vk::CreateInstance(impl->appName.c_str(), VK_MAKE_API_VERSION(0, 1, 0, 0), inst_exts, cfg.enableValidation);
+    if (instance == VK_NULL_HANDLE) {
+        return std::unexpected("Failed to create Vulkan Instance.");
+    }
 
-	// Phase 3: Surface creation (Before device selection for windowed/GLFW)
-	int width = 0;
-	int height = 0;
-	auto* raw_surface =
-		static_cast<VkSurfaceKHR>(window.CreateVulkanSurface(instance, nullptr, width, height));
-	if (!window.IsTTY() && raw_surface == VK_NULL_HANDLE) {
-		return std::unexpected("Failed to create GLFW Vulkan surface.");
-	}
+    // Phase 3: Surface creation (Before device selection for windowed/GLFW)
+    int   width       = 0;
+    int   height      = 0;
+    auto* raw_surface = static_cast<VkSurfaceKHR>(window.CreateVulkanSurface(instance, nullptr, width, height));
+    if (!window.IsTTY() && raw_surface == VK_NULL_HANDLE) {
+        return std::unexpected("Failed to create GLFW Vulkan surface.");
+    }
 
-	// Phase 4: Device selection
-	auto physicalInfo = Vk::SelectDevice(instance, raw_surface);
-	if (physicalInfo.handle == VK_NULL_HANDLE) {
-		return std::unexpected(
-			"Failed to select a suitable physical device supporting the required Vulkan features.");
-	}
+    // Phase 4: Device selection
+    auto physicalInfo = Vk::SelectDevice(instance, raw_surface);
+    if (physicalInfo.handle == VK_NULL_HANDLE) {
+        return std::unexpected("Failed to select a suitable physical device supporting the required Vulkan features.");
+    }
 
-	// Phase 5: Surface creation (After device selection for TTY)
-	if (window.IsTTY()) {
-		raw_surface = static_cast<VkSurfaceKHR>(
-			window.CreateVulkanSurface(instance, physicalInfo.handle, width, height));
-		if (raw_surface == VK_NULL_HANDLE) {
-			return std::unexpected("Failed to create TTY Vulkan Surface.");
-		}
-	}
+    // Phase 5: Surface creation (After device selection for TTY)
+    if (window.IsTTY()) {
+        raw_surface = static_cast<VkSurfaceKHR>(window.CreateVulkanSurface(instance, physicalInfo.handle, width, height));
+        if (raw_surface == VK_NULL_HANDLE) {
+            return std::unexpected("Failed to create TTY Vulkan Surface.");
+        }
+    }
 
-	impl->surface = Vk::Surface(instance, raw_surface);
+    impl->surface = Vk::Surface(instance, raw_surface);
 
-	// Phase 6: Capability detection
-	HardwareCaps caps =
-		ProbeHardware(physicalInfo.handle, physicalInfo.properties.properties.apiVersion);
+    // Phase 6: Capability detection
+    HardwareCaps caps = ProbeHardware(physicalInfo.handle, physicalInfo.properties.properties.apiVersion);
 
-	// Phase 7: Feature negotiation
-	auto features = BuildFeatureChain(physicalInfo.handle, caps);
+    // Phase 7: Feature negotiation
+    auto features = BuildFeatureChain(physicalInfo.handle, caps);
 
-	// Phase 8: Device extension building
-	auto dev_exts = GetDeviceExtensions(physicalInfo.handle);
+    // Phase 8: Device extension building
+    auto dev_exts = GetDeviceExtensions(physicalInfo.handle);
 
-	// Phase 9: Device creation
-	impl->ctx = CreateLogicalDevice(instance, raw_surface, physicalInfo, dev_exts,
-									features.GetRoot(), cfg.enableValidation);
-	if (!impl->ctx.Valid()) {
-		return std::unexpected("Failed to create Vulkan Logical Device.");
-	}
+    // Phase 9: Device creation
+    impl->ctx = CreateLogicalDevice(instance, raw_surface, physicalInfo, dev_exts, features.GetRoot(), cfg.enableValidation);
+    if (!impl->ctx.Valid()) {
+        return std::unexpected("Failed to create Vulkan Logical Device.");
+    }
 
-	// Phase 10: Subsystem initialization
-	auto status = impl->InitSubsystems(cfg, width, height);
-	if (!status) {
-		return std::unexpected(status.error());
-	}
+    // Phase 10: Subsystem initialization
+    auto status = impl->InitSubsystems(cfg, width, height);
+    if (!status) {
+        return std::unexpected(status.error());
+    }
 
-	return std::make_unique<RenderContext>(PrivateToken{}, std::move(impl));
+    return std::make_unique<RenderContext>(PrivateToken {}, std::move(impl));
 }
 
 RenderContext::~RenderContext() {
-	if (_impl && (_impl->ctx.Device() != nullptr)) {
-		auto res = Vk::WaitIdle(_impl->ctx.Device());
-		if (res != VK_SUCCESS) {
-			ZHLN::Log("ERROR: Failed to wait for idle on device destruction.");
-		}
-		_impl->stagingContext.reset();
+    if (_impl && (_impl->ctx.Device() != nullptr)) {
+        auto res = Vk::WaitIdle(_impl->ctx.Device());
+        if (res != VK_SUCCESS) {
+            ZHLN::Log("ERROR: Failed to wait for idle on device destruction.");
+        }
+        _impl->stagingContext.reset();
 
-		// --- SAFETY: Only shut down ImGui if it was actually initialized ---
-		if (!_impl->window.IsTTY()) {
-			ImGui_ImplVulkan_Shutdown();
-			ImGui_ImplGlfw_Shutdown();
-			ImGui::DestroyContext();
-		}
-	}
+        // --- SAFETY: Only shut down ImGui if it was actually initialized ---
+        if (!_impl->window.IsTTY()) {
+            ImGui_ImplVulkan_Shutdown();
+            ImGui_ImplGlfw_Shutdown();
+            ImGui::DestroyContext();
+        }
+    }
 }
 
 void RenderContext::CheckShaderReload() noexcept {
-	if constexpr (isDev) {
-		_impl->CheckShaderWatchers();
-	}
+    if constexpr (isDev) {
+        _impl->CheckShaderWatchers();
+    }
 }
 
 std::expected<void, std::string> RenderContext::Impl::BuildSkinningPipeline() {
-	VkPushConstantRange pushRange = {
-		.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(SkinningConstants)};
+    VkPushConstantRange pushRange = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(SkinningConstants)};
 
-	ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = nullptr,
-										   .set_layout_count = 0,
-										   .push_constants = &pushRange,
-										   .push_constant_count = 1};
+    ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = nullptr, .set_layout_count = 0, .push_constants = &pushRange, .push_constant_count = 1};
 
-	skinningPass.pipelineLayout =
-		Vk::PipelineLayout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &layout_desc));
+    skinningPass.pipelineLayout = Vk::PipelineLayout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &layout_desc));
 
-	skinningPass.pipeline = LoadAndCreateComputeShader({.path = SHADER_SKINNING_HLSL_CS_PATH,
-														.fallback = Resource::skinning_comp,
-														.entryPoint = "CSMain"},
-													   skinningPass.pipelineLayout.Get());
+    skinningPass.pipeline = LoadAndCreateComputeShader(
+        {.path = SHADER_SKINNING_HLSL_CS_PATH, .fallback = Resource::skinning_comp, .entryPoint = "CSMain"}, skinningPass.pipelineLayout.Get()
+    );
 
-	if (skinningPass.pipeline.Valid()) {
-		return {};
-	}
-	return std::unexpected("GPU Skinning Compute pipeline failed to build.");
+    if (skinningPass.pipeline.Valid()) {
+        return {};
+    }
+    return std::unexpected("GPU Skinning Compute pipeline failed to build.");
 }
 
 void RenderContext::Impl::RecreatePunctualShadowViews() noexcept {
-	punctualShadowViews.clear();
-	punctualShadowViews.resize(MAX_PUNCTUAL_LIGHTS);
-	for (uint32_t i = 0; i < MAX_PUNCTUAL_LIGHTS; ++i) {
-		VkImageViewCreateInfo viewInfo = {
-			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-			.pNext = {},
-			.flags = {},
-			.image = graphResources.shadowAtlas.image.Handle(),
-			.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-			.format = VK_FORMAT_D32_SFLOAT,
-			.components = {},
-			.subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
-								 .baseMipLevel = 0,
-								 .levelCount = 1,
-								 .baseArrayLayer = i * 6,
-								 .layerCount = 6},
-		};
+    punctualShadowViews.clear();
+    punctualShadowViews.resize(MAX_PUNCTUAL_LIGHTS);
+    for (uint32_t i = 0; i < MAX_PUNCTUAL_LIGHTS; ++i) {
+        VkImageViewCreateInfo viewInfo = {
+            .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .pNext            = {},
+            .flags            = {},
+            .image            = graphResources.shadowAtlas.image.Handle(),
+            .viewType         = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+            .format           = VK_FORMAT_D32_SFLOAT,
+            .components       = {},
+            .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = i * 6, .layerCount = 6},
+        };
 
-		VkImageView rawView = VK_NULL_HANDLE;
-		vkCreateImageView(ctx.Device(), &viewInfo, nullptr, &rawView);
-		punctualShadowViews[i] = Vk::ImageView(ctx.Device(), rawView);
-	}
+        VkImageView rawView = VK_NULL_HANDLE;
+        vkCreateImageView(ctx.Device(), &viewInfo, nullptr, &rawView);
+        punctualShadowViews[i] = Vk::ImageView(ctx.Device(), rawView);
+    }
 }
 
 std::expected<void, std::string> RenderContext::Impl::InitShadowResources() {
-	auto shadowResult = Vk::SamplerBuilder{}
-							.Linear()
-							.ClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE)
-							.DepthCompare()
-							.Build(ctx.Device());
+    auto shadowResult = Vk::SamplerBuilder {}.Linear().ClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE).DepthCompare().Build(ctx.Device());
 
-	if (!shadowResult) {
-		return std::unexpected(
-			std::format("Failed to create Shadow Sampler: {}", shadowResult.error()));
-	}
-	shadowSampler = std::move(*shadowResult);
+    if (!shadowResult) {
+        return std::unexpected(std::format("Failed to create Shadow Sampler: {}", shadowResult.error()));
+    }
+    shadowSampler = std::move(*shadowResult);
 
-	graphResources.shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-		allocator, ctx, {.width = SHADOW_RES, .height = SHADOW_RES},
-		{.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-		 .arrayLayers = NUM_CASCADES});
+    graphResources.shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+        allocator, ctx, {.width = SHADOW_RES, .height = SHADOW_RES},
+        {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = NUM_CASCADES}
+    );
 
-	shadowCascadeViews.resize(NUM_CASCADES);
-	for (uint32_t i = 0; i < NUM_CASCADES; ++i) {
-		shadowCascadeViews[i] = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(
-			ctx.Device(), graphResources.shadowMap.image.Handle(), i, 1);
-	}
+    shadowCascadeViews.resize(NUM_CASCADES);
+    for (uint32_t i = 0; i < NUM_CASCADES; ++i) {
+        shadowCascadeViews[i] = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowMap.image.Handle(), i, 1);
+    }
 
-	// 1. Allocate Shadow Atlas
-	graphResources.shadowAtlas = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-		allocator, ctx, {.width = 1024, .height = 1024},
-		{.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-		 .arrayLayers = 24});
+    // 1. Allocate Shadow Atlas
+    graphResources.shadowAtlas = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+        allocator, ctx, {.width = 1024, .height = 1024}, {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = 24}
+    );
 
-	// 2. Pre-allocate Views using clean C++ helper templates!
-	shadowAtlasCubeView = Vk::CreateViewCubeArray<VK_FORMAT_D32_SFLOAT>(
-		ctx.Device(), graphResources.shadowAtlas.image.Handle(), 24);
-	shadowAtlas2DView = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(
-		ctx.Device(), graphResources.shadowAtlas.image.Handle(), 0, 24);
+    // 2. Pre-allocate Views using clean C++ helper templates!
+    shadowAtlasCubeView = Vk::CreateViewCubeArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowAtlas.image.Handle(), 24);
+    shadowAtlas2DView   = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowAtlas.image.Handle(), 0, 24);
 
-	Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-			cmd, graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-			cmd, graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
+    Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+            cmd, graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
+        );
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+            cmd, graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
+        );
 
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-			cmd, graphResources.shadowAtlas.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-			cmd, graphResources.shadowAtlas.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
-	});
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+            cmd, graphResources.shadowAtlas.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
+        );
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+            cmd, graphResources.shadowAtlas.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
+        );
+    });
 
-	RecreatePunctualShadowViews();
+    RecreatePunctualShadowViews();
 
-	frameUniformBuffers =
-		CreateDoubleBuffered(allocator, sizeof(FrameUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-							 VMA_MEMORY_USAGE_CPU_TO_GPU);
+    frameUniformBuffers = CreateDoubleBuffered(allocator, sizeof(FrameUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
-	lightStorageBuffers =
-		CreateDoubleBuffered(allocator, sizeof(GPULight) * 128, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-							 VMA_MEMORY_USAGE_CPU_TO_GPU);
+    lightStorageBuffers = CreateDoubleBuffered(allocator, sizeof(GPULight) * 128, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
-	shadowIndirectBuffers =
-		CreateDoubleBuffered(allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances * 8,
-							 VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
-	return {};
+    shadowIndirectBuffers = CreateDoubleBuffered(
+        allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances * 8, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
+    );
+    return {};
 }
 
 std::expected<void, std::string> RenderContext::Impl::InitCullingResources() {
-	using enum Resource::ShaderID;
-	Vk::AllocateDoubleBufferedSet<CullingLayout>(ctx.Device(), cullingLayout, cullingPool,
-												 cullingSets);
+    using enum Resource::ShaderID;
+    Vk::AllocateDoubleBufferedSet<CullingLayout>(ctx.Device(), cullingLayout, cullingPool, cullingSets);
 
-	for (int i = 0; i < 2; ++i) {
-		instanceDataBuffers[i] =
-			Vk::Buffer::Create(allocator.Get(), sizeof(InstanceData) * kGpuCullingMaxInstances,
-							   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    for (int i = 0; i < 2; ++i) {
+        instanceDataBuffers[i] = Vk::Buffer::Create(
+            allocator.Get(), sizeof(InstanceData) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
+        );
 
-		indirectCommandsBuffers[i] = Vk::Buffer::Create(
-			allocator.Get(), sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances,
-			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
-			VMA_MEMORY_USAGE_GPU_ONLY);
+        indirectCommandsBuffers[i] = Vk::Buffer::Create(
+            allocator.Get(), sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+            VMA_MEMORY_USAGE_GPU_ONLY
+        );
 
-		CullingLayout::Write(ctx.Device(), cullingSets[i],
-							 Vk::BufferWrite{.buffer = instanceDataBuffers[i].Handle()},
-							 Vk::BufferWrite{.buffer = indirectCommandsBuffers[i].Handle()});
-	}
+        CullingLayout::Write(
+            ctx.Device(), cullingSets[i], Vk::BufferWrite {.buffer = instanceDataBuffers[i].Handle()},
+            Vk::BufferWrite {.buffer = indirectCommandsBuffers[i].Handle()}
+        );
+    }
 
-	constexpr uint32_t kCullingPushSize = sizeof(float) * 4 * 6 + sizeof(uint32_t) * 4;
-	VkPushConstantRange cullingPush = {
-		.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
-		.offset = 0,
-		.size = kCullingPushSize,
-	};
+    constexpr uint32_t  kCullingPushSize = sizeof(float) * 4 * 6 + sizeof(uint32_t) * 4;
+    VkPushConstantRange cullingPush      = {
+        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+        .offset     = 0,
+        .size       = kCullingPushSize,
+    };
 
-	auto cullingShader = Vk::CreateShaderDesc(Resource::culling_comp);
+    auto cullingShader = Vk::CreateShaderDesc(Resource::culling_comp);
 
-	if (!cullingPass.Build(ctx.Device(), cullingLayout.Get(), cullingShader, &cullingPush, 1)) {
-		return std::unexpected("Failed to compile or build the Compute Culling Pipeline.");
-	}
+    if (!cullingPass.Build(ctx.Device(), cullingLayout.Get(), cullingShader, &cullingPush, 1)) {
+        return std::unexpected("Failed to compile or build the Compute Culling Pipeline.");
+    }
 
-	constexpr auto numClusters = static_cast<size_t>(16 * 9 * 24);
+    constexpr auto numClusters = static_cast<size_t>(16 * 9 * 24);
 
-	clusterBoundsBuffer =
-		Vk::Buffer::Create(allocator.Get(), sizeof(struct ClusterBounds) * numClusters,
-						   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-						   VMA_MEMORY_USAGE_GPU_ONLY);
+    clusterBoundsBuffer = Vk::Buffer::Create(
+        allocator.Get(), sizeof(struct ClusterBounds) * numClusters, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VMA_MEMORY_USAGE_GPU_ONLY
+    );
 
-	Vk::AllocateDoubleBufferedSet<ClusterCullingLayout>(ctx.Device(), clusterCullingDescLayout,
-														clusterCullingPool, clusterCullingSets);
+    Vk::AllocateDoubleBufferedSet<ClusterCullingLayout>(ctx.Device(), clusterCullingDescLayout, clusterCullingPool, clusterCullingSets);
 
-	for (int i = 0; i < 2; ++i) {
-		clusterGridBuffers[i] =
-			Vk::Buffer::Create(allocator.Get(), sizeof(ClusterVolume) * numClusters,
-							   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-		lightIndexListBuffers[i] =
-			Vk::Buffer::Create(allocator.Get(), sizeof(uint32_t) * numClusters * 64,
-							   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-		globalCounterBuffers[i] = Vk::Buffer::Create(allocator.Get(), sizeof(uint32_t),
-													 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-														 VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-													 VMA_MEMORY_USAGE_GPU_ONLY);
+    for (int i = 0; i < 2; ++i) {
+        clusterGridBuffers[i] =
+            Vk::Buffer::Create(allocator.Get(), sizeof(ClusterVolume) * numClusters, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+        lightIndexListBuffers[i] =
+            Vk::Buffer::Create(allocator.Get(), sizeof(uint32_t) * numClusters * 64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+        globalCounterBuffers[i] = Vk::Buffer::Create(
+            allocator.Get(), sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+        );
 
-		ClusterCullingLayout::Write(ctx.Device(), clusterCullingSets[i],
-									Vk::BufferWrite{.buffer = clusterBoundsBuffer.Handle()},
-									Vk::BufferWrite{.buffer = clusterGridBuffers[i].Handle()},
-									Vk::BufferWrite{.buffer = lightIndexListBuffers[i].Handle()},
-									Vk::BufferWrite{.buffer = globalCounterBuffers[i].Handle()},
-									Vk::BufferWrite{.buffer = frameUniformBuffers[i].Handle()},
-									Vk::BufferWrite{.buffer = lightStorageBuffers[i].Handle()});
-	}
+        ClusterCullingLayout::Write(
+            ctx.Device(), clusterCullingSets[i], Vk::BufferWrite {.buffer = clusterBoundsBuffer.Handle()},
+            Vk::BufferWrite {.buffer = clusterGridBuffers[i].Handle()}, Vk::BufferWrite {.buffer = lightIndexListBuffers[i].Handle()},
+            Vk::BufferWrite {.buffer = globalCounterBuffers[i].Handle()}, Vk::BufferWrite {.buffer = frameUniformBuffers[i].Handle()},
+            Vk::BufferWrite {.buffer = lightStorageBuffers[i].Handle()}
+        );
+    }
 
-	auto bDesc = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterBounds).vertex);
-	auto cDesc = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterCulling).vertex);
-	if (!clusterBoundsPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), bDesc)) {
-		return std::unexpected("Failed to build Cluster Bounds Pass!");
-	}
-	if (!clusterCullingPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), cDesc)) {
-		return std::unexpected("Failed to build Cluster Culling Pass!");
-	}
+    auto bDesc = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterBounds).vertex);
+    auto cDesc = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterCulling).vertex);
+    if (!clusterBoundsPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), bDesc)) {
+        return std::unexpected("Failed to build Cluster Bounds Pass!");
+    }
+    if (!clusterCullingPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), cDesc)) {
+        return std::unexpected("Failed to build Cluster Culling Pass!");
+    }
 
-	if (rtCtx.Valid()) {
-		ZHLN_AccelerationStructureSizes tlasSizes;
-		rtCtx.GetTlasSizes(kGpuCullingMaxInstances, tlasSizes);
+    if (rtCtx.Valid()) {
+        ZHLN_AccelerationStructureSizes tlasSizes;
+        rtCtx.GetTlasSizes(kGpuCullingMaxInstances, tlasSizes);
 
-		for (int i = 0; i < 2; ++i) {
-			tlasBuffer[i] =
-				Vk::Buffer::Create(allocator.Get(), tlasSizes.acceleration_structure_size,
-								   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-									   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-								   VMA_MEMORY_USAGE_GPU_ONLY);
+        for (int i = 0; i < 2; ++i) {
+            tlasBuffer[i] = Vk::Buffer::Create(
+                allocator.Get(), tlasSizes.acceleration_structure_size,
+                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+            );
 
-			tlasScratchBuffer[i] = Vk::Buffer::Create(allocator.Get(), tlasSizes.build_scratch_size,
-													  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-														  VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-													  VMA_MEMORY_USAGE_GPU_ONLY);
+            tlasScratchBuffer[i] = Vk::Buffer::Create(
+                allocator.Get(), tlasSizes.build_scratch_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                VMA_MEMORY_USAGE_GPU_ONLY
+            );
 
-			tlas[i] = rtCtx.CreateAS(tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size,
-									 ZHLN_AS_TYPE_TOP_LEVEL);
+            tlas[i] = rtCtx.CreateAS(tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL);
 
-			tlasInstanceBuffers[i] = Vk::Buffer::Create(
-				allocator.Get(),
-				sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances,
-				VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-					VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-					VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-				VMA_MEMORY_USAGE_GPU_ONLY);
+            tlasInstanceBuffers[i] = Vk::Buffer::Create(
+                allocator.Get(), sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances,
+                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                    VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                VMA_MEMORY_USAGE_GPU_ONLY
+            );
 
-			tlasStagingBuffers[i] = Vk::Buffer::Create(
-				allocator.Get(),
-				sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances,
-				VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
-		}
-	}
+            tlasStagingBuffers[i] = Vk::Buffer::Create(
+                allocator.Get(), sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                VMA_MEMORY_USAGE_CPU_ONLY
+            );
+        }
+    }
 
-	auto skin_res = BuildSkinningPipeline();
-	if (!skin_res) {
-		return skin_res;
-	}
+    auto skin_res = BuildSkinningPipeline();
+    if (!skin_res) {
+        return skin_res;
+    }
 
-	if constexpr (isDev) {
-		RegisterShaderWatcher(SHADER_SKINNING_HLSL_CS_PATH, [this]() {
-			auto res = BuildSkinningPipeline();
-			if (!res) {
-				ZHLN::Log("ERROR: Failed to hot-reload Skinning pipeline: {}", res.error());
-			} else {
-				ZHLN::Log("[Shader Reload] Skinning pipeline hot-reloaded successfully.");
-			}
-		});
-	}
+    if constexpr (isDev) {
+        RegisterShaderWatcher(SHADER_SKINNING_HLSL_CS_PATH, [this]() {
+            auto res = BuildSkinningPipeline();
+            if (!res) {
+                ZHLN::Log("ERROR: Failed to hot-reload Skinning pipeline: {}", res.error());
+            } else {
+                ZHLN::Log("[Shader Reload] Skinning pipeline hot-reloaded successfully.");
+            }
+        });
+    }
 
-	return {};
+    return {};
 }
 
 void RenderContext::Impl::InitSkeletalAnimationResources() {
-	// Allocate our global Joint storage buffer (Supports 8192 dynamic matrices)
-	JPH::Array<JPH::Mat44> identities(8192, JPH::Mat44::sIdentity());
-	for (int i = 0; i < 2; ++i) {
-		jointBuffers[i] = Vk::Buffer::Create(allocator.Get(), sizeof(JPH::Mat44) * 8192,
-											 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-												 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-											 VMA_MEMORY_USAGE_CPU_TO_GPU);
+    // Allocate our global Joint storage buffer (Supports 8192 dynamic matrices)
+    JPH::Array<JPH::Mat44> identities(8192, JPH::Mat44::sIdentity());
+    for (int i = 0; i < 2; ++i) {
+        jointBuffers[i] = Vk::Buffer::Create(
+            allocator.Get(), sizeof(JPH::Mat44) * 8192, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+            VMA_MEMORY_USAGE_CPU_TO_GPU
+        );
 
-		// Upload identity matrices initially
-		auto mapped = jointBuffers[i].Map();
-		std::memcpy(mapped.data, identities.data(), identities.size() * sizeof(JPH::Mat44));
-	}
+        // Upload identity matrices initially
+        auto mapped = jointBuffers[i].Map();
+        std::memcpy(mapped.data, identities.data(), identities.size() * sizeof(JPH::Mat44));
+    }
 
-	morphDeltasBuffer = Vk::Buffer::Create(allocator.Get(), sizeof(float) * 4 * 1000000,
-										   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-											   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-										   VMA_MEMORY_USAGE_CPU_TO_GPU);
+    morphDeltasBuffer = Vk::Buffer::Create(
+        allocator.Get(), sizeof(float) * 4 * 1000000, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        VMA_MEMORY_USAGE_CPU_TO_GPU
+    );
 }
 
 void RenderContext::Impl::InitLightingLUTs() {
-	stagingContext = std::make_unique<Vk::StagingContext>(allocator, ctx);
-	stagingContext->Begin();
+    stagingContext = std::make_unique<Vk::StagingContext>(allocator, ctx);
+    stagingContext->Begin();
 
-	iblPayload = Vk::IBLProcessor::Bake(*this, *stagingContext);
+    iblPayload = Vk::IBLProcessor::Bake(*this, *stagingContext);
 
-	ZHLN::Log("[IBL] Uploading Linearly Transformed Cosines (LTC) LUTs...");
+    ZHLN::Log("[IBL] Uploading Linearly Transformed Cosines (LTC) LUTs...");
 
-	VkImageCreateInfo ltcInfo = {
-		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-		.pNext = {},
-		.flags = {},
-		.imageType = VK_IMAGE_TYPE_2D,
-		.format = VK_FORMAT_R16G16B16A16_SFLOAT,
-		.extent = {.width = 64, .height = 64, .depth = 1},
-		.mipLevels = 1,
-		.arrayLayers = 1,
-		.samples = VK_SAMPLE_COUNT_1_BIT,
-		.tiling = VK_IMAGE_TILING_OPTIMAL,
-		.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-		.queueFamilyIndexCount = {},
-		.pQueueFamilyIndices = {},
-		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-	};
+    VkImageCreateInfo ltcInfo = {
+        .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .pNext                 = {},
+        .flags                 = {},
+        .imageType             = VK_IMAGE_TYPE_2D,
+        .format                = VK_FORMAT_R16G16B16A16_SFLOAT,
+        .extent                = {.width = 64, .height = 64, .depth = 1},
+        .mipLevels             = 1,
+        .arrayLayers           = 1,
+        .samples               = VK_SAMPLE_COUNT_1_BIT,
+        .tiling                = VK_IMAGE_TILING_OPTIMAL,
+        .usage                 = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = {},
+        .pQueueFamilyIndices   = {},
+        .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
 
-	using namespace Resource;
-	const size_t matRawSize = ltc_mat.size() - 128;
-	const size_t ampRawSize = ltc_amp.size() - 128;
+    using namespace Resource;
+    const size_t matRawSize = ltc_mat.size() - 128;
+    const size_t ampRawSize = ltc_amp.size() - 128;
 
-	auto ltcStaging =
-		Vk::Buffer::Create(allocator.Get(), matRawSize + ampRawSize,
-						   VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+    auto ltcStaging = Vk::Buffer::Create(allocator.Get(), matRawSize + ampRawSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 
-	auto mapped = ltcStaging.Map();
-	char* const stageBasePtr = static_cast<char*>(mapped.data);
+    auto        mapped       = ltcStaging.Map();
+    char* const stageBasePtr = static_cast<char*>(mapped.data);
 
-	struct LUTUploadItem {
-		Vk::Image* targetImage;
-		std::span<const uint8_t> rawData;
-		size_t rawSize;
-		size_t bufferOffset;
-	};
+    struct LUTUploadItem {
+        Vk::Image*               targetImage;
+        std::span<const uint8_t> rawData;
+        size_t                   rawSize;
+        size_t                   bufferOffset;
+    };
 
-	std::array<LUTUploadItem, 2> uploads = {
-		{{.targetImage = &ltcMatImage, .rawData = ltc_mat, .rawSize = matRawSize, .bufferOffset = 0},
-		 {.targetImage = &ltcAmpImage,
-		  .rawData = ltc_amp,
-		  .rawSize = ampRawSize,
-		  .bufferOffset = matRawSize}}};
+    std::array<LUTUploadItem, 2> uploads = {
+        {{.targetImage = &ltcMatImage, .rawData = ltc_mat, .rawSize = matRawSize, .bufferOffset = 0},
+         {.targetImage = &ltcAmpImage, .rawData = ltc_amp, .rawSize = ampRawSize, .bufferOffset = matRawSize}}
+    };
 
-	for (const auto& item : uploads) {
-		*item.targetImage = Vk::Image::Create(allocator.Get(), ltcInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+    for (const auto& item: uploads) {
+        *item.targetImage = Vk::Image::Create(allocator.Get(), ltcInfo, VMA_MEMORY_USAGE_GPU_ONLY);
 
-		std::memcpy(stageBasePtr + item.bufferOffset, item.rawData.data() + 128, item.rawSize);
+        std::memcpy(stageBasePtr + item.bufferOffset, item.rawData.data() + 128, item.rawSize);
 
-		stagingContext->UploadImage2DBuffer(item.targetImage->Handle(), 64, 64, 1,
-											ltcStaging.Handle(), item.bufferOffset);
-	}
+        stagingContext->UploadImage2DBuffer(item.targetImage->Handle(), 64, 64, 1, ltcStaging.Handle(), item.bufferOffset);
+    }
 
-	stagingContext->AddBuffer(std::move(ltcStaging));
-	stagingContext->ExecuteAsync();
+    stagingContext->AddBuffer(std::move(ltcStaging));
+    stagingContext->ExecuteAsync();
 
-	// 4. Create image views safely outside the async execution line
-	ltcMatView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle());
-	ltcAmpView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle());
+    // 4. Create image views safely outside the async execution line
+    ltcMatView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle());
+    ltcAmpView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle());
 }
 [[nodiscard]]
 std::expected<void, std::string> RenderContext::Impl::InitBindless() {
-	Vk::AllocateDoubleBufferedSet<GlobalSceneLayout>(ctx.Device(), bindlessLayout, bindlessPool,
-													 bindlessSets);
+    Vk::AllocateDoubleBufferedSet<GlobalSceneLayout>(ctx.Device(), bindlessLayout, bindlessPool, bindlessSets);
 
-	// 1. Try building the global sampler
-	auto globalResult =
-		Vk::SamplerBuilder{}
-			.Linear()
-			.Repeat()
-			.Anisotropy(ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy)
-			.LodRange(0.0f, 0.0f)
-			.Build(ctx.Device());
+    // 1. Try building the global sampler
+    auto globalResult = Vk::SamplerBuilder {}
+                            .Linear()
+                            .Repeat()
+                            .Anisotropy(ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy)
+                            .LodRange(0.0f, 0.0f)
+                            .Build(ctx.Device());
 
-	if (!globalResult) {
-		return std::unexpected(std::string("Global Sampler: ") + globalResult.error());
-	}
-	globalSampler = std::move(*globalResult);
+    if (!globalResult) {
+        return std::unexpected(std::string("Global Sampler: ") + globalResult.error());
+    }
+    globalSampler = std::move(*globalResult);
 
-	// 2. Try building the clamp sampler
-	auto clampResult = Vk::SamplerBuilder{}.Linear().ClampToEdge().Build(ctx.Device());
+    // 2. Try building the clamp sampler
+    auto clampResult = Vk::SamplerBuilder {}.Linear().ClampToEdge().Build(ctx.Device());
 
-	if (!clampResult) {
-		return std::unexpected(std::string("Clamp Sampler: ") + clampResult.error());
-	}
-	clampSampler = std::move(*clampResult);
+    if (!clampResult) {
+        return std::unexpected(std::string("Clamp Sampler: ") + clampResult.error());
+    }
+    clampSampler = std::move(*clampResult);
 
-	InitSkeletalAnimationResources();
-	InitLightingLUTs();
+    InitSkeletalAnimationResources();
+    InitLightingLUTs();
 
-	ZHLN::Log("[RenderInit] Pre-allocating persistently mapped Double-Buffered Debug VBOs...");
-	size_t maxDebugVerts = 500000;
-	size_t bufferSize = maxDebugVerts * (sizeof(VertexPosition) + sizeof(VertexAttributes));
-	for (int i = 0; i < 2; ++i) {
-		auto gpu_buf = Vk::Buffer::Create(allocator.Get(), bufferSize,
-										  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-											  VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-										  VMA_MEMORY_USAGE_CPU_TO_GPU);
+    ZHLN::Log("[RenderInit] Pre-allocating persistently mapped Double-Buffered Debug VBOs...");
+    size_t maxDebugVerts = 500000;
+    size_t bufferSize    = maxDebugVerts * (sizeof(VertexPosition) + sizeof(VertexAttributes));
+    for (int i = 0; i < 2; ++i) {
+        auto gpu_buf = Vk::Buffer::Create(
+            allocator.Get(), bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
+        );
 
-		auto address = Vk::GetBufferDeviceAddress(ctx.Device(), gpu_buf.Handle());
-		debugMeshHandles[i] = meshPool.Create(std::move(gpu_buf), maxDebugVerts, address);
-	}
+        auto address        = Vk::GetBufferDeviceAddress(ctx.Device(), gpu_buf.Handle());
+        debugMeshHandles[i] = meshPool.Create(std::move(gpu_buf), maxDebugVerts, address);
+    }
 
-	// Update global descriptor bindings
-	Vk::DescriptorUpdater bindlessRegistry;
-	for (int i = 0; i < 2; ++i) {
-		bindlessRegistry.BindSampler(1, globalSampler.Get());
-		bindlessRegistry.BindUniformBuffer(2, frameUniformBuffers[i].Handle());
-		bindlessRegistry.BindStorageBuffer(3, lightStorageBuffers[i].Handle());
-		bindlessRegistry.BindStorageBuffer(4, instanceDataBuffers[i].Handle());
-		bindlessRegistry.BindStorageBuffer(5, jointBuffers[i].Handle());
-		bindlessRegistry.BindStorageBuffer(6, jointBuffers[1 - i].Handle());
-		bindlessRegistry.BindStorageBuffer(7, morphDeltasBuffer.Handle());
+    // Update global descriptor bindings
+    Vk::DescriptorUpdater bindlessRegistry;
+    for (int i = 0; i < 2; ++i) {
+        bindlessRegistry.BindSampler(1, globalSampler.Get());
+        bindlessRegistry.BindUniformBuffer(2, frameUniformBuffers[i].Handle());
+        bindlessRegistry.BindStorageBuffer(3, lightStorageBuffers[i].Handle());
+        bindlessRegistry.BindStorageBuffer(4, instanceDataBuffers[i].Handle());
+        bindlessRegistry.BindStorageBuffer(5, jointBuffers[i].Handle());
+        bindlessRegistry.BindStorageBuffer(6, jointBuffers[1 - i].Handle());
+        bindlessRegistry.BindStorageBuffer(7, morphDeltasBuffer.Handle());
 
-		bindlessRegistry.BindSampledImage(8, iblPayload.prefilteredView.Get(), VK_NULL_HANDLE,
-										  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-		bindlessRegistry.BindSampledImage(9, iblPayload.brdfLutView.Get(), VK_NULL_HANDLE,
-										  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-		bindlessRegistry.BindSampler(10, clampSampler.Get());
+        bindlessRegistry.BindSampledImage(8, iblPayload.prefilteredView.Get(), VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        bindlessRegistry.BindSampledImage(9, iblPayload.brdfLutView.Get(), VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        bindlessRegistry.BindSampler(10, clampSampler.Get());
 
-		bindlessRegistry.UpdateSet(ctx.Device(), bindlessSets[i]);
-	}
+        bindlessRegistry.UpdateSet(ctx.Device(), bindlessSets[i]);
+    }
 
-	return {}; // Everything succeeded!
+    return {}; // Everything succeeded!
 }
 
 using enum Resource::ShaderID;
 std::expected<void, std::string> RenderContext::Impl::BuildTAAPipeline() {
-	VkPushConstantRange taaPush = {
-		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float)};
+    VkPushConstantRange taaPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float)};
 
-	return BuildPassHelper(this, taaPass, "TAA",
-						   {.path = SHADER_TAA_HLSL_VS_PATH,
-							.fallback = Resource::GetShaderProgram(Taa).vertex,
-							.entryPoint = "VSMain"},
-						   {.path = SHADER_TAA_HLSL_PS_PATH,
-							.fallback = Resource::GetShaderProgram(Taa).fragment,
-							.entryPoint = "PSMain"},
-						   {VK_FORMAT_R16G16B16A16_SFLOAT}, &taaPush, 1);
+    return BuildPassHelper(
+        this, taaPass, "TAA", {.path = SHADER_TAA_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(Taa).vertex, .entryPoint = "VSMain"},
+        {.path = SHADER_TAA_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(Taa).fragment, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT},
+        &taaPush, 1
+    );
 }
 
 std::expected<void, std::string> RenderContext::Impl::BuildFXAAPipeline() {
-	VkPushConstantRange fxaaPush = {
-		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float) * 6};
+    VkPushConstantRange fxaaPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float) * 6};
 
-	return BuildPassHelper(this, fxaaPass, "FXAA",
-						   {.path = SHADER_FXAA_HLSL_VS_PATH,
-							.fallback = Resource::GetShaderProgram(Fxaa).vertex,
-							.entryPoint = "VSMain"},
-						   {.path = SHADER_FXAA_HLSL_PS_PATH,
-							.fallback = Resource::GetShaderProgram(Fxaa).fragment,
-							.entryPoint = "PSMain"},
-						   {VK_FORMAT_R16G16B16A16_SFLOAT}, &fxaaPush, 1);
+    return BuildPassHelper(
+        this, fxaaPass, "FXAA", {.path = SHADER_FXAA_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(Fxaa).vertex, .entryPoint = "VSMain"},
+        {.path = SHADER_FXAA_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(Fxaa).fragment, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT},
+        &fxaaPush, 1
+    );
 }
 
 std::expected<void, std::string> RenderContext::Impl::BuildSMAAPipeline() {
-	VkPushConstantRange smaaPush = {.stageFlags =
-										VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-									.offset = 0,
-									.size = sizeof(float) * 4};
+    VkPushConstantRange smaaPush = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float) * 4};
 
-	auto res = BuildPassHelper(this, smaaEdgePass, "SMAA Edge Detection",
-							   {.path = SHADER_SMAA_EDGE_VS_PATH,
-								.fallback = Resource::GetShaderProgram(SmaaEdge).vertex,
-								.entryPoint = "SmaaEdgeVS"},
-							   {.path = SHADER_SMAA_EDGE_PS_PATH,
-								.fallback = Resource::GetShaderProgram(SmaaEdge).fragment,
-								.entryPoint = "SmaaEdgePS"},
-							   {VK_FORMAT_R8G8_UNORM}, &smaaPush, 1);
-	if (!res) {
-		return res;
-	}
+    auto res = BuildPassHelper(
+        this, smaaEdgePass, "SMAA Edge Detection",
+        {.path = SHADER_SMAA_EDGE_VS_PATH, .fallback = Resource::GetShaderProgram(SmaaEdge).vertex, .entryPoint = "SmaaEdgeVS"},
+        {.path = SHADER_SMAA_EDGE_PS_PATH, .fallback = Resource::GetShaderProgram(SmaaEdge).fragment, .entryPoint = "SmaaEdgePS"}, {VK_FORMAT_R8G8_UNORM},
+        &smaaPush, 1
+    );
+    if (!res) {
+        return res;
+    }
 
-	res = BuildPassHelper(this, smaaWeightPass, "SMAA Blending Weight",
-						  {.path = SHADER_SMAA_WEIGHT_VS_PATH,
-						   .fallback = Resource::GetShaderProgram(SmaaWeight).vertex,
-						   .entryPoint = "SmaaWeightVS"},
-						  {.path = SHADER_SMAA_WEIGHT_PS_PATH,
-						   .fallback = Resource::GetShaderProgram(SmaaWeight).fragment,
-						   .entryPoint = "SmaaWeightPS"},
-						  {VK_FORMAT_R8G8B8A8_UNORM}, &smaaPush, 1);
-	if (!res) {
-		return res;
-	}
+    res = BuildPassHelper(
+        this, smaaWeightPass, "SMAA Blending Weight",
+        {.path = SHADER_SMAA_WEIGHT_VS_PATH, .fallback = Resource::GetShaderProgram(SmaaWeight).vertex, .entryPoint = "SmaaWeightVS"},
+        {.path = SHADER_SMAA_WEIGHT_PS_PATH, .fallback = Resource::GetShaderProgram(SmaaWeight).fragment, .entryPoint = "SmaaWeightPS"},
+        {VK_FORMAT_R8G8B8A8_UNORM}, &smaaPush, 1
+    );
+    if (!res) {
+        return res;
+    }
 
-	return BuildPassHelper(this, smaaBlendPass, "SMAA Neighborhood Blend",
-						   {.path = SHADER_SMAA_BLEND_VS_PATH,
-							.fallback = Resource::GetShaderProgram(SmaaBlend).vertex,
-							.entryPoint = "SmaaBlendVS"},
-						   {.path = SHADER_SMAA_BLEND_PS_PATH,
-							.fallback = Resource::GetShaderProgram(SmaaBlend).fragment,
-							.entryPoint = "SmaaBlendPS"},
-						   {VK_FORMAT_R16G16B16A16_SFLOAT}, &smaaPush, 1);
+    return BuildPassHelper(
+        this, smaaBlendPass, "SMAA Neighborhood Blend",
+        {.path = SHADER_SMAA_BLEND_VS_PATH, .fallback = Resource::GetShaderProgram(SmaaBlend).vertex, .entryPoint = "SmaaBlendVS"},
+        {.path = SHADER_SMAA_BLEND_PS_PATH, .fallback = Resource::GetShaderProgram(SmaaBlend).fragment, .entryPoint = "SmaaBlendPS"},
+        {VK_FORMAT_R16G16B16A16_SFLOAT}, &smaaPush, 1
+    );
 }
 
 std::expected<void, std::string> RenderContext::Impl::BuildAmbientPipeline() {
-	VkPushConstantRange ppPush = {
-		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
+    VkPushConstantRange ppPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
 
-	return BuildPassHelper(this, ambientPass, "Ambient",
-						   {.path = SHADER_AMBIENT_HLSL_VS_PATH,
-							.fallback = Resource::GetShaderProgram(Ambient).vertex,
-							.entryPoint = "VSMain"},
-						   {.path = SHADER_AMBIENT_HLSL_PS_PATH,
-							.fallback = Resource::GetShaderProgram(Ambient).fragment,
-							.entryPoint = "PSMain"},
-						   {VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush, 1);
+    return BuildPassHelper(
+        this, ambientPass, "Ambient", {.path = SHADER_AMBIENT_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(Ambient).vertex, .entryPoint = "VSMain"},
+        {.path = SHADER_AMBIENT_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(Ambient).fragment, .entryPoint = "PSMain"},
+        {VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush, 1
+    );
 }
 
 std::expected<void, std::string> RenderContext::Impl::BuildLightingPipeline() {
-	VkPushConstantRange ppPush = {
-		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
+    VkPushConstantRange ppPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
 
-	struct SpecData {
-		int enableRTR;
-	};
-	std::array<VkSpecializationMapEntry, 1> specEntries = {
-		{{.constantID = 0, .offset = offsetof(SpecData, enableRTR), .size = sizeof(int)}}};
+    struct SpecData {
+        int enableRTR;
+    };
+    std::array<VkSpecializationMapEntry, 1> specEntries = {{{.constantID = 0, .offset = offsetof(SpecData, enableRTR), .size = sizeof(int)}}};
 
-	std::array<SpecData, 2> variants = {{{.enableRTR = 0}, {.enableRTR = 1}}};
-	std::array<VkSpecializationInfo, 2> specInfos{};
-	for (int i = 0; i < 2; ++i) {
-		specInfos[i] = {.mapEntryCount = 1,
-						.pMapEntries = specEntries.data(),
-						.dataSize = sizeof(SpecData),
-						.pData = &variants[i]};
-	}
+    std::array<SpecData, 2>             variants = {{{.enableRTR = 0}, {.enableRTR = 1}}};
+    std::array<VkSpecializationInfo, 2> specInfos {};
+    for (int i = 0; i < 2; ++i) {
+        specInfos[i] = {.mapEntryCount = 1, .pMapEntries = specEntries.data(), .dataSize = sizeof(SpecData), .pData = &variants[i]};
+    }
 
-	bool hasRt = rtCtx.Valid();
-	const char* vsPath = hasRt ? SHADER_LIGHTING_HLSL_VS_PATH : SHADER_LIGHTING_NORT_HLSL_VS_PATH;
-	const char* psPath = hasRt ? SHADER_LIGHTING_HLSL_PS_PATH : SHADER_LIGHTING_NORT_HLSL_PS_PATH;
+    bool        hasRt  = rtCtx.Valid();
+    const char* vsPath = hasRt ? SHADER_LIGHTING_HLSL_VS_PATH : SHADER_LIGHTING_NORT_HLSL_VS_PATH;
+    const char* psPath = hasRt ? SHADER_LIGHTING_HLSL_PS_PATH : SHADER_LIGHTING_NORT_HLSL_PS_PATH;
 
-	auto vsSpan = hasRt ? Resource::GetShaderProgram(Lighting).vertex
-						: Resource::GetShaderProgram(LightingNort).vertex;
-	auto psSpan = hasRt ? Resource::GetShaderProgram(Lighting).fragment
-						: Resource::GetShaderProgram(LightingNort).fragment;
+    auto vsSpan = hasRt ? Resource::GetShaderProgram(Lighting).vertex : Resource::GetShaderProgram(LightingNort).vertex;
+    auto psSpan = hasRt ? Resource::GetShaderProgram(Lighting).fragment : Resource::GetShaderProgram(LightingNort).fragment;
 
-	return BuildPassVariants(this, lightingPass, "Lighting",
-							 {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
-							 {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"},
-							 {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1);
+    return BuildPassVariants(
+        this, lightingPass, "Lighting", {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
+        {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1
+    );
 }
 
 std::expected<void, std::string> RenderContext::Impl::BuildReflectionPipelines() {
-	VkPushConstantRange ppPush = {
-		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(PPPushConstants)};
+    VkPushConstantRange ppPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(PPPushConstants)};
 
-	struct SpecData {
-		int enableSSR;
-		int enableRTR;
-	};
-	std::array<VkSpecializationMapEntry, 2> specEntries = {
-		{{.constantID = 0, .offset = offsetof(SpecData, enableSSR), .size = sizeof(int)},
-		 {.constantID = 1, .offset = offsetof(SpecData, enableRTR), .size = sizeof(int)}}};
+    struct SpecData {
+        int enableSSR;
+        int enableRTR;
+    };
+    std::array<VkSpecializationMapEntry, 2> specEntries = {
+        {{.constantID = 0, .offset = offsetof(SpecData, enableSSR), .size = sizeof(int)},
+         {.constantID = 1, .offset = offsetof(SpecData, enableRTR), .size = sizeof(int)}}
+    };
 
-	std::array<SpecData, 4> variants = {{{.enableSSR = 0, .enableRTR = 0},
-										 {.enableSSR = 1, .enableRTR = 0},
-										 {.enableSSR = 0, .enableRTR = 1},
-										 {.enableSSR = 1, .enableRTR = 1}}};
-	std::array<VkSpecializationInfo, 4> specInfos{};
-	for (int i = 0; i < 4; ++i) {
-		specInfos[i] = {.mapEntryCount = 2,
-						.pMapEntries = specEntries.data(),
-						.dataSize = sizeof(SpecData),
-						.pData = &variants[i]};
-	}
+    std::array<SpecData, 4> variants = {
+        {{.enableSSR = 0, .enableRTR = 0}, {.enableSSR = 1, .enableRTR = 0}, {.enableSSR = 0, .enableRTR = 1}, {.enableSSR = 1, .enableRTR = 1}}
+    };
+    std::array<VkSpecializationInfo, 4> specInfos {};
+    for (int i = 0; i < 4; ++i) {
+        specInfos[i] = {.mapEntryCount = 2, .pMapEntries = specEntries.data(), .dataSize = sizeof(SpecData), .pData = &variants[i]};
+    }
 
-	bool hasRt = rtCtx.Valid();
-	const char* vsPath =
-		hasRt ? SHADER_REFLECTION_HLSL_VS_PATH : SHADER_REFLECTION_NORT_HLSL_VS_PATH;
-	const char* psPath =
-		hasRt ? SHADER_REFLECTION_HLSL_PS_PATH : SHADER_REFLECTION_NORT_HLSL_PS_PATH;
+    bool        hasRt  = rtCtx.Valid();
+    const char* vsPath = hasRt ? SHADER_REFLECTION_HLSL_VS_PATH : SHADER_REFLECTION_NORT_HLSL_VS_PATH;
+    const char* psPath = hasRt ? SHADER_REFLECTION_HLSL_PS_PATH : SHADER_REFLECTION_NORT_HLSL_PS_PATH;
 
-	auto vsSpan = hasRt ? Resource::GetShaderProgram(Reflection).vertex
-						: Resource::GetShaderProgram(Resource::ShaderID::ReflectionNort).vertex;
-	auto psSpan = hasRt ? Resource::GetShaderProgram(Reflection).fragment
-						: Resource::GetShaderProgram(Resource::ShaderID::ReflectionNort).fragment;
+    auto vsSpan = hasRt ? Resource::GetShaderProgram(Reflection).vertex : Resource::GetShaderProgram(Resource::ShaderID::ReflectionNort).vertex;
+    auto psSpan = hasRt ? Resource::GetShaderProgram(Reflection).fragment : Resource::GetShaderProgram(Resource::ShaderID::ReflectionNort).fragment;
 
-	return BuildPassVariants(this, reflectionPass, "Reflection",
-							 {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
-							 {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"},
-							 {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1);
+    return BuildPassVariants(
+        this, reflectionPass, "Reflection", {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
+        {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1
+    );
 }
 
 std::expected<void, std::string> RenderContext::Impl::BuildBloomPipelines() {
-	using enum Resource::ShaderID;
-	auto res = BuildPassHelper(this, bloomThresholdPass, "Bloom Threshold",
-							   {.path = SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH,
-								.fallback = Resource::GetShaderProgram(BloomThreshold).vertex,
-								.entryPoint = "VSMain"},
-							   {.path = SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH,
-								.fallback = Resource::GetShaderProgram(BloomThreshold).fragment,
-								.entryPoint = "PSMain"},
-							   {VK_FORMAT_R16G16B16A16_SFLOAT});
-	if (!res) {
-		return res;
-	}
+    using enum Resource::ShaderID;
+    auto res = BuildPassHelper(
+        this, bloomThresholdPass, "Bloom Threshold",
+        {.path = SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(BloomThreshold).vertex, .entryPoint = "VSMain"},
+        {.path = SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(BloomThreshold).fragment, .entryPoint = "PSMain"},
+        {VK_FORMAT_R16G16B16A16_SFLOAT}
+    );
+    if (!res) {
+        return res;
+    }
 
-	VkPushConstantRange kawasePush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-									  .offset = 0,
-									  .size = sizeof(KawasePushConstants)};
+    VkPushConstantRange kawasePush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(KawasePushConstants)};
 
-	for (int i = 0; i < 3; ++i) {
-		std::string downName = std::format("Bloom Downsample {}", i);
-		res = BuildPassHelper(this, bloomDownPass[i], downName.c_str(),
-							  {.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH,
-							   .fallback = Resource::GetShaderProgram(BloomBlur).vertex,
-							   .entryPoint = "VSMain"},
-							  {.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH,
-							   .fallback = Resource::GetShaderProgram(BloomBlur).fragment,
-							   .entryPoint = "PSMain"},
-							  {VK_FORMAT_R16G16B16A16_SFLOAT}, &kawasePush, 1);
-		if (!res) {
-			return res;
-		}
+    for (int i = 0; i < 3; ++i) {
+        std::string downName = std::format("Bloom Downsample {}", i);
+        res                  = BuildPassHelper(
+            this, bloomDownPass[i], downName.c_str(),
+            {.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).vertex, .entryPoint = "VSMain"},
+            {.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).fragment, .entryPoint = "PSMain"},
+            {VK_FORMAT_R16G16B16A16_SFLOAT}, &kawasePush, 1
+        );
+        if (!res) {
+            return res;
+        }
 
-		std::string upName = std::format("Bloom Upsample {}", i);
-		res = BuildPassHelper(this, bloomUpPass[i], upName.c_str(),
-							  {.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH,
-							   .fallback = Resource::GetShaderProgram(BloomBlur).vertex,
-							   .entryPoint = "VSMain"},
-							  {.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH,
-							   .fallback = Resource::GetShaderProgram(BloomBlur).fragment,
-							   .entryPoint = "PSMain"},
-							  {VK_FORMAT_R16G16B16A16_SFLOAT}, &kawasePush, 1);
-		if (!res) {
-			return res;
-		}
-	}
-	return {};
+        std::string upName = std::format("Bloom Upsample {}", i);
+        res                = BuildPassHelper(
+            this, bloomUpPass[i], upName.c_str(),
+            {.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).vertex, .entryPoint = "VSMain"},
+            {.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).fragment, .entryPoint = "PSMain"},
+            {VK_FORMAT_R16G16B16A16_SFLOAT}, &kawasePush, 1
+        );
+        if (!res) {
+            return res;
+        }
+    }
+    return {};
 }
 
 std::expected<void, std::string> RenderContext::Impl::BuildBlitPipeline() {
-	VkPushConstantRange blitPush = {
-		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-		.offset = 0,
-		.size = sizeof(BlitPushConstants),
-	};
+    VkPushConstantRange blitPush = {
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        .offset     = 0,
+        .size       = sizeof(BlitPushConstants),
+    };
 
-	return BuildPassHelper(this, blitPass, "Blit",
-						   {.path = SHADER_BLIT_HLSL_VS_PATH,
-							.fallback = Resource::GetShaderProgram(Blit).vertex,
-							.entryPoint = "VSMain"},
-						   {.path = SHADER_BLIT_HLSL_PS_PATH,
-							.fallback = Resource::GetShaderProgram(Blit).fragment,
-							.entryPoint = "PSMain"},
-						   {presentation.swapchain.Get().format}, &blitPush, 1);
+    return BuildPassHelper(
+        this, blitPass, "Blit", {.path = SHADER_BLIT_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(Blit).vertex, .entryPoint = "VSMain"},
+        {.path = SHADER_BLIT_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(Blit).fragment, .entryPoint = "PSMain"},
+        {presentation.swapchain.Get().format}, &blitPush, 1
+    );
 }
 
 std::expected<void, std::string> RenderContext::Impl::InitPostProcessing() {
-	auto defaultResult = Vk::SamplerBuilder{}.Linear().ClampToEdge().Build(ctx.Device());
-	if (!defaultResult) {
-		std::unexpected(std::format("Failed to create default Sampler: {}", defaultResult.error()));
-	}
-	defaultSampler = std::move(*defaultResult);
-	auto pointResult = Vk::SamplerBuilder{}.Nearest().ClampToEdge().Build(ctx.Device());
-	if (!pointResult) {
-		std::unexpected(std::format("Failed to create point Sampler: {}", pointResult.error()));
-	}
-	pointSampler = std::move(*pointResult);
+    auto defaultResult = Vk::SamplerBuilder {}.Linear().ClampToEdge().Build(ctx.Device());
+    if (!defaultResult) {
+        std::unexpected(std::format("Failed to create default Sampler: {}", defaultResult.error()));
+    }
+    defaultSampler   = std::move(*defaultResult);
+    auto pointResult = Vk::SamplerBuilder {}.Nearest().ClampToEdge().Build(ctx.Device());
+    if (!pointResult) {
+        std::unexpected(std::format("Failed to create point Sampler: {}", pointResult.error()));
+    }
+    pointSampler = std::move(*pointResult);
 
-	// Unified build and watch registration helper
-	auto register_and_check =
-		[&](const char* name, auto&& build_fn,
-			std::initializer_list<const char*> watchPaths) -> std::expected<void, std::string> {
-		auto res = build_fn();
-		if (!res) {
-			return std::unexpected(
-				std::format("Pipeline '{}' failed to compile: {}", name, res.error()));
-		}
-		if constexpr (isDev) {
-			for (const auto* path : watchPaths) {
-				RegisterShaderWatcher(path, [=, build_fn =
-													std::forward<decltype(build_fn)>(build_fn)]() {
-					auto reload_res = build_fn();
-					if (!reload_res) {
-						ZHLN::Log("ERROR: Failed to hot-reload pipeline '{}': {}", name,
-								  reload_res.error());
-					} else {
-						ZHLN::Log("[Shader Reload] Pipeline '{}' hot-reloaded successfully.", name);
-					}
-				});
-			}
-		}
-		return {};
-	};
+    // Unified build and watch registration helper
+    auto register_and_check = [&](const char* name, auto&& build_fn, std::initializer_list<const char*> watchPaths) -> std::expected<void, std::string> {
+        auto res = build_fn();
+        if (!res) {
+            return std::unexpected(std::format("Pipeline '{}' failed to compile: {}", name, res.error()));
+        }
+        if constexpr (isDev) {
+            for (const auto* path: watchPaths) {
+                RegisterShaderWatcher(path, [=, build_fn = std::forward<decltype(build_fn)>(build_fn)]() {
+                    auto reload_res = build_fn();
+                    if (!reload_res) {
+                        ZHLN::Log("ERROR: Failed to hot-reload pipeline '{}': {}", name, reload_res.error());
+                    } else {
+                        ZHLN::Log("[Shader Reload] Pipeline '{}' hot-reloaded successfully.", name);
+                    }
+                });
+            }
+        }
+        return {};
+    };
 
-	auto res = register_and_check("TAA", [this]() { return BuildTAAPipeline(); },
-								  {SHADER_TAA_HLSL_VS_PATH, SHADER_TAA_HLSL_PS_PATH});
-	if (!res) {
-		return res;
-	}
+    auto res = register_and_check("TAA", [this]() { return BuildTAAPipeline(); }, {SHADER_TAA_HLSL_VS_PATH, SHADER_TAA_HLSL_PS_PATH});
+    if (!res) {
+        return res;
+    }
 
-	res = register_and_check("FXAA", [this]() { return BuildFXAAPipeline(); },
-							 {SHADER_FXAA_HLSL_VS_PATH, SHADER_FXAA_HLSL_PS_PATH});
-	if (!res) {
-		return res;
-	}
+    res = register_and_check("FXAA", [this]() { return BuildFXAAPipeline(); }, {SHADER_FXAA_HLSL_VS_PATH, SHADER_FXAA_HLSL_PS_PATH});
+    if (!res) {
+        return res;
+    }
 
-	res = register_and_check("SMAA", [this]() { return BuildSMAAPipeline(); },
-							 {SHADER_SMAA_EDGE_VS_PATH, SHADER_SMAA_EDGE_PS_PATH,
-							  SHADER_SMAA_WEIGHT_VS_PATH, SHADER_SMAA_WEIGHT_PS_PATH,
-							  SHADER_SMAA_BLEND_VS_PATH, SHADER_SMAA_BLEND_PS_PATH});
-	if (!res) {
-		return res;
-	}
+    res = register_and_check(
+        "SMAA", [this]() { return BuildSMAAPipeline(); },
+        {SHADER_SMAA_EDGE_VS_PATH, SHADER_SMAA_EDGE_PS_PATH, SHADER_SMAA_WEIGHT_VS_PATH, SHADER_SMAA_WEIGHT_PS_PATH, SHADER_SMAA_BLEND_VS_PATH,
+         SHADER_SMAA_BLEND_PS_PATH}
+    );
+    if (!res) {
+        return res;
+    }
 
-	res = register_and_check("Ambient", [this]() { return BuildAmbientPipeline(); },
-							 {SHADER_AMBIENT_HLSL_VS_PATH, SHADER_AMBIENT_HLSL_PS_PATH});
-	if (!res) {
-		return res;
-	}
+    res = register_and_check("Ambient", [this]() { return BuildAmbientPipeline(); }, {SHADER_AMBIENT_HLSL_VS_PATH, SHADER_AMBIENT_HLSL_PS_PATH});
+    if (!res) {
+        return res;
+    }
 
-	res =
-		register_and_check("Lighting", [this]() { return BuildLightingPipeline(); },
-						   {SHADER_LIGHTING_HLSL_VS_PATH, SHADER_LIGHTING_HLSL_PS_PATH,
-							SHADER_LIGHTING_NORT_HLSL_VS_PATH, SHADER_LIGHTING_NORT_HLSL_PS_PATH});
-	if (!res) {
-		return res;
-	}
+    res = register_and_check(
+        "Lighting", [this]() { return BuildLightingPipeline(); },
+        {SHADER_LIGHTING_HLSL_VS_PATH, SHADER_LIGHTING_HLSL_PS_PATH, SHADER_LIGHTING_NORT_HLSL_VS_PATH, SHADER_LIGHTING_NORT_HLSL_PS_PATH}
+    );
+    if (!res) {
+        return res;
+    }
 
-	res = register_and_check("Reflection", [this]() { return BuildReflectionPipelines(); },
-							 {SHADER_REFLECTION_HLSL_VS_PATH, SHADER_REFLECTION_HLSL_PS_PATH,
-							  SHADER_REFLECTION_NORT_HLSL_VS_PATH,
-							  SHADER_REFLECTION_NORT_HLSL_PS_PATH});
-	if (!res) {
-		return res;
-	}
+    res = register_and_check(
+        "Reflection", [this]() { return BuildReflectionPipelines(); },
+        {SHADER_REFLECTION_HLSL_VS_PATH, SHADER_REFLECTION_HLSL_PS_PATH, SHADER_REFLECTION_NORT_HLSL_VS_PATH, SHADER_REFLECTION_NORT_HLSL_PS_PATH}
+    );
+    if (!res) {
+        return res;
+    }
 
-	res = register_and_check("Bloom", [this]() { return BuildBloomPipelines(); },
-							 {SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH,
-							  SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH, SHADER_BLOOM_BLUR_HLSL_VS_PATH,
-							  SHADER_BLOOM_BLUR_HLSL_PS_PATH});
-	if (!res) {
-		return res;
-	}
+    res = register_and_check(
+        "Bloom", [this]() { return BuildBloomPipelines(); },
+        {SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH, SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH, SHADER_BLOOM_BLUR_HLSL_VS_PATH, SHADER_BLOOM_BLUR_HLSL_PS_PATH}
+    );
+    if (!res) {
+        return res;
+    }
 
-	res = register_and_check("Blit", [this]() { return BuildBlitPipeline(); },
-							 {SHADER_BLIT_HLSL_VS_PATH, SHADER_BLIT_HLSL_PS_PATH});
-	if (!res) {
-		return res;
-	}
+    res = register_and_check("Blit", [this]() { return BuildBlitPipeline(); }, {SHADER_BLIT_HLSL_VS_PATH, SHADER_BLIT_HLSL_PS_PATH});
+    if (!res) {
+        return res;
+    }
 
-	ZHLN::Array<uint32_t> smaaAreaPixels(static_cast<size_t>(160 * 560));
-	ZHLN::PBR::FillSmaaAreaTex(smaaAreaPixels);
-	ZHLN::Array<uint32_t> smaaSearchPixels(static_cast<size_t>(64 * 16));
-	ZHLN::PBR::FillSmaaSearchTex(smaaSearchPixels);
-	smaaAreaTexIdx = CreateTextureInternal(smaaAreaPixels.data(), 160, 560, false);
-	smaaSearchTexIdx = CreateTextureInternal(smaaSearchPixels.data(), 64, 16, false);
+    ZHLN::Array<uint32_t> smaaAreaPixels(static_cast<size_t>(160 * 560));
+    ZHLN::PBR::FillSmaaAreaTex(smaaAreaPixels);
+    ZHLN::Array<uint32_t> smaaSearchPixels(static_cast<size_t>(64 * 16));
+    ZHLN::PBR::FillSmaaSearchTex(smaaSearchPixels);
+    smaaAreaTexIdx   = CreateTextureInternal(smaaAreaPixels.data(), 160, 560, false);
+    smaaSearchTexIdx = CreateTextureInternal(smaaSearchPixels.data(), 64, 16, false);
 
-	return {};
+    return {};
 }
 
 std::expected<void, std::string> RenderContext::Impl::SetupUI(GLFWwindow* window) {
-	auto uiPool_res = Vk::DescriptorPoolBuilder(ctx.Device())
-						  .Flags(VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT)
-						  .MaxSets(1000)
-						  .AddSize(VK_DESCRIPTOR_TYPE_SAMPLER, 1000)
-						  .AddSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000)
-						  .AddSize(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000)
-						  .AddSize(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000)
-						  .AddSize(VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000)
-						  .AddSize(VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000)
-						  .AddSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000)
-						  .AddSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000)
-						  .AddSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000)
-						  .AddSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000)
-						  .AddSize(VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000)
-						  .Build();
+    auto uiPool_res = Vk::DescriptorPoolBuilder(ctx.Device())
+                          .Flags(VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT)
+                          .MaxSets(1000)
+                          .AddSize(VK_DESCRIPTOR_TYPE_SAMPLER, 1000)
+                          .AddSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000)
+                          .AddSize(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000)
+                          .AddSize(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000)
+                          .AddSize(VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000)
+                          .AddSize(VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000)
+                          .AddSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000)
+                          .AddSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000)
+                          .AddSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000)
+                          .AddSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000)
+                          .AddSize(VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000)
+                          .Build();
 
-	if (!uiPool_res) {
-		return std::unexpected(std::format("Failed to create UI Descriptor Pool: {}",
-										   Vk::ResultString(uiPool_res.error())));
-	}
-	uiPool = std::move(uiPool_res.value());
+    if (!uiPool_res) {
+        return std::unexpected(std::format("Failed to create UI Descriptor Pool: {}", Vk::ResultString(uiPool_res.error())));
+    }
+    uiPool = std::move(uiPool_res.value());
 
-	auto uiShaders = Vk::ShaderStages::Create(ctx.Device(), Resource::GetShaderProgram(Ui));
-	if (!uiShaders.Valid()) {
-		return std::unexpected("Failed to compile or load UI ShaderStages.");
-	}
+    auto uiShaders = Vk::ShaderStages::Create(ctx.Device(), Resource::GetShaderProgram(Ui));
+    if (!uiShaders.Valid()) {
+        return std::unexpected("Failed to compile or load UI ShaderStages.");
+    }
 
-	// Build the UI Pipeline Layout using the fluent builder
-	auto uiPipelineLayout_res =
-		Vk::PipelineLayoutBuilder(ctx.Device())
-			.AddDescriptorSetLayout(bindlessLayout.Get())
-			.AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-							 sizeof(UIObjectConstants))
-			.Build();
+    // Build the UI Pipeline Layout using the fluent builder
+    auto uiPipelineLayout_res = Vk::PipelineLayoutBuilder(ctx.Device())
+                                    .AddDescriptorSetLayout(bindlessLayout.Get())
+                                    .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(UIObjectConstants))
+                                    .Build();
 
-	if (!uiPipelineLayout_res) {
-		return std::unexpected("Failed to compile UI Pipeline Layout.");
-	}
-	uiPipelineLayout = std::move(uiPipelineLayout_res.value());
+    if (!uiPipelineLayout_res) {
+        return std::unexpected("Failed to compile UI Pipeline Layout.");
+    }
+    uiPipelineLayout = std::move(uiPipelineLayout_res.value());
 
-	VkFormat swapchainFormat = presentation.swapchain.Get().format;
+    VkFormat swapchainFormat = presentation.swapchain.Get().format;
 
-	auto uiPipelineRes = Vk::PipelineBuilder{}
-							 .Shaders(uiShaders)
-							 .Layout(uiPipelineLayout.Get())
-							 .ColorFormats(std::array{swapchainFormat})
-							 .NoDepth()
-							 .AlphaBlend()
-							 .CullNone()
-							 .Build(ctx.Device());
+    auto uiPipelineRes = Vk::PipelineBuilder {}
+                             .Shaders(uiShaders)
+                             .Layout(uiPipelineLayout.Get())
+                             .ColorFormats(std::array {swapchainFormat})
+                             .NoDepth()
+                             .AlphaBlend()
+                             .CullNone()
+                             .Build(ctx.Device());
 
-	if (!uiPipelineRes) {
-		return std::unexpected(
-			std::format("Failed to compile UI Graphics Pipeline (Error Code: {})",
-						static_cast<int>(uiPipelineRes.error())));
-	}
-	uiPipeline = std::move(*uiPipelineRes);
+    if (!uiPipelineRes) {
+        return std::unexpected(std::format("Failed to compile UI Graphics Pipeline (Error Code: {})", static_cast<int>(uiPipelineRes.error())));
+    }
+    uiPipeline = std::move(*uiPipelineRes);
 
-	// --- ONLY RUN THE IMGUI/GLFW PORTION IF WINDOW IS VALID ---
-	if (window != nullptr) {
-		IMGUI_CHECKVERSION();
-		ImGui::CreateContext();
-		ImGui_ImplGlfw_InitForVulkan(window, true);
+    // --- ONLY RUN THE IMGUI/GLFW PORTION IF WINDOW IS VALID ---
+    if (window != nullptr) {
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGui_ImplGlfw_InitForVulkan(window, true);
 
-		ImGui_ImplVulkan_InitInfo init_info = {
-			.ApiVersion = VK_API_VERSION_1_3,
-			.Instance = ctx.Instance(),
-			.PhysicalDevice = ctx.Physical(),
-			.Device = ctx.Device(),
-			.QueueFamily = ctx.PhysicalInfo().graphics_family,
-			.Queue = ctx.GraphicsQueue(),
-			.DescriptorPool = uiPool.Get(),
-			.DescriptorPoolSize = 0,
-			.MinImageCount = 2,
-			.ImageCount = 2,
-			.PipelineCache = VK_NULL_HANDLE,
-			.PipelineInfoMain =
-				{
-					.RenderPass = VK_NULL_HANDLE,
-					.Subpass = 0,
-					.MSAASamples = VK_SAMPLE_COUNT_1_BIT,
-					.ExtraDynamicStates{},
-					.PipelineRenderingCreateInfo =
-						{.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-						 .pNext = nullptr,
-						 .viewMask = 0,
-						 .colorAttachmentCount = 1,
-						 .pColorAttachmentFormats = &swapchainFormat,
-						 .depthAttachmentFormat = VK_FORMAT_D32_SFLOAT,
-						 .stencilAttachmentFormat = VK_FORMAT_UNDEFINED},
-				},
-			.UseDynamicRendering = true,
-			.Allocator = nullptr,
-			.CheckVkResultFn = nullptr,
-			.MinAllocationSize = 0,
-			.CustomShaderVertCreateInfo = {},
-			.CustomShaderFragCreateInfo = {},
-		};
+        ImGui_ImplVulkan_InitInfo init_info = {
+            .ApiVersion         = VK_API_VERSION_1_3,
+            .Instance           = ctx.Instance(),
+            .PhysicalDevice     = ctx.Physical(),
+            .Device             = ctx.Device(),
+            .QueueFamily        = ctx.PhysicalInfo().graphics_family,
+            .Queue              = ctx.GraphicsQueue(),
+            .DescriptorPool     = uiPool.Get(),
+            .DescriptorPoolSize = 0,
+            .MinImageCount      = 2,
+            .ImageCount         = 2,
+            .PipelineCache      = VK_NULL_HANDLE,
+            .PipelineInfoMain =
+                {
+                    .RenderPass  = VK_NULL_HANDLE,
+                    .Subpass     = 0,
+                    .MSAASamples = VK_SAMPLE_COUNT_1_BIT,
+                    .ExtraDynamicStates {},
+                    .PipelineRenderingCreateInfo =
+                        {.sType                   = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+                         .pNext                   = nullptr,
+                         .viewMask                = 0,
+                         .colorAttachmentCount    = 1,
+                         .pColorAttachmentFormats = &swapchainFormat,
+                         .depthAttachmentFormat   = VK_FORMAT_D32_SFLOAT,
+                         .stencilAttachmentFormat = VK_FORMAT_UNDEFINED},
+                },
+            .UseDynamicRendering        = true,
+            .Allocator                  = nullptr,
+            .CheckVkResultFn            = nullptr,
+            .MinAllocationSize          = 0,
+            .CustomShaderVertCreateInfo = {},
+            .CustomShaderFragCreateInfo = {},
+        };
 
-		if (!ImGui_ImplVulkan_Init(&init_info)) {
-			return std::unexpected("Failed to initialize ImGui Vulkan implementation.");
-		}
-	}
-	return {};
+        if (!ImGui_ImplVulkan_Init(&init_info)) {
+            return std::unexpected("Failed to initialize ImGui Vulkan implementation.");
+        }
+    }
+    return {};
 }
 
 bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
-	if (!presentation.Rebuild(ext.width, ext.height)) {
-		return false;
-	}
+    if (!presentation.Rebuild(ext.width, ext.height)) {
+        return false;
+    }
 
-	graphResources.sceneColor = CreateDefaultTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>(ext);
-	graphResources.velocityBuffer = CreateDefaultTarget<VK_FORMAT_R16G16_SFLOAT>(ext);
-	accumBuffers[0] = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
-	accumBuffers[1] = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
-	graphResources.normalRoughnessBuffer = CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext);
-	graphResources.postProcessTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
-	graphResources.ambientTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
-	graphResources.lightingTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
-	graphResources.smaaEdgeTarget = CreateDefaultTarget<VK_FORMAT_R8G8_UNORM>(ext);
-	graphResources.smaaWeightTarget = CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext);
+    graphResources.sceneColor            = CreateDefaultTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>(ext);
+    graphResources.velocityBuffer        = CreateDefaultTarget<VK_FORMAT_R16G16_SFLOAT>(ext);
+    accumBuffers[0]                      = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
+    accumBuffers[1]                      = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
+    graphResources.normalRoughnessBuffer = CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext);
+    graphResources.postProcessTarget     = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
+    graphResources.ambientTarget         = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
+    graphResources.lightingTarget        = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
+    graphResources.smaaEdgeTarget        = CreateDefaultTarget<VK_FORMAT_R8G8_UNORM>(ext);
+    graphResources.smaaWeightTarget      = CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext);
 
-	VkExtent2D ext2 = {.width = std::max(1u, ext.width / 2), .height = std::max(1u, ext.height / 2)};
-	VkExtent2D ext4 = {.width = std::max(1u, ext.width / 4), .height = std::max(1u, ext.height / 4)};
-	VkExtent2D ext8 = {.width = std::max(1u, ext.width / 8), .height = std::max(1u, ext.height / 8)};
-	VkExtent2D ext16 = {.width = std::max(1u, ext.width / 16),
-						.height = std::max(1u, ext.height / 16)};
+    VkExtent2D ext2  = {.width = std::max(1u, ext.width / 2), .height = std::max(1u, ext.height / 2)};
+    VkExtent2D ext4  = {.width = std::max(1u, ext.width / 4), .height = std::max(1u, ext.height / 4)};
+    VkExtent2D ext8  = {.width = std::max(1u, ext.width / 8), .height = std::max(1u, ext.height / 8)};
+    VkExtent2D ext16 = {.width = std::max(1u, ext.width / 16), .height = std::max(1u, ext.height / 16)};
 
-	graphResources.bloomThresholdTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2);
-	graphResources.bloomDown1 = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4);
-	graphResources.bloomDown2 = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext8);
-	graphResources.bloomDown3 = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext16);
-	graphResources.bloomUp2 = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext8);
-	graphResources.bloomUp1 = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4);
-	graphResources.bloomFinalTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2);
+    graphResources.bloomThresholdTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2);
+    graphResources.bloomDown1           = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4);
+    graphResources.bloomDown2           = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext8);
+    graphResources.bloomDown3           = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext16);
+    graphResources.bloomUp2             = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext8);
+    graphResources.bloomUp1             = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4);
+    graphResources.bloomFinalTarget     = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2);
 
-	RecreatePunctualShadowViews();
+    RecreatePunctualShadowViews();
 
-	// Transition all newly allocated render targets to their correct default layouts
-	Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
-		std::array colorTargets = {graphResources.sceneColor.image.Handle(),
-								   graphResources.velocityBuffer.image.Handle(),
-								   accumBuffers[0].image.Handle(),
-								   accumBuffers[1].image.Handle(),
-								   graphResources.normalRoughnessBuffer.image.Handle(),
-								   graphResources.postProcessTarget.image.Handle(),
-								   graphResources.ambientTarget.image.Handle(),
-								   graphResources.lightingTarget.image.Handle(),
-								   graphResources.smaaEdgeTarget.image.Handle(),
-								   graphResources.smaaWeightTarget.image.Handle(),
-								   graphResources.bloomThresholdTarget.image.Handle(),
-								   graphResources.bloomDown1.image.Handle(),
-								   graphResources.bloomDown2.image.Handle(),
-								   graphResources.bloomDown3.image.Handle(),
-								   graphResources.bloomUp2.image.Handle(),
-								   graphResources.bloomUp1.image.Handle(),
-								   graphResources.bloomFinalTarget.image.Handle()};
+    // Transition all newly allocated render targets to their correct default layouts
+    Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
+        std::array colorTargets = {
+            graphResources.sceneColor.image.Handle(),
+            graphResources.velocityBuffer.image.Handle(),
+            accumBuffers[0].image.Handle(),
+            accumBuffers[1].image.Handle(),
+            graphResources.normalRoughnessBuffer.image.Handle(),
+            graphResources.postProcessTarget.image.Handle(),
+            graphResources.ambientTarget.image.Handle(),
+            graphResources.lightingTarget.image.Handle(),
+            graphResources.smaaEdgeTarget.image.Handle(),
+            graphResources.smaaWeightTarget.image.Handle(),
+            graphResources.bloomThresholdTarget.image.Handle(),
+            graphResources.bloomDown1.image.Handle(),
+            graphResources.bloomDown2.image.Handle(),
+            graphResources.bloomDown3.image.Handle(),
+            graphResources.bloomUp2.image.Handle(),
+            graphResources.bloomUp1.image.Handle(),
+            graphResources.bloomFinalTarget.image.Handle()
+        };
 
-		for (auto* const img : colorTargets) {
-			Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
-				cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-			Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-								 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-				cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-		}
+        for (auto* const img: colorTargets) {
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+        }
 
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-			cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
-		Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-							 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-			cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT);
-	});
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+            cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
+        );
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+            cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
+        );
+    });
 
-	return true;
+    return true;
 }
 
 std::expected<void, std::string> RenderContext::Impl::BuildHangGpuPipeline() {
-	ZHLN_PipelineLayoutDesc pLayoutDesc = {.set_layouts = nullptr,
-										   .set_layout_count = 0,
-										   .push_constants = nullptr,
-										   .push_constant_count = 0};
+    ZHLN_PipelineLayoutDesc pLayoutDesc = {.set_layouts = nullptr, .set_layout_count = 0, .push_constants = nullptr, .push_constant_count = 0};
 
-	hangGpuPass.pipelineLayout =
-		Vk::PipelineLayout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &pLayoutDesc));
+    hangGpuPass.pipelineLayout = Vk::PipelineLayout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &pLayoutDesc));
 
-	hangGpuPass.pipeline = LoadAndCreateComputeShader({.path = SHADER_HANG_GPU_HLSL_CS_PATH,
-													   .fallback = Resource::hang_gpu_comp,
-													   .entryPoint = "CSMain"},
-													  hangGpuPass.pipelineLayout.Get());
-	if (hangGpuPass.pipeline.Valid()) {
-		return {};
-	}
-	return std::unexpected("Failed to build Hang GPU compute pipeline.");
+    hangGpuPass.pipeline = LoadAndCreateComputeShader(
+        {.path = SHADER_HANG_GPU_HLSL_CS_PATH, .fallback = Resource::hang_gpu_comp, .entryPoint = "CSMain"}, hangGpuPass.pipelineLayout.Get()
+    );
+    if (hangGpuPass.pipeline.Valid()) {
+        return {};
+    }
+    return std::unexpected("Failed to build Hang GPU compute pipeline.");
 }
 
 } // namespace ZHLN

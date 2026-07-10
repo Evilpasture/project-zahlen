@@ -16,40 +16,37 @@ class Buffer;
 
 class StagingContext {
   public:
-	StagingContext(Allocator& allocator, const Context& ctx);
-	~StagingContext();
+    StagingContext(Allocator& allocator, const Context& ctx);
+    ~StagingContext();
 
-	// Disable copying to enforce strict ownership
-	StagingContext(const StagingContext&) = delete;
-	StagingContext& operator=(const StagingContext&) = delete;
+    // Disable copying to enforce strict ownership
+    StagingContext(const StagingContext&)            = delete;
+    StagingContext& operator=(const StagingContext&) = delete;
 
-	StagingContext(StagingContext&& other) noexcept;
-	StagingContext& operator=(StagingContext&&) noexcept = delete;
+    StagingContext(StagingContext&& other) noexcept;
+    StagingContext& operator=(StagingContext&&) noexcept = delete;
 
-	void Begin();
+    void Begin();
 
-	void UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels,
-					   const void* data, size_t bytes);
+    void UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, const void* data, size_t bytes);
 
-	void UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels,
-							 VkBuffer stagingBuf, VkDeviceSize offset);
+    void UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, VkBuffer stagingBuf, VkDeviceSize offset);
 
-	void UploadPrefilteredCubeMap(VkImage dstImage, VkBuffer stagingBuf, uint32_t baseSize,
-								  uint32_t mipLevels);
+    void UploadPrefilteredCubeMap(VkImage dstImage, VkBuffer stagingBuf, uint32_t baseSize, uint32_t mipLevels);
 
-	void AddBuffer(Buffer&& buf);
+    void AddBuffer(Buffer&& buf);
 
-	void ExecuteAsync();
+    void ExecuteAsync();
 
-	void Wait() noexcept;
+    void Wait() noexcept;
 
   private:
-	Allocator* _allocator = nullptr;
-	const Context* _ctx = nullptr;
-	CommandPool<QueueType::Graphics> _cmdPool;
-	VkCommandBuffer _cmd = VK_NULL_HANDLE;
-	std::vector<Buffer> _stagingBuffers;
-	VkFence _fence = VK_NULL_HANDLE; // Owned internally
+    Allocator*                       _allocator = nullptr;
+    const Context*                   _ctx       = nullptr;
+    CommandPool<QueueType::Graphics> _cmdPool;
+    VkCommandBuffer                  _cmd = VK_NULL_HANDLE;
+    std::vector<Buffer>              _stagingBuffers;
+    VkFence                          _fence = VK_NULL_HANDLE; // Owned internally
 };
 
 } // namespace ZHLN::Vk

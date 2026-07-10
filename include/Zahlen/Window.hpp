@@ -13,50 +13,50 @@ class InputContext;
 
 class ZHLN_API Window {
   public:
-	Window(const String32& title, uint32_t width, uint32_t height, bool fullscreen,
-		   InputContext* input, bool useTTY = false);
-	~Window();
+    Window(const String32& title, uint32_t width, uint32_t height, bool fullscreen, InputContext* input, bool useTTY = false);
+    ~Window();
 
-	Window(const Window&) = delete;
-	Window& operator=(const Window&) = delete;
+    Window(const Window&)            = delete;
+    Window& operator=(const Window&) = delete;
 
-	[[nodiscard]] bool IsRunning() const;
-	void ProcessEvents();
-	void Focus();
+    [[nodiscard]] bool IsRunning() const;
+    void               ProcessEvents();
+    void               Focus();
 
-	[[nodiscard]] Extent2D GetSize() const;
-	void SetSize(uint32_t width, uint32_t height) noexcept;
+    [[nodiscard]] Extent2D GetSize() const;
+    void                   SetSize(uint32_t width, uint32_t height) noexcept;
 
-	struct Impl;
-	[[nodiscard]] Impl* GetImpl() const { return _impl.get(); }
+    struct Impl;
+    [[nodiscard]] Impl* GetImpl() const {
+        return _impl.get();
+    }
 
-	[[nodiscard]] void* GetNativeHandle() const;
+    [[nodiscard]] void* GetNativeHandle() const;
 
-	void Close();
+    void Close();
 
-	[[nodiscard]] bool IsTTY() const;
-	[[nodiscard]] void* GetTTYContext() const;
-	bool ReinitTTY();
+    [[nodiscard]] bool  IsTTY() const;
+    [[nodiscard]] void* GetTTYContext() const;
+    bool                ReinitTTY();
 
-	/**
-	 * @brief Creates a Vulkan surface for the active window platform.
-	 *
-	 * For non-TTY windows (e.g. GLFW), this should be called before physical device selection,
-	 * passing nullptr for the physicalDevice.
-	 * For TTY windows (e.g. KMS/DRM), this must be called after physical device selection,
-	 * passing the selected physicalDevice.
-	 *
-	 * @param instance The raw VkInstance pointer.
-	 * @param physicalDevice The raw VkPhysicalDevice pointer (required for TTY/KMS).
-	 * @param outWidth Reference to store the output surface width.
-	 * @param outHeight Reference to store the output surface height.
-	 * @return The created raw VkSurfaceKHR as a void*, or nullptr if not ready.
-	 */
-	[[nodiscard]] void* CreateVulkanSurface(void* instance, void* physicalDevice, int& outWidth,
-											int& outHeight) noexcept;
+    /**
+     * @brief Creates a Vulkan surface for the active window platform.
+     *
+     * For non-TTY windows (e.g. GLFW), this should be called before physical device selection,
+     * passing nullptr for the physicalDevice.
+     * For TTY windows (e.g. KMS/DRM), this must be called after physical device selection,
+     * passing the selected physicalDevice.
+     *
+     * @param instance The raw VkInstance pointer.
+     * @param physicalDevice The raw VkPhysicalDevice pointer (required for TTY/KMS).
+     * @param outWidth Reference to store the output surface width.
+     * @param outHeight Reference to store the output surface height.
+     * @return The created raw VkSurfaceKHR as a void*, or nullptr if not ready.
+     */
+    [[nodiscard]] void* CreateVulkanSurface(void* instance, void* physicalDevice, int& outWidth, int& outHeight) noexcept;
 
   private:
-	std::unique_ptr<Impl> _impl;
+    std::unique_ptr<Impl> _impl;
 };
 
 } // namespace ZHLN

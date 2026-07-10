@@ -7,167 +7,155 @@
 #include "Zahlen/Log.hpp"
 #include "ecs/ECS.hpp"
 #include "physics/Physics.hpp"
-
 #include <cmath> // std::atan2
 #include <threading/TaskSystem.hpp>
 
 namespace ZHLN::Tests {
 static void VerifyMovementStateConsistency(const ECS::Registry& reg) noexcept {
-	static bool testsRun = false;
-	if (testsRun) {
-		return;
-	}
+    static bool testsRun = false;
+    if (testsRun) {
+        return;
+    }
 
-	auto entities = reg.GetEntitiesWith<Components::MovementComponent>();
-	if (entities.empty()) {
-		return;
-	}
-	testsRun = true;
+    auto entities = reg.GetEntitiesWith<Components::MovementComponent>();
+    if (entities.empty()) {
+        return;
+    }
+    testsRun = true;
 
-	auto movements = reg.GetRawArray<Components::MovementComponent>();
-	for (size_t i = 0; i < entities.size(); ++i) {
-		Entity e = entities[i];
-		const auto& move = movements[i];
+    auto movements = reg.GetRawArray<Components::MovementComponent>();
+    for (size_t i = 0; i < entities.size(); ++i) {
+        Entity      e    = entities[i];
+        const auto& move = movements[i];
 
-		// Test 1: Ground state consistency (FIXED: airborne to grounded)
-		if (!move.wasGrounded && move.isGrounded && move.landingTimer <= 0.0f) {
-			ZHLN::Log(
-				"[Test Fail] Movement State: Entity {} transitioned from airborne to grounded but "
-				"landing timer not set properly (landingTimer={})",
-				e.index, move.landingTimer);
-		}
+        // Test 1: Ground state consistency (FIXED: airborne to grounded)
+        if (!move.wasGrounded && move.isGrounded && move.landingTimer <= 0.0f) {
+            ZHLN::Log(
+                "[Test Fail] Movement State: Entity {} transitioned from airborne to grounded but "
+                "landing timer not set properly (landingTimer={})",
+                e.index, move.landingTimer
+            );
+        }
 
-		// Test 2: Jump delay timer bounds
-		if (move.jumpDelayTimer < 0.0f) {
-			ZHLN::Log("[Test Fail] Movement State: Entity {} has negative jump delay timer: {}",
-					  e.index, move.jumpDelayTimer);
-		}
+        // Test 2: Jump delay timer bounds
+        if (move.jumpDelayTimer < 0.0f) {
+            ZHLN::Log("[Test Fail] Movement State: Entity {} has negative jump delay timer: {}", e.index, move.jumpDelayTimer);
+        }
 
-		// Test 3: Orientation is valid (normalized quaternion)
-		float orientationMagSq = move.orientation.GetX() * move.orientation.GetX() +
-								 move.orientation.GetY() * move.orientation.GetY() +
-								 move.orientation.GetZ() * move.orientation.GetZ() +
-								 move.orientation.GetW() * move.orientation.GetW();
-		if (std::abs(orientationMagSq - 1.0f) > 0.01f) {
-			ZHLN::Log(
-				"[Test Fail] Movement State: Entity {} orientation not normalized (mag={:.4f})",
-				e.index, std::sqrt(orientationMagSq));
-		}
+        // Test 3: Orientation is valid (normalized quaternion)
+        float orientationMagSq = move.orientation.GetX() * move.orientation.GetX() + move.orientation.GetY() * move.orientation.GetY() +
+                                 move.orientation.GetZ() * move.orientation.GetZ() + move.orientation.GetW() * move.orientation.GetW();
+        if (std::abs(orientationMagSq - 1.0f) > 0.01f) {
+            ZHLN::Log("[Test Fail] Movement State: Entity {} orientation not normalized (mag={:.4f})", e.index, std::sqrt(orientationMagSq));
+        }
 
-		// Test 4: Velocity bounds sanity check
-		float velMag = std::sqrt(move.inputX * move.inputX + move.inputZ * move.inputZ);
-		if (velMag > 2.0f) {
-			ZHLN::Log(
-				"[Test Fail] Movement State: Entity {} input velocity unusually high (mag={:.2f})",
-				e.index, velMag);
-		}
-	}
+        // Test 4: Velocity bounds sanity check
+        float velMag = std::sqrt(move.inputX * move.inputX + move.inputZ * move.inputZ);
+        if (velMag > 2.0f) {
+            ZHLN::Log("[Test Fail] Movement State: Entity {} input velocity unusually high (mag={:.2f})", e.index, velMag);
+        }
+    }
 }
 } // namespace ZHLN::Tests
 
 namespace ZHLN {
 
 void MovementSystem(Engine& engine, float dt) {
-	auto& reg = engine.GetRegistry();
+    auto& reg = engine.GetRegistry();
 
-	auto entities = reg.GetEntitiesWith<Components::MovementComponent>();
-	if (entities.empty()) {
-		return;
-	}
+    auto entities = reg.GetEntitiesWith<Components::MovementComponent>();
+    if (entities.empty()) {
+        return;
+    }
 
-	auto movements = reg.GetRawArray<Components::MovementComponent>();
-	auto& pc = engine.GetPhysicsContext();
+    auto  movements = reg.GetRawArray<Components::MovementComponent>();
+    auto& pc        = engine.GetPhysicsContext();
 
-	TaskSystem::ParallelFor(entities.size(), 128, [&](uint32_t start, uint32_t end, uint32_t) {
-		for (uint32_t i = start; i < end; ++i) {
-			Components::MovementComponent& move = movements[i];
-			Entity e = entities[i];
-			// Record previous orientation before calculating the new one
-			move.prevOrientation = move.orientation;
+    TaskSystem::ParallelFor(entities.size(), 128, [&](uint32_t start, uint32_t end, uint32_t) {
+        for (uint32_t i = start; i < end; ++i) {
+            Components::MovementComponent& move = movements[i];
+            Entity                         e    = entities[i];
+            // Record previous orientation before calculating the new one
+            move.prevOrientation = move.orientation;
 
-			auto* phys = reg.Get<Components::PhysicsComponent>(e);
-			if (!phys) {
-				continue;
-			}
+            auto* phys = reg.Get<Components::PhysicsComponent>(e);
+            if (!phys) {
+                continue;
+            }
 
-			if (auto* ragComp = reg.Get<Components::RagdollComponent>(e)) {
-				if (ragComp->state == RagdollState::Limp ||
-					ragComp->state == RagdollState::KeyframeMotor) {
-					continue;
-				}
-			}
+            if (auto* ragComp = reg.Get<Components::RagdollComponent>(e)) {
+                if (ragComp->state == RagdollState::Limp || ragComp->state == RagdollState::KeyframeMotor) {
+                    continue;
+                }
+            }
 
-			// Query Jolt ground state (thread-safe, read-only on distinct indices)
-			bool onGround = Physics::IsCharacterOnGround(pc, phys->physicsHandle);
+            // Query Jolt ground state (thread-safe, read-only on distinct indices)
+            bool onGround = Physics::IsCharacterOnGround(pc, phys->physicsHandle);
 
-			// Track ground states and set/decay timers
-			move.wasGrounded = move.isGrounded;
-			move.isGrounded = onGround;
+            // Track ground states and set/decay timers
+            move.wasGrounded = move.isGrounded;
+            move.isGrounded  = onGround;
 
-			if (move.isGrounded && !move.wasGrounded) {
-				move.landingTimer = 0.25f; // Play landing animation for 250ms
-			}
-			if (move.landingTimer > 0.0f) {
-				move.landingTimer -= dt;
-			}
+            if (move.isGrounded && !move.wasGrounded) {
+                move.landingTimer = 0.25f; // Play landing animation for 250ms
+            }
+            if (move.landingTimer > 0.0f) {
+                move.landingTimer -= dt;
+            }
 
-			// --- NEW: Handle Jump Anticipation (Crouch Prep) ---
-			if (onGround && move.jumpRequested && move.jumpDelayTimer <= 0.0f) {
-				// 150ms delay is typical for stylized models like Pomni.
-				// Adjust this value to match your model's push-off frame.
-				move.jumpDelayTimer = 0.15f;
-			}
-			move.jumpRequested = false; // Consume intent
+            // --- NEW: Handle Jump Anticipation (Crouch Prep) ---
+            if (onGround && move.jumpRequested && move.jumpDelayTimer <= 0.0f) {
+                // 150ms delay is typical for stylized models like Pomni.
+                // Adjust this value to match your model's push-off frame.
+                move.jumpDelayTimer = 0.15f;
+            }
+            move.jumpRequested = false; // Consume intent
 
-			// 1. Calculate Vertical Velocity
-			if (onGround) {
-				if (move.jumpDelayTimer > 0.0f) {
-					move.jumpDelayTimer -= dt;
-					if (move.jumpDelayTimer <= 0.0f) {
-						// Anticipation finished! Launch physically
-						move.currentYVel = move.jumpForce;
-						move.isGrounded = false; // Force takeoff state
-					} else {
-						// Coiling legs: stay anchored to the ground
-						move.currentYVel = -1.0f;
-					}
-				} else {
-					move.currentYVel = -1.0f; // Snap to slopes
-				}
-			} else {
-				move.jumpDelayTimer = 0.0f;
-				move.currentYVel -= 30.0f * dt; // Gravity
-			}
+            // 1. Calculate Vertical Velocity
+            if (onGround) {
+                if (move.jumpDelayTimer > 0.0f) {
+                    move.jumpDelayTimer -= dt;
+                    if (move.jumpDelayTimer <= 0.0f) {
+                        // Anticipation finished! Launch physically
+                        move.currentYVel = move.jumpForce;
+                        move.isGrounded  = false; // Force takeoff state
+                    } else {
+                        // Coiling legs: stay anchored to the ground
+                        move.currentYVel = -1.0f;
+                    }
+                } else {
+                    move.currentYVel = -1.0f; // Snap to slopes
+                }
+            } else {
+                move.jumpDelayTimer = 0.0f;
+                move.currentYVel -= 30.0f * dt; // Gravity
+            }
 
-			// 2. Assemble and apply final vector directly to the distinct character virtual
-			// Scale down horizontal speed during the coiling phase for natural weight feel
-			float speedMultiplier = (move.jumpDelayTimer > 0.0f) ? 0.25f : 1.0f;
-			JPH::Vec3 velocity = {move.inputX * move.speed * speedMultiplier, move.currentYVel,
-								  move.inputZ * move.speed * speedMultiplier};
+            // 2. Assemble and apply final vector directly to the distinct character virtual
+            // Scale down horizontal speed during the coiling phase for natural weight feel
+            float     speedMultiplier = (move.jumpDelayTimer > 0.0f) ? 0.25f : 1.0f;
+            JPH::Vec3 velocity        = {move.inputX * move.speed * speedMultiplier, move.currentYVel, move.inputZ * move.speed * speedMultiplier};
 
-			Physics::SetCharacterVelocity(pc, phys->physicsHandle, velocity);
+            Physics::SetCharacterVelocity(pc, phys->physicsHandle, velocity);
 
-			// 3. Character Orientation Interpolation
-			JPH::Vec3 flatVel(velocity.GetX(), 0.0f, velocity.GetZ());
-			if (flatVel.LengthSq() > 0.1f) {
-				float targetAngleRad =
-					std::atan2(-velocity.GetZ(), velocity.GetX()) + JPH::DegreesToRadians(90.0f);
-				JPH::Quat targetRotation =
-					JPH::Quat::sRotation(JPH::Vec3::sAxisY(), targetAngleRad);
+            // 3. Character Orientation Interpolation
+            JPH::Vec3 flatVel(velocity.GetX(), 0.0f, velocity.GetZ());
+            if (flatVel.LengthSq() > 0.1f) {
+                float     targetAngleRad = std::atan2(-velocity.GetZ(), velocity.GetX()) + JPH::DegreesToRadians(90.0f);
+                JPH::Quat targetRotation = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), targetAngleRad);
 
-				JPH::Quat currentRotation = move.orientation;
+                JPH::Quat currentRotation = move.orientation;
 
-				float turnSpeed = 10.0f;
-				JPH::Quat nextRotation =
-					currentRotation.SLERP(targetRotation, JPH::Clamp(turnSpeed * dt, 0.0f, 1.0f));
+                float     turnSpeed    = 10.0f;
+                JPH::Quat nextRotation = currentRotation.SLERP(targetRotation, JPH::Clamp(turnSpeed * dt, 0.0f, 1.0f));
 
-				move.orientation = nextRotation;
-			}
-		}
-	});
+                move.orientation = nextRotation;
+            }
+        }
+    });
 
-	if constexpr (isDev) {
-		ZHLN::Tests::VerifyMovementStateConsistency(reg);
-	}
+    if constexpr (isDev) {
+        ZHLN::Tests::VerifyMovementStateConsistency(reg);
+    }
 }
 } // namespace ZHLN

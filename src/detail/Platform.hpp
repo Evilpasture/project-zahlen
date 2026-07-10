@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // INCLUDE THIS HEADER INSTEAD OF <windows.h>!!!
 
 #pragma once
@@ -9,7 +8,7 @@
 #ifdef _WIN32
 #undef WINVER
 #undef _WIN32_WINNT
-#define WINVER 0x0A00
+#define WINVER       0x0A00
 #define _WIN32_WINNT 0x0A00
 
 #ifndef NOMINMAX
@@ -59,15 +58,15 @@
 //    LLGL and Vulkan headers especially hate these
 // -------------------------------------------------------------------------
 #undef interface   // COM keyword, breaks C++ class/concept design
-#undef OPAQUE	   // Vulkan and LLGL use this as an identifier
+#undef OPAQUE      // Vulkan and LLGL use this as an identifier
 #undef TRANSPARENT // same
-#undef DrawText	   // GDI macro, A/W suffixed — nukes any DrawText method
+#undef DrawText    // GDI macro, A/W suffixed — nukes any DrawText method
 #undef DrawState   // GDI
 #undef CreateFont  // GDI — A/W macro that breaks font manager classes
 #undef LoadImage   // GDI — A/W macro, nukes asset loaders named LoadImage
 #undef LoadBitmap  // GDI
 #undef GetObject   // GDI — extremely common name, nukes asset/ECS code
-#undef SetPort	   // nukes any networking or port abstractions
+#undef SetPort     // nukes any networking or port abstractions
 
 // -------------------------------------------------------------------------
 // 5. Error / Status codes redefined as macros
@@ -85,10 +84,10 @@
 // 6. String / Encoding macros
 //    Force redefinition as A/W variants that silently corrupt your own APIs
 // -------------------------------------------------------------------------
-#undef GetMessage	// A/W macro — conflicts with message queue classes
-#undef SendMessage	// same
-#undef PostMessage	// same
-#undef PeekMessage	// same — LLGL pumps its own event loop
+#undef GetMessage   // A/W macro — conflicts with message queue classes
+#undef SendMessage  // same
+#undef PostMessage  // same
+#undef PeekMessage  // same — LLGL pumps its own event loop
 #undef CreateWindow // A/W macro — stomps Window factory functions
 #undef CreateWindowEx
 #undef FindWindow
@@ -105,16 +104,16 @@
 #undef TerminateProcess
 #undef LoadModule // old Win16 relic, still defined in some SDK versions
 #undef FreeModule
-#undef GetModuleHandle	 // A/W macro
+#undef GetModuleHandle   // A/W macro
 #undef GetModuleFileName // A/W macro
 
 // -------------------------------------------------------------------------
 // 8. Misc identifiers that appear in engine/physics/renderer namespaces
 // -------------------------------------------------------------------------
 #undef DIFFERENCE // set-math name occasionally defined
-#undef DOMAIN	  // math.h / <cmath> conflict on MSVC
-#undef VOID		  // typedef void — corrupts template void specializations
-#undef pascal	  // old calling convention keyword still lurking
+#undef DOMAIN     // math.h / <cmath> conflict on MSVC
+#undef VOID       // typedef void — corrupts template void specializations
+#undef pascal     // old calling convention keyword still lurking
 #undef cdecl
 #undef CDECL
 #undef small

@@ -13,92 +13,92 @@ namespace ZHLN {
 // --- Core Math/Spatial Types ---
 
 struct Extent2D {
-	uint32_t width, height;
+    uint32_t width, height;
 };
 struct Offset2D {
-	int32_t x, y;
+    int32_t x, y;
 };
 
 struct ScissorRect {
-	int32_t x;
-	int32_t y;
-	uint32_t width;
-	uint32_t height;
+    int32_t  x;
+    int32_t  y;
+    uint32_t width;
+    uint32_t height;
 };
 
 // Semantic types to help the Renderer choose the right Vulkan Format
 struct Packed1010102 {
-	uint32_t data;
+    uint32_t data;
 }; // Normals/Tangents
 struct PackedHalf2 {
-	uint32_t data;
+    uint32_t data;
 }; // UVs (2x 16-bit floats)
 struct PackedRGBA8 {
-	uint32_t data;
+    uint32_t data;
 }; // Color
 
 struct VertexPosition {
-	float position[3]; // 12B - Full precision
+    float position[3]; // 12B - Full precision
 };
 
 struct VertexAttributes {
-	Packed1010102 normal;  // 4B  - 10-bit per axis
-	Packed1010102 tangent; // 4B  - 10-bit + sign
-	PackedHalf2 uv;		   // 4B  - 16-bit UVs
-	PackedRGBA8 color;	   // 4B  - RGBA8
+    Packed1010102 normal;  // 4B  - 10-bit per axis
+    Packed1010102 tangent; // 4B  - 10-bit + sign
+    PackedHalf2   uv;      // 4B  - 16-bit UVs
+    PackedRGBA8   color;   // 4B  - RGBA8
 }; // 16B - Perfect alignment
 
 struct VertexSkin {
-	uint16_t joints[4];	 // 8B  - 16-bit Joint indices
-	PackedRGBA8 weights; // 4B  - 8-bit UNORM weights mapped to [0.0, 1.0]
+    uint16_t    joints[4]; // 8B  - 16-bit Joint indices
+    PackedRGBA8 weights;   // 4B  - 8-bit UNORM weights mapped to [0.0, 1.0]
 }; // 12B
 
 struct alignas(16) InstanceData {
-	JPH::Mat44 world;
-	JPH::Mat44 prevWorld;
-	uint64_t posAddress;
-	uint64_t attrAddress;
-	uint64_t skinAddress;
-	uint64_t iboAddress;
-	uint32_t vertexCount;
-	uint32_t indexCount;
-	uint32_t texIndices0; // [albedo:16 | normal:16]
-	uint32_t texIndices1; // [pbr:16    | emissive:16]
-	float cullRadius;
-	float metallicFactor;
-	float roughnessFactor;
-	float alphaCutoff;
-	uint32_t flags; // [alphaMode:8 | isSkinned:8 | padding:16]
-	uint32_t jointOffset;
-	uint32_t morphOffset;
-	uint32_t activeMorphCount;
-	alignas(16) std::array<float, 3> localCenter;
-	uint32_t _paddingCenter;
-	alignas(16) std::array<float, 4> morphWeights;
-	alignas(16) std::array<float, 4> baseColorFactor;
-	alignas(16) std::array<float, 4> emissiveFactor;
+    JPH::Mat44 world;
+    JPH::Mat44 prevWorld;
+    uint64_t   posAddress;
+    uint64_t   attrAddress;
+    uint64_t   skinAddress;
+    uint64_t   iboAddress;
+    uint32_t   vertexCount;
+    uint32_t   indexCount;
+    uint32_t   texIndices0; // [albedo:16 | normal:16]
+    uint32_t   texIndices1; // [pbr:16    | emissive:16]
+    float      cullRadius;
+    float      metallicFactor;
+    float      roughnessFactor;
+    float      alphaCutoff;
+    uint32_t   flags; // [alphaMode:8 | isSkinned:8 | padding:16]
+    uint32_t   jointOffset;
+    uint32_t   morphOffset;
+    uint32_t   activeMorphCount;
+    alignas(16) std::array<float, 3> localCenter;
+    uint32_t _paddingCenter;
+    alignas(16) std::array<float, 4> morphWeights;
+    alignas(16) std::array<float, 4> baseColorFactor;
+    alignas(16) std::array<float, 4> emissiveFactor;
 };
 
 struct UIObjectConstants {
-	JPH::Mat44 orthoMatrix;
-	uint64_t posAddress;
-	uint64_t attrAddress;
-	uint32_t albedoIdx;
-	uint32_t padding;
+    JPH::Mat44 orthoMatrix;
+    uint64_t   posAddress;
+    uint64_t   attrAddress;
+    uint32_t   albedoIdx;
+    uint32_t   padding;
 };
 
 struct ClusterBounds {
-	JPH::Vec4 minPoint;
-	JPH::Vec4 maxPoint;
+    JPH::Vec4 minPoint;
+    JPH::Vec4 maxPoint;
 };
 struct ClusterVolume {
-	uint32_t offset;
-	uint32_t count;
+    uint32_t offset;
+    uint32_t count;
 };
 
 struct ObjectConstants {
-	uint32_t instanceId;
-	uint32_t isShadowPass;
+    uint32_t instanceId;
+    uint32_t isShadowPass;
 };
 static_assert(sizeof(ObjectConstants) == 8);
 static_assert(sizeof(InstanceData) == 272);
@@ -115,191 +115,199 @@ static_assert(sizeof(PipelineHandle) == 8);
 static_assert(sizeof(ResourceGroupHandle) == 8);
 
 struct Mesh {
-	using enum BufferHandle;
-	BufferHandle posBuffer = Invalid;
-	BufferHandle attrBuffer = Invalid;
-	BufferHandle skinBuffer = Invalid;
-	BufferHandle indexBuffer = Invalid;
-	uint32_t vertexCount = 0;
-	uint32_t indexCount = 0;
+    using enum BufferHandle;
+    BufferHandle posBuffer   = Invalid;
+    BufferHandle attrBuffer  = Invalid;
+    BufferHandle skinBuffer  = Invalid;
+    BufferHandle indexBuffer = Invalid;
+    uint32_t     vertexCount = 0;
+    uint32_t     indexCount  = 0;
 };
 
 // NOLINTNEXTLINE(performance-enum-size)
 enum class LightType : uint32_t {
-	Directional,
-	Point,
-	Spot,
-	Area,
-	Sun,
+    Directional,
+    Point,
+    Spot,
+    Area,
+    Sun,
 };
 static_assert(sizeof(LightType) == sizeof(uint32_t));
 
 // Align structures to 16-byte boundaries to match HLSL std430 layout
 struct alignas(16) GPULight {
-	float position[3];
-	LightType type; // 0 = Dir, 1 = Point, 2 = Spot, 3 = Area (LTC Quad)
-	float color[3];
-	float intensity;
-	float direction[3];
-	float range;
+    float     position[3];
+    LightType type; // 0 = Dir, 1 = Point, 2 = Spot, 3 = Area (LTC Quad)
+    float     color[3];
+    float     intensity;
+    float     direction[3];
+    float     range;
 
-	// --- Area Light Specific (64 Bytes) ---
-	float points[4][4]; // XYZ = World Space Vertices, W = Padding / Flags
+    // --- Area Light Specific (64 Bytes) ---
+    float points[4][4]; // XYZ = World Space Vertices, W = Padding / Flags
 
-	float radius;
-	float innerConeCos;
-	float outerConeCos;
-	uint32_t twoSided;	 // 0 = Single-Sided, 1 = Double-Sided Area Light
-	int32_t shadowLayer; // -1 if no shadow, >= 0 for Atlas layer index
-	float positionView[3];
+    float    radius;
+    float    innerConeCos;
+    float    outerConeCos;
+    uint32_t twoSided;    // 0 = Single-Sided, 1 = Double-Sided Area Light
+    int32_t  shadowLayer; // -1 if no shadow, >= 0 for Atlas layer index
+    float    positionView[3];
 };
 static_assert(sizeof(GPULight) == 144);
 
 struct alignas(16) FrameUniforms {
-	JPH::Mat44 viewProj;
-	JPH::Mat44 unjitteredViewProj;
-	JPH::Mat44 prevUnjitteredViewProj;
+    JPH::Mat44 viewProj;
+    JPH::Mat44 unjitteredViewProj;
+    JPH::Mat44 prevUnjitteredViewProj;
 
-	// CHANGED: Array of light-space projection matrices (maximum 4 cascades is standard)
-	JPH::Mat44 lightSpaceMatrices[4];
+    // CHANGED: Array of light-space projection matrices (maximum 4 cascades is standard)
+    JPH::Mat44 lightSpaceMatrices[4];
 
-	JPH::Mat44 invViewProj;
-	float camPos[4];
-	float lightDir[4];
-	uint32_t lightCount;
-	float ambientExposure;
-	float shadowWidth; // Can now represent cascade-0 width or be repurposed
-	uint32_t shadowResolution;
-	JPH::Vec4 sh[9];
+    JPH::Mat44 invViewProj;
+    float      camPos[4];
+    float      lightDir[4];
+    uint32_t   lightCount;
+    float      ambientExposure;
+    float      shadowWidth; // Can now represent cascade-0 width or be repurposed
+    uint32_t   shadowResolution;
+    JPH::Vec4  sh[9];
 
-	JPH::Vec4 probeMin;
-	JPH::Vec4 probeMax;
-	JPH::Vec4 probePos;
-	JPH::Vec4 jitterParams;
-	int enableRTR;
-	float zScale;
-	float zBias;
+    JPH::Vec4 probeMin;
+    JPH::Vec4 probeMax;
+    JPH::Vec4 probePos;
+    JPH::Vec4 jitterParams;
+    int       enableRTR;
+    float     zScale;
+    float     zBias;
 
-	alignas(16) float cascadeSplits[4];
-	int numCascades; // E.g., 4
-	int fullBright;	 // 0 = Lit, 1 = Fullbright/Unlit
-	float _pad_csm[2];
+    alignas(16) float cascadeSplits[4];
+    int   numCascades; // E.g., 4
+    int   fullBright;  // 0 = Lit, 1 = Fullbright/Unlit
+    float _pad_csm[2];
 };
 
 // Material handle representation
 struct Material {
-	PipelineHandle pipeline = PipelineHandle::Invalid;
-	ResourceGroupHandle resourceGroup = ResourceGroupHandle::Invalid;
-	BufferHandle constantBuffer = BufferHandle::Invalid;
-	uint32_t albedoIndex = 1;	// Default to Solid White (Index 1)
-	uint32_t normalIndex = 2;	// Default to Flat Normal Map (Index 2)
-	uint32_t pbrIndex = 0;		// Default to Solid Black (Index 0)
-	uint32_t emissiveIndex = 1; // Default to Solid White (Index 1)
-	float baseColorFactor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-	float emissiveFactor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-	float metallicFactor = 1.0f;
-	float roughnessFactor = 1.0f;
-	float alphaCutoff = 0.5f;
-	uint32_t alphaMode = 0; // 0=Opaque, 1=Mask, 2=Blend
+    PipelineHandle      pipeline           = PipelineHandle::Invalid;
+    ResourceGroupHandle resourceGroup      = ResourceGroupHandle::Invalid;
+    BufferHandle        constantBuffer     = BufferHandle::Invalid;
+    uint32_t            albedoIndex        = 1; // Default to Solid White (Index 1)
+    uint32_t            normalIndex        = 2; // Default to Flat Normal Map (Index 2)
+    uint32_t            pbrIndex           = 0; // Default to Solid Black (Index 0)
+    uint32_t            emissiveIndex      = 1; // Default to Solid White (Index 1)
+    float               baseColorFactor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    float               emissiveFactor[4]  = {0.0f, 0.0f, 0.0f, 1.0f};
+    float               metallicFactor     = 1.0f;
+    float               roughnessFactor    = 1.0f;
+    float               alphaCutoff        = 0.5f;
+    uint32_t            alphaMode          = 0; // 0=Opaque, 1=Mask, 2=Blend
 };
 
 struct GISettings {
-	int mode = 1; // 0 = Off, 1 = SSAO, 2 = SSGI
-	float aoRadius = 0.5f;
-	float aoBias = 0.05f;
-	float aoPower = 1.8f;
-	float giIntensity = 1.2f;
-	int giSamples = 8;
-	float vignetteIntensity = 1.1f; // 0.0f is completely off
-	float vignettePower = 1.5f;		// Controls softness falloff
-	int enableSSR = 1;
-	int enableRTR = 0;
+    int   mode              = 1; // 0 = Off, 1 = SSAO, 2 = SSGI
+    float aoRadius          = 0.5f;
+    float aoBias            = 0.05f;
+    float aoPower           = 1.8f;
+    float giIntensity       = 1.2f;
+    int   giSamples         = 8;
+    float vignetteIntensity = 1.1f; // 0.0f is completely off
+    float vignettePower     = 1.5f; // Controls softness falloff
+    int   enableSSR         = 1;
+    int   enableRTR         = 0;
 };
 // NOLINTNEXTLINE(performance-enum-size)
 enum class AAMode : uint32_t { None = 0, FXAA = 1, TAA = 2, SMAA = 3 };
 
 struct AAState {
-	AAMode mode = AAMode::TAA;
+    AAMode mode = AAMode::TAA;
 
-	// TAA Options
-	float taaFeedback = 0.95f; // 95% History, 5% Current Frame
-	float jitterX = 0.0f;
-	float jitterY = 0.0f;
-	float prevJitterX = 0.0f;
-	float prevJitterY = 0.0f;
-	uint32_t frameIndex = 0; // Drives the Halton Jitter sequence
+    // TAA Options
+    float    taaFeedback = 0.95f; // 95% History, 5% Current Frame
+    float    jitterX     = 0.0f;
+    float    jitterY     = 0.0f;
+    float    prevJitterX = 0.0f;
+    float    prevJitterY = 0.0f;
+    uint32_t frameIndex  = 0; // Drives the Halton Jitter sequence
 
-	// FXAA Options
-	float fxaaSubpix = 0.75f;
-	float fxaaEdgeThreshold = 0.166f;
-	float fxaaEdgeThresholdMin = 0.0833f;
+    // FXAA Options
+    float fxaaSubpix           = 0.75f;
+    float fxaaEdgeThreshold    = 0.166f;
+    float fxaaEdgeThresholdMin = 0.0833f;
 };
 
 struct GlyphMetric {
-	float x0, y0, x1, y1;
-	float xoff, yoff, xadvance;
+    float x0, y0, x1, y1;
+    float xoff, yoff, xadvance;
 };
 
 struct FontAtlas {
-	uint32_t textureIndex = 0;
-	GlyphMetric glyphs[96]{};
+    uint32_t    textureIndex = 0;
+    GlyphMetric glyphs[96] {};
 };
 
-template <typename T> inline constexpr bool EnableEnumFlags = false;
+template <typename T>
+inline constexpr bool EnableEnumFlags = false;
 
 template <typename T>
 concept EnumFlag = std::is_enum_v<T> && EnableEnumFlags<T>;
 
-template <EnumFlag T> constexpr T operator|(T a, T b) noexcept {
-	return static_cast<T>(static_cast<std::underlying_type_t<T>>(a) |
-						  static_cast<std::underlying_type_t<T>>(b));
+template <EnumFlag T>
+constexpr T operator|(T a, T b) noexcept {
+    return static_cast<T>(static_cast<std::underlying_type_t<T>>(a) | static_cast<std::underlying_type_t<T>>(b));
 }
 
-template <EnumFlag T> constexpr T operator&(T a, T b) noexcept {
-	return static_cast<T>(static_cast<std::underlying_type_t<T>>(a) &
-						  static_cast<std::underlying_type_t<T>>(b));
+template <EnumFlag T>
+constexpr T operator&(T a, T b) noexcept {
+    return static_cast<T>(static_cast<std::underlying_type_t<T>>(a) & static_cast<std::underlying_type_t<T>>(b));
 }
 
-template <EnumFlag T> constexpr T operator^(T a, T b) noexcept {
-	return static_cast<T>(static_cast<std::underlying_type_t<T>>(a) ^
-						  static_cast<std::underlying_type_t<T>>(b));
+template <EnumFlag T>
+constexpr T operator^(T a, T b) noexcept {
+    return static_cast<T>(static_cast<std::underlying_type_t<T>>(a) ^ static_cast<std::underlying_type_t<T>>(b));
 }
 
-template <EnumFlag T> constexpr T operator~(T a) noexcept {
-	return static_cast<T>(~static_cast<std::underlying_type_t<T>>(a));
+template <EnumFlag T>
+constexpr T operator~(T a) noexcept {
+    return static_cast<T>(~static_cast<std::underlying_type_t<T>>(a));
 }
 
-template <EnumFlag T> constexpr T& operator|=(T& a, T b) noexcept {
-	a = a | b;
-	return a;
+template <EnumFlag T>
+constexpr T& operator|=(T& a, T b) noexcept {
+    a = a | b;
+    return a;
 }
 
-template <EnumFlag T> constexpr T& operator&=(T& a, T b) noexcept {
-	a = a & b;
-	return a;
+template <EnumFlag T>
+constexpr T& operator&=(T& a, T b) noexcept {
+    a = a & b;
+    return a;
 }
 
-template <EnumFlag T> constexpr T& operator^=(T& a, T b) noexcept {
-	a = a ^ b;
-	return a;
+template <EnumFlag T>
+constexpr T& operator^=(T& a, T b) noexcept {
+    a = a ^ b;
+    return a;
 }
 
-template <EnumFlag T> constexpr bool operator==(T a, T b) noexcept {
-	return static_cast<std::underlying_type_t<T>>(a) == static_cast<std::underlying_type_t<T>>(b);
+template <EnumFlag T>
+constexpr bool operator==(T a, T b) noexcept {
+    return static_cast<std::underlying_type_t<T>>(a) == static_cast<std::underlying_type_t<T>>(b);
 }
 
-template <EnumFlag T> constexpr bool operator!=(T a, T b) noexcept {
-	return !(a == b);
+template <EnumFlag T>
+constexpr bool operator!=(T a, T b) noexcept {
+    return !(a == b);
 }
 
 // NOLINTNEXTLINE(performance-enum-size)
 enum class DrawFlags : uint32_t {
-	None = 0,
-	ExcludeFromTLAS = 1 << 0, // Generic raytracing exclusion
-	Skinned = 1 << 1,		  // Tells the renderer that this draw is skin-weighted
-	VisibleInMain = 1 << 2,
-	VisibleInShadow = 1 << 3,
+    None            = 0,
+    ExcludeFromTLAS = 1 << 0, // Generic raytracing exclusion
+    Skinned         = 1 << 1, // Tells the renderer that this draw is skin-weighted
+    VisibleInMain   = 1 << 2,
+    VisibleInShadow = 1 << 3,
 };
 } // namespace ZHLN
 
-template <> inline constexpr bool ZHLN::EnableEnumFlags<ZHLN::DrawFlags> = true;
+template <>
+inline constexpr bool ZHLN::EnableEnumFlags<ZHLN::DrawFlags> = true;

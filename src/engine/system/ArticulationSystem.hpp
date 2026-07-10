@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 // include/Zahlen/physics/ArticulationSystem.hpp
 #pragma once
 
@@ -13,18 +12,18 @@ class Engine;
 
 class ZHLN_API ArticulationSystem {
   public:
-	ArticulationSystem() = default;
-	~ArticulationSystem() = default;
+    ArticulationSystem()  = default;
+    ~ArticulationSystem() = default;
 
-	// Non-copyable to prevent accidental duplication of internal system state
-	ArticulationSystem(const ArticulationSystem&) = delete;
-	ArticulationSystem& operator=(const ArticulationSystem&) = delete;
+    // Non-copyable to prevent accidental duplication of internal system state
+    ArticulationSystem(const ArticulationSystem&)            = delete;
+    ArticulationSystem& operator=(const ArticulationSystem&) = delete;
 
-	/**
-	 * @brief Evaluates active motor forces on dynamic ragdoll constraints
-	 * and synchronizes simulated body poses back to the visual mesh joint palette.
-	 */
-	void Update(Engine& engine, float dt);
+    /**
+     * @brief Evaluates active motor forces on dynamic ragdoll constraints
+     * and synchronizes simulated body poses back to the visual mesh joint palette.
+     */
+    void Update(Engine& engine, float dt);
 };
 
 } // namespace ZHLN

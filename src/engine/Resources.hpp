@@ -8,37 +8,37 @@
 namespace ZHLN::Resource {
 
 struct ShaderPair {
-	std::span<const uint8_t> vertex;
-	std::span<const uint8_t> fragment;
+    std::span<const uint8_t> vertex;
+    std::span<const uint8_t> fragment;
 };
 
 enum class ShaderID : uint8_t {
-	Basic,
-	Blit,
-	Taa,
-	Ui,
-	Ambient,
-	Lighting,
-	Reflection,
-	ReflectionNort,
-	Fxaa,
-	SmaaEdge,
-	SmaaWeight,
-	SmaaBlend,
-	BloomThreshold,
-	BloomBlur,
-	PunctualShadows,
-	LightingNort,
-	CullingComp,
-	ShadowFrag,
-	ClusterBounds,
-	ClusterCulling,
-	SkinningComp,
-	ForwardFrag,
-	HangGpuComp,
-	ProceduralBakeComp,
-	LtcMat,
-	LtcAmp
+    Basic,
+    Blit,
+    Taa,
+    Ui,
+    Ambient,
+    Lighting,
+    Reflection,
+    ReflectionNort,
+    Fxaa,
+    SmaaEdge,
+    SmaaWeight,
+    SmaaBlend,
+    BloomThreshold,
+    BloomBlur,
+    PunctualShadows,
+    LightingNort,
+    CullingComp,
+    ShadowFrag,
+    ClusterBounds,
+    ClusterCulling,
+    SkinningComp,
+    ForwardFrag,
+    HangGpuComp,
+    ProceduralBakeComp,
+    LtcMat,
+    LtcAmp
 };
 
 // Extern declarations of individual programs to avoid header bloat and allow compile-time routing
@@ -72,50 +72,48 @@ extern const std::span<const uint8_t> ltc_mat;
 extern const std::span<const uint8_t> ltc_amp;
 
 struct ShaderMapping {
-	ShaderID id;
-	ShaderPair pair;
+    ShaderID   id;
+    ShaderPair pair;
 };
 
 [[nodiscard]] constexpr ShaderPair GetShaderProgram(ShaderID id) noexcept {
-	static const ShaderMapping table[] = {
-		ShaderMapping{.id = ShaderID::Basic, .pair = basic_shaders},
-		{.id = ShaderID::Blit, .pair = blit_shaders},
-		{.id = ShaderID::Taa, .pair = taa_shaders},
-		{.id = ShaderID::Ui, .pair = ui_shaders},
-		{.id = ShaderID::Ambient, .pair = ambient_shaders},
-		{.id = ShaderID::Lighting, .pair = lighting_shaders},
-		{.id = ShaderID::Reflection, .pair = reflection_shaders},
-		{.id = ShaderID::ReflectionNort, .pair = reflection_nort_shaders},
-		{.id = ShaderID::Fxaa, .pair = fxaa_shaders},
-		{.id = ShaderID::SmaaEdge, .pair = smaa_edge_shaders},
-		{.id = ShaderID::SmaaWeight, .pair = smaa_weight_shaders},
-		{.id = ShaderID::SmaaBlend, .pair = smaa_blend_shaders},
-		{.id = ShaderID::BloomThreshold, .pair = bloom_threshold_shaders},
-		{.id = ShaderID::BloomBlur, .pair = bloom_blur_shaders},
-		{.id = ShaderID::PunctualShadows, .pair = punctual_shadows_shaders},
-		{.id = ShaderID::LightingNort, .pair = lighting_nort_shaders},
-		{.id = ShaderID::CullingComp, .pair = ShaderPair{.vertex = culling_comp, .fragment = {}}},
-		{.id = ShaderID::ShadowFrag, .pair = ShaderPair{.vertex = shadow_frag, .fragment = {}}},
-		{.id = ShaderID::ClusterBounds,
-		 .pair = ShaderPair{.vertex = cluster_bounds, .fragment = {}}},
-		{.id = ShaderID::ClusterCulling,
-		 .pair = ShaderPair{.vertex = cluster_culling, .fragment = {}}},
-		{.id = ShaderID::SkinningComp, .pair = ShaderPair{.vertex = skinning_comp, .fragment = {}}},
-		{.id = ShaderID::ForwardFrag, .pair = ShaderPair{.vertex = forward_frag, .fragment = {}}},
-		{.id = ShaderID::HangGpuComp, .pair = ShaderPair{.vertex = hang_gpu_comp, .fragment = {}}},
-		{.id = ShaderID::ProceduralBakeComp,
-		 .pair = ShaderPair{.vertex = procedural_bake_comp, .fragment = {}}},
-		{.id = ShaderID::LtcMat, .pair = ShaderPair{.vertex = ltc_mat, .fragment = {}}},
-		{.id = ShaderID::LtcAmp, .pair = ShaderPair{.vertex = ltc_amp, .fragment = {}}}};
+    static const ShaderMapping table[] = {
+        ShaderMapping {.id = ShaderID::Basic, .pair = basic_shaders},
+        {.id = ShaderID::Blit, .pair = blit_shaders},
+        {.id = ShaderID::Taa, .pair = taa_shaders},
+        {.id = ShaderID::Ui, .pair = ui_shaders},
+        {.id = ShaderID::Ambient, .pair = ambient_shaders},
+        {.id = ShaderID::Lighting, .pair = lighting_shaders},
+        {.id = ShaderID::Reflection, .pair = reflection_shaders},
+        {.id = ShaderID::ReflectionNort, .pair = reflection_nort_shaders},
+        {.id = ShaderID::Fxaa, .pair = fxaa_shaders},
+        {.id = ShaderID::SmaaEdge, .pair = smaa_edge_shaders},
+        {.id = ShaderID::SmaaWeight, .pair = smaa_weight_shaders},
+        {.id = ShaderID::SmaaBlend, .pair = smaa_blend_shaders},
+        {.id = ShaderID::BloomThreshold, .pair = bloom_threshold_shaders},
+        {.id = ShaderID::BloomBlur, .pair = bloom_blur_shaders},
+        {.id = ShaderID::PunctualShadows, .pair = punctual_shadows_shaders},
+        {.id = ShaderID::LightingNort, .pair = lighting_nort_shaders},
+        {.id = ShaderID::CullingComp, .pair = ShaderPair {.vertex = culling_comp, .fragment = {}}},
+        {.id = ShaderID::ShadowFrag, .pair = ShaderPair {.vertex = shadow_frag, .fragment = {}}},
+        {.id = ShaderID::ClusterBounds, .pair = ShaderPair {.vertex = cluster_bounds, .fragment = {}}},
+        {.id = ShaderID::ClusterCulling, .pair = ShaderPair {.vertex = cluster_culling, .fragment = {}}},
+        {.id = ShaderID::SkinningComp, .pair = ShaderPair {.vertex = skinning_comp, .fragment = {}}},
+        {.id = ShaderID::ForwardFrag, .pair = ShaderPair {.vertex = forward_frag, .fragment = {}}},
+        {.id = ShaderID::HangGpuComp, .pair = ShaderPair {.vertex = hang_gpu_comp, .fragment = {}}},
+        {.id = ShaderID::ProceduralBakeComp, .pair = ShaderPair {.vertex = procedural_bake_comp, .fragment = {}}},
+        {.id = ShaderID::LtcMat, .pair = ShaderPair {.vertex = ltc_mat, .fragment = {}}},
+        {.id = ShaderID::LtcAmp, .pair = ShaderPair {.vertex = ltc_amp, .fragment = {}}}
+    };
 
-	for (const auto& mapping : table) {
-		if (mapping.id == id) {
-			return mapping.pair;
-		}
-	}
+    for (const auto& mapping: table) {
+        if (mapping.id == id) {
+            return mapping.pair;
+        }
+    }
 
-	// Fallback path just in case
-	return {};
+    // Fallback path just in case
+    return {};
 }
 
 } // namespace ZHLN::Resource

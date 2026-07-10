@@ -10,12 +10,12 @@ class Engine;
 
 class ZHLN_API PhysicsStateSystem {
   public:
-	static void WriteBack(Engine& engine) noexcept;
+    static void WriteBack(Engine& engine) noexcept;
 };
 
 class ZHLN_API VisualInterpolationSystem {
   public:
-	static void Update(Engine& engine, float alpha) noexcept;
+    static void Update(Engine& engine, float alpha) noexcept;
 };
 
 } // namespace ZHLN

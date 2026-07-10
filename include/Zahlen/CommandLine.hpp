@@ -13,21 +13,21 @@ namespace ZHLN {
 enum class LogLevel : uint8_t { Quiet, Moderate, Verbose };
 
 struct CommandLineOptions {
-	std::span<char* const> args;
-	bool enableValidation = true;
-	bool launchEditor = false;
-	bool vsync = true;
-	bool fullscreen = false;
-	LogLevel logLevel = LogLevel::Moderate;
-	uint32_t fpsLimit = 0;
-	bool enableRenderDoc = false;
-	bool benchmark = false;
+    std::span<char* const> args;
+    bool                   enableValidation = true;
+    bool                   launchEditor     = false;
+    bool                   vsync            = true;
+    bool                   fullscreen       = false;
+    LogLevel               logLevel         = LogLevel::Moderate;
+    uint32_t               fpsLimit         = 0;
+    bool                   enableRenderDoc  = false;
+    bool                   benchmark        = false;
 };
 
 struct EngineError {
-	std::string msg;
-	int code = EXIT_FAILURE;
-	bool silent = false;
+    std::string msg;
+    int         code   = EXIT_FAILURE;
+    bool        silent = false;
 };
 
 std::expected<CommandLineOptions, EngineError> HandleCommandLine(std::span<char* const> args);

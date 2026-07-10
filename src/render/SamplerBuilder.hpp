@@ -13,21 +13,21 @@ namespace ZHLN::Vk {
 
 class SamplerBuilder {
   public:
-	SamplerBuilder() noexcept;
+    SamplerBuilder() noexcept;
 
-	auto Linear() noexcept -> SamplerBuilder&;
-	auto Nearest() noexcept -> SamplerBuilder&;
-	auto Repeat() noexcept -> SamplerBuilder&;
-	auto ClampToEdge() noexcept -> SamplerBuilder&;
-	auto ClampToBorder(VkBorderColor color) noexcept -> SamplerBuilder&;
-	auto Anisotropy(float maxAniso = 16.0f) noexcept -> SamplerBuilder&;
-	auto DepthCompare(VkCompareOp op = VK_COMPARE_OP_LESS_OR_EQUAL) noexcept -> SamplerBuilder&;
-	auto LodRange(float minLod, float maxLod) noexcept -> SamplerBuilder&;
+    auto Linear() noexcept -> SamplerBuilder&;
+    auto Nearest() noexcept -> SamplerBuilder&;
+    auto Repeat() noexcept -> SamplerBuilder&;
+    auto ClampToEdge() noexcept -> SamplerBuilder&;
+    auto ClampToBorder(VkBorderColor color) noexcept -> SamplerBuilder&;
+    auto Anisotropy(float maxAniso = 16.0f) noexcept -> SamplerBuilder&;
+    auto DepthCompare(VkCompareOp op = VK_COMPARE_OP_LESS_OR_EQUAL) noexcept -> SamplerBuilder&;
+    auto LodRange(float minLod, float maxLod) noexcept -> SamplerBuilder&;
 
-	[[nodiscard]] auto Build(VkDevice device) const noexcept -> std::expected<Sampler, std::string>;
+    [[nodiscard]] auto Build(VkDevice device) const noexcept -> std::expected<Sampler, std::string>;
 
   private:
-	VkSamplerCreateInfo _info{};
+    VkSamplerCreateInfo _info {};
 };
 
 } // namespace ZHLN::Vk
