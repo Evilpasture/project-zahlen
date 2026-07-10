@@ -40,45 +40,6 @@ inline void MemoryBarrier(const VkCommandBuffer cmd, const ZHLN_MemoryBarrierDes
 	ZHLN_CmdMemoryBarrier(cmd, &desc);
 }
 
-inline void
-RayTracingContext::GetBlasSizes(const ZHLN_BlasGeometryDesc& desc, uint32_t primCount,
-								ZHLN_AccelerationStructureSizes& outSizes) const noexcept {
-	ZHLN_GetBlasSizes(&_raw, &desc, primCount, &outSizes);
-}
-
-inline void
-RayTracingContext::GetTlasSizes(uint32_t instanceCount,
-								ZHLN_AccelerationStructureSizes& outSizes) const noexcept {
-	ZHLN_GetTlasSizes(&_raw, instanceCount, &outSizes);
-}
-
-inline VkAccelerationStructureKHR
-RayTracingContext::CreateAS(VkBuffer buffer, VkDeviceSize size,
-							ZHLN_AccelerationStructureType type) const noexcept {
-	return ZHLN_CreateAS(&_raw, buffer, size, type);
-}
-
-inline void RayTracingContext::DestroyAS(VkAccelerationStructureKHR as) const noexcept {
-	ZHLN_DestroyAS(&_raw, as);
-}
-
-inline VkDeviceAddress
-RayTracingContext::GetASAddress(VkAccelerationStructureKHR as) const noexcept {
-	return ZHLN_GetASAddress(&_raw, as);
-}
-
-inline void RayTracingContext::CmdBuildBlas(VkCommandBuffer cmd, const ZHLN_BlasGeometryDesc& desc,
-											VkAccelerationStructureKHR dst, VkDeviceAddress scratch,
-											uint32_t primCount) const noexcept {
-	ZHLN_CmdBuildBlas(&_raw, cmd, &desc, dst, scratch, primCount);
-}
-
-inline void RayTracingContext::CmdBuildTlas(VkCommandBuffer cmd, const ZHLN_TlasGeometryDesc& desc,
-											VkAccelerationStructureKHR dst, VkDeviceAddress scratch,
-											uint32_t instanceCount) const noexcept {
-	ZHLN_CmdBuildTlas(&_raw, cmd, &desc, dst, scratch, instanceCount);
-}
-
 inline void CopyBufferToImage(const VkCommandBuffer cmd,
 							  const ZHLN_BufferImageCopyDesc& desc) noexcept {
 	ZHLN_CmdCopyBufferToImage(cmd, &desc);
@@ -284,83 +245,6 @@ inline std::expected<VkResult, std::string> CheckResult(const VkResult result, c
 		return std::unexpected(ReportVkError(result, context, location));
 	}
 	return result;
-}
-
-// ============================================================================
-// SemaphorePool Implementation
-// ============================================================================
-
-inline SemaphorePool::~SemaphorePool() noexcept {
-	Cleanup();
-}
-
-inline SemaphorePool::SemaphorePool(SemaphorePool&& other) noexcept
-	: _device(other._device), _count(other._count) {
-	for (uint32_t i = 0; i < 6; ++i) {
-		_semaphores[i] = other._semaphores[i];
-		other._semaphores[i] = VK_NULL_HANDLE;
-	}
-	other._device = VK_NULL_HANDLE;
-	other._count = 0;
-}
-
-inline auto SemaphorePool::operator=(SemaphorePool&& other) noexcept -> SemaphorePool& {
-	if (this != &other) {
-		Cleanup();
-		_device = other._device;
-		_count = other._count;
-
-		for (uint32_t i = 0; i < 6; ++i) {
-			_semaphores[i] = other._semaphores[i];
-			other._semaphores[i] = VK_NULL_HANDLE;
-		}
-
-		other._device = VK_NULL_HANDLE;
-		other._count = 0;
-	}
-	return *this;
-}
-
-inline void SemaphorePool::Rebuild(const VkDevice device, const uint32_t count) noexcept {
-	Cleanup();
-	_device = device;
-	_count = ZHLN::Min(count, 6U);
-
-	for (uint32_t i = 0; i < _count; ++i) {
-		_semaphores[i] = ZHLN_CreateSemaphore(_device);
-	}
-}
-
-inline auto SemaphorePool::operator[](const uint32_t index) const noexcept -> VkSemaphore {
-	if (index >= _count) [[unlikely]] {
-		ReportSemaphoreBoundsError(index, _count);
-	}
-	return _semaphores[index];
-}
-
-inline auto SemaphorePool::Count() const noexcept -> uint32_t {
-	return _count;
-}
-
-inline auto SemaphorePool::Valid() const noexcept -> bool {
-	return _device != VK_NULL_HANDLE;
-}
-
-inline void SemaphorePool::Cleanup() noexcept {
-	if (_device == VK_NULL_HANDLE) {
-		return;
-	}
-
-	auto* const d = _device;
-	for (uint32_t i = 0; i < _count; ++i) {
-		if (_semaphores[i] != VK_NULL_HANDLE) {
-			vkDestroySemaphore(d, _semaphores[i], nullptr);
-		}
-	}
-
-	_semaphores.fill(VK_NULL_HANDLE);
-	_count = 0;
-	_device = VK_NULL_HANDLE;
 }
 
 inline auto IsInstanceExtensionSupported(std::string_view extension) noexcept -> bool {

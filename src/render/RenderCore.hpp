@@ -114,68 +114,6 @@ inline constexpr auto& GetBufferDeviceAddress = ZHLN_GetBufferDeviceAddress;
 
 std::expected<VkResult, std::string> WaitIdle(VkDevice device) noexcept;
 
-/**
- * @brief Holds fully automated, RAII-managed layout handles generated via shader reflection.
- * @note [UNSAFE] This struct is populated by parsing untrusted SPIR-V bytecode at runtime.
- * Incorrect layout assumptions here can lead to undefined behavior, driver hangs, or GPU crashes.
- */
-struct UnsafeReflectedLayout {
-	PipelineLayout pipelineLayout;
-	std::array<DescriptorSetLayout, 4> descriptorSetLayouts;
-	uint32_t setLayoutCount = 0;
-
-	// Tracks the exact count of each descriptor type needed by all sets combined
-	std::array<uint32_t, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT + 1> descriptorTypeCounts{};
-
-	/**
-	 * @brief Unsafely fetches a raw layout handle.
-	 * @warning Caller must guarantee setIndex is within shader layout bounds.
-	 */
-	[[nodiscard]] auto GetSetLayoutUnsafe(uint32_t setIndex = 0) const noexcept
-		-> VkDescriptorSetLayout {
-		return setIndex < setLayoutCount ? descriptorSetLayouts[setIndex].Get() : VK_NULL_HANDLE;
-	}
-};
-
-/**
- * @brief Reflection builder that queries SPIR-V bytecode at runtime using SPIRV-Reflect.
- * @note [UNSAFE] Bypasses C++ compile-time type-safety guarantees. Relies entirely on
- * runtime binary parsing. Use only when static layouts cannot be predefined.
- */
-class UnsafeReflectedLayoutBuilder {
-  public:
-	UnsafeReflectedLayoutBuilder() noexcept = default;
-
-	// Non-movable, non-copyable
-	UnsafeReflectedLayoutBuilder(UnsafeReflectedLayoutBuilder&&) = delete;
-	UnsafeReflectedLayoutBuilder& operator=(UnsafeReflectedLayoutBuilder&&) = delete;
-	UnsafeReflectedLayoutBuilder(const UnsafeReflectedLayoutBuilder&) = delete;
-	auto operator=(const UnsafeReflectedLayoutBuilder&) -> UnsafeReflectedLayoutBuilder& = delete;
-	~UnsafeReflectedLayoutBuilder() noexcept = default;
-
-	/**
-	 * @brief Adds a shader bytecode stage to the pipeline parsing queue.
-	 * @warning It is undefined behavior if desc contains malformed SPIR-V or invalid bytecode size.
-	 */
-	void AddStageUnsafe(const ZHLN_ShaderDesc& desc, VkShaderStageFlags stage) noexcept;
-
-	/**
-	 * @brief Unsafely parses all registered stages and builds the Vulkan layouts.
-	 * @throws Does not throw, but failure to match pipeline state object requirements
-	 * later down the line will cause hard validation layer errors.
-	 */
-	[[nodiscard]] auto BuildUnsafe(VkDevice device) noexcept -> UnsafeReflectedLayout;
-
-  private:
-	struct StageData {
-		const uint32_t* code = nullptr;
-		size_t size = 0;
-		VkShaderStageFlags stage = 0;
-	};
-	std::array<StageData, 5> _stages{};
-	uint32_t _stageCount = 0;
-};
-
 // ============================================================================
 // Scoped RAII Scissor State Guard
 // ============================================================================
@@ -217,34 +155,6 @@ class ScopedRendering {
 
 void ImageBarrier(const VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc& desc) noexcept;
 void MemoryBarrier(const VkCommandBuffer cmd, const ZHLN_MemoryBarrierDesc& desc) noexcept;
-
-class RayTracingContext {
-  public:
-	RayTracingContext() = default;
-
-	[[nodiscard]] bool Init(VkDevice device) noexcept;
-	[[nodiscard]] bool Valid() const noexcept { return _raw.device != VK_NULL_HANDLE; }
-
-	void GetBlasSizes(const ZHLN_BlasGeometryDesc& desc, uint32_t primCount,
-					  ZHLN_AccelerationStructureSizes& outSizes) const noexcept;
-	void GetTlasSizes(uint32_t instanceCount,
-					  ZHLN_AccelerationStructureSizes& outSizes) const noexcept;
-
-	[[nodiscard]] VkAccelerationStructureKHR
-	CreateAS(VkBuffer buffer, VkDeviceSize size, ZHLN_AccelerationStructureType type) const noexcept;
-	void DestroyAS(VkAccelerationStructureKHR as) const noexcept;
-	[[nodiscard]] VkDeviceAddress GetASAddress(VkAccelerationStructureKHR as) const noexcept;
-
-	void CmdBuildBlas(VkCommandBuffer cmd, const ZHLN_BlasGeometryDesc& desc,
-					  VkAccelerationStructureKHR dst, VkDeviceAddress scratch,
-					  uint32_t primCount) const noexcept;
-	void CmdBuildTlas(VkCommandBuffer cmd, const ZHLN_TlasGeometryDesc& desc,
-					  VkAccelerationStructureKHR dst, VkDeviceAddress scratch,
-					  uint32_t instanceCount) const noexcept;
-
-  private:
-	ZHLN_RayTracingContext _raw{};
-};
 
 void CopyBufferToImage(const VkCommandBuffer cmd, const ZHLN_BufferImageCopyDesc& desc) noexcept;
 
@@ -401,38 +311,6 @@ std::string ReportVkError(VkResult result, const char* context,
 std::expected<VkResult, std::string>
 CheckResult(const VkResult result, const char* context = "",
 			const std::source_location location = std::source_location::current());
-
-// ============================================================================
-// Semaphore Helpers
-// ============================================================================
-
-class alignas(64) SemaphorePool {
-  public:
-	SemaphorePool() noexcept = default;
-	~SemaphorePool() noexcept;
-
-	SemaphorePool(const SemaphorePool&) = delete;
-	auto operator=(const SemaphorePool&) -> SemaphorePool& = delete;
-
-	SemaphorePool(SemaphorePool&& other) noexcept;
-	auto operator=(SemaphorePool&& other) noexcept -> SemaphorePool&;
-
-	void Rebuild(const VkDevice device, const uint32_t count) noexcept;
-	[[nodiscard("Semaphore access must be checked for bounds; invalid indices will crash")]]
-	auto operator[](const uint32_t index) const noexcept -> VkSemaphore;
-
-	[[nodiscard]] auto Count() const noexcept -> uint32_t;
-	[[nodiscard("Verify semaphore pool is initialized before use")]]
-	auto Valid() const noexcept -> bool;
-
-  private:
-	void Cleanup() noexcept;
-
-	VkDevice _device = VK_NULL_HANDLE;
-	uint32_t _count = 0;
-	[[maybe_unused]] uint32_t _padding = 0;
-	std::array<VkSemaphore, 6> _semaphores = {};
-};
 
 // ============================================================================
 // Extension Query Utilities

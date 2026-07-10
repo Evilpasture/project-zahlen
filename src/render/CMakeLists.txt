@@ -24,6 +24,9 @@ add_library(zahlen_render STATIC
     Context.cpp
     Swapchain.cpp
     ShaderStages.cpp
+    ReflectedLayout.cpp
+    SemaphorePool.cpp
+    Raytracing.cpp
     Surface.cpp
 )
 set_target_properties(zahlen_render PROPERTIES POSITION_INDEPENDENT_CODE ON)
