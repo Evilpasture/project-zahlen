@@ -13,8 +13,10 @@
 #include <detail/Span.hpp>
 #include <source_location>
 #include <span>
+#include <string>
 #include <string_view>
 #include <threading/Mutex.hpp>
+#include <vector>
 
 namespace ZHLN::ECS {
 
@@ -24,6 +26,13 @@ template <typename T> struct is_complete<T, std::void_t<decltype(sizeof(T))>> : 
 
 template <typename T>
 concept CompleteType = is_complete<T>::value;
+
+struct ComponentTypeInfo {
+	std::string_view name;
+	size_t size = 0;
+	size_t alignment = 0;
+	void (*debugDump)(const void*, std::string&) = nullptr;
+};
 
 constexpr uint32_t HashTypeName(std::string_view str) {
 	uint32_t hash = 2166136261u;
@@ -35,65 +44,21 @@ constexpr uint32_t HashTypeName(std::string_view str) {
 }
 
 template <typename T> consteval uint32_t GetTypeHash() {
-	// The resolved function name contains the template parameter (e.g., "[with T =
-	// Components::MeshComponent]")
-	return HashTypeName(std::source_location::current().function_name());
+	if constexpr (requires { ZHLN::Reflect::TypeName<T>(); }) {
+		return HashTypeName(ZHLN::Reflect::TypeName<T>());
+	} else {
+		return HashTypeName(std::source_location::current().function_name());
+	}
 }
 
 template <typename T> constexpr std::string_view BoxedName() {
-	// If the type was generated via SchemaType, extract its name NTTP directly
 	if constexpr (requires { ZHLN::Reflect::GetSchemaNameOf(static_cast<T*>(nullptr)); }) {
 		return ZHLN::Reflect::GetSchemaNameOf(static_cast<T*>(nullptr));
-	}
-#if defined(__clang__) || defined(__GNUC__)
-	// GCC & Clang format: "constexpr std::string_view BoxedName() [with T = Type]"
-	std::string_view name = __PRETTY_FUNCTION__;
-	size_t start = name.find("T = ");
-	if (start != std::string_view::npos) {
-		start += 4;
+	} else if constexpr (requires { ZHLN::Reflect::TypeName<T>(); }) {
+		return ZHLN::Reflect::TypeName<T>();
 	} else {
-		return "Unknown";
+		static_assert(false, "Unknown type");
 	}
-	size_t end = name.find_first_of("];", start);
-	if (end != std::string_view::npos) {
-		name = name.substr(start, end - start);
-	} else {
-		name = name.substr(start);
-	}
-#elif defined(_MSC_VER)
-	// MSVC format: "auto __cdecl BoxedName<struct Type>(void)"
-	std::string_view name = __FUNCSIG__;
-	size_t start = name.find("BoxedName<");
-	if (start != std::string_view::npos) {
-		start += 10;
-	} else {
-		return "Unknown";
-	}
-	size_t end = name.find_first_of(">(", start);
-	if (end != std::string_view::npos) {
-		name = name.substr(start, end - start);
-	} else {
-		name = name.substr(start);
-	}
-#else
-	std::string_view name = "Unknown";
-#endif
-
-	// Strip MSVC-specific 'struct' / 'class' prefixes if present
-	if (name.starts_with("struct ")) {
-		name.remove_prefix(7);
-	} else if (name.starts_with("class ")) {
-		name.remove_prefix(6);
-	}
-
-	// Strip namespace qualifiers (e.g., "ZHLN::ALife::Components::ALifeComponent" ->
-	// "Components::ALifeComponent")
-	size_t last_colon = name.find_last_of(':');
-	if (last_colon != std::string_view::npos) {
-		name.remove_prefix(last_colon + 1);
-	}
-
-	return name;
 }
 
 class ZHLN_API SparseSet {
@@ -172,17 +137,7 @@ class ZHLN_API Registry {
 	static void MapNameToFamilyID(std::string_view name, uint32_t id) noexcept;
 	static uint32_t GetFamilyIDFromName(std::string_view name) noexcept;
 
-	template <typename T> void RegisterComponent() {
-		uint32_t id = ComponentFamily::GetTypeID<T>();
-		EnsureComponentCapacity(id);
-		if (!_components[id]) {
-			typename SparseSet::DestructorFn dt = nullptr;
-			if constexpr (requires(T* t) { T::OnDestroy(t); }) {
-				dt = [](void* ptr) { T::OnDestroy(static_cast<T*>(ptr)); };
-			}
-			_components[id] = new SparseSet(sizeof(T), alignof(T), &this->sync, dt);
-		}
-	}
+	template <typename T> void RegisterComponent() { RegisterComponent<T>(BoxedName<T>()); }
 
 	template <typename... Components> void RegisterComponents() {
 		// A C++17 fold expression that expands for every component in the list
@@ -255,17 +210,44 @@ class ZHLN_API Registry {
 		return {_components[id]->GetDenseArray(), _components[id]->Count()};
 	}
 
+	// Overload: Populates _typeInfo metadata alongside sparse set allocation
 	template <typename T> void RegisterComponent(std::string_view name) {
 		uint32_t id = ComponentFamily::GetTypeID<T>();
 		MapNameToFamilyID(name, id);
-
 		EnsureComponentCapacity(id);
+
 		if (!_components[id]) {
 			typename SparseSet::DestructorFn dt = nullptr;
 			if constexpr (requires(T* t) { T::OnDestroy(t); }) {
 				dt = [](void* ptr) { T::OnDestroy(static_cast<T*>(ptr)); };
 			}
 			_components[id] = new SparseSet(sizeof(T), alignof(T), &this->sync, dt);
+		}
+
+		_typeInfo[id] = {
+			.name = name,
+			.size = sizeof(T),
+			.alignment = alignof(T),
+			.debugDump =
+				[](const void* data, std::string& out) {
+					out += ZHLN::Reflect::ToDebugString(*static_cast<const T*>(data));
+				},
+		};
+	}
+
+	// Inspector: Iterates and dumps active component state representations into out buffer
+	void DebugDumpEntity(Entity entity, std::string& out) const {
+		for (uint32_t id = 0; id < _compCapacity; ++id) {
+			if (auto* raw = GetRawByFamily(entity, id)) {
+				out += _typeInfo[id].name;
+				out += ": ";
+				if (_typeInfo[id].debugDump != nullptr) {
+					_typeInfo[id].debugDump(raw, out);
+				} else {
+					out += "{}";
+				}
+				out += "\n";
+			}
 		}
 	}
 
@@ -293,6 +275,7 @@ class ZHLN_API Registry {
 
 	SparseSet** _components = nullptr;
 	size_t _compCapacity = 0;
+	std::vector<ComponentTypeInfo> _typeInfo;
 
 	void EnsureEntityCapacity(uint32_t index);
 	void EnsureComponentCapacity(uint32_t id);

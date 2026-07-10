@@ -26,6 +26,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/Format.hpp>
 #include <Zahlen/GUI.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Profiler.hpp>

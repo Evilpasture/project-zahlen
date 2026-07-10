@@ -2,16 +2,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-
-#if defined(__cpp_impl_reflection)
 #include "Loop.hpp"
 
 #include <algorithm>
-#include <format>
-#include <meta>
+#include <array>
+#include <compare>
+#include <optional>
 #include <ranges>
+#include <string>
 #include <string_view>
+#include <tuple>
+#include <type_traits>
+#include <utility>
 #include <vector>
+
+#if defined(__cpp_impl_reflection)
+
+#include <meta>
 
 namespace ZHLN::Reflect {
 
@@ -105,7 +112,16 @@ template <typename T, typename F> constexpr void ForEachFieldWithName(T&& t, F&&
 
 	ZHLN::Unroll<members.size()>([&](auto I) {
 		constexpr auto member = members[decltype(I)::value];
-		f(std::meta::identifier_of(member), t.[:member:]);
+
+		// Guard: Only extract identifier if the reflected member has one
+		constexpr std::string_view name = []() consteval {
+			if (std::meta::has_identifier(member)) {
+				return std::meta::identifier_of(member);
+			}
+			return std::string_view(""); // Return empty placeholder for nameless fields
+		}();
+
+		f(name, t.[:member:]);
 	});
 }
 
@@ -129,10 +145,11 @@ constexpr std::string_view EnumToString(E value) {
 	static constexpr auto enumerators = std::define_static_array(std::meta::enumerators_of(^^E));
 	std::string_view result = "Unknown";
 
-	ZHLN::Unroll<enumerators.size()>([&](auto I) {
-		constexpr auto enumerator = enumerators[decltype(I)::value];
+	ZHLN::Unroll<enumerators.size()>([&](auto ic) {
+		constexpr auto enumerator = enumerators[decltype(ic)::value];
+		constexpr std::string_view name = std::meta::identifier_of(enumerator);
 		if (value == static_cast<E>([:enumerator:])) {
-			result = std::meta::identifier_of(enumerator);
+			result = name;
 		}
 	});
 	return result;
@@ -237,18 +254,6 @@ template <typename Dst, typename Src> constexpr void CopyMatchingFields(Dst& dst
 	});
 }
 
-template <typename T> std::string ToDebugString(const T& t) {
-	std::string out = "{";
-	bool first = true;
-	ForEachFieldWithName(t, [&](std::string_view name, auto&& value) {
-		if (!first)
-			out += ", ";
-		first = false;
-		out += std::string(name) + "=" + std::format("{}", value); // needs formatter for each type
-	});
-	return out + "}";
-}
-
 template <typename E>
 	requires std::is_enum_v<E>
 consteval std::size_t EnumCount() {
@@ -338,12 +343,13 @@ constexpr std::string_view EnumToFlagsString(E value, std::string& out_buffer) {
 	[:Expand(std::define_static_array(std::meta::enumerators_of(^^E))):] >> [&]<auto enumerator> {
 		constexpr E enum_val = static_cast<E>([:enumerator:]);
 		auto enum_under = static_cast<Under>(enum_val);
+		constexpr std::string_view name = std::meta::identifier_of(enumerator);
 
 		// Skip zero flags unless the value is exactly zero
 		if (enum_under != 0 && (val_under & enum_under) == enum_under) {
 			if (!out_buffer.empty())
 				out_buffer += " | ";
-			out_buffer += std::meta::identifier_of(enumerator);
+			out_buffer += name;
 		}
 	};
 
@@ -579,17 +585,6 @@ constexpr void DispatchEnum(E value, F&& f) {
 
 } // namespace ZHLN::Reflect
 #else
-#include <algorithm>
-#include <array>
-#include <compare>
-#include <optional>
-#include <ranges>
-#include <string>
-#include <string_view>
-#include <tuple>
-#include <type_traits>
-#include <utility>
-#include <vector>
 
 namespace ZHLN::Reflect {
 
@@ -674,10 +669,6 @@ template <typename T> consteval bool HasField(std::string_view) {
 }
 
 template <typename Dst, typename Src> constexpr void CopyMatchingFields(Dst&, const Src&) {}
-
-template <typename T> std::string ToDebugString(const T&) {
-	return "{}";
-}
 
 template <typename E>
 	requires std::is_enum_v<E>
@@ -790,3 +781,50 @@ constexpr void DispatchEnum(E, F&&) {}
 
 } // namespace ZHLN::Reflect
 #endif
+
+// We don't need stubs for everything.
+namespace ZHLN::Reflect {
+namespace detail {
+template <typename T>
+concept Formattable = requires(const T& val, std::format_context ctx) {
+	std::formatter<std::remove_cvref_t<T>, char>().format(val, ctx);
+};
+} // namespace detail
+// Forward declare the public dispatcher to allow recursive formatting
+template <typename T> std::string ToDebugString(const T& t);
+
+template <typename T, typename = void> struct CustomFormatter {
+	static void format(const T& val, std::string& out) {
+		using Decayed = std::remove_cvref_t<T>;
+
+		if constexpr (detail::Formattable<Decayed>) {
+			out += std::format("{}", val);
+		} else if constexpr (std::is_enum_v<Decayed>) {
+			out += EnumToString(val);
+		} else if constexpr (std::is_class_v<Decayed>) {
+			if constexpr (FieldCount<Decayed>() > 0) {
+				out += "{";
+				bool first = true;
+				ForEachFieldWithName(val, [&](std::string_view name, auto&& value) {
+					if (!first) {
+						out += ", ";
+					}
+					first = false;
+					out += std::string(name) + "=" + ToDebugString(value); // Recurse
+				});
+				out += "}";
+			} else {
+				out += TypeName<Decayed>();
+			}
+		} else {
+			out += "?";
+		}
+	}
+};
+
+template <typename T> std::string ToDebugString(const T& t) {
+	std::string out;
+	CustomFormatter<std::remove_cvref_t<T>>::format(t, out);
+	return out;
+}
+} // namespace ZHLN::Reflect

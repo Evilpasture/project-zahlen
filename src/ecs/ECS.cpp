@@ -282,6 +282,7 @@ void Registry::EnsureComponentCapacity(uint32_t id) {
 	for (size_t i = oldCap; i < _compCapacity; ++i) {
 		_components[i] = nullptr;
 	}
+	_typeInfo.resize(_compCapacity); // Resizes tracking metadata vector on demand
 }
 
 Entity Registry::Create() {
@@ -346,6 +347,15 @@ uint32_t Registry::RegisterComponentDynamic(std::string_view name, size_t size, 
 		if (_components[id] == nullptr) {
 			_components[id] = new SparseSet(size, alignment, &this->sync);
 		}
+
+		// Bind raw dynamic layout parameters with a safe, crash-immune fallback dumper
+		_typeInfo[id] = {.name = name,
+						 .size = size,
+						 .alignment = alignment,
+						 .debugDump = [](const void*, std::string& out) {
+							 out +=
+								 "{}"; // Fallback representation for non-static dynamic components
+						 }};
 	}
 	return id;
 }
