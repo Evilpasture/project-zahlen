@@ -7,6 +7,7 @@
 #include "Zahlen/Engine.hpp"
 #include "ecs/ECS.hpp"
 #include <GLFW/glfw3.h>
+#include <Rendering.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Window.hpp>
 
@@ -272,7 +273,7 @@ bool Window::ReinitTTY() {
     return false;
 }
 
-void* Window::CreateVulkanSurface(void* instance, void* physicalDevice, int& outWidth, int& outHeight) noexcept {
+std::expected<void*, std::string> Window::CreateVulkanSurface(void* instance, void* physicalDevice, int& outWidth, int& outHeight) noexcept {
     if (_impl->is_tty) {
         // TTY surface creation requires a physical device and must occur after selection
         if (physicalDevice == nullptr) {
@@ -284,28 +285,37 @@ void* Window::CreateVulkanSurface(void* instance, void* physicalDevice, int& out
         VkSurfaceKHR raw_surface =
             TTYBackend::CreateSurface(static_cast<VkInstance>(instance), static_cast<VkPhysicalDevice>(physicalDevice), _impl->tty_context, hwWidth, hwHeight);
 
+        if (raw_surface == VK_NULL_HANDLE) {
+            return std::unexpected("Failed to create TTY Vulkan Surface.");
+        }
+
         outWidth      = static_cast<int>(hwWidth);
         outHeight     = static_cast<int>(hwHeight);
         _impl->width  = hwWidth;
         _impl->height = hwHeight;
 
         return static_cast<void*>(raw_surface);
-    } else {
-        // Standard window surface creation occurs before physical device selection
-        if (physicalDevice != nullptr) {
-            return nullptr;
-        }
-
-        VkSurfaceKHR raw_surface = VK_NULL_HANDLE;
-        VkResult     err         = glfwCreateWindowSurface(static_cast<VkInstance>(instance), _impl->handle, nullptr, &raw_surface);
-
-        if (err != VK_SUCCESS || raw_surface == VK_NULL_HANDLE) {
-            ZHLN::Panic("FATAL: Failed to create GLFW Vulkan window surface!");
-        }
-
-        glfwGetFramebufferSize(_impl->handle, &outWidth, &outHeight);
-        return static_cast<void*>(raw_surface);
     }
+    if (physicalDevice != nullptr) {
+        return nullptr;
+    }
+
+    // 1. Query GLFW Vulkan Support
+    if (glfwVulkanSupported() == GLFW_FALSE) {
+        std::unexpected("FATAL: GLFW reports Vulkan is not supported on this platform!");
+    }
+
+    VkSurfaceKHR raw_surface = VK_NULL_HANDLE;
+    VkResult     err         = glfwCreateWindowSurface(static_cast<VkInstance>(instance), _impl->handle, nullptr, &raw_surface);
+
+    // Uses your existing framework helper to check result and generate a rich, source-location-aware error string
+    auto check = Vk::CheckResult(err, "Failed to create GLFW Vulkan window surface");
+    if (!check) {
+        return std::unexpected(check.error());
+    }
+
+    glfwGetFramebufferSize(_impl->handle, &outWidth, &outHeight);
+    return static_cast<void*>(raw_surface);
 }
 
 } // namespace ZHLN

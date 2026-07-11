@@ -5,6 +5,7 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Types.hpp>
 #include <detail/String.hpp>
+#include <expected>
 #include <memory>
 
 namespace ZHLN {
@@ -51,9 +52,9 @@ class ZHLN_API Window {
      * @param physicalDevice The raw VkPhysicalDevice pointer (required for TTY/KMS).
      * @param outWidth Reference to store the output surface width.
      * @param outHeight Reference to store the output surface height.
-     * @return The created raw VkSurfaceKHR as a void*, or nullptr if not ready.
+     * @return The raw VkSurfaceKHR pointer, or an error string.
      */
-    [[nodiscard]] void* CreateVulkanSurface(void* instance, void* physicalDevice, int& outWidth, int& outHeight) noexcept;
+    [[nodiscard]] std::expected<void*, std::string> CreateVulkanSurface(void* instance, void* physicalDevice, int& outWidth, int& outHeight) noexcept;
 
   private:
     std::unique_ptr<Impl> _impl;

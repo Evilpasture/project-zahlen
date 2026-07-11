@@ -67,6 +67,7 @@ static constexpr auto isLegacy = false;
 // ============================================================================
 // clang-format off
 #include "Utils.hpp"
+#include "Extensions.hpp"
 #include "Features.hpp"
 #include "Vertex.hpp"
 #include "Handles.hpp"

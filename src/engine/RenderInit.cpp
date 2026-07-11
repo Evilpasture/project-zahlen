@@ -186,42 +186,32 @@ std::expected<void, std::string> RenderContext::Impl::InitSubsystems(const Rende
 
 namespace {
 
-std::vector<std::string_view> GetPlatformInstanceExtensions(Window& window, bool enableValidation) noexcept {
-    std::vector<std::string_view> inst_exts;
+std::expected<Vk::ExtensionResult, std::string> GetPlatformInstanceExtensions(Window& window, bool enableValidation) noexcept {
+    glfwSetErrorCallback([](int error, const char* description) { ZHLN::Log("[GLFW Error] Code {}: {}", error, description); });
+
+    auto builder = Vk::ExtensionBuilder::ForInstance();
 
     if (window.IsTTY()) {
-        inst_exts = TTYBackend::GetRequiredInstanceExtensions();
+        for (const auto ext: TTYBackend::GetRequiredInstanceExtensions()) {
+            builder.Require(ext);
+        }
     } else {
         uint32_t     glfwExtensionCount = 0;
         const char** glfwExtensions     = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
 
         if (glfwExtensionCount > 0 && glfwExtensions != nullptr) {
-            inst_exts.assign(glfwExtensions, glfwExtensions + glfwExtensionCount);
-        } else {
-            inst_exts.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
-            if constexpr (isWindows) {
-                inst_exts.emplace_back("VK_KHR_win32_surface");
-            } else if constexpr (isMac) {
-                inst_exts.emplace_back("VK_EXT_metal_surface");
-            } else {
-                inst_exts.emplace_back("VK_KHR_xcb_surface");
-                inst_exts.emplace_back("VK_KHR_xlib_surface");
-                inst_exts.emplace_back("VK_KHR_wayland_surface");
+            for (uint32_t i = 0; i < glfwExtensionCount; ++i) {
+                builder.Require(glfwExtensions[i]); // Operates cleanly on the lvalue
             }
+        } else {
+            ZHLN::Log("WARNING: glfwGetRequiredInstanceExtensions returned 0 extensions.");
+            builder.Require(VK_KHR_SURFACE_EXTENSION_NAME).Optional("VK_KHR_wayland_surface").Optional("VK_KHR_xcb_surface").Optional("VK_KHR_xlib_surface");
         }
-        inst_exts.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
-        inst_exts.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+
+        builder.Require(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME).Require(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
     }
 
-    if (enableValidation) {
-        inst_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-    }
-
-    if constexpr (isMac) {
-        inst_exts.emplace_back("VK_KHR_portability_enumeration");
-    }
-
-    return inst_exts;
+    return std::move(builder).Debug(enableValidation).OptionalIf("VK_KHR_portability_enumeration", isMac).Build();
 }
 
 auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps) noexcept {
@@ -261,21 +251,18 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
         .Build();
 }
 
-std::vector<const char*> GetDeviceExtensions(VkPhysicalDevice physicalDevice) noexcept {
-    std::vector<const char*> dev_exts = {
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME, VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME, "VK_EXT_robustness2"
-    };
-
-    if (CheckRayTracingSupport(physicalDevice)) {
-        dev_exts.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
-        dev_exts.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
-        dev_exts.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
-    }
-
-    if constexpr (isMac) {
-        dev_exts.push_back("VK_KHR_portability_subset");
-    }
-    return dev_exts;
+std::expected<Vk::ExtensionResult, std::string> GetDeviceExtensions(VkPhysicalDevice physicalDevice) noexcept {
+    return Vk::ExtensionBuilder::ForDevice(physicalDevice)
+        .Require(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
+        .Require(VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME)
+        .Require(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME)
+        .Require("VK_EXT_robustness2")
+        .OptionalIf("VK_KHR_portability_subset", isMac)
+        .OptionalGroup(
+            {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME},
+            CheckRayTracingSupport(physicalDevice)
+        )
+        .Build();
 }
 
 Vk::Context CreateLogicalDevice(
@@ -393,7 +380,11 @@ std::expected<std::unique_ptr<RenderContext>, std::string> RenderContext::Create
     impl->appName = cfg.appName;
 
     // Phase 1: Instance extensions selection
-    auto inst_exts = GetPlatformInstanceExtensions(window, cfg.enableValidation);
+    auto inst_exts_res = GetPlatformInstanceExtensions(window, cfg.enableValidation);
+    if (!inst_exts_res) {
+        return std::unexpected(inst_exts_res.error());
+    }
+    const auto& inst_exts = inst_exts_res.value();
 
     // Phase 2: Instance creation
     VkInstance instance = Vk::CreateInstance(impl->appName.c_str(), VK_MAKE_API_VERSION(0, 1, 0, 0), inst_exts, cfg.enableValidation);
@@ -402,11 +393,16 @@ std::expected<std::unique_ptr<RenderContext>, std::string> RenderContext::Create
     }
 
     // Phase 3: Surface creation (Before device selection for windowed/GLFW)
-    int   width       = 0;
-    int   height      = 0;
-    auto* raw_surface = static_cast<VkSurfaceKHR>(window.CreateVulkanSurface(instance, nullptr, width, height));
-    if (!window.IsTTY() && raw_surface == VK_NULL_HANDLE) {
-        return std::unexpected("Failed to create GLFW Vulkan surface.");
+    int          width       = 0;
+    int          height      = 0;
+    VkSurfaceKHR raw_surface = VK_NULL_HANDLE;
+
+    if (!window.IsTTY()) {
+        auto surface_res = window.CreateVulkanSurface(instance, nullptr, width, height);
+        if (!surface_res) {
+            return std::unexpected(surface_res.error());
+        }
+        raw_surface = static_cast<VkSurfaceKHR>(surface_res.value());
     }
 
     // Phase 4: Device selection
@@ -417,10 +413,11 @@ std::expected<std::unique_ptr<RenderContext>, std::string> RenderContext::Create
 
     // Phase 5: Surface creation (After device selection for TTY)
     if (window.IsTTY()) {
-        raw_surface = static_cast<VkSurfaceKHR>(window.CreateVulkanSurface(instance, physicalInfo.handle, width, height));
-        if (raw_surface == VK_NULL_HANDLE) {
-            return std::unexpected("Failed to create TTY Vulkan Surface.");
+        auto surface_res = window.CreateVulkanSurface(instance, physicalInfo.handle, width, height);
+        if (!surface_res) {
+            return std::unexpected(surface_res.error());
         }
+        raw_surface = static_cast<VkSurfaceKHR>(surface_res.value());
     }
 
     impl->surface = Vk::Surface(instance, raw_surface);
@@ -432,7 +429,11 @@ std::expected<std::unique_ptr<RenderContext>, std::string> RenderContext::Create
     auto features = BuildFeatureChain(physicalInfo.handle, caps);
 
     // Phase 8: Device extension building
-    auto dev_exts = GetDeviceExtensions(physicalInfo.handle);
+    auto dev_exts_res = GetDeviceExtensions(physicalInfo.handle);
+    if (!dev_exts_res) {
+        return std::unexpected(dev_exts_res.error());
+    }
+    const auto& dev_exts = dev_exts_res.value();
 
     // Phase 9: Device creation
     impl->ctx = CreateLogicalDevice(instance, raw_surface, physicalInfo, dev_exts, features.GetRoot(), cfg.enableValidation);
