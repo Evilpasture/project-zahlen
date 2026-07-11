@@ -13,73 +13,53 @@
 namespace ZHLN {
 
 std::expected<void, std::string> RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) {
-    auto make_expected = [](bool success, std::string_view err_msg) -> std::expected<void, std::string> {
-        if (success) {
-            return {};
-        }
-        return std::unexpected(std::string(err_msg));
-    };
+    return Vk::ShaderStages::Create(device, shaderData, "VSMain", "PSShadow")
+        .transform_error([](const std::string& err) { return "Failed to compile ShaderStages for Shadow Pipeline: " + err; })
+        .and_then([&, device](auto&& shaders) -> std::expected<void, std::string> {
+            return Vk::PipelineLayoutBuilder(device)
+                .AddDescriptorSetLayout(bindlessLayout.Get())
+                .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
+                .Build()
+                .transform_error([](VkResult err) { return std::format("Failed to compile Shadow Pipeline Layout: {}", Vk::ResultString(err)); })
+                .and_then([&, device, shaders = std::forward<decltype(shaders)>(shaders)](auto&& layout) -> std::expected<void, std::string> {
+                    shadowPipelineLayout = std::forward<decltype(layout)>(layout);
 
-    auto shaders = Vk::ShaderStages::Create(device, shaderData, "VSMain", "PSShadow");
-
-    // 1. Lift shader validation into the expected monad
-    return make_expected(shaders.Valid(), "Failed to compile ShaderStages for Shadow Pipeline.").and_then([&]() {
-        // 2. Build the pipeline layout
-        return Vk::PipelineLayoutBuilder(device)
-            .AddDescriptorSetLayout(bindlessLayout.Get())
-            .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
-            .Build()
-            .transform_error([](VkResult err) { return std::format("Failed to compile Shadow Pipeline Layout: {}", Vk::ResultString(err)); })
-            .and_then([&](auto&& layout) -> std::expected<void, std::string> {
-                shadowPipelineLayout = std::forward<decltype(layout)>(layout);
-
-                // 3. Compile the graphics pipeline and transfer ownership on success
-                return Vk::PipelineBuilder {}
-                    .Shaders(shaders)
-                    .Layout(shadowPipelineLayout.Get())
-                    .DepthOnly()
-                    .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                    .CullNone()
-                    .Build(device)
-                    .transform_error([](Vk::PipelineBuilderResult) { return std::string("Failed to compile or build Shadow Pipeline."); })
-                    .transform([&](auto&& pipeline) { shadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
-            });
-    });
+                    return Vk::PipelineBuilder {}
+                        .Shaders(shaders)
+                        .Layout(shadowPipelineLayout.Get())
+                        .DepthOnly()
+                        .DepthFormat(VK_FORMAT_D32_SFLOAT)
+                        .CullNone()
+                        .Build(device)
+                        .transform_error([](Vk::PipelineBuilderResult) { return std::string("Failed to compile or build Shadow Pipeline."); })
+                        .transform([&](auto&& pipeline) { shadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
+                });
+        });
 }
 
 std::expected<void, std::string> RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) {
-    auto make_expected = [](bool success, std::string_view err_msg) -> std::expected<void, std::string> {
-        if (success) {
-            return {};
-        }
-        return std::unexpected(std::string(err_msg));
-    };
+    return Vk::ShaderStages::Create(device, shaderData)
+        .transform_error([](const std::string& err) { return "Failed to compile ShaderStages for Punctual Shadow Pipeline: " + err; })
+        .and_then([&, device](auto&& shaders) -> std::expected<void, std::string> {
+            return Vk::PipelineLayoutBuilder(device)
+                .AddDescriptorSetLayout(bindlessLayout.Get())
+                .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT, sizeof(uint32_t))
+                .Build()
+                .transform_error([](VkResult err) { return std::format("Failed to compile Punctual Shadow Pipeline Layout: {}", Vk::ResultString(err)); })
+                .and_then([&, device, shaders = std::forward<decltype(shaders)>(shaders)](auto&& layout) -> std::expected<void, std::string> {
+                    punctualShadowPipelineLayout = std::forward<decltype(layout)>(layout);
 
-    auto shaders = Vk::ShaderStages::Create(device, shaderData);
-
-    // 1. Lift shader validation into the expected monad
-    return make_expected(shaders.Valid(), "Failed to compile ShaderStages for Punctual Shadow Pipeline.").and_then([&]() {
-        // 2. Build the pipeline layout
-        return Vk::PipelineLayoutBuilder(device)
-            .AddDescriptorSetLayout(bindlessLayout.Get())
-            .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT, sizeof(uint32_t))
-            .Build()
-            .transform_error([](VkResult err) { return std::format("Failed to compile Punctual Shadow Pipeline Layout: {}", Vk::ResultString(err)); })
-            .and_then([&](auto&& layout) -> std::expected<void, std::string> {
-                punctualShadowPipelineLayout = std::forward<decltype(layout)>(layout);
-
-                // 3. Compile the graphics pipeline and transfer ownership on success
-                return Vk::PipelineBuilder {}
-                    .Shaders(shaders)
-                    .Layout(punctualShadowPipelineLayout.Get())
-                    .DepthOnly()
-                    .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                    .CullNone()
-                    .Build(device)
-                    .transform_error([](Vk::PipelineBuilderResult) { return std::string("Failed to compile or build Punctual Shadow Pipeline."); })
-                    .transform([&](auto&& pipeline) { punctualShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
-            });
-    });
+                    return Vk::PipelineBuilder {}
+                        .Shaders(shaders)
+                        .Layout(punctualShadowPipelineLayout.Get())
+                        .DepthOnly()
+                        .DepthFormat(VK_FORMAT_D32_SFLOAT)
+                        .CullNone()
+                        .Build(device)
+                        .transform_error([](Vk::PipelineBuilderResult) { return std::string("Failed to compile or build Punctual Shadow Pipeline."); })
+                        .transform([&](auto&& pipeline) { punctualShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
+                });
+        });
 }
 
 auto RenderContext::GetRendererName() const -> const char* {
@@ -115,60 +95,53 @@ void RenderContext::DestroyBuffer(BufferHandle handle) {
 }
 
 std::expected<Material, std::string> RenderContext::CreateMaterial(const PipelineDesc& desc) {
-    ZHLN_ShaderDesc v_desc  = {.code = Vk::AsSpirV(desc.vertexShaderData), .size = desc.vertexShaderSize, .entry_point = nullptr};
-    ZHLN_ShaderDesc f_desc  = {.code = Vk::AsSpirV(desc.fragShaderData), .size = desc.fragShaderSize, .entry_point = nullptr};
-    auto            shaders = Vk::ShaderStages::Create(_impl->ctx.Device(), v_desc, f_desc);
-
-    auto make_expected = [](bool success, std::string_view err_msg) -> std::expected<void, std::string> {
-        if (success) {
-            return {};
-        }
-        return std::unexpected(std::string(err_msg));
-    };
+    ZHLN_ShaderDesc v_desc = {.code = Vk::AsSpirV(desc.vertexShaderData), .size = desc.vertexShaderSize, .entry_point = nullptr};
+    ZHLN_ShaderDesc f_desc = {.code = Vk::AsSpirV(desc.fragShaderData), .size = desc.fragShaderSize, .entry_point = nullptr};
 
     auto* impl = _impl.get();
 
-    // 1. Validate compiled shader modules
-    return make_expected(shaders.Valid(), "Failed to compile or link Material shader stages.")
-        .and_then([&]() {
-            // 2. Build the pipeline layout
+    return Vk::ShaderStages::Create(impl->ctx.Device(), v_desc, f_desc)
+        .transform_error([](const std::string& err) { return "Failed to compile or link Material shader stages: " + err; })
+        .and_then([impl, &desc](auto&& shaders) -> std::expected<Material, std::string> {
+            // 1. Build the pipeline layout
             return Vk::PipelineLayoutBuilder(impl->ctx.Device())
                 .AddDescriptorSetLayout(impl->bindlessLayout.Get())
                 .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
                 .Build()
-                .transform_error([](VkResult err) { return std::format("Failed to compile Material Pipeline Layout: {}", Vk::ResultString(err)); });
-        })
-        .and_then([&](auto&& layout) -> std::expected<Material, std::string> {
-            // 3. Configure the graphics pipeline builder options
-            auto pipeline = Vk::PipelineBuilder {}.Shaders(shaders).Layout(layout.Get()).DepthFormat(VK_FORMAT_D32_SFLOAT);
+                .transform_error([](VkResult err) { return std::format("Failed to compile Material Pipeline Layout: {}", Vk::ResultString(err)); })
+                .and_then([impl, &desc, &shaders](auto&& layout) -> std::expected<Material, std::string> {
+                    // 2. Configure the graphics pipeline builder options
+                    auto pipeline = Vk::PipelineBuilder {}.Shaders(shaders).Layout(layout.Get()).DepthFormat(VK_FORMAT_D32_SFLOAT);
 
-            if (desc.doubleSided) {
-                pipeline.CullNone();
-            } else {
-                pipeline.CullBack();
-            }
+                    if (desc.doubleSided) {
+                        pipeline.CullNone();
+                    } else {
+                        pipeline.CullBack();
+                    }
 
-            if (desc.alphaBlend) {
-                pipeline.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT}); // Output straight to the Lit pass
-                pipeline.DepthWrite(false);                             // DO NOT write to depth, to preserve opaque occlusion
-                pipeline.AlphaBlend();
-            } else {
-                pipeline.ColorFormats(ActiveGBuffer::array);
-            }
+                    if (desc.alphaBlend) {
+                        pipeline.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT}); // Output straight to the Lit pass
+                        pipeline.DepthWrite(false);                             // DO NOT write to depth, to preserve opaque occlusion
+                        pipeline.AlphaBlend();
+                    } else {
+                        pipeline.ColorFormats(ActiveGBuffer::array);
+                    }
 
-            if (desc.isLineList) {
-                pipeline.Topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST);
-            }
+                    if (desc.isLineList) {
+                        pipeline.Topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST);
+                    }
 
-            // 4. Compile the graphics pipeline and return the initialized Material on success
-            return pipeline.Build(impl->ctx.Device())
-                .transform_error([](Vk::PipelineBuilderResult) { return std::string("Failed to build Material Graphics Pipeline."); })
-                .transform([&](auto&& compiledPipeline) {
-                    return Material {
-                        .pipeline =
-                            impl->materialPool.Create(std::forward<decltype(compiledPipeline)>(compiledPipeline), std::forward<decltype(layout)>(layout)),
-                        .alphaMode = desc.alphaBlend ? 2u : 0u
-                    };
+                    // 3. Compile the graphics pipeline and return the initialized Material on success
+                    return pipeline.Build(impl->ctx.Device())
+                        .transform_error([](Vk::PipelineBuilderResult) { return std::string("Failed to build Material Graphics Pipeline."); })
+                        .transform([impl, &desc, &layout](auto&& compiledPipeline) {
+                            return Material {
+                                .pipeline = impl->materialPool.Create(
+                                    std::forward<decltype(compiledPipeline)>(compiledPipeline), std::forward<decltype(layout)>(layout)
+                                ),
+                                .alphaMode = desc.alphaBlend ? 2u : 0u
+                            };
+                        });
                 });
         });
 }

@@ -3,6 +3,11 @@
 
 #pragma once
 
+#include <expected>
+#include <filesystem>
+#include <span>
+#include <string>
+
 namespace ZHLN::Vk {
 
 // ============================================================================
@@ -31,7 +36,7 @@ class ShaderStages {
     auto operator=(ShaderStages&& other) noexcept -> ShaderStages&;
 
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
-    static auto Create(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) noexcept -> ShaderStages;
+    static auto Create(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) noexcept -> std::expected<ShaderStages, std::string>;
 
     template <typename T, size_t Extent1, typename U = const uint8_t, size_t Extent2 = std::dynamic_extent>
     [[nodiscard]] static auto Create(
@@ -40,13 +45,13 @@ class ShaderStages {
         std::span<U, Extent2> fragSpan  = {},
         const char*           vertEntry = nullptr,
         const char*           fragEntry = nullptr
-    ) noexcept -> ShaderStages {
+    ) noexcept -> std::expected<ShaderStages, std::string> {
         return Create(device, CreateShaderDesc(vertSpan, vertEntry), fragSpan.empty() ? ZHLN_ShaderDesc {} : CreateShaderDesc(fragSpan, fragEntry));
     }
 
     template <typename T>
-    [[nodiscard]] static auto
-        Create(const VkDevice device, const T& pair, const char* vertEntry = nullptr, const char* fragEntry = nullptr) noexcept -> ShaderStages {
+    [[nodiscard]] static auto Create(const VkDevice device, const T& pair, const char* vertEntry = nullptr, const char* fragEntry = nullptr) noexcept
+        -> std::expected<ShaderStages, std::string> {
         return Create(
             device, CreateShaderDesc(pair.vertex, vertEntry), pair.fragment.empty() ? ZHLN_ShaderDesc {} : CreateShaderDesc(pair.fragment, fragEntry)
         );
@@ -59,7 +64,7 @@ class ShaderStages {
         const std::filesystem::path& fragPath,
         const char*                  vertEntry = "main",
         const char*                  fragEntry = "main"
-    ) noexcept -> ShaderStages;
+    ) noexcept -> std::expected<ShaderStages, std::string>;
 
     [[nodiscard]] constexpr auto Get() const noexcept -> const ZHLN_ShaderStages* {
         return &_raw;

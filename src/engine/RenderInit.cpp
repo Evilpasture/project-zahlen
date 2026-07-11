@@ -340,16 +340,13 @@ std::expected<Vk::ShaderStages, std::string> RenderContext::Impl::LoadAndCreateS
     LoadShaderData(vs, vs_code, vs_size, disk_vs);
     LoadShaderData(ps, ps_code, ps_size, disk_ps);
 
-    auto stages = Vk::ShaderStages::Create(
-        ctx.Device(), {.code = Vk::AsSpirV(vs_code), .size = vs_size, .entry_point = vs.entryPoint},
-        {.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint}
-    );
-
-    if (!stages.Valid()) {
-        return std::unexpected(std::format("Failed to compile or load shader stages for vs '{}' and ps '{}'", vs.path, ps.path));
-    }
-
-    return stages;
+    return Vk::ShaderStages::Create(
+               ctx.Device(), {.code = Vk::AsSpirV(vs_code), .size = vs_size, .entry_point = vs.entryPoint},
+               {.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint}
+    )
+        .transform_error([&](const std::string& err) {
+            return std::format("Failed to compile or load shader stages for vs '{}' and ps '{}': {}", vs.path, ps.path, err);
+        });
 }
 
 std::expected<Vk::Pipeline, std::string> RenderContext::Impl::LoadAndCreateComputeShader(ShaderStageSource cs, VkPipelineLayout layout) const noexcept {
@@ -1129,11 +1126,9 @@ std::expected<void, std::string> RenderContext::Impl::SetupUI(GLFWwindow* window
         .and_then([&](auto&& poolRes) -> std::expected<void, std::string> {
             uiPool = std::forward<decltype(poolRes)>(poolRes);
 
-            uiShaders = Vk::ShaderStages::Create(ctx.Device(), Resource::GetShaderProgram(Ui));
-            if (!uiShaders.Valid()) {
-                return std::unexpected("Failed to compile or load UI ShaderStages.");
-            }
-            return {};
+            return Vk::ShaderStages::Create(ctx.Device(), Resource::GetShaderProgram(Ui))
+                .transform_error([](const std::string& err) { return std::format("Failed to compile or load UI ShaderStages: {}", err); })
+                .transform([&](auto&& shaders) -> void { uiShaders = std::forward<decltype(shaders)>(shaders); });
         })
         .and_then([&]() {
             return Vk::PipelineLayoutBuilder(ctx.Device())
