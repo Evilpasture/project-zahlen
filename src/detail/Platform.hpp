@@ -126,12 +126,16 @@
 #include <unistd.h>
 #endif
 
-#if (__cplusplus < 202302L) && (!defined(_MSVC_LANG) || _MSVC_LANG < 202302L)
-#error Project-Zahlen requires a compiler that supports C++23.
+#if __cplusplus < 202400L
+#error "Project-Zahlen requires C++26"
 #endif
 
 #ifdef _MSC_VER
+#ifndef ZHLN_RESTRICT
 #define ZHLN_RESTRICT __restrict
+#endif
 #else
+#ifndef ZHLN_RESTRICT
 #define ZHLN_RESTRICT __restrict__
+#endif
 #endif
