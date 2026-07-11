@@ -11,6 +11,7 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Entity.hpp>
+#include <expected>
 #include <memory>
 
 namespace ZHLN {
@@ -45,8 +46,7 @@ class ZHLN_API Engine {
 
     void HandleDeviceLost() noexcept;
 
-    // Static Factory: Uses a raw out-pointer to avoid <string>/<expected> dependencies
-    static std::unique_ptr<Engine> Create(const EngineConfig& cfg, const char** outError = nullptr);
+    static std::expected<std::unique_ptr<Engine>, std::string> Create(const EngineConfig& cfg);
 
     [[nodiscard]] bool IsRunning() const;
     void               ProcessEvents();
@@ -78,8 +78,8 @@ class ZHLN_API Engine {
     void ProvokeDeviceLost();
 
   private:
-    void                        InitInternal(const EngineConfig& cfg, bool& outSuccess, const char** outError = nullptr);
-    std::unique_ptr<EngineImpl> _impl;
+    std::expected<void, std::string> InitInternal(const EngineConfig& cfg);
+    std::unique_ptr<EngineImpl>      _impl;
 };
 
 Engine* GetEngineContext();

@@ -376,13 +376,14 @@ std::expected<std::unique_ptr<Engine>, EngineError> InitializeEngine(CommandLine
         },
     };
 
-    const char* initError = nullptr;
-    auto        engine    = Engine::Create(config, &initError);
+    // Call the refactored factory method
+    auto engine_res = Engine::Create(config);
 
-    if (!engine) {
-        return std::unexpected(EngineError {.msg = (initError != nullptr) ? initError : "Unknown engine initialization error.", .code = EXIT_FAILURE});
+    if (!engine_res) {
+        return std::unexpected(EngineError {.msg = engine_res.error(), .code = EXIT_FAILURE});
     }
 
+    auto engine = std::move(engine_res.value());
     engine->GetWindow().Focus();
     return engine;
 }

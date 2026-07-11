@@ -95,10 +95,9 @@ Engine::Engine(): _impl(nullptr) {
 }
 
 Engine::Engine(const EngineConfig& cfg): _impl(nullptr) {
-    bool success = false;
-    InitInternal(cfg, success, nullptr);
-    if (!success) {
-        ZHLN::Panic("FATAL: Failed to initialize Engine via legacy constructor.");
+    auto res = InitInternal(cfg);
+    if (!res) {
+        ZHLN::Panic("FATAL: Failed to initialize Engine via legacy constructor: {}", res.error());
     }
 }
 
@@ -124,30 +123,28 @@ void Engine::HandleDeviceLost() noexcept {
 }
 
 Engine::Engine(const EngineConfig& cfg, bool& outSuccess): _impl(nullptr) {
-    InitInternal(cfg, outSuccess, nullptr);
+    auto res   = InitInternal(cfg);
+    outSuccess = res.has_value();
+    if (!res) {
+        ZHLN::Log("Engine initialization failed: {}", res.error());
+    }
 }
 
-std::unique_ptr<Engine> Engine::Create(const EngineConfig& cfg, const char** outError) {
+std::expected<std::unique_ptr<Engine>, std::string> Engine::Create(const EngineConfig& cfg) {
     auto engine = std::unique_ptr<Engine>(new (std::nothrow) Engine());
     if (!engine) {
-        if (outError != nullptr) {
-            *outError = "Failed to allocate memory for the Engine context.";
-        }
-        return nullptr;
+        return std::unexpected("Failed to allocate memory for the Engine context.");
     }
 
-    bool success = false;
-    engine->InitInternal(cfg, success, outError);
-
-    if (!success) {
-        return nullptr; // outError has been populated with the precise failure reason
+    auto res = engine->InitInternal(cfg);
+    if (!res) {
+        return std::unexpected(res.error());
     }
 
     return engine;
 }
 
-void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess, const char** outError) {
-    outSuccess      = false;
+std::expected<void, std::string> Engine::InitInternal(const EngineConfig& cfg) {
     g_CurrentEngine = this;
     s_GlobalEngine  = this;
 
@@ -171,11 +168,7 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess, const char*
             ZHLN::Log("GLFW failed to initialize. Falling back to native TTY Display Mode.");
             use_tty = true;
         } else {
-            if (outError != nullptr) {
-                *outError = "GLFW failed to initialize, and native KMS/TTY display mode is not "
-                            "supported on this platform.";
-            }
-            return;
+            return std::unexpected("GLFW failed to initialize, and native KMS/TTY display mode is not supported on this platform.");
         }
     }
 
@@ -184,11 +177,7 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess, const char*
 
     if (use_tty && _impl->window->GetTTYContext() == nullptr) {
         ZHLN::Log("[Engine] FATAL: TTY Input initialization failed (libseat session rejected).");
-        if (outError != nullptr) {
-            *outError = "TTY input initialization failed. Please make sure seatd.service is active "
-                        "or logind is running.";
-        }
-        return;
+        return std::unexpected("TTY input initialization failed. Please make sure seatd.service is active or logind is running.");
     }
 
     InitRenderDocAPI();
@@ -205,12 +194,7 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess, const char*
     // Instantiate through the thread-safe static factory method and capture state
     auto rc_res = RenderContext::Create(*_impl->window, cfg.render);
     if (!rc_res) {
-        if (outError != nullptr) {
-            static std::string s_InitError;
-            s_InitError = std::format("RenderContext initialization failed: {}", rc_res.error());
-            *outError   = s_InitError.c_str();
-        }
-        return;
+        return std::unexpected(std::format("RenderContext initialization failed: {}", rc_res.error()));
     }
     _impl->renderContext = std::move(rc_res.value());
 
@@ -232,7 +216,7 @@ void Engine::InitInternal(const EngineConfig& cfg, bool& outSuccess, const char*
         ZHLN::Log("WARNING: Could not find 'data/base.pak' in working directory or build/ folder!");
     }
 
-    outSuccess = true;
+    return {};
 }
 
 Engine::~Engine() {
