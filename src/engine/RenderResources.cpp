@@ -165,28 +165,13 @@ void RenderContext::Impl::CheckShaderWatchers() noexcept {
 auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> uint32_t {
     auto* const  device    = ctx.Device();
     const size_t imageSize = static_cast<size_t>(width) * height * 4;
+    uint32_t     mipLevels = std::bit_width(std::max(width, height));
 
-    uint32_t mipLevels = std::bit_width(std::max(width, height));
+    VkFormat          format = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+    VkImageUsageFlags usage  = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
-    const VkImageCreateInfo imgInfo = {
-        .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .pNext                 = nullptr,
-        .flags                 = 0,
-        .imageType             = VK_IMAGE_TYPE_2D,
-        .format                = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM,
-        .extent                = {.width = width, .height = height, .depth = 1},
-        .mipLevels             = mipLevels,
-        .arrayLayers           = 1,
-        .samples               = VK_SAMPLE_COUNT_1_BIT,
-        .tiling                = VK_IMAGE_TILING_OPTIMAL,
-        .usage                 = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
-        .queueFamilyIndexCount = 0,
-        .pQueueFamilyIndices   = nullptr,
-        .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED
-    };
-
-    auto gpuImage = Vk::Image::Create(allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+    // Abstracted: The verbose VkImageCreateInfo block is replaced here
+    auto gpuImage = Vk::ImageBuilder {}.Texture2D(width, height, format, usage, mipLevels).Build(allocator.Get());
 
     // Textures are bound back to the graphics queue staging buffer (Safe blitting & stages)
     auto stagingAlloc = stagingRingBuffer.Allocate(imageSize);
@@ -209,42 +194,24 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
         Vk::GenerateMipmaps(cmd, gpuImage.Handle(), width, height);
     });
 
-    auto     gpuView = isSRGB ? Vk::CreateView<VK_FORMAT_R8G8B8A8_SRGB>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels) :
-                                Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(
+    auto gpuView = isSRGB ? Vk::CreateView<VK_FORMAT_R8G8B8A8_SRGB>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels) :
+                            Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
 
-                                    device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels
-                                );
-    uint32_t index   = nextTextureIndex++;
+    uint32_t index = nextTextureIndex++;
     Vk::UpdateBindlessTextureSlot(device, index, gpuView.Get(), bindlessSets, 0);
     textureImages.push_back(std::move(gpuImage));
     textureViews.push_back(std::move(gpuView));
 
-    return index; // Return the allocated texture index to the caller
+    return index;
 }
 
 uint32_t RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height) {
-    auto* const  device   = ctx.Device();
-    const size_t faceSize = static_cast<size_t>(width) * height * 4;
+    auto* const       device   = ctx.Device();
+    const size_t      faceSize = static_cast<size_t>(width) * height * 4;
+    VkImageUsageFlags usage    = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
-    const VkImageCreateInfo imgInfo = {
-        .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .pNext                 = nullptr,
-        .flags                 = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
-        .imageType             = VK_IMAGE_TYPE_2D,
-        .format                = VK_FORMAT_R8G8B8A8_UNORM,
-        .extent                = {.width = width, .height = height, .depth = 1},
-        .mipLevels             = 1,
-        .arrayLayers           = 6,
-        .samples               = VK_SAMPLE_COUNT_1_BIT,
-        .tiling                = VK_IMAGE_TILING_OPTIMAL,
-        .usage                 = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
-        .queueFamilyIndexCount = 0,
-        .pQueueFamilyIndices   = nullptr,
-        .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
-    };
-
-    auto gpuImage = Vk::Image::Create(allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+    // Abstracted: Simple, semantic cubemap allocation
+    auto gpuImage = Vk::ImageBuilder {}.TextureCube(width, VK_FORMAT_R8G8B8A8_UNORM, usage, 1).Build(allocator.Get());
 
     // Textures are bound back to the graphics queue staging buffer (Safe blitting & stages)
     auto stagingAlloc = stagingRingBuffer.Allocate(faceSize * 6);
@@ -255,11 +222,10 @@ uint32_t RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceD
     Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, gpuImage.Handle());
 
-        // 1. Generate the 6 cubemap regions on the stack (zero-overhead compile-time loop)
+        // Generate the 6 cubemap regions on the stack (zero-overhead compile-time loop)
         auto regions = Vk::CreateCopyRegions<6>(stagingAlloc.offset, faceSize, {.width = width, .height = height, .depth = {}});
 
-        // 2. Dispatch the copy using the new type-safe overload (layout defaults to
-        // TRANSFER_DST)
+        // Dispatch the copy using the new type-safe overload
         Vk::CopyBufferToImage(cmd, stagingAlloc.buffer, gpuImage.Handle(), regions);
 
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());

@@ -209,6 +209,101 @@ auto Image::Create(VmaAllocator allocator, const VkImageCreateInfo& info, VmaMem
     return res;
 }
 
+ImageBuilder::ImageBuilder() noexcept {
+    _info = {
+        .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .pNext                 = nullptr,
+        .flags                 = 0,
+        .imageType             = VK_IMAGE_TYPE_2D,
+        .format                = VK_FORMAT_UNDEFINED,
+        .extent                = {.width = 0, .height = 0, .depth = 0},
+        .mipLevels             = 1,
+        .arrayLayers           = 1,
+        .samples               = VK_SAMPLE_COUNT_1_BIT,
+        .tiling                = VK_IMAGE_TILING_OPTIMAL,
+        .usage                 = 0,
+        .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = 0,
+        .pQueueFamilyIndices   = nullptr,
+        .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED
+    };
+}
+
+auto ImageBuilder::Type(VkImageType type) noexcept -> ImageBuilder& {
+    _info.imageType = type;
+    return *this;
+}
+
+auto ImageBuilder::Format(VkFormat format) noexcept -> ImageBuilder& {
+    _info.format = format;
+    return *this;
+}
+
+auto ImageBuilder::Dimensions(uint32_t width, uint32_t height, uint32_t depth) noexcept -> ImageBuilder& {
+    _info.extent = {.width = width, .height = height, .depth = depth};
+    return *this;
+}
+
+auto ImageBuilder::Mips(uint32_t levels) noexcept -> ImageBuilder& {
+    _info.mipLevels = levels;
+    return *this;
+}
+
+auto ImageBuilder::Layers(uint32_t layers) noexcept -> ImageBuilder& {
+    _info.arrayLayers = layers;
+    return *this;
+}
+
+auto ImageBuilder::Samples(VkSampleCountFlagBits samples) noexcept -> ImageBuilder& {
+    _info.samples = samples;
+    return *this;
+}
+
+auto ImageBuilder::Tiling(VkImageTiling tiling) noexcept -> ImageBuilder& {
+    _info.tiling = tiling;
+    return *this;
+}
+
+auto ImageBuilder::Usage(VkImageUsageFlags usage) noexcept -> ImageBuilder& {
+    _info.usage = usage;
+    return *this;
+}
+
+auto ImageBuilder::SharingMode(VkSharingMode mode) noexcept -> ImageBuilder& {
+    _info.sharingMode = mode;
+    return *this;
+}
+
+auto ImageBuilder::Flags(VkImageCreateFlags flags) noexcept -> ImageBuilder& {
+    _info.flags = flags;
+    return *this;
+}
+
+auto ImageBuilder::Texture2D(uint32_t width, uint32_t height, VkFormat format, VkImageUsageFlags usage, uint32_t mips) noexcept -> ImageBuilder& {
+    _info.imageType   = VK_IMAGE_TYPE_2D;
+    _info.format      = format;
+    _info.extent      = {.width = width, .height = height, .depth = 1};
+    _info.mipLevels   = mips;
+    _info.arrayLayers = 1;
+    _info.usage       = usage;
+    return *this;
+}
+
+auto ImageBuilder::TextureCube(uint32_t size, VkFormat format, VkImageUsageFlags usage, uint32_t mips) noexcept -> ImageBuilder& {
+    _info.flags       = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+    _info.imageType   = VK_IMAGE_TYPE_2D;
+    _info.format      = format;
+    _info.extent      = {.width = size, .height = size, .depth = 1};
+    _info.mipLevels   = mips;
+    _info.arrayLayers = 6;
+    _info.usage       = usage;
+    return *this;
+}
+
+auto ImageBuilder::Build(VmaAllocator allocator, VmaMemoryUsage memUsage) const noexcept -> Image {
+    return Image::Create(allocator, _info, memUsage);
+}
+
 // ============================================================================
 // StagingRingBuffer Implementation
 // ============================================================================
