@@ -13,60 +13,73 @@
 namespace ZHLN {
 
 std::expected<void, std::string> RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) {
+    auto make_expected = [](bool success, std::string_view err_msg) -> std::expected<void, std::string> {
+        if (success) {
+            return {};
+        }
+        return std::unexpected(std::string(err_msg));
+    };
+
     auto shaders = Vk::ShaderStages::Create(device, shaderData, "VSMain", "PSShadow");
-    if (!shaders.Valid()) {
-        return std::unexpected("Failed to compile ShaderStages for Shadow Pipeline.");
-    }
 
-    auto shadowPipelineLayout_res = Vk::PipelineLayoutBuilder(device)
-                                        .AddDescriptorSetLayout(bindlessLayout.Get())
-                                        .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
-                                        .Build();
+    // 1. Lift shader validation into the expected monad
+    return make_expected(shaders.Valid(), "Failed to compile ShaderStages for Shadow Pipeline.").and_then([&]() {
+        // 2. Build the pipeline layout
+        return Vk::PipelineLayoutBuilder(device)
+            .AddDescriptorSetLayout(bindlessLayout.Get())
+            .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
+            .Build()
+            .transform_error([](VkResult err) { return std::format("Failed to compile Shadow Pipeline Layout: {}", Vk::ResultString(err)); })
+            .and_then([&](auto&& layout) -> std::expected<void, std::string> {
+                shadowPipelineLayout = std::forward<decltype(layout)>(layout);
 
-    if (!shadowPipelineLayout_res) {
-        return std::unexpected(std::format("Failed to compile Shadow Pipeline Layout: {}", Vk::ResultString(shadowPipelineLayout_res.error())));
-    }
-    shadowPipelineLayout = std::move(shadowPipelineLayout_res.value());
-
-    auto shadowPipelineRes =
-        Vk::PipelineBuilder {}.Shaders(shaders).Layout(shadowPipelineLayout.Get()).DepthOnly().DepthFormat(VK_FORMAT_D32_SFLOAT).CullNone().Build(device);
-
-    if (!shadowPipelineRes) {
-        return std::unexpected("Failed to compile or build Shadow Pipeline.");
-    }
-    shadowPipeline = std::move(*shadowPipelineRes);
-    return {};
+                // 3. Compile the graphics pipeline and transfer ownership on success
+                return Vk::PipelineBuilder {}
+                    .Shaders(shaders)
+                    .Layout(shadowPipelineLayout.Get())
+                    .DepthOnly()
+                    .DepthFormat(VK_FORMAT_D32_SFLOAT)
+                    .CullNone()
+                    .Build(device)
+                    .transform_error([](Vk::PipelineBuilderResult) { return std::string("Failed to compile or build Shadow Pipeline."); })
+                    .transform([&](auto&& pipeline) { shadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
+            });
+    });
 }
 
 std::expected<void, std::string> RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) {
+    auto make_expected = [](bool success, std::string_view err_msg) -> std::expected<void, std::string> {
+        if (success) {
+            return {};
+        }
+        return std::unexpected(std::string(err_msg));
+    };
+
     auto shaders = Vk::ShaderStages::Create(device, shaderData);
-    if (!shaders.Valid()) {
-        return std::unexpected("Failed to compile ShaderStages for Punctual Shadow Pipeline.");
-    }
 
-    auto punctualShadowPipelineLayout_res =
-        Vk::PipelineLayoutBuilder(device).AddDescriptorSetLayout(bindlessLayout.Get()).AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT, sizeof(uint32_t)).Build();
+    // 1. Lift shader validation into the expected monad
+    return make_expected(shaders.Valid(), "Failed to compile ShaderStages for Punctual Shadow Pipeline.").and_then([&]() {
+        // 2. Build the pipeline layout
+        return Vk::PipelineLayoutBuilder(device)
+            .AddDescriptorSetLayout(bindlessLayout.Get())
+            .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT, sizeof(uint32_t))
+            .Build()
+            .transform_error([](VkResult err) { return std::format("Failed to compile Punctual Shadow Pipeline Layout: {}", Vk::ResultString(err)); })
+            .and_then([&](auto&& layout) -> std::expected<void, std::string> {
+                punctualShadowPipelineLayout = std::forward<decltype(layout)>(layout);
 
-    if (!punctualShadowPipelineLayout_res) {
-        return std::unexpected(
-            std::format("Failed to compile Punctual Shadow Pipeline Layout: {}", Vk::ResultString(punctualShadowPipelineLayout_res.error()))
-        );
-    }
-    punctualShadowPipelineLayout = std::move(punctualShadowPipelineLayout_res.value());
-
-    auto punctualShadowPipelineRes = Vk::PipelineBuilder {}
-                                         .Shaders(shaders)
-                                         .Layout(punctualShadowPipelineLayout.Get())
-                                         .DepthOnly()
-                                         .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                                         .CullNone()
-                                         .Build(device);
-
-    if (!punctualShadowPipelineRes) {
-        return std::unexpected("Failed to compile or build Punctual Shadow Pipeline.");
-    }
-    punctualShadowPipeline = std::move(*punctualShadowPipelineRes);
-    return {};
+                // 3. Compile the graphics pipeline and transfer ownership on success
+                return Vk::PipelineBuilder {}
+                    .Shaders(shaders)
+                    .Layout(punctualShadowPipelineLayout.Get())
+                    .DepthOnly()
+                    .DepthFormat(VK_FORMAT_D32_SFLOAT)
+                    .CullNone()
+                    .Build(device)
+                    .transform_error([](Vk::PipelineBuilderResult) { return std::string("Failed to compile or build Punctual Shadow Pipeline."); })
+                    .transform([&](auto&& pipeline) { punctualShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
+            });
+    });
 }
 
 auto RenderContext::GetRendererName() const -> const char* {
@@ -105,48 +118,59 @@ std::expected<Material, std::string> RenderContext::CreateMaterial(const Pipelin
     ZHLN_ShaderDesc v_desc  = {.code = Vk::AsSpirV(desc.vertexShaderData), .size = desc.vertexShaderSize, .entry_point = nullptr};
     ZHLN_ShaderDesc f_desc  = {.code = Vk::AsSpirV(desc.fragShaderData), .size = desc.fragShaderSize, .entry_point = nullptr};
     auto            shaders = Vk::ShaderStages::Create(_impl->ctx.Device(), v_desc, f_desc);
-    if (!shaders.Valid()) {
-        return std::unexpected("Failed to compile or link Material shader stages.");
-    }
+
+    auto make_expected = [](bool success, std::string_view err_msg) -> std::expected<void, std::string> {
+        if (success) {
+            return {};
+        }
+        return std::unexpected(std::string(err_msg));
+    };
+
     auto* impl = _impl.get();
 
-    // Compile the pipeline layout using the updated std::expected pattern
-    auto layout_res = Vk::PipelineLayoutBuilder(impl->ctx.Device())
-                          .AddDescriptorSetLayout(impl->bindlessLayout.Get())
-                          .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
-                          .Build();
+    // 1. Validate compiled shader modules
+    return make_expected(shaders.Valid(), "Failed to compile or link Material shader stages.")
+        .and_then([&]() {
+            // 2. Build the pipeline layout
+            return Vk::PipelineLayoutBuilder(impl->ctx.Device())
+                .AddDescriptorSetLayout(impl->bindlessLayout.Get())
+                .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
+                .Build()
+                .transform_error([](VkResult err) { return std::format("Failed to compile Material Pipeline Layout: {}", Vk::ResultString(err)); });
+        })
+        .and_then([&](auto&& layout) -> std::expected<Material, std::string> {
+            // 3. Configure the graphics pipeline builder options
+            auto pipeline = Vk::PipelineBuilder {}.Shaders(shaders).Layout(layout.Get()).DepthFormat(VK_FORMAT_D32_SFLOAT);
 
-    if (!layout_res) {
-        return std::unexpected(std::format("Failed to compile Material Pipeline Layout: {}", Vk::ResultString(layout_res.error())));
-    }
-    auto layout = std::move(*layout_res);
+            if (desc.doubleSided) {
+                pipeline.CullNone();
+            } else {
+                pipeline.CullBack();
+            }
 
-    auto pipeline = Vk::PipelineBuilder {}.Shaders(shaders).Layout(layout.Get()).DepthFormat(VK_FORMAT_D32_SFLOAT);
+            if (desc.alphaBlend) {
+                pipeline.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT}); // Output straight to the Lit pass
+                pipeline.DepthWrite(false);                             // DO NOT write to depth, to preserve opaque occlusion
+                pipeline.AlphaBlend();
+            } else {
+                pipeline.ColorFormats(ActiveGBuffer::array);
+            }
 
-    if (desc.doubleSided) {
-        pipeline.CullNone();
-    } else {
-        pipeline.CullBack();
-    }
+            if (desc.isLineList) {
+                pipeline.Topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST);
+            }
 
-    if (desc.alphaBlend) {
-        pipeline.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT}); // Output straight to the Lit pass
-        pipeline.DepthWrite(false);                             // DO NOT write to depth, to preserve opaque occlusion
-        pipeline.AlphaBlend();
-    } else {
-        pipeline.ColorFormats(ActiveGBuffer::array);
-    }
-
-    if (desc.isLineList) {
-        pipeline.Topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST);
-    }
-
-    auto finalPipelineRes = pipeline.Build(impl->ctx.Device());
-    if (!finalPipelineRes) {
-        return std::unexpected("Failed to build Material Graphics Pipeline.");
-    }
-
-    return Material {.pipeline = impl->materialPool.Create(std::move(*finalPipelineRes), std::move(layout)), .alphaMode = desc.alphaBlend ? 2u : 0u};
+            // 4. Compile the graphics pipeline and return the initialized Material on success
+            return pipeline.Build(impl->ctx.Device())
+                .transform_error([](Vk::PipelineBuilderResult) { return std::string("Failed to build Material Graphics Pipeline."); })
+                .transform([&](auto&& compiledPipeline) {
+                    return Material {
+                        .pipeline =
+                            impl->materialPool.Create(std::forward<decltype(compiledPipeline)>(compiledPipeline), std::forward<decltype(layout)>(layout)),
+                        .alphaMode = desc.alphaBlend ? 2u : 0u
+                    };
+                });
+        });
 }
 
 void RenderContext::Impl::CheckShaderWatchers() noexcept {
@@ -394,37 +418,39 @@ uint32_t RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas)
     return offset;
 }
 
-[[nodiscard]] std::expected<void, std::string> RenderContext::SetShadowResolution(uint32_t resolution) {
+std::expected<void, std::string> RenderContext::SetShadowResolution(uint32_t resolution) {
     auto* impl   = _impl.get();
     auto* device = impl->ctx.Device();
-    auto  res    = Vk::WaitIdle(device);
-    if (res != VK_SUCCESS) {
-        return std::unexpected(std::format("Failed to wait for idle on resolution set: {}", Vk::ResultString(res.value())));
-    }
 
-    impl->graphResources.shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-        impl->allocator, impl->ctx, {.width = resolution, .height = resolution},
-        {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
-    );
+    // 1. Wait for GPU idle monadically to prevent pipeline hazards during reallocation
+    return Vk::WaitIdle(device)
+        .transform_error([](const std::string& err) { return std::format("Failed to wait for idle on resolution set: {}", err); })
+        // 2. Perform the target reallocation and layout transitions on success
+        .transform([&](VkResult /*success*/) {
+            impl->graphResources.shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+                impl->allocator, impl->ctx, {.width = resolution, .height = resolution},
+                {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
+            );
 
-    impl->shadowCascadeViews.clear();
-    impl->shadowCascadeViews.resize(RenderContext::Impl::NUM_CASCADES);
-    for (uint32_t i = 0; i < RenderContext::Impl::NUM_CASCADES; ++i) {
-        impl->shadowCascadeViews[i] = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(impl->ctx.Device(), impl->graphResources.shadowMap.image.Handle(), i, 1);
-    }
+            impl->shadowCascadeViews.clear();
+            impl->shadowCascadeViews.resize(RenderContext::Impl::NUM_CASCADES);
+            for (uint32_t i = 0; i < RenderContext::Impl::NUM_CASCADES; ++i) {
+                impl->shadowCascadeViews[i] =
+                    Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(impl->ctx.Device(), impl->graphResources.shadowMap.image.Handle(), i, 1);
+            }
 
-    Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) {
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-            cmd, impl->graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
-        );
+            Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) {
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+                    cmd, impl->graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
+                );
 
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-            cmd, impl->graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
-        );
-    });
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+                    cmd, impl->graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
+                );
+            });
 
-    ZHLN::Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);
-    return {};
+            ZHLN::Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);
+        });
 }
 
 void RenderContext::SetAAState(const AAState& state) {

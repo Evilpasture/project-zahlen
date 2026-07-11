@@ -5,7 +5,7 @@
 #include <cstdint>
 namespace ZHLN {
 
-void RenderContext::Impl::BuildProceduralBakePipeline() {
+std::expected<void, std::string> RenderContext::Impl::BuildProceduralBakePipeline() {
     Vk::AllocateSingleBufferedSet<BakeLayout>(ctx.Device(), proceduralBakeDescLayout, proceduralBakeDescPool, proceduralBakeSet);
 
     VkPushConstantRange push = {
@@ -31,14 +31,15 @@ void RenderContext::Impl::BuildProceduralBakePipeline() {
         specInfos[i] = {.mapEntryCount = 1, .pMapEntries = specEntries.data(), .dataSize = sizeof(int), .pData = &variants[i]};
     }
 
-    ZHLN::PanicIf(
-        !proceduralBakePass.BuildVariants(ctx.Device(), proceduralBakeDescLayout.Get(), shaderDesc, specInfos, &push, 1),
-        "[Shader] Failed to build specialized Procedural Bake Compute variants!"
-    );
+    if (!proceduralBakePass.BuildVariants(ctx.Device(), proceduralBakeDescLayout.Get(), shaderDesc, specInfos, &push, 1)) {
+        return std::unexpected("[Shader] Failed to build specialized Procedural Bake Compute variants!");
+    }
+
     ZHLN::Log(
         "[Shader] GPU Procedural Bake Compute Pipeline initialized with specialization "
         "variants."
     );
+    return {};
 }
 
 uint32_t RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion) {
