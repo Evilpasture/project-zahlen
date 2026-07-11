@@ -294,18 +294,16 @@ template <typename LayoutT>
     uint32_t                        pushCount     = 0,
     bool                            additive      = false
 ) noexcept {
-    auto shaders = self->LoadAndCreateShaders(vs, ps);
-    if (!shaders.Valid()) {
-        return std::unexpected(std::format("Failed to load or compile shaders for '{}'", passName));
-    }
-
-    if (pass.Build(self->ctx.Device(), shaders, colorFormats, pushConstants, pushCount, additive)) {
-        return {};
-    }
-    return std::unexpected(std::format("{} Pipeline failed to build.", passName));
+    return self->LoadAndCreateShaders(vs, ps)
+        .transform_error([=](const std::string& err) { return std::format("Failed to load or compile shaders for '{}': {}", passName, err); })
+        .and_then([&](auto&& shaders) -> std::expected<void, std::string> {
+            if (pass.Build(self->ctx.Device(), shaders, colorFormats, pushConstants, pushCount, additive)) {
+                return {};
+            }
+            return std::unexpected(std::format("{} Pipeline failed to build.", passName));
+        });
 }
 
-// Generic helper for specialized pipeline variants (e.g. Reflections)
 template <typename LayoutT>
 [[nodiscard]] std::expected<void, std::string> BuildPassVariants(
     RenderContext::Impl*                  self,
@@ -319,15 +317,8 @@ template <typename LayoutT>
     uint32_t                              pushCount     = 0,
     bool                                  additive      = false
 ) noexcept {
-    // 1. Initialize and validate the shader stages inside an IIFE
-    return std::expected<Vk::ShaderStages, std::string>([&]() -> std::expected<Vk::ShaderStages, std::string> {
-               auto shaders = self->LoadAndCreateShaders(vs, ps);
-               if (shaders.Valid()) {
-                   return shaders;
-               }
-               return std::unexpected(std::format("Failed to load or compile shaders for '{}'", passName));
-           }())
-        // 2. Build the specialized pipeline variants with the validated shaders
+    return self->LoadAndCreateShaders(vs, ps)
+        .transform_error([=](const std::string& err) { return std::format("Failed to load or compile shaders for '{}': {}", passName, err); })
         .and_then([&](auto&& shaders) -> std::expected<void, std::string> {
             if (pass.BuildVariants(self->ctx.Device(), shaders, colorFormats, pushConstants, pushCount, specInfos, additive)) {
                 return {};
@@ -338,7 +329,7 @@ template <typename LayoutT>
 
 } // namespace
 
-Vk::ShaderStages RenderContext::Impl::LoadAndCreateShaders(ShaderStageSource vs, ShaderStageSource ps) const noexcept {
+std::expected<Vk::ShaderStages, std::string> RenderContext::Impl::LoadAndCreateShaders(ShaderStageSource vs, ShaderStageSource ps) const noexcept {
     const void*           vs_code = nullptr;
     size_t                vs_size = 0;
     const void*           ps_code = nullptr;
@@ -349,25 +340,38 @@ Vk::ShaderStages RenderContext::Impl::LoadAndCreateShaders(ShaderStageSource vs,
     LoadShaderData(vs, vs_code, vs_size, disk_vs);
     LoadShaderData(ps, ps_code, ps_size, disk_ps);
 
-    return Vk::ShaderStages::Create(
+    auto stages = Vk::ShaderStages::Create(
         ctx.Device(), {.code = Vk::AsSpirV(vs_code), .size = vs_size, .entry_point = vs.entryPoint},
         {.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint}
     );
+
+    if (!stages.Valid()) {
+        return std::unexpected(std::format("Failed to compile or load shader stages for vs '{}' and ps '{}'", vs.path, ps.path));
+    }
+
+    return stages;
 }
 
-Vk::Pipeline RenderContext::Impl::LoadAndCreateComputeShader(ShaderStageSource cs, VkPipelineLayout layout) const noexcept {
+std::expected<Vk::Pipeline, std::string> RenderContext::Impl::LoadAndCreateComputeShader(ShaderStageSource cs, VkPipelineLayout layout) const noexcept {
     const void*           cs_code = nullptr;
     size_t                cs_size = 0;
     std::vector<uint32_t> disk_cs;
 
     LoadShaderData(cs, cs_code, cs_size, disk_cs);
 
-    auto p_res = Vk::ComputePipelineBuilder().Shader(Vk::AsSpirV(cs_code), cs_size, cs.entryPoint).Layout(layout).Build(ctx.Device());
-
-    if (!p_res) {
-        return {};
-    }
-    return std::move(*p_res);
+    return Vk::ComputePipelineBuilder()
+        .Shader(Vk::AsSpirV(cs_code), cs_size, cs.entryPoint)
+        .Layout(layout)
+        .Build(ctx.Device())
+        .transform_error([&](Vk::PipelineBuilderResult err) {
+            std::string_view errMsg = "Unknown pipeline builder error.";
+            if (err == Vk::PipelineBuilderResult::MissingShaders) {
+                errMsg = "Missing or invalid shader code.";
+            } else if (err == Vk::PipelineBuilderResult::MissingLayout) {
+                errMsg = "Missing pipeline layout.";
+            }
+            return std::format("Failed to build compute pipeline for '{}': {}", cs.path, errMsg);
+        });
 }
 
 void RenderContext::Impl::WatchPipeline(const char* vsPath, const char* psPath, std::function<void()> rebuild_fn) noexcept {
@@ -485,18 +489,14 @@ std::expected<void, std::string> RenderContext::Impl::BuildSkinningPipeline() {
 
     auto* rawLayout = ZHLN_CreatePipelineLayout(ctx.Device(), &layout_desc);
 
-    // 1. Lift raw layout validation into the expected monad
     return make_expected(rawLayout != VK_NULL_HANDLE, "Failed to create Skinning Pipeline Layout.").and_then([&]() -> std::expected<void, std::string> {
         skinningPass.pipelineLayout = Vk::PipelineLayout(ctx.Device(), rawLayout);
 
-        auto pipeline = LoadAndCreateComputeShader(
-            {.path = SHADER_SKINNING_HLSL_CS_PATH, .fallback = Resource::skinning_comp, .entryPoint = "CSMain"}, skinningPass.pipelineLayout.Get()
-        );
-
-        // 2. Validate and transfer the compiled pipeline ownership on success
-        return make_expected(pipeline.Valid(), "GPU Skinning Compute pipeline failed to build.").transform([&]() {
-            skinningPass.pipeline = std::move(pipeline);
-        });
+        return LoadAndCreateComputeShader(
+                   {.path = SHADER_SKINNING_HLSL_CS_PATH, .fallback = Resource::skinning_comp, .entryPoint = "CSMain"}, skinningPass.pipelineLayout.Get()
+        )
+            .transform_error([](const std::string& err) { return std::format("GPU Skinning Compute pipeline failed to build: {}", err); })
+            .transform([&](auto&& pipeline) { skinningPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
     });
 }
 
@@ -1282,13 +1282,11 @@ std::expected<void, std::string> RenderContext::Impl::BuildHangGpuPipeline() {
 
     hangGpuPass.pipelineLayout = Vk::PipelineLayout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &pLayoutDesc));
 
-    hangGpuPass.pipeline = LoadAndCreateComputeShader(
-        {.path = SHADER_HANG_GPU_HLSL_CS_PATH, .fallback = Resource::hang_gpu_comp, .entryPoint = "CSMain"}, hangGpuPass.pipelineLayout.Get()
-    );
-    if (hangGpuPass.pipeline.Valid()) {
-        return {};
-    }
-    return std::unexpected("Failed to build Hang GPU compute pipeline.");
+    return LoadAndCreateComputeShader(
+               {.path = SHADER_HANG_GPU_HLSL_CS_PATH, .fallback = Resource::hang_gpu_comp, .entryPoint = "CSMain"}, hangGpuPass.pipelineLayout.Get()
+    )
+        .transform_error([](const std::string& err) { return std::format("Failed to build Hang GPU compute pipeline: {}", err); })
+        .transform([&](auto&& pipeline) { hangGpuPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
 }
 
 } // namespace ZHLN

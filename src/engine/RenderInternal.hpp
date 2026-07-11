@@ -861,9 +861,9 @@ struct RenderContext::Impl {
     void InitSkeletalAnimationResources();
     void InitLightingLUTs();
 
-    [[nodiscard]] Vk::ShaderStages LoadAndCreateShaders(ShaderStageSource vs, ShaderStageSource ps) const noexcept;
+    [[nodiscard]] std::expected<Vk::ShaderStages, std::string> LoadAndCreateShaders(ShaderStageSource vs, ShaderStageSource ps) const noexcept;
 
-    [[nodiscard]] Vk::Pipeline LoadAndCreateComputeShader(ShaderStageSource cs, VkPipelineLayout layout) const noexcept;
+    [[nodiscard]] std::expected<Vk::Pipeline, std::string> LoadAndCreateComputeShader(ShaderStageSource cs, VkPipelineLayout layout) const noexcept;
 
     void WatchPipeline(const char* vsPath, const char* psPath, std::function<void()> rebuild_fn) noexcept;
 
