@@ -187,7 +187,7 @@ void RenderContext::Impl::DispatchSkinningPasses() {
             };
 
             skinningPass.PushConstants(cmd, pcs);
-            skinningPass.Dispatch(cmd, (posMesh->vertexCount + 63) / 64, 1, 1);
+            Vk::ComputePass::Dispatch(cmd, (posMesh->vertexCount + 63) / 64, 1, 1);
         }
     }
 
@@ -905,7 +905,7 @@ void RenderContext::Impl::ProvokeDeviceLostInternal() const {
 
     if (current_cmd != VK_NULL_HANDLE) {
         hangGpuPass.Bind(current_cmd);
-        hangGpuPass.Dispatch(current_cmd, 512, 512, 1);
+        Vk::ComputePass::Dispatch(current_cmd, 512, 512, 1);
     } else {
         // Grab from pre-allocated ring and execute blocking CPU stall until GPU page faults
         Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](auto cmd) {

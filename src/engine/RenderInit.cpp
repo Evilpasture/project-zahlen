@@ -200,13 +200,13 @@ std::vector<std::string_view> GetPlatformInstanceExtensions(Window& window, bool
         } else {
             inst_exts.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
             if constexpr (isWindows) {
-                inst_exts.push_back("VK_KHR_win32_surface");
+                inst_exts.emplace_back("VK_KHR_win32_surface");
             } else if constexpr (isMac) {
-                inst_exts.push_back("VK_EXT_metal_surface");
+                inst_exts.emplace_back("VK_EXT_metal_surface");
             } else {
-                inst_exts.push_back("VK_KHR_xcb_surface");
-                inst_exts.push_back("VK_KHR_xlib_surface");
-                inst_exts.push_back("VK_KHR_wayland_surface");
+                inst_exts.emplace_back("VK_KHR_xcb_surface");
+                inst_exts.emplace_back("VK_KHR_xlib_surface");
+                inst_exts.emplace_back("VK_KHR_wayland_surface");
             }
         }
         inst_exts.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
@@ -218,7 +218,7 @@ std::vector<std::string_view> GetPlatformInstanceExtensions(Window& window, bool
     }
 
     if constexpr (isMac) {
-        inst_exts.push_back("VK_KHR_portability_enumeration");
+        inst_exts.emplace_back("VK_KHR_portability_enumeration");
     }
 
     return inst_exts;
@@ -385,7 +385,7 @@ void RenderContext::Impl::WatchPipeline(const char* vsPath, const char* psPath, 
     }
 }
 
-RenderContext::RenderContext(PrivateToken, std::unique_ptr<Impl> impl) noexcept: _impl(std::move(impl)) {
+RenderContext::RenderContext(PrivateToken /*unused*/, std::unique_ptr<Impl> impl) noexcept: _impl(std::move(impl)) {
 }
 
 std::expected<std::unique_ptr<RenderContext>, std::string> RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept {
