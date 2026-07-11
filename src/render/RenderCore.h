@@ -18,7 +18,9 @@
 #include <stdbool.h> // We use booleans as keyword but good to include nevertheless
 #include <vulkan/vulkan_core.h>
 
+#ifndef ZHLN_RESTRICT
 #define ZHLN_RESTRICT __restrict
+#endif
 
 #ifdef __cplusplus
 extern "C" {
