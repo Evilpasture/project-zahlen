@@ -758,7 +758,7 @@ auto main() -> int {
 
     // --- Frame loop resources ---
     auto sync  = ZHLN::Vk::FrameSync<3>::Create(ctx.Device());
-    auto pools = ZHLN::Vk::CommandPools<3>::Create(ctx.Device(), {.queue_family = ctx.PhysicalInfo().graphics_family, .buffers_per_pool = 1});
+    auto pools = ZHLN::Vk::CommandPools<3>::Create(ctx.Device(), {.queueFamily = ctx.PhysicalInfo().graphics_family, .buffersPerPool = 1});
 
     uint32_t frame_index = 0;
     win.resized          = true;

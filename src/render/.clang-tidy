@@ -81,8 +81,7 @@ CheckOptions:
     value:           'camelBack'
   
   # --- VULKAN COMPATIBILITY (sType, pNext) ---
-  # Allows camelBack to match the Vulkan SDK naming
-  - key:             readability-identifier-naming.StructMemberCase
+  - key:             readability-identifier-naming.PublicMemberCase
     value:           'camelBack'
 
   # --- READABILITY ---

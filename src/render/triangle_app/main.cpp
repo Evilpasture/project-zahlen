@@ -48,7 +48,7 @@ auto main() -> int {
     auto                    _ = pres.Init(ctx, allocator, surface.Get(), win.width, win.height, true);
 
     auto sync  = Vk::FrameSync<3>::Create(ctx.Device());
-    auto pools = Vk::CommandPools<3>::Create(ctx.Device(), {.queue_family = ctx.PhysicalInfo().graphics_family, .buffers_per_pool = 1});
+    auto pools = Vk::CommandPools<3>::Create(ctx.Device(), {.queueFamily = ctx.PhysicalInfo().graphics_family, .buffersPerPool = 1});
 
     // 4. Fluid Pipeline Generation
     auto shaders = Vk::ShaderStages::FromFiles(ctx.Device(), "triangle.hlsl.VSMain.spv", "triangle.hlsl.PSMain.spv", "VSMain", "PSMain");

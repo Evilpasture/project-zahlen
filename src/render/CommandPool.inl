@@ -63,8 +63,8 @@ template <uint32_t N, Vk::QueueType QType>
 inline auto CommandPools<N, QType>::Create(const VkDevice device, const Description& desc) noexcept -> CommandPools {
     CommandPools cp;
     for (auto& pool: cp._pools) {
-        pool = CommandPool<QType>(device, desc.queue_family);
-        if (!pool || !pool.Allocate(desc.buffers_per_pool)) {
+        pool = CommandPool<QType>(device, desc.queueFamily);
+        if (!pool || !pool.Allocate(desc.buffersPerPool)) {
             return {};
         }
     }

@@ -146,8 +146,8 @@ template <VkImageLayout TargetLayout, typename... Resources>
             using Traits                       = detail::ResourceTraits<std::decay_t<decltype(res)>>;
             constexpr VkImageLayout old_layout = Traits::old_layout;
 
-            auto src_sync = detail::GetSyncInfo(old_layout, true);
-            auto dst_sync = detail::GetSyncInfo(TargetLayout, false);
+            auto src_sync = LayoutTraits<old_layout>::GetSyncInfo(true);
+            auto dst_sync = LayoutTraits<TargetLayout>::GetSyncInfo(false);
 
             barriers[idx++] = VkImageMemoryBarrier2 {
                 .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,

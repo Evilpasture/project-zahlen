@@ -61,8 +61,8 @@ template <uint32_t N, Vk::QueueType QType = Vk::QueueType::Graphics>
 class CommandPools {
   public:
     struct Description {
-        uint32_t queue_family     = 0;
-        uint32_t buffers_per_pool = 1;
+        uint32_t queueFamily    = 0;
+        uint32_t buffersPerPool = 1;
     };
 
     CommandPools() noexcept = default;

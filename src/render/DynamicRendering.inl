@@ -9,65 +9,71 @@ namespace ZHLN::Vk {
 // Centralized Layout State Translation Engine
 // ============================================================================
 
-namespace detail {
-
-struct LayoutSyncInfo {
-    VkPipelineStageFlags2 stage;
-    VkAccessFlags2        access;
-};
-
-[[nodiscard]] constexpr auto GetSyncInfo(VkImageLayout layout, bool isSource) noexcept -> LayoutSyncInfo {
-    switch (layout) {
-        case VK_IMAGE_LAYOUT_UNDEFINED:
-            return {.stage = VK_PIPELINE_STAGE_2_NONE, .access = 0};
-
-        case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
-            return {
-                .stage  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                .access = isSource ? VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT : (VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT)
-            };
-
-        case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL:
-        case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
-            return {
-                .stage  = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                .access = isSource ? VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT :
-                                     (VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT)
-            };
-
-        case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
-            return {.stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, .access = VK_ACCESS_2_SHADER_READ_BIT};
-
-        case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
-            return {.stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, .access = 0};
-
-        case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
-            return {.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT, .access = VK_ACCESS_2_TRANSFER_WRITE_BIT};
-
-        case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
-            return {.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT, .access = VK_ACCESS_2_TRANSFER_READ_BIT};
-
-        case VK_IMAGE_LAYOUT_GENERAL:
-            return {
-                .stage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                .access = isSource ? (VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT) : (VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT)
-            };
-
-        default:
-            return {.stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, .access = isSource ? VK_ACCESS_2_MEMORY_WRITE_BIT : VK_ACCESS_2_MEMORY_READ_BIT};
-    }
-}
-
-} // namespace detail
-
 template <VkImageLayout Layout>
 struct LayoutTraits {
-    static constexpr auto kInfo = detail::GetSyncInfo(Layout, false);
+  private:
+    struct LayoutSyncInfo {
+        VkPipelineStageFlags2 stage;
+        VkAccessFlags2        access;
+    };
+    static constexpr LayoutSyncInfo GetSyncInfo(bool isSource) {
+        switch (Layout) {
+            case VK_IMAGE_LAYOUT_UNDEFINED:
+                return {.stage = VK_PIPELINE_STAGE_2_NONE, .access = 0};
 
-    static constexpr VkPipelineStageFlags2 kStage = (Layout == VK_IMAGE_LAYOUT_UNDEFINED)                ? VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT :
-                                                    (Layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) ? VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT :
-                                                    (Layout == VK_IMAGE_LAYOUT_GENERAL)                  ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT :
-                                                                                                           kInfo.stage;
+            case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+                return {
+                    .stage  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    .access = isSource ? VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT :
+                                         (VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT)
+                };
+
+            case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL:
+            case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+                return {
+                    .stage  = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                    .access = isSource ? VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT :
+                                         (VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT)
+                };
+
+            case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+                return {.stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, .access = VK_ACCESS_2_SHADER_READ_BIT};
+
+            case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
+                return {.stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, .access = 0};
+
+            case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+                return {.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT, .access = VK_ACCESS_2_TRANSFER_WRITE_BIT};
+
+            case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+                return {.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT, .access = VK_ACCESS_2_TRANSFER_READ_BIT};
+
+            case VK_IMAGE_LAYOUT_GENERAL:
+                return {
+                    .stage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                    .access = isSource ? (VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT) :
+                                         (VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT)
+                };
+
+            default:
+                return {.stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, .access = isSource ? VK_ACCESS_2_MEMORY_WRITE_BIT : VK_ACCESS_2_MEMORY_READ_BIT};
+        }
+    }
+
+  public:
+    static constexpr auto kInfo = GetSyncInfo(false);
+
+    static constexpr VkPipelineStageFlags2 kStage = []() constexpr {
+        if constexpr (Layout == VK_IMAGE_LAYOUT_UNDEFINED) {
+            return VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        } else if constexpr (Layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+            return VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+        } else if constexpr (Layout == VK_IMAGE_LAYOUT_GENERAL) {
+            return VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        } else {
+            return kInfo.stage;
+        }
+    }();
 
     static constexpr VkAccessFlags2 kAccess = kInfo.access;
 };
@@ -135,19 +141,19 @@ auto ScopedBarrierGuard<SrcState, DstState>::operator=(ScopedBarrierGuard&& othe
 
 template <typename SrcState, typename DstState, typename T>
 auto ScopedBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFlags aspectOverride) noexcept {
-    auto transitionedImage = IssueBarrier<SrcState, DstState>(cmd, resource, aspectOverride);
+    auto transitioned_image = IssueBarrier<SrcState, DstState>(cmd, resource, aspectOverride);
 
-    constexpr VkImageLayout srcLayout = LayoutMap<SrcState>::value;
-    TypedImage<srcLayout>   srcImage;
+    constexpr VkImageLayout src_layout = LayoutMap<SrcState>::value;
+    TypedImage<src_layout>  src_image;
 
     if constexpr (requires { resource.State(); }) {
         auto state = resource.State();
-        srcImage   = {state.handle, state.view, state.extent, state.aspect, state.format};
+        src_image  = {state.handle, state.view, state.extent, state.aspect, state.format};
     } else {
-        srcImage = {resource.handle, resource.view, resource.extent, resource.aspect, resource.format};
+        src_image = {resource.handle, resource.view, resource.extent, resource.aspect, resource.format};
     }
 
-    return std::make_pair(transitionedImage, ScopedBarrierGuard<SrcState, DstState>(cmd, srcImage, aspectOverride));
+    return std::make_pair(transitioned_image, ScopedBarrierGuard<SrcState, DstState>(cmd, src_image, aspectOverride));
 }
 
 template <typename T>
@@ -155,8 +161,8 @@ struct TargetFormat;
 
 template <typename InState, typename OutState, typename T>
 inline auto IssueBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFlags aspectOverride) {
-    constexpr VkImageLayout inLayout  = LayoutMap<InState>::value;
-    constexpr VkImageLayout outLayout = LayoutMap<OutState>::value;
+    constexpr VkImageLayout in_layout  = LayoutMap<InState>::value;
+    constexpr VkImageLayout out_layout = LayoutMap<OutState>::value;
 
     VkImage            image = VK_NULL_HANDLE;
     VkImageView        view  = VK_NULL_HANDLE;
@@ -185,9 +191,9 @@ inline auto IssueBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFl
         aspect = aspectOverride;
     }
 
-    TransitionLayout<inLayout, outLayout>(cmd, image, aspect);
+    TransitionLayout<in_layout, out_layout>(cmd, image, aspect);
 
-    return TypedImage<outLayout> {.handle = image, .view = view, .extent = extent, .aspect = aspect, .format = format};
+    return TypedImage<out_layout> {.handle = image, .view = view, .extent = extent, .aspect = aspect, .format = format};
 }
 
 template <VkImageLayout NewLayout, VkImageLayout OldLayout>
@@ -241,8 +247,8 @@ constexpr auto DynamicPass<ColorCount, HasDepth>::AddColorGroup(
     VkAttachmentStoreOp               storeOp,
     const ZHLN::Color4&               clearColor
 ) && noexcept -> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth> {
-    constexpr size_t AddedCount = sizeof...(TypedImages);
-    static_assert(ColorCount + AddedCount <= kMaxColorAttachments, "ZHLN Error: DynamicPass exceeded maximum color attachments (8).");
+    constexpr size_t added_count = sizeof...(TypedImages);
+    static_assert(ColorCount + added_count <= kMaxColorAttachments, "ZHLN Error: DynamicPass exceeded maximum color attachments (8).");
 
     std::apply(
         [&](const auto&... img) {
@@ -263,7 +269,7 @@ constexpr auto DynamicPass<ColorCount, HasDepth>::AddColorGroup(
         imageTuple
     );
 
-    return DynamicPass<ColorCount + AddedCount, HasDepth>(std::move(*this));
+    return DynamicPass<ColorCount + added_count, HasDepth>(std::move(*this));
 }
 
 template <size_t ColorCount, bool HasDepth>
@@ -318,12 +324,12 @@ void DynamicPass<ColorCount, HasDepth>::Execute(VkCommandBuffer cmd, Func&& func
     vkCmdBeginRendering(cmd, &rendering_info);
 
     const VkViewport viewport = {
-        .x        = 0.0f,
-        .y        = 0.0f,
+        .x        = 0.0F,
+        .y        = 0.0F,
         .width    = (float) _extent.width,
         .height   = (float) _extent.height,
-        .minDepth = 0.0f,
-        .maxDepth = 1.0f,
+        .minDepth = 0.0F,
+        .maxDepth = 1.0F,
     };
     const VkRect2D scissor = {.offset = {.x = 0, .y = 0}, .extent = _extent};
 

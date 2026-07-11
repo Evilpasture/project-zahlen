@@ -139,7 +139,7 @@ std::expected<void, std::string> RenderContext::Impl::InitSubsystems(const Rende
     }
 
     sync  = Vk::FrameSync<2>::Create(ctx.Device());
-    pools = Vk::CommandPools<2>::Create(ctx.Device(), {.queue_family = ctx.PhysicalInfo().graphics_family, .buffers_per_pool = 1});
+    pools = Vk::CommandPools<2>::Create(ctx.Device(), {.queueFamily = ctx.PhysicalInfo().graphics_family, .buffersPerPool = 1});
 
     InitializeSystemTextures();
 
