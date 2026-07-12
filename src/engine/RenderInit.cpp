@@ -370,7 +370,7 @@ void RenderContext::Impl::WatchPipeline(const char* vsPath, const char* psPath, 
     }
 }
 
-RenderContext::RenderContext(PrivateToken, std::unique_ptr<Impl> impl) noexcept: _impl(std::move(impl)) {
+RenderContext::RenderContext(PrivateToken /*unused*/, std::unique_ptr<Impl> impl) noexcept: _impl(std::move(impl)) {
 }
 
 std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept {
@@ -902,6 +902,25 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
         return {};
     };
 
+    auto buildVolumetrics = [&]() -> std::expected<void, Error> {
+        auto csInject = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricInjection).vertex);
+        if (!volumetricInjectionPass.Build(ctx.Device(), csInject)) {
+            return std::unexpected(RenderInitError::PipelineCreationFailed);
+        }
+
+        auto csScatter = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricScattering).vertex);
+        if (!volumetricScatteringPass.Build(ctx.Device(), csScatter)) {
+            return std::unexpected(RenderInitError::PipelineCreationFailed);
+        }
+
+        auto csIntegrate = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricIntegration).vertex);
+        if (!volumetricIntegrationPass.Build(ctx.Device(), csIntegrate)) {
+            return std::unexpected(RenderInitError::PipelineCreationFailed);
+        }
+
+        return {};
+    };
+
     return Vk::SamplerBuilder {}
         .Linear()
         .ClampToEdge()
@@ -944,6 +963,12 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
             return register_and_check(
                 "Bloom", [this]() { return BuildBloomPipelines(); },
                 {SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH, SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH, SHADER_BLOOM_BLUR_HLSL_VS_PATH, SHADER_BLOOM_BLUR_HLSL_PS_PATH}
+            );
+        })
+        .and_then([&]() {
+            return register_and_check(
+                "Volumetrics", buildVolumetrics,
+                {SHADER_VOLUMETRIC_INJECTION_CS_PATH, SHADER_VOLUMETRIC_SCATTERING_CS_PATH, SHADER_VOLUMETRIC_INTEGRATION_CS_PATH}
             );
         })
         .and_then([&]() { return register_and_check("Blit", [this]() { return BuildBlitPipeline(); }, {SHADER_BLIT_HLSL_VS_PATH, SHADER_BLIT_HLSL_PS_PATH}); })
@@ -1185,6 +1210,17 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
     VkExtent2D ext4  = {.width = std::max(1u, ext.width / 4), .height = std::max(1u, ext.height / 4)};
     VkExtent2D ext8  = {.width = std::max(1u, ext.width / 8), .height = std::max(1u, ext.height / 8)};
     VkExtent2D ext16 = {.width = std::max(1u, ext.width / 16), .height = std::max(1u, ext.height / 16)};
+    // 160x90 aligns cleanly with 16x9 light clusters, maintaining 10x subdivision.
+    VkExtent3D voxelExt = {.width = 160, .height = 90, .depth = 64};
+
+    graphResources.voxelMedia =
+        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+
+    graphResources.voxelLight =
+        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+
+    graphResources.voxelIntegrated =
+        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 
     graphResources.bloomThresholdTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2);
     graphResources.bloomDown1           = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4);
@@ -1229,6 +1265,14 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
             cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
         );
+        std::array targets3D = {
+            graphResources.voxelMedia.image.Handle(), graphResources.voxelLight.image.Handle(), graphResources.voxelIntegrated.image.Handle()
+        };
+
+        for (auto* const img: targets3D) {
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+        }
     });
 
     return true;

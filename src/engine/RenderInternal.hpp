@@ -177,10 +177,41 @@ using FXAALayout = Vk::DescriptorLayout<
     Vk::SamplerSlot<1>       // sampler
     >;
 
+// 1. Descriptors
+using VolumetricInjectionLayout = Vk::DescriptorLayout<
+    Vk::StorageImageSlot<0>,                        // outVoxelMedia
+    Vk::UniformSlot<1, VK_SHADER_STAGE_COMPUTE_BIT> // frame
+    >;
+
+using VolumetricScatteringLayout = Vk::DescriptorLayout<
+    Vk::SampledImageSlot<0, VK_SHADER_STAGE_COMPUTE_BIT>,  // inVoxelMedia
+    Vk::StorageImageSlot<1>,                               // outVoxelLight
+    Vk::UniformSlot<2, VK_SHADER_STAGE_COMPUTE_BIT>,       // frame
+    Vk::StorageBufferSlot<3, VK_SHADER_STAGE_COMPUTE_BIT>, // lights
+    Vk::StorageBufferSlot<4, VK_SHADER_STAGE_COMPUTE_BIT>, // clusterGrid
+    Vk::StorageBufferSlot<5, VK_SHADER_STAGE_COMPUTE_BIT>, // clusterIndexList
+    Vk::SampledImageSlot<6, VK_SHADER_STAGE_COMPUTE_BIT>,  // shadowMap
+    Vk::SamplerSlot<7, VK_SHADER_STAGE_COMPUTE_BIT>        // shadowSampler
+    >;
+
+using VolumetricIntegrationLayout = Vk::DescriptorLayout<
+    Vk::SampledImageSlot<0, VK_SHADER_STAGE_COMPUTE_BIT>, // inVoxelLight
+    Vk::StorageImageSlot<1>                               // outVoxelIntegrated
+    >;
+
+// 2. Resource Tags
+using Res_VoxelMedia = Vk::GraphImage<"VoxelMedia", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_VoxelLight = Vk::GraphImage<"VoxelLight", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_VoxelInt   = Vk::GraphImage<"VoxelInt", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+
+// 3. Update BlitLayout to sample depth & volumetrics
 using BlitLayout = Vk::DescriptorLayout<
-    Vk::SampledImageSlot<0>, // texCurrent (Color)
-    Vk::SamplerSlot<1>,      // sampler
-    Vk::SampledImageSlot<2>  // texBloom (Bloom)
+    Vk::SampledImageSlot<0>,                         // texCurrent
+    Vk::SamplerSlot<1>,                              // sampler
+    Vk::SampledImageSlot<2>,                         // texBloom
+    Vk::SampledImageSlot<3>,                         // texDepth
+    Vk::SampledImageSlot<4>,                         // texVoxelIntegrated
+    Vk::UniformSlot<5, VK_SHADER_STAGE_FRAGMENT_BIT> // frame
     >;
 
 // Layouts for Threshold & Blur
@@ -319,6 +350,15 @@ struct BlitPass {
 struct PostProcessPass {
     static constexpr std::string_view name = "[GPU] PostProcess (GI)";
 };
+struct VolumetricInjectPass {
+    static constexpr std::string_view name = "[GPU] Volumetric Inject";
+};
+struct VolumetricScatterPass {
+    static constexpr std::string_view name = "[GPU] Volumetric Scatter";
+};
+struct VolumetricIntegratePass {
+    static constexpr std::string_view name = "[GPU] Volumetric Integrate";
+};
 } // namespace Stages
 
 using FrameProfiler = Profiler::GpuProfiler<
@@ -329,7 +369,10 @@ using FrameProfiler = Profiler::GpuProfiler<
     Stages::BloomThreshPass,
     Stages::BloomBlurHPass,
     Stages::BloomBlurVPass,
-    Stages::BlitPass>;
+    Stages::BlitPass,
+    Stages::VolumetricInjectPass,     // Unique Slot 16/17
+    Stages::VolumetricScatterPass,    // Unique Slot 18/19
+    Stages::VolumetricIntegratePass>; // Unique Slot 20/21
 
 struct NativeMesh {
     VkDevice                     device = VK_NULL_HANDLE;
@@ -475,6 +518,9 @@ struct RenderContext::Impl {
         Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          smaaWeightTarget;
         Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>              shadowMap;
         Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>              shadowAtlas;
+        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelMedia;
+        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelLight;
+        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelIntegrated;
 
         struct ReflectMetadata {
             Res_SceneColor  sceneColor;
@@ -494,6 +540,9 @@ struct RenderContext::Impl {
             Res_SmaaWeight  smaaWeightTarget;
             Res_ShadowMap   shadowMap;
             Res_ShadowAtlas shadowAtlas;
+            Res_VoxelMedia  voxelMedia;
+            Res_VoxelLight  voxelLight;
+            Res_VoxelInt    voxelIntegrated;
         };
     };
 
@@ -595,12 +644,15 @@ struct RenderContext::Impl {
     std::array<Vk::PostProcessPass<KawaseLayout>, 3> bloomDownPass;
     std::array<Vk::PostProcessPass<KawaseLayout>, 3> bloomUpPass;
 
-    Vk::ComputePass clusterBoundsPass;
-    Vk::ComputePass clusterCullingPass;
-    Vk::ComputePass cullingPass;
-    Vk::ComputePass skinningPass;
-    Vk::ComputePass proceduralBakePass;
-    Vk::ComputePass hangGpuPass;
+    Vk::ComputePass                                            clusterBoundsPass;
+    Vk::ComputePass                                            clusterCullingPass;
+    Vk::ComputePass                                            cullingPass;
+    Vk::ComputePass                                            skinningPass;
+    Vk::ComputePass                                            proceduralBakePass;
+    Vk::ComputePass                                            hangGpuPass;
+    Vk::DoubleBufferedComputePass<VolumetricInjectionLayout>   volumetricInjectionPass;
+    Vk::DoubleBufferedComputePass<VolumetricScatteringLayout>  volumetricScatteringPass;
+    Vk::DoubleBufferedComputePass<VolumetricIntegrationLayout> volumetricIntegrationPass;
 
     Vk::PipelineLayout skinningPipelineLayout;
     Vk::PipelineLayout shadowPipelineLayout;
@@ -975,10 +1027,10 @@ struct AAPass {
 };
 
 struct BlitPass {
+    // TODO: Update BlitPass::Execute signature in Passes namespace to provide Depth & VoxelInt mapping
     void Execute(
         const FrameRecorder&                                     recorder,
         Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor,
-        Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> bloomColor,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> swapchainTarget,
         int                                                      fullBright
     ) const noexcept;

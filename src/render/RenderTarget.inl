@@ -24,7 +24,13 @@ inline auto RenderTarget<F>::operator=(RenderTarget&& other) noexcept -> RenderT
 
 template <VkFormat F>
 inline auto RenderTarget<F>::State() const noexcept -> TypedImage<VK_IMAGE_LAYOUT_UNDEFINED> {
-    return {.handle = image.Handle(), .view = view.Get(), .extent = extent, .aspect = GetFormatAspect(F), .format = F};
+    return {
+        .handle = image.Handle(),
+        .view   = view.Get(),
+        .extent = {.width = extent.width, .height = extent.height, .depth = 1}, // Explicit 2D -> 3D conversion
+        .aspect = GetFormatAspect(F),
+        .format = F
+    };
 }
 
 template <VkFormat F>

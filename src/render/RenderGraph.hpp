@@ -80,6 +80,12 @@ using DepthWrite = Usage<
     VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
     VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT>;
 
+template <typename Image>
+using ComputeWrite = Usage<Image, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT>;
+
+template <typename Image>
+using ComputeRead = Usage<Image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT>;
+
 template <ResourceName Name, typename UsagesList, typename RecordFn_T>
 struct GraphPass {
     static constexpr auto name = Name;
@@ -176,14 +182,15 @@ constexpr auto Passieren(RecordFn&& record, [[maybe_unused]] detail::BypassGraph
 struct GraphResource {
     VkImage     handle = VK_NULL_HANDLE;
     VkImageView view   = VK_NULL_HANDLE;
-    VkExtent2D  extent {};
+    VkExtent3D  extent {}; // Upgraded to 3D to support volumetric targets
 };
 
 template <typename ResourceList>
 class ResourceBinder {
   public:
     template <typename Image>
-    constexpr void Bind(VkImage handle, VkImageView view, VkExtent2D extent) noexcept;
+    // Upgraded parameter signature to 3D
+    constexpr void Bind(VkImage handle, VkImageView view, VkExtent3D extent) noexcept;
 
     constexpr auto GetBindings() const noexcept -> const std::array<GraphResource, ResourceList::size>&;
 
@@ -311,7 +318,7 @@ struct GraphImageRef {
     using TagType      = Tag;
     VkImage     handle = VK_NULL_HANDLE;
     VkImageView view   = VK_NULL_HANDLE;
-    VkExtent2D  extent {};
+    VkExtent3D  extent {};
 };
 
 template <typename Tag, typename T>

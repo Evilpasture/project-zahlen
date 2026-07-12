@@ -38,7 +38,10 @@ enum class ShaderID : uint8_t {
     HangGpuComp,
     ProceduralBakeComp,
     LtcMat,
-    LtcAmp
+    LtcAmp,
+    VolumetricInjection,
+    VolumetricScattering,
+    VolumetricIntegration,
 };
 
 // Extern declarations of individual programs to avoid header bloat and allow compile-time routing
@@ -58,6 +61,9 @@ extern const ShaderPair bloom_threshold_shaders;
 extern const ShaderPair bloom_blur_shaders;
 extern const ShaderPair punctual_shadows_shaders;
 extern const ShaderPair lighting_nort_shaders;
+extern const ShaderPair volumetric_injection_shaders;
+extern const ShaderPair volumetric_scattering_shaders;
+extern const ShaderPair volumetric_integration_shaders;
 
 // Extern declarations for single spans
 extern const std::span<const uint8_t> culling_comp;
@@ -103,7 +109,10 @@ struct ShaderMapping {
         {.id = ShaderID::HangGpuComp, .pair = ShaderPair {.vertex = hang_gpu_comp, .fragment = {}}},
         {.id = ShaderID::ProceduralBakeComp, .pair = ShaderPair {.vertex = procedural_bake_comp, .fragment = {}}},
         {.id = ShaderID::LtcMat, .pair = ShaderPair {.vertex = ltc_mat, .fragment = {}}},
-        {.id = ShaderID::LtcAmp, .pair = ShaderPair {.vertex = ltc_amp, .fragment = {}}}
+        {.id = ShaderID::LtcAmp, .pair = ShaderPair {.vertex = ltc_amp, .fragment = {}}},
+        {.id = ShaderID::VolumetricInjection, .pair = volumetric_injection_shaders},
+        {.id = ShaderID::VolumetricScattering, .pair = volumetric_scattering_shaders},
+        {.id = ShaderID::VolumetricIntegration, .pair = volumetric_integration_shaders},
     };
 
     for (const auto& mapping: table) {
@@ -112,7 +121,6 @@ struct ShaderMapping {
         }
     }
 
-    // Fallback path just in case
     return {};
 }
 

@@ -312,7 +312,7 @@ void DynamicPass<ColorCount, HasDepth>::Execute(VkCommandBuffer cmd, Func&& func
         .sType                = VK_STRUCTURE_TYPE_RENDERING_INFO,
         .pNext                = nullptr,
         .flags                = _flags,
-        .renderArea           = {.offset = {0, 0}, .extent = _extent},
+        .renderArea           = {.offset = {0, 0}, .extent = {_extent.width, _extent.height}},
         .layerCount           = 1,
         .viewMask             = _viewMask,
         .colorAttachmentCount = ColorCount,
@@ -331,7 +331,7 @@ void DynamicPass<ColorCount, HasDepth>::Execute(VkCommandBuffer cmd, Func&& func
         .minDepth = 0.0F,
         .maxDepth = 1.0F,
     };
-    const VkRect2D scissor = {.offset = {.x = 0, .y = 0}, .extent = _extent};
+    const VkRect2D scissor = {.offset = {.x = 0, .y = 0}, .extent = {.width = _extent.width, .height = _extent.height}};
 
     vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &scissor);

@@ -206,6 +206,27 @@ add_dependencies(zahlen_engine zahlen_engine_procedural_bake)
 target_compile_definitions(zahlen_engine PUBLIC SHADER_PROCEDURAL_BAKE_CS_PATH="${PROCEDURAL_BAKE_CS_SPV}")
 list(APPEND ALL_GENERATED_SPVS ${PROCEDURAL_BAKE_CS_SPV})
 
+# 1. Volumetric Injection Pass
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/volumetric_injection.hlsl" CSMain cs_6_0 VOL_INJECT_SPV)
+add_custom_target(zahlen_engine_vol_inject_shader ALL DEPENDS ${VOL_INJECT_SPV})
+add_dependencies(zahlen_engine zahlen_engine_vol_inject_shader)
+target_compile_definitions(zahlen_engine PUBLIC SHADER_VOLUMETRIC_INJECTION_CS_PATH="${VOL_INJECT_SPV}")
+list(APPEND ALL_GENERATED_SPVS ${VOL_INJECT_SPV})
+
+# 2. Volumetric Scattering Pass
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/volumetric_scattering.hlsl" CSMain cs_6_0 VOL_SCATTER_SPV)
+add_custom_target(zahlen_engine_vol_scatter_shader ALL DEPENDS ${VOL_SCATTER_SPV})
+add_dependencies(zahlen_engine zahlen_engine_vol_scatter_shader)
+target_compile_definitions(zahlen_engine PUBLIC SHADER_VOLUMETRIC_SCATTERING_CS_PATH="${VOL_SCATTER_SPV}")
+list(APPEND ALL_GENERATED_SPVS ${VOL_SCATTER_SPV})
+
+# 3. Volumetric Integration / Raymarching Pass
+compile_hlsl("${CMAKE_SOURCE_DIR}/resources/shaders/volumetric_integration.hlsl" CSMain cs_6_0 VOL_INTEGRATE_SPV)
+add_custom_target(zahlen_engine_vol_integrate_shader ALL DEPENDS ${VOL_INTEGRATE_SPV})
+add_dependencies(zahlen_engine zahlen_engine_vol_integrate_shader)
+target_compile_definitions(zahlen_engine PUBLIC SHADER_VOLUMETRIC_INTEGRATION_CS_PATH="${VOL_INTEGRATE_SPV}")
+list(APPEND ALL_GENERATED_SPVS ${VOL_INTEGRATE_SPV})
+
 # Set the target-wide object dependency rule (fallback for non-Ninja generators)
 set(ENGINE_SOURCES_ABS "")
 foreach(src IN LISTS ENGINE_SOURCES)

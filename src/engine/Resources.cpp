@@ -156,6 +156,22 @@ constexpr uint8_t lighting_nort_ps_raw[] = {
 };
 extern const ShaderPair lighting_nort_shaders {.vertex = lighting_nort_vs_raw, .fragment = lighting_nort_ps_raw};
 
+// --- Volumetric Compute Shaders ---
+constexpr uint8_t vol_inject_cs_raw[] = {
+#embed SHADER_VOLUMETRIC_INJECTION_CS_PATH
+};
+extern const ShaderPair volumetric_injection_shaders {.vertex = vol_inject_cs_raw, .fragment = {}};
+
+constexpr uint8_t vol_scatter_cs_raw[] = {
+#embed SHADER_VOLUMETRIC_SCATTERING_CS_PATH
+};
+extern const ShaderPair volumetric_scattering_shaders {.vertex = vol_scatter_cs_raw, .fragment = {}};
+
+constexpr uint8_t vol_integrate_cs_raw[] = {
+#embed SHADER_VOLUMETRIC_INTEGRATION_CS_PATH
+};
+extern const ShaderPair volumetric_integration_shaders {.vertex = vol_integrate_cs_raw, .fragment = {}};
+
 // --- Single Shaders and Binary Resources ---
 constexpr uint8_t culling_comp_raw[] = {
 #embed SHADER_CULLING_HLSL_CS_PATH

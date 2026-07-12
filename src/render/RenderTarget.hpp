@@ -39,6 +39,55 @@ struct RenderTarget {
     explicit           operator bool() const noexcept;
 };
 
+template <VkFormat F>
+struct RenderTarget3D {
+    Image      image;
+    ImageView  view;
+    VkExtent3D extent {};
+
+    RenderTarget3D()  = default;
+    ~RenderTarget3D() = default;
+
+    RenderTarget3D(const RenderTarget3D&)                = delete;
+    RenderTarget3D& operator=(const RenderTarget3D&)     = delete;
+    RenderTarget3D(RenderTarget3D&&) noexcept            = default;
+    RenderTarget3D& operator=(RenderTarget3D&&) noexcept = default;
+
+    [[nodiscard]] auto Valid() const noexcept -> bool {
+        return image.Valid() && view.Valid();
+    }
+    explicit operator bool() const noexcept {
+        return Valid();
+    }
+
+    [[nodiscard]] static auto Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, VkImageUsageFlags usage) -> RenderTarget3D {
+        RenderTarget3D rt;
+        rt.extent                    = extent;
+        const VkImageCreateInfo info = {
+            .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            .pNext                 = nullptr,
+            .flags                 = 0,
+            .imageType             = VK_IMAGE_TYPE_3D,
+            .format                = F,
+            .extent                = extent,
+            .mipLevels             = 1,
+            .arrayLayers           = 1,
+            .samples               = VK_SAMPLE_COUNT_1_BIT,
+            .tiling                = VK_IMAGE_TILING_OPTIMAL,
+            .usage                 = usage,
+            .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
+            .queueFamilyIndexCount = {},
+            .pQueueFamilyIndices   = {},
+            .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
+        };
+        rt.image = Image::Create(allocator.Get(), info, VMA_MEMORY_USAGE_GPU_ONLY);
+        if (rt.image.Valid()) {
+            rt.view = CreateView3D<F>(ctx.Device(), rt.image.Handle(), GetFormatAspect(F), 1);
+        }
+        return rt;
+    }
+};
+
 // Define the Transition overload here where RenderTarget is fully complete
 template <VkImageLayout TargetLayout, VkFormat F>
 [[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const RenderTarget<F>& rt, Tag<TargetLayout> /*unused*/) noexcept;
@@ -67,15 +116,18 @@ struct GBufferLayout {
     static constexpr std::array<VkFormat, count> array = {TargetFormat<Targets>::value...};
 };
 
-// --- Graph Helper ---
 template <VkImageLayout L, VkFormat F>
 Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget<F>& rt, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
+    return {rt.image.Handle(), rt.view.Get(), {rt.extent.width, rt.extent.height, 1}, aspect, F};
+}
+
+template <VkImageLayout L, VkFormat F>
+Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget3D<F>& rt, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
     return {rt.image.Handle(), rt.view.Get(), rt.extent, aspect, F};
 }
 
 template <VkImageLayout TargetLayout, typename T>
 constexpr auto TransitionSingle(VkCommandBuffer cmd, const T& res) noexcept {
-    // Simply fetch from index 0 of our unified batch transition
     return std::get<0>(TransitionBatch<TargetLayout>(cmd, res));
 }
 

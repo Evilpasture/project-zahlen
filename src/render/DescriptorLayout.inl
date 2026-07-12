@@ -435,7 +435,7 @@ void DescriptorLayout<Slots...>::WriteSlot(
 
         } else if constexpr (Slot::type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
             VkImageView view = VK_NULL_HANDLE;
-            if constexpr (std::is_same_v<T, ImageWrite>) {
+            if constexpr (std::is_same_v<T, ImageWrite> || IsTypedImage<T>::value) {
                 view = arg.view;
             } else if constexpr (requires { arg.view.Get(); }) {
                 view = arg.view.Get();

@@ -27,13 +27,11 @@ static constexpr VkCommandBufferInheritanceInfo NullInheritanceInfo = {
 template <VkImageLayout Layout>
 struct TypedImage {
     static constexpr VkImageLayout layout = Layout;
-
-    VkImage            handle = VK_NULL_HANDLE;
-    VkImageView        view   = VK_NULL_HANDLE;
-    VkExtent2D         extent {};
-    VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
-
-    VkFormat format = VK_FORMAT_UNDEFINED; // Compatibility for 1.1
+    VkImage                        handle = VK_NULL_HANDLE;
+    VkImageView                    view   = VK_NULL_HANDLE;
+    VkExtent3D                     extent {}; // Modified from VkExtent2D
+    VkImageAspectFlags             aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+    VkFormat                       format = VK_FORMAT_UNDEFINED;
 };
 
 // ============================================================================
@@ -170,7 +168,12 @@ ScopedTransition(VkCommandBuffer, ImageT&, Vk::Tag<Final>) -> ScopedTransition<I
 template <size_t ColorCount = 0, bool HasDepth = false>
 class DynamicPass {
   public:
+    // 2D Constructor
     constexpr explicit DynamicPass(VkExtent2D extent) noexcept: _extent(extent) {
+    }
+
+    // 3D Constructor (Safely isolates depth)
+    constexpr explicit DynamicPass(VkExtent3D extent) noexcept: _extent({.width = extent.width, .height = extent.height}) {
     }
 
     template <size_t InsideCount, bool InsideDepth>

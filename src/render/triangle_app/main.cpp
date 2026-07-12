@@ -171,7 +171,7 @@ auto main() -> int {
                                                 Vk::TypedImage<VK_IMAGE_LAYOUT_UNDEFINED> swap_image = {
                                                     .handle = pres.swapchain.Get().images[imageIndex],
                                                     .view   = pres.swapchain.Get().views[imageIndex],
-                                                    .extent = pres.swapchain.Get().extent,
+                                                    .extent = {.width = pres.swapchain.Get().extent.width, .height = pres.swapchain.Get().extent.height},
                                                     .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
                                                     .format = pres.swapchain.Get().format
                                                 };

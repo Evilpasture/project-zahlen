@@ -160,8 +160,9 @@ struct CpuCullingPolicy {
             .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT)
             .Execute(cmd, [&]() {
                 Vk::ParallelDrawDispatch(
-                    cmd, Vk::SecondaryInheritance {.colorFormats = colorFormats, .depthFormat = VK_FORMAT_D32_SFLOAT}, color_att.extent, drawCount,
-                    kParallelChunkSize,
+                    cmd, Vk::SecondaryInheritance {.colorFormats = colorFormats, .depthFormat = VK_FORMAT_D32_SFLOAT},
+                    {.width = color_att.extent.width, .height = color_att.extent.height}, // Explicit 3D -> 2D Truncation
+                    drawCount, kParallelChunkSize,
 
                     TaskSystemSchedulerAdapter {},
                     [&]([[maybe_unused]] uint32_t chunkIdx) -> VkCommandBuffer {
@@ -280,7 +281,8 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
             Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> cascadeLayerImage = {
                 .handle = ctx.graphResources.shadowMap.image.Handle(),
                 .view   = ctx.shadowCascadeViews[cascade].Get(),
-                .extent = ctx.graphResources.shadowMap.extent,
+                // Explicitly promote the 2D extent to a 3D subobject inline with depth = 1
+                .extent = {.width = ctx.graphResources.shadowMap.extent.width, .height = ctx.graphResources.shadowMap.extent.height, .depth = 1},
                 .aspect = VK_IMAGE_ASPECT_DEPTH_BIT
             };
 
@@ -437,7 +439,6 @@ void ForwardPass::Execute(
 void BlitPass::Execute(
     const FrameRecorder&                                     recorder,
     Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor,
-    Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> bloomColor,
     Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> swapchainTarget,
     int                                                      fullBright
 ) const noexcept {
@@ -445,8 +446,6 @@ void BlitPass::Execute(
     auto&           ctx = recorder.ctx;
 
     Profiler::ScopedGpuProfile<Stages::BlitPass, FrameProfiler> timer(cmd, recorder.frameIndex, ctx.gpuProfiler);
-
-    ctx.blitPass.WriteNext(ctx.ctx.Device(), inColor, ctx.defaultSampler.Get(), bloomColor);
 
     struct BlitPushConstants {
         float vignetteIntensity;

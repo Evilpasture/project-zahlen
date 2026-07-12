@@ -206,6 +206,15 @@ consteval auto ComputeStateTable() {
     return table;
 }
 
+template <typename T>
+[[nodiscard]] constexpr VkExtent3D ToExtent3D(const T& extent) noexcept {
+    if constexpr (requires { extent.depth; }) {
+        return extent; // Already 3D
+    } else {
+        return {extent.width, extent.height, 1}; // Promote 2D -> 3D
+    }
+}
+
 } // namespace detail
 
 // ============================================================================
@@ -245,7 +254,7 @@ constexpr auto Passieren(RecordFn&& record, [[maybe_unused]] detail::BypassGraph
 
 template <typename ResourceList>
 template <typename Image>
-constexpr void ResourceBinder<ResourceList>::Bind(VkImage handle, VkImageView view, VkExtent2D extent) noexcept {
+constexpr void ResourceBinder<ResourceList>::Bind(VkImage handle, VkImageView view, VkExtent3D extent) noexcept {
     constexpr size_t idx = detail::GetResourceIndex<ResourceList, Image>();
     _resources[idx]      = {handle, view, extent};
 }
@@ -417,8 +426,10 @@ void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
 ) noexcept {
     (([&]() {
          if (m_extent.width == 0) {
-             using Img = typename ColorWrites::template type<Is>;
-             m_extent  = bindings[detail::GetResourceIndex<ResourceList, Img>()].extent;
+             using Img       = typename ColorWrites::template type<Is>;
+             const auto& ext = bindings[detail::GetResourceIndex<ResourceList, Img>()].extent;
+             // Explicitly truncate the 3D extent down to 2D for attachment rendering
+             m_extent = {ext.width, ext.height};
          }
      }()),
      ...);
@@ -426,8 +437,10 @@ void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
     if (m_extent.width == 0) {
         (([&]() {
              if (m_extent.width == 0) {
-                 using Img = typename DepthWrites::template type<Js>;
-                 m_extent  = bindings[detail::GetResourceIndex<ResourceList, Img>()].extent;
+                 using Img       = typename DepthWrites::template type<Js>;
+                 const auto& ext = bindings[detail::GetResourceIndex<ResourceList, Img>()].extent;
+                 // Explicitly truncate the 3D extent down to 2D for attachment rendering
+                 m_extent = {ext.width, ext.height};
              }
          }()),
          ...);
@@ -504,9 +517,17 @@ bool RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
 template <typename Tag, typename T>
 constexpr auto MakeRef(const T& resource) noexcept {
     if constexpr (requires { resource.image.Handle(); }) {
-        return GraphImageRef<Tag> {.handle = resource.image.Handle(), .view = resource.view.Get(), .extent = resource.extent};
+        return GraphImageRef<Tag> {
+            .handle = resource.image.Handle(),
+            .view   = resource.view.Get(),
+            .extent = detail::ToExtent3D(resource.extent) // Unified 3D adapter
+        };
     } else if constexpr (requires { resource.handle; }) {
-        return GraphImageRef<Tag> {.handle = resource.handle, .view = resource.view, .extent = resource.extent};
+        return GraphImageRef<Tag> {
+            .handle = resource.handle,
+            .view   = resource.view,
+            .extent = detail::ToExtent3D(resource.extent) // Unified 3D adapter
+        };
     } else {
         static_assert(sizeof(T) == 0, "Unsupported resource type while making a graph reference");
     }
@@ -514,17 +535,21 @@ constexpr auto MakeRef(const T& resource) noexcept {
 
 template <typename Tag>
 constexpr auto MakeRef(VkImage handle, VkImageView view) noexcept {
-    return GraphImageRef<Tag> {.handle = handle, .view = view, .extent = {}};
+    return GraphImageRef<Tag> {.handle = handle, .view = view, .extent = {0, 0, 1}};
 }
 
+// 2D manual overload (used by the Swapchain binding)
 template <typename Tag>
 constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent) noexcept {
-    return GraphImageRef<Tag> {.handle = handle, .view = view, .extent = extent};
+    return GraphImageRef<Tag> {
+        .handle = handle, .view = view, .extent = {extent.width, extent.height, 1} // Promote 2D -> 3D
+    };
 }
 
-template <typename BinderT, typename... Refs>
-constexpr void AutoBind(BinderT& binder, const Refs&... refs) noexcept {
-    (binder.template Bind<typename Refs::TagType>(refs.handle, refs.view, refs.extent), ...);
+// 3D manual overload
+template <typename Tag>
+constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent3D extent) noexcept {
+    return GraphImageRef<Tag> {.handle = handle, .view = view, .extent = extent};
 }
 
 } // namespace ZHLN::Vk
