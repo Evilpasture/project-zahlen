@@ -145,13 +145,16 @@ class Surface {
                                     vkGetDisplayPlaneCapabilitiesKHR(pd, mode, planeIndex, &caps);
 
                                     VkDisplaySurfaceCreateInfoKHR create_info = {
-                                        .sType       = VK_STRUCTURE_TYPE_DISPLAY_SURFACE_CREATE_INFO_KHR,
-                                        .displayMode = mode,
-                                        .planeIndex  = planeIndex,
-                                        .transform   = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
-                                        .globalAlpha = 1.0F,
-                                        .alphaMode   = std::forward<ConfigType>(cfg).selectAlpha(caps),
-                                        .imageExtent = {.width = outWidth, .height = outHeight}
+                                        .sType           = VK_STRUCTURE_TYPE_DISPLAY_SURFACE_CREATE_INFO_KHR,
+                                        .pNext           = nullptr,
+                                        .flags           = 0,
+                                        .displayMode     = mode,
+                                        .planeIndex      = planeIndex,
+                                        .planeStackIndex = 0,
+                                        .transform       = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+                                        .globalAlpha     = 1.0F,
+                                        .alphaMode       = std::forward<ConfigType>(cfg).selectAlpha(caps),
+                                        .imageExtent     = {.width = outWidth, .height = outHeight}
                                     };
 
                                     VkSurfaceKHR raw_surface = VK_NULL_HANDLE;

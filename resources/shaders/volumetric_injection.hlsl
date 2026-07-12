@@ -48,6 +48,30 @@ float3 GetVoxelWorldPos(uint3 tid, float2 resolution) {
     return frame.camPos.xyz + dir * depthVS;
 }
 
+// --- 2D VALUE NOISE & FRACTAL BROWNIAN MOTION ---
+float Lerp(float a, float b, float t) {
+    return a + t * (b - a);
+}
+
+float Noise2D(float2 p) {
+    float2 ip = floor(p);
+    float2 fp = frac(p);
+    float2 u  = fp * fp * (3.0f - 2.0f * fp);
+
+    return Lerp(Lerp(Hash(ip.x, ip.y), Hash(ip.x + 1.0f, ip.y), u.x), Lerp(Hash(ip.x, ip.y + 1.0f), Hash(ip.x + 1.0f, ip.y + 1.0f), u.x), u.y);
+}
+
+float CloudFBM(float2 p) {
+    float val = 0.0f;
+    float amp = 0.5f;
+    for (int i = 0; i < 3; i++) {
+        val += amp * Noise2D(p);
+        p *= 2.1f;
+        amp *= 0.5f;
+    }
+    return val;
+}
+
 [numthreads(8, 8, 1)] void CSMain(uint3 tid : SV_DispatchThreadID) {
     uint3 gridDim;
     outVoxelMedia.GetDimensions(gridDim.x, gridDim.y, gridDim.z);
@@ -56,18 +80,40 @@ float3 GetVoxelWorldPos(uint3 tid, float2 resolution) {
 
     float3 worldPos = GetVoxelWorldPos(tid, float2(gridDim.xy));
 
-    // Evaluate Global Exponential Height Fog with bounded negative depth
+    // 1. Existing Exponential Height Fog
     float heightFalloff = 0.15f;
-    float baseDensity   = 0.05f;
+    float baseDensity   = 0.03f;
+    float boundedY      = max(worldPos.y, -10.0f);
+    float fogDensity    = baseDensity * exp(-heightFalloff * boundedY);
 
-    // Clamp Y to prevent exponential density explosion into negative infinity
-    float boundedY = max(worldPos.y, -10.0f);
-    float density  = baseDensity * exp(-heightFalloff * boundedY);
-
-    // Apply Worley turbulence
     float noiseScale = 0.08f;
-    float noise      = Worley(worldPos.x * noiseScale, worldPos.z * noiseScale);
-    density *= lerp(0.3f, 1.0f, noise);
+    float fogNoise   = Worley(worldPos.x * noiseScale, worldPos.z * noiseScale);
+    fogDensity *= lerp(0.3f, 1.0f, fogNoise);
+
+    // 2. 2D Layered Cloud Slab
+    float cloudMinY = 12.0f; // Lower boundary of the cloud layer (in world units)
+    float cloudMaxY = 22.0f; // Upper boundary of the cloud layer
+
+    // Smooth vertical envelope to bound the clouds along the Y-axis
+    float verticalEnvelope = smoothstep(cloudMinY, cloudMinY + 2.0f, worldPos.y) * smoothstep(cloudMaxY, cloudMaxY - 2.0f, worldPos.y);
+
+    // Wind displacement driven by time (stored in frame.camPos.w)
+    float  time       = frame.camPos.w;
+    float2 windOffset = float2(0.5f, 0.2f) * time;
+    float2 samplePos  = worldPos.xz * 0.04f + windOffset; // Scaled down for broad, soft clouds
+
+    // Evaluate 2D cloud noise
+    float cloudNoise = CloudFBM(samplePos);
+
+    // Cloud threshold/coverage (0.0 = completely overcast, 1.0 = clear skies)
+    float cloudCoverage   = 0.45f;
+    float cloudDensityVal = saturate((cloudNoise - cloudCoverage) / (1.0f - cloudCoverage));
+
+    // Combine height envelope, noise density, and strength multiplier
+    float cloudDensity = verticalEnvelope * cloudDensityVal * 0.9f;
+
+    // 3. Final Combined Density
+    float density = fogDensity + cloudDensity;
 
     // Bounding Box Mask (Optional fade near probe bounds)
     if (frame.probeMin.w > 0.0f) {
@@ -78,7 +124,7 @@ float3 GetVoxelWorldPos(uint3 tid, float2 resolution) {
         density *= mask;
     }
 
-    float3 scatteringCoeff = float3(0.8f, 0.9f, 1.0f) * density;
+    float3 scatteringCoeff = float3(0.85f, 0.9f, 1.0f) * density;
     float  absorptionCoeff = 0.1f * density;
     float  extinction      = dot(scatteringCoeff, float3(0.2126f, 0.7152f, 0.0722f)) + absorptionCoeff;
 

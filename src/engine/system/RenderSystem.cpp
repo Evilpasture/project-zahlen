@@ -150,6 +150,7 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
     uniforms.prevUnjitteredViewProj = prevUnjitteredVp;
     uniforms.invViewProj            = unjitteredVp.Inversed();
     std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
+    uniforms.camPos[3]       = static_cast<float>(engine.GetCurrentFrame()) * 0.0166f;
     JPH::Vec3 shaderLightDir = sunDirection;
     std::memcpy(&uniforms.lightDir[0], &shaderLightDir, sizeof(float) * 3);
     uniforms.lightDir[3]      = sunIntensity;

@@ -215,6 +215,7 @@ set(ENGINE_SOURCES
     src/engine/system/InteractionSystem.cpp
     src/engine/system/UIRenderSystem.cpp
     src/engine/system/UIInteractionSystem.cpp
+    src/engine/WindowSurface.cpp
     src/engine/RenderProcedural.cpp
     src/engine/RenderPasses.cpp
     src/engine/RenderSetup.cpp
