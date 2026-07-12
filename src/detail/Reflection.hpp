@@ -5,7 +5,6 @@
 #include "Loop.hpp"
 #include <algorithm>
 #include <array>
-#include <compare>
 #include <format>
 #include <optional>
 #include <ranges>
@@ -13,26 +12,49 @@
 #include <string_view>
 #include <tuple>
 #include <type_traits>
-#include <utility>
-#include <vector>
+
+namespace ZHLN::Reflect {
+
+// ============================================================================
+// 1. COMPLETELY INDEPENDENT UTILITIES (Defined Once)
+// ============================================================================
+
+// Literal class type to allow passing string literals as NTTPs
+template <std::size_t N>
+struct StringLiteral {
+    std::array<char, N> value {};
+    constexpr StringLiteral(const char (&str)[N]) {
+        std::copy_n(str, N, value);
+    }
+
+    constexpr operator std::string_view() const {
+        return {value, N - 1};
+    }
+};
+
+// Represents a single field declaration in a schema.
+template <typename T, StringLiteral FieldName>
+struct Field {
+    using type                             = T;
+    static constexpr std::string_view name = FieldName;
+};
+
+template <typename T>
+constexpr bool IsBracesConstructible() {
+    return std::is_aggregate_v<std::remove_cvref_t<T>>;
+}
+
+} // namespace ZHLN::Reflect
+
+// ============================================================================
+// 2. REFLECTION-DEPENDENT CORE (Split by Guard)
+// ============================================================================
 
 #if defined(__cpp_impl_reflection)
 
 #include <meta>
 
 namespace ZHLN::Reflect {
-
-// Literal class type to allow passing string literals as NTTPs
-template <std::size_t N>
-struct StringLiteral {
-    char value[N];
-    constexpr StringLiteral(const char (&str)[N]) {
-        std::copy_n(str, N, value);
-    }
-    constexpr operator std::string_view() const {
-        return {value, N - 1};
-    }
-};
 
 namespace detail {
 template <auto... vals>
@@ -46,7 +68,6 @@ struct ReplicatorType {
 template <auto... vals>
 ReplicatorType<vals...> Replicator {};
 
-// Helper to resolve type alias/typedefs before applying the reflection operator
 template <typename T>
 struct TypeReflector {
     static consteval std::string_view name() {
@@ -54,7 +75,6 @@ struct TypeReflector {
     }
 };
 
-// Consteval helper to find non-static data members without capture issues
 template <StringLiteral Name, typename T>
 consteval std::meta::info FindMember() {
     static constexpr auto members =
@@ -68,7 +88,6 @@ consteval std::meta::info FindMember() {
     return std::meta::info {};
 }
 
-// Consteval helper to find index of a non-static data member
 template <StringLiteral Name, typename T>
 consteval std::size_t IndexOfField() {
     static constexpr auto members =
@@ -124,16 +143,13 @@ constexpr void ForEachFieldWithName(T&& t, F&& f) {
         std::define_static_array(std::meta::nonstatic_data_members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
 
     ZHLN::Unroll<members.size()>([&](auto I) {
-        constexpr auto member = members[decltype(I)::value];
-
-        // Guard: Only extract identifier if the reflected member has one
-        constexpr std::string_view name = []() consteval {
+        constexpr auto             member = members[decltype(I)::value];
+        constexpr std::string_view name   = []() consteval {
             if (std::meta::has_identifier(member)) {
                 return std::meta::identifier_of(member);
             }
-            return std::string_view(""); // Return empty placeholder for nameless fields
+            return std::string_view("");
         }();
-
         f(name, t.[:member:]);
     });
 }
@@ -143,13 +159,7 @@ constexpr auto TieFields(T&& t) {
     static constexpr auto members =
         std::define_static_array(std::meta::nonstatic_data_members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
 
-    // We Expand using a standard index sequence over the reflection info array
     return [&]<std::size_t... Is>(std::index_sequence<Is...>) { return std::tie(t.[:members[Is]:]...); }(std::make_index_sequence<members.size()>());
-}
-
-template <typename T>
-constexpr bool GenericEqual(const T& lhs, const T& rhs) {
-    return TieFields(lhs) == TieFields(rhs);
 }
 
 template <typename E>
@@ -195,13 +205,11 @@ constexpr auto ZipFieldsWithNames(T&& t) {
     }(std::make_index_sequence<members.size()>());
 }
 
-// Get the total number of fields at compile-time
 template <typename T>
 constexpr std::size_t FieldCount() {
     return std::meta::nonstatic_data_members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()).size();
 }
 
-// Access a field by compile-time index (like std::get<N>)
 template <std::size_t N, typename T>
 constexpr decltype(auto) GetField(T&& t) {
     static constexpr auto members =
@@ -209,12 +217,6 @@ constexpr decltype(auto) GetField(T&& t) {
 
     static_assert(N < members.size(), "Index out of bounds for field access.");
     return std::forward<T>(t).[:members[N]:];
-}
-
-template <typename T>
-constexpr bool IsBracesConstructible() {
-    // True if T can be initialized with an initializer list matching its reflection footprint
-    return std::is_aggregate_v<std::remove_cvref_t<T>>;
 }
 
 template <typename T, typename F>
@@ -228,24 +230,7 @@ constexpr bool VisitFieldByName(T&& t, std::string_view name, F&& f) {
             found = true;
         }
     };
-    return found; // Returns false if no such field exists
-}
-
-template <typename T>
-constexpr auto GenericCompare(const T& lhs, const T& rhs) {
-    return TieFields(lhs) <=> TieFields(rhs); // requires all fields support <=>
-}
-
-template <typename T>
-constexpr bool GenericLess(const T& lhs, const T& rhs) {
-    return TieFields(lhs) < TieFields(rhs);
-}
-
-template <typename T>
-constexpr std::size_t GenericHash(const T& t) {
-    std::size_t seed = 0;
-    ForEachField(t, [&](auto&& field) { seed ^= std::hash<std::remove_cvref_t<decltype(field)>> {}(field) + 0x9e3779b9 + (seed << 6) + (seed >> 2); });
-    return seed;
+    return found;
 }
 
 template <typename T>
@@ -262,16 +247,6 @@ consteval bool HasField(std::string_view name) {
         if (std::meta::identifier_of(m) == name)
             return true;
     return false;
-}
-
-template <typename Dst, typename Src>
-constexpr void CopyMatchingFields(Dst& dst, const Src& src) {
-    ForEachFieldWithName(src, [&](std::string_view name, auto&& value) {
-        VisitFieldByName(dst, name, [&](auto&& dstField) {
-            if constexpr (std::is_assignable_v<decltype(dstField)&, decltype(value)>)
-                dstField = value;
-        });
-    });
 }
 
 template <typename E>
@@ -299,13 +274,10 @@ constexpr void ForEachFieldIndexed(T&& t, F&& f) {
 template <typename Tag, typename T>
 consteval bool HasTag(std::string_view field_name) {
     using U = std::remove_cvref_t<T>;
-
-    // Check if the type even has a ReflectMetadata inner struct
     if constexpr (requires { typename U::ReflectMetadata; }) {
         using Meta                  = typename U::ReflectMetadata;
         constexpr auto meta_members = std::define_static_array(std::meta::nonstatic_data_members_of(^^Meta, std::meta::access_context::current()));
 
-        // Loop through the metadata fields to see if our field matches and has the Tag type
         for (auto m: meta_members) {
             if (std::meta::identifier_of(m) == field_name) {
                 return std::meta::type_of(m) == ^^Tag;
@@ -328,11 +300,6 @@ consteval auto BaseClasses() {
     return std::meta::bases_of(^^std::remove_cvref_t<T>, std::meta::access_context::current());
 }
 
-template <typename T>
-constexpr bool HasBases() {
-    return !BaseClasses<T>().empty();
-}
-
 template <StringLiteral NameConst, typename T>
 constexpr decltype(auto) GetFieldByName(T&& t) {
     constexpr auto found_member = detail::FindMember<NameConst, T>();
@@ -349,10 +316,7 @@ template <typename T, typename F>
 constexpr void ForEachBase(F&& f) {
     static constexpr auto bases = std::define_static_array(std::meta::bases_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
 
-    [:Expand(bases):] >> [&]<auto base> {
-        // Correctly splicing the reflected type info back into a usable type
-        f.template operator()<typename[:std::meta::type_of(base):]>();
-    };
+    [:Expand(bases):] >> [&]<auto base> { f.template operator()<typename[:std::meta::type_of(base):]>(); };
 }
 
 template <typename E>
@@ -367,7 +331,6 @@ constexpr std::string_view EnumToFlagsString(E value, std::string& out_buffer) {
         auto                       enum_under = static_cast<Under>(enum_val);
         constexpr std::string_view name       = std::meta::identifier_of(enumerator);
 
-        // Skip zero flags unless the value is exactly zero
         if (enum_under != 0 && (val_under & enum_under) == enum_under) {
             if (!out_buffer.empty())
                 out_buffer += " | ";
@@ -376,7 +339,6 @@ constexpr std::string_view EnumToFlagsString(E value, std::string& out_buffer) {
     };
 
     if (out_buffer.empty() && val_under == 0) {
-        // Look for an explicit zero enumerator
         return EnumToString(value);
     }
     return out_buffer;
@@ -385,20 +347,6 @@ constexpr std::string_view EnumToFlagsString(E value, std::string& out_buffer) {
 template <StringLiteral NameConst, typename T>
 consteval std::size_t IndexOfField() {
     return detail::IndexOfField<NameConst, T>();
-}
-
-// Maps the index of a field in type 'From' to its matching field index in type 'To' by name.
-// Returns static_cast<std::size_t>(-1) if no matching field is found.
-template <typename From, typename To>
-consteval std::size_t MapFieldIndex(std::size_t fromIdx) {
-    constexpr auto fromNames = FieldNames<From>();
-    constexpr auto toNames   = FieldNames<To>();
-    for (std::size_t i = 0; i < toNames.size(); ++i) {
-        if (toNames[i] == fromNames[fromIdx]) {
-            return i;
-        }
-    }
-    return static_cast<std::size_t>(-1);
 }
 
 template <typename T>
@@ -417,14 +365,11 @@ consteval std::size_t MemberFunctionCount() {
 template <typename T>
 consteval auto MemberFunctionNames() {
     static constexpr auto all_members = std::define_static_array(std::meta::members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
-
-    // First count how many actual functions we have to size our array
-    constexpr std::size_t count = MemberFunctionCount<T>();
+    constexpr std::size_t count       = MemberFunctionCount<T>();
 
     return []<std::size_t... Is>(std::index_sequence<Is...>) {
         std::array<std::string_view, count> names {};
         [[maybe_unused]] std::size_t        idx = 0;
-
         (
             [&] {
                 constexpr auto member = all_members[Is];
@@ -433,7 +378,6 @@ consteval auto MemberFunctionNames() {
                 }
             }(),
             ...);
-
         return names;
     }(std::make_index_sequence<all_members.size()>());
 }
@@ -467,8 +411,8 @@ consteval std::string_view EnumUnderlyingTypeName() {
 
 template <typename T, typename F>
 constexpr void ForEachFieldAdaptive(T&& t, F&& f) {
-    constexpr std::size_t FieldCount = ZHLN::Reflect::FieldCount<T>();
-    detail::ChunkedFieldVisitor<T, F, 0, FieldCount>(std::forward<T>(t), std::forward<F>(f));
+    constexpr std::size_t Count = FieldCount<T>();
+    detail::ChunkedFieldVisitor<T, F, 0, Count>(std::forward<T>(t), std::forward<F>(f));
 }
 
 template <typename Tag, typename T>
@@ -490,10 +434,6 @@ consteval bool ValidateSerializability() {
     return ok;
 }
 
-/**
- * @brief Generic static reflection utility to iterate over nested classes/structs.
- * Traverses all members of an enclosing scope type and yields each nested class type.
- */
 template <typename T, typename F>
 constexpr void ForEachNestedType(F&& f) {
     static constexpr auto members = std::define_static_array(std::meta::members_of(std::meta::dealias(^^T), std::meta::access_context::current()));
@@ -513,23 +453,6 @@ constexpr void ForEachNestedType(F&& f) {
     }(std::make_index_sequence<members.size()> {});
 }
 
-// ----------------------------------------------------------------------------
-// Compile-Time Aggregates (Type Generation)
-// ----------------------------------------------------------------------------
-
-/**
- * @brief Represents a single field declaration in a schema.
- */
-template <typename T, StringLiteral FieldName>
-struct Field {
-    using type                             = T;
-    static constexpr std::string_view name = FieldName;
-};
-
-/**
- * @brief Triggering struct that forces compilation-phase instantiation
- *        and completion of the reflected aggregate inside a consteval block.
- */
 template <StringLiteral Name, typename... Fields>
 struct Define {
     struct type;
@@ -555,15 +478,6 @@ struct Define {
     }
 };
 
-// This helper template takes the type explicitly as a template argument,
-// but internally calls the hidden friend unqualified using a dependent argument.
-template <typename T>
-constexpr std::string_view GetSchemaNameOf() noexcept {
-    return GetSchemaName(static_cast<T*>(nullptr));
-}
-
-// Walks T's fields; for any field whose name also appears in Meta,
-// calls f.template operator()<Tag>(field) where Tag is that Meta field's type.
 template <typename Meta, typename T, typename F>
 constexpr void ForEachReflectedField(T&& t, F&& f) {
     static constexpr auto members =
@@ -588,7 +502,6 @@ constexpr void ForEachReflectedField(T&& t, F&& f) {
     });
 }
 
-// Calls f.template operator()<Val>() for every enumerator Val of E, at compile time.
 template <typename E, typename F>
     requires std::is_enum_v<E>
 constexpr void ForEachEnumerator(F&& f) {
@@ -600,113 +513,62 @@ constexpr void ForEachEnumerator(F&& f) {
     });
 }
 
-// Runtime enum value -> compile-time template dispatch. Calls f.template operator()<Val>()
-// for whichever enumerator Val equals `value`. No-op if value doesn't match any enumerator.
-template <typename E, typename F>
-    requires std::is_enum_v<E>
-constexpr void DispatchEnum(E value, F&& f) {
-    ForEachEnumerator<E>([&]<E Val>() {
-        if (value == Val) {
-            f.template operator()<Val>();
-        }
-    });
-}
-
 } // namespace ZHLN::Reflect
-#else
+
+#else // Fallback code with redundant logic removed
 
 namespace ZHLN::Reflect {
 
-// Literal class type to allow passing string literals as NTTPs
-template <std::size_t N>
-struct StringLiteral {
-    char value[N];
-    constexpr StringLiteral(const char (&str)[N]) {
-        std::copy_n(str, N, value);
-    }
-    constexpr operator std::string_view() const {
-        return {value, N - 1};
-    }
-};
-
-// Dummy placeholder for template-splicing structures
 template <std::ranges::range R>
-consteval int Expand(R&&) {
+consteval int Expand(R&& /*unused*/) {
     return 0;
 }
 
 template <typename T, typename F>
-constexpr void ForEachField(T&&, F&&) {
+constexpr void ForEachField(T&& /*unused*/, F&& /*unused*/) {
 }
 
 template <typename T, typename F>
-constexpr void ForEachFieldWithName(T&&, F&&) {
+constexpr void ForEachFieldWithName(T&& /*unused*/, F&& /*unused*/) {
 }
 
 template <typename T>
-constexpr auto TieFields(T&&) {
+constexpr auto TieFields(T&& /*unused*/) {
     return std::tuple {};
-}
-
-template <typename T>
-constexpr bool GenericEqual(const T&, const T&) {
-    return true;
 }
 
 template <typename E>
     requires std::is_enum_v<E>
-constexpr std::string_view EnumToString(E) {
+constexpr std::string_view EnumToString(E /*unused*/) {
     return "Unknown";
 }
 
 template <typename E>
     requires std::is_enum_v<E>
-constexpr std::optional<E> StringToEnum(std::string_view) {
+constexpr std::optional<E> StringToEnum(std::string_view /*unused*/) {
     return std::nullopt;
 }
 
 template <typename T>
-constexpr auto ZipFieldsWithNames(T&&) {
+constexpr auto ZipFieldsWithNames(T&& /*unused*/) {
     return std::tuple {};
 }
 
-// Get the total number of fields at compile-time
 template <typename T>
 constexpr std::size_t FieldCount() {
     return 0;
 }
 
-// Access a field by compile-time index (returns dummy reference to satisfy decltype(auto))
 template <std::size_t N, typename T>
-constexpr decltype(auto) GetField(T&&) {
+constexpr decltype(auto) GetField(T&& /*unused*/) {
     struct Dummy {};
     static Dummy d;
     return d;
 }
 
-template <typename T>
-constexpr bool IsBracesConstructible() {
-    return std::is_aggregate_v<std::remove_cvref_t<T>>;
-}
-
 template <typename T, typename F>
-constexpr bool VisitFieldByName(T&&, std::string_view, F&&) {
+constexpr bool VisitFieldByName(T&& /*unused*/, std::string_view /*unused*/, F&& /*unused*/) {
     return false;
-}
-
-template <typename T>
-constexpr auto GenericCompare(const T&, const T&) {
-    return std::strong_ordering::equal;
-}
-
-template <typename T>
-constexpr bool GenericLess(const T&, const T&) {
-    return false;
-}
-
-template <typename T>
-constexpr std::size_t GenericHash(const T&) {
-    return 0;
 }
 
 template <typename T>
@@ -715,12 +577,8 @@ consteval auto FieldNames() {
 }
 
 template <typename T>
-consteval bool HasField(std::string_view) {
+consteval bool HasField(std::string_view /*unused*/) {
     return false;
-}
-
-template <typename Dst, typename Src>
-constexpr void CopyMatchingFields(Dst&, const Src&) {
 }
 
 template <typename E>
@@ -736,11 +594,11 @@ consteval auto EnumNames() {
 }
 
 template <typename T, typename F>
-constexpr void ForEachFieldIndexed(T&&, F&&) {
+constexpr void ForEachFieldIndexed(T&& /*unused*/, F&& /*unused*/) {
 }
 
 template <typename Tag, typename T>
-consteval bool HasTag(std::string_view) {
+consteval bool HasTag(std::string_view /*unused*/) {
     return false;
 }
 
@@ -752,14 +610,8 @@ consteval auto BaseClasses() {
     return std::array<int, 0> {};
 }
 
-template <typename T>
-constexpr bool HasBases() {
-    return false;
-}
-
-// Access a field by compile-time name (returns dummy reference to satisfy decltype(auto))
 template <StringLiteral NameConst, typename T>
-constexpr decltype(auto) GetFieldByName(T&&) {
+constexpr decltype(auto) GetFieldByName(T&& /*unused*/) {
     struct Dummy {};
     static Dummy d;
     return d;
@@ -771,23 +623,18 @@ consteval std::string_view TypeName() {
 }
 
 template <typename T, typename F>
-constexpr void ForEachBase(F&&) {
+constexpr void ForEachBase(F&& /*unused*/) {
 }
 
 template <typename E>
     requires std::is_enum_v<E>
-constexpr std::string_view EnumToFlagsString(E, std::string& out_buffer) {
+constexpr std::string_view EnumToFlagsString(E /*unused*/, std::string& out_buffer) {
     out_buffer.clear();
     return "";
 }
 
 template <StringLiteral NameConst, typename T>
 consteval std::size_t IndexOfField() {
-    return static_cast<std::size_t>(-1);
-}
-
-template <typename From, typename To>
-consteval std::size_t MapFieldIndex(std::size_t) {
     return static_cast<std::size_t>(-1);
 }
 
@@ -802,12 +649,12 @@ consteval auto MemberFunctionNames() {
 }
 
 template <StringLiteral NameConst, typename T, typename ValueType>
-constexpr bool SetFieldByName(T&, ValueType&&) {
+constexpr bool SetFieldByName(T& /*unused*/, ValueType&& /*unused*/) {
     return false;
 }
 
 template <typename T, typename Tuple>
-constexpr T MakeFromTuple(Tuple&&) {
+constexpr T MakeFromTuple(Tuple&& /*unused*/) {
     return T {};
 }
 
@@ -818,7 +665,7 @@ consteval std::string_view EnumUnderlyingTypeName() {
 }
 
 template <typename T, typename F>
-constexpr void ForEachFieldAdaptive(T&&, F&&) {
+constexpr void ForEachFieldAdaptive(T&& /*unused*/, F&& /*unused*/) {
 }
 
 template <typename Tag, typename T>
@@ -827,50 +674,105 @@ consteval bool ValidateSerializability() {
 }
 
 template <typename T, typename F>
-constexpr void ForEachNestedType(F&&) {
+constexpr void ForEachNestedType(F&& /*unused*/) {
 }
-
-template <typename T, StringLiteral FieldName>
-struct Field {
-    using type                             = T;
-    static constexpr std::string_view name = FieldName;
-};
 
 template <StringLiteral Name, typename... Fields>
 struct Define {
     struct type {};
-    friend constexpr std::string_view GetSchemaName(type*) {
+    friend constexpr std::string_view GetSchemaName(type* /*unused*/) {
         return Name;
     }
 };
 
-template <typename T>
-constexpr std::string_view GetSchemaNameOf() noexcept;
-
 template <typename Meta, typename T, typename F>
-constexpr void ForEachReflectedField(T&&, F&&) {
+constexpr void ForEachReflectedField(T&& /*unused*/, F&& /*unused*/) {
 }
 
 template <typename E, typename F>
     requires std::is_enum_v<E>
-constexpr void ForEachEnumerator(F&&) {
-}
-
-template <typename E, typename F>
-    requires std::is_enum_v<E>
-constexpr void DispatchEnum(E, F&&) {
+constexpr void ForEachEnumerator(F&& /*unused*/) {
 }
 
 } // namespace ZHLN::Reflect
 #endif
 
-// We don't need stubs for everything.
+// ============================================================================
+// 3. DERIVED UTILITIES & DIAGNOSTICS (Defined Once)
+// ============================================================================
+
 namespace ZHLN::Reflect {
+
+template <typename T>
+constexpr std::string_view GetSchemaNameOf() noexcept {
+    return GetSchemaName(static_cast<T*>(nullptr));
+}
+
+template <typename T>
+constexpr bool GenericEqual(const T& lhs, const T& rhs) {
+    return TieFields(lhs) == TieFields(rhs);
+}
+
+template <typename T>
+constexpr auto GenericCompare(const T& lhs, const T& rhs) {
+    return TieFields(lhs) <=> TieFields(rhs);
+}
+
+template <typename T>
+constexpr bool GenericLess(const T& lhs, const T& rhs) {
+    return TieFields(lhs) < TieFields(rhs);
+}
+
+template <typename T>
+constexpr std::size_t GenericHash(const T& t) {
+    std::size_t seed = 0;
+    ForEachField(t, [&](auto&& field) { seed ^= std::hash<std::remove_cvref_t<decltype(field)>> {}(field) + 0x9e3779b9 + (seed << 6) + (seed >> 2); });
+    return seed;
+}
+
+template <typename Dst, typename Src>
+constexpr void CopyMatchingFields(Dst& dst, const Src& src) {
+    ForEachFieldWithName(src, [&](std::string_view name, auto&& value) {
+        VisitFieldByName(dst, name, [&](auto&& dstField) {
+            if constexpr (std::is_assignable_v<decltype(dstField)&, decltype(value)>) {
+                dstField = value;
+            }
+        });
+    });
+}
+
+template <typename T>
+constexpr bool HasBases() {
+    return !BaseClasses<T>().empty();
+}
+
+template <typename From, typename To>
+consteval std::size_t MapFieldIndex(std::size_t fromIdx) {
+    constexpr auto fromNames = FieldNames<From>();
+    constexpr auto toNames   = FieldNames<To>();
+    for (std::size_t i = 0; i < toNames.size(); ++i) {
+        if (toNames[i] == fromNames[fromIdx]) {
+            return i;
+        }
+    }
+    return static_cast<std::size_t>(-1);
+}
+
+template <typename E, typename F>
+    requires std::is_enum_v<E>
+constexpr void DispatchEnum(E value, F&& f) {
+    ForEachEnumerator<E>([&]<E Val>() {
+        if (value == Val) {
+            f.template operator()<Val>();
+        }
+    });
+}
+
 namespace detail {
 template <typename T>
 concept Formattable = requires(const T& val, std::format_context ctx) { std::formatter<std::remove_cvref_t<T>, char>().format(val, ctx); };
 } // namespace detail
-// Forward declare the public dispatcher to allow recursive formatting
+
 template <typename T>
 std::string ToDebugString(const T& t);
 
@@ -892,7 +794,7 @@ struct CustomFormatter {
                         out += ", ";
                     }
                     first = false;
-                    out += std::string(name) + "=" + ToDebugString(value); // Recurse
+                    out += std::string(name) + "=" + ToDebugString(value);
                 });
                 out += "}";
             } else {
@@ -910,4 +812,5 @@ std::string ToDebugString(const T& t) {
     CustomFormatter<std::remove_cvref_t<T>>::format(t, out);
     return out;
 }
+
 } // namespace ZHLN::Reflect
