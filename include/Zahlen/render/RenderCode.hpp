@@ -1,6 +1,6 @@
 // include/Zahlen/RenderCode.hpp
 #pragma once
-#include <Zahlen/Error.hpp>
+#include "../Error.hpp"
 #include <cstdint>
 
 namespace ZHLN {

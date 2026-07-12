@@ -12,16 +12,19 @@
 
 namespace ZHLN {
 
-std::expected<void, std::string> RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) {
+std::expected<void, Error> RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) {
     return Vk::ShaderStages::Create(device, shaderData, "VSMain", "PSShadow")
-        .transform_error([](const std::string& err) { return "Failed to compile ShaderStages for Shadow Pipeline: " + err; })
-        .and_then([&, device](auto&& shaders) -> std::expected<void, std::string> {
+        .transform_error([](auto err) -> Error { return err; })
+        .and_then([&, device](auto&& shaders) -> std::expected<void, Error> {
             return Vk::PipelineLayoutBuilder(device)
                 .AddDescriptorSetLayout(bindlessLayout.Get())
                 .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
                 .Build()
-                .transform_error([](VkResult err) { return std::format("Failed to compile Shadow Pipeline Layout: {}", Vk::ResultString(err)); })
-                .and_then([&, device, shaders = std::forward<decltype(shaders)>(shaders)](auto&& layout) -> std::expected<void, std::string> {
+                .transform_error([](auto err) -> Error {
+                    ZHLN::Log("Shadow pipeline layout creation error: {} (Category: {})", err.Message(), err.Category());
+                    return RenderInitError::PipelineLayoutCreationFailed;
+                })
+                .and_then([&, device, shaders = std::forward<decltype(shaders)>(shaders)](auto&& layout) -> std::expected<void, Error> {
                     shadowPipelineLayout = std::forward<decltype(layout)>(layout);
 
                     return Vk::PipelineBuilder {}
@@ -31,22 +34,28 @@ std::expected<void, std::string> RenderContext::Impl::CompileShadowPipeline(VkDe
                         .DepthFormat(VK_FORMAT_D32_SFLOAT)
                         .CullNone()
                         .Build(device)
-                        .transform_error([](Vk::PipelineBuilderResult) { return std::string("Failed to compile or build Shadow Pipeline."); })
+                        .transform_error([](auto err) -> Error {
+                            ZHLN::Log("Shadow pipeline compilation error: {} (Category: {})", err.Message(), err.Category());
+                            return RenderInitError::PipelineCreationFailed;
+                        })
                         .transform([&](auto&& pipeline) { shadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
                 });
         });
 }
 
-std::expected<void, std::string> RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) {
+std::expected<void, Error> RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) {
     return Vk::ShaderStages::Create(device, shaderData)
-        .transform_error([](const std::string& err) { return "Failed to compile ShaderStages for Punctual Shadow Pipeline: " + err; })
-        .and_then([&, device](auto&& shaders) -> std::expected<void, std::string> {
+        .transform_error([](auto err) -> Error { return err; })
+        .and_then([&, device](auto&& shaders) -> std::expected<void, Error> {
             return Vk::PipelineLayoutBuilder(device)
                 .AddDescriptorSetLayout(bindlessLayout.Get())
                 .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT, sizeof(uint32_t))
                 .Build()
-                .transform_error([](VkResult err) { return std::format("Failed to compile Punctual Shadow Pipeline Layout: {}", Vk::ResultString(err)); })
-                .and_then([&, device, shaders = std::forward<decltype(shaders)>(shaders)](auto&& layout) -> std::expected<void, std::string> {
+                .transform_error([](auto err) -> Error {
+                    ZHLN::Log("Punctual shadow pipeline layout creation error: {} (Category: {})", err.Message(), err.Category());
+                    return RenderInitError::PipelineLayoutCreationFailed;
+                })
+                .and_then([&, device, shaders = std::forward<decltype(shaders)>(shaders)](auto&& layout) -> std::expected<void, Error> {
                     punctualShadowPipelineLayout = std::forward<decltype(layout)>(layout);
 
                     return Vk::PipelineBuilder {}
@@ -56,7 +65,10 @@ std::expected<void, std::string> RenderContext::Impl::CompilePunctualShadowPipel
                         .DepthFormat(VK_FORMAT_D32_SFLOAT)
                         .CullNone()
                         .Build(device)
-                        .transform_error([](Vk::PipelineBuilderResult) { return std::string("Failed to compile or build Punctual Shadow Pipeline."); })
+                        .transform_error([](auto err) -> Error {
+                            ZHLN::Log("Punctual shadow pipeline compilation error: {} (Category: {})", err.Message(), err.Category());
+                            return RenderInitError::PipelineCreationFailed;
+                        })
                         .transform([&](auto&& pipeline) { punctualShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
                 });
         });
@@ -72,6 +84,12 @@ auto RenderContext::GetGPUName() const -> const char* {
 
 uint32_t RenderContext::GetFrameIndex() const noexcept {
     return _impl->frame_index;
+}
+
+void RenderContext::CheckShaderReload() noexcept {
+    if constexpr (isDev) {
+        _impl->CheckShaderWatchers();
+    }
 }
 
 void RenderContext::SetResolution([[maybe_unused]] const Extent2D& res) {
@@ -94,22 +112,28 @@ void RenderContext::DestroyBuffer(BufferHandle handle) {
     }
 }
 
-std::expected<Material, std::string> RenderContext::CreateMaterial(const PipelineDesc& desc) {
+std::expected<Material, Error> RenderContext::CreateMaterial(const PipelineDesc& desc) {
     ZHLN_ShaderDesc v_desc = {.code = Vk::AsSpirV(desc.vertexShaderData), .size = desc.vertexShaderSize, .entry_point = nullptr};
     ZHLN_ShaderDesc f_desc = {.code = Vk::AsSpirV(desc.fragShaderData), .size = desc.fragShaderSize, .entry_point = nullptr};
 
     auto* impl = _impl.get();
 
     return Vk::ShaderStages::Create(impl->ctx.Device(), v_desc, f_desc)
-        .transform_error([](const std::string& err) { return "Failed to compile or link Material shader stages: " + err; })
-        .and_then([impl, &desc](auto&& shaders) -> std::expected<Material, std::string> {
+        .transform_error([](auto err) -> Error {
+            ZHLN::Log("Material shader compilation error: {} (Category: {})", err.Message(), err.Category());
+            return MaterialCreationError::ShaderCompilationFailed;
+        })
+        .and_then([impl, &desc](auto&& shaders) -> std::expected<Material, Error> {
             // 1. Build the pipeline layout
             return Vk::PipelineLayoutBuilder(impl->ctx.Device())
                 .AddDescriptorSetLayout(impl->bindlessLayout.Get())
                 .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
                 .Build()
-                .transform_error([](VkResult err) { return std::format("Failed to compile Material Pipeline Layout: {}", Vk::ResultString(err)); })
-                .and_then([impl, &desc, &shaders](auto&& layout) -> std::expected<Material, std::string> {
+                .transform_error([](auto err) -> Error {
+                    ZHLN::Log("Material pipeline layout creation error: {} (Category: {})", err.Message(), err.Category());
+                    return MaterialCreationError::PipelineLayoutCreationFailed;
+                })
+                .and_then([impl, &desc, &shaders](auto&& layout) -> std::expected<Material, Error> {
                     // 2. Configure the graphics pipeline builder options
                     auto pipeline = Vk::PipelineBuilder {}.Shaders(shaders).Layout(layout.Get()).DepthFormat(VK_FORMAT_D32_SFLOAT);
 
@@ -133,7 +157,10 @@ std::expected<Material, std::string> RenderContext::CreateMaterial(const Pipelin
 
                     // 3. Compile the graphics pipeline and return the initialized Material on success
                     return pipeline.Build(impl->ctx.Device())
-                        .transform_error([](Vk::PipelineBuilderResult) { return std::string("Failed to build Material Graphics Pipeline."); })
+                        .transform_error([](auto err) -> Error {
+                            ZHLN::Log("Material pipeline creation error: {} (Category: {})", err.Message(), err.Category());
+                            return MaterialCreationError::PipelineCreationFailed;
+                        })
                         .transform([impl, &desc, &layout](auto&& compiledPipeline) {
                             return Material {
                                 .pipeline = impl->materialPool.Create(
@@ -357,13 +384,16 @@ uint32_t RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas)
     return offset;
 }
 
-std::expected<void, std::string> RenderContext::SetShadowResolution(uint32_t resolution) {
+std::expected<void, Error> RenderContext::SetShadowResolution(uint32_t resolution) {
     auto* impl   = _impl.get();
     auto* device = impl->ctx.Device();
 
     // 1. Wait for GPU idle monadically to prevent pipeline hazards during reallocation
     return Vk::WaitIdle(device)
-        .transform_error([](const std::string& err) { return std::format("Failed to wait for idle on resolution set: {}", err); })
+        .transform_error([](auto err) -> Error {
+            ZHLN::Log("SetShadowResolution WaitIdle failed: {}", ToString(err));
+            return ShadowResolutionError::RecreationFailed;
+        })
         // 2. Perform the target reallocation and layout transitions on success
         .transform([&](VkResult /*success*/) {
             impl->graphResources.shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
@@ -439,7 +469,7 @@ void RenderContext::BuildMeshBLAS(Mesh& mesh) {
     );
 
     {
-        Vk::CommandPool tempPool(impl->ctx.Device(), impl->ctx.PhysicalInfo().graphics_family);
+        Vk::CommandPool<Vk::QueueType::Graphics> tempPool(impl->ctx.Device(), impl->ctx.PhysicalInfo().graphics_family);
         if (tempPool.Allocate(1)) {
             VkCommandBuffer tempCmd = tempPool[0];
             {

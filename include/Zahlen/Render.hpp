@@ -4,8 +4,10 @@
 #pragma once
 #include "Common.h"
 #include <Zahlen/Config.hpp>
+#include <Zahlen/Error.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
+#include <Zahlen/render/RenderCode.hpp>
 #include <detail/String.hpp>
 #include <expected>
 #include <memory>
@@ -15,7 +17,7 @@ namespace ZHLN {
 
 enum class RenderFrameResult : uint8_t { Success = 0, Suboptimal, OutOfDate, DeviceLost, Error };
 
-using RenderResult = std::expected<void, RenderFrameResult>;
+using RenderResult = std::expected<void, Error>;
 
 struct PipelineDesc {
     const void* vertexShaderData = nullptr;
@@ -41,7 +43,7 @@ class ZHLN_API RenderContext {
     RenderContext(const RenderContext&)                    = delete;
     auto operator=(const RenderContext&) -> RenderContext& = delete;
 
-    [[nodiscard]] static std::expected<std::unique_ptr<RenderContext>, std::string> Create(Window& window, const RenderConfig& cfg) noexcept;
+    [[nodiscard]] static std::expected<std::unique_ptr<RenderContext>, Error> Create(Window& window, const RenderConfig& cfg) noexcept;
 
     void CheckShaderReload() noexcept;
 
@@ -55,11 +57,11 @@ class ZHLN_API RenderContext {
     [[nodiscard]] uint32_t     GetFrameIndex() const noexcept;
 
     // --- Opaque Resource Creation API ---
-    auto CreateVertexBuffer(const void* data, size_t size, uint32_t stride = sizeof(VertexPosition)) -> BufferHandle;
-    auto CreateIndexBuffer(const void* data, size_t size) -> BufferHandle;
-    void DestroyBuffer(BufferHandle handle);
-    auto CreateConstantBuffer(size_t size) -> BufferHandle;
-    [[nodiscard]] std::expected<Material, std::string> CreateMaterial(const PipelineDesc& desc);
+    auto                                         CreateVertexBuffer(const void* data, size_t size, uint32_t stride = sizeof(VertexPosition)) -> BufferHandle;
+    auto                                         CreateIndexBuffer(const void* data, size_t size) -> BufferHandle;
+    void                                         DestroyBuffer(BufferHandle handle);
+    auto                                         CreateConstantBuffer(size_t size) -> BufferHandle;
+    [[nodiscard]] std::expected<Material, Error> CreateMaterial(const PipelineDesc& desc);
 
     auto CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true) -> uint32_t;
     auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;
@@ -79,7 +81,7 @@ class ZHLN_API RenderContext {
 
     void BuildMeshBLAS(Mesh& mesh);
 
-    [[nodiscard]] std::expected<void, std::string> SetShadowResolution(uint32_t resolution);
+    [[nodiscard]] std::expected<void, Error> SetShadowResolution(uint32_t resolution);
 
     void ProvokeDeviceLost();
 

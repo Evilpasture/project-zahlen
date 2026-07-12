@@ -64,7 +64,7 @@ auto ComputePipelineBuilder::Specialization(const VkSpecializationInfo* info) no
     return *this;
 }
 
-auto ComputePipelineBuilder::Build(const VkDevice device) const noexcept -> std::expected<Pipeline, PipelineBuilderResult> {
+auto ComputePipelineBuilder::Build(const VkDevice device) const noexcept -> std::expected<Pipeline, ZHLN::Error> {
     const auto result = Validate();
     if (result != PipelineBuilderResult::Succeeded) {
         ReportComputePipelineBuilderError(result);
@@ -107,7 +107,7 @@ PipelineLayoutBuilder& PipelineLayoutBuilder::AddPushConstant(VkShaderStageFlags
     return *this;
 }
 
-auto PipelineLayoutBuilder::Build() const noexcept -> std::expected<PipelineLayout, VkResult> {
+auto PipelineLayoutBuilder::Build() const noexcept -> std::expected<PipelineLayout, ZHLN::Error> {
     const VkPipelineLayoutCreateInfo info = {
         .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .pNext                  = nullptr,

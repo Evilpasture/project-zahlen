@@ -779,7 +779,7 @@ RenderResult RenderContext::BeginFrame() noexcept {
         VkExtent2D ext = {.width = fbSize->width, .height = fbSize->height};
 
         if (!_impl->RecreateTargets(ext)) {
-            return std::unexpected(Error);
+            return std::unexpected(RenderFrameResult::Error);
         }
 
         _impl->needsInitialClear = true;
@@ -816,7 +816,7 @@ RenderResult RenderContext::EndFrame() noexcept {
         if (_impl->current_cmd == VK_NULL_HANDLE) {
             _impl->drawQueue.clear();
             _impl->uiDrawQueue.clear();
-            return std::unexpected(Error);
+            return std::unexpected(RenderFrameResult::Error);
         }
 
         res = Vk::DrawFrame<2, false>(

@@ -86,14 +86,14 @@ auto SamplerBuilder::LodRange(float minLod, float maxLod) noexcept -> SamplerBui
     return *this;
 }
 
-auto SamplerBuilder::Build(VkDevice device) const noexcept -> std::expected<Sampler, std::string> {
+auto SamplerBuilder::Build(VkDevice device) const noexcept -> std::expected<Sampler, ZHLN::Error> {
     if (device == VK_NULL_HANDLE) {
-        return std::unexpected("Device handle is null.");
+        return std::unexpected(SamplerCreationError::NullDevice);
     }
 
     VkSampler sampler = nullptr;
     if (vkCreateSampler(device, &_info, nullptr, &sampler) != VK_SUCCESS) {
-        return std::unexpected("Failed to create sampler.");
+        return std::unexpected(SamplerCreationError::CreationFailed);
     }
 
     return Sampler {device, sampler};

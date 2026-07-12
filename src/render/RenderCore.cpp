@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 // clang-format off
+#include <Zahlen/render/RenderCode.hpp>
 #include "Rendering.hpp"
 // clang-format on
 #include "RenderCore.hpp"
@@ -9,10 +10,10 @@
 
 namespace ZHLN::Vk {
 
-std::expected<VkResult, std::string> WaitIdle(VkDevice device) noexcept {
+std::expected<VkResult, VulkanCallError> WaitIdle(VkDevice device) noexcept {
     auto res = vkDeviceWaitIdle(device);
     if (res != VK_SUCCESS) {
-        return std::unexpected(ResultString(res));
+        return std::unexpected(VulkanCallError::VulkanCallFailed);
     }
     return res;
 }

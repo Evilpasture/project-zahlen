@@ -81,7 +81,7 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
 
             // Trigger depth texture allocation changes
             if (auto res = engine.GetRenderContext().SetShadowResolution(newRes); !res) {
-                ZHLN::Log("ERROR: Failed to update shadow resolution: {}", res.error());
+                ZHLN::Log("ERROR: Failed to update shadow resolution: {}", res.error().Message());
             }
         }
         ImGui::End();

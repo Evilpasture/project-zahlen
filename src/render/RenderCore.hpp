@@ -7,6 +7,8 @@
 #error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <Zahlen/render/RenderCode.hpp>
+
 namespace ZHLN {
 
 struct Color4 {
@@ -153,7 +155,7 @@ class TypedPipeline {
 
 inline constexpr auto& GetBufferAddress = ZHLN_GetBufferDeviceAddress;
 
-std::expected<VkResult, std::string> WaitIdle(VkDevice device) noexcept;
+std::expected<VkResult, VulkanCallError> WaitIdle(VkDevice device) noexcept;
 
 // ============================================================================
 // Scoped RAII Scissor State Guard
@@ -363,11 +365,10 @@ void DrawIndexedIndirectCount(
 // Error Helpers
 // ============================================================================
 
-std::string       ReportVkError(VkResult result, const char* context, const std::source_location& location);
-[[noreturn]] void ReportSemaphoreBoundsError(uint32_t index, uint32_t count) noexcept;
-
-[[nodiscard]] auto ResultString(const VkResult result) noexcept -> std::string;
-std::expected<VkResult, std::string>
+[[nodiscard]] std::string ReportVkError(VkResult result, const char* context, const std::source_location& location);
+[[noreturn]] void         ReportSemaphoreBoundsError(uint32_t index, uint32_t count) noexcept;
+[[nodiscard]] auto        ResultString(const VkResult result) noexcept -> std::string;
+[[nodiscard]] std::expected<VkResult, std::string>
     CheckResult(const VkResult result, const char* context = "", const std::source_location location = std::source_location::current());
 
 // ============================================================================

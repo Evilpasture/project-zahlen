@@ -73,8 +73,8 @@ auto main() -> int {
         inst_exts_builder.OptionalIf(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME, isMac);
 
         return inst_exts_builder.Build()
-            .transform_error([](const std::string& err) {
-                return "Failed to build instance extensions: " + err;
+            .transform_error([](ZHLN::Error err) {
+                return "Failed to build instance extensions: " + std::string(err.Message());
             })
             .and_then([&](const Vk::ExtensionResult& instExts) -> std::expected<void, std::string> {
                 // 3. Create Vulkan Instance
@@ -110,10 +110,10 @@ auto main() -> int {
                     .RequireIf(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME, has_maint1_local)
                     .OptionalIf("VK_KHR_portability_subset", isMac)
                     .Build()
-                    .transform_error([instance, raw_surface](const std::string& err) {
+                    .transform_error([instance, raw_surface](ZHLN::Error err) {
                         vkDestroySurfaceKHR(instance, raw_surface, nullptr);
                         vkDestroyInstance(instance, nullptr);
-                        return "Failed to build device extensions: " + err;
+                        return "Failed to build device extensions: " + std::string(err.Message());
                     })
                     .and_then([&, instance, raw_surface, physical, has_maint1_local](const Vk::ExtensionResult& devExts) -> std::expected<void, std::string> {
                         
@@ -229,7 +229,7 @@ auto main() -> int {
 
                         auto cube_sampler_res = ZHLN::Vk::SamplerBuilder {}.Linear().Repeat().Build(ctx.Device());
                         if (!cube_sampler_res) {
-                            return std::unexpected("Failed to build cube sampler: " + cube_sampler_res.error());
+                            return std::unexpected("Failed to build cube sampler: " + std::string(cube_sampler_res.error().Message()));
                         }
                         auto cube_sampler = std::move(*cube_sampler_res);
 
@@ -246,8 +246,8 @@ auto main() -> int {
                         // Monadic Pipeline Generation
                         // =========================================================================
                         return ZHLN::Vk::ShaderStages::FromFiles(ctx.Device(), "cube.hlsl.VSMain.spv", "cube.hlsl.PSMain.spv", "VSMain", "PSMain")
-                            .transform_error([](const std::string& err) {
-                                return "Failed to compile cube ShaderStages: " + err;
+                            .transform_error([](ZHLN::Error err) {
+                                return "Failed to compile cube ShaderStages: " + std::string(err.Message());
                             })
                             .and_then([&, cube_desc_layout = std::move(cube_desc_layout)](Vk::ShaderStages shaders) mutable {
                                 VkDescriptorSetLayout raw_layout = cube_desc_layout.Get();
@@ -255,8 +255,8 @@ auto main() -> int {
                                     .AddDescriptorSetLayout(raw_layout)
                                     .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT, sizeof(Mat4))
                                     .Build()
-                                    .transform_error([](VkResult err) {
-                                        return std::format("Failed to compile Pipeline Layout: {}", Vk::ResultString(err));
+                                    .transform_error([](ZHLN::Error err) {
+                                        return std::format("Failed to compile Pipeline Layout: {}", err.Message());
                                     })
                                     .transform([shaders = std::move(shaders)](Vk::PipelineLayout layout) mutable {
                                         return std::make_pair(std::move(shaders), std::move(layout));
@@ -274,8 +274,8 @@ auto main() -> int {
                                     .DepthWrite(true)
                                     .CullBack()
                                     .Build(ctx.Device())
-                                    .transform_error([](Vk::PipelineBuilderResult err) {
-                                        return std::format("Failed to build Graphics Pipeline: {}", static_cast<int>(err));
+                                    .transform_error([](ZHLN::Error err) {
+                                        return std::format("Failed to build Graphics Pipeline: {}", err.Message());
                                     })
                                     .and_then([&, ctx = std::move(ctx), layout = std::move(layout), cube_descriptor_set](Vk::Pipeline&& pipeline) mutable -> std::expected<void, std::string> {
                                         

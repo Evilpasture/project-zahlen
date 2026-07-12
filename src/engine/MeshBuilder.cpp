@@ -12,7 +12,7 @@
 
 namespace ZHLN::CreativeWorksFactory {
 
-std::expected<Material, std::string> CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend) {
+std::expected<Material, Error> CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend) {
     using enum Resource::ShaderID;
     PipelineDesc desc;
     desc.vertexShaderData = Resource::GetShaderProgram(Basic).vertex.data();

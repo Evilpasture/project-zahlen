@@ -12,12 +12,12 @@
 #include "imgui.h"
 #include <Features.hpp>
 #include <StagingContext.hpp>
+#include <Zahlen/Error.hpp>
 #include <cstddef>
 #include <functional>
 #include <stb_image.h>
 #include <threading/TaskSystem.hpp>
 #include <vector>
-
 namespace {
 
 struct HardwareCaps {
@@ -76,24 +76,23 @@ bool CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept {
 
 namespace ZHLN {
 
-std::expected<void, std::string> RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int height) {
+std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int height) {
     using enum Resource::ShaderID;
 
-    // Helper to lift boolean-returning initializers into the expected-monad
-    auto make_expected = [](bool success, std::string_view err_msg) -> std::expected<void, std::string> {
+    auto make_expected = [](bool success, Error err) -> std::expected<void, Error> {
         if (success) {
             return {};
         }
-        return std::unexpected(std::string(err_msg));
+        return std::unexpected(err);
     };
 
-    return make_expected(allocator.Init(ctx), "Vulkan Memory Allocator (VMA) failed to initialize.")
+    return make_expected(allocator.Init(ctx), RenderInitError::SubsystemAllocationFailed)
         .and_then([&]() {
             return make_expected(
                 stagingRingBuffer.Init(
                     allocator.Get(), ctx.Device(), ctx.GraphicsQueue(), ctx.PhysicalInfo().graphics_family, static_cast<VkDeviceSize>(64 * 1024 * 1024)
                 ),
-                "Failed to initialize Staging Ring Buffer."
+                RenderInitError::SubsystemAllocationFailed
             );
         })
         .and_then([&]() {
@@ -101,11 +100,10 @@ std::expected<void, std::string> RenderContext::Impl::InitSubsystems(const Rende
                 transferRingBuffer.Init(
                     allocator.Get(), ctx.Device(), ctx.TransferQueue(), ctx.PhysicalInfo().transfer_family, static_cast<VkDeviceSize>(64 * 1024 * 1024)
                 ),
-                "Failed to initialize Transfer Ring Buffer."
+                RenderInitError::SubsystemAllocationFailed
             );
         })
-        .and_then([&]() -> std::expected<void, std::string> {
-            // Raytracing (non-fatal; logged on failure)
+        .and_then([&]() -> std::expected<void, Error> {
             bool supportsRayTracing = CheckRayTracingSupport(ctx.Physical());
             if (!supportsRayTracing || !rtCtx.Init(ctx.Device())) {
                 ZHLN::Log("WARNING: Raytracing context failed to initialize. RTR will be disabled.");
@@ -113,33 +111,26 @@ std::expected<void, std::string> RenderContext::Impl::InitSubsystems(const Rende
                 ZHLN::Log("Raytracing context initialized successfully.");
             }
 
-            // Subsystem initializations (non-fatal void calls)
             gpuProfiler.Init(ctx.Device(), ctx.Physical(), ctx.PhysicalInfo().graphics_family);
             graphicsCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().graphics_family);
             transferCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().transfer_family);
 
-            // InitShadowResources already returns std::expected<void, std::string>
-            return InitShadowResources().transform_error([](const std::string& /*err*/) { return std::string("Failed to initialize Shadow Resources."); });
+            return InitShadowResources();
         })
         .and_then([&]() { return InitCullingResources(); })
-        .and_then([&]() {
-            // InitBindless already returns std::expected<void, std::string>
-            return InitBindless().transform_error([](const std::string& /*err*/) { return std::string("Failed to initialize Bindless Descriptors."); });
-        })
+        .and_then([&]() { return InitBindless(); })
         .and_then([&]() { return BuildHangGpuPipeline(); })
         .and_then([&]() {
             return CompileShadowPipeline(
                        ctx.Device(), Resource::ShaderPair {.vertex = Resource::GetShaderProgram(Basic).vertex, .fragment = Resource::shadow_frag}
             )
-                .transform_error([](const std::string& err) { return std::format("Shadow pipeline compilation failed: {}", err); });
+                .transform_error([](auto e) -> Error { return e; });
         })
         .and_then([&]() {
-            return CompilePunctualShadowPipeline(ctx.Device(), Resource::GetShaderProgram(PunctualShadows)).transform_error([](const std::string& err) {
-                return std::format("Punctual shadow pipeline compilation failed: {}", err);
-            });
+            return CompilePunctualShadowPipeline(ctx.Device(), Resource::GetShaderProgram(PunctualShadows)).transform_error([](auto e) -> Error { return e; });
         })
         .and_then([&]() {
-            return make_expected(presentation.Init(ctx, allocator, surface.Get(), width, height, cfg.vsync), "Presentation Context initialization failed.");
+            return make_expected(presentation.Init(ctx, allocator, surface.Get(), width, height, cfg.vsync), RenderInitError::PresentationFailed);
         })
         .and_then([&]() {
             sync  = Vk::FrameSync<2>::Create(ctx.Device());
@@ -151,9 +142,9 @@ std::expected<void, std::string> RenderContext::Impl::InitSubsystems(const Rende
         })
         .and_then([&]() {
             auto* windowHandle = window.IsTTY() ? nullptr : static_cast<GLFWwindow*>(window.GetNativeHandle());
-            return SetupUI(windowHandle).transform_error([](const std::string& err) { return std::format("UI setup failed: {}", err); });
+            return SetupUI(windowHandle);
         })
-        .and_then([&]() -> std::expected<void, std::string> {
+        .and_then([&]() -> std::expected<void, Error> {
             uint32_t workerCount = TaskSystem::GetWorkerCount() + 1;
             if (workerCount == 0) {
                 workerCount = 1;
@@ -162,22 +153,22 @@ std::expected<void, std::string> RenderContext::Impl::InitSubsystems(const Rende
 
             for (auto& worker: workerCmds) {
                 for (auto& pool: worker.pools) {
-                    pool = Vk::CommandPool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+                    pool = Vk::CommandPool<Vk::QueueType::Graphics>(ctx.Device(), ctx.PhysicalInfo().graphics_family);
                     if (!pool.AllocateSecondary(256)) {
-                        return std::unexpected("Failed to pre-allocate secondary command buffers for worker threads.");
+                        return std::unexpected(Error(RenderInitError::WorkerCommandPoolSetupFailed));
                     }
                 }
             }
             return {};
         })
         .and_then([&]() {
-            return parallelRecorder[0].Init(ctx.Device(), ctx.PhysicalInfo().graphics_family).transform_error([](auto err) {
-                return std::format("Failed to allocate hardware command pools for parallel recorder [0]: {}", Vk::ResultString(err));
+            return parallelRecorder[0].Init(ctx.Device(), ctx.PhysicalInfo().graphics_family).transform_error([](auto) -> Error {
+                return RenderInitError::ParallelRecorderInitializationFailed;
             });
         })
         .and_then([&]() {
-            return parallelRecorder[1].Init(ctx.Device(), ctx.PhysicalInfo().graphics_family).transform_error([](auto err) {
-                return std::format("Failed to allocate hardware command pools for parallel recorder [1]: {}", Vk::ResultString(err));
+            return parallelRecorder[1].Init(ctx.Device(), ctx.PhysicalInfo().graphics_family).transform_error([](auto) -> Error {
+                return RenderInitError::ParallelRecorderInitializationFailed;
             });
         })
         .transform([&]() { deletionQueue.Init(2); });
@@ -185,7 +176,7 @@ std::expected<void, std::string> RenderContext::Impl::InitSubsystems(const Rende
 
 namespace {
 
-std::expected<Vk::ExtensionResult, std::string> GetPlatformInstanceExtensions(Window& window, bool enableValidation) noexcept {
+std::expected<Vk::ExtensionResult, Error> GetPlatformInstanceExtensions(Window& window, bool enableValidation) noexcept {
     glfwSetErrorCallback([](int error, const char* description) { ZHLN::Log("[GLFW Error] Code {}: {}", error, description); });
 
     auto builder = Vk::ExtensionBuilder::ForInstance();
@@ -200,7 +191,7 @@ std::expected<Vk::ExtensionResult, std::string> GetPlatformInstanceExtensions(Wi
 
         if (glfwExtensionCount > 0 && glfwExtensions != nullptr) {
             for (uint32_t i = 0; i < glfwExtensionCount; ++i) {
-                builder.Require(glfwExtensions[i]); // Operates cleanly on the lvalue
+                builder.Require(glfwExtensions[i]);
             }
         } else {
             ZHLN::Log("WARNING: glfwGetRequiredInstanceExtensions returned 0 extensions.");
@@ -210,7 +201,9 @@ std::expected<Vk::ExtensionResult, std::string> GetPlatformInstanceExtensions(Wi
         builder.Require(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME).Require(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
     }
 
-    return std::move(builder).Debug(enableValidation).OptionalIf("VK_KHR_portability_enumeration", isMac).Build();
+    return std::move(builder).Debug(enableValidation).OptionalIf("VK_KHR_portability_enumeration", isMac).Build().transform_error([](auto err) -> Error {
+        return err;
+    });
 }
 
 auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps) noexcept {
@@ -250,7 +243,7 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
         .Build();
 }
 
-std::expected<Vk::ExtensionResult, std::string> GetDeviceExtensions(VkPhysicalDevice physicalDevice) noexcept {
+std::expected<Vk::ExtensionResult, Error> GetDeviceExtensions(VkPhysicalDevice physicalDevice) noexcept {
     return Vk::ExtensionBuilder::ForDevice(physicalDevice)
         .Require(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
         .Require(VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME)
@@ -261,7 +254,8 @@ std::expected<Vk::ExtensionResult, std::string> GetDeviceExtensions(VkPhysicalDe
             {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME},
             CheckRayTracingSupport(physicalDevice)
         )
-        .Build();
+        .Build()
+        .transform_error([](auto err) -> Error { return err; });
 }
 
 Vk::Context CreateLogicalDevice(
@@ -283,7 +277,7 @@ Vk::Context CreateLogicalDevice(
 }
 
 template <typename LayoutT>
-[[nodiscard]] std::expected<void, std::string> BuildPassHelper(
+[[nodiscard]] std::expected<void, Error> BuildPassHelper(
     RenderContext::Impl*            self,
     Vk::PostProcessPass<LayoutT>&   pass,
     const char*                     passName,
@@ -294,18 +288,18 @@ template <typename LayoutT>
     uint32_t                        pushCount     = 0,
     bool                            additive      = false
 ) noexcept {
-    return self->LoadAndCreateShaders(vs, ps)
-        .transform_error([=](const std::string& err) { return std::format("Failed to load or compile shaders for '{}': {}", passName, err); })
-        .and_then([&](auto&& shaders) -> std::expected<void, std::string> {
-            if (pass.Build(self->ctx.Device(), shaders, colorFormats, pushConstants, pushCount, additive)) {
-                return {};
-            }
-            return std::unexpected(std::format("{} Pipeline failed to build.", passName));
-        });
+    return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, Error> {
+        if (pass.Build(self->ctx.Device(), shaders, colorFormats, pushConstants, pushCount, additive)) {
+            ZHLN::Log("[RenderInit] Successfully built pipeline for pass: {}", passName);
+            return {};
+        }
+        ZHLN::Log("[RenderInit] ERROR: Failed to build pipeline for pass: {}", passName);
+        return std::unexpected(Error(RenderInitError::PipelineCreationFailed));
+    });
 }
 
 template <typename LayoutT>
-[[nodiscard]] std::expected<void, std::string> BuildPassVariants(
+[[nodiscard]] std::expected<void, Error> BuildPassVariants(
     RenderContext::Impl*                  self,
     Vk::PostProcessPass<LayoutT>&         pass,
     const char*                           passName,
@@ -317,19 +311,19 @@ template <typename LayoutT>
     uint32_t                              pushCount     = 0,
     bool                                  additive      = false
 ) noexcept {
-    return self->LoadAndCreateShaders(vs, ps)
-        .transform_error([=](const std::string& err) { return std::format("Failed to load or compile shaders for '{}': {}", passName, err); })
-        .and_then([&](auto&& shaders) -> std::expected<void, std::string> {
-            if (pass.BuildVariants(self->ctx.Device(), shaders, colorFormats, pushConstants, pushCount, specInfos, additive)) {
-                return {};
-            }
-            return std::unexpected(std::format("{} Pass variants failed to build.", passName));
-        });
+    return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, Error> {
+        if (pass.BuildVariants(self->ctx.Device(), shaders, colorFormats, pushConstants, pushCount, specInfos, additive)) {
+            ZHLN::Log("[RenderInit] Successfully built pipeline variants for pass: {}", passName);
+            return {};
+        }
+        ZHLN::Log("[RenderInit] ERROR: Failed to build pipeline variants for pass: {}", passName);
+        return std::unexpected(Error(RenderInitError::PipelineCreationFailed));
+    });
 }
 
 } // namespace
 
-std::expected<Vk::ShaderStages, std::string> RenderContext::Impl::LoadAndCreateShaders(ShaderStageSource vs, ShaderStageSource ps) const noexcept {
+std::expected<Vk::ShaderStages, Error> RenderContext::Impl::LoadAndCreateShaders(ShaderStageSource vs, ShaderStageSource ps) const noexcept {
     const void*           vs_code = nullptr;
     size_t                vs_size = 0;
     const void*           ps_code = nullptr;
@@ -344,12 +338,10 @@ std::expected<Vk::ShaderStages, std::string> RenderContext::Impl::LoadAndCreateS
                ctx.Device(), {.code = Vk::AsSpirV(vs_code), .size = vs_size, .entry_point = vs.entryPoint},
                {.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint}
     )
-        .transform_error([&](const std::string& err) {
-            return std::format("Failed to compile or load shader stages for vs '{}' and ps '{}': {}", vs.path, ps.path, err);
-        });
+        .transform_error([](auto err) -> Error { return err; });
 }
 
-std::expected<Vk::Pipeline, std::string> RenderContext::Impl::LoadAndCreateComputeShader(ShaderStageSource cs, VkPipelineLayout layout) const noexcept {
+std::expected<Vk::Pipeline, Error> RenderContext::Impl::LoadAndCreateComputeShader(ShaderStageSource cs, VkPipelineLayout layout) const noexcept {
     const void*           cs_code = nullptr;
     size_t                cs_size = 0;
     std::vector<uint32_t> disk_cs;
@@ -360,14 +352,14 @@ std::expected<Vk::Pipeline, std::string> RenderContext::Impl::LoadAndCreateCompu
         .Shader(Vk::AsSpirV(cs_code), cs_size, cs.entryPoint)
         .Layout(layout)
         .Build(ctx.Device())
-        .transform_error([&](Vk::PipelineBuilderResult err) {
-            std::string_view errMsg = "Unknown pipeline builder error.";
-            if (err == Vk::PipelineBuilderResult::MissingShaders) {
-                errMsg = "Missing or invalid shader code.";
-            } else if (err == Vk::PipelineBuilderResult::MissingLayout) {
-                errMsg = "Missing pipeline layout.";
+        .transform_error([](ZHLN::Error err) -> Error {
+            if (err.Is(Vk::PipelineBuilderResult::MissingShaders)) {
+                return RenderInitError::ShaderCompilationFailed;
             }
-            return std::format("Failed to build compute pipeline for '{}': {}", cs.path, errMsg);
+            if (err.Is(Vk::PipelineBuilderResult::MissingLayout)) {
+                return RenderInitError::PipelineLayoutCreationFailed;
+            }
+            return RenderInitError::PipelineCreationFailed;
         });
 }
 
@@ -378,75 +370,87 @@ void RenderContext::Impl::WatchPipeline(const char* vsPath, const char* psPath, 
     }
 }
 
-RenderContext::RenderContext(PrivateToken /*unused*/, std::unique_ptr<Impl> impl) noexcept: _impl(std::move(impl)) {
+RenderContext::RenderContext(PrivateToken, std::unique_ptr<Impl> impl) noexcept: _impl(std::move(impl)) {
 }
 
-std::expected<std::unique_ptr<RenderContext>, std::string> RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept {
+std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept {
     auto impl     = std::make_unique<Impl>(window);
     impl->appName = cfg.appName;
 
-    auto make_expected = [](bool success, std::string_view err_msg) -> std::expected<void, std::string> {
+    auto make_expected = [](bool success, Error err) -> std::expected<void, Error> {
         if (success) {
             return {};
         }
-        return std::unexpected(std::string(err_msg));
+        return std::unexpected(err);
     };
 
-    // Keep intermediate state variables in scope across pipeline stages
     VkInstance              instance    = VK_NULL_HANDLE;
     VkSurfaceKHR            raw_surface = VK_NULL_HANDLE;
     int                     width       = 0;
     int                     height      = 0;
     ZHLN_PhysicalDeviceInfo physicalInfo {};
 
-    // 1. Begin the monadic pipeline with platform extension queries
     return GetPlatformInstanceExtensions(window, cfg.enableValidation)
-        .and_then([&](auto&& inst_exts) -> std::expected<void, std::string> {
-            // Phase 2: Instance creation
+        .and_then([&](auto&& inst_exts) -> std::expected<void, Error> {
             instance = Vk::CreateInstance(impl->appName.c_str(), VK_MAKE_API_VERSION(0, 1, 0, 0), inst_exts, cfg.enableValidation);
-            return make_expected(instance != VK_NULL_HANDLE, "Failed to create Vulkan Instance.");
+            return make_expected(instance != VK_NULL_HANDLE, RenderInitError::InstanceCreationFailed);
         })
-        .and_then([&]() -> std::expected<void, std::string> {
-            // Phase 3: Surface creation (before device selection for windowed/GLFW)
+        .and_then([&]() -> std::expected<void, Error> {
             if (!window.IsTTY()) {
-                return window.CreateVulkanSurface(instance, nullptr, width, height).transform([&](void* surface) {
-                    raw_surface = static_cast<VkSurfaceKHR>(surface);
-                });
+                return window.CreateVulkanSurface(instance, nullptr, width, height)
+                    .transform_error([](auto) -> Error { return RenderInitError::SurfaceCreationFailed; })
+                    .transform([&](void* surface) { raw_surface = static_cast<VkSurfaceKHR>(surface); });
             }
             return {};
         })
-        .and_then([&]() -> std::expected<void, std::string> {
-            // Phase 4: Device selection
+        .and_then([&]() -> std::expected<void, Error> {
             physicalInfo = Vk::SelectDevice(instance, raw_surface);
-            return make_expected(physicalInfo.handle != VK_NULL_HANDLE, "Failed to select a suitable physical device supporting the required Vulkan features.");
+            return make_expected(physicalInfo.handle != VK_NULL_HANDLE, RenderInitError::NoSuitableDeviceFound);
         })
-        .and_then([&]() -> std::expected<void, std::string> {
-            // Phase 5: Surface creation (after device selection for TTY)
+        .and_then([&]() -> std::expected<void, Error> {
             if (window.IsTTY()) {
-                return window.CreateVulkanSurface(instance, physicalInfo.handle, width, height).transform([&](void* surface) {
-                    raw_surface = static_cast<VkSurfaceKHR>(surface);
-                });
+                return window.CreateVulkanSurface(instance, physicalInfo.handle, width, height)
+                    .transform_error([](auto) -> Error { return RenderInitError::SurfaceCreationFailed; })
+                    .transform([&](void* surface) { raw_surface = static_cast<VkSurfaceKHR>(surface); });
             }
             return {};
         })
-        .and_then([&]() -> std::expected<void, std::string> {
-            // Phase 6 & 7: Capability detection and feature negotiation
+        .and_then([&]() -> std::expected<void, Error> {
             impl->surface         = Vk::Surface(instance, raw_surface);
             HardwareCaps caps     = ProbeHardware(physicalInfo.handle, physicalInfo.properties.properties.apiVersion);
             auto         features = BuildFeatureChain(physicalInfo.handle, caps);
 
-            // Phase 8 & 9: Device extensions and logical device creation
-            return GetDeviceExtensions(physicalInfo.handle).and_then([&](auto&& dev_exts) -> std::expected<void, std::string> {
+            return GetDeviceExtensions(physicalInfo.handle).and_then([&](auto&& dev_exts) -> std::expected<void, Error> {
                 impl->ctx = CreateLogicalDevice(instance, raw_surface, physicalInfo, dev_exts, features.GetRoot(), cfg.enableValidation);
-                return make_expected(impl->ctx.Valid(), "Failed to create Vulkan Logical Device.");
+                return make_expected(impl->ctx.Valid(), RenderInitError::DeviceCreationFailed);
             });
         })
-        .and_then([&]() {
-            // Phase 10: Subsystem initialization
-            return impl->InitSubsystems(cfg, width, height);
-        })
-        // 11. Wrap successful setup into the final RenderContext container
+        .and_then([&]() { return impl->InitSubsystems(cfg, width, height); })
         .transform([&]() { return std::make_unique<RenderContext>(PrivateToken {}, std::move(impl)); });
+}
+
+std::expected<void, Error> RenderContext::Impl::BuildSkinningPipeline() {
+    VkPushConstantRange pushRange = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(SkinningConstants)};
+
+    ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = nullptr, .set_layout_count = 0, .push_constants = &pushRange, .push_constant_count = 1};
+
+    auto make_expected = [](bool success, Error err) -> std::expected<void, Error> {
+        if (success) {
+            return {};
+        }
+        return std::unexpected(err);
+    };
+
+    auto* rawLayout = ZHLN_CreatePipelineLayout(ctx.Device(), &layout_desc);
+
+    return make_expected(rawLayout != VK_NULL_HANDLE, RenderInitError::PipelineLayoutCreationFailed).and_then([&]() -> std::expected<void, Error> {
+        skinningPass.pipelineLayout = Vk::PipelineLayout(ctx.Device(), rawLayout);
+
+        return LoadAndCreateComputeShader(
+                   {.path = SHADER_SKINNING_HLSL_CS_PATH, .fallback = Resource::skinning_comp, .entryPoint = "CSMain"}, skinningPass.pipelineLayout.Get()
+        )
+            .transform([&](auto&& pipeline) { skinningPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
+    });
 }
 
 RenderContext::~RenderContext() {
@@ -466,65 +470,13 @@ RenderContext::~RenderContext() {
     }
 }
 
-void RenderContext::CheckShaderReload() noexcept {
-    if constexpr (isDev) {
-        _impl->CheckShaderWatchers();
-    }
-}
-
-std::expected<void, std::string> RenderContext::Impl::BuildSkinningPipeline() {
-    VkPushConstantRange pushRange = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(SkinningConstants)};
-
-    ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = nullptr, .set_layout_count = 0, .push_constants = &pushRange, .push_constant_count = 1};
-
-    auto make_expected = [](bool success, std::string_view err_msg) -> std::expected<void, std::string> {
-        if (success) {
-            return {};
-        }
-        return std::unexpected(std::string(err_msg));
-    };
-
-    auto* rawLayout = ZHLN_CreatePipelineLayout(ctx.Device(), &layout_desc);
-
-    return make_expected(rawLayout != VK_NULL_HANDLE, "Failed to create Skinning Pipeline Layout.").and_then([&]() -> std::expected<void, std::string> {
-        skinningPass.pipelineLayout = Vk::PipelineLayout(ctx.Device(), rawLayout);
-
-        return LoadAndCreateComputeShader(
-                   {.path = SHADER_SKINNING_HLSL_CS_PATH, .fallback = Resource::skinning_comp, .entryPoint = "CSMain"}, skinningPass.pipelineLayout.Get()
-        )
-            .transform_error([](const std::string& err) { return std::format("GPU Skinning Compute pipeline failed to build: {}", err); })
-            .transform([&](auto&& pipeline) { skinningPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
-    });
-}
-
-void RenderContext::Impl::RecreatePunctualShadowViews() noexcept {
-    punctualShadowViews.clear();
-    punctualShadowViews.resize(MAX_PUNCTUAL_LIGHTS);
-    for (uint32_t i = 0; i < MAX_PUNCTUAL_LIGHTS; ++i) {
-        VkImageViewCreateInfo viewInfo = {
-            .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .pNext            = {},
-            .flags            = {},
-            .image            = graphResources.shadowAtlas.image.Handle(),
-            .viewType         = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-            .format           = VK_FORMAT_D32_SFLOAT,
-            .components       = {},
-            .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = i * 6, .layerCount = 6},
-        };
-
-        VkImageView rawView = VK_NULL_HANDLE;
-        vkCreateImageView(ctx.Device(), &viewInfo, nullptr, &rawView);
-        punctualShadowViews[i] = Vk::ImageView(ctx.Device(), rawView);
-    }
-}
-
-std::expected<void, std::string> RenderContext::Impl::InitShadowResources() {
+std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
     return Vk::SamplerBuilder {}
         .Linear()
         .ClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE)
         .DepthCompare()
         .Build(ctx.Device())
-        .transform_error([](const std::string& err) { return std::format("Failed to create Shadow Sampler: {}", err); })
+        .transform_error([](auto err) -> Error { return err; })
         .transform([&](auto&& sampler) {
             shadowSampler = std::forward<decltype(sampler)>(sampler);
 
@@ -548,7 +500,7 @@ std::expected<void, std::string> RenderContext::Impl::InitShadowResources() {
             shadowAtlasCubeView = Vk::CreateViewCubeArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowAtlas.image.Handle(), 24);
             shadowAtlas2DView   = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowAtlas.image.Handle(), 0, 24);
 
-            Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
+            Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
                     cmd, graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
                 );
@@ -576,14 +528,14 @@ std::expected<void, std::string> RenderContext::Impl::InitShadowResources() {
         });
 }
 
-std::expected<void, std::string> RenderContext::Impl::InitCullingResources() {
+std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
     using enum Resource::ShaderID;
 
-    auto make_expected = [](bool success, std::string_view err_msg) -> std::expected<void, std::string> {
+    auto make_expected = [](bool success, Error err) -> std::expected<void, Error> {
         if (success) {
             return {};
         }
-        return std::unexpected(std::string(err_msg));
+        return std::unexpected(err);
     };
 
     // 1. Initial side-effects: Descriptor sets & Buffer allocation
@@ -615,10 +567,8 @@ std::expected<void, std::string> RenderContext::Impl::InitCullingResources() {
     auto cullingShader = Vk::CreateShaderDesc(Resource::culling_comp);
 
     // 2. Start the monadic pipeline with the Compute Culling build
-    return make_expected(
-               cullingPass.Build(ctx.Device(), cullingLayout.Get(), cullingShader, &cullingPush, 1), "Failed to compile or build the Compute Culling Pipeline."
-    )
-        .and_then([&]() -> std::expected<void, std::string> {
+    return make_expected(cullingPass.Build(ctx.Device(), cullingLayout.Get(), cullingShader, &cullingPush, 1), RenderInitError::PipelineCreationFailed)
+        .and_then([&]() -> std::expected<void, Error> {
             constexpr auto numClusters = static_cast<size_t>(16 * 9 * 24);
 
             clusterBoundsBuffer = Vk::Buffer::Create(
@@ -646,13 +596,13 @@ std::expected<void, std::string> RenderContext::Impl::InitCullingResources() {
             }
 
             auto bDesc = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterBounds).vertex);
-            return make_expected(clusterBoundsPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), bDesc), "Failed to build Cluster Bounds Pass!");
+            return make_expected(clusterBoundsPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), bDesc), RenderInitError::PipelineCreationFailed);
         })
         .and_then([&]() {
             auto cDesc = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterCulling).vertex);
-            return make_expected(clusterCullingPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), cDesc), "Failed to build Cluster Culling Pass!");
+            return make_expected(clusterCullingPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), cDesc), RenderInitError::PipelineCreationFailed);
         })
-        .and_then([&]() -> std::expected<void, std::string> {
+        .and_then([&]() -> std::expected<void, Error> {
             if (rtCtx.Valid()) {
                 ZHLN_AccelerationStructureSizes tlasSizes;
                 rtCtx.GetTlasSizes(kGpuCullingMaxInstances, tlasSizes);
@@ -691,13 +641,445 @@ std::expected<void, std::string> RenderContext::Impl::InitCullingResources() {
                 RegisterShaderWatcher(SHADER_SKINNING_HLSL_CS_PATH, [this]() {
                     auto res = BuildSkinningPipeline();
                     if (!res) {
-                        ZHLN::Log("ERROR: Failed to hot-reload Skinning pipeline: {}", res.error());
+                        ZHLN::Log("ERROR: Failed to hot-reload Skinning pipeline: {}", res.error().Message());
                     } else {
                         ZHLN::Log("[Shader Reload] Skinning pipeline hot-reloaded successfully.");
                     }
                 });
             }
         });
+}
+
+std::expected<void, Error> RenderContext::Impl::InitBindless() {
+    Vk::AllocateDoubleBufferedSet<GlobalSceneLayout>(ctx.Device(), bindlessLayout, bindlessPool, bindlessSets);
+
+    // 1. Build and bind global and clamping samplers monadically
+    return Vk::SamplerBuilder {}
+        .Linear()
+        .Repeat()
+        .Anisotropy(ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy)
+        .LodRange(0.0f, 0.0f)
+        .Build(ctx.Device())
+        .transform_error([](auto err) -> Error { return err; })
+        .and_then([&](auto&& globalRes) -> std::expected<void, Error> {
+            globalSampler = std::forward<decltype(globalRes)>(globalRes);
+
+            return Vk::SamplerBuilder {}
+                .Linear()
+                .ClampToEdge()
+                .Build(ctx.Device())
+                .transform_error([](auto err) -> Error { return err; })
+                .and_then([&](auto&& clampRes) -> std::expected<void, Error> {
+                    clampSampler = std::forward<decltype(clampRes)>(clampRes);
+                    return {};
+                });
+        })
+        // 2. Consolidate remaining void initializations into a terminal transform mapping
+        .transform([&]() {
+            InitSkeletalAnimationResources();
+            InitLightingLUTs();
+
+            ZHLN::Log("[RenderInit] Pre-allocating persistently mapped Double-Buffered Debug VBOs...");
+            size_t maxDebugVerts = 500000;
+            size_t bufferSize    = maxDebugVerts * (sizeof(VertexPosition) + sizeof(VertexAttributes));
+            for (int i = 0; i < 2; ++i) {
+                auto gpu_buf = Vk::Buffer::Create(
+                    allocator.Get(), bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
+                );
+
+                auto address        = Vk::GetBufferAddress(ctx.Device(), gpu_buf.Handle());
+                debugMeshHandles[i] = meshPool.Create(std::move(gpu_buf), maxDebugVerts, address);
+            }
+
+            // Update global descriptor bindings
+            Vk::DescriptorUpdater bindlessRegistry;
+            for (int i = 0; i < 2; ++i) {
+                bindlessRegistry.BindSampler(1, globalSampler.Get());
+                bindlessRegistry.BindUniformBuffer(2, frameUniformBuffers[i].Handle());
+                bindlessRegistry.BindStorageBuffer(3, lightStorageBuffers[i].Handle());
+                bindlessRegistry.BindStorageBuffer(4, instanceDataBuffers[i].Handle());
+                bindlessRegistry.BindStorageBuffer(5, jointBuffers[i].Handle());
+                bindlessRegistry.BindStorageBuffer(6, jointBuffers[1 - i].Handle());
+                bindlessRegistry.BindStorageBuffer(7, morphDeltasBuffer.Handle());
+
+                bindlessRegistry.BindSampledImage(8, iblPayload.prefilteredView.Get(), VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                bindlessRegistry.BindSampledImage(9, iblPayload.brdfLutView.Get(), VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                bindlessRegistry.BindSampler(10, clampSampler.Get());
+
+                bindlessRegistry.UpdateSet(ctx.Device(), bindlessSets[i]);
+            }
+        });
+}
+
+using enum Resource::ShaderID;
+std::expected<void, Error> RenderContext::Impl::BuildTAAPipeline() {
+    VkPushConstantRange taaPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float)};
+
+    return BuildPassHelper(
+        this, taaPass, "TAA", {.path = SHADER_TAA_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(Taa).vertex, .entryPoint = "VSMain"},
+        {.path = SHADER_TAA_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(Taa).fragment, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT},
+        &taaPush, 1
+    );
+}
+
+std::expected<void, Error> RenderContext::Impl::BuildFXAAPipeline() {
+    VkPushConstantRange fxaaPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float) * 6};
+
+    return BuildPassHelper(
+        this, fxaaPass, "FXAA", {.path = SHADER_FXAA_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(Fxaa).vertex, .entryPoint = "VSMain"},
+        {.path = SHADER_FXAA_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(Fxaa).fragment, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT},
+        &fxaaPush, 1
+    );
+}
+
+std::expected<void, Error> RenderContext::Impl::BuildSMAAPipeline() {
+    VkPushConstantRange smaaPush = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float) * 4};
+
+    return BuildPassHelper(
+               this, smaaEdgePass, "SMAA Edge Detection",
+               {.path = SHADER_SMAA_EDGE_VS_PATH, .fallback = Resource::GetShaderProgram(SmaaEdge).vertex, .entryPoint = "SmaaEdgeVS"},
+               {.path = SHADER_SMAA_EDGE_PS_PATH, .fallback = Resource::GetShaderProgram(SmaaEdge).fragment, .entryPoint = "SmaaEdgePS"},
+               {VK_FORMAT_R8G8_UNORM}, &smaaPush, 1
+    )
+        .and_then([&]() {
+            return BuildPassHelper(
+                this, smaaWeightPass, "SMAA Blending Weight",
+                {.path = SHADER_SMAA_WEIGHT_VS_PATH, .fallback = Resource::GetShaderProgram(SmaaWeight).vertex, .entryPoint = "SmaaWeightVS"},
+                {.path = SHADER_SMAA_WEIGHT_PS_PATH, .fallback = Resource::GetShaderProgram(SmaaWeight).fragment, .entryPoint = "SmaaWeightPS"},
+                {VK_FORMAT_R8G8B8A8_UNORM}, &smaaPush, 1
+            );
+        })
+        .and_then([&]() {
+            return BuildPassHelper(
+                this, smaaBlendPass, "SMAA Neighborhood Blend",
+                {.path = SHADER_SMAA_BLEND_VS_PATH, .fallback = Resource::GetShaderProgram(SmaaBlend).vertex, .entryPoint = "SmaaBlendVS"},
+                {.path = SHADER_SMAA_BLEND_PS_PATH, .fallback = Resource::GetShaderProgram(SmaaBlend).fragment, .entryPoint = "SmaaBlendPS"},
+                {VK_FORMAT_R16G16B16A16_SFLOAT}, &smaaPush, 1
+            );
+        });
+}
+
+std::expected<void, Error> RenderContext::Impl::BuildAmbientPipeline() {
+    VkPushConstantRange ppPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
+
+    return BuildPassHelper(
+        this, ambientPass, "Ambient", {.path = SHADER_AMBIENT_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(Ambient).vertex, .entryPoint = "VSMain"},
+        {.path = SHADER_AMBIENT_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(Ambient).fragment, .entryPoint = "PSMain"},
+        {VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush, 1
+    );
+}
+
+std::expected<void, Error> RenderContext::Impl::BuildLightingPipeline() {
+    VkPushConstantRange ppPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
+
+    struct SpecData {
+        int enableRTR;
+    };
+    std::array<VkSpecializationMapEntry, 1> specEntries = {{{.constantID = 0, .offset = offsetof(SpecData, enableRTR), .size = sizeof(int)}}};
+
+    std::array<SpecData, 2>             variants = {{{.enableRTR = 0}, {.enableRTR = 1}}};
+    std::array<VkSpecializationInfo, 2> specInfos {};
+    for (int i = 0; i < 2; ++i) {
+        specInfos[i] = {.mapEntryCount = 1, .pMapEntries = specEntries.data(), .dataSize = sizeof(SpecData), .pData = &variants[i]};
+    }
+
+    bool        hasRt  = rtCtx.Valid();
+    const char* vsPath = hasRt ? SHADER_LIGHTING_HLSL_VS_PATH : SHADER_LIGHTING_NORT_HLSL_VS_PATH;
+    const char* psPath = hasRt ? SHADER_LIGHTING_HLSL_PS_PATH : SHADER_LIGHTING_NORT_HLSL_PS_PATH;
+
+    auto vsSpan = hasRt ? Resource::GetShaderProgram(Lighting).vertex : Resource::GetShaderProgram(LightingNort).vertex;
+    auto psSpan = hasRt ? Resource::GetShaderProgram(Lighting).fragment : Resource::GetShaderProgram(LightingNort).fragment;
+
+    return BuildPassVariants(
+        this, lightingPass, "Lighting", {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
+        {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1
+    );
+}
+
+std::expected<void, Error> RenderContext::Impl::BuildReflectionPipelines() {
+    VkPushConstantRange ppPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(PPPushConstants)};
+
+    struct SpecData {
+        int enableSSR;
+        int enableRTR;
+    };
+    std::array<VkSpecializationMapEntry, 2> specEntries = {
+        {{.constantID = 0, .offset = offsetof(SpecData, enableSSR), .size = sizeof(int)},
+         {.constantID = 1, .offset = offsetof(SpecData, enableRTR), .size = sizeof(int)}}
+    };
+
+    std::array<SpecData, 4> variants = {
+        {{.enableSSR = 0, .enableRTR = 0}, {.enableSSR = 1, .enableRTR = 0}, {.enableSSR = 0, .enableRTR = 1}, {.enableSSR = 1, .enableRTR = 1}}
+    };
+    std::array<VkSpecializationInfo, 4> specInfos {};
+    for (int i = 0; i < 4; ++i) {
+        specInfos[i] = {.mapEntryCount = 2, .pMapEntries = specEntries.data(), .dataSize = sizeof(SpecData), .pData = &variants[i]};
+    }
+
+    bool        hasRt  = rtCtx.Valid();
+    const char* vsPath = hasRt ? SHADER_REFLECTION_HLSL_VS_PATH : SHADER_REFLECTION_NORT_HLSL_VS_PATH;
+    const char* psPath = hasRt ? SHADER_REFLECTION_HLSL_PS_PATH : SHADER_REFLECTION_NORT_HLSL_PS_PATH;
+
+    auto vsSpan = hasRt ? Resource::GetShaderProgram(Reflection).vertex : Resource::GetShaderProgram(Resource::ShaderID::ReflectionNort).vertex;
+    auto psSpan = hasRt ? Resource::GetShaderProgram(Reflection).fragment : Resource::GetShaderProgram(Resource::ShaderID::ReflectionNort).fragment;
+
+    return BuildPassVariants(
+        this, reflectionPass, "Reflection", {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
+        {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1
+    );
+}
+
+std::expected<void, Error> RenderContext::Impl::BuildBloomPipelines() {
+    using enum Resource::ShaderID;
+
+    auto res = BuildPassHelper(
+        this, bloomThresholdPass, "Bloom Threshold",
+        {.path = SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(BloomThreshold).vertex, .entryPoint = "VSMain"},
+        {.path = SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(BloomThreshold).fragment, .entryPoint = "PSMain"},
+        {VK_FORMAT_R16G16B16A16_SFLOAT}
+    );
+
+    VkPushConstantRange kawasePush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(KawasePushConstants)};
+
+    for (int i = 0; i < 3; ++i) {
+        res = res.and_then(
+                     [&, i]() {
+                         std::string downName = std::format("Bloom Downsample {}", i);
+                         return BuildPassHelper(
+                             this, bloomDownPass[i], downName.c_str(),
+                             {.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).vertex, .entryPoint = "VSMain"},
+                             {.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).fragment, .entryPoint = "PSMain"},
+                             {VK_FORMAT_R16G16B16A16_SFLOAT}, &kawasePush, 1
+                         );
+                     }
+        ).and_then([&, i]() {
+            std::string upName = std::format("Bloom Upsample {}", i);
+            return BuildPassHelper(
+                this, bloomUpPass[i], upName.c_str(),
+                {.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).vertex, .entryPoint = "VSMain"},
+                {.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).fragment, .entryPoint = "PSMain"},
+                {VK_FORMAT_R16G16B16A16_SFLOAT}, &kawasePush, 1
+            );
+        });
+    }
+
+    return res;
+}
+
+std::expected<void, Error> RenderContext::Impl::BuildBlitPipeline() {
+    VkPushConstantRange blitPush = {
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        .offset     = 0,
+        .size       = sizeof(BlitPushConstants),
+    };
+
+    return BuildPassHelper(
+        this, blitPass, "Blit", {.path = SHADER_BLIT_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(Blit).vertex, .entryPoint = "VSMain"},
+        {.path = SHADER_BLIT_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(Blit).fragment, .entryPoint = "PSMain"},
+        {presentation.swapchain.Get().format}, &blitPush, 1
+    );
+}
+
+std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
+    auto register_and_check = [&](const char* name, auto&& build_fn, std::initializer_list<const char*> watchPaths) -> std::expected<void, Error> {
+        auto res = build_fn();
+        if (!res) {
+            ZHLN::Log("Pipeline '{}' failed to compile: {}", name, res.error().Message());
+            return std::unexpected(res.error());
+        }
+        if constexpr (isDev) {
+            for (const auto* path: watchPaths) {
+                RegisterShaderWatcher(path, [=, build_fn = std::forward<decltype(build_fn)>(build_fn)]() {
+                    auto reload_res = build_fn();
+                    if (!reload_res) {
+                        ZHLN::Log("ERROR: Failed to hot-reload pipeline '{}': {}", name, reload_res.error().Message());
+                    } else {
+                        ZHLN::Log("[Shader Reload] Pipeline '{}' hot-reloaded successfully.", name);
+                    }
+                });
+            }
+        }
+        return {};
+    };
+
+    return Vk::SamplerBuilder {}
+        .Linear()
+        .ClampToEdge()
+        .Build(ctx.Device())
+        .transform_error([](auto err) -> Error { return err; })
+        .and_then([&](auto defaultResult) -> std::expected<void, Error> {
+            defaultSampler = std::move(defaultResult);
+            return Vk::SamplerBuilder {}
+                .Nearest()
+                .ClampToEdge()
+                .Build(ctx.Device())
+                .transform_error([](auto err) -> Error { return err; })
+                .transform([&](auto pointResult) { pointSampler = std::move(pointResult); });
+        })
+        .and_then([&]() { return register_and_check("TAA", [this]() { return BuildTAAPipeline(); }, {SHADER_TAA_HLSL_VS_PATH, SHADER_TAA_HLSL_PS_PATH}); })
+        .and_then([&]() { return register_and_check("FXAA", [this]() { return BuildFXAAPipeline(); }, {SHADER_FXAA_HLSL_VS_PATH, SHADER_FXAA_HLSL_PS_PATH}); })
+        .and_then([&]() {
+            return register_and_check(
+                "SMAA", [this]() { return BuildSMAAPipeline(); },
+                {SHADER_SMAA_EDGE_VS_PATH, SHADER_SMAA_EDGE_PS_PATH, SHADER_SMAA_WEIGHT_VS_PATH, SHADER_SMAA_WEIGHT_PS_PATH, SHADER_SMAA_BLEND_VS_PATH,
+                 SHADER_SMAA_BLEND_PS_PATH}
+            );
+        })
+        .and_then([&]() {
+            return register_and_check("Ambient", [this]() { return BuildAmbientPipeline(); }, {SHADER_AMBIENT_HLSL_VS_PATH, SHADER_AMBIENT_HLSL_PS_PATH});
+        })
+        .and_then([&]() {
+            return register_and_check(
+                "Lighting", [this]() { return BuildLightingPipeline(); },
+                {SHADER_LIGHTING_HLSL_VS_PATH, SHADER_LIGHTING_HLSL_PS_PATH, SHADER_LIGHTING_NORT_HLSL_VS_PATH, SHADER_LIGHTING_NORT_HLSL_PS_PATH}
+            );
+        })
+        .and_then([&]() {
+            return register_and_check(
+                "Reflection", [this]() { return BuildReflectionPipelines(); },
+                {SHADER_REFLECTION_HLSL_VS_PATH, SHADER_REFLECTION_HLSL_PS_PATH, SHADER_REFLECTION_NORT_HLSL_VS_PATH, SHADER_REFLECTION_NORT_HLSL_PS_PATH}
+            );
+        })
+        .and_then([&]() {
+            return register_and_check(
+                "Bloom", [this]() { return BuildBloomPipelines(); },
+                {SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH, SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH, SHADER_BLOOM_BLUR_HLSL_VS_PATH, SHADER_BLOOM_BLUR_HLSL_PS_PATH}
+            );
+        })
+        .and_then([&]() { return register_and_check("Blit", [this]() { return BuildBlitPipeline(); }, {SHADER_BLIT_HLSL_VS_PATH, SHADER_BLIT_HLSL_PS_PATH}); })
+        .transform([&]() {
+            ZHLN::Array<uint32_t> smaaAreaPixels(static_cast<size_t>(160 * 560));
+            ZHLN::PBR::FillSmaaAreaTex(smaaAreaPixels);
+            ZHLN::Array<uint32_t> smaaSearchPixels(static_cast<size_t>(64 * 16));
+            ZHLN::PBR::FillSmaaSearchTex(smaaSearchPixels);
+            smaaAreaTexIdx   = CreateTextureInternal(smaaAreaPixels.data(), 160, 560, false);
+            smaaSearchTexIdx = CreateTextureInternal(smaaSearchPixels.data(), 64, 16, false);
+        });
+}
+
+std::expected<void, Error> RenderContext::Impl::SetupUI(GLFWwindow* window) {
+    auto make_expected = [](bool success, Error err) -> std::expected<void, Error> {
+        if (success) {
+            return {};
+        }
+        return std::unexpected(err);
+    };
+
+    Vk::ShaderStages uiShaders;
+
+    return Vk::DescriptorPoolBuilder(ctx.Device())
+        .Flags(VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT)
+        .MaxSets(1000)
+        .AddSize(VK_DESCRIPTOR_TYPE_SAMPLER, 1000)
+        .AddSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000)
+        .AddSize(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000)
+        .AddSize(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000)
+        .AddSize(VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000)
+        .AddSize(VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000)
+        .AddSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000)
+        .AddSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000)
+        .AddSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000)
+        .AddSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000)
+        .AddSize(VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000)
+        .Build()
+        .transform_error([](auto) -> Error { return RenderInitError::UISetupFailed; })
+        .and_then([&](auto&& poolRes) -> std::expected<void, Error> {
+            uiPool = std::forward<decltype(poolRes)>(poolRes);
+
+            return Vk::ShaderStages::Create(ctx.Device(), Resource::GetShaderProgram(Ui))
+                .transform_error([](auto) -> Error { return RenderInitError::UISetupFailed; })
+                .transform([&](auto&& shaders) -> void { uiShaders = std::forward<decltype(shaders)>(shaders); });
+        })
+        .and_then([&]() -> std::expected<void, Error> {
+            return Vk::PipelineLayoutBuilder(ctx.Device())
+                .AddDescriptorSetLayout(bindlessLayout.Get())
+                .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(UIObjectConstants))
+                .Build()
+                .transform_error([](auto) -> Error { return RenderInitError::UISetupFailed; })
+                .transform([&](auto&& layout) { uiPipelineLayout = std::forward<decltype(layout)>(layout); });
+        })
+        .and_then([&]() -> std::expected<void, Error> {
+            VkFormat swapchainFormat = presentation.swapchain.Get().format;
+
+            return Vk::PipelineBuilder {}
+                .Shaders(uiShaders)
+                .Layout(uiPipelineLayout.Get())
+                .ColorFormats(std::array {swapchainFormat})
+                .NoDepth()
+                .AlphaBlend()
+                .CullNone()
+                .Build(ctx.Device())
+                .transform_error([](auto) -> Error { return RenderInitError::UISetupFailed; })
+                .transform([&](auto&& pipeline) { uiPipeline = std::forward<decltype(pipeline)>(pipeline); });
+        })
+        .and_then([&]() -> std::expected<void, Error> {
+            if (window != nullptr) {
+                IMGUI_CHECKVERSION();
+                ImGui::CreateContext();
+                ImGui_ImplGlfw_InitForVulkan(window, true);
+
+                VkFormat swapchainFormat = presentation.swapchain.Get().format;
+
+                ImGui_ImplVulkan_InitInfo init_info = {
+                    .ApiVersion         = VK_API_VERSION_1_3,
+                    .Instance           = ctx.Instance(),
+                    .PhysicalDevice     = ctx.Physical(),
+                    .Device             = ctx.Device(),
+                    .QueueFamily        = ctx.PhysicalInfo().graphics_family,
+                    .Queue              = ctx.GraphicsQueue(),
+                    .DescriptorPool     = uiPool.Get(),
+                    .DescriptorPoolSize = 0,
+                    .MinImageCount      = 2,
+                    .ImageCount         = 2,
+                    .PipelineCache      = VK_NULL_HANDLE,
+                    .PipelineInfoMain =
+                        {
+                            .RenderPass  = VK_NULL_HANDLE,
+                            .Subpass     = 0,
+                            .MSAASamples = VK_SAMPLE_COUNT_1_BIT,
+                            .ExtraDynamicStates {},
+                            .PipelineRenderingCreateInfo =
+                                {.sType                   = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+                                 .pNext                   = nullptr,
+                                 .viewMask                = 0,
+                                 .colorAttachmentCount    = 1,
+                                 .pColorAttachmentFormats = &swapchainFormat,
+                                 .depthAttachmentFormat   = VK_FORMAT_D32_SFLOAT,
+                                 .stencilAttachmentFormat = VK_FORMAT_UNDEFINED},
+                        },
+                    .UseDynamicRendering        = true,
+                    .Allocator                  = nullptr,
+                    .CheckVkResultFn            = nullptr,
+                    .MinAllocationSize          = 0,
+                    .CustomShaderVertCreateInfo = {},
+                    .CustomShaderFragCreateInfo = {},
+                };
+
+                return make_expected(ImGui_ImplVulkan_Init(&init_info), RenderInitError::UISetupFailed);
+            }
+            return {};
+        });
+}
+
+void RenderContext::Impl::RecreatePunctualShadowViews() noexcept {
+    punctualShadowViews.clear();
+    punctualShadowViews.resize(MAX_PUNCTUAL_LIGHTS);
+    for (uint32_t i = 0; i < MAX_PUNCTUAL_LIGHTS; ++i) {
+        VkImageViewCreateInfo viewInfo = {
+            .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .pNext            = {},
+            .flags            = {},
+            .image            = graphResources.shadowAtlas.image.Handle(),
+            .viewType         = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+            .format           = VK_FORMAT_D32_SFLOAT,
+            .components       = {},
+            .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = i * 6, .layerCount = 6},
+        };
+
+        VkImageView rawView = VK_NULL_HANDLE;
+        vkCreateImageView(ctx.Device(), &viewInfo, nullptr, &rawView);
+        punctualShadowViews[i] = Vk::ImageView(ctx.Device(), rawView);
+    }
 }
 
 void RenderContext::Impl::InitSkeletalAnimationResources() {
@@ -783,426 +1165,6 @@ void RenderContext::Impl::InitLightingLUTs() {
     ltcAmpView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle());
 }
 
-std::expected<void, std::string> RenderContext::Impl::InitBindless() {
-    Vk::AllocateDoubleBufferedSet<GlobalSceneLayout>(ctx.Device(), bindlessLayout, bindlessPool, bindlessSets);
-
-    // 1. Build and bind global and clamping samplers monadically
-    return Vk::SamplerBuilder {}
-        .Linear()
-        .Repeat()
-        .Anisotropy(ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy)
-        .LodRange(0.0f, 0.0f)
-        .Build(ctx.Device())
-        .transform_error([](const std::string& err) { return "Global Sampler: " + err; })
-        .and_then([&](auto&& globalRes) -> std::expected<void, std::string> {
-            globalSampler = std::forward<decltype(globalRes)>(globalRes);
-
-            return Vk::SamplerBuilder {}
-                .Linear()
-                .ClampToEdge()
-                .Build(ctx.Device())
-                .transform_error([](const std::string& err) { return "Clamp Sampler: " + err; })
-                .and_then([&](auto&& clampRes) -> std::expected<void, std::string> {
-                    clampSampler = std::forward<decltype(clampRes)>(clampRes);
-                    return {};
-                });
-        })
-        // 2. Consolidate remaining void initializations into a terminal transform mapping
-        .transform([&]() {
-            InitSkeletalAnimationResources();
-            InitLightingLUTs();
-
-            ZHLN::Log("[RenderInit] Pre-allocating persistently mapped Double-Buffered Debug VBOs...");
-            size_t maxDebugVerts = 500000;
-            size_t bufferSize    = maxDebugVerts * (sizeof(VertexPosition) + sizeof(VertexAttributes));
-            for (int i = 0; i < 2; ++i) {
-                auto gpu_buf = Vk::Buffer::Create(
-                    allocator.Get(), bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
-                );
-
-                auto address        = Vk::GetBufferAddress(ctx.Device(), gpu_buf.Handle());
-                debugMeshHandles[i] = meshPool.Create(std::move(gpu_buf), maxDebugVerts, address);
-            }
-
-            // Update global descriptor bindings
-            Vk::DescriptorUpdater bindlessRegistry;
-            for (int i = 0; i < 2; ++i) {
-                bindlessRegistry.BindSampler(1, globalSampler.Get());
-                bindlessRegistry.BindUniformBuffer(2, frameUniformBuffers[i].Handle());
-                bindlessRegistry.BindStorageBuffer(3, lightStorageBuffers[i].Handle());
-                bindlessRegistry.BindStorageBuffer(4, instanceDataBuffers[i].Handle());
-                bindlessRegistry.BindStorageBuffer(5, jointBuffers[i].Handle());
-                bindlessRegistry.BindStorageBuffer(6, jointBuffers[1 - i].Handle());
-                bindlessRegistry.BindStorageBuffer(7, morphDeltasBuffer.Handle());
-
-                bindlessRegistry.BindSampledImage(8, iblPayload.prefilteredView.Get(), VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-                bindlessRegistry.BindSampledImage(9, iblPayload.brdfLutView.Get(), VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-                bindlessRegistry.BindSampler(10, clampSampler.Get());
-
-                bindlessRegistry.UpdateSet(ctx.Device(), bindlessSets[i]);
-            }
-        });
-}
-
-using enum Resource::ShaderID;
-std::expected<void, std::string> RenderContext::Impl::BuildTAAPipeline() {
-    VkPushConstantRange taaPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float)};
-
-    return BuildPassHelper(
-        this, taaPass, "TAA", {.path = SHADER_TAA_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(Taa).vertex, .entryPoint = "VSMain"},
-        {.path = SHADER_TAA_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(Taa).fragment, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT},
-        &taaPush, 1
-    );
-}
-
-std::expected<void, std::string> RenderContext::Impl::BuildFXAAPipeline() {
-    VkPushConstantRange fxaaPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float) * 6};
-
-    return BuildPassHelper(
-        this, fxaaPass, "FXAA", {.path = SHADER_FXAA_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(Fxaa).vertex, .entryPoint = "VSMain"},
-        {.path = SHADER_FXAA_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(Fxaa).fragment, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT},
-        &fxaaPush, 1
-    );
-}
-
-std::expected<void, std::string> RenderContext::Impl::BuildSMAAPipeline() {
-    VkPushConstantRange smaaPush = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float) * 4};
-
-    return BuildPassHelper(
-               this, smaaEdgePass, "SMAA Edge Detection",
-               {.path = SHADER_SMAA_EDGE_VS_PATH, .fallback = Resource::GetShaderProgram(SmaaEdge).vertex, .entryPoint = "SmaaEdgeVS"},
-               {.path = SHADER_SMAA_EDGE_PS_PATH, .fallback = Resource::GetShaderProgram(SmaaEdge).fragment, .entryPoint = "SmaaEdgePS"},
-               {VK_FORMAT_R8G8_UNORM}, &smaaPush, 1
-    )
-        .and_then([&]() {
-            return BuildPassHelper(
-                this, smaaWeightPass, "SMAA Blending Weight",
-                {.path = SHADER_SMAA_WEIGHT_VS_PATH, .fallback = Resource::GetShaderProgram(SmaaWeight).vertex, .entryPoint = "SmaaWeightVS"},
-                {.path = SHADER_SMAA_WEIGHT_PS_PATH, .fallback = Resource::GetShaderProgram(SmaaWeight).fragment, .entryPoint = "SmaaWeightPS"},
-                {VK_FORMAT_R8G8B8A8_UNORM}, &smaaPush, 1
-            );
-        })
-        .and_then([&]() {
-            return BuildPassHelper(
-                this, smaaBlendPass, "SMAA Neighborhood Blend",
-                {.path = SHADER_SMAA_BLEND_VS_PATH, .fallback = Resource::GetShaderProgram(SmaaBlend).vertex, .entryPoint = "SmaaBlendVS"},
-                {.path = SHADER_SMAA_BLEND_PS_PATH, .fallback = Resource::GetShaderProgram(SmaaBlend).fragment, .entryPoint = "SmaaBlendPS"},
-                {VK_FORMAT_R16G16B16A16_SFLOAT}, &smaaPush, 1
-            );
-        });
-}
-
-std::expected<void, std::string> RenderContext::Impl::BuildAmbientPipeline() {
-    VkPushConstantRange ppPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
-
-    return BuildPassHelper(
-        this, ambientPass, "Ambient", {.path = SHADER_AMBIENT_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(Ambient).vertex, .entryPoint = "VSMain"},
-        {.path = SHADER_AMBIENT_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(Ambient).fragment, .entryPoint = "PSMain"},
-        {VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush, 1
-    );
-}
-
-std::expected<void, std::string> RenderContext::Impl::BuildLightingPipeline() {
-    VkPushConstantRange ppPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
-
-    struct SpecData {
-        int enableRTR;
-    };
-    std::array<VkSpecializationMapEntry, 1> specEntries = {{{.constantID = 0, .offset = offsetof(SpecData, enableRTR), .size = sizeof(int)}}};
-
-    std::array<SpecData, 2>             variants = {{{.enableRTR = 0}, {.enableRTR = 1}}};
-    std::array<VkSpecializationInfo, 2> specInfos {};
-    for (int i = 0; i < 2; ++i) {
-        specInfos[i] = {.mapEntryCount = 1, .pMapEntries = specEntries.data(), .dataSize = sizeof(SpecData), .pData = &variants[i]};
-    }
-
-    bool        hasRt  = rtCtx.Valid();
-    const char* vsPath = hasRt ? SHADER_LIGHTING_HLSL_VS_PATH : SHADER_LIGHTING_NORT_HLSL_VS_PATH;
-    const char* psPath = hasRt ? SHADER_LIGHTING_HLSL_PS_PATH : SHADER_LIGHTING_NORT_HLSL_PS_PATH;
-
-    auto vsSpan = hasRt ? Resource::GetShaderProgram(Lighting).vertex : Resource::GetShaderProgram(LightingNort).vertex;
-    auto psSpan = hasRt ? Resource::GetShaderProgram(Lighting).fragment : Resource::GetShaderProgram(LightingNort).fragment;
-
-    return BuildPassVariants(
-        this, lightingPass, "Lighting", {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
-        {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1
-    );
-}
-
-std::expected<void, std::string> RenderContext::Impl::BuildReflectionPipelines() {
-    VkPushConstantRange ppPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(PPPushConstants)};
-
-    struct SpecData {
-        int enableSSR;
-        int enableRTR;
-    };
-    std::array<VkSpecializationMapEntry, 2> specEntries = {
-        {{.constantID = 0, .offset = offsetof(SpecData, enableSSR), .size = sizeof(int)},
-         {.constantID = 1, .offset = offsetof(SpecData, enableRTR), .size = sizeof(int)}}
-    };
-
-    std::array<SpecData, 4> variants = {
-        {{.enableSSR = 0, .enableRTR = 0}, {.enableSSR = 1, .enableRTR = 0}, {.enableSSR = 0, .enableRTR = 1}, {.enableSSR = 1, .enableRTR = 1}}
-    };
-    std::array<VkSpecializationInfo, 4> specInfos {};
-    for (int i = 0; i < 4; ++i) {
-        specInfos[i] = {.mapEntryCount = 2, .pMapEntries = specEntries.data(), .dataSize = sizeof(SpecData), .pData = &variants[i]};
-    }
-
-    bool        hasRt  = rtCtx.Valid();
-    const char* vsPath = hasRt ? SHADER_REFLECTION_HLSL_VS_PATH : SHADER_REFLECTION_NORT_HLSL_VS_PATH;
-    const char* psPath = hasRt ? SHADER_REFLECTION_HLSL_PS_PATH : SHADER_REFLECTION_NORT_HLSL_PS_PATH;
-
-    auto vsSpan = hasRt ? Resource::GetShaderProgram(Reflection).vertex : Resource::GetShaderProgram(Resource::ShaderID::ReflectionNort).vertex;
-    auto psSpan = hasRt ? Resource::GetShaderProgram(Reflection).fragment : Resource::GetShaderProgram(Resource::ShaderID::ReflectionNort).fragment;
-
-    return BuildPassVariants(
-        this, reflectionPass, "Reflection", {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
-        {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1
-    );
-}
-
-std::expected<void, std::string> RenderContext::Impl::BuildBloomPipelines() {
-    using enum Resource::ShaderID;
-
-    auto res = BuildPassHelper(
-        this, bloomThresholdPass, "Bloom Threshold",
-        {.path = SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(BloomThreshold).vertex, .entryPoint = "VSMain"},
-        {.path = SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(BloomThreshold).fragment, .entryPoint = "PSMain"},
-        {VK_FORMAT_R16G16B16A16_SFLOAT}
-    );
-
-    VkPushConstantRange kawasePush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(KawasePushConstants)};
-
-    for (int i = 0; i < 3; ++i) {
-        res = res.and_then(
-                     [&, i]() {
-                         std::string downName = std::format("Bloom Downsample {}", i);
-                         return BuildPassHelper(
-                             this, bloomDownPass[i], downName.c_str(),
-                             {.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).vertex, .entryPoint = "VSMain"},
-                             {.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).fragment, .entryPoint = "PSMain"},
-                             {VK_FORMAT_R16G16B16A16_SFLOAT}, &kawasePush, 1
-                         );
-                     }
-        ).and_then([&, i]() {
-            std::string upName = std::format("Bloom Upsample {}", i);
-            return BuildPassHelper(
-                this, bloomUpPass[i], upName.c_str(),
-                {.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).vertex, .entryPoint = "VSMain"},
-                {.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).fragment, .entryPoint = "PSMain"},
-                {VK_FORMAT_R16G16B16A16_SFLOAT}, &kawasePush, 1
-            );
-        });
-    }
-
-    return res;
-}
-
-std::expected<void, std::string> RenderContext::Impl::BuildBlitPipeline() {
-    VkPushConstantRange blitPush = {
-        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-        .offset     = 0,
-        .size       = sizeof(BlitPushConstants),
-    };
-
-    return BuildPassHelper(
-        this, blitPass, "Blit", {.path = SHADER_BLIT_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(Blit).vertex, .entryPoint = "VSMain"},
-        {.path = SHADER_BLIT_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(Blit).fragment, .entryPoint = "PSMain"},
-        {presentation.swapchain.Get().format}, &blitPush, 1
-    );
-}
-
-std::expected<void, std::string> RenderContext::Impl::InitPostProcessing() {
-    // Unified build and watch registration helper
-    auto register_and_check = [&](const char* name, auto&& build_fn, std::initializer_list<const char*> watchPaths) -> std::expected<void, std::string> {
-        auto res = build_fn();
-        if (!res) {
-            return std::unexpected(std::format("Pipeline '{}' failed to compile: {}", name, res.error()));
-        }
-        if constexpr (isDev) {
-            for (const auto* path: watchPaths) {
-                RegisterShaderWatcher(path, [=, build_fn = std::forward<decltype(build_fn)>(build_fn)]() {
-                    auto reload_res = build_fn();
-                    if (!reload_res) {
-                        ZHLN::Log("ERROR: Failed to hot-reload pipeline '{}': {}", name, reload_res.error());
-                    } else {
-                        ZHLN::Log("[Shader Reload] Pipeline '{}' hot-reloaded successfully.", name);
-                    }
-                });
-            }
-        }
-        return {};
-    };
-
-    // 1. Build and bind default and point samplers monadically
-    return Vk::SamplerBuilder {}
-        .Linear()
-        .ClampToEdge()
-        .Build(ctx.Device())
-        .transform_error([](const std::string& err) { return std::format("Failed to create default Sampler: {}", err); })
-        .and_then([&](auto defaultResult) -> std::expected<void, std::string> {
-            defaultSampler = std::move(defaultResult);
-            return Vk::SamplerBuilder {}
-                .Nearest()
-                .ClampToEdge()
-                .Build(ctx.Device())
-                .transform_error([](const std::string& err) { return std::format("Failed to create point Sampler: {}", err); })
-                .and_then([&](auto pointResult) -> std::expected<void, std::string> {
-                    pointSampler = std::move(pointResult);
-                    return {};
-                });
-        })
-        // 2. Chain pipeline compilation stages sequentially
-        .and_then([&]() { return register_and_check("TAA", [this]() { return BuildTAAPipeline(); }, {SHADER_TAA_HLSL_VS_PATH, SHADER_TAA_HLSL_PS_PATH}); })
-        .and_then([&]() { return register_and_check("FXAA", [this]() { return BuildFXAAPipeline(); }, {SHADER_FXAA_HLSL_VS_PATH, SHADER_FXAA_HLSL_PS_PATH}); })
-        .and_then([&]() {
-            return register_and_check(
-                "SMAA", [this]() { return BuildSMAAPipeline(); },
-                {SHADER_SMAA_EDGE_VS_PATH, SHADER_SMAA_EDGE_PS_PATH, SHADER_SMAA_WEIGHT_VS_PATH, SHADER_SMAA_WEIGHT_PS_PATH, SHADER_SMAA_BLEND_VS_PATH,
-                 SHADER_SMAA_BLEND_PS_PATH}
-            );
-        })
-        .and_then([&]() {
-            return register_and_check("Ambient", [this]() { return BuildAmbientPipeline(); }, {SHADER_AMBIENT_HLSL_VS_PATH, SHADER_AMBIENT_HLSL_PS_PATH});
-        })
-        .and_then([&]() {
-            return register_and_check(
-                "Lighting", [this]() { return BuildLightingPipeline(); },
-                {SHADER_LIGHTING_HLSL_VS_PATH, SHADER_LIGHTING_HLSL_PS_PATH, SHADER_LIGHTING_NORT_HLSL_VS_PATH, SHADER_LIGHTING_NORT_HLSL_PS_PATH}
-            );
-        })
-        .and_then([&]() {
-            return register_and_check(
-                "Reflection", [this]() { return BuildReflectionPipelines(); },
-                {SHADER_REFLECTION_HLSL_VS_PATH, SHADER_REFLECTION_HLSL_PS_PATH, SHADER_REFLECTION_NORT_HLSL_VS_PATH, SHADER_REFLECTION_NORT_HLSL_PS_PATH}
-            );
-        })
-        .and_then([&]() {
-            return register_and_check(
-                "Bloom", [this]() { return BuildBloomPipelines(); },
-                {SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH, SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH, SHADER_BLOOM_BLUR_HLSL_VS_PATH, SHADER_BLOOM_BLUR_HLSL_PS_PATH}
-            );
-        })
-        .and_then([&]() { return register_and_check("Blit", [this]() { return BuildBlitPipeline(); }, {SHADER_BLIT_HLSL_VS_PATH, SHADER_BLIT_HLSL_PS_PATH}); })
-        // 3. Bake texture resources as a final mapping transformation on success
-        .transform([&]() {
-            ZHLN::Array<uint32_t> smaaAreaPixels(static_cast<size_t>(160 * 560));
-            ZHLN::PBR::FillSmaaAreaTex(smaaAreaPixels);
-            ZHLN::Array<uint32_t> smaaSearchPixels(static_cast<size_t>(64 * 16));
-            ZHLN::PBR::FillSmaaSearchTex(smaaSearchPixels);
-            smaaAreaTexIdx   = CreateTextureInternal(smaaAreaPixels.data(), 160, 560, false);
-            smaaSearchTexIdx = CreateTextureInternal(smaaSearchPixels.data(), 64, 16, false);
-        });
-}
-
-std::expected<void, std::string> RenderContext::Impl::SetupUI(GLFWwindow* window) {
-    auto make_expected = [](bool success, std::string_view err_msg) -> std::expected<void, std::string> {
-        if (success) {
-            return {};
-        }
-        return std::unexpected(std::string(err_msg));
-    };
-
-    // Keep transient shader stage allocation in scope across the pipeline steps
-    Vk::ShaderStages uiShaders;
-
-    return Vk::DescriptorPoolBuilder(ctx.Device())
-        .Flags(VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT)
-        .MaxSets(1000)
-        .AddSize(VK_DESCRIPTOR_TYPE_SAMPLER, 1000)
-        .AddSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000)
-        .AddSize(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000)
-        .AddSize(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000)
-        .AddSize(VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000)
-        .AddSize(VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000)
-        .AddSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000)
-        .AddSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000)
-        .AddSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000)
-        .AddSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000)
-        .AddSize(VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000)
-        .Build()
-        .transform_error([](VkResult err) { return std::format("Failed to create UI Descriptor Pool: {}", Vk::ResultString(err)); })
-        .and_then([&](auto&& poolRes) -> std::expected<void, std::string> {
-            uiPool = std::forward<decltype(poolRes)>(poolRes);
-
-            return Vk::ShaderStages::Create(ctx.Device(), Resource::GetShaderProgram(Ui))
-                .transform_error([](const std::string& err) { return std::format("Failed to compile or load UI ShaderStages: {}", err); })
-                .transform([&](auto&& shaders) -> void { uiShaders = std::forward<decltype(shaders)>(shaders); });
-        })
-        .and_then([&]() {
-            return Vk::PipelineLayoutBuilder(ctx.Device())
-                .AddDescriptorSetLayout(bindlessLayout.Get())
-                .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(UIObjectConstants))
-                .Build()
-                .transform_error([](VkResult) { return std::string("Failed to compile UI Pipeline Layout."); })
-                .transform([&](auto&& layout) { uiPipelineLayout = std::forward<decltype(layout)>(layout); });
-        })
-        .and_then([&]() {
-            VkFormat swapchainFormat = presentation.swapchain.Get().format;
-
-            return Vk::PipelineBuilder {}
-                .Shaders(uiShaders)
-                .Layout(uiPipelineLayout.Get())
-                .ColorFormats(std::array {swapchainFormat})
-                .NoDepth()
-                .AlphaBlend()
-                .CullNone()
-                .Build(ctx.Device())
-                .transform_error([](Vk::PipelineBuilderResult err) {
-                    return std::format("Failed to compile UI Graphics Pipeline (Error Code: {})", static_cast<int>(err));
-                })
-                .transform([&](auto&& pipeline) { uiPipeline = std::forward<decltype(pipeline)>(pipeline); });
-        })
-        .and_then([&]() -> std::expected<void, std::string> {
-            if (window != nullptr) {
-                IMGUI_CHECKVERSION();
-                ImGui::CreateContext();
-                ImGui_ImplGlfw_InitForVulkan(window, true);
-
-                VkFormat swapchainFormat = presentation.swapchain.Get().format;
-
-                ImGui_ImplVulkan_InitInfo init_info = {
-                    .ApiVersion         = VK_API_VERSION_1_3,
-                    .Instance           = ctx.Instance(),
-                    .PhysicalDevice     = ctx.Physical(),
-                    .Device             = ctx.Device(),
-                    .QueueFamily        = ctx.PhysicalInfo().graphics_family,
-                    .Queue              = ctx.GraphicsQueue(),
-                    .DescriptorPool     = uiPool.Get(),
-                    .DescriptorPoolSize = 0,
-                    .MinImageCount      = 2,
-                    .ImageCount         = 2,
-                    .PipelineCache      = VK_NULL_HANDLE,
-                    .PipelineInfoMain =
-                        {
-                            .RenderPass  = VK_NULL_HANDLE,
-                            .Subpass     = 0,
-                            .MSAASamples = VK_SAMPLE_COUNT_1_BIT,
-                            .ExtraDynamicStates {},
-                            .PipelineRenderingCreateInfo =
-                                {.sType                   = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-                                 .pNext                   = nullptr,
-                                 .viewMask                = 0,
-                                 .colorAttachmentCount    = 1,
-                                 .pColorAttachmentFormats = &swapchainFormat,
-                                 .depthAttachmentFormat   = VK_FORMAT_D32_SFLOAT,
-                                 .stencilAttachmentFormat = VK_FORMAT_UNDEFINED},
-                        },
-                    .UseDynamicRendering        = true,
-                    .Allocator                  = nullptr,
-                    .CheckVkResultFn            = nullptr,
-                    .MinAllocationSize          = 0,
-                    .CustomShaderVertCreateInfo = {},
-                    .CustomShaderFragCreateInfo = {},
-                };
-
-                return make_expected(ImGui_ImplVulkan_Init(&init_info), "Failed to initialize ImGui Vulkan implementation.");
-            }
-            return {};
-        });
-}
-
 bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
     if (!presentation.Rebuild(ext.width, ext.height)) {
         return false;
@@ -1272,7 +1234,7 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
     return true;
 }
 
-std::expected<void, std::string> RenderContext::Impl::BuildHangGpuPipeline() {
+std::expected<void, Error> RenderContext::Impl::BuildHangGpuPipeline() {
     ZHLN_PipelineLayoutDesc pLayoutDesc = {.set_layouts = nullptr, .set_layout_count = 0, .push_constants = nullptr, .push_constant_count = 0};
 
     hangGpuPass.pipelineLayout = Vk::PipelineLayout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &pLayoutDesc));
@@ -1280,7 +1242,7 @@ std::expected<void, std::string> RenderContext::Impl::BuildHangGpuPipeline() {
     return LoadAndCreateComputeShader(
                {.path = SHADER_HANG_GPU_HLSL_CS_PATH, .fallback = Resource::hang_gpu_comp, .entryPoint = "CSMain"}, hangGpuPass.pipelineLayout.Get()
     )
-        .transform_error([](const std::string& err) { return std::format("Failed to build Hang GPU compute pipeline: {}", err); })
+        .transform_error([](auto err) -> Error { return err; })
         .transform([&](auto&& pipeline) { hangGpuPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
 }
 
