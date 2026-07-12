@@ -155,7 +155,7 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
                 for (auto& pool: worker.pools) {
                     pool = Vk::CommandPool<Vk::QueueType::Graphics>(ctx.Device(), ctx.PhysicalInfo().graphics_family);
                     if (!pool.AllocateSecondary(256)) {
-                        return std::unexpected(Error(RenderInitError::WorkerCommandPoolSetupFailed));
+                        return std::unexpected(RenderInitError::WorkerCommandPoolSetupFailed);
                     }
                 }
             }
@@ -294,7 +294,7 @@ template <typename LayoutT>
             return {};
         }
         ZHLN::Log("[RenderInit] ERROR: Failed to build pipeline for pass: {}", passName);
-        return std::unexpected(Error(RenderInitError::PipelineCreationFailed));
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
     });
 }
 
@@ -317,7 +317,7 @@ template <typename LayoutT>
             return {};
         }
         ZHLN::Log("[RenderInit] ERROR: Failed to build pipeline variants for pass: {}", passName);
-        return std::unexpected(Error(RenderInitError::PipelineCreationFailed));
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
     });
 }
 

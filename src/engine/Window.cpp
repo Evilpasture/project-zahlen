@@ -276,7 +276,7 @@ bool Window::ReinitTTY() {
 std::expected<void*, Error> Window::CreateVulkanSurface(void* instance, void* physicalDevice, int& outWidth, int& outHeight) noexcept {
     if (_impl->is_tty) {
         if (physicalDevice == nullptr) {
-            return std::unexpected(Error(SurfaceCreationError::TTYSurfaceCreationFailed));
+            return std::unexpected(SurfaceCreationError::TTYSurfaceCreationFailed);
         }
 
         uint32_t     hwWidth  = 0;
@@ -285,7 +285,7 @@ std::expected<void*, Error> Window::CreateVulkanSurface(void* instance, void* ph
             TTYBackend::CreateSurface(static_cast<VkInstance>(instance), static_cast<VkPhysicalDevice>(physicalDevice), _impl->tty_context, hwWidth, hwHeight);
 
         if (raw_surface == VK_NULL_HANDLE) {
-            return std::unexpected(Error(SurfaceCreationError::TTYSurfaceCreationFailed));
+            return std::unexpected(SurfaceCreationError::TTYSurfaceCreationFailed);
         }
 
         outWidth      = static_cast<int>(hwWidth);
@@ -296,11 +296,11 @@ std::expected<void*, Error> Window::CreateVulkanSurface(void* instance, void* ph
         return static_cast<void*>(raw_surface);
     }
     if (physicalDevice != nullptr) {
-        return std::unexpected(Error(SurfaceCreationError::WindowSurfaceUnsupported));
+        return std::unexpected(SurfaceCreationError::WindowSurfaceUnsupported);
     }
 
     if (glfwVulkanSupported() == GLFW_FALSE) {
-        return std::unexpected(Error(SurfaceCreationError::WindowSurfaceUnsupported));
+        return std::unexpected(SurfaceCreationError::WindowSurfaceUnsupported);
     }
 
     VkSurfaceKHR raw_surface = VK_NULL_HANDLE;
@@ -308,7 +308,7 @@ std::expected<void*, Error> Window::CreateVulkanSurface(void* instance, void* ph
 
     auto check = Vk::CheckResult(err, "Failed to create GLFW Vulkan window surface");
     if (!check) {
-        return std::unexpected(Error(SurfaceCreationError::GLFWSurfaceCreationFailed));
+        return std::unexpected(SurfaceCreationError::GLFWSurfaceCreationFailed);
     }
 
     glfwGetFramebufferSize(_impl->handle, &outWidth, &outHeight);

@@ -211,7 +211,7 @@ constexpr std::array Handlers = {
                 opt.fullscreen = IsTrue(v);
             } else {
                 std::println(stderr, "Error: Invalid value '{}' for --fullscreen.", v);
-                return std::unexpected(ZHLN::Error(ZHLN::CommandLineError::InvalidValue));
+                return std::unexpected(ZHLN::CommandLineError::InvalidValue);
             }
             return {};
         }
@@ -238,13 +238,13 @@ constexpr std::array Handlers = {
         .action   = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::Error> {
             if (v.empty()) {
                 std::println(stderr, "Error: --fps-limit requires an integer value.");
-                return std::unexpected(ZHLN::Error(ZHLN::CommandLineError::MissingValue));
+                return std::unexpected(ZHLN::CommandLineError::MissingValue);
             }
             uint32_t val   = 0;
             auto [ptr, ec] = std::from_chars(v.data(), v.data() + v.size(), val);
             if (ec != std::errc {}) {
                 std::println(stderr, "Error: Invalid value '{}' for --fps-limit.", v);
-                return std::unexpected(ZHLN::Error(ZHLN::CommandLineError::InvalidValue));
+                return std::unexpected(ZHLN::CommandLineError::InvalidValue);
             }
             opt.fpsLimit = val;
             return {};
@@ -261,7 +261,7 @@ constexpr std::array Handlers = {
                 opt.enableRenderDoc = false;
             } else {
                 std::println(stderr, "Error: Invalid value '{}' for --renderdoc.", v);
-                return std::unexpected(ZHLN::Error(ZHLN::CommandLineError::InvalidValue));
+                return std::unexpected(ZHLN::CommandLineError::InvalidValue);
             }
             return {};
         }
@@ -332,7 +332,7 @@ std::expected<CommandLineOptions, Error> HandleCommandLine(std::span<char* const
             }
             PrintHelp(exeName);
 
-            return std::unexpected(Error(CommandLineError::UnknownArgument));
+            return std::unexpected(CommandLineError::UnknownArgument);
         }
     }
     return options;

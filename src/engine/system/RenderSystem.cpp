@@ -58,7 +58,7 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
 
     auto cameraEntities = reg.GetEntitiesWith<Components::MainCameraTagComponent>();
     if (cameraEntities.empty()) {
-        return std::unexpected(Error(RenderFrameResult::Error));
+        return std::unexpected(RenderFrameResult::Error);
     }
 
     auto begin_res = rc.BeginFrame();
@@ -73,7 +73,7 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
         unjitteredVp     = cComp->unjitteredViewProj;
         prevUnjitteredVp = cComp->prevUnjitteredViewProj;
     } else {
-        return std::unexpected(Error(RenderFrameResult::Error));
+        return std::unexpected(RenderFrameResult::Error);
     }
 
     int       enableRTR  = 0;

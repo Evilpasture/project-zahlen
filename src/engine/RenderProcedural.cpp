@@ -35,7 +35,7 @@ std::expected<void, Error> RenderContext::Impl::BuildProceduralBakePipeline() {
 
     if (!proceduralBakePass.BuildVariants(ctx.Device(), proceduralBakeDescLayout.Get(), shaderDesc, specInfos, &push, 1)) {
         ZHLN::Log("[Shader] Failed to build specialized Procedural Bake Compute variants!");
-        return std::unexpected(Error(RenderInitError::PipelineCreationFailed));
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
 
     ZHLN::Log(

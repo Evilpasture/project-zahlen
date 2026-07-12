@@ -134,7 +134,7 @@ std::expected<std::unique_ptr<Engine>, Error> Engine::Create(const EngineConfig&
     auto engine = std::unique_ptr<Engine>(new (std::nothrow) Engine());
     if (!engine) {
         ZHLN::Log("Failed to allocate memory for the Engine context.");
-        return std::unexpected(Error(EngineInitError::UnknownError));
+        return std::unexpected(EngineInitError::UnknownError);
     }
 
     auto res = engine->InitInternal(cfg);
@@ -170,7 +170,7 @@ std::expected<void, Error> Engine::InitInternal(const EngineConfig& cfg) {
             use_tty = true;
         } else {
             ZHLN::Log("GLFW failed to initialize, and native KMS/TTY display mode is not supported on this platform.");
-            return std::unexpected(Error(EngineInitError::WindowCreationFailed));
+            return std::unexpected(EngineInitError::WindowCreationFailed);
         }
     }
 
@@ -179,7 +179,7 @@ std::expected<void, Error> Engine::InitInternal(const EngineConfig& cfg) {
 
     if (use_tty && _impl->window->GetTTYContext() == nullptr) {
         ZHLN::Log("[Engine] FATAL: TTY Input initialization failed (libseat session rejected).");
-        return std::unexpected(Error(EngineInitError::TTYInitializationFailed));
+        return std::unexpected(EngineInitError::TTYInitializationFailed);
     }
 
     InitRenderDocAPI();
