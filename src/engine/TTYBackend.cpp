@@ -383,103 +383,6 @@ std::vector<std::string_view> GetRequiredInstanceExtensions() {
     };
 }
 
-VkSurfaceKHR CreateSurface(VkInstance instance, VkPhysicalDevice physical, void* context, uint32_t& outWidth, uint32_t& outHeight) {
-    uint32_t displayCount = 0;
-    vkGetPhysicalDeviceDisplayPropertiesKHR(physical, &displayCount, nullptr);
-    if (displayCount == 0) {
-        ZHLN::Log("[TTY] FATAL: No displays found via VK_KHR_display");
-        return VK_NULL_HANDLE;
-    }
-
-    std::vector<VkDisplayPropertiesKHR> displays(displayCount);
-    vkGetPhysicalDeviceDisplayPropertiesKHR(physical, &displayCount, displays.data());
-    VkDisplayKHR targetDisplay = displays[0].display;
-
-    ZHLN::Log(
-        "[TTY] Using Display: {} (Resolution: {}x{})", (displays[0].displayName != nullptr) ? displays[0].displayName : "Unknown",
-        displays[0].physicalResolution.width, displays[0].physicalResolution.height
-    );
-
-    uint32_t modeCount = 0;
-    vkGetDisplayModePropertiesKHR(physical, targetDisplay, &modeCount, nullptr);
-    std::vector<VkDisplayModePropertiesKHR> modes(modeCount);
-    vkGetDisplayModePropertiesKHR(physical, targetDisplay, &modeCount, modes.data());
-
-    VkDisplayModeKHR targetMode = modes[0].displayMode;
-    outWidth                    = modes[0].parameters.visibleRegion.width;
-    outHeight                   = modes[0].parameters.visibleRegion.height;
-
-    ZHLN::Log("[TTY] Selected Mode: {}x{} @ {}Hz", outWidth, outHeight, (float) modes[0].parameters.refreshRate / 1000.0f);
-
-    uint32_t planeCount = 0;
-    vkGetPhysicalDeviceDisplayPlanePropertiesKHR(physical, &planeCount, nullptr);
-    std::vector<VkDisplayPlanePropertiesKHR> planeProps(planeCount);
-    vkGetPhysicalDeviceDisplayPlanePropertiesKHR(physical, &planeCount, planeProps.data());
-
-    uint32_t targetPlane = UINT32_MAX;
-    for (uint32_t i = 0; i < planeCount; i++) {
-        if (planeProps[i].currentDisplay != VK_NULL_HANDLE && planeProps[i].currentDisplay != targetDisplay) {
-            continue;
-        }
-
-        uint32_t supportedCount = 0;
-        vkGetDisplayPlaneSupportedDisplaysKHR(physical, i, &supportedCount, nullptr);
-        std::vector<VkDisplayKHR> supported(supportedCount);
-        vkGetDisplayPlaneSupportedDisplaysKHR(physical, i, &supportedCount, supported.data());
-
-        for (auto* d: supported) {
-            if (d == targetDisplay) {
-                targetPlane = i;
-                break;
-            }
-        }
-        if (targetPlane != UINT32_MAX) {
-            break;
-        }
-    }
-
-    if (targetPlane == UINT32_MAX) {
-        ZHLN::Log("[TTY] FATAL: Could not find a compatible display plane!");
-        return VK_NULL_HANDLE;
-    }
-
-    VkDisplayPlaneCapabilitiesKHR planeCaps;
-    vkGetDisplayPlaneCapabilitiesKHR(physical, targetMode, targetPlane, &planeCaps);
-
-    VkDisplayPlaneAlphaFlagBitsKHR alphaMode = VK_DISPLAY_PLANE_ALPHA_OPAQUE_BIT_KHR;
-    if (!(planeCaps.supportedAlpha & alphaMode)) {
-        if (planeCaps.supportedAlpha & VK_DISPLAY_PLANE_ALPHA_GLOBAL_BIT_KHR) {
-            alphaMode = VK_DISPLAY_PLANE_ALPHA_GLOBAL_BIT_KHR;
-        } else if (planeCaps.supportedAlpha & VK_DISPLAY_PLANE_ALPHA_PER_PIXEL_BIT_KHR) {
-            alphaMode = VK_DISPLAY_PLANE_ALPHA_PER_PIXEL_BIT_KHR;
-        } else if (planeCaps.supportedAlpha & VK_DISPLAY_PLANE_ALPHA_PER_PIXEL_PREMULTIPLIED_BIT_KHR) {
-            alphaMode = VK_DISPLAY_PLANE_ALPHA_PER_PIXEL_PREMULTIPLIED_BIT_KHR;
-        }
-    }
-
-    VkDisplaySurfaceCreateInfoKHR createInfo = {
-        .sType           = VK_STRUCTURE_TYPE_DISPLAY_SURFACE_CREATE_INFO_KHR,
-        .pNext           = nullptr,
-        .flags           = 0,
-        .displayMode     = targetMode,
-        .planeIndex      = targetPlane,
-        .planeStackIndex = 0,
-        .transform       = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
-        .globalAlpha     = 1.0f,
-        .alphaMode       = alphaMode,
-        .imageExtent     = {.width = outWidth, .height = outHeight}
-    };
-
-    VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (vkCreateDisplayPlaneSurfaceKHR(instance, &createInfo, nullptr, &surface) != VK_SUCCESS) {
-        ZHLN::Log("[TTY] FATAL: vkCreateDisplayPlaneSurfaceKHR failed!");
-    } else {
-        ZHLN::Log("[TTY] VK_KHR_display Surface successfully created on Plane {}", targetPlane);
-    }
-
-    return surface;
-}
-
 #else
 
 bool IsSupported() {
@@ -496,9 +399,6 @@ void ProcessEvents(void*, InputContext*) {
 }
 std::vector<std::string_view> GetRequiredInstanceExtensions() {
     return {};
-}
-VkSurfaceKHR CreateSurface(VkInstance, VkPhysicalDevice, void*, uint32_t&, uint32_t&) {
-    return VK_NULL_HANDLE;
 }
 
 bool IsRunning(void*) {

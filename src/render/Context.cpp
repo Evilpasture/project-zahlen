@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Context.hpp"
+#include <Zahlen/render/RenderCode.hpp>
 
 namespace ZHLN::Vk {
 
@@ -71,55 +72,37 @@ auto Context::operator=(Context&& other) noexcept -> Context& {
     return *this;
 }
 
-auto Context::Create(const ZHLN_InstanceDesc& instanceDesc, const ZHLN_DeviceSelectDesc& selectDesc, const ZHLN_DeviceDesc& deviceDesc) noexcept -> Context {
-    Context ctx;
+// ============================================================================
+// Builder Implementation
+// ============================================================================
 
-    ctx._instance = ZHLN_CreateInstance(&instanceDesc);
-    if (ctx._instance == VK_NULL_HANDLE) {
-        return {};
-    }
-
-    ctx._surface = selectDesc.surface;
-
-    const ZHLN_DeviceSelectDesc safe_select = {
-        .instance       = ctx._instance,
-        .surface        = selectDesc.surface,
-        .score_fn       = selectDesc.score_fn,
-        .score_userdata = selectDesc.score_userdata,
-    };
-    ctx._physical = ZHLN_SelectPhysicalDevice(&safe_select);
-
-    if (ctx._physical.handle == VK_NULL_HANDLE) {
-        return {};
-    }
-
-    const ZHLN_DeviceDesc safe_device = {
-        .physical          = &ctx._physical,
-        .extensions        = deviceDesc.extensions,
-        .extension_count   = deviceDesc.extension_count,
-        .features          = deviceDesc.features,
-        .enable_validation = deviceDesc.enable_validation,
-    };
-    ctx._device = ZHLN_CreateDevice(&safe_device);
-
-    return ctx;
+VkInstance Context::Builder::BuildInstance() const noexcept {
+    return CreateInstance(_appName, _appVersion, _instanceExtensions, _enableValidation);
 }
 
-auto Context::Create(VkInstance instance, VkSurfaceKHR surface, const ZHLN_PhysicalDeviceInfo& physical, const ZHLN_DeviceDesc& deviceDesc) noexcept
-    -> Context {
-    Context ctx;
-    ctx._instance = instance;
-    ctx._surface  = surface;
-    ctx._physical = physical;
+ZHLN_PhysicalDeviceInfo Context::Builder::SelectPhysicalDevice() const noexcept {
+    ZHLN_DeviceSelectDesc select_desc = {.instance = _instance, .surface = _surface, .score_fn = _scoreFn, .score_userdata = _scoreUserdata};
+    return ZHLN_SelectPhysicalDevice(&select_desc);
+}
 
-    const ZHLN_DeviceDesc safe_device = {
+std::expected<Context, Error> Context::Builder::Build() const noexcept {
+    Context ctx;
+    ctx._instance = _instance;
+    ctx._surface  = _surface;
+    ctx._physical = _physical;
+
+    const ZHLN_DeviceDesc device_desc = {
         .physical          = &ctx._physical,
-        .extensions        = deviceDesc.extensions,
-        .extension_count   = deviceDesc.extension_count,
-        .features          = deviceDesc.features,
-        .enable_validation = deviceDesc.enable_validation,
+        .extensions        = _deviceExtensions.data(),
+        .extension_count   = static_cast<uint32_t>(_deviceExtensions.size()),
+        .features          = _features,
+        .enable_validation = _enableValidation,
     };
-    ctx._device = ZHLN_CreateDevice(&safe_device);
+
+    ctx._device = ZHLN_CreateDevice(&device_desc);
+    if (ctx._device.handle == VK_NULL_HANDLE) {
+        return std::unexpected(RenderInitError::DeviceCreationFailed);
+    }
 
     return ctx;
 }

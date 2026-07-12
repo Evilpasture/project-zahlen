@@ -77,8 +77,14 @@ auto main() -> int {
                 return "Failed to build instance extensions: " + std::string(err.Message());
             })
             .and_then([&](const Vk::ExtensionResult& instExts) -> std::expected<void, std::string> {
-                // 3. Create Vulkan Instance
-                VkInstance instance = Vk::CreateInstance("ZHLN Engine - Cube", VK_MAKE_API_VERSION(0, 1, 0, 0), instExts, true);
+                // 3. Create Vulkan Instance via Builder
+                VkInstance instance = Vk::Context::Builder()
+                    .AppName("ZHLN Engine - Cube")
+                    .AppVersion(VK_MAKE_API_VERSION(0, 1, 0, 0))
+                    .InstanceExtensions(instExts)
+                    .EnableValidation(true)
+                    .BuildInstance();
+
                 if (instance == VK_NULL_HANDLE) {
                     return std::unexpected("Failed to create Vulkan Instance.");
                 }
@@ -90,8 +96,12 @@ auto main() -> int {
                     return std::unexpected("Failed to create Vulkan Surface.");
                 }
 
-                // 5. Select Physical Device
-                ZHLN_PhysicalDeviceInfo physical = Vk::SelectDevice(instance, raw_surface);
+                // 5. Select Physical Device via Builder
+                ZHLN_PhysicalDeviceInfo physical = Vk::Context::Builder()
+                    .Instance(instance)
+                    .Surface(raw_surface)
+                    .SelectPhysicalDevice();
+
                 if (physical.handle == VK_NULL_HANDLE) {
                     vkDestroySurfaceKHR(instance, raw_surface, nullptr);
                     vkDestroyInstance(instance, nullptr);
@@ -143,20 +153,22 @@ auto main() -> int {
                                             })
                                             .Build();
 
-                        ZHLN_DeviceDesc dev_desc = {
-                            .extensions = devExts.data(),
-                            .extension_count = static_cast<uint32_t>(devExts.size()),
-                            .features = features.GetRoot(),
-                            .enable_validation = true
-                        };
+                        // 8. Create Context via Builder
+                        auto ctx_res = Vk::Context::Builder()
+                            .Instance(instance)
+                            .Surface(raw_surface)
+                            .PhysicalDevice(physical)
+                            .DeviceExtensions(devExts)
+                            .DeviceFeatures(features.GetRoot())
+                            .EnableValidation(true)
+                            .Build();
 
-                        // 8. Create Context
-                        auto ctx = Vk::Context::Create(instance, raw_surface, physical, dev_desc);
-                        if (!ctx) {
+                        if (!ctx_res) {
                             vkDestroySurfaceKHR(instance, raw_surface, nullptr);
                             vkDestroyInstance(instance, nullptr);
-                            return std::unexpected("Failed to create Vulkan logical device / Context.");
+                            return std::unexpected("Failed to create Vulkan logical device / Context: " + std::string(ctx_res.error().Message()));
                         }
+                        auto ctx = std::move(ctx_res.value());
 
                         // 9. RAII Surface Holder
                         Vk::Surface surface(instance, raw_surface);

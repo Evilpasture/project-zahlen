@@ -258,24 +258,6 @@ std::expected<Vk::ExtensionResult, Error> GetDeviceExtensions(VkPhysicalDevice p
         .transform_error([](auto err) -> Error { return err; });
 }
 
-Vk::Context CreateLogicalDevice(
-    VkInstance                       instance,
-    VkSurfaceKHR                     surface,
-    const ZHLN_PhysicalDeviceInfo&   physical,
-    const std::vector<const char*>&  extensions,
-    const VkPhysicalDeviceFeatures2* features,
-    bool                             enableValidation
-) noexcept {
-    return Vk::Context::Create(
-        instance, surface, physical,
-        {.physical          = &physical,
-         .extensions        = extensions.data(),
-         .extension_count   = static_cast<uint32_t>(extensions.size()),
-         .features          = features,
-         .enable_validation = enableValidation}
-    );
-}
-
 template <typename LayoutT>
 [[nodiscard]] std::expected<void, Error> BuildPassHelper(
     RenderContext::Impl*            self,
@@ -377,22 +359,18 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
     auto impl     = std::make_unique<Impl>(window);
     impl->appName = cfg.appName;
 
-    auto make_expected = [](bool success, Error err) -> std::expected<void, Error> {
-        if (success) {
-            return {};
-        }
-        return std::unexpected(err);
-    };
-
+    // Local state captured by reference and mutated synchronously inside the pipeline
     VkInstance              instance    = VK_NULL_HANDLE;
     VkSurfaceKHR            raw_surface = VK_NULL_HANDLE;
     int                     width       = 0;
     int                     height      = 0;
     ZHLN_PhysicalDeviceInfo physicalInfo {};
 
+    auto make_expected = [](bool success, Error err) -> std::expected<void, Error> { return success ? std::expected<void, Error> {} : std::unexpected(err); };
+
     return GetPlatformInstanceExtensions(window, cfg.enableValidation)
         .and_then([&](auto&& inst_exts) -> std::expected<void, Error> {
-            instance = Vk::CreateInstance(impl->appName.c_str(), VK_MAKE_API_VERSION(0, 1, 0, 0), inst_exts, cfg.enableValidation);
+            instance = Vk::Context::Builder().AppName(impl->appName).EnableValidation(cfg.enableValidation).InstanceExtensions(inst_exts).BuildInstance();
             return make_expected(instance != VK_NULL_HANDLE, RenderInitError::InstanceCreationFailed);
         })
         .and_then([&]() -> std::expected<void, Error> {
@@ -404,7 +382,7 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
             return {};
         })
         .and_then([&]() -> std::expected<void, Error> {
-            physicalInfo = Vk::SelectDevice(instance, raw_surface);
+            physicalInfo = Vk::Context::Builder().Instance(instance).Surface(raw_surface).SelectPhysicalDevice();
             return make_expected(physicalInfo.handle != VK_NULL_HANDLE, RenderInitError::NoSuitableDeviceFound);
         })
         .and_then([&]() -> std::expected<void, Error> {
@@ -421,10 +399,18 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
             auto         features = BuildFeatureChain(physicalInfo.handle, caps);
 
             return GetDeviceExtensions(physicalInfo.handle).and_then([&](auto&& dev_exts) -> std::expected<void, Error> {
-                impl->ctx = CreateLogicalDevice(instance, raw_surface, physicalInfo, dev_exts, features.GetRoot(), cfg.enableValidation);
-                return make_expected(impl->ctx.Valid(), RenderInitError::DeviceCreationFailed);
+                return Vk::Context::Builder()
+                    .Instance(instance)
+                    .Surface(raw_surface)
+                    .PhysicalDevice(physicalInfo)
+                    .DeviceExtensions(dev_exts)
+                    .DeviceFeatures(features.GetRoot())
+                    .EnableValidation(cfg.enableValidation)
+                    .Build()
+                    .transform([&](auto&& context) { impl->ctx = std::forward<decltype(context)>(context); });
             });
         })
+        .and_then([&]() { return make_expected(impl->ctx.Valid(), RenderInitError::DeviceCreationFailed); })
         .and_then([&]() { return impl->InitSubsystems(cfg, width, height); })
         .transform([&]() { return std::make_unique<RenderContext>(PrivateToken {}, std::move(impl)); });
 }

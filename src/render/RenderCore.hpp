@@ -289,15 +289,23 @@ void DrawInstanced(
 );
 
 struct DrawIndirectState {
-    VkPipeline       pipeline          = VK_NULL_HANDLE;
-    VkPipelineLayout layout            = VK_NULL_HANDLE;
-    VkDescriptorSet  set               = VK_NULL_HANDLE;
-    VkBuffer         argumentBuffer    = VK_NULL_HANDLE;
-    VkDeviceSize     offset            = 0;
-    uint32_t         drawCount         = 0;
-    uint32_t         stride            = 0;
-    VkBuffer         countBuffer       = VK_NULL_HANDLE; // GPU-driven count buffer
-    VkDeviceSize     countBufferOffset = 0;              // Offset inside count buffer
+    VkPipeline       pipeline       = VK_NULL_HANDLE;
+    VkPipelineLayout layout         = VK_NULL_HANDLE;
+    VkDescriptorSet  set            = VK_NULL_HANDLE;
+    VkBuffer         argumentBuffer = VK_NULL_HANDLE;
+    VkDeviceSize     offset         = 0; // Default byte offset
+    uint32_t         drawCount      = 0;
+
+    // Default to the standard tightly-packed structure size
+    uint32_t stride = sizeof(VkDrawIndirectCommand);
+
+    VkBuffer     countBuffer       = VK_NULL_HANDLE;
+    VkDeviceSize countBufferOffset = 0;
+
+    // Helper to calculate offset by command index
+    static constexpr VkDeviceSize OffsetForIndex(uint32_t index) noexcept {
+        return static_cast<VkDeviceSize>(index) * sizeof(VkDrawIndirectCommand);
+    }
 };
 
 struct DrawIndirectCountState {
@@ -305,11 +313,23 @@ struct DrawIndirectCountState {
     VkPipelineLayout layout            = VK_NULL_HANDLE;
     VkDescriptorSet  set               = VK_NULL_HANDLE;
     VkBuffer         argumentBuffer    = VK_NULL_HANDLE;
-    VkDeviceSize     offset            = 0;
+    VkDeviceSize     offset            = 0; // Byte offset into argumentBuffer
     VkBuffer         countBuffer       = VK_NULL_HANDLE;
-    VkDeviceSize     countBufferOffset = 0;
+    VkDeviceSize     countBufferOffset = 0; // Byte offset into countBuffer
     uint32_t         maxDrawCount      = 0;
-    uint32_t         stride            = 0;
+
+    // Default to the standard tightly-packed structure size
+    uint32_t stride = sizeof(VkDrawIndirectCommand);
+
+    // Helper to calculate argument buffer offset by index
+    static constexpr VkDeviceSize OffsetForIndex(uint32_t index) noexcept {
+        return static_cast<VkDeviceSize>(index) * sizeof(VkDrawIndirectCommand);
+    }
+
+    // Helper to calculate count buffer offset by index (usually an array of uint32_t)
+    static constexpr VkDeviceSize CountOffsetForIndex(uint32_t index) noexcept {
+        return static_cast<VkDeviceSize>(index) * sizeof(uint32_t);
+    }
 };
 
 template <GpuTriviallyCopyable T>
@@ -336,10 +356,17 @@ struct DrawIndexedIndirectState {
     VkPipeline       pipeline       = VK_NULL_HANDLE;
     VkPipelineLayout layout         = VK_NULL_HANDLE;
     VkDescriptorSet  set            = VK_NULL_HANDLE;
-    VkBuffer         argumentBuffer = VK_NULL_HANDLE; // Buffer containing VkDrawIndexedIndirectCommand structs
-    VkDeviceSize     offset         = 0;              // Byte offset into argumentBuffer
-    uint32_t         drawCount      = 0;              // Number of draw commands to execute
-    uint32_t         stride         = 0;              // Stride (sizeof(VkDrawIndexedIndirectCommand))
+    VkBuffer         argumentBuffer = VK_NULL_HANDLE;
+    VkDeviceSize     offset         = 0;
+    uint32_t         drawCount      = 0;
+
+    // Default to the standard tightly-packed indexed structure size
+    uint32_t stride = sizeof(VkDrawIndexedIndirectCommand);
+
+    // Helper to calculate offset by command index
+    static constexpr VkDeviceSize OffsetForIndex(uint32_t index) noexcept {
+        return static_cast<VkDeviceSize>(index) * sizeof(VkDrawIndexedIndirectCommand);
+    }
 };
 
 struct DrawIndexedIndirectCountState {
@@ -351,7 +378,19 @@ struct DrawIndexedIndirectCountState {
     VkBuffer         countBuffer       = VK_NULL_HANDLE; // Buffer containing a single uint32_t draw count
     VkDeviceSize     countBufferOffset = 0;              // Byte offset into countBuffer
     uint32_t         maxDrawCount      = 0;              // Upper limit to prevent out-of-bound draws
-    uint32_t         stride            = 0;              // Stride (sizeof(VkDrawIndexedIndirectCommand))
+
+    // Default to the standard tightly-packed indexed structure size
+    uint32_t stride = sizeof(VkDrawIndexedIndirectCommand);
+
+    // Helper to calculate argument buffer offset by index
+    static constexpr VkDeviceSize OffsetForIndex(uint32_t index) noexcept {
+        return static_cast<VkDeviceSize>(index) * sizeof(VkDrawIndexedIndirectCommand);
+    }
+
+    // Helper to calculate count buffer offset by index
+    static constexpr VkDeviceSize CountOffsetForIndex(uint32_t index) noexcept {
+        return static_cast<VkDeviceSize>(index) * sizeof(uint32_t);
+    }
 };
 
 template <GpuTriviallyCopyable T>

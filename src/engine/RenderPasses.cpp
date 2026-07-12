@@ -64,7 +64,6 @@ inline void SubmitDrawInstanced(
         pushConstants, stages
     );
 }
-} // namespace
 
 struct GpuCullingPolicy {
     static void Record(
@@ -115,21 +114,20 @@ struct GpuCullingPolicy {
             .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
             .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
             .Execute(cmd, [&]() {
-                const VkDeviceSize stride = sizeof(VkDrawIndirectCommand);
                 for (const auto& group: groups) {
                     if (!group.material->pipeline.Valid()) {
                         continue;
                     }
-
                     Vk::DrawIndirect(
                         cmd,
-                        {.pipeline       = group.material->pipeline.Get(),
-                         .layout         = group.material->layout.Get(),
-                         .set            = recorder.bindlessSet,
-                         .argumentBuffer = ctx.indirectCommandsBuffers->Handle(),
-                         .offset         = group.start * stride,
-                         .drawCount      = group.count,
-                         .stride         = static_cast<uint32_t>(stride)},
+                        {
+                            .pipeline       = group.material->pipeline.Get(),
+                            .layout         = group.material->layout.Get(),
+                            .set            = recorder.bindlessSet,
+                            .argumentBuffer = ctx.indirectCommandsBuffers->Handle(),
+                            .offset         = Vk::DrawIndirectState::OffsetForIndex(group.start),
+                            .drawCount      = group.count,
+                        },
                         ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 0}
                     );
                 }
@@ -193,7 +191,7 @@ template <typename CullingPolicy, typename... Args>
 void ExecutePass(const FrameRecorder& recorder, const ZHLN::Array<GroupRange>& groups, uint32_t drawCount, Args&&... args) {
     CullingPolicy::Record(recorder, groups, drawCount, std::forward<Args>(args)...);
 }
-
+} // namespace
 namespace Passes {
 
 void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
@@ -304,9 +302,8 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
                      .layout         = ctx.shadowPipelineLayout.Get(),
                      .set            = recorder.bindlessSet,
                      .argumentBuffer = ctx.shadowIndirectBuffers->Handle(),
-                     .offset         = passWriteOffsets[cascade] * sizeof(VkDrawIndirectCommand),
-                     .drawCount      = drawCount,
-                     .stride         = sizeof(VkDrawIndirectCommand)},
+                     .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[cascade]),
+                     .drawCount      = drawCount},
                     ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = cascade + 1}, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
                 );
             });
@@ -336,7 +333,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
             Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> subViewImage = {
                 .handle = ctx.graphResources.shadowAtlas.image.Handle(),
                 .view   = ctx.punctualShadowViews[light.shadowLayer].Get(),
-                .extent = {.width = 1024, .height = 1024},
+                .extent = {.width = 1024, .height = 1024, .depth = {}},
                 .aspect = VK_IMAGE_ASPECT_DEPTH_BIT
             };
 
@@ -347,13 +344,14 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 
                 Vk::DrawIndirect(
                     cmd,
-                    {.pipeline       = ctx.punctualShadowPipeline.Get(),
-                     .layout         = ctx.punctualShadowPipelineLayout.Get(),
-                     .set            = recorder.bindlessSet,
-                     .argumentBuffer = ctx.shadowIndirectBuffers->Handle(),
-                     .offset         = passWriteOffsets[slotIdx] * sizeof(VkDrawIndirectCommand),
-                     .drawCount      = drawCount,
-                     .stride         = sizeof(VkDrawIndirectCommand)},
+                    {
+                        .pipeline       = ctx.punctualShadowPipeline.Get(),
+                        .layout         = ctx.punctualShadowPipelineLayout.Get(),
+                        .set            = recorder.bindlessSet,
+                        .argumentBuffer = ctx.shadowIndirectBuffers->Handle(),
+                        .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[slotIdx]),
+                        .drawCount      = drawCount,
+                    },
                     pc, VK_SHADER_STAGE_VERTEX_BIT
                 );
             });
