@@ -250,6 +250,31 @@ class Image {
     VmaHandle<VkImage, vmaDestroyImage> _handle;
 };
 
+class ImageBuilder {
+  public:
+    ImageBuilder() noexcept;
+
+    auto Type(VkImageType type) noexcept -> ImageBuilder&;
+    auto Format(VkFormat format) noexcept -> ImageBuilder&;
+    auto Dimensions(uint32_t width, uint32_t height, uint32_t depth = 1) noexcept -> ImageBuilder&;
+    auto Mips(uint32_t levels) noexcept -> ImageBuilder&;
+    auto Layers(uint32_t layers) noexcept -> ImageBuilder&;
+    auto Samples(VkSampleCountFlagBits samples) noexcept -> ImageBuilder&;
+    auto Tiling(VkImageTiling tiling) noexcept -> ImageBuilder&;
+    auto Usage(VkImageUsageFlags usage) noexcept -> ImageBuilder&;
+    auto SharingMode(VkSharingMode mode) noexcept -> ImageBuilder&;
+    auto Flags(VkImageCreateFlags flags) noexcept -> ImageBuilder&;
+
+    // Semantic helpers for common configurations
+    auto Texture2D(uint32_t width, uint32_t height, VkFormat format, VkImageUsageFlags usage, uint32_t mips = 1) noexcept -> ImageBuilder&;
+    auto TextureCube(uint32_t size, VkFormat format, VkImageUsageFlags usage, uint32_t mips = 1) noexcept -> ImageBuilder&;
+
+    [[nodiscard]] auto Build(VmaAllocator allocator, VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_GPU_ONLY) const noexcept -> Image;
+
+  private:
+    VkImageCreateInfo _info {};
+};
+
 // ============================================================================
 // Buffer Utilities
 // ============================================================================

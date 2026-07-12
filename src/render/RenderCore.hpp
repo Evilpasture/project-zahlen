@@ -7,6 +7,8 @@
 #error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <Zahlen/render/RenderCode.hpp>
+
 namespace ZHLN {
 
 struct Color4 {
@@ -153,7 +155,7 @@ class TypedPipeline {
 
 inline constexpr auto& GetBufferAddress = ZHLN_GetBufferDeviceAddress;
 
-std::expected<VkResult, std::string> WaitIdle(VkDevice device) noexcept;
+[[nodiscard]] std::expected<VkResult, VulkanCallError> WaitIdle(VkDevice device) noexcept;
 
 // ============================================================================
 // Scoped RAII Scissor State Guard
@@ -241,9 +243,18 @@ template <uint32_t N, bool WaitOnFence = true, typename Record, typename Rebuild
     requires RecordFn<Record> && RebuildFn<Rebuild>
 auto DrawFrame(const DrawFrameDesc<N>& desc, uint32_t& frameIndex, Record&& record, Rebuild&& rebuild) noexcept -> ZHLN_FrameResult;
 
+[[nodiscard]] std::expected<void, Error> QueueSubmit(
+    VkQueue               queue,
+    VkCommandBuffer       cmd,
+    VkSemaphore           waitSemaphore = VK_NULL_HANDLE,
+    uint64_t              waitValue     = 0,
+    VkPipelineStageFlags2 waitStage     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+    VkFence               fence         = VK_NULL_HANDLE
+) noexcept;
+
 [[nodiscard]] auto SubmitAndPresent(const ZHLN_FrameSubmitDesc& desc) noexcept -> ZHLN_FrameResult;
 
-void SubmitAndWait(
+[[nodiscard]] std::expected<void, Error> SubmitAndWait(
     VkQueue               queue,
     VkCommandBuffer       cmd,
     VkSemaphore           waitSemaphore = VK_NULL_HANDLE,
@@ -363,11 +374,10 @@ void DrawIndexedIndirectCount(
 // Error Helpers
 // ============================================================================
 
-std::string       ReportVkError(VkResult result, const char* context, const std::source_location& location);
-[[noreturn]] void ReportSemaphoreBoundsError(uint32_t index, uint32_t count) noexcept;
+[[nodiscard]] std::string ReportVkError(VkResult result, const char* context, const std::source_location& location);
+[[noreturn]] void         ReportSemaphoreBoundsError(uint32_t index, uint32_t count) noexcept;
 
-[[nodiscard]] auto ResultString(const VkResult result) noexcept -> std::string;
-std::expected<VkResult, std::string>
+[[nodiscard]] std::expected<VkResult, std::string>
     CheckResult(const VkResult result, const char* context = "", const std::source_location location = std::source_location::current());
 
 // ============================================================================

@@ -485,7 +485,7 @@ void RegisterCreativeWorkCommands() {
     RegisterCmd("CreateBasicMaterial", MakeCmd<CreateMaterialArgs>([](ZHLN::Engine* engine, const CreateMaterialArgs& a) -> uint64_t {
                     auto mat_res = ZHLN::CreativeWorksFactory::CreateBasicMaterial(engine->GetRenderContext(), false, a.a < 1.0f);
                     if (!mat_res) {
-                        ZHLN::Log("ERROR: CreateBasicMaterial from Lua failed: {}", mat_res.error());
+                        ZHLN::Log("ERROR: CreateBasicMaterial from Lua failed: {}", mat_res.error().Message());
                         return 0;
                     }
                     ZHLN::Material mat     = mat_res.value();
@@ -531,7 +531,7 @@ void RegisterCreativeWorkCommands() {
 
                     auto mat_res = ZHLN::CreativeWorksFactory::CreateBasicMaterial(rc, false, isTransparent);
                     if (!mat_res) {
-                        ZHLN::Panic("Failed to create basic material inside SpawnEntity: {}", mat_res.error());
+                        ZHLN::Panic("Failed to create basic material inside SpawnEntity: {}", mat_res.error().Message());
                     }
                     ZHLN::Material mat     = mat_res.value();
                     mat.baseColorFactor[0] = a.r;

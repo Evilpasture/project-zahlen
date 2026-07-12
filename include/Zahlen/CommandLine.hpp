@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <Zahlen/Error.hpp>
 #include <cstdint>
 #include <cstdlib>
 #include <expected>
@@ -11,6 +12,8 @@
 namespace ZHLN {
 
 enum class LogLevel : uint8_t { Quiet, Moderate, Verbose };
+
+enum class CommandLineError : uint8_t { Success = 0, InvalidValue, MissingValue, UnknownArgument };
 
 struct CommandLineOptions {
     std::span<char* const> args;
@@ -22,6 +25,11 @@ struct CommandLineOptions {
     uint32_t               fpsLimit         = 0;
     bool                   enableRenderDoc  = false;
     bool                   benchmark        = false;
+
+    // User requests (successful early-exit paths)
+    bool helpRequested       = false;
+    bool versionRequested    = false;
+    bool printGraphRequested = false;
 };
 
 struct EngineError {
@@ -30,6 +38,6 @@ struct EngineError {
     bool        silent = false;
 };
 
-std::expected<CommandLineOptions, EngineError> HandleCommandLine(std::span<char* const> args);
+std::expected<CommandLineOptions, Error> HandleCommandLine(std::span<char* const> args);
 
 } // namespace ZHLN

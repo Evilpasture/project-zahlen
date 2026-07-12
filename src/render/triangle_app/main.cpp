@@ -38,7 +38,7 @@ auto main() -> int {
         inst_exts_builder.OptionalIf(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME, is_mac);
 
         return inst_exts_builder.Build().transform_error(
-                                            [](const std::string& err) { return "Failed to build instance extensions: " + err; }
+                                            [](ZHLN::Error err) { return "Failed to build instance extensions: " + std::string(err.Message()); }
         ).and_then([&](auto&& instExts) -> std::expected<void, std::string> {
             // 3. Create Vulkan Instance
             VkInstance instance = Vk::CreateInstance("ZHLN - Triangle Demo", VK_MAKE_API_VERSION(0, 1, 0, 0), instExts, true);
@@ -66,10 +66,10 @@ auto main() -> int {
                 .Require(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
                 .OptionalIf("VK_KHR_portability_subset", is_mac)
                 .Build()
-                .transform_error([instance, raw_surface](const std::string& err) {
+                .transform_error([instance, raw_surface](ZHLN::Error err) {
                     vkDestroySurfaceKHR(instance, raw_surface, nullptr);
                     vkDestroyInstance(instance, nullptr);
-                    return "Failed to build device extensions: " + err;
+                    return "Failed to build device extensions: " + std::string(err.Message());
                 })
                 .and_then([&, instance, raw_surface, physical](auto&& devExts) -> std::expected<void, std::string> {
                     // 7. Feature Chain Setup
@@ -116,11 +116,11 @@ auto main() -> int {
 
                     // 12. Shader & Pipeline Compilation
                     return Vk::ShaderStages::FromFiles(ctx.Device(), "triangle.hlsl.VSMain.spv", "triangle.hlsl.PSMain.spv", "VSMain", "PSMain")
-                        .transform_error([](const std::string& err) { return "Shader compilation failed: " + err; })
+                        .transform_error([](ZHLN::Error err) { return "Shader compilation failed: " + std::string(err.Message()); })
                         .and_then([&](auto&& shaders) {
                             return Vk::PipelineLayoutBuilder(ctx.Device())
                                 .Build()
-                                .transform_error([](VkResult err) { return std::format("Pipeline layout compilation failed: {}", Vk::ResultString(err)); })
+                                .transform_error([](ZHLN::Error err) { return std::format("Pipeline layout compilation failed: {}", err.Message()); })
                                 .transform([shaders = std::forward<decltype(shaders)>(shaders)](auto&& layout) mutable {
                                     return std::make_pair(std::move(shaders), std::forward<decltype(layout)>(layout));
                                 });
@@ -135,8 +135,8 @@ auto main() -> int {
                                 .NoDepth()
                                 .CullNone()
                                 .Build(ctx.Device())
-                                .transform_error([](Vk::PipelineBuilderResult err) {
-                                    return std::format("Graphics pipeline compilation failed. Error Code: {}", static_cast<int>(err));
+                                .transform_error([](ZHLN::Error err) {
+                                    return std::format("Graphics pipeline compilation failed. Error Code: {}", err.Message());
                                 })
                                 .and_then([&](auto&& pipeline) -> std::expected<void, std::string> {
                                     // 13. Rebuild Callback

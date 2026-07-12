@@ -66,6 +66,7 @@ target_link_libraries(zahlen_render PUBLIC
 
 target_include_directories(zahlen_render PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/include
 )
 
 target_compile_definitions(zahlen_render PRIVATE

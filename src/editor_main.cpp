@@ -262,7 +262,7 @@ std::expected<std::unique_ptr<Engine>, EngineError> InitializeEditor(CommandLine
     auto engine_res = Engine::Create(config);
 
     if (!engine_res) {
-        return std::unexpected(EngineError {.msg = engine_res.error(), .code = EXIT_FAILURE});
+        return std::unexpected(EngineError {.msg = std::string(engine_res.error().Message()), .code = EXIT_FAILURE});
     }
 
     auto engine = std::move(engine_res.value());
@@ -303,7 +303,7 @@ bool InitializeEditorScene(Engine& engine) {
 
     auto material_res = CreativeWorksFactory::CreateBasicMaterial(rc);
     if (!material_res) {
-        ZHLN::Log("ERROR: Failed to compile basic material during editor initialization: {}", material_res.error());
+        ZHLN::Log("ERROR: Failed to compile basic material during editor initialization: {}", material_res.error().Message());
         return false;
     }
     Material material = material_res.value();
@@ -521,7 +521,7 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 
                 auto debugLineMat_res = rc.CreateMaterial(lineDesc);
                 if (!debugLineMat_res) {
-                    ZHLN::Panic("Failed to compile editor debug line material: {}", debugLineMat_res.error());
+                    ZHLN::Panic("Failed to compile editor debug line material: {}", debugLineMat_res.error().Message());
                 }
                 debugLineMat             = debugLineMat_res.value();
                 debugLineMat.albedoIndex = 1;
@@ -531,7 +531,7 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 
                 auto debugSolidMat_res = rc.CreateMaterial(solidDesc);
                 if (!debugSolidMat_res) {
-                    ZHLN::Panic("Failed to compile editor debug solid material: {}", debugSolidMat_res.error());
+                    ZHLN::Panic("Failed to compile editor debug solid material: {}", debugSolidMat_res.error().Message());
                 }
                 debugSolidMat             = debugSolidMat_res.value();
                 debugSolidMat.albedoIndex = 1;

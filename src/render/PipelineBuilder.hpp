@@ -9,6 +9,8 @@
 #error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <Zahlen/Error.hpp>
+
 namespace ZHLN::Vk {
 
 // ============================================================================
@@ -184,7 +186,7 @@ class PipelineBuilder {
     }
 
     [[nodiscard("Pipeline creation may fail; verify validity before use")]]
-    auto Build(VkDevice device) const& noexcept -> std::expected<Pipeline, PipelineBuilderResult> {
+    auto Build(VkDevice device) const& noexcept -> std::expected<Pipeline, ZHLN::Error> {
         const auto result = Validate();
         if (result != PipelineBuilderResult::Succeeded) {
             ReportPipelineBuilderError(result);
@@ -217,7 +219,7 @@ class PipelineBuilder {
         return PipelineBuilder<N, HasDepth> {std::move(_cfg)};
     }
 
-    [[nodiscard]] auto Build(VkDevice device) const&& noexcept -> std::expected<TypedPipeline<ColorCount, HasDepth>, PipelineBuilderResult> {
+    [[nodiscard]] auto Build(VkDevice device) const&& noexcept -> std::expected<TypedPipeline<ColorCount, HasDepth>, ZHLN::Error> {
         const auto result = Validate();
         if (result != PipelineBuilderResult::Succeeded) {
             ReportPipelineBuilderError(result);
@@ -278,7 +280,7 @@ class ComputePipelineBuilder {
     auto Layout(VkPipelineLayout l) noexcept -> ComputePipelineBuilder&;
     auto Specialization(const VkSpecializationInfo* info) noexcept -> ComputePipelineBuilder&;
 
-    [[nodiscard]] auto Build(VkDevice device) const noexcept -> std::expected<Pipeline, PipelineBuilderResult>;
+    [[nodiscard]] auto Build(VkDevice device) const noexcept -> std::expected<Pipeline, ZHLN::Error>;
 
   private:
     [[nodiscard]] auto Validate() const noexcept -> PipelineBuilderResult;
@@ -297,7 +299,7 @@ class PipelineLayoutBuilder {
     PipelineLayoutBuilder& AddDescriptorSetLayout(VkDescriptorSetLayout layout) noexcept;
     PipelineLayoutBuilder& AddPushConstant(VkShaderStageFlags stages, uint32_t size, uint32_t offset = 0) noexcept;
 
-    [[nodiscard]] auto Build() const noexcept -> std::expected<PipelineLayout, VkResult>;
+    [[nodiscard]] auto Build() const noexcept -> std::expected<PipelineLayout, ZHLN::Error>;
 
   private:
     VkDevice                           _device;

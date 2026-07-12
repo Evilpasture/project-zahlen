@@ -23,7 +23,7 @@
 
 namespace ZHLN {
 
-std::expected<void, RenderFrameResult> RenderSystem::Update(Engine& engine) {
+std::expected<void, Error> RenderSystem::Update(Engine& engine) {
     int        physicsDrawMode = 0;
     JPH::Mat44 shadowProjView  = JPH::Mat44::sIdentity();
 
@@ -46,7 +46,7 @@ std::expected<void, RenderFrameResult> RenderSystem::Update(Engine& engine) {
     return {};
 }
 
-std::expected<void, RenderFrameResult> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView) {
+std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView) {
     auto&       rc              = engine.GetRenderContext();
     auto&       reg             = engine.GetRegistry();
     auto&       cam             = engine.GetCamera();
@@ -259,7 +259,7 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
 
             auto debugLineMat_res = rc.CreateMaterial(lineDesc);
             if (!debugLineMat_res) {
-                ZHLN::Panic("Failed to compile debug line material: {}", debugLineMat_res.error());
+                ZHLN::Panic("Failed to compile debug line material: {}", debugLineMat_res.error().Message());
             }
             debugLineMat             = debugLineMat_res.value();
             debugLineMat.albedoIndex = 1;
@@ -269,7 +269,7 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
 
             auto debugSolidMat_res = rc.CreateMaterial(solidDesc);
             if (!debugSolidMat_res) {
-                ZHLN::Panic("Failed to compile debug solid material: {}", debugSolidMat_res.error());
+                ZHLN::Panic("Failed to compile debug solid material: {}", debugSolidMat_res.error().Message());
             }
             debugSolidMat             = debugSolidMat_res.value();
             debugSolidMat.albedoIndex = 1;

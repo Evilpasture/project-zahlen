@@ -8,7 +8,7 @@
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
 #error "Please include <src/render/Rendering.hpp> before including any other render headers."
 #endif
-
+#include <Zahlen/Error.hpp>
 namespace ZHLN::Vk {
 
 class ExtensionResult {
@@ -82,7 +82,7 @@ class ExtensionBuilder {
     }
 
     // Output compilation
-    [[nodiscard]] auto Build() noexcept -> std::expected<ExtensionResult, std::string>;
+    [[nodiscard]] auto Build() noexcept -> std::expected<ExtensionResult, ZHLN::Error>;
 
   private:
     explicit ExtensionBuilder(std::vector<std::string>&& available) noexcept;

@@ -701,7 +701,12 @@ static CompiledPrimitive GetOrCreateCompiledPrimitive(
         .indexCount  = primJob.indexCount
     };
 
-    ctx.BuildMeshBLAS(subMesh);
+    auto res = ctx.BuildMeshBLAS(subMesh);
+    if (!res) [[unlikely]] {
+        if (!res.error().Is(VulkanCallError::FeatureNotPresent)) {
+            ZHLN::Log("WARNING: glTFImporter: Failed to build mesh BLAS: {}", res.error().Message());
+        }
+    }
 
     // Allocate morph targets on GPU
     uint32_t finalMorphOffset = 0;
@@ -712,8 +717,9 @@ static CompiledPrimitive GetOrCreateCompiledPrimitive(
     // Map Materials and assign Bindless Indices
     auto subMaterial_res = CreateBasicMaterial(ctx, primJob.doubleSided || isMirrored, primJob.alphaBlend);
     if (!subMaterial_res) {
-        ZHLN::Panic("Failed to create primitive material in glTF Importer: {}", subMaterial_res.error());
+        ZHLN::Panic("Failed to create primitive material in glTF Importer: {}", ToString(subMaterial_res.error()));
     }
+
     Material subMaterial        = subMaterial_res.value();
     subMaterial.alphaMode       = primJob.alphaMode;
     subMaterial.alphaCutoff     = primJob.alphaCutoff;
@@ -832,7 +838,7 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, CreativeWorksManager& assetMgr,
             // Upgrade base material to a double-sided pipeline variant on mirrored nodes
             auto mirroredMat_res = CreateBasicMaterial(ctx, true, activeMaterial.alphaMode == 2);
             if (!mirroredMat_res) {
-                ZHLN::Panic("Failed to compile mirrored double-sided material in glTF Importer: {}", mirroredMat_res.error());
+                ZHLN::Panic("Failed to compile mirrored double-sided material in glTF Importer: {}", ToString(mirroredMat_res.error()));
             }
             Material mirroredMat        = mirroredMat_res.value();
             mirroredMat.albedoIndex     = activeMaterial.albedoIndex;

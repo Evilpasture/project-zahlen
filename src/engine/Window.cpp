@@ -273,11 +273,10 @@ bool Window::ReinitTTY() {
     return false;
 }
 
-std::expected<void*, std::string> Window::CreateVulkanSurface(void* instance, void* physicalDevice, int& outWidth, int& outHeight) noexcept {
+std::expected<void*, Error> Window::CreateVulkanSurface(void* instance, void* physicalDevice, int& outWidth, int& outHeight) noexcept {
     if (_impl->is_tty) {
-        // TTY surface creation requires a physical device and must occur after selection
         if (physicalDevice == nullptr) {
-            return nullptr;
+            return std::unexpected(SurfaceCreationError::TTYSurfaceCreationFailed);
         }
 
         uint32_t     hwWidth  = 0;
@@ -286,7 +285,7 @@ std::expected<void*, std::string> Window::CreateVulkanSurface(void* instance, vo
             TTYBackend::CreateSurface(static_cast<VkInstance>(instance), static_cast<VkPhysicalDevice>(physicalDevice), _impl->tty_context, hwWidth, hwHeight);
 
         if (raw_surface == VK_NULL_HANDLE) {
-            return std::unexpected("Failed to create TTY Vulkan Surface.");
+            return std::unexpected(SurfaceCreationError::TTYSurfaceCreationFailed);
         }
 
         outWidth      = static_cast<int>(hwWidth);
@@ -297,21 +296,19 @@ std::expected<void*, std::string> Window::CreateVulkanSurface(void* instance, vo
         return static_cast<void*>(raw_surface);
     }
     if (physicalDevice != nullptr) {
-        return nullptr;
+        return std::unexpected(SurfaceCreationError::WindowSurfaceUnsupported);
     }
 
-    // 1. Query GLFW Vulkan Support
     if (glfwVulkanSupported() == GLFW_FALSE) {
-        std::unexpected("FATAL: GLFW reports Vulkan is not supported on this platform!");
+        return std::unexpected(SurfaceCreationError::WindowSurfaceUnsupported);
     }
 
     VkSurfaceKHR raw_surface = VK_NULL_HANDLE;
     VkResult     err         = glfwCreateWindowSurface(static_cast<VkInstance>(instance), _impl->handle, nullptr, &raw_surface);
 
-    // Uses your existing framework helper to check result and generate a rich, source-location-aware error string
     auto check = Vk::CheckResult(err, "Failed to create GLFW Vulkan window surface");
     if (!check) {
-        return std::unexpected(check.error());
+        return std::unexpected(SurfaceCreationError::GLFWSurfaceCreationFailed);
     }
 
     glfwGetFramebufferSize(_impl->handle, &outWidth, &outHeight);

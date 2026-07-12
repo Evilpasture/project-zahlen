@@ -6,7 +6,12 @@
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
 #error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
 #endif
+
+#include <Zahlen/render/RenderCode.hpp>
 namespace ZHLN::Vk {
+
+[[nodiscard]] std::expected<VkResult, VulkanCallError> WaitIdle(VkQueue queue) noexcept;
+
 // NOLINTNEXTLINE(performance-enum-size)
 enum class BarrierStage : VkPipelineStageFlags2 {
     StageNone = 0,
@@ -187,25 +192,21 @@ template <QueueType QType>
  * @brief Submits a strongly-typed command buffer to its corresponding queue
  *        and blocks the CPU until execution completes.
  */
+// src/render/RenderCore.inl
+
 template <QueueType QType>
-void SubmitAndWait(const Context& ctx, CommandBuffer<QType> cmd) noexcept {
-    VkCommandBufferSubmitInfo sub_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .pNext = nullptr, .commandBuffer = cmd, .deviceMask = 0};
+[[nodiscard]] std::expected<void, Error> SubmitAndWait(const Context& ctx, CommandBuffer<QType> cmd) noexcept {
+    VkQueue queue      = ResolveQueue<QType>(ctx);
+    auto    submit_res = QueueSubmit(queue, cmd.handle);
+    if (!submit_res) [[unlikely]] {
+        return submit_res;
+    }
 
-    VkSubmitInfo2 submit = {
-        .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .pNext                    = nullptr,
-        .flags                    = 0,
-        .waitSemaphoreInfoCount   = 0,
-        .pWaitSemaphoreInfos      = nullptr,
-        .commandBufferInfoCount   = 1,
-        .pCommandBufferInfos      = &sub_info,
-        .signalSemaphoreInfoCount = 0,
-        .pSignalSemaphoreInfos    = nullptr
-    };
-
-    VkQueue queue = ResolveQueue<QType>(ctx);
-    vkQueueSubmit2(queue, 1, &submit, VK_NULL_HANDLE);
-    vkQueueWaitIdle(queue);
+    auto wait_res = WaitIdle(queue);
+    if (!wait_res) [[unlikely]] {
+        return std::unexpected(wait_res.error());
+    }
+    return {};
 }
 
 } // namespace ZHLN::Vk

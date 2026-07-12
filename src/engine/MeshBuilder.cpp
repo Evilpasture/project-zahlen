@@ -5,6 +5,7 @@
 #include "Resources.hpp"
 #include "Zahlen/Render.hpp"
 #include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <cmath>
 #include <cstring>
@@ -12,7 +13,7 @@
 
 namespace ZHLN::CreativeWorksFactory {
 
-std::expected<Material, std::string> CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend) {
+std::expected<Material, Error> CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend) {
     using enum Resource::ShaderID;
     PipelineDesc desc;
     desc.vertexShaderData = Resource::GetShaderProgram(Basic).vertex.data();
@@ -62,7 +63,12 @@ Mesh CreatePlane(RenderContext& ctx, float extent, const JPH::Vec4& color) {
         .vertexCount = static_cast<uint32_t>(positions.size()),
         .indexCount  = 0
     };
-    ctx.BuildMeshBLAS(finalMesh);
+    auto res = ctx.BuildMeshBLAS(finalMesh);
+    if (!res) [[unlikely]] {
+        if (!res.error().Is(VulkanCallError::FeatureNotPresent)) {
+            ZHLN::Log("WARNING: CreatePlane: Failed to build mesh BLAS: {}", res.error().Message());
+        }
+    }
     return finalMesh;
 }
 
@@ -138,47 +144,47 @@ Mesh CreateBox(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& co
 
     std::vector<VertexAttributes> attributes = {
         // Front (+Z)
-        {nZ, tZ, uv01, c},
-        {nZ, tZ, uv11, c},
-        {nZ, tZ, uv10, c},
-        {nZ, tZ, uv10, c},
-        {nZ, tZ, uv00, c},
-        {nZ, tZ, uv01, c},
+        {.normal = nZ, .tangent = tZ, .uv = uv01, .color = c},
+        {.normal = nZ, .tangent = tZ, .uv = uv11, .color = c},
+        {.normal = nZ, .tangent = tZ, .uv = uv10, .color = c},
+        {.normal = nZ, .tangent = tZ, .uv = uv10, .color = c},
+        {.normal = nZ, .tangent = tZ, .uv = uv00, .color = c},
+        {.normal = nZ, .tangent = tZ, .uv = uv01, .color = c},
         // Back (-Z)
-        {nNZ, tNZ, uv01, c},
-        {nNZ, tNZ, uv11, c},
-        {nNZ, tNZ, uv10, c},
-        {nNZ, tNZ, uv10, c},
-        {nNZ, tNZ, uv00, c},
-        {nNZ, tNZ, uv01, c},
+        {.normal = nNZ, .tangent = tNZ, .uv = uv01, .color = c},
+        {.normal = nNZ, .tangent = tNZ, .uv = uv11, .color = c},
+        {.normal = nNZ, .tangent = tNZ, .uv = uv10, .color = c},
+        {.normal = nNZ, .tangent = tNZ, .uv = uv10, .color = c},
+        {.normal = nNZ, .tangent = tNZ, .uv = uv00, .color = c},
+        {.normal = nNZ, .tangent = tNZ, .uv = uv01, .color = c},
         // Top (+Y)
-        {nY, tY, uv01, c},
-        {nY, tY, uv11, c},
-        {nY, tY, uv10, c},
-        {nY, tY, uv10, c},
-        {nY, tY, uv00, c},
-        {nY, tY, uv01, c},
+        {.normal = nY, .tangent = tY, .uv = uv01, .color = c},
+        {.normal = nY, .tangent = tY, .uv = uv11, .color = c},
+        {.normal = nY, .tangent = tY, .uv = uv10, .color = c},
+        {.normal = nY, .tangent = tY, .uv = uv10, .color = c},
+        {.normal = nY, .tangent = tY, .uv = uv00, .color = c},
+        {.normal = nY, .tangent = tY, .uv = uv01, .color = c},
         // Bottom (-Y)
-        {nNY, tNY, uv01, c},
-        {nNY, tNY, uv11, c},
-        {nNY, tNY, uv10, c},
-        {nNY, tNY, uv10, c},
-        {nNY, tNY, uv00, c},
-        {nNY, tNY, uv01, c},
+        {.normal = nNY, .tangent = tNY, .uv = uv01, .color = c},
+        {.normal = nNY, .tangent = tNY, .uv = uv11, .color = c},
+        {.normal = nNY, .tangent = tNY, .uv = uv10, .color = c},
+        {.normal = nNY, .tangent = tNY, .uv = uv10, .color = c},
+        {.normal = nNY, .tangent = tNY, .uv = uv00, .color = c},
+        {.normal = nNY, .tangent = tNY, .uv = uv01, .color = c},
         // Right (+X)
-        {nX, tX, uv01, c},
-        {nX, tX, uv11, c},
-        {nX, tX, uv10, c},
-        {nX, tX, uv10, c},
-        {nX, tX, uv00, c},
-        {nX, tX, uv01, c},
+        {.normal = nX, .tangent = tX, .uv = uv01, .color = c},
+        {.normal = nX, .tangent = tX, .uv = uv11, .color = c},
+        {.normal = nX, .tangent = tX, .uv = uv10, .color = c},
+        {.normal = nX, .tangent = tX, .uv = uv10, .color = c},
+        {.normal = nX, .tangent = tX, .uv = uv00, .color = c},
+        {.normal = nX, .tangent = tX, .uv = uv01, .color = c},
         // Left (-X)
-        {nNX, tNX, uv01, c},
-        {nNX, tNX, uv11, c},
-        {nNX, tNX, uv10, c},
-        {nNX, tNX, uv10, c},
-        {nNX, tNX, uv00, c},
-        {nNX, tNX, uv01, c}
+        {.normal = nNX, .tangent = tNX, .uv = uv01, .color = c},
+        {.normal = nNX, .tangent = tNX, .uv = uv11, .color = c},
+        {.normal = nNX, .tangent = tNX, .uv = uv10, .color = c},
+        {.normal = nNX, .tangent = tNX, .uv = uv10, .color = c},
+        {.normal = nNX, .tangent = tNX, .uv = uv00, .color = c},
+        {.normal = nNX, .tangent = tNX, .uv = uv01, .color = c}
     };
 
     BufferHandle posVbo  = ctx.CreateVertexBuffer(positions.data(), positions.size() * sizeof(VertexPosition));
@@ -192,7 +198,12 @@ Mesh CreateBox(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& co
         .vertexCount = static_cast<uint32_t>(positions.size()),
         .indexCount  = 0
     };
-    ctx.BuildMeshBLAS(finalMesh);
+    auto res = ctx.BuildMeshBLAS(finalMesh);
+    if (!res) [[unlikely]] {
+        if (!res.error().Is(VulkanCallError::FeatureNotPresent)) {
+            ZHLN::Log("WARNING: CreateBox: Failed to build mesh BLAS: {}", res.error().Message());
+        }
+    }
     return finalMesh;
 }
 
@@ -369,7 +380,12 @@ Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float m
         .vertexCount = static_cast<uint32_t>(positions.size()),
         .indexCount  = 0
     };
-    ctx.BuildMeshBLAS(finalMesh);
+    auto res = ctx.BuildMeshBLAS(finalMesh);
+    if (!res) [[unlikely]] {
+        if (!res.error().Is(VulkanCallError::FeatureNotPresent)) {
+            ZHLN::Log("WARNING: CreateTerrain: Failed to build mesh BLAS: {}", res.error().Message());
+        }
+    }
     return finalMesh;
 }
 

@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
+#include <Zahlen/Error.hpp>
 #include <cstdint>
+
 namespace ZHLN {
 
-std::expected<void, std::string> RenderContext::Impl::BuildProceduralBakePipeline() {
+std::expected<void, Error> RenderContext::Impl::BuildProceduralBakePipeline() {
     Vk::AllocateSingleBufferedSet<BakeLayout>(ctx.Device(), proceduralBakeDescLayout, proceduralBakeDescPool, proceduralBakeSet);
 
     VkPushConstantRange push = {
@@ -32,7 +34,8 @@ std::expected<void, std::string> RenderContext::Impl::BuildProceduralBakePipelin
     }
 
     if (!proceduralBakePass.BuildVariants(ctx.Device(), proceduralBakeDescLayout.Get(), shaderDesc, specInfos, &push, 1)) {
-        return std::unexpected("[Shader] Failed to build specialized Procedural Bake Compute variants!");
+        ZHLN::Log("[Shader] Failed to build specialized Procedural Bake Compute variants!");
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
 
     ZHLN::Log(

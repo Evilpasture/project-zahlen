@@ -10,7 +10,9 @@
 
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
+#include <Zahlen/EngineCode.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/Error.hpp>
 #include <expected>
 #include <memory>
 
@@ -46,7 +48,7 @@ class ZHLN_API Engine {
 
     void HandleDeviceLost() noexcept;
 
-    static std::expected<std::unique_ptr<Engine>, std::string> Create(const EngineConfig& cfg);
+    static std::expected<std::unique_ptr<Engine>, Error> Create(const EngineConfig& cfg);
 
     [[nodiscard]] bool IsRunning() const;
     void               ProcessEvents();
@@ -78,8 +80,8 @@ class ZHLN_API Engine {
     void ProvokeDeviceLost();
 
   private:
-    std::expected<void, std::string> InitInternal(const EngineConfig& cfg);
-    std::unique_ptr<EngineImpl>      _impl;
+    std::expected<void, Error>  InitInternal(const EngineConfig& cfg);
+    std::unique_ptr<EngineImpl> _impl;
 };
 
 Engine* GetEngineContext();

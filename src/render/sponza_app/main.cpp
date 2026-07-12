@@ -335,8 +335,8 @@ auto main() -> int {
         inst_exts_builder.OptionalIf(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME, isMac);
 
         return inst_exts_builder.Build()
-            .transform_error([](const std::string& err) {
-                return "Failed to build instance extensions: " + err;
+            .transform_error([](ZHLN::Error err) {
+                return "Failed to build instance extensions: " + std::string(err.Message());
             })
             .and_then([&](const Vk::ExtensionResult& instExts) -> std::expected<void, std::string> {
                 // 3. Create Vulkan Instance
@@ -372,10 +372,10 @@ auto main() -> int {
                     .RequireIf(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME, has_maint1)
                     .OptionalIf("VK_KHR_portability_subset", isMac)
                     .Build()
-                    .transform_error([instance, raw_surface](const std::string& err) {
+                    .transform_error([instance, raw_surface](ZHLN::Error err) {
                         vkDestroySurfaceKHR(instance, raw_surface, nullptr);
                         vkDestroyInstance(instance, nullptr);
-                        return "Failed to build device extensions: " + err;
+                        return "Failed to build device extensions: " + std::string(err.Message());
                     })
                     .and_then([&, instance, raw_surface, physical, has_maint1](const Vk::ExtensionResult& devExts) -> std::expected<void, std::string> {
                         
@@ -574,19 +574,19 @@ auto main() -> int {
                         // Samplers
                         auto default_sampler_res = ZHLN::Vk::SamplerBuilder {}.Linear().Repeat().Anisotropy(8.0F).Build(ctx.Device());
                         if (!default_sampler_res) {
-                            return std::unexpected("Failed to build default sampler: " + default_sampler_res.error());
+                            return std::unexpected("Failed to build default sampler: " + std::string(default_sampler_res.error().Message()));
                         }
                         auto default_sampler = std::move(*default_sampler_res);
 
                         auto shadow_sampler_res = ZHLN::Vk::SamplerBuilder {}.Linear().ClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE).DepthCompare().Build(ctx.Device());
                         if (!shadow_sampler_res) {
-                            return std::unexpected("Failed to build shadow sampler: " + shadow_sampler_res.error());
+                            return std::unexpected("Failed to build shadow sampler: " + std::string(shadow_sampler_res.error().Message()));
                         }
                         auto shadow_sampler = std::move(*shadow_sampler_res);
 
                         auto lightmap_sampler_res = ZHLN::Vk::SamplerBuilder {}.Linear().ClampToEdge().Build(ctx.Device());
                         if (!lightmap_sampler_res) {
-                            return std::unexpected("Failed to build lightmap sampler: " + lightmap_sampler_res.error());
+                            return std::unexpected("Failed to build lightmap sampler: " + std::string(lightmap_sampler_res.error().Message()));
                         }
                         auto lightmap_sampler = std::move(*lightmap_sampler_res);
 
@@ -677,15 +677,15 @@ auto main() -> int {
 
                         // --- Monadic compilation of pipelines and layout building ---
                         return ZHLN::Vk::ShaderStages::FromFiles(ctx.Device(), "fxaa.hlsl.VSMain.spv", "fxaa.hlsl.PSMain.spv", "VSMain", "PSMain")
-                            .transform_error([](const std::string& err) {
-                                return "Failed to compile FXAA ShaderStages: " + err;
+                            .transform_error([](ZHLN::Error err) {
+                                return "Failed to compile FXAA ShaderStages: " + std::string(err.Message());
                             })
                             .and_then([&, fxaa_set, fxaa_desc_layout = std::move(fxaa_desc_layout), fxaa_desc_pool = std::move(fxaa_desc_pool)](Vk::ShaderStages fxaaShaders) mutable {
                                 return Vk::PipelineLayoutBuilder(ctx.Device())
                                     .AddDescriptorSetLayout(fxaa_desc_layout.Get())
                                     .Build()
-                                    .transform_error([](VkResult err) {
-                                        return std::format("Failed to build FXAA Pipeline Layout: {}", Vk::ResultString(err));
+                                    .transform_error([](ZHLN::Error err) {
+                                        return std::format("Failed to build FXAA Pipeline Layout: {}", err.Message());
                                     })
                                     .transform([fxaa_shaders = std::move(fxaaShaders)](Vk::PipelineLayout fxaaLayout) mutable {
                                         return std::make_pair(std::move(fxaa_shaders), std::move(fxaaLayout));
@@ -699,8 +699,8 @@ auto main() -> int {
                                     .NoDepth()
                                     .CullNone()
                                     .Build(ctx.Device())
-                                    .transform_error([](Vk::PipelineBuilderResult err) {
-                                        return std::format("Failed to build FXAA Graphics Pipeline: {}", static_cast<int>(err));
+                                    .transform_error([](ZHLN::Error err) {
+                                        return std::format("Failed to build FXAA Graphics Pipeline: {}", err.Message());
                                     })
                                     .transform([fxaa_layout = std::move(fxaaPair.second)](Vk::Pipeline fxaaPipeline) mutable {
                                         return std::make_pair(std::move(fxaaPipeline), std::move(fxaa_layout));
@@ -708,8 +708,8 @@ auto main() -> int {
                             })
                             .and_then([&](std::pair<Vk::Pipeline, Vk::PipelineLayout> fxaaState) mutable {
                                 return ZHLN::Vk::ShaderStages::FromFiles(ctx.Device(), paths.vertSpv, paths.fragSpv, "VSMain", "PSMain")
-                                    .transform_error([](const std::string& err) {
-                                        return "Failed to compile main PBR ShaderStages: " + err;
+                                    .transform_error([](ZHLN::Error err) {
+                                        return "Failed to compile main PBR ShaderStages: " + std::string(err.Message());
                                     })
                                     .transform([fxaa_state = std::move(fxaaState)](Vk::ShaderStages shaders) mutable {
                                         return std::make_tuple(std::move(fxaa_state.first), std::move(fxaa_state.second), std::move(shaders));
@@ -717,8 +717,8 @@ auto main() -> int {
                             })
                             .and_then([&](std::tuple<Vk::Pipeline, Vk::PipelineLayout, Vk::ShaderStages> state) mutable {
                                 return ZHLN::Vk::ShaderStages::FromFiles(ctx.Device(), paths.shadowVertSpv, paths.shadowFragSpv, "VSMain", "PSMain")
-                                    .transform_error([](const std::string& err) {
-                                        return "Failed to compile Shadow ShaderStages: " + err;
+                                    .transform_error([](ZHLN::Error err) {
+                                        return "Failed to compile Shadow ShaderStages: " + std::string(err.Message());
                                     })
                                     .transform([state = std::move(state)](Vk::ShaderStages shadowShaders) mutable {
                                         auto& [fxaa_pipeline, fxaa_layout, shaders] = state;
@@ -733,8 +733,8 @@ auto main() -> int {
                                     .AddDescriptorSetLayout(desc_layout.Get())
                                     .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ZHLN::Vk::Passes::PBRPushConstants))
                                     .Build()
-                                    .transform_error([](VkResult err) {
-                                        return std::format("Failed to build Main Pipeline Layout: {}", Vk::ResultString(err));
+                                    .transform_error([](ZHLN::Error err) {
+                                        return std::format("Failed to build Main Pipeline Layout: {}", err.Message());
                                     })
                                     .transform([state = std::move(state)](Vk::PipelineLayout pipelineLayout) mutable {
                                         auto& [fxaa_pipeline, fxaa_layout, shaders, shadow_shaders] = state;
@@ -749,8 +749,8 @@ auto main() -> int {
                                 return Vk::PipelineLayoutBuilder(ctx.Device())
                                     .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT, sizeof(Mat4))
                                     .Build()
-                                    .transform_error([](VkResult err) {
-                                        return std::format("Failed to build Shadow Pipeline Layout: {}", Vk::ResultString(err));
+                                    .transform_error([](ZHLN::Error err) {
+                                        return std::format("Failed to build Shadow Pipeline Layout: {}", err.Message());
                                     })
                                     .transform([state = std::move(state)](Vk::PipelineLayout shadowLayout) mutable {
                                         auto& [fxaa_pipeline, fxaa_layout, shaders, shadow_shaders, pipeline_layout] = state;
@@ -773,8 +773,8 @@ auto main() -> int {
                                     .WindingCW()
                                     .CullBack()
                                     .Build(ctx.Device())
-                                    .transform_error([](Vk::PipelineBuilderResult err) {
-                                        return std::format("Failed to build Main PBR Graphics Pipeline: {}", static_cast<int>(err));
+                                    .transform_error([](ZHLN::Error err) {
+                                        return std::format("Failed to build Main PBR Graphics Pipeline: {}", err.Message());
                                     })
                                     .transform([state = std::move(state)](Vk::Pipeline pipeline) mutable {
                                         auto& [fxaa_pipeline, fxaa_layout, shaders, shadow_shaders, pipeline_layout, shadow_layout] = state;
@@ -795,8 +795,8 @@ auto main() -> int {
                                     .DepthOnly()
                                     .CullNone()
                                     .Build(ctx.Device())
-                                    .transform_error([](Vk::PipelineBuilderResult err) {
-                                        return std::format("Failed to build Shadow Graphics Pipeline: {}", static_cast<int>(err));
+                                    .transform_error([](ZHLN::Error err) {
+                                        return std::format("Failed to build Shadow Graphics Pipeline: {}", err.Message());
                                     })
                                     .and_then([&, state = std::move(state), ctx = std::move(ctx), fxaa_set](Vk::Pipeline shadowPipeline) mutable -> std::expected<void, std::string> {
                                         auto& [fxaa_pipeline, fxaa_pipeline_layout, shadow_shaders, pipeline_layout, shadow_layout, pipeline] = state;

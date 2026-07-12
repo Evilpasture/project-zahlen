@@ -3,7 +3,9 @@
 
 #pragma once
 #include <Zahlen/Common.h>
+#include <Zahlen/Error.hpp>
 #include <Zahlen/Types.hpp>
+#include <Zahlen/render/RenderCode.hpp>
 #include <detail/String.hpp>
 #include <expected>
 #include <memory>
@@ -54,7 +56,7 @@ class ZHLN_API Window {
      * @param outHeight Reference to store the output surface height.
      * @return The raw VkSurfaceKHR pointer, or an error string.
      */
-    [[nodiscard]] std::expected<void*, std::string> CreateVulkanSurface(void* instance, void* physicalDevice, int& outWidth, int& outHeight) noexcept;
+    [[nodiscard]] std::expected<void*, Error> CreateVulkanSurface(void* instance, void* physicalDevice, int& outWidth, int& outHeight) noexcept;
 
   private:
     std::unique_ptr<Impl> _impl;

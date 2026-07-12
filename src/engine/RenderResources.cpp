@@ -12,16 +12,19 @@
 
 namespace ZHLN {
 
-std::expected<void, std::string> RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) {
+std::expected<void, Error> RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) {
     return Vk::ShaderStages::Create(device, shaderData, "VSMain", "PSShadow")
-        .transform_error([](const std::string& err) { return "Failed to compile ShaderStages for Shadow Pipeline: " + err; })
-        .and_then([&, device](auto&& shaders) -> std::expected<void, std::string> {
+        .transform_error([](auto err) -> Error { return err; })
+        .and_then([&, device](auto&& shaders) -> std::expected<void, Error> {
             return Vk::PipelineLayoutBuilder(device)
                 .AddDescriptorSetLayout(bindlessLayout.Get())
                 .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
                 .Build()
-                .transform_error([](VkResult err) { return std::format("Failed to compile Shadow Pipeline Layout: {}", Vk::ResultString(err)); })
-                .and_then([&, device, shaders = std::forward<decltype(shaders)>(shaders)](auto&& layout) -> std::expected<void, std::string> {
+                .transform_error([](auto err) -> Error {
+                    ZHLN::Log("Shadow pipeline layout creation error: {} (Category: {})", err.Message(), err.Category());
+                    return RenderInitError::PipelineLayoutCreationFailed;
+                })
+                .and_then([&, device, shaders = std::forward<decltype(shaders)>(shaders)](auto&& layout) -> std::expected<void, Error> {
                     shadowPipelineLayout = std::forward<decltype(layout)>(layout);
 
                     return Vk::PipelineBuilder {}
@@ -31,22 +34,28 @@ std::expected<void, std::string> RenderContext::Impl::CompileShadowPipeline(VkDe
                         .DepthFormat(VK_FORMAT_D32_SFLOAT)
                         .CullNone()
                         .Build(device)
-                        .transform_error([](Vk::PipelineBuilderResult) { return std::string("Failed to compile or build Shadow Pipeline."); })
+                        .transform_error([](auto err) -> Error {
+                            ZHLN::Log("Shadow pipeline compilation error: {} (Category: {})", err.Message(), err.Category());
+                            return RenderInitError::PipelineCreationFailed;
+                        })
                         .transform([&](auto&& pipeline) { shadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
                 });
         });
 }
 
-std::expected<void, std::string> RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) {
+std::expected<void, Error> RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) {
     return Vk::ShaderStages::Create(device, shaderData)
-        .transform_error([](const std::string& err) { return "Failed to compile ShaderStages for Punctual Shadow Pipeline: " + err; })
-        .and_then([&, device](auto&& shaders) -> std::expected<void, std::string> {
+        .transform_error([](auto err) -> Error { return err; })
+        .and_then([&, device](auto&& shaders) -> std::expected<void, Error> {
             return Vk::PipelineLayoutBuilder(device)
                 .AddDescriptorSetLayout(bindlessLayout.Get())
                 .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT, sizeof(uint32_t))
                 .Build()
-                .transform_error([](VkResult err) { return std::format("Failed to compile Punctual Shadow Pipeline Layout: {}", Vk::ResultString(err)); })
-                .and_then([&, device, shaders = std::forward<decltype(shaders)>(shaders)](auto&& layout) -> std::expected<void, std::string> {
+                .transform_error([](auto err) -> Error {
+                    ZHLN::Log("Punctual shadow pipeline layout creation error: {} (Category: {})", err.Message(), err.Category());
+                    return RenderInitError::PipelineLayoutCreationFailed;
+                })
+                .and_then([&, device, shaders = std::forward<decltype(shaders)>(shaders)](auto&& layout) -> std::expected<void, Error> {
                     punctualShadowPipelineLayout = std::forward<decltype(layout)>(layout);
 
                     return Vk::PipelineBuilder {}
@@ -56,7 +65,10 @@ std::expected<void, std::string> RenderContext::Impl::CompilePunctualShadowPipel
                         .DepthFormat(VK_FORMAT_D32_SFLOAT)
                         .CullNone()
                         .Build(device)
-                        .transform_error([](Vk::PipelineBuilderResult) { return std::string("Failed to compile or build Punctual Shadow Pipeline."); })
+                        .transform_error([](auto err) -> Error {
+                            ZHLN::Log("Punctual shadow pipeline compilation error: {} (Category: {})", err.Message(), err.Category());
+                            return RenderInitError::PipelineCreationFailed;
+                        })
                         .transform([&](auto&& pipeline) { punctualShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
                 });
         });
@@ -72,6 +84,12 @@ auto RenderContext::GetGPUName() const -> const char* {
 
 uint32_t RenderContext::GetFrameIndex() const noexcept {
     return _impl->frame_index;
+}
+
+void RenderContext::CheckShaderReload() noexcept {
+    if constexpr (isDev) {
+        _impl->CheckShaderWatchers();
+    }
 }
 
 void RenderContext::SetResolution([[maybe_unused]] const Extent2D& res) {
@@ -94,22 +112,28 @@ void RenderContext::DestroyBuffer(BufferHandle handle) {
     }
 }
 
-std::expected<Material, std::string> RenderContext::CreateMaterial(const PipelineDesc& desc) {
+std::expected<Material, Error> RenderContext::CreateMaterial(const PipelineDesc& desc) {
     ZHLN_ShaderDesc v_desc = {.code = Vk::AsSpirV(desc.vertexShaderData), .size = desc.vertexShaderSize, .entry_point = nullptr};
     ZHLN_ShaderDesc f_desc = {.code = Vk::AsSpirV(desc.fragShaderData), .size = desc.fragShaderSize, .entry_point = nullptr};
 
     auto* impl = _impl.get();
 
     return Vk::ShaderStages::Create(impl->ctx.Device(), v_desc, f_desc)
-        .transform_error([](const std::string& err) { return "Failed to compile or link Material shader stages: " + err; })
-        .and_then([impl, &desc](auto&& shaders) -> std::expected<Material, std::string> {
+        .transform_error([](auto err) -> Error {
+            ZHLN::Log("Material shader compilation error: {} (Category: {})", err.Message(), err.Category());
+            return MaterialCreationError::ShaderCompilationFailed;
+        })
+        .and_then([impl, &desc](auto&& shaders) -> std::expected<Material, Error> {
             // 1. Build the pipeline layout
             return Vk::PipelineLayoutBuilder(impl->ctx.Device())
                 .AddDescriptorSetLayout(impl->bindlessLayout.Get())
                 .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
                 .Build()
-                .transform_error([](VkResult err) { return std::format("Failed to compile Material Pipeline Layout: {}", Vk::ResultString(err)); })
-                .and_then([impl, &desc, &shaders](auto&& layout) -> std::expected<Material, std::string> {
+                .transform_error([](auto err) -> Error {
+                    ZHLN::Log("Material pipeline layout creation error: {} (Category: {})", err.Message(), err.Category());
+                    return MaterialCreationError::PipelineLayoutCreationFailed;
+                })
+                .and_then([impl, &desc, &shaders](auto&& layout) -> std::expected<Material, Error> {
                     // 2. Configure the graphics pipeline builder options
                     auto pipeline = Vk::PipelineBuilder {}.Shaders(shaders).Layout(layout.Get()).DepthFormat(VK_FORMAT_D32_SFLOAT);
 
@@ -133,7 +157,10 @@ std::expected<Material, std::string> RenderContext::CreateMaterial(const Pipelin
 
                     // 3. Compile the graphics pipeline and return the initialized Material on success
                     return pipeline.Build(impl->ctx.Device())
-                        .transform_error([](Vk::PipelineBuilderResult) { return std::string("Failed to build Material Graphics Pipeline."); })
+                        .transform_error([](auto err) -> Error {
+                            ZHLN::Log("Material pipeline creation error: {} (Category: {})", err.Message(), err.Category());
+                            return MaterialCreationError::PipelineCreationFailed;
+                        })
                         .transform([impl, &desc, &layout](auto&& compiledPipeline) {
                             return Material {
                                 .pipeline = impl->materialPool.Create(
@@ -165,28 +192,13 @@ void RenderContext::Impl::CheckShaderWatchers() noexcept {
 auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> uint32_t {
     auto* const  device    = ctx.Device();
     const size_t imageSize = static_cast<size_t>(width) * height * 4;
+    uint32_t     mipLevels = std::bit_width(std::max(width, height));
 
-    uint32_t mipLevels = std::bit_width(std::max(width, height));
+    VkFormat          format = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+    VkImageUsageFlags usage  = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
-    const VkImageCreateInfo imgInfo = {
-        .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .pNext                 = nullptr,
-        .flags                 = 0,
-        .imageType             = VK_IMAGE_TYPE_2D,
-        .format                = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM,
-        .extent                = {.width = width, .height = height, .depth = 1},
-        .mipLevels             = mipLevels,
-        .arrayLayers           = 1,
-        .samples               = VK_SAMPLE_COUNT_1_BIT,
-        .tiling                = VK_IMAGE_TILING_OPTIMAL,
-        .usage                 = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
-        .queueFamilyIndexCount = 0,
-        .pQueueFamilyIndices   = nullptr,
-        .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED
-    };
-
-    auto gpuImage = Vk::Image::Create(allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+    // Abstracted: The verbose VkImageCreateInfo block is replaced here
+    auto gpuImage = Vk::ImageBuilder {}.Texture2D(width, height, format, usage, mipLevels).Build(allocator.Get());
 
     // Textures are bound back to the graphics queue staging buffer (Safe blitting & stages)
     auto stagingAlloc = stagingRingBuffer.Allocate(imageSize);
@@ -209,42 +221,24 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
         Vk::GenerateMipmaps(cmd, gpuImage.Handle(), width, height);
     });
 
-    auto     gpuView = isSRGB ? Vk::CreateView<VK_FORMAT_R8G8B8A8_SRGB>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels) :
-                                Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(
+    auto gpuView = isSRGB ? Vk::CreateView<VK_FORMAT_R8G8B8A8_SRGB>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels) :
+                            Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
 
-                                    device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels
-                                );
-    uint32_t index   = nextTextureIndex++;
+    uint32_t index = nextTextureIndex++;
     Vk::UpdateBindlessTextureSlot(device, index, gpuView.Get(), bindlessSets, 0);
     textureImages.push_back(std::move(gpuImage));
     textureViews.push_back(std::move(gpuView));
 
-    return index; // Return the allocated texture index to the caller
+    return index;
 }
 
 uint32_t RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height) {
-    auto* const  device   = ctx.Device();
-    const size_t faceSize = static_cast<size_t>(width) * height * 4;
+    auto* const       device   = ctx.Device();
+    const size_t      faceSize = static_cast<size_t>(width) * height * 4;
+    VkImageUsageFlags usage    = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
-    const VkImageCreateInfo imgInfo = {
-        .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .pNext                 = nullptr,
-        .flags                 = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
-        .imageType             = VK_IMAGE_TYPE_2D,
-        .format                = VK_FORMAT_R8G8B8A8_UNORM,
-        .extent                = {.width = width, .height = height, .depth = 1},
-        .mipLevels             = 1,
-        .arrayLayers           = 6,
-        .samples               = VK_SAMPLE_COUNT_1_BIT,
-        .tiling                = VK_IMAGE_TILING_OPTIMAL,
-        .usage                 = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
-        .queueFamilyIndexCount = 0,
-        .pQueueFamilyIndices   = nullptr,
-        .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
-    };
-
-    auto gpuImage = Vk::Image::Create(allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+    // Abstracted: Simple, semantic cubemap allocation
+    auto gpuImage = Vk::ImageBuilder {}.TextureCube(width, VK_FORMAT_R8G8B8A8_UNORM, usage, 1).Build(allocator.Get());
 
     // Textures are bound back to the graphics queue staging buffer (Safe blitting & stages)
     auto stagingAlloc = stagingRingBuffer.Allocate(faceSize * 6);
@@ -255,11 +249,10 @@ uint32_t RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceD
     Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, gpuImage.Handle());
 
-        // 1. Generate the 6 cubemap regions on the stack (zero-overhead compile-time loop)
+        // Generate the 6 cubemap regions on the stack (zero-overhead compile-time loop)
         auto regions = Vk::CreateCopyRegions<6>(stagingAlloc.offset, faceSize, {.width = width, .height = height, .depth = {}});
 
-        // 2. Dispatch the copy using the new type-safe overload (layout defaults to
-        // TRANSFER_DST)
+        // Dispatch the copy using the new type-safe overload
         Vk::CopyBufferToImage(cmd, stagingAlloc.buffer, gpuImage.Handle(), regions);
 
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
@@ -391,13 +384,16 @@ uint32_t RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas)
     return offset;
 }
 
-std::expected<void, std::string> RenderContext::SetShadowResolution(uint32_t resolution) {
+std::expected<void, Error> RenderContext::SetShadowResolution(uint32_t resolution) {
     auto* impl   = _impl.get();
     auto* device = impl->ctx.Device();
 
     // 1. Wait for GPU idle monadically to prevent pipeline hazards during reallocation
     return Vk::WaitIdle(device)
-        .transform_error([](const std::string& err) { return std::format("Failed to wait for idle on resolution set: {}", err); })
+        .transform_error([](auto err) -> Error {
+            ZHLN::Log("SetShadowResolution WaitIdle failed: {}", ToString(err));
+            return ShadowResolutionError::RecreationFailed;
+        })
         // 2. Perform the target reallocation and layout transitions on success
         .transform([&](VkResult /*success*/) {
             impl->graphResources.shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
@@ -430,17 +426,18 @@ void RenderContext::SetAAState(const AAState& state) {
     _impl->aaState = state;
 }
 
-void RenderContext::BuildMeshBLAS(Mesh& mesh) {
+RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
     auto* impl = _impl.get();
-    if (!impl->rtCtx.Valid()) {
-        return;
+    if (!impl->rtCtx.Valid()) [[unlikely]] {
+        // Return explicit Vulkan error indicating raytracing is unsupported on this device
+        return std::unexpected(VK_ERROR_FEATURE_NOT_PRESENT);
     }
 
     auto* nativePosMesh   = impl->meshPool.Resolve(mesh.posBuffer);
     auto* nativeIndexMesh = mesh.indexBuffer != BufferHandle::Invalid ? impl->meshPool.Resolve(mesh.indexBuffer) : nullptr;
 
-    if (nativePosMesh == nullptr) {
-        return;
+    if (nativePosMesh == nullptr) [[unlikely]] {
+        return std::unexpected(Error(VulkanCallError::VulkanCallFailed));
     }
 
     ZHLN_BlasGeometryDesc geom = {
@@ -457,47 +454,69 @@ void RenderContext::BuildMeshBLAS(Mesh& mesh) {
     ZHLN_AccelerationStructureSizes sizes;
     impl->rtCtx.GetBlasSizes(geom, primitiveCount, sizes);
 
-    nativePosMesh->blasBuffer = Vk::Buffer::Create(
+    // 1. Safe Allocation of the BLAS buffer
+    auto blasBuffer = Vk::Buffer::Create(
         impl->allocator.Get(), sizes.acceleration_structure_size,
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
     );
-    nativePosMesh->blas        = impl->rtCtx.CreateAS(nativePosMesh->blasBuffer.Handle(), sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL);
+    if (!blasBuffer.Valid()) [[unlikely]] {
+        return std::unexpected(Error(VulkanCallError::VulkanCallFailed));
+    }
+    nativePosMesh->blasBuffer = std::move(blasBuffer);
+
+    // 2. Safe Creation of the Acceleration Structure handle
+    auto* blas = impl->rtCtx.CreateAS(nativePosMesh->blasBuffer.Handle(), sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL);
+    if (blas == VK_NULL_HANDLE) [[unlikely]] {
+        return std::unexpected(Error(VulkanCallError::VulkanCallFailed));
+    }
+    nativePosMesh->blas        = blas;
     nativePosMesh->blasAddress = impl->rtCtx.GetASAddress(nativePosMesh->blas);
 
     nativePosMesh->device = impl->ctx.Device();
     nativePosMesh->rtCtx  = &impl->rtCtx;
 
+    // 3. Safe Allocation of the Scratch buffer
     Vk::Buffer scratch = Vk::Buffer::Create(
         impl->allocator.Get(), sizes.build_scratch_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
         VMA_MEMORY_USAGE_GPU_ONLY
     );
+    if (!scratch.Valid()) [[unlikely]] {
+        return std::unexpected(Error(VulkanCallError::VulkanCallFailed));
+    }
 
     {
-        Vk::CommandPool tempPool(impl->ctx.Device(), impl->ctx.PhysicalInfo().graphics_family);
-        if (tempPool.Allocate(1)) {
-            VkCommandBuffer tempCmd = tempPool[0];
-            {
-                Vk::CommandBufferGuard guard(tempCmd);
-                // 1. Cleanly drain pending family ownership acquires (locks and C-structs are
-                // hidden)
-                impl->pendingAcquires.Drain(tempCmd);
+        Vk::CommandPool<Vk::QueueType::Graphics> tempPool(impl->ctx.Device(), impl->ctx.PhysicalInfo().graphics_family);
+        if (!tempPool.Allocate(1)) [[unlikely]] {
+            return std::unexpected(Error(VulkanCallError::VulkanCallFailed));
+        }
 
-                // Synchronize the vertex/index buffer copy writes with the BLAS build reads
-                Vk::MemoryBarrier(
-                    tempCmd, {.src_stage  = VK_PIPELINE_STAGE_2_COPY_BIT,
-                              .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                              .dst_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                              .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
-                );
-                impl->rtCtx.CmdBuildBlas(tempCmd, geom, nativePosMesh->blas, Vk::GetBufferAddress(impl->ctx.Device(), scratch.Handle()), primitiveCount);
-            }
-            // 2. Synchronously submit and wait on the transfer staging timeline semaphore
-            Vk::SubmitAndWait(
-                impl->ctx.GraphicsQueue(), tempCmd, impl->transferRingBuffer.GetSemaphore(), impl->transferRingBuffer.GetCurrentValue(),
-                VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
+        VkCommandBuffer tempCmd = tempPool[0];
+        {
+            Vk::CommandBufferGuard guard(tempCmd);
+            // Cleanly drain pending family ownership acquires (locks and C-structs are hidden)
+            impl->pendingAcquires.Drain(tempCmd);
+
+            // Synchronize the vertex/index buffer copy writes with the BLAS build reads
+            Vk::MemoryBarrier(
+                tempCmd, {.src_stage  = VK_PIPELINE_STAGE_2_COPY_BIT,
+                          .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                          .dst_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                          .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
             );
+            impl->rtCtx.CmdBuildBlas(tempCmd, geom, nativePosMesh->blas, Vk::GetBufferAddress(impl->ctx.Device(), scratch.Handle()), primitiveCount);
+        }
+
+        // 4. Submit and propagate potential queue / device-loss failures
+        auto res = Vk::SubmitAndWait(
+            impl->ctx.GraphicsQueue(), tempCmd, impl->transferRingBuffer.GetSemaphore(), impl->transferRingBuffer.GetCurrentValue(),
+            VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
+        );
+        if (!res) [[unlikely]] {
+            return std::unexpected(res.error());
         }
     }
+
+    return {};
 }
 
 void RenderContext::Impl::InitializeSystemTextures() {

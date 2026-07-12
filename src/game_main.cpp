@@ -273,7 +273,7 @@ bool InitializeGame(Engine& engine) {
 
     auto lineMat_res = CreativeWorksFactory::CreateBasicMaterial(rc);
     if (!lineMat_res) {
-        ZHLN::Log("ERROR: Failed to compile basic material during initialization: {}", lineMat_res.error());
+        ZHLN::Log("ERROR: Failed to compile basic material during initialization: {}", lineMat_res.error().Message());
         return false;
     }
     Material lineMat = lineMat_res.value();
@@ -344,7 +344,10 @@ std::expected<void, RenderFrameResult> RenderGame(Engine& engine, float frameTim
 
     auto render_res = RenderSystem::Update(engine);
     if (!render_res) {
-        return std::unexpected(render_res.error());
+        if (render_res.error().Is<RenderFrameResult>()) {
+            return std::unexpected(render_res.error().As<RenderFrameResult>());
+        }
+        return std::unexpected(RenderFrameResult::Error);
     }
 
     {
@@ -380,7 +383,7 @@ std::expected<std::unique_ptr<Engine>, EngineError> InitializeEngine(CommandLine
     auto engine_res = Engine::Create(config);
 
     if (!engine_res) {
-        return std::unexpected(EngineError {.msg = engine_res.error(), .code = EXIT_FAILURE});
+        return std::unexpected(EngineError {.msg = std::string(engine_res.error().Message()), .code = EXIT_FAILURE});
     }
 
     auto engine = std::move(engine_res.value());

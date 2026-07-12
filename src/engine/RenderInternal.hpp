@@ -11,6 +11,7 @@
 #include "engine/Resources.hpp"
 #include "threading/Mutex.hpp"
 #include <GLFW/glfw3.h>
+#include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Types.hpp>
@@ -748,7 +749,7 @@ struct RenderContext::Impl {
         }
     }
 
-    [[nodiscard]] std::expected<void, std::string> InitSubsystems(const RenderConfig& cfg, int width, int height);
+    [[nodiscard]] std::expected<void, Error> InitSubsystems(const RenderConfig& cfg, int width, int height);
 
     struct PPPushConstants {
         JPH::Mat44 invViewProj;
@@ -811,30 +812,30 @@ struct RenderContext::Impl {
     void RegisterPipeline(const PipelineRegistration& reg) noexcept;
     void ProvokeDeviceLostInternal() const;
 
-    [[nodiscard]] std::expected<void, std::string> BuildSkinningPipeline();
-    void                                           DispatchSkinningPasses();
+    [[nodiscard]] std::expected<void, Error> BuildSkinningPipeline();
+    void                                     DispatchSkinningPasses();
 
-    [[nodiscard]] std::expected<void, std::string> BuildProceduralBakePipeline();
+    [[nodiscard]] std::expected<void, Error> BuildProceduralBakePipeline();
     uint32_t BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion);
 
     void BuildTLAS(VkCommandBuffer cmd) noexcept;
 
-    [[nodiscard]] std::expected<void, std::string> InitShadowResources();
-    [[nodiscard]] std::expected<void, std::string> InitCullingResources();
-    [[nodiscard]] std::expected<void, std::string> CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
-    [[nodiscard]] std::expected<void, std::string> CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
-    [[nodiscard]] std::expected<void, std::string> InitBindless();
-    [[nodiscard]] std::expected<void, std::string> BuildTAAPipeline();
-    [[nodiscard]] std::expected<void, std::string> BuildFXAAPipeline();
-    [[nodiscard]] std::expected<void, std::string> BuildSMAAPipeline();
-    [[nodiscard]] std::expected<void, std::string> BuildAmbientPipeline();
-    [[nodiscard]] std::expected<void, std::string> BuildLightingPipeline();
-    [[nodiscard]] std::expected<void, std::string> BuildReflectionPipelines();
-    [[nodiscard]] std::expected<void, std::string> BuildBlitPipeline();
-    [[nodiscard]] std::expected<void, std::string> BuildBloomPipelines();
-    [[nodiscard]] std::expected<void, std::string> BuildHangGpuPipeline();
-    [[nodiscard]] std::expected<void, std::string> InitPostProcessing();
-    [[nodiscard]] std::expected<void, std::string> SetupUI(GLFWwindow* window);
+    [[nodiscard]] std::expected<void, Error> InitShadowResources();
+    [[nodiscard]] std::expected<void, Error> InitCullingResources();
+    [[nodiscard]] std::expected<void, Error> CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
+    [[nodiscard]] std::expected<void, Error> CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
+    [[nodiscard]] std::expected<void, Error> InitBindless();
+    [[nodiscard]] std::expected<void, Error> BuildTAAPipeline();
+    [[nodiscard]] std::expected<void, Error> BuildFXAAPipeline();
+    [[nodiscard]] std::expected<void, Error> BuildSMAAPipeline();
+    [[nodiscard]] std::expected<void, Error> BuildAmbientPipeline();
+    [[nodiscard]] std::expected<void, Error> BuildLightingPipeline();
+    [[nodiscard]] std::expected<void, Error> BuildReflectionPipelines();
+    [[nodiscard]] std::expected<void, Error> BuildBlitPipeline();
+    [[nodiscard]] std::expected<void, Error> BuildBloomPipelines();
+    [[nodiscard]] std::expected<void, Error> BuildHangGpuPipeline();
+    [[nodiscard]] std::expected<void, Error> InitPostProcessing();
+    [[nodiscard]] std::expected<void, Error> SetupUI(GLFWwindow* window);
 
     uint32_t CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB);
     uint32_t CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height);
@@ -861,9 +862,9 @@ struct RenderContext::Impl {
     void InitSkeletalAnimationResources();
     void InitLightingLUTs();
 
-    [[nodiscard]] std::expected<Vk::ShaderStages, std::string> LoadAndCreateShaders(ShaderStageSource vs, ShaderStageSource ps) const noexcept;
+    [[nodiscard]] std::expected<Vk::ShaderStages, Error> LoadAndCreateShaders(ShaderStageSource vs, ShaderStageSource ps) const noexcept;
 
-    [[nodiscard]] std::expected<Vk::Pipeline, std::string> LoadAndCreateComputeShader(ShaderStageSource cs, VkPipelineLayout layout) const noexcept;
+    [[nodiscard]] std::expected<Vk::Pipeline, Error> LoadAndCreateComputeShader(ShaderStageSource cs, VkPipelineLayout layout) const noexcept;
 
     void WatchPipeline(const char* vsPath, const char* psPath, std::function<void()> rebuild_fn) noexcept;
 

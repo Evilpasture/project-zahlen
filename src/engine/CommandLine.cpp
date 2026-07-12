@@ -144,14 +144,14 @@ constexpr bool IsFalse(std::string_view val) noexcept {
 struct CommandHandler {
     std::string_view key;
     std::string_view shortKey;
-    std::expected<void, ZHLN::EngineError> (*action)(ZHLN::CommandLineOptions&, std::string_view);
+    std::expected<void, ZHLN::Error> (*action)(ZHLN::CommandLineOptions&, std::string_view);
 };
 
 constexpr std::array Handlers = {
     CommandHandler {
         .key      = "--editor",
         .shortKey = "",
-        .action   = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::EngineError> {
+        .action   = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::Error> {
             opt.launchEditor = true;
             return {};
         }
@@ -159,27 +159,29 @@ constexpr std::array Handlers = {
     CommandHandler {
         .key      = "--version",
         .shortKey = "",
-        .action   = [](ZHLN::CommandLineOptions&, std::string_view) -> std::expected<void, ZHLN::EngineError> {
+        .action   = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::Error> {
             PrintVersion();
-            return std::unexpected(ZHLN::EngineError {.msg = {}, .code = EXIT_SUCCESS, .silent = true});
+            opt.versionRequested = true;
+            return {};
         }
     },
     CommandHandler {
         .key      = "--help",
         .shortKey = "-h",
-        .action   = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::EngineError> {
+        .action   = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::Error> {
             std::string exeName = "zahlen";
             if (!opt.args.empty() && opt.args[0] != nullptr) {
                 exeName = std::filesystem::path(opt.args[0]).filename().string();
             }
             PrintHelp(exeName);
-            return std::unexpected(ZHLN::EngineError {.msg = {}, .code = EXIT_SUCCESS, .silent = true});
+            opt.helpRequested = true;
+            return {};
         }
     },
     CommandHandler {
         .key      = "--no-validation",
         .shortKey = "",
-        .action   = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::EngineError> {
+        .action   = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::Error> {
             opt.enableValidation = false;
             return {};
         }
@@ -187,14 +189,14 @@ constexpr std::array Handlers = {
     CommandHandler {
         .key      = "--vsync",
         .shortKey = "",
-        .action   = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::EngineError> {
+        .action   = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::Error> {
             if (v.empty()) {
                 opt.vsync = true;
             } else if (IsTrue(v) || IsFalse(v)) {
                 opt.vsync = IsTrue(v);
             } else {
                 std::println(stderr, "Error: Invalid value '{}' for --vsync.", v);
-                return std::unexpected(ZHLN::EngineError {.msg = "Invalid value for --vsync: " + std::string(v), .code = EXIT_FAILURE, .silent = true});
+                return std::unexpected(ZHLN::CommandLineError::InvalidValue);
             }
             return {};
         }
@@ -202,14 +204,14 @@ constexpr std::array Handlers = {
     CommandHandler {
         .key      = "--fullscreen",
         .shortKey = "",
-        .action   = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::EngineError> {
+        .action   = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::Error> {
             if (v.empty()) {
                 opt.fullscreen = true;
             } else if (IsTrue(v) || IsFalse(v)) {
                 opt.fullscreen = IsTrue(v);
             } else {
                 std::println(stderr, "Error: Invalid value '{}' for --fullscreen.", v);
-                return std::unexpected(ZHLN::EngineError {.msg = "Invalid value for --fullscreen: " + std::string(v), .code = EXIT_FAILURE, .silent = true});
+                return std::unexpected(ZHLN::CommandLineError::InvalidValue);
             }
             return {};
         }
@@ -217,7 +219,7 @@ constexpr std::array Handlers = {
     CommandHandler {
         .key      = "--verbose",
         .shortKey = "",
-        .action   = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::EngineError> {
+        .action   = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::Error> {
             opt.logLevel = ZHLN::LogLevel::Verbose;
             return {};
         }
@@ -225,7 +227,7 @@ constexpr std::array Handlers = {
     CommandHandler {
         .key      = "--quiet",
         .shortKey = "",
-        .action   = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::EngineError> {
+        .action   = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::Error> {
             opt.logLevel = ZHLN::LogLevel::Quiet;
             return {};
         }
@@ -233,16 +235,16 @@ constexpr std::array Handlers = {
     CommandHandler {
         .key      = "--fps-limit",
         .shortKey = "",
-        .action   = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::EngineError> {
+        .action   = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::Error> {
             if (v.empty()) {
                 std::println(stderr, "Error: --fps-limit requires an integer value.");
-                return std::unexpected(ZHLN::EngineError {.msg = "Missing value for --fps-limit", .code = EXIT_FAILURE, .silent = true});
+                return std::unexpected(ZHLN::CommandLineError::MissingValue);
             }
             uint32_t val   = 0;
             auto [ptr, ec] = std::from_chars(v.data(), v.data() + v.size(), val);
             if (ec != std::errc {}) {
                 std::println(stderr, "Error: Invalid value '{}' for --fps-limit.", v);
-                return std::unexpected(ZHLN::EngineError {.msg = "Invalid value for --fps-limit: " + std::string(v), .code = EXIT_FAILURE, .silent = true});
+                return std::unexpected(ZHLN::CommandLineError::InvalidValue);
             }
             opt.fpsLimit = val;
             return {};
@@ -252,14 +254,14 @@ constexpr std::array Handlers = {
     CommandHandler {
         .key      = "--renderdoc",
         .shortKey = "",
-        .action   = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::EngineError> {
+        .action   = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::Error> {
             if (v.empty() || IsTrue(v)) {
                 opt.enableRenderDoc = true;
             } else if (IsFalse(v)) {
                 opt.enableRenderDoc = false;
             } else {
                 std::println(stderr, "Error: Invalid value '{}' for --renderdoc.", v);
-                return std::unexpected(ZHLN::EngineError {.msg = "Invalid value for --renderdoc: " + std::string(v), .code = EXIT_FAILURE, .silent = true});
+                return std::unexpected(ZHLN::CommandLineError::InvalidValue);
             }
             return {};
         }
@@ -267,7 +269,7 @@ constexpr std::array Handlers = {
     CommandHandler {
         .key      = "--benchmark",
         .shortKey = "",
-        .action   = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::EngineError> {
+        .action   = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::Error> {
             opt.benchmark = true;
             return {};
         }
@@ -275,7 +277,7 @@ constexpr std::array Handlers = {
     CommandHandler {
         .key      = "--debug-attach",
         .shortKey = "",
-        .action   = [](ZHLN::CommandLineOptions&, std::string_view) -> std::expected<void, ZHLN::EngineError> {
+        .action   = [](ZHLN::CommandLineOptions&, std::string_view) -> std::expected<void, ZHLN::Error> {
             std::println(
                 R"(
 Waiting for attachment. PID: {}
@@ -288,21 +290,18 @@ Press ENTER to continue.
             return {};
         }
     },
-    CommandHandler {
-        .key      = "--print-graph",
-        .shortKey = "",
-        .action   = [](ZHLN::CommandLineOptions&, std::string_view) -> std::expected<void, ZHLN::EngineError> {
-            std::println("{}", ZHLN::GetRenderGraphDump());
-            return std::unexpected(ZHLN::EngineError {.msg = {}, .code = EXIT_SUCCESS, .silent = true});
-        }
-    },
+    CommandHandler {.key = "--print-graph", .shortKey = "", .action = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::Error> {
+                        std::println("{}", ZHLN::GetRenderGraphDump());
+                        opt.printGraphRequested = true;
+                        return {};
+                    }},
 };
 
 } // namespace
 
 namespace ZHLN {
 
-std::expected<CommandLineOptions, EngineError> HandleCommandLine(std::span<char* const> args) {
+std::expected<CommandLineOptions, Error> HandleCommandLine(std::span<char* const> args) {
     CommandLineOptions options {.args = args, .enableValidation = true, .launchEditor = false};
 
     // Check environment variables first (allows easy IDE configuration profiles)
@@ -333,7 +332,7 @@ std::expected<CommandLineOptions, EngineError> HandleCommandLine(std::span<char*
             }
             PrintHelp(exeName);
 
-            return std::unexpected(EngineError {.msg = "Unknown command line argument: " + std::string(tok.key), .code = EXIT_FAILURE, .silent = true});
+            return std::unexpected(CommandLineError::UnknownArgument);
         }
     }
     return options;

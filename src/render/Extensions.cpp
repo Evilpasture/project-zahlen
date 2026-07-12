@@ -116,13 +116,9 @@ auto ExtensionBuilder::OptionalGroup(std::initializer_list<std::string_view> nam
     return *this;
 }
 
-auto ExtensionBuilder::Build() noexcept -> std::expected<ExtensionResult, std::string> {
+auto ExtensionBuilder::Build() noexcept -> std::expected<ExtensionResult, ZHLN::Error> {
     if (!_missingRequired.empty()) {
-        std::string error_msg = "Missing required extension(s):";
-        for (const auto& missing: _missingRequired) {
-            error_msg += " " + missing;
-        }
-        return std::unexpected(error_msg);
+        return std::unexpected(ExtensionBuilderError::MissingRequiredExtension);
     }
     return ExtensionResult(std::move(_active));
 }

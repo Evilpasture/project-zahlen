@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <compare>
+#include <format>
 #include <optional>
 #include <ranges>
 #include <string>
