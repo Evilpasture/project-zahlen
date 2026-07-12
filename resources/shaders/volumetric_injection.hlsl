@@ -56,10 +56,13 @@ float3 GetVoxelWorldPos(uint3 tid, float2 resolution) {
 
     float3 worldPos = GetVoxelWorldPos(tid, float2(gridDim.xy));
 
-    // Evaluate Global Exponential Height Fog
+    // Evaluate Global Exponential Height Fog with bounded negative depth
     float heightFalloff = 0.15f;
     float baseDensity   = 0.05f;
-    float density       = baseDensity * exp(-heightFalloff * worldPos.y);
+
+    // Clamp Y to prevent exponential density explosion into negative infinity
+    float boundedY = max(worldPos.y, -10.0f);
+    float density  = baseDensity * exp(-heightFalloff * boundedY);
 
     // Apply Worley turbulence
     float noiseScale = 0.08f;
