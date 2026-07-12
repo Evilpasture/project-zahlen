@@ -499,15 +499,13 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, co
 
 } // namespace
 
-extern auto RunGame(const ZHLN::CommandLineOptions& options) {
-    auto result = InitializeEngine(options).and_then(
-                                               [&options](std::unique_ptr<Engine> engine) { return RunEngineLoop(std::move(engine), options); }
+extern std::expected<int, int> RunGame(const ZHLN::CommandLineOptions& options) {
+    return InitializeEngine(options).and_then(
+                                        [&options](std::unique_ptr<Engine> engine) { return RunEngineLoop(std::move(engine), options); }
     ).transform_error([](const EngineError& err) -> int {
         if (!err.msg.empty() && !err.silent) {
             ZHLN::Log("Error: {}", err.msg);
         }
         return err.code;
     });
-
-    return result.has_value() ? result.value() : result.error();
 }

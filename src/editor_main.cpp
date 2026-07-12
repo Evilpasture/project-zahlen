@@ -678,16 +678,13 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
 
 } // namespace
 
-extern auto RunEditor(const CommandLineOptions& options) {
-    auto result = InitializeEditor(options).and_then(
-                                               [&options](std::unique_ptr<Engine> engine) { return RunEditorLoop(std::move(engine), options.fpsLimit); }
+extern std::expected<int, int> RunEditor(const CommandLineOptions& options) {
+    return InitializeEditor(options).and_then(
+                                        [&options](std::unique_ptr<Engine> engine) { return RunEditorLoop(std::move(engine), options.fpsLimit); }
     ).transform_error([](const EngineError& err) -> int {
         if (!err.msg.empty() && !err.silent) {
             ZHLN::Log("Error: {}", err.msg);
         }
         return err.code;
     });
-
-    // Fix: Prevent eager evaluation of .error() on successful runs
-    return result.has_value() ? result.value() : result.error();
 }

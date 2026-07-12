@@ -9,33 +9,34 @@
 
 using namespace ZHLN;
 
-int RunGame(const CommandLineOptions& options);
-int RunEditor(const CommandLineOptions& options);
+std::expected<int, int> RunGame(const CommandLineOptions& options);
+std::expected<int, int> RunEditor(const CommandLineOptions& options);
 
 namespace ZHLN {
 bool LoadRenderDocLibrary() noexcept;
 } // namespace ZHLN
 
 int main(int argc, char* argv[]) {
-    auto options_res = HandleCommandLine(std::span(argv, static_cast<size_t>(argc)));
-    if (!options_res) {
-        ZHLN::Log("Error: {}", options_res.error().Message());
-        return EXIT_FAILURE;
-    }
+    return HandleCommandLine(std::span(argv, static_cast<size_t>(argc)))
+        .transform_error([](const Error& err) -> int {
+            ZHLN::Log("Error: {}", err.Message());
+            return EXIT_FAILURE;
+        })
+        .and_then([](const CommandLineOptions& options) -> std::expected<int, int> {
+            if (options.helpRequested || options.versionRequested || options.printGraphRequested) {
+                return 0; // Clean exit
+            }
 
-    const auto& options = options_res.value();
+            ZHLN::SetLogLevel(options.logLevel);
 
-    // Clean exit for non-error user requests
-    if (options.helpRequested || options.versionRequested || options.printGraphRequested) {
-        return 0;
-    }
+            if (options.enableRenderDoc) {
+                ZHLN::LoadRenderDocLibrary();
+            }
 
-    ZHLN::SetLogLevel(options.logLevel);
-
-    // Load RenderDoc before starting any windowing or rendering modules
-    if (options.enableRenderDoc) {
-        ZHLN::LoadRenderDocLibrary();
-    }
-
-    return options.launchEditor ? RunEditor(options) : RunGame(options);
+            return options.launchEditor ? RunEditor(options) : RunGame(options);
+        })
+        .or_else([](int errorCode) -> std::expected<int, int> {
+            return errorCode; // Normalize error path into a valid expected payload
+        })
+        .value();
 }
