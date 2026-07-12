@@ -79,7 +79,7 @@ class ZHLN_API RenderContext {
 
     void SetAAState(const AAState& state);
 
-    void BuildMeshBLAS(Mesh& mesh);
+    RenderResult BuildMeshBLAS(Mesh& mesh) noexcept;
 
     [[nodiscard]] std::expected<void, Error> SetShadowResolution(uint32_t resolution);
 

@@ -701,7 +701,12 @@ static CompiledPrimitive GetOrCreateCompiledPrimitive(
         .indexCount  = primJob.indexCount
     };
 
-    ctx.BuildMeshBLAS(subMesh);
+    auto res = ctx.BuildMeshBLAS(subMesh);
+    if (!res) [[unlikely]] {
+        if (!res.error().Is(VulkanCallError::FeatureNotPresent)) {
+            ZHLN::Log("WARNING: glTFImporter: Failed to build mesh BLAS: {}", res.error().Message());
+        }
+    }
 
     // Allocate morph targets on GPU
     uint32_t finalMorphOffset = 0;

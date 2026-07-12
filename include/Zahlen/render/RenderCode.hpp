@@ -44,6 +44,6 @@ enum class ShaderStageCreationError : uint8_t {
 
 enum class SamplerCreationError : uint8_t { Success = 0, NullDevice, CreationFailed, UnknownError };
 
-enum class VulkanCallError : uint8_t { Success = 0, VulkanCallFailed, UnknownError };
+enum class VulkanCallError : uint8_t { Success = 0, VulkanCallFailed, FeatureNotPresent, UnknownError };
 
 } // namespace ZHLN

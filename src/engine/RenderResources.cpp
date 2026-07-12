@@ -426,17 +426,18 @@ void RenderContext::SetAAState(const AAState& state) {
     _impl->aaState = state;
 }
 
-void RenderContext::BuildMeshBLAS(Mesh& mesh) {
+RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
     auto* impl = _impl.get();
-    if (!impl->rtCtx.Valid()) {
-        return;
+    if (!impl->rtCtx.Valid()) [[unlikely]] {
+        // Return explicit Vulkan error indicating raytracing is unsupported on this device
+        return std::unexpected(VK_ERROR_FEATURE_NOT_PRESENT);
     }
 
     auto* nativePosMesh   = impl->meshPool.Resolve(mesh.posBuffer);
     auto* nativeIndexMesh = mesh.indexBuffer != BufferHandle::Invalid ? impl->meshPool.Resolve(mesh.indexBuffer) : nullptr;
 
-    if (nativePosMesh == nullptr) {
-        return;
+    if (nativePosMesh == nullptr) [[unlikely]] {
+        return std::unexpected(Error(VulkanCallError::VulkanCallFailed));
     }
 
     ZHLN_BlasGeometryDesc geom = {
@@ -453,47 +454,69 @@ void RenderContext::BuildMeshBLAS(Mesh& mesh) {
     ZHLN_AccelerationStructureSizes sizes;
     impl->rtCtx.GetBlasSizes(geom, primitiveCount, sizes);
 
-    nativePosMesh->blasBuffer = Vk::Buffer::Create(
+    // 1. Safe Allocation of the BLAS buffer
+    auto blasBuffer = Vk::Buffer::Create(
         impl->allocator.Get(), sizes.acceleration_structure_size,
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
     );
-    nativePosMesh->blas        = impl->rtCtx.CreateAS(nativePosMesh->blasBuffer.Handle(), sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL);
+    if (!blasBuffer.Valid()) [[unlikely]] {
+        return std::unexpected(Error(VulkanCallError::VulkanCallFailed));
+    }
+    nativePosMesh->blasBuffer = std::move(blasBuffer);
+
+    // 2. Safe Creation of the Acceleration Structure handle
+    auto* blas = impl->rtCtx.CreateAS(nativePosMesh->blasBuffer.Handle(), sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL);
+    if (blas == VK_NULL_HANDLE) [[unlikely]] {
+        return std::unexpected(Error(VulkanCallError::VulkanCallFailed));
+    }
+    nativePosMesh->blas        = blas;
     nativePosMesh->blasAddress = impl->rtCtx.GetASAddress(nativePosMesh->blas);
 
     nativePosMesh->device = impl->ctx.Device();
     nativePosMesh->rtCtx  = &impl->rtCtx;
 
+    // 3. Safe Allocation of the Scratch buffer
     Vk::Buffer scratch = Vk::Buffer::Create(
         impl->allocator.Get(), sizes.build_scratch_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
         VMA_MEMORY_USAGE_GPU_ONLY
     );
+    if (!scratch.Valid()) [[unlikely]] {
+        return std::unexpected(Error(VulkanCallError::VulkanCallFailed));
+    }
 
     {
         Vk::CommandPool<Vk::QueueType::Graphics> tempPool(impl->ctx.Device(), impl->ctx.PhysicalInfo().graphics_family);
-        if (tempPool.Allocate(1)) {
-            VkCommandBuffer tempCmd = tempPool[0];
-            {
-                Vk::CommandBufferGuard guard(tempCmd);
-                // 1. Cleanly drain pending family ownership acquires (locks and C-structs are
-                // hidden)
-                impl->pendingAcquires.Drain(tempCmd);
+        if (!tempPool.Allocate(1)) [[unlikely]] {
+            return std::unexpected(Error(VulkanCallError::VulkanCallFailed));
+        }
 
-                // Synchronize the vertex/index buffer copy writes with the BLAS build reads
-                Vk::MemoryBarrier(
-                    tempCmd, {.src_stage  = VK_PIPELINE_STAGE_2_COPY_BIT,
-                              .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                              .dst_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                              .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
-                );
-                impl->rtCtx.CmdBuildBlas(tempCmd, geom, nativePosMesh->blas, Vk::GetBufferAddress(impl->ctx.Device(), scratch.Handle()), primitiveCount);
-            }
-            // 2. Synchronously submit and wait on the transfer staging timeline semaphore
-            Vk::SubmitAndWait(
-                impl->ctx.GraphicsQueue(), tempCmd, impl->transferRingBuffer.GetSemaphore(), impl->transferRingBuffer.GetCurrentValue(),
-                VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
+        VkCommandBuffer tempCmd = tempPool[0];
+        {
+            Vk::CommandBufferGuard guard(tempCmd);
+            // Cleanly drain pending family ownership acquires (locks and C-structs are hidden)
+            impl->pendingAcquires.Drain(tempCmd);
+
+            // Synchronize the vertex/index buffer copy writes with the BLAS build reads
+            Vk::MemoryBarrier(
+                tempCmd, {.src_stage  = VK_PIPELINE_STAGE_2_COPY_BIT,
+                          .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                          .dst_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                          .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
             );
+            impl->rtCtx.CmdBuildBlas(tempCmd, geom, nativePosMesh->blas, Vk::GetBufferAddress(impl->ctx.Device(), scratch.Handle()), primitiveCount);
+        }
+
+        // 4. Submit and propagate potential queue / device-loss failures
+        auto res = Vk::SubmitAndWait(
+            impl->ctx.GraphicsQueue(), tempCmd, impl->transferRingBuffer.GetSemaphore(), impl->transferRingBuffer.GetCurrentValue(),
+            VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
+        );
+        if (!res) [[unlikely]] {
+            return std::unexpected(res.error());
         }
     }
+
+    return {};
 }
 
 void RenderContext::Impl::InitializeSystemTextures() {

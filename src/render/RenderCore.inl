@@ -223,10 +223,6 @@ inline void
 // Error Helpers Implementation
 // ============================================================================
 
-inline auto ResultString(const VkResult result) noexcept -> std::string {
-    return ZHLN_VkResultString(result);
-}
-
 inline std::expected<VkResult, std::string> CheckResult(const VkResult result, const char* context, const std::source_location location) {
     if (result != VK_SUCCESS) [[unlikely]] {
         return std::unexpected(ReportVkError(result, context, location));
