@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "Loop.hpp"
 #include <algorithm>
 #include <array>
 #include <format>
@@ -51,7 +50,7 @@ constexpr bool IsBracesConstructible() {
 // ============================================================================
 
 #if defined(__cpp_impl_reflection)
-
+#include "Loop.hpp"
 #include <meta>
 
 namespace ZHLN::Reflect {
@@ -115,7 +114,7 @@ constexpr void ChunkedFieldVisitor(T&& t, F&& f) {
             f(t.[:members[Index]:]);
         });
 
-        ChunkedFieldVisitor<T, F, Start + Step, Total>(std::forward<T>(t), std::forward<F>(f));
+        ChunkedFieldVisitor<T, F, Start + Step, Total>(t, f);
     }
 }
 } // namespace detail
@@ -763,7 +762,7 @@ template <typename E, typename F>
 constexpr void DispatchEnum(E value, F&& f) {
     ForEachEnumerator<E>([&]<E Val>() {
         if (value == Val) {
-            f.template operator()<Val>();
+            std::forward<F>(f).template operator()<Val>();
         }
     });
 }
@@ -785,6 +784,17 @@ struct CustomFormatter {
             out += std::format("{}", val);
         } else if constexpr (std::is_enum_v<Decayed>) {
             out += EnumToString(val);
+        } else if constexpr (std::ranges::input_range<Decayed>) { // added support for vectors/arrays
+            out += "[";
+            bool first = true;
+            for (const auto& elem: val) {
+                if (!first) {
+                    out += ", ";
+                }
+                first = false;
+                out += ToDebugString(elem);
+            }
+            out += "]";
         } else if constexpr (std::is_class_v<Decayed>) {
             if constexpr (FieldCount<Decayed>() > 0) {
                 out += "{";
