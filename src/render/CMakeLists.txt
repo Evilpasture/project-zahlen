@@ -146,15 +146,7 @@ set(CRT_HLSL "${CMAKE_CURRENT_SOURCE_DIR}/crt_app/crt.hlsl")
 compile_hlsl("${CRT_HLSL}" VSMain vs CRT_VERT_SPV)
 compile_hlsl("${CRT_HLSL}" PSMain ps CRT_FRAG_SPV)
 
-set(SPONZA_HLSL "${CMAKE_CURRENT_SOURCE_DIR}/sponza_app/sponza.hlsl")
-set(SPONZA_SHADOW_HLSL "${CMAKE_CURRENT_SOURCE_DIR}/sponza_app/shadow.hlsl")
-set(SPONZA_FXAA_HLSL "${CMAKE_CURRENT_SOURCE_DIR}/sponza_app/fxaa.hlsl")
-compile_hlsl("${SPONZA_HLSL}" VSMain vs SPONZA_VERT_SPV)
-compile_hlsl("${SPONZA_HLSL}" PSMain ps SPONZA_FRAG_SPV)
-compile_hlsl("${SPONZA_SHADOW_HLSL}" VSMain vs SPONZA_SHADOW_VERT_SPV)
-compile_hlsl("${SPONZA_SHADOW_HLSL}" PSMain ps SPONZA_SHADOW_FRAG_SPV)
-compile_hlsl("${SPONZA_FXAA_HLSL}" VSMain vs SPONZA_FXAA_VERT_SPV)
-compile_hlsl("${SPONZA_FXAA_HLSL}" PSMain ps SPONZA_FXAA_FRAG_SPV)
+
 
 # 4. Triangle Executable
 add_executable(zahlen_triangle triangle_app/main.cpp ${TRI_VERT_SPV} ${TRI_FRAG_SPV})
@@ -174,21 +166,7 @@ target_link_libraries(zahlen_crt PRIVATE zahlen_demo_utils)
 target_include_directories(zahlen_crt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(zahlen_crt PRIVATE cxx_std_23)
 
-# 7. Sponza Executable
-add_executable(zahlen_sponza sponza_app/main.cpp
-    ${SPONZA_VERT_SPV}
-    ${SPONZA_FRAG_SPV}
-    ${SPONZA_SHADOW_VERT_SPV}
-    ${SPONZA_SHADOW_FRAG_SPV}
-    ${SPONZA_FXAA_VERT_SPV}
-    ${SPONZA_FXAA_FRAG_SPV}
-)
-target_link_libraries(zahlen_sponza PRIVATE zahlen_demo_utils)
-target_include_directories(zahlen_sponza PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/extern/cgltf
-    ${CMAKE_SOURCE_DIR}/extern/stb
-)
+
 # ============================================================================
 # 8. Raw Vulkan Triangle Executable (No ZHLN abstractions)
 # ============================================================================
