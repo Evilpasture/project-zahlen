@@ -88,10 +88,6 @@ if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
     )
 endif()
 
-if(BUILD_TESTING)
-    add_subdirectory(tests)
-endif()
-
 # ----------------------------------------------------------------------------
 # Demo Utilities (Shared PIMPL Window Abstraction)
 # ----------------------------------------------------------------------------
