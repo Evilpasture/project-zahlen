@@ -47,12 +47,13 @@ struct TypeList<> {
     using type = void; // Safe fallback, never indexed
 };
 
-template <ResourceName Name, VkFormat Format, VkImageAspectFlags Aspect, bool IsSwapchain = false>
+template <ResourceName Name, VkFormat Format, VkImageAspectFlags Aspect, bool IsSwapchain = false, bool IsPersistent = false>
 struct GraphImage {
-    static constexpr auto               name         = Name;
-    static constexpr VkFormat           format       = Format;
-    static constexpr VkImageAspectFlags aspect       = Aspect;
-    static constexpr bool               is_swapchain = IsSwapchain;
+    static constexpr auto               name          = Name;
+    static constexpr VkFormat           format        = Format;
+    static constexpr VkImageAspectFlags aspect        = Aspect;
+    static constexpr bool               is_swapchain  = IsSwapchain;
+    static constexpr bool               is_persistent = IsPersistent;
 };
 
 template <typename Image, VkImageLayout Layout, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access>
@@ -145,10 +146,11 @@ template <typename ResourceList, typename Target>
 consteval auto GetResourceIndex() -> size_t;
 
 struct ResourceState {
-    VkImageLayout         layout          = VK_IMAGE_LAYOUT_UNDEFINED;
-    VkPipelineStageFlags2 stage           = VK_PIPELINE_STAGE_2_NONE;
-    VkAccessFlags2        access          = 0;
-    size_t                last_write_pass = 999999;
+    VkImageLayout         layout            = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkPipelineStageFlags2 stage             = VK_PIPELINE_STAGE_2_NONE;
+    VkAccessFlags2        access            = 0;
+    size_t                lastWritePass     = 999999;
+    bool                  fromPreviousFrame = false;
 };
 
 constexpr VkAccessFlags2 WriteMask = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
@@ -156,8 +158,9 @@ constexpr VkAccessFlags2 WriteMask = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_
 
 template <ResourceState Prev, typename Usage, size_t PassIndex>
 struct NeedsBarrier {
-    static constexpr bool value = (Prev.layout != Usage::layout) || (Prev.stage != Usage::stage) || (Prev.access != Usage::access) ||
-                                  (Prev.layout == VK_IMAGE_LAYOUT_UNDEFINED) || (((Usage::access & WriteMask) != 0) && (Prev.last_write_pass < PassIndex));
+    static constexpr bool value = (((Usage::access & WriteMask) != 0) && (Prev.fromPreviousFrame || (Prev.lastWritePass < PassIndex))) ||
+                                  (Prev.layout != Usage::layout) || (Prev.stage != Usage::stage) || (Prev.access != Usage::access) ||
+                                  (Prev.layout == VK_IMAGE_LAYOUT_UNDEFINED);
 };
 
 template <typename ResourceList, typename... Passes>

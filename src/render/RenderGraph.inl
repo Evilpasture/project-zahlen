@@ -147,8 +147,7 @@ consteval auto ComputeStateTable() {
 
     // Warm up simulation state
     [&]<size_t... Is>(std::index_sequence<Is...>) {
-        ((current_states[Is] = {.layout = VK_IMAGE_LAYOUT_UNDEFINED, .stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, .access = 0, .last_write_pass = 999999}),
-         ...);
+        ((current_states[Is] = {.layout = VK_IMAGE_LAYOUT_UNDEFINED, .stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, .access = 0, .lastWritePass = 999999}), ...);
     }(std::make_index_sequence<num_resources> {});
 
     auto simulate_passes = [&](bool record) noexcept(false) {
@@ -174,7 +173,8 @@ consteval auto ComputeStateTable() {
                             .stage  = U::stage,
                             .access = U::access,
                             // Track when the resource was last modified in this frame cycle
-                            .last_write_pass = is_write ? pass_idx : current_states[r_idx].last_write_pass
+                            .lastWritePass     = is_write ? pass_idx : current_states[r_idx].lastWritePass,
+                            .fromPreviousFrame = is_write ? false : current_states[r_idx].fromPreviousFrame
                         };
                     }.template operator()<Is>(),
                     ...);
@@ -192,10 +192,19 @@ consteval auto ComputeStateTable() {
         (
             [&]<size_t I>() {
                 using R = typename ResourceList::template type<I>;
-                if constexpr (R::is_swapchain) {
+                if constexpr (R::is_swapchain || !R::is_persistent) {
                     current_states[I] = {
-                        .layout = VK_IMAGE_LAYOUT_UNDEFINED, .stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, .access = 0, .last_write_pass = 999999
+                        .layout            = VK_IMAGE_LAYOUT_UNDEFINED,
+                        .stage             = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        .access            = 0,
+                        .lastWritePass     = 999999,
+                        .fromPreviousFrame = false
                     };
+                } else {
+                    // If the resource was written in the previous frame, flag it
+                    if (current_states[I].lastWritePass < 999999) {
+                        current_states[I].fromPreviousFrame = true;
+                    }
                 }
             }.template operator()<Is>(),
             ...);
