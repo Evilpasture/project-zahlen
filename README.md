@@ -12,7 +12,7 @@ A **simple** project that integrates Vulkan, Jolt Physics and ImGUI for hardware
 
 You can do it the hard way, or the easy way.
 
-### The Hard Way
+### Manual Build
 1. Clone the repository and its submodules:
    ```sh
    git clone --recurse-submodules https://github.com/Evilpasture/project-zahlen.git
@@ -33,7 +33,7 @@ You can do it the hard way, or the easy way.
    ./build/zahlen
    ```  
 
-### The Easy Way
+### Convenient Build
 
 1. Clone the repository and its submodules:
    ```sh
@@ -52,7 +52,9 @@ You can do it the hard way, or the easy way.
 
 ## System & Platform Dependencies
 
-The project is primarily developed on Linux and macOS, but should also work on Windows as originally planned.
+The project is primarily developed on Linux and macOS, but should also work on Windows as originally planned. That is true, if your compiler supports standard C++26 features.
+
+See [here](https://en.cppreference.com/cpp/compiler_support/26) for compiler support information.
 
 These packages are expected to be installed on the host operating system:
 
