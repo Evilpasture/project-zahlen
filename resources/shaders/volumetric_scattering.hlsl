@@ -25,10 +25,43 @@ float PhaseDualHG(float cosTheta, float g1, float g2, float k) {
     return lerp(PhaseHG(cosTheta, g2), PhaseHG(cosTheta, g1), k);
 }
 
-float TemporalHash(uint2 pixelPos, float timeOffset) {
-    float spatial  = frac(float(pixelPos.x * 12664589 + pixelPos.y * 9546283) * 0.6180339887498949f);
-    float temporal = frac(timeOffset * 0.6180339887498949f);
-    return frac(spatial + temporal);
+// --- Stable 2D Spatial-Temporal Ray Jitter ---
+float TemporalHash2D(uint2 tid, float timeOffset) {
+    float spatial = frac(float(tid.x * 12664589 + tid.y * 9546283) * 0.6180339887f);
+    return frac(spatial + timeOffset * 60.0f * 0.6180339887f);
+}
+
+// --- High-Frequency 3D Hash for Rotated PCF ---
+float GetNoise3D(uint3 tid, float time) {
+    uint h = tid.x * 1597334673U + tid.y * 3812015801U + tid.z * 2798796415U;
+    h ^= (h >> 16);
+    h *= 0x85ebca6bU;
+    float spatial = float(h) * (1.0f / 4294967296.0f);
+    return frac(spatial + time * 60.0f * 0.6180339887f);
+}
+
+// --- Rotated 3x3 PCF Shadow Sampler ---
+float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
+    float shadow    = 0.0f;
+    float texelSize = 1.0f / float(frame.shadowResolution);
+
+    // Dynamic bias scaling with cascade depth to prevent self-shadowing acne
+    float bias         = 0.0012f * (cascade + 1.0f);
+    float compareDepth = projCoords.z - bias;
+
+    float s = sin(angle);
+    float c = cos(angle);
+
+    float2 offsets[9] = {float2(-1.0f, -1.0f), float2(0.0f, -1.0f), float2(1.0f, -1.0f), float2(-1.0f, 0.0f), float2(0.0f, 0.0f),
+                         float2(1.0f, 0.0f),   float2(-1.0f, 1.0f), float2(0.0f, 1.0f),  float2(1.0f, 1.0f)};
+
+    [unroll] for (int i = 0; i < 9; ++i) {
+        float2 rotatedOffset = float2(offsets[i].x * c - offsets[i].y * s, offsets[i].x * s + offsets[i].y * c) * texelSize;
+
+        shadow += shadowMap.SampleCmpLevelZero(shadowSampler, float3(projCoords.xy + rotatedOffset, cascade), compareDepth);
+    }
+
+    return shadow / 9.0f;
 }
 
 [numthreads(8, 8, 1)] void CSMain(uint3 tid : SV_DispatchThreadID) {
@@ -47,8 +80,8 @@ float TemporalHash(uint2 pixelPos, float timeOffset) {
     }
 
     float2 uv      = (float2(tid.xy) + 0.5f) / float2(gridDim.xy);
-    float  jitter  = TemporalHash(tid.xy, frame.camPos.w) - 0.5f;
-    float  depthVS = 0.1f * pow(10000.0f, (float(tid.z) + 0.5f + jitter * 0.85f) / 64.0f);
+    float  jitter  = TemporalHash2D(tid.xy, frame.camPos.w) - 0.5f;
+    float  depthVS = 0.1f * pow(10000.0f, (float(tid.z) + 0.5f + jitter * 0.5f) / 64.0f);
 
     float4 clip          = float4(uv.x * 2.0f - 1.0f, uv.y * 2.0f - 1.0f, 0.5f, 1.0f);
     float4 worldSpacePos = mul(frame.invViewProj, clip);
@@ -57,12 +90,9 @@ float TemporalHash(uint2 pixelPos, float timeOffset) {
 
     float3 accumulatedLight = float3(0.0f, 0.0f, 0.0f);
 
-    // 1. Evaluate Soft Ambient Lighting (Sky Light)
-    // Prevents shadowed fog from turning pitch black
     float3 ambientSkyColor = float3(0.5f, 0.6f, 0.75f) * frame.ambientExposure * 0.005f;
     accumulatedLight += ambientSkyColor * scattering;
 
-    // 2. Direct Sun Light & CSM
     float3 L_sun    = normalize(frame.lightDir.xyz);
     float  phaseSun = PhaseDualHG(dot(-V, L_sun), 0.82f, -0.15f, 0.92f);
 
@@ -78,16 +108,21 @@ float TemporalHash(uint2 pixelPos, float timeOffset) {
     shadowPos.xy     = shadowPos.xy * 0.5f + 0.5f * shadowPos.w;
 
     float3 projCoords = shadowPos.xyz / shadowPos.w;
-    float  shadow     = 1.0f; // Default to fully lit outside shadow map coverage
+    float  shadow     = 1.0f;
 
-    // Perform explicit bounds checking
     if (projCoords.x >= 0.0f && projCoords.x <= 1.0f && projCoords.y >= 0.0f && projCoords.y <= 1.0f && projCoords.z >= 0.0f && projCoords.z <= 1.0f) {
-        shadow = shadowMap.SampleCmpLevelZero(shadowSampler, float3(projCoords.xy, cascadeIndex), projCoords.z);
+        // --- ROTATED 3x3 PCF FILTER ---
+        float rotationAngle = GetNoise3D(tid, frame.camPos.w) * 2.0f * 3.14159265f;
+        shadow              = SampleShadowPCF3x3(projCoords, (float) cascadeIndex, rotationAngle);
+
+        // Smoothly fade out shadows near the shadow map boundaries
+        float3 boundaryDist = min(projCoords.xyz, 1.0f - projCoords.xyz);
+        float  fade         = saturate(min(boundaryDist.x, min(boundaryDist.y, boundaryDist.z)) * 8.0f);
+        shadow              = lerp(1.0f, shadow, fade);
     }
 
     accumulatedLight += frame.lightDir.w * phaseSun * shadow * scattering;
 
-    // 3. Clustered Punctual Lights
     uint3         clusterCoords = uint3(uint(uv.x * 16.0f), uint(uv.y * 9.0f), uint(max(0.0f, log(depthVS) * frame.zScale + frame.zBias)));
     uint          clusterIdx    = clusterCoords.x + (clusterCoords.y * 16) + (min(clusterCoords.z, 23u) * 144);
     ClusterVolume cluster       = clusterGrid[clusterIdx];

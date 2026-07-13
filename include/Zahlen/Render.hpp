@@ -15,6 +15,15 @@
 
 namespace ZHLN {
 
+// --- CENTRALIZED SHADOW PROJECTION CONSTANTS ---
+namespace Shadows {
+inline constexpr float NearClip   = 0.1f;
+inline constexpr float BaseOffset = 150.0f; // For Cascades 0-2 (millimeter-precise)
+inline constexpr float BaseDepth  = 300.0f;
+inline constexpr float FarOffset  = 500.0f; // For Cascade 3 (prevents distant fog clipping)
+inline constexpr float FarDepth   = 1000.0f;
+} // namespace Shadows
+
 enum class RenderFrameResult : uint8_t { Success = 0, Suboptimal, OutOfDate, DeviceLost, Error };
 
 using RenderResult = std::expected<void, Error>;

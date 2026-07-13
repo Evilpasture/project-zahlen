@@ -152,11 +152,12 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
         shadowCenter.SetY(std::round(shadowCenter.GetY() / texelSize) * texelSize);
         shadowCenter.SetZ(std::round(shadowCenter.GetZ() / texelSize) * texelSize);
 
-        JPH::Vec3  lightPos  = shadowCenter + sunDirection * 150.0f;
+        // --- USE CENTRALIZED SHADOW CONSTANTS ---
+        JPH::Vec3  lightPos  = shadowCenter + sunDirection * Shadows::FarOffset;
         JPH::Mat44 lightView = Math::CreateLookAt(lightPos, shadowCenter, JPH::Vec3::sAxisY());
 
         float      halfWidth      = shadowWidth * 0.5f;
-        JPH::Mat44 lightProj      = Math::CreateOrtho(-halfWidth, halfWidth, -halfWidth, halfWidth, 0.1f, 400.0f);
+        JPH::Mat44 lightProj      = Math::CreateOrtho(-halfWidth, halfWidth, -halfWidth, halfWidth, Shadows::NearClip, Shadows::FarDepth);
         JPH::Mat44 shadowProjView = lightProj * lightView;
 
         cam.shadowFrustum.Update(shadowProjView);

@@ -8,7 +8,6 @@
 #include "detail/ControlFlow.hpp"
 #include "detail/RadixSort.hpp"
 #include "engine/FileWatcher.hpp"
-#include "engine/Resources.hpp"
 #include "threading/Mutex.hpp"
 #include <GLFW/glfw3.h>
 #include <Zahlen/Error.hpp>
@@ -210,8 +209,7 @@ using BlitLayout = Vk::DescriptorLayout<
     Vk::SamplerSlot<1>,                              // sampler
     Vk::SampledImageSlot<2>,                         // texBloom
     Vk::SampledImageSlot<3>,                         // texDepth
-    Vk::SampledImageSlot<4>,                         // texVoxelIntegrated
-    Vk::UniformSlot<5, VK_SHADER_STAGE_FRAGMENT_BIT> // frame
+    Vk::UniformSlot<4, VK_SHADER_STAGE_FRAGMENT_BIT> // frame
     >;
 
 // Layouts for Threshold & Blur
@@ -303,18 +301,18 @@ using LightingLayout = Vk::DescriptorLayout<
     >;
 
 using ReflectionLayout = Vk::DescriptorLayout<
-    Vk::SampledImageSlot<0>,                               // texAlbedo
-    Vk::SamplerSlot<1>,                                    // sampler
-    Vk::SampledImageSlot<2>,                               // texDepth
-    Vk::SampledImageSlot<3>,                               // texNormalRoughness
-    Vk::SamplerSlot<4>,                                    // pointSampler
-    Vk::SampledImageSlot<5>,                               // texEnvMap
-    EngineAS<6, VK_SHADER_STAGE_FRAGMENT_BIT>,             // TLAS
-    Vk::UniformSlot<7, VK_SHADER_STAGE_FRAGMENT_BIT>,      // frame
-    Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>, // brdfLUT
-    Vk::SamplerSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,      // clampSampler
-    Vk::SampledImageSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT> // texLighting (Pass
-                                                           // 2 Output)
+    Vk::SampledImageSlot<0>,                                // texAlbedo
+    Vk::SamplerSlot<1>,                                     // sampler
+    Vk::SampledImageSlot<2>,                                // texDepth
+    Vk::SampledImageSlot<3>,                                // texNormalRoughness
+    Vk::SamplerSlot<4>,                                     // pointSampler
+    Vk::SampledImageSlot<5>,                                // texEnvMap
+    EngineAS<6, VK_SHADER_STAGE_FRAGMENT_BIT>,              // TLAS
+    Vk::UniformSlot<7, VK_SHADER_STAGE_FRAGMENT_BIT>,       // frame
+    Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>,  // brdfLUT
+    Vk::SamplerSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,       // clampSampler
+    Vk::SampledImageSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>, // texLighting (Pass 2 Output)
+    Vk::SampledImageSlot<11, VK_SHADER_STAGE_FRAGMENT_BIT>  // texVoxelIntegrated
     >;
 
 using BakeLayout = Vk::DescriptorLayout<Vk::StorageImageSlot<0>>;
@@ -459,6 +457,10 @@ struct SceneResources {
     Vk::TypedImage<ColorL> normRough;
     Vk::TypedImage<DepthL> depth;
 };
+
+namespace Resource {
+struct ShaderPair;
+}
 
 // ============================================================================
 // Frame Graph Resource Tags (Declared Before PIMPL Struct)

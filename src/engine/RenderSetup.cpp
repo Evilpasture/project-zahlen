@@ -60,9 +60,18 @@ JPH::Mat44 ComputeCascadeLightSpaceMatrix(
 
     center = lightView.Inversed() * centerLight;
 
-    JPH::Vec3  cascadeLightPos  = center + sunDir * 150.0f;
+    // --- USE CENTRALIZED SHADOW CONSTANTS ---
+    float offset  = Shadows::BaseOffset;
+    float farClip = Shadows::BaseDepth;
+
+    if (farDist > 550.0f) {
+        offset  = Shadows::FarOffset;
+        farClip = Shadows::FarDepth;
+    }
+
+    JPH::Vec3  cascadeLightPos  = center + sunDir * offset;
     JPH::Mat44 cascadeLightView = Math::CreateLookAt(cascadeLightPos, center, JPH::Vec3::sAxisY());
-    JPH::Mat44 cascadeLightProj = Math::CreateOrtho(-radius, radius, -radius, radius, 0.1f, 300.0f);
+    JPH::Mat44 cascadeLightProj = Math::CreateOrtho(-radius, radius, -radius, radius, Shadows::NearClip, farClip);
 
     return cascadeLightProj * cascadeLightView;
 }

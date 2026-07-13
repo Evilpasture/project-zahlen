@@ -20,11 +20,11 @@ JPH::Vec3 EvaluateSky(const JPH::Vec3& D) {
     float dy = D.GetY();
 
     // Core palette
-    JPH::Vec3 zenith(0.5f, 0.65f, 0.85f);   // Soft pale sky blue
-    JPH::Vec3 horizon(0.88f, 0.85f, 0.82f); // Warm peach-white horizon
-    JPH::Vec3 ground(0.35f, 0.28f, 0.22f);  // Warm sandy/clay ground reflection
+    JPH::Vec3 zenith(0.12f, 0.38f, 0.85f);  // Rich, deep sky blue
+    JPH::Vec3 horizon(0.55f, 0.82f, 1.00f); // Lighter, crisp cyan-blue at the horizon
+    JPH::Vec3 ground(0.20f, 0.15f, 0.10f);  // Darker ground, preventing light pollution from underneath
 
-    JPH::Vec3 color;
+    JPH::Vec3 color {};
     if (dy >= 0.0f) {
         // Sky gradient
         color = LerpColor(horizon, zenith, std::pow(dy, 1.2f));

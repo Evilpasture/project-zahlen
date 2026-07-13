@@ -26,10 +26,9 @@ struct PushConstants {
 
 [[vk::binding(0, 0)]] Texture2D<float4>             texInput;
 [[vk::binding(1, 0)]] SamplerState                  smp;
-[[vk::binding(2, 0)]] Texture2D<float4>             texBloom; // <-- Bound dynamically by BlitPass
+[[vk::binding(2, 0)]] Texture2D<float4>             texBloom; // Bound dynamically by BlitPass
 [[vk::binding(3, 0)]] Texture2D<float>              texDepth;
-[[vk::binding(4, 0)]] Texture3D<float4>             texVoxelIntegrated;
-[[vk::binding(5, 0)]] ConstantBuffer<FrameUniforms> frame;
+[[vk::binding(4, 0)]] ConstantBuffer<FrameUniforms> frame;
 
 float3 ACESFilm(float3 x) {
     float a = 2.51f;
@@ -48,30 +47,17 @@ float4 PSMain(VSOutput input): SV_Target0 {
         return float4(hdrColor, 1.0f);
     }
 
-    // 1. Fetch Geometry Depth and Compute Volumetric Coordinates
-    float rawDepth  = texDepth.SampleLevel(smp, input.uv, 0).r;
-    float viewDepth = 1000.0f; // Default for skybox
-    if (rawDepth < 1.0f) {
-        float3 worldPos = ReconstructWorldPos(input.uv, rawDepth, frame.invViewProj);
-        viewDepth       = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
-    }
-
-    // 2. Apply Volumetric Scattering
-    float  zSlice      = log(max(viewDepth, 0.1f) / 0.1f) / log(10000.0f);
-    float4 volumetrics = texVoxelIntegrated.SampleLevel(smp, float3(input.uv, zSlice), 0);
-    hdrColor           = hdrColor * volumetrics.a + volumetrics.rgb;
-
     // Sample Bloom and blend additively (adjust the 0.5f intensity multiplier as needed)
     float3 bloom = texBloom.SampleLevel(smp, input.uv, 0).rgb;
     hdrColor += bloom * 0.5f;
 
-    // 3. Exposure Control: Scale down the massive HDR values (Sun is 250.0)
+    // Exposure Control: Scale down the massive HDR values (Sun is 250.0)
     hdrColor *= 0.015f;
 
-    // 4. Tonemap HDR -> LDR
+    // Tonemap HDR -> LDR
     float3 finalColor = ACESFilm(hdrColor);
 
-    // 5. Apply Vignette overlay
+    // Apply Vignette overlay
     if (pc.vignetteIntensity > 0.0f) {
         float2 uvDist   = abs(input.uv - 0.5f) * pc.vignetteIntensity;
         float  vignette = saturate(1.0f - dot(uvDist, uvDist));

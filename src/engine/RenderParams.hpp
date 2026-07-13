@@ -66,10 +66,11 @@ struct ReflectionPassParams {
     VkImageView                                              brdfLutView        = VK_NULL_HANDLE;
     VkSampler                                                clampSampler       = VK_NULL_HANDLE;
     Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> lightingTarget;
+    Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> voxelIntegrated;
 
     [[nodiscard]] constexpr auto AsTuple() const noexcept {
-        return std::tuple {sceneColor, defaultSampler,     depth,       normRough,    pointSampler,  prefilteredView,
-                           tlas,       frameUniformBuffer, brdfLutView, clampSampler, lightingTarget};
+        return std::tuple {sceneColor, defaultSampler,     depth,       normRough,    pointSampler,   prefilteredView,
+                           tlas,       frameUniformBuffer, brdfLutView, clampSampler, lightingTarget, voxelIntegrated};
     }
 };
 

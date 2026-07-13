@@ -409,17 +409,20 @@ struct PassFactory {
     [[nodiscard]] auto MakeReflectionPass() const noexcept {
         return Vk::MakePass<
             "Reflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_Lighting>,
-            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ColorWrite<Res_PostProcess>>([this](auto& ctx) noexcept {
-            Profiler::ScopedGpuProfile<Stages::PostProcessPass, FrameProfiler> timer(ctx.Cmd(), fIdx, self.gpuProfiler);
-            self.reflectionPass.WriteNext(
-                device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.sceneColor), self.defaultSampler.Get(),
-                Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
-                Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.normalRoughnessBuffer), self.pointSampler.Get(),
-                self.iblPayload.prefilteredView.Get(), GetTLAS(), self.frameUniformBuffers->Handle(), self.iblPayload.brdfLutView.Get(),
-                self.clampSampler.Get(), Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.lightingTarget)
-            );
-            self.reflectionPass.ExecuteVariant(ctx.Cmd(), reflVariant, pc);
-        });
+            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderRead<Res_VoxelInt>, Vk::ColorWrite<Res_PostProcess>>(
+            [this](auto& ctx) noexcept {
+                Profiler::ScopedGpuProfile<Stages::PostProcessPass, FrameProfiler> timer(ctx.Cmd(), fIdx, self.gpuProfiler);
+                self.reflectionPass.WriteNext(
+                    device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.sceneColor), self.defaultSampler.Get(),
+                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
+                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.normalRoughnessBuffer), self.pointSampler.Get(),
+                    self.iblPayload.prefilteredView.Get(), GetTLAS(), self.frameUniformBuffers->Handle(), self.iblPayload.brdfLutView.Get(),
+                    self.clampSampler.Get(), Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.lightingTarget),
+                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.voxelIntegrated) // <-- ADDED THIS BINDING
+                );
+                self.reflectionPass.ExecuteVariant(ctx.Cmd(), reflVariant, pc);
+            }
+        );
     }
 
     template <bool FullBright>
@@ -526,6 +529,8 @@ struct PassFactory {
             [aaLambda = std::forward<AALambdaT>(aaLambda), &aaColorInputImage](VkCommandBuffer c) noexcept { aaLambda(c, aaColorInputImage); }
         );
     }
+
+    // --- REVERTED BACK TO YOUR ORIGINAL OPTIMIZED PIPELINE PATH ---
     template <bool FullBright, AAMode Mode, typename GetSwapchainImageT>
     auto MakeBlitPass(GetSwapchainImageT&& getSwapchainImage) const noexcept {
         using enum AAMode;
@@ -538,23 +543,22 @@ struct PassFactory {
             }
         }();
 
-        return Vk::Passieren<
-            "Blit", Vk::ShaderRead<BlitInputRes>, Vk::ShaderRead<Res_BloomFinal>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_VoxelInt>,
-            Vk::ColorWrite<Res_Swapchain>>([this, &blitInputImage,
-                                            getSwapchainImage = std::forward<GetSwapchainImageT>(getSwapchainImage)](VkCommandBuffer c) noexcept {
-            FrameRecorder blitRecorder(c, self);
+        return Vk::Passieren<"Blit", Vk::ShaderRead<BlitInputRes>, Vk::ShaderRead<Res_BloomFinal>, Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_Swapchain>>(
+            [this, &blitInputImage, getSwapchainImage = std::forward<GetSwapchainImageT>(getSwapchainImage)](VkCommandBuffer c) noexcept {
+                FrameRecorder blitRecorder(c, self);
 
-            self.blitPass.WriteNext(
-                device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(blitInputImage), self.defaultSampler.Get(),
-                Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.bloomFinalTarget),
-                Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
-                Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.voxelIntegrated), self.frameUniformBuffers[fIdx].Handle()
-            );
+                self.blitPass.WriteNext(
+                    device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(blitInputImage), self.defaultSampler.Get(),
+                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.bloomFinalTarget),
+                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
+                    self.frameUniformBuffers[fIdx].Handle()
+                );
 
-            Passes::BlitPass {}.Execute(
-                blitRecorder, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(blitInputImage), getSwapchainImage(), FullBright ? 1 : 0
-            );
-        });
+                Passes::BlitPass {}.Execute(
+                    blitRecorder, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(blitInputImage), getSwapchainImage(), FullBright ? 1 : 0
+                );
+            }
+        );
     }
 };
 
@@ -585,6 +589,7 @@ auto BuildFrameGraph(const PassFactory& factory, AALambdaT&& aaLambda, GetSwapch
         factory.template MakeBloomUpPass<0>()
     };
 
+    // --- REVERTED BACK TO YOUR ORIGINAL OPTIMIZED PIPELINE PATH ---
     auto tailPasses = [&] {
         if constexpr (Mode != AAMode::None) {
             return std::tuple {
@@ -758,12 +763,12 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
                 smaaBlendPass.Execute(c, metrics, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
             });
         } else {
+            // --- REVERTED BACK TO YOUR ORIGINAL OPTIMIZED PIPELINE PATH ---
             RunAAWritePass(
                 c, device, *this, blitPass, BlitPushConstants {.vignetteIntensity = 0.0f, .vignettePower = 0.0f, .fullBright = 0},
                 AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor), defaultSampler.Get(),
                 AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(graphResources.bloomFinalTarget),
-                AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
-                AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(graphResources.voxelIntegrated), frameUniformBuffers[fIdx].Handle()
+                AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT), frameUniformBuffers[fIdx].Handle()
             );
         }
     };

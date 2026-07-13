@@ -448,12 +448,11 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
             shadowCenter.SetY(std::round(shadowCenter.GetY() / texelSize) * texelSize);
             shadowCenter.SetZ(std::round(shadowCenter.GetZ() / texelSize) * texelSize);
 
-            // 3. Build the camera-centric shadow View-Projection matrices
-            JPH::Vec3  lightPos  = shadowCenter + sunDirection * 100.0f;
+            // --- USE CENTRALIZED SHADOW CONSTANTS ---
+            JPH::Vec3  lightPos  = shadowCenter + sunDirection * Shadows::FarOffset;
             JPH::Mat44 lightView = Math::CreateLookAt(lightPos, shadowCenter, JPH::Vec3::sAxisY());
 
-            // Orthographic projection bounding volume (adjust width/height based on clip distance)
-            JPH::Mat44 lightProj      = Math::CreateOrtho(-50.0f, 50.0f, -50.0f, 50.0f, 0.1f, 200.0f);
+            JPH::Mat44 lightProj      = Math::CreateOrtho(-50.0f, 50.0f, -50.0f, 50.0f, Shadows::NearClip, Shadows::FarDepth);
             JPH::Mat44 shadowProjView = lightProj * lightView;
             cam.shadowFrustum.Update(shadowProjView);
 
@@ -482,6 +481,8 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
             uniforms.ambientExposure = 5.0f;
             uniforms.jitterParams    = JPH::Vec4(s_AAState.jitterX, s_AAState.jitterY, s_AAState.prevJitterX, s_AAState.prevJitterY);
             uniforms.fullBright      = g_EditorState.fullBright ? 1 : 0;
+            uniforms.zScale          = 24.0f / std::log(1000.0f / 0.1f);
+            uniforms.zBias           = -(24.0f * std::log(0.1f)) / std::log(1000.0f / 0.1f);
 
             rc.SetAAState(s_AAState);
             Renderer::SetFrameData(rc, cam, uniforms, shadowProjView);
