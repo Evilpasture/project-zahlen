@@ -350,17 +350,19 @@ struct PassFactory {
     }
 
     [[nodiscard]] auto MakeVoxelScatteringPass() const noexcept {
-        return Vk::MakePass<"VoxelScatter", Vk::ComputeRead<Res_VoxelMedia>, Vk::ComputeWrite<Res_VoxelLight>>([this](VkCommandBuffer c) noexcept {
-            Profiler::ScopedGpuProfile<Stages::VolumetricScatterPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
-            self.volumetricScatteringPass.WriteNext(
-                device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.voxelMedia),
-                Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.voxelLight), self.frameUniformBuffers[fIdx].Handle(),
-                self.lightStorageBuffers[fIdx].Handle(), self.clusterGridBuffers[fIdx].Handle(), self.lightIndexListBuffers[fIdx].Handle(),
-                self.graphResources.shadowMap.view.Get(), self.shadowSampler.Get()
-            );
-            // Dispatch across all 64 Z slices
-            self.volumetricScatteringPass.Dispatch(c, 160 / 8, (90 + 7) / 8, 64);
-        });
+        return Vk::MakePass<"VoxelScatter", Vk::ComputeRead<Res_VoxelMedia>, Vk::ComputeWrite<Res_VoxelLight>, Vk::ComputeRead<Res_ShadowMap>>(
+            [this](VkCommandBuffer c) noexcept {
+                Profiler::ScopedGpuProfile<Stages::VolumetricScatterPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
+                self.volumetricScatteringPass.WriteNext(
+                    device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.voxelMedia),
+                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.voxelLight), self.frameUniformBuffers[fIdx].Handle(),
+                    self.lightStorageBuffers[fIdx].Handle(), self.clusterGridBuffers[fIdx].Handle(), self.lightIndexListBuffers[fIdx].Handle(),
+                    self.graphResources.shadowMap.view.Get(), self.shadowSampler.Get()
+                );
+                // Dispatch across all 64 Z slices
+                self.volumetricScatteringPass.Dispatch(c, 160 / 8, (90 + 7) / 8, 64);
+            }
+        );
     }
 
     [[nodiscard]] auto MakeVoxelIntegrationPass() const noexcept {
