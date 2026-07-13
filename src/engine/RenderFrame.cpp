@@ -652,7 +652,7 @@ void DispatchAAMode(Self& self, VkCommandBuffer cmd, AAMode mode, Args&&... args
 }
 } // namespace
 
-consteval std::string_view GetRenderGraphDump() noexcept {
+std::string_view GetRenderGraphDump() noexcept {
     auto dummyAA   = [](VkCommandBuffer, const auto&) noexcept {};
     auto dummySwap = []() noexcept -> Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> { return {}; };
 
