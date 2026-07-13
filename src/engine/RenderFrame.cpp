@@ -530,7 +530,6 @@ struct PassFactory {
         );
     }
 
-    // --- REVERTED BACK TO YOUR ORIGINAL OPTIMIZED PIPELINE PATH ---
     template <bool FullBright, AAMode Mode, typename GetSwapchainImageT>
     auto MakeBlitPass(GetSwapchainImageT&& getSwapchainImage) const noexcept {
         using enum AAMode;
@@ -589,7 +588,6 @@ auto BuildFrameGraph(const PassFactory& factory, AALambdaT&& aaLambda, GetSwapch
         factory.template MakeBloomUpPass<0>()
     };
 
-    // --- REVERTED BACK TO YOUR ORIGINAL OPTIMIZED PIPELINE PATH ---
     auto tailPasses = [&] {
         if constexpr (Mode != AAMode::None) {
             return std::tuple {
@@ -763,7 +761,6 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
                 smaaBlendPass.Execute(c, metrics, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
             });
         } else {
-            // --- REVERTED BACK TO YOUR ORIGINAL OPTIMIZED PIPELINE PATH ---
             RunAAWritePass(
                 c, device, *this, blitPass, BlitPushConstants {.vignetteIntensity = 0.0f, .vignettePower = 0.0f, .fullBright = 0},
                 AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor), defaultSampler.Get(),
