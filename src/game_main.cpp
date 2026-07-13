@@ -40,7 +40,6 @@
 #include <engine/system/InteractionSystem.hpp>
 #include <engine/system/UIInteractionSystem.hpp>
 #include <expected>
-#include <meta>
 #include <physics/PhysicsWorld.hpp>
 #include <print>
 #include <threading/Mutex.hpp>
