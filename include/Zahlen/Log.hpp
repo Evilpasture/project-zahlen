@@ -55,6 +55,10 @@ void Log(LogContext ctx, Args&&... args) {
     InternalWriteLog(static_cast<uint8_t>(Channel), ctx.loc.file_name(), ctx.loc.line(), formatted);
 }
 
+/*
+ * @brief ONLY USE FOR EXTREMELY EXCEPTIONAL CASES.
+ * Change return type to std::expected<void, Error> and return an error code.
+ */
 template <typename... Args>
 [[noreturn]] void Panic(LogContext ctx, Args&&... args) {
     std::string formatted = std::vformat(ctx.fmt, std::make_format_args(args...));
@@ -68,6 +72,9 @@ void PanicIf(bool condition, LogContext ctx, Args&&... args) {
     }
 }
 
+/*
+ * @brief Runtime assertion.
+ */
 template <typename... Args>
 inline void Assert(bool condition, LogContext ctx, Args&&... args) {
     if consteval {
