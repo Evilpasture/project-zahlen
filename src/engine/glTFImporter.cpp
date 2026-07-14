@@ -652,11 +652,18 @@ std::unordered_map<cgltf_image*, uint32_t> UploadTexturesToGPU(RenderContext& ct
     std::unordered_map<cgltf_image*, uint32_t> imageToBindlessIdx;
     for (auto& texJob: textureJobs) {
         if (texJob.decodedPixels != nullptr) {
-            uint32_t index = ctx.CreateTexture(texJob.decodedPixels, texJob.width, texJob.height, texJob.isSRGB);
+            auto tex_res = ctx.CreateTexture(texJob.decodedPixels, texJob.width, texJob.height, texJob.isSRGB);
             if (texJob.wasRescaled) {
                 std::free(texJob.decodedPixels);
             } else {
                 stbi_image_free(texJob.decodedPixels);
+            }
+
+            uint32_t index = 1; // Fallback to Solid White on failure
+            if (tex_res) {
+                index = tex_res.value();
+            } else {
+                Log("WARNING: UploadTexturesToGPU failed: {}. Falling back to default.", tex_res.error().Message());
             }
             imageToBindlessIdx[texJob.image] = index;
         } else {

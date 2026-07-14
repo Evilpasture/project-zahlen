@@ -120,9 +120,6 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
         .and_then([&]() {
             sync  = Vk::FrameSync<2>::Create(ctx.Device());
             pools = Vk::CommandPools<2>::Create(ctx.Device(), {.queueFamily = ctx.PhysicalInfo().graphics_family, .buffersPerPool = 1});
-
-            InitializeSystemTextures();
-
             return InitPostProcessing();
         })
         .and_then([&]() {
@@ -508,32 +505,30 @@ std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
 std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
     using enum Resource::ShaderID;
 
-    // 1. Initial side-effects: Descriptor sets & Buffer allocation
+    // 1. Initial side-effects: Descriptor sets allocation
     Vk::AllocateDoubleBufferedSet<CullingLayout>(ctx.Device(), cullingLayout, cullingPool, cullingSets);
 
-    for (int i = 0; i < 2; ++i) {
-        auto idb_res = Vk::Buffer::Create(
-            allocator.Get(), sizeof(InstanceData) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
-        );
-        if (!idb_res) {
-            return std::unexpected(idb_res.error());
-        }
-        instanceDataBuffers[i] = std::move(*idb_res);
-
-        auto icb_res = Vk::Buffer::Create(
-            allocator.Get(), sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
-            VMA_MEMORY_USAGE_GPU_ONLY
-        );
-        if (!icb_res) {
-            return std::unexpected(icb_res.error());
-        }
-        indirectCommandsBuffers[i] = std::move(*icb_res);
-
-        CullingLayout::Write(
-            ctx.Device(), cullingSets[i], Vk::BufferWrite {.buffer = instanceDataBuffers[i].Handle()},
-            Vk::BufferWrite {.buffer = indirectCommandsBuffers[i].Handle()}
-        );
-    }
+    auto make_instance_set = [&](uint32_t i) -> std::expected<void, Error> {
+        return Vk::Buffer::Create(
+                   allocator.Get(), sizeof(InstanceData) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
+        )
+            .transform_error([](VkResult res) -> Error { return res; })
+            .and_then([&, i](auto&& idb) { // Deduced as std::expected<Vk::Buffer, Error>
+                instanceDataBuffers[i] = std::forward<decltype(idb)>(idb);
+                return Vk::Buffer::Create(
+                           allocator.Get(), sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances,
+                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+                )
+                    .transform_error([](VkResult res) -> Error { return res; });
+            })
+            .transform([&, i](auto&& icb) -> void { // Transforms final Vk::Buffer to void
+                indirectCommandsBuffers[i] = std::forward<decltype(icb)>(icb);
+                CullingLayout::Write(
+                    ctx.Device(), cullingSets[i], Vk::BufferWrite {.buffer = instanceDataBuffers[i].Handle()},
+                    Vk::BufferWrite {.buffer = indirectCommandsBuffers[i].Handle()}
+                );
+            });
+    };
 
     constexpr uint32_t  kCullingPushSize = sizeof(float) * 4 * 6 + sizeof(uint32_t) * 4;
     VkPushConstantRange cullingPush      = {
@@ -544,53 +539,56 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
 
     auto cullingShader = Vk::CreateShaderDesc(Resource::culling_comp);
 
-    // 2. Start the monadic pipeline with the Compute Culling build
-    return cullingPass.Build(ctx.Device(), cullingLayout.Get(), cullingShader, &cullingPush, 1)
+    return make_instance_set(0)
+        .and_then([&]() { return make_instance_set(1); })
+        .and_then([&]() { return cullingPass.Build(ctx.Device(), cullingLayout.Get(), cullingShader, &cullingPush, 1); })
         .and_then([&]() -> std::expected<void, Error> {
             constexpr auto numClusters = static_cast<size_t>(16 * 9 * 24);
 
-            auto cbb_res = Vk::Buffer::Create(
-                allocator.Get(), sizeof(struct ClusterBounds) * numClusters, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                VMA_MEMORY_USAGE_GPU_ONLY
-            );
-            if (!cbb_res) {
-                return std::unexpected(cbb_res.error());
-            }
-            clusterBoundsBuffer = std::move(*cbb_res);
+            return Vk::Buffer::Create(
+                       allocator.Get(), sizeof(struct ClusterBounds) * numClusters, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                       VMA_MEMORY_USAGE_GPU_ONLY
+            )
+                .transform_error([](VkResult res) -> Error { return res; })
+                .and_then([&, numClusters](auto&& cbb) -> std::expected<void, Error> {
+                    clusterBoundsBuffer = std::forward<decltype(cbb)>(cbb);
+                    Vk::AllocateDoubleBufferedSet<ClusterCullingLayout>(ctx.Device(), clusterCullingDescLayout, clusterCullingPool, clusterCullingSets);
 
-            Vk::AllocateDoubleBufferedSet<ClusterCullingLayout>(ctx.Device(), clusterCullingDescLayout, clusterCullingPool, clusterCullingSets);
+                    auto make_cluster_set = [&](uint32_t i) -> std::expected<void, Error> {
+                        return Vk::Buffer::Create(
+                                   allocator.Get(), sizeof(ClusterVolume) * numClusters, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+                        )
+                            .transform_error([](VkResult res) -> Error { return res; })
+                            .and_then([&, i](auto&& cgb) { // Deduced as std::expected<Vk::Buffer, Error>
+                                clusterGridBuffers[i] = std::forward<decltype(cgb)>(cgb);
+                                return Vk::Buffer::Create(
+                                           allocator.Get(), sizeof(uint32_t) * numClusters * 64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+                                )
+                                    .transform_error([](VkResult res) -> Error { return res; });
+                            })
+                            .and_then([&, i](auto&& lsb) { // Deduced as std::expected<Vk::Buffer, Error>
+                                lightIndexListBuffers[i] = std::forward<decltype(lsb)>(lsb);
+                                return Vk::Buffer::Create(
+                                           allocator.Get(), sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                           VMA_MEMORY_USAGE_GPU_ONLY
+                                )
+                                    .transform_error([](VkResult res) -> Error { return res; });
+                            })
+                            .transform([&, i](auto&& gcb) -> void { // Transforms final Vk::Buffer to void
+                                globalCounterBuffers[i] = std::forward<decltype(gcb)>(gcb);
+                                ClusterCullingLayout::Write(
+                                    ctx.Device(), clusterCullingSets[i], Vk::BufferWrite {.buffer = clusterBoundsBuffer.Handle()},
+                                    Vk::BufferWrite {.buffer = clusterGridBuffers[i].Handle()}, Vk::BufferWrite {.buffer = lightIndexListBuffers[i].Handle()},
+                                    Vk::BufferWrite {.buffer = globalCounterBuffers[i].Handle()}, Vk::BufferWrite {.buffer = frameUniformBuffers[i].Handle()},
+                                    Vk::BufferWrite {.buffer = lightStorageBuffers[i].Handle()}
+                                );
+                            });
+                    };
 
-            for (int i = 0; i < 2; ++i) {
-                auto cgb_res =
-                    Vk::Buffer::Create(allocator.Get(), sizeof(ClusterVolume) * numClusters, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-                if (!cgb_res) {
-                    return std::unexpected(cgb_res.error());
-                }
-                clusterGridBuffers[i] = std::move(*cgb_res);
-
-                auto lsb_res =
-                    Vk::Buffer::Create(allocator.Get(), sizeof(uint32_t) * numClusters * 64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-                if (!lsb_res) {
-                    return std::unexpected(lsb_res.error());
-                }
-                lightIndexListBuffers[i] = std::move(*lsb_res);
-
-                auto gcb_res = Vk::Buffer::Create(
-                    allocator.Get(), sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY
-                );
-                if (!gcb_res) {
-                    return std::unexpected(gcb_res.error());
-                }
-                globalCounterBuffers[i] = std::move(*gcb_res);
-
-                ClusterCullingLayout::Write(
-                    ctx.Device(), clusterCullingSets[i], Vk::BufferWrite {.buffer = clusterBoundsBuffer.Handle()},
-                    Vk::BufferWrite {.buffer = clusterGridBuffers[i].Handle()}, Vk::BufferWrite {.buffer = lightIndexListBuffers[i].Handle()},
-                    Vk::BufferWrite {.buffer = globalCounterBuffers[i].Handle()}, Vk::BufferWrite {.buffer = frameUniformBuffers[i].Handle()},
-                    Vk::BufferWrite {.buffer = lightStorageBuffers[i].Handle()}
-                );
-            }
-
+                    return make_cluster_set(0).and_then([&, make_cluster_set]() { return make_cluster_set(1); });
+                });
+        })
+        .and_then([&]() {
             auto bDesc = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterBounds).vertex);
             return clusterBoundsPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), bDesc);
         })
@@ -603,51 +601,50 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                 ZHLN_AccelerationStructureSizes tlasSizes;
                 rtCtx.GetTlasSizes(kGpuCullingMaxInstances, tlasSizes);
 
-                for (int i = 0; i < 2; ++i) {
-                    auto tb_res = Vk::Buffer::Create(
-                        allocator.Get(), tlasSizes.acceleration_structure_size,
-                        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
-                    );
-                    if (!tb_res) {
-                        return std::unexpected(tb_res.error());
-                    }
-                    tlasBuffer[i] = std::move(*tb_res);
+                auto make_tlas_set = [&](uint32_t i) -> std::expected<void, Error> {
+                    return Vk::Buffer::Create(
+                               allocator.Get(), tlasSizes.acceleration_structure_size,
+                               VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+                    )
+                        .transform_error([](VkResult res) -> Error { return res; })
+                        .and_then([&, i, tlasSizes](auto&& tb) { // Deduced as std::expected<Vk::Buffer, Error>
+                            tlasBuffer[i] = std::forward<decltype(tb)>(tb);
+                            return Vk::Buffer::Create(
+                                       allocator.Get(), tlasSizes.build_scratch_size,
+                                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+                            )
+                                .transform_error([](VkResult res) -> Error { return res; });
+                        })
+                        .and_then([&, i, tlasSizes](auto&& tsb) { // Deduced as std::expected<Vk::Buffer, Error>
+                            tlasScratchBuffer[i] = std::forward<decltype(tsb)>(tsb);
+                            tlas[i]              = rtCtx.CreateAS(tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL);
 
-                    auto tsb_res = Vk::Buffer::Create(
-                        allocator.Get(), tlasSizes.build_scratch_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                        VMA_MEMORY_USAGE_GPU_ONLY
-                    );
-                    if (!tsb_res) {
-                        return std::unexpected(tsb_res.error());
-                    }
-                    tlasScratchBuffer[i] = std::move(*tsb_res);
+                            return Vk::Buffer::Create(
+                                       allocator.Get(), sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances,
+                                       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                           VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                       VMA_MEMORY_USAGE_GPU_ONLY
+                            )
+                                .transform_error([](VkResult res) -> Error { return res; });
+                        })
+                        .and_then([&, i](auto&& tib) { // Deduced as std::expected<Vk::Buffer, Error>
+                            tlasInstanceBuffers[i] = std::forward<decltype(tib)>(tib);
+                            return Vk::Buffer::Create(
+                                       allocator.Get(), sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                       VMA_MEMORY_USAGE_CPU_ONLY
+                            )
+                                .transform_error([](VkResult res) -> Error { return res; });
+                        })
+                        .transform([&, i](auto&& tstb) -> void { // Transforms final Vk::Buffer to void
+                            tlasStagingBuffers[i] = std::forward<decltype(tstb)>(tstb);
+                        });
+                };
 
-                    tlas[i] = rtCtx.CreateAS(tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL);
-
-                    auto tib_res = Vk::Buffer::Create(
-                        allocator.Get(), sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances,
-                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                        VMA_MEMORY_USAGE_GPU_ONLY
-                    );
-                    if (!tib_res) {
-                        return std::unexpected(tib_res.error());
-                    }
-                    tlasInstanceBuffers[i] = std::move(*tib_res);
-
-                    auto tstb_res = Vk::Buffer::Create(
-                        allocator.Get(), sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                        VMA_MEMORY_USAGE_CPU_ONLY
-                    );
-                    if (!tstb_res) {
-                        return std::unexpected(tstb_res.error());
-                    }
-                    tlasStagingBuffers[i] = std::move(*tstb_res);
-                }
+                return make_tlas_set(0).and_then([&, make_tlas_set]() { return make_tlas_set(1); });
             }
-
-            return BuildSkinningPipeline();
+            return {};
         })
+        .and_then([&]() { return BuildSkinningPipeline(); })
         .transform([&]() {
             if constexpr (isDev) {
                 RegisterShaderWatcher(SHADER_SKINNING_HLSL_CS_PATH, [this]() {
@@ -680,13 +677,11 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
                 .ClampToEdge()
                 .Build(ctx.Device())
                 .transform_error([](auto err) -> Error { return err; })
-                .and_then([&](auto&& clampRes) -> std::expected<void, Error> {
-                    clampSampler = std::forward<decltype(clampRes)>(clampRes);
-                    return {};
-                });
+                .transform([&](auto&& clampRes) { clampSampler = std::forward<decltype(clampRes)>(clampRes); });
         })
         .and_then([&]() -> std::expected<void, Error> { return InitSkeletalAnimationResources(); })
         .and_then([&]() -> std::expected<void, Error> { return InitLightingLUTs(); })
+        .and_then([&]() -> std::expected<void, Error> { return InitializeSystemTextures(); })
         .and_then([&]() -> std::expected<void, Error> {
             ZHLN::Log("[RenderInit] Pre-allocating persistently mapped Double-Buffered Debug VBOs...");
             size_t maxDebugVerts = 500000;
@@ -986,13 +981,20 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
             );
         })
         .and_then([&]() { return register_and_check("Blit", [this]() { return BuildBlitPipeline(); }, {SHADER_BLIT_HLSL_VS_PATH, SHADER_BLIT_HLSL_PS_PATH}); })
-        .transform([&]() {
+        // CHANGED: Converted to .and_then to handle expected texture allocations monadically
+        .and_then([&]() -> std::expected<void, Error> {
             ZHLN::Array<uint32_t> smaaAreaPixels(static_cast<size_t>(160 * 560));
             ZHLN::PBR::FillSmaaAreaTex(smaaAreaPixels);
             ZHLN::Array<uint32_t> smaaSearchPixels(static_cast<size_t>(64 * 16));
             ZHLN::PBR::FillSmaaSearchTex(smaaSearchPixels);
-            smaaAreaTexIdx   = CreateTextureInternal(smaaAreaPixels.data(), 160, 560, false);
-            smaaSearchTexIdx = CreateTextureInternal(smaaSearchPixels.data(), 64, 16, false);
+
+            return CreateTextureInternal(smaaAreaPixels.data(), 160, 560, false)
+                .and_then([&, smaaSearchPixels](uint32_t areaIdx) -> std::expected<void, Error> {
+                    smaaAreaTexIdx = areaIdx;
+                    return CreateTextureInternal(smaaSearchPixels.data(), 64, 16, false).transform([&](uint32_t searchIdx) -> void {
+                        smaaSearchTexIdx = searchIdx;
+                    });
+                });
         });
 }
 

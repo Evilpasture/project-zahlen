@@ -881,13 +881,13 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, Error> InitPostProcessing();
     [[nodiscard]] std::expected<void, Error> SetupUI(GLFWwindow* window);
 
-    uint32_t CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB);
-    uint32_t CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height);
+    [[nodiscard]] auto CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, Error>;
+    [[nodiscard]] auto CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, Error>;
 
     std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, VkResult> CreateGPUBuffer(size_t size, const void* data, VkBufferUsageFlags functionalUsage) const;
 
-    void SortDrawQueue();
-    void InitializeSystemTextures();
+    void               SortDrawQueue();
+    [[nodiscard]] auto InitializeSystemTextures() noexcept -> std::expected<void, Error>;
 
     template <bool FullBright>
     void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd);

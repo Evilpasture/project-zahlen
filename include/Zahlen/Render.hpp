@@ -72,14 +72,13 @@ class ZHLN_API RenderContext {
     auto                                         CreateConstantBuffer(size_t size) -> BufferHandle;
     [[nodiscard]] std::expected<Material, Error> CreateMaterial(const PipelineDesc& desc);
 
-    auto CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true) -> uint32_t;
     auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;
 
     void                       UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept;
     [[nodiscard]] BufferHandle GetDebugMeshBuffer() const noexcept;
 
-    // --- NEW: Declare CreateTextureCube (Switched from std::vector to raw pointer) ---
-    auto CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height) -> uint32_t;
+    [[nodiscard]] auto CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true) -> std::expected<uint32_t, Error>;
+    [[nodiscard]] auto CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, Error>;
 
     // Dynamic CPU-to-GPU Joint Matrix transfer hook
     void UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices, uint32_t count);

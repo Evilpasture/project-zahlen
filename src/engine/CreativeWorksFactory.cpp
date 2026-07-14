@@ -98,7 +98,12 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
         rgbaPixels[i] = (static_cast<uint32_t>(alpha) << 24) | 0x00FFFFFF; // Transparent white
     }
 
-    uint32_t texIdx = ctx.CreateTexture(rgbaPixels.data(), atlasSize, atlasSize, false); // Linear sampling
+    auto tex_res = ctx.CreateTexture(rgbaPixels.data(), atlasSize, atlasSize, false);
+    if (!tex_res) {
+        Log("ERROR: CreateFontAtlasTexture failed to create Vulkan texture: {}", tex_res.error().Message());
+        return 0;
+    }
+    uint32_t texIdx = tex_res.value();
 
     // Convert Jolt/C++ structures
     for (uint32_t i = 0; i < 96; ++i) {
@@ -174,7 +179,7 @@ Mesh LoadCookedMesh(RenderContext& ctx, [[maybe_unused]] CreativeWorksManager& a
     }
 }
 
-uint32_t LoadCookedTexture(RenderContext& ctx, [[maybe_unused]] CreativeWorksManager& assetMgr, std::string_view virtualPath) {
+uint32_t LoadCookedTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view virtualPath) {
     if constexpr (isDev) {
         std::string rawPath = "resources/assets/" + std::string(virtualPath);
 
@@ -187,9 +192,14 @@ uint32_t LoadCookedTexture(RenderContext& ctx, [[maybe_unused]] CreativeWorksMan
             return 0;
         }
 
-        uint32_t textureIndex = ctx.CreateTexture(pixels, width, height);
+        auto tex_res = ctx.CreateTexture(pixels, width, height);
         stbi_image_free(pixels);
-        return textureIndex;
+
+        if (!tex_res) {
+            Log("ERROR: LoadCookedTexture failed to create Vulkan texture in dev mode: {}", tex_res.error().Message());
+            return 0;
+        }
+        return tex_res.value();
     } else {
         CreativeWorkLoadRequest req;
         req.assetID = HashCreativeWorkPath(virtualPath);
@@ -210,11 +220,16 @@ uint32_t LoadCookedTexture(RenderContext& ctx, [[maybe_unused]] CreativeWorksMan
             return 0;
         }
 
-        uint32_t textureIndex = ctx.CreateTexture(pixels, width, height);
-
+        auto tex_res = ctx.CreateTexture(pixels, width, height);
         stbi_image_free(pixels);
         assetMgr.FreeCreativeWorkMemory(req);
 
+        if (!tex_res) {
+            Log("ERROR: LoadCookedTexture failed to create Vulkan texture: {}", tex_res.error().Message());
+            return 0;
+        }
+
+        uint32_t textureIndex = tex_res.value();
         Log("Loaded Cooked Texture: {} (Bindless Index: {})", virtualPath, textureIndex);
         return textureIndex;
     }

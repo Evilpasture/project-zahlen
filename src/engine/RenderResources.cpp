@@ -195,7 +195,15 @@ void RenderContext::Impl::CheckShaderWatchers() noexcept {
     }
 }
 
-auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> uint32_t {
+auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, Error> {
+    return _impl->CreateTextureInternal(data, width, height, isSRGB);
+}
+
+auto RenderContext::CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, Error> {
+    return _impl->CreateTextureCubeInternal(faceData, width, height);
+}
+
+std::expected<uint32_t, Error> RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) {
     auto* const  device    = ctx.Device();
     const size_t imageSize = static_cast<size_t>(width) * height * 4;
     uint32_t     mipLevels = std::bit_width(std::max(width, height));
@@ -203,86 +211,78 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
     VkFormat          format = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
     VkImageUsageFlags usage  = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
-    // CHANGED: Unwrap the std::expected result returned by ImageBuilder::Build
-    auto img_res = Vk::ImageBuilder {}.Texture2D(width, height, format, usage, mipLevels).Build(allocator.Get());
-    if (!img_res.has_value()) {
-        ZHLN::Log("ERROR: CreateTextureInternal failed to allocate image. VkResult: {}", (int) img_res.error());
-        return 1; // Fallback to Solid White (Index 1)
-    }
-    auto gpuImage = std::move(img_res.value());
+    return Vk::ImageBuilder {}
+        .Texture2D(width, height, format, usage, mipLevels)
+        .Build(allocator.Get())
+        .transform_error([](VkResult res) -> Error { return res; })
+        .and_then([&, device, width, height, isSRGB, mipLevels, data, imageSize](auto&& gpuImage) -> std::expected<uint32_t, Error> {
+            auto stagingAlloc = stagingRingBuffer.Allocate(imageSize);
+            std::memcpy(stagingAlloc.mappedData, data, imageSize);
 
-    // Textures are bound back to the graphics queue staging buffer (Safe blitting & stages)
-    auto stagingAlloc = stagingRingBuffer.Allocate(imageSize);
-    std::memcpy(stagingAlloc.mappedData, data, imageSize);
+            Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, gpuImage.Handle());
 
-    Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, gpuImage.Handle());
+                Vk::CopyBufferToImage(
+                    cmd, {.buffer           = stagingAlloc.buffer,
+                          .image            = gpuImage.Handle(),
+                          .layout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                          .width            = width,
+                          .height           = height,
+                          .buffer_offset    = stagingAlloc.offset,
+                          .mip_level        = 0,
+                          .base_array_layer = 0}
+                );
 
-        Vk::CopyBufferToImage(
-            cmd, {.buffer           = stagingAlloc.buffer,
-                  .image            = gpuImage.Handle(),
-                  .layout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                  .width            = width,
-                  .height           = height,
-                  .buffer_offset    = stagingAlloc.offset,
-                  .mip_level        = 0,
-                  .base_array_layer = 0}
-        );
+                Vk::GenerateMipmaps(cmd, gpuImage.Handle(), width, height);
+            });
 
-        Vk::GenerateMipmaps(cmd, gpuImage.Handle(), width, height);
-    });
+            auto gpuView = isSRGB ? Vk::CreateView<VK_FORMAT_R8G8B8A8_SRGB>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels) :
+                                    Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
 
-    auto gpuView = isSRGB ? Vk::CreateView<VK_FORMAT_R8G8B8A8_SRGB>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels) :
-                            Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
+            uint32_t index = nextTextureIndex++;
+            Vk::UpdateBindlessTextureSlot(device, index, gpuView.Get(), bindlessSets, 0);
 
-    uint32_t index = nextTextureIndex++;
-    Vk::UpdateBindlessTextureSlot(device, index, gpuView.Get(), bindlessSets, 0);
-    textureImages.push_back(std::move(gpuImage));
-    textureViews.push_back(std::move(gpuView));
+            textureImages.push_back(std::forward<decltype(gpuImage)>(gpuImage));
+            textureViews.push_back(std::move(gpuView));
 
-    return index;
+            return index;
+        });
 }
 
-uint32_t RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height) {
+std::expected<uint32_t, Error> RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height) {
     auto* const       device   = ctx.Device();
     const size_t      faceSize = static_cast<size_t>(width) * height * 4;
     VkImageUsageFlags usage    = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
-    // CHANGED: Unwrap the std::expected result returned by ImageBuilder::Build
-    auto img_res = Vk::ImageBuilder {}.TextureCube(width, VK_FORMAT_R8G8B8A8_UNORM, usage, 1).Build(allocator.Get());
-    if (!img_res.has_value()) {
-        ZHLN::Log("ERROR: CreateTextureCubeInternal failed to allocate image. VkResult: {}", (int) img_res.error());
-        return 1; // Fallback to Solid White (Index 1)
-    }
-    auto gpuImage = std::move(img_res.value());
+    return Vk::ImageBuilder {}
+        .TextureCube(width, VK_FORMAT_R8G8B8A8_UNORM, usage, 1)
+        .Build(allocator.Get())
+        .transform_error([](VkResult res) -> Error { return res; })
+        .and_then([&, device, width, height, faceData, faceSize](auto&& gpuImage) -> std::expected<uint32_t, Error> {
+            auto stagingAlloc = stagingRingBuffer.Allocate(faceSize * 6);
+            for (uint32_t i = 0; i < 6; ++i) {
+                std::memcpy(static_cast<char*>(stagingAlloc.mappedData) + (i * faceSize), faceData[i], faceSize);
+            }
 
-    // Textures are bound back to the graphics queue staging buffer (Safe blitting & stages)
-    auto stagingAlloc = stagingRingBuffer.Allocate(faceSize * 6);
-    for (uint32_t i = 0; i < 6; ++i) {
-        std::memcpy(static_cast<char*>(stagingAlloc.mappedData) + (i * faceSize), faceData[i], faceSize);
-    }
+            Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, gpuImage.Handle());
 
-    Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, gpuImage.Handle());
+                auto regions = Vk::CreateCopyRegions<6>(stagingAlloc.offset, faceSize, {.width = width, .height = height, .depth = {}});
+                Vk::CopyBufferToImage(cmd, stagingAlloc.buffer, gpuImage.Handle(), regions);
 
-        // Generate the 6 cubemap regions on the stack (zero-overhead compile-time loop)
-        auto regions = Vk::CreateCopyRegions<6>(stagingAlloc.offset, faceSize, {.width = width, .height = height, .depth = {}});
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
+            });
 
-        // Dispatch the copy using the new type-safe overload
-        Vk::CopyBufferToImage(cmd, stagingAlloc.buffer, gpuImage.Handle(), regions);
+            auto gpuView = Vk::CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), 1);
 
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
-    });
+            uint32_t index = nextTextureIndex++;
+            Vk::UpdateBindlessTextureSlot(device, index, gpuView.Get(), bindlessSets, 0);
 
-    auto gpuView = Vk::CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), 1);
+            textureImages.push_back(std::forward<decltype(gpuImage)>(gpuImage));
+            textureViews.push_back(std::move(gpuView));
 
-    uint32_t index = nextTextureIndex++;
-    Vk::UpdateBindlessTextureSlot(device, index, gpuView.Get(), bindlessSets, 0);
-
-    textureImages.push_back(std::move(gpuImage));
-    textureViews.push_back(std::move(gpuView));
-
-    return index;
+            return index;
+        });
 }
 
 std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, VkResult>
@@ -324,14 +324,6 @@ std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, VkResult>
         VkDeviceAddress address = Vk::GetBufferAddress(ctx.Device(), gpu_buf.Handle());
         return std::make_pair(std::forward<decltype(gpu_buf)>(gpu_buf), address);
     });
-}
-
-auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> uint32_t {
-    return _impl->CreateTextureInternal(data, width, height, isSRGB);
-}
-
-auto RenderContext::CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height) -> uint32_t {
-    return _impl->CreateTextureCubeInternal(faceData, width, height);
 }
 
 auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle {
@@ -542,22 +534,24 @@ RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
         });
 }
 
-void RenderContext::Impl::InitializeSystemTextures() {
+std::expected<void, Error> RenderContext::Impl::InitializeSystemTextures() noexcept {
     ZHLN::Log("[Resource Factory] Registering fallback system texture slots...");
 
-    std::array<uint8_t, 4> blackPixel = {0, 0, 0, 0};
-    uint32_t               blackIdx   = CreateTextureInternal(blackPixel.data(), 1, 1, false);
-
-    std::array<uint8_t, 4> whitePixel = {255, 255, 255, 255};
-    uint32_t               whiteIdx   = CreateTextureInternal(whitePixel.data(), 1, 1, true);
-
+    std::array<uint8_t, 4> blackPixel  = {0, 0, 0, 0};
+    std::array<uint8_t, 4> whitePixel  = {255, 255, 255, 255};
     std::array<uint8_t, 4> normalPixel = {128, 128, 255, 255};
-    uint32_t               normalIdx   = CreateTextureInternal(normalPixel.data(), 1, 1, false);
 
-    ZHLN::Assert(
-        blackIdx == 0 && whiteIdx == 1 && normalIdx == 2, "System textures allocated out of order! Expected [0, 1, 2], got [{}, {}, {}]", blackIdx, whiteIdx,
-        normalIdx
-    );
+    return CreateTextureInternal(blackPixel.data(), 1, 1, false).and_then([&, whitePixel, normalPixel](uint32_t blackIdx) -> std::expected<void, Error> {
+        return CreateTextureInternal(whitePixel.data(), 1, 1, true).and_then([&, blackIdx, normalPixel](uint32_t whiteIdx) -> std::expected<void, Error> {
+            return CreateTextureInternal(normalPixel.data(), 1, 1, false).and_then([&, blackIdx, whiteIdx](uint32_t normalIdx) -> std::expected<void, Error> {
+                // Verify sequential bindless indices to prevent runtime offset issues
+                if (blackIdx != 0 || whiteIdx != 1 || normalIdx != 2) {
+                    return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+                }
+                return {};
+            });
+        });
+    });
 }
 
 void RenderContext::Impl::RegisterShaderWatcher(const char* path, std::function<void()> callback) {
