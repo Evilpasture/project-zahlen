@@ -34,14 +34,21 @@ void StagingContext::Begin() {
     ZHLN_BeginCommandBuffer(_cmd);
 }
 
-void StagingContext::UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, const void* data, size_t bytes) {
-    Buffer staging = Buffer::Create(_allocator->Get(), bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
-    if (auto mapped = staging.Map(); mapped.data) {
-        std::memcpy(mapped.data, data, bytes);
-    }
+auto StagingContext::UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, const void* data, size_t bytes) noexcept
+    -> std::expected<void, VkResult> {
+    return Buffer::Create(_allocator->Get(), bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY)
+        .and_then([&, dstImage, w, h, mipLevels, data, bytes](auto&& staging) -> std::expected<void, VkResult> {
+            auto mapped = staging.Map();
+            if (mapped.data != nullptr) {
+                std::memcpy(mapped.data, data, bytes);
+            } else {
+                return std::unexpected(VK_ERROR_MEMORY_MAP_FAILED);
+            }
 
-    UploadImage2DBuffer(dstImage, w, h, mipLevels, staging.Handle(), 0);
-    _stagingBuffers.push_back(std::move(staging));
+            UploadImage2DBuffer(dstImage, w, h, mipLevels, staging.Handle(), 0);
+            _stagingBuffers.push_back(std::forward<decltype(staging)>(staging));
+            return {};
+        });
 }
 
 void StagingContext::UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, VkBuffer stagingBuf, VkDeviceSize offset) {

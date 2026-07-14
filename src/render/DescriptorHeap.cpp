@@ -109,13 +109,14 @@ auto DescriptorHeap::Init(const Context& ctx, Allocator& allocator, DescriptorHe
 
     const VkDeviceSize total_bytes = _stride * _capacity;
 
-    _buffer = Buffer::Create(
+    auto buffer_res = Buffer::Create(
         allocator.Get(), total_bytes, VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
     );
 
-    if (!_buffer.Valid()) {
+    if (!buffer_res.has_value()) {
         return false;
     }
+    _buffer = std::move(*buffer_res);
 
     _mappedRegion  = _buffer.Map();
     _mappedPtr     = _mappedRegion.data;

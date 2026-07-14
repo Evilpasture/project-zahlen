@@ -97,13 +97,19 @@ void RenderContext::SetResolution([[maybe_unused]] const Extent2D& res) {
 }
 
 auto RenderContext::CreateVertexBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
-    auto [gpu_buf, address] = _impl->CreateGPUBuffer(size, data, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-    return _impl->meshPool.Create(std::move(gpu_buf), static_cast<uint32_t>(size / stride), address);
+    return _impl->CreateGPUBuffer(size, data, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
+        .transform([this, size, stride](auto&& pair) {
+            return _impl->meshPool.Create(std::move(pair.first), static_cast<uint32_t>(size / stride), pair.second);
+        })
+        .value_or(BufferHandle::Invalid);
 }
 
 auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHandle {
-    auto [gpu_buf, address] = _impl->CreateGPUBuffer(size, data, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
-    return _impl->meshPool.Create(std::move(gpu_buf), static_cast<uint32_t>(size / sizeof(uint32_t)), address);
+    return _impl->CreateGPUBuffer(size, data, VK_BUFFER_USAGE_INDEX_BUFFER_BIT)
+        .transform([this, size](auto&& pair) {
+            return _impl->meshPool.Create(std::move(pair.first), static_cast<uint32_t>(size / sizeof(uint32_t)), pair.second);
+        })
+        .value_or(BufferHandle::Invalid);
 }
 
 void RenderContext::DestroyBuffer(BufferHandle handle) {
@@ -269,7 +275,8 @@ uint32_t RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceD
     return index;
 }
 
-auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data, VkBufferUsageFlags functionalUsage) const -> std::pair<Vk::Buffer, VkDeviceAddress> {
+std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, VkResult>
+    RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data, VkBufferUsageFlags functionalUsage) const {
     VkBufferUsageFlags usage = functionalUsage | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 
     if (rtCtx.Valid()) {
@@ -278,34 +285,35 @@ auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data, VkBuffe
 
     bool diffQueue = ctx.PhysicalInfo().graphics_family != ctx.PhysicalInfo().transfer_family;
 
-    auto gpu_buf = Vk::Buffer::Create(allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY);
+    return Vk::Buffer::Create(allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY).transform([&, size, data, diffQueue](auto&& gpu_buf) {
+        auto stagingAlloc = transferRingBuffer.Allocate(size);
+        std::memcpy(stagingAlloc.mappedData, data, size);
 
-    auto stagingAlloc = transferRingBuffer.Allocate(size);
-    std::memcpy(stagingAlloc.mappedData, data, size);
+        Vk::ExecuteImmediate<Vk::QueueType::Transfer>(ctx, transferCmdRing, transferRingBuffer, [&](VkCommandBuffer cmd) {
+            Vk::CopyRingBuffer(cmd, stagingAlloc, gpu_buf, size);
+            if (diffQueue) {
+                auto [release, acquire] = Vk::BufferQueueBarrier::Create(
+                    {.buffer           = gpu_buf.Handle(),
+                     .size             = size,
+                     .src_queue_family = ctx.PhysicalInfo().transfer_family,
+                     .dst_queue_family = ctx.PhysicalInfo().graphics_family,
+                     .src_stage        = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                     .src_access       = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                     .dst_stage        = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                     .dst_access       = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT}
+                );
 
-    Vk::ExecuteImmediate<Vk::QueueType::Transfer>(ctx, transferCmdRing, transferRingBuffer, [&](VkCommandBuffer cmd) {
-        Vk::CopyRingBuffer(cmd, stagingAlloc, gpu_buf, size);
-        if (diffQueue) {
-            auto [release, acquire] = Vk::BufferQueueBarrier::Create(
-                {.buffer           = gpu_buf.Handle(),
-                 .size             = size,
-                 .src_queue_family = ctx.PhysicalInfo().transfer_family,
-                 .dst_queue_family = ctx.PhysicalInfo().graphics_family,
-                 .src_stage        = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                 .src_access       = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                 .dst_stage        = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                 .dst_access       = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT}
-            );
+                Vk::BufferBarrier(cmd, release);
 
-            Vk::BufferBarrier(cmd, release);
-
-            ZHLN_LOCK(pendingAcquires.mutex) {
-                pendingAcquires.buffers.push_back(acquire);
+                ZHLN_LOCK(pendingAcquires.mutex) {
+                    pendingAcquires.buffers.push_back(acquire);
+                }
             }
-        }
-    });
+        });
 
-    return {std::move(gpu_buf), Vk::GetBufferAddress(ctx.Device(), gpu_buf.Handle())};
+        VkDeviceAddress address = Vk::GetBufferAddress(ctx.Device(), gpu_buf.Handle());
+        return std::make_pair(std::forward<decltype(gpu_buf)>(gpu_buf), address);
+    });
 }
 
 auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> uint32_t {
@@ -323,10 +331,13 @@ auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHa
     if (_impl->rtCtx.Valid()) {
         usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
     }
-    auto gpu_buf = Vk::Buffer::Create(_impl->allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY);
 
-    VkDeviceAddress address = Vk::GetBufferAddress(_impl->ctx.Device(), gpu_buf.Handle());
-    return _impl->meshPool.Create(std::move(gpu_buf), vertexCount, address);
+    return Vk::Buffer::Create(_impl->allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY)
+        .transform([this, vertexCount](auto&& gpu_buf) {
+            VkDeviceAddress address = Vk::GetBufferAddress(_impl->ctx.Device(), gpu_buf.Handle());
+            return _impl->meshPool.Create(std::forward<decltype(gpu_buf)>(gpu_buf), vertexCount, address);
+        })
+        .value_or(BufferHandle::Invalid);
 }
 
 void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept {
@@ -459,28 +470,31 @@ RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
 
             impl->rtCtx.GetBlasSizes(b.geom, b.primitiveCount, b.sizes);
 
-            b.blasBuffer = Vk::Buffer::Create(
-                impl->allocator.Get(), b.sizes.acceleration_structure_size,
-                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
-            );
-            if (!b.blasBuffer.Valid()) {
-                return std::unexpected(VulkanCallError::VulkanCallFailed);
-            }
-            return b;
+            return Vk::Buffer::Create(
+                       impl->allocator.Get(), b.sizes.acceleration_structure_size,
+                       VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+            )
+                .transform_error([](VkResult res) -> Error { return {res}; })
+                .transform([b = std::move(b)](auto&& buffer) mutable {
+                    b.blasBuffer = std::forward<decltype(buffer)>(buffer);
+                    return std::move(b); // <-- Explicitly move to trigger the move constructor
+                });
         })
         .and_then([&](BuildContext b) -> std::expected<BuildContext, Error> {
             b.blas = impl->rtCtx.CreateAS(b.blasBuffer.Handle(), b.sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL);
             if (b.blas == VK_NULL_HANDLE) {
                 return std::unexpected(VulkanCallError::VulkanCallFailed);
             }
-            b.scratch = Vk::Buffer::Create(
-                impl->allocator.Get(), b.sizes.build_scratch_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                VMA_MEMORY_USAGE_GPU_ONLY
-            );
-            if (!b.scratch.Valid()) {
-                return std::unexpected(VulkanCallError::VulkanCallFailed);
-            }
-            return b;
+
+            return Vk::Buffer::Create(
+                       impl->allocator.Get(), b.sizes.build_scratch_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                       VMA_MEMORY_USAGE_GPU_ONLY
+            )
+                .transform_error([](VkResult res) -> Error { return {res}; })
+                .transform([b = std::move(b)](auto&& buffer) mutable {
+                    b.scratch = std::forward<decltype(buffer)>(buffer);
+                    return std::move(b); // <-- Explicitly move to trigger the move constructor
+                });
         })
         .and_then([&](BuildContext b) -> std::expected<void, Error> {
             Vk::CommandPool<Vk::QueueType::Graphics> tempPool(impl->ctx.Device(), impl->ctx.PhysicalInfo().graphics_family);

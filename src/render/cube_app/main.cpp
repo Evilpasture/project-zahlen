@@ -202,10 +202,10 @@ auto main() -> int {
                             .mipLevels     = 1,
                             .arrayLayers   = 1,
                             .samples       = VK_SAMPLE_COUNT_1_BIT,
-                            .tiling        = VK_IMAGE_TILING_OPTIMAL,
-                            .usage         = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                            .sharingMode   = VK_SHARING_MODE_EXCLUSIVE,
-                            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                            .tiling                = VK_IMAGE_TILING_OPTIMAL,
+                            .usage                 = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                            .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
+                            .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
                         };
 
                         ZHLN::Vk::Image cube_texture_image = ZHLN::Vk::Image::Create(allocator.Get(), tex_info, VMA_MEMORY_USAGE_GPU_ONLY);
@@ -221,8 +221,12 @@ auto main() -> int {
                         VkCommandBuffer setup_cmd = setup_pool[0];
                         ZHLN_BeginCommandBuffer(setup_cmd);
 
-                        ZHLN::Vk::Buffer staging_buffer =
-                            ZHLN::Vk::Buffer::Create(allocator.Get(), cube_pixels.size() * sizeof(uint32_t), VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+                        auto staging_buffer_res = ZHLN::Vk::Buffer::Create(allocator.Get(), cube_pixels.size() * sizeof(uint32_t), VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+                        if (!staging_buffer_res) {
+                            return std::unexpected(std::format("Failed to create staging buffer: {}", ZHLN_VkResultString(staging_buffer_res.error())));
+                        }
+                        auto staging_buffer = std::move(*staging_buffer_res);
+
                         std::memcpy(staging_buffer.Map().data, cube_pixels.data(), cube_pixels.size() * sizeof(uint32_t));
 
                         ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(setup_cmd, cube_texture_image.Handle());

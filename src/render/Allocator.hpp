@@ -165,7 +165,8 @@ class Buffer {
     Buffer(Buffer&& other) noexcept                    = default;
     auto operator=(Buffer&& other) noexcept -> Buffer& = default;
 
-    [[nodiscard]] static auto Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage) noexcept -> Buffer;
+    [[nodiscard]] static auto
+        Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage) noexcept -> std::expected<Buffer, VkResult>;
 
     struct MappedRegion {
         MappedRegion() = default;

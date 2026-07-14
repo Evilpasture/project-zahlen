@@ -66,8 +66,12 @@ inline auto UploadTexture(Allocator& allocator, const Context& ctx, const VkImag
         return {};
     }
 
-    const size_t image_size = static_cast<size_t>(texture_w) * texture_h * 4;
-    Buffer       staging    = Buffer::Create(allocator.Get(), image_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+    const size_t image_size  = static_cast<size_t>(texture_w) * texture_h * 4;
+    auto         staging_res = Buffer::Create(allocator.Get(), image_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+    if (!staging_res.has_value()) {
+        return {};
+    }
+    Buffer staging = std::move(staging_res.value());
     if (auto mapped = staging.Map(); mapped.data) {
         std::memcpy(mapped.data, pixelData, image_size);
     }

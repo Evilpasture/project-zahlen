@@ -226,13 +226,13 @@ auto main() -> int {
                             .imageType     = VK_IMAGE_TYPE_2D,
                             .format        = VK_FORMAT_R8G8B8A8_UNORM,
                             .extent        = {.width = tex_w, .height = tex_h, .depth = 1},
-                            .mipLevels     = 1,
-                            .arrayLayers   = 1,
-                            .samples       = VK_SAMPLE_COUNT_1_BIT,
-                            .tiling        = VK_IMAGE_TILING_OPTIMAL,
-                            .usage         = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                            .sharingMode   = VK_SHARING_MODE_EXCLUSIVE,
-                            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+                            .mipLevels             = 1,
+                            .arrayLayers           = 1,
+                            .samples               = VK_SAMPLE_COUNT_1_BIT,
+                            .tiling                = VK_IMAGE_TILING_OPTIMAL,
+                            .usage                 = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                            .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
+                            .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED
                         };
 
                         auto texture_image = ZHLN::Vk::Image::Create(allocator.Get(), img_info, VMA_MEMORY_USAGE_GPU_ONLY);
@@ -247,7 +247,13 @@ auto main() -> int {
                         VkCommandBuffer setup_cmd = setup_pool[0];
 
                         ZHLN_BeginCommandBuffer(setup_cmd);
-                        auto staging_buffer = ZHLN::Vk::Buffer::Create(allocator.Get(), pixels.size() * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+                        
+                        auto staging_buffer_res = ZHLN::Vk::Buffer::Create(allocator.Get(), pixels.size() * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+                        if (!staging_buffer_res) {
+                            return std::unexpected(std::format("Failed to create staging buffer: {}", ZHLN_VkResultString(staging_buffer_res.error())));
+                        }
+                        auto staging_buffer = std::move(*staging_buffer_res);
+
                         std::memcpy(staging_buffer.Map().data, pixels.data(), pixels.size() * 4);
 
                         ZHLN::Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(setup_cmd, texture_image.Handle());

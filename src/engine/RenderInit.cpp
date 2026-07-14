@@ -440,7 +440,7 @@ std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
         .DepthCompare()
         .Build(ctx.Device())
         .transform_error([](auto err) -> Error { return err; })
-        .transform([&](auto&& sampler) {
+        .and_then([&](auto&& sampler) -> std::expected<void, Error> {
             shadowSampler = std::forward<decltype(sampler)>(sampler);
 
             graphResources.shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
@@ -481,13 +481,27 @@ std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
 
             RecreatePunctualShadowViews();
 
-            frameUniformBuffers = CreateDoubleBuffered(allocator, sizeof(FrameUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+            auto fub_res = CreateDoubleBuffered(allocator, sizeof(FrameUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+            if (!fub_res) {
+                return std::unexpected(fub_res.error());
+            }
+            frameUniformBuffers = std::move(*fub_res);
 
-            lightStorageBuffers = CreateDoubleBuffered(allocator, sizeof(GPULight) * 128, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+            auto lsb_res = CreateDoubleBuffered(allocator, sizeof(GPULight) * 128, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+            if (!lsb_res) {
+                return std::unexpected(lsb_res.error());
+            }
+            lightStorageBuffers = std::move(*lsb_res);
 
-            shadowIndirectBuffers = CreateDoubleBuffered(
+            auto sib_res = CreateDoubleBuffered(
                 allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances * 8, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
             );
+            if (!sib_res) {
+                return std::unexpected(sib_res.error());
+            }
+            shadowIndirectBuffers = std::move(*sib_res);
+
+            return {};
         });
 }
 
@@ -498,14 +512,20 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
     Vk::AllocateDoubleBufferedSet<CullingLayout>(ctx.Device(), cullingLayout, cullingPool, cullingSets);
 
     for (int i = 0; i < 2; ++i) {
-        instanceDataBuffers[i] = Vk::Buffer::Create(
+        auto idb_res = Vk::Buffer::Create(
             allocator.Get(), sizeof(InstanceData) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
         );
+        if (!idb_res)
+            return std::unexpected(idb_res.error());
+        instanceDataBuffers[i] = std::move(*idb_res);
 
-        indirectCommandsBuffers[i] = Vk::Buffer::Create(
+        auto icb_res = Vk::Buffer::Create(
             allocator.Get(), sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
             VMA_MEMORY_USAGE_GPU_ONLY
         );
+        if (!icb_res)
+            return std::unexpected(icb_res.error());
+        indirectCommandsBuffers[i] = std::move(*icb_res);
 
         CullingLayout::Write(
             ctx.Device(), cullingSets[i], Vk::BufferWrite {.buffer = instanceDataBuffers[i].Handle()},
@@ -527,21 +547,35 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
         .and_then([&]() -> std::expected<void, Error> {
             constexpr auto numClusters = static_cast<size_t>(16 * 9 * 24);
 
-            clusterBoundsBuffer = Vk::Buffer::Create(
+            auto cbb_res = Vk::Buffer::Create(
                 allocator.Get(), sizeof(struct ClusterBounds) * numClusters, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                 VMA_MEMORY_USAGE_GPU_ONLY
             );
+            if (!cbb_res)
+                return std::unexpected(cbb_res.error());
+            clusterBoundsBuffer = std::move(*cbb_res);
 
             Vk::AllocateDoubleBufferedSet<ClusterCullingLayout>(ctx.Device(), clusterCullingDescLayout, clusterCullingPool, clusterCullingSets);
 
             for (int i = 0; i < 2; ++i) {
-                clusterGridBuffers[i] =
+                auto cgb_res =
                     Vk::Buffer::Create(allocator.Get(), sizeof(ClusterVolume) * numClusters, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-                lightIndexListBuffers[i] =
+                if (!cgb_res)
+                    return std::unexpected(cgb_res.error());
+                clusterGridBuffers[i] = std::move(*cgb_res);
+
+                auto lsb_res =
                     Vk::Buffer::Create(allocator.Get(), sizeof(uint32_t) * numClusters * 64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-                globalCounterBuffers[i] = Vk::Buffer::Create(
+                if (!lsb_res)
+                    return std::unexpected(lsb_res.error());
+                lightIndexListBuffers[i] = std::move(*lsb_res);
+
+                auto gcb_res = Vk::Buffer::Create(
                     allocator.Get(), sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY
                 );
+                if (!gcb_res)
+                    return std::unexpected(gcb_res.error());
+                globalCounterBuffers[i] = std::move(*gcb_res);
 
                 ClusterCullingLayout::Write(
                     ctx.Device(), clusterCullingSets[i], Vk::BufferWrite {.buffer = clusterBoundsBuffer.Handle()},
@@ -564,29 +598,41 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                 rtCtx.GetTlasSizes(kGpuCullingMaxInstances, tlasSizes);
 
                 for (int i = 0; i < 2; ++i) {
-                    tlasBuffer[i] = Vk::Buffer::Create(
+                    auto tb_res = Vk::Buffer::Create(
                         allocator.Get(), tlasSizes.acceleration_structure_size,
                         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
                     );
+                    if (!tb_res)
+                        return std::unexpected(tb_res.error());
+                    tlasBuffer[i] = std::move(*tb_res);
 
-                    tlasScratchBuffer[i] = Vk::Buffer::Create(
+                    auto tsb_res = Vk::Buffer::Create(
                         allocator.Get(), tlasSizes.build_scratch_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                         VMA_MEMORY_USAGE_GPU_ONLY
                     );
+                    if (!tsb_res)
+                        return std::unexpected(tsb_res.error());
+                    tlasScratchBuffer[i] = std::move(*tsb_res);
 
                     tlas[i] = rtCtx.CreateAS(tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL);
 
-                    tlasInstanceBuffers[i] = Vk::Buffer::Create(
+                    auto tib_res = Vk::Buffer::Create(
                         allocator.Get(), sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances,
                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                             VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                         VMA_MEMORY_USAGE_GPU_ONLY
                     );
+                    if (!tib_res)
+                        return std::unexpected(tib_res.error());
+                    tlasInstanceBuffers[i] = std::move(*tib_res);
 
-                    tlasStagingBuffers[i] = Vk::Buffer::Create(
+                    auto tstb_res = Vk::Buffer::Create(
                         allocator.Get(), sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                         VMA_MEMORY_USAGE_CPU_ONLY
                     );
+                    if (!tstb_res)
+                        return std::unexpected(tstb_res.error());
+                    tlasStagingBuffers[i] = std::move(*tstb_res);
                 }
             }
 
@@ -609,7 +655,6 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
 std::expected<void, Error> RenderContext::Impl::InitBindless() {
     Vk::AllocateDoubleBufferedSet<GlobalSceneLayout>(ctx.Device(), bindlessLayout, bindlessPool, bindlessSets);
 
-    // 1. Build and bind global and clamping samplers monadically
     return Vk::SamplerBuilder {}
         .Linear()
         .Repeat()
@@ -630,18 +675,20 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
                     return {};
                 });
         })
-        // 2. Consolidate remaining void initializations into a terminal transform mapping
-        .transform([&]() {
-            InitSkeletalAnimationResources();
-            InitLightingLUTs();
-
+        .and_then([&]() -> std::expected<void, Error> { return InitSkeletalAnimationResources(); })
+        .and_then([&]() -> std::expected<void, Error> { return InitLightingLUTs(); })
+        .and_then([&]() -> std::expected<void, Error> {
             ZHLN::Log("[RenderInit] Pre-allocating persistently mapped Double-Buffered Debug VBOs...");
             size_t maxDebugVerts = 500000;
             size_t bufferSize    = maxDebugVerts * (sizeof(VertexPosition) + sizeof(VertexAttributes));
             for (int i = 0; i < 2; ++i) {
-                auto gpu_buf = Vk::Buffer::Create(
+                auto gpu_buf_res = Vk::Buffer::Create(
                     allocator.Get(), bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
                 );
+                if (!gpu_buf_res) {
+                    return std::unexpected(Error(gpu_buf_res.error()));
+                }
+                auto gpu_buf = std::move(*gpu_buf_res);
 
                 auto address        = Vk::GetBufferAddress(ctx.Device(), gpu_buf.Handle());
                 debugMeshHandles[i] = meshPool.Create(std::move(gpu_buf), maxDebugVerts, address);
@@ -664,6 +711,7 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
 
                 bindlessRegistry.UpdateSet(ctx.Device(), bindlessSets[i]);
             }
+            return {};
         });
 }
 
@@ -1055,31 +1103,42 @@ void RenderContext::Impl::RecreatePunctualShadowViews() noexcept {
     }
 }
 
-void RenderContext::Impl::InitSkeletalAnimationResources() {
-    // Allocate our global Joint storage buffer (Supports 8192 dynamic matrices)
+std::expected<void, Error> RenderContext::Impl::InitSkeletalAnimationResources() {
     JPH::Array<JPH::Mat44> identities(8192, JPH::Mat44::sIdentity());
     for (int i = 0; i < 2; ++i) {
-        jointBuffers[i] = Vk::Buffer::Create(
+        auto jb_res = Vk::Buffer::Create(
             allocator.Get(), sizeof(JPH::Mat44) * 8192, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
             VMA_MEMORY_USAGE_CPU_TO_GPU
         );
+        if (!jb_res) {
+            return std::unexpected(Error(jb_res.error()));
+        }
+        jointBuffers[i] = std::move(*jb_res);
 
-        // Upload identity matrices initially
         auto mapped = jointBuffers[i].Map();
         std::memcpy(mapped.data, identities.data(), identities.size() * sizeof(JPH::Mat44));
     }
 
-    morphDeltasBuffer = Vk::Buffer::Create(
+    auto mdb_res = Vk::Buffer::Create(
         allocator.Get(), sizeof(float) * 4 * 1000000, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
         VMA_MEMORY_USAGE_CPU_TO_GPU
     );
+    if (!mdb_res) {
+        return std::unexpected(Error(mdb_res.error()));
+    }
+    morphDeltasBuffer = std::move(*mdb_res);
+    return {};
 }
 
-void RenderContext::Impl::InitLightingLUTs() {
+std::expected<void, Error> RenderContext::Impl::InitLightingLUTs() {
     stagingContext = std::make_unique<Vk::StagingContext>(allocator, ctx);
     stagingContext->Begin();
 
-    iblPayload = Vk::IBLProcessor::Bake(*this, *stagingContext);
+    auto ibl_res = Vk::IBLProcessor::Bake(*this, *stagingContext);
+    if (!ibl_res) {
+        return std::unexpected(Error(ibl_res.error()));
+    }
+    iblPayload = std::move(*ibl_res);
 
     ZHLN::Log("[IBL] Uploading Linearly Transformed Cosines (LTC) LUTs...");
 
@@ -1105,7 +1164,11 @@ void RenderContext::Impl::InitLightingLUTs() {
     const size_t matRawSize = ltc_mat.size() - 128;
     const size_t ampRawSize = ltc_amp.size() - 128;
 
-    auto ltcStaging = Vk::Buffer::Create(allocator.Get(), matRawSize + ampRawSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+    auto ltcStaging_res = Vk::Buffer::Create(allocator.Get(), matRawSize + ampRawSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+    if (!ltcStaging_res) {
+        return std::unexpected(Error(ltcStaging_res.error()));
+    }
+    auto ltcStaging = std::move(*ltcStaging_res);
 
     auto        mapped       = ltcStaging.Map();
     char* const stageBasePtr = static_cast<char*>(mapped.data);
@@ -1133,9 +1196,9 @@ void RenderContext::Impl::InitLightingLUTs() {
     stagingContext->AddBuffer(std::move(ltcStaging));
     stagingContext->ExecuteAsync();
 
-    // 4. Create image views safely outside the async execution line
     ltcMatView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle());
     ltcAmpView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle());
+    return {};
 }
 
 bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {

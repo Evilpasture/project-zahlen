@@ -96,8 +96,7 @@ std::expected<void, ZHLN::Error> Allocator::Init(const Context& ctx) noexcept {
 // ============================================================================
 // Buffer RAII
 // ============================================================================
-[[nodiscard]]
-auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage) noexcept -> Buffer {
+auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage) noexcept -> std::expected<Buffer, VkResult> {
     VkBuffer          buffer = VK_NULL_HANDLE;
     VmaAllocation     alloc  = nullptr;
     VmaAllocationInfo info   = {};
@@ -130,8 +129,9 @@ auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usag
         alloc_info.flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT;
     }
 
-    if (vmaCreateBuffer(allocator, &buffer_info, &alloc_info, &buffer, &alloc, &info) != VK_SUCCESS) {
-        return {};
+    VkResult res = vmaCreateBuffer(allocator, &buffer_info, &alloc_info, &buffer, &alloc, &info);
+    if (res != VK_SUCCESS) {
+        return std::unexpected(res);
     }
 
     Buffer b;
@@ -169,10 +169,11 @@ auto Buffer::Map() noexcept -> MappedRegion {
 // ============================================================================
 
 auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst, const void* data, size_t size) noexcept -> Buffer {
-    Buffer staging = Buffer::Create(allocator, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
-    if (!staging.Valid()) {
+    auto staging_res = Buffer::Create(allocator, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+    if (!staging_res.has_value()) {
         return {};
     }
+    Buffer staging = std::move(staging_res.value());
 
     {
         auto mapped = staging.Map();
@@ -360,12 +361,13 @@ auto StagingRingBuffer::Init(VmaAllocator allocator, VkDevice device, VkQueue qu
         return std::unexpected(res);
     }
 
-    _stagingBuffer = Buffer::Create(_allocator, _capacity, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
-    if (!_stagingBuffer.Valid()) {
+    auto staging_res = Buffer::Create(_allocator, _capacity, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+    if (!staging_res.has_value()) {
         vkDestroySemaphore(_device, _timelineSemaphore, nullptr);
         _timelineSemaphore = VK_NULL_HANDLE;
         return std::unexpected(RenderInitError::SubsystemAllocationFailed);
     }
+    _stagingBuffer = std::move(*staging_res);
 
     _mappedRegion = _stagingBuffer.Map();
     _mappedPtr    = _mappedRegion.data;

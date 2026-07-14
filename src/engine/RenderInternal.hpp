@@ -894,7 +894,7 @@ struct RenderContext::Impl {
     uint32_t CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB);
     uint32_t CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height);
 
-    auto CreateGPUBuffer(size_t size, const void* data, VkBufferUsageFlags functionalUsage) const -> std::pair<Vk::Buffer, VkDeviceAddress>;
+    std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, VkResult> CreateGPUBuffer(size_t size, const void* data, VkBufferUsageFlags functionalUsage) const;
 
     void SortDrawQueue();
     void InitializeSystemTextures();
@@ -912,9 +912,9 @@ struct RenderContext::Impl {
 
     bool RecreateTargets(VkExtent2D ext);
 
-    void RecreatePunctualShadowViews() noexcept;
-    void InitSkeletalAnimationResources();
-    void InitLightingLUTs();
+    void                       RecreatePunctualShadowViews() noexcept;
+    std::expected<void, Error> InitSkeletalAnimationResources();
+    std::expected<void, Error> InitLightingLUTs();
 
     [[nodiscard]] std::expected<Vk::ShaderStages, Error> LoadAndCreateShaders(ShaderStageSource vs, ShaderStageSource ps) const noexcept;
 
@@ -1068,8 +1068,12 @@ inline bool LoadShaderData(const ShaderStageSource& src, const void*& outData, s
 }
 
 template <typename T = Vk::Buffer, typename... Args>
-DoubleBuffered<T> CreateDoubleBuffered(Vk::Allocator& alloc, Args&&... args) {
-    return DoubleBuffered<T> {T::Create(alloc.Get(), std::forward<Args>(args)...), T::Create(alloc.Get(), std::forward<Args>(args)...)};
+std::expected<DoubleBuffered<T>, VkResult> CreateDoubleBuffered(Vk::Allocator& alloc, Args&&... args) {
+    return T::Create(alloc.Get(), std::forward<Args>(args)...).and_then([&](auto&& first) -> std::expected<DoubleBuffered<T>, VkResult> {
+        return T::Create(alloc.Get(), std::forward<Args>(args)...).transform([&](auto&& second) {
+            return DoubleBuffered<T> {std::forward<decltype(first)>(first), std::forward<decltype(second)>(second)};
+        });
+    });
 }
 
 } // namespace ZHLN
