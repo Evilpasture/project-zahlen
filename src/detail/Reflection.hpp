@@ -514,127 +514,521 @@ constexpr void ForEachEnumerator(F&& f) {
 
 } // namespace ZHLN::Reflect
 
-#else // Fallback code with redundant logic removed
+#else // Standard C++26 Fallback (No <meta> support)
+
+#include <tuple>
+#include <utility>
+
+// ============================================================================
+// Fallback Opt-in Macros (For properties impossible to deduce automatically)
+// ============================================================================
+namespace ZHLN::Reflect::detail {
+template <typename T>
+struct StructReflectionTraits {
+    static constexpr bool registered = false;
+};
+template <typename T>
+struct BaseClassTraits {
+    static constexpr bool registered = false;
+};
+template <typename T, StringLiteral Name>
+struct TagTraits {
+    using Tag                     = void;
+    static constexpr bool has_tag = false;
+};
+} // namespace ZHLN::Reflect::detail
+
+// NOLINTBEGIN(cppcoreguidelines-macro-usage)
+#define ZHLN_REFLECT_NAMES(Type, ...)                                                                     \
+    template <>                                                                                           \
+    struct ZHLN::Reflect::detail::StructReflectionTraits<Type> {                                          \
+        static constexpr bool                                                 registered = true;          \
+        static constexpr std::array<std::string_view, sizeof...(__VA_ARGS__)> names      = {__VA_ARGS__}; \
+    }
+
+#define ZHLN_REFLECT_BASES(Type, ...)                               \
+    template <>                                                     \
+    struct ZHLN::Reflect::detail::BaseClassTraits<Type> {           \
+        static constexpr bool registered = true;                    \
+        using BasesTuple                 = std::tuple<__VA_ARGS__>; \
+    }
+
+#define ZHLN_REFLECT_TAG(Type, FieldName, TagType)             \
+    template <>                                                \
+    struct ZHLN::Reflect::detail::TagTraits<Type, FieldName> { \
+        using Tag                     = TagType;               \
+        static constexpr bool has_tag = true;                  \
+    }
+// NOLINTEND(cppcoreguidelines-macro-usage)
 
 namespace ZHLN::Reflect {
 
-template <std::ranges::range R>
-consteval int Expand(R&& /*unused*/) {
-    return 0;
+// ============================================================================
+// 1. Type & Enum Names (Magic Enum Lite via __PRETTY_FUNCTION__)
+// ============================================================================
+namespace detail {
+template <typename T>
+consteval std::string_view GetTypeName() {
+    std::string_view func = __PRETTY_FUNCTION__;
+#if defined(__clang__)
+    size_t start = func.find("T = ") + 4;
+    size_t end   = func.find_last_of(']');
+#elif defined(__GNUC__)
+    size_t start = func.find("with T = ") + 9;
+    size_t end   = func.find_last_of(';');
+#elif defined(_MSC_VER)
+    size_t start = func.find("GetTypeName<") + 12;
+    size_t end   = func.find_last_of('>');
+#else
+    return "UnsupportedCompiler";
+#endif
+    std::string_view name = func.substr(start, end - start);
+    if (name.starts_with("struct ")) {
+        name.remove_prefix(7);
+    }
+    if (name.starts_with("class ")) {
+        name.remove_prefix(6);
+    }
+    if (name.starts_with("enum ")) {
+        name.remove_prefix(5);
+    }
+    return name;
 }
 
-template <typename T, typename F>
-constexpr void ForEachField(T&& /*unused*/, F&& /*unused*/) {
+template <typename E, E V>
+consteval std::string_view ProbeEnumName() {
+    std::string_view name = __PRETTY_FUNCTION__;
+#if defined(__clang__) || defined(__GNUC__)
+    size_t start = name.find("V = ") + 4;
+    size_t end   = name.find_last_of(']');
+#elif defined(_MSC_VER)
+    size_t start = name.find("ProbeEnumName<") + 14;
+    size_t end   = name.find_last_of('>');
+#endif
+    std::string_view sub = name.substr(start, end - start);
+    if (sub.contains(')') || sub.find_first_of("0123456789") == 0) {
+        return "";
+    }
+
+    size_t colon = sub.find_last_of(':');
+    if (colon != std::string_view::npos) {
+        sub.remove_prefix(colon + 1);
+    }
+    return sub;
 }
 
-template <typename T, typename F>
-constexpr void ForEachFieldWithName(T&& /*unused*/, F&& /*unused*/) {
-}
+template <typename E, int V>
+struct EnumProber {
+    static consteval std::string_view name() {
+        return ProbeEnumName<E, static_cast<E>(V)>();
+    }
+};
+
+template <typename E, int Min, int Max>
+struct EnumExtractor {
+    static constexpr int Range = Max - Min + 1;
+
+    static consteval int Count() {
+        int c = 0;
+        [&]<int... Is>(std::integer_sequence<int, Is...>) {
+            (((EnumProber<E, Is + Min>::name().empty()) ? 0 : ++c), ...);
+        }(std::make_integer_sequence<int, Range> {});
+        return c;
+    }
+
+    static constexpr int ValidCount = Count();
+
+    struct Result {
+        std::array<E, ValidCount>                v {};
+        std::array<std::string_view, ValidCount> n {};
+    };
+
+    static consteval Result Extract() {
+        Result res {};
+        int    idx = 0;
+        [&]<int... Is>(std::integer_sequence<int, Is...>) {
+            (((EnumProber<E, Is + Min>::name().empty()) ? 0 : (res.v[idx] = static_cast<E>(Is + Min), res.n[idx] = EnumProber<E, Is + Min>::name(), ++idx)),
+             ...);
+        }(std::make_integer_sequence<int, Range> {});
+        return res;
+    }
+};
+} // namespace detail
 
 template <typename T>
-constexpr auto TieFields(T&& /*unused*/) {
-    return std::tuple {};
+consteval std::string_view TypeName() {
+    return detail::GetTypeName<std::remove_cvref_t<T>>();
 }
 
 template <typename E>
     requires std::is_enum_v<E>
-constexpr std::string_view EnumToString(E /*unused*/) {
+consteval std::string_view EnumUnderlyingTypeName() {
+    return TypeName<std::underlying_type_t<E>>();
+}
+
+template <typename E>
+    requires std::is_enum_v<E>
+constexpr std::string_view EnumToString(E value) {
+    constexpr auto data = detail::EnumExtractor<E, -128, 128>::Extract();
+    for (std::size_t i = 0; i < data.v.size(); ++i) {
+        if (data.v[i] == value) {
+            return data.n[i];
+        }
+    }
     return "Unknown";
 }
 
 template <typename E>
     requires std::is_enum_v<E>
-constexpr std::optional<E> StringToEnum(std::string_view /*unused*/) {
+constexpr std::optional<E> StringToEnum(std::string_view name) {
+    constexpr auto data = detail::EnumExtractor<E, -128, 128>::Extract();
+    for (std::size_t i = 0; i < data.v.size(); ++i) {
+        if (data.n[i] == name) {
+            return data.v[i];
+        }
+    }
     return std::nullopt;
-}
-
-template <typename T>
-constexpr auto ZipFieldsWithNames(T&& /*unused*/) {
-    return std::tuple {};
-}
-
-template <typename T>
-constexpr std::size_t FieldCount() {
-    return 0;
-}
-
-template <std::size_t N, typename T>
-constexpr decltype(auto) GetField(T&& /*unused*/) {
-    struct Dummy {};
-    static Dummy d;
-    return d;
-}
-
-template <typename T, typename F>
-constexpr bool VisitFieldByName(T&& /*unused*/, std::string_view /*unused*/, F&& /*unused*/) {
-    return false;
-}
-
-template <typename T>
-consteval auto FieldNames() {
-    return std::array<std::string_view, 0> {};
-}
-
-template <typename T>
-consteval bool HasField(std::string_view /*unused*/) {
-    return false;
 }
 
 template <typename E>
     requires std::is_enum_v<E>
 consteval std::size_t EnumCount() {
-    return 0;
+    return detail::EnumExtractor<E, -128, 128>::ValidCount;
 }
 
 template <typename E>
     requires std::is_enum_v<E>
 consteval auto EnumNames() {
-    return std::array<std::string_view, 0> {};
+    return detail::EnumExtractor<E, -128, 128>::Extract().n;
 }
 
-template <typename T, typename F>
-constexpr void ForEachFieldIndexed(T&& /*unused*/, F&& /*unused*/) {
+template <typename E, typename F>
+    requires std::is_enum_v<E>
+constexpr void ForEachEnumerator(F&& f) {
+    constexpr auto data = detail::EnumExtractor<E, -128, 128>::Extract();
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        (std::forward<F>(f).template operator()<data.v[Is]>(), ...);
+    }(std::make_index_sequence<data.v.size()> {});
 }
 
-template <typename Tag, typename T>
-consteval bool HasTag(std::string_view /*unused*/) {
+template <typename E>
+    requires std::is_enum_v<E>
+constexpr std::string_view EnumToFlagsString(E value, std::string& out_buffer) {
+    out_buffer.clear();
+    using Under              = std::underlying_type_t<E>;
+    auto           val_under = static_cast<Under>(value);
+    constexpr auto data      = detail::EnumExtractor<E, -128, 128>::Extract();
+
+    for (std::size_t i = 0; i < data.v.size(); ++i) {
+        auto enum_under = static_cast<Under>(data.v[i]);
+        if (enum_under != 0 && (val_under & enum_under) == enum_under) {
+            if (!out_buffer.empty()) {
+                out_buffer += " | ";
+            }
+            out_buffer += data.n[i];
+        }
+    }
+    if (out_buffer.empty() && val_under == 0) {
+        return EnumToString(value);
+    }
+    return out_buffer;
+}
+
+// ============================================================================
+// 2. Aggregate Introspection (PFR Lite)
+// ============================================================================
+namespace detail {
+struct AnyType {
+    template <typename T>
+    constexpr operator T() const;
+};
+
+template <typename T, typename... Args>
+consteval auto test_aggregate(int) -> decltype(T {std::declval<Args>()...}, true) {
+    return true;
+}
+template <typename T, typename... Args>
+consteval bool test_aggregate(...) {
     return false;
 }
 
+template <typename T, std::size_t N>
+consteval bool is_aggregate_constructible() {
+    return []<std::size_t... I>(std::index_sequence<I...>) { return test_aggregate<T, decltype(I, AnyType {})...>(0); }(std::make_index_sequence<N> {});
+}
+
+template <typename T, std::size_t N = 16>
+consteval std::size_t count_fields() {
+    if constexpr (N == 0) {
+        return 0;
+    } else if constexpr (is_aggregate_constructible<T, N>()) {
+        return N;
+    } else {
+        return count_fields<T, N - 1>();
+    }
+}
+} // namespace detail
+
+template <typename T>
+constexpr std::size_t FieldCount() {
+    return detail::count_fields<std::remove_cvref_t<T>>();
+}
+
+template <typename T>
+constexpr auto TieFields(T&& t) {
+    using M                 = std::remove_cvref_t<T>;
+    constexpr std::size_t N = FieldCount<M>();
+
+    if constexpr (N == 0) {
+        return std::tuple {};
+    } else if constexpr (N == 1) {
+        auto& [a] = t;
+        return std::tie(a);
+    } else if constexpr (N == 2) {
+        auto& [a, b] = t;
+        return std::tie(a, b);
+    } else if constexpr (N == 3) {
+        auto& [a, b, c] = t;
+        return std::tie(a, b, c);
+    } else if constexpr (N == 4) {
+        auto& [a, b, c, d] = t;
+        return std::tie(a, b, c, d);
+    } else if constexpr (N == 5) {
+        auto& [a, b, c, d, e] = t;
+        return std::tie(a, b, c, d, e);
+    } else if constexpr (N == 6) {
+        auto& [a, b, c, d, e, f] = t;
+        return std::tie(a, b, c, d, e, f);
+    } else if constexpr (N == 7) {
+        auto& [a, b, c, d, e, f, g] = t;
+        return std::tie(a, b, c, d, e, f, g);
+    } else if constexpr (N == 8) {
+        auto& [a, b, c, d, e, f, g, h] = t;
+        return std::tie(a, b, c, d, e, f, g, h);
+    } else if constexpr (N == 9) {
+        auto& [a, b, c, d, e, f, g, h, i] = t;
+        return std::tie(a, b, c, d, e, f, g, h, i);
+    } else if constexpr (N == 10) {
+        auto& [a, b, c, d, e, f, g, h, i, j] = t;
+        return std::tie(a, b, c, d, e, f, g, h, i, j);
+    } else if constexpr (N == 11) {
+        auto& [a, b, c, d, e, f, g, h, i, j, k] = t;
+        return std::tie(a, b, c, d, e, f, g, h, i, j, k);
+    } else if constexpr (N == 12) {
+        auto& [a, b, c, d, e, f, g, h, i, j, k, l] = t;
+        return std::tie(a, b, c, d, e, f, g, h, i, j, k, l);
+    } else if constexpr (N == 13) {
+        auto& [a, b, c, d, e, f, g, h, i, j, k, l, m] = t;
+        return std::tie(a, b, c, d, e, f, g, h, i, j, k, l, m);
+    } else if constexpr (N == 14) {
+        auto& [a, b, c, d, e, f, g, h, i, j, k, l, m, n] = t;
+        return std::tie(a, b, c, d, e, f, g, h, i, j, k, l, m, n);
+    } else if constexpr (N == 15) {
+        auto& [a, b, c, d, e, f, g, h, i, j, k, l, m, n, o] = t;
+        return std::tie(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o);
+    } else if constexpr (N == 16) {
+        auto& [a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p] = t;
+        return std::tie(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p);
+    } else {
+        static_assert(N <= 16, "TieFields fallback only supports up to 16 fields");
+        return std::tuple {};
+    }
+}
+
+template <typename T, typename F>
+constexpr void ForEachField(T&& t, F&& f) {
+    std::apply([&](auto&&... args) { (std::forward<F>(f)(std::forward<decltype(args)>(args)), ...); }, TieFields(std::forward<T>(t)));
+}
+
+template <typename T, typename F>
+constexpr void ForEachFieldIndexed(T&& t, F&& f) {
+    auto tup = TieFields(std::forward<T>(t));
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        (std::forward<F>(f)(Is, std::get<Is>(tup)), ...);
+    }(std::make_index_sequence<std::tuple_size_v<decltype(tup)>> {});
+}
+
+template <typename T, typename F>
+constexpr void ForEachFieldAdaptive(T&& t, F&& f) {
+    ForEachField(std::forward<T>(t), std::forward<F>(f));
+}
+
 template <std::size_t N, typename T>
-using FieldType = void;
+using FieldType = std::tuple_element_t<N, decltype(TieFields(std::declval<T&>()))>;
+
+template <std::size_t N, typename T>
+constexpr decltype(auto) GetField(T&& t) {
+    return std::get<N>(TieFields(std::forward<T>(t)));
+}
+
+template <typename T, typename Tuple>
+constexpr T MakeFromTuple(Tuple&& t) {
+    return std::make_from_tuple<T>(std::forward<Tuple>(t));
+}
+
+// ============================================================================
+// 3. Name-Based & Macro Features
+// ============================================================================
+
+template <typename T>
+consteval auto FieldNames() {
+    constexpr std::size_t N = FieldCount<T>();
+    if constexpr (detail::StructReflectionTraits<T>::registered) {
+        static_assert(detail::StructReflectionTraits<T>::names.size() == N, "ZHLN_REFLECT_NAMES count mismatch.");
+        return detail::StructReflectionTraits<T>::names;
+    } else {
+        return std::array<std::string_view, N> {};
+    }
+}
+
+template <typename T, typename F>
+constexpr void ForEachFieldWithName(T&& t, F&& f) {
+    constexpr auto names = FieldNames<std::remove_cvref_t<T>>();
+    auto           tup   = TieFields(std::forward<T>(t));
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) { (std::forward<F>(f)(names[Is], std::get<Is>(tup)), ...); }(std::make_index_sequence<names.size()> {});
+}
+
+template <typename T>
+consteval bool HasField(std::string_view name) {
+    constexpr auto names = FieldNames<T>();
+    for (auto n: names) {
+        if (n == name)
+            return true;
+    }
+    return false;
+}
+
+template <StringLiteral NameConst, typename T>
+consteval std::size_t IndexOfField() {
+    constexpr auto names = FieldNames<T>();
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        if (names[i] == std::string_view(NameConst.value.data(), NameConst.value.size() - 1)) {
+            return i;
+        }
+    }
+    return static_cast<std::size_t>(-1);
+}
+
+template <typename T, typename F>
+constexpr bool VisitFieldByName(T&& t, std::string_view name, F&& f) {
+    bool found = false;
+    ForEachFieldWithName(std::forward<T>(t), [&](std::string_view n, auto&& val) {
+        if (!found && n == name) {
+            std::forward<F>(f)(std::forward<decltype(val)>(val));
+            found = true;
+        }
+    });
+    return found;
+}
+
+template <StringLiteral NameConst, typename T>
+constexpr decltype(auto) GetFieldByName(T&& t) {
+    constexpr std::size_t idx = IndexOfField<NameConst, std::remove_cvref_t<T>>();
+    static_assert(idx != static_cast<std::size_t>(-1), "Field not found.");
+    return std::get<idx>(TieFields(std::forward<T>(t)));
+}
+
+template <StringLiteral NameConst, typename T, typename ValueType>
+constexpr bool SetFieldByName(T& t, ValueType&& value) {
+    constexpr std::size_t idx = IndexOfField<NameConst, std::remove_cvref_t<T>>();
+    if constexpr (idx != static_cast<std::size_t>(-1)) {
+        auto tup = TieFields(t);
+        if constexpr (std::is_assignable_v<decltype(std::get<idx>(tup))&, ValueType>) {
+            std::get<idx>(tup) = std::forward<ValueType>(value);
+            return true;
+        }
+    }
+    return false;
+}
+
+template <typename T>
+constexpr auto ZipFieldsWithNames(T&& t) {
+    constexpr auto names = FieldNames<std::remove_cvref_t<T>>();
+    auto           tup   = TieFields(std::forward<T>(t));
+    return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        return std::make_tuple(std::pair<std::string_view, decltype(std::get<Is>(tup))> {names[Is], std::get<Is>(tup)}...);
+    }(std::make_index_sequence<names.size()> {});
+}
+
+// ============================================================================
+// 4. Custom Tags and Sub-Types
+// ============================================================================
+
+template <typename Tag, typename T>
+consteval bool HasTag([[maybe_unused]] std::string_view field_name) {
+    // Unsupported automatically without compiler reflection
+    return false;
+}
+
+template <typename Tag, typename T>
+consteval bool ValidateSerializability() {
+    return std::is_trivially_copyable_v<T>;
+}
+
+template <typename Meta, typename T, typename F>
+constexpr void ForEachReflectedField(T&& t, F&& f) {
+    // This is 100% implementable! It's used by the RenderGraph to auto-bind resources.
+    if constexpr (detail::StructReflectionTraits<std::remove_cvref_t<T>>::registered && detail::StructReflectionTraits<std::remove_cvref_t<Meta>>::registered) {
+        constexpr auto t_names    = FieldNames<std::remove_cvref_t<T>>();
+        constexpr auto meta_names = FieldNames<std::remove_cvref_t<Meta>>();
+
+        auto t_tup = TieFields(std::forward<T>(t));
+
+        // We instantiate a dummy Meta just so we can run TieFields to extract its types
+        std::remove_cvref_t<Meta> dummy_meta {};
+        auto                      meta_tup = TieFields(dummy_meta);
+
+        // Iterate over every field in Meta
+        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+            (
+                [&]() {
+                    constexpr std::string_view meta_name = meta_names[Is];
+                    using TagType                        = std::remove_cvref_t<std::tuple_element_t<Is, decltype(meta_tup)>>;
+
+                    // Find the matching field name in T
+                    [&]<std::size_t... Js>(std::index_sequence<Js...>) {
+                        (
+                            [&]() {
+                                if constexpr (t_names[Js] == meta_name) {
+                                    // Found a match! Invoke the lambda with the TagType and the actual data from T
+                                    std::forward<F>(f).template operator()<TagType>(std::get<Js>(t_tup));
+                                }
+                            }(),
+                            ...);
+                    }(std::make_index_sequence<t_names.size()> {});
+                }(),
+                ...);
+        }(std::make_index_sequence<meta_names.size()> {});
+    }
+}
+
+template <typename T, typename F>
+constexpr void ForEachNestedType(F&& /*f*/) {
+    // Requires standard C++26 <meta> reflection. Safe to omit in fallback.
+}
+
+template <std::ranges::range R>
+consteval int Expand(R&& /*unused*/) {
+    return 0;
+} // <meta> placeholder stub
+
+// ============================================================================
+// 5. Classes and Methods
+// ============================================================================
 
 template <typename T>
 consteval auto BaseClasses() {
     return std::array<int, 0> {};
 }
 
-template <StringLiteral NameConst, typename T>
-constexpr decltype(auto) GetFieldByName(T&& /*unused*/) {
-    struct Dummy {};
-    static Dummy d;
-    return d;
-}
-
-template <typename T>
-consteval std::string_view TypeName() {
-    return "";
-}
-
 template <typename T, typename F>
-constexpr void ForEachBase(F&& /*unused*/) {
-}
-
-template <typename E>
-    requires std::is_enum_v<E>
-constexpr std::string_view EnumToFlagsString(E /*unused*/, std::string& out_buffer) {
-    out_buffer.clear();
-    return "";
-}
-
-template <StringLiteral NameConst, typename T>
-consteval std::size_t IndexOfField() {
-    return static_cast<std::size_t>(-1);
+constexpr void ForEachBase(F&& f) {
+    if constexpr (detail::BaseClassTraits<std::remove_cvref_t<T>>::registered) {
+        using Bases = typename detail::BaseClassTraits<std::remove_cvref_t<T>>::BasesTuple;
+        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+            (std::forward<F>(f).template operator()<std::tuple_element_t<Is, Bases>>(), ...);
+        }(std::make_index_sequence<std::tuple_size_v<Bases>> {});
+    }
 }
 
 template <typename T>
@@ -647,35 +1041,6 @@ consteval auto MemberFunctionNames() {
     return std::array<std::string_view, 0> {};
 }
 
-template <StringLiteral NameConst, typename T, typename ValueType>
-constexpr bool SetFieldByName(T& /*unused*/, ValueType&& /*unused*/) {
-    return false;
-}
-
-template <typename T, typename Tuple>
-constexpr T MakeFromTuple(Tuple&& /*unused*/) {
-    return T {};
-}
-
-template <typename E>
-    requires std::is_enum_v<E>
-consteval std::string_view EnumUnderlyingTypeName() {
-    return "";
-}
-
-template <typename T, typename F>
-constexpr void ForEachFieldAdaptive(T&& /*unused*/, F&& /*unused*/) {
-}
-
-template <typename Tag, typename T>
-consteval bool ValidateSerializability() {
-    return true;
-}
-
-template <typename T, typename F>
-constexpr void ForEachNestedType(F&& /*unused*/) {
-}
-
 template <StringLiteral Name, typename... Fields>
 struct Define {
     struct type {};
@@ -684,18 +1049,8 @@ struct Define {
     }
 };
 
-template <typename Meta, typename T, typename F>
-constexpr void ForEachReflectedField(T&& /*unused*/, F&& /*unused*/) {
-}
-
-template <typename E, typename F>
-    requires std::is_enum_v<E>
-constexpr void ForEachEnumerator(F&& /*unused*/) {
-}
-
 } // namespace ZHLN::Reflect
 #endif
-
 // ============================================================================
 // 3. DERIVED UTILITIES & DIAGNOSTICS (Defined Once)
 // ============================================================================
