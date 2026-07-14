@@ -99,7 +99,7 @@ class ZHLN_API RenderContext {
      * on-the-fly and registers it in the bindless texture array.
      * @return The bindless texture index.
      */
-    auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness) -> uint32_t;
+    auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness) -> std::expected<uint32_t, Error>;
 
     [[nodiscard]] auto GetImpl() const -> Impl* {
         return _impl.get();

@@ -234,7 +234,7 @@ class Image {
     Image(Image&& other) noexcept                    = default;
     auto operator=(Image&& other) noexcept -> Image& = default;
 
-    static auto Create(VmaAllocator allocator, const VkImageCreateInfo& info, VmaMemoryUsage memUsage) -> Image;
+    [[nodiscard]] static auto Create(VmaAllocator allocator, const VkImageCreateInfo& info, VmaMemoryUsage memUsage) -> std::expected<Image, VkResult>;
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return _handle.Valid();
@@ -270,7 +270,7 @@ class ImageBuilder {
     auto Texture2D(uint32_t width, uint32_t height, VkFormat format, VkImageUsageFlags usage, uint32_t mips = 1) noexcept -> ImageBuilder&;
     auto TextureCube(uint32_t size, VkFormat format, VkImageUsageFlags usage, uint32_t mips = 1) noexcept -> ImageBuilder&;
 
-    [[nodiscard]] auto Build(VmaAllocator allocator, VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_GPU_ONLY) const noexcept -> Image;
+    [[nodiscard]] auto Build(VmaAllocator allocator, VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_GPU_ONLY) const noexcept -> std::expected<Image, VkResult>;
 
   private:
     VkImageCreateInfo _info {};

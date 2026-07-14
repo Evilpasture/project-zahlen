@@ -859,7 +859,8 @@ struct RenderContext::Impl {
     void                                     DispatchSkinningPasses();
 
     [[nodiscard]] std::expected<void, Error> BuildProceduralBakePipeline();
-    uint32_t BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion);
+    [[nodiscard]] auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion)
+        -> std::expected<uint32_t, Error>;
 
     void BuildTLAS(VkCommandBuffer cmd) noexcept;
 

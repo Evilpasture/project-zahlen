@@ -745,9 +745,14 @@ static CompiledPrimitive GetOrCreateCompiledPrimitive(
             variantIdx = 2;
         }
 
-        // Clean, decoupled, Vulkan-free PIMPL call
-        uint32_t bakedIndex     = ctx.BakeProceduralTexture(512, 512, variantIdx, primJob.proceduralScale, primJob.proceduralRandomness);
-        subMaterial.albedoIndex = bakedIndex;
+        // Handle the expected return value
+        auto bakedRes = ctx.BakeProceduralTexture(512, 512, variantIdx, primJob.proceduralScale, primJob.proceduralRandomness);
+        if (bakedRes) {
+            subMaterial.albedoIndex = bakedRes.value();
+        } else {
+            Log("WARNING: Procedural texture bake failed: {}. Falling back to default.", bakedRes.error().Message());
+            subMaterial.albedoIndex = 1; // Fallback to Solid White
+        }
     } else {
         subMaterial.albedoIndex = GetBindlessIndex(primJob.albedoImage, 1);
     }

@@ -192,7 +192,7 @@ auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst, co
 // Image RAII
 // ============================================================================
 
-auto Image::Create(VmaAllocator allocator, const VkImageCreateInfo& info, VmaMemoryUsage memUsage) -> Image {
+auto Image::Create(VmaAllocator allocator, const VkImageCreateInfo& info, VmaMemoryUsage memUsage) -> std::expected<Image, VkResult> {
     VkImage                       img        = VK_NULL_HANDLE;
     VmaAllocation                 alloc      = nullptr;
     const VmaAllocationCreateInfo alloc_info = {
@@ -206,12 +206,15 @@ auto Image::Create(VmaAllocator allocator, const VkImageCreateInfo& info, VmaMem
         .priority       = {},
         .minAlignment   = {}
     };
-    if (vmaCreateImage(allocator, &info, &alloc_info, &img, &alloc, nullptr) != VK_SUCCESS) {
-        return {};
+
+    VkResult res = vmaCreateImage(allocator, &info, &alloc_info, &img, &alloc, nullptr);
+    if (res != VK_SUCCESS) {
+        return std::unexpected(res);
     }
-    Image res;
-    res._handle = {allocator, img, alloc};
-    return res;
+
+    Image r;
+    r._handle = {allocator, img, alloc};
+    return r;
 }
 
 ImageBuilder::ImageBuilder() noexcept {
@@ -305,7 +308,7 @@ auto ImageBuilder::TextureCube(uint32_t size, VkFormat format, VkImageUsageFlags
     return *this;
 }
 
-auto ImageBuilder::Build(VmaAllocator allocator, VmaMemoryUsage memUsage) const noexcept -> Image {
+auto ImageBuilder::Build(VmaAllocator allocator, VmaMemoryUsage memUsage) const noexcept -> std::expected<Image, VkResult> {
     return Image::Create(allocator, _info, memUsage);
 }
 

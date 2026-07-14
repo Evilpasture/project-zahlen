@@ -56,8 +56,9 @@ inline auto RenderTarget<F>::Create(Allocator& allocator, const Context& ctx, Vk
         .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
     };
 
-    rt.image = Image::Create(allocator.Get(), info, VMA_MEMORY_USAGE_GPU_ONLY);
-    if (rt.image.Valid()) {
+    auto img_res = Image::Create(allocator.Get(), info, VMA_MEMORY_USAGE_GPU_ONLY);
+    if (img_res.has_value()) {
+        rt.image = std::move(img_res.value());
         if (desc.arrayLayers > 1) {
             rt.view = CreateView2DArray<F>(ctx.Device(), rt.image.Handle(), 0, desc.arrayLayers, desc.aspect, 1);
         } else {
@@ -75,6 +76,36 @@ inline auto RenderTarget<F>::Valid() const noexcept -> bool {
 template <VkFormat F>
 inline RenderTarget<F>::operator bool() const noexcept {
     return Valid();
+}
+
+template <VkFormat F>
+inline auto RenderTarget3D<F>::Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, VkImageUsageFlags usage) -> RenderTarget3D {
+    RenderTarget3D rt;
+    rt.extent                    = extent;
+    const VkImageCreateInfo info = {
+        .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .pNext                 = nullptr,
+        .flags                 = 0,
+        .imageType             = VK_IMAGE_TYPE_3D,
+        .format                = F,
+        .extent                = extent,
+        .mipLevels             = 1,
+        .arrayLayers           = 1,
+        .samples               = VK_SAMPLE_COUNT_1_BIT,
+        .tiling                = VK_IMAGE_TILING_OPTIMAL,
+        .usage                 = usage,
+        .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = {},
+        .pQueueFamilyIndices   = {},
+        .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+
+    auto img_res = Image::Create(allocator.Get(), info, VMA_MEMORY_USAGE_GPU_ONLY);
+    if (img_res.has_value()) {
+        rt.image = std::move(img_res.value());
+        rt.view  = CreateView3D<F>(ctx.Device(), rt.image.Handle(), GetFormatAspect(F), 1);
+    }
+    return rt;
 }
 
 // ============================================================================

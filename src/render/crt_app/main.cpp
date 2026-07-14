@@ -235,10 +235,12 @@ auto main() -> int {
                             .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED
                         };
 
-                        auto texture_image = ZHLN::Vk::Image::Create(allocator.Get(), img_info, VMA_MEMORY_USAGE_GPU_ONLY);
-                        if (!texture_image.Valid()) {
-                            return std::unexpected("Failed to create texture image.");
+                        // CHANGED: Handle the std::expected result from Image::Create
+                        auto texture_image_res = ZHLN::Vk::Image::Create(allocator.Get(), img_info, VMA_MEMORY_USAGE_GPU_ONLY);
+                        if (!texture_image_res.has_value()) {
+                            return std::unexpected("Failed to create texture image. VkResult: " + std::to_string(static_cast<int>(texture_image_res.error())));
                         }
+                        auto texture_image = std::move(texture_image_res.value());
 
                         ZHLN::Vk::CommandPool setup_pool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
                         if (!setup_pool.Allocate(1)) {

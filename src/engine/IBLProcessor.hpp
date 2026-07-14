@@ -36,7 +36,11 @@ class IBLProcessor {
             .pQueueFamilyIndices   = nullptr,
             .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED
         };
-        payload.brdfLutImage = Image::Create(impl.allocator.Get(), lutInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+        auto lut_res = Image::Create(impl.allocator.Get(), lutInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+        if (!lut_res) {
+            return std::unexpected(lut_res.error());
+        }
+        payload.brdfLutImage = std::move(lut_res.value());
 
         auto upload_res = staging.UploadImage2D(payload.brdfLutImage.Handle(), 512, 512, 1, lutData.data(), static_cast<size_t>(512 * 512 * 4));
         if (!upload_res) {
@@ -59,7 +63,11 @@ class IBLProcessor {
         specInfo.extent            = {.width = kBaseSize, .height = kBaseSize, .depth = 1};
         specInfo.mipLevels         = kMipLevels;
         specInfo.arrayLayers       = 6;
-        payload.prefilteredImage   = Image::Create(impl.allocator.Get(), specInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+        auto spec_res              = Image::Create(impl.allocator.Get(), specInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+        if (!spec_res) {
+            return std::unexpected(spec_res.error());
+        }
+        payload.prefilteredImage = std::move(spec_res.value());
 
         size_t totalBytes = 0;
         for (uint32_t m = 0; m < kMipLevels; ++m) {

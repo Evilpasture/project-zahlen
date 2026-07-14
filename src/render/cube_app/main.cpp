@@ -201,17 +201,19 @@ auto main() -> int {
                             .extent        = {.width = tex_w, .height = tex_h, .depth = 1},
                             .mipLevels     = 1,
                             .arrayLayers   = 1,
-                            .samples       = VK_SAMPLE_COUNT_1_BIT,
+                            .samples               = VK_SAMPLE_COUNT_1_BIT,
                             .tiling                = VK_IMAGE_TILING_OPTIMAL,
                             .usage                 = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                             .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
                             .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
                         };
 
-                        ZHLN::Vk::Image cube_texture_image = ZHLN::Vk::Image::Create(allocator.Get(), tex_info, VMA_MEMORY_USAGE_GPU_ONLY);
-                        if (!cube_texture_image.Valid()) {
-                            return std::unexpected("Failed to create cube texture image.");
+                        // CHANGED: Handle the std::expected result from Image::Create
+                        auto cube_texture_image_res = ZHLN::Vk::Image::Create(allocator.Get(), tex_info, VMA_MEMORY_USAGE_GPU_ONLY);
+                        if (!cube_texture_image_res.has_value()) {
+                            return std::unexpected("Failed to create cube texture image. VkResult: " + std::to_string(static_cast<int>(cube_texture_image_res.error())));
                         }
+                        auto cube_texture_image = std::move(cube_texture_image_res.value());
 
                         ZHLN::Vk::CommandPool setup_pool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
                         if (!setup_pool.Allocate(1)) {
@@ -333,13 +335,19 @@ auto main() -> int {
                                                 .mipLevels     = 1,
                                                 .arrayLayers   = 1,
                                                 .samples       = VK_SAMPLE_COUNT_1_BIT,
-                                                .tiling        = VK_IMAGE_TILING_OPTIMAL,
-                                                .usage         = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-                                                .sharingMode   = VK_SHARING_MODE_EXCLUSIVE,
-                                                .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                                                .tiling                = VK_IMAGE_TILING_OPTIMAL,
+                                                .usage                 = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                                                .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
+                                                .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
                                             };
 
-                                            depth_image = ZHLN::Vk::Image::Create(allocator.Get(), img_info, VMA_MEMORY_USAGE_GPU_ONLY);
+                                            // CHANGED: Handle the std::expected result from Image::Create
+                                            auto depth_image_res = ZHLN::Vk::Image::Create(allocator.Get(), img_info, VMA_MEMORY_USAGE_GPU_ONLY);
+                                            if (!depth_image_res.has_value()) {
+                                                return false;
+                                            }
+                                            depth_image = std::move(depth_image_res.value());
+                                            
                                             depth_view  = ZHLN::Vk::CreateView<VK_FORMAT_D32_SFLOAT>(ctx.Device(), depth_image.Handle());
                                             return depth_view.Valid();
                                         };

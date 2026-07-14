@@ -1144,71 +1144,75 @@ std::expected<void, Error> RenderContext::Impl::InitLightingLUTs() {
     stagingContext = std::make_unique<Vk::StagingContext>(allocator, ctx);
     stagingContext->Begin();
 
-    auto ibl_res = Vk::IBLProcessor::Bake(*this, *stagingContext);
-    if (!ibl_res) {
-        return std::unexpected(Error(ibl_res.error()));
-    }
-    iblPayload = std::move(*ibl_res);
-
-    ZHLN::Log("[IBL] Uploading Linearly Transformed Cosines (LTC) LUTs...");
-
-    VkImageCreateInfo ltcInfo = {
-        .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .pNext                 = {},
-        .flags                 = {},
-        .imageType             = VK_IMAGE_TYPE_2D,
-        .format                = VK_FORMAT_R16G16B16A16_SFLOAT,
-        .extent                = {.width = 64, .height = 64, .depth = 1},
-        .mipLevels             = 1,
-        .arrayLayers           = 1,
-        .samples               = VK_SAMPLE_COUNT_1_BIT,
-        .tiling                = VK_IMAGE_TILING_OPTIMAL,
-        .usage                 = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
-        .queueFamilyIndexCount = {},
-        .pQueueFamilyIndices   = {},
-        .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
-    };
-
     using namespace Resource;
     const size_t matRawSize = ltc_mat.size() - 128;
     const size_t ampRawSize = ltc_amp.size() - 128;
 
-    auto ltcStaging_res = Vk::Buffer::Create(allocator.Get(), matRawSize + ampRawSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
-    if (!ltcStaging_res) {
-        return std::unexpected(Error(ltcStaging_res.error()));
-    }
-    auto ltcStaging = std::move(*ltcStaging_res);
+    return Vk::IBLProcessor::Bake(*this, *stagingContext)
+        .transform_error([](VkResult res) -> Error { return res; })
+        .and_then([&](auto&& ibl) -> std::expected<Vk::Buffer, Error> {
+            iblPayload = std::forward<decltype(ibl)>(ibl);
+            ZHLN::Log("[IBL] Uploading Linearly Transformed Cosines (LTC) LUTs...");
 
-    auto        mapped       = ltcStaging.Map();
-    char* const stageBasePtr = static_cast<char*>(mapped.data);
+            return Vk::Buffer::Create(allocator.Get(), matRawSize + ampRawSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY)
+                .transform_error([](VkResult res) -> Error { return res; });
+        })
+        .and_then([&, matRawSize, ampRawSize](auto&& ltcStaging) -> std::expected<std::pair<Vk::Image, Vk::Image>, Error> {
+            auto        mapped       = ltcStaging.Map();
+            auto* const stageBasePtr = static_cast<char*>(mapped.data);
 
-    struct LUTUploadItem {
-        Vk::Image*               targetImage;
-        std::span<const uint8_t> rawData;
-        size_t                   rawSize;
-        size_t                   bufferOffset;
-    };
+            // Map and write raw LTC DDS binary payloads
+            std::memcpy(stageBasePtr, ltc_mat.data() + 128, matRawSize);
+            std::memcpy(stageBasePtr + matRawSize, ltc_amp.data() + 128, ampRawSize);
 
-    std::array<LUTUploadItem, 2> uploads = {
-        {{.targetImage = &ltcMatImage, .rawData = ltc_mat, .rawSize = matRawSize, .bufferOffset = 0},
-         {.targetImage = &ltcAmpImage, .rawData = ltc_amp, .rawSize = ampRawSize, .bufferOffset = matRawSize}}
-    };
+            const VkImageCreateInfo ltcInfo = {
+                .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+                .pNext                 = {},
+                .flags                 = {},
+                .imageType             = VK_IMAGE_TYPE_2D,
+                .format                = VK_FORMAT_R16G16B16A16_SFLOAT,
+                .extent                = {.width = 64, .height = 64, .depth = 1},
+                .mipLevels             = 1,
+                .arrayLayers           = 1,
+                .samples               = VK_SAMPLE_COUNT_1_BIT,
+                .tiling                = VK_IMAGE_TILING_OPTIMAL,
+                .usage                 = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
+                .queueFamilyIndexCount = {},
+                .pQueueFamilyIndices   = {},
+                .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
+            };
 
-    for (const auto& item: uploads) {
-        *item.targetImage = Vk::Image::Create(allocator.Get(), ltcInfo, VMA_MEMORY_USAGE_GPU_ONLY);
+            // Allocate and stage both LUT textures back-to-back
+            return Vk::Image::Create(allocator.Get(), ltcInfo, VMA_MEMORY_USAGE_GPU_ONLY)
+                .transform_error([](VkResult res) -> Error { return res; })
+                .and_then(
+                    [&, ltcInfo, ltcStaging = std::forward<decltype(ltcStaging)>(ltcStaging),
+                     matRawSize](auto&& matImg) mutable -> std::expected<std::pair<Vk::Image, Vk::Image>, Error> {
+                        return Vk::Image::Create(allocator.Get(), ltcInfo, VMA_MEMORY_USAGE_GPU_ONLY)
+                            .transform_error([](VkResult res) -> Error { return res; })
+                            .transform([&, matImg = std::forward<decltype(matImg)>(matImg), ltcStaging = std::move(ltcStaging),
+                                        matRawSize](auto&& ampImg) mutable {
+                                // Queue image buffer copies to transfer queue
+                                stagingContext->UploadImage2DBuffer(matImg.Handle(), 64, 64, 1, ltcStaging.Handle(), 0);
+                                stagingContext->UploadImage2DBuffer(ampImg.Handle(), 64, 64, 1, ltcStaging.Handle(), matRawSize);
 
-        std::memcpy(stageBasePtr + item.bufferOffset, item.rawData.data() + 128, item.rawSize);
+                                stagingContext->AddBuffer(std::move(ltcStaging));
+                                return std::make_pair(std::move(matImg), std::forward<decltype(ampImg)>(ampImg));
+                            });
+                    }
+                );
+        })
+        .transform([&](auto&& images) -> void {
+            // Unpack allocated textures, execute transfer context, and bind views
+            ltcMatImage = std::move(images.first);
+            ltcAmpImage = std::move(images.second);
 
-        stagingContext->UploadImage2DBuffer(item.targetImage->Handle(), 64, 64, 1, ltcStaging.Handle(), item.bufferOffset);
-    }
+            stagingContext->ExecuteAsync();
 
-    stagingContext->AddBuffer(std::move(ltcStaging));
-    stagingContext->ExecuteAsync();
-
-    ltcMatView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle());
-    ltcAmpView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle());
-    return {};
+            ltcMatView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle());
+            ltcAmpView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle());
+        });
 }
 
 bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {

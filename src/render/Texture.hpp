@@ -61,10 +61,11 @@ inline auto UploadTexture(Allocator& allocator, const Context& ctx, const VkImag
     tex_info.mipLevels         = mip_levels;
     tex_info.usage |= (VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
-    result.image = Image::Create(allocator.Get(), tex_info, VMA_MEMORY_USAGE_GPU_ONLY);
-    if (!result.image) {
+    auto img_res = Image::Create(allocator.Get(), tex_info, VMA_MEMORY_USAGE_GPU_ONLY);
+    if (!img_res.has_value()) {
         return {};
     }
+    result.image = std::move(img_res.value());
 
     const size_t image_size  = static_cast<size_t>(texture_w) * texture_h * 4;
     auto         staging_res = Buffer::Create(allocator.Get(), image_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);

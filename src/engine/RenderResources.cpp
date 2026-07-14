@@ -203,8 +203,13 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
     VkFormat          format = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
     VkImageUsageFlags usage  = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
-    // Abstracted: The verbose VkImageCreateInfo block is replaced here
-    auto gpuImage = Vk::ImageBuilder {}.Texture2D(width, height, format, usage, mipLevels).Build(allocator.Get());
+    // CHANGED: Unwrap the std::expected result returned by ImageBuilder::Build
+    auto img_res = Vk::ImageBuilder {}.Texture2D(width, height, format, usage, mipLevels).Build(allocator.Get());
+    if (!img_res.has_value()) {
+        ZHLN::Log("ERROR: CreateTextureInternal failed to allocate image. VkResult: {}", (int) img_res.error());
+        return 1; // Fallback to Solid White (Index 1)
+    }
+    auto gpuImage = std::move(img_res.value());
 
     // Textures are bound back to the graphics queue staging buffer (Safe blitting & stages)
     auto stagingAlloc = stagingRingBuffer.Allocate(imageSize);
@@ -243,8 +248,13 @@ uint32_t RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceD
     const size_t      faceSize = static_cast<size_t>(width) * height * 4;
     VkImageUsageFlags usage    = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
-    // Abstracted: Simple, semantic cubemap allocation
-    auto gpuImage = Vk::ImageBuilder {}.TextureCube(width, VK_FORMAT_R8G8B8A8_UNORM, usage, 1).Build(allocator.Get());
+    // CHANGED: Unwrap the std::expected result returned by ImageBuilder::Build
+    auto img_res = Vk::ImageBuilder {}.TextureCube(width, VK_FORMAT_R8G8B8A8_UNORM, usage, 1).Build(allocator.Get());
+    if (!img_res.has_value()) {
+        ZHLN::Log("ERROR: CreateTextureCubeInternal failed to allocate image. VkResult: {}", (int) img_res.error());
+        return 1; // Fallback to Solid White (Index 1)
+    }
+    auto gpuImage = std::move(img_res.value());
 
     // Textures are bound back to the graphics queue staging buffer (Safe blitting & stages)
     auto stagingAlloc = stagingRingBuffer.Allocate(faceSize * 6);
@@ -556,7 +566,8 @@ void RenderContext::Impl::RegisterShaderWatcher(const char* path, std::function<
     }
 }
 
-auto RenderContext::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness) -> uint32_t {
+auto RenderContext::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness)
+    -> std::expected<uint32_t, Error> {
     return _impl->BakeProceduralTexture(width, height, variantIdx, scale, randomness, 0.0f);
 }
 

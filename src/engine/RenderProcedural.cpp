@@ -46,10 +46,10 @@ std::expected<void, Error> RenderContext::Impl::BuildProceduralBakePipeline() {
     return {};
 }
 
-uint32_t RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion) {
+std::expected<uint32_t, Error>
+    RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion) {
     auto* const device = ctx.Device();
 
-    // 1. Create a texture with STORAGE and SAMPLED usage
     const VkImageCreateInfo imgInfo = {
         .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .pNext                 = {},
@@ -68,34 +68,37 @@ uint32_t RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t hei
         .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
     };
 
-    auto gpuImage  = Vk::Image::Create(allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY);
-    auto writeView = Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 1);
+    return Vk::Image::Create(allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY)
+        .transform_error([](VkResult res) -> Error { return res; })
+        .and_then([&, device, width, height, variantIdx, scale, randomness, distortion](auto&& gpuImage) -> std::expected<uint32_t, Error> {
+            auto writeView = Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 1);
 
-    // Write to compute descriptor set
-    BakeLayout::Write(device, proceduralBakeSet, Vk::ImageWrite {.view = writeView.Get()});
+            // Write to compute descriptor set
+            BakeLayout::Write(device, proceduralBakeSet, Vk::ImageWrite {.view = writeView.Get()});
 
-    // 2. Dispatch the Compute Shader via allocation-free ExecuteImmediate
-    Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
-        // Transition Undefined -> General (Safe for Compute storage writes)
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, gpuImage.Handle());
+            // Dispatch the Compute Shader via allocation-free ExecuteImmediate
+            Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
+                // Transition Undefined -> General (Safe for Compute storage writes)
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, gpuImage.Handle());
 
-        proceduralBakePass.DispatchVariant(
-            cmd, proceduralBakeSet, variantIdx, (width + 15) / 16, (height + 15) / 16, 1,
-            BakePush {.width = width, .height = height, .scale = scale, .randomness = randomness, .distortion = distortion, .bakeType = variantIdx}
-        );
+                proceduralBakePass.DispatchVariant(
+                    cmd, proceduralBakeSet, variantIdx, (width + 15) / 16, (height + 15) / 16, 1,
+                    BakePush {.width = width, .height = height, .scale = scale, .randomness = randomness, .distortion = distortion, .bakeType = variantIdx}
+                );
 
-        // Transition General -> Shader Read Only (Ready for Bindless fragment reads)
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
-    });
+                // Transition General -> Shader Read Only (Ready for Bindless fragment reads)
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
+            });
 
-    // 3. Register our generated view into the Bindless Set
-    uint32_t index = nextTextureIndex++;
-    Vk::UpdateBindlessTextureSlot(device, index, writeView.Get(), bindlessSets, 0);
+            // Register our generated view into the Bindless Set
+            uint32_t index = nextTextureIndex++;
+            Vk::UpdateBindlessTextureSlot(device, index, writeView.Get(), bindlessSets, 0);
 
-    textureImages.push_back(std::move(gpuImage));
-    textureViews.push_back(std::move(writeView));
+            textureImages.push_back(std::forward<decltype(gpuImage)>(gpuImage));
+            textureViews.push_back(std::move(writeView));
 
-    return index;
+            return index;
+        });
 }
 
 } // namespace ZHLN

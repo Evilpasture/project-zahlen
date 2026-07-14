@@ -60,32 +60,7 @@ struct RenderTarget3D {
         return Valid();
     }
 
-    [[nodiscard]] static auto Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, VkImageUsageFlags usage) -> RenderTarget3D {
-        RenderTarget3D rt;
-        rt.extent                    = extent;
-        const VkImageCreateInfo info = {
-            .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-            .pNext                 = nullptr,
-            .flags                 = 0,
-            .imageType             = VK_IMAGE_TYPE_3D,
-            .format                = F,
-            .extent                = extent,
-            .mipLevels             = 1,
-            .arrayLayers           = 1,
-            .samples               = VK_SAMPLE_COUNT_1_BIT,
-            .tiling                = VK_IMAGE_TILING_OPTIMAL,
-            .usage                 = usage,
-            .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
-            .queueFamilyIndexCount = {},
-            .pQueueFamilyIndices   = {},
-            .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
-        };
-        rt.image = Image::Create(allocator.Get(), info, VMA_MEMORY_USAGE_GPU_ONLY);
-        if (rt.image.Valid()) {
-            rt.view = CreateView3D<F>(ctx.Device(), rt.image.Handle(), GetFormatAspect(F), 1);
-        }
-        return rt;
-    }
+    [[nodiscard]] static auto Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, VkImageUsageFlags usage) -> RenderTarget3D;
 };
 
 // Define the Transition overload here where RenderTarget is fully complete
