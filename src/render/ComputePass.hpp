@@ -14,7 +14,7 @@ struct ComputePass {
     Pipeline              pipeline;
     std::vector<Pipeline> pipelines;
 
-    [[nodiscard]] bool Build(
+    [[nodiscard]] std::expected<void, ZHLN::Error> Build(
         VkDevice                   device,
         VkDescriptorSetLayout      descriptorLayout,
         const ZHLN_ShaderDesc&     shader,
@@ -22,7 +22,7 @@ struct ComputePass {
         uint32_t                   pushCount     = 0
     ) noexcept;
 
-    [[nodiscard]] bool BuildVariants(
+    [[nodiscard]] std::expected<void, ZHLN::Error> BuildVariants(
         VkDevice                              device,
         VkDescriptorSetLayout                 descriptorLayout,
         const ZHLN_ShaderDesc&                shader,

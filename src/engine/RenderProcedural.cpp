@@ -33,9 +33,10 @@ std::expected<void, Error> RenderContext::Impl::BuildProceduralBakePipeline() {
         specInfos[i] = {.mapEntryCount = 1, .pMapEntries = specEntries.data(), .dataSize = sizeof(int), .pData = &variants[i]};
     }
 
-    if (!proceduralBakePass.BuildVariants(ctx.Device(), proceduralBakeDescLayout.Get(), shaderDesc, specInfos, &push, 1)) {
-        ZHLN::Log("[Shader] Failed to build specialized Procedural Bake Compute variants!");
-        return std::unexpected(RenderInitError::PipelineCreationFailed);
+    auto build_res = proceduralBakePass.BuildVariants(ctx.Device(), proceduralBakeDescLayout.Get(), shaderDesc, specInfos, &push, 1);
+    if (!build_res) {
+        ZHLN::Log("[Shader] Failed to build specialized Procedural Bake Compute variants: {}", build_res.error().Message());
+        return std::unexpected(build_res.error());
     }
 
     ZHLN::Log(

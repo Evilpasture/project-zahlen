@@ -6,7 +6,7 @@
 
 namespace ZHLN::Vk {
 
-bool ComputePass::Build(
+std::expected<void, ZHLN::Error> ComputePass::Build(
     VkDevice                   device,
     VkDescriptorSetLayout      descriptorLayout,
     const ZHLN_ShaderDesc&     shader,
@@ -16,18 +16,21 @@ bool ComputePass::Build(
     ZHLN_PipelineLayoutDesc p_layout_desc = {
         .set_layouts = &descriptorLayout, .set_layout_count = 1, .push_constants = pushConstants, .push_constant_count = pushCount
     };
-    pipelineLayout = PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &p_layout_desc));
+    VkPipelineLayout raw_layout = ZHLN_CreatePipelineLayout(device, &p_layout_desc);
+    if (raw_layout == VK_NULL_HANDLE) {
+        return std::unexpected(RenderInitError::PipelineLayoutCreationFailed);
+    }
+    pipelineLayout = PipelineLayout(device, raw_layout);
 
     auto p_res = ComputePipelineBuilder().Shader(shader).Layout(pipelineLayout.Get()).Build(device);
-
     if (!p_res) {
-        return false;
+        return std::unexpected(p_res.error());
     }
     pipeline = std::move(*p_res);
-    return true;
+    return {};
 }
 
-bool ComputePass::BuildVariants(
+std::expected<void, ZHLN::Error> ComputePass::BuildVariants(
     VkDevice                              device,
     VkDescriptorSetLayout                 descriptorLayout,
     const ZHLN_ShaderDesc&                shader,
@@ -38,20 +41,27 @@ bool ComputePass::BuildVariants(
     ZHLN_PipelineLayoutDesc p_layout_desc = {
         .set_layouts = &descriptorLayout, .set_layout_count = 1, .push_constants = pushConstants, .push_constant_count = pushCount
     };
-    pipelineLayout = PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &p_layout_desc));
+    VkPipelineLayout raw_layout = ZHLN_CreatePipelineLayout(device, &p_layout_desc);
+    if (raw_layout == VK_NULL_HANDLE) {
+        return std::unexpected(RenderInitError::PipelineLayoutCreationFailed);
+    }
+    pipelineLayout = PipelineLayout(device, raw_layout);
 
     pipelines.clear();
     pipelines.reserve(specInfos.size());
 
     for (const auto& spec: specInfos) {
         auto p_res = ComputePipelineBuilder().Shader(shader).Layout(pipelineLayout.Get()).Specialization(&spec).Build(device);
-
         if (!p_res) {
-            return false;
+            return std::unexpected(p_res.error());
         }
         pipelines.push_back(std::move(*p_res));
     }
-    return !pipelines.empty();
+
+    if (pipelines.empty()) {
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
+    }
+    return {};
 }
 
 } // namespace ZHLN::Vk

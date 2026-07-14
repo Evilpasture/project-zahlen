@@ -517,13 +517,6 @@ std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
 std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
     using enum Resource::ShaderID;
 
-    auto make_expected = [](bool success, Error err) -> std::expected<void, Error> {
-        if (success) {
-            return {};
-        }
-        return std::unexpected(err);
-    };
-
     // 1. Initial side-effects: Descriptor sets & Buffer allocation
     Vk::AllocateDoubleBufferedSet<CullingLayout>(ctx.Device(), cullingLayout, cullingPool, cullingSets);
 
@@ -553,7 +546,7 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
     auto cullingShader = Vk::CreateShaderDesc(Resource::culling_comp);
 
     // 2. Start the monadic pipeline with the Compute Culling build
-    return make_expected(cullingPass.Build(ctx.Device(), cullingLayout.Get(), cullingShader, &cullingPush, 1), RenderInitError::PipelineCreationFailed)
+    return cullingPass.Build(ctx.Device(), cullingLayout.Get(), cullingShader, &cullingPush, 1)
         .and_then([&]() -> std::expected<void, Error> {
             constexpr auto numClusters = static_cast<size_t>(16 * 9 * 24);
 
@@ -582,11 +575,11 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
             }
 
             auto bDesc = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterBounds).vertex);
-            return make_expected(clusterBoundsPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), bDesc), RenderInitError::PipelineCreationFailed);
+            return clusterBoundsPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), bDesc);
         })
         .and_then([&]() {
             auto cDesc = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterCulling).vertex);
-            return make_expected(clusterCullingPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), cDesc), RenderInitError::PipelineCreationFailed);
+            return clusterCullingPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), cDesc);
         })
         .and_then([&]() -> std::expected<void, Error> {
             if (rtCtx.Valid()) {
