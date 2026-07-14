@@ -3,8 +3,6 @@
 # -readability-identifier-length: Screams at short iterator/variable names like i, j, dt, x, y, z
 # -cppcoreguidelines-owning-memory: Screams at raw pointers (useless for custom memory/C-style architectures)
 # -cppcoreguidelines-no-malloc: Screams at malloc/free
-# -readability-magic-numbers: Screams at array sizes, colors, clear values
-# -cppcoreguidelines-avoid-magic-numbers: Same as above but under cppcoreguidelines
 # -readability-uppercase-literal-suffix: Screams at lowercase float suffix 'f' (demanding uppercase 'F')
 # -misc-non-private-member-variables-in-classes: Screams at public member variables in POD structs
 # -cppcoreguidelines-non-private-member-variables-in-classes: Same as above under cppcoreguidelines
@@ -37,8 +35,6 @@ Checks: >
   -readability-identifier-length,
   -cppcoreguidelines-owning-memory,
   -cppcoreguidelines-no-malloc,
-  -readability-magic-numbers,
-  -cppcoreguidelines-avoid-magic-numbers,
   -readability-uppercase-literal-suffix,
   -misc-non-private-member-variables-in-classes,
   -cppcoreguidelines-non-private-member-variables-in-classes,
@@ -66,3 +62,12 @@ CheckOptions:
   modernize-use-designated-initializers.IgnoreMacros: false
   # Prevents readability-implicit-bool-conversion from panicking over VkBool32 assignments
   readability-implicit-bool-conversion.AllowIntegerConditions: true
+  readability-magic-numbers.IgnoredIntegerValues: "0;1;2;3;4"
+  readability-magic-numbers.IgnoredFloatingPointValues: "0.0;1.0;2.0;-1.0;0.5"
+  
+  # Prevents linter from complaining when magic numbers are used to initialize enum values
+  readability-magic-numbers.IgnoreEnums: true
+  
+  # Forces the cppcoreguidelines layer to respect the same numeric baselines
+  cppcoreguidelines-avoid-magic-numbers.IgnoredIntegerValues: "0;1;2;3;4"
+  cppcoreguidelines-avoid-magic-numbers.IgnoredFloatingPointValues: "0.0;1.0;2.0;-1.0;0.5"
