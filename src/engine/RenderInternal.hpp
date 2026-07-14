@@ -588,18 +588,7 @@ struct RenderContext::Impl {
         void Drain(VkCommandBuffer cmd) noexcept {
             ZHLN_LOCK(mutex) {
                 if (!buffers.empty()) {
-                    VkDependencyInfo depInfo = {
-                        .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                        .pNext                    = {},
-                        .dependencyFlags          = {},
-                        .memoryBarrierCount       = {},
-                        .pMemoryBarriers          = {},
-                        .bufferMemoryBarrierCount = static_cast<uint32_t>(buffers.size()),
-                        .pBufferMemoryBarriers    = buffers.data(),
-                        .imageMemoryBarrierCount  = {},
-                        .pImageMemoryBarriers     = {},
-                    };
-                    vkCmdPipelineBarrier2(cmd, &depInfo);
+                    Vk::BufferBarrier(cmd, buffers);
                     buffers.clear();
                 }
             }

@@ -182,6 +182,25 @@ inline void BufferBarrier(VkCommandBuffer cmd, const VkBufferMemoryBarrier2& bar
     vkCmdPipelineBarrier2(cmd, &dep_info);
 }
 
+inline void BufferBarrier(VkCommandBuffer cmd, std::span<const VkBufferMemoryBarrier2> barriers) noexcept {
+    if (barriers.empty()) {
+        return;
+    }
+
+    const VkDependencyInfo dep_info = {
+        .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .pNext                    = nullptr,
+        .dependencyFlags          = 0,
+        .memoryBarrierCount       = 0,
+        .pMemoryBarriers          = nullptr,
+        .bufferMemoryBarrierCount = static_cast<uint32_t>(barriers.size()),
+        .pBufferMemoryBarriers    = barriers.data(),
+        .imageMemoryBarrierCount  = 0,
+        .pImageMemoryBarriers     = nullptr,
+    };
+    vkCmdPipelineBarrier2(cmd, &dep_info);
+}
+
 template <QueueType QType>
 [[nodiscard]] constexpr auto ResolveQueueFamily(const Context& ctx) noexcept -> uint32_t {
     if constexpr (QType == QueueType::Graphics || QType == QueueType::Compute) {
