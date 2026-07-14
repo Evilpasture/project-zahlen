@@ -370,8 +370,12 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
 
     return GetPlatformInstanceExtensions(window, cfg.enableValidation)
         .and_then([&](auto&& inst_exts) -> std::expected<void, Error> {
-            instance = Vk::Context::Builder().AppName(impl->appName).EnableValidation(cfg.enableValidation).InstanceExtensions(inst_exts).BuildInstance();
-            return make_expected(instance != VK_NULL_HANDLE, RenderInitError::InstanceCreationFailed);
+            return Vk::Context::Builder()
+                .AppName(impl->appName)
+                .EnableValidation(cfg.enableValidation)
+                .InstanceExtensions(inst_exts)
+                .BuildInstance()
+                .transform([&](VkInstance inst) { instance = inst; });
         })
         .and_then([&]() -> std::expected<void, Error> {
             if (!window.IsTTY()) {
@@ -382,8 +386,9 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
             return {};
         })
         .and_then([&]() -> std::expected<void, Error> {
-            physicalInfo = Vk::Context::Builder().Instance(instance).Surface(raw_surface).SelectPhysicalDevice();
-            return make_expected(physicalInfo.handle != VK_NULL_HANDLE, RenderInitError::NoSuitableDeviceFound);
+            return Vk::Context::Builder().Instance(instance).Surface(raw_surface).SelectPhysicalDevice().transform([&](const ZHLN_PhysicalDeviceInfo& info) {
+                physicalInfo = info;
+            });
         })
         .and_then([&]() -> std::expected<void, Error> {
             if (window.IsTTY()) {

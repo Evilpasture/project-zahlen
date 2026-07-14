@@ -76,13 +76,21 @@ auto Context::operator=(Context&& other) noexcept -> Context& {
 // Builder Implementation
 // ============================================================================
 
-VkInstance Context::Builder::BuildInstance() const noexcept {
-    return CreateInstance(_appName, _appVersion, _instanceExtensions, _enableValidation);
+std::expected<VkInstance, ZHLN::Error> Context::Builder::BuildInstance() const noexcept {
+    VkInstance instance = CreateInstance(_appName, _appVersion, _instanceExtensions, _enableValidation);
+    if (instance == VK_NULL_HANDLE) {
+        return std::unexpected(RenderInitError::InstanceCreationFailed);
+    }
+    return instance;
 }
 
-ZHLN_PhysicalDeviceInfo Context::Builder::SelectPhysicalDevice() const noexcept {
-    ZHLN_DeviceSelectDesc select_desc = {.instance = _instance, .surface = _surface, .score_fn = _scoreFn, .score_userdata = _scoreUserdata};
-    return ZHLN_SelectPhysicalDevice(&select_desc);
+std::expected<ZHLN_PhysicalDeviceInfo, ZHLN::Error> Context::Builder::SelectPhysicalDevice() const noexcept {
+    ZHLN_DeviceSelectDesc   select_desc = {.instance = _instance, .surface = _surface, .score_fn = _scoreFn, .score_userdata = _scoreUserdata};
+    ZHLN_PhysicalDeviceInfo info        = ZHLN_SelectPhysicalDevice(&select_desc);
+    if (info.handle == VK_NULL_HANDLE) {
+        return std::unexpected(RenderInitError::NoSuitableDeviceFound);
+    }
+    return info;
 }
 
 std::expected<Context, Error> Context::Builder::Build() const noexcept {

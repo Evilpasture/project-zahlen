@@ -121,9 +121,9 @@ class Context::Builder {
     }
 
     // --- Build Steps ---
-    [[nodiscard]] VkInstance                    BuildInstance() const noexcept;
-    [[nodiscard]] ZHLN_PhysicalDeviceInfo       SelectPhysicalDevice() const noexcept;
-    [[nodiscard]] std::expected<Context, Error> Build() const noexcept;
+    [[nodiscard]] std::expected<VkInstance, ZHLN::Error>              BuildInstance() const noexcept;
+    [[nodiscard]] std::expected<ZHLN_PhysicalDeviceInfo, ZHLN::Error> SelectPhysicalDevice() const noexcept;
+    [[nodiscard]] std::expected<Context, ZHLN::Error>                 Build() const noexcept;
 
   private:
     std::string_view _appName          = "ZHLN Engine";
