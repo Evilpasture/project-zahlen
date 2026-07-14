@@ -515,16 +515,18 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
         auto idb_res = Vk::Buffer::Create(
             allocator.Get(), sizeof(InstanceData) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
         );
-        if (!idb_res)
+        if (!idb_res) {
             return std::unexpected(idb_res.error());
+        }
         instanceDataBuffers[i] = std::move(*idb_res);
 
         auto icb_res = Vk::Buffer::Create(
             allocator.Get(), sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
             VMA_MEMORY_USAGE_GPU_ONLY
         );
-        if (!icb_res)
+        if (!icb_res) {
             return std::unexpected(icb_res.error());
+        }
         indirectCommandsBuffers[i] = std::move(*icb_res);
 
         CullingLayout::Write(
@@ -551,8 +553,9 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                 allocator.Get(), sizeof(struct ClusterBounds) * numClusters, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                 VMA_MEMORY_USAGE_GPU_ONLY
             );
-            if (!cbb_res)
+            if (!cbb_res) {
                 return std::unexpected(cbb_res.error());
+            }
             clusterBoundsBuffer = std::move(*cbb_res);
 
             Vk::AllocateDoubleBufferedSet<ClusterCullingLayout>(ctx.Device(), clusterCullingDescLayout, clusterCullingPool, clusterCullingSets);
@@ -560,21 +563,24 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
             for (int i = 0; i < 2; ++i) {
                 auto cgb_res =
                     Vk::Buffer::Create(allocator.Get(), sizeof(ClusterVolume) * numClusters, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-                if (!cgb_res)
+                if (!cgb_res) {
                     return std::unexpected(cgb_res.error());
+                }
                 clusterGridBuffers[i] = std::move(*cgb_res);
 
                 auto lsb_res =
                     Vk::Buffer::Create(allocator.Get(), sizeof(uint32_t) * numClusters * 64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-                if (!lsb_res)
+                if (!lsb_res) {
                     return std::unexpected(lsb_res.error());
+                }
                 lightIndexListBuffers[i] = std::move(*lsb_res);
 
                 auto gcb_res = Vk::Buffer::Create(
                     allocator.Get(), sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY
                 );
-                if (!gcb_res)
+                if (!gcb_res) {
                     return std::unexpected(gcb_res.error());
+                }
                 globalCounterBuffers[i] = std::move(*gcb_res);
 
                 ClusterCullingLayout::Write(
@@ -602,16 +608,18 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                         allocator.Get(), tlasSizes.acceleration_structure_size,
                         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
                     );
-                    if (!tb_res)
+                    if (!tb_res) {
                         return std::unexpected(tb_res.error());
+                    }
                     tlasBuffer[i] = std::move(*tb_res);
 
                     auto tsb_res = Vk::Buffer::Create(
                         allocator.Get(), tlasSizes.build_scratch_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                         VMA_MEMORY_USAGE_GPU_ONLY
                     );
-                    if (!tsb_res)
+                    if (!tsb_res) {
                         return std::unexpected(tsb_res.error());
+                    }
                     tlasScratchBuffer[i] = std::move(*tsb_res);
 
                     tlas[i] = rtCtx.CreateAS(tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL);
@@ -622,16 +630,18 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                             VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                         VMA_MEMORY_USAGE_GPU_ONLY
                     );
-                    if (!tib_res)
+                    if (!tib_res) {
                         return std::unexpected(tib_res.error());
+                    }
                     tlasInstanceBuffers[i] = std::move(*tib_res);
 
                     auto tstb_res = Vk::Buffer::Create(
                         allocator.Get(), sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                         VMA_MEMORY_USAGE_CPU_ONLY
                     );
-                    if (!tstb_res)
+                    if (!tstb_res) {
                         return std::unexpected(tstb_res.error());
+                    }
                     tlasStagingBuffers[i] = std::move(*tstb_res);
                 }
             }
