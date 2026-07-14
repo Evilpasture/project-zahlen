@@ -41,16 +41,17 @@ auto main() -> int {
                                             [](ZHLN::Error err) { return "Failed to build instance extensions: " + std::string(err.Message()); }
         ).and_then([&](auto&& instExts) -> std::expected<void, std::string> {
             // 3. Create Vulkan Instance via Builder
-            VkInstance instance = Vk::Context::Builder()
-                                      .AppName("ZHLN - Triangle Demo")
-                                      .AppVersion(VK_MAKE_API_VERSION(0, 1, 0, 0))
-                                      .InstanceExtensions(instExts)
-                                      .EnableValidation(true)
-                                      .BuildInstance();
+            auto instance_res = Vk::Context::Builder()
+                                    .AppName("ZHLN - Triangle Demo")
+                                    .AppVersion(VK_MAKE_API_VERSION(0, 1, 0, 0))
+                                    .InstanceExtensions(instExts)
+                                    .EnableValidation(true)
+                                    .BuildInstance();
 
-            if (instance == VK_NULL_HANDLE) {
-                return std::unexpected("Failed to create Vulkan Instance.");
+            if (!instance_res) {
+                return std::unexpected("Failed to create Vulkan Instance: " + std::string(instance_res.error().Message()));
             }
+            VkInstance instance = *instance_res;
 
             // 4. Create Vulkan Surface (Raw Handle)
             VkSurfaceKHR raw_surface = Demo::CreateSurface(instance, win);
@@ -60,13 +61,14 @@ auto main() -> int {
             }
 
             // 5. Select Physical Device via Builder
-            ZHLN_PhysicalDeviceInfo physical = Vk::Context::Builder().Instance(instance).Surface(raw_surface).SelectPhysicalDevice();
+            auto physical_res = Vk::Context::Builder().Instance(instance).Surface(raw_surface).SelectPhysicalDevice();
 
-            if (physical.handle == VK_NULL_HANDLE) {
+            if (!physical_res) {
                 vkDestroySurfaceKHR(instance, raw_surface, nullptr);
                 vkDestroyInstance(instance, nullptr);
-                return std::unexpected("Failed to select a suitable physical device.");
+                return std::unexpected("Failed to select a suitable physical device: " + std::string(physical_res.error().Message()));
             }
+            ZHLN_PhysicalDeviceInfo physical = *physical_res;
 
             // 6. Build Device Extensions Monadically
             return Vk::ExtensionBuilder::ForDevice(physical.handle)
@@ -110,14 +112,16 @@ auto main() -> int {
 
                     // 10. Allocator Setup
                     Vk::Allocator allocator;
-                    if (!allocator.Init(ctx)) {
-                        return std::unexpected("Failed to initialize Vulkan Memory Allocator.");
+                    auto          alloc_res = allocator.Init(ctx);
+                    if (!alloc_res) {
+                        return std::unexpected("Failed to initialize Vulkan Memory Allocator: " + std::string(alloc_res.error().Message()));
                     }
 
                     // 11. Presentation Setup
                     Vk::PresentationContext pres;
-                    if (!pres.Init(ctx, allocator, surface.Get(), win.width, win.height, true)) {
-                        return std::unexpected("Failed to initialize Presentation Context.");
+                    auto                    pres_res = pres.Init(ctx, allocator, surface.Get(), win.width, win.height, true);
+                    if (!pres_res) {
+                        return std::unexpected("Failed to initialize Presentation Context: " + std::string(pres_res.error().Message()));
                     }
 
                     auto sync  = Vk::FrameSync<3>::Create(ctx.Device());

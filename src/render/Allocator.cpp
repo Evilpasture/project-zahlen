@@ -34,7 +34,7 @@ auto Allocator::operator=(Allocator&& other) noexcept -> Allocator& {
     return *this;
 }
 
-auto Allocator::Init(VkInstance instance, VkPhysicalDevice physical, VkDevice device) noexcept -> bool {
+std::expected<void, ZHLN::Error> Allocator::Init(VkInstance instance, VkPhysicalDevice physical, VkDevice device) noexcept {
     const VmaVulkanFunctions vfuncs = {
         .vkGetInstanceProcAddr                   = &vkGetInstanceProcAddr,
         .vkGetDeviceProcAddr                     = &vkGetDeviceProcAddr,
@@ -82,10 +82,14 @@ auto Allocator::Init(VkInstance instance, VkPhysicalDevice physical, VkDevice de
         .pTypeExternalMemoryHandleTypes = {},
     };
 
-    return vmaCreateAllocator(&info, &_handle) == VK_SUCCESS;
+    VkResult res = vmaCreateAllocator(&info, &_handle);
+    if (res != VK_SUCCESS) {
+        return std::unexpected(res);
+    }
+    return {};
 }
 
-auto Allocator::Init(const Context& ctx) noexcept -> bool {
+std::expected<void, ZHLN::Error> Allocator::Init(const Context& ctx) noexcept {
     return Init(ctx.Instance(), ctx.Physical(), ctx.Device());
 }
 
@@ -338,7 +342,8 @@ auto StagingRingBuffer::operator=(StagingRingBuffer&& other) noexcept -> Staging
     return *this;
 }
 
-auto StagingRingBuffer::Init(VmaAllocator allocator, VkDevice device, VkQueue queue, uint32_t queueFamily, VkDeviceSize capacity) noexcept -> bool {
+auto StagingRingBuffer::Init(VmaAllocator allocator, VkDevice device, VkQueue queue, uint32_t queueFamily, VkDeviceSize capacity) noexcept
+    -> std::expected<void, ZHLN::Error> {
     _allocator   = allocator;
     _device      = device;
     _queue       = queue;
@@ -349,20 +354,22 @@ auto StagingRingBuffer::Init(VmaAllocator allocator, VkDevice device, VkQueue qu
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO, .pNext = nullptr, .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE, .initialValue = 0
     };
     VkSemaphoreCreateInfo sem_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &type_info, .flags = 0};
-    if (vkCreateSemaphore(_device, &sem_info, nullptr, &_timelineSemaphore) != VK_SUCCESS) {
-        return false;
+
+    auto res = vkCreateSemaphore(_device, &sem_info, nullptr, &_timelineSemaphore);
+    if (res != VK_SUCCESS) {
+        return std::unexpected(res);
     }
 
     _stagingBuffer = Buffer::Create(_allocator, _capacity, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
     if (!_stagingBuffer.Valid()) {
         vkDestroySemaphore(_device, _timelineSemaphore, nullptr);
         _timelineSemaphore = VK_NULL_HANDLE;
-        return false;
+        return std::unexpected(RenderInitError::SubsystemAllocationFailed);
     }
 
     _mappedRegion = _stagingBuffer.Map();
     _mappedPtr    = _mappedRegion.data;
-    return true;
+    return {};
 }
 
 void StagingRingBuffer::Cleanup() noexcept {

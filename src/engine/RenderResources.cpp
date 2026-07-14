@@ -297,18 +297,7 @@ auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data, VkBuffe
                  .dst_access       = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT}
             );
 
-            VkDependencyInfo depInfo = {
-                .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                .pNext                    = {},
-                .dependencyFlags          = {},
-                .memoryBarrierCount       = {},
-                .pMemoryBarriers          = {},
-                .bufferMemoryBarrierCount = 1,
-                .pBufferMemoryBarriers    = &release,
-                .imageMemoryBarrierCount  = {},
-                .pImageMemoryBarriers     = {},
-            };
-            vkCmdPipelineBarrier2(cmd, &depInfo);
+            Vk::BufferBarrier(cmd, release);
 
             ZHLN_LOCK(pendingAcquires.mutex) {
                 pendingAcquires.buffers.push_back(acquire);
@@ -428,95 +417,105 @@ void RenderContext::SetAAState(const AAState& state) {
 
 RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
     auto* impl = _impl.get();
-    if (!impl->rtCtx.Valid()) [[unlikely]] {
-        // Return explicit Vulkan error indicating raytracing is unsupported on this device
-        return std::unexpected(VK_ERROR_FEATURE_NOT_PRESENT);
-    }
 
-    auto* nativePosMesh   = impl->meshPool.Resolve(mesh.posBuffer);
-    auto* nativeIndexMesh = mesh.indexBuffer != BufferHandle::Invalid ? impl->meshPool.Resolve(mesh.indexBuffer) : nullptr;
-
-    if (nativePosMesh == nullptr) [[unlikely]] {
-        return std::unexpected(Error(VulkanCallError::VulkanCallFailed));
-    }
-
-    ZHLN_BlasGeometryDesc geom = {
-        .vertex_data   = nativePosMesh->vboAddress,
-        .vertex_stride = sizeof(VertexPosition),
-        .max_vertex    = mesh.vertexCount,
-        .vertex_format = VK_FORMAT_R32G32B32_SFLOAT,
-        .index_data    = (nativeIndexMesh != nullptr) ? nativeIndexMesh->vboAddress : 0,
-        .index_type    = (nativeIndexMesh != nullptr) ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_NONE_KHR
+    // Struct to propagate intermediate allocations down the monadic railway
+    struct BuildContext {
+        NativeMesh*                     posMesh;
+        NativeMesh*                     indexMesh;
+        ZHLN_BlasGeometryDesc           geom;
+        uint32_t                        primitiveCount;
+        ZHLN_AccelerationStructureSizes sizes;
+        Vk::Buffer                      blasBuffer;
+        VkAccelerationStructureKHR      blas;
+        Vk::Buffer                      scratch;
     };
 
-    uint32_t primitiveCount = (nativeIndexMesh != nullptr) ? mesh.indexCount / 3 : mesh.vertexCount / 3;
+    // Invoking the default constructor directly resolves the ambiguity
+    return std::expected<void, Error>()
+        .and_then([&]() -> std::expected<BuildContext, Error> {
+            if (!impl->rtCtx.Valid()) {
+                return std::unexpected(VulkanCallError::FeatureNotPresent);
+            }
+            auto* pos = impl->meshPool.Resolve(mesh.posBuffer);
+            if (pos == nullptr) {
+                return std::unexpected(VulkanCallError::VulkanCallFailed);
+            }
+            auto* index = mesh.indexBuffer != BufferHandle::Invalid ? impl->meshPool.Resolve(mesh.indexBuffer) : nullptr;
 
-    ZHLN_AccelerationStructureSizes sizes;
-    impl->rtCtx.GetBlasSizes(geom, primitiveCount, sizes);
+            return BuildContext {
+                .posMesh = pos, .indexMesh = index, .geom = {}, .primitiveCount = {}, .sizes = {}, .blasBuffer = {}, .blas = nullptr, .scratch = {}
+            };
+        })
+        .and_then([&](BuildContext b) -> std::expected<BuildContext, Error> {
+            b.geom = {
+                .vertex_data   = b.posMesh->vboAddress,
+                .vertex_stride = sizeof(VertexPosition),
+                .max_vertex    = mesh.vertexCount,
+                .vertex_format = VK_FORMAT_R32G32B32_SFLOAT,
+                .index_data    = (b.indexMesh != nullptr) ? b.indexMesh->vboAddress : 0,
+                .index_type    = (b.indexMesh != nullptr) ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_NONE_KHR
+            };
+            b.primitiveCount = (b.indexMesh != nullptr) ? mesh.indexCount / 3 : mesh.vertexCount / 3;
 
-    // 1. Safe Allocation of the BLAS buffer
-    auto blasBuffer = Vk::Buffer::Create(
-        impl->allocator.Get(), sizes.acceleration_structure_size,
-        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
-    );
-    if (!blasBuffer.Valid()) [[unlikely]] {
-        return std::unexpected(Error(VulkanCallError::VulkanCallFailed));
-    }
-    nativePosMesh->blasBuffer = std::move(blasBuffer);
+            impl->rtCtx.GetBlasSizes(b.geom, b.primitiveCount, b.sizes);
 
-    // 2. Safe Creation of the Acceleration Structure handle
-    auto* blas = impl->rtCtx.CreateAS(nativePosMesh->blasBuffer.Handle(), sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL);
-    if (blas == VK_NULL_HANDLE) [[unlikely]] {
-        return std::unexpected(Error(VulkanCallError::VulkanCallFailed));
-    }
-    nativePosMesh->blas        = blas;
-    nativePosMesh->blasAddress = impl->rtCtx.GetASAddress(nativePosMesh->blas);
-
-    nativePosMesh->device = impl->ctx.Device();
-    nativePosMesh->rtCtx  = &impl->rtCtx;
-
-    // 3. Safe Allocation of the Scratch buffer
-    Vk::Buffer scratch = Vk::Buffer::Create(
-        impl->allocator.Get(), sizes.build_scratch_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        VMA_MEMORY_USAGE_GPU_ONLY
-    );
-    if (!scratch.Valid()) [[unlikely]] {
-        return std::unexpected(Error(VulkanCallError::VulkanCallFailed));
-    }
-
-    {
-        Vk::CommandPool<Vk::QueueType::Graphics> tempPool(impl->ctx.Device(), impl->ctx.PhysicalInfo().graphics_family);
-        if (!tempPool.Allocate(1)) [[unlikely]] {
-            return std::unexpected(Error(VulkanCallError::VulkanCallFailed));
-        }
-
-        VkCommandBuffer tempCmd = tempPool[0];
-        {
-            Vk::CommandBufferGuard guard(tempCmd);
-            // Cleanly drain pending family ownership acquires (locks and C-structs are hidden)
-            impl->pendingAcquires.Drain(tempCmd);
-
-            // Synchronize the vertex/index buffer copy writes with the BLAS build reads
-            Vk::MemoryBarrier(
-                tempCmd, {.src_stage  = VK_PIPELINE_STAGE_2_COPY_BIT,
-                          .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                          .dst_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                          .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
+            b.blasBuffer = Vk::Buffer::Create(
+                impl->allocator.Get(), b.sizes.acceleration_structure_size,
+                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
             );
-            impl->rtCtx.CmdBuildBlas(tempCmd, geom, nativePosMesh->blas, Vk::GetBufferAddress(impl->ctx.Device(), scratch.Handle()), primitiveCount);
-        }
+            if (!b.blasBuffer.Valid()) {
+                return std::unexpected(VulkanCallError::VulkanCallFailed);
+            }
+            return b;
+        })
+        .and_then([&](BuildContext b) -> std::expected<BuildContext, Error> {
+            b.blas = impl->rtCtx.CreateAS(b.blasBuffer.Handle(), b.sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL);
+            if (b.blas == VK_NULL_HANDLE) {
+                return std::unexpected(VulkanCallError::VulkanCallFailed);
+            }
+            b.scratch = Vk::Buffer::Create(
+                impl->allocator.Get(), b.sizes.build_scratch_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                VMA_MEMORY_USAGE_GPU_ONLY
+            );
+            if (!b.scratch.Valid()) {
+                return std::unexpected(VulkanCallError::VulkanCallFailed);
+            }
+            return b;
+        })
+        .and_then([&](BuildContext b) -> std::expected<void, Error> {
+            Vk::CommandPool<Vk::QueueType::Graphics> tempPool(impl->ctx.Device(), impl->ctx.PhysicalInfo().graphics_family);
+            if (!tempPool.Allocate(1)) {
+                return std::unexpected(VulkanCallError::VulkanCallFailed);
+            }
 
-        // 4. Submit and propagate potential queue / device-loss failures
-        auto res = Vk::SubmitAndWait(
-            impl->ctx.GraphicsQueue(), tempCmd, impl->transferRingBuffer.GetSemaphore(), impl->transferRingBuffer.GetCurrentValue(),
-            VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
-        );
-        if (!res) [[unlikely]] {
-            return std::unexpected(res.error());
-        }
-    }
+            VkCommandBuffer tempCmd = tempPool[0];
+            {
+                Vk::CommandBufferGuard guard(tempCmd);
+                impl->pendingAcquires.Drain(tempCmd);
 
-    return {};
+                Vk::MemoryBarrier(
+                    tempCmd, {.src_stage  = VK_PIPELINE_STAGE_2_COPY_BIT,
+                              .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                              .dst_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                              .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
+                );
+                impl->rtCtx.CmdBuildBlas(tempCmd, b.geom, b.blas, Vk::GetBufferAddress(impl->ctx.Device(), b.scratch.Handle()), b.primitiveCount);
+            }
+
+            return Vk::SubmitAndWait(
+                       impl->ctx.GraphicsQueue(), tempCmd, impl->transferRingBuffer.GetSemaphore(), impl->transferRingBuffer.GetCurrentValue(),
+                       VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
+            )
+                .transform_error([](auto err) -> Error { return err; })
+                .transform([&]() {
+                    // Safely update the native mesh object only upon successful GPU submission
+                    b.posMesh->blasBuffer  = std::move(b.blasBuffer);
+                    b.posMesh->blas        = b.blas;
+                    b.posMesh->blasAddress = impl->rtCtx.GetASAddress(b.blas);
+                    b.posMesh->device      = impl->ctx.Device();
+                    b.posMesh->rtCtx       = &impl->rtCtx;
+                });
+        });
 }
 
 void RenderContext::Impl::InitializeSystemTextures() {

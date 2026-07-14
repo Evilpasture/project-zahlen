@@ -132,9 +132,9 @@ class Allocator {
     Allocator(Allocator&& other) noexcept;
     auto operator=(Allocator&& other) noexcept -> Allocator&;
 
-    [[nodiscard]] auto Init(VkInstance instance, VkPhysicalDevice physical, VkDevice device) noexcept -> bool;
+    [[nodiscard]] auto Init(VkInstance instance, VkPhysicalDevice physical, VkDevice device) noexcept -> std::expected<void, ZHLN::Error>;
 
-    [[nodiscard]] auto Init(const Context& ctx) noexcept -> bool;
+    [[nodiscard]] auto Init(const Context& ctx) noexcept -> std::expected<void, ZHLN::Error>;
 
     [[nodiscard]] auto Get() const noexcept -> VmaAllocator {
         return _handle;
@@ -315,8 +315,9 @@ class StagingRingBuffer {
     StagingRingBuffer(StagingRingBuffer&& other) noexcept;
     auto operator=(StagingRingBuffer&& other) noexcept -> StagingRingBuffer&;
 
-    [[nodiscard]] auto Init(VmaAllocator allocator, VkDevice device, VkQueue queue, uint32_t queueFamily, VkDeviceSize capacity) noexcept -> bool;
-    void               Cleanup() noexcept;
+    [[nodiscard]] auto
+         Init(VmaAllocator allocator, VkDevice device, VkQueue queue, uint32_t queueFamily, VkDeviceSize capacity) noexcept -> std::expected<void, ZHLN::Error>;
+    void Cleanup() noexcept;
 
     [[nodiscard]] auto Allocate(VkDeviceSize size, VkDeviceSize alignment = 4) noexcept -> Allocation;
     auto               Submit(VkCommandBuffer cmd) noexcept -> uint64_t;

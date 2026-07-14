@@ -167,6 +167,21 @@ struct BufferQueueBarrier {
     }
 };
 
+inline void BufferBarrier(VkCommandBuffer cmd, const VkBufferMemoryBarrier2& barrier) noexcept {
+    const VkDependencyInfo dep_info = {
+        .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .pNext                    = nullptr,
+        .dependencyFlags          = 0,
+        .memoryBarrierCount       = 0,
+        .pMemoryBarriers          = nullptr,
+        .bufferMemoryBarrierCount = 1,
+        .pBufferMemoryBarriers    = &barrier,
+        .imageMemoryBarrierCount  = 0,
+        .pImageMemoryBarriers     = nullptr,
+    };
+    vkCmdPipelineBarrier2(cmd, &dep_info);
+}
+
 template <QueueType QType>
 [[nodiscard]] constexpr auto ResolveQueueFamily(const Context& ctx) noexcept -> uint32_t {
     if constexpr (QType == QueueType::Graphics || QType == QueueType::Compute) {

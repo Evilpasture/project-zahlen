@@ -29,7 +29,8 @@ class PresentationContext {
     PresentationContext(PresentationContext&&) noexcept                    = default;
     auto operator=(PresentationContext&&) noexcept -> PresentationContext& = default;
 
-    [[nodiscard]] auto Init(const Context& ctx, Allocator& alloc, VkSurfaceKHR surface, uint32_t width, uint32_t height, bool vsync = true) -> bool {
+    [[nodiscard]] auto Init(const Context& ctx, Allocator& alloc, VkSurfaceKHR surface, uint32_t width, uint32_t height, bool vsync = true)
+        -> std::expected<void, ZHLN::Error> {
         _ctx     = &ctx;
         _alloc   = &alloc;
         _surface = surface;
@@ -37,13 +38,14 @@ class PresentationContext {
         return Rebuild(width, height);
     }
 
-    [[nodiscard]] auto Rebuild(uint32_t width, uint32_t height) -> bool {
+    [[nodiscard]] auto Rebuild(uint32_t width, uint32_t height) -> std::expected<void, ZHLN::Error> {
         if ((_ctx == nullptr) || (_alloc == nullptr)) {
-            return false;
+            return std::unexpected(RenderInitError::SubsystemAllocationFailed);
         }
 
-        if (Vk::WaitIdle(_ctx->Device()) != VK_SUCCESS) {
-            return false;
+        auto idle_res = Vk::WaitIdle(_ctx->Device());
+        if (!idle_res) {
+            return std::unexpected(idle_res.error());
         }
 
         const ZHLN_Device raw_dev = {
@@ -61,7 +63,7 @@ class PresentationContext {
         };
 
         if (!swapchain.Rebuild(s_desc)) {
-            return false;
+            return std::unexpected(RenderInitError::PresentationFailed);
         }
         presentSemaphores.Rebuild(_ctx->Device(), swapchain.Get().image_count);
 
@@ -70,7 +72,11 @@ class PresentationContext {
             *_alloc, *_ctx, swapchain.Get().extent, {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT}
         );
 
-        return depthTarget.Valid();
+        if (!depthTarget.Valid()) {
+            return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+        }
+
+        return {};
     }
 
   private:

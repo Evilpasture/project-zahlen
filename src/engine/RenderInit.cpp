@@ -79,28 +79,15 @@ namespace ZHLN {
 std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int height) {
     using enum Resource::ShaderID;
 
-    auto make_expected = [](bool success, Error err) -> std::expected<void, Error> {
-        if (success) {
-            return {};
-        }
-        return std::unexpected(err);
-    };
-
-    return make_expected(allocator.Init(ctx), RenderInitError::SubsystemAllocationFailed)
+    return allocator.Init(ctx)
         .and_then([&]() {
-            return make_expected(
-                stagingRingBuffer.Init(
-                    allocator.Get(), ctx.Device(), ctx.GraphicsQueue(), ctx.PhysicalInfo().graphics_family, static_cast<VkDeviceSize>(64 * 1024 * 1024)
-                ),
-                RenderInitError::SubsystemAllocationFailed
+            return stagingRingBuffer.Init(
+                allocator.Get(), ctx.Device(), ctx.GraphicsQueue(), ctx.PhysicalInfo().graphics_family, static_cast<VkDeviceSize>(64 * 1024 * 1024)
             );
         })
         .and_then([&]() {
-            return make_expected(
-                transferRingBuffer.Init(
-                    allocator.Get(), ctx.Device(), ctx.TransferQueue(), ctx.PhysicalInfo().transfer_family, static_cast<VkDeviceSize>(64 * 1024 * 1024)
-                ),
-                RenderInitError::SubsystemAllocationFailed
+            return transferRingBuffer.Init(
+                allocator.Get(), ctx.Device(), ctx.TransferQueue(), ctx.PhysicalInfo().transfer_family, static_cast<VkDeviceSize>(64 * 1024 * 1024)
             );
         })
         .and_then([&]() -> std::expected<void, Error> {
@@ -129,9 +116,7 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
         .and_then([&]() {
             return CompilePunctualShadowPipeline(ctx.Device(), Resource::GetShaderProgram(PunctualShadows)).transform_error([](auto e) -> Error { return e; });
         })
-        .and_then([&]() {
-            return make_expected(presentation.Init(ctx, allocator, surface.Get(), width, height, cfg.vsync), RenderInitError::PresentationFailed);
-        })
+        .and_then([&]() { return presentation.Init(ctx, allocator, surface.Get(), width, height, cfg.vsync); })
         .and_then([&]() {
             sync  = Vk::FrameSync<2>::Create(ctx.Device());
             pools = Vk::CommandPools<2>::Create(ctx.Device(), {.queueFamily = ctx.PhysicalInfo().graphics_family, .buffersPerPool = 1});
@@ -366,8 +351,6 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
     int                     height      = 0;
     ZHLN_PhysicalDeviceInfo physicalInfo {};
 
-    auto make_expected = [](bool success, Error err) -> std::expected<void, Error> { return success ? std::expected<void, Error> {} : std::unexpected(err); };
-
     return GetPlatformInstanceExtensions(window, cfg.enableValidation)
         .and_then([&](auto&& inst_exts) -> std::expected<void, Error> {
             return Vk::Context::Builder()
@@ -415,33 +398,22 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
                     .transform([&](auto&& context) { impl->ctx = std::forward<decltype(context)>(context); });
             });
         })
-        .and_then([&]() { return make_expected(impl->ctx.Valid(), RenderInitError::DeviceCreationFailed); })
         .and_then([&]() { return impl->InitSubsystems(cfg, width, height); })
         .transform([&]() { return std::make_unique<RenderContext>(PrivateToken {}, std::move(impl)); });
 }
 
 std::expected<void, Error> RenderContext::Impl::BuildSkinningPipeline() {
-    VkPushConstantRange pushRange = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(SkinningConstants)};
-
-    ZHLN_PipelineLayoutDesc layout_desc = {.set_layouts = nullptr, .set_layout_count = 0, .push_constants = &pushRange, .push_constant_count = 1};
-
-    auto make_expected = [](bool success, Error err) -> std::expected<void, Error> {
-        if (success) {
-            return {};
-        }
-        return std::unexpected(err);
-    };
-
-    auto* rawLayout = ZHLN_CreatePipelineLayout(ctx.Device(), &layout_desc);
-
-    return make_expected(rawLayout != VK_NULL_HANDLE, RenderInitError::PipelineLayoutCreationFailed).and_then([&]() -> std::expected<void, Error> {
-        skinningPass.pipelineLayout = Vk::PipelineLayout(ctx.Device(), rawLayout);
-
-        return LoadAndCreateComputeShader(
-                   {.path = SHADER_SKINNING_HLSL_CS_PATH, .fallback = Resource::skinning_comp, .entryPoint = "CSMain"}, skinningPass.pipelineLayout.Get()
-        )
-            .transform([&](auto&& pipeline) { skinningPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
-    });
+    return Vk::PipelineLayoutBuilder(ctx.Device())
+        .AddPushConstant(VK_SHADER_STAGE_COMPUTE_BIT, sizeof(SkinningConstants))
+        .Build()
+        .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
+        .and_then([&](auto&& layout) -> std::expected<void, Error> {
+            skinningPass.pipelineLayout = std::forward<decltype(layout)>(layout);
+            return LoadAndCreateComputeShader(
+                       {.path = SHADER_SKINNING_HLSL_CS_PATH, .fallback = Resource::skinning_comp, .entryPoint = "CSMain"}, skinningPass.pipelineLayout.Get()
+            )
+                .transform([&](auto&& pipeline) { skinningPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
+        });
 }
 
 RenderContext::~RenderContext() {
@@ -1074,20 +1046,12 @@ void RenderContext::Impl::RecreatePunctualShadowViews() noexcept {
     punctualShadowViews.clear();
     punctualShadowViews.resize(MAX_PUNCTUAL_LIGHTS);
     for (uint32_t i = 0; i < MAX_PUNCTUAL_LIGHTS; ++i) {
-        VkImageViewCreateInfo viewInfo = {
-            .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .pNext            = {},
-            .flags            = {},
-            .image            = graphResources.shadowAtlas.image.Handle(),
-            .viewType         = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-            .format           = VK_FORMAT_D32_SFLOAT,
-            .components       = {},
-            .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = i * 6, .layerCount = 6},
-        };
-
-        VkImageView rawView = VK_NULL_HANDLE;
-        vkCreateImageView(ctx.Device(), &viewInfo, nullptr, &rawView);
-        punctualShadowViews[i] = Vk::ImageView(ctx.Device(), rawView);
+        punctualShadowViews[i] = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(
+            ctx.Device(), graphResources.shadowAtlas.image.Handle(),
+            i * 6,                    // baseLayer
+            6,                        // layerCount
+            VK_IMAGE_ASPECT_DEPTH_BIT // aspect
+        );
     }
 }
 
@@ -1263,15 +1227,16 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
 }
 
 std::expected<void, Error> RenderContext::Impl::BuildHangGpuPipeline() {
-    ZHLN_PipelineLayoutDesc pLayoutDesc = {.set_layouts = nullptr, .set_layout_count = 0, .push_constants = nullptr, .push_constant_count = 0};
-
-    hangGpuPass.pipelineLayout = Vk::PipelineLayout(ctx.Device(), ZHLN_CreatePipelineLayout(ctx.Device(), &pLayoutDesc));
-
-    return LoadAndCreateComputeShader(
-               {.path = SHADER_HANG_GPU_HLSL_CS_PATH, .fallback = Resource::hang_gpu_comp, .entryPoint = "CSMain"}, hangGpuPass.pipelineLayout.Get()
-    )
-        .transform_error([](auto err) -> Error { return err; })
-        .transform([&](auto&& pipeline) { hangGpuPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
+    return Vk::PipelineLayoutBuilder(ctx.Device())
+        .Build()
+        .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
+        .and_then([&](auto&& layout) -> std::expected<void, Error> {
+            hangGpuPass.pipelineLayout = std::forward<decltype(layout)>(layout);
+            return LoadAndCreateComputeShader(
+                       {.path = SHADER_HANG_GPU_HLSL_CS_PATH, .fallback = Resource::hang_gpu_comp, .entryPoint = "CSMain"}, hangGpuPass.pipelineLayout.Get()
+            )
+                .transform([&](auto&& pipeline) { hangGpuPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
+        });
 }
 
 } // namespace ZHLN

@@ -78,16 +78,17 @@ auto main() -> int {
             })
             .and_then([&](const Vk::ExtensionResult& instExts) -> std::expected<void, std::string> {
                 // 3. Create Vulkan Instance via Builder
-                VkInstance instance = Vk::Context::Builder()
+                auto instance_res = Vk::Context::Builder()
                     .AppName("ZHLN Engine - Cube")
                     .AppVersion(VK_MAKE_API_VERSION(0, 1, 0, 0))
                     .InstanceExtensions(instExts)
                     .EnableValidation(true)
                     .BuildInstance();
 
-                if (instance == VK_NULL_HANDLE) {
-                    return std::unexpected("Failed to create Vulkan Instance.");
+                if (!instance_res) {
+                    return std::unexpected("Failed to create Vulkan Instance: " + std::string(instance_res.error().Message()));
                 }
+                VkInstance instance = *instance_res;
 
                 // 4. Create Vulkan Surface (Raw Handle)
                 VkSurfaceKHR raw_surface = ZHLN::Demo::CreateSurface(instance, win);
@@ -97,16 +98,17 @@ auto main() -> int {
                 }
 
                 // 5. Select Physical Device via Builder
-                ZHLN_PhysicalDeviceInfo physical = Vk::Context::Builder()
+                auto physical_res = Vk::Context::Builder()
                     .Instance(instance)
                     .Surface(raw_surface)
                     .SelectPhysicalDevice();
 
-                if (physical.handle == VK_NULL_HANDLE) {
+                if (!physical_res) {
                     vkDestroySurfaceKHR(instance, raw_surface, nullptr);
                     vkDestroyInstance(instance, nullptr);
-                    return std::unexpected("Failed to select a suitable physical device.");
+                    return std::unexpected("Failed to select a suitable physical device: " + std::string(physical_res.error().Message()));
                 }
+                ZHLN_PhysicalDeviceInfo physical = *physical_res;
 
                 std::span<const std::string_view> inst_exts_span = instExts;
                 bool has_maint1_local = std::ranges::any_of(inst_exts_span, [](std::string_view name) {
@@ -175,8 +177,9 @@ auto main() -> int {
 
                         // 10. Allocator Setup
                         Vk::Allocator allocator;
-                        if (!allocator.Init(ctx)) {
-                            return std::unexpected("Failed to initialize Vulkan Memory Allocator.");
+                        auto alloc_res = allocator.Init(ctx);
+                        if (!alloc_res) {
+                            return std::unexpected("Failed to initialize Vulkan Memory Allocator: " + std::string(alloc_res.error().Message()));
                         }
 
                         ZHLN::Vk::Swapchain     swapchain(ctx.Device(), {});
