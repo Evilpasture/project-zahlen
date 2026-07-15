@@ -658,15 +658,10 @@ void DispatchAAMode(Self& self, VkCommandBuffer cmd, AAMode mode, Args&&... args
 } // namespace
 
 std::string_view GetRenderGraphDump() noexcept {
-    auto dummyAA   = [](VkCommandBuffer, const auto&) noexcept {};
-    auto dummySwap = []() noexcept -> Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> { return {}; };
-
-    // Deduce the graph structure via template instantiation without running any code
-    using DummyGraphT = decltype(BuildFrameGraph<false, AAMode::TAA>(std::declval<PassFactory>(), dummyAA, dummySwap));
-
-    // Bake the resulting string directly into the executable's read-only memory
-    static constexpr auto viz = Vk::Debug::GraphVisualizer<DummyGraphT>::Visualize();
-    return viz.string_view();
+    return Vk::Debug::GraphVisualizer<decltype(BuildFrameGraph<false, AAMode::TAA>(
+        std::declval<PassFactory>(), [](VkCommandBuffer, const auto&) {}, []() -> Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> { return {}; }
+    ))>::Visualize()
+        .string_view();
 }
 
 template <bool FullBright>
