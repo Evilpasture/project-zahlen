@@ -828,18 +828,18 @@ struct RenderContext::Impl {
     };
 
     struct alignas(8) SkinningConstants {
-        uint64_t inPosAddr;
-        uint64_t inAttrAddr;
-        uint64_t inSkinAddr;
-        uint64_t outPosAddr;
-        uint64_t outAttrAddr;
-        uint64_t jointsAddr;
-        uint64_t morphDeltasAddr;
-        uint32_t vertexCount;
-        uint32_t jointOffset;
-        uint32_t morphOffset;
-        uint32_t activeMorphCount;
-        float    morphWeights[4];
+        VkDeviceAddress inPosAddr;
+        VkDeviceAddress inAttrAddr;
+        VkDeviceAddress inSkinAddr;
+        VkDeviceAddress outPosAddr;
+        VkDeviceAddress outAttrAddr;
+        VkDeviceAddress jointsAddr;
+        VkDeviceAddress morphDeltasAddr;
+        uint32_t        vertexCount;
+        uint32_t        jointOffset;
+        uint32_t        morphOffset;
+        uint32_t        activeMorphCount;
+        float           morphWeights[4];
     };
 
     struct BakePush {

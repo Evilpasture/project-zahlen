@@ -1042,8 +1042,8 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
 
     auto* finalPosMesh = (params.skinnedVertexBuffer != Invalid) ? impl->meshPool.Resolve(params.skinnedVertexBuffer).value_or(nullptr) : posMesh;
 
-    uint64_t posAddr  = (finalPosMesh != nullptr) ? finalPosMesh->vboAddress : 0;
-    uint64_t attrAddr = (attrMesh != nullptr) ? attrMesh->vboAddress : 0;
+    VkDeviceAddress posAddr  = (finalPosMesh != nullptr) ? finalPosMesh->vboAddress : 0;
+    VkDeviceAddress attrAddr = (attrMesh != nullptr) ? attrMesh->vboAddress : 0;
 
     if (posMesh == attrMesh && posMesh != nullptr) {
         attrAddr = posMesh->vboAddress + (500000 * sizeof(VertexPosition));
