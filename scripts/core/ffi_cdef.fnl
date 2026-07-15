@@ -66,6 +66,14 @@
           uint32_t sub1, sub2;
       } __attribute__((aligned(128))) ZHLN_ContactEventD;
 
+      typedef struct PhysicsStateComponent {
+        float currPosition[4];
+        float prevPosition[4];
+        float currRotation[4];
+        float prevRotation[4];
+        uint64_t lastPhysicsSyncFrame;
+      } PhysicsStateComponent;
+
       typedef struct MovementComponent {
           float orientation[4];
           float prevOrientation[4];

@@ -4,18 +4,6 @@
 (local ffi (require :ffi))
 (local zh (require :scripts.core.zahlen))
 
-;; Safely declare the C++ struct layout for PhysicsStateComponent on the FFI side.
-;; Using pcall prevents "duplicate declaration" errors when hot-reloading the script.
-(pcall ffi.cdef "
-    typedef struct PhysicsStateComponent {
-        float currPosition[4];
-        float prevPosition[4];
-        float currRotation[4];
-        float prevRotation[4];
-        uint64_t lastPhysicsSyncFrame;
-    } PhysicsStateComponent;
-")
-
 ;; ============================================================================
 ;; Local Macros & Syntactic sugar
 ;; ============================================================================
