@@ -3,6 +3,7 @@
 
 #include "Zahlen/CommandLine.hpp"
 #include "Zahlen/Config.hpp"
+#include "Zahlen/Types.hpp"
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -44,7 +45,7 @@
 #endif
 
 namespace ZHLN {
-extern std::string_view GetRenderGraphDump() noexcept;
+extern std::string_view GetRenderGraphDump(AAMode currentMode) noexcept;
 }
 
 namespace {
@@ -291,7 +292,7 @@ Press ENTER to continue.
         }
     },
     CommandHandler {.key = "--print-graph", .shortKey = "", .action = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::Error> {
-                        std::println("{}", ZHLN::GetRenderGraphDump());
+                        std::println("{}", ZHLN::GetRenderGraphDump(ZHLN::AAMode::TAA));
                         opt.printGraphRequested = true;
                         return {};
                     }},

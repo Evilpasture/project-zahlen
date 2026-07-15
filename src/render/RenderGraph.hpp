@@ -158,8 +158,16 @@ constexpr VkAccessFlags2 WriteMask = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_
 
 template <ResourceState Prev, typename Usage, size_t PassIndex>
 struct NeedsBarrier {
-    static constexpr bool value = (((Usage::access & WriteMask) != 0) && (Prev.fromPreviousFrame || (Prev.lastWritePass < PassIndex))) ||
-                                  (Prev.layout != Usage::layout) || (Prev.stage != Usage::stage) || (Prev.access != Usage::access) ||
+    static constexpr bool is_prev_write = (Prev.access & WriteMask) != 0;
+    static constexpr bool is_curr_write = (Usage::access & WriteMask) != 0;
+
+    // An active barrier is only needed if:
+    // 1. We are writing, and we have a WAW/RAW hazard (either from this frame or carried over)
+    // 2. Or, we are reading, but the previous state was a write (RAW hazard)
+    // 3. Or, the layout changed (even if both are reads, e.g., GENERAL to SHADER_READ_ONLY)
+    // 4. Or, the resource starts uninitialized (UNDEFINED)
+    static constexpr bool value = (is_curr_write && (Prev.fromPreviousFrame || (Prev.lastWritePass < PassIndex))) ||
+                                  (is_prev_write && !is_curr_write && (Prev.lastWritePass < PassIndex)) || (Prev.layout != Usage::layout) ||
                                   (Prev.layout == VK_IMAGE_LAYOUT_UNDEFINED);
 };
 

@@ -23,6 +23,20 @@ constexpr ResourceName<N>::ResourceName(const char (&str)[N]) {
 
 namespace detail {
 
+template <typename UsagesList, typename TargetResource>
+struct FindResourceUsage;
+
+template <typename TargetResource>
+struct FindResourceUsage<TypeList<>, TargetResource> {
+    using type = void;
+};
+
+template <typename Head, typename... Tail, typename TargetResource>
+struct FindResourceUsage<TypeList<Head, Tail...>, TargetResource> {
+    using type =
+        std::conditional_t<std::is_same_v<typename Head::Resource, TargetResource>, Head, typename FindResourceUsage<TypeList<Tail...>, TargetResource>::type>;
+};
+
 template <typename OutList, template <typename> class Predicate>
 struct FilterImpl<TypeList<>, OutList, Predicate> {
     using type = OutList;
@@ -253,7 +267,7 @@ constexpr auto MakePass(RecordFn&& record) {
 }
 
 template <ResourceName Name, typename... Usages, typename RecordFn>
-constexpr auto Passieren(RecordFn&& record, [[maybe_unused]] detail::BypassGraphicsCheckToken unused) {
+constexpr auto Passieren(RecordFn&& record, detail::BypassGraphicsCheckToken /*unused*/) {
     return GraphPass<Name, TypeList<Usages...>, RecordFn> {std::forward<RecordFn>(record)};
 }
 
@@ -698,9 +712,107 @@ constexpr std::string_view GraphVisualizer<CompileTimeFrameGraph<Passes...>>::Ac
     return "COMBINED_OR_OTHER_ACCESS";
 }
 
+// 1. Standalone compile-time helper to print a single resource state
+template <typename GraphT, size_t PassIdx, size_t ResIdx, typename Pass, typename Res, typename VisualizerStringT>
+constexpr void PrintResourceState(VisualizerStringT& msg) noexcept {
+    using UsageType          = typename detail::FindResourceUsage<typename Pass::Usages, Res>::type;
+    constexpr bool is_active = !std::is_same_v<UsageType, void>;
+
+    if constexpr (is_active) {
+        constexpr auto prev_state = GraphT::StateTable[PassIdx][ResIdx];
+
+        msg.append("      ↳ Resource [");
+        msg.append_int(ResIdx);
+        msg.append("] (\"");
+        msg.append(std::string_view(Res::name.value.data()));
+        msg.append("\")\n");
+
+        constexpr bool layout_changed = (prev_state.layout != UsageType::layout);
+
+        // Decouple read vs write access types using the compiler's WriteMask
+        constexpr bool is_prev_write = (prev_state.access & ZHLN::Vk::detail::WriteMask) != 0;
+        constexpr bool is_curr_write = (UsageType::access & ZHLN::Vk::detail::WriteMask) != 0;
+
+        // WAW (Write-After-Write) or RAW (Read-After-Write) hazards require active synchronization.
+        // Pure RAR (Read-After-Read) stage changes do not.
+        constexpr bool write_hazard = (is_curr_write && (prev_state.fromPreviousFrame || (prev_state.lastWritePass < PassIdx))) ||
+                                      (is_prev_write && !is_curr_write && (prev_state.lastWritePass < PassIdx));
+
+        constexpr bool needs_barrier = layout_changed || write_hazard || (prev_state.layout == VK_IMAGE_LAYOUT_UNDEFINED);
+
+        using Vis = GraphVisualizer<GraphT>;
+
+        if constexpr (needs_barrier) {
+            msg.append("          Layout: ");
+            msg.append(Vis::LayoutToString(prev_state.layout));
+            msg.append(" ➔ ");
+            msg.append(Vis::LayoutToString(UsageType::layout));
+            msg.append("\n");
+
+            msg.append("          Stage : ");
+            msg.append(Vis::StageToString(prev_state.stage));
+            msg.append(" ➔ ");
+            msg.append(Vis::StageToString(UsageType::stage));
+            msg.append("\n");
+
+            msg.append("          Access: ");
+            msg.append(Vis::AccessToString(prev_state.access));
+            msg.append(" ➔ ");
+            msg.append(Vis::AccessToString(UsageType::access));
+            msg.append("\n");
+        } else {
+            msg.append("          State : ");
+            msg.append(Vis::LayoutToString(prev_state.layout));
+            msg.append(" (");
+            msg.append(Vis::StageToString(prev_state.stage));
+            msg.append(" / ");
+            msg.append(Vis::AccessToString(prev_state.access));
+            msg.append(") [Unchanged]\n");
+        }
+    }
+}
+
+// 2. Standalone helper to fold over resource index sequence
+template <typename GraphT, size_t PassIdx, typename Pass, typename Resources, size_t NumResources, typename VisualizerStringT, size_t... ResIdxs>
+constexpr void PrintResources(VisualizerStringT& msg, std::index_sequence<ResIdxs...> /*unused*/) noexcept {
+    (PrintResourceState<GraphT, PassIdx, ResIdxs, Pass, typename Resources::template type<ResIdxs>>(msg), ...);
+}
+
+// 3. Standalone helper to print a single pass state
+template <typename GraphT, size_t PassIdx, typename Pass, typename Resources, size_t NumResources, typename VisualizerStringT>
+constexpr void PrintPassState(VisualizerStringT& msg) noexcept {
+    msg.append("  ● Pass [");
+    msg.append_int(PassIdx);
+    msg.append("]: \"");
+    msg.append(std::string_view(Pass::name.value.data()));
+    msg.append("\"\n");
+
+    PrintResources<GraphT, PassIdx, Pass, Resources, NumResources>(msg, std::make_index_sequence<NumResources> {});
+}
+
+// 4. Standalone helper to fold over pass index sequence
+template <typename GraphT, typename PassesTuple, typename Resources, size_t NumResources, typename VisualizerStringT, size_t... PassIdxs>
+constexpr void PrintPasses(VisualizerStringT& msg, std::index_sequence<PassIdxs...> /*unused*/) noexcept {
+    ((PrintPassState<GraphT, PassIdxs, std::tuple_element_t<PassIdxs, PassesTuple>, Resources, NumResources>(msg), msg.append("\n")), ...);
+}
+
+// 5. Standalone helper to print registered resource list
+template <typename Resources, size_t NumResources, typename VisualizerStringT, size_t... Is>
+constexpr void PrintResourceNames(VisualizerStringT& msg, std::index_sequence<Is...> /*unused*/) noexcept {
+    ((msg.append("    [Resource "), msg.append_int(Is), msg.append("]: \""), msg.append(std::string_view(Resources::template type<Is>::name.value.data())),
+      msg.append("\""), msg.append(Resources::template type<Is>::is_swapchain ? " (SWAPCHAIN)" : ""), msg.append("\n")),
+     ...);
+}
+
+} // namespace ZHLN::Vk::Debug
+
+// ============================================================================
+// Main Visualize Entry Point
+// ============================================================================
+
 template <typename... Passes>
-consteval auto GraphVisualizer<CompileTimeFrameGraph<Passes...>>::Visualize() {
-    VisualizerString<32768> msg {}; // Bypassed original limit with 32KB buffer
+consteval auto ZHLN::Vk::Debug::GraphVisualizer<ZHLN::Vk::CompileTimeFrameGraph<Passes...>>::Visualize() {
+    VisualizerString<32768> msg {};
     msg.append("\n\n");
     msg.append("================================================================================\n");
     msg.append("  [RENDER GRAPH COMPILE-TIME STATE TABLE VISUALIZATION]\n");
@@ -714,69 +826,11 @@ consteval auto GraphVisualizer<CompileTimeFrameGraph<Passes...>>::Visualize() {
     msg.append("\n\n");
 
     msg.append("  --- REGISTERED RESOURCES ---\n");
-    size_t r_idx          = 0;
-    auto   print_resource = [&]<typename R>() {
-        msg.append("    [Resource ");
-        msg.append_int(r_idx);
-        msg.append("]: \"");
-        msg.append(std::string_view(R::name.value.data()));
-        msg.append("\"");
-        if constexpr (R::is_swapchain) {
-            msg.append(" (SWAPCHAIN)");
-        }
-        msg.append("\n");
-        r_idx++;
-    };
-    [&]<typename... Us>(TypeList<Us...>) { (print_resource.template operator()<Us>(), ...); }(Resources {});
+    PrintResourceNames<Resources, NumResources>(msg, std::make_index_sequence<NumResources> {});
 
-    msg.append("\n  --- PASS STATE TRANSITIONS (AT ENTRY TO PASS) ---\n");
-
-    size_t pass_idx   = 0;
-    auto   print_pass = [&]<typename Pass>() {
-        msg.append("  ● Pass [");
-        msg.append_int(pass_idx);
-        msg.append("]: \"");
-        msg.append(std::string_view(Pass::name.value.data()));
-        msg.append("\"\n");
-
-        size_t res_idx              = 0;
-        auto   print_resource_state = [&]<typename Res>() {
-            // Check if this pass actively references this resource
-            constexpr bool is_active = IsResourceInUsages<typename Pass::Usages, Res>::value;
-
-            if constexpr (is_active) {
-                const auto state = GraphT::StateTable[pass_idx][res_idx];
-                msg.append("      ↳ Resource [");
-                msg.append_int(res_idx);
-                msg.append("] (\"");
-                msg.append(std::string_view(Res::name.value.data()));
-                msg.append("\")\n");
-
-                msg.append("          Layout: ");
-                msg.append(LayoutToString(state.layout));
-                msg.append("\n");
-
-                msg.append("          Stage : ");
-                msg.append(StageToString(state.stage));
-                msg.append("\n");
-
-                msg.append("          Access: ");
-                msg.append(AccessToString(state.access));
-                msg.append("\n");
-            }
-            res_idx++;
-        };
-
-        [&]<typename... Us>(TypeList<Us...>) { (print_resource_state.template operator()<Us>(), ...); }(Resources {});
-
-        msg.append("\n");
-        pass_idx++;
-    };
-
-    (print_pass.template operator()<Passes>(), ...);
+    msg.append("\n  --- PASS STATE TRANSITIONS (BEFORE ➔ AFTER BARRIER) ---\n\n");
+    PrintPasses<GraphT, std::tuple<Passes...>, Resources, NumResources>(msg, std::make_index_sequence<NumPasses> {});
 
     msg.append("================================================================================\n\n");
     return msg;
 }
-
-} // namespace ZHLN::Vk::Debug
