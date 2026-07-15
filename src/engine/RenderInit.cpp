@@ -338,6 +338,11 @@ void RenderContext::Impl::WatchPipeline(const char* vsPath, const char* psPath, 
 RenderContext::RenderContext(PrivateToken /*unused*/, std::unique_ptr<Impl> impl) noexcept: _impl(std::move(impl)) {
 }
 
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized" // Suppress false-positives inside std::expected::transform
+#endif
+
 std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept {
     auto impl     = std::make_unique<Impl>(window);
     impl->appName = cfg.appName;
@@ -399,6 +404,10 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
         .and_then([&]() { return impl->InitSubsystems(cfg, width, height); })
         .transform([&]() { return std::make_unique<RenderContext>(PrivateToken {}, std::move(impl)); });
 }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 std::expected<void, Error> RenderContext::Impl::BuildSkinningPipeline() {
     return Vk::PipelineLayoutBuilder(ctx.Device())
