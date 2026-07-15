@@ -7,21 +7,21 @@
 #include "threading/Mutex.hpp"
 #include <condition_variable>
 #include <mutex>
+#include <queue> // Replaced vector with queue
 #include <thread>
-#include <vector>
 
 namespace ZHLN::TaskSystem {
 
-// --- Thread-Safe Queue ---
+// --- Thread-Safe Queue (Fixed: Now strictly FIFO) ---
 struct WorkQueue {
     std::mutex              mtx;
     std::condition_variable cv;
-    std::vector<Fiber*>     fibers;
+    std::queue<Fiber*>      fibers;
     bool                    quit = false;
 
     void Push(Fiber* f) {
         std::lock_guard lock(mtx);
-        fibers.push_back(f);
+        fibers.push(f);
         cv.notify_one();
     }
 
@@ -31,8 +31,8 @@ struct WorkQueue {
         if (quit && fibers.empty()) {
             return nullptr;
         }
-        Fiber* f = fibers.back();
-        fibers.pop_back();
+        Fiber* f = fibers.front(); // Pull from the front
+        fibers.pop();              // Remove from the front
         return f;
     }
 
@@ -41,8 +41,8 @@ struct WorkQueue {
         if (fibers.empty()) {
             return nullptr;
         }
-        Fiber* f = fibers.back();
-        fibers.pop_back();
+        Fiber* f = fibers.front(); // Pull from the front
+        fibers.pop();              // Remove from the front
         return f;
     }
 
@@ -52,6 +52,31 @@ struct WorkQueue {
         cv.notify_all();
     }
 };
+
+// --- Thread-Local Cache Optimization ---
+namespace {
+
+// Compiler-safe single-element thread-local cache (maximum 1 fiber per thread)
+static thread_local Fiber* t_localFiber = nullptr;
+
+inline bool PushLocalFiber(Fiber* f) noexcept {
+    if (t_localFiber == nullptr) {
+        t_localFiber = f;
+        return true;
+    }
+    return false; // Cache full, fallback to global s_freeQueue
+}
+
+inline Fiber* PopLocalFiber() noexcept {
+    if (t_localFiber != nullptr) {
+        Fiber* f     = t_localFiber;
+        t_localFiber = nullptr;
+        return f;
+    }
+    return nullptr; // Cache empty, fallback to global s_freeQueue
+}
+
+} // namespace
 
 // --- Internal State ---
 struct FiberData {
@@ -87,13 +112,14 @@ static void FiberMain(void* arg) {
             data->counter->value.fetch_sub(1, std::memory_order::release);
         }
 
-        // 3. We are done! Put ourselves back in the free pool
-        s_freeQueue.Push(Fiber::GetCurrent());
+        // 3. Put this fiber back in the single-element local free pool
+        Fiber* self = Fiber::GetCurrent();
+        if (!PushLocalFiber(self)) {
+            s_freeQueue.Push(self);
+        }
 
         // 4. Yield back to the OS worker thread so it can grab the next Ready Fiber
         Fiber::Yield();
-
-        // When we wake up here later, it's because Dispatch() gave us a new task!
     }
 }
 
@@ -101,7 +127,7 @@ static void FiberMain(void* arg) {
 static void WorkerMain(uint32_t index) {
     Platform::SetHighPriority();
     Fiber::InitMainThread();
-    t_workerIndex = index; // Store it in thread_local
+    t_workerIndex = index;
 
     while (true) {
         Fiber* f = s_readyQueue.PopOrWait();
@@ -114,7 +140,6 @@ static void WorkerMain(uint32_t index) {
 
 void Init(uint32_t numThreads, uint32_t numFibers, size_t stackSize) {
     Platform::SetHighPriority();
-    // The thread that calls Init() (the main thread) must be a Fiber to use Wait()
     Fiber::InitMainThread();
     if (numThreads == 0) {
         numThreads = std::thread::hardware_concurrency();
@@ -134,7 +159,6 @@ void Init(uint32_t numThreads, uint32_t numFibers, size_t stackSize) {
 
     for (uint32_t i = 0; i < numFibers; i++) {
         s_fiberData[i] = {};
-        // The 'arg' we pass is a pointer to this fiber's specific data slot
         s_fiberPool[i] = Fiber::Create(stackSize, FiberMain, &s_fiberData[i]);
         s_freeQueue.Push(s_fiberPool[i]);
     }
@@ -178,18 +202,16 @@ void Dispatch(std::span<const Task> tasks, Counter* counter) {
     }
 
     for (const auto& task: tasks) {
-        // Grab a sleeping fiber
-        Fiber* f = s_freeQueue.PopOrWait();
+        // Pull allocation-free from the single-element local cache first
+        Fiber* f = PopLocalFiber();
         if (f == nullptr) {
-            return;
+            f = s_freeQueue.PopOrWait();
         }
 
-        // Assign the task to its data payload
         auto* data    = static_cast<FiberData*>(f->arg);
         data->task    = task;
         data->counter = counter;
 
-        // Put it in the queue for the OS Threads to pick up
         s_readyQueue.Push(f);
     }
 }
@@ -211,26 +233,20 @@ void Wait(Counter* counter) {
                 Fiber::Resume(f);
                 spinCount = 0;
             } else {
-                // On macOS, we DO NOT YIELD here.
-                // We spin to keep the P-core "Hot" so the OS doesn't
-                // context switch us for a trackpad interrupt.
                 if (spinCount < 100) {
                     CPURelax();
                 } else if (spinCount < 1000) {
-                    // Small backoff but still no OS yield
                     for (int i = 0; i < 10; ++i) {
                         CPURelax();
                     }
                 } else {
-                    // Only after 1000 failures do we finally give the OS
-                    // a tiny bit of breathing room.
                     std::this_thread::yield();
-                    spinCount = 0; // Reset to start hot again
+                    spinCount = 0;
                 }
                 spinCount++;
             }
         } else {
-            // Workers should just push themselves back and yield to the scheduler
+            // Workers push themselves to the back of the line
             s_readyQueue.Push(self);
             Fiber::Yield();
         }

@@ -263,11 +263,16 @@ void Mutex::LockSlow() noexcept {
             // Main Thread / OS Thread: Block using Condition Variable
             node.cond.wait(lock, [&]() { return node.signaled.load(std::memory_order::acquire); });
         } else {
-            // worker Fiber: Yield back to the parent
+            // worker Fiber: Yield back to the scheduler
             lock.unlock();
             while (!node.signaled.load(std::memory_order::acquire)) {
                 YieldFiber();
             }
+
+            // FIX: Reset the signal state so that if the lock was stolen
+            // by another thread while we were waking up, we can safely
+            // park and yield again on the next loop iteration!
+            node.signaled.store(false, std::memory_order::relaxed);
         }
     }
 }
@@ -364,6 +369,9 @@ void ConditionalVariable::Wait(Mutex& mutex) noexcept {
         while (!node.signaled.load(std::memory_order::acquire)) {
             YieldFiber();
         }
+
+        // FIX: Reset the state to prevent infinite non-yielding spins
+        node.signaled.store(false, std::memory_order::relaxed);
     }
 
     // Re-acquire the user's mutex before returning to the caller
