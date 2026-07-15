@@ -63,11 +63,11 @@ class Error {
     }
 
     [[nodiscard]] constexpr std::string_view Category() const noexcept {
-        return _category ? _category->name : "Success";
+        return (_category != nullptr) ? _category->name : "Success";
     }
 
     [[nodiscard]] constexpr std::string_view Message() const noexcept {
-        return _category ? _category->to_string(_value) : "Success";
+        return (_category != nullptr) ? _category->to_string(_value) : "Success";
     }
 
     // Evaluates to true if there is an active error (non-success)
@@ -81,6 +81,19 @@ class Error {
     const ErrorCategory* _category = nullptr;
     uint32_t             _value    = 0;
 };
+
+static_assert(std::is_default_constructible_v<Error>);
+static_assert(std::is_nothrow_default_constructible_v<Error>);
+static_assert(std::is_copy_constructible_v<Error>);
+static_assert(std::is_nothrow_copy_constructible_v<Error>);
+static_assert(std::is_move_constructible_v<Error>);
+static_assert(std::is_nothrow_move_constructible_v<Error>);
+static_assert(std::is_copy_assignable_v<Error>);
+static_assert(std::is_nothrow_copy_assignable_v<Error>);
+static_assert(std::is_move_assignable_v<Error>);
+static_assert(std::is_nothrow_move_assignable_v<Error>);
+static_assert(std::is_destructible_v<Error>);
+static_assert(std::is_nothrow_destructible_v<Error>);
 
 // ============================================================================
 // Single Unified Generic ToString Overload for both Error and raw Enums

@@ -165,7 +165,7 @@ void RenderContext::Impl::DispatchSkinningPasses() {
             auto* posMesh     = drawCmd.posMesh;
             auto* attrMesh    = drawCmd.attrMesh;
             auto* skinMesh    = drawCmd.skinMesh;
-            auto* scratchMesh = meshPool.Resolve(drawCmd.skinnedVertexBuffer);
+            auto* scratchMesh = meshPool.Resolve(drawCmd.skinnedVertexBuffer).value_or(nullptr);
 
             if (AnyNull(posMesh, attrMesh, skinMesh, scratchMesh)) {
                 continue;
@@ -802,9 +802,6 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
     DispatchAAMode<FullBright>(*this, cmd, aaState.mode, factory, aaLambda, getSwapchainImage);
 }
 
-template void RenderContext::Impl::RecordSceneFrame<true>(Vk::CommandBuffer<Vk::QueueType::Graphics>);
-template void RenderContext::Impl::RecordSceneFrame<false>(Vk::CommandBuffer<Vk::QueueType::Graphics>);
-
 RenderResult RenderContext::BeginFrame() noexcept {
     using enum RenderFrameResult;
     if (_impl->stagingContext) {
@@ -975,22 +972,29 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
         return;
     }
 
-    auto* posMesh        = impl->meshPool.Resolve(mesh.posBuffer);
-    auto* attrMesh       = impl->meshPool.Resolve(mesh.attrBuffer);
-    auto* nativeMaterial = impl->materialPool.Resolve(material.pipeline);
-    if (AnyNull(attrMesh, posMesh, nativeMaterial)) [[unlikely]] {
-        ZHLN::Assert(false);
+    // 1. Resolve required pipeline/vertex resources
+    auto posMesh_res        = impl->meshPool.Resolve(mesh.posBuffer);
+    auto attrMesh_res       = impl->meshPool.Resolve(mesh.attrBuffer);
+    auto nativeMaterial_res = impl->materialPool.Resolve(material.pipeline);
+
+    if (!posMesh_res || !attrMesh_res || !nativeMaterial_res) [[unlikely]] {
+        ZHLN::Assert(false, "Draw: Attempted to submit draw with invalid mesh or material handles!");
         return;
     }
 
-    auto* skinMesh        = mesh.skinBuffer != Invalid ? impl->meshPool.Resolve(mesh.skinBuffer) : nullptr;
-    auto* nativeIndexMesh = mesh.indexBuffer != Invalid ? impl->meshPool.Resolve(mesh.indexBuffer) : nullptr;
+    auto* posMesh        = posMesh_res.value();
+    auto* attrMesh       = attrMesh_res.value();
+    auto* nativeMaterial = nativeMaterial_res.value();
+
+    // 2. Resolve optional/conditional resources
+    auto* skinMesh        = (mesh.skinBuffer != Invalid) ? impl->meshPool.Resolve(mesh.skinBuffer).value_or(nullptr) : nullptr;
+    auto* nativeIndexMesh = (mesh.indexBuffer != Invalid) ? impl->meshPool.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
 
     if (params.skinnedVertexBuffer != Invalid) {
         impl->hasSkinnedThisFrame = true;
     }
 
-    auto* finalPosMesh = (params.skinnedVertexBuffer != Invalid) ? impl->meshPool.Resolve(params.skinnedVertexBuffer) : posMesh;
+    auto* finalPosMesh = (params.skinnedVertexBuffer != Invalid) ? impl->meshPool.Resolve(params.skinnedVertexBuffer).value_or(nullptr) : posMesh;
 
     uint64_t posAddr  = (finalPosMesh != nullptr) ? finalPosMesh->vboAddress : 0;
     uint64_t attrAddr = (attrMesh != nullptr) ? attrMesh->vboAddress : 0;
@@ -1053,11 +1057,16 @@ void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex, bool useSc
         return;
     }
 
-    auto* posMesh  = impl->meshPool.Resolve(mesh.posBuffer);
-    auto* attrMesh = impl->meshPool.Resolve(mesh.attrBuffer);
-    if (AnyNull(posMesh, attrMesh)) [[unlikely]] {
+    auto posMesh_res  = impl->meshPool.Resolve(mesh.posBuffer);
+    auto attrMesh_res = impl->meshPool.Resolve(mesh.attrBuffer);
+
+    if (!posMesh_res || !attrMesh_res) [[unlikely]] {
+        ZHLN::Assert(false, "DrawUI: Attempted to submit UI draw with invalid mesh handles!");
         return;
     }
+
+    auto* posMesh  = posMesh_res.value();
+    auto* attrMesh = attrMesh_res.value();
 
     impl->uiDrawQueue.push_back({.posMesh = posMesh, .attrMesh = attrMesh, .fontIndex = fontIndex, .useScissor = useScissor, .scissorRect = scissorRect});
 }

@@ -343,7 +343,7 @@ auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHa
 }
 
 void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept {
-    auto* nativeMesh = _impl->meshPool.Resolve(_impl->debugMeshHandles[]);
+    auto* nativeMesh = _impl->meshPool.Resolve(_impl->debugMeshHandles[]).value_or(nullptr);
     if (nativeMesh == nullptr) {
         return;
     }
@@ -449,15 +449,16 @@ RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
             if (!impl->rtCtx.Valid()) {
                 return std::unexpected(VulkanCallError::FeatureNotPresent);
             }
-            auto* pos = impl->meshPool.Resolve(mesh.posBuffer);
-            if (pos == nullptr) {
-                return std::unexpected(VulkanCallError::VulkanCallFailed);
-            }
-            auto* index = mesh.indexBuffer != BufferHandle::Invalid ? impl->meshPool.Resolve(mesh.indexBuffer) : nullptr;
-
-            return BuildContext {
-                .posMesh = pos, .indexMesh = index, .geom = {}, .primitiveCount = {}, .sizes = {}, .blasBuffer = {}, .blas = nullptr, .scratch = {}
-            };
+            // Resolve the vertex buffer. Propagates ResourcePoolError if invalid/stale
+            return impl->meshPool.Resolve(mesh.posBuffer)
+                .transform_error([](auto err) -> Error { return err; })
+                .and_then([&](auto* pos) -> std::expected<BuildContext, Error> {
+                    // Optional index buffer: use value_or(nullptr) to handle missing indices cleanly
+                    auto* index = (mesh.indexBuffer != BufferHandle::Invalid) ? impl->meshPool.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
+                    return BuildContext {
+                        .posMesh = pos, .indexMesh = index, .geom = {}, .primitiveCount = {}, .sizes = {}, .blasBuffer = {}, .blas = nullptr, .scratch = {}
+                    };
+                });
         })
         .and_then([&](BuildContext b) -> std::expected<BuildContext, Error> {
             b.geom = {
@@ -500,8 +501,9 @@ RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
         })
         .and_then([&](BuildContext b) -> std::expected<void, Error> {
             Vk::CommandPool<Vk::QueueType::Graphics> tempPool(impl->ctx.Device(), impl->ctx.PhysicalInfo().graphics_family);
-            if (!tempPool.Allocate(1)) {
-                return std::unexpected(VulkanCallError::VulkanCallFailed);
+            auto                                     alloc_res = tempPool.Allocate(1);
+            if (!alloc_res) [[unlikely]] {
+                return std::unexpected(alloc_res.error());
             }
 
             VkCommandBuffer tempCmd = tempPool[0];

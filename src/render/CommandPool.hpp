@@ -21,6 +21,7 @@ class CommandPool {
     [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
         return _device != VK_NULL_HANDLE;
     }
+
     constexpr explicit operator bool() const noexcept {
         return Valid();
     }
@@ -31,9 +32,9 @@ class CommandPool {
     [[nodiscard]] constexpr operator ZHLN_CommandPool&() noexcept {
         return _raw;
     }
-
-    [[nodiscard]] auto Allocate(uint32_t count) -> bool;
-    [[nodiscard]] auto AllocateSecondary(uint32_t count) -> bool;
+    [[nodiscard]] auto EnsureValid() const noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto Allocate(uint32_t count) noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto AllocateSecondary(uint32_t count) noexcept -> std::expected<void, Error>;
     void               Reset() noexcept;
 
     // This is where the compiler-enforced safety is introduced!

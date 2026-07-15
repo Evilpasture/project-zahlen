@@ -49,6 +49,13 @@ using EngineAS = std::conditional_t<
 template <typename T, size_t MaxObjects, typename HandleType = uint64_t>
 class GenerationalPool {
   public:
+    enum class Error : uint8_t {
+        Success = 0,
+        InvalidHandle,    // The handle was 0/Null
+        StaleHandle,      // Generational mismatch (the resource was already destroyed)
+        OutOfBoundsIndex, // Index exceeds pool capacity
+        NullResource      // Internal error: slot points to null pointer
+    };
     GenerationalPool() {
         _freeIndices.reserve(MaxObjects);
         for (size_t i = 0; i < MaxObjects; ++i) {
@@ -105,14 +112,25 @@ class GenerationalPool {
         _freeIndices.push_back(index);
     }
 
-    [[nodiscard]] T* Resolve(HandleType handle) const noexcept {
+    [[nodiscard]] auto Resolve(HandleType handle) const noexcept -> std::expected<T*, Error> {
         auto rawHandle = static_cast<uint64_t>(handle);
-        auto index     = static_cast<uint32_t>(rawHandle & 0xFFFFFFFF);
-        auto gen       = static_cast<uint32_t>(rawHandle >> 32);
-
-        if (index >= MaxObjects || _generations[index] != gen) {
-            return nullptr;
+        if (rawHandle == 0) [[unlikely]] {
+            return std::unexpected(Error::InvalidHandle);
         }
+
+        auto index = static_cast<uint32_t>(rawHandle & 0xFFFFFFFF);
+        auto gen   = static_cast<uint32_t>(rawHandle >> 32);
+
+        if (index >= MaxObjects) [[unlikely]] {
+            return std::unexpected(Error::OutOfBoundsIndex);
+        }
+        if (_generations[index] != gen) [[unlikely]] {
+            return std::unexpected(Error::StaleHandle);
+        }
+        if (_pointers[index] == nullptr) [[unlikely]] {
+            return std::unexpected(Error::NullResource);
+        }
+
         return _pointers[index];
     }
 

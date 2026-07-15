@@ -90,7 +90,7 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
                 allocator.Get(), ctx.Device(), ctx.TransferQueue(), ctx.PhysicalInfo().transfer_family, static_cast<VkDeviceSize>(64 * 1024 * 1024)
             );
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() {
             bool supportsRayTracing = CheckRayTracingSupport(ctx.Physical());
             if (!supportsRayTracing || !rtCtx.Init(ctx.Device())) {
                 ZHLN::Log("WARNING: Raytracing context failed to initialize. RTR will be disabled.");
@@ -135,9 +135,10 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
 
             for (auto& worker: workerCmds) {
                 for (auto& pool: worker.pools) {
-                    pool = Vk::CommandPool<Vk::QueueType::Graphics>(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-                    if (!pool.AllocateSecondary(256)) {
-                        return std::unexpected(RenderInitError::WorkerCommandPoolSetupFailed);
+                    pool     = Vk::CommandPool<Vk::QueueType::Graphics>(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+                    auto res = pool.AllocateSecondary(256);
+                    if (!res) [[unlikely]] {
+                        return std::unexpected(res.error()); // Implicitly maps VkResult -> Error
                     }
                 }
             }
@@ -431,35 +432,69 @@ RenderContext::~RenderContext() {
 }
 
 std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
+    using enum RenderInitError;
+
     return Vk::SamplerBuilder {}
         .Linear()
         .ClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE)
         .DepthCompare()
         .Build(ctx.Device())
         .transform_error([](auto err) -> Error { return err; })
+
+        // 1. Bind Sampler
         .and_then([&](auto&& sampler) -> std::expected<void, Error> {
             shadowSampler = std::forward<decltype(sampler)>(sampler);
+            return {};
+        })
 
+        // 2. Allocate Cascaded Shadow Map Render Target
+        .and_then([&]() -> std::expected<void, Error> {
             graphResources.shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
                 allocator, ctx, {.width = SHADOW_RES, .height = SHADOW_RES},
                 {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = NUM_CASCADES}
             );
+            if (!graphResources.shadowMap.Valid()) [[unlikely]] {
+                return std::unexpected(SubsystemAllocationFailed);
+            }
+            return {};
+        })
 
+        // 3. Create Cascade Image Views
+        .and_then([&]() -> std::expected<void, Error> {
             shadowCascadeViews.resize(NUM_CASCADES);
             for (uint32_t i = 0; i < NUM_CASCADES; ++i) {
                 shadowCascadeViews[i] = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowMap.image.Handle(), i, 1);
+                if (!shadowCascadeViews[i].Valid()) [[unlikely]] {
+                    return std::unexpected(SubsystemAllocationFailed);
+                }
             }
+            return {};
+        })
 
-            // 1. Allocate Shadow Atlas
+        // 4. Allocate Punctual Shadow Atlas Render Target
+        .and_then([&]() -> std::expected<void, Error> {
             graphResources.shadowAtlas = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
                 allocator, ctx, {.width = 1024, .height = 1024},
                 {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = 24}
             );
+            if (!graphResources.shadowAtlas.Valid()) [[unlikely]] {
+                return std::unexpected(SubsystemAllocationFailed);
+            }
+            return {};
+        })
 
-            // 2. Pre-allocate Views using clean C++ helper templates!
+        // 5. Create Atlas Image Views
+        .and_then([&]() -> std::expected<void, Error> {
             shadowAtlasCubeView = Vk::CreateViewCubeArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowAtlas.image.Handle(), 24);
             shadowAtlas2DView   = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowAtlas.image.Handle(), 0, 24);
+            if (!shadowAtlasCubeView.Valid() || !shadowAtlas2DView.Valid()) [[unlikely]] {
+                return std::unexpected(SubsystemAllocationFailed);
+            }
+            return {};
+        })
 
+        // 6. Transition Layouts and Recreate Punctual Views
+        .and_then([&]() -> std::expected<void, Error> {
             Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
                     cmd, graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
@@ -477,29 +512,33 @@ std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
             });
 
             RecreatePunctualShadowViews();
-
-            auto fub_res = CreateDoubleBuffered(allocator, sizeof(FrameUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
-            if (!fub_res) {
-                return std::unexpected(fub_res.error());
-            }
-            frameUniformBuffers = std::move(*fub_res);
-
-            auto lsb_res = CreateDoubleBuffered(allocator, sizeof(GPULight) * 128, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
-            if (!lsb_res) {
-                return std::unexpected(lsb_res.error());
-            }
-            lightStorageBuffers = std::move(*lsb_res);
-
-            auto sib_res = CreateDoubleBuffered(
-                allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances * 8, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
-            );
-            if (!sib_res) {
-                return std::unexpected(sib_res.error());
-            }
-            shadowIndirectBuffers = std::move(*sib_res);
-
             return {};
-        });
+        })
+
+        // 7. Allocate Double-Buffered Frame Uniform Buffers
+        .and_then([&]() {
+            return CreateDoubleBuffered(allocator, sizeof(FrameUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU)
+                .transform_error([](auto err) -> Error { return err; });
+        })
+
+        // 8. Allocate Double-Buffered Light Storage Buffers
+        .and_then([&](auto&& fub) {
+            frameUniformBuffers = std::forward<decltype(fub)>(fub);
+            return CreateDoubleBuffered(allocator, sizeof(GPULight) * 128, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU)
+                .transform_error([](auto err) -> Error { return err; });
+        })
+
+        // 9. Allocate Double-Buffered Indirect Argument Buffers
+        .and_then([&](auto&& lsb) {
+            lightStorageBuffers = std::forward<decltype(lsb)>(lsb);
+            return CreateDoubleBuffered(
+                       allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances * 8, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
+            )
+                .transform_error([](auto err) -> Error { return err; });
+        })
+
+        // 10. Complete pipeline assignment
+        .transform([&](auto&& sib) { shadowIndirectBuffers = std::forward<decltype(sib)>(sib); });
 }
 
 std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
@@ -779,7 +818,7 @@ std::expected<void, Error> RenderContext::Impl::BuildAmbientPipeline() {
 }
 
 std::expected<void, Error> RenderContext::Impl::BuildLightingPipeline() {
-    VkPushConstantRange ppPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
+    VkPushConstantRange ppPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(PPPushConstants)};
 
     struct SpecData {
         int enableRTR;
@@ -1144,29 +1183,21 @@ std::expected<void, Error> RenderContext::Impl::InitSkeletalAnimationResources()
 
 std::expected<void, Error> RenderContext::Impl::InitLightingLUTs() {
     stagingContext = std::make_unique<Vk::StagingContext>(allocator, ctx);
-    stagingContext->Begin();
 
     using namespace Resource;
     const size_t matRawSize = ltc_mat.size() - 128;
     const size_t ampRawSize = ltc_amp.size() - 128;
 
-    return Vk::IBLProcessor::Bake(*this, *stagingContext)
-        .transform_error([](VkResult res) -> Error { return res; })
-        .and_then([&](auto&& ibl) -> std::expected<Vk::Buffer, Error> {
+    return stagingContext->Begin()
+        .and_then([&]() { return Vk::IBLProcessor::Bake(*this, *stagingContext).transform_error([](auto res) -> Error { return res; }); })
+        .and_then([&, matRawSize, ampRawSize](auto&& ibl) {
             iblPayload = std::forward<decltype(ibl)>(ibl);
             ZHLN::Log("[IBL] Uploading Linearly Transformed Cosines (LTC) LUTs...");
 
             return Vk::Buffer::Create(allocator.Get(), matRawSize + ampRawSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY)
-                .transform_error([](VkResult res) -> Error { return res; });
+                .transform_error([](auto res) -> Error { return res; });
         })
-        .and_then([&, matRawSize, ampRawSize](auto&& ltcStaging) -> std::expected<std::pair<Vk::Image, Vk::Image>, Error> {
-            auto        mapped       = ltcStaging.Map();
-            auto* const stageBasePtr = static_cast<char*>(mapped.data);
-
-            // Map and write raw LTC DDS binary payloads
-            std::memcpy(stageBasePtr, ltc_mat.data() + 128, matRawSize);
-            std::memcpy(stageBasePtr + matRawSize, ltc_amp.data() + 128, ampRawSize);
-
+        .and_then([&, matRawSize](auto&& ltcStaging) {
             const VkImageCreateInfo ltcInfo = {
                 .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
                 .pNext                 = {},
@@ -1185,28 +1216,21 @@ std::expected<void, Error> RenderContext::Impl::InitLightingLUTs() {
                 .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
             };
 
-            // Allocate and stage both LUT textures back-to-back
             return Vk::Image::Create(allocator.Get(), ltcInfo, VMA_MEMORY_USAGE_GPU_ONLY)
-                .transform_error([](VkResult res) -> Error { return res; })
-                .and_then(
-                    [&, ltcInfo, ltcStaging = std::forward<decltype(ltcStaging)>(ltcStaging),
-                     matRawSize](auto&& matImg) mutable -> std::expected<std::pair<Vk::Image, Vk::Image>, Error> {
-                        return Vk::Image::Create(allocator.Get(), ltcInfo, VMA_MEMORY_USAGE_GPU_ONLY)
-                            .transform_error([](VkResult res) -> Error { return res; })
-                            .transform([&, matImg = std::forward<decltype(matImg)>(matImg), ltcStaging = std::move(ltcStaging),
-                                        matRawSize](auto&& ampImg) mutable {
-                                // Queue image buffer copies to transfer queue
-                                stagingContext->UploadImage2DBuffer(matImg.Handle(), 64, 64, 1, ltcStaging.Handle(), 0);
-                                stagingContext->UploadImage2DBuffer(ampImg.Handle(), 64, 64, 1, ltcStaging.Handle(), matRawSize);
+                .transform_error([](auto res) -> Error { return res; })
+                .and_then([&, ltcInfo, ltcStaging = std::forward<decltype(ltcStaging)>(ltcStaging), matRawSize](auto&& matImg) mutable {
+                    return Vk::Image::Create(allocator.Get(), ltcInfo, VMA_MEMORY_USAGE_GPU_ONLY)
+                        .transform_error([](auto res) -> Error { return res; })
+                        .transform([&, matImg = std::forward<decltype(matImg)>(matImg), ltcStaging = std::move(ltcStaging), matRawSize](auto&& ampImg) mutable {
+                            stagingContext->UploadImage2DBuffer(matImg.Handle(), 64, 64, 1, ltcStaging.Handle(), 0);
+                            stagingContext->UploadImage2DBuffer(ampImg.Handle(), 64, 64, 1, ltcStaging.Handle(), matRawSize);
 
-                                stagingContext->AddBuffer(std::move(ltcStaging));
-                                return std::make_pair(std::move(matImg), std::forward<decltype(ampImg)>(ampImg));
-                            });
-                    }
-                );
+                            stagingContext->AddBuffer(std::move(ltcStaging));
+                            return std::make_pair(std::move(matImg), std::forward<decltype(ampImg)>(ampImg));
+                        });
+                });
         })
         .transform([&](auto&& images) -> void {
-            // Unpack allocated textures, execute transfer context, and bind views
             ltcMatImage = std::move(images.first);
             ltcAmpImage = std::move(images.second);
 

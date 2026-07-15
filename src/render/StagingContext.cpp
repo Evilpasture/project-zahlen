@@ -27,11 +27,15 @@ StagingContext::StagingContext(StagingContext&& other) noexcept:
     _stagingBuffers(std::move(other._stagingBuffers)), _fence(std::exchange(other._fence, VK_NULL_HANDLE)) {
 }
 
-void StagingContext::Begin() {
-    _cmdPool                 = CommandPool<QueueType::Graphics>(_ctx->Device(), _ctx->PhysicalInfo().graphics_family);
-    [[maybe_unused]] bool ok = _cmdPool.Allocate(1);
-    _cmd                     = _cmdPool[0];
+auto StagingContext::Begin() noexcept -> std::expected<void, Error> {
+    _cmdPool       = CommandPool<QueueType::Graphics>(_ctx->Device(), _ctx->PhysicalInfo().graphics_family);
+    auto alloc_res = _cmdPool.Allocate(1);
+    if (!alloc_res) [[unlikely]] {
+        return std::unexpected(alloc_res.error());
+    }
+    _cmd = _cmdPool[0];
     ZHLN_BeginCommandBuffer(_cmd);
+    return {};
 }
 
 auto StagingContext::UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, const void* data, size_t bytes) noexcept
