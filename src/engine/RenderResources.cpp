@@ -386,6 +386,10 @@ uint32_t RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas)
     return offset;
 }
 
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
 std::expected<void, Error> RenderContext::SetShadowResolution(uint32_t resolution) {
     auto* impl   = _impl.get();
     auto* device = impl->ctx.Device();
@@ -423,6 +427,10 @@ std::expected<void, Error> RenderContext::SetShadowResolution(uint32_t resolutio
             ZHLN::Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);
         });
 }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 void RenderContext::SetAAState(const AAState& state) {
     _impl->aaState = state;
