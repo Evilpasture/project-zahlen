@@ -3,6 +3,7 @@
 #pragma once
 
 #include "ECS.hpp"
+#include "threading/TaskSystem.hpp"
 #include <detail/Atomic.hpp>
 #include <string_view>
 #include <vector>
@@ -71,9 +72,9 @@ class ZHLN_API SystemGraph {
     std::vector<ExecPayload> _payloads;
     std::vector<uint32_t>    _entryNodes;
 
-    ZHLN::Engine*          _currentEngine = nullptr;
-    float                  _currentDt     = 0.0f;
-    ZHLN::Atomic<uint32_t> _completionCounter {0};
+    ZHLN::Engine*       _currentEngine = nullptr;
+    float               _currentDt     = 0.0f;
+    TaskSystem::Counter _completionCounter;
 };
 
 } // namespace ZHLN::ECS
