@@ -6,6 +6,7 @@
 #include "Zahlen/Types.hpp"
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <charconv>
 #include <expected>
 #include <filesystem>
@@ -124,7 +125,7 @@ Options:
   --quiet                  Disable all logging outputs (silent mode)
   --renderdoc <on|off>     Load RenderDoc library at startup (default: off)
   --benchmark              Run the benchmark suite
-  --print-graph            Print the compile-time generated render graph and exit
+  --print-graph [mode]     Print the compile-time generated render graph for the specified AA mode (none, fxaa, mlaa, taa, smaa) and exit (default: taa)
   --debug-attach           Wait for a program to attach to the running engine process
 
 Environment Variables:
@@ -291,11 +292,34 @@ Press ENTER to continue.
             return {};
         }
     },
-    CommandHandler {.key = "--print-graph", .shortKey = "", .action = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::Error> {
-                        std::println("{}", ZHLN::GetRenderGraphDump(ZHLN::AAMode::TAA));
-                        opt.printGraphRequested = true;
-                        return {};
-                    }},
+    CommandHandler {
+        .key      = "--print-graph",
+        .shortKey = "",
+        .action   = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::Error> {
+            ZHLN::AAMode mode = ZHLN::AAMode::TAA;
+            if (!v.empty()) {
+                std::string modeStr(v);
+                std::ranges::transform(modeStr, modeStr.begin(), [](unsigned char c) { return std::tolower(c); });
+                if (modeStr == "none") {
+                    mode = ZHLN::AAMode::None;
+                } else if (modeStr == "fxaa") {
+                    mode = ZHLN::AAMode::FXAA;
+                } else if (modeStr == "mlaa") {
+                    mode = ZHLN::AAMode::MLAA;
+                } else if (modeStr == "taa") {
+                    mode = ZHLN::AAMode::TAA;
+                } else if (modeStr == "smaa") {
+                    mode = ZHLN::AAMode::SMAA;
+                } else {
+                    std::println(stderr, "Error: Invalid AA mode '{}' for --print-graph. Valid modes are: none, fxaa, mlaa, taa, smaa.", v);
+                    return std::unexpected(ZHLN::CommandLineError::InvalidValue);
+                }
+            }
+            std::println("{}", ZHLN::GetRenderGraphDump(mode));
+            opt.printGraphRequested = true;
+            return {};
+        }
+    },
 };
 
 } // namespace

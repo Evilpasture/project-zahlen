@@ -791,34 +791,36 @@ void DispatchAAMode(Self& self, VkCommandBuffer cmd, AAMode mode, const PassFact
 } // namespace
 
 std::string_view GetRenderGraphDump(AAMode currentMode) noexcept {
+    using enum AAMode;
+    using Vk::Debug::GraphVisualizer;
     // 1. Bake the TAA String
-    static constexpr auto vis_taa = Vk::Debug::GraphVisualizer<decltype(BuildFrameGraph<false, AAMode::TAA>(std::declval<PassFactory>(), []() {
+    static constexpr auto vis_taa = GraphVisualizer<decltype(BuildFrameGraph<false, TAA>(std::declval<PassFactory>(), []() {
         return Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {};
     }))>::Visualize();
 
     // 2. Bake the SMAA String
-    static constexpr auto vis_smaa = Vk::Debug::GraphVisualizer<decltype(BuildFrameGraph<false, AAMode::SMAA>(std::declval<PassFactory>(), []() {
+    static constexpr auto vis_smaa = GraphVisualizer<decltype(BuildFrameGraph<false, SMAA>(std::declval<PassFactory>(), []() {
         return Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {};
     }))>::Visualize();
 
     // 3. Bake the MLAA String
-    static constexpr auto vis_mlaa = Vk::Debug::GraphVisualizer<decltype(BuildFrameGraph<false, AAMode::MLAA>(
-        std::declval<PassFactory>(), []() -> Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> { return {}; }
-    ))>::Visualize();
+    static constexpr auto vis_mlaa =
+        GraphVisualizer<decltype(BuildFrameGraph<false, MLAA>(std::declval<PassFactory>(), []() -> Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {
+            return {};
+        }))>::Visualize();
 
     // 4. Bake the FXAA String
-    static constexpr auto vis_fxaa = Vk::Debug::GraphVisualizer<decltype(BuildFrameGraph<false, AAMode::FXAA>(std::declval<PassFactory>(), []() {
+    static constexpr auto vis_fxaa = GraphVisualizer<decltype(BuildFrameGraph<false, FXAA>(std::declval<PassFactory>(), []() {
         return Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {};
     }))>::Visualize();
 
     // Bake the 'None' String (No Anti-Aliasing)
-    static constexpr auto vis_none = Vk::Debug::GraphVisualizer<decltype(BuildFrameGraph<false, AAMode::None>(std::declval<PassFactory>(), []() {
+    static constexpr auto vis_none = GraphVisualizer<decltype(BuildFrameGraph<false, None>(std::declval<PassFactory>(), []() {
         return Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {};
     }))>::Visualize();
 
     // Return the correct pre-baked compile-time string based on the runtime mode
     switch (currentMode) {
-        using enum AAMode;
         case TAA:
             return vis_taa.string_view();
         case SMAA:
@@ -911,7 +913,7 @@ RenderResult RenderContext::BeginFrame() noexcept {
         VkExtent2D ext = {.width = fbSize->width, .height = fbSize->height};
 
         if (!_impl->RecreateTargets(ext)) {
-            return std::unexpected(RenderFrameResult::Error);
+            return std::unexpected(Error);
         }
 
         _impl->needsInitialClear = true;
@@ -948,7 +950,7 @@ RenderResult RenderContext::EndFrame() noexcept {
         if (_impl->current_cmd == VK_NULL_HANDLE) {
             _impl->drawQueue.clear();
             _impl->uiDrawQueue.clear();
-            return std::unexpected(RenderFrameResult::Error);
+            return std::unexpected(Error);
         }
 
         res = Vk::DrawFrame<2, false>(
@@ -1093,46 +1095,43 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
     uint32_t isSkinned        = (params.skinnedVertexBuffer == Invalid && (params.flags & Skinned) != None) ? 1u : 0u;
     uint32_t activeMorphCount = (params.skinnedVertexBuffer != Invalid) ? 0 : params.activeMorphCount;
 
-    InstanceData inst = {
-        .world            = params.transform,
-        .prevWorld        = params.prevTransform,
-        .posAddress       = posAddr,
-        .attrAddress      = attrAddr,
-        .skinAddress      = (skinMesh != nullptr) ? skinMesh->vboAddress : 0,
-        .iboAddress       = (nativeIndexMesh != nullptr) ? nativeIndexMesh->vboAddress : 0,
-        .vertexCount      = (posMesh != nullptr) ? posMesh->vertexCount : 0,
-        .indexCount       = mesh.indexCount,
-        .texIndices0      = (material.normalIndex << 16) | (material.albedoIndex & 0xFFFF),
-        .texIndices1      = (material.emissiveIndex << 16) | (material.pbrIndex & 0xFFFF),
-        .cullRadius       = params.cullRadius,
-        .metallicFactor   = params.metallic >= 0.0f ? params.metallic : material.metallicFactor,
-        .roughnessFactor  = params.roughness >= 0.0f ? params.roughness : material.roughnessFactor,
-        .alphaCutoff      = material.alphaCutoff,
-        .flags            = (isSkinned << 8) | (material.alphaMode & 0xFF),
-        .jointOffset      = params.jointOffset,
-        .morphOffset      = params.morphOffset,
-        .activeMorphCount = activeMorphCount,
-        .localCenter      = {params.localCenter[0], params.localCenter[1], params.localCenter[2]},
-        ._paddingCenter   = {},
-        .morphWeights     = UnpackMorphWeights(params.morphWeights),
-        .baseColorFactor  = {material.baseColorFactor[0], material.baseColorFactor[1], material.baseColorFactor[2], material.baseColorFactor[3]},
-        .emissiveFactor   = {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]},
-    };
-
     impl->drawQueue.push_back(
-        DrawCommand {
-            .instanceData        = inst,
-            .material            = nativeMaterial,
-            .posMesh             = posMesh,
-            .attrMesh            = attrMesh,
-            .skinMesh            = skinMesh,
-            .skinnedVertexBuffer = params.skinnedVertexBuffer,
-            .jointOffset         = params.jointOffset,
-            .morphOffset         = params.morphOffset,
-            .activeMorphCount    = params.activeMorphCount,
-            .morphWeights        = UnpackMorphWeights(params.morphWeights),
-            .flags               = params.flags
-        }
+        {.instanceData =
+             {
+                 .world            = params.transform,
+                 .prevWorld        = params.prevTransform,
+                 .posAddress       = posAddr,
+                 .attrAddress      = attrAddr,
+                 .skinAddress      = (skinMesh != nullptr) ? skinMesh->vboAddress : 0,
+                 .iboAddress       = (nativeIndexMesh != nullptr) ? nativeIndexMesh->vboAddress : 0,
+                 .vertexCount      = (posMesh != nullptr) ? posMesh->vertexCount : 0,
+                 .indexCount       = mesh.indexCount,
+                 .texIndices0      = (material.normalIndex << 16) | (material.albedoIndex & 0xFFFF),
+                 .texIndices1      = (material.emissiveIndex << 16) | (material.pbrIndex & 0xFFFF),
+                 .cullRadius       = params.cullRadius,
+                 .metallicFactor   = params.metallic >= 0.0f ? params.metallic : material.metallicFactor,
+                 .roughnessFactor  = params.roughness >= 0.0f ? params.roughness : material.roughnessFactor,
+                 .alphaCutoff      = material.alphaCutoff,
+                 .flags            = (isSkinned << 8) | (material.alphaMode & 0xFF),
+                 .jointOffset      = params.jointOffset,
+                 .morphOffset      = params.morphOffset,
+                 .activeMorphCount = activeMorphCount,
+                 .localCenter      = {params.localCenter[0], params.localCenter[1], params.localCenter[2]},
+                 ._paddingCenter   = {},
+                 .morphWeights     = UnpackMorphWeights(params.morphWeights),
+                 .baseColorFactor  = {material.baseColorFactor[0], material.baseColorFactor[1], material.baseColorFactor[2], material.baseColorFactor[3]},
+                 .emissiveFactor   = {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]},
+             },
+         .material            = nativeMaterial,
+         .posMesh             = posMesh,
+         .attrMesh            = attrMesh,
+         .skinMesh            = skinMesh,
+         .skinnedVertexBuffer = params.skinnedVertexBuffer,
+         .jointOffset         = params.jointOffset,
+         .morphOffset         = params.morphOffset,
+         .activeMorphCount    = params.activeMorphCount,
+         .morphWeights        = UnpackMorphWeights(params.morphWeights),
+         .flags               = params.flags}
     );
 }
 
