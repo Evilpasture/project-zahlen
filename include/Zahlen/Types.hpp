@@ -216,7 +216,7 @@ struct GISettings {
     int   enableRTR         = 0;
 };
 // NOLINTNEXTLINE(performance-enum-size)
-enum class AAMode : uint32_t { None = 0, FXAA = 1, TAA = 2, SMAA = 3 };
+enum class AAMode : uint32_t { None = 0, FXAA, MLAA, TAA, SMAA };
 
 struct AAState {
     AAMode mode = AAMode::TAA;
@@ -230,9 +230,11 @@ struct AAState {
     uint32_t frameIndex  = 0; // Drives the Halton Jitter sequence
 
     // FXAA Options
-    float fxaaSubpix           = 0.75f;
-    float fxaaEdgeThreshold    = 0.166f;
-    float fxaaEdgeThresholdMin = 0.0833f;
+    float    fxaaSubpix           = 0.75f;
+    float    fxaaEdgeThreshold    = 0.166f;
+    float    fxaaEdgeThresholdMin = 0.0833f;
+    float    mlaaThreshold        = 0.1f; // Edge detection sensitivity (typically 0.1 to 0.15)
+    uint32_t mlaaMaxSearchSteps   = 16;   // Maximum pixels to search left/right/up/down (typically 8 to 32)
 };
 
 struct GlyphMetric {

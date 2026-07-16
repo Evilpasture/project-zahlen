@@ -789,6 +789,21 @@ std::expected<void, Error> RenderContext::Impl::BuildFXAAPipeline() {
     );
 }
 
+std::expected<void, Error> RenderContext::Impl::BuildMLAAPipeline() {
+    VkPushConstantRange mlaaPush = {
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        .offset     = 0,
+        .size       = sizeof(float) * 3 + sizeof(uint32_t), // Matches the 16-byte push constant struct
+    };
+
+    return BuildPassHelper(
+        this, mlaaPass, "MLAA",
+        {.path = SHADER_MLAA_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(Resource::ShaderID::Mlaa).vertex, .entryPoint = "VSMain"},
+        {.path = SHADER_MLAA_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(Resource::ShaderID::Mlaa).fragment, .entryPoint = "PSMain"},
+        {VK_FORMAT_R16G16B16A16_SFLOAT}, &mlaaPush, 1
+    );
+}
+
 std::expected<void, Error> RenderContext::Impl::BuildSMAAPipeline() {
     VkPushConstantRange smaaPush = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float) * 4};
 
@@ -994,6 +1009,7 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
         })
         .and_then([&]() { return register_and_check("TAA", [this]() { return BuildTAAPipeline(); }, {SHADER_TAA_HLSL_VS_PATH, SHADER_TAA_HLSL_PS_PATH}); })
         .and_then([&]() { return register_and_check("FXAA", [this]() { return BuildFXAAPipeline(); }, {SHADER_FXAA_HLSL_VS_PATH, SHADER_FXAA_HLSL_PS_PATH}); })
+        .and_then([&]() { return register_and_check("MLAA", [this]() { return BuildMLAAPipeline(); }, {SHADER_MLAA_HLSL_VS_PATH, SHADER_MLAA_HLSL_PS_PATH}); })
         .and_then([&]() {
             return register_and_check(
                 "SMAA", [this]() { return BuildSMAAPipeline(); },

@@ -289,6 +289,10 @@ struct PassFactory {
         }
     }
 
+    [[nodiscard]] auto RcpExtent(VkExtent2D e) const noexcept {
+        return std::pair {1.0f / (float) e.width, 1.0f / (float) e.height};
+    }
+
     // Consolidated helper to build scene resource descriptions
     [[nodiscard]] auto BuildSceneResources() const noexcept {
         return SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> {
@@ -546,7 +550,6 @@ struct PassFactory {
             auto& inputColor = ColorTarget<FullBright>();
 
             if (self.fxaaPass.pipeline.Valid()) {
-                auto RcpExtent    = [](VkExtent2D e) -> std::pair<float, float> { return {1.0f / (float) e.width, 1.0f / (float) e.height}; };
                 auto [rcpW, rcpH] = RcpExtent(inputColor.extent);
                 struct FXAAPushConstants {
                     float rcpFrameX;
@@ -567,19 +570,41 @@ struct PassFactory {
     }
 
     template <bool FullBright>
+    [[nodiscard]] auto MakeMLAAPass() const noexcept {
+        using InputRes = std::conditional_t<FullBright, Res_SceneColor, Res_PostProcess>;
+        return Vk::MakePass<"MLAA", Vk::ShaderRead<InputRes>, Vk::ColorWrite<Res_AccumNext>>([this](auto& ctx) noexcept {
+            auto  c          = ctx.Cmd();
+            auto& inputColor = ColorTarget<FullBright>();
+
+            if (self.mlaaPass.pipeline.Valid()) {
+                auto [rcpW, rcpH] = RcpExtent(inputColor.extent);
+
+                struct MLAAPushConstants {
+                    float    rcpFrameX;
+                    float    rcpFrameY;
+                    float    threshold;
+                    uint32_t maxSearchSteps;
+                };
+
+                self.mlaaPass.WriteNext(device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor), self.defaultSampler.Get());
+
+                self.mlaaPass.Execute(c, MLAAPushConstants {rcpW, rcpH, self.aaState.mlaaThreshold, self.aaState.mlaaMaxSearchSteps});
+            }
+        });
+    }
+
+    template <bool FullBright>
     [[nodiscard]] auto MakeSMAAEdgePass() const noexcept {
         using InputRes = std::conditional_t<FullBright, Res_SceneColor, Res_PostProcess>;
         return Vk::MakePass<"SmaaEdge", Vk::ShaderRead<InputRes>, Vk::ColorWrite<Res_SmaaEdge>>([this](auto& ctx) noexcept {
             auto  c          = ctx.Cmd(); // Extract cmd from the graph context
             auto& inputColor = ColorTarget<FullBright>();
             if (self.smaaEdgePass.pipeline.Valid()) {
-                auto RcpExtent    = [](VkExtent2D e) -> std::pair<float, float> { return {1.0f / (float) e.width, 1.0f / (float) e.height}; };
                 auto [rcpW, rcpH] = RcpExtent(inputColor.extent);
                 struct SMAAMetrics {
                     float rcpWidth, rcpHeight, width, height;
                 } metrics = {rcpW, rcpH, (float) inputColor.extent.width, (float) inputColor.extent.height};
 
-                // NO MORE DispatchPostProcessPass! The graph already started the render pass!
                 self.smaaEdgePass.WriteNext(
                     device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor), self.defaultSampler.Get(), self.pointSampler.Get()
                 );
@@ -592,7 +617,6 @@ struct PassFactory {
         return Vk::MakePass<"SmaaWeight", Vk::ShaderRead<Res_SmaaEdge>, Vk::ColorWrite<Res_SmaaWeight>>([this](auto& ctx) noexcept {
             auto c = ctx.Cmd();
             if (self.smaaWeightPass.pipeline.Valid()) {
-                auto RcpExtent    = [](VkExtent2D e) -> std::pair<float, float> { return {1.0f / (float) e.width, 1.0f / (float) e.height}; };
                 auto [rcpW, rcpH] = RcpExtent(self.graphResources.smaaWeightTarget.extent);
                 struct SMAAMetrics {
                     float rcpWidth, rcpHeight, width, height;
@@ -615,7 +639,6 @@ struct PassFactory {
             auto  c          = ctx.Cmd();
             auto& inputColor = ColorTarget<FullBright>();
             if (self.smaaBlendPass.pipeline.Valid()) {
-                auto RcpExtent    = [](VkExtent2D e) -> std::pair<float, float> { return {1.0f / (float) e.width, 1.0f / (float) e.height}; };
                 auto [rcpW, rcpH] = RcpExtent(inputColor.extent);
                 struct SMAAMetrics {
                     float rcpWidth, rcpHeight, width, height;
@@ -667,6 +690,7 @@ struct PassFactory {
 // ============================================================================
 template <bool FullBright, AAMode Mode, typename GetSwapchainImageT>
 auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapchainImage) {
+    using enum AAMode;
     auto corePasses = [&] {
         if constexpr (FullBright) {
             return std::tuple {factory.MakeMainPass(), factory.template MakeForwardPass<FullBright>()};
@@ -689,16 +713,21 @@ auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapcha
     };
 
     auto tailPasses = [&] {
-        if constexpr (Mode == AAMode::TAA) {
+        if constexpr (Mode == TAA) {
             return std::tuple {
                 factory.template MakeTAAPass<FullBright>(), factory.template MakeBlitPass<FullBright, Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))
             };
-        } else if constexpr (Mode == AAMode::FXAA) {
+        } else if constexpr (Mode == FXAA) {
             return std::tuple {
                 factory.template MakeFXAAPass<FullBright>(),
                 factory.template MakeBlitPass<FullBright, Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))
             };
-        } else if constexpr (Mode == AAMode::SMAA) {
+        } else if constexpr (Mode == MLAA) {
+            return std::tuple {
+                factory.template MakeMLAAPass<FullBright>(),
+                factory.template MakeBlitPass<FullBright, Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))
+            };
+        } else if constexpr (Mode == SMAA) {
             return std::tuple {
                 factory.template MakeSMAAEdgePass<FullBright>(), factory.MakeSMAAWeightPass(), factory.template MakeSMAABlendPass<FullBright>(),
                 factory.template MakeBlitPass<FullBright, Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))
@@ -763,38 +792,45 @@ void DispatchAAMode(Self& self, VkCommandBuffer cmd, AAMode mode, const PassFact
 
 std::string_view GetRenderGraphDump(AAMode currentMode) noexcept {
     // 1. Bake the TAA String
-    static constexpr auto vis_taa = Vk::Debug::GraphVisualizer<decltype(BuildFrameGraph<false, AAMode::TAA>(
-        std::declval<PassFactory>(), []() -> Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> { return {}; }
-    ))>::Visualize();
+    static constexpr auto vis_taa = Vk::Debug::GraphVisualizer<decltype(BuildFrameGraph<false, AAMode::TAA>(std::declval<PassFactory>(), []() {
+        return Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {};
+    }))>::Visualize();
 
     // 2. Bake the SMAA String
-    static constexpr auto vis_smaa = Vk::Debug::GraphVisualizer<decltype(BuildFrameGraph<false, AAMode::SMAA>(
+    static constexpr auto vis_smaa = Vk::Debug::GraphVisualizer<decltype(BuildFrameGraph<false, AAMode::SMAA>(std::declval<PassFactory>(), []() {
+        return Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {};
+    }))>::Visualize();
+
+    // 3. Bake the MLAA String
+    static constexpr auto vis_mlaa = Vk::Debug::GraphVisualizer<decltype(BuildFrameGraph<false, AAMode::MLAA>(
         std::declval<PassFactory>(), []() -> Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> { return {}; }
     ))>::Visualize();
 
-    // 3. Bake the FXAA String
-    static constexpr auto vis_fxaa = Vk::Debug::GraphVisualizer<decltype(BuildFrameGraph<false, AAMode::FXAA>(
-        std::declval<PassFactory>(), []() -> Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> { return {}; }
-    ))>::Visualize();
+    // 4. Bake the FXAA String
+    static constexpr auto vis_fxaa = Vk::Debug::GraphVisualizer<decltype(BuildFrameGraph<false, AAMode::FXAA>(std::declval<PassFactory>(), []() {
+        return Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {};
+    }))>::Visualize();
 
-    // 4. Bake the 'None' String (No Anti-Aliasing)
-    static constexpr auto vis_none = Vk::Debug::GraphVisualizer<decltype(BuildFrameGraph<false, AAMode::None>(
-        std::declval<PassFactory>(), []() -> Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> { return {}; }
-    ))>::Visualize();
+    // Bake the 'None' String (No Anti-Aliasing)
+    static constexpr auto vis_none = Vk::Debug::GraphVisualizer<decltype(BuildFrameGraph<false, AAMode::None>(std::declval<PassFactory>(), []() {
+        return Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {};
+    }))>::Visualize();
 
     // Return the correct pre-baked compile-time string based on the runtime mode
     switch (currentMode) {
-        case AAMode::TAA:
+        using enum AAMode;
+        case TAA:
             return vis_taa.string_view();
-        case AAMode::SMAA:
+        case SMAA:
             return vis_smaa.string_view();
-        case AAMode::FXAA:
+        case FXAA:
             return vis_fxaa.string_view();
-        case AAMode::None:
-            return vis_none.string_view();
-        default:
+        case MLAA:
+            return vis_mlaa.string_view();
+        case None:
             return vis_none.string_view();
     }
+    return "Not implemented.";
 }
 
 template <bool FullBright>
@@ -850,20 +886,23 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
 
 RenderResult RenderContext::BeginFrame() noexcept {
     using enum RenderFrameResult;
-    if (_impl->stagingContext) {
-        _impl->stagingContext->Wait();
-        _impl->stagingContext.reset();
+    auto& stagingContext = _impl->stagingContext;
+    auto& frame_index    = _impl->frame_index;
+    auto& deletionQueue  = _impl->deletionQueue;
+    if (stagingContext) {
+        stagingContext->Wait();
+        stagingContext.reset();
     }
 
-    _impl->deletionQueue.BeginFrame(_impl->frame_index);
-    _impl->activeQueueGuard.emplace(_impl->deletionQueue);
+    deletionQueue.BeginFrame(frame_index);
+    _impl->activeQueueGuard.emplace(deletionQueue);
 
     for (auto& worker: _impl->workerCmds) {
-        worker.cmdCount[_impl->frame_index].store(0, std::memory_order::relaxed);
-        worker.pools[_impl->frame_index].Reset();
+        worker.cmdCount[frame_index].store(0, std::memory_order::relaxed);
+        worker.pools[frame_index].Reset();
     }
-
-    if (_impl->resized) {
+    auto& resized = _impl->resized;
+    if (resized) {
         auto fbSize = GetFramebufferSize();
         if (!fbSize.has_value()) {
             return std::unexpected(OutOfDate);
@@ -876,7 +915,7 @@ RenderResult RenderContext::BeginFrame() noexcept {
         }
 
         _impl->needsInitialClear = true;
-        _impl->resized           = false;
+        resized                  = false;
     }
 
     // Set a non-null placeholder value to indicate that frame tracking is active

@@ -246,6 +246,11 @@ using CullingLayout = Vk::DescriptorLayout<
     Vk::StorageBufferSlot<1>  // g_indirectCommands
     >;
 
+using MLAALayout = Vk::DescriptorLayout<
+    Vk::SampledImageSlot<0>, // colorTex
+    Vk::SamplerSlot<1>       // sPoint
+    >;
+
 // Pass 1: Edge Detection Layout (Reads the main scene color)
 using SMAAEdgeLayout = Vk::DescriptorLayout<
     Vk::SampledImageSlot<0>, // texInput (Color)
@@ -641,6 +646,7 @@ struct RenderContext::Impl {
     // ============================================================================
     Vk::PostProcessPass<TAALayout>        taaPass;
     Vk::PostProcessPass<FXAALayout>       fxaaPass;
+    Vk::PostProcessPass<MLAALayout>       mlaaPass;
     Vk::PostProcessPass<SMAAEdgeLayout>   smaaEdgePass;
     Vk::PostProcessPass<SMAAWeightLayout> smaaWeightPass;
     Vk::PostProcessPass<SMAABlendLayout>  smaaBlendPass;
@@ -889,6 +895,7 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, Error> InitBindless();
     [[nodiscard]] std::expected<void, Error> BuildTAAPipeline();
     [[nodiscard]] std::expected<void, Error> BuildFXAAPipeline();
+    [[nodiscard]] std::expected<void, Error> BuildMLAAPipeline();
     [[nodiscard]] std::expected<void, Error> BuildSMAAPipeline();
     [[nodiscard]] std::expected<void, Error> BuildAmbientPipeline();
     [[nodiscard]] std::expected<void, Error> BuildLightingPipeline();

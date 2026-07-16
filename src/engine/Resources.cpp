@@ -93,6 +93,15 @@ constexpr uint8_t fxaa_ps_raw[] = {
 };
 extern const ShaderPair fxaa_shaders {.vertex = fxaa_vs_raw, .fragment = fxaa_ps_raw};
 
+// --- MLAA Shaders ---
+constexpr uint8_t mlaa_vs_raw[] = {
+#embed SHADER_MLAA_HLSL_VS_PATH
+};
+constexpr uint8_t mlaa_ps_raw[] = {
+#embed SHADER_MLAA_HLSL_PS_PATH
+};
+extern const ShaderPair mlaa_shaders {.vertex = mlaa_vs_raw, .fragment = mlaa_ps_raw};
+
 // --- SMAA Edge Shaders ---
 constexpr uint8_t smaa_edge_vs_raw[] = {
 #embed SHADER_SMAA_EDGE_VS_PATH

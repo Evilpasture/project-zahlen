@@ -22,6 +22,7 @@ enum class ShaderID : uint8_t {
     Reflection,
     ReflectionNort,
     Fxaa,
+    Mlaa,
     SmaaEdge,
     SmaaWeight,
     SmaaBlend,
@@ -54,6 +55,7 @@ extern const ShaderPair lighting_shaders;
 extern const ShaderPair reflection_shaders;
 extern const ShaderPair reflection_nort_shaders;
 extern const ShaderPair fxaa_shaders;
+extern const ShaderPair mlaa_shaders;
 extern const ShaderPair smaa_edge_shaders;
 extern const ShaderPair smaa_weight_shaders;
 extern const ShaderPair smaa_blend_shaders;
@@ -93,6 +95,7 @@ struct ShaderMapping {
         {.id = ShaderID::Reflection, .pair = reflection_shaders},
         {.id = ShaderID::ReflectionNort, .pair = reflection_nort_shaders},
         {.id = ShaderID::Fxaa, .pair = fxaa_shaders},
+        {.id = ShaderID::Mlaa, .pair = mlaa_shaders},
         {.id = ShaderID::SmaaEdge, .pair = smaa_edge_shaders},
         {.id = ShaderID::SmaaWeight, .pair = smaa_weight_shaders},
         {.id = ShaderID::SmaaBlend, .pair = smaa_blend_shaders},

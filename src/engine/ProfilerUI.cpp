@@ -185,7 +185,7 @@ void DrawProfiler(Engine& engine) {
             if (!aaEnts.empty()) {
                 auto* aaSettings = engine.GetRegistry().Get<Components::AASettingsComponent>(aaEnts[0]);
 
-                const char* aaModesList[]  = {"Disabled", "FXAA (Fast Approximate)", "TAA (Temporal)", "SMAA (Subpixel Morphological)"};
+                const char* aaModesList[]  = {"Disabled", "FXAA (Fast Approximate)", "MLAA (Morphological)", "TAA (Temporal)", "SMAA (Subpixel Morphological)"};
                 int         currentModeIdx = static_cast<int>(aaSettings->state.mode);
 
                 if (ImGui::Combo("AA Method", &currentModeIdx, aaModesList, IM_ARRAYSIZE(aaModesList))) {
@@ -197,6 +197,12 @@ void DrawProfiler(Engine& engine) {
                 } else if (aaSettings->state.mode == AAMode::FXAA) {
                     ImGui::SliderFloat("FXAA Subpixel Blend", &aaSettings->state.fxaaSubpix, 0.0f, 1.0f, "%.2f");
                     ImGui::SliderFloat("FXAA Edge Threshold", &aaSettings->state.fxaaEdgeThreshold, 0.063f, 0.333f, "%.3f");
+                } else if (aaSettings->state.mode == AAMode::MLAA) { // <- ADDED
+                    ImGui::SliderFloat("MLAA Edge Threshold", &aaSettings->state.mlaaThreshold, 0.05f, 0.25f, "%.3f");
+                    int steps = static_cast<int>(aaSettings->state.mlaaMaxSearchSteps);
+                    if (ImGui::SliderInt("MLAA Max Search Steps", &steps, 4, 32)) {
+                        aaSettings->state.mlaaMaxSearchSteps = static_cast<uint32_t>(steps);
+                    }
                 }
             }
         }
