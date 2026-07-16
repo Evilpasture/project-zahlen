@@ -11,14 +11,25 @@
 
 namespace ZHLN::Vk {
 
-/*
- * EXPERIMENTAL: Might not be available in MacOS.
- * Might be available using KosmicKrisp instead of MoltenVK.
- */
+// Forward declarations to break inline dependency loops
+class ResourceWriteBatch;
+class SamplerWriteBatch;
+class HeapManager;
 
 enum class DescriptorHeapType : uint8_t {
     Resource, // Storage Buffers, Uniform Buffers, Sampled Images, Storage Images, AS
     Sampler   // Samplers only
+};
+
+enum class DescriptorHeapError : uint8_t {
+    ResourceSlotsExhausted,
+    SamplerSlotsExhausted,
+    DynamicResourceOverflow,
+    DynamicSamplerOverflow,
+    FunctionLoaderFailed,
+    AllocationFailed,
+    MappingFailed,
+    DeviceAddressFailed
 };
 
 // ============================================================================
@@ -45,6 +56,7 @@ using PFN_vkWriteResourceDescriptorsEXT =
 // Descriptor Heap Abstraction
 // ============================================================================
 
+template <DescriptorHeapType Type>
 class DescriptorHeap {
   public:
     DescriptorHeap() = default;
@@ -56,10 +68,26 @@ class DescriptorHeap {
     DescriptorHeap(DescriptorHeap&& other) noexcept;
     auto operator=(DescriptorHeap&& other) noexcept -> DescriptorHeap&;
 
-    [[nodiscard]] auto Init(const Context& ctx, Allocator& allocator, DescriptorHeapType type, uint32_t capacity) noexcept -> bool;
+    [[nodiscard]] auto Init(const Context& ctx, Allocator& allocator, uint32_t capacity) noexcept -> std::expected<void, DescriptorHeapError>;
     void               Cleanup() noexcept;
 
     void Bind(VkCommandBuffer cmd) const noexcept;
+
+    // Enforce C++ type safety with compile-time template constraints
+    void Flush(ResourceWriteBatch& batch) noexcept
+        requires(Type == DescriptorHeapType::Resource);
+    void Flush(SamplerWriteBatch& batch) noexcept
+        requires(Type == DescriptorHeapType::Sampler);
+
+    [[nodiscard]] auto Valid() const noexcept -> bool {
+        return _buffer.Valid();
+    }
+    explicit operator bool() const noexcept {
+        return Valid();
+    }
+
+  private:
+    friend class HeapManager;
 
     [[nodiscard]] auto GetDevice() const noexcept -> VkDevice {
         return _device;
@@ -76,41 +104,25 @@ class DescriptorHeap {
     [[nodiscard]] auto GetCapacity() const noexcept -> uint32_t {
         return _capacity;
     }
-    [[nodiscard]] auto GetType() const noexcept -> DescriptorHeapType {
-        return _type;
-    }
     [[nodiscard]] auto GetMappedPtr() const noexcept -> void* {
         return _mappedPtr;
     }
-    [[nodiscard]] auto Valid() const noexcept -> bool {
-        return _buffer.Valid();
-    }
-    explicit operator bool() const noexcept {
-        return Valid();
-    }
 
-    [[nodiscard]] auto GetWriteResourceDescriptorsFn() const noexcept -> PFN_vkWriteResourceDescriptorsEXT {
-        return _vkWriteResourceDescriptorsEXT;
-    }
-    [[nodiscard]] auto GetWriteSamplerDescriptorsFn() const noexcept -> PFN_vkWriteSamplerDescriptorsEXT {
-        return _vkWriteSamplerDescriptorsEXT;
-    }
-
-  private:
-    VkDevice           _device   = VK_NULL_HANDLE;
-    DescriptorHeapType _type     = DescriptorHeapType::Resource;
-    uint32_t           _capacity = 0;
-    VkDeviceSize       _stride   = 0;
+    VkDevice     _device   = VK_NULL_HANDLE;
+    uint32_t     _capacity = 0;
+    VkDeviceSize _stride   = 0;
 
     Buffer               _buffer;
     Buffer::MappedRegion _mappedRegion;
     void*                _mappedPtr     = nullptr;
     VkDeviceAddress      _deviceAddress = 0;
 
-    PFN_vkCmdBindSamplerHeapEXT       _vkCmdBindSamplerHeapEXT       = nullptr;
-    PFN_vkCmdBindResourceHeapEXT      _vkCmdBindResourceHeapEXT      = nullptr;
-    PFN_vkWriteSamplerDescriptorsEXT  _vkWriteSamplerDescriptorsEXT  = nullptr;
-    PFN_vkWriteResourceDescriptorsEXT _vkWriteResourceDescriptorsEXT = nullptr;
+    // Compile-time conditional members via Type matching
+    using BindHeapFn  = std::conditional_t<Type == DescriptorHeapType::Sampler, PFN_vkCmdBindSamplerHeapEXT, PFN_vkCmdBindResourceHeapEXT>;
+    using WriteDescFn = std::conditional_t<Type == DescriptorHeapType::Sampler, PFN_vkWriteSamplerDescriptorsEXT, PFN_vkWriteResourceDescriptorsEXT>;
+
+    BindHeapFn  _vkCmdBindHeapEXT      = nullptr;
+    WriteDescFn _vkWriteDescriptorsEXT = nullptr;
 };
 
 // ============================================================================
@@ -175,8 +187,8 @@ class SlotAllocator {
     SlotAllocator(SlotAllocator&& other) noexcept;
     auto operator=(SlotAllocator&& other) noexcept -> SlotAllocator&;
 
-    void               Init(uint32_t capacity) noexcept;
-    [[nodiscard]] auto Allocate() noexcept -> uint32_t;
+    void               Init(uint32_t capacity, DescriptorHeapError errorOnExhaustion) noexcept;
+    [[nodiscard]] auto Allocate() noexcept -> std::expected<uint32_t, DescriptorHeapError>;
     void               Free(uint32_t slot) noexcept;
     void               Clear() noexcept;
 
@@ -208,21 +220,21 @@ class HeapManager {
         uint32_t       staticSamplerCount,
         uint32_t       dynamicSamplerCount,
         uint32_t       doubleBufferCount = 2
-    ) noexcept -> bool;
+    ) noexcept -> std::expected<void, DescriptorHeapError>;
 
     void BeginFrame(uint32_t frameIndex) noexcept;
 
     // --- Static Allocation ---
 
-    [[nodiscard]] auto AllocateStaticResourceSlot() noexcept -> uint32_t;
+    [[nodiscard]] auto AllocateStaticResourceSlot() noexcept -> std::expected<uint32_t, DescriptorHeapError>;
     void               FreeStaticResourceSlot(uint32_t slot) noexcept;
-    [[nodiscard]] auto AllocateStaticSamplerSlot() noexcept -> uint32_t;
+    [[nodiscard]] auto AllocateStaticSamplerSlot() noexcept -> std::expected<uint32_t, DescriptorHeapError>;
     void               FreeStaticSamplerSlot(uint32_t slot) noexcept;
 
     // --- Dynamic/Transient Allocation ---
 
-    [[nodiscard]] auto AllocateDynamicResourceRange(uint32_t count) noexcept -> uint32_t;
-    [[nodiscard]] auto AllocateDynamicSamplerRange(uint32_t count) noexcept -> uint32_t;
+    [[nodiscard]] auto AllocateDynamicResourceRange(uint32_t count) noexcept -> std::expected<uint32_t, DescriptorHeapError>;
+    [[nodiscard]] auto AllocateDynamicSamplerRange(uint32_t count) noexcept -> std::expected<uint32_t, DescriptorHeapError>;
 
     // --- Updates ---
 
@@ -234,8 +246,8 @@ class HeapManager {
     void BindHeaps(VkCommandBuffer cmd) const noexcept;
 
   private:
-    DescriptorHeap _resourceHeap;
-    DescriptorHeap _samplerHeap;
+    DescriptorHeap<DescriptorHeapType::Resource> _resourceHeap;
+    DescriptorHeap<DescriptorHeapType::Sampler>  _samplerHeap;
 
     uint32_t _staticResourceCount  = 0;
     uint32_t _dynamicResourceCount = 0;
