@@ -23,8 +23,17 @@ std::expected<VkResult, VulkanCallError> WaitIdle(VkQueue queue) noexcept {
     return res;
 }
 
-std::expected<void, Error>
-    QueueSubmit(VkQueue queue, VkCommandBuffer cmd, VkSemaphore waitSemaphore, uint64_t waitValue, VkPipelineStageFlags2 waitStage, VkFence fence) noexcept {
+std::expected<void, Error> QueueSubmit(
+    VkQueue               queue,
+    VkCommandBuffer       cmd,
+    VkSemaphore           waitSemaphore,
+    uint64_t              waitValue,
+    VkPipelineStageFlags2 waitStage,
+    VkSemaphore           signalSemaphore,
+    uint64_t              signalValue,
+    VkPipelineStageFlags2 signalStage,
+    VkFence               fence
+) noexcept {
     VkCommandBufferSubmitInfo cmd_info = {
         .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
         .pNext         = {},
@@ -41,7 +50,17 @@ std::expected<void, Error>
         .deviceIndex = {},
     };
 
-    uint32_t wait_count = (waitSemaphore != VK_NULL_HANDLE && waitValue > 0) ? 1 : 0;
+    VkSemaphoreSubmitInfo signal_info = {
+        .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+        .pNext       = {},
+        .semaphore   = signalSemaphore,
+        .value       = signalValue,
+        .stageMask   = signalStage,
+        .deviceIndex = {},
+    };
+
+    uint32_t wait_count   = (waitSemaphore != VK_NULL_HANDLE && waitValue > 0) ? 1 : 0;
+    uint32_t signal_count = (signalSemaphore != VK_NULL_HANDLE && signalValue > 0) ? 1 : 0; // <-- ADDED
 
     VkSubmitInfo2 submit = {
         .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
@@ -51,8 +70,8 @@ std::expected<void, Error>
         .pWaitSemaphoreInfos      = wait_count > 0 ? &wait_info : nullptr,
         .commandBufferInfoCount   = 1,
         .pCommandBufferInfos      = &cmd_info,
-        .signalSemaphoreInfoCount = {},
-        .pSignalSemaphoreInfos    = {},
+        .signalSemaphoreInfoCount = signal_count,
+        .pSignalSemaphoreInfos    = signal_count > 0 ? &signal_info : nullptr,
     };
 
     VkResult res = vkQueueSubmit2(queue, 1, &submit, fence);

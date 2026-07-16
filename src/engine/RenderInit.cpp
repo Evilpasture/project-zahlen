@@ -101,6 +101,7 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
             gpuProfiler.Init(ctx.Device(), ctx.Physical(), ctx.PhysicalInfo().graphics_family);
             graphicsCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().graphics_family);
             transferCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().transfer_family);
+            computeCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().compute_family);
 
             return InitShadowResources();
         })
@@ -120,6 +121,8 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
         .and_then([&]() {
             sync  = Vk::FrameSync<2>::Create(ctx.Device());
             pools = Vk::CommandPools<2>::Create(ctx.Device(), {.queueFamily = ctx.PhysicalInfo().graphics_family, .buffersPerPool = 1});
+            computePools =
+                Vk::CommandPools<2, Vk::QueueType::Compute>::Create(ctx.Device(), {.queueFamily = ctx.PhysicalInfo().compute_family, .buffersPerPool = 1});
             return InitPostProcessing();
         })
         .and_then([&]() {

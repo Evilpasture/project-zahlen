@@ -194,7 +194,6 @@ using FXAALayout = Vk::DescriptorLayout<
     Vk::SamplerSlot<1>       // sampler
     >;
 
-// 1. Descriptors
 using VolumetricInjectionLayout = Vk::DescriptorLayout<
     Vk::StorageImageSlot<0>,                        // outVoxelMedia
     Vk::UniformSlot<1, VK_SHADER_STAGE_COMPUTE_BIT> // frame
@@ -216,12 +215,6 @@ using VolumetricIntegrationLayout = Vk::DescriptorLayout<
     Vk::StorageImageSlot<1>                               // outVoxelIntegrated
     >;
 
-// 2. Resource Tags
-using Res_VoxelMedia = Vk::GraphImage<"VoxelMedia", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_VoxelLight = Vk::GraphImage<"VoxelLight", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_VoxelInt   = Vk::GraphImage<"VoxelInt", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-
-// 3. Update BlitLayout to sample depth & volumetrics
 using BlitLayout = Vk::DescriptorLayout<
     Vk::SampledImageSlot<0>,                         // texCurrent
     Vk::SamplerSlot<1>,                              // sampler
@@ -504,11 +497,16 @@ using Res_BloomDown3  = Vk::GraphImage<"BloomDown3", VK_FORMAT_R16G16B16A16_SFLO
 using Res_BloomUp2    = Vk::GraphImage<"BloomUp2", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_BloomUp1    = Vk::GraphImage<"BloomUp1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_BloomFinal  = Vk::GraphImage<"BloomFinal", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_AccumCurr   = Vk::GraphImage<"AccumCurr", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
-using Res_AccumNext   = Vk::GraphImage<"AccumNext", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
-using Res_SmaaEdge    = Vk::GraphImage<"SmaaEdge", VK_FORMAT_R8G8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, false>;
-using Res_SmaaWeight  = Vk::GraphImage<"SmaaWeight", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, false>;
+using Res_SmaaEdge    = Vk::GraphImage<"SmaaEdge", VK_FORMAT_R8G8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_SmaaWeight  = Vk::GraphImage<"SmaaWeight", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_Swapchain   = Vk::GraphImage<"Swapchain", VK_FORMAT_B8G8R8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, true>;
+using Res_VoxelMedia  = Vk::GraphImage<"VoxelMedia", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_VoxelLight  = Vk::GraphImage<"VoxelLight", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_VoxelInt    = Vk::GraphImage<"VoxelInt", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+
+// Only TAA targets remain persistent:
+using Res_AccumCurr = Vk::GraphImage<"AccumCurr", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
+using Res_AccumNext = Vk::GraphImage<"AccumNext", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
 
 // --- Impl Struct ---
 
@@ -578,21 +576,24 @@ struct RenderContext::Impl {
     // ============================================================================
     // Core System Properties (64-Bit / High Alignment)
     // ============================================================================
-    Window&                       window;
-    String64                      appName;
-    Vk::Context                   ctx;
-    Vk::Allocator                 allocator;
-    Vk::Surface                   surface;
-    Vk::PresentationContext       presentation;
-    Vk::FrameSync<2>              sync;
-    Vk::CommandPools<2>           pools;
-    Vk::StagingRingBuffer         stagingRingBuffer;
-    mutable Vk::StagingRingBuffer transferRingBuffer;
+    Window&                                      window;
+    String64                                     appName;
+    Vk::Context                                  ctx;
+    Vk::Allocator                                allocator;
+    Vk::Surface                                  surface;
+    Vk::PresentationContext                      presentation;
+    Vk::FrameSync<2>                             sync;
+    Vk::CommandPools<2, Vk::QueueType::Graphics> pools;
+    Vk::CommandPools<2, Vk::QueueType::Compute>  computePools;
+    Vk::StagingRingBuffer                        stagingRingBuffer;
+    mutable Vk::StagingRingBuffer                transferRingBuffer;
 
     mutable Vk::CommandRing<Vk::QueueType::Graphics, 8> graphicsCmdRing;
     mutable Vk::CommandRing<Vk::QueueType::Transfer, 8> transferCmdRing;
+    mutable Vk::CommandRing<Vk::QueueType::Compute, 8>  computeCmdRing;
 
-    VkCommandBuffer current_cmd = VK_NULL_HANDLE;
+    VkCommandBuffer                           current_cmd = VK_NULL_HANDLE;
+    Vk::CommandBuffer<Vk::QueueType::Compute> current_compute_cmd;
 
     // ============================================================================
     // Staging, Memory Reclamation & Multithreading
@@ -913,6 +914,8 @@ struct RenderContext::Impl {
 
     void               SortDrawQueue();
     [[nodiscard]] auto InitializeSystemTextures() noexcept -> std::expected<void, Error>;
+
+    void RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Compute> compCmd);
 
     template <bool FullBright>
     void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd);

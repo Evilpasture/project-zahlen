@@ -230,13 +230,13 @@ class SemaphorePool;
 
 template <uint32_t N>
 struct DrawFrameDesc {
-    const Context&                              ctx;
-    const Swapchain&                            swapchain;
-    const FrameSync<N>&                         sync;
-    const CommandPools<N, QueueType::Graphics>& pools;
-    const SemaphorePool&                        presentSemaphores;
-    VkSemaphore                                 stagingSemaphore = VK_NULL_HANDLE;
-    uint64_t                                    stagingWaitValue = 0;
+    const Context&         ctx;
+    const Swapchain&       swapchain;
+    const FrameSync<N>&    sync;
+    const CommandPools<N>& pools;
+    const SemaphorePool&   presentSemaphores;
+    VkSemaphore            stagingSemaphore = VK_NULL_HANDLE;
+    uint64_t               stagingWaitValue = 0;
 };
 
 template <uint32_t N, bool WaitOnFence = true, typename Record, typename Rebuild>
@@ -246,11 +246,29 @@ auto DrawFrame(const DrawFrameDesc<N>& desc, uint32_t& frameIndex, Record&& reco
 [[nodiscard]] std::expected<void, Error> QueueSubmit(
     VkQueue               queue,
     VkCommandBuffer       cmd,
-    VkSemaphore           waitSemaphore = VK_NULL_HANDLE,
-    uint64_t              waitValue     = 0,
-    VkPipelineStageFlags2 waitStage     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-    VkFence               fence         = VK_NULL_HANDLE
+    VkSemaphore           waitSemaphore   = VK_NULL_HANDLE,
+    uint64_t              waitValue       = 0,
+    VkPipelineStageFlags2 waitStage       = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+    VkSemaphore           signalSemaphore = VK_NULL_HANDLE,
+    uint64_t              signalValue     = 0,
+    VkPipelineStageFlags2 signalStage     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+    VkFence               fence           = VK_NULL_HANDLE
 ) noexcept;
+
+template <QueueType QType>
+[[nodiscard]] inline std::expected<void, Error> QueueSubmit(
+    const Context&        ctx,
+    CommandBuffer<QType>  cmd,
+    VkSemaphore           waitSemaphore   = VK_NULL_HANDLE,
+    uint64_t              waitValue       = 0,
+    VkPipelineStageFlags2 waitStage       = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+    VkSemaphore           signalSemaphore = VK_NULL_HANDLE,
+    uint64_t              signalValue     = 0,
+    VkPipelineStageFlags2 signalStage     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+    VkFence               fence           = VK_NULL_HANDLE
+) noexcept {
+    return QueueSubmit(ResolveQueue<QType>(ctx), cmd.handle, waitSemaphore, waitValue, waitStage, signalSemaphore, signalValue, signalStage, fence);
+}
 
 [[nodiscard]] auto SubmitAndPresent(const ZHLN_FrameSubmitDesc& desc) noexcept -> ZHLN_FrameResult;
 

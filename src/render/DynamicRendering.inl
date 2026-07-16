@@ -65,7 +65,7 @@ struct LayoutTraits {
 
     static constexpr VkPipelineStageFlags2 kStage = []() constexpr {
         if constexpr (Layout == VK_IMAGE_LAYOUT_UNDEFINED) {
-            return VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+            return VK_PIPELINE_STAGE_2_NONE;
         } else if constexpr (Layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
             return VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
         } else if constexpr (Layout == VK_IMAGE_LAYOUT_GENERAL) {

@@ -36,6 +36,9 @@ class Context {
     [[nodiscard]] auto TransferQueue() const noexcept -> VkQueue {
         return _device.transfer_queue;
     }
+    [[nodiscard]] auto ComputeQueue() const noexcept -> VkQueue {
+        return _device.compute_queue;
+    }
     [[nodiscard]] auto Physical() const noexcept -> VkPhysicalDevice {
         return _physical.handle;
     }
