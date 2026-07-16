@@ -37,14 +37,14 @@ enum class RenderPassType : uint8_t { Main, Shadow };
 
 template <typename T>
 inline void SubmitDrawInstanced(
-    VkCommandBuffer    cmd,
-    const DrawCommand& drawCmd,
-    uint32_t           instanceIdx,
-    VkDescriptorSet    bindlessSet,
-    const T&           pushConstants,
-    VkPipeline         pipelineOverride = VK_NULL_HANDLE,
-    VkPipelineLayout   layoutOverride   = VK_NULL_HANDLE,
-    VkShaderStageFlags stages           = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+    Vk::CommandEncoder& encoder,
+    const DrawCommand&  drawCmd,
+    uint32_t            instanceIdx,
+    VkDescriptorSet     bindlessSet,
+    const T&            pushConstants,
+    VkPipeline          pipelineOverride = VK_NULL_HANDLE,
+    VkPipelineLayout    layoutOverride   = VK_NULL_HANDLE,
+    VkShaderStageFlags  stages           = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
 ) noexcept {
     const auto* nativeMat = drawCmd.material;
     auto* const pipeline  = (pipelineOverride != VK_NULL_HANDLE) ? pipelineOverride : nativeMat->pipeline.Get();
@@ -52,8 +52,7 @@ inline void SubmitDrawInstanced(
 
     const uint32_t vertexCount = drawCmd.instanceData.iboAddress != 0 ? drawCmd.instanceData.indexCount : drawCmd.instanceData.vertexCount;
 
-    Vk::DrawInstanced(
-        cmd,
+    encoder.DrawInstanced(
         {.pipeline      = pipeline,
          .layout        = layout,
          .set           = bindlessSet,
@@ -118,8 +117,7 @@ struct GpuCullingPolicy {
                     if (!group.material->pipeline.Valid()) {
                         continue;
                     }
-                    Vk::DrawIndirect(
-                        cmd,
+                    recorder.encoder.DrawIndirect(
                         {
                             .pipeline       = group.material->pipeline.Get(),
                             .layout         = group.material->layout.Get(),
@@ -171,7 +169,7 @@ struct CpuCullingPolicy {
                         uint32_t localCmdIdx = ctx.workerCmds[wIdx].cmdCount[recorder.frameIndex].fetch_add(1, std::memory_order::relaxed);
                         return ctx.workerCmds[wIdx].pools[recorder.frameIndex][localCmdIdx];
                     },
-                    [&](VkCommandBuffer sec_cmd, uint32_t i) {
+                    [&](Vk::CommandEncoder& encoder, uint32_t i) {
                         const auto& drawCmd = ctx.drawQueue[i];
                         if (!IsVisibleIn(drawCmd.flags, RenderPassType::Main)) {
                             return;
@@ -180,7 +178,7 @@ struct CpuCullingPolicy {
                             return;
                         }
                         const ObjectConstants pushConstants = {.instanceId = i, .isShadowPass = 0};
-                        SubmitDrawInstanced(sec_cmd, drawCmd, i, recorder.bindlessSet, pushConstants);
+                        SubmitDrawInstanced(encoder, drawCmd, i, recorder.bindlessSet, pushConstants);
                     }
                 );
             });
@@ -281,8 +279,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
                 .ViewMask(0xF) // Broadcast to all 4 Cascades cleanly via Multiview
                 .AddDepth(cascadeLayerImage, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kShadowClearDepth)
                 .Execute(cmd, [&]() {
-                    Vk::DrawIndirect(
-                        cmd,
+                    recorder.encoder.DrawIndirect(
                         {.pipeline       = ctx.shadowPipeline.Get(),
                          .layout         = ctx.shadowPipelineLayout.Get(),
                          .set            = recorder.bindlessSet,
@@ -327,8 +324,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
                     uint32_t lightIdx;
                 } pc = {l_idx};
 
-                Vk::DrawIndirect(
-                    cmd,
+                recorder.encoder.DrawIndirect(
                     {
                         .pipeline       = ctx.punctualShadowPipeline.Get(),
                         .layout         = ctx.punctualShadowPipelineLayout.Get(),
@@ -367,20 +363,20 @@ void MainPass::Execute(
     ZHLN::Array<GroupRange> groups;
     groups.reserve((drawCount + 15) / 16);
 
-    const NativeMaterial* currentMaterial = nullptr;
+    VkPipeline currentPipeline = VK_NULL_HANDLE;
 
     for (uint32_t i = 0; i < drawCount; ++i) {
         const auto&       drawCmd = ctx.drawQueue[i];
         const auto* const drawMat = drawCmd.material;
 
-        if (IsForwardOnly(drawCmd.instanceData.flags)) {
-            currentMaterial = nullptr;
+        if (IsForwardOnly(drawCmd.instanceData.flags) || !drawMat->pipeline.Valid()) {
+            currentPipeline = VK_NULL_HANDLE;
             continue;
         }
 
-        if (i == 0 || drawMat != currentMaterial) {
+        if (i == 0 || drawMat->pipeline.Get() != currentPipeline) {
             groups.push_back(GroupRange {.material = drawMat, .start = i, .count = 1});
-            currentMaterial = drawMat;
+            currentPipeline = drawMat->pipeline.Get();
         } else {
             groups.back().count++;
         }
@@ -413,7 +409,7 @@ void ForwardPass::Execute(
                 const auto& drawCmd = ctx.drawQueue[i];
                 if (IsForwardOnly(drawCmd.instanceData.flags) && drawCmd.material->pipeline.Valid()) {
                     const ObjectConstants pushConstants = {.instanceId = i, .isShadowPass = 0};
-                    SubmitDrawInstanced(cmd, drawCmd, i, recorder.bindlessSet, pushConstants);
+                    SubmitDrawInstanced(recorder.encoder, drawCmd, i, recorder.bindlessSet, pushConstants);
                 }
             }
         });
@@ -462,8 +458,7 @@ void BlitPass::Execute(
                              }
                     );
 
-                    Vk::DrawInstanced(
-                        cmd,
+                    recorder.encoder.DrawInstanced(
                         {.pipeline    = ctx.uiPipeline.Get(),
                          .layout      = ctx.uiPipelineLayout.Get(),
                          .set         = recorder.bindlessSet,

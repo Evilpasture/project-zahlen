@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// src/render/Commands.hpp
 #pragma once
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
 #error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
@@ -263,5 +264,97 @@ void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, St
     // 4. Signal the associated fence so that CommandRing's next Acquire doesn't stall
     vkQueueSubmit2(ResolveQueue<QType>(ctx), 0, nullptr, fence);
 }
+
+// ============================================================================
+// Command Encoder (Stateful Bind Filtering)
+// ============================================================================
+
+class CommandEncoder {
+  public:
+    VkCommandBuffer  cmd               = VK_NULL_HANDLE;
+    VkPipeline       lastPipeline      = VK_NULL_HANDLE;
+    VkPipelineLayout lastLayout        = VK_NULL_HANDLE;
+    VkDescriptorSet  lastDescriptorSet = VK_NULL_HANDLE;
+
+    CommandEncoder() = default;
+    explicit CommandEncoder(VkCommandBuffer c) noexcept: cmd(c) {
+    }
+
+    void BindPipeline(VkPipeline pipeline, VkPipelineLayout layout) noexcept {
+        if (pipeline != VK_NULL_HANDLE && pipeline != lastPipeline) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+            lastPipeline      = pipeline;
+            lastLayout        = layout;
+            lastDescriptorSet = VK_NULL_HANDLE;
+        }
+    }
+
+    void BindDescriptorSet(VkDescriptorSet set) noexcept {
+        if (set != VK_NULL_HANDLE && set != lastDescriptorSet) {
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, lastLayout, 0, 1, &set, 0, nullptr);
+            lastDescriptorSet = set;
+        }
+    }
+
+    template <GpuTriviallyCopyable T>
+    inline void DrawInstanced(
+        const DrawState&   state,
+        const T&           pushConstants,
+        VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+    ) noexcept {
+        BindPipeline(state.pipeline, state.layout);
+        BindDescriptorSet(state.set);
+        vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
+        vkCmdDraw(cmd, state.vertexCount, state.instanceCount, state.firstVertex, state.firstInstance);
+    }
+
+    template <GpuTriviallyCopyable T>
+    inline void DrawIndirect(
+        const DrawIndirectState& state,
+        const T&                 pushConstants,
+        VkShaderStageFlags       stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+    ) noexcept {
+        BindPipeline(state.pipeline, state.layout);
+        BindDescriptorSet(state.set);
+        vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
+        vkCmdDrawIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount, state.stride);
+    }
+
+    template <GpuTriviallyCopyable T>
+    inline void DrawIndirectCount(
+        const DrawIndirectCountState& state,
+        const T&                      pushConstants,
+        VkShaderStageFlags            stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+    ) noexcept {
+        BindPipeline(state.pipeline, state.layout);
+        BindDescriptorSet(state.set);
+        vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
+        vkCmdDrawIndirectCount(cmd, state.argumentBuffer, state.offset, state.countBuffer, state.countBufferOffset, state.maxDrawCount, state.stride);
+    }
+
+    template <GpuTriviallyCopyable T>
+    inline void DrawIndexedIndirect(
+        const DrawIndexedIndirectState& state,
+        const T&                        pushConstants,
+        VkShaderStageFlags              stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+    ) noexcept {
+        BindPipeline(state.pipeline, state.layout);
+        BindDescriptorSet(state.set);
+        vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
+        vkCmdDrawIndexedIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount, state.stride);
+    }
+
+    template <GpuTriviallyCopyable T>
+    inline void DrawIndexedIndirectCount(
+        const DrawIndexedIndirectCountState& state,
+        const T&                             pushConstants,
+        VkShaderStageFlags                   stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+    ) noexcept {
+        BindPipeline(state.pipeline, state.layout);
+        BindDescriptorSet(state.set);
+        vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
+        vkCmdDrawIndexedIndirectCount(cmd, state.argumentBuffer, state.offset, state.countBuffer, state.countBufferOffset, state.maxDrawCount, state.stride);
+    }
+};
 
 } // namespace ZHLN::Vk

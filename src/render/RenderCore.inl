@@ -3,10 +3,6 @@
 
 #pragma once
 
-#include "RenderCore.hpp"
-
-// NOLINTBEGIN(misc-misplaced-const)
-
 namespace ZHLN::Vk {
 
 // ============================================================================
@@ -165,66 +161,6 @@ inline void ExecuteCommands(const VkCommandBuffer primary, const std::span<const
     }
 }
 
-template <GpuTriviallyCopyable T>
-inline void DrawInstanced(VkCommandBuffer cmd, const DrawState& state, const T& pushConstants, VkShaderStageFlags stages) {
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state.pipeline);
-    if (state.set != VK_NULL_HANDLE) {
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state.layout, 0, 1, &state.set, 0, nullptr);
-    }
-    vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
-
-    vkCmdDraw(cmd, state.vertexCount, state.instanceCount, state.firstVertex, state.firstInstance);
-}
-
-template <GpuTriviallyCopyable T>
-inline void DrawIndirect(VkCommandBuffer cmd, const DrawIndirectState& state, const T& pushConstants, VkShaderStageFlags stages) {
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state.pipeline);
-    if (state.set != VK_NULL_HANDLE) {
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state.layout, 0, 1, &state.set, 0, nullptr);
-    }
-    vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
-
-    vkCmdDrawIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount, state.stride);
-}
-
-template <GpuTriviallyCopyable T>
-void DrawIndirectCount(VkCommandBuffer cmd, const DrawIndirectCountState& state, const T& pushConstants, VkShaderStageFlags stages) noexcept {
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state.pipeline);
-    if (state.set != VK_NULL_HANDLE) {
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state.layout, 0, 1, &state.set, 0, nullptr);
-    }
-    vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
-
-    vkCmdDrawIndirectCount(cmd, state.argumentBuffer, state.offset, state.countBuffer, state.countBufferOffset, state.maxDrawCount, state.stride);
-}
-
-template <GpuTriviallyCopyable T>
-inline void DrawIndexedIndirect(VkCommandBuffer cmd, const DrawIndexedIndirectState& state, const T& pushConstants, VkShaderStageFlags stages) noexcept {
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state.pipeline);
-    if (state.set != VK_NULL_HANDLE) {
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state.layout, 0, 1, &state.set, 0, nullptr);
-    }
-    vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
-
-    vkCmdDrawIndexedIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount, state.stride);
-}
-
-template <GpuTriviallyCopyable T>
-inline void
-    DrawIndexedIndirectCount(VkCommandBuffer cmd, const DrawIndexedIndirectCountState& state, const T& pushConstants, VkShaderStageFlags stages) noexcept {
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state.pipeline);
-    if (state.set != VK_NULL_HANDLE) {
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, state.layout, 0, 1, &state.set, 0, nullptr);
-    }
-    vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
-
-    vkCmdDrawIndexedIndirectCount(cmd, state.argumentBuffer, state.offset, state.countBuffer, state.countBufferOffset, state.maxDrawCount, state.stride);
-}
-
-// ============================================================================
-// Error Helpers Implementation
-// ============================================================================
-
 inline std::expected<VkResult, std::string> CheckResult(const VkResult result, const char* context, const std::source_location location) {
     if (result != VK_SUCCESS) [[unlikely]] {
         return std::unexpected(ReportVkError(result, context, location));
@@ -283,7 +219,5 @@ inline void GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, cons
     uint32_t levels = std::bit_width(ZHLN::Max(width, height));
     ZHLN_GenerateMipmaps(cmd, image, static_cast<int32_t>(width), static_cast<int32_t>(height), levels);
 }
-
-// NOLINTEND(misc-misplaced-const)
 
 } // namespace ZHLN::Vk

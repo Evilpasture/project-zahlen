@@ -963,16 +963,17 @@ struct PostProcessResources {
 
 struct FrameRecorder {
     Vk::CommandBuffer<Vk::QueueType::Graphics> cmd;
+    mutable Vk::CommandEncoder                 encoder;
     RenderContext::Impl&                       ctx;
     uint32_t                                   frameIndex;
     VkDescriptorSet                            bindlessSet;
 
     FrameRecorder(Vk::CommandBuffer<Vk::QueueType::Graphics> c, RenderContext::Impl& impl) noexcept:
-        cmd(c), ctx(impl), frameIndex(impl.frame_index), bindlessSet(impl.bindlessSets[impl.frame_index]) {
+        cmd(c), encoder(c.handle), ctx(impl), frameIndex(impl.frame_index), bindlessSet(impl.bindlessSets[impl.frame_index]) {
     }
 
     FrameRecorder(VkCommandBuffer c, RenderContext::Impl& impl) noexcept:
-        cmd({c}), ctx(impl), frameIndex(impl.frame_index), bindlessSet(impl.bindlessSets[impl.frame_index]) {
+        cmd({c}), encoder(c), ctx(impl), frameIndex(impl.frame_index), bindlessSet(impl.bindlessSets[impl.frame_index]) {
     }
 };
 

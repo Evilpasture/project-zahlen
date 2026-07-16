@@ -88,6 +88,10 @@ inline void ParallelDrawDispatch(
 
         vkBeginCommandBuffer(sec_cmd, &begin_info);
 
+        // Instantiated locally on the thread's stack.
+        // No thread_local, no global shared state.
+        CommandEncoder encoder(sec_cmd);
+
         // Standard, un-flipped viewport
         const VkViewport viewport = {.x = 0.0F, .y = 0.0F, .width = (float) extent.width, .height = (float) extent.height, .minDepth = 0.0F, .maxDepth = 1.0F};
         const VkRect2D   scissor  = {.offset = {.x = 0, .y = 0}, .extent = extent};
@@ -95,7 +99,7 @@ inline void ParallelDrawDispatch(
         vkCmdSetScissor(sec_cmd, 0, 1, &scissor);
 
         for (uint32_t i = start; i < end; ++i) {
-            recordFn(sec_cmd, i);
+            recordFn(encoder, i);
         }
 
         vkEndCommandBuffer(sec_cmd);
