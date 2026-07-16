@@ -333,6 +333,7 @@ typedef struct ZHLN_GraphicsPipelineDesc {
     const bool                  depth_write;
     const bool                  blend_enable;   // basic src_alpha / one_minus_src_alpha if true
     const bool                  additive_blend; // Explicitly route additive blend configuration
+    const uint32_t              view_mask;      // Explicit Multiview mask (0 = disabled)
     const VkSpecializationInfo* specialization_info;
 } ZHLN_GraphicsPipelineDesc;
 

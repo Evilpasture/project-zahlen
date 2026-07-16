@@ -769,6 +769,10 @@ void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const Pas
         auto ref = Vk::MakeRef<Res_Depth>(self.presentation.depthTarget);
         binder.template Bind<Res_Depth>(ref.handle, ref.view, ref.extent);
     }
+    if constexpr (Vk::IsInList<Resources, Res_ShadowMap>::value) {
+        auto ref = Vk::MakeRef<Res_ShadowMap>(self.graphResources.shadowMap);
+        binder.template Bind<Res_ShadowMap>(ref.handle, ref.view, ref.extent);
+    }
     if constexpr (Vk::IsInList<Resources, Res_AccumCurr>::value) {
         auto ref = Vk::MakeRef<Res_AccumCurr>(self.accumBuffers.Current());
         binder.template Bind<Res_AccumCurr>(ref.handle, ref.view, ref.extent);
@@ -866,7 +870,7 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
     });
 
     if constexpr (Vk::IsInList<CompResources, Res_ShadowMap>::value) {
-        auto ref = Vk::MakeRef<Res_ShadowMap>(graphResources.shadowMap);
+        auto ref = Vk::MakeRef<Res_ShadowMap>(shadowMapPrev); // <-- FIXED: Compute reads previous frame's shadow map!
         compBinder.template Bind<Res_ShadowMap>(ref.handle, ref.view, ref.extent);
     }
 
@@ -1088,6 +1092,9 @@ RenderResult RenderContext::EndFrame() noexcept {
 
         // Flip double-buffered resources to prepare for the next frame
         ZHLN::Reflect::ForEachField(*_impl, [](auto& field) { FlipObject(field); });
+
+        std::swap(_impl->graphResources.shadowMap, _impl->shadowMapPrev);
+        std::swap(_impl->shadowCascadeViews, _impl->shadowCascadeViewsPrev);
 
         _impl->drawQueue.clear();
         _impl->uiDrawQueue.clear();

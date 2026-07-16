@@ -561,7 +561,6 @@ struct RenderContext::Impl {
             Res_BloomFinal  bloomFinalTarget;
             Res_SmaaEdge    smaaEdgeTarget;
             Res_SmaaWeight  smaaWeightTarget;
-            Res_ShadowMap   shadowMap;
             Res_ShadowAtlas shadowAtlas;
             Res_VoxelMedia  voxelMedia;
             Res_VoxelLight  voxelLight;
@@ -669,6 +668,9 @@ struct RenderContext::Impl {
     Vk::DoubleBufferedComputePass<VolumetricInjectionLayout>   volumetricInjectionPass;
     Vk::DoubleBufferedComputePass<VolumetricScatteringLayout>  volumetricScatteringPass;
     Vk::DoubleBufferedComputePass<VolumetricIntegrationLayout> volumetricIntegrationPass;
+
+    Vk::RenderTarget<VK_FORMAT_D32_SFLOAT> shadowMapPrev;
+    ZHLN::Array<Vk::ImageView>             shadowCascadeViewsPrev;
 
     Vk::PipelineLayout skinningPipelineLayout;
     Vk::PipelineLayout shadowPipelineLayout;

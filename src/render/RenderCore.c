@@ -1166,7 +1166,7 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
         .colorAttachmentCount    = desc->color_format_count,
         .pColorAttachmentFormats = desc->color_format_count > 0 ? desc->color_formats : nullptr,
         .depthAttachmentFormat   = desc->depth_format,
-        .viewMask                = desc->stages ? (desc->stages->vert.view_mask | desc->stages->frag.view_mask) : 0,
+        .viewMask                = desc->view_mask,
     };
 
     const VkGraphicsPipelineCreateInfo pipeline_info = {
@@ -1278,7 +1278,7 @@ ZHLN_FrameResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* const restric
             .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
             .semaphore = desc->computeSemaphore,
             .value     = desc->computeWaitValue,
-            .stageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT
+            .stageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
         };
     }
 

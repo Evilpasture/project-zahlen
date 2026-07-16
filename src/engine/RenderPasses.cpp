@@ -209,9 +209,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
     auto* indirectCmdsBase = static_cast<VkDrawIndirectCommand*>(mapped.data);
 
     std::array<uint32_t, 8> passWriteOffsets {};
-    for (uint32_t c = 0; c < 4; ++c) {
-        passWriteOffsets[c] = c * kGpuCullingMaxInstances;
-    }
+    passWriteOffsets[0] = 0; // We use a single batch offset for all 4 Cascades via Multiview
     for (uint32_t l = 0; l < 4; ++l) {
         passWriteOffsets[4 + l] = (4 + l) * kGpuCullingMaxInstances;
     }
@@ -239,20 +237,13 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 
         uint32_t vertexCount = drawCmd.instanceData.iboAddress != 0 ? drawCmd.instanceData.indexCount : drawCmd.instanceData.vertexCount;
 
-        auto writeDraw = [&](uint32_t passIdx) {
-            uint32_t writeIdx          = passWriteOffsets[passIdx] + passDrawCounts[passIdx];
-            indirectCmdsBase[writeIdx] = {.vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = i};
-            passDrawCounts[passIdx]++;
-        };
-
         JPH::Vec3 meshPos = drawCmd.instanceData.world.GetTranslation();
         float     radius  = drawCmd.instanceData.cullRadius;
 
-        for (uint32_t c = 0; c < RenderContext::Impl::NUM_CASCADES; ++c) {
-            if (cascadeFrustums[c].IsSphereVisible(meshPos, radius)) {
-                writeDraw(c);
-            }
-        }
+        // Directional Cascaded Shadow (Multiview processes all 4 layers from a single buffer slice)
+        uint32_t writeIdx          = passWriteOffsets[0] + passDrawCounts[0];
+        indirectCmdsBase[writeIdx] = {.vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = i};
+        passDrawCounts[0]++;
 
         // 2. Iterate only over pre-filtered shadow-casting lights instead of the entire scene light list
         for (uint32_t l = 0; l < activeShadowLightCount; ++l) {
@@ -267,7 +258,9 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
             float     maxRange      = light->range + radius;
 
             if (distToLightSq <= (maxRange * maxRange)) {
-                writeDraw(slotIdx);
+                uint32_t pWriteIdx          = passWriteOffsets[slotIdx] + passDrawCounts[slotIdx];
+                indirectCmdsBase[pWriteIdx] = {.vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = i};
+                passDrawCounts[slotIdx]++;
             }
         }
     }
@@ -275,38 +268,30 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
     {
         Profiler::ScopedGpuProfile<Stages::ShadowPass, FrameProfiler> timer(cmd, recorder.frameIndex, ctx.gpuProfiler);
 
-        auto ExecuteCascadePass = [&](uint32_t cascade, auto&& recordFn) {
+        uint32_t csmDrawCount = passDrawCounts[0];
+        if (csmDrawCount > 0) {
             Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> cascadeLayerImage = {
                 .handle = ctx.graphResources.shadowMap.image.Handle(),
-                .view   = ctx.shadowCascadeViews[cascade].Get(),
-                // Explicitly promote the 2D extent to a 3D subobject inline with depth = 1
+                .view   = ctx.graphResources.shadowMap.view.Get(),
                 .extent = {.width = ctx.graphResources.shadowMap.extent.width, .height = ctx.graphResources.shadowMap.extent.height, .depth = 1},
                 .aspect = VK_IMAGE_ASPECT_DEPTH_BIT
             };
 
             Vk::DynamicPass(cascadeLayerImage.extent)
+                .ViewMask(0xF) // Broadcast to all 4 Cascades cleanly via Multiview
                 .AddDepth(cascadeLayerImage, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kShadowClearDepth)
-                .Execute(cmd, std::forward<decltype(recordFn)>(recordFn));
-        };
-
-        for (uint32_t cascade = 0; cascade < RenderContext::Impl::NUM_CASCADES; ++cascade) {
-            uint32_t drawCount = passDrawCounts[cascade];
-            if (drawCount == 0) {
-                continue;
-            }
-
-            ExecuteCascadePass(cascade, [&]() {
-                Vk::DrawIndirect(
-                    cmd,
-                    {.pipeline       = ctx.shadowPipeline.Get(),
-                     .layout         = ctx.shadowPipelineLayout.Get(),
-                     .set            = recorder.bindlessSet,
-                     .argumentBuffer = ctx.shadowIndirectBuffers->Handle(),
-                     .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[cascade]),
-                     .drawCount      = drawCount},
-                    ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = cascade + 1}, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
-                );
-            });
+                .Execute(cmd, [&]() {
+                    Vk::DrawIndirect(
+                        cmd,
+                        {.pipeline       = ctx.shadowPipeline.Get(),
+                         .layout         = ctx.shadowPipelineLayout.Get(),
+                         .set            = recorder.bindlessSet,
+                         .argumentBuffer = ctx.shadowIndirectBuffers->Handle(),
+                         .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[0]),
+                         .drawCount      = csmDrawCount},
+                        ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 1}, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+                    );
+                });
         }
     }
 

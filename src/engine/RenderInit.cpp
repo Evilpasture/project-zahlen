@@ -465,7 +465,11 @@ std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
                 allocator, ctx, {.width = SHADOW_RES, .height = SHADOW_RES},
                 {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = NUM_CASCADES}
             );
-            if (!graphResources.shadowMap.Valid()) [[unlikely]] {
+            shadowMapPrev = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+                allocator, ctx, {.width = SHADOW_RES, .height = SHADOW_RES},
+                {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = NUM_CASCADES}
+            );
+            if (!graphResources.shadowMap.Valid() || !shadowMapPrev.Valid()) [[unlikely]] {
                 return std::unexpected(SubsystemAllocationFailed);
             }
             return {};
@@ -474,9 +478,11 @@ std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
         // 3. Create Cascade Image Views
         .and_then([&]() -> std::expected<void, Error> {
             shadowCascadeViews.resize(NUM_CASCADES);
+            shadowCascadeViewsPrev.resize(NUM_CASCADES);
             for (uint32_t i = 0; i < NUM_CASCADES; ++i) {
-                shadowCascadeViews[i] = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowMap.image.Handle(), i, 1);
-                if (!shadowCascadeViews[i].Valid()) [[unlikely]] {
+                shadowCascadeViews[i]     = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowMap.image.Handle(), i, 1);
+                shadowCascadeViewsPrev[i] = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), shadowMapPrev.image.Handle(), i, 1);
+                if (!shadowCascadeViews[i].Valid() || !shadowCascadeViewsPrev[i].Valid()) [[unlikely]] {
                     return std::unexpected(SubsystemAllocationFailed);
                 }
             }
@@ -513,6 +519,13 @@ std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
                 );
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
                     cmd, graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
+                );
+
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+                    cmd, shadowMapPrev.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
+                );
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+                    cmd, shadowMapPrev.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
                 );
 
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(

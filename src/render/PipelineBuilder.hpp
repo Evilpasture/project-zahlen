@@ -59,6 +59,9 @@ struct PipelineConfig {
     bool blend_enable   = false;
     bool additive_blend = false;
 
+    // Multiview
+    uint32_t view_mask = 0;
+
     // Specialization
     const VkSpecializationInfo* specialization_info = nullptr;
 };
@@ -73,8 +76,6 @@ class PipelineBuilder {
     PipelineBuilder() = default;
     explicit PipelineBuilder(PipelineConfig cfg) noexcept: _cfg(std::move(cfg)) {
     }
-
-    // --- Same-Type Modifiers (Chaining lvalue returns) ---
 
     auto Shaders(const ShaderStages& s) noexcept -> PipelineBuilder& {
         _cfg.stages = s.Get();
@@ -122,9 +123,8 @@ class PipelineBuilder {
         return *this;
     }
 
-    [[gnu::warning("Forbidden. Use CCW whenever necessary.")]]
-    auto WindingCW() noexcept -> PipelineBuilder& {
-        _cfg.front_face = VK_FRONT_FACE_CLOCKWISE;
+    auto ViewMask(uint32_t mask) noexcept -> PipelineBuilder& {
+        _cfg.view_mask = mask;
         return *this;
     }
 
@@ -153,8 +153,6 @@ class PipelineBuilder {
         _cfg.specialization_info = info;
         return *this;
     }
-
-    // --- Legacy Lvalue Modifiers (Ref-qualified with & to allow && overloads) ---
 
     auto ColorFormats(std::initializer_list<VkFormat> formats) & noexcept -> PipelineBuilder& {
         _cfg.color_formats = formats;
@@ -196,8 +194,6 @@ class PipelineBuilder {
         const ZHLN_GraphicsPipelineDesc desc = GetDesc();
         return Pipeline(device, ZHLN_CreateGraphicsPipeline(device, &desc));
     }
-
-    // --- Modern Rvalue Typestate Modifiers (Ref-qualified with &&) ---
 
     [[nodiscard]] auto DepthOnly() && noexcept -> PipelineBuilder<0, true> {
         _cfg.color_formats.clear();
@@ -260,6 +256,7 @@ class PipelineBuilder {
             .depth_write          = _cfg.depth_write,
             .blend_enable         = _cfg.blend_enable,
             .additive_blend       = _cfg.additive_blend,
+            .view_mask            = _cfg.view_mask,
             .specialization_info  = _cfg.specialization_info,
         };
     }
