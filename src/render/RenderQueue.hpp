@@ -202,11 +202,13 @@ inline void BufferBarrier(VkCommandBuffer cmd, std::span<const VkBufferMemoryBar
 }
 
 template <QueueType QType>
-[[nodiscard]] constexpr auto ResolveQueueFamily(const Context& ctx) noexcept -> uint32_t {
-    if constexpr (QType == QueueType::Graphics || QType == QueueType::Compute) {
-        return ctx.PhysicalInfo().graphics_family;
+[[nodiscard]] constexpr auto ResolveQueue(const Context& ctx) noexcept -> VkQueue {
+    if constexpr (QType == QueueType::Graphics) {
+        return ctx.GraphicsQueue();
+    } else if constexpr (QType == QueueType::Compute) {
+        return ctx.ComputeQueue();
     } else if constexpr (QType == QueueType::Transfer) {
-        return ctx.PhysicalInfo().transfer_family;
+        return ctx.TransferQueue();
     }
 }
 
@@ -214,11 +216,13 @@ template <QueueType QType>
  * @brief Resolves the appropriate raw VkQueue from the context based on QueueType.
  */
 template <QueueType QType>
-[[nodiscard]] constexpr auto ResolveQueue(const Context& ctx) noexcept -> VkQueue {
-    if constexpr (QType == QueueType::Graphics || QType == QueueType::Compute) {
-        return ctx.GraphicsQueue();
+[[nodiscard]] constexpr auto ResolveQueueFamily(const Context& ctx) noexcept -> uint32_t {
+    if constexpr (QType == QueueType::Graphics) {
+        return ctx.PhysicalInfo().graphics_family;
+    } else if constexpr (QType == QueueType::Compute) {
+        return ctx.PhysicalInfo().compute_family;
     } else if constexpr (QType == QueueType::Transfer) {
-        return ctx.TransferQueue();
+        return ctx.PhysicalInfo().transfer_family;
     }
 }
 

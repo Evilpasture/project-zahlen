@@ -3,6 +3,17 @@
 #include "pbr_helpers.hlsl"
 #include "uniforms.hlsl"
 
+[[vk::constant_id(0)]] const int BAKE_TYPE = 0;
+
+struct PushConstants {
+    uint  width;
+    uint  height;
+    float param0;
+    float param1;
+    float param2;
+};
+[[vk::push_constant]] PushConstants pc;
+
 [[vk::binding(0, 0)]] RWTexture3D<float4>           outVoxelMedia;
 [[vk::binding(1, 0)]] ConstantBuffer<FrameUniforms> frame;
 
@@ -12,26 +23,17 @@ float TemporalHash2D(uint2 tid, float timeOffset) {
     return frac(spatial + timeOffset * 60.0f * 0.6180339887f);
 }
 
-// --- High-Performance 3D Hash and Noise Libraries ---
-
+// --- Highly Optimized Fast Float-Based 3D Hashes ---
 float Hash3D(float3 p) {
-    uint3 ip    = uint3(abs(floor(p)));
-    uint3 prime = uint3(1597u, 5147u, 131071u);
-    uint  hash  = (ip.x * prime.x ^ ip.y * prime.y ^ ip.z * prime.z) * 0x9E3779B9u;
-    return float(hash & 0xFFFFFFu) / 16777215.0f;
+    p = frac(p * 0.1031f);
+    p += dot(p, p.yzx + 33.33f);
+    return frac((p.x + p.y) * p.z);
 }
 
 float3 Hash3D_Vec3(float3 p) {
-    uint3 ip     = uint3(abs(floor(p)));
-    uint3 primeX = uint3(1597u, 5147u, 131071u);
-    uint3 primeY = uint3(9546283u, 12664589u, 2798796415u);
-    uint3 primeZ = uint3(3812015801u, 1597334673u, 1597u);
-
-    uint hx = (ip.x * primeX.x ^ ip.y * primeX.y ^ ip.z * primeX.z) * 0x9E3779B9u;
-    uint hy = (ip.x * primeY.x ^ ip.y * primeY.y ^ ip.z * primeY.z) * 0x9E3779B9u;
-    uint hz = (ip.x * primeZ.x ^ ip.y * primeZ.y ^ ip.z * primeZ.z) * 0x9E3779B9u;
-
-    return float3(float(hx & 0xFFFFFFu) / 16777215.0f, float(hy & 0xFFFFFFu) / 16777215.0f, float(hz & 0xFFFFFFu) / 16777215.0f);
+    p = frac(p * float3(0.1031f, 0.1030f, 0.0973f));
+    p += dot(p, p.yxz + 33.33f);
+    return frac((p.xxy + p.yxx) * p.zyx);
 }
 
 // Procedural 3D Value Noise with Trilinear Interpolation
@@ -60,11 +62,11 @@ float Noise3D(float3 p) {
     return lerp(r0, r1, u.z);
 }
 
-// 3D Value-FBM
+// Optimized 3D Value-FBM (Reduced to 2 Octaves)
 float FBM3D(float3 p, int octaves) {
     float val = 0.0f;
     float amp = 0.5f;
-    for (int i = 0; i < octaves; i++) {
+    [unroll] for (int i = 0; i < 2; i++) {
         val += amp * Noise3D(p);
         p *= 2.1f;
         amp *= 0.5f;
@@ -78,9 +80,9 @@ float Worley3D(float3 p) {
     float3 fp       = frac(p);
     float  min_dist = 1e9f;
 
-    for (int z = -1; z <= 1; ++z) {
-        for (int y = -1; y <= 1; ++y) {
-            for (int x = -1; x <= 1; ++x) {
+    [unroll] for (int z = -1; z <= 1; ++z) {
+        [unroll] for (int y = -1; y <= 1; ++y) {
+            [unroll] for (int x = -1; x <= 1; ++x) {
                 float3 g = float3(x, y, z);
                 float3 o = Hash3D_Vec3(ip + g);
                 float3 r = g + o - fp;
@@ -92,26 +94,23 @@ float Worley3D(float3 p) {
     return saturate(sqrt(min_dist));
 }
 
-// Base Perlin-Worley mix used to generate cauliflower structures
+// Optimized Perlin-Worley mix (Fewer octaves and simplified erosion)
 float PerlinWorley3D(float3 p) {
-    float p_noise = FBM3D(p, 3); // Base billowy shape
+    float p_noise = FBM3D(p, 2); // 2 Octaves instead of 3
 
-    // Multi-frequency Worley noise for erosion
+    // Multi-frequency Worley noise (2 Octaves instead of 3)
     float w0     = Worley3D(p * 2.0f);
     float w1     = Worley3D(p * 4.0f);
-    float w2     = Worley3D(p * 8.0f);
-    float worley = w0 * 0.5f + w1 * 0.25f + w2 * 0.125f;
+    float worley = w0 * 0.7f + w1 * 0.3f;
 
-    // Erode the value noise with Worley noise (mimicking water condensation/evaporation)
+    // Erode the value noise with Worley noise
     float pw = saturate(p_noise - (1.0f - worley) * 0.45f);
     return pw;
 }
 
-// FIXED: Added out parameter to cleanly return the calculated depthVS
 float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
     float2 uv = (float2(tid.xy) + 0.5f) / resolution;
 
-    // Jitter the entire ray uniformly in 2D (prevents 3D integration static)
     float jitter  = TemporalHash2D(tid.xy, frame.camPos.w) - 0.5f;
     float depthVS = 0.1f * pow(10000.0f, (float(tid.z) + 0.5f + jitter * 0.5f) / 64.0f);
     outDepthVS    = depthVS;
@@ -128,21 +127,20 @@ float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
     if (any(tid >= gridDim))
         return;
 
-    // FIXED: Declare and retrieve depthVS from GetVoxelWorldPos
     float  depthVS  = 0.0f;
     float3 worldPos = GetVoxelWorldPos(tid, float2(gridDim.xy), depthVS);
 
-    // Fog
+    // Logarithmic Fog
     float heightFalloff = 0.15f;
     float baseDensity   = 0.03f;
     float boundedY      = max(worldPos.y, -10.0f);
     float fogDensity    = baseDensity * exp(-heightFalloff * boundedY);
 
     float noiseScale = 0.08f;
-    float fogNoise   = Worley3D(worldPos * noiseScale); // Upgraded to 3D Worley!
+    float fogNoise   = Worley3D(worldPos * noiseScale);
     fogDensity *= lerp(0.3f, 1.0f, fogNoise);
 
-    // --- Raised Cloud Layer (150m-200m) ---
+    // Raised Cloud Layer (150m-200m)
     float cloudMinY = 150.0f;
     float cloudMaxY = 200.0f;
 
@@ -151,16 +149,11 @@ float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
     float  time       = frame.camPos.w;
     float2 windOffset = float2(0.5f, 0.2f) * time;
 
-    // Apply XY Jitter to break up voxel blockiness
     float2 jitterXY = float2(TemporalHash2D(tid.xy, time), TemporalHash2D(tid.yx, time + 0.5f)) - 0.5f;
 
     float3 jitteredWorldPos = worldPos;
-    // Scale jitter with distance (depthVS) so nearby voxels don't jitter too violently
     jitteredWorldPos.xz += jitterXY * (depthVS * 0.015f);
 
-    // --- NEW: Procedural 3D Perlin-Worley Noise ---
-    // Stretch the coordinates horizontally (0.015f vs 0.045f) so clouds are flat and billowy
-    // rather than perfect round spheres.
     float3 samplePos3D = float3(jitteredWorldPos.x * 0.015f, jitteredWorldPos.y * 0.045f, jitteredWorldPos.z * 0.015f) +
                          float3(windOffset.x, time * 0.02f, windOffset.y);
 
@@ -171,7 +164,7 @@ float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
 
     float density = fogDensity + cloudDensity;
 
-    // Bounds
+    // Local Probe Clipping
     if (frame.probeMin.w > 0.0f) {
         float3 center  = (frame.probeMax.xyz + frame.probeMin.xyz) * 0.5f;
         float3 extents = (frame.probeMax.xyz - frame.probeMin.xyz) * 0.5f;

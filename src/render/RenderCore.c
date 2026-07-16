@@ -267,11 +267,13 @@ static void ZHLN_Internal_QueryQueueFamilies(
     const VkSurfaceKHR     surface,
     uint32_t* const restrict out_graphics,
     uint32_t* const restrict out_present,
-    uint32_t* const restrict out_transfer
+    uint32_t* const restrict out_transfer,
+    uint32_t* const restrict out_compute
 ) {
     *out_graphics = UINT32_MAX;
     *out_present  = UINT32_MAX;
     *out_transfer = UINT32_MAX;
+    *out_compute  = UINT32_MAX;
 
     uint32_t count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(device, &count, nullptr);
@@ -280,7 +282,7 @@ static void ZHLN_Internal_QueryQueueFamilies(
     count                                = ZHLN_Min(count, 64);
     vkGetPhysicalDeviceQueueFamilyProperties(device, &count, families);
 
-    // First pass: Find dedicated transfer queue (has transfer bit, but no graphics/compute)
+    // First pass: Find dedicated transfer queue
     for (uint32_t i = 0; i < count; ++i) {
         if ((families[i].queueFlags & VK_QUEUE_TRANSFER_BIT) && !(families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
             !(families[i].queueFlags & VK_QUEUE_COMPUTE_BIT)) {
@@ -289,7 +291,15 @@ static void ZHLN_Internal_QueryQueueFamilies(
         }
     }
 
-    // Fallback to non-dedicated transfer families
+    // First pass: Find dedicated compute queue (has compute, no graphics)
+    for (uint32_t i = 0; i < count; ++i) {
+        if ((families[i].queueFlags & VK_QUEUE_COMPUTE_BIT) && !(families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
+            *out_compute = i;
+            break;
+        }
+    }
+
+    // Fallbacks
     if (*out_transfer == UINT32_MAX) {
         for (uint32_t i = 0; i < count; ++i) {
             if ((families[i].queueFlags & VK_QUEUE_TRANSFER_BIT) && !(families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
@@ -302,9 +312,10 @@ static void ZHLN_Internal_QueryQueueFamilies(
     for (uint32_t i = 0; i < count; ++i) {
         if (families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT && *out_graphics == UINT32_MAX) {
             *out_graphics = i;
-            if (*out_transfer == UINT32_MAX) {
+            if (*out_transfer == UINT32_MAX)
                 *out_transfer = i;
-            }
+            if (*out_compute == UINT32_MAX)
+                *out_compute = i; // Fallback compute to graphics
         }
 
         if (surface != VK_NULL_HANDLE && *out_present == UINT32_MAX) {
@@ -353,11 +364,12 @@ ZHLN_PhysicalDeviceInfo ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* c
         vkGetPhysicalDeviceFeatures2(devices[i], &info.features);
         vkGetPhysicalDeviceMemoryProperties2(devices[i], &info.memory);
 
-        ZHLN_Internal_QueryQueueFamilies(devices[i], desc->surface, &info.graphics_family, &info.present_family, &info.transfer_family);
+        ZHLN_Internal_QueryQueueFamilies(devices[i], desc->surface, &info.graphics_family, &info.present_family, &info.transfer_family, &info.compute_family);
 
         info.has_graphics = (info.graphics_family != UINT32_MAX);
         info.has_present  = (info.present_family != UINT32_MAX);
         info.has_transfer = (info.transfer_family != UINT32_MAX);
+        info.has_compute  = (info.compute_family != UINT32_MAX);
 
         const int32_t score = score_fn(&info, desc->score_userdata);
         if (score > best_score) {
@@ -377,7 +389,7 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
     uint32_t available_count = 0;
     vkEnumerateDeviceExtensionProperties(desc->physical->handle, nullptr, &available_count, nullptr);
 
-    VkExtensionProperties* available_exts = NULL;
+    VkExtensionProperties* available_exts = nullptr;
     if (available_count > 0) {
         available_exts = (VkExtensionProperties*) malloc(available_count * sizeof(VkExtensionProperties));
         vkEnumerateDeviceExtensionProperties(desc->physical->handle, nullptr, &available_count, available_exts);
@@ -409,15 +421,17 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
     }
 
     // --- Queue Creation ---
-    const uint32_t queue_candidates[3] = {
+    constexpr auto unique_families_count                   = 4;
+    const uint32_t queue_candidates[unique_families_count] = {
         desc->physical->graphics_family,
         desc->physical->present_family,
         desc->physical->transfer_family,
+        desc->physical->compute_family,
     };
 
-    uint32_t unique_families[3] = {0};
-    uint32_t unique_count       = 0;
-    for (uint32_t i = 0; i < 3; ++i) {
+    uint32_t unique_families[unique_families_count] = {};
+    uint32_t unique_count                           = 0;
+    for (uint32_t i = 0; i < unique_families_count; ++i) {
         bool is_duplicate = false;
         for (uint32_t j = 0; j < unique_count; ++j) {
             if (queue_candidates[i] == unique_families[j]) {
@@ -475,16 +489,19 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
     VkQueue graphics_queue = VK_NULL_HANDLE;
     VkQueue present_queue  = VK_NULL_HANDLE;
     VkQueue transfer_queue = VK_NULL_HANDLE;
+    VkQueue compute_queue  = VK_NULL_HANDLE;
 
     vkGetDeviceQueue(handle, desc->physical->graphics_family, 0, &graphics_queue);
     vkGetDeviceQueue(handle, desc->physical->present_family, 0, &present_queue);
     vkGetDeviceQueue(handle, desc->physical->transfer_family, 0, &transfer_queue);
+    vkGetDeviceQueue(handle, desc->physical->compute_family, 0, &compute_queue);
 
     return (ZHLN_Device) {
         .handle         = handle,
         .graphics_queue = graphics_queue,
         .present_queue  = present_queue,
         .transfer_queue = transfer_queue,
+        .compute_queue  = compute_queue,
     };
 }
 
@@ -711,7 +728,11 @@ bool ZHLN_CreateFrameSync(const ZHLN_FrameSyncDesc* const desc, ZHLN_FrameSync* 
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
     };
 
-    // Fence starts signaled so the first frame doesn't wait forever
+    VkSemaphoreTypeCreateInfo timeline_type_info = {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO, .pNext = nullptr, .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE, .initialValue = 0
+    };
+    VkSemaphoreCreateInfo timeline_sem_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &timeline_type_info, .flags = 0};
+
     static constexpr VkFenceCreateInfo fence_info = {
         .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
         .flags = VK_FENCE_CREATE_SIGNALED_BIT,
@@ -720,15 +741,14 @@ bool ZHLN_CreateFrameSync(const ZHLN_FrameSyncDesc* const desc, ZHLN_FrameSync* 
     for (uint32_t i = 0; i < desc->frame_count; ++i) {
         bool ok = (vkCreateSemaphore(desc->device, &sem_info, nullptr, &out_sync[i].image_available) == VK_SUCCESS &&
                    vkCreateSemaphore(desc->device, &sem_info, nullptr, &out_sync[i].render_finished) == VK_SUCCESS &&
+                   vkCreateSemaphore(desc->device, &timeline_sem_info, nullptr, &out_sync[i].compute_timeline) == VK_SUCCESS &&
                    vkCreateFence(desc->device, &fence_info, nullptr, &out_sync[i].in_flight) == VK_SUCCESS) != 0;
 
         if (!ok) {
-            // Destroy everything successfully created up to and including this frame
             ZHLN_DestroyFrameSync(desc->device, out_sync, i + 1);
             return false;
         }
     }
-
     return true;
 }
 
@@ -742,6 +762,9 @@ void ZHLN_DestroyFrameSync(const VkDevice device, ZHLN_FrameSync* const restrict
         }
         if (sync[i].in_flight != VK_NULL_HANDLE) {
             vkDestroyFence(device, sync[i].in_flight, nullptr);
+        }
+        if (sync[i].compute_timeline != VK_NULL_HANDLE) {
+            vkDestroySemaphore(device, sync[i].compute_timeline, nullptr);
         }
         sync[i] = (ZHLN_FrameSync) {};
     }
@@ -1143,7 +1166,7 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
         .colorAttachmentCount    = desc->color_format_count,
         .pColorAttachmentFormats = desc->color_format_count > 0 ? desc->color_formats : nullptr,
         .depthAttachmentFormat   = desc->depth_format,
-        .viewMask                = desc->stages ? (desc->stages->vert.view_mask | desc->stages->frag.view_mask) : 0,
+        .viewMask                = desc->view_mask,
     };
 
     const VkGraphicsPipelineCreateInfo pipeline_info = {
@@ -1228,11 +1251,10 @@ void ZHLN_EndRendering(const VkCommandBuffer cmd) {
     vkCmdEndRendering(cmd);
 }
 
-[[nodiscard]]
 ZHLN_FrameResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* const restrict desc) {
     const VkCommandBufferSubmitInfo cmd_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = desc->cmd};
 
-    VkSemaphoreSubmitInfo wait_infos[2] = {};
+    VkSemaphoreSubmitInfo wait_infos[3] = {};
     uint32_t              wait_count    = 0;
 
     // Wait 1: Presentation engine sync
@@ -1247,6 +1269,16 @@ ZHLN_FrameResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* const restric
             .semaphore = desc->stagingSemaphore,
             .value     = desc->stagingWaitValue,
             .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
+        };
+    }
+
+    // Wait 3: Async Compute synchronization
+    if (desc->computeSemaphore != VK_NULL_HANDLE && desc->computeWaitValue > 0) {
+        wait_infos[wait_count++] = (VkSemaphoreSubmitInfo) {
+            .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+            .semaphore = desc->computeSemaphore,
+            .value     = desc->computeWaitValue,
+            .stageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
         };
     }
 

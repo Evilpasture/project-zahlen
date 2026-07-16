@@ -266,7 +266,6 @@ struct PassFactory {
     VkCommandBuffer                             cmd;
     uint32_t                                    fIdx;
     VkDevice                                    device;
-    FrameRecorder&                              recorder;
     const RenderContext::Impl::PPPushConstants& pc;
     uint32_t                                    lightVariant;
     uint32_t                                    reflVariant;
@@ -346,29 +345,29 @@ struct PassFactory {
     }
 
     [[nodiscard]] auto MakeVoxelScatteringPass() const noexcept {
-        return Vk::MakePass<"VoxelScatter", Vk::ComputeRead<Res_VoxelMedia>, Vk::ComputeWrite<Res_VoxelLight>, Vk::ComputeRead<Res_ShadowMap>>(
+        return Vk::MakePass<"VoxelScatter", Vk::ComputeReadGeneral<Res_VoxelMedia>, Vk::ComputeWrite<Res_VoxelLight>, Vk::ComputeRead<Res_ShadowMap>>(
             [this](VkCommandBuffer c) noexcept {
                 Profiler::ScopedGpuProfile<Stages::VolumetricScatterPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
                 self.volumetricScatteringPass.WriteNext(
-                    device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.voxelMedia),
+                    device,
+                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.voxelMedia), // --- CHANGED from SHADER_READ_ONLY_OPTIMAL to GENERAL ---
                     Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.voxelLight), self.frameUniformBuffers[fIdx].Handle(),
                     self.lightStorageBuffers[fIdx].Handle(), self.clusterGridBuffers[fIdx].Handle(), self.lightIndexListBuffers[fIdx].Handle(),
                     self.graphResources.shadowMap.view.Get(), self.shadowSampler.Get()
                 );
-                // Dispatch across all 64 Z slices
                 self.volumetricScatteringPass.Dispatch(c, 160 / 8, (90 + 7) / 8, 64);
             }
         );
     }
 
     [[nodiscard]] auto MakeVoxelIntegrationPass() const noexcept {
-        return Vk::MakePass<"VoxelIntegrate", Vk::ComputeRead<Res_VoxelLight>, Vk::ComputeWrite<Res_VoxelInt>>([this](VkCommandBuffer c) noexcept {
+        return Vk::MakePass<"VoxelIntegrate", Vk::ComputeReadGeneral<Res_VoxelLight>, Vk::ComputeWrite<Res_VoxelInt>>([this](VkCommandBuffer c) noexcept {
             Profiler::ScopedGpuProfile<Stages::VolumetricIntegratePass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
             self.volumetricIntegrationPass.WriteNext(
-                device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.voxelLight),
+                device,
+                Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.voxelLight), // --- CHANGED from SHADER_READ_ONLY_OPTIMAL to GENERAL ---
                 Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.voxelIntegrated)
             );
-            // Dispatch with 10 Y groups (90 / 9) to cover the entire height dimension
             self.volumetricIntegrationPass.Dispatch(c, 160 / 16, (90 + 8) / 9, 1);
         });
     }
@@ -407,16 +406,16 @@ struct PassFactory {
     [[nodiscard]] auto MakeReflectionPass() const noexcept {
         return Vk::MakePass<
             "Reflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_Lighting>,
-            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderRead<Res_VoxelInt>, Vk::ColorWrite<Res_PostProcess>>(
+            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelInt>, Vk::ColorWrite<Res_PostProcess>>(
             [this](auto& ctx) noexcept {
                 Profiler::ScopedGpuProfile<Stages::PostProcessPass, FrameProfiler> timer(ctx.Cmd(), fIdx, self.gpuProfiler);
                 self.reflectionPass.WriteNext(
                     device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.sceneColor), self.defaultSampler.Get(),
                     Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
                     Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.normalRoughnessBuffer), self.pointSampler.Get(),
-                    self.iblPayload.prefilteredView.Get(), GetTLAS(), self.frameUniformBuffers->Handle(), self.iblPayload.brdfLutView.Get(),
+                    self.iblPayload.prefilteredView.Get(), GetTLAS(), self.frameUniformBuffers[fIdx].Handle(), self.iblPayload.brdfLutView.Get(),
                     self.clampSampler.Get(), Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.lightingTarget),
-                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.voxelIntegrated) // <-- ADDED THIS BINDING
+                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.voxelIntegrated) // --- CHANGED from SHADER_READ_ONLY_OPTIMAL to GENERAL ---
                 );
                 self.reflectionPass.ExecuteVariant(ctx.Cmd(), reflVariant, pc);
             }
@@ -685,6 +684,11 @@ struct PassFactory {
     }
 };
 
+// --- Extract Compute Passes into their own graph ---
+auto BuildComputeGraph(const PassFactory& factory) {
+    return Vk::CompileTimeFrameGraph(factory.MakeVoxelInjectionPass(), factory.MakeVoxelScatteringPass(), factory.MakeVoxelIntegrationPass());
+}
+
 // ============================================================================
 // Multi-Axis Frame Graph Generator
 // ============================================================================
@@ -695,10 +699,10 @@ auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapcha
         if constexpr (FullBright) {
             return std::tuple {factory.MakeMainPass(), factory.template MakeForwardPass<FullBright>()};
         } else {
-            return std::tuple {factory.MakeShadowPass(),          factory.MakeVoxelInjectionPass(),
-                               factory.MakeVoxelScatteringPass(), factory.MakeVoxelIntegrationPass(),
-                               factory.MakeAmbientPass(),         factory.MakeLightingPass(),
-                               factory.MakeReflectionPass(),      factory.template MakeForwardPass<FullBright>()};
+            return std::tuple {
+                factory.MakeShadowPass(), factory.MakeAmbientPass(), factory.MakeLightingPass(), factory.MakeReflectionPass(),
+                factory.template MakeForwardPass<FullBright>()
+            };
         }
     }();
 
@@ -764,6 +768,10 @@ void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const Pas
     if constexpr (Vk::IsInList<Resources, Res_Depth>::value) {
         auto ref = Vk::MakeRef<Res_Depth>(self.presentation.depthTarget);
         binder.template Bind<Res_Depth>(ref.handle, ref.view, ref.extent);
+    }
+    if constexpr (Vk::IsInList<Resources, Res_ShadowMap>::value) {
+        auto ref = Vk::MakeRef<Res_ShadowMap>(self.graphResources.shadowMap);
+        binder.template Bind<Res_ShadowMap>(ref.handle, ref.view, ref.extent);
     }
     if constexpr (Vk::IsInList<Resources, Res_AccumCurr>::value) {
         auto ref = Vk::MakeRef<Res_AccumCurr>(self.accumBuffers.Current());
@@ -835,6 +843,40 @@ std::string_view GetRenderGraphDump(AAMode currentMode) noexcept {
     return "Not implemented.";
 }
 
+// --- Standalone Compute Recording ---
+void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Compute> compCmd) {
+    uint32_t fIdx = frame_index;
+
+    PassFactory factory {
+        .self         = *this,
+        .cmd          = VK_NULL_HANDLE,
+        .fIdx         = fIdx,
+        .device       = ctx.Device(),
+        .pc           = {},
+        .lightVariant = (giSettings.enableRTR && rtCtx.Valid()) ? 1u : 0u,
+        .reflVariant  = 0
+    };
+
+    auto                                 compGraph = BuildComputeGraph(factory);
+    typename decltype(compGraph)::Binder compBinder;
+    using CompResources = typename decltype(compGraph)::Resources;
+    using Meta          = GraphResources::ReflectMetadata;
+
+    Reflect::ForEachReflectedField<Meta>(graphResources, [&]<typename Tag>(auto& image) {
+        if constexpr (Vk::IsInList<CompResources, Tag>::value) {
+            auto ref = Vk::MakeRef<Tag>(image);
+            compBinder.template Bind<Tag>(ref.handle, ref.view, ref.extent);
+        }
+    });
+
+    if constexpr (Vk::IsInList<CompResources, Res_ShadowMap>::value) {
+        auto ref = Vk::MakeRef<Res_ShadowMap>(shadowMapPrev); // <-- FIXED: Compute reads previous frame's shadow map!
+        compBinder.template Bind<Res_ShadowMap>(ref.handle, ref.view, ref.extent);
+    }
+
+    compGraph.Execute(compCmd, compBinder);
+}
+
 template <bool FullBright>
 void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd) {
     uint32_t imageIdx = current_image_index;
@@ -843,7 +885,6 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
 
     using namespace ZHLN::Vk;
     using enum AAMode;
-    FrameRecorder recorder(cmd, *this);
 
     auto getSwapchainImage = [&]() -> Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {
         return {
@@ -860,11 +901,10 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
     uint32_t reflVariant  = (giSettings.enableSSR ? 1 : 0) | ((giSettings.enableRTR && rtCtx.Valid()) ? 2 : 0);
 
     PassFactory factory {
-        .self     = *this,
-        .cmd      = cmd,
-        .fIdx     = fIdx,
-        .device   = device,
-        .recorder = recorder,
+        .self   = *this,
+        .cmd    = cmd,
+        .fIdx   = fIdx,
+        .device = device,
         .pc =
             {.invViewProj = current_view_proj.Inversed(),
              .viewProj    = current_view_proj,
@@ -888,6 +928,13 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
 
 RenderResult RenderContext::BeginFrame() noexcept {
     using enum RenderFrameResult;
+
+    // 1. Wait for the previous frame at this slot to finish before we touch any of its resources!
+    auto wait_res = _impl->sync.Wait(_impl->frame_index ^ 1);
+    if (wait_res == VK_ERROR_DEVICE_LOST) {
+        return std::unexpected(DeviceLost);
+    }
+
     auto& stagingContext = _impl->stagingContext;
     auto& frame_index    = _impl->frame_index;
     auto& deletionQueue  = _impl->deletionQueue;
@@ -899,10 +946,21 @@ RenderResult RenderContext::BeginFrame() noexcept {
     deletionQueue.BeginFrame(frame_index);
     _impl->activeQueueGuard.emplace(deletionQueue);
 
+    // --- ADDED: Retrieve the GPU profiling results for the frame that just finished BEFORE resetting ---
+    float timestampPeriod = _impl->ctx.PhysicalInfo().properties.properties.limits.timestampPeriod;
+    _impl->gpuProfiler.RetrieveResults(frame_index, timestampPeriod, [](std::string_view name, float durationMS) { CPUProfiler::Record(name, durationMS); });
+
+    _impl->sync.StepTimeline(frame_index);
+
+    // --- RESET THE GPU PROFILER QUERY POOL NOW ---
+    _impl->gpuProfiler.Reset(frame_index);
+    _impl->computePools[frame_index].Reset();
+
     for (auto& worker: _impl->workerCmds) {
         worker.cmdCount[frame_index].store(0, std::memory_order::relaxed);
         worker.pools[frame_index].Reset();
     }
+
     auto& resized = _impl->resized;
     if (resized) {
         auto fbSize = GetFramebufferSize();
@@ -944,7 +1002,6 @@ RenderResult RenderContext::EndFrame() noexcept {
 
     ZHLN_FrameResult res = ZHLN_FrameResult_Ok;
 
-    // 1. Isolate the active CPU recording work in an inner block to exclude GPU/VSync blocking times
     {
         ZHLN_PROFILE_SCOPE("Render (CPU Record)");
         if (_impl->current_cmd == VK_NULL_HANDLE) {
@@ -953,6 +1010,35 @@ RenderResult RenderContext::EndFrame() noexcept {
             return std::unexpected(Error);
         }
 
+        // ====================================================================
+        // 1. RECORD & SUBMIT COMPUTE QUEUE (Async Compute Phase)
+        // ====================================================================
+        _impl->current_compute_cmd = _impl->computePools[_impl->frame_index][0];
+
+        ZHLN_BeginCommandBuffer(_impl->current_compute_cmd);
+        _impl->RecordComputeFrame(_impl->current_compute_cmd);
+        ZHLN_EndCommandBuffer(_impl->current_compute_cmd);
+
+        uint64_t computeSignalValue = _impl->sync.GetTimelineValue(_impl->frame_index);
+
+        // Capture and handle the nodiscard return value of the queue submission
+        auto comp_submit_res = Vk::QueueSubmit(
+            _impl->ctx, _impl->current_compute_cmd, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, // No Wait
+            _impl->sync[_impl->frame_index].compute_timeline, computeSignalValue,
+            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT // Signal on compute completion
+        );
+
+        if (!comp_submit_res) [[unlikely]] {
+            _impl->drawQueue.clear();
+            _impl->uiDrawQueue.clear();
+            _impl->current_cmd         = VK_NULL_HANDLE;
+            _impl->hasSkinnedThisFrame = false;
+            return std::unexpected(comp_submit_res.error()); // Propagate the Vulkan error
+        }
+
+        // ====================================================================
+        // 2. RECORD GRAPHICS QUEUE
+        // ====================================================================
         res = Vk::DrawFrame<2, false>(
             {.ctx               = _impl->ctx,
              .swapchain         = _impl->presentation.swapchain,
@@ -960,18 +1046,11 @@ RenderResult RenderContext::EndFrame() noexcept {
              .pools             = _impl->pools,
              .presentSemaphores = _impl->presentation.presentSemaphores,
              .stagingSemaphore  = _impl->transferRingBuffer.GetSemaphore(),
-             .stagingWaitValue  = _impl->transferRingBuffer.GetCurrentValue()},
+             .stagingWaitValue  = _impl->transferRingBuffer.GetCurrentValue()}, // <-- CLEANED UP: No compute parameters needed!
             _impl->frame_index,
             [this](VkCommandBuffer cmd, uint32_t image_index) {
                 _impl->current_cmd         = cmd;
                 _impl->current_image_index = image_index;
-
-                // Safe Synchronized Query Readback & Reset
-                float timestampPeriod = _impl->ctx.PhysicalInfo().properties.properties.limits.timestampPeriod;
-                _impl->gpuProfiler.RetrieveResults(_impl->frame_index, timestampPeriod, [](std::string_view name, float durationMS) {
-                    CPUProfiler::Record(name, durationMS);
-                });
-                _impl->gpuProfiler.Reset(_impl->frame_index);
 
                 _impl->pendingAcquires.Drain(cmd);
 
@@ -993,6 +1072,7 @@ RenderResult RenderContext::EndFrame() noexcept {
                 }
                 _impl->BuildTLAS(cmd);
 
+                // Graphics-only recording
                 if (_impl->currentUniforms.fullBright != 0) {
                     _impl->RecordSceneFrame<true>({cmd});
                 } else {
@@ -1013,17 +1093,14 @@ RenderResult RenderContext::EndFrame() noexcept {
         // Flip double-buffered resources to prepare for the next frame
         ZHLN::Reflect::ForEachField(*_impl, [](auto& field) { FlipObject(field); });
 
+        std::swap(_impl->graphResources.shadowMap, _impl->shadowMapPrev);
+        std::swap(_impl->shadowCascadeViews, _impl->shadowCascadeViewsPrev);
+
         _impl->drawQueue.clear();
         _impl->uiDrawQueue.clear();
         _impl->current_cmd         = VK_NULL_HANDLE;
         _impl->hasSkinnedThisFrame = false;
     } // <-- The profile timer is destroyed here, committing only the actual recording work
-
-    // 2. Perform the blocking GPU synchronization outside of the CPU Record timer
-    auto wait_res = _impl->sync.Wait(_impl->frame_index);
-    if (wait_res == VK_ERROR_DEVICE_LOST) {
-        return std::unexpected(DeviceLost);
-    }
 
     if (res == ZHLN_FrameResult_Suboptimal) {
         return std::unexpected(Suboptimal);

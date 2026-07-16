@@ -86,9 +86,11 @@ typedef struct ZHLN_PhysicalDeviceInfo {
     uint32_t                          graphics_family; /**< Index of the graphics queue family */
     uint32_t                          present_family;  /**< Index of the presentation queue family */
     uint32_t                          transfer_family; /**< Index of the dedicated transfer queue family */
+    uint32_t                          compute_family;  /**< Index of the compute queue family */
     bool                              has_graphics;    /**< True if a graphics queue was found */
     bool                              has_present;     /**< True if presentation is supported on 'surface' */
     bool                              has_transfer;    /**< True if dedicated transfer is supported */
+    bool                              has_compute;     /**< True if compute queue is supported */
 } ZHLN_PhysicalDeviceInfo;
 
 /**
@@ -128,10 +130,11 @@ typedef struct ZHLN_DeviceDesc {
 } ZHLN_DeviceDesc;
 
 typedef struct ZHLN_Device {
-    VkDevice handle;
-    VkQueue  graphics_queue;
-    VkQueue  present_queue;
+    VkDevice handle;         /**< Raw Vulkan handle */
+    VkQueue  graphics_queue; /**< Graphics queue */
+    VkQueue  present_queue;  /**< Present queue */
     VkQueue  transfer_queue; /**< Dedicated async transfer queue */
+    VkQueue  compute_queue;  /**< Compute queue */
 } ZHLN_Device;
 
 [[nodiscard]]
@@ -184,6 +187,7 @@ void ZHLN_DestroySwapchain(VkDevice device, ZHLN_Swapchain* ZHLN_RESTRICT swapch
 typedef struct ZHLN_FrameSync {
     VkSemaphore image_available;
     VkSemaphore render_finished;
+    VkSemaphore compute_timeline;
     VkFence     in_flight;
 } ZHLN_FrameSync;
 
@@ -329,6 +333,7 @@ typedef struct ZHLN_GraphicsPipelineDesc {
     const bool                  depth_write;
     const bool                  blend_enable;   // basic src_alpha / one_minus_src_alpha if true
     const bool                  additive_blend; // Explicitly route additive blend configuration
+    const uint32_t              view_mask;      // Explicit Multiview mask (0 = disabled)
     const VkSpecializationInfo* specialization_info;
 } ZHLN_GraphicsPipelineDesc;
 
@@ -375,7 +380,9 @@ typedef struct ZHLN_FrameSubmitDesc {
     const VkSwapchainKHR  swapchain;
     const uint32_t        imageIndex;
     const VkSemaphore     stagingSemaphore; /**< Timeline semaphore for transfer queue sync */
+    const VkSemaphore     computeSemaphore; /**< Timeline semaphore for compute queue sync */
     const uint64_t        stagingWaitValue; /**< Target timeline value to wait on */
+    const uint64_t        computeWaitValue;
 } ZHLN_FrameSubmitDesc;
 
 [[nodiscard]]

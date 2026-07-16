@@ -134,7 +134,9 @@ inline auto DrawFrame(const DrawFrameDesc<N>& desc, uint32_t& frameIndex, Record
         .swapchain        = desc.swapchain.Get().handle,
         .imageIndex       = image_index,
         .stagingSemaphore = desc.stagingSemaphore,
+        .computeSemaphore = s.compute_timeline,
         .stagingWaitValue = desc.stagingWaitValue,
+        .computeWaitValue = desc.sync.GetTimelineValue(frameIndex),
     };
 
     result = ZHLN_SubmitAndPresent(&submit_desc);

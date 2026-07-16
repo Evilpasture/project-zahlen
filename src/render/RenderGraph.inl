@@ -161,7 +161,73 @@ consteval auto ComputeStateTable() {
 
     // Warm up simulation state
     [&]<size_t... Is>(std::index_sequence<Is...>) {
-        ((current_states[Is] = {.layout = VK_IMAGE_LAYOUT_UNDEFINED, .stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, .access = 0, .lastWritePass = 999999}), ...);
+        (
+            [&]<size_t I>() {
+                using R = typename ResourceList::template type<I>;
+
+                // Determine if the resource is ever written in this graph
+                constexpr bool is_written = []() consteval {
+                    bool written    = false;
+                    auto check_pass = [&]<typename Pass>() {
+                        using Usages = typename Pass::Usages;
+                        written |= []<size_t... Js>(std::index_sequence<Js...>) {
+                            return (
+                                (std::is_same_v<typename Usages::template type<Js>::Resource, R> && ((Usages::template type<Js>::access & WriteMask) != 0)) ||
+                                ...
+                            );
+                        }(std::make_index_sequence<Usages::size> {});
+                    };
+                    (check_pass.template operator()<Passes>(), ...);
+                    return written;
+                }();
+
+                if constexpr (!is_written) {
+                    // It is an external read-only input.
+                    // Initialize its state to its first usage's layout and stage.
+                    constexpr auto first_usage_info = []() consteval {
+                        VkImageLayout         layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                        VkPipelineStageFlags2 stage  = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+                        VkAccessFlags2        access = VK_ACCESS_2_SHADER_READ_BIT;
+                        bool                  found  = false;
+
+                        auto check_pass = [&]<typename Pass>() {
+                            if (found) {
+                                return;
+                            }
+                            using Usages = typename Pass::Usages;
+                            [&]<size_t... Js>(std::index_sequence<Js...>) {
+                                (([&]() {
+                                     if (found) {
+                                         return;
+                                     }
+                                     using U = typename Usages::template type<Js>;
+                                     if constexpr (std::is_same_v<typename U::Resource, R>) {
+                                         layout = U::layout;
+                                         stage  = U::stage;
+                                         access = U::access;
+                                         found  = true;
+                                     }
+                                 }()),
+                                 ...);
+                            }(std::make_index_sequence<Usages::size> {});
+                        };
+                        (check_pass.template operator()<Passes>(), ...);
+                        return ResourceState {.layout = layout, .stage = stage, .access = access, .lastWritePass = 999999, .fromPreviousFrame = false};
+                    }();
+
+                    current_states[I] = first_usage_info;
+                } else {
+                    // Standard initialization for resources written inside this graph
+                    current_states[I] = ResourceState {
+                        .layout            = VK_IMAGE_LAYOUT_UNDEFINED,
+                        .stage             = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+                        .access            = 0,
+                        .lastWritePass     = 999999,
+                        .fromPreviousFrame = false
+                    };
+                }
+            }.template operator()<Is>(),
+            ...);
     }(std::make_index_sequence<num_resources> {});
 
     auto simulate_passes = [&](bool record) noexcept(false) {
@@ -182,7 +248,7 @@ consteval auto ComputeStateTable() {
 
                         constexpr bool is_write = (U::access & WriteMask) != 0;
 
-                        current_states[r_idx] = {
+                        current_states[r_idx] = ResourceState {
                             .layout = U::layout,
                             .stage  = U::stage,
                             .access = U::access,
@@ -206,14 +272,38 @@ consteval auto ComputeStateTable() {
         (
             [&]<size_t I>() {
                 using R = typename ResourceList::template type<I>;
-                if constexpr (R::is_swapchain || !R::is_persistent) {
-                    current_states[I] = {
+
+                // Determine if the resource is ever written in this graph
+                constexpr bool is_written = []() consteval {
+                    bool written    = false;
+                    auto check_pass = [&]<typename Pass>() {
+                        using Usages = typename Pass::Usages;
+                        written |= []<size_t... Js>(std::index_sequence<Js...>) {
+                            return (
+                                (std::is_same_v<typename Usages::template type<Js>::Resource, R> && ((Usages::template type<Js>::access & WriteMask) != 0)) ||
+                                ...
+                            );
+                        }(std::make_index_sequence<Usages::size> {});
+                    };
+                    (check_pass.template operator()<Passes>(), ...);
+                    return written;
+                }();
+
+                if constexpr (R::is_swapchain) {
+                    // Swapchain must synchronize with the acquire semaphore wait stage
+                    current_states[I] = ResourceState {
                         .layout            = VK_IMAGE_LAYOUT_UNDEFINED,
                         .stage             = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                         .access            = 0,
                         .lastWritePass     = 999999,
                         .fromPreviousFrame = false
                     };
+                } else if constexpr (is_written && !R::is_persistent) {
+                    current_states[I] = ResourceState {
+                        .layout = VK_IMAGE_LAYOUT_UNDEFINED, .stage = VK_PIPELINE_STAGE_2_NONE, .access = 0, .lastWritePass = 999999, .fromPreviousFrame = false
+                    };
+                } else if constexpr (!is_written) {
+                    // Keep the external read-only input state intact
                 } else {
                     // If the resource was written in the previous frame, flag it
                     if (current_states[I].lastWritePass < 999999) {

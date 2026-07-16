@@ -49,7 +49,11 @@ class PresentationContext {
         }
 
         const ZHLN_Device raw_dev = {
-            .handle = _ctx->Device(), .graphics_queue = _ctx->GraphicsQueue(), .present_queue = _ctx->PresentQueue(), .transfer_queue = _ctx->TransferQueue()
+            .handle         = _ctx->Device(),
+            .graphics_queue = _ctx->GraphicsQueue(),
+            .present_queue  = _ctx->PresentQueue(),
+            .transfer_queue = _ctx->TransferQueue(),
+            .compute_queue  = _ctx->ComputeQueue()
         };
         const ZHLN_PhysicalDeviceInfo raw_phys = _ctx->PhysicalInfo();
         ZHLN_SwapchainDesc            s_desc   = {

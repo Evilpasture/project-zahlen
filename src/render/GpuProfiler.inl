@@ -107,7 +107,12 @@ inline void GpuProfiler<Stages...>::WriteStart(VkCommandBuffer cmd, uint32_t fra
     uint32_t slot = frameIndex % 2;
     _recordedMasks[slot] |= (1U << stage_idx);
 
-    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, _pools[slot], query_idx);
+    // --- FIXED: Detect if this is a Compute pass and use the optimal stage mask to prevent hardware deadlocks ---
+    constexpr std::string_view stage_name = Stage::name;
+    constexpr bool             is_compute = stage_name.contains("Volumetric") || stage_name.contains("Compute");
+    VkPipelineStageFlags2      stage_mask = is_compute ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT : VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
+
+    vkCmdWriteTimestamp2(cmd, stage_mask, _pools[slot], query_idx);
 }
 
 template <GpuStageTag... Stages>
@@ -119,7 +124,12 @@ inline void GpuProfiler<Stages...>::WriteEnd(VkCommandBuffer cmd, uint32_t frame
     static_assert(ContainsType<Stage, Stages...>, "Stage tag not registered in this GpuProfiler!");
     constexpr uint32_t query_idx = (TypeIndex<Stage, Stages...>::value * 2) + 1;
 
-    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, _pools[frameIndex % 2], query_idx);
+    // --- FIXED: Detect if this is a Compute pass and use the optimal stage mask to prevent hardware deadlocks ---
+    constexpr std::string_view stage_name = Stage::name;
+    constexpr bool             is_compute = stage_name.contains("Volumetric") || stage_name.contains("Compute");
+    VkPipelineStageFlags2      stage_mask = is_compute ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT : VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
+
+    vkCmdWriteTimestamp2(cmd, stage_mask, _pools[frameIndex % 2], query_idx);
 }
 
 template <GpuStageTag... Stages>

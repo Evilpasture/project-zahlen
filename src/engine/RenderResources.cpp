@@ -32,6 +32,7 @@ std::expected<void, Error> RenderContext::Impl::CompileShadowPipeline(VkDevice d
                         .Layout(shadowPipelineLayout.Get())
                         .DepthOnly()
                         .DepthFormat(VK_FORMAT_D32_SFLOAT)
+                        .ViewMask(0xF) // 4 Cascades (0b1111)
                         .CullNone()
                         .Build(device)
                         .transform_error([](auto err) -> Error {
@@ -63,6 +64,7 @@ std::expected<void, Error> RenderContext::Impl::CompilePunctualShadowPipeline(Vk
                         .Layout(punctualShadowPipelineLayout.Get())
                         .DepthOnly()
                         .DepthFormat(VK_FORMAT_D32_SFLOAT)
+                        .ViewMask(0x3F) // 6 Cubemap faces (0b111111)
                         .CullNone()
                         .Build(device)
                         .transform_error([](auto err) -> Error {
@@ -406,12 +408,19 @@ std::expected<void, Error> RenderContext::SetShadowResolution(uint32_t resolutio
                 impl->allocator, impl->ctx, {.width = resolution, .height = resolution},
                 {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
             );
+            impl->shadowMapPrev = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+                impl->allocator, impl->ctx, {.width = resolution, .height = resolution},
+                {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
+            );
 
             impl->shadowCascadeViews.clear();
             impl->shadowCascadeViews.resize(RenderContext::Impl::NUM_CASCADES);
+            impl->shadowCascadeViewsPrev.clear();
+            impl->shadowCascadeViewsPrev.resize(RenderContext::Impl::NUM_CASCADES);
             for (uint32_t i = 0; i < RenderContext::Impl::NUM_CASCADES; ++i) {
                 impl->shadowCascadeViews[i] =
                     Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(impl->ctx.Device(), impl->graphResources.shadowMap.image.Handle(), i, 1);
+                impl->shadowCascadeViewsPrev[i] = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(impl->ctx.Device(), impl->shadowMapPrev.image.Handle(), i, 1);
             }
 
             Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) {
@@ -422,11 +431,23 @@ std::expected<void, Error> RenderContext::SetShadowResolution(uint32_t resolutio
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
                     cmd, impl->graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
                 );
+
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+                    cmd, impl->shadowMapPrev.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
+                );
+
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+                    cmd, impl->shadowMapPrev.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
+                );
             });
 
             ZHLN::Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);
         });
 }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic pop

@@ -38,9 +38,18 @@ class FrameSync {
         return vkWaitForFences(_device, 1, &_frames[frameIndex % N].in_flight, VK_TRUE, UINT64_MAX);
     }
 
+    uint64_t StepTimeline(uint32_t frameIndex) noexcept {
+        return ++_timelineValues[frameIndex % N];
+    }
+
+    [[nodiscard]] uint64_t GetTimelineValue(uint32_t frameIndex) const noexcept {
+        return _timelineValues[frameIndex % N];
+    }
+
   private:
     VkDevice                      _device = VK_NULL_HANDLE;
     std::array<ZHLN_FrameSync, N> _frames {};
+    std::array<uint64_t, N>       _timelineValues {};
 };
 } // namespace ZHLN::Vk
 
