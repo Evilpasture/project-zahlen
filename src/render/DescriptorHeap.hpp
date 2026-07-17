@@ -32,6 +32,59 @@ enum class DescriptorHeapError : uint8_t {
     DeviceAddressFailed
 };
 
+template <DescriptorHeapType Heap, VkDescriptorType Type>
+struct HeapHandle {
+    uint32_t index = kInvalidIndex;
+
+    static constexpr uint32_t kInvalidIndex = ~0U;
+
+    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
+        return index != kInvalidIndex;
+    }
+    explicit constexpr operator bool() const noexcept {
+        return Valid();
+    }
+
+    constexpr bool operator==(const HeapHandle&) const noexcept = default;
+};
+
+template <DescriptorHeapType Heap, VkDescriptorType Type>
+inline constexpr HeapHandle<Heap, Type> kInvalidHandle {HeapHandle<Heap, Type>::kInvalidIndex};
+
+// ============================================================================
+// Strongly-Typed Semantic Aliases
+// ============================================================================
+using TextureHandle               = HeapHandle<DescriptorHeapType::Resource, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>;
+using StorageImageHandle          = HeapHandle<DescriptorHeapType::Resource, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE>;
+using UniformBufferHandle         = HeapHandle<DescriptorHeapType::Resource, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER>;
+using StorageBufferHandle         = HeapHandle<DescriptorHeapType::Resource, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER>;
+using SamplerHandle               = HeapHandle<DescriptorHeapType::Sampler, VK_DESCRIPTOR_TYPE_SAMPLER>;
+using AccelerationStructureHandle = HeapHandle<DescriptorHeapType::Resource, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR>;
+
+// ============================================================================
+// Concepts
+// ============================================================================
+template <VkDescriptorType Type>
+concept ValidResourceDescriptorType = Type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE || Type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
+                                      Type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER || Type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ||
+                                      Type == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+
+// ============================================================================
+// Global Invalid Constants
+// ============================================================================
+inline constexpr TextureHandle               kInvalidTextureHandle       = kInvalidHandle<DescriptorHeapType::Resource, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>;
+inline constexpr StorageImageHandle          kInvalidStorageImageHandle  = kInvalidHandle<DescriptorHeapType::Resource, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE>;
+inline constexpr UniformBufferHandle         kInvalidUniformBufferHandle = kInvalidHandle<DescriptorHeapType::Resource, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER>;
+inline constexpr StorageBufferHandle         kInvalidStorageBufferHandle = kInvalidHandle<DescriptorHeapType::Resource, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER>;
+inline constexpr SamplerHandle               kInvalidSamplerHandle       = kInvalidHandle<DescriptorHeapType::Sampler, VK_DESCRIPTOR_TYPE_SAMPLER>;
+inline constexpr AccelerationStructureHandle kInvalidAccelerationStructureHandle =
+    kInvalidHandle<DescriptorHeapType::Resource, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR>;
+
+// Validate layout safety at compile time
+static_assert(sizeof(TextureHandle) == sizeof(uint32_t));
+static_assert(std::is_standard_layout_v<TextureHandle>);
+static_assert(std::is_trivially_copyable_v<TextureHandle>);
+
 // ============================================================================
 // Alignment Helper
 // ============================================================================
@@ -140,10 +193,12 @@ class ResourceWriteBatch {
     ResourceWriteBatch(ResourceWriteBatch&& other) noexcept;
     auto operator=(ResourceWriteBatch&& other) noexcept -> ResourceWriteBatch&;
 
-    void
-        AddImage(uint32_t slot, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout, VkDescriptorType type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE) noexcept;
-
-    void AddBuffer(uint32_t slot, VkDeviceAddress address, VkDeviceSize size, VkDescriptorType type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) noexcept;
+    // Overloaded typed write commands
+    void AddImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
+    void AddStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
+    void AddBuffer(StorageBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept;
+    void AddBuffer(UniformBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept;
+    void AddAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;
 
     void Flush(VkDevice device, PFN_vkWriteResourceDescriptorsEXT writeFn, void* mappedPtr, VkDeviceSize stride) noexcept;
 
@@ -163,7 +218,7 @@ class SamplerWriteBatch {
     SamplerWriteBatch(SamplerWriteBatch&& other) noexcept;
     auto operator=(SamplerWriteBatch&& other) noexcept -> SamplerWriteBatch&;
 
-    void AddSampler(uint32_t slot, const VkSamplerCreateInfo& createInfo) noexcept;
+    void AddSampler(SamplerHandle handle, const VkSamplerCreateInfo& createInfo) noexcept;
 
     void Flush(VkDevice device, PFN_vkWriteSamplerDescriptorsEXT writeFn, void* mappedPtr, VkDeviceSize stride) noexcept;
 
@@ -224,28 +279,55 @@ class HeapManager {
 
     void BeginFrame(uint32_t frameIndex) noexcept;
 
-    // --- Static Allocation ---
+    // --- Type-Safe Static Resource Allocation ---
+    template <VkDescriptorType Type>
+        requires ValidResourceDescriptorType<Type>
+    [[nodiscard]] auto AllocateStaticResource() noexcept -> std::expected<HeapHandle<DescriptorHeapType::Resource, Type>, DescriptorHeapError> {
+        return AllocateStaticResourceSlot().transform([](uint32_t idx) { return HeapHandle<DescriptorHeapType::Resource, Type> {idx}; });
+    }
 
+    [[nodiscard]] auto AllocateStaticSampler() noexcept -> std::expected<SamplerHandle, DescriptorHeapError> {
+        return AllocateStaticSamplerSlot().transform([](uint32_t idx) { return SamplerHandle {idx}; });
+    }
+
+    // --- Type-Safe Dynamic Range Allocation ---
+    template <VkDescriptorType Type>
+        requires ValidResourceDescriptorType<Type>
+    [[nodiscard]] auto
+        AllocateDynamicResourceRange(uint32_t count) noexcept -> std::expected<HeapHandle<DescriptorHeapType::Resource, Type>, DescriptorHeapError> {
+        return AllocateDynamicResourceRangeSlot(count).transform([](uint32_t idx) { return HeapHandle<DescriptorHeapType::Resource, Type> {idx}; });
+    }
+
+    [[nodiscard]] auto AllocateDynamicSamplerRange(uint32_t count) noexcept -> std::expected<SamplerHandle, DescriptorHeapError> {
+        return AllocateDynamicSamplerRangeSlot(count).transform([](uint32_t idx) { return SamplerHandle {idx}; });
+    }
+
+    // --- Type-Safe Static Reclamation ---
+    template <VkDescriptorType Type>
+    void FreeStaticResource(HeapHandle<DescriptorHeapType::Resource, Type> handle) noexcept {
+        FreeStaticResourceSlot(handle.index);
+    }
+
+    void FreeStaticSampler(SamplerHandle handle) noexcept {
+        FreeStaticSamplerSlot(handle.index);
+    }
+
+    // --- Updates ---
+    void FlushResourceBatch(ResourceWriteBatch& batch) noexcept;
+    void FlushSamplerBatch(SamplerWriteBatch& batch) noexcept;
+
+    // --- Command Binding ---
+    void BindHeaps(VkCommandBuffer cmd) const noexcept;
+
+  private:
     [[nodiscard]] auto AllocateStaticResourceSlot() noexcept -> std::expected<uint32_t, DescriptorHeapError>;
     void               FreeStaticResourceSlot(uint32_t slot) noexcept;
     [[nodiscard]] auto AllocateStaticSamplerSlot() noexcept -> std::expected<uint32_t, DescriptorHeapError>;
     void               FreeStaticSamplerSlot(uint32_t slot) noexcept;
 
-    // --- Dynamic/Transient Allocation ---
+    [[nodiscard]] auto AllocateDynamicResourceRangeSlot(uint32_t count) noexcept -> std::expected<uint32_t, DescriptorHeapError>;
+    [[nodiscard]] auto AllocateDynamicSamplerRangeSlot(uint32_t count) noexcept -> std::expected<uint32_t, DescriptorHeapError>;
 
-    [[nodiscard]] auto AllocateDynamicResourceRange(uint32_t count) noexcept -> std::expected<uint32_t, DescriptorHeapError>;
-    [[nodiscard]] auto AllocateDynamicSamplerRange(uint32_t count) noexcept -> std::expected<uint32_t, DescriptorHeapError>;
-
-    // --- Updates ---
-
-    void FlushResourceBatch(ResourceWriteBatch& batch) noexcept;
-    void FlushSamplerBatch(SamplerWriteBatch& batch) noexcept;
-
-    // --- Command Binding ---
-
-    void BindHeaps(VkCommandBuffer cmd) const noexcept;
-
-  private:
     DescriptorHeap<DescriptorHeapType::Resource> _resourceHeap;
     DescriptorHeap<DescriptorHeapType::Sampler>  _samplerHeap;
 

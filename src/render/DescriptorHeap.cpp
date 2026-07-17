@@ -192,20 +192,43 @@ ResourceWriteBatch::~ResourceWriteBatch() noexcept = default;
 ResourceWriteBatch::ResourceWriteBatch(ResourceWriteBatch&& other) noexcept                    = default;
 auto ResourceWriteBatch::operator=(ResourceWriteBatch&& other) noexcept -> ResourceWriteBatch& = default;
 
-void ResourceWriteBatch::AddImage(uint32_t slot, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout, VkDescriptorType type) noexcept {
+void ResourceWriteBatch::AddImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
     // 1. Store the structure by value to keep it alive until Flush() completes
     _impl->viewInfos.push_back(viewInfo);
 
     // 2. Queue with pView set to nullptr for now. We will resolve stable memory pointers inside Flush()!
     _impl->imageInfos.push_back({.sType = VK_STRUCTURE_TYPE_IMAGE_DESCRIPTOR_INFO_EXT, .pNext = nullptr, .pView = nullptr, .layout = layout});
-    _impl->slots.push_back(slot);
-    _impl->types.push_back(type);
+    _impl->slots.push_back(handle.index);
+    _impl->types.push_back(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
 }
 
-void ResourceWriteBatch::AddBuffer(uint32_t slot, VkDeviceAddress address, VkDeviceSize size, VkDescriptorType type) noexcept {
+void ResourceWriteBatch::AddStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
+    // 1. Store the structure by value to keep it alive until Flush() completes
+    _impl->viewInfos.push_back(viewInfo);
+
+    // 2. Queue with pView set to nullptr for now. We will resolve stable memory pointers inside Flush()!
+    _impl->imageInfos.push_back({.sType = VK_STRUCTURE_TYPE_IMAGE_DESCRIPTOR_INFO_EXT, .pNext = nullptr, .pView = nullptr, .layout = layout});
+    _impl->slots.push_back(handle.index);
+    _impl->types.push_back(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+}
+
+void ResourceWriteBatch::AddBuffer(StorageBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept {
     _impl->addressRanges.push_back({.address = address, .size = size});
-    _impl->slots.push_back(slot);
-    _impl->types.push_back(type);
+    _impl->slots.push_back(handle.index);
+    _impl->types.push_back(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+}
+
+void ResourceWriteBatch::AddBuffer(UniformBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept {
+    _impl->addressRanges.push_back({.address = address, .size = size});
+    _impl->slots.push_back(handle.index);
+    _impl->types.push_back(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+}
+
+void ResourceWriteBatch::AddAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept {
+    // Size is validated but not strictly utilized by AS structures under the new extension (safe to write as 0)
+    _impl->addressRanges.push_back({.address = address, .size = 0});
+    _impl->slots.push_back(handle.index);
+    _impl->types.push_back(VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR);
 }
 
 void ResourceWriteBatch::Flush(VkDevice device, PFN_vkWriteResourceDescriptorsEXT writeFn, void* mappedPtr, VkDeviceSize stride) noexcept {
@@ -228,10 +251,7 @@ void ResourceWriteBatch::Flush(VkDevice device, PFN_vkWriteResourceDescriptorsEX
             .data  = {},
         };
 
-        if (_impl->types[i] == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE || _impl->types[i] == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
-            _impl->types[i] == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
-            // 3. The vector has stopped growing and its memory has stabilized.
-            // It is now perfectly safe to resolve and assign the direct pointer address.
+        if (_impl->types[i] == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE || _impl->types[i] == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
             _impl->imageInfos[img_idx].pView = &_impl->viewInfos[img_idx];
             resource_infos[i].data.pImage    = &_impl->imageInfos[img_idx++];
         } else {
@@ -267,9 +287,9 @@ SamplerWriteBatch::~SamplerWriteBatch() noexcept = default;
 SamplerWriteBatch::SamplerWriteBatch(SamplerWriteBatch&& other) noexcept                    = default;
 auto SamplerWriteBatch::operator=(SamplerWriteBatch&& other) noexcept -> SamplerWriteBatch& = default;
 
-void SamplerWriteBatch::AddSampler(uint32_t slot, const VkSamplerCreateInfo& createInfo) noexcept {
+void SamplerWriteBatch::AddSampler(SamplerHandle handle, const VkSamplerCreateInfo& createInfo) noexcept {
     _impl->createInfos.push_back(createInfo);
-    _impl->slots.push_back(slot);
+    _impl->slots.push_back(handle.index);
 }
 
 void SamplerWriteBatch::Flush(VkDevice device, PFN_vkWriteSamplerDescriptorsEXT writeFn, void* mappedPtr, VkDeviceSize stride) noexcept {
@@ -398,7 +418,7 @@ void HeapManager::FreeStaticSamplerSlot(uint32_t slot) noexcept {
     _staticSamplerAlloc.Free(slot);
 }
 
-auto HeapManager::AllocateDynamicResourceRange(uint32_t count) noexcept -> std::expected<uint32_t, DescriptorHeapError> {
+auto HeapManager::AllocateDynamicResourceRangeSlot(uint32_t count) noexcept -> std::expected<uint32_t, DescriptorHeapError> {
     const uint32_t base_slot = _staticResourceCount + (_currentFrameIndex * _dynamicResourceCount) + _dynamicResourceAllocated;
     if (_dynamicResourceAllocated + count > _dynamicResourceCount) [[unlikely]] {
         return std::unexpected(DescriptorHeapError::DynamicResourceOverflow);
@@ -407,7 +427,7 @@ auto HeapManager::AllocateDynamicResourceRange(uint32_t count) noexcept -> std::
     return base_slot;
 }
 
-auto HeapManager::AllocateDynamicSamplerRange(uint32_t count) noexcept -> std::expected<uint32_t, DescriptorHeapError> {
+auto HeapManager::AllocateDynamicSamplerRangeSlot(uint32_t count) noexcept -> std::expected<uint32_t, DescriptorHeapError> {
     const uint32_t base_slot = _staticSamplerCount + (_currentFrameIndex * _dynamicSamplerCount) + _dynamicSamplerAllocated;
     if (_dynamicSamplerAllocated + count > _dynamicSamplerCount) [[unlikely]] {
         return std::unexpected(DescriptorHeapError::DynamicSamplerOverflow);
