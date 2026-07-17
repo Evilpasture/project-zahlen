@@ -226,11 +226,14 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
             f.features.shaderInt64               = caps.supportsInt64 ? VK_TRUE : VK_FALSE;
             f.features.imageCubeArray            = VK_TRUE;
         })
+        .Optional<VkPhysicalDeviceDescriptorHeapFeaturesEXT>([](auto& f) { f.descriptorHeap = VK_TRUE; })
         .Build();
 }
 
 std::expected<Vk::ExtensionResult, Error> GetDeviceExtensions(VkPhysicalDevice physicalDevice) noexcept {
     return Vk::ExtensionBuilder::ForDevice(physicalDevice)
+        .Optional(VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME)
+        .Optional("VK_KHR_maintenance5")
         .Require(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
         .Require(VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME)
         .Require(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME)
