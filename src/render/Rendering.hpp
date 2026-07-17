@@ -99,7 +99,6 @@ static constexpr auto isLegacy = false;
 #include "TextureUtils.hpp"
 #include "ParallelRecorder.hpp"
 #include "ParallelDraw.hpp"
-#include "DescriptorHeap.hpp"
 #include "RenderGraph.hpp"
 // clang-format on
 // IWYU pragma: end_exports
