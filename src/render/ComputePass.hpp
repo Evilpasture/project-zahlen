@@ -98,46 +98,17 @@ struct DoubleBufferedComputePass {
     Pipeline                              pipeline;
 
     [[nodiscard]] bool
-        Build(VkDevice device, const ZHLN_ShaderDesc& shader, const VkPushConstantRange* pushConstants = nullptr, uint32_t pushCount = 0) noexcept {
-        descLayout = LayoutT::CreateLayout(device);
-        pool       = LayoutT::CreatePool(device, 2);
-        sets[0]    = LayoutT::Allocate(device, pool.Get(), descLayout.Get());
-        sets[1]    = LayoutT::Allocate(device, pool.Get(), descLayout.Get());
-
-        VkDescriptorSetLayout         raw_layout    = descLayout.Get();
-        const ZHLN_PipelineLayoutDesc p_layout_desc = {
-            .set_layouts = &raw_layout, .set_layout_count = 1, .push_constants = pushConstants, .push_constant_count = pushCount
-        };
-        pipelineLayout = PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &p_layout_desc));
-
-        auto p_res = ComputePipelineBuilder().Shader(shader).Layout(pipelineLayout.Get()).Build(device);
-        if (!p_res) {
-            return false;
-        }
-        pipeline = std::move(*p_res);
-        return true;
-    }
+        Build(VkDevice device, const ZHLN_ShaderDesc& shader, const VkPushConstantRange* pushConstants = nullptr, uint32_t pushCount = 0) noexcept;
 
     template <typename... Args>
     void WriteNext(VkDevice device, Args&&... args) const noexcept {
         LayoutT::Write(device, sets.Next(), std::forward<Args>(args)...);
     }
 
-    void Dispatch(VkCommandBuffer cmd, uint32_t x, uint32_t y, uint32_t z) const noexcept {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Get());
-        VkDescriptorSet set = sets.Next();
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout.Get(), 0, 1, &set, 0, nullptr);
-        vkCmdDispatch(cmd, x, y, z);
-    }
+    void Dispatch(VkCommandBuffer cmd, uint32_t x, uint32_t y, uint32_t z) const noexcept;
 
     template <GpuTriviallyCopyable T>
-    void Dispatch(VkCommandBuffer cmd, uint32_t x, uint32_t y, uint32_t z, const T& pushData) const noexcept {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Get());
-        VkDescriptorSet set = sets.Next();
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout.Get(), 0, 1, &set, 0, nullptr);
-        Push(cmd, pipelineLayout.Get(), VK_SHADER_STAGE_COMPUTE_BIT, pushData);
-        vkCmdDispatch(cmd, x, y, z);
-    }
+    void Dispatch(VkCommandBuffer cmd, uint32_t x, uint32_t y, uint32_t z, const T& pushData) const noexcept;
 
     void Flip() noexcept {
         sets.Flip();
@@ -145,3 +116,5 @@ struct DoubleBufferedComputePass {
 };
 
 } // namespace ZHLN::Vk
+
+#include "ComputePass.inl"
