@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <format>
+#include <meta>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -23,11 +24,13 @@ template <std::size_t N>
 struct StringLiteral {
     std::array<char, N> value {};
     constexpr StringLiteral(const char (&str)[N]) {
-        std::copy_n(str, N, value);
+        for (std::size_t i = 0; i < N; ++i) {
+            value[i] = str[i];
+        }
     }
 
     constexpr operator std::string_view() const {
-        return {value, N - 1};
+        return {value.data(), N - 1};
     }
 };
 
@@ -114,7 +117,7 @@ constexpr void ChunkedFieldVisitor(T&& t, F&& f) {
             f(t.[:members[Index]:]);
         });
 
-        ChunkedFieldVisitor<T, F, Start + Step, Total>(t, f);
+        ChunkedFieldVisitor<T, F, Start + Step, Total>(std::forward<T>(t), std::forward<F>(f));
     }
 }
 } // namespace detail
