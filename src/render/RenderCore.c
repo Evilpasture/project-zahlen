@@ -171,8 +171,9 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
         }
     }
 
-    // Auto-inject debug utils if validation is requested and supported
+    // Auto-inject debug utils and layer settings if validation is requested
     if (desc->enable_validation) {
+        // 1. Inject VK_EXT_debug_utils
         bool has_debug_ext = false;
         for (uint32_t i = 0; i < final_count; ++i) {
             if (strcmp(final_extensions[i], VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0) {
@@ -180,19 +181,26 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
                 break;
             }
         }
-        if (!has_debug_ext) {
-            // Verify if system actually supports debug utils before force-injecting
-            for (uint32_t j = 0; j < available_count; ++j) {
-                if (strcmp(VK_EXT_DEBUG_UTILS_EXTENSION_NAME, available_exts[j].extensionName) == 0) {
-                    final_extensions[final_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
-                    break;
-                }
+        if (!has_debug_ext && final_count < 32) {
+            final_extensions[final_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+        }
+
+        // 2. Inject VK_EXT_layer_settings
+        bool has_layer_settings_ext = false;
+        for (uint32_t i = 0; i < final_count; ++i) {
+            if (strcmp(final_extensions[i], VK_EXT_LAYER_SETTINGS_EXTENSION_NAME) == 0) {
+                has_layer_settings_ext = true;
+                break;
             }
+        }
+        if (!has_layer_settings_ext && final_count < 32) {
+            final_extensions[final_count++] = VK_EXT_LAYER_SETTINGS_EXTENSION_NAME;
         }
     }
 
     VkInstanceCreateInfo create_info = {
         .sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .pNext                   = nullptr,
         .pApplicationInfo        = &app_info,
         .enabledExtensionCount   = final_count,
         .ppEnabledExtensionNames = final_extensions,
@@ -205,24 +213,42 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
     create_info.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 #endif
 
+    // --- Modern validation settings structures (Primary, Unconditional) ---
+    const char*    layer_name              = "VK_LAYER_KHRONOS_validation";
+    const VkBool32 validate_sync           = VK_TRUE;
+    const VkBool32 validate_best_practices = VK_TRUE;
+
+    const VkLayerSettingEXT layer_settings[] = {
+        {.pLayerName = layer_name, .pSettingName = "validate_sync", .type = VK_LAYER_SETTING_TYPE_BOOL32_EXT, .valueCount = 1, .pValues = &validate_sync},
+        {.pLayerName   = layer_name,
+         .pSettingName = "validate_best_practices",
+         .type         = VK_LAYER_SETTING_TYPE_BOOL32_EXT,
+         .valueCount   = 1,
+         .pValues      = &validate_best_practices}
+    };
+
+    VkLayerSettingsCreateInfoEXT layer_settings_ci = {
+        .sType        = VK_STRUCTURE_TYPE_LAYER_SETTINGS_CREATE_INFO_EXT,
+        .pNext        = nullptr,
+        .settingCount = sizeof(layer_settings) / sizeof(layer_settings[0]),
+        .pSettings    = layer_settings
+    };
+
     VkDebugUtilsMessengerCreateInfoEXT debug_info = {};
-    const VkValidationFeatureEnableEXT enables[]  = {
-        VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT, VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT,
-        VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT, VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT
-    };
-    const VkValidationFeaturesEXT features = {
-        .sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT, .enabledValidationFeatureCount = 2, .pEnabledValidationFeatures = enables
-    };
+
     if (desc->enable_validation) {
         debug_info = (VkDebugUtilsMessengerCreateInfoEXT) {
             .sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+            .pNext           = nullptr,
             .messageSeverity = desc->severity_flags,
             .messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                                VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
             .pfnUserCallback = ZHLN_Internal_DebugCallback,
         };
-        debug_info.pNext  = &features;
-        create_info.pNext = &debug_info;
+
+        // Direct Chain: create_info.pNext -> layer_settings_ci -> debug_info -> NULL
+        create_info.pNext       = &layer_settings_ci;
+        layer_settings_ci.pNext = &debug_info;
     }
 
     VkInstance instance = VK_NULL_HANDLE;
