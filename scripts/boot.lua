@@ -10,4 +10,4 @@ end
 local fennel = require("scripts.core.fennel")
 fennel.install()
 
-require("scripts.gameplay_volumetric")
+require("scripts.gameplay")
