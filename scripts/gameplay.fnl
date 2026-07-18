@@ -124,10 +124,11 @@
             :useLocalProbe 0
             :vignetteIntensity 1.0
             :vignettePower 1.8
-            :enableSSR 1
+            :enableSSR 0
+            :enableRTR 1
             :enableTAA 1
             :taaFeedback 0.95
-            :ambientExposure 5.0})
+            :ambientExposure 25.0})
 
 ;; ============================================================================
 ;; 2. REQUIRE MAIN MENU & DEFINE GLOBAL BOUNDARIES
