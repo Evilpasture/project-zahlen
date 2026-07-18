@@ -167,16 +167,18 @@ void Sys_PostProcess(Engine& engine, float /*dt*/) {
     for (Entity e: reg.GetEntitiesWith<Components::PostProcessSettingsComponent>()) {
         if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(e)) {
             Renderer::SetGISettings(
-                rc, {.mode              = pp->giMode,
-                     .aoRadius          = pp->aoRadius,
-                     .aoBias            = pp->aoBias,
-                     .aoPower           = pp->aoPower,
-                     .giIntensity       = pp->giIntensity,
-                     .giSamples         = pp->giSamples,
-                     .vignetteIntensity = pp->vignetteIntensity,
-                     .vignettePower     = pp->vignettePower,
-                     .enableSSR         = pp->enableSSR ? 1 : 0,
-                     .enableRTR         = pp->enableRTR ? 1 : 0}
+                rc, {
+                        .mode              = pp->giMode,
+                        .aoRadius          = pp->aoRadius,
+                        .aoBias            = pp->aoBias,
+                        .aoPower           = pp->aoPower,
+                        .giIntensity       = pp->giIntensity,
+                        .giSamples         = pp->giSamples,
+                        .vignetteIntensity = pp->vignetteIntensity,
+                        .vignettePower     = pp->vignettePower,
+                        .enableSSR         = pp->enableSSR ? 1 : 0,
+                        .enableRTR         = pp->enableRTR ? 1 : 0,
+                    }
             );
         }
     }
@@ -186,79 +188,93 @@ void BuildSystemGraphs(Engine& engine) {
     auto& updateGraph = engine.GetUpdateGraph();
     auto& renderGraph = engine.GetRenderGraph();
 
-    updateGraph.AddSystem(
-        {.update_func    = Sys_VisualInterpolation,
-         .name           = "VisualInterpolationSystem",
-         .access_pattern = {Read<Components::PhysicsStateComponent>(), Write<Components::TransformComponent>()},
-         .enabled        = true}
-    );
+    updateGraph.AddSystem({
+        .update_func    = Sys_VisualInterpolation,
+        .name           = "VisualInterpolationSystem",
+        .access_pattern = {Read<Components::PhysicsStateComponent>(), Write<Components::TransformComponent>()},
+        .enabled        = true,
+    });
 
-    updateGraph.AddSystem(
-        {.update_func    = Sys_Animation,
-         .name           = "AnimationSystem",
-         .access_pattern = {Read<Components::MovementComponent>(), Write<Components::MeshComponent>()},
-         .enabled        = true}
-    );
+    updateGraph.AddSystem({
+        .update_func    = Sys_Animation,
+        .name           = "AnimationSystem",
+        .access_pattern = {Read<Components::MovementComponent>(), Write<Components::MeshComponent>()},
+        .enabled        = true,
+    });
 
-    updateGraph.AddSystem(
-        {.update_func = Sys_Articulation,
-         .name        = "ArticulationSystem",
-         .access_pattern =
-             {Read<Components::PhysicsComponent>(), Read<Components::MeshComponent>(), Write<Components::RagdollComponent>(),
-              Write<Components::TransformComponent>()},
-         .enabled = true}
-    );
+    updateGraph.AddSystem({
+        .update_func = Sys_Articulation,
+        .name        = "ArticulationSystem",
+        .access_pattern =
+            {
+                Read<Components::PhysicsComponent>(),
+                Read<Components::MeshComponent>(),
+                Write<Components::RagdollComponent>(),
+                Write<Components::TransformComponent>(),
+            },
+        .enabled = true,
+    });
 
-    updateGraph.AddSystem(
-        {.update_func    = Sys_Transform,
-         .name           = "TransformSystem",
-         .access_pattern = {Read<Components::HierarchyComponent>(), Read<Components::TransformComponent>(), Write<Components::MeshComponent>()},
-         .enabled        = true}
-    );
+    updateGraph.AddSystem({
+        .update_func    = Sys_Transform,
+        .name           = "TransformSystem",
+        .access_pattern = {Read<Components::HierarchyComponent>(), Read<Components::TransformComponent>(), Write<Components::MeshComponent>()},
+        .enabled        = true,
+    });
 
     updateGraph.AddSystem(
         {.update_func = Sys_PostProcess, .name = "PostProcessSystem", .access_pattern = {Read<Components::PostProcessSettingsComponent>()}, .enabled = true}
     );
 
-    updateGraph.AddSystem(
-        {.update_func    = Sys_Audio,
-         .name           = "AudioSystem",
-         .access_pattern = {Read<Components::PhysicsComponent>(), Read<Components::ALifeComponent>(), Write<Components::AudioSourceComponent>()},
-         .enabled        = true}
-    );
+    updateGraph.AddSystem({
+        .update_func    = Sys_Audio,
+        .name           = "AudioSystem",
+        .access_pattern = {Read<Components::PhysicsComponent>(), Read<Components::ALifeComponent>(), Write<Components::AudioSourceComponent>()},
+        .enabled        = true,
+    });
 
     updateGraph.AddSystem({.update_func = Sys_ParticleSpawner, .name = "ParticleSpawnerExample", .access_pattern = {}, .enabled = true});
 
-    updateGraph.AddSystem(
-        {.update_func =
-             [](Engine& eng, float dt) {
-                 static InteractionSystem sys;
-                 sys.Update(eng, dt);
-             },
-         .name = "InteractionSystem",
-         .access_pattern =
-             {Write<Components::TriggerComponent>(), Write<Components::ContainerComponent>(), Write<Components::PickupComponent>(),
-              Read<Components::ItemBaseComponent>(), Read<Components::UsableComponent>(), Read<Components::MovementComponent>()},
-         .enabled = true}
-    );
+    updateGraph.AddSystem({
+        .update_func =
+            [](Engine& eng, float dt) {
+                static InteractionSystem sys;
+                sys.Update(eng, dt);
+            },
+        .name = "InteractionSystem",
+        .access_pattern =
+            {
+                Write<Components::TriggerComponent>(),
+                Write<Components::ContainerComponent>(),
+                Write<Components::PickupComponent>(),
+                Read<Components::ItemBaseComponent>(),
+                Read<Components::UsableComponent>(),
+                Read<Components::MovementComponent>(),
+            },
+        .enabled = true,
+    });
 
     updateGraph.Compile();
 
-    renderGraph.AddSystem(
-        {.update_func    = Sys_Culling,
-         .name           = "CullingSystem",
-         .access_pattern = {Read<Components::MeshComponent>(), Read<Components::CameraComponent>()},
-         .enabled        = true}
-    );
+    renderGraph.AddSystem({
+        .update_func    = Sys_Culling,
+        .name           = "CullingSystem",
+        .access_pattern = {Read<Components::MeshComponent>(), Read<Components::CameraComponent>()},
+        .enabled        = true,
+    });
 
-    renderGraph.AddSystem(
-        {.update_func = Sys_Lighting,
-         .name        = "LightingSystem",
-         .access_pattern =
-             {Read<Components::LightComponent>(), Read<Components::TransformComponent>(), Read<Components::NameComponent>(),
-              Write<Components::MeshComponent>()},
-         .enabled = true}
-    );
+    renderGraph.AddSystem({
+        .update_func = Sys_Lighting,
+        .name        = "LightingSystem",
+        .access_pattern =
+            {
+                Read<Components::LightComponent>(),
+                Read<Components::TransformComponent>(),
+                Read<Components::NameComponent>(),
+                Write<Components::MeshComponent>(),
+            },
+        .enabled = true,
+    });
 
     renderGraph.Compile();
 }
@@ -291,10 +307,10 @@ bool InitializeGame(Engine& engine) {
     reg.Add(settingsEntity, Components::ShadowSettingsComponent {});
     reg.Add(
         settingsEntity, Components::DebugSettingsComponent {
-                            .debugLineVbo      = static_cast<uint64_t>(lineMesh.posBuffer),
-                            .debugLinePipeline = static_cast<uint64_t>(lineMat.pipeline),
+                            .debugLineVbo      = lineMesh.posBuffer,
+                            .debugLinePipeline = lineMat.pipeline,
                             .debugLineAlbedo   = lineMat.albedoIndex,
-                            .physicsDrawMode   = 0
+                            .physicsDrawMode   = 0,
                         }
     );
 
@@ -374,7 +390,7 @@ std::expected<std::unique_ptr<Engine>, EngineError> InitializeEngine(CommandLine
             .height           = h,
             .vsync            = options.vsync,
             .fullscreen       = options.fullscreen,
-            .enableValidation = options.enableValidation
+            .enableValidation = options.enableValidation,
         },
     };
 

@@ -164,10 +164,10 @@ struct Components {
         JPH::Vec3 probePos          = JPH::Vec3(0.0f, 4.0f, 0.0f);
     };
     struct DebugSettingsComponent {
-        uint64_t debugLineVbo      = 0;
-        uint64_t debugLinePipeline = 0;
-        uint32_t debugLineAlbedo   = 0;
-        int      physicsDrawMode   = 0;
+        BufferHandle   debugLineVbo      = BufferHandle::Invalid;
+        PipelineHandle debugLinePipeline = PipelineHandle::Invalid;
+        uint32_t       debugLineAlbedo   = 0;
+        int            physicsDrawMode   = 0;
     };
     struct TextComponent {
         ZHLN::String256 text;

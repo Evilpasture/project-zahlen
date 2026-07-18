@@ -518,7 +518,7 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
                     .fragShaderSize   = static_cast<std::uint32_t>(Resource::GetShaderProgram(Resource::ShaderID::Basic).fragment.size()),
                     .doubleSided      = true,
                     .alphaBlend       = true,
-                    .isLineList       = true
+                    .isLineList       = true,
                 };
 
                 auto debugLineMat_res = rc.CreateMaterial(lineDesc);

@@ -163,7 +163,7 @@ void RenderContext::Impl::DispatchSkinningPasses() {
                 continue;
             }
 
-            SkinningConstants pcs = {
+            SkinningConstants pcs {
                 .inPosAddr        = posMesh->vboAddress,
                 .inAttrAddr       = attrMesh->vboAddress,
                 .inSkinAddr       = skinMesh->vboAddress,
@@ -415,7 +415,7 @@ struct PassFactory {
                     Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.normalRoughnessBuffer), self.pointSampler.Get(),
                     self.iblPayload.prefilteredView.Get(), GetTLAS(), self.frameUniformBuffers[fIdx].Handle(), self.iblPayload.brdfLutView.Get(),
                     self.clampSampler.Get(), Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.lightingTarget),
-                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.voxelIntegrated) // --- CHANGED from SHADER_READ_ONLY_OPTIMAL to GENERAL ---
+                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.voxelIntegrated)
                 );
                 self.reflectionPass.ExecuteVariant(ctx.Cmd(), reflVariant, pc);
             }
@@ -870,7 +870,7 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
     });
 
     if constexpr (Vk::IsInList<CompResources, Res_ShadowMap>::value) {
-        auto ref = Vk::MakeRef<Res_ShadowMap>(shadowMapPrev); // <-- FIXED: Compute reads previous frame's shadow map!
+        auto ref = Vk::MakeRef<Res_ShadowMap>(shadowMapPrev);
         compBinder.template Bind<Res_ShadowMap>(ref.handle, ref.view, ref.extent);
     }
 
@@ -1046,7 +1046,7 @@ RenderResult RenderContext::EndFrame() noexcept {
              .pools             = _impl->pools,
              .presentSemaphores = _impl->presentation.presentSemaphores,
              .stagingSemaphore  = _impl->transferRingBuffer.GetSemaphore(),
-             .stagingWaitValue  = _impl->transferRingBuffer.GetCurrentValue()}, // <-- CLEANED UP: No compute parameters needed!
+             .stagingWaitValue  = _impl->transferRingBuffer.GetCurrentValue()},
             _impl->frame_index,
             [this](VkCommandBuffer cmd, uint32_t image_index) {
                 _impl->current_cmd         = cmd;

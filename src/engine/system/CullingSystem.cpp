@@ -214,7 +214,7 @@ void CullingSystem::DrawDebugFrustum(Engine& engine) {
     }
 
     auto* dbg = reg.Get<Components::DebugSettingsComponent>(settingsEntities[0]);
-    if ((dbg == nullptr) || dbg->debugLineVbo == 0) {
+    if ((dbg == nullptr) || dbg->debugLineVbo == BufferHandle::Invalid) {
         return;
     }
 
