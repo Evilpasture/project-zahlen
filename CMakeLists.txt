@@ -265,6 +265,29 @@ string(REGEX REPLACE " +" " " COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST}")
 
 add_library(zahlen_engine SHARED ${ENGINE_SOURCES})
 
+target_precompile_headers(zahlen_engine PRIVATE
+    "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_SOURCE_DIR}/src/render/Rendering.hpp>"
+)
+
+# --- COMPILE-TIME PROFILING ---
+option(ZHLN_PROFILE_RENDER_FRAME_COMPILE "Enable GCC compile-time profiling for RenderFrame.cpp" OFF)
+
+if(ZHLN_PROFILE_RENDER_FRAME_COMPILE)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        # Apply the -ftime-report flag specifically to RenderFrame.cpp
+        set_source_files_properties(src/engine/RenderFrame.cpp PROPERTIES
+            COMPILE_OPTIONS "-ftime-report"
+        )
+        message(STATUS "GCC compile-time profiling enabled for RenderFrame.cpp")
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        # Optional fallback for Clang, which generates a .json file viewable in speedscope.app or chrome://tracing
+        set_source_files_properties(src/engine/RenderFrame.cpp PROPERTIES
+            COMPILE_OPTIONS "-ftime-trace"
+        )
+        message(STATUS "Clang time-trace profiling enabled for RenderFrame.cpp")
+    endif()
+endif()
+
 target_compile_definitions(zahlen_engine PRIVATE
     ZHLN_ENGINE_BUILD
     JPH_DOUBLE_PRECISION
