@@ -190,6 +190,21 @@ float4 PSMain(VSOutput input): SV_Target0 {
                 } else {
                     confidence *= saturate(dot(R, N) * 10.0f);
                     reflectionColor = texLighting.SampleLevel(smp, hitUV, 0).rgb;
+
+                    // --- Reconstruct global ambient at the hit point ---
+                    float3 hitN        = UnpackNormalOctahedron(hitNormRough.xy * 2.0f - 1.0f);
+                    float3 hitAlbedo   = texInput.SampleLevel(smp, hitUV, 0).rgb;
+                    float  hitMetallic = hitNormRough.w;
+
+                    // Evaluate SH irradiance using the hit point's normal
+                    float3 hitN_rot      = RotateVector(hitN, frame.lightDir.xyz);
+                    float3 hitIrradiance = EvaluateSH(hitN_rot, frame.sh) * frame.ambientExposure;
+
+                    // Simple diffuse IBL approximation for the reflected surface
+                    float3 hitDiffuseIBL = (1.0f - hitMetallic) * hitAlbedo * hitIrradiance;
+
+                    // Add the calculated ambient contribution to the reflection color
+                    reflectionColor += hitDiffuseIBL;
                 }
             }
 
