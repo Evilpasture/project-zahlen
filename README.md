@@ -1,6 +1,6 @@
 # Project Zahlen
 
-A **simple** project that integrates Vulkan, Jolt Physics and ImGUI for hardware raytracing, asset pipelining and game development.
+A **simple** project that integrates Vulkan, Jolt Physics and ImGUI for hardware raytracing, fast and straightforward creative work conversions and game development with Fennel/Lua.
 
 ## Build Requirements
 * **CMake (>= 3.25)**: Build automation tool.
@@ -9,6 +9,8 @@ A **simple** project that integrates Vulkan, Jolt Physics and ImGUI for hardware
 * **Python**: Used during the asset building phase to scan level assets and configure the parallel build rules.
 
 ## Build Instructions
+
+For creative works, the build system expects Blender files in `./blender/`
 
 You can do it the hard way, or the easy way.
 
@@ -50,9 +52,15 @@ You can do it the hard way, or the easy way.
    ./build/zahlen
    ```
 
+## Hardware expectations
+
+The project is designed to run on a system with a discrete GPU and a dedicated CPU. Tested on NVIDIA RTX 3050 6GB in Arch Linux.
+Should work on macOS too with MoltenVK if you manage to compile it, but expect MoltenVK overhead.
+
 ## System & Platform Dependencies
 
-The project is primarily developed on Linux and macOS, but should also work on Windows as originally planned. That is true, if your compiler supports standard C++26 features.
+The project is primarily developed on Linux and macOS, but should also work on Windows as originally planned. 
+That is true, if your compiler supports standard C++26 features. Otherwise, tough luck. Compile GCC 16.1.1+ yourself.
 
 See [here](https://en.cppreference.com/cpp/compiler_support/26) for compiler support information.
 
@@ -60,6 +68,8 @@ These packages are expected to be installed on the host operating system:
 
 * **Vulkan SDK (>= 1.3)**: Core graphics API, validation layers, and the DirectX Shader Compiler (`dxc`) used for SPIR-V shader compilation.
 * **zstd (Zstandard)**: Compression algorithm used to build and decompress custom `.pak` assets.
+* **Windows SDK** *(Windows only)*: Windows API headers and libraries. It's expected that you should have the SDK installed on your system.
+* **Visual Studio Build Tools** *(Windows only)*: Required to build the project with Clang/LLVM when targeting Windows.
 * **Fontconfig** *(Linux & macOS)*: System font customization and configuration library (used to locate standard system fonts for font atlas generation).
 * **libevdev** *(Linux only)*: Kernel-level input device wrapper used by the native TTY/KMS fallback backend.
 * **libseat** *(Linux only)*: Shared session management library used to acquire input and graphics permissions in TTY mode without root access.
@@ -70,11 +80,12 @@ These packages are expected to be installed on the host operating system:
 These are located in the `extern/` and `third_party/` directories:
 
 ### Physics & Math
-* **Jolt Physics**: A multi-core 3D physics simulation and collision engine.
+* **Jolt Physics**: A multi-core 3D physics simulation and collision engine. Also used for fast SIMD math.
 * **VulkanMemoryAllocator (VMA)**: Vulkan memory management utility.
 
 ### Scripting & Audio
 * **LuaJIT**: JIT runtime for the Lua scripting language.
+* **Fennel Compiler**: Used to transpile Fennel scripts to Lua.
 * **miniaudio**: Single-file C audio playback and mixing library.
 
 ### Graphics & Tooling
