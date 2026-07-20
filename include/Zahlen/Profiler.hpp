@@ -9,10 +9,12 @@
 namespace ZHLN {
 
 struct CullingStats {
-    static inline uint32_t TotalObjects  = 0;
-    static inline uint32_t CulledObjects = 0;
-    static inline bool     EnableCulling = true; // Toggle for testing!
-    static inline bool     FreezeFrustum = false;
+    static inline uint32_t TotalObjects      = 0;
+    static inline uint32_t CulledObjects     = 0;
+    static inline bool     EnableCulling     = true; // Toggle for testing!
+    static inline bool     FreezeFrustum     = false;
+    static inline uint32_t TotalTriangles    = 0;
+    static inline uint32_t RenderedTriangles = 0;
 };
 
 class CPUProfiler {

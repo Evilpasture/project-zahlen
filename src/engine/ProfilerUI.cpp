@@ -172,6 +172,12 @@ void DrawProfiler(Engine& engine) {
             ImGui::Text("Objects Rendered: %u", CullingStats::TotalObjects - CullingStats::CulledObjects);
             ImGui::Text("Objects Culled:   %u", CullingStats::CulledObjects);
 
+            ImGui::Separator(); // Visual divider for clarity
+
+            // Display the new triangle metrics
+            ImGui::Text("Total Triangles:    %u", CullingStats::TotalTriangles);
+            ImGui::Text("Rendered Triangles: %u", CullingStats::RenderedTriangles);
+
             float culledRatio = (CullingStats::TotalObjects > 0) ? (float) CullingStats::CulledObjects / (float) CullingStats::TotalObjects : 0.0f;
 
             ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.2f, 0.7f, 0.2f, 1.0f));

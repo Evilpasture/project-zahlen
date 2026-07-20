@@ -173,23 +173,51 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
     outVisibleShadow.clear();
     auto meshes = reg.GetRawArray<Components::MeshComponent>();
 
+    // 1. Reset counters at the beginning of the frame
+    CullingStats::TotalTriangles    = 0;
+    CullingStats::RenderedTriangles = 0;
+
+    // Handle early exit when culling is disabled
+    if (!CullingStats::EnableCulling) {
+        outVisible.assign(entities.begin(), entities.end());
+        outVisibleShadow.assign(entities.begin(), entities.end());
+
+        uint32_t tris = 0;
+        for (size_t i = 0; i < entities.size(); ++i) {
+            const auto& mesh = meshes[i].mesh;
+            tris += (mesh.indexCount > 0) ? (mesh.indexCount / 3) : (mesh.vertexCount / 3);
+        }
+        CullingStats::TotalTriangles    = tris;
+        CullingStats::RenderedTriangles = tris;
+        return;
+    }
+
+    outVisible.clear();
+    outVisibleShadow.clear();
+
+    // 2. Loop through entities and accumulate triangle counts
     for (size_t i = 0; i < entities.size(); ++i) {
-        Entity e = entities[i];
+        Entity      e        = entities[i];
+        const auto& meshComp = meshes[i];
 
-        JPH::Vec3 pos = meshes[i].worldTransform * meshes[i].localCenter;
+        // Calculate triangles for this specific mesh
+        uint32_t meshTris = (meshComp.mesh.indexCount > 0) ? (meshComp.mesh.indexCount / 3) : (meshComp.mesh.vertexCount / 3);
 
-        // Extract max scale from the 3x3 rotational component of the world matrix
-        float scaleX          = meshes[i].worldTransform.GetColumn3(0).Length();
-        float scaleY          = meshes[i].worldTransform.GetColumn3(1).Length();
-        float scaleZ          = meshes[i].worldTransform.GetColumn3(2).Length();
-        float currentMaxScale = std::max({scaleX, scaleY, scaleZ});
+        CullingStats::TotalTriangles += meshTris;
 
-        // 1. Cull against Main Camera Frustum
+        JPH::Vec3 pos             = meshes[i].worldTransform * meshes[i].localCenter;
+        float     scaleX          = meshes[i].worldTransform.GetColumn3(0).Length();
+        float     scaleY          = meshes[i].worldTransform.GetColumn3(1).Length();
+        float     scaleZ          = meshes[i].worldTransform.GetColumn3(2).Length();
+        float     currentMaxScale = std::max({scaleX, scaleY, scaleZ});
+
         if (cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius * currentMaxScale)) {
             outVisible.push_back(e);
+
+            // If visible in the main camera view, add to the rendered count
+            CullingStats::RenderedTriangles += meshTris;
         }
 
-        // 2. Cull against Shadow Camera Frustum (Only run if lit)
         if (!isFullBright && cam.shadowFrustum.IsSphereVisible(pos, meshes[i].cullRadius)) {
             outVisibleShadow.push_back(e);
         }
