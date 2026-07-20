@@ -5,7 +5,6 @@
 
 #include "Mutex.hpp"
 #include <detail/Atomic.hpp>
-#include <mutex> // Added for std::unique_lock
 #include <type_traits>
 
 namespace ZHLN {
@@ -13,57 +12,33 @@ namespace ZHLN {
 /**
  * @class ConditionalVariable
  * @brief A memory-efficient 1-byte Condition Variable compatible with both OS threads and Fibers.
+ *
+ * Leverages the same sharded parking lot backend as ZHLN::Mutex to eliminate the "thundering herd"
+ * problem and keep a near-zero memory footprint.
  */
 class ConditionalVariable {
   public:
-    constexpr ConditionalVariable() noexcept = default;
-    ~ConditionalVariable()                   = default;
-
-    ConditionalVariable(const ConditionalVariable&)            = delete;
-    ConditionalVariable& operator=(const ConditionalVariable&) = delete;
+    // No custom or defaulted constructors are declared here.
+    // This allows the compiler to generate the implicit trivial default constructor.
 
     /**
      * @brief Releases the mutex and blocks until notified.
      */
-    void wait(Mutex& mutex) noexcept;
-
-    /**
-     * @brief Overload that accepts std::unique_lock<Mutex> directly to match STL patterns.
-     */
-    void wait(std::unique_lock<Mutex>& lock) noexcept;
-
-    /**
-     * @brief Releases the mutex and blocks until notified, repeating until the predicate is satisfied.
-     * Mimics the STL std::condition_variable::wait overload to handle spurious wakeups.
-     */
-    template <typename Predicate>
-    void wait(Mutex& mutex, Predicate pred) {
-        while (!pred()) {
-            wait(mutex);
-        }
-    }
-
-    /**
-     * @brief Releases the unique_lock and blocks until notified, repeating until the predicate is satisfied.
-     */
-    template <typename Predicate>
-    void wait(std::unique_lock<Mutex>& lock, Predicate pred) {
-        while (!pred()) {
-            wait(lock);
-        }
-    }
+    void Wait(Mutex& mutex) noexcept;
 
     /**
      * @brief Unblocks one waiting thread or fiber.
      */
-    void notify_one() noexcept;
+    void NotifyOne() noexcept;
 
     /**
      * @brief Unblocks all waiting threads and fibers.
      */
-    void notify_all() noexcept;
+    void NotifyAll() noexcept;
 
   private:
+    // Trivial uninitialized atomic state to guarantee standard-layout / triviality.
+    // 0 = No active waiters, 1 = Active waiters present
     ZHLN::Atomic<uint8_t> _bits;
 };
 

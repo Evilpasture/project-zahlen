@@ -8,6 +8,7 @@
 #include <bit>
 #include <cassert>
 #include <condition_variable>
+#include <cstdlib>
 #include <mutex>
 #ifdef ZHLN_DEBUG
 #include <print>
@@ -161,15 +162,21 @@ struct alignas(128) Bucket {
 
 alignas(128) static Bucket s_parkingLot[BUCKET_COUNT];
 
+/**
+ * Fibonacci Hash for pointer addresses.
+ * constexpr ensures zero runtime overhead for constant addresses.
+ */
 template <size_t BUCKET_COUNT>
 [[nodiscard]] constexpr size_t HashAddress(const void* addr) noexcept {
     static_assert(std::has_single_bit(BUCKET_COUNT), "BUCKET_COUNT must be a power of two.");
 
+    // Golden ratio for 64-bit distribution
     constexpr uint64_t K    = 0x9E3779B97F4A7C15ULL;
     auto               hash = std::bit_cast<uintptr_t>(addr);
 
     hash *= K;
 
+    // Use C++20 countr_zero for a safe, constexpr shift calculation
     constexpr int BITS = std::countr_zero(BUCKET_COUNT);
 
     return static_cast<size_t>(hash >> (64 - BITS));
@@ -184,6 +191,7 @@ void Mutex::LockSlow() noexcept {
     Bucket* bucket        = &s_parkingLot[hash];
     size_t  backoff_limit = 1;
 
+    // PHASE 1: Adaptive Exponential Backoff
     for (int i = 0; i < MAX_SPIN_COUNT; i++) {
         uint8_t val = _bits.load(std::memory_order::relaxed);
 
@@ -208,6 +216,7 @@ void Mutex::LockSlow() noexcept {
         }
     }
 
+    // PHASE 2: Parking
     for (;;) {
         uint8_t val = _bits.load(std::memory_order::relaxed);
 
@@ -227,8 +236,11 @@ void Mutex::LockSlow() noexcept {
             }
         }
 
-        Fiber* self            = GetCurrentFiber();
-        bool   is_worker_fiber = (self != nullptr && !self->isMain);
+        Fiber* self = GetCurrentFiber();
+
+        // A fiber can only yield if it has a caller (meaning it's a worker)
+        // If self->isMain is true, we are on the OS root stack.
+        bool is_worker_fiber = (self != nullptr && !self->isMain);
 
         Waiter node;
         node.address = this;
@@ -248,12 +260,18 @@ void Mutex::LockSlow() noexcept {
         bucket->head = &node;
 
         if (!is_worker_fiber) {
+            // Main Thread / OS Thread: Block using Condition Variable
             node.cond.wait(lock, [&]() { return node.signaled.load(std::memory_order::acquire); });
         } else {
+            // worker Fiber: Yield back to the scheduler
             lock.unlock();
             while (!node.signaled.load(std::memory_order::acquire)) {
                 YieldFiber();
             }
+
+            // FIX: Reset the signal state so that if the lock was stolen
+            // by another thread while we were waking up, we can safely
+            // park and yield again on the next loop iteration!
             node.signaled.store(false, std::memory_order::relaxed);
         }
     }
@@ -271,62 +289,62 @@ void Mutex::UnlockSlow() noexcept {
         }
     }
 
-    size_t  hash   = HashAddress<BUCKET_COUNT>(this);
-    Bucket* bucket = &s_parkingLot[hash];
+    size_t                      hash   = HashAddress<BUCKET_COUNT>(this);
+    Bucket*                     bucket = &s_parkingLot[hash];
+    std::lock_guard<std::mutex> lock(bucket->mutex);
 
-    Waiter* to_wake = nullptr;
-    bool    more    = false;
+    Waiter** curr    = &bucket->head;
+    Waiter*  to_wake = nullptr;
+    bool     more    = false;
 
-    {
-        std::lock_guard<std::mutex> lock(bucket->mutex);
-
-        Waiter** curr = &bucket->head;
-        while (*curr != nullptr) {
-            if ((*curr)->address == this && to_wake == nullptr) {
-                to_wake = *curr;
-                *curr   = to_wake->next;
-                continue;
-            }
-            if ((*curr)->address == this) {
-                more = true;
-            }
-            curr = &((*curr)->next);
+    while (*curr != nullptr) {
+        if ((*curr)->address == this && to_wake == nullptr) {
+            to_wake = *curr;
+            *curr   = to_wake->next;
+            continue;
         }
+        if ((*curr)->address == this) {
+            more = true;
+        }
+        curr = &((*curr)->next);
+    }
 
-        if (!more) {
-            val = _bits.load(std::memory_order::relaxed);
-            for (;;) {
-                if (_bits.compare_exchange_weak(val, val & ~HAS_WAITERS, std::memory_order::relaxed, std::memory_order::relaxed)) {
-                    break;
-                }
+    if (!more) {
+        val = _bits.load(std::memory_order::relaxed);
+        for (;;) {
+            if (_bits.compare_exchange_weak(val, val & ~HAS_WAITERS, std::memory_order::relaxed, std::memory_order::relaxed)) {
+                break;
             }
         }
+    }
 
-        // --- SIGNAL INSIDE THE LOCK ---
-        if (to_wake != nullptr) {
-            to_wake->signaled.store(true, std::memory_order::release);
-            if (to_wake->fiber == nullptr) {
-                to_wake->cond.notify_one();
-            } else {
-                ZHLN::TaskSystem::WakeUp(to_wake->fiber);
-            }
+    if (to_wake != nullptr) {
+        to_wake->signaled.store(true, std::memory_order::release);
+        if (to_wake->fiber == nullptr) {
+            to_wake->cond.notify_one();
+        } else {
+            // Push the fiber back into the OS Thread Ready Queue!
+            ZHLN::TaskSystem::WakeUp(to_wake->fiber);
         }
     }
 }
 
-void ConditionalVariable::wait(Mutex& mutex) noexcept {
+void ConditionalVariable::Wait(Mutex& mutex) noexcept {
     size_t  hash   = HashAddress<BUCKET_COUNT>(this);
     Bucket* bucket = &s_parkingLot[hash];
 
     Fiber* self            = GetCurrentFiber();
     bool   is_worker_fiber = (self != nullptr && !self->isMain);
 
+    // Prepare the waiter node on the active stack.
+    // The memory remains valid while the thread/fiber is blocked.
     Waiter node;
     node.address = this;
     node.fiber   = is_worker_fiber ? self : nullptr;
     node.next    = nullptr;
     node.signaled.store(false, std::memory_order::relaxed);
 
+    // Fast-path hint: let signalers know someone is waiting
     _bits.store(1, std::memory_order::relaxed);
 
     std::unique_lock<std::mutex> bucket_lock(bucket->mutex);
@@ -334,67 +352,34 @@ void ConditionalVariable::wait(Mutex& mutex) noexcept {
     bucket->head = &node;
 
     if (!is_worker_fiber) {
+        // === OS THREAD PATH ===
         bucket_lock.unlock();
-        mutex.unlock();
+        mutex.unlock(); // Release user's mutex to avoid deadlocks
 
+        // Re-lock the bucket to wait on the condition variable safely
         bucket_lock.lock();
         node.cond.wait(bucket_lock, [&]() { return node.signaled.load(std::memory_order::acquire); });
         bucket_lock.unlock();
     } else {
-        bucket_lock.unlock();
-        mutex.unlock();
+        // === FIBER PATH ===
+        bucket_lock.unlock(); // Drop the bucket lock immediately
+        mutex.unlock();       // Release user's mutex
 
+        // Yield execution to the fiber scheduler until signaled
         while (!node.signaled.load(std::memory_order::acquire)) {
             YieldFiber();
         }
 
+        // FIX: Reset the state to prevent infinite non-yielding spins
         node.signaled.store(false, std::memory_order::relaxed);
     }
 
+    // Re-acquire the user's mutex before returning to the caller
     mutex.lock();
 }
 
-void ConditionalVariable::wait(std::unique_lock<Mutex>& lock) noexcept {
-    size_t  hash   = HashAddress<BUCKET_COUNT>(this);
-    Bucket* bucket = &s_parkingLot[hash];
-
-    Fiber* self            = GetCurrentFiber();
-    bool   is_worker_fiber = (self != nullptr && !self->isMain);
-
-    Waiter node;
-    node.address = this;
-    node.fiber   = is_worker_fiber ? self : nullptr;
-    node.next    = nullptr;
-    node.signaled.store(false, std::memory_order::relaxed);
-
-    _bits.store(1, std::memory_order::relaxed);
-
-    std::unique_lock<std::mutex> bucket_lock(bucket->mutex);
-    node.next    = bucket->head;
-    bucket->head = &node;
-
-    if (!is_worker_fiber) {
-        bucket_lock.unlock();
-        lock.unlock();
-
-        bucket_lock.lock();
-        node.cond.wait(bucket_lock, [&]() { return node.signaled.load(std::memory_order::acquire); });
-        bucket_lock.unlock();
-    } else {
-        bucket_lock.unlock();
-        lock.unlock();
-
-        while (!node.signaled.load(std::memory_order::acquire)) {
-            YieldFiber();
-        }
-
-        node.signaled.store(false, std::memory_order::relaxed);
-    }
-
-    lock.lock();
-}
-
-void ConditionalVariable::notify_one() noexcept {
+void ConditionalVariable::NotifyOne() noexcept {
+    // Fast path: if no waiters exist, bail out immediately
     if (_bits.load(std::memory_order::relaxed) == 0) {
         return;
     }
@@ -402,80 +387,80 @@ void ConditionalVariable::notify_one() noexcept {
     size_t  hash   = HashAddress<BUCKET_COUNT>(this);
     Bucket* bucket = &s_parkingLot[hash];
 
-    Waiter* to_wake = nullptr;
-    bool    more    = false;
+    std::lock_guard<std::mutex> lock(bucket->mutex);
 
-    {
-        std::lock_guard<std::mutex> lock(bucket->mutex);
+    Waiter** curr    = &bucket->head;
+    Waiter*  to_wake = nullptr;
+    bool     more    = false;
 
-        Waiter** curr = &bucket->head;
-        while (*curr != nullptr) {
-            if ((*curr)->address == this && to_wake == nullptr) {
-                to_wake = *curr;
-                *curr   = to_wake->next;
-                continue;
-            }
-            if ((*curr)->address == this) {
-                more = true;
-            }
+    // Search and extract the first node waiting on this specific CV address
+    while (*curr != nullptr) {
+        if ((*curr)->address == this && to_wake == nullptr) {
+            to_wake = *curr;
+            *curr   = to_wake->next;
+            continue;
+        }
+        if ((*curr)->address == this) {
+            more = true;
+        }
+        curr = &((*curr)->next);
+    }
+
+    if (!more) {
+        _bits.store(0, std::memory_order::relaxed);
+    }
+
+    if (to_wake != nullptr) {
+        to_wake->signaled.store(true, std::memory_order::release);
+        if (to_wake->fiber == nullptr) {
+            // Signal the OS thread condition variable
+            to_wake->cond.notify_one();
+        } else {
+            // Wake up the scheduler fiber
+            ZHLN::TaskSystem::WakeUp(to_wake->fiber);
+        }
+    }
+}
+
+void ConditionalVariable::NotifyAll() noexcept {
+    // Fast path: bail out if no active waiters
+    if (_bits.load(std::memory_order::relaxed) == 0) {
+        return;
+    }
+
+    size_t  hash   = HashAddress<BUCKET_COUNT>(this);
+    Bucket* bucket = &s_parkingLot[hash];
+
+    std::lock_guard<std::mutex> lock(bucket->mutex);
+
+    Waiter** curr      = &bucket->head;
+    Waiter*  wake_list = nullptr;
+
+    // Isolate and extract all nodes matching this condition variable address
+    while (*curr != nullptr) {
+        if ((*curr)->address == this) {
+            Waiter* waiter = *curr;
+            *curr          = waiter->next; // Unlink from bucket
+
+            waiter->next = wake_list; // Link to local stack list
+            wake_list    = waiter;
+        } else {
             curr = &((*curr)->next);
         }
-
-        if (!more) {
-            _bits.store(0, std::memory_order::relaxed);
-        }
-
-        // --- SIGNAL INSIDE THE LOCK ---
-        if (to_wake != nullptr) {
-            to_wake->signaled.store(true, std::memory_order::release);
-            if (to_wake->fiber == nullptr) {
-                to_wake->cond.notify_one();
-            } else {
-                ZHLN::TaskSystem::WakeUp(to_wake->fiber);
-            }
-        }
-    }
-}
-
-void ConditionalVariable::notify_all() noexcept {
-    if (_bits.load(std::memory_order::relaxed) == 0) {
-        return;
     }
 
-    size_t  hash   = HashAddress<BUCKET_COUNT>(this);
-    Bucket* bucket = &s_parkingLot[hash];
+    _bits.store(0, std::memory_order::relaxed);
 
-    Waiter* wake_list = nullptr;
+    // Unblock all extracted nodes outside the primary bucket list structure
+    while (wake_list != nullptr) {
+        Waiter* waiter = wake_list;
+        wake_list      = waiter->next;
 
-    {
-        std::lock_guard<std::mutex> lock(bucket->mutex);
-
-        Waiter** curr = &bucket->head;
-        while (*curr != nullptr) {
-            if ((*curr)->address == this) {
-                Waiter* waiter = *curr;
-                *curr          = waiter->next; // Unlink
-
-                waiter->next = wake_list; // Link to local stack list
-                wake_list    = waiter;
-            } else {
-                curr = &((*curr)->next);
-            }
-        }
-
-        _bits.store(0, std::memory_order::relaxed);
-
-        // --- SIGNAL INSIDE THE LOCK ---
-        while (wake_list != nullptr) {
-            Waiter* waiter = wake_list;
-            wake_list      = waiter->next;
-
-            waiter->signaled.store(true, std::memory_order::release);
-            if (waiter->fiber == nullptr) {
-                waiter->cond.notify_one();
-            } else {
-                ZHLN::TaskSystem::WakeUp(waiter->fiber);
-            }
+        waiter->signaled.store(true, std::memory_order::release);
+        if (waiter->fiber == nullptr) {
+            waiter->cond.notify_one();
+        } else {
+            ZHLN::TaskSystem::WakeUp(waiter->fiber);
         }
     }
 }

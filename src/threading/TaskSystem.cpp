@@ -4,21 +4,20 @@
 #include "TaskSystem.hpp"
 #include "Thread.hpp"
 #include "engine/Platform.hpp"
-#include "threading/ConditionalVariable.hpp"
 #include "threading/Mutex.hpp"
-#include <detail/Queue.hpp> // Added for ZHLN::Queue
+#include <condition_variable>
 #include <mutex>
+#include <queue> // Replaced vector with queue
 #include <thread>
-#include <vector>
 
 namespace ZHLN::TaskSystem {
 
 // --- Thread-Safe Queue (Fixed: Now strictly FIFO) ---
 struct WorkQueue {
-    ZHLN::Mutex               mtx {};
-    ZHLN::ConditionalVariable cv {};
-    ZHLN::Queue<Fiber*>       fibers; // Replaced std::queue with ZHLN::Queue
-    bool                      quit = false;
+    std::mutex              mtx;
+    std::condition_variable cv;
+    std::queue<Fiber*>      fibers;
+    bool                    quit = false;
 
     void Push(Fiber* f) {
         std::lock_guard lock(mtx);
@@ -32,20 +31,19 @@ struct WorkQueue {
         if (quit && fibers.empty()) {
             return nullptr;
         }
-
-        Fiber* f = nullptr;
-        // Atomic pop directly into local pointer
-        fibers.try_pop(f);
+        Fiber* f = fibers.front(); // Pull from the front
+        fibers.pop();              // Remove from the front
         return f;
     }
 
     Fiber* TryPop() {
         std::lock_guard lock(mtx);
-        Fiber*          f = nullptr;
-        if (fibers.try_pop(f)) {
-            return f;
+        if (fibers.empty()) {
+            return nullptr;
         }
-        return nullptr;
+        Fiber* f = fibers.front(); // Pull from the front
+        fibers.pop();              // Remove from the front
+        return f;
     }
 
     void WakeAll() {
