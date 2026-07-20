@@ -126,7 +126,6 @@
 ;; 1. OPTIMIZE GRAPHICS & POST-PROCESSING FOR SHAFTS
 ;; ============================================================================
 (zh:config {:giMode 2
-            ;; SSGI Enabled
             :aoRadius 0.8
             :aoBias 0.03
             :aoPower 2.2
@@ -134,15 +133,11 @@
             :giSamples 16
             :useLocalProbe 0
             :vignetteIntensity 1.1
-            ;; Cinematic camera framing
             :vignettePower 1.6
             :enableSSR 1
-            ;; SSR on for beautiful wet-floor reflections
             :enableTAA 1
             :taaFeedback 0.95
             :ambientExposure 10.0})
-
-;; Lower exposure makes volumetric shafts pop!
 
 (require :scripts.main_menu)
 
@@ -162,10 +157,8 @@
                                 :size (zh.vec3 50.0 0.5 50.0)
                                 :position (zh.vec3 0.0 -0.5 0.0)
                                 :color [0.25 0.25 0.28 1.0]
-                                ;; Medium gray slate
                                 :static true})]
     (table.insert g-level-entities floor)
-    ;; Non-metallic (0.0) + smooth (0.15) allows SSR to reflect light beautifully
     (zh.ecs:add floor :PBRComponent {:roughness 0.15 :metallic 0.0}))
   ;; B. Colonnade of Light-Scattering Pillars (Non-metallic concrete)
   (for [z -36 36 12]
@@ -174,7 +167,6 @@
                                   :size (zh.vec3 1.5 14.0 1.5)
                                   :position (zh.vec3 -12.0 7.0 z)
                                   :color [0.55 0.55 0.58 1.0]
-                                  ;; Light concrete gray
                                   :static true})]
       (table.insert g-level-entities col-l)
       (zh.ecs:add col-l :PBRComponent {:roughness 0.6 :metallic 0.0}))
@@ -183,7 +175,6 @@
                                   :size (zh.vec3 1.5 14.0 1.5)
                                   :position (zh.vec3 12.0 7.0 z)
                                   :color [0.55 0.55 0.58 1.0]
-                                  ;; Light concrete gray
                                   :static true})]
       (table.insert g-level-entities col-r)
       (zh.ecs:add col-r :PBRComponent {:roughness 0.6 :metallic 0.0}))
@@ -251,14 +242,12 @@
   (set g-wisp-1 (zh:spawn_light {:type LightType.POINT
                                  :position (zh.vec3 -8.0 4.0 0.0)
                                  :color [0.1 0.8 1.0]
-                                 ;; Ethereal Cyan
                                  :intensity 220.0
                                  :radius 0.2
                                  :range 18.0}))
   (set g-wisp-2 (zh:spawn_light {:type LightType.POINT
                                  :position (zh.vec3 8.0 6.0 -10.0)
                                  :color [1.0 0.1 0.6]
-                                 ;; Electric Magenta
                                  :intensity 220.0
                                  :radius 0.2
                                  :range 18.0}))
@@ -269,7 +258,6 @@
                 (zh:spawn_light {:type LightType.POINT
                                  :position (zh.vec3 0.0 22.0 -8.0)
                                  :color [1.0 0.85 0.2]
-                                 ;; Golden victory light
                                  :intensity 180.0
                                  :radius 0.5
                                  :range 25.0})))
@@ -313,11 +301,8 @@
   ;; 4. Spawn Sunlight (Low-angle warm sunset slice)
   (let [sun (zh:spawn_light {:type LightType.SUN
                              :rotation [-0.35 0.35 0.1 0.86]
-                             ;; Low horizon sunset
                              :color [1.0 0.65 0.35]
-                             ;; Deep golden solar color
                              :intensity 100.0
-                             ;; Intense solar energy
                              :radius 0.5
                              :range 400.0})]
     (zh.ecs:add sun :SunTagComponent))
@@ -342,7 +327,7 @@
 (var total-time 0.0)
 
 (defsystem player-input-system
-  [_dt]
+  []
   (each [player-ent movement (zh.ecs:view :MovementComponent)]
     (let [yaw-rad (math.rad zh.camera.yaw)
           forward-x (math.cos yaw-rad)
@@ -415,7 +400,7 @@
       (set combat.hp (math.min combat.max_hp (+ combat.hp (* 2.0 dt)))))))
 
 (defsystem camera-fov-system
-  [_dt]
+  []
   (each [player-ent movement (zh.ecs:view :MovementComponent)]
     (each [_ cam (zh.ecs:view :TargetCameraComponent)]
       (when (= cam.target player-ent)
@@ -438,7 +423,7 @@
 (var current-anim-state :IDLE)
 
 (defsystem player-animation-system
-  [_dt]
+  []
   (when (and _G.player_ent pomni-parts)
     (let [movement (zh.ecs:get _G.player_ent :MovementComponent)]
       (when movement
@@ -478,9 +463,6 @@
 ;; ============================================================================
 ;; 6. DYNAMIC VOLUMETRIC SYSTEM SHADERS AND PHYSICS MOVEMENT
 ;; ============================================================================
-
-;; This system continuously orbits and bobs the point lights (Wisps) in 3D space,
-;; physically sweeping light cones across the brutalist pillars and cloud layers!
 (defsystem animating-lights-system
   [dt]
   (set total-time (+ total-time dt))
@@ -495,14 +477,14 @@
   ;; Orbiting Wisp 2 (Electric Magenta)
   (let [w2-trans (zh.ecs:get g-wisp-2 :TransformComponent)]
     (when w2-trans
-      (let [angle (+ (* total-time -0.7) 3.14159) ;; Offset by 180 degrees
+      (let [angle (+ (* total-time -0.7) 3.14159)
             rad 7.5]
         (tset w2-trans.position 0 (* (math.cos angle) rad))
         (tset w2-trans.position 1 (+ 6.5 (* (math.cos (* total-time 1.8)) 2.0)))
         (tset w2-trans.position 2 (* (math.sin angle) rad))))))
 
 (defsystem check-fall-system
-  [_dt]
+  []
   (when _G.player_ent
     (let [state (zh.ecs:get _G.player_ent :PhysicsStateComponent)]
       (when (and state (< (. state.currPosition 1) -15.0))
@@ -510,7 +492,7 @@
         (RespawnPlayer)))))
 
 (defsystem victory-detection-system
-  [dt]
+  []
   (when (and _G.player_ent (not won-game))
     (let [state (zh.ecs:get _G.player_ent :PhysicsStateComponent)]
       (when state
@@ -534,8 +516,6 @@
 (zh.scheduler.register :CameraFOV 30 camera-fov-system)
 (zh.scheduler.register :VisualFeedback 25 visual-feedback-system)
 (zh.scheduler.register :AnimatingLights 28 animating-lights-system)
-
-;; Orbiting point lights
 (zh.scheduler.register :CheckFall 35 check-fall-system)
 (zh.scheduler.register :VictoryDetection 40 victory-detection-system)
 

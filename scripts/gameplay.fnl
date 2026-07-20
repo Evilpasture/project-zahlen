@@ -13,11 +13,10 @@
                            ,...)))})
 
 ;; ============================================================================
-;; Magic Numbers Dictionaries
+;; Magic Numbers Dictionaries (Aligned with C++ Engine)
 ;; ============================================================================
 (local RagdollState {:STANDING 0 :RAGDOLL_FULL 1 :RAGDOLL_LIMP 2})
-
-(local LightType {:POINT 0 :SPOT 1 :DIRECTIONAL 4})
+(local LightType {:DIRECTIONAL 0 :POINT 1 :SPOT 2 :AREA 3 :SUN 4})
 
 ;; ============================================================================
 ;; Mathematical & Structural Helpers
@@ -100,8 +99,6 @@
     (if (not idx)
         (let [track-name (tostring name-or-idx)]
           (when (not (. Animator.unresolved_warnings track-name))
-            (zh.warn (.. "[Animator] Failed to semantically resolve track: "
-                         track-name))
             (tset Animator.unresolved_warnings track-name true))
           false)
         (let [args (ffi.new :PlayTrackArgs
@@ -148,8 +145,8 @@
   ;; 2. Spawn Static World Geometry
   (zh:spawn "Circus Lobby V9.glb" {:physics true :static true})
   (set pomni-parts (zh:spawn :tadc_models/POMNI.glb {:animated true}))
-  ;; 3. Spawn Lights
-  (let [sun (zh:spawn_light {:type LightType.DIRECTIONAL
+  ;; 3. Spawn Lights (Corrected to match C++ Engine Enums)
+  (let [sun (zh:spawn_light {:type LightType.SUN
                              :rotation [-0.575 0.287 0.0 0.766]
                              :color [1.0 0.95 0.88]
                              :intensity 180.0
@@ -310,8 +307,7 @@
                                              :IDLE))))]
               ;; 2. Process State Transition
               (when (not= target-state current-anim-state)
-                (set current-anim-state target-state)
-                (zh.log (.. "[Animation] State Transition -> " target-state))
+                (set current-anim-state target-state) ; (zh.log (.. "[Animation] State Transition -> " target-state))
                 (each [_ part-ent (ipairs pomni-parts)]
                   (when (zh.ecs:has part-ent :AnimatorComponent)
                     (let [options {:blend_duration 0.15 :loop true :speed 1.0}]
@@ -332,4 +328,3 @@
 (zh.scheduler.register :VisualFeedback 25 visual-feedback-system)
 
 (zh.log "[Gameplay] Systems successfully registered in dormant state.")
-

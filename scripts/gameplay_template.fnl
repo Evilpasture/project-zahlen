@@ -13,10 +13,10 @@
                            ,...)))})
 
 ;; ============================================================================
-;; Magic Numbers Dictionaries
+;; Magic Numbers Dictionaries (Aligned with C++ Engine)
 ;; ============================================================================
 (local RagdollState {:STANDING 0 :RAGDOLL_FULL 1 :RAGDOLL_LIMP 2})
-(local LightType {:POINT 0 :SPOT 1 :DIRECTIONAL 4})
+(local LightType {:DIRECTIONAL 0 :POINT 1 :SPOT 2 :AREA 3 :SUN 4})
 
 ;; ============================================================================
 ;; State Variables
@@ -190,7 +190,7 @@
                                   :color p.color
                                   :static true})]
         (table.insert g-platform-entities ent)))
-    ;; Spawn point lights to illuminate the platforms
+    ;; Spawn point lights (Using corrected POINT enum)
     (table.insert g-platform-entities
                   (zh:spawn_light {:type LightType.POINT
                                    :position [4.5 3.5 11.0]
@@ -251,8 +251,8 @@
   (SpawnPlatformerLevel)
   ;; 3. Spawn Visual Mesh parts for Pomni
   (set pomni-parts (zh:spawn :tadc_models/POMNI.glb {:animated true}))
-  ;; 4. Spawn Sunlight Directional
-  (let [sun (zh:spawn_light {:type LightType.DIRECTIONAL
+  ;; 4. Spawn Sunlight (Corrected to use SUN type)
+  (let [sun (zh:spawn_light {:type LightType.SUN
                              :rotation [-0.575 0.287 0.0 0.766]
                              :color [1.0 0.95 0.88]
                              :intensity 180.0
@@ -417,7 +417,7 @@
 ;; 6. PLATFORMER MECHANICS SYSTEMS
 ;; ============================================================================
 (defsystem check-fall-system
-  [_dt]
+  []
   (when _G.player_ent
     (let [state (zh.ecs:get _G.player_ent :PhysicsStateComponent)]
       (when (and state (< (. state.currPosition 1) -15.0))
@@ -425,7 +425,7 @@
         (RespawnPlayer)))))
 
 (defsystem victory-detection-system
-  [dt]
+  []
   (when (and _G.player_ent (not won-game))
     (let [state (zh.ecs:get _G.player_ent :PhysicsStateComponent)]
       (when state
@@ -452,4 +452,3 @@
 (zh.scheduler.register :VictoryDetection 40 victory-detection-system)
 
 (zh.log "[Gameplay] Platformer systems successfully registered.")
-
