@@ -295,10 +295,10 @@ struct PassFactory {
     // Consolidated helper to build scene resource descriptions
     [[nodiscard]] auto BuildSceneResources() const noexcept {
         return SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> {
-            .sceneColor = AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(self.graphResources.sceneColor),
-            .velocity   = AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(self.graphResources.velocityBuffer),
-            .normRough  = AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(self.graphResources.normalRoughnessBuffer),
-            .depth      = AssumeLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT)
+            .sceneColor = Vk::Assume<Vk::ColorWrite<Res_SceneColor>>(self.graphResources.sceneColor),
+            .velocity   = Vk::Assume<Vk::ColorWrite<Res_Velocity>>(self.graphResources.velocityBuffer),
+            .normRough  = Vk::Assume<Vk::ColorWrite<Res_NormRough>>(self.graphResources.normalRoughnessBuffer),
+            .depth      = Vk::Assume<Vk::DepthWrite<Res_Depth>>(self.presentation.depthTarget)
         };
     }
 
@@ -337,7 +337,7 @@ struct PassFactory {
         return Vk::MakePass<"VoxelInject", Vk::ComputeWrite<Res_VoxelMedia>>([this](VkCommandBuffer c) noexcept {
             Profiler::ScopedGpuProfile<Stages::VolumetricInjectPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
             self.volumetricInjectionPass.WriteNext(
-                device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.voxelMedia), self.frameUniformBuffers[fIdx].Handle()
+                device, Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia), self.frameUniformBuffers[fIdx].Handle()
             );
             // Dispatch across all 64 Z slices
             self.volumetricInjectionPass.Dispatch(c, 160 / 8, (90 + 7) / 8, 64);
@@ -349,9 +349,8 @@ struct PassFactory {
             [this](VkCommandBuffer c) noexcept {
                 Profiler::ScopedGpuProfile<Stages::VolumetricScatterPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
                 self.volumetricScatteringPass.WriteNext(
-                    device,
-                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.voxelMedia), // --- CHANGED from SHADER_READ_ONLY_OPTIMAL to GENERAL ---
-                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.voxelLight), self.frameUniformBuffers[fIdx].Handle(),
+                    device, Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelMedia>>(self.graphResources.voxelMedia),
+                    Vk::Assume<Vk::ComputeWrite<Res_VoxelLight>>(self.graphResources.voxelLight), self.frameUniformBuffers[fIdx].Handle(),
                     self.lightStorageBuffers[fIdx].Handle(), self.clusterGridBuffers[fIdx].Handle(), self.lightIndexListBuffers[fIdx].Handle(),
                     self.graphResources.shadowMap.view.Get(), self.shadowSampler.Get()
                 );
@@ -364,9 +363,8 @@ struct PassFactory {
         return Vk::MakePass<"VoxelIntegrate", Vk::ComputeReadGeneral<Res_VoxelLight>, Vk::ComputeWrite<Res_VoxelInt>>([this](VkCommandBuffer c) noexcept {
             Profiler::ScopedGpuProfile<Stages::VolumetricIntegratePass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
             self.volumetricIntegrationPass.WriteNext(
-                device,
-                Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.voxelLight), // --- CHANGED from SHADER_READ_ONLY_OPTIMAL to GENERAL ---
-                Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.voxelIntegrated)
+                device, Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelLight>>(self.graphResources.voxelLight),
+                Vk::Assume<Vk::ComputeWrite<Res_VoxelInt>>(self.graphResources.voxelIntegrated)
             );
             self.volumetricIntegrationPass.Dispatch(c, 160 / 16, (90 + 8) / 9, 1);
         });
@@ -376,9 +374,9 @@ struct PassFactory {
         return Vk::MakePass<"Ambient", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_Ambient>>(
             [this](auto& ctx) noexcept {
                 self.ambientPass.WriteNext(
-                    device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.sceneColor), self.defaultSampler.Get(),
-                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
-                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.normalRoughnessBuffer), self.pointSampler.Get(),
+                    device, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler.Get(),
+                    Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
+                    Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.pointSampler.Get(),
                     self.iblPayload.prefilteredView.Get(), self.iblPayload.brdfLutView.Get(), self.clampSampler.Get(), self.frameUniformBuffers->Handle()
                 );
                 self.ambientPass.Execute(ctx.Cmd(), pc);
@@ -391,13 +389,13 @@ struct PassFactory {
             "Lighting", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_Ambient>,
             Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ColorWrite<Res_Lighting>>([this](auto& ctx) noexcept {
             self.lightingPass.WriteNext(
-                device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.sceneColor), self.defaultSampler.Get(),
-                Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
-                Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.normalRoughnessBuffer), self.lightStorageBuffers->Handle(),
+                device, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler.Get(),
+                Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
+                Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.lightStorageBuffers->Handle(),
                 self.frameUniformBuffers->Handle(), self.graphResources.shadowMap.view.Get(), self.shadowSampler.Get(), self.ltcMatView.Get(),
                 self.ltcAmpView.Get(), self.clampSampler.Get(), self.clusterGridBuffers->Handle(), self.lightIndexListBuffers->Handle(),
-                Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.ambientTarget), self.pointSampler.Get(), GetTLAS(),
-                self.shadowAtlasCubeView.Get(), self.shadowAtlas2DView.Get()
+                Vk::Assume<Vk::ShaderRead<Res_Ambient>>(self.graphResources.ambientTarget), self.pointSampler.Get(), GetTLAS(), self.shadowAtlasCubeView.Get(),
+                self.shadowAtlas2DView.Get()
             );
             self.lightingPass.ExecuteVariant(ctx.Cmd(), lightVariant, pc);
         });
@@ -410,12 +408,12 @@ struct PassFactory {
             [this](auto& ctx) noexcept {
                 Profiler::ScopedGpuProfile<Stages::PostProcessPass, FrameProfiler> timer(ctx.Cmd(), fIdx, self.gpuProfiler);
                 self.reflectionPass.WriteNext(
-                    device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.sceneColor), self.defaultSampler.Get(),
-                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
-                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.normalRoughnessBuffer), self.pointSampler.Get(),
+                    device, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler.Get(),
+                    Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
+                    Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.pointSampler.Get(),
                     self.iblPayload.prefilteredView.Get(), GetTLAS(), self.frameUniformBuffers[fIdx].Handle(), self.iblPayload.brdfLutView.Get(),
-                    self.clampSampler.Get(), Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.lightingTarget),
-                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.voxelIntegrated)
+                    self.clampSampler.Get(), Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
+                    Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelInt>>(self.graphResources.voxelIntegrated)
                 );
                 self.reflectionPass.ExecuteVariant(ctx.Cmd(), reflVariant, pc);
             }
@@ -430,8 +428,7 @@ struct PassFactory {
         return Vk::Passieren<"Forward", Vk::ColorWrite<ColorTargetRes>, Vk::DepthWrite<Res_Depth>>([this, &targetImage](VkCommandBuffer c) noexcept {
             FrameRecorder fwdRecorder(c, self);
             Passes::ForwardPass {}.Execute(
-                fwdRecorder, Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(targetImage),
-                Vk::AssumeLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT)
+                fwdRecorder, Vk::Assume<Vk::ColorWrite<ColorTargetRes>>(targetImage), Vk::Assume<Vk::DepthWrite<Res_Depth>>(self.presentation.depthTarget)
             );
         });
     }
@@ -442,7 +439,7 @@ struct PassFactory {
         const auto& inputColor = ColorTarget<FullBright>();
         return Vk::MakePass<"BloomThreshold", Vk::ShaderRead<BloomInputRes>, Vk::ColorWrite<Res_BloomThresh>>([this, &inputColor](auto& ctx) noexcept {
             Profiler::ScopedGpuProfile<Stages::BloomThreshPass, FrameProfiler> timer(ctx.Cmd(), fIdx, self.gpuProfiler);
-            self.bloomThresholdPass.WriteNext(device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor), self.defaultSampler.Get());
+            self.bloomThresholdPass.WriteNext(device, Vk::Assume<Vk::ShaderRead<BloomInputRes>>(inputColor), self.defaultSampler.Get());
             self.bloomThresholdPass.Execute(ctx.Cmd());
         });
     }
@@ -530,9 +527,8 @@ struct PassFactory {
                 };
 
                 self.taaPass.WriteNext(
-                    device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor),
-                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.accumBuffers.Current()),
-                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.velocityBuffer), self.defaultSampler.Get(),
+                    device, Vk::Assume<Vk::ShaderRead<InputRes>>(inputColor), Vk::Assume<Vk::ShaderRead<Res_AccumCurr>>(self.accumBuffers.Current()),
+                    Vk::Assume<Vk::ShaderRead<Res_Velocity>>(self.graphResources.velocityBuffer), self.defaultSampler.Get(),
                     self.frameUniformBuffers[fIdx].Handle()
                 );
 
@@ -559,7 +555,7 @@ struct PassFactory {
                     float _pad;
                 };
 
-                self.fxaaPass.WriteNext(device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor), self.defaultSampler.Get());
+                self.fxaaPass.WriteNext(device, Vk::Assume<Vk::ShaderRead<InputRes>>(inputColor), self.defaultSampler.Get());
 
                 self.fxaaPass.Execute(
                     c, FXAAPushConstants {rcpW, rcpH, self.aaState.fxaaSubpix, self.aaState.fxaaEdgeThreshold, self.aaState.fxaaEdgeThresholdMin, 0.0f}
@@ -585,7 +581,7 @@ struct PassFactory {
                     uint32_t maxSearchSteps;
                 };
 
-                self.mlaaPass.WriteNext(device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor), self.defaultSampler.Get());
+                self.mlaaPass.WriteNext(device, Vk::Assume<Vk::ShaderRead<InputRes>>(inputColor), self.defaultSampler.Get());
 
                 self.mlaaPass.Execute(c, MLAAPushConstants {rcpW, rcpH, self.aaState.mlaaThreshold, self.aaState.mlaaMaxSearchSteps});
             }
@@ -604,9 +600,7 @@ struct PassFactory {
                     float rcpWidth, rcpHeight, width, height;
                 } metrics = {rcpW, rcpH, (float) inputColor.extent.width, (float) inputColor.extent.height};
 
-                self.smaaEdgePass.WriteNext(
-                    device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor), self.defaultSampler.Get(), self.pointSampler.Get()
-                );
+                self.smaaEdgePass.WriteNext(device, Vk::Assume<Vk::ShaderRead<InputRes>>(inputColor), self.defaultSampler.Get(), self.pointSampler.Get());
                 self.smaaEdgePass.Execute(c, metrics, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
             }
         });
@@ -623,8 +617,8 @@ struct PassFactory {
 
                 const auto& [areaView, searchView] = std::tie(self.textureViews[self.smaaAreaTexIdx], self.textureViews[self.smaaSearchTexIdx]);
                 self.smaaWeightPass.WriteNext(
-                    device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.smaaEdgeTarget), areaView, searchView,
-                    self.defaultSampler.Get(), self.pointSampler.Get()
+                    device, Vk::Assume<Vk::ShaderRead<Res_SmaaEdge>>(self.graphResources.smaaEdgeTarget), areaView, searchView, self.defaultSampler.Get(),
+                    self.pointSampler.Get()
                 );
                 self.smaaWeightPass.Execute(c, metrics, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
             }
@@ -644,9 +638,8 @@ struct PassFactory {
                 } metrics = {rcpW, rcpH, (float) inputColor.extent.width, (float) inputColor.extent.height};
 
                 self.smaaBlendPass.WriteNext(
-                    device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(inputColor),
-                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.smaaWeightTarget), self.defaultSampler.Get(),
-                    self.pointSampler.Get()
+                    device, Vk::Assume<Vk::ShaderRead<InputRes>>(inputColor), Vk::Assume<Vk::ShaderRead<Res_SmaaWeight>>(self.graphResources.smaaWeightTarget),
+                    self.defaultSampler.Get(), self.pointSampler.Get()
                 );
                 self.smaaBlendPass.Execute(c, metrics, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
             }
@@ -670,15 +663,12 @@ struct PassFactory {
                 FrameRecorder blitRecorder(c, self);
 
                 self.blitPass.WriteNext(
-                    device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(blitInputImage), self.defaultSampler.Get(),
-                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.graphResources.bloomFinalTarget),
-                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(self.presentation.depthTarget, VK_IMAGE_ASPECT_DEPTH_BIT),
-                    self.frameUniformBuffers[fIdx].Handle()
+                    device, Vk::Assume<Vk::ShaderRead<BlitInputRes>>(blitInputImage), self.defaultSampler.Get(),
+                    Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(self.graphResources.bloomFinalTarget),
+                    Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget), self.frameUniformBuffers[fIdx].Handle()
                 );
 
-                Passes::BlitPass {}.Execute(
-                    blitRecorder, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(blitInputImage), getSwapchainImage(), FullBright ? 1 : 0
-                );
+                Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<BlitInputRes>>(blitInputImage), getSwapchainImage(), FullBright ? 1 : 0);
             }
         );
     }

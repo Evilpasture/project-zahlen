@@ -101,6 +101,23 @@ Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget3D<F>& rt, VkImageAspectFla
     return {rt.image.Handle(), rt.view.Get(), rt.extent, aspect, F};
 }
 
+template <typename Usage>
+struct UsageLayout {
+    static_assert(requires { typename Usage::Resource; }, "UsageLayout requires a valid Vk::Usage type.");
+
+    static constexpr VkImageLayout      layout = Usage::layout;
+    static constexpr VkImageAspectFlags aspect = Usage::Resource::aspect;
+};
+
+/**
+ * @brief Automatically resolves layout and aspect from compile-time Graph Usages.
+ */
+template <typename Usage, typename T>
+[[nodiscard]] constexpr auto Assume(const T& resource) noexcept {
+    using Layout = UsageLayout<Usage>;
+    return AssumeLayout<Layout::layout>(resource, Layout::aspect);
+}
+
 template <VkImageLayout TargetLayout, typename T>
 constexpr auto TransitionSingle(VkCommandBuffer cmd, const T& res) noexcept {
     return std::get<0>(TransitionBatch<TargetLayout>(cmd, res));
