@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <array>
 #include <format>
-#include <meta>
 #include <optional>
 #include <ranges>
 #include <string>
