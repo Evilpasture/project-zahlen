@@ -1,0 +1,13 @@
+# tsan.supp
+race:^g_queue_pop_tail
+race:^g_strsplit
+race:^g_str_equal
+race:^g_socket_send_message_with_timeout
+race:^g_main_context_unref
+race:^g_hash_table_unref
+race:^g_closure_unref
+race:^g_signal_handler_disconnect
+race:^g_variant_store
+race:libglib-2.0.so
+race:libgio-2.0.so
+race:libgobject-2.0.so
