@@ -39,12 +39,21 @@ struct IsInList<Vk::TypeList<Ts...>, Target> {
     static constexpr bool value = (std::is_same_v<Ts, Target> || ...);
 };
 
+namespace detail {
+// Dummy usage stub for zero-usage passes (e.g. BDA compute passes)
+struct DummyUsage {
+    struct Resource {};
+    static constexpr VkImageLayout         layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    static constexpr VkPipelineStageFlags2 stage  = VK_PIPELINE_STAGE_2_NONE;
+    static constexpr VkAccessFlags2        access = 0;
+};
+} // namespace detail
 template <>
 struct TypeList<> {
     static constexpr size_t size = 0;
 
     template <size_t I>
-    using type = void; // Safe fallback, never indexed
+    using type = detail::DummyUsage; // Safe fallback struct instead of void
 };
 
 template <ResourceName Name, VkFormat Format, VkImageAspectFlags Aspect, bool IsSwapchain = false, bool IsPersistent = false>
