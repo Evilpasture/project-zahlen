@@ -181,6 +181,20 @@ constexpr uint8_t vol_integrate_cs_raw[] = {
 };
 extern const ShaderPair volumetric_integration_shaders {.vertex = vol_integrate_cs_raw, .fragment = {}};
 
+// --- Particle Shaders ---
+constexpr uint8_t particle_update_cs_raw[] = {
+#embed SHADER_PARTICLE_UPDATE_CS_PATH
+};
+extern const ShaderPair particle_update_shaders {.vertex = particle_update_cs_raw, .fragment = {}};
+
+constexpr uint8_t particle_render_vs_raw[] = {
+#embed SHADER_PARTICLE_RENDER_VS_PATH
+};
+constexpr uint8_t particle_render_ps_raw[] = {
+#embed SHADER_PARTICLE_RENDER_PS_PATH
+};
+extern const ShaderPair particle_render_shaders {.vertex = particle_render_vs_raw, .fragment = particle_render_ps_raw};
+
 // --- Single Shaders and Binary Resources ---
 constexpr uint8_t culling_comp_raw[] = {
 #embed SHADER_CULLING_HLSL_CS_PATH

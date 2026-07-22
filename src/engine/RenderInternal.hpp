@@ -165,21 +165,20 @@ static constexpr Color4 kClearColorVelocity = {.r = 0.0f, .g = 0.0f, .b = 0.0f, 
 static constexpr float  kClearDepthValue    = 1.0f;
 
 // --- Layouts and Types ---
+static constexpr VkShaderStageFlags kCommonStages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 
 using GlobalSceneLayout = Vk::DescriptorLayout<
-    Vk::BindlessSampledImageSlot<0, 4096>,                                               // Bindless textures
-    Vk::SamplerSlot<1>,                                                                  // Default linear sampler
-    Vk::UniformSlot<2, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT>,       // FrameUniforms
-                                                                                         // (UBO)
-    Vk::StorageBufferSlot<3, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT>, // Lights
-                                                                                         // (SSBO)
-    Vk::StorageBufferSlot<4, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT>, // Instance buffer (SSBO)
-    Vk::StorageBufferSlot<5, VK_SHADER_STAGE_VERTEX_BIT>,                                // Joint matrices (SSBO)
-    Vk::StorageBufferSlot<6, VK_SHADER_STAGE_VERTEX_BIT>,                                // Previous Joint matrices (SSBO)
-    Vk::StorageBufferSlot<7, VK_SHADER_STAGE_VERTEX_BIT>,                                // Morph target deltas (SSBO)
-    Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>,                               // Pre-filtered Cubemap (Specular IBL)
-    Vk::SampledImageSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,                               // 2D BRDF LUT (2D Texture)
-    Vk::SamplerSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>                                    // Clamping Sampler
+    Vk::BindlessSampledImageSlot<0, 4096, kCommonStages>,
+    Vk::SamplerSlot<1, kCommonStages>,
+    Vk::UniformSlot<2, kCommonStages>,                     // FrameUniforms
+    Vk::StorageBufferSlot<3, kCommonStages>,               // Lights (Declared in common.hlsl)
+    Vk::StorageBufferSlot<4, kCommonStages>,               // InstanceData
+    Vk::StorageBufferSlot<5, VK_SHADER_STAGE_VERTEX_BIT>,  // Joints
+    Vk::StorageBufferSlot<6, VK_SHADER_STAGE_VERTEX_BIT>,  // PrevJoints
+    Vk::StorageBufferSlot<7, VK_SHADER_STAGE_VERTEX_BIT>,  // MorphDeltas
+    Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>, // Specular IBL
+    Vk::SampledImageSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>, // BRDF LUT
+    Vk::SamplerSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>      // Clamp Sampler
     >;
 
 using TAALayout = Vk::DescriptorLayout<
@@ -572,6 +571,8 @@ struct RenderContext::Impl {
     static constexpr uint32_t NUM_CASCADES        = 4;
     static constexpr uint32_t MAX_PUNCTUAL_LIGHTS = 4;
 
+    static constexpr uint32_t kGpuParticleCount = 65536;
+
     // ============================================================================
     // Core System Properties (64-Bit / High Alignment)
     // ============================================================================
@@ -678,6 +679,11 @@ struct RenderContext::Impl {
 
     Vk::TypedPipeline<0, true> shadowPipeline;
     Vk::TypedPipeline<0, true> punctualShadowPipeline;
+
+    Vk::Buffer                  particleBuffer;
+    Vk::ComputePass             particleUpdatePass;
+    Vk::PipelineLayout          particleRenderLayout;
+    Vk::TypedPipeline<1, false> particleRenderPipeline;
 
     // ============================================================================
     // GPU Storage & Double-Buffered Work Buffers
@@ -895,6 +901,8 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, Error> InitCullingResources();
     [[nodiscard]] std::expected<void, Error> CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
     [[nodiscard]] std::expected<void, Error> CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
+    [[nodiscard]] std::expected<void, Error> InitParticleResources();
+    [[nodiscard]] std::expected<void, Error> BuildParticlePipelines();
     [[nodiscard]] std::expected<void, Error> InitBindless();
     [[nodiscard]] std::expected<void, Error> BuildTAAPipeline();
     [[nodiscard]] std::expected<void, Error> BuildFXAAPipeline();
@@ -943,6 +951,10 @@ struct RenderContext::Impl {
     void WatchPipeline(const char* vsPath, const char* psPath, std::function<void()> rebuild_fn) noexcept;
 
     void UploadClusterBounds(const JPH::Mat44& proj);
+
+    [[nodiscard]] auto BufferAddress(VkBuffer buffer) const noexcept -> VkDeviceAddress {
+        return ctx.BufferAddress(buffer);
+    }
 };
 
 // --- Promoted G-Buffer & Post-Process Views ---

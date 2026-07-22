@@ -23,7 +23,7 @@ float TemporalHash2D(uint2 tid, float timeOffset) {
     return frac(spatial + timeOffset * 60.0f * 0.6180339887f);
 }
 
-// --- Highly Optimized Fast Float-Based 3D Hashes ---
+// --- Fast Float-Based 3D Hashes ---
 float Hash3D(float3 p) {
     p = frac(p * 0.1031f);
     p += dot(p, p.yzx + 33.33f);
@@ -36,7 +36,6 @@ float3 Hash3D_Vec3(float3 p) {
     return frac((p.xxy + p.yxx) * p.zyx);
 }
 
-// Procedural 3D Value Noise with Trilinear Interpolation
 float Noise3D(float3 p) {
     float3 ip = floor(p);
     float3 fp = frac(p);
@@ -48,7 +47,7 @@ float Noise3D(float3 p) {
     float n110 = Hash3D(ip + float3(1, 1, 0));
     float n001 = Hash3D(ip + float3(0, 0, 1));
     float n101 = Hash3D(ip + float3(1, 0, 1));
-    float n011 = Hash3D(ip + float3(0, 1, 1));
+    float n011 = Hash3D(ip + float3(0, 0, 1));
     float n111 = Hash3D(ip + float3(1, 1, 1));
 
     float r00 = lerp(n000, n100, u.x);
@@ -62,7 +61,6 @@ float Noise3D(float3 p) {
     return lerp(r0, r1, u.z);
 }
 
-// Optimized 3D Value-FBM (Reduced to 2 Octaves)
 float FBM3D(float3 p, int octaves) {
     float val = 0.0f;
     float amp = 0.5f;
@@ -74,7 +72,6 @@ float FBM3D(float3 p, int octaves) {
     return val;
 }
 
-// Procedural 3D Worley (Cellular) Noise
 float Worley3D(float3 p) {
     float3 ip       = floor(p);
     float3 fp       = frac(p);
@@ -92,20 +89,6 @@ float Worley3D(float3 p) {
         }
     }
     return saturate(sqrt(min_dist));
-}
-
-// Optimized Perlin-Worley mix (Fewer octaves and simplified erosion)
-float PerlinWorley3D(float3 p) {
-    float p_noise = FBM3D(p, 2); // 2 Octaves instead of 3
-
-    // Multi-frequency Worley noise (2 Octaves instead of 3)
-    float w0     = Worley3D(p * 2.0f);
-    float w1     = Worley3D(p * 4.0f);
-    float worley = w0 * 0.7f + w1 * 0.3f;
-
-    // Erode the value noise with Worley noise
-    float pw = saturate(p_noise - (1.0f - worley) * 0.45f);
-    return pw;
 }
 
 float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
@@ -130,51 +113,42 @@ float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
     float  depthVS  = 0.0f;
     float3 worldPos = GetVoxelWorldPos(tid, float2(gridDim.xy), depthVS);
 
-    // Logarithmic Fog
-    float heightFalloff = 0.15f;
-    float baseDensity   = 0.03f;
+    float time = frame.camPos.w;
+
+    // --- 1. HIGH-SPEED BLIZZARD WIND VECTOR ---
+    // Fast horizontal blowing vector along X/Z axis
+    float2 windVector = float2(6.5f, 3.2f);
+    float2 windOffset = windVector * time;
+
+    // Slower vertical falloff so snow fog envelopes mountains up to 60m+
+    float heightFalloff = 0.035f;
+    float baseDensity   = 0.15f; // Dense snow whiteout atmosphere
     float boundedY      = max(worldPos.y, -10.0f);
     float fogDensity    = baseDensity * exp(-heightFalloff * boundedY);
 
-    float noiseScale = 0.08f;
-    float fogNoise   = Worley3D(worldPos * noiseScale);
-    fogDensity *= lerp(0.3f, 1.0f, fogNoise);
+    // --- 2. SWIRLING SNOWDRIFTS & TURBULENCE ---
+    float3 windSamplePos = worldPos * 0.035f + float3(windOffset.x, time * 0.8f, windOffset.y);
+    float  windGusts     = Worley3D(windSamplePos);
 
-    // Raised Cloud Layer (150m-200m)
-    float cloudMinY = 150.0f;
-    float cloudMaxY = 200.0f;
+    // High-frequency turbulent snow streaks
+    float3 turbulencePos = worldPos * 0.10f + float3(windOffset.x * 2.2f, time * 1.6f, windOffset.y * 2.2f);
+    float  turbulence    = FBM3D(turbulencePos, 2);
 
-    float verticalEnvelope = smoothstep(cloudMinY, cloudMinY + 10.0f, worldPos.y) * smoothstep(cloudMaxY, cloudMaxY - 10.0f, worldPos.y);
+    fogDensity *= lerp(0.35f, 1.85f, windGusts * turbulence);
 
-    float  time       = frame.camPos.w;
-    float2 windOffset = float2(0.5f, 0.2f) * time;
-
-    float2 jitterXY = float2(TemporalHash2D(tid.xy, time), TemporalHash2D(tid.yx, time + 0.5f)) - 0.5f;
-
-    float3 jitteredWorldPos = worldPos;
-    jitteredWorldPos.xz += jitterXY * (depthVS * 0.015f);
-
-    float3 samplePos3D = float3(jitteredWorldPos.x * 0.015f, jitteredWorldPos.y * 0.045f, jitteredWorldPos.z * 0.015f) +
-                         float3(windOffset.x, time * 0.02f, windOffset.y);
-
-    float cloudNoise      = PerlinWorley3D(samplePos3D);
-    float cloudCoverage   = 0.45f;
-    float cloudDensityVal = saturate((cloudNoise - cloudCoverage) / (1.0f - cloudCoverage));
-    float cloudDensity    = verticalEnvelope * cloudDensityVal * 0.9f;
-
-    float density = fogDensity + cloudDensity;
-
-    // Local Probe Clipping
+    // Local Probe Clipping (Indoor/Tunnel Masking)
     if (frame.probeMin.w > 0.0f) {
         float3 center  = (frame.probeMax.xyz + frame.probeMin.xyz) * 0.5f;
         float3 extents = (frame.probeMax.xyz - frame.probeMin.xyz) * 0.5f;
         float3 dist    = abs(worldPos - center) / max(extents, 0.001f);
         float  mask    = saturate(1.0f - max(dist.x, max(dist.y, dist.z)));
-        density *= mask;
+        fogDensity *= mask;
     }
 
-    float3 scatteringCoeff = float3(0.85f, 0.9f, 1.0f) * density;
-    float  absorptionCoeff = 0.1f * density;
+    // --- 3. ICY BLUE-WHITE SNOW SCATTERING COEFFICIENTS ---
+    // Pure ice/snow forward scattering (bright, crisp winter light)
+    float3 scatteringCoeff = float3(0.91f, 0.95f, 1.0f) * fogDensity;
+    float  absorptionCoeff = 0.015f * fogDensity; // High single-scattering
     float  extinction      = dot(scatteringCoeff, float3(0.2126f, 0.7152f, 0.0722f)) + absorptionCoeff;
 
     outVoxelMedia[tid] = float4(scatteringCoeff, extinction);

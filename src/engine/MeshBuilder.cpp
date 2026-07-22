@@ -8,6 +8,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <vector>
 
@@ -207,8 +208,113 @@ Mesh CreateBox(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& co
     return finalMesh;
 }
 
-Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight, float* outHeights) {
-    // outHeights allocation size is assumed to be sampleCount * sampleCount
+Mesh CreateTerrainFromData(RenderContext& ctx, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA) {
+    float halfSize = worldSize / 2.0f;
+    float dx       = worldSize / (sampleCount - 1);
+    float dz       = worldSize / (sampleCount - 1);
+
+    auto get_height = [&](int x, int z) -> float {
+        x = std::clamp(x, 0, sampleCount - 1);
+        z = std::clamp(z, 0, sampleCount - 1);
+        return heights[x + z * sampleCount];
+    };
+
+    auto get_normal = [&](int x, int z) -> JPH::Vec3 {
+        float hL = get_height(x - 1, z);
+        float hR = get_height(x + 1, z);
+        float hD = get_height(x, z - 1);
+        float hU = get_height(x, z + 1);
+        return JPH::Vec3(hL - hR, 2.0f * dx, hD - hU).Normalized();
+    };
+
+    std::vector<VertexPosition>   positions;
+    std::vector<VertexAttributes> attributes;
+    size_t                        quadCount = static_cast<size_t>(sampleCount - 1) * (sampleCount - 1);
+    positions.reserve(quadCount * 6);
+    attributes.reserve(quadCount * 6);
+
+    for (int z = 0; z < sampleCount - 1; ++z) {
+        for (int x = 0; x < sampleCount - 1; ++x) {
+            int idxA = x + z * sampleCount;
+            int idxB = (x + 1) + z * sampleCount;
+            int idxC = x + (z + 1) * sampleCount;
+            int idxD = (x + 1) + (z + 1) * sampleCount;
+
+            float ax  = -halfSize + x * dx;
+            float az  = -halfSize + z * dz;
+            float bx  = -halfSize + (x + 1) * dx;
+            float bz  = -halfSize + z * dz;
+            float cx  = -halfSize + x * dx;
+            float cz  = -halfSize + (z + 1) * dz;
+            float dx_ = -halfSize + (x + 1) * dx;
+            float dz_ = -halfSize + (z + 1) * dz;
+
+            JPH::Vec3 nA = get_normal(x, z);
+            JPH::Vec3 nB = get_normal(x + 1, z);
+            JPH::Vec3 nC = get_normal(x, z + 1);
+            JPH::Vec3 nD = get_normal(x + 1, z + 1);
+
+            auto fetch_color = [&](int idx) {
+                const float* c = &colorsRGBA[static_cast<ptrdiff_t>(idx * 4)];
+                return Math::PackColor(c[0], c[1], c[2], c[3]);
+            };
+
+            VertexPosition   posA {{ax, heights[idxA], az}};
+            VertexAttributes attrA {
+                .normal  = Math::PackNormal(nA.GetX(), nA.GetY(), nA.GetZ()),
+                .tangent = Math::PackNormal(1, 0, 0, 1),
+                .uv      = Math::PackUV((float) x / sampleCount, (float) z / sampleCount),
+                .color   = fetch_color(idxA)
+            };
+
+            VertexPosition   posB {{bx, heights[idxB], bz}};
+            VertexAttributes attrB {
+                .normal  = Math::PackNormal(nB.GetX(), nB.GetY(), nB.GetZ()),
+                .tangent = Math::PackNormal(1, 0, 0, 1),
+                .uv      = Math::PackUV((float) (x + 1) / sampleCount, (float) z / sampleCount),
+                .color   = fetch_color(idxB)
+            };
+
+            VertexPosition   posC {{cx, heights[idxC], cz}};
+            VertexAttributes attrC {
+                .normal  = Math::PackNormal(nC.GetX(), nC.GetY(), nC.GetZ()),
+                .tangent = Math::PackNormal(1, 0, 0, 1),
+                .uv      = Math::PackUV((float) x / sampleCount, (float) (z + 1) / sampleCount),
+                .color   = fetch_color(idxC)
+            };
+
+            VertexPosition   posD {{dx_, heights[idxD], dz_}};
+            VertexAttributes attrD {
+                .normal  = Math::PackNormal(nD.GetX(), nD.GetY(), nD.GetZ()),
+                .tangent = Math::PackNormal(1, 0, 0, 1),
+                .uv      = Math::PackUV((float) (x + 1) / sampleCount, (float) (z + 1) / sampleCount),
+                .color   = fetch_color(idxD)
+            };
+
+            positions.push_back(posA);
+            attributes.push_back(attrA);
+            positions.push_back(posC);
+            attributes.push_back(attrC);
+            positions.push_back(posB);
+            attributes.push_back(attrB);
+            positions.push_back(posB);
+            attributes.push_back(attrB);
+            positions.push_back(posC);
+            attributes.push_back(attrC);
+            positions.push_back(posD);
+            attributes.push_back(attrD);
+        }
+    }
+
+    BufferHandle posVbo  = ctx.CreateVertexBuffer(positions.data(), positions.size() * sizeof(VertexPosition));
+    BufferHandle attrVbo = ctx.CreateVertexBuffer(attributes.data(), attributes.size() * sizeof(VertexAttributes));
+
+    Mesh finalMesh {.posBuffer = posVbo, .attrBuffer = attrVbo, .vertexCount = static_cast<uint32_t>(positions.size())};
+    ctx.BuildMeshBLAS(finalMesh);
+    return finalMesh;
+}
+
+Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight, float* outHeights, TerrainType type) {
     auto hash = [](float x, float y) -> float {
         uint32_t ix = 0;
         std::memcpy(&ix, &x, sizeof(float));
@@ -233,18 +339,45 @@ Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float m
     };
 
     auto get_height = [&](float x, float z) {
-        float val  = 0.0f;
-        float amp  = 0.5f;
-        float freq = 0.015f;
-        float tx   = x * freq;
-        float tz   = z * freq;
-        for (int i = 0; i < 4; i++) {
-            val += amp * noise(tx, tz);
-            tx *= 2.1f;
-            tz *= 2.15f;
-            amp *= 0.45f;
+        if (type == TerrainType::Snow) {
+            float tx = x * 0.012f;
+            float tz = z * 0.012f;
+
+            // Domain Warping to model wind-sculpted snow drifts and snow hills
+            float warpX = noise(tx + 1.2f, tz + 3.4f);
+            float warpZ = noise(tx + 5.6f, tz + 7.8f);
+
+            float val = 0.0f;
+            float amp = 0.5f;
+            float wx  = tx + warpX * 0.7f;
+            float wz  = tz + warpZ * 0.7f;
+
+            for (int i = 0; i < 5; i++) {
+                val += amp * noise(wx, wz);
+                wx *= 2.05f;
+                wz *= 2.05f;
+                amp *= 0.48f;
+            }
+
+            // Mountain ridge sharpness
+            float ridge = 1.0f - std::abs(noise(tx * 2.2f, tz * 2.2f) * 2.0f - 1.0f);
+            ridge *= ridge;
+
+            return (std::pow(val, 1.2f) * 0.75f + ridge * 0.25f) * maxHeight;
+        } else {
+            float val  = 0.0f;
+            float amp  = 0.5f;
+            float freq = 0.015f;
+            float tx   = x * freq;
+            float tz   = z * freq;
+            for (int i = 0; i < 4; i++) {
+                val += amp * noise(tx, tz);
+                tx *= 2.1f;
+                tz *= 2.15f;
+                amp *= 0.45f;
+            }
+            return std::pow(val, 1.4f) * maxHeight;
         }
-        return std::pow(val, 1.4f) * maxHeight;
     };
 
     float halfSize = worldSize / 2.0f;
@@ -304,17 +437,44 @@ Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float m
             auto get_color = [&](float y, JPH::Vec3 normal) {
                 float slope = normal.GetY();
                 float normY = y / maxHeight;
-                if (slope < 0.65f) {
-                    return Math::PackColor(0.35f, 0.32f, 0.29f, 1.0f);
+
+                if (type == TerrainType::Snow) {
+                    if (slope < 0.60f) {
+                        // Steep exposed dark slate cliff
+                        return Math::PackColor(0.22f, 0.25f, 0.30f, 1.0f);
+                    }
+                    if (slope < 0.72f) {
+                        // Transition: rock with light snow dusting
+                        float t = (slope - 0.60f) / 0.12f;
+                        float r = 0.22f + t * (0.88f - 0.22f);
+                        float g = 0.25f + t * (0.93f - 0.25f);
+                        float b = 0.30f + t * (0.98f - 0.30f);
+                        return Math::PackColor(r, g, b, 1.0f);
+                    }
+                    if (normY > 0.70f) {
+                        // High pristine snow peak
+                        return Math::PackColor(0.97f, 0.98f, 1.00f, 1.0f);
+                    }
+                    if (normY < 0.15f) {
+                        // Glacial ice tint in low hollows
+                        return Math::PackColor(0.75f, 0.88f, 0.96f, 1.0f);
+                    }
+                    // Fresh powder snow field
+                    float snowVar = 0.90f + 0.06f * std::sin(y * 0.4f);
+                    return Math::PackColor(snowVar * 0.95f, snowVar * 0.98f, snowVar, 1.0f);
+                } else {
+                    if (slope < 0.65f) {
+                        return Math::PackColor(0.35f, 0.32f, 0.29f, 1.0f);
+                    }
+                    if (normY > 0.75f) {
+                        return Math::PackColor(0.95f, 0.95f, 0.98f, 1.0f);
+                    }
+                    if (normY < 0.12f) {
+                        return Math::PackColor(0.72f, 0.64f, 0.48f, 1.0f);
+                    }
+                    float greenVar = 0.4f + 0.12f * std::sin(y * 0.5f);
+                    return Math::PackColor(0.12f, greenVar, 0.08f, 1.0f);
                 }
-                if (normY > 0.75f) {
-                    return Math::PackColor(0.95f, 0.95f, 0.98f, 1.0f);
-                }
-                if (normY < 0.12f) {
-                    return Math::PackColor(0.72f, 0.64f, 0.48f, 1.0f);
-                }
-                float greenVar = 0.4f + 0.12f * std::sin(y * 0.5f);
-                return Math::PackColor(0.12f, greenVar, 0.08f, 1.0f);
             };
 
             VertexPosition   posA  = {{ax, ay, az}};

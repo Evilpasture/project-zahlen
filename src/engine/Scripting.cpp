@@ -213,6 +213,16 @@ struct GetTrackNameArgs {
     char     outName[64];
 };
 
+struct SpawnTerrainArgs {
+    uint32_t     sampleCount;
+    float        worldSize;
+    float        maxHeight;
+    const float* heights;    // Optional: Pointer to Fennel heights (or nullptr)
+    const float* colorsRGBA; // Optional: Pointer to Fennel RGBA colors (or nullptr)
+    float        roughness;
+    float        metallic;
+};
+
 #pragma pack(pop)
 
 void SafeDestroyEntity(ZHLN::Engine* engine, ZHLN::Entity entity) {
@@ -464,6 +474,53 @@ void RegisterCreativeWorkCommands() {
                     }
                     return writtenCount;
                 }));
+
+    RegisterCmd(
+        "SpawnTerrain", MakeCmd<SpawnTerrainArgs>([](ZHLN::Engine* engine, const SpawnTerrainArgs& a) -> uint64_t {
+            auto& rc  = engine->GetRenderContext();
+            auto& pc  = engine->GetPhysicsContext();
+            auto& reg = engine->GetRegistry();
+
+            uint32_t samples   = (a.sampleCount > 0) ? a.sampleCount : 128;
+            float    worldSize = (a.worldSize > 0.0f) ? a.worldSize : 200.0f;
+            float    maxHeight = (a.maxHeight > 0.0f) ? a.maxHeight : 25.0f;
+
+            Mesh               mesh;
+            std::vector<float> heightsVec;
+
+            if (a.heights != nullptr && a.colorsRGBA != nullptr) {
+                // High-level path: Fennel generated heights and colors
+                mesh = ZHLN::CreativeWorksFactory::CreateTerrainFromData(rc, samples, worldSize, a.heights, a.colorsRGBA);
+                heightsVec.assign(a.heights, a.heights + (samples * samples));
+            } else {
+                // Default C++ heightmap generator
+                heightsVec.resize(static_cast<size_t>(samples) * samples);
+                mesh = ZHLN::CreativeWorksFactory::CreateTerrain(rc, samples, worldSize, maxHeight, heightsVec.data());
+            }
+
+            auto shape = ZHLN::Physics::CreateHeightFieldShape(heightsVec, samples, worldSize);
+
+            auto mat_res = ZHLN::CreativeWorksFactory::CreateBasicMaterial(rc);
+            if (!mat_res) {
+                return 0;
+            }
+            Material mat = mat_res.value();
+
+            Entity e = reg.Create();
+            reg.Add(e, Components::TransformComponent {.position = {0.0f, 0.0f, 0.0f}, .rotation = JPH::Quat::sIdentity(), .scale = {1.0f, 1.0f, 1.0f}});
+            reg.Add(e, Components::MeshComponent {.mesh = mesh, .material = mat, .cullRadius = worldSize * 1.5f});
+            reg.Add(
+                e, Components::PhysicsComponent {
+                       Physics::CreateRigidBody(pc, shape, JPH::RVec3(0.0f, 0.0f, 0.0f), JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0)
+                   }
+            );
+            reg.Add(e, Components::PhysicsStateComponent {});
+            reg.Add(e, Components::PBRComponent {.roughness = a.roughness, .metallic = a.metallic});
+            reg.Add(e, Components::NameComponent {.name = String64("Terrain")});
+
+            return e.Pack();
+        })
+    );
 
     RegisterCmd("SetupRagdoll", MakeCmd<SetupRagdollArgs>([](ZHLN::Engine* engine, const SetupRagdollArgs& a) -> uint64_t {
                     std::vector<ZHLN::Entity> parts(a.count);

@@ -427,6 +427,16 @@
           char outName[64];
       } GetTrackNameArgs;
 
+      typedef struct SpawnTerrainArgs {
+          uint32_t    sampleCount;
+          float       worldSize;
+          float       maxHeight;
+          const void* heights;
+          const void* colorsRGBA;
+          float       roughness;
+          float       metallic;
+      } SpawnTerrainArgs;
+
       #pragma pack(pop)
   "))
 

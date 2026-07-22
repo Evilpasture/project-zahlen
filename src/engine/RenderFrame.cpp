@@ -169,8 +169,8 @@ void RenderContext::Impl::DispatchSkinningPasses() {
                 .inSkinAddr       = skinMesh->vboAddress,
                 .outPosAddr       = scratchMesh->vboAddress,
                 .outAttrAddr      = scratchMesh->vboAddress + (scratchMesh->vertexCount * sizeof(VertexPosition)),
-                .jointsAddr       = Vk::GetBufferAddress(ctx.Device(), jointBuffers->Handle()),
-                .morphDeltasAddr  = Vk::GetBufferAddress(ctx.Device(), morphDeltasBuffer.Handle()),
+                .jointsAddr       = ctx.BufferAddress(jointBuffers->Handle()),
+                .morphDeltasAddr  = ctx.BufferAddress(morphDeltasBuffer.Handle()),
                 .vertexCount      = posMesh->vertexCount,
                 .jointOffset      = drawCmd.jointOffset,
                 .morphOffset      = drawCmd.morphOffset,
@@ -245,9 +245,9 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
               .dst_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_2_SHADER_READ_BIT}
     );
 
-    ZHLN_TlasGeometryDesc geom = {.instance_data = Vk::GetBufferAddress(ctx.Device(), instanceBuf.Handle())};
+    ZHLN_TlasGeometryDesc geom = {.instance_data = ctx.BufferAddress(instanceBuf.Handle())};
 
-    rtCtx.CmdBuildTlas(cmd, geom, tlas[], Vk::GetBufferAddress(ctx.Device(), tlasScratchBuffer->Handle()), tlasInstancesScratch.size());
+    rtCtx.CmdBuildTlas(cmd, geom, tlas[], ctx.BufferAddress(tlasScratchBuffer->Handle()), tlasInstancesScratch.size());
 
     Vk::MemoryBarrier(
         cmd, {.src_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
@@ -330,6 +330,28 @@ struct PassFactory {
                 }
             );
             Vk::ExecuteCommands(c, rec.GetCommandBuffers());
+        });
+    }
+
+    [[nodiscard]] auto MakeParticleUpdatePass() const noexcept {
+        return Vk::MakePass<"ParticleUpdate">([this](VkCommandBuffer c) noexcept {
+            if (!self.particleUpdatePass.pipeline.Valid()) {
+                return;
+            }
+
+            struct ParticlePushConstants {
+                VkDeviceAddress particleBufferAddr;
+                uint32_t        particleCount;
+                float           deltaTime;
+            } pc = {
+                .particleBufferAddr = self.ctx.BufferAddress(self.particleBuffer.Handle()),
+                .particleCount      = RenderContext::Impl::kGpuParticleCount,
+                .deltaTime          = 0.0166f
+            };
+
+            // Bind set 0 (bindlessSet) along with the compute dispatch
+            VkDescriptorSet bindlessSet = self.bindlessSets[self.frame_index];
+            self.particleUpdatePass.Dispatch(c, bindlessSet, (RenderContext::Impl::kGpuParticleCount + 63) / 64, 1, 1, pc);
         });
     }
 
@@ -676,7 +698,9 @@ struct PassFactory {
 
 // --- Extract Compute Passes into their own graph ---
 auto BuildComputeGraph(const PassFactory& factory) {
-    return Vk::CompileTimeFrameGraph(factory.MakeVoxelInjectionPass(), factory.MakeVoxelScatteringPass(), factory.MakeVoxelIntegrationPass());
+    return Vk::CompileTimeFrameGraph(
+        factory.MakeVoxelInjectionPass(), factory.MakeVoxelScatteringPass(), factory.MakeVoxelIntegrationPass(), factory.MakeParticleUpdatePass()
+    );
 }
 
 // ============================================================================

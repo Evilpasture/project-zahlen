@@ -76,6 +76,80 @@ bool CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept {
 
 namespace ZHLN {
 
+std::expected<void, Error> RenderContext::Impl::InitParticleResources() {
+    size_t bufferSize = sizeof(Particle) * kGpuParticleCount;
+
+    return Vk::Buffer::Create(
+               allocator.Get(), bufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+               VMA_MEMORY_USAGE_GPU_ONLY
+    )
+        .transform_error([](VkResult res) -> Error { return res; })
+        .and_then([&, bufferSize](auto&& buf) -> std::expected<void, Error> {
+            particleBuffer = std::forward<decltype(buf)>(buf);
+
+            // Warm-up / seed initial particle state (all inactive/buried initially)
+            std::vector<Particle> initialParticles(kGpuParticleCount);
+            for (uint32_t i = 0; i < kGpuParticleCount; ++i) {
+                initialParticles[i].position = {0.0f, -1000.0f, 0.0f};
+                initialParticles[i].life     = 0.0f;
+            }
+
+            auto stagingAlloc = stagingRingBuffer.Allocate(bufferSize);
+            std::memcpy(stagingAlloc.mappedData, initialParticles.data(), bufferSize);
+
+            Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
+                Vk::CopyRingBuffer(cmd, stagingAlloc, particleBuffer, bufferSize);
+            });
+
+            return {};
+        });
+}
+
+std::expected<void, Error> RenderContext::Impl::BuildParticlePipelines() {
+    using enum Resource::ShaderID;
+
+    // 1. Build GPU Compute Simulation Pipeline (particle_update.hlsl)
+    auto                csShader   = Vk::CreateShaderDesc(Resource::GetShaderProgram(ParticleUpdate).vertex);
+    VkPushConstantRange updatePush = {
+        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(VkDeviceAddress) + sizeof(uint32_t) + sizeof(float)
+    };
+
+    if (!particleUpdatePass.Build(ctx.Device(), bindlessLayout.Get(), csShader, &updatePush, 1)) {
+        ZHLN::Log("ERROR: Failed to build particle update compute pipeline!");
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
+    }
+
+    // 2. Build Billboard Graphics Pipeline (particle_render.hlsl)
+    return Vk::PipelineLayoutBuilder(ctx.Device())
+        .AddDescriptorSetLayout(bindlessLayout.Get())
+        .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT, sizeof(VkDeviceAddress))
+        .Build()
+        .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
+        .and_then([&](auto&& layout) -> std::expected<void, Error> {
+            particleRenderLayout = std::forward<decltype(layout)>(layout);
+
+            auto renderShaders = Resource::GetShaderProgram(ParticleRender);
+            return LoadAndCreateShaders(
+                       {.path = SHADER_PARTICLE_RENDER_VS_PATH, .fallback = renderShaders.vertex, .entryPoint = "VSMain"},
+                       {.path = SHADER_PARTICLE_RENDER_PS_PATH, .fallback = renderShaders.fragment, .entryPoint = "PSMain"}
+            )
+                .and_then([&](auto&& shaders) -> std::expected<void, Error> {
+                    return Vk::PipelineBuilder {}
+                        .Shaders(shaders)
+                        .Layout(particleRenderLayout.Get())
+                        .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT}) // Target HDR scene color
+                        .DepthFormat(VK_FORMAT_D32_SFLOAT)
+                        .DepthTest(true)
+                        .DepthWrite(false)
+                        .AdditiveBlend()
+                        .AlphaBlend() // Enable transparent particle blending
+                        .CullNone()
+                        .Build(ctx.Device())
+                        .transform([&](auto&& pipeline) { particleRenderPipeline = std::forward<decltype(pipeline)>(pipeline); });
+                });
+        });
+}
+
 std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int height) {
     using enum Resource::ShaderID;
 
@@ -107,6 +181,7 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
         })
         .and_then([&]() { return InitCullingResources(); })
         .and_then([&]() { return InitBindless(); })
+        .and_then([&]() { return InitParticleResources(); })
         .and_then([&]() { return BuildHangGpuPipeline(); })
         .and_then([&]() {
             return CompileShadowPipeline(
@@ -759,7 +834,7 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
                 }
                 auto gpu_buf = std::move(*gpu_buf_res);
 
-                auto address        = Vk::GetBufferAddress(ctx.Device(), gpu_buf.Handle());
+                auto address        = ctx.BufferAddress(gpu_buf.Handle());
                 debugMeshHandles[i] = meshPool.Create(std::move(gpu_buf), maxDebugVerts, address);
             }
 
@@ -1058,6 +1133,13 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
             return register_and_check(
                 "Volumetrics", buildVolumetrics,
                 {SHADER_VOLUMETRIC_INJECTION_CS_PATH, SHADER_VOLUMETRIC_SCATTERING_CS_PATH, SHADER_VOLUMETRIC_INTEGRATION_CS_PATH}
+            );
+        })
+        .and_then([&]() {
+            // Build Particle Compute + Render Pipelines
+            return register_and_check(
+                "Particles", [this]() { return BuildParticlePipelines(); },
+                {SHADER_PARTICLE_UPDATE_CS_PATH, SHADER_PARTICLE_RENDER_VS_PATH, SHADER_PARTICLE_RENDER_PS_PATH}
             );
         })
         .and_then([&]() { return register_and_check("Blit", [this]() { return BuildBlitPipeline(); }, {SHADER_BLIT_HLSL_VS_PATH, SHADER_BLIT_HLSL_PS_PATH}); })

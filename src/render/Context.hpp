@@ -46,6 +46,10 @@ class Context {
         return _physical;
     }
 
+    [[nodiscard]] auto BufferAddress(VkBuffer buffer) const noexcept -> VkDeviceAddress {
+        return ZHLN_GetBufferDeviceAddress(_device.handle, buffer);
+    }
+
     [[nodiscard("Always verify context initialization; check Valid() before use")]]
     auto Valid() const noexcept -> bool {
         return _device.handle != VK_NULL_HANDLE;

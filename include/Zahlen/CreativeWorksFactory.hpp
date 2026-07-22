@@ -23,13 +23,17 @@ class Registry;
 } // namespace ZHLN
 
 namespace ZHLN::CreativeWorksFactory {
+enum class TerrainType : uint8_t { Default = 0, Snow = 1, Desert = 2 };
+
 Mesh CreateTetrahedron(RenderContext& ctx);
 Mesh CreatePlane(RenderContext& ctx, float extent = 10.0f, const JPH::Vec4& color = {0.6f, 0.6f, 0.6f, 1.0f});
 Mesh CreateBox(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f});
 
 [[nodiscard]] std::expected<Material, Error> CreateBasicMaterial(RenderContext& ctx, bool doubleSided = false, bool alphaBlend = false);
 
-Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight, float* outHeights);
+Mesh CreateTerrainFromData(RenderContext& ctx, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA);
+
+Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight, float* outHeights, TerrainType type = TerrainType::Default);
 
 uint32_t CreateFontAtlasTexture(RenderContext& ctx);
 

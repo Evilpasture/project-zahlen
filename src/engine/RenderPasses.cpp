@@ -405,12 +405,24 @@ void ForwardPass::Execute(
         .AddColor(litColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddDepth(depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .Execute(cmd, [&]() {
-            for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
-                const auto& drawCmd = ctx.drawQueue[i];
-                if (IsForwardOnly(drawCmd.instanceData.flags) && drawCmd.material->pipeline.Valid()) {
-                    const ObjectConstants pushConstants = {.instanceId = i, .isShadowPass = 0};
-                    SubmitDrawInstanced(recorder.encoder, drawCmd, i, recorder.bindlessSet, pushConstants);
-                }
+            // Draw standard forward transparent geometry...
+
+            // --- DRAW 65,536 GPU SNOWFLAKE BILLBOARDS (NATIVE FRAMEWORK) ---
+            if (ctx.particleRenderPipeline.Valid()) {
+                struct ParticleRenderPushConstants {
+                    VkDeviceAddress particleBufferAddr;
+                } pc = {.particleBufferAddr = ctx.BufferAddress(ctx.particleBuffer.Handle())};
+
+                recorder.encoder.DrawInstanced(
+                    {.pipeline      = ctx.particleRenderPipeline.Get(),
+                     .layout        = ctx.particleRenderLayout.Get(),
+                     .set           = recorder.bindlessSet,
+                     .vertexCount   = 6, // Quad (2 triangles = 6 vertices)
+                     .instanceCount = RenderContext::Impl::kGpuParticleCount,
+                     .firstVertex   = 0,
+                     .firstInstance = 0},
+                    pc, VK_SHADER_STAGE_VERTEX_BIT
+                );
             }
         });
 }

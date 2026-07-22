@@ -430,6 +430,8 @@ compile_fennel(zahlen_engine COMPILED_LUA_FILES
     "${CMAKE_SOURCE_DIR}/scripts/core/ffi_cdef.fnl"
     "${CMAKE_SOURCE_DIR}/scripts/gameplay.fnl"
     "${CMAKE_SOURCE_DIR}/scripts/gameplay_template.fnl"
+    "${CMAKE_SOURCE_DIR}/scripts/gameplay_volumetric.fnl"
+    "${CMAKE_SOURCE_DIR}/scripts/gameplay_snow.fnl"
     "${CMAKE_SOURCE_DIR}/scripts/main_menu.fnl"
     "${CMAKE_SOURCE_DIR}/scripts/dialogue_db.fnl"
 )

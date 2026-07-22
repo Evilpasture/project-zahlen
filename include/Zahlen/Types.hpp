@@ -134,6 +134,19 @@ enum class LightType : uint32_t {
 };
 static_assert(sizeof(LightType) == sizeof(uint32_t));
 
+// 64-byte struct matching particle_update.hlsl & particle_render.hlsl 1:1
+struct alignas(16) Particle {
+    std::array<float, 3> position = {0.0f, 0.0f, 0.0f};
+    float                life     = 0.0f;
+    std::array<float, 3> velocity = {0.0f, 0.0f, 0.0f};
+    float                maxLife  = 0.0f;
+    std::array<float, 4> color    = {1.0f, 1.0f, 1.0f, 1.0f};
+    float                size     = 0.05f;
+    std::array<float, 3> _pad     = {0.0f, 0.0f, 0.0f};
+};
+
+static_assert(sizeof(Particle) == 64, "Particle struct must be 64 bytes to match HLSL layout");
+
 // Align structures to 16-byte boundaries to match HLSL std430 layout
 struct alignas(16) GPULight {
     float     position[3];

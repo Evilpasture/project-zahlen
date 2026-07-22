@@ -171,10 +171,15 @@ consteval auto ComputeStateTable() {
                     auto check_pass = [&]<typename Pass>() {
                         using Usages = typename Pass::Usages;
                         written |= []<size_t... Js>(std::index_sequence<Js...>) {
-                            return (
-                                (std::is_same_v<typename Usages::template type<Js>::Resource, R> && ((Usages::template type<Js>::access & WriteMask) != 0)) ||
-                                ...
-                            );
+                            if constexpr (sizeof...(Js) == 0) {
+                                return false; // Short-circuit passes with no image usages
+                            } else {
+                                return (
+                                    (std::is_same_v<typename Usages::template type<Js>::Resource, R> &&
+                                     ((Usages::template type<Js>::access & WriteMask) != 0)) ||
+                                    ...
+                                );
+                            }
                         }(std::make_index_sequence<Usages::size> {});
                     };
                     (check_pass.template operator()<Passes>(), ...);
@@ -196,19 +201,21 @@ consteval auto ComputeStateTable() {
                             }
                             using Usages = typename Pass::Usages;
                             [&]<size_t... Js>(std::index_sequence<Js...>) {
-                                (([&]() {
-                                     if (found) {
-                                         return;
-                                     }
-                                     using U = typename Usages::template type<Js>;
-                                     if constexpr (std::is_same_v<typename U::Resource, R>) {
-                                         layout = U::layout;
-                                         stage  = U::stage;
-                                         access = U::access;
-                                         found  = true;
-                                     }
-                                 }()),
-                                 ...);
+                                if constexpr (sizeof...(Js) > 0) {
+                                    (([&]() {
+                                         if (found) {
+                                             return;
+                                         }
+                                         using U = typename Usages::template type<Js>;
+                                         if constexpr (std::is_same_v<typename U::Resource, R>) {
+                                             layout = U::layout;
+                                             stage  = U::stage;
+                                             access = U::access;
+                                             found  = true;
+                                         }
+                                     }()),
+                                     ...);
+                                }
                             }(std::make_index_sequence<Usages::size> {});
                         };
                         (check_pass.template operator()<Passes>(), ...);
@@ -249,10 +256,9 @@ consteval auto ComputeStateTable() {
                         constexpr bool is_write = (U::access & WriteMask) != 0;
 
                         current_states[r_idx] = ResourceState {
-                            .layout = U::layout,
-                            .stage  = U::stage,
-                            .access = U::access,
-                            // Track when the resource was last modified in this frame cycle
+                            .layout            = U::layout,
+                            .stage             = U::stage,
+                            .access            = U::access,
                             .lastWritePass     = is_write ? pass_idx : current_states[r_idx].lastWritePass,
                             .fromPreviousFrame = is_write ? false : current_states[r_idx].fromPreviousFrame
                         };
@@ -279,10 +285,15 @@ consteval auto ComputeStateTable() {
                     auto check_pass = [&]<typename Pass>() {
                         using Usages = typename Pass::Usages;
                         written |= []<size_t... Js>(std::index_sequence<Js...>) {
-                            return (
-                                (std::is_same_v<typename Usages::template type<Js>::Resource, R> && ((Usages::template type<Js>::access & WriteMask) != 0)) ||
-                                ...
-                            );
+                            if constexpr (sizeof...(Js) == 0) {
+                                return false; // Short-circuit passes with no image usages
+                            } else {
+                                return (
+                                    (std::is_same_v<typename Usages::template type<Js>::Resource, R> &&
+                                     ((Usages::template type<Js>::access & WriteMask) != 0)) ||
+                                    ...
+                                );
+                            }
                         }(std::make_index_sequence<Usages::size> {});
                     };
                     (check_pass.template operator()<Passes>(), ...);
@@ -290,7 +301,6 @@ consteval auto ComputeStateTable() {
                 }();
 
                 if constexpr (R::is_swapchain) {
-                    // Swapchain must synchronize with the acquire semaphore wait stage
                     current_states[I] = ResourceState {
                         .layout            = VK_IMAGE_LAYOUT_UNDEFINED,
                         .stage             = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -305,7 +315,6 @@ consteval auto ComputeStateTable() {
                 } else if constexpr (!is_written) {
                     // Keep the external read-only input state intact
                 } else {
-                    // If the resource was written in the previous frame, flag it
                     if (current_states[I].lastWritePass < 999999) {
                         current_states[I].fromPreviousFrame = true;
                     }

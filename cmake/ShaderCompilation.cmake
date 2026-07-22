@@ -59,7 +59,7 @@ function(add_shader_target TARGET_SUFFIX)
             string(REPLACE " " ";" STAGE_SPECIFIC_ARGS "${STAGE_SPECIFIC_ARGS}")
         endif()
 
-        # FIXED: Pass ${MACRO} as the unique output variable name to prevent collisions
+        # Pass ${MACRO} as the unique output variable name to prevent collisions
         compile_hlsl("${SHADER_PATH}" ${ENTRY} ${PROFILE} ${MACRO} ${ARG_EXTRA_ARGS} ${STAGE_SPECIFIC_ARGS})
 
         list(APPEND OUTPUTS ${${MACRO}})
@@ -95,7 +95,6 @@ function(compile_shaders TARGET_NAME)
             string(MAKE_C_IDENTIFIER "SHADER_${FILE_NAME}_${EXT}_PATH" MACRO_NAME)
             string(TOUPPER ${MACRO_NAME} MACRO_NAME)
 
-            # FIXED: Pass ${MACRO_NAME} to prevent any future collision
             compile_hlsl("${HLSL_SRC}" ${ENTRY} ${PROFILE} ${MACRO_NAME})
             list(APPEND ALL_SPV_OUTPUTS ${${MACRO_NAME}})
             list(APPEND ALL_SHADER_DEFINITIONS "${MACRO_NAME}=\"${${MACRO_NAME}}\"")
@@ -171,6 +170,18 @@ add_shader_target(vol_scatter_shader
 
 add_shader_target(vol_integrate_shader
     STAGES "${SHADER_SRC_DIR}/volumetric_integration.hlsl|CSMain|cs_6_0|SHADER_VOLUMETRIC_INTEGRATION_CS_PATH"
+)
+
+# --- GPU PARTICLE SHADERS ---
+
+add_shader_target(particle_update_shader
+    STAGES "${SHADER_SRC_DIR}/particle_update.hlsl|CSMain|cs_6_0|SHADER_PARTICLE_UPDATE_CS_PATH"
+)
+
+add_shader_target(particle_render_shader
+    STAGES
+        "${SHADER_SRC_DIR}/particle_render.hlsl|VSMain|vs_6_5|SHADER_PARTICLE_RENDER_VS_PATH"
+        "${SHADER_SRC_DIR}/particle_render.hlsl|PSMain|ps_6_5|SHADER_PARTICLE_RENDER_PS_PATH"
 )
 
 # --- Multi-stage (VS+PS) targets, RT vs NoRT variants ---
