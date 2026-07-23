@@ -7,17 +7,6 @@
 namespace ZHLN::Vk {
 
 // ============================================================================
-// ResourceName Template Definitions
-// ============================================================================
-
-template <size_t N>
-constexpr ResourceName<N>::ResourceName(const char (&str)[N]) {
-    for (size_t i = 0; i < N; ++i) {
-        value[i] = str[i];
-    }
-}
-
-// ============================================================================
 // detail Metaprogramming & Simulation Definitions
 // ============================================================================
 
@@ -108,47 +97,42 @@ constexpr auto ConstexprString<Capacity>::string_view() const noexcept -> std::s
 
 template <typename ResourceList, typename Target>
 consteval auto GetResourceIndex() -> size_t {
-    constexpr size_t idx = GetResourceIndexImpl<Target>(ResourceList {});
+    if constexpr (std::is_same_v<Target, detail::DummyResource>) {
+        return 0; // Dummy resources bypass index lookup safely
+    } else {
+        constexpr size_t idx = GetResourceIndexImpl<Target>(ResourceList {});
 
-    if constexpr (idx >= ResourceList::size) {
-        constexpr auto error_message = []() consteval {
-            ConstexprString<2048> msg {};
-            msg.append("\n\n");
-            msg.append(
-                "==========================================================================="
-                "=====\n"
-            );
-            msg.append("  [GRAPH COMPILATION ERROR]\n");
-            msg.append(
-                "==========================================================================="
-                "=====\n\n"
-            );
-            msg.append("  The requested resource is not registered in this Frame Graph!\n\n");
-            msg.append("  Missing Resource:\n");
-            msg.append("    - \"");
-            msg.append(std::string_view(Target::name.value.data(), Target::name.value.size()));
-            msg.append("\"\n\n");
-            msg.append("  Registered Resources in this Graph:\n");
-
-            auto append_name = [&]<typename R>() {
+        if constexpr (idx >= ResourceList::size) {
+            constexpr auto error_message = []() consteval {
+                ConstexprString<2048> msg {};
+                msg.append("\n\n");
+                msg.append("================================================================================\n");
+                msg.append("  [GRAPH COMPILATION ERROR]\n");
+                msg.append("================================================================================\n\n");
+                msg.append("  The requested resource is not registered in this Frame Graph!\n\n");
+                msg.append("  Missing Resource:\n");
                 msg.append("    - \"");
-                msg.append(std::string_view(R::name.value.data(), R::name.value.size()));
-                msg.append("\"\n");
-            };
+                msg.append(std::string_view(Target::name.value.data(), Target::name.value.size()));
+                msg.append("\"\n\n");
+                msg.append("  Registered Resources in this Graph:\n");
 
-            [&]<typename... Us>(TypeList<Us...>) { (append_name.template operator()<Us>(), ...); }(ResourceList {});
+                auto append_name = [&]<typename R>() {
+                    msg.append("    - \"");
+                    msg.append(std::string_view(R::name.value.data(), R::name.value.size()));
+                    msg.append("\"\n");
+                };
 
-            msg.append(
-                "==========================================================================="
-                "=====\n\n"
-            );
-            return msg;
-        }();
+                [&]<typename... Us>(TypeList<Us...>) { (append_name.template operator()<Us>(), ...); }(ResourceList {});
 
-        static_assert(idx < ResourceList::size, error_message.string_view());
+                msg.append("================================================================================\n\n");
+                return msg;
+            }();
+
+            static_assert(idx < ResourceList::size, error_message.string_view());
+        }
+
+        return idx;
     }
-
-    return idx;
 }
 
 template <typename ResourceList, typename... Passes>

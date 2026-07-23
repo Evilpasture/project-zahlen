@@ -17,8 +17,13 @@ template <size_t N>
 struct ResourceName {
     std::array<char, N> value {};
 
+    // Define constructor inline so it is immediately available for constexpr initialization
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
-    constexpr ResourceName(const char (&str)[N]);
+    constexpr ResourceName(const char (&str)[N]) {
+        for (size_t i = 0; i < N; ++i) {
+            value[i] = str[i];
+        }
+    }
 };
 
 // Defined early so GraphPass and MakePass can resolve it during compilation
@@ -40,6 +45,9 @@ struct IsInList<Vk::TypeList<Ts...>, Target> {
 };
 
 namespace detail {
+struct DummyResource {
+    static constexpr auto name = ResourceName("DummyResource");
+};
 // Dummy usage stub for zero-usage passes (e.g. BDA compute passes)
 struct DummyUsage {
     struct Resource {};
@@ -247,19 +255,23 @@ class CompileTimeFrameGraph {
     template <size_t PassIndex, typename PassType>
     static consteval size_t CountRequiredBarriers() {
         using Usages = typename PassType::Usages;
-        return []<size_t... Is>(std::index_sequence<Is...>) {
-            size_t count = 0;
-            ((count +=
-              []() {
-                  using UsageType                            = typename Usages::template type<Is>;
-                  using Img                                  = typename UsageType::Resource;
-                  constexpr size_t                r_idx      = detail::GetResourceIndex<Resources, Img>();
-                  constexpr detail::ResourceState prev_state = StateTable[PassIndex][r_idx];
-                  return detail::NeedsBarrier<prev_state, UsageType, PassIndex>::value ? 1 : 0;
-              }()),
-             ...);
-            return count;
-        }(std::make_index_sequence<Usages::size> {});
+        if constexpr (Usages::size == 0) {
+            return 0; // Short-circuit passes with zero image usages
+        } else {
+            return []<size_t... Is>(std::index_sequence<Is...>) {
+                size_t count = 0;
+                ((count +=
+                  []() {
+                      using UsageType                            = typename Usages::template type<Is>;
+                      using Img                                  = typename UsageType::Resource;
+                      constexpr size_t                r_idx      = detail::GetResourceIndex<Resources, Img>();
+                      constexpr detail::ResourceState prev_state = StateTable[PassIndex][r_idx];
+                      return detail::NeedsBarrier<prev_state, UsageType, PassIndex>::value ? 1 : 0;
+                  }()),
+                 ...);
+                return count;
+            }(std::make_index_sequence<Usages::size> {});
+        }
     }
 
     template <size_t PassIndex, typename PassType, size_t BarrierCount>
@@ -267,21 +279,25 @@ class CompileTimeFrameGraph {
         std::array<size_t, BarrierCount> indices {};
         using Usages = typename PassType::Usages;
 
-        [&]<size_t... Is>(std::index_sequence<Is...>) {
-            size_t write_idx = 0;
-            (([&]() {
-                 using UsageType                            = typename Usages::template type<Is>;
-                 using Img                                  = typename UsageType::Resource;
-                 constexpr size_t                r_idx      = detail::GetResourceIndex<Resources, Img>();
-                 constexpr detail::ResourceState prev_state = StateTable[PassIndex][r_idx];
-                 if constexpr (detail::NeedsBarrier<prev_state, UsageType, PassIndex>::value) {
-                     indices[write_idx++] = Is;
-                 }
-             }()),
-             ...);
-        }(std::make_index_sequence<Usages::size> {});
+        if constexpr (Usages::size == 0) {
+            return indices; // Short-circuit passes with zero image usages
+        } else {
+            [&]<size_t... Is>(std::index_sequence<Is...>) {
+                size_t write_idx = 0;
+                (([&]() {
+                     using UsageType                            = typename Usages::template type<Is>;
+                     using Img                                  = typename UsageType::Resource;
+                     constexpr size_t                r_idx      = detail::GetResourceIndex<Resources, Img>();
+                     constexpr detail::ResourceState prev_state = StateTable[PassIndex][r_idx];
+                     if constexpr (detail::NeedsBarrier<prev_state, UsageType, PassIndex>::value) {
+                         indices[write_idx++] = Is;
+                     }
+                 }()),
+                 ...);
+            }(std::make_index_sequence<Usages::size> {});
 
-        return indices;
+            return indices;
+        }
     }
 
     template <size_t PassIndex, typename PassType>
