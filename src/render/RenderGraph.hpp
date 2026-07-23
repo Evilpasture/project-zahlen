@@ -50,7 +50,7 @@ struct DummyResource {
 };
 // Dummy usage stub for zero-usage passes (e.g. BDA compute passes)
 struct DummyUsage {
-    struct Resource {};
+    using Resource                                = DummyResource;
     static constexpr VkImageLayout         layout = VK_IMAGE_LAYOUT_UNDEFINED;
     static constexpr VkPipelineStageFlags2 stage  = VK_PIPELINE_STAGE_2_NONE;
     static constexpr VkAccessFlags2        access = 0;

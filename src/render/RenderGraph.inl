@@ -230,25 +230,27 @@ consteval auto ComputeStateTable() {
 
             using Usages = typename Pass::Usages;
 
-            [&]<size_t... Is>(std::index_sequence<Is...>) {
-                (
-                    [&]<size_t I>() {
-                        using U                = typename Usages::template type<I>;
-                        using Img              = typename U::Resource;
-                        constexpr size_t r_idx = GetResourceIndex<ResourceList, Img>();
+            if constexpr (Usages::size > 0) { // <--- Add guard here
+                [&]<size_t... Is>(std::index_sequence<Is...>) {
+                    (
+                        [&]<size_t I>() {
+                            using U                = typename Usages::template type<I>;
+                            using Img              = typename U::Resource;
+                            constexpr size_t r_idx = GetResourceIndex<ResourceList, Img>();
 
-                        constexpr bool is_write = (U::access & WriteMask) != 0;
+                            constexpr bool is_write = (U::access & WriteMask) != 0;
 
-                        current_states[r_idx] = ResourceState {
-                            .layout            = U::layout,
-                            .stage             = U::stage,
-                            .access            = U::access,
-                            .lastWritePass     = is_write ? pass_idx : current_states[r_idx].lastWritePass,
-                            .fromPreviousFrame = is_write ? false : current_states[r_idx].fromPreviousFrame
-                        };
-                    }.template operator()<Is>(),
-                    ...);
-            }(std::make_index_sequence<Usages::size> {});
+                            current_states[r_idx] = ResourceState {
+                                .layout            = U::layout,
+                                .stage             = U::stage,
+                                .access            = U::access,
+                                .lastWritePass     = is_write ? pass_idx : current_states[r_idx].lastWritePass,
+                                .fromPreviousFrame = is_write ? false : current_states[r_idx].fromPreviousFrame
+                            };
+                        }.template operator()<Is>(),
+                        ...);
+                }(std::make_index_sequence<Usages::size> {});
+            }
 
             pass_idx++;
         };
