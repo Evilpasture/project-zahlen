@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 
-# tools/asset_utils/converter.py
+# tools/asset_utils/export_pomni.py
 import subprocess
 import os
 
