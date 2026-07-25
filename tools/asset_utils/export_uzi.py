@@ -9,7 +9,7 @@ import json
 
 
 def export_uzi_to_glb(blend_path: str, glb_path: str) -> bool:
-    """Exports Uzi .blend to .glb natively with clean character actions and no mesh-level animation trash."""
+    """Exports Uzi .blend to .glb natively with Blender 5.x Armature ActionSlot bindings."""
     blend_path = os.path.abspath(blend_path)
     glb_path = os.path.abspath(glb_path)
 
@@ -64,11 +64,9 @@ def patch_blender_52_gltf_cache_bug():
         print(f"[~] Notice while patching glTF exporter: {e}", flush=True)
 
 def setup_environment_and_drivers():
-    # Enables Python script execution for rig drivers and un-hides elements for evaluation.
-    print("[*] Enabling Python script auto-execution for rig drivers...", flush=True)
+    print("[*] Enabling Python script auto-execution for rig UI...", flush=True)
     bpy.context.preferences.filepaths.use_scripts_auto_execute = True
 
-    # Execute embedded rig scripts (Toxilisk_DroneUI.py) if present
     for txt in bpy.data.texts:
         if txt.name.endswith(".py") or any(k in txt.name.lower() for k in ["rig", "driver", "ui"]):
             try:
@@ -77,7 +75,6 @@ def setup_environment_and_drivers():
             except Exception as e:
                 print(f"  [~] Notice running embedded script '{txt.name}': {e}", flush=True)
 
-    # Un-exclude view layer collections so depsgraph can calculate target meshes
     layer_collections = [bpy.context.view_layer.layer_collection]
     while layer_collections:
         l_c = layer_collections.pop(0)
@@ -88,7 +85,6 @@ def setup_environment_and_drivers():
     bpy.context.view_layer.update()
 
 def convert_emission_shaders_to_pbr():
-    # Evaluates Emission shader nodes (Color * Strength) and converts them to glTF-compatible Principled BSDF.
     print("[*] Converting Emission shader nodes to glTF-compatible PBR materials...", flush=True)
 
     for mat in bpy.data.materials:
@@ -161,7 +157,6 @@ def convert_emission_shaders_to_pbr():
     bpy.context.view_layer.update()
 
 def convert_hair_curves_to_mesh():
-    # Converts renderable hair curves/NURBS to mesh geometry for glTF export.
     print("[*] Converting renderable hair curves to mesh...", flush=True)
     if bpy.ops.object.mode_set.poll():
         bpy.ops.object.mode_set(mode='OBJECT')
@@ -180,8 +175,6 @@ def convert_hair_curves_to_mesh():
     bpy.context.view_layer.update()
 
 def align_facial_mesh_parenting():
-    # Re-parents Teeth and Tongue directly to Head_Parent so control bone offsets (CTR-Bot_Teeth)
-    # do not push the baked shrinkwrapped teeth away from Mouth_Shrink during animation playback.
     print("[*] Aligning facial mesh parenting with Mouth_Shrink screen...", flush=True)
     mouth_shrink = bpy.data.objects.get("Mouth_Shrink")
     target_parent = mouth_shrink.parent if mouth_shrink else None
@@ -201,7 +194,6 @@ def align_facial_mesh_parenting():
     bpy.context.view_layer.update()
 
 def bake_facial_shrinkwrap_only():
-    # Bakes Shrinkwrap modifiers ONLY for facial meshes (Teeth, Tongue, Mouth, Eyelids) in POSE mode.
     print("[*] Baking facial Shrinkwrap modifiers while keeping body skinning intact...", flush=True)
 
     for arm in [o for o in bpy.data.objects if o.type == 'ARMATURE']:
@@ -297,23 +289,96 @@ def bake_facial_shrinkwrap_only():
 
     bpy.context.view_layer.update()
 
-def setup_rig_actions_and_purge_mesh_tracks(main_rig):
-    # Clears object-level animation data from mesh/curve objects so glTF exporter does NOT
-    # generate individual animation tracks for meshes (Cylinder.007, Circle.076, etc.).
-    # Binds all 6 character actions to main_rig with Blender 5.2 Action Slots.
-    print("[*] Setting up character actions and purging mesh-level animation tracks...", flush=True)
+def is_armature_action(action, main_rig):
+    # Dynamically checks if an action targets pose bones or is stashed on the armature.
+    if not action:
+        return False
 
-    if not main_rig:
-        return
+    if main_rig and main_rig.animation_data:
+        for track in main_rig.animation_data.nla_tracks:
+            for strip in track.strips:
+                if strip.action == action:
+                    return True
 
-    # 1. Clear animation_data on all non-armature objects
+    if hasattr(action, "fcurves"):
+        for fc in action.fcurves:
+            if fc.data_path.startswith("pose.bones"):
+                return True
+
+    if hasattr(action, "layers"):
+        for layer in action.layers:
+            for strip in layer.strips:
+                for slot in getattr(action, "slots", []):
+                    cb = strip.channelbag(slot) if hasattr(strip, "channelbag") else None
+                    if cb and hasattr(cb, "fcurves"):
+                        for fc in cb.fcurves:
+                            if fc.data_path.startswith("pose.bones"):
+                                return True
+
+    return False
+
+def purge_non_armature_animation_data(main_rig):
+    # Clears animation data from non-armature objects and purges orphan object actions.
+    print("[*] Dynamically purging non-armature animation data...", flush=True)
+
     for obj in list(bpy.data.objects):
         if obj != main_rig and obj.type != 'ARMATURE':
             if obj.animation_data:
                 obj.animation_data_clear()
-                print(f"  [-] Cleared mesh animation data from: '{obj.name}'", flush=True)
 
-    # 2. Select main_rig and make it active
+            if hasattr(obj, "data") and obj.data and hasattr(obj.data, "animation_data") and obj.data.animation_data:
+                obj.data.animation_data_clear()
+
+            if hasattr(obj, "data") and obj.data and hasattr(obj.data, "shape_keys") and obj.data.shape_keys:
+                if obj.data.shape_keys.animation_data:
+                    obj.data.shape_keys.animation_data_clear()
+
+            if hasattr(obj, "material_slots"):
+                for slot in obj.material_slots:
+                    if slot.material:
+                        if slot.material.animation_data:
+                            slot.material.animation_data_clear()
+                        if slot.material.node_tree and slot.material.node_tree.animation_data:
+                            slot.material.node_tree.animation_data_clear()
+
+    for action in list(bpy.data.actions):
+        if not is_armature_action(action, main_rig):
+            print(f"  [-] Purged non-armature action: '{action.name}'", flush=True)
+            try:
+                bpy.data.actions.remove(action, do_unlink=True)
+            except Exception as e:
+                print(f"    [~] Notice removing action '{action.name}': {e}", flush=True)
+
+    bpy.context.view_layer.update()
+
+def deep_fcurve_pruning(main_rig):
+    print("[*] Performing deep F-curve pruning to keep only bone keyframe tracks...", flush=True)
+    if not main_rig:
+        return
+
+    for action in list(bpy.data.actions):
+        if hasattr(action, "layers"):
+            for layer in action.layers:
+                for strip in layer.strips:
+                    for slot in action.slots:
+                        cb = strip.channelbag(slot) if hasattr(strip, "channelbag") else None
+                        if cb and hasattr(cb, "fcurves"):
+                            for fc in list(cb.fcurves):
+                                if not any(fc.data_path.startswith(prefix) for prefix in ["pose.bones", "location", "rotation", "scale"]):
+                                    cb.fcurves.remove(fc)
+        elif hasattr(action, "fcurves"):
+            for fc in list(action.fcurves):
+                if not any(fc.data_path.startswith(prefix) for prefix in ["pose.bones", "location", "rotation", "scale"]):
+                    action.fcurves.remove(fc)
+
+    bpy.context.view_layer.update()
+
+def stash_and_slot_character_actions(main_rig):
+    print("[*] Stashing character actions into muted NLA tracks with Armature Action Slots...", flush=True)
+
+    if not main_rig or not main_rig.data:
+        return
+
     bpy.ops.object.select_all(action='DESELECT')
     main_rig.select_set(True)
     bpy.context.view_layer.objects.active = main_rig
@@ -323,53 +388,48 @@ def setup_rig_actions_and_purge_mesh_tracks(main_rig):
     if not main_rig.animation_data:
         main_rig.animation_data_create()
 
-    # Clear old NLA tracks
+    if not main_rig.data.animation_data:
+        main_rig.data.animation_data_create()
+
     for track in list(main_rig.animation_data.nla_tracks):
         try:
             main_rig.animation_data.nla_tracks.remove(track)
         except Exception:
             pass
 
-    # 3. Filter character actions
-    character_actions = [a for a in list(bpy.data.actions) if a.name.startswith("Uzi_") or "Rig" in a.name]
-    if not character_actions:
-        character_actions = list(bpy.data.actions)
+    character_actions = [a for a in list(bpy.data.actions) if is_armature_action(a, main_rig)]
+    print(f"  [+] Stashing {len(character_actions)} armature actions onto main armature:", flush=True)
 
-    # Delete any non-character actions from database
-    for a in list(bpy.data.actions):
-        if a not in character_actions:
-            print(f"  [-] Purging non-character action from database: '{a.name}'", flush=True)
-            try:
-                bpy.data.actions.remove(a, do_unlink=True)
-            except Exception:
-                pass
-
-    print(f"  [+] Configured {len(character_actions)} character actions for export:", flush=True)
-
-    # 4. Bind Action Slots and stash into muted NLA tracks for Blender 5.2
     for action in character_actions:
         action.use_fake_user = True
 
         main_rig.animation_data.action = action
+        main_rig.data.animation_data.action = action
         bpy.context.view_layer.update()
 
         slot = None
         if hasattr(action, "slots"):
-            if len(action.slots) == 0 and hasattr(action.slots, "new"):
+            for s in action.slots:
+                if getattr(s, "id_type", "") == 'ARMATURE' or "AR" in getattr(s, "identifier", ""):
+                    slot = s
+                    break
+
+            if not slot and hasattr(action.slots, "new"):
                 try:
-                    slot = action.slots.new(id_type='OBJECT', name=main_rig.name)
+                    slot = action.slots.new(id_type='ARMATURE', name=main_rig.data.name)
                 except Exception:
-                    pass
+                    try:
+                        slot = action.slots.new('ARMATURE', main_rig.data.name)
+                    except Exception:
+                        pass
+
             if not slot and len(action.slots) > 0:
                 slot = action.slots[0]
 
-        if not slot and hasattr(main_rig.animation_data, "action_slot"):
-            slot = main_rig.animation_data.action_slot
-
-        track_name = action.name
+        track_name = f"[Stash] {action.name}"
         track = main_rig.animation_data.nla_tracks.new()
         track.name = track_name
-        track.mute = True  # Muted to prevent T-pose locks
+        track.mute = True
 
         start_frame = int(action.frame_range[0])
         end_frame = int(action.frame_range[1])
@@ -379,35 +439,39 @@ def setup_rig_actions_and_purge_mesh_tracks(main_rig):
         strip = track.strips.new(action.name, start_frame, action)
         strip.action = action
 
-        if slot is not None:
-            if hasattr(strip, "action_slot"):
-                try:
-                    strip.action_slot = slot
-                except Exception:
-                    pass
-            elif hasattr(strip, "slot"):
-                try:
-                    strip.slot = slot
-                except Exception:
-                    pass
-
-        if not getattr(strip, "action_slot", None) and hasattr(strip, "action_suitable_slots") and strip.action_suitable_slots:
+        if hasattr(strip, "action_suitable_slots") and strip.action_suitable_slots:
             if len(strip.action_suitable_slots) > 0:
                 try:
                     strip.action_slot = strip.action_suitable_slots[0]
                 except Exception:
                     pass
 
+        if slot is not None and not getattr(strip, "action_slot", None):
+            if hasattr(strip, "action_slot"):
+                try:
+                    strip.action_slot = slot
+                except Exception:
+                    pass
+
+        if hasattr(strip, "channelbag") and getattr(strip, "action_slot", None):
+            try:
+                strip.channelbag(strip.action_slot, ensure=True)
+            except Exception:
+                pass
+
         strip.action_frame_start = start_frame
         strip.action_frame_end = end_frame
         strip.frame_start = start_frame
         strip.frame_end = end_frame
 
-        print(f"    - '{action.name}' (Frames {start_frame}-{end_frame})", flush=True)
+        assigned_slot = getattr(strip, "action_slot", slot)
+        slot_repr = getattr(assigned_slot, "identifier", "Active") if assigned_slot else "None"
+        print(f"    - Stashed: '{action.name}' -> NLA Track: '{track_name}' (Slot: {slot_repr})", flush=True)
 
     for track in main_rig.animation_data.nla_tracks:
         track.mute = True
 
+    main_rig.animation_data.action = None
     if character_actions:
         main_rig.animation_data.action = character_actions[0]
 
@@ -422,7 +486,13 @@ def run_gltf_export(filepath):
         main_rig.select_set(True)
         bpy.context.view_layer.objects.active = main_rig
 
-    # Apply safe root bone sampling patch for Blender 5.2
+    for action in list(bpy.data.actions):
+        if not is_armature_action(action, main_rig):
+            try:
+                bpy.data.actions.remove(action, do_unlink=True)
+            except Exception:
+                pass
+
     patch_blender_52_gltf_cache_bug()
 
     bpy.ops.export_scene.gltf(
@@ -432,10 +502,11 @@ def run_gltf_export(filepath):
         export_morph=True,
         export_tangents=False,
         export_normals=True,
-        export_apply=False,                 # Preserves skeleton skin weights & bone parenting
+        export_apply=False,
         export_animations=True,
-        export_animation_mode='ACTIONS',    # Exports character armature actions cleanly
-        export_bake_animation=True,
+        export_animation_mode='ACTIONS',
+        export_anim_single_armature=True,
+        export_bake_animation=False,
         use_renderable=True,
         export_cameras=False,
         export_lights=False,
@@ -447,36 +518,26 @@ def main():
         if img.source == 'FILE' and not img.packed_file:
             try:
                 img.pack()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[~] Notice packing image '{img.name}': {e}", flush=True)
 
-    # 1. Setup environment and drivers
     setup_environment_and_drivers()
-
-    # 2. Convert Emission nodes (White * 0.0 = Black) to PBR materials
     convert_emission_shaders_to_pbr()
-
-    # 3. Convert hair curves to mesh
     convert_hair_curves_to_mesh()
-
-    # 4. Align facial mesh parenting with Mouth_Shrink screen
     align_facial_mesh_parenting()
-
-    # 5. Bake facial shrinkwrap only in POSE mode
     bake_facial_shrinkwrap_only()
 
-    # 6. Configure character actions on main_rig and clear mesh-level animation data
     main_rig = bpy.data.objects.get("Rig") or bpy.data.objects.get("Rig.001")
-    setup_rig_actions_and_purge_mesh_tracks(main_rig)
+    purge_non_armature_animation_data(main_rig)
+    stash_and_slot_character_actions(main_rig)
+    deep_fcurve_pruning(main_rig)
 
-    # 7. Native glTF Export in ACTIONS mode
     run_gltf_export(__GLB_PATH__)
 
 if __name__ == "__main__":
     main()
 """
 
-    # Format output GLB path using json.dumps to avoid string escape syntax errors
     json_path = json.dumps(glb_path)
     expr = expr.replace("__GLB_PATH__", json_path)
 
@@ -522,8 +583,8 @@ if __name__ == "__main__":
         if os.path.exists(temp_blend_path):
             try:
                 os.remove(temp_blend_path)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[~] Notice removing temp file: {e}")
 
     return export_success
 
