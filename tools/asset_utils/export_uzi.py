@@ -174,22 +174,25 @@ def convert_hair_curves_to_mesh():
 
     bpy.context.view_layer.update()
 
-def align_facial_mesh_parenting():
-    print("[*] Aligning facial mesh parenting with Mouth_Shrink screen...", flush=True)
-    mouth_shrink = bpy.data.objects.get("Mouth_Shrink")
-    target_parent = mouth_shrink.parent if mouth_shrink else None
+def fix_teeth_parenting_and_tilt(main_rig):
+    # Lock teeth directly to head deform bone with 0 rotation/position so they stay flush on visor
+    print("[*] Re-parenting teeth directly to head bone to fix 53-degree tilt...", flush=True)
 
-    FACIAL_MESHES = ["Teeth", "Tongue", "Mouth", "Lip"]
+    for teeth_name in ["Teeth_Top", "Teeth_Bot", "Teeth_Bottom"]:
+        obj = bpy.data.objects.get(teeth_name)
+        if obj and obj.type == 'MESH':
+            # Remove constraints causing tilt
+            for c in list(obj.constraints):
+                obj.constraints.remove(c)
 
-    for obj in list(bpy.data.objects):
-        if obj.type == 'MESH' and any(k in obj.name for k in FACIAL_MESHES):
-            if target_parent and obj.parent != target_parent:
-                w_mat = obj.matrix_world.copy()
-                obj.parent = target_parent
-                obj.parent_type = 'OBJECT'
-                obj.parent_bone = ""
-                obj.matrix_world = w_mat
-                print(f"  [+] Re-parented '{obj.name}' to '{target_parent.name}' to lock onto Mouth_Shrink.", flush=True)
+            # Re-parent directly to main armature's head bone
+            if main_rig:
+                obj.parent = main_rig
+                obj.parent_type = 'BONE'
+                obj.parent_bone = "DEF-Head"
+                obj.location = (0.0, 0.0, 0.0)
+                obj.rotation_euler = (0.0, 0.0, 0.0)
+                print(f"  [+] Locked '{obj.name}' flush to 'DEF-Head'.", flush=True)
 
     bpy.context.view_layer.update()
 
@@ -289,8 +292,21 @@ def bake_facial_shrinkwrap_only():
 
     bpy.context.view_layer.update()
 
+def hide_non_character_widgets_and_symbols():
+    # Set hide_render = True so native glTF export (use_renderable=True) omits non-character UI widgets and symbol meshes
+    print("[*] Marking viewport widgets and inactive symbols as hidden from export...", flush=True)
+
+    HIDE_PATTERNS = ["WGT", "Widget", "Solver", "Warning", "X.L", "X.R", "Full_X", "WD_Symbol", "Display_Frame", "Marks_Frame"]
+
+    for obj in list(bpy.data.objects):
+        if obj.type == 'MESH':
+            if any(pat in obj.name for pat in HIDE_PATTERNS):
+                obj.hide_render = True
+                print(f"  [-] Omitted from glTF export: '{obj.name}'", flush=True)
+
+    bpy.context.view_layer.update()
+
 def is_armature_action(action, main_rig):
-    # Dynamically checks if an action targets pose bones or is stashed on the armature.
     if not action:
         return False
 
@@ -318,7 +334,6 @@ def is_armature_action(action, main_rig):
     return False
 
 def purge_non_armature_animation_data(main_rig):
-    # Clears animation data from non-armature objects and purges orphan object actions.
     print("[*] Dynamically purging non-armature animation data...", flush=True)
 
     for obj in list(bpy.data.objects):
@@ -343,11 +358,10 @@ def purge_non_armature_animation_data(main_rig):
 
     for action in list(bpy.data.actions):
         if not is_armature_action(action, main_rig):
-            print(f"  [-] Purged non-armature action: '{action.name}'", flush=True)
             try:
                 bpy.data.actions.remove(action, do_unlink=True)
-            except Exception as e:
-                print(f"    [~] Notice removing action '{action.name}': {e}", flush=True)
+            except Exception:
+                pass
 
     bpy.context.view_layer.update()
 
@@ -374,7 +388,7 @@ def deep_fcurve_pruning(main_rig):
     bpy.context.view_layer.update()
 
 def stash_and_slot_character_actions(main_rig):
-    print("[*] Stashing character actions into muted NLA tracks with Armature Action Slots...", flush=True)
+    print("[*] Stashing character actions onto NLA tracks...", flush=True)
 
     if not main_rig or not main_rig.data:
         return
@@ -388,9 +402,6 @@ def stash_and_slot_character_actions(main_rig):
     if not main_rig.animation_data:
         main_rig.animation_data_create()
 
-    if not main_rig.data.animation_data:
-        main_rig.data.animation_data_create()
-
     for track in list(main_rig.animation_data.nla_tracks):
         try:
             main_rig.animation_data.nla_tracks.remove(track)
@@ -398,33 +409,13 @@ def stash_and_slot_character_actions(main_rig):
             pass
 
     character_actions = [a for a in list(bpy.data.actions) if is_armature_action(a, main_rig)]
-    print(f"  [+] Stashing {len(character_actions)} armature actions onto main armature:", flush=True)
+    print(f"  [+] Stashing {len(character_actions)} actions onto main armature:", flush=True)
 
     for action in character_actions:
         action.use_fake_user = True
 
         main_rig.animation_data.action = action
-        main_rig.data.animation_data.action = action
         bpy.context.view_layer.update()
-
-        slot = None
-        if hasattr(action, "slots"):
-            for s in action.slots:
-                if getattr(s, "id_type", "") == 'ARMATURE' or "AR" in getattr(s, "identifier", ""):
-                    slot = s
-                    break
-
-            if not slot and hasattr(action.slots, "new"):
-                try:
-                    slot = action.slots.new(id_type='ARMATURE', name=main_rig.data.name)
-                except Exception:
-                    try:
-                        slot = action.slots.new('ARMATURE', main_rig.data.name)
-                    except Exception:
-                        pass
-
-            if not slot and len(action.slots) > 0:
-                slot = action.slots[0]
 
         track_name = f"[Stash] {action.name}"
         track = main_rig.animation_data.nla_tracks.new()
@@ -446,13 +437,6 @@ def stash_and_slot_character_actions(main_rig):
                 except Exception:
                     pass
 
-        if slot is not None and not getattr(strip, "action_slot", None):
-            if hasattr(strip, "action_slot"):
-                try:
-                    strip.action_slot = slot
-                except Exception:
-                    pass
-
         if hasattr(strip, "channelbag") and getattr(strip, "action_slot", None):
             try:
                 strip.channelbag(strip.action_slot, ensure=True)
@@ -464,16 +448,14 @@ def stash_and_slot_character_actions(main_rig):
         strip.frame_start = start_frame
         strip.frame_end = end_frame
 
-        assigned_slot = getattr(strip, "action_slot", slot)
-        slot_repr = getattr(assigned_slot, "identifier", "Active") if assigned_slot else "None"
-        print(f"    - Stashed: '{action.name}' -> NLA Track: '{track_name}' (Slot: {slot_repr})", flush=True)
+        print(f"    - Stashed action: '{action.name}' -> NLA Track: '{track_name}'", flush=True)
 
     for track in main_rig.animation_data.nla_tracks:
         track.mute = True
 
     main_rig.animation_data.action = None
-    if character_actions:
-        main_rig.animation_data.action = character_actions[0]
+    if main_rig.data and main_rig.data.animation_data:
+        main_rig.data.animation_data.action = None
 
     bpy.context.view_layer.update()
 
@@ -485,6 +467,9 @@ def run_gltf_export(filepath):
         bpy.ops.object.select_all(action='DESELECT')
         main_rig.select_set(True)
         bpy.context.view_layer.objects.active = main_rig
+
+        if main_rig.animation_data:
+            main_rig.animation_data.action = None
 
     for action in list(bpy.data.actions):
         if not is_armature_action(action, main_rig):
@@ -524,14 +509,28 @@ def main():
     setup_environment_and_drivers()
     convert_emission_shaders_to_pbr()
     convert_hair_curves_to_mesh()
-    align_facial_mesh_parenting()
-    bake_facial_shrinkwrap_only()
 
     main_rig = bpy.data.objects.get("Rig") or bpy.data.objects.get("Rig.001")
+
+    # 1. Lock teeth directly to head deform bone with 0.0 offset/tilt
+    fix_teeth_parenting_and_tilt(main_rig)
+
+    # 2. Bake facial shrinkwrap with skinning intact
+    bake_facial_shrinkwrap_only()
+
+    # 3. Mark non-renderable viewport widgets and symbol meshes as hidden from glTF export pass
+    hide_non_character_widgets_and_symbols()
+
+    # 4. Clean non-armature animation data
     purge_non_armature_animation_data(main_rig)
+
+    # 5. Stash character actions cleanly on NLA tracks
     stash_and_slot_character_actions(main_rig)
+
+    # 6. Perform deep F-curve pruning
     deep_fcurve_pruning(main_rig)
 
+    # 7. Native glTF export
     run_gltf_export(__GLB_PATH__)
 
 if __name__ == "__main__":
