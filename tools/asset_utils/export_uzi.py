@@ -63,6 +63,14 @@ def patch_blender_52_gltf_cache_bug():
     except Exception as e:
         print(f"[~] Notice while patching glTF exporter: {e}", flush=True)
 
+def safe_str(val) -> str:
+    try:
+        if isinstance(val, bytes):
+            return val.decode("utf-8", errors="replace")
+        return str(val).encode("utf-8", errors="replace").decode("utf-8")
+    except Exception:
+        return "Unknown Error"
+
 def setup_environment_and_drivers():
     print("[*] Enabling Python script auto-execution for rig UI...", flush=True)
     bpy.context.preferences.filepaths.use_scripts_auto_execute = True
@@ -156,36 +164,40 @@ def convert_emission_shaders_to_pbr():
 
     bpy.context.view_layer.update()
 
-def convert_hair_curves_to_mesh():
-    print("[*] Converting renderable hair curves to mesh...", flush=True)
-    if bpy.ops.object.mode_set.poll():
-        bpy.ops.object.mode_set(mode='OBJECT')
+def fix_visor_glass_materials():
+    print("[*] Configuring outer visor glass materials ('Drone_Screen_Ext') for glTF transparency...", flush=True)
 
-    for obj in list(bpy.data.objects):
-        if obj.type in {'CURVE', 'SURFACE', 'FONT'} and not obj.hide_render:
-            bpy.ops.object.select_all(action='DESELECT')
-            obj.select_set(True)
-            bpy.context.view_layer.objects.active = obj
-            try:
-                bpy.ops.object.convert(target='MESH')
-                print(f"  [+] Converted curve to MESH: '{obj.name}'", flush=True)
-            except Exception as e:
-                print(f"  [-] Skipped '{obj.name}': {e}", flush=True)
+    for mat in bpy.data.materials:
+        if mat and any(k.lower() in mat.name.lower() for k in ["screen_ext", "visorext", "glass_ext"]):
+            mat.use_nodes = True
+            if hasattr(mat, "blend_method"):
+                mat.blend_method = 'BLEND'
+
+            if mat.node_tree:
+                for node in mat.node_tree.nodes:
+                    if node.type == 'BSDF_PRINCIPLED':
+                        if "Alpha" in node.inputs:
+                            node.inputs["Alpha"].default_value = 0.35
+                        if "Roughness" in node.inputs:
+                            node.inputs["Roughness"].default_value = 0.05
+                        if "Transmission Weight" in node.inputs:
+                            node.inputs["Transmission Weight"].default_value = 0.8
+                        elif "Transmission" in node.inputs:
+                            node.inputs["Transmission"].default_value = 0.8
+
+            print(f"  [+] Set alpha transparency on visor glass material: '{mat.name}'", flush=True)
 
     bpy.context.view_layer.update()
 
 def fix_teeth_parenting_and_tilt(main_rig):
-    # Lock teeth directly to head deform bone with 0 rotation/position so they stay flush on visor
     print("[*] Re-parenting teeth directly to head bone to fix 53-degree tilt...", flush=True)
 
     for teeth_name in ["Teeth_Top", "Teeth_Bot", "Teeth_Bottom"]:
         obj = bpy.data.objects.get(teeth_name)
         if obj and obj.type == 'MESH':
-            # Remove constraints causing tilt
             for c in list(obj.constraints):
                 obj.constraints.remove(c)
 
-            # Re-parent directly to main armature's head bone
             if main_rig:
                 obj.parent = main_rig
                 obj.parent_type = 'BONE'
@@ -196,85 +208,117 @@ def fix_teeth_parenting_and_tilt(main_rig):
 
     bpy.context.view_layer.update()
 
+
+
 def bake_facial_shrinkwrap_only():
-    print("[*] Baking facial Shrinkwrap modifiers while keeping body skinning intact...", flush=True)
+    print("[*] Baking facial Shrinkwrap modifiers using native targets and offsets...", flush=True)
 
     for arm in [o for o in bpy.data.objects if o.type == 'ARMATURE']:
         if arm.data:
-            arm.data.pose_position = 'POSE'
+            arm.data.pose_position = 'REST'
 
     bpy.context.view_layer.update()
-    depsgraph = bpy.context.evaluated_depsgraph_get()
 
-    FACIAL_SHRINKWRAP_NAMES = ["Teeth", "Tongue", "Mouth", "Lip", "Eyelid", "Eyebrow"]
+    FACIAL_SHRINKWRAP_NAMES = [
+        "Teeth", "Tongue", "Mouth", "Lip", "Eyelid", "Eyebrow", 
+        "Eye", "Blush", "Expression", "Mark"
+    ]
 
     for obj in list(bpy.data.objects):
         if not (obj.type == 'MESH' and not obj.hide_render):
             continue
 
         sw_mods = [m for m in obj.modifiers if m.type == 'SHRINKWRAP']
-        if not (sw_mods and any(k in obj.name for k in FACIAL_SHRINKWRAP_NAMES)):
+        if not (sw_mods and any(k.lower() in obj.name.lower() for k in [n.lower() for n in FACIAL_SHRINKWRAP_NAMES])):
             continue
 
         print(f"  [*] Processing facial shrinkwrap on: '{obj.name}'...", flush=True)
 
-        if obj.data and obj.data.shape_keys:
-            shape_keys = obj.data.shape_keys.key_blocks
-            key_names = [k.name for k in shape_keys]
-            orig_values = {k.name: k.value for k in shape_keys}
+        mask_mods = [m for m in obj.modifiers if m.type == 'MASK']
+        for m in mask_mods:
+            m.show_viewport = False
 
-            for k in shape_keys:
-                k.value = 0.0
+        try:
+            if obj.data and obj.data.shape_keys:
+                shape_keys = obj.data.shape_keys.key_blocks
+                key_names = [k.name for k in shape_keys]
+                orig_values = {k.name: k.value for k in shape_keys}
 
-            eval_objs = []
-
-            for k_name in key_names:
-                k = shape_keys.get(k_name)
-                if k is not None:
-                    k.value = 1.0
-
-                bpy.context.view_layer.update()
-                depsgraph = bpy.context.evaluated_depsgraph_get()
-
-                obj_eval = obj.evaluated_get(depsgraph)
-                mesh_eval = bpy.data.meshes.new_from_object(
-                    obj_eval, preserve_all_data_layers=True, depsgraph=depsgraph
-                )
-
-                tmp_obj = bpy.data.objects.new(f"__tmp_sk_{k_name}", mesh_eval)
-                bpy.context.collection.objects.link(tmp_obj)
-                eval_objs.append((k_name, tmp_obj))
-
-                if k is not None:
+                for k in shape_keys:
                     k.value = 0.0
 
-            if eval_objs:
-                basis_name, base_tmp_obj = eval_objs[0]
+                eval_objs = []
 
-                bpy.ops.object.select_all(action='DESELECT')
-                base_tmp_obj.select_set(True)
-                bpy.context.view_layer.objects.active = base_tmp_obj
+                for k_name in key_names:
+                    k = shape_keys.get(k_name)
+                    if k is not None:
+                        k.value = 1.0
 
-                for k_name, tmp_obj in eval_objs:
-                    tmp_obj.select_set(True)
+                    bpy.context.view_layer.update()
+                    depsgraph = bpy.context.evaluated_depsgraph_get()
 
-                if len(eval_objs) > 1:
-                    bpy.ops.object.join_shapes()
+                    obj_eval = obj.evaluated_get(depsgraph)
+                    mesh_eval = bpy.data.meshes.new_from_object(
+                        obj_eval, preserve_all_data_layers=True, depsgraph=depsgraph
+                    )
 
-                if base_tmp_obj.data.shape_keys:
-                    for (k_name, _), sk_block in zip(eval_objs, base_tmp_obj.data.shape_keys.key_blocks):
-                        sk_block.name = k_name
+                    tmp_obj = bpy.data.objects.new(f"__tmp_sk_{k_name}", mesh_eval)
+                    bpy.context.collection.objects.link(tmp_obj)
+                    eval_objs.append((k_name, tmp_obj))
 
-                new_mesh = base_tmp_obj.data
+                    if k is not None:
+                        k.value = 0.0
+
+                if eval_objs:
+                    base_tmp_obj = eval_objs[0][1]
+
+                    bpy.ops.object.select_all(action='DESELECT')
+                    base_tmp_obj.select_set(True)
+                    bpy.context.view_layer.objects.active = base_tmp_obj
+
+                    for _, tmp_obj in eval_objs:
+                        tmp_obj.select_set(True)
+
+                    if len(eval_objs) > 1:
+                        bpy.ops.object.join_shapes()
+
+                    if base_tmp_obj.data.shape_keys:
+                        for (k_name, _), sk_block in zip(eval_objs, base_tmp_obj.data.shape_keys.key_blocks):
+                            sk_block.name = k_name
+
+                    new_mesh = base_tmp_obj.data
+                    old_mesh = obj.data
+
+                    for mat in old_mesh.materials:
+                        new_mesh.materials.append(mat)
+
+                    obj.data = new_mesh
+
+                    for _, tmp_obj in eval_objs:
+                        bpy.data.objects.remove(tmp_obj, do_unlink=True)
+
+                    if old_mesh.users == 0:
+                        bpy.data.meshes.remove(old_mesh)
+
+                    for m in list(obj.modifiers):
+                        if m.type == 'SHRINKWRAP':
+                            obj.modifiers.remove(m)
+
+                    if obj.data.shape_keys:
+                        for k_name, val in orig_values.items():
+                            if k_name in obj.data.shape_keys.key_blocks:
+                                obj.data.shape_keys.key_blocks[k_name].value = val
+
+                    print(f"  [+] Baked Shrinkwrap into shape keys for: '{obj.name}'", flush=True)
+
+            else:
+                depsgraph = bpy.context.evaluated_depsgraph_get()
+                obj_eval = obj.evaluated_get(depsgraph)
+                new_mesh = bpy.data.meshes.new_from_object(
+                    obj_eval, preserve_all_data_layers=True, depsgraph=depsgraph
+                )
                 old_mesh = obj.data
-
-                for mat in old_mesh.materials:
-                    new_mesh.materials.append(mat)
-
                 obj.data = new_mesh
-
-                for k_name, tmp_obj in eval_objs:
-                    bpy.data.objects.remove(tmp_obj, do_unlink=True)
 
                 if old_mesh.users == 0:
                     bpy.data.meshes.remove(old_mesh)
@@ -283,27 +327,444 @@ def bake_facial_shrinkwrap_only():
                     if m.type == 'SHRINKWRAP':
                         obj.modifiers.remove(m)
 
-                if obj.data.shape_keys:
-                    for k_name, val in orig_values.items():
-                        if k_name in obj.data.shape_keys.key_blocks:
-                            obj.data.shape_keys.key_blocks[k_name].value = val
+        except Exception as e:
+            print(f"  [~] Notice baking facial shrinkwrap on '{obj.name}': {safe_str(e)}", flush=True)
 
-                print(f"  [+] Baked Shrinkwrap into shape keys for: '{obj.name}'", flush=True)
+        finally:
+            for m in mask_mods:
+                m.show_viewport = True
+
+    for arm in [o for o in bpy.data.objects if o.type == 'ARMATURE']:
+        if arm.data:
+            arm.data.pose_position = 'POSE'
+
+    bpy.context.view_layer.update()
+
+def fix_facial_element_parenting(main_rig):
+    print("[*] Re-parenting facial elements directly to 'DEF-Head'...", flush=True)
+    if not main_rig or not main_rig.data:
+        return
+
+    target_bone = "DEF-Head" if "DEF-Head" in main_rig.data.bones else "Head"
+
+    FACIAL_ELEMENTS = [
+        "Eye.L", "Eye.R", "Blush_1.L", "Blush_1.R", "Blush_2.L", "Blush_2.R",
+        "Expression_Mark.L", "Expression_Mark.R", "Mouth_Shrink"
+    ]
+
+    for elem_name in FACIAL_ELEMENTS:
+        obj = bpy.data.objects.get(elem_name)
+        if obj and obj.type == 'MESH':
+            world_mat = obj.matrix_world.copy()
+            obj.parent = main_rig
+            obj.parent_type = 'BONE'
+            obj.parent_bone = target_bone
+            obj.matrix_world = world_mat
+            print(f"  [+] Locked '{obj.name}' directly to bone '{target_bone}'.", flush=True)
+
+    bpy.context.view_layer.update()
+
+def bake_clothing_modifiers_with_shapekeys():
+    print("[*] Baking Subdivision, Shrinkwrap, Solidify, and Displace modifiers into clothing & visor...", flush=True)
+
+    for arm in [o for o in bpy.data.objects if o.type == 'ARMATURE']:
+        if arm.data:
+            arm.data.pose_position = 'REST'
+
+    bpy.context.view_layer.update()
+
+    CLOTHING_EXACT_NAMES = [
+        "Cylinder.001", "Cylinder.002", "Jacket", "Clothes", "Shirt", 
+        "DD_Symbol", "WD_Symbol", "Symbol", 
+        "Plane.130", "Plane.197", "Chestplate", "Shield",
+        "VisorExt", "VisorInt", "Visor", "Screen"
+    ]
+
+    for obj in list(bpy.data.objects):
+        if not (obj.type == 'MESH' and not obj.hide_render):
+            continue
+
+        if not any(k.lower() == obj.name.lower() or k.lower() in obj.name.lower() for k in CLOTHING_EXACT_NAMES):
+            continue
+
+        if obj.name.startswith("Cylinder.") and obj.name not in ["Cylinder.001", "Cylinder.002"]:
+            continue
+
+        target_mods = [
+            m for m in obj.modifiers 
+            if m.type in {'SUBSURF', 'SOLIDIFY', 'SHRINKWRAP', 'DISPLACE', 'CORRECTIVE_SMOOTH'}
+        ]
+        if not target_mods:
+            continue
+
+        print(f"  [*] Baking modifiers on target mesh: '{obj.name}'...", flush=True)
+
+        arm_mods = [m for m in obj.modifiers if m.type == 'ARMATURE']
+        for m in arm_mods:
+            m.show_viewport = False
+
+        bpy.context.view_layer.update()
+
+        try:
+            if obj.data and obj.data.shape_keys:
+                shape_keys = obj.data.shape_keys.key_blocks
+                key_names = [k.name for k in shape_keys]
+                orig_values = {k.name: k.value for k in shape_keys}
+
+                for k in shape_keys:
+                    k.value = 0.0
+
+                eval_objs = []
+
+                for k_name in key_names:
+                    k = shape_keys.get(k_name)
+                    if k is not None:
+                        k.value = 1.0
+
+                    bpy.context.view_layer.update()
+                    depsgraph = bpy.context.evaluated_depsgraph_get()
+
+                    obj_eval = obj.evaluated_get(depsgraph)
+                    mesh_eval = bpy.data.meshes.new_from_object(
+                        obj_eval, preserve_all_data_layers=True, depsgraph=depsgraph
+                    )
+
+                    tmp_obj = bpy.data.objects.new(f"__tmp_sk_{k_name}", mesh_eval)
+                    bpy.context.collection.objects.link(tmp_obj)
+                    eval_objs.append((k_name, tmp_obj))
+
+                    if k is not None:
+                        k.value = 0.0
+
+                if eval_objs:
+                    base_tmp_obj = eval_objs[0][1]
+
+                    bpy.ops.object.select_all(action='DESELECT')
+                    base_tmp_obj.select_set(True)
+                    bpy.context.view_layer.objects.active = base_tmp_obj
+
+                    for _, tmp_obj in eval_objs:
+                        tmp_obj.select_set(True)
+
+                    if len(eval_objs) > 1:
+                        bpy.ops.object.join_shapes()
+
+                    if base_tmp_obj.data.shape_keys:
+                        for (k_name, _), sk_block in zip(eval_objs, base_tmp_obj.data.shape_keys.key_blocks):
+                            sk_block.name = k_name
+
+                    new_mesh = base_tmp_obj.data
+                    old_mesh = obj.data
+
+                    for mat in old_mesh.materials:
+                        new_mesh.materials.append(mat)
+
+                    obj.data = new_mesh
+
+                    for _, tmp_obj in eval_objs:
+                        bpy.data.objects.remove(tmp_obj, do_unlink=True)
+
+                    if old_mesh.users == 0:
+                        bpy.data.meshes.remove(old_mesh)
+
+                    for m in list(obj.modifiers):
+                        if m.type in {'SUBSURF', 'SOLIDIFY', 'SHRINKWRAP', 'DISPLACE', 'CORRECTIVE_SMOOTH'}:
+                            obj.modifiers.remove(m)
+
+                    if obj.data.shape_keys:
+                        for k_name, val in orig_values.items():
+                            if k_name in obj.data.shape_keys.key_blocks:
+                                obj.data.shape_keys.key_blocks[k_name].value = val
+
+                    print(f"  [+] Baked modifiers into shape keys for: '{obj.name}'", flush=True)
+
+            else:
+                depsgraph = bpy.context.evaluated_depsgraph_get()
+                obj_eval = obj.evaluated_get(depsgraph)
+                new_mesh = bpy.data.meshes.new_from_object(
+                    obj_eval, preserve_all_data_layers=True, depsgraph=depsgraph
+                )
+                old_mesh = obj.data
+                obj.data = new_mesh
+
+                if old_mesh.users == 0:
+                    bpy.data.meshes.remove(old_mesh)
+
+                for m in list(obj.modifiers):
+                    if m.type in {'SUBSURF', 'SOLIDIFY', 'SHRINKWRAP', 'DISPLACE', 'CORRECTIVE_SMOOTH'}:
+                        obj.modifiers.remove(m)
+
+            print(f"  [+] Successfully baked modifiers into '{obj.name}'", flush=True)
+
+        except Exception as e:
+            print(f"  [~] Notice while baking '{obj.name}': {safe_str(e)}", flush=True)
+
+        finally:
+            for m in arm_mods:
+                m.show_viewport = True
+
+    for arm in [o for o in bpy.data.objects if o.type == 'ARMATURE']:
+        if arm.data:
+            arm.data.pose_position = 'POSE'
+
+    bpy.context.view_layer.update()
+
+def bake_limb_modifiers():
+    print("[*] Baking Array, Curve, Bevel, and Subdivision modifiers for metal limbs...", flush=True)
+
+    for arm in [o for o in bpy.data.objects if o.type == 'ARMATURE']:
+        if arm.data:
+            arm.data.pose_position = 'REST'
+
+    bpy.context.view_layer.update()
+
+    limb_objects = set()
+    limbs_collection = bpy.data.collections.get("Limbs")
+
+    if limbs_collection:
+        for obj in limbs_collection.all_objects:
+            if obj.type == 'MESH' and not obj.hide_render:
+                limb_objects.add(obj)
+
+    for obj in bpy.data.objects:
+        if obj.type == 'MESH' and not obj.hide_render:
+            if any(k in obj.name for k in ["Cylinder.021", "Cylinder.029", "Sphere.013", "Sphere.017", "Sphere.019", "Sphere.022", "Sphere.027", "Sphere.028"]):
+                limb_objects.add(obj)
+
+    for obj in limb_objects:
+        target_mods = [m for m in obj.modifiers if m.type in {'ARRAY', 'CURVE', 'BEVEL', 'SUBSURF'}]
+        if not target_mods:
+            continue
+
+        print(f"  [*] Baking metal limb geometry on: '{obj.name}'...", flush=True)
+
+        try:
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            obj_eval = obj.evaluated_get(depsgraph)
+            new_mesh = bpy.data.meshes.new_from_object(
+                obj_eval, preserve_all_data_layers=True, depsgraph=depsgraph
+            )
+
+            old_mesh = obj.data
+            obj.data = new_mesh
+
+            if old_mesh and old_mesh.users == 0:
+                bpy.data.meshes.remove(old_mesh)
+
+            for m in list(obj.modifiers):
+                if m.type in {'ARRAY', 'CURVE', 'BEVEL', 'SUBSURF'}:
+                    obj.modifiers.remove(m)
+
+            print(f"  [+] Successfully baked metal limb rings into '{obj.name}'", flush=True)
+
+        except Exception as e:
+            print(f"  [~] Notice while baking limb '{obj.name}': {safe_str(e)}", flush=True)
+
+    for arm in [o for o in bpy.data.objects if o.type == 'ARMATURE']:
+        if arm.data:
+            arm.data.pose_position = 'POSE'
+
+    bpy.context.view_layer.update()
+
+def bake_socks_modifiers():
+    print("[*] Baking Displace, Solidify, and Curve modifiers for socks...", flush=True)
+
+    for arm in [o for o in bpy.data.objects if o.type == 'ARMATURE']:
+        if arm.data:
+            arm.data.pose_position = 'REST'
+
+    bpy.context.view_layer.update()
+
+    socks_objects = []
+
+    socks_collection = bpy.data.collections.get("Socks")
+    if socks_collection:
+        for obj in socks_collection.all_objects:
+            if obj.type == 'MESH':
+                socks_objects.append(obj)
+
+    for obj in bpy.data.objects:
+        if obj.type == 'MESH':
+            if any(k in obj.name for k in ["Cylinder.003", "Cylinder.060", "Sock"]):
+                if obj not in socks_objects:
+                    socks_objects.append(obj)
+
+    for obj in socks_objects:
+        obj.hide_render = False
+        obj.hide_viewport = False
+
+        if obj.parent and "AUX" in obj.parent.name:
+            world_mat = obj.matrix_world.copy()
+            obj.parent = None
+            obj.matrix_world = world_mat
+            print(f"  [+] Unparented '{obj.name}' from AUX container.", flush=True)
+
+        for m in list(obj.modifiers):
+            if m.type == 'MASK':
+                obj.modifiers.remove(m)
+                print(f"  [+] Removed Mask modifier from '{obj.name}'.", flush=True)
+
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
+
+        try:
+            bpy.ops.object.convert(target='MESH')
+            print(f"  [+] Converted '{obj.name}' to baked MESH ({len(obj.data.vertices)} verts, {len(obj.data.polygons)} faces)", flush=True)
+        except Exception as e:
+            print(f"  [~] Notice converting '{obj.name}': {safe_str(e)}", flush=True)
+
+    for arm in [o for o in bpy.data.objects if o.type == 'ARMATURE']:
+        if arm.data:
+            arm.data.pose_position = 'POSE'
+
+    bpy.context.view_layer.update()
+
+def attach_socks_to_bones(main_rig):
+    print("[*] Binding baked socks to Armature with smooth leg skinning...", flush=True)
+    if not main_rig or not main_rig.data:
+        return
+
+    main_rig.data.pose_position = 'REST'
+    bpy.context.view_layer.update()
+
+    sock_names = ["Cylinder.003", "Cylinder.060"]
+
+    for sock_name in sock_names:
+        sock_obj = bpy.data.objects.get(sock_name)
+        if not sock_obj:
+            continue
+
+        sock_obj.hide_render = False
+        sock_obj.hide_viewport = False
+
+        world_mat = sock_obj.matrix_world.copy()
+        sock_obj.parent = None
+        sock_obj.matrix_world = world_mat
+        bpy.context.view_layer.update()
+
+        bpy.ops.object.select_all(action='DESELECT')
+        sock_obj.select_set(True)
+        main_rig.select_set(True)
+        bpy.context.view_layer.objects.active = main_rig
+
+        try:
+            bpy.ops.object.parent_set(type='ARMATURE_AUTO')
+            print(f"  [+] Generated smooth leg skinning weights for sock: '{sock_name}'", flush=True)
+
+        except Exception as e:
+            print(f"  [~] Notice skinning sock '{sock_name}': {safe_str(e)}", flush=True)
+
+            arm_mod = next((m for m in sock_obj.modifiers if m.type == 'ARMATURE'), None)
+            if not arm_mod:
+                arm_mod = sock_obj.modifiers.new(name="Armature", type='ARMATURE')
+                arm_mod.object = main_rig
+
+    main_rig.data.pose_position = 'POSE'
+    bpy.context.view_layer.update()
+
+def convert_hair_curves_to_mesh():
+    print("[*] Converting renderable hair curves to 3D meshes...", flush=True)
+    if bpy.ops.object.mode_set.poll():
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    for obj in list(bpy.data.objects):
+        if obj.type in {'CURVE', 'SURFACE', 'FONT'} and not obj.hide_render:
+            is_hair = any("hair" in col.name.lower() for col in obj.users_collection) or \
+                      any(slot.material and "hair" in slot.material.name.lower() for slot in obj.material_slots) or \
+                      (hasattr(obj.data, "bevel_depth") and obj.data.bevel_depth > 0)
+
+            if not is_hair and any(k.lower() in obj.name.lower() for k in ["curve_sock"]):
+                continue
+
+            bpy.ops.object.select_all(action='DESELECT')
+            obj.select_set(True)
+            bpy.context.view_layer.objects.active = obj
+            try:
+                bpy.ops.object.convert(target='MESH')
+                obj.hide_render = False
+                obj.hide_viewport = False
+                print(f"  [+] Converted hair curve to MESH: '{obj.name}'", flush=True)
+            except Exception as e:
+                print(f"  [-] Skipped '{obj.name}': {e}", flush=True)
 
     bpy.context.view_layer.update()
 
 def hide_non_character_widgets_and_symbols():
-    # Set hide_render = True so native glTF export (use_renderable=True) omits non-character UI widgets and symbol meshes
-    print("[*] Marking viewport widgets and inactive symbols as hidden from export...", flush=True)
+    print("[*] Marking viewport widgets, limb guide curves, and inactive configuration meshes as hidden from export...", flush=True)
 
-    HIDE_PATTERNS = ["WGT", "Widget", "Solver", "Warning", "X.L", "X.R", "Full_X", "WD_Symbol", "Display_Frame", "Marks_Frame"]
+    HIDE_PATTERNS = [
+        "WGT", "Widget", "Solver", "Warning", "X.L", "X.R", "Full_X", 
+        "WD_Symbol", "Display_Frame", "Marks_Frame", "Curve_Sock",
+        "Mouthless", "Hide_Mouth", "ANC-Teeth"
+    ]
 
     for obj in list(bpy.data.objects):
-        if obj.type == 'MESH':
-            if any(pat in obj.name for pat in HIDE_PATTERNS):
-                obj.hide_render = True
-                print(f"  [-] Omitted from glTF export: '{obj.name}'", flush=True)
+        if any(pat.lower() in obj.name.lower() for pat in HIDE_PATTERNS):
+            obj.hide_render = True
+            print(f"  [-] Omitted from glTF export: '{obj.name}'", flush=True)
+            continue
 
+        if obj.type == 'CURVE' or (obj.type == 'MESH' and "nurbspath" in obj.name.lower()):
+            is_in_limbs = any("limb" in col.name.lower() for col in obj.users_collection)
+            has_no_material = len(obj.material_slots) == 0 or not any(slot.material for slot in obj.material_slots)
+
+            if is_in_limbs or has_no_material:
+                obj.hide_render = True
+                print(f"  [-] Omitted limb guide curve from glTF export: '{obj.name}'", flush=True)
+
+    bpy.context.view_layer.update()
+
+def skin_limbs_to_armature(main_rig):
+    print("[*] Binding baked metal limb meshes to Armature deform bones (Automatic Weights)...", flush=True)
+
+    if not main_rig or not main_rig.data:
+        return
+
+    main_rig.data.pose_position = 'REST'
+    bpy.context.view_layer.update()
+
+    limb_objects = []
+
+    limbs_collection = bpy.data.collections.get("Limbs")
+    if limbs_collection:
+        for obj in limbs_collection.all_objects:
+            if obj.type == 'MESH' and not obj.hide_render:
+                if "nurbspath" not in obj.name.lower():
+                    limb_objects.append(obj)
+
+    for obj in bpy.data.objects:
+        if obj.type == 'MESH' and not obj.hide_render:
+            name_lower = obj.name.lower()
+            if any(k in name_lower for k in ["cylinder.021", "cylinder.029", "cylinder.042", "cylinder.044", "cylinder.046"]):
+                if obj not in limb_objects:
+                    limb_objects.append(obj)
+
+    for obj in limb_objects:
+        arm_mod = next((m for m in obj.modifiers if m.type == 'ARMATURE'), None)
+
+        world_mat = obj.matrix_world.copy()
+        obj.parent = None
+        obj.matrix_world = world_mat
+        bpy.context.view_layer.update()
+
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(True)
+        main_rig.select_set(True)
+        bpy.context.view_layer.objects.active = main_rig
+
+        try:
+            bpy.ops.object.parent_set(type='ARMATURE_AUTO')
+            print(f"  [+] Skinned metal limb: '{obj.name}'", flush=True)
+
+        except Exception as e:
+            print(f"  [~] Notice skinning '{obj.name}': {safe_str(e)}", flush=True)
+
+            if not arm_mod:
+                arm_mod = obj.modifiers.new(name="Armature", type='ARMATURE')
+                arm_mod.object = main_rig
+
+    main_rig.data.pose_position = 'POSE'
     bpy.context.view_layer.update()
 
 def is_armature_action(action, main_rig):
@@ -491,6 +952,7 @@ def run_gltf_export(filepath):
         export_animations=True,
         export_animation_mode='ACTIONS',
         export_anim_single_armature=True,
+        export_force_sampling=True, # Very slow, to disable later
         export_bake_animation=False,
         use_renderable=True,
         export_cameras=False,
@@ -504,33 +966,56 @@ def main():
             try:
                 img.pack()
             except Exception as e:
-                print(f"[~] Notice packing image '{img.name}': {e}", flush=True)
+                print(f"[~] Notice packing image '{img.name}': {safe_str(e)}", flush=True)
 
     setup_environment_and_drivers()
     convert_emission_shaders_to_pbr()
-    convert_hair_curves_to_mesh()
+    fix_visor_glass_materials()
 
     main_rig = bpy.data.objects.get("Rig") or bpy.data.objects.get("Rig.001")
 
     # 1. Lock teeth directly to head deform bone with 0.0 offset/tilt
     fix_teeth_parenting_and_tilt(main_rig)
 
-    # 2. Bake facial shrinkwrap with skinning intact
+    
+
+    # 3. Bake facial shrinkwrap with native 0.006m offsets
     bake_facial_shrinkwrap_only()
 
-    # 3. Mark non-renderable viewport widgets and symbol meshes as hidden from glTF export pass
+    # 4. Lock baked facial elements directly to DEF-Head
+    fix_facial_element_parenting(main_rig)
+
+    # 5. Bake clothing, chestplate, and VisorExt/VisorInt modifiers
+    bake_clothing_modifiers_with_shapekeys()
+
+    # 6. Bake metal limb segment rings
+    bake_limb_modifiers()
+
+    # 7. Bake purple socks
+    bake_socks_modifiers()
+
+    # 8. Parent baked socks directly to shin deform bones
+    attach_socks_to_bones(main_rig)
+
+    # 9. Convert remaining renderable hair curves to 3D meshes
+    convert_hair_curves_to_mesh()
+
+    # 10. Bind baked metal limb meshes to armature deform bones
+    skin_limbs_to_armature(main_rig)
+
+    # 11. Mark non-renderable viewport widgets and guide curves as hidden from glTF export pass
     hide_non_character_widgets_and_symbols()
 
-    # 4. Clean non-armature animation data
+    # 12. Clean non-armature animation data
     purge_non_armature_animation_data(main_rig)
 
-    # 5. Stash character actions cleanly on NLA tracks
+    # 13. Stash character actions cleanly on NLA tracks
     stash_and_slot_character_actions(main_rig)
 
-    # 6. Perform deep F-curve pruning
+    # 14. Perform deep F-curve pruning
     deep_fcurve_pruning(main_rig)
 
-    # 7. Native glTF export
+    # 15. Native glTF export
     run_gltf_export(__GLB_PATH__)
 
 if __name__ == "__main__":
