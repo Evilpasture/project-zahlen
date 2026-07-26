@@ -595,18 +595,17 @@ ZHLN::Entity CreateRigidBody(
 
 JPH::ShapeRefC CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount) {
     if (vertexCount < 3 || indexCount < 3 || (indexCount % 3) != 0) {
-        ZHLN::Log("WARNING: Cannot create MeshShape. Invalid bounds (vertices: {}, indices: {})", vertexCount, indexCount);
         return nullptr;
     }
 
-    // 1. Pack vertices into Jolt's VertexList (Array<Float3>)
+    // 1. Pack vertices into Jolt's VertexList
     JPH::VertexList joltVertices;
     joltVertices.reserve(vertexCount);
     for (uint32_t i = 0; i < vertexCount; ++i) {
         joltVertices.push_back(JPH::Float3(vertices[i].position[0], vertices[i].position[1], vertices[i].position[2]));
     }
 
-    // 2. Validate indices and pack into Jolt's IndexedTriangleList (Array<IndexedTriangle>)
+    // 2. Filter degenerate triangles (where indices are identical)
     JPH::IndexedTriangleList joltTriangles;
     joltTriangles.reserve(indexCount / 3);
     for (uint32_t i = 0; i < indexCount; i += 3) {
@@ -614,14 +613,22 @@ JPH::ShapeRefC CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCo
         uint32_t i2 = indices[i + 1];
         uint32_t i3 = indices[i + 2];
 
-        // Index Boundary Validation Guard
+        // Skip degenerate triangles with shared indices
+        if (i1 == i2 || i2 == i3 || i1 == i3) {
+            continue;
+        }
+
         ZHLN::Assert(
-            i1 < vertexCount && i2 < vertexCount && i3 < vertexCount, "[Jolt Mesh Build] Index out of range: {}/{}/{} >= vertex_count (%u)", i1, i2, i3,
+            i1 < vertexCount && i2 < vertexCount && i3 < vertexCount, "[Jolt Mesh Build] Index out of range: {}/{}/{} >= vertex_count ({})", i1, i2, i3,
             vertexCount
         );
 
-        // Create native IndexedTriangle (materialIndex=0, userData=0)
         joltTriangles.push_back(JPH::IndexedTriangle(i1, i2, i3, 0, 0));
+    }
+
+    // Early exit if no valid non-degenerate triangles exist (e.g. 2D planes/lines)
+    if (joltTriangles.empty()) {
+        return nullptr;
     }
 
     // 3. Build the BVH Accelerated Static Mesh Shape
@@ -629,11 +636,10 @@ JPH::ShapeRefC CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCo
     JPH::Shape::ShapeResult result = settings.Create();
 
     if (result.HasError()) {
-        ZHLN::Log("ERROR: Jolt Mesh BVH compilation failed: {}", result.GetError().c_str());
         return nullptr;
     }
 
-    return result.Get(); // Returns safe JPH::ShapeRefC smart pointer
+    return result.Get();
 }
 
 ZHLN::Entity CreateMeshBody(

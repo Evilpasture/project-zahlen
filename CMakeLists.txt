@@ -150,6 +150,7 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/src/render)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/threading)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/physics)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/ecs)
+add_subdirectory(${CMAKE_SOURCE_DIR}/src/gltf)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/alife)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/audio)
 
@@ -181,7 +182,6 @@ set(ENGINE_SOURCES
     src/engine/Engine.cpp
     src/engine/CreativeWorksFactory.cpp
     src/engine/MeshBuilder.cpp
-    src/engine/glTFImporter.cpp
     src/engine/system/AnimationSystem.cpp
     src/engine/CreativeWorksManager.cpp
     src/engine/Window.cpp
@@ -303,7 +303,6 @@ target_compile_definitions(zahlen_engine PRIVATE
 
 target_sources(zahlen_engine PRIVATE
     ${CMAKE_SOURCE_DIR}/extern/stbi_impl.c
-    ${CMAKE_SOURCE_DIR}/extern/cgltf_impl.c
 )
 
 target_link_libraries(zahlen_engine PRIVATE
@@ -311,6 +310,7 @@ target_link_libraries(zahlen_engine PRIVATE
     zahlen_physics
     zahlen_threading
     zahlen_ecs
+    zahlen_gltf
     zahlen_alife
     zahlen_audio
     glfw

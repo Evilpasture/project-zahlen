@@ -3,23 +3,41 @@
 
 // File: src/engine/CreativeWorksFactory.cpp
 
-#include "Zahlen/Components.hpp"
-#include "Zahlen/CreativeWorksManager.hpp"
-#include "Zahlen/Engine.hpp"
-#include "Zahlen/Render.hpp"
-#include "ecs/ECS.hpp"
+// clang-format off
+#include <Jolt/Jolt.h>
+#include <Jolt/Physics/Collision/Shape/BoxShape.h>
+#include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
+#include <Jolt/Physics/Collision/Shape/ScaledShape.h>
+// clang-format on
+
+#include "Resources.hpp" // Needed for Basic Material Shader lookup
+#include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/CreativeWorksManager.hpp>
+#include <Zahlen/Engine.hpp>
 #include <Zahlen/Font8x8.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
+#include <Zahlen/Render.hpp>
 #include <algorithm>
 #include <cstddef>
-#include <fontconfig/fontconfig.h>
+#include <ecs/ECS.hpp>
+#include <engine/system/AnimationSystem.hpp>
+#include <engine/system/LightingSystem.hpp>
+#include <filesystem>
+#include <gltf/GLTFImporter.hpp> // <-- The only place glTF is allowed to be mentioned
+#include <physics/Physics.hpp>
 #include <stb_image.h>
+#include <threading/TaskSystem.hpp> // Needed for ParallelFor
 #define STB_TRUETYPE_IMPLEMENTATION
+#include <fontconfig/fontconfig.h>
 #include <stb_truetype.h>
 
 namespace ZHLN::CreativeWorksFactory {
+
+// ============================================================================
+// SYSTEM FONT
+// ============================================================================
 
 static std::string FindSystemFont(const char* fontName) {
     FcConfig*  config = FcInitLoadConfigAndFonts();
@@ -43,10 +61,9 @@ static std::string FindSystemFont(const char* fontName) {
 }
 
 uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
-    // Query standard Arch sans-serif font (fallback to DejaVu/Liberation if missing)
     std::string fontPath = FindSystemFont("sans-serif");
     if (fontPath.empty()) {
-        fontPath = "/usr/share/fonts/TTF/DejaVuSans.ttf"; // Safe Arch fallback
+        fontPath = "/usr/share/fonts/TTF/DejaVuSans.ttf";
     }
 
     Log("Loading TrueType system font: {}", fontPath);
@@ -64,38 +81,32 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
     std::fread(fontBuffer.data(), 1, size, f);
     std::fclose(f);
 
-    // Resolve starting offset for font collections (like macOS .ttc files)
     int fontOffset = stbtt_GetFontOffsetForIndex(fontBuffer.data(), 0);
-    fontOffset     = std::max(fontOffset, 0); // Fallback to standard behavior for standard TTF
+    fontOffset     = std::max(fontOffset, 0);
 
-    // Setup a clean 512x512 alpha map
     const uint32_t       atlasSize = 512;
     std::vector<uint8_t> alphaBitmap(static_cast<size_t>(atlasSize * atlasSize), 0);
 
-    // Retrieve active font settings from your Components::UISettingsComponent
-    auto* engine = GetEngineContext();
-    auto& reg    = engine->GetRegistry();
-
-    auto uiSettingsEntities = reg.GetEntitiesWith<Components::UISettingsComponent>();
+    auto* engine             = GetEngineContext();
+    auto& reg                = engine->GetRegistry();
+    auto  uiSettingsEntities = reg.GetEntitiesWith<Components::UISettingsComponent>();
     if (uiSettingsEntities.empty()) {
         return 0;
     }
     auto* uiSettings = reg.Get<Components::UISettingsComponent>(uiSettingsEntities[0]);
 
-    stbtt_bakedchar bakedChars[96]; // ASCII 32 - 127
-                                    // Bake 24pt anti-aliased glyphs into the alpha channel
-    int result = stbtt_BakeFontBitmap(fontBuffer.data(), fontOffset, 24.0f, alphaBitmap.data(), atlasSize, atlasSize, 32, 96, bakedChars);
+    stbtt_bakedchar bakedChars[96];
+    int             result = stbtt_BakeFontBitmap(fontBuffer.data(), fontOffset, 24.0f, alphaBitmap.data(), atlasSize, atlasSize, 32, 96, bakedChars);
 
     if (result <= 0) {
         Log("ERROR: stb_truetype failed to bake font bitmap!");
         return 0;
     }
 
-    // Convert 8-bit alpha map into Vulkan-native 32-bit RGBA texture
     std::vector<uint32_t> rgbaPixels(static_cast<size_t>(atlasSize * atlasSize));
     for (uint32_t i = 0; i < atlasSize * atlasSize; ++i) {
         uint8_t alpha = alphaBitmap[i];
-        rgbaPixels[i] = (static_cast<uint32_t>(alpha) << 24) | 0x00FFFFFF; // Transparent white
+        rgbaPixels[i] = (static_cast<uint32_t>(alpha) << 24) | 0x00FFFFFF;
     }
 
     auto tex_res = ctx.CreateTexture(rgbaPixels.data(), atlasSize, atlasSize, false);
@@ -105,7 +116,6 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
     }
     uint32_t texIdx = tex_res.value();
 
-    // Convert Jolt/C++ structures
     for (uint32_t i = 0; i < 96; ++i) {
         const auto& bc                  = bakedChars[i];
         uiSettings->fontAtlas.glyphs[i] = GlyphMetric {
@@ -124,114 +134,409 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
     return texIdx;
 }
 
-Mesh LoadCookedMesh(RenderContext& ctx, [[maybe_unused]] CreativeWorksManager& assetMgr, std::string_view virtualPath) {
-    if constexpr (isDev) {
-        auto* prefab = LoadModelPrefab(ctx, assetMgr, virtualPath);
-        if ((prefab != nullptr) && prefab->partCount > 0) {
-            return prefab->parts[0].mesh;
+// ============================================================================
+// MODEL PREFAB INSTANTIATION (NATIVE)
+// ============================================================================
+
+ModelPrefab* LoadModelPrefab(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path) {
+    // Pipeline securely crosses the boundary into the isolated glTF module
+    return GLTF::LoadGLBPrefab(ctx, assetMgr, path);
+}
+
+namespace {
+
+Entity SpawnPrefabRoot(ECS::Registry& reg, std::string_view vPath, const SpawnParams& p) {
+    Entity root = reg.Create();
+    reg.Add(root, Components::TransformComponent {.position = JPH::Vec3(p.position), .rotation = p.rotation, .scale = p.scale});
+    reg.Add(root, Components::NameComponent {.name = String64("Root_" + std::string(vPath))});
+    return root;
+}
+
+JPH::Mat44 GetNodeLogicalTransform(const ModelPrefab& prefab, int32_t nodeIndex) {
+    JPH::Mat44 matrix    = prefab.nodes[nodeIndex].localTransform;
+    int32_t    parentIdx = prefab.nodes[nodeIndex].parentIndex;
+
+    while (parentIdx >= 0) {
+        matrix    = prefab.nodes[parentIdx].localTransform * matrix;
+        parentIdx = prefab.nodes[parentIdx].parentIndex;
+    }
+    return matrix;
+}
+
+struct PreparedPart {
+    JPH::Vec3      translation;
+    JPH::Quat      rotation;
+    JPH::Vec3      scale;
+    float          maxScale = 1.0f;
+    JPH::ShapeRefC shape    = nullptr;
+};
+
+void PreparePrefabPhysics(
+    const ModelPrefab&         prefab,
+    const JPH::Mat44&          baseTransform,
+    bool                       createPhysics,
+    bool                       useBoxColliders,
+    std::vector<PreparedPart>& outPrepared
+) {
+    outPrepared.resize(prefab.parts.size());
+
+    TaskSystem::ParallelFor(prefab.parts.size(), 16, [&](uint32_t start, uint32_t end, uint32_t) {
+        for (uint32_t i = start; i < end; ++i) {
+            const auto& part = prefab.parts[i];
+            auto&       prep = outPrepared[i];
+
+            JPH::Mat44 nodeWorld  = GetNodeLogicalTransform(prefab, part.nodeIndex);
+            JPH::Mat44 finalLocal = baseTransform * nodeWorld * part.localTransform;
+
+            prep.scale = JPH::Vec3(finalLocal.GetColumn3(0).Length(), finalLocal.GetColumn3(1).Length(), finalLocal.GetColumn3(2).Length());
+
+            if (finalLocal.GetDeterminant3x3() < 0.0f) {
+                prep.scale.SetX(-prep.scale.GetX());
+            }
+
+            prep.maxScale    = std::max({std::abs(prep.scale.GetX()), std::abs(prep.scale.GetY()), std::abs(prep.scale.GetZ())});
+            prep.translation = finalLocal.GetTranslation();
+
+            JPH::Vec3 absScale(std::abs(prep.scale.GetX()), std::abs(prep.scale.GetY()), std::abs(prep.scale.GetZ()));
+            JPH::Vec3 c0 = absScale.GetX() > 1e-6f ? finalLocal.GetColumn3(0) / prep.scale.GetX() : JPH::Vec3::sAxisX();
+            JPH::Vec3 c1 = absScale.GetY() > 1e-6f ? finalLocal.GetColumn3(1) / prep.scale.GetY() : JPH::Vec3::sAxisY();
+            JPH::Vec3 c2 = absScale.GetZ() > 1e-6f ? finalLocal.GetColumn3(2) / prep.scale.GetZ() : JPH::Vec3::sAxisZ();
+
+            JPH::Mat44 rotMat(JPH::Vec4(c0, 0), JPH::Vec4(c1, 0), JPH::Vec4(c2, 0), JPH::Vec4(0, 0, 0, 1));
+            prep.rotation = rotMat.GetQuaternion().Normalized();
+
+            if (createPhysics) {
+                JPH::ShapeRefC rawShape = useBoxColliders ? part.boxCollider : part.meshCollider;
+                if (rawShape != nullptr) {
+                    prep.shape = !prep.scale.IsClose(JPH::Vec3::sReplicate(1.0f), 1e-5f) ? new JPH::ScaledShape(rawShape, prep.scale) : rawShape;
+                }
+            }
         }
-        return {};
+    });
+}
+
+Entity InstantiateMeshPart(
+    RenderContext&                         ctx,
+    ECS::Registry&                         reg,
+    PhysicsContext&                        pc,
+    const ModelPrefab&                     prefab,
+    const ModelPart&                       part,
+    const PreparedPart&                    prep,
+    const SpawnParams&                     params,
+    Entity                                 rootEntity,
+    std::unordered_map<int32_t, uint32_t>& allocatedSkeletons
+) {
+    BufferHandle skinnedVbo = BufferHandle::Invalid;
+    if (part.isSkinned && params.isAnimated) {
+        skinnedVbo = ctx.CreateSkinnedScratchBuffer(part.mesh.vertexCount);
+    }
+
+    uint32_t assignedJointOffset = 0;
+    if (part.isSkinned && params.isAnimated && part.skeletonIndex >= 0) {
+        auto it = allocatedSkeletons.find(part.skeletonIndex);
+        if (it != allocatedSkeletons.end()) {
+            assignedJointOffset = it->second;
+        } else {
+            assignedJointOffset                    = JointAllocator::Allocate(static_cast<uint32_t>(prefab.skeletons[part.skeletonIndex].joints.size()));
+            allocatedSkeletons[part.skeletonIndex] = assignedJointOffset;
+        }
+    }
+
+    Entity   e         = reg.Create();
+    Material activeMat = params.materialOverride.pipeline != PipelineHandle::Invalid ? params.materialOverride : part.defaultMaterial;
+
+    DrawFlags flags = DrawFlags::None;
+    if (part.isSkinned && params.isAnimated)
+        flags |= DrawFlags::Skinned;
+    if (activeMat.alphaMode == 2 || params.isAnimated)
+        flags |= DrawFlags::ExcludeFromTLAS;
+
+    if (params.createPhysics && prep.shape != nullptr) {
+        reg.Add(e, Components::TransformComponent {.position = prep.translation, .rotation = prep.rotation, .scale = prep.scale});
+        reg.Add(
+            e, Components::PhysicsComponent {Physics::CreateRigidBody(
+                   pc, prep.shape, JPH::RVec3(prep.translation), prep.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
+                   params.isStaticPhysics ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0, params.physicsCategory, params.physicsMask
+               )}
+        );
+
+        if (!params.isStaticPhysics) {
+            reg.Add(
+                e, Components::PhysicsStateComponent {
+                       .currPosition = prep.translation, .prevPosition = prep.translation, .currRotation = prep.rotation, .prevRotation = prep.rotation
+                   }
+            );
+        }
     } else {
-        CreativeWorkLoadRequest req;
-        req.assetID = HashCreativeWorkPath(virtualPath);
+        reg.Add(e, Components::TransformComponent {.position = prep.translation, .rotation = prep.rotation, .scale = prep.scale});
+        reg.Add(e, Components::HierarchyComponent {.parent = rootEntity});
+    }
 
-        if (!assetMgr.LoadSync(req)) {
-            Log("ERROR: Failed to load cooked mesh from PAK: {}", virtualPath);
-            return {};
+    reg.Add(e, Components::NameComponent {.name = part.name});
+    reg.Add(
+        e, Components::MeshComponent {
+               .mesh        = part.mesh,
+               .material    = activeMat,
+               .cullRadius  = part.boundingRadius,
+               .localCenter = JPH::Vec3(
+                   (part.localMax[0] + part.localMin[0]) * 0.5f, (part.localMax[1] + part.localMin[1]) * 0.5f, (part.localMax[2] + part.localMin[2]) * 0.5f
+               ),
+               .localTransform      = part.localTransform,
+               .jointOffset         = assignedJointOffset,
+               .isSkinned           = part.isSkinned && params.isAnimated,
+               .skinnedVertexBuffer = skinnedVbo,
+               .morphOffset         = part.morphOffset,
+               .activeMorphCount    = part.activeMorphCount,
+               .morphWeights        = {part.defaultMorphWeights[0], part.defaultMorphWeights[1], part.defaultMorphWeights[2], part.defaultMorphWeights[3]},
+               .nodeIndex           = part.nodeIndex,
+               .skeletonIndex       = part.skeletonIndex,
+               .flags               = flags
+           }
+    );
+
+    if (part.isSkinned && params.isAnimated) {
+        reg.Add(e, Components::AnimatorComponent {.currentTrackIdx = 0, .currentTrackTime = 0.0f, .currentLoop = true, .prefab = &prefab});
+    }
+
+    return e;
+}
+
+Entity TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, const JPH::Mat44& baseTransform, float scaleMult) {
+    const float* ef  = part.defaultMaterial.emissiveFactor;
+    float        lum = ef[0] * 0.2126f + ef[1] * 0.7152f + ef[2] * 0.0722f;
+    if (lum <= 0.01f)
+        return NullEntity;
+
+    JPH::Vec3 localCenter(
+        (part.localMax[0] + part.localMin[0]) * 0.5f, (part.localMax[1] + part.localMin[1]) * 0.5f, (part.localMax[2] + part.localMin[2]) * 0.5f
+    );
+    float partExtent = (part.localMax[0] - part.localMin[0]) + (part.localMax[1] - part.localMin[1]) + (part.localMax[2] - part.localMin[2]);
+
+    Entity glowEnt = reg.Create();
+    reg.Add(
+        glowEnt,
+        Components::TransformComponent {.position = baseTransform * localCenter, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)}
+    );
+    reg.Add(glowEnt, Components::NameComponent {.name = String64("Glow_" + std::string(part.name.c_str()))});
+    reg.Add(
+        glowEnt, Components::LightComponent {
+                     .type        = LightType::Point,
+                     .color       = JPH::Vec3(ef[0], ef[1], ef[2]),
+                     .intensity   = lum * 35.0f,
+                     .radius      = std::max(partExtent * scaleMult * 0.15f, 0.05f),
+                     .direction   = JPH::Vec3(0, -1, 0),
+                     .range       = std::max(partExtent * scaleMult * 2.5f, 3.0f),
+                     .points      = {},
+                     .twoSided    = 0,
+                     .shadowLayer = -1
+                 }
+    );
+    return glowEnt;
+}
+
+} // namespace
+
+uint32_t InstantiatePrefab(
+    RenderContext&     ctx,
+    ECS::Registry&     reg,
+    PhysicsContext&    pc,
+    const ModelPrefab& prefab,
+    const SpawnParams& params,
+    Entity*            outBuffer,
+    uint32_t           maxCount
+) {
+    uint32_t spawnedCount = 0;
+    Entity   rootEntity   = NullEntity;
+    uint32_t startIndex   = 0;
+
+    if (!params.createPhysics) {
+        rootEntity = SpawnPrefabRoot(reg, prefab.virtualPath.c_str(), params);
+        if (outBuffer != nullptr && maxCount > 0) {
+            outBuffer[0] = rootEntity;
+            startIndex   = 1;
+            spawnedCount = 1;
         }
+    }
 
-        const auto* header = static_cast<const CookedMeshHeader*>(req.outData);
-        if (header->magic != 0x3048534D) {
-            Log("ERROR: Invalid CookedMeshHeader magic for: {}", virtualPath);
-            return {};
+    JPH::Mat44                baseTransform = Math::CreateTransform(JPH::Vec3(params.position), params.rotation, params.scale);
+    std::vector<PreparedPart> preparedParts;
+    PreparePrefabPhysics(prefab, baseTransform, params.createPhysics, params.useBoxColliders, preparedParts);
+
+    float                                 scaleMult = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
+    std::unordered_map<int32_t, uint32_t> allocatedSkeletons;
+
+    for (size_t i = 0; i < prefab.parts.size(); ++i) {
+        Entity meshEnt = InstantiateMeshPart(ctx, reg, pc, prefab, prefab.parts[i], preparedParts[i], params, rootEntity, allocatedSkeletons);
+
+        if (outBuffer != nullptr && spawnedCount < maxCount) {
+            outBuffer[startIndex + (spawnedCount - startIndex)] = meshEnt;
         }
+        spawnedCount++;
 
-        const char* ptr = reinterpret_cast<const char*>(header + 1);
-
-        BufferHandle posVbo = ctx.CreateVertexBuffer(ptr, header->vertexCount * sizeof(VertexPosition));
-        ptr += header->vertexCount * sizeof(VertexPosition);
-
-        BufferHandle attrVbo = ctx.CreateVertexBuffer(ptr, header->vertexCount * sizeof(VertexAttributes), sizeof(VertexAttributes));
-        ptr += header->vertexCount * sizeof(VertexAttributes);
-
-        BufferHandle skinVbo = BufferHandle::Invalid;
-        if (header->hasSkin) {
-            // FIX: Explicitly pass sizeof(VertexSkin) as the 3rd argument
-            skinVbo = ctx.CreateVertexBuffer(ptr, header->vertexCount * sizeof(VertexSkin), sizeof(VertexSkin));
-            ptr += header->vertexCount * sizeof(VertexSkin);
+        Entity glowEnt = TrySpawnEmissiveVPL(reg, prefab.parts[i], baseTransform * GetNodeLogicalTransform(prefab, prefab.parts[i].nodeIndex), scaleMult);
+        if (glowEnt != NullEntity) {
+            if (outBuffer != nullptr && spawnedCount < maxCount) {
+                outBuffer[spawnedCount] = glowEnt;
+            }
+            spawnedCount++;
         }
+    }
 
-        BufferHandle ibo = BufferHandle::Invalid;
-        if (header->indexCount > 0) {
-            ibo = ctx.CreateIndexBuffer(ptr, header->indexCount * sizeof(uint32_t));
+    return spawnedCount;
+}
+
+void SetupPlayerRagdoll(RenderContext& /*rc*/, PhysicsContext& pc, ECS::Registry& reg, Entity playerEntity, std::span<const Entity> visualParts) {
+    const Skeleton* targetSkeleton = nullptr;
+    uint32_t        jointOffset    = 0;
+
+    for (Entity part: visualParts) {
+        if (auto* meshComp = reg.Get<Components::MeshComponent>(part)) {
+            if (auto* animComp = reg.Get<Components::AnimatorComponent>(part)) {
+                if (animComp->prefab && meshComp->skeletonIndex >= 0) {
+                    targetSkeleton = &animComp->prefab->skeletons[meshComp->skeletonIndex];
+                    jointOffset    = meshComp->jointOffset;
+                    break;
+                }
+            }
         }
+    }
 
-        Mesh finalMesh = Mesh {
-            .posBuffer   = posVbo,
-            .attrBuffer  = attrVbo,
-            .skinBuffer  = skinVbo,
-            .indexBuffer = ibo,
-            .vertexCount = header->vertexCount,
-            .indexCount  = header->indexCount
+    if (targetSkeleton != nullptr) {
+        auto* joltSkel = new JPH::Skeleton();
+        for (const auto& joint: targetSkeleton->joints) {
+            std::string parentName = (joint.parentIndex >= 0) ? targetSkeleton->joints[joint.parentIndex].name.c_str() : "";
+            joltSkel->AddJoint(joint.name.c_str(), parentName);
+        }
+        joltSkel->CalculateParentJointIndices();
+
+        auto IsImportantJoint = [](std::string name) -> bool {
+            std::ranges::transform(name, name.begin(), ::tolower);
+            return name.contains("hip") || name.contains("pelvis") || name.contains("root") || name.contains("spine") || name.contains("chest") ||
+                   name.contains("torso") || name.contains("head") || name.contains("neck") || name.contains("arm") || name.contains("forearm") ||
+                   name.contains("thigh") || name.contains("calf") || name.contains("shin");
         };
-        ctx.BuildMeshBLAS(finalMesh);
-        return finalMesh;
+
+        std::vector<Physics::RagdollPartParams> parts;
+        for (size_t i = 0; i < targetSkeleton->joints.size(); ++i) {
+            std::string name = targetSkeleton->joints[i].name.c_str();
+
+            Physics::RagdollPartParams part;
+            part.jointIndex       = (uint32_t) i;
+            part.parentJointIndex = targetSkeleton->joints[i].parentIndex;
+            part.mass             = 1.0f;
+            part.enableMotors     = false;
+
+            // Compute global bind pose for the joint
+            JPH::Mat44 bindPose = targetSkeleton->joints[i].inverseBindMatrix.Inversed();
+            part.position       = JPH::RVec3(bindPose.GetTranslation());
+            part.rotation       = bindPose.GetQuaternion().Normalized();
+
+            std::ranges::transform(name, name.begin(), ::tolower);
+            if (name.contains("hip") || name.contains("pelvis") || name.contains("root")) {
+                part.shape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Capsule, 0.4f, 0.2f);
+                part.mass  = 15.0f;
+            } else if (name.contains("spine") || name.contains("chest") || name.contains("torso")) {
+                part.shape         = Physics::GetOrCreateShape(pc, Physics::ShapeType::Capsule, 0.5f, 0.25f);
+                part.mass          = 20.0f;
+                part.enableMotors  = true;
+                part.maxMotorForce = 250.0f;
+            } else if (name.contains("head") || name.contains("neck")) {
+                part.shape         = Physics::GetOrCreateShape(pc, Physics::ShapeType::Sphere, 0.3f);
+                part.mass          = 8.0f;
+                part.enableMotors  = true;
+                part.maxMotorForce = 250.0f;
+            } else if (IsImportantJoint(name)) {
+                part.shape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Capsule, 0.2f, 0.1f);
+                part.mass  = 3.0f;
+            } else {
+                part.shape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Sphere, 0.08f);
+                part.mass  = 0.5f;
+            }
+            parts.push_back(part);
+        }
+
+        auto ragdollInstance = Physics::CreateSkeletalRagdoll(pc, joltSkel, parts);
+        ragdollInstance->AddRef();
+
+        reg.Add(
+            playerEntity, Components::RagdollComponent {
+                              .ragdollInstance  = ragdollInstance.GetPtr(),
+                              .state            = RagdollState::Inactive,
+                              .prevState        = RagdollState::Inactive,
+                              .isAddedToPhysics = 0,
+                              .jointOffset      = jointOffset,
+                              .jointCount       = static_cast<uint32_t>(targetSkeleton->joints.size()),
+                              .skeleton         = targetSkeleton
+                          }
+        );
+        Log("Skeletal Ragdoll successfully generated from Native Skeleton.");
+    } else {
+        Log("WARNING: SetupPlayerRagdoll failed because no skeleton was found.");
     }
 }
 
-uint32_t LoadCookedTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view virtualPath) {
-    if constexpr (isDev) {
-        std::string rawPath = "resources/assets/" + std::string(virtualPath);
+// ============================================================================
+// DEVICE LOST HOT-RECOVERY (Rebuilding VRAM buffers)
+// ============================================================================
 
-        int            width    = 0;
-        int            height   = 0;
-        int            channels = 0;
-        unsigned char* pixels   = stbi_load(rawPath.c_str(), &width, &height, &channels, 4);
-        if (pixels == nullptr) {
-            Log("WARNING: Failed to load raw texture in dev mode: {}", rawPath);
-            return 0;
+void ReuploadAllPrefabs(RenderContext& ctx, CreativeWorksManager& cwMgr, std::unordered_map<BufferHandle, std::pair<Mesh, Material>>& outMeshRebuildMap) {
+    uint32_t count = cwMgr.GetCachedPrefabs(nullptr, 0);
+    if (count == 0)
+        return;
+
+    std::vector<ModelPrefab*> prefabs(count);
+    cwMgr.GetCachedPrefabs(prefabs.data(), count);
+
+    for (auto* prefab: prefabs) {
+        std::vector<BufferHandle> oldHandles;
+        for (const auto& part: prefab->parts) {
+            oldHandles.push_back(part.mesh.posBuffer);
         }
 
-        auto tex_res = ctx.CreateTexture(pixels, width, height);
-        stbi_image_free(pixels);
+        GLTF::RebuildPrefabGPUResources(ctx, cwMgr, prefab);
 
-        if (!tex_res) {
-            Log("ERROR: LoadCookedTexture failed to create Vulkan texture in dev mode: {}", tex_res.error().Message());
-            return 0;
+        for (size_t i = 0; i < prefab->parts.size(); ++i) {
+            if (oldHandles[i] != BufferHandle::Invalid) {
+                outMeshRebuildMap[oldHandles[i]] = {prefab->parts[i].mesh, prefab->parts[i].defaultMaterial};
+            }
         }
-        return tex_res.value();
-    } else {
-        CreativeWorkLoadRequest req;
-        req.assetID = HashCreativeWorkPath(virtualPath);
+    }
+}
 
-        if (!assetMgr.LoadSync(req)) {
-            Log("ERROR: Failed to load texture from PAK: {}", virtualPath);
-            return 0;
-        }
+void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS::Registry& reg) {
+    ZHLN::Log("[Engine] Re-uploading all textures and meshes to new Vulkan device...");
 
-        int            width    = 0;
-        int            height   = 0;
-        int            channels = 0;
-        unsigned char* pixels = stbi_load_from_memory(std::bit_cast<const stbi_uc*>(req.outData), static_cast<int>(req.outSize), &width, &height, &channels, 4);
+    CreateFontAtlasTexture(ctx);
 
-        if (pixels == nullptr) {
-            Log("ERROR: STB failed to decode image: {}", virtualPath);
-            assetMgr.FreeCreativeWorkMemory(req);
-            return 0;
-        }
+    std::unordered_map<BufferHandle, std::pair<Mesh, Material>> meshRebuildMap;
+    ReuploadAllPrefabs(ctx, cwMgr, meshRebuildMap);
 
-        auto tex_res = ctx.CreateTexture(pixels, width, height);
-        stbi_image_free(pixels);
-        assetMgr.FreeCreativeWorkMemory(req);
+    auto entities = reg.GetEntitiesWith<Components::MeshComponent>();
+    auto meshes   = reg.GetRawArray<Components::MeshComponent>();
 
-        if (!tex_res) {
-            Log("ERROR: LoadCookedTexture failed to create Vulkan texture: {}", tex_res.error().Message());
-            return 0;
+    for (size_t i = 0; i < entities.size(); ++i) {
+        Components::MeshComponent& meshComp     = meshes[i];
+        BufferHandle               oldPosBuffer = meshComp.mesh.posBuffer;
+
+        if (meshComp.isSkinned && meshComp.skinnedVertexBuffer != BufferHandle::Invalid) {
+            meshComp.skinnedVertexBuffer = ctx.CreateSkinnedScratchBuffer(meshComp.mesh.vertexCount);
         }
 
-        uint32_t textureIndex = tex_res.value();
-        Log("Loaded Cooked Texture: {} (Bindless Index: {})", virtualPath, textureIndex);
-        return textureIndex;
+        if (oldPosBuffer != BufferHandle::Invalid) {
+            auto it = meshRebuildMap.find(oldPosBuffer);
+            if (it != meshRebuildMap.end()) {
+                meshComp.mesh     = it->second.first;
+                meshComp.material = it->second.second;
+            }
+        }
+    }
+
+    for (Entity e: reg.GetEntitiesWith<Components::TextComponent>()) {
+        if (auto* text = reg.Get<Components::TextComponent>(e)) {
+            text->mesh.posBuffer   = BufferHandle::Invalid;
+            text->mesh.attrBuffer  = BufferHandle::Invalid;
+            text->mesh.indexBuffer = BufferHandle::Invalid;
+        }
     }
 }
 

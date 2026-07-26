@@ -16,7 +16,7 @@
 (local LightType {:DIRECTIONAL 0 :POINT 1 :SPOT 2 :AREA 3 :SUN 4})
 
 (set _G.game_started false)
-(var pomni-parts nil)
+(var char-parts nil)
 (var g-snow-terrain nil)
 (var g-campfire-light nil)
 (var g-summit-light nil)
@@ -276,22 +276,22 @@
 ;; ============================================================================
 (fn RespawnPlayer []
   (when _G.player_ent
-    (when pomni-parts
-      (each [_ part-ent (ipairs pomni-parts)]
+    (when char-parts
+      (each [_ part-ent (ipairs char-parts)]
         (zh:dispatch :DestroyEntity {:entityRaw part-ent})))
     (zh:dispatch :DestroyEntity {:entityRaw _G.player_ent})
     (set _G.player_ent (zh:dispatch :InitPlayer))
-    (set pomni-parts (zh:spawn :tadc_models/POMNI.glb {:animated true}))
-    (when (and _G.player_ent pomni-parts)
-      (let [pomni-root (. pomni-parts 1)
-            root-trans (zh.ecs:get pomni-root :TransformComponent)]
+    (set char-parts (zh:spawn :murderdrones/Uzi.glb {:animated true}))
+    (when (and _G.player_ent char-parts)
+      (let [char-root (. char-parts 1)
+            root-trans (zh.ecs:get char-root :TransformComponent)]
         (when root-trans
           (tset root-trans.position 0 0.0)
           (tset root-trans.position 1 -0.8)
           (tset root-trans.position 2 0.0))
-        (zh.ecs:add pomni-root :HierarchyComponent {:parent _G.player_ent})
+        (zh.ecs:add char-root :HierarchyComponent {:parent _G.player_ent})
         (zh.ecs:add _G.player_ent :combat {:hp 100 :max_hp 100})
-        (zh.physics:setup_ragdoll _G.player_ent pomni-parts)
+        (zh.physics:setup_ragdoll _G.player_ent char-parts)
         (zh.log "[Snow Scene] Player successfully respawned!")))))
 
 ;; ============================================================================
@@ -354,18 +354,18 @@
                                        :radius 0.8
                                        :range 45.0}))
   ;; 8. Spawn Character
-  (set pomni-parts (zh:spawn :tadc_models/POMNI.glb {:animated true}))
+  (set char-parts (zh:spawn :murderdrones/Uzi.glb {:animated true}))
   ;; 9. Bind Hierarchy & Ragdoll
-  (when (and _G.player_ent pomni-parts)
-    (let [pomni-root (. pomni-parts 1)
-          root-trans (zh.ecs:get pomni-root :TransformComponent)]
+  (when (and _G.player_ent char-parts)
+    (let [char-root (. char-parts 1)
+          root-trans (zh.ecs:get char-root :TransformComponent)]
       (when root-trans
         (tset root-trans.position 0 0.0)
         (tset root-trans.position 1 -0.8)
         (tset root-trans.position 2 0.0))
-      (zh.ecs:add pomni-root :HierarchyComponent {:parent _G.player_ent})
+      (zh.ecs:add char-root :HierarchyComponent {:parent _G.player_ent})
       (zh.ecs:add _G.player_ent :combat {:hp 100 :max_hp 100})
-      (zh.physics:setup_ragdoll _G.player_ent pomni-parts)
+      (zh.physics:setup_ragdoll _G.player_ent char-parts)
       (zh.log "[Snow Scene] Character bound to snow world controller.")))
   (set _G.game_started true))
 
@@ -410,23 +410,23 @@
           (when (and is-r-down (not was-r-down))
             (let [ragdoll (zh.ecs:get player-ent :RagdollComponent)]
               (when ragdoll
-                (let [pomni-root (. pomni-parts 1)]
+                (let [char-root (. char-parts 1)]
                   (if (= ragdoll.state RagdollState.STANDING)
                       (do
                         (set ragdoll.state RagdollState.RAGDOLL_LIMP)
                         (zh.log "Player collapsed into the blizzard!")
                         (zh.audio:beep 150.0 0.25 0.3)
-                        (zh.ecs:remove pomni-root :HierarchyComponent)
-                        (let [root-trans (zh.ecs:get pomni-root
+                        (zh.ecs:remove char-root :HierarchyComponent)
+                        (let [root-trans (zh.ecs:get char-root
                                                      :TransformComponent)]
                           (when root-trans (tset root-trans.position 1 0.0))))
                       (do
                         (set ragdoll.state RagdollState.STANDING)
                         (zh.log "Player stood up in the blizzard!")
-                        (let [root-trans (zh.ecs:get pomni-root
+                        (let [root-trans (zh.ecs:get char-root
                                                      :TransformComponent)]
                           (when root-trans (tset root-trans.position 1 -0.8)))
-                        (zh.ecs:add pomni-root :HierarchyComponent
+                        (zh.ecs:add char-root :HierarchyComponent
                                     {:parent player-ent})))))))
           (set was-r-down is-r-down))))))
 
@@ -482,7 +482,7 @@
 
 (defsystem player-animation-system
   [_dt]
-  (when (and _G.player_ent pomni-parts)
+  (when (and _G.player_ent char-parts)
     (let [movement (zh.ecs:get _G.player_ent :MovementComponent)]
       (when movement
         (let [ragdoll (zh.ecs:get _G.player_ent :RagdollComponent)]
@@ -504,7 +504,7 @@
                                              :IDLE))))]
               (when (not= target-state current-anim-state)
                 (set current-anim-state target-state)
-                (each [_ part-ent (ipairs pomni-parts)]
+                (each [_ part-ent (ipairs char-parts)]
                   (when (zh.ecs:has part-ent :AnimatorComponent)
                     (let [options {:blend_duration 0.15 :loop true :speed 1.0}]
                       (if (= target-state :JUMP)

@@ -1,63 +1,61 @@
-// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
-// SPDX-License-Identifier: GPL-3.0-or-later
-
+// include/Zahlen/ModelPrefab.hpp
 #pragma once
 
 #include "../../src/detail/String.hpp"
+#include "SkeletalAnimation.hpp"
 #include "Types.hpp"
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Collision/Shape/Shape.h>
-
-// Forward declare cgltf struct to prevent leaking the library into engine headers
-struct cgltf_data;
-struct cgltf_node;
-struct cgltf_skin;
+#include <vector>
 
 namespace ZHLN {
+
+struct ModelNode {
+    String64   name;
+    int32_t    parentIndex    = -1;
+    JPH::Mat44 localTransform = JPH::Mat44::sIdentity();
+    bool       hasMesh        = false;
+};
 
 struct ModelPart {
     String64 name;
     Mesh     mesh;
     Material defaultMaterial;
 
-    // Transforms relative to the prefab's root
     JPH::Mat44 localTransform = JPH::Mat44::sIdentity();
 
-    // Animation metadata
-    uint32_t    jointOffset = 0;
-    bool        isSkinned   = false;
-    cgltf_node* gltfNode    = nullptr;
-    cgltf_skin* gltfSkin    = nullptr;
+    uint32_t jointOffset   = 0;
+    bool     isSkinned     = false;
+    int32_t  nodeIndex     = -1;
+    int32_t  skeletonIndex = -1;
 
-    // Morph target data
     uint32_t morphOffset            = 0;
     uint32_t activeMorphCount       = 0;
     float    defaultMorphWeights[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 
-    // Bounds for frustum culling
     float boundingRadius = 1.0f;
     float localMin[3]    = {0.0f, 0.0f, 0.0f};
     float localMax[3]    = {0.0f, 0.0f, 0.0f};
 
-    // Pre-calculated colliders (in local space relative to localTransform)
     JPH::ShapeRefC meshCollider = nullptr;
     JPH::ShapeRefC boxCollider  = nullptr;
 };
 
 struct ModelPrefab {
-    String256   virtualPath;
-    ModelPart*  parts     = nullptr;
-    uint32_t    partCount = 0;
-    cgltf_data* rawData   = nullptr; // Retained for animation hierarchy lookups
+    String256 virtualPath;
 
-    ModelPrefab() = default;
-    ~ModelPrefab() {
-        delete[] parts;
-    }
+    std::vector<ModelPart>     parts;
+    std::vector<ModelNode>     nodes;
+    std::vector<Skeleton>      skeletons;
+    std::vector<AnimationClip> animations;
 
-    // Rule of five: Exclusively managed by pointers/unique_ptrs internally
+    ModelPrefab()  = default;
+    ~ModelPrefab() = default;
+
     ModelPrefab(const ModelPrefab&)            = delete;
     ModelPrefab& operator=(const ModelPrefab&) = delete;
+    ModelPrefab(ModelPrefab&&)                 = default;
+    ModelPrefab& operator=(ModelPrefab&&)      = default;
 };
 
 } // namespace ZHLN

@@ -5,6 +5,7 @@
 #include "../../src/detail/String.hpp"
 #include "Entity.hpp"
 #include "Types.hpp"
+#include "Zahlen/ModelPrefab.hpp"
 #include "alife/Types.hpp"
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
@@ -51,9 +52,9 @@ struct Components {
         uint32_t             activeMorphCount = 0;
         std::array<float, 4> morphWeights     = {0.0f, 0.0f, 0.0f, 0.0f};
 
-        void*     gltfNode = nullptr;
-        void*     gltfSkin = nullptr;
-        DrawFlags flags    = DrawFlags::None;
+        int32_t   nodeIndex     = -1;
+        int32_t   skeletonIndex = -1;
+        DrawFlags flags         = DrawFlags::None;
     };
     struct PhysicsComponent {
         Entity physicsHandle;
@@ -87,15 +88,14 @@ struct Components {
 
     struct RagdollComponent {
         using enum RagdollState;
-        JPH::Ragdoll* ragdollInstance  = nullptr;
-        RagdollState  state            = Inactive;
-        RagdollState  prevState        = Inactive;
-        uint32_t      isAddedToPhysics = 0;
-        uint32_t      jointOffset      = 0;
-        uint32_t      jointCount       = 0;
-        uint32_t      _padding         = 0;
-        void*         gltfSkin         = nullptr;
-        static void   OnDestroy(RagdollComponent* r) noexcept {
+        JPH::Ragdoll*   ragdollInstance  = nullptr;
+        RagdollState    state            = Inactive;
+        RagdollState    prevState        = Inactive;
+        uint32_t        isAddedToPhysics = 0;
+        uint32_t        jointOffset      = 0;
+        uint32_t        jointCount       = 0;
+        const Skeleton* skeleton         = nullptr;
+        static void     OnDestroy(RagdollComponent* r) noexcept {
             if (r->ragdollInstance != nullptr) {
                 r->ragdollInstance->Release();
                 r->ragdollInstance = nullptr;
@@ -296,26 +296,20 @@ struct Components {
         char      _pad[3]     = {};    // 3 bytes padding (Total size: 272 bytes)
     };
     struct AnimatorComponent {
-        // Track 0 (Current Active Animation)
-        int32_t currentTrackIdx      = -1; // -1 means no active animation
+        int32_t currentTrackIdx      = -1;
         float   currentTrackTime     = 0.0f;
         float   currentPlaybackSpeed = 1.0f;
         bool    currentLoop          = true;
 
-        // Track 1 (Previous Animation - used for crossfading)
         int32_t prevTrackIdx      = -1;
         float   prevTrackTime     = 0.0f;
         float   prevPlaybackSpeed = 1.0f;
 
-        // Blending State
-        float blendFactor   = 1.0f;  // 1.0 = fully Track 0, < 1.0 = blending from Track 1
-        float blendDuration = 0.15f; // Transition duration in seconds
+        float blendFactor   = 1.0f;
+        float blendDuration = 0.15f;
+        bool  isFinished    = false;
 
-        // Scripting / Event Interface
-        bool isFinished = false; // True when a non-looping animation reaches the end
-
-        // Pointer to the shared model's asset tree (cgltf_data*)
-        void* gltfData = nullptr;
+        const ModelPrefab* prefab = nullptr;
     };
 
     struct ALifeComponent {

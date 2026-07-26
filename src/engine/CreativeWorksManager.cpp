@@ -32,11 +32,7 @@ CreativeWorksManager::~CreativeWorksManager() {
         delete _archives[i];
     }
     for (size_t i = 0; i < _prefabsCount; ++i) {
-        auto* prefab = _prefabsMemory[i];
-        if (prefab->rawData != nullptr) {
-            cgltf_free(prefab->rawData);
-        }
-        delete prefab;
+        delete _prefabsMemory[i]; // Native destructor cleans up parts/nodes
     }
     delete[] _prefabsMemory;
     delete[] _archives;
@@ -204,16 +200,9 @@ void CreativeWorksManager::CachePrefab(uint64_t hash, ModelPrefab* prefab) {
 
 void CreativeWorksManager::ClearCache() noexcept {
     ZHLN_LOCK(_prefabMutex) {
-        // 1. Clear the lookup hash map
         _prefabCache.Clear();
-
-        // 2. Destroy and free all memory allocated for cached prefabs
         for (size_t i = 0; i < _prefabsCount; ++i) {
-            auto* prefab = _prefabsMemory[i];
-            if (prefab->rawData != nullptr) {
-                cgltf_free(prefab->rawData);
-            }
-            delete prefab;
+            delete _prefabsMemory[i]; // No more cgltf_free!
         }
         _prefabsCount = 0;
     }

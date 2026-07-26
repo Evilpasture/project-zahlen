@@ -11,6 +11,7 @@
 #include <physics/PhysicsWorld.hpp>
 
 namespace ZHLN::Tests {
+
 static void VerifyRealTransforms(const ECS::Registry& reg) noexcept {
     static bool testsRun = false;
     if (testsRun) {
@@ -57,7 +58,7 @@ static void VerifyRealTransforms(const ECS::Registry& reg) noexcept {
         const auto& mesh = meshes[i];
         if (mesh.prevTransform != JPH::Mat44::sIdentity()) {
             float deltaPos = (mesh.worldTransform.GetTranslation() - mesh.prevTransform.GetTranslation()).Length();
-            if (deltaPos > 100.0f) { // Arbitrary "Speed of Light" threshold
+            if (deltaPos > 100.0f) {
                 ZHLN::Log("[Test Fail] Jitter Detected: Entity {} moved {} units in one frame!", e.index, deltaPos);
             }
         }
@@ -79,13 +80,16 @@ static void VerifyRealTransforms(const ECS::Registry& reg) noexcept {
         }
     }
 }
+
 } // namespace ZHLN::Tests
 
 namespace ZHLN {
+
 namespace {
+
 // Helper to calculate the logical world-space transform of an entity
 JPH::Mat44 GetLogicalWorldTransform(const ECS::Registry& reg, Entity e) noexcept {
-    const auto* trans       = reg.Get<Components::Components::TransformComponent>(e);
+    const auto* trans       = reg.Get<Components::TransformComponent>(e);
     JPH::Mat44  localMatrix = (trans != nullptr) ? trans->GetMatrix() : JPH::Mat44::sIdentity();
 
     const auto* hierarchy = reg.Get<Components::HierarchyComponent>(e);
@@ -101,12 +105,14 @@ JPH::Mat44 GetLogicalWorldTransform(const ECS::Registry& reg, Entity e) noexcept
     }
     return localMatrix;
 }
+
 } // namespace
+
 JPH::Mat44 TransformSystem::GetWorldTransform(const ECS::Registry& reg, Entity e) const noexcept {
     const auto* mesh      = reg.Get<Components::MeshComponent>(e);
     JPH::Mat44  meshLocal = (mesh != nullptr) ? mesh->localTransform : JPH::Mat44::sIdentity();
 
-    const auto* trans       = reg.Get<Components::Components::TransformComponent>(e);
+    const auto* trans       = reg.Get<Components::TransformComponent>(e);
     JPH::Mat44  localMatrix = (trans != nullptr) ? trans->GetMatrix() : JPH::Mat44::sIdentity();
 
     const auto* hierarchy = reg.Get<Components::HierarchyComponent>(e);
@@ -114,9 +120,9 @@ JPH::Mat44 TransformSystem::GetWorldTransform(const ECS::Registry& reg, Entity e
         // Retrieve only the logical parent matrix (bypassing the parent's visual offset)
         JPH::Mat44 parentLogical = GetLogicalWorldTransform(reg, hierarchy->parent);
 
-        // If the node is animated, meshLocal is already computed relative to the glTF root
+        // If the node is animated, meshLocal is already computed relative to the model root
         // by the AnimationSystem. We skip multiplying by the redundant static localMatrix.
-        if ((mesh != nullptr) && mesh->gltfNode != nullptr && !mesh->isSkinned) {
+        if ((mesh != nullptr) && mesh->nodeIndex >= 0 && !mesh->isSkinned) {
             return parentLogical * meshLocal;
         }
 

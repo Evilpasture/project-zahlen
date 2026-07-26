@@ -995,29 +995,22 @@ void RegisterSystemCommands() {
                 }));
 
     RegisterCmd("GetAnimationTrackCount", MakeCmd<EntityOnlyArgs>([](ZHLN::Engine* engine, const EntityOnlyArgs& a) -> uint64_t {
-                    auto& reg = engine->GetRegistry();
-
                     auto entity = ZHLN::Entity::Unpack(a.entityRaw);
-                    if (auto* anim = reg.Get<ZHLN::Components::AnimatorComponent>(entity)) {
-                        if (anim->gltfData != nullptr) {
-                            auto* data = static_cast<cgltf_data*>(anim->gltfData);
-                            return static_cast<uint64_t>(data->animations_count);
+                    if (auto* anim = engine->GetRegistry().Get<ZHLN::Components::AnimatorComponent>(entity)) {
+                        if (anim->prefab != nullptr) {
+                            return static_cast<uint64_t>(anim->prefab->animations.size());
                         }
                     }
                     return 0;
                 }));
 
     RegisterCmd("GetAnimationTrackName", MakeCmd<GetTrackNameArgs>([](ZHLN::Engine* engine, const GetTrackNameArgs& a) -> uint64_t {
-                    auto& reg = engine->GetRegistry();
-
                     auto entity = ZHLN::Entity::Unpack(a.entityRaw);
-                    if (auto* anim = reg.Get<ZHLN::Components::AnimatorComponent>(entity)) {
-                        if (anim->gltfData != nullptr) {
-                            auto* data = static_cast<cgltf_data*>(anim->gltfData);
-                            if (a.trackIndex >= 0 && a.trackIndex < static_cast<int32_t>(data->animations_count)) {
-                                const char* name = data->animations[a.trackIndex].name;
-                                // Safely write to the flat array
-                                std::strncpy(const_cast<char*>(a.outName), name ? name : "Unnamed", 63);
+                    if (auto* anim = engine->GetRegistry().Get<ZHLN::Components::AnimatorComponent>(entity)) {
+                        if (anim->prefab != nullptr) {
+                            if (a.trackIndex >= 0 && a.trackIndex < static_cast<int32_t>(anim->prefab->animations.size())) {
+                                const auto& name = anim->prefab->animations[a.trackIndex].name;
+                                std::strncpy(const_cast<char*>(a.outName), name.c_str(), 63);
                                 const_cast<char*>(a.outName)[63] = '\0';
                                 return 1;
                             }
@@ -1027,14 +1020,10 @@ void RegisterSystemCommands() {
                 }));
 
     RegisterCmd("PlayAnimationTrack", MakeCmd<PlayTrackArgs>([](ZHLN::Engine* engine, const PlayTrackArgs& a) -> uint64_t {
-                    auto& reg = engine->GetRegistry();
-
                     auto entity = ZHLN::Entity::Unpack(a.entityRaw);
-                    if (auto* anim = reg.Get<ZHLN::Components::AnimatorComponent>(entity)) {
-                        if (anim->gltfData != nullptr) {
-                            auto* data = static_cast<cgltf_data*>(anim->gltfData);
-                            if (a.trackIndex >= 0 && a.trackIndex < static_cast<int32_t>(data->animations_count)) {
-                                // Manage the crossfading transition state machine
+                    if (auto* anim = engine->GetRegistry().Get<ZHLN::Components::AnimatorComponent>(entity)) {
+                        if (anim->prefab != nullptr) {
+                            if (a.trackIndex >= 0 && a.trackIndex < static_cast<int32_t>(anim->prefab->animations.size())) {
                                 if (anim->currentTrackIdx != a.trackIndex) {
                                     anim->prevTrackIdx      = anim->currentTrackIdx;
                                     anim->prevTrackTime     = anim->currentTrackTime;
@@ -1049,7 +1038,6 @@ void RegisterSystemCommands() {
                                     anim->blendDuration = a.blendDuration;
                                     anim->isFinished    = false;
                                 } else {
-                                    // If targeting the same track, update playback properties
                                     anim->currentLoop          = (a.loop != 0);
                                     anim->currentPlaybackSpeed = a.playbackSpeed;
                                     if (anim->isFinished && anim->currentLoop) {
