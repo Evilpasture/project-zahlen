@@ -44,6 +44,149 @@ def optimize_subsurf_modifiers(obj, max_level=1):
     first_subsurf.levels = min(first_subsurf.levels, max_level)
     first_subsurf.render_levels = min(first_subsurf.render_levels, max_level)
 
+def convert_particle_systems_to_real_mesh(main_rig):
+    print(
+        "[*] Converting jacket/fur particle systems to real meshes...",
+        flush=True,
+    )
+
+    # 1. Force armature into REST pose so particle geometry is generated at rest topology
+    if main_rig and main_rig.data:
+        main_rig.data.pose_position = "REST"
+
+    bpy.context.view_layer.update()
+
+    ALLOWED_PARTICLE_OBJECTS = ["Cylinder.001", "Jacket", "Clothes", "Coat"]
+
+    for obj in list(bpy.data.objects):
+        if not (obj.type == "MESH" and not obj.hide_render):
+            continue
+
+        psys_mods = [m for m in obj.modifiers if m.type == "PARTICLE_SYSTEM"]
+        if not psys_mods:
+            continue
+
+        is_allowed = any(
+            target.lower() in obj.name.lower()
+            for target in ALLOWED_PARTICLE_OBJECTS
+        )
+        if not is_allowed:
+            print(
+                f"  [-] Stripped high-density particle system from '{obj.name}' to prevent mesh bloat.",
+                flush=True,
+            )
+            for m in psys_mods:
+                obj.modifiers.remove(m)
+            continue
+
+        print(
+            f"  [*] Baking particle instances on object: '{obj.name}' in REST pose...",
+            flush=True,
+        )
+
+        bpy.ops.object.select_all(action="DESELECT")
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
+
+        try:
+            # 2. Spawn real instances in exact rest position
+            bpy.ops.object.duplicates_make_real(
+                use_base_parent=False, use_hierarchy=False
+            )
+
+            spawned_objs = [
+                o
+                for o in bpy.context.selected_objects
+                if o != obj and o.type == "MESH"
+            ]
+
+            if spawned_objs:
+                for inst in spawned_objs:
+                    inst.hide_render = False
+                    inst.hide_viewport = False
+
+                # 3. Join spawned fur pieces together
+                bpy.ops.object.select_all(action="DESELECT")
+                for inst in spawned_objs:
+                    inst.select_set(True)
+
+                bpy.context.view_layer.objects.active = spawned_objs[0]
+
+                if bpy.ops.object.mode_set.poll():
+                    bpy.ops.object.mode_set(mode="OBJECT")
+
+                bpy.ops.object.join()
+
+                joined_fur = bpy.context.view_layer.objects.active
+                joined_fur.name = f"{obj.name}_Fur_Trim"
+                joined_fur.hide_render = False
+                joined_fur.hide_viewport = False
+
+                if joined_fur.data and joined_fur.data.users > 1:
+                    joined_fur.data = joined_fur.data.copy()
+
+                # 4. FIX BACKWARDS FACES: Recalculate face normals & enable Double-Sided glTF export
+                bpy.ops.object.mode_set(mode="EDIT")
+                bpy.ops.mesh.select_all(action="SELECT")
+                bpy.ops.mesh.normals_make_consistent(inside=False)
+                bpy.ops.object.mode_set(mode="OBJECT")
+
+                for slot in joined_fur.material_slots:
+                    if slot.material:
+                        # Setting backface culling false exports 'doubleSided: true' in glTF
+                        slot.material.use_backface_culling = False
+
+                # 5. TRANSFER WEIGHTS from jacket to fur mesh
+                dt_mod = joined_fur.modifiers.new(
+                    name="WeightTransfer", type="DATA_TRANSFER"
+                )
+                dt_mod.object = obj
+                dt_mod.use_vert_data = True
+                dt_mod.data_types_verts = {"VGROUP_WEIGHTS"}
+                dt_mod.vert_mapping = "NEAREST"
+
+                bpy.ops.object.select_all(action="DESELECT")
+                joined_fur.select_set(True)
+                bpy.context.view_layer.objects.active = joined_fur
+
+                try:
+                    bpy.ops.object.datalayout_transfer(modifier=dt_mod.name)
+                except Exception:
+                    pass
+
+                bpy.ops.object.modifier_apply(modifier=dt_mod.name)
+
+                # 6. FIX OFFSET: Join fur geometry directly into the jacket mesh (obj)
+                # Joining directly into the jacket eliminates object-node offset completely!
+                bpy.ops.object.select_all(action="DESELECT")
+                joined_fur.select_set(True)
+                obj.select_set(True)
+                bpy.context.view_layer.objects.active = obj
+
+                bpy.ops.object.join()
+
+                print(
+                    f"  [+] Seamlessly merged fur trim into jacket mesh: '{obj.name}'",
+                    flush=True,
+                )
+
+            # Remove particle modifier after baking
+            for m in list(obj.modifiers):
+                if m.type == "PARTICLE_SYSTEM":
+                    obj.modifiers.remove(m)
+
+        except Exception as e:
+            print(
+                f"  [~] Notice converting particles on '{obj.name}': {safe_str(e)}",
+                flush=True,
+            )
+
+    # 7. Restore pose mode
+    if main_rig and main_rig.data:
+        main_rig.data.pose_position = "POSE"
+
+    bpy.context.view_layer.update()
+
 def patch_blender_52_gltf_cache_bug():
     # Patches Blender 5.2 LTS io_scene_gltf2 KeyError: None / AttributeError in sampling_cache.py
     try:
@@ -1185,6 +1328,9 @@ def main():
 
     # 5. Bake clothing, chestplate, and VisorExt/VisorInt modifiers
     bake_clothing_modifiers_with_shapekeys()
+
+    # Automatically convert jacket fur particles to real exportable GLB meshes
+    convert_particle_systems_to_real_mesh(main_rig)
 
     # 6. Bake metal limb segment rings
     bake_limb_modifiers()
