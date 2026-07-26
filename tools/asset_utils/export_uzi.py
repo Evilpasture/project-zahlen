@@ -1140,16 +1140,34 @@ def fix_and_bake_mouth_shrink(main_rig):
         mouth_obj.hide_viewport = False
         mouth_obj.hide_render = False
 
-        for m in mouth_obj.modifiers:
-            if m.type == "SHRINKWRAP":
+        # --- OPTIMIZED MODIFIER CLEANUP FOR MOUTH_SHRINK ---
+        subsurf_count = 0
+        for m in list(mouth_obj.modifiers):
+            m_name_lower = m.name.lower()
+
+            # Remove redundant heavy (Render) duplicates
+            if "(render)" in m_name_lower:
+                perf_name = m.name.lower().replace("(render)", "(performance)").strip()
+                if any(other.name.lower().strip() == perf_name for other in mouth_obj.modifiers):
+                    mouth_obj.modifiers.remove(m)
+                    continue
+
+            # Set Subdivision to Level 3 (~15,000 faces total)
+            # This gives 16x more vertex density along the outline curve for a butter-smooth rounded edge
+            if m.type == "SUBSURF":
+                subsurf_count += 1
+                if subsurf_count > 1:
+                    mouth_obj.modifiers.remove(m)
+                else:
+                    m.show_viewport = True
+                    m.show_render = True
+                    m.levels = 3
+                    m.render_levels = 3
+
+            elif m.type == "SHRINKWRAP":
                 m.show_viewport = True
                 m.show_render = True
                 m.wrap_method = "TARGET_PROJECT"
-            elif m.type == "SUBSURF":
-                m.show_viewport = True
-                m.show_render = True
-                m.levels = max(m.levels, 2)
-                m.render_levels = max(m.render_levels, 2)
 
         bpy.context.view_layer.update()
 
@@ -1201,6 +1219,7 @@ def fix_and_bake_mouth_shrink(main_rig):
         internal_obj.hide_viewport = False
 
     bpy.context.view_layer.update()
+
 
 
 def hide_non_character_widgets_and_symbols():
