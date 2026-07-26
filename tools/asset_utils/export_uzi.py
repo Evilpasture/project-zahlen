@@ -914,7 +914,12 @@ def bake_limb_modifiers():
 
     for obj in bpy.data.objects:
         if obj.type == 'MESH' and not obj.hide_render:
-            if any(k in obj.name for k in ["Cylinder.021", "Cylinder.029", "Sphere.013", "Sphere.017", "Sphere.019", "Sphere.022", "Sphere.027", "Sphere.028"]):
+            name_lower = obj.name.lower()
+            if any(k in name_lower for k in [
+                "cylinder.021", "cylinder.029", "cylinder.042", "cylinder.044", 
+                "cylinder.046", "sphere.013", "sphere.017", "sphere.019", 
+                "sphere.022", "sphere.027", "sphere.028"
+            ]):
                 limb_objects.add(obj)
 
     for obj in limb_objects:
@@ -923,6 +928,13 @@ def bake_limb_modifiers():
             continue
 
         print(f"  [*] Baking metal limb geometry on: '{obj.name}'...", flush=True)
+
+        # OPTIMIZATION: Remove Subsurf and cap Bevel on limb rings before multiplying via Array
+        for m in list(obj.modifiers):
+            if m.type == 'SUBSURF':
+                obj.modifiers.remove(m)
+            elif m.type == 'BEVEL':
+                m.segments = min(m.segments, 1)
 
         try:
             depsgraph = bpy.context.evaluated_depsgraph_get()
@@ -941,7 +953,12 @@ def bake_limb_modifiers():
                 if m.type in {'ARRAY', 'CURVE', 'BEVEL', 'SUBSURF'}:
                     obj.modifiers.remove(m)
 
-            print(f"  [+] Successfully baked metal limb rings into '{obj.name}'", flush=True)
+            # Enable smooth shading on the baked metal cylinders
+            if obj.data and hasattr(obj.data, "polygons"):
+                for poly in obj.data.polygons:
+                    poly.use_smooth = True
+
+            print(f"  [+] Successfully baked metal limb rings into '{obj.name}' ({len(obj.data.polygons)} faces)", flush=True)
 
         except Exception as e:
             print(f"  [~] Notice while baking limb '{obj.name}': {safe_str(e)}", flush=True)
