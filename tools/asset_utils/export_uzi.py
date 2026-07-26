@@ -85,8 +85,16 @@ def bake_procedural_material(mat_name, target_objects, resolution=2048):
     if not mat or not mat.use_nodes:
         return False
 
-    # 1. Check if the material actually contains procedural texture nodes
-    procedural_types = {
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+
+    bsdf_node = next(
+        (n for n in nodes if n.type == "BSDF_PRINCIPLED"), None
+    )
+    if not bsdf_node:
+        return False
+
+    procedural_tex_types = {
         "TEX_NOISE",
         "TEX_WAVE",
         "TEX_VORONOI",
@@ -94,42 +102,43 @@ def bake_procedural_material(mat_name, target_objects, resolution=2048):
         "TEX_GRADIENT",
         "TEX_CHECKER",
     }
-    has_procedural = any(
-        n.type in procedural_types for n in mat.node_tree.nodes
-    )
 
-    if not has_procedural:
-        # Skip image-based materials to prevent texture corruption
+    # Determine what needs baking
+    bake_color = False
+    bake_normal = False
+
+    # 1. Check if Base Color is driven by procedural texture nodes
+    base_color_input = bsdf_node.inputs.get("Base Color")
+    if base_color_input and base_color_input.is_linked:
+        for n in nodes:
+            if n.type in procedural_tex_types:
+                # Check if procedural node feeds into Base Color
+                bake_color = True
+                break
+
+    # 2. Check if Normal is driven by a custom group (Mat_Clothes_1) or procedural bump
+    normal_input = bsdf_node.inputs.get("Normal")
+    if normal_input and normal_input.is_linked:
+        from_node = normal_input.links[0].from_node
+        if from_node.type in (procedural_tex_types | {"GROUP", "BUMP"}):
+            bake_normal = True
+
+    if not (bake_color or bake_normal):
         return False
 
     print(
-        f"[*] Starting Isolated Cycles Bake for procedural material: '{mat_name}' ({resolution}x{resolution})...",
+        f"[*] Starting Cycles Bake for '{mat_name}' (Bake Color: {bake_color}, Bake Normal: {bake_normal})...",
         flush=True,
     )
     setup_cycles_gpu()
 
-    nodes = mat.node_tree.nodes
-    links = mat.node_tree.links
-
-    # Preserve metallic and roughness defaults from original Principled BSDF
-    orig_bsdf = next((n for n in nodes if n.type == "BSDF_PRINCIPLED"), None)
-    orig_metallic = 0.0
-    orig_roughness = 0.5
-    if orig_bsdf:
-        if "Metallic" in orig_bsdf.inputs:
-            orig_metallic = orig_bsdf.inputs["Metallic"].default_value
-        if "Roughness" in orig_bsdf.inputs:
-            orig_roughness = orig_bsdf.inputs["Roughness"].default_value
-
     target_obj = target_objects[0]
     ensure_uv_unwrap(target_obj)
 
-    # 2. ISOLATED BAKE DUMMY OBJECT: Prevents multi-material slot corruption
+    # 3. ISOLATED BAKE DUMMY OBJECT
     tmp_mesh = target_obj.data.copy()
     tmp_obj = bpy.data.objects.new(f"__tmp_bake_{mat_name}", tmp_mesh)
     bpy.context.collection.objects.link(tmp_obj)
-
-    # Assign ONLY the target procedural material to slot 0
     tmp_obj.data.materials.clear()
     tmp_obj.data.materials.append(mat)
 
@@ -137,115 +146,110 @@ def bake_procedural_material(mat_name, target_objects, resolution=2048):
     tmp_obj.select_set(True)
     bpy.context.view_layer.objects.active = tmp_obj
 
-    # Create target Image datablocks
-    diffuse_img_name = f"{mat_name}_Baked_Diffuse"
-    normal_img_name = f"{mat_name}_Baked_Normal"
-
-    diffuse_img = bpy.data.images.get(
-        diffuse_img_name
-    ) or bpy.data.images.new(
-        diffuse_img_name,
-        width=resolution,
-        height=resolution,
-        alpha=True,
-        float_buffer=False,
-    )
-    normal_img = bpy.data.images.get(
-        normal_img_name
-    ) or bpy.data.images.new(
-        normal_img_name,
-        width=resolution,
-        height=resolution,
-        alpha=False,
-        float_buffer=False,
-    )
-
     bake_node = nodes.new("ShaderNodeTexImage")
     bake_node.location = (-400, 300)
 
     # -------------------------------------------------------------------------
-    # PASS 1: Bake Diffuse (Base Color)
+    # PASS 1: BAKE DIFFUSE COLOR (Only if Base Color is procedural)
     # -------------------------------------------------------------------------
-    print(f"  [*] Baking Diffuse map for '{mat_name}'...", flush=True)
-    bake_node.image = diffuse_img
-    nodes.active = bake_node
-    bake_node.select = True
+    diffuse_img = None
+    if bake_color:
+        diffuse_img_name = f"{mat_name}_Baked_Diffuse"
+        diffuse_img = bpy.data.images.get(
+            diffuse_img_name
+        ) or bpy.data.images.new(
+            diffuse_img_name,
+            width=resolution,
+            height=resolution,
+            alpha=True,
+        )
 
-    scene = bpy.context.scene
-    scene.cycles.bake_type = "DIFFUSE"
-    scene.render.bake.use_pass_direct = False
-    scene.render.bake.use_pass_indirect = False
-    scene.render.bake.use_pass_color = True
-    scene.render.bake.margin = 16
+        print(f"  [*] Baking Diffuse map for '{mat_name}'...", flush=True)
+        bake_node.image = diffuse_img
+        nodes.active = bake_node
+        bake_node.select = True
 
-    bpy.ops.object.bake(type="DIFFUSE", save_mode="INTERNAL")
-    diffuse_img.pack()
+        scene = bpy.context.scene
+        scene.cycles.bake_type = "DIFFUSE"
+        scene.render.bake.use_pass_direct = False
+        scene.render.bake.use_pass_indirect = False
+        scene.render.bake.use_pass_color = True
+        scene.render.bake.margin = 16
+
+        bpy.ops.object.bake(type="DIFFUSE", save_mode="INTERNAL")
+        diffuse_img.pack()
 
     # -------------------------------------------------------------------------
-    # PASS 2: Bake Tangent Normal Map
+    # PASS 2: BAKE NORMAL MAP (If Normal uses Mat_Clothes_1 / procedural bump)
     # -------------------------------------------------------------------------
-    print(f"  [*] Baking Normal map for '{mat_name}'...", flush=True)
-    normal_img.colorspace_settings.name = "Non-Color"
-    bake_node.image = normal_img
-    nodes.active = bake_node
-    bake_node.select = True
+    normal_img = None
+    if bake_normal:
+        normal_img_name = f"{mat_name}_Baked_Normal"
+        normal_img = bpy.data.images.get(
+            normal_img_name
+        ) or bpy.data.images.new(
+            normal_img_name,
+            width=resolution,
+            height=resolution,
+            alpha=False,
+        )
 
-    scene.cycles.bake_type = "NORMAL"
-    scene.render.bake.margin = 16
+        print(f"  [*] Baking Normal map for '{mat_name}'...", flush=True)
+        normal_img.colorspace_settings.name = "Non-Color"
+        bake_node.image = normal_img
+        nodes.active = bake_node
+        bake_node.select = True
 
-    bpy.ops.object.bake(type="NORMAL", save_mode="INTERNAL")
-    normal_img.pack()
+        scene = bpy.context.scene
+        scene.cycles.bake_type = "NORMAL"
+        scene.render.bake.margin = 16
 
-    # Clean up isolated dummy object
+        bpy.ops.object.bake(type="NORMAL", save_mode="INTERNAL")
+        normal_img.pack()
+
+    # Cleanup dummy object
     bpy.data.objects.remove(tmp_obj, do_unlink=True)
     if tmp_mesh.users == 0:
         bpy.data.meshes.remove(tmp_mesh)
 
+    nodes.remove(bake_node)
+
     # -------------------------------------------------------------------------
-    # REWIRE MATERIAL NODE TREE TO STANDARD GLTF PBR
+    # REWIRE MATERIAL NODES SAFELY
     # -------------------------------------------------------------------------
-    print(
-        f"  [*] Rewiring '{mat_name}' nodes to standard Principled BSDF...",
-        flush=True,
-    )
+    print(f"  [*] Rewiring '{mat_name}' PBR nodes...", flush=True)
 
-    for node in list(nodes):
-        if node.type not in {"OUTPUT_MATERIAL"}:
-            nodes.remove(node)
+    if bake_color and diffuse_img:
+        # Replace procedural color nodes with baked diffuse map
+        for link in list(bsdf_node.inputs["Base Color"].links):
+            links.remove(link)
 
-    output_node = next((n for n in nodes if n.type == "OUTPUT_MATERIAL"), None)
-    if not output_node:
-        output_node = nodes.new("ShaderNodeOutputMaterial")
-        output_node.location = (400, 0)
+        tex_diffuse = nodes.new("ShaderNodeTexImage")
+        tex_diffuse.location = (-400, 200)
+        tex_diffuse.image = diffuse_img
+        links.new(tex_diffuse.outputs["Color"], bsdf_node.inputs["Base Color"])
 
-    # Create new Principled BSDF
-    bsdf = nodes.new("ShaderNodeBsdfPrincipled")
-    bsdf.location = (0, 0)
-    bsdf.inputs["Metallic"].default_value = orig_metallic
-    bsdf.inputs["Roughness"].default_value = orig_roughness
-    links.new(bsdf.outputs["BSDF"], output_node.inputs["Surface"])
+    if bake_normal and normal_img:
+        # Replace custom group (Mat_Clothes_1) with glTF-standard Normal Map node
+        for link in list(bsdf_node.inputs["Normal"].links):
+            links.remove(link)
 
-    # Connect Baked Diffuse
-    tex_diffuse = nodes.new("ShaderNodeTexImage")
-    tex_diffuse.location = (-400, 200)
-    tex_diffuse.image = diffuse_img
-    links.new(tex_diffuse.outputs["Color"], bsdf.inputs["Base Color"])
+        tex_normal = nodes.new("ShaderNodeTexImage")
+        tex_normal.location = (-400, -100)
+        tex_normal.image = normal_img
+        tex_normal.image.colorspace_settings.name = "Non-Color"
 
-    # Connect Baked Normal
-    tex_normal = nodes.new("ShaderNodeTexImage")
-    tex_normal.location = (-400, -100)
-    tex_normal.image = normal_img
-    tex_normal.image.colorspace_settings.name = "Non-Color"
+        normal_map_node = nodes.new("ShaderNodeNormalMap")
+        normal_map_node.location = (-150, -100)
+        normal_map_node.inputs["Strength"].default_value = 1.0
 
-    normal_map_node = nodes.new("ShaderNodeNormalMap")
-    normal_map_node.location = (-150, -100)
-    normal_map_node.inputs["Strength"].default_value = 1.0
-
-    links.new(tex_normal.outputs["Color"], normal_map_node.inputs["Color"])
-    links.new(normal_map_node.outputs["Normal"], bsdf.inputs["Normal"])
+        links.new(
+            tex_normal.outputs["Color"], normal_map_node.inputs["Color"]
+        )
+        links.new(normal_map_node.outputs["Normal"], bsdf_node.inputs["Normal"])
 
     print(
-        f"[+] Material '{mat_name}' successfully baked and rewired to PBR!\\n",
+        f"[+] Material '{mat_name}' successfully updated with baked PBR maps!\\n",
         flush=True,
     )
     return True
@@ -1569,25 +1573,28 @@ def main():
     convert_hair_curves_to_mesh()
 
     # -------------------------------------------------------------------------
-    # AUTOMATICALLY BAKE ALL PROCEDURAL MATERIALS (HAIR, BEANIE, SOCKS, FUR)
+    # AUTOMATICALLY BAKE ALL PROCEDURAL & GROUP-BASED NORMAL MATERIALS
     # -------------------------------------------------------------------------
-    procedural_node_types = {
+    procedural_and_group_node_types = {
         "TEX_NOISE",
         "TEX_WAVE",
         "TEX_VORONOI",
         "TEX_BRICK",
         "TEX_GRADIENT",
         "TEX_CHECKER",
+        "GROUP",  # Catches custom node groups like Mat_Clothes_1 on the jacket!
+        "BUMP",  # Catches procedural bump nodes!
     }
 
     for mat in list(bpy.data.materials):
         if not (mat and mat.use_nodes and mat.node_tree):
             continue
 
-        has_procedural = any(
-            n.type in procedural_node_types for n in mat.node_tree.nodes
+        # Check if the material uses procedural nodes OR custom node groups
+        has_procedural_or_group = any(
+            n.type in procedural_and_group_node_types for n in mat.node_tree.nodes
         )
-        if not has_procedural:
+        if not has_procedural_or_group:
             continue
 
         target_objs = [
