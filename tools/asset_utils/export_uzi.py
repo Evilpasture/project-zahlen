@@ -26,6 +26,183 @@ def export_uzi_to_glb(blend_path: str, glb_path: str) -> bool:
 
     expr = """
 import bpy
+import os
+
+def setup_cycles_gpu():
+    scene = bpy.context.scene
+    scene.render.engine = "CYCLES"
+    scene.cycles.samples = 16  # 16 samples is fast and clean for texture baking
+
+    try:
+        prefs = bpy.context.preferences.addons["cycles"].preferences
+        prefs.get_devices()
+
+        gpu_enabled = False
+        for dev_type in ["OPTIX", "CUDA"]:
+            try:
+                prefs.compute_device_type = dev_type
+                for device in prefs.devices:
+                    device.use = True
+                print(
+                    f"[+] Cycles GPU Acceleration active: {dev_type}",
+                    flush=True,
+                )
+                gpu_enabled = True
+                break
+            except Exception:
+                pass
+
+        if gpu_enabled:
+            scene.cycles.device = "GPU"
+        else:
+            print(
+                "[~] Notice: NVIDIA GPU not detected by Cycles API, falling back to CPU.",
+                flush=True,
+            )
+            scene.cycles.device = "CPU"
+
+    except Exception as e:
+        print(f"[~] Notice setting up Cycles GPU: {e}", flush=True)
+
+
+def ensure_uv_unwrap(obj):
+    if not obj.data.uv_layers:
+        print(
+            f"  [*] Generating Smart UV Project for '{obj.name}'...", flush=True
+        )
+        bpy.ops.object.select_all(action="DESELECT")
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
+
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="SELECT")
+        bpy.ops.uv.smart_project(island_margin=0.02)
+        bpy.ops.object.mode_set(mode="OBJECT")
+
+
+def bake_procedural_material(mat_name, target_objects, resolution=2048):
+    mat = bpy.data.materials.get(mat_name)
+    if not mat or not mat.use_nodes:
+        print(f"[-] Material '{mat_name}' not found or has no nodes.")
+        return False
+
+    print(
+        f"[*] Starting Cycles Bake for procedural material: '{mat_name}' ({resolution}x{resolution})...",
+        flush=True,
+    )
+    setup_cycles_gpu()
+
+    # 1. Prepare target hair objects
+    for obj in target_objects:
+        ensure_uv_unwrap(obj)
+
+    # Make target object active
+    target_obj = target_objects[0]
+    bpy.ops.object.select_all(action="DESELECT")
+    target_obj.select_set(True)
+    bpy.context.view_layer.objects.active = target_obj
+
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+
+    # 2. Create target Image datablocks
+    diffuse_img_name = f"{mat_name}_Baked_Diffuse"
+    normal_img_name = f"{mat_name}_Baked_Normal"
+
+    diffuse_img = bpy.data.images.get(diffuse_img_name) or bpy.data.images.new(
+        diffuse_img_name,
+        width=resolution,
+        height=resolution,
+        alpha=True,
+        float_buffer=False,
+    )
+    normal_img = bpy.data.images.get(normal_img_name) or bpy.data.images.new(
+        normal_img_name,
+        width=resolution,
+        height=resolution,
+        alpha=False,
+        float_buffer=False,
+    )
+
+    # 3. Create Bake Image Target Node
+    bake_node = nodes.new("ShaderNodeTexImage")
+    bake_node.location = (-400, 300)
+
+    # -------------------------------------------------------------------------
+    # PASS 1: Bake Diffuse (Base Color) - Pure Color without Scene Lights
+    # -------------------------------------------------------------------------
+    print("  [*] Baking Diffuse (Base Color) map...", flush=True)
+    bake_node.image = diffuse_img
+    nodes.active = bake_node
+    bake_node.select = True
+
+    scene = bpy.context.scene
+    scene.cycles.bake_type = "DIFFUSE"
+    scene.render.bake.use_pass_direct = False
+    scene.render.bake.use_pass_indirect = False
+    scene.render.bake.use_pass_color = True
+    scene.render.bake.margin = 16
+
+    bpy.ops.object.bake(type="DIFFUSE", save_mode="INTERNAL")
+    diffuse_img.pack()
+
+    # -------------------------------------------------------------------------
+    # PASS 2: Bake Tangent Space Normal Map
+    # -------------------------------------------------------------------------
+    print("  [*] Baking Normal map...", flush=True)
+    normal_img.colorspace_settings.name = "Non-Color"
+    bake_node.image = normal_img
+    nodes.active = bake_node
+    bake_node.select = True
+
+    scene.cycles.bake_type = "NORMAL"
+    scene.render.bake.margin = 16
+
+    bpy.ops.object.bake(type="NORMAL", save_mode="INTERNAL")
+    normal_img.pack()
+
+    # -------------------------------------------------------------------------
+    # REWIRE MATERIAL NODE TREE TO STANDARD GLTF PBR
+    # -------------------------------------------------------------------------
+    print("  [*] Rewiring material nodes to standard Principled BSDF...", flush=True)
+
+    # Clear old procedural nodes
+    for node in list(nodes):
+        if node.type not in {"OUTPUT_MATERIAL"}:
+            nodes.remove(node)
+
+    output_node = next((n for n in nodes if n.type == "OUTPUT_MATERIAL"), None)
+    if not output_node:
+        output_node = nodes.new("ShaderNodeOutputMaterial")
+        output_node.location = (400, 0)
+
+    # Create new Principled BSDF
+    bsdf = nodes.new("ShaderNodeBsdfPrincipled")
+    bsdf.location = (0, 0)
+    bsdf.inputs["Roughness"].default_value = 0.4
+    links.new(bsdf.outputs["BSDF"], output_node.inputs["Surface"])
+
+    # Create & Connect Baked Diffuse Texture Node
+    tex_diffuse = nodes.new("ShaderNodeTexImage")
+    tex_diffuse.location = (-400, 200)
+    tex_diffuse.image = diffuse_img
+    links.new(tex_diffuse.outputs["Color"], bsdf.inputs["Base Color"])
+
+    # Create & Connect Baked Normal Texture Node
+    tex_normal = nodes.new("ShaderNodeTexImage")
+    tex_normal.location = (-400, -100)
+    tex_normal.image = normal_img
+    tex_normal.image.colorspace_settings.name = "Non-Color"
+
+    normal_map_node = nodes.new("ShaderNodeNormalMap")
+    normal_map_node.location = (-150, -100)
+    normal_map_node.inputs["Strength"].default_value = 1.0
+
+    links.new(tex_normal.outputs["Color"], normal_map_node.inputs["Color"])
+    links.new(normal_map_node.outputs["Normal"], bsdf.inputs["Normal"])
+
+    print(f"[+] Material '{mat_name}' successfully baked and rewired to PBR!\\n", flush=True)
+    return True
 
 def optimize_subsurf_modifiers(obj, max_level=1):
     if not (obj and obj.type == 'MESH'):
@@ -1343,6 +1520,21 @@ def main():
 
     # 9. Convert remaining renderable hair curves to 3D meshes
     convert_hair_curves_to_mesh()
+
+    # -------------------------------------------------------------------------
+    # BAKE PROCEDURAL HAIR SHADER WITH CYCLES GPU BEFORE GLB EXPORT
+    # -------------------------------------------------------------------------
+    hair_objects = [
+        obj
+        for obj in bpy.data.objects
+        if obj.type == "MESH"
+        and any(
+            s.material and "hair" in s.material.name.lower()
+            for s in obj.material_slots
+        )
+    ]
+    if hair_objects:
+        bake_procedural_material("Hair_Uzi", hair_objects, resolution=2048)
 
     # 10. Bind baked metal limb meshes to armature deform bones
     skin_limbs_to_armature(main_rig)
