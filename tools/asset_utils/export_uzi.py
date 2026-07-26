@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 # tools/asset_utils/export_uzi.py
-import subprocess
-import os
-import sys
 import json
+import os
+import subprocess
+import sys
 
 
 def export_uzi_to_glb(blend_path: str, glb_path: str) -> bool:
@@ -83,40 +83,76 @@ def ensure_uv_unwrap(obj):
 def bake_procedural_material(mat_name, target_objects, resolution=2048):
     mat = bpy.data.materials.get(mat_name)
     if not mat or not mat.use_nodes:
-        print(f"[-] Material '{mat_name}' not found or has no nodes.")
+        return False
+
+    # 1. Check if the material actually contains procedural texture nodes
+    procedural_types = {
+        "TEX_NOISE",
+        "TEX_WAVE",
+        "TEX_VORONOI",
+        "TEX_BRICK",
+        "TEX_GRADIENT",
+        "TEX_CHECKER",
+    }
+    has_procedural = any(
+        n.type in procedural_types for n in mat.node_tree.nodes
+    )
+
+    if not has_procedural:
+        # Skip image-based materials to prevent texture corruption
         return False
 
     print(
-        f"[*] Starting Cycles Bake for procedural material: '{mat_name}' ({resolution}x{resolution})...",
+        f"[*] Starting Isolated Cycles Bake for procedural material: '{mat_name}' ({resolution}x{resolution})...",
         flush=True,
     )
     setup_cycles_gpu()
 
-    # 1. Prepare target hair objects
-    for obj in target_objects:
-        ensure_uv_unwrap(obj)
-
-    # Make target object active
-    target_obj = target_objects[0]
-    bpy.ops.object.select_all(action="DESELECT")
-    target_obj.select_set(True)
-    bpy.context.view_layer.objects.active = target_obj
-
     nodes = mat.node_tree.nodes
     links = mat.node_tree.links
 
-    # 2. Create target Image datablocks
+    # Preserve metallic and roughness defaults from original Principled BSDF
+    orig_bsdf = next((n for n in nodes if n.type == "BSDF_PRINCIPLED"), None)
+    orig_metallic = 0.0
+    orig_roughness = 0.5
+    if orig_bsdf:
+        if "Metallic" in orig_bsdf.inputs:
+            orig_metallic = orig_bsdf.inputs["Metallic"].default_value
+        if "Roughness" in orig_bsdf.inputs:
+            orig_roughness = orig_bsdf.inputs["Roughness"].default_value
+
+    target_obj = target_objects[0]
+    ensure_uv_unwrap(target_obj)
+
+    # 2. ISOLATED BAKE DUMMY OBJECT: Prevents multi-material slot corruption
+    tmp_mesh = target_obj.data.copy()
+    tmp_obj = bpy.data.objects.new(f"__tmp_bake_{mat_name}", tmp_mesh)
+    bpy.context.collection.objects.link(tmp_obj)
+
+    # Assign ONLY the target procedural material to slot 0
+    tmp_obj.data.materials.clear()
+    tmp_obj.data.materials.append(mat)
+
+    bpy.ops.object.select_all(action="DESELECT")
+    tmp_obj.select_set(True)
+    bpy.context.view_layer.objects.active = tmp_obj
+
+    # Create target Image datablocks
     diffuse_img_name = f"{mat_name}_Baked_Diffuse"
     normal_img_name = f"{mat_name}_Baked_Normal"
 
-    diffuse_img = bpy.data.images.get(diffuse_img_name) or bpy.data.images.new(
+    diffuse_img = bpy.data.images.get(
+        diffuse_img_name
+    ) or bpy.data.images.new(
         diffuse_img_name,
         width=resolution,
         height=resolution,
         alpha=True,
         float_buffer=False,
     )
-    normal_img = bpy.data.images.get(normal_img_name) or bpy.data.images.new(
+    normal_img = bpy.data.images.get(
+        normal_img_name
+    ) or bpy.data.images.new(
         normal_img_name,
         width=resolution,
         height=resolution,
@@ -124,14 +160,13 @@ def bake_procedural_material(mat_name, target_objects, resolution=2048):
         float_buffer=False,
     )
 
-    # 3. Create Bake Image Target Node
     bake_node = nodes.new("ShaderNodeTexImage")
     bake_node.location = (-400, 300)
 
     # -------------------------------------------------------------------------
-    # PASS 1: Bake Diffuse (Base Color) - Pure Color without Scene Lights
+    # PASS 1: Bake Diffuse (Base Color)
     # -------------------------------------------------------------------------
-    print("  [*] Baking Diffuse (Base Color) map...", flush=True)
+    print(f"  [*] Baking Diffuse map for '{mat_name}'...", flush=True)
     bake_node.image = diffuse_img
     nodes.active = bake_node
     bake_node.select = True
@@ -147,9 +182,9 @@ def bake_procedural_material(mat_name, target_objects, resolution=2048):
     diffuse_img.pack()
 
     # -------------------------------------------------------------------------
-    # PASS 2: Bake Tangent Space Normal Map
+    # PASS 2: Bake Tangent Normal Map
     # -------------------------------------------------------------------------
-    print("  [*] Baking Normal map...", flush=True)
+    print(f"  [*] Baking Normal map for '{mat_name}'...", flush=True)
     normal_img.colorspace_settings.name = "Non-Color"
     bake_node.image = normal_img
     nodes.active = bake_node
@@ -161,12 +196,19 @@ def bake_procedural_material(mat_name, target_objects, resolution=2048):
     bpy.ops.object.bake(type="NORMAL", save_mode="INTERNAL")
     normal_img.pack()
 
+    # Clean up isolated dummy object
+    bpy.data.objects.remove(tmp_obj, do_unlink=True)
+    if tmp_mesh.users == 0:
+        bpy.data.meshes.remove(tmp_mesh)
+
     # -------------------------------------------------------------------------
     # REWIRE MATERIAL NODE TREE TO STANDARD GLTF PBR
     # -------------------------------------------------------------------------
-    print("  [*] Rewiring material nodes to standard Principled BSDF...", flush=True)
+    print(
+        f"  [*] Rewiring '{mat_name}' nodes to standard Principled BSDF...",
+        flush=True,
+    )
 
-    # Clear old procedural nodes
     for node in list(nodes):
         if node.type not in {"OUTPUT_MATERIAL"}:
             nodes.remove(node)
@@ -179,16 +221,17 @@ def bake_procedural_material(mat_name, target_objects, resolution=2048):
     # Create new Principled BSDF
     bsdf = nodes.new("ShaderNodeBsdfPrincipled")
     bsdf.location = (0, 0)
-    bsdf.inputs["Roughness"].default_value = 0.4
+    bsdf.inputs["Metallic"].default_value = orig_metallic
+    bsdf.inputs["Roughness"].default_value = orig_roughness
     links.new(bsdf.outputs["BSDF"], output_node.inputs["Surface"])
 
-    # Create & Connect Baked Diffuse Texture Node
+    # Connect Baked Diffuse
     tex_diffuse = nodes.new("ShaderNodeTexImage")
     tex_diffuse.location = (-400, 200)
     tex_diffuse.image = diffuse_img
     links.new(tex_diffuse.outputs["Color"], bsdf.inputs["Base Color"])
 
-    # Create & Connect Baked Normal Texture Node
+    # Connect Baked Normal
     tex_normal = nodes.new("ShaderNodeTexImage")
     tex_normal.location = (-400, -100)
     tex_normal.image = normal_img
@@ -201,7 +244,10 @@ def bake_procedural_material(mat_name, target_objects, resolution=2048):
     links.new(tex_normal.outputs["Color"], normal_map_node.inputs["Color"])
     links.new(normal_map_node.outputs["Normal"], bsdf.inputs["Normal"])
 
-    print(f"[+] Material '{mat_name}' successfully baked and rewired to PBR!\\n", flush=True)
+    print(
+        f"[+] Material '{mat_name}' successfully baked and rewired to PBR!\\n",
+        flush=True,
+    )
     return True
 
 def optimize_subsurf_modifiers(obj, max_level=1):
@@ -1488,70 +1534,52 @@ def main():
 
     apply_facial_gui_visibility_and_hide_anchors(main_rig)
 
-    # 1. Bake teeth geometry and bind flush inside mouth
     bake_and_attach_teeth(main_rig)
-
-    
-
-    # 3. Bake facial shrinkwrap with native 0.006m offsets
     bake_facial_shrinkwrap_only()
 
-    # 4. Lock head, hair, visor, and beanie directly to DEF-Head
     fix_head_hair_and_accessories_parenting(main_rig)
     bake_and_attach_hair_to_head(main_rig)
 
-    # Bake mouth shrink flat to visor screen
     fix_and_bake_mouth_shrink(main_rig)
 
-    # 5. Bake clothing, chestplate, and VisorExt/VisorInt modifiers
     bake_clothing_modifiers_with_shapekeys()
-
-    # Automatically convert jacket fur particles to real exportable GLB meshes
     convert_particle_systems_to_real_mesh(main_rig)
 
-    # 6. Bake metal limb segment rings
     bake_limb_modifiers()
-
-    # 7. Bake purple socks
     bake_socks_modifiers()
-
-    # 8. Parent baked socks directly to shin deform bones
     attach_socks_to_bones(main_rig)
 
-    # 9. Convert remaining renderable hair curves to 3D meshes
     convert_hair_curves_to_mesh()
 
     # -------------------------------------------------------------------------
-    # BAKE PROCEDURAL HAIR SHADER WITH CYCLES GPU BEFORE GLB EXPORT
+    # BAKE ALL PROCEDURAL MATERIALS (HAIR, BEANIE, HAT FUR) WITH CYCLES GPU
     # -------------------------------------------------------------------------
-    hair_objects = [
-        obj
-        for obj in bpy.data.objects
-        if obj.type == "MESH"
-        and any(
-            s.material and "hair" in s.material.name.lower()
-            for s in obj.material_slots
-        )
-    ]
-    if hair_objects:
-        bake_procedural_material("Hair_Uzi", hair_objects, resolution=2048)
+    PROCEDURAL_KEYWORDS = ["hair", "hat", "beanie", "fur"]
 
-    # 10. Bind baked metal limb meshes to armature deform bones
+    for mat in list(bpy.data.materials):
+        if not (mat and mat.use_nodes and mat.node_tree):
+            continue
+
+        if any(kw in mat.name.lower() for kw in PROCEDURAL_KEYWORDS):
+            target_objs = [
+                obj
+                for obj in bpy.data.objects
+                if obj.type == "MESH"
+                and not obj.hide_render
+                and any(
+                    slot.material == mat for slot in obj.material_slots
+                )
+            ]
+            if target_objs:
+                bake_procedural_material(mat.name, target_objs, resolution=2048)
+
     skin_limbs_to_armature(main_rig)
-
-    # 11. Mark non-renderable viewport widgets and guide curves as hidden from glTF export pass
     hide_non_character_widgets_and_symbols()
 
-    # 12. Clean non-armature animation data
     purge_non_armature_animation_data(main_rig)
-
-    # 13. Stash character actions cleanly on NLA tracks
     stash_and_slot_character_actions(main_rig)
-
-    # 14. Perform deep F-curve pruning
     deep_fcurve_pruning(main_rig)
 
-    # 15. Native glTF export
     run_gltf_export(__GLB_PATH__)
 
 if __name__ == "__main__":
