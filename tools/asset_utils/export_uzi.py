@@ -356,7 +356,6 @@ def convert_particle_systems_to_real_mesh(main_rig):
 
                 for slot in joined_fur.material_slots:
                     if slot.material:
-                        # Setting backface culling false exports 'doubleSided: true' in glTF
                         slot.material.use_backface_culling = False
 
                 # 5. TRANSFER WEIGHTS from jacket to fur mesh
@@ -380,7 +379,6 @@ def convert_particle_systems_to_real_mesh(main_rig):
                 bpy.ops.object.modifier_apply(modifier=dt_mod.name)
 
                 # 6. FIX OFFSET: Join fur geometry directly into the jacket mesh (obj)
-                # Joining directly into the jacket eliminates object-node offset completely!
                 bpy.ops.object.select_all(action="DESELECT")
                 joined_fur.select_set(True)
                 obj.select_set(True)
@@ -475,19 +473,43 @@ def setup_environment_and_drivers():
 
     bpy.context.view_layer.update()
 
+def get_socket_color(socket):
+    if socket.is_linked:
+        from_node = socket.links[0].from_node
+        if from_node.type == "RGB":
+            return list(from_node.outputs[0].default_value)
+        elif hasattr(from_node, "outputs") and len(from_node.outputs) > 0:
+            out = from_node.outputs[0]
+            if hasattr(out, "default_value") and isinstance(
+                out.default_value, (list, tuple)
+            ):
+                return list(out.default_value)
+    if hasattr(socket, "default_value"):
+        val = socket.default_value
+        if isinstance(val, (list, tuple)):
+            return list(val)
+    return [1.0, 1.0, 1.0, 1.0]
+
+
 def convert_emission_shaders_to_pbr():
-    print("[*] Converting Emission shader nodes to glTF-compatible PBR materials...", flush=True)
+    print(
+        "[*] Converting Emission shader nodes to glTF-compatible PBR"
+        " materials...",
+        flush=True,
+    )
 
     for mat in bpy.data.materials:
         if not (mat and mat.use_nodes and mat.node_tree):
             continue
 
-        output_node = None
-        for node in mat.node_tree.nodes:
-            if node.type == 'OUTPUT_MATERIAL' and node.is_active_output:
-                output_node = node
-                break
-
+        output_node = next(
+            (
+                n
+                for n in mat.node_tree.nodes
+                if n.type == "OUTPUT_MATERIAL" and n.is_active_output
+            ),
+            None,
+        )
         if not output_node:
             continue
 
@@ -497,53 +519,79 @@ def convert_emission_shaders_to_pbr():
 
         connected_node = surface_input.links[0].from_node
 
-        if connected_node.type == 'EMISSION':
+        if connected_node.type == "EMISSION":
             emission_node = connected_node
 
             color_val = [1.0, 1.0, 1.0, 1.0]
-            if "Color" in emission_node.inputs and not emission_node.inputs["Color"].is_linked:
-                c = emission_node.inputs["Color"].default_value
-                color_val = [c[0], c[1], c[2], c[3] if len(c) > 3 else 1.0]
+            if "Color" in emission_node.inputs:
+                color_val = get_socket_color(emission_node.inputs["Color"])
 
             strength_val = 1.0
-            if "Strength" in emission_node.inputs and not emission_node.inputs["Strength"].is_linked:
-                strength_val = emission_node.inputs["Strength"].default_value
+            if "Strength" in emission_node.inputs:
+                if not emission_node.inputs["Strength"].is_linked:
+                    strength_val = emission_node.inputs["Strength"].default_value
 
+            # 1. Effective RGB scaled by emission strength (0.0 Strength produces pure Black)
             eff_r = color_val[0] * strength_val
             eff_g = color_val[1] * strength_val
             eff_b = color_val[2] * strength_val
 
-            bsdf_node = None
-            for node in mat.node_tree.nodes:
-                if node.type == 'BSDF_PRINCIPLED':
-                    bsdf_node = node
-                    break
+            # 2. Clamp Base Color channels to valid glTF range [0.0, 1.0]
+            base_r = max(0.0, min(1.0, eff_r))
+            base_g = max(0.0, min(1.0, eff_g))
+            base_b = max(0.0, min(1.0, eff_b))
 
+            # 3. Normalized Emission Color
+            em_r = max(0.0, min(1.0, color_val[0]))
+            em_g = max(0.0, min(1.0, color_val[1]))
+            em_b = max(0.0, min(1.0, color_val[2]))
+
+            bsdf_node = next(
+                (n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"),
+                None,
+            )
             if not bsdf_node:
                 bsdf_node = mat.node_tree.nodes.new("ShaderNodeBsdfPrincipled")
-                bsdf_node.location = (emission_node.location.x, emission_node.location.y)
+                bsdf_node.location = (
+                    emission_node.location.x,
+                    emission_node.location.y,
+                )
 
-            bsdf_node.inputs["Base Color"].default_value = (eff_r, eff_g, eff_b, color_val[3])
+            bsdf_node.inputs["Base Color"].default_value = (
+                base_r,
+                base_g,
+                base_b,
+                1.0,
+            )
             bsdf_node.inputs["Roughness"].default_value = 0.15
 
-            if strength_val > 0.0:
-                if "Emission Color" in bsdf_node.inputs:
-                    bsdf_node.inputs["Emission Color"].default_value = (color_val[0], color_val[1], color_val[2], 1.0)
-                elif "Emission" in bsdf_node.inputs:
-                    bsdf_node.inputs["Emission"].default_value = (color_val[0], color_val[1], color_val[2], 1.0)
+            if "Emission Color" in bsdf_node.inputs:
+                bsdf_node.inputs["Emission Color"].default_value = (
+                    em_r,
+                    em_g,
+                    em_b,
+                    1.0,
+                )
+            elif "Emission" in bsdf_node.inputs:
+                bsdf_node.inputs["Emission"].default_value = (
+                    em_r,
+                    em_g,
+                    em_b,
+                    1.0,
+                )
 
-                if "Emission Strength" in bsdf_node.inputs:
-                    bsdf_node.inputs["Emission Strength"].default_value = strength_val
-            else:
-                if "Emission Color" in bsdf_node.inputs:
-                    bsdf_node.inputs["Emission Color"].default_value = (0.0, 0.0, 0.0, 1.0)
-                elif "Emission" in bsdf_node.inputs:
-                    bsdf_node.inputs["Emission"].default_value = (0.0, 0.0, 0.0, 1.0)
-
-                if "Emission Strength" in bsdf_node.inputs:
-                    bsdf_node.inputs["Emission Strength"].default_value = 0.0
+            if "Emission Strength" in bsdf_node.inputs:
+                bsdf_node.inputs["Emission Strength"].default_value = (
+                    strength_val
+                )
 
             mat.node_tree.links.new(bsdf_node.outputs["BSDF"], surface_input)
+            print(
+                f"  [+] Converted emission shader for '{mat.name}' -> Base"
+                f" Color: ({base_r:.2f}, {base_g:.2f}, {base_b:.2f}),"
+                f" Strength: {strength_val}",
+                flush=True,
+            )
 
     bpy.context.view_layer.update()
 
@@ -582,15 +630,12 @@ def bake_and_attach_teeth(main_rig):
     for teeth_name in ["Teeth_Top", "Teeth_Bot", "Teeth_Bottom"]:
         obj = bpy.data.objects.get(teeth_name)
         if obj and obj.type == 'MESH':
-            # 1. Enable ALL Render-only modifiers in viewport so depsgraph captures full tuned shape
             for m in obj.modifiers:
                 if m.show_render:
                     m.show_viewport = True
 
-            # 2. Cap Subsurf modifiers to level 1 for performance
             optimize_subsurf_modifiers(obj, max_level=1)
 
-            # 3. Evaluate mesh with all creator's tuned modifiers (Mirror, Solidify, Bevel, Subsurf) applied
             depsgraph = bpy.context.evaluated_depsgraph_get()
             try:
                 obj_eval = obj.evaluated_get(depsgraph)
@@ -606,23 +651,19 @@ def bake_and_attach_teeth(main_rig):
                 if old_mesh and old_mesh.users == 0:
                     bpy.data.meshes.remove(old_mesh)
 
-                # 4. Strip constraints and modifiers
                 for c in list(obj.constraints):
                     obj.constraints.remove(c)
                 for m in list(obj.modifiers):
                     obj.modifiers.remove(m)
 
-                # 5. Lock to DEF-Head and recess 8mm deeper into head (+Y is back into head)
                 obj.parent = main_rig
                 obj.parent_type = 'BONE'
                 obj.parent_bone = target_bone
                 obj.matrix_world = world_mat
 
-                # Recess teeth deeper behind Mouth_Shrink screen plate
                 obj.matrix_world.translation.y += 0.008
 
                 if "bot" in teeth_name.lower():
-                    # Shift bottom teeth slightly up into the mouth cavity
                     obj.matrix_world.translation.z += 0.005
 
                 obj.hide_render = False
@@ -637,13 +678,11 @@ def bake_and_attach_teeth(main_rig):
 def apply_facial_gui_visibility_and_hide_anchors(main_rig):
     print("[*] Hiding Facial_Rig control armature and floating 3D GUI meshes...", flush=True)
 
-    # 1. Hide the secondary Facial_Rig armature so its ANC-/CTR- bones don't export as a skeleton
     facial_rig = bpy.data.objects.get("Facial_Rig")
     if facial_rig:
         facial_rig.hide_render = True
         print("  [-] Omitted secondary control armature 'Facial_Rig' from glTF export.", flush=True)
 
-    # 2. List of inactive GUI option meshes parked floating above the head
     INACTIVE_GUI_PATTERNS = [
         "eyelid", "eyebrow", "tongue", "anc-", "ctr-", "wgt-", 
         "circle.054", "icosphere.001", "mouthless"
@@ -652,7 +691,6 @@ def apply_facial_gui_visibility_and_hide_anchors(main_rig):
     for obj in list(bpy.data.objects):
         name_lower = obj.name.lower()
 
-        # Hide any object matching inactive GUI elements or anchor patterns
         if any(pat in name_lower for pat in INACTIVE_GUI_PATTERNS):
             obj.hide_render = True
             print(f"  [-] Omitted inactive 3D GUI element: '{obj.name}'", flush=True)
@@ -668,11 +706,9 @@ def bake_facial_shrinkwrap_only():
 
     bpy.context.view_layer.update()
 
-    # Only bake active facial features on the face visor
     FACIAL_SHRINKWRAP_NAMES = ["Eye", "Blush", "Expression", "Mark"]
 
     for obj in list(bpy.data.objects):
-        # Skip hidden objects and inactive GUI elements
         if not (obj.type == 'MESH' and not obj.hide_render):
             continue
 
@@ -709,8 +745,6 @@ def bake_facial_shrinkwrap_only():
             arm.data.pose_position = 'POSE'
 
     bpy.context.view_layer.update()
-
-
 
 def bake_clothing_modifiers_with_shapekeys():
     print("[*] Baking Subdivision, Shrinkwrap, Solidify, and Displace modifiers into clothing & visor...", flush=True)
@@ -1030,7 +1064,6 @@ def convert_hair_curves_to_mesh():
             bpy.context.view_layer.objects.active = obj
             try:
                 bpy.ops.object.convert(target='MESH')
-                # Rename converted hair to prevent triggering 'NurbsPath' hide rules
                 obj.name = f"Hair_Mesh_{obj.name}"
                 obj.hide_render = False
                 obj.hide_viewport = False
@@ -1088,7 +1121,6 @@ def fix_and_bake_mouth_shrink(main_rig):
     mouth_obj = bpy.data.objects.get("Mouth_Shrink")
 
     if mouth_obj and mouth_obj.type == "MESH":
-        # 1. Ensure target objects are visible for evaluation
         for aux_name in [
             "AUX_MOUTH",
             "AUX_SCREEN",
@@ -1104,23 +1136,19 @@ def fix_and_bake_mouth_shrink(main_rig):
         mouth_obj.hide_viewport = False
         mouth_obj.hide_render = False
 
-        # 2. Keep modifier settings intact (do NOT strip Corner Fix / Displace)
         for m in mouth_obj.modifiers:
             if m.type == "SHRINKWRAP":
                 m.show_viewport = True
                 m.show_render = True
-                # Preserve Target Normal Project from original setup
                 m.wrap_method = "TARGET_PROJECT"
             elif m.type == "SUBSURF":
                 m.show_viewport = True
                 m.show_render = True
-                # Boost viewport/render levels to match original smooth resolution
                 m.levels = max(m.levels, 2)
                 m.render_levels = max(m.render_levels, 2)
 
         bpy.context.view_layer.update()
 
-        # 3. Evaluate full stack natively via Depsgraph (preserves all stacked Subsurfs + Corner Fix)
         world_mat = mouth_obj.matrix_world.copy()
         depsgraph = bpy.context.evaluated_depsgraph_get()
 
@@ -1136,7 +1164,6 @@ def fix_and_bake_mouth_shrink(main_rig):
             if old_mesh and old_mesh.users == 0:
                 bpy.data.meshes.remove(old_mesh)
 
-            # Clear modifier stack post-bake
             mouth_obj.modifiers.clear()
 
             print(
@@ -1147,7 +1174,6 @@ def fix_and_bake_mouth_shrink(main_rig):
         except Exception as e:
             print(f"  [~] Notice converting Mouth_Shrink: {safe_str(e)}", flush=True)
 
-        # 4. Bind baked mesh to head bone
         mouth_obj.parent = main_rig
         mouth_obj.parent_type = "BONE"
         mouth_obj.parent_bone = target_bone
@@ -1155,7 +1181,6 @@ def fix_and_bake_mouth_shrink(main_rig):
         mouth_obj.hide_render = False
         mouth_obj.hide_viewport = False
 
-    # 7. Recess 'Internal' mouth cavity mesh inside head
     internal_obj = bpy.data.objects.get("Internal")
     if internal_obj and internal_obj.type == 'MESH':
         world_mat = internal_obj.matrix_world.copy()
@@ -1189,13 +1214,11 @@ def hide_non_character_widgets_and_symbols():
             print(f"  [-] Omitted from glTF export: '{obj.name}'", flush=True)
             continue
 
-        # Hide guide curves
         if obj.type == 'CURVE':
             obj.hide_render = True
             print(f"  [-] Omitted curve from glTF export: '{obj.name}'", flush=True)
             continue
 
-        # Hide limb guide meshes in 'Limbs' or 'Limb_Hooks'
         if obj.type == 'MESH':
             is_in_limbs = any(c.name.lower() in ["limbs", "limb_hooks"] for c in obj.users_collection)
             if is_in_limbs and "nurbspath" in obj.name.lower():
@@ -1266,7 +1289,6 @@ def bake_and_attach_hair_to_head(main_rig):
 
     hair_objects = []
 
-    # Filter hair meshes while excluding limb guide curves in 'Limbs'
     for obj in bpy.data.objects:
         if obj.type == 'MESH' and not obj.hide_render:
             is_in_limbs = any(c.name.lower() in ["limbs", "limb_hooks"] for c in obj.users_collection)
@@ -1288,7 +1310,6 @@ def bake_and_attach_hair_to_head(main_rig):
         print(f"  [*] Baking hair geometry on: '{obj.name}'...", flush=True)
 
         try:
-            # 1. Evaluate mesh at exact visual position in Blender
             obj_eval = obj.evaluated_get(depsgraph)
             new_mesh = bpy.data.meshes.new_from_object(
                 obj_eval, preserve_all_data_layers=True, depsgraph=depsgraph
@@ -1297,18 +1318,15 @@ def bake_and_attach_hair_to_head(main_rig):
             old_mesh = obj.data
             world_mat = obj.matrix_world.copy()
 
-            # 2. Swap to evaluated mesh geometry
             obj.data = new_mesh
 
             if old_mesh and old_mesh.users == 0:
                 bpy.data.meshes.remove(old_mesh)
 
-            # 3. Strip Armature and CorrectiveSmooth modifiers to prevent double transform
             for m in list(obj.modifiers):
                 if m.type in {'ARMATURE', 'CORRECTIVE_SMOOTH'}:
                     obj.modifiers.remove(m)
 
-            # 4. Lock directly to DEF-Head on main_rig
             obj.parent = main_rig
             obj.parent_type = 'BONE'
             obj.parent_bone = target_bone
@@ -1488,7 +1506,6 @@ def run_gltf_export(filepath):
         if main_rig.animation_data:
             main_rig.animation_data.action = None
 
-    # Remove lingering Subsurf modifiers from meshes so scene evaluation per frame is fast
     for obj in bpy.data.objects:
         if obj.type == 'MESH':
             for m in list(obj.modifiers):
@@ -1509,7 +1526,7 @@ def run_gltf_export(filepath):
         export_animation_mode='ACTIONS',
         export_anim_single_armature=True,
         export_force_sampling=True,
-        export_def_bones=False,                # Keeps bone-parented meshes intact
+        export_def_bones=False,
         export_optimize_animation_size=True,
         export_bake_animation=False,
         use_renderable=True,
@@ -1552,26 +1569,37 @@ def main():
     convert_hair_curves_to_mesh()
 
     # -------------------------------------------------------------------------
-    # BAKE ALL PROCEDURAL MATERIALS (HAIR, BEANIE, HAT FUR) WITH CYCLES GPU
+    # AUTOMATICALLY BAKE ALL PROCEDURAL MATERIALS (HAIR, BEANIE, SOCKS, FUR)
     # -------------------------------------------------------------------------
-    PROCEDURAL_KEYWORDS = ["hair", "hat", "beanie", "fur"]
+    procedural_node_types = {
+        "TEX_NOISE",
+        "TEX_WAVE",
+        "TEX_VORONOI",
+        "TEX_BRICK",
+        "TEX_GRADIENT",
+        "TEX_CHECKER",
+    }
 
     for mat in list(bpy.data.materials):
         if not (mat and mat.use_nodes and mat.node_tree):
             continue
 
-        if any(kw in mat.name.lower() for kw in PROCEDURAL_KEYWORDS):
-            target_objs = [
-                obj
-                for obj in bpy.data.objects
-                if obj.type == "MESH"
-                and not obj.hide_render
-                and any(
-                    slot.material == mat for slot in obj.material_slots
-                )
-            ]
-            if target_objs:
-                bake_procedural_material(mat.name, target_objs, resolution=2048)
+        has_procedural = any(
+            n.type in procedural_node_types for n in mat.node_tree.nodes
+        )
+        if not has_procedural:
+            continue
+
+        target_objs = [
+            obj
+            for obj in bpy.data.objects
+            if obj.type == "MESH"
+            and not obj.hide_render
+            and any(slot.material == mat for slot in obj.material_slots)
+        ]
+
+        if target_objs:
+            bake_procedural_material(mat.name, target_objs, resolution=2048)
 
     skin_limbs_to_armature(main_rig)
     hide_non_character_widgets_and_symbols()
