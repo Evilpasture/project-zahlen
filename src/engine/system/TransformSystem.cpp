@@ -117,15 +117,7 @@ JPH::Mat44 TransformSystem::GetWorldTransform(const ECS::Registry& reg, Entity e
 
     const auto* hierarchy = reg.Get<Components::HierarchyComponent>(e);
     if ((hierarchy != nullptr) && hierarchy->parent != NullEntity && reg.IsAlive(hierarchy->parent)) {
-        // Retrieve only the logical parent matrix (bypassing the parent's visual offset)
         JPH::Mat44 parentLogical = GetLogicalWorldTransform(reg, hierarchy->parent);
-
-        // If the node is animated, meshLocal is already computed relative to the model root
-        // by the AnimationSystem. We skip multiplying by the redundant static localMatrix.
-        if ((mesh != nullptr) && mesh->nodeIndex >= 0 && !mesh->isSkinned) {
-            return parentLogical * meshLocal;
-        }
-
         return parentLogical * localMatrix * meshLocal;
     }
 

@@ -246,10 +246,12 @@ Entity InstantiateMeshPart(
     Material activeMat = params.materialOverride.pipeline != PipelineHandle::Invalid ? params.materialOverride : part.defaultMaterial;
 
     DrawFlags flags = DrawFlags::None;
-    if (part.isSkinned && params.isAnimated)
+    if (part.isSkinned && params.isAnimated) {
         flags |= DrawFlags::Skinned;
-    if (activeMat.alphaMode == 2 || params.isAnimated)
+    }
+    if (activeMat.alphaMode == 2 || params.isAnimated) {
         flags |= DrawFlags::ExcludeFromTLAS;
+    }
 
     if (params.createPhysics && prep.shape != nullptr) {
         reg.Add(e, Components::TransformComponent {.position = prep.translation, .rotation = prep.rotation, .scale = prep.scale});
@@ -293,10 +295,6 @@ Entity InstantiateMeshPart(
                .flags               = flags
            }
     );
-
-    if (part.isSkinned && params.isAnimated) {
-        reg.Add(e, Components::AnimatorComponent {.currentTrackIdx = 0, .currentTrackTime = 0.0f, .currentLoop = true, .prefab = &prefab});
-    }
 
     return e;
 }
@@ -351,6 +349,12 @@ uint32_t InstantiatePrefab(
 
     if (!params.createPhysics) {
         rootEntity = SpawnPrefabRoot(reg, prefab.virtualPath.c_str(), params);
+
+        // ADD THIS: Attach a single master AnimatorComponent to the root entity
+        if (params.isAnimated && !prefab.animations.empty()) {
+            reg.Add(rootEntity, Components::AnimatorComponent {.currentTrackIdx = 0, .currentTrackTime = 0.0f, .currentLoop = true, .prefab = &prefab});
+        }
+
         if (outBuffer != nullptr && maxCount > 0) {
             outBuffer[0] = rootEntity;
             startIndex   = 1;
@@ -392,7 +396,7 @@ void SetupPlayerRagdoll(RenderContext& /*rc*/, PhysicsContext& pc, ECS::Registry
     for (Entity part: visualParts) {
         if (auto* meshComp = reg.Get<Components::MeshComponent>(part)) {
             if (auto* animComp = reg.Get<Components::AnimatorComponent>(part)) {
-                if (animComp->prefab && meshComp->skeletonIndex >= 0) {
+                if ((animComp->prefab != nullptr) && meshComp->skeletonIndex >= 0) {
                     targetSkeleton = &animComp->prefab->skeletons[meshComp->skeletonIndex];
                     jointOffset    = meshComp->jointOffset;
                     break;
