@@ -84,11 +84,13 @@ void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj, const JPH::Mat4
     impl->unjittered_view_proj = unjitteredViewProj;
 }
 
-void SetFrameData(RenderContext& ctx, const Camera& cam, const FrameUniforms& uniforms, const JPH::Mat44& shadowProjView) {
+void SetFrameData(RenderContext& ctx, const Camera& cam, const FrameUniforms& uniforms, const JPH::Mat44& shadowProjView, float dt) {
     auto* impl = ctx.GetImpl();
 
     impl->shadowProjView  = shadowProjView;
     impl->currentUniforms = uniforms;
+    // Clamp dt between 0.1ms and 100ms to prevent giant leaps when dragging the window
+    impl->currentDt = std::clamp(dt, 0.0001f, 0.1f);
 
     VkExtent2D res    = impl->graphResources.sceneColor.extent;
     float      aspect = (res.height > 0) ? (float) res.width / res.height : 1.777f;

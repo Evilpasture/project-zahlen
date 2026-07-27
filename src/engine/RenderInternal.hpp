@@ -765,6 +765,7 @@ struct RenderContext::Impl {
     JPH::Mat44    unjittered_view_proj = JPH::Mat44::sIdentity();
     JPH::Mat44    shadowProjView       = JPH::Mat44::sIdentity();
     FrameUniforms currentUniforms {};
+    float         currentDt = 0.0166f;
 
     GISettings    giSettings {};
     AAState       aaState {};

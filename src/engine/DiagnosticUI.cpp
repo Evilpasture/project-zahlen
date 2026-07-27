@@ -141,6 +141,21 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "  [Punctual shadows disabled (0ms overhead)]");
     }
 
+    ImGui::SeparatorText("Dynamic Sky Gradient");
+    std::array<float, 3> zenith  = {pp->skyZenith.GetX(), pp->skyZenith.GetY(), pp->skyZenith.GetZ()};
+    std::array<float, 3> horizon = {pp->skyHorizon.GetX(), pp->skyHorizon.GetY(), pp->skyHorizon.GetZ()};
+    std::array<float, 3> ground  = {pp->skyGround.GetX(), pp->skyGround.GetY(), pp->skyGround.GetZ()};
+
+    if (ImGui::ColorEdit3("Sky Zenith (Top)", zenith.data())) {
+        pp->skyZenith = JPH::Vec4(zenith[0], zenith[1], zenith[2], 1.0f);
+    }
+    if (ImGui::ColorEdit3("Sky Horizon (Middle)", horizon.data())) {
+        pp->skyHorizon = JPH::Vec4(horizon[0], horizon[1], horizon[2], 1.0f);
+    }
+    if (ImGui::ColorEdit3("Sky Ground (Bottom)", ground.data())) {
+        pp->skyGround = JPH::Vec4(ground[0], ground[1], ground[2], 1.0f);
+    }
+
     auto camEnts = reg.GetEntitiesWith<Components::MainCameraTagComponent>();
     if (!camEnts.empty()) {
         Entity camEnt    = camEnts[0];

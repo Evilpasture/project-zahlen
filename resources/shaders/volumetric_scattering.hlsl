@@ -94,7 +94,7 @@ float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
     accumulatedLight += ambientSkyColor * scattering;
 
     float3 L_sun    = normalize(frame.lightDir.xyz);
-    float  phaseSun = PhaseDualHG(dot(-V, L_sun), 0.82f, -0.15f, 0.92f);
+    float  phaseSun = PhaseDualHG(dot(-V, L_sun), 0.35f, -0.10f, 0.50f);
 
     uint cascadeIndex = 0;
     if (depthVS > frame.cascadeSplits.x)

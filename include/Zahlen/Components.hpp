@@ -162,6 +162,11 @@ struct Components {
         JPH::Vec3 probeMin          = JPH::Vec3(-22.0f, 0.0f, -22.0f);
         JPH::Vec3 probeMax          = JPH::Vec3(22.0f, 12.0f, 22.0f);
         JPH::Vec3 probePos          = JPH::Vec3(0.0f, 4.0f, 0.0f);
+
+        // Dynamic Sky Gradient Colors
+        JPH::Vec4 skyZenith  = JPH::Vec4(0.003f, 0.008f, 0.020f, 1.0f); // Space black
+        JPH::Vec4 skyHorizon = JPH::Vec4(0.015f, 0.035f, 0.080f, 1.0f); // Dark night horizon
+        JPH::Vec4 skyGround  = JPH::Vec4(0.001f, 0.001f, 0.003f, 1.0f); // Ground
     };
     struct DebugSettingsComponent {
         BufferHandle   debugLineVbo      = BufferHandle::Invalid;

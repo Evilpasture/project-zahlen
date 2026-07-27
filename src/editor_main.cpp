@@ -485,7 +485,7 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
             uniforms.zBias           = -(24.0f * std::log(0.1f)) / std::log(1000.0f / 0.1f);
 
             rc.SetAAState(s_AAState);
-            Renderer::SetFrameData(rc, cam, uniforms, shadowProjView);
+            Renderer::SetFrameData(rc, cam, uniforms, shadowProjView, frameTime);
 
             auto begin_res = rc.BeginFrame(); // <-- FIXED: Capture expected
             if (!begin_res) {

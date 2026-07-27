@@ -346,11 +346,11 @@ struct PassFactory {
             } pc = {
                 .particleBufferAddr = self.ctx.BufferAddress(self.particleBuffer.Handle()),
                 .particleCount      = RenderContext::Impl::kGpuParticleCount,
-                .deltaTime          = 0.0166f
+                .deltaTime          = self.currentDt,
             };
 
             // Bind set 0 (bindlessSet) along with the compute dispatch
-            VkDescriptorSet bindlessSet = self.bindlessSets[self.frame_index];
+            auto* bindlessSet = self.bindlessSets[self.frame_index];
             self.particleUpdatePass.Dispatch(c, bindlessSet, (RenderContext::Impl::kGpuParticleCount + 63) / 64, 1, 1, pc);
         });
     }

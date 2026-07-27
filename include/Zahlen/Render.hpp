@@ -129,7 +129,7 @@ struct DrawParams {
 namespace Renderer {
 
 void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj);
-void SetFrameData(RenderContext& ctx, const Camera& cam, const FrameUniforms& uniforms, const JPH::Mat44& shadowProjView);
+void SetFrameData(RenderContext& ctx, const Camera& cam, const FrameUniforms& uniforms, const JPH::Mat44& shadowProjView, float dt = 0.0166f);
 void SetGISettings(RenderContext& ctx, const GISettings& settings);
 
 void SetLights(RenderContext& ctx, const GPULight* lights, uint32_t count);

@@ -23,12 +23,12 @@
 
 namespace ZHLN {
 
-std::expected<void, Error> RenderSystem::Update(Engine& engine) {
+std::expected<void, Error> RenderSystem::Update(Engine& engine, float dt) {
     int        physicsDrawMode = 0;
     JPH::Mat44 shadowProjView  = JPH::Mat44::sIdentity();
 
     // 1. Process standard geometry draws and frame configurations
-    auto mainResult = RenderMain(engine, physicsDrawMode, shadowProjView);
+    auto mainResult = RenderMain(engine, physicsDrawMode, shadowProjView, dt);
     if (!mainResult) {
         return mainResult;
     }
@@ -46,7 +46,7 @@ std::expected<void, Error> RenderSystem::Update(Engine& engine) {
     return {};
 }
 
-std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView) {
+std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView, float dt) {
     auto&       rc              = engine.GetRenderContext();
     auto&       reg             = engine.GetRegistry();
     auto&       cam             = engine.GetCamera();
@@ -167,13 +167,16 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
     if (!settingsEntities.empty()) {
         if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(settingsEntities[0])) {
             uniforms.ambientExposure = pp->ambientExposure;
+            uniforms.skyZenith       = pp->skyZenith;
+            uniforms.skyHorizon      = pp->skyHorizon;
+            uniforms.skyGround       = pp->skyGround;
         }
     }
     uniforms.zScale = 24.0f / std::log(1000.0f / 0.1f);
     uniforms.zBias  = -(24.0f * std::log(0.1f)) / std::log(1000.0f / 0.1f);
 
     rc.SetAAState(aaState);
-    Renderer::SetFrameData(rc, cam, uniforms, outShadowProjView);
+    Renderer::SetFrameData(rc, cam, uniforms, outShadowProjView, dt);
     Renderer::SetMatrices(rc, vp, unjitteredVp);
 
     const auto& mainVisible   = engine.GetVisibleEntities();

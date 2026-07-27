@@ -264,10 +264,11 @@
             :useLocalProbe 0
             :vignetteIntensity 1.25
             :vignettePower 1.8
-            :enableSSR 1
+            :enableSSR 0
+            :enableRTR 1
             :enableTAA 1
             :taaFeedback 0.96
-            :ambientExposure 22.0})
+            :ambientExposure 4.5})
 
 (require :scripts.main_menu)
 
@@ -298,18 +299,17 @@
 ;; 3. GAMESTART CALLBACK
 ;; ============================================================================
 (fn _G.StartGame []
-  (zh.log "[Snow Scene] Generating Volumetric Blizzard Environment...")
+  (zh.log "[Snow Scene] Generating Volumetric Nighttime Environment...")
   (set won-game false)
   (set total-time 0.0)
-  ;; 1. Initialize Player Capsule safely above ground at (0, 8, 0)
+  ;; 1. Initialize Player
   (set _G.player_ent (zh:dispatch :InitPlayer))
-  ;; 2. Calculate heightmap and vertex colors entirely in Fennel
+  ;; 2. Spawn Snow Terrain
   (let [sample-count 128
         world-size 280.0
         max-height 35.0
         (heights colors) (generate-fennel-snow-mountain sample-count world-size
                                                         max-height)]
-    ;; 3. Spawn terrain
     (set g-snow-terrain
          (zh:spawn_terrain {: heights
                             : colors
@@ -318,41 +318,52 @@
                             :max_height max-height
                             :roughness 0.85
                             :metallic 0.05})))
-  ;; 4. Sunlight (Low-angle cool winter sun penetrating the blizzard)
-  (let [sun (zh:spawn_light {:type LightType.SUN
-                             :rotation [-0.55 0.35 0.1 0.76]
-                             :color [0.85 0.92 1.0]
-                             :intensity 210.0
-                             :radius 0.6
-                             :range 450.0})]
-    (zh.ecs:add sun :SunTagComponent))
-  ;; 5. Cozy Warm Campfire Point Light at starting clearing (Warm volumetric shaft)
+  ;; 3. SPAWN CELESTIAL PLANET IN THE NIGHT SKY
+  (local planet-pos [0.0 80.0 -350.0])
+  (zh:spawn :murderdrones/Copper9_Celestials.glb
+            {:position planet-pos
+             :rotation [0.35 0.25 0.1 0.9]
+             :scale [1000.0 1000.0 1000.0]
+             :physics false
+             :static true})
+  ;; 4. DIM VOLUMETRIC MOONLIGHT (Aligned with planet)
+  (let [moonlight (zh:spawn_light {:type LightType.SUN
+                                   :direction [0.0 0.28 -0.96]
+                                   :color [0.82 0.92 1.0]
+                                   ;; Indigo Moonlight
+                                   :intensity 18.0
+                                   ;; Balanced intensity (no glare)
+                                   :radius 1.2
+                                   :range 600.0})]
+    (zh.ecs:add moonlight :SunTagComponent))
+  ;; 5. INTENSE WARM CAMPFIRE (Creates rich orange vs. blue moonlight contrast)
   (set g-campfire-light (zh:spawn_light {:type LightType.POINT
                                          :position (zh.vec3 4.0 3.5 4.0)
-                                         :color [1.0 0.5 0.12]
-                                         :intensity 320.0
+                                         :color [1.0 0.45 0.08]
+                                         :intensity 120.0
+                                         ;; <--- DROPPED from 450.0 to 120.0
                                          :radius 0.6
-                                         :range 30.0}))
-  ;; 6. Fast Flying Glacial Wind Wisps
+                                         :range 25.0}))
+  ;; 6. GLACIAL WIND WISPS IN THE DARK
   (set g-wisp-1 (zh:spawn_light {:type LightType.POINT
                                  :position (zh.vec3 -15.0 12.0 -15.0)
-                                 :color [0.15 0.85 1.0]
-                                 :intensity 240.0
+                                 :color [0.1 0.75 1.0]
+                                 :intensity 60.0
                                  :radius 0.4
-                                 :range 25.0}))
+                                 :range 20.0}))
   (set g-wisp-2 (zh:spawn_light {:type LightType.POINT
                                  :position (zh.vec3 20.0 18.0 -30.0)
-                                 :color [0.4 0.7 1.0]
-                                 :intensity 220.0
+                                 :color [0.3 0.6 1.0]
+                                 :intensity 60.0
                                  :radius 0.4
-                                 :range 25.0}))
-  ;; 7. Golden Beacon Light on mountain summit at (-50, 36, -50)
+                                 :range 20.0}))
+  ;; 7. GOLDEN BEACON ON SUMMIT
   (set g-summit-light (zh:spawn_light {:type LightType.POINT
                                        :position (zh.vec3 -50.0 38.0 -50.0)
                                        :color [1.0 0.85 0.2]
-                                       :intensity 380.0
+                                       :intensity 400.0
                                        :radius 0.8
-                                       :range 45.0}))
+                                       :range 50.0}))
   ;; 8. Spawn Character
   (set char-parts (zh:spawn :murderdrones/Uzi.glb {:animated true}))
   ;; 9. Bind Hierarchy & Ragdoll

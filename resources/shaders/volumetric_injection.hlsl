@@ -122,7 +122,7 @@ float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
 
     // Slower vertical falloff so snow fog envelopes mountains up to 60m+
     float heightFalloff = 0.035f;
-    float baseDensity   = 0.15f; // Dense snow whiteout atmosphere
+    float baseDensity   = 0.03f; // Reduced from 0.15f for subtle mist instead of heavy whiteout
     float boundedY      = max(worldPos.y, -10.0f);
     float fogDensity    = baseDensity * exp(-heightFalloff * boundedY);
 

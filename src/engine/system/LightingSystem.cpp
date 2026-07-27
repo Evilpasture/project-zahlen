@@ -16,23 +16,23 @@
 namespace ZHLN {
 
 std::pair<JPH::Vec3, float> LightingSystem::GetSunDirectionAndIntensity(const ECS::Registry& reg) noexcept {
-    JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f}; // Default reference direction matching baked skybox
-    float     sunIntensity = 180.0f;             // Default fallback solar constant
+    JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f};
+    float     sunIntensity = 180.0f;
     bool      sunFound     = false;
 
-    // Search for any Components::LightComponent explicitly marked as LightType::Sun
     for (Entity e: reg.GetEntitiesWith<Components::LightComponent>()) {
         auto* light = reg.Get<Components::LightComponent>(e);
         if (light->type == LightType::Sun) {
-            if (auto* trans = reg.Get<Components::Components::TransformComponent>(e)) {
+            // FIX: Prioritize explicit direction vector if set by script!
+            if (light->direction.LengthSq() > 1e-4f) {
+                sunDirection = light->direction;
+            } else if (auto* trans = reg.Get<Components::Components::TransformComponent>(e)) {
                 JPH::Mat44 worldMat = trans->GetMatrix();
-                // Local +Z is backward (pointing TO the sun) because local -Z is forward (pointing
-                // away)
-                sunDirection = worldMat.GetColumn3(2);
-                sunIntensity = light->intensity;
-                sunFound     = true;
-                break;
+                sunDirection        = worldMat.GetColumn3(2);
             }
+            sunIntensity = light->intensity;
+            sunFound     = true;
+            break;
         }
     }
 

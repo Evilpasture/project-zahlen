@@ -78,16 +78,19 @@ float4 PSMain(VSOutput input): SV_Target0 {
     float  viewDepth = 250.0f; // Limit fog integration depth for the skybox
 
     if (depth >= 1.0f) {
-        // Reconstruct the world-space point on the far plane (depth = 1.0)
         float3 worldPos = ReconstructWorldPos(input.uv, 1.0f, pc.invViewProj);
-        // Calculate the ray direction pointing away from the camera
-        float3 rayDir = normalize(worldPos - pc.camPos.xyz);
+        float3 rayDir   = normalize(worldPos - pc.camPos.xyz);
 
-        // Rotate the visual skybox to match the dynamic sun
+        // Rotate sky vector to match sun orientation
         rayDir = RotateVector(rayDir, frame.lightDir.xyz);
 
-        // FIXED: Swapped 'smp' for 'clampSampler' to enable seamless edge blending
-        litColor = texEnvMap.SampleLevel(clampSampler, rayDir, 0.0f).rgb * 25.0f;
+        // Evaluate dynamic 3-color gradient on the GPU
+        float  dy      = rayDir.y;
+        float3 skyGrad = (dy >= 0.0f) ? lerp(frame.skyHorizon.rgb, frame.skyZenith.rgb, pow(saturate(dy), 1.2f)) :
+                                        lerp(frame.skyHorizon.rgb, frame.skyGround.rgb, pow(saturate(-dy), 0.5f));
+
+        // Combine gradient with ambient exposure
+        litColor = skyGrad * frame.ambientExposure;
     } else {
         float4 litColorRaw = texLighting.SampleLevel(pointSampler, input.uv, 0);
         if (frame.fullBright != 0) {

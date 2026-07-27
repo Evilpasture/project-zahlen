@@ -197,6 +197,10 @@ struct alignas(16) FrameUniforms {
     int   numCascades; // E.g., 4
     int   fullBright;  // 0 = Lit, 1 = Fullbright/Unlit
     float _pad_csm[2];
+
+    JPH::Vec4 skyZenith;
+    JPH::Vec4 skyHorizon;
+    JPH::Vec4 skyGround;
 };
 
 // Material handle representation

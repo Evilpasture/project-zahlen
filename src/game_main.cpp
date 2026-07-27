@@ -357,7 +357,7 @@ void UpdateGame(Engine& engine, float dt, ScriptRunner& scriptRunner, FileWatche
 std::expected<void, RenderFrameResult> RenderGame(Engine& engine, float frameTime) {
     engine.GetRenderGraph().Execute(engine, frameTime);
 
-    auto render_res = RenderSystem::Update(engine);
+    auto render_res = RenderSystem::Update(engine, frameTime);
     if (!render_res) {
         if (render_res.error().Is<RenderFrameResult>()) {
             return std::unexpected(render_res.error().As<RenderFrameResult>());
