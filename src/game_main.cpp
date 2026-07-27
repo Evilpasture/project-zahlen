@@ -9,6 +9,7 @@
 #include "ecs/EntityCommandBuffer.hpp"
 #include "ecs/SystemGraph.hpp"
 #include "engine/FileWatcher.hpp"
+#include "engine/NativeScriptModule.hpp"
 #include "engine/Platform.hpp"
 #include "engine/system/CameraSystem.hpp"
 #include "engine/system/InputSystem.hpp"
@@ -44,9 +45,6 @@
 #include <print>
 #include <threading/Mutex.hpp>
 #include <threading/TaskSystem.hpp>
-#if defined(__x86_64__) || defined(_M_X64)
-#include <immintrin.h>
-#endif
 
 using namespace ZHLN;
 using namespace ZHLN::ECS;
@@ -58,14 +56,12 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner);
 namespace {
 
 void WriteBenchmarkLog(std::vector<double> frameTimes) {
-    if (frameTimes.empty()) {
+    if (frameTimes.empty())
         return;
-    }
 
     double totalTime = 0.0;
-    for (double t: frameTimes) {
+    for (double t: frameTimes)
         totalTime += t;
-    }
     double avgFrameTime = totalTime / frameTimes.size();
     double avgFps       = 1.0 / avgFrameTime;
 
@@ -78,42 +74,22 @@ void WriteBenchmarkLog(std::vector<double> frameTimes) {
     }
     double low1PercentFps = 1.0 / (sum1Percent / count1Percent);
 
-    size_t count01Percent = std::max<size_t>(1, frameTimes.size() / 1000);
-    double sum01Percent   = 0.0;
-    for (size_t i = frameTimes.size() - count01Percent; i < frameTimes.size(); ++i) {
-        sum01Percent += frameTimes[i];
-    }
-    double low01PercentFps = 1.0 / (sum01Percent / count01Percent);
-
-    double p99  = frameTimes[static_cast<size_t>(frameTimes.size() * 0.99)] * 1000.0;
-    double p999 = frameTimes[static_cast<size_t>(frameTimes.size() * 0.999)] * 1000.0;
-
     FILE* f = std::fopen("benchmark.log", "w");
     if (f != nullptr) {
         std::println(f, "=========================================");
         std::println(f, "         ZAHLEN BENCHMARK REPORT         ");
         std::println(f, "=========================================");
         std::println(f, "Total Frames:       {}", frameTimes.size());
-        std::println(f, "Total Time (s):     {:.3f}", totalTime);
         std::println(f, "Average FPS:        {:.2f}", avgFps);
         std::println(f, "Average Frametime:  {:.2f} ms", avgFrameTime * 1000.0);
         std::println(f, "1% Low FPS:         {:.2f}", low1PercentFps);
-        std::println(f, "0.1% Low FPS:       {:.2f}", low01PercentFps);
-        std::println(f, "99.0% Percentile:   {:.2f} ms", p99);
-        std::println(f, "99.9% Percentile:   {:.2f} ms", p999);
         std::println(f, "=========================================");
         std::fclose(f);
         ZHLN::Log("Benchmark report written to benchmark.log");
-    } else {
-        ZHLN::Log("Error: Failed to write benchmark.log");
     }
 }
 
-std::string s_GameplayFile = "scripts/gameplay_snow.fnl";
-
-// ============================================================================
-// Flattened System Wrappers (For 100% Predictable Function Pointers)
-// ============================================================================
+std::string s_GameplayFile = "scripts/boot.lua";
 
 void Sys_VisualInterpolation(Engine& engine, float /*dt*/) {
     VisualInterpolationSystem::Update(engine, engine.GetCurrentAlpha());
@@ -138,16 +114,6 @@ void Sys_Audio(Engine& engine, float dt) {
     AudioSystem(engine, dt);
 }
 
-void Sys_TargetCamera(Engine& engine, float dt) {
-    static TargetCameraSystem sys;
-    sys.Update(engine, dt, engine.GetCurrentAlpha());
-}
-
-void Sys_Camera(Engine& engine, float dt) {
-    static CameraSystem sys;
-    sys.Update(engine, dt, engine.GetCurrentAlpha());
-}
-
 void Sys_Culling(Engine& engine, float /*dt*/) {
     engine.GetCullingSystem().Update<false>(engine, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());
 }
@@ -155,9 +121,6 @@ void Sys_Culling(Engine& engine, float /*dt*/) {
 void Sys_Lighting(Engine& engine, float dt) {
     static LightingSystem sys;
     sys.Update(engine, dt);
-}
-
-void Sys_ParticleSpawner(Engine& engine, float /*dt*/) {
 }
 
 void Sys_PostProcess(Engine& engine, float /*dt*/) {
@@ -233,8 +196,6 @@ void BuildSystemGraphs(Engine& engine) {
         .enabled        = true,
     });
 
-    updateGraph.AddSystem({.update_func = Sys_ParticleSpawner, .name = "ParticleSpawnerExample", .access_pattern = {}, .enabled = true});
-
     updateGraph.AddSystem({
         .update_func =
             [](Engine& eng, float dt) {
@@ -282,20 +243,12 @@ void BuildSystemGraphs(Engine& engine) {
 bool InitializeGame(Engine& engine) {
     auto& rc  = engine.GetRenderContext();
     auto& reg = engine.GetRegistry();
-    auto& pc  = engine.GetPhysicsContext();
 
     Mesh lineMesh = CreativeWorksFactory::CreateBox(rc, {0.01f, 0.01f, 0.5f}, {0.0f, 1.0f, 1.0f, 1.0f});
-
-    auto lineMat_res = CreativeWorksFactory::CreateBasicMaterial(rc);
-    if (!lineMat_res) {
-        ZHLN::Log("ERROR: Failed to compile basic material during initialization: {}", lineMat_res.error().Message());
-        return false;
-    }
-    Material lineMat = lineMat_res.value();
+    auto lineMat  = CreativeWorksFactory::CreateBasicMaterial(rc).value_or(Material {});
 
     reg.RegisterAllComponentsIn<ZHLN::Components>();
 
-    // Spawn a blank, static camera just to render the main menu
     Entity cameraEntity = reg.Create();
     reg.Add(cameraEntity, Components::MainCameraTagComponent {});
     reg.Add(cameraEntity, Components::CameraComponent {});
@@ -323,7 +276,7 @@ bool InitializeGame(Engine& engine) {
     return true;
 }
 
-void UpdateGame(Engine& engine, float dt, ScriptRunner& scriptRunner, FileWatcher& gameplayWatcher) {
+void UpdateGame(Engine& engine, float dt, ScriptRunner& scriptRunner, FileWatcher& gameplayWatcher, GameplayDriver driver) {
     static InputSystem inputSystem;
     inputSystem.Update(engine);
     UIInteractionSystem::Update(engine);
@@ -341,13 +294,39 @@ void UpdateGame(Engine& engine, float dt, ScriptRunner& scriptRunner, FileWatche
 
     inputSystem.PlayerInputTranslate(engine, engine.GetCamera());
 
-    // Consolidate and execute the physical simulation loop
     static PhysicsSystem physicsSystem;
     physicsSystem.Update(engine, dt);
 
-    {
-        ZHLN_PROFILE_SCOPE("ECS System: Script/Lua Update");
-        scriptRunner.CallUpdate(&engine, dt);
+    // ========================================================================
+    // GAME LOOP OWNER DISPATCH
+    // ========================================================================
+    switch (driver) {
+        using enum GameplayDriver;
+        case Cpp: {
+            ZHLN_PROFILE_SCOPE("ECS System: Native C++ Gameplay Update");
+            static NativeScriptModule nativeGameplayModule("scripts/gameplay");
+            nativeGameplayModule.Update(&engine, dt);
+            break;
+        }
+
+        case Fennel: {
+            ZHLN_PROFILE_SCOPE("ECS System: Script/Lua Update");
+            scriptRunner.CallUpdate(&engine, dt);
+            break;
+        }
+
+        case Hybrid: {
+            {
+                ZHLN_PROFILE_SCOPE("ECS System: Native C++ Gameplay Update");
+                static NativeScriptModule nativeGameplayModule("scripts/gameplay");
+                nativeGameplayModule.Update(&engine, dt);
+            }
+            {
+                ZHLN_PROFILE_SCOPE("ECS System: Script/Lua Update");
+                scriptRunner.CallUpdate(&engine, dt);
+            }
+            break;
+        }
     }
 
     engine.GetUpdateGraph().Execute(engine, dt);
@@ -394,9 +373,7 @@ std::expected<std::unique_ptr<Engine>, EngineError> InitializeEngine(CommandLine
         },
     };
 
-    // Call the refactored factory method
     auto engine_res = Engine::Create(config);
-
     if (!engine_res) {
         return std::unexpected(EngineError {.msg = std::string(engine_res.error().Message()), .code = EXIT_FAILURE});
     }
@@ -426,9 +403,10 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, co
     }
 
     ZHLN::Log("Window active and presenting. Loading scene assets... ");
+
+    // Warm up Fennel / Lua runtime
     scriptRunner.CallUpdate(engine.get(), 0.0f);
 
-    // float physicsAccumulator = 0.0f; <--- REMOVED (Now managed inside PhysicsSystem)
     const double targetFrameTime = options.fpsLimit > 0 ? 1.0 / static_cast<double>(options.fpsLimit) : 0.0;
 
     std::vector<double> frameTimes;
@@ -456,19 +434,6 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, co
 
         float rawDt = std::min(static_cast<float>(elapsed), 0.1f);
 
-        double               target      = elapsed;
-        constexpr std::array snapTargets = {1.0 / 60.0, 1.0 / 75.0, 1.0 / 90.0, 1.0 / 120.0, 1.0 / 144.0, 1.0 / 240.0, 1.0 / 360.0};
-        for (double t: snapTargets) {
-            if (std::abs(elapsed - t) < 0.001) {
-                target = t;
-                break;
-            }
-        }
-
-        static double smoothedElapsed = 0.0166667;
-        smoothedElapsed               = (smoothedElapsed * 0.9) + (target * 0.1);
-        float frameTime               = std::min(static_cast<float>(smoothedElapsed), 0.1f);
-
         if (engine->GetInput().NeedsResize()) {
             engine->GetRenderContext().SetResolution(engine->GetInput().GetNewSize());
             engine->GetInput().ClearResizeFlag();
@@ -478,8 +443,7 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, co
             continue;
         }
 
-        // Simplified game update loop signature
-        UpdateGame(*engine, rawDt, scriptRunner, gameplayWatcher);
+        UpdateGame(*engine, rawDt, scriptRunner, gameplayWatcher, options.driver);
 
         auto render_res = RenderGame(*engine, rawDt);
         if (!render_res) {

@@ -123,8 +123,6 @@ set(MI_BUILD_OBJECT OFF CACHE BOOL "" FORCE)
 set(MI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(extern/mimalloc EXCLUDE_FROM_ALL)
 
-
-
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -219,6 +217,7 @@ set(ENGINE_SOURCES
     src/engine/RenderProcedural.cpp
     src/engine/RenderPasses.cpp
     src/engine/RenderSetup.cpp
+    src/engine/ScriptECSBridge.cpp
 )
 
 find_library(ZSTD_LIBRARY NAMES zstd zstd_static HINTS "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib")
@@ -254,6 +253,12 @@ else()
 endif()
 
 if(NOT MSVC)
+    set(GCC_ONLY_FLAGS
+        "--param=destructive-interference-size=64"
+        "-Wno-interference-size"
+        "-fno-exceptions"
+        "-fno-rtti"
+    )
     set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti")
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
         set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} --param=destructive-interference-size=64")
@@ -274,13 +279,11 @@ option(ZHLN_PROFILE_RENDER_FRAME_COMPILE "Enable GCC compile-time profiling for 
 
 if(ZHLN_PROFILE_RENDER_FRAME_COMPILE)
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        # Apply the -ftime-report flag specifically to RenderFrame.cpp
         set_source_files_properties(src/engine/RenderFrame.cpp PROPERTIES
             COMPILE_OPTIONS "-ftime-report"
         )
         message(STATUS "GCC compile-time profiling enabled for RenderFrame.cpp")
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        # Optional fallback for Clang, which generates a .json file viewable in speedscope.app or chrome://tracing
         set_source_files_properties(src/engine/RenderFrame.cpp PROPERTIES
             COMPILE_OPTIONS "-ftime-trace"
         )
@@ -321,12 +324,10 @@ target_link_libraries(zahlen_engine PRIVATE
     ${ZSTD_LIBRARY}
 )
 
-# Link Linux-only dependencies
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(zahlen_engine PRIVATE PkgConfig::LIBEVDEV PkgConfig::LIBSEAT)
 endif()
 
-# Link Fontconfig on both Linux and macOS
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
     target_link_libraries(zahlen_engine PRIVATE PkgConfig::FONTCONFIG)
 endif()
@@ -389,7 +390,6 @@ function(compile_fennel TARGET_NAME OUTPUT_LUA_FILES_VAR)
         get_filename_component(FILE_NAME_WE ${FNL_SRC} NAME_WLE)
         get_filename_component(FILE_DIR ${FNL_SRC} DIRECTORY)
 
-        # Maintain relative directory structures from the source folder
         file(RELATIVE_PATH REL_PATH "${CMAKE_SOURCE_DIR}" "${FILE_DIR}")
         set(OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/${REL_PATH}")
         file(MAKE_DIRECTORY "${OUT_DIR}")
@@ -412,9 +412,6 @@ function(compile_fennel TARGET_NAME OUTPUT_LUA_FILES_VAR)
     set(${OUTPUT_LUA_FILES_VAR} ${LUA_OUTPUTS} PARENT_SCOPE)
 endfunction()
 
-# --- PREVENT CIRCULAR DIRECTORY SYMLINKS ---
-# If the build directory has a stale directory symlink, remove it so it can be
-# generated as a real folder with individual script links instead.
 if(IS_SYMLINK "${CMAKE_CURRENT_BINARY_DIR}/scripts")
     message(STATUS "Removing stale scripts directory symlink: ${CMAKE_CURRENT_BINARY_DIR}/scripts")
     file(REMOVE "${CMAKE_CURRENT_BINARY_DIR}/scripts")
@@ -455,7 +452,6 @@ foreach(STATIC_SRC IN LISTS STATIC_SCRIPT_FILES)
     file(MAKE_DIRECTORY "${OUT_DIR}")
 
     if(WIN32)
-        # Windows symlinking often requires elevation; copy is safer for local dev
         add_custom_command(
             OUTPUT "${OUT_FILE}"
             COMMAND ${CMAKE_COMMAND} -E copy "${STATIC_SRC}" "${OUT_FILE}"
@@ -490,6 +486,12 @@ add_executable(zahlen
 target_link_libraries(zahlen PRIVATE zahlen_engine imgui)
 target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)
 
+# ============================================================================
+# SCRIPTS SUBDIRECTORY (gameplay shared library)
+# ============================================================================
+add_subdirectory(scripts)
+add_dependencies(zahlen gameplay)
+
 add_executable(zcook
     src/zcook/main.cpp
     src/zcook/Transform.cpp
@@ -508,7 +510,7 @@ add_custom_command(
     COMMAND python3 "${CMAKE_SOURCE_DIR}/configure_assets.py" "${CMAKE_CURRENT_BINARY_DIR}/assets.ninja" "$<TARGET_FILE:zcook>" "${CMAKE_SOURCE_DIR}"
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
     DEPENDS "${CMAKE_SOURCE_DIR}/configure_assets.py"
-            "${CMAKE_SOURCE_DIR}/tools/export_metadata.py" # Track changes to the exporter script
+            "${CMAKE_SOURCE_DIR}/tools/export_metadata.py"
     COMMENT "Scanning asset folders and generating assets.ninja..."
 )
 
@@ -527,18 +529,8 @@ add_custom_target(cook_assets ALL
 add_dependencies(cook_assets zcook)
 
 if(NOT MSVC)
-    # Define flags that should ONLY apply to GNU/GCC
-    set(GCC_ONLY_FLAGS
-        "--param=destructive-interference-size=64"
-        "-Wno-interference-size"
-        "-fno-exceptions"
-        "-fno-rtti"
-    )
-
     target_compile_options(zahlen_engine PRIVATE
         $<$<AND:$<CXX_COMPILER_ID:GNU>,$<COMPILE_LANGUAGE:CXX>>:${GCC_ONLY_FLAGS}>
-
-        # General warnings (always applied to non-MSVC)
         $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
     )
 
@@ -584,7 +576,6 @@ endif()
 
 # --- APPLY TARGET-SPECIFIC REFLECTION FLAGS ---
 if(COMPILER_HAS_REFLECTION)
-    # Target-specific C++ only flags via generator expressions ($<COMPILE_LANGUAGE:CXX>)
     target_compile_options(zahlen_render PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
     target_compile_options(zahlen_engine PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
     target_compile_options(zahlen PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")

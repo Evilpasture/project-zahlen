@@ -20,12 +20,12 @@ class FileWatcher {
 
     bool CheckModified() {
         std::error_code ec;
-        // Use the overload that takes std::error_code to avoid exceptions
-        auto currentWriteTime = std::filesystem::last_write_time(_path, ec);
+        auto            currentWriteTime = std::filesystem::last_write_time(_path, ec);
 
         if (ec) {
-            // File might be temporarily locked by an IDE (like VS Code or Premake)
-            // or deleted. We return false and try again next check.
+            if (!std::filesystem::exists(_path)) {
+                return false; // Silently wait for the file to be generated
+            }
             ZHLN::Log("Script file is locked. File path: {}", _path);
             return false;
         }

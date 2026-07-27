@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Platform.hpp"
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Window.hpp>
 #include <chrono>
 #include <thread>
@@ -19,6 +20,8 @@
 #include <GLFW/glfw3native.h>
 
 #pragma comment(lib, "Shcore.lib")
+#else
+#include <dlfcn.h>
 #endif
 
 #ifdef __APPLE__
@@ -87,35 +90,28 @@ void CloseMappedFile(MappedFile& file) {
 
 void SetHighPriority() {
 #ifdef __APPLE__
-    // This is the magic command for macOS.
-    // QOS_CLASS_USER_INTERACTIVE tells the scheduler to prioritize P-Cores
-    // and ignore power-saving E-core migration.
     pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
 #endif
 }
 
 void Init() {
 #ifdef _WIN32
-    // Force the process to be DPI aware - Fixes the "Small Viewport" issue on high-DPI screens
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 #endif
 }
 
 void FocusWindow(Window& window) {
 #ifdef _WIN32
-    // Extract the GLFW handle and then the Win32 HWND
     auto* glfwHandle = static_cast<GLFWwindow*>(window.GetNativeHandle());
     if (!glfwHandle)
         return;
 
     HWND hwnd = glfwGetWin32Window(glfwHandle);
     if (hwnd) {
-        // Bring to front and grab keyboard focus
         SetForegroundWindow(hwnd);
         SetFocus(hwnd);
     }
 #else
-    // Fallback for other platforms
     auto* glfwHandle = static_cast<GLFWwindow*>(window.GetNativeHandle());
     if (glfwHandle) {
         glfwFocusWindow(glfwHandle);
@@ -130,10 +126,8 @@ float GetDisplayScale(Window& window) {
         return 1.0f;
 
     HWND hwnd = glfwGetWin32Window(glfwHandle);
-    // 96 DPI is the standard 100% scale
     return static_cast<float>(GetDpiForWindow(hwnd)) / 96.0f;
 #else
-    // For non-Windows platforms, GLFW provides content scale
     auto* glfwHandle = static_cast<GLFWwindow*>(window.GetNativeHandle());
     if (glfwHandle) {
         float xscale, yscale;
@@ -146,6 +140,55 @@ float GetDisplayScale(Window& window) {
 
 void Sleep(uint32_t milliseconds) {
     std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
+}
+
+void* LoadSharedLibrary(const char* path) noexcept {
+#if defined(_WIN32)
+    void* handle = static_cast<void*>(LoadLibraryA(path));
+    if (!handle) {
+        ZHLN::Log("[Platform] LoadLibraryA failed for '{}'. Error code: {}", path, GetLastError());
+    }
+    return handle;
+#else
+    void* handle = dlopen(path, RTLD_NOW | RTLD_GLOBAL);
+    if (!handle) {
+        const char* err = dlerror();
+        ZHLN::Log("[Platform] dlopen failed for '{}': {}", path, err ? err : "unknown error");
+    }
+    return handle;
+#endif
+}
+
+void* GetSymbolAddress(void* handle, const char* symbol) noexcept {
+    if (handle == nullptr || symbol == nullptr) {
+        return nullptr;
+    }
+#if defined(_WIN32)
+    void* addr = reinterpret_cast<void*>(GetProcAddress(static_cast<HMODULE>(handle), symbol));
+    if (!addr) {
+        ZHLN::Log("[Platform] GetProcAddress failed for symbol '{}'. Error code: {}", symbol, GetLastError());
+    }
+    return addr;
+#else
+    dlerror(); // Clear existing errors
+    void*       addr = dlsym(handle, symbol);
+    const char* err  = dlerror();
+    if (err != nullptr) {
+        ZHLN::Log("[Platform] dlsym failed for symbol '{}': {}", symbol, err);
+    }
+    return addr;
+#endif
+}
+
+void UnloadSharedLibrary(void* handle) noexcept {
+    if (handle == nullptr) {
+        return;
+    }
+#if defined(_WIN32)
+    FreeLibrary(static_cast<HMODULE>(handle));
+#else
+    dlclose(handle);
+#endif
 }
 
 } // namespace ZHLN::Platform

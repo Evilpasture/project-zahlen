@@ -18,7 +18,6 @@ namespace ZHLN::Reflect {
 // 1. COMPLETELY INDEPENDENT UTILITIES (Defined Once)
 // ============================================================================
 
-// Literal class type to allow passing string literals as NTTPs
 template <std::size_t N>
 struct StringLiteral {
     std::array<char, N> value {};
@@ -33,7 +32,6 @@ struct StringLiteral {
     }
 };
 
-// Represents a single field declaration in a schema.
 template <typename T, StringLiteral FieldName>
 struct Field {
     using type                             = T;
@@ -61,7 +59,7 @@ namespace detail {
 template <auto... vals>
 struct ReplicatorType {
     template <typename F>
-    constexpr void operator>>(F body) const {
+    constexpr void operator>>([[maybe_unused]] F body) const {
         (body.template operator()<vals>(), ...);
     }
 };
@@ -154,6 +152,36 @@ constexpr void ForEachFieldWithName(T&& t, F&& f) {
         f(name, t.[:member:]);
     });
 }
+
+// ----------------------------------------------------------------------------
+// Pure Generic Introspection Primitives
+// ----------------------------------------------------------------------------
+
+/**
+ * @brief Iterates over non-static data members at compile time, passing the raw std::meta::info handle to F.
+ */
+template <typename T, typename F>
+constexpr void ForEachDataMember(F&& f) {
+    constexpr auto members = std::define_static_array(std::meta::nonstatic_data_members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
+
+    ZHLN::Reflect::Expand(members) >> [&]<auto member>() { f.template operator()<member>(); };
+}
+
+/**
+ * @brief Iterates over member functions at compile time, passing the raw std::meta::info handle to F.
+ */
+template <typename T, typename F>
+constexpr void ForEachMemberFunction(F&& f) {
+    constexpr auto members = std::define_static_array(std::meta::members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
+
+    ZHLN::Reflect::Expand(members) >> [&]<auto member>() {
+        if constexpr (std::meta::is_function(member) && std::meta::has_identifier(member)) {
+            f.template operator()<member>();
+        }
+    };
+}
+
+// ----------------------------------------------------------------------------
 
 template <typename T>
 constexpr auto TieFields(T&& t) {
@@ -299,6 +327,18 @@ using FieldType = typename[:[] {
 template <typename T>
 consteval auto BaseClasses() {
     return std::meta::bases_of(^^std::remove_cvref_t<T>, std::meta::access_context::current());
+}
+
+template <typename T>
+consteval bool HasVirtualBases() {
+    using U              = std::remove_cvref_t<T>;
+    constexpr auto bases = std::define_static_array(std::meta::bases_of(^^U, std::meta::access_context::current()));
+    for (auto b: bases) {
+        if (std::meta::is_virtual(b)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 template <StringLiteral NameConst, typename T>
@@ -514,6 +554,77 @@ constexpr void ForEachEnumerator(F&& f) {
     });
 }
 
+// ----------------------------------------------------------------------------
+// Pure Introspection Primitives (Encapsulating std::meta and Splicing)
+// ----------------------------------------------------------------------------
+
+/**
+ * @brief Iterates over data members, passing (Name, GetterLambda, SetterLambda) with pure C++ types.
+ */
+template <typename T, typename F>
+constexpr void ForEachFieldAccessor(F&& f) {
+    constexpr auto members = std::define_static_array(std::meta::nonstatic_data_members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
+
+    [:ZHLN::Reflect::Expand(members):] >> [&]<auto member>() {
+        constexpr std::string_view name = std::meta::identifier_of(member);
+        using FieldType                 = typename[:std::meta::type_of(member):];
+
+        // 1. Const-Correct Read-Only Accessor
+        auto const_getter = [](const auto& inst) -> const FieldType& { return inst.[:member:]; };
+
+        // 2. Mutable Accessor (Required by ScriptBinder for container elements)
+        auto mut_getter = [](auto& inst) -> FieldType& { return inst.[:member:]; };
+
+        // 3. Setter
+        auto setter = [](auto& inst, const FieldType& val) { inst.[:member:] = val; };
+
+        // Pass all 4 arguments expected by ScriptBinder
+        f.template operator()<FieldType>(name, const_getter, mut_getter, setter);
+    };
+}
+
+/**
+ * @brief Iterates over member functions, passing (Name, PointerToMemberFunction).
+ */
+template <typename T, typename F>
+constexpr void ForEachMethodPointer(F&& f) {
+    constexpr auto members = std::define_static_array(std::meta::members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
+
+    // FIX: Wrap Expand(...) in [: ... :] splice brackets
+    [:ZHLN::Reflect::Expand(members):] >> [&]<auto member>() {
+        if constexpr (std::meta::is_function(member) && std::meta::has_identifier(member)) {
+            constexpr std::string_view name = std::meta::identifier_of(member);
+            constexpr auto             pmf  = &[:member:];
+            f(name, pmf);
+        }
+    };
+}
+
+/**
+ * @brief Scans a namespace/scope for types tagged with 'Tag', invoking F.template operator()<TargetType>().
+ */
+template <auto ScopeInfo, typename Tag, typename F>
+constexpr void ForEachAnnotatedTypeInScope(F&& f) {
+    constexpr auto members = std::define_static_array(std::meta::members_of(ScopeInfo, std::meta::access_context::current()));
+
+    ZHLN::Reflect::Expand(members) >> [&]<auto m>() {
+        if constexpr (std::meta::is_type(m)) {
+            constexpr bool isAnnotated = []() consteval {
+                for (auto a: std::meta::annotations_of(m)) {
+                    if (std::meta::type_of(a) == ^^Tag)
+                        return true;
+                }
+                return false;
+            }();
+
+            if constexpr (isAnnotated) {
+                using TargetType = typename[:m:];
+                f.template operator()<TargetType>();
+            }
+        }
+    };
+}
+
 } // namespace ZHLN::Reflect
 
 #else // Standard C++26 Fallback (Stubs - Waiting for compiler reflection)
@@ -531,6 +642,14 @@ constexpr void ForEachField(T&& /*unused*/, F&& /*unused*/) {
 
 template <typename T, typename F>
 constexpr void ForEachFieldWithName(T&& /*unused*/, F&& /*unused*/) {
+}
+
+template <typename T, typename F>
+constexpr void ForEachDataMember(F&& /*unused*/) {
+}
+
+template <typename T, typename F>
+constexpr void ForEachMemberFunction(F&& /*unused*/) {
 }
 
 template <typename T>
@@ -609,6 +728,11 @@ using FieldType = void;
 template <typename T>
 consteval auto BaseClasses() {
     return std::array<int, 0> {};
+}
+
+template <typename T>
+consteval bool HasVirtualBases() {
+    return false;
 }
 
 template <StringLiteral NameConst, typename T>
@@ -693,6 +817,18 @@ constexpr void ForEachReflectedField(T&& /*unused*/, F&& /*unused*/) {
 template <typename E, typename F>
     requires std::is_enum_v<E>
 constexpr void ForEachEnumerator(F&& /*unused*/) {
+}
+
+template <typename T, typename F>
+constexpr void ForEachFieldAccessor(F&& /*unused*/) {
+}
+
+template <typename T, typename F>
+constexpr void ForEachMethodPointer(F&& /*unused*/) {
+}
+
+template <auto ScopeInfo, typename Tag, typename F>
+constexpr void ForEachAnnotatedTypeInScope(F&& /*unused*/) {
 }
 
 } // namespace ZHLN::Reflect

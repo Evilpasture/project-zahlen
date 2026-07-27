@@ -320,6 +320,20 @@ Press ENTER to continue.
             return {};
         }
     },
+
+    CommandHandler {.key = "--driver", .shortKey = "-d", .action = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::Error> {
+                        if (v == "cpp" || v == "c++" || v == "native") {
+                            opt.driver = ZHLN::GameplayDriver::Cpp;
+                        } else if (v == "fennel" || v == "lua") {
+                            opt.driver = ZHLN::GameplayDriver::Fennel;
+                        } else if (v == "hybrid") {
+                            opt.driver = ZHLN::GameplayDriver::Hybrid;
+                        } else {
+                            std::println(stderr, "Error: Invalid driver '{}'. Valid options: cpp, fennel, hybrid.", v);
+                            return std::unexpected(ZHLN::CommandLineError::InvalidValue);
+                        }
+                        return {};
+                    }},
 };
 
 } // namespace

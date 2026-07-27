@@ -5,8 +5,8 @@
 
 namespace ZHLN {
 
-ScriptECSBridge::ScriptECSBridge(ECS::Registry& reg): m_registry(reg) {
-}
+// REMOVED: ScriptECSBridge::ScriptECSBridge(ECS::Registry& reg): m_registry(reg) {}
+// (Already defined inline in include/Zahlen/ScriptECSBridge.hpp)
 
 std::expected<void*, Error> ScriptECSBridge::ResolveBoxedPointer(const BoxedObject& obj) const {
     // Path A: Stable ECS Handle Re-resolution
@@ -36,7 +36,6 @@ std::expected<void*, Error> ScriptECSBridge::ResolveBoxedPointer(const BoxedObje
             return std::unexpected(ScriptError::PropertyNotFound);
         }
 
-        // Path A1: Re-resolve element index directly from reallocated container buffer!
         if (obj.elementIndex != SIZE_MAX) {
             if (!propIt->second.get_element_at) {
                 return std::unexpected(ScriptError::UnsupportedConversion);
@@ -51,7 +50,6 @@ std::expected<void*, Error> ScriptECSBridge::ResolveBoxedPointer(const BoxedObje
             return std::unexpected(ScriptError::TypeMismatch);
         }
 
-        // Path A2: Standard property-level re-resolution
         auto res = propIt->second.get(compPtr);
         if (!res) {
             return std::unexpected(res.error());
@@ -64,7 +62,6 @@ std::expected<void*, Error> ScriptECSBridge::ResolveBoxedPointer(const BoxedObje
         return std::unexpected(ScriptError::TypeMismatch);
     }
 
-    // Path B: Transient raw pointer fallback
     if (obj.rawPtr == nullptr) {
         return std::unexpected(ScriptError::ComponentNotFound);
     }
@@ -328,13 +325,12 @@ std::expected<ScriptVal, Error> ScriptECSBridge::GetPropertyElementAt(Entity ent
     if (!res)
         return std::unexpected(res.error());
 
-    // Stamp element-level stable handle metadata!
     ScriptVal val = res.value();
     if (auto* boxed = std::get_if<BoxedObject>(&val)) {
         boxed->ownerEntity  = entity;
         boxed->compName     = compName;
         boxed->propName     = propName;
-        boxed->elementIndex = index; // Stamped for element-level re-resolution!
+        boxed->elementIndex = index;
     }
 
     return val;

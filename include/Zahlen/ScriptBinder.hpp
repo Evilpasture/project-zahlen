@@ -6,7 +6,6 @@
 #include "Zahlen/Entity.hpp"
 #include "detail/Reflection.hpp"
 #include <expected>
-#include <format>
 #include <functional>
 #include <memory>
 #include <ranges>
@@ -83,7 +82,14 @@ ScriptVal ToScriptVal(const T& val) {
         }
         return arr;
     } else if constexpr (std::is_class_v<Decayed>) {
-        return BoxedObject {.typeName = ZHLN::Reflect::TypeName<Decayed>(), .rawPtr = const_cast<void*>(static_cast<const void*>(&val))};
+        return BoxedObject {
+            .typeName     = ZHLN::Reflect::TypeName<Decayed>(),
+            .ownerEntity  = NullEntity,
+            .compName     = {},
+            .propName     = {},
+            .elementIndex = SIZE_MAX,
+            .rawPtr       = const_cast<void*>(static_cast<const void*>(&val))
+        };
     } else {
         return std::monostate {};
     }
@@ -118,21 +124,25 @@ template <typename T>
 std::expected<T, Error> FromScriptVal(const ScriptVal& sval) {
     using Decayed = std::decay_t<T>;
     if constexpr (std::is_same_v<Decayed, bool>) {
-        if (const auto* b = std::get_if<bool>(&sval))
+        if (const auto* b = std::get_if<bool>(&sval)) {
             return *b;
+        }
         return std::unexpected(ScriptError::TypeMismatch);
     } else if constexpr (std::is_arithmetic_v<Decayed>) {
-        if (const auto* d = std::get_if<double>(&sval))
+        if (const auto* d = std::get_if<double>(&sval)) {
             return static_cast<Decayed>(*d);
+        }
         return std::unexpected(ScriptError::TypeMismatch);
     } else if constexpr (std::is_same_v<Decayed, std::string>) {
-        if (const auto* s = std::get_if<std::string>(&sval))
+        if (const auto* s = std::get_if<std::string>(&sval)) {
             return *s;
+        }
         return std::unexpected(ScriptError::TypeMismatch);
     } else if constexpr (std::is_enum_v<Decayed>) {
         if (const auto* s = std::get_if<std::string>(&sval)) {
-            if (auto opt = ZHLN::Reflect::StringToEnum<Decayed>(*s))
+            if (auto opt = ZHLN::Reflect::StringToEnum<Decayed>(*s)) {
                 return *opt;
+            }
             return std::unexpected(ScriptError::InvalidEnumString);
         }
         return std::unexpected(ScriptError::TypeMismatch);
@@ -147,8 +157,9 @@ std::expected<T, Error> FromScriptVal(const ScriptVal& sval) {
 
             for (const auto& elemVal: arr->elements) {
                 auto converted = FromScriptVal<ElementType>(elemVal);
-                if (!converted)
+                if (!converted) {
                     return std::unexpected(converted.error());
+                }
                 if constexpr (requires { container.push_back(std::move(converted.value())); }) {
                     container.push_back(std::move(converted.value()));
                 } else if constexpr (requires { container.insert(container.end(), std::move(converted.value())); }) {
@@ -221,12 +232,14 @@ struct ScriptClassInfo {
 
         Error lastError = ScriptError::ArityMismatch;
         for (const auto& overload: it->second) {
-            if (overload.arity != args.size())
+            if (overload.arity != args.size()) {
                 continue;
+            }
 
             auto result = overload.invoke(instance, args);
-            if (result)
+            if (result) {
                 return result.value();
+            }
             lastError = result.error();
         }
         return std::unexpected(lastError);
@@ -246,7 +259,7 @@ class ScriptBinder {
     void Register() {
         static_assert(!ZHLN::Reflect::HasVirtualBases<T>(), "ScriptBinder: Virtual base classes are not supported due to dynamic pointer offset adjustment.");
 
-        ScriptClassInfo classInfo {.name = ZHLN::Reflect::TypeName<T>(), .size = sizeof(T), .alignment = alignof(T)};
+        ScriptClassInfo classInfo {.name = ZHLN::Reflect::TypeName<T>(), .size = sizeof(T), .alignment = alignof(T), .properties = {}, .methods = {}};
         PopulateClassInfo<T, T>(classInfo);
         classes[classInfo.name] = std::move(classInfo);
     }
@@ -266,11 +279,14 @@ class ScriptBinder {
                 .set = [setter](void* inst, const ScriptVal& val) -> std::expected<void, Error> {
                     auto* typedInst = static_cast<CurrentT*>(static_cast<ClassT*>(inst));
                     auto  converted = FromScriptVal<FieldT>(val);
-                    if (!converted)
+                    if (!converted) {
                         return std::unexpected(converted.error());
+                    }
                     setter(*typedInst, converted.value());
                     return {};
-                }
+                },
+                .get_element_at = nullptr,
+                .set_element_at = nullptr
             };
 
             using DecayedField = std::decay_t<FieldT>;
@@ -299,8 +315,9 @@ class ScriptBinder {
                         return std::unexpected(ScriptError::IndexOutOfBounds);
                     }
                     auto converted = FromScriptVal<ElementType>(val);
-                    if (!converted)
+                    if (!converted) {
                         return std::unexpected(converted.error());
+                    }
                     container[index] = std::move(converted.value());
                     return {};
                 };
@@ -331,15 +348,17 @@ class ScriptBinder {
                         (
                             [&]<size_t I>() {
                                 if (!std::get<I>(convertedArgs)) {
-                                    if (!hasError)
+                                    if (!hasError) {
                                         firstError = std::get<I>(convertedArgs).error();
+                                    }
                                     hasError = true;
                                 }
                             }.template operator()<Is>(),
                             ...);
 
-                        if (hasError)
+                        if (hasError) {
                             return std::unexpected(firstError);
+                        }
 
                         using RetType = typename Traits::return_type;
                         if constexpr (std::is_same_v<RetType, void>) {
@@ -369,7 +388,6 @@ class ScriptBinder {
 
 template <typename Manifest>
 void RegisterManifest() {
-    // Reflection.hpp handles the std::meta reflection internally via ForEachNestedType
     ZHLN::Reflect::ForEachNestedType<Manifest>([]<typename T>() { ScriptBinder::Get().Register<T>(); });
 }
 

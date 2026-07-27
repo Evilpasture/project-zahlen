@@ -15,6 +15,12 @@ enum class LogLevel : uint8_t { Quiet, Moderate, Verbose };
 
 enum class CommandLineError : uint8_t { Success = 0, InvalidValue, MissingValue, UnknownArgument };
 
+enum class GameplayDriver : uint8_t {
+    Fennel, // Fennel/LuaJIT owns the game loop & logic (Default)
+    Cpp,    // Native C++ (.so / .dll) owns the game loop
+    Hybrid  // Native C++ handles core loop/physics; Fennel handles UI & Dialogue
+};
+
 struct CommandLineOptions {
     std::span<char* const> args;
     bool                   enableValidation = true;
@@ -26,7 +32,10 @@ struct CommandLineOptions {
     bool                   enableRenderDoc  = false;
     bool                   benchmark        = false;
 
-    // User requests (successful early-exit paths)
+    // Configurable Game Loop Driver
+    GameplayDriver driver = GameplayDriver::Fennel;
+
+    // User requests
     bool helpRequested       = false;
     bool versionRequested    = false;
     bool printGraphRequested = false;

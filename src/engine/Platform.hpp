@@ -46,4 +46,9 @@ float GetDisplayScale(Window& window);
  */
 void Sleep(uint32_t milliseconds);
 
+// --- Dynamic Library Loading ---
+[[nodiscard]] void* LoadSharedLibrary(const char* path) noexcept;
+[[nodiscard]] void* GetSymbolAddress(void* handle, const char* symbol) noexcept;
+void                UnloadSharedLibrary(void* handle) noexcept;
+
 } // namespace ZHLN::Platform
