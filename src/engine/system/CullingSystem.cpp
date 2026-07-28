@@ -2,17 +2,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "CullingSystem.hpp"
-#include "LightingSystem.hpp" // Added to resolve sun data queries
+#include "LightingSystem.hpp"
 #include "Zahlen/Render.hpp"
 #include "engine/system/CameraSystem.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math3D.hpp> // Added to resolve JPH projection math
+#include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <detail/ControlFlow.hpp>
 #include <ecs/ECS.hpp>
+#include <engine/Resources.hpp>
 #include <physics/PhysicsWorld.hpp>
 
 namespace ZHLN::Tests { namespace {
@@ -30,7 +31,6 @@ void VerifyCullingResults(const ECS::Registry& reg, const JPH::Array<Entity>& vi
     for (size_t i = 0; i < entities.size(); ++i) {
         JPH::Vec3 pos = meshes[i].worldTransform.GetTranslation();
 
-        // --- UPDATE DIAGNOSTICS TO USE DUAL FRUSTUMS ---
         bool visibleInMain   = cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius);
         bool visibleInShadow = cam.shadowFrustum.IsSphereVisible(pos, meshes[i].cullRadius);
         if (visibleInMain || visibleInShadow) {
@@ -38,24 +38,20 @@ void VerifyCullingResults(const ECS::Registry& reg, const JPH::Array<Entity>& vi
         }
     }
 
-    // Test 1: Visible count is reasonable
     if (visible.size() > entities.size()) {
         ZHLN::Log("[Test Fail] Culling: Visible count {} exceeds total entity count {}", visible.size(), entities.size());
     }
 
-    // Test 2: All visible entities exist in the registry
     for (Entity e: visible) {
         if (!reg.IsAlive(e)) {
             ZHLN::Log("[Test Fail] Culling: Visible list contains dead entity {}", e.index);
         }
     }
 
-    // Test 3: Visible list consistency with expected
     if (visible.size() != expectedVisible && CullingStats::EnableCulling) {
         ZHLN::Log("[Test Fail] Culling: Visible count {} does not match expected {}", visible.size(), expectedVisible);
     }
 
-    // Test 4: No duplicates in visible list
     if (visible.size() > 1) {
         for (size_t i = 0; i < visible.size(); ++i) {
             for (size_t j = i + 1; j < visible.size(); ++j) {
@@ -75,6 +71,7 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
     ZHLN_PROFILE_SCOPE("Culling (ECS O(N))");
     auto& cam = engine.GetCamera();
     auto& reg = engine.GetRegistry();
+    auto& rc  = engine.GetRenderContext();
 
     auto entities       = reg.GetEntitiesWith<Components::MeshComponent>();
     auto cameraEntities = reg.GetEntitiesWith<Components::CameraComponent>();
@@ -84,7 +81,6 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
         cComp = reg.Get<Components::CameraComponent>(cameraEntities[0]);
     }
 
-    // 1. Fetch Global Settings & Shadow Configuration values
     bool     isFullBright     = false;
     float    shadowWidth      = 80.0f;
     uint32_t shadowResolution = 2048;
@@ -103,7 +99,6 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
         shadowResolution     = shadowSettings->shadowResolution;
     }
 
-    // 2. Perform Viewport Camera Culling Updates
     static bool s_WasFrozen = false;
     if (CullingStats::FreezeFrustum) {
         if (!s_WasFrozen) {
@@ -140,19 +135,17 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
         s_WasFrozen = false;
     }
 
-    // 3. Dynamically update the shadow culling frustum using the centralized Sun orientation [1]
+    // --- RESTORED ORIGINAL WORKING SHADOW CULLING ---
     if (!isFullBright) {
         auto [sunDirection, sunIntensity] = LightingSystem::GetSunDirectionAndIntensity(reg);
 
         JPH::Vec3 shadowCenter = cam.position;
 
-        // Align the shadow center to texel increments to prevent edge shimmering [1]
         float texelSize = shadowWidth / static_cast<float>(shadowResolution);
         shadowCenter.SetX(std::round(shadowCenter.GetX() / texelSize) * texelSize);
         shadowCenter.SetY(std::round(shadowCenter.GetY() / texelSize) * texelSize);
         shadowCenter.SetZ(std::round(shadowCenter.GetZ() / texelSize) * texelSize);
 
-        // --- USE CENTRALIZED SHADOW CONSTANTS ---
         JPH::Vec3  lightPos  = shadowCenter + sunDirection * Shadows::FarOffset;
         JPH::Mat44 lightView = Math::CreateLookAt(lightPos, shadowCenter, JPH::Vec3::sAxisY());
 
@@ -163,29 +156,21 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
         cam.shadowFrustum.Update(shadowProjView);
     }
 
-    if (!CullingStats::EnableCulling) {
-        outVisible.assign(entities.begin(), entities.end());
-        outVisibleShadow.assign(entities.begin(), entities.end());
-        return;
-    }
-
-    outVisible.clear();
-    outVisibleShadow.clear();
     auto meshes = reg.GetRawArray<Components::MeshComponent>();
 
-    // 1. Reset counters at the beginning of the frame
     CullingStats::TotalTriangles    = 0;
     CullingStats::RenderedTriangles = 0;
 
-    // Handle early exit when culling is disabled
     if (!CullingStats::EnableCulling) {
         outVisible.assign(entities.begin(), entities.end());
         outVisibleShadow.assign(entities.begin(), entities.end());
 
         uint32_t tris = 0;
         for (size_t i = 0; i < entities.size(); ++i) {
-            const auto& mesh = meshes[i].mesh;
-            tris += (mesh.indexCount > 0) ? (mesh.indexCount / 3) : (mesh.vertexCount / 3);
+            auto gpuMeshOpt = rc.GetGPUMesh(meshes[i].meshAsset);
+            if (gpuMeshOpt.has_value()) {
+                tris += (gpuMeshOpt->indexCount > 0) ? (gpuMeshOpt->indexCount / 3) : (gpuMeshOpt->vertexCount / 3);
+            }
         }
         CullingStats::TotalTriangles    = tris;
         CullingStats::RenderedTriangles = tris;
@@ -195,13 +180,15 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
     outVisible.clear();
     outVisibleShadow.clear();
 
-    // 2. Loop through entities and accumulate triangle counts
     for (size_t i = 0; i < entities.size(); ++i) {
         Entity      e        = entities[i];
         const auto& meshComp = meshes[i];
 
-        // Calculate triangles for this specific mesh
-        uint32_t meshTris = (meshComp.mesh.indexCount > 0) ? (meshComp.mesh.indexCount / 3) : (meshComp.mesh.vertexCount / 3);
+        auto     gpuMeshOpt = rc.GetGPUMesh(meshComp.meshAsset);
+        uint32_t meshTris   = 0;
+        if (gpuMeshOpt.has_value()) {
+            meshTris = (gpuMeshOpt->indexCount > 0) ? (gpuMeshOpt->indexCount / 3) : (gpuMeshOpt->vertexCount / 3);
+        }
 
         CullingStats::TotalTriangles += meshTris;
 
@@ -213,8 +200,6 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
 
         if (cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius * currentMaxScale)) {
             outVisible.push_back(e);
-
-            // If visible in the main camera view, add to the rendered count
             CullingStats::RenderedTriangles += meshTris;
         }
 
@@ -233,52 +218,62 @@ void CullingSystem::DrawDebugFrustum(Engine& engine) {
         return;
     }
 
-    auto& rc  = engine.GetRenderContext();
-    auto& reg = engine.GetRegistry();
+    auto& rc = engine.GetRenderContext();
 
-    auto settingsEntities = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
-    if (settingsEntities.empty()) {
+    BufferHandle debugVbo = rc.GetDebugMeshBuffer();
+    if (debugVbo == BufferHandle::Invalid) {
         return;
     }
 
-    auto* dbg = reg.Get<Components::DebugSettingsComponent>(settingsEntities[0]);
-    if ((dbg == nullptr) || dbg->debugLineVbo == BufferHandle::Invalid) {
-        return;
-    }
-
-    Mesh debugMesh = {
-        .posBuffer   = static_cast<BufferHandle>(dbg->debugLineVbo),
-        .attrBuffer  = static_cast<BufferHandle>(dbg->debugLineVbo),
-        .skinBuffer  = BufferHandle::Invalid,
-        .indexBuffer = BufferHandle::Invalid,
-        .vertexCount = 36,
-        .indexCount  = 0
+    PipelineDesc lineDesc = {
+        .vertexShaderData = Resource::GetShaderProgram(Resource::ShaderID::Basic).vertex.data(),
+        .vertexShaderSize = static_cast<std::uint32_t>(Resource::GetShaderProgram(Resource::ShaderID::Basic).vertex.size()),
+        .fragShaderData   = Resource::forward_frag.data(),
+        .fragShaderSize   = static_cast<std::uint32_t>(Resource::forward_frag.size()),
+        .doubleSided      = true,
+        .alphaBlend       = true,
+        .isLineList       = true
     };
-    Material debugMat = {.pipeline = static_cast<PipelineHandle>(dbg->debugLinePipeline), .albedoIndex = dbg->debugLineAlbedo};
+
+    auto debugLineMat_res = rc.CreateMaterial(lineDesc);
+    if (!debugLineMat_res) {
+        return;
+    }
+    Material debugMat    = debugLineMat_res.value();
+    debugMat.albedoIndex = 1;
 
     debugMat.baseColorFactor[0] = 0.0f;
     debugMat.baseColorFactor[1] = 1.0f;
     debugMat.baseColorFactor[2] = 1.0f;
     debugMat.baseColorFactor[3] = 1.0f;
 
+    Mesh debugMesh = {
+        .posBuffer   = debugVbo,
+        .attrBuffer  = debugVbo,
+        .skinBuffer  = BufferHandle::Invalid,
+        .indexBuffer = BufferHandle::Invalid,
+        .vertexCount = 36,
+        .indexCount  = 0
+    };
+
     struct FrustumEdge {
         int start;
         int end;
     };
-    static constexpr std::array<FrustumEdge, 12> frustumEdges = {{
-        {.start = 0, .end = 1},
-        {.start = 1, .end = 2},
-        {.start = 2, .end = 3},
-        {.start = 3, .end = 0}, // Near Plane loop
-        {.start = 4, .end = 5},
-        {.start = 5, .end = 6},
-        {.start = 6, .end = 7},
-        {.start = 7, .end = 4}, // Far Plane loop
-        {.start = 0, .end = 4},
-        {.start = 1, .end = 5},
-        {.start = 2, .end = 6},
-        {.start = 3, .end = 7} // Near-to-Far connection lines
-    }};
+    static constexpr std::array<FrustumEdge, 12> frustumEdges = {
+        {{.start = 0, .end = 1},
+         {.start = 1, .end = 2},
+         {.start = 2, .end = 3},
+         {.start = 3, .end = 0},
+         {.start = 4, .end = 5},
+         {.start = 5, .end = 6},
+         {.start = 6, .end = 7},
+         {.start = 7, .end = 4},
+         {.start = 0, .end = 4},
+         {.start = 1, .end = 5},
+         {.start = 2, .end = 6},
+         {.start = 3, .end = 7}}
+    };
 
     for (auto edge: frustumEdges) {
         JPH::Vec3 pA = m_frustumCorners[edge.start];

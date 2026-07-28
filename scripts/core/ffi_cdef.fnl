@@ -67,11 +67,11 @@
       } __attribute__((aligned(128))) ZHLN_ContactEventD;
 
       typedef struct PhysicsStateComponent {
-        float currPosition[4];
-        float prevPosition[4];
-        float currRotation[4];
-        float prevRotation[4];
-        uint64_t lastPhysicsSyncFrame;
+          float currPosition[4];
+          float prevPosition[4];
+          float currRotation[4];
+          float prevRotation[4];
+          uint64_t lastPhysicsSyncFrame;
       } PhysicsStateComponent;
 
       typedef struct MovementComponent {
@@ -97,8 +97,7 @@
           uint32_t isAddedToPhysics;
           uint32_t jointOffset;
           uint32_t jointCount;
-          uint32_t padding;
-          void*    gltfSkin;
+          void*    skeleton;
       } RagdollComponent;
 
       typedef struct NameComponent {
@@ -117,6 +116,8 @@
           float fxaaSubpix;
           float fxaaEdgeThreshold;
           float fxaaEdgeThresholdMin;
+          float mlaaThreshold;
+          uint32_t mlaaMaxSearchSteps;
       } AAState;
 
       typedef struct AASettingsComponent {
@@ -140,12 +141,12 @@
           float probeMin[4];
           float probeMax[4];
           float probePos[4];
+          float skyZenith[4];
+          float skyHorizon[4];
+          float skyGround[4];
       } PostProcessSettingsComponent;
 
       typedef struct DebugSettingsComponent {
-          uint64_t debugLineVbo;
-          uint64_t debugLinePipeline;
-          uint32_t debugLineAlbedo;
           int physicsDrawMode;
       } DebugSettingsComponent;
 
@@ -180,14 +181,23 @@
           uint32_t hasInitSmoothTarget;
       } __attribute__((aligned(16))) TargetCameraComponent;
 
-      typedef struct Mesh {
-          uint64_t posBuffer;
-          uint64_t attrBuffer;
-          uint64_t skinBuffer;
-          uint64_t indexBuffer;
-          uint32_t vertexCount;
-          uint32_t indexCount;
-      } Mesh;
+      typedef struct MeshComponent {
+          uint64_t meshAsset;
+          uint64_t materialAsset;
+          float cullRadius;
+          float localCenter[3];
+          float localTransform[16];
+          float prevTransform[16];
+          float worldTransform[16];
+          uint32_t jointOffset;
+          bool isSkinned;
+          uint32_t morphOffset;
+          uint32_t activeMorphCount;
+          float morphWeights[4];
+          int32_t nodeIndex;
+          int32_t skeletonIndex;
+          uint32_t flags;
+      } MeshComponent;
 
       typedef struct TextComponent {
           char     text[256];
@@ -198,10 +208,6 @@
           char     _pad1[12];
           float    color[4];
           uint32_t fontIndex;
-          char     _pad2[4];
-          Mesh     mesh;
-          float    lastDrawX;
-          float    lastDrawY;
       } TextComponent;
 
       typedef struct UISettingsComponent {
@@ -253,7 +259,6 @@
           uint8_t dummy;
       } SunTagComponent;
 
-
       typedef struct UIRectComponent {
           uint64_t parentEntity;
 
@@ -281,9 +286,6 @@
           float color[4];
           float borderRadius[4];
           uint32_t textureIndex;
-          bool isDirty;
-          char _pad[3];
-          Mesh mesh;
           float edgeWidth;
           float uvLeft;
           float uvRight;
@@ -326,9 +328,8 @@
           float blendFactor;
           float blendDuration;
           bool isFinished;
-          void* gltfData;
+          void* prefab;
       } AnimatorComponent;
-
 
       #pragma pack(push, 1)
       typedef struct GetBufferArgs { ZHLN_BufferView* outView; } GetBufferArgs;
@@ -412,7 +413,6 @@
           uint64_t handle;
       } SoundInstanceArgs;
 
-
       typedef struct PlayTrackArgs {
           uint64_t entityRaw;
           int32_t trackIndex;
@@ -436,9 +436,7 @@
           float       roughness;
           float       metallic;
       } SpawnTerrainArgs;
-
       #pragma pack(pop)
   "))
 
 ffi
-

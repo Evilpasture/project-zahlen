@@ -54,13 +54,11 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
             monitor = glfwGetPrimaryMonitor();
             if (monitor != nullptr) {
                 const GLFWvidmode* mode = glfwGetVideoMode(monitor);
-                // Match monitor's native video configurations
                 glfwWindowHint(GLFW_RED_BITS, mode->redBits);
                 glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
                 glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
                 glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
 
-                // Automatically scale the resolution if no dimensions are supplied
                 width  = (width == 0) ? static_cast<uint32_t>(mode->width) : width;
                 height = (height == 0) ? static_cast<uint32_t>(mode->height) : height;
             }
@@ -70,7 +68,6 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
         glfwSetWindowUserPointer(_impl->handle, this);
 
         if (_impl->handle != nullptr) {
-            // Force the window manager to map and display the window immediately
             glfwShowWindow(_impl->handle);
             glfwPollEvents();
         }
@@ -83,6 +80,29 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
                     self->_impl->input->InjectKeyDown(mapped);
                 } else if (action == GLFW_RELEASE) {
                     self->_impl->input->InjectKeyUp(mapped);
+                }
+
+                if (action == GLFW_PRESS || action == GLFW_REPEAT) {
+                    if (auto* engine = GetEngineContext()) {
+                        auto& reg = engine->GetRegistry();
+                        for (Entity e: reg.GetEntitiesWith<Components::UITextInputComponent>()) {
+                            auto* inputComp = reg.Get<Components::UITextInputComponent>(e);
+                            if (inputComp && inputComp->isFocused) {
+                                std::string_view curr = inputComp->text;
+
+                                if (key == GLFW_KEY_BACKSPACE && inputComp->cursorIndex > 0) {
+                                    std::string next = std::string(curr.substr(0, inputComp->cursorIndex - 1)) +
+                                                       std::string(curr.substr(inputComp->cursorIndex));
+                                    inputComp->text.assign(next);
+                                    inputComp->cursorIndex--;
+                                } else if (key == GLFW_KEY_LEFT && inputComp->cursorIndex > 0) {
+                                    inputComp->cursorIndex--;
+                                } else if (key == GLFW_KEY_RIGHT && inputComp->cursorIndex < curr.size()) {
+                                    inputComp->cursorIndex++;
+                                }
+                            }
+                        }
+                    }
                 }
             });
 
@@ -106,8 +126,6 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
             glfwSetCursorPosCallback(_impl->handle, [](GLFWwindow* win, double xpos, double ypos) {
                 auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
 
-                // Query both the virtual window size (points) and physical framebuffer size
-                // (pixels)
                 int winWidth  = 0;
                 int winHeight = 0;
                 glfwGetWindowSize(win, &winWidth, &winHeight);
@@ -116,11 +134,9 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
                 int fbHeight = 0;
                 glfwGetFramebufferSize(win, &fbWidth, &fbHeight);
 
-                // Calculate the High-DPI / Retina scale factors
                 float scaleX = (winWidth > 0) ? (float) fbWidth / (float) winWidth : 1.0f;
                 float scaleY = (winHeight > 0) ? (float) fbHeight / (float) winHeight : 1.0f;
 
-                // Inject the adjusted pixel-pace coordinates into the input system
                 self->_impl->input->InjectLocalMotion(static_cast<float>(xpos) * scaleX, static_cast<float>(ypos) * scaleY);
             });
 
@@ -129,70 +145,23 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
                 self->_impl->input->InjectResize({.width = static_cast<uint32_t>(width), .height = static_cast<uint32_t>(height)});
             });
 
-            glfwSetScrollCallback(_impl->handle, [](GLFWwindow* win, double xoffset, double yoffset) {
+            glfwSetScrollCallback(_impl->handle, [](GLFWwindow* win, [[maybe_unused]] double xoffset, double yoffset) {
                 auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
                 self->_impl->input->InjectWheelMotion(static_cast<float>(yoffset));
             });
 
-            // Handle control keys (Backspace / Arrow keys) for focused text inputs
-            glfwSetKeyCallback(_impl->handle, [](GLFWwindow* win, int key, [[maybe_unused]] int scancode, int action, [[maybe_unused]] int mods) {
-                auto*   self   = static_cast<Window*>(glfwGetWindowUserPointer(win));
-                KeyCode mapped = MapGLFWKey(key);
-                if (action == GLFW_PRESS) {
-                    self->_impl->input->InjectKeyDown(mapped);
-                } else if (action == GLFW_RELEASE) {
-                    self->_impl->input->InjectKeyUp(mapped);
-                }
-
-                // Process text control actions on key press
-                if (action == GLFW_PRESS || action == GLFW_REPEAT) {
-                    if (auto* engine = GetEngineContext()) {
-                        auto& reg = engine->GetRegistry();
-                        for (Entity e: reg.GetEntitiesWith<Components::UITextInputComponent>()) {
-                            auto* input = reg.Get<Components::UITextInputComponent>(e);
-                            if (input && input->isFocused) {
-                                std::string_view curr = input->text;
-
-                                if (key == GLFW_KEY_BACKSPACE && input->cursorIndex > 0) {
-                                    // Erase character before cursor
-                                    std::string next = std::string(curr.substr(0, input->cursorIndex - 1)) + std::string(curr.substr(input->cursorIndex));
-                                    input->text.assign(next);
-                                    input->cursorIndex--;
-
-                                    // Force immediate redraw
-                                    if (auto* text = reg.Get<Components::TextComponent>(e)) {
-                                        text->mesh.posBuffer = BufferHandle::Invalid;
-                                    }
-                                } else if (key == GLFW_KEY_LEFT && input->cursorIndex > 0) {
-                                    input->cursorIndex--;
-                                } else if (key == GLFW_KEY_RIGHT && input->cursorIndex < curr.size()) {
-                                    input->cursorIndex++;
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-
-            // Handle printable character inputs
-            glfwSetCharCallback(_impl->handle, [](GLFWwindow* win, unsigned int codepoint) {
+            glfwSetCharCallback(_impl->handle, []([[maybe_unused]] GLFWwindow* win, unsigned int codepoint) {
                 if (auto* engine = GetEngineContext()) {
                     auto& reg = engine->GetRegistry();
                     for (Entity e: reg.GetEntitiesWith<Components::UITextInputComponent>()) {
-                        auto* input = reg.Get<Components::UITextInputComponent>(e);
-                        if (input && input->isFocused) {
-                            // Append only printable ASCII characters within buffer limits
-                            if (codepoint >= 32 && codepoint <= 126 && input->text.size() < 255) {
-                                std::string_view curr = input->text;
-                                std::string      next = std::string(curr.substr(0, input->cursorIndex)) + static_cast<char>(codepoint) +
-                                                        std::string(curr.substr(input->cursorIndex));
-                                input->text.assign(next);
-                                input->cursorIndex++;
-
-                                // Force immediate redraw
-                                if (auto* text = reg.Get<Components::TextComponent>(e)) {
-                                    text->mesh.posBuffer = BufferHandle::Invalid;
-                                }
+                        auto* inputComp = reg.Get<Components::UITextInputComponent>(e);
+                        if (inputComp && inputComp->isFocused) {
+                            if (codepoint >= 32 && codepoint <= 126 && inputComp->text.size() < 255) {
+                                std::string_view curr = inputComp->text;
+                                std::string      next = std::string(curr.substr(0, inputComp->cursorIndex)) + static_cast<char>(codepoint) +
+                                                        std::string(curr.substr(inputComp->cursorIndex));
+                                inputComp->text.assign(next);
+                                inputComp->cursorIndex++;
                             }
                         }
                     }
@@ -218,7 +187,6 @@ bool Window::IsRunning() const {
 }
 
 void Window::ProcessEvents() {
-    // Engine::ProcessEvents handles glfwPollEvents now
 }
 
 Extent2D Window::GetSize() const {
@@ -238,12 +206,11 @@ void Window::SetSize(uint32_t width, uint32_t height) noexcept {
 }
 
 void Window::Focus() {
-    // We can just use GLFW's built-in focus!
     glfwFocusWindow(_impl->handle);
 }
 
 void* Window::GetNativeHandle() const {
-    return _impl->handle; // Return GLFWwindow*
+    return _impl->handle;
 }
 
 void Window::Close() {

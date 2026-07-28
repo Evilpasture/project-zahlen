@@ -9,6 +9,7 @@
 #include "ecs/ECS.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
+#include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -27,16 +28,13 @@ std::expected<void, Error> RenderSystem::Update(Engine& engine, float dt) {
     int        physicsDrawMode = 0;
     JPH::Mat44 shadowProjView  = JPH::Mat44::sIdentity();
 
-    // 1. Process standard geometry draws and frame configurations
     auto mainResult = RenderMain(engine, physicsDrawMode, shadowProjView, dt);
     if (!mainResult) {
         return mainResult;
     }
 
-    // 2. Process secondary debug lines/solids drawing
     RenderDebug(engine, physicsDrawMode);
 
-    // 3. Resolve frame boundaries
     auto& rc      = engine.GetRenderContext();
     auto  end_res = rc.EndFrame();
     if (!end_res) {
@@ -97,14 +95,7 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
         }
     }
 
-    // 1. Resolve primary sunlight parameters using the centralized GetSunDirectionAndIntensity
-    // helper
     auto [sunDirection, sunIntensity] = LightingSystem::GetSunDirectionAndIntensity(reg);
-
-    float     yawRad   = JPH::DegreesToRadians(cam.yaw);
-    float     pitchRad = JPH::DegreesToRadians(cam.pitch);
-    JPH::Vec3 forward(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
-    forward = forward.Normalized();
 
     float    shadowWidth      = 80.0f;
     uint32_t shadowResolution = 2048;
@@ -116,21 +107,14 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
         shadowResolution     = shadowSettings->shadowResolution;
     }
 
+    // --- RESTORED ORIGINAL WORKING SHADOW CALCULATION ---
     float texelSize = shadowWidth / static_cast<float>(shadowResolution);
 
-    JPH::Vec3 shadowCenter   = JPH::Vec3::sZero();
-    auto      playerEntities = reg.GetEntitiesWith<Components::PlayerTagComponent>();
-    if (!playerEntities.empty()) {
-        if (auto* trans = reg.Get<Components::Components::TransformComponent>(playerEntities[0])) {
-            shadowCenter = trans->position;
-        }
-    }
-
+    JPH::Vec3 shadowCenter = cam.position;
     shadowCenter.SetX(std::round(shadowCenter.GetX() / texelSize) * texelSize);
     shadowCenter.SetY(std::round(shadowCenter.GetY() / texelSize) * texelSize);
     shadowCenter.SetZ(std::round(shadowCenter.GetZ() / texelSize) * texelSize);
 
-    // --- USE CENTRALIZED SHADOW CONSTANTS ---
     JPH::Vec3  lightPos  = shadowCenter + sunDirection * Shadows::FarOffset;
     JPH::Mat44 lightView = Math::CreateLookAt(lightPos, shadowCenter, JPH::Vec3::sAxisY());
 
@@ -179,6 +163,31 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
     Renderer::SetFrameData(rc, cam, uniforms, outShadowProjView, dt);
     Renderer::SetMatrices(rc, vp, unjitteredVp);
 
+    // ========================================================================
+    // LAZY RE-BAKE FOR TERRAIN COMPONENTS
+    // ========================================================================
+    for (Entity e: reg.GetEntitiesWith<Components::TerrainComponent>()) {
+        auto* terrain  = reg.Get<Components::TerrainComponent>(e);
+        auto* meshComp = reg.Get<Components::MeshComponent>(e);
+        if ((terrain != nullptr) && (meshComp != nullptr) && meshComp->meshAsset != InvalidAssetID) {
+            if (!rc.GetGPUMesh(meshComp->meshAsset).has_value()) {
+                Mesh tMesh =
+                    CreativeWorksFactory::CreateTerrainFromData(rc, terrain->sampleCount, terrain->worldSize, terrain->heights.data(), terrain->colors.data());
+                rc.RegisterGPUMesh(meshComp->meshAsset, tMesh);
+
+                if (!rc.GetGPUMaterial(meshComp->materialAsset).has_value()) {
+                    auto mat            = CreativeWorksFactory::CreateBasicMaterial(rc).value_or(Material {});
+                    mat.roughnessFactor = terrain->roughness;
+                    mat.metallicFactor  = terrain->metallic;
+                    rc.RegisterGPUMaterial(meshComp->materialAsset, mat);
+                }
+            }
+        }
+    }
+
+    // ========================================================================
+    // HIGH-LEVEL ASSET RESOLUTION DRAW PASS
+    // ========================================================================
     const auto& mainVisible   = engine.GetVisibleEntities();
     const auto& shadowVisible = engine.GetVisibleShadowEntities();
 
@@ -190,12 +199,27 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
             bool inShadow = IsInList(shadowVisible, e);
 
             if (inMain || inShadow) {
-                auto* mesh = reg.Get<Components::MeshComponent>(e);
-                if (mesh == nullptr) {
+                auto* meshComp = reg.Get<Components::MeshComponent>(e);
+                if (meshComp == nullptr) {
                     continue;
                 }
 
-                DrawFlags drawFlags = mesh->flags;
+                auto gpuMeshOpt = rc.GetGPUMesh(meshComp->meshAsset);
+                auto gpuMatOpt  = rc.GetGPUMaterial(meshComp->materialAsset);
+
+                if (!gpuMeshOpt.has_value() || !gpuMatOpt.has_value()) {
+                    continue;
+                }
+
+                Mesh     gpuMesh = *gpuMeshOpt;
+                Material gpuMat  = *gpuMatOpt;
+
+                BufferHandle scratchVbo = BufferHandle::Invalid;
+                if (meshComp->isSkinned) {
+                    scratchVbo = rc.GetOrCreateSkinnedScratchBuffer(e.Pack(), gpuMesh.vertexCount);
+                }
+
+                DrawFlags drawFlags = meshComp->flags;
                 if (inMain) {
                     drawFlags |= DrawFlags::VisibleInMain;
                 }
@@ -205,23 +229,23 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
 
                 float roughness = -1.0f;
                 float metallic  = -1.0f;
-                if (auto* pbr = reg.Get<Components::Components::PBRComponent>(e)) {
+                if (auto* pbr = reg.Get<Components::PBRComponent>(e)) {
                     roughness = pbr->roughness;
                     metallic  = pbr->metallic;
                 }
 
                 Renderer::Draw(
-                    rc, mesh->material, mesh->mesh,
-                    {.transform           = mesh->worldTransform,
-                     .prevTransform       = mesh->prevTransform,
-                     .cullRadius          = mesh->cullRadius,
-                     .localCenter         = {mesh->localCenter.GetX(), mesh->localCenter.GetY(), mesh->localCenter.GetZ()},
-                     .jointOffset         = mesh->jointOffset,
-                     .morphOffset         = mesh->morphOffset,
-                     .activeMorphCount    = mesh->activeMorphCount,
-                     .morphWeights        = mesh->morphWeights.data(),
+                    rc, gpuMat, gpuMesh,
+                    {.transform           = meshComp->worldTransform,
+                     .prevTransform       = meshComp->prevTransform,
+                     .cullRadius          = meshComp->cullRadius,
+                     .localCenter         = {meshComp->localCenter.GetX(), meshComp->localCenter.GetY(), meshComp->localCenter.GetZ()},
+                     .jointOffset         = meshComp->jointOffset,
+                     .morphOffset         = meshComp->morphOffset,
+                     .activeMorphCount    = meshComp->activeMorphCount,
+                     .morphWeights        = meshComp->morphWeights.data(),
                      .flags               = drawFlags,
-                     .skinnedVertexBuffer = mesh->skinnedVertexBuffer,
+                     .skinnedVertexBuffer = scratchVbo,
                      .roughness           = roughness,
                      .metallic            = metallic}
                 );

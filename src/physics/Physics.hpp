@@ -199,7 +199,7 @@ void QueryAABB(const PhysicsContext& ctx, JPH::Vec3Arg min, JPH::Vec3Arg max, JP
 JPH::BodyID  GetBodyID(const PhysicsWorld& world, ZHLN::Entity handle);
 ZHLN::Entity GetEntityHandle(const PhysicsContext& ctx, JPH::BodyID bodyID);
 
-JPH::ShapeRefC CreateHeightFieldShape(const std::vector<float>& heights, int sampleCount, float worldSize);
+JPH::ShapeRefC CreateHeightFieldShape(const float* heights, int sampleCount, float worldSize);
 
 void AddImpulse(PhysicsContext& ctx, ZHLN::Entity handle, JPH::Vec3Arg impulse, JPH::RVec3Arg position);
 

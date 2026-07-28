@@ -119,6 +119,30 @@ class HashMap {
         return _capacity;
     }
 
+    template <typename Func>
+    void ForEach(Func&& func) const {
+        if (_states == nullptr) {
+            return;
+        }
+        for (size_t i = 0; i < _capacity; ++i) {
+            if (_states[i] == 1) {
+                std::forward<Func>(func)(_keys[i], _values[i]);
+            }
+        }
+    }
+
+    template <typename Func>
+    void ForEach(Func&& func) {
+        if (_states == nullptr) {
+            return;
+        }
+        for (size_t i = 0; i < _capacity; ++i) {
+            if (_states[i] == 1) {
+                std::forward<Func>(func)(_keys[i], _values[i]);
+            }
+        }
+    }
+
   private:
     void AllocateStorage() {
         _states = new uint8_t[_capacity](); // Zero-initialized status bytes

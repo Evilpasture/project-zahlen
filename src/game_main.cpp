@@ -244,9 +244,6 @@ bool InitializeGame(Engine& engine) {
     auto& rc  = engine.GetRenderContext();
     auto& reg = engine.GetRegistry();
 
-    Mesh lineMesh = CreativeWorksFactory::CreateBox(rc, {0.01f, 0.01f, 0.5f}, {0.0f, 1.0f, 1.0f, 1.0f});
-    auto lineMat  = CreativeWorksFactory::CreateBasicMaterial(rc).value_or(Material {});
-
     reg.RegisterAllComponentsIn<ZHLN::Components>();
 
     Entity cameraEntity = reg.Create();
@@ -258,14 +255,7 @@ bool InitializeGame(Engine& engine) {
     reg.Add(settingsEntity, Components::GlobalSettingsTagComponent {});
     reg.Add(settingsEntity, Components::PostProcessSettingsComponent {});
     reg.Add(settingsEntity, Components::ShadowSettingsComponent {});
-    reg.Add(
-        settingsEntity, Components::DebugSettingsComponent {
-                            .debugLineVbo      = lineMesh.posBuffer,
-                            .debugLinePipeline = lineMat.pipeline,
-                            .debugLineAlbedo   = lineMat.albedoIndex,
-                            .physicsDrawMode   = 0,
-                        }
-    );
+    reg.Add(settingsEntity, Components::DebugSettingsComponent {.physicsDrawMode = 0});
 
     Entity uiSettings = reg.Create();
     reg.Add(uiSettings, Components::UISettingsComponent {});
@@ -297,9 +287,6 @@ void UpdateGame(Engine& engine, float dt, ScriptRunner& scriptRunner, FileWatche
     static PhysicsSystem physicsSystem;
     physicsSystem.Update(engine, dt);
 
-    // ========================================================================
-    // GAME LOOP OWNER DISPATCH
-    // ========================================================================
     switch (driver) {
         using enum GameplayDriver;
         case Cpp: {

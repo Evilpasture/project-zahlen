@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/Scripting.cpp
 #include "IScriptRuntime.hpp"
 #include "LuaScriptRuntime.hpp"
 #include "Zahlen/Camera.hpp"
@@ -34,9 +33,6 @@
 #include <unordered_map>
 #include <vector>
 
-// ============================================================================
-// PAYLOAD DEFINITIONS (Must exactly match ffi_cdef.lua)
-// ============================================================================
 namespace {
 #pragma pack(push, 1)
 
@@ -179,14 +175,14 @@ struct RegisterDynamicComponentArgs {
 };
 
 struct SpawnLightArgs {
-    float           px, py, pz;     // Position
-    float           rx, ry, rz, rw; // Rotation (Quaternion)
-    float           r, g, b;        // Color
+    float           px, py, pz;
+    float           rx, ry, rz, rw;
+    float           r, g, b;
     float           intensity;
     float           radius;
-    float           dx, dy, dz; // Direction
+    float           dx, dy, dz;
     float           range;
-    ZHLN::LightType type; // 0=Dir, 1=Point, 2=Spot, 3=Area
+    ZHLN::LightType type;
     uint32_t        twoSided;
 };
 
@@ -217,8 +213,8 @@ struct SpawnTerrainArgs {
     uint32_t     sampleCount;
     float        worldSize;
     float        maxHeight;
-    const float* heights;    // Optional: Pointer to Fennel heights (or nullptr)
-    const float* colorsRGBA; // Optional: Pointer to Fennel RGBA colors (or nullptr)
+    const float* heights;
+    const float* colorsRGBA;
     float        roughness;
     float        metallic;
 };
@@ -228,7 +224,6 @@ struct SpawnTerrainArgs {
 void SafeDestroyEntity(ZHLN::Engine* engine, ZHLN::Entity entity) {
     using namespace ZHLN;
     using namespace ZHLN::ECS;
-    using enum BufferHandle;
     auto& reg = engine->GetRegistry();
 
     std::vector<Entity> childrenToDestroy;
@@ -255,36 +250,6 @@ void SafeDestroyEntity(ZHLN::Engine* engine, ZHLN::Entity entity) {
 
     for (ZHLN::Entity child: childrenToDestroy) {
         SafeDestroyEntity(engine, child);
-    }
-
-    auto* text = reg.Get<ZHLN::Components::TextComponent>(entity);
-    if (text != nullptr) {
-        if (text->mesh.posBuffer != Invalid) {
-            engine->GetRenderContext().DestroyBuffer(text->mesh.posBuffer);
-        }
-        if (text->mesh.attrBuffer != Invalid) {
-            engine->GetRenderContext().DestroyBuffer(text->mesh.attrBuffer);
-        }
-        if (text->mesh.indexBuffer != Invalid) {
-            engine->GetRenderContext().DestroyBuffer(text->mesh.indexBuffer);
-        }
-    }
-
-    auto* panel = reg.Get<ZHLN::Components::UIPanelComponent>(entity);
-    if (panel != nullptr) {
-        if (panel->mesh.posBuffer != Invalid) {
-            engine->GetRenderContext().DestroyBuffer(panel->mesh.posBuffer);
-        }
-        if (panel->mesh.attrBuffer != Invalid) {
-            engine->GetRenderContext().DestroyBuffer(panel->mesh.attrBuffer);
-        }
-    }
-
-    auto* mesh = reg.Get<ZHLN::Components::MeshComponent>(entity);
-    if (mesh != nullptr) {
-        if (mesh->skinnedVertexBuffer != Invalid) {
-            engine->GetRenderContext().DestroyBuffer(mesh->skinnedVertexBuffer);
-        }
     }
 
     reg.Destroy(entity);
@@ -344,20 +309,14 @@ struct ViewComposer {
 
 using CommandHandler = std::function<uint64_t(ZHLN::Engine*, const void*)>;
 
-// 1. The O(1) Fast Path arrays
 static std::vector<CommandHandler>                    s_JumpTable;
 static std::unordered_map<std::string_view, uint32_t> s_StringToIntMap;
 
-// Helper to push lambdas into the flat array
 static void RegisterCmd(std::string_view name, CommandHandler handler) {
     auto id = static_cast<uint32_t>(s_JumpTable.size());
     s_JumpTable.push_back(std::move(handler));
     s_StringToIntMap[name] = id;
 }
-
-// ============================================================================
-// UNIFIED COMMAND WRAPPER TEMPLATE
-// ============================================================================
 
 template <typename TArgs = void, bool RequireEngine = true, typename Fn>
 CommandHandler MakeCmd(Fn fn) {
@@ -378,9 +337,6 @@ CommandHandler MakeCmd(Fn fn) {
     };
 }
 
-// ============================================================================
-// GENERALIZED TYPE-SAFE ECS COMPONENT REGISTRY
-// ============================================================================
 struct ComponentRegistryEntry {
     void* (*add)(ZHLN::ECS::Registry&, ZHLN::Entity) = nullptr;
     std::function<ZHLN_BufferView(ZHLN::ECS::Registry&)> getBuffer;
@@ -405,17 +361,14 @@ void RegisterComponentType(std::string_view name, const char* format, Dims... di
 
 template <typename T, typename... Dims>
 void RegisterComponentTypeReadOnly(std::string_view name, const char* format, Dims... dims) {
-    s_ComponentRegistry[name] = ComponentRegistryEntry {
-        .add       = nullptr, // Block manual generic instantiations (for Physics components)
-        .getBuffer = [format, ... dims = dims](ZHLN::ECS::Registry& reg) -> ZHLN_BufferView {
-            auto raw = reg.GetRawArray<T>();
-            if constexpr (sizeof...(Dims) > 0) {
-                return ZHLN::ViewComposer::Build(&reg, raw.data(), format, raw.size(), dims...);
-            } else {
-                return ZHLN::ViewComposer::Build(&reg, raw.data(), format, raw.size());
-            }
-        }
-    };
+    s_ComponentRegistry[name] = ComponentRegistryEntry {.add = nullptr, .getBuffer = [format, ... dims = dims](ZHLN::ECS::Registry& reg) -> ZHLN_BufferView {
+                                                            auto raw = reg.GetRawArray<T>();
+                                                            if constexpr (sizeof...(Dims) > 0) {
+                                                                return ZHLN::ViewComposer::Build(&reg, raw.data(), format, raw.size(), dims...);
+                                                            } else {
+                                                                return ZHLN::ViewComposer::Build(&reg, raw.data(), format, raw.size());
+                                                            }
+                                                        }};
 }
 
 void InitComponentRegistry() {
@@ -442,10 +395,6 @@ void InitComponentRegistry() {
     RegisterComponentType<Components::UIStackComponent>("UIStackComponent", "B");
     RegisterComponentTypeReadOnly<Components::PhysicsComponent>("PhysicsComponent", "Q");
 }
-
-// ============================================================================
-// DECOUPLED SUBSYSTEM COMMAND REGISTERS
-// ============================================================================
 
 void RegisterCreativeWorkCommands() {
     RegisterCmd("SpawnPrefab", MakeCmd<SpawnPrefabArgs>([](ZHLN::Engine* engine, const SpawnPrefabArgs& a) -> uint64_t {
@@ -489,16 +438,14 @@ void RegisterCreativeWorkCommands() {
             std::vector<float> heightsVec;
 
             if (a.heights != nullptr && a.colorsRGBA != nullptr) {
-                // High-level path: Fennel generated heights and colors
                 mesh = ZHLN::CreativeWorksFactory::CreateTerrainFromData(rc, samples, worldSize, a.heights, a.colorsRGBA);
                 heightsVec.assign(a.heights, a.heights + (samples * samples));
             } else {
-                // Default C++ heightmap generator
                 heightsVec.resize(static_cast<size_t>(samples) * samples);
                 mesh = ZHLN::CreativeWorksFactory::CreateTerrain(rc, samples, worldSize, maxHeight, heightsVec.data());
             }
 
-            auto shape = ZHLN::Physics::CreateHeightFieldShape(heightsVec, samples, worldSize);
+            auto shape = ZHLN::Physics::CreateHeightFieldShape(heightsVec.data(), samples, worldSize);
 
             auto mat_res = ZHLN::CreativeWorksFactory::CreateBasicMaterial(rc);
             if (!mat_res) {
@@ -507,8 +454,14 @@ void RegisterCreativeWorkCommands() {
             Material mat = mat_res.value();
 
             Entity e = reg.Create();
+
+            AssetID    terrainMeshAsset = HashAssetID("terrain_mesh_" + std::to_string(e.index));
+            MaterialID terrainMatAsset  = HashAssetID("terrain_mat_" + std::to_string(e.index));
+            rc.RegisterGPUMesh(terrainMeshAsset, mesh);
+            rc.RegisterGPUMaterial(terrainMatAsset, mat);
+
             reg.Add(e, Components::TransformComponent {.position = {0.0f, 0.0f, 0.0f}, .rotation = JPH::Quat::sIdentity(), .scale = {1.0f, 1.0f, 1.0f}});
-            reg.Add(e, Components::MeshComponent {.mesh = mesh, .material = mat, .cullRadius = worldSize * 1.5f});
+            reg.Add(e, Components::MeshComponent {.meshAsset = terrainMeshAsset, .materialAsset = terrainMatAsset, .cullRadius = worldSize * 1.5f});
             reg.Add(
                 e, Components::PhysicsComponent {
                        Physics::CreateRigidBody(pc, shape, JPH::RVec3(0.0f, 0.0f, 0.0f), JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0)
@@ -595,7 +548,14 @@ void RegisterCreativeWorkCommands() {
                     mat.baseColorFactor[1] = a.g;
                     mat.baseColorFactor[2] = a.b;
                     mat.baseColorFactor[3] = a.a;
-                    ZHLN::Entity e         = reg.Create();
+
+                    ZHLN::Entity e = reg.Create();
+
+                    AssetID    entityMeshAsset = HashAssetID("procedural_mesh_" + std::to_string(e.index));
+                    MaterialID entityMatAsset  = HashAssetID("procedural_mat_" + std::to_string(e.index));
+                    rc.RegisterGPUMesh(entityMeshAsset, mesh);
+                    rc.RegisterGPUMaterial(entityMatAsset, mat);
+
                     reg.Add(
                         e,
                         ZHLN::Components::TransformComponent {.position = {a.px, a.py, a.pz}, .rotation = {a.rx, a.ry, a.rz, a.rw}, .scale = {1.0f, 1.0f, 1.0f}}
@@ -607,8 +567,8 @@ void RegisterCreativeWorkCommands() {
 
                     reg.Add(
                         e, ZHLN::Components::MeshComponent {
-                               .mesh           = mesh,
-                               .material       = mat,
+                               .meshAsset      = entityMeshAsset,
+                               .materialAsset  = entityMatAsset,
                                .cullRadius     = cullRadius,
                                .localTransform = JPH::Mat44::sIdentity(),
                                .prevTransform  = JPH::Mat44::sIdentity(),
@@ -952,7 +912,6 @@ void RegisterSystemCommands() {
                     auto& reg = engine->GetRegistry();
                     auto& pc  = engine->GetPhysicsContext();
 
-                    // 1. Spawn infinite physical ground plane
                     auto         groundShape = ZHLN::Physics::GetOrCreateShape(pc, ZHLN::Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
                     ZHLN::Entity ground      = reg.Create();
                     reg.Add(
@@ -961,7 +920,6 @@ void RegisterSystemCommands() {
                     );
                     reg.Add(ground, Components::PhysicsStateComponent {});
 
-                    // 2. Spawn the Player Character Controller
                     ZHLN::Entity playerEntity = reg.Create();
                     reg.Add(playerEntity, Components::PlayerTagComponent {});
                     reg.Add(playerEntity, Components::TransformComponent {.position = {0.0f, 3.0f, 0.0f}});
@@ -971,7 +929,6 @@ void RegisterSystemCommands() {
                     reg.Add(playerEntity, Components::PhysicsComponent {charPhys});
                     reg.Add(playerEntity, Components::PhysicsStateComponent {.currPosition = {0.0f, 3.0f, 0.0f}, .prevPosition = {0.0f, 3.0f, 0.0f}});
 
-                    // 3. Attach Camera Tracking logic to the blank menu camera
                     auto camEnts = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
                     if (!camEnts.empty()) {
                         ZHLN::Entity camEnt = camEnts[0];
@@ -1080,7 +1037,7 @@ ZHLN_API uint32_t ZHLN_GetCommandID(const char* cmdName) {
     if (cmdName == nullptr) {
         return 0xFFFFFFFF;
     }
-    RegisterFFICommands(); // Lazily ensure the jump table is built on first request
+    RegisterFFICommands();
 
     std::string_view view(cmdName);
     auto             it = s_StringToIntMap.find(view);
@@ -1094,11 +1051,8 @@ ZHLN_API uint32_t ZHLN_GetCommandID(const char* cmdName) {
 
 ZHLN_API uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine_handle, uint32_t cmdID, const void* args) {
     if (cmdID >= s_JumpTable.size()) [[unlikely]] {
-        return 0; // Out of bounds
+        return 0;
     }
-
-    // 100% Branchless O(1) jump directly into the closure.
-    // Null pointer safety checks are handled individually by the lambda's inner closure scopes.
     return s_JumpTable[cmdID](reinterpret_cast<ZHLN::Engine*>(engine_handle), args);
 }
 

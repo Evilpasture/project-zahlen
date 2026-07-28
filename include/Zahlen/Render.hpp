@@ -15,12 +15,11 @@
 
 namespace ZHLN {
 
-// --- CENTRALIZED SHADOW PROJECTION CONSTANTS ---
 namespace Shadows {
 inline constexpr float NearClip   = 0.1f;
-inline constexpr float BaseOffset = 150.0f; // For Cascades 0-2 (millimeter-precise)
+inline constexpr float BaseOffset = 150.0f;
 inline constexpr float BaseDepth  = 300.0f;
-inline constexpr float FarOffset  = 500.0f; // For Cascade 3 (prevents distant fog clipping)
+inline constexpr float FarOffset  = 500.0f;
 inline constexpr float FarDepth   = 1000.0f;
 } // namespace Shadows
 
@@ -37,7 +36,9 @@ struct PipelineDesc {
     bool        alphaBlend       = false;
     bool        isLineList       = false;
 };
+
 struct Camera;
+
 class ZHLN_API RenderContext {
   private:
     struct PrivateToken {
@@ -65,6 +66,16 @@ class ZHLN_API RenderContext {
     [[nodiscard]] const char*  GetGPUName() const;
     [[nodiscard]] uint32_t     GetFrameIndex() const noexcept;
 
+    // --- High-Level Asset Resolution & GPU Cache API ---
+    [[nodiscard]] std::optional<Mesh>     GetGPUMesh(AssetID id) const noexcept;
+    [[nodiscard]] std::optional<Material> GetGPUMaterial(MaterialID id) const noexcept;
+    void                                  RegisterGPUMesh(AssetID id, Mesh mesh) noexcept;
+    void                                  RegisterGPUMaterial(MaterialID id, Material mat) noexcept;
+    void                                  ClearGPUCaches() noexcept;
+
+    // Reuse or create skinned scratch VBO for an entity without leaking handles
+    BufferHandle GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t vertexCount);
+
     // --- Opaque Resource Creation API ---
     auto                                         CreateVertexBuffer(const void* data, size_t size, uint32_t stride = sizeof(VertexPosition)) -> BufferHandle;
     auto                                         CreateIndexBuffer(const void* data, size_t size) -> BufferHandle;
@@ -80,24 +91,15 @@ class ZHLN_API RenderContext {
     [[nodiscard]] auto CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true) -> std::expected<uint32_t, Error>;
     [[nodiscard]] auto CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, Error>;
 
-    // Dynamic CPU-to-GPU Joint Matrix transfer hook
-    void UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices, uint32_t count);
-
+    void     UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices, uint32_t count);
     uint32_t AllocateMorphDeltas(uint32_t count, const float* deltas);
 
-    void SetAAState(const AAState& state);
-
+    void         SetAAState(const AAState& state);
     RenderResult BuildMeshBLAS(Mesh& mesh) noexcept;
 
     [[nodiscard]] std::expected<void, Error> SetShadowResolution(uint32_t resolution);
+    void                                     ProvokeDeviceLost();
 
-    void ProvokeDeviceLost();
-
-    /**
-     * @brief Dispatches a GPU compute pass to bake a procedural noise texture
-     * on-the-fly and registers it in the bindless texture array.
-     * @return The bindless texture index.
-     */
     auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness) -> std::expected<uint32_t, Error>;
 
     [[nodiscard]] auto GetImpl() const -> Impl* {
@@ -121,7 +123,6 @@ struct DrawParams {
 
     BufferHandle skinnedVertexBuffer = BufferHandle::Invalid;
 
-    // --- Dynamic Shading Factor Overrides (-1.0f = fall back to material defaults) ---
     float roughness = -1.0f;
     float metallic  = -1.0f;
 };
@@ -134,7 +135,6 @@ void SetGISettings(RenderContext& ctx, const GISettings& settings);
 
 void SetLights(RenderContext& ctx, const GPULight* lights, uint32_t count);
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const DrawParams& params);
-
 void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex, bool useScissor = false, ScissorRect scissorRect = {});
 
 } // namespace Renderer

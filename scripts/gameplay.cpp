@@ -11,6 +11,7 @@
 #include "Zahlen/Math3D.hpp"
 #include "Zahlen/ScriptECSBridge.hpp"
 #include "Zahlen/Window.hpp"
+#include "detail/Array.hpp"
 #include "ecs/ECS.hpp"
 #include "physics/Physics.hpp"
 #include <algorithm>
@@ -18,7 +19,6 @@
 #include <string>
 #include <vector>
 
-// --- C++26 MODULE IMPORT ---
 import ZHLN.MainMenu;
 
 #if defined(_WIN32)
@@ -130,7 +130,7 @@ inline float ComputeHeight(float x, float z, [[maybe_unused]] float maxHeight) {
     return ((baseHills + mountainElevation) * spawnClearing) + ((1.0f - spawnClearing) * 2.0f);
 }
 
-inline void GenerateMountainData(uint32_t sampleCount, float worldSize, float maxHeight, std::vector<float>& outHeights, std::vector<float>& outColors) {
+inline void GenerateMountainData(uint32_t sampleCount, float worldSize, float maxHeight, ZHLN::Array<float>& outHeights, ZHLN::Array<float>& outColors) {
     size_t totalVerts = static_cast<size_t>(sampleCount * sampleCount);
     outHeights.resize(totalVerts);
     outColors.resize(totalVerts * 4);
@@ -170,29 +170,29 @@ inline void GenerateMountainData(uint32_t sampleCount, float worldSize, float ma
             float slope = dyH / len;
             float normY = y / maxHeight;
 
-            if (slope < 0.68f) { // Cliff Rock
+            if (slope < 0.68f) {
                 float rockN         = Noise2D(x * 0.1f, z * 0.1f);
                 outColors[cIdx + 0] = 0.11f + rockN * 0.04f;
                 outColors[cIdx + 1] = 0.13f + rockN * 0.04f;
                 outColors[cIdx + 2] = 0.16f + rockN * 0.05f;
                 outColors[cIdx + 3] = 1.0f;
-            } else if (slope < 0.82f) { // Transition
+            } else if (slope < 0.82f) {
                 float t             = (slope - 0.68f) / 0.14f;
                 outColors[cIdx + 0] = Lerp(0.12f, 0.88f, t);
                 outColors[cIdx + 1] = Lerp(0.14f, 0.92f, t);
                 outColors[cIdx + 2] = Lerp(0.17f, 0.98f, t);
                 outColors[cIdx + 3] = 1.0f;
-            } else if (normY > 0.65f) { // Snow Cap
+            } else if (normY > 0.65f) {
                 outColors[cIdx + 0] = 0.97f;
                 outColors[cIdx + 1] = 0.98f;
                 outColors[cIdx + 2] = 1.00f;
                 outColors[cIdx + 3] = 1.00f;
-            } else if (normY < 0.12f) { // Glacial Ice
+            } else if (normY < 0.12f) {
                 outColors[cIdx + 0] = 0.78f;
                 outColors[cIdx + 1] = 0.88f;
                 outColors[cIdx + 2] = 0.95f;
                 outColors[cIdx + 3] = 1.00f;
-            } else { // Powder Snow
+            } else {
                 float snowV         = 0.90f + 0.05f * std::sin(y * 0.4f);
                 outColors[cIdx + 0] = snowV * 0.94f;
                 outColors[cIdx + 1] = snowV * 0.97f;
@@ -224,7 +224,6 @@ void PlayTrack(ECS::Registry& reg, Entity ent, int trackIdx, float blend = 0.15f
 void RespawnPlayer(Engine* engine) {
     auto& reg = engine->GetRegistry();
     auto& pc  = engine->GetPhysicsContext();
-    auto& rc  = engine->GetRenderContext();
 
     if (g_State.playerEnt != NullEntity) {
         for (Entity part: g_State.charParts) {
@@ -243,7 +242,6 @@ void RespawnPlayer(Engine* engine) {
     reg.Add(g_State.playerEnt, Components::PhysicsStateComponent {.currPosition = JPH::Vec3(0.0f, 3.0f, 0.0f), .prevPosition = JPH::Vec3(0.0f, 3.0f, 0.0f)});
     reg.Add(g_State.playerEnt, GameplayComponents::Combat {.hp = 100.0f, .maxHp = 100.0f});
 
-    // --- ATTACH CAMERA TARGET CONTROLLER TO PLAYER ---
     auto camEnts = reg.GetEntitiesWith<Components::MainCameraTagComponent>();
     if (!camEnts.empty()) {
         Entity camEnt    = camEnts[0];
@@ -261,24 +259,21 @@ void RespawnPlayer(Engine* engine) {
         targetCam->hasInitSmoothTarget = 0;
     }
 
-    auto* prefab = CreativeWorksFactory::LoadModelPrefab(rc, engine->GetCreativeWorksManager(), "murderdrones/Uzi.glb");
-    if (prefab) {
-        CreativeWorksFactory::SpawnParams params;
-        params.isAnimated    = true;
-        params.createPhysics = false;
+    CreativeWorksFactory::SpawnParams params;
+    params.isAnimated    = true;
+    params.createPhysics = false;
 
-        g_State.charParts.resize(32);
-        uint32_t count = CreativeWorksFactory::InstantiatePrefab(rc, reg, pc, *prefab, params, g_State.charParts.data(), 32);
-        g_State.charParts.resize(count);
+    g_State.charParts.resize(32);
+    uint32_t count = CreativeWorksFactory::InstantiatePrefab(*engine, "murderdrones/Uzi.glb", params, g_State.charParts.data(), 32);
+    g_State.charParts.resize(count);
 
-        if (!g_State.charParts.empty()) {
-            Entity charRoot = g_State.charParts[0];
-            if (auto* rootTrans = reg.Get<Components::TransformComponent>(charRoot)) {
-                rootTrans->position = JPH::Vec3(0.0f, -0.8f, 0.0f);
-            }
-            reg.Add(charRoot, Components::HierarchyComponent {.parent = g_State.playerEnt});
-            CreativeWorksFactory::SetupPlayerRagdoll(rc, pc, reg, g_State.playerEnt, g_State.charParts);
+    if (!g_State.charParts.empty()) {
+        Entity charRoot = g_State.charParts[0];
+        if (auto* rootTrans = reg.Get<Components::TransformComponent>(charRoot)) {
+            rootTrans->position = JPH::Vec3(0.0f, -0.8f, 0.0f);
         }
+        reg.Add(charRoot, Components::HierarchyComponent {.parent = g_State.playerEnt});
+        CreativeWorksFactory::SetupPlayerRagdoll(*engine, g_State.playerEnt, g_State.charParts);
     }
 
     ZHLN::Log("[Snow Scene] Player successfully respawned!");
@@ -287,7 +282,6 @@ void RespawnPlayer(Engine* engine) {
 void StartGame(Engine* engine) {
     auto& reg = engine->GetRegistry();
     auto& pc  = engine->GetPhysicsContext();
-    auto& rc  = engine->GetRenderContext();
 
     ZHLN::Log("[Snow Scene] Generating Volumetric Nighttime Environment...");
     g_State.wonGame   = false;
@@ -316,32 +310,45 @@ void StartGame(Engine* engine) {
     uint32_t           samples   = 128;
     float              worldSize = 280.0f;
     float              maxHeight = 35.0f;
-    std::vector<float> heights, colors;
+    ZHLN::Array<float> heights, colors;
     TerrainGen::GenerateMountainData(samples, worldSize, maxHeight, heights, colors);
 
-    Mesh terrainMesh  = CreativeWorksFactory::CreateTerrainFromData(rc, samples, worldSize, heights.data(), colors.data());
-    auto terrainShape = Physics::CreateHeightFieldShape(heights, samples, worldSize);
-    auto mat          = CreativeWorksFactory::CreateBasicMaterial(rc).value_or(Material {});
+    auto terrainShape = Physics::CreateHeightFieldShape(heights.data(), samples, worldSize);
 
     g_State.snowTerrain = reg.Create();
     reg.Add(g_State.snowTerrain, Components::TransformComponent {});
-    reg.Add(g_State.snowTerrain, Components::MeshComponent {.mesh = terrainMesh, .material = mat, .cullRadius = 400.0f});
+
+    // High-level asset keys
+    AssetID    terrainMeshAsset = HashAssetID("terrain_mountain_mesh");
+    MaterialID terrainMatAsset  = HashAssetID("terrain_mountain_mat");
+
+    reg.Add(g_State.snowTerrain, Components::MeshComponent {.meshAsset = terrainMeshAsset, .materialAsset = terrainMatAsset, .cullRadius = 400.0f});
+
+    // Retain CPU RAM heightfield and color buffers for device lost auto-rebaking inside RenderSystem
+    reg.Add(
+        g_State.snowTerrain, Components::TerrainComponent {
+                                 .sampleCount = samples,
+                                 .worldSize   = worldSize,
+                                 .maxHeight   = maxHeight,
+                                 .roughness   = 0.85f,
+                                 .metallic    = 0.05f,
+                                 .heights     = std::move(heights),
+                                 .colors      = std::move(colors)
+                             }
+    );
+
     reg.Add(
         g_State.snowTerrain,
         Components::PhysicsComponent {Physics::CreateRigidBody(pc, terrainShape, JPH::RVec3::sZero(), JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0)}
     );
     reg.Add(g_State.snowTerrain, Components::PBRComponent {.roughness = 0.85f, .metallic = 0.05f});
 
-    auto* planetPrefab = CreativeWorksFactory::LoadModelPrefab(rc, engine->GetCreativeWorksManager(), "murderdrones/Copper9_Celestials.glb");
-    if (planetPrefab) {
-        CreativeWorksFactory::SpawnParams p;
-        p.position = JPH::RVec3(0.0f, 80.0f, -500.0f);
-        p.rotation = JPH::Quat(0.35f, 0.25f, 0.1f, 0.9f).Normalized();
+    CreativeWorksFactory::SpawnParams p;
+    p.position = JPH::RVec3(0.0f, 80.0f, -500.0f);
+    p.rotation = JPH::Quat(0.35f, 0.25f, 0.1f, 0.9f).Normalized();
+    p.scale    = JPH::Vec3(5.0f, 5.0f, 5.0f);
 
-        p.scale = JPH::Vec3(5.0f, 5.0f, 5.0f);
-
-        CreativeWorksFactory::InstantiatePrefab(rc, reg, pc, *planetPrefab, p);
-    }
+    CreativeWorksFactory::InstantiatePrefab(*engine, "murderdrones/Copper9_Celestials.glb", p);
 
     Entity moonlight = reg.Create();
     reg.Add(
@@ -659,7 +666,6 @@ extern "C" GAMEPLAY_API void NativeGameplayUpdate(ZHLN::Engine* engine, float dt
             Game::g_State.gameStarted = true;
             ZHLN::Log("[Hot-Reload Success] Gameplay module re-attached to live ECS session!");
         } else {
-            // Build Main Menu using the imported C++26 module
             ZHLN::MenuConfig cfg;
             cfg.titleLogoPrefab = "TADCLogo.glb";
             cfg.logoPosition    = JPH::RVec3(0.0f, 0.0f, -5.0f);
@@ -672,8 +678,8 @@ extern "C" GAMEPLAY_API void NativeGameplayUpdate(ZHLN::Engine* engine, float dt
                 {.text = "START GAME",
                  .onClick =
                      [](ZHLN::Engine* eng) {
-                         Game::StartGame(eng);                // 1. Spawn player & terrain FIRST
-                         Game::g_State.mainMenu.Destroy(eng); // 2. Clean up UI SECOND
+                         Game::StartGame(eng);
+                         Game::g_State.mainMenu.Destroy(eng);
                      },
                  .textX = 55.0f,
                  .textY = 25.0f}
@@ -686,13 +692,11 @@ extern "C" GAMEPLAY_API void NativeGameplayUpdate(ZHLN::Engine* engine, float dt
         }
     }
 
-    // 1. Process Main Menu state if active
     if (Game::g_State.mainMenu.IsActive()) {
         Game::g_State.mainMenu.Update(engine, dt);
         return;
     }
 
-    // 2. Process gameplay loop systems when active
     if (Game::g_State.gameStarted) {
         Game::PlayerInputSystem(engine, dt);
         Game::BlizzardWindSystem(engine, dt);

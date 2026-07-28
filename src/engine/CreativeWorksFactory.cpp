@@ -1,15 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/engine/CreativeWorksFactory.cpp
-
-// clang-format off
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/ScaledShape.h>
-// clang-format on
-
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
@@ -17,25 +12,23 @@
 #include <Zahlen/Font8x8.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
+#include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Render.hpp>
+#include <Zahlen/SkeletalAnimation.hpp>
 #include <algorithm>
 #include <cstddef>
 #include <ecs/ECS.hpp>
 #include <engine/system/AnimationSystem.hpp>
 #include <engine/system/LightingSystem.hpp>
-#include <gltf/GLTFImporter.hpp> // <-- The only place glTF is allowed to be mentioned
+#include <gltf/GLTFImporter.hpp>
 #include <physics/Physics.hpp>
 #include <stb_image.h>
-#include <threading/TaskSystem.hpp> // Needed for ParallelFor
+#include <threading/TaskSystem.hpp>
 #define STB_TRUETYPE_IMPLEMENTATION
 #include <fontconfig/fontconfig.h>
 #include <stb_truetype.h>
 
 namespace ZHLN::CreativeWorksFactory {
-
-// ============================================================================
-// SYSTEM FONT
-// ============================================================================
 
 static std::string FindSystemFont(const char* fontName) {
     FcConfig*  config = FcInitLoadConfigAndFonts();
@@ -132,12 +125,7 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
     return texIdx;
 }
 
-// ============================================================================
-// MODEL PREFAB INSTANTIATION (NATIVE)
-// ============================================================================
-
 ModelPrefab* LoadModelPrefab(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path) {
-    // Pipeline securely crosses the boundary into the isolated glTF module
     return GLTF::LoadGLBPrefab(ctx, assetMgr, path);
 }
 
@@ -224,10 +212,15 @@ Entity InstantiateMeshPart(
     Entity                                 rootEntity,
     std::unordered_map<int32_t, uint32_t>& allocatedSkeletons
 ) {
-    BufferHandle skinnedVbo = BufferHandle::Invalid;
-    if (part.isSkinned && params.isAnimated) {
-        skinnedVbo = ctx.CreateSkinnedScratchBuffer(part.mesh.vertexCount);
-    }
+    // Pure integer ID usage - cast scoped enum to uint64_t directly
+    AssetID    meshAsset = part.meshAsset;
+    MaterialID matAsset  = params.materialOverride.pipeline != PipelineHandle::Invalid ? static_cast<uint64_t>(params.materialOverride.pipeline) :
+                                                                                         part.materialAsset;
+
+    Material activeMat = params.materialOverride.pipeline != PipelineHandle::Invalid ? params.materialOverride : part.defaultMaterial;
+
+    ctx.RegisterGPUMesh(meshAsset, part.mesh);
+    ctx.RegisterGPUMaterial(matAsset, activeMat);
 
     uint32_t assignedJointOffset = 0;
     if (part.isSkinned && params.isAnimated && part.skeletonIndex >= 0) {
@@ -240,9 +233,7 @@ Entity InstantiateMeshPart(
         }
     }
 
-    Entity   e         = reg.Create();
-    Material activeMat = params.materialOverride.pipeline != PipelineHandle::Invalid ? params.materialOverride : part.defaultMaterial;
-
+    Entity    e     = reg.Create();
     DrawFlags flags = DrawFlags::None;
     if (part.isSkinned && params.isAnimated) {
         flags |= DrawFlags::Skinned;
@@ -268,7 +259,6 @@ Entity InstantiateMeshPart(
             );
         }
     } else {
-        // --- FIX: Normalize basis columns before extracting quaternion to prevent skewing ---
         JPH::Mat44 nodeLocal = GetNodeLogicalTransform(prefab, part.nodeIndex) * part.localTransform;
         JPH::Vec3  localPos  = nodeLocal.GetTranslation();
 
@@ -277,24 +267,18 @@ Entity InstantiateMeshPart(
         JPH::Vec3 c2 = nodeLocal.GetColumn3(2);
         JPH::Vec3 localScale(c0.Length(), c1.Length(), c2.Length());
 
-        // Strip scale to form a pure rotation matrix
-        if (localScale.GetX() > 1e-5f) {
+        if (localScale.GetX() > 1e-5f)
             c0 /= localScale.GetX();
-        } else {
+        else
             c0 = JPH::Vec3::sAxisX();
-        }
-
-        if (localScale.GetY() > 1e-5f) {
+        if (localScale.GetY() > 1e-5f)
             c1 /= localScale.GetY();
-        } else {
+        else
             c1 = JPH::Vec3::sAxisY();
-        }
-
-        if (localScale.GetZ() > 1e-5f) {
+        if (localScale.GetZ() > 1e-5f)
             c2 /= localScale.GetZ();
-        } else {
+        else
             c2 = JPH::Vec3::sAxisZ();
-        }
 
         JPH::Mat44 rotMat(JPH::Vec4(c0, 0), JPH::Vec4(c1, 0), JPH::Vec4(c2, 0), JPH::Vec4(0, 0, 0, 1));
         JPH::Quat  localRot = rotMat.GetQuaternion().Normalized();
@@ -304,24 +288,24 @@ Entity InstantiateMeshPart(
     }
 
     reg.Add(e, Components::NameComponent {.name = part.name});
+
     reg.Add(
         e, Components::MeshComponent {
-               .mesh        = part.mesh,
-               .material    = activeMat,
-               .cullRadius  = part.boundingRadius,
-               .localCenter = JPH::Vec3(
+               .meshAsset     = meshAsset,
+               .materialAsset = matAsset,
+               .cullRadius    = part.boundingRadius,
+               .localCenter   = JPH::Vec3(
                    (part.localMax[0] + part.localMin[0]) * 0.5f, (part.localMax[1] + part.localMin[1]) * 0.5f, (part.localMax[2] + part.localMin[2]) * 0.5f
                ),
-               .localTransform      = part.localTransform,
-               .jointOffset         = assignedJointOffset,
-               .isSkinned           = part.isSkinned && params.isAnimated,
-               .skinnedVertexBuffer = skinnedVbo,
-               .morphOffset         = part.morphOffset,
-               .activeMorphCount    = part.activeMorphCount,
-               .morphWeights        = {part.defaultMorphWeights[0], part.defaultMorphWeights[1], part.defaultMorphWeights[2], part.defaultMorphWeights[3]},
-               .nodeIndex           = part.nodeIndex,
-               .skeletonIndex       = part.skeletonIndex,
-               .flags               = flags
+               .localTransform   = part.localTransform,
+               .jointOffset      = assignedJointOffset,
+               .isSkinned        = part.isSkinned && params.isAnimated,
+               .morphOffset      = part.morphOffset,
+               .activeMorphCount = part.activeMorphCount,
+               .morphWeights     = {part.defaultMorphWeights[0], part.defaultMorphWeights[1], part.defaultMorphWeights[2], part.defaultMorphWeights[3]},
+               .nodeIndex        = part.nodeIndex,
+               .skeletonIndex    = part.skeletonIndex,
+               .flags            = flags
            }
     );
 
@@ -380,7 +364,6 @@ uint32_t InstantiatePrefab(
     if (!params.createPhysics) {
         rootEntity = SpawnPrefabRoot(reg, prefab.virtualPath.c_str(), params);
 
-        // ADD THIS: Attach a single master AnimatorComponent to the root entity
         if (params.isAnimated && !prefab.animations.empty()) {
             reg.Add(rootEntity, Components::AnimatorComponent {.currentTrackIdx = 0, .currentTrackTime = 0.0f, .currentLoop = true, .prefab = &prefab});
         }
@@ -460,7 +443,6 @@ void SetupPlayerRagdoll(RenderContext& /*rc*/, PhysicsContext& pc, ECS::Registry
             part.mass             = 1.0f;
             part.enableMotors     = false;
 
-            // Compute global bind pose for the joint
             JPH::Mat44 bindPose = targetSkeleton->joints[i].inverseBindMatrix.Inversed();
             part.position       = JPH::RVec3(bindPose.GetTranslation());
             part.rotation       = bindPose.GetQuaternion().Normalized();
@@ -510,87 +492,50 @@ void SetupPlayerRagdoll(RenderContext& /*rc*/, PhysicsContext& pc, ECS::Registry
 }
 
 // ============================================================================
-// DEVICE LOST HOT-RECOVERY (Rebuilding VRAM buffers)
+// DEVICE LOST RECOVERY
 // ============================================================================
 
-static void
-    ReuploadAllPrefabs(RenderContext& ctx, CreativeWorksManager& cwMgr, std::unordered_map<BufferHandle, std::pair<Mesh, Material>>& outMeshRebuildMap) {
+void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS::Registry& /*reg*/) {
+    ZHLN::Log("[Engine] Device Lost: Clearing GPU asset cache. Next frame will re-upload assets lazily.");
+
+    ctx.ClearGPUCaches();
+    CreateFontAtlasTexture(ctx);
+
     uint32_t count = cwMgr.GetCachedPrefabs(nullptr, 0);
-    if (count == 0) {
-        return;
-    }
+    if (count > 0) {
+        std::vector<ModelPrefab*> prefabs(count);
+        cwMgr.GetCachedPrefabs(prefabs.data(), count);
 
-    std::vector<ModelPrefab*> prefabs(count);
-    cwMgr.GetCachedPrefabs(prefabs.data(), count);
-
-    for (auto* prefab: prefabs) {
-        std::vector<BufferHandle> oldHandles;
-        oldHandles.reserve(prefab->parts.size());
-        for (const auto& part: prefab->parts) {
-            oldHandles.push_back(part.mesh.posBuffer);
-        }
-
-        GLTF::RebuildPrefabGPUResources(ctx, cwMgr, prefab);
-
-        for (size_t i = 0; i < prefab->parts.size(); ++i) {
-            if (oldHandles[i] != BufferHandle::Invalid) {
-                outMeshRebuildMap[oldHandles[i]] = {prefab->parts[i].mesh, prefab->parts[i].defaultMaterial};
+        for (auto* prefab: prefabs) {
+            GLTF::RebuildPrefabGPUResources(ctx, cwMgr, prefab);
+            for (size_t i = 0; i < prefab->parts.size(); ++i) {
+                std::string assetKeyStr = std::string(prefab->virtualPath.c_str()) + "#" + prefab->parts[i].name.c_str() + "_" +
+                                          std::to_string(prefab->parts[i].nodeIndex);
+                ctx.RegisterGPUMesh(HashAssetID(assetKeyStr), prefab->parts[i].mesh);
+                ctx.RegisterGPUMaterial(HashAssetID(assetKeyStr + "_mat"), prefab->parts[i].defaultMaterial);
             }
         }
     }
 }
 
-void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS::Registry& reg) {
-    ZHLN::Log("[Engine] Re-uploading all textures and meshes to new Vulkan device...");
+ModelPrefab* LoadModelPrefab(Engine& engine, std::string_view path) {
+    return LoadModelPrefab(engine.GetRenderContext(), engine.GetCreativeWorksManager(), path);
+}
 
-    CreateFontAtlasTexture(ctx);
+uint32_t InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount) {
+    return InstantiatePrefab(engine.GetRenderContext(), engine.GetRegistry(), engine.GetPhysicsContext(), prefab, params, outBuffer, maxCount);
+}
 
-    std::unordered_map<BufferHandle, std::pair<Mesh, Material>> meshRebuildMap;
-    ReuploadAllPrefabs(ctx, cwMgr, meshRebuildMap);
-
-    // Create a fresh fallback material in the new Vulkan context
-    auto fallbackMat = CreativeWorksFactory::CreateBasicMaterial(ctx).value_or(Material {});
-
-    auto entities = reg.GetEntitiesWith<Components::MeshComponent>();
-    auto meshes   = reg.GetRawArray<Components::MeshComponent>();
-
-    for (size_t i = 0; i < entities.size(); ++i) {
-        Components::MeshComponent& meshComp     = meshes[i];
-        BufferHandle               oldPosBuffer = meshComp.mesh.posBuffer;
-
-        if (meshComp.isSkinned && meshComp.skinnedVertexBuffer != BufferHandle::Invalid) {
-            meshComp.skinnedVertexBuffer = ctx.CreateSkinnedScratchBuffer(meshComp.mesh.vertexCount);
-        }
-
-        if (oldPosBuffer != BufferHandle::Invalid) {
-            auto it = meshRebuildMap.find(oldPosBuffer);
-            if (it != meshRebuildMap.end()) {
-                meshComp.mesh     = it->second.first;
-                meshComp.material = it->second.second;
-            } else {
-                // Assign a valid fallback material for procedural meshes
-                meshComp.material.pipeline = fallbackMat.pipeline;
-            }
-        }
+uint32_t InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount) {
+    ModelPrefab* prefab = LoadModelPrefab(engine, path);
+    if (prefab == nullptr) {
+        return 0;
     }
+    return InstantiatePrefab(engine, *prefab, params, outBuffer, maxCount);
+}
 
-    // Rebuild Debug VBOs in new context
-    for (Entity e: reg.GetEntitiesWith<Components::DebugSettingsComponent>()) {
-        if (auto* dbg = reg.Get<Components::DebugSettingsComponent>(e)) {
-            Mesh lineMesh          = CreativeWorksFactory::CreateBox(ctx, {0.01f, 0.01f, 0.5f}, {0.0f, 1.0f, 1.0f, 1.0f});
-            dbg->debugLineVbo      = lineMesh.posBuffer;
-            dbg->debugLinePipeline = fallbackMat.pipeline;
-            dbg->debugLineAlbedo   = fallbackMat.albedoIndex;
-        }
-    }
-
-    for (Entity e: reg.GetEntitiesWith<Components::TextComponent>()) {
-        if (auto* text = reg.Get<Components::TextComponent>(e)) {
-            text->mesh.posBuffer   = BufferHandle::Invalid;
-            text->mesh.attrBuffer  = BufferHandle::Invalid;
-            text->mesh.indexBuffer = BufferHandle::Invalid;
-        }
-    }
+void SetupPlayerRagdoll(Engine& engine, Entity playerEntity, std::span<const Entity> visualParts) {
+    SetupPlayerRagdoll(engine.GetRenderContext(), engine.GetPhysicsContext(), engine.GetRegistry(), playerEntity, visualParts);
 }
 
 } // namespace ZHLN::CreativeWorksFactory

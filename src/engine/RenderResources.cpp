@@ -12,6 +12,60 @@
 
 namespace ZHLN {
 
+// ============================================================================
+// High-Level GPU Asset Registry & Resolution API
+// ============================================================================
+
+std::optional<Mesh> RenderContext::GetGPUMesh(AssetID id) const noexcept {
+    const Mesh* found = _impl->assetMeshMap.Find(id);
+    if (found != nullptr) {
+        return *found;
+    }
+    return std::nullopt;
+}
+
+std::optional<Material> RenderContext::GetGPUMaterial(MaterialID id) const noexcept {
+    const Material* found = _impl->assetMaterialMap.Find(id);
+    if (found != nullptr) {
+        return *found;
+    }
+    return std::nullopt;
+}
+
+void RenderContext::RegisterGPUMesh(AssetID id, Mesh mesh) noexcept {
+    _impl->assetMeshMap.Insert(id, mesh);
+}
+
+void RenderContext::RegisterGPUMaterial(MaterialID id, Material mat) noexcept {
+    _impl->assetMaterialMap.Insert(id, mat);
+}
+
+BufferHandle RenderContext::GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t vertexCount) {
+    const BufferHandle* existing = _impl->skinnedScratchMap.Find(entityKey);
+    if (existing != nullptr && *existing != BufferHandle::Invalid) {
+        return *existing;
+    }
+
+    BufferHandle handle = CreateSkinnedScratchBuffer(vertexCount);
+    if (handle != BufferHandle::Invalid) {
+        _impl->skinnedScratchMap.Insert(entityKey, handle);
+    }
+    return handle;
+}
+
+void RenderContext::ClearGPUCaches() noexcept {
+    _impl->assetMeshMap.Clear();
+    _impl->assetMaterialMap.Clear();
+
+    // Safely reclaim all cached skinning scratch VBOs using public ForEach
+    _impl->skinnedScratchMap.ForEach([this](uint64_t /*key*/, BufferHandle handle) { DestroyBuffer(handle); });
+    _impl->skinnedScratchMap.Clear();
+}
+
+// ============================================================================
+// RenderContext Subsystem Implementation
+// ============================================================================
+
 std::expected<void, Error> RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) {
     return Vk::ShaderStages::Create(device, shaderData, "VSMain", "PSShadow")
         .transform_error([](auto err) -> Error { return err; })
@@ -32,7 +86,7 @@ std::expected<void, Error> RenderContext::Impl::CompileShadowPipeline(VkDevice d
                         .Layout(shadowPipelineLayout.Get())
                         .DepthOnly()
                         .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                        .ViewMask(0xF) // 4 Cascades (0b1111)
+                        .ViewMask(0xF)
                         .CullNone()
                         .Build(device)
                         .transform_error([](auto err) -> Error {
@@ -64,7 +118,7 @@ std::expected<void, Error> RenderContext::Impl::CompilePunctualShadowPipeline(Vk
                         .Layout(punctualShadowPipelineLayout.Get())
                         .DepthOnly()
                         .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                        .ViewMask(0x3F) // 6 Cubemap faces (0b111111)
+                        .ViewMask(0x3F)
                         .CullNone()
                         .Build(device)
                         .transform_error([](auto err) -> Error {
@@ -132,7 +186,6 @@ std::expected<Material, Error> RenderContext::CreateMaterial(const PipelineDesc&
             return MaterialCreationError::ShaderCompilationFailed;
         })
         .and_then([impl, &desc](auto&& shaders) -> std::expected<Material, Error> {
-            // 1. Build the pipeline layout
             return Vk::PipelineLayoutBuilder(impl->ctx.Device())
                 .AddDescriptorSetLayout(impl->bindlessLayout.Get())
                 .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
@@ -142,7 +195,6 @@ std::expected<Material, Error> RenderContext::CreateMaterial(const PipelineDesc&
                     return MaterialCreationError::PipelineLayoutCreationFailed;
                 })
                 .and_then([impl, &desc, &shaders](auto&& layout) -> std::expected<Material, Error> {
-                    // 2. Configure the graphics pipeline builder options
                     auto pipeline = Vk::PipelineBuilder {}.Shaders(shaders).Layout(layout.Get()).DepthFormat(VK_FORMAT_D32_SFLOAT);
 
                     if (desc.doubleSided) {
@@ -152,8 +204,8 @@ std::expected<Material, Error> RenderContext::CreateMaterial(const PipelineDesc&
                     }
 
                     if (desc.alphaBlend) {
-                        pipeline.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT}); // Output straight to the Lit pass
-                        pipeline.DepthWrite(false);                             // DO NOT write to depth, to preserve opaque occlusion
+                        pipeline.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT});
+                        pipeline.DepthWrite(false);
                         pipeline.AlphaBlend();
                     } else {
                         pipeline.ColorFormats(ActiveGBuffer::array);
@@ -163,7 +215,6 @@ std::expected<Material, Error> RenderContext::CreateMaterial(const PipelineDesc&
                         pipeline.Topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST);
                     }
 
-                    // 3. Compile the graphics pipeline and return the initialized Material on success
                     return pipeline.Build(impl->ctx.Device())
                         .transform_error([](auto err) -> Error {
                             ZHLN::Log("Material pipeline creation error: {} (Category: {})", err.Message(), err.Category());
@@ -187,7 +238,6 @@ void RenderContext::Impl::CheckShaderWatchers() noexcept {
         for (auto& watcher: shaderWatchers) {
             if (watcher.watcher.CheckModified()) {
                 if (!anyReloaded) {
-                    // Prevent write-after-read race conditions by forcing GPU idle
                     vkDeviceWaitIdle(ctx.Device());
                     anyReloaded = true;
                 }
@@ -392,18 +442,17 @@ uint32_t RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
+
 std::expected<void, Error> RenderContext::SetShadowResolution(uint32_t resolution) {
     auto* impl   = _impl.get();
     auto* device = impl->ctx.Device();
 
-    // 1. Wait for GPU idle monadically to prevent pipeline hazards during reallocation
     return Vk::WaitIdle(device)
         .transform_error([](auto err) -> Error {
             ZHLN::Log("SetShadowResolution WaitIdle failed: {}", ToString(err));
             return ShadowResolutionError::RecreationFailed;
         })
-        // 2. Perform the target reallocation and layout transitions on success
-        .transform([&](VkResult /*success*/) {
+        .transform([&](VkResult) {
             impl->graphResources.shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
                 impl->allocator, impl->ctx, {.width = resolution, .height = resolution},
                 {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
@@ -449,10 +498,6 @@ std::expected<void, Error> RenderContext::SetShadowResolution(uint32_t resolutio
 #pragma GCC diagnostic pop
 #endif
 
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
-
 void RenderContext::SetAAState(const AAState& state) {
     _impl->aaState = state;
 }
@@ -460,7 +505,6 @@ void RenderContext::SetAAState(const AAState& state) {
 RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
     auto* impl = _impl.get();
 
-    // Struct to propagate intermediate allocations down the monadic railway
     struct BuildContext {
         NativeMesh*                     posMesh;
         NativeMesh*                     indexMesh;
@@ -472,17 +516,14 @@ RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
         Vk::Buffer                      scratch;
     };
 
-    // Invoking the default constructor directly resolves the ambiguity
     return std::expected<void, Error>()
         .and_then([&]() -> std::expected<BuildContext, Error> {
             if (!impl->rtCtx.Valid()) {
                 return std::unexpected(VulkanCallError::FeatureNotPresent);
             }
-            // Resolve the vertex buffer. Propagates ResourcePoolError if invalid/stale
             return impl->meshPool.Resolve(mesh.posBuffer)
                 .transform_error([](auto err) -> Error { return err; })
                 .and_then([&](auto* pos) -> std::expected<BuildContext, Error> {
-                    // Optional index buffer: use value_or(nullptr) to handle missing indices cleanly
                     auto* index = (mesh.indexBuffer != BufferHandle::Invalid) ? impl->meshPool.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
                     return BuildContext {
                         .posMesh = pos, .indexMesh = index, .geom = {}, .primitiveCount = {}, .sizes = {}, .blasBuffer = {}, .blas = nullptr, .scratch = {}
@@ -509,7 +550,7 @@ RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
                 .transform_error([](VkResult res) -> Error { return {res}; })
                 .transform([b = std::move(b)](auto&& buffer) mutable {
                     b.blasBuffer = std::forward<decltype(buffer)>(buffer);
-                    return std::move(b); // <-- Explicitly move to trigger the move constructor
+                    return std::move(b);
                 });
         })
         .and_then([&](BuildContext b) -> std::expected<BuildContext, Error> {
@@ -525,7 +566,7 @@ RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
                 .transform_error([](VkResult res) -> Error { return {res}; })
                 .transform([b = std::move(b)](auto&& buffer) mutable {
                     b.scratch = std::forward<decltype(buffer)>(buffer);
-                    return std::move(b); // <-- Explicitly move to trigger the move constructor
+                    return std::move(b);
                 });
         })
         .and_then([&](BuildContext b) -> std::expected<void, Error> {
@@ -555,7 +596,6 @@ RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
             )
                 .transform_error([](auto err) -> Error { return err; })
                 .transform([&]() {
-                    // Safely update the native mesh object only upon successful GPU submission
                     b.posMesh->blasBuffer  = std::move(b.blasBuffer);
                     b.posMesh->blas        = b.blas;
                     b.posMesh->blasAddress = impl->rtCtx.GetASAddress(b.blas);
@@ -575,7 +615,6 @@ std::expected<void, Error> RenderContext::Impl::InitializeSystemTextures() noexc
     return CreateTextureInternal(blackPixel.data(), 1, 1, false).and_then([&, whitePixel, normalPixel](uint32_t blackIdx) -> std::expected<void, Error> {
         return CreateTextureInternal(whitePixel.data(), 1, 1, true).and_then([&, blackIdx, normalPixel](uint32_t whiteIdx) -> std::expected<void, Error> {
             return CreateTextureInternal(normalPixel.data(), 1, 1, false).and_then([&, blackIdx, whiteIdx](uint32_t normalIdx) -> std::expected<void, Error> {
-                // Verify sequential bindless indices to prevent runtime offset issues
                 if (blackIdx != 0 || whiteIdx != 1 || normalIdx != 2) {
                     return std::unexpected(RenderInitError::SubsystemAllocationFailed);
                 }
@@ -662,7 +701,6 @@ void RenderContext::Impl::UploadClusterBounds(const JPH::Mat44& proj) {
         }
     }
 
-    // Direct staging copy to GPU (Runs on main thread outside active render pass)
     auto stagingAlloc = stagingRingBuffer.Allocate(cpuBounds.size() * sizeof(ClusterBounds));
     std::memcpy(stagingAlloc.mappedData, cpuBounds.data(), cpuBounds.size() * sizeof(ClusterBounds));
 

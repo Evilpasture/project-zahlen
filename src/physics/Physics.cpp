@@ -889,13 +889,7 @@ void AddImpulse(PhysicsContext& ctx, ZHLN::Entity handle, JPH::Vec3Arg impulse) 
     }
 }
 
-JPH::ShapeRefC CreateHeightFieldShape(const std::vector<float>& heights, int sampleCount, float worldSize) {
-    ZHLN::Assert(sampleCount > 0, "Sample count must be greater than 0");
-    ZHLN::Assert(worldSize > 0.0f, "World size must be greater than 0.0f");
-    ZHLN::Assert(
-        heights.size() >= static_cast<size_t>(sampleCount) * sampleCount, "Heights vector size ({}) is smaller than expected ({}x{})", heights.size(),
-        sampleCount, sampleCount
-    );
+JPH::ShapeRefC CreateHeightFieldShape(const float* heights, int sampleCount, float worldSize) {
     JPH::HeightFieldShapeSettings settings;
     settings.mSampleCount = sampleCount;
     settings.mHeightSamples.resize(static_cast<size_t>(sampleCount) * sampleCount);
@@ -904,15 +898,11 @@ JPH::ShapeRefC CreateHeightFieldShape(const std::vector<float>& heights, int sam
         settings.mHeightSamples[i] = heights[i];
     }
 
-    // Offset to center the terrain over the origin (0, 0, 0)
     settings.mOffset = JPH::Vec3(-worldSize / 2.0f, 0.0f, -worldSize / 2.0f);
-
-    // Map scale to stretch the local samples grid into world units
-    settings.mScale = JPH::Vec3(worldSize / (sampleCount - 1), 1.0f, worldSize / (sampleCount - 1));
+    settings.mScale  = JPH::Vec3(worldSize / (sampleCount - 1), 1.0f, worldSize / (sampleCount - 1));
 
     JPH::Shape::ShapeResult result = settings.Create();
     if (result.HasError()) {
-        ZHLN::Log("Failed to build Jolt HeightFieldShape: {}", result.GetError().c_str());
         return nullptr;
     }
     return result.Get();

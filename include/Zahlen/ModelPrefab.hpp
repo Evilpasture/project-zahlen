@@ -18,9 +18,11 @@ struct ModelNode {
 };
 
 struct ModelPart {
-    String64 name;
-    Mesh     mesh;
-    Material defaultMaterial;
+    String64   name;
+    AssetID    meshAsset     = InvalidAssetID;
+    MaterialID materialAsset = InvalidMaterialID;
+    Mesh       mesh;
+    Material   defaultMaterial;
 
     JPH::Mat44 localTransform = JPH::Mat44::sIdentity();
 
