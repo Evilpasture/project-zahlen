@@ -282,7 +282,7 @@ void UpdateGame(Engine& engine, float dt, ScriptRunner& scriptRunner, FileWatche
     UIInteractionSystem::Update(engine);
     UISystem(engine, scriptRunner);
 
-    if (gameplayWatcher.CheckModified()) {
+    if (driver != GameplayDriver::Cpp && gameplayWatcher.CheckModified()) {
         scriptRunner.ReloadFile(s_GameplayFile);
     }
     engine.GetRenderContext().CheckShaderReload();
@@ -404,8 +404,9 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, co
 
     ZHLN::Log("Window active and presenting. Loading scene assets... ");
 
-    // Warm up Fennel / Lua runtime
-    scriptRunner.CallUpdate(engine.get(), 0.0f);
+    if (options.driver != GameplayDriver::Cpp) {
+        scriptRunner.CallUpdate(engine.get(), 0.0f);
+    }
 
     const double targetFrameTime = options.fpsLimit > 0 ? 1.0 / static_cast<double>(options.fpsLimit) : 0.0;
 

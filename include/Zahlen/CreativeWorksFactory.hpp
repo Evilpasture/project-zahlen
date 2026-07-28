@@ -69,4 +69,5 @@ uint32_t InstantiatePrefab(
 );
 
 void SetupPlayerRagdoll(RenderContext& rc, PhysicsContext& pc, ECS::Registry& reg, Entity playerEntity, std::span<const Entity> visualParts);
+void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS::Registry& reg);
 } // namespace ZHLN::CreativeWorksFactory

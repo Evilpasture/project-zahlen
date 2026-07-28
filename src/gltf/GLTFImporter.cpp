@@ -96,7 +96,7 @@ struct CompiledPrimitive {
     uint32_t       activeMorphCount = 0;
 };
 
-static unsigned char* DownsampleHalfSize(const unsigned char* src, uint32_t currentW, uint32_t currentH) {
+unsigned char* DownsampleHalfSize(const unsigned char* src, uint32_t currentW, uint32_t currentH) {
     uint32_t nextW = currentW / 2;
     uint32_t nextH = currentH / 2;
 
@@ -110,7 +110,10 @@ static unsigned char* DownsampleHalfSize(const unsigned char* src, uint32_t curr
             uint32_t srcX = x * 2;
             uint32_t srcY = y * 2;
 
-            uint32_t r = 0, g = 0, b = 0, a = 0;
+            uint32_t r = 0;
+            uint32_t g = 0;
+            uint32_t b = 0;
+            uint32_t a = 0;
 
             for (uint32_t dy = 0; dy < 2; ++dy) {
                 for (uint32_t dx = 0; dx < 2; ++dx) {
@@ -132,7 +135,7 @@ static unsigned char* DownsampleHalfSize(const unsigned char* src, uint32_t curr
     return dst;
 }
 
-static void DecodeAndRescaleTexture(CPUTextureJob& job) {
+void DecodeAndRescaleTexture(CPUTextureJob& job) {
     int            channels = 0;
     unsigned char* pixels   = nullptr;
 
@@ -205,7 +208,7 @@ static void DecodeAndRescaleTexture(CPUTextureJob& job) {
     job.decodedPixels = pixels;
 }
 
-static void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
+void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
     const auto& prim = *job.prim;
     const auto* node = job.node;
 
@@ -219,29 +222,33 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
 
     for (cgltf_size a = 0; a < prim.attributes_count; ++a) {
         const auto& attr = prim.attributes[a];
-        if (attr.type == cgltf_attribute_type_position)
+        if (attr.type == cgltf_attribute_type_position) {
             posAcc = attr.data;
-        else if (attr.type == cgltf_attribute_type_normal)
+        } else if (attr.type == cgltf_attribute_type_normal) {
             normAcc = attr.data;
-        else if (attr.type == cgltf_attribute_type_tangent)
+        } else if (attr.type == cgltf_attribute_type_tangent) {
             tangentAcc = attr.data;
-        else if (attr.type == cgltf_attribute_type_texcoord && attr.index == 0)
+        } else if (attr.type == cgltf_attribute_type_texcoord && attr.index == 0) {
             uvAcc = attr.data;
-        else if (attr.type == cgltf_attribute_type_color && attr.index == 0)
+        } else if (attr.type == cgltf_attribute_type_color && attr.index == 0) {
             colorAcc = attr.data;
-        else if (attr.type == cgltf_attribute_type_joints && attr.index == 0)
+        } else if (attr.type == cgltf_attribute_type_joints && attr.index == 0) {
             jointsAcc = attr.data;
-        else if (attr.type == cgltf_attribute_type_weights && attr.index == 0)
+        } else if (attr.type == cgltf_attribute_type_weights && attr.index == 0) {
             weightsAcc = attr.data;
+        }
     }
 
-    if (posAcc == nullptr)
+    if (posAcc == nullptr) {
         return;
+    }
 
-    if (posAcc->has_min)
+    if (posAcc->has_min) {
         std::copy(posAcc->min, posAcc->min + 3, job.localMin);
-    if (posAcc->has_max)
+    }
+    if (posAcc->has_max) {
         std::copy(posAcc->max, posAcc->max + 3, job.localMax);
+    }
 
     if (prim.material != nullptr) {
         job.doubleSided = (prim.material->double_sided != 0);
@@ -299,8 +306,9 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
         job.positions[vIdx] = {.position = {rawPos[0], rawPos[1], rawPos[2]}};
 
         float rawNorm[3] = {0.0f, 1.0f, 0.0f};
-        if (normAcc != nullptr)
+        if (normAcc != nullptr) {
             cgltf_accessor_read_float(normAcc, vIdx, rawNorm, 3);
+        }
         float nLen = std::sqrt(rawNorm[0] * rawNorm[0] + rawNorm[1] * rawNorm[1] + rawNorm[2] * rawNorm[2]);
         if (nLen > 1e-6f) {
             rawNorm[0] /= nLen;
@@ -309,16 +317,19 @@ static void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
         }
 
         float rawTangent[4] = {1.0f, 0.0f, 0.0f, 1.0f};
-        if (tangentAcc != nullptr)
+        if (tangentAcc != nullptr) {
             cgltf_accessor_read_float(tangentAcc, vIdx, rawTangent, 4);
+        }
 
         float uv[2] = {0.0f, 0.0f};
-        if (uvAcc != nullptr)
+        if (uvAcc != nullptr) {
             cgltf_accessor_read_float(uvAcc, vIdx, uv, 2);
+        }
 
         float rawColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-        if (colorAcc != nullptr)
+        if (colorAcc != nullptr) {
             cgltf_accessor_read_float(colorAcc, vIdx, rawColor, 4);
+        }
 
         job.attributes[vIdx] = {
             .normal  = Math::PackNormal(rawNorm[0], rawNorm[1], rawNorm[2]),
@@ -387,8 +398,9 @@ void GatherImagesAndPrimitiveJobs(cgltf_data* data, std::vector<cgltf_image*>& o
 
     for (cgltf_size i = 0; i < data->nodes_count; ++i) {
         const cgltf_node* node = &data->nodes[i];
-        if (node->mesh == nullptr)
+        if (node->mesh == nullptr) {
             continue;
+        }
 
         float matrix[16];
         cgltf_node_transform_world(node, matrix);
@@ -490,7 +502,7 @@ std::unordered_map<cgltf_image*, uint32_t> UploadTexturesToGPU(RenderContext& ct
     return imageToBindlessIdx;
 }
 
-static CompiledPrimitive GetOrCreateCompiledPrimitive(
+CompiledPrimitive GetOrCreateCompiledPrimitive(
     RenderContext&                                                 ctx,
     const CPUPrimitiveJob&                                         primJob,
     const std::unordered_map<cgltf_image*, uint32_t>&              imageToBindlessIdx,
@@ -524,7 +536,11 @@ static CompiledPrimitive GetOrCreateCompiledPrimitive(
         .indexCount  = primJob.indexCount
     };
 
-    ctx.BuildMeshBLAS(subMesh);
+    if (auto res = ctx.BuildMeshBLAS(subMesh); !res) [[unlikely]] {
+        if (!res.error().Is(VulkanCallError::FeatureNotPresent)) {
+            ZHLN::Log("WARNING: GLTF Importer: Failed to build mesh BLAS: {}", res.error().Message());
+        }
+    }
 
     uint32_t finalMorphOffset = 0;
     if (primJob.activeMorphCount > 0) {
@@ -540,8 +556,9 @@ static CompiledPrimitive GetOrCreateCompiledPrimitive(
     std::memcpy(subMaterial.baseColorFactor, primJob.baseColorFactor, sizeof(float) * 4);
 
     auto GetBindlessIndex = [&](cgltf_image* img, uint32_t defaultIdx) -> uint32_t {
-        if (!img)
+        if (!img) {
             return defaultIdx;
+        }
         auto texIt = imageToBindlessIdx.find(img);
         return (texIt != imageToBindlessIdx.end()) ? texIt->second : defaultIdx;
     };
@@ -608,7 +625,7 @@ ModelPrefab* LoadGLBPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, std:
         nodeMap[node]    = static_cast<int32_t>(i);
 
         ModelNode& n = prefab->nodes[i];
-        n.name       = node->name ? String64(node->name) : String64("Unnamed");
+        n.name       = (node->name != nullptr) ? String64(node->name) : String64("Unnamed");
         n.hasMesh    = (node->mesh != nullptr);
 
         float m[16];
@@ -632,12 +649,12 @@ ModelPrefab* LoadGLBPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, std:
         skinMap[skin]          = static_cast<int32_t>(i);
 
         Skeleton& skel = prefab->skeletons[i];
-        skel.name      = skin->name ? String64(skin->name) : String64("Skeleton");
+        skel.name      = (skin->name != nullptr) ? String64(skin->name) : String64("Skeleton");
         skel.joints.resize(skin->joints_count);
 
         for (cgltf_size j = 0; j < skin->joints_count; ++j) {
             cgltf_node* jointNode    = skin->joints[j];
-            skel.joints[j].name      = jointNode->name ? String64(jointNode->name) : String64("Joint");
+            skel.joints[j].name      = (jointNode->name != nullptr) ? String64(jointNode->name) : String64("Joint");
             skel.joints[j].nodeIndex = nodeMap[jointNode];
 
             skel.joints[j].parentIndex = -1;
@@ -666,31 +683,34 @@ ModelPrefab* LoadGLBPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, std:
     for (cgltf_size i = 0; i < data->animations_count; ++i) {
         const cgltf_animation& anim = data->animations[i];
         AnimationClip&         clip = prefab->animations[i];
-        clip.name                   = anim.name ? String64(anim.name) : String64("Anim");
+        clip.name                   = (anim.name != nullptr) ? String64(anim.name) : String64("Anim");
 
         for (cgltf_size c = 0; c < anim.channels_count; ++c) {
             const cgltf_animation_channel& chan = anim.channels[c];
-            if (chan.target_node == nullptr)
+            if (chan.target_node == nullptr) {
                 continue;
+            }
 
             AnimationChannel nativeChan;
             nativeChan.targetNodeIndex = nodeMap[chan.target_node];
 
-            if (chan.target_path == cgltf_animation_path_type_translation)
+            if (chan.target_path == cgltf_animation_path_type_translation) {
                 nativeChan.path = AnimationPathType::Translation;
-            else if (chan.target_path == cgltf_animation_path_type_rotation)
+            } else if (chan.target_path == cgltf_animation_path_type_rotation) {
                 nativeChan.path = AnimationPathType::Rotation;
-            else if (chan.target_path == cgltf_animation_path_type_scale)
+            } else if (chan.target_path == cgltf_animation_path_type_scale) {
                 nativeChan.path = AnimationPathType::Scale;
-            else if (chan.target_path == cgltf_animation_path_type_weights)
+            } else if (chan.target_path == cgltf_animation_path_type_weights) {
                 nativeChan.path = AnimationPathType::Weights;
+            }
 
-            if (chan.sampler->interpolation == cgltf_interpolation_type_step)
+            if (chan.sampler->interpolation == cgltf_interpolation_type_step) {
                 nativeChan.interpolation = InterpolationType::Step;
-            else if (chan.sampler->interpolation == cgltf_interpolation_type_cubic_spline)
+            } else if (chan.sampler->interpolation == cgltf_interpolation_type_cubic_spline) {
                 nativeChan.interpolation = InterpolationType::CubicSpline;
-            else
+            } else {
                 nativeChan.interpolation = InterpolationType::Linear;
+            }
 
             size_t numKeys = chan.sampler->input->count;
             nativeChan.keyTimes.resize(numKeys);
@@ -740,8 +760,9 @@ ModelPrefab* LoadGLBPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, std:
 
         part.morphOffset      = compPrim.morphOffset;
         part.activeMorphCount = compPrim.activeMorphCount;
-        for (int m = 0; m < 4; ++m)
+        for (int m = 0; m < 4; ++m) {
             part.defaultMorphWeights[m] = primJob.defaultMorphWeights[m];
+        }
 
         part.boundingRadius = compPrim.boundingRadius;
         part.localMin[0]    = compPrim.localMin[0];
@@ -766,16 +787,18 @@ ModelPrefab* LoadGLBPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, std:
     return result;
 }
 
-void RebuildPrefabGPUResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ModelPrefab* prefab) {
-    if (!prefab)
+void RebuildPrefabGPUResources(RenderContext& ctx, CreativeWorksManager& /*cwMgr*/, ModelPrefab* prefab) {
+    if (prefab == nullptr) {
         return;
+    }
 
     cgltf_options opts {};
     cgltf_data*   data    = nullptr;
     std::string   rawPath = "resources/assets/" + std::string(prefab->virtualPath.c_str());
 
-    if (cgltf_parse_file(&opts, rawPath.c_str(), &data) != cgltf_result_success)
+    if (cgltf_parse_file(&opts, rawPath.c_str(), &data) != cgltf_result_success) {
         return;
+    }
     if (cgltf_load_buffers(&opts, data, rawPath.c_str()) != cgltf_result_success) {
         cgltf_free(data);
         return;

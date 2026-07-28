@@ -480,28 +480,28 @@ struct ShaderPair;
 // ============================================================================
 // Frame Graph Resource Tags (Declared Before PIMPL Struct)
 // ============================================================================
-using Res_SceneColor  = Vk::GraphImage<"SceneColor", VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_Velocity    = Vk::GraphImage<"Velocity", VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_NormRough   = Vk::GraphImage<"NormRough", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_Depth       = Vk::GraphImage<"Depth", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
-using Res_ShadowMap   = Vk::GraphImage<"ShadowMap", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
-using Res_ShadowAtlas = Vk::GraphImage<"ShadowAtlas", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
-using Res_Ambient     = Vk::GraphImage<"Ambient", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_Lighting    = Vk::GraphImage<"Lighting", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_PostProcess = Vk::GraphImage<"PostProcess", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_BloomThresh = Vk::GraphImage<"BloomThresh", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_BloomDown1  = Vk::GraphImage<"BloomDown1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_BloomDown2  = Vk::GraphImage<"BloomDown2", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_BloomDown3  = Vk::GraphImage<"BloomDown3", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_BloomUp2    = Vk::GraphImage<"BloomUp2", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_BloomUp1    = Vk::GraphImage<"BloomUp1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_BloomFinal  = Vk::GraphImage<"BloomFinal", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_SmaaEdge    = Vk::GraphImage<"SmaaEdge", VK_FORMAT_R8G8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_SmaaWeight  = Vk::GraphImage<"SmaaWeight", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_Swapchain   = Vk::GraphImage<"Swapchain", VK_FORMAT_B8G8R8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, true>;
-using Res_VoxelMedia  = Vk::GraphImage<"VoxelMedia", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_VoxelLight  = Vk::GraphImage<"VoxelLight", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_VoxelInt    = Vk::GraphImage<"VoxelInt", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_SceneColor    = Vk::GraphImage<"SceneColor", VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_Velocity      = Vk::GraphImage<"Velocity", VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_NormRough     = Vk::GraphImage<"NormRough", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_Depth         = Vk::GraphImage<"Depth", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
+using Res_ShadowMap     = Vk::GraphImage<"ShadowMap", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
+using Res_ShadowAtlas   = Vk::GraphImage<"ShadowAtlas", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
+using Res_Ambient       = Vk::GraphImage<"Ambient", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_Lighting      = Vk::GraphImage<"Lighting", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_HdrSceneColor = Vk::GraphImage<"HdrSceneColor", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_BloomThresh   = Vk::GraphImage<"BloomThresh", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_BloomDown1    = Vk::GraphImage<"BloomDown1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_BloomDown2    = Vk::GraphImage<"BloomDown2", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_BloomDown3    = Vk::GraphImage<"BloomDown3", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_BloomUp2      = Vk::GraphImage<"BloomUp2", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_BloomUp1      = Vk::GraphImage<"BloomUp1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_BloomFinal    = Vk::GraphImage<"BloomFinal", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_SmaaEdge      = Vk::GraphImage<"SmaaEdge", VK_FORMAT_R8G8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_SmaaWeight    = Vk::GraphImage<"SmaaWeight", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_Swapchain     = Vk::GraphImage<"Swapchain", VK_FORMAT_B8G8R8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, true>;
+using Res_VoxelMedia    = Vk::GraphImage<"VoxelMedia", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_VoxelLight    = Vk::GraphImage<"VoxelLight", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_VoxelInt      = Vk::GraphImage<"VoxelInt", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 
 // Only TAA targets remain persistent:
 using Res_AccumCurr = Vk::GraphImage<"AccumCurr", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
@@ -527,7 +527,7 @@ struct RenderContext::Impl {
         Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          normalRoughnessBuffer;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     ambientTarget;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     lightingTarget;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     postProcessTarget;
+        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     hdrSceneColor;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomThresholdTarget;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomDown1;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomDown2;
@@ -545,25 +545,25 @@ struct RenderContext::Impl {
         Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelIntegrated;
 
         struct ReflectMetadata {
-            Res_SceneColor  sceneColor;
-            Res_Velocity    velocityBuffer;
-            Res_NormRough   normalRoughnessBuffer;
-            Res_Ambient     ambientTarget;
-            Res_Lighting    lightingTarget;
-            Res_PostProcess postProcessTarget;
-            Res_BloomThresh bloomThresholdTarget;
-            Res_BloomDown1  bloomDown1;
-            Res_BloomDown2  bloomDown2;
-            Res_BloomDown3  bloomDown3;
-            Res_BloomUp2    bloomUp2;
-            Res_BloomUp1    bloomUp1;
-            Res_BloomFinal  bloomFinalTarget;
-            Res_SmaaEdge    smaaEdgeTarget;
-            Res_SmaaWeight  smaaWeightTarget;
-            Res_ShadowAtlas shadowAtlas;
-            Res_VoxelMedia  voxelMedia;
-            Res_VoxelLight  voxelLight;
-            Res_VoxelInt    voxelIntegrated;
+            Res_SceneColor    sceneColor;
+            Res_Velocity      velocityBuffer;
+            Res_NormRough     normalRoughnessBuffer;
+            Res_Ambient       ambientTarget;
+            Res_Lighting      lightingTarget;
+            Res_HdrSceneColor hdrSceneColor;
+            Res_BloomThresh   bloomThresholdTarget;
+            Res_BloomDown1    bloomDown1;
+            Res_BloomDown2    bloomDown2;
+            Res_BloomDown3    bloomDown3;
+            Res_BloomUp2      bloomUp2;
+            Res_BloomUp1      bloomUp1;
+            Res_BloomFinal    bloomFinalTarget;
+            Res_SmaaEdge      smaaEdgeTarget;
+            Res_SmaaWeight    smaaWeightTarget;
+            Res_ShadowAtlas   shadowAtlas;
+            Res_VoxelMedia    voxelMedia;
+            Res_VoxelLight    voxelLight;
+            Res_VoxelInt      voxelIntegrated;
         };
     };
 
@@ -928,7 +928,6 @@ struct RenderContext::Impl {
 
     void RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Compute> compCmd);
 
-    template <bool FullBright>
     void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd);
 
     void RegisterShaderWatcher(const char* path, std::function<void()> callback);

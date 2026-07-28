@@ -10,7 +10,6 @@
 #include <Jolt/Physics/Collision/Shape/ScaledShape.h>
 // clang-format on
 
-#include "Resources.hpp" // Needed for Basic Material Shader lookup
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
@@ -24,7 +23,6 @@
 #include <ecs/ECS.hpp>
 #include <engine/system/AnimationSystem.hpp>
 #include <engine/system/LightingSystem.hpp>
-#include <filesystem>
 #include <gltf/GLTFImporter.hpp> // <-- The only place glTF is allowed to be mentioned
 #include <physics/Physics.hpp>
 #include <stb_image.h>
@@ -164,9 +162,9 @@ JPH::Mat44 GetNodeLogicalTransform(const ModelPrefab& prefab, int32_t nodeIndex)
 }
 
 struct PreparedPart {
-    JPH::Vec3      translation;
-    JPH::Quat      rotation;
-    JPH::Vec3      scale;
+    JPH::Vec3      translation {};
+    JPH::Quat      rotation {};
+    JPH::Vec3      scale {};
     float          maxScale = 1.0f;
     JPH::ShapeRefC shape    = nullptr;
 };
@@ -270,7 +268,38 @@ Entity InstantiateMeshPart(
             );
         }
     } else {
-        reg.Add(e, Components::TransformComponent {.position = prep.translation, .rotation = prep.rotation, .scale = prep.scale});
+        // --- FIX: Normalize basis columns before extracting quaternion to prevent skewing ---
+        JPH::Mat44 nodeLocal = GetNodeLogicalTransform(prefab, part.nodeIndex) * part.localTransform;
+        JPH::Vec3  localPos  = nodeLocal.GetTranslation();
+
+        JPH::Vec3 c0 = nodeLocal.GetColumn3(0);
+        JPH::Vec3 c1 = nodeLocal.GetColumn3(1);
+        JPH::Vec3 c2 = nodeLocal.GetColumn3(2);
+        JPH::Vec3 localScale(c0.Length(), c1.Length(), c2.Length());
+
+        // Strip scale to form a pure rotation matrix
+        if (localScale.GetX() > 1e-5f) {
+            c0 /= localScale.GetX();
+        } else {
+            c0 = JPH::Vec3::sAxisX();
+        }
+
+        if (localScale.GetY() > 1e-5f) {
+            c1 /= localScale.GetY();
+        } else {
+            c1 = JPH::Vec3::sAxisY();
+        }
+
+        if (localScale.GetZ() > 1e-5f) {
+            c2 /= localScale.GetZ();
+        } else {
+            c2 = JPH::Vec3::sAxisZ();
+        }
+
+        JPH::Mat44 rotMat(JPH::Vec4(c0, 0), JPH::Vec4(c1, 0), JPH::Vec4(c2, 0), JPH::Vec4(0, 0, 0, 1));
+        JPH::Quat  localRot = rotMat.GetQuaternion().Normalized();
+
+        reg.Add(e, Components::TransformComponent {.position = localPos, .rotation = localRot, .scale = localScale});
         reg.Add(e, Components::HierarchyComponent {.parent = rootEntity});
     }
 
@@ -302,8 +331,9 @@ Entity InstantiateMeshPart(
 Entity TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, const JPH::Mat44& baseTransform, float scaleMult) {
     const float* ef  = part.defaultMaterial.emissiveFactor;
     float        lum = ef[0] * 0.2126f + ef[1] * 0.7152f + ef[2] * 0.0722f;
-    if (lum <= 0.01f)
+    if (lum <= 0.01f) {
         return NullEntity;
+    }
 
     JPH::Vec3 localCenter(
         (part.localMax[0] + part.localMin[0]) * 0.5f, (part.localMax[1] + part.localMin[1]) * 0.5f, (part.localMax[2] + part.localMin[2]) * 0.5f
@@ -483,16 +513,19 @@ void SetupPlayerRagdoll(RenderContext& /*rc*/, PhysicsContext& pc, ECS::Registry
 // DEVICE LOST HOT-RECOVERY (Rebuilding VRAM buffers)
 // ============================================================================
 
-void ReuploadAllPrefabs(RenderContext& ctx, CreativeWorksManager& cwMgr, std::unordered_map<BufferHandle, std::pair<Mesh, Material>>& outMeshRebuildMap) {
+static void
+    ReuploadAllPrefabs(RenderContext& ctx, CreativeWorksManager& cwMgr, std::unordered_map<BufferHandle, std::pair<Mesh, Material>>& outMeshRebuildMap) {
     uint32_t count = cwMgr.GetCachedPrefabs(nullptr, 0);
-    if (count == 0)
+    if (count == 0) {
         return;
+    }
 
     std::vector<ModelPrefab*> prefabs(count);
     cwMgr.GetCachedPrefabs(prefabs.data(), count);
 
     for (auto* prefab: prefabs) {
         std::vector<BufferHandle> oldHandles;
+        oldHandles.reserve(prefab->parts.size());
         for (const auto& part: prefab->parts) {
             oldHandles.push_back(part.mesh.posBuffer);
         }
@@ -515,6 +548,9 @@ void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS
     std::unordered_map<BufferHandle, std::pair<Mesh, Material>> meshRebuildMap;
     ReuploadAllPrefabs(ctx, cwMgr, meshRebuildMap);
 
+    // Create a fresh fallback material in the new Vulkan context
+    auto fallbackMat = CreativeWorksFactory::CreateBasicMaterial(ctx).value_or(Material {});
+
     auto entities = reg.GetEntitiesWith<Components::MeshComponent>();
     auto meshes   = reg.GetRawArray<Components::MeshComponent>();
 
@@ -531,7 +567,20 @@ void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS
             if (it != meshRebuildMap.end()) {
                 meshComp.mesh     = it->second.first;
                 meshComp.material = it->second.second;
+            } else {
+                // Assign a valid fallback material for procedural meshes
+                meshComp.material.pipeline = fallbackMat.pipeline;
             }
+        }
+    }
+
+    // Rebuild Debug VBOs in new context
+    for (Entity e: reg.GetEntitiesWith<Components::DebugSettingsComponent>()) {
+        if (auto* dbg = reg.Get<Components::DebugSettingsComponent>(e)) {
+            Mesh lineMesh          = CreativeWorksFactory::CreateBox(ctx, {0.01f, 0.01f, 0.5f}, {0.0f, 1.0f, 1.0f, 1.0f});
+            dbg->debugLineVbo      = lineMesh.posBuffer;
+            dbg->debugLinePipeline = fallbackMat.pipeline;
+            dbg->debugLineAlbedo   = fallbackMat.albedoIndex;
         }
     }
 

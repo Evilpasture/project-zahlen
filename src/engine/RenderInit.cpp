@@ -1374,7 +1374,7 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
     accumBuffers[0]                      = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
     accumBuffers[1]                      = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
     graphResources.normalRoughnessBuffer = CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext);
-    graphResources.postProcessTarget     = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
+    graphResources.hdrSceneColor         = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
     graphResources.ambientTarget         = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
     graphResources.lightingTarget        = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
     graphResources.smaaEdgeTarget        = CreateDefaultTarget<VK_FORMAT_R8G8_UNORM>(ext);
@@ -1414,7 +1414,7 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
             accumBuffers[0].image.Handle(),
             accumBuffers[1].image.Handle(),
             graphResources.normalRoughnessBuffer.image.Handle(),
-            graphResources.postProcessTarget.image.Handle(),
+            graphResources.hdrSceneColor.image.Handle(),
             graphResources.ambientTarget.image.Handle(),
             graphResources.lightingTarget.image.Handle(),
             graphResources.smaaEdgeTarget.image.Handle(),

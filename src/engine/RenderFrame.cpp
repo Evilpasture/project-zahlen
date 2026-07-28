@@ -130,8 +130,7 @@ void RenderContext::Impl::SortDrawQueue() {
         sortDrawQueueScratch[i] = drawQueue[sortItemsScratch[i].payload];
     }
 
-    // Copy elements back. Because drawQueue already has the capacity, this performs a raw data copy
-    // with zero allocations.
+    // Copy elements back.
     drawQueue = sortDrawQueueScratch;
 }
 
@@ -258,7 +257,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 }
 
 // ============================================================================
-// Zero-Copy Pass Construction Factory (Refactored)
+// Zero-Copy Pass Construction Factory
 // ============================================================================
 namespace {
 struct PassFactory {
@@ -278,21 +277,10 @@ struct PassFactory {
         }
     }
 
-    // Helper to resolve the correct color target based on fullbright configuration
-    template <bool FullBright>
-    [[nodiscard]] auto& ColorTarget() const noexcept {
-        if constexpr (FullBright) {
-            return self.graphResources.sceneColor;
-        } else {
-            return self.graphResources.postProcessTarget;
-        }
-    }
-
     [[nodiscard]] auto RcpExtent(VkExtent2D e) const noexcept {
         return std::pair {1.0f / (float) e.width, 1.0f / (float) e.height};
     }
 
-    // Consolidated helper to build scene resource descriptions
     [[nodiscard]] auto BuildSceneResources() const noexcept {
         return SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> {
             .sceneColor = Vk::Assume<Vk::ColorWrite<Res_SceneColor>>(self.graphResources.sceneColor),
@@ -349,7 +337,6 @@ struct PassFactory {
                 .deltaTime          = self.currentDt,
             };
 
-            // Bind set 0 (bindlessSet) along with the compute dispatch
             auto* bindlessSet = self.bindlessSets[self.frame_index];
             self.particleUpdatePass.Dispatch(c, bindlessSet, (RenderContext::Impl::kGpuParticleCount + 63) / 64, 1, 1, pc);
         });
@@ -361,7 +348,6 @@ struct PassFactory {
             self.volumetricInjectionPass.WriteNext(
                 device, Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia), self.frameUniformBuffers[fIdx].Handle()
             );
-            // Dispatch across all 64 Z slices
             self.volumetricInjectionPass.Dispatch(c, 160 / 8, (90 + 7) / 8, 64);
         });
     }
@@ -426,7 +412,7 @@ struct PassFactory {
     [[nodiscard]] auto MakeReflectionPass() const noexcept {
         return Vk::MakePass<
             "Reflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_Lighting>,
-            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelInt>, Vk::ColorWrite<Res_PostProcess>>(
+            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelInt>, Vk::ColorWrite<Res_HdrSceneColor>>(
             [this](auto& ctx) noexcept {
                 Profiler::ScopedGpuProfile<Stages::PostProcessPass, FrameProfiler> timer(ctx.Cmd(), fIdx, self.gpuProfiler);
                 self.reflectionPass.WriteNext(
@@ -442,54 +428,23 @@ struct PassFactory {
         );
     }
 
-    template <bool FullBright>
     [[nodiscard]] auto MakeForwardPass() const noexcept {
-        using ColorTargetRes = std::conditional_t<FullBright, Res_SceneColor, Res_PostProcess>;
-        auto& targetImage    = ColorTarget<FullBright>();
-
-        return Vk::Passieren<"Forward", Vk::ColorWrite<ColorTargetRes>, Vk::DepthWrite<Res_Depth>>([this, &targetImage](VkCommandBuffer c) noexcept {
+        auto& targetImage = self.graphResources.hdrSceneColor;
+        return Vk::Passieren<"Forward", Vk::ColorWrite<Res_HdrSceneColor>, Vk::DepthWrite<Res_Depth>>([this, &targetImage](VkCommandBuffer c) noexcept {
             FrameRecorder fwdRecorder(c, self);
             Passes::ForwardPass {}.Execute(
-                fwdRecorder, Vk::Assume<Vk::ColorWrite<ColorTargetRes>>(targetImage), Vk::Assume<Vk::DepthWrite<Res_Depth>>(self.presentation.depthTarget)
+                fwdRecorder, Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(targetImage), Vk::Assume<Vk::DepthWrite<Res_Depth>>(self.presentation.depthTarget)
             );
         });
     }
 
-    template <bool FullBright>
     [[nodiscard]] auto MakeBloomThresholdPass() const noexcept {
-        using BloomInputRes    = std::conditional_t<FullBright, Res_SceneColor, Res_PostProcess>;
-        const auto& inputColor = ColorTarget<FullBright>();
-        return Vk::MakePass<"BloomThreshold", Vk::ShaderRead<BloomInputRes>, Vk::ColorWrite<Res_BloomThresh>>([this, &inputColor](auto& ctx) noexcept {
+        const auto& inputColor = self.graphResources.hdrSceneColor;
+        return Vk::MakePass<"BloomThreshold", Vk::ShaderRead<Res_HdrSceneColor>, Vk::ColorWrite<Res_BloomThresh>>([this, &inputColor](auto& ctx) noexcept {
             Profiler::ScopedGpuProfile<Stages::BloomThreshPass, FrameProfiler> timer(ctx.Cmd(), fIdx, self.gpuProfiler);
-            self.bloomThresholdPass.WriteNext(device, Vk::Assume<Vk::ShaderRead<BloomInputRes>>(inputColor), self.defaultSampler.Get());
+            self.bloomThresholdPass.WriteNext(device, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor), self.defaultSampler.Get());
             self.bloomThresholdPass.Execute(ctx.Cmd());
         });
-    }
-
-    // Downsample version (single source)
-    template <typename SrcImgT, typename PassT>
-    static void RunKawasePass(VkDevice device, VkCommandBuffer cmd, PassT& pass, const SrcImgT& src, const Vk::Sampler& defaultSampler) noexcept {
-        pass.WriteNext(device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src), defaultSampler.Get(), Vk::SkipWrite {});
-        pass.Execute(
-            cmd, RenderContext::Impl::KawasePushConstants {
-                     .mode = 0, .rcpWidth = 1.0f / (float) src.extent.width, .rcpHeight = 1.0f / (float) src.extent.height, .padding = 0.0f
-                 }
-        );
-    }
-
-    // Upsample version (dual sources)
-    template <typename SrcImgT, typename SrcImg2T, typename PassT>
-    static void
-        RunKawasePass(VkDevice device, VkCommandBuffer cmd, PassT& pass, const SrcImgT& src, const Vk::Sampler& defaultSampler, const SrcImg2T& src2) noexcept {
-        pass.WriteNext(
-            device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src), defaultSampler.Get(),
-            Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src2)
-        );
-        pass.Execute(
-            cmd, RenderContext::Impl::KawasePushConstants {
-                     .mode = 1, .rcpWidth = 1.0f / (float) src.extent.width, .rcpHeight = 1.0f / (float) src.extent.height, .padding = 0.0f
-                 }
-        );
     }
 
     template <size_t Index>
@@ -534,14 +489,12 @@ struct PassFactory {
         }
     }
 
-    template <bool FullBright>
     [[nodiscard]] auto MakeTAAPass() const noexcept {
-        using InputRes = std::conditional_t<FullBright, Res_SceneColor, Res_PostProcess>;
         return Vk::MakePass<
-            "TAA", Vk::ShaderRead<InputRes>, Vk::ShaderRead<Res_Velocity>, Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_AccumNext>,
+            "TAA", Vk::ShaderRead<Res_HdrSceneColor>, Vk::ShaderRead<Res_Velocity>, Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_AccumNext>,
             Vk::ShaderRead<Res_AccumCurr>>([this](auto& ctx) noexcept {
-            auto  c          = ctx.Cmd(); // Extract cmd from the graph context
-            auto& inputColor = ColorTarget<FullBright>();
+            auto  c          = ctx.Cmd();
+            auto& inputColor = self.graphResources.hdrSceneColor;
 
             if (self.taaPass.pipeline.Valid()) {
                 struct TAAPushConstants {
@@ -549,7 +502,7 @@ struct PassFactory {
                 };
 
                 self.taaPass.WriteNext(
-                    device, Vk::Assume<Vk::ShaderRead<InputRes>>(inputColor), Vk::Assume<Vk::ShaderRead<Res_AccumCurr>>(self.accumBuffers.Current()),
+                    device, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor), Vk::Assume<Vk::ShaderRead<Res_AccumCurr>>(self.accumBuffers.Current()),
                     Vk::Assume<Vk::ShaderRead<Res_Velocity>>(self.graphResources.velocityBuffer), self.defaultSampler.Get(),
                     self.frameUniformBuffers[fIdx].Handle()
                 );
@@ -559,12 +512,10 @@ struct PassFactory {
         });
     }
 
-    template <bool FullBright>
     [[nodiscard]] auto MakeFXAAPass() const noexcept {
-        using InputRes = std::conditional_t<FullBright, Res_SceneColor, Res_PostProcess>;
-        return Vk::MakePass<"FXAA", Vk::ShaderRead<InputRes>, Vk::ColorWrite<Res_AccumNext>>([this](auto& ctx) noexcept {
+        return Vk::MakePass<"FXAA", Vk::ShaderRead<Res_HdrSceneColor>, Vk::ColorWrite<Res_AccumNext>>([this](auto& ctx) noexcept {
             auto  c          = ctx.Cmd();
-            auto& inputColor = ColorTarget<FullBright>();
+            auto& inputColor = self.graphResources.hdrSceneColor;
 
             if (self.fxaaPass.pipeline.Valid()) {
                 auto [rcpW, rcpH] = RcpExtent(inputColor.extent);
@@ -577,7 +528,7 @@ struct PassFactory {
                     float _pad;
                 };
 
-                self.fxaaPass.WriteNext(device, Vk::Assume<Vk::ShaderRead<InputRes>>(inputColor), self.defaultSampler.Get());
+                self.fxaaPass.WriteNext(device, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor), self.defaultSampler.Get());
 
                 self.fxaaPass.Execute(
                     c, FXAAPushConstants {rcpW, rcpH, self.aaState.fxaaSubpix, self.aaState.fxaaEdgeThreshold, self.aaState.fxaaEdgeThresholdMin, 0.0f}
@@ -586,12 +537,10 @@ struct PassFactory {
         });
     }
 
-    template <bool FullBright>
     [[nodiscard]] auto MakeMLAAPass() const noexcept {
-        using InputRes = std::conditional_t<FullBright, Res_SceneColor, Res_PostProcess>;
-        return Vk::MakePass<"MLAA", Vk::ShaderRead<InputRes>, Vk::ColorWrite<Res_AccumNext>>([this](auto& ctx) noexcept {
+        return Vk::MakePass<"MLAA", Vk::ShaderRead<Res_HdrSceneColor>, Vk::ColorWrite<Res_AccumNext>>([this](auto& ctx) noexcept {
             auto  c          = ctx.Cmd();
-            auto& inputColor = ColorTarget<FullBright>();
+            auto& inputColor = self.graphResources.hdrSceneColor;
 
             if (self.mlaaPass.pipeline.Valid()) {
                 auto [rcpW, rcpH] = RcpExtent(inputColor.extent);
@@ -603,26 +552,26 @@ struct PassFactory {
                     uint32_t maxSearchSteps;
                 };
 
-                self.mlaaPass.WriteNext(device, Vk::Assume<Vk::ShaderRead<InputRes>>(inputColor), self.defaultSampler.Get());
+                self.mlaaPass.WriteNext(device, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor), self.defaultSampler.Get());
 
                 self.mlaaPass.Execute(c, MLAAPushConstants {rcpW, rcpH, self.aaState.mlaaThreshold, self.aaState.mlaaMaxSearchSteps});
             }
         });
     }
 
-    template <bool FullBright>
     [[nodiscard]] auto MakeSMAAEdgePass() const noexcept {
-        using InputRes = std::conditional_t<FullBright, Res_SceneColor, Res_PostProcess>;
-        return Vk::MakePass<"SmaaEdge", Vk::ShaderRead<InputRes>, Vk::ColorWrite<Res_SmaaEdge>>([this](auto& ctx) noexcept {
-            auto  c          = ctx.Cmd(); // Extract cmd from the graph context
-            auto& inputColor = ColorTarget<FullBright>();
+        return Vk::MakePass<"SmaaEdge", Vk::ShaderRead<Res_HdrSceneColor>, Vk::ColorWrite<Res_SmaaEdge>>([this](auto& ctx) noexcept {
+            auto  c          = ctx.Cmd();
+            auto& inputColor = self.graphResources.hdrSceneColor;
             if (self.smaaEdgePass.pipeline.Valid()) {
                 auto [rcpW, rcpH] = RcpExtent(inputColor.extent);
                 struct SMAAMetrics {
                     float rcpWidth, rcpHeight, width, height;
                 } metrics = {rcpW, rcpH, (float) inputColor.extent.width, (float) inputColor.extent.height};
 
-                self.smaaEdgePass.WriteNext(device, Vk::Assume<Vk::ShaderRead<InputRes>>(inputColor), self.defaultSampler.Get(), self.pointSampler.Get());
+                self.smaaEdgePass.WriteNext(
+                    device, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor), self.defaultSampler.Get(), self.pointSampler.Get()
+                );
                 self.smaaEdgePass.Execute(c, metrics, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
             }
         });
@@ -647,36 +596,36 @@ struct PassFactory {
         });
     }
 
-    template <bool FullBright>
     [[nodiscard]] auto MakeSMAABlendPass() const noexcept {
-        using InputRes = std::conditional_t<FullBright, Res_SceneColor, Res_PostProcess>;
-        return Vk::MakePass<"SmaaBlend", Vk::ShaderRead<InputRes>, Vk::ShaderRead<Res_SmaaWeight>, Vk::ColorWrite<Res_AccumNext>>([this](auto& ctx) noexcept {
-            auto  c          = ctx.Cmd();
-            auto& inputColor = ColorTarget<FullBright>();
-            if (self.smaaBlendPass.pipeline.Valid()) {
-                auto [rcpW, rcpH] = RcpExtent(inputColor.extent);
-                struct SMAAMetrics {
-                    float rcpWidth, rcpHeight, width, height;
-                } metrics = {rcpW, rcpH, (float) inputColor.extent.width, (float) inputColor.extent.height};
+        return Vk::MakePass<"SmaaBlend", Vk::ShaderRead<Res_HdrSceneColor>, Vk::ShaderRead<Res_SmaaWeight>, Vk::ColorWrite<Res_AccumNext>>(
+            [this](auto& ctx) noexcept {
+                auto  c          = ctx.Cmd();
+                auto& inputColor = self.graphResources.hdrSceneColor;
+                if (self.smaaBlendPass.pipeline.Valid()) {
+                    auto [rcpW, rcpH] = RcpExtent(inputColor.extent);
+                    struct SMAAMetrics {
+                        float rcpWidth, rcpHeight, width, height;
+                    } metrics = {rcpW, rcpH, (float) inputColor.extent.width, (float) inputColor.extent.height};
 
-                self.smaaBlendPass.WriteNext(
-                    device, Vk::Assume<Vk::ShaderRead<InputRes>>(inputColor), Vk::Assume<Vk::ShaderRead<Res_SmaaWeight>>(self.graphResources.smaaWeightTarget),
-                    self.defaultSampler.Get(), self.pointSampler.Get()
-                );
-                self.smaaBlendPass.Execute(c, metrics, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+                    self.smaaBlendPass.WriteNext(
+                        device, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor),
+                        Vk::Assume<Vk::ShaderRead<Res_SmaaWeight>>(self.graphResources.smaaWeightTarget), self.defaultSampler.Get(), self.pointSampler.Get()
+                    );
+                    self.smaaBlendPass.Execute(c, metrics, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+                }
             }
-        });
+        );
     }
 
-    template <bool FullBright, AAMode Mode, typename GetSwapchainImageT>
+    template <AAMode Mode, typename GetSwapchainImageT>
     auto MakeBlitPass(GetSwapchainImageT&& getSwapchainImage) const noexcept {
         using enum AAMode;
-        using BlitInputRes         = std::conditional_t<Mode != None, Res_AccumNext, std::conditional_t<FullBright, Res_SceneColor, Res_PostProcess>>;
+        using BlitInputRes         = std::conditional_t<Mode != None, Res_AccumNext, Res_HdrSceneColor>;
         const auto& blitInputImage = [&]() -> auto& {
             if constexpr (Mode != None) {
                 return self.accumBuffers.Next();
             } else {
-                return ColorTarget<FullBright>();
+                return self.graphResources.hdrSceneColor;
             }
         }();
 
@@ -690,13 +639,41 @@ struct PassFactory {
                     Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget), self.frameUniformBuffers[fIdx].Handle()
                 );
 
-                Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<BlitInputRes>>(blitInputImage), getSwapchainImage(), FullBright ? 1 : 0);
+                Passes::BlitPass {}.Execute(
+                    blitRecorder, Vk::Assume<Vk::ShaderRead<BlitInputRes>>(blitInputImage), getSwapchainImage(), self.currentUniforms.fullBright != 0 ? 1 : 0
+                );
             }
+        );
+    }
+
+    // Single source downsample helper
+    template <typename SrcImgT, typename PassT>
+    static void RunKawasePass(VkDevice device, VkCommandBuffer cmd, PassT& pass, const SrcImgT& src, const Vk::Sampler& defaultSampler) noexcept {
+        pass.WriteNext(device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src), defaultSampler.Get(), Vk::SkipWrite {});
+        pass.Execute(
+            cmd, RenderContext::Impl::KawasePushConstants {
+                     .mode = 0, .rcpWidth = 1.0f / (float) src.extent.width, .rcpHeight = 1.0f / (float) src.extent.height, .padding = 0.0f
+                 }
+        );
+    }
+
+    // Dual source upsample helper
+    template <typename SrcImgT, typename SrcImg2T, typename PassT>
+    static void
+        RunKawasePass(VkDevice device, VkCommandBuffer cmd, PassT& pass, const SrcImgT& src, const Vk::Sampler& defaultSampler, const SrcImg2T& src2) noexcept {
+        pass.WriteNext(
+            device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src), defaultSampler.Get(),
+            Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src2)
+        );
+        pass.Execute(
+            cmd, RenderContext::Impl::KawasePushConstants {
+                     .mode = 1, .rcpWidth = 1.0f / (float) src.extent.width, .rcpHeight = 1.0f / (float) src.extent.height, .padding = 0.0f
+                 }
         );
     }
 };
 
-// --- Extract Compute Passes into their own graph ---
+// --- Compute Graph Generator ---
 auto BuildComputeGraph(const PassFactory& factory) {
     return Vk::CompileTimeFrameGraph(
         factory.MakeVoxelInjectionPass(), factory.MakeVoxelScatteringPass(), factory.MakeVoxelIntegrationPass(), factory.MakeParticleUpdatePass()
@@ -706,52 +683,31 @@ auto BuildComputeGraph(const PassFactory& factory) {
 // ============================================================================
 // Multi-Axis Frame Graph Generator
 // ============================================================================
-template <bool FullBright, AAMode Mode, typename GetSwapchainImageT>
+template <AAMode Mode, typename GetSwapchainImageT>
 auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapchainImage) {
     using enum AAMode;
-    auto corePasses = [&] {
-        if constexpr (FullBright) {
-            return std::tuple {factory.MakeMainPass(), factory.template MakeForwardPass<FullBright>()};
-        } else {
-            return std::tuple {
-                factory.MakeShadowPass(), factory.MakeAmbientPass(), factory.MakeLightingPass(), factory.MakeReflectionPass(),
-                factory.template MakeForwardPass<FullBright>()
-            };
-        }
-    }();
 
-    auto bloomPasses = std::tuple {
-        factory.template MakeBloomThresholdPass<FullBright>(),
-        factory.template MakeBloomDownPass<0>(),
-        factory.template MakeBloomDownPass<1>(),
-        factory.template MakeBloomDownPass<2>(),
-        factory.template MakeBloomUpPass<2>(),
-        factory.template MakeBloomUpPass<1>(),
-        factory.template MakeBloomUpPass<0>()
-    };
+    auto corePasses =
+        std::tuple {factory.MakeShadowPass(), factory.MakeAmbientPass(), factory.MakeLightingPass(), factory.MakeReflectionPass(), factory.MakeForwardPass()};
+
+    auto bloomPasses = std::tuple {factory.MakeBloomThresholdPass(), factory.MakeBloomDownPass<0>(), factory.MakeBloomDownPass<1>(),
+                                   factory.MakeBloomDownPass<2>(),   factory.MakeBloomUpPass<2>(),   factory.MakeBloomUpPass<1>(),
+                                   factory.MakeBloomUpPass<0>()};
 
     auto tailPasses = [&] {
         if constexpr (Mode == TAA) {
-            return std::tuple {
-                factory.template MakeTAAPass<FullBright>(), factory.template MakeBlitPass<FullBright, Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))
-            };
+            return std::tuple {factory.MakeTAAPass(), factory.MakeBlitPass<Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))};
         } else if constexpr (Mode == FXAA) {
-            return std::tuple {
-                factory.template MakeFXAAPass<FullBright>(),
-                factory.template MakeBlitPass<FullBright, Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))
-            };
+            return std::tuple {factory.MakeFXAAPass(), factory.MakeBlitPass<Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))};
         } else if constexpr (Mode == MLAA) {
-            return std::tuple {
-                factory.template MakeMLAAPass<FullBright>(),
-                factory.template MakeBlitPass<FullBright, Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))
-            };
+            return std::tuple {factory.MakeMLAAPass(), factory.MakeBlitPass<Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))};
         } else if constexpr (Mode == SMAA) {
             return std::tuple {
-                factory.template MakeSMAAEdgePass<FullBright>(), factory.MakeSMAAWeightPass(), factory.template MakeSMAABlendPass<FullBright>(),
-                factory.template MakeBlitPass<FullBright, Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))
+                factory.MakeSMAAEdgePass(), factory.MakeSMAAWeightPass(), factory.MakeSMAABlendPass(),
+                factory.MakeBlitPass<Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))
             };
         } else {
-            return std::tuple {factory.template MakeBlitPass<FullBright, Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))};
+            return std::tuple {factory.MakeBlitPass<Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))};
         }
     }();
 
@@ -761,9 +717,9 @@ auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapcha
     );
 }
 
-template <bool FullBright, AAMode Mode, typename GetSwapchainImageT>
+template <AAMode Mode, typename GetSwapchainImageT>
 void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const PassFactory& factory, GetSwapchainImageT&& getSwapchainImage) {
-    auto graph = BuildFrameGraph<FullBright, Mode>(factory, std::forward<GetSwapchainImageT>(getSwapchainImage));
+    auto graph = BuildFrameGraph<Mode>(factory, std::forward<GetSwapchainImageT>(getSwapchainImage));
 
     typename decltype(graph)::Binder binder;
     using Resources = typename decltype(graph)::Resources;
@@ -778,7 +734,6 @@ void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const Pas
         }
     });
 
-    // Genuine exceptions — not representable as a plain stored field, handled explicitly:
     if constexpr (Vk::IsInList<Resources, Res_Depth>::value) {
         auto ref = Vk::MakeRef<Res_Depth>(self.presentation.depthTarget);
         binder.template Bind<Res_Depth>(ref.handle, ref.view, ref.extent);
@@ -804,44 +759,38 @@ void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const Pas
     graph.Execute(cmd, binder);
 }
 
-template <bool FullBright, typename Self, typename GetSwapchainImageT>
+template <typename Self, typename GetSwapchainImageT>
 void DispatchAAMode(Self& self, VkCommandBuffer cmd, AAMode mode, const PassFactory& factory, GetSwapchainImageT&& getSwapchainImage) {
-    Reflect::DispatchEnum(mode, [&]<AAMode Val>() {
-        ExecuteFrameGraph<FullBright, Val>(self, cmd, factory, std::forward<GetSwapchainImageT>(getSwapchainImage));
-    });
+    Reflect::DispatchEnum(mode, [&]<AAMode Val>() { ExecuteFrameGraph<Val>(self, cmd, factory, std::forward<GetSwapchainImageT>(getSwapchainImage)); });
 }
+
 } // namespace
 
 std::string_view GetRenderGraphDump(AAMode currentMode) noexcept {
     using enum AAMode;
     using Vk::Debug::GraphVisualizer;
-    // 1. Bake the TAA String
-    static constexpr auto vis_taa = GraphVisualizer<decltype(BuildFrameGraph<false, TAA>(std::declval<PassFactory>(), []() {
+
+    static constexpr auto vis_taa = GraphVisualizer<decltype(BuildFrameGraph<TAA>(std::declval<PassFactory>(), []() {
         return Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {};
     }))>::Visualize();
 
-    // 2. Bake the SMAA String
-    static constexpr auto vis_smaa = GraphVisualizer<decltype(BuildFrameGraph<false, SMAA>(std::declval<PassFactory>(), []() {
+    static constexpr auto vis_smaa = GraphVisualizer<decltype(BuildFrameGraph<SMAA>(std::declval<PassFactory>(), []() {
         return Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {};
     }))>::Visualize();
 
-    // 3. Bake the MLAA String
     static constexpr auto vis_mlaa =
-        GraphVisualizer<decltype(BuildFrameGraph<false, MLAA>(std::declval<PassFactory>(), []() -> Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {
+        GraphVisualizer<decltype(BuildFrameGraph<MLAA>(std::declval<PassFactory>(), []() -> Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {
             return {};
         }))>::Visualize();
 
-    // 4. Bake the FXAA String
-    static constexpr auto vis_fxaa = GraphVisualizer<decltype(BuildFrameGraph<false, FXAA>(std::declval<PassFactory>(), []() {
+    static constexpr auto vis_fxaa = GraphVisualizer<decltype(BuildFrameGraph<FXAA>(std::declval<PassFactory>(), []() {
         return Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {};
     }))>::Visualize();
 
-    // Bake the 'None' String (No Anti-Aliasing)
-    static constexpr auto vis_none = GraphVisualizer<decltype(BuildFrameGraph<false, None>(std::declval<PassFactory>(), []() {
+    static constexpr auto vis_none = GraphVisualizer<decltype(BuildFrameGraph<None>(std::declval<PassFactory>(), []() {
         return Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {};
     }))>::Visualize();
 
-    // Return the correct pre-baked compile-time string based on the runtime mode
     switch (currentMode) {
         case TAA:
             return vis_taa.string_view();
@@ -891,7 +840,6 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
     compGraph.Execute(compCmd, compBinder);
 }
 
-template <bool FullBright>
 void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd) {
     uint32_t imageIdx = current_image_index;
     VkDevice device   = ctx.Device();
@@ -904,7 +852,6 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
         return {
             .handle = presentation.swapchain.Get().images[imageIdx],
             .view   = presentation.swapchain.Get().views[imageIdx],
-            // Promote the 2D extent to a 3D subobject inline with explicit depth = 1
             .extent = {.width = graphResources.sceneColor.extent.width, .height = graphResources.sceneColor.extent.height, .depth = 1},
             .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
             .format = presentation.swapchain.Get().format
@@ -936,14 +883,13 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
         .reflVariant  = reflVariant
     };
 
-    // Runtime enum mapped to compile-time template parameter dispatch
-    DispatchAAMode<FullBright>(*this, cmd, aaState.mode, factory, getSwapchainImage);
+    DispatchAAMode(*this, cmd, aaState.mode, factory, getSwapchainImage);
 }
 
 RenderResult RenderContext::BeginFrame() noexcept {
     using enum RenderFrameResult;
 
-    // 1. Wait for the previous frame at this slot to finish before we touch any of its resources!
+    // 1. Wait for the previous frame at this slot to finish
     auto wait_res = _impl->sync.Wait(_impl->frame_index ^ 1);
     if (wait_res == VK_ERROR_DEVICE_LOST) {
         return std::unexpected(DeviceLost);
@@ -960,13 +906,13 @@ RenderResult RenderContext::BeginFrame() noexcept {
     deletionQueue.BeginFrame(frame_index);
     _impl->activeQueueGuard.emplace(deletionQueue);
 
-    // --- ADDED: Retrieve the GPU profiling results for the frame that just finished BEFORE resetting ---
+    // Retrieve GPU profiling results
     float timestampPeriod = _impl->ctx.PhysicalInfo().properties.properties.limits.timestampPeriod;
     _impl->gpuProfiler.RetrieveResults(frame_index, timestampPeriod, [](std::string_view name, float durationMS) { CPUProfiler::Record(name, durationMS); });
 
     _impl->sync.StepTimeline(frame_index);
 
-    // --- RESET THE GPU PROFILER QUERY POOL NOW ---
+    // Reset query pools
     _impl->gpuProfiler.Reset(frame_index);
     _impl->computePools[frame_index].Reset();
 
@@ -992,9 +938,7 @@ RenderResult RenderContext::BeginFrame() noexcept {
         resized                  = false;
     }
 
-    // Set a non-null placeholder value to indicate that frame tracking is active
     _impl->current_cmd = reinterpret_cast<VkCommandBuffer>(1);
-
     return {};
 }
 
@@ -1035,11 +979,9 @@ RenderResult RenderContext::EndFrame() noexcept {
 
         uint64_t computeSignalValue = _impl->sync.GetTimelineValue(_impl->frame_index);
 
-        // Capture and handle the nodiscard return value of the queue submission
         auto comp_submit_res = Vk::QueueSubmit(
-            _impl->ctx, _impl->current_compute_cmd, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, // No Wait
-            _impl->sync[_impl->frame_index].compute_timeline, computeSignalValue,
-            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT // Signal on compute completion
+            _impl->ctx, _impl->current_compute_cmd, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _impl->sync[_impl->frame_index].compute_timeline,
+            computeSignalValue, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
         );
 
         if (!comp_submit_res) [[unlikely]] {
@@ -1047,7 +989,7 @@ RenderResult RenderContext::EndFrame() noexcept {
             _impl->uiDrawQueue.clear();
             _impl->current_cmd         = VK_NULL_HANDLE;
             _impl->hasSkinnedThisFrame = false;
-            return std::unexpected(comp_submit_res.error()); // Propagate the Vulkan error
+            return std::unexpected(comp_submit_res.error());
         }
 
         // ====================================================================
@@ -1087,11 +1029,7 @@ RenderResult RenderContext::EndFrame() noexcept {
                 _impl->BuildTLAS(cmd);
 
                 // Graphics-only recording
-                if (_impl->currentUniforms.fullBright != 0) {
-                    _impl->RecordSceneFrame<true>({cmd});
-                } else {
-                    _impl->RecordSceneFrame<false>({cmd});
-                }
+                _impl->RecordSceneFrame({cmd});
             },
             [this]() { _impl->resized = true; }
         );
@@ -1104,7 +1042,7 @@ RenderResult RenderContext::EndFrame() noexcept {
             return std::unexpected(MapFrameResult(res));
         }
 
-        // Flip double-buffered resources to prepare for the next frame
+        // Flip double-buffered resources
         ZHLN::Reflect::ForEachField(*_impl, [](auto& field) { FlipObject(field); });
 
         std::swap(_impl->graphResources.shadowMap, _impl->shadowMapPrev);
@@ -1114,7 +1052,7 @@ RenderResult RenderContext::EndFrame() noexcept {
         _impl->uiDrawQueue.clear();
         _impl->current_cmd         = VK_NULL_HANDLE;
         _impl->hasSkinnedThisFrame = false;
-    } // <-- The profile timer is destroyed here, committing only the actual recording work
+    }
 
     if (res == ZHLN_FrameResult_Suboptimal) {
         return std::unexpected(Suboptimal);
@@ -1132,7 +1070,6 @@ void RenderContext::Impl::ProvokeDeviceLostInternal() const {
         hangGpuPass.Bind(current_cmd);
         Vk::ComputePass::Dispatch(current_cmd, 512, 512, 1);
     } else {
-        // Grab from pre-allocated ring and execute blocking CPU stall until GPU page faults
         Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](auto cmd) {
             hangGpuPass.Bind(cmd);
             hangGpuPass.Dispatch(cmd, 512, 512, 1);
@@ -1155,8 +1092,12 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
     auto attrMesh_res       = impl->meshPool.Resolve(mesh.attrBuffer);
     auto nativeMaterial_res = impl->materialPool.Resolve(material.pipeline);
 
+    // --- FIX: Log a warning & skip draw call instead of asserting/crashing ---
     if (!posMesh_res || !attrMesh_res || !nativeMaterial_res) [[unlikely]] {
-        ZHLN::Assert(false, "Draw: Attempted to submit draw with invalid mesh or material handles!");
+        static uint32_t s_WarnCount = 0;
+        if (s_WarnCount++ < 5) {
+            ZHLN::Log("WARNING: Renderer::Draw skipped draw call with invalid mesh or material handle.");
+        }
         return;
     }
 
@@ -1164,7 +1105,6 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
     auto* attrMesh       = attrMesh_res.value();
     auto* nativeMaterial = nativeMaterial_res.value();
 
-    // 2. Resolve optional/conditional resources
     auto* skinMesh        = (mesh.skinBuffer != Invalid) ? impl->meshPool.Resolve(mesh.skinBuffer).value_or(nullptr) : nullptr;
     auto* nativeIndexMesh = (mesh.indexBuffer != Invalid) ? impl->meshPool.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
 

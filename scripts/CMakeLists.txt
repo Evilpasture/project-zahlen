@@ -1,9 +1,8 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Dual-mode: Standalone SDK build vs In-tree Engine build
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    cmake_minimum_required(VERSION 3.25)
+    cmake_minimum_required(VERSION 3.28)
     project(ZahlenGameplay LANGUAGES CXX)
 
     set(CMAKE_CXX_STANDARD 26)
@@ -23,7 +22,6 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 
     set(GAMEPLAY_LINK_LIBS ${ZAHLEN_ENGINE_LIB} ${JOLT_LIB})
 else()
-    # In-tree build
     set(ENGINE_INCLUDE_DIRS
         ${CMAKE_SOURCE_DIR}/include
         ${CMAKE_SOURCE_DIR}/src
@@ -32,21 +30,23 @@ else()
 
     set(GAMEPLAY_LINK_LIBS
         zahlen_engine
-        zahlen_render
-        zahlen_physics
-        zahlen_threading
-        zahlen_ecs
-        zahlen_gltf
-        zahlen_alife
-        zahlen_audio
         Jolt
     )
 endif()
 
 # ============================================================================
+# C++ MODULE SUBDIRECTORIES
+# ============================================================================
+add_subdirectory(MainMenu)
+
+# ============================================================================
 # DYNAMIC GAMEPLAY MODULE (libgameplay.so / gameplay.dll)
 # ============================================================================
 add_library(gameplay SHARED gameplay.cpp)
+
+# FORCE C++ Module scanning & strict build ordering
+set_target_properties(gameplay PROPERTIES CXX_SCAN_FOR_MODULES ON)
+add_dependencies(gameplay zahlen_main_menu)
 
 target_include_directories(gameplay PRIVATE ${ENGINE_INCLUDE_DIRS})
 
@@ -67,6 +67,7 @@ if(NOT MSVC)
         "-Wno-interference-size"
         "-fno-exceptions"
         "-fno-rtti"
+        $<$<CXX_COMPILER_ID:GNU>:-fmodules-ts>
     )
 
     target_compile_options(gameplay PRIVATE
@@ -79,9 +80,11 @@ if(COMPILER_HAS_REFLECTION OR (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
     target_compile_options(gameplay PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
 endif()
 
-target_link_libraries(gameplay PRIVATE ${GAMEPLAY_LINK_LIBS})
+target_link_libraries(gameplay PRIVATE
+    zahlen_main_menu
+    ${GAMEPLAY_LINK_LIBS}
+)
 
-# Copy gameplay and Jolt dynamic libraries into scripts/ and build bin directory
 if(TARGET zahlen)
     add_custom_command(TARGET gameplay POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:Jolt> $<TARGET_FILE_DIR:zahlen>/

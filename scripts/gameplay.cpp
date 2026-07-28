@@ -10,12 +10,16 @@
 #include "Zahlen/Log.hpp"
 #include "Zahlen/Math3D.hpp"
 #include "Zahlen/ScriptECSBridge.hpp"
+#include "Zahlen/Window.hpp"
 #include "ecs/ECS.hpp"
 #include "physics/Physics.hpp"
 #include <algorithm>
 #include <cmath>
 #include <string>
 #include <vector>
+
+// --- C++26 MODULE IMPORT ---
+import ZHLN.MainMenu;
 
 #if defined(_WIN32)
 #define GAMEPLAY_API __declspec(dllexport)
@@ -48,7 +52,8 @@ namespace Game {
 using namespace ZHLN;
 
 struct SnowSceneState {
-    ScriptECSBridge* bridge      = nullptr;
+    ScriptECSBridge* bridge = nullptr;
+    MainMenu         mainMenu;
     bool             gameStarted = false;
     bool             wonGame     = false;
     bool             wasRDown    = false;
@@ -238,6 +243,24 @@ void RespawnPlayer(Engine* engine) {
     reg.Add(g_State.playerEnt, Components::PhysicsStateComponent {.currPosition = JPH::Vec3(0.0f, 3.0f, 0.0f), .prevPosition = JPH::Vec3(0.0f, 3.0f, 0.0f)});
     reg.Add(g_State.playerEnt, GameplayComponents::Combat {.hp = 100.0f, .maxHp = 100.0f});
 
+    // --- ATTACH CAMERA TARGET CONTROLLER TO PLAYER ---
+    auto camEnts = reg.GetEntitiesWith<Components::MainCameraTagComponent>();
+    if (!camEnts.empty()) {
+        Entity camEnt    = camEnts[0];
+        auto*  targetCam = reg.Get<Components::TargetCameraComponent>(camEnt);
+        if (!targetCam) {
+            targetCam = &reg.Add(camEnt, Components::TargetCameraComponent {});
+        }
+        targetCam->target              = g_State.playerEnt;
+        targetCam->distance            = 4.5f;
+        targetCam->targetDistance      = 4.5f;
+        targetCam->yaw                 = -90.0f;
+        targetCam->pitch               = -10.0f;
+        targetCam->stiffness           = 15.0f;
+        targetCam->targetOffset        = JPH::Vec3(0.0f, 1.3f, 0.0f);
+        targetCam->hasInitSmoothTarget = 0;
+    }
+
     auto* prefab = CreativeWorksFactory::LoadModelPrefab(rc, engine->GetCreativeWorksManager(), "murderdrones/Uzi.glb");
     if (prefab) {
         CreativeWorksFactory::SpawnParams params;
@@ -312,9 +335,11 @@ void StartGame(Engine* engine) {
     auto* planetPrefab = CreativeWorksFactory::LoadModelPrefab(rc, engine->GetCreativeWorksManager(), "murderdrones/Copper9_Celestials.glb");
     if (planetPrefab) {
         CreativeWorksFactory::SpawnParams p;
-        p.position = JPH::RVec3(0.0f, 80.0f, -350.0f);
+        p.position = JPH::RVec3(0.0f, 80.0f, -500.0f);
         p.rotation = JPH::Quat(0.35f, 0.25f, 0.1f, 0.9f).Normalized();
-        p.scale    = JPH::Vec3(1000.0f, 1000.0f, 1000.0f);
+
+        p.scale = JPH::Vec3(5.0f, 5.0f, 5.0f);
+
         CreativeWorksFactory::InstantiatePrefab(rc, reg, pc, *planetPrefab, p);
     }
 
@@ -634,16 +659,47 @@ extern "C" GAMEPLAY_API void NativeGameplayUpdate(ZHLN::Engine* engine, float dt
             Game::g_State.gameStarted = true;
             ZHLN::Log("[Hot-Reload Success] Gameplay module re-attached to live ECS session!");
         } else {
-            Game::StartGame(engine);
-            ZHLN::Log("[Snow Scene] Volumetric C++26 gameplay loop initialized.");
+            // Build Main Menu using the imported C++26 module
+            ZHLN::MenuConfig cfg;
+            cfg.titleLogoPrefab = "TADCLogo.glb";
+            cfg.logoPosition    = JPH::RVec3(0.0f, 0.0f, -5.0f);
+            cfg.themeMusicPath  = "resources/assets/audio/theme.mp3";
+            cfg.cameraPosition  = JPH::Vec3(0.0f, 1.5f, 12.0f);
+            cfg.cameraYaw       = -90.0f;
+            cfg.cameraPitch     = 0.0f;
+
+            cfg.buttons.push_back(
+                {.text = "START GAME",
+                 .onClick =
+                     [](ZHLN::Engine* eng) {
+                         Game::StartGame(eng);                // 1. Spawn player & terrain FIRST
+                         Game::g_State.mainMenu.Destroy(eng); // 2. Clean up UI SECOND
+                     },
+                 .textX = 55.0f,
+                 .textY = 25.0f}
+            );
+
+            cfg.buttons.push_back({.text = "QUIT", .onClick = [](ZHLN::Engine* eng) { eng->GetWindow().Close(); }, .textX = 80.0f, .textY = 25.0f});
+
+            Game::g_State.mainMenu.Build(engine, cfg);
+            ZHLN::Log("[Snow Scene] Main menu initialized via C++26 module.");
         }
     }
 
-    Game::PlayerInputSystem(engine, dt);
-    Game::BlizzardWindSystem(engine, dt);
-    Game::CameraFovSystem(engine, dt);
-    Game::VisualFeedbackSystem(engine, dt);
-    Game::PlayerAnimationSystem(engine, dt);
-    Game::CheckFallSystem(engine, dt);
-    Game::SummitVictorySystem(engine, dt);
+    // 1. Process Main Menu state if active
+    if (Game::g_State.mainMenu.IsActive()) {
+        Game::g_State.mainMenu.Update(engine, dt);
+        return;
+    }
+
+    // 2. Process gameplay loop systems when active
+    if (Game::g_State.gameStarted) {
+        Game::PlayerInputSystem(engine, dt);
+        Game::BlizzardWindSystem(engine, dt);
+        Game::CameraFovSystem(engine, dt);
+        Game::VisualFeedbackSystem(engine, dt);
+        Game::PlayerAnimationSystem(engine, dt);
+        Game::CheckFallSystem(engine, dt);
+        Game::SummitVictorySystem(engine, dt);
+    }
 }

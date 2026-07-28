@@ -310,7 +310,11 @@ Mesh CreateTerrainFromData(RenderContext& ctx, int sampleCount, float worldSize,
     BufferHandle attrVbo = ctx.CreateVertexBuffer(attributes.data(), attributes.size() * sizeof(VertexAttributes));
 
     Mesh finalMesh {.posBuffer = posVbo, .attrBuffer = attrVbo, .vertexCount = static_cast<uint32_t>(positions.size())};
-    ctx.BuildMeshBLAS(finalMesh);
+    if (auto res = ctx.BuildMeshBLAS(finalMesh); !res) [[unlikely]] {
+        if (!res.error().Is(VulkanCallError::FeatureNotPresent)) {
+            ZHLN::Log("WARNING: CreateTerrainFromData: Failed to build mesh BLAS: {}", res.error().Message());
+        }
+    }
     return finalMesh;
 }
 
