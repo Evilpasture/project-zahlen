@@ -14,11 +14,9 @@
 #include "detail/Array.hpp"
 #include "ecs/ECS.hpp"
 #include "physics/Physics.hpp"
-#include <algorithm>
-#include <cmath>
-#include <string>
-#include <vector>
 
+// C++ Standard Library & Engine Modules
+import std;
 import ZHLN.MainMenu;
 
 #if defined(_WIN32)
@@ -318,13 +316,11 @@ void StartGame(Engine* engine) {
     g_State.snowTerrain = reg.Create();
     reg.Add(g_State.snowTerrain, Components::TransformComponent {});
 
-    // High-level asset keys
     AssetID    terrainMeshAsset = HashAssetID("terrain_mountain_mesh");
     MaterialID terrainMatAsset  = HashAssetID("terrain_mountain_mat");
 
     reg.Add(g_State.snowTerrain, Components::MeshComponent {.meshAsset = terrainMeshAsset, .materialAsset = terrainMatAsset, .cullRadius = 400.0f});
 
-    // Retain CPU RAM heightfield and color buffers for device lost auto-rebaking inside RenderSystem
     reg.Add(
         g_State.snowTerrain, Components::TerrainComponent {
                                  .sampleCount = samples,

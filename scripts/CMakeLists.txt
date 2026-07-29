@@ -1,8 +1,11 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+# scripts/CMakeLists.txt
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     cmake_minimum_required(VERSION 3.28)
+    set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "0e5b6991-d74f-4b3d-a41c-cf096e0b2508")
+    set(CMAKE_CXX_MODULE_STD ON)
     project(ZahlenGameplay LANGUAGES CXX)
 
     set(CMAKE_CXX_STANDARD 26)
@@ -44,8 +47,10 @@ add_subdirectory(MainMenu)
 # ============================================================================
 add_library(gameplay SHARED gameplay.cpp)
 
-# FORCE C++ Module scanning & strict build ordering
-set_target_properties(gameplay PROPERTIES CXX_SCAN_FOR_MODULES ON)
+set_target_properties(gameplay PROPERTIES
+    CXX_SCAN_FOR_MODULES ON
+    CXX_MODULE_STD ON
+)
 add_dependencies(gameplay zahlen_main_menu)
 
 target_include_directories(gameplay PRIVATE ${ENGINE_INCLUDE_DIRS})

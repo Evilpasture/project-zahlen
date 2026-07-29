@@ -1,7 +1,7 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.28)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 # include(AppleShim)
@@ -12,7 +12,19 @@ if(WIN32 AND NOT DEFINED CMAKE_C_COMPILER)
     set(CMAKE_CXX_COMPILER clang++)
 endif()
 
+set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "f35a9ac6-8463-4d38-8eec-5d6008153e7d")
+set(CMAKE_CXX_STANDARD 26)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+set(CMAKE_C_STANDARD 23)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
 project(zahlen LANGUAGES C CXX ASM)
+
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
+endif()
 
 # --- RETRIEVE GIT COMMIT HASH ---
 find_package(Git QUIET)
@@ -41,13 +53,6 @@ if(APPLE)
     set(CMAKE_SYSROOT ${MACOS_SDK_PATH})
 endif()
 
-set(CMAKE_CXX_STANDARD 26)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
-set(CMAKE_C_STANDARD 23)
-set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -132,8 +137,22 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/extern/LuaJIT SYSTEM)
 
 set(DOUBLE_PRECISION ON CACHE BOOL "" FORCE)
 set(USE_STD_INCLUDES ON CACHE BOOL "" FORCE)
+set(USE_RTTI OFF CACHE BOOL "" FORCE)
+
+# Force the debug renderer to compile globally, even in Release configurations
+add_compile_definitions(JPH_DEBUG_RENDERER)
+
 set(JPH_BUILD_SHARED_LIBS ON CACHE BOOL "Build Jolt as shared library" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/JoltPhysics/Build SYSTEM)
+
+# Force Jolt to export all symbols
+target_compile_definitions(Jolt PUBLIC JPH_SHARED_LIBRARY)
+set_target_properties(Jolt PROPERTIES
+    CXX_VISIBILITY_PRESET default
+    C_VISIBILITY_PRESET default
+    VISIBILITY_INLINES_HIDDEN OFF
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/VulkanMemoryAllocator SYSTEM)
 add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/SPIRV-Reflect)
@@ -272,6 +291,12 @@ add_library(zahlen_engine SHARED ${ENGINE_SOURCES})
 
 target_precompile_headers(zahlen_engine PRIVATE
     "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_SOURCE_DIR}/src/render/Rendering.hpp>"
+)
+
+set_target_properties(zahlen_engine PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_MODULE_STD ON
 )
 
 # --- COMPILE-TIME PROFILING ---
@@ -483,8 +508,14 @@ add_executable(zahlen
     src/game_main.cpp
     src/editor_main.cpp
 )
-target_link_libraries(zahlen PRIVATE zahlen_engine imgui)
+target_link_libraries(zahlen PRIVATE zahlen_engine imgui Jolt)
 target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)
+
+set_target_properties(zahlen PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_MODULE_STD ON
+)
 
 # ============================================================================
 # SCRIPTS SUBDIRECTORY (gameplay shared library)

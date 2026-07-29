@@ -37,8 +37,8 @@ JPH::Vec3 EvaluateSky(const JPH::Vec3& D) {
     JPH::Vec3 sunDir   = JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized();
     float     cosTheta = D.Dot(sunDir);
     if (cosTheta > 0.0f) {
-        float glow = std::pow(cosTheta, 24.0f) * 0.7f;  // Broad soft glow
-        float disk = std::pow(cosTheta, 400.0f) * 2.5f; // Sharp sun disk
+        float glow = std::pow(cosTheta, 24) * 0.7f;  // Broad soft glow
+        float disk = std::pow(cosTheta, 400) * 2.5f; // Sharp sun disk
         color += JPH::Vec3(1.0f, 1.0f, 1.0f) * (glow + disk);
     }
 
