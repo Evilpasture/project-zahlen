@@ -8,13 +8,12 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Types.hpp>
-#include <Zahlen/render/RenderCode.hpp>
 #include <expected>
 #include <span>
-#include <string>
 #include <string_view>
 
 namespace ZHLN {
+class Engine;
 class RenderContext;
 class CreativeWorksManager;
 namespace ECS {
@@ -32,13 +31,9 @@ Mesh CreateBox(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& co
 [[nodiscard]] std::expected<Material, Error> CreateBasicMaterial(RenderContext& ctx, bool doubleSided = false, bool alphaBlend = false);
 
 Mesh CreateTerrainFromData(RenderContext& ctx, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA);
-
 Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight, float* outHeights, TerrainType type = TerrainType::Default);
 
 uint32_t CreateFontAtlasTexture(RenderContext& ctx);
-
-Mesh     LoadCookedMesh(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view virtualPath);
-uint32_t LoadCookedTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view virtualPath);
 
 struct SpawnParams {
     JPH::RVec3 position = JPH::RVec3::sZero();
@@ -55,9 +50,9 @@ struct SpawnParams {
     Material materialOverride = {.pipeline = PipelineHandle::Invalid};
 };
 
+// --- Low-Level RenderContext Overloads ---
 ModelPrefab* LoadModelPrefab(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path);
 
-// Returns the number of entities actually spawned and populated into outBuffer (if provided)
 uint32_t InstantiatePrefab(
     RenderContext&     ctx,
     ECS::Registry&     reg,
@@ -70,4 +65,14 @@ uint32_t InstantiatePrefab(
 
 void SetupPlayerRagdoll(RenderContext& rc, PhysicsContext& pc, ECS::Registry& reg, Entity playerEntity, std::span<const Entity> visualParts);
 void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS::Registry& reg);
+
+// --- High-Level Engine Overloads (Zero Renderer Headers Required) ---
+ModelPrefab* LoadModelPrefab(Engine& engine, std::string_view path);
+
+uint32_t InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer = nullptr, uint32_t maxCount = 0);
+
+uint32_t InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams& params, Entity* outBuffer = nullptr, uint32_t maxCount = 0);
+
+void SetupPlayerRagdoll(Engine& engine, Entity playerEntity, std::span<const Entity> visualParts);
+
 } // namespace ZHLN::CreativeWorksFactory

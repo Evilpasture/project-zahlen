@@ -1,17 +1,19 @@
-// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
-// SPDX-License-Identifier: GPL-3.0-or-later
-
+// include/Zahlen/Components.hpp
 #pragma once
+#include "../../src/detail/Array.hpp"
 #include "../../src/detail/String.hpp"
 #include "Entity.hpp"
 #include "Types.hpp"
-#include "Zahlen/ModelPrefab.hpp"
 #include "alife/Types.hpp"
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <array>
+#include <vector>
 
 namespace ZHLN {
+
+struct ModelPrefab;
+struct Skeleton; // Forward declaration for RagdollComponent
 
 enum class UIButton : uint8_t { None = 0, Hovered = 1 << 0, Pressed = 1 << 1, Clicked = 1 << 2 };
 template <>
@@ -35,18 +37,19 @@ struct Components {
             return JPH::Mat44::sRotationTranslation(rotation, position) * JPH::Mat44::sScale(scale);
         }
     };
+
+    // --- Persistent Mesh Component (No Raw GPU Handles) ---
     struct MeshComponent {
-        ZHLN::Mesh mesh;
-        Material   material;
-        float      cullRadius     = 1.0f;
+        AssetID    meshAsset     = InvalidAssetID;
+        MaterialID materialAsset = InvalidMaterialID;
+        float      cullRadius    = 1.0f;
+
         JPH::Vec3  localCenter    = JPH::Vec3::sZero();
         JPH::Mat44 localTransform = JPH::Mat44::sIdentity();
         JPH::Mat44 prevTransform  = JPH::Mat44::sIdentity();
         JPH::Mat44 worldTransform = JPH::Mat44::sIdentity();
         uint32_t   jointOffset    = 0;
         bool       isSkinned      = false;
-
-        BufferHandle skinnedVertexBuffer = BufferHandle::Invalid;
 
         uint32_t             morphOffset      = 0;
         uint32_t             activeMorphCount = 0;
@@ -56,6 +59,25 @@ struct Components {
         int32_t   skeletonIndex = -1;
         DrawFlags flags         = DrawFlags::None;
     };
+
+    static_assert(sizeof(MeshComponent) == 288);
+
+    // --- Persistent CPU Terrain Data ---
+    struct TerrainComponent {
+        uint32_t           sampleCount = 128;
+        float              worldSize   = 280.0f;
+        float              maxHeight   = 35.0f;
+        float              roughness   = 0.85f;
+        float              metallic    = 0.05f;
+        ZHLN::Array<float> heights;
+        ZHLN::Array<float> colors;
+
+        static void OnDestroy(TerrainComponent* t) noexcept {
+            t->heights.clear();
+            t->colors.clear();
+        }
+    };
+
     struct PhysicsComponent {
         Entity physicsHandle;
     };
@@ -102,6 +124,7 @@ struct Components {
             }
         }
     };
+
     struct CameraComponent {
         JPH::Mat44 viewProj               = JPH::Mat44::sIdentity();
         JPH::Mat44 unjitteredViewProj     = JPH::Mat44::sIdentity();
@@ -164,15 +187,12 @@ struct Components {
         JPH::Vec3 probePos          = JPH::Vec3(0.0f, 4.0f, 0.0f);
 
         // Dynamic Sky Gradient Colors
-        JPH::Vec4 skyZenith  = JPH::Vec4(0.003f, 0.008f, 0.020f, 1.0f); // Space black
-        JPH::Vec4 skyHorizon = JPH::Vec4(0.015f, 0.035f, 0.080f, 1.0f); // Dark night horizon
-        JPH::Vec4 skyGround  = JPH::Vec4(0.001f, 0.001f, 0.003f, 1.0f); // Ground
+        JPH::Vec4 skyZenith  = JPH::Vec4(0.003f, 0.008f, 0.020f, 1.0f);
+        JPH::Vec4 skyHorizon = JPH::Vec4(0.015f, 0.035f, 0.080f, 1.0f);
+        JPH::Vec4 skyGround  = JPH::Vec4(0.001f, 0.001f, 0.003f, 1.0f);
     };
     struct DebugSettingsComponent {
-        BufferHandle   debugLineVbo      = BufferHandle::Invalid;
-        PipelineHandle debugLinePipeline = PipelineHandle::Invalid;
-        uint32_t       debugLineAlbedo   = 0;
-        int            physicsDrawMode   = 0;
+        int physicsDrawMode = 0;
     };
     struct TextComponent {
         ZHLN::String256 text;
@@ -181,11 +201,6 @@ struct Components {
         float           scale     = 1.0f;
         JPH::Vec4       color     = {1.0f, 1.0f, 1.0f, 1.0f};
         uint32_t        fontIndex = 0;
-        ZHLN::Mesh      mesh {};
-
-        // --- Rendering Position Cache ---
-        float lastDrawX = -1e30f;
-        float lastDrawY = -1e30f;
     };
     struct UISettingsComponent {
         uint32_t  defaultFontAtlasIdx = 0;
@@ -223,10 +238,8 @@ struct Components {
         uint32_t flags  = Active;
     };
     struct UIRectComponent {
-        // 1. 8-Byte Types First (Aligned cleanly to 8-byte boundary)
-        ZHLN::Entity parentEntity {}; // 8 bytes
+        ZHLN::Entity parentEntity {};
 
-        // 2. 4-Byte Types (12 floats * 4 bytes = 48 bytes. Packs perfectly into 8-byte lines)
         float x      = 0.0f;
         float y      = 0.0f;
         float width  = 100.0f;
@@ -242,32 +255,20 @@ struct Components {
         float computedAbsMaxX = 0.0f;
         float computedAbsMaxY = 0.0f;
 
-        // 3. More 4-Byte Types (1 uint32_t = 4 bytes)
-        uint32_t hierarchyDepth = 0; // 4 bytes
-
-        // 4. 1-Byte Types at the Tail (1 byte)
-        bool clipChildren = false; // 1 byte
-
-        // --- RECLAIMED REAL ESTATE ---
-        // At this exact point, we have used 8 + 48 + 4 + 1 = 61 bytes.
-        // The compiler needs the struct to be a multiple of 8, so it adds 3 bytes of implicit
-        // padding. That means you have exactly 3 bytes of FREE SPACE right here for future flags or
-        // uint8_ts! char _free_space[3];
+        uint32_t hierarchyDepth = 0;
+        bool     clipChildren   = false;
+        char     _free_space[3] {};
     };
     struct UIPanelComponent {
         JPH::Vec4 color        = {1.0f, 1.0f, 1.0f, 1.0f};
-        JPH::Vec4 borderRadius = {0.0f, 0.0f, 0.0f, 0.0f}; // TopLeft, TopRight, BottomRight, BottomLeft
+        JPH::Vec4 borderRadius = {0.0f, 0.0f, 0.0f, 0.0f};
 
-        uint32_t textureIndex = 1;    // Handled via Bindless Descriptor Indexing
-        bool     isDirty      = true; // Triggers a data rewrite to the shared buffer instance chunk
-        Mesh     mesh {};
-
-        // --- 9-Slice Options ---
-        float edgeWidth = 0.0f; // Screen-space border size in pixels. Set to 0.0f to disable 9-slice.
-        float uvLeft    = 0.1f; // Texture-space margins (normalized UV coords, 0.0 to 1.0)
-        float uvRight   = 0.1f;
-        float uvTop     = 0.1f;
-        float uvBottom  = 0.1f;
+        uint32_t textureIndex = 1;
+        float    edgeWidth    = 0.0f;
+        float    uvLeft       = 0.1f;
+        float    uvRight      = 0.1f;
+        float    uvTop        = 0.1f;
+        float    uvBottom     = 0.1f;
     };
     struct UIButtonComponent {
         UIButton flags = UIButton::None;
@@ -285,20 +286,20 @@ struct Components {
         }
     };
     struct UIDragComponent {
-        ZHLN::Entity targetEntity {}; // The master panel we want to translate
+        ZHLN::Entity targetEntity {};
         bool         isDragging = false;
     };
     struct UIStackComponent {
-        float          spacing   = 8.0f; // Gap size between adjacent elements (pixels)
-        float          padding   = 8.0f; // Container boundary padding margin (pixels)
+        float          spacing   = 8.0f;
+        float          padding   = 8.0f;
         StackDirection direction = StackDirection::Vertical;
-        char           _pad[3] {}; // Align to 4-byte boundaries/multiples (Total size: 12 bytes)
+        char           _pad[3] {};
     };
     struct UITextInputComponent {
-        String256 text;                // 264 bytes
-        uint32_t  cursorIndex = 0;     // 4 bytes
-        bool      isFocused   = false; // 1 byte
-        char      _pad[3]     = {};    // 3 bytes padding (Total size: 272 bytes)
+        String256 text;
+        uint32_t  cursorIndex = 0;
+        bool      isFocused   = false;
+        char      _pad[3]     = {};
     };
     struct AnimatorComponent {
         int32_t currentTrackIdx      = -1;
@@ -320,7 +321,7 @@ struct Components {
     struct ALifeComponent {
         using enum ALife::State;
         using enum ALife::TaskType;
-        // --- Simulator Mandatory Fields ---
+
         JPH::RVec3   position     = JPH::RVec3::sZero();
         ALife::State state        = Offline;
         uint32_t     current_node = ALife::INVALID_GRAPH_NODE;
@@ -336,10 +337,8 @@ struct Components {
         int32_t wait_time   = 0;
         bool    is_thinking = false;
 
-        // Spatial Grid Intrusive Linked List
         uint32_t next_in_grid = ALife::END_OF_LIST;
 
-        // --- User Fields ---
         uint32_t        class_id      = 0;
         int32_t         health        = 100;
         int32_t         power         = 10;
@@ -351,7 +350,7 @@ struct Components {
         bool            is_fleeing    = false;
         uint64_t        script_handle = 0;
     };
-    // ECS Component for placing audio sources in 3D space
+
     struct AudioSourceComponent {
         std::string filepath;
         float       volume        = 1.0f;
@@ -360,7 +359,6 @@ struct Components {
         bool        isSpatialized = true;
         bool        playOnStart   = true;
 
-        // Managed internally by the AudioSystem/Context
         void* nativeSound = nullptr;
     };
     struct InputComponent {
@@ -373,7 +371,7 @@ struct Components {
         bool  wantsToSprint  = false;
     };
     struct LightComponent {
-        LightType  type; // 0=Dir, 1=Point, 2=Spot, 3=Area (LTC Quad)
+        LightType  type;
         JPH::Vec3  color;
         float      intensity;
         float      radius;

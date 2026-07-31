@@ -6,16 +6,16 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
-
 #include "AnimationSystem.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Render.hpp>
+#include <Zahlen/SkeletalAnimation.hpp>
 #include <algorithm>
 #include <cmath>
 #include <ecs/ECS.hpp>
 #include <threading/TaskSystem.hpp>
-
 namespace ZHLN {
 
 uint32_t JointAllocator::Allocate(uint32_t count) noexcept {

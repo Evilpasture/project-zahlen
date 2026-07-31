@@ -6,6 +6,7 @@
 #include "Rendering.hpp"
 #include "detail/Array.hpp"
 #include "detail/ControlFlow.hpp"
+#include "detail/HashMap.hpp"
 #include "detail/RadixSort.hpp"
 #include "engine/FileWatcher.hpp"
 #include "threading/Mutex.hpp"
@@ -432,7 +433,7 @@ static constexpr uint32_t kGpuCullingMaxVisibleInstances = kGpuCullingMaxInstanc
 
 /**
  * @brief Heavily optimized, cache-line-friendly CPU draw command.
- * All redundant texture indexing and geometric properties have been stripped [3].
+ * All redundant texture indexing and geometric properties have been stripped.
  */
 struct DrawCommand {
     InstanceData         instanceData;        // 272 bytes (contains world, prevWorld, indexes, factor overrides, etc.)
@@ -570,8 +571,7 @@ struct RenderContext::Impl {
     static constexpr uint32_t SHADOW_RES          = 2048;
     static constexpr uint32_t NUM_CASCADES        = 4;
     static constexpr uint32_t MAX_PUNCTUAL_LIGHTS = 4;
-
-    static constexpr uint32_t kGpuParticleCount = 65536;
+    static constexpr uint32_t kGpuParticleCount   = 65536;
 
     // ============================================================================
     // Core System Properties (64-Bit / High Alignment)
@@ -735,6 +735,11 @@ struct RenderContext::Impl {
     // ============================================================================
     GenerationalPool<NativeMesh, 8192, BufferHandle>       meshPool;
     GenerationalPool<NativeMaterial, 2048, PipelineHandle> materialPool;
+
+    // --- High-Level Asset Identifier Maps (Freestanding ZHLN::HashMap) ---
+    ZHLN::HashMap<AssetID, Mesh>          assetMeshMap;
+    ZHLN::HashMap<MaterialID, Material>   assetMaterialMap;
+    ZHLN::HashMap<uint64_t, BufferHandle> skinnedScratchMap;
 
     ZHLN::Array<DrawCommand>           drawQueue;
     ZHLN::Array<GPULight>              mappedLights;
@@ -927,7 +932,6 @@ struct RenderContext::Impl {
     [[nodiscard]] auto InitializeSystemTextures() noexcept -> std::expected<void, Error>;
 
     void RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Compute> compCmd);
-
     void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd);
 
     void RegisterShaderWatcher(const char* path, std::function<void()> callback);
@@ -945,32 +949,14 @@ struct RenderContext::Impl {
     std::expected<void, Error> InitLightingLUTs();
 
     [[nodiscard]] std::expected<Vk::ShaderStages, Error> LoadAndCreateShaders(ShaderStageSource vs, ShaderStageSource ps) const noexcept;
-
-    [[nodiscard]] std::expected<Vk::Pipeline, Error> LoadAndCreateComputeShader(ShaderStageSource cs, VkPipelineLayout layout) const noexcept;
+    [[nodiscard]] std::expected<Vk::Pipeline, Error>     LoadAndCreateComputeShader(ShaderStageSource cs, VkPipelineLayout layout) const noexcept;
 
     void WatchPipeline(const char* vsPath, const char* psPath, std::function<void()> rebuild_fn) noexcept;
-
     void UploadClusterBounds(const JPH::Mat44& proj);
 
     [[nodiscard]] auto BufferAddress(VkBuffer buffer) const noexcept -> VkDeviceAddress {
         return ctx.BufferAddress(buffer);
     }
-};
-
-// --- Promoted G-Buffer & Post-Process Views ---
-
-struct GBufferView {
-    Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> sceneColor;
-    Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> depth;
-    Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> normRough;
-};
-
-struct PostProcessResources {
-    GBufferView        gbuffer;
-    const Vk::Buffer&  frameUniforms;
-    const Vk::Sampler& defaultSampler;
-    const Vk::Sampler& pointSampler;
-    const Vk::Sampler& clampSampler;
 };
 
 struct FrameRecorder {
@@ -995,8 +981,6 @@ struct GroupRange {
     uint32_t              count;
 };
 
-// --- Render Pass Concept Validation ---
-
 template <typename T, typename... Args>
 concept IsRenderPass = requires(T pass, Args&&... args) {
     { pass.Execute(std::forward<Args>(args)...) };
@@ -1007,8 +991,6 @@ template <typename Pass, typename... Args>
 void RunPass(const Pass& pass, Args&&... args) {
     pass.Execute(std::forward<Args>(args)...);
 }
-
-// --- Render Pass Specifications ---
 
 namespace Passes {
 
@@ -1062,7 +1044,6 @@ struct AAPass {
 };
 
 struct BlitPass {
-    // TODO: Update BlitPass::Execute signature in Passes namespace to provide Depth & VoxelInt mapping
     void Execute(
         const FrameRecorder&                                     recorder,
         Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor,

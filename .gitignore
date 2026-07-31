@@ -17,6 +17,7 @@ out/
 *.exe
 *.dll
 *.so
+*.shadow
 *.a
 *.lib
 *.pdb

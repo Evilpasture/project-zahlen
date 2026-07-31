@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/system/UIRenderSystem.cpp
 #include "UIRenderSystem.hpp"
 #include "UILayoutSystem.hpp"
 #include <Zahlen/Components.hpp>
@@ -15,6 +14,24 @@
 
 namespace ZHLN {
 
+namespace {
+struct UIPanelCacheEntry {
+    Mesh  posMesh {};
+    float lastX = -1e30f;
+    float lastY = -1e30f;
+};
+
+struct UITextCacheEntry {
+    Mesh        posMesh {};
+    float       lastX = -1e30f;
+    float       lastY = -1e30f;
+    std::string textCache;
+};
+
+static ZHLN::HashMap<uint64_t, UIPanelCacheEntry> s_UIPanelMeshes;
+static ZHLN::HashMap<uint64_t, UITextCacheEntry>  s_UITextMeshes;
+} // namespace
+
 void UIRenderSystem::Update(Engine& engine) {
     auto& reg        = engine.GetRegistry();
     auto& rc         = engine.GetRenderContext();
@@ -24,11 +41,9 @@ void UIRenderSystem::Update(Engine& engine) {
         return;
     }
 
-    // 1. Resolve Math Layouts
     UILayoutSystem layoutSystem;
     layoutSystem.ResolveLayouts(reg, {.width = (float) windowSize.width, .height = (float) windowSize.height});
 
-    // 2. Gather and sort ALL UI elements by depth ascending for correct draw-order (Z-Index)
     auto entities = reg.GetEntitiesWith<Components::UIRectComponent>();
     auto rects    = reg.GetRawArray<Components::UIRectComponent>();
 
@@ -49,7 +64,6 @@ void UIRenderSystem::Update(Engine& engine) {
         Entity      e    = entities[entry.rawIndex];
         const auto& rect = rects[entry.rawIndex];
 
-        // A. Inherit scissor from parent if parent had scissoring active
         bool        parentHasScissor = false;
         ScissorRect parentScissor {};
 
@@ -61,11 +75,9 @@ void UIRenderSystem::Update(Engine& engine) {
             }
         }
 
-        // B. Intersect active clipping regions
         bool        useScissor     = parentHasScissor;
         ScissorRect currentScissor = parentScissor;
 
-        // Check if the parent of this element had `clipChildren = true`
         if (rect.parentEntity != NullEntity && reg.IsAlive(rect.parentEntity)) {
             if (auto* parentRect = reg.Get<Components::UIRectComponent>(rect.parentEntity)) {
                 if (parentRect->clipChildren) {
@@ -80,7 +92,6 @@ void UIRenderSystem::Update(Engine& engine) {
                         currentScissor = parentClip;
                         useScissor     = true;
                     } else {
-                        // Intersect parent clipping bounds with ancestors' active boundaries
                         int32_t x0 = std::max(currentScissor.x, parentClip.x);
                         int32_t y0 = std::max(currentScissor.y, parentClip.y);
                         int32_t x1 = std::min(currentScissor.x + (int32_t) currentScissor.width, parentClip.x + (int32_t) parentClip.width);
@@ -95,26 +106,28 @@ void UIRenderSystem::Update(Engine& engine) {
             }
         }
 
-        // Cache current scissor for nested children down the line
         if (useScissor) {
             activeScissors.Insert(e.Pack(), currentScissor);
         }
 
-        // C. Draw Panel
         if (auto* panel = reg.Get<Components::UIPanelComponent>(e)) {
-            if (panel->isDirty || panel->mesh.posBuffer == BufferHandle::Invalid) {
-                if (panel->mesh.posBuffer != BufferHandle::Invalid) {
-                    rc.DestroyBuffer(panel->mesh.posBuffer);
-                    rc.DestroyBuffer(panel->mesh.attrBuffer);
+            const auto* cache = s_UIPanelMeshes.Find(e.Pack());
+            Mesh        panelMesh {};
+
+            if (!cache || cache->posMesh.posBuffer == BufferHandle::Invalid || cache->lastX != rect.computedAbsMinX || cache->lastY != rect.computedAbsMinY) {
+                if (cache && cache->posMesh.posBuffer != BufferHandle::Invalid) {
+                    rc.DestroyBuffer(cache->posMesh.posBuffer);
+                    rc.DestroyBuffer(cache->posMesh.attrBuffer);
                 }
-                panel->mesh    = GUI::CreatePanelMesh(rc, rect, *panel);
-                panel->isDirty = false;
+                panelMesh = GUI::CreatePanelMesh(rc, rect, *panel);
+                s_UIPanelMeshes.Insert(e.Pack(), UIPanelCacheEntry {.posMesh = panelMesh, .lastX = rect.computedAbsMinX, .lastY = rect.computedAbsMinY});
+            } else {
+                panelMesh = cache->posMesh;
             }
-            Renderer::DrawUI(rc, panel->mesh, panel->textureIndex, useScissor, currentScissor);
+            Renderer::DrawUI(rc, panelMesh, panel->textureIndex, useScissor, currentScissor);
         }
     }
 
-    // 3. Process Text & Text Input Components
     auto             uiSettingsEntities = reg.GetEntitiesWith<Components::UISettingsComponent>();
     const FontAtlas* activeFont         = nullptr;
     if (!uiSettingsEntities.empty()) {
@@ -134,46 +147,32 @@ void UIRenderSystem::Update(Engine& engine) {
             hasRect = true;
         }
 
-        // Handle raw text input synchronization and cursor appending
+        std::string displayStr = text->text.c_str();
         if (auto* input = reg.Get<Components::UITextInputComponent>(e)) {
             std::string_view raw = input->text;
-            std::string      displayStr;
-
             if (input->isFocused) {
-                // Inject a vertical bar cursor '|' at the current cursor index position
                 displayStr = std::string(raw.substr(0, input->cursorIndex)) + "|" + std::string(raw.substr(input->cursorIndex));
             } else {
-                displayStr = raw;
-            }
-
-            if (displayStr != text->text.c_str()) {
-                if (text->mesh.posBuffer != BufferHandle::Invalid) {
-                    rc.DestroyBuffer(text->mesh.posBuffer);
-                    rc.DestroyBuffer(text->mesh.attrBuffer);
-                }
-                text->text.assign(displayStr);
-                text->mesh.posBuffer  = BufferHandle::Invalid;
-                text->mesh.attrBuffer = BufferHandle::Invalid;
+                displayStr = std::string(raw);
             }
         }
 
-        // If the computed absolute coordinates changed (due to dragging), rebuild the text mesh
-        if (text->lastDrawX != drawX || text->lastDrawY != drawY) {
-            if (text->mesh.posBuffer != BufferHandle::Invalid) {
-                rc.DestroyBuffer(text->mesh.posBuffer);
-                rc.DestroyBuffer(text->mesh.attrBuffer);
-                text->mesh.posBuffer  = BufferHandle::Invalid;
-                text->mesh.attrBuffer = BufferHandle::Invalid;
+        const auto* cache = s_UITextMeshes.Find(e.Pack());
+        Mesh        textMesh {};
+
+        if (!cache || cache->posMesh.posBuffer == BufferHandle::Invalid || cache->lastX != drawX || cache->lastY != drawY || cache->textCache != displayStr) {
+            if (cache && cache->posMesh.posBuffer != BufferHandle::Invalid) {
+                rc.DestroyBuffer(cache->posMesh.posBuffer);
+                rc.DestroyBuffer(cache->posMesh.attrBuffer);
             }
-            text->lastDrawX = drawX;
-            text->lastDrawY = drawY;
+            if (activeFont != nullptr && !displayStr.empty()) {
+                textMesh = GUI::CreateTextMesh(rc, *activeFont, displayStr, drawX, drawY, text->scale, text->color);
+                s_UITextMeshes.Insert(e.Pack(), UITextCacheEntry {.posMesh = textMesh, .lastX = drawX, .lastY = drawY, .textCache = displayStr});
+            }
+        } else {
+            textMesh = cache->posMesh;
         }
 
-        if (text->mesh.posBuffer == BufferHandle::Invalid && activeFont != nullptr) {
-            text->mesh = GUI::CreateTextMesh(rc, *activeFont, text->text.c_str(), drawX, drawY, text->scale, text->color);
-        }
-
-        // Calculate scissor constraints (using O(1) hash lookups from step 2)
         bool        useScissor = false;
         ScissorRect currentScissor {};
 
@@ -182,25 +181,24 @@ void UIRenderSystem::Update(Engine& engine) {
             if (parentScissorPtr != nullptr) {
                 currentScissor = *parentScissorPtr;
                 useScissor     = true;
-            } else {
-                // Fallback: Check if the direct parent itself had clipping enabled
-                if (rect->parentEntity != NullEntity && reg.IsAlive(rect->parentEntity)) {
-                    if (auto* parentRect = reg.Get<Components::UIRectComponent>(rect->parentEntity)) {
-                        if (parentRect->clipChildren) {
-                            currentScissor = {
-                                .x      = (int32_t) std::max(0.0f, parentRect->computedAbsMinX),
-                                .y      = (int32_t) std::max(0.0f, parentRect->computedAbsMinY),
-                                .width  = (uint32_t) std::max(0.0f, parentRect->computedAbsMaxX - parentRect->computedAbsMinX),
-                                .height = (uint32_t) std::max(0.0f, parentRect->computedAbsMaxY - parentRect->computedAbsMinY)
-                            };
-                            useScissor = true;
-                        }
+            } else if (rect->parentEntity != NullEntity && reg.IsAlive(rect->parentEntity)) {
+                if (auto* parentRect = reg.Get<Components::UIRectComponent>(rect->parentEntity)) {
+                    if (parentRect->clipChildren) {
+                        currentScissor = {
+                            .x      = (int32_t) std::max(0.0f, parentRect->computedAbsMinX),
+                            .y      = (int32_t) std::max(0.0f, parentRect->computedAbsMinY),
+                            .width  = (uint32_t) std::max(0.0f, parentRect->computedAbsMaxX - parentRect->computedAbsMinX),
+                            .height = (uint32_t) std::max(0.0f, parentRect->computedAbsMaxY - parentRect->computedAbsMinY)
+                        };
+                        useScissor = true;
                     }
                 }
             }
         }
 
-        Renderer::DrawUI(rc, text->mesh, text->fontIndex, useScissor, currentScissor);
+        if (textMesh.posBuffer != BufferHandle::Invalid) {
+            Renderer::DrawUI(rc, textMesh, text->fontIndex, useScissor, currentScissor);
+        }
     }
 }
 

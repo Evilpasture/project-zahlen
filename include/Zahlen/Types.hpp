@@ -6,9 +6,27 @@
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
+#include <array>
 #include <cstdint>
+#include <string_view>
 
 namespace ZHLN {
+
+// --- High-Level Persistent Asset Identifiers ---
+using AssetID    = uint64_t;
+using MaterialID = uint64_t;
+
+inline constexpr AssetID    InvalidAssetID    = 0;
+inline constexpr MaterialID InvalidMaterialID = 0;
+
+constexpr AssetID HashAssetID(std::string_view name) noexcept {
+    uint64_t hash = 0xcbf29ce484222325ull;
+    for (char c: name) {
+        hash ^= static_cast<uint64_t>(c);
+        hash *= 0x100000001b3ull;
+    }
+    return hash;
+}
 
 // --- Core Math/Spatial Types ---
 
@@ -102,6 +120,7 @@ struct ObjectConstants {
 };
 static_assert(sizeof(ObjectConstants) == 8);
 static_assert(sizeof(InstanceData) == 272);
+
 // --- Opaque Resource Handles ---
 // These abstract away Vulkan objects completely.
 // NOLINTBEGIN(performance-enum-size)
@@ -173,7 +192,7 @@ struct alignas(16) FrameUniforms {
     JPH::Mat44 unjitteredViewProj;
     JPH::Mat44 prevUnjitteredViewProj;
 
-    // CHANGED: Array of light-space projection matrices (maximum 4 cascades is standard)
+    // Array of light-space projection matrices
     JPH::Mat44 lightSpaceMatrices[4];
 
     JPH::Mat44 invViewProj;
@@ -181,7 +200,7 @@ struct alignas(16) FrameUniforms {
     float      lightDir[4];
     uint32_t   lightCount;
     float      ambientExposure;
-    float      shadowWidth; // Can now represent cascade-0 width or be repurposed
+    float      shadowWidth;
     uint32_t   shadowResolution;
     JPH::Vec4  sh[9];
 
@@ -232,6 +251,7 @@ struct GISettings {
     int   enableSSR         = 1;
     int   enableRTR         = 0;
 };
+
 // NOLINTNEXTLINE(performance-enum-size)
 enum class AAMode : uint32_t { None = 0, FXAA, MLAA, TAA, SMAA };
 
@@ -250,8 +270,8 @@ struct AAState {
     float    fxaaSubpix           = 0.75f;
     float    fxaaEdgeThreshold    = 0.166f;
     float    fxaaEdgeThresholdMin = 0.0833f;
-    float    mlaaThreshold        = 0.1f; // Edge detection sensitivity (typically 0.1 to 0.15)
-    uint32_t mlaaMaxSearchSteps   = 16;   // Maximum pixels to search left/right/up/down (typically 8 to 32)
+    float    mlaaThreshold        = 0.1f; // Edge detection sensitivity
+    uint32_t mlaaMaxSearchSteps   = 16;   // Maximum pixels to search
 };
 
 struct GlyphMetric {

@@ -56,9 +56,6 @@ using namespace ZHLN::ECS;
 
 namespace {
 
-// ============================================================================
-// DATA-DRIVEN SCENE MANIFEST & CONFIGURATION
-// ============================================================================
 struct EntityManifestEntry {
     std::string name;
     std::string prefabPath;
@@ -92,21 +89,15 @@ struct SceneManifest {
     std::vector<EntityManifestEntry> prefabs;
 };
 
-// ============================================================================
-// EDITOR STATE & GLOBAL CONTROLLERS
-// ============================================================================
 struct EditorState {
-    bool   simulationRunning = false;      // Pauses/runs physics and ALife
-    Entity selectedEntity    = NullEntity; // Active selected entity in viewport/hierarchy
-    bool   freeCamActive     = true;       // Free-fly vs Target Camera
+    bool   simulationRunning = false;
+    Entity selectedEntity    = NullEntity;
+    bool   freeCamActive     = true;
     float  freeCamSpeed      = 25.0f;
 };
 
 EditorState s_EditorState;
 
-// ============================================================================
-// SYSTEM GRAPH REGISTRATION (SHARED WITH GAME_MAIN)
-// ============================================================================
 void Sys_VisualInterpolation(Engine& engine, float /*dt*/) {
     VisualInterpolationSystem::Update(engine, engine.GetCurrentAlpha());
 }
@@ -237,9 +228,6 @@ void BuildEditorSystemGraphs(Engine& engine) {
     renderGraph.Compile();
 }
 
-// ============================================================================
-// FREE-FLY EDITOR CAMERA
-// ============================================================================
 void UpdateEditorCamera(Camera& cam, const InputContext& input, float dt) {
     const float sensitivity = 0.15f;
 
@@ -276,9 +264,6 @@ void UpdateEditorCamera(Camera& cam, const InputContext& input, float dt) {
     }
 }
 
-// ============================================================================
-// 3D VIEWPORT PICKING RAYCAST
-// ============================================================================
 auto CastPickingRay(Engine& engine, const Camera& cam) -> Physics::RaycastResult {
     const auto& input   = engine.GetInput();
     auto        mouse   = input.GetMouse();
@@ -304,9 +289,6 @@ auto CastPickingRay(Engine& engine, const Camera& cam) -> Physics::RaycastResult
     return Physics::Raycast(engine.GetPhysicsContext(), JPH::RVec3(pNear), dir, 1000.0f);
 }
 
-// ============================================================================
-// IMGUI INSPECTOR & SCENE CONTROLLER
-// ============================================================================
 void DrawEditorPanels(Engine& engine) {
     auto&       reg   = engine.GetRegistry();
     auto&       pc    = engine.GetPhysicsContext();
@@ -322,7 +304,6 @@ void DrawEditorPanels(Engine& engine) {
         dbg         = reg.Get<Components::DebugSettingsComponent>(sEnt);
     }
 
-    // 1. Control Toolbar
     ImGui::Begin("Toolbar", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove);
     ImGui::SetWindowPos({0, 0});
     ImGui::SetWindowSize({(float) engine.GetWindow().GetSize().width, 42.0f});
@@ -357,7 +338,6 @@ void DrawEditorPanels(Engine& engine) {
 
     ImGui::End();
 
-    // 2. Scene Hierarchy Window
     ImGui::Begin("Scene Hierarchy");
     for (Entity e: reg.GetEntitiesWith<Components::NameComponent>()) {
         auto*       nameComp   = reg.Get<Components::NameComponent>(e);
@@ -369,7 +349,6 @@ void DrawEditorPanels(Engine& engine) {
     }
     ImGui::End();
 
-    // 3. Component Inspector Window
     ImGui::Begin("Component Inspector");
     if (s_EditorState.selectedEntity != NullEntity && reg.IsAlive(s_EditorState.selectedEntity)) {
         Entity e = s_EditorState.selectedEntity;
@@ -383,7 +362,6 @@ void DrawEditorPanels(Engine& engine) {
         }
         ImGui::Separator();
 
-        // Name Component
         if (auto* name = reg.Get<Components::NameComponent>(e)) {
             if (ImGui::CollapsingHeader("Name Component", ImGuiTreeNodeFlags_DefaultOpen)) {
                 char buf[64];
@@ -394,7 +372,6 @@ void DrawEditorPanels(Engine& engine) {
             }
         }
 
-        // Transform Component
         if (auto* trans = reg.Get<Components::TransformComponent>(e)) {
             if (ImGui::CollapsingHeader("Transform Component", ImGuiTreeNodeFlags_DefaultOpen)) {
                 std::array<float, 3> pos   = {trans->position.GetX(), trans->position.GetY(), trans->position.GetZ()};
@@ -411,7 +388,6 @@ void DrawEditorPanels(Engine& engine) {
                     trans->rotation = Math::EulerDegreesToQuat(JPH::Vec3(rot[0], rot[1], rot[2]));
                     trans->scale    = JPH::Vec3(scale[0], scale[1], scale[2]);
 
-                    // Sync to Jolt Physics Body if present
                     if (auto* phys = reg.Get<Components::PhysicsComponent>(e)) {
                         JPH::BodyID bid = Physics::GetBodyID(world, phys->physicsHandle);
                         if (!bid.IsInvalid()) {
@@ -422,15 +398,17 @@ void DrawEditorPanels(Engine& engine) {
             }
         }
 
-        // Mesh Component Panel
         if (auto* mesh = reg.Get<Components::MeshComponent>(e)) {
             if (ImGui::CollapsingHeader("Mesh Component", ImGuiTreeNodeFlags_DefaultOpen)) {
-                ImGui::Text("Vertices: %u | Indices: %u", mesh->mesh.vertexCount, mesh->mesh.indexCount);
+                if (auto gpuMeshOpt = engine.GetRenderContext().GetGPUMesh(mesh->meshAsset)) {
+                    ImGui::Text("Vertices: %u | Indices: %u", gpuMeshOpt->vertexCount, gpuMeshOpt->indexCount);
+                } else {
+                    ImGui::Text("Mesh Asset ID: %llu (Pending Load)", static_cast<unsigned long long>(mesh->meshAsset));
+                }
                 ImGui::DragFloat("Cull Radius", &mesh->cullRadius, 0.1f, 0.5f, 500.0f);
             }
         }
 
-        // PBR Component Panel
         if (auto* pbr = reg.Get<Components::PBRComponent>(e)) {
             if (ImGui::CollapsingHeader("PBR Component", ImGuiTreeNodeFlags_DefaultOpen)) {
                 ImGui::SliderFloat("Roughness", &pbr->roughness, 0.0f, 1.0f);
@@ -438,7 +416,6 @@ void DrawEditorPanels(Engine& engine) {
             }
         }
 
-        // Light Component Panel
         if (auto* light = reg.Get<Components::LightComponent>(e)) {
             if (ImGui::CollapsingHeader("Light Component", ImGuiTreeNodeFlags_DefaultOpen)) {
                 std::array<float, 3> color = {light->color.GetX(), light->color.GetY(), light->color.GetZ()};
@@ -451,7 +428,6 @@ void DrawEditorPanels(Engine& engine) {
             }
         }
 
-        // Component Addition Menu
         ImGui::Separator();
         if (ImGui::Button("+ Add Component")) {
             ImGui::OpenPopup("AddComponentPopup");
@@ -475,9 +451,6 @@ void DrawEditorPanels(Engine& engine) {
     ImGui::End();
 }
 
-// ============================================================================
-// MANIFEST SCENE LOADER
-// ============================================================================
 void LoadSceneFromManifest(Engine& engine, const SceneManifest& manifest) {
     auto& rc  = engine.GetRenderContext();
     auto& pc  = engine.GetPhysicsContext();
@@ -485,7 +458,6 @@ void LoadSceneFromManifest(Engine& engine, const SceneManifest& manifest) {
 
     ZHLN::Log("[Editor] Loading Manifest: '{}'...", manifest.name);
 
-    // 1. Configure Global Environment & Post-Process Component
     auto settingsEntities = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
     if (!settingsEntities.empty()) {
         Entity sEnt = settingsEntities[0];
@@ -500,21 +472,37 @@ void LoadSceneFromManifest(Engine& engine, const SceneManifest& manifest) {
         }
     }
 
-    // 2. Build Terrain if enabled in manifest
     if (manifest.terrain.enabled) {
         uint32_t samples   = manifest.terrain.sampleCount;
         float    worldSize = manifest.terrain.worldSize;
         float    maxHeight = manifest.terrain.maxHeight;
 
-        std::vector<float> heights(static_cast<size_t>(samples * samples));
+        ZHLN::Array<float> heights(static_cast<size_t>(samples * samples));
         Mesh               terrainMesh  = CreativeWorksFactory::CreateTerrain(rc, samples, worldSize, maxHeight, heights.data());
-        auto               terrainShape = Physics::CreateHeightFieldShape(heights, samples, worldSize);
+        auto               terrainShape = Physics::CreateHeightFieldShape(heights.data(), samples, worldSize);
         auto               mat          = CreativeWorksFactory::CreateBasicMaterial(rc).value_or(Material {});
+
+        AssetID    terrainMeshAsset = HashAssetID("editor_terrain_mesh");
+        MaterialID terrainMatAsset  = HashAssetID("editor_terrain_mat");
+
+        rc.RegisterGPUMesh(terrainMeshAsset, terrainMesh);
+        rc.RegisterGPUMaterial(terrainMatAsset, mat);
 
         Entity terrainEnt = reg.Create();
         reg.Add(terrainEnt, Components::NameComponent {.name = String64("MountainTerrain")});
         reg.Add(terrainEnt, Components::TransformComponent {});
-        reg.Add(terrainEnt, Components::MeshComponent {.mesh = terrainMesh, .material = mat, .cullRadius = worldSize * 1.5f});
+        reg.Add(terrainEnt, Components::MeshComponent {.meshAsset = terrainMeshAsset, .materialAsset = terrainMatAsset, .cullRadius = worldSize * 1.5f});
+        reg.Add(
+            terrainEnt, Components::TerrainComponent {
+                            .sampleCount = samples,
+                            .worldSize   = worldSize,
+                            .maxHeight   = maxHeight,
+                            .roughness   = 0.85f,
+                            .metallic    = 0.05f,
+                            .heights     = std::move(heights),
+                            .colors      = {}
+                        }
+        );
         reg.Add(
             terrainEnt,
             Components::PhysicsComponent {Physics::CreateRigidBody(pc, terrainShape, JPH::RVec3::sZero(), JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0)}
@@ -522,7 +510,6 @@ void LoadSceneFromManifest(Engine& engine, const SceneManifest& manifest) {
         reg.Add(terrainEnt, Components::PBRComponent {.roughness = 0.85f, .metallic = 0.05f});
     }
 
-    // 3. Instantiate Prefabs listed in Manifest
     for (const auto& entry: manifest.prefabs) {
         auto* prefab = CreativeWorksFactory::LoadModelPrefab(rc, engine.GetCreativeWorksManager(), entry.prefabPath);
         if (prefab != nullptr) {
@@ -540,9 +527,6 @@ void LoadSceneFromManifest(Engine& engine, const SceneManifest& manifest) {
     pc.OptimizeBroadphase();
 }
 
-// ============================================================================
-// STAGE 2: INITIALIZATION
-// ============================================================================
 std::expected<std::unique_ptr<Engine>, EngineError> InitializeEditor(CommandLineOptions options) {
     Platform::Init();
     ZHLN::SetupSignalHandler();
@@ -565,40 +549,26 @@ std::expected<std::unique_ptr<Engine>, EngineError> InitializeEditor(CommandLine
 
 bool InitializeEditorScene(Engine& engine) {
     auto& reg = engine.GetRegistry();
-    auto& rc  = engine.GetRenderContext();
 
     reg.RegisterAllComponentsIn<ZHLN::Components>();
 
-    // Main Camera Setup
     Entity cameraEntity = reg.Create();
     reg.Add(cameraEntity, Components::MainCameraTagComponent {});
     reg.Add(cameraEntity, Components::CameraComponent {});
     reg.Add(cameraEntity, Components::AASettingsComponent {.state = {.mode = AAMode::TAA, .taaFeedback = 0.95f}});
 
-    // Global Settings Setup
     Entity settingsEntity = reg.Create();
     reg.Add(settingsEntity, Components::GlobalSettingsTagComponent {});
     reg.Add(settingsEntity, Components::PostProcessSettingsComponent {});
     reg.Add(settingsEntity, Components::ShadowSettingsComponent {});
-
-    Mesh lineMesh = CreativeWorksFactory::CreateBox(rc, {0.01f, 0.01f, 0.5f}, {0.0f, 1.0f, 1.0f, 1.0f});
-    auto lineMat  = CreativeWorksFactory::CreateBasicMaterial(rc).value_or(Material {});
-    reg.Add(
-        settingsEntity, Components::DebugSettingsComponent {
-                            .debugLineVbo      = lineMesh.posBuffer,
-                            .debugLinePipeline = lineMat.pipeline,
-                            .debugLineAlbedo   = lineMat.albedoIndex,
-                            .physicsDrawMode   = 0,
-                        }
-    );
+    reg.Add(settingsEntity, Components::DebugSettingsComponent {.physicsDrawMode = 0});
 
     Entity uiSettings = reg.Create();
     reg.Add(uiSettings, Components::UISettingsComponent {});
-    CreativeWorksFactory::CreateFontAtlasTexture(rc);
+    CreativeWorksFactory::CreateFontAtlasTexture(engine.GetRenderContext());
 
     BuildEditorSystemGraphs(engine);
 
-    // Construct Default Data-Driven Manifest
     SceneManifest manifest;
     manifest.prefabs.push_back(
         {.name       = "Celestial Planet",
@@ -611,7 +581,6 @@ bool InitializeEditorScene(Engine& engine) {
 
     LoadSceneFromManifest(engine, manifest);
 
-    // Initial Viewport Camera Pose
     auto& cam    = engine.GetCamera();
     cam.position = {0.0f, 20.0f, 40.0f};
     cam.yaw      = -90.0f;
@@ -620,9 +589,6 @@ bool InitializeEditorScene(Engine& engine) {
     return true;
 }
 
-// ============================================================================
-// STAGE 4: MAIN WORKSPACE INTERACTION & RENDER LOOP
-// ============================================================================
 std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, uint32_t fpsLimit) {
     Clock clock;
 
@@ -647,7 +613,6 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
             engine->GetWindow().Close();
         }
 
-        // 1. Process Viewport Selection Picking
         if (!engine->GetInput().IsKeyDown(KeyCode::Unknown) && !engine->GetInput().IsMouseButtonDown(KeyCode::RButton) && !ImGui::GetIO().WantCaptureMouse) {
             static bool wasMouseDown = false;
             bool        isMouseDown = glfwGetMouseButton(static_cast<GLFWwindow*>(engine->GetWindow().GetNativeHandle()), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
@@ -663,7 +628,6 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
             wasMouseDown = isMouseDown;
         }
 
-        // 2. Draw Editor Panels
         DrawEditorPanels(*engine);
 
         if (engine->GetInput().NeedsResize()) {
@@ -673,7 +637,6 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
             continue;
         }
 
-        // 3. Update Systems & Physics Simulation
         if (s_EditorState.simulationRunning) {
             accumulator += frameTime;
             while (accumulator >= targetDt) {
@@ -685,13 +648,11 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
             engine->GetUpdateGraph().Execute(*engine, frameTime);
             engine->GetMainECB().Playback();
         } else {
-            // Free Camera Movement when paused/editing
             UpdateEditorCamera(cam, engine->GetInput(), frameTime);
             static TransformSystem transformSys;
             transformSys.ResolveTransforms(reg);
         }
 
-        // 4. Render Frame via RenderSystem Architecture
         engine->GetRenderGraph().Execute(*engine, frameTime);
 
         auto render_res = RenderSystem::Update(*engine, frameTime);
@@ -704,7 +665,6 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
         static TransformSystem transformSys;
         transformSys.UpdateTransformHistory(reg);
 
-        // Frame Limiter
         if (fpsLimit > 0) {
             auto   frameEnd = std::chrono::high_resolution_clock::now();
             double elapsed  = std::chrono::duration<double>(frameEnd - frameStart).count();

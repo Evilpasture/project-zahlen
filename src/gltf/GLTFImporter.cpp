@@ -750,9 +750,15 @@ ModelPrefab* LoadGLBPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, std:
         part.name            = (node->name != nullptr) ? String64(node->name) : String64("Unnamed");
         part.mesh            = compPrim.mesh;
         part.defaultMaterial = compPrim.defaultMaterial;
-        part.localTransform  = JPH::Mat44::sIdentity(); // Prevent double world matrix multiplication
-        part.nodeIndex       = nodeMap[node];
-        part.isSkinned       = (node->skin != nullptr) || !primJob.skins.empty();
+
+        // Pre-compute 64-bit numerical IDs at load time
+        std::string assetKeyStr = pathStr + "#part" + std::to_string(prefab->parts.size());
+        part.meshAsset          = HashAssetID(assetKeyStr);
+        part.materialAsset      = HashAssetID(assetKeyStr + "_mat");
+
+        part.localTransform = JPH::Mat44::sIdentity();
+        part.nodeIndex      = nodeMap[node];
+        part.isSkinned      = (node->skin != nullptr) || !primJob.skins.empty();
 
         if (node->skin != nullptr) {
             part.skeletonIndex = skinMap[node->skin];

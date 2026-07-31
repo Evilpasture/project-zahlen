@@ -168,17 +168,28 @@ class ZHLN_API Registry {
 
     template <typename T>
     T& Add(Entity entity, T&& component) {
-        uint32_t id = ComponentFamily::GetTypeID<T>();
+        using DecayedT = std::decay_t<T>;
+        uint32_t id    = ComponentFamily::GetTypeID<DecayedT>();
         EnsureComponentCapacity(id);
+
         if (!_components[id]) {
             typename SparseSet::DestructorFn dt = nullptr;
-            if constexpr (requires(T* t) { T::OnDestroy(t); }) {
-                dt = [](void* ptr) { T::OnDestroy(static_cast<T*>(ptr)); };
+            if constexpr (requires(DecayedT* t) { DecayedT::OnDestroy(t); }) {
+                dt = [](void* ptr) { DecayedT::OnDestroy(static_cast<DecayedT*>(ptr)); };
             }
-            _components[id] = new SparseSet(sizeof(T), alignof(T), &this->sync, dt);
+            _components[id] = new SparseSet(sizeof(DecayedT), alignof(DecayedT), &this->sync, dt);
         }
-        _components[id]->Insert(entity, &component);
-        return *static_cast<T*>(_components[id]->Get(entity));
+
+        if constexpr (std::is_trivially_copyable_v<DecayedT>) {
+            // Fast Path: Direct bitwise memcpy
+            _components[id]->Insert(entity, &component);
+            return *static_cast<DecayedT*>(_components[id]->Get(entity));
+        } else {
+            // Safe Path: Placement move-construction into SparseSet memory slot
+            void* slot = _components[id]->InsertEmpty(entity);
+            ::new (slot) DecayedT(std::forward<T>(component));
+            return *static_cast<DecayedT*>(slot);
+        }
     }
 
     template <typename... Ts>

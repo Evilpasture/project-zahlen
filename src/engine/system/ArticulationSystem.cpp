@@ -8,13 +8,14 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Render.hpp>
+#include <Zahlen/SkeletalAnimation.hpp>
 #include <cstring>
 #include <detail/ControlFlow.hpp>
 #include <ecs/ECS.hpp>
 #include <physics/Physics.hpp>
 #include <physics/PhysicsWorld.hpp>
-
 namespace ZHLN::Tests {
 
 static void VerifyArticulationStateConsistency(const ECS::Registry& reg) noexcept {
