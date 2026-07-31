@@ -182,7 +182,34 @@ void RenderContext::Impl::DispatchSkinningPasses() {
         }
     }
 
-    BarrierComputeWriteToVertexRead(Vk::CommandBuffer<Vk::QueueType::Graphics> {cmd});
+    // 1. Transition vertex writes from compute to both AS build and Vertex Shader read stages
+    Vk::MemoryBarrier(
+        cmd, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+              .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
+              .dst_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+              .dst_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_2_SHADER_READ_BIT}
+    );
+
+    // 2. Build BLAS for each active skinned scratch mesh
+    if (rtCtx.Valid()) {
+        ZHLN_PROFILE_SCOPE("GPU Skinned BLAS Rebuilds");
+        for (const auto& drawCmd: drawQueue) {
+            if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
+                auto* scratchMesh = meshPool.Resolve(drawCmd.skinnedVertexBuffer).value_or(nullptr);
+                if (scratchMesh != nullptr) {
+                    BuildOrUpdateSkinnedBLAS(cmd, drawCmd, scratchMesh);
+                }
+            }
+        }
+
+        // 3. Transition BLAS writes to TLAS build reads
+        Vk::MemoryBarrier(
+            cmd, {.src_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                  .src_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+                  .dst_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                  .dst_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR}
+        );
+    }
 }
 
 void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
@@ -199,7 +226,12 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
         const auto& drawCmd = drawQueue[i];
         auto*       mesh    = drawCmd.posMesh;
 
-        if (mesh == nullptr || mesh->blasAddress == 0 || ((drawCmd.flags & Skinned) != None) || ((drawCmd.flags & ExcludeFromTLAS) != None)) {
+        // If the draw command is skinned, swap the static bind-pose mesh for the skinned scratch mesh
+        if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
+            mesh = meshPool.Resolve(drawCmd.skinnedVertexBuffer).value_or(nullptr);
+        }
+
+        if (mesh == nullptr || mesh->blasAddress == 0 || ((drawCmd.flags & ExcludeFromTLAS) != None)) {
             continue;
         }
 
@@ -220,7 +252,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
             .mask                                   = 0xFF,
             .instanceShaderBindingTableRecordOffset = 0,
             .flags                                  = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR,
-            .accelerationStructureReference         = mesh->blasAddress
+            .accelerationStructureReference         = mesh->blasAddress // Points to the scratch BLAS!
         };
 
         tlasInstancesScratch.push_back(inst);

@@ -381,6 +381,7 @@ std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, VkResult>
 auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle {
     size_t size = (vertexCount * sizeof(VertexPosition)) + (vertexCount * sizeof(VertexAttributes));
 
+    // Add ray tracing input read flag if context is valid
     VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
     if (_impl->rtCtx.Valid()) {
         usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
@@ -389,9 +390,63 @@ auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHa
     return Vk::Buffer::Create(_impl->allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY)
         .transform([this, vertexCount](auto&& gpu_buf) {
             VkDeviceAddress address = Vk::GetBufferAddress(_impl->ctx.Device(), gpu_buf.Handle());
-            return _impl->meshPool.Create(std::forward<decltype(gpu_buf)>(gpu_buf), vertexCount, address);
+            auto            handle  = _impl->meshPool.Create(std::move(gpu_buf), vertexCount, address);
+
+            // Register RT Context with the scratch mesh for automatic lifecycle cleanup
+            if (_impl->rtCtx.Valid()) {
+                if (auto* nativeMesh = _impl->meshPool.Resolve(handle).value_or(nullptr)) {
+                    nativeMesh->rtCtx  = &_impl->rtCtx;
+                    nativeMesh->device = _impl->ctx.Device();
+                }
+            }
+            return handle;
         })
         .value_or(BufferHandle::Invalid);
+}
+
+void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const DrawCommand& drawCmd, NativeMesh* scratchMesh) const {
+    if (!rtCtx.Valid() || scratchMesh == nullptr || drawCmd.posMesh == nullptr) {
+        return;
+    }
+
+    ZHLN_BlasGeometryDesc geom = {
+        .vertex_data   = scratchMesh->vboAddress,
+        .vertex_stride = sizeof(VertexPosition),
+        .max_vertex    = scratchMesh->vertexCount,
+        .vertex_format = VK_FORMAT_R32G32B32_SFLOAT,
+        .index_data    = drawCmd.instanceData.iboAddress,
+        .index_type    = (drawCmd.instanceData.iboAddress != 0) ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_NONE_KHR
+    };
+
+    uint32_t primitiveCount = (drawCmd.instanceData.iboAddress != 0) ? drawCmd.instanceData.indexCount / 3 : scratchMesh->vertexCount / 3;
+
+    ZHLN_AccelerationStructureSizes sizes {};
+    rtCtx.GetBlasSizes(geom, primitiveCount, sizes);
+
+    if (scratchMesh->blas == VK_NULL_HANDLE) {
+        auto blasBufOpt = Vk::Buffer::Create(
+            allocator.Get(), sizes.acceleration_structure_size,
+            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+        );
+        if (!blasBufOpt) {
+            return;
+        }
+        scratchMesh->blasBuffer  = std::move(*blasBufOpt);
+        scratchMesh->blas        = rtCtx.CreateAS(scratchMesh->blasBuffer.Handle(), sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL);
+        scratchMesh->blasAddress = rtCtx.GetASAddress(scratchMesh->blas);
+    }
+
+    auto scratchBufOpt = Vk::Buffer::Create(
+        allocator.Get(), sizes.build_scratch_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+    );
+    if (!scratchBufOpt) {
+        return;
+    }
+    Vk::Buffer      scratchBuf     = std::move(*scratchBufOpt);
+    VkDeviceAddress scratchAddress = ctx.BufferAddress(scratchBuf.Handle());
+
+    // Record the build command directly onto the active graphics queue command buffer
+    rtCtx.CmdBuildBlas(cmd, geom, scratchMesh->blas, scratchAddress, primitiveCount);
 }
 
 void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept {

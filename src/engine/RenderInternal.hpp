@@ -967,6 +967,8 @@ struct RenderContext::Impl {
 
     std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, VkResult> CreateGPUBuffer(size_t size, const void* data, VkBufferUsageFlags functionalUsage) const;
 
+    void BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const DrawCommand& drawCmd, NativeMesh* scratchMesh) const;
+
     void               SortDrawQueue();
     [[nodiscard]] auto InitializeSystemTextures() noexcept -> std::expected<void, Error>;
 

@@ -238,7 +238,7 @@ Entity InstantiateMeshPart(
     if (part.isSkinned && params.isAnimated) {
         flags |= DrawFlags::Skinned;
     }
-    if (activeMat.alphaMode == 2 || params.isAnimated) {
+    if (activeMat.alphaMode == 2) {
         flags |= DrawFlags::ExcludeFromTLAS;
     }
 
