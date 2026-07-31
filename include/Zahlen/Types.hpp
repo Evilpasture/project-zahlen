@@ -215,7 +215,7 @@ struct alignas(16) FrameUniforms {
     alignas(16) float cascadeSplits[4];
     int   numCascades; // E.g., 4
     int   fullBright;  // 0 = Lit, 1 = Fullbright/Unlit
-    float _pad_csm[2];
+    float screenResolution[2];
 
     JPH::Vec4 skyZenith;
     JPH::Vec4 skyHorizon;
@@ -225,6 +225,7 @@ struct alignas(16) FrameUniforms {
 // Material handle representation
 struct Material {
     PipelineHandle      pipeline           = PipelineHandle::Invalid;
+    PipelineHandle      prePassPipeline    = PipelineHandle::Invalid;
     ResourceGroupHandle resourceGroup      = ResourceGroupHandle::Invalid;
     BufferHandle        constantBuffer     = BufferHandle::Invalid;
     uint32_t            albedoIndex        = 1; // Default to Solid White (Index 1)

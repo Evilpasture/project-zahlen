@@ -29,7 +29,7 @@ struct FrameUniforms {
     float4 cascadeSplits;
     int    numCascades;
     int    fullBright;
-    float2 _pad_csm;
+    float2 screenResolution;
 
     float4 skyZenith;
     float4 skyHorizon;

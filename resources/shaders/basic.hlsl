@@ -208,11 +208,15 @@ PSOutput PSMain(VSOutput input) {
 }
 
 #ifdef FORWARD_PASS
+
+// Read the pre-calculated reflections/shadows for translucent surfaces
+[[vk::binding(11, 0)]] Texture2D<float4> texTransLighting;
+[[vk::binding(11, 0)]] SamplerState      texTransLightingSampler;
+
 float3 RotateVector(float3 V, float3 lightDir) {
     float lenB = length(lightDir);
-    if (lenB < 0.001f) {
+    if (lenB < 0.001f)
         return V;
-    }
     float3 A     = normalize(float3(0.5f, 1.0f, 0.2f));
     float3 B     = lightDir / lenB;
     float3 q_xyz = cross(B, A);
@@ -234,55 +238,23 @@ float4 PSForward(VSOutput input): SV_Target0 {
     float3 emissiveMap = globalTextures[indices.w].Sample(defaultSampler, input.uv).rgb;
     float3 emissive    = emissiveMap * input.emissiveFactor.rgb;
 
-    // Bypass shading entirely in Fullbright Mode
     if (frame.fullBright != 0) {
         return float4(albedo.rgb + emissive, albedo.a);
     }
 
-    float metallicFactor  = input.pbrFactors.x;
-    float roughnessFactor = input.pbrFactors.y;
+    // Grab correct screen UVs using the new uniform
+    float2 screenUV = input.pos.xy / frame.screenResolution;
 
-    float3 N = normalize(input.normal);
-    float3 V = normalize(frame.camPos.xyz - input.worldPos);
-    float3 R = reflect(-V, N);
+    // Use the combined sampler to read the translucent lighting target
+    float4 transLighting = texTransLighting.SampleLevel(texTransLightingSampler, screenUV, 0);
 
-    if (indices.z != 0) {
-        float4 pbr = globalTextures[indices.z].Sample(defaultSampler, input.uv);
-        roughnessFactor *= max(pbr.g, 0.045f);
-        metallicFactor *= pbr.b;
-    }
-
-    if (indices.y != 2 && any(input.tangent.xyz)) {
-        float3 T_unnorm = input.tangent.xyz - dot(input.tangent.xyz, N) * N;
-        if (dot(T_unnorm, T_unnorm) < 0.0001f) {
-            T_unnorm = cross(N, abs(N.y) < 0.999f ? float3(0, 1, 0) : float3(1, 0, 0));
-        }
-        float3 T           = normalize(T_unnorm);
-        float  tangentSign = input.tangent.w * 2.0f - 1.0f;
-        float3 B           = normalize(cross(N, T) * tangentSign);
-
-        float3 normalMap = globalTextures[indices.y].Sample(defaultSampler, input.uv).rgb * 2.0f - 1.0f;
-        N                = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * N);
-        R                = reflect(-V, N);
-    }
-
-    float  NdotV = saturate(dot(N, V));
-    float3 F0    = lerp(float3(0.04f, 0.04f, 0.04f), albedo.rgb, metallicFactor);
-    float3 F     = F0 + (max(float3(1.0f - roughnessFactor, 1.0f - roughnessFactor, 1.0f - roughnessFactor), F0) - F0) * pow(saturate(1.0f - NdotV), 5.0f);
-
-    float2 envBRDF = brdfLUT.SampleLevel(clampSampler, float2(NdotV, roughnessFactor), 0.0f).rg;
-
-    // Rotate the forward reflection vector to match the dynamic sun
-    float3 R_rot = RotateVector(R, frame.lightDir.xyz);
-
-    // Fast Specular IBL Reflection
-    float3 specularIBL = prefilteredMap.SampleLevel(defaultSampler, R_rot, roughnessFactor * 5.0f).rgb * 25.0f * (F * envBRDF.x + envBRDF.y);
-
+    // Diffuse is evaluated analytically, but we composite the expensive SSR/RTR reflections on top
     float3 diffuseIBL = albedo.rgb * 0.5f;
-    float3 finalColor = diffuseIBL + specularIBL + emissive;
 
-    // Additive fresnel boost to simulate refractive edges
-    float glassAlpha = saturate(albedo.a + saturate(1.0f - NdotV) * 0.5f);
+    float3 finalColor = diffuseIBL + (transLighting.rgb * transLighting.a) + emissive;
+
+    // Additive fresnel boost simulating refractive edges based on RTR reflection strength
+    float glassAlpha = saturate(albedo.a + transLighting.a * 0.5f);
 
     return float4(finalColor, glassAlpha);
 }

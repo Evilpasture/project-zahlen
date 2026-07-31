@@ -171,15 +171,16 @@ static constexpr VkShaderStageFlags kCommonStages = VK_SHADER_STAGE_VERTEX_BIT |
 using GlobalSceneLayout = Vk::DescriptorLayout<
     Vk::BindlessSampledImageSlot<0, 4096, kCommonStages>,
     Vk::SamplerSlot<1, kCommonStages>,
-    Vk::UniformSlot<2, kCommonStages>,                     // FrameUniforms
-    Vk::StorageBufferSlot<3, kCommonStages>,               // Lights (Declared in common.hlsl)
-    Vk::StorageBufferSlot<4, kCommonStages>,               // InstanceData
-    Vk::StorageBufferSlot<5, VK_SHADER_STAGE_VERTEX_BIT>,  // Joints
-    Vk::StorageBufferSlot<6, VK_SHADER_STAGE_VERTEX_BIT>,  // PrevJoints
-    Vk::StorageBufferSlot<7, VK_SHADER_STAGE_VERTEX_BIT>,  // MorphDeltas
-    Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>, // Specular IBL
-    Vk::SampledImageSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>, // BRDF LUT
-    Vk::SamplerSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>      // Clamp Sampler
+    Vk::UniformSlot<2, kCommonStages>,                                        // FrameUniforms
+    Vk::StorageBufferSlot<3, kCommonStages>,                                  // Lights (Declared in common.hlsl)
+    Vk::StorageBufferSlot<4, kCommonStages>,                                  // InstanceData
+    Vk::StorageBufferSlot<5, VK_SHADER_STAGE_VERTEX_BIT>,                     // Joints
+    Vk::StorageBufferSlot<6, VK_SHADER_STAGE_VERTEX_BIT>,                     // PrevJoints
+    Vk::StorageBufferSlot<7, VK_SHADER_STAGE_VERTEX_BIT>,                     // MorphDeltas
+    Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>,                    // Specular IBL
+    Vk::SampledImageSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,                    // BRDF LUT
+    Vk::SamplerSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>,                        // Clamp Sampler
+    Vk::BindlessCombinedImageSamplerSlot<11, 1, VK_SHADER_STAGE_FRAGMENT_BIT> // Translucent Lighting
     >;
 
 using TAALayout = Vk::DescriptorLayout<
@@ -373,11 +374,19 @@ struct VolumetricScatterPass {
 struct VolumetricIntegratePass {
     static constexpr std::string_view name = "[GPU] Volumetric Integrate";
 };
+struct TransPrePass {
+    static constexpr std::string_view name = "[GPU] Translucent Pre-Pass";
+};
+struct TransReflection {
+    static constexpr std::string_view name = "[GPU] Translucent Reflection";
+};
 } // namespace Stages
 
 using FrameProfiler = Profiler::GpuProfiler<
     Stages::ShadowPass,
     Stages::MainPass,
+    Stages::TransPrePass,
+    Stages::TransReflection,
     Stages::AAPass,
     Stages::PostProcessPass,
     Stages::BloomThreshPass,
@@ -436,8 +445,9 @@ static constexpr uint32_t kGpuCullingMaxVisibleInstances = kGpuCullingMaxInstanc
  * All redundant texture indexing and geometric properties have been stripped.
  */
 struct DrawCommand {
-    InstanceData         instanceData;        // 272 bytes (contains world, prevWorld, indexes, factor overrides, etc.)
-    NativeMaterial*      material;            // 8 bytes
+    InstanceData         instanceData; // 272 bytes (contains world, prevWorld, indexes, factor overrides, etc.)
+    NativeMaterial*      material;     // 8 bytes
+    NativeMaterial*      prePassMaterial;
     NativeMesh*          posMesh;             // 8 bytes
     NativeMesh*          attrMesh;            // 8 bytes
     NativeMesh*          skinMesh;            // 8 bytes
@@ -515,6 +525,9 @@ using Res_Swapchain     = Vk::GraphImage<"Swapchain", VK_FORMAT_B8G8R8A8_SRGB, V
 using Res_VoxelMedia    = Vk::GraphImage<"VoxelMedia", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_VoxelLight    = Vk::GraphImage<"VoxelLight", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_VoxelInt      = Vk::GraphImage<"VoxelInt", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_TransNorm     = Vk::GraphImage<"TransNorm", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_TransDepth    = Vk::GraphImage<"TransDepth", VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT>;
+using Res_TransLighting = Vk::GraphImage<"TransLighting", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 
 // Only TAA targets remain persistent:
 using Res_AccumCurr = Vk::GraphImage<"AccumCurr", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
@@ -556,6 +569,9 @@ struct RenderContext::Impl {
         Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelMedia;
         Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelLight;
         Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelIntegrated;
+        Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          transNormalBuffer;
+        Vk::RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>      transDepthBuffer;
+        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     transLightingTarget;
 
         struct ReflectMetadata {
             Res_SceneColor    sceneColor;
@@ -577,6 +593,9 @@ struct RenderContext::Impl {
             Res_VoxelMedia    voxelMedia;
             Res_VoxelLight    voxelLight;
             Res_VoxelInt      voxelIntegrated;
+            Res_TransNorm     transNormalBuffer;
+            Res_TransDepth    transDepthBuffer;
+            Res_TransLighting transLightingTarget;
         };
     };
 
@@ -667,6 +686,7 @@ struct RenderContext::Impl {
     Vk::PostProcessPass<AmbientLayout>               ambientPass;
     Vk::PostProcessPass<LightingLayout>              lightingPass;
     Vk::PostProcessPass<ReflectionLayout>            reflectionPass;
+    Vk::PostProcessPass<ReflectionLayout>            translucentReflectionPass;
     Vk::PostProcessPass<BlitLayout>                  blitPass;
     Vk::PostProcessPass<BloomThresholdLayout>        bloomThresholdPass;
     std::array<Vk::PostProcessPass<KawaseLayout>, 3> bloomDownPass;
@@ -1035,6 +1055,14 @@ struct DeferredLightingPass {
   private:
     [[nodiscard]] constexpr uint32_t DetermineLightingVariant(const GISettings& gi, bool hasRt) const noexcept;
     [[nodiscard]] constexpr uint32_t DetermineReflectionVariant(const GISettings& gi, bool hasRt) const noexcept;
+};
+
+struct TranslucentPrePass {
+    void Execute(
+        const FrameRecorder&                                             recorder,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         norm_att,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> depth_att
+    ) const noexcept;
 };
 
 struct ForwardPass {

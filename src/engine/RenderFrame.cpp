@@ -429,6 +429,36 @@ struct PassFactory {
         );
     }
 
+    [[nodiscard]] auto MakeTranslucentPrePass() const noexcept {
+        return Vk::Passieren<"TransPrePass", Vk::ColorWrite<Res_TransNorm>, Vk::DepthStencilWrite<Res_TransDepth>>([this](VkCommandBuffer c) noexcept {
+            FrameRecorder rec(c, self);
+            Passes::TranslucentPrePass {}.Execute(
+                rec, Vk::Assume<Vk::ColorWrite<Res_TransNorm>>(self.graphResources.transNormalBuffer),
+                Vk::Assume<Vk::DepthStencilWrite<Res_TransDepth>>(self.graphResources.transDepthBuffer)
+            );
+        });
+    }
+
+    [[nodiscard]] auto MakeTranslucentReflectionPass() const noexcept {
+        return Vk::MakePass<
+            "TransReflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_TransNorm>, Vk::ShaderRead<Res_TransDepth>, Vk::ShaderRead<Res_Lighting>,
+            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelInt>, Vk::ColorWrite<Res_TransLighting>>(
+            [this](auto& ctx) noexcept {
+                Profiler::ScopedGpuProfile<Stages::TransReflection, FrameProfiler> timer(ctx.Cmd(), fIdx, self.gpuProfiler);
+
+                self.translucentReflectionPass.WriteNext(
+                    device, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler.Get(),
+                    Vk::Assume<Vk::ShaderRead<Res_TransDepth>>(self.graphResources.transDepthBuffer),
+                    Vk::Assume<Vk::ShaderRead<Res_TransNorm>>(self.graphResources.transNormalBuffer), self.pointSampler.Get(),
+                    self.iblPayload.prefilteredView.Get(), GetTLAS(), self.frameUniformBuffers[fIdx].Handle(), self.iblPayload.brdfLutView.Get(),
+                    self.clampSampler.Get(), Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
+                    Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelInt>>(self.graphResources.voxelIntegrated)
+                );
+                self.translucentReflectionPass.ExecuteVariant(ctx.Cmd(), reflVariant, pc);
+            }
+        );
+    }
+
     [[nodiscard]] auto MakeForwardPass() const noexcept {
         auto& targetImage = self.graphResources.hdrSceneColor;
         return Vk::Passieren<"Forward", Vk::ColorWrite<Res_HdrSceneColor>, Vk::DepthStencilWrite<Res_Depth>>([this, &targetImage](VkCommandBuffer c) noexcept {
@@ -689,8 +719,8 @@ template <AAMode Mode, typename GetSwapchainImageT>
 auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapchainImage) {
     using enum AAMode;
 
-    auto corePasses =
-        std::tuple {factory.MakeShadowPass(), factory.MakeAmbientPass(), factory.MakeLightingPass(), factory.MakeReflectionPass(), factory.MakeForwardPass()};
+    auto corePasses = std::tuple {factory.MakeShadowPass(),     factory.MakeTranslucentPrePass(),        factory.MakeAmbientPass(), factory.MakeLightingPass(),
+                                  factory.MakeReflectionPass(), factory.MakeTranslucentReflectionPass(), factory.MakeForwardPass()};
 
     auto bloomPasses = std::tuple {factory.MakeBloomThresholdPass(), factory.MakeBloomDownPass<0>(), factory.MakeBloomDownPass<1>(),
                                    factory.MakeBloomDownPass<2>(),   factory.MakeBloomUpPass<2>(),   factory.MakeBloomUpPass<1>(),
@@ -1123,6 +1153,11 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
     auto* attrMesh       = attrMesh_res.value();
     auto* nativeMaterial = nativeMaterial_res.value();
 
+    NativeMaterial* prePassMaterial = nullptr;
+    if (material.prePassPipeline != PipelineHandle::Invalid) {
+        prePassMaterial = impl->materialPool.Resolve(material.prePassPipeline).value_or(nullptr);
+    }
+
     auto* skinMesh        = (mesh.skinBuffer != Invalid) ? impl->meshPool.Resolve(mesh.skinBuffer).value_or(nullptr) : nullptr;
     auto* nativeIndexMesh = (mesh.indexBuffer != Invalid) ? impl->meshPool.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
 
@@ -1172,6 +1207,7 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
                  .emissiveFactor   = {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]},
              },
          .material            = nativeMaterial,
+         .prePassMaterial     = prePassMaterial,
          .posMesh             = posMesh,
          .attrMesh            = attrMesh,
          .skinMesh            = skinMesh,
@@ -1204,6 +1240,11 @@ void DrawCSG(RenderContext& ctx, const Material& eyeMaterial, const Mesh& eyeMes
         auto* posMesh        = posMesh_res.value();
         auto* attrMesh       = attrMesh_res.value();
         auto* nativeMaterial = nativeMaterial_res.value();
+
+        NativeMaterial* prePassMaterial = nullptr;
+        if (material.prePassPipeline != PipelineHandle::Invalid) {
+            prePassMaterial = impl->materialPool.Resolve(material.prePassPipeline).value_or(nullptr);
+        }
 
         auto* skinMesh  = (mesh.skinBuffer != BufferHandle::Invalid) ? impl->meshPool.Resolve(mesh.skinBuffer).value_or(nullptr) : nullptr;
         auto* indexMesh = (mesh.indexBuffer != BufferHandle::Invalid) ? impl->meshPool.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
@@ -1249,6 +1290,7 @@ void DrawCSG(RenderContext& ctx, const Material& eyeMaterial, const Mesh& eyeMes
                     .emissiveFactor   = {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]},
                 },
             .material            = nativeMaterial,
+            .prePassMaterial     = prePassMaterial,
             .posMesh             = finalPosMesh,
             .attrMesh            = attrMesh,
             .skinMesh            = skinMesh,

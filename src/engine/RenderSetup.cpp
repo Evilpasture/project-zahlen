@@ -109,7 +109,9 @@ void SetFrameData(RenderContext& ctx, const Camera& cam, const FrameUniforms& un
     cascadeSplits[2] = cam.nearZ + (cam.farZ - cam.nearZ) * 0.55f;
     cascadeSplits[3] = cam.nearZ + (cam.farZ - cam.nearZ) * 1.0f;
 
-    FrameUniforms gpuUniforms = uniforms;
+    FrameUniforms gpuUniforms       = uniforms;
+    gpuUniforms.screenResolution[0] = static_cast<float>(res.width);
+    gpuUniforms.screenResolution[1] = static_cast<float>(res.height);
     std::memcpy(gpuUniforms.cascadeSplits, cascadeSplits.data(), sizeof(float) * 4);
     std::memcpy(gpuUniforms.sh, impl->iblPayload.shCoeffs.data(), sizeof(JPH::Vec4) * 9);
 

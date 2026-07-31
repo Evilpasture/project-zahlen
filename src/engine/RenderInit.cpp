@@ -987,8 +987,17 @@ std::expected<void, Error> RenderContext::Impl::BuildReflectionPipelines() {
     auto vsSpan = hasRt ? Resource::GetShaderProgram(Reflection).vertex : Resource::GetShaderProgram(Resource::ShaderID::ReflectionNort).vertex;
     auto psSpan = hasRt ? Resource::GetShaderProgram(Reflection).fragment : Resource::GetShaderProgram(Resource::ShaderID::ReflectionNort).fragment;
 
-    return BuildPassVariants(
+    auto res = BuildPassVariants(
         this, reflectionPass, "Reflection", {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
+        {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1
+    );
+    if (!res) {
+        return res;
+    }
+
+    // ADD THIS:
+    return BuildPassVariants(
+        this, translucentReflectionPass, "Translucent Reflection", {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
         {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1
     );
 }
@@ -1520,6 +1529,11 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
     graphResources.bloomUp2             = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext8);
     graphResources.bloomUp1             = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4);
     graphResources.bloomFinalTarget     = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2);
+    graphResources.transNormalBuffer    = CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext);
+    graphResources.transLightingTarget  = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
+    graphResources.transDepthBuffer     = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
+        allocator, ctx, ext, {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT}
+    );
 
     RecreatePunctualShadowViews();
 
@@ -1542,7 +1556,9 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
             graphResources.bloomDown3.image.Handle(),
             graphResources.bloomUp2.image.Handle(),
             graphResources.bloomUp1.image.Handle(),
-            graphResources.bloomFinalTarget.image.Handle()
+            graphResources.bloomFinalTarget.image.Handle(),
+            graphResources.transNormalBuffer.image.Handle(),
+            graphResources.transLightingTarget.image.Handle()
         };
 
         for (auto* const img: colorTargets) {
@@ -1556,6 +1572,12 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
             cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
         );
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(
+            cmd, graphResources.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
+        );
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+            cmd, graphResources.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
+        );
         std::array targets3D = {
             graphResources.voxelMedia.image.Handle(), graphResources.voxelLight.image.Handle(), graphResources.voxelIntegrated.image.Handle()
         };
@@ -1565,6 +1587,13 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
         }
     });
+
+    Vk::DescriptorUpdater bindlessRegistry;
+    for (int i = 0; i < 2; ++i) {
+        bindlessRegistry.BindSampledImage(11, graphResources.transLightingTarget.view.Get(), defaultSampler.Get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        bindlessRegistry.UpdateSet(ctx.Device(), bindlessSets[i]);
+        bindlessRegistry.Clear();
+    }
 
     return true;
 }

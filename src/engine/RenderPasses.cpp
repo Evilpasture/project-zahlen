@@ -440,6 +440,42 @@ void MainPass::Execute(
     }
 }
 
+void TranslucentPrePass::Execute(
+    const FrameRecorder&                                             recorder,
+    Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         norm_att,
+    Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> depth_att
+) const noexcept {
+    VkCommandBuffer cmd = recorder.cmd;
+    auto&           ctx = recorder.ctx;
+
+    Vk::DynamicPass(norm_att.extent)
+        .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
+        .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
+        .Execute(cmd, [&]() {
+            for (size_t i = 0; i < ctx.drawQueue.size(); ++i) {
+                const auto& drawCmd = ctx.drawQueue[i];
+
+                // Only process transparent/glass objects (alphaMode == 2)
+                if ((drawCmd.instanceData.flags & 0xFF) != 2) {
+                    continue;
+                }
+
+                // Skip if material didn't successfully compile a pre-pass pipeline
+                if (drawCmd.prePassMaterial == nullptr || !drawCmd.prePassMaterial->pipeline.Valid()) {
+                    continue;
+                }
+
+                const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
+
+                // Pass the pre-pass pipeline and layout overrides into SubmitDrawInstanced
+                SubmitDrawInstanced(
+                    recorder.encoder, drawCmd, static_cast<uint32_t>(i), recorder.bindlessSet, push, drawCmd.prePassMaterial->pipeline.Get(),
+                    drawCmd.prePassMaterial->layout.Get()
+                );
+            }
+        });
+}
+
 void ForwardPass::Execute(
     const FrameRecorder&                                             recorder,
     Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         litColor,
@@ -452,9 +488,26 @@ void ForwardPass::Execute(
         .AddColor(litColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddDepth(depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .Execute(cmd, [&]() {
-            // Draw standard forward transparent geometry...
+            // --- DRAW STANDARD FORWARD TRANSLUCENT GEOMETRY (alphaMode == 2) ---
+            for (size_t i = 0; i < ctx.drawQueue.size(); ++i) {
+                const auto& drawCmd = ctx.drawQueue[i];
 
-            // --- DRAW 65,536 GPU SNOWFLAKE BILLBOARDS (NATIVE FRAMEWORK) ---
+                // Only process transparent/glass objects (alphaMode == 2)
+                if ((drawCmd.instanceData.flags & 0xFF) != 2) {
+                    continue;
+                }
+
+                // Skip if the material doesn't have a valid compiled pipeline
+                if (!drawCmd.material->pipeline.Valid()) {
+                    continue;
+                }
+
+                const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
+
+                // Submit draw calls using the standard material forward pipeline
+                SubmitDrawInstanced(recorder.encoder, drawCmd, static_cast<uint32_t>(i), recorder.bindlessSet, push);
+            }
+
             if (ctx.particleRenderPipeline.Valid()) {
                 struct ParticleRenderPushConstants {
                     VkDeviceAddress particleBufferAddr;
