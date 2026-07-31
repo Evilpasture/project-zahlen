@@ -382,20 +382,54 @@ uint32_t InstantiatePrefab(
     float                                 scaleMult = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
     std::unordered_map<int32_t, uint32_t> allocatedSkeletons;
 
+    std::unordered_map<std::string, Entity> instantiatedParts;
+
     for (size_t i = 0; i < prefab.parts.size(); ++i) {
         Entity meshEnt = InstantiateMeshPart(ctx, reg, pc, prefab, prefab.parts[i], preparedParts[i], params, rootEntity, allocatedSkeletons);
+
+        // Store the name to entity mapping for CSG resolution
+        instantiatedParts[prefab.parts[i].name.c_str()] = meshEnt;
 
         if (outBuffer != nullptr && spawnedCount < maxCount) {
             outBuffer[startIndex + (spawnedCount - startIndex)] = meshEnt;
         }
         spawnedCount++;
 
+        // --- PRESERVED EMISSIVE VPL GENERATOR ---
         Entity glowEnt = TrySpawnEmissiveVPL(reg, prefab.parts[i], baseTransform * GetNodeLogicalTransform(prefab, prefab.parts[i].nodeIndex), scaleMult);
         if (glowEnt != NullEntity) {
             if (outBuffer != nullptr && spawnedCount < maxCount) {
                 outBuffer[spawnedCount] = glowEnt;
             }
             spawnedCount++;
+        }
+    }
+
+    // --- RESOLVE CSG MODIFIERS AND LINK ECS COMPONENTS ---
+    for (const auto& part: prefab.parts) {
+        if (!part.csgModifiers.empty()) {
+            std::string partName = part.name.c_str();
+            auto        it       = instantiatedParts.find(partName);
+            if (it != instantiatedParts.end()) {
+                Entity targetEntity = it->second;
+
+                Components::CSGComponent csgComp;
+                for (const auto& mod: part.csgModifiers) {
+                    auto opIt = instantiatedParts.find(mod.operand_name);
+                    if (opIt != instantiatedParts.end()) {
+                        csgComp.modifiers.push_back({.operation = mod.operation, .operandEntity = opIt->second});
+
+                        // Exclude the operand cutter from standard main/shadow draw passes
+                        if (auto* cutMesh = reg.Get<Components::MeshComponent>(opIt->second)) {
+                            cutMesh->flags |= DrawFlags::Hidden;
+                        }
+                    }
+                }
+
+                if (!csgComp.modifiers.empty()) {
+                    reg.Add(targetEntity, std::move(csgComp));
+                }
+            }
         }
     }
 

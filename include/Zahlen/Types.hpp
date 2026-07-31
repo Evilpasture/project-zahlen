@@ -284,6 +284,13 @@ struct FontAtlas {
     GlyphMetric glyphs[96] {};
 };
 
+enum class CSGOperation : uint8_t { Difference = 0, Union = 1, Intersection = 2 };
+
+struct CSGModifier {
+    CSGOperation operation;
+    std::string  operand_name;
+};
+
 template <typename T>
 inline constexpr bool EnableEnumFlags = false;
 
@@ -345,6 +352,7 @@ enum class DrawFlags : uint32_t {
     Skinned         = 1 << 1, // Tells the renderer that this draw is skin-weighted
     VisibleInMain   = 1 << 2,
     VisibleInShadow = 1 << 3,
+    Hidden          = 1 << 4,
 };
 } // namespace ZHLN
 

@@ -393,6 +393,7 @@ void InitComponentRegistry() {
     RegisterComponentType<Components::UIButtonComponent>("UIButtonComponent", "B");
     RegisterComponentType<Components::UIDragComponent>("UIDragComponent", "B");
     RegisterComponentType<Components::UIStackComponent>("UIStackComponent", "B");
+    RegisterComponentType<Components::CSGComponent>("CSGComponent", "B");
     RegisterComponentTypeReadOnly<Components::PhysicsComponent>("PhysicsComponent", "Q");
 }
 

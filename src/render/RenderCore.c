@@ -1086,7 +1086,6 @@ void ZHLN_DestroyPipelineLayout(const VkDevice device, const VkPipelineLayout la
     }
 }
 
-[[nodiscard]]
 VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_GraphicsPipelineDesc* const restrict desc) {
     // --- Shader Stages ---
     VkPipelineShaderStageCreateInfo shader_stages[2];
@@ -1132,10 +1131,13 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
 
     // --- Depth/Stencil ---
     const VkPipelineDepthStencilStateCreateInfo depth_stencil = {
-        .sType            = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-        .depthTestEnable  = desc->depth_test ? VK_TRUE : VK_FALSE,
-        .depthWriteEnable = desc->depth_write ? VK_TRUE : VK_FALSE,
-        .depthCompareOp   = VK_COMPARE_OP_LESS,
+        .sType             = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .depthTestEnable   = desc->depth_test ? VK_TRUE : VK_FALSE,
+        .depthWriteEnable  = desc->depth_write ? VK_TRUE : VK_FALSE,
+        .depthCompareOp    = VK_COMPARE_OP_LESS,
+        .stencilTestEnable = desc->stencil_test ? VK_TRUE : VK_FALSE,
+        .front             = desc->stencil_front,
+        .back              = desc->stencil_back,
     };
 
     // --- Color Blend (Dynamic Attachment Count & Additive Branching) ---
@@ -1143,6 +1145,10 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
     uint32_t                            safe_color_count = ZHLN_Min(desc->color_format_count, 8);
 
     for (uint32_t i = 0; i < safe_color_count; ++i) {
+        // Resolve write mask once per iteration
+        const VkColorComponentFlags write_mask =
+            desc->color_write_enable ? (VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT) : 0;
+
         if (desc->additive_blend) {
             blend_attachments[i] = (VkPipelineColorBlendAttachmentState) {
                 .blendEnable         = VK_TRUE,
@@ -1152,7 +1158,7 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
                 .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
                 .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
                 .alphaBlendOp        = VK_BLEND_OP_ADD,
-                .colorWriteMask      = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+                .colorWriteMask      = write_mask, // Apply write mask here
             };
         } else {
             blend_attachments[i] = (VkPipelineColorBlendAttachmentState) {
@@ -1163,7 +1169,7 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
                 .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
                 .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
                 .alphaBlendOp        = VK_BLEND_OP_ADD,
-                .colorWriteMask      = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+                .colorWriteMask      = write_mask, // And here
             };
         }
     }
@@ -1189,9 +1195,11 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
     // --- Dynamic Rendering ---
     const VkPipelineRenderingCreateInfo rendering = {
         .sType                   = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+        .pNext                   = nullptr,
         .colorAttachmentCount    = desc->color_format_count,
         .pColorAttachmentFormats = desc->color_format_count > 0 ? desc->color_formats : nullptr,
         .depthAttachmentFormat   = desc->depth_format,
+        .stencilAttachmentFormat = (desc->depth_format == VK_FORMAT_D32_SFLOAT_S8_UINT) ? VK_FORMAT_D32_SFLOAT_S8_UINT : VK_FORMAT_UNDEFINED,
         .viewMask                = desc->view_mask,
     };
 
@@ -1246,6 +1254,16 @@ void ZHLN_BeginRendering(const VkCommandBuffer cmd, const ZHLN_RenderPassDesc* c
         .clearValue  = {.depthStencil = {.depth = desc->clear_depth ? desc->clear_depth : 1.0F}},
     };
 
+    // Prepare a separate stencil attachment structure
+    const VkRenderingAttachmentInfo stencil_attachment = {
+        .sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .imageView   = desc->stencil_view,
+        .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        .loadOp      = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp     = VK_ATTACHMENT_STORE_OP_STORE,
+        .clearValue  = {.depthStencil = {.depth = desc->clear_depth ? desc->clear_depth : 1.0F, .stencil = 0}},
+    };
+
     const VkRenderingInfo rendering_info = {
         .sType                = VK_STRUCTURE_TYPE_RENDERING_INFO,
         .flags                = desc->use_secondaries ? VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT : 0,
@@ -1254,6 +1272,8 @@ void ZHLN_BeginRendering(const VkCommandBuffer cmd, const ZHLN_RenderPassDesc* c
         .colorAttachmentCount = desc->target_count,
         .pColorAttachments    = desc->target_count > 0 ? color_attachments : nullptr,
         .pDepthAttachment     = (desc->depth_view != VK_NULL_HANDLE) ? &depth_attachment : nullptr,
+        // Only bind if the stencil view is valid (shadow maps will pass NULL)
+        .pStencilAttachment = (desc->stencil_view != VK_NULL_HANDLE) ? &stencil_attachment : nullptr,
     };
 
     vkCmdBeginRendering(cmd, &rendering_info);

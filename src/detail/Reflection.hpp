@@ -164,7 +164,8 @@ template <typename T, typename F>
 constexpr void ForEachDataMember(F&& f) {
     constexpr auto members = std::define_static_array(std::meta::nonstatic_data_members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
 
-    ZHLN::Reflect::Expand(members) >> [&]<auto member>() { f.template operator()<member>(); };
+    // Wrap Expand in splice brackets to instantiate the ReplicatorType
+    [:ZHLN::Reflect::Expand(members):] >> [&]<auto member>() { f.template operator()<member>(); };
 }
 
 /**
@@ -174,7 +175,8 @@ template <typename T, typename F>
 constexpr void ForEachMemberFunction(F&& f) {
     constexpr auto members = std::define_static_array(std::meta::members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
 
-    ZHLN::Reflect::Expand(members) >> [&]<auto member>() {
+    // Wrap Expand in splice brackets to instantiate the ReplicatorType
+    [:ZHLN::Reflect::Expand(members):] >> [&]<auto member>() {
         if constexpr (std::meta::is_function(member) && std::meta::has_identifier(member)) {
             f.template operator()<member>();
         }
@@ -607,7 +609,8 @@ template <auto ScopeInfo, typename Tag, typename F>
 constexpr void ForEachAnnotatedTypeInScope(F&& f) {
     constexpr auto members = std::define_static_array(std::meta::members_of(ScopeInfo, std::meta::access_context::current()));
 
-    ZHLN::Reflect::Expand(members) >> [&]<auto m>() {
+    // Wrap Expand in splice brackets to instantiate the ReplicatorType
+    [:ZHLN::Reflect::Expand(members):] >> [&]<auto m>() {
         if constexpr (std::meta::is_type(m)) {
             constexpr bool isAnnotated = []() consteval {
                 for (auto a: std::meta::annotations_of(m)) {

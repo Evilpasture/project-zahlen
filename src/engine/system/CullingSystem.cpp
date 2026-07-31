@@ -184,6 +184,10 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
         Entity      e        = entities[i];
         const auto& meshComp = meshes[i];
 
+        if ((meshComp.flags & DrawFlags::Hidden) != DrawFlags::None) {
+            continue;
+        }
+
         auto     gpuMeshOpt = rc.GetGPUMesh(meshComp.meshAsset);
         uint32_t meshTris   = 0;
         if (gpuMeshOpt.has_value()) {

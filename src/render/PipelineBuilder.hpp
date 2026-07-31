@@ -64,6 +64,11 @@ struct PipelineConfig {
 
     // Specialization
     const VkSpecializationInfo* specialization_info = nullptr;
+
+    bool             stencil_test = false;
+    VkStencilOpState stencil_front {};
+    VkStencilOpState stencil_back {};
+    bool             color_write_enable = true;
 };
 
 // ============================================================================
@@ -209,6 +214,22 @@ class PipelineBuilder {
         return PipelineBuilder<ColorCount, false> {std::move(_cfg)};
     }
 
+    auto StencilTest(bool enable) noexcept -> PipelineBuilder& {
+        _cfg.stencil_test = enable;
+        return *this;
+    }
+
+    auto StencilOp(VkStencilOpState front, VkStencilOpState back) noexcept -> PipelineBuilder& {
+        _cfg.stencil_front = front;
+        _cfg.stencil_back  = back;
+        return *this;
+    }
+
+    auto ColorWriteEnable(bool enable) noexcept -> PipelineBuilder& {
+        _cfg.color_write_enable = enable;
+        return *this;
+    }
+
     template <size_t N>
     [[nodiscard]] auto ColorFormats(const std::array<VkFormat, N>& formats) && noexcept -> PipelineBuilder<N, HasDepth> {
         _cfg.color_formats.assign(formats.begin(), formats.end());
@@ -258,6 +279,10 @@ class PipelineBuilder {
             .additive_blend       = _cfg.additive_blend,
             .view_mask            = _cfg.view_mask,
             .specialization_info  = _cfg.specialization_info,
+            .stencil_test         = _cfg.stencil_test,
+            .stencil_front        = _cfg.stencil_front,
+            .stencil_back         = _cfg.stencil_back,
+            .color_write_enable   = _cfg.color_write_enable,
         };
     }
 

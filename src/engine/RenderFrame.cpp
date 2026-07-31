@@ -282,16 +282,17 @@ struct PassFactory {
     }
 
     [[nodiscard]] auto BuildSceneResources() const noexcept {
-        return SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> {
+        return SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> {
             .sceneColor = Vk::Assume<Vk::ColorWrite<Res_SceneColor>>(self.graphResources.sceneColor),
             .velocity   = Vk::Assume<Vk::ColorWrite<Res_Velocity>>(self.graphResources.velocityBuffer),
             .normRough  = Vk::Assume<Vk::ColorWrite<Res_NormRough>>(self.graphResources.normalRoughnessBuffer),
-            .depth      = Vk::Assume<Vk::DepthWrite<Res_Depth>>(self.presentation.depthTarget)
+            .depth      = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.presentation.depthTarget)
         };
     }
 
     [[nodiscard]] auto MakeMainPass() const noexcept {
-        return Vk::Passieren<"Main", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::DepthWrite<Res_Depth>>(
+        return Vk::Passieren<
+            "Main", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::DepthStencilWrite<Res_Depth>>(
             [this](VkCommandBuffer c) noexcept {
                 FrameRecorder mainRec(c, self);
                 Passes::MainPass {}.Execute(mainRec, BuildSceneResources());
@@ -301,7 +302,7 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeShadowPass() const noexcept {
         return Vk::Passieren<
-            "MainShadow", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::DepthWrite<Res_Depth>,
+            "MainShadow", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::DepthStencilWrite<Res_Depth>,
             Vk::DepthWrite<Res_ShadowMap>, Vk::DepthWrite<Res_ShadowAtlas>>([this](VkCommandBuffer c) noexcept {
             auto& rec = self.parallelRecorder.Current();
             rec.Reset();
@@ -430,10 +431,11 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeForwardPass() const noexcept {
         auto& targetImage = self.graphResources.hdrSceneColor;
-        return Vk::Passieren<"Forward", Vk::ColorWrite<Res_HdrSceneColor>, Vk::DepthWrite<Res_Depth>>([this, &targetImage](VkCommandBuffer c) noexcept {
+        return Vk::Passieren<"Forward", Vk::ColorWrite<Res_HdrSceneColor>, Vk::DepthStencilWrite<Res_Depth>>([this, &targetImage](VkCommandBuffer c) noexcept {
             FrameRecorder fwdRecorder(c, self);
             Passes::ForwardPass {}.Execute(
-                fwdRecorder, Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(targetImage), Vk::Assume<Vk::DepthWrite<Res_Depth>>(self.presentation.depthTarget)
+                fwdRecorder, Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(targetImage),
+                Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.presentation.depthTarget) // <-- Fixed!
             );
         });
     }
@@ -1019,11 +1021,27 @@ RenderResult RenderContext::EndFrame() noexcept {
                 _impl->SortDrawQueue();
 
                 auto drawCount = _impl->drawQueue.size();
-                if (drawCount > 0) {
+                auto csgCount  = _impl->csgDrawQueue.size();
+
+                if (drawCount > 0 || csgCount > 0) {
                     auto  mapped = _impl->instanceDataBuffers->Map();
                     auto* dst    = static_cast<InstanceData*>(mapped.data);
+
+                    // 1. Write standard draw queue
                     for (size_t i = 0; i < drawCount; ++i) {
                         dst[i] = _impl->drawQueue[i].instanceData;
+                    }
+
+                    // 2. Write CSG draw queue (Appended sequentially right after standard draw count)
+                    uint32_t csgOffset = drawCount;
+                    for (auto& csgCmd: _impl->csgDrawQueue) {
+                        dst[csgOffset]        = csgCmd.eyeDraw.instanceData;
+                        csgCmd.eyeInstanceIdx = csgOffset++;
+
+                        for (auto& cutter: csgCmd.cutters) {
+                            dst[csgOffset]     = cutter.draw.instanceData;
+                            cutter.instanceIdx = csgOffset++;
+                        }
                     }
                 }
                 _impl->BuildTLAS(cmd);
@@ -1164,6 +1182,104 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
          .morphWeights        = UnpackMorphWeights(params.morphWeights),
          .flags               = params.flags}
     );
+}
+
+void DrawCSG(RenderContext& ctx, const Material& eyeMaterial, const Mesh& eyeMesh, const CSGDrawParams& params) {
+    auto* impl = ctx.GetImpl();
+    if (impl->current_cmd == VK_NULL_HANDLE) {
+        return;
+    }
+
+    // Helper inside the backend to assemble DrawCommands cleanly
+    auto MakeCommand = [&](const Material& material, const Mesh& mesh, const JPH::Mat44& transform, const JPH::Mat44& prevTransform, float cullRadius,
+                           uint32_t jointOffset, BufferHandle skinnedVertexBuffer, DrawFlags flags) -> DrawCommand {
+        auto posMesh_res        = impl->meshPool.Resolve(mesh.posBuffer);
+        auto attrMesh_res       = impl->meshPool.Resolve(mesh.attrBuffer);
+        auto nativeMaterial_res = impl->materialPool.Resolve(material.pipeline);
+
+        if (!posMesh_res || !attrMesh_res || !nativeMaterial_res) {
+            return {};
+        }
+
+        auto* posMesh        = posMesh_res.value();
+        auto* attrMesh       = attrMesh_res.value();
+        auto* nativeMaterial = nativeMaterial_res.value();
+
+        auto* skinMesh  = (mesh.skinBuffer != BufferHandle::Invalid) ? impl->meshPool.Resolve(mesh.skinBuffer).value_or(nullptr) : nullptr;
+        auto* indexMesh = (mesh.indexBuffer != BufferHandle::Invalid) ? impl->meshPool.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
+
+        auto* finalPosMesh = (skinnedVertexBuffer != BufferHandle::Invalid) ? impl->meshPool.Resolve(skinnedVertexBuffer).value_or(nullptr) : posMesh;
+
+        VkDeviceAddress posAddr  = (finalPosMesh != nullptr) ? finalPosMesh->vboAddress : 0;
+        VkDeviceAddress attrAddr = (attrMesh != nullptr) ? attrMesh->vboAddress : 0;
+
+        if (posMesh == attrMesh && posMesh != nullptr) {
+            attrAddr = finalPosMesh->vboAddress + (500000 * sizeof(VertexPosition));
+        } else if (skinnedVertexBuffer != BufferHandle::Invalid && finalPosMesh != nullptr) {
+            attrAddr = finalPosMesh->vboAddress + (finalPosMesh->vertexCount * sizeof(VertexPosition));
+        }
+
+        uint32_t isSkinned = (skinnedVertexBuffer == BufferHandle::Invalid && (flags & DrawFlags::Skinned) != DrawFlags::None) ? 1u : 0u;
+
+        return {
+            .instanceData =
+                {
+                    .world            = transform,
+                    .prevWorld        = prevTransform,
+                    .posAddress       = posAddr,
+                    .attrAddress      = attrAddr,
+                    .skinAddress      = (skinMesh != nullptr) ? skinMesh->vboAddress : 0,
+                    .iboAddress       = (indexMesh != nullptr) ? indexMesh->vboAddress : 0,
+                    .vertexCount      = (finalPosMesh != nullptr) ? finalPosMesh->vertexCount : 0,
+                    .indexCount       = mesh.indexCount,
+                    .texIndices0      = (material.normalIndex << 16) | (material.albedoIndex & 0xFFFF),
+                    .texIndices1      = (material.emissiveIndex << 16) | (material.pbrIndex & 0xFFFF),
+                    .cullRadius       = cullRadius,
+                    .metallicFactor   = material.metallicFactor,
+                    .roughnessFactor  = material.roughnessFactor,
+                    .alphaCutoff      = material.alphaCutoff,
+                    .flags            = (isSkinned << 8) | (material.alphaMode & 0xFF),
+                    .jointOffset      = jointOffset, // Pass the actual joint offset!
+                    .morphOffset      = 0,
+                    .activeMorphCount = 0,
+                    .localCenter      = {},
+                    ._paddingCenter   = {},
+                    .morphWeights     = {},
+                    .baseColorFactor  = {material.baseColorFactor[0], material.baseColorFactor[1], material.baseColorFactor[2], material.baseColorFactor[3]},
+                    .emissiveFactor   = {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]},
+                },
+            .material            = nativeMaterial,
+            .posMesh             = finalPosMesh,
+            .attrMesh            = attrMesh,
+            .skinMesh            = skinMesh,
+            .skinnedVertexBuffer = skinnedVertexBuffer,
+            .jointOffset         = jointOffset,
+            .morphOffset         = 0,
+            .activeMorphCount    = 0,
+            .morphWeights        = {},
+            .flags               = flags
+        };
+    };
+
+    CSGDrawCommand csgCmd;
+
+    // 1. Build Eye Command
+    DrawFlags eyeFlags = params.eyeParams.flags;
+    csgCmd.eyeDraw     = MakeCommand(
+        eyeMaterial, eyeMesh, params.eyeParams.transform, params.eyeParams.prevTransform, params.eyeParams.cullRadius, params.eyeParams.jointOffset,
+        params.eyeParams.skinnedVertexBuffer, eyeFlags
+    );
+
+    // 2. Build Cutters
+    for (const auto& cutter: params.cutters) {
+        DrawCommand cutCmd = MakeCommand(
+            cutter.material, cutter.mesh, cutter.transform, cutter.prevTransform, cutter.cullRadius, cutter.jointOffset, cutter.skinnedVertexBuffer,
+            cutter.flags
+        );
+        csgCmd.cutters.push_back({.draw = cutCmd, .instanceIdx = 0, .operation = cutter.operation});
+    }
+
+    impl->csgDrawQueue.push_back(std::move(csgCmd));
 }
 
 void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex, bool useScissor, ScissorRect scissorRect) {

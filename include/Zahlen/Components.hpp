@@ -381,6 +381,14 @@ struct Components {
         uint32_t   twoSided;
         int32_t    shadowLayer = -1;
     };
+
+    struct CSGComponent {
+        struct Element {
+            CSGOperation operation;
+            Entity       operandEntity;
+        };
+        ZHLN::Array<Element> modifiers;
+    };
     static_assert(sizeof(LightComponent) == 160);
     static_assert(sizeof(UIStackComponent) == 12);
     static_assert(sizeof(UIRectComponent) == 64);

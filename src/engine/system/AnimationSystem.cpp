@@ -16,6 +16,7 @@
 #include <cmath>
 #include <ecs/ECS.hpp>
 #include <threading/TaskSystem.hpp>
+
 namespace ZHLN {
 
 uint32_t JointAllocator::Allocate(uint32_t count) noexcept {
@@ -60,6 +61,33 @@ void SampleChannel(const AnimationChannel& channel, float time, JPH::Vec3& outT,
         const float* s0 = &channel.keyValues[idx0 * 3];
         const float* s1 = &channel.keyValues[idx1 * 3];
         outS            = JPH::Vec3(s0[0] + factor * (s1[0] - s0[0]), s0[1] + factor * (s1[1] - s0[1]), s0[2] + factor * (s1[2] - s0[2]));
+    }
+}
+
+void SampleWeightsChannel(const AnimationChannel& channel, float time, float* outWeights, uint32_t maxWeights) noexcept {
+    if (channel.keyTimes.empty() || maxWeights == 0)
+        return;
+
+    auto   it   = std::upper_bound(channel.keyTimes.begin(), channel.keyTimes.end(), time);
+    size_t idx1 = (it == channel.keyTimes.end()) ? channel.keyTimes.size() - 1 : std::distance(channel.keyTimes.begin(), it);
+    size_t idx0 = (idx1 > 0) ? idx1 - 1 : 0;
+
+    float t0     = channel.keyTimes[idx0];
+    float t1     = channel.keyTimes[idx1];
+    float factor = (t1 > t0) ? (time - t0) / (t1 - t0) : 0.0f;
+
+    if (channel.interpolation == InterpolationType::Step) {
+        factor = 0.0f;
+    }
+
+    uint32_t numWeights = static_cast<uint32_t>(channel.keyValues.size() / channel.keyTimes.size());
+    uint32_t count      = std::min(numWeights, maxWeights);
+
+    const float* v0 = &channel.keyValues[idx0 * numWeights];
+    const float* v1 = &channel.keyValues[idx1 * numWeights];
+
+    for (uint32_t w = 0; w < count; ++w) {
+        outWeights[w] = v0[w] + factor * (v1[w] - v0[w]);
     }
 }
 
@@ -134,6 +162,10 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                 localTransforms[n] = prefab.nodes[n].localTransform;
             }
 
+            // Track animated morph weights per node
+            std::vector<std::array<float, 4>> nodeMorphWeights(prefab.nodes.size(), {0.0f, 0.0f, 0.0f, 0.0f});
+            std::vector<uint32_t>             nodeActiveMorphCounts(prefab.nodes.size(), 0);
+
             // B. Evaluate current animation track
             if (anim.currentTrackIdx >= 0 && anim.currentTrackIdx < static_cast<int32_t>(prefab.animations.size())) {
                 const auto& clip = prefab.animations[anim.currentTrackIdx];
@@ -149,11 +181,18 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                     if (channel.targetNodeIndex < 0 || channel.targetNodeIndex >= static_cast<int32_t>(prefab.nodes.size()))
                         continue;
 
-                    JPH::Vec3 t, s;
-                    JPH::Quat r;
-                    Decompose(localTransforms[channel.targetNodeIndex], t, r, s);
-                    SampleChannel(channel, anim.currentTrackTime, t, r, s);
-                    localTransforms[channel.targetNodeIndex] = JPH::Mat44::sRotationTranslation(r, t).PreScaled(s);
+                    // --- HANDLE INTERPOLATED MORPH WEIGHT CHANNELS ---
+                    if (channel.path == AnimationPathType::Weights) {
+                        uint32_t numWeights                            = static_cast<uint32_t>(channel.keyValues.size() / channel.keyTimes.size());
+                        nodeActiveMorphCounts[channel.targetNodeIndex] = std::min(numWeights, 4u);
+                        SampleWeightsChannel(channel, anim.currentTrackTime, nodeMorphWeights[channel.targetNodeIndex].data(), 4);
+                    } else {
+                        JPH::Vec3 t, s;
+                        JPH::Quat r;
+                        Decompose(localTransforms[channel.targetNodeIndex], t, r, s);
+                        SampleChannel(channel, anim.currentTrackTime, t, r, s);
+                        localTransforms[channel.targetNodeIndex] = JPH::Mat44::sRotationTranslation(r, t).PreScaled(s);
+                    }
                 }
             }
 
@@ -180,7 +219,7 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                 GetWorldTransform(GetWorldTransform, static_cast<int32_t>(n));
             }
 
-            // D. Apply calculated node matrices to ALL child mesh primitives of this root entity
+            // D. Apply calculated node matrices & morph weights to child mesh primitives
             for (Entity childEnt: allMeshEntities) {
                 auto* hier = reg.Get<Components::HierarchyComponent>(childEnt);
                 if (!hier || hier->parent != rootEntity)
@@ -189,6 +228,12 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                 auto* mesh = reg.Get<Components::MeshComponent>(childEnt);
                 if (!mesh || mesh->nodeIndex < 0 || mesh->nodeIndex >= static_cast<int32_t>(prefab.nodes.size()))
                     continue;
+
+                // --- WRITE INTERPOLATED MORPH WEIGHTS TO THE MESH COMPONENT ---
+                if (nodeActiveMorphCounts[mesh->nodeIndex] > 0) {
+                    mesh->activeMorphCount = nodeActiveMorphCounts[mesh->nodeIndex];
+                    mesh->morphWeights     = nodeMorphWeights[mesh->nodeIndex];
+                }
 
                 if (mesh->isSkinned) {
                     // Skinned primitives: calculate GPU joint matrices

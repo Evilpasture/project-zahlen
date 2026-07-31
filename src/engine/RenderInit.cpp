@@ -138,7 +138,7 @@ std::expected<void, Error> RenderContext::Impl::BuildParticlePipelines() {
                         .Shaders(shaders)
                         .Layout(particleRenderLayout.Get())
                         .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT}) // Target HDR scene color
-                        .DepthFormat(VK_FORMAT_D32_SFLOAT)
+                        .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
                         .DepthTest(true)
                         .DepthWrite(false)
                         .AdditiveBlend()
@@ -192,6 +192,7 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
         .and_then([&]() {
             return CompilePunctualShadowPipeline(ctx.Device(), Resource::GetShaderProgram(PunctualShadows)).transform_error([](auto e) -> Error { return e; });
         })
+        .and_then([&]() { return InitCSGPipelines(); })
         .and_then([&]() { return presentation.Init(ctx, allocator, surface.Get(), width, height, cfg.vsync); })
         .and_then([&]() {
             sync  = Vk::FrameSync<2>::Create(ctx.Device());
@@ -1160,6 +1161,122 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
         });
 }
 
+std::expected<void, Error> RenderContext::Impl::InitCSGPipelines() {
+    using enum Resource::ShaderID;
+
+    // We declare the shared shaders in a stack variable so all lambdas can reference it.
+    Vk::ShaderStages shaders;
+
+    auto basicShaders = Resource::GetShaderProgram(Basic);
+
+    return LoadAndCreateShaders(
+               {.path = SHADER_BASIC_HLSL_VS_PATH, .fallback = basicShaders.vertex, .entryPoint = "VSMain"},
+               {.path = SHADER_BASIC_HLSL_PS_PATH, .fallback = basicShaders.fragment, .entryPoint = "PSMain"}
+    )
+        .and_then([&](auto&& compiledShaders) {
+            shaders = std::forward<decltype(compiledShaders)>(compiledShaders);
+
+            return Vk::PipelineLayoutBuilder(ctx.Device())
+                .AddDescriptorSetLayout(bindlessLayout.Get())
+                .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
+                .Build()
+                .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; });
+        })
+        .and_then([&](auto&& layout) {
+            csgPipelineLayout = std::forward<decltype(layout)>(layout);
+
+            VkStencilOpState writeStencil = {
+                .failOp      = VK_STENCIL_OP_KEEP,
+                .passOp      = VK_STENCIL_OP_REPLACE,
+                .depthFailOp = VK_STENCIL_OP_KEEP,
+                .compareOp   = VK_COMPARE_OP_ALWAYS,
+                .compareMask = 0xFF,
+                .writeMask   = 0xFF,
+                .reference   = 1
+            };
+
+            return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
+                .Shaders(shaders)
+                .Layout(csgPipelineLayout.Get())
+                .ColorFormats(ActiveGBuffer::array)
+                .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
+                .DepthTest(true)
+                .DepthWrite(false)
+                .CullNone()
+                .ColorWriteEnable(false)
+                .StencilTest(true)
+                .StencilOp(writeStencil, writeStencil)
+                .Build(ctx.Device())
+                .transform_error([](auto e) -> Error { return e; });
+        })
+        .and_then([&](auto&& writePipeline) {
+            csgWritePipeline = std::forward<decltype(writePipeline)>(writePipeline);
+
+            VkStencilOpState diffStencil = {
+                .failOp      = VK_STENCIL_OP_KEEP,
+                .passOp      = VK_STENCIL_OP_KEEP,
+                .depthFailOp = VK_STENCIL_OP_KEEP,
+                .compareOp   = VK_COMPARE_OP_NOT_EQUAL,
+                .compareMask = 0xFF,
+                .writeMask   = 0x00,
+                .reference   = 1
+            };
+
+            return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
+                .Shaders(shaders)
+                .Layout(csgPipelineLayout.Get())
+                .ColorFormats(ActiveGBuffer::array)
+                .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
+                .DepthTest(true)
+                .DepthWrite(true)
+                .CullBack()
+                .ColorWriteEnable(true)
+                .StencilTest(true)
+                .StencilOp(diffStencil, diffStencil)
+                .Build(ctx.Device())
+                .transform_error([](auto e) -> Error { return e; });
+        })
+        .and_then([&](auto&& diffPipeline) {
+            csgDifferencePipeline = std::forward<decltype(diffPipeline)>(diffPipeline);
+
+            VkStencilOpState intersectStencil = {
+                .failOp      = VK_STENCIL_OP_KEEP,
+                .passOp      = VK_STENCIL_OP_KEEP,
+                .depthFailOp = VK_STENCIL_OP_KEEP,
+                .compareOp   = VK_COMPARE_OP_EQUAL,
+                .compareMask = 0xFF,
+                .writeMask   = 0x00,
+                .reference   = 1
+            };
+
+            return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
+                .Shaders(shaders)
+                .Layout(csgPipelineLayout.Get())
+                .ColorFormats(ActiveGBuffer::array)
+                .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
+                .DepthTest(true)
+                .DepthWrite(true)
+                .CullBack()
+                .ColorWriteEnable(true)
+                .StencilTest(true)
+                .StencilOp(intersectStencil, intersectStencil)
+                .Build(ctx.Device())
+                .transform_error([](auto e) -> Error { return e; });
+        })
+        .transform([&](auto&& intersectPipeline) {
+            csgIntersectionPipeline = std::forward<decltype(intersectPipeline)>(intersectPipeline);
+
+            WatchPipeline(SHADER_BASIC_HLSL_VS_PATH, SHADER_BASIC_HLSL_PS_PATH, [this]() {
+                auto res = InitCSGPipelines();
+                if (!res) {
+                    ZHLN::Log("ERROR: Failed to hot-reload CSG stencil pipelines: {}", res.error().Message());
+                } else {
+                    ZHLN::Log("[Shader Reload] CSG Stencil pipelines hot-reloaded successfully.");
+                }
+            });
+        });
+}
+
 std::expected<void, Error> RenderContext::Impl::SetupUI(GLFWwindow* window) {
     auto make_expected = [](bool success, Error err) -> std::expected<void, Error> {
         if (success) {
@@ -1247,7 +1364,7 @@ std::expected<void, Error> RenderContext::Impl::SetupUI(GLFWwindow* window) {
                                  .viewMask                = 0,
                                  .colorAttachmentCount    = 1,
                                  .pColorAttachmentFormats = &swapchainFormat,
-                                 .depthAttachmentFormat   = VK_FORMAT_D32_SFLOAT,
+                                 .depthAttachmentFormat   = VK_FORMAT_D32_SFLOAT_S8_UINT,
                                  .stencilAttachmentFormat = VK_FORMAT_UNDEFINED},
                         },
                     .UseDynamicRendering        = true,
@@ -1433,11 +1550,11 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
         }
 
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-            cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(
+            cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
         );
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-            cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+            cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
         );
         std::array targets3D = {
             graphResources.voxelMedia.image.Handle(), graphResources.voxelLight.image.Handle(), graphResources.voxelIntegrated.image.Handle()

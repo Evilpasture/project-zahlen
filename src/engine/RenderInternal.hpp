@@ -457,8 +457,20 @@ struct UIDrawCommand {
     uint32_t    fontIndex;
 
     // --- Scissoring Bounds ---
-    bool        useScissor = false;
-    ScissorRect scissorRect {};
+    bool        useScissor;
+    ScissorRect scissorRect;
+};
+
+struct CSGDrawCommand {
+    DrawCommand eyeDraw;
+    uint32_t    eyeInstanceIdx;
+
+    struct Cutter {
+        DrawCommand  draw;
+        uint32_t     instanceIdx;
+        CSGOperation operation;
+    };
+    ZHLN::Array<Cutter> cutters;
 };
 
 struct WorkerCmdContext {
@@ -484,7 +496,7 @@ struct ShaderPair;
 using Res_SceneColor    = Vk::GraphImage<"SceneColor", VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_Velocity      = Vk::GraphImage<"Velocity", VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_NormRough     = Vk::GraphImage<"NormRough", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_Depth         = Vk::GraphImage<"Depth", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
+using Res_Depth         = Vk::GraphImage<"Depth", VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT>;
 using Res_ShadowMap     = Vk::GraphImage<"ShadowMap", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
 using Res_ShadowAtlas   = Vk::GraphImage<"ShadowAtlas", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
 using Res_Ambient       = Vk::GraphImage<"Ambient", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
@@ -742,8 +754,14 @@ struct RenderContext::Impl {
     ZHLN::HashMap<uint64_t, BufferHandle> skinnedScratchMap;
 
     ZHLN::Array<DrawCommand>           drawQueue;
+    ZHLN::Array<CSGDrawCommand>        csgDrawQueue;
     ZHLN::Array<GPULight>              mappedLights;
     ZHLN::DoubleBuffered<BufferHandle> debugMeshHandles;
+
+    Vk::Pipeline       csgWritePipeline;
+    Vk::Pipeline       csgDifferencePipeline;
+    Vk::Pipeline       csgIntersectionPipeline;
+    Vk::PipelineLayout csgPipelineLayout;
 
     // ============================================================================
     // User Interface Rendering (Vulkan Bound)
@@ -921,6 +939,7 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, Error> BuildBloomPipelines();
     [[nodiscard]] std::expected<void, Error> BuildHangGpuPipeline();
     [[nodiscard]] std::expected<void, Error> InitPostProcessing();
+    [[nodiscard]] std::expected<void, Error> InitCSGPipelines();
     [[nodiscard]] std::expected<void, Error> SetupUI(GLFWwindow* window);
 
     [[nodiscard]] auto CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, Error>;
@@ -1002,8 +1021,8 @@ struct ShadowPass {
 
 struct MainPass {
     void Execute(
-        const FrameRecorder&                                                                               recorder,
-        SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> in
+        const FrameRecorder&                                                                                       recorder,
+        SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> in
     ) const noexcept;
 };
 
@@ -1020,9 +1039,9 @@ struct DeferredLightingPass {
 
 struct ForwardPass {
     void Execute(
-        const FrameRecorder&                                     recorder,
-        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> litColor,
-        Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> depth
+        const FrameRecorder&                                             recorder,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         litColor,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> depth
     ) const noexcept;
 };
 
