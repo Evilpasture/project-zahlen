@@ -9,10 +9,10 @@ RUN pacman -Sy --noconfirm && \
 
 RUN pacman -S --needed --noconfirm \
     base-devel \
+    gcc \
     cmake \
     ninja \
     git \
-    clang \
     python \
     blender \
     directx-shader-compiler \
@@ -23,10 +23,13 @@ RUN pacman -S --needed --noconfirm \
     fontconfig \
     zstd \
     gtest \
-    fennel
+    fennel \
+    simdjson \
+    pkgconf
 
-ENV CC=clang
-ENV CXX=clang++
+# Set default compilers to GCC
+ENV CC=gcc
+ENV CXX=g++
 
 WORKDIR /workspace
 
