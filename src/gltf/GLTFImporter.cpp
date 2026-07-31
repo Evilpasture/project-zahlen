@@ -4,6 +4,7 @@
 // File: src/gltf/GLTFImporter.cpp
 
 #include "GLTFImporter.hpp"
+#include "Zahlen/JSON.hpp"
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Zahlen/CreativeWorksFactory.hpp>
@@ -25,7 +26,9 @@
 namespace ZHLN::GLTF {
 
 namespace {
-
+struct NodeExtras {
+    std::string csg_data; // Will hold the serialized JSON string of modifiers
+};
 // ============================================================================
 // INTERNAL CPU PARSING & TEXTURE WORKSTRUCTURES
 // ============================================================================
@@ -779,6 +782,23 @@ ModelPrefab* LoadGLBPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, std:
         part.localMax[2]    = compPrim.localMax[2];
         part.meshCollider   = compPrim.meshCollider;
         part.boxCollider    = compPrim.boxCollider;
+
+        // ====================================================================
+        // PARSE CSG METADATA VIA JSON.hpp
+        // ====================================================================
+        if (node->extras.start_offset != node->extras.end_offset) {
+            std::string_view extras_json(data->json + node->extras.start_offset, node->extras.end_offset - node->extras.start_offset);
+
+            // 1. Parse the outer "extras" object to find "csg_data"
+            auto extras_res = ZHLN::ReflectJSON::TryParse<NodeExtras>(extras_json);
+            if (extras_res) {
+                // 2. Parse the inner "csg_data" string as a JSON array of CSGModifiers
+                auto csg_res = ZHLN::ReflectJSON::TryParse<std::vector<CSGModifier>>(extras_res->csg_data);
+                if (csg_res) {
+                    part.csgModifiers = std::move(*csg_res);
+                }
+            }
+        }
 
         prefab->parts.push_back(std::move(part));
     }

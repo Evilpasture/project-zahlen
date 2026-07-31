@@ -335,6 +335,12 @@ typedef struct ZHLN_GraphicsPipelineDesc {
     const bool                  additive_blend; // Explicitly route additive blend configuration
     const uint32_t              view_mask;      // Explicit Multiview mask (0 = disabled)
     const VkSpecializationInfo* specialization_info;
+
+    // --- CSG Extensions ---
+    const bool       stencil_test;
+    VkStencilOpState stencil_front;
+    VkStencilOpState stencil_back;
+    const bool       color_write_enable; // False = disables color writes (used to write masks to stencil)
 } ZHLN_GraphicsPipelineDesc;
 
 [[nodiscard]]
@@ -348,6 +354,7 @@ typedef struct ZHLN_RenderPassDesc {
     const VkImageView target_views[4]; // Array instead of single view
     const uint32_t    target_count;    // How many targets are we writing to?
     const VkImageView depth_view;
+    const VkImageView stencil_view;
     const VkExtent2D  extent;
     const float       clear_color[4];
     const float       clear_depth;

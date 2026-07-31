@@ -17,6 +17,8 @@ set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+
 set(CMAKE_C_STANDARD 23)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
@@ -261,6 +263,7 @@ endif()
 # Dependencies needed on both Linux and macOS
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
     pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
+    pkg_check_modules(SIMDJSON REQUIRED IMPORTED_TARGET simdjson)
 endif()
 
 set(COMPILER_FLAGS_LIST "${CMAKE_CXX_FLAGS}")
@@ -347,6 +350,7 @@ target_link_libraries(zahlen_engine PRIVATE
     imgui
     mimalloc-static
     ${ZSTD_LIBRARY}
+    PkgConfig::SIMDJSON
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -609,5 +613,6 @@ endif()
 if(COMPILER_HAS_REFLECTION)
     target_compile_options(zahlen_render PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
     target_compile_options(zahlen_engine PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
+    target_compile_options(zahlen_gltf PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
     target_compile_options(zahlen PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
 endif()

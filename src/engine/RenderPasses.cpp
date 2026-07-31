@@ -4,6 +4,7 @@
 #include "RenderInternal.hpp"
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Math3D.hpp"
+#include "Zahlen/Profiler.hpp"
 #include "backends/imgui_impl_vulkan.h"
 #include "imgui.h"
 #include <array>
@@ -64,15 +65,59 @@ inline void SubmitDrawInstanced(
     );
 }
 
+void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept {
+    VkCommandBuffer cmd = recorder.cmd;
+    auto&           ctx = recorder.ctx;
+
+    if (ctx.csgDrawQueue.empty() || !ctx.csgWritePipeline.Valid()) {
+        return;
+    }
+
+    ZHLN_PROFILE_SCOPE("GPU Stencil CSG Passes");
+
+    for (const auto& csgCmd: ctx.csgDrawQueue) {
+        // A. Clear stencil to 0 (In-line clear of the active viewport area)
+        VkClearAttachment clearAttachment = {
+            .aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT, .colorAttachment = {}, .clearValue = {.depthStencil = {.depth = 1.0f, .stencil = 0}}
+        };
+        VkClearRect clearRect = {
+            // Construct the VkExtent2D inline using the 3D dimensions
+            .rect           = {.offset = {.x = 0, .y = 0}, .extent = {.width = extent.width, .height = extent.height}},
+            .baseArrayLayer = 0,
+            .layerCount     = 1
+        };
+        vkCmdClearAttachments(cmd, 1, &clearAttachment, 1, &clearRect);
+
+        // B. Draw Cutters using csgWritePipeline (No color writes, writes 1s to stencil)
+        for (const auto& cutter: csgCmd.cutters) {
+            const ObjectConstants push = {.instanceId = cutter.instanceIdx, .isShadowPass = 0};
+            SubmitDrawInstanced(
+                recorder.encoder, cutter.draw, cutter.instanceIdx, recorder.bindlessSet, push, ctx.csgWritePipeline.Get(), ctx.csgPipelineLayout.Get()
+            );
+        }
+
+        // C. Draw Eye using the appropriate CSG Stencil Pipeline
+        VkPipeline activePipeline = ctx.csgDifferencePipeline.Get();
+        if (!csgCmd.cutters.empty() && csgCmd.cutters[0].operation == CSGOperation::Intersection) {
+            activePipeline = ctx.csgIntersectionPipeline.Get();
+        }
+
+        const ObjectConstants push = {.instanceId = csgCmd.eyeInstanceIdx, .isShadowPass = 0};
+        SubmitDrawInstanced(recorder.encoder, csgCmd.eyeDraw, csgCmd.eyeInstanceIdx, recorder.bindlessSet, push, activePipeline, ctx.csgPipelineLayout.Get());
+    }
+
+    ctx.csgDrawQueue.clear(); // Flush queue for the next frame
+}
+
 struct GpuCullingPolicy {
     static void Record(
-        const FrameRecorder&                                     recorder,
-        const ZHLN::Array<GroupRange>&                           groups,
-        uint32_t                                                 drawCount,
-        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> color_att,
-        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> vel_att,
-        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> norm_att,
-        Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> depth_att
+        const FrameRecorder&                                             recorder,
+        const ZHLN::Array<GroupRange>&                                   groups,
+        uint32_t                                                         drawCount,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         color_att,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         vel_att,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         norm_att,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> depth_att
     ) noexcept {
         VkCommandBuffer cmd = recorder.cmd;
         auto&           ctx = recorder.ctx;
@@ -129,6 +174,7 @@ struct GpuCullingPolicy {
                         ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 0}
                     );
                 }
+                DrawCSGMeshes(recorder, color_att.extent);
             });
     }
 };
@@ -137,11 +183,11 @@ struct CpuCullingPolicy {
     static void Record(
         const FrameRecorder& recorder,
         const ZHLN::Array<GroupRange>& /*groups*/,
-        uint32_t                                                 drawCount,
-        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> color_att,
-        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> vel_att,
-        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> norm_att,
-        Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> depth_att
+        uint32_t                                                         drawCount,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         color_att,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         vel_att,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         norm_att,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> depth_att
     ) noexcept {
         VkCommandBuffer cmd = recorder.cmd;
         auto&           ctx = recorder.ctx;
@@ -156,7 +202,7 @@ struct CpuCullingPolicy {
             .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT)
             .Execute(cmd, [&]() {
                 Vk::ParallelDrawDispatch(
-                    cmd, Vk::SecondaryInheritance {.colorFormats = colorFormats, .depthFormat = VK_FORMAT_D32_SFLOAT},
+                    cmd, Vk::SecondaryInheritance {.colorFormats = colorFormats, .depthFormat = VK_FORMAT_D32_SFLOAT_S8_UINT},
                     {.width = color_att.extent.width, .height = color_att.extent.height}, // Explicit 3D -> 2D Truncation
                     drawCount, kParallelChunkSize,
 
@@ -181,6 +227,7 @@ struct CpuCullingPolicy {
                         SubmitDrawInstanced(encoder, drawCmd, i, recorder.bindlessSet, pushConstants);
                     }
                 );
+                DrawCSGMeshes(recorder, color_att.extent);
             });
     }
 };
@@ -341,8 +388,8 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 }
 
 void MainPass::Execute(
-    const FrameRecorder&                                                                               recorder,
-    SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> in
+    const FrameRecorder&                                                                                       recorder,
+    SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> in
 ) const noexcept {
     auto  cmd = recorder.cmd;
     auto& ctx = recorder.ctx;
@@ -394,9 +441,9 @@ void MainPass::Execute(
 }
 
 void ForwardPass::Execute(
-    const FrameRecorder&                                     recorder,
-    Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> litColor,
-    Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> depth
+    const FrameRecorder&                                             recorder,
+    Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         litColor,
+    Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> depth
 ) const noexcept {
     VkCommandBuffer cmd = recorder.cmd;
     const auto&     ctx = recorder.ctx;

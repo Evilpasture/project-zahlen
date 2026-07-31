@@ -8,6 +8,7 @@
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/render/RenderCode.hpp>
+#include <detail/Array.hpp>
 #include <detail/String.hpp>
 #include <expected>
 #include <memory>
@@ -127,6 +128,23 @@ struct DrawParams {
     float metallic  = -1.0f;
 };
 
+struct CSGCutterParams {
+    Mesh         mesh;
+    Material     material;
+    JPH::Mat44   transform           = JPH::Mat44::sIdentity();
+    JPH::Mat44   prevTransform       = JPH::Mat44::sIdentity();
+    float        cullRadius          = 1.0f;
+    CSGOperation operation           = CSGOperation::Difference;
+    uint32_t     jointOffset         = 0;
+    BufferHandle skinnedVertexBuffer = BufferHandle::Invalid;
+    DrawFlags    flags               = DrawFlags::None;
+};
+
+struct CSGDrawParams {
+    DrawParams                   eyeParams;
+    ZHLN::Array<CSGCutterParams> cutters; // Stably using your custom Array container
+};
+
 namespace Renderer {
 
 void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj);
@@ -135,6 +153,7 @@ void SetGISettings(RenderContext& ctx, const GISettings& settings);
 
 void SetLights(RenderContext& ctx, const GPULight* lights, uint32_t count);
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const DrawParams& params);
+void DrawCSG(RenderContext& ctx, const Material& eyeMaterial, const Mesh& eyeMesh, const CSGDrawParams& params);
 void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex, bool useScissor = false, ScissorRect scissorRect = {});
 
 } // namespace Renderer

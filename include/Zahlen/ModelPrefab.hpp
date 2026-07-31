@@ -41,6 +41,8 @@ struct ModelPart {
 
     JPH::ShapeRefC meshCollider = nullptr;
     JPH::ShapeRefC boxCollider  = nullptr;
+
+    std::vector<CSGModifier> csgModifiers;
 };
 
 struct ModelPrefab {

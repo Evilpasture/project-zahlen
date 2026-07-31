@@ -195,7 +195,7 @@ std::expected<Material, Error> RenderContext::CreateMaterial(const PipelineDesc&
                     return MaterialCreationError::PipelineLayoutCreationFailed;
                 })
                 .and_then([impl, &desc, &shaders](auto&& layout) -> std::expected<Material, Error> {
-                    auto pipeline = Vk::PipelineBuilder {}.Shaders(shaders).Layout(layout.Get()).DepthFormat(VK_FORMAT_D32_SFLOAT);
+                    auto pipeline = Vk::PipelineBuilder {}.Shaders(shaders).Layout(layout.Get()).DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT);
 
                     if (desc.doubleSided) {
                         pipeline.CullNone();

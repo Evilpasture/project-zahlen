@@ -18,7 +18,7 @@ class PresentationContext {
     SemaphorePool presentSemaphores;
 
     // The main depth buffer is tied to the window resolution
-    RenderTarget<VK_FORMAT_D32_SFLOAT> depthTarget;
+    RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT> depthTarget;
 
     PresentationContext()  = default;
     ~PresentationContext() = default;
@@ -72,7 +72,7 @@ class PresentationContext {
         presentSemaphores.Rebuild(_ctx->Device(), swapchain.Get().image_count);
 
         // Automatically recreate the depth buffer to match the new swapchain extent
-        depthTarget = RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+        depthTarget = RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
             *_alloc, *_ctx, swapchain.Get().extent, {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT}
         );
 

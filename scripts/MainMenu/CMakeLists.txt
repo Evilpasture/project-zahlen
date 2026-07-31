@@ -5,7 +5,10 @@ cmake_minimum_required(VERSION 3.28)
 
 add_library(zahlen_main_menu STATIC)
 
-set_target_properties(zahlen_main_menu PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(zahlen_main_menu PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_SCAN_FOR_MODULES ON
+)
 
 target_sources(zahlen_main_menu
     PUBLIC

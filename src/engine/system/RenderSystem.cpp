@@ -234,6 +234,60 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
                     metallic  = pbr->metallic;
                 }
 
+                // --- STENCIL CSG INTERCEPTION ---
+                if (auto* csg = reg.Get<Components::CSGComponent>(e)) {
+                    CSGDrawParams csgParams;
+                    csgParams.eyeParams = {
+                        .transform           = meshComp->worldTransform,
+                        .prevTransform       = meshComp->prevTransform,
+                        .cullRadius          = meshComp->cullRadius,
+                        .localCenter         = {meshComp->localCenter.GetX(), meshComp->localCenter.GetY(), meshComp->localCenter.GetZ()},
+                        .jointOffset         = meshComp->jointOffset,
+                        .morphOffset         = meshComp->morphOffset,
+                        .activeMorphCount    = meshComp->activeMorphCount,
+                        .flags               = drawFlags,
+                        .skinnedVertexBuffer = scratchVbo,
+                        .roughness           = roughness,
+                        .metallic            = metallic
+                    };
+                    csgParams.eyeParams.morphWeights = meshComp->morphWeights.data();
+
+                    for (const auto& mod: csg->modifiers) {
+                        if (reg.IsAlive(mod.operandEntity)) {
+                            if (auto* cutMesh = reg.Get<Components::MeshComponent>(mod.operandEntity)) {
+                                auto cutGpuMeshOpt = rc.GetGPUMesh(cutMesh->meshAsset);
+                                auto cutGpuMatOpt  = rc.GetGPUMaterial(cutMesh->materialAsset);
+                                if (cutGpuMeshOpt && cutGpuMatOpt) {
+                                    // Resolve skinning scratch VBO for the cutter if it's skinned
+                                    BufferHandle cutScratchVbo = BufferHandle::Invalid;
+                                    if (cutMesh->isSkinned) {
+                                        cutScratchVbo = rc.GetOrCreateSkinnedScratchBuffer(mod.operandEntity.Pack(), cutGpuMeshOpt->vertexCount);
+                                    }
+
+                                    csgParams.cutters.push_back(
+                                        {.mesh          = *cutGpuMeshOpt,
+                                         .material      = *cutGpuMatOpt,
+                                         .transform     = cutMesh->worldTransform,
+                                         .prevTransform = cutMesh->prevTransform,
+                                         .cullRadius    = cutMesh->cullRadius,
+                                         .operation     = mod.operation,
+
+                                         .jointOffset         = cutMesh->jointOffset,
+                                         .skinnedVertexBuffer = cutScratchVbo,
+                                         .flags               = cutMesh->flags}
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    if (!csgParams.cutters.empty()) {
+                        Renderer::DrawCSG(rc, gpuMat, gpuMesh, csgParams); // Clean, opaque public call
+                        continue;
+                    }
+                }
+
+                // Standard non-CSG path
                 Renderer::Draw(
                     rc, gpuMat, gpuMesh,
                     {.transform           = meshComp->worldTransform,

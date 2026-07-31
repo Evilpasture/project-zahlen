@@ -280,8 +280,13 @@ constexpr auto DynamicPass<ColorCount, HasDepth>::AddDepth(
     VkAttachmentStoreOp       storeOp,
     float                     clearVal
 ) && noexcept -> DynamicPass<ColorCount, true> {
-    static_assert(!HasDepth, "ZHLN Execution Error: Depth target already bound to this pass.");
-    static_assert(Layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL || Layout == VK_IMAGE_LAYOUT_GENERAL);
+    static_assert(!HasDepth, "ZHLN Execution Error: Depth target already bound.");
+    // Allow both depth-only and combined depth-stencil layouts
+    static_assert(
+        Layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL || Layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL || Layout == VK_IMAGE_LAYOUT_GENERAL
+    );
+
+    _hasStencil = (img.format == VK_FORMAT_D32_SFLOAT_S8_UINT || img.format == VK_FORMAT_D24_UNORM_S8_UINT);
 
     _depth = {
         .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
@@ -318,7 +323,7 @@ void DynamicPass<ColorCount, HasDepth>::Execute(VkCommandBuffer cmd, Func&& func
         .colorAttachmentCount = ColorCount,
         .pColorAttachments    = ColorCount > 0 ? _colors.data() : nullptr,
         .pDepthAttachment     = GetDepthPtr(),
-        .pStencilAttachment   = nullptr,
+        .pStencilAttachment   = (HasDepth && _hasStencil) ? &_depth : nullptr,
     };
 
     vkCmdBeginRendering(cmd, &rendering_info);
