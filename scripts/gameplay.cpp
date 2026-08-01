@@ -18,6 +18,7 @@
 // C++ Standard Library & Engine Modules
 import std;
 import ZHLN.MainMenu;
+import ZHLN.Lightning; // <-- Imported Lightning Module
 
 #if defined(_WIN32)
 #define GAMEPLAY_API extern "C" __declspec(dllexport)
@@ -50,12 +51,13 @@ namespace Game {
 using namespace ZHLN;
 
 struct SnowSceneState {
-    ScriptECSBridge* bridge = nullptr;
-    MainMenu         mainMenu;
-    bool             gameStarted = false;
-    bool             wonGame     = false;
-    bool             wasRDown    = false;
-    float            totalTime   = 0.0f;
+    ScriptECSBridge*    bridge = nullptr;
+    MainMenu            mainMenu;
+    LightningSimulation lightningSim; // <-- 3D Lightning DBM Simulation Instance
+    bool                gameStarted = false;
+    bool                wonGame     = false;
+    bool                wasRDown    = false;
+    float               totalTime   = 0.0f;
 
     Entity playerEnt     = NullEntity;
     Entity snowTerrain   = NullEntity;
@@ -434,6 +436,76 @@ void StartGame(Engine* engine) {
     g_State.gameStarted = true;
 }
 
+// ============================================================================
+// LIGHTNING CLICK STRIKE SYSTEM (Raycasts click to mountain & spawns DBM bolt)
+// ============================================================================
+void LightningClickStrikeSystem(Engine* engine, float dt) {
+    const auto& input = engine->GetInput();
+    const auto& cam   = engine->GetCamera();
+    auto        mouse = input.GetMouse();
+    auto        win   = engine->GetWindow().GetSize();
+
+    bool        isLMouseDown  = input.IsMouseButtonDown(KeyCode::LButton);
+    static bool wasLMouseDown = false;
+
+    // Detect left mouse button click edge
+    if (isLMouseDown && !wasLMouseDown) {
+        if (win.width > 0 && win.height > 0) {
+            float ndcX = (2.0f * mouse.x) / static_cast<float>(win.width) - 1.0f;
+            // Corrected for Vulkan Y-Down NDC: Top of screen = -1.0, Bottom of screen = +1.0
+            float ndcY   = (2.0f * mouse.y) / static_cast<float>(win.height) - 1.0f;
+            float aspect = static_cast<float>(win.width) / static_cast<float>(win.height);
+
+            JPH::Mat44 invVP     = (cam.GetProjectionMatrix(aspect) * cam.GetViewMatrix()).Inversed();
+            JPH::Vec4  nearWorld = invVP * JPH::Vec4(ndcX, ndcY, 0.0f, 1.0f);
+            JPH::Vec4  farWorld  = invVP * JPH::Vec4(ndcX, ndcY, 1.0f, 1.0f);
+
+            JPH::Vec3 pNear = JPH::Vec3(nearWorld.GetX() / nearWorld.GetW(), nearWorld.GetY() / nearWorld.GetW(), nearWorld.GetZ() / nearWorld.GetW());
+            JPH::Vec3 pFar  = JPH::Vec3(farWorld.GetX() / farWorld.GetW(), farWorld.GetY() / farWorld.GetW(), farWorld.GetZ() / farWorld.GetW());
+            JPH::Vec3 dir   = (pFar - pNear).Normalized();
+
+            // Ignore player's physics body during picking
+            Entity ignorePhys = NullEntity;
+            if (g_State.playerEnt != NullEntity) {
+                if (auto* phys = engine->GetRegistry().Get<Components::PhysicsComponent>(g_State.playerEnt)) {
+                    ignorePhys = phys->physicsHandle;
+                }
+            }
+
+            auto hit = Physics::Raycast(engine->GetPhysicsContext(), JPH::RVec3(pNear), dir, 2000.0f, ignorePhys);
+
+            JPH::RVec3 impactPos;
+            if (hit.hasHit) {
+                impactPos = hit.position;
+            } else {
+                // Fallback: Intersect with ground plane Y = 0 if clicking sky
+                if (std::abs(dir.GetY()) > 1e-4f) {
+                    float t = -pNear.GetY() / dir.GetY();
+                    if (t > 0.0f) {
+                        impactPos = JPH::RVec3(pNear + dir * t);
+                    } else {
+                        impactPos = JPH::RVec3(0.0f, 0.0f, 0.0f);
+                    }
+                }
+            }
+
+            // Spawn cloud origin high above the impact point
+            JPH::RVec3 cloudPos = impactPos + JPH::RVec3(0.0f, 140.0f, 0.0f);
+
+            ZHLN::LightningConfig cfg;
+            cfg.peakCurrentKA = 50.0f;
+            cfg.timeDilation  = 1.0f;
+
+            g_State.lightningSim.TriggerStrike(*engine, cloudPos, impactPos, cfg);
+            ZHLN::Log("[Lightning] Strike triggered at spot ({:.1f}, {:.1f}, {:.1f})", impactPos.GetX(), impactPos.GetY(), impactPos.GetZ());
+        }
+    }
+    wasLMouseDown = isLMouseDown;
+
+    // Advance the lightning simulation each frame
+    g_State.lightningSim.Update(*engine, dt);
+}
+
 void PlayerInputSystem(Engine* engine, [[maybe_unused]] float dt) {
     auto&       reg   = engine->GetRegistry();
     const auto& input = engine->GetInput();
@@ -702,6 +774,7 @@ GAMEPLAY_API ZHLN::GameplayStatus NativeGameplayUpdate(ZHLN::Engine* engine, flo
         Game::PlayerAnimationSystem(engine, dt);
         Game::CheckFallSystem(engine, dt);
         Game::SummitVictorySystem(engine, dt);
+        Game::LightningClickStrikeSystem(engine, dt); // <-- Click to Strike System!
     }
     return ZHLN::GameplayStatus::OK;
 }
