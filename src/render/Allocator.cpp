@@ -140,6 +140,12 @@ auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usag
     return b;
 }
 
+void Buffer::Flush(VkDeviceSize offset, VkDeviceSize size) noexcept {
+    if (_handle.Allocator() != nullptr && _handle.Allocation() != nullptr) {
+        vmaFlushAllocation(_handle.Allocator(), _handle.Allocation(), offset, size);
+    }
+}
+
 Buffer::MappedRegion::MappedRegion(VmaAllocator alloc, VmaAllocation allocation, void* ptr) noexcept: data(ptr), _handle(alloc, ptr, allocation) {
 }
 

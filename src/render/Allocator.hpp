@@ -168,6 +168,8 @@ class Buffer {
     [[nodiscard]] static auto
         Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage) noexcept -> std::expected<Buffer, VkResult>;
 
+    void Flush(VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept;
+
     struct MappedRegion {
         MappedRegion() = default;
         MappedRegion(VmaAllocator alloc, VmaAllocation allocation, void* ptr) noexcept;
