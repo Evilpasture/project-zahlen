@@ -29,6 +29,7 @@ add_library(zahlen_render STATIC
     Surface.cpp
     ComputePass.cpp
     Extensions.cpp
+    PresentationContext.cpp
 )
 set_target_properties(zahlen_render PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
