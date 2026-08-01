@@ -5,11 +5,8 @@
 
 add_library(zahlen_ecs OBJECT
     ECS.cpp
-    ECS.hpp
     SystemGraph.cpp
-    SystemGraph.hpp
     EntityCommandBuffer.cpp
-    EntityCommandBuffer.hpp
 )
 set_target_properties(zahlen_ecs PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
