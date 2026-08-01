@@ -59,8 +59,11 @@ std::expected<void, Error> QueueSubmit(
         .deviceIndex = {},
     };
 
-    uint32_t wait_count   = (waitSemaphore != VK_NULL_HANDLE && waitValue > 0) ? 1 : 0;
-    uint32_t signal_count = (signalSemaphore != VK_NULL_HANDLE && signalValue > 0) ? 1 : 0; // <-- ADDED
+    // Determine counts based strictly on handle presence.
+    // This adds compatibility for binary semaphores (where value is 0).
+    const uint32_t wait_count   = (waitSemaphore != VK_NULL_HANDLE) ? 1U : 0U;
+    const uint32_t signal_count = (signalSemaphore != VK_NULL_HANDLE) ? 1U : 0U;
+    const uint32_t cmd_count    = (cmd != VK_NULL_HANDLE) ? 1U : 0U;
 
     VkSubmitInfo2 submit = {
         .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
@@ -68,8 +71,8 @@ std::expected<void, Error> QueueSubmit(
         .flags                    = {},
         .waitSemaphoreInfoCount   = wait_count,
         .pWaitSemaphoreInfos      = wait_count > 0 ? &wait_info : nullptr,
-        .commandBufferInfoCount   = 1,
-        .pCommandBufferInfos      = &cmd_info,
+        .commandBufferInfoCount   = cmd_count,
+        .pCommandBufferInfos      = cmd_count > 0 ? &cmd_info : nullptr,
         .signalSemaphoreInfoCount = signal_count,
         .pSignalSemaphoreInfos    = signal_count > 0 ? &signal_info : nullptr,
     };

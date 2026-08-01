@@ -287,9 +287,19 @@ void FillBuffer(VkCommandBuffer cmd, const Buffer& buffer, VkDeviceSize offset =
     vkCmdFillBuffer(cmd, buffer.Handle(), offset, sizeof(T), data);
 }
 
-inline void CopyBuffer(VkCommandBuffer cmd, const Buffer& src, const Buffer& dst, VkDeviceSize size) {
-    ZHLN_BufferCopyDesc copy = {.src = src.Handle(), .dst = dst.Handle(), .size = size, .src_offset = 0, .dst_offset = 0};
+/**
+ * @brief Base buffer copy helper utilizing raw VkBuffer handles.
+ */
+inline void CopyBuffer(VkCommandBuffer cmd, VkBuffer src, VkBuffer dst, VkDeviceSize size, VkDeviceSize srcOffset = 0, VkDeviceSize dstOffset = 0) {
+    const ZHLN_BufferCopyDesc copy = {.src = src, .dst = dst, .size = size, .src_offset = srcOffset, .dst_offset = dstOffset};
     ZHLN_CmdCopyBuffer(cmd, &copy);
+}
+
+/**
+ * @brief High-level buffer copy helper utilizing RAII Buffer wrappers.
+ */
+inline void CopyBuffer(VkCommandBuffer cmd, const Buffer& src, const Buffer& dst, VkDeviceSize size, VkDeviceSize srcOffset = 0, VkDeviceSize dstOffset = 0) {
+    CopyBuffer(cmd, src.Handle(), dst.Handle(), size, srcOffset, dstOffset);
 }
 
 // ============================================================================
@@ -371,8 +381,7 @@ class StagingRingBuffer {
 };
 
 inline void CopyRingBuffer(VkCommandBuffer cmd, StagingRingBuffer::Allocation stagingAlloc, const Vk::Buffer& buffer, VkDeviceSize size) {
-    const ZHLN_BufferCopyDesc copy = {.src = stagingAlloc.buffer, .dst = buffer.Handle(), .size = size, .src_offset = stagingAlloc.offset, .dst_offset = 0};
-    ZHLN_CmdCopyBuffer(cmd, &copy);
+    CopyBuffer(cmd, stagingAlloc.buffer, buffer.Handle(), size, stagingAlloc.offset, 0);
 }
 
 // ============================================================================

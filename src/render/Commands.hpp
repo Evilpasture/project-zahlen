@@ -200,30 +200,20 @@ void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, Re
         std::forward<RecordFn>(record)(cmd);
     }
 
-    VkCommandBufferSubmitInfo sub_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .pNext = nullptr, .commandBuffer = cmd, .deviceMask = 0};
-
-    VkSubmitInfo2 submit = {
-        .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .pNext                    = nullptr,
-        .flags                    = 0,
-        .waitSemaphoreInfoCount   = 0,
-        .pWaitSemaphoreInfos      = nullptr,
-        .commandBufferInfoCount   = 1,
-        .pCommandBufferInfos      = &sub_info,
-        .signalSemaphoreInfoCount = 0,
-        .pSignalSemaphoreInfos    = nullptr
-    };
-
     VkQueue queue = ResolveQueue<QType>(ctx);
-    vkQueueSubmit2(queue, 1, &submit, fence);
+
+    // Bail early on submission failure to prevent vkWaitForFences from hanging
+    if (auto res =
+            QueueSubmit(queue, cmd, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, fence);
+        !res) [[unlikely]] {
+        return;
+    }
 
     // 2. Synchronization Strategy
     if (blockCPU) {
         // Hard stall: waits immediately (e.g. for synchronous debug hooks)
         vkWaitForFences(ctx.Device(), 1, &fence, VK_TRUE, UINT64_MAX);
     }
-    // If blockCPU is false, we return immediately! The ring buffer design
-    // ensures we won't overwrite this command buffer until it is safe to do so.
 }
 
 /**
@@ -243,6 +233,11 @@ void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, St
     // 2. Submit via StagingRingBuffer to stamp active allocations and signal timeline
     uint64_t submit_val = ringBuffer.Submit(cmd);
 
+    // Abort the wait if the staging submission failed (indicated by timeline value 0)
+    if (submit_val == 0) [[unlikely]] {
+        return;
+    }
+
     // 3. Synchronously wait on the timeline semaphore to retire the staging memory
     VkSemaphore         semaphore = ringBuffer.GetSemaphore();
     VkSemaphoreWaitInfo wait_info = {
@@ -251,11 +246,17 @@ void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, St
     vkWaitSemaphores(ctx.Device(), &wait_info, UINT64_MAX);
 
     // 4. Signal the associated fence so that CommandRing's next Acquire doesn't stall
-    vkQueueSubmit2(ResolveQueue<QType>(ctx), 0, nullptr, fence);
+    VkQueue queue = ResolveQueue<QType>(ctx);
+    if (auto res = QueueSubmit(
+            queue, VK_NULL_HANDLE, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, fence
+        );
+        !res) [[unlikely]] {
+        return;
+    }
 }
 
 // ============================================================================
-// Command Encoder (Stateful Bind Filtering)
+// Command Encoder (Stateful Bind Filtering with Unified Push Constants)
 // ============================================================================
 
 class CommandEncoder {
@@ -293,7 +294,7 @@ class CommandEncoder {
     ) noexcept {
         BindPipeline(state.pipeline, state.layout);
         BindDescriptorSet(state.set);
-        vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
+        Push(cmd, state.layout, stages, pushConstants);
         vkCmdDraw(cmd, state.vertexCount, state.instanceCount, state.firstVertex, state.firstInstance);
     }
 
@@ -305,7 +306,7 @@ class CommandEncoder {
     ) noexcept {
         BindPipeline(state.pipeline, state.layout);
         BindDescriptorSet(state.set);
-        vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
+        Push(cmd, state.layout, stages, pushConstants);
         vkCmdDrawIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount, state.stride);
     }
 
@@ -317,7 +318,7 @@ class CommandEncoder {
     ) noexcept {
         BindPipeline(state.pipeline, state.layout);
         BindDescriptorSet(state.set);
-        vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
+        Push(cmd, state.layout, stages, pushConstants);
         vkCmdDrawIndirectCount(cmd, state.argumentBuffer, state.offset, state.countBuffer, state.countBufferOffset, state.maxDrawCount, state.stride);
     }
 
@@ -329,7 +330,7 @@ class CommandEncoder {
     ) noexcept {
         BindPipeline(state.pipeline, state.layout);
         BindDescriptorSet(state.set);
-        vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
+        Push(cmd, state.layout, stages, pushConstants);
         vkCmdDrawIndexedIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount, state.stride);
     }
 
@@ -341,7 +342,7 @@ class CommandEncoder {
     ) noexcept {
         BindPipeline(state.pipeline, state.layout);
         BindDescriptorSet(state.set);
-        vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
+        Push(cmd, state.layout, stages, pushConstants);
         vkCmdDrawIndexedIndirectCount(cmd, state.argumentBuffer, state.offset, state.countBuffer, state.countBufferOffset, state.maxDrawCount, state.stride);
     }
 };

@@ -182,9 +182,8 @@ auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst, co
         }
     }
 
-    const ZHLN_BufferCopyDesc copy = {.src = staging.Handle(), .dst = dst.Handle(), .size = static_cast<VkDeviceSize>(size), .src_offset = 0, .dst_offset = 0};
-
-    ZHLN_CmdCopyBuffer(cmd, &copy);
+    // Cleaned up to utilize the updated CopyBuffer helper
+    CopyBuffer(cmd, staging, dst, static_cast<VkDeviceSize>(size));
     return staging;
 }
 
@@ -484,36 +483,14 @@ auto StagingRingBuffer::Submit(VkCommandBuffer cmd) noexcept -> uint64_t {
         }
     }
 
-    VkCommandBufferSubmitInfo cmd_info = {
-        .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-        .pNext         = {},
-        .commandBuffer = cmd,
-        .deviceMask    = {},
-    };
+    // Inspect the return value; return 0 on failure to prevent deadlocks in timeline wait loops
+    if (auto res = QueueSubmit(
+            _queue, cmd, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _timelineSemaphore.Get(), _timelineValue, VK_PIPELINE_STAGE_2_COPY_BIT, VK_NULL_HANDLE
+        );
+        !res) [[unlikely]] {
+        return 0;
+    }
 
-    VkSemaphore           sem_handle  = _timelineSemaphore.Get();
-    VkSemaphoreSubmitInfo signal_info = {
-        .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-        .pNext       = {},
-        .semaphore   = sem_handle,
-        .value       = _timelineValue,
-        .stageMask   = VK_PIPELINE_STAGE_2_COPY_BIT,
-        .deviceIndex = {},
-    };
-
-    VkSubmitInfo2 submit = {
-        .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .pNext                    = {},
-        .flags                    = {},
-        .waitSemaphoreInfoCount   = {},
-        .pWaitSemaphoreInfos      = {},
-        .commandBufferInfoCount   = 1,
-        .pCommandBufferInfos      = &cmd_info,
-        .signalSemaphoreInfoCount = 1,
-        .pSignalSemaphoreInfos    = &signal_info,
-    };
-
-    vkQueueSubmit2(_queue, 1, &submit, VK_NULL_HANDLE);
     return _timelineValue;
 }
 
