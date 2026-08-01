@@ -5,7 +5,6 @@
 #include "Zahlen/Audio.hpp"
 #include "Zahlen/CommandLine.hpp"
 #include "Zahlen/Input.hpp"
-#include <Zahlen/ecs/ECS.hpp>
 #include "ecs/EntityCommandBuffer.hpp"
 #include "ecs/SystemGraph.hpp"
 #include "engine/FileWatcher.hpp"
@@ -24,6 +23,7 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/Components.hpp>
+#include <Zahlen/Core/ControlFlow.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Format.hpp>
@@ -32,9 +32,9 @@
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Scripting.h>
 #include <Zahlen/Scripting.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <chrono>
-#include <Zahlen/Core/ControlFlow.hpp>
 #include <engine/system/AnimationSystem.hpp>
 #include <engine/system/ArticulationSystem.hpp>
 #include <engine/system/CullingSystem.hpp>
@@ -269,7 +269,7 @@ bool InitializeGame(Engine& engine) {
 void UpdateGame(Engine& engine, float dt, ScriptRunner& scriptRunner, FileWatcher& gameplayWatcher, GameplayDriver driver) {
     static InputSystem inputSystem;
     inputSystem.Update(engine);
-    UIInteractionSystem::Update(engine);
+    UIInteractionSystem::Update(engine, dt);
     UISystem(engine, scriptRunner);
 
     if (driver != GameplayDriver::Cpp && gameplayWatcher.CheckModified()) {
@@ -292,7 +292,12 @@ void UpdateGame(Engine& engine, float dt, ScriptRunner& scriptRunner, FileWatche
         case Cpp: {
             ZHLN_PROFILE_SCOPE("ECS System: Native C++ Gameplay Update");
             static NativeScriptModule nativeGameplayModule("scripts/gameplay");
-            nativeGameplayModule.Update(&engine, dt);
+            GameplayStatus            status = nativeGameplayModule.Update(&engine, dt);
+            if (status == GameplayStatus::RequestQuit) {
+                engine.GetWindow().Close();
+            } else if (status == GameplayStatus::Error) {
+                ZHLN::Log("ERROR: Native gameplay module reported an unrecoverable error!");
+            }
             break;
         }
 
@@ -306,7 +311,12 @@ void UpdateGame(Engine& engine, float dt, ScriptRunner& scriptRunner, FileWatche
             {
                 ZHLN_PROFILE_SCOPE("ECS System: Native C++ Gameplay Update");
                 static NativeScriptModule nativeGameplayModule("scripts/gameplay");
-                nativeGameplayModule.Update(&engine, dt);
+                GameplayStatus            status = nativeGameplayModule.Update(&engine, dt);
+                if (status == GameplayStatus::RequestQuit) {
+                    engine.GetWindow().Close();
+                } else if (status == GameplayStatus::Error) {
+                    ZHLN::Log("ERROR: Native gameplay module reported an unrecoverable error!");
+                }
             }
             {
                 ZHLN_PROFILE_SCOPE("ECS System: Script/Lua Update");

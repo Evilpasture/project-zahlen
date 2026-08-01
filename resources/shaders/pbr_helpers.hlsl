@@ -156,42 +156,45 @@ float CalculateShadowRayTraced(
     float2                          screenPos,
     float                           time,
     RaytracingAccelerationStructure tlas,
-    float                           sunSize = 0.025f
+    float                           sunSize = 0.001f
 ) {
-    // 1. Create an orthonormal basis around the light vector
     float3 up        = abs(L.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
     float3 right     = normalize(cross(up, L));
     float3 bitangent = cross(L, right);
 
-    // 2. Sample stable Weyl noise to jitter the shadow ray
-    float noise = GetStableWeylNoise(uint2(screenPos), time);
-    float theta = noise * 2.0f * 3.14159265f;
+    float angle = GetShadowDither(screenPos) * 2.0f * 3.14159265f;
+    float cosA  = cos(angle);
+    float sinA  = sin(angle);
 
-    // Jitter radius scaled by the light source size
-    float r = sqrt(noise) * sunSize;
+    float     unblockedRays = 0.0f;
+    const int RAY_SAMPLES   = 4;
 
-    // Calculate the final stochastically offset ray direction
-    float3 jitteredDir = normalize(L + right * cos(theta) * r + bitangent * sin(theta) * r);
+    // Direct 1:1 mapping with no floor clamp
+    float spread = max(sunSize, 0.00001f);
 
-    // 3. Define a slightly biased ray to prevent self-shadowing acne
-    RayDesc ray;
-    ray.Origin    = worldPos + N * 0.05f;
-    ray.Direction = jitteredDir;
-    ray.TMin      = 0.01f;
-    ray.TMax      = 300.0f; // Track up to the sky bounds of your level
+    [unroll] for (int i = 0; i < RAY_SAMPLES; ++i) {
+        float2 p      = PoissonDisk[i];
+        float2 jitter = float2(p.x * cosA - p.y * sinA, p.x * sinA + p.y * cosA) * spread;
 
-    // 4. Trace the ray inline via RayQuery
-    RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> q;
+        float3 jitteredDir = normalize(L + right * jitter.x + bitangent * jitter.y);
 
-    q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
-    while (q.Proceed()) {
+        RayDesc ray;
+        ray.Origin    = worldPos + N * 0.04f;
+        ray.Direction = jitteredDir;
+        ray.TMin      = 0.01f;
+        ray.TMax      = 300.0f;
+
+        RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> q;
+        q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
+        while (q.Proceed()) {
+        }
+
+        if (q.CommittedStatus() != COMMITTED_TRIANGLE_HIT) {
+            unblockedRays += 1.0f;
+        }
     }
 
-    if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
-        return 0.0f; // Blocked (Shadowed)
-    }
-
-    return 1.0f; // Unblocked (Lit)
+    return unblockedRays / float(RAY_SAMPLES);
 }
 #endif
 

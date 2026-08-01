@@ -1,21 +1,20 @@
 // include/Zahlen/Components.hpp
 #pragma once
-#include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Core/String.hpp>
 #include "Entity.hpp"
 #include "Types.hpp"
 #include "alife/Types.hpp"
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
+#include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Core/String.hpp>
 #include <array>
-#include <vector>
 
 namespace ZHLN {
 
 struct ModelPrefab;
 struct Skeleton; // Forward declaration for RagdollComponent
 
-enum class UIButton : uint8_t { None = 0, Hovered = 1 << 0, Pressed = 1 << 1, Clicked = 1 << 2 };
+enum class UIButton : uint8_t { None = 0, Hovered = 1 << 0, Pressed = 1 << 1, Clicked = 1 << 2, Disabled = 1 << 3 };
 template <>
 inline constexpr bool EnableEnumFlags<UIButton> = true;
 enum class StackDirection : uint8_t { Horizontal = 0, Vertical = 1 };
@@ -167,6 +166,7 @@ struct Components {
         float shadowWidth        = 200.0f;
         int   shadowResolution   = 2048;
         int   maxPunctualShadows = 1;
+        float sunSize            = 0.05f;
     };
     struct PostProcessSettingsComponent {
         int       giMode            = 1;
@@ -301,6 +301,22 @@ struct Components {
         bool      isFocused   = false;
         char      _pad[3]     = {};
     };
+
+    struct UIStyleComponent {
+        JPH::Vec4 normalColor   = {0.15f, 0.15f, 0.22f, 0.95f};
+        JPH::Vec4 hoverColor    = {0.22f, 0.22f, 0.32f, 0.95f};
+        JPH::Vec4 pressedColor  = {0.10f, 0.10f, 0.15f, 0.95f};
+        JPH::Vec4 disabledColor = {0.08f, 0.08f, 0.10f, 0.50f};
+
+        JPH::Vec4 textColorNormal  = {0.90f, 0.90f, 0.90f, 1.0f};
+        JPH::Vec4 textColorHover   = {1.00f, 1.00f, 1.00f, 1.0f};
+        JPH::Vec4 textColorPressed = {0.70f, 0.70f, 0.70f, 1.0f};
+
+        float transitionSpeed = 18.0f; // Speed of smooth color lerping (0 = instant)
+        bool  hasTextColor    = false;
+        char  _pad[3]         = {};
+    };
+
     struct AnimatorComponent {
         int32_t currentTrackIdx      = -1;
         float   currentTrackTime     = 0.0f;

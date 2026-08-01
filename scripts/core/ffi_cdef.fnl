@@ -215,10 +215,11 @@
       } UISettingsComponent;
 
       typedef struct ShadowSettingsComponent {
-          float shadowWidth;
-          int shadowResolution;
-          int maxPunctualShadows;
-      } ShadowSettingsComponent;
+        float shadowWidth;
+        int shadowResolution;
+        int maxPunctualShadows;
+        float sunSize;
+    } ShadowSettingsComponent;
 
       typedef struct String64 {
           char data[64];
@@ -316,6 +317,19 @@
           bool isFocused;
           char _pad[3];
       } UITextInputComponent;
+
+      typedef struct UIStyleComponent {
+        float normalColor[4];
+        float hoverColor[4];
+        float pressedColor[4];
+        float disabledColor[4];
+        float textColorNormal[4];
+        float textColorHover[4];
+        float textColorPressed[4];
+        float transitionSpeed;
+        bool  hasTextColor;
+        char  _pad[3];
+    } UIStyleComponent;
 
       typedef struct AnimatorComponent {
           int32_t currentTrackIdx;

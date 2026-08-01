@@ -72,22 +72,16 @@
            (set start-rect.width 200)
            (set start-rect.height 40))
          (let [start-panel (zh.ecs:add Menu.start_btn :UIPanelComponent)]
-           (tset start-panel.color 0 0.15)
-           (tset start-panel.color 1 0.15)
-           (tset start-panel.color 2 0.22)
-           (tset start-panel.color 3 0.95)
            (set start-panel.edgeWidth 8.0))
          (zh.ecs:add Menu.start_btn :UIButtonComponent)
+         (let [style (zh.ecs:add Menu.start_btn :UIStyleComponent)]
+           (set style.hasTextColor true))
          (let [start-text (zh.ecs:add Menu.start_btn :TextComponent)]
            (ffi.copy start-text.text "START GAME")
            (set start-text.x 55)
            (set start-text.y 25)
            (set start-text.scale 0.8)
-           (set start-text.fontIndex font-idx)
-           (tset start-text.color 0 0.9)
-           (tset start-text.color 1 0.9)
-           (tset start-text.color 2 0.9)
-           (tset start-text.color 3 1.0))
+           (set start-text.fontIndex font-idx))
          ;; 7. Quit Button
          (set Menu.quit_btn (zh.ecs:create))
          (let [quit-rect (zh.ecs:add Menu.quit_btn :UIRectComponent)]
@@ -96,22 +90,16 @@
            (set quit-rect.width 200)
            (set quit-rect.height 40))
          (let [quit-panel (zh.ecs:add Menu.quit_btn :UIPanelComponent)]
-           (tset quit-panel.color 0 0.15)
-           (tset quit-panel.color 1 0.15)
-           (tset quit-panel.color 2 0.22)
-           (tset quit-panel.color 3 0.95)
            (set quit-panel.edgeWidth 8.0))
          (zh.ecs:add Menu.quit_btn :UIButtonComponent)
+         (let [style (zh.ecs:add Menu.quit_btn :UIStyleComponent)]
+           (set style.hasTextColor true))
          (let [quit-text (zh.ecs:add Menu.quit_btn :TextComponent)]
            (ffi.copy quit-text.text :QUIT)
            (set quit-text.x 80)
            (set quit-text.y 25)
            (set quit-text.scale 0.8)
-           (set quit-text.fontIndex font-idx)
-           (tset quit-text.color 0 0.9)
-           (tset quit-text.color 1 0.9)
-           (tset quit-text.color 2 0.9)
-           (tset quit-text.color 3 1.0))
+           (set quit-text.fontIndex font-idx))
          (tset Menu.hovered_states Menu.start_btn false)
          (tset Menu.hovered_states Menu.quit_btn false)))
 
@@ -123,31 +111,15 @@
     (set zh.camera.pitch 0.0)
 
     (fn process-button [btn-ent click-callback]
-      (let [btn (zh.ecs:get btn-ent :UIButtonComponent)
-            panel (zh.ecs:get btn-ent :UIPanelComponent)]
-        (when (and btn panel)
+      (let [btn (zh.ecs:get btn-ent :UIButtonComponent)]
+        (when btn
           (let [is-hovered (not= (band btn.flags UIButtonFlags.Hovered) 0)
-                is-pressed (not= (band btn.flags UIButtonFlags.Pressed) 0)
                 is-clicked (not= (band btn.flags UIButtonFlags.Clicked) 0)]
             (if is-hovered
-                (do
-                  (when (not (. Menu.hovered_states btn-ent))
-                    (zh.audio:beep 440 0.05 0.15)
-                    (tset Menu.hovered_states btn-ent true))
-                  (if is-pressed
-                      (do
-                        (tset panel.color 0 0.1)
-                        (tset panel.color 1 0.1)
-                        (tset panel.color 2 0.15))
-                      (do
-                        (tset panel.color 0 0.22)
-                        (tset panel.color 1 0.22)
-                        (tset panel.color 2 0.32))))
-                (do
-                  (tset panel.color 0 0.15)
-                  (tset panel.color 1 0.15)
-                  (tset panel.color 2 0.22)
-                  (tset Menu.hovered_states btn-ent false)))
+                (when (not (. Menu.hovered_states btn-ent))
+                  (zh.audio:beep 440 0.05 0.15)
+                  (tset Menu.hovered_states btn-ent true))
+                (tset Menu.hovered_states btn-ent false))
             (when is-clicked
               (click-callback))))))
 
@@ -203,4 +175,3 @@
                       (os.exit 0)))))
 
 (zh.scheduler.register :MainMenuUpdate 10 main_menu_update_system)
-

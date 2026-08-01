@@ -30,6 +30,7 @@
                           :UIDragComponent true
                           :UIStackComponent true
                           :UITextInputComponent true
+                          :UIStyleComponent true
                           :AnimatorComponent true})
 
 (local DYNAMIC_COMPONENTS {})

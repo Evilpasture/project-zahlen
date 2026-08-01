@@ -15,13 +15,13 @@
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
+#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cstddef>
-#include <Zahlen/ecs/ECS.hpp>
 #include <engine/system/AnimationSystem.hpp>
 #include <engine/system/LightingSystem.hpp>
 #include <gltf/GLTFImporter.hpp>
-#include <Zahlen/physics/Physics.hpp>
 #include <stb_image.h>
 #include <threading/TaskSystem.hpp>
 #define STB_TRUETYPE_IMPLEMENTATION
@@ -75,6 +75,12 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
     int fontOffset = stbtt_GetFontOffsetForIndex(fontBuffer.data(), 0);
     fontOffset     = std::max(fontOffset, 0);
 
+    stbtt_fontinfo fontInfo {};
+    if (!stbtt_InitFont(&fontInfo, fontBuffer.data(), fontOffset)) {
+        Log("ERROR: stbtt_InitFont failed for {}", fontPath);
+        return 0;
+    }
+
     const uint32_t       atlasSize = 512;
     std::vector<uint8_t> alphaBitmap(static_cast<size_t>(atlasSize * atlasSize), 0);
 
@@ -86,18 +92,75 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
     }
     auto* uiSettings = reg.Get<Components::UISettingsComponent>(uiSettingsEntities[0]);
 
-    stbtt_bakedchar bakedChars[96];
-    int             result = stbtt_BakeFontBitmap(fontBuffer.data(), fontOffset, 24.0f, alphaBitmap.data(), atlasSize, atlasSize, 32, 96, bakedChars);
+    // SDF Generation Parameters
+    const float   fontSize         = 24.0f;
+    const float   scale            = stbtt_ScaleForPixelHeight(&fontInfo, fontSize);
+    const int     padding          = 5;
+    const uint8_t onedge_value     = 128; // 0.5 in normalized space
+    const float   pixel_dist_scale = 128.0f / static_cast<float>(padding);
 
-    if (result <= 0) {
-        Log("ERROR: stb_truetype failed to bake font bitmap!");
-        return 0;
+    uint32_t curX      = 1;
+    uint32_t curY      = 1;
+    uint32_t rowHeight = 0;
+
+    for (int i = 0; i < 96; ++i) {
+        int codepoint = 32 + i;
+        int w         = 0;
+        int h         = 0;
+        int xoff      = 0;
+        int yoff      = 0;
+        int advance   = 0;
+        int lsb       = 0;
+
+        stbtt_GetCodepointHMetrics(&fontInfo, codepoint, &advance, &lsb);
+        float xadvance = static_cast<float>(advance) * scale;
+
+        unsigned char* sdf = stbtt_GetCodepointSDF(&fontInfo, scale, codepoint, padding, onedge_value, pixel_dist_scale, &w, &h, &xoff, &yoff);
+
+        if (sdf != nullptr && w > 0 && h > 0) {
+            if (curX + w + 1 > atlasSize) {
+                curX = 1;
+                curY += rowHeight + 1;
+                rowHeight = 0;
+            }
+
+            if (curY + h + 1 > atlasSize) {
+                Log("WARNING: Font atlas size exceeded! Glyphs truncated.");
+                stbtt_FreeSDF(sdf, nullptr);
+                break;
+            }
+
+            for (int row = 0; row < h; ++row) {
+                for (int col = 0; col < w; ++col) {
+                    alphaBitmap[(curY + row) * atlasSize + (curX + col)] = sdf[row * w + col];
+                }
+            }
+
+            uiSettings->fontAtlas.glyphs[i] = GlyphMetric {
+                .x0       = static_cast<float>(curX),
+                .y0       = static_cast<float>(curY),
+                .x1       = static_cast<float>(curX + w),
+                .y1       = static_cast<float>(curY + h),
+                .xoff     = static_cast<float>(xoff),
+                .yoff     = static_cast<float>(yoff),
+                .xadvance = xadvance
+            };
+
+            curX += w + 1;
+            rowHeight = std::max(rowHeight, static_cast<uint32_t>(h));
+            stbtt_FreeSDF(sdf, nullptr);
+        } else {
+            if (sdf != nullptr) {
+                stbtt_FreeSDF(sdf, nullptr);
+            }
+            uiSettings->fontAtlas.glyphs[i] = GlyphMetric {.x0 = 0.0f, .y0 = 0.0f, .x1 = 0.0f, .y1 = 0.0f, .xoff = 0.0f, .yoff = 0.0f, .xadvance = xadvance};
+        }
     }
 
     std::vector<uint32_t> rgbaPixels(static_cast<size_t>(atlasSize * atlasSize));
     for (uint32_t i = 0; i < atlasSize * atlasSize; ++i) {
-        uint8_t alpha = alphaBitmap[i];
-        rgbaPixels[i] = (static_cast<uint32_t>(alpha) << 24) | 0x00FFFFFF;
+        uint8_t dist  = alphaBitmap[i];
+        rgbaPixels[i] = (static_cast<uint32_t>(dist) << 24) | 0x00FFFFFF;
     }
 
     auto tex_res = ctx.CreateTexture(rgbaPixels.data(), atlasSize, atlasSize, false);
@@ -107,18 +170,6 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
     }
     uint32_t texIdx = tex_res.value();
 
-    for (uint32_t i = 0; i < 96; ++i) {
-        const auto& bc                  = bakedChars[i];
-        uiSettings->fontAtlas.glyphs[i] = GlyphMetric {
-            .x0       = static_cast<float>(bc.x0),
-            .y0       = static_cast<float>(bc.y0),
-            .x1       = static_cast<float>(bc.x1),
-            .y1       = static_cast<float>(bc.y1),
-            .xoff     = bc.xoff,
-            .yoff     = bc.yoff,
-            .xadvance = bc.xadvance
-        };
-    }
     uiSettings->fontAtlas.textureIndex = texIdx;
     uiSettings->defaultFontAtlasIdx    = texIdx;
 

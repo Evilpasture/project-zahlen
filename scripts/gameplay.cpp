@@ -648,9 +648,10 @@ void SummitVictorySystem(Engine* engine, [[maybe_unused]] float dt) {
 
 } // namespace Game
 
-GAMEPLAY_API void NativeGameplayUpdate(ZHLN::Engine* engine, float dt) {
-    if (!engine)
-        return;
+GAMEPLAY_API ZHLN::GameplayStatus NativeGameplayUpdate(ZHLN::Engine* engine, float dt) {
+    if (!engine) {
+        return ZHLN::GameplayStatus::Error;
+    }
 
     if (!Game::g_State.bridge) {
         Game::g_State.bridge = new ZHLN::ScriptECSBridge(engine->GetRegistry());
@@ -690,7 +691,7 @@ GAMEPLAY_API void NativeGameplayUpdate(ZHLN::Engine* engine, float dt) {
 
     if (Game::g_State.mainMenu.IsActive()) {
         Game::g_State.mainMenu.Update(engine, dt);
-        return;
+        return ZHLN::GameplayStatus::OK;
     }
 
     if (Game::g_State.gameStarted) {
@@ -702,4 +703,5 @@ GAMEPLAY_API void NativeGameplayUpdate(ZHLN::Engine* engine, float dt) {
         Game::CheckFallSystem(engine, dt);
         Game::SummitVictorySystem(engine, dt);
     }
+    return ZHLN::GameplayStatus::OK;
 }

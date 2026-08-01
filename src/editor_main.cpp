@@ -15,7 +15,6 @@
 #include "Zahlen/Render.hpp"
 #include "Zahlen/Window.hpp"
 #include "Zahlen/alife/Simulator.hpp"
-#include <Zahlen/ecs/ECS.hpp>
 #include "ecs/EntityCommandBuffer.hpp"
 #include "ecs/SystemGraph.hpp"
 #include "engine/Platform.hpp"
@@ -33,17 +32,18 @@
 #include "engine/system/TransformSystem.hpp"
 #include "engine/system/UIInteractionSystem.hpp"
 #include "engine/system/UIRenderSystem.hpp"
-#include <Zahlen/physics/Physics.hpp>
 #include "physics/PhysicsWorld.hpp"
 #include <GLFW/glfw3.h>
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Zahlen/Clock.hpp>
+#include <Zahlen/Core/ControlFlow.hpp>
+#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
-#include <Zahlen/Core/ControlFlow.hpp>
 #include <expected>
 #include <imgui.h>
 #include <span>
@@ -649,6 +649,7 @@ std::expected<int, EngineError> RunEditorLoop(std::unique_ptr<Engine> engine, ui
             engine->GetMainECB().Playback();
         } else {
             UpdateEditorCamera(cam, engine->GetInput(), frameTime);
+            UIInteractionSystem::Update(*engine, frameTime);
             static TransformSystem transformSys;
             transformSys.ResolveTransforms(reg);
         }

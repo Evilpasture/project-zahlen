@@ -28,6 +28,8 @@ constexpr AssetID HashAssetID(std::string_view name) noexcept {
     return hash;
 }
 
+enum class GameplayStatus : int8_t { OK = 0, RequestQuit = 1, RequestReload = 2, Error = -1 };
+
 // --- Core Math/Spatial Types ---
 
 struct Extent2D {
@@ -102,7 +104,7 @@ struct UIObjectConstants {
     uint64_t   posAddress;
     uint64_t   attrAddress;
     uint32_t   albedoIdx;
-    uint32_t   padding;
+    uint32_t   isSDF;
 };
 
 struct UIBatch {
@@ -110,6 +112,7 @@ struct UIBatch {
     uint32_t    vertexStart  = 0;
     uint32_t    vertexCount  = 0;
     bool        useScissor   = false;
+    bool        isSDF        = false;
     ScissorRect scissorRect  = {};
 };
 
@@ -219,6 +222,7 @@ struct alignas(16) FrameUniforms {
     int       enableRTR;
     float     zScale;
     float     zBias;
+    float     sunSize;
 
     alignas(16) float cascadeSplits[4];
     int   numCascades; // E.g., 4

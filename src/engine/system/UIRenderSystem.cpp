@@ -53,14 +53,14 @@ void UIRenderSystem::Update(Engine& engine) {
     uint32_t                       currentVertexOffset = 0;
     HashMap<uint64_t, ScissorRect> activeScissors;
 
-    auto QueueBatch = [&](uint32_t textureIdx, uint32_t count, bool useScissor, ScissorRect scissor) {
+    auto QueueBatch = [&](uint32_t textureIdx, uint32_t count, bool useScissor, ScissorRect scissor, bool isSDF = false) {
         if (count == 0) {
             return;
         }
 
         if (!localBatches.empty()) {
             auto& last = localBatches.back();
-            if (last.textureIndex == textureIdx && last.useScissor == useScissor &&
+            if (last.textureIndex == textureIdx && last.isSDF == isSDF && last.useScissor == useScissor &&
                 (!useScissor || (std::memcmp(&last.scissorRect, &scissor, sizeof(ScissorRect)) == 0))) {
                 last.vertexCount += count;
                 return;
@@ -68,7 +68,12 @@ void UIRenderSystem::Update(Engine& engine) {
         }
 
         localBatches.push_back(
-            {.textureIndex = textureIdx, .vertexStart = currentVertexOffset - count, .vertexCount = count, .useScissor = useScissor, .scissorRect = scissor}
+            {.textureIndex = textureIdx,
+             .vertexStart  = currentVertexOffset - count,
+             .vertexCount  = count,
+             .useScissor   = useScissor,
+             .isSDF        = isSDF,
+             .scissorRect  = scissor}
         );
     };
 
@@ -214,7 +219,7 @@ void UIRenderSystem::Update(Engine& engine) {
                 }
             }
 
-            QueueBatch(text->fontIndex, written, useScissor, currentScissor);
+            QueueBatch(text->fontIndex, written, useScissor, currentScissor, true);
         }
     }
 

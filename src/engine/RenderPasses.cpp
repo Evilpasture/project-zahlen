@@ -558,6 +558,7 @@ void BlitPass::Execute(
 
                 for (const auto& batch: ctx.uiBatches) {
                     uipc.albedoIdx   = batch.textureIndex;
+                    uipc.isSDF       = batch.isSDF ? 1 : 0;
                     uipc.posAddress  = baseVboAddress + (batch.vertexStart * sizeof(VertexPosition));
                     uipc.attrAddress = baseVboAddress + (100000 * sizeof(VertexPosition)) + (batch.vertexStart * sizeof(VertexAttributes));
 

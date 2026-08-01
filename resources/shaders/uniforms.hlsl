@@ -7,7 +7,6 @@ struct FrameUniforms {
     float4x4 unjitteredViewProj;
     float4x4 prevUnjitteredViewProj;
 
-    // CHANGED: Array of 4 matrices replacing the single matrix [3]
     float4x4 lightSpaceMatrices[4];
 
     float4x4 invViewProj;
@@ -25,6 +24,7 @@ struct FrameUniforms {
     int      enableRTR;
     float    zScale;
     float    zBias;
+    float    sunSize;
 
     float4 cascadeSplits;
     int    numCascades;

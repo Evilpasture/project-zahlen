@@ -8,8 +8,8 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Scripting.hpp>
-#include <algorithm>
 #include <Zahlen/ecs/ECS.hpp>
+#include <algorithm>
 #include <imgui.h>
 
 namespace ZHLN {
@@ -83,6 +83,11 @@ void UISystem(Engine& engine, ScriptRunner& scriptRunner) {
             if (auto res = engine.GetRenderContext().SetShadowResolution(newRes); !res) {
                 ZHLN::Log("ERROR: Failed to update shadow resolution: {}", res.error().Message());
             }
+        }
+
+        ImGui::DragFloat("Raytraced Sun Softness", &shadowSettings->sunSize, 0.005f, 0.001f, 0.05f, "%.3f");
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Angular size of the sun for ray-traced penumbra softness.");
         }
         ImGui::End();
     }

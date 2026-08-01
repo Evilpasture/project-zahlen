@@ -6,6 +6,7 @@
 #include "Zahlen/Config.hpp"
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Log.hpp"
+#include "Zahlen/Types.hpp"
 #include "engine/FileWatcher.hpp"
 #include "engine/Platform.hpp"
 #include <filesystem>
@@ -16,7 +17,7 @@ namespace ZHLN {
 
 class NativeScriptModule {
   public:
-    using UpdateFn = void (*)(Engine*, float);
+    using UpdateFn = GameplayStatus (*)(Engine*, float);
 
     // Automatically resolves platform prefix/extension if omitted (e.g. "scripts/gameplay")
     explicit NativeScriptModule(std::string_view libPath): m_libPath(ResolveModulePath(libPath)), m_watcher(m_libPath) {
@@ -27,15 +28,17 @@ class NativeScriptModule {
         UnloadModule();
     }
 
-    void Update(Engine* engine, float dt) {
+    GameplayStatus Update(Engine* engine, float dt) {
         if (m_watcher.CheckModified()) {
             ZHLN::Log("[Hot-Reload] New C++ gameplay binary detected! Swapping module...");
             LoadModule();
         }
 
         if (m_updateFn != nullptr) {
-            m_updateFn(engine, dt);
+            return m_updateFn(engine, dt);
         }
+
+        return GameplayStatus::OK;
     }
 
   private:

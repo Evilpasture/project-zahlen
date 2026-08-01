@@ -6,7 +6,6 @@
 #include "CullingSystem.hpp"
 #include "LightingSystem.hpp"
 #include "UIRenderSystem.hpp"
-#include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
@@ -15,11 +14,12 @@
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render.hpp>
+#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <engine/Resources.hpp>
-#include <Zahlen/physics/Physics.hpp>
 #include <physics/PhysicsDebug.hpp>
 
 namespace ZHLN {
@@ -99,12 +99,14 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
 
     float    shadowWidth      = 80.0f;
     uint32_t shadowResolution = 2048;
+    float    sunSize          = 0.05f;
 
     auto shadowEntities = reg.GetEntitiesWith<Components::ShadowSettingsComponent>();
     if (!shadowEntities.empty()) {
         auto* shadowSettings = reg.Get<Components::ShadowSettingsComponent>(shadowEntities[0]);
         shadowWidth          = shadowSettings->shadowWidth;
         shadowResolution     = shadowSettings->shadowResolution;
+        sunSize              = shadowSettings->sunSize;
     }
 
     // --- RESTORED ORIGINAL WORKING SHADOW CALCULATION ---
@@ -148,6 +150,7 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
     uniforms.fullBright       = fullBright;
     uniforms.shadowWidth      = shadowWidth;
     uniforms.shadowResolution = shadowResolution;
+    uniforms.sunSize          = sunSize;
     if (!settingsEntities.empty()) {
         if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(settingsEntities[0])) {
             uniforms.ambientExposure = pp->ambientExposure;

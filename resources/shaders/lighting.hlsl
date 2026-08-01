@@ -99,8 +99,7 @@ float4 PSMain(VSOutput input): SV_Target0 {
 
 #ifndef DISABLE_RTR
     if (ENABLE_RTR != 0 && pc.enableRTR != 0) {
-        // Elegant, decoupled call passing the local 'tlas' binding
-        shadow = CalculateShadowRayTraced(worldPos, N, L_sun, input.pos.xy, pc.camPos.w, tlas, 0.025f);
+        shadow = CalculateShadowRayTraced(worldPos, N, L_sun, input.pos.xy, pc.camPos.w, tlas, frame.sunSize);
     } else
 #endif
     {

@@ -5,12 +5,12 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
-#include <algorithm>
 #include <Zahlen/ecs/ECS.hpp>
+#include <algorithm>
 
 namespace ZHLN {
 
-void UIInteractionSystem::Update(Engine& engine) {
+void UIInteractionSystem::Update(Engine& engine, float dt) {
     auto& reg   = engine.GetRegistry();
     auto& input = engine.GetInput();
     auto  mouse = input.GetMouse();
@@ -65,6 +65,12 @@ void UIInteractionSystem::Update(Engine& engine) {
 
         button->Set(UIButton::Clicked, false);
 
+        if (button->Has(UIButton::Disabled)) {
+            button->Set(UIButton::Hovered, false);
+            button->Set(UIButton::Pressed, false);
+            continue;
+        }
+
         if (clickConsumed) {
             button->Set(UIButton::Hovered, false);
             button->Set(UIButton::Pressed, false);
@@ -79,12 +85,10 @@ void UIInteractionSystem::Update(Engine& engine) {
             if (leftMouseDown) {
                 button->Set(UIButton::Pressed, true);
 
-                // Handle drag start
                 if (auto* drag = reg.Get<Components::UIDragComponent>(e)) {
                     drag->isDragging = true;
                 }
 
-                // Handle focus capture
                 if (reg.Get<Components::UITextInputComponent>(e) != nullptr) {
                     focusCaptured = true;
                     for (Entity other: reg.GetEntitiesWith<Components::UITextInputComponent>()) {
@@ -108,11 +112,57 @@ void UIInteractionSystem::Update(Engine& engine) {
         }
     }
 
-    // If clicked blank space outside any text fields, clear active focus
     if (leftMouseDown && !focusCaptured) {
         for (Entity e: reg.GetEntitiesWith<Components::UITextInputComponent>()) {
             if (auto* inputComp = reg.Get<Components::UITextInputComponent>(e)) {
                 inputComp->isFocused = false;
+            }
+        }
+    }
+
+    // 3. Process State-Driven Style Transitions
+    for (Entity e: reg.GetEntitiesWith<Components::UIStyleComponent>()) {
+        auto* style = reg.Get<Components::UIStyleComponent>(e);
+        auto* btn   = reg.Get<Components::UIButtonComponent>(e);
+        if (style == nullptr) {
+            continue;
+        }
+
+        JPH::Vec4 targetPanelColor = style->normalColor;
+        JPH::Vec4 targetTextColor  = style->textColorNormal;
+
+        if (btn != nullptr) {
+            if (btn->Has(UIButton::Disabled)) {
+                targetPanelColor = style->disabledColor;
+            } else if (btn->Has(UIButton::Pressed)) {
+                targetPanelColor = style->pressedColor;
+                targetTextColor  = style->textColorPressed;
+            } else if (btn->Has(UIButton::Hovered)) {
+                targetPanelColor = style->hoverColor;
+                targetTextColor  = style->textColorHover;
+            }
+        }
+
+        // Animate Panel Color
+        if (auto* panel = reg.Get<Components::UIPanelComponent>(e)) {
+            if (style->transitionSpeed > 0.0f) {
+                float factor = std::clamp(style->transitionSpeed * dt, 0.0f, 1.0f);
+                panel->color = panel->color + factor * (targetPanelColor - panel->color);
+            } else {
+                panel->color = targetPanelColor;
+            }
+        }
+
+        // Animate Text Color (on self)
+        if (style->hasTextColor) {
+            auto* text = reg.Get<Components::TextComponent>(e);
+            if (text != nullptr) {
+                if (style->transitionSpeed > 0.0f) {
+                    float factor = std::clamp(style->transitionSpeed * dt, 0.0f, 1.0f);
+                    text->color  = text->color + factor * (targetTextColor - text->color);
+                } else {
+                    text->color = targetTextColor;
+                }
             }
         }
     }
