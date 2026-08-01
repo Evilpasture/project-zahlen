@@ -38,12 +38,14 @@ export namespace ZHLN {
 enum class LightningPhase : uint8_t { Idle, SteppedLeader, ReturnStroke, Dissipating };
 
 struct LightningConfig {
-    float eta              = 2.0f;  // Branching factor / probability
-    float peakCurrentKA    = 45.0f; // Peak current in kA
-    float timeDilation     = 1.0f;  // Slow-motion factor
-    bool  positivePolarity = false; // Polarity (+CG / -CG)
-    float ribbonWidth      = 0.8f;  // Width of the glowing 3D lightning trunk
-    int   subdivisions     = 5;     // 2^5 = 32 segments on main trunk + branches
+    float eta               = 2.0f;  // Branching factor / probability
+    float peakCurrentKA     = 45.0f; // Peak current in kA
+    float timeDilation      = 1.0f;  // Slow-motion factor
+    bool  positivePolarity  = false; // Polarity (+CG / -CG)
+    float ribbonWidth       = 0.8f;  // Width of the glowing 3D lightning trunk
+    int   subdivisions      = 5;     // 2^5 = 32 segments on main trunk + branches
+    float soundVolume       = 10.0f;
+    float emissiveIntensity = 8000.0f;
 };
 
 struct LightningSegment {
@@ -57,7 +59,7 @@ class LightningSimulation {
   public:
     LightningSimulation() = default;
     ~LightningSimulation() {
-        Cleanup();
+        Cleanup(false); // <-- Force restore on destruction
     }
 
     LightningSimulation(const LightningSimulation&)            = delete;
@@ -74,7 +76,8 @@ class LightningSimulation {
      * @brief Generates a 3D branching fractal bolt instantly in 20 microseconds with zero lag.
      */
     void TriggerStrike(Engine& engine, JPH::RVec3Arg cloudSeedPos, JPH::RVec3Arg groundTargetPos, const LightningConfig& config = {}) {
-        Cleanup();
+        // Clean up entities, but keep the cached environment if a flash is already active
+        Cleanup(true);
         m_cfg    = config;
         m_engine = &engine;
 
@@ -87,7 +90,21 @@ class LightningSimulation {
         // 2. Build Camera-Facing Ribbon Mesh
         InitRenderResources(engine);
 
-        // 3. Start State Machine
+        // 3. Cache Environment (only if we don't have one active already)
+        if (!m_hasCachedEnvironment) {
+            auto& reg          = engine.GetRegistry();
+            auto  settingsEnts = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
+            if (!settingsEnts.empty()) {
+                if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(settingsEnts[0])) {
+                    m_hasCachedEnvironment = true;
+                    m_baseAmbientExposure  = pp->ambientExposure;
+                    m_baseSkyZenith        = pp->skyZenith;
+                    m_baseSkyHorizon       = pp->skyHorizon;
+                }
+            }
+        }
+
+        // 4. Start State Machine
         m_phase           = LightningPhase::SteppedLeader;
         m_realTime        = 0.0f;
         m_phaseTime       = 0.0f;
@@ -100,8 +117,9 @@ class LightningSimulation {
     }
 
     void Update(Engine& engine, float dt) {
-        if (m_phase == LightningPhase::Idle)
+        if (m_phase == LightningPhase::Idle) {
             return;
+        }
 
         float dtReal = dt / m_cfg.timeDilation;
         m_realTime += dtReal;
@@ -112,7 +130,6 @@ class LightningSimulation {
 
         switch (m_phase) {
             case LightningPhase::SteppedLeader: {
-                // Animate stepped leader descending rapidly (reaches ground in ~0.04s)
                 float growthRate = static_cast<float>(m_maxVertices) / 0.04f;
                 m_visibleVertices += static_cast<uint32_t>(growthRate * dtReal);
 
@@ -123,7 +140,8 @@ class LightningSimulation {
                     TriggerAcousticThunder();
                 }
 
-                UpdateMaterialGlow(rc, 2.0f, 3.5f, 6.0f);
+                // Sizzling initial leader descending (low glow)
+                UpdateMaterialGlow(rc, 0.88f * 15.0f, 0.95f * 15.0f, 1.00f * 15.0f);
                 break;
             }
 
@@ -134,8 +152,8 @@ class LightningSimulation {
                 m_currentKA = iNow;
                 float lum   = std::pow(std::max(iNow, 0.0f) / 30.0f, 1.4f);
 
-                // Blinding HDR Plasma Flash
-                UpdateMaterialGlow(rc, 60.0f * lum, 65.0f * lum, 80.0f * lum);
+                // Blinding HDR Plasma Glow on the mesh
+                UpdateMaterialGlow(rc, 0.88f * m_cfg.emissiveIntensity * lum, 0.95f * m_cfg.emissiveIntensity * lum, 1.00f * m_cfg.emissiveIntensity * lum);
                 UpdateFlashLighting(engine, lum * 2.0f);
 
                 if (m_phaseTime > 0.15f) {
@@ -151,7 +169,7 @@ class LightningSimulation {
                 UpdateFlashLighting(engine, fade * 0.2f);
 
                 if (fade < 0.01f) {
-                    Cleanup(); // Completely destroys VBOs & entities once faded out
+                    Cleanup(false); // <-- Force restore on natural fade completion
                     m_phase = LightningPhase::Idle;
                 }
                 break;
@@ -174,6 +192,53 @@ class LightningSimulation {
     }
 
   private:
+    void RestoreEnvironment() {
+        if ((m_engine != nullptr) && m_hasCachedEnvironment) {
+            auto& reg          = m_engine->GetRegistry();
+            auto  settingsEnts = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
+            if (!settingsEnts.empty()) {
+                if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(settingsEnts[0])) {
+                    pp->ambientExposure = m_baseAmbientExposure;
+                    pp->skyZenith       = m_baseSkyZenith;
+                    pp->skyHorizon      = m_baseSkyHorizon;
+                }
+            }
+            m_hasCachedEnvironment = false;
+        }
+    }
+
+    void UpdateFlashLighting(Engine& engine, float luminance) {
+        auto& reg = engine.GetRegistry();
+
+        // 1. Update Ultra-Bright Point Lights
+        if (m_flashLightEntity != NullEntity && reg.IsAlive(m_flashLightEntity)) {
+            if (auto* light = reg.Get<Components::LightComponent>(m_flashLightEntity)) {
+                light->intensity = luminance * 120000.0f; // Sky flash
+            }
+        }
+        if (m_impactLightEntity != NullEntity && reg.IsAlive(m_impactLightEntity)) {
+            if (auto* light = reg.Get<Components::LightComponent>(m_impactLightEntity)) {
+                light->intensity = luminance * 100000.0f; // Ground burst
+            }
+        }
+
+        // 2. Screen-Wide HDR Exposure Surge
+        if (m_hasCachedEnvironment) {
+            auto settingsEnts = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
+            if (!settingsEnts.empty()) {
+                if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(settingsEnts[0])) {
+                    // Massive ambient camera exposure surge
+                    pp->ambientExposure = m_baseAmbientExposure + (180.0f * luminance);
+
+                    // Flash the sky colors to blinding electric white-cyan
+                    JPH::Vec4 flashSky = JPH::Vec4(12.0f, 15.0f, 20.0f, 1.0f) * luminance;
+                    pp->skyHorizon     = m_baseSkyHorizon + flashSky;
+                    pp->skyZenith      = m_baseSkyZenith + (flashSky * 0.7f);
+                }
+            }
+        }
+    }
+
     void GenerateFractalBolt(JPH::Vec3 start, JPH::Vec3 end, float startWidth) {
         m_segments.clear();
         std::vector<LightningSegment> queue;
@@ -327,21 +392,44 @@ class LightningSimulation {
                                }
         );
 
-        // Flashing Dynamic Point Light
+        // --------------------------------------------------------
+        // ULTRA-BRIGHT FLASH LIGHT CREATION
+        // --------------------------------------------------------
+
+        // Main Mid-Air Flash Light
+        JPH::Vec3 flashPos = (m_cloudOrigin + m_groundTarget) * 0.5f;
         m_flashLightEntity = reg.Create();
-        reg.Add(m_flashLightEntity, Components::TransformComponent {.position = JPH::Vec3(m_groundTarget)});
+        reg.Add(m_flashLightEntity, Components::TransformComponent {.position = flashPos});
         reg.Add(
             m_flashLightEntity, Components::LightComponent {
                                     .type        = LightType::Point,
-                                    .color       = JPH::Vec3(0.6f, 0.8f, 1.0f),
+                                    .color       = JPH::Vec3(0.88f, 0.95f, 1.0f),
                                     .intensity   = 0.0f,
-                                    .radius      = 2.0f,
+                                    .radius      = 12.0f,
                                     .direction   = JPH::Vec3(0.0f, -1.0f, 0.0f),
-                                    .range       = 350.0f,
+                                    .range       = 1400.0f,
                                     .points      = JPH::Mat44::sIdentity(),
                                     .twoSided    = 0,
                                     .shadowLayer = -1
                                 }
+        );
+
+        // Secondary Impact Point Ground Burst Light
+        JPH::Vec3 iPos      = m_groundTarget + JPH::Vec3(0.0f, 1.5f, 0.0f);
+        m_impactLightEntity = reg.Create();
+        reg.Add(m_impactLightEntity, Components::TransformComponent {.position = iPos});
+        reg.Add(
+            m_impactLightEntity, Components::LightComponent {
+                                     .type        = LightType::Point,
+                                     .color       = JPH::Vec3(1.0f, 1.0f, 1.0f),
+                                     .intensity   = 0.0f,
+                                     .radius      = 8.0f,
+                                     .direction   = JPH::Vec3(0.0f, 1.0f, 0.0f),
+                                     .range       = 500.0f,
+                                     .points      = JPH::Mat44::sIdentity(),
+                                     .twoSided    = 0,
+                                     .shadowLayer = -1
+                                 }
         );
     }
 
@@ -355,23 +443,20 @@ class LightningSimulation {
         }
     }
 
-    void UpdateFlashLighting(Engine& engine, float luminance) {
-        auto& reg = engine.GetRegistry();
-        if (m_flashLightEntity != NullEntity && reg.IsAlive(m_flashLightEntity)) {
-            if (auto* light = reg.Get<Components::LightComponent>(m_flashLightEntity)) {
-                light->intensity = luminance * 25.0f;
-            }
-        }
-    }
-
     void TriggerAcousticThunder() {
-        if (!m_engine)
+        if (m_engine == nullptr) {
             return;
-        m_engine->GetAudioContext().PlayProceduralBeep(80.0f, 0.4f, 0.4f);
-        m_engine->GetAudioContext().PlayProceduralBeep(140.0f, 0.8f, 0.3f);
+        }
+
+        // Play the high-quality recording as a 3D spatialized one-shot at the ground target
+        m_engine->GetAudioContext().PlayOneShot3D("resources/assets/audio/lightning.wav", m_groundTarget, m_cfg.soundVolume);
     }
 
-    void Cleanup() {
+    void Cleanup(bool keepEnvironmentCache = false) {
+        if (!keepEnvironmentCache) {
+            RestoreEnvironment();
+        }
+
         if (m_engine) {
             auto& reg = m_engine->GetRegistry();
             auto& rc  = m_engine->GetRenderContext();
@@ -385,12 +470,15 @@ class LightningSimulation {
                 reg.Destroy(m_lightningEntity);
             if (m_flashLightEntity != NullEntity && reg.IsAlive(m_flashLightEntity))
                 reg.Destroy(m_flashLightEntity);
+            if (m_impactLightEntity != NullEntity && reg.IsAlive(m_impactLightEntity))
+                reg.Destroy(m_impactLightEntity);
         }
 
-        m_lightningEntity  = NullEntity;
-        m_flashLightEntity = NullEntity;
-        m_vboPos           = BufferHandle::Invalid;
-        m_vboAttr          = BufferHandle::Invalid;
+        m_lightningEntity   = NullEntity;
+        m_flashLightEntity  = NullEntity;
+        m_impactLightEntity = NullEntity;
+        m_vboPos            = BufferHandle::Invalid;
+        m_vboAttr           = BufferHandle::Invalid;
         m_segments.clear();
     }
 
@@ -408,10 +496,17 @@ class LightningSimulation {
 
     std::vector<LightningSegment> m_segments;
 
-    Entity     m_lightningEntity  = NullEntity;
-    Entity     m_flashLightEntity = NullEntity;
-    AssetID    m_meshAssetId      = 0;
-    MaterialID m_matAssetId       = 0;
+    Entity     m_lightningEntity   = NullEntity;
+    Entity     m_flashLightEntity  = NullEntity;
+    Entity     m_impactLightEntity = NullEntity;
+    AssetID    m_meshAssetId       = 0;
+    MaterialID m_matAssetId        = 0;
+
+    // Environmental cache for flashing screen exposure
+    bool      m_hasCachedEnvironment = false;
+    float     m_baseAmbientExposure  = 4.5f;
+    JPH::Vec4 m_baseSkyZenith        = JPH::Vec4(0.003f, 0.008f, 0.020f, 1.0f);
+    JPH::Vec4 m_baseSkyHorizon       = JPH::Vec4(0.015f, 0.035f, 0.080f, 1.0f);
 
     BufferHandle m_vboPos          = BufferHandle::Invalid;
     BufferHandle m_vboAttr         = BufferHandle::Invalid;
