@@ -9,7 +9,7 @@
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <algorithm>
-#include <ecs/ECS.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <imgui.h>
 
 namespace ZHLN {

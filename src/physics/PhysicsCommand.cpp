@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "Physics.hpp" // For GetBodyID
+#include <Zahlen/physics/Physics.hpp> // For GetBodyID
 #include "Zahlen/Log.hpp"
 #include "physics/PhysicsWorld.hpp"
 #include <Jolt/Physics/Constraints/HingeConstraint.h>

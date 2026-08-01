@@ -14,7 +14,7 @@
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <algorithm>
 #include <cmath>
-#include <ecs/ECS.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <threading/TaskSystem.hpp>
 
 namespace ZHLN {

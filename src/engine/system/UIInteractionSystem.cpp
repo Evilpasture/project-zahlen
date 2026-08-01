@@ -6,7 +6,7 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
 #include <algorithm>
-#include <ecs/ECS.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 
 namespace ZHLN {
 

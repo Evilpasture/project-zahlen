@@ -7,10 +7,10 @@
 #include <Jolt/Physics/Body/Body.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <array>
-#include <detail/Loop.hpp>
-#include <detail/Platform.hpp>
-#include <detail/Prefetch.hpp>
-#include <detail/Span.hpp>
+#include <Zahlen/Core/Loop.hpp>
+#include <Zahlen/Core/Platform.hpp>
+#include <Zahlen/Core/Prefetch.hpp>
+#include <Zahlen/Core/Span.hpp>
 #include <memory>
 
 namespace ZHLN::Physics {

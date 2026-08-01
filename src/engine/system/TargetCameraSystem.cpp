@@ -7,7 +7,7 @@
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Input.hpp"
 #include "Zahlen/Log.hpp"
-#include "ecs/ECS.hpp"
+#include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <cmath>
 

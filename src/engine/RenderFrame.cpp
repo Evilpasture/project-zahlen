@@ -3,8 +3,8 @@
 
 #include "RenderInternal.hpp"
 #include "Zahlen/Profiler.hpp"
-#include "detail/RadixSort.hpp"
-#include "detail/Reflection.hpp"
+#include <Zahlen/Core/RadixSort.hpp>
+#include <Zahlen/Core/Reflection.hpp>
 #include "engine/Scheduler.hpp"
 #include <array>
 #include <cstring>

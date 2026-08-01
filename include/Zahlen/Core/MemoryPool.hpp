@@ -5,7 +5,7 @@
 
 #include <algorithm>
 #include <array>
-#include <detail/Atomic.hpp>
+#include <Zahlen/Core/Atomic.hpp>
 #include <new>
 #include <utility>
 

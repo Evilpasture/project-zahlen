@@ -3,8 +3,8 @@
 
 // src/audio/AudioSystem.cpp
 #include "Zahlen/alife/Types.hpp"
-#include "ecs/ECS.hpp"
-#include "physics/Physics.hpp"
+#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>

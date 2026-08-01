@@ -7,7 +7,7 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <cmath>
-#include <detail/Reflection.hpp>
+#include <Zahlen/Core/Reflection.hpp>
 #include <expected>
 #include <simdjson.h>
 #include <string_view>

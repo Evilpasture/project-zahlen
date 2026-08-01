@@ -9,8 +9,8 @@
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Window.hpp>
 #include <algorithm>
-#include <detail/HashMap.hpp>
-#include <ecs/ECS.hpp>
+#include <Zahlen/Core/HashMap.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 
 namespace ZHLN {
 

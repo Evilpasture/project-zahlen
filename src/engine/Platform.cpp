@@ -11,7 +11,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 // 2. Win32-specific plumbing (internally handles ifdef logic)
-#include <detail/Platform.hpp>
+#include <Zahlen/Core/Platform.hpp>
 
 #ifdef _WIN32
 

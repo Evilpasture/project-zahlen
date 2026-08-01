@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <detail/Atomic.hpp>
+#include <Zahlen/Core/Atomic.hpp>
 #include <threading/Mutex.hpp>
 
 namespace ZHLN {

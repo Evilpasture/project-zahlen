@@ -7,8 +7,8 @@
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
-#include <detail/ControlFlow.hpp>
-#include <detail/MemoryPool.hpp>
+#include <Zahlen/Core/ControlFlow.hpp>
+#include <Zahlen/Core/MemoryPool.hpp>
 #include <miniaudio.h>
 #include <threading/Mutex.hpp>
 #include <type_traits>

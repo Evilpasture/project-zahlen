@@ -2,7 +2,7 @@
 #pragma once
 #include <Zahlen/Math3D.hpp>
 #include <cstdint>
-#include <detail/String.hpp>
+#include <Zahlen/Core/String.hpp>
 #include <vector>
 
 namespace ZHLN {

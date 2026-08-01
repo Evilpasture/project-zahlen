@@ -11,8 +11,8 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
-#include <detail/ControlFlow.hpp>
-#include <ecs/ECS.hpp>
+#include <Zahlen/Core/ControlFlow.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <engine/Resources.hpp>
 #include <physics/PhysicsWorld.hpp>
 

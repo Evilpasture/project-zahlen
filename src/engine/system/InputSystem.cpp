@@ -7,7 +7,7 @@
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Entity.hpp"
 #include "Zahlen/Input.hpp"
-#include "ecs/ECS.hpp"
+#include <Zahlen/ecs/ECS.hpp>
 namespace ZHLN {
 
 void InputSystem::Update(Engine& engine) {

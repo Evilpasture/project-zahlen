@@ -4,8 +4,8 @@
 #pragma once
 
 #include "Zahlen/Components.hpp"
-#include "detail/HashMap.hpp"
-#include "ecs/ECS.hpp"
+#include <Zahlen/Core/HashMap.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 
 namespace ZHLN {
 

@@ -4,10 +4,10 @@
 // File: src/render/RenderInternal.hpp
 #pragma once
 #include "Rendering.hpp"
-#include "detail/Array.hpp"
-#include "detail/ControlFlow.hpp"
-#include "detail/HashMap.hpp"
-#include "detail/RadixSort.hpp"
+#include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Core/ControlFlow.hpp>
+#include <Zahlen/Core/HashMap.hpp>
+#include <Zahlen/Core/RadixSort.hpp>
 #include "engine/FileWatcher.hpp"
 #include "threading/Mutex.hpp"
 #include <GLFW/glfw3.h>
@@ -17,7 +17,7 @@
 #include <Zahlen/Types.hpp>
 #include <array>
 #include <cstddef>
-#include <detail/MemoryPool.hpp>
+#include <Zahlen/Core/MemoryPool.hpp>
 #include <fstream>
 #include <memory>
 #include <type_traits>

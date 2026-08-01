@@ -1,6 +1,6 @@
 // include/Zahlen/Error.hpp
 #pragma once
-#include "../../src/detail/Reflection.hpp"
+#include <Zahlen/Core/Reflection.hpp>
 #include <atomic>
 #include <cstdint>
 #include <string_view>

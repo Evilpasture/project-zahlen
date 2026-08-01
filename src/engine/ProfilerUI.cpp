@@ -5,15 +5,15 @@
 
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Render.hpp"
-#include "ecs/ECS.hpp"
-#include "physics/Physics.hpp"
+#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <algorithm>
 #include <array>
 #include <chrono>
-#include <detail/Atomic.hpp>
-#include <detail/SkipList.hpp>
+#include <Zahlen/Core/Atomic.hpp>
+#include <Zahlen/Core/SkipList.hpp>
 #include <imgui.h>
 
 namespace ZHLN {

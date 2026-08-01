@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
-#include <detail/Atomic.hpp>
+#include <Zahlen/Core/Atomic.hpp>
 #include <span>
 
 namespace ZHLN {

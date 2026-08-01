@@ -7,7 +7,7 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <algorithm>
-#include <physics/Physics.hpp>
+#include <Zahlen/physics/Physics.hpp>
 
 namespace ZHLN {
 

@@ -9,8 +9,8 @@
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <cstdint>
-#include <detail/Atomic.hpp>
-#include <detail/Platform.hpp>
+#include <Zahlen/Core/Atomic.hpp>
+#include <Zahlen/Core/Platform.hpp>
 #include <threading/Mutex.hpp>
 #include <type_traits>
 

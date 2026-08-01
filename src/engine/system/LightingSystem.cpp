@@ -8,8 +8,8 @@
 #include "Zahlen/Entity.hpp"
 #include "Zahlen/Render.hpp"
 #include "Zahlen/Types.hpp"
-#include "detail/Array.hpp"
-#include "ecs/ECS.hpp"
+#include <Zahlen/Core/Array.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <cstring>
 

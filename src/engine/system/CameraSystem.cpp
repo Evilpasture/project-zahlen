@@ -8,7 +8,7 @@
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Entity.hpp"
 #include "Zahlen/Window.hpp"
-#include "ecs/ECS.hpp"
+#include <Zahlen/ecs/ECS.hpp>
 
 namespace ZHLN {
 

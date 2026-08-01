@@ -12,9 +12,9 @@
 #include <Zahlen/Render.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <cstring>
-#include <detail/ControlFlow.hpp>
-#include <ecs/ECS.hpp>
-#include <physics/Physics.hpp>
+#include <Zahlen/Core/ControlFlow.hpp>
+#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <physics/PhysicsWorld.hpp>
 namespace ZHLN::Tests {
 

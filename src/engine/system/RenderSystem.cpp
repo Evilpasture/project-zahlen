@@ -6,7 +6,7 @@
 #include "CullingSystem.hpp"
 #include "LightingSystem.hpp"
 #include "UIRenderSystem.hpp"
-#include "ecs/ECS.hpp"
+#include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
@@ -19,7 +19,7 @@
 #include <cmath>
 #include <cstring>
 #include <engine/Resources.hpp>
-#include <physics/Physics.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <physics/PhysicsDebug.hpp>
 
 namespace ZHLN {

@@ -3,7 +3,7 @@
 
 #include <Zahlen/Console.hpp>
 #include <Zahlen/Scripting.hpp>
-#include <detail/ControlFlow.hpp>
+#include <Zahlen/Core/ControlFlow.hpp>
 #include <imgui.h>
 #include <print>
 #include <string>

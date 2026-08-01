@@ -17,7 +17,7 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
-#include <physics/Physics.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <stb_image.h>
 #include <threading/TaskSystem.hpp>
 #include <unordered_map>

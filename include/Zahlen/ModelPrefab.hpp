@@ -1,7 +1,7 @@
 // include/Zahlen/ModelPrefab.hpp
 #pragma once
 
-#include "../../src/detail/String.hpp"
+#include <Zahlen/Core/String.hpp>
 #include "SkeletalAnimation.hpp"
 #include "Types.hpp"
 #include <Jolt/Jolt.h>

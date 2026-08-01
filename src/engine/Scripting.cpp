@@ -6,7 +6,7 @@
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Input.hpp"
-#include "ecs/ECS.hpp"
+#include <Zahlen/ecs/ECS.hpp>
 #include "engine/system/AnimationSystem.hpp"
 #include "engine/system/InputSystem.hpp"
 #include <Zahlen/Audio.hpp>
@@ -26,7 +26,7 @@
 #include <cstring>
 #include <engine/system/LightingSystem.hpp>
 #include <functional>
-#include <physics/Physics.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <physics/PhysicsWorld.hpp>
 #include <print>
 #include <string_view>

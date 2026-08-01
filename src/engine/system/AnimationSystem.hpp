@@ -4,7 +4,7 @@
 #pragma once
 // clang-format off
 #include "Zahlen/Components.hpp"
-#include "detail/Atomic.hpp"
+#include <Zahlen/Core/Atomic.hpp>
 #include <Jolt/Jolt.h>
 #include <Jolt/Core/Array.h>
 #include <Jolt/Core/UnorderedMap.h>

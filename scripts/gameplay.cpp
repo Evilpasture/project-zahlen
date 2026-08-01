@@ -11,18 +11,18 @@
 #include "Zahlen/Math3D.hpp"
 #include "Zahlen/ScriptECSBridge.hpp"
 #include "Zahlen/Window.hpp"
-#include "detail/Array.hpp"
-#include "ecs/ECS.hpp"
-#include "physics/Physics.hpp"
+#include <Zahlen/Core/Array.hpp>
+#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/physics/Physics.hpp>
 
 // C++ Standard Library & Engine Modules
 import std;
 import ZHLN.MainMenu;
 
 #if defined(_WIN32)
-#define GAMEPLAY_API __declspec(dllexport)
+#define GAMEPLAY_API extern "C" __declspec(dllexport)
 #else
-#define GAMEPLAY_API [[gnu::visibility("default")]]
+#define GAMEPLAY_API extern "C" [[gnu::visibility("default")]]
 #endif
 
 namespace Game {
@@ -648,7 +648,7 @@ void SummitVictorySystem(Engine* engine, [[maybe_unused]] float dt) {
 
 } // namespace Game
 
-extern "C" GAMEPLAY_API void NativeGameplayUpdate(ZHLN::Engine* engine, float dt) {
+GAMEPLAY_API void NativeGameplayUpdate(ZHLN::Engine* engine, float dt) {
     if (!engine)
         return;
 

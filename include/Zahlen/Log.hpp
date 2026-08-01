@@ -6,7 +6,7 @@
 #include "CommandLine.hpp"
 #include "Config.hpp"
 #include <cstdio>
-#include <detail/Print.hpp>
+#include <Zahlen/Core/Print.hpp>
 #include <format>
 #include <source_location>
 #include <string>

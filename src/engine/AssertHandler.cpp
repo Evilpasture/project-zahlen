@@ -3,7 +3,7 @@
 
 #include "Zahlen/Camera.hpp"
 #include "engine/TTYBackend.hpp"
-#include "physics/Physics.hpp"
+#include <Zahlen/physics/Physics.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <atomic>
@@ -15,8 +15,8 @@
 #include <cstdio>              // For FILE, stderr, stdout, vfprintf
 #include <cstdlib>             // For std::abort, std::free
 #include <cstring>             // For std::memcpy
-#include <detail/Platform.hpp> // This handles windows.h and includes unistd.h on Unix
-#include <detail/Print.hpp>
+#include <Zahlen/Core/Platform.hpp> // This handles windows.h and includes unistd.h on Unix
+#include <Zahlen/Core/Print.hpp>
 #include <physics/PhysicsWorld.hpp> // Required to fully define PhysicsWorld for ZHLN_TRACE
 #include <print>                    // Restored for stable general-purpose printing
 #include <string>                   // For std::string

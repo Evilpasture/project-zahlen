@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // src/physics/RagdollFactory.cpp
-#include "Physics.hpp"
-#include "detail/ControlFlow.hpp"
+#include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/Core/ControlFlow.hpp>
 #include <Jolt/Physics/Constraints/SwingTwistConstraint.h>
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <vector>

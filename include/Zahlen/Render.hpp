@@ -8,8 +8,8 @@
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/render/RenderCode.hpp>
-#include <detail/Array.hpp>
-#include <detail/String.hpp>
+#include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Core/String.hpp>
 #include <expected>
 #include <memory>
 #include <optional>

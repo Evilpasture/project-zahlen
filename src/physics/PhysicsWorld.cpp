@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "PhysicsWorld.hpp"
-#include "detail/ControlFlow.hpp"
+#include <Zahlen/Core/ControlFlow.hpp>
 #include <cstring>
 #include <new>
 

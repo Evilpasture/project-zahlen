@@ -8,7 +8,7 @@
 #include <Zahlen/alife/Simulator.hpp>
 #include <cmath>
 #include <cstdlib>
-#include <ecs/ECS.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <fstream>
 #include <threading/TaskSystem.hpp>
 

@@ -8,9 +8,9 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Sync.hpp>
 #include <cstddef>
-#include <detail/HashMap.hpp>
-#include <detail/Reflection.hpp>
-#include <detail/Span.hpp>
+#include <Zahlen/Core/HashMap.hpp>
+#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Span.hpp>
 #include <source_location>
 #include <span>
 #include <string>

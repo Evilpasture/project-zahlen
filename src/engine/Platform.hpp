@@ -5,7 +5,7 @@
 
 #pragma once
 #include <cstdint>
-#include <detail/Platform.hpp>
+#include <Zahlen/Core/Platform.hpp>
 
 namespace ZHLN {
 class Window;

@@ -6,7 +6,7 @@
 #include "WindowInternal.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
-#include "ecs/ECS.hpp"
+#include <Zahlen/ecs/ECS.hpp>
 #include <GLFW/glfw3.h>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Window.hpp>

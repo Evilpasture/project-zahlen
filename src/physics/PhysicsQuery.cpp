@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "Physics.hpp"
+#include <Zahlen/physics/Physics.hpp>
 #include "PhysicsWorld.hpp"
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Collision/CastResult.h>

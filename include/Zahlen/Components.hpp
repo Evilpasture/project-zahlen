@@ -1,7 +1,7 @@
 // include/Zahlen/Components.hpp
 #pragma once
-#include "../../src/detail/Array.hpp"
-#include "../../src/detail/String.hpp"
+#include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Core/String.hpp>
 #include "Entity.hpp"
 #include "Types.hpp"
 #include "alife/Types.hpp"

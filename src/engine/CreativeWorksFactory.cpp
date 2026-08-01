@@ -17,11 +17,11 @@
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <algorithm>
 #include <cstddef>
-#include <ecs/ECS.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <engine/system/AnimationSystem.hpp>
 #include <engine/system/LightingSystem.hpp>
 #include <gltf/GLTFImporter.hpp>
-#include <physics/Physics.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <stb_image.h>
 #include <threading/TaskSystem.hpp>
 #define STB_TRUETYPE_IMPLEMENTATION

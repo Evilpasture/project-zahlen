@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include "ECS.hpp"
+#include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/Entity.hpp>
 #include <new>
 #include <utility>

@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <detail/Platform.hpp>
+#include <Zahlen/Core/Platform.hpp>
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <emmintrin.h>

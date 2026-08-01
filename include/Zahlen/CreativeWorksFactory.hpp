@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "physics/Physics.hpp"
+#include <Zahlen/physics/Physics.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/ModelPrefab.hpp>

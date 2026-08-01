@@ -6,7 +6,7 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/render/RenderCode.hpp>
-#include <detail/String.hpp>
+#include <Zahlen/Core/String.hpp>
 #include <expected>
 #include <memory>
 

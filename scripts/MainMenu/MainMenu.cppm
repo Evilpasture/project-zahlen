@@ -16,7 +16,7 @@ module;
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Log.hpp>
 #include <algorithm>
-#include <ecs/ECS.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <functional>
 #include <string>
 #include <vector>

@@ -4,9 +4,9 @@
 #pragma once
 
 #include <cstdint>
-#include <detail/HashMap.hpp>
-#include <detail/Span.hpp>
-#include <detail/String.hpp>
+#include <Zahlen/Core/HashMap.hpp>
+#include <Zahlen/Core/Span.hpp>
+#include <Zahlen/Core/String.hpp>
 #include <string_view>
 #include <threading/Mutex.hpp>
 

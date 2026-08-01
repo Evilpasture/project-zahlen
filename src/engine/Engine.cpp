@@ -27,12 +27,12 @@
 #include <dlfcn.h>
 #endif
 
-#include <ecs/ECS.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <ecs/EntityCommandBuffer.hpp>
 #include <ecs/SystemGraph.hpp>
 #include <engine/system/CullingSystem.hpp>
 #include <filesystem>
-#include <physics/Physics.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <threading/Thread.hpp>
 
 namespace ZHLN {

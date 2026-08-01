@@ -4,7 +4,7 @@
 #pragma once
 
 #include "ScriptBinder.hpp"
-#include "ecs/ECS.hpp"
+#include <Zahlen/ecs/ECS.hpp>
 
 namespace ZHLN {
 

@@ -4,7 +4,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/alife/SpatialGrid.hpp>
 #include <cmath>
-#include <ecs/ECS.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 
 namespace ZHLN::ALife {
 

@@ -4,7 +4,7 @@
 #pragma once
 
 #include "Zahlen/Entity.hpp"
-#include "detail/Reflection.hpp"
+#include <Zahlen/Core/Reflection.hpp>
 #include <expected>
 #include <functional>
 #include <memory>

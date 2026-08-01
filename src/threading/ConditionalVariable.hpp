@@ -4,7 +4,7 @@
 #pragma once
 
 #include "Mutex.hpp"
-#include <detail/Atomic.hpp>
+#include <Zahlen/Core/Atomic.hpp>
 #include <type_traits>
 
 namespace ZHLN {

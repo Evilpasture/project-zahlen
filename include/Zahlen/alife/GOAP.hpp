@@ -4,7 +4,7 @@
 #pragma once
 
 #include <cstdint>
-#include <detail/String.hpp>
+#include <Zahlen/Core/String.hpp>
 #include <string_view>
 #include <vector>
 

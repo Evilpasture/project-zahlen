@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include "ECS.hpp"
+#include <Zahlen/ecs/ECS.hpp>
 #include "threading/TaskSystem.hpp"
-#include <detail/Atomic.hpp>
+#include <Zahlen/Core/Atomic.hpp>
 #include <string_view>
 #include <vector>
 

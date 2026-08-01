@@ -21,22 +21,22 @@
 #include <Jolt/Physics/Collision/Shape/PlaneShape.h>
 #include <Jolt/Physics/Collision/Shape/HeightFieldShape.h>
 
-#include "Physics.hpp"
+#include <Zahlen/physics/Physics.hpp>
 #include "PhysicsDebug.hpp"
 #include <Zahlen/Buffer.h>
 #include "PhysicsWorld.hpp"
 #include <Zahlen/Log.hpp>
 #include "PhysicsContactEvents.hpp"
 #include "Zahlen/Profiler.hpp"
-#include "detail/ControlFlow.hpp"
+#include <Zahlen/Core/ControlFlow.hpp>
 #include "threading/TaskSystem.hpp"
 
 // ZHLN Detail Utilities
 #include <algorithm>
 #include <cstddef>
-#include <detail/Prefetch.hpp>
-#include <detail/Span.hpp>
-#include <detail/Loop.hpp>
+#include <Zahlen/Core/Prefetch.hpp>
+#include <Zahlen/Core/Span.hpp>
+#include <Zahlen/Core/Loop.hpp>
 // clang-format on
 
 #include <alloca.h> // Include this specifically for alloca() on macOS/Linux

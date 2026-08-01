@@ -7,7 +7,7 @@
 #include <Zahlen/ModelPrefab.hpp>
 #include <cgltf.h>
 #include <cstring>
-#include <detail/ControlFlow.hpp>
+#include <Zahlen/Core/ControlFlow.hpp>
 #include <engine/Platform.hpp>
 #include <new>
 #include <vector>

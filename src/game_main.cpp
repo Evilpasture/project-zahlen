@@ -5,7 +5,7 @@
 #include "Zahlen/Audio.hpp"
 #include "Zahlen/CommandLine.hpp"
 #include "Zahlen/Input.hpp"
-#include "ecs/ECS.hpp"
+#include <Zahlen/ecs/ECS.hpp>
 #include "ecs/EntityCommandBuffer.hpp"
 #include "ecs/SystemGraph.hpp"
 #include "engine/FileWatcher.hpp"
@@ -34,7 +34,7 @@
 #include <Zahlen/Scripting.hpp>
 #include <algorithm>
 #include <chrono>
-#include <detail/ControlFlow.hpp>
+#include <Zahlen/Core/ControlFlow.hpp>
 #include <engine/system/AnimationSystem.hpp>
 #include <engine/system/ArticulationSystem.hpp>
 #include <engine/system/CullingSystem.hpp>

@@ -7,7 +7,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Log.hpp>
-#include <ecs/ECS.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <physics/PhysicsWorld.hpp>
 
 namespace ZHLN::Tests {

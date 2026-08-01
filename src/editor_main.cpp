@@ -15,7 +15,7 @@
 #include "Zahlen/Render.hpp"
 #include "Zahlen/Window.hpp"
 #include "Zahlen/alife/Simulator.hpp"
-#include "ecs/ECS.hpp"
+#include <Zahlen/ecs/ECS.hpp>
 #include "ecs/EntityCommandBuffer.hpp"
 #include "ecs/SystemGraph.hpp"
 #include "engine/Platform.hpp"
@@ -33,7 +33,7 @@
 #include "engine/system/TransformSystem.hpp"
 #include "engine/system/UIInteractionSystem.hpp"
 #include "engine/system/UIRenderSystem.hpp"
-#include "physics/Physics.hpp"
+#include <Zahlen/physics/Physics.hpp>
 #include "physics/PhysicsWorld.hpp"
 #include <GLFW/glfw3.h>
 #include <Jolt/Physics/Collision/CastResult.h>
@@ -43,7 +43,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
-#include <detail/ControlFlow.hpp>
+#include <Zahlen/Core/ControlFlow.hpp>
 #include <expected>
 #include <imgui.h>
 #include <span>

@@ -4,8 +4,8 @@
 // src/threading/Channel.hpp
 #pragma once
 
-#include <detail/Atomic.hpp>
-#include <detail/ControlFlow.hpp>
+#include <Zahlen/Core/Atomic.hpp>
+#include <Zahlen/Core/ControlFlow.hpp>
 #include <queue>
 #include <threading/Mutex.hpp>
 #include <threading/TaskSystem.hpp>

@@ -3,7 +3,7 @@
 
 // include/Zahlen/Format.hpp
 #pragma once
-#include "../../src/detail/Reflection.hpp"
+#include <Zahlen/Core/Reflection.hpp>
 #include "Entity.hpp"
 #include <Jolt/Jolt.h>
 #include <Jolt/Math/Quat.h>
