@@ -1,40 +1,19 @@
-// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
-// SPDX-License-Identifier: GPL-3.0-or-later
-
 #include "UIRenderSystem.hpp"
 #include "UILayoutSystem.hpp"
 #include <Zahlen/Components.hpp>
+#include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/GUI.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Window.hpp>
-#include <algorithm>
-#include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <algorithm>
+#include <cstring>
 
 namespace ZHLN {
 
-namespace {
-struct UIPanelCacheEntry {
-    Mesh  posMesh {};
-    float lastX = -1e30f;
-    float lastY = -1e30f;
-};
-
-struct UITextCacheEntry {
-    Mesh        posMesh {};
-    float       lastX = -1e30f;
-    float       lastY = -1e30f;
-    std::string textCache;
-};
-
-static ZHLN::HashMap<uint64_t, UIPanelCacheEntry> s_UIPanelMeshes;
-static ZHLN::HashMap<uint64_t, UITextCacheEntry>  s_UITextMeshes;
-} // namespace
-
 void UIRenderSystem::Update(Engine& engine) {
     auto& reg        = engine.GetRegistry();
-    auto& rc         = engine.GetRenderContext();
     auto  windowSize = engine.GetWindow().GetSize();
 
     if (windowSize.width == 0 || windowSize.height == 0) {
@@ -47,19 +26,53 @@ void UIRenderSystem::Update(Engine& engine) {
     auto entities = reg.GetEntitiesWith<Components::UIRectComponent>();
     auto rects    = reg.GetRawArray<Components::UIRectComponent>();
 
+    if (entities.empty()) {
+        return;
+    }
+
     struct SortEntry {
         size_t   rawIndex;
         uint32_t depth;
     };
-    JPH::Array<SortEntry> sortedEntries;
+    std::vector<SortEntry> sortedEntries;
     sortedEntries.reserve(entities.size());
     for (size_t i = 0; i < entities.size(); ++i) {
         sortedEntries.push_back({.rawIndex = i, .depth = rects[i].hierarchyDepth});
     }
     std::ranges::sort(sortedEntries, [](const auto& a, const auto& b) { return a.depth < b.depth; });
 
+    // CPU-side staging arrays (Zero allocation overhead after warming up)
+    ZHLN::Array<VertexPosition>   localPositions;
+    ZHLN::Array<VertexAttributes> localAttributes;
+    ZHLN::Array<UIBatch>          localBatches;
+
+    localPositions.reserve(4096);
+    localAttributes.reserve(4096);
+    localBatches.reserve(128);
+
+    uint32_t                       currentVertexOffset = 0;
     HashMap<uint64_t, ScissorRect> activeScissors;
 
+    auto QueueBatch = [&](uint32_t textureIdx, uint32_t count, bool useScissor, ScissorRect scissor) {
+        if (count == 0) {
+            return;
+        }
+
+        if (!localBatches.empty()) {
+            auto& last = localBatches.back();
+            if (last.textureIndex == textureIdx && last.useScissor == useScissor &&
+                (!useScissor || (std::memcmp(&last.scissorRect, &scissor, sizeof(ScissorRect)) == 0))) {
+                last.vertexCount += count;
+                return;
+            }
+        }
+
+        localBatches.push_back(
+            {.textureIndex = textureIdx, .vertexStart = currentVertexOffset - count, .vertexCount = count, .useScissor = useScissor, .scissorRect = scissor}
+        );
+    };
+
+    // --- Generate Panel Vertices ---
     for (const auto& entry: sortedEntries) {
         Entity      e    = entities[entry.rawIndex];
         const auto& rect = rects[entry.rawIndex];
@@ -111,23 +124,26 @@ void UIRenderSystem::Update(Engine& engine) {
         }
 
         if (auto* panel = reg.Get<Components::UIPanelComponent>(e)) {
-            const auto* cache = s_UIPanelMeshes.Find(e.Pack());
-            Mesh        panelMesh {};
-
-            if (!cache || cache->posMesh.posBuffer == BufferHandle::Invalid || cache->lastX != rect.computedAbsMinX || cache->lastY != rect.computedAbsMinY) {
-                if (cache && cache->posMesh.posBuffer != BufferHandle::Invalid) {
-                    rc.DestroyBuffer(cache->posMesh.posBuffer);
-                    rc.DestroyBuffer(cache->posMesh.attrBuffer);
-                }
-                panelMesh = GUI::CreatePanelMesh(rc, rect, *panel);
-                s_UIPanelMeshes.Insert(e.Pack(), UIPanelCacheEntry {.posMesh = panelMesh, .lastX = rect.computedAbsMinX, .lastY = rect.computedAbsMinY});
-            } else {
-                panelMesh = cache->posMesh;
+            uint32_t maxNeeded = 54; // Max vertices for 9-slice panel
+            if (currentVertexOffset + maxNeeded >= 100000) {
+                break;
             }
-            Renderer::DrawUI(rc, panelMesh, panel->textureIndex, useScissor, currentScissor);
+
+            size_t startIdx = localPositions.size();
+            localPositions.resize(startIdx + maxNeeded);
+            localAttributes.resize(startIdx + maxNeeded);
+
+            uint32_t written = GUI::AppendPanelVertices(&localPositions[startIdx], &localAttributes[startIdx], rect, *panel);
+
+            localPositions.resize(startIdx + written);
+            localAttributes.resize(startIdx + written);
+
+            currentVertexOffset += written;
+            QueueBatch(panel->textureIndex, written, useScissor, currentScissor);
         }
     }
 
+    // --- Generate Text Vertices ---
     auto             uiSettingsEntities = reg.GetEntitiesWith<Components::UISettingsComponent>();
     const FontAtlas* activeFont         = nullptr;
     if (!uiSettingsEntities.empty()) {
@@ -157,49 +173,56 @@ void UIRenderSystem::Update(Engine& engine) {
             }
         }
 
-        const auto* cache = s_UITextMeshes.Find(e.Pack());
-        Mesh        textMesh {};
-
-        if (!cache || cache->posMesh.posBuffer == BufferHandle::Invalid || cache->lastX != drawX || cache->lastY != drawY || cache->textCache != displayStr) {
-            if (cache && cache->posMesh.posBuffer != BufferHandle::Invalid) {
-                rc.DestroyBuffer(cache->posMesh.posBuffer);
-                rc.DestroyBuffer(cache->posMesh.attrBuffer);
+        if (activeFont != nullptr && !displayStr.empty()) {
+            auto maxVertsNeeded = static_cast<uint32_t>(displayStr.length() * 6);
+            if (currentVertexOffset + maxVertsNeeded >= 100000) {
+                break;
             }
-            if (activeFont != nullptr && !displayStr.empty()) {
-                textMesh = GUI::CreateTextMesh(rc, *activeFont, displayStr, drawX, drawY, text->scale, text->color);
-                s_UITextMeshes.Insert(e.Pack(), UITextCacheEntry {.posMesh = textMesh, .lastX = drawX, .lastY = drawY, .textCache = displayStr});
-            }
-        } else {
-            textMesh = cache->posMesh;
-        }
 
-        bool        useScissor = false;
-        ScissorRect currentScissor {};
+            size_t startIdx = localPositions.size();
+            localPositions.resize(startIdx + maxVertsNeeded);
+            localAttributes.resize(startIdx + maxVertsNeeded);
 
-        if (hasRect) {
-            const ScissorRect* parentScissorPtr = activeScissors.Find(rect->parentEntity.Pack());
-            if (parentScissorPtr != nullptr) {
-                currentScissor = *parentScissorPtr;
-                useScissor     = true;
-            } else if (rect->parentEntity != NullEntity && reg.IsAlive(rect->parentEntity)) {
-                if (auto* parentRect = reg.Get<Components::UIRectComponent>(rect->parentEntity)) {
-                    if (parentRect->clipChildren) {
-                        currentScissor = {
-                            .x      = (int32_t) std::max(0.0f, parentRect->computedAbsMinX),
-                            .y      = (int32_t) std::max(0.0f, parentRect->computedAbsMinY),
-                            .width  = (uint32_t) std::max(0.0f, parentRect->computedAbsMaxX - parentRect->computedAbsMinX),
-                            .height = (uint32_t) std::max(0.0f, parentRect->computedAbsMaxY - parentRect->computedAbsMinY)
-                        };
-                        useScissor = true;
+            uint32_t written =
+                GUI::AppendTextVertices(&localPositions[startIdx], &localAttributes[startIdx], *activeFont, displayStr, drawX, drawY, text->scale, text->color);
+
+            localPositions.resize(startIdx + written);
+            localAttributes.resize(startIdx + written);
+
+            currentVertexOffset += written;
+
+            bool        useScissor = false;
+            ScissorRect currentScissor {};
+
+            if (hasRect) {
+                const ScissorRect* parentScissorPtr = activeScissors.Find(rect->parentEntity.Pack());
+                if (parentScissorPtr != nullptr) {
+                    currentScissor = *parentScissorPtr;
+                    useScissor     = true;
+                } else if (rect->parentEntity != NullEntity && reg.IsAlive(rect->parentEntity)) {
+                    if (auto* parentRect = reg.Get<Components::UIRectComponent>(rect->parentEntity)) {
+                        if (parentRect->clipChildren) {
+                            currentScissor = {
+                                .x      = (int32_t) std::max(0.0f, parentRect->computedAbsMinX),
+                                .y      = (int32_t) std::max(0.0f, parentRect->computedAbsMinY),
+                                .width  = (uint32_t) std::max(0.0f, parentRect->computedAbsMaxX - parentRect->computedAbsMinX),
+                                .height = (uint32_t) std::max(0.0f, parentRect->computedAbsMaxY - parentRect->computedAbsMinY)
+                            };
+                            useScissor = true;
+                        }
                     }
                 }
             }
-        }
 
-        if (textMesh.posBuffer != BufferHandle::Invalid) {
-            Renderer::DrawUI(rc, textMesh, text->fontIndex, useScissor, currentScissor);
+            QueueBatch(text->fontIndex, written, useScissor, currentScissor);
         }
     }
+
+    // Submit the data cleanly through the public boundary API
+    engine.GetRenderContext().SubmitUI(
+        localBatches.data(), static_cast<uint32_t>(localBatches.size()), localPositions.data(), localAttributes.data(),
+        static_cast<uint32_t>(localPositions.size())
+    );
 }
 
 } // namespace ZHLN

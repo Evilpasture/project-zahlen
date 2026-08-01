@@ -205,6 +205,7 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
             auto* windowHandle = window.IsTTY() ? nullptr : static_cast<GLFWwindow*>(window.GetNativeHandle());
             return SetupUI(windowHandle);
         })
+        .and_then([&]() { return InitUIDynamicBuffers(); })
         .and_then([&]() -> std::expected<void, Error> {
             uint32_t workerCount = TaskSystem::GetWorkerCount() + 1;
             if (workerCount == 0) {
@@ -1609,6 +1610,25 @@ std::expected<void, Error> RenderContext::Impl::BuildHangGpuPipeline() {
             )
                 .transform([&](auto&& pipeline) { hangGpuPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
+}
+
+std::expected<void, Error> RenderContext::Impl::InitUIDynamicBuffers() noexcept {
+    // Capacity for 100,000 vertices (approx 16k glyphs or panels) per frame
+    const size_t maxUiVertices = 100000;
+    const size_t uiBufferSize  = maxUiVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
+
+    for (int i = 0; i < 2; ++i) {
+        auto gpu_buf_res = Vk::Buffer::Create(
+            allocator.Get(), uiBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
+        );
+        if (!gpu_buf_res) {
+            return std::unexpected(Error(gpu_buf_res.error()));
+        }
+        uiVbos[i]         = std::move(*gpu_buf_res);
+        uiVboAddresses[i] = ctx.BufferAddress(uiVbos[i].Handle());
+    }
+    ZHLN::Log("Allocated double-buffered dynamic UI VBOs ({} bytes).", uiBufferSize);
+    return {};
 }
 
 } // namespace ZHLN

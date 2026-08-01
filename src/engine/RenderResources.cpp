@@ -471,6 +471,33 @@ BufferHandle RenderContext::GetDebugMeshBuffer() const noexcept {
     return _impl->debugMeshHandles[];
 }
 
+void RenderContext::SubmitUI(
+    const UIBatch*          batches,
+    uint32_t                batchCount,
+    const VertexPosition*   positions,
+    const VertexAttributes* attributes,
+    uint32_t                vertexCount
+) noexcept {
+    if (batchCount == 0 || vertexCount == 0 || _impl->current_cmd == VK_NULL_HANDLE) {
+        return;
+    }
+
+    uint32_t safeVertexCount = std::min(vertexCount, 100000u);
+
+    auto  mappedRegion = _impl->uiVbos[_impl->frame_index].Map();
+    auto* basePosPtr   = static_cast<VertexPosition*>(mappedRegion.data);
+    auto* baseAttrPtr  = reinterpret_cast<VertexAttributes*>(basePosPtr + 100000);
+
+    std::memcpy(basePosPtr, positions, safeVertexCount * sizeof(VertexPosition));
+    std::memcpy(baseAttrPtr, attributes, safeVertexCount * sizeof(VertexAttributes));
+
+    _impl->uiBatches.clear();
+    _impl->uiBatches.reserve(batchCount);
+    for (uint32_t i = 0; i < batchCount; ++i) {
+        _impl->uiBatches.push_back(batches[i]);
+    }
+}
+
 void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices, uint32_t count) {
     if (count == 0) {
         return;

@@ -547,38 +547,43 @@ void BlitPass::Execute(
     if (ctx.blitPass.pipeline.Valid()) {
         Vk::DynamicPass(inColor.extent).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(cmd, [&]() {
             ctx.blitPass.Execute(cmd, pc);
-            if (!ctx.uiDrawQueue.empty()) {
+
+            if (!ctx.uiBatches.empty()) {
                 UIObjectConstants uipc {};
                 uipc.orthoMatrix = Math::CreateOrthoMatrix(inColor.extent.width, inColor.extent.height);
 
                 VkRect2D defaultScissor = {.offset = {.x = 0, .y = 0}, .extent = {.width = inColor.extent.width, .height = inColor.extent.height}};
 
-                for (const auto& draw: ctx.uiDrawQueue) {
-                    uipc.albedoIdx   = draw.fontIndex;
-                    uipc.posAddress  = draw.posMesh->vboAddress;
-                    uipc.attrAddress = draw.attrMesh->vboAddress;
+                auto baseVboAddress = ctx.uiVboAddresses[recorder.frameIndex];
+
+                for (const auto& batch: ctx.uiBatches) {
+                    uipc.albedoIdx   = batch.textureIndex;
+                    uipc.posAddress  = baseVboAddress + (batch.vertexStart * sizeof(VertexPosition));
+                    uipc.attrAddress = baseVboAddress + (100000 * sizeof(VertexPosition)) + (batch.vertexStart * sizeof(VertexAttributes));
 
                     Vk::ScopedScissor scissorGuard(
-                        cmd, Vk::ScopedScissor::ScissorDesc {
-                                 .target   = draw.useScissor ?
-                                                 VkRect2D {
-                                                     .offset = {.x = draw.scissorRect.x, .y = draw.scissorRect.y},
-                                                     .extent = {.width = draw.scissorRect.width, .height = draw.scissorRect.height}
-                                                 } :
-                                                 defaultScissor,
-                                 .fallback = defaultScissor
-                             }
+                        cmd, {.target   = batch.useScissor ?
+                                              VkRect2D {
+                                                  .offset = {.x = batch.scissorRect.x, .y = batch.scissorRect.y},
+                                                  .extent = {.width = batch.scissorRect.width, .height = batch.scissorRect.height}
+                                              } :
+                                              defaultScissor,
+                              .fallback = defaultScissor}
                     );
 
+                    // This automatically filters redundant binds across adjacent batches.
                     recorder.encoder.DrawInstanced(
-                        {.pipeline    = ctx.uiPipeline.Get(),
-                         .layout      = ctx.uiPipelineLayout.Get(),
-                         .set         = recorder.bindlessSet,
-                         .vertexCount = draw.posMesh->vertexCount},
-                        uipc
+                        {.pipeline      = ctx.uiPipeline.Get(),
+                         .layout        = ctx.uiPipelineLayout.Get(),
+                         .set           = recorder.bindlessSet,
+                         .vertexCount   = batch.vertexCount,
+                         .instanceCount = 1,
+                         .firstVertex   = 0,
+                         .firstInstance = 0},
+                        uipc, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
                     );
                 }
-                ctx.uiDrawQueue.clear();
+                ctx.uiBatches.clear();
             }
             if (!ctx.window.IsTTY()) {
                 ImGui::Render();

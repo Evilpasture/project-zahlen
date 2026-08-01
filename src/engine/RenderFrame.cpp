@@ -3,9 +3,9 @@
 
 #include "RenderInternal.hpp"
 #include "Zahlen/Profiler.hpp"
+#include "engine/Scheduler.hpp"
 #include <Zahlen/Core/RadixSort.hpp>
 #include <Zahlen/Core/Reflection.hpp>
-#include "engine/Scheduler.hpp"
 #include <array>
 #include <cstring>
 #include <threading/TaskSystem.hpp>
@@ -1028,7 +1028,7 @@ RenderResult RenderContext::EndFrame() noexcept {
         ZHLN_PROFILE_SCOPE("Render (CPU Record)");
         if (_impl->current_cmd == VK_NULL_HANDLE) {
             _impl->drawQueue.clear();
-            _impl->uiDrawQueue.clear();
+            _impl->uiBatches.clear();
             return std::unexpected(Error);
         }
 
@@ -1050,7 +1050,7 @@ RenderResult RenderContext::EndFrame() noexcept {
 
         if (!comp_submit_res) [[unlikely]] {
             _impl->drawQueue.clear();
-            _impl->uiDrawQueue.clear();
+            _impl->uiBatches.clear();
             _impl->current_cmd         = VK_NULL_HANDLE;
             _impl->hasSkinnedThisFrame = false;
             return std::unexpected(comp_submit_res.error());
@@ -1116,7 +1116,7 @@ RenderResult RenderContext::EndFrame() noexcept {
 
         if (res != ZHLN_FrameResult_Ok && res != ZHLN_FrameResult_Suboptimal) {
             _impl->drawQueue.clear();
-            _impl->uiDrawQueue.clear();
+            _impl->uiBatches.clear();
             _impl->current_cmd         = VK_NULL_HANDLE;
             _impl->hasSkinnedThisFrame = false;
             return std::unexpected(MapFrameResult(res));
@@ -1129,7 +1129,7 @@ RenderResult RenderContext::EndFrame() noexcept {
         std::swap(_impl->shadowCascadeViews, _impl->shadowCascadeViewsPrev);
 
         _impl->drawQueue.clear();
-        _impl->uiDrawQueue.clear();
+        _impl->uiBatches.clear();
         _impl->current_cmd         = VK_NULL_HANDLE;
         _impl->hasSkinnedThisFrame = false;
     }
@@ -1354,26 +1354,6 @@ void DrawCSG(RenderContext& ctx, const Material& eyeMaterial, const Mesh& eyeMes
     }
 
     impl->csgDrawQueue.push_back(std::move(csgCmd));
-}
-
-void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex, bool useScissor, ScissorRect scissorRect) {
-    auto* impl = ctx.GetImpl();
-    if (impl->current_cmd == VK_NULL_HANDLE) {
-        return;
-    }
-
-    auto posMesh_res  = impl->meshPool.Resolve(mesh.posBuffer);
-    auto attrMesh_res = impl->meshPool.Resolve(mesh.attrBuffer);
-
-    if (!posMesh_res || !attrMesh_res) [[unlikely]] {
-        ZHLN::Assert(false, "DrawUI: Attempted to submit UI draw with invalid mesh handles!");
-        return;
-    }
-
-    auto* posMesh  = posMesh_res.value();
-    auto* attrMesh = attrMesh_res.value();
-
-    impl->uiDrawQueue.push_back({.posMesh = posMesh, .attrMesh = attrMesh, .fontIndex = fontIndex, .useScissor = useScissor, .scissorRect = scissorRect});
 }
 
 } // namespace Renderer

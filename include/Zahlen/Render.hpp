@@ -4,12 +4,12 @@
 #pragma once
 #include "Common.h"
 #include <Zahlen/Config.hpp>
+#include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Core/String.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/render/RenderCode.hpp>
-#include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Core/String.hpp>
 #include <expected>
 #include <memory>
 #include <optional>
@@ -89,6 +89,14 @@ class ZHLN_API RenderContext {
     void                       UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept;
     [[nodiscard]] BufferHandle GetDebugMeshBuffer() const noexcept;
 
+    void SubmitUI(
+        const UIBatch*          batches,
+        uint32_t                batchCount,
+        const VertexPosition*   positions,
+        const VertexAttributes* attributes,
+        uint32_t                vertexCount
+    ) noexcept;
+
     [[nodiscard]] auto CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true) -> std::expected<uint32_t, Error>;
     [[nodiscard]] auto CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, Error>;
 
@@ -154,7 +162,6 @@ void SetGISettings(RenderContext& ctx, const GISettings& settings);
 void SetLights(RenderContext& ctx, const GPULight* lights, uint32_t count);
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const DrawParams& params);
 void DrawCSG(RenderContext& ctx, const Material& eyeMaterial, const Mesh& eyeMesh, const CSGDrawParams& params);
-void DrawUI(RenderContext& ctx, const Mesh& mesh, uint32_t fontIndex, bool useScissor = false, ScissorRect scissorRect = {});
 
 } // namespace Renderer
 

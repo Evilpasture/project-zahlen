@@ -4,20 +4,20 @@
 // File: src/render/RenderInternal.hpp
 #pragma once
 #include "Rendering.hpp"
-#include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Core/ControlFlow.hpp>
-#include <Zahlen/Core/HashMap.hpp>
-#include <Zahlen/Core/RadixSort.hpp>
 #include "engine/FileWatcher.hpp"
 #include "threading/Mutex.hpp"
 #include <GLFW/glfw3.h>
+#include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Core/ControlFlow.hpp>
+#include <Zahlen/Core/HashMap.hpp>
+#include <Zahlen/Core/MemoryPool.hpp>
+#include <Zahlen/Core/RadixSort.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Types.hpp>
 #include <array>
 #include <cstddef>
-#include <Zahlen/Core/MemoryPool.hpp>
 #include <fstream>
 #include <memory>
 #include <type_traits>
@@ -461,16 +461,6 @@ struct DrawCommand {
 
 static_assert(std::is_trivially_copyable_v<DrawCommand> && std::is_trivially_constructible_v<DrawCommand>);
 
-struct UIDrawCommand {
-    NativeMesh* posMesh;
-    NativeMesh* attrMesh;
-    uint32_t    fontIndex;
-
-    // --- Scissoring Bounds ---
-    bool        useScissor;
-    ScissorRect scissorRect;
-};
-
 struct CSGDrawCommand {
     DrawCommand eyeDraw;
     uint32_t    eyeInstanceIdx;
@@ -786,10 +776,14 @@ struct RenderContext::Impl {
     // ============================================================================
     // User Interface Rendering (Vulkan Bound)
     // ============================================================================
-    Vk::DescriptorPool         uiPool;
-    Vk::Pipeline               uiPipeline;
-    Vk::PipelineLayout         uiPipelineLayout;
-    ZHLN::Array<UIDrawCommand> uiDrawQueue;
+    Vk::DescriptorPool                    uiPool;
+    Vk::Pipeline                          uiPipeline;
+    Vk::PipelineLayout                    uiPipelineLayout;
+    ZHLN::DoubleBuffered<Vk::Buffer>      uiVbos;
+    ZHLN::DoubleBuffered<VkDeviceAddress> uiVboAddresses;
+    ZHLN::Array<UIBatch>                  uiBatches;
+
+    [[nodiscard]] std::expected<void, Error> InitUIDynamicBuffers() noexcept;
 
     // ============================================================================
     // Hardware Ray Tracing Context (TLAS)

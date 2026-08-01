@@ -105,6 +105,14 @@ struct UIObjectConstants {
     uint32_t   padding;
 };
 
+struct UIBatch {
+    uint32_t    textureIndex = 0;
+    uint32_t    vertexStart  = 0;
+    uint32_t    vertexCount  = 0;
+    bool        useScissor   = false;
+    ScissorRect scissorRect  = {};
+};
+
 struct ClusterBounds {
     JPH::Vec4 minPoint;
     JPH::Vec4 maxPoint;
