@@ -13,14 +13,17 @@ std::expected<void, ZHLN::Error> ComputePass::Build(
     const VkPushConstantRange* pushConstants,
     uint32_t                   pushCount
 ) noexcept {
-    ZHLN_PipelineLayoutDesc p_layout_desc = {
-        .set_layouts = &descriptorLayout, .set_layout_count = 1, .push_constants = pushConstants, .push_constant_count = pushCount
-    };
-    VkPipelineLayout raw_layout = ZHLN_CreatePipelineLayout(device, &p_layout_desc);
-    if (raw_layout == VK_NULL_HANDLE) {
+    PipelineLayoutBuilder builder(device);
+    builder.AddDescriptorSetLayout(descriptorLayout);
+    for (uint32_t i = 0; i < pushCount; ++i) {
+        builder.AddPushConstant(pushConstants[i].stageFlags, pushConstants[i].size, pushConstants[i].offset);
+    }
+
+    auto layout_res = builder.Build();
+    if (!layout_res) {
         return std::unexpected(RenderInitError::PipelineLayoutCreationFailed);
     }
-    pipelineLayout = PipelineLayout(device, raw_layout);
+    pipelineLayout = std::move(layout_res.value());
 
     auto p_res = ComputePipelineBuilder().Shader(shader).Layout(pipelineLayout.Get()).Build(device);
     if (!p_res) {
@@ -38,14 +41,17 @@ std::expected<void, ZHLN::Error> ComputePass::BuildVariants(
     const VkPushConstantRange*            pushConstants,
     uint32_t                              pushCount
 ) noexcept {
-    ZHLN_PipelineLayoutDesc p_layout_desc = {
-        .set_layouts = &descriptorLayout, .set_layout_count = 1, .push_constants = pushConstants, .push_constant_count = pushCount
-    };
-    VkPipelineLayout raw_layout = ZHLN_CreatePipelineLayout(device, &p_layout_desc);
-    if (raw_layout == VK_NULL_HANDLE) {
+    PipelineLayoutBuilder builder(device);
+    builder.AddDescriptorSetLayout(descriptorLayout);
+    for (uint32_t i = 0; i < pushCount; ++i) {
+        builder.AddPushConstant(pushConstants[i].stageFlags, pushConstants[i].size, pushConstants[i].offset);
+    }
+
+    auto layout_res = builder.Build();
+    if (!layout_res) {
         return std::unexpected(RenderInitError::PipelineLayoutCreationFailed);
     }
-    pipelineLayout = PipelineLayout(device, raw_layout);
+    pipelineLayout = std::move(layout_res.value());
 
     pipelines.clear();
     pipelines.reserve(specInfos.size());

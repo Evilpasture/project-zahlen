@@ -615,7 +615,6 @@ static VkCompositeAlphaFlagBitsKHR ZHLN_Internal_ChooseCompositeAlpha(const VkCo
     return VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 }
 
-[[nodiscard]]
 ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict desc) {
     ZHLN_Swapchain null_result = {};
 
@@ -706,31 +705,21 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
 
     // --- Image Views ---
     for (uint32_t i = 0; i < swapchain.image_count; ++i) {
-        const VkImageViewCreateInfo view_info = {
-            .sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image    = swapchain.images[i],
-            .viewType = VK_IMAGE_VIEW_TYPE_2D,
-            .format   = format.format,
-            .components =
-                {
-                    .r = VK_COMPONENT_SWIZZLE_IDENTITY,
-                    .g = VK_COMPONENT_SWIZZLE_IDENTITY,
-                    .b = VK_COMPONENT_SWIZZLE_IDENTITY,
-                    .a = VK_COMPONENT_SWIZZLE_IDENTITY,
-                },
-            .subresourceRange = {
-                .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
-                .baseMipLevel   = 0,
-                .levelCount     = 1,
-                .baseArrayLayer = 0,
-                .layerCount     = 1,
-            },
+        const ZHLN_ImageViewDesc view_desc = {
+            .image            = swapchain.images[i],
+            .format           = format.format,
+            .aspect           = VK_IMAGE_ASPECT_COLOR_BIT,
+            .mip_levels       = 1,
+            .array_layers     = 1,
+            .view_type        = VK_IMAGE_VIEW_TYPE_2D,
+            .base_array_layer = 0,
         };
 
-        if (vkCreateImageView(desc->device->handle, &view_info, nullptr, &swapchain.views[i]) != VK_SUCCESS) {
+        swapchain.views[i] = ZHLN_CreateImageView(desc->device->handle, &view_desc);
+        if (swapchain.views[i] == VK_NULL_HANDLE) {
             // Destroy already-created views before bailing
             for (uint32_t j = 0; j < i; ++j) {
-                vkDestroyImageView(desc->device->handle, swapchain.views[j], nullptr);
+                ZHLN_DestroyImageView(desc->device->handle, swapchain.views[j]);
             }
             vkDestroySwapchainKHR(desc->device->handle, handle, nullptr);
             return null_result;
@@ -742,7 +731,7 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
 
 void ZHLN_DestroySwapchain(const VkDevice device, ZHLN_Swapchain* const swapchain) {
     for (uint32_t i = 0; i < swapchain->image_count; ++i) {
-        vkDestroyImageView(device, swapchain->views[i], nullptr);
+        ZHLN_DestroyImageView(device, swapchain->views[i]);
     }
     vkDestroySwapchainKHR(device, swapchain->handle, nullptr);
     *swapchain = (ZHLN_Swapchain) {};

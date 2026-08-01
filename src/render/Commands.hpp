@@ -102,24 +102,16 @@ class CommandRing {
     void Init(VkDevice device, uint32_t queueFamily) noexcept {
         _device = device;
         for (size_t i = 0; i < Capacity; ++i) {
-            VkCommandPoolCreateInfo pool_info = {
-                .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-                .pNext            = nullptr,
-                .flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-                .queueFamilyIndex = queueFamily
-            };
-            if (vkCreateCommandPool(_device, &pool_info, nullptr, &_pools[i]) != VK_SUCCESS) {
+            _pools[i] = CommandPool<QType>(_device, queueFamily);
+            if (!_pools[i].Valid()) {
                 continue;
             }
 
-            VkCommandBufferAllocateInfo alloc_info = {
-                .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-                .pNext              = nullptr,
-                .commandPool        = _pools[i],
-                .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-                .commandBufferCount = 1
-            };
-            vkAllocateCommandBuffers(_device, &alloc_info, &_cmds[i]);
+            auto alloc_res = _pools[i].Allocate(1);
+            if (!alloc_res) {
+                continue;
+            }
+            _cmds[i] = _pools[i][0];
 
             VkFenceCreateInfo fence_info = {
                 .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
@@ -138,11 +130,8 @@ class CommandRing {
                     vkDestroyFence(_device, _fences[i], nullptr);
                     _fences[i] = VK_NULL_HANDLE;
                 }
-                if (_pools[i] != VK_NULL_HANDLE) {
-                    vkDestroyCommandPool(_device, _pools[i], nullptr);
-                    _pools[i] = VK_NULL_HANDLE;
-                }
-                _cmds[i] = VK_NULL_HANDLE;
+                _pools[i] = {}; // Safely calls destructor (triggers C-core CommandPool destruction)
+                _cmds[i]  = {};
             }
             _device = VK_NULL_HANDLE;
         }
@@ -161,17 +150,17 @@ class CommandRing {
         vkResetFences(_device, 1, &_fences[slot_idx]);
 
         // Recycle the command pool instantly without any driver reallocation
-        vkResetCommandPool(_device, _pools[slot_idx], 0);
+        _pools[slot_idx].Reset();
 
-        return {CommandBuffer<QType> {_cmds[slot_idx]}, _fences[slot_idx]};
+        return {_cmds[slot_idx], _fences[slot_idx]};
     }
 
   private:
-    VkDevice                              _device = VK_NULL_HANDLE;
-    std::array<VkCommandPool, Capacity>   _pools {};
-    std::array<VkCommandBuffer, Capacity> _cmds {};
-    std::array<VkFence, Capacity>         _fences {};
-    std::atomic<uint32_t>                 _index {0};
+    VkDevice                                   _device = VK_NULL_HANDLE;
+    std::array<CommandPool<QType>, Capacity>   _pools {};
+    std::array<CommandBuffer<QType>, Capacity> _cmds {};
+    std::array<VkFence, Capacity>              _fences {};
+    std::atomic<uint32_t>                      _index {0};
 };
 
 // Simple RAII wrapper.

@@ -104,11 +104,17 @@ struct DoubleBufferedComputePass {
         sets[0]    = LayoutT::Allocate(device, pool.Get(), descLayout.Get());
         sets[1]    = LayoutT::Allocate(device, pool.Get(), descLayout.Get());
 
-        VkDescriptorSetLayout         raw_layout    = descLayout.Get();
-        const ZHLN_PipelineLayoutDesc p_layout_desc = {
-            .set_layouts = &raw_layout, .set_layout_count = 1, .push_constants = pushConstants, .push_constant_count = pushCount
-        };
-        pipelineLayout = PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &p_layout_desc));
+        PipelineLayoutBuilder builder(device);
+        builder.AddDescriptorSetLayout(descLayout.Get());
+        for (uint32_t i = 0; i < pushCount; ++i) {
+            builder.AddPushConstant(pushConstants[i].stageFlags, pushConstants[i].size, pushConstants[i].offset);
+        }
+
+        auto layout_res = builder.Build();
+        if (!layout_res) {
+            return false;
+        }
+        pipelineLayout = std::move(layout_res.value());
 
         auto p_res = ComputePipelineBuilder().Shader(shader).Layout(pipelineLayout.Get()).Build(device);
         if (!p_res) {

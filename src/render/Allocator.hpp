@@ -327,7 +327,7 @@ class StagingRingBuffer {
     void RetirePool(VkCommandPool pool, uint64_t timelineValue) noexcept;
 
     [[nodiscard]] auto GetSemaphore() const noexcept -> VkSemaphore {
-        return _timelineSemaphore;
+        return _timelineSemaphore.Get();
     }
     [[nodiscard]] auto GetCurrentValue() const noexcept -> uint64_t {
         return _timelineValue;
@@ -336,7 +336,7 @@ class StagingRingBuffer {
         return _queueFamily;
     }
     [[nodiscard]] auto Valid() const noexcept -> bool {
-        return _timelineSemaphore != VK_NULL_HANDLE;
+        return _timelineSemaphore.Valid();
     }
 
   private:
@@ -353,8 +353,8 @@ class StagingRingBuffer {
     VkDeviceSize _head = 0;
     VkDeviceSize _tail = 0;
 
-    VkSemaphore _timelineSemaphore = VK_NULL_HANDLE;
-    uint64_t    _timelineValue     = 0;
+    Semaphore _timelineSemaphore; // Upgraded to RAII handle
+    uint64_t  _timelineValue = 0;
 
     struct ActiveAllocation {
         VkDeviceSize offset;

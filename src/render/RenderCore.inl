@@ -29,10 +29,6 @@ inline void ImageBarrier(const VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc&
     ZHLN_CmdImageBarrier(cmd, &desc);
 }
 
-inline void MemoryBarrier(const VkCommandBuffer cmd, const ZHLN_MemoryBarrierDesc& desc) noexcept {
-    ZHLN_CmdMemoryBarrier(cmd, &desc);
-}
-
 inline void CopyBufferToImage(const VkCommandBuffer cmd, const ZHLN_BufferImageCopyDesc& desc) noexcept {
     ZHLN_CmdCopyBufferToImage(cmd, &desc);
 }

@@ -48,28 +48,36 @@ enum class BarrierAccess : VkAccessFlags2 {
     return static_cast<BarrierAccess>(static_cast<std::underlying_type_t<BarrierAccess>>(a) | static_cast<std::underlying_type_t<BarrierAccess>>(b));
 }
 
+/**
+ * @brief Unified memory barrier dispatcher.
+ * Exposed early to resolve cyclic header dependencies between Queue and Core headers.
+ */
+inline void MemoryBarrier(const VkCommandBuffer cmd, const ZHLN_MemoryBarrierDesc& desc) noexcept {
+    ZHLN_CmdMemoryBarrier(cmd, &desc);
+}
+
 struct BarrierBuilder {
-    VkPipelineStageFlags2 src_stage  = 0;
-    VkAccessFlags2        src_access = 0;
+    VkPipelineStageFlags2 srcStage  = 0;
+    VkAccessFlags2        srcAccess = 0;
 
     constexpr BarrierBuilder() noexcept = default;
 
     constexpr auto From(BarrierStage stage, BarrierAccess access) noexcept -> BarrierBuilder& {
-        src_stage |= static_cast<VkPipelineStageFlags2>(stage);
-        src_access |= static_cast<VkAccessFlags2>(access);
+        srcStage |= static_cast<VkPipelineStageFlags2>(stage);
+        srcAccess |= static_cast<VkAccessFlags2>(access);
         return *this;
     }
 
     void To(VkCommandBuffer cmd, BarrierStage dstStage, BarrierAccess dstAccess) const noexcept {
-        const ZHLN_MemoryBarrierDesc desc = {
-            .src_stage  = src_stage,
-            .src_access = src_access,
-            .dst_stage  = static_cast<VkPipelineStageFlags2>(dstStage),
-            .dst_access = static_cast<VkAccessFlags2>(dstAccess)
-        };
-        ZHLN_CmdMemoryBarrier(cmd, &desc);
+        MemoryBarrier(
+            cmd, {.src_stage  = srcStage,
+                  .src_access = srcAccess,
+                  .dst_stage  = static_cast<VkPipelineStageFlags2>(dstStage),
+                  .dst_access = static_cast<VkAccessFlags2>(dstAccess)}
+        );
     }
 };
+
 enum class QueueType : uint8_t { Graphics, Compute, Transfer };
 
 // Primary templates (default to invalid/false)
@@ -141,13 +149,12 @@ struct ConstrainedBarrier {
     template <BarrierStage DstStage, BarrierAccess DstAccess>
         requires ValidQueueOperation<QType, DstStage, DstAccess>
     void TransitionTo() const noexcept {
-        const ZHLN_MemoryBarrierDesc desc = {
-            .src_stage  = static_cast<VkPipelineStageFlags2>(SrcStage),
-            .src_access = static_cast<VkAccessFlags2>(SrcAccess),
-            .dst_stage  = static_cast<VkPipelineStageFlags2>(DstStage),
-            .dst_access = static_cast<VkAccessFlags2>(DstAccess)
-        };
-        ZHLN_CmdMemoryBarrier(cmd.handle, &desc);
+        MemoryBarrier(
+            cmd.handle, {.src_stage  = static_cast<VkPipelineStageFlags2>(SrcStage),
+                         .src_access = static_cast<VkAccessFlags2>(SrcAccess),
+                         .dst_stage  = static_cast<VkPipelineStageFlags2>(DstStage),
+                         .dst_access = static_cast<VkAccessFlags2>(DstAccess)}
+        );
     }
 };
 
