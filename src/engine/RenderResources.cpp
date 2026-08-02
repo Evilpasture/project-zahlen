@@ -53,13 +53,39 @@ BufferHandle RenderContext::GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, 
     return handle;
 }
 
+BufferHandle RenderContext::CreateStorageBuffer(size_t size) {
+    auto res = _impl->CreateGPUBuffer(size, nullptr, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    if (res) {
+        return _impl->meshPool.Create(std::move(res->first), 0, res->second);
+    }
+    return BufferHandle::Invalid;
+}
+
+BufferHandle RenderContext::GetOrCreateParticleBuffer(uint64_t entityKey, uint32_t maxParticles) {
+    const BufferHandle* existing = _impl->particleBufferMap.Find(entityKey);
+    if (existing != nullptr && *existing != BufferHandle::Invalid) {
+        return *existing;
+    }
+
+    BufferHandle handle = CreateStorageBuffer(maxParticles * sizeof(Particle));
+    if (handle != BufferHandle::Invalid) {
+        _impl->particleBufferMap.Insert(entityKey, handle);
+    }
+    return handle;
+}
+
+void RenderContext::SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& params) {
+    _impl->particleEmittersQueue.push_back({.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = params});
+}
+
 void RenderContext::ClearGPUCaches() noexcept {
     _impl->assetMeshMap.Clear();
     _impl->assetMaterialMap.Clear();
 
-    // Safely reclaim all cached skinning scratch VBOs using public ForEach
     _impl->skinnedScratchMap.ForEach([this](uint64_t /*key*/, BufferHandle handle) { DestroyBuffer(handle); });
     _impl->skinnedScratchMap.Clear();
+    _impl->particleBufferMap.ForEach([this](uint64_t /*key*/, BufferHandle handle) { DestroyBuffer(handle); });
+    _impl->particleBufferMap.Clear();
 }
 
 // ============================================================================
@@ -353,7 +379,12 @@ std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, VkResult>
 
     return Vk::Buffer::Create(allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY).transform([&, size, data, diffQueue](auto&& gpu_buf) {
         auto stagingAlloc = transferRingBuffer.Allocate(size);
-        std::memcpy(stagingAlloc.mappedData, data, size);
+
+        if (data != nullptr) {
+            std::memcpy(stagingAlloc.mappedData, data, size);
+        } else {
+            std::memset(stagingAlloc.mappedData, 0, size);
+        }
 
         Vk::ExecuteImmediate<Vk::QueueType::Transfer>(ctx, transferCmdRing, transferRingBuffer, [&](VkCommandBuffer cmd) {
             Vk::CopyRingBuffer(cmd, stagingAlloc, gpu_buf, size);

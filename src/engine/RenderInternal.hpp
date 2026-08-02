@@ -350,6 +350,9 @@ struct MainPass {
 struct AAPass {
     static constexpr std::string_view name = "[GPU] Anti-Aliasing";
 };
+struct ForwardPass {
+    static constexpr std::string_view name = "[GPU] Forward";
+};
 struct BloomThreshPass {
     static constexpr std::string_view name = "[GPU] Bloom Threshold";
 };
@@ -388,6 +391,7 @@ using FrameProfiler = Profiler::GpuProfiler<
     Stages::TransPrePass,
     Stages::TransReflection,
     Stages::AAPass,
+    Stages::ForwardPass,
     Stages::PostProcessPass,
     Stages::BloomThreshPass,
     Stages::BloomBlurHPass,
@@ -472,6 +476,14 @@ struct CSGDrawCommand {
     };
     ZHLN::Array<Cutter> cutters;
 };
+
+struct ParticleEmitterCommand {
+    BufferHandle          gpuBuffer;
+    uint32_t              maxParticles;
+    ParticleEmitterParams params;
+};
+
+static_assert(std::is_trivially_copyable_v<ParticleEmitterCommand> && std::is_standard_layout_v<ParticleEmitterCommand>);
 
 struct WorkerCmdContext {
     std::array<Vk::CommandPool<Vk::QueueType::Graphics>, 2> pools;
@@ -769,11 +781,13 @@ struct RenderContext::Impl {
     ZHLN::HashMap<AssetID, Mesh>          assetMeshMap;
     ZHLN::HashMap<MaterialID, Material>   assetMaterialMap;
     ZHLN::HashMap<uint64_t, BufferHandle> skinnedScratchMap;
+    ZHLN::HashMap<uint64_t, BufferHandle> particleBufferMap;
 
-    ZHLN::Array<DrawCommand>           drawQueue;
-    ZHLN::Array<CSGDrawCommand>        csgDrawQueue;
-    ZHLN::Array<GPULight>              mappedLights;
-    ZHLN::DoubleBuffered<BufferHandle> debugMeshHandles;
+    ZHLN::Array<DrawCommand>            drawQueue;
+    ZHLN::Array<CSGDrawCommand>         csgDrawQueue;
+    ZHLN::Array<ParticleEmitterCommand> particleEmittersQueue;
+    ZHLN::Array<GPULight>               mappedLights;
+    ZHLN::DoubleBuffered<BufferHandle>  debugMeshHandles;
 
     Vk::Pipeline       csgWritePipeline;
     Vk::Pipeline       csgDifferencePipeline;
@@ -872,6 +886,19 @@ struct RenderContext::Impl {
 
     [[nodiscard]] std::expected<void, Error> InitSubsystems(const RenderConfig& cfg, int width, int height);
 
+    struct alignas(16) ComputePushConstants {
+        VkDeviceAddress       particleBufferAddr;
+        uint32_t              particleCount;
+        float                 deltaTime;
+        ParticleEmitterParams p;
+    };
+
+    struct ParticleRenderPushConstants {
+        VkDeviceAddress particleBufferAddr;
+        uint32_t        alignment;
+        uint32_t        textureIndex;
+    };
+
     struct PPPushConstants {
         JPH::Mat44 invViewProj;
         JPH::Mat44 viewProj;
@@ -946,7 +973,6 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, Error> InitCullingResources();
     [[nodiscard]] std::expected<void, Error> CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
     [[nodiscard]] std::expected<void, Error> CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
-    [[nodiscard]] std::expected<void, Error> InitParticleResources();
     [[nodiscard]] std::expected<void, Error> BuildParticlePipelines();
     [[nodiscard]] std::expected<void, Error> InitBindless();
     [[nodiscard]] std::expected<void, Error> BuildTAAPipeline();

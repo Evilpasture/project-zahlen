@@ -164,18 +164,54 @@ enum class LightType : uint32_t {
 };
 static_assert(sizeof(LightType) == sizeof(uint32_t));
 
-// 64-byte struct matching particle_update.hlsl & particle_render.hlsl 1:1
-struct alignas(16) Particle {
-    std::array<float, 3> position = {0.0f, 0.0f, 0.0f};
-    float                life     = 0.0f;
-    std::array<float, 3> velocity = {0.0f, 0.0f, 0.0f};
-    float                maxLife  = 0.0f;
-    std::array<float, 4> color    = {1.0f, 1.0f, 1.0f, 1.0f};
-    float                size     = 0.05f;
-    std::array<float, 3> _pad     = {0.0f, 0.0f, 0.0f};
+// NOLINTNEXTLINE(performance-enum-size)
+enum class ParticleAlignment : uint32_t {
+    CameraBillboard   = 0, // Faces camera (Snow, Smoke, Dust)
+    VelocityStretched = 1, // Aligns along velocity vector (Rain, Sparks)
+    GroundFlat        = 2  // Aligns flat on the XZ ground plane (Shockwaves)
 };
 
-static_assert(sizeof(Particle) == 64, "Particle struct must be 64 bytes to match HLSL layout");
+struct alignas(16) ParticleEmitterParams {
+    // std::array<float, 3> + float = 16 bytes (matches HLSL float3 + float)
+    std::array<float, 3> gravity = {0.0f, -9.81f, 0.0f};
+    float                drag    = 0.2f;
+
+    std::array<float, 3> turbulence     = {0.0f, 0.0f, 0.0f};
+    float                turbulenceFreq = 0.1f;
+
+    std::array<float, 3> spawnOrigin = {0.0f, 0.0f, 0.0f};
+    float                spawnRadius = 0.0f;
+
+    std::array<float, 3> spawnBoxExtent = {10.0f, 10.0f, 10.0f};
+    float                loopBoundary   = 0.0f;
+
+    std::array<float, 3> initVelMin  = {-1.0f, -1.0f, -1.0f};
+    float                lifetimeMin = 1.0f;
+
+    std::array<float, 3> initVelMax  = {1.0f, 1.0f, 1.0f};
+    float                lifetimeMax = 3.0f;
+
+    std::array<float, 4> startColor = {1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<float, 4> endColor   = {1.0f, 1.0f, 1.0f, 0.0f};
+
+    std::array<float, 2> startSize = {0.1f, 0.1f};
+    std::array<float, 2> endSize   = {0.0f, 0.0f};
+
+    float             spinSpeed    = 0.0f;
+    uint32_t          textureIndex = 1;
+    ParticleAlignment alignment    = ParticleAlignment::CameraBillboard;
+    uint32_t          blendMode    = 0;
+};
+static_assert(sizeof(ParticleEmitterParams) == 160, "ParticleEmitterParams alignment mismatch!");
+
+struct alignas(16) Particle {
+    JPH::Vec4 position = JPH::Vec4::sZero(); // xyz = pos
+    JPH::Vec4 velocity = JPH::Vec4::sZero(); // xyz = vel
+    JPH::Vec4 color    = JPH::Vec4::sReplicate(1.0f);
+    JPH::Vec4 params   = JPH::Vec4::sZero(); // x=age, y=lifetime, z=size, w=rotation
+};
+
+static_assert(sizeof(Particle) == 64);
 
 // Align structures to 16-byte boundaries to match HLSL std430 layout
 struct alignas(16) GPULight {

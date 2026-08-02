@@ -6,7 +6,6 @@
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Input.hpp"
-#include <Zahlen/ecs/ECS.hpp>
 #include "engine/system/AnimationSystem.hpp"
 #include "engine/system/InputSystem.hpp"
 #include <Zahlen/Audio.hpp>
@@ -20,13 +19,14 @@
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/Sync.hpp>
 #include <Zahlen/Window.hpp>
+#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cgltf.h>
 #include <chrono>
 #include <cstring>
 #include <engine/system/LightingSystem.hpp>
 #include <functional>
-#include <Zahlen/physics/Physics.hpp>
 #include <physics/PhysicsWorld.hpp>
 #include <print>
 #include <string_view>
@@ -217,6 +217,13 @@ struct SpawnTerrainArgs {
     const float* colorsRGBA;
     float        roughness;
     float        metallic;
+};
+
+struct CreateTextureArgs {
+    const void* data;
+    uint32_t    width;
+    uint32_t    height;
+    uint32_t    isSRGB;
 };
 
 #pragma pack(pop)
@@ -616,6 +623,14 @@ void RegisterCreativeWorkCommands() {
                            }
                     );
                     return e.Pack();
+                }));
+
+    RegisterCmd("CreateTexture", MakeCmd<CreateTextureArgs>([](ZHLN::Engine* engine, const CreateTextureArgs& a) -> uint64_t {
+                    if (a.data == nullptr || a.width == 0 || a.height == 0) {
+                        return 1; // Fallback to white texture on invalid data
+                    }
+                    auto res = engine->GetRenderContext().CreateTexture(a.data, a.width, a.height, a.isSRGB != 0);
+                    return res.value_or(1);
                 }));
 }
 

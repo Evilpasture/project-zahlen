@@ -13,6 +13,7 @@
 #include "Zahlen/ScriptECSBridge.hpp"
 #include "Zahlen/Window.hpp"
 #include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 
@@ -61,13 +62,14 @@ struct SnowSceneState {
     bool                wasRDown    = false;
     float               totalTime   = 0.0f;
 
-    Entity playerEnt     = NullEntity;
-    Entity snowTerrain   = NullEntity;
-    Entity testPlatform  = NullEntity;
-    Entity campfireLight = NullEntity;
-    Entity summitLight   = NullEntity;
-    Entity wisp1         = NullEntity;
-    Entity wisp2         = NullEntity;
+    Entity playerEnt       = NullEntity;
+    Entity snowTerrain     = NullEntity;
+    Entity testPlatform    = NullEntity;
+    Entity campfireLight   = NullEntity;
+    Entity summitLight     = NullEntity;
+    Entity wisp1           = NullEntity;
+    Entity wisp2           = NullEntity;
+    Entity blizzardEmitter = NullEntity; // Track active particle emitter
 
     std::vector<Entity> charParts;
     std::string         currentAnimState = "IDLE";
@@ -206,6 +208,136 @@ inline void GenerateMountainData(uint32_t sampleCount, float worldSize, float ma
     }
 }
 
+// --- Procedural Mathematical Snowflake Texture Generation ---
+
+inline float DistanceToSegment(float px, float py, float ax, float ay, float bx, float by) {
+    float abx = bx - ax;
+    float aby = by - ay;
+    float apx = px - ax;
+    float apy = py - ay;
+    float ab2 = abx * abx + aby * aby;
+    if (ab2 < 1e-6f)
+        return std::sqrt(apx * apx + apy * apy);
+    float t        = (apx * abx + apy * aby) / ab2;
+    t              = std::max(0.0f, std::min(1.0f, t));
+    float closestX = ax + t * abx;
+    float closestY = ay + t * aby;
+    float dx       = px - closestX;
+    float dy       = py - closestY;
+    return std::sqrt(dx * dx + dy * dy);
+}
+
+inline float DistanceToCircle(float px, float py, float cx, float cy, float r) {
+    float dx = px - cx;
+    float dy = py - cy;
+    return std::max(0.0f, std::sqrt(dx * dx + dy * dy) - r);
+}
+
+inline std::vector<uint32_t> GenerateSnowflakeTexture(uint32_t size) {
+    std::vector<uint32_t> pixels(size * size, 0);
+    float                 center = size / 2.0f;
+    float                 scale  = (size / 2.0f) / 100.0f; // Map canvas pixel index to SVG viewBox space [-100, 100]
+
+    for (uint32_t cy = 0; cy < size; ++cy) {
+        for (uint32_t cx = 0; cx < size; ++cx) {
+            float x = (static_cast<float>(cx) - center) / scale;
+            float y = (static_cast<float>(cy) - center) / scale;
+
+            float maxAlpha = 0.0f;
+
+            // 1. Center Accent Dot
+            {
+                float d = std::sqrt(x * x + y * y);
+                if (d <= 4.0f) {
+                    maxAlpha = 1.0f;
+                } else if (d <= 5.0f) {
+                    maxAlpha = std::max(maxAlpha, 1.0f - (d - 4.0f));
+                }
+            }
+
+            // 2. Center Hexagon (points: (0,-12) to (10.4,-6) to (10.4,6) to (0,12) to (-10.4,6) to (-10.4,-6))
+            static const float hexX[6] = {0.0f, 10.4f, 10.4f, 0.0f, -10.4f, -10.4f};
+            static const float hexY[6] = {-12.0f, -6.0f, 6.0f, 12.0f, 6.0f, -6.0f};
+            for (int i = 0; i < 6; ++i) {
+                float ax         = hexX[i];
+                float ay         = hexY[i];
+                float bx         = hexX[(i + 1) % 6];
+                float by         = hexY[(i + 1) % 6];
+                float d          = DistanceToSegment(x, y, ax, ay, bx, by);
+                float half_thick = 1.0f; // stroke-width = 2 -> half-thickness = 1.0
+                if (d <= half_thick) {
+                    maxAlpha = std::max(maxAlpha, 1.0f);
+                } else if (d <= half_thick + 1.0f) {
+                    maxAlpha = std::max(maxAlpha, 1.0f - (d - half_thick));
+                }
+            }
+
+            // 3. Repeat the single arm 6 times at 60-degree increments
+            for (int k = 0; k < 6; ++k) {
+                float angle = k * (3.1415926535f / 3.0f);
+                float cosA  = std::cos(angle);
+                float sinA  = std::sin(angle);
+
+                // Rotated space coordinate transform (negative rotation to align)
+                float rx = x * cosA + y * sinA;
+                float ry = -x * sinA + y * cosA;
+
+                auto EvalLine = [&](float ax, float ay, float bx, float by, float thick) {
+                    float d          = DistanceToSegment(rx, ry, ax, ay, bx, by);
+                    float half_thick = thick * 0.5f;
+                    if (d <= half_thick) {
+                        maxAlpha = std::max(maxAlpha, 1.0f);
+                    } else if (d <= half_thick + 1.0f) {
+                        maxAlpha = std::max(maxAlpha, 1.0f - (d - half_thick));
+                    }
+                };
+
+                auto EvalCircle = [&](float cx, float cy, float r) {
+                    float d = DistanceToCircle(rx, ry, cx, cy, r);
+                    if (d <= 0.0f) {
+                        maxAlpha = std::max(maxAlpha, 1.0f);
+                    } else if (d <= 1.0f) {
+                        maxAlpha = std::max(maxAlpha, 1.0f - d);
+                    }
+                };
+
+                // Stem: line (0,0) -> (0,-85), stroke-width=4
+                EvalLine(0.0f, 0.0f, 0.0f, -85.0f, 4.0f);
+
+                // Outer large branches: (0,-60) -> (20,-75) & (0,-60) -> (-20,-75), stroke-width=3.5
+                EvalLine(0.0f, -60.0f, 20.0f, -75.0f, 3.5f);
+                EvalLine(0.0f, -60.0f, -20.0f, -75.0f, 3.5f);
+
+                // Middle branches: (0,-40) -> (25,-55) & (0,-40) -> (-25,-55), stroke-width=3.5
+                EvalLine(0.0f, -40.0f, 25.0f, -55.0f, 3.5f);
+                EvalLine(0.0f, -40.0f, -25.0f, -55.0f, 3.5f);
+
+                // Sub-tips: (18,-51) -> (22,-43) & (-18,-51) -> (-22,-43), stroke-width=2.5
+                EvalLine(18.0f, -51.0f, 22.0f, -43.0f, 2.5f);
+                EvalLine(-18.0f, -51.0f, -22.0f, -43.0f, 2.5f);
+
+                // Inner small branches: (0,-20) -> (15,-30) & (0,-20) -> (-15,-30), stroke-width=3
+                EvalLine(0.0f, -20.0f, 15.0f, -30.0f, 3.0f);
+                EvalLine(0.0f, -20.0f, -15.0f, -30.0f, 3.0f);
+
+                // Circular accents
+                EvalCircle(0.0f, -85.0f, 3.0f);
+                EvalCircle(20.0f, -75.0f, 2.0f);
+                EvalCircle(-20.0f, -75.0f, 2.0f);
+            }
+
+            // Pack into color format (A8B8G8R8) - light blue-white #e0f2fe
+            uint8_t r = static_cast<uint8_t>(224.0f * maxAlpha);
+            uint8_t g = static_cast<uint8_t>(242.0f * maxAlpha);
+            uint8_t b = static_cast<uint8_t>(254.0f * maxAlpha);
+            uint8_t a = static_cast<uint8_t>(255.0f * maxAlpha);
+
+            pixels[cy * size + cx] = (a << 24) | (b << 16) | (g << 8) | r;
+        }
+    }
+    return pixels;
+}
+
 } // namespace TerrainGen
 
 void PlayTrack(ECS::Registry& reg, Entity ent, int trackIdx, float blend = 0.15f, bool loop = true, float speed = 1.0f) {
@@ -292,6 +424,12 @@ void StartGame(Engine* engine) {
     ZHLN::Log("[Snow Scene] Generating Volumetric Nighttime Environment...");
     g_State.wonGame   = false;
     g_State.totalTime = 0.0f;
+
+    // Destroy previous blizzard emitter if any
+    if (g_State.blizzardEmitter != NullEntity) {
+        reg.Destroy(g_State.blizzardEmitter);
+        g_State.blizzardEmitter = NullEntity;
+    }
 
     auto settingsEntities = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
     if (!settingsEntities.empty()) {
@@ -465,6 +603,44 @@ void StartGame(Engine* engine) {
                                  .twoSided    = 0,
                                  .shadowLayer = -1
                              }
+    );
+
+    // 1. Bake the anti-aliased mathematical SVG snowflake texture onto the GPU
+    auto     snowPixels   = TerrainGen::GenerateSnowflakeTexture(256);
+    auto     snowRes      = rc.CreateTexture(snowPixels.data(), 256, 256, false);
+    uint32_t snowTexIndex = snowRes.value_or(1);
+
+    // 2. Create the camera-relative spatial blizzard emitter
+    g_State.blizzardEmitter = reg.Create();
+    reg.Add(g_State.blizzardEmitter, Components::TransformComponent {});
+    reg.Add(g_State.blizzardEmitter, Components::NameComponent {.name = String64("BlizzardEmitter")});
+
+    ParticleEmitterParams pParams {};
+    pParams.gravity        = {0.0f, -1.8f, 0.0f}; // Soft falling speed
+    pParams.drag           = 0.12f;
+    pParams.turbulence     = {1.8f, 0.4f, 1.8f}; // Dynamic drifting winds
+    pParams.turbulenceFreq = 0.15f;
+    pParams.spawnBoxExtent = {60.0f, 25.0f, 60.0f}; // Local bounding volume around camera
+    pParams.initVelMin     = {-1.5f, -0.5f, -1.5f};
+    pParams.initVelMax     = {1.5f, 0.2f, 1.5f};
+    pParams.lifetimeMin    = 5.0f;
+    pParams.lifetimeMax    = 9.0f;
+    pParams.startColor     = {0.88f, 0.95f, 1.0f, 0.85f}; // Light blue-white #e0f2fe
+    pParams.endColor       = {0.88f, 0.95f, 1.0f, 0.0f};  // Fade out
+    pParams.startSize      = {0.35f, 0.35f};
+    pParams.endSize        = {0.20f, 0.20f};
+    pParams.spinSpeed      = 1.2f; // Angular spin
+    pParams.textureIndex   = snowTexIndex;
+    pParams.alignment      = ParticleAlignment::CameraBillboard;
+    pParams.loopBoundary   = 1.0f; // Wrap particles within camera volume
+
+    reg.Add(
+        g_State.blizzardEmitter, Components::ParticleEmitterComponent {
+                                     .params         = pParams,
+                                     .maxParticles   = 16384,
+                                     .active         = true,
+                                     .attachToCamera = true // Track player camera coordinates
+                                 }
     );
 
     g_State.gameStarted = true;

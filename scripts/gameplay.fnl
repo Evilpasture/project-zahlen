@@ -134,12 +134,17 @@
 
 (set _G.game_started false)
 (var pomni-parts nil)
+(var g-blizzard-emitter nil)
 
 ;; ============================================================================
 ;; 3. DEFINE WORLD GENERATION / GAMESTART CALLBACK
 ;; ============================================================================
 (fn _G.StartGame []
   (zh.log "[Gameplay] Spawning Circus Lobby layout and characters...")
+  ;; Destroy previous emitter if any (prevents leaks on restart/hot-reload)
+  (when (and g-blizzard-emitter (zh.ecs:is_alive g-blizzard-emitter))
+    (zh.ecs:destroy g-blizzard-emitter)
+    (set g-blizzard-emitter nil))
   ;; 1. Initialize Player Capsule & Camera Controller
   (set _G.player_ent (zh:dispatch :InitPlayer))
   ;; 2. Spawn Static World Geometry
@@ -178,6 +183,58 @@
       (zh.ecs:add _G.player_ent :combat {:hp 100 :max_hp 100})
       (zh.physics:setup_ragdoll _G.player_ent pomni-parts)
       (zh.log "[Gameplay] Skeletal Ragdoll successfully generated and bound to player controller.")))
+  ;; 6. Bake and Spawn Procedural Blizzard Emitter (Direct FFI dispatch to avoid wrapper lag)
+  (let [cmd-id (ffi.C.ZHLN_GetCommandID :CreateSnowflakeTexture)
+        snow-tex (ffi.C.ZHLN_DispatchCommand zh._raw cmd-id nil)]
+    (set g-blizzard-emitter (zh.ecs:create))
+    (zh.ecs:add g-blizzard-emitter :TransformComponent)
+    (zh.ecs:add g-blizzard-emitter :NameComponent {:name :BlizzardEmitter})
+    (let [p-comp (zh.ecs:add g-blizzard-emitter :ParticleEmitterComponent)]
+      (set p-comp.maxParticles 16384)
+      (set p-comp.active true)
+      (set p-comp.attachToCamera true)
+      ;; Gravity and friction damping
+      (tset p-comp.params.gravity 0 0.0)
+      (tset p-comp.params.gravity 1 -1.8)
+      (tset p-comp.params.gravity 2 0.0)
+      (set p-comp.params.drag 0.12)
+      ;; Wind drift turbulence
+      (tset p-comp.params.turbulence 0 1.8)
+      (tset p-comp.params.turbulence 1 0.4)
+      (tset p-comp.params.turbulence 2 1.8)
+      (set p-comp.params.turbulenceFreq 0.15)
+      ;; Boundaries
+      (tset p-comp.params.spawnBoxExtent 0 60.0)
+      (tset p-comp.params.spawnBoxExtent 1 25.0)
+      (tset p-comp.params.spawnBoxExtent 2 60.0)
+      (set p-comp.params.loopBoundary 1.0)
+      ;; Velocity and lifespans
+      (tset p-comp.params.initVelMin 0 -1.5)
+      (tset p-comp.params.initVelMin 1 -0.5)
+      (tset p-comp.params.initVelMin 2 -1.5)
+      (set p-comp.params.lifetimeMin 5.0)
+      (tset p-comp.params.initVelMax 0 1.5)
+      (tset p-comp.params.initVelMax 1 0.2)
+      (tset p-comp.params.initVelMax 2 1.5)
+      (set p-comp.params.lifetimeMax 9.0)
+      ;; Color / Size Interpolations (#e0f2fe to transparent)
+      (tset p-comp.params.startColor 0 0.88)
+      (tset p-comp.params.startColor 1 0.95)
+      (tset p-comp.params.startColor 2 1.0)
+      (tset p-comp.params.startColor 3 0.85)
+      (tset p-comp.params.endColor 0 0.88)
+      (tset p-comp.params.endColor 1 0.95)
+      (tset p-comp.params.endColor 2 1.0)
+      (tset p-comp.params.endColor 3 0.0)
+      (tset p-comp.params.startSize 0 0.35)
+      (tset p-comp.params.startSize 1 0.35)
+      (tset p-comp.params.endSize 0 0.2)
+      (tset p-comp.params.endSize 1 0.2)
+      (set p-comp.params.spinSpeed 1.2)
+      (set p-comp.params.textureIndex (tonumber snow-tex))
+      (set p-comp.params.alignment 0)
+      ;; CameraBillboard
+      (set p-comp.params.blendMode 0)))
   (set _G.game_started true))
 
 ;; ============================================================================

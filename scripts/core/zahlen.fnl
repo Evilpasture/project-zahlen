@@ -512,6 +512,7 @@
                         :PlayAnimationTrack :PlayTrackArgs
                         :GetAnimationTrackCount :EntityOnlyArgs
                         :GetAnimationTrackName :GetTrackNameArgs
+                        :CreateTexture :CreateTextureArgs
                         :SpawnTerrain :SpawnTerrainArgs})
 
 (fn Engine.dispatch [self cmd_name args]
@@ -620,6 +621,15 @@
                            :metallic (or (. opts :metallic) 0.05)})]
     (self:dispatch :SpawnTerrain ffi-args)))
 
+(fn Engine.create_texture [self width height is-srgb callback]
+  (let [size (* width height)
+        pixels (ffi.new "uint32_t[?]" size)]
+    ;; Invoke user callback to fill the pixel buffer
+    (callback pixels width height)
+    ;; Dispatch the raw pointer to the C++ engine
+    (self:dispatch :CreateTexture
+                   {:data pixels : width : height :isSRGB (if is-srgb 1 0)})))
+
 ;; ============================================================================
 ;; Threading Task Scheduler
 ;; ============================================================================
@@ -664,6 +674,7 @@
            :dispatch Engine.dispatch
            :spawn Engine.spawn
            :spawn_terrain Engine.spawn_terrain
+           :create_texture Engine.create_texture
            :spawn_entity Engine.spawn_entity
            :spawn_light Engine.spawn_light
            :provoke_device_lost Engine.provoke_device_lost

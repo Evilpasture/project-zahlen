@@ -110,12 +110,12 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
     }
 
     // --- RESTORED ORIGINAL WORKING SHADOW CALCULATION ---
-    float texelSize = shadowWidth / static_cast<float>(shadowResolution);
+    float textelSize = shadowWidth / static_cast<float>(shadowResolution);
 
     JPH::Vec3 shadowCenter = cam.position;
-    shadowCenter.SetX(std::round(shadowCenter.GetX() / texelSize) * texelSize);
-    shadowCenter.SetY(std::round(shadowCenter.GetY() / texelSize) * texelSize);
-    shadowCenter.SetZ(std::round(shadowCenter.GetZ() / texelSize) * texelSize);
+    shadowCenter.SetX(std::round(shadowCenter.GetX() / textelSize) * textelSize);
+    shadowCenter.SetY(std::round(shadowCenter.GetY() / textelSize) * textelSize);
+    shadowCenter.SetZ(std::round(shadowCenter.GetZ() / textelSize) * textelSize);
 
     JPH::Vec3  lightPos  = shadowCenter + sunDirection * Shadows::FarOffset;
     JPH::Mat44 lightView = Math::CreateLookAt(lightPos, shadowCenter, JPH::Vec3::sAxisY());
@@ -185,6 +185,28 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
                     rc.RegisterGPUMaterial(meshComp->materialAsset, mat);
                 }
             }
+        }
+    }
+
+    // ========================================================================
+    // PROCESS PARTICLE EMITTERS (ECS Bridge to Pure Renderer)
+    // ========================================================================
+    for (Entity e: reg.GetEntitiesWith<Components::ParticleEmitterComponent>()) {
+        auto* emitter = reg.Get<Components::ParticleEmitterComponent>(e);
+        if ((emitter != nullptr) && emitter->active) {
+            // 1. Lazy allocate on the ECS side (only once per emitter)
+            if (emitter->gpuBuffer == BufferHandle::Invalid) {
+                emitter->gpuBuffer = rc.CreateStorageBuffer(emitter->maxParticles * sizeof(Particle));
+            }
+
+            // 2. Resolve camera-relative offsets in-place
+            ParticleEmitterParams params = emitter->params;
+            if (emitter->attachToCamera) {
+                params.spawnOrigin = {cam.position.GetX(), cam.position.GetY(), cam.position.GetZ()};
+            }
+
+            // 3. Dispatch raw graphics handles directly to the pure render queue
+            rc.SubmitParticleEmitter(emitter->gpuBuffer, emitter->maxParticles, params);
         }
     }
 

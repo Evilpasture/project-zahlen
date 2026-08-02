@@ -508,21 +508,32 @@ void ForwardPass::Execute(
                 SubmitDrawInstanced(recorder.encoder, drawCmd, static_cast<uint32_t>(i), recorder.bindlessSet, push);
             }
 
-            if (ctx.particleRenderPipeline.Valid()) {
-                struct ParticleRenderPushConstants {
-                    VkDeviceAddress particleBufferAddr;
-                } pc = {.particleBufferAddr = ctx.BufferAddress(ctx.particleBuffer.Handle())};
+            if (ctx.particleRenderPipeline.Valid() && !ctx.particleEmittersQueue.empty()) {
+                auto* bindlessSet = ctx.bindlessSets[ctx.frame_index];
 
-                recorder.encoder.DrawInstanced(
-                    {.pipeline      = ctx.particleRenderPipeline.Get(),
-                     .layout        = ctx.particleRenderLayout.Get(),
-                     .set           = recorder.bindlessSet,
-                     .vertexCount   = 6, // Quad (2 triangles = 6 vertices)
-                     .instanceCount = RenderContext::Impl::kGpuParticleCount,
-                     .firstVertex   = 0,
-                     .firstInstance = 0},
-                    pc, VK_SHADER_STAGE_VERTEX_BIT
-                );
+                for (const auto& emitter: ctx.particleEmittersQueue) {
+                    auto* buffer = ctx.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
+                    if (!buffer) {
+                        continue;
+                    }
+
+                    RenderContext::Impl::ParticleRenderPushConstants pc = {
+                        .particleBufferAddr = ctx.BufferAddress(buffer->buffer.Handle()),
+                        .alignment          = static_cast<uint32_t>(emitter.params.alignment),
+                        .textureIndex       = emitter.params.textureIndex
+                    };
+
+                    recorder.encoder.DrawInstanced(
+                        {.pipeline      = ctx.particleRenderPipeline.Get(),
+                         .layout        = ctx.particleRenderLayout.Get(),
+                         .set           = bindlessSet,
+                         .vertexCount   = 6, // Quad (2 triangles = 6 vertices)
+                         .instanceCount = emitter.maxParticles,
+                         .firstVertex   = 0,
+                         .firstInstance = 0},
+                        pc, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+                    );
+                }
             }
         });
 }

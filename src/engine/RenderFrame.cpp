@@ -356,22 +356,27 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeParticleUpdatePass() const noexcept {
         return Vk::MakePass<"ParticleUpdate">([this](VkCommandBuffer c) noexcept {
-            if (!self.particleUpdatePass.pipeline.Valid()) {
+            if (!self.particleUpdatePass.pipeline.Valid() || self.particleEmittersQueue.empty()) {
                 return;
             }
 
-            struct ParticlePushConstants {
-                VkDeviceAddress particleBufferAddr;
-                uint32_t        particleCount;
-                float           deltaTime;
-            } pc = {
-                .particleBufferAddr = self.ctx.BufferAddress(self.particleBuffer.Handle()),
-                .particleCount      = RenderContext::Impl::kGpuParticleCount,
-                .deltaTime          = self.currentDt,
-            };
-
             auto* bindlessSet = self.bindlessSets[self.frame_index];
-            self.particleUpdatePass.Dispatch(c, bindlessSet, (RenderContext::Impl::kGpuParticleCount + 63) / 64, 1, 1, pc);
+
+            for (const auto& emitter: self.particleEmittersQueue) {
+                auto* buffer = self.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
+                if (!buffer) {
+                    continue;
+                }
+
+                RenderContext::Impl::ComputePushConstants pc = {
+                    .particleBufferAddr = self.ctx.BufferAddress(buffer->buffer.Handle()),
+                    .particleCount      = emitter.maxParticles,
+                    .deltaTime          = self.currentDt,
+                    .p                  = emitter.params
+                };
+
+                self.particleUpdatePass.Dispatch(c, bindlessSet, (emitter.maxParticles + 63) / 64, 1, 1, pc);
+            }
         });
     }
 
@@ -494,7 +499,8 @@ struct PassFactory {
     [[nodiscard]] auto MakeForwardPass() const noexcept {
         auto& targetImage = self.graphResources.hdrSceneColor;
         return Vk::Passieren<"Forward", Vk::ColorWrite<Res_HdrSceneColor>, Vk::DepthStencilWrite<Res_Depth>>([this, &targetImage](VkCommandBuffer c) noexcept {
-            FrameRecorder fwdRecorder(c, self);
+            Profiler::ScopedGpuProfile<Stages::ForwardPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
+            FrameRecorder                                                  fwdRecorder(c, self);
             Passes::ForwardPass {}.Execute(
                 fwdRecorder, Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(targetImage),
                 Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.presentation.depthTarget) // <-- Fixed!
@@ -1053,6 +1059,7 @@ RenderResult RenderContext::EndFrame() noexcept {
             _impl->drawQueue.clear();
             _impl->csgDrawQueue.clear();
             _impl->uiBatches.clear();
+            _impl->particleEmittersQueue.clear();
             _impl->current_cmd         = VK_NULL_HANDLE;
             _impl->hasSkinnedThisFrame = false;
             return std::unexpected(comp_submit_res.error());
@@ -1120,6 +1127,7 @@ RenderResult RenderContext::EndFrame() noexcept {
             _impl->drawQueue.clear();
             _impl->csgDrawQueue.clear();
             _impl->uiBatches.clear();
+            _impl->particleEmittersQueue.clear();
             _impl->current_cmd         = VK_NULL_HANDLE;
             _impl->hasSkinnedThisFrame = false;
             return std::unexpected(MapFrameResult(res));
@@ -1134,6 +1142,7 @@ RenderResult RenderContext::EndFrame() noexcept {
         _impl->drawQueue.clear();
         _impl->csgDrawQueue.clear();
         _impl->uiBatches.clear();
+        _impl->particleEmittersQueue.clear();
         _impl->current_cmd         = VK_NULL_HANDLE;
         _impl->hasSkinnedThisFrame = false;
     }

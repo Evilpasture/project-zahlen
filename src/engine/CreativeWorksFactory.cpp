@@ -176,6 +176,39 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
     return texIdx;
 }
 
+uint32_t LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path, bool isSRGB) {
+    uint64_t hash = HashCreativeWorkPath(path);
+
+    CreativeWorkLoadRequest req;
+    req.assetID = hash;
+
+    // 1. Fetch raw compressed file bytes from VFS / PAK
+    if (!assetMgr.LoadSync(req)) {
+        ZHLN::Log("WARNING: Failed to load texture asset from VFS: {}", path);
+        return 1; // Fallback to white pixel (Slot 1)
+    }
+
+    // 2. Decompress PNG/JPG in memory
+    int            width    = 0;
+    int            height   = 0;
+    int            channels = 0;
+    unsigned char* pixels   = stbi_load_from_memory(static_cast<const stbi_uc*>(req.outData), static_cast<int>(req.outSize), &width, &height, &channels, 4);
+
+    // Free VFS memory immediately
+    assetMgr.FreeCreativeWorkMemory(req);
+
+    if (pixels == nullptr) {
+        ZHLN::Log("ERROR: stbi_load_from_memory failed for texture: {}", path);
+        return 1;
+    }
+
+    // 3. Register raw pixels with Vulkan GPU
+    auto texRes = ctx.CreateTexture(pixels, static_cast<uint32_t>(width), static_cast<uint32_t>(height), isSRGB);
+    stbi_image_free(pixels);
+
+    return texRes ? *texRes : 1;
+}
+
 ModelPrefab* LoadModelPrefab(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path) {
     return GLTF::LoadGLBPrefab(ctx, assetMgr, path);
 }

@@ -36,6 +36,8 @@ Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float m
 
 uint32_t CreateFontAtlasTexture(RenderContext& ctx);
 
+uint32_t LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path, bool isSRGB = true);
+
 struct SpawnParams {
     JPH::RVec3 position = JPH::RVec3::sZero();
     JPH::Quat  rotation = JPH::Quat::sIdentity();

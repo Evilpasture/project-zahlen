@@ -77,6 +77,9 @@ class ZHLN_API RenderContext {
 
     // Reuse or create skinned scratch VBO for an entity without leaking handles
     BufferHandle GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t vertexCount);
+    BufferHandle CreateStorageBuffer(size_t size);
+    BufferHandle GetOrCreateParticleBuffer(uint64_t entityKey, uint32_t maxParticles);
+    void         SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& params);
 
     // --- Opaque Resource Creation API ---
     auto                                         CreateVertexBuffer(const void* data, size_t size, uint32_t stride = sizeof(VertexPosition)) -> BufferHandle;
@@ -100,6 +103,17 @@ class ZHLN_API RenderContext {
 
     [[nodiscard]] auto CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true) -> std::expected<uint32_t, Error>;
     [[nodiscard]] auto CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, Error>;
+
+    /**
+     * @brief Generates a texture procedurally by invoking a CPU-side callback to populate the pixel buffer.
+     * @param callback A callable with signature: void(uint32_t* pixels, uint32_t width, uint32_t height)
+     */
+    template <typename Func>
+    [[nodiscard]] auto CreateTextureProcedural(uint32_t width, uint32_t height, bool isSRGB, Func&& callback) -> std::expected<uint32_t, Error> {
+        std::vector<uint32_t> pixels(static_cast<size_t>(width * height));
+        callback(pixels.data(), width, height);
+        return CreateTexture(pixels.data(), width, height, isSRGB);
+    }
 
     void     UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices, uint32_t count);
     uint32_t AllocateMorphDeltas(uint32_t count, const float* deltas);
@@ -166,7 +180,6 @@ void SetGISettings(RenderContext& ctx, const GISettings& settings);
 void SetLights(RenderContext& ctx, const GPULight* lights, uint32_t count);
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const DrawParams& params);
 void DrawCSG(RenderContext& ctx, const Material& eyeMaterial, const Mesh& eyeMesh, const CSGDrawParams& params);
-
 } // namespace Renderer
 
 } // namespace ZHLN

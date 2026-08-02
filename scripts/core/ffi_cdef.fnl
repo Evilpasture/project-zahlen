@@ -345,6 +345,38 @@
           void* prefab;
       } AnimatorComponent;
 
+      typedef struct ParticleEmitterParams {
+          float    gravity[3];
+          float    drag;
+          float    turbulence[3];
+          float    turbulenceFreq;
+          float    spawnOrigin[3];
+          float    spawnRadius;
+          float    spawnBoxExtent[3];
+          float    loopBoundary;
+          float    initVelMin[3];
+          float    lifetimeMin;
+          float    initVelMax[3];
+          float    lifetimeMax;
+          float    startColor[4];
+          float    endColor[4];
+          float    startSize[2];
+          float    endSize[2];
+          float    spinSpeed;
+          uint32_t textureIndex;
+          uint32_t alignment;
+          uint32_t blendMode;
+      } ParticleEmitterParams;
+
+      typedef struct ParticleEmitterComponent {
+          ParticleEmitterParams params;
+          uint32_t              maxParticles;
+          bool                  active;
+          bool                  attachToCamera;
+          uint64_t              gpuBuffer; // Matches BufferHandle
+          char                  _pad[2];   // Maintains strict 16-byte alignment
+      } ParticleEmitterComponent;
+
       #pragma pack(push, 1)
       typedef struct GetBufferArgs { ZHLN_BufferView* outView; } GetBufferArgs;
       typedef struct GetECSBufferArgs { const char* componentName; ZHLN_BufferView* outView; } GetECSBufferArgs;
@@ -450,6 +482,13 @@
           float       roughness;
           float       metallic;
       } SpawnTerrainArgs;
+
+      typedef struct CreateTextureArgs {
+          const void* data;
+          uint32_t    width;
+          uint32_t    height;
+          uint32_t    isSRGB;
+      } CreateTextureArgs;
       #pragma pack(pop)
   "))
 

@@ -76,42 +76,29 @@ bool CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept {
 
 namespace ZHLN {
 
-std::expected<void, Error> RenderContext::Impl::InitParticleResources() {
-    size_t bufferSize = sizeof(Particle) * kGpuParticleCount;
-
-    return Vk::Buffer::Create(
-               allocator.Get(), bufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-               VMA_MEMORY_USAGE_GPU_ONLY
-    )
-        .transform_error([](VkResult res) -> Error { return res; })
-        .and_then([&, bufferSize](auto&& buf) -> std::expected<void, Error> {
-            particleBuffer = std::forward<decltype(buf)>(buf);
-
-            // Warm-up / seed initial particle state (all inactive/buried initially)
-            std::vector<Particle> initialParticles(kGpuParticleCount);
-            for (uint32_t i = 0; i < kGpuParticleCount; ++i) {
-                initialParticles[i].position = {0.0f, -1000.0f, 0.0f};
-                initialParticles[i].life     = 0.0f;
-            }
-
-            auto stagingAlloc = stagingRingBuffer.Allocate(bufferSize);
-            std::memcpy(stagingAlloc.mappedData, initialParticles.data(), bufferSize);
-
-            Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
-                Vk::CopyRingBuffer(cmd, stagingAlloc, particleBuffer, bufferSize);
-            });
-
-            return {};
-        });
-}
-
 std::expected<void, Error> RenderContext::Impl::BuildParticlePipelines() {
     using enum Resource::ShaderID;
 
-    // 1. Build GPU Compute Simulation Pipeline (particle_update.hlsl)
-    auto                csShader   = Vk::CreateShaderDesc(Resource::GetShaderProgram(ParticleUpdate).vertex);
+    // 1. Allocate global default particle buffer to prevent null vkGetBufferDeviceAddress crashes
+    size_t particleBufferSize = RenderContext::Impl::kGpuParticleCount * sizeof(Particle);
+    auto   pb_res             = Vk::Buffer::Create(
+        allocator.Get(), particleBufferSize,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VMA_MEMORY_USAGE_GPU_ONLY
+    );
+    if (!pb_res) {
+        ZHLN::Log("ERROR: Failed to allocate global particle buffer!");
+        return std::unexpected(pb_res.error());
+    }
+    particleBuffer = std::move(*pb_res);
+
+    // 2. Build GPU Compute Simulation Pipeline (particle_update.hlsl)
+    auto csShader = Vk::CreateShaderDesc(Resource::GetShaderProgram(ParticleUpdate).vertex);
+
     VkPushConstantRange updatePush = {
-        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(VkDeviceAddress) + sizeof(uint32_t) + sizeof(float)
+        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+        .offset     = 0,
+        .size       = sizeof(ComputePushConstants) // 176 Bytes
     };
 
     if (!particleUpdatePass.Build(ctx.Device(), bindlessLayout.Get(), csShader, &updatePush, 1)) {
@@ -119,10 +106,10 @@ std::expected<void, Error> RenderContext::Impl::BuildParticlePipelines() {
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
 
-    // 2. Build Billboard Graphics Pipeline (particle_render.hlsl)
+    // 3. Build Billboard Graphics Pipeline (particle_render.hlsl)
     return Vk::PipelineLayoutBuilder(ctx.Device())
         .AddDescriptorSetLayout(bindlessLayout.Get())
-        .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT, sizeof(VkDeviceAddress))
+        .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ParticleRenderPushConstants))
         .Build()
         .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
         .and_then([&](auto&& layout) -> std::expected<void, Error> {
@@ -137,12 +124,12 @@ std::expected<void, Error> RenderContext::Impl::BuildParticlePipelines() {
                     return Vk::PipelineBuilder {}
                         .Shaders(shaders)
                         .Layout(particleRenderLayout.Get())
-                        .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT}) // Target HDR scene color
+                        .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT}) // <-- FIXED: Changed from R16G16B16_SFLOAT
                         .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
                         .DepthTest(true)
                         .DepthWrite(false)
                         .AdditiveBlend()
-                        .AlphaBlend() // Enable transparent particle blending
+                        .AlphaBlend()
                         .CullNone()
                         .Build(ctx.Device())
                         .transform([&](auto&& pipeline) { particleRenderPipeline = std::forward<decltype(pipeline)>(pipeline); });
@@ -181,7 +168,6 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
         })
         .and_then([&]() { return InitCullingResources(); })
         .and_then([&]() { return InitBindless(); })
-        .and_then([&]() { return InitParticleResources(); })
         .and_then([&]() { return BuildHangGpuPipeline(); })
         .and_then([&]() {
             return CompileShadowPipeline(

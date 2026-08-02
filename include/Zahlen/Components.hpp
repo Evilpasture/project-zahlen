@@ -398,6 +398,16 @@ struct Components {
         int32_t    shadowLayer = -1;
     };
 
+    struct ParticleEmitterComponent {
+        ParticleEmitterParams params;
+        uint32_t              maxParticles   = 65536;
+        bool                  active         = true;
+        bool                  attachToCamera = false;
+
+        // Cached GPU-side storage buffer handle (Zero CPU-lookup overhead)
+        BufferHandle gpuBuffer = BufferHandle::Invalid;
+    };
+
     struct CSGComponent {
         struct Element {
             CSGOperation operation;
