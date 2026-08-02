@@ -30,6 +30,7 @@ def get_git_tracked_files(
         ".py",
         ".inl",
         ".fnl",
+        ".cppm",
     }
     include_filenames = {"CMakeLists.txt"}
 
@@ -117,7 +118,7 @@ def generate_snapshot_string(tracked_files, target_dir):
         # Mapping highlighting
         if filename == "CMakeLists.txt":
             lang = "cmake"
-        elif ext in {".cpp", ".hpp", ".mm", ".inl"}:
+        elif ext in {".cpp", ".hpp", ".mm", ".inl", ".cppm"}:
             lang = "cpp"
         elif ext == ".S":
             lang = "asm"
