@@ -189,6 +189,27 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
     }
 
     // ========================================================================
+    // DECALS
+    // ========================================================================
+    for (Entity e: reg.GetEntitiesWith<Components::DecalComponent>()) {
+        auto* decalComp = reg.Get<Components::DecalComponent>(e);
+        auto* trans     = reg.Get<Components::TransformComponent>(e);
+        if ((decalComp != nullptr) && (trans != nullptr)) {
+            JPH::Mat44 worldMat = trans->GetMatrix();
+            JPH::Mat44 invWorld = worldMat.Inversed();
+
+            Renderer::DrawDecal(
+                rc, {.transform    = worldMat,
+                     .invTransform = invWorld,
+                     .albedoIndex  = decalComp->albedoIndex,
+                     .normalIndex  = decalComp->normalIndex,
+                     .roughness    = decalComp->roughness,
+                     .metallic     = decalComp->metallic}
+            );
+        }
+    }
+
+    // ========================================================================
     // PROCESS PARTICLE EMITTERS (ECS Bridge to Pure Renderer)
     // ========================================================================
     for (Entity e: reg.GetEntitiesWith<Components::ParticleEmitterComponent>()) {

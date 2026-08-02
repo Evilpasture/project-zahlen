@@ -195,6 +195,15 @@ constexpr uint8_t particle_render_ps_raw[] = {
 };
 extern const ShaderPair particle_render_shaders {.vertex = particle_render_vs_raw, .fragment = particle_render_ps_raw};
 
+// --- Decal Shaders ---
+constexpr uint8_t decal_vs_raw[] = {
+#embed SHADER_DECAL_VS_PATH
+};
+constexpr uint8_t decal_ps_raw[] = {
+#embed SHADER_DECAL_PS_PATH
+};
+extern const ShaderPair decal_shaders {.vertex = decal_vs_raw, .fragment = decal_ps_raw};
+
 // --- Single Shaders and Binary Resources ---
 constexpr uint8_t culling_comp_raw[] = {
 #embed SHADER_CULLING_HLSL_CS_PATH

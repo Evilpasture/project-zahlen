@@ -846,8 +846,52 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
             return {};
         });
 }
-
 using enum Resource::ShaderID;
+std::expected<void, Error> RenderContext::Impl::BuildDecalPipeline() {
+    using enum Resource::ShaderID;
+
+    decalDescLayout = DecalLayout::CreateLayout(ctx.Device());
+    decalDescPool   = DecalLayout::CreatePool(ctx.Device(), 1);
+    decalSet        = DecalLayout::Allocate(ctx.Device(), decalDescPool.Get(), decalDescLayout.Get());
+
+    VkPushConstantRange push = {
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        .offset     = 0,
+        .size       = sizeof(DecalPushConstants) // 144 bytes
+    };
+
+    return Vk::PipelineLayoutBuilder(ctx.Device())
+        .AddDescriptorSetLayout(decalDescLayout.Get()) // Set 0: DecalLayout (texDepth, pointSampler)
+        .AddDescriptorSetLayout(bindlessLayout.Get())  // Set 1: Global Bindless Layout
+        .AddPushConstant(push.stageFlags, push.size, push.offset)
+        .Build()
+        .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
+        .and_then([&](auto&& layout) -> std::expected<void, Error> {
+            decalPipelineLayout = std::forward<decltype(layout)>(layout);
+
+            auto decalShaders = Resource::GetShaderProgram(Decal);
+
+            // Correctly nest .and_then on LoadAndCreateShaders
+            return LoadAndCreateShaders(
+                       {.path = SHADER_DECAL_VS_PATH, .fallback = decalShaders.vertex, .entryPoint = "VSMain"},
+                       {.path = SHADER_DECAL_PS_PATH, .fallback = decalShaders.fragment, .entryPoint = "PSMain"}
+            )
+                .and_then([&](auto&& shaders) -> std::expected<void, Error> {
+                    return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
+                        .Shaders(shaders)
+                        .Layout(decalPipelineLayout.Get())
+                        .ColorFormats(ActiveGBuffer::array)
+                        .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
+                        .DepthTest(true)
+                        .DepthWrite(false)
+                        .CullFront()
+                        .AlphaBlend()
+                        .Build(ctx.Device())
+                        .transform([&](auto&& pipeline) { decalPipeline = std::forward<decltype(pipeline)>(pipeline); });
+                });
+        });
+}
+
 std::expected<void, Error> RenderContext::Impl::BuildTAAPipeline() {
     VkPushConstantRange taaPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float)};
 
@@ -1139,6 +1183,7 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
                 {SHADER_PARTICLE_UPDATE_CS_PATH, SHADER_PARTICLE_RENDER_VS_PATH, SHADER_PARTICLE_RENDER_PS_PATH}
             );
         })
+        .and_then([&]() { return register_and_check("Decals", [this]() { return BuildDecalPipeline(); }, {SHADER_DECAL_VS_PATH, SHADER_DECAL_PS_PATH}); })
         .and_then([&]() { return register_and_check("Blit", [this]() { return BuildBlitPipeline(); }, {SHADER_BLIT_HLSL_VS_PATH, SHADER_BLIT_HLSL_PS_PATH}); })
         // CHANGED: Converted to .and_then to handle expected texture allocations monadically
         .and_then([&]() -> std::expected<void, Error> {
@@ -1551,6 +1596,10 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
         for (auto* const img: colorTargets) {
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+        }
+
+        if (decalSet != VK_NULL_HANDLE) {
+            DecalLayout::Write(ctx.Device(), decalSet, presentation.depthTarget.view.Get(), pointSampler.Get());
         }
 
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(

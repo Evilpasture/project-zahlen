@@ -340,6 +340,11 @@ using KawaseLayout = Vk::DescriptorLayout<
     Vk::SampledImageSlot<2>  // texLow (downsampled source for combine)
     >;
 
+using DecalLayout = Vk::DescriptorLayout<
+    Vk::SampledImageSlot<0, VK_SHADER_STAGE_FRAGMENT_BIT>, // texDepth
+    Vk::SamplerSlot<1, VK_SHADER_STAGE_FRAGMENT_BIT>       // pointSampler
+    >;
+
 namespace Stages {
 struct ShadowPass {
     static constexpr std::string_view name = "[GPU] Shadow Map";
@@ -383,11 +388,15 @@ struct TransPrePass {
 struct TransReflection {
     static constexpr std::string_view name = "[GPU] Translucent Reflection";
 };
+struct DecalPass {
+    static constexpr std::string_view name = "[GPU] Decal Pass";
+};
 } // namespace Stages
 
 using FrameProfiler = Profiler::GpuProfiler<
     Stages::ShadowPass,
     Stages::MainPass,
+    Stages::DecalPass,
     Stages::TransPrePass,
     Stages::TransReflection,
     Stages::AAPass,
@@ -484,6 +493,15 @@ struct ParticleEmitterCommand {
 };
 
 static_assert(std::is_trivially_copyable_v<ParticleEmitterCommand> && std::is_standard_layout_v<ParticleEmitterCommand>);
+
+struct DecalDrawCommand {
+    JPH::Mat44 transform;
+    JPH::Mat44 invTransform;
+    uint32_t   albedoIndex;
+    uint32_t   normalIndex;
+    float      roughness;
+    float      metallic;
+};
 
 struct WorkerCmdContext {
     std::array<Vk::CommandPool<Vk::QueueType::Graphics>, 2> pools;
@@ -726,6 +744,13 @@ struct RenderContext::Impl {
     Vk::PipelineLayout          particleRenderLayout;
     Vk::TypedPipeline<1, false> particleRenderPipeline;
 
+    Vk::DescriptorSetLayout decalDescLayout;
+    Vk::DescriptorPool      decalDescPool;
+    VkDescriptorSet         decalSet = VK_NULL_HANDLE;
+
+    Vk::PipelineLayout decalPipelineLayout;
+    Vk::Pipeline       decalPipeline;
+
     // ============================================================================
     // GPU Storage & Double-Buffered Work Buffers
     // ============================================================================
@@ -786,6 +811,7 @@ struct RenderContext::Impl {
     ZHLN::Array<DrawCommand>            drawQueue;
     ZHLN::Array<CSGDrawCommand>         csgDrawQueue;
     ZHLN::Array<ParticleEmitterCommand> particleEmittersQueue;
+    ZHLN::Array<DecalDrawCommand>       decalQueue;
     ZHLN::Array<GPULight>               mappedLights;
     ZHLN::DoubleBuffered<BufferHandle>  debugMeshHandles;
 
@@ -914,6 +940,15 @@ struct RenderContext::Impl {
         int   _pad;
     };
 
+    struct DecalPushConstants {
+        JPH::Mat44 world;
+        JPH::Mat44 invWorld;
+        uint32_t   albedoIndex;
+        uint32_t   normalIndex;
+        float      roughness;
+        float      metallic;
+    };
+
     struct alignas(8) SkinningConstants {
         VkDeviceAddress inPosAddr;
         VkDeviceAddress inAttrAddr;
@@ -973,6 +1008,7 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, Error> InitCullingResources();
     [[nodiscard]] std::expected<void, Error> CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
     [[nodiscard]] std::expected<void, Error> CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
+    [[nodiscard]] std::expected<void, Error> BuildDecalPipeline();
     [[nodiscard]] std::expected<void, Error> BuildParticlePipelines();
     [[nodiscard]] std::expected<void, Error> InitBindless();
     [[nodiscard]] std::expected<void, Error> BuildTAAPipeline();

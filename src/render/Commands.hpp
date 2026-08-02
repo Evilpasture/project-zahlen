@@ -286,8 +286,26 @@ class CommandEncoder {
         }
     }
 
+    void BindDescriptorSets(uint32_t firstSet, std::span<const VkDescriptorSet> sets) noexcept {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, lastLayout, firstSet, static_cast<uint32_t>(sets.size()), sets.data(), 0, nullptr);
+        if (!sets.empty()) {
+            lastDescriptorSet = sets[0];
+        }
+    }
+
     template <GpuTriviallyCopyable T>
-    inline void DrawInstanced(
+    void Draw(
+        uint32_t           vertexCount,
+        uint32_t           instanceCount,
+        const T&           pushConstants,
+        VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+    ) noexcept {
+        Push(cmd, lastLayout, stages, pushConstants);
+        vkCmdDraw(cmd, vertexCount, instanceCount, 0, 0);
+    }
+
+    template <GpuTriviallyCopyable T>
+    void DrawInstanced(
         const DrawState&   state,
         const T&           pushConstants,
         VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
@@ -299,7 +317,7 @@ class CommandEncoder {
     }
 
     template <GpuTriviallyCopyable T>
-    inline void DrawIndirect(
+    void DrawIndirect(
         const DrawIndirectState& state,
         const T&                 pushConstants,
         VkShaderStageFlags       stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
@@ -311,7 +329,7 @@ class CommandEncoder {
     }
 
     template <GpuTriviallyCopyable T>
-    inline void DrawIndirectCount(
+    void DrawIndirectCount(
         const DrawIndirectCountState& state,
         const T&                      pushConstants,
         VkShaderStageFlags            stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
@@ -323,7 +341,7 @@ class CommandEncoder {
     }
 
     template <GpuTriviallyCopyable T>
-    inline void DrawIndexedIndirect(
+    void DrawIndexedIndirect(
         const DrawIndexedIndirectState& state,
         const T&                        pushConstants,
         VkShaderStageFlags              stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
@@ -335,7 +353,7 @@ class CommandEncoder {
     }
 
     template <GpuTriviallyCopyable T>
-    inline void DrawIndexedIndirectCount(
+    void DrawIndexedIndirectCount(
         const DrawIndexedIndirectCountState& state,
         const T&                             pushConstants,
         VkShaderStageFlags                   stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT

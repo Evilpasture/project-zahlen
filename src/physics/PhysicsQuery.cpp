@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/physics/Physics.hpp>
 #include "PhysicsWorld.hpp"
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Collision/CastResult.h>
@@ -11,6 +10,7 @@
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/ShapeCast.h>
 #include <Jolt/Physics/PhysicsSystem.h>
+#include <Zahlen/physics/Physics.hpp>
 
 namespace ZHLN::Physics {
 
@@ -95,6 +95,70 @@ RaycastResult Raycast(const PhysicsContext& ctx, JPH::RVec3Arg origin, JPH::Vec3
     return result;
 }
 
+void RaycastAll(
+    const PhysicsContext&      ctx,
+    JPH::RVec3Arg              origin,
+    JPH::Vec3Arg               direction,
+    float                      maxDistance,
+    JPH::Array<RaycastResult>& outResults,
+    ZHLN::Entity               ignore
+) {
+    const auto& world = ctx.GetWorld();
+
+    // Guard against queries during physics simulation steps
+    if (world.isStepping.load(std::memory_order::relaxed)) {
+        return;
+    }
+
+    float lengthSq = direction.LengthSq();
+    if (lengthSq < 1e-6f) {
+        return;
+    }
+
+    JPH::Vec3     scaledDir = direction.Normalized() * maxDistance;
+    JPH::RRayCast ray {origin, scaledDir};
+
+    JPH::RayCastSettings settings;
+    // Collide with back-faces to detect when the ray exits a solid boundary
+    settings.mBackFaceModeTriangles = JPH::EBackFaceMode::CollideWithBackFaces;
+    settings.mBackFaceModeConvex    = JPH::EBackFaceMode::CollideWithBackFaces;
+    // Disable solid treatment so rays starting inside a hull don't immediately return a 0.0 fraction
+    settings.mTreatConvexAsSolid = false;
+
+    JPH::BodyID ignoreID = GetBodyID(world, ignore);
+    QueryFilter filter(ignoreID);
+
+    // Use Jolt's built-in multiple hit collector
+    JPH::AllHitCollisionCollector<JPH::CastRayCollector> collector;
+    const auto*                                          query = &world.system->GetNarrowPhaseQuery();
+    query->CastRay(ray, settings, collector, {}, {}, filter);
+
+    // Sort hits from nearest to furthest
+    collector.Sort();
+
+    if (collector.HadHit()) {
+        const auto* lockInterface = &world.system->GetBodyLockInterfaceNoLock();
+
+        for (const auto& hit: collector.mHits) {
+            RaycastResult result {};
+            if (TryGetValidHandle(world, hit.mBodyID, result.handle)) {
+                result.hasHit   = true;
+                result.fraction = hit.mFraction;
+                result.position = ray.GetPointOnRay(hit.mFraction);
+
+                // Safely lock body to resolve the world space normal of the sub-shape hit
+                JPH::BodyLockRead lock(*lockInterface, hit.mBodyID);
+                if (lock.Succeeded()) {
+                    result.normal = lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, result.position);
+                } else {
+                    result.normal = JPH::Vec3::sAxisY();
+                }
+                outResults.push_back(result);
+            }
+        }
+    }
+}
+
 ShapeCastResult Shapecast(
     const PhysicsContext& ctx,
     JPH::ShapeRefC        shape,
@@ -105,12 +169,14 @@ ShapeCastResult Shapecast(
     ZHLN::Entity          ignore
 ) {
     const auto& world = ctx.GetWorld();
-    if (world.isStepping.load(std::memory_order::relaxed))
+    if (world.isStepping.load(std::memory_order::relaxed)) {
         return {};
+    }
 
     float lengthSq = direction.LengthSq();
-    if (lengthSq < 1e-6f)
+    if (lengthSq < 1e-6f) {
         return {};
+    }
 
     JPH::Vec3 scaledDir = direction.Normalized() * maxDistance;
 

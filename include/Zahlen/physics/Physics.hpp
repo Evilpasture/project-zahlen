@@ -179,6 +179,15 @@ static_assert(
 [[nodiscard]] RaycastResult
     Raycast(const PhysicsContext& ctx, JPH::RVec3Arg origin, JPH::Vec3Arg direction, float maxDistance = 1000.0f, ZHLN::Entity ignore = {});
 
+void RaycastAll(
+    const PhysicsContext&      ctx,
+    JPH::RVec3Arg              origin,
+    JPH::Vec3Arg               direction,
+    float                      maxDistance,
+    JPH::Array<RaycastResult>& outResults,
+    ZHLN::Entity               ignore = {}
+);
+
 [[nodiscard]] ShapeCastResult Shapecast(
     const PhysicsContext& ctx,
     JPH::ShapeRefC        shape,

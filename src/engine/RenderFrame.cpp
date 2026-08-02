@@ -559,6 +559,39 @@ struct PassFactory {
         }
     }
 
+    [[nodiscard]] auto MakeDecalPass() const noexcept {
+        return Vk::MakePass<"DecalPass", Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_NormRough>>([this](auto& ctx) noexcept {
+            auto c = ctx.Cmd();
+            if (!self.decalPipeline.Valid() || self.decalQueue.empty()) {
+                return;
+            }
+
+            Profiler::ScopedGpuProfile<Stages::DecalPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
+
+            // Bind depth texture to Descriptor Set 0
+            DecalLayout::Write(self.ctx.Device(), self.decalSet, self.presentation.depthTarget.view.Get(), self.pointSampler.Get());
+
+            FrameRecorder recorder(c, self);
+            recorder.encoder.BindPipeline(self.decalPipeline.Get(), self.decalPipelineLayout.Get());
+
+            std::array sets = {self.decalSet, self.bindlessSets[fIdx]};
+            recorder.encoder.BindDescriptorSets(0, sets);
+
+            for (const auto& decalCmd: self.decalQueue) {
+                RenderContext::Impl::DecalPushConstants pc {
+                    .world       = decalCmd.transform,    // Matches DecalPushConstants.world
+                    .invWorld    = decalCmd.invTransform, // Matches DecalPushConstants.invWorld
+                    .albedoIndex = decalCmd.albedoIndex,
+                    .normalIndex = decalCmd.normalIndex,
+                    .roughness   = decalCmd.roughness,
+                    .metallic    = decalCmd.metallic
+                };
+
+                recorder.encoder.Draw(36, 1, pc);
+            }
+        });
+    }
+
     [[nodiscard]] auto MakeTAAPass() const noexcept {
         return Vk::MakePass<
             "TAA", Vk::ShaderRead<Res_HdrSceneColor>, Vk::ShaderRead<Res_Velocity>, Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_AccumNext>,
@@ -757,8 +790,8 @@ template <AAMode Mode, typename GetSwapchainImageT>
 auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapchainImage) {
     using enum AAMode;
 
-    auto corePasses = std::tuple {factory.MakeShadowPass(),     factory.MakeTranslucentPrePass(),        factory.MakeAmbientPass(), factory.MakeLightingPass(),
-                                  factory.MakeReflectionPass(), factory.MakeTranslucentReflectionPass(), factory.MakeForwardPass()};
+    auto corePasses = std::tuple {factory.MakeShadowPass(),   factory.MakeDecalPass(),      factory.MakeTranslucentPrePass(),        factory.MakeAmbientPass(),
+                                  factory.MakeLightingPass(), factory.MakeReflectionPass(), factory.MakeTranslucentReflectionPass(), factory.MakeForwardPass()};
 
     auto bloomPasses = std::tuple {factory.MakeBloomThresholdPass(), factory.MakeBloomDownPass<0>(), factory.MakeBloomDownPass<1>(),
                                    factory.MakeBloomDownPass<2>(),   factory.MakeBloomUpPass<2>(),   factory.MakeBloomUpPass<1>(),
@@ -1036,6 +1069,7 @@ RenderResult RenderContext::EndFrame() noexcept {
             _impl->drawQueue.clear();
             _impl->csgDrawQueue.clear();
             _impl->uiBatches.clear();
+            _impl->decalQueue.clear();
             return std::unexpected(Error);
         }
 
@@ -1060,6 +1094,7 @@ RenderResult RenderContext::EndFrame() noexcept {
             _impl->csgDrawQueue.clear();
             _impl->uiBatches.clear();
             _impl->particleEmittersQueue.clear();
+            _impl->decalQueue.clear();
             _impl->current_cmd         = VK_NULL_HANDLE;
             _impl->hasSkinnedThisFrame = false;
             return std::unexpected(comp_submit_res.error());
@@ -1128,6 +1163,7 @@ RenderResult RenderContext::EndFrame() noexcept {
             _impl->csgDrawQueue.clear();
             _impl->uiBatches.clear();
             _impl->particleEmittersQueue.clear();
+            _impl->decalQueue.clear();
             _impl->current_cmd         = VK_NULL_HANDLE;
             _impl->hasSkinnedThisFrame = false;
             return std::unexpected(MapFrameResult(res));
@@ -1368,6 +1404,18 @@ void DrawCSG(RenderContext& ctx, const Material& eyeMaterial, const Mesh& eyeMes
     }
 
     impl->csgDrawQueue.push_back(std::move(csgCmd));
+}
+
+void DrawDecal(RenderContext& ctx, const DecalParams& params) {
+    auto* impl = ctx.GetImpl();
+    impl->decalQueue.push_back(
+        {.transform    = params.transform,
+         .invTransform = params.invTransform,
+         .albedoIndex  = params.albedoIndex,
+         .normalIndex  = params.normalIndex,
+         .roughness    = params.roughness,
+         .metallic     = params.metallic}
+    );
 }
 
 } // namespace Renderer

@@ -45,6 +45,7 @@ enum class ShaderID : uint8_t {
     VolumetricIntegration,
     ParticleUpdate,
     ParticleRender,
+    Decal,
 };
 
 // Extern declarations of individual programs to avoid header bloat and allow compile-time routing
@@ -70,6 +71,7 @@ extern const ShaderPair volumetric_scattering_shaders;
 extern const ShaderPair volumetric_integration_shaders;
 extern const ShaderPair particle_update_shaders;
 extern const ShaderPair particle_render_shaders;
+extern const ShaderPair decal_shaders;
 
 // Extern declarations for single spans
 extern const std::span<const uint8_t> culling_comp;
@@ -122,6 +124,7 @@ struct ShaderMapping {
         {.id = ShaderID::VolumetricIntegration, .pair = volumetric_integration_shaders},
         ShaderMapping {.id = ShaderID::ParticleUpdate, .pair = particle_update_shaders},
         ShaderMapping {.id = ShaderID::ParticleRender, .pair = particle_render_shaders},
+        ShaderMapping {.id = ShaderID::Decal, .pair = decal_shaders},
     };
 
     for (const auto& mapping: table) {

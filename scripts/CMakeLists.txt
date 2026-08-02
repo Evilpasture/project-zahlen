@@ -87,7 +87,7 @@ target_link_libraries(zahlen_modules PUBLIC
 # ============================================================================
 # DYNAMIC GAMEPLAY MODULE (libgameplay.so / gameplay.dll)
 # ============================================================================
-add_library(gameplay SHARED gameplay.cpp)
+add_library(gameplay SHARED gameplay_fps.cpp)
 
 set_target_properties(gameplay PROPERTIES
     CXX_SCAN_FOR_MODULES ON

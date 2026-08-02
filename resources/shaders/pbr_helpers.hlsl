@@ -38,6 +38,12 @@ float GetShadowDither(float2 screenPos) {
 // ============================================================================
 // MATH UTILITIES
 // ============================================================================
+float2 PackNormalOctahedron(float3 N) {
+    N /= (abs(N.x) + abs(N.y) + abs(N.z));
+    float2 s = float2(N.x >= 0.0 ? 1.0 : -1.0, N.y >= 0.0 ? 1.0 : -1.0);
+    return N.z >= 0.0 ? N.xy : (1.0 - abs(N.yx)) * s;
+}
+
 float3 UnpackNormalOctahedron(float2 oct) {
     float3 N = float3(oct, 1.0 - abs(oct.x) - abs(oct.y));
     float2 s = float2(N.x >= 0.0 ? 1.0 : -1.0, N.y >= 0.0 ? 1.0 : -1.0);

@@ -171,6 +171,15 @@ struct CSGDrawParams {
     ZHLN::Array<CSGCutterParams> cutters; // Stably using your custom Array container
 };
 
+struct DecalParams {
+    JPH::Mat44 transform    = JPH::Mat44::sIdentity();
+    JPH::Mat44 invTransform = JPH::Mat44::sIdentity();
+    uint32_t   albedoIndex  = 1;
+    uint32_t   normalIndex  = 2;
+    float      roughness    = 0.5f;
+    float      metallic     = 0.0f;
+};
+
 namespace Renderer {
 
 void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj);
@@ -180,6 +189,7 @@ void SetGISettings(RenderContext& ctx, const GISettings& settings);
 void SetLights(RenderContext& ctx, const GPULight* lights, uint32_t count);
 void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const DrawParams& params);
 void DrawCSG(RenderContext& ctx, const Material& eyeMaterial, const Mesh& eyeMesh, const CSGDrawParams& params);
+void DrawDecal(RenderContext& ctx, const DecalParams& params);
 } // namespace Renderer
 
 } // namespace ZHLN

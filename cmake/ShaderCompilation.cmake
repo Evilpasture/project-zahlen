@@ -223,6 +223,13 @@ add_shader_target(smaa_shaders
         "${SHADER_SRC_DIR}/smaa_wrap.hlsl|SmaaBlendPS|ps_6_5|SHADER_SMAA_BLEND_PS_PATH|-DBLEND_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=1"
 )
 
+# --- DECAL SHADER ---
+add_shader_target(decal_shader
+    STAGES
+        "${SHADER_SRC_DIR}/decal.hlsl|VSMain|vs_6_5|SHADER_DECAL_VS_PATH"
+        "${SHADER_SRC_DIR}/decal.hlsl|PSMain|ps_6_5|SHADER_DECAL_PS_PATH"
+)
+
 # ============================================================================
 # --- ISOLATE SHADER DEFINITIONS & DEPENDENCIES TO ONLY THE CONSUMING FILES ---
 # ============================================================================

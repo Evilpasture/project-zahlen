@@ -408,6 +408,13 @@ struct Components {
         BufferHandle gpuBuffer = BufferHandle::Invalid;
     };
 
+    struct DecalComponent {
+        uint32_t albedoIndex = 1;
+        uint32_t normalIndex = 2; // default flat normal
+        float    roughness   = 0.5f;
+        float    metallic    = 0.0f;
+    };
+
     struct CSGComponent {
         struct Element {
             CSGOperation operation;
