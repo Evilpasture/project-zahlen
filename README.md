@@ -52,6 +52,10 @@ You can do it the hard way, or the easy way.
    ./build/zahlen
    ```
 
+## Architecture
+
+For a detailed breakdown of the engine's architecture, frame loop execution order, deferred render graph topology, and scripting IPC protocol, see [include/ARCHITECTURE.md](include/ARCHITECTURE.md).
+
 ## Hardware expectations
 
 The project is designed to run on a system with a discrete GPU and a dedicated CPU. Tested on NVIDIA RTX 3050 6GB in Arch Linux.
