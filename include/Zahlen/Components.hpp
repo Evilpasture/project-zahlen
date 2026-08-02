@@ -388,13 +388,13 @@ struct Components {
     };
     struct LightComponent {
         LightType  type;
-        JPH::Vec3  color;
-        float      intensity;
-        float      radius;
-        JPH::Vec3  direction;
-        float      range;
-        JPH::Mat44 points;
-        uint32_t   twoSided;
+        JPH::Vec3  color       = JPH::Vec3::sZero();
+        float      intensity   = 0.0f;
+        float      radius      = 0.0f;
+        JPH::Vec3  direction   = JPH::Vec3::sZero();
+        float      range       = 0.0f;
+        JPH::Mat44 points      = JPH::Mat44::sIdentity();
+        uint32_t   twoSided    = 0;
         int32_t    shadowLayer = -1;
     };
 

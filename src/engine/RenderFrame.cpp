@@ -262,8 +262,8 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
         return;
     }
 
-    auto& stagingBuf  = tlasStagingBuffers[];
-    auto& instanceBuf = tlasInstanceBuffers[];
+    auto& stagingBuf  = tlasStagingBuffers[frame_index];
+    auto& instanceBuf = tlasInstanceBuffers[frame_index];
 
     std::memcpy(stagingBuf.Map().data, tlasInstancesScratch.data(), tlasInstancesScratch.size() * sizeof(VkAccelerationStructureInstanceKHR));
 
@@ -278,7 +278,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 
     ZHLN_TlasGeometryDesc geom = {.instance_data = ctx.BufferAddress(instanceBuf.Handle())};
 
-    rtCtx.CmdBuildTlas(cmd, geom, tlas[], ctx.BufferAddress(tlasScratchBuffer->Handle()), tlasInstancesScratch.size());
+    rtCtx.CmdBuildTlas(cmd, geom, tlas[frame_index], ctx.BufferAddress(tlasScratchBuffer[frame_index].Handle()), tlasInstancesScratch.size());
 
     Vk::MemoryBarrier(
         cmd, {.src_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
@@ -1028,6 +1028,7 @@ RenderResult RenderContext::EndFrame() noexcept {
         ZHLN_PROFILE_SCOPE("Render (CPU Record)");
         if (_impl->current_cmd == VK_NULL_HANDLE) {
             _impl->drawQueue.clear();
+            _impl->csgDrawQueue.clear();
             _impl->uiBatches.clear();
             return std::unexpected(Error);
         }
@@ -1050,6 +1051,7 @@ RenderResult RenderContext::EndFrame() noexcept {
 
         if (!comp_submit_res) [[unlikely]] {
             _impl->drawQueue.clear();
+            _impl->csgDrawQueue.clear();
             _impl->uiBatches.clear();
             _impl->current_cmd         = VK_NULL_HANDLE;
             _impl->hasSkinnedThisFrame = false;
@@ -1086,7 +1088,7 @@ RenderResult RenderContext::EndFrame() noexcept {
                 auto csgCount  = _impl->csgDrawQueue.size();
 
                 if (drawCount > 0 || csgCount > 0) {
-                    auto  mapped = _impl->instanceDataBuffers->Map();
+                    auto  mapped = _impl->instanceDataBuffers[_impl->frame_index].Map();
                     auto* dst    = static_cast<InstanceData*>(mapped.data);
 
                     // 1. Write standard draw queue
@@ -1116,6 +1118,7 @@ RenderResult RenderContext::EndFrame() noexcept {
 
         if (res != ZHLN_FrameResult_Ok && res != ZHLN_FrameResult_Suboptimal) {
             _impl->drawQueue.clear();
+            _impl->csgDrawQueue.clear();
             _impl->uiBatches.clear();
             _impl->current_cmd         = VK_NULL_HANDLE;
             _impl->hasSkinnedThisFrame = false;
@@ -1129,6 +1132,7 @@ RenderResult RenderContext::EndFrame() noexcept {
         std::swap(_impl->shadowCascadeViews, _impl->shadowCascadeViewsPrev);
 
         _impl->drawQueue.clear();
+        _impl->csgDrawQueue.clear();
         _impl->uiBatches.clear();
         _impl->current_cmd         = VK_NULL_HANDLE;
         _impl->hasSkinnedThisFrame = false;
@@ -1163,9 +1167,6 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
     using enum DrawFlags;
     using enum BufferHandle;
     auto* impl = ctx.GetImpl();
-    if (impl->current_cmd == VK_NULL_HANDLE) {
-        return;
-    }
 
     // 1. Resolve required pipeline/vertex resources
     auto posMesh_res        = impl->meshPool.Resolve(mesh.posBuffer);
@@ -1261,9 +1262,6 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
 
 void DrawCSG(RenderContext& ctx, const Material& eyeMaterial, const Mesh& eyeMesh, const CSGDrawParams& params) {
     auto* impl = ctx.GetImpl();
-    if (impl->current_cmd == VK_NULL_HANDLE) {
-        return;
-    }
 
     // Helper inside the backend to assemble DrawCommands cleanly
     auto MakeCommand = [&](const Material& material, const Mesh& mesh, const JPH::Mat44& transform, const JPH::Mat44& prevTransform, float cullRadius,

@@ -1,11 +1,10 @@
-// scripts/Explosions/Explosions.cppm
 module;
 #include <Jolt/Jolt.h>
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Audio.hpp>
-#include <Zahlen/Components.hpp> // <-- FIXED: Added missing component definitions
+#include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Render.hpp>
@@ -84,7 +83,7 @@ inline std::vector<uint32_t> GenerateFireTexture(uint32_t size) {
                 r       = 1.0f - t;
                 g       = 0.35f * (1.0f - t);
                 b       = 0.08f * (1.0f - t);
-                a       = 0.30f * (1.0f - t);
+                a       = 0.30f - 0.4f * t;
             }
 
             uint8_t ru           = static_cast<uint8_t>(std::clamp(r, 0.0f, 1.0f) * 255.0f);
@@ -367,12 +366,49 @@ struct ExplosionInstance {
         const Material& sparkMat,
         const Material& shockwaveMat
     ) const noexcept {
-        // Calculate the view-facing billboard rotation once
-        JPH::Quat billboardRot      = Math::EulerDegreesToQuat(JPH::Vec3(-cam.pitch, cam.yaw + 90.0f, 0.0f));
-        JPH::Quat alignToCamera     = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), JPH::DegreesToRadians(90.0f));
-        JPH::Quat finalBillboardRot = billboardRot * alignToCamera;
+        // --- VIEW-PLANE ALIGNED CAMERA BILLBOARDING ---
+        JPH::Mat44 invView = cam.GetViewMatrix().Inversed();
+        JPH::Vec3  right   = invView.GetColumn3(0).Normalized();
+        JPH::Vec3  up      = invView.GetColumn3(1).Normalized();
+        JPH::Vec3  back    = invView.GetColumn3(2).Normalized();
 
-        // -------- DRAW FIREBALLS --------
+        JPH::Mat44 billboardMat(JPH::Vec4(right, 0.0f), JPH::Vec4(back, 0.0f), JPH::Vec4(-up, 0.0f), JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f));
+        JPH::Quat  finalBillboardRot = billboardMat.GetQuaternion().Normalized();
+
+        // 1. DRAW SMOKE FIRST (Background volume)
+        float smokeOpacity = std::max(0.0f, 1.0f - std::max(0.0f, age - 1.5f) / 3.0f);
+        if (smokeOpacity > 0.001f) {
+            float emissiveBoost = std::max(0.0f, 1.0f - age / 1.0f) * 20.0f;
+            for (const auto& p: smoke) {
+                if (p.life < 0.0f)
+                    continue;
+                float t = std::min(1.0f, p.life / p.maxLife);
+
+                JPH::Vec3 color;
+                if (t < 0.5f) {
+                    color = p.colorStart + (p.colorMid - p.colorStart) * (t / 0.5f);
+                } else {
+                    color = p.colorMid + (p.colorEnd - p.colorMid) * ((t - 0.5f) / 0.5f);
+                }
+                float fade       = 1.0f - std::pow(t, 3.0f);
+                float finalAlpha = fade * smokeOpacity;
+
+                float      size      = std::lerp(p.startSize, p.endSize, t);
+                JPH::Mat44 transform = Math::CreateTransform(origin + p.position, finalBillboardRot, JPH::Vec3::sReplicate(size));
+
+                DrawParams params;
+                params.transform        = transform;
+                params.prevTransform    = transform;
+                params.cullRadius       = size;
+                params.flags            = DrawFlags::VisibleInMain | DrawFlags::ExcludeFromTLAS;
+                params.colorOverride    = {color.GetX(), color.GetY(), color.GetZ(), finalAlpha};
+                params.emissiveOverride = {color.GetX() * emissiveBoost, color.GetY() * emissiveBoost, color.GetZ() * emissiveBoost, 1.0f};
+
+                Renderer::Draw(rc, smokeMat, quadMesh, params);
+            }
+        }
+
+        // 2. DRAW FIREBALL SECOND (Additive glowing core in center)
         float fireOpacity = std::max(0.0f, 1.0f - age / 1.4f);
         if (fireOpacity > 0.001f) {
             for (const auto& p: fireball) {
@@ -389,7 +425,7 @@ struct ExplosionInstance {
                 float     fade       = 1.0f - std::pow(t, 3.0f);
                 JPH::Vec3 finalColor = color * (fade * fireOpacity);
 
-                float      size      = std::lerp(p.startSize, p.endSize, t) * (2.5f + std::min(1.0f, age / 0.4f) * 1.5f);
+                float      size      = std::lerp(p.startSize, p.endSize, t);
                 JPH::Mat44 transform = Math::CreateTransform(origin + p.position, finalBillboardRot, JPH::Vec3::sReplicate(size));
 
                 DrawParams params;
@@ -397,45 +433,34 @@ struct ExplosionInstance {
                 params.prevTransform    = transform;
                 params.cullRadius       = size;
                 params.flags            = DrawFlags::VisibleInMain | DrawFlags::ExcludeFromTLAS;
-                params.colorOverride    = {finalColor.GetX(), finalColor.GetY(), finalColor.GetZ(), 1.0f};
-                params.emissiveOverride = {finalColor.GetX() * 2.0f, finalColor.GetY() * 2.0f, finalColor.GetZ() * 2.0f, 1.0f};
+                params.colorOverride    = {finalColor.GetX(), finalColor.GetY(), finalColor.GetZ(), fade * fireOpacity};
+                params.emissiveOverride = {finalColor.GetX() * 15.0f, finalColor.GetY() * 15.0f, finalColor.GetZ() * 15.0f, 1.0f};
 
                 Renderer::Draw(rc, fireMat, quadMesh, params);
             }
         }
 
-        // -------- DRAW SMOKE --------
-        float smokeOpacity = std::max(0.0f, 1.0f - std::max(0.0f, age - 1.5f) / 3.0f);
-        if (smokeOpacity > 0.001f) {
-            for (const auto& p: smoke) {
-                if (p.life < 0.0f)
-                    continue;
-                float t = std::min(1.0f, p.life / p.maxLife);
+        // 3. DRAW SHOCKWAVE (Ground ring)
+        float shockOpacity = std::max(0.0f, 1.0f - age / 0.7f);
+        if (shockOpacity > 0.001f) {
+            float swT    = std::min(1.0f, age / 0.6f);
+            float swSize = swT * 28.0f * scale;
 
-                JPH::Vec3 color;
-                if (t < 0.5f) {
-                    color = p.colorStart + (p.colorMid - p.colorStart) * (t / 0.5f);
-                } else {
-                    color = p.colorMid + (p.colorEnd - p.colorMid) * ((t - 0.5f) / 0.5f);
-                }
-                float     fade       = 1.0f - std::pow(t, 3.0f);
-                JPH::Vec3 finalColor = color * (fade * smokeOpacity);
+            JPH::Mat44 transform =
+                Math::CreateTransform(JPH::Vec3(origin.GetX(), 0.05f, origin.GetZ()), JPH::Quat::sIdentity(), JPH::Vec3(swSize, 1.0f, swSize));
 
-                float      size      = std::lerp(p.startSize, p.endSize, t) * (2.0f + std::min(1.0f, age / 1.5f) * 4.0f);
-                JPH::Mat44 transform = Math::CreateTransform(origin + p.position, finalBillboardRot, JPH::Vec3::sReplicate(size));
+            DrawParams params;
+            params.transform        = transform;
+            params.prevTransform    = transform;
+            params.cullRadius       = swSize;
+            params.flags            = DrawFlags::VisibleInMain | DrawFlags::ExcludeFromTLAS;
+            params.colorOverride    = {1.0f, 0.8f, 0.5f, shockOpacity};
+            params.emissiveOverride = {15.0f, 10.0f, 4.0f, shockOpacity};
 
-                DrawParams params;
-                params.transform     = transform;
-                params.prevTransform = transform;
-                params.cullRadius    = size;
-                params.flags         = DrawFlags::VisibleInMain | DrawFlags::ExcludeFromTLAS;
-                params.colorOverride = {finalColor.GetX(), finalColor.GetY(), finalColor.GetZ(), 1.0f};
-
-                Renderer::Draw(rc, smokeMat, quadMesh, params);
-            }
+            Renderer::Draw(rc, shockwaveMat, quadMesh, params);
         }
 
-        // -------- DRAW SPARKS --------
+        // 4. DRAW SPARKS LAST (Foreground bright embers)
         float sparkOpacity = std::max(0.0f, 1.0f - age / 1.8f);
         if (sparkOpacity > 0.001f) {
             for (const auto& p: sparks) {
@@ -453,7 +478,7 @@ struct ExplosionInstance {
                 float     fade       = 1.0f - std::pow(t, 2.0f);
                 JPH::Vec3 finalColor = color * (fade * flick * sparkOpacity);
 
-                float      size      = std::lerp(p.startSize, p.endSize, t) * 0.35f;
+                float      size      = std::lerp(p.startSize, p.endSize, t);
                 JPH::Mat44 transform = Math::CreateTransform(origin + p.position, finalBillboardRot, JPH::Vec3::sReplicate(size));
 
                 DrawParams params;
@@ -461,31 +486,11 @@ struct ExplosionInstance {
                 params.prevTransform    = transform;
                 params.cullRadius       = size;
                 params.flags            = DrawFlags::VisibleInMain | DrawFlags::ExcludeFromTLAS;
-                params.colorOverride    = {finalColor.GetX(), finalColor.GetY(), finalColor.GetZ(), 1.0f};
-                params.emissiveOverride = {finalColor.GetX() * 3.5f, finalColor.GetY() * 3.5f, finalColor.GetZ() * 3.5f, 1.0f};
+                params.colorOverride    = {finalColor.GetX(), finalColor.GetY(), finalColor.GetZ(), fade * sparkOpacity};
+                params.emissiveOverride = {finalColor.GetX() * 25.0f, finalColor.GetY() * 25.0f, finalColor.GetZ() * 25.0f, 1.0f};
 
                 Renderer::Draw(rc, sparkMat, quadMesh, params);
             }
-        }
-
-        // -------- DRAW SHOCKWAVE (Flat on ground) --------
-        float shockOpacity = std::max(0.0f, 1.0f - age / 0.7f);
-        if (shockOpacity > 0.001f) {
-            float swT    = std::min(1.0f, age / 0.6f);
-            float swSize = swT * 14.0f * scale;
-
-            JPH::Mat44 transform =
-                Math::CreateTransform(JPH::Vec3(origin.GetX(), 0.05f, origin.GetZ()), JPH::Quat::sIdentity(), JPH::Vec3(swSize, 1.0f, swSize));
-
-            DrawParams params;
-            params.transform        = transform;
-            params.prevTransform    = transform;
-            params.cullRadius       = swSize;
-            params.flags            = DrawFlags::VisibleInMain | DrawFlags::ExcludeFromTLAS;
-            params.colorOverride    = {1.0f, 0.8f, 0.5f, shockOpacity};
-            params.emissiveOverride = {2.5f, 1.6f, 0.6f, shockOpacity};
-
-            Renderer::Draw(rc, shockwaveMat, quadMesh, params);
         }
     }
 
@@ -532,49 +537,81 @@ export class ExplosionSystem {
 
         ZHLN::Log("[Explosions] Initializing procedural visual assets...");
 
-        // Generate and upload textures
+        // Generate and upload textures with explicit diagnostic logging
         auto firePixels = GenerateFireTexture(256);
-        s_FireTex       = rc.CreateTexture(firePixels.data(), 256, 256, true).value_or(1);
+        auto fireRes    = rc.CreateTexture(firePixels.data(), 256, 256, true);
+        if (fireRes) {
+            s_FireTex = fireRes.value();
+            ZHLN::Log("[Explosions] Fire texture loaded successfully at slot {}.", s_FireTex);
+        } else {
+            s_FireTex = 1;
+            ZHLN::Log("[Explosions] ERROR: Failed to load fire texture. Falling back to slot 1.");
+        }
 
         auto smokePixels = GenerateSmokeTexture(256);
-        s_SmokeTex       = rc.CreateTexture(smokePixels.data(), 256, 256, true).value_or(1);
+        auto smokeRes    = rc.CreateTexture(smokePixels.data(), 256, 256, true);
+        if (smokeRes) {
+            s_SmokeTex = smokeRes.value();
+            ZHLN::Log("[Explosions] Smoke texture loaded successfully at slot {}.", s_SmokeTex);
+        } else {
+            s_SmokeTex = 1;
+            ZHLN::Log("[Explosions] ERROR: Failed to load smoke texture. Falling back to slot 1.");
+        }
 
         auto sparkPixels = GenerateSparkTexture(128);
-        s_SparkTex       = rc.CreateTexture(sparkPixels.data(), 128, 128, true).value_or(1);
+        auto sparkRes    = rc.CreateTexture(sparkPixels.data(), 128, 128, true);
+        if (sparkRes) {
+            s_SparkTex = sparkRes.value();
+            ZHLN::Log("[Explosions] Spark texture loaded successfully at slot {}.", s_SparkTex);
+        } else {
+            s_SparkTex = 1;
+            ZHLN::Log("[Explosions] ERROR: Failed to load spark texture. Falling back to slot 1.");
+        }
 
         auto shockwavePixels = GenerateShockwaveTexture(512);
-        s_ShockwaveTex       = rc.CreateTexture(shockwavePixels.data(), 512, 512, true).value_or(1);
+        auto shockwaveRes    = rc.CreateTexture(shockwavePixels.data(), 512, 512, true);
+        if (shockwaveRes) {
+            s_ShockwaveTex = shockwaveRes.value();
+            ZHLN::Log("[Explosions] Shockwave texture loaded successfully at slot {}.", s_ShockwaveTex);
+        } else {
+            s_ShockwaveTex = 1;
+            ZHLN::Log("[Explosions] ERROR: Failed to load shockwave texture. Falling back to slot 1.");
+        }
 
         // Load unit quad mesh
-        s_QuadMesh = CreativeWorksFactory::CreatePlane(rc, 1.0f);
+        s_QuadMesh = CreativeWorksFactory::CreatePlane(rc, 0.5f);
 
         // Build translucency materials
-        auto fireMat_res = CreativeWorksFactory::CreateBasicMaterial(rc, true, true);
+        auto fireMat_res = CreativeWorksFactory::CreateBasicMaterial(rc, true, true, true);
         if (fireMat_res) {
-            s_FireMat             = fireMat_res.value();
-            s_FireMat.albedoIndex = s_FireTex;
-            s_FireMat.alphaMode   = 2; // Translucent
+            s_FireMat               = fireMat_res.value();
+            s_FireMat.albedoIndex   = s_FireTex;
+            s_FireMat.emissiveIndex = s_FireTex; // Bind emissive map to particle texture
+            s_FireMat.alphaMode     = 2;         // Translucent
         }
 
-        auto smokeMat_res = CreativeWorksFactory::CreateBasicMaterial(rc, true, true);
+        auto smokeMat_res = CreativeWorksFactory::CreateBasicMaterial(rc, true, true, false);
         if (smokeMat_res) {
-            s_SmokeMat             = smokeMat_res.value();
-            s_SmokeMat.albedoIndex = s_SmokeTex;
-            s_SmokeMat.alphaMode   = 2;
+            s_SmokeMat               = smokeMat_res.value();
+            s_SmokeMat.albedoIndex   = s_SmokeTex;
+            s_SmokeMat.emissiveIndex = s_SmokeTex; // Bind emissive map to particle texture
+            s_SmokeMat.alphaMode     = 2;
         }
 
-        auto sparkMat_res = CreativeWorksFactory::CreateBasicMaterial(rc, true, true);
+        auto sparkMat_res = CreativeWorksFactory::CreateBasicMaterial(rc, true, true, true);
         if (sparkMat_res) {
-            s_SparkMat             = sparkMat_res.value();
-            s_SparkMat.albedoIndex = s_SparkTex;
-            s_SparkMat.alphaMode   = 2;
+            s_SparkMat               = sparkMat_res.value();
+            s_SparkMat.albedoIndex   = s_SparkTex;
+            s_SparkMat.emissiveIndex = s_SparkTex; // Bind emissive map to particle texture
+            s_SparkMat.alphaMode     = 2;
         }
 
-        auto shockwaveMat_res = CreativeWorksFactory::CreateBasicMaterial(rc, true, true);
+        auto shockwaveMat_res = CreativeWorksFactory::CreateBasicMaterial(rc, true, true, true);
         if (shockwaveMat_res) {
-            s_ShockwaveMat             = shockwaveMat_res.value();
-            s_ShockwaveMat.albedoIndex = s_ShockwaveTex;
-            s_ShockwaveMat.alphaMode   = 2;
+            s_ShockwaveMat               = shockwaveMat_res.value();
+            s_ShockwaveMat.albedoIndex   = s_ShockwaveTex;
+            s_ShockwaveMat.emissiveIndex = s_ShockwaveTex; // Bind emissive map to particle texture
+            s_ShockwaveMat.alphaMode     = 2;
         }
     }
 

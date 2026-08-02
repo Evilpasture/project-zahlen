@@ -203,10 +203,14 @@ std::expected<Material, Error> RenderContext::CreateMaterial(const PipelineDesc&
                         pipeline.CullBack();
                     }
 
-                    if (desc.alphaBlend) {
+                    if (desc.alphaBlend || desc.additiveBlend) {
                         pipeline.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT});
                         pipeline.DepthWrite(false);
-                        pipeline.AlphaBlend();
+                        if (desc.additiveBlend) {
+                            pipeline.AdditiveBlend();
+                        } else {
+                            pipeline.AlphaBlend();
+                        }
                     } else {
                         pipeline.ColorFormats(ActiveGBuffer::array);
                     }
@@ -225,7 +229,7 @@ std::expected<Material, Error> RenderContext::CreateMaterial(const PipelineDesc&
                                 .pipeline = impl->materialPool.Create(
                                     std::forward<decltype(compiledPipeline)>(compiledPipeline), std::forward<decltype(layout)>(layout)
                                 ),
-                                .alphaMode = desc.alphaBlend ? 2u : 0u
+                                .alphaMode = (desc.alphaBlend || desc.additiveBlend) ? 2u : 0u
                             };
                         });
                 });
@@ -450,7 +454,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
 }
 
 void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept {
-    auto* nativeMesh = _impl->meshPool.Resolve(_impl->debugMeshHandles[]).value_or(nullptr);
+    auto* nativeMesh = _impl->meshPool.Resolve(_impl->debugMeshHandles[_impl->frame_index]).value_or(nullptr);
     if (nativeMesh == nullptr) {
         return;
     }
@@ -468,7 +472,7 @@ void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, con
 }
 
 BufferHandle RenderContext::GetDebugMeshBuffer() const noexcept {
-    return _impl->debugMeshHandles[];
+    return _impl->debugMeshHandles[_impl->frame_index];
 }
 
 void RenderContext::SubmitUI(
@@ -502,7 +506,7 @@ void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matri
     if (count == 0) {
         return;
     }
-    auto  mappedRegion = _impl->jointBuffers->Map();
+    auto  mappedRegion = _impl->jointBuffers[_impl->frame_index].Map();
     auto* gpuJoints    = std::bit_cast<JPH::Mat44*>(mappedRegion.data);
 
     std::memcpy(gpuJoints + offset, matrices, count * sizeof(JPH::Mat44));

@@ -14,13 +14,13 @@
 
 namespace ZHLN::CreativeWorksFactory {
 
-std::expected<Material, Error> CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend) {
+std::expected<Material, Error> CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend, bool additiveBlend) {
     using enum Resource::ShaderID;
     PipelineDesc desc;
     desc.vertexShaderData = Resource::GetShaderProgram(Basic).vertex.data();
     desc.vertexShaderSize = static_cast<std::uint32_t>(Resource::GetShaderProgram(Basic).vertex.size());
 
-    if (alphaBlend) {
+    if (alphaBlend || additiveBlend) {
         desc.fragShaderData = Resource::forward_frag.data();
         desc.fragShaderSize = static_cast<std::uint32_t>(Resource::forward_frag.size());
     } else {
@@ -28,9 +28,11 @@ std::expected<Material, Error> CreateBasicMaterial(RenderContext& ctx, bool doub
         desc.fragShaderSize = static_cast<std::uint32_t>(Resource::GetShaderProgram(Basic).fragment.size());
     }
 
-    desc.doubleSided = doubleSided;
-    desc.alphaBlend  = alphaBlend;
-    auto mat_res     = ctx.CreateMaterial(desc);
+    desc.doubleSided   = doubleSided;
+    desc.alphaBlend    = alphaBlend;
+    desc.additiveBlend = additiveBlend;
+
+    auto mat_res = ctx.CreateMaterial(desc);
     if (!mat_res) {
         return std::unexpected(mat_res.error());
     }

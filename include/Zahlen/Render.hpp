@@ -35,6 +35,7 @@ struct PipelineDesc {
     size_t      fragShaderSize   = 0;
     bool        doubleSided      = false;
     bool        alphaBlend       = false;
+    bool        additiveBlend    = false; // ADDED: Support for emissive particles
     bool        isLineList       = false;
 };
 

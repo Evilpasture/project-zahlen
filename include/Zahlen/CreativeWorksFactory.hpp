@@ -3,11 +3,11 @@
 
 #pragma once
 
-#include <Zahlen/physics/Physics.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Types.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <expected>
 #include <span>
 #include <string_view>
@@ -28,7 +28,8 @@ Mesh CreateTetrahedron(RenderContext& ctx);
 Mesh CreatePlane(RenderContext& ctx, float extent = 10.0f, const JPH::Vec4& color = {0.6f, 0.6f, 0.6f, 1.0f});
 Mesh CreateBox(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f});
 
-[[nodiscard]] std::expected<Material, Error> CreateBasicMaterial(RenderContext& ctx, bool doubleSided = false, bool alphaBlend = false);
+[[nodiscard]] std::expected<Material, Error>
+    CreateBasicMaterial(RenderContext& ctx, bool doubleSided = false, bool alphaBlend = false, bool additiveBlend = false);
 
 Mesh CreateTerrainFromData(RenderContext& ctx, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA);
 Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight, float* outHeights, TerrainType type = TerrainType::Default);

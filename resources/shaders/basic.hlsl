@@ -233,10 +233,13 @@ float3 RotateVector(float3 V, float3 lightDir) {
 float4 PSForward(VSOutput input): SV_Target0 {
     uint4  indices         = input.materialIndices;
     float4 baseColorFactor = input.baseColorFactor;
+    float  roughnessFactor = input.pbrFactors.y; // Extract surface roughness
 
     float4 albedo      = globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
     float3 emissiveMap = globalTextures[indices.w].Sample(defaultSampler, input.uv).rgb;
-    float3 emissive    = emissiveMap * input.emissiveFactor.rgb;
+
+    // FIX: Mask emissive light by albedo.a so unmasked emissive factors don't create solid square bounds on translucent quads
+    float3 emissive = emissiveMap * input.emissiveFactor.rgb * albedo.a;
 
     if (frame.fullBright != 0) {
         return float4(albedo.rgb + emissive, albedo.a);
@@ -248,14 +251,16 @@ float4 PSForward(VSOutput input): SV_Target0 {
     // Use the combined sampler to read the translucent lighting target
     float4 transLighting = texTransLighting.SampleLevel(texTransLightingSampler, screenUV, 0);
 
-    // Diffuse is evaluated analytically, but we composite the expensive SSR/RTR reflections on top
-    float3 diffuseIBL = albedo.rgb * 0.5f;
+    // Scale diffuse IBL by frame.ambientExposure so forward translucent objects match scene lighting
+    float3 diffuseIBL = albedo.rgb * frame.ambientExposure * 0.5f;
 
-    float3 finalColor = diffuseIBL + (transLighting.rgb * transLighting.a) + emissive;
+    // Only apply strong environmental reflections to smooth surfaces (like glass)
+    float  reflFactor = saturate(1.0f - roughnessFactor);
+    float3 finalColor = diffuseIBL + (transLighting.rgb * reflFactor) + emissive;
 
-    // Additive fresnel boost simulating refractive edges based on RTR reflection strength
-    float glassAlpha = saturate(albedo.a + transLighting.a * 0.5f);
+    // Particles use pure albedo alpha. Refractive surfaces get a slight alpha boost.
+    float glassAlpha = albedo.a + (reflFactor * 0.5f);
 
-    return float4(finalColor, glassAlpha);
+    return float4(finalColor, saturate(glassAlpha));
 }
 #endif

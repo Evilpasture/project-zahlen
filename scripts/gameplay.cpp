@@ -9,6 +9,7 @@
 #include "Zahlen/Input.hpp"
 #include "Zahlen/Log.hpp"
 #include "Zahlen/Math3D.hpp"
+#include "Zahlen/Profiler.hpp"
 #include "Zahlen/ScriptECSBridge.hpp"
 #include "Zahlen/Window.hpp"
 #include <Zahlen/Core/Array.hpp>
@@ -18,7 +19,8 @@
 // C++ Standard Library & Engine Modules
 import std;
 import ZHLN.MainMenu;
-import ZHLN.Lightning; // <-- Imported Lightning Module
+import ZHLN.Lightning;
+import ZHLN.Explosions;
 
 #if defined(_WIN32)
 #define GAMEPLAY_API extern "C" __declspec(dllexport)
@@ -53,7 +55,7 @@ using namespace ZHLN;
 struct SnowSceneState {
     ScriptECSBridge*    bridge = nullptr;
     MainMenu            mainMenu;
-    LightningSimulation lightningSim; // <-- 3D Lightning DBM Simulation Instance
+    LightningSimulation lightningSim;
     bool                gameStarted = false;
     bool                wonGame     = false;
     bool                wasRDown    = false;
@@ -61,6 +63,7 @@ struct SnowSceneState {
 
     Entity playerEnt     = NullEntity;
     Entity snowTerrain   = NullEntity;
+    Entity testPlatform  = NullEntity;
     Entity campfireLight = NullEntity;
     Entity summitLight   = NullEntity;
     Entity wisp1         = NullEntity;
@@ -233,13 +236,15 @@ void RespawnPlayer(Engine* engine) {
         reg.Destroy(g_State.playerEnt);
     }
 
+    JPH::Vec3 spawnPos(0.0f, 13.5f, 0.0f);
+
     g_State.playerEnt = reg.Create();
     reg.Add(g_State.playerEnt, Components::PlayerTagComponent {});
-    reg.Add(g_State.playerEnt, Components::TransformComponent {.position = JPH::Vec3(0.0f, 3.0f, 0.0f)});
+    reg.Add(g_State.playerEnt, Components::TransformComponent {.position = spawnPos});
     reg.Add(g_State.playerEnt, Components::MovementComponent {});
     reg.Add(g_State.playerEnt, Components::InputComponent {});
-    reg.Add(g_State.playerEnt, Components::PhysicsComponent {Physics::CreateCharacter(pc, JPH::RVec3(0.0f, 3.0f, 0.0f))});
-    reg.Add(g_State.playerEnt, Components::PhysicsStateComponent {.currPosition = JPH::Vec3(0.0f, 3.0f, 0.0f), .prevPosition = JPH::Vec3(0.0f, 3.0f, 0.0f)});
+    reg.Add(g_State.playerEnt, Components::PhysicsComponent {Physics::CreateCharacter(pc, JPH::RVec3(spawnPos))});
+    reg.Add(g_State.playerEnt, Components::PhysicsStateComponent {.currPosition = spawnPos, .prevPosition = spawnPos});
     reg.Add(g_State.playerEnt, GameplayComponents::Combat {.hp = 100.0f, .maxHp = 100.0f});
 
     auto camEnts = reg.GetEntitiesWith<Components::MainCameraTagComponent>();
@@ -282,6 +287,7 @@ void RespawnPlayer(Engine* engine) {
 void StartGame(Engine* engine) {
     auto& reg = engine->GetRegistry();
     auto& pc  = engine->GetPhysicsContext();
+    auto& rc  = engine->GetRenderContext();
 
     ZHLN::Log("[Snow Scene] Generating Volumetric Nighttime Environment...");
     g_State.wonGame   = false;
@@ -304,6 +310,34 @@ void StartGame(Engine* engine) {
             pp->ambientExposure   = 4.5f;
         }
     }
+
+    JPH::Vec3 halfExtents(20.0f, 0.5f, 20.0f);
+    Mesh      boxMesh  = CreativeWorksFactory::CreateBox(rc, halfExtents, {0.15f, 0.22f, 0.35f, 1.0f});
+    auto      boxShape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Box, halfExtents.GetX(), halfExtents.GetY(), halfExtents.GetZ());
+
+    AssetID platformMeshAsset = HashAssetID("test_platform_mesh");
+    AssetID platformMatAsset  = HashAssetID("test_platform_mat");
+
+    rc.RegisterGPUMesh(platformMeshAsset, boxMesh);
+
+    auto mat_res = CreativeWorksFactory::CreateBasicMaterial(rc);
+    if (mat_res) {
+        Material mat        = mat_res.value();
+        mat.roughnessFactor = 0.15f;
+        mat.metallicFactor  = 0.10f;
+        rc.RegisterGPUMaterial(platformMatAsset, mat);
+    }
+
+    g_State.testPlatform = reg.Create();
+    reg.Add(g_State.testPlatform, Components::NameComponent {.name = String64("TestPlatform")});
+    reg.Add(g_State.testPlatform, Components::TransformComponent {.position = JPH::Vec3(0.0f, 12.0f, 0.0f)});
+    reg.Add(g_State.testPlatform, Components::MeshComponent {.meshAsset = platformMeshAsset, .materialAsset = platformMatAsset, .cullRadius = 100.0f});
+    reg.Add(
+        g_State.testPlatform, Components::PhysicsComponent {
+                                  Physics::CreateRigidBody(pc, boxShape, JPH::RVec3(0.0f, 12.0f, 0.0f), JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0)
+                              }
+    );
+    reg.Add(g_State.testPlatform, Components::PBRComponent {.roughness = 0.15f, .metallic = 0.10f});
 
     RespawnPlayer(engine);
 
@@ -341,12 +375,12 @@ void StartGame(Engine* engine) {
     );
     reg.Add(g_State.snowTerrain, Components::PBRComponent {.roughness = 0.85f, .metallic = 0.05f});
 
-    CreativeWorksFactory::SpawnParams p;
-    p.position = JPH::RVec3(0.0f, 80.0f, -500.0f);
-    p.rotation = JPH::Quat(0.35f, 0.25f, 0.1f, 0.9f).Normalized();
-    p.scale    = JPH::Vec3(5.0f, 5.0f, 5.0f);
+    CreativeWorksFactory::SpawnParams cp;
+    cp.position = JPH::RVec3(0.0f, 80.0f, -500.0f);
+    cp.rotation = JPH::Quat(0.35f, 0.25f, 0.1f, 0.9f).Normalized();
+    cp.scale    = JPH::Vec3(5.0f, 5.0f, 5.0f);
 
-    CreativeWorksFactory::InstantiatePrefab(*engine, "murderdrones/Copper9_Celestials.glb", p);
+    CreativeWorksFactory::InstantiatePrefab(*engine, "murderdrones/Copper9_Celestials.glb", cp);
 
     Entity moonlight = reg.Create();
     reg.Add(
@@ -437,7 +471,7 @@ void StartGame(Engine* engine) {
 }
 
 // ============================================================================
-// LIGHTNING CLICK STRIKE SYSTEM (Raycasts click to mountain & spawns DBM bolt)
+// LIGHTNING CLICK STRIKE SYSTEM
 // ============================================================================
 void LightningClickStrikeSystem(Engine* engine, float dt) {
     const auto& input = engine->GetInput();
@@ -448,11 +482,9 @@ void LightningClickStrikeSystem(Engine* engine, float dt) {
     bool        isLMouseDown  = input.IsMouseButtonDown(KeyCode::LButton);
     static bool wasLMouseDown = false;
 
-    // Detect left mouse button click edge
     if (isLMouseDown && !wasLMouseDown) {
         if (win.width > 0 && win.height > 0) {
-            float ndcX = (2.0f * mouse.x) / static_cast<float>(win.width) - 1.0f;
-            // Corrected for Vulkan Y-Down NDC: Top of screen = -1.0, Bottom of screen = +1.0
+            float ndcX   = (2.0f * mouse.x) / static_cast<float>(win.width) - 1.0f;
             float ndcY   = (2.0f * mouse.y) / static_cast<float>(win.height) - 1.0f;
             float aspect = static_cast<float>(win.width) / static_cast<float>(win.height);
 
@@ -464,7 +496,6 @@ void LightningClickStrikeSystem(Engine* engine, float dt) {
             JPH::Vec3 pFar  = JPH::Vec3(farWorld.GetX() / farWorld.GetW(), farWorld.GetY() / farWorld.GetW(), farWorld.GetZ() / farWorld.GetW());
             JPH::Vec3 dir   = (pFar - pNear).Normalized();
 
-            // Ignore player's physics body during picking
             Entity ignorePhys = NullEntity;
             if (g_State.playerEnt != NullEntity) {
                 if (auto* phys = engine->GetRegistry().Get<Components::PhysicsComponent>(g_State.playerEnt)) {
@@ -478,7 +509,6 @@ void LightningClickStrikeSystem(Engine* engine, float dt) {
             if (hit.hasHit) {
                 impactPos = hit.position;
             } else {
-                // Fallback: Intersect with ground plane Y = 0 if clicking sky
                 if (std::abs(dir.GetY()) > 1e-4f) {
                     float t = -pNear.GetY() / dir.GetY();
                     if (t > 0.0f) {
@@ -489,7 +519,9 @@ void LightningClickStrikeSystem(Engine* engine, float dt) {
                 }
             }
 
-            // Spawn cloud origin high above the impact point
+            float surfaceHeight = TerrainGen::ComputeHeight(static_cast<float>(impactPos.GetX()), static_cast<float>(impactPos.GetZ()), 35.0f);
+            impactPos.SetY(std::max(impactPos.GetY(), static_cast<double>(surfaceHeight)));
+
             JPH::RVec3 cloudPos = impactPos + JPH::RVec3(0.0f, 140.0f, 0.0f);
 
             ZHLN::LightningConfig cfg;
@@ -497,13 +529,15 @@ void LightningClickStrikeSystem(Engine* engine, float dt) {
             cfg.timeDilation  = 1.0f;
 
             g_State.lightningSim.TriggerStrike(*engine, cloudPos, impactPos, cfg);
-            ZHLN::Log("[Lightning] Strike triggered at spot ({:.1f}, {:.1f}, {:.1f})", impactPos.GetX(), impactPos.GetY(), impactPos.GetZ());
+
+            // Spawn explosion exactly at impact coordinate
+            ExplosionSystem::Spawn(engine, JPH::Vec3(impactPos), 2.2f);
         }
     }
     wasLMouseDown = isLMouseDown;
 
-    // Advance the lightning simulation each frame
     g_State.lightningSim.Update(*engine, dt);
+    ExplosionSystem::Update(engine, dt);
 }
 
 void PlayerInputSystem(Engine* engine, [[maybe_unused]] float dt) {
@@ -725,6 +759,8 @@ GAMEPLAY_API ZHLN::GameplayStatus NativeGameplayUpdate(ZHLN::Engine* engine, flo
         return ZHLN::GameplayStatus::Error;
     }
 
+    ZHLN_PROFILE_SCOPE("ECS System: Native Gameplay Update");
+
     if (!Game::g_State.bridge) {
         Game::g_State.bridge = new ZHLN::ScriptECSBridge(engine->GetRegistry());
         Game::g_State.bridge->RegisterComponentManifest<Game::GameplayComponents>();
@@ -767,14 +803,38 @@ GAMEPLAY_API ZHLN::GameplayStatus NativeGameplayUpdate(ZHLN::Engine* engine, flo
     }
 
     if (Game::g_State.gameStarted) {
-        Game::PlayerInputSystem(engine, dt);
-        Game::BlizzardWindSystem(engine, dt);
-        Game::CameraFovSystem(engine, dt);
-        Game::VisualFeedbackSystem(engine, dt);
-        Game::PlayerAnimationSystem(engine, dt);
-        Game::CheckFallSystem(engine, dt);
-        Game::SummitVictorySystem(engine, dt);
-        Game::LightningClickStrikeSystem(engine, dt); // <-- Click to Strike System!
+        {
+            ZHLN_PROFILE_SCOPE("ECS System: Player Input");
+            Game::PlayerInputSystem(engine, dt);
+        }
+        {
+            ZHLN_PROFILE_SCOPE("ECS System: Blizzard Wind");
+            Game::BlizzardWindSystem(engine, dt);
+        }
+        {
+            ZHLN_PROFILE_SCOPE("ECS System: Camera FOV");
+            Game::CameraFovSystem(engine, dt);
+        }
+        {
+            ZHLN_PROFILE_SCOPE("ECS System: Visual Feedback");
+            Game::VisualFeedbackSystem(engine, dt);
+        }
+        {
+            ZHLN_PROFILE_SCOPE("ECS System: Player Animation");
+            Game::PlayerAnimationSystem(engine, dt);
+        }
+        {
+            ZHLN_PROFILE_SCOPE("ECS System: Check Fall");
+            Game::CheckFallSystem(engine, dt);
+        }
+        {
+            ZHLN_PROFILE_SCOPE("ECS System: Summit Victory");
+            Game::SummitVictorySystem(engine, dt);
+        }
+        {
+            ZHLN_PROFILE_SCOPE("ECS System: Lightning & Explosions");
+            Game::LightningClickStrikeSystem(engine, dt);
+        }
     }
     return ZHLN::GameplayStatus::OK;
 }

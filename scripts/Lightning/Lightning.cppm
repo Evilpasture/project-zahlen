@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 module;
-
+// clang-format off
 #include <Jolt/Jolt.h>
+// clang-format on
+#include <Jolt/Core/Factory.h>
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
@@ -21,11 +23,8 @@ module;
 #include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
-#include <array>
 #include <cmath>
-#include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <random>
 #include <string>
 #include <utility>
@@ -210,15 +209,15 @@ class LightningSimulation {
     void UpdateFlashLighting(Engine& engine, float luminance) {
         auto& reg = engine.GetRegistry();
 
-        // 1. Update Ultra-Bright Point Lights
+        // 1. Update Point Lights with massive, cinematic intensities
         if (m_flashLightEntity != NullEntity && reg.IsAlive(m_flashLightEntity)) {
             if (auto* light = reg.Get<Components::LightComponent>(m_flashLightEntity)) {
-                light->intensity = luminance * 120000.0f; // Sky flash
+                light->intensity = luminance * 8000000.0f; // 8 Million Lux!
             }
         }
         if (m_impactLightEntity != NullEntity && reg.IsAlive(m_impactLightEntity)) {
             if (auto* light = reg.Get<Components::LightComponent>(m_impactLightEntity)) {
-                light->intensity = luminance * 100000.0f; // Ground burst
+                light->intensity = luminance * 4000000.0f; // 4 Million Lux!
             }
         }
 
@@ -242,7 +241,7 @@ class LightningSimulation {
     void GenerateFractalBolt(JPH::Vec3 start, JPH::Vec3 end, float startWidth) {
         m_segments.clear();
         std::vector<LightningSegment> queue;
-        queue.push_back({start, end, startWidth, 0.0f});
+        queue.push_back({.start = start, .end = end, .width = startWidth, .branchLevel = 0.0f});
 
         std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
         std::uniform_real_distribution<float> prob(0.0f, 1.0f);
@@ -263,18 +262,19 @@ class LightningSimulation {
                 dir /= len;
 
                 JPH::Vec3 side = dir.Cross(JPH::Vec3::sAxisY());
-                if (side.LengthSq() < 1e-4f)
+                if (side.LengthSq() < 1e-4f) {
                     side = JPH::Vec3::sAxisX();
-                else
+                } else {
                     side = side.Normalized();
+                }
                 JPH::Vec3 up = dir.Cross(side).Normalized();
 
                 JPH::Vec3 offset      = (side * dist(m_rng) + up * dist(m_rng)) * scale;
                 JPH::Vec3 jitteredMid = mid + offset;
 
                 // Split main segment into two
-                nextQueue.push_back({seg.start, jitteredMid, seg.width, seg.branchLevel});
-                nextQueue.push_back({jitteredMid, seg.end, seg.width, seg.branchLevel});
+                nextQueue.push_back({.start = seg.start, .end = jitteredMid, .width = seg.width, .branchLevel = seg.branchLevel});
+                nextQueue.push_back({.start = jitteredMid, .end = seg.end, .width = seg.width, .branchLevel = seg.branchLevel});
 
                 // Spawn natural side branch
                 float branchProb = (0.35f * m_cfg.eta / 2.0f) / (1.0f + seg.branchLevel * 0.8f);
@@ -283,7 +283,7 @@ class LightningSimulation {
                     float     branchLen = len * (0.4f + prob(m_rng) * 0.3f);
                     JPH::Vec3 branchEnd = jitteredMid + branchDir * branchLen;
 
-                    nextQueue.push_back({jitteredMid, branchEnd, seg.width * 0.5f, seg.branchLevel + 1.0f});
+                    nextQueue.push_back({.start = jitteredMid, .end = branchEnd, .width = seg.width * 0.5f, .branchLevel = seg.branchLevel + 1.0f});
                 }
             }
             queue = std::move(nextQueue);
@@ -291,9 +291,10 @@ class LightningSimulation {
         m_segments = std::move(queue);
     }
 
-    float EvaluateHeidler(float tUs, float i0, float t1, float t2) const noexcept {
-        if (tUs <= 0.0f || i0 <= 0.0f)
+    [[nodiscard]] float EvaluateHeidler(float tUs, float i0, float t1, float t2) const noexcept {
+        if (tUs <= 0.0f || i0 <= 0.0f) {
             return 0.0f;
+        }
         float x  = (tUs / t1) * (tUs / t1);
         float ec = std::exp(-(t1 / t2) * std::sqrt(2.0f * t2 / t1));
         return (i0 / ec) * (x / (1.0f + x)) * std::exp(-tUs / t2);
@@ -321,17 +322,19 @@ class LightningSimulation {
 
             JPH::Vec3 dir = (p1 - p0);
             float     len = dir.Length();
-            if (len < 1e-4f)
+            if (len < 1e-4f) {
                 continue;
+            }
             dir /= len;
 
             // Camera-facing ribbons
             JPH::Vec3 toCam = (camPos - p0).Normalized();
             JPH::Vec3 side  = dir.Cross(toCam);
-            if (side.LengthSq() < 1e-4f)
+            if (side.LengthSq() < 1e-4f) {
                 side = JPH::Vec3::sAxisX();
-            else
+            } else {
                 side = side.Normalized();
+            }
 
             float width = seg.width;
 
@@ -396,8 +399,11 @@ class LightningSimulation {
         // ULTRA-BRIGHT FLASH LIGHT CREATION
         // --------------------------------------------------------
 
-        // Main Mid-Air Flash Light
-        JPH::Vec3 flashPos = (m_cloudOrigin + m_groundTarget) * 0.5f;
+        // "Hollywood Cheat": Position the main flash light 25 meters above the camera.
+        // This ensures the player's immediate environment is brilliantly flooded with light,
+        // while the visual bolt is still drawn at the correct distant coordinates.
+        JPH::Vec3 flashPos = cam.position + JPH::Vec3(0.0f, 25.0f, 0.0f);
+
         m_flashLightEntity = reg.Create();
         reg.Add(m_flashLightEntity, Components::TransformComponent {.position = flashPos});
         reg.Add(
@@ -407,15 +413,15 @@ class LightningSimulation {
                                     .intensity   = 0.0f,
                                     .radius      = 12.0f,
                                     .direction   = JPH::Vec3(0.0f, -1.0f, 0.0f),
-                                    .range       = 1400.0f,
+                                    .range       = 2000.0f, // Expanded range to prevent cutoff
                                     .points      = JPH::Mat44::sIdentity(),
                                     .twoSided    = 0,
                                     .shadowLayer = -1
                                 }
         );
 
-        // Secondary Impact Point Ground Burst Light
-        JPH::Vec3 iPos      = m_groundTarget + JPH::Vec3(0.0f, 1.5f, 0.0f);
+        // Secondary Impact Point Ground Burst Light (remains at the strike point)
+        JPH::Vec3 iPos      = m_groundTarget + JPH::Vec3(0.0f, 20.0f, 0.0f);
         m_impactLightEntity = reg.Create();
         reg.Add(m_impactLightEntity, Components::TransformComponent {.position = iPos});
         reg.Add(
@@ -433,7 +439,7 @@ class LightningSimulation {
         );
     }
 
-    void UpdateMaterialGlow(RenderContext& rc, float r, float g, float b) {
+    void UpdateMaterialGlow(RenderContext& rc, float r, float g, float b) const {
         if (auto gpuMatOpt = rc.GetGPUMaterial(m_matAssetId)) {
             Material mat          = *gpuMatOpt;
             mat.emissiveFactor[0] = r;
@@ -453,25 +459,36 @@ class LightningSimulation {
     }
 
     void Cleanup(bool keepEnvironmentCache = false) {
+        // If Jolt/Engine has already been shut down, bypass cleanup to prevent
+        // use-after-free crashes during static global destruction.
+        if (JPH::Factory::sInstance == nullptr) {
+            return;
+        }
+
         if (!keepEnvironmentCache) {
             RestoreEnvironment();
         }
 
-        if (m_engine) {
+        if (m_engine != nullptr) {
             auto& reg = m_engine->GetRegistry();
             auto& rc  = m_engine->GetRenderContext();
 
-            if (m_vboPos != BufferHandle::Invalid)
+            if (m_vboPos != BufferHandle::Invalid) {
                 rc.DestroyBuffer(m_vboPos);
-            if (m_vboAttr != BufferHandle::Invalid)
+            }
+            if (m_vboAttr != BufferHandle::Invalid) {
                 rc.DestroyBuffer(m_vboAttr);
+            }
 
-            if (m_lightningEntity != NullEntity && reg.IsAlive(m_lightningEntity))
+            if (m_lightningEntity != NullEntity && reg.IsAlive(m_lightningEntity)) {
                 reg.Destroy(m_lightningEntity);
-            if (m_flashLightEntity != NullEntity && reg.IsAlive(m_flashLightEntity))
+            }
+            if (m_flashLightEntity != NullEntity && reg.IsAlive(m_flashLightEntity)) {
                 reg.Destroy(m_flashLightEntity);
-            if (m_impactLightEntity != NullEntity && reg.IsAlive(m_impactLightEntity))
+            }
+            if (m_impactLightEntity != NullEntity && reg.IsAlive(m_impactLightEntity)) {
                 reg.Destroy(m_impactLightEntity);
+            }
         }
 
         m_lightningEntity   = NullEntity;

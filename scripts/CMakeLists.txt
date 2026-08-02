@@ -42,6 +42,7 @@ endif()
 # ============================================================================
 add_subdirectory(MainMenu)
 add_subdirectory(Lightning)
+add_subdirectory(Explosions)
 # ============================================================================
 # DYNAMIC GAMEPLAY MODULE (libgameplay.so / gameplay.dll)
 # ============================================================================
@@ -88,6 +89,7 @@ endif()
 target_link_libraries(gameplay PRIVATE
     zahlen_main_menu
     zahlen_lightning
+    zahlen_explosions
     ${GAMEPLAY_LINK_LIBS}
 )
 
