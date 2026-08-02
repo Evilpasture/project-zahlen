@@ -134,6 +134,9 @@ struct DrawParams {
 
     float roughness = -1.0f;
     float metallic  = -1.0f;
+
+    std::array<float, 4> colorOverride    = {1.0f, 1.0f, 1.0f, -1.0f}; // alpha < 0 means disable override
+    std::array<float, 4> emissiveOverride = {0.0f, 0.0f, 0.0f, -1.0f}; // alpha < 0 means disable override
 };
 
 struct CSGCutterParams {

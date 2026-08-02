@@ -1235,8 +1235,15 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
                  .localCenter      = {params.localCenter[0], params.localCenter[1], params.localCenter[2]},
                  ._paddingCenter   = {},
                  .morphWeights     = UnpackMorphWeights(params.morphWeights),
-                 .baseColorFactor  = {material.baseColorFactor[0], material.baseColorFactor[1], material.baseColorFactor[2], material.baseColorFactor[3]},
-                 .emissiveFactor   = {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]},
+                 .baseColorFactor  = (params.colorOverride[3] >= 0.0f) ?
+                                         params.colorOverride :
+                                         std::array<float, 4> {
+                                             material.baseColorFactor[0], material.baseColorFactor[1], material.baseColorFactor[2], material.baseColorFactor[3]
+                                         },
+                 .emissiveFactor =
+                     (params.emissiveOverride[3] >= 0.0f) ?
+                         params.emissiveOverride :
+                         std::array<float, 4> {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]},
              },
          .material            = nativeMaterial,
          .prePassMaterial     = prePassMaterial,
