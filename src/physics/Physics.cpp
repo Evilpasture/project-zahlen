@@ -421,6 +421,13 @@ JPH::BodyID PhysicsWorld::GetBodyID(ZHLN::Entity handle) {
         return {};
     }
 
+    // Check if the slot actually contains an active physical body or character.
+    // slotStates is guaranteed to be initialized to SLOT_EMPTY (0) for unallocated slots.
+    uint8_t state = slotStates[handle.index].load(std::memory_order::acquire);
+    if (state != SLOT_ALIVE && state != SLOT_CHARACTER) {
+        return {};
+    }
+
     // Check generation: Source of Truth check
     if (generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return {}; // Stale handle
