@@ -6,10 +6,10 @@
 #include "WindowInternal.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
-#include <Zahlen/ecs/ECS.hpp>
 #include <GLFW/glfw3.h>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Window.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <variant>
 
 namespace ZHLN {
@@ -34,6 +34,8 @@ static KeyCode MapGLFWKey(int key) {
             return KeyCode::R;
         case GLFW_KEY_E:
             return KeyCode::E;
+        case GLFW_KEY_TAB:
+            return KeyCode::Tab;
         default:
             return KeyCode::Unknown;
     }
@@ -215,6 +217,12 @@ void* Window::GetNativeHandle() const {
 
 void Window::Close() {
     glfwSetWindowShouldClose(_impl->handle, GLFW_TRUE);
+}
+
+void Window::CaptureMouse(bool captured) {
+    if (!_impl->is_tty && (_impl->handle != nullptr)) {
+        glfwSetInputMode(_impl->handle, GLFW_CURSOR, captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+    }
 }
 
 bool Window::IsTTY() const {

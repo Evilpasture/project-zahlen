@@ -71,6 +71,10 @@ static KeyCode MapEvdevKey(uint16_t code) {
             return Escape;
         case KEY_R:
             return R;
+        case KEY_E:
+            return E;
+        case KEY_TAB:
+            return Tab;
         case BTN_LEFT:
             return LButton;
         case BTN_RIGHT:

@@ -1,7 +1,6 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# scripts/CMakeLists.txt
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     cmake_minimum_required(VERSION 3.28)
     set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "0e5b6991-d74f-4b3d-a41c-cf096e0b2508")
@@ -38,29 +37,63 @@ else()
 endif()
 
 # ============================================================================
-# C++ MODULE SUBDIRECTORIES
+# AUTO-DISCOVER ALL .cppm MODULE INTERFACES
 # ============================================================================
-add_subdirectory(MainMenu)
-add_subdirectory(Lightning)
-add_subdirectory(Explosions)
+file(GLOB_RECURSE MODULE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cppm")
 
-add_subdirectory(MathUtils)
-add_subdirectory(Rig)
-add_subdirectory(FPS)
-add_subdirectory(Ragdoll)
-add_subdirectory(Animator)
-add_subdirectory(Actor)
+add_library(zahlen_modules STATIC)
+
+target_sources(zahlen_modules
+    PUBLIC
+        FILE_SET CXX_MODULES FILES
+            ${MODULE_SOURCES}
+)
+
+set_target_properties(zahlen_modules PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_SCAN_FOR_MODULES ON
+    CXX_MODULE_STD ON
+)
+
+target_include_directories(zahlen_modules PUBLIC ${ENGINE_INCLUDE_DIRS})
+
+target_compile_definitions(zahlen_modules PRIVATE
+    JPH_DOUBLE_PRECISION
+    JPH_SHARED_LIBRARY
+    $<$<CONFIG:Debug>:JPH_DEBUG>
+    $<$<NOT:$<CONFIG:Debug>>:JPH_RELEASE>
+)
+
+if(NOT MSVC)
+    target_compile_options(zahlen_modules PRIVATE
+        -Wall -Wextra -Wpedantic
+        -fno-exceptions
+        -fno-rtti
+        $<$<CXX_COMPILER_ID:GNU>:-fmodules-ts>
+    )
+endif()
+
+if(COMPILER_HAS_REFLECTION OR (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
+    target_compile_options(zahlen_modules PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
+endif()
+
+target_link_libraries(zahlen_modules PUBLIC
+    zahlen_engine
+    zahlen_ecs
+    zahlen_audio
+    Jolt
+)
+
 # ============================================================================
 # DYNAMIC GAMEPLAY MODULE (libgameplay.so / gameplay.dll)
 # ============================================================================
-# add_library(gameplay SHARED gameplay.cpp)
 add_library(gameplay SHARED gameplay_fps.cpp)
 
 set_target_properties(gameplay PROPERTIES
     CXX_SCAN_FOR_MODULES ON
     CXX_MODULE_STD ON
+    BUILD_RPATH "$ORIGIN;$ORIGIN/extern/JoltPhysics/Build;${CMAKE_CURRENT_BINARY_DIR};${CMAKE_CURRENT_BINARY_DIR}/extern/JoltPhysics/Build"
 )
-add_dependencies(gameplay zahlen_main_menu)
 
 target_include_directories(gameplay PRIVATE ${ENGINE_INCLUDE_DIRS})
 
@@ -71,22 +104,12 @@ target_compile_definitions(gameplay PRIVATE
     $<$<NOT:$<CONFIG:Debug>>:JPH_RELEASE>
 )
 
-set_target_properties(gameplay PROPERTIES
-    BUILD_RPATH "$ORIGIN;$ORIGIN/extern/JoltPhysics/Build;${CMAKE_CURRENT_BINARY_DIR};${CMAKE_CURRENT_BINARY_DIR}/extern/JoltPhysics/Build"
-)
-
 if(NOT MSVC)
-    set(GCC_GAMEPLAY_FLAGS
-        "--param=destructive-interference-size=64"
-        "-Wno-interference-size"
-        "-fno-exceptions"
-        "-fno-rtti"
-        $<$<CXX_COMPILER_ID:GNU>:-fmodules-ts>
-    )
-
     target_compile_options(gameplay PRIVATE
-        $<$<AND:$<CXX_COMPILER_ID:GNU>,$<COMPILE_LANGUAGE:CXX>>:${GCC_GAMEPLAY_FLAGS}>
-        $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
+        -Wall -Wextra -Wpedantic
+        -fno-exceptions
+        -fno-rtti
+        $<$<CXX_COMPILER_ID:GNU>:-fmodules-ts>
     )
 endif()
 
@@ -95,15 +118,7 @@ if(COMPILER_HAS_REFLECTION OR (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
 endif()
 
 target_link_libraries(gameplay PRIVATE
-    zahlen_math_utils
-    zahlen_rig
-    zahlen_fps
-    zahlen_ragdoll
-    zahlen_animator
-    zahlen_actor
-    zahlen_main_menu
-    zahlen_lightning
-    zahlen_explosions
+    zahlen_modules
     ${GAMEPLAY_LINK_LIBS}
 )
 

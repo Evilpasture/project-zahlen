@@ -3,10 +3,10 @@
 
 #pragma once
 #include <Zahlen/Common.h>
+#include <Zahlen/Core/String.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/render/RenderCode.hpp>
-#include <Zahlen/Core/String.hpp>
 #include <expected>
 #include <memory>
 
@@ -37,6 +37,7 @@ class ZHLN_API Window {
     [[nodiscard]] void* GetNativeHandle() const;
 
     void Close();
+    void CaptureMouse(bool captured);
 
     [[nodiscard]] bool  IsTTY() const;
     [[nodiscard]] void* GetTTYContext() const;

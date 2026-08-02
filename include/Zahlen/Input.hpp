@@ -9,7 +9,7 @@
 
 namespace ZHLN {
 
-enum class KeyCode : uint8_t { Unknown = 0, W, A, S, D, LShift, RButton, Space, Escape, R, E, LButton, MaxKeys };
+enum class KeyCode : uint8_t { Unknown = 0, W, A, S, D, LShift, RButton, Space, Escape, R, E, LButton, Tab, MaxKeys };
 
 struct MouseState {
     float          x = 0, y = 0;
