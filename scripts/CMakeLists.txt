@@ -43,10 +43,18 @@ endif()
 add_subdirectory(MainMenu)
 add_subdirectory(Lightning)
 add_subdirectory(Explosions)
+
+add_subdirectory(MathUtils)
+add_subdirectory(Rig)
+add_subdirectory(FPS)
+add_subdirectory(Ragdoll)
+add_subdirectory(Animator)
+add_subdirectory(Actor)
 # ============================================================================
 # DYNAMIC GAMEPLAY MODULE (libgameplay.so / gameplay.dll)
 # ============================================================================
-add_library(gameplay SHARED gameplay.cpp)
+# add_library(gameplay SHARED gameplay.cpp)
+add_library(gameplay SHARED gameplay_fps.cpp)
 
 set_target_properties(gameplay PROPERTIES
     CXX_SCAN_FOR_MODULES ON
@@ -87,6 +95,12 @@ if(COMPILER_HAS_REFLECTION OR (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
 endif()
 
 target_link_libraries(gameplay PRIVATE
+    zahlen_math_utils
+    zahlen_rig
+    zahlen_fps
+    zahlen_ragdoll
+    zahlen_animator
+    zahlen_actor
     zahlen_main_menu
     zahlen_lightning
     zahlen_explosions
