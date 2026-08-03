@@ -1,6 +1,6 @@
 # Zahlen Engine Architecture
 
-This document provides a technical overview of Project Zahlen's architecture, frame loop execution order, deferred render graph topology, scripting IPC protocol, and asset pipeline.
+This document provides a technical overview of Project Zahlen's architecture, mathematical conventions, frame loop execution order, deferred render graph topology, scripting IPC protocol, asset pipeline, and Three.js porting guidelines.
 
 ---
 
@@ -13,7 +13,37 @@ This document provides a technical overview of Project Zahlen's architecture, fr
 
 ---
 
-## 2. Frame Lifecycle & Execution Order
+## 2. Mathematical & Geometric Conventions
+
+Zahlen adheres strictly to standard Vulkan and Jolt Physics conventions across both CPU host code and GPU shaders:
+
+### Coordinate System (World Space)
+* **Handedness**: **Right-Handed**
+* **Axes**: 
+  * **$+X$**: Right
+  * **$+Y$**: Up
+  * **$-Z$**: Forward
+* **Camera Orientation**: Default forward vector looks down **$-Z$** (at `yaw = -90.0f` and `pitch = 0.0f`).
+
+### Matrix Layout & Multiplication Order
+* **Storage Layout**: **Column-Major** in both C++ (`JPH::Mat44`) and HLSL (`#pragma pack_matrix(column_major)`).
+* **Multiplication Order**: **Column Vectors** ($M \cdot v$). Shaders and host code execute `mul(matrix, vector)` / `m * v`.
+
+### Winding Order & Culling
+* **Front-Face Winding**: **Counter-Clockwise (CCW)** (`VK_FRONT_FACE_COUNTER_CLOCKWISE`).
+* **Cull Mode**: **Back-Face Culling** (`VK_CULL_MODE_BACK_BIT`).
+
+### Extents & Bounding Volumes
+* **Box Convention**: **Half-Extents** ($\frac{\text{Width}}{2}, \frac{\text{Height}}{2}, \frac{\text{Depth}}{2}$).
+* **Usage**: `CreateBox(ctx, halfExtents)`, Jolt's `JPH::BoxShape`, and culling bounds all expect half-extents. Passing `(1.0, 1.0, 1.0)` creates a box of dimensions $2 \times 2 \times 2$.
+
+### Projection & Clip Space
+* **Depth Range**: **$[0, 1]$** (Vulkan Zero-to-One depth range).
+* **Y-Axis Clip Space**: **Y-Down** in clip space, handled natively inside `Math::CreatePerspective` and `Math::CreateOrtho` via a flipped Y-column.
+
+---
+
+## 3. Frame Lifecycle & Execution Order
 
 Each frame executes in a strict, deterministic sequence:
 
@@ -37,7 +67,7 @@ Each frame executes in a strict, deterministic sequence:
 
 ---
 
-## 3. Deferred Render Graph Topology
+## 4. Deferred Render Graph Topology
 
 The renderer executes a multi-pass pipeline managed by a compile-time type-checked frame graph:
 
@@ -74,17 +104,34 @@ The renderer executes a multi-pass pipeline managed by a compile-time type-check
 
 ---
 
-## 4. C++ <-> Scripting FFI & Zero-Copy Buffer Protocol
+## 5. C++ <-> Scripting FFI & Zero-Copy Buffer Protocol
 
 * **IPC Command Dispatch**: Scripting languages (Fennel/LuaJIT) communicate with the C++ core via `ZHLN_GetCommandID` and `ZHLN_DispatchCommand` using integer jump-table IDs.
 * **Zero-Copy Memory Protocol**: Scripts query native memory layouts through `ZHLN_BufferView`. A `BufferSync` atomic counter (`shadowLock`) locks C++ vector reallocations while raw FFI pointers are held in Lua land.
 
 ---
 
-## 5. Asset Cooking & Virtual File System (VFS)
+## 6. Asset Cooking & Virtual File System (VFS)
 
 1. **Source Models**: Blender `.blend` files in `./blender/` are scanned by `tools/export_metadata.py`.
 2. **Intermediate Extraction**: Uncompressed binary metadata (`.bin`) and textures are emitted into `resources/intermediate/`.
 3. **Ninja Parallel Compilation**: `zcook` compiles meshes (`.zmesh`), animations (`.zanim`), and textures (`.ztex`) in parallel.
 4. **Archive Packing**: `zcook pak` packs all cooked targets into `data/base.pak` (Zstandard compressed archive).
 5. **VFS Loading**: `CreativeWorksManager` mounts `.pak` files and streams assets via memory-mapped IO and fiber tasks.
+
+---
+
+## 7. Three.js / TypeScript Porting Reference Guide
+
+When porting prototype gameplay or math logic from a **TypeScript + Three.js + React** codebase into Zahlen:
+
+| Property | Three.js (TS / React) | Zahlen Engine (C++) | Porting Action |
+| :--- | :--- | :--- | :--- |
+| **World Coordinate System** | Right-Handed, $+Y$ Up | Right-Handed, $+Y$ Up | **Direct 1:1 Mapping** |
+| **Forward Vector** | $-Z$ | $-Z$ | **Direct 1:1 Mapping** |
+| **Matrix Storage Layout** | Column-Major (`Matrix4`) | Column-Major (`JPH::Mat44` / HLSL) | **Direct 1:1 Mapping** |
+| **Matrix Vector Multiplication** | $M \cdot v$ (`v.applyMatrix4(m)`) | $M \cdot v$ (`m * v` / `mul(m, v)`) | **Direct 1:1 Mapping** |
+| **Winding Order** | Counter-Clockwise (CCW) | Counter-Clockwise (CCW) | **Direct 1:1 Mapping** |
+| **Box Geometry Sizes** | Full-Extents $(W, H, D)$ | **Half-Extents** $(X, Y, Z)$ | ⚠️ **Divide dimensions by 2** |
+| **Clip Depth Range** | $[-1, 1]$ (WebGL) | $[0, 1]$ (Vulkan) | ⚠️ **Use `Math::CreatePerspective`** |
+| **Euler Rotation Order** | Default: 'XYZ' | Default: 'YXZ' (Yaw, Pitch, Roll) | Use `MathUtils::EulerYXZ` or `EulerXYZ` |
