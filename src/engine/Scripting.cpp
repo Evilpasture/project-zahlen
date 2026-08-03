@@ -305,6 +305,32 @@ struct CreateTextureArgs {
     uint32_t    isSRGB;
 };
 
+struct AddIKChainArgs {
+    uint64_t entityRaw;
+    int32_t  upperNodeIndex;
+    int32_t  lowerNodeIndex;
+    int32_t  endNodeIndex;
+    float    targetX, targetY, targetZ;
+    float    poleX, poleY, poleZ;
+    float    weight;
+};
+
+struct SetIKTargetArgs {
+    uint64_t entityRaw;
+    uint32_t chainIndex;
+    float    tx, ty, tz;
+    float    rx, ry, rz, rw;
+    float    weight;
+};
+
+struct SetIKTargetEntityArgs {
+    uint64_t entityRaw;
+    uint32_t chainIndex;
+    uint64_t targetEntityRaw;
+    float    offsetX, offsetY, offsetZ;
+    float    weight;
+};
+
 #pragma pack(pop)
 
 void SafeDestroyEntity(ZHLN::Engine* engine, ZHLN::Entity entity) {
@@ -462,25 +488,35 @@ void InitComponentRegistry() {
         return;
     }
 
-    RegisterComponentType<Components::HierarchyComponent>("HierarchyComponent", "B");
-    RegisterComponentType<Components::TransformComponent>("TransformComponent", "B");
-    RegisterComponentType<Components::MovementComponent>("MovementComponent", "B");
-    RegisterComponentType<Components::PhysicsStateComponent>("PhysicsStateComponent", "B");
-    RegisterComponentType<Components::TargetCameraComponent>("TargetCameraComponent", "B");
-    RegisterComponentType<Components::PBRComponent>("PBRComponent", "f", 2);
-    RegisterComponentType<Components::TextComponent>("TextComponent", "B");
-    RegisterComponentType<Components::PostProcessSettingsComponent>("PostProcessSettingsComponent", "B");
-    RegisterComponentType<Components::DebugSettingsComponent>("DebugSettingsComponent", "B");
-    RegisterComponentType<Components::AASettingsComponent>("AASettingsComponent", "B");
-    RegisterComponentType<Components::SunTagComponent>("SunTagComponent", "B");
-    RegisterComponentType<Components::ShadowSettingsComponent>("ShadowSettingsComponent", "B");
-    RegisterComponentType<Components::UIRectComponent>("UIRectComponent", "B");
-    RegisterComponentType<Components::UIPanelComponent>("UIPanelComponent", "B");
-    RegisterComponentType<Components::UIButtonComponent>("UIButtonComponent", "B");
-    RegisterComponentType<Components::UIDragComponent>("UIDragComponent", "B");
-    RegisterComponentType<Components::UIStackComponent>("UIStackComponent", "B");
-    RegisterComponentType<Components::CSGComponent>("CSGComponent", "B");
-    RegisterComponentTypeReadOnly<Components::PhysicsComponent>("PhysicsComponent", "Q");
+    ZHLN::Reflect::ForEachNestedType<Components>([]<typename Comp>() {
+        std::string_view name = ZHLN::Reflect::TypeName<Comp>();
+
+        s_ComponentRegistry[name] = ComponentRegistryEntry {
+            .add = [](ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> void* {
+                if constexpr (std::is_same_v<Comp, Components::PhysicsComponent>) {
+                    return nullptr; // Read-only physics handle
+                } else if constexpr (std::is_default_constructible_v<Comp>) {
+                    return &reg.template Add<Comp>(entity, Comp {});
+                } else {
+                    return nullptr;
+                }
+            },
+            .getBuffer = [](ZHLN::ECS::Registry& reg) -> ZHLN_BufferView {
+                auto             raw        = reg.GetRawArray<Comp>();
+                constexpr size_t floatCount = ZHLN::Reflect::GetFloatFieldsCount<Comp>();
+
+                if constexpr (std::is_same_v<Comp, Components::PhysicsComponent>) {
+                    return ZHLN::ViewComposer::Build(&reg, raw.data(), "Q", raw.size());
+                } else if constexpr (floatCount > 0) {
+                    // Auto-detected float-only struct (e.g. PBRComponent) -> 2D float view ("f")
+                    return ZHLN::ViewComposer::Build(&reg, raw.data(), "f", raw.size(), floatCount);
+                } else {
+                    // General struct -> 1D byte buffer view ("B")
+                    return ZHLN::ViewComposer::Build(&reg, raw.data(), "B", raw.size());
+                }
+            }
+        };
+    });
 }
 
 void RegisterCreativeWorkCommands() {
@@ -1175,6 +1211,55 @@ void RegisterSystemCommands() {
                                 }
                                 return 1;
                             }
+                        }
+                    }
+                    return 0;
+                }));
+
+    RegisterCmd("AddIKChain", MakeCmd<AddIKChainArgs>([](ZHLN::Engine* engine, const AddIKChainArgs& a) -> uint64_t {
+                    auto  entity = ZHLN::Entity::Unpack(a.entityRaw);
+                    auto& reg    = engine->GetRegistry();
+
+                    auto* ikComp = reg.Get<Components::TwoBoneIKComponent>(entity);
+                    if (ikComp == nullptr) {
+                        ikComp = &reg.Add(entity, Components::TwoBoneIKComponent {});
+                    }
+
+                    Components::TwoBoneIKChain chain;
+                    chain.upperNodeIndex = a.upperNodeIndex;
+                    chain.lowerNodeIndex = a.lowerNodeIndex;
+                    chain.endNodeIndex   = a.endNodeIndex;
+                    chain.targetPosition = JPH::Vec3(a.targetX, a.targetY, a.targetZ);
+                    chain.poleVector     = JPH::Vec3(a.poleX, a.poleY, a.poleZ);
+                    chain.weight         = a.weight;
+
+                    ikComp->chains.push_back(chain);
+                    return static_cast<uint64_t>(ikComp->chains.size() - 1);
+                }));
+
+    RegisterCmd("SetIKTarget", MakeCmd<SetIKTargetArgs>([](ZHLN::Engine* engine, const SetIKTargetArgs& a) -> uint64_t {
+                    auto entity = ZHLN::Entity::Unpack(a.entityRaw);
+                    if (auto* ikComp = engine->GetRegistry().Get<Components::TwoBoneIKComponent>(entity)) {
+                        if (a.chainIndex < ikComp->chains.size()) {
+                            auto& chain          = ikComp->chains[a.chainIndex];
+                            chain.targetPosition = JPH::Vec3(a.tx, a.ty, a.tz);
+                            chain.targetRotation = JPH::Quat(a.rx, a.ry, a.rz, a.rw);
+                            chain.weight         = a.weight;
+                            return 1;
+                        }
+                    }
+                    return 0;
+                }));
+
+    RegisterCmd("SetIKTargetEntity", MakeCmd<SetIKTargetEntityArgs>([](ZHLN::Engine* engine, const SetIKTargetEntityArgs& a) -> uint64_t {
+                    auto entity = ZHLN::Entity::Unpack(a.entityRaw);
+                    if (auto* ikComp = engine->GetRegistry().Get<Components::TwoBoneIKComponent>(entity)) {
+                        if (a.chainIndex < ikComp->chains.size()) {
+                            auto& chain        = ikComp->chains[a.chainIndex];
+                            chain.targetEntity = ZHLN::Entity::Unpack(a.targetEntityRaw);
+                            chain.targetOffset = JPH::Vec3(a.offsetX, a.offsetY, a.offsetZ);
+                            chain.weight       = a.weight;
+                            return 1;
                         }
                     }
                     return 0;

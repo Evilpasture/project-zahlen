@@ -237,7 +237,6 @@ struct alignas(16) FrameUniforms {
     JPH::Mat44 viewProj;
     JPH::Mat44 unjitteredViewProj;
     JPH::Mat44 prevUnjitteredViewProj;
-    JPH::Mat44 viewmodelViewProj; // Fixed 58-degree FOV viewmodel matrix
 
     // Array of light-space projection matrices
     JPH::Mat44 lightSpaceMatrices[4];
@@ -268,6 +267,8 @@ struct alignas(16) FrameUniforms {
     JPH::Vec4 skyZenith;
     JPH::Vec4 skyHorizon;
     JPH::Vec4 skyGround;
+
+    JPH::Mat44 viewmodelViewProj;
 };
 
 // Material handle representation

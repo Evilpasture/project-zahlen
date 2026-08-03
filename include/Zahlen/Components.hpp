@@ -457,6 +457,30 @@ struct Components {
         };
         ZHLN::Array<Element> modifiers;
     };
+
+    struct TwoBoneIKChain {
+        int32_t upperNodeIndex = -1;
+        int32_t lowerNodeIndex = -1;
+        int32_t endNodeIndex   = -1;
+
+        JPH::Vec3 targetPosition = JPH::Vec3::sZero();
+        JPH::Quat targetRotation = JPH::Quat::sIdentity();
+        JPH::Vec3 poleVector     = JPH::Vec3(0.0f, -1.0f, 0.0f); // Direction hint for middle joint
+
+        Entity    targetEntity = NullEntity; // Optional entity tracking target transform
+        JPH::Vec3 targetOffset = JPH::Vec3::sZero();
+
+        float weight            = 1.0f; // 0.0 = Keyframe pose, 1.0 = Full IK
+        bool  orientEndEffector = true;
+    };
+
+    struct TwoBoneIKComponent {
+        ZHLN::Array<TwoBoneIKChain> chains;
+
+        static void OnDestroy(TwoBoneIKComponent* c) noexcept {
+            c->chains.clear();
+        }
+    };
     static_assert(sizeof(LightComponent) == 160);
     static_assert(sizeof(UIStackComponent) == 12);
     static_assert(sizeof(UIRectComponent) == 64);

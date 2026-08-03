@@ -628,6 +628,21 @@ constexpr void ForEachAnnotatedTypeInScope(F&& f) {
     };
 }
 
+template <typename T>
+consteval std::size_t GetFloatFieldsCount() {
+    using U                = std::remove_cvref_t<T>;
+    constexpr auto members = std::define_static_array(std::meta::nonstatic_data_members_of(^^U, std::meta::access_context::current()));
+    if (members.empty()) {
+        return 0;
+    }
+    for (auto m: members) {
+        if (std::meta::type_of(m) != ^^float) {
+            return 0;
+        }
+    }
+    return members.size();
+}
+
 } // namespace ZHLN::Reflect
 
 #else // Standard C++26 Fallback (Stubs - Waiting for compiler reflection)
@@ -832,6 +847,11 @@ constexpr void ForEachMethodPointer(F&& /*unused*/) {
 
 template <auto ScopeInfo, typename Tag, typename F>
 constexpr void ForEachAnnotatedTypeInScope(F&& /*unused*/) {
+}
+
+template <typename T>
+consteval std::size_t GetFloatFieldsCount() {
+    return 0;
 }
 
 } // namespace ZHLN::Reflect

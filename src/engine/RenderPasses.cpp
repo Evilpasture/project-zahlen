@@ -212,6 +212,9 @@ struct CpuCullingPolicy {
                         if (!IsVisibleIn(drawCmd.flags, RenderPassType::Main)) {
                             return;
                         }
+                        if ((drawCmd.flags & DrawFlags::Viewmodel) != DrawFlags::None) {
+                            return; // Skip viewmodels during main scene rendering
+                        }
                         if (!drawCmd.material->pipeline.Valid() || IsForwardOnly(drawCmd.instanceData.flags)) {
                             return;
                         }
@@ -405,7 +408,7 @@ void MainPass::Execute(
         const auto&       drawCmd = ctx.queues.drawQueue[i];
         const auto* const drawMat = drawCmd.material;
 
-        if (IsForwardOnly(drawCmd.instanceData.flags) || !drawMat->pipeline.Valid()) {
+        if (IsForwardOnly(drawCmd.instanceData.flags) || (drawCmd.flags & DrawFlags::Viewmodel) != DrawFlags::None || !drawMat->pipeline.Valid()) {
             currentPipeline = VK_NULL_HANDLE;
             continue;
         }
@@ -611,7 +614,7 @@ void ViewmodelPass::Execute(
         .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
-        .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
+        .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .Execute(cmd, [&]() {
             for (size_t i = 0; i < ctx.queues.drawQueue.size(); ++i) {
                 const auto& drawCmd = ctx.queues.drawQueue[i];

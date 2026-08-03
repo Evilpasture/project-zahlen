@@ -6,7 +6,6 @@ struct FrameUniforms {
     float4x4 viewProj;
     float4x4 unjitteredViewProj;
     float4x4 prevUnjitteredViewProj;
-    float4x4 viewmodelViewProj; // Fixed 58-degree FOV viewmodel matrix
 
     float4x4 lightSpaceMatrices[4];
 
@@ -35,6 +34,8 @@ struct FrameUniforms {
     float4 skyZenith;
     float4 skyHorizon;
     float4 skyGround;
+
+    float4x4 viewmodelViewProj; // Appended at the end!
 };
 
 struct Light {

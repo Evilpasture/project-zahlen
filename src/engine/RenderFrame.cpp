@@ -1244,7 +1244,7 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
     } else if (params.skinnedVertexBuffer != Invalid && posMesh != nullptr) {
         attrAddr = finalPosMesh->vboAddress + (posMesh->vertexCount * sizeof(VertexPosition));
     }
-
+    uint32_t isViewmodel      = ((params.flags & DrawFlags::Viewmodel) != DrawFlags::None) ? 1u : 0u;
     uint32_t isSkinned        = (params.skinnedVertexBuffer == Invalid && (params.flags & Skinned) != None) ? 1u : 0u;
     uint32_t activeMorphCount = (params.skinnedVertexBuffer != Invalid) ? 0 : params.activeMorphCount;
 
@@ -1265,7 +1265,7 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
                  .metallicFactor   = params.metallic >= 0.0f ? params.metallic : material.metallicFactor,
                  .roughnessFactor  = params.roughness >= 0.0f ? params.roughness : material.roughnessFactor,
                  .alphaCutoff      = material.alphaCutoff,
-                 .flags            = (isSkinned << 8) | (material.alphaMode & 0xFF),
+                 .flags            = (isViewmodel << 16) | (isSkinned << 8) | (material.alphaMode & 0xFF),
                  .jointOffset      = params.jointOffset,
                  .morphOffset      = params.morphOffset,
                  .activeMorphCount = activeMorphCount,
