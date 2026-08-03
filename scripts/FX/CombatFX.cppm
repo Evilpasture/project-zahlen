@@ -14,6 +14,7 @@ module;
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Types.hpp>
 #include <algorithm>
+#include <cmath>
 #include <random>
 #include <vector>
 
@@ -50,6 +51,71 @@ struct KineticShockwave {
     float     maxLife;
 };
 
+struct BulletDecal {
+    JPH::Mat44 transform;
+    float      life;
+    float      maxLife;
+};
+
+inline std::vector<BulletDecal> g_Decals;
+inline uint32_t                 g_DecalTex = 0;
+
+inline std::vector<uint32_t> GenerateBulletHoleTexture(uint32_t size = 128) {
+    std::vector<uint32_t> pixels(size * size);
+    float                 cx   = size / 2.0f;
+    float                 cy   = size / 2.0f;
+    float                 maxR = size / 2.0f;
+
+    for (uint32_t y = 0; y < size; ++y) {
+        for (uint32_t x = 0; x < size; ++x) {
+            float dx = x - cx;
+            float dy = y - cy;
+            float r  = std::sqrt(dx * dx + dy * dy) / maxR;
+
+            float   alpha = 0.0f;
+            uint8_t col   = 18;
+            if (r <= 0.20f) {
+                alpha = 0.95f;
+                col   = 12;
+            } else if (r <= 0.60f) {
+                float t = (r - 0.20f) / 0.40f;
+                alpha   = (1.0f - t) * 0.85f;
+                col     = static_cast<uint8_t>(12 + t * 35);
+            } else if (r <= 1.0f) {
+                float t = (r - 0.60f) / 0.40f;
+                alpha   = (1.0f - t) * 0.25f;
+                col     = static_cast<uint8_t>(47 + t * 25);
+            }
+
+            uint8_t a            = static_cast<uint8_t>(std::clamp(alpha, 0.0f, 1.0f) * 255.0f);
+            pixels[y * size + x] = (a << 24) | (col << 16) | (col << 8) | col;
+        }
+    }
+    return pixels;
+}
+
+void SpawnDecal(const JPH::Vec3& point, const JPH::Vec3& normal, float size = 0.28f) {
+    JPH::Vec3 zAxis = -normal.Normalized();
+    JPH::Vec3 up    = (std::abs(zAxis.GetY()) > 0.95f) ? JPH::Vec3(1, 0, 0) : JPH::Vec3(0, 1, 0);
+    JPH::Vec3 xAxis = up.Cross(zAxis).Normalized();
+    JPH::Vec3 yAxis = zAxis.Cross(xAxis).Normalized();
+
+    JPH::Mat44 rot = JPH::Mat44(JPH::Vec4(xAxis, 0.0f), JPH::Vec4(yAxis, 0.0f), JPH::Vec4(zAxis, 0.0f), JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f));
+
+    JPH::Vec3  scale(size, size, 0.4f);
+    JPH::Mat44 transform = Math::CreateTransform(point, rot.GetQuaternion().Normalized(), scale);
+
+    BulletDecal decal;
+    decal.transform = transform;
+    decal.life      = 20.0f;
+    decal.maxLife   = 20.0f;
+
+    g_Decals.push_back(decal);
+    if (g_Decals.size() > 64) {
+        g_Decals.erase(g_Decals.begin());
+    }
+}
+
 void SpawnImpactParticles(std::vector<VisualParticle>& particles, const JPH::Vec3& point, const JPH::Vec3& normal, uint32_t materialType) {
     std::mt19937                          gen(std::random_device {}());
     std::uniform_real_distribution<float> randomDist(-1.0f, 1.0f);
@@ -69,7 +135,9 @@ void SpawnImpactParticles(std::vector<VisualParticle>& particles, const JPH::Vec
             p.gravity  = -11.0f;
             particles.push_back(p);
         }
-    } else { // Sparks
+    } else { // Concrete / Metal (Sparks + Decals)
+        SpawnDecal(point, normal, 0.28f);
+
         JPH::Vec4 sparkColor(1.0f, 0.81f, 0.56f, 1.0f);
         int       count = (materialType == 2) ? 12 : 7;
         for (int i = 0; i < count; ++i) {
@@ -100,12 +168,41 @@ void ProcessRenderTick(
     auto& rc  = engine->GetRenderContext();
     auto& cam = engine->GetCamera();
 
+    // 1. Process Screenspace Decals
+    if (g_DecalTex == 0) {
+        auto holePixels = GenerateBulletHoleTexture(128);
+        auto texRes     = rc.CreateTexture(holePixels.data(), 128, 128, true);
+        if (texRes) {
+            g_DecalTex = texRes.value();
+        }
+    }
+
+    if (g_DecalTex != 0) {
+        for (auto it = g_Decals.begin(); it != g_Decals.end();) {
+            it->life -= dt;
+            if (it->life <= 0.0f) {
+                it = g_Decals.erase(it);
+            } else {
+                DecalParams dParams;
+                dParams.transform    = it->transform;
+                dParams.invTransform = it->transform.Inversed();
+                dParams.albedoIndex  = g_DecalTex;
+                dParams.normalIndex  = 2; // Flat normal
+                dParams.roughness    = 0.9f;
+                dParams.metallic     = 0.05f;
+
+                Renderer::DrawDecal(rc, dParams);
+                ++it;
+            }
+        }
+    }
+
     AssetID unitBoxAsset = HashAssetID("unit_box");
     if (!rc.GetGPUMesh(unitBoxAsset).has_value()) {
         rc.RegisterGPUMesh(unitBoxAsset, CreativeWorksFactory::CreateBox(rc, JPH::Vec3(0.5f, 0.5f, 0.5f)));
     }
 
-    // 1. Process CPU Tracer Lines
+    // 2. Process CPU Tracer Lines
     for (auto it = tracers.begin(); it != tracers.end();) {
         it->traveled += it->speed * dt;
         if (it->traveled - it->length > it->totalDistance) {
@@ -137,7 +234,7 @@ void ProcessRenderTick(
         }
     }
 
-    // 2. Process Kinetic Shockwave Rings
+    // 3. Process Kinetic Shockwave Rings
     AssetID planeMesh = HashAssetID("unit_plane");
     if (!rc.GetGPUMesh(planeMesh).has_value()) {
         rc.RegisterGPUMesh(planeMesh, CreativeWorksFactory::CreatePlane(rc, 1.0f));
@@ -167,7 +264,7 @@ void ProcessRenderTick(
         }
     }
 
-    // 3. Process Billboard Particles
+    // 4. Process Billboard Particles
     JPH::Mat44 invView = cam.GetViewMatrix().Inversed();
     JPH::Vec3  right   = invView.GetColumn3(0).Normalized();
     JPH::Vec3  up      = invView.GetColumn3(1).Normalized();

@@ -3,6 +3,7 @@ module;
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <optional>
 #include <random>
@@ -12,7 +13,7 @@ export module ZHLN.Actor;
 
 import ZHLN.Rig;
 import ZHLN.Ragdoll;
-import ZHLN.MathUtils; // Importing our shared math utils (Lerp, Clamp, Damp, AngleWrap)
+import ZHLN.MathUtils;
 
 export namespace ZHLN::Actor {
 
@@ -34,17 +35,12 @@ struct WeaponStance {
     JPH::Vec3 aimDir      = JPH::Vec3::sAxisZ();
 };
 
-/**
- * @brief Represents external systems passed to the actor during updates.
- * Completely decouples the actor from global singleton dependencies.
- */
 struct ActorContext {
     JPH::Vec3 playerPos;
     bool      playerAlive;
     float     time;
     float     floorY;
 
-    // Abstract interface hook for pathfinding and cover queries
     struct {
         std::function<bool(JPH::Vec3Arg, float)>                                 pointBlocked;
         std::function<bool(JPH::Vec3Arg, JPH::Vec3Arg)>                          lineOfSight;
@@ -53,27 +49,21 @@ struct ActorContext {
         std::function<std::optional<BodyHit>(JPH::Vec3Arg, JPH::Vec3Arg, float)> raycastWorld;
     } world;
 
-    // Interface hooks for visual and auditory feedback
     struct {
-        std::function<void(float, float, float)>                      playBeep;    // Freq, Duration, Vol
-        std::function<void(JPH::Vec3Arg, JPH::Vec3Arg, uint32_t)>     spawnImpact; // Pos, Normal, Type
-        std::function<void(JPH::Vec3Arg, JPH::Vec3Arg, uint32_t)>     spawnTracer; // Start, End, Color
+        std::function<void(float, float, float)>                      playBeep;
+        std::function<void(JPH::Vec3Arg, JPH::Vec3Arg, uint32_t)>     spawnImpact;
+        std::function<void(JPH::Vec3Arg, JPH::Vec3Arg, uint32_t)>     spawnTracer;
         std::function<void(JPH::Vec3Arg, JPH::Vec3Arg, float)>        spawnMuzzleFlash;
-        std::function<void(JPH::Vec3Arg, JPH::Vec3Arg, JPH::Vec3Arg)> ejectCasing;  // Pos, Right, Up
-        std::function<void()>                                         fireWeapon;   // Trigger recoil kick
-        std::function<void()>                                         reloadWeapon; // Trigger reload sequence
+        std::function<void(JPH::Vec3Arg, JPH::Vec3Arg, JPH::Vec3Arg)> ejectCasing;
+        std::function<void()>                                         fireWeapon;
+        std::function<void()>                                         reloadWeapon;
     } fx;
 
-    // Decoupled Animation driver callback
     std::function<WeaponStance(float dt, float speed, float crouch, float aimYaw, float aimPitch, float aiming)> updateAnimation;
 
     std::function<void(float, JPH::Vec3Arg)> damagePlayer;
-    std::function<void(bool)>                onKilled; // true if headshot
+    std::function<void(bool)>                onKilled;
 };
-
-// ============================================================================
-// AUXILIARY MATHEMATICS
-// ============================================================================
 
 struct SegmentIntersection {
     float     t;
@@ -82,10 +72,6 @@ struct SegmentIntersection {
     JPH::Vec3 segmentPoint;
 };
 
-/**
- * @brief Calculates the closest approach (SDF) between a ray and a line segment.
- * Extremely critical for locational capsule damage registration.
- */
 inline std::optional<SegmentIntersection> RaySegmentDistance(JPH::Vec3Arg o, JPH::Vec3Arg d, JPH::Vec3Arg a, JPH::Vec3Arg b) noexcept {
     JPH::Vec3 ab   = b - a;
     JPH::Vec3 ao   = o - a;
@@ -115,13 +101,8 @@ inline std::optional<SegmentIntersection> RaySegmentDistance(JPH::Vec3Arg o, JPH
     return SegmentIntersection {.t = t, .dist = (pointOnRay - pointOnSegment).Length(), .point = pointOnRay, .segmentPoint = pointOnSegment};
 }
 
-// ============================================================================
-// THE ACTOR CLASS
-// ============================================================================
-
 class StandardActor {
   public:
-    // Transform & Locomotion
     JPH::Vec3 position = JPH::Vec3::sZero();
     JPH::Vec3 velocity = JPH::Vec3::sZero();
     float     yaw      = 0.0f;
@@ -131,14 +112,12 @@ class StandardActor {
     float     crouch   = 0.0f;
     float     aiming   = 0.0f;
 
-    // Vitals
     float health    = 100.0f;
     float maxHealth = 100.0f;
     bool  alive     = true;
     float flash     = 0.0f;
     bool  headshot  = false;
 
-    // AI & Combat State Machine
     AIState   state              = AIState::Idle;
     float     stateT             = 0.0f;
     JPH::Vec3 targetPos          = JPH::Vec3::sZero();
@@ -154,11 +133,9 @@ class StandardActor {
     float     alertness          = 0.0f;
     float     deathTime          = -1.0f;
 
-    // Custom Physical Verlet Solver
     Physics::VerletSolver                  ragdoll;
     std::array<JPH::Vec3, Rig::JointCount> boneWorldPositions;
 
-    // Weapon physics state on drop
     bool      weaponDropped = false;
     JPH::Vec3 weaponPos     = JPH::Vec3::sZero();
     JPH::Quat weaponRot     = JPH::Quat::sIdentity();
@@ -167,13 +144,33 @@ class StandardActor {
 
     StandardActor() {
         std::fill(boneWorldPositions.begin(), boneWorldPositions.end(), JPH::Vec3::sZero());
-        // Custom Verlet Ragdoll initialization
+
+        // Fix: Compute World T-Pose Bind Positions for Verlet particle initialization
+        std::array<JPH::Vec3, Rig::JointCount> bindWorld;
+        for (uint32_t i = 0; i < Rig::JointCount; ++i) {
+            Rig::Joint j      = static_cast<Rig::Joint>(i);
+            JPH::Vec3  local  = Rig::GetBindPosition(j);
+            int32_t    parent = Rig::GetParentIndex(j);
+            bindWorld[i]      = (parent >= 0) ? bindWorld[parent] + local : local;
+        }
+
+        // Initialize particles at world bind locations
         for (uint32_t i = 0; i < Rig::JointCount; i++) {
-            ragdoll.AddParticle(Rig::GetBindPosition(static_cast<Rig::Joint>(i)), 1.0f);
+            ragdoll.AddParticle(bindWorld[i], 1.0f);
         }
-        for (const auto& cap: Rig::HIT_CAPSULES) {
-            ragdoll.AddConstraint(static_cast<uint32_t>(cap.a), static_cast<uint32_t>(cap.b), 1.0f);
+
+        // Add constraints for all parent-child pairs in hierarchy
+        for (uint32_t i = 0; i < Rig::JointCount; i++) {
+            int32_t parent = Rig::GetParentIndex(static_cast<Rig::Joint>(i));
+            if (parent >= 0) {
+                ragdoll.AddConstraint(static_cast<uint32_t>(parent), i, 1.0f);
+            }
         }
+
+        // Cross-bracing constraints for anatomical structural stability
+        ragdoll.AddConstraint(static_cast<uint32_t>(Rig::Joint::ThighL), static_cast<uint32_t>(Rig::Joint::ThighR), 0.8f);
+        ragdoll.AddConstraint(static_cast<uint32_t>(Rig::Joint::ClavicleL), static_cast<uint32_t>(Rig::Joint::ClavicleR), 0.8f);
+        ragdoll.AddConstraint(static_cast<uint32_t>(Rig::Joint::Hips), static_cast<uint32_t>(Rig::Joint::Chest), 0.9f);
     }
 
     void SetPosition(JPH::Vec3Arg pos) {
@@ -181,11 +178,7 @@ class StandardActor {
         targetPos = pos;
     }
 
-    /**
-     * @brief Performs analytical raycasting against the actor's hierarchical hit capsules.
-     */
     [[nodiscard]] std::optional<BodyHit> Raycast(JPH::Vec3Arg origin, JPH::Vec3Arg direction, float maxT) const noexcept {
-        // Broad phase bounding sphere check
         JPH::Vec3 center   = boneWorldPositions[static_cast<size_t>(Rig::Joint::Spine)];
         JPH::Vec3 toCenter = center - origin;
         float     along    = toCenter.Dot(direction);
@@ -213,9 +206,8 @@ class StandardActor {
 
     void Damage(float amount, const BodyHit& hit, JPH::Vec3Arg dir, ActorContext& ctx, bool fromPlayer) {
         if (!alive) {
-            // Corpse pushing
             ragdoll.ApplyImpulse(static_cast<uint32_t>(hit.joint), dir * 4.5f);
-            ctx.fx.spawnImpact(hit.point, -dir, 1); // 1 = Flesh/Blood
+            ctx.fx.spawnImpact(hit.point, -dir, 1);
             return;
         }
 
@@ -228,7 +220,7 @@ class StandardActor {
             lastKnownPlayerPos = ctx.playerPos;
             sawTime            = ctx.time;
         }
-        ctx.fx.spawnImpact(hit.point, -dir, 1); // Blood Mist
+        ctx.fx.spawnImpact(hit.point, -dir, 1);
 
         if (health <= 0.0f) {
             alive     = false;
@@ -238,19 +230,16 @@ class StandardActor {
 
             float power = headshot ? 8.5f : 5.5f;
 
-            // Trigger Custom Verlet Ragdoll Dissolve
-            // Capture current animated pose into Verlet positions first
+            // Capture animated pose into Verlet particle positions
             for (uint32_t i = 0; i < Rig::JointCount; i++) {
                 ragdoll.positions[i]         = boneWorldPositions[i];
                 ragdoll.previousPositions[i] = boneWorldPositions[i];
             }
 
-            // Execute the custom physical impulse directly on the Verlet Solver
             std::random_device                    rd;
             std::mt19937                          gen(rd());
             std::uniform_real_distribution<float> dis(0.75f, 1.25f);
 
-            // Custom physical kill
             ragdoll.ApplyImpulse(static_cast<uint32_t>(hit.joint), dir * (power * dis(gen)));
             DropWeapon(dir);
 
@@ -260,7 +249,6 @@ class StandardActor {
             return;
         }
 
-        // Flinching reaction
         std::vector<uint32_t> flinchRegion;
         if (hit.zone == 0) {
             flinchRegion = {static_cast<uint32_t>(Rig::Joint::Head), static_cast<uint32_t>(Rig::Joint::Neck)};
@@ -287,35 +275,29 @@ class StandardActor {
         if (alive) {
             UpdateAI(dt, ctx);
 
-            // Integrate movement
             position += velocity * dt;
 
-            // Snap to terrain height
             float groundY = ctx.world.pointBlocked(position, 0.42f) ? position.GetY() : ctx.floorY;
             position.SetY(MathUtils::Damp(position.GetY(), groundY, 12.0f, dt));
 
-            // Obstacle Avoidance / Boundary Constraints
-            float boundLimit = 42.5f; // Simplified boundary check
+            float boundLimit = 42.5f;
             position.SetX(MathUtils::Clamp(position.GetX(), -boundLimit, boundLimit));
             position.SetZ(MathUtils::Clamp(position.GetZ(), -boundLimit, boundLimit));
 
             speed = JPH::Vec3(velocity.GetX(), 0.0f, velocity.GetZ()).Length();
 
-            // Footstep timing loop
             m_stepPhase += (speed / 1.4f) * dt;
             if (m_stepPhase > 1.0f) {
                 m_stepPhase -= 1.0f;
                 if ((position - ctx.playerPos).LengthSq() < 18.0f * 18.0f && ctx.fx.playBeep) {
-                    ctx.fx.playBeep(220.0f, 0.05f, 0.15f); // Sizzling footstep click
+                    ctx.fx.playBeep(220.0f, 0.05f, 0.15f);
                 }
             }
 
-            // Sync procedural animation through the abstract callback
             if (ctx.updateAnimation) {
                 m_stance = ctx.updateAnimation(dt, speed, crouch, aimYaw, aimPitch, aiming);
             }
 
-            // Populate current animated world space bone array
             UpdateBoneWorldMatrices();
         } else {
             // Solve Verlet Ragdoll
@@ -325,7 +307,6 @@ class StandardActor {
                 }
             });
 
-            // Sync boneWorldPositions array straight to the solved Verlet particles
             for (uint32_t i = 0; i < Rig::JointCount; i++) {
                 boneWorldPositions[i] = ragdoll.positions[i];
             }
@@ -335,7 +316,6 @@ class StandardActor {
             weaponVel.SetY(weaponVel.GetY() - 20.0f * dt);
             weaponPos += weaponVel * dt;
 
-            // Simple spinning Euler rotation
             JPH::Quat rotX = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), weaponSpin.GetX() * dt);
             JPH::Quat rotY = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), weaponSpin.GetY() * dt);
             JPH::Quat rotZ = JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), weaponSpin.GetZ() * dt);
@@ -358,7 +338,6 @@ class StandardActor {
     void UpdateBoneWorldMatrices() {
         JPH::Mat44 rootMatrix = JPH::Mat44::sRotationTranslation(JPH::Quat::sRotation(JPH::Vec3::sAxisY(), yaw), position);
 
-        // Solve FK recursively to project local bind pose bones to world space
         for (uint32_t i = 0; i < Rig::JointCount; i++) {
             JPH::Mat44 local =
                 JPH::Mat44::sRotationTranslation(Rig::GetBindRotation(static_cast<Rig::Joint>(i)), Rig::GetBindPosition(static_cast<Rig::Joint>(i)));
@@ -394,7 +373,6 @@ class StandardActor {
         }
         dir /= d;
 
-        // Obstacle Avoidance: probe 1.5m ahead
         JPH::Vec3 probe = position + dir * 1.5f;
         if (ctx.world.pointBlocked(probe, 0.7f)) {
             float     s  = std::sin(0.9f) * MathUtils::Clamp(strafeDir, -1.0f, 1.0f);
@@ -519,7 +497,6 @@ class StandardActor {
                 break;
         }
 
-        // Aiming interpolations
         JPH::Vec3 aimAt     = canSeePlayer ? targetPoint : lastKnownPlayerPos + JPH::Vec3(0, 1.3f, 0);
         JPH::Vec3 deltaAim  = aimAt - eyePos;
         float     wantYaw   = std::atan2(deltaAim.GetX(), deltaAim.GetZ());
@@ -538,7 +515,6 @@ class StandardActor {
         }
         yaw = yaw + MathUtils::AngleWrap(bodyWant - yaw) * std::min(1.0f, 7.0f * dt);
 
-        // Firing Logic
         fireCd -= dt;
         if (reloadT > 0.0f) {
             reloadT -= dt;
@@ -551,7 +527,7 @@ class StandardActor {
         if (canSeePlayer && state != AIState::Suppressed && aimError < 0.22f && dist < 55.0f && ctx.playerAlive) {
             if (ammo <= 0) {
                 reloadT = 2.4f;
-                if (ctx.fx.reloadWeapon) { // trigger reload sequence
+                if (ctx.fx.reloadWeapon) {
                     ctx.fx.reloadWeapon();
                 }
                 return;
@@ -600,11 +576,10 @@ class StandardActor {
             if (hit) {
                 endPoint = hit->point;
                 if (ctx.fx.spawnImpact)
-                    ctx.fx.spawnImpact(hit->point, hit->normal, 0); // 0 = Concrete
+                    ctx.fx.spawnImpact(hit->point, hit->normal, 0);
             }
         }
 
-        // Ray vs Player Capsule Hit Test
         auto playerHit = RaySegmentDistance(origin, dir, ctx.playerPos + JPH::Vec3(0, 0.3f, 0), ctx.playerPos + JPH::Vec3(0, 1.55f, 0));
         if (ctx.playerAlive && playerHit && playerHit->dist < 0.38f && playerHit->t < maxD) {
             endPoint = playerHit->point;
@@ -618,11 +593,10 @@ class StandardActor {
         if (ctx.fx.spawnMuzzleFlash)
             ctx.fx.spawnMuzzleFlash(origin, dir, 0.55f);
 
-        // Sound cue via the callback
         if (ctx.fx.playBeep) {
             float dCam = (origin - ctx.playerPos).Length();
             float vol  = std::max(0.05f, 1.0f - dCam / 55.0f);
-            ctx.fx.playBeep(900.0f, 0.12f, vol); // Low synthetic burst
+            ctx.fx.playBeep(900.0f, 0.12f, vol);
         }
     }
 };

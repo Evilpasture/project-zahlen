@@ -29,7 +29,7 @@ import ZHLN.Animator;
 import ZHLN.Soldier;
 import ZHLN.Weapons;
 import ZHLN.Pickups;
-import ZHLN.BlacksiteState; // <--- MUST BE BlacksiteState (DO NOT import ZHLN.BlacksiteLevel!)
+import ZHLN.BlacksiteState;
 
 export namespace ZHLN::EnemyAI {
 
@@ -139,7 +139,6 @@ void SpawnEnemy(Engine* engine, JPH::Vec3Arg position, Weapons::WeaponId weaponI
 }
 
 void EnemyAISystem(Engine* engine, float dt) {
-    // FIX: Changed from BlacksiteLevel to BlacksiteState
     auto& state = BlacksiteState::GetSceneState();
     auto& reg   = engine->GetRegistry();
     auto& pc    = engine->GetPhysicsContext();
@@ -202,6 +201,18 @@ void EnemyAISystem(Engine* engine, float dt) {
             continue;
         }
         auto& enemy = *enemyPtr;
+
+        // Cleanup dead corpses after 12 seconds
+        if (!enemy.behavior.alive) {
+            if (enemy.behavior.deathTime > 0.0f && (static_cast<float>(engine->GetCurrentFrame()) * 0.0166f - enemy.behavior.deathTime) > 12.0f) {
+                if (enemy.weaponEntity != NullEntity && reg.IsAlive(enemy.weaponEntity)) {
+                    reg.Destroy(enemy.weaponEntity);
+                }
+                reg.Destroy(enemyEnt);
+                it = state.enemies.erase(it);
+                continue;
+            }
+        }
 
         Actor::ActorContext ctx;
         ctx.playerPos   = (state.playerEnt != NullEntity && reg.IsAlive(state.playerEnt) && reg.Get<Components::TransformComponent>(state.playerEnt)) ?
@@ -409,8 +420,19 @@ void EnemyAISystem(Engine* engine, float dt) {
         ++it;
     }
 
+    // Fix: Count ONLY alive hostiles for wave / horde spawning
+    uint32_t activeHostiles = 0;
+    for (Entity e: state.enemies) {
+        if (!reg.IsAlive(e))
+            continue;
+        auto* enemy = reg.Get<EnemyController>(e);
+        if (enemy && enemy->behavior.alive) {
+            activeHostiles++;
+        }
+    }
+
     uint32_t targetHostiles = state.hordeMode ? state.hordeTarget : (3 + std::min(6u, state.wave));
-    if (state.enemies.size() < targetHostiles) {
+    if (activeHostiles < targetHostiles) {
         state.waveTimer -= dt;
         if (state.waveTimer <= 0.0f) {
             state.waveTimer             = state.hordeMode ? 0.2f : 2.4f;

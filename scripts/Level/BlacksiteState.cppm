@@ -13,6 +13,7 @@ module;
 #include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include <array>
 #include <string>
 #include <vector>
 
@@ -50,11 +51,12 @@ struct SceneState {
     Material tracerMat;
     Material particleMat;
 
-    Entity hudVitalsBg  = NullEntity;
-    Entity hudVitalsBar = NullEntity;
-    Entity hudAmmoText  = NullEntity;
-    Entity hudCrosshair = NullEntity;
-    Entity hudWaveText  = NullEntity;
+    Entity                hudVitalsBg      = NullEntity;
+    Entity                hudVitalsBar     = NullEntity;
+    Entity                hudAmmoText      = NullEntity;
+    Entity                hudCrosshair     = NullEntity;
+    Entity                hudWaveText      = NullEntity;
+    std::array<Entity, 5> hudKillFeedTexts = {NullEntity, NullEntity, NullEntity, NullEntity, NullEntity};
 
     std::vector<Entity>                     worldEntities;
     std::vector<Entity>                     enemies;

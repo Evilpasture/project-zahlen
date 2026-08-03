@@ -13,6 +13,7 @@
 #include <Zahlen/physics/Physics.hpp>
 #include <cmath>
 
+import std;
 import ZHLN.MainMenu;
 import ZHLN.Weapons;
 import ZHLN.CombatFX;
@@ -102,6 +103,7 @@ void StartGame(Engine* engine) {
                         }
     );
 
+    // Build compound level environment
     BlacksiteState::AddBox(engine, JPH::Vec3(0.0f, 0.0f, -6.0f), JPH::Vec3(14.0f, 5.0f, 10.0f), state.concreteMat);
     BlacksiteState::AddBox(engine, JPH::Vec3(-3.0f, 5.0f, -6.0f), JPH::Vec3(8.0f, 0.4f, 10.0f), state.barrierMat, true);
     BlacksiteState::AddBox(engine, JPH::Vec3(9.0f, 0.0f, -10.0f), JPH::Vec3(4.0f, 2.6f, 4.0f), state.concreteMat);
@@ -112,6 +114,10 @@ void StartGame(Engine* engine) {
     BlacksiteState::AddBox(engine, JPH::Vec3(14.0f, 0.0f, 8.0f), JPH::Vec3(6.0f, 2.6f, 2.5f), state.metalMat);
     BlacksiteState::AddBox(engine, JPH::Vec3(20.0f, 0.0f, -4.0f), JPH::Vec3(2.5f, 2.6f, 6.0f), state.metalMat);
     BlacksiteState::AddBox(engine, JPH::Vec3(-22.0f, 0.0f, -12.0f), JPH::Vec3(6.0f, 2.6f, 2.5f), state.metalMat);
+
+    BlacksiteState::AddBox(engine, JPH::Vec3(-6.0f, 0.0f, 4.0f), JPH::Vec3(6.0f, 1.15f, 0.9f), state.barrierMat);
+    BlacksiteState::AddBox(engine, JPH::Vec3(6.0f, 0.0f, 4.0f), JPH::Vec3(6.0f, 1.15f, 0.9f), state.barrierMat);
+    BlacksiteState::AddBox(engine, JPH::Vec3(0.0f, 0.0f, 14.0f), JPH::Vec3(6.0f, 1.15f, 0.9f), state.barrierMat);
 
     JPH::Vec3 spawnPos(0.0f, 1.5f, 24.0f);
     state.playerEnt = reg.Create();
@@ -230,17 +236,185 @@ void StartGame(Engine* engine) {
     waveRect.anchorMaxY     = 0.0f;
     waveRect.x              = 24.0f;
     waveRect.y              = 20.0f;
-    waveRect.width          = 250.0f;
-    waveRect.height         = 80.0f;
+    waveRect.width          = 320.0f;
+    waveRect.height         = 40.0f;
     waveRect.hierarchyDepth = 10;
 
     auto& waveText = reg.Add(state.hudWaveText, Components::TextComponent {});
-    waveText.text.assign("WAVE 01");
+    waveText.text.assign("WAVE 01 - HOSTILES: 5");
     waveText.scale     = 1.0f;
     waveText.fontIndex = fontIdx;
     waveText.color     = JPH::Vec4(0.55f, 0.82f, 1.00f, 0.85f);
 
+    // Dedicated single-line UI elements for Kill Feed to avoid embedded '\n' rendering glitches
+    for (size_t i = 0; i < 5; ++i) {
+        Entity kfEnt          = reg.Create();
+        auto&  kfRect         = reg.Add(kfEnt, Components::UIRectComponent {});
+        kfRect.anchorMinX     = 1.0f;
+        kfRect.anchorMaxX     = 1.0f;
+        kfRect.anchorMinY     = 0.0f;
+        kfRect.anchorMaxY     = 0.0f;
+        kfRect.x              = -280.0f;
+        kfRect.y              = 20.0f + static_cast<float>(i) * 22.0f;
+        kfRect.width          = 260.0f;
+        kfRect.height         = 20.0f;
+        kfRect.hierarchyDepth = 10;
+
+        auto& kfText = reg.Add(kfEnt, Components::TextComponent {});
+        kfText.text.assign("");
+        kfText.scale     = 0.95f;
+        kfText.fontIndex = fontIdx;
+        kfText.color     = JPH::Vec4(0.4f, 0.95f, 0.7f, 0.9f);
+
+        state.hudKillFeedTexts[i] = kfEnt;
+    }
+
     state.gameStarted = true;
+}
+
+void GameRulesSystem(ZHLN::Engine* engine, float /*dt*/) {
+    auto& state = ZHLN::BlacksiteState::GetSceneState();
+    auto& reg   = engine->GetRegistry();
+
+    std::vector<ZHLN::Entity> corpses;
+    uint32_t                  aliveCount = 0;
+
+    for (auto ent: state.enemies) {
+        if (!reg.IsAlive(ent))
+            continue;
+        auto* enemy = reg.Get<ZHLN::EnemyAI::EnemyController>(ent);
+        if (enemy) {
+            if (enemy->behavior.alive) {
+                aliveCount++;
+            } else {
+                corpses.push_back(ent);
+            }
+        }
+    }
+
+    uint32_t corpseBudget = aliveCount > 60 ? 4 : aliveCount > 30 ? 7 : 12;
+    if (corpses.size() > corpseBudget) {
+        size_t toRemove = corpses.size() - corpseBudget;
+        for (size_t i = 0; i < toRemove; ++i) {
+            reg.Destroy(corpses[i]);
+        }
+    }
+
+    if (state.kills >= state.wave * 6) {
+        state.wave++;
+        ZHLN::BlacksiteState::PushKillFeed(std::format("WAVE {:02d} INBOUND", state.wave), false);
+    }
+}
+
+void CameraEffectsSystem(ZHLN::Engine* engine, float /*dt*/) {
+    auto& state = ZHLN::BlacksiteState::GetSceneState();
+    auto& reg   = engine->GetRegistry();
+
+    if (state.playerEnt == ZHLN::NullEntity || !reg.IsAlive(state.playerEnt))
+        return;
+    auto* p    = reg.Get<ZHLN::PlayerController::PlayerControllerComp>(state.playerEnt);
+    auto* move = reg.Get<ZHLN::Components::MovementComponent>(state.playerEnt);
+    if (!p || !move)
+        return;
+
+    auto camEnts = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
+    if (camEnts.empty())
+        return;
+    Entity camEnt    = camEnts[0];
+    auto*  targetCam = reg.Get<ZHLN::Components::TargetCameraComponent>(camEnt);
+    if (!targetCam)
+        return;
+
+    if (p->health < 40.0f && p->alive) {
+        float pulse                  = std::sin(p->totalTime * 6.0f);
+        targetCam->vignetteIntensity = 1.4f + 0.35f * pulse;
+        targetCam->vignettePower     = 2.0f;
+    } else {
+        targetCam->vignetteIntensity = 1.15f;
+        targetCam->vignettePower     = 1.6f;
+    }
+
+    targetCam->targetFov = move->isSprinting ? 55.0f : 45.0f;
+}
+
+void HUDSyncSystem(ZHLN::Engine* engine, float /*dt*/) {
+    auto& state = ZHLN::BlacksiteState::GetSceneState();
+    auto& reg   = engine->GetRegistry();
+
+    if (state.playerEnt == ZHLN::NullEntity || !reg.IsAlive(state.playerEnt))
+        return;
+    auto* p = reg.Get<ZHLN::PlayerController::PlayerControllerComp>(state.playerEnt);
+    if (!p)
+        return;
+
+    if (state.hudVitalsBar != ZHLN::NullEntity && reg.IsAlive(state.hudVitalsBar)) {
+        if (auto* rect = reg.Get<ZHLN::Components::UIRectComponent>(state.hudVitalsBar)) {
+            float hpPct = std::max(0.0f, p->health) / 100.0f;
+            rect->width = 196.0f * hpPct;
+        }
+        if (auto* panel = reg.Get<ZHLN::Components::UIPanelComponent>(state.hudVitalsBar)) {
+            if (p->godMode) {
+                panel->color = JPH::Vec4(1.0f, 0.85f, 0.4f, 0.95f);
+            } else if (p->health < 35.0f) {
+                panel->color = JPH::Vec4(0.95f, 0.25f, 0.25f, 0.95f);
+            } else {
+                panel->color = JPH::Vec4(0.35f, 0.95f, 0.45f, 0.95f);
+            }
+        }
+    }
+
+    if (state.hudAmmoText != ZHLN::NullEntity && reg.IsAlive(state.hudAmmoText)) {
+        if (auto* text = reg.Get<ZHLN::Components::TextComponent>(state.hudAmmoText)) {
+            auto& ammoState = p->ammo[static_cast<size_t>(p->currentWeapon)];
+            if (p->infiniteAmmo) {
+                text->text.assign(std::format("{} / INF", ammoState.mag));
+            } else {
+                text->text.assign(std::format("{} / {}", ammoState.mag, ammoState.reserve));
+            }
+            if (ammoState.mag == 0) {
+                text->color = JPH::Vec4(0.95f, 0.3f, 0.3f, 0.95f);
+            } else {
+                text->color = JPH::Vec4(0.95f, 0.95f, 0.95f, 0.95f);
+            }
+        }
+    }
+
+    if (state.hudWaveText != ZHLN::NullEntity && reg.IsAlive(state.hudWaveText)) {
+        if (auto* text = reg.Get<ZHLN::Components::TextComponent>(state.hudWaveText)) {
+            std::string status = state.hordeMode ? std::format("HORDE TARGET: {} - KILLS: {}", state.hordeTarget, state.kills) :
+                                                   std::format("WAVE {:02d} - HOSTILES: {}", state.wave, state.enemies.size());
+
+            text->text.assign(status);
+        }
+    }
+
+    for (size_t i = 0; i < 5; ++i) {
+        Entity kfEnt = state.hudKillFeedTexts[i];
+        if (kfEnt != NullEntity && reg.IsAlive(kfEnt)) {
+            if (auto* text = reg.Get<ZHLN::Components::TextComponent>(kfEnt)) {
+                if (i < state.killFeed.size()) {
+                    text->text.assign(state.killFeed[i].text);
+                    text->color = state.killFeed[i].head ? JPH::Vec4(0.95f, 0.35f, 0.35f, 0.95f) : JPH::Vec4(0.4f, 0.95f, 0.7f, 0.9f);
+                } else {
+                    text->text.assign("");
+                }
+            }
+        }
+    }
+
+    if (state.hudCrosshair != ZHLN::NullEntity && reg.IsAlive(state.hudCrosshair)) {
+        if (auto* text = reg.Get<ZHLN::Components::TextComponent>(state.hudCrosshair)) {
+            if (p->ads > 0.25f) {
+                text->text.assign(".");
+                text->color = JPH::Vec4(1.0f, 0.2f, 0.2f, 0.85f);
+                text->scale = 2.0f;
+            } else {
+                text->text.assign("+");
+                text->color = JPH::Vec4(0.43f, 1.00f, 0.70f, 0.85f);
+                text->scale = 1.5f;
+            }
+        }
+    }
 }
 
 } // namespace Game
@@ -319,6 +493,10 @@ GAMEPLAY_API ZHLN::GameplayStatus NativeGameplayUpdate(ZHLN::Engine* engine, flo
         ZHLN::PlayerController::PlayerUpdateTick(engine, dt);
         ZHLN::EnemyAI::EnemyAISystem(engine, dt);
         ZHLN::CombatFX::ProcessRenderTick(engine, dt, state.tracers, state.shockwaves, state.particles, state.tracerMat, state.particleMat);
+
+        Game::GameRulesSystem(engine, dt);
+        Game::CameraEffectsSystem(engine, dt);
+        Game::HUDSyncSystem(engine, dt);
     }
 
     return ZHLN::GameplayStatus::OK;
