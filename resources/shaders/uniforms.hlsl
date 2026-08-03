@@ -6,6 +6,7 @@ struct FrameUniforms {
     float4x4 viewProj;
     float4x4 unjitteredViewProj;
     float4x4 prevUnjitteredViewProj;
+    float4x4 viewmodelViewProj; // Fixed 58-degree FOV viewmodel matrix
 
     float4x4 lightSpaceMatrices[4];
 

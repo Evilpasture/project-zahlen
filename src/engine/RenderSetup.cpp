@@ -60,7 +60,6 @@ JPH::Mat44 ComputeCascadeLightSpaceMatrix(
 
     center = lightView.Inversed() * centerLight;
 
-    // --- USE CENTRALIZED SHADOW CONSTANTS ---
     float offset  = Shadows::BaseOffset;
     float farClip = Shadows::BaseDepth;
 
@@ -89,20 +88,17 @@ void SetFrameData(RenderContext& ctx, const Camera& cam, const FrameUniforms& un
 
     impl->shadowProjView  = shadowProjView;
     impl->currentUniforms = uniforms;
-    // Clamp dt between 0.1ms and 100ms to prevent giant leaps when dragging the window
-    impl->currentDt = std::clamp(dt, 0.0001f, 0.1f);
+    impl->currentDt       = std::clamp(dt, 0.0001f, 0.1f);
 
     VkExtent2D res    = impl->graphResources.sceneColor.extent;
     float      aspect = (res.height > 0) ? (float) res.width / res.height : 1.777f;
 
-    // Check if projection bounds need an update
     if (aspect != impl->lastAspectRatio || cam.fov != impl->lastFov) {
         impl->lastAspectRatio = aspect;
         impl->lastFov         = cam.fov;
         impl->UploadClusterBounds(cam.GetProjectionMatrix(aspect));
     }
 
-    // Snapping and cascade projections
     std::array<float, 4> cascadeSplits {};
     cascadeSplits[0] = cam.nearZ + (cam.farZ - cam.nearZ) * 0.08f;
     cascadeSplits[1] = cam.nearZ + (cam.farZ - cam.nearZ) * 0.22f;
@@ -112,10 +108,14 @@ void SetFrameData(RenderContext& ctx, const Camera& cam, const FrameUniforms& un
     FrameUniforms gpuUniforms       = uniforms;
     gpuUniforms.screenResolution[0] = static_cast<float>(res.width);
     gpuUniforms.screenResolution[1] = static_cast<float>(res.height);
+
+    // Compute viewmodel projection matrix (fixed 58.0f FOV by default for viewmodels, matching Three.js prototype)
+    JPH::Mat44 viewmodelProj      = Math::CreatePerspective(JPH::DegreesToRadians(58.0f), aspect, cam.nearZ, cam.farZ);
+    gpuUniforms.viewmodelViewProj = viewmodelProj * cam.GetViewMatrix();
+
     std::memcpy(gpuUniforms.cascadeSplits, cascadeSplits.data(), sizeof(float) * 4);
     std::memcpy(gpuUniforms.sh, impl->iblPayload.shCoeffs.data(), sizeof(JPH::Vec4) * 9);
 
-    // Update Cascade light space matrices
     JPH::Vec3  sunDir    = JPH::Vec3(uniforms.lightDir[0], uniforms.lightDir[1], uniforms.lightDir[2]).Normalized();
     JPH::Mat44 lightView = Math::CreateLookAt(sunDir * 100.0f, JPH::Vec3::sZero(), JPH::Vec3::sAxisY());
 

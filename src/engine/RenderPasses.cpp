@@ -586,5 +586,49 @@ void BlitPass::Execute(
     Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, swapchainTarget.handle);
 }
 
+void ViewmodelPass::Execute(
+    const FrameRecorder&                                                                                       recorder,
+    SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> in
+) const noexcept {
+    auto  cmd = recorder.cmd;
+    auto& ctx = recorder.ctx;
+
+    bool hasViewmodelDraws = false;
+    for (const auto& drawCmd: ctx.queues.drawQueue) {
+        if ((drawCmd.flags & DrawFlags::Viewmodel) != DrawFlags::None && !IsForwardOnly(drawCmd.instanceData.flags)) {
+            hasViewmodelDraws = true;
+            break;
+        }
+    }
+
+    if (!hasViewmodelDraws) {
+        return;
+    }
+
+    Profiler::ScopedGpuProfile<Stages::ViewmodelPass, FrameProfiler> timer(cmd, recorder.frameIndex, ctx.gpuProfiler);
+
+    Vk::DynamicPass(in.sceneColor.extent)
+        .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
+        .Execute(cmd, [&]() {
+            for (size_t i = 0; i < ctx.queues.drawQueue.size(); ++i) {
+                const auto& drawCmd = ctx.queues.drawQueue[i];
+
+                if ((drawCmd.flags & DrawFlags::Viewmodel) == DrawFlags::None || IsForwardOnly(drawCmd.instanceData.flags)) {
+                    continue;
+                }
+
+                if (!drawCmd.material->pipeline.Valid()) {
+                    continue;
+                }
+
+                const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
+                SubmitDrawInstanced(recorder.encoder, drawCmd, static_cast<uint32_t>(i), recorder.bindlessSet, push);
+            }
+        });
+}
+
 } // namespace Passes
 } // namespace ZHLN

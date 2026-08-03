@@ -19,9 +19,12 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
     uint pbrIdx      = texIndices1 & 0xFFFF;
     uint emissiveIdx = texIndices1 >> 16;
 
-    uint flags     = inst.flags;
-    uint alphaMode = flags & 0xFF;
-    uint isSkinned = (flags >> 8) & 0xFF;
+    uint flags       = inst.flags;
+    uint alphaMode   = flags & 0xFF;
+    uint isSkinned   = (flags >> 8) & 0xFF;
+    uint isViewmodel = (flags >> 16) & 0xFF;
+
+    float4x4 activeVP = (isViewmodel != 0) ? frame.viewmodelViewProj : frame.viewProj;
 
     float3 position     = vk::RawBufferLoad<float3>(inst.posAddress + actualVertexId * 12, 4);
     float2 localUV      = float2(0, 0);
@@ -48,14 +51,13 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
     uint4  localJoints = uint4(0, 0, 0, 0);
     float4 weights     = float4(0.0f, 0.0f, 0.0f, 0.0f);
 
-    // Unpack UNORM8 skinning weights
     if (isSkinned != 0 && inst.skinAddress != 0) {
         uint64_t skinAddr   = inst.skinAddress + actualVertexId * 12;
         uint2    jointsRaw  = vk::RawBufferLoad<uint2>(skinAddr + 0, 4);
         uint     weightsRaw = vk::RawBufferLoad<uint>(skinAddr + 8, 4);
 
         localJoints = UnpackJoints(jointsRaw);
-        weights     = UnpackColor(weightsRaw); // Decodes UNORM8 weights!
+        weights     = UnpackColor(weightsRaw);
     }
 
     uint   vertexCount      = inst.vertexCount;
@@ -110,8 +112,8 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
         return output;
     }
 
-    output.pos      = mul(frame.viewProj, worldPos);
-    output.currClip = mul(frame.unjitteredViewProj, worldPos);
+    output.pos      = mul(activeVP, worldPos);
+    output.currClip = mul(activeVP, worldPos);
 
     float4 prevWorldPos;
     if (isSkinned != 0) {
@@ -170,11 +172,9 @@ PSOutput PSMain(VSOutput input) {
     float roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.045f);
     float metallic  = (indices.z == 0 ? 1.0f : pbr.b) * metallicFactor;
 
-    // === FIX: If the pixel belongs to an alpha-masked mesh, set roughness to exactly 0.0 ===
     if (input.alphaMode == 1) {
-        roughness = 0.0f; // Magic value indicating "Do Not Reflect"
+        roughness = 0.0f;
     }
-    // ===============================================================================
 
     float3 N           = normalize(input.normal);
     float3 worldNormal = N;
@@ -201,7 +201,6 @@ PSOutput PSMain(VSOutput input) {
     float2 ndcCurr = input.currClip.xy / currW;
     float2 ndcPrev = input.prevClip.xy / prevW;
 
-    // Native Vulkan positive coordinate mapping mapping [-1, 1] to [0, 1]
     output.velocity = (ndcCurr - ndcPrev) * 0.5f;
 
     return output;
@@ -209,7 +208,6 @@ PSOutput PSMain(VSOutput input) {
 
 #ifdef FORWARD_PASS
 
-// Read the pre-calculated reflections/shadows for translucent surfaces
 [[vk::binding(11, 0)]] Texture2D<float4> texTransLighting;
 [[vk::binding(11, 0)]] SamplerState      texTransLightingSampler;
 
@@ -233,32 +231,26 @@ float3 RotateVector(float3 V, float3 lightDir) {
 float4 PSForward(VSOutput input): SV_Target0 {
     uint4  indices         = input.materialIndices;
     float4 baseColorFactor = input.baseColorFactor;
-    float  roughnessFactor = input.pbrFactors.y; // Extract surface roughness
+    float  roughnessFactor = input.pbrFactors.y;
 
     float4 albedo      = globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
     float3 emissiveMap = globalTextures[indices.w].Sample(defaultSampler, input.uv).rgb;
 
-    // FIX: Mask emissive light by albedo.a so unmasked emissive factors don't create solid square bounds on translucent quads
     float3 emissive = emissiveMap * input.emissiveFactor.rgb * albedo.a;
 
     if (frame.fullBright != 0) {
         return float4(albedo.rgb + emissive, albedo.a);
     }
 
-    // Grab correct screen UVs using the new uniform
     float2 screenUV = input.pos.xy / frame.screenResolution;
 
-    // Use the combined sampler to read the translucent lighting target
     float4 transLighting = texTransLighting.SampleLevel(texTransLightingSampler, screenUV, 0);
 
-    // Scale diffuse IBL by frame.ambientExposure so forward translucent objects match scene lighting
     float3 diffuseIBL = albedo.rgb * frame.ambientExposure * 0.5f;
 
-    // Only apply strong environmental reflections to smooth surfaces (like glass)
     float  reflFactor = saturate(1.0f - roughnessFactor);
     float3 finalColor = diffuseIBL + (transLighting.rgb * reflFactor) + emissive;
 
-    // Particles use pure albedo alpha. Refractive surfaces get a slight alpha boost.
     float glassAlpha = albedo.a + (reflFactor * 0.5f);
 
     return float4(finalColor, saturate(glassAlpha));

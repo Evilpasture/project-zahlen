@@ -88,7 +88,7 @@ struct alignas(16) InstanceData {
     float      metallicFactor;
     float      roughnessFactor;
     float      alphaCutoff;
-    uint32_t   flags; // [alphaMode:8 | isSkinned:8 | padding:16]
+    uint32_t   flags; // [alphaMode:8 | isSkinned:8 | isViewmodel:8 | padding:8]
     uint32_t   jointOffset;
     uint32_t   morphOffset;
     uint32_t   activeMorphCount;
@@ -172,7 +172,6 @@ enum class ParticleAlignment : uint32_t {
 };
 
 struct alignas(16) ParticleEmitterParams {
-    // std::array<float, 3> + float = 16 bytes (matches HLSL float3 + float)
     std::array<float, 3> gravity = {0.0f, -9.81f, 0.0f};
     float                drag    = 0.2f;
 
@@ -238,6 +237,7 @@ struct alignas(16) FrameUniforms {
     JPH::Mat44 viewProj;
     JPH::Mat44 unjitteredViewProj;
     JPH::Mat44 prevUnjitteredViewProj;
+    JPH::Mat44 viewmodelViewProj; // Fixed 58-degree FOV viewmodel matrix
 
     // Array of light-space projection matrices
     JPH::Mat44 lightSpaceMatrices[4];
@@ -402,6 +402,7 @@ enum class DrawFlags : uint32_t {
     VisibleInMain   = 1 << 2,
     VisibleInShadow = 1 << 3,
     Hidden          = 1 << 4,
+    Viewmodel       = 1 << 5, // First-person viewmodel overlay tag
 };
 } // namespace ZHLN
 

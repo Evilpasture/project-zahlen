@@ -743,6 +743,16 @@ struct PassFactory {
         );
     }
 
+    [[nodiscard]] auto MakeViewmodelPass() const noexcept {
+        return Vk::Passieren<
+            "Viewmodel", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::DepthStencilWrite<Res_Depth>>(
+            [this](VkCommandBuffer c) noexcept {
+                FrameRecorder vmRec(c, self);
+                Passes::ViewmodelPass {}.Execute(vmRec, BuildSceneResources());
+            }
+        );
+    }
+
     // Single source downsample helper
     template <typename SrcImgT, typename PassT>
     static void RunKawasePass(VkDevice device, VkCommandBuffer cmd, PassT& pass, const SrcImgT& src, const Vk::Sampler& defaultSampler) noexcept {
@@ -784,8 +794,9 @@ template <AAMode Mode, typename GetSwapchainImageT>
 auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapchainImage) {
     using enum AAMode;
 
-    auto corePasses = std::tuple {factory.MakeShadowPass(),   factory.MakeDecalPass(),      factory.MakeTranslucentPrePass(),        factory.MakeAmbientPass(),
-                                  factory.MakeLightingPass(), factory.MakeReflectionPass(), factory.MakeTranslucentReflectionPass(), factory.MakeForwardPass()};
+    auto corePasses = std::tuple {factory.MakeShadowPass(),  factory.MakeDecalPass(),    factory.MakeViewmodelPass(),  factory.MakeTranslucentPrePass(),
+                                  factory.MakeAmbientPass(), factory.MakeLightingPass(), factory.MakeReflectionPass(), factory.MakeTranslucentReflectionPass(),
+                                  factory.MakeForwardPass()};
 
     auto bloomPasses = std::tuple {factory.MakeBloomThresholdPass(), factory.MakeBloomDownPass<0>(), factory.MakeBloomDownPass<1>(),
                                    factory.MakeBloomDownPass<2>(),   factory.MakeBloomUpPass<2>(),   factory.MakeBloomUpPass<1>(),

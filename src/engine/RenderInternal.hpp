@@ -352,6 +352,18 @@ struct ShadowPass {
 struct MainPass {
     static constexpr std::string_view name = "[GPU] G-Buffer/Main";
 };
+struct DecalPass {
+    static constexpr std::string_view name = "[GPU] Decal Pass";
+};
+struct ViewmodelPass {
+    static constexpr std::string_view name = "[GPU] Viewmodel Pass";
+};
+struct TransPrePass {
+    static constexpr std::string_view name = "[GPU] Translucent Pre-Pass";
+};
+struct TransReflection {
+    static constexpr std::string_view name = "[GPU] Translucent Reflection";
+};
 struct AAPass {
     static constexpr std::string_view name = "[GPU] Anti-Aliasing";
 };
@@ -382,21 +394,13 @@ struct VolumetricScatterPass {
 struct VolumetricIntegratePass {
     static constexpr std::string_view name = "[GPU] Volumetric Integrate";
 };
-struct TransPrePass {
-    static constexpr std::string_view name = "[GPU] Translucent Pre-Pass";
-};
-struct TransReflection {
-    static constexpr std::string_view name = "[GPU] Translucent Reflection";
-};
-struct DecalPass {
-    static constexpr std::string_view name = "[GPU] Decal Pass";
-};
 } // namespace Stages
 
 using FrameProfiler = Profiler::GpuProfiler<
     Stages::ShadowPass,
     Stages::MainPass,
     Stages::DecalPass,
+    Stages::ViewmodelPass,
     Stages::TransPrePass,
     Stages::TransReflection,
     Stages::AAPass,
@@ -406,9 +410,9 @@ using FrameProfiler = Profiler::GpuProfiler<
     Stages::BloomBlurHPass,
     Stages::BloomBlurVPass,
     Stages::BlitPass,
-    Stages::VolumetricInjectPass,     // Unique Slot 16/17
-    Stages::VolumetricScatterPass,    // Unique Slot 18/19
-    Stages::VolumetricIntegratePass>; // Unique Slot 20/21
+    Stages::VolumetricInjectPass,
+    Stages::VolumetricScatterPass,
+    Stages::VolumetricIntegratePass>;
 
 struct NativeMesh {
     VkDevice                     device = VK_NULL_HANDLE;
@@ -1169,6 +1173,13 @@ struct BlitPass {
         Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> swapchainTarget,
         int                                                      fullBright
+    ) const noexcept;
+};
+
+struct ViewmodelPass {
+    void Execute(
+        const FrameRecorder&                                                                                       recorder,
+        SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> in
     ) const noexcept;
 };
 
