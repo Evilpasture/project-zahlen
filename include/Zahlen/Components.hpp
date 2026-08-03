@@ -7,7 +7,9 @@
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/String.hpp>
+#include <algorithm>
 #include <array>
+#include <span>
 
 namespace ZHLN {
 
@@ -18,8 +20,9 @@ enum class UIButton : uint8_t { None = 0, Hovered = 1 << 0, Pressed = 1 << 1, Cl
 template <>
 inline constexpr bool EnableEnumFlags<UIButton> = true;
 enum class StackDirection : uint8_t { Horizontal = 0, Vertical = 1 };
+
 // NOLINTNEXTLINE(performance-enum-size)
-enum class RagdollState : uint32_t { Inactive = 0, KeyframeMotor = 1, Limp = 2 };
+enum class RagdollState : uint32_t { Inactive = 0, KeyframeMotor = 1, Limp = 2, PartialBlend = 3 };
 static_assert(sizeof(RagdollState) == sizeof(uint32_t));
 
 struct Components {
@@ -37,7 +40,6 @@ struct Components {
         }
     };
 
-    // --- Persistent Mesh Component (No Raw GPU Handles) ---
     struct MeshComponent {
         AssetID    meshAsset     = InvalidAssetID;
         MaterialID materialAsset = InvalidMaterialID;
@@ -61,7 +63,6 @@ struct Components {
 
     static_assert(sizeof(MeshComponent) == 288);
 
-    // --- Persistent CPU Terrain Data ---
     struct TerrainComponent {
         uint32_t           sampleCount = 128;
         float              worldSize   = 280.0f;
@@ -87,11 +88,10 @@ struct Components {
         JPH::Quat prevRotation         = JPH::Quat::sIdentity();
         uint64_t  lastPhysicsSyncFrame = 0;
     };
-    struct MovementComponent { // 16-byte aligned types first
+    struct MovementComponent {
         JPH::Quat orientation     = JPH::Quat::sIdentity();
         JPH::Quat prevOrientation = JPH::Quat::sIdentity();
 
-        // 4-byte aligned types second
         float inputX         = 0.0f;
         float inputZ         = 0.0f;
         float currentYVel    = 0.0f;
@@ -100,7 +100,6 @@ struct Components {
         float landingTimer   = 0.0f;
         float jumpDelayTimer = 0.0f;
 
-        // 1-byte aligned types last
         bool jumpRequested = false;
         bool isGrounded    = true;
         bool wasGrounded   = true;
@@ -116,11 +115,50 @@ struct Components {
         uint32_t        jointOffset      = 0;
         uint32_t        jointCount       = 0;
         const Skeleton* skeleton         = nullptr;
-        static void     OnDestroy(RagdollComponent* r) noexcept {
+
+        // --- Per-Joint Active Ragdoll & Hit Reaction Properties ---
+        ZHLN::Array<float> jointBlendWeights; // 0.0 = Anim, 1.0 = Phys
+        ZHLN::Array<float> jointStiffness;    // 0.0 = Flaccid, 1.0 = Rigid Motor
+        ZHLN::Array<float> jointBlendDecay;   // Decay speed (units/sec) back to 0.0
+
+        void EnsureJointCapacity(uint32_t count) {
+            if (jointBlendWeights.size() < count) {
+                jointBlendWeights.resize(count, 0.0f);
+                jointStiffness.resize(count, 1.0f);
+                jointBlendDecay.resize(count, 0.0f);
+            }
+        }
+
+        void ApplyHitReaction(uint32_t jointIdx, float weight = 0.8f, float stiffness = 0.2f, float decayRate = 2.0f) {
+            EnsureJointCapacity(jointCount);
+            if (jointIdx < jointCount) {
+                jointBlendWeights[jointIdx] = std::clamp(weight, 0.0f, 1.0f);
+                jointStiffness[jointIdx]    = std::clamp(stiffness, 0.0f, 1.0f);
+                jointBlendDecay[jointIdx]   = std::max(0.0f, decayRate);
+                state                       = PartialBlend;
+            }
+        }
+
+        void ApplyHitReactionRegion(std::span<const uint32_t> jointIndices, float weight = 0.8f, float stiffness = 0.2f, float decayRate = 2.0f) {
+            EnsureJointCapacity(jointCount);
+            for (uint32_t jIdx: jointIndices) {
+                if (jIdx < jointCount) {
+                    jointBlendWeights[jIdx] = std::clamp(weight, 0.0f, 1.0f);
+                    jointStiffness[jIdx]    = std::clamp(stiffness, 0.0f, 1.0f);
+                    jointBlendDecay[jIdx]   = std::max(0.0f, decayRate);
+                }
+            }
+            state = PartialBlend;
+        }
+
+        static void OnDestroy(RagdollComponent* r) noexcept {
             if (r->ragdollInstance != nullptr) {
                 r->ragdollInstance->Release();
                 r->ragdollInstance = nullptr;
             }
+            r->jointBlendWeights.clear();
+            r->jointStiffness.clear();
+            r->jointBlendDecay.clear();
         }
     };
 
@@ -186,7 +224,6 @@ struct Components {
         JPH::Vec3 probeMax          = JPH::Vec3(22.0f, 12.0f, 22.0f);
         JPH::Vec3 probePos          = JPH::Vec3(0.0f, 4.0f, 0.0f);
 
-        // Dynamic Sky Gradient Colors
         JPH::Vec4 skyZenith  = JPH::Vec4(0.003f, 0.008f, 0.020f, 1.0f);
         JPH::Vec4 skyHorizon = JPH::Vec4(0.015f, 0.035f, 0.080f, 1.0f);
         JPH::Vec4 skyGround  = JPH::Vec4(0.001f, 0.001f, 0.003f, 1.0f);
@@ -227,7 +264,6 @@ struct Components {
         uint32_t                      _padding  = 0;
     };
     struct TriggerComponent {
-        // NOLINTNEXTLINE(performance-enum-size)
         enum Flags : uint32_t {
             Active       = 1 << 0,
             PlayerInside = 1 << 1,
@@ -312,7 +348,7 @@ struct Components {
         JPH::Vec4 textColorHover   = {1.00f, 1.00f, 1.00f, 1.0f};
         JPH::Vec4 textColorPressed = {0.70f, 0.70f, 0.70f, 1.0f};
 
-        float transitionSpeed = 18.0f; // Speed of smooth color lerping (0 = instant)
+        float transitionSpeed = 18.0f;
         bool  hasTextColor    = false;
         char  _pad[3]         = {};
     };
@@ -404,13 +440,12 @@ struct Components {
         bool                  active         = true;
         bool                  attachToCamera = false;
 
-        // Cached GPU-side storage buffer handle (Zero CPU-lookup overhead)
         BufferHandle gpuBuffer = BufferHandle::Invalid;
     };
 
     struct DecalComponent {
         uint32_t albedoIndex = 1;
-        uint32_t normalIndex = 2; // default flat normal
+        uint32_t normalIndex = 2;
         float    roughness   = 0.5f;
         float    metallic    = 0.0f;
     };
@@ -428,7 +463,6 @@ struct Components {
     static_assert(sizeof(TriggerComponent) == 8);
     static_assert(sizeof(UsableComponent) == 8);
     static_assert(sizeof(MovementComponent) == 64 && offsetof(MovementComponent, orientation) == 0);
-    static_assert(std::is_trivially_copyable_v<RagdollComponent>);
     static_assert(sizeof(TargetCameraComponent) == 112);
     static_assert(sizeof(UITextInputComponent) == 272);
 };
