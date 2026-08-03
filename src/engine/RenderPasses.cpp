@@ -69,26 +69,21 @@ void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept {
     VkCommandBuffer cmd = recorder.cmd;
     auto&           ctx = recorder.ctx;
 
-    if (ctx.csgDrawQueue.empty() || !ctx.csgWritePipeline.Valid()) {
+    if (ctx.queues.csgDrawQueue.empty() || !ctx.csgWritePipeline.Valid()) {
         return;
     }
 
     ZHLN_PROFILE_SCOPE("GPU Stencil CSG Passes");
 
-    for (const auto& csgCmd: ctx.csgDrawQueue) {
-        // A. Clear stencil to 0 (In-line clear of the active viewport area)
+    for (const auto& csgCmd: ctx.queues.csgDrawQueue) {
         VkClearAttachment clearAttachment = {
             .aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT, .colorAttachment = {}, .clearValue = {.depthStencil = {.depth = 1.0f, .stencil = 0}}
         };
         VkClearRect clearRect = {
-            // Construct the VkExtent2D inline using the 3D dimensions
-            .rect           = {.offset = {.x = 0, .y = 0}, .extent = {.width = extent.width, .height = extent.height}},
-            .baseArrayLayer = 0,
-            .layerCount     = 1
+            .rect = {.offset = {.x = 0, .y = 0}, .extent = {.width = extent.width, .height = extent.height}}, .baseArrayLayer = 0, .layerCount = 1
         };
         vkCmdClearAttachments(cmd, 1, &clearAttachment, 1, &clearRect);
 
-        // B. Draw Cutters using csgWritePipeline (No color writes, writes 1s to stencil)
         for (const auto& cutter: csgCmd.cutters) {
             const ObjectConstants push = {.instanceId = cutter.instanceIdx, .isShadowPass = 0};
             SubmitDrawInstanced(
@@ -96,7 +91,6 @@ void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept {
             );
         }
 
-        // C. Draw Eye using the appropriate CSG Stencil Pipeline
         VkPipeline activePipeline = ctx.csgDifferencePipeline.Get();
         if (!csgCmd.cutters.empty() && csgCmd.cutters[0].operation == CSGOperation::Intersection) {
             activePipeline = ctx.csgIntersectionPipeline.Get();
@@ -105,8 +99,6 @@ void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept {
         const ObjectConstants push = {.instanceId = csgCmd.eyeInstanceIdx, .isShadowPass = 0};
         SubmitDrawInstanced(recorder.encoder, csgCmd.eyeDraw, csgCmd.eyeInstanceIdx, recorder.bindlessSet, push, activePipeline, ctx.csgPipelineLayout.Get());
     }
-
-    ctx.csgDrawQueue.clear(); // Flush queue for the next frame
 }
 
 struct GpuCullingPolicy {
@@ -216,7 +208,7 @@ struct CpuCullingPolicy {
                         return ctx.workerCmds[wIdx].pools[recorder.frameIndex][localCmdIdx];
                     },
                     [&](Vk::CommandEncoder& encoder, uint32_t i) {
-                        const auto& drawCmd = ctx.drawQueue[i];
+                        const auto& drawCmd = ctx.queues.drawQueue[i];
                         if (!IsVisibleIn(drawCmd.flags, RenderPassType::Main)) {
                             return;
                         }
@@ -254,14 +246,13 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
     auto* indirectCmdsBase = static_cast<VkDrawIndirectCommand*>(mapped.data);
 
     std::array<uint32_t, 8> passWriteOffsets {};
-    passWriteOffsets[0] = 0; // We use a single batch offset for all 4 Cascades via Multiview
+    passWriteOffsets[0] = 0;
     for (uint32_t l = 0; l < 4; ++l) {
         passWriteOffsets[4 + l] = (4 + l) * kGpuCullingMaxInstances;
     }
 
     std::array<uint32_t, 8> passDrawCounts {};
 
-    // 1. Pre-filter active shadow-casting point lights once to eliminate redundant loop overhead
     std::array<const GPULight*, 4> activeShadowLights {};
     uint32_t                       activeShadowLightCount = 0;
     for (const auto& light: ctx.mappedLights) {
@@ -273,8 +264,8 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
         }
     }
 
-    for (uint32_t i = 0; i < ctx.drawQueue.size(); ++i) {
-        const auto& drawCmd = ctx.drawQueue[i];
+    for (uint32_t i = 0; i < ctx.queues.drawQueue.size(); ++i) {
+        const auto& drawCmd = ctx.queues.drawQueue[i];
 
         if (!IsVisibleIn(drawCmd.flags, Shadow) || IsForwardOnly(drawCmd.instanceData.flags)) {
             continue;
@@ -285,12 +276,10 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
         JPH::Vec3 meshPos = drawCmd.instanceData.world.GetTranslation();
         float     radius  = drawCmd.instanceData.cullRadius;
 
-        // Directional Cascaded Shadow (Multiview processes all 4 layers from a single buffer slice)
         uint32_t writeIdx          = passWriteOffsets[0] + passDrawCounts[0];
         indirectCmdsBase[writeIdx] = {.vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = i};
         passDrawCounts[0]++;
 
-        // 2. Iterate only over pre-filtered shadow-casting lights instead of the entire scene light list
         for (uint32_t l = 0; l < activeShadowLightCount; ++l) {
             const auto* light   = activeShadowLights[l];
             uint32_t    slotIdx = 4 + light->shadowLayer;
@@ -323,7 +312,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
             };
 
             Vk::DynamicPass(cascadeLayerImage.extent)
-                .ViewMask(0xF) // Broadcast to all 4 Cascades cleanly via Multiview
+                .ViewMask(0xF)
                 .AddDepth(cascadeLayerImage, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kShadowClearDepth)
                 .Execute(cmd, [&]() {
                     recorder.encoder.DrawIndirect(
@@ -396,7 +385,7 @@ void MainPass::Execute(
 
     Profiler::ScopedGpuProfile<Stages::MainPass, FrameProfiler> timer(cmd, recorder.frameIndex, ctx.gpuProfiler);
 
-    const auto drawCount = static_cast<uint32_t>(ctx.drawQueue.size());
+    const auto drawCount = static_cast<uint32_t>(ctx.queues.drawQueue.size());
     if (drawCount == 0) {
         Vk::DynamicPass(in.sceneColor.extent)
             .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
@@ -413,7 +402,7 @@ void MainPass::Execute(
     VkPipeline currentPipeline = VK_NULL_HANDLE;
 
     for (uint32_t i = 0; i < drawCount; ++i) {
-        const auto&       drawCmd = ctx.drawQueue[i];
+        const auto&       drawCmd = ctx.queues.drawQueue[i];
         const auto* const drawMat = drawCmd.material;
 
         if (IsForwardOnly(drawCmd.instanceData.flags) || !drawMat->pipeline.Valid()) {
@@ -452,22 +441,19 @@ void TranslucentPrePass::Execute(
         .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
         .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
         .Execute(cmd, [&]() {
-            for (size_t i = 0; i < ctx.drawQueue.size(); ++i) {
-                const auto& drawCmd = ctx.drawQueue[i];
+            for (size_t i = 0; i < ctx.queues.drawQueue.size(); ++i) {
+                const auto& drawCmd = ctx.queues.drawQueue[i];
 
-                // Only process transparent/glass objects (alphaMode == 2)
                 if ((drawCmd.instanceData.flags & 0xFF) != 2) {
                     continue;
                 }
 
-                // Skip if material didn't successfully compile a pre-pass pipeline
                 if (drawCmd.prePassMaterial == nullptr || !drawCmd.prePassMaterial->pipeline.Valid()) {
                     continue;
                 }
 
                 const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
-                // Pass the pre-pass pipeline and layout overrides into SubmitDrawInstanced
                 SubmitDrawInstanced(
                     recorder.encoder, drawCmd, static_cast<uint32_t>(i), recorder.bindlessSet, push, drawCmd.prePassMaterial->pipeline.Get(),
                     drawCmd.prePassMaterial->layout.Get()
@@ -488,30 +474,26 @@ void ForwardPass::Execute(
         .AddColor(litColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddDepth(depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .Execute(cmd, [&]() {
-            // --- DRAW STANDARD FORWARD TRANSLUCENT GEOMETRY (alphaMode == 2) ---
-            for (size_t i = 0; i < ctx.drawQueue.size(); ++i) {
-                const auto& drawCmd = ctx.drawQueue[i];
+            for (size_t i = 0; i < ctx.queues.drawQueue.size(); ++i) {
+                const auto& drawCmd = ctx.queues.drawQueue[i];
 
-                // Only process transparent/glass objects (alphaMode == 2)
                 if ((drawCmd.instanceData.flags & 0xFF) != 2) {
                     continue;
                 }
 
-                // Skip if the material doesn't have a valid compiled pipeline
                 if (!drawCmd.material->pipeline.Valid()) {
                     continue;
                 }
 
                 const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
-                // Submit draw calls using the standard material forward pipeline
                 SubmitDrawInstanced(recorder.encoder, drawCmd, static_cast<uint32_t>(i), recorder.bindlessSet, push);
             }
 
-            if (ctx.particleRenderPipeline.Valid() && !ctx.particleEmittersQueue.empty()) {
+            if (ctx.particleRenderPipeline.Valid() && !ctx.queues.particleEmittersQueue.empty()) {
                 auto* bindlessSet = ctx.bindlessSets[ctx.frame_index];
 
-                for (const auto& emitter: ctx.particleEmittersQueue) {
+                for (const auto& emitter: ctx.queues.particleEmittersQueue) {
                     auto* buffer = ctx.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
                     if (!buffer) {
                         continue;
@@ -527,7 +509,7 @@ void ForwardPass::Execute(
                         {.pipeline      = ctx.particleRenderPipeline.Get(),
                          .layout        = ctx.particleRenderLayout.Get(),
                          .set           = bindlessSet,
-                         .vertexCount   = 6, // Quad (2 triangles = 6 vertices)
+                         .vertexCount   = 6,
                          .instanceCount = emitter.maxParticles,
                          .firstVertex   = 0,
                          .firstInstance = 0},
@@ -559,7 +541,7 @@ void BlitPass::Execute(
         Vk::DynamicPass(inColor.extent).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(cmd, [&]() {
             ctx.blitPass.Execute(cmd, pc);
 
-            if (!ctx.uiBatches.empty()) {
+            if (!ctx.queues.uiBatches.empty()) {
                 UIObjectConstants uipc {};
                 uipc.orthoMatrix = Math::CreateOrthoMatrix(inColor.extent.width, inColor.extent.height);
 
@@ -567,7 +549,7 @@ void BlitPass::Execute(
 
                 auto baseVboAddress = ctx.uiVboAddresses[recorder.frameIndex];
 
-                for (const auto& batch: ctx.uiBatches) {
+                for (const auto& batch: ctx.queues.uiBatches) {
                     uipc.albedoIdx   = batch.textureIndex;
                     uipc.isSDF       = batch.isSDF ? 1 : 0;
                     uipc.posAddress  = baseVboAddress + (batch.vertexStart * sizeof(VertexPosition));
@@ -583,7 +565,6 @@ void BlitPass::Execute(
                               .fallback = defaultScissor}
                     );
 
-                    // This automatically filters redundant binds across adjacent batches.
                     recorder.encoder.DrawInstanced(
                         {.pipeline      = ctx.uiPipeline.Get(),
                          .layout        = ctx.uiPipelineLayout.Get(),
@@ -595,7 +576,6 @@ void BlitPass::Execute(
                         uipc, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
                     );
                 }
-                ctx.uiBatches.clear();
             }
             if (!ctx.window.IsTTY()) {
                 ImGui::Render();

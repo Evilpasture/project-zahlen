@@ -75,7 +75,7 @@ BufferHandle RenderContext::GetOrCreateParticleBuffer(uint64_t entityKey, uint32
 }
 
 void RenderContext::SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& params) {
-    _impl->particleEmittersQueue.push_back({.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = params});
+    _impl->queues.particleEmittersQueue.push_back({.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = params});
 }
 
 void RenderContext::ClearGPUCaches() noexcept {
@@ -526,10 +526,9 @@ void RenderContext::SubmitUI(
     std::memcpy(basePosPtr, positions, safeVertexCount * sizeof(VertexPosition));
     std::memcpy(baseAttrPtr, attributes, safeVertexCount * sizeof(VertexAttributes));
 
-    _impl->uiBatches.clear();
-    _impl->uiBatches.reserve(batchCount);
+    _impl->queues.uiBatches.reserve(batchCount);
     for (uint32_t i = 0; i < batchCount; ++i) {
-        _impl->uiBatches.push_back(batches[i]);
+        _impl->queues.uiBatches.push_back(batches[i]);
     }
 }
 

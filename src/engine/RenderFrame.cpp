@@ -111,7 +111,7 @@ inline void SubmitDrawInstanced(
 // ============================================================================
 
 void RenderContext::Impl::SortDrawQueue() {
-    auto drawCount = static_cast<uint32_t>(drawQueue.size());
+    auto drawCount = static_cast<uint32_t>(queues.drawQueue.size());
     if (drawCount == 0) {
         return;
     }
@@ -121,17 +121,16 @@ void RenderContext::Impl::SortDrawQueue() {
     sortDrawQueueScratch.resize(drawCount);
 
     for (uint32_t i = 0; i < drawCount; ++i) {
-        sortItemsScratch[i] = {.key = SortKey::Pack(drawQueue[i].material, drawQueue[i].posMesh), .payload = i};
+        sortItemsScratch[i] = {.key = SortKey::Pack(queues.drawQueue[i].material, queues.drawQueue[i].posMesh), .payload = i};
     }
 
     RadixSort64(sortItemsScratch.data(), sortTempScratch.data(), drawCount);
 
     for (uint32_t i = 0; i < drawCount; ++i) {
-        sortDrawQueueScratch[i] = drawQueue[sortItemsScratch[i].payload];
+        sortDrawQueueScratch[i] = queues.drawQueue[sortItemsScratch[i].payload];
     }
 
-    // Copy elements back.
-    drawQueue = sortDrawQueueScratch;
+    queues.drawQueue = sortDrawQueueScratch;
 }
 
 std::optional<Extent2D> RenderContext::GetFramebufferSize() const {
@@ -151,7 +150,7 @@ void RenderContext::Impl::DispatchSkinningPasses() {
     auto* const cmd = current_cmd;
     skinningPass.Bind(cmd);
 
-    for (const auto& drawCmd: drawQueue) {
+    for (const auto& drawCmd: queues.drawQueue) {
         if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
             auto* posMesh     = drawCmd.posMesh;
             auto* attrMesh    = drawCmd.attrMesh;
@@ -182,7 +181,6 @@ void RenderContext::Impl::DispatchSkinningPasses() {
         }
     }
 
-    // 1. Transition vertex writes from compute to both AS build and Vertex Shader read stages
     Vk::MemoryBarrier(
         cmd, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
               .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
@@ -190,10 +188,9 @@ void RenderContext::Impl::DispatchSkinningPasses() {
               .dst_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_2_SHADER_READ_BIT}
     );
 
-    // 2. Build BLAS for each active skinned scratch mesh
     if (rtCtx.Valid()) {
         ZHLN_PROFILE_SCOPE("GPU Skinned BLAS Rebuilds");
-        for (const auto& drawCmd: drawQueue) {
+        for (const auto& drawCmd: queues.drawQueue) {
             if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
                 auto* scratchMesh = meshPool.Resolve(drawCmd.skinnedVertexBuffer).value_or(nullptr);
                 if (scratchMesh != nullptr) {
@@ -202,7 +199,6 @@ void RenderContext::Impl::DispatchSkinningPasses() {
             }
         }
 
-        // 3. Transition BLAS writes to TLAS build reads
         Vk::MemoryBarrier(
             cmd, {.src_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
                   .src_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
@@ -213,20 +209,19 @@ void RenderContext::Impl::DispatchSkinningPasses() {
 }
 
 void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
-    if (!rtCtx.Valid() || drawQueue.empty()) {
+    if (!rtCtx.Valid() || queues.drawQueue.empty()) {
         return;
     }
 
     tlasInstancesScratch.clear();
-    tlasInstancesScratch.reserve(drawQueue.size());
+    tlasInstancesScratch.reserve(queues.drawQueue.size());
 
     using enum DrawFlags;
 
-    for (uint32_t i = 0; i < drawQueue.size(); ++i) {
-        const auto& drawCmd = drawQueue[i];
+    for (uint32_t i = 0; i < queues.drawQueue.size(); ++i) {
+        const auto& drawCmd = queues.drawQueue[i];
         auto*       mesh    = drawCmd.posMesh;
 
-        // If the draw command is skinned, swap the static bind-pose mesh for the skinned scratch mesh
         if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
             mesh = meshPool.Resolve(drawCmd.skinnedVertexBuffer).value_or(nullptr);
         }
@@ -252,7 +247,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
             .mask                                   = 0xFF,
             .instanceShaderBindingTableRecordOffset = 0,
             .flags                                  = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR,
-            .accelerationStructureReference         = mesh->blasAddress // Points to the scratch BLAS!
+            .accelerationStructureReference         = mesh->blasAddress
         };
 
         tlasInstancesScratch.push_back(inst);
@@ -356,13 +351,13 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeParticleUpdatePass() const noexcept {
         return Vk::MakePass<"ParticleUpdate">([this](VkCommandBuffer c) noexcept {
-            if (!self.particleUpdatePass.pipeline.Valid() || self.particleEmittersQueue.empty()) {
+            if (!self.particleUpdatePass.pipeline.Valid() || self.queues.particleEmittersQueue.empty()) {
                 return;
             }
 
             auto* bindlessSet = self.bindlessSets[self.frame_index];
 
-            for (const auto& emitter: self.particleEmittersQueue) {
+            for (const auto& emitter: self.queues.particleEmittersQueue) {
                 auto* buffer = self.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
                 if (!buffer) {
                     continue;
@@ -562,13 +557,12 @@ struct PassFactory {
     [[nodiscard]] auto MakeDecalPass() const noexcept {
         return Vk::MakePass<"DecalPass", Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_NormRough>>([this](auto& ctx) noexcept {
             auto c = ctx.Cmd();
-            if (!self.decalPipeline.Valid() || self.decalQueue.empty()) {
+            if (!self.decalPipeline.Valid() || self.queues.decalQueue.empty()) {
                 return;
             }
 
             Profiler::ScopedGpuProfile<Stages::DecalPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
 
-            // Bind depth texture to Descriptor Set 0
             DecalLayout::Write(self.ctx.Device(), self.decalSet, self.presentation.depthTarget.view.Get(), self.pointSampler.Get());
 
             FrameRecorder recorder(c, self);
@@ -577,10 +571,10 @@ struct PassFactory {
             std::array sets = {self.decalSet, self.bindlessSets[fIdx]};
             recorder.encoder.BindDescriptorSets(0, sets);
 
-            for (const auto& decalCmd: self.decalQueue) {
+            for (const auto& decalCmd: self.queues.decalQueue) {
                 RenderContext::Impl::DecalPushConstants pc {
-                    .world       = decalCmd.transform,    // Matches DecalPushConstants.world
-                    .invWorld    = decalCmd.invTransform, // Matches DecalPushConstants.invWorld
+                    .world       = decalCmd.transform,
+                    .invWorld    = decalCmd.invTransform,
                     .albedoIndex = decalCmd.albedoIndex,
                     .normalIndex = decalCmd.normalIndex,
                     .roughness   = decalCmd.roughness,
@@ -1066,10 +1060,7 @@ RenderResult RenderContext::EndFrame() noexcept {
     {
         ZHLN_PROFILE_SCOPE("Render (CPU Record)");
         if (_impl->current_cmd == VK_NULL_HANDLE) {
-            _impl->drawQueue.clear();
-            _impl->csgDrawQueue.clear();
-            _impl->uiBatches.clear();
-            _impl->decalQueue.clear();
+            _impl->queues.Clear();
             return std::unexpected(Error);
         }
 
@@ -1090,11 +1081,7 @@ RenderResult RenderContext::EndFrame() noexcept {
         );
 
         if (!comp_submit_res) [[unlikely]] {
-            _impl->drawQueue.clear();
-            _impl->csgDrawQueue.clear();
-            _impl->uiBatches.clear();
-            _impl->particleEmittersQueue.clear();
-            _impl->decalQueue.clear();
+            _impl->queues.Clear();
             _impl->current_cmd         = VK_NULL_HANDLE;
             _impl->hasSkinnedThisFrame = false;
             return std::unexpected(comp_submit_res.error());
@@ -1120,14 +1107,14 @@ RenderResult RenderContext::EndFrame() noexcept {
 
                 _impl->DispatchSkinningPasses();
 
-                if (_impl->drawQueue.size() > kGpuCullingMaxInstances) {
-                    _impl->drawQueue.resize(kGpuCullingMaxInstances);
+                if (_impl->queues.drawQueue.size() > kGpuCullingMaxInstances) {
+                    _impl->queues.drawQueue.resize(kGpuCullingMaxInstances);
                 }
 
                 _impl->SortDrawQueue();
 
-                auto drawCount = _impl->drawQueue.size();
-                auto csgCount  = _impl->csgDrawQueue.size();
+                auto drawCount = _impl->queues.drawQueue.size();
+                auto csgCount  = _impl->queues.csgDrawQueue.size();
 
                 if (drawCount > 0 || csgCount > 0) {
                     auto  mapped = _impl->instanceDataBuffers[_impl->frame_index].Map();
@@ -1135,12 +1122,12 @@ RenderResult RenderContext::EndFrame() noexcept {
 
                     // 1. Write standard draw queue
                     for (size_t i = 0; i < drawCount; ++i) {
-                        dst[i] = _impl->drawQueue[i].instanceData;
+                        dst[i] = _impl->queues.drawQueue[i].instanceData;
                     }
 
-                    // 2. Write CSG draw queue (Appended sequentially right after standard draw count)
+                    // 2. Write CSG draw queue
                     uint32_t csgOffset = drawCount;
-                    for (auto& csgCmd: _impl->csgDrawQueue) {
+                    for (auto& csgCmd: _impl->queues.csgDrawQueue) {
                         dst[csgOffset]        = csgCmd.eyeDraw.instanceData;
                         csgCmd.eyeInstanceIdx = csgOffset++;
 
@@ -1159,11 +1146,7 @@ RenderResult RenderContext::EndFrame() noexcept {
         );
 
         if (res != ZHLN_FrameResult_Ok && res != ZHLN_FrameResult_Suboptimal) {
-            _impl->drawQueue.clear();
-            _impl->csgDrawQueue.clear();
-            _impl->uiBatches.clear();
-            _impl->particleEmittersQueue.clear();
-            _impl->decalQueue.clear();
+            _impl->queues.Clear();
             _impl->current_cmd         = VK_NULL_HANDLE;
             _impl->hasSkinnedThisFrame = false;
             return std::unexpected(MapFrameResult(res));
@@ -1175,10 +1158,7 @@ RenderResult RenderContext::EndFrame() noexcept {
         std::swap(_impl->graphResources.shadowMap, _impl->shadowMapPrev);
         std::swap(_impl->shadowCascadeViews, _impl->shadowCascadeViewsPrev);
 
-        _impl->drawQueue.clear();
-        _impl->csgDrawQueue.clear();
-        _impl->uiBatches.clear();
-        _impl->particleEmittersQueue.clear();
+        _impl->queues.Clear();
         _impl->current_cmd         = VK_NULL_HANDLE;
         _impl->hasSkinnedThisFrame = false;
     }
@@ -1257,7 +1237,7 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
     uint32_t isSkinned        = (params.skinnedVertexBuffer == Invalid && (params.flags & Skinned) != None) ? 1u : 0u;
     uint32_t activeMorphCount = (params.skinnedVertexBuffer != Invalid) ? 0 : params.activeMorphCount;
 
-    impl->drawQueue.push_back(
+    impl->queues.drawQueue.push_back(
         {.instanceData =
              {
                  .world            = params.transform,
@@ -1403,12 +1383,12 @@ void DrawCSG(RenderContext& ctx, const Material& eyeMaterial, const Mesh& eyeMes
         csgCmd.cutters.push_back({.draw = cutCmd, .instanceIdx = 0, .operation = cutter.operation});
     }
 
-    impl->csgDrawQueue.push_back(std::move(csgCmd));
+    impl->queues.csgDrawQueue.push_back(std::move(csgCmd));
 }
 
 void DrawDecal(RenderContext& ctx, const DecalParams& params) {
     auto* impl = ctx.GetImpl();
-    impl->decalQueue.push_back(
+    impl->queues.decalQueue.push_back(
         {.transform    = params.transform,
          .invTransform = params.invTransform,
          .albedoIndex  = params.albedoIndex,

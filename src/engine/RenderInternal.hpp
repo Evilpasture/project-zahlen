@@ -562,6 +562,18 @@ using Res_AccumNext = Vk::GraphImage<"AccumNext", VK_FORMAT_R16G16B16A16_SFLOAT,
 
 // --- Impl Struct ---
 
+struct RenderQueues {
+    ZHLN::Array<DrawCommand>            drawQueue;
+    ZHLN::Array<CSGDrawCommand>         csgDrawQueue;
+    ZHLN::Array<ParticleEmitterCommand> particleEmittersQueue;
+    ZHLN::Array<DecalDrawCommand>       decalQueue;
+    ZHLN::Array<UIBatch>                uiBatches;
+
+    void Clear() noexcept {
+        ZHLN::Reflect::ForEachField(*this, [](auto& queue) { queue.clear(); });
+    }
+};
+
 struct RenderContext::Impl {
     // ============================================================================
     // Nested Types & Reflection Metadata
@@ -808,12 +820,9 @@ struct RenderContext::Impl {
     ZHLN::HashMap<uint64_t, BufferHandle> skinnedScratchMap;
     ZHLN::HashMap<uint64_t, BufferHandle> particleBufferMap;
 
-    ZHLN::Array<DrawCommand>            drawQueue;
-    ZHLN::Array<CSGDrawCommand>         csgDrawQueue;
-    ZHLN::Array<ParticleEmitterCommand> particleEmittersQueue;
-    ZHLN::Array<DecalDrawCommand>       decalQueue;
-    ZHLN::Array<GPULight>               mappedLights;
-    ZHLN::DoubleBuffered<BufferHandle>  debugMeshHandles;
+    RenderQueues                       queues;
+    ZHLN::Array<GPULight>              mappedLights;
+    ZHLN::DoubleBuffered<BufferHandle> debugMeshHandles;
 
     Vk::Pipeline       csgWritePipeline;
     Vk::Pipeline       csgDifferencePipeline;
@@ -828,7 +837,6 @@ struct RenderContext::Impl {
     Vk::PipelineLayout                    uiPipelineLayout;
     ZHLN::DoubleBuffered<Vk::Buffer>      uiVbos;
     ZHLN::DoubleBuffered<VkDeviceAddress> uiVboAddresses;
-    ZHLN::Array<UIBatch>                  uiBatches;
 
     [[nodiscard]] std::expected<void, Error> InitUIDynamicBuffers() noexcept;
 

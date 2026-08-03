@@ -48,8 +48,8 @@ VSOutput VSMain(uint vertexID : SV_VertexID) {
 [[vk::binding(1, 0)]] SamplerState     pointSampler;
 
 struct PSOutput {
-    float4 albedo : SV_Target0;          // Writes to G-Buffer SceneColor
-    float4 normalRoughness : SV_Target2; // Writes to G-Buffer NormRough
+    float4 albedo : SV_Target0;          // Writes to G-Buffer SceneColor (Slot 0)
+    float4 normalRoughness : SV_Target1; // Writes to G-Buffer NormRough (Slot 1)
 };
 
 PSOutput PSMain(VSOutput input) {

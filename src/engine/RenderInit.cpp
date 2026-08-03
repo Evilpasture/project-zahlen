@@ -860,6 +860,8 @@ std::expected<void, Error> RenderContext::Impl::BuildDecalPipeline() {
         .size       = sizeof(DecalPushConstants) // 144 bytes
     };
 
+    static constexpr std::array<VkFormat, 2> decalFormats = {VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_FORMAT_R8G8B8A8_UNORM};
+
     return Vk::PipelineLayoutBuilder(ctx.Device())
         .AddDescriptorSetLayout(decalDescLayout.Get()) // Set 0: DecalLayout (texDepth, pointSampler)
         .AddDescriptorSetLayout(bindlessLayout.Get())  // Set 1: Global Bindless Layout
@@ -871,16 +873,15 @@ std::expected<void, Error> RenderContext::Impl::BuildDecalPipeline() {
 
             auto decalShaders = Resource::GetShaderProgram(Decal);
 
-            // Correctly nest .and_then on LoadAndCreateShaders
             return LoadAndCreateShaders(
                        {.path = SHADER_DECAL_VS_PATH, .fallback = decalShaders.vertex, .entryPoint = "VSMain"},
                        {.path = SHADER_DECAL_PS_PATH, .fallback = decalShaders.fragment, .entryPoint = "PSMain"}
             )
                 .and_then([&](auto&& shaders) -> std::expected<void, Error> {
-                    return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
+                    return Vk::PipelineBuilder<2, true> {} // Updated from 3 to 2 attachments
                         .Shaders(shaders)
                         .Layout(decalPipelineLayout.Get())
-                        .ColorFormats(ActiveGBuffer::array)
+                        .ColorFormats(decalFormats) // Explicit 2-format array
                         .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
                         .DepthTest(true)
                         .DepthWrite(false)
