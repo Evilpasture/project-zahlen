@@ -6,12 +6,19 @@
 #include <Jolt/Jolt.h>
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Common.h>
+#include <cstdint>
 #include <memory>
 #include <string>
 
 namespace ZHLN {
 
 class Engine;
+
+enum class AudioWaveformType : uint8_t { Sine = 0, Square = 1, Triangle = 2, Sawtooth = 3 };
+
+enum class AudioFilterType : uint8_t { LowPass = 0, HighPass = 1, BandPass = 2, Notch = 3 };
+
+enum class AudioNoiseType : uint8_t { White = 0, Pink = 1, Brownian = 2 };
 
 struct AudioConfig {
     bool enableSpatialization = true;
@@ -44,8 +51,40 @@ class ZHLN_API AudioContext {
     void SetSoundInstanceLooping(void* soundHandle, bool looping);
     auto IsSoundInstancePlaying(void* soundHandle) -> bool;
 
-    // Procedural sound generation (for UI beeps, jump indicators, etc.)
+    // Basic procedural sine beep
     void PlayProceduralBeep(float frequency = 440.0f, float duration = 0.5f, float volume = 0.2f);
+
+    // --- Advanced DSP & Procedural Audio Synthesis API ---
+
+    // Filtered noise burst with exponential volume decay (gunshots, impacts, explosions)
+    void PlayNoiseBurst(AudioFilterType filterType, float freq, float q, float volume, float duration, AudioNoiseType noiseType = AudioNoiseType::White);
+
+    void PlayNoiseBurst3D(
+        AudioFilterType  filterType,
+        float            freq,
+        float            q,
+        float            volume,
+        float            duration,
+        const JPH::Vec3& position,
+        AudioNoiseType   noiseType = AudioNoiseType::White
+    );
+
+    // Frequency-swept tone with exponential volume decay (ricochets, pitch bends, UI chimes)
+    void PlayToneSweep(AudioWaveformType waveType, float startFreq, float endFreq, float volume, float duration);
+
+    void PlayToneSweep3D(AudioWaveformType waveType, float startFreq, float endFreq, float volume, float duration, const JPH::Vec3& position);
+
+    // Dynamic dual-oscillator loop synthesizer with real-time charge & filter modulation (miniguns, thrusters, engines)
+    auto CreateLoopSynth(
+        AudioWaveformType waveType1  = AudioWaveformType::Sawtooth,
+        AudioWaveformType waveType2  = AudioWaveformType::Square,
+        AudioFilterType   filterType = AudioFilterType::LowPass
+    ) -> void*;
+
+    void SetLoopSynthParams(void* handle, float charge, float baseFreq = 40.0f, float filterFreq = 500.0f, float volume = 0.16f);
+
+    void StopLoopSynth(void* handle, float fadeOutTime = 0.08f);
+    void DestroyLoopSynth(void* handle);
 
     struct Impl;
     [[nodiscard]] auto GetImpl() const -> Impl* {

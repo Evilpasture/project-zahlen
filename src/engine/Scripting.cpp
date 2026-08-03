@@ -209,6 +209,65 @@ struct GetTrackNameArgs {
     char     outName[64];
 };
 
+struct PlayNoiseBurstArgs {
+    uint8_t filterType;
+    float   freq;
+    float   q;
+    float   volume;
+    float   duration;
+    uint8_t noiseType;
+};
+
+struct PlayNoiseBurst3DArgs {
+    uint8_t filterType;
+    float   freq;
+    float   q;
+    float   volume;
+    float   duration;
+    float   x;
+    float   y;
+    float   z;
+    uint8_t noiseType;
+};
+
+struct PlayToneSweepArgs {
+    uint8_t waveType;
+    float   startFreq;
+    float   endFreq;
+    float   volume;
+    float   duration;
+};
+
+struct PlayToneSweep3DArgs {
+    uint8_t waveType;
+    float   startFreq;
+    float   endFreq;
+    float   volume;
+    float   duration;
+    float   x;
+    float   y;
+    float   z;
+};
+
+struct CreateLoopSynthArgs {
+    uint8_t waveType1;
+    uint8_t waveType2;
+    uint8_t filterType;
+};
+
+struct SetLoopSynthParamsArgs {
+    uint64_t handle;
+    float    charge;
+    float    baseFreq;
+    float    filterFreq;
+    float    volume;
+};
+
+struct StopLoopSynthArgs {
+    uint64_t handle;
+    float    fadeOutTime;
+};
+
 struct SpawnTerrainArgs {
     uint32_t     sampleCount;
     float        worldSize;
@@ -794,8 +853,9 @@ void RegisterAudioCommands() {
                 }));
 
     RegisterCmd("CreateSoundInstance", MakeCmd<CreateSoundInstanceArgs>([](ZHLN::Engine* engine, const CreateSoundInstanceArgs& a) -> uint64_t {
-                    if (!a.filepath)
+                    if (!a.filepath) {
                         return 0;
+                    }
                     void* handle = engine->GetAudioContext().CreateSoundInstance(a.filepath, a.spatialized != 0);
                     return reinterpret_cast<uint64_t>(handle);
                 }));
@@ -812,6 +872,53 @@ void RegisterAudioCommands() {
 
     RegisterCmd("DestroySoundInstance", MakeCmd<SoundInstanceArgs>([](ZHLN::Engine* engine, const SoundInstanceArgs& a) -> uint64_t {
                     engine->GetAudioContext().DestroySoundInstance(reinterpret_cast<void*>(a.handle));
+                    return 0;
+                }));
+
+    // --- Procedural Synthesis & Filter Commands ---
+
+    RegisterCmd("PlayNoiseBurst", MakeCmd<PlayNoiseBurstArgs>([](ZHLN::Engine* engine, const PlayNoiseBurstArgs& a) -> uint64_t {
+                    engine->GetAudioContext().PlayNoiseBurst(
+                        static_cast<ZHLN::AudioFilterType>(a.filterType), a.freq, a.q, a.volume, a.duration, static_cast<ZHLN::AudioNoiseType>(a.noiseType)
+                    );
+                    return 0;
+                }));
+
+    RegisterCmd("PlayNoiseBurst3D", MakeCmd<PlayNoiseBurst3DArgs>([](ZHLN::Engine* engine, const PlayNoiseBurst3DArgs& a) -> uint64_t {
+                    engine->GetAudioContext().PlayNoiseBurst3D(
+                        static_cast<ZHLN::AudioFilterType>(a.filterType), a.freq, a.q, a.volume, a.duration, JPH::Vec3(a.x, a.y, a.z),
+                        static_cast<ZHLN::AudioNoiseType>(a.noiseType)
+                    );
+                    return 0;
+                }));
+
+    RegisterCmd("PlayToneSweep", MakeCmd<PlayToneSweepArgs>([](ZHLN::Engine* engine, const PlayToneSweepArgs& a) -> uint64_t {
+                    engine->GetAudioContext().PlayToneSweep(static_cast<ZHLN::AudioWaveformType>(a.waveType), a.startFreq, a.endFreq, a.volume, a.duration);
+                    return 0;
+                }));
+
+    RegisterCmd("PlayToneSweep3D", MakeCmd<PlayToneSweep3DArgs>([](ZHLN::Engine* engine, const PlayToneSweep3DArgs& a) -> uint64_t {
+                    engine->GetAudioContext().PlayToneSweep3D(
+                        static_cast<ZHLN::AudioWaveformType>(a.waveType), a.startFreq, a.endFreq, a.volume, a.duration, JPH::Vec3(a.x, a.y, a.z)
+                    );
+                    return 0;
+                }));
+
+    RegisterCmd("CreateLoopSynth", MakeCmd<CreateLoopSynthArgs>([](ZHLN::Engine* engine, const CreateLoopSynthArgs& a) -> uint64_t {
+                    void* handle = engine->GetAudioContext().CreateLoopSynth(
+                        static_cast<ZHLN::AudioWaveformType>(a.waveType1), static_cast<ZHLN::AudioWaveformType>(a.waveType2),
+                        static_cast<ZHLN::AudioFilterType>(a.filterType)
+                    );
+                    return reinterpret_cast<uint64_t>(handle);
+                }));
+
+    RegisterCmd("SetLoopSynthParams", MakeCmd<SetLoopSynthParamsArgs>([](ZHLN::Engine* engine, const SetLoopSynthParamsArgs& a) -> uint64_t {
+                    engine->GetAudioContext().SetLoopSynthParams(reinterpret_cast<void*>(a.handle), a.charge, a.baseFreq, a.filterFreq, a.volume);
+                    return 0;
+                }));
+
+    RegisterCmd("StopLoopSynth", MakeCmd<StopLoopSynthArgs>([](ZHLN::Engine* engine, const StopLoopSynthArgs& a) -> uint64_t {
+                    engine->GetAudioContext().StopLoopSynth(reinterpret_cast<void*>(a.handle), a.fadeOutTime);
                     return 0;
                 }));
 }
