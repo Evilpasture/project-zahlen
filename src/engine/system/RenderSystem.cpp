@@ -413,17 +413,18 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
         std::vector<VertexAttributes> debugAttr;
 
         if (isWireframe && debugData.lineCount > 0) {
-            debugPos.reserve(debugData.lineCount);
-            debugAttr.reserve(debugData.lineCount);
-            for (size_t i = 0; i < debugData.lineCount; ++i) {
-                const auto& jv = debugData.lines[i];
-                debugPos.push_back({.position = {jv.x, jv.y, jv.z}});
-                debugAttr.push_back(
-                    {.normal  = Math::PackNormal(0.0f, 1.0f, 0.0f),
-                     .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
-                     .uv      = Math::PackUV(0.0f, 0.0f),
-                     .color   = {.data = jv.color}}
-                );
+            auto UnpackColorVec4 = [](uint32_t packed) {
+                float r = static_cast<float>(packed & 0xFF) / 255.0f;
+                float g = static_cast<float>((packed >> 8) & 0xFF) / 255.0f;
+                float b = static_cast<float>((packed >> 16) & 0xFF) / 255.0f;
+                float a = static_cast<float>((packed >> 24) & 0xFF) / 255.0f;
+                return JPH::Vec4(r, g, b, a);
+            };
+
+            for (size_t i = 0; i + 1 < debugData.lineCount; i += 2) {
+                const auto& v0 = debugData.lines[i];
+                const auto& v1 = debugData.lines[i + 1];
+                rc.DrawLine(JPH::Vec3(v0.x, v0.y, v0.z), JPH::Vec3(v1.x, v1.y, v1.z), UnpackColorVec4(v0.color), UnpackColorVec4(v1.color));
             }
         } else if (!isWireframe && debugData.triangleCount > 0) {
             debugPos.reserve(debugData.triangleCount);

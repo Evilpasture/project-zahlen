@@ -520,6 +520,21 @@ void ForwardPass::Execute(
                     );
                 }
             }
+
+            if (ctx.linePipeline.Valid() && ctx.activeLineVertexCount > 0) {
+                const ObjectConstants pc = {.instanceId = ctx.lineInstanceId, .isShadowPass = 0};
+
+                recorder.encoder.DrawInstanced(
+                    {.pipeline      = ctx.linePipeline.Get(),
+                     .layout        = ctx.linePipelineLayout.Get(),
+                     .set           = recorder.bindlessSet,
+                     .vertexCount   = ctx.activeLineVertexCount,
+                     .instanceCount = 1,
+                     .firstVertex   = 0,
+                     .firstInstance = ctx.lineInstanceId},
+                    pc, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+                );
+            }
         });
 }
 

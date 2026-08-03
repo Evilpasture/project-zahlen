@@ -331,6 +331,13 @@ struct SetIKTargetEntityArgs {
     float    weight;
 };
 
+struct DrawLineArgs {
+    float ox, oy, oz;
+    float dx, dy, dz;
+    float r1, g1, b1, a1;
+    float r2, g2, b2, a2;
+};
+
 #pragma pack(pop)
 
 void SafeDestroyEntity(ZHLN::Engine* engine, ZHLN::Entity entity) {
@@ -1111,6 +1118,13 @@ void RegisterECSCommands() {
 void RegisterSystemCommands() {
     RegisterCmd("ProvokeDeviceLost", MakeCmd<void>([](ZHLN::Engine* engine) -> uint64_t {
                     engine->ProvokeDeviceLost();
+                    return 1;
+                }));
+
+    RegisterCmd("DrawLine", MakeCmd<DrawLineArgs>([](ZHLN::Engine* engine, const DrawLineArgs& a) -> uint64_t {
+                    engine->GetRenderContext().DrawLine(
+                        JPH::Vec3(a.ox, a.oy, a.oz), JPH::Vec3(a.dx, a.dy, a.dz), JPH::Vec4(a.r1, a.g1, a.b1, a.a1), JPH::Vec4(a.r2, a.g2, a.b2, a.a2)
+                    );
                     return 1;
                 }));
 

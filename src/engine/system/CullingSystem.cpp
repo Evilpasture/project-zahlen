@@ -7,11 +7,11 @@
 #include "engine/system/CameraSystem.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
+#include <Zahlen/Core/ControlFlow.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
-#include <Zahlen/Core/ControlFlow.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <engine/Resources.hpp>
 #include <physics/PhysicsWorld.hpp>
@@ -224,42 +224,6 @@ void CullingSystem::DrawDebugFrustum(Engine& engine) {
 
     auto& rc = engine.GetRenderContext();
 
-    BufferHandle debugVbo = rc.GetDebugMeshBuffer();
-    if (debugVbo == BufferHandle::Invalid) {
-        return;
-    }
-
-    PipelineDesc lineDesc = {
-        .vertexShaderData = Resource::GetShaderProgram(Resource::ShaderID::Basic).vertex.data(),
-        .vertexShaderSize = static_cast<std::uint32_t>(Resource::GetShaderProgram(Resource::ShaderID::Basic).vertex.size()),
-        .fragShaderData   = Resource::forward_frag.data(),
-        .fragShaderSize   = static_cast<std::uint32_t>(Resource::forward_frag.size()),
-        .doubleSided      = true,
-        .alphaBlend       = true,
-        .isLineList       = true
-    };
-
-    auto debugLineMat_res = rc.CreateMaterial(lineDesc);
-    if (!debugLineMat_res) {
-        return;
-    }
-    Material debugMat    = debugLineMat_res.value();
-    debugMat.albedoIndex = 1;
-
-    debugMat.baseColorFactor[0] = 0.0f;
-    debugMat.baseColorFactor[1] = 1.0f;
-    debugMat.baseColorFactor[2] = 1.0f;
-    debugMat.baseColorFactor[3] = 1.0f;
-
-    Mesh debugMesh = {
-        .posBuffer   = debugVbo,
-        .attrBuffer  = debugVbo,
-        .skinBuffer  = BufferHandle::Invalid,
-        .indexBuffer = BufferHandle::Invalid,
-        .vertexCount = 36,
-        .indexCount  = 0
-    };
-
     struct FrustumEdge {
         int start;
         int end;
@@ -279,23 +243,11 @@ void CullingSystem::DrawDebugFrustum(Engine& engine) {
          {.start = 3, .end = 7}}
     };
 
+    JPH::Vec4 cyanColor(0.0f, 1.0f, 1.0f, 1.0f);
     for (auto edge: frustumEdges) {
         JPH::Vec3 pA = m_frustumCorners[edge.start];
         JPH::Vec3 pB = m_frustumCorners[edge.end];
-
-        JPH::Vec3 v   = pB - pA;
-        float     len = v.Length();
-        if (len < 1e-4f) {
-            continue;
-        }
-
-        JPH::Vec3 dir = v / len;
-        JPH::Vec3 mid = (pA + pB) * 0.5f;
-
-        JPH::Quat  rot           = JPH::Quat::sFromTo(JPH::Vec3::sAxisZ(), dir);
-        JPH::Mat44 lineTransform = Math::CreateTransform(mid, rot, JPH::Vec3(1.0f, 1.0f, len));
-
-        Renderer::Draw(rc, debugMat, debugMesh, {.transform = lineTransform, .prevTransform = lineTransform, .cullRadius = len});
+        rc.DrawLine(pA, pB, cyanColor, cyanColor);
     }
 }
 

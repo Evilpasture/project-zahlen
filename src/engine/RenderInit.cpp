@@ -506,6 +506,57 @@ RenderContext::~RenderContext() {
     }
 }
 
+std::expected<void, Error> RenderContext::Impl::InitLineBuffers() noexcept {
+    const size_t maxLineVerts   = 500000;
+    const size_t lineBufferSize = maxLineVerts * (sizeof(VertexPosition) + sizeof(VertexAttributes));
+
+    for (int i = 0; i < 2; ++i) {
+        auto gpu_buf_res = Vk::Buffer::Create(
+            allocator.Get(), lineBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            VMA_MEMORY_USAGE_CPU_TO_GPU
+        );
+        if (!gpu_buf_res) {
+            return std::unexpected(Error(gpu_buf_res.error()));
+        }
+        lineVbos[i]         = std::move(*gpu_buf_res);
+        lineVboAddresses[i] = ctx.BufferAddress(lineVbos[i].Handle());
+    }
+    ZHLN::Log("Allocated double-buffered dynamic line tracer VBOs ({} bytes).", lineBufferSize);
+    return {};
+}
+
+std::expected<void, Error> RenderContext::Impl::BuildLinePipeline() {
+    return Vk::PipelineLayoutBuilder(ctx.Device())
+        .AddDescriptorSetLayout(bindlessLayout.Get())
+        .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
+        .Build()
+        .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
+        .and_then([&](auto&& layout) -> std::expected<void, Error> {
+            linePipelineLayout = std::forward<decltype(layout)>(layout);
+
+            auto basicShaders = Resource::GetShaderProgram(Resource::ShaderID::Basic);
+
+            return LoadAndCreateShaders(
+                       {.path = SHADER_BASIC_HLSL_VS_PATH, .fallback = basicShaders.vertex, .entryPoint = "VSMain"},
+                       {.path = SHADER_FORWARD_HLSL_PS_PATH, .fallback = Resource::forward_frag, .entryPoint = "PSMain"}
+            )
+                .and_then([&](auto&& shaders) -> std::expected<void, Error> {
+                    return Vk::PipelineBuilder<1, true> {}
+                        .Shaders(shaders)
+                        .Layout(linePipelineLayout.Get())
+                        .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
+                        .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
+                        .DepthTest(true)
+                        .DepthWrite(false)
+                        .Topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST)
+                        .CullNone()
+                        .AlphaBlend()
+                        .Build(ctx.Device())
+                        .transform([&](auto&& pipeline) { linePipeline = std::forward<decltype(pipeline)>(pipeline); });
+                });
+        });
+}
+
 std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
     using enum RenderInitError;
 

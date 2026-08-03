@@ -507,6 +507,13 @@ struct DecalDrawCommand {
     float      metallic;
 };
 
+struct LineSegment {
+    JPH::Vec3 start      = JPH::Vec3::sZero();
+    JPH::Vec3 end        = JPH::Vec3::sZero();
+    JPH::Vec4 colorStart = {1.0f, 1.0f, 1.0f, 1.0f};
+    JPH::Vec4 colorEnd   = {1.0f, 1.0f, 1.0f, 1.0f};
+};
+
 struct WorkerCmdContext {
     std::array<Vk::CommandPool<Vk::QueueType::Graphics>, 2> pools;
     std::array<ZHLN::Atomic<uint32_t>, 2>                   cmdCount {};
@@ -571,6 +578,7 @@ struct RenderQueues {
     ZHLN::Array<CSGDrawCommand>         csgDrawQueue;
     ZHLN::Array<ParticleEmitterCommand> particleEmittersQueue;
     ZHLN::Array<DecalDrawCommand>       decalQueue;
+    ZHLN::Array<LineSegment>            lineQueue;
     ZHLN::Array<UIBatch>                uiBatches;
 
     void Clear() noexcept {
@@ -766,6 +774,17 @@ struct RenderContext::Impl {
 
     Vk::PipelineLayout decalPipelineLayout;
     Vk::Pipeline       decalPipeline;
+
+    Vk::PipelineLayout                    linePipelineLayout;
+    Vk::Pipeline                          linePipeline;
+    ZHLN::DoubleBuffered<Vk::Buffer>      lineVbos;
+    ZHLN::DoubleBuffered<VkDeviceAddress> lineVboAddresses;
+    uint32_t                              activeLineVertexCount = 0;
+    uint32_t                              lineInstanceId        = 0;
+
+    std::expected<void, Error> BuildLinePipeline();
+    std::expected<void, Error> InitLineBuffers() noexcept;
+    void                       FlushLineQueue();
 
     // ============================================================================
     // GPU Storage & Double-Buffered Work Buffers

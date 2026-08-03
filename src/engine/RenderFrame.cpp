@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
+#include "Zahlen/Math3D.hpp"
 #include "Zahlen/Profiler.hpp"
 #include "engine/Scheduler.hpp"
 #include <Zahlen/Core/RadixSort.hpp>
@@ -131,6 +132,89 @@ void RenderContext::Impl::SortDrawQueue() {
     }
 
     queues.drawQueue = sortDrawQueueScratch;
+}
+
+void RenderContext::Impl::FlushLineQueue() {
+    activeLineVertexCount = 0;
+
+    if (queues.lineQueue.empty() || !linePipeline.Valid()) {
+        return;
+    }
+
+    const uint32_t maxLineVerts   = 500000;
+    uint32_t       totalLineVerts = std::min(static_cast<uint32_t>(queues.lineQueue.size() * 2), maxLineVerts);
+
+    auto  mappedRegion = lineVbos[frame_index].Map();
+    auto* basePosPtr   = static_cast<VertexPosition*>(mappedRegion.data);
+    auto* baseAttrPtr  = reinterpret_cast<VertexAttributes*>(basePosPtr + maxLineVerts);
+
+    Packed1010102 dummyNorm = Math::PackNormal(0.0f, 1.0f, 0.0f);
+    Packed1010102 dummyTang = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f);
+
+    uint32_t vertIdx = 0;
+    for (const auto& line: queues.lineQueue) {
+        if (vertIdx + 2 > totalLineVerts) {
+            break;
+        }
+
+        basePosPtr[vertIdx]  = {.position = {line.start.GetX(), line.start.GetY(), line.start.GetZ()}};
+        baseAttrPtr[vertIdx] = {
+            .normal  = dummyNorm,
+            .tangent = dummyTang,
+            .uv      = Math::PackUV(0.0f, 0.0f),
+            .color   = Math::PackColor(line.colorStart.GetX(), line.colorStart.GetY(), line.colorStart.GetZ(), line.colorStart.GetW())
+        };
+        vertIdx++;
+
+        basePosPtr[vertIdx]  = {.position = {line.end.GetX(), line.end.GetY(), line.end.GetZ()}};
+        baseAttrPtr[vertIdx] = {
+            .normal  = dummyNorm,
+            .tangent = dummyTang,
+            .uv      = Math::PackUV(1.0f, 1.0f),
+            .color   = Math::PackColor(line.colorEnd.GetX(), line.colorEnd.GetY(), line.colorEnd.GetZ(), line.colorEnd.GetW())
+        };
+        vertIdx++;
+    }
+
+    activeLineVertexCount = vertIdx;
+
+    // Allocate identity instance data for the line batch
+    auto lineInstanceIdx = static_cast<uint32_t>(queues.drawQueue.size());
+    lineInstanceId       = lineInstanceIdx;
+
+    VkDeviceAddress posAddr  = lineVboAddresses[frame_index];
+    VkDeviceAddress attrAddr = posAddr + (maxLineVerts * sizeof(VertexPosition));
+
+    auto  mappedInst = instanceDataBuffers[frame_index].Map();
+    auto* dst        = static_cast<InstanceData*>(mappedInst.data);
+
+    dst[lineInstanceIdx] = {
+        .world            = JPH::Mat44::sIdentity(),
+        .prevWorld        = JPH::Mat44::sIdentity(),
+        .posAddress       = posAddr,
+        .attrAddress      = attrAddr,
+        .skinAddress      = 0,
+        .iboAddress       = 0,
+        .vertexCount      = vertIdx,
+        .indexCount       = 0,
+        .texIndices0      = (2 << 16) | 1,
+        .texIndices1      = (1 << 16) | 0,
+        .cullRadius       = 10000.0f,
+        .metallicFactor   = 0.0f,
+        .roughnessFactor  = 1.0f,
+        .alphaCutoff      = 0.0f,
+        .flags            = 2, // Forward pass flag
+        .jointOffset      = 0,
+        .morphOffset      = 0,
+        .activeMorphCount = 0,
+        .localCenter      = {0.0f, 0.0f, 0.0f},
+        ._paddingCenter   = 0,
+        .morphWeights     = {0.0f, 0.0f, 0.0f, 0.0f},
+        .baseColorFactor  = {1.0f, 1.0f, 1.0f, 1.0f},
+        .emissiveFactor   = {0.0f, 0.0f, 0.0f, 1.0f},
+    };
+
+    queues.lineQueue.clear();
 }
 
 std::optional<Extent2D> RenderContext::GetFramebufferSize() const {

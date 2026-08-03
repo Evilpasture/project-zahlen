@@ -101,6 +101,16 @@ class ZHLN_API RenderContext {
         uint32_t                vertexCount
     ) noexcept;
 
+    void DrawLine(
+        JPH::Vec3Arg start,
+        JPH::Vec3Arg end,
+        JPH::Vec4Arg colorStart = {1.0f, 1.0f, 1.0f, 1.0f},
+        JPH::Vec4Arg colorEnd   = {1.0f, 1.0f, 1.0f, 1.0f}
+    ) noexcept;
+    void DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg color) noexcept {
+        DrawLine(start, end, color, color);
+    }
+
     [[nodiscard]] auto CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true) -> std::expected<uint32_t, Error>;
     [[nodiscard]] auto CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, Error>;
 

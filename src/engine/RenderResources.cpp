@@ -262,6 +262,10 @@ std::expected<Material, Error> RenderContext::CreateMaterial(const PipelineDesc&
         });
 }
 
+void RenderContext::DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) noexcept {
+    _impl->queues.lineQueue.push_back({.start = start, .end = end, .colorStart = colorStart, .colorEnd = colorEnd});
+}
+
 void RenderContext::Impl::CheckShaderWatchers() noexcept {
     if constexpr (isDev) {
         bool anyReloaded = false;
