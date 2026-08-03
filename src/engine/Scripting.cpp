@@ -44,6 +44,19 @@ struct ZHLN_RaycastResult {
     int      hasHit;
 };
 
+struct ZHLN_RaycastPenetrationResult {
+    uint64_t entity;
+    double   epx, epy, epz;
+    double   xpx, xpy, xpz;
+    float    enx, eny, enz;
+    float    xnx, xny, xnz;
+    float    entryFraction;
+    float    exitFraction;
+    float    thickness;
+    uint32_t materialID;
+    int      hasHit;
+};
+
 struct GetBufferArgs {
     ZHLN_BufferView* outView;
 };
@@ -117,6 +130,13 @@ struct RaycastArgs {
     float               maxDist;
     uint64_t            ignoreEntity;
     ZHLN_RaycastResult* outResult;
+};
+struct RaycastPenetrationArgs {
+    double                         ox, oy, oz;
+    float                          dx, dy, dz;
+    float                          maxDist;
+    uint64_t                       ignoreEntity;
+    ZHLN_RaycastPenetrationResult* outResult;
 };
 struct SetMoveInputArgs {
     uint64_t entityRaw;
@@ -753,6 +773,34 @@ void RegisterPhysicsCommands() {
                         a.outResult->ny       = res.normal.GetY();
                         a.outResult->nz       = res.normal.GetZ();
                         a.outResult->fraction = res.fraction;
+                    }
+                    return 0;
+                }));
+
+    RegisterCmd("RaycastPenetration", MakeCmd<RaycastPenetrationArgs>([](ZHLN::Engine* engine, const RaycastPenetrationArgs& a) -> uint64_t {
+                    ZHLN::Entity ignore = a.ignoreEntity != 0 ? ZHLN::Entity::Unpack(a.ignoreEntity) : ZHLN::Entity {};
+                    auto         res    = ZHLN::Physics::RaycastPenetration(
+                        engine->GetPhysicsContext(), JPH::RVec3(a.ox, a.oy, a.oz), JPH::Vec3(a.dx, a.dy, a.dz), a.maxDist, ignore
+                    );
+                    a.outResult->hasHit = res.hasHit ? 1 : 0;
+                    if (res.hasHit) {
+                        a.outResult->entity        = res.handle.Pack();
+                        a.outResult->epx           = res.entryPosition.GetX();
+                        a.outResult->epy           = res.entryPosition.GetY();
+                        a.outResult->epz           = res.entryPosition.GetZ();
+                        a.outResult->xpx           = res.exitPosition.GetX();
+                        a.outResult->xpy           = res.exitPosition.GetY();
+                        a.outResult->xpz           = res.exitPosition.GetZ();
+                        a.outResult->enx           = res.entryNormal.GetX();
+                        a.outResult->eny           = res.entryNormal.GetY();
+                        a.outResult->enz           = res.entryNormal.GetZ();
+                        a.outResult->xnx           = res.exitNormal.GetX();
+                        a.outResult->xny           = res.exitNormal.GetY();
+                        a.outResult->xnz           = res.exitNormal.GetZ();
+                        a.outResult->entryFraction = res.entryFraction;
+                        a.outResult->exitFraction  = res.exitFraction;
+                        a.outResult->thickness     = res.thickness;
+                        a.outResult->materialID    = res.materialID;
                     }
                     return 0;
                 }));

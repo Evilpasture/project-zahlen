@@ -41,7 +41,6 @@ static bool TryGetValidHandle(const PhysicsWorld& world, JPH::BodyID bodyID, ZHL
 
     const uint8_t state = world.slotStates[handle.index].load(std::memory_order::acquire);
 
-    // Using the simplified C++ predicate
     const SlotPredicate pred = GetSlotPredicate(state);
 
     if (pred.isActive) {
@@ -79,13 +78,11 @@ RaycastResult Raycast(const PhysicsContext& ctx, JPH::RVec3Arg origin, JPH::Vec3
         if (TryGetValidHandle(world, hit.mBodyID, result.handle)) {
             result.hasHit   = true;
             result.fraction = hit.mFraction;
-            // GetPointOnRay returns RVec3 if ray is RRayCast
             result.position = ray.GetPointOnRay(hit.mFraction);
 
             const auto*       lockInterface = &world.system->GetBodyLockInterfaceNoLock();
             JPH::BodyLockRead lock(*lockInterface, hit.mBodyID);
             if (lock.Succeeded()) {
-                // Surface normal is usually a Vec3 (float)
                 result.normal = lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, result.position);
             } else {
                 result.normal = JPH::Vec3::sAxisY();
@@ -105,7 +102,6 @@ void RaycastAll(
 ) {
     const auto& world = ctx.GetWorld();
 
-    // Guard against queries during physics simulation steps
     if (world.isStepping.load(std::memory_order::relaxed)) {
         return;
     }
@@ -119,21 +115,17 @@ void RaycastAll(
     JPH::RRayCast ray {origin, scaledDir};
 
     JPH::RayCastSettings settings;
-    // Collide with back-faces to detect when the ray exits a solid boundary
     settings.mBackFaceModeTriangles = JPH::EBackFaceMode::CollideWithBackFaces;
     settings.mBackFaceModeConvex    = JPH::EBackFaceMode::CollideWithBackFaces;
-    // Disable solid treatment so rays starting inside a hull don't immediately return a 0.0 fraction
-    settings.mTreatConvexAsSolid = false;
+    settings.mTreatConvexAsSolid    = false;
 
     JPH::BodyID ignoreID = GetBodyID(world, ignore);
     QueryFilter filter(ignoreID);
 
-    // Use Jolt's built-in multiple hit collector
     JPH::AllHitCollisionCollector<JPH::CastRayCollector> collector;
     const auto*                                          query = &world.system->GetNarrowPhaseQuery();
     query->CastRay(ray, settings, collector, {}, {}, filter);
 
-    // Sort hits from nearest to furthest
     collector.Sort();
 
     if (collector.HadHit()) {
@@ -146,7 +138,6 @@ void RaycastAll(
                 result.fraction = hit.mFraction;
                 result.position = ray.GetPointOnRay(hit.mFraction);
 
-                // Safely lock body to resolve the world space normal of the sub-shape hit
                 JPH::BodyLockRead lock(*lockInterface, hit.mBodyID);
                 if (lock.Succeeded()) {
                     result.normal = lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, result.position);
@@ -157,6 +148,147 @@ void RaycastAll(
             }
         }
     }
+}
+
+void RaycastAllPenetrations(
+    const PhysicsContext&                 ctx,
+    JPH::RVec3Arg                         origin,
+    JPH::Vec3Arg                          direction,
+    float                                 maxDistance,
+    JPH::Array<RaycastPenetrationResult>& outResults,
+    ZHLN::Entity                          ignore
+) {
+    const auto& world = ctx.GetWorld();
+    if (world.isStepping.load(std::memory_order::relaxed)) {
+        return;
+    }
+
+    float lengthSq = direction.LengthSq();
+    if (lengthSq < 1e-6f) {
+        return;
+    }
+
+    JPH::Vec3     dirNorm   = direction.Normalized();
+    JPH::Vec3     scaledDir = dirNorm * maxDistance;
+    JPH::RRayCast ray {origin, scaledDir};
+
+    JPH::RayCastSettings settings;
+    settings.mBackFaceModeTriangles = JPH::EBackFaceMode::CollideWithBackFaces;
+    settings.mBackFaceModeConvex    = JPH::EBackFaceMode::CollideWithBackFaces;
+    settings.mTreatConvexAsSolid    = false;
+
+    JPH::BodyID ignoreID = GetBodyID(world, ignore);
+    QueryFilter filter(ignoreID);
+
+    JPH::AllHitCollisionCollector<JPH::CastRayCollector> collector;
+    const auto*                                          query = &world.system->GetNarrowPhaseQuery();
+    query->CastRay(ray, settings, collector, {}, {}, filter);
+
+    collector.Sort();
+
+    if (!collector.HadHit()) {
+        return;
+    }
+
+    struct IntermediateHit {
+        JPH::BodyID bodyID;
+        float       fraction;
+        JPH::RVec3  position;
+        JPH::Vec3   normal;
+        bool        isBackFace;
+    };
+
+    const auto* lockInterface = &world.system->GetBodyLockInterfaceNoLock();
+
+    JPH::Array<IntermediateHit> hits;
+    hits.reserve(collector.mHits.size());
+
+    for (const auto& hit: collector.mHits) {
+        ZHLN::Entity handle;
+        if (TryGetValidHandle(world, hit.mBodyID, handle)) {
+            JPH::BodyLockRead lock(*lockInterface, hit.mBodyID);
+            if (lock.Succeeded()) {
+                JPH::RVec3 hitPos = ray.GetPointOnRay(hit.mFraction);
+                JPH::Vec3  norm   = lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, hitPos);
+
+                // If dot(dirNorm, norm) > 0, ray is exiting the surface (back-face hit)
+                bool isBackFace = (dirNorm.Dot(norm) > 0.0f);
+
+                hits.push_back({.bodyID = hit.mBodyID, .fraction = hit.mFraction, .position = hitPos, .normal = norm, .isBackFace = isBackFace});
+            }
+        }
+    }
+
+    // Pair entry (front-face) and exit (back-face) hits for each body
+    JPH::Array<bool> processed(hits.size(), false);
+
+    for (size_t i = 0; i < hits.size(); ++i) {
+        if (processed[i]) {
+            continue;
+        }
+
+        const auto&  entryHit = hits[i];
+        ZHLN::Entity handle;
+        if (!TryGetValidHandle(world, entryHit.bodyID, handle)) {
+            continue;
+        }
+
+        processed[i] = true;
+
+        RaycastPenetrationResult res {};
+        res.hasHit = true;
+        res.handle = handle;
+
+        uint32_t dense = world.slotToDense[handle.index];
+        res.materialID = world.materialIDs[dense];
+
+        if (!entryHit.isBackFace) {
+            // Normal entry from outside
+            res.entryPosition = entryHit.position;
+            res.entryNormal   = entryHit.normal;
+            res.entryFraction = entryHit.fraction;
+
+            // Search for corresponding exit hit on the same body
+            bool foundExit = false;
+            for (size_t j = i + 1; j < hits.size(); ++j) {
+                if (!processed[j] && hits[j].bodyID == entryHit.bodyID && hits[j].isBackFace) {
+                    processed[j]     = true;
+                    res.exitPosition = hits[j].position;
+                    res.exitNormal   = hits[j].normal;
+                    res.exitFraction = hits[j].fraction;
+                    foundExit        = true;
+                    break;
+                }
+            }
+
+            if (!foundExit) {
+                // Ray ended inside object
+                res.exitFraction = 1.0f;
+                res.exitPosition = ray.GetPointOnRay(1.0f);
+                res.exitNormal   = -dirNorm;
+            }
+        } else {
+            // Ray started inside object and exited
+            res.entryPosition = origin;
+            res.entryNormal   = -dirNorm;
+            res.entryFraction = 0.0f;
+            res.exitPosition  = entryHit.position;
+            res.exitNormal    = entryHit.normal;
+            res.exitFraction  = entryHit.fraction;
+        }
+
+        res.thickness = static_cast<float>((res.exitPosition - res.entryPosition).Length());
+        outResults.push_back(res);
+    }
+}
+
+RaycastPenetrationResult RaycastPenetration(const PhysicsContext& ctx, JPH::RVec3Arg origin, JPH::Vec3Arg direction, float maxDistance, ZHLN::Entity ignore) {
+    JPH::Array<RaycastPenetrationResult> results;
+    RaycastAllPenetrations(ctx, origin, direction, maxDistance, results, ignore);
+    if (!results.empty()) {
+        return results[0];
+    }
+    return {};
 }
 
 ShapeCastResult Shapecast(
@@ -180,10 +312,8 @@ ShapeCastResult Shapecast(
 
     JPH::Vec3 scaledDir = direction.Normalized() * maxDistance;
 
-    // Use RMat44 for the double-precision start transform
     JPH::RShapeCast cast(shape, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sRotationTranslation(rot, pos), scaledDir);
 
-    // Use standard CastShapeCollector (Jolt manages precision inside)
     JPH::ClosestHitCollisionCollector<JPH::CastShapeCollector> collector;
     JPH::BodyID                                                ignoreID = GetBodyID(world, ignore);
     QueryFilter                                                filter(ignoreID);
@@ -198,10 +328,8 @@ ShapeCastResult Shapecast(
     ShapeCastResult result {};
     if (collector.HadHit()) {
         if (TryGetValidHandle(world, collector.mHit.mBodyID2, result.handle)) {
-            result.hasHit   = true;
-            result.fraction = collector.mHit.mFraction;
-
-            // FIX: Explicitly cast float Vec3 to double RVec3
+            result.hasHit       = true;
+            result.fraction     = collector.mHit.mFraction;
             result.contactPoint = JPH::RVec3(collector.mHit.mContactPointOn2);
 
             JPH::Vec3 axis       = -collector.mHit.mPenetrationAxis;
@@ -214,19 +342,19 @@ ShapeCastResult Shapecast(
 
 void OverlapSphere(const PhysicsContext& ctx, JPH::RVec3Arg center, float radius, JPH::Array<ZHLN::Entity>& outResults) {
     const auto& world = ctx.GetWorld();
-    if (world.isStepping.load(std::memory_order::relaxed))
+    if (world.isStepping.load(std::memory_order::relaxed)) {
         return;
+    }
 
     JPH::SphereShapeSettings settings(radius);
     JPH::ShapeRefC           shape = settings.Create().Get();
 
-    // Use standard CollideShapeCollector
     JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> collector;
     const auto*                                               query = &world.system->GetNarrowPhaseQuery();
 
     query->CollideShape(shape, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sTranslation(center), {}, JPH::RVec3::sZero(), collector);
 
-    ZHLN::Entity handle;
+    ZHLN::Entity handle {};
     for (const auto& hit: collector.mHits) {
         if (TryGetValidHandle(world, hit.mBodyID2, handle)) {
             outResults.push_back(handle);
@@ -245,7 +373,7 @@ void OverlapAABB(const PhysicsContext& ctx, JPH::RVec3Arg minBox, JPH::RVec3Arg 
 
     query->CollideAABox(box, collector);
 
-    ZHLN::Entity handle;
+    ZHLN::Entity handle {};
     for (const auto& hitID: collector.mHits) {
         if (TryGetValidHandle(world, hitID, handle)) {
             outResults.push_back(handle);
@@ -255,12 +383,12 @@ void OverlapAABB(const PhysicsContext& ctx, JPH::RVec3Arg minBox, JPH::RVec3Arg 
 
 void QueryAABB(const PhysicsContext& ctx, JPH::Vec3Arg min, JPH::Vec3Arg max, JPH::Array<ZHLN::Entity>& outEntities) {
     const auto& world = ctx.GetWorld();
-    if (world.isStepping.load(std::memory_order::relaxed))
+    if (world.isStepping.load(std::memory_order::relaxed)) {
         return;
+    }
 
     JPH::AABox box(min, max);
 
-    // collector that just dumps everything into the array
     struct SimpleCollector: public JPH::CollideShapeBodyCollector {
         const PhysicsWorld&       world;
         JPH::Array<ZHLN::Entity>& out;
@@ -298,20 +426,16 @@ void FrustumCull(const PhysicsContext& ctx, const JPH::Mat44& viewProj, const Fr
         }
 
         void AddHit(const JPH::BodyID& inBodyID) override {
-            ZHLN::Entity handle;
+            ZHLN::Entity handle {};
             if (TryGetValidHandle(world, inBodyID, handle)) {
-                // FIX: Fetch the ACTUAL bounds from Jolt instead of a hardcoded 2.0f sphere!
-                // Because world.isStepping is false, using NoLock is thread-safe here.
                 JPH::BodyLockRead lock(world.system->GetBodyLockInterfaceNoLock(), inBodyID);
 
                 if (lock.Succeeded()) {
                     JPH::AABox bounds = lock.GetBody().GetWorldSpaceBounds();
 
-                    // Calculate the circumscribed sphere of the object's actual AABB
                     JPH::Vec3 center = bounds.GetCenter();
-                    float     radius = bounds.GetExtent().Length(); // Distance from center to corner
+                    float     radius = bounds.GetExtent().Length();
 
-                    // The floor will have a massive radius, so it will never be incorrectly culled.
                     if (frustum.IsSphereVisible(center, radius)) {
                         out.push_back(handle);
                     }

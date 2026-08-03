@@ -12,12 +12,11 @@
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Physics/Body/BodyID.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
-#include <Jolt/Physics/Collision/Shape/Shape.h> // For ShapeRefC
+#include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Entity.hpp>
 #include <physics/PhysicsWorld.hpp>
 #include <Zahlen/Types.hpp>
-
 // clang-format on
 
 #include <cstdint>
@@ -152,6 +151,19 @@ struct RaycastResult {
     bool         hasHit;
 };
 
+struct RaycastPenetrationResult {
+    ZHLN::Entity handle;
+    JPH::RVec3   entryPosition;
+    JPH::RVec3   exitPosition;
+    JPH::Vec3    entryNormal;
+    JPH::Vec3    exitNormal;
+    float        entryFraction;
+    float        exitFraction;
+    float        thickness;
+    uint32_t     materialID;
+    bool         hasHit;
+};
+
 struct ShapeCastResult {
     ZHLN::Entity handle;
     JPH::RVec3   contactPoint;
@@ -164,13 +176,12 @@ struct CullResult {
     ZHLN::Entity* results;
     uint32_t      count;
 };
-/**
- * @brief Uses Jolt's Broadphase to find all entities within a frustum.
- */
+
 void FrustumCull(const PhysicsContext& ctx, const JPH::Mat44& viewProj, const Frustum& frustum, JPH::Array<ZHLN::Entity>& outEntities);
 
 static_assert(
     (std::is_trivially_default_constructible_v<RaycastResult> && std::is_trivially_copyable_v<RaycastResult>) &&
+    (std::is_trivially_default_constructible_v<RaycastPenetrationResult> && std::is_trivially_copyable_v<RaycastPenetrationResult>) &&
     (std::is_trivially_default_constructible_v<ShapeCastResult> && std::is_trivially_copyable_v<ShapeCastResult>) &&
     (std::is_trivially_default_constructible_v<CullResult> && std::is_trivially_copyable_v<CullResult>)
 );
@@ -186,6 +197,18 @@ void RaycastAll(
     float                      maxDistance,
     JPH::Array<RaycastResult>& outResults,
     ZHLN::Entity               ignore = {}
+);
+
+[[nodiscard]] RaycastPenetrationResult
+    RaycastPenetration(const PhysicsContext& ctx, JPH::RVec3Arg origin, JPH::Vec3Arg direction, float maxDistance = 1000.0f, ZHLN::Entity ignore = {});
+
+void RaycastAllPenetrations(
+    const PhysicsContext&                 ctx,
+    JPH::RVec3Arg                         origin,
+    JPH::Vec3Arg                          direction,
+    float                                 maxDistance,
+    JPH::Array<RaycastPenetrationResult>& outResults,
+    ZHLN::Entity                          ignore = {}
 );
 
 [[nodiscard]] ShapeCastResult Shapecast(
@@ -204,7 +227,7 @@ void OverlapAABB(const PhysicsContext& ctx, JPH::RVec3Arg minBox, JPH::RVec3Arg 
 
 void QueryAABB(const PhysicsContext& ctx, JPH::Vec3Arg min, JPH::Vec3Arg max, JPH::Array<ZHLN::Entity>& outEntities);
 
-// --- Internal Mapping Helpers (Now visible to Query module) ---
+// --- Internal Mapping Helpers ---
 JPH::BodyID  GetBodyID(const PhysicsWorld& world, ZHLN::Entity handle);
 ZHLN::Entity GetEntityHandle(const PhysicsContext& ctx, JPH::BodyID bodyID);
 
@@ -212,7 +235,6 @@ JPH::ShapeRefC CreateHeightFieldShape(const float* heights, int sampleCount, flo
 
 void AddImpulse(PhysicsContext& ctx, ZHLN::Entity handle, JPH::Vec3Arg impulse, JPH::RVec3Arg position);
 
-// Internal helpers to bridge PIMPL barriers for engine factories
 [[nodiscard]] JPH::PhysicsSystem& GetInternalSystem(PhysicsContext& ctx) noexcept;
 [[nodiscard]] PhysicsWorld&       GetInternalWorld(PhysicsContext& ctx) noexcept;
 
