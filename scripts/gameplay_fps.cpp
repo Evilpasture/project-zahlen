@@ -162,10 +162,10 @@ void StartGame(Engine* engine) {
 
     uint32_t fontIdx = 0;
     for (Entity uiEnt: reg.GetEntitiesWith<Components::UISettingsComponent>()) {
-        if (auto* uiSettings = reg.Get<Components::UISettingsComponent>(uiEnt)) {
-            fontIdx = uiSettings->defaultFontAtlasIdx;
-            break;
-        }
+        Patch<Components::UISettingsComponent>(reg, uiEnt, [&](auto& uiSettings) {
+            fontIdx = uiSettings.defaultFontAtlasIdx;
+        });
+        break;
     }
 
     state.hudVitalsBg = reg.Create();
