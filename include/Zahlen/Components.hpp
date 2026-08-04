@@ -441,6 +441,8 @@ struct Components {
         bool                  attachToCamera = false;
 
         BufferHandle gpuBuffer = BufferHandle::Invalid;
+
+        static void OnDestroy(ParticleEmitterComponent* p) noexcept;
     };
 
     struct DecalComponent {

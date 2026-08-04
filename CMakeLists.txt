@@ -222,6 +222,8 @@ set(ENGINE_SOURCES
     src/engine/BRDFLUT.cpp
     src/engine/GizmoUI.cpp
     src/engine/system/PhysicsSystem.cpp
+    src/engine/system/TerrainSystem.cpp
+    src/engine/system/ParticleSystem.cpp
     src/engine/CommandLine.cpp
     src/engine/system/TargetCameraSystem.cpp
     src/engine/TTYBackend.cpp

@@ -13,10 +13,12 @@
 #include "engine/system/CameraSystem.hpp"
 #include "engine/system/InputSystem.hpp"
 #include "engine/system/LightingSystem.hpp"
+#include "engine/system/ParticleSystem.hpp"
 #include "engine/system/PhysicsStateSystem.hpp"
 #include "engine/system/PhysicsSystem.hpp"
 #include "engine/system/RenderSystem.hpp"
 #include "engine/system/TargetCameraSystem.hpp"
+#include "engine/system/TerrainSystem.hpp"
 #include "engine/system/TransformSystem.hpp"
 #include "engine/system/UIRenderSystem.hpp"
 #include "imgui.h"
@@ -32,6 +34,8 @@
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Scripting.h>
 #include <Zahlen/Scripting.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <chrono>
@@ -43,8 +47,6 @@
 #include <expected>
 #include <physics/PhysicsWorld.hpp>
 #include <print>
-#include <Zahlen/Threading/Mutex.hpp>
-#include <Zahlen/Threading/TaskSystem.hpp>
 
 using namespace ZHLN;
 using namespace ZHLN::ECS;
@@ -147,6 +149,16 @@ void Sys_PostProcess(Engine& engine, float /*dt*/) {
     }
 }
 
+void Sys_Particle(Engine& engine, float dt) {
+    static ParticleSystem sys;
+    sys.Update(engine, dt);
+}
+
+void Sys_Terrain(Engine& engine, float dt) {
+    static TerrainSystem sys;
+    sys.Update(engine, dt);
+}
+
 void BuildSystemGraphs(Engine& engine) {
     auto& updateGraph = engine.GetUpdateGraph();
     auto& renderGraph = engine.GetRenderGraph();
@@ -235,6 +247,20 @@ void BuildSystemGraphs(Engine& engine) {
                 Write<Components::MeshComponent>(),
             },
         .enabled = true,
+    });
+
+    updateGraph.AddSystem({
+        .update_func    = Sys_Particle,
+        .name           = "ParticleSystem",
+        .access_pattern = {Write<Components::ParticleEmitterComponent>()},
+        .enabled        = true,
+    });
+
+    updateGraph.AddSystem({
+        .update_func    = Sys_Terrain,
+        .name           = "TerrainSystem",
+        .access_pattern = {Write<Components::TerrainComponent>(), Write<Components::MeshComponent>()},
+        .enabled        = true,
     });
 
     renderGraph.Compile();

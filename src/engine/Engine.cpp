@@ -27,13 +27,13 @@
 #include <dlfcn.h>
 #endif
 
+#include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <ecs/EntityCommandBuffer.hpp>
 #include <ecs/SystemGraph.hpp>
 #include <engine/system/CullingSystem.hpp>
 #include <filesystem>
-#include <Zahlen/physics/Physics.hpp>
-#include <Zahlen/Threading/Thread.hpp>
 
 namespace ZHLN {
 
@@ -317,6 +317,10 @@ AudioContext& Engine::GetAudioContext() {
     return *_impl->audioContext;
 }
 ECS::Registry& Engine::GetRegistry() {
+    return _impl->registry;
+}
+
+const ECS::Registry& Engine::GetRegistry() const {
     return _impl->registry;
 }
 

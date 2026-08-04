@@ -55,15 +55,16 @@ class ZHLN_API Engine {
     [[nodiscard]] bool BeginFrame(bool& outDeviceLost) noexcept;
     [[nodiscard]] bool EndFrame(bool& outDeviceLost) noexcept;
 
-    Window&               GetWindow();
-    PhysicsContext&       GetPhysicsContext();
-    RenderContext&        GetRenderContext();
-    InputContext&         GetInput();
-    Camera&               GetCamera();
-    ALife::Simulator&     GetALife();
-    CreativeWorksManager& GetCreativeWorksManager();
-    AudioContext&         GetAudioContext();
-    ECS::Registry&        GetRegistry();
+    Window&                            GetWindow();
+    PhysicsContext&                    GetPhysicsContext();
+    RenderContext&                     GetRenderContext();
+    InputContext&                      GetInput();
+    Camera&                            GetCamera();
+    ALife::Simulator&                  GetALife();
+    CreativeWorksManager&              GetCreativeWorksManager();
+    AudioContext&                      GetAudioContext();
+    [[nodiscard]] ECS::Registry&       GetRegistry();
+    [[nodiscard]] const ECS::Registry& GetRegistry() const;
 
     ECS::SystemGraph&         GetUpdateGraph();
     ECS::SystemGraph&         GetRenderGraph();

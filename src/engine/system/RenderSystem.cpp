@@ -167,28 +167,6 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
     Renderer::SetMatrices(rc, vp, unjitteredVp);
 
     // ========================================================================
-    // LAZY RE-BAKE FOR TERRAIN COMPONENTS
-    // ========================================================================
-    for (Entity e: reg.GetEntitiesWith<Components::TerrainComponent>()) {
-        auto* terrain  = reg.Get<Components::TerrainComponent>(e);
-        auto* meshComp = reg.Get<Components::MeshComponent>(e);
-        if ((terrain != nullptr) && (meshComp != nullptr) && meshComp->meshAsset != InvalidAssetID) {
-            if (!rc.GetGPUMesh(meshComp->meshAsset).has_value()) {
-                Mesh tMesh =
-                    CreativeWorksFactory::CreateTerrainFromData(rc, terrain->sampleCount, terrain->worldSize, terrain->heights.data(), terrain->colors.data());
-                rc.RegisterGPUMesh(meshComp->meshAsset, tMesh);
-
-                if (!rc.GetGPUMaterial(meshComp->materialAsset).has_value()) {
-                    auto mat            = CreativeWorksFactory::CreateBasicMaterial(rc).value_or(Material {});
-                    mat.roughnessFactor = terrain->roughness;
-                    mat.metallicFactor  = terrain->metallic;
-                    rc.RegisterGPUMaterial(meshComp->materialAsset, mat);
-                }
-            }
-        }
-    }
-
-    // ========================================================================
     // DECALS
     // ========================================================================
     for (Entity e: reg.GetEntitiesWith<Components::DecalComponent>()) {
@@ -206,28 +184,6 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
                      .roughness    = decalComp->roughness,
                      .metallic     = decalComp->metallic}
             );
-        }
-    }
-
-    // ========================================================================
-    // PROCESS PARTICLE EMITTERS (ECS Bridge to Pure Renderer)
-    // ========================================================================
-    for (Entity e: reg.GetEntitiesWith<Components::ParticleEmitterComponent>()) {
-        auto* emitter = reg.Get<Components::ParticleEmitterComponent>(e);
-        if ((emitter != nullptr) && emitter->active) {
-            // 1. Lazy allocate on the ECS side (only once per emitter)
-            if (emitter->gpuBuffer == BufferHandle::Invalid) {
-                emitter->gpuBuffer = rc.CreateStorageBuffer(emitter->maxParticles * sizeof(Particle));
-            }
-
-            // 2. Resolve camera-relative offsets in-place
-            ParticleEmitterParams params = emitter->params;
-            if (emitter->attachToCamera) {
-                params.spawnOrigin = {cam.position.GetX(), cam.position.GetY(), cam.position.GetZ()};
-            }
-
-            // 3. Dispatch raw graphics handles directly to the pure render queue
-            rc.SubmitParticleEmitter(emitter->gpuBuffer, emitter->maxParticles, params);
         }
     }
 
