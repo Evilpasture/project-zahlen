@@ -231,9 +231,9 @@ void EnemyAISystem(Engine* engine, float dt) {
         ctx.world.lineOfSight = [](JPH::Vec3Arg, JPH::Vec3Arg) { return true; };
 
         Entity ignorePhys = NullEntity;
-        Patch<Components::PhysicsComponent>(reg, enemyEnt, [&](auto& phys) {
-            ignorePhys = phys.physicsHandle;
-        });
+        if (auto* phys = reg.Get<Components::PhysicsComponent>(enemyEnt)) {
+            ignorePhys = phys->physicsHandle;
+        }
 
         ctx.world.raycastWorld = [&](JPH::Vec3Arg origin, JPH::Vec3Arg direction, float maxDistance) -> std::optional<Actor::BodyHit> {
             auto hit = Physics::Raycast(pc, JPH::RVec3(origin), direction, maxDistance, ignorePhys);
@@ -262,25 +262,27 @@ void EnemyAISystem(Engine* engine, float dt) {
 
         enemy.behavior.Update(dt, ctx);
 
-        Patch<Components::PhysicsComponent>(reg, enemyEnt, [&](auto& physComp) {
-            if (enemy.behavior.alive) {
-                if (physComp.physicsHandle != NullEntity) {
-                    Physics::SetCharacterVelocity(pc, physComp.physicsHandle, enemy.behavior.velocity);
-                }
-            } else {
+        auto* phys = reg.Get<Components::PhysicsComponent>(enemyEnt);
+
+        if (enemy.behavior.alive) {
+            if (phys && phys->physicsHandle != NullEntity) {
+                Physics::SetCharacterVelocity(pc, phys->physicsHandle, enemy.behavior.velocity);
+            }
+
+            if (auto* stateComp = reg.Get<Components::PhysicsStateComponent>(enemyEnt)) {
+                float feetY             = stateComp->currPosition.GetY() - 0.80f;
+                enemy.behavior.position = JPH::Vec3(stateComp->currPosition.GetX(), std::max(0.0f, feetY), stateComp->currPosition.GetZ());
+            }
+        } else {
+            if (reg.Get<Components::PhysicsComponent>(enemyEnt) != nullptr) {
                 reg.Remove<Components::PhysicsComponent>(enemyEnt);
             }
-        });
+        }
 
-        Patch<Components::PhysicsStateComponent>(reg, enemyEnt, [&](auto& stateComp) {
-            float feetY = stateComp.currPosition.GetY() - 0.80f;
-            enemy.behavior.position = JPH::Vec3(stateComp.currPosition.GetX(), std::max(0.0f, feetY), stateComp.currPosition.GetZ());
-        });
-
-        Patch<Components::TransformComponent>(reg, enemyEnt, [&](auto& eTrans) {
-            eTrans.position = enemy.behavior.position;
-            eTrans.rotation = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), enemy.behavior.yaw);
-        });
+        if (auto* eTrans = reg.Get<Components::TransformComponent>(enemyEnt)) {
+            eTrans->position = enemy.behavior.position;
+            eTrans->rotation = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), enemy.behavior.yaw);
+        }
 
         if (enemy.behavior.alive) {
             float speed  = enemy.behavior.speed;
@@ -354,7 +356,7 @@ void EnemyAISystem(Engine* engine, float dt) {
             pos[static_cast<size_t>(Rig::Joint::HandEndL)] = gripL + weaponQuat * JPH::Vec3(0.0f, 0.0f, 0.08f);
         }
 
-            Patch<Components::MeshComponent>(reg, enemyEnt, [&](auto& meshComp) {
+        Patch<Components::MeshComponent>(reg, enemyEnt, [&](auto& meshComp) {
             JPH::Mat44 rootMatrix = JPH::Mat44::sRotationTranslation(JPH::Quat::sRotation(JPH::Vec3::sAxisY(), enemy.behavior.yaw), enemy.behavior.position);
             JPH::Mat44 invRoot    = rootMatrix.Inversed();
 
@@ -375,7 +377,8 @@ void EnemyAISystem(Engine* engine, float dt) {
                         jointWorldMatrices[j] = JPH::Mat44::sRotationTranslation(rot, pJ);
                     } else {
                         jointWorldMatrices[j] = JPH::Mat44::sTranslation(pJ);
-});                } else {
+                    }
+                } else {
                     int32_t parent = Rig::GetParentIndex(static_cast<Rig::Joint>(j));
                     if (parent >= 0) {
                         jointWorldMatrices[j] = jointWorldMatrices[parent] * JPH::Mat44::sTranslation(Rig::GetBindPosition(static_cast<Rig::Joint>(j)));
@@ -390,14 +393,15 @@ void EnemyAISystem(Engine* engine, float dt) {
                 gpuMatrices[j] = invRoot * jointWorldMatrices[j] * s_InvBindMatrices[j];
             }
 
-            rc.UpdateJointMatrices(meshComp->jointOffset, gpuMatrices.data(), Rig::JointCount);
-        }
+            rc.UpdateJointMatrices(meshComp.jointOffset, gpuMatrices.data(), Rig::JointCount);
+        });
 
         if (!enemy.behavior.weaponDropped && enemy.weaponEntity != NullEntity && reg.IsAlive(enemy.weaponEntity)) {
-            Patch<Components::TransformComponent>(reg, enemy.weaponEntity, [&](auto& wTrans) {
-                wTrans.position = enemy.behavior.position + enemy.anim.weaponPos;
-                wTrans.rotation = enemy.anim.weaponQuat;
-});        }
+            if (auto* wTrans = reg.Get<Components::TransformComponent>(enemy.weaponEntity)) {
+                wTrans->position = enemy.behavior.position + enemy.anim.weaponPos;
+                wTrans->rotation = enemy.anim.weaponQuat;
+            }
+        }
 
         if (!enemy.behavior.alive && !enemy.behavior.weaponDropped) {
             Pickups::WeaponPickup pu {
