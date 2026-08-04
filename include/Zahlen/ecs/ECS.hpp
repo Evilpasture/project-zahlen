@@ -29,7 +29,6 @@ inline bool Patch(ECS::Registry& reg, Entity e, Fn&& fn) {
     }
     return false;
 }
-namespace ZHLN::ECS {
 
 template <typename T, typename = void>
 struct is_complete: std::false_type {};
