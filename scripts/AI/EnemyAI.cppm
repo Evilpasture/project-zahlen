@@ -354,7 +354,7 @@ void EnemyAISystem(Engine* engine, float dt) {
             pos[static_cast<size_t>(Rig::Joint::HandEndL)] = gripL + weaponQuat * JPH::Vec3(0.0f, 0.0f, 0.08f);
         }
 
-        meshComp = enemyEnt; Patch<Components::MeshComponent>(reg, enemyEnt, [&](auto& meshComp) {
+        meshComp = enemyEnt;Components::MeshComponent>(reg, enemyEnt, [&](auto& meshComp) {
             JPH::Mat44 rootMatrix = JPH::Mat44::sRotationTranslation(JPH::Quat::sRotation(JPH::Vec3::sAxisY(), enemy.behavior.yaw), enemy.behavior.position);
             JPH::Mat44 invRoot    = rootMatrix.Inversed();
 
@@ -394,9 +394,9 @@ void EnemyAISystem(Engine* engine, float dt) {
         }
 
         if (!enemy.behavior.weaponDropped && enemy.weaponEntity != NullEntity && reg.IsAlive(enemy.weaponEntity)) {
-            wTrans = enemy.weaponEntity; Patch<Components::TransformComponent>(reg, enemy.weaponEntity, [&](auto& wTrans) {
-                wTrans->position = enemy.behavior.position + enemy.anim.weaponPos;
-                wTrans->rotation = enemy.anim.weaponQuat;
+            Patch<Components::TransformComponent>(reg, enemy.weaponEntity, [&](auto& wTrans) {
+                wTrans.position = enemy.behavior.position + enemy.anim.weaponPos;
+                wTrans.rotation = enemy.anim.weaponQuat;
 });        }
 
         if (!enemy.behavior.alive && !enemy.behavior.weaponDropped) {
