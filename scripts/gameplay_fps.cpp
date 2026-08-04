@@ -443,7 +443,7 @@ GAMEPLAY_API ZHLN::GameplayStatus NativeGameplayUpdate(ZHLN::Engine* engine, flo
                     }
                 }
             );
-        });
+        }
     }
     wasTabDown = isTabDown;
 
