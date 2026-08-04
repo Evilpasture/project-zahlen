@@ -59,10 +59,12 @@ struct SnowSceneState {
     LightningSimulation lightningSim;
     bool                gameStarted = false;
     bool                wonGame     = false;
+    bool                wasLMouseDown = false;
     bool                wasRDown    = false;
     float               totalTime   = 0.0f;
 
     Entity playerEnt       = NullEntity;
+    Entity playerCameraEnt = NullEntity; // Cached once in RespawnPlayer
     Entity snowTerrain     = NullEntity;
     Entity testPlatform    = NullEntity;
     Entity campfireLight   = NullEntity;
@@ -76,6 +78,36 @@ struct SnowSceneState {
 };
 
 static SnowSceneState g_State;
+
+// Small combinators removing the repetitive null-check dance
+
+template<typename T, typename Fn>
+inline bool Patch(ECS::Registry& reg, Entity e, Fn&& fn) {
+    if (auto* c = reg.Get<T>(e)) {
+        fn(*c);
+        return true;
+    }
+    return false;
+}
+
+inline Entity SpawnPointLight(ECS::Registry& reg, JPH::Vec3 pos, JPH::Vec3 color, float intensity, float range, float radius = 0.4f) {
+    Entity e = reg.Create();
+    reg.Add(e, Components::TransformComponent{.position = pos});
+    reg.Add(
+        e, Components::LightComponent {
+               .type        = LightType::Point,
+               .color       = color,
+               .intensity   = intensity,
+               .radius      = radius,
+               .direction   = JPH::Vec3(0, -1, 0),
+               .range       = range,
+               .points      = JPH::Mat44::sIdentity(),
+               .twoSided    = 0,
+               .shadowLayer = -1
+           }
+    );
+    return e;
+}
 
 namespace TerrainGen {
 
@@ -341,19 +373,19 @@ inline std::vector<uint32_t> GenerateSnowflakeTexture(uint32_t size) {
 } // namespace TerrainGen
 
 void PlayTrack(ECS::Registry& reg, Entity ent, int trackIdx, float blend = 0.15f, bool loop = true, float speed = 1.0f) {
-    if (auto* anim = reg.Get<Components::AnimatorComponent>(ent)) {
-        if (anim->currentTrackIdx != trackIdx) {
-            anim->prevTrackIdx         = anim->currentTrackIdx;
-            anim->prevTrackTime        = anim->currentTrackTime;
-            anim->currentTrackIdx      = trackIdx;
-            anim->currentTrackTime     = 0.0f;
-            anim->currentPlaybackSpeed = speed;
-            anim->currentLoop          = loop;
-            anim->blendFactor          = 0.0f;
-            anim->blendDuration        = blend;
-            anim->isFinished           = false;
+    Patch<Components::AnimatorComponent>(reg, ent, [&](auto& anim) {
+        if (anim.currentTrackIdx != trackIdx) {
+            anim.prevTrackIdx         = anim.currentTrackIdx;
+            anim.prevTrackTime        = anim.currentTrackTime;
+            anim.currentTrackIdx      = trackIdx;
+            anim.currentTrackTime     = 0.0f;
+            anim.currentPlaybackSpeed = speed;
+            anim.currentLoop          = loop;
+            anim.blendFactor          = 0.0f;
+            anim.blendDuration        = blend;
+            anim.isFinished           = false;
         }
-    }
+    });
 }
 
 void RespawnPlayer(Engine* engine) {
@@ -371,17 +403,21 @@ void RespawnPlayer(Engine* engine) {
     JPH::Vec3 spawnPos(0.0f, 13.5f, 0.0f);
 
     g_State.playerEnt = reg.Create();
-    reg.Add(g_State.playerEnt, Components::PlayerTagComponent {});
-    reg.Add(g_State.playerEnt, Components::TransformComponent {.position = spawnPos});
-    reg.Add(g_State.playerEnt, Components::MovementComponent {});
-    reg.Add(g_State.playerEnt, Components::InputComponent {});
-    reg.Add(g_State.playerEnt, Components::PhysicsComponent {Physics::CreateCharacter(pc, JPH::RVec3(spawnPos))});
-    reg.Add(g_State.playerEnt, Components::PhysicsStateComponent {.currPosition = spawnPos, .prevPosition = spawnPos});
-    reg.Add(g_State.playerEnt, GameplayComponents::Combat {.hp = 100.0f, .maxHp = 100.0f});
+    reg.Add(
+        g_State.playerEnt,
+        Components::PlayerTagComponent {},
+        Components::TransformComponent {.position = spawnPos},
+        Components::MovementComponent {},
+        Components::InputComponent {},
+        Components::PhysicsComponent {Physics::CreateCharacter(pc, JPH::RVec3(spawnPos))},
+        Components::PhysicsStateComponent {.currPosition = spawnPos, .prevPosition = spawnPos},
+        GameplayComponents::Combat {.hp = 100.0f, .maxHp = 100.0f}
+    );
 
     auto camEnts = reg.GetEntitiesWith<Components::MainCameraTagComponent>();
     if (!camEnts.empty()) {
         Entity camEnt    = camEnts[0];
+        g_State.playerCameraEnt = camEnt;
         auto*  targetCam = reg.Get<Components::TargetCameraComponent>(camEnt);
         if (!targetCam) {
             targetCam = &reg.Add(camEnt, Components::TargetCameraComponent {});
@@ -406,9 +442,9 @@ void RespawnPlayer(Engine* engine) {
 
     if (!g_State.charParts.empty()) {
         Entity charRoot = g_State.charParts[0];
-        if (auto* rootTrans = reg.Get<Components::TransformComponent>(charRoot)) {
-            rootTrans->position = JPH::Vec3(0.0f, -0.8f, 0.0f);
-        }
+        Patch<Components::TransformComponent>(reg, charRoot, [&](auto& rootTrans) {
+            rootTrans.position = JPH::Vec3(0.0f, -0.8f, 0.0f);
+        });
         reg.Add(charRoot, Components::HierarchyComponent {.parent = g_State.playerEnt});
         CreativeWorksFactory::SetupPlayerRagdoll(*engine, g_State.playerEnt, g_State.charParts);
     }
@@ -433,20 +469,20 @@ void StartGame(Engine* engine) {
 
     auto settingsEntities = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
     if (!settingsEntities.empty()) {
-        if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(settingsEntities[0])) {
-            pp->giMode            = 2;
-            pp->aoRadius          = 1.4f;
-            pp->aoBias            = 0.02f;
-            pp->aoPower           = 2.2f;
-            pp->giIntensity       = 2.2f;
-            pp->giSamples         = 24;
-            pp->useLocalProbe     = 0;
-            pp->vignetteIntensity = 1.25f;
-            pp->vignettePower     = 1.8f;
-            pp->enableSSR         = 0;
-            pp->enableRTR         = 1;
-            pp->ambientExposure   = 4.5f;
-        }
+        Patch<Components::PostProcessSettingsComponent>(reg, settingsEntities[0], [&](auto& pp) {
+            pp.giMode            = 2;
+            pp.aoRadius          = 1.4f;
+            pp.aoBias            = 0.02f;
+            pp.aoPower           = 2.2f;
+            pp.giIntensity       = 2.2f;
+            pp.giSamples         = 24;
+            pp.useLocalProbe     = 0;
+            pp.vignetteIntensity = 1.25f;
+            pp.vignettePower     = 1.8f;
+            pp.enableSSR         = 0;
+            pp.enableRTR         = 1;
+            pp.ambientExposure   = 4.5f;
+        });
     }
 
     JPH::Vec3 halfExtents(20.0f, 0.5f, 20.0f);
@@ -541,69 +577,13 @@ void StartGame(Engine* engine) {
     );
     reg.Add(moonlight, Components::SunTagComponent {});
 
-    g_State.campfireLight = reg.Create();
-    reg.Add(g_State.campfireLight, Components::TransformComponent {.position = JPH::Vec3(4.0f, 3.5f, 4.0f)});
-    reg.Add(
-        g_State.campfireLight, Components::LightComponent {
-                                   .type        = LightType::Point,
-                                   .color       = JPH::Vec3(1.0f, 0.45f, 0.08f),
-                                   .intensity   = 120.0f,
-                                   .radius      = 0.6f,
-                                   .direction   = JPH::Vec3(0, -1, 0),
-                                   .range       = 25.0f,
-                                   .points      = JPH::Mat44::sIdentity(),
-                                   .twoSided    = 0,
-                                   .shadowLayer = -1
-                               }
-    );
+    g_State.campfireLight = SpawnPointLight(reg, JPH::Vec3(4.0f, 3.5f, 4.0f), JPH::Vec3(1.0f, 0.45f, 0.08f), 120.0f, 25.0f, 0.6f);
 
-    g_State.wisp1 = reg.Create();
-    reg.Add(g_State.wisp1, Components::TransformComponent {.position = JPH::Vec3(-15.0f, 12.0f, -15.0f)});
-    reg.Add(
-        g_State.wisp1, Components::LightComponent {
-                           .type        = LightType::Point,
-                           .color       = JPH::Vec3(0.1f, 0.75f, 1.0f),
-                           .intensity   = 60.0f,
-                           .radius      = 0.4f,
-                           .direction   = JPH::Vec3(0, -1, 0),
-                           .range       = 20.0f,
-                           .points      = JPH::Mat44::sIdentity(),
-                           .twoSided    = 0,
-                           .shadowLayer = -1
-                       }
-    );
+    g_State.wisp1 = SpawnPointLight(reg, JPH::Vec3(-15.0f, 12.0f, -15.0f), JPH::Vec3(0.1f, 0.75f, 1.0f), 60.0f, 20.0f, 0.4f);
 
-    g_State.wisp2 = reg.Create();
-    reg.Add(g_State.wisp2, Components::TransformComponent {.position = JPH::Vec3(20.0f, 18.0f, -30.0f)});
-    reg.Add(
-        g_State.wisp2, Components::LightComponent {
-                           .type        = LightType::Point,
-                           .color       = JPH::Vec3(0.3f, 0.6f, 1.0f),
-                           .intensity   = 60.0f,
-                           .radius      = 0.4f,
-                           .direction   = JPH::Vec3(0, -1, 0),
-                           .range       = 20.0f,
-                           .points      = JPH::Mat44::sIdentity(),
-                           .twoSided    = 0,
-                           .shadowLayer = -1
-                       }
-    );
+    g_State.wisp2 = SpawnPointLight(reg, JPH::Vec3(20.0f, 18.0f, -30.0f), JPH::Vec3(0.3f, 0.6f, 1.0f), 60.0f, 20.0f, 0.4f);
 
-    g_State.summitLight = reg.Create();
-    reg.Add(g_State.summitLight, Components::TransformComponent {.position = JPH::Vec3(-50.0f, 38.0f, -50.0f)});
-    reg.Add(
-        g_State.summitLight, Components::LightComponent {
-                                 .type        = LightType::Point,
-                                 .color       = JPH::Vec3(1.0f, 0.85f, 0.2f),
-                                 .intensity   = 400.0f,
-                                 .radius      = 0.8f,
-                                 .direction   = JPH::Vec3(0, -1, 0),
-                                 .range       = 50.0f,
-                                 .points      = JPH::Mat44::sIdentity(),
-                                 .twoSided    = 0,
-                                 .shadowLayer = -1
-                             }
-    );
+    g_State.summitLight = SpawnPointLight(reg, JPH::Vec3(-50.0f, 38.0f, -50.0f), JPH::Vec3(1.0f, 0.85f, 0.2f), 400.0f, 50.0f, 0.8f);
 
     // 1. Bake the anti-aliased mathematical SVG snowflake texture onto the GPU
     auto     snowPixels   = TerrainGen::GenerateSnowflakeTexture(256);
@@ -655,10 +635,9 @@ void LightningClickStrikeSystem(Engine* engine, float dt) {
     auto        mouse = input.GetMouse();
     auto        win   = engine->GetWindow().GetSize();
 
-    bool        isLMouseDown  = input.IsMouseButtonDown(KeyCode::LButton);
-    static bool wasLMouseDown = false;
+    bool isLMouseDown = input.IsMouseButtonDown(KeyCode::LButton);
 
-    if (isLMouseDown && !wasLMouseDown) {
+    if (isLMouseDown && !g_State.wasLMouseDown) {
         if (win.width > 0 && win.height > 0) {
             float ndcX   = (2.0f * mouse.x) / static_cast<float>(win.width) - 1.0f;
             float ndcY   = (2.0f * mouse.y) / static_cast<float>(win.height) - 1.0f;
@@ -673,11 +652,9 @@ void LightningClickStrikeSystem(Engine* engine, float dt) {
             JPH::Vec3 dir   = (pFar - pNear).Normalized();
 
             Entity ignorePhys = NullEntity;
-            if (g_State.playerEnt != NullEntity) {
-                if (auto* phys = engine->GetRegistry().Get<Components::PhysicsComponent>(g_State.playerEnt)) {
-                    ignorePhys = phys->physicsHandle;
-                }
-            }
+            Patch<Components::PhysicsComponent>(engine->GetRegistry(), g_State.playerEnt, [&](auto& phys) {
+                ignorePhys = phys.physicsHandle;
+            });
 
             auto hit = Physics::Raycast(engine->GetPhysicsContext(), JPH::RVec3(pNear), dir, 2000.0f, ignorePhys);
 
@@ -710,7 +687,7 @@ void LightningClickStrikeSystem(Engine* engine, float dt) {
             ExplosionSystem::Spawn(engine, JPH::Vec3(impactPos), 2.2f);
         }
     }
-    wasLMouseDown = isLMouseDown;
+    g_State.wasLMouseDown = isLMouseDown;
 
     g_State.lightningSim.Update(*engine, dt);
     ExplosionSystem::Update(engine, dt);
@@ -765,27 +742,27 @@ void PlayerInputSystem(Engine* engine, [[maybe_unused]] float dt) {
 
         bool isRDown = input.IsKeyDown(KeyCode::R);
         if (isRDown && !g_State.wasRDown) {
-            if (auto* ragdoll = reg.Get<Components::RagdollComponent>(e)) {
+            Patch<Components::RagdollComponent>(reg, e, [&](auto& ragdoll) {
                 if (!g_State.charParts.empty()) {
                     Entity charRoot = g_State.charParts[0];
-                    if (ragdoll->state == RagdollState::Inactive) {
-                        ragdoll->state = RagdollState::Limp;
+                    if (ragdoll.state == RagdollState::Inactive) {
+                        ragdoll.state = RagdollState::Limp;
                         reg.Remove<Components::HierarchyComponent>(charRoot);
-                        if (auto* rootTrans = reg.Get<Components::TransformComponent>(charRoot)) {
-                            rootTrans->position.SetY(0.0f);
-                        }
+                        Patch<Components::TransformComponent>(reg, charRoot, [&](auto& rootTrans) {
+                            rootTrans.position.SetY(0.0f);
+                        });
                         ZHLN::Log("Player collapsed into the blizzard!");
                         engine->GetAudioContext().PlayProceduralBeep(150.0f, 0.25f, 0.3f);
                     } else {
-                        ragdoll->state = RagdollState::Inactive;
-                        if (auto* rootTrans = reg.Get<Components::TransformComponent>(charRoot)) {
-                            rootTrans->position.SetY(-0.8f);
-                        }
+                        ragdoll.state = RagdollState::Inactive;
+                        Patch<Components::TransformComponent>(reg, charRoot, [&](auto& rootTrans) {
+                            rootTrans.position.SetY(-0.8f);
+                        });
                         reg.Add(charRoot, Components::HierarchyComponent {.parent = e});
                         ZHLN::Log("Player stood up in the blizzard!");
                     }
                 }
-            }
+            });
         }
         g_State.wasRDown = isRDown;
     }
@@ -795,33 +772,35 @@ void BlizzardWindSystem(Engine* engine, float dt) {
     g_State.totalTime += dt;
     auto& reg = engine->GetRegistry();
 
-    if (auto* fireLight = reg.Get<Components::LightComponent>(g_State.campfireLight)) {
-        float gust           = 300.0f + 55.0f * std::sin(g_State.totalTime * 14.0f) + 30.0f * std::cos(g_State.totalTime * 28.0f);
-        fireLight->intensity = gust;
-    }
+    Patch<Components::LightComponent>(reg, g_State.campfireLight, [&](auto& fireLight) {
+        float gust = 300.0f + 55.0f * std::sin(g_State.totalTime * 14.0f) + 30.0f * std::cos(g_State.totalTime * 28.0f);
+        fireLight.intensity = gust;
+    });
 
-    if (auto* w1 = reg.Get<Components::TransformComponent>(g_State.wisp1)) {
+    Patch<Components::TransformComponent>(reg, g_State.wisp1, [&](auto& w1) {
         float angle = g_State.totalTime * 0.8f;
-        w1->position.SetX(-20.0f + std::cos(angle) * 25.0f);
-        w1->position.SetY(14.0f + std::sin(g_State.totalTime * 2.1f) * 4.0f);
-        w1->position.SetZ(-20.0f + std::sin(angle) * 25.0f);
-    }
-    if (auto* w2 = reg.Get<Components::TransformComponent>(g_State.wisp2)) {
+        w1.position.SetX(-20.0f + std::cos(angle) * 25.0f);
+        w1.position.SetY(14.0f + std::sin(g_State.totalTime * 2.1f) * 4.0f);
+        w1.position.SetZ(-20.0f + std::sin(angle) * 25.0f);
+    });
+    Patch<Components::TransformComponent>(reg, g_State.wisp2, [&](auto& w2) {
         float angle = g_State.totalTime * -0.6f + 1.57f;
-        w2->position.SetX(15.0f + std::cos(angle) * 32.0f);
-        w2->position.SetY(20.0f + std::cos(g_State.totalTime * 1.7f) * 5.0f);
-        w2->position.SetZ(-30.0f + std::sin(angle) * 32.0f);
-    }
+        w2.position.SetX(15.0f + std::cos(angle) * 32.0f);
+        w2.position.SetY(20.0f + std::cos(g_State.totalTime * 1.7f) * 5.0f);
+        w2.position.SetZ(-30.0f + std::sin(angle) * 32.0f);
+    });
 }
 
 void CameraFovSystem(Engine* engine, [[maybe_unused]] float dt) {
     auto& reg = engine->GetRegistry();
     for (Entity pEnt: reg.GetEntitiesWith<Components::MovementComponent>()) {
         auto* move = reg.Get<Components::MovementComponent>(pEnt);
-        for (Entity cEnt: reg.GetEntitiesWith<Components::TargetCameraComponent>()) {
-            auto* cam = reg.Get<Components::TargetCameraComponent>(cEnt);
-            if (cam && cam->target == pEnt) {
-                cam->targetFov = move->isSprinting ? 55.0f : 45.0f;
+        if (!move) continue;
+        if (g_State.playerCameraEnt != NullEntity) {
+            if (auto* cam = reg.Get<Components::TargetCameraComponent>(g_State.playerCameraEnt)) {
+                if (cam->target == pEnt) {
+                    cam->targetFov = move->isSprinting ? 55.0f : 45.0f;
+                }
             }
         }
     }
@@ -831,16 +810,18 @@ void VisualFeedbackSystem(Engine* engine, [[maybe_unused]] float dt) {
     auto& reg = engine->GetRegistry();
     for (Entity pEnt: reg.GetEntitiesWith<GameplayComponents::Combat>()) {
         auto* combat = reg.Get<GameplayComponents::Combat>(pEnt);
-        for (Entity cEnt: reg.GetEntitiesWith<Components::TargetCameraComponent>()) {
-            auto* cam = reg.Get<Components::TargetCameraComponent>(cEnt);
-            if (cam && cam->target == pEnt) {
-                if (combat->hp < 40.0f) {
-                    float pulse            = std::sin(g_State.totalTime * 6.0f);
-                    cam->vignetteIntensity = 1.4f + 0.35f * pulse;
-                    cam->vignettePower     = 2.0f;
-                } else {
-                    cam->vignetteIntensity = 1.15f;
-                    cam->vignettePower     = 1.6f;
+        if (!combat) continue;
+        if (g_State.playerCameraEnt != NullEntity) {
+            if (auto* cam = reg.Get<Components::TargetCameraComponent>(g_State.playerCameraEnt)) {
+                if (cam->target == pEnt) {
+                    if (combat->hp < 40.0f) {
+                        float pulse            = std::sin(g_State.totalTime * 6.0f);
+                        cam->vignetteIntensity = 1.4f + 0.35f * pulse;
+                        cam->vignettePower     = 2.0f;
+                    } else {
+                        cam->vignetteIntensity = 1.15f;
+                        cam->vignettePower     = 1.6f;
+                    }
                 }
             }
         }
@@ -852,22 +833,20 @@ void PlayerAnimationSystem(Engine* engine, [[maybe_unused]] float dt) {
     if (g_State.playerEnt == NullEntity || g_State.charParts.empty())
         return;
 
-    auto* move    = reg.Get<Components::MovementComponent>(g_State.playerEnt);
     auto* ragdoll = reg.Get<Components::RagdollComponent>(g_State.playerEnt);
-    if (!move)
-        return;
-    if (ragdoll && (ragdoll->state == RagdollState::Limp || ragdoll->state == RagdollState::KeyframeMotor))
-        return;
+    Patch<Components::MovementComponent>(reg, g_State.playerEnt, [&](auto& move) {
+        if (ragdoll && (ragdoll->state == RagdollState::Limp || ragdoll->state == RagdollState::KeyframeMotor))
+            return;
 
-    std::string targetState = "IDLE";
-    if (!move->isGrounded) {
-        targetState = (move->currentYVel > 1.0f) ? "JUMP" : "FALL";
-    } else if (move->landingTimer > 0.0f) {
+        std::string targetState = "IDLE";
+    if (!move.isGrounded) {
+        targetState = (move.currentYVel > 1.0f) ? "JUMP" : "FALL";
+    } else if (move.landingTimer > 0.0f) {
         targetState = "LAND";
     } else {
-        float velSq = move->inputX * move->inputX + move->inputZ * move->inputZ;
+        float velSq = move.inputX * move.inputX + move.inputZ * move.inputZ;
         if (velSq > 0.01f) {
-            targetState = move->isSprinting ? "RUN" : "WALK";
+            targetState = move.isSprinting ? "RUN" : "WALK";
         }
     }
 
@@ -875,11 +854,11 @@ void PlayerAnimationSystem(Engine* engine, [[maybe_unused]] float dt) {
         g_State.currentAnimState = targetState;
 
         for (Entity part: g_State.charParts) {
-            if (auto* anim = reg.Get<Components::AnimatorComponent>(part)) {
+            Patch<Components::AnimatorComponent>(reg, part, [&](auto& anim) {
                 int trackIdx = -1;
-                if (anim->prefab) {
-                    for (size_t i = 0; i < anim->prefab->animations.size(); ++i) {
-                        std::string name = anim->prefab->animations[i].name.c_str();
+                if (anim.prefab) {
+                    for (size_t i = 0; i < anim.prefab->animations.size(); ++i) {
+                        std::string name = anim.prefab->animations[i].name.c_str();
                         std::transform(name.begin(), name.end(), name.begin(), ::toupper);
                         if (name.find(targetState) != std::string::npos) {
                             trackIdx = static_cast<int>(i);
@@ -892,9 +871,10 @@ void PlayerAnimationSystem(Engine* engine, [[maybe_unused]] float dt) {
                     float speed = (targetState == "LAND") ? 1.6f : 1.0f;
                     PlayTrack(reg, part, trackIdx, 0.15f, loop, speed);
                 }
-            }
+            });
         }
     }
+    });
 }
 
 void CheckFallSystem(Engine* engine, [[maybe_unused]] float dt) {
@@ -902,12 +882,12 @@ void CheckFallSystem(Engine* engine, [[maybe_unused]] float dt) {
     if (g_State.playerEnt == NullEntity)
         return;
 
-    if (auto* state = reg.Get<Components::PhysicsStateComponent>(g_State.playerEnt)) {
-        if (state->currPosition.GetY() < -10.0f) {
+    Patch<Components::PhysicsStateComponent>(reg, g_State.playerEnt, [&](auto& state) {
+        if (state.currPosition.GetY() < -10.0f) {
             ZHLN::Log("[Snow Scene] Player fell off the mountain! Respawning...");
             RespawnPlayer(engine);
         }
-    }
+    });
 }
 
 void SummitVictorySystem(Engine* engine, [[maybe_unused]] float dt) {
@@ -915,8 +895,8 @@ void SummitVictorySystem(Engine* engine, [[maybe_unused]] float dt) {
     if (g_State.playerEnt == NullEntity || g_State.wonGame)
         return;
 
-    if (auto* state = reg.Get<Components::PhysicsStateComponent>(g_State.playerEnt)) {
-        JPH::Vec3 pos = state->currPosition;
+    Patch<Components::PhysicsStateComponent>(reg, g_State.playerEnt, [&](auto& state) {
+        JPH::Vec3 pos = state.currPosition;
         JPH::Vec3 beacon(-50.0f, 35.0f, -50.0f);
         if ((pos - beacon).LengthSq() < (8.0f * 8.0f)) {
             g_State.wonGame = true;
@@ -925,7 +905,7 @@ void SummitVictorySystem(Engine* engine, [[maybe_unused]] float dt) {
             engine->GetAudioContext().PlayProceduralBeep(1100.0f, 0.25f, 0.3f);
             engine->GetAudioContext().PlayProceduralBeep(1320.0f, 0.45f, 0.3f);
         }
-    }
+    });
 }
 
 } // namespace Game

@@ -504,9 +504,9 @@ uint32_t InstantiatePrefab(
                         csgComp.modifiers.push_back({.operation = mod.operation, .operandEntity = opIt->second});
 
                         // Exclude the operand cutter from standard main/shadow draw passes
-                        if (auto* cutMesh = reg.Get<Components::MeshComponent>(opIt->second)) {
-                            cutMesh->flags |= DrawFlags::Hidden;
-                        }
+                        Patch<Components::MeshComponent>(reg, opIt->second, [&](auto& cutMesh) {
+                            cutMesh.flags |= DrawFlags::Hidden;
+                        });
                     }
                 }
 
@@ -524,16 +524,18 @@ void SetupPlayerRagdoll(RenderContext& /*rc*/, PhysicsContext& pc, ECS::Registry
     const Skeleton* targetSkeleton = nullptr;
     uint32_t        jointOffset    = 0;
 
+    bool skeletonFound = false;
     for (Entity part: visualParts) {
-        if (auto* meshComp = reg.Get<Components::MeshComponent>(part)) {
-            if (auto* animComp = reg.Get<Components::AnimatorComponent>(part)) {
-                if ((animComp->prefab != nullptr) && meshComp->skeletonIndex >= 0) {
-                    targetSkeleton = &animComp->prefab->skeletons[meshComp->skeletonIndex];
-                    jointOffset    = meshComp->jointOffset;
-                    break;
+        Patch<Components::MeshComponent>(reg, part, [&](auto& meshComp) {
+            Patch<Components::AnimatorComponent>(reg, part, [&](auto& animComp) {
+                if ((animComp.prefab != nullptr) && meshComp.skeletonIndex >= 0) {
+                    targetSkeleton = &animComp.prefab->skeletons[meshComp.skeletonIndex];
+                    jointOffset    = meshComp.jointOffset;
+                    skeletonFound  = true;
                 }
-            }
-        }
+            });
+        });
+        if (skeletonFound) break;
     }
 
     if (targetSkeleton != nullptr) {

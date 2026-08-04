@@ -20,6 +20,17 @@
 
 namespace ZHLN::ECS {
 
+// Patch combinator: collapses the repetitive null-check dance
+template<typename T, typename Fn>
+inline bool Patch(ECS::Registry& reg, Entity e, Fn&& fn) {
+    if (auto* c = reg.Get<T>(e)) {
+        fn(*c);
+        return true;
+    }
+    return false;
+}
+namespace ZHLN::ECS {
+
 template <typename T, typename = void>
 struct is_complete: std::false_type {};
 
@@ -235,6 +246,25 @@ class ZHLN_API Registry {
             return {};
         }
         return {_components[id]->GetDenseArray(), _components[id]->Count()};
+    }
+
+    template <typename T, typename Pred>
+        requires CompleteType<T>
+    T* FindWhere(Pred&& pred) const noexcept {
+        uint32_t id = ComponentFamily::GetTypeID<T>();
+        if (id >= _compCapacity || !_components[id]) {
+            return nullptr;
+        }
+        auto* set    = _components[id];
+        size_t count = set->Count();
+        auto* data   = static_cast<T*>(set->GetDataArray());
+        for (size_t i = 0; i < count; ++i) {
+            T* comp = data + i;
+            if (pred(*comp)) {
+                return comp;
+            }
+        }
+        return nullptr;
     }
 
     // Overload: Populates _typeInfo metadata alongside sparse set allocation
