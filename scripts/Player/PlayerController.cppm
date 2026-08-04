@@ -529,7 +529,7 @@ void PlayerUpdateTick(Engine* engine, float dt) {
             targetCam.targetOffset =
                 JPH::Vec3(0.0f, PLAYER_EYE_OFFSET_Y + std::sin(p->bobPhase * 2.0f * JPH::JPH_PI) * 0.035f * p->bobAmt * bobScale - p->landDip, 0.0f);
             targetCam.smoothTargetPos = playerPos;
-        }
+        });
     }
 
     if (state.weaponEntity != NullEntity && reg.IsAlive(state.weaponEntity)) {
