@@ -40,10 +40,10 @@ void UpdatePickupsSystem(Engine* engine, PlayerController& p, std::vector<Weapon
 
     JPH::Vec3 playerPos = JPH::Vec3::sZero();
     if (playerEnt != NullEntity && reg.IsAlive(playerEnt)) {
-        trans = playerEnt;Components::TransformComponent>(reg, playerEnt, [&](auto& trans) {
-            playerPos = trans->position;
-});    }
-
+        Patch<Components::TransformComponent>(reg, playerEnt, [&](auto& trans) {
+            playerPos = trans.position;
+        });
+    }
     if (p.pickupFlash > 0.0f) {
         p.pickupFlash = std::max(0.0f, p.pickupFlash - dt);
     }
