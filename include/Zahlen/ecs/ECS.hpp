@@ -15,7 +15,7 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <threading/Mutex.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
 #include <vector>
 
 namespace ZHLN::ECS {

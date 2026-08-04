@@ -8,7 +8,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <cmath> // std::atan2
-#include <threading/TaskSystem.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
 
 namespace ZHLN::Tests {
 static void VerifyMovementStateConsistency(const ECS::Registry& reg) noexcept {

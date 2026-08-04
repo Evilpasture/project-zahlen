@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <new>
-#include <threading/Mutex.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
 #include <type_traits>
 
 namespace ZHLN {

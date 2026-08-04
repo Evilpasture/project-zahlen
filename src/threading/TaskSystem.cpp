@@ -1,10 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "TaskSystem.hpp"
-#include "Thread.hpp"
+#include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/Threading/Thread.hpp>
 #include "engine/Platform.hpp"
-#include "threading/Mutex.hpp"
+#include <Zahlen/Threading/Mutex.hpp>
 #include <condition_variable>
 #include <mutex>
 #include <queue> // Replaced vector with queue

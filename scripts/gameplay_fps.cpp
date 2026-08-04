@@ -39,9 +39,8 @@ void StartGame(Engine* engine) {
 
     ZHLN::Log("[Blacksite] Initializing FPS Tactical Sandbox...");
 
-    auto settingsEntities = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
-    if (!settingsEntities.empty()) {
-        if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(settingsEntities[0])) {
+    if (auto settings = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>(); !settings.empty()) {
+        if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(settings[0])) {
             pp->giMode            = 1;
             pp->ambientExposure   = 12.0f;
             pp->enableSSR         = 1;
@@ -75,16 +74,16 @@ void StartGame(Engine* engine) {
 
     AssetID groundMeshAsset = HashAssetID("ground_floor_mesh");
     if (!rc.GetGPUMesh(groundMeshAsset).has_value()) {
-        Mesh groundBox = CreativeWorksFactory::CreateBox(rc, JPH::Vec3(100.0f, 0.1f, 100.0f));
-        rc.RegisterGPUMesh(groundMeshAsset, groundBox);
+        rc.RegisterGPUMesh(groundMeshAsset, CreativeWorksFactory::CreateBox(rc, JPH::Vec3(100.0f, 0.1f, 100.0f)));
     }
 
-    auto groundShape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
     state.floorPlane = reg.Create();
     reg.Add(state.floorPlane, Components::TransformComponent {.position = JPH::Vec3(0.0f, -0.1f, 0.0f)});
     reg.Add(
-        state.floorPlane,
-        Components::PhysicsComponent {Physics::CreateRigidBody(pc, groundShape, JPH::RVec3::sZero(), JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0)}
+        state.floorPlane, Components::PhysicsComponent {Physics::CreateRigidBody(
+                              pc, Physics::GetOrCreateShape(pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f), JPH::RVec3::sZero(), JPH::Quat::sIdentity(),
+                              JPH::EMotionType::Static, 0
+                          )}
     );
     reg.Add(state.floorPlane, Components::MeshComponent {.meshAsset = groundMeshAsset, .materialAsset = state.concreteMat, .cullRadius = 250.0f});
     reg.Add(state.floorPlane, Components::PBRComponent {.roughness = 0.92f, .metallic = 0.05f});
@@ -97,7 +96,7 @@ void StartGame(Engine* engine) {
                             .color       = JPH::Vec3(1.0f, 0.98f, 0.95f),
                             .intensity   = 150.0f,
                             .radius      = 0.5f,
-                            .direction   = JPH::Vec3(0.4f, 0.8f, 0.4f).Normalized(),
+                            .direction   = JPH::Vec3(0.4f, -0.8f, 0.4f).Normalized(),
                             .range       = 500.0f,
                             .shadowLayer = -1
                         }
@@ -134,27 +133,31 @@ void StartGame(Engine* engine) {
 
     state.weaponEntity = Weapons::CreateWeaponModel(engine, p.currentWeapon, state.metalMat, state.crateMat);
 
-    auto camEnts = reg.GetEntitiesWith<Components::MainCameraTagComponent>();
-    if (!camEnts.empty()) {
+    if (auto camEnts = reg.GetEntitiesWith<Components::MainCameraTagComponent>(); !camEnts.empty()) {
         Entity camEnt    = camEnts[0];
         auto*  targetCam = reg.Get<Components::TargetCameraComponent>(camEnt);
-        if (!targetCam) {
+        if (!targetCam)
             targetCam = &reg.Add(camEnt, Components::TargetCameraComponent {});
-        }
-        targetCam->target          = state.playerEnt;
-        targetCam->distance        = 0.0f;
-        targetCam->targetDistance  = 0.0f;
-        targetCam->yaw             = -90.0f;
-        targetCam->pitch           = 0.0f;
-        targetCam->stiffness       = 0.0f;
-        targetCam->targetOffset    = JPH::Vec3(0.0f, PlayerController::PLAYER_EYE_OFFSET_Y, 0.0f);
-        targetCam->smoothTargetPos = spawnPos;
+
+        // C++26 strictly requires initialization exactly in the struct's declared order
+        *targetCam = Components::TargetCameraComponent {
+            .target          = state.playerEnt,
+            .distance        = 0.0f,
+            .targetDistance  = 0.0f,
+            .yaw             = -90.0f,
+            .pitch           = 0.0f,
+            .targetOffset    = JPH::Vec3(0.0f, PlayerController::PLAYER_EYE_OFFSET_Y, 0.0f),
+            .stiffness       = 0.0f,
+            .smoothTargetPos = spawnPos
+        };
     }
 
     for (int i = 0; i < 5; ++i) {
-        float             randAngle = (static_cast<float>(i) / 5.0f) * 6.283f;
-        Weapons::WeaponId wId       = (i % 3 == 0) ? Weapons::WeaponId::Shotgun : Weapons::WeaponId::Rifle;
-        EnemyAI::SpawnEnemy(engine, JPH::Vec3(std::cos(randAngle) * 18.0f, 0.0f, std::sin(randAngle) * 18.0f), wId);
+        float randAngle = (static_cast<float>(i) / 5.0f) * 6.283f;
+        EnemyAI::SpawnEnemy(
+            engine, JPH::Vec3(std::cos(randAngle) * 18.0f, 0.0f, std::sin(randAngle) * 18.0f),
+            (i % 3 == 0) ? Weapons::WeaponId::Shotgun : Weapons::WeaponId::Rifle
+        );
     }
 
     uint32_t fontIdx = 0;
@@ -165,107 +168,103 @@ void StartGame(Engine* engine) {
         }
     }
 
-    state.hudVitalsBg     = reg.Create();
-    auto& bgRect          = reg.Add(state.hudVitalsBg, Components::UIRectComponent {});
-    bgRect.anchorMinX     = 0.0f;
-    bgRect.anchorMaxX     = 0.0f;
-    bgRect.anchorMinY     = 1.0f;
-    bgRect.anchorMaxY     = 1.0f;
-    bgRect.x              = 24.0f;
-    bgRect.y              = -80.0f;
-    bgRect.width          = 200.0f;
-    bgRect.height         = 14.0f;
-    bgRect.hierarchyDepth = 10;
+    state.hudVitalsBg = reg.Create();
+    reg.Add(
+        state.hudVitalsBg, Components::UIRectComponent {
+                               .x              = 24.0f,
+                               .y              = -80.0f,
+                               .width          = 200.0f,
+                               .height         = 14.0f,
+                               .anchorMinX     = 0.0f,
+                               .anchorMinY     = 1.0f,
+                               .anchorMaxX     = 0.0f,
+                               .anchorMaxY     = 1.0f,
+                               .hierarchyDepth = 10
+                           }
+    );
+    reg.Add(state.hudVitalsBg, Components::UIPanelComponent {.color = JPH::Vec4(0.12f, 0.12f, 0.16f, 0.65f)});
 
-    auto& bgPanel = reg.Add(state.hudVitalsBg, Components::UIPanelComponent {});
-    bgPanel.color = JPH::Vec4(0.12f, 0.12f, 0.16f, 0.65f);
+    state.hudVitalsBar = reg.Create();
+    reg.Add(
+        state.hudVitalsBar,
+        Components::UIRectComponent {.parentEntity = state.hudVitalsBg, .x = 2.0f, .y = 2.0f, .width = 196.0f, .height = 10.0f, .hierarchyDepth = 11}
+    );
+    reg.Add(state.hudVitalsBar, Components::UIPanelComponent {.color = JPH::Vec4(0.35f, 0.95f, 0.45f, 0.95f)});
 
-    state.hudVitalsBar     = reg.Create();
-    auto& barRect          = reg.Add(state.hudVitalsBar, Components::UIRectComponent {});
-    barRect.parentEntity   = state.hudVitalsBg;
-    barRect.x              = 2.0f;
-    barRect.y              = 2.0f;
-    barRect.width          = 196.0f;
-    barRect.height         = 10.0f;
-    barRect.hierarchyDepth = 11;
+    state.hudAmmoText = reg.Create();
+    reg.Add(
+        state.hudAmmoText, Components::UIRectComponent {
+                               .x              = -240.0f,
+                               .y              = -85.0f,
+                               .width          = 200.0f,
+                               .height         = 40.0f,
+                               .anchorMinX     = 1.0f,
+                               .anchorMinY     = 1.0f,
+                               .anchorMaxX     = 1.0f,
+                               .anchorMaxY     = 1.0f,
+                               .hierarchyDepth = 10
+                           }
+    );
+    reg.Add(
+        state.hudAmmoText,
+        Components::TextComponent {.text = String256("30 / 210"), .scale = 1.25f, .color = JPH::Vec4(0.95f, 0.95f, 0.95f, 0.95f), .fontIndex = fontIdx}
+    );
 
-    auto& barPanel = reg.Add(state.hudVitalsBar, Components::UIPanelComponent {});
-    barPanel.color = JPH::Vec4(0.35f, 0.95f, 0.45f, 0.95f);
+    state.hudCrosshair = reg.Create();
+    reg.Add(
+        state.hudCrosshair, Components::UIRectComponent {
+                                .x              = -6.0f,
+                                .y              = -8.0f,
+                                .width          = 20.0f,
+                                .height         = 20.0f,
+                                .anchorMinX     = 0.5f,
+                                .anchorMinY     = 0.5f,
+                                .anchorMaxX     = 0.5f,
+                                .anchorMaxY     = 0.5f,
+                                .hierarchyDepth = 15
+                            }
+    );
+    reg.Add(
+        state.hudCrosshair,
+        Components::TextComponent {.text = String256("+"), .scale = 1.5f, .color = JPH::Vec4(0.43f, 1.00f, 0.70f, 0.85f), .fontIndex = fontIdx}
+    );
 
-    state.hudAmmoText       = reg.Create();
-    auto& ammoRect          = reg.Add(state.hudAmmoText, Components::UIRectComponent {});
-    ammoRect.anchorMinX     = 1.0f;
-    ammoRect.anchorMaxX     = 1.0f;
-    ammoRect.anchorMinY     = 1.0f;
-    ammoRect.anchorMaxY     = 1.0f;
-    ammoRect.x              = -240.0f;
-    ammoRect.y              = -85.0f;
-    ammoRect.width          = 200.0f;
-    ammoRect.height         = 40.0f;
-    ammoRect.hierarchyDepth = 10;
+    state.hudWaveText = reg.Create();
+    reg.Add(
+        state.hudWaveText, Components::UIRectComponent {
+                               .x              = 24.0f,
+                               .y              = 20.0f,
+                               .width          = 320.0f,
+                               .height         = 40.0f,
+                               .anchorMinX     = 0.0f,
+                               .anchorMinY     = 0.0f,
+                               .anchorMaxX     = 0.0f,
+                               .anchorMaxY     = 0.0f,
+                               .hierarchyDepth = 10
+                           }
+    );
+    reg.Add(
+        state.hudWaveText, Components::TextComponent {
+                               .text = String256("WAVE 01 - HOSTILES: 5"), .scale = 1.0f, .color = JPH::Vec4(0.55f, 0.82f, 1.00f, 0.85f), .fontIndex = fontIdx
+                           }
+    );
 
-    auto& ammoText = reg.Add(state.hudAmmoText, Components::TextComponent {});
-    ammoText.text.assign("30 / 210");
-    ammoText.scale     = 1.25f;
-    ammoText.fontIndex = fontIdx;
-    ammoText.color     = JPH::Vec4(0.95f, 0.95f, 0.95f, 0.95f);
-
-    state.hudCrosshair    = reg.Create();
-    auto& chRect          = reg.Add(state.hudCrosshair, Components::UIRectComponent {});
-    chRect.anchorMinX     = 0.5f;
-    chRect.anchorMaxX     = 0.5f;
-    chRect.anchorMinY     = 0.5f;
-    chRect.anchorMaxY     = 0.5f;
-    chRect.x              = -6.0f;
-    chRect.y              = -8.0f;
-    chRect.width          = 20.0f;
-    chRect.height         = 20.0f;
-    chRect.hierarchyDepth = 15;
-
-    auto& chText = reg.Add(state.hudCrosshair, Components::TextComponent {});
-    chText.text.assign("+");
-    chText.scale     = 1.5f;
-    chText.fontIndex = fontIdx;
-    chText.color     = JPH::Vec4(0.43f, 1.00f, 0.70f, 0.85f);
-
-    state.hudWaveText       = reg.Create();
-    auto& waveRect          = reg.Add(state.hudWaveText, Components::UIRectComponent {});
-    waveRect.anchorMinX     = 0.0f;
-    waveRect.anchorMaxX     = 0.0f;
-    waveRect.anchorMinY     = 0.0f;
-    waveRect.anchorMaxY     = 0.0f;
-    waveRect.x              = 24.0f;
-    waveRect.y              = 20.0f;
-    waveRect.width          = 320.0f;
-    waveRect.height         = 40.0f;
-    waveRect.hierarchyDepth = 10;
-
-    auto& waveText = reg.Add(state.hudWaveText, Components::TextComponent {});
-    waveText.text.assign("WAVE 01 - HOSTILES: 5");
-    waveText.scale     = 1.0f;
-    waveText.fontIndex = fontIdx;
-    waveText.color     = JPH::Vec4(0.55f, 0.82f, 1.00f, 0.85f);
-
-    // Dedicated single-line UI elements for Kill Feed to avoid embedded '\n' rendering glitches
     for (size_t i = 0; i < 5; ++i) {
-        Entity kfEnt          = reg.Create();
-        auto&  kfRect         = reg.Add(kfEnt, Components::UIRectComponent {});
-        kfRect.anchorMinX     = 1.0f;
-        kfRect.anchorMaxX     = 1.0f;
-        kfRect.anchorMinY     = 0.0f;
-        kfRect.anchorMaxY     = 0.0f;
-        kfRect.x              = -280.0f;
-        kfRect.y              = 20.0f + static_cast<float>(i) * 22.0f;
-        kfRect.width          = 260.0f;
-        kfRect.height         = 20.0f;
-        kfRect.hierarchyDepth = 10;
-
-        auto& kfText = reg.Add(kfEnt, Components::TextComponent {});
-        kfText.text.assign("");
-        kfText.scale     = 0.95f;
-        kfText.fontIndex = fontIdx;
-        kfText.color     = JPH::Vec4(0.4f, 0.95f, 0.7f, 0.9f);
-
+        Entity kfEnt = reg.Create();
+        reg.Add(
+            kfEnt, Components::UIRectComponent {
+                       .x              = -280.0f,
+                       .y              = 20.0f + static_cast<float>(i) * 22.0f,
+                       .width          = 260.0f,
+                       .height         = 20.0f,
+                       .anchorMinX     = 1.0f,
+                       .anchorMinY     = 0.0f,
+                       .anchorMaxX     = 1.0f,
+                       .anchorMaxY     = 0.0f,
+                       .hierarchyDepth = 10
+                   }
+        );
+        reg.Add(kfEnt, Components::TextComponent {.text = String256(""), .scale = 0.95f, .color = JPH::Vec4(0.4f, 0.95f, 0.7f, 0.9f), .fontIndex = fontIdx});
         state.hudKillFeedTexts[i] = kfEnt;
     }
 
@@ -282,22 +281,19 @@ void GameRulesSystem(ZHLN::Engine* engine, float /*dt*/) {
     for (auto ent: state.enemies) {
         if (!reg.IsAlive(ent))
             continue;
-        auto* enemy = reg.Get<ZHLN::EnemyAI::EnemyController>(ent);
-        if (enemy) {
-            if (enemy->behavior.alive) {
+        if (auto* enemy = reg.Get<ZHLN::EnemyAI::EnemyController>(ent)) {
+            if (enemy->behavior.alive)
                 aliveCount++;
-            } else {
+            else
                 corpses.push_back(ent);
-            }
         }
     }
 
-    uint32_t corpseBudget = aliveCount > 60 ? 4 : aliveCount > 30 ? 7 : 12;
+    uint32_t corpseBudget = (aliveCount > 60) ? 4 : (aliveCount > 30) ? 7 : 12;
     if (corpses.size() > corpseBudget) {
         size_t toRemove = corpses.size() - corpseBudget;
-        for (size_t i = 0; i < toRemove; ++i) {
+        for (size_t i = 0; i < toRemove; ++i)
             reg.Destroy(corpses[i]);
-        }
     }
 
     if (state.kills >= state.wave * 6) {
@@ -320,21 +316,11 @@ void CameraEffectsSystem(ZHLN::Engine* engine, float /*dt*/) {
     auto camEnts = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
     if (camEnts.empty())
         return;
-    Entity camEnt    = camEnts[0];
-    auto*  targetCam = reg.Get<ZHLN::Components::TargetCameraComponent>(camEnt);
-    if (!targetCam)
-        return;
-
-    if (p->health < 40.0f && p->alive) {
-        float pulse                  = std::sin(p->totalTime * 6.0f);
-        targetCam->vignetteIntensity = 1.4f + 0.35f * pulse;
-        targetCam->vignettePower     = 2.0f;
-    } else {
-        targetCam->vignetteIntensity = 1.15f;
-        targetCam->vignettePower     = 1.6f;
+    if (auto* targetCam = reg.Get<ZHLN::Components::TargetCameraComponent>(camEnts[0])) {
+        targetCam->vignetteIntensity = (p->health < 40.0f && p->alive) ? 1.4f + 0.35f * std::sin(p->totalTime * 6.0f) : 1.15f;
+        targetCam->vignettePower     = (p->health < 40.0f && p->alive) ? 2.0f : 1.6f;
+        targetCam->targetFov         = move->isSprinting ? 55.0f : 45.0f;
     }
-
-    targetCam->targetFov = move->isSprinting ? 55.0f : 45.0f;
 }
 
 void HUDSyncSystem(ZHLN::Engine* engine, float /*dt*/) {
@@ -349,70 +335,47 @@ void HUDSyncSystem(ZHLN::Engine* engine, float /*dt*/) {
 
     if (state.hudVitalsBar != ZHLN::NullEntity && reg.IsAlive(state.hudVitalsBar)) {
         if (auto* rect = reg.Get<ZHLN::Components::UIRectComponent>(state.hudVitalsBar)) {
-            float hpPct = std::max(0.0f, p->health) / 100.0f;
-            rect->width = 196.0f * hpPct;
+            rect->width = 196.0f * (std::max(0.0f, p->health) / 100.0f);
         }
         if (auto* panel = reg.Get<ZHLN::Components::UIPanelComponent>(state.hudVitalsBar)) {
-            if (p->godMode) {
-                panel->color = JPH::Vec4(1.0f, 0.85f, 0.4f, 0.95f);
-            } else if (p->health < 35.0f) {
-                panel->color = JPH::Vec4(0.95f, 0.25f, 0.25f, 0.95f);
-            } else {
-                panel->color = JPH::Vec4(0.35f, 0.95f, 0.45f, 0.95f);
-            }
+            panel->color = p->godMode          ? JPH::Vec4(1.0f, 0.85f, 0.4f, 0.95f) :
+                           (p->health < 35.0f) ? JPH::Vec4(0.95f, 0.25f, 0.25f, 0.95f) :
+                                                 JPH::Vec4(0.35f, 0.95f, 0.45f, 0.95f);
         }
     }
 
     if (state.hudAmmoText != ZHLN::NullEntity && reg.IsAlive(state.hudAmmoText)) {
         if (auto* text = reg.Get<ZHLN::Components::TextComponent>(state.hudAmmoText)) {
             auto& ammoState = p->ammo[static_cast<size_t>(p->currentWeapon)];
-            if (p->infiniteAmmo) {
-                text->text.assign(std::format("{} / INF", ammoState.mag));
-            } else {
-                text->text.assign(std::format("{} / {}", ammoState.mag, ammoState.reserve));
-            }
-            if (ammoState.mag == 0) {
-                text->color = JPH::Vec4(0.95f, 0.3f, 0.3f, 0.95f);
-            } else {
-                text->color = JPH::Vec4(0.95f, 0.95f, 0.95f, 0.95f);
-            }
+            text->text.assign(p->infiniteAmmo ? std::format("{} / INF", ammoState.mag) : std::format("{} / {}", ammoState.mag, ammoState.reserve));
+            text->color = (ammoState.mag == 0) ? JPH::Vec4(0.95f, 0.3f, 0.3f, 0.95f) : JPH::Vec4(0.95f, 0.95f, 0.95f, 0.95f);
         }
     }
 
     if (state.hudWaveText != ZHLN::NullEntity && reg.IsAlive(state.hudWaveText)) {
         if (auto* text = reg.Get<ZHLN::Components::TextComponent>(state.hudWaveText)) {
-            std::string status = state.hordeMode ? std::format("HORDE TARGET: {} - KILLS: {}", state.hordeTarget, state.kills) :
-                                                   std::format("WAVE {:02d} - HOSTILES: {}", state.wave, state.enemies.size());
-
-            text->text.assign(status);
+            text->text.assign(
+                state.hordeMode ? std::format("HORDE TARGET: {} - KILLS: {}", state.hordeTarget, state.kills) :
+                                  std::format("WAVE {:02d} - HOSTILES: {}", state.wave, state.enemies.size())
+            );
         }
     }
 
     for (size_t i = 0; i < 5; ++i) {
-        Entity kfEnt = state.hudKillFeedTexts[i];
-        if (kfEnt != NullEntity && reg.IsAlive(kfEnt)) {
+        if (Entity kfEnt = state.hudKillFeedTexts[i]; kfEnt != NullEntity && reg.IsAlive(kfEnt)) {
             if (auto* text = reg.Get<ZHLN::Components::TextComponent>(kfEnt)) {
-                if (i < state.killFeed.size()) {
-                    text->text.assign(state.killFeed[i].text);
+                text->text.assign((i < state.killFeed.size()) ? state.killFeed[i].text : "");
+                if (i < state.killFeed.size())
                     text->color = state.killFeed[i].head ? JPH::Vec4(0.95f, 0.35f, 0.35f, 0.95f) : JPH::Vec4(0.4f, 0.95f, 0.7f, 0.9f);
-                } else {
-                    text->text.assign("");
-                }
             }
         }
     }
 
     if (state.hudCrosshair != ZHLN::NullEntity && reg.IsAlive(state.hudCrosshair)) {
         if (auto* text = reg.Get<ZHLN::Components::TextComponent>(state.hudCrosshair)) {
-            if (p->ads > 0.25f) {
-                text->text.assign(".");
-                text->color = JPH::Vec4(1.0f, 0.2f, 0.2f, 0.85f);
-                text->scale = 2.0f;
-            } else {
-                text->text.assign("+");
-                text->color = JPH::Vec4(0.43f, 1.00f, 0.70f, 0.85f);
-                text->scale = 1.5f;
-            }
+            text->text.assign((p->ads > 0.25f) ? "." : "+");
+            text->color = (p->ads > 0.25f) ? JPH::Vec4(1.0f, 0.2f, 0.2f, 0.85f) : JPH::Vec4(0.43f, 1.00f, 0.70f, 0.85f);
+            text->scale = (p->ads > 0.25f) ? 2.0f : 1.5f;
         }
     }
 }
@@ -420,9 +383,8 @@ void HUDSyncSystem(ZHLN::Engine* engine, float /*dt*/) {
 } // namespace Game
 
 GAMEPLAY_API ZHLN::GameplayStatus NativeGameplayUpdate(ZHLN::Engine* engine, float dt) {
-    if (!engine) {
+    if (!engine)
         return ZHLN::GameplayStatus::Error;
-    }
 
     ZHLN_PROFILE_SCOPE("ECS System: Native Gameplay Update");
 
@@ -432,53 +394,55 @@ GAMEPLAY_API ZHLN::GameplayStatus NativeGameplayUpdate(ZHLN::Engine* engine, flo
     auto& state = ZHLN::BlacksiteState::GetSceneState();
 
     if (!state.gameStarted) {
-        ZHLN::MenuConfig cfg;
-        cfg.titleLogoPrefab = "";
-        cfg.themeMusicPath  = "";
-        cfg.cameraPosition  = JPH::Vec3(0.0f, 1.5f, 12.0f);
-        cfg.cameraYaw       = -90.0f;
-        cfg.cameraPitch     = 0.0f;
-
-        cfg.buttons.push_back(
-            {.text = "DEPLOY",
-             .onClick =
-                 [](ZHLN::Engine* eng) {
-                     eng->GetWindow().CaptureMouse(true);
-                     Game::StartGame(eng);
-                     ZHLN::BlacksiteState::GetSceneState().mainMenu.Destroy(eng);
-                 },
-             .textX = 55.0f,
-             .textY = 25.0f}
+        state.mainMenu.Build(
+            engine,
+            ZHLN::MenuConfig {
+                .cameraPosition = JPH::Vec3(0.0f, 1.5f, 12.0f),
+                .cameraYaw      = -90.0f,
+                .cameraPitch    = 0.0f,
+                .buttons        = {
+                    ZHLN::MenuButtonDesc {
+                        .text = "DEPLOY",
+                        .onClick =
+                            [](ZHLN::Engine* eng) {
+                                eng->GetWindow().CaptureMouse(true);
+                                Game::StartGame(eng);
+                                ZHLN::BlacksiteState::GetSceneState().mainMenu.Destroy(eng);
+                            },
+                        .textX = 55.0f,
+                        .textY = 25.0f
+                    },
+                    ZHLN::MenuButtonDesc {.text = "QUIT", .onClick = [](ZHLN::Engine* eng) { eng->GetWindow().Close(); }, .textX = 80.0f, .textY = 25.0f}
+                }
+            }
         );
-
-        cfg.buttons.push_back({.text = "QUIT", .onClick = [](ZHLN::Engine* eng) { eng->GetWindow().Close(); }, .textX = 80.0f, .textY = 25.0f});
-
-        state.mainMenu.Build(engine, cfg);
     } else if (isTabDown && !wasTabDown) {
         if (state.mainMenu.IsActive()) {
             engine->GetWindow().CaptureMouse(true);
             state.mainMenu.Destroy(engine);
         } else {
             engine->GetWindow().CaptureMouse(false);
-            ZHLN::MenuConfig cfg;
-            cfg.cameraPosition = engine->GetCamera().position;
-            cfg.cameraYaw      = engine->GetCamera().yaw;
-            cfg.cameraPitch    = engine->GetCamera().pitch;
-
-            cfg.buttons.push_back(
-                {.text = "RESUME",
-                 .onClick =
-                     [](ZHLN::Engine* eng) {
-                         eng->GetWindow().CaptureMouse(true);
-                         ZHLN::BlacksiteState::GetSceneState().mainMenu.Destroy(eng);
-                     },
-                 .textX = 55.0f,
-                 .textY = 25.0f}
+            state.mainMenu.Build(
+                engine,
+                ZHLN::MenuConfig {
+                    .cameraPosition = engine->GetCamera().position,
+                    .cameraYaw      = engine->GetCamera().yaw,
+                    .cameraPitch    = engine->GetCamera().pitch,
+                    .buttons        = {
+                        ZHLN::MenuButtonDesc {
+                            .text = "RESUME",
+                            .onClick =
+                                [](ZHLN::Engine* eng) {
+                                    eng->GetWindow().CaptureMouse(true);
+                                    ZHLN::BlacksiteState::GetSceneState().mainMenu.Destroy(eng);
+                                },
+                            .textX = 55.0f,
+                            .textY = 25.0f
+                        },
+                        ZHLN::MenuButtonDesc {.text = "QUIT", .onClick = [](ZHLN::Engine* eng) { eng->GetWindow().Close(); }, .textX = 80.0f, .textY = 25.0f}
+                    }
+                }
             );
-
-            cfg.buttons.push_back({.text = "QUIT", .onClick = [](ZHLN::Engine* eng) { eng->GetWindow().Close(); }, .textX = 80.0f, .textY = 25.0f});
-
-            state.mainMenu.Build(engine, cfg);
         }
     }
     wasTabDown = isTabDown;

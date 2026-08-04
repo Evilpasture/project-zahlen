@@ -1,10 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "Mutex.hpp"
-#include "ConditionalVariable.hpp"
-#include "TaskSystem.hpp"
-#include "Thread.hpp"
+#include <Zahlen/Threading/Mutex.hpp>
+#include <Zahlen/Threading/ConditionalVariable.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/Threading/Thread.hpp>
 #include <bit>
 #include <cassert>
 #include <condition_variable>

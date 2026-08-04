@@ -4,7 +4,7 @@
 #pragma once
 
 #include <Zahlen/Log.hpp>
-#include <threading/Mutex.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
 
 /**
  * @brief Internal helper to create a scope-bound guard that executes exactly once.

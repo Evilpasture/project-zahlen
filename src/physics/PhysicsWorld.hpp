@@ -11,7 +11,7 @@
 #include <cstdint>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/Platform.hpp>
-#include <threading/Mutex.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
 #include <type_traits>
 
 namespace ZHLN {

@@ -5,7 +5,7 @@
 #pragma once
 #include "Rendering.hpp"
 #include "engine/FileWatcher.hpp"
-#include "threading/Mutex.hpp"
+#include <Zahlen/Threading/Mutex.hpp>
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/ControlFlow.hpp>

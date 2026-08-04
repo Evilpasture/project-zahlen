@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Cook.hpp"
-#include "threading/TaskSystem.hpp"
-#include "threading/Thread.hpp"
+#include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/Threading/Thread.hpp>
 #include <cstdio>
 #include <print>
 #include <string_view>

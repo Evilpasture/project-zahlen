@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "Thread.hpp"
-#include "threading/Mutex.hpp"
+#include <Zahlen/Threading/Thread.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
 #include <bit>
 #include <cstddef>
 #include <cstdint>

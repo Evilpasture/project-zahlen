@@ -6,7 +6,7 @@
 #include "BinaryReader.hpp"
 #include "GLB.hpp"
 #include "Transform.hpp"
-#include "threading/TaskSystem.hpp"
+#include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Types.hpp>

@@ -82,9 +82,9 @@ struct PlayerControllerComp {
         int32_t reserve = 210;
     };
     std::array<AmmoState, static_cast<size_t>(Weapons::WeaponId::Count)> ammo = {{
-        {.mag = 30, .reserve = 210},  // Rifle
-        {.mag = 7, .reserve = 70},    // Shotgun
-        {.mag = 600, .reserve = 2400} // Minigun
+        AmmoState {.mag = 30, .reserve = 210},  // Rifle
+        AmmoState {.mag = 7, .reserve = 70},    // Shotgun
+        AmmoState {.mag = 600, .reserve = 2400} // Minigun
     }};
 
     float   reloading    = 0.0f;
@@ -156,8 +156,7 @@ void ProcessPlayerWeaponFire(Engine* engine, PlayerControllerComp& p) {
     float     pitchRad = JPH::DegreesToRadians(cam.pitch);
     JPH::Vec3 baseDir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
 
-    std::random_device                    rd;
-    std::mt19937                          gen(rd());
+    std::mt19937                          gen(std::random_device {}());
     std::uniform_real_distribution<float> dis(-1.0f, 1.0f);
 
     float moving      = (p.bobAmt * 0.028f) * (def.pellets > 1 ? 0.45f : 1.0f);
@@ -170,8 +169,7 @@ void ProcessPlayerWeaponFire(Engine* engine, PlayerControllerComp& p) {
         }
     }
 
-    bool anyHit    = false;
-    bool anyPierce = false;
+    bool anyHit = false, anyPierce = false;
 
     struct HitRecord {
         float                         t        = 220.0f;
@@ -189,9 +187,7 @@ void ProcessPlayerWeaponFire(Engine* engine, PlayerControllerComp& p) {
             cone += def.patternSpread * (1.0f - p.ads * def.adsTighten) * r;
         }
 
-        JPH::Vec3 dir = baseDir.Normalized() + JPH::Vec3(dis(gen) * cone, dis(gen) * cone, dis(gen) * cone);
-        dir           = dir.Normalized();
-
+        JPH::Vec3              dir  = (baseDir.Normalized() + JPH::Vec3(dis(gen) * cone, dis(gen) * cone, dis(gen) * cone)).Normalized();
         float                  maxT = def.range;
         std::vector<HitRecord> hits;
 
@@ -212,8 +208,7 @@ void ProcessPlayerWeaponFire(Engine* engine, PlayerControllerComp& p) {
                 continue;
             auto* enemy = reg.Get<EnemyAI::EnemyController>(enemyEnt);
             if (enemy) {
-                auto bHit = enemy->behavior.Raycast(origin, dir, maxT);
-                if (bHit) {
+                if (auto bHit = enemy->behavior.Raycast(origin, dir, maxT)) {
                     hits.push_back({.t = bHit->t, .victim = enemyEnt, .bodyHit = bHit, .isGround = false, .point = bHit->point, .normal = bHit->normal});
                 }
             }
@@ -221,10 +216,8 @@ void ProcessPlayerWeaponFire(Engine* engine, PlayerControllerComp& p) {
 
         std::sort(hits.begin(), hits.end(), [](const HitRecord& a, const HitRecord& b) { return a.t < b.t; });
 
-        float    pen           = def.penetration;
-        float    dmgScale      = 1.0f;
+        float    pen = def.penetration, dmgScale = 1.0f, endT = maxT;
         uint32_t bodiesPierced = 0;
-        float    endT          = maxT;
 
         for (const auto& hit: hits) {
             if (hit.t > endT)
@@ -233,22 +226,21 @@ void ProcessPlayerWeaponFire(Engine* engine, PlayerControllerComp& p) {
             if (hit.victim != NullEntity && hit.bodyHit) {
                 auto* enemy = reg.Get<EnemyAI::EnemyController>(hit.victim);
                 if (enemy && enemy->behavior.alive) {
-                    Actor::ActorContext dummyCtx;
-                    dummyCtx.fx.spawnImpact = [&state](JPH::Vec3Arg pt, JPH::Vec3Arg n, uint32_t type) {
-                        CombatFX::SpawnImpactParticles(state.particles, pt, n, type);
-                    };
-                    dummyCtx.onKilled = [&](bool hs) {
-                        state.kills++;
-                        state.score += hs ? 250 : 100;
-                        if (hs)
-                            state.headshots++;
-                        CombatAudio::PlayKill(engine);
-                        BlacksiteState::PushKillFeed(hs ? "HEADSHOT — HOSTILE DOWN" : "HOSTILE DOWN", hs);
+                    Actor::ActorContext dummyCtx {
+                        .fx =
+                            {.spawnImpact =
+                                 [&state](JPH::Vec3Arg pt, JPH::Vec3Arg n, uint32_t type) { CombatFX::SpawnImpactParticles(state.particles, pt, n, type); }},
+                        .onKilled = [&](bool hs) {
+                            state.kills++;
+                            state.score += hs ? 250 : 100;
+                            if (hs)
+                                state.headshots++;
+                            CombatAudio::PlayKill(engine);
+                            BlacksiteState::PushKillFeed(hs ? "HEADSHOT — HOSTILE DOWN" : "HOSTILE DOWN", hs);
+                        }
                     };
 
-                    float falloff = Weapons::FalloffAt(def, hit.t);
-                    float dmg     = def.damage * falloff * dmgScale;
-
+                    float dmg = def.damage * Weapons::FalloffAt(def, hit.t) * dmgScale;
                     enemy->behavior.Damage(dmg, *hit.bodyHit, dir, dummyCtx, true);
 
                     anyHit          = true;
@@ -261,11 +253,11 @@ void ProcessPlayerWeaponFire(Engine* engine, PlayerControllerComp& p) {
                     }
 
                     bodiesPierced++;
-                    if (pen < 0.55f || bodiesPierced >= def.maxBodyPierces || def.bodyPenRetain <= 0.0f) {
+                    if (pen < Weapons::BODY_PEN_COST || bodiesPierced >= def.maxBodyPierces || def.bodyPenRetain <= 0.0f) {
                         endT = hit.t;
                         break;
                     }
-                    pen -= 0.55f;
+                    pen -= Weapons::BODY_PEN_COST;
                     dmgScale *= def.bodyPenRetain;
                 }
             } else {
@@ -278,15 +270,15 @@ void ProcessPlayerWeaponFire(Engine* engine, PlayerControllerComp& p) {
 
         JPH::Vec3 endPoint = origin + dir * endT;
 
-        CombatFX::BulletTracer tracer;
-        tracer.start         = muzzleWorld;
-        tracer.direction     = (endPoint - muzzleWorld).Normalized();
-        tracer.speed         = 320.0f;
-        tracer.length        = 3.2f;
-        tracer.totalDistance = (endPoint - muzzleWorld).Length();
-        tracer.traveled      = 0.0f;
-        tracer.color         = JPH::Vec3(1.0f, 0.81f, 0.44f);
-        state.tracers.push_back(tracer);
+        state.tracers.push_back(
+            {.start         = muzzleWorld,
+             .direction     = (endPoint - muzzleWorld).Normalized(),
+             .speed         = 320.0f,
+             .length        = 3.2f,
+             .totalDistance = (endPoint - muzzleWorld).Length(),
+             .traveled      = 0.0f,
+             .color         = JPH::Vec3(1.0f, 0.81f, 0.44f)}
+        );
     }
 
     if (def.pellets > 1)
@@ -316,10 +308,8 @@ void ProcessKineticBlast(Engine* engine, PlayerControllerComp& p) {
     auto& state = BlacksiteState::GetSceneState();
     auto& cam   = engine->GetCamera();
 
-    float     yawRad   = JPH::DegreesToRadians(cam.yaw);
-    float     pitchRad = JPH::DegreesToRadians(cam.pitch);
+    float     yawRad = JPH::DegreesToRadians(cam.yaw), pitchRad = JPH::DegreesToRadians(cam.pitch);
     JPH::Vec3 aimDir   = JPH::Vec3(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad)).Normalized();
-
     JPH::Vec3 origin   = cam.position + aimDir * 0.9f;
     float     cosAngle = JPH::Cos(JPH::DegreesToRadians(62.0f));
 
@@ -332,9 +322,8 @@ void ProcessKineticBlast(Engine* engine, PlayerControllerComp& p) {
         if (!enemy)
             continue;
 
-        JPH::Vec3 targetPos = enemy->behavior.position + JPH::Vec3(0, 1.2f, 0);
-        JPH::Vec3 toTarget  = targetPos - origin;
-        float     dist      = toTarget.Length();
+        JPH::Vec3 targetPos = enemy->behavior.position + JPH::Vec3(0, 1.2f, 0), toTarget = targetPos - origin;
+        float     dist = toTarget.Length();
 
         if (dist > BLAST_RANGE || dist < 0.01f)
             continue;
@@ -343,23 +332,22 @@ void ProcessKineticBlast(Engine* engine, PlayerControllerComp& p) {
             continue;
 
         float     falloff   = std::pow(1.0f - dist / BLAST_RANGE, 0.7f);
-        JPH::Vec3 launchDir = (aimDir * 0.55f + dirToTarget * 0.45f).Normalized();
-        launchDir.SetY(launchDir.GetY() + 0.55f);
-
-        JPH::Vec3 impulse = launchDir.Normalized() * (BLAST_FORCE * (0.45f + 0.55f * falloff));
+        JPH::Vec3 launchDir = (aimDir * 0.55f + dirToTarget * 0.45f).Normalized() + JPH::Vec3(0, 0.55f, 0);
+        JPH::Vec3 impulse   = launchDir.Normalized() * (BLAST_FORCE * (0.45f + 0.55f * falloff));
 
         if (enemy->behavior.alive) {
-            Actor::BodyHit      hit {.t = dist, .point = targetPos, .normal = -aimDir, .joint = Rig::Joint::Chest, .mult = 1.0f, .zone = 1};
             Actor::ActorContext dummyCtx;
-            enemy->behavior.Damage(20.0f * falloff, hit, launchDir, dummyCtx, true);
+            enemy->behavior.Damage(
+                20.0f * falloff, {.t = dist, .point = targetPos, .normal = -aimDir, .joint = Rig::Joint::Chest, .mult = 1.0f, .zone = 1}, launchDir, dummyCtx,
+                true
+            );
             enemy->behavior.state = Actor::AIState::Suppressed;
             enemy->behavior.ragdoll.ApplyImpulse(static_cast<uint32_t>(Rig::Joint::Chest), impulse);
             stunnedCount++;
         }
     }
 
-    CombatFX::KineticShockwave wave {.position = origin, .direction = aimDir, .radius = BLAST_RANGE * 0.62f, .life = 0.55f, .maxLife = 0.55f};
-    state.shockwaves.push_back(wave);
+    state.shockwaves.push_back({.position = origin, .direction = aimDir, .radius = BLAST_RANGE * 0.62f, .life = 0.55f, .maxLife = 0.55f});
 
     p.pitchRecoil.ApplyImpulse(2.6f);
     p.kickSpring.ApplyImpulse(4.5f);
@@ -385,9 +373,8 @@ void PlayerInputSystem(Engine* engine, [[maybe_unused]] float dt) {
         return;
 
     if (!state.mainMenu.IsActive()) {
-        const float sensitivity = 0.15f;
-        p->baseYaw += input.GetMouse().deltaX * sensitivity;
-        p->basePitch = std::clamp(p->basePitch - (input.GetMouse().deltaY * sensitivity), -89.0f, 89.0f);
+        p->baseYaw += input.GetMouse().deltaX * 0.15f;
+        p->basePitch = std::clamp(p->basePitch - (input.GetMouse().deltaY * 0.15f), -89.0f, 89.0f);
     }
 
     float yawRad   = JPH::DegreesToRadians(p->baseYaw);
@@ -412,14 +399,9 @@ void PlayerInputSystem(Engine* engine, [[maybe_unused]] float dt) {
         moveZ += rightZ;
     }
 
-    float len = std::sqrt(moveX * moveX + moveZ * moveZ);
-    if (len > 0.01f) {
-        move->inputX = moveX / len;
-        move->inputZ = moveZ / len;
-    } else {
-        move->inputX = 0.0f;
-        move->inputZ = 0.0f;
-    }
+    float len    = std::sqrt(moveX * moveX + moveZ * moveZ);
+    move->inputX = (len > 0.01f) ? moveX / len : 0.0f;
+    move->inputZ = (len > 0.01f) ? moveZ / len : 0.0f;
 
     move->isSprinting = input.IsKeyDown(KeyCode::LShift) && (len > 0.01f);
     if (input.IsKeyDown(KeyCode::Space))
@@ -448,39 +430,33 @@ void PlayerUpdateTick(Engine* engine, float dt) {
         p->swapT -= dt;
         if (prev > 0.275f && p->swapT <= 0.275f) {
             p->currentWeapon = p->pendingWeapon;
-            if (state.weaponEntity != NullEntity && reg.IsAlive(state.weaponEntity)) {
+            if (state.weaponEntity != NullEntity && reg.IsAlive(state.weaponEntity))
                 reg.Destroy(state.weaponEntity);
-            }
             state.weaponEntity = Weapons::CreateWeaponModel(engine, p->currentWeapon, state.metalMat, state.crateMat);
         }
         if (p->swapT <= 0.0f)
             p->swapT = 0.0f;
     }
 
-    if (input.IsKeyDown(KeyCode::R)) {
-        if (p->reloading <= 0.0f && p->swapT <= 0.0f) {
-            auto& ammoState = p->ammo[static_cast<size_t>(p->currentWeapon)];
-            if (ammoState.mag < def.magSize && ammoState.reserve > 0) {
-                if (def.shellReload > 0.0f) {
-                    p->shellsToLoad = std::min(def.magSize - ammoState.mag, ammoState.reserve);
-                    p->shellTimer   = 0.35f;
-                    p->reloading    = 0.35f + p->shellsToLoad * def.shellReload + 0.3f;
-                } else {
-                    p->reloading = def.reloadTime;
-                }
-                CombatAudio::PlayReload(engine);
-            }
+    if (input.IsKeyDown(KeyCode::R) && p->reloading <= 0.0f && p->swapT <= 0.0f) {
+        auto& ammoState = p->ammo[static_cast<size_t>(p->currentWeapon)];
+        if (ammoState.mag < def.magSize && ammoState.reserve > 0) {
+            p->shellsToLoad = (def.shellReload > 0.0f) ? std::min(def.magSize - ammoState.mag, ammoState.reserve) : 0;
+            p->shellTimer   = 0.35f;
+            p->reloading    = (def.shellReload > 0.0f) ? 0.35f + p->shellsToLoad * def.shellReload + 0.3f : def.reloadTime;
+            CombatAudio::PlayReload(engine);
         }
     }
 
-    if (def.spinUp > 0.0f) {
-        bool  wantSpin = input.IsMouseButtonDown(KeyCode::LButton) || input.IsMouseButtonDown(KeyCode::RButton);
-        float rate     = wantSpin ? dt / def.spinUp : -dt / (def.spinUp * 1.5f);
-        p->spin        = MathUtils::Clamp(p->spin + rate, 0.0f, 1.0f);
+    p->spin = (def.spinUp > 0.0f) ?
+                  MathUtils::Clamp(
+                      p->spin + ((input.IsMouseButtonDown(KeyCode::LButton) || input.IsMouseButtonDown(KeyCode::RButton)) ? dt / def.spinUp :
+                                                                                                                            -dt / (def.spinUp * 1.5f)),
+                      0.0f, 1.0f
+                  ) :
+                  0.0f;
+    if (def.spinUp > 0.0f)
         p->barrelAngle += p->spin * 46.0f * dt;
-    } else {
-        p->spin = 0.0f;
-    }
 
     p->fireCd = std::max(0.0f, p->fireCd - dt);
     if (p->reloading > 0.0f) {
@@ -498,8 +474,7 @@ void PlayerUpdateTick(Engine* engine, float dt) {
                 CombatAudio::PlayStep(engine);
             }
         } else if (p->reloading <= 0.0f) {
-            int32_t need     = def.magSize - ammoState.mag;
-            int32_t transfer = std::min(need, ammoState.reserve);
+            int32_t transfer = std::min(def.magSize - ammoState.mag, ammoState.reserve);
             ammoState.mag += transfer;
             if (!p->infiniteAmmo)
                 ammoState.reserve -= transfer;
@@ -511,8 +486,8 @@ void PlayerUpdateTick(Engine* engine, float dt) {
     p->yawRecoil.Update(dt);
     p->kickSpring.Update(dt);
 
-    bool canAds = !def.noAds && p->reloading <= 0.0f && p->swapT <= 0.0f;
-    p->ads      = MathUtils::Damp(p->ads, (canAds && input.IsMouseButtonDown(KeyCode::RButton)) ? 1.0f : 0.0f, 14.0f, dt);
+    p->ads =
+        MathUtils::Damp(p->ads, (!def.noAds && p->reloading <= 0.0f && p->swapT <= 0.0f && input.IsMouseButtonDown(KeyCode::RButton)) ? 1.0f : 0.0f, 14.0f, dt);
 
     float speedSq     = move->inputX * move->inputX + move->inputZ * move->inputZ;
     float planarSpeed = (speedSq > 0.01f) ? (move->isSprinting ? 7.4f : 5.1f) : 0.0f;
@@ -530,63 +505,47 @@ void PlayerUpdateTick(Engine* engine, float dt) {
     p->landDip += p->landVel * dt;
 
     float height = reg.Get<Components::TransformComponent>(state.playerEnt)->position.GetY();
-    if (move->isGrounded && p->lastHeight - height > 1.5f) {
+    if (move->isGrounded && p->lastHeight - height > 1.5f)
         p->landVel = -(p->lastHeight - height) * 3.5f;
-    }
     p->lastHeight = height;
 
     float bobScale = 1.0f - p->ads * 0.9f;
-    float bobY     = std::sin(p->bobPhase * 2.0f * JPH::JPH_PI) * 0.035f * p->bobAmt * bobScale;
-    float bobX     = std::cos(p->bobPhase * JPH::JPH_PI) * 0.045f * p->bobAmt * bobScale;
+    cam.yaw        = p->baseYaw + p->yawRecoil.value * 0.35f;
+    cam.pitch      = std::clamp(p->basePitch + p->pitchRecoil.value, -89.0f, 89.0f);
+    cam.fov        = MathUtils::Lerp(HIP_FOV, def.adsFov, p->ads);
 
-    cam.yaw   = p->baseYaw + p->yawRecoil.value * 0.35f;
-    cam.pitch = std::clamp(p->basePitch + p->pitchRecoil.value, -89.0f, 89.0f);
-    cam.fov   = MathUtils::Lerp(HIP_FOV, def.adsFov, p->ads);
+    JPH::Vec3 playerPos = (reg.Get<Components::TransformComponent>(state.playerEnt)) ? reg.Get<Components::TransformComponent>(state.playerEnt)->position :
+                                                                                       JPH::Vec3::sZero();
+    cam.position        = playerPos + JPH::Vec3(
+                                          std::cos(p->bobPhase * JPH::JPH_PI) * 0.045f * p->bobAmt * bobScale * 0.4f,
+                                          PLAYER_EYE_OFFSET_Y + std::sin(p->bobPhase * 2.0f * JPH::JPH_PI) * 0.035f * p->bobAmt * bobScale - p->landDip, 0.0f
+                                      );
 
-    JPH::Vec3 playerPos = JPH::Vec3::sZero();
-    if (auto* trans = reg.Get<Components::TransformComponent>(state.playerEnt)) {
-        playerPos = trans->position;
-    }
-
-    JPH::Vec3 mutablePos = playerPos;
-    mutablePos.SetY(mutablePos.GetY() + PLAYER_EYE_OFFSET_Y + bobY - p->landDip);
-    mutablePos.SetX(mutablePos.GetX() + bobX * 0.4f);
-    cam.position = mutablePos;
-
-    auto camEnts = reg.GetEntitiesWith<Components::MainCameraTagComponent>();
-    if (!camEnts.empty()) {
+    if (auto camEnts = reg.GetEntitiesWith<Components::MainCameraTagComponent>(); !camEnts.empty()) {
         if (auto* targetCam = reg.Get<Components::TargetCameraComponent>(camEnts[0])) {
-            targetCam->distance        = 0.0f;
-            targetCam->targetDistance  = 0.0f;
-            targetCam->yaw             = cam.yaw;
-            targetCam->pitch           = cam.pitch;
-            targetCam->targetOffset    = JPH::Vec3(0.0f, PLAYER_EYE_OFFSET_Y + bobY - p->landDip, 0.0f);
+            targetCam->distance = targetCam->targetDistance = 0.0f;
+            targetCam->yaw                                  = cam.yaw;
+            targetCam->pitch                                = cam.pitch;
+            targetCam->targetOffset =
+                JPH::Vec3(0.0f, PLAYER_EYE_OFFSET_Y + std::sin(p->bobPhase * 2.0f * JPH::JPH_PI) * 0.035f * p->bobAmt * bobScale - p->landDip, 0.0f);
             targetCam->smoothTargetPos = playerPos;
         }
     }
 
     if (state.weaponEntity != NullEntity && reg.IsAlive(state.weaponEntity)) {
         if (auto* wTrans = reg.Get<Components::TransformComponent>(state.weaponEntity)) {
-            float free   = 1.0f - p->ads;
-            float freeSq = free * free;
-
+            float free = 1.0f - p->ads, freeSq = free * free;
             p->sway.Update(dt, input.GetMouse().deltaX * 0.002f, input.GetMouse().deltaY * 0.002f);
 
-            float pitchRad = JPH::DegreesToRadians(cam.pitch);
-            float yawRad   = JPH::DegreesToRadians(cam.yaw);
-
-            JPH::Vec3 forward = JPH::Vec3(std::cos(yawRad) * std::cos(pitchRad), std::sin(pitchRad), std::sin(yawRad) * std::cos(pitchRad)).Normalized();
-            JPH::Vec3 worldUp(0.0f, 1.0f, 0.0f);
-            JPH::Vec3 right    = worldUp.Cross(forward).Normalized();
+            float     pitchRad = JPH::DegreesToRadians(cam.pitch), yawRad = JPH::DegreesToRadians(cam.yaw);
+            JPH::Vec3 forward  = JPH::Vec3(std::cos(yawRad) * std::cos(pitchRad), std::sin(pitchRad), std::sin(yawRad) * std::cos(pitchRad)).Normalized();
+            JPH::Vec3 right    = JPH::Vec3(0, 1, 0).Cross(forward).Normalized();
             JPH::Vec3 actualUp = forward.Cross(right).Normalized();
 
-            JPH::Vec3 hipBase(-0.14f, 0.05f, 0.38f);
-            JPH::Vec3 adsBase(0.0f, -SIGHT_HEIGHT, 0.285f);
-            JPH::Vec3 base = MathUtils::Lerp(hipBase, adsBase, p->ads);
-
-            float offsetX = base.GetX() + (p->sway.currentSwayX + std::sin(p->bobPhase * 2.0f * JPH::JPH_PI) * 0.012f * p->bobAmt) * freeSq;
-            float offsetY = base.GetY() + (p->sway.currentSwayY + std::abs(std::cos(p->bobPhase * JPH::JPH_PI)) * 0.012f * p->bobAmt) * freeSq;
-            float offsetZ = base.GetZ() - p->kickSpring.value * 0.04f;
+            JPH::Vec3 base    = MathUtils::Lerp(JPH::Vec3(-0.14f, 0.05f, 0.38f), JPH::Vec3(0.0f, -SIGHT_HEIGHT, 0.285f), p->ads);
+            float     offsetX = base.GetX() + (p->sway.currentSwayX + std::sin(p->bobPhase * 2.0f * JPH::JPH_PI) * 0.012f * p->bobAmt) * freeSq;
+            float     offsetY = base.GetY() + (p->sway.currentSwayY + std::abs(std::cos(p->bobPhase * JPH::JPH_PI)) * 0.012f * p->bobAmt) * freeSq;
+            float     offsetZ = base.GetZ() - p->kickSpring.value * 0.04f;
 
             if (p->swapT > 0.0f) {
                 float swapDip = std::sin(MathUtils::Clamp(1.0f - std::abs(p->swapT - 0.275f) / 0.275f, 0.0f, 1.0f) * (JPH::JPH_PI * 0.5f));
@@ -599,11 +558,10 @@ void PlayerUpdateTick(Engine* engine, float dt) {
             basis.SetColumn3(1, actualUp);
             basis.SetColumn3(2, forward);
 
-            JPH::Quat camRot  = basis.GetQuaternion().Normalized();
-            JPH::Quat kickRot = MathUtils::EulerYXZ(-p->kickSpring.value * 0.55f, p->kickSpring.value * 0.12f, p->kickSpring.value * 0.2f);
-
             wTrans->position = cam.position + right * offsetX + actualUp * offsetY + forward * offsetZ;
-            wTrans->rotation = (camRot * kickRot).Normalized();
+            wTrans->rotation = (basis.GetQuaternion().Normalized() *
+                                MathUtils::EulerYXZ(-p->kickSpring.value * 0.55f, p->kickSpring.value * 0.12f, p->kickSpring.value * 0.2f))
+                                   .Normalized();
         }
     }
 

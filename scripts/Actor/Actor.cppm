@@ -9,6 +9,7 @@ module;
 #include <random>
 #include <string_view>
 #include <vector>
+
 export module ZHLN.Actor;
 
 import ZHLN.Rig;
@@ -20,12 +21,12 @@ export namespace ZHLN::Actor {
 enum class AIState : uint8_t { Idle, Patrol, Engage, Reposition, Suppressed, Dead };
 
 struct BodyHit {
-    float      t;
-    JPH::Vec3  point;
-    JPH::Vec3  normal;
-    Rig::Joint joint;
-    float      mult;
-    uint32_t   zone; // 0=Head, 1=Torso, 2=Limb
+    float      t      = 0.0f;
+    JPH::Vec3  point  = JPH::Vec3::sZero();
+    JPH::Vec3  normal = JPH::Vec3::sZero();
+    Rig::Joint joint  = Rig::Joint::Hips;
+    float      mult   = 1.0f;
+    uint32_t   zone   = 2; // 0=Head, 1=Torso, 2=Limb
 };
 
 struct WeaponStance {
@@ -36,10 +37,10 @@ struct WeaponStance {
 };
 
 struct ActorContext {
-    JPH::Vec3 playerPos;
-    bool      playerAlive;
-    float     time;
-    float     floorY;
+    JPH::Vec3 playerPos   = JPH::Vec3::sZero();
+    bool      playerAlive = false;
+    float     time        = 0.0f;
+    float     floorY      = 0.0f;
 
     struct {
         std::function<bool(JPH::Vec3Arg, float)>                                 pointBlocked;
@@ -60,145 +61,95 @@ struct ActorContext {
     } fx;
 
     std::function<WeaponStance(float dt, float speed, float crouch, float aimYaw, float aimPitch, float aiming)> updateAnimation;
-
-    std::function<void(float, JPH::Vec3Arg)> damagePlayer;
-    std::function<void(bool)>                onKilled;
+    std::function<void(float, JPH::Vec3Arg)>                                                                     damagePlayer;
+    std::function<void(bool)>                                                                                    onKilled;
 };
 
 struct SegmentIntersection {
-    float     t;
-    float     dist;
-    JPH::Vec3 point;
-    JPH::Vec3 segmentPoint;
+    float     t            = 0.0f;
+    float     dist         = 0.0f;
+    JPH::Vec3 point        = JPH::Vec3::sZero();
+    JPH::Vec3 segmentPoint = JPH::Vec3::sZero();
 };
 
 inline std::optional<SegmentIntersection> RaySegmentDistance(JPH::Vec3Arg o, JPH::Vec3Arg d, JPH::Vec3Arg a, JPH::Vec3Arg b) noexcept {
-    JPH::Vec3 ab   = b - a;
-    JPH::Vec3 ao   = o - a;
-    float     abab = ab.Dot(ab);
-    float     abd  = ab.Dot(d);
-    float     abao = ab.Dot(ao);
-    float     dao  = d.Dot(ao);
-    float     den  = abab - abd * abd;
-
-    float s = 0.0f;
-    float t = 0.0f;
-
-    if (std::abs(den) < 1e-6f) {
-        s = 0.0f;
-        t = -dao;
-    } else {
-        s = MathUtils::Clamp((abd * dao - abao) / den * -1.0f, 0.0f, 1.0f);
-        t = abd * s - dao;
-    }
+    JPH::Vec3 ab = b - a, ao = o - a;
+    float     abab = ab.Dot(ab), abd = ab.Dot(d), abao = ab.Dot(ao), dao = d.Dot(ao), den = abab - abd * abd;
+    float     s = (std::abs(den) < 1e-6f) ? 0.0f : MathUtils::Clamp((abd * dao - abao) / den * -1.0f, 0.0f, 1.0f);
+    float     t = (std::abs(den) < 1e-6f) ? -dao : abd * s - dao;
 
     if (t < 0.0f)
         return std::nullopt;
 
-    JPH::Vec3 pointOnRay     = o + d * t;
-    JPH::Vec3 pointOnSegment = a + ab * s;
-
-    return SegmentIntersection {.t = t, .dist = (pointOnRay - pointOnSegment).Length(), .point = pointOnRay, .segmentPoint = pointOnSegment};
+    JPH::Vec3 pRay = o + d * t, pSeg = a + ab * s;
+    return SegmentIntersection {.t = t, .dist = (pRay - pSeg).Length(), .point = pRay, .segmentPoint = pSeg};
 }
 
 class StandardActor {
   public:
-    JPH::Vec3 position = JPH::Vec3::sZero();
-    JPH::Vec3 velocity = JPH::Vec3::sZero();
-    float     yaw      = 0.0f;
-    float     aimYaw   = 0.0f;
-    float     aimPitch = 0.0f;
-    float     speed    = 0.0f;
-    float     crouch   = 0.0f;
-    float     aiming   = 0.0f;
+    JPH::Vec3 position = JPH::Vec3::sZero(), velocity = JPH::Vec3::sZero();
+    float     yaw = 0.0f, aimYaw = 0.0f, aimPitch = 0.0f, speed = 0.0f, crouch = 0.0f, aiming = 0.0f;
+    float     health = 100.0f, maxHealth = 100.0f, flash = 0.0f, stateT = 0.0f, sawTime = -99.0f;
+    bool      alive = true, headshot = false, canSeePlayer = false, weaponDropped = false;
 
-    float health    = 100.0f;
-    float maxHealth = 100.0f;
-    bool  alive     = true;
-    float flash     = 0.0f;
-    bool  headshot  = false;
-
-    AIState   state              = AIState::Idle;
-    float     stateT             = 0.0f;
-    JPH::Vec3 targetPos          = JPH::Vec3::sZero();
-    JPH::Vec3 lastKnownPlayerPos = JPH::Vec3::sZero();
-    bool      canSeePlayer       = false;
-    float     sawTime            = -99.0f;
-    int32_t   ammo               = 30;
-    int32_t   burstCount         = 0;
-    float     fireCd             = 0.0f;
-    float     reloadT            = 0.0f;
-    float     strafeDir          = 1.0f;
-    float     strafeT            = 0.0f;
-    float     alertness          = 0.0f;
-    float     deathTime          = -1.0f;
+    AIState   state     = AIState::Idle;
+    JPH::Vec3 targetPos = JPH::Vec3::sZero(), lastKnownPlayerPos = JPH::Vec3::sZero();
+    int32_t   ammo = 30, burstCount = 0;
+    float     fireCd = 0.0f, reloadT = 0.0f, strafeDir = 1.0f, strafeT = 0.0f, alertness = 0.0f, deathTime = -1.0f;
 
     Physics::VerletSolver                  ragdoll;
     std::array<JPH::Vec3, Rig::JointCount> boneWorldPositions;
 
-    bool      weaponDropped = false;
-    JPH::Vec3 weaponPos     = JPH::Vec3::sZero();
-    JPH::Quat weaponRot     = JPH::Quat::sIdentity();
-    JPH::Vec3 weaponVel     = JPH::Vec3::sZero();
-    JPH::Vec3 weaponSpin    = JPH::Vec3::sZero();
+    JPH::Vec3 weaponPos = JPH::Vec3::sZero(), weaponVel = JPH::Vec3::sZero(), weaponSpin = JPH::Vec3::sZero();
+    JPH::Quat weaponRot = JPH::Quat::sIdentity();
 
     StandardActor() {
         std::fill(boneWorldPositions.begin(), boneWorldPositions.end(), JPH::Vec3::sZero());
-
-        // Fix: Compute World T-Pose Bind Positions for Verlet particle initialization
         std::array<JPH::Vec3, Rig::JointCount> bindWorld;
         for (uint32_t i = 0; i < Rig::JointCount; ++i) {
-            Rig::Joint j      = static_cast<Rig::Joint>(i);
-            JPH::Vec3  local  = Rig::GetBindPosition(j);
-            int32_t    parent = Rig::GetParentIndex(j);
-            bindWorld[i]      = (parent >= 0) ? bindWorld[parent] + local : local;
-        }
-
-        // Initialize particles at world bind locations
-        for (uint32_t i = 0; i < Rig::JointCount; i++) {
+            int32_t parent = Rig::GetParentIndex(static_cast<Rig::Joint>(i));
+            bindWorld[i]   = (parent >= 0) ? bindWorld[parent] + Rig::GetBindPosition(static_cast<Rig::Joint>(i)) :
+                                             Rig::GetBindPosition(static_cast<Rig::Joint>(i));
             ragdoll.AddParticle(bindWorld[i], 1.0f);
         }
 
-        // Add constraints for all parent-child pairs in hierarchy
         for (uint32_t i = 0; i < Rig::JointCount; i++) {
             int32_t parent = Rig::GetParentIndex(static_cast<Rig::Joint>(i));
-            if (parent >= 0) {
+            if (parent >= 0)
                 ragdoll.AddConstraint(static_cast<uint32_t>(parent), i, 1.0f);
-            }
         }
 
-        // Cross-bracing constraints for anatomical structural stability
         ragdoll.AddConstraint(static_cast<uint32_t>(Rig::Joint::ThighL), static_cast<uint32_t>(Rig::Joint::ThighR), 0.8f);
         ragdoll.AddConstraint(static_cast<uint32_t>(Rig::Joint::ClavicleL), static_cast<uint32_t>(Rig::Joint::ClavicleR), 0.8f);
         ragdoll.AddConstraint(static_cast<uint32_t>(Rig::Joint::Hips), static_cast<uint32_t>(Rig::Joint::Chest), 0.9f);
     }
 
     void SetPosition(JPH::Vec3Arg pos) {
-        position  = pos;
-        targetPos = pos;
+        position = targetPos = pos;
     }
 
     [[nodiscard]] std::optional<BodyHit> Raycast(JPH::Vec3Arg origin, JPH::Vec3Arg direction, float maxT) const noexcept {
         JPH::Vec3 center   = boneWorldPositions[static_cast<size_t>(Rig::Joint::Spine)];
         JPH::Vec3 toCenter = center - origin;
         float     along    = toCenter.Dot(direction);
-        if (along < -1.5f || along > maxT + 1.5f)
-            return std::nullopt;
-        if ((toCenter - direction * along).LengthSq() > 2.6f * 2.6f)
+        if (along < -1.5f || along > maxT + 1.5f || (toCenter - direction * along).LengthSq() > 6.76f)
             return std::nullopt;
 
         std::optional<BodyHit> bestHit = std::nullopt;
         float                  bestT   = maxT;
 
         for (const auto& cap: Rig::HIT_CAPSULES) {
-            JPH::Vec3 pA = boneWorldPositions[static_cast<size_t>(cap.a)];
-            JPH::Vec3 pB = boneWorldPositions[static_cast<size_t>(cap.b)];
-
-            auto intersection = RaySegmentDistance(origin, direction, pA, pB);
-            if (intersection && intersection->dist <= cap.r && intersection->t < bestT) {
-                bestT            = intersection->t;
-                JPH::Vec3 normal = (intersection->point - intersection->segmentPoint).Normalized();
-                bestHit = BodyHit {.t = intersection->t, .point = intersection->point, .normal = normal, .joint = cap.a, .mult = cap.mult, .zone = cap.zone};
+            auto isect = RaySegmentDistance(origin, direction, boneWorldPositions[static_cast<size_t>(cap.a)], boneWorldPositions[static_cast<size_t>(cap.b)]);
+            if (isect && isect->dist <= cap.r && isect->t < bestT) {
+                bestT   = isect->t;
+                bestHit = BodyHit {
+                    .t      = isect->t,
+                    .point  = isect->point,
+                    .normal = (isect->point - isect->segmentPoint).Normalized(),
+                    .joint  = cap.a,
+                    .mult   = cap.mult,
+                    .zone   = cap.zone
+                };
             }
         }
         return bestHit;
@@ -211,10 +162,8 @@ class StandardActor {
             return;
         }
 
-        float damageDealt = amount * hit.mult;
-        health -= damageDealt;
-        flash     = 1.0f;
-        alertness = 1.0f;
+        health -= amount * hit.mult;
+        flash = alertness = 1.0f;
 
         if (fromPlayer) {
             lastKnownPlayerPos = ctx.playerPos;
@@ -228,35 +177,22 @@ class StandardActor {
             headshot  = (hit.zone == 0);
             deathTime = ctx.time;
 
-            float power = headshot ? 8.5f : 5.5f;
-
-            // Capture animated pose into Verlet particle positions
             for (uint32_t i = 0; i < Rig::JointCount; i++) {
-                ragdoll.positions[i]         = boneWorldPositions[i];
-                ragdoll.previousPositions[i] = boneWorldPositions[i];
+                ragdoll.positions[i] = ragdoll.previousPositions[i] = boneWorldPositions[i];
             }
 
-            std::random_device                    rd;
-            std::mt19937                          gen(rd());
-            std::uniform_real_distribution<float> dis(0.75f, 1.25f);
-
-            ragdoll.ApplyImpulse(static_cast<uint32_t>(hit.joint), dir * (power * dis(gen)));
+            std::mt19937 gen(std::random_device {}());
+            ragdoll.ApplyImpulse(static_cast<uint32_t>(hit.joint), dir * ((headshot ? 8.5f : 5.5f) * std::uniform_real_distribution<float>(0.75f, 1.25f)(gen)));
             DropWeapon(dir);
 
-            if (ctx.onKilled) {
+            if (ctx.onKilled)
                 ctx.onKilled(headshot);
-            }
             return;
         }
 
-        std::vector<uint32_t> flinchRegion;
-        if (hit.zone == 0) {
-            flinchRegion = {static_cast<uint32_t>(Rig::Joint::Head), static_cast<uint32_t>(Rig::Joint::Neck)};
-        } else {
-            flinchRegion = {static_cast<uint32_t>(Rig::Joint::Spine), static_cast<uint32_t>(Rig::Joint::Chest)};
-        }
-
-        for (uint32_t b: flinchRegion) {
+        for (uint32_t b: (hit.zone == 0) ?
+                             std::initializer_list<uint32_t> {static_cast<uint32_t>(Rig::Joint::Head), static_cast<uint32_t>(Rig::Joint::Neck)} :
+                             std::initializer_list<uint32_t> {static_cast<uint32_t>(Rig::Joint::Spine), static_cast<uint32_t>(Rig::Joint::Chest)}) {
             ragdoll.ApplyImpulse(b, dir * (hit.zone == 0 ? 5.0f : 3.5f));
         }
 
@@ -268,62 +204,48 @@ class StandardActor {
     }
 
     void Update(float dt, ActorContext& ctx) {
-        if (flash > 0.0f) {
+        if (flash > 0.0f)
             flash = std::max(0.0f, flash - dt * 5.0f);
-        }
 
         if (alive) {
             UpdateAI(dt, ctx);
-
             position += velocity * dt;
 
             float groundY = ctx.world.pointBlocked(position, 0.42f) ? position.GetY() : ctx.floorY;
             position.SetY(MathUtils::Damp(position.GetY(), groundY, 12.0f, dt));
-
-            float boundLimit = 42.5f;
-            position.SetX(MathUtils::Clamp(position.GetX(), -boundLimit, boundLimit));
-            position.SetZ(MathUtils::Clamp(position.GetZ(), -boundLimit, boundLimit));
+            position.SetX(MathUtils::Clamp(position.GetX(), -42.5f, 42.5f));
+            position.SetZ(MathUtils::Clamp(position.GetZ(), -42.5f, 42.5f));
 
             speed = JPH::Vec3(velocity.GetX(), 0.0f, velocity.GetZ()).Length();
-
             m_stepPhase += (speed / 1.4f) * dt;
             if (m_stepPhase > 1.0f) {
                 m_stepPhase -= 1.0f;
-                if ((position - ctx.playerPos).LengthSq() < 18.0f * 18.0f && ctx.fx.playBeep) {
+                if ((position - ctx.playerPos).LengthSq() < 324.0f && ctx.fx.playBeep)
                     ctx.fx.playBeep(220.0f, 0.05f, 0.15f);
-                }
             }
 
-            if (ctx.updateAnimation) {
+            if (ctx.updateAnimation)
                 m_stance = ctx.updateAnimation(dt, speed, crouch, aimYaw, aimPitch, aiming);
-            }
 
             UpdateBoneWorldMatrices();
         } else {
-            // Solve Verlet Ragdoll
             ragdoll.Step(dt, -18.0f, 0.992f, 4, [&](JPH::Vec3& p, float) {
-                if (p.GetY() < ctx.floorY + 0.1f) {
+                if (p.GetY() < ctx.floorY + 0.1f)
                     p.SetY(ctx.floorY + 0.1f);
-                }
             });
-
-            for (uint32_t i = 0; i < Rig::JointCount; i++) {
+            for (uint32_t i = 0; i < Rig::JointCount; i++)
                 boneWorldPositions[i] = ragdoll.positions[i];
-            }
         }
 
         if (weaponDropped) {
             weaponVel.SetY(weaponVel.GetY() - 20.0f * dt);
             weaponPos += weaponVel * dt;
+            weaponRot = (JPH::Quat::sRotation(JPH::Vec3::sAxisX(), weaponSpin.GetX() * dt) * JPH::Quat::sRotation(JPH::Vec3::sAxisY(), weaponSpin.GetY() * dt) *
+                         JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), weaponSpin.GetZ() * dt) * weaponRot)
+                            .Normalized();
 
-            JPH::Quat rotX = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), weaponSpin.GetX() * dt);
-            JPH::Quat rotY = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), weaponSpin.GetY() * dt);
-            JPH::Quat rotZ = JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), weaponSpin.GetZ() * dt);
-            weaponRot      = (rotX * rotY * rotZ * weaponRot).Normalized();
-
-            float groundY = ctx.floorY + 0.05f;
-            if (weaponPos.GetY() < groundY) {
-                weaponPos.SetY(groundY);
+            if (weaponPos.GetY() < ctx.floorY + 0.05f) {
+                weaponPos.SetY(ctx.floorY + 0.05f);
                 weaponVel *= 0.35f;
                 weaponVel.SetY(weaponVel.GetY() * -0.3f);
                 weaponSpin *= 0.3f;
@@ -337,15 +259,13 @@ class StandardActor {
 
     void UpdateBoneWorldMatrices() {
         JPH::Mat44 rootMatrix = JPH::Mat44::sRotationTranslation(JPH::Quat::sRotation(JPH::Vec3::sAxisY(), yaw), position);
-
         for (uint32_t i = 0; i < Rig::JointCount; i++) {
             JPH::Mat44 local =
                 JPH::Mat44::sRotationTranslation(Rig::GetBindRotation(static_cast<Rig::Joint>(i)), Rig::GetBindPosition(static_cast<Rig::Joint>(i)));
             int32_t parent = Rig::GetParentIndex(static_cast<Rig::Joint>(i));
-
-            JPH::Mat44 world      = (parent >= 0) ? JPH::Mat44::sRotationTranslation(JPH::Quat::sIdentity(), boneWorldPositions[parent]) * local :
-                                                    rootMatrix * local;
-            boneWorldPositions[i] = world.GetTranslation();
+            boneWorldPositions[i] =
+                ((parent >= 0) ? JPH::Mat44::sRotationTranslation(JPH::Quat::sIdentity(), boneWorldPositions[parent]) * local : rootMatrix * local)
+                    .GetTranslation();
         }
     }
 
@@ -353,13 +273,9 @@ class StandardActor {
         weaponDropped = true;
         weaponPos     = m_stance.position;
         weaponRot     = m_stance.rotation;
-
-        std::random_device                    rd;
-        std::mt19937                          gen(rd());
+        std::mt19937                          gen(std::random_device {}());
         std::uniform_real_distribution<float> dis(-6.0f, 6.0f);
-
-        weaponVel = dir * (1.5f + ((std::rand() % 100) / 100.0f) * 2.0f);
-        weaponVel.SetY(weaponVel.GetY() + 2.0f + ((std::rand() % 100) / 100.0f) * 2.0f);
+        weaponVel  = dir * (1.5f + ((std::rand() % 100) / 100.0f) * 2.0f) + JPH::Vec3(0, 2.0f + ((std::rand() % 100) / 100.0f) * 2.0f, 0);
         weaponSpin = JPH::Vec3(dis(gen), dis(gen), dis(gen));
     }
 
@@ -373,36 +289,25 @@ class StandardActor {
         }
         dir /= d;
 
-        JPH::Vec3 probe = position + dir * 1.5f;
-        if (ctx.world.pointBlocked(probe, 0.7f)) {
-            float     s  = std::sin(0.9f) * MathUtils::Clamp(strafeDir, -1.0f, 1.0f);
-            float     c  = std::cos(0.9f);
-            float     nx = dir.GetX() * c - dir.GetZ() * s;
-            float     nz = dir.GetX() * s + dir.GetZ() * c;
-            JPH::Vec3 alternative(nx, 0.0f, nz);
-
-            if (ctx.world.pointBlocked(position + alternative * 1.5f, 0.7f)) {
-                dir = JPH::Vec3(dir.GetX() * c + dir.GetZ() * s, 0.0f, -dir.GetX() * s + dir.GetZ() * c);
-            } else {
-                dir = alternative;
-            }
+        if (ctx.world.pointBlocked(position + dir * 1.5f, 0.7f)) {
+            float     s = std::sin(0.9f) * MathUtils::Clamp(strafeDir, -1.0f, 1.0f), c = std::cos(0.9f);
+            JPH::Vec3 alt(dir.GetX() * c - dir.GetZ() * s, 0.0f, dir.GetX() * s + dir.GetZ() * c);
+            dir = ctx.world.pointBlocked(position + alt * 1.5f, 0.7f) ? JPH::Vec3(dir.GetX() * c + dir.GetZ() * s, 0.0f, -dir.GetX() * s + dir.GetZ() * c) :
+                                                                        alt;
         }
 
-        float accel = 14.0f;
-        velocity.SetX(MathUtils::Damp(velocity.GetX(), dir.GetX() * maxSpeed, accel * 0.5f, dt));
-        velocity.SetZ(MathUtils::Damp(velocity.GetZ(), dir.GetZ() * maxSpeed, accel * 0.5f, dt));
+        velocity.SetX(MathUtils::Damp(velocity.GetX(), dir.GetX() * maxSpeed, 7.0f, dt));
+        velocity.SetZ(MathUtils::Damp(velocity.GetZ(), dir.GetZ() * maxSpeed, 7.0f, dt));
     }
 
     void UpdateAI(float dt, ActorContext& ctx) {
-        JPH::Vec3 toPlayer    = ctx.playerPos - position;
-        float     dist        = toPlayer.Length();
-        JPH::Vec3 eyePos      = position + JPH::Vec3(0, 1.55f, 0);
-        JPH::Vec3 targetPoint = ctx.playerPos + JPH::Vec3(0, 1.3f, 0);
+        JPH::Vec3 toPlayer = ctx.playerPos - position;
+        float     dist     = toPlayer.Length();
+        JPH::Vec3 eyePos = position + JPH::Vec3(0, 1.55f, 0), targetPoint = ctx.playerPos + JPH::Vec3(0, 1.3f, 0);
 
-        float angleToPlayer = std::atan2(toPlayer.GetX(), toPlayer.GetZ());
-        float facing        = std::abs(MathUtils::AngleWrap(angleToPlayer - yaw));
-
-        canSeePlayer = ctx.playerAlive && dist < 62.0f && (facing < 1.5f || alertness > 0.4f) && ctx.world.lineOfSight(eyePos, targetPoint);
+        canSeePlayer = ctx.playerAlive && dist < 62.0f &&
+                       (std::abs(MathUtils::AngleWrap(std::atan2(toPlayer.GetX(), toPlayer.GetZ()) - yaw)) < 1.5f || alertness > 0.4f) &&
+                       ctx.world.lineOfSight(eyePos, targetPoint);
         if (canSeePlayer) {
             lastKnownPlayerPos = ctx.playerPos;
             sawTime            = ctx.time;
@@ -416,7 +321,7 @@ class StandardActor {
 
         switch (state) {
             case AIState::Idle:
-            case AIState::Patrol: {
+            case AIState::Patrol:
                 aiming = MathUtils::Damp(aiming, 0.15f, 4.0f, dt);
                 crouch = MathUtils::Damp(crouch, 0.0f, 4.0f, dt);
                 if (canSeePlayer) {
@@ -433,19 +338,14 @@ class StandardActor {
                     targetPos = lastKnownPlayerPos;
                 Steer(dt, ctx, targetPos, recent ? 4.4f : 1.9f);
                 break;
-            }
-            case AIState::Engage: {
+            case AIState::Engage:
                 aiming = MathUtils::Damp(aiming, 1.0f, 6.0f, dt);
                 crouch = MathUtils::Damp(crouch, dist > 26.0f ? 0.35f : 0.0f, 3.0f, dt);
                 if (!canSeePlayer) {
-                    if (!recent) {
-                        state  = AIState::Patrol;
-                        stateT = 0.0f;
-                    } else {
-                        state     = AIState::Reposition;
-                        stateT    = 2.0f + ((std::rand() % 100) / 100.0f) * 2.0f;
+                    state  = recent ? AIState::Reposition : AIState::Patrol;
+                    stateT = recent ? 2.0f + ((std::rand() % 100) / 100.0f) * 2.0f : 0.0f;
+                    if (recent)
                         targetPos = lastKnownPlayerPos;
-                    }
                     break;
                 }
 
@@ -455,12 +355,12 @@ class StandardActor {
                     strafeT   = 1.0f + ((std::rand() % 100) / 100.0f) * 2.0f;
                 }
 
-                float     ideal = 13.0f;
-                JPH::Vec3 dir   = toPlayer.Normalized();
-                JPH::Vec3 side(-dir.GetZ(), 0.0f, dir.GetX());
-                JPH::Vec3 want = position + dir * MathUtils::Clamp(dist - ideal, -7.0f, 9.0f) + side * (4.5f * strafeDir);
-
-                Steer(dt, ctx, want, dist > ideal + 6.0f ? 4.2f : 2.4f);
+                Steer(
+                    dt, ctx,
+                    position + toPlayer.Normalized() * MathUtils::Clamp(dist - 13.0f, -7.0f, 9.0f) +
+                        JPH::Vec3(-toPlayer.Normalized().GetZ(), 0.0f, toPlayer.Normalized().GetX()) * (4.5f * strafeDir),
+                    dist > 19.0f ? 4.2f : 2.4f
+                );
 
                 if (stateT <= 0.0f && ((std::rand() % 100) / 100.0f) < 0.5f) {
                     state  = AIState::Reposition;
@@ -472,8 +372,7 @@ class StandardActor {
                     }
                 }
                 break;
-            }
-            case AIState::Reposition: {
+            case AIState::Reposition:
                 aiming = MathUtils::Damp(aiming, 0.6f, 4.0f, dt);
                 crouch = MathUtils::Damp(crouch, 0.0f, 4.0f, dt);
                 Steer(dt, ctx, targetPos, 4.6f);
@@ -482,8 +381,7 @@ class StandardActor {
                     stateT = 1.5f + ((std::rand() % 100) / 100.0f);
                 }
                 break;
-            }
-            case AIState::Suppressed: {
+            case AIState::Suppressed:
                 aiming = MathUtils::Damp(aiming, 0.4f, 5.0f, dt);
                 crouch = MathUtils::Damp(crouch, 0.85f, 7.0f, dt);
                 velocity *= std::max(0.0f, 1.0f - 5.0f * dt);
@@ -492,7 +390,6 @@ class StandardActor {
                     stateT = 1.5f;
                 }
                 break;
-            }
             default:
                 break;
         }
@@ -503,17 +400,14 @@ class StandardActor {
         float     wantPitch = -std::atan2(deltaAim.GetY(), JPH::Vec3(deltaAim.GetX(), 0, deltaAim.GetZ()).Length());
 
         float turnSpeed = canSeePlayer ? 9.0f : 3.0f;
-        aimYaw          = aimYaw + MathUtils::AngleWrap(wantYaw - aimYaw) * std::min(1.0f, turnSpeed * dt);
-        aimPitch        = MathUtils::Damp(aimPitch, wantPitch, turnSpeed, dt);
+        aimYaw += MathUtils::AngleWrap(wantYaw - aimYaw) * std::min(1.0f, turnSpeed * dt);
+        aimPitch = MathUtils::Damp(aimPitch, wantPitch, turnSpeed, dt);
 
         float moveSpeed = velocity.Length();
-        float bodyWant  = aimYaw;
-        if (moveSpeed > 2.6f && !canSeePlayer) {
-            bodyWant = std::atan2(velocity.GetX(), velocity.GetZ());
-        } else if (moveSpeed > 0.5f) {
-            bodyWant = aimYaw + MathUtils::AngleWrap(std::atan2(velocity.GetX(), velocity.GetZ()) - aimYaw) * 0.35f;
-        }
-        yaw = yaw + MathUtils::AngleWrap(bodyWant - yaw) * std::min(1.0f, 7.0f * dt);
+        float bodyWant  = (moveSpeed > 2.6f && !canSeePlayer) ? std::atan2(velocity.GetX(), velocity.GetZ()) :
+                          (moveSpeed > 0.5f)                  ? aimYaw + MathUtils::AngleWrap(std::atan2(velocity.GetX(), velocity.GetZ()) - aimYaw) * 0.35f :
+                                                                aimYaw;
+        yaw += MathUtils::AngleWrap(bodyWant - yaw) * std::min(1.0f, 7.0f * dt);
 
         fireCd -= dt;
         if (reloadT > 0.0f) {
@@ -523,13 +417,11 @@ class StandardActor {
             return;
         }
 
-        float aimError = std::abs(MathUtils::AngleWrap(aimYaw - wantYaw));
-        if (canSeePlayer && state != AIState::Suppressed && aimError < 0.22f && dist < 55.0f && ctx.playerAlive) {
+        if (canSeePlayer && state != AIState::Suppressed && std::abs(MathUtils::AngleWrap(aimYaw - wantYaw)) < 0.22f && dist < 55.0f && ctx.playerAlive) {
             if (ammo <= 0) {
                 reloadT = 2.4f;
-                if (ctx.fx.reloadWeapon) {
+                if (ctx.fx.reloadWeapon)
                     ctx.fx.reloadWeapon();
-                }
                 return;
             }
             if (burstCount <= 0 && fireCd <= 0.0f) {
@@ -546,34 +438,24 @@ class StandardActor {
 
     void ExecuteWeaponShoot(ActorContext& ctx, float dist) {
         ammo--;
-        if (ctx.fx.fireWeapon) {
+        if (ctx.fx.fireWeapon)
             ctx.fx.fireWeapon();
-        }
 
-        JPH::Vec3 origin = m_stance.muzzleWorld;
-        JPH::Vec3 dir    = m_stance.aimDir;
+        JPH::Vec3 origin = m_stance.muzzleWorld, dir = m_stance.aimDir;
+        JPH::Vec3 toTarget = (ctx.playerPos + JPH::Vec3(0, 1.2f, 0) - origin);
+        if (toTarget.Length() > 1e-4f)
+            dir = (dir + (toTarget.Normalized() - dir) * 0.85f).Normalized();
 
-        JPH::Vec3 targetCenter = ctx.playerPos + JPH::Vec3(0, 1.2f, 0);
-        JPH::Vec3 toTarget     = (targetCenter - origin);
-        float     dLen         = toTarget.Length();
-        if (dLen > 1e-4f) {
-            dir = (dir + (toTarget / dLen - dir) * 0.85f).Normalized();
-        }
-
-        std::random_device                    rd;
-        std::mt19937                          gen(rd());
+        std::mt19937                          gen(std::random_device {}());
         std::uniform_real_distribution<float> spreadDis(-1.0f, 1.0f);
         float                                 spread = 0.012f + dist * 0.0022f + (state == AIState::Reposition ? 0.03f : 0.0f);
-
-        dir += JPH::Vec3(spreadDis(gen), spreadDis(gen), spreadDis(gen)) * spread;
-        dir = dir.Normalized();
+        dir                                          = (dir + JPH::Vec3(spreadDis(gen), spreadDis(gen), spreadDis(gen)) * spread).Normalized();
 
         float     maxD     = 90.0f;
         JPH::Vec3 endPoint = origin + dir * maxD;
 
         if (ctx.world.raycastWorld) {
-            auto hit = ctx.world.raycastWorld(origin, dir, maxD);
-            if (hit) {
+            if (auto hit = ctx.world.raycastWorld(origin, dir, maxD)) {
                 endPoint = hit->point;
                 if (ctx.fx.spawnImpact)
                     ctx.fx.spawnImpact(hit->point, hit->normal, 0);
@@ -583,21 +465,16 @@ class StandardActor {
         auto playerHit = RaySegmentDistance(origin, dir, ctx.playerPos + JPH::Vec3(0, 0.3f, 0), ctx.playerPos + JPH::Vec3(0, 1.55f, 0));
         if (ctx.playerAlive && playerHit && playerHit->dist < 0.38f && playerHit->t < maxD) {
             endPoint = playerHit->point;
-            if (ctx.damagePlayer) {
+            if (ctx.damagePlayer)
                 ctx.damagePlayer(5.0f + ((std::rand() % 100) / 100.0f) * 5.0f, origin);
-            }
         }
 
         if (ctx.fx.spawnTracer)
             ctx.fx.spawnTracer(origin, endPoint, 0xffb347);
         if (ctx.fx.spawnMuzzleFlash)
             ctx.fx.spawnMuzzleFlash(origin, dir, 0.55f);
-
-        if (ctx.fx.playBeep) {
-            float dCam = (origin - ctx.playerPos).Length();
-            float vol  = std::max(0.05f, 1.0f - dCam / 55.0f);
-            ctx.fx.playBeep(900.0f, 0.12f, vol);
-        }
+        if (ctx.fx.playBeep)
+            ctx.fx.playBeep(900.0f, 0.12f, std::max(0.05f, 1.0f - (origin - ctx.playerPos).Length() / 55.0f));
     }
 };
 

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "Mutex.hpp"
+#include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Core/Atomic.hpp>
 #include <type_traits>
 

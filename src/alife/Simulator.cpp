@@ -10,7 +10,7 @@
 #include <cstdlib>
 #include <Zahlen/ecs/ECS.hpp>
 #include <fstream>
-#include <threading/TaskSystem.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
 
 namespace ZHLN::ALife {
 

@@ -6,10 +6,10 @@ add_library(zahlen_threading STATIC
     Thread.cpp
     Thread.S
     Mutex.cpp
-    Mutex.hpp
-    Thread.hpp
+    
+    
     TaskSystem.cpp
-    TaskSystem.hpp
+    
 )
 set_target_properties(zahlen_threading PROPERTIES POSITION_INDEPENDENT_CODE ON)
 

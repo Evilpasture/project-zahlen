@@ -14,7 +14,7 @@
 #include <cmath>
 #include <miniaudio.h>
 #include <numbers>
-#include <threading/Mutex.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
 #include <type_traits>
 #include <vector>
 

@@ -33,7 +33,7 @@
 #include <engine/system/CullingSystem.hpp>
 #include <filesystem>
 #include <Zahlen/physics/Physics.hpp>
-#include <threading/Thread.hpp>
+#include <Zahlen/Threading/Thread.hpp>
 
 namespace ZHLN {
 

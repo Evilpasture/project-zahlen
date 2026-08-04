@@ -7,9 +7,9 @@
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/ControlFlow.hpp>
 #include <queue>
-#include <threading/Mutex.hpp>
-#include <threading/TaskSystem.hpp>
-#include <threading/Thread.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/Threading/Thread.hpp>
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <emmintrin.h>

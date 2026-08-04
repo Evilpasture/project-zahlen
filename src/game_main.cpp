@@ -43,8 +43,8 @@
 #include <expected>
 #include <physics/PhysicsWorld.hpp>
 #include <print>
-#include <threading/Mutex.hpp>
-#include <threading/TaskSystem.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
 
 using namespace ZHLN;
 using namespace ZHLN::ECS;

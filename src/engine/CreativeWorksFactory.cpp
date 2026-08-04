@@ -23,7 +23,7 @@
 #include <engine/system/LightingSystem.hpp>
 #include <gltf/GLTFImporter.hpp>
 #include <stb_image.h>
-#include <threading/TaskSystem.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
 #define STB_TRUETYPE_IMPLEMENTATION
 #include <fontconfig/fontconfig.h>
 #include <stb_truetype.h>

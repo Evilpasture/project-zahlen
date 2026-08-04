@@ -4,7 +4,7 @@
 #pragma once
 
 #include <Zahlen/Core/Atomic.hpp>
-#include <threading/Mutex.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
 
 namespace ZHLN {
 struct alignas(64) BufferSync {
