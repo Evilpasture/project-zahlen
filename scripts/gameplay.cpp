@@ -81,14 +81,6 @@ static SnowSceneState g_State;
 
 // Small combinators removing the repetitive null-check dance
 
-template<typename T, typename Fn>
-inline bool Patch(ECS::Registry& reg, Entity e, Fn&& fn) {
-    if (auto* c = reg.Get<T>(e)) {
-        fn(*c);
-        return true;
-    }
-    return false;
-}
 
 inline Entity SpawnPointLight(ECS::Registry& reg, JPH::Vec3 pos, JPH::Vec3 color, float intensity, float range, float radius = 0.4f) {
     Entity e = reg.Create();
