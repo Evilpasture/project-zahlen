@@ -42,6 +42,7 @@
 #include <engine/system/AnimationSystem.hpp>
 #include <engine/system/ArticulationSystem.hpp>
 #include <engine/system/CullingSystem.hpp>
+#include <engine/system/DecalSystem.hpp>
 #include <engine/system/InteractionSystem.hpp>
 #include <engine/system/UIInteractionSystem.hpp>
 #include <expected>
@@ -233,6 +234,16 @@ void BuildSystemGraphs(Engine& engine) {
         .update_func    = Sys_Culling,
         .name           = "CullingSystem",
         .access_pattern = {Read<Components::MeshComponent>(), Read<Components::CameraComponent>()},
+        .enabled        = true,
+    });
+
+    renderGraph.AddSystem({
+        .update_func =
+            [](Engine& eng, float /*dt*/) {
+                DecalSystem::Update(eng);
+            },
+        .name           = "DecalSystem",
+        .access_pattern = {Read<Components::DecalComponent>(), Read<Components::TransformComponent>()},
         .enabled        = true,
     });
 
