@@ -1,10 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Threading/Thread.hpp>
 #include "engine/Platform.hpp"
 #include <Zahlen/Threading/Mutex.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/Threading/Thread.hpp>
 #include <condition_variable>
 #include <mutex>
 #include <queue> // Replaced vector with queue
@@ -23,6 +23,11 @@ struct WorkQueue {
         std::lock_guard lock(mtx);
         fibers.push(f);
         cv.notify_one();
+    }
+
+    void PushSilent(Fiber* f) {
+        std::lock_guard lock(mtx);
+        fibers.push(f);
     }
 
     Fiber* PopOrWait() {
@@ -246,8 +251,9 @@ void Wait(Counter* counter) {
                 spinCount++;
             }
         } else {
-            // Workers push themselves to the back of the line
-            s_readyQueue.Push(self);
+            // Workers push themselves to the back of the line SILENTLY
+            // to prevent condition variable thrashing and lost wakeups
+            s_readyQueue.PushSilent(self);
             Fiber::Yield();
         }
     }

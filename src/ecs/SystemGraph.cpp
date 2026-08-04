@@ -53,25 +53,19 @@ void SystemGraph::Execute(ZHLN::Engine& engine, float dt) {
     _currentEngine = &engine;
     _currentDt     = dt;
 
-    uint32_t enabledCount = 0;
+    // Reset dependency counts for all nodes
     for (auto& _node: _nodes) {
         _node.currentDependencyCount.store(_node.initialDependencyCount, std::memory_order::relaxed);
-        if (_node.info.enabled) {
-            enabledCount++;
-        }
     }
 
-    if (enabledCount == 0) {
-        return;
-    }
-
-    // Write to the inner atomic value
-    _completionCounter.value.store(enabledCount, std::memory_order::release);
+    // Initialize completion counter to zero
+    _completionCounter.value.store(0, std::memory_order::release);
 
     std::vector<TaskSystem::Task> initialTasks;
     initialTasks.reserve(_entryNodes.size());
 
     for (uint32_t idx: _entryNodes) {
+        _completionCounter.value.fetch_add(1, std::memory_order::relaxed);
         initialTasks.push_back({.func = TaskThunk, .arg = &_payloads[idx]});
     }
 
@@ -92,14 +86,12 @@ void SystemGraph::DispatchNode(uint32_t nodeIdx) {
 
     if (node.info.enabled) {
         node.info.update_func(*_currentEngine, _currentDt);
-
-        // Decrement the inner atomic value
-        _completionCounter.value.fetch_sub(1, std::memory_order::release);
     }
 
     std::vector<TaskSystem::Task> nextTasks;
     for (uint32_t depIdx: node.dependents) {
         if (_nodes[depIdx].currentDependencyCount.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+            _completionCounter.value.fetch_add(1, std::memory_order::relaxed);
             nextTasks.push_back({.func = TaskThunk, .arg = &_payloads[depIdx]});
         }
     }
@@ -107,6 +99,9 @@ void SystemGraph::DispatchNode(uint32_t nodeIdx) {
     if (!nextTasks.empty()) {
         TaskSystem::Dispatch(nextTasks, nullptr);
     }
+
+    // Decrement completion counter ONLY AFTER all child tasks have been safely dispatched
+    _completionCounter.value.fetch_sub(1, std::memory_order::release);
 }
 
 void SystemGraph::SetSystemEnabled(std::string_view name, bool enabled) {

@@ -15,8 +15,8 @@ module;
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Log.hpp>
-#include <algorithm>
 #include <Zahlen/ecs/ECS.hpp>
+#include <algorithm>
 #include <functional>
 #include <string>
 #include <vector>
@@ -155,8 +155,7 @@ void MainMenu::Build(Engine* engine, const MenuConfig& config) {
     // 5. Query Active Font Atlas
     uint32_t fontIdx = 0;
     for (Entity uiEnt: reg.GetEntitiesWith<Components::UISettingsComponent>()) {
-        if (auto* uiSettings = reg.Get<Components::UISettingsComponent>(uiEnt)) {
-            fontIdx = uiSettings->defaultFontAtlasIdx;
+        if (Patch<Components::UISettingsComponent>(reg, uiEnt, [&](auto& uiSettings) { fontIdx = uiSettings.defaultFontAtlasIdx; })) {
             break;
         }
     }

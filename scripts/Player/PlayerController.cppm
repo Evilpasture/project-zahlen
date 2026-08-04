@@ -147,9 +147,9 @@ void ProcessPlayerWeaponFire(Engine* engine, PlayerControllerComp& p) {
     JPH::Vec3 origin      = cam.position;
     JPH::Vec3 muzzleWorld = origin;
     if (state.weaponEntity != NullEntity && reg.IsAlive(state.weaponEntity)) {
-        if (auto* wTrans = reg.Get<Components::TransformComponent>(state.weaponEntity)) {
-            muzzleWorld = wTrans->position + (wTrans->rotation * JPH::Vec3(0.0f, 0.012f, 0.66f));
-        }
+        Patch<Components::TransformComponent>(reg, state.weaponEntity, [&](auto& wTrans) {
+            muzzleWorld = wTrans.position + (wTrans.rotation * JPH::Vec3(0.0f, 0.012f, 0.66f));
+        });
     }
 
     float     yawRad   = JPH::DegreesToRadians(cam.yaw);
@@ -164,9 +164,9 @@ void ProcessPlayerWeaponFire(Engine* engine, PlayerControllerComp& p) {
 
     Entity ignorePhys = NullEntity;
     if (state.playerEnt != NullEntity && reg.IsAlive(state.playerEnt)) {
-        if (auto* phys = reg.Get<Components::PhysicsComponent>(state.playerEnt)) {
-            ignorePhys = phys->physicsHandle;
-        }
+        Patch<Components::PhysicsComponent>(reg, state.playerEnt, [&](auto& phys) {
+            ignorePhys = phys.physicsHandle;
+        });
     }
 
     bool anyHit = false, anyPierce = false;
@@ -504,7 +504,7 @@ void PlayerUpdateTick(Engine* engine, float dt) {
     p->landVel += (-160.0f * p->landDip - 18.0f * p->landVel) * dt;
     p->landDip += p->landVel * dt;
 
-    float height = reg.Get<Components::TransformComponent>(state.playerEnt)->position.GetY();
+    float height = reg.Get<Components::TransformComponent>(state.playerEnt) ? reg.Get<Components::TransformComponent>(state.playerEnt)->position.GetY() : 0.0f;
     if (move->isGrounded && p->lastHeight - height > 1.5f)
         p->landVel = -(p->lastHeight - height) * 3.5f;
     p->lastHeight = height;
@@ -522,18 +522,18 @@ void PlayerUpdateTick(Engine* engine, float dt) {
                                       );
 
     if (auto camEnts = reg.GetEntitiesWith<Components::MainCameraTagComponent>(); !camEnts.empty()) {
-        if (auto* targetCam = reg.Get<Components::TargetCameraComponent>(camEnts[0])) {
-            targetCam->distance = targetCam->targetDistance = 0.0f;
-            targetCam->yaw                                  = cam.yaw;
-            targetCam->pitch                                = cam.pitch;
-            targetCam->targetOffset =
+        Patch<Components::TargetCameraComponent>(reg, camEnts[0], [&](auto& targetCam) {
+            targetCam.distance = targetCam.targetDistance = 0.0f;
+            targetCam.yaw                                  = cam.yaw;
+            targetCam.pitch                                = cam.pitch;
+            targetCam.targetOffset =
                 JPH::Vec3(0.0f, PLAYER_EYE_OFFSET_Y + std::sin(p->bobPhase * 2.0f * JPH::JPH_PI) * 0.035f * p->bobAmt * bobScale - p->landDip, 0.0f);
-            targetCam->smoothTargetPos = playerPos;
-        }
+            targetCam.smoothTargetPos = playerPos;
+        });
     }
 
     if (state.weaponEntity != NullEntity && reg.IsAlive(state.weaponEntity)) {
-        if (auto* wTrans = reg.Get<Components::TransformComponent>(state.weaponEntity)) {
+        Patch<Components::TransformComponent>(reg, state.weaponEntity, [&](auto& wTrans) {
             float free = 1.0f - p->ads, freeSq = free * free;
             p->sway.Update(dt, input.GetMouse().deltaX * 0.002f, input.GetMouse().deltaY * 0.002f);
 
@@ -558,11 +558,11 @@ void PlayerUpdateTick(Engine* engine, float dt) {
             basis.SetColumn3(1, actualUp);
             basis.SetColumn3(2, forward);
 
-            wTrans->position = cam.position + right * offsetX + actualUp * offsetY + forward * offsetZ;
-            wTrans->rotation = (basis.GetQuaternion().Normalized() *
+            wTrans.position = cam.position + right * offsetX + actualUp * offsetY + forward * offsetZ;
+            wTrans.rotation = (basis.GetQuaternion().Normalized() *
                                 MathUtils::EulerYXZ(-p->kickSpring.value * 0.55f, p->kickSpring.value * 0.12f, p->kickSpring.value * 0.2f))
                                    .Normalized();
-        }
+        });
     }
 
     if (input.IsMouseButtonDown(KeyCode::LButton))

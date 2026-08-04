@@ -94,12 +94,12 @@ class LightningSimulation {
             auto& reg          = engine.GetRegistry();
             auto  settingsEnts = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
             if (!settingsEnts.empty()) {
-                if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(settingsEnts[0])) {
+                Patch<Components::PostProcessSettingsComponent>(reg, settingsEnts[0], [&](auto& pp) {
                     m_hasCachedEnvironment = true;
-                    m_baseAmbientExposure  = pp->ambientExposure;
-                    m_baseSkyZenith        = pp->skyZenith;
-                    m_baseSkyHorizon       = pp->skyHorizon;
-                }
+                    m_baseAmbientExposure  = pp.ambientExposure;
+                    m_baseSkyZenith        = pp.skyZenith;
+                    m_baseSkyHorizon       = pp.skyHorizon;
+                });
             }
         }
 
@@ -196,11 +196,11 @@ class LightningSimulation {
             auto& reg          = m_engine->GetRegistry();
             auto  settingsEnts = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
             if (!settingsEnts.empty()) {
-                if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(settingsEnts[0])) {
-                    pp->ambientExposure = m_baseAmbientExposure;
-                    pp->skyZenith       = m_baseSkyZenith;
-                    pp->skyHorizon      = m_baseSkyHorizon;
-                }
+                Patch<Components::PostProcessSettingsComponent>(reg, settingsEnts[0], [&](auto& pp) {
+                    pp.ambientExposure = m_baseAmbientExposure;
+                    pp.skyZenith       = m_baseSkyZenith;
+                    pp.skyHorizon      = m_baseSkyHorizon;
+                });
             }
             m_hasCachedEnvironment = false;
         }
@@ -211,29 +211,29 @@ class LightningSimulation {
 
         // 1. Update Point Lights with massive, cinematic intensities
         if (m_flashLightEntity != NullEntity && reg.IsAlive(m_flashLightEntity)) {
-            if (auto* light = reg.Get<Components::LightComponent>(m_flashLightEntity)) {
-                light->intensity = luminance * 8000000.0f; // 8 Million Lux!
-            }
+            Patch<Components::LightComponent>(reg, m_flashLightEntity, [&](auto& light) {
+                light.intensity = luminance * 8000000.0f; // 8 Million Lux!
+            });
         }
         if (m_impactLightEntity != NullEntity && reg.IsAlive(m_impactLightEntity)) {
-            if (auto* light = reg.Get<Components::LightComponent>(m_impactLightEntity)) {
-                light->intensity = luminance * 4000000.0f; // 4 Million Lux!
-            }
+            Patch<Components::LightComponent>(reg, m_impactLightEntity, [&](auto& light) {
+                light.intensity = luminance * 4000000.0f; // 4 Million Lux!
+            });
         }
 
         // 2. Screen-Wide HDR Exposure Surge
         if (m_hasCachedEnvironment) {
             auto settingsEnts = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
             if (!settingsEnts.empty()) {
-                if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(settingsEnts[0])) {
+                Patch<Components::PostProcessSettingsComponent>(reg, settingsEnts[0], [&](auto& pp) {
                     // Massive ambient camera exposure surge
-                    pp->ambientExposure = m_baseAmbientExposure + (180.0f * luminance);
+                    pp.ambientExposure = m_baseAmbientExposure + (180.0f * luminance);
 
                     // Flash the sky colors to blinding electric white-cyan
                     JPH::Vec4 flashSky = JPH::Vec4(12.0f, 15.0f, 20.0f, 1.0f) * luminance;
-                    pp->skyHorizon     = m_baseSkyHorizon + flashSky;
-                    pp->skyZenith      = m_baseSkyZenith + (flashSky * 0.7f);
-                }
+                    pp.skyHorizon     = m_baseSkyHorizon + flashSky;
+                    pp.skyZenith      = m_baseSkyZenith + (flashSky * 0.7f);
+                });
             }
         }
     }

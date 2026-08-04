@@ -356,7 +356,7 @@ void EnemyAISystem(Engine* engine, float dt) {
             pos[static_cast<size_t>(Rig::Joint::HandEndL)] = gripL + weaponQuat * JPH::Vec3(0.0f, 0.0f, 0.08f);
         }
 
-        if (auto* meshComp = reg.Get<Components::MeshComponent>(enemyEnt)) {
+        Patch<Components::MeshComponent>(reg, enemyEnt, [&](auto& meshComp) {
             JPH::Mat44 rootMatrix = JPH::Mat44::sRotationTranslation(JPH::Quat::sRotation(JPH::Vec3::sAxisY(), enemy.behavior.yaw), enemy.behavior.position);
             JPH::Mat44 invRoot    = rootMatrix.Inversed();
 
@@ -393,8 +393,8 @@ void EnemyAISystem(Engine* engine, float dt) {
                 gpuMatrices[j] = invRoot * jointWorldMatrices[j] * s_InvBindMatrices[j];
             }
 
-            rc.UpdateJointMatrices(meshComp->jointOffset, gpuMatrices.data(), Rig::JointCount);
-        }
+            rc.UpdateJointMatrices(meshComp.jointOffset, gpuMatrices.data(), Rig::JointCount);
+        });
 
         if (!enemy.behavior.weaponDropped && enemy.weaponEntity != NullEntity && reg.IsAlive(enemy.weaponEntity)) {
             if (auto* wTrans = reg.Get<Components::TransformComponent>(enemy.weaponEntity)) {

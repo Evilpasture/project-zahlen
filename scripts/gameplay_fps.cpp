@@ -40,14 +40,14 @@ void StartGame(Engine* engine) {
     ZHLN::Log("[Blacksite] Initializing FPS Tactical Sandbox...");
 
     if (auto settings = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>(); !settings.empty()) {
-        if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(settings[0])) {
-            pp->giMode            = 1;
-            pp->ambientExposure   = 12.0f;
-            pp->enableSSR         = 1;
-            pp->enableRTR         = 0;
-            pp->vignetteIntensity = 1.15f;
-            pp->vignettePower     = 1.6f;
-        }
+        Patch<Components::PostProcessSettingsComponent>(reg, settings[0], [&](auto& pp) {
+            pp.giMode            = 1;
+            pp.ambientExposure   = 12.0f;
+            pp.enableSSR         = 1;
+            pp.enableRTR         = 0;
+            pp.vignetteIntensity = 1.15f;
+            pp.vignettePower     = 1.6f;
+        });
     }
 
     state.concreteMat = HashAssetID("concrete_mat_asset");
@@ -162,10 +162,10 @@ void StartGame(Engine* engine) {
 
     uint32_t fontIdx = 0;
     for (Entity uiEnt: reg.GetEntitiesWith<Components::UISettingsComponent>()) {
-        if (auto* uiSettings = reg.Get<Components::UISettingsComponent>(uiEnt)) {
-            fontIdx = uiSettings->defaultFontAtlasIdx;
-            break;
-        }
+        Patch<Components::UISettingsComponent>(reg, uiEnt, [&](auto& uiSettings) {
+            fontIdx = uiSettings.defaultFontAtlasIdx;
+        });
+        break;
     }
 
     state.hudVitalsBg = reg.Create();
@@ -281,12 +281,12 @@ void GameRulesSystem(ZHLN::Engine* engine, float /*dt*/) {
     for (auto ent: state.enemies) {
         if (!reg.IsAlive(ent))
             continue;
-        if (auto* enemy = reg.Get<ZHLN::EnemyAI::EnemyController>(ent)) {
-            if (enemy->behavior.alive)
+        Patch<ZHLN::EnemyAI::EnemyController>(reg, ent, [&](auto& enemy) {
+            if (enemy.behavior.alive)
                 aliveCount++;
             else
                 corpses.push_back(ent);
-        }
+        });
     }
 
     uint32_t corpseBudget = (aliveCount > 60) ? 4 : (aliveCount > 30) ? 7 : 12;
@@ -316,11 +316,11 @@ void CameraEffectsSystem(ZHLN::Engine* engine, float /*dt*/) {
     auto camEnts = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
     if (camEnts.empty())
         return;
-    if (auto* targetCam = reg.Get<ZHLN::Components::TargetCameraComponent>(camEnts[0])) {
-        targetCam->vignetteIntensity = (p->health < 40.0f && p->alive) ? 1.4f + 0.35f * std::sin(p->totalTime * 6.0f) : 1.15f;
-        targetCam->vignettePower     = (p->health < 40.0f && p->alive) ? 2.0f : 1.6f;
-        targetCam->targetFov         = move->isSprinting ? 55.0f : 45.0f;
-    }
+    Patch<ZHLN::Components::TargetCameraComponent>(reg, camEnts[0], [&](auto& targetCam) {
+        targetCam.vignetteIntensity = (p->health < 40.0f && p->alive) ? 1.4f + 0.35f * std::sin(p->totalTime * 6.0f) : 1.15f;
+        targetCam.vignettePower     = (p->health < 40.0f && p->alive) ? 2.0f : 1.6f;
+        targetCam.targetFov         = move->isSprinting ? 55.0f : 45.0f;
+    });
 }
 
 void HUDSyncSystem(ZHLN::Engine* engine, float /*dt*/) {
@@ -334,49 +334,49 @@ void HUDSyncSystem(ZHLN::Engine* engine, float /*dt*/) {
         return;
 
     if (state.hudVitalsBar != ZHLN::NullEntity && reg.IsAlive(state.hudVitalsBar)) {
-        if (auto* rect = reg.Get<ZHLN::Components::UIRectComponent>(state.hudVitalsBar)) {
-            rect->width = 196.0f * (std::max(0.0f, p->health) / 100.0f);
-        }
-        if (auto* panel = reg.Get<ZHLN::Components::UIPanelComponent>(state.hudVitalsBar)) {
-            panel->color = p->godMode          ? JPH::Vec4(1.0f, 0.85f, 0.4f, 0.95f) :
+        Patch<ZHLN::Components::UIRectComponent>(reg, state.hudVitalsBar, [&](auto& rect) {
+            rect.width = 196.0f * (std::max(0.0f, p->health) / 100.0f);
+        });
+        Patch<ZHLN::Components::UIPanelComponent>(reg, state.hudVitalsBar, [&](auto& panel) {
+            panel.color = p->godMode          ? JPH::Vec4(1.0f, 0.85f, 0.4f, 0.95f) :
                            (p->health < 35.0f) ? JPH::Vec4(0.95f, 0.25f, 0.25f, 0.95f) :
                                                  JPH::Vec4(0.35f, 0.95f, 0.45f, 0.95f);
-        }
+        });
     }
 
     if (state.hudAmmoText != ZHLN::NullEntity && reg.IsAlive(state.hudAmmoText)) {
-        if (auto* text = reg.Get<ZHLN::Components::TextComponent>(state.hudAmmoText)) {
+        Patch<ZHLN::Components::TextComponent>(reg, state.hudAmmoText, [&](auto& text) {
             auto& ammoState = p->ammo[static_cast<size_t>(p->currentWeapon)];
-            text->text.assign(p->infiniteAmmo ? std::format("{} / INF", ammoState.mag) : std::format("{} / {}", ammoState.mag, ammoState.reserve));
-            text->color = (ammoState.mag == 0) ? JPH::Vec4(0.95f, 0.3f, 0.3f, 0.95f) : JPH::Vec4(0.95f, 0.95f, 0.95f, 0.95f);
-        }
+            text.text.assign(p->infiniteAmmo ? std::format("{} / INF", ammoState.mag) : std::format("{} / {}", ammoState.mag, ammoState.reserve));
+            text.color = (ammoState.mag == 0) ? JPH::Vec4(0.95f, 0.3f, 0.3f, 0.95f) : JPH::Vec4(0.95f, 0.95f, 0.95f, 0.95f);
+        });
     }
 
     if (state.hudWaveText != ZHLN::NullEntity && reg.IsAlive(state.hudWaveText)) {
-        if (auto* text = reg.Get<ZHLN::Components::TextComponent>(state.hudWaveText)) {
-            text->text.assign(
+        Patch<ZHLN::Components::TextComponent>(reg, state.hudWaveText, [&](auto& text) {
+            text.text.assign(
                 state.hordeMode ? std::format("HORDE TARGET: {} - KILLS: {}", state.hordeTarget, state.kills) :
                                   std::format("WAVE {:02d} - HOSTILES: {}", state.wave, state.enemies.size())
             );
-        }
+        });
     }
 
     for (size_t i = 0; i < 5; ++i) {
         if (Entity kfEnt = state.hudKillFeedTexts[i]; kfEnt != NullEntity && reg.IsAlive(kfEnt)) {
-            if (auto* text = reg.Get<ZHLN::Components::TextComponent>(kfEnt)) {
-                text->text.assign((i < state.killFeed.size()) ? state.killFeed[i].text : "");
+            Patch<ZHLN::Components::TextComponent>(reg, kfEnt, [&](auto& text) {
+                text.text.assign((i < state.killFeed.size()) ? state.killFeed[i].text : "");
                 if (i < state.killFeed.size())
-                    text->color = state.killFeed[i].head ? JPH::Vec4(0.95f, 0.35f, 0.35f, 0.95f) : JPH::Vec4(0.4f, 0.95f, 0.7f, 0.9f);
-            }
+                    text.color = state.killFeed[i].head ? JPH::Vec4(0.95f, 0.35f, 0.35f, 0.95f) : JPH::Vec4(0.4f, 0.95f, 0.7f, 0.9f);
+            });
         }
     }
 
     if (state.hudCrosshair != ZHLN::NullEntity && reg.IsAlive(state.hudCrosshair)) {
-        if (auto* text = reg.Get<ZHLN::Components::TextComponent>(state.hudCrosshair)) {
-            text->text.assign((p->ads > 0.25f) ? "." : "+");
-            text->color = (p->ads > 0.25f) ? JPH::Vec4(1.0f, 0.2f, 0.2f, 0.85f) : JPH::Vec4(0.43f, 1.00f, 0.70f, 0.85f);
-            text->scale = (p->ads > 0.25f) ? 2.0f : 1.5f;
-        }
+        Patch<ZHLN::Components::TextComponent>(reg, state.hudCrosshair, [&](auto& text) {
+            text.text.assign((p->ads > 0.25f) ? "." : "+");
+            text.color = (p->ads > 0.25f) ? JPH::Vec4(1.0f, 0.2f, 0.2f, 0.85f) : JPH::Vec4(0.43f, 1.00f, 0.70f, 0.85f);
+            text.scale = (p->ads > 0.25f) ? 2.0f : 1.5f;
+        });
     }
 }
 

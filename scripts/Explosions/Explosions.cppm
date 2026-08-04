@@ -335,10 +335,10 @@ struct ExplosionInstance {
         // 1. Update Flash Light Intensity
         float flashT = std::max(0.0f, 1.0f - age / 0.35f);
         auto& reg    = engine->GetRegistry();
-        if (auto* light = reg.Get<ZHLN::Components::LightComponent>(lightFlashEntity)) {
-            light->intensity = flashT * flashT * 1500.0f * scale * scale;
-            light->color     = JPH::Vec3(1.0f, 0.7f * flashT + 0.2f, 0.3f * flashT + 0.05f);
-        }
+        Patch<ZHLN::Components::LightComponent>(reg, lightFlashEntity, [&](auto& light) {
+            light.intensity = flashT * flashT * 1500.0f * scale * scale;
+            light.color     = JPH::Vec3(1.0f, 0.7f * flashT + 0.2f, 0.3f * flashT + 0.05f);
+        });
 
         // 2. Update Particles on CPU
         UpdateGroup(fireball, dt, true);

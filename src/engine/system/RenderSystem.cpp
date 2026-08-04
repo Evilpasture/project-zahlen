@@ -168,11 +168,6 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
     Renderer::SetMatrices(rc, vp, unjitteredVp);
 
     // ========================================================================
-    // DECALS
-    // ========================================================================
-    DecalSystem::Update(engine);
-
-    // ========================================================================
     // HIGH-LEVEL ASSET RESOLUTION DRAW PASS
     // ========================================================================
     const auto& mainVisible   = engine.GetVisibleEntities();
