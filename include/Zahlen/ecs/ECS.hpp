@@ -20,15 +20,6 @@
 
 namespace ZHLN::ECS {
 
-// Patch combinator: collapses the repetitive null-check dance
-template<typename T, typename Fn>
-inline bool Patch(ECS::Registry& reg, Entity e, Fn&& fn) {
-    if (auto* c = reg.Get<T>(e)) {
-        fn(*c);
-        return true;
-    }
-    return false;
-}
 
 template <typename T, typename = void>
 struct is_complete: std::false_type {};
@@ -335,4 +326,14 @@ class ZHLN_API Registry {
     void EnsureComponentCapacity(uint32_t id);
 };
 
+
+// Patch combinator: collapses the repetitive null-check dance
+template<typename T, typename Fn>
+inline bool Patch(ECS::Registry& reg, Entity e, Fn&& fn) {
+    if (auto* c = reg.Get<T>(e)) {
+        fn(*c);
+        return true;
+    }
+    return false;
+}
 } // namespace ZHLN::ECS
