@@ -40,10 +40,9 @@ void UpdatePickupsSystem(Engine* engine, PlayerController& p, std::vector<Weapon
 
     JPH::Vec3 playerPos = JPH::Vec3::sZero();
     if (playerEnt != NullEntity && reg.IsAlive(playerEnt)) {
-        if (auto* trans = reg.Get<Components::TransformComponent>(playerEnt)) {
+        trans = playerEnt; Patch<Components::TransformComponent>(reg, playerEnt, [&](auto& trans) {
             playerPos = trans->position;
-        }
-    }
+});    }
 
     if (p.pickupFlash > 0.0f) {
         p.pickupFlash = std::max(0.0f, p.pickupFlash - dt);
@@ -62,11 +61,10 @@ void UpdatePickupsSystem(Engine* engine, PlayerController& p, std::vector<Weapon
             JPH::Quat rot  = rotX * rotY * rotZ;
 
             if (it->entity != NullEntity && reg.IsAlive(it->entity)) {
-                if (auto* trans = reg.Get<Components::TransformComponent>(it->entity)) {
+                trans = it->entity; Patch<Components::TransformComponent>(reg, it->entity, [&](auto& trans) {
                     trans->position = it->position;
                     trans->rotation = (rot * trans->rotation).Normalized();
-                }
-            }
+});            }
 
             if (it->position.GetY() < 0.05f) {
                 it->position.SetY(0.05f);

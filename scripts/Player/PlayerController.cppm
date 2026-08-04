@@ -147,10 +147,9 @@ void ProcessPlayerWeaponFire(Engine* engine, PlayerControllerComp& p) {
     JPH::Vec3 origin      = cam.position;
     JPH::Vec3 muzzleWorld = origin;
     if (state.weaponEntity != NullEntity && reg.IsAlive(state.weaponEntity)) {
-        if (auto* wTrans = reg.Get<Components::TransformComponent>(state.weaponEntity)) {
+        wTrans = state.weaponEntity; Patch<Components::TransformComponent>(reg, state.weaponEntity, [&](auto& wTrans) {
             muzzleWorld = wTrans->position + (wTrans->rotation * JPH::Vec3(0.0f, 0.012f, 0.66f));
-        }
-    }
+});    }
 
     float     yawRad   = JPH::DegreesToRadians(cam.yaw);
     float     pitchRad = JPH::DegreesToRadians(cam.pitch);
@@ -164,10 +163,9 @@ void ProcessPlayerWeaponFire(Engine* engine, PlayerControllerComp& p) {
 
     Entity ignorePhys = NullEntity;
     if (state.playerEnt != NullEntity && reg.IsAlive(state.playerEnt)) {
-        if (auto* phys = reg.Get<Components::PhysicsComponent>(state.playerEnt)) {
+        phys = state.playerEnt; Patch<Components::PhysicsComponent>(reg, state.playerEnt, [&](auto& phys) {
             ignorePhys = phys->physicsHandle;
-        }
-    }
+});    }
 
     bool anyHit = false, anyPierce = false;
 
@@ -522,18 +520,17 @@ void PlayerUpdateTick(Engine* engine, float dt) {
                                       );
 
     if (auto camEnts = reg.GetEntitiesWith<Components::MainCameraTagComponent>(); !camEnts.empty()) {
-        if (auto* targetCam = reg.Get<Components::TargetCameraComponent>(camEnts[0])) {
+        targetCam = camEnts[0]; Patch<Components::TargetCameraComponent>(reg, camEnts[0], [&](auto& targetCam) {
             targetCam->distance = targetCam->targetDistance = 0.0f;
             targetCam->yaw                                  = cam.yaw;
             targetCam->pitch                                = cam.pitch;
             targetCam->targetOffset =
                 JPH::Vec3(0.0f, PLAYER_EYE_OFFSET_Y + std::sin(p->bobPhase * 2.0f * JPH::JPH_PI) * 0.035f * p->bobAmt * bobScale - p->landDip, 0.0f);
             targetCam->smoothTargetPos = playerPos;
-        }
-    }
+});    }
 
     if (state.weaponEntity != NullEntity && reg.IsAlive(state.weaponEntity)) {
-        if (auto* wTrans = reg.Get<Components::TransformComponent>(state.weaponEntity)) {
+        wTrans = state.weaponEntity; Patch<Components::TransformComponent>(reg, state.weaponEntity, [&](auto& wTrans) {
             float free = 1.0f - p->ads, freeSq = free * free;
             p->sway.Update(dt, input.GetMouse().deltaX * 0.002f, input.GetMouse().deltaY * 0.002f);
 
@@ -551,8 +548,7 @@ void PlayerUpdateTick(Engine* engine, float dt) {
                 float swapDip = std::sin(MathUtils::Clamp(1.0f - std::abs(p->swapT - 0.275f) / 0.275f, 0.0f, 1.0f) * (JPH::JPH_PI * 0.5f));
                 offsetY -= swapDip * 0.34f;
                 offsetZ -= swapDip * 0.10f;
-            }
-
+});
             JPH::Mat44 basis = JPH::Mat44::sIdentity();
             basis.SetColumn3(0, right);
             basis.SetColumn3(1, actualUp);

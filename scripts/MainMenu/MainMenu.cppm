@@ -155,11 +155,10 @@ void MainMenu::Build(Engine* engine, const MenuConfig& config) {
     // 5. Query Active Font Atlas
     uint32_t fontIdx = 0;
     for (Entity uiEnt: reg.GetEntitiesWith<Components::UISettingsComponent>()) {
-        if (auto* uiSettings = reg.Get<Components::UISettingsComponent>(uiEnt)) {
+        uiSettings = uiEnt; Patch<Components::UISettingsComponent>(reg, uiEnt, [&](auto& uiSettings) {
             fontIdx = uiSettings->defaultFontAtlasIdx;
             break;
-        }
-    }
+});    }
 
     // 6. UI Button Stack Container
     m_buttonStack        = reg.Create();
