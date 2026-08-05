@@ -85,6 +85,7 @@ class ZHLN_API RenderContext {
     auto                                         CreateVertexBuffer(const void* data, size_t size, uint32_t stride = sizeof(VertexPosition)) -> BufferHandle;
     auto                                         CreateIndexBuffer(const void* data, size_t size) -> BufferHandle;
     void                                         DestroyBuffer(BufferHandle handle);
+    void                                         UpdateBuffer(BufferHandle handle, const void* data, size_t size) noexcept;
     auto                                         CreateConstantBuffer(size_t size) -> BufferHandle;
     [[nodiscard]] std::expected<Material, Error> CreateMaterial(const PipelineDesc& desc);
 

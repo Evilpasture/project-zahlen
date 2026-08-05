@@ -228,6 +228,20 @@ void BuildSystemGraphs(Engine& engine) {
         .enabled = true,
     });
 
+    updateGraph.AddSystem({
+        .update_func    = Sys_Particle,
+        .name           = "ParticleSystem",
+        .access_pattern = {Write<Components::ParticleEmitterComponent>()},
+        .enabled        = true,
+    });
+
+    updateGraph.AddSystem({
+        .update_func    = Sys_Terrain,
+        .name           = "TerrainSystem",
+        .access_pattern = {Write<Components::TerrainComponent>(), Write<Components::MeshComponent>()},
+        .enabled        = true,
+    });
+
     updateGraph.Compile();
 
     renderGraph.AddSystem({
@@ -238,10 +252,7 @@ void BuildSystemGraphs(Engine& engine) {
     });
 
     renderGraph.AddSystem({
-        .update_func =
-            [](Engine& eng, float /*dt*/) {
-                DecalSystem::Update(eng);
-            },
+        .update_func    = [](Engine& eng, float /*dt*/) { DecalSystem::Update(eng); },
         .name           = "DecalSystem",
         .access_pattern = {Read<Components::DecalComponent>(), Read<Components::TransformComponent>()},
         .enabled        = true,
@@ -258,20 +269,6 @@ void BuildSystemGraphs(Engine& engine) {
                 Write<Components::MeshComponent>(),
             },
         .enabled = true,
-    });
-
-    updateGraph.AddSystem({
-        .update_func    = Sys_Particle,
-        .name           = "ParticleSystem",
-        .access_pattern = {Write<Components::ParticleEmitterComponent>()},
-        .enabled        = true,
-    });
-
-    updateGraph.AddSystem({
-        .update_func    = Sys_Terrain,
-        .name           = "TerrainSystem",
-        .access_pattern = {Write<Components::TerrainComponent>(), Write<Components::MeshComponent>()},
-        .enabled        = true,
     });
 
     renderGraph.Compile();

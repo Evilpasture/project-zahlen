@@ -57,11 +57,11 @@ struct SnowSceneState {
     ScriptECSBridge*    bridge = nullptr;
     MainMenu            mainMenu;
     LightningSimulation lightningSim;
-    bool                gameStarted = false;
-    bool                wonGame     = false;
+    bool                gameStarted   = false;
+    bool                wonGame       = false;
     bool                wasLMouseDown = false;
-    bool                wasRDown    = false;
-    float               totalTime   = 0.0f;
+    bool                wasRDown      = false;
+    float               totalTime     = 0.0f;
 
     Entity playerEnt       = NullEntity;
     Entity playerCameraEnt = NullEntity; // Cached once in RespawnPlayer
@@ -81,10 +81,9 @@ static SnowSceneState g_State;
 
 // Small combinators removing the repetitive null-check dance
 
-
 inline Entity SpawnPointLight(ECS::Registry& reg, JPH::Vec3 pos, JPH::Vec3 color, float intensity, float range, float radius = 0.4f) {
     Entity e = reg.Create();
-    reg.Add(e, Components::TransformComponent{.position = pos});
+    reg.Add(e, Components::TransformComponent {.position = pos});
     reg.Add(
         e, Components::LightComponent {
                .type        = LightType::Point,
@@ -396,21 +395,16 @@ void RespawnPlayer(Engine* engine) {
 
     g_State.playerEnt = reg.Create();
     reg.Add(
-        g_State.playerEnt,
-        Components::PlayerTagComponent {},
-        Components::TransformComponent {.position = spawnPos},
-        Components::MovementComponent {},
-        Components::InputComponent {},
-        Components::PhysicsComponent {Physics::CreateCharacter(pc, JPH::RVec3(spawnPos))},
-        Components::PhysicsStateComponent {.currPosition = spawnPos, .prevPosition = spawnPos},
-        GameplayComponents::Combat {.hp = 100.0f, .maxHp = 100.0f}
+        g_State.playerEnt, Components::PlayerTagComponent {}, Components::TransformComponent {.position = spawnPos}, Components::MovementComponent {},
+        Components::InputComponent {}, Components::PhysicsComponent {Physics::CreateCharacter(pc, JPH::RVec3(spawnPos))},
+        Components::PhysicsStateComponent {.currPosition = spawnPos, .prevPosition = spawnPos}, GameplayComponents::Combat {.hp = 100.0f, .maxHp = 100.0f}
     );
 
     auto camEnts = reg.GetEntitiesWith<Components::MainCameraTagComponent>();
     if (!camEnts.empty()) {
-        Entity camEnt    = camEnts[0];
+        Entity camEnt           = camEnts[0];
         g_State.playerCameraEnt = camEnt;
-        auto*  targetCam = reg.Get<Components::TargetCameraComponent>(camEnt);
+        auto* targetCam         = reg.Get<Components::TargetCameraComponent>(camEnt);
         if (!targetCam) {
             targetCam = &reg.Add(camEnt, Components::TargetCameraComponent {});
         }
@@ -434,9 +428,7 @@ void RespawnPlayer(Engine* engine) {
 
     if (!g_State.charParts.empty()) {
         Entity charRoot = g_State.charParts[0];
-        Patch<Components::TransformComponent>(reg, charRoot, [&](auto& rootTrans) {
-            rootTrans.position = JPH::Vec3(0.0f, -0.8f, 0.0f);
-        });
+        Patch<Components::TransformComponent>(reg, charRoot, [&](auto& rootTrans) { rootTrans.position = JPH::Vec3(0.0f, -0.8f, 0.0f); });
         reg.Add(charRoot, Components::HierarchyComponent {.parent = g_State.playerEnt});
         CreativeWorksFactory::SetupPlayerRagdoll(*engine, g_State.playerEnt, g_State.charParts);
     }
@@ -644,9 +636,7 @@ void LightningClickStrikeSystem(Engine* engine, float dt) {
             JPH::Vec3 dir   = (pFar - pNear).Normalized();
 
             Entity ignorePhys = NullEntity;
-            Patch<Components::PhysicsComponent>(engine->GetRegistry(), g_State.playerEnt, [&](auto& phys) {
-                ignorePhys = phys.physicsHandle;
-            });
+            Patch<Components::PhysicsComponent>(engine->GetRegistry(), g_State.playerEnt, [&](auto& phys) { ignorePhys = phys.physicsHandle; });
 
             auto hit = Physics::Raycast(engine->GetPhysicsContext(), JPH::RVec3(pNear), dir, 2000.0f, ignorePhys);
 
@@ -675,14 +665,13 @@ void LightningClickStrikeSystem(Engine* engine, float dt) {
 
             g_State.lightningSim.TriggerStrike(*engine, cloudPos, impactPos, cfg);
 
-            // Spawn explosion exactly at impact coordinate
-            ExplosionSystem::Spawn(engine, JPH::Vec3(impactPos), 2.2f);
+            // Spawn explosion via ECS System (*engine dereferenced)
+            ExplosionSystem::Spawn(*engine, JPH::Vec3(impactPos), 2.2f);
         }
     }
     g_State.wasLMouseDown = isLMouseDown;
 
     g_State.lightningSim.Update(*engine, dt);
-    ExplosionSystem::Update(engine, dt);
 }
 
 void PlayerInputSystem(Engine* engine, [[maybe_unused]] float dt) {
@@ -740,16 +729,12 @@ void PlayerInputSystem(Engine* engine, [[maybe_unused]] float dt) {
                     if (ragdoll.state == RagdollState::Inactive) {
                         ragdoll.state = RagdollState::Limp;
                         reg.Remove<Components::HierarchyComponent>(charRoot);
-                        Patch<Components::TransformComponent>(reg, charRoot, [&](auto& rootTrans) {
-                            rootTrans.position.SetY(0.0f);
-                        });
+                        Patch<Components::TransformComponent>(reg, charRoot, [&](auto& rootTrans) { rootTrans.position.SetY(0.0f); });
                         ZHLN::Log("Player collapsed into the blizzard!");
                         engine->GetAudioContext().PlayProceduralBeep(150.0f, 0.25f, 0.3f);
                     } else {
                         ragdoll.state = RagdollState::Inactive;
-                        Patch<Components::TransformComponent>(reg, charRoot, [&](auto& rootTrans) {
-                            rootTrans.position.SetY(-0.8f);
-                        });
+                        Patch<Components::TransformComponent>(reg, charRoot, [&](auto& rootTrans) { rootTrans.position.SetY(-0.8f); });
                         reg.Add(charRoot, Components::HierarchyComponent {.parent = e});
                         ZHLN::Log("Player stood up in the blizzard!");
                     }
@@ -765,7 +750,7 @@ void BlizzardWindSystem(Engine* engine, float dt) {
     auto& reg = engine->GetRegistry();
 
     Patch<Components::LightComponent>(reg, g_State.campfireLight, [&](auto& fireLight) {
-        float gust = 300.0f + 55.0f * std::sin(g_State.totalTime * 14.0f) + 30.0f * std::cos(g_State.totalTime * 28.0f);
+        float gust          = 300.0f + 55.0f * std::sin(g_State.totalTime * 14.0f) + 30.0f * std::cos(g_State.totalTime * 28.0f);
         fireLight.intensity = gust;
     });
 
@@ -787,7 +772,8 @@ void CameraFovSystem(Engine* engine, [[maybe_unused]] float dt) {
     auto& reg = engine->GetRegistry();
     for (Entity pEnt: reg.GetEntitiesWith<Components::MovementComponent>()) {
         auto* move = reg.Get<Components::MovementComponent>(pEnt);
-        if (!move) continue;
+        if (!move)
+            continue;
         if (g_State.playerCameraEnt != NullEntity) {
             if (auto* cam = reg.Get<Components::TargetCameraComponent>(g_State.playerCameraEnt)) {
                 if (cam->target == pEnt) {
@@ -802,7 +788,8 @@ void VisualFeedbackSystem(Engine* engine, [[maybe_unused]] float dt) {
     auto& reg = engine->GetRegistry();
     for (Entity pEnt: reg.GetEntitiesWith<GameplayComponents::Combat>()) {
         auto* combat = reg.Get<GameplayComponents::Combat>(pEnt);
-        if (!combat) continue;
+        if (!combat)
+            continue;
         if (g_State.playerCameraEnt != NullEntity) {
             if (auto* cam = reg.Get<Components::TargetCameraComponent>(g_State.playerCameraEnt)) {
                 if (cam->target == pEnt) {
@@ -831,41 +818,41 @@ void PlayerAnimationSystem(Engine* engine, [[maybe_unused]] float dt) {
             return;
 
         std::string targetState = "IDLE";
-    if (!move.isGrounded) {
-        targetState = (move.currentYVel > 1.0f) ? "JUMP" : "FALL";
-    } else if (move.landingTimer > 0.0f) {
-        targetState = "LAND";
-    } else {
-        float velSq = move.inputX * move.inputX + move.inputZ * move.inputZ;
-        if (velSq > 0.01f) {
-            targetState = move.isSprinting ? "RUN" : "WALK";
+        if (!move.isGrounded) {
+            targetState = (move.currentYVel > 1.0f) ? "JUMP" : "FALL";
+        } else if (move.landingTimer > 0.0f) {
+            targetState = "LAND";
+        } else {
+            float velSq = move.inputX * move.inputX + move.inputZ * move.inputZ;
+            if (velSq > 0.01f) {
+                targetState = move.isSprinting ? "RUN" : "WALK";
+            }
         }
-    }
 
-    if (targetState != g_State.currentAnimState) {
-        g_State.currentAnimState = targetState;
+        if (targetState != g_State.currentAnimState) {
+            g_State.currentAnimState = targetState;
 
-        for (Entity part: g_State.charParts) {
-            Patch<Components::AnimatorComponent>(reg, part, [&](auto& anim) {
-                int trackIdx = -1;
-                if (anim.prefab) {
-                    for (size_t i = 0; i < anim.prefab->animations.size(); ++i) {
-                        std::string name = anim.prefab->animations[i].name.c_str();
-                        std::transform(name.begin(), name.end(), name.begin(), ::toupper);
-                        if (name.find(targetState) != std::string::npos) {
-                            trackIdx = static_cast<int>(i);
-                            break;
+            for (Entity part: g_State.charParts) {
+                Patch<Components::AnimatorComponent>(reg, part, [&](auto& anim) {
+                    int trackIdx = -1;
+                    if (anim.prefab) {
+                        for (size_t i = 0; i < anim.prefab->animations.size(); ++i) {
+                            std::string name = anim.prefab->animations[i].name.c_str();
+                            std::transform(name.begin(), name.end(), name.begin(), ::toupper);
+                            if (name.find(targetState) != std::string::npos) {
+                                trackIdx = static_cast<int>(i);
+                                break;
+                            }
                         }
                     }
-                }
-                if (trackIdx >= 0) {
-                    bool  loop  = !(targetState == "JUMP" || targetState == "LAND");
-                    float speed = (targetState == "LAND") ? 1.6f : 1.0f;
-                    PlayTrack(reg, part, trackIdx, 0.15f, loop, speed);
-                }
-            });
+                    if (trackIdx >= 0) {
+                        bool  loop  = !(targetState == "JUMP" || targetState == "LAND");
+                        float speed = (targetState == "LAND") ? 1.6f : 1.0f;
+                        PlayTrack(reg, part, trackIdx, 0.15f, loop, speed);
+                    }
+                });
+            }
         }
-    }
     });
 }
 
@@ -980,8 +967,12 @@ GAMEPLAY_API ZHLN::GameplayStatus NativeGameplayUpdate(ZHLN::Engine* engine, flo
             Game::SummitVictorySystem(engine, dt);
         }
         {
-            ZHLN_PROFILE_SCOPE("ECS System: Lightning & Explosions");
+            ZHLN_PROFILE_SCOPE("ECS System: Lightning");
             Game::LightningClickStrikeSystem(engine, dt);
+        }
+        {
+            ZHLN_PROFILE_SCOPE("ECS System: Explosions");
+            ZHLN::ExplosionSystem::Update(*engine, dt);
         }
     }
     return ZHLN::GameplayStatus::OK;

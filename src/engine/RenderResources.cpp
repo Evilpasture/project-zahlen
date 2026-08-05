@@ -196,8 +196,27 @@ auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHa
 
 void RenderContext::DestroyBuffer(BufferHandle handle) {
     if (handle != BufferHandle::Invalid) {
+        // Defer destruction for 2 frames so the GPU finishes reading from the buffer
+        Vk::ScopedDeletionQueue guard(_impl->deletionQueue);
         _impl->meshPool.Destroy(handle);
     }
+}
+
+void RenderContext::UpdateBuffer(BufferHandle handle, const void* data, size_t size) noexcept {
+    if (handle == BufferHandle::Invalid || data == nullptr || size == 0) {
+        return;
+    }
+    auto* nativeMesh = _impl->meshPool.Resolve(handle).value_or(nullptr);
+    if (nativeMesh == nullptr) {
+        return;
+    }
+
+    auto stagingAlloc = _impl->transferRingBuffer.Allocate(size);
+    std::memcpy(stagingAlloc.mappedData, data, size);
+
+    Vk::ExecuteImmediate<Vk::QueueType::Transfer>(_impl->ctx, _impl->transferCmdRing, _impl->transferRingBuffer, [&](VkCommandBuffer cmd) {
+        Vk::CopyRingBuffer(cmd, stagingAlloc, nativeMesh->buffer, size);
+    });
 }
 
 std::expected<Material, Error> RenderContext::CreateMaterial(const PipelineDesc& desc) {
