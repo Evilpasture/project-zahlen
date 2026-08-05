@@ -19,6 +19,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
+#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
@@ -682,6 +683,22 @@ GameplayStatus Engine::Tick(float dt, GameplayDriver driver) {
         if (render_res.error().Is<RenderFrameResult>() && render_res.error().As<RenderFrameResult>() == RenderFrameResult::DeviceLost) {
             HandleDeviceLost();
         }
+    }
+
+    // Auto-detect missing gameplay scripts / modules and engage Fallback Preset
+    if (!DefaultPreset::IsActive()) {
+        if ((driver == GameplayDriver::Fennel || driver == GameplayDriver::Hybrid) && !std::filesystem::exists("scripts/boot.lua") &&
+            !std::filesystem::exists("scripts/boot.fnl")) {
+            DefaultPreset::BuildFallbackScene(*this, FallbackReason::MissingBootScript, "Script 'scripts/boot.lua' was not found in working directory.");
+        } else if (driver == GameplayDriver::Cpp && !nativeModule.IsLoaded()) {
+            DefaultPreset::BuildFallbackScene(
+                *this, FallbackReason::MissingNativeModule, "Native gameplay module (libgameplay.so / gameplay.dll) was not found."
+            );
+        }
+    }
+
+    if (DefaultPreset::IsActive()) {
+        DefaultPreset::Update(*this, dt);
     }
 
     // 7. Motion Vectors & Transform History

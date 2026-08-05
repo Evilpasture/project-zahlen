@@ -27,6 +27,8 @@ uint32_t AppendTextVertices(
     }
 
     float         currentX     = x;
+    float         currentY     = y;
+    float         lineHeight   = 36.0f * scale; // Line height step for newlines
     PackedRGBA8   packedColor  = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
     Packed1010102 dummyNormal  = Math::PackNormal(0, 1, 0);
     Packed1010102 dummyTangent = Math::PackNormal(1, 0, 0, 1);
@@ -34,19 +36,29 @@ uint32_t AppendTextVertices(
     uint32_t writtenCount = 0;
 
     for (char c: text) {
+        if (c == '\n') {
+            currentX = x;
+            currentY += lineHeight;
+            continue;
+        }
+        if (c == '\r') {
+            continue;
+        }
+
         uint32_t glyphCode = static_cast<uint8_t>(c);
         if (glyphCode < 32 || glyphCode > 127) {
             glyphCode = '?';
         }
 
         const auto& g  = font.glyphs[glyphCode - 32];
-        float       u0 = g.x0 / 512.0f;
-        float       v0 = g.y0 / 512.0f;
-        float       u1 = g.x1 / 512.0f;
-        float       v1 = g.y1 / 512.0f;
+        float       u0 = g.x0 / 1024.0f; // Fixed: 1024.0f matches 1024x1024 atlas
+        float       v0 = g.y0 / 1024.0f;
+        float       u1 = g.x1 / 1024.0f;
+        float       v1 = g.y1 / 1024.0f;
 
         float x0 = currentX + g.xoff * scale;
-        float y0 = y + g.yoff * scale;
+        // Offset by +28.0f to convert STB TTF baseline yoff to top-left bounding box coordinates
+        float y0 = currentY + (g.yoff + 28.0f) * scale;
         float x1 = x0 + (g.x1 - g.x0) * scale;
         float y1 = y0 + (g.y1 - g.y0) * scale;
 

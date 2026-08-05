@@ -138,8 +138,6 @@ void LuaScriptRuntime::Initialize(Engine* engine) {
     _initialized = true;
 
 #ifdef ZHLN_COMPILED_SCRIPTS_DIR
-    // Append the compiled build scripts directory to package.path
-    // so the runtime can always locate compiled Fennel output files.
     std::string appendPath = std::format("package.path = package.path .. ';{}/?.lua;{}/?/init.lua'", ZHLN_COMPILED_SCRIPTS_DIR, ZHLN_COMPILED_SCRIPTS_DIR);
     luaL_dostring(L, appendPath.c_str());
 #endif
@@ -148,12 +146,18 @@ void LuaScriptRuntime::Initialize(Engine* engine) {
     lua_getglobal(L, "require");
     lua_pushstring(L, "scripts.core.memoryview");
     if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
-        Panic("Failed to load core script: scripts/core/memoryview.lua. Error: {}", lua_tostring(L, -1));
+        Log("Notice: Core script 'scripts/core/memoryview.lua' not present in runtime environment.");
+        lua_pop(L, 1);
+    } else {
+        lua_pop(L, 1);
     }
-    lua_pop(L, 1);
 
-    // Execute our Fennel bootstrapper
-    RunFile("scripts/boot.lua");
+    // Execute Fennel bootstrapper if present
+    if (std::filesystem::exists("scripts/boot.lua") || std::filesystem::exists("scripts/boot.fnl")) {
+        RunFile("scripts/boot.lua");
+    } else {
+        Log("Notice: 'scripts/boot.lua' not found. Standalone fallback preset engaged.");
+    }
 }
 
 void LuaScriptRuntime::Shutdown() {

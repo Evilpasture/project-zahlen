@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "SystemGraph.hpp"
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <utility>
 
 namespace ZHLN::ECS {
 

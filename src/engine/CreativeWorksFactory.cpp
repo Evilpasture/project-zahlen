@@ -81,7 +81,7 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
         return 0;
     }
 
-    const uint32_t       atlasSize = 512;
+    const uint32_t       atlasSize = 1024;
     std::vector<uint8_t> alphaBitmap(static_cast<size_t>(atlasSize * atlasSize), 0);
 
     auto* engine             = GetEngineContext();
@@ -92,15 +92,15 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
     }
     auto* uiSettings = reg.Get<Components::UISettingsComponent>(uiSettingsEntities[0]);
 
-    // SDF Generation Parameters
-    const float   fontSize         = 24.0f;
+    // High-Resolution SDF Generation Parameters
+    const float   fontSize         = 32.0f;
     const float   scale            = stbtt_ScaleForPixelHeight(&fontInfo, fontSize);
-    const int     padding          = 5;
+    const int     padding          = 6;
     const uint8_t onedge_value     = 128; // 0.5 in normalized space
     const float   pixel_dist_scale = 128.0f / static_cast<float>(padding);
 
-    uint32_t curX      = 1;
-    uint32_t curY      = 1;
+    uint32_t curX      = 2;
+    uint32_t curY      = 2;
     uint32_t rowHeight = 0;
 
     for (int i = 0; i < 96; ++i) {
@@ -118,13 +118,13 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
         unsigned char* sdf = stbtt_GetCodepointSDF(&fontInfo, scale, codepoint, padding, onedge_value, pixel_dist_scale, &w, &h, &xoff, &yoff);
 
         if (sdf != nullptr && w > 0 && h > 0) {
-            if (curX + w + 1 > atlasSize) {
-                curX = 1;
-                curY += rowHeight + 1;
+            if (curX + w + 2 > atlasSize) {
+                curX = 2;
+                curY += rowHeight + 2;
                 rowHeight = 0;
             }
 
-            if (curY + h + 1 > atlasSize) {
+            if (curY + h + 2 > atlasSize) {
                 Log("WARNING: Font atlas size exceeded! Glyphs truncated.");
                 stbtt_FreeSDF(sdf, nullptr);
                 break;
@@ -146,7 +146,7 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
                 .xadvance = xadvance
             };
 
-            curX += w + 1;
+            curX += w + 2;
             rowHeight = std::max(rowHeight, static_cast<uint32_t>(h));
             stbtt_FreeSDF(sdf, nullptr);
         } else {

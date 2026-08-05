@@ -173,6 +173,7 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/audio)
 
 set(ENGINE_SOURCES
     src/engine/AssertHandler.cpp
+    src/engine/DefaultPreset.cpp
     src/engine/RenderFrame.cpp
     src/engine/RenderInit.cpp
     src/engine/RenderResources.cpp

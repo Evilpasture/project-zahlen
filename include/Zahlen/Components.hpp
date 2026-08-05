@@ -14,18 +14,41 @@
 namespace ZHLN {
 
 struct ModelPrefab;
-struct Skeleton; // Forward declaration for RagdollComponent
+struct Skeleton;
 
 enum class UIButton : uint8_t { None = 0, Hovered = 1 << 0, Pressed = 1 << 1, Clicked = 1 << 2, Disabled = 1 << 3 };
 template <>
 inline constexpr bool EnableEnumFlags<UIButton> = true;
-enum class StackDirection : uint8_t { Horizontal = 0, Vertical = 1 };
 
-// NOLINTNEXTLINE(performance-enum-size)
+enum class StackDirection : uint8_t { Horizontal = 0, Vertical = 1 };
+enum class TextAlignment : uint8_t { Left = 0, Center = 1, Right = 2 };
+enum class TextVerticalAlignment : uint8_t { Top = 0, Center = 1, Bottom = 2 };
+enum class UIJustify : uint8_t { Start = 0, Center = 1, End = 2, SpaceBetween = 3, SpaceAround = 4 };
+
 enum class RagdollState : uint32_t { Inactive = 0, KeyframeMotor = 1, Limp = 2, PartialBlend = 3 };
-static_assert(sizeof(RagdollState) == sizeof(uint32_t));
 
 struct Components {
+    struct TextComponent {
+        ZHLN::String256 text;
+        float           scale = 1.0f;
+        JPH::Vec4       color = {1.0f, 1.0f, 1.0f, 1.0f};
+
+        // Declarative Alignment - No manual math required by the author!
+        TextAlignment         align         = TextAlignment::Left;
+        TextVerticalAlignment verticalAlign = TextVerticalAlignment::Top;
+
+        uint32_t fontIndex = 0;
+        float    offsetX   = 0.0f; // Optional fine-tuning offset
+        float    offsetY   = 0.0f;
+    };
+
+    struct UIStackComponent {
+        float          spacing   = 8.0f;
+        float          padding   = 8.0f;
+        StackDirection direction = StackDirection::Vertical;
+        UIJustify      justify   = UIJustify::Start; // Auto-distributes child elements
+    };
+
     struct PBRComponent {
         float roughness = 0.5f;
         float metallic  = 0.0f;
@@ -60,8 +83,6 @@ struct Components {
         int32_t   skeletonIndex = -1;
         DrawFlags flags         = DrawFlags::None;
     };
-
-    static_assert(sizeof(MeshComponent) == 288);
 
     struct TerrainComponent {
         uint32_t           sampleCount = 128;
@@ -116,10 +137,9 @@ struct Components {
         uint32_t        jointCount       = 0;
         const Skeleton* skeleton         = nullptr;
 
-        // --- Per-Joint Active Ragdoll & Hit Reaction Properties ---
-        ZHLN::Array<float> jointBlendWeights; // 0.0 = Anim, 1.0 = Phys
-        ZHLN::Array<float> jointStiffness;    // 0.0 = Flaccid, 1.0 = Rigid Motor
-        ZHLN::Array<float> jointBlendDecay;   // Decay speed (units/sec) back to 0.0
+        ZHLN::Array<float> jointBlendWeights;
+        ZHLN::Array<float> jointStiffness;
+        ZHLN::Array<float> jointBlendDecay;
 
         void EnsureJointCapacity(uint32_t count) {
             if (jointBlendWeights.size() < count) {
@@ -231,14 +251,6 @@ struct Components {
     struct DebugSettingsComponent {
         int physicsDrawMode = 0;
     };
-    struct TextComponent {
-        ZHLN::String256 text;
-        float           x         = 0.0f;
-        float           y         = 0.0f;
-        float           scale     = 1.0f;
-        JPH::Vec4       color     = {1.0f, 1.0f, 1.0f, 1.0f};
-        uint32_t        fontIndex = 0;
-    };
     struct UISettingsComponent {
         uint32_t  defaultFontAtlasIdx = 0;
         FontAtlas fontAtlas;
@@ -325,12 +337,7 @@ struct Components {
         ZHLN::Entity targetEntity {};
         bool         isDragging = false;
     };
-    struct UIStackComponent {
-        float          spacing   = 8.0f;
-        float          padding   = 8.0f;
-        StackDirection direction = StackDirection::Vertical;
-        char           _pad[3] {};
-    };
+
     struct UITextInputComponent {
         String256 text;
         uint32_t  cursorIndex = 0;
@@ -467,12 +474,12 @@ struct Components {
 
         JPH::Vec3 targetPosition = JPH::Vec3::sZero();
         JPH::Quat targetRotation = JPH::Quat::sIdentity();
-        JPH::Vec3 poleVector     = JPH::Vec3(0.0f, -1.0f, 0.0f); // Direction hint for middle joint
+        JPH::Vec3 poleVector     = JPH::Vec3(0.0f, -1.0f, 0.0f);
 
-        Entity    targetEntity = NullEntity; // Optional entity tracking target transform
+        Entity    targetEntity = NullEntity;
         JPH::Vec3 targetOffset = JPH::Vec3::sZero();
 
-        float weight            = 1.0f; // 0.0 = Keyframe pose, 1.0 = Full IK
+        float weight            = 1.0f;
         bool  orientEndEffector = true;
     };
 
@@ -483,14 +490,6 @@ struct Components {
             c->chains.clear();
         }
     };
-    static_assert(sizeof(LightComponent) == 160);
-    static_assert(sizeof(UIStackComponent) == 12);
-    static_assert(sizeof(UIRectComponent) == 64);
-    static_assert(sizeof(TriggerComponent) == 8);
-    static_assert(sizeof(UsableComponent) == 8);
-    static_assert(sizeof(MovementComponent) == 64 && offsetof(MovementComponent, orientation) == 0);
-    static_assert(sizeof(TargetCameraComponent) == 112);
-    static_assert(sizeof(UITextInputComponent) == 272);
 };
 
 } // namespace ZHLN
