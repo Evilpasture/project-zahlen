@@ -177,6 +177,8 @@ set(ENGINE_SOURCES
     src/engine/RenderInit.cpp
     src/engine/RenderResources.cpp
     src/engine/Engine.cpp
+    src/engine/EngineLoop.cpp
+    src/engine/Editor.cpp
     src/engine/CreativeWorksFactory.cpp
     src/engine/MeshBuilder.cpp
     src/engine/system/AnimationSystem.cpp
@@ -485,8 +487,6 @@ add_dependencies(zahlen_engine zahlen_fennel_compilation)
 # --- ENGINE LAUNCHER & EDITOR EXECUTABLE ---
 add_executable(zahlen
     src/main.cpp
-    src/game_main.cpp
-    src/editor_main.cpp
 )
 target_link_libraries(zahlen PRIVATE zahlen_engine imgui Jolt)
 target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)

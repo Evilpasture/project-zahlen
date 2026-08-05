@@ -8,11 +8,13 @@
 #include <Jolt/Core/Array.h>
 // clang-format on
 
+#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/EngineCode.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/Types.hpp>
 #include <expected>
 #include <memory>
 
@@ -79,6 +81,25 @@ class ZHLN_API Engine {
     [[nodiscard]] uint64_t GetCurrentFrame() const noexcept;
 
     void ProvokeDeviceLost();
+
+    /**
+     * @brief Registers default engine components, camera, lighting settings,
+     *        UI settings, and compiles internal System Graphs.
+     */
+    bool InitializeDefaultScene();
+
+    /**
+     * @brief Executes a single synchronized frame tick in canonical order.
+     * @param dt Frame delta time in seconds.
+     * @param driver Gameplay driver (Cpp, Fennel, or Hybrid).
+     */
+    GameplayStatus Tick(float dt, GameplayDriver driver = GameplayDriver::Cpp);
+
+    /**
+     * @brief Convenience entry point that manages the main loop, frame limiting,
+     *        and clean shutdown.
+     */
+    static int Run(const CommandLineOptions& options);
 
   private:
     std::expected<void, Error>  InitInternal(const EngineConfig& cfg);
