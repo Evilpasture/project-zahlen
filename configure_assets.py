@@ -279,15 +279,19 @@ rule zpak
 
     blend_files = sorted(discover_blend_files(source_dir))
 
-    meta_deps_list = []
+    # Pre-calculate and escape all metadata dependencies
+    escaped_meta_deps_list = []
     for b in blend_files:
         abs_blend = os.path.abspath(b)
         abs_source = os.path.abspath(source_dir)
         rel_path = os.path.relpath(abs_blend, abs_source)
         level = os.path.splitext(rel_path)[0].replace("\\", "/").replace("/", "_")
-        meta_deps_list.append(
-            os.path.join(intermediate_root, level, "metadata.bin").replace("\\", "/")
+        meta_path = os.path.join(intermediate_root, level, "metadata.bin").replace(
+            "\\", "/"
         )
+        escaped_meta_deps_list.append(escape_ninja(meta_path))
+
+    escaped_meta_deps = " ".join(escaped_meta_deps_list)
 
     for blend_path in blend_files:
         abs_blend = os.path.abspath(blend_path)
@@ -410,7 +414,8 @@ rule zpak
     escaped_targets = [escape_ninja(t) for t in sorted(compiled_targets)]
     escaped_manifest = escape_ninja(manifest_target)
 
-    ninja_content += f"\nbuild data/base.pak: zpak {escaped_manifest} | {' '.join(escaped_targets)} {' '.join(meta_deps_list)} || {escaped_zcook}\n"
+    # FIXED: Joined pre-escaped metadata dependencies into ZPAK rule [5.5.0]
+    ninja_content += f"\nbuild data/base.pak: zpak {escaped_manifest} | {' '.join(escaped_targets)} {escaped_meta_deps} || {escaped_zcook}\n"
 
     # Virtual targets
     escaped_glbs = [escape_ninja(g) for g in sorted(glb_targets)]
@@ -427,7 +432,8 @@ rule zpak
     ninja_content += "  description = Regenerating assets.ninja\n"
     ninja_content += "  generator = 1\n"
 
-    ninja_content += f"\nbuild {escaped_output}: regenerate_ninja {escaped_configure} | {blend_deps} {' '.join(meta_deps_list)} {escaped_script} {escaped_wrapper}\n"
+    # FIXED: Joined pre-escaped metadata dependencies into self-regeneration rule [5.5.0]
+    ninja_content += f"\nbuild {escaped_output}: regenerate_ninja {escaped_configure} | {blend_deps} {escaped_meta_deps} {escaped_script} {escaped_wrapper}\n"
 
     ninja_content += "\ndefault data/base.pak\n"
 
