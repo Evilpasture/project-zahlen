@@ -1,15 +1,15 @@
 # src/gltf/CMakeLists.txt
 add_library(zahlen_gltf STATIC
     GLTFImporter.cpp
-    ${CMAKE_SOURCE_DIR}/extern/cgltf_impl.c
+    ${PROJECT_SOURCE_DIR}/extern/cgltf_impl.c
 )
 set_target_properties(zahlen_gltf PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_include_directories(zahlen_gltf PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/extern/cgltf
-    ${CMAKE_SOURCE_DIR}/extern/stb
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/src
+    ${PROJECT_SOURCE_DIR}/extern/cgltf
+    ${PROJECT_SOURCE_DIR}/extern/stb
 )
 
 target_link_libraries(zahlen_gltf PRIVATE
@@ -20,5 +20,5 @@ target_link_libraries(zahlen_gltf PRIVATE
 )
 
 if(NOT MSVC)
-    target_compile_options(zahlen_gltf PRIVATE -fno-exceptions -fno-rtti)
+    target_compile_options(zahlen_gltf PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
 endif()

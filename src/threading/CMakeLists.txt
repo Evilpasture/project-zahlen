@@ -15,8 +15,8 @@ set_target_properties(zahlen_threading PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # Allow other modules to find the headers
 target_include_directories(zahlen_threading PUBLIC 
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/src
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/src
 )
 
 # Enable ASM support if not already inherited

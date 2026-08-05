@@ -3,8 +3,7 @@
 
 cmake_minimum_required(VERSION 3.28)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
-# include(AppleShim)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # 1. Force the compiler selection BEFORE project()
 if(WIN32 AND NOT DEFINED CMAKE_C_COMPILER)
@@ -33,7 +32,7 @@ find_package(Git QUIET)
 if(GIT_FOUND)
     execute_process(
         COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         OUTPUT_VARIABLE ZHLN_GIT_HASH
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET
@@ -54,7 +53,6 @@ if(APPLE)
     execute_process(COMMAND xcrun --show-sdk-path OUTPUT_VARIABLE MACOS_SDK_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
     set(CMAKE_SYSROOT ${MACOS_SDK_PATH})
 endif()
-
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -128,14 +126,14 @@ endif()
 set(MI_BUILD_SHARED OFF CACHE BOOL "" FORCE) # Build static lib for easy embedding
 set(MI_BUILD_OBJECT OFF CACHE BOOL "" FORCE)
 set(MI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-add_subdirectory(extern/mimalloc EXCLUDE_FROM_ALL)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/mimalloc EXCLUDE_FROM_ALL)
 
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/glfw SYSTEM)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/glfw SYSTEM)
 
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/LuaJIT SYSTEM)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/LuaJIT SYSTEM)
 
 set(DOUBLE_PRECISION ON CACHE BOOL "" FORCE)
 set(USE_STD_INCLUDES ON CACHE BOOL "" FORCE)
@@ -145,7 +143,7 @@ set(USE_RTTI OFF CACHE BOOL "" FORCE)
 add_compile_definitions(JPH_DEBUG_RENDERER)
 
 set(JPH_BUILD_SHARED_LIBS ON CACHE BOOL "Build Jolt as shared library" FORCE)
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/JoltPhysics/Build SYSTEM)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/JoltPhysics/Build SYSTEM)
 
 # Force Jolt to export all symbols
 target_compile_definitions(Jolt PUBLIC JPH_SHARED_LIBRARY)
@@ -156,22 +154,22 @@ set_target_properties(Jolt PROPERTIES
     WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
 
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/VulkanMemoryAllocator SYSTEM)
-add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/SPIRV-Reflect)
-add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/imgui)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/VulkanMemoryAllocator SYSTEM)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/SPIRV-Reflect)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui)
 set_target_properties(imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(APPLE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion")
 endif()
 
-add_subdirectory(${CMAKE_SOURCE_DIR}/src/render)
-add_subdirectory(${CMAKE_SOURCE_DIR}/src/threading)
-add_subdirectory(${CMAKE_SOURCE_DIR}/src/physics)
-add_subdirectory(${CMAKE_SOURCE_DIR}/src/ecs)
-add_subdirectory(${CMAKE_SOURCE_DIR}/src/gltf)
-add_subdirectory(${CMAKE_SOURCE_DIR}/src/alife)
-add_subdirectory(${CMAKE_SOURCE_DIR}/src/audio)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/render)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/threading)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/physics)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/ecs)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/gltf)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/alife)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/audio)
 
 set(ENGINE_SOURCES
     src/engine/AssertHandler.cpp
@@ -179,6 +177,8 @@ set(ENGINE_SOURCES
     src/engine/RenderInit.cpp
     src/engine/RenderResources.cpp
     src/engine/Engine.cpp
+    src/engine/EngineLoop.cpp
+    src/engine/Editor.cpp
     src/engine/CreativeWorksFactory.cpp
     src/engine/MeshBuilder.cpp
     src/engine/system/AnimationSystem.cpp
@@ -276,13 +276,12 @@ string(REGEX REPLACE " +" " " COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST}")
 add_library(zahlen_engine SHARED ${ENGINE_SOURCES})
 
 target_precompile_headers(zahlen_engine PRIVATE
-    "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_SOURCE_DIR}/src/render/Rendering.hpp>"
+    "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/src/render/Rendering.hpp>"
 )
 
 set_target_properties(zahlen_engine PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
-    CXX_MODULE_STD ON
 )
 
 # --- COMPILE-TIME PROFILING ---
@@ -312,11 +311,11 @@ target_compile_definitions(zahlen_engine PRIVATE
     ZHLN_BUILD_TOOL="${CMAKE_GENERATOR}"
     ZHLN_TARGET_TRIPLE="${ZHLN_TARGET_TRIPLE}"
     ZHLN_LINKER_NAME="${ZHLN_LINKER}"
-    ZHLN_COMPILED_SCRIPTS_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    ZHLN_COMPILED_SCRIPTS_DIR="${CMAKE_BINARY_DIR}"
 )
 
 target_sources(zahlen_engine PRIVATE
-    ${CMAKE_SOURCE_DIR}/extern/stbi_impl.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern/stbi_impl.c
 )
 
 target_link_libraries(zahlen_engine PRIVATE
@@ -347,25 +346,25 @@ endif()
 target_link_libraries(zahlen_engine PUBLIC Jolt)
 
 target_include_directories(zahlen_engine SYSTEM PRIVATE
-    ${CMAKE_SOURCE_DIR}/extern/JoltPhysics
-    ${CMAKE_SOURCE_DIR}/third_party/renderdoc
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern/JoltPhysics
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/renderdoc
 )
 target_include_directories(zahlen_engine PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/extern/LuaJIT/src
-    ${CMAKE_CURRENT_BINARY_DIR}/generated_shaders
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern/LuaJIT/src
+    ${CMAKE_BINARY_DIR}/generated_shaders
 )
 target_include_directories(zahlen_engine PRIVATE
-    ${CMAKE_SOURCE_DIR}/extern/cgltf
-    ${CMAKE_SOURCE_DIR}/extern/stb
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern/cgltf
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb
 )
 
-if(NOT EXISTS "${CMAKE_SOURCE_DIR}/resources/shaders/SMAA.hlsl")
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resources/shaders/SMAA.hlsl")
     message(STATUS "SMAA.hlsl not found. Downloading from official iryoku/smaa repository...")
     file(DOWNLOAD
         "https://raw.githubusercontent.com/iryoku/smaa/master/SMAA.hlsl"
-        "${CMAKE_SOURCE_DIR}/resources/shaders/SMAA.hlsl"
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources/shaders/SMAA.hlsl"
         SHOW_PROGRESS
         STATUS DOWNLOAD_STATUS
     )
@@ -376,11 +375,11 @@ if(NOT EXISTS "${CMAKE_SOURCE_DIR}/resources/shaders/SMAA.hlsl")
 endif()
 
 # --- AUTOMATIC FENNEL BOOTSTRAP DOWNLOADER ---
-if(NOT EXISTS "${CMAKE_SOURCE_DIR}/scripts/core/fennel.lua")
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/fennel.lua")
     message(STATUS "fennel.lua not found. Downloading from official fennel-lang.org...")
     file(DOWNLOAD
         "https://fennel-lang.org/downloads/fennel-1.6.1.lua"
-        "${CMAKE_SOURCE_DIR}/scripts/core/fennel.lua"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/fennel.lua"
         SHOW_PROGRESS
         STATUS DOWNLOAD_STATUS
     )
@@ -393,17 +392,17 @@ endif()
 # --- SHADER COMPILATION ---
 include(ShaderCompilation)
 
-# --- FENNEL COMPILER INTEGRATION ---
+# --- FENNEL COMPILER INTEGRATION & EXPORTED HELPERS ---
 find_program(FENNEL_BIN NAMES fennel)
 
-function(compile_fennel TARGET_NAME OUTPUT_LUA_FILES_VAR)
+function(zahlen_compile_fennel TARGET_NAME OUTPUT_LUA_FILES_VAR)
     set(LUA_OUTPUTS "")
     foreach(FNL_SRC IN LISTS ARGN)
         get_filename_component(FILE_NAME_WE ${FNL_SRC} NAME_WLE)
         get_filename_component(FILE_DIR ${FNL_SRC} DIRECTORY)
 
         file(RELATIVE_PATH REL_PATH "${CMAKE_SOURCE_DIR}" "${FILE_DIR}")
-        set(OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/${REL_PATH}")
+        set(OUT_DIR "${CMAKE_BINARY_DIR}/${REL_PATH}")
         file(MAKE_DIRECTORY "${OUT_DIR}")
 
         set(OUTPUT_LUA "${OUT_DIR}/${FILE_NAME_WE}.lua")
@@ -424,40 +423,36 @@ function(compile_fennel TARGET_NAME OUTPUT_LUA_FILES_VAR)
     set(${OUTPUT_LUA_FILES_VAR} ${LUA_OUTPUTS} PARENT_SCOPE)
 endfunction()
 
-if(IS_SYMLINK "${CMAKE_CURRENT_BINARY_DIR}/scripts")
-    message(STATUS "Removing stale scripts directory symlink: ${CMAKE_CURRENT_BINARY_DIR}/scripts")
-    file(REMOVE "${CMAKE_CURRENT_BINARY_DIR}/scripts")
+if(IS_SYMLINK "${CMAKE_BINARY_DIR}/scripts")
+    message(STATUS "Removing stale scripts directory symlink: ${CMAKE_BINARY_DIR}/scripts")
+    file(REMOVE "${CMAKE_BINARY_DIR}/scripts")
 endif()
 
-# 1. Compile all Fennel files directly into the build folder
-compile_fennel(zahlen_engine COMPILED_LUA_FILES
-    "${CMAKE_SOURCE_DIR}/scripts/core/memoryview.fnl"
-    "${CMAKE_SOURCE_DIR}/scripts/core/zahlen.fnl"
-    "${CMAKE_SOURCE_DIR}/scripts/core/ecs.fnl"
-    "${CMAKE_SOURCE_DIR}/scripts/core/dialogue.fnl"
-    "${CMAKE_SOURCE_DIR}/scripts/core/inventory.fnl"
-    "${CMAKE_SOURCE_DIR}/scripts/core/ffi_cdef.fnl"
-    "${CMAKE_SOURCE_DIR}/scripts/gameplay.fnl"
-    "${CMAKE_SOURCE_DIR}/scripts/gameplay_snow.fnl"
-    "${CMAKE_SOURCE_DIR}/scripts/main_menu.fnl"
-    "${CMAKE_SOURCE_DIR}/scripts/dialogue_db.fnl"
+# 1. Compile Engine Core Fennel files
+zahlen_compile_fennel(zahlen_engine COMPILED_CORE_LUA_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/memoryview.fnl"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/zahlen.fnl"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/ecs.fnl"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/dialogue.fnl"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/inventory.fnl"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/ffi_cdef.fnl"
 )
 
-# 2. Selectively copy or link static non-Fennel files (e.g. boot.lua, fennel.lua)
-file(GLOB_RECURSE STATIC_SCRIPT_FILES
+# 2. Selectively copy or link static non-Fennel core script files
+file(GLOB_RECURSE STATIC_CORE_SCRIPT_FILES
     LIST_DIRECTORIES false
-    "${CMAKE_SOURCE_DIR}/scripts/*.lua"
-    "${CMAKE_SOURCE_DIR}/scripts/*.sh"
-    "${CMAKE_SOURCE_DIR}/scripts/*.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/*.lua"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/*.sh"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/*.txt"
 )
 
 set(STATIC_SCRIPT_SYMLINKS "")
-foreach(STATIC_SRC IN LISTS STATIC_SCRIPT_FILES)
-    file(RELATIVE_PATH REL_FILE "${CMAKE_SOURCE_DIR}/scripts" "${STATIC_SRC}")
+foreach(STATIC_SRC IN LISTS STATIC_CORE_SCRIPT_FILES)
+    file(RELATIVE_PATH REL_FILE "${CMAKE_CURRENT_SOURCE_DIR}/scripts" "${STATIC_SRC}")
     get_filename_component(REL_DIR "${REL_FILE}" DIRECTORY)
 
-    set(OUT_FILE "${CMAKE_CURRENT_BINARY_DIR}/scripts/${REL_FILE}")
-    set(OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/scripts/${REL_DIR}")
+    set(OUT_FILE "${CMAKE_BINARY_DIR}/scripts/${REL_FILE}")
+    set(OUT_DIR "${CMAKE_BINARY_DIR}/scripts/${REL_DIR}")
 
     file(MAKE_DIRECTORY "${OUT_DIR}")
 
@@ -466,7 +461,7 @@ foreach(STATIC_SRC IN LISTS STATIC_SCRIPT_FILES)
             OUTPUT "${OUT_FILE}"
             COMMAND ${CMAKE_COMMAND} -E copy "${STATIC_SRC}" "${OUT_FILE}"
             DEPENDS "${STATIC_SRC}"
-            COMMENT "Copying static script: ${REL_FILE}"
+            COMMENT "Copying static core script: ${REL_FILE}"
             VERBATIM
         )
     else()
@@ -474,24 +469,23 @@ foreach(STATIC_SRC IN LISTS STATIC_SCRIPT_FILES)
             OUTPUT "${OUT_FILE}"
             COMMAND ${CMAKE_COMMAND} -E create_symlink "${STATIC_SRC}" "${OUT_FILE}"
             DEPENDS "${STATIC_SRC}"
-            COMMENT "Symlinking static script: ${REL_FILE}"
+            COMMENT "Symlinking static core script: ${REL_FILE}"
             VERBATIM
         )
     endif()
     list(APPEND STATIC_SCRIPT_SYMLINKS "${OUT_FILE}")
 endforeach()
 
-add_custom_target(sync_static_scripts DEPENDS ${STATIC_SCRIPT_SYMLINKS})
+add_custom_target(sync_static_core_scripts DEPENDS ${STATIC_SCRIPT_SYMLINKS})
 
-# 3. Create a target blocking engine compilation until all scripts are generated
-add_custom_target(zahlen_fennel_compilation ALL DEPENDS ${COMPILED_LUA_FILES})
-add_dependencies(zahlen_fennel_compilation sync_static_scripts)
+# 3. Create a target blocking engine compilation until all core scripts are generated
+add_custom_target(zahlen_fennel_compilation ALL DEPENDS ${COMPILED_CORE_LUA_FILES})
+add_dependencies(zahlen_fennel_compilation sync_static_core_scripts)
 add_dependencies(zahlen_engine zahlen_fennel_compilation)
 
+# --- ENGINE LAUNCHER & EDITOR EXECUTABLE ---
 add_executable(zahlen
     src/main.cpp
-    src/game_main.cpp
-    src/editor_main.cpp
 )
 target_link_libraries(zahlen PRIVATE zahlen_engine imgui Jolt)
 target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)
@@ -499,15 +493,9 @@ target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)
 set_target_properties(zahlen PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
-    CXX_MODULE_STD ON
 )
 
-# ============================================================================
-# SCRIPTS SUBDIRECTORY (gameplay shared library)
-# ============================================================================
-add_subdirectory(scripts)
-add_dependencies(zahlen gameplay)
-
+# --- ASSET COMPILER (ZCOOK) ---
 add_executable(zcook
     src/zcook/main.cpp
     src/zcook/Transform.cpp
@@ -516,33 +504,42 @@ add_executable(zcook
 )
 target_link_libraries(zcook PRIVATE zahlen_engine)
 target_include_directories(zcook PRIVATE
-    ${CMAKE_SOURCE_DIR}/extern/cgltf
-    ${CMAKE_SOURCE_DIR}/src/zcook
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern/cgltf
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/zcook
 )
 
-# Generates the safe, non-colliding assets.ninja blueprint
-add_custom_command(
-    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/assets.ninja"
-    COMMAND python3 "${CMAKE_SOURCE_DIR}/configure_assets.py" "${CMAKE_CURRENT_BINARY_DIR}/assets.ninja" "$<TARGET_FILE:zcook>" "${CMAKE_SOURCE_DIR}"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-    DEPENDS "${CMAKE_SOURCE_DIR}/configure_assets.py"
-            "${CMAKE_SOURCE_DIR}/tools/export_metadata.py"
-    COMMENT "Scanning asset folders and generating assets.ninja..."
-)
+# Function for consumer Game projects to configure asset cooking via Ninja
+function(zahlen_configure_game_assets GAME_SOURCE_DIR)
+    add_custom_command(
+        OUTPUT "${CMAKE_BINARY_DIR}/assets.ninja"
+        COMMAND python3 "${zahlen_SOURCE_DIR}/configure_assets.py"
+                "${CMAKE_BINARY_DIR}/assets.ninja"
+                "$<TARGET_FILE:zcook>"
+                "${GAME_SOURCE_DIR}"
+        WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+        DEPENDS "${zahlen_SOURCE_DIR}/configure_assets.py"
+                "${zahlen_SOURCE_DIR}/tools/export_metadata.py"
+        COMMENT "Scanning asset folders and generating assets.ninja..."
+    )
 
-# Executes the Ninja asset build pipeline in parallel
-add_custom_target(cook_assets ALL
-    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:zahlen>/data"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/build_assets"
-    COMMAND ninja -f "${CMAKE_CURRENT_BINARY_DIR}/assets.ninja"
-    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_BINARY_DIR}/data/base.pak" "$<TARGET_FILE_DIR:zahlen>/data/base.pak"
-    DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/assets.ninja"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-    COMMENT "Cooking assets in parallel using Ninja..."
-    USES_TERMINAL
-)
+    add_custom_target(cook_assets ALL
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:zahlen>/data"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/build_assets"
+        COMMAND ninja -f "${CMAKE_BINARY_DIR}/assets.ninja"
+        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_BINARY_DIR}/data/base.pak" "$<TARGET_FILE_DIR:zahlen>/data/base.pak"
+        DEPENDS "${CMAKE_BINARY_DIR}/assets.ninja"
+        WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+        COMMENT "Cooking assets in parallel using Ninja..."
+        USES_TERMINAL
+    )
+    add_dependencies(cook_assets zcook)
+    add_dependencies(zahlen cook_assets)
+endfunction()
 
-add_dependencies(cook_assets zcook)
+# If building engine standalone (not as a submodule), cook local engine assets
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    zahlen_configure_game_assets("${CMAKE_CURRENT_SOURCE_DIR}")
+endif()
 
 if(NOT MSVC)
     target_compile_options(zahlen_engine PRIVATE
@@ -567,13 +564,12 @@ target_compile_options(zahlen_render PRIVATE
 
 add_custom_target(link_resources ALL
     COMMAND ${CMAKE_COMMAND}
-        -D SRC="${CMAKE_SOURCE_DIR}/resources"
-        -D DST="${CMAKE_CURRENT_BINARY_DIR}/resources"
-        -P "${CMAKE_SOURCE_DIR}/cmake/CreateSymlinks.cmake"
+        -D SRC="${CMAKE_CURRENT_SOURCE_DIR}/resources"
+        -D DST="${CMAKE_BINARY_DIR}/resources"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CreateSymlinks.cmake"
     COMMENT "Creating zero-copy symlinks for resources..."
 )
 
-add_dependencies(zahlen cook_assets)
 add_dependencies(zahlen link_resources)
 
 if(USE_SANITIZERS)

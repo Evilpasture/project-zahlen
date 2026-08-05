@@ -11,10 +11,10 @@ set_target_properties(zahlen_audio PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # Propagate Jolt, FFI Engine headers, and miniaudio search directories
 target_include_directories(zahlen_audio PUBLIC 
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/extern/miniaudio
-    ${CMAKE_SOURCE_DIR}/extern/JoltPhysics
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/src
+    ${PROJECT_SOURCE_DIR}/extern/miniaudio
+    ${PROJECT_SOURCE_DIR}/extern/JoltPhysics
 )
 
 # Propagate dependency chains

@@ -5,8 +5,8 @@
 set(ALL_GENERATED_SPVS "")
 set(ALL_SHADER_DEFINITIONS "")
 
-set(SHADER_SRC_DIR "${CMAKE_SOURCE_DIR}/resources/shaders")
-set(SHADER_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/include")
+set(SHADER_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/resources/shaders")
+set(SHADER_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(GEN_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_shaders")
 file(MAKE_DIRECTORY ${GEN_INCLUDE_DIR})
 
@@ -238,10 +238,10 @@ add_shader_target(decal_shader
 # ============================================================================
 
 set(SHADER_CONSUMING_FILES
-    "${CMAKE_SOURCE_DIR}/src/engine/Resources.cpp"
-    "${CMAKE_SOURCE_DIR}/src/engine/RenderInit.cpp"
-    "${CMAKE_SOURCE_DIR}/src/engine/RenderResources.cpp"
-    "${CMAKE_SOURCE_DIR}/src/engine/RenderProcedural.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/Resources.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/RenderInit.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/RenderResources.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/RenderProcedural.cpp"
 )
 
 set_source_files_properties(${SHADER_CONSUMING_FILES} PROPERTIES

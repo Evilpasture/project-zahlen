@@ -2,6 +2,9 @@
 # ZHLN Project - Master Ignore
 # ==========================================
 
+# --- Downloaded vendor files ---
+SMAA.hlsl
+
 # --- Compiled Shaders (Vulkan) ---
 *.spv
 *.vert.spv

@@ -1,17 +1,30 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/game_main.cpp
+// src/engine/EngineLoop.cpp
 #include "Zahlen/Audio.hpp"
 #include "Zahlen/CommandLine.hpp"
+#include "Zahlen/Components.hpp"
+#include "Zahlen/CreativeWorksFactory.hpp"
+#include "Zahlen/Engine.hpp"
 #include "Zahlen/Input.hpp"
+#include "Zahlen/Log.hpp"
+#include "Zahlen/Render.hpp"
+#include "Zahlen/Scripting.hpp"
+#include "Zahlen/Window.hpp"
+#include "Zahlen/ecs/ECS.hpp"
 #include "ecs/EntityCommandBuffer.hpp"
 #include "ecs/SystemGraph.hpp"
 #include "engine/FileWatcher.hpp"
 #include "engine/NativeScriptModule.hpp"
 #include "engine/Platform.hpp"
+#include "engine/system/AnimationSystem.hpp"
+#include "engine/system/ArticulationSystem.hpp"
 #include "engine/system/CameraSystem.hpp"
+#include "engine/system/CullingSystem.hpp"
+#include "engine/system/DecalSystem.hpp"
 #include "engine/system/InputSystem.hpp"
+#include "engine/system/InteractionSystem.hpp"
 #include "engine/system/LightingSystem.hpp"
 #include "engine/system/ParticleSystem.hpp"
 #include "engine/system/PhysicsStateSystem.hpp"
@@ -20,79 +33,20 @@
 #include "engine/system/TargetCameraSystem.hpp"
 #include "engine/system/TerrainSystem.hpp"
 #include "engine/system/TransformSystem.hpp"
+#include "engine/system/UIInteractionSystem.hpp"
 #include "engine/system/UIRenderSystem.hpp"
 #include "imgui.h"
-#include <Zahlen/Camera.hpp>
-#include <Zahlen/Clock.hpp>
-#include <Zahlen/Components.hpp>
-#include <Zahlen/Core/ControlFlow.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/Format.hpp>
-#include <Zahlen/GUI.hpp>
-#include <Zahlen/Log.hpp>
+#include <Zahlen/Editor.hpp>
 #include <Zahlen/Profiler.hpp>
-#include <Zahlen/Scripting.h>
-#include <Zahlen/Scripting.hpp>
-#include <Zahlen/Threading/Mutex.hpp>
-#include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <chrono>
-#include <engine/system/AnimationSystem.hpp>
-#include <engine/system/ArticulationSystem.hpp>
-#include <engine/system/CullingSystem.hpp>
-#include <engine/system/DecalSystem.hpp>
-#include <engine/system/InteractionSystem.hpp>
-#include <engine/system/UIInteractionSystem.hpp>
-#include <expected>
-#include <physics/PhysicsWorld.hpp>
-#include <print>
-
-using namespace ZHLN;
-using namespace ZHLN::ECS;
+#include <thread>
 
 namespace ZHLN {
+
 void UISystem(Engine& engine, ScriptRunner& scriptRunner);
-} // namespace ZHLN
 
 namespace {
-
-void WriteBenchmarkLog(std::vector<double> frameTimes) {
-    if (frameTimes.empty())
-        return;
-
-    double totalTime = 0.0;
-    for (double t: frameTimes)
-        totalTime += t;
-    double avgFrameTime = totalTime / frameTimes.size();
-    double avgFps       = 1.0 / avgFrameTime;
-
-    std::ranges::sort(frameTimes);
-
-    size_t count1Percent = std::max<size_t>(1, frameTimes.size() / 100);
-    double sum1Percent   = 0.0;
-    for (size_t i = frameTimes.size() - count1Percent; i < frameTimes.size(); ++i) {
-        sum1Percent += frameTimes[i];
-    }
-    double low1PercentFps = 1.0 / (sum1Percent / count1Percent);
-
-    FILE* f = std::fopen("benchmark.log", "w");
-    if (f != nullptr) {
-        std::println(f, "=========================================");
-        std::println(f, "         ZAHLEN BENCHMARK REPORT         ");
-        std::println(f, "=========================================");
-        std::println(f, "Total Frames:       {}", frameTimes.size());
-        std::println(f, "Average FPS:        {:.2f}", avgFps);
-        std::println(f, "Average Frametime:  {:.2f} ms", avgFrameTime * 1000.0);
-        std::println(f, "1% Low FPS:         {:.2f}", low1PercentFps);
-        std::println(f, "=========================================");
-        std::fclose(f);
-        ZHLN::Log("Benchmark report written to benchmark.log");
-    }
-}
-
-std::string s_GameplayFile = "scripts/boot.lua";
 
 void Sys_VisualInterpolation(Engine& engine, float /*dt*/) {
     VisualInterpolationSystem::Update(engine, engine.GetCurrentAlpha());
@@ -164,6 +118,8 @@ void BuildSystemGraphs(Engine& engine) {
     auto& updateGraph = engine.GetUpdateGraph();
     auto& renderGraph = engine.GetRenderGraph();
 
+    using namespace ZHLN::ECS;
+
     updateGraph.AddSystem({
         .update_func    = Sys_VisualInterpolation,
         .name           = "VisualInterpolationSystem",
@@ -198,9 +154,12 @@ void BuildSystemGraphs(Engine& engine) {
         .enabled        = true,
     });
 
-    updateGraph.AddSystem(
-        {.update_func = Sys_PostProcess, .name = "PostProcessSystem", .access_pattern = {Read<Components::PostProcessSettingsComponent>()}, .enabled = true}
-    );
+    updateGraph.AddSystem({
+        .update_func    = Sys_PostProcess,
+        .name           = "PostProcessSystem",
+        .access_pattern = {Read<Components::PostProcessSettingsComponent>()},
+        .enabled        = true,
+    });
 
     updateGraph.AddSystem({
         .update_func    = Sys_Audio,
@@ -274,9 +233,11 @@ void BuildSystemGraphs(Engine& engine) {
     renderGraph.Compile();
 }
 
-bool InitializeGame(Engine& engine) {
-    auto& rc  = engine.GetRenderContext();
-    auto& reg = engine.GetRegistry();
+} // namespace
+
+bool Engine::InitializeDefaultScene() {
+    auto& rc  = GetRenderContext();
+    auto& reg = GetRegistry();
 
     reg.RegisterAllComponentsIn<ZHLN::Components>();
 
@@ -295,96 +256,88 @@ bool InitializeGame(Engine& engine) {
     reg.Add(uiSettings, Components::UISettingsComponent {});
     CreativeWorksFactory::CreateFontAtlasTexture(rc);
 
-    BuildSystemGraphs(engine);
-
+    BuildSystemGraphs(*this);
     return true;
 }
 
-void UpdateGame(Engine& engine, float dt, ScriptRunner& scriptRunner, FileWatcher& gameplayWatcher, GameplayDriver driver) {
-    static InputSystem inputSystem;
-    inputSystem.Update(engine);
-    UIInteractionSystem::Update(engine, dt);
-    UISystem(engine, scriptRunner);
-
-    if (driver != GameplayDriver::Cpp && gameplayWatcher.CheckModified()) {
-        scriptRunner.ReloadFile(s_GameplayFile);
-    }
-    engine.GetRenderContext().CheckShaderReload();
-
+GameplayStatus Engine::Tick(float dt, GameplayDriver driver) {
+    static ScriptRunner       scriptRunner;
+    static FileWatcher        gameplayWatcher("scripts/boot.lua");
+    static NativeScriptModule nativeModule("scripts/gameplay");
+    static InputSystem        inputSystem;
     static TargetCameraSystem targetCamSys;
     static CameraSystem       camSys;
-    targetCamSys.Update(engine, dt, engine.GetCurrentAlpha());
-    camSys.Update(engine, dt, engine.GetCurrentAlpha());
+    static PhysicsSystem      physicsSystem;
 
-    inputSystem.PlayerInputTranslate(engine, engine.GetCamera());
+    // 1. Process Input & UI Systems
+    inputSystem.Update(*this);
+    UIInteractionSystem::Update(*this, dt);
+    UISystem(*this, scriptRunner);
 
-    static PhysicsSystem physicsSystem;
-    physicsSystem.Update(engine, dt);
+    if (driver != GameplayDriver::Cpp && gameplayWatcher.CheckModified()) {
+        scriptRunner.ReloadFile("scripts/boot.lua");
+    }
+    GetRenderContext().CheckShaderReload();
 
+    // 2. Camera Systems
+    targetCamSys.Update(*this, dt, GetCurrentAlpha());
+    camSys.Update(*this, dt, GetCurrentAlpha());
+    inputSystem.PlayerInputTranslate(*this, GetCamera());
+
+    // 3. Physics Fixed Step & WriteBack
+    physicsSystem.Update(*this, dt);
+
+    // 4. Gameplay Module Update
+    GameplayStatus status = GameplayStatus::OK;
     switch (driver) {
         using enum GameplayDriver;
         case Cpp: {
             ZHLN_PROFILE_SCOPE("ECS System: Native C++ Gameplay Update");
-            static NativeScriptModule nativeGameplayModule("scripts/gameplay");
-            GameplayStatus            status = nativeGameplayModule.Update(&engine, dt);
-            if (status == GameplayStatus::RequestQuit) {
-                engine.GetWindow().Close();
-            } else if (status == GameplayStatus::Error) {
-                ZHLN::Log("ERROR: Native gameplay module reported an unrecoverable error!");
-            }
+            status = nativeModule.Update(this, dt);
             break;
         }
-
         case Fennel: {
             ZHLN_PROFILE_SCOPE("ECS System: Script/Lua Update");
-            scriptRunner.CallUpdate(&engine, dt);
+            scriptRunner.CallUpdate(this, dt);
             break;
         }
-
         case Hybrid: {
             {
                 ZHLN_PROFILE_SCOPE("ECS System: Native C++ Gameplay Update");
-                static NativeScriptModule nativeGameplayModule("scripts/gameplay");
-                GameplayStatus            status = nativeGameplayModule.Update(&engine, dt);
-                if (status == GameplayStatus::RequestQuit) {
-                    engine.GetWindow().Close();
-                } else if (status == GameplayStatus::Error) {
-                    ZHLN::Log("ERROR: Native gameplay module reported an unrecoverable error!");
-                }
+                status = nativeModule.Update(this, dt);
             }
             {
                 ZHLN_PROFILE_SCOPE("ECS System: Script/Lua Update");
-                scriptRunner.CallUpdate(&engine, dt);
+                scriptRunner.CallUpdate(this, dt);
             }
             break;
         }
     }
 
-    engine.GetUpdateGraph().Execute(engine, dt);
-    engine.GetMainECB().Playback();
-}
+    // 5. Update Graph & Command Buffer Playback
+    GetUpdateGraph().Execute(*this, dt);
+    GetMainECB().Playback();
 
-std::expected<void, RenderFrameResult> RenderGame(Engine& engine, float frameTime) {
-    engine.GetRenderGraph().Execute(engine, frameTime);
-
-    auto render_res = RenderSystem::Update(engine, frameTime);
+    // 6. Render Graph & Frame Submission
+    GetRenderGraph().Execute(*this, dt);
+    auto render_res = RenderSystem::Update(*this, dt);
     if (!render_res) {
-        if (render_res.error().Is<RenderFrameResult>()) {
-            return std::unexpected(render_res.error().As<RenderFrameResult>());
+        if (render_res.error().Is<RenderFrameResult>() && render_res.error().As<RenderFrameResult>() == RenderFrameResult::DeviceLost) {
+            HandleDeviceLost();
         }
-        return std::unexpected(RenderFrameResult::Error);
     }
 
+    // 7. Motion Vectors & Transform History
     {
         ZHLN_PROFILE_SCOPE("ECS System: Update Transform History");
         static TransformSystem ts;
-        ts.UpdateTransformHistory(engine.GetRegistry());
+        ts.UpdateTransformHistory(GetRegistry());
     }
 
-    return {};
+    return status;
 }
 
-std::expected<std::unique_ptr<Engine>, EngineError> InitializeEngine(CommandLineOptions options) {
+int Engine::Run(const CommandLineOptions& options) {
     Platform::Init();
     ZHLN::SetupSignalHandler();
     TaskSystem::Init();
@@ -395,7 +348,7 @@ std::expected<std::unique_ptr<Engine>, EngineError> InitializeEngine(CommandLine
     EngineConfig config {
         .physics = {.maxBodies = 5000, .maxBodyPairs = 10000, .maxContactConstraints = 10000, .tempAllocatorSize = 64 * 1024 * 1024},
         .render  = {
-            .appName          = "Zahlen Engine",
+            .appName          = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
             .width            = w,
             .height           = h,
             .vsync            = options.vsync,
@@ -406,47 +359,21 @@ std::expected<std::unique_ptr<Engine>, EngineError> InitializeEngine(CommandLine
 
     auto engine_res = Engine::Create(config);
     if (!engine_res) {
-        return std::unexpected(EngineError {.msg = std::string(engine_res.error().Message()), .code = EXIT_FAILURE});
+        ZHLN::Log("Error initializing Engine: {}", engine_res.error().Message());
+        return EXIT_FAILURE;
     }
 
     auto engine = std::move(engine_res.value());
     engine->GetWindow().Focus();
-    return engine;
-}
+    engine->InitializeDefaultScene();
 
-std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, const CommandLineOptions& options) {
-    ScriptRunner scriptRunner;
-    FileWatcher  gameplayWatcher(s_GameplayFile);
-
-    if (!InitializeGame(*engine)) {
-        return std::unexpected(EngineError {.msg = "Game failed to initialize.", .code = EXIT_FAILURE});
-    }
-
-    for (int i = 0; i < 3; ++i) {
-        engine->ProcessEvents();
-
-        auto res = RenderGame(*engine, 0.016f);
-        if (!res) {
-            if (res.error() == RenderFrameResult::DeviceLost) {
-                engine->HandleDeviceLost();
-            }
-        }
-    }
-
-    ZHLN::Log("Window active and presenting. Loading scene assets... ");
-
-    if (options.driver != GameplayDriver::Cpp) {
-        scriptRunner.CallUpdate(engine.get(), 0.0f);
+    // --- LAUNCH EDITOR OR GAME LOOP ---
+    if (options.launchEditor) {
+        return WorldEditor::Run(*engine, options); // Launches full editor
     }
 
     const double targetFrameTime = options.fpsLimit > 0 ? 1.0 / static_cast<double>(options.fpsLimit) : 0.0;
-
-    std::vector<double> frameTimes;
-    if (options.benchmark) {
-        frameTimes.reserve(10000);
-    }
-
-    auto frameStart = std::chrono::high_resolution_clock::now();
+    auto         frameStart      = std::chrono::high_resolution_clock::now();
 
     while (engine->IsRunning()) {
         engine->ProcessEvents();
@@ -460,10 +387,6 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, co
         double elapsed  = std::chrono::duration<double>(frameEnd - frameStart).count();
         frameStart      = std::chrono::high_resolution_clock::now();
 
-        if (options.benchmark) {
-            frameTimes.push_back(elapsed);
-        }
-
         float rawDt = std::min(static_cast<float>(elapsed), 0.1f);
 
         if (engine->GetInput().NeedsResize()) {
@@ -475,13 +398,11 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, co
             continue;
         }
 
-        UpdateGame(*engine, rawDt, scriptRunner, gameplayWatcher, options.driver);
-
-        auto render_res = RenderGame(*engine, rawDt);
-        if (!render_res) {
-            if (render_res.error() == RenderFrameResult::DeviceLost) {
-                engine->HandleDeviceLost();
-            }
+        // Single synchronized engine tick
+        GameplayStatus status = engine->Tick(rawDt, options.driver);
+        if (status == GameplayStatus::RequestQuit) {
+            engine->GetWindow().Close();
+            break;
         }
 
         if (options.fpsLimit > 0) {
@@ -500,23 +421,7 @@ std::expected<int, EngineError> RunEngineLoop(std::unique_ptr<Engine> engine, co
     }
 
     TaskSystem::Shutdown();
-
-    if (options.benchmark && !frameTimes.empty()) {
-        WriteBenchmarkLog(frameTimes);
-    }
-
     return EXIT_SUCCESS;
 }
 
-} // namespace
-
-extern std::expected<int, int> RunGame(const ZHLN::CommandLineOptions& options) {
-    return InitializeEngine(options).and_then(
-                                        [&options](std::unique_ptr<Engine> engine) { return RunEngineLoop(std::move(engine), options); }
-    ).transform_error([](const EngineError& err) -> int {
-        if (!err.msg.empty() && !err.silent) {
-            ZHLN::Log("Error: {}", err.msg);
-        }
-        return err.code;
-    });
-}
+} // namespace ZHLN

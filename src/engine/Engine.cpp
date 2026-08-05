@@ -34,7 +34,6 @@
 #include <ecs/SystemGraph.hpp>
 #include <engine/system/CullingSystem.hpp>
 #include <filesystem>
-
 namespace ZHLN {
 
 thread_local Engine*        g_CurrentEngine = nullptr;
