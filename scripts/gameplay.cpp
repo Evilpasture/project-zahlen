@@ -54,32 +54,29 @@ namespace Game {
 using namespace ZHLN;
 
 struct SnowSceneState {
-    ScriptECSBridge*    bridge = nullptr;
-    MainMenu            mainMenu;
-    LightningSimulation lightningSim;
-    bool                gameStarted   = false;
-    bool                wonGame       = false;
-    bool                wasLMouseDown = false;
-    bool                wasRDown      = false;
-    float               totalTime     = 0.0f;
+    ScriptECSBridge* bridge = nullptr;
+    MainMenu         mainMenu;
+    bool             gameStarted   = false;
+    bool             wonGame       = false;
+    bool             wasLMouseDown = false;
+    bool             wasRDown      = false;
+    float            totalTime     = 0.0f;
 
     Entity playerEnt       = NullEntity;
-    Entity playerCameraEnt = NullEntity; // Cached once in RespawnPlayer
+    Entity playerCameraEnt = NullEntity;
     Entity snowTerrain     = NullEntity;
     Entity testPlatform    = NullEntity;
     Entity campfireLight   = NullEntity;
     Entity summitLight     = NullEntity;
     Entity wisp1           = NullEntity;
     Entity wisp2           = NullEntity;
-    Entity blizzardEmitter = NullEntity; // Track active particle emitter
+    Entity blizzardEmitter = NullEntity;
 
     std::vector<Entity> charParts;
     std::string         currentAnimState = "IDLE";
 };
 
 static SnowSceneState g_State;
-
-// Small combinators removing the repetitive null-check dance
 
 inline Entity SpawnPointLight(ECS::Registry& reg, JPH::Vec3 pos, JPH::Vec3 color, float intensity, float range, float radius = 0.4f) {
     Entity e = reg.Create();
@@ -231,8 +228,6 @@ inline void GenerateMountainData(uint32_t sampleCount, float worldSize, float ma
     }
 }
 
-// --- Procedural Mathematical Snowflake Texture Generation ---
-
 inline float DistanceToSegment(float px, float py, float ax, float ay, float bx, float by) {
     float abx = bx - ax;
     float aby = by - ay;
@@ -259,7 +254,7 @@ inline float DistanceToCircle(float px, float py, float cx, float cy, float r) {
 inline std::vector<uint32_t> GenerateSnowflakeTexture(uint32_t size) {
     std::vector<uint32_t> pixels(size * size, 0);
     float                 center = size / 2.0f;
-    float                 scale  = (size / 2.0f) / 100.0f; // Map canvas pixel index to SVG viewBox space [-100, 100]
+    float                 scale  = (size / 2.0f) / 100.0f;
 
     for (uint32_t cy = 0; cy < size; ++cy) {
         for (uint32_t cx = 0; cx < size; ++cx) {
@@ -278,7 +273,7 @@ inline std::vector<uint32_t> GenerateSnowflakeTexture(uint32_t size) {
                 }
             }
 
-            // 2. Center Hexagon (points: (0,-12) to (10.4,-6) to (10.4,6) to (0,12) to (-10.4,6) to (-10.4,-6))
+            // 2. Center Hexagon
             static const float hexX[6] = {0.0f, 10.4f, 10.4f, 0.0f, -10.4f, -10.4f};
             static const float hexY[6] = {-12.0f, -6.0f, 6.0f, 12.0f, 6.0f, -6.0f};
             for (int i = 0; i < 6; ++i) {
@@ -287,7 +282,7 @@ inline std::vector<uint32_t> GenerateSnowflakeTexture(uint32_t size) {
                 float bx         = hexX[(i + 1) % 6];
                 float by         = hexY[(i + 1) % 6];
                 float d          = DistanceToSegment(x, y, ax, ay, bx, by);
-                float half_thick = 1.0f; // stroke-width = 2 -> half-thickness = 1.0
+                float half_thick = 1.0f;
                 if (d <= half_thick) {
                     maxAlpha = std::max(maxAlpha, 1.0f);
                 } else if (d <= half_thick + 1.0f) {
@@ -295,13 +290,12 @@ inline std::vector<uint32_t> GenerateSnowflakeTexture(uint32_t size) {
                 }
             }
 
-            // 3. Repeat the single arm 6 times at 60-degree increments
+            // 3. Repeat arms 6 times
             for (int k = 0; k < 6; ++k) {
                 float angle = k * (3.1415926535f / 3.0f);
                 float cosA  = std::cos(angle);
                 float sinA  = std::sin(angle);
 
-                // Rotated space coordinate transform (negative rotation to align)
                 float rx = x * cosA + y * sinA;
                 float ry = -x * sinA + y * cosA;
 
@@ -324,32 +318,21 @@ inline std::vector<uint32_t> GenerateSnowflakeTexture(uint32_t size) {
                     }
                 };
 
-                // Stem: line (0,0) -> (0,-85), stroke-width=4
                 EvalLine(0.0f, 0.0f, 0.0f, -85.0f, 4.0f);
-
-                // Outer large branches: (0,-60) -> (20,-75) & (0,-60) -> (-20,-75), stroke-width=3.5
                 EvalLine(0.0f, -60.0f, 20.0f, -75.0f, 3.5f);
                 EvalLine(0.0f, -60.0f, -20.0f, -75.0f, 3.5f);
-
-                // Middle branches: (0,-40) -> (25,-55) & (0,-40) -> (-25,-55), stroke-width=3.5
                 EvalLine(0.0f, -40.0f, 25.0f, -55.0f, 3.5f);
                 EvalLine(0.0f, -40.0f, -25.0f, -55.0f, 3.5f);
-
-                // Sub-tips: (18,-51) -> (22,-43) & (-18,-51) -> (-22,-43), stroke-width=2.5
                 EvalLine(18.0f, -51.0f, 22.0f, -43.0f, 2.5f);
                 EvalLine(-18.0f, -51.0f, -22.0f, -43.0f, 2.5f);
-
-                // Inner small branches: (0,-20) -> (15,-30) & (0,-20) -> (-15,-30), stroke-width=3
                 EvalLine(0.0f, -20.0f, 15.0f, -30.0f, 3.0f);
                 EvalLine(0.0f, -20.0f, -15.0f, -30.0f, 3.0f);
 
-                // Circular accents
                 EvalCircle(0.0f, -85.0f, 3.0f);
                 EvalCircle(20.0f, -75.0f, 2.0f);
                 EvalCircle(-20.0f, -75.0f, 2.0f);
             }
 
-            // Pack into color format (A8B8G8R8) - light blue-white #e0f2fe
             uint8_t r = static_cast<uint8_t>(224.0f * maxAlpha);
             uint8_t g = static_cast<uint8_t>(242.0f * maxAlpha);
             uint8_t b = static_cast<uint8_t>(254.0f * maxAlpha);
@@ -445,7 +428,6 @@ void StartGame(Engine* engine) {
     g_State.wonGame   = false;
     g_State.totalTime = 0.0f;
 
-    // Destroy previous blizzard emitter if any
     if (g_State.blizzardEmitter != NullEntity) {
         reg.Destroy(g_State.blizzardEmitter);
         g_State.blizzardEmitter = NullEntity;
@@ -569,43 +551,34 @@ void StartGame(Engine* engine) {
 
     g_State.summitLight = SpawnPointLight(reg, JPH::Vec3(-50.0f, 38.0f, -50.0f), JPH::Vec3(1.0f, 0.85f, 0.2f), 400.0f, 50.0f, 0.8f);
 
-    // 1. Bake the anti-aliased mathematical SVG snowflake texture onto the GPU
     auto     snowPixels   = TerrainGen::GenerateSnowflakeTexture(256);
     auto     snowRes      = rc.CreateTexture(snowPixels.data(), 256, 256, false);
     uint32_t snowTexIndex = snowRes.value_or(1);
 
-    // 2. Create the camera-relative spatial blizzard emitter
     g_State.blizzardEmitter = reg.Create();
     reg.Add(g_State.blizzardEmitter, Components::TransformComponent {});
     reg.Add(g_State.blizzardEmitter, Components::NameComponent {.name = String64("BlizzardEmitter")});
 
     ParticleEmitterParams pParams {};
-    pParams.gravity        = {0.0f, -1.8f, 0.0f}; // Soft falling speed
+    pParams.gravity        = {0.0f, -1.8f, 0.0f};
     pParams.drag           = 0.12f;
-    pParams.turbulence     = {1.8f, 0.4f, 1.8f}; // Dynamic drifting winds
+    pParams.turbulence     = {1.8f, 0.4f, 1.8f};
     pParams.turbulenceFreq = 0.15f;
-    pParams.spawnBoxExtent = {60.0f, 25.0f, 60.0f}; // Local bounding volume around camera
+    pParams.spawnBoxExtent = {60.0f, 25.0f, 60.0f};
     pParams.initVelMin     = {-1.5f, -0.5f, -1.5f};
     pParams.initVelMax     = {1.5f, 0.2f, 1.5f};
     pParams.lifetimeMin    = 5.0f;
     pParams.lifetimeMax    = 9.0f;
-    pParams.startColor     = {0.88f, 0.95f, 1.0f, 0.85f}; // Light blue-white #e0f2fe
-    pParams.endColor       = {0.88f, 0.95f, 1.0f, 0.0f};  // Fade out
+    pParams.startColor     = {0.88f, 0.95f, 1.0f, 0.85f};
+    pParams.endColor       = {0.88f, 0.95f, 1.0f, 0.0f};
     pParams.startSize      = {0.35f, 0.35f};
     pParams.endSize        = {0.20f, 0.20f};
-    pParams.spinSpeed      = 1.2f; // Angular spin
+    pParams.spinSpeed      = 1.2f;
     pParams.textureIndex   = snowTexIndex;
     pParams.alignment      = ParticleAlignment::CameraBillboard;
-    pParams.loopBoundary   = 1.0f; // Wrap particles within camera volume
+    pParams.loopBoundary   = 1.0f;
 
-    reg.Add(
-        g_State.blizzardEmitter, Components::ParticleEmitterComponent {
-                                     .params         = pParams,
-                                     .maxParticles   = 16384,
-                                     .active         = true,
-                                     .attachToCamera = true // Track player camera coordinates
-                                 }
-    );
+    reg.Add(g_State.blizzardEmitter, Components::ParticleEmitterComponent {.params = pParams, .maxParticles = 16384, .active = true, .attachToCamera = true});
 
     g_State.gameStarted = true;
 }
@@ -659,19 +632,21 @@ void LightningClickStrikeSystem(Engine* engine, float dt) {
 
             JPH::RVec3 cloudPos = impactPos + JPH::RVec3(0.0f, 140.0f, 0.0f);
 
-            ZHLN::LightningConfig cfg;
+            LightningConfig cfg;
             cfg.peakCurrentKA = 50.0f;
             cfg.timeDilation  = 1.0f;
 
-            g_State.lightningSim.TriggerStrike(*engine, cloudPos, impactPos, cfg);
+            // Spawn strike via Lightning::Spawn
+            Lightning::Spawn(*engine, cloudPos, impactPos, cfg);
 
-            // Spawn explosion via ECS System (*engine dereferenced)
+            // Spawn explosion via ECS System
             ExplosionSystem::Spawn(*engine, JPH::Vec3(impactPos), 2.2f);
         }
     }
     g_State.wasLMouseDown = isLMouseDown;
 
-    g_State.lightningSim.Update(*engine, dt);
+    // Evaluate all active lightning strikes via Lightning::Update
+    Lightning::Update(*engine, dt);
 }
 
 void PlayerInputSystem(Engine* engine, [[maybe_unused]] float dt) {
