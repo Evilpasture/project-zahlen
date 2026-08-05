@@ -1,6 +1,5 @@
 // resources/shaders/pbr_helpers.hlsl
 #pragma once
-#include <SharedMath.hpp>
 
 // ============================================================================
 // CONSTANTS & NOISE
@@ -54,7 +53,6 @@ float3 UnpackNormalOctahedron(float2 oct) {
 }
 
 float3 ReconstructWorldPos(float2 uv, float depth, float4x4 invViewProj) {
-    // UN-FLIPPED: Removed the legacy OpenGL (1.0f - uv.y) coordinate flip
     float4 clipSpacePos  = float4(uv.x * 2.0f - 1.0f, uv.y * 2.0f - 1.0f, depth, 1.0f);
     float4 worldSpacePos = mul(invViewProj, clipSpacePos);
     return worldSpacePos.xyz / worldSpacePos.w;
@@ -76,9 +74,8 @@ float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture2DArray
     float blockerBias = 0.0005f;
 
     [unroll] for (int i = 0; i < BLOCKER_SEARCH_SAMPLES; ++i) {
-        float2 offset = PoissonDisk[i] * searchRadius;
-        // Sample from the active cascade slice [c]
-        float shadowMapDepth = shadowMap.SampleLevel(linearSampler, float3(uv + offset, cascadeIndex), 0);
+        float2 offset         = PoissonDisk[i] * searchRadius;
+        float  shadowMapDepth = shadowMap.SampleLevel(linearSampler, float3(uv + offset, cascadeIndex), 0);
 
         if (shadowMapDepth < (zReceiver - blockerBias)) {
             blockerSum += shadowMapDepth;
@@ -115,7 +112,7 @@ float CalculateShadowPCSS(
     float bias            = max(0.0015f * (1.0 - dot(N, L)), 0.0005f) * resolutionScale;
     zReceiver -= bias;
 
-    // 1. Blocker Search (Passing cascadeIndex)
+    // 1. Blocker Search
     float searchRadius    = 4.0 * texelSize;
     float avgBlockerDepth = FindBlocker(projCoords.xy, zReceiver, searchRadius, shadowMap, linearSampler, cascadeIndex);
 
@@ -135,8 +132,6 @@ float CalculateShadowPCSS(
 
     [unroll] for (int i = 0; i < PCF_SAMPLES; ++i) {
         float2 offset = float2(PoissonDisk[i].x * c - PoissonDisk[i].y * s, PoissonDisk[i].x * s + PoissonDisk[i].y * c) * filterRadius;
-
-        // Sample using texture array coordinate format: float3(UV, slice) [c]
         shadow += shadowMap.SampleCmpLevelZero(shadowSampler, float3(projCoords.xy + offset, cascadeIndex), zReceiver);
     }
 
@@ -146,14 +141,6 @@ float CalculateShadowPCSS(
 #ifndef DISABLE_RTR
 /**
  * @brief Computes a high-performance, stochastically dithered soft ray-traced shadow.
- *
- * @param worldPos  The surface position being lit.
- * @param N         The surface normal at the point.
- * @param L         The normalized direction pointing toward the light source.
- * @param screenPos The 2D screen coordinate (for dither lookup).
- * @param time      The frame-updated time offset (for animating the dither).
- * @param tlas      The Top-Level Acceleration Structure bound by the host.
- * @param sunSize   The angular radius of the light disc (controls penumbra softness).
  */
 float CalculateShadowRayTraced(
     float3                          worldPos,
@@ -175,7 +162,6 @@ float CalculateShadowRayTraced(
     float     unblockedRays = 0.0f;
     const int RAY_SAMPLES   = 4;
 
-    // Direct 1:1 mapping with no floor clamp
     float spread = max(sunSize, 0.00001f);
 
     [unroll] for (int i = 0; i < RAY_SAMPLES; ++i) {
@@ -339,7 +325,6 @@ float2 RaymarchSSR(
     float4           camPos,
     float4x4         invViewProj
 ) {
-    // Default debug value
     debugValue = 0.0f;
 
     const float maxDistance = 30.0f;
@@ -360,14 +345,12 @@ float2 RaymarchSSR(
     float3 startNDC = startClip.xyz * invW_start;
     float3 endNDC   = endClip.xyz * invW_end;
 
-    // Native Vulkan positive coordinate mapping mapping [-1, 1] to [0, 1]
     float2 startUV = startNDC.xy * 0.5f + 0.5f;
     float2 endUV   = endNDC.xy * 0.5f + 0.5f;
 
     float2 uv_w_start = startUV * invW_start;
     float2 uv_w_end   = endUV * invW_end;
 
-    // Linearly interpolate NDC Z directly in screen space (no W division required)
     float ndc_z_start = startNDC.z;
     float ndc_z_end   = endNDC.z;
 
@@ -410,10 +393,8 @@ float2 RaymarchSSR(
             continue;
         }
 
-        // Direct linear interpolation of the depth buffer-space Z
         float rayDepth = ndc_z_start + ndc_z_step * (float(i) + dither);
 
-        // Reconstruct BOTH positions using the exact same function and matrix
         float3 currentWS = ReconstructWorldPos(currentUV, rayDepth, invViewProj);
         float3 sampledWS = ReconstructWorldPos(currentUV, sampledDepth, invViewProj);
 
@@ -421,7 +402,6 @@ float2 RaymarchSSR(
         float sampleDist = length(sampledWS - camPos.xyz);
         float thickness  = rayDist - sampleDist;
 
-        // Precision-matched bias
         float bias = 0.03f + rayDist * 0.002f;
 
         if (thickness >= bias && thickness < 2.0f) {
@@ -439,7 +419,6 @@ float2 RaymarchSSR(
 
                 mid_uv = mid_uv_w / mid_invW;
 
-                // Direct linear interpolation of NDC Z for binary search
                 float midRayDepth = ndc_z_start + (ndc_z_end - ndc_z_start) * t_mid;
 
                 float3 mid_ws = ReconstructWorldPos(mid_uv, midRayDepth, invViewProj);
@@ -460,7 +439,6 @@ float2 RaymarchSSR(
             float finalDepth = texDepth.SampleLevel(pointSampler, mid_uv, 0).r;
             float final_invW = invW_start + (invW_end - invW_start) * t_mid;
 
-            // Direct linear interpolation of NDC Z for final hit
             float finalRayDepth = ndc_z_start + (ndc_z_end - ndc_z_start) * t_mid;
 
             float3 mid_ws          = ReconstructWorldPos(mid_uv, finalRayDepth, invViewProj);
@@ -471,7 +449,6 @@ float2 RaymarchSSR(
             float distFromStart      = length(mid_ws - startPosWS);
             float heightAboveSurface = dot(mid_ws - worldPos, N);
 
-            // Strict 5cm height constraint to eliminate floor self-reflections
             if (heightAboveSurface > 0.05f && abs(finalRayDist - finalSampleDist) < 0.25f) {
                 float distanceFade = saturate(1.0f - distFromStart / maxDistance);
                 confidence         = distanceFade * distanceFade;
@@ -526,10 +503,8 @@ float2 RaytraceRTR(
 
         float2 hitNDC = hitClip.xy / hitClip.w;
 
-        // Native Vulkan positive coordinate mapping mapping [-1, 1] to [0, 1]
         float2 hitUV = hitNDC * 0.5f + 0.5f;
 
-        // Tighten the screen-edge fade to 3% (down from 8%) so reflections reach further
         float2 edgeFactor = smoothstep(0.0f, 0.03f, hitUV) * smoothstep(1.0f, 0.97f, hitUV);
         confidence        = edgeFactor.x * edgeFactor.y;
 
@@ -542,7 +517,7 @@ float2 RaytraceRTR(
 
             float depthDiff = abs(distToHit - distToSampled);
 
-            float maxDiff = 0.15f + rayT * 0.02f; // 15cm base tolerance (down from 1.0m)
+            float maxDiff = 0.15f + rayT * 0.02f;
 
             float depthMask = smoothstep(maxDiff, maxDiff * 0.2f, depthDiff);
             confidence *= depthMask;

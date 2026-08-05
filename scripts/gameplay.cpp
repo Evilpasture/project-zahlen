@@ -65,7 +65,7 @@ struct SnowSceneState {
     Entity playerEnt       = NullEntity;
     Entity playerCameraEnt = NullEntity;
     Entity snowTerrain     = NullEntity;
-    Entity testPlatform    = NullEntity;
+    // Entity testPlatform    = NullEntity;
     Entity campfireLight   = NullEntity;
     Entity summitLight     = NullEntity;
     Entity wisp1           = NullEntity;
@@ -468,16 +468,16 @@ void StartGame(Engine* engine) {
         rc.RegisterGPUMaterial(platformMatAsset, mat);
     }
 
-    g_State.testPlatform = reg.Create();
-    reg.Add(g_State.testPlatform, Components::NameComponent {.name = String64("TestPlatform")});
-    reg.Add(g_State.testPlatform, Components::TransformComponent {.position = JPH::Vec3(0.0f, 12.0f, 0.0f)});
-    reg.Add(g_State.testPlatform, Components::MeshComponent {.meshAsset = platformMeshAsset, .materialAsset = platformMatAsset, .cullRadius = 100.0f});
-    reg.Add(
-        g_State.testPlatform, Components::PhysicsComponent {
-                                  Physics::CreateRigidBody(pc, boxShape, JPH::RVec3(0.0f, 12.0f, 0.0f), JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0)
-                              }
-    );
-    reg.Add(g_State.testPlatform, Components::PBRComponent {.roughness = 0.15f, .metallic = 0.10f});
+    // g_State.testPlatform = reg.Create();
+    // reg.Add(g_State.testPlatform, Components::NameComponent {.name = String64("TestPlatform")});
+    // reg.Add(g_State.testPlatform, Components::TransformComponent {.position = JPH::Vec3(0.0f, 12.0f, 0.0f)});
+    // reg.Add(g_State.testPlatform, Components::MeshComponent {.meshAsset = platformMeshAsset, .materialAsset = platformMatAsset, .cullRadius = 100.0f});
+    // reg.Add(
+    //     g_State.testPlatform, Components::PhysicsComponent {
+    //                               Physics::CreateRigidBody(pc, boxShape, JPH::RVec3(0.0f, 12.0f, 0.0f), JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0)
+    //                           }
+    // );
+    // reg.Add(g_State.testPlatform, Components::PBRComponent {.roughness = 0.15f, .metallic = 0.10f});
 
     RespawnPlayer(engine);
 

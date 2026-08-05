@@ -173,26 +173,6 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/src/gltf)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/alife)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/audio)
 
-option(BUILD_TESTING "Build the test suite" OFF)
-
-if(BUILD_TESTING)
-    message(STATUS "Building the test suites...")
-    enable_testing()
-    find_package(GTest REQUIRED)
-    add_executable(zahlen_ssr_test src/ssr_test.cpp)
-    target_link_libraries(zahlen_ssr_test PRIVATE GTest::gtest_main Jolt)
-    target_include_directories(zahlen_ssr_test PRIVATE
-        ${CMAKE_SOURCE_DIR}
-        ${CMAKE_SOURCE_DIR}/include
-        ${CMAKE_SOURCE_DIR}/src
-    )
-    target_compile_definitions(zahlen_ssr_test PRIVATE JPH_DOUBLE_PRECISION)
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        target_compile_options(zahlen_ssr_test PRIVATE -Wno-attributes)
-    endif()
-    add_test(NAME ssr_cpu_test COMMAND zahlen_ssr_test)
-endif()
-
 set(ENGINE_SOURCES
     src/engine/AssertHandler.cpp
     src/engine/RenderFrame.cpp

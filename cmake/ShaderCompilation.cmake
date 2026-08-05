@@ -29,7 +29,10 @@ function(compile_hlsl SHADER_PATH ENTRY STAGE OUTPUT_VAR)
         COMMAND ${DXC_EXECUTABLE} -T ${STAGE} -E ${ENTRY} -spirv -fspv-target-env=vulkan1.3
                 -I "${SHADER_SRC_DIR}" -I "${SHADER_INCLUDE_DIR}"
                 ${EXTRA_ARGS} ${SHADER_PATH} -Fo ${OUTPUT_SPV}
-        DEPENDS ${SHADER_PATH} "${SHADER_SRC_DIR}/common.hlsl" "${SHADER_INCLUDE_DIR}/SharedMath.hpp"
+        DEPENDS ${SHADER_PATH}
+                "${SHADER_SRC_DIR}/common.hlsl"
+                "${SHADER_SRC_DIR}/pbr_helpers.hlsl"
+                "${SHADER_SRC_DIR}/uniforms.hlsl"
         COMMENT "DXC: Generating ${FILE_NAME}.${ENTRY}.${OUTPUT_VAR}.spv"
         VERBATIM
     )
