@@ -5,8 +5,25 @@
 #include "Components.hpp"
 #include "Types.hpp"
 #include <string>
+#include <string_view>
 
 namespace ZHLN::GUI {
+
+struct TextBounds {
+    float               minX = 0.0f;
+    float               maxX = 0.0f;
+    float               minY = 0.0f;
+    float               maxY = 0.0f;
+    [[nodiscard]] float width() const noexcept {
+        return maxX - minX;
+    }
+    [[nodiscard]] float height() const noexcept {
+        return maxY - minY;
+    }
+};
+
+TextBounds MeasureTextBounds(const FontAtlas& font, std::string_view text, float scale) noexcept;
+
 uint32_t AppendTextVertices(
     VertexPosition*    outPos,
     VertexAttributes*  outAttr,
@@ -17,6 +34,8 @@ uint32_t AppendTextVertices(
     float              scale,
     const JPH::Vec4&   color
 );
+
 uint32_t
     AppendPanelVertices(VertexPosition* outPos, VertexAttributes* outAttr, const Components::UIRectComponent& rect, const Components::UIPanelComponent& panel);
+
 } // namespace ZHLN::GUI

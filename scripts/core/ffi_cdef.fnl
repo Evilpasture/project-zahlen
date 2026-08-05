@@ -38,6 +38,19 @@
           int hasHit;
       } ZHLN_RaycastResult;
 
+      typedef struct ZHLN_RaycastPenetrationResult {
+          uint64_t entity;
+          double epx, epy, epz;
+          double xpx, xpy, xpz;
+          float enx, eny, enz;
+          float xnx, xny, xnz;
+          float entryFraction;
+          float exitFraction;
+          float thickness;
+          uint32_t materialID;
+          int hasHit;
+      } ZHLN_RaycastPenetrationResult;
+
       typedef struct ZHLN_ContactEventF {
           uint64_t body1;
           uint64_t body2;
@@ -66,6 +79,22 @@
           uint32_t sub1, sub2;
       } __attribute__((aligned(128))) ZHLN_ContactEventD;
 
+      typedef struct ZHLN_Array_float {
+          float* data;
+          size_t size;
+          size_t capacity;
+      } ZHLN_Array_float;
+
+      typedef struct String64 {
+          char data[64];
+          size_t len;
+      } String64;
+
+      typedef struct String256 {
+          char data[256];
+          size_t len;
+      } String256;
+
       typedef struct PhysicsStateComponent {
           float currPosition[4];
           float prevPosition[4];
@@ -91,18 +120,20 @@
       } MovementComponent;
 
       typedef struct RagdollComponent {
-          void*    ragdollInstance;
-          uint32_t state;
-          uint32_t prevState;
-          uint32_t isAddedToPhysics;
-          uint32_t jointOffset;
-          uint32_t jointCount;
-          void*    skeleton;
+          void*            ragdollInstance;
+          uint32_t         state;
+          uint32_t         prevState;
+          uint32_t         isAddedToPhysics;
+          uint32_t         jointOffset;
+          uint32_t         jointCount;
+          void*            skeleton;
+          ZHLN_Array_float jointBlendWeights;
+          ZHLN_Array_float jointStiffness;
+          ZHLN_Array_float jointBlendDecay;
       } RagdollComponent;
 
       typedef struct NameComponent {
-          char name[64];
-          size_t len;
+          String64 name;
       } NameComponent;
 
       typedef struct AAState {
@@ -185,12 +216,13 @@
           uint64_t meshAsset;
           uint64_t materialAsset;
           float cullRadius;
-          float localCenter[3];
+          float localCenter[4];
           float localTransform[16];
           float prevTransform[16];
           float worldTransform[16];
           uint32_t jointOffset;
           bool isSkinned;
+          char _pad[3];
           uint32_t morphOffset;
           uint32_t activeMorphCount;
           float morphWeights[4];
@@ -200,14 +232,15 @@
       } MeshComponent;
 
       typedef struct TextComponent {
-          char     text[256];
-          size_t   text_len;
-          float    x;
-          float    y;
-          float    scale;
-          char     _pad1[12];
-          float    color[4];
-          uint32_t fontIndex;
+          String256 text;
+          float     scale;
+          float     color[4];
+          uint8_t   align;
+          uint8_t   verticalAlign;
+          char      _pad[2];
+          uint32_t  fontIndex;
+          float     offsetX;
+          float     offsetY;
       } TextComponent;
 
       typedef struct UISettingsComponent {
@@ -215,21 +248,11 @@
       } UISettingsComponent;
 
       typedef struct ShadowSettingsComponent {
-        float shadowWidth;
-        int shadowResolution;
-        int maxPunctualShadows;
-        float sunSize;
-    } ShadowSettingsComponent;
-
-      typedef struct String64 {
-          char data[64];
-          size_t len;
-      } String64;
-
-      typedef struct String256 {
-          char data[256];
-          size_t len;
-      } String256;
+          float shadowWidth;
+          int shadowResolution;
+          int maxPunctualShadows;
+          float sunSize;
+      } ShadowSettingsComponent;
 
       typedef struct ItemBaseComponent {
           String64 name;
@@ -259,6 +282,28 @@
       typedef struct SunTagComponent {
           uint8_t dummy;
       } SunTagComponent;
+
+      typedef struct LightComponent {
+          uint32_t type;
+          float    color[4];
+          float    intensity;
+          float    radius;
+          float    direction[4];
+          float    range;
+          float    points[16];
+          uint32_t twoSided;
+          int32_t  shadowLayer;
+      } LightComponent;
+
+      typedef struct TerrainComponent {
+          uint32_t         sampleCount;
+          float            worldSize;
+          float            maxHeight;
+          float            roughness;
+          float            metallic;
+          ZHLN_Array_float heights;
+          ZHLN_Array_float colors;
+      } TerrainComponent;
 
       typedef struct UIRectComponent {
           uint64_t parentEntity;
@@ -311,6 +356,28 @@
           char _pad[3];
       } UIStackComponent;
 
+      typedef struct UIFlexComponent {
+          uint8_t direction;
+          uint8_t justify;
+          uint8_t alignItems;
+          uint8_t alignSelf;
+          uint8_t wrap;
+          char    _pad1[3];
+          float flexGrow;
+          float flexShrink;
+          float flexBasis;
+          float paddingLeft;
+          float paddingTop;
+          float paddingRight;
+          float paddingBottom;
+          float marginLeft;
+          float marginTop;
+          float marginRight;
+          float marginBottom;
+          float gapX;
+          float gapY;
+      } UIFlexComponent;
+
       typedef struct UITextInputComponent {
           String256 text;
           uint32_t cursorIndex;
@@ -319,17 +386,17 @@
       } UITextInputComponent;
 
       typedef struct UIStyleComponent {
-        float normalColor[4];
-        float hoverColor[4];
-        float pressedColor[4];
-        float disabledColor[4];
-        float textColorNormal[4];
-        float textColorHover[4];
-        float textColorPressed[4];
-        float transitionSpeed;
-        bool  hasTextColor;
-        char  _pad[3];
-    } UIStyleComponent;
+          float normalColor[4];
+          float hoverColor[4];
+          float pressedColor[4];
+          float disabledColor[4];
+          float textColorNormal[4];
+          float textColorHover[4];
+          float textColorPressed[4];
+          float transitionSpeed;
+          bool  hasTextColor;
+          char  _pad[3];
+      } UIStyleComponent;
 
       typedef struct AnimatorComponent {
           int32_t currentTrackIdx;
@@ -373,8 +440,8 @@
           uint32_t              maxParticles;
           bool                  active;
           bool                  attachToCamera;
-          uint64_t              gpuBuffer; // Matches BufferHandle
-          char                  _pad[2];   // Maintains strict 16-byte alignment
+          uint64_t              gpuBuffer;
+          char                  _pad[2];
       } ParticleEmitterComponent;
 
       #pragma pack(push, 1)
@@ -393,6 +460,7 @@
       typedef struct SetCharVelArgs { uint64_t entityRaw; float x; float y; float z; } SetCharVelArgs;
       typedef struct AddImpulseAtArgs { uint64_t entityRaw; float ix; float iy; float iz; double px; double py; double pz; } AddImpulseAtArgs;
       typedef struct RaycastArgs { double ox; double oy; double oz; float dx; float dy; float dz; float maxDist; uint64_t ignoreEntity; ZHLN_RaycastResult* outResult; } RaycastArgs;
+      typedef struct RaycastPenetrationArgs { double ox, oy, oz; float dx, dy, dz; float maxDist; uint64_t ignoreEntity; ZHLN_RaycastPenetrationResult* outResult; } RaycastPenetrationArgs;
       typedef struct SetMoveInputArgs { uint64_t entityRaw; float x; float z; } SetMoveInputArgs;
       typedef struct UnprojectArgs { float ndcX; float ndcY; double* ox; double* oy; double* oz; float* dx; float* dy; float* dz; } UnprojectArgs;
       typedef struct LogInventoryArgs { const char* msg; } LogInventoryArgs;
@@ -473,6 +541,65 @@
           char outName[64];
       } GetTrackNameArgs;
 
+      typedef struct PlayNoiseBurstArgs {
+          uint8_t filterType;
+          float freq;
+          float q;
+          float volume;
+          float duration;
+          uint8_t noiseType;
+      } PlayNoiseBurstArgs;
+
+      typedef struct PlayNoiseBurst3DArgs {
+          uint8_t filterType;
+          float freq;
+          float q;
+          float volume;
+          float duration;
+          float x;
+          float y;
+          float z;
+          uint8_t noiseType;
+      } PlayNoiseBurst3DArgs;
+
+      typedef struct PlayToneSweepArgs {
+          uint8_t waveType;
+          float startFreq;
+          float endFreq;
+          float volume;
+          float duration;
+      } PlayToneSweepArgs;
+
+      typedef struct PlayToneSweep3DArgs {
+          uint8_t waveType;
+          float startFreq;
+          float endFreq;
+          float volume;
+          float duration;
+          float x;
+          float y;
+          float z;
+      } PlayToneSweep3DArgs;
+
+      typedef struct CreateLoopSynthArgs {
+          uint8_t waveType1;
+          uint8_t waveType2;
+          uint8_t filterType;
+      } CreateLoopSynthArgs;
+
+      typedef struct SetLoopSynthParamsArgs {
+          uint64_t handle;
+          float charge;
+          float baseFreq;
+          float filterFreq;
+          float volume;
+      } SetLoopSynthParamsArgs;
+
+      typedef struct StopLoopSynthArgs {
+          uint64_t handle;
+          float fadeOutTime;
+      } StopLoopSynthArgs;
+
       typedef struct SpawnTerrainArgs {
           uint32_t    sampleCount;
           float       worldSize;
@@ -489,6 +616,39 @@
           uint32_t    height;
           uint32_t    isSRGB;
       } CreateTextureArgs;
+
+      typedef struct AddIKChainArgs {
+          uint64_t entityRaw;
+          int32_t  upperNodeIndex;
+          int32_t  lowerNodeIndex;
+          int32_t  endNodeIndex;
+          float    targetX, targetY, targetZ;
+          float    poleX, poleY, poleZ;
+          float    weight;
+      } AddIKChainArgs;
+
+      typedef struct SetIKTargetArgs {
+          uint64_t entityRaw;
+          uint32_t chainIndex;
+          float    tx, ty, tz;
+          float    rx, ry, rz, rw;
+          float    weight;
+      } SetIKTargetArgs;
+
+      typedef struct SetIKTargetEntityArgs {
+          uint64_t entityRaw;
+          uint32_t chainIndex;
+          uint64_t targetEntityRaw;
+          float    offsetX, offsetY, offsetZ;
+          float    weight;
+      } SetIKTargetEntityArgs;
+
+      typedef struct DrawLineArgs {
+          float ox, oy, oz;
+          float dx, dy, dz;
+          float r1, g1, b1, a1;
+          float r2, g2, b2, a2;
+      } DrawLineArgs;
       #pragma pack(pop)
   "))
 

@@ -751,11 +751,6 @@ int Engine::Run(const CommandLineOptions& options, UICallback uiCallback) {
     while (engine->IsRunning()) {
         engine->ProcessEvents();
 
-        if (engine->GetInput().IsKeyDown(KeyCode::Escape)) {
-            engine->GetWindow().Close();
-            break;
-        }
-
         auto   frameEnd = std::chrono::high_resolution_clock::now();
         double elapsed  = std::chrono::duration<double>(frameEnd - frameStart).count();
         frameStart      = std::chrono::high_resolution_clock::now();

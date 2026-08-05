@@ -159,6 +159,12 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/SPIRV-Reflect)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui)
 set_target_properties(imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(YOGA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(YOGA_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/yoga EXCLUDE_FROM_ALL SYSTEM)
+
 if(APPLE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion")
 endif()
@@ -328,6 +334,7 @@ target_link_libraries(zahlen_engine PRIVATE
     spirv_reflect
     imgui
     mimalloc-static
+    yogacore
     ${ZSTD_LIBRARY}
     PkgConfig::SIMDJSON
 )
@@ -350,6 +357,7 @@ target_include_directories(zahlen_engine PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/LuaJIT/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern/yoga
     ${CMAKE_BINARY_DIR}/generated_shaders
 )
 target_include_directories(zahlen_engine PRIVATE

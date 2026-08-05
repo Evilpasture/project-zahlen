@@ -26,6 +26,10 @@ enum class TextVerticalAlignment : uint8_t { Top = 0, Center = 1, Bottom = 2 };
 enum class UIJustify : uint8_t { Start = 0, Center = 1, End = 2, SpaceBetween = 3, SpaceAround = 4 };
 
 enum class RagdollState : uint32_t { Inactive = 0, KeyframeMotor = 1, Limp = 2, PartialBlend = 3 };
+enum class FlexDirection : uint8_t { Column = 0, ColumnReverse, Row, RowReverse };
+enum class FlexWrap : uint8_t { NoWrap = 0, Wrap, WrapReverse };
+enum class FlexJustify : uint8_t { FlexStart = 0, Center, FlexEnd, SpaceBetween, SpaceAround, SpaceEvenly };
+enum class FlexAlign : uint8_t { Auto = 0, FlexStart, Center, FlexEnd, Stretch, Baseline };
 
 struct Components {
     struct TextComponent {
@@ -47,6 +51,32 @@ struct Components {
         float          padding   = 8.0f;
         StackDirection direction = StackDirection::Vertical;
         UIJustify      justify   = UIJustify::Start; // Auto-distributes child elements
+    };
+
+    struct UIFlexComponent {
+        FlexDirection direction  = FlexDirection::Column;
+        FlexJustify   justify    = FlexJustify::FlexStart;
+        FlexAlign     alignItems = FlexAlign::Stretch;
+        FlexAlign     alignSelf  = FlexAlign::Auto;
+        FlexWrap      wrap       = FlexWrap::NoWrap;
+
+        float flexGrow   = 0.0f;
+        float flexShrink = 1.0f;
+        float flexBasis  = -1.0f; // -1.0f indicates Auto
+
+        float paddingLeft = 0.0f, paddingTop = 0.0f, paddingRight = 0.0f, paddingBottom = 0.0f;
+        float marginLeft = 0.0f, marginTop = 0.0f, marginRight = 0.0f, marginBottom = 0.0f;
+        float gapX = 0.0f, gapY = 0.0f;
+
+        void SetPadding(float p) noexcept {
+            paddingLeft = paddingTop = paddingRight = paddingBottom = p;
+        }
+        void SetMargin(float m) noexcept {
+            marginLeft = marginTop = marginRight = marginBottom = m;
+        }
+        void SetGap(float g) noexcept {
+            gapX = gapY = g;
+        }
     };
 
     struct PBRComponent {

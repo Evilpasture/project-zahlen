@@ -26,7 +26,7 @@ extern "C" {
 namespace ZHLN::TTYBackend {
 
 #ifdef __linux__
-
+namespace {
 struct TakenDevice {
     uint32_t  maj;
     uint32_t  min;
@@ -38,7 +38,7 @@ struct TakenDevice {
 struct TTYState {
     int            tty_fd      = -1;
     int            old_kb_mode = 0;
-    struct termios old_termios;
+    struct termios old_termios {};
     uint32_t       width   = 0;
     uint32_t       height  = 0;
     bool           running = true;
@@ -50,57 +50,207 @@ struct TTYState {
     bool            active = false;
 };
 
-static TTYState* g_CrashState = nullptr;
+TTYState* g_CrashState = nullptr;
 
-static KeyCode MapEvdevKey(uint16_t code) {
+// 1. Consteval mapping (Natural forward direction)
+[[maybe_unused]] consteval uint16_t KeyCodeToEvdev(KeyCode key) noexcept {
     using enum KeyCode;
-    switch (code) {
-        case KEY_W:
-            return W;
-        case KEY_A:
-            return A;
-        case KEY_S:
-            return S;
-        case KEY_D:
-            return D;
-        case KEY_LEFTSHIFT:
-            return LShift;
-        case KEY_SPACE:
-            return Space;
-        case KEY_ESC:
-            return Escape;
-        case KEY_R:
-            return R;
-        case KEY_E:
-            return E;
-        case KEY_TAB:
-            return Tab;
-        case BTN_LEFT:
-            return LButton;
-        case BTN_RIGHT:
-            return RButton;
+    switch (key) {
+        // Numbers 0 - 9
+        case Num0:
+            return KEY_0;
+        case Num1:
+            return KEY_1;
+        case Num2:
+            return KEY_2;
+        case Num3:
+            return KEY_3;
+        case Num4:
+            return KEY_4;
+        case Num5:
+            return KEY_5;
+        case Num6:
+            return KEY_6;
+        case Num7:
+            return KEY_7;
+        case Num8:
+            return KEY_8;
+        case Num9:
+            return KEY_9;
+
+        // Alphabet A - Z
+        case A:
+            return KEY_A;
+        case B:
+            return KEY_B;
+        case C:
+            return KEY_C;
+        case D:
+            return KEY_D;
+        case E:
+            return KEY_E;
+        case F:
+            return KEY_F;
+        case G:
+            return KEY_G;
+        case H:
+            return KEY_H;
+        case I:
+            return KEY_I;
+        case J:
+            return KEY_J;
+        case K:
+            return KEY_K;
+        case L:
+            return KEY_L;
+        case M:
+            return KEY_M;
+        case N:
+            return KEY_N;
+        case O:
+            return KEY_O;
+        case P:
+            return KEY_P;
+        case Q:
+            return KEY_Q;
+        case R:
+            return KEY_R;
+        case S:
+            return KEY_S;
+        case T:
+            return KEY_T;
+        case U:
+            return KEY_U;
+        case V:
+            return KEY_V;
+        case W:
+            return KEY_W;
+        case X:
+            return KEY_X;
+        case Y:
+            return KEY_Y;
+        case Z:
+            return KEY_Z;
+
+        // Function Keys F1 - F12
+        case F1:
+            return KEY_F1;
+        case F2:
+            return KEY_F2;
+        case F3:
+            return KEY_F3;
+        case F4:
+            return KEY_F4;
+        case F5:
+            return KEY_F5;
+        case F6:
+            return KEY_F6;
+        case F7:
+            return KEY_F7;
+        case F8:
+            return KEY_F8;
+        case F9:
+            return KEY_F9;
+        case F10:
+            return KEY_F10;
+        case F11:
+            return KEY_F11;
+        case F12:
+            return KEY_F12;
+
+        // Modifiers
+        case LShift:
+            return KEY_LEFTSHIFT;
+        case RShift:
+            return KEY_RIGHTSHIFT;
+        case LControl:
+            return KEY_LEFTCTRL;
+        case RControl:
+            return KEY_RIGHTCTRL;
+        case LAlt:
+            return KEY_LEFTALT;
+        case RAlt:
+            return KEY_RIGHTALT;
+
+        // Navigation & Editing
+        case Space:
+            return KEY_SPACE;
+        case Escape:
+            return KEY_ESC;
+        case Enter:
+            return KEY_ENTER;
+        case Backspace:
+            return KEY_BACKSPACE;
+        case Tab:
+            return KEY_TAB;
+        case Delete:
+            return KEY_DELETE;
+
+        // Arrow Keys
+        case Up:
+            return KEY_UP;
+        case Down:
+            return KEY_DOWN;
+        case Left:
+            return KEY_LEFT;
+        case Right:
+            return KEY_RIGHT;
+
+        // Mouse Buttons
+        case LButton:
+            return BTN_LEFT;
+        case RButton:
+            return BTN_RIGHT;
+        case MButton:
+            return BTN_MIDDLE;
+
         default:
-            return Unknown;
+            return 0;
     }
 }
 
-static void handle_enable_seat(struct libseat* seat, void* data) {
+// 2. C++26 Reflection generates the inverted O(1) lookup table at compile time!
+consteval auto BuildEvdevToKeyCodeTable() noexcept {
+    std::array<KeyCode, KEY_MAX + 1> table {};
+    table.fill(KeyCode::Unknown);
+
+    ZHLN::Reflect::ForEachEnumerator<KeyCode>([&]<KeyCode Key>() {
+        constexpr uint16_t evdevCode = KeyCodeToEvdev(Key);
+        if constexpr (evdevCode > 0 && evdevCode <= KEY_MAX) {
+            table[evdevCode] = Key;
+        }
+    });
+
+    return table;
+}
+
+// 3. Runtime function: Single instruction array access (O(1) / Branchless)
+KeyCode MapEvdevKey(uint16_t code) noexcept {
+    static constexpr auto Table = BuildEvdevToKeyCodeTable();
+    if (code <= KEY_MAX) [[likely]] {
+        return Table[code];
+    }
+    return KeyCode::Unknown;
+}
+
+void handle_enable_seat(struct libseat* seat, void* data) {
     auto* state   = static_cast<TTYState*>(data);
     state->active = true;
     ZHLN::Log("[TTY] libseat: Seat session enabled and active.");
 }
 
-static void handle_disable_seat(struct libseat* seat, void* data) {
+void handle_disable_seat(struct libseat* seat, void* data) {
     auto* state   = static_cast<TTYState*>(data);
     state->active = false;
     ZHLN::Log("[TTY] libseat: Seat session disabled (VT switched away).");
     libseat_disable_seat(seat);
 }
 
-static struct libseat_seat_listener seat_listener = {
+struct libseat_seat_listener seat_listener = {
     .enable_seat  = handle_enable_seat,
     .disable_seat = handle_disable_seat,
 };
+} // namespace
 
 bool IsSupported() {
     return access("/dev/tty", R_OK | W_OK) == 0;

@@ -7,39 +7,190 @@
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
 #include <GLFW/glfw3.h>
+#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <array>
 #include <variant>
 
 namespace ZHLN {
 
-static KeyCode MapGLFWKey(int key) {
+namespace {
+
+// 1. Consteval mapping (Natural forward direction)
+[[maybe_unused]] consteval int KeyCodeToGLFW(KeyCode key) noexcept {
+    using enum KeyCode;
     switch (key) {
-        case GLFW_KEY_W:
-            return KeyCode::W;
-        case GLFW_KEY_A:
-            return KeyCode::A;
-        case GLFW_KEY_S:
-            return KeyCode::S;
-        case GLFW_KEY_D:
-            return KeyCode::D;
-        case GLFW_KEY_LEFT_SHIFT:
-            return KeyCode::LShift;
-        case GLFW_KEY_SPACE:
-            return KeyCode::Space;
-        case GLFW_KEY_ESCAPE:
-            return KeyCode::Escape;
-        case GLFW_KEY_R:
-            return KeyCode::R;
-        case GLFW_KEY_E:
-            return KeyCode::E;
-        case GLFW_KEY_TAB:
-            return KeyCode::Tab;
+        // Numbers 0 - 9
+        case Num0:
+            return GLFW_KEY_0;
+        case Num1:
+            return GLFW_KEY_1;
+        case Num2:
+            return GLFW_KEY_2;
+        case Num3:
+            return GLFW_KEY_3;
+        case Num4:
+            return GLFW_KEY_4;
+        case Num5:
+            return GLFW_KEY_5;
+        case Num6:
+            return GLFW_KEY_6;
+        case Num7:
+            return GLFW_KEY_7;
+        case Num8:
+            return GLFW_KEY_8;
+        case Num9:
+            return GLFW_KEY_9;
+
+        // Letters A - Z
+        case A:
+            return GLFW_KEY_A;
+        case B:
+            return GLFW_KEY_B;
+        case C:
+            return GLFW_KEY_C;
+        case D:
+            return GLFW_KEY_D;
+        case E:
+            return GLFW_KEY_E;
+        case F:
+            return GLFW_KEY_F;
+        case G:
+            return GLFW_KEY_G;
+        case H:
+            return GLFW_KEY_H;
+        case I:
+            return GLFW_KEY_I;
+        case J:
+            return GLFW_KEY_J;
+        case K:
+            return GLFW_KEY_K;
+        case L:
+            return GLFW_KEY_L;
+        case M:
+            return GLFW_KEY_M;
+        case N:
+            return GLFW_KEY_N;
+        case O:
+            return GLFW_KEY_O;
+        case P:
+            return GLFW_KEY_P;
+        case Q:
+            return GLFW_KEY_Q;
+        case R:
+            return GLFW_KEY_R;
+        case S:
+            return GLFW_KEY_S;
+        case T:
+            return GLFW_KEY_T;
+        case U:
+            return GLFW_KEY_U;
+        case V:
+            return GLFW_KEY_V;
+        case W:
+            return GLFW_KEY_W;
+        case X:
+            return GLFW_KEY_X;
+        case Y:
+            return GLFW_KEY_Y;
+        case Z:
+            return GLFW_KEY_Z;
+
+        // Function Keys F1 - F12
+        case F1:
+            return GLFW_KEY_F1;
+        case F2:
+            return GLFW_KEY_F2;
+        case F3:
+            return GLFW_KEY_F3;
+        case F4:
+            return GLFW_KEY_F4;
+        case F5:
+            return GLFW_KEY_F5;
+        case F6:
+            return GLFW_KEY_F6;
+        case F7:
+            return GLFW_KEY_F7;
+        case F8:
+            return GLFW_KEY_F8;
+        case F9:
+            return GLFW_KEY_F9;
+        case F10:
+            return GLFW_KEY_F10;
+        case F11:
+            return GLFW_KEY_F11;
+        case F12:
+            return GLFW_KEY_F12;
+
+        // Modifiers
+        case LShift:
+            return GLFW_KEY_LEFT_SHIFT;
+        case RShift:
+            return GLFW_KEY_RIGHT_SHIFT;
+        case LControl:
+            return GLFW_KEY_LEFT_CONTROL;
+        case RControl:
+            return GLFW_KEY_RIGHT_CONTROL;
+        case LAlt:
+            return GLFW_KEY_LEFT_ALT;
+        case RAlt:
+            return GLFW_KEY_RIGHT_ALT;
+
+        // Navigation & Editing
+        case Space:
+            return GLFW_KEY_SPACE;
+        case Escape:
+            return GLFW_KEY_ESCAPE;
+        case Enter:
+            return GLFW_KEY_ENTER;
+        case Backspace:
+            return GLFW_KEY_BACKSPACE;
+        case Tab:
+            return GLFW_KEY_TAB;
+        case Delete:
+            return GLFW_KEY_DELETE;
+
+        // Arrow Keys
+        case Up:
+            return GLFW_KEY_UP;
+        case Down:
+            return GLFW_KEY_DOWN;
+        case Left:
+            return GLFW_KEY_LEFT;
+        case Right:
+            return GLFW_KEY_RIGHT;
+
         default:
-            return KeyCode::Unknown;
+            return GLFW_KEY_UNKNOWN;
     }
 }
+
+// 2. C++26 Reflection generates the inverted O(1) lookup table at compile time!
+consteval auto BuildGLFWToKeyCodeTable() noexcept {
+    std::array<KeyCode, GLFW_KEY_LAST + 1> table {};
+    table.fill(KeyCode::Unknown);
+
+    ZHLN::Reflect::ForEachEnumerator<KeyCode>([&]<KeyCode Key>() {
+        static constexpr int glfwCode = KeyCodeToGLFW(Key);
+        if constexpr (glfwCode >= 0 && glfwCode <= GLFW_KEY_LAST) {
+            table[glfwCode] = Key;
+        }
+    });
+
+    return table;
+}
+
+// 3. Runtime function: Single instruction array access (O(1) / Branchless)
+KeyCode MapGLFWKey(int key) noexcept {
+    static constexpr auto Table = BuildGLFWToKeyCodeTable();
+    if (key >= 0 && key <= GLFW_KEY_LAST) [[likely]] {
+        return Table[key];
+    }
+    return KeyCode::Unknown;
+}
+} // namespace
 
 Window::Window(const String32& title, uint32_t width, uint32_t height, bool fullscreen, InputContext* input, bool useTTY): _impl(std::make_unique<Impl>()) {
     _impl->input  = input;
