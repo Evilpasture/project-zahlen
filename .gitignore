@@ -23,6 +23,7 @@ out/
 *.pdb
 *.ilk
 *.exp
+*.ii
 compile_commands.json
 
 # --- C++ / MSVC / GCC Artifacts ---
@@ -60,3 +61,7 @@ resources/intermediate/
 
 # Blender source files and unpacked textures
 blender/
+
+# Others
+*.patch
+.Rhistory
