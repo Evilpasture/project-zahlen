@@ -15,6 +15,7 @@
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
@@ -23,7 +24,6 @@
 #include <engine/system/LightingSystem.hpp>
 #include <gltf/GLTFImporter.hpp>
 #include <stb_image.h>
-#include <Zahlen/Threading/TaskSystem.hpp>
 #define STB_TRUETYPE_IMPLEMENTATION
 #include <fontconfig/fontconfig.h>
 #include <stb_truetype.h>
@@ -504,9 +504,7 @@ uint32_t InstantiatePrefab(
                         csgComp.modifiers.push_back({.operation = mod.operation, .operandEntity = opIt->second});
 
                         // Exclude the operand cutter from standard main/shadow draw passes
-                        Patch<Components::MeshComponent>(reg, opIt->second, [&](auto& cutMesh) {
-                            cutMesh.flags |= DrawFlags::Hidden;
-                        });
+                        Patch<Components::MeshComponent>(reg, opIt->second, [&](auto& cutMesh) { cutMesh.flags |= DrawFlags::Hidden; });
                     }
                 }
 
@@ -535,7 +533,8 @@ void SetupPlayerRagdoll(RenderContext& /*rc*/, PhysicsContext& pc, ECS::Registry
                 }
             });
         });
-        if (skeletonFound) break;
+        if (skeletonFound)
+            break;
     }
 
     if (targetSkeleton != nullptr) {
@@ -596,13 +595,16 @@ void SetupPlayerRagdoll(RenderContext& /*rc*/, PhysicsContext& pc, ECS::Registry
 
         reg.Add(
             playerEntity, Components::RagdollComponent {
-                              .ragdollInstance  = ragdollInstance.GetPtr(),
-                              .state            = RagdollState::Inactive,
-                              .prevState        = RagdollState::Inactive,
-                              .isAddedToPhysics = 0,
-                              .jointOffset      = jointOffset,
-                              .jointCount       = static_cast<uint32_t>(targetSkeleton->joints.size()),
-                              .skeleton         = targetSkeleton
+                              .ragdollInstance   = ragdollInstance.GetPtr(),
+                              .state             = RagdollState::Inactive,
+                              .prevState         = RagdollState::Inactive,
+                              .isAddedToPhysics  = 0,
+                              .jointOffset       = jointOffset,
+                              .jointCount        = static_cast<uint32_t>(targetSkeleton->joints.size()),
+                              .skeleton          = targetSkeleton,
+                              .jointBlendWeights = {},
+                              .jointStiffness    = {},
+                              .jointBlendDecay   = {}
                           }
         );
         Log("Skeletal Ragdoll successfully generated from Native Skeleton.");

@@ -16,6 +16,7 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Types.hpp>
 #include <expected>
+#include <functional>
 #include <memory>
 
 namespace ZHLN {
@@ -26,6 +27,7 @@ class RenderContext;
 class PhysicsContext;
 class AudioContext;
 class CreativeWorksManager;
+class ScriptRunner;
 struct Camera;
 struct EngineImpl;
 
@@ -43,6 +45,8 @@ class CullingSystem;
 
 class ZHLN_API Engine {
   public:
+    using UICallback = std::function<void(Engine&)>;
+
     Engine();
     Engine(const EngineConfig& cfg);
     Engine(const EngineConfig& cfg, bool& outSuccess);
@@ -65,6 +69,7 @@ class ZHLN_API Engine {
     ALife::Simulator&                  GetALife();
     CreativeWorksManager&              GetCreativeWorksManager();
     AudioContext&                      GetAudioContext();
+    ScriptRunner&                      GetScriptRunner();
     [[nodiscard]] ECS::Registry&       GetRegistry();
     [[nodiscard]] const ECS::Registry& GetRegistry() const;
 
@@ -79,6 +84,8 @@ class ZHLN_API Engine {
     [[nodiscard]] void*    GetGameState() const;
     void                   SetGameState(void* state);
     [[nodiscard]] uint64_t GetCurrentFrame() const noexcept;
+
+    void SetUICallback(UICallback callback);
 
     void ProvokeDeviceLost();
 
@@ -99,7 +106,7 @@ class ZHLN_API Engine {
      * @brief Convenience entry point that manages the main loop, frame limiting,
      *        and clean shutdown.
      */
-    static int Run(const CommandLineOptions& options);
+    static int Run(const CommandLineOptions& options, UICallback uiCallback = nullptr);
 
   private:
     std::expected<void, Error>  InitInternal(const EngineConfig& cfg);
