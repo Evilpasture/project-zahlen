@@ -11,7 +11,11 @@ import argparse
 
 
 def get_git_tracked_files(
-    target=".", ignore_demo=False, ignore_tools=False, ignore_inlines=False
+    target=".",
+    ignore_demo=False,
+    ignore_tools=False,
+    ignore_inlines=False,
+    ignore_scripts=False,
 ):
     extensions = {
         ".cpp",
@@ -40,6 +44,8 @@ def get_git_tracked_files(
     ignore_paths = {"third_party", "extern"}
     if ignore_tools:
         ignore_paths.add("tools")
+    if ignore_scripts:
+        ignore_paths.add("scripts")
 
     # If the flag is set, remove .inl from the allowed extensions
     if ignore_inlines:
@@ -151,13 +157,18 @@ def generate_snapshot_string(tracked_files, target_dir):
 
 
 def run_project_manager(
-    target=".", ignore_demo=False, ignore_tools=False, ignore_inlines=False
+    target=".",
+    ignore_demo=False,
+    ignore_tools=False,
+    ignore_inlines=False,
+    ignore_scripts=False,
 ):
     tracked_files = get_git_tracked_files(
         target,
         ignore_demo=ignore_demo,
         ignore_tools=ignore_tools,
         ignore_inlines=ignore_inlines,
+        ignore_scripts=ignore_scripts,
     )
     if not tracked_files:
         print(f"No matching files found at '{target}'.")
@@ -232,22 +243,25 @@ if __name__ == "__main__":
         action="store_true",
         help="Ignore directories containing .DEMO files.",
     )
-    # NEW: Add the --ignore-tools flag
     parser.add_argument(
         "--ignore-tools", action="store_true", help="Ignore the tools/ directory."
     )
-
     parser.add_argument(
         "--ignore-inlines",
         action="store_true",
         help="Ignore .inl implementation files.",
     )
+    parser.add_argument(
+        "--ignore-scripts",
+        action="store_true",
+        help="Ignore the scripts/ directory.",
+    )
 
     args = parser.parse_args()
-    # Pass the new argument into your main function
     run_project_manager(
         args.target,
         ignore_demo=args.ignore_demo,
         ignore_tools=args.ignore_tools,
         ignore_inlines=args.ignore_inlines,
+        ignore_scripts=args.ignore_scripts,
     )
