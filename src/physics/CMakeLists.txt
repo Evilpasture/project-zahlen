@@ -24,8 +24,8 @@ target_link_libraries(zahlen_physics
 )
 
 target_include_directories(zahlen_physics PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/src
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/src
 )
 
 # Pass Jolt specific configurations down

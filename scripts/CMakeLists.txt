@@ -1,9 +1,9 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     cmake_minimum_required(VERSION 3.28)
-    set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "0e5b6991-d74f-4b3d-a41c-cf096e0b2508")
+    set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "f35a9ac6-8463-4d38-8eec-5d6008153e7d")
     set(CMAKE_CXX_MODULE_STD ON)
     project(ZahlenGameplay LANGUAGES CXX)
 
@@ -25,9 +25,9 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(GAMEPLAY_LINK_LIBS ${ZAHLEN_ENGINE_LIB} ${JOLT_LIB})
 else()
     set(ENGINE_INCLUDE_DIRS
-        ${CMAKE_SOURCE_DIR}/include
-        ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/extern/JoltPhysics
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/extern/JoltPhysics
     )
 
     set(GAMEPLAY_LINK_LIBS
@@ -126,8 +126,8 @@ if(TARGET zahlen)
     add_custom_command(TARGET gameplay POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:Jolt> $<TARGET_FILE_DIR:zahlen>/
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:gameplay> $<TARGET_FILE_DIR:zahlen>/
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/scripts"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:gameplay> "${CMAKE_SOURCE_DIR}/scripts/"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_SOURCE_DIR}/scripts"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:gameplay> "${PROJECT_SOURCE_DIR}/scripts/"
         COMMENT "Copying gameplay dynamic library into scripts directory..."
     )
 endif()

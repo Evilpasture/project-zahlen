@@ -21,12 +21,12 @@ target_compile_definitions(zahlen_alife PRIVATE _CRT_SECURE_NO_WARNINGS)
 
 # Include directories
 target_include_directories(zahlen_alife PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/extern/JoltPhysics
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/extern/JoltPhysics
 )
 
 target_include_directories(zahlen_alife PRIVATE
-    ${CMAKE_SOURCE_DIR}/src
+    ${PROJECT_SOURCE_DIR}/src
 )
 
 # ALife inherently relies on the ECS and Jolt Physics (for RVec3, math, etc.)

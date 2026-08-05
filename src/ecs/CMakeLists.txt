@@ -11,8 +11,8 @@ add_library(zahlen_ecs OBJECT
 set_target_properties(zahlen_ecs PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_include_directories(zahlen_ecs PUBLIC 
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/src
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/src
 )
 
 if(NOT MSVC)
