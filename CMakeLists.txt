@@ -173,12 +173,11 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/audio)
 
 set(ENGINE_SOURCES
     src/engine/AssertHandler.cpp
+    src/engine/DefaultPreset.cpp
     src/engine/RenderFrame.cpp
     src/engine/RenderInit.cpp
     src/engine/RenderResources.cpp
     src/engine/Engine.cpp
-    src/engine/EngineLoop.cpp
-    src/engine/Editor.cpp
     src/engine/CreativeWorksFactory.cpp
     src/engine/MeshBuilder.cpp
     src/engine/system/AnimationSystem.cpp
@@ -188,9 +187,8 @@ set(ENGINE_SOURCES
     src/engine/Platform.cpp
     src/engine/Scripting.cpp
     src/engine/LuaScriptRuntime.cpp
-    src/engine/ConsoleUI.cpp
-    src/engine/ProfilerUI.cpp
-    src/engine/DiagnosticUI.cpp
+    src/engine/Console.cpp
+    src/engine/Profiler.cpp
     src/engine/Text.cpp
     src/engine/Resources.cpp
     src/engine/system/RenderSystem.cpp
@@ -201,7 +199,6 @@ set(ENGINE_SOURCES
     src/engine/system/CullingSystem.cpp
     src/engine/Sky.cpp
     src/engine/BRDFLUT.cpp
-    src/engine/GizmoUI.cpp
     src/engine/system/PhysicsSystem.cpp
     src/engine/system/TerrainSystem.cpp
     src/engine/system/ParticleSystem.cpp
@@ -441,9 +438,9 @@ zahlen_compile_fennel(zahlen_engine COMPILED_CORE_LUA_FILES
 # 2. Selectively copy or link static non-Fennel core script files
 file(GLOB_RECURSE STATIC_CORE_SCRIPT_FILES
     LIST_DIRECTORIES false
-    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/*.lua"
-    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/*.sh"
-    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/*.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.lua"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.sh"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.txt"
 )
 
 set(STATIC_SCRIPT_SYMLINKS "")

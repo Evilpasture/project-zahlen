@@ -28,6 +28,10 @@ class NativeScriptModule {
         UnloadModule();
     }
 
+    [[nodiscard]] bool IsLoaded() const noexcept {
+        return m_handle != nullptr && m_updateFn != nullptr;
+    }
+
     GameplayStatus Update(Engine* engine, float dt) {
         if (m_watcher.CheckModified()) {
             ZHLN::Log("[Hot-Reload] New C++ gameplay binary detected! Swapping module...");

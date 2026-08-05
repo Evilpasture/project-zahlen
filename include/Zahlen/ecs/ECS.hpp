@@ -4,22 +4,22 @@
 #pragma once
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Common.h>
-#include <Zahlen/Entity.hpp>
-#include <Zahlen/Log.hpp>
-#include <Zahlen/Sync.hpp>
-#include <cstddef>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Core/Span.hpp>
+#include <Zahlen/Entity.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/Sync.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
+#include <cstddef>
 #include <source_location>
 #include <span>
 #include <string>
 #include <string_view>
-#include <Zahlen/Threading/Mutex.hpp>
+#include <utility>
 #include <vector>
 
 namespace ZHLN::ECS {
-
 
 template <typename T, typename = void>
 struct is_complete: std::false_type {};
@@ -245,9 +245,9 @@ class ZHLN_API Registry {
         if (id >= _compCapacity || !_components[id]) {
             return nullptr;
         }
-        auto* set    = _components[id];
+        auto*  set   = _components[id];
         size_t count = set->Count();
-        auto* data   = static_cast<T*>(set->GetDataArray());
+        auto*  data  = static_cast<T*>(set->GetDataArray());
         for (size_t i = 0; i < count; ++i) {
             T* comp = data + i;
             if (pred(*comp)) {
@@ -326,12 +326,12 @@ class ZHLN_API Registry {
     void EnsureComponentCapacity(uint32_t id);
 };
 
-
 // Patch combinator: collapses the repetitive null-check dance
-template<typename T, typename Fn>
+// Stop writing `if (auto* c = reg.Get<T>(e))` manually.
+template <typename T, typename Fn>
 inline bool Patch(ECS::Registry& reg, Entity e, Fn&& fn) {
     if (auto* c = reg.Get<T>(e)) {
-        fn(*c);
+        std::forward<Fn>(fn)(*c);
         return true;
     }
     return false;
