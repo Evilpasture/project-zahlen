@@ -13,6 +13,100 @@ This document provides a technical overview of Project Zahlen's architecture, ma
 
 ---
 
+## 1.1 Strict ECS Mandate & Architectural Constraints
+
+To preserve the engine's data-oriented design (DOD), cache locality, zero-allocation memory guarantees, and C++26 hot-reloadability, **ALL state in Zahlen MUST reside in ECS Components, and ALL logic MUST reside in ECS Systems.**
+
+### The Core Law
+> **There are no "Manager" or "Simulation" classes for gameplay or visual effects in Zahlen.**
+> Every entity, bolt, particle, projectile, sound, and light source is represented as a plain-data `struct` inside the `ZHLN::Components` namespace.
+
+---
+
+### Strict Development Rules
+
+#### 1. Zero Class-Based State
+* **NO `class` instances may hold simulation, timing, or visual state.**
+* Features MUST NOT wrap state inside private member variables (`m_phase`, `m_time`, `m_luminance`).
+* All state MUST be stored in `ZHLN::Components` as POD (Plain Old Data) structs and accessed via `reg.Get<Component>()` or `reg.GetRawArray<Component>()`.
+
+#### 2. The $N$-Concurrent Rule
+* **Every feature MUST support $N$ simultaneous instances out of the box.**
+* Hardcoding single-instance state assumes a feature will only happen once. By making state an ECS Component attached to an `Entity`, the engine automatically supports 1, 100, or 10,000 instances in contiguous memory without state collisions.
+
+#### 3. Pure System Functions
+* Logic MUST be written as pure, stateless system functions (`void SystemName(Engine& engine, float dt)`).
+* Systems MUST NOT store internal state across frames. If a calculation needs memory across frames, that memory belongs in a Component attached to an Entity or a Global Settings Entity.
+
+#### 4. Automated Component Resource Cleanup
+* Component GPU allocations (VBOs, IBOs, Textures) MUST be released via the `static void OnDestroy(Component* c)` hook declared on the Component struct.
+* Systems MUST NOT manually manage raw heap pointers or manage class destructors.
+
+#### 5. Environment & Global State Isolation
+* Systems modifying global engine state (e.g., Post-Processing, Exposure, Sky Gradients) MUST NOT overwrite global base values.
+* Global state changes MUST be applied as non-destructive deltas or read from an un-flashed baseline cached on the Global Settings entity.
+
+---
+
+### Anti-Pattern Reference Guide
+
+#### ❌ FORBIDDEN: Classic OOP Class Bypass
+```cpp
+// BAD: Stateful class holding simulation variables, non-DOD memory, single-instance lock
+class LightningSimulation {
+  private:
+    float  m_phaseTime    = 0.0f;
+    float  m_baseExposure = 4.5f; // Clobbers global exposure!
+    Entity m_flashLight;
+
+  public:
+    void TriggerStrike(Engine& engine, ...);
+    void Update(Engine& engine, float dt);
+};
+```
+
+#### ✅ MANDATED: Idiomatic Data-Oriented ECS
+```cpp
+// GOOD: Pure POD Component
+struct LightningComponent {
+    LightningConfig config {};
+    LightningPhase  phase               = LightningPhase::Idle;
+    float           phaseTime           = 0.0f;
+    float           baseAmbientExposure = 4.5f;
+
+    BufferHandle vboPos  = BufferHandle::Invalid;
+    BufferHandle vboAttr = BufferHandle::Invalid;
+
+    // Automated RAII cleanup on entity destruction
+    static void OnDestroy(LightningComponent* c) noexcept {
+        if (auto* engine = GetEngineContext()) {
+            engine->GetRenderContext().DestroyBuffer(c->vboPos);
+            engine->GetRenderContext().DestroyBuffer(c->vboAttr);
+        }
+    }
+};
+
+// GOOD: Stateless System Function
+namespace ZHLN::Lightning {
+Entity Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, const LightningConfig& cfg);
+void   Update(Engine& engine, float dt);
+} // namespace ZHLN::Lightning
+```
+
+---
+
+### Architectural Rationale
+
+| Requirement | Why OOP Fails | Why ECS Succeeds |
+| :--- | :--- | :--- |
+| **Hot-Reloading** | Reloading `.so`/`.dll` modules invalidates class vtables and member offsets, crashing active class instances. | Components reside in C++ host memory. Hot-reloaded code modules simply re-attach to existing Component arrays seamlessly. |
+| **Cache Locality** | Heap-allocated objects (`new MyClass()`) scatter data across RAM pages, causing CPU L1/L2 cache misses. | `SparseSet` arrays store components contiguously in RAM, allowing SIMD vectorization and prefetching. |
+| **Parallel Execution** | Mutable class methods introduce thread races when accessed concurrently by multiple workers. | `SystemGraph` inspects Component Read/Write access patterns (`Read<T>()`, `Write<T>()`) to execute systems in parallel on fibers safely. |
+| **State Save/Load** | Private class members cannot be serialized without custom, error-prone boilerplate. | Reflection (`std::meta`) automatically serializes all Component POD structs to disk or network instantly. |
+
+
+---
+
 ## 2. Mathematical & Geometric Conventions
 
 Zahlen adheres strictly to standard Vulkan and Jolt Physics conventions across both CPU host code and GPU shaders:
