@@ -282,7 +282,6 @@ target_precompile_headers(zahlen_engine PRIVATE
 set_target_properties(zahlen_engine PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
-    CXX_MODULE_STD ON
 )
 
 # --- COMPILE-TIME PROFILING ---
@@ -494,7 +493,6 @@ target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)
 set_target_properties(zahlen PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
-    CXX_MODULE_STD ON
 )
 
 # --- ASSET COMPILER (ZCOOK) ---
