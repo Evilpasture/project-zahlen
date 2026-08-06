@@ -482,6 +482,14 @@ struct Components {
         static void OnDestroy(ParticleEmitterComponent* p) noexcept;
     };
 
+    struct MeshParticleEmitterComponent {
+        AssetID                   meshAsset     = InvalidAssetID;
+        MaterialID                materialAsset = InvalidMaterialID;
+        uint32_t                  maxParticles  = 128;
+        bool                      active        = true;
+        MeshParticleEmitterParams params;
+    };
+
     struct DecalComponent {
         uint32_t albedoIndex = 1;
         uint32_t normalIndex = 2;

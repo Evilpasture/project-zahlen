@@ -459,6 +459,32 @@ struct PassFactory {
         });
     }
 
+    [[nodiscard]] auto MakeMeshParticleUpdatePass() const noexcept {
+        return Vk::MakePass<"MeshParticleUpdate">([this](VkCommandBuffer c) noexcept {
+            if (!self.meshParticleUpdatePass.pipeline.Valid() || self.queues.meshParticleQueue.empty()) {
+                return;
+            }
+
+            auto* bindlessSet = self.bindlessSets[self.frame_index];
+
+            for (const auto& emitter: self.queues.meshParticleQueue) {
+                auto* buffer = self.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
+                if (!buffer) {
+                    continue;
+                }
+
+                RenderContext::Impl::MeshParticleComputePush pushPC = {
+                    .particleBufferAddr = self.ctx.BufferAddress(buffer->buffer.Handle()),
+                    .particleCount      = emitter.maxParticles,
+                    .deltaTime          = self.currentDt,
+                    .p                  = emitter.params
+                };
+
+                self.meshParticleUpdatePass.Dispatch(c, bindlessSet, (emitter.maxParticles + 63) / 64, 1, 1, pushPC);
+            }
+        });
+    }
+
     [[nodiscard]] auto MakeVoxelInjectionPass() const noexcept {
         return Vk::MakePass<"VoxelInject", Vk::ComputeWrite<Res_VoxelMedia>>([this](VkCommandBuffer c) noexcept {
             Profiler::ScopedGpuProfile<Stages::VolumetricInjectPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
@@ -867,7 +893,8 @@ struct PassFactory {
 // --- Compute Graph Generator ---
 auto BuildComputeGraph(const PassFactory& factory) {
     return Vk::CompileTimeFrameGraph(
-        factory.MakeVoxelInjectionPass(), factory.MakeVoxelScatteringPass(), factory.MakeVoxelIntegrationPass(), factory.MakeParticleUpdatePass()
+        factory.MakeVoxelInjectionPass(), factory.MakeVoxelScatteringPass(), factory.MakeVoxelIntegrationPass(), factory.MakeParticleUpdatePass(),
+        factory.MakeMeshParticleUpdatePass()
     );
 }
 

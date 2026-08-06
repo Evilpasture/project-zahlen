@@ -80,6 +80,7 @@ class ZHLN_API RenderContext {
     BufferHandle CreateStorageBuffer(size_t size);
     BufferHandle GetOrCreateParticleBuffer(uint64_t entityKey, uint32_t maxParticles);
     void         SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& params);
+    void SubmitMeshParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const MeshParticleEmitterParams& params, AssetID mesh, MaterialID mat);
 
     // --- Opaque Resource Creation API ---
     auto                                         CreateVertexBuffer(const void* data, size_t size, uint32_t stride = sizeof(VertexPosition)) -> BufferHandle;

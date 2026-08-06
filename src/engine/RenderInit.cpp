@@ -137,6 +137,71 @@ std::expected<void, Error> RenderContext::Impl::BuildParticlePipelines() {
         });
 }
 
+std::expected<void, Error> RenderContext::Impl::BuildMeshParticlePipelines() {
+    using enum Resource::ShaderID;
+
+    // 1. Compute Simulation Pipeline (mesh_particle_update.hlsl)
+    auto                csMeshShader = Vk::CreateShaderDesc(Resource::GetShaderProgram(MeshParticleUpdate).vertex);
+    VkPushConstantRange mpUpdatePush = {
+        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+        .offset     = 0,
+        .size       = sizeof(RenderContext::Impl::MeshParticleComputePush) // 208 bytes
+    };
+
+    if (!meshParticleUpdatePass.Build(ctx.Device(), bindlessLayout.Get(), csMeshShader, &mpUpdatePush, 1)) {
+        ZHLN::Log("ERROR: Failed to build 3D mesh particle update compute pipeline!");
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
+    }
+
+    // 2. Pipeline Layout for 3D Mesh Particle Graphics Pipelines
+    return Vk::PipelineLayoutBuilder(ctx.Device())
+        .AddDescriptorSetLayout(bindlessLayout.Get())
+        .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(MeshParticleRenderPush))
+        .Build()
+        .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
+        .and_then([&](auto&& layout) -> std::expected<void, Error> {
+            meshParticleRenderLayout = std::forward<decltype(layout)>(layout);
+
+            // 3. G-Buffer Deferred Graphics Pipeline (mesh_particle_render.hlsl)
+            auto mpRenderShaders = Resource::GetShaderProgram(MeshParticleRender);
+            return LoadAndCreateShaders(
+                       {.path = SHADER_MESH_PARTICLE_RENDER_VS_PATH, .fallback = mpRenderShaders.vertex, .entryPoint = "VSMain"},
+                       {.path = SHADER_MESH_PARTICLE_RENDER_PS_PATH, .fallback = mpRenderShaders.fragment, .entryPoint = "PSMain"}
+            )
+                .and_then([&](auto&& shaders) -> std::expected<void, Error> {
+                    return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
+                        .Shaders(shaders)
+                        .Layout(meshParticleRenderLayout.Get())
+                        .ColorFormats(ActiveGBuffer::array) // Writes to SceneColor, Velocity, NormRough
+                        .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
+                        .DepthTest(true)
+                        .DepthWrite(true) // Solid 3D geometry writes depth
+                        .CullBack()
+                        .Build(ctx.Device())
+                        .transform([&](auto&& pipeline) { meshParticleRenderPipeline = std::forward<decltype(pipeline)>(pipeline); });
+                });
+        })
+        .and_then([&]() -> std::expected<void, Error> {
+            // 4. Directional Shadow Cascade Pipeline (mesh_particle_shadow.hlsl)
+            auto mpShadowShaders = Resource::GetShaderProgram(MeshParticleShadow);
+            return LoadAndCreateShaders(
+                       {.path = SHADER_MESH_PARTICLE_SHADOW_VS_PATH, .fallback = mpShadowShaders.vertex, .entryPoint = "VSMain"},
+                       {.path = SHADER_MESH_PARTICLE_SHADOW_PS_PATH, .fallback = mpShadowShaders.fragment, .entryPoint = "PSMain"}
+            )
+                .and_then([&](auto&& shaders) -> std::expected<void, Error> {
+                    return Vk::PipelineBuilder<0, true> {}
+                        .Shaders(shaders)
+                        .Layout(meshParticleRenderLayout.Get())
+                        .DepthOnly()
+                        .DepthFormat(VK_FORMAT_D32_SFLOAT)
+                        .ViewMask(0xF) // 4 CSM Cascades
+                        .CullNone()
+                        .Build(ctx.Device())
+                        .transform([&](auto&& pipeline) { meshParticleShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
+                });
+        });
+}
+
 std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int height) {
     using enum Resource::ShaderID;
 
@@ -1231,6 +1296,13 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
             return register_and_check(
                 "Particles", [this]() { return BuildParticlePipelines(); },
                 {SHADER_PARTICLE_UPDATE_CS_PATH, SHADER_PARTICLE_RENDER_VS_PATH, SHADER_PARTICLE_RENDER_PS_PATH}
+            );
+        })
+        .and_then([&]() {
+            return register_and_check(
+                "3D Mesh Particles", [this]() { return BuildMeshParticlePipelines(); },
+                {SHADER_MESH_PARTICLE_UPDATE_CS_PATH, SHADER_MESH_PARTICLE_RENDER_VS_PATH, SHADER_MESH_PARTICLE_RENDER_PS_PATH,
+                 SHADER_MESH_PARTICLE_SHADOW_VS_PATH}
             );
         })
         .and_then([&]() { return register_and_check("Decals", [this]() { return BuildDecalPipeline(); }, {SHADER_DECAL_VS_PATH, SHADER_DECAL_PS_PATH}); })

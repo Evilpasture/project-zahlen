@@ -101,6 +101,117 @@ void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept {
     }
 }
 
+void Draw3DParticles(const FrameRecorder& recorder) noexcept {
+    auto& ctx = recorder.ctx;
+    if (!ctx.meshParticleRenderPipeline.Valid() || ctx.queues.meshParticleQueue.empty()) {
+        return;
+    }
+
+    for (const auto& emitter: ctx.queues.meshParticleQueue) {
+        auto* pBuf = ctx.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
+
+        const Mesh*     gpuMesh = ctx.assetMeshMap.Find(emitter.meshAsset);
+        const Material* gpuMat  = ctx.assetMaterialMap.Find(emitter.materialAsset);
+
+        if ((pBuf == nullptr) || gpuMesh == nullptr || gpuMat == nullptr) {
+            continue;
+        }
+
+        auto* posMesh  = ctx.meshPool.Resolve(gpuMesh->posBuffer).value_or(nullptr);
+        auto* attrMesh = ctx.meshPool.Resolve(gpuMesh->attrBuffer).value_or(nullptr);
+        auto* iboMesh  = (gpuMesh->indexBuffer != BufferHandle::Invalid) ? ctx.meshPool.Resolve(gpuMesh->indexBuffer).value_or(nullptr) : nullptr;
+
+        // FIXED: Initializers ordered to match MeshParticleRenderPush declaration order
+        RenderContext::Impl::MeshParticleRenderPush rpc = {
+            .particleBufferAddr = ctx.BufferAddress(pBuf->buffer.Handle()),
+            .posAddress         = (posMesh != nullptr) ? posMesh->vboAddress : 0,
+            .attrAddress        = (attrMesh != nullptr) ? attrMesh->vboAddress : 0,
+            .iboAddress         = (iboMesh != nullptr) ? iboMesh->vboAddress : 0,
+            .baseColorFactor    = {},
+            .emissiveFactor     = {},
+            .indexCount         = gpuMesh->indexCount,
+            .albedoIdx          = gpuMat->albedoIndex,
+            .normalIdx          = gpuMat->normalIndex,
+            .pbrIdx             = gpuMat->pbrIndex,
+            .emissiveIdx        = gpuMat->emissiveIndex,
+            .roughness          = gpuMat->roughnessFactor,
+            .metallic           = gpuMat->metallicFactor,
+            .alphaCutoff        = gpuMat->alphaCutoff,
+            .alphaMode          = gpuMat->alphaMode,
+            ._padding           = 0
+        };
+        std::memcpy(rpc.baseColorFactor, gpuMat->baseColorFactor, sizeof(float) * 4);
+        std::memcpy(rpc.emissiveFactor, gpuMat->emissiveFactor, sizeof(float) * 4);
+
+        uint32_t drawVertexCount = (iboMesh != nullptr) ? gpuMesh->indexCount : gpuMesh->vertexCount;
+
+        recorder.encoder.DrawInstanced(
+            {.pipeline      = ctx.meshParticleRenderPipeline.Get(),
+             .layout        = ctx.particleRenderLayout.Get(),
+             .set           = recorder.bindlessSet,
+             .vertexCount   = drawVertexCount,
+             .instanceCount = emitter.maxParticles,
+             .firstVertex   = 0,
+             .firstInstance = 0},
+            rpc
+        );
+    }
+}
+
+void Draw3DParticleShadows(const FrameRecorder& recorder) noexcept {
+    auto& ctx = recorder.ctx;
+    if (!ctx.meshParticleShadowPipeline.Valid() || ctx.queues.meshParticleQueue.empty()) {
+        return;
+    }
+
+    for (const auto& emitter: ctx.queues.meshParticleQueue) {
+        auto*           pBuf    = ctx.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
+        const Mesh*     gpuMesh = ctx.assetMeshMap.Find(emitter.meshAsset);
+        const Material* gpuMat  = ctx.assetMaterialMap.Find(emitter.materialAsset);
+
+        if ((pBuf == nullptr) || gpuMesh == nullptr || gpuMat == nullptr) {
+            continue;
+        }
+
+        auto* posMesh = ctx.meshPool.Resolve(gpuMesh->posBuffer).value_or(nullptr);
+        auto* iboMesh = (gpuMesh->indexBuffer != BufferHandle::Invalid) ? ctx.meshPool.Resolve(gpuMesh->indexBuffer).value_or(nullptr) : nullptr;
+
+        // FIXED: Initializers ordered to match MeshParticleRenderPush declaration order
+        RenderContext::Impl::MeshParticleRenderPush rpc = {
+            .particleBufferAddr = ctx.BufferAddress(pBuf->buffer.Handle()),
+            .posAddress         = (posMesh != nullptr) ? posMesh->vboAddress : 0,
+            .attrAddress        = 0,
+            .iboAddress         = (iboMesh != nullptr) ? iboMesh->vboAddress : 0,
+            .baseColorFactor    = {},
+            .emissiveFactor     = {},
+            .indexCount         = gpuMesh->indexCount,
+            .albedoIdx          = gpuMat->albedoIndex,
+            .normalIdx          = 0,
+            .pbrIdx             = 0,
+            .emissiveIdx        = 0,
+            .roughness          = 0.0f,
+            .metallic           = 0.0f,
+            .alphaCutoff        = gpuMat->alphaCutoff,
+            .alphaMode          = gpuMat->alphaMode,
+            ._padding           = 0
+        };
+        std::memcpy(rpc.baseColorFactor, gpuMat->baseColorFactor, sizeof(float) * 4);
+
+        uint32_t drawVertexCount = (iboMesh != nullptr) ? gpuMesh->indexCount : gpuMesh->vertexCount;
+
+        recorder.encoder.DrawInstanced(
+            {.pipeline      = ctx.meshParticleShadowPipeline.Get(),
+             .layout        = ctx.particleRenderLayout.Get(),
+             .set           = recorder.bindlessSet,
+             .vertexCount   = drawVertexCount,
+             .instanceCount = emitter.maxParticles,
+             .firstVertex   = 0,
+             .firstInstance = 0},
+            rpc, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+        );
+    }
+}
+
 struct GpuCullingPolicy {
     static void Record(
         const FrameRecorder&                                             recorder,
@@ -167,6 +278,7 @@ struct GpuCullingPolicy {
                     );
                 }
                 DrawCSGMeshes(recorder, color_att.extent);
+                Draw3DParticles(recorder);
             });
     }
 };
@@ -195,8 +307,7 @@ struct CpuCullingPolicy {
             .Execute(cmd, [&]() {
                 Vk::ParallelDrawDispatch(
                     cmd, Vk::SecondaryInheritance {.colorFormats = colorFormats, .depthFormat = VK_FORMAT_D32_SFLOAT_S8_UINT},
-                    {.width = color_att.extent.width, .height = color_att.extent.height}, // Explicit 3D -> 2D Truncation
-                    drawCount, kParallelChunkSize,
+                    {.width = color_att.extent.width, .height = color_att.extent.height}, drawCount, kParallelChunkSize,
 
                     TaskSystemSchedulerAdapter {},
                     [&]([[maybe_unused]] uint32_t chunkIdx) -> VkCommandBuffer {
@@ -213,7 +324,7 @@ struct CpuCullingPolicy {
                             return;
                         }
                         if ((drawCmd.flags & DrawFlags::Viewmodel) != DrawFlags::None) {
-                            return; // Skip viewmodels during main scene rendering
+                            return;
                         }
                         if (!drawCmd.material->pipeline.Valid() || IsForwardOnly(drawCmd.instanceData.flags)) {
                             return;
@@ -223,6 +334,7 @@ struct CpuCullingPolicy {
                     }
                 );
                 DrawCSGMeshes(recorder, color_att.extent);
+                Draw3DParticles(recorder);
             });
     }
 };
@@ -305,8 +417,10 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
     {
         Profiler::ScopedGpuProfile<Stages::ShadowPass, FrameProfiler> timer(cmd, recorder.frameIndex, ctx.gpuProfiler);
 
-        uint32_t csmDrawCount = passDrawCounts[0];
-        if (csmDrawCount > 0) {
+        uint32_t csmDrawCount     = passDrawCounts[0];
+        bool     hasMeshParticles = !ctx.queues.meshParticleQueue.empty();
+
+        if (csmDrawCount > 0 || hasMeshParticles) {
             Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> cascadeLayerImage = {
                 .handle = ctx.graphResources.shadowMap.image.Handle(),
                 .view   = ctx.graphResources.shadowMap.view.Get(),
@@ -318,15 +432,19 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
                 .ViewMask(0xF)
                 .AddDepth(cascadeLayerImage, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kShadowClearDepth)
                 .Execute(cmd, [&]() {
-                    recorder.encoder.DrawIndirect(
-                        {.pipeline       = ctx.shadowPipeline.Get(),
-                         .layout         = ctx.shadowPipelineLayout.Get(),
-                         .set            = recorder.bindlessSet,
-                         .argumentBuffer = ctx.shadowIndirectBuffers->Handle(),
-                         .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[0]),
-                         .drawCount      = csmDrawCount},
-                        ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 1}, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
-                    );
+                    if (csmDrawCount > 0) {
+                        recorder.encoder.DrawIndirect(
+                            {.pipeline       = ctx.shadowPipeline.Get(),
+                             .layout         = ctx.shadowPipelineLayout.Get(),
+                             .set            = recorder.bindlessSet,
+                             .argumentBuffer = ctx.shadowIndirectBuffers->Handle(),
+                             .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[0]),
+                             .drawCount      = csmDrawCount},
+                            ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 1}, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+                        );
+                    }
+
+                    Draw3DParticleShadows(recorder);
                 });
         }
     }
@@ -347,7 +465,8 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 
             uint32_t slotIdx   = 4 + light.shadowLayer;
             uint32_t drawCount = passDrawCounts[slotIdx];
-            if (drawCount == 0) {
+
+            if (drawCount == 0 && ctx.queues.meshParticleQueue.empty()) {
                 continue;
             }
 
@@ -359,21 +478,25 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
             };
 
             ExecutePunctualPass(subViewImage, [&]() {
-                const struct PunctualPush {
-                    uint32_t lightIdx;
-                } pc = {l_idx};
+                if (drawCount > 0) {
+                    const struct PunctualPush {
+                        uint32_t lightIdx;
+                    } pc = {l_idx};
 
-                recorder.encoder.DrawIndirect(
-                    {
-                        .pipeline       = ctx.punctualShadowPipeline.Get(),
-                        .layout         = ctx.punctualShadowPipelineLayout.Get(),
-                        .set            = recorder.bindlessSet,
-                        .argumentBuffer = ctx.shadowIndirectBuffers->Handle(),
-                        .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[slotIdx]),
-                        .drawCount      = drawCount,
-                    },
-                    pc, VK_SHADER_STAGE_VERTEX_BIT
-                );
+                    recorder.encoder.DrawIndirect(
+                        {
+                            .pipeline       = ctx.punctualShadowPipeline.Get(),
+                            .layout         = ctx.punctualShadowPipelineLayout.Get(),
+                            .set            = recorder.bindlessSet,
+                            .argumentBuffer = ctx.shadowIndirectBuffers->Handle(),
+                            .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[slotIdx]),
+                            .drawCount      = drawCount,
+                        },
+                        pc, VK_SHADER_STAGE_VERTEX_BIT
+                    );
+                }
+
+                Draw3DParticleShadows(recorder);
             });
         }
     }
@@ -388,8 +511,9 @@ void MainPass::Execute(
 
     Profiler::ScopedGpuProfile<Stages::MainPass, FrameProfiler> timer(cmd, recorder.frameIndex, ctx.gpuProfiler);
 
-    const auto drawCount = static_cast<uint32_t>(ctx.queues.drawQueue.size());
-    if (drawCount == 0) {
+    const auto drawCount         = static_cast<uint32_t>(ctx.queues.drawQueue.size());
+    const auto meshParticleCount = static_cast<uint32_t>(ctx.queues.meshParticleQueue.size());
+    if (drawCount == 0 && meshParticleCount == 0) {
         Vk::DynamicPass(in.sceneColor.extent)
             .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
             .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorVelocity)

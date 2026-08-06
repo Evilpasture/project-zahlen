@@ -202,6 +202,35 @@ struct alignas(16) ParticleEmitterParams {
     uint32_t          blendMode    = 0;
 };
 static_assert(sizeof(ParticleEmitterParams) == 160, "ParticleEmitterParams alignment mismatch!");
+struct alignas(16) MeshParticleEmitterParams {
+    std::array<float, 3> gravity = {0.0f, -9.81f, 0.0f};
+    float                drag    = 0.2f;
+
+    std::array<float, 3> turbulence     = {0.0f, 0.0f, 0.0f};
+    float                turbulenceFreq = 0.1f;
+
+    std::array<float, 3> spawnOrigin = {0.0f, 0.0f, 0.0f};
+    float                spawnRadius = 0.0f;
+
+    std::array<float, 3> spawnBoxExtent = {10.0f, 10.0f, 10.0f};
+    float                loopBoundary   = 0.0f;
+
+    std::array<float, 3> initVelMin  = {-5.0f, 0.0f, -5.0f};
+    float                lifetimeMin = 1.0f;
+
+    std::array<float, 3> initVelMax  = {5.0f, 10.0f, 5.0f};
+    float                lifetimeMax = 3.0f;
+
+    std::array<float, 3> rotVelMin = {-3.14f, -3.14f, -3.14f};
+    float                scaleMin  = 0.1f;
+
+    std::array<float, 3> rotVelMax = {3.14f, 3.14f, 3.14f};
+    float                scaleMax  = 0.5f;
+
+    std::array<float, 4> startColor = {1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<float, 4> endColor   = {1.0f, 1.0f, 1.0f, 1.0f};
+};
+static_assert(sizeof(MeshParticleEmitterParams) == 160);
 
 struct alignas(16) Particle {
     JPH::Vec4 position = JPH::Vec4::sZero(); // xyz = pos
@@ -211,6 +240,16 @@ struct alignas(16) Particle {
 };
 
 static_assert(sizeof(Particle) == 64);
+
+struct alignas(16) Particle3D {
+    JPH::Vec4 position; // xyz = pos, w = scale
+    JPH::Vec4 velocity; // xyz = vel, w = unused
+    JPH::Quat rotation; // xyzw = quaternion
+    JPH::Vec4 rotVel;   // xyz = angular velocity, w = unused
+    JPH::Vec4 color;    // rgba
+    JPH::Vec4 params;   // x = age, y = life, z = unused, w = unused
+};
+static_assert(sizeof(Particle3D) == 96);
 
 // Align structures to 16-byte boundaries to match HLSL std430 layout
 struct alignas(16) GPULight {

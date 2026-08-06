@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "RenderCore.hpp"
+
 namespace ZHLN::Vk {
 
 // ============================================================================

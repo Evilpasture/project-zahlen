@@ -204,6 +204,28 @@ constexpr uint8_t decal_ps_raw[] = {
 };
 extern const ShaderPair decal_shaders {.vertex = decal_vs_raw, .fragment = decal_ps_raw};
 
+// --- 3D Mesh Particle Shaders ---
+constexpr uint8_t mesh_particle_update_cs_raw[] = {
+#embed SHADER_MESH_PARTICLE_UPDATE_CS_PATH
+};
+extern const ShaderPair mesh_particle_update_shaders {.vertex = mesh_particle_update_cs_raw, .fragment = {}};
+
+constexpr uint8_t mesh_particle_render_vs_raw[] = {
+#embed SHADER_MESH_PARTICLE_RENDER_VS_PATH
+};
+constexpr uint8_t mesh_particle_render_ps_raw[] = {
+#embed SHADER_MESH_PARTICLE_RENDER_PS_PATH
+};
+extern const ShaderPair mesh_particle_render_shaders {.vertex = mesh_particle_render_vs_raw, .fragment = mesh_particle_render_ps_raw};
+
+constexpr uint8_t mesh_particle_shadow_vs_raw[] = {
+#embed SHADER_MESH_PARTICLE_SHADOW_VS_PATH
+};
+constexpr uint8_t mesh_particle_shadow_ps_raw[] = {
+#embed SHADER_MESH_PARTICLE_SHADOW_PS_PATH
+};
+extern const ShaderPair mesh_particle_shadow_shaders {.vertex = mesh_particle_shadow_vs_raw, .fragment = mesh_particle_shadow_ps_raw};
+
 // --- Single Shaders and Binary Resources ---
 constexpr uint8_t culling_comp_raw[] = {
 #embed SHADER_CULLING_HLSL_CS_PATH

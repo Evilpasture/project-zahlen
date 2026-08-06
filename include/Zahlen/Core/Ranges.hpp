@@ -12,6 +12,35 @@
 
 namespace ZHLN::Ranges {
 
+namespace detail {
+
+// Helper to deduce the weakest iterator_category among a set of categories
+template <typename... Categories>
+struct MinCategory;
+
+template <typename Cat>
+struct MinCategory<Cat> {
+    using type = Cat;
+};
+
+template <typename Cat1, typename Cat2, typename... Rest>
+struct MinCategory<Cat1, Cat2, Rest...> {
+    using lower = std::conditional_t<std::is_base_of_v<Cat1, Cat2>, Cat2, std::conditional_t<std::is_base_of_v<Cat2, Cat1>, Cat1, std::input_iterator_tag>>;
+    using type  = typename MinCategory<lower, Rest...>::type;
+};
+
+// Maps raw iterator categories to standard tags
+template <typename Category>
+using NormalizeCategory = std::conditional_t<
+    std::is_base_of_v<std::random_access_iterator_tag, Category>,
+    std::random_access_iterator_tag,
+    std::conditional_t<
+        std::is_base_of_v<std::bidirectional_iterator_tag, Category>,
+        std::bidirectional_iterator_tag,
+        std::conditional_t<std::is_base_of_v<std::forward_iterator_tag, Category>, std::forward_iterator_tag, std::input_iterator_tag>>>;
+
+} // namespace detail
+
 // ============================================================================
 // Core Zip View
 // ============================================================================
@@ -23,7 +52,7 @@ class ZipIterator {
     using reference         = value_type;
     using pointer           = void;
     using difference_type   = std::ptrdiff_t;
-    using iterator_category = std::input_iterator_tag;
+    using iterator_category = typename detail::MinCategory<detail::NormalizeCategory<typename std::iterator_traits<Iterators>::iterator_category>...>::type;
 
     constexpr ZipIterator() = default;
     constexpr explicit ZipIterator(Iterators... iters): _iters(iters...) {
@@ -102,7 +131,7 @@ class TransformIterator {
     using reference         = value_type;
     using pointer           = void;
     using difference_type   = typename std::iterator_traits<Iterator>::difference_type;
-    using iterator_category = std::input_iterator_tag;
+    using iterator_category = detail::NormalizeCategory<typename std::iterator_traits<Iterator>::iterator_category>;
 
     constexpr TransformIterator() = default;
     constexpr TransformIterator(Iterator it, Func func): _it(it), _func(func) {
@@ -131,8 +160,8 @@ class TransformIterator {
     }
 
   private:
-    Iterator _it;
-    Func     _func;
+    Iterator     _it;
+    mutable Func _func; // FIXED: mutable allows stateful / non-const operator() lambdas
 };
 
 template <typename Range, typename Func>
@@ -162,12 +191,17 @@ class TransformRange {
 
 template <typename Iterator, typename Pred>
 class FilterIterator {
+  private:
+    using base_category = typename std::iterator_traits<Iterator>::iterator_category;
+
   public:
-    using value_type        = typename std::iterator_traits<Iterator>::value_type;
-    using reference         = typename std::iterator_traits<Iterator>::reference;
-    using pointer           = typename std::iterator_traits<Iterator>::pointer;
-    using difference_type   = typename std::iterator_traits<Iterator>::difference_type;
-    using iterator_category = std::input_iterator_tag;
+    using value_type      = typename std::iterator_traits<Iterator>::value_type;
+    using reference       = typename std::iterator_traits<Iterator>::reference;
+    using pointer         = typename std::iterator_traits<Iterator>::pointer;
+    using difference_type = typename std::iterator_traits<Iterator>::difference_type;
+    // Filtering inherently requires forward scanning, capping category at forward_iterator_tag
+    using iterator_category =
+        std::conditional_t<std::is_base_of_v<std::forward_iterator_tag, base_category>, std::forward_iterator_tag, std::input_iterator_tag>;
 
     constexpr FilterIterator() = default;
     constexpr FilterIterator(Iterator it, Iterator end, Pred pred): _it(it), _end(end), _pred(pred) {
@@ -242,7 +276,7 @@ class StrideIterator {
     using reference         = typename std::iterator_traits<Iterator>::reference;
     using pointer           = typename std::iterator_traits<Iterator>::pointer;
     using difference_type   = typename std::iterator_traits<Iterator>::difference_type;
-    using iterator_category = std::input_iterator_tag;
+    using iterator_category = detail::NormalizeCategory<typename std::iterator_traits<Iterator>::iterator_category>;
 
     constexpr StrideIterator() = default;
     constexpr StrideIterator(Iterator it, Iterator end, size_t stride): _it(it), _end(end), _stride(stride) {
@@ -311,7 +345,7 @@ class TakeIterator {
     using reference         = typename std::iterator_traits<Iterator>::reference;
     using pointer           = typename std::iterator_traits<Iterator>::pointer;
     using difference_type   = typename std::iterator_traits<Iterator>::difference_type;
-    using iterator_category = std::input_iterator_tag;
+    using iterator_category = detail::NormalizeCategory<typename std::iterator_traits<Iterator>::iterator_category>;
 
     constexpr TakeIterator() = default;
     constexpr TakeIterator(Iterator it, size_t count): _it(it), _count(count) {
@@ -400,6 +434,40 @@ class DropRange {
 };
 
 // ============================================================================
+// EraseIf Action (Terminal mutation)
+// ============================================================================
+
+template <typename Container, typename Pred>
+constexpr auto EraseIf(Container& c, Pred pred) {
+    for (auto it = c.begin(); it != c.end();) {
+        if (pred(*it)) {
+            it = c.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    return c;
+}
+
+// ============================================================================
+// FindIf Action (Linear Search)
+// ============================================================================
+
+template <typename Container, typename Pred>
+constexpr auto FindIf(Container& c, Pred pred) {
+    using std::begin;
+    using std::end;
+    auto it   = begin(c);
+    auto last = end(c);
+    for (; it != last; ++it) {
+        if (pred(*it)) {
+            return it;
+        }
+    }
+    return last;
+}
+
+// ============================================================================
 // Functional Adapters for Pipe `|` Syntax
 // ============================================================================
 
@@ -442,6 +510,74 @@ struct DropAdapter {
     template <typename Range>
     constexpr auto operator()(Range&& r) const {
         return DropRange<Range>(std::forward<Range>(r), count);
+    }
+};
+
+template <typename Pred>
+struct EraseIfAdapter {
+    Pred pred;
+
+    // FIXED: Now delegates directly to ZHLN::Ranges::EraseIf(c, pred)
+    template <typename Container>
+    constexpr auto operator()(Container& c) const {
+        return ZHLN::Ranges::EraseIf(c, pred);
+    }
+};
+
+template <typename Pred>
+struct FindIfAdapter {
+    Pred pred;
+
+    template <typename Container>
+    constexpr auto operator()(Container& c) const {
+        return ZHLN::Ranges::FindIf(c, pred);
+    }
+};
+
+template <typename Key, typename Factory, typename KeySelector>
+struct FindOrInsertAdapter {
+    Key         key;
+    Factory     factory;
+    KeySelector key_selector;
+
+    template <typename Container>
+    constexpr auto operator()(Container& c) const -> auto& {
+        auto it = ZHLN::Ranges::FindIf(c, [this](const auto& element) {
+            if constexpr (std::is_invocable_v<KeySelector, decltype(element)>) {
+                return key_selector(element) == key;
+            } else {
+                return element.first == key;
+            }
+        });
+
+        if (it != c.end()) {
+            if constexpr (requires { it->second; }) {
+                return it->second;
+            } else {
+                return *it;
+            }
+        }
+
+        if constexpr (requires { c.emplace_back(); }) {
+            if constexpr (std::is_invocable_v<Factory>) {
+                if constexpr (requires { c.push_back(typename Container::value_type {key, factory()}); }) {
+                    c.push_back({key, factory()});
+                } else {
+                    c.emplace_back(key, factory());
+                }
+            } else {
+                c.push_back({key, factory});
+            }
+
+            auto& inserted_element = c.back();
+            if constexpr (requires { inserted_element.second; }) {
+                return inserted_element.second;
+            } else {
+                return inserted_element;
+            }
+        } else {
+            static_assert(sizeof(Container) == 0, "[ZHLN::Ranges] Container must support emplace_back/push_back for FindOrInsert.");
+        }
     }
 };
 
@@ -505,6 +641,26 @@ template <typename Range>
 }
 [[nodiscard]] constexpr auto Drop(size_t count) {
     return DropAdapter {count};
+}
+
+// 6. EraseIf Overloads
+template <typename Pred>
+[[nodiscard]] constexpr auto EraseIf(Pred pred) {
+    return EraseIfAdapter<Pred> {pred};
+}
+
+// 7. FindIf Overloads
+template <typename Pred>
+[[nodiscard]] constexpr auto FindIf(Pred pred) {
+    return FindIfAdapter<Pred> {pred};
+}
+
+// 8. FindOrInsert Overloads
+template <typename Key, typename Factory, typename KeySelector = decltype([](const auto& e) { return e.first; })>
+[[nodiscard]] constexpr auto FindOrInsert(Key&& key, Factory&& factory, KeySelector&& key_selector = {}) {
+    return FindOrInsertAdapter<std::decay_t<Key>, std::decay_t<Factory>, std::decay_t<KeySelector>> {
+        std::forward<Key>(key), std::forward<Factory>(factory), std::forward<KeySelector>(key_selector)
+    };
 }
 
 } // namespace ZHLN::Ranges

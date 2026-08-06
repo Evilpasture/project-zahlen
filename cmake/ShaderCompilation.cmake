@@ -187,6 +187,25 @@ add_shader_target(particle_render_shader
         "${SHADER_SRC_DIR}/particle_render.hlsl|PSMain|ps_6_5|SHADER_PARTICLE_RENDER_PS_PATH"
 )
 
+# --- 3D MESH PARTICLE SHADERS ---
+
+add_shader_target(mesh_particle_update_shader
+    STAGES "${SHADER_SRC_DIR}/mesh_particle_update.hlsl|CSMain|cs_6_0|SHADER_MESH_PARTICLE_UPDATE_CS_PATH"
+)
+
+add_shader_target(mesh_particle_render_shader
+    STAGES
+        "${SHADER_SRC_DIR}/mesh_particle_render.hlsl|VSMain|vs_6_5|SHADER_MESH_PARTICLE_RENDER_VS_PATH"
+        "${SHADER_SRC_DIR}/mesh_particle_render.hlsl|PSMain|ps_6_5|SHADER_MESH_PARTICLE_RENDER_PS_PATH"
+)
+
+# Compiles mesh_particle_render.hlsl with -DSHADOW_PASS for depth-only rendering
+add_shader_target(mesh_particle_shadow_shader
+    STAGES
+        "${SHADER_SRC_DIR}/mesh_particle_render.hlsl|VSMain|vs_6_5|SHADER_MESH_PARTICLE_SHADOW_VS_PATH|-DSHADOW_PASS"
+        "${SHADER_SRC_DIR}/mesh_particle_render.hlsl|PSMain|ps_6_5|SHADER_MESH_PARTICLE_SHADOW_PS_PATH|-DSHADOW_PASS"
+)
+
 # --- Multi-stage (VS+PS) targets, RT vs NoRT variants ---
 
 add_shader_target(reflection_shader

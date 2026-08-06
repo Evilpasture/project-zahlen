@@ -514,6 +514,14 @@ struct LineSegment {
     JPH::Vec4 colorEnd   = {1.0f, 1.0f, 1.0f, 1.0f};
 };
 
+struct MeshParticleEmitterCommand {
+    BufferHandle              gpuBuffer;
+    uint32_t                  maxParticles;
+    MeshParticleEmitterParams params;
+    AssetID                   meshAsset;
+    MaterialID                materialAsset;
+};
+
 struct WorkerCmdContext {
     std::array<Vk::CommandPool<Vk::QueueType::Graphics>, 2> pools;
     std::array<ZHLN::Atomic<uint32_t>, 2>                   cmdCount {};
@@ -574,12 +582,13 @@ using Res_AccumNext = Vk::GraphImage<"AccumNext", VK_FORMAT_R16G16B16A16_SFLOAT,
 // --- Impl Struct ---
 
 struct RenderQueues {
-    ZHLN::Array<DrawCommand>            drawQueue;
-    ZHLN::Array<CSGDrawCommand>         csgDrawQueue;
-    ZHLN::Array<ParticleEmitterCommand> particleEmittersQueue;
-    ZHLN::Array<DecalDrawCommand>       decalQueue;
-    ZHLN::Array<LineSegment>            lineQueue;
-    ZHLN::Array<UIBatch>                uiBatches;
+    ZHLN::Array<DrawCommand>                drawQueue;
+    ZHLN::Array<CSGDrawCommand>             csgDrawQueue;
+    ZHLN::Array<ParticleEmitterCommand>     particleEmittersQueue;
+    ZHLN::Array<MeshParticleEmitterCommand> meshParticleQueue;
+    ZHLN::Array<DecalDrawCommand>           decalQueue;
+    ZHLN::Array<LineSegment>                lineQueue;
+    ZHLN::Array<UIBatch>                    uiBatches;
 
     void Clear() noexcept {
         ZHLN::Reflect::ForEachField(*this, [](auto& queue) { queue.clear(); });
@@ -778,6 +787,11 @@ struct RenderContext::Impl {
     Vk::PipelineLayout          particleRenderLayout;
     Vk::TypedPipeline<1, false> particleRenderPipeline;
 
+    Vk::ComputePass    meshParticleUpdatePass;
+    Vk::PipelineLayout meshParticleRenderLayout;
+    Vk::Pipeline       meshParticleRenderPipeline;
+    Vk::Pipeline       meshParticleShadowPipeline;
+
     Vk::DescriptorSetLayout decalDescLayout;
     Vk::DescriptorPool      decalDescPool;
     VkDescriptorSet         decalSet = VK_NULL_HANDLE;
@@ -966,6 +980,39 @@ struct RenderContext::Impl {
         uint32_t        textureIndex;
     };
 
+    struct alignas(16) MeshParticleComputePush {
+        VkDeviceAddress           particleBufferAddr;
+        uint32_t                  particleCount;
+        float                     deltaTime;
+        MeshParticleEmitterParams p;
+    };
+
+    struct MeshParticleRenderPush {
+        // 64-bit Addresses (32 bytes) -> Offset 0
+        VkDeviceAddress particleBufferAddr;
+        VkDeviceAddress posAddress;
+        VkDeviceAddress attrAddress;
+        VkDeviceAddress iboAddress;
+
+        // 128-bit Vectors (32 bytes) -> Offset 32 (16-byte aligned!)
+        float baseColorFactor[4];
+        float emissiveFactor[4];
+
+        // 32-bit Scalars (36 bytes) -> Offset 64
+        uint32_t indexCount;
+        uint32_t albedoIdx;
+        uint32_t normalIdx;
+        uint32_t pbrIdx;
+        uint32_t emissiveIdx;
+        float    roughness;
+        float    metallic;
+        float    alphaCutoff;
+        uint32_t alphaMode;
+
+        uint32_t _padding; // Offset 100 -> Rounds total size to 104 bytes
+    };
+    static_assert(sizeof(MeshParticleRenderPush) == 104);
+
     struct PPPushConstants {
         JPH::Mat44 invViewProj;
         JPH::Mat44 viewProj;
@@ -1051,6 +1098,7 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, Error> CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
     [[nodiscard]] std::expected<void, Error> BuildDecalPipeline();
     [[nodiscard]] std::expected<void, Error> BuildParticlePipelines();
+    [[nodiscard]] std::expected<void, Error> BuildMeshParticlePipelines();
     [[nodiscard]] std::expected<void, Error> InitBindless();
     [[nodiscard]] std::expected<void, Error> BuildTAAPipeline();
     [[nodiscard]] std::expected<void, Error> BuildFXAAPipeline();

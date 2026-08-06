@@ -78,6 +78,18 @@ void RenderContext::SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxPa
     _impl->queues.particleEmittersQueue.push_back({.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = params});
 }
 
+void RenderContext::SubmitMeshParticleEmitter(
+    BufferHandle                     gpuBuffer,
+    uint32_t                         maxParticles,
+    const MeshParticleEmitterParams& params,
+    AssetID                          mesh,
+    MaterialID                       mat
+) {
+    _impl->queues.meshParticleQueue.push_back(
+        {.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = params, .meshAsset = mesh, .materialAsset = mat}
+    );
+}
+
 void RenderContext::ClearGPUCaches() noexcept {
     _impl->assetMeshMap.Clear();
     _impl->assetMaterialMap.Clear();
