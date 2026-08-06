@@ -105,49 +105,59 @@ add_subdirectory(extern/zahlen)
 # Game C++26 Modules Target (gameplay/*.cppm)
 file(GLOB_RECURSE GAMEPLAY_MODULE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/gameplay/*.cppm")
 
-add_library(gameplay_modules STATIC)
-target_sources(gameplay_modules PUBLIC FILE_SET CXX_MODULES FILES ${GAMEPLAY_MODULE_SOURCES})
-set_target_properties(gameplay_modules PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_SCAN_FOR_MODULES ON)
+if(GAMEPLAY_MODULE_SOURCES)
+    add_library(gameplay_modules STATIC)
+    target_sources(gameplay_modules PUBLIC FILE_SET CXX_MODULES FILES ${GAMEPLAY_MODULE_SOURCES})
+    set_target_properties(gameplay_modules PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_SCAN_FOR_MODULES ON)
 
-target_include_directories(gameplay_modules PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/gameplay
-    ${zahlen_SOURCE_DIR}/include
-    ${zahlen_SOURCE_DIR}/src
-    ${zahlen_SOURCE_DIR}/extern/JoltPhysics
-)
-target_compile_definitions(gameplay_modules PRIVATE JPH_DOUBLE_PRECISION JPH_SHARED_LIBRARY)
-target_link_libraries(gameplay_modules PUBLIC zahlen_engine zahlen_ecs zahlen_audio Jolt)
+    target_include_directories(gameplay_modules PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/gameplay
+        ${zahlen_SOURCE_DIR}/include
+        ${zahlen_SOURCE_DIR}/src
+        ${zahlen_SOURCE_DIR}/extern/JoltPhysics
+    )
+    target_compile_definitions(gameplay_modules PRIVATE JPH_DOUBLE_PRECISION JPH_SHARED_LIBRARY)
+    target_link_libraries(gameplay_modules PUBLIC zahlen_engine zahlen_ecs zahlen_audio Jolt)
 
-if(COMPILER_HAS_REFLECTION OR (CMAKE_CXX_COMPILER_ID STREQUAL "GNU") OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
-    target_compile_options(gameplay_modules PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
+    if(COMPILER_HAS_REFLECTION OR (CMAKE_CXX_COMPILER_ID STREQUAL "GNU") OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
+        target_compile_options(gameplay_modules PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
+    endif()
 endif()
 
 # Dynamic Gameplay Library (gameplay/*.cpp for Live Hot-Reloading)
 file(GLOB GAMEPLAY_CPP_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/gameplay/*.cpp")
 
-add_library(gameplay SHARED ${GAMEPLAY_CPP_SOURCES})
-set_target_properties(gameplay PROPERTIES CXX_SCAN_FOR_MODULES ON BUILD_RPATH "$ORIGIN;$ORIGIN/extern/zahlen/extern/JoltPhysics/Build")
-target_include_directories(gameplay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/gameplay ${zahlen_SOURCE_DIR}/include ${zahlen_SOURCE_DIR}/src ${zahlen_SOURCE_DIR}/extern/JoltPhysics)
-target_compile_definitions(gameplay PRIVATE JPH_DOUBLE_PRECISION JPH_SHARED_LIBRARY)
-target_link_libraries(gameplay PRIVATE gameplay_modules zahlen_engine Jolt)
+if(GAMEPLAY_CPP_SOURCES)
+    add_library(gameplay SHARED ${GAMEPLAY_CPP_SOURCES})
+    set_target_properties(gameplay PROPERTIES CXX_SCAN_FOR_MODULES ON BUILD_RPATH "$ORIGIN;$ORIGIN/extern/zahlen/extern/JoltPhysics/Build")
+    target_include_directories(gameplay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/gameplay ${zahlen_SOURCE_DIR}/include ${zahlen_SOURCE_DIR}/src ${zahlen_SOURCE_DIR}/extern/JoltPhysics)
+    target_compile_definitions(gameplay PRIVATE JPH_DOUBLE_PRECISION JPH_SHARED_LIBRARY)
+    target_link_libraries(gameplay PRIVATE zahlen_engine Jolt)
+    if(TARGET gameplay_modules)
+        target_link_libraries(gameplay PRIVATE gameplay_modules)
+    endif()
 
-if(COMPILER_HAS_REFLECTION OR (CMAKE_CXX_COMPILER_ID STREQUAL "GNU") OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
-    target_compile_options(gameplay PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
+    if(COMPILER_HAS_REFLECTION OR (CMAKE_CXX_COMPILER_ID STREQUAL "GNU") OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
+        target_compile_options(gameplay PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
+    endif()
+
+    add_custom_command(TARGET gameplay POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:gameplay> $<TARGET_FILE_DIR:${PROJECT_NAME}>/
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/scripts"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:gameplay> "${CMAKE_CURRENT_SOURCE_DIR}/scripts/"
+        COMMENT "Copying gameplay dynamic library for live hot-reloading..."
+    )
 endif()
 
-add_custom_command(TARGET gameplay POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:gameplay> $<TARGET_FILE_DIR:${PROJECT_NAME}>/
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/scripts"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:gameplay> "${CMAKE_CURRENT_SOURCE_DIR}/scripts/"
-    COMMENT "Copying gameplay dynamic library for live hot-reloading..."
-)
+# Dynamically discover and compile ANY .fnl files in scripts/ (handles 0, 1, or many files automatically)
+file(GLOB_RECURSE FENNEL_GAME_SCRIPTS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.fnl")
 
-# Compile Game Fennel Scripts & Sync Static Lua Scripts
-zahlen_compile_fennel(${PROJECT_NAME} COMPILED_GAME_LUA
-    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/gameplay.fnl"
-    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/main_menu.fnl"
-    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/dialogue_db.fnl"
-)
+if(FENNEL_GAME_SCRIPTS)
+    zahlen_compile_fennel(${PROJECT_NAME} COMPILED_GAME_LUA ${FENNEL_GAME_SCRIPTS})
+    add_custom_target(compile_game_fennel ALL DEPENDS ${COMPILED_GAME_LUA})
+else()
+    add_custom_target(compile_game_fennel ALL)
+endif()
 
 file(GLOB_RECURSE STATIC_GAME_SCRIPTS LIST_DIRECTORIES false "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.lua" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.sh" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.txt")
 list(FILTER STATIC_GAME_SCRIPTS EXCLUDE REGEX ".*/scripts/core/.*")
@@ -166,8 +176,7 @@ foreach(STATIC_SRC IN LISTS STATIC_GAME_SCRIPTS)
     list(APPEND GAME_SCRIPT_SYMLINKS "${OUT_FILE}")
 endforeach()
 
-add_custom_target(sync_game_static_scripts DEPENDS ${STATIC_GAME_SYMLINKS})
-add_custom_target(compile_game_fennel ALL DEPENDS ${COMPILED_GAME_LUA})
+add_custom_target(sync_game_static_scripts DEPENDS ${GAME_SCRIPT_SYMLINKS})
 add_dependencies(compile_game_fennel sync_game_static_scripts)
 
 # Configure Game Ninja Asset Cooking Pipeline (zcook)
@@ -176,9 +185,18 @@ zahlen_configure_game_assets("${CMAKE_CURRENT_SOURCE_DIR}")
 # Game Executable Target
 add_executable(${PROJECT_NAME} src/main.cpp)
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/gameplay PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/extern>)
-target_link_libraries(${PROJECT_NAME} PRIVATE zahlen_engine gameplay_modules imgui Jolt)
+target_link_libraries(${PROJECT_NAME} PRIVATE zahlen_engine imgui Jolt)
+
+if(TARGET gameplay)
+    add_dependencies(${PROJECT_NAME} gameplay)
+endif()
+
+if(TARGET gameplay_modules)
+    target_link_libraries(${PROJECT_NAME} PRIVATE gameplay_modules)
+endif()
+
 target_compile_definitions(${PROJECT_NAME} PRIVATE JPH_DOUBLE_PRECISION)
-add_dependencies(${PROJECT_NAME} gameplay compile_game_fennel)
+add_dependencies(${PROJECT_NAME} compile_game_fennel)
 
 if(MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE /W4 /permissive-)
