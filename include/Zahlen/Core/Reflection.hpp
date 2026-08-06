@@ -183,6 +183,19 @@ constexpr void ForEachMemberFunction(F&& f) {
     };
 }
 
+template <typename T, typename F>
+constexpr void ForEachFieldInfo(F&& f) {
+    constexpr auto members = std::define_static_array(std::meta::nonstatic_data_members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
+
+    [:ZHLN::Reflect::Expand(members):] >> [&]<auto member>() {
+        constexpr std::string_view name   = std::meta::identifier_of(member);
+        constexpr std::size_t      offset = std::meta::offset_of(member).bytes;
+        using FieldType                   = typename[:std::meta::type_of(member):];
+
+        f.template operator()<FieldType>(name, offset);
+    };
+}
+
 // ----------------------------------------------------------------------------
 
 template <typename T>
@@ -668,6 +681,10 @@ constexpr void ForEachDataMember(F&& /*unused*/) {
 
 template <typename T, typename F>
 constexpr void ForEachMemberFunction(F&& /*unused*/) {
+}
+
+template <typename T, typename F>
+constexpr void ForEachFieldInfo(F&& /*unused*/) {
 }
 
 template <typename T>

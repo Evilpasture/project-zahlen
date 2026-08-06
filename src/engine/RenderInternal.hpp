@@ -5,7 +5,6 @@
 #pragma once
 #include "Rendering.hpp"
 #include "engine/FileWatcher.hpp"
-#include <Zahlen/Threading/Mutex.hpp>
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/ControlFlow.hpp>
@@ -15,6 +14,7 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Types.hpp>
 #include <array>
 #include <cstddef>
@@ -1258,7 +1258,3 @@ template <>
 struct ZHLN::Vk::FormatOf<::ZHLN::PackedRGBA8> {
     static constexpr auto value = VK_FORMAT_R8G8B8A8_UNORM;
 };
-
-ZHLN_REFLECT_VERTEX(::ZHLN::VertexPosition, position);
-ZHLN_REFLECT_VERTEX(::ZHLN::VertexAttributes, normal, tangent, uv, color);
-ZHLN_REFLECT_VERTEX(::ZHLN::VertexSkin, joints, weights);
