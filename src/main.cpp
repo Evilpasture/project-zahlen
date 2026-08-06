@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <format>
 #include <imgui.h>
 #include <print>
@@ -132,12 +133,15 @@ void DrawConsole(ZHLN::Engine& engine) {
     ImGui::SameLine();
 
     const float footer_height = ImGui::GetStyle().ItemSpacing.y + ImGui::GetFrameHeightWithSpacing();
-    ImGui::BeginChild("ScrollingRegion", ImVec2(0, -footer_height), false);
+    ImGui::BeginChild("ScrollingRegion", ImVec2(0, -footer_height), 0);
 
     size_t entryCount = ZHLN::GameConsole::GetEntryCount();
     for (size_t i = 0; i < entryCount; ++i) {
         std::string_view text;
-        float            r, g, b, a;
+        float            r;
+        float            g;
+        float            b;
+        float            a;
         ZHLN::GameConsole::GetEntry(i, text, r, g, b, a);
         ImGui::TextColored(ImVec4(r, g, b, a), "%.*s", (int) text.size(), text.data());
     }
@@ -179,7 +183,7 @@ void DrawInventoryShell(ZHLN::Engine& engine) {
     }
 
     const float footer_height = ImGui::GetStyle().ItemSpacing.y + ImGui::GetFrameHeightWithSpacing();
-    ImGui::BeginChild("InvScrollingRegion", ImVec2(0, -footer_height), false);
+    ImGui::BeginChild("InvScrollingRegion", ImVec2(0, -footer_height), 0);
 
     for (const auto& line: s_InvShellLog) {
         if (line.starts_with("$ ")) {
@@ -544,7 +548,7 @@ void UISystem(ZHLN::Engine& engine) {
     ImGui::Begin("Lighting Workspace Controller");
 
     ImGui::SeparatorText("Punctual Shadows (Raster Fallback)");
-    if (shadowSettings) {
+    if (shadowSettings != nullptr) {
         ImGui::SliderInt("Max Punctual Shadows", &shadowSettings->maxPunctualShadows, 0, 4);
         if (shadowSettings->maxPunctualShadows > 0) {
             ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "  [Rendering %d shadow-casting light(s)]", shadowSettings->maxPunctualShadows);
@@ -705,7 +709,7 @@ struct EditorState {
     float        freeCamSpeed      = 25.0f;
 };
 
-static EditorState s_EditorState;
+EditorState s_EditorState;
 
 void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::InputContext& input, float dt) {
     const float sensitivity = 0.15f;
@@ -1020,9 +1024,8 @@ int main(int argc, char* argv[]) {
 
                 ZHLN::TaskSystem::Shutdown();
                 return ret;
-            } else {
-                return ZHLN::Engine::Run(options, UISystem);
             }
+            return ZHLN::Engine::Run(options, UISystem);
         })
         .or_else([](int errorCode) -> std::expected<int, int> { return errorCode; })
         .value();
