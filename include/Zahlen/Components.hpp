@@ -114,6 +114,17 @@ struct Components {
         DrawFlags flags         = DrawFlags::None;
     };
 
+    struct LODComponent {
+        static constexpr size_t MAX_LODS = 4;
+        struct Level {
+            AssetID meshAsset = InvalidAssetID;
+            float   distance  = 0.0f; // Max distance before switching to the NEXT level
+        };
+        std::array<Level, MAX_LODS> levels;
+        uint8_t                     count      = 0;
+        uint8_t                     currentLOD = 0;
+    };
+
     struct TerrainComponent {
         uint32_t           sampleCount = 128;
         float              worldSize   = 280.0f;

@@ -338,6 +338,13 @@ struct DrawLineArgs {
     float r2, g2, b2, a2;
 };
 
+struct SetLODArgs {
+    uint64_t    entityRaw;
+    uint32_t    index;
+    const char* meshName;
+    float       distance;
+};
+
 #pragma pack(pop)
 
 void SafeDestroyEntity(ZHLN::Engine* engine, ZHLN::Entity entity) {
@@ -552,6 +559,23 @@ void RegisterCreativeWorkCommands() {
                         a.outEntities[i] = temp_buffer[i].Pack();
                     }
                     return writtenCount;
+                }));
+
+    RegisterCmd("SetLODLevel", MakeCmd<SetLODArgs>([](ZHLN::Engine* engine, const SetLODArgs& a) -> uint64_t {
+                    auto  e   = ZHLN::Entity::Unpack(a.entityRaw);
+                    auto& reg = engine->GetRegistry();
+
+                    auto* lod = reg.Get<ZHLN::Components::LODComponent>(e);
+                    if (!lod) {
+                        lod = &reg.Add(e, ZHLN::Components::LODComponent {});
+                    }
+
+                    if (a.index < ZHLN::Components::LODComponent::MAX_LODS) {
+                        lod->levels[a.index].meshAsset = HashAssetID(a.meshName);
+                        lod->levels[a.index].distance  = a.distance;
+                        lod->count                     = std::max(lod->count, static_cast<uint8_t>(a.index + 1));
+                    }
+                    return 1;
                 }));
 
     RegisterCmd(

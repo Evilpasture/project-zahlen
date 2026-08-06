@@ -12,6 +12,7 @@
 #include "TTYBackend.hpp"
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_vulkan.h"
+#include "engine/system/LODSystem.hpp"
 #include "imgui.h"
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
@@ -675,6 +676,7 @@ GameplayStatus Engine::Tick(float dt, GameplayDriver driver) {
     // 5. Update Graph & Command Buffer Playback
     GetUpdateGraph().Execute(*this, dt);
     GetMainECB().Playback();
+    LODSystem::Update(*this);
 
     // 6. Render Graph & Frame Submission
     GetRenderGraph().Execute(*this, dt);
