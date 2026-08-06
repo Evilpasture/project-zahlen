@@ -3,8 +3,8 @@
 
 // File: src/main.cpp
 #include "engine/Platform.hpp"
-#include "physics/PhysicsWorld.hpp"
 #include <GLFW/glfw3.h>
+#include <Jolt/Jolt.h>
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
@@ -28,7 +28,6 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
-#include <cmath>
 #include <format>
 #include <imgui.h>
 #include <print>
