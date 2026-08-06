@@ -13,10 +13,10 @@
 #include <Features.hpp>
 #include <StagingContext.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
 #include <cstddef>
 #include <functional>
 #include <stb_image.h>
-#include <Zahlen/Threading/TaskSystem.hpp>
 #include <vector>
 namespace {
 
@@ -507,8 +507,7 @@ RenderContext::~RenderContext() {
 }
 
 std::expected<void, Error> RenderContext::Impl::InitLineBuffers() noexcept {
-    const size_t maxLineVerts   = 500000;
-    const size_t lineBufferSize = maxLineVerts * (sizeof(VertexPosition) + sizeof(VertexAttributes));
+    const size_t lineBufferSize = kMaxLineVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
 
     for (int i = 0; i < 2; ++i) {
         auto gpu_buf_res = Vk::Buffer::Create(
@@ -777,7 +776,7 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
         .and_then([&]() -> std::expected<void, Error> {
             if (rtCtx.Valid()) {
                 ZHLN_AccelerationStructureSizes tlasSizes;
-                rtCtx.GetTlasSizes(kGpuCullingMaxInstances, tlasSizes);
+                rtCtx.GetTLASSizes(kGpuCullingMaxInstances, tlasSizes);
 
                 auto make_tlas_set = [&](uint32_t i) -> std::expected<void, Error> {
                     return Vk::Buffer::Create(
@@ -795,7 +794,7 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                         })
                         .and_then([&, i, tlasSizes](auto&& tsb) { // Deduced as std::expected<Vk::Buffer, Error>
                             tlasScratchBuffer[i] = std::forward<decltype(tsb)>(tsb);
-                            tlas[i]              = rtCtx.CreateAS(tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL);
+                            tlas[i] = rtCtx.CreateAccelerationStructure(tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL);
 
                             return Vk::Buffer::Create(
                                        allocator.Get(), sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances,
@@ -862,8 +861,7 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
         .and_then([&]() -> std::expected<void, Error> { return InitializeSystemTextures(); })
         .and_then([&]() -> std::expected<void, Error> {
             ZHLN::Log("[RenderInit] Pre-allocating persistently mapped Double-Buffered Debug VBOs...");
-            size_t maxDebugVerts = 500000;
-            size_t bufferSize    = maxDebugVerts * (sizeof(VertexPosition) + sizeof(VertexAttributes));
+            size_t bufferSize = kMaxDebugVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
             for (int i = 0; i < 2; ++i) {
                 auto gpu_buf_res = Vk::Buffer::Create(
                     allocator.Get(), bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
@@ -874,7 +872,7 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
                 auto gpu_buf = std::move(*gpu_buf_res);
 
                 auto address        = ctx.BufferAddress(gpu_buf.Handle());
-                debugMeshHandles[i] = meshPool.Create(std::move(gpu_buf), maxDebugVerts, address);
+                debugMeshHandles[i] = meshPool.Create(std::move(gpu_buf), kMaxDebugVertices, address);
             }
 
             // Update global descriptor bindings
@@ -1700,9 +1698,7 @@ std::expected<void, Error> RenderContext::Impl::BuildHangGpuPipeline() {
 }
 
 std::expected<void, Error> RenderContext::Impl::InitUIDynamicBuffers() noexcept {
-    // Capacity for 100,000 vertices (approx 16k glyphs or panels) per frame
-    const size_t maxUiVertices = 100000;
-    const size_t uiBufferSize  = maxUiVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
+    const size_t uiBufferSize = kMaxUiVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
 
     for (int i = 0; i < 2; ++i) {
         auto gpu_buf_res = Vk::Buffer::Create(

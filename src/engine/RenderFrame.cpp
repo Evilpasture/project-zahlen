@@ -7,9 +7,9 @@
 #include "engine/Scheduler.hpp"
 #include <Zahlen/Core/RadixSort.hpp>
 #include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
 #include <array>
 #include <cstring>
-#include <Zahlen/Threading/TaskSystem.hpp>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -141,8 +141,8 @@ void RenderContext::Impl::FlushLineQueue() {
         return;
     }
 
-    const uint32_t maxLineVerts   = 500000;
-    uint32_t       totalLineVerts = std::min(static_cast<uint32_t>(queues.lineQueue.size() * 2), maxLineVerts);
+    constexpr uint32_t maxLineVerts   = kMaxLineVertices;
+    uint32_t           totalLineVerts = std::min(static_cast<uint32_t>(queues.lineQueue.size() * 2), maxLineVerts);
 
     auto  mappedRegion = lineVbos[frame_index].Map();
     auto* basePosPtr   = static_cast<VertexPosition*>(mappedRegion.data);
@@ -357,7 +357,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 
     ZHLN_TlasGeometryDesc geom = {.instance_data = ctx.BufferAddress(instanceBuf.Handle())};
 
-    rtCtx.CmdBuildTlas(cmd, geom, tlas[frame_index], ctx.BufferAddress(tlasScratchBuffer[frame_index].Handle()), tlasInstancesScratch.size());
+    rtCtx.BuildTLAS(cmd, geom, tlas[frame_index], ctx.BufferAddress(tlasScratchBuffer[frame_index].Handle()), tlasInstancesScratch.size());
 
     Vk::MemoryBarrier(
         cmd, {.src_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
@@ -1000,7 +1000,8 @@ std::string_view GetRenderGraphDump(AAMode currentMode) noexcept {
 
 // --- Standalone Compute Recording ---
 void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Compute> compCmd) {
-    uint32_t fIdx = frame_index;
+    Vk::CommandBufferGuard guard(current_compute_cmd);
+    uint32_t               fIdx = frame_index;
 
     PassFactory factory {
         .self         = *this,
@@ -1137,10 +1138,15 @@ RenderResult RenderContext::BeginFrame() noexcept {
 RenderResult RenderContext::EndFrame() noexcept {
     struct EndFrameGuard {
         RenderContext::Impl* impl;
-        EndFrameGuard(RenderContext::Impl* i): impl(i) {
+        explicit EndFrameGuard(RenderContext::Impl* i) noexcept: impl(i) {
         }
-        ~EndFrameGuard() {
-            impl->activeQueueGuard.reset();
+        ~EndFrameGuard() noexcept {
+            if (impl != nullptr) {
+                impl->activeQueueGuard.reset();
+                impl->queues.Clear();
+                impl->current_cmd         = VK_NULL_HANDLE;
+                impl->hasSkinnedThisFrame = false;
+            }
         }
         EndFrameGuard(const EndFrameGuard&)            = delete;
         EndFrameGuard& operator=(const EndFrameGuard&) = delete;
@@ -1155,7 +1161,6 @@ RenderResult RenderContext::EndFrame() noexcept {
     {
         ZHLN_PROFILE_SCOPE("Render (CPU Record)");
         if (_impl->current_cmd == VK_NULL_HANDLE) {
-            _impl->queues.Clear();
             return std::unexpected(Error);
         }
 
@@ -1164,9 +1169,7 @@ RenderResult RenderContext::EndFrame() noexcept {
         // ====================================================================
         _impl->current_compute_cmd = _impl->computePools[_impl->frame_index][0];
 
-        ZHLN_BeginCommandBuffer(_impl->current_compute_cmd);
         _impl->RecordComputeFrame(_impl->current_compute_cmd);
-        ZHLN_EndCommandBuffer(_impl->current_compute_cmd);
 
         uint64_t computeSignalValue = _impl->sync.GetTimelineValue(_impl->frame_index);
 
@@ -1176,9 +1179,6 @@ RenderResult RenderContext::EndFrame() noexcept {
         );
 
         if (!comp_submit_res) [[unlikely]] {
-            _impl->queues.Clear();
-            _impl->current_cmd         = VK_NULL_HANDLE;
-            _impl->hasSkinnedThisFrame = false;
             return std::unexpected(comp_submit_res.error());
         }
 
@@ -1241,9 +1241,6 @@ RenderResult RenderContext::EndFrame() noexcept {
         );
 
         if (res != ZHLN_FrameResult_Ok && res != ZHLN_FrameResult_Suboptimal) {
-            _impl->queues.Clear();
-            _impl->current_cmd         = VK_NULL_HANDLE;
-            _impl->hasSkinnedThisFrame = false;
             return std::unexpected(MapFrameResult(res));
         }
 
@@ -1252,10 +1249,6 @@ RenderResult RenderContext::EndFrame() noexcept {
 
         std::swap(_impl->graphResources.shadowMap, _impl->shadowMapPrev);
         std::swap(_impl->shadowCascadeViews, _impl->shadowCascadeViewsPrev);
-
-        _impl->queues.Clear();
-        _impl->current_cmd         = VK_NULL_HANDLE;
-        _impl->hasSkinnedThisFrame = false;
     }
 
     if (res == ZHLN_FrameResult_Suboptimal) {
@@ -1324,7 +1317,7 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
     VkDeviceAddress attrAddr = (attrMesh != nullptr) ? attrMesh->vboAddress : 0;
 
     if (posMesh == attrMesh && posMesh != nullptr) {
-        attrAddr = posMesh->vboAddress + (500000 * sizeof(VertexPosition));
+        attrAddr = posMesh->vboAddress + (RenderContext::Impl::kMaxLineVertices * sizeof(VertexPosition));
     } else if (params.skinnedVertexBuffer != Invalid && posMesh != nullptr) {
         attrAddr = finalPosMesh->vboAddress + (posMesh->vertexCount * sizeof(VertexPosition));
     }

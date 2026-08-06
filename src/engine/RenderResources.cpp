@@ -479,7 +479,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     uint32_t primitiveCount = (drawCmd.instanceData.iboAddress != 0) ? drawCmd.instanceData.indexCount / 3 : scratchMesh->vertexCount / 3;
 
     ZHLN_AccelerationStructureSizes sizes {};
-    rtCtx.GetBlasSizes(geom, primitiveCount, sizes);
+    rtCtx.GetBLASSizes(geom, primitiveCount, sizes);
 
     if (scratchMesh->blas == VK_NULL_HANDLE) {
         auto blasBufOpt = Vk::Buffer::Create(
@@ -489,9 +489,9 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
         if (!blasBufOpt) {
             return;
         }
-        scratchMesh->blasBuffer  = std::move(*blasBufOpt);
-        scratchMesh->blas        = rtCtx.CreateAS(scratchMesh->blasBuffer.Handle(), sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL);
-        scratchMesh->blasAddress = rtCtx.GetASAddress(scratchMesh->blas);
+        scratchMesh->blasBuffer = std::move(*blasBufOpt);
+        scratchMesh->blas = rtCtx.CreateAccelerationStructure(scratchMesh->blasBuffer.Handle(), sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL);
+        scratchMesh->blasAddress = rtCtx.GetAccelerationStructureAddress(scratchMesh->blas);
     }
 
     auto scratchBufOpt = Vk::Buffer::Create(
@@ -504,7 +504,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     VkDeviceAddress scratchAddress = ctx.BufferAddress(scratchBuf.Handle());
 
     // Record the build command directly onto the active graphics queue command buffer
-    rtCtx.CmdBuildBlas(cmd, geom, scratchMesh->blas, scratchAddress, primitiveCount);
+    rtCtx.BuildBLAS(cmd, geom, scratchMesh->blas, scratchAddress, primitiveCount);
 }
 
 void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept {
@@ -513,8 +513,8 @@ void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, con
         return;
     }
 
-    size_t maxPosSize  = 500000 * sizeof(VertexPosition);
-    size_t maxAttrSize = 500000 * sizeof(VertexAttributes);
+    size_t maxPosSize  = RenderContext::Impl::kMaxDebugVertices * sizeof(VertexPosition);
+    size_t maxAttrSize = RenderContext::Impl::kMaxDebugVertices * sizeof(VertexAttributes);
 
     auto  mapped  = nativeMesh->buffer.Map();
     char* basePtr = static_cast<char*>(mapped.data);
@@ -522,7 +522,7 @@ void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, con
     std::memcpy(basePtr, posData, std::min(posSize, maxPosSize));
     std::memcpy(basePtr + maxPosSize, attrData, std::min(attrSize, maxAttrSize));
 
-    nativeMesh->vertexCount = std::min(vertexCount, 500000u);
+    nativeMesh->vertexCount = std::min(vertexCount, RenderContext::Impl::kMaxDebugVertices);
 }
 
 BufferHandle RenderContext::GetDebugMeshBuffer() const noexcept {
@@ -540,11 +540,14 @@ void RenderContext::SubmitUI(
         return;
     }
 
-    uint32_t safeVertexCount = std::min(vertexCount, 100000u);
+    auto&  vbo         = _impl->uiVbos[_impl->frame_index];
+    size_t maxVertices = vbo.Size() / (sizeof(VertexPosition) + sizeof(VertexAttributes));
 
-    auto  mappedRegion = _impl->uiVbos[_impl->frame_index].Map();
+    uint32_t safeVertexCount = std::min(vertexCount, static_cast<uint32_t>(maxVertices));
+
+    auto  mappedRegion = vbo.Map();
     auto* basePosPtr   = static_cast<VertexPosition*>(mappedRegion.data);
-    auto* baseAttrPtr  = reinterpret_cast<VertexAttributes*>(basePosPtr + 100000);
+    auto* baseAttrPtr  = reinterpret_cast<VertexAttributes*>(basePosPtr + maxVertices);
 
     std::memcpy(basePosPtr, positions, safeVertexCount * sizeof(VertexPosition));
     std::memcpy(baseAttrPtr, attributes, safeVertexCount * sizeof(VertexAttributes));
@@ -680,7 +683,7 @@ RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
             };
             b.primitiveCount = (b.indexMesh != nullptr) ? mesh.indexCount / 3 : mesh.vertexCount / 3;
 
-            impl->rtCtx.GetBlasSizes(b.geom, b.primitiveCount, b.sizes);
+            impl->rtCtx.GetBLASSizes(b.geom, b.primitiveCount, b.sizes);
 
             return Vk::Buffer::Create(
                        impl->allocator.Get(), b.sizes.acceleration_structure_size,
@@ -693,7 +696,7 @@ RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
                 });
         })
         .and_then([&](BuildContext b) -> std::expected<BuildContext, Error> {
-            b.blas = impl->rtCtx.CreateAS(b.blasBuffer.Handle(), b.sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL);
+            b.blas = impl->rtCtx.CreateAccelerationStructure(b.blasBuffer.Handle(), b.sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL);
             if (b.blas == VK_NULL_HANDLE) {
                 return std::unexpected(VulkanCallError::VulkanCallFailed);
             }
@@ -726,7 +729,7 @@ RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
                               .dst_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
                               .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
                 );
-                impl->rtCtx.CmdBuildBlas(tempCmd, b.geom, b.blas, Vk::GetBufferAddress(impl->ctx.Device(), b.scratch.Handle()), b.primitiveCount);
+                impl->rtCtx.BuildBLAS(tempCmd, b.geom, b.blas, Vk::GetBufferAddress(impl->ctx.Device(), b.scratch.Handle()), b.primitiveCount);
             }
 
             return Vk::SubmitAndWait(
@@ -737,7 +740,7 @@ RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
                 .transform([&]() {
                     b.posMesh->blasBuffer  = std::move(b.blasBuffer);
                     b.posMesh->blas        = b.blas;
-                    b.posMesh->blasAddress = impl->rtCtx.GetASAddress(b.blas);
+                    b.posMesh->blasAddress = impl->rtCtx.GetAccelerationStructureAddress(b.blas);
                     b.posMesh->device      = impl->ctx.Device();
                     b.posMesh->rtCtx       = &impl->rtCtx;
                 });

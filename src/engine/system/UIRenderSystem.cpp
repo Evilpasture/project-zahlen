@@ -257,20 +257,17 @@ void UIRenderSystem::Update(Engine& engine) {
         // A. Process Panel (if entity has UIPanelComponent)
         if (auto* panel = reg.Get<Components::UIPanelComponent>(e)) {
             if (rect != nullptr) {
-                uint32_t maxNeeded = 54;
-                if (currentVertexOffset + maxNeeded < 100000) {
-                    size_t startIdx = localPositions.size();
-                    localPositions.resize(startIdx + maxNeeded);
-                    localAttributes.resize(startIdx + maxNeeded);
+                size_t startIdx = localPositions.size();
+                localPositions.resize(startIdx + 54);
+                localAttributes.resize(startIdx + 54);
 
-                    uint32_t written = GUI::AppendPanelVertices(&localPositions[startIdx], &localAttributes[startIdx], *rect, *panel);
+                uint32_t written = GUI::AppendPanelVertices(&localPositions[startIdx], &localAttributes[startIdx], *rect, *panel);
 
-                    localPositions.resize(startIdx + written);
-                    localAttributes.resize(startIdx + written);
+                localPositions.resize(startIdx + written);
+                localAttributes.resize(startIdx + written);
 
-                    currentVertexOffset += written;
-                    QueueBatch(panel->textureIndex, written, useScissor, currentScissor, false);
-                }
+                currentVertexOffset += written;
+                QueueBatch(panel->textureIndex, written, useScissor, currentScissor, false);
             }
         }
 
@@ -317,24 +314,23 @@ void UIRenderSystem::Update(Engine& engine) {
             }
 
             if (activeFont != nullptr && !displayStr.empty()) {
-                auto maxVertsNeeded = static_cast<uint32_t>(displayStr.length() * 6);
-                if (currentVertexOffset + maxVertsNeeded < 100000) {
-                    size_t startIdx = localPositions.size();
-                    localPositions.resize(startIdx + maxVertsNeeded);
-                    localAttributes.resize(startIdx + maxVertsNeeded);
+                auto   maxVertsNeeded = static_cast<uint32_t>(displayStr.length() * 6);
+                size_t startIdx       = localPositions.size();
 
-                    uint32_t written = GUI::AppendTextVertices(
-                        &localPositions[startIdx], &localAttributes[startIdx], *activeFont, displayStr, drawX, drawY, text->scale, text->color
-                    );
+                localPositions.resize(startIdx + maxVertsNeeded);
+                localAttributes.resize(startIdx + maxVertsNeeded);
 
-                    localPositions.resize(startIdx + written);
-                    localAttributes.resize(startIdx + written);
+                uint32_t written = GUI::AppendTextVertices(
+                    &localPositions[startIdx], &localAttributes[startIdx], *activeFont, displayStr, drawX, drawY, text->scale, text->color
+                );
 
-                    currentVertexOffset += written;
+                localPositions.resize(startIdx + written);
+                localAttributes.resize(startIdx + written);
 
-                    uint32_t fontTexIdx = (text->fontIndex != 0) ? text->fontIndex : activeFont->textureIndex;
-                    QueueBatch(fontTexIdx, written, useScissor, currentScissor, true);
-                }
+                currentVertexOffset += written;
+
+                uint32_t fontTexIdx = (text->fontIndex != 0) ? text->fontIndex : activeFont->textureIndex;
+                QueueBatch(fontTexIdx, written, useScissor, currentScissor, true);
             }
         }
     }

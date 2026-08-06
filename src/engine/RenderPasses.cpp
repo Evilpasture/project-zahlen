@@ -7,8 +7,8 @@
 #include "Zahlen/Profiler.hpp"
 #include "backends/imgui_impl_vulkan.h"
 #include "imgui.h"
-#include <array>
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <array>
 
 namespace ZHLN {
 
@@ -565,13 +565,14 @@ void BlitPass::Execute(
 
                 VkRect2D defaultScissor = {.offset = {.x = 0, .y = 0}, .extent = {.width = inColor.extent.width, .height = inColor.extent.height}};
 
-                auto baseVboAddress = ctx.uiVboAddresses[recorder.frameIndex];
+                auto   baseVboAddress = ctx.uiVboAddresses[recorder.frameIndex];
+                size_t maxVertices    = ctx.uiVbos[recorder.frameIndex].Size() / (sizeof(VertexPosition) + sizeof(VertexAttributes));
 
                 for (const auto& batch: ctx.queues.uiBatches) {
                     uipc.albedoIdx   = batch.textureIndex;
                     uipc.isSDF       = batch.isSDF ? 1 : 0;
                     uipc.posAddress  = baseVboAddress + (batch.vertexStart * sizeof(VertexPosition));
-                    uipc.attrAddress = baseVboAddress + (100000 * sizeof(VertexPosition)) + (batch.vertexStart * sizeof(VertexAttributes));
+                    uipc.attrAddress = baseVboAddress + (maxVertices * sizeof(VertexPosition)) + (batch.vertexStart * sizeof(VertexAttributes));
 
                     Vk::ScopedScissor scissorGuard(
                         cmd, {.target   = batch.useScissor ?

@@ -437,7 +437,7 @@ struct NativeMesh {
 
     ~NativeMesh() {
         if (blas != VK_NULL_HANDLE && rtCtx != nullptr) {
-            rtCtx->DestroyAS(blas);
+            rtCtx->DestroyAccelerationStructure(blas);
         }
     }
 };
@@ -653,7 +653,17 @@ struct RenderContext::Impl {
     static constexpr uint32_t SHADOW_RES          = 2048;
     static constexpr uint32_t NUM_CASCADES        = 4;
     static constexpr uint32_t MAX_PUNCTUAL_LIGHTS = 4;
-    static constexpr uint32_t kGpuParticleCount   = 65536;
+
+    // ============================================================================
+    // Centralized Buffer Capacity Limits (Single Source of Truth)
+    // ============================================================================
+    static constexpr uint32_t kMaxLineVertices               = 500'000;
+    static constexpr uint32_t kMaxDebugVertices              = 500'000;
+    static constexpr uint32_t kMaxUiVertices                 = 100'000;
+    static constexpr uint32_t kGpuParticleCount              = 65'536;
+    static constexpr uint32_t kGpuCullingMaxInstances        = 8'192;
+    static constexpr uint32_t kGpuCullingMaxBatches          = 256;
+    static constexpr uint32_t kGpuCullingMaxVisibleInstances = kGpuCullingMaxInstances * kGpuCullingMaxBatches;
 
     // ============================================================================
     // Core System Properties (64-Bit / High Alignment)
@@ -935,7 +945,7 @@ struct RenderContext::Impl {
         if (ctx.Device() != VK_NULL_HANDLE) {
             for (uint32_t i = 0; i < 2; ++i) {
                 if (tlas[i] != VK_NULL_HANDLE) {
-                    rtCtx.DestroyAS(tlas[i]);
+                    rtCtx.DestroyAccelerationStructure(tlas[i]);
                 }
             }
         }
