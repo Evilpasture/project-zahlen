@@ -36,6 +36,7 @@ void DefaultPreset::ClearFallback() noexcept {
     s_BtnAnimate   = NullEntity;
     s_BtnQuit      = NullEntity;
     s_AccumTime    = 0.0f;
+    s_PopupVisible = true;
 }
 
 void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, std::string_view detailMessage) {
@@ -43,8 +44,9 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
         return;
     }
 
-    s_IsActive = true;
-    s_Reason   = reason;
+    s_IsActive     = true;
+    s_Reason       = reason;
+    s_PopupVisible = true;
 
     size_t copyLen = std::min(detailMessage.size(), sizeof(s_DetailMsg) - 1);
     std::memcpy(s_DetailMsg, detailMessage.data(), copyLen);
@@ -156,6 +158,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
                   }
     );
     reg.Add(popupBox, Components::UIPanelComponent {.color = {0.08f, 0.11f, 0.16f, 0.95f}, .textureIndex = 1, .edgeWidth = 1.0f});
+    reg.Add(popupBox, Components::MeshComponent {}); // <-- Added to give the popup box DrawFlags capability
     s_UIPopupBox = popupBox;
 
     // Top Accent Stripe
@@ -355,7 +358,26 @@ void DefaultPreset::Update(Engine& engine, float dt) {
     }
 
     s_AccumTime += dt;
-    auto& reg = engine.GetRegistry();
+    auto& reg   = engine.GetRegistry();
+    auto& input = engine.GetInput();
+
+    // --- TOGGLE POPUP VISIBILITY WITH ESCAPE KEY ---
+    bool        escDown    = input.IsKeyDown(KeyCode::Escape);
+    static bool wasEscDown = false;
+
+    if (escDown && !wasEscDown) {
+        s_PopupVisible = !s_PopupVisible;
+        if (auto* mesh = reg.Get<Components::MeshComponent>(s_UIPopupBox)) {
+            if (s_PopupVisible) {
+                mesh->flags &= ~DrawFlags::Hidden;
+                Log("[DefaultPreset] Native GUI Popup Restored.");
+            } else {
+                mesh->flags |= DrawFlags::Hidden;
+                Log("[DefaultPreset] Native GUI Popup Minimized (Press ESC to restore).");
+            }
+        }
+    }
+    wasEscDown = escDown;
 
     // 1. Animate 3D Emblem
     if (s_AnimateScene) {
@@ -373,26 +395,30 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         });
     }
 
-    // 3. Process Native ECS Button Clicks
-    ECS::Patch<Components::UIButtonComponent>(reg, s_BtnReload, [&](auto& btn) {
-        if (btn.Has(UIButton::Clicked)) {
-            Log("[DefaultPreset] Reloading 'scripts/boot.lua' via Native UI...");
-            engine.GetScriptRunner().ReloadFile("scripts/boot.lua");
-        }
-    });
+    // 3. Process Native ECS Button Clicks (Only active when popup is visible)
+    if (s_PopupVisible) {
+        ECS::Patch<Components::UIButtonComponent>(reg, s_BtnReload, [&](auto& btn) {
+            if (btn.Has(UIButton::Clicked)) {
+                Log("[DefaultPreset] Reloading 'scripts/boot.lua' via Native UI...");
+                engine.GetScriptRunner().ReloadFile("scripts/boot.lua");
+            }
+        });
 
-    ECS::Patch<Components::UIButtonComponent>(reg, s_BtnAnimate, [&](auto& btn) {
-        if (btn.Has(UIButton::Clicked)) {
-            s_AnimateScene = !s_AnimateScene;
-            ECS::Patch<Components::TextComponent>(reg, s_BtnAnimate, [&](auto& text) { text.text.assign(s_AnimateScene ? "Pause Motion" : "Resume Motion"); });
-        }
-    });
+        ECS::Patch<Components::UIButtonComponent>(reg, s_BtnAnimate, [&](auto& btn) {
+            if (btn.Has(UIButton::Clicked)) {
+                s_AnimateScene = !s_AnimateScene;
+                ECS::Patch<Components::TextComponent>(reg, s_BtnAnimate, [&](auto& text) {
+                    text.text.assign(s_AnimateScene ? "Pause Motion" : "Resume Motion");
+                });
+            }
+        });
 
-    ECS::Patch<Components::UIButtonComponent>(reg, s_BtnQuit, [&](auto& btn) {
-        if (btn.Has(UIButton::Clicked)) {
-            engine.GetWindow().Close();
-        }
-    });
+        ECS::Patch<Components::UIButtonComponent>(reg, s_BtnQuit, [&](auto& btn) {
+            if (btn.Has(UIButton::Clicked)) {
+                engine.GetWindow().Close();
+            }
+        });
+    }
 }
 
 } // namespace ZHLN

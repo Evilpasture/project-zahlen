@@ -15,6 +15,20 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
     auto& input = engine.GetInput();
     auto  mouse = input.GetMouse();
 
+    auto IsEntityOrAncestorHidden = [&](Entity ent) -> bool {
+        Entity curr = ent;
+        while (curr != NullEntity && reg.IsAlive(curr)) {
+            if (auto* mesh = reg.Get<Components::MeshComponent>(curr)) {
+                if ((mesh->flags & DrawFlags::Hidden) != DrawFlags::None) {
+                    return true;
+                }
+            }
+            auto* rect = reg.Get<Components::UIRectComponent>(curr);
+            curr       = (rect != nullptr) ? rect->parentEntity : NullEntity;
+        }
+        return false;
+    };
+
     auto entities = reg.GetEntitiesWith<Components::UIRectComponent>();
     auto rects    = reg.GetRawArray<Components::UIRectComponent>();
 
@@ -59,7 +73,11 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
         const auto& rect   = rects[entry.rawIndex];
         auto*       button = reg.Get<Components::UIButtonComponent>(e);
 
-        if (button == nullptr) {
+        if (button == nullptr || IsEntityOrAncestorHidden(e)) {
+            if (button != nullptr) {
+                button->Set(UIButton::Hovered, false);
+                button->Set(UIButton::Pressed, false);
+            }
             continue;
         }
 

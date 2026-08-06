@@ -104,6 +104,20 @@ void UIRenderSystem::Update(Engine& engine) {
         return;
     }
 
+    auto IsEntityOrAncestorHidden = [&](Entity ent) -> bool {
+        Entity curr = ent;
+        while (curr != NullEntity && reg.IsAlive(curr)) {
+            if (auto* mesh = reg.Get<Components::MeshComponent>(curr)) {
+                if ((mesh->flags & DrawFlags::Hidden) != DrawFlags::None) {
+                    return true;
+                }
+            }
+            auto* rect = reg.Get<Components::UIRectComponent>(curr);
+            curr       = (rect != nullptr) ? rect->parentEntity : NullEntity;
+        }
+        return false;
+    };
+
     // 1. Resolve UI Hierarchy Layouts (Anchors, Offsets, Stacks)
     UILayoutSystem layoutSystem;
     layoutSystem.ResolveLayouts(reg, {.width = (float) windowSize.width, .height = (float) windowSize.height});
@@ -154,8 +168,11 @@ void UIRenderSystem::Update(Engine& engine) {
     HashMap<uint64_t, ScissorRect> activeScissors;
 
     for (const auto& entry: sortedEntries) {
-        Entity e    = entry.entity;
-        auto*  rect = reg.Get<Components::UIRectComponent>(e);
+        Entity e = entry.entity;
+        if (IsEntityOrAncestorHidden(e)) {
+            continue;
+        }
+        auto* rect = reg.Get<Components::UIRectComponent>(e);
         if (rect == nullptr) {
             continue;
         }
@@ -239,6 +256,10 @@ void UIRenderSystem::Update(Engine& engine) {
     // ========================================================================
     for (const auto& entry: sortedEntries) {
         Entity e = entry.entity;
+
+        if (IsEntityOrAncestorHidden(e)) {
+            continue;
+        }
 
         bool        useScissor = false;
         ScissorRect currentScissor {};

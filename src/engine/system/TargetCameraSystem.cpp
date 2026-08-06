@@ -57,17 +57,17 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 
     Entity camEnt  = cameraEntities[0];
     auto*  camComp = reg.Get<Components::TargetCameraComponent>(camEnt);
-    if ((camComp == nullptr) || !reg.IsAlive(camComp->target)) {
+    if (camComp == nullptr) {
         return;
     }
 
     // ========================================================================
-    // FREE-CAM INTERCEPTION BRANCH
+    // FREE-CAM INTERCEPTION BRANCH (Must run before target check)
     // ========================================================================
     if (reg.Get<Components::FreeCamTagComponent>(camEnt) != nullptr) {
         const auto& input = engine.GetInput();
 
-        // 1. Resolve dynamic fly speed from player's Components::MovementComponent
+        // 1. Resolve dynamic fly speed from player's MovementComponent if alive, else default
         float baseSpeed = 12.0f;
         if (reg.IsAlive(camComp->target)) {
             if (auto* targetMove = reg.Get<Components::MovementComponent>(camComp->target)) {
@@ -116,7 +116,11 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
         return;
     }
 
-    Entity    targetEnt = camComp->target;
+    Entity targetEnt = camComp->target;
+    if (!reg.IsAlive(targetEnt)) {
+        return;
+    }
+
     JPH::Vec3 targetPos = JPH::Vec3::sZero();
 
     // 1. Resolve Target Position

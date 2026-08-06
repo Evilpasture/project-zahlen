@@ -603,6 +603,22 @@ bool Engine::InitializeDefaultScene() {
     reg.Add(cameraEntity, Components::CameraComponent {});
     reg.Add(cameraEntity, Components::AASettingsComponent {.state = {.mode = AAMode::TAA, .taaFeedback = 0.95f}});
 
+    reg.Add(cameraEntity, Components::FreeCamTagComponent {});
+    reg.Add(cameraEntity, Components::InputComponent {});
+    reg.Add(
+        cameraEntity, Components::TargetCameraComponent {
+                          .distance          = 4.5f,
+                          .targetDistance    = 4.5f,
+                          .yaw               = -90.0f,
+                          .pitch             = -10.0f,
+                          .stiffness         = 15.0f,
+                          .vignetteIntensity = 1.10f,
+                          .vignettePower     = 1.50f,
+                          .fov               = 45.0f,
+                          .targetFov         = 45.0f
+                      }
+    );
+
     Entity settingsEntity = reg.Create();
     reg.Add(settingsEntity, Components::GlobalSettingsTagComponent {});
     reg.Add(settingsEntity, Components::PostProcessSettingsComponent {});

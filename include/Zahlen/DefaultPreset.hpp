@@ -38,6 +38,7 @@ class ZHLN_API DefaultPreset {
 
     static inline float s_AccumTime    = 0.0f;
     static inline bool  s_AnimateScene = true;
+    static inline bool  s_PopupVisible = true;
 };
 
 } // namespace ZHLN
