@@ -235,9 +235,18 @@ using BlurLayout = Vk::DescriptorLayout<
     Vk::SamplerSlot<1>       // sampler
     >;
 
+using HiZGenerateLayout = Vk::DescriptorLayout<
+    Vk::SampledImageSlot<0, VK_SHADER_STAGE_COMPUTE_BIT>,
+    Vk::StorageImageSlot<1, VK_SHADER_STAGE_COMPUTE_BIT>,
+    Vk::SamplerSlot<2, VK_SHADER_STAGE_COMPUTE_BIT>>;
+
 using CullingLayout = Vk::DescriptorLayout<
-    Vk::StorageBufferSlot<0>, // g_instances
-    Vk::StorageBufferSlot<1>  // g_indirectCommands
+    Vk::StorageBufferSlot<0>,                              // g_instances
+    Vk::StorageBufferSlot<1>,                              // g_indirectCommands
+    Vk::SampledImageSlot<2, VK_SHADER_STAGE_COMPUTE_BIT>,  // g_hizTexture
+    Vk::SamplerSlot<3, VK_SHADER_STAGE_COMPUTE_BIT>,       // g_pointSampler
+    Vk::StorageBufferSlot<4, VK_SHADER_STAGE_COMPUTE_BIT>, // g_secondPassCandidates
+    Vk::StorageBufferSlot<5, VK_SHADER_STAGE_COMPUTE_BIT>  // g_secondPassCount
     >;
 
 using MLAALayout = Vk::DescriptorLayout<
@@ -349,8 +358,14 @@ namespace Stages {
 struct ShadowPass {
     static constexpr std::string_view name = "[GPU] Shadow Map";
 };
-struct MainPass {
-    static constexpr std::string_view name = "[GPU] G-Buffer/Main";
+struct MainPass1 {
+    static constexpr std::string_view name = "[GPU] G-Buffer/Pass1";
+};
+struct MainPass2 {
+    static constexpr std::string_view name = "[GPU] G-Buffer/Pass2";
+};
+struct HiZPass {
+    static constexpr std::string_view name = "[GPU] Hi-Z Generation";
 };
 struct DecalPass {
     static constexpr std::string_view name = "[GPU] Decal Pass";
@@ -398,7 +413,9 @@ struct VolumetricIntegratePass {
 
 using FrameProfiler = Profiler::GpuProfiler<
     Stages::ShadowPass,
-    Stages::MainPass,
+    Stages::MainPass1,
+    Stages::HiZPass,
+    Stages::MainPass2,
     Stages::DecalPass,
     Stages::ViewmodelPass,
     Stages::TransPrePass,
@@ -568,6 +585,8 @@ using Res_TransNorm     = Vk::GraphImage<"TransNorm", VK_FORMAT_R8G8B8A8_UNORM, 
 using Res_TransDepth    = Vk::GraphImage<"TransDepth", VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT>;
 using Res_TransLighting = Vk::GraphImage<"TransLighting", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 
+using Res_HiZ = Vk::GraphImage<"HiZMap", VK_FORMAT_R32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+
 namespace Vk {
 template <>
 struct ClearColorOf<Res_TransLighting> {
@@ -632,6 +651,7 @@ struct RenderContext::Impl {
         Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          transNormalBuffer;
         Vk::RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>      transDepthBuffer;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     transLightingTarget;
+        Vk::MipmappedRenderTarget<VK_FORMAT_R32_SFLOAT>     hizMap;
 
         struct ReflectMetadata {
             Res_SceneColor    sceneColor;
@@ -656,6 +676,7 @@ struct RenderContext::Impl {
             Res_TransNorm     transNormalBuffer;
             Res_TransDepth    transDepthBuffer;
             Res_TransLighting transLightingTarget;
+            Res_HiZ           hizMap;
         };
     };
 
@@ -823,6 +844,9 @@ struct RenderContext::Impl {
 
     ZHLN::DoubleBuffered<Vk::Buffer> instanceDataBuffers;
     ZHLN::DoubleBuffered<Vk::Buffer> indirectCommandsBuffers;
+    ZHLN::DoubleBuffered<Vk::Buffer> indirectCommandsBuffersPass2;
+    ZHLN::DoubleBuffered<Vk::Buffer> secondPassCandidatesBuffers;
+    ZHLN::DoubleBuffered<Vk::Buffer> secondPassCountBuffers;
     ZHLN::DoubleBuffered<Vk::Buffer> shadowIndirectBuffers;
     ZHLN::DoubleBuffered<Vk::Buffer> jointBuffers;
     Vk::Buffer                       morphDeltasBuffer;
@@ -832,7 +856,13 @@ struct RenderContext::Impl {
     // ============================================================================
     Vk::DescriptorSetLayout               cullingLayout;
     Vk::DescriptorPool                    cullingPool;
-    ZHLN::DoubleBuffered<VkDescriptorSet> cullingSets;
+    ZHLN::DoubleBuffered<VkDescriptorSet> cullingSetsPass1;
+    ZHLN::DoubleBuffered<VkDescriptorSet> cullingSetsPass2;
+
+    Vk::ComputePass              hizGeneratePass;
+    Vk::DescriptorSetLayout      hizDescLayout;
+    Vk::DescriptorPool           hizPool;
+    ZHLN::Array<VkDescriptorSet> hizSets;
 
     Vk::DescriptorSetLayout               clusterCullingDescLayout;
     Vk::DescriptorPool                    clusterCullingPool;
@@ -974,6 +1004,14 @@ struct RenderContext::Impl {
         ParticleEmitterParams p;
     };
 
+    struct CullingConstants {
+        JPH::Mat44 viewProj;
+        float      hizScreenSize[2];
+        uint32_t   maxHiZMipLevel;
+        uint32_t   drawCount;
+        uint32_t   passIndex;
+    };
+
     struct ParticleRenderPushConstants {
         VkDeviceAddress particleBufferAddr;
         uint32_t        alignment;
@@ -1113,6 +1151,7 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, Error> InitPostProcessing();
     [[nodiscard]] std::expected<void, Error> InitCSGPipelines();
     [[nodiscard]] std::expected<void, Error> SetupUI(GLFWwindow* window);
+    [[nodiscard]] std::expected<void, Error> BuildHiZPipeline();
 
     [[nodiscard]] auto CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, Error>;
     [[nodiscard]] auto CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, Error>;
@@ -1193,7 +1232,13 @@ struct ShadowPass {
     void                      Execute(const FrameRecorder& recorder) const noexcept;
 };
 
-struct MainPass {
+struct MainPass1 {
+    void Execute(
+        const FrameRecorder&                                                                                       recorder,
+        SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> in
+    ) const noexcept;
+};
+struct MainPass2 {
     void Execute(
         const FrameRecorder&                                                                                       recorder,
         SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> in

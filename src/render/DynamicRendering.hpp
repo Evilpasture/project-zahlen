@@ -78,7 +78,13 @@ template <VkImageLayout Layout>
 struct LayoutTraits;
 
 template <VkImageLayout OldLayout, VkImageLayout NewLayout>
-void TransitionLayout(VkCommandBuffer cmd, VkImage image, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) noexcept;
+void TransitionLayout(
+    VkCommandBuffer    cmd,
+    VkImage            image,
+    VkImageAspectFlags aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+    uint32_t           baseMip  = 0,
+    uint32_t           mipCount = VK_REMAINING_MIP_LEVELS
+) noexcept;
 
 template <typename InState, typename OutState, typename T>
 auto IssueBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFlags aspectOverride = VK_IMAGE_ASPECT_NONE);

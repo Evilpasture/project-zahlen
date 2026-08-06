@@ -233,6 +233,7 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
         .and_then([&]() { return InitCullingResources(); })
         .and_then([&]() { return InitBindless(); })
         .and_then([&]() { return BuildHangGpuPipeline(); })
+        .and_then([&]() { return BuildHiZPipeline(); })
         .and_then([&]() {
             return CompileShadowPipeline(
                        ctx.Device(), Resource::ShaderPair {.vertex = Resource::GetShaderProgram(Basic).vertex, .fragment = Resource::shadow_frag}
@@ -747,35 +748,56 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
     using enum Resource::ShaderID;
 
     // 1. Initial side-effects: Descriptor sets allocation
-    Vk::AllocateDoubleBufferedSet<CullingLayout>(ctx.Device(), cullingLayout, cullingPool, cullingSets);
+    cullingLayout = CullingLayout::CreateLayout(ctx.Device());
+    cullingPool   = CullingLayout::CreatePool(ctx.Device(), 4);
+
+    cullingSetsPass1[0] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
+    cullingSetsPass1[1] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
+    cullingSetsPass2[0] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
+    cullingSetsPass2[1] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
 
     auto make_instance_set = [&](uint32_t i) -> std::expected<void, Error> {
         return Vk::Buffer::Create(
                    allocator.Get(), sizeof(InstanceData) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
         )
-            .transform_error([](VkResult res) -> Error { return res; })
-            .and_then([&, i](auto&& idb) { // Deduced as std::expected<Vk::Buffer, Error>
-                instanceDataBuffers[i] = std::forward<decltype(idb)>(idb);
+            .and_then([&, i](auto&& idb) {
+                instanceDataBuffers[i] = std::move(idb);
                 return Vk::Buffer::Create(
-                           allocator.Get(), sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances,
-                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY
-                )
-                    .transform_error([](VkResult res) -> Error { return res; });
-            })
-            .transform([&, i](auto&& icb) -> void { // Transforms final Vk::Buffer to void
-                indirectCommandsBuffers[i] = std::forward<decltype(icb)>(icb);
-                CullingLayout::Write(
-                    ctx.Device(), cullingSets[i], Vk::BufferWrite {.buffer = instanceDataBuffers[i].Handle()},
-                    Vk::BufferWrite {.buffer = indirectCommandsBuffers[i].Handle()}
+                    allocator.Get(), sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances,
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY
                 );
+            })
+            .and_then([&, i](auto&& icb1) {
+                indirectCommandsBuffers[i] = std::move(icb1);
+                return Vk::Buffer::Create(
+                    allocator.Get(), sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances,
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+                );
+            })
+            .and_then([&, i](auto&& icb2) {
+                indirectCommandsBuffersPass2[i] = std::move(icb2);
+                return Vk::Buffer::Create(
+                    allocator.Get(), sizeof(uint32_t) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                    VMA_MEMORY_USAGE_GPU_ONLY
+                );
+            })
+            .and_then([&, i](auto&& spcb) {
+                secondPassCandidatesBuffers[i] = std::move(spcb);
+                return Vk::Buffer::Create(
+                    allocator.Get(), sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                    VMA_MEMORY_USAGE_GPU_ONLY
+                );
+            })
+            .transform([&, i](auto&& spcnt) -> void {
+                globalCounterBuffers[i]   = std::move(spcnt);
+                secondPassCountBuffers[i] = std::move(globalCounterBuffers[i]);
             });
     };
 
-    constexpr uint32_t  kCullingPushSize = sizeof(float) * 4 * 6 + sizeof(uint32_t) * 4;
-    VkPushConstantRange cullingPush      = {
+    VkPushConstantRange cullingPush = {
         .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
         .offset     = 0,
-        .size       = kCullingPushSize,
+        .size       = sizeof(CullingConstants), // 80 bytes (exact match)
     };
 
     auto cullingShader = Vk::CreateShaderDesc(Resource::culling_comp);
@@ -1687,6 +1709,11 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
     graphResources.transDepthBuffer     = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
         allocator, ctx, ext, {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT}
     );
+    graphResources.hizMap = Vk::MipmappedRenderTarget<VK_FORMAT_R32_SFLOAT>::Create(
+        allocator, ctx, ext,
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT
+    );
 
     RecreatePunctualShadowViews();
 
@@ -1752,6 +1779,42 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
         bindlessRegistry.Clear();
     }
 
+    if (hizPool.Valid()) {
+        hizPool = {};
+    }
+    uint32_t mips = graphResources.hizMap.mipLevels;
+    hizPool       = HiZGenerateLayout::CreatePool(ctx.Device(), mips);
+    hizSets.resize(mips);
+
+    for (uint32_t i = 0; i < mips; ++i) {
+        hizSets[i] = HiZGenerateLayout::Allocate(ctx.Device(), hizPool.Get(), hizDescLayout.Get());
+        if (i == 0) {
+            HiZGenerateLayout::Write(
+                ctx.Device(), hizSets[i], presentation.depthTarget.view.Get(), graphResources.hizMap.mipViews[0].Get(), pointSampler.Get()
+            );
+        } else {
+            HiZGenerateLayout::Write(
+                ctx.Device(), hizSets[i], graphResources.hizMap.mipViews[i - 1].Get(), graphResources.hizMap.mipViews[i].Get(), pointSampler.Get()
+            );
+        }
+    }
+
+    for (int i = 0; i < 2; ++i) {
+        // Pass 1 Set (Reads Previous Frame's Hi-Z)
+        CullingLayout::Write(
+            ctx.Device(), cullingSetsPass1[i], Vk::BufferWrite {.buffer = instanceDataBuffers[i].Handle()},
+            Vk::BufferWrite {.buffer = indirectCommandsBuffers[i].Handle()}, graphResources.hizMap.fullView.Get(), pointSampler.Get(),
+            Vk::BufferWrite {.buffer = secondPassCandidatesBuffers[i].Handle()}, Vk::BufferWrite {.buffer = secondPassCountBuffers[i].Handle()}
+        );
+
+        // Pass 2 Set (Reads Current Frame's Hi-Z)
+        CullingLayout::Write(
+            ctx.Device(), cullingSetsPass2[i], Vk::BufferWrite {.buffer = instanceDataBuffers[i].Handle()},
+            Vk::BufferWrite {.buffer = indirectCommandsBuffersPass2[i].Handle()}, graphResources.hizMap.fullView.Get(), pointSampler.Get(),
+            Vk::BufferWrite {.buffer = secondPassCandidatesBuffers[i].Handle()}, Vk::BufferWrite {.buffer = secondPassCountBuffers[i].Handle()}
+        );
+    }
+
     return true;
 }
 
@@ -1766,6 +1829,13 @@ std::expected<void, Error> RenderContext::Impl::BuildHangGpuPipeline() {
             )
                 .transform([&](auto&& pipeline) { hangGpuPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
+}
+
+std::expected<void, Error> RenderContext::Impl::BuildHiZPipeline() {
+    hizDescLayout              = HiZGenerateLayout::CreateLayout(ctx.Device());
+    VkPushConstantRange pc     = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(float) * 2 + sizeof(uint32_t) * 3};
+    auto                shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::HizGenerateComp).vertex);
+    return hizGeneratePass.Build(ctx.Device(), hizDescLayout.Get(), shader, &pc, 1);
 }
 
 std::expected<void, Error> RenderContext::Impl::InitUIDynamicBuffers() noexcept {

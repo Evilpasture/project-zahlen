@@ -401,14 +401,58 @@ struct PassFactory {
         };
     }
 
-    [[nodiscard]] auto MakeMainPass() const noexcept {
+    [[nodiscard]] auto MakeMainPass1() const noexcept {
         return Vk::Passieren<
-            "Main", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::DepthStencilWrite<Res_Depth>>(
+            "MainPass1", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::DepthStencilWrite<Res_Depth>>(
             [this](VkCommandBuffer c) noexcept {
                 FrameRecorder mainRec(c, self);
-                Passes::MainPass {}.Execute(mainRec, BuildSceneResources());
+                Passes::MainPass1 {}.Execute(mainRec, BuildSceneResources());
             }
         );
+    }
+
+    [[nodiscard]] auto MakeHiZGeneratePass() const noexcept {
+        return Vk::MakePass<"HiZGenerate", Vk::ShaderRead<Res_Depth>, Vk::ComputeWrite<Res_HiZ>>([this](VkCommandBuffer cmd) noexcept {
+            Profiler::ScopedGpuProfile<Stages::HiZPass, FrameProfiler> timer(cmd, fIdx, self.gpuProfiler);
+
+            uint32_t width  = self.graphResources.hizMap.extent.width;
+            uint32_t height = self.graphResources.hizMap.extent.height;
+            uint32_t mips   = self.graphResources.hizMap.mipLevels;
+
+            for (uint32_t mip = 0; mip < mips; ++mip) {
+                // Execution Barrier: Ensure Mip N-1 finishes writing before Mip N reads it
+                if (mip > 0) {
+                    Vk::MemoryBarrier(
+                        cmd, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                              .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
+                              .dst_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                              .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
+                    );
+                }
+
+                uint32_t srcW = std::max(1u, width >> (mip == 0 ? 0 : mip - 1));
+                uint32_t srcH = std::max(1u, height >> (mip == 0 ? 0 : mip - 1));
+                uint32_t dstW = std::max(1u, width >> mip);
+                uint32_t dstH = std::max(1u, height >> mip);
+
+                struct PC {
+                    float    rcpW, rcpH;
+                    uint32_t resW, resH;
+                    uint32_t isFirstPass;
+                } pc = {1.0f / (float) srcW, 1.0f / (float) srcH, srcW, srcH, mip == 0 ? 1u : 0u};
+
+                self.hizGeneratePass.Dispatch(cmd, self.hizSets[mip], (dstW + 15) / 16, (dstH + 15) / 16, 1, pc);
+            }
+        });
+    }
+
+    [[nodiscard]] auto MakeMainPass2() const noexcept {
+        return Vk::Passieren<
+            "MainPass2", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::DepthStencilWrite<Res_Depth>,
+            Vk::ComputeRead<Res_HiZ>>([this](VkCommandBuffer c) noexcept {
+            FrameRecorder mainRec(c, self);
+            Passes::MainPass2 {}.Execute(mainRec, BuildSceneResources());
+        });
     }
 
     [[nodiscard]] auto MakeShadowPass() const noexcept {
@@ -426,7 +470,7 @@ struct PassFactory {
                 },
                 [&](Vk::RecordingSlot slot) noexcept {
                     FrameRecorder mainRec(slot.cmd, self);
-                    Passes::MainPass {}.Execute(mainRec, BuildSceneResources());
+                    Passes::MainPass1 {}.Execute(mainRec, BuildSceneResources()); // <--- MainPass1
                 }
             );
             Vk::ExecuteCommands(c, rec.GetCommandBuffers());
@@ -905,9 +949,9 @@ template <AAMode Mode, typename GetSwapchainImageT>
 auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapchainImage) {
     using enum AAMode;
 
-    auto corePasses = std::tuple {factory.MakeShadowPass(),  factory.MakeDecalPass(),    factory.MakeViewmodelPass(),  factory.MakeTranslucentPrePass(),
-                                  factory.MakeAmbientPass(), factory.MakeLightingPass(), factory.MakeReflectionPass(), factory.MakeTranslucentReflectionPass(),
-                                  factory.MakeForwardPass()};
+    auto corePasses = std::tuple {factory.MakeShadowPass(),     factory.MakeHiZGeneratePass(),           factory.MakeMainPass2(),   factory.MakeDecalPass(),
+                                  factory.MakeViewmodelPass(),  factory.MakeTranslucentPrePass(),        factory.MakeAmbientPass(), factory.MakeLightingPass(),
+                                  factory.MakeReflectionPass(), factory.MakeTranslucentReflectionPass(), factory.MakeForwardPass()};
 
     auto bloomPasses = std::tuple {factory.MakeBloomThresholdPass(), factory.MakeBloomDownPass<0>(), factory.MakeBloomDownPass<1>(),
                                    factory.MakeBloomDownPass<2>(),   factory.MakeBloomUpPass<2>(),   factory.MakeBloomUpPass<1>(),

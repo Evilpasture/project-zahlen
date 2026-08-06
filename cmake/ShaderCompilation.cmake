@@ -134,6 +134,10 @@ add_shader_target(culling_shader
     STAGES "${SHADER_SRC_DIR}/culling.hlsl|CSMain|cs_6_0|SHADER_CULLING_HLSL_CS_PATH"
 )
 
+add_shader_target(hiz_generate_shader
+    STAGES "${SHADER_SRC_DIR}/hiz_generate.hlsl|CSMain|cs_6_0|SHADER_HIZ_GENERATE_CS_PATH"
+)
+
 add_shader_target(shadow_shader
     STAGES "${SHADER_SRC_DIR}/basic.hlsl|PSShadow|ps_6_0|SHADER_SHADOW_HLSL_PS_PATH"
 )

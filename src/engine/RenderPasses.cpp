@@ -209,7 +209,7 @@ void Draw3DParticleShadows(const FrameRecorder& recorder, uint32_t cascadeIndex)
     }
 }
 
-struct GpuCullingPolicy {
+struct GpuCullingPolicyPass1 {
     static void Record(
         const FrameRecorder&                                             recorder,
         const ZHLN::Array<GroupRange>&                                   groups,
@@ -222,36 +222,62 @@ struct GpuCullingPolicy {
         VkCommandBuffer cmd = recorder.cmd;
         auto&           ctx = recorder.ctx;
 
-        struct FrustumPlanes {
-            std::array<JPH::Vec4, 6> planes;
-            uint32_t                 drawCount;
-        } planes {};
-
-        const auto& vp = ctx.unjittered_view_proj;
-        JPH::Vec4   r0(vp(0, 0), vp(0, 1), vp(0, 2), vp(0, 3));
-        JPH::Vec4   r1(vp(1, 0), vp(1, 1), vp(1, 2), vp(1, 3));
-        JPH::Vec4   r2(vp(2, 0), vp(2, 1), vp(2, 2), vp(2, 3));
-        JPH::Vec4   r3(vp(3, 0), vp(3, 1), vp(3, 2), vp(3, 3));
-
-        auto NormalizePlane = [&](const JPH::Vec4& plane) {
-            float len = JPH::Vec3(plane.GetX(), plane.GetY(), plane.GetZ()).Length();
-            return plane / std::max(len, 1e-6f);
+        // Transition buffer access to CLEAR / TRANSFER_WRITE
+        VkBufferMemoryBarrier2 fillBarrier = {
+            .sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+            .pNext               = nullptr,
+            .srcStageMask        = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
+            .srcAccessMask       = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
+            .dstStageMask        = VK_PIPELINE_STAGE_2_CLEAR_BIT,
+            .dstAccessMask       = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer              = ctx.secondPassCountBuffers[recorder.frameIndex].Handle(),
+            .offset              = 0,
+            .size                = VK_WHOLE_SIZE
         };
+        Vk::BufferBarrier(cmd, fillBarrier);
 
-        planes.planes[0] = NormalizePlane(r3 + r0);
-        planes.planes[1] = NormalizePlane(r3 - r0);
-        planes.planes[2] = NormalizePlane(r3 + r1);
-        planes.planes[3] = NormalizePlane(r3 - r1);
-        planes.planes[4] = NormalizePlane(r2);
-        planes.planes[5] = NormalizePlane(r3 - r2);
-        planes.drawCount = drawCount;
+        Vk::FillBuffer(cmd, ctx.secondPassCountBuffers[recorder.frameIndex], 0, 0u);
 
-        ctx.cullingPass.Dispatch(cmd, ctx.cullingSets[], (drawCount + 63) / 64, 1, 1, planes);
+        VkBufferMemoryBarrier2 clearBarrier = {
+            .sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+            .pNext               = nullptr,
+            .srcStageMask        = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            .srcAccessMask       = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            .dstStageMask        = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+            .dstAccessMask       = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer              = ctx.secondPassCountBuffers[recorder.frameIndex].Handle(),
+            .offset              = 0,
+            .size                = VK_WHOLE_SIZE
+        };
+        Vk::BufferBarrier(cmd, clearBarrier);
+
+        // 2. Dispatch Culling Pass 1 (Frustum + Last Frame Hi-Z)
+        struct CullingConstants {
+            JPH::Mat44 viewProj;
+            float      hizScreenSize[2];
+            uint32_t   maxHiZMipLevel;
+            uint32_t   drawCount;
+            uint32_t   passIndex;
+        } pc {};
+
+        pc.viewProj         = ctx.unjittered_view_proj;
+        pc.hizScreenSize[0] = (float) color_att.extent.width;
+        pc.hizScreenSize[1] = (float) color_att.extent.height;
+        pc.maxHiZMipLevel   = ctx.graphResources.hizMap.mipLevels > 0 ? ctx.graphResources.hizMap.mipLevels - 1 : 0;
+        pc.drawCount        = drawCount;
+        pc.passIndex        = 0; // PASS 1
+
+        ctx.cullingPass.Dispatch(cmd, ctx.cullingSetsPass1[recorder.frameIndex], (drawCount + 63) / 64, 1, 1, pc);
+
         using enum Vk::BarrierStage;
         using enum Vk::BarrierAccess;
-
         Vk::BeginBarrier<Compute, ShaderWrite>(Vk::CommandBuffer<Vk::QueueType::Graphics> {cmd}).TransitionTo<Indirect, IndirectRead>();
 
+        // 3. Render Pass 1 Geometry
         Vk::DynamicPass(color_att.extent)
             .AddColor(color_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
             .AddColor(vel_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorVelocity)
@@ -267,23 +293,21 @@ struct GpuCullingPolicy {
                             .pipeline       = group.material->pipeline.Get(),
                             .layout         = group.material->layout.Get(),
                             .set            = recorder.bindlessSet,
-                            .argumentBuffer = ctx.indirectCommandsBuffers->Handle(),
+                            .argumentBuffer = ctx.indirectCommandsBuffers[recorder.frameIndex].Handle(),
                             .offset         = Vk::DrawIndirectState::OffsetForIndex(group.start),
                             .drawCount      = group.count,
                         },
                         ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 0}
                     );
                 }
-                DrawCSGMeshes(recorder, color_att.extent);
-                Draw3DParticles(recorder);
             });
     }
 };
 
-struct CpuCullingPolicy {
+struct GpuCullingPolicyPass2 {
     static void Record(
-        const FrameRecorder& recorder,
-        const ZHLN::Array<GroupRange>& /*groups*/,
+        const FrameRecorder&                                             recorder,
+        const ZHLN::Array<GroupRange>&                                   groups,
         uint32_t                                                         drawCount,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         color_att,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         vel_att,
@@ -293,7 +317,96 @@ struct CpuCullingPolicy {
         VkCommandBuffer cmd = recorder.cmd;
         auto&           ctx = recorder.ctx;
 
-        const auto& colorFormats = ActiveGBuffer::array;
+        VkBufferMemoryBarrier2 fillBarrier = {
+            .sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+            .pNext               = nullptr,
+            .srcStageMask        = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
+            .srcAccessMask       = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
+            .dstStageMask        = VK_PIPELINE_STAGE_2_CLEAR_BIT,
+            .dstAccessMask       = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer              = ctx.indirectCommandsBuffersPass2[recorder.frameIndex].Handle(),
+            .offset              = 0,
+            .size                = VK_WHOLE_SIZE
+        };
+        Vk::BufferBarrier(cmd, fillBarrier);
+
+        Vk::FillBuffer(cmd, ctx.indirectCommandsBuffersPass2[recorder.frameIndex], 0, 0u);
+
+        VkBufferMemoryBarrier2 clearBarrier = {
+            .sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+            .pNext               = nullptr,
+            .srcStageMask        = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            .srcAccessMask       = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            .dstStageMask        = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+            .dstAccessMask       = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer              = ctx.indirectCommandsBuffersPass2[recorder.frameIndex].Handle(),
+            .offset              = 0,
+            .size                = VK_WHOLE_SIZE
+        };
+        Vk::BufferBarrier(cmd, clearBarrier);
+
+        // 2. Dispatch Culling Pass 2 (Current Frame Hi-Z Re-test)
+
+        RenderContext::Impl::CullingConstants pc {
+            .viewProj       = ctx.unjittered_view_proj,
+            .hizScreenSize  = {(float) color_att.extent.width, (float) color_att.extent.height},
+            .maxHiZMipLevel = ctx.graphResources.hizMap.mipLevels > 0 ? ctx.graphResources.hizMap.mipLevels - 1 : 0,
+            .drawCount      = drawCount,
+            .passIndex      = 1,
+        };
+        ctx.cullingPass.Dispatch(cmd, ctx.cullingSetsPass2[recorder.frameIndex], (drawCount + 63) / 64, 1, 1, pc);
+
+        using enum Vk::BarrierStage;
+        using enum Vk::BarrierAccess;
+        Vk::BeginBarrier<Compute, ShaderWrite>(Vk::CommandBuffer<Vk::QueueType::Graphics> {cmd}).TransitionTo<Indirect, IndirectRead>();
+
+        // 3. Render Pass 2 Geometry (Newly Unoccluded) with LOAD_OP_LOAD!
+        Vk::DynamicPass(color_att.extent)
+            .AddColor(color_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+            .AddColor(vel_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+            .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+            .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+            .Execute(cmd, [&]() {
+                for (const auto& group: groups) {
+                    if (!group.material->pipeline.Valid()) {
+                        continue;
+                    }
+                    recorder.encoder.DrawIndirect(
+                        {
+                            .pipeline       = group.material->pipeline.Get(),
+                            .layout         = group.material->layout.Get(),
+                            .set            = recorder.bindlessSet,
+                            .argumentBuffer = ctx.indirectCommandsBuffersPass2[recorder.frameIndex].Handle(),
+                            .offset         = Vk::DrawIndirectState::OffsetForIndex(group.start),
+                            .drawCount      = group.count,
+                        },
+                        ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 0}
+                    );
+                }
+                // Particles and CSG are drawn ONLY in Pass 2 to avoid double rendering
+                DrawCSGMeshes(recorder, color_att.extent);
+                Draw3DParticles(recorder);
+            });
+    }
+};
+
+struct CpuCullingPolicyPass1 {
+    static void Record(
+        const FrameRecorder& recorder,
+        const ZHLN::Array<GroupRange>& /*groups*/,
+        uint32_t                                                         drawCount,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         color_att,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         vel_att,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         norm_att,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> depth_att
+    ) noexcept {
+        VkCommandBuffer cmd          = recorder.cmd;
+        auto&           ctx          = recorder.ctx;
+        const auto&     colorFormats = ActiveGBuffer::array;
 
         Vk::DynamicPass(color_att.extent)
             .AddColor(color_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
@@ -304,32 +417,45 @@ struct CpuCullingPolicy {
             .Execute(cmd, [&]() {
                 Vk::ParallelDrawDispatch(
                     cmd, Vk::SecondaryInheritance {.colorFormats = colorFormats, .depthFormat = VK_FORMAT_D32_SFLOAT_S8_UINT},
-                    {.width = color_att.extent.width, .height = color_att.extent.height}, drawCount, kParallelChunkSize,
-
-                    TaskSystemSchedulerAdapter {},
-                    [&]([[maybe_unused]] uint32_t chunkIdx) -> VkCommandBuffer {
+                    {.width = color_att.extent.width, .height = color_att.extent.height}, drawCount, kParallelChunkSize, TaskSystemSchedulerAdapter {},
+                    [&](uint32_t /*chunkIdx*/) -> VkCommandBuffer {
                         uint32_t wIdx = TaskSystem::GetWorkerIndex();
-                        if (wIdx >= ctx.workerCmds.size()) {
+                        if (wIdx >= ctx.workerCmds.size())
                             wIdx = (uint32_t) (ctx.workerCmds.size() - 1);
-                        }
                         uint32_t localCmdIdx = ctx.workerCmds[wIdx].cmdCount[recorder.frameIndex].fetch_add(1, std::memory_order::relaxed);
                         return ctx.workerCmds[wIdx].pools[recorder.frameIndex][localCmdIdx];
                     },
                     [&](Vk::CommandEncoder& encoder, uint32_t i) {
                         const auto& drawCmd = ctx.queues.drawQueue[i];
-                        if (!IsVisibleIn(drawCmd.flags, RenderPassType::Main)) {
+                        if (!IsVisibleIn(drawCmd.flags, RenderPassType::Main) || (drawCmd.flags & DrawFlags::Viewmodel) != DrawFlags::None ||
+                            !drawCmd.material->pipeline.Valid() || IsForwardOnly(drawCmd.instanceData.flags)) {
                             return;
                         }
-                        if ((drawCmd.flags & DrawFlags::Viewmodel) != DrawFlags::None) {
-                            return;
-                        }
-                        if (!drawCmd.material->pipeline.Valid() || IsForwardOnly(drawCmd.instanceData.flags)) {
-                            return;
-                        }
-                        const ObjectConstants pushConstants = {.instanceId = i, .isShadowPass = 0};
-                        SubmitDrawInstanced(encoder, drawCmd, i, recorder.bindlessSet, pushConstants);
+                        SubmitDrawInstanced(encoder, drawCmd, i, recorder.bindlessSet, ObjectConstants {.instanceId = i, .isShadowPass = 0});
                     }
                 );
+            });
+    }
+};
+
+struct CpuCullingPolicyPass2 {
+    static void Record(
+        const FrameRecorder& recorder,
+        const ZHLN::Array<GroupRange>& /*groups*/,
+        uint32_t /*drawCount*/,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         color_att,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         vel_att,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         norm_att,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> depth_att
+    ) noexcept {
+        // CPU Culling does everything in Pass 1. Pass 2 just draws CSG and Particles on top.
+        VkCommandBuffer cmd = recorder.cmd;
+        Vk::DynamicPass(color_att.extent)
+            .AddColor(color_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+            .AddColor(vel_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+            .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+            .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+            .Execute(cmd, [&]() {
                 DrawCSGMeshes(recorder, color_att.extent);
                 Draw3DParticles(recorder);
             });
@@ -507,18 +633,16 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
     }
 }
 
-void MainPass::Execute(
+void MainPass1::Execute(
     const FrameRecorder&                                                                                       recorder,
     SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> in
 ) const noexcept {
-    auto  cmd = recorder.cmd;
-    auto& ctx = recorder.ctx;
+    auto                                                         cmd = recorder.cmd;
+    auto&                                                        ctx = recorder.ctx;
+    Profiler::ScopedGpuProfile<Stages::MainPass1, FrameProfiler> timer(cmd, recorder.frameIndex, ctx.gpuProfiler);
 
-    Profiler::ScopedGpuProfile<Stages::MainPass, FrameProfiler> timer(cmd, recorder.frameIndex, ctx.gpuProfiler);
-
-    const auto drawCount         = static_cast<uint32_t>(ctx.queues.drawQueue.size());
-    const auto meshParticleCount = static_cast<uint32_t>(ctx.queues.meshParticleQueue.size());
-    if (drawCount == 0 && meshParticleCount == 0) {
+    const auto drawCount = static_cast<uint32_t>(ctx.queues.drawQueue.size());
+    if (drawCount == 0) {
         Vk::DynamicPass(in.sceneColor.extent)
             .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
             .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorVelocity)
@@ -530,7 +654,6 @@ void MainPass::Execute(
 
     ZHLN::Array<GroupRange> groups;
     groups.reserve((drawCount + 15) / 16);
-
     VkPipeline currentPipeline = VK_NULL_HANDLE;
 
     for (uint32_t i = 0; i < drawCount; ++i) {
@@ -550,14 +673,53 @@ void MainPass::Execute(
         }
     }
 
-    const bool useGpuCulling = [&]() {
-        return ctx.cullingPass.pipeline.Valid() && ctx.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances);
-    }();
-
+    const bool useGpuCulling = ctx.cullingPass.pipeline.Valid() && ctx.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances);
     if (useGpuCulling) {
-        ExecutePass<GpuCullingPolicy>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.depth);
+        ExecutePass<GpuCullingPolicyPass1>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.depth);
     } else {
-        ExecutePass<CpuCullingPolicy>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.depth);
+        ExecutePass<CpuCullingPolicyPass1>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.depth);
+    }
+}
+
+void MainPass2::Execute(
+    const FrameRecorder&                                                                                       recorder,
+    SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> in
+) const noexcept {
+    auto                                                         cmd = recorder.cmd;
+    auto&                                                        ctx = recorder.ctx;
+    Profiler::ScopedGpuProfile<Stages::MainPass2, FrameProfiler> timer(cmd, recorder.frameIndex, ctx.gpuProfiler);
+
+    const auto drawCount = static_cast<uint32_t>(ctx.queues.drawQueue.size());
+    if (drawCount == 0 && ctx.queues.meshParticleQueue.empty() && ctx.queues.csgDrawQueue.empty()) {
+        return;
+    }
+
+    ZHLN::Array<GroupRange> groups;
+    groups.reserve((drawCount + 15) / 16);
+    VkPipeline currentPipeline = VK_NULL_HANDLE;
+
+    for (uint32_t i = 0; i < drawCount; ++i) {
+        const auto&       drawCmd = ctx.queues.drawQueue[i];
+        const auto* const drawMat = drawCmd.material;
+
+        if (IsForwardOnly(drawCmd.instanceData.flags) || (drawCmd.flags & DrawFlags::Viewmodel) != DrawFlags::None || !drawMat->pipeline.Valid()) {
+            currentPipeline = VK_NULL_HANDLE;
+            continue;
+        }
+
+        if (i == 0 || drawMat->pipeline.Get() != currentPipeline) {
+            groups.push_back(GroupRange {.material = drawMat, .start = i, .count = 1});
+            currentPipeline = drawMat->pipeline.Get();
+        } else {
+            groups.back().count++;
+        }
+    }
+
+    const bool useGpuCulling = ctx.cullingPass.pipeline.Valid() && ctx.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances);
+    if (useGpuCulling) {
+        ExecutePass<GpuCullingPolicyPass2>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.depth);
+    } else {
+        ExecutePass<CpuCullingPolicyPass2>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.depth);
     }
 }
 

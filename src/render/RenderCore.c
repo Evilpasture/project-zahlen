@@ -1599,7 +1599,7 @@ void ZHLN_DestroySemaphore(const VkDevice device, const VkSemaphore semaphore) {
         vkDestroySemaphore(device, semaphore, nullptr);
     }
 }
-[[nodiscard]]
+
 VkImageView ZHLN_CreateImageView(const VkDevice device, const ZHLN_ImageViewDesc* const restrict desc) {
     const VkImageViewCreateInfo info = {
         .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -1608,7 +1608,7 @@ VkImageView ZHLN_CreateImageView(const VkDevice device, const ZHLN_ImageViewDesc
         .format           = desc->format,
         .subresourceRange = {
             .aspectMask     = desc->aspect,
-            .baseMipLevel   = 0,
+            .baseMipLevel   = desc->base_mip,
             .levelCount     = desc->mip_levels ? desc->mip_levels : 1,
             .baseArrayLayer = desc->base_array_layer,
             .layerCount     = desc->array_layers ? desc->array_layers : 1,

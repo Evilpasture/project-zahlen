@@ -486,10 +486,11 @@ typedef struct ZHLN_ImageViewDesc {
     const VkImage            image;
     const VkFormat           format;
     const VkImageAspectFlags aspect;
-    const uint32_t           mip_levels;   // default 1
-    const uint32_t           array_layers; // default 1
+    const uint32_t           mip_levels;   /* default 1 */
+    const uint32_t           array_layers; /* default 1 */
     const VkImageViewType    view_type;
     const uint32_t           base_array_layer;
+    const uint32_t           base_mip; /* targeted base mip level (default 0) */
 } ZHLN_ImageViewDesc;
 
 [[nodiscard]]

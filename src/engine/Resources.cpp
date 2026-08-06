@@ -231,6 +231,10 @@ constexpr uint8_t culling_comp_raw[] = {
 #embed SHADER_CULLING_HLSL_CS_PATH
 };
 
+constexpr uint8_t hiz_generate_comp_raw[] = {
+#embed SHADER_HIZ_GENERATE_CS_PATH
+};
+
 constexpr uint8_t shadow_frag_raw[] = {
 #embed SHADER_SHADOW_HLSL_PS_PATH
 };
@@ -273,6 +277,7 @@ constexpr uint8_t ltc_amp_raw[] = {
 #endif
 
 extern const std::span<const uint8_t> culling_comp {culling_comp_raw, sizeof(culling_comp_raw)};
+extern const std::span<const uint8_t> hiz_generate_comp {hiz_generate_comp_raw, sizeof(hiz_generate_comp_raw)};
 extern const std::span<const uint8_t> shadow_frag {shadow_frag_raw, sizeof(shadow_frag_raw)};
 extern const std::span<const uint8_t> cluster_bounds {cluster_bounds_raw, sizeof(cluster_bounds_raw)};
 extern const std::span<const uint8_t> cluster_culling {cluster_culling_raw, sizeof(cluster_culling_raw)};

@@ -13,9 +13,10 @@ struct FormatAspectMapping {
 };
 } // namespace
 
-inline constexpr std::array<FormatAspectMapping, 11> kFormatAspectTable = {
+inline constexpr std::array<FormatAspectMapping, 12> kFormatAspectTable = {
     {{.format = VK_FORMAT_R16G16B16A16_SFLOAT, .aspect = VK_IMAGE_ASPECT_COLOR_BIT},
      {.format = VK_FORMAT_R32G32B32A32_SFLOAT, .aspect = VK_IMAGE_ASPECT_COLOR_BIT},
+     {.format = VK_FORMAT_R32_SFLOAT, .aspect = VK_IMAGE_ASPECT_COLOR_BIT},
      {.format = VK_FORMAT_R8G8B8A8_UNORM, .aspect = VK_IMAGE_ASPECT_COLOR_BIT},
      {.format = VK_FORMAT_R8G8B8A8_SRGB, .aspect = VK_IMAGE_ASPECT_COLOR_BIT},
      {.format = VK_FORMAT_B8G8R8A8_SRGB, .aspect = VK_IMAGE_ASPECT_COLOR_BIT},
@@ -46,6 +47,7 @@ inline auto CreateView(VkDevice device, VkImage image, VkImageAspectFlags aspect
         .array_layers     = 1,
         .view_type        = VK_IMAGE_VIEW_TYPE_2D,
         .base_array_layer = 0,
+        .base_mip         = {},
     };
     VkImageView view = ZHLN_CreateImageView(device, &desc);
     return ImageView {device, view};
@@ -61,6 +63,7 @@ inline auto CreateViewCube(VkDevice device, VkImage image, uint32_t mips) -> Ima
         .array_layers     = 6,
         .view_type        = VK_IMAGE_VIEW_TYPE_CUBE,
         .base_array_layer = 0,
+        .base_mip         = {},
     };
     VkImageView view = ZHLN_CreateImageView(device, &desc);
     return ImageView {device, view};
@@ -75,7 +78,8 @@ inline auto CreateView2DArray(VkDevice device, VkImage image, uint32_t baseLayer
         .mip_levels       = mips,
         .array_layers     = layerCount,
         .view_type        = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-        .base_array_layer = baseLayer
+        .base_array_layer = baseLayer,
+        .base_mip         = {},
     };
     VkImageView view = ZHLN_CreateImageView(device, &desc);
     return ImageView {device, view};
@@ -90,7 +94,24 @@ inline auto CreateViewCubeArray(VkDevice device, VkImage image, uint32_t arrayLa
         .mip_levels       = mips,
         .array_layers     = arrayLayers,
         .view_type        = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY,
-        .base_array_layer = 0
+        .base_array_layer = 0,
+        .base_mip         = {},
+    };
+    VkImageView view = ZHLN_CreateImageView(device, &desc);
+    return ImageView {device, view};
+}
+
+template <VkFormat F>
+inline auto CreateViewSingleMip(VkDevice device, VkImage image, uint32_t baseMip, VkImageAspectFlags aspect) -> ImageView {
+    ZHLN_ImageViewDesc desc = {
+        .image            = image,
+        .format           = F,
+        .aspect           = aspect,
+        .mip_levels       = 1,
+        .array_layers     = 1,
+        .view_type        = VK_IMAGE_VIEW_TYPE_2D,
+        .base_array_layer = 0,
+        .base_mip         = baseMip
     };
     VkImageView view = ZHLN_CreateImageView(device, &desc);
     return ImageView {device, view};

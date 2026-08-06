@@ -31,6 +31,7 @@ enum class ShaderID : uint8_t {
     PunctualShadows,
     LightingNort,
     CullingComp,
+    HizGenerateComp,
     ShadowFrag,
     ClusterBounds,
     ClusterCulling,
@@ -81,6 +82,7 @@ extern const ShaderPair mesh_particle_shadow_shaders;
 
 // Extern declarations for single spans
 extern const std::span<const uint8_t> culling_comp;
+extern const std::span<const uint8_t> hiz_generate_comp;
 extern const std::span<const uint8_t> shadow_frag;
 extern const std::span<const uint8_t> cluster_bounds;
 extern const std::span<const uint8_t> cluster_culling;
@@ -116,6 +118,7 @@ struct ShaderMapping {
         {.id = ShaderID::PunctualShadows, .pair = punctual_shadows_shaders},
         {.id = ShaderID::LightingNort, .pair = lighting_nort_shaders},
         {.id = ShaderID::CullingComp, .pair = ShaderPair {.vertex = culling_comp, .fragment = {}}},
+        {.id = ShaderID::HizGenerateComp, .pair = ShaderPair {.vertex = hiz_generate_comp, .fragment = {}}},
         {.id = ShaderID::ShadowFrag, .pair = ShaderPair {.vertex = shadow_frag, .fragment = {}}},
         {.id = ShaderID::ClusterBounds, .pair = ShaderPair {.vertex = cluster_bounds, .fragment = {}}},
         {.id = ShaderID::ClusterCulling, .pair = ShaderPair {.vertex = cluster_culling, .fragment = {}}},

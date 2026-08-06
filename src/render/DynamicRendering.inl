@@ -79,7 +79,13 @@ struct LayoutTraits {
 };
 
 template <VkImageLayout OldLayout, VkImageLayout NewLayout>
-inline void TransitionLayout(const VkCommandBuffer cmd, const VkImage image, const VkImageAspectFlags aspect) noexcept {
+inline void TransitionLayout(
+    const VkCommandBuffer    cmd,
+    const VkImage            image,
+    const VkImageAspectFlags aspect,
+    const uint32_t           baseMip,
+    const uint32_t           mipCount
+) noexcept {
     using Src = LayoutTraits<OldLayout>;
     using Dst = LayoutTraits<NewLayout>;
 
@@ -92,8 +98,8 @@ inline void TransitionLayout(const VkCommandBuffer cmd, const VkImage image, con
         .src_stage  = Src::kStage,
         .dst_stage  = Dst::kStage,
         .aspect     = aspect,
-        .base_mip   = 0,
-        .mip_count  = VK_REMAINING_MIP_LEVELS
+        .base_mip   = baseMip,
+        .mip_count  = mipCount
     };
 
     ZHLN_CmdImageBarrier(cmd, &barrier);

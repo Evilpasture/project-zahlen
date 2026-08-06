@@ -624,18 +624,12 @@ bool RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
 
 template <typename Tag, typename T>
 constexpr auto MakeRef(const T& resource) noexcept {
-    if constexpr (requires { resource.image.Handle(); }) {
-        return GraphImageRef<Tag> {
-            .handle = resource.image.Handle(),
-            .view   = resource.view.Get(),
-            .extent = detail::ToExtent3D(resource.extent) // Unified 3D adapter
-        };
+    if constexpr (requires { resource.fullView.Get(); }) {
+        return GraphImageRef<Tag> {.handle = resource.image.Handle(), .view = resource.fullView.Get(), .extent = detail::ToExtent3D(resource.extent)};
+    } else if constexpr (requires { resource.image.Handle(); }) {
+        return GraphImageRef<Tag> {.handle = resource.image.Handle(), .view = resource.view.Get(), .extent = detail::ToExtent3D(resource.extent)};
     } else if constexpr (requires { resource.handle; }) {
-        return GraphImageRef<Tag> {
-            .handle = resource.handle,
-            .view   = resource.view,
-            .extent = detail::ToExtent3D(resource.extent) // Unified 3D adapter
-        };
+        return GraphImageRef<Tag> {.handle = resource.handle, .view = resource.view, .extent = detail::ToExtent3D(resource.extent)};
     } else {
         static_assert(sizeof(T) == 0, "Unsupported resource type while making a graph reference");
     }

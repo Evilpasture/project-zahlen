@@ -45,5 +45,9 @@ template <VkFormat F>
 template <VkFormat F>
 [[nodiscard]] auto
     CreateViewCubeArray(VkDevice device, VkImage image, uint32_t arrayLayers, VkImageAspectFlags aspect = GetFormatAspect(F), uint32_t mips = 1) -> ImageView;
+
+template <VkFormat F>
+[[nodiscard]] auto CreateViewSingleMip(VkDevice device, VkImage image, uint32_t baseMip, VkImageAspectFlags aspect = GetFormatAspect(F)) -> ImageView;
+
 } // namespace ZHLN::Vk
 #include "ImageView.inl"
