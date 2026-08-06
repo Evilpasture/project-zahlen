@@ -166,7 +166,7 @@ std::expected<void, Error> RenderContext::Impl::BuildMeshParticlePipelines() {
             auto mpRenderShaders = Resource::GetShaderProgram(MeshParticleRender);
             return LoadAndCreateShaders(
                        {.path = SHADER_MESH_PARTICLE_RENDER_VS_PATH, .fallback = mpRenderShaders.vertex, .entryPoint = "VSMain"},
-                       {.path = SHADER_MESH_PARTICLE_RENDER_PS_PATH, .fallback = mpRenderShaders.fragment, .entryPoint = "PSShadow"}
+                       {.path = SHADER_MESH_PARTICLE_RENDER_PS_PATH, .fallback = mpRenderShaders.fragment, .entryPoint = "PSMain"}
             )
                 .and_then([&](auto&& shaders) -> std::expected<void, Error> {
                     return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
@@ -186,7 +186,7 @@ std::expected<void, Error> RenderContext::Impl::BuildMeshParticlePipelines() {
             auto mpShadowShaders = Resource::GetShaderProgram(MeshParticleShadow);
             return LoadAndCreateShaders(
                        {.path = SHADER_MESH_PARTICLE_SHADOW_VS_PATH, .fallback = mpShadowShaders.vertex, .entryPoint = "VSMain"},
-                       {.path = SHADER_MESH_PARTICLE_SHADOW_PS_PATH, .fallback = mpShadowShaders.fragment, .entryPoint = "PSMain"}
+                       {.path = SHADER_MESH_PARTICLE_SHADOW_PS_PATH, .fallback = mpShadowShaders.fragment, .entryPoint = "PSShadow"}
             )
                 .and_then([&](auto&& shaders) -> std::expected<void, Error> {
                     return Vk::PipelineBuilder<0, true> {}
