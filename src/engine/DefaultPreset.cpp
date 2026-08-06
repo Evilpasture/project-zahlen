@@ -240,7 +240,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
         "Compiler:         {}\n"
         "Target Triple:    {}\n"
         "GPU Hardware:     {}",
-        EngineVersion.String, Compiler, ZHLN_TARGET_TRIPLE, rc.GetGPUName()
+        ZHLN::Version::String, Compiler, ZHLN_TARGET_TRIPLE, rc.GetGPUName()
     );
 
     reg.Add(
