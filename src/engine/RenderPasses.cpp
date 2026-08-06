@@ -108,8 +108,7 @@ void Draw3DParticles(const FrameRecorder& recorder) noexcept {
     }
 
     for (const auto& emitter: ctx.queues.meshParticleQueue) {
-        auto* pBuf = ctx.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
-
+        auto*           pBuf    = ctx.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
         const Mesh*     gpuMesh = ctx.assetMeshMap.Find(emitter.meshAsset);
         const Material* gpuMat  = ctx.assetMaterialMap.Find(emitter.materialAsset);
 
@@ -121,7 +120,6 @@ void Draw3DParticles(const FrameRecorder& recorder) noexcept {
         auto* attrMesh = ctx.meshPool.Resolve(gpuMesh->attrBuffer).value_or(nullptr);
         auto* iboMesh  = (gpuMesh->indexBuffer != BufferHandle::Invalid) ? ctx.meshPool.Resolve(gpuMesh->indexBuffer).value_or(nullptr) : nullptr;
 
-        // FIXED: Initializers ordered to match MeshParticleRenderPush declaration order
         RenderContext::Impl::MeshParticleRenderPush rpc = {
             .particleBufferAddr = ctx.BufferAddress(pBuf->buffer.Handle()),
             .posAddress         = (posMesh != nullptr) ? posMesh->vboAddress : 0,
@@ -147,7 +145,7 @@ void Draw3DParticles(const FrameRecorder& recorder) noexcept {
 
         recorder.encoder.DrawInstanced(
             {.pipeline      = ctx.meshParticleRenderPipeline.Get(),
-             .layout        = ctx.particleRenderLayout.Get(),
+             .layout        = ctx.meshParticleRenderLayout.Get(),
              .set           = recorder.bindlessSet,
              .vertexCount   = drawVertexCount,
              .instanceCount = emitter.maxParticles,
@@ -176,7 +174,6 @@ void Draw3DParticleShadows(const FrameRecorder& recorder) noexcept {
         auto* posMesh = ctx.meshPool.Resolve(gpuMesh->posBuffer).value_or(nullptr);
         auto* iboMesh = (gpuMesh->indexBuffer != BufferHandle::Invalid) ? ctx.meshPool.Resolve(gpuMesh->indexBuffer).value_or(nullptr) : nullptr;
 
-        // FIXED: Initializers ordered to match MeshParticleRenderPush declaration order
         RenderContext::Impl::MeshParticleRenderPush rpc = {
             .particleBufferAddr = ctx.BufferAddress(pBuf->buffer.Handle()),
             .posAddress         = (posMesh != nullptr) ? posMesh->vboAddress : 0,
@@ -201,7 +198,7 @@ void Draw3DParticleShadows(const FrameRecorder& recorder) noexcept {
 
         recorder.encoder.DrawInstanced(
             {.pipeline      = ctx.meshParticleShadowPipeline.Get(),
-             .layout        = ctx.particleRenderLayout.Get(),
+             .layout        = ctx.meshParticleRenderLayout.Get(),
              .set           = recorder.bindlessSet,
              .vertexCount   = drawVertexCount,
              .instanceCount = emitter.maxParticles,
@@ -495,8 +492,6 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
                         pc, VK_SHADER_STAGE_VERTEX_BIT
                     );
                 }
-
-                Draw3DParticleShadows(recorder);
             });
         }
     }

@@ -203,7 +203,7 @@ add_shader_target(mesh_particle_render_shader
 add_shader_target(mesh_particle_shadow_shader
     STAGES
         "${SHADER_SRC_DIR}/mesh_particle_render.hlsl|VSMain|vs_6_5|SHADER_MESH_PARTICLE_SHADOW_VS_PATH|-DSHADOW_PASS"
-        "${SHADER_SRC_DIR}/mesh_particle_render.hlsl|PSMain|ps_6_5|SHADER_MESH_PARTICLE_SHADOW_PS_PATH|-DSHADOW_PASS"
+        "${SHADER_SRC_DIR}/mesh_particle_render.hlsl|PSShadow|ps_6_5|SHADER_MESH_PARTICLE_SHADOW_PS_PATH|-DSHADOW_PASS"
 )
 
 # --- Multi-stage (VS+PS) targets, RT vs NoRT variants ---
