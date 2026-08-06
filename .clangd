@@ -1,6 +1,12 @@
 CompileFlags:
   CompilationDatabase: "build"
-  Add: [-Iinclude]
+  Add:
+    [
+      -Iinclude,
+      -freflection,
+      -D__cpp_impl_reflection=202603L,
+      -D__glibcxx_want_reflection,
+    ]
 
 Diagnostics:
   ClangTidy:
@@ -10,5 +16,12 @@ Diagnostics:
 If:
   PathMatch: .*\.(hpp|inl)
 CompileFlags:
-  Add: [-xc++-header, -std=c++26]
+  Add:
+    [
+      -xc++-header,
+      -std=c++26,
+      -freflection,
+      -D__cpp_impl_reflection=202603L,
+      -D__glibcxx_want_reflection,
+    ]
   Remove: [-std=*]

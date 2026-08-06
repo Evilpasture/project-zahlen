@@ -51,7 +51,40 @@ constexpr bool IsBracesConstructible() {
 
 #if defined(__cpp_impl_reflection)
 #include "Loop.hpp"
-#include <meta>
+
+#if defined(__clang__) && !defined(_GLIBCXX_META)
+
+#include <exception>       // IWYU pragma: keep
+#include <source_location> // IWYU pragma: keep
+#include <version>
+
+namespace clang_meta_compat {
+struct exception_base {
+    exception_base()          = default;
+    virtual ~exception_base() = default;
+
+    exception_base(const exception_base&)                = default;
+    exception_base& operator=(const exception_base&)     = default;
+    exception_base(exception_base&&) noexcept            = default;
+    exception_base& operator=(exception_base&&) noexcept = default;
+
+    [[nodiscard]] virtual consteval const char* what() const noexcept = 0;
+};
+} // namespace clang_meta_compat
+
+namespace std {
+using clang_meta_exc_base = ::clang_meta_compat::exception_base;
+}
+
+#define exception clang_meta_exc_base
+
+#include_next <meta>
+
+#undef exception
+
+#else
+#include_next <meta>
+#endif
 
 namespace ZHLN::Reflect {
 
