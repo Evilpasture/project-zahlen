@@ -1,4 +1,6 @@
+// resources/shaders/mesh_particle_update.hlsl
 #pragma pack_matrix(column_major)
+#include "uniforms.hlsl"
 
 struct Particle3D {
     float4 position; // xyz = pos, w = scale
@@ -17,7 +19,7 @@ struct MeshParticleEmitterParams {
     float3 spawnOrigin;
     float  spawnRadius;
     float3 spawnBoxExtent;
-    float  loopBoundary;
+    float  loopBoundary; // 0.0 = One-Shot Burst, 1.0 = Continuous Loop
     float3 initVelMin;
     float  lifetimeMin;
     float3 initVelMax;
@@ -37,14 +39,15 @@ struct ComputePushConstants {
     MeshParticleEmitterParams p;
 };
 
-[[vk::push_constant]] ComputePushConstants pc;
+[[vk::push_constant]] ComputePushConstants          pc;
+[[vk::binding(2, 0)]] ConstantBuffer<FrameUniforms> frame;
 
-// Fast Hashes
 float Hash13(float3 p) {
     p = frac(p * 0.1031f);
     p += dot(p, p.zyx + 31.32f);
     return frac((p.x + p.y) * p.z);
 }
+
 float3 Hash33(float3 p) {
     return float3(Hash13(p), Hash13(p + float3(17.1f, 9.3f, 27.5f)), Hash13(p + float3(31.4f, 45.2f, 11.8f)));
 }
@@ -71,10 +74,26 @@ float4 QuatFromAxisAngle(float3 axis, float angle) {
     Particle3D p    = vk::RawBufferLoad<Particle3D>(addr, 4);
     float      dt   = pc.deltaTime;
 
-    p.params.x += dt;
+    // --- 1. INITIAL SEED (UNINITIALIZED BRAND-NEW PARTICLE) ---
+    if (p.params.y <= 0.0f) {
+        float3 seed = float3(idx, frame.camPos.w, pc.p.scaleMin);
+        float3 rand = Hash33(seed) * 2.0f - 1.0f;
 
-    if (p.params.x < p.params.y) {
-        // Integrate Velocity
+        p.position.xyz = pc.p.spawnOrigin + rand * (pc.p.spawnBoxExtent * 0.5f);
+        p.velocity.xyz = lerp(pc.p.initVelMin, pc.p.initVelMax, Hash33(seed + 1.0f));
+        p.rotVel.xyz   = lerp(pc.p.rotVelMin, pc.p.rotVelMax, Hash33(seed + 2.0f));
+        p.rotation     = float4(0, 0, 0, 1); // Identity
+
+        p.params.y   = lerp(pc.p.lifetimeMin, pc.p.lifetimeMax, Hash13(seed + 3.0f));
+        p.params.x   = 0.0f;
+        p.position.w = pc.p.scaleMin;
+        p.color      = pc.p.startColor;
+    }
+    // --- 2. ACTIVE PARTICLE SIMULATION ---
+    else if (p.params.x < p.params.y) {
+        p.params.x += dt;
+
+        // Integrate Physics
         p.velocity.xyz += pc.p.gravity * dt;
         p.velocity.xyz *= exp(-pc.p.drag * dt);
         p.position.xyz += p.velocity.xyz * dt;
@@ -86,20 +105,20 @@ float4 QuatFromAxisAngle(float3 axis, float angle) {
             p.rotation = normalize(QuatMultiply(dq, p.rotation));
         }
 
-        // Interpolate Color & Scale
+        // Interpolate Color & Scale over Lifetime
         float t      = saturate(p.params.x / p.params.y);
         p.color      = lerp(pc.p.startColor, pc.p.endColor, t);
         p.position.w = lerp(pc.p.scaleMin, pc.p.scaleMax, t);
-
-    } else if (p.params.y <= 0.0f || p.params.x >= p.params.y) {
-        // Respawn
-        float3 seed = float3(idx, pc.deltaTime, pc.p.scaleMin);
+    }
+    // --- 3. RECYCLING (ONLY IF LOOPING IS ENABLED!) ---
+    else if (pc.p.loopBoundary > 0.5f) {
+        float3 seed = float3(idx, frame.camPos.w, p.params.x);
         float3 rand = Hash33(seed) * 2.0f - 1.0f;
 
         p.position.xyz = pc.p.spawnOrigin + rand * (pc.p.spawnBoxExtent * 0.5f);
         p.velocity.xyz = lerp(pc.p.initVelMin, pc.p.initVelMax, Hash33(seed + 1.0f));
         p.rotVel.xyz   = lerp(pc.p.rotVelMin, pc.p.rotVelMax, Hash33(seed + 2.0f));
-        p.rotation     = float4(0, 0, 0, 1); // Identity
+        p.rotation     = float4(0, 0, 0, 1);
 
         p.params.y   = lerp(pc.p.lifetimeMin, pc.p.lifetimeMax, Hash13(seed + 3.0f));
         p.params.x   = 0.0f;
