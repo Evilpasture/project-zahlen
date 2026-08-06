@@ -124,7 +124,6 @@ std::expected<void, Error> RenderContext::Impl::CompileShadowPipeline(VkDevice d
                         .Layout(shadowPipelineLayout.Get())
                         .DepthOnly()
                         .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                        .ViewMask(0xF)
                         .CullNone()
                         .Build(device)
                         .transform_error([](auto err) -> Error {

@@ -194,7 +194,6 @@ std::expected<void, Error> RenderContext::Impl::BuildMeshParticlePipelines() {
                         .Layout(meshParticleRenderLayout.Get())
                         .DepthOnly()
                         .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                        .ViewMask(0xF) // 4 CSM Cascades
                         .CullNone()
                         .Build(ctx.Device())
                         .transform([&](auto&& pipeline) { meshParticleShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });

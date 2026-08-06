@@ -136,7 +136,7 @@ void Draw3DParticles(const FrameRecorder& recorder) noexcept {
             .metallic           = gpuMat->metallicFactor,
             .alphaCutoff        = gpuMat->alphaCutoff,
             .alphaMode          = gpuMat->alphaMode,
-            ._padding           = 0
+            .cascadeIndex       = 0
         };
         std::memcpy(rpc.baseColorFactor, gpuMat->baseColorFactor, sizeof(float) * 4);
         std::memcpy(rpc.emissiveFactor, gpuMat->emissiveFactor, sizeof(float) * 4);
@@ -156,7 +156,7 @@ void Draw3DParticles(const FrameRecorder& recorder) noexcept {
     }
 }
 
-void Draw3DParticleShadows(const FrameRecorder& recorder) noexcept {
+void Draw3DParticleShadows(const FrameRecorder& recorder, uint32_t cascadeIndex) noexcept {
     auto& ctx = recorder.ctx;
     if (!ctx.meshParticleShadowPipeline.Valid() || ctx.queues.meshParticleQueue.empty()) {
         return;
@@ -190,7 +190,7 @@ void Draw3DParticleShadows(const FrameRecorder& recorder) noexcept {
             .metallic           = 0.0f,
             .alphaCutoff        = gpuMat->alphaCutoff,
             .alphaMode          = gpuMat->alphaMode,
-            ._padding           = 0
+            .cascadeIndex       = cascadeIndex
         };
         std::memcpy(rpc.baseColorFactor, gpuMat->baseColorFactor, sizeof(float) * 4);
 
@@ -358,19 +358,21 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
     auto* indirectCmdsBase = static_cast<VkDrawIndirectCommand*>(mapped.data);
 
     std::array<uint32_t, 8> passWriteOffsets {};
-    passWriteOffsets[0] = 0;
-    for (uint32_t l = 0; l < 4; ++l) {
+    for (uint32_t c = 0; c < RenderContext::Impl::NUM_CASCADES; ++c) {
+        passWriteOffsets[c] = c * kGpuCullingMaxInstances;
+    }
+    for (uint32_t l = 0; l < RenderContext::Impl::MAX_PUNCTUAL_LIGHTS; ++l) {
         passWriteOffsets[4 + l] = (4 + l) * kGpuCullingMaxInstances;
     }
 
     std::array<uint32_t, 8> passDrawCounts {};
 
-    std::array<const GPULight*, 4> activeShadowLights {};
-    uint32_t                       activeShadowLightCount = 0;
+    std::array<const GPULight*, RenderContext::Impl::MAX_PUNCTUAL_LIGHTS> activeShadowLights {};
+    uint32_t                                                              activeShadowLightCount = 0;
     for (const auto& light: ctx.mappedLights) {
         if (light.shadowLayer >= 0 && light.type == Point) {
             activeShadowLights[activeShadowLightCount++] = &light;
-            if (activeShadowLightCount >= 4) {
+            if (activeShadowLightCount >= RenderContext::Impl::MAX_PUNCTUAL_LIGHTS) {
                 break;
             }
         }
@@ -383,15 +385,20 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
             continue;
         }
 
-        uint32_t vertexCount = drawCmd.instanceData.iboAddress != 0 ? drawCmd.instanceData.indexCount : drawCmd.instanceData.vertexCount;
+        uint32_t  vertexCount = drawCmd.instanceData.iboAddress != 0 ? drawCmd.instanceData.indexCount : drawCmd.instanceData.vertexCount;
+        JPH::Vec3 meshPos     = drawCmd.instanceData.world.GetTranslation();
+        float     radius      = drawCmd.instanceData.cullRadius;
 
-        JPH::Vec3 meshPos = drawCmd.instanceData.world.GetTranslation();
-        float     radius  = drawCmd.instanceData.cullRadius;
+        // Cascade Culling: Only assign to cascades that geometrically intersect the mesh!
+        for (uint32_t c = 0; c < RenderContext::Impl::NUM_CASCADES; ++c) {
+            if (cascadeFrustums[c].IsSphereVisible(meshPos, radius)) {
+                uint32_t writeIdx          = passWriteOffsets[c] + passDrawCounts[c];
+                indirectCmdsBase[writeIdx] = {.vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = i};
+                passDrawCounts[c]++;
+            }
+        }
 
-        uint32_t writeIdx          = passWriteOffsets[0] + passDrawCounts[0];
-        indirectCmdsBase[writeIdx] = {.vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = i};
-        passDrawCounts[0]++;
-
+        // Punctual light logic
         for (uint32_t l = 0; l < activeShadowLightCount; ++l) {
             const auto* light   = activeShadowLights[l];
             uint32_t    slotIdx = 4 + light->shadowLayer;
@@ -413,20 +420,20 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 
     {
         Profiler::ScopedGpuProfile<Stages::ShadowPass, FrameProfiler> timer(cmd, recorder.frameIndex, ctx.gpuProfiler);
+        bool                                                          hasMeshParticles = !ctx.queues.meshParticleQueue.empty();
 
-        uint32_t csmDrawCount     = passDrawCounts[0];
-        bool     hasMeshParticles = !ctx.queues.meshParticleQueue.empty();
+        for (uint32_t c = 0; c < RenderContext::Impl::NUM_CASCADES; ++c) {
+            uint32_t csmDrawCount = passDrawCounts[c];
 
-        if (csmDrawCount > 0 || hasMeshParticles) {
+            // Render exclusively to this cascade's slice/layer
             Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> cascadeLayerImage = {
                 .handle = ctx.graphResources.shadowMap.image.Handle(),
-                .view   = ctx.graphResources.shadowMap.view.Get(),
+                .view   = ctx.shadowCascadeViews[c].Get(),
                 .extent = {.width = ctx.graphResources.shadowMap.extent.width, .height = ctx.graphResources.shadowMap.extent.height, .depth = 1},
                 .aspect = VK_IMAGE_ASPECT_DEPTH_BIT
             };
 
             Vk::DynamicPass(cascadeLayerImage.extent)
-                .ViewMask(0xF)
                 .AddDepth(cascadeLayerImage, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kShadowClearDepth)
                 .Execute(cmd, [&]() {
                     if (csmDrawCount > 0) {
@@ -435,13 +442,16 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
                              .layout         = ctx.shadowPipelineLayout.Get(),
                              .set            = recorder.bindlessSet,
                              .argumentBuffer = ctx.shadowIndirectBuffers->Handle(),
-                             .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[0]),
+                             .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[c]),
                              .drawCount      = csmDrawCount},
-                            ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 1}, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+                            ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 1 + c}, // Map: 1 -> Cas0, 2 -> Cas1, etc.
+                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
                         );
                     }
 
-                    Draw3DParticleShadows(recorder);
+                    if (hasMeshParticles) {
+                        Draw3DParticleShadows(recorder, c);
+                    }
                 });
         }
     }
@@ -456,7 +466,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 
         for (uint32_t l_idx = 0; l_idx < ctx.mappedLights.size(); ++l_idx) {
             const auto& light = ctx.mappedLights[l_idx];
-            if (light.shadowLayer < 0 || light.type != Point) {
+            if (light.shadowLayer < 0 || light.type == Point) {
                 continue;
             }
 

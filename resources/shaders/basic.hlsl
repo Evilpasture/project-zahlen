@@ -94,7 +94,9 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
     float  alphaCutoff     = inst.alphaCutoff;
 
     if (obj.isShadowPass != 0) {
-        uint cascadeIndex      = clamp(viewId, 0u, 3u);
+        // Extract the cascade index mapped from the CPU
+        uint cascadeIndex = obj.isShadowPass - 1;
+
         output.pos             = mul(frame.lightSpaceMatrices[cascadeIndex], worldPos);
         output.uv              = localUV;
         output.baseColorFactor = baseColorFactor;

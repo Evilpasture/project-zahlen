@@ -1009,7 +1009,7 @@ struct RenderContext::Impl {
         float    alphaCutoff;
         uint32_t alphaMode;
 
-        uint32_t _padding; // Offset 100 -> Rounds total size to 104 bytes
+        uint32_t cascadeIndex;
     };
     static_assert(sizeof(MeshParticleRenderPush) == 104);
 
