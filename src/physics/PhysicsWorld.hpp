@@ -8,10 +8,10 @@
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/PhysicsSystem.h>
-#include <cstdint>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
+#include <cstdint>
 #include <type_traits>
 
 namespace ZHLN {
@@ -271,8 +271,8 @@ static_assert(std::is_standard_layout_v<PhysicsWorld>);
 // --- Slot Predication Logic ---
 
 // Simplified masks for C++
-static constexpr uint32_t MASK_ACTIVE       = (1U << SLOT_ALIVE) | (1U << SLOT_CHARACTER);
-static constexpr uint32_t MASK_DESTRUCTIBLE = (1U << SLOT_ALIVE) | (1U << SLOT_CHARACTER);
+inline constexpr uint32_t MASK_ACTIVE       = (1U << SLOT_ALIVE) | (1U << SLOT_CHARACTER);
+inline constexpr uint32_t MASK_DESTRUCTIBLE = (1U << SLOT_ALIVE) | (1U << SLOT_CHARACTER);
 
 struct SlotPredicate {
     bool isActive;       // Alive in Jolt right now and safe to query

@@ -3,15 +3,15 @@
 
 #pragma once
 
-#include <cstdint>
 #include <Zahlen/Core/String.hpp>
+#include <cstdint>
 #include <string_view>
 #include <vector>
 
 namespace ZHLN::ALife {
 
-constexpr uint32_t MAX_GOAP_STATES = 64;
-constexpr uint32_t MAX_PLAN_LENGTH = 8;
+inline constexpr uint32_t MAX_GOAP_STATES = 64;
+inline constexpr uint32_t MAX_PLAN_LENGTH = 8;
 
 struct WorldState {
     uint64_t values = 0;

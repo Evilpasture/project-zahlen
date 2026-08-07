@@ -9,7 +9,7 @@
 
 namespace ZHLN::ALife {
 
-constexpr uint32_t MAX_NODE_NEIGHBORS = 4;
+inline constexpr uint32_t MAX_NODE_NEIGHBORS = 4;
 
 enum class NodeType : uint8_t { Wilderness, Hub, Campfire, Lair };
 

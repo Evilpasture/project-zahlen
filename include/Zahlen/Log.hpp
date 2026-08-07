@@ -120,12 +120,12 @@ struct DumpOptions {
 
 // ANSI Color Helpers
 namespace Color {
-constexpr char Reset[]  = "\033[0m";
-constexpr char Gray[]   = "\033[90m";
-constexpr char Cyan[]   = "\033[36m";
-constexpr char Yellow[] = "\033[33m";
-constexpr char Green[]  = "\033[32m";
-constexpr char Red[]    = "\033[31m";
+inline constexpr char Reset[]  = "\033[0m";
+inline constexpr char Gray[]   = "\033[90m";
+inline constexpr char Cyan[]   = "\033[36m";
+inline constexpr char Yellow[] = "\033[33m";
+inline constexpr char Green[]  = "\033[32m";
+inline constexpr char Red[]    = "\033[31m";
 } // namespace Color
 
 void LogManual(std::string_view file, int line, std::string_view message, const char* color = "");
