@@ -130,6 +130,17 @@ export import :alife;
 export import :scripting;
 export import :engine;
 
+// Export Jolt Math types so consumers importing 'zahlen' can use them directly
+export namespace JPH {
+using JPH::AABox;
+using JPH::DVec3;
+using JPH::Mat44;
+using JPH::Quat;
+using JPH::RVec3;
+using JPH::Vec3;
+using JPH::Vec4;
+} // namespace JPH
+
 export {
 // 4. Zahlen Engine Core
 #include <Zahlen/Audio.hpp>

@@ -168,6 +168,20 @@ class ZHLN_API Registry {
     }
 
     template <typename T>
+        requires std::is_default_constructible_v<T>
+    T& Add(Entity entity) {
+        return Add(entity, T {});
+    }
+
+    template <typename T1, typename T2, typename... Ts>
+        requires(std::is_default_constructible_v<T1> && std::is_default_constructible_v<T2> && (std::is_default_constructible_v<Ts> && ...))
+    void Add(Entity entity) {
+        Add<T1>(entity);
+        Add<T2>(entity);
+        (Add<Ts>(entity), ...);
+    }
+
+    template <typename T>
     T& Add(Entity entity, T&& component) {
         using DecayedT = std::decay_t<T>;
         uint32_t id    = ComponentFamily::GetTypeID<DecayedT>();
@@ -191,6 +205,13 @@ class ZHLN_API Registry {
             ::new (slot) DecayedT(std::forward<T>(component));
             return *static_cast<DecayedT*>(slot);
         }
+    }
+
+    template <typename T1, typename T2, typename... Ts>
+    void Add(Entity entity, T1&& c1, T2&& c2, Ts&&... cs) {
+        Add(entity, std::forward<T1>(c1));
+        Add(entity, std::forward<T2>(c2));
+        (Add(entity, std::forward<Ts>(cs)), ...);
     }
 
     template <typename... Ts>
