@@ -568,7 +568,7 @@ void AudioContext::UpdateListener(const JPH::Vec3& position, const JPH::Vec3& di
     using namespace ZHLN::Ranges;
 
     // Prune finished 3D one-shots
-    ZHLN_LOCK(_impl->oneShotMutex) {
+    ZHLN::Lock(_impl->oneShotMutex, [&] {
         _impl->activeOneShots | EraseIf([&](ma_sound* sound) {
             if (ma_sound_at_end(sound) == MA_TRUE) {
                 ma_sound_uninit(sound);
@@ -577,10 +577,10 @@ void AudioContext::UpdateListener(const JPH::Vec3& position, const JPH::Vec3& di
             }
             return false;
         });
-    }
+    });
 
     // Prune finished procedural beeps
-    ZHLN_LOCK(_impl->beepMutex) {
+    ZHLN::Lock(_impl->beepMutex, [&] {
         _impl->activeBeeps | EraseIf([&](ProceduralBeep* beep) {
             if (ma_sound_at_end(&beep->sound) == MA_TRUE) {
                 ma_sound_uninit(&beep->sound);
@@ -590,10 +590,10 @@ void AudioContext::UpdateListener(const JPH::Vec3& position, const JPH::Vec3& di
             }
             return false;
         });
-    }
+    });
 
     // Prune finished noise bursts
-    ZHLN_LOCK(_impl->burstMutex) {
+    ZHLN::Lock(_impl->burstMutex, [&] {
         _impl->activeBursts | EraseIf([&](NoiseBurstData* burst) {
             if (ma_sound_at_end(&burst->sound) == MA_TRUE || burst->currentFrame >= burst->totalFrames) {
                 ma_sound_uninit(&burst->sound);
@@ -604,10 +604,10 @@ void AudioContext::UpdateListener(const JPH::Vec3& position, const JPH::Vec3& di
             }
             return false;
         });
-    }
+    });
 
     // Prune finished tone sweeps
-    ZHLN_LOCK(_impl->sweepMutex) {
+    ZHLN::Lock(_impl->sweepMutex, [&] {
         _impl->activeSweeps | EraseIf([&](ToneSweepData* sweep) {
             if (ma_sound_at_end(&sweep->sound) == MA_TRUE || sweep->currentFrame >= sweep->totalFrames) {
                 ma_sound_uninit(&sweep->sound);
@@ -618,10 +618,10 @@ void AudioContext::UpdateListener(const JPH::Vec3& position, const JPH::Vec3& di
             }
             return false;
         });
-    }
+    });
 
     // Prune finished loop synths
-    ZHLN_LOCK(_impl->loopSynthMutex) {
+    ZHLN::Lock(_impl->loopSynthMutex, [&] {
         _impl->activeLoopSynths | EraseIf([&](LoopSynthData* synth) {
             if (ma_sound_at_end(&synth->sound) == MA_TRUE || synth->isFinished.load(std::memory_order::relaxed)) {
                 ma_sound_uninit(&synth->sound);
@@ -633,7 +633,7 @@ void AudioContext::UpdateListener(const JPH::Vec3& position, const JPH::Vec3& di
             }
             return false;
         });
-    }
+    });
 }
 
 void AudioContext::PlayProceduralBeep(float frequency, float duration, float volume) {
@@ -665,9 +665,9 @@ void AudioContext::PlayProceduralBeep(float frequency, float duration, float vol
     ma_sound_set_stop_time_in_pcm_frames(&beep->sound, stopTime);
     ma_sound_start(&beep->sound);
 
-    ZHLN_LOCK(_impl->beepMutex) {
+    ZHLN::Lock(_impl->beepMutex, [&] {
         _impl->activeBeeps.push_back(beep);
-    }
+    });
 }
 
 void AudioContext::PlayNoiseBurst(AudioFilterType filterType, float freq, float q, float volume, float duration, AudioNoiseType noiseType) {
@@ -720,9 +720,9 @@ void AudioContext::PlayNoiseBurst3D(
 
     ma_sound_start(&burst->sound);
 
-    ZHLN_LOCK(_impl->burstMutex) {
+    ZHLN::Lock(_impl->burstMutex, [&] {
         _impl->activeBursts.push_back(burst);
-    }
+    });
 }
 
 void AudioContext::PlayToneSweep(AudioWaveformType waveType, float startFreq, float endFreq, float volume, float duration) {
@@ -766,9 +766,9 @@ void AudioContext::PlayToneSweep3D(AudioWaveformType waveType, float startFreq, 
 
     ma_sound_start(&sweep->sound);
 
-    ZHLN_LOCK(_impl->sweepMutex) {
+    ZHLN::Lock(_impl->sweepMutex, [&] {
         _impl->activeSweeps.push_back(sweep);
-    }
+    });
 }
 
 auto AudioContext::CreateLoopSynth(AudioWaveformType waveType1, AudioWaveformType waveType2, AudioFilterType filterType) -> void* {
@@ -804,9 +804,9 @@ auto AudioContext::CreateLoopSynth(AudioWaveformType waveType1, AudioWaveformTyp
 
     ma_sound_start(&synth->sound);
 
-    ZHLN_LOCK(_impl->loopSynthMutex) {
+    ZHLN::Lock(_impl->loopSynthMutex, [&] {
         _impl->activeLoopSynths.push_back(synth);
-    }
+    });
 
     return static_cast<void*>(synth);
 }
@@ -837,10 +837,10 @@ void AudioContext::DestroyLoopSynth(void* handle) {
     }
     auto* synth = static_cast<LoopSynthData*>(handle);
 
-    ZHLN_LOCK(_impl->loopSynthMutex) {
+    ZHLN::Lock(_impl->loopSynthMutex, [&] {
         using namespace ZHLN::Ranges;
         _impl->activeLoopSynths | EraseIf([&](LoopSynthData* s) { return s == synth; });
-    }
+    });
 
     ma_sound_uninit(&synth->sound);
     ma_waveform_uninit(&synth->waveform1);
@@ -869,9 +869,9 @@ void AudioContext::PlayOneShot3D(const std::string& filepath, const JPH::Vec3& p
         ma_sound_set_volume(sound, volume);
         ma_sound_start(sound);
 
-        ZHLN_LOCK(_impl->oneShotMutex) {
+        ZHLN::Lock(_impl->oneShotMutex, [&] {
             _impl->activeOneShots.push_back(sound);
-        }
+        });
     } else {
         _impl->soundPool.Destroy(sound);
         ZHLN::Log("ERROR: Failed to play 3D one-shot: {}", filepath);

@@ -732,12 +732,12 @@ struct RenderContext::Impl {
         ZHLN::Array<VkBufferMemoryBarrier2> buffers;
 
         void Drain(VkCommandBuffer cmd) noexcept {
-            ZHLN_LOCK(mutex) {
+            ZHLN::Lock(mutex, [&] {
                 if (!buffers.empty()) {
                     Vk::BufferBarrier(cmd, buffers);
                     buffers.clear();
                 }
-            }
+            });
         }
     };
     mutable PendingAcquires pendingAcquires;

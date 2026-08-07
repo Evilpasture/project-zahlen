@@ -119,10 +119,10 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
             if (impulseCmd->jointIndex < ragComp.ragdollInstance->GetBodyCount()) {
                 JPH::BodyID bodyID = ragComp.ragdollInstance->GetBodyID(impulseCmd->jointIndex);
                 if (!bodyID.IsInvalid()) {
-                    ZHLN_LOCK(world.sync.shadowLock) {
+                    ZHLN::Lock(world.sync.shadowLock, [&] {
                         world.bodyInterface->AddImpulse(bodyID, impulseCmd->impulse);
                         world.bodyInterface->ActivateBody(bodyID);
-                    }
+                    });
                 }
             }
             reg.Remove<Components::RagdollImpulseCommand>(e);
@@ -194,7 +194,7 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
         if (ragComp.state != ragComp.prevState) {
             if (ragComp.state == RagdollState::Dynamic || ragComp.state == RagdollState::Kinematic || ragComp.state == RagdollState::PartialBlend) {
                 if (!ragComp.isAddedToPhysics) {
-                    ZHLN_LOCK(world.sync.shadowLock) {
+                    ZHLN::Lock(world.sync.shadowLock, [&] {
                         ragdoll->AddToPhysicsSystem(JPH::EActivation::Activate);
                         if (phys != nullptr) {
                             JPH::Vec3 charVel = Physics::GetCharacterVelocity(engine.GetPhysicsContext(), phys->physicsHandle);
@@ -202,22 +202,22 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
                             ragdoll->SetLinearAndAngularVelocity(charVel, JPH::Vec3::sZero());
                         }
                         ragComp.isAddedToPhysics = true;
-                    }
+                    });
                 }
             } else if (ragComp.state == RagdollState::Inactive && ragComp.isAddedToPhysics) {
-                ZHLN_LOCK(world.sync.shadowLock) {
+                ZHLN::Lock(world.sync.shadowLock, [&] {
                     ragdoll->RemoveFromPhysicsSystem();
                     ragComp.isAddedToPhysics = false;
-                }
+                });
             }
             ragComp.prevState = ragComp.state;
         }
 
         if (ragComp.state == RagdollState::Kinematic || ragComp.state == RagdollState::PartialBlend) {
-            ZHLN_LOCK(world.sync.shadowLock) {
+            ZHLN::Lock(world.sync.shadowLock, [&] {
                 ragdoll->Activate();
                 ragdoll->DriveToPoseUsingMotors(animPose);
-            }
+            });
         }
 
         // --- D. OUTPUT BLENDED TRANSFORM TO GPU ---
@@ -225,9 +225,9 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
             JPH::Array<JPH::Mat44> physicalWorldJoints(count, JPH::Mat44::sIdentity());
             JPH::RVec3             actualRootOffset = JPH::RVec3::sZero();
 
-            ZHLN_LOCK(world.sync.shadowLock) {
+            ZHLN::Lock(world.sync.shadowLock, [&] {
                 ragdoll->GetPose(actualRootOffset, physicalWorldJoints.data());
-            }
+            });
 
             // Sync physics translation roots to all associated child visual components
             auto allMeshEntities = reg.GetEntitiesWith<Components::MeshComponent>();

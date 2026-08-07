@@ -1,45 +1,33 @@
-// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
-// SPDX-License-Identifier: GPL-3.0-or-later
-
+// include/Zahlen/Core/ControlFlow.hpp
 #pragma once
 
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
+#include <utility>
+
+namespace ZHLN {
 
 /**
- * @brief Internal helper to create a scope-bound guard that executes exactly once.
+ * @brief Higher-order functional mutex lock.
+ * Automatically locks the mutex, executes the lambda, and unlocks on exit.
+ *
+ * Usage:
+ *   ZHLN::Lock(myMutex, [&] {
+ *       return registry.Create();
+ *   });
  */
-#define ZHLN_SCOPE_BLOCK(GuardInit) if (GuardInit; true)
+template <typename MutexT, typename Func>
+decltype(auto) Lock(MutexT& mutex, Func&& func) {
+    MutexGuard guard(mutex);
+    return std::forward<Func>(func)();
+}
 
-/**
- * @brief Standard Mutex Lock Macro.
- * Usage: ZHLN_LOCK(myMutex) { ... }
- */
-#define ZHLN_LOCK(mutex_ref) ZHLN_SCOPE_BLOCK(::ZHLN::MutexGuard _zhln_guard_no_recursive_and_nesting(mutex_ref))
-
-/**
- * @brief ECS-Specific Safety Macro.
- * Checks if the registry is currently being accessed by Lua/FFI via the Buffer Protocol.
- * If a view is exported, it prevents structural changes that would reallocate memory.
- */
-#define ZHLN_FFI_GUARD(registry_ptr) ZHLN_SCOPE_BLOCK(::ZHLN::Internal::FFISafetyGuard _ffi_guard(registry_ptr))
-
-namespace ZHLN::Internal {
-
-/**
- * @brief Logic for ECS FFI Safety.
- * Prevents structural modifications (reallocs) while raw pointers are held by scripting.
- */
+namespace Internal {
 struct FFISafetyGuard {
-    // We forward declare the Registry logic here to keep this header clean
     void* _reg;
     explicit FFISafetyGuard(void* reg): _reg(reg) {
-        // Logic: If (reg->view_export_count > 0) Panic("FFI Memory Violation");
-        // We'll implement this properly in ECS.cpp
     }
-    ~FFISafetyGuard() {
-        // Cleanup logic
-    }
+    ~FFISafetyGuard() = default;
 };
+} // namespace Internal
 
-} // namespace ZHLN::Internal
+} // namespace ZHLN

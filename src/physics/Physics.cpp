@@ -286,14 +286,14 @@ void PhysicsContext::Step(float deltaTime) {
     // --- 1. COMMAND FLUSH (Structural Phase) ---
     size_t capturedCount = 0;
 
-    ZHLN_LOCK(world.sync.shadowLock) {
+    ZHLN::Lock(world.sync.shadowLock, [&] {
         capturedCount = world.commandCount;
         if (capturedCount > 0) {
             // Zero-allocation ping-pong swap on the underlying array buffers
             world.commandQueue.swap(world.commandQueueSpare);
             world.commandCount = 0;
         }
-    }
+    });
 
     // Execute the flusher outside the lock on the isolated commandQueueSpare data
     if (capturedCount > 0) {
@@ -321,9 +321,7 @@ void PhysicsContext::Step(float deltaTime) {
     }
 
     // 3. Data Synchronization Pass (Jolt SoA -> Engine Shadow SoA)
-    ZHLN_LOCK(world.sync.shadowLock) {
-        world.Synchronize(&_impl->physicsSystem, _impl->activeCharacters);
-    }
+    ZHLN::Lock(world.sync.shadowLock, [&] { world.Synchronize(&_impl->physicsSystem, _impl->activeCharacters); });
 
     world.isStepping.store(false, std::memory_order::release);
 }
@@ -371,7 +369,7 @@ JPH::ShapeRefC GetOrCreateShape(PhysicsContext& ctx, Physics::ShapeType type, fl
     // 3. Jolt Creation
     JPH::ShapeRefC shape;
 
-    ZHLN_LOCK(impl->world.sync.shadowLock) {
+    ZHLN::Lock(impl->world.sync.shadowLock, [&] {
         switch (type) {
             case Physics::ShapeType::Box: {
                 JPH::BoxShapeSettings s(JPH::Vec3(np1, np2, np3), 0.05f);
@@ -403,12 +401,12 @@ JPH::ShapeRefC GetOrCreateShape(PhysicsContext& ctx, Physics::ShapeType type, fl
 
         if (shape == nullptr) {
             ZHLN::Log("Failed to create Jolt Shape! Degenerate parameters?");
-            return nullptr;
+            return;
         }
 
         // 4. Store in cache
         impl->shapeCache.push_back({.key = ShapeKey {.type = static_cast<uint32_t>(type), .p1 = np1, .p2 = np2, .p3 = np3, .p4 = np4}, .shape = shape});
-    }
+    });
     return shape;
 }
 
@@ -475,7 +473,7 @@ void DestroyBody(PhysicsContext& ctx, ZHLN::Entity handle) {
     world.slotStates[slot].store(SLOT_PENDING_DESTROY, std::memory_order::release);
 
     // Lock the shadow buffer to queue the command safely
-    ZHLN_LOCK(world.sync.shadowLock) {
+    ZHLN::Lock(world.sync.shadowLock, [&] {
         // Expand the JPH::Arrays automatically if capacity is exceeded
         if (world.commandCount >= world.commandQueue.size()) {
             size_t newCap = world.commandQueue.size() == 0 ? 64 : world.commandQueue.size() * 2;
@@ -484,12 +482,12 @@ void DestroyBody(PhysicsContext& ctx, ZHLN::Entity handle) {
         }
 
         world.commandQueue[world.commandCount++] = {.type = CommandType::DestroyBody, .handle = handle};
-    }
+    });
 }
 
 void RegisterMaterial(PhysicsContext& ctx, uint32_t id, float friction, float restitution) {
     auto& world = ctx.GetImpl()->world;
-    ZHLN_LOCK(world.sync.shadowLock) {
+    ZHLN::Lock(world.sync.shadowLock, [&] {
         // 1. Update if exists
         for (size_t i = 0; i < world.materialCount; ++i) {
             if (world.materials[i].id == id) {
@@ -507,7 +505,7 @@ void RegisterMaterial(PhysicsContext& ctx, uint32_t id, float friction, float re
 
         // 3. Insert new
         world.materials[world.materialCount++] = {.id = id, .friction = friction, .restitution = restitution};
-    }
+    });
 }
 
 /**
@@ -547,7 +545,7 @@ ZHLN::Entity CreateRigidBody(
 
     // Engine allocates the identity!
     ZHLN::Entity handle = world.AllocateHandle();
-    ZHLN_LOCK(world.sync.shadowLock) {
+    ZHLN::Lock(world.sync.shadowLock, [&] {
         mat = ResolveMaterial(world, materialID);
         JPH::BodyCreationSettings settings(shape, pos, rot, motion, layer);
         settings.mUserData    = handle.Pack();
@@ -596,7 +594,7 @@ ZHLN::Entity CreateRigidBody(
         world.materialIDs[dense] = materialID;
         world.categories[dense]  = category;
         world.masks[dense]       = mask;
-    }
+    });
     return handle;
 }
 
@@ -676,7 +674,7 @@ ZHLN::Entity CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position, uint32
     JPH::ShapeRefC charShape = GetOrCreateShape(ctx, ShapeType::Capsule, 0.5f, 0.3f);
 
     ZHLN::Entity handle = world.AllocateHandle();
-    ZHLN_LOCK(world.sync.shadowLock) {
+    ZHLN::Lock(world.sync.shadowLock, [&] {
         JPH::CharacterVirtualSettings settings;
         settings.mShape       = charShape;
         settings.mMaxStrength = 100.0f;
@@ -720,20 +718,20 @@ ZHLN::Entity CreateCharacter(PhysicsContext& ctx, JPH::RVec3Arg position, uint32
         world.prevRotations[dense * 4 + 1] = 0.0f;
         world.prevRotations[dense * 4 + 2] = 0.0f;
         world.prevRotations[dense * 4 + 3] = 1.0f;
-    }
+    });
     return handle;
 }
 
 void SetCollisionFilter(PhysicsContext& ctx, ZHLN::Entity handle, uint32_t category, uint32_t mask) {
     auto& world = ctx.GetImpl()->world;
-    ZHLN_LOCK(world.sync.shadowLock) {
+    ZHLN::Lock(world.sync.shadowLock, [&] {
         Command cmd {};
         cmd.type                                 = CommandType::SetCollisionFilter;
         cmd.setFilter.handle                     = handle;
         cmd.setFilter.category                   = category;
         cmd.setFilter.mask                       = mask;
         world.commandQueue[world.commandCount++] = cmd;
-    }
+    });
 }
 
 DebugDrawData GetDebugDrawData(PhysicsContext& ctx, bool drawShapes, bool drawConstraints, bool wireframe) {
@@ -855,7 +853,7 @@ ConstraintHandle CreateConstraint(PhysicsContext& ctx, ConstraintType type, ZHLN
     // 1. Allocate handle immediately so we can return it
     ConstraintHandle handle = world.AllocateConstraintHandle();
 
-    ZHLN_LOCK(world.sync.shadowLock) { // 2. Queue Command
+    ZHLN::Lock(world.sync.shadowLock, [&] { // 2. Queue Command
         Command cmd {};
         cmd.type           = CommandType::CreateConstraint;
         cmd.cHandle        = handle;
@@ -865,21 +863,21 @@ ConstraintHandle CreateConstraint(PhysicsContext& ctx, ConstraintType type, ZHLN
         cmd.createC.params = params;
 
         world.commandQueue[world.commandCount++] = cmd;
-    }
+    });
 
     return handle;
 }
 
 void SetConstraintTarget(PhysicsContext& ctx, ConstraintHandle handle, float value) {
     auto& world = ctx.GetImpl()->world;
-    ZHLN_LOCK(world.sync.shadowLock) {
+    ZHLN::Lock(world.sync.shadowLock, [&] {
         // Motors are often updated every frame, so we use a specialized command
         Command cmd {};
         cmd.type                                 = CommandType::SetConstraintTarget;
         cmd.setTarget.targetCHandle              = handle;
         cmd.setTarget.targetValue                = value;
         world.commandQueue[world.commandCount++] = cmd;
-    }
+    });
 }
 
 void AddImpulse(PhysicsContext& ctx, ZHLN::Entity handle, JPH::Vec3Arg impulse) {

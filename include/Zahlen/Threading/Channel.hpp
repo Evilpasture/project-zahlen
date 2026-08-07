@@ -31,7 +31,7 @@ class Channel {
      * this writes directly to its stack and schedules it for immediate resumption.
      */
     void Push(T&& msg) {
-        ZHLN_LOCK(_mutex) {
+        ZHLN::Lock(_mutex, [&] {
             if (!_waiters.empty()) {
                 // Direct-pass optimization: bypass the queue entirely
                 Waiter waiter = _waiters.front();
@@ -45,7 +45,7 @@ class Channel {
             } else {
                 _queue.push(std::move(msg));
             }
-        }
+        });
     }
 
     void Push(const T& msg) {
@@ -68,7 +68,7 @@ class Channel {
         T                  result;
         ZHLN::Atomic<bool> signaled {false};
 
-        ZHLN_LOCK(_mutex) {
+        ZHLN::Lock(_mutex, [&] {
             if (!_queue.empty()) {
                 result = std::move(_queue.front());
                 _queue.pop();
@@ -79,7 +79,7 @@ class Channel {
             // Safely passing pointers to 'result' and 'signaled' because
             // the stack frame is preserved while this fiber is yielded.
             _waiters.push(Waiter {.fiber = self, .outMsg = &result, .signaled = &signaled});
-        }
+        });
 
         // Suspend the fiber back to the worker thread scheduler
         while (!signaled.load(std::memory_order::acquire)) {
@@ -90,20 +90,20 @@ class Channel {
     }
 
     bool TryPop(T& outMsg) {
-        ZHLN_LOCK(_mutex) {
+        ZHLN::Lock(_mutex, [&] {
             if (_queue.empty()) {
                 return false;
             }
             outMsg = std::move(_queue.front());
             _queue.pop();
             return true;
-        }
+        });
     }
 
     size_t Size() const {
-        ZHLN_LOCK(_mutex) {
+        ZHLN::Lock(_mutex, [&] {
             return _queue.size();
-        }
+        });
     }
 
   private:
@@ -115,13 +115,13 @@ class Channel {
 
     T PopBlocking() {
         for (;;) {
-            ZHLN_LOCK(_mutex) {
+            ZHLN::Lock(_mutex, [&] {
                 if (!_queue.empty()) {
                     T result = std::move(_queue.front());
                     _queue.pop();
                     return result;
                 }
-            }
+            });
             // CPU relaxation for non-fiber thread spinning
             CPURelax();
         }

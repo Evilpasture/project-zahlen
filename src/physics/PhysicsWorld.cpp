@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "PhysicsWorld.hpp"
+#include "Zahlen/Log.hpp"
 #include <Zahlen/Core/ControlFlow.hpp>
 #include <cstring>
 #include <new>
@@ -306,7 +307,7 @@ JPH::Array<std::byte> PhysicsWorld::SaveState() const {
     JPH::Array<std::byte> buffer(totalSize);
     auto*                 ptr = buffer.data();
 
-    ZHLN_LOCK(sync.shadowLock) {
+    ZHLN::Lock(sync.shadowLock, [&] {
         // 2. Write Header
         WorldStateHeader header;
         header.bodyCount    = (uint32_t) currentCount;
@@ -342,7 +343,7 @@ JPH::Array<std::byte> PhysicsWorld::SaveState() const {
             *ptr   = s;
             ptr += 1;
         }
-    }
+    });
     return buffer;
 }
 
@@ -361,7 +362,7 @@ bool PhysicsWorld::LoadState(const uint8_t* data, size_t size) {
     const uint8_t* ptr        = data + sizeof(WorldStateHeader);
     size_t         savedCount = header->bodyCount;
 
-    ZHLN_LOCK(sync.shadowLock) {
+    ZHLN::Lock(sync.shadowLock, [&] {
         // 1. Restore SoA Buffers
         size_t posSize = savedCount * sizeof(JPH::Real) * 4;
         size_t rotSize = savedCount * sizeof(float) * 4;
@@ -403,7 +404,7 @@ bool PhysicsWorld::LoadState(const uint8_t* data, size_t size) {
         freeCount.store(newFreeCount, std::memory_order::release);
         count.store(savedCount, std::memory_order::release);
         time = header->worldTime;
-    }
+    });
 
     // 4. SYNC TO JOLT: Push SoA data back to the actual Jolt bodies
     // This part happens outside the shadow lock but while isStepping is ideally false

@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // src/physics/RagdollFactory.cpp
-#include <Zahlen/physics/Physics.hpp>
-#include <Zahlen/Core/ControlFlow.hpp>
+#include <Jolt/Jolt.h>
 #include <Jolt/Physics/Constraints/SwingTwistConstraint.h>
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
+#include <Zahlen/Core/ControlFlow.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <vector>
 
 namespace ZHLN::Physics {
@@ -23,7 +24,7 @@ JPH::Ref<JPH::Ragdoll> CreateSkeletalRagdoll(PhysicsContext& ctx, const JPH::Ske
     // 2. Resize public dynamic parts vector
     settings->mParts.resize(skeleton->GetJointCount());
 
-    ZHLN_LOCK(world.sync.shadowLock) {
+    return ZHLN::Lock(world.sync.shadowLock, [&]() -> JPH::Ref<JPH::Ragdoll> {
         for (const auto& part: parts) {
             uint32_t jointIdx = part.jointIndex;
 
@@ -101,6 +102,6 @@ JPH::Ref<JPH::Ragdoll> CreateSkeletalRagdoll(PhysicsContext& ctx, const JPH::Ske
 
         JPH::Ragdoll* ragdoll = settings->CreateRagdoll(0, 0, &joltSystem);
         return {ragdoll};
-    }
+    });
 }
 } // namespace ZHLN::Physics

@@ -456,9 +456,9 @@ std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, VkResult>
 
                 Vk::BufferBarrier(cmd, release);
 
-                ZHLN_LOCK(pendingAcquires.mutex) {
+                ZHLN::Lock(pendingAcquires.mutex, [&] {
                     pendingAcquires.buffers.push_back(acquire);
-                }
+                });
             }
         });
 

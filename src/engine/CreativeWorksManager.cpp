@@ -1,13 +1,13 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/Core/ControlFlow.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ModelPrefab.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
 #include <cgltf.h>
 #include <cstring>
-#include <Zahlen/Core/ControlFlow.hpp>
 #include <engine/Platform.hpp>
 #include <new>
 #include <vector>
@@ -59,7 +59,7 @@ bool CreativeWorksManager::MountPak(std::string_view pakFilePath) {
 
     const auto* entries = reinterpret_cast<const PakEntry*>(static_cast<const char*>(archive->mapped.data) + header->tocOffset);
 
-    ZHLN_LOCK(_catalogMutex) {
+    ZHLN::Lock(_catalogMutex, [&] {
         if (_archiveCount >= _archiveCapacity) {
             size_t newCap  = _archiveCapacity == 0 ? 4 : _archiveCapacity * 2;
             auto** newArrs = new PakArchive*[newCap];
@@ -75,7 +75,7 @@ bool CreativeWorksManager::MountPak(std::string_view pakFilePath) {
         for (uint32_t i = 0; i < header->entryCount; ++i) {
             _catalog.Insert(entries[i].pathHash, CatalogEntry {entries[i], archive});
         }
-    }
+    });
 
     Log("Mounted PAK: {} ({} assets)", pakFilePath, header->entryCount);
     return true;
@@ -115,7 +115,7 @@ void CreativeWorksManager::ExecuteLoad(CreativeWorkLoadRequest* req) {
     PakArchive* archive = nullptr;
 
     {
-        ZHLN_LOCK(_catalogMutex) {
+        ZHLN::Lock(_catalogMutex, [&] {
             const CatalogEntry* catEntry = _catalog.Find(req->assetID);
             if (catEntry == nullptr) {
                 req->success = false;
@@ -123,7 +123,7 @@ void CreativeWorksManager::ExecuteLoad(CreativeWorkLoadRequest* req) {
             }
             entry   = catEntry->entry;
             archive = catEntry->archive;
-        }
+        });
     }
 
     req->outSize           = entry.uncompressedSize;
@@ -172,17 +172,17 @@ void CreativeWorksManager::FreeCreativeWorkMemory(CreativeWorkLoadRequest& req) 
 }
 
 ModelPrefab* CreativeWorksManager::GetCachedPrefab(uint64_t hash) {
-    ZHLN_LOCK(_prefabMutex) {
+    return ZHLN::Lock(_prefabMutex, [&]() -> ModelPrefab* {
         const auto* entry = _prefabCache.Find(hash);
         if (entry != nullptr) {
             return *entry;
         }
         return nullptr;
-    }
+    });
 }
 
 void CreativeWorksManager::CachePrefab(uint64_t hash, ModelPrefab* prefab) {
-    ZHLN_LOCK(_prefabMutex) {
+    ZHLN::Lock(_prefabMutex, [&] {
         _prefabCache.Insert(hash, prefab);
         if (_prefabsCount >= _prefabsCapacity) {
             size_t newCap  = _prefabsCapacity == 0 ? 8 : _prefabsCapacity * 2;
@@ -195,28 +195,28 @@ void CreativeWorksManager::CachePrefab(uint64_t hash, ModelPrefab* prefab) {
             _prefabsCapacity = newCap;
         }
         _prefabsMemory[_prefabsCount++] = prefab;
-    }
+    });
 }
 
 void CreativeWorksManager::ClearCache() noexcept {
-    ZHLN_LOCK(_prefabMutex) {
+    ZHLN::Lock(_prefabMutex, [&] {
         _prefabCache.Clear();
         for (size_t i = 0; i < _prefabsCount; ++i) {
             delete _prefabsMemory[i]; // No more cgltf_free!
         }
         _prefabsCount = 0;
-    }
+    });
 }
 
 uint32_t CreativeWorksManager::GetCachedPrefabs(ModelPrefab** outPrefabs, uint32_t maxCount) {
-    ZHLN_LOCK(_prefabMutex) {
+    return ZHLN::Lock(_prefabMutex, [&] {
         if (outPrefabs == nullptr || maxCount == 0) {
             return static_cast<uint32_t>(_prefabsCount);
         }
         uint32_t toCopy = std::min(static_cast<uint32_t>(_prefabsCount), maxCount);
         std::memcpy(outPrefabs, _prefabsMemory, toCopy * sizeof(ModelPrefab*));
         return toCopy;
-    }
+    });
 }
 
 } // namespace ZHLN

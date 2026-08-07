@@ -336,12 +336,12 @@ class SkipList {
         _level.store(1, std::memory_order::relaxed);
         _size.store(0, std::memory_order::relaxed);
 
-        ZHLN_LOCK(_retireMutex) {
+        ZHLN::Lock(_retireMutex, [&] {
             for (auto* node: _retireQueue) {
                 DestroyNode(node);
             }
             _retireQueue.clear();
-        }
+        });
     }
 
     [[nodiscard]] size_t Size() const noexcept {
@@ -364,9 +364,9 @@ class SkipList {
     }
 
     void RetireNode(SkipNode* node) {
-        ZHLN_LOCK(_retireMutex) {
+        ZHLN::Lock(_retireMutex, [&] {
             _retireQueue.push_back(node);
-        }
+        });
         TryPurge();
     }
 
@@ -375,13 +375,13 @@ class SkipList {
         if (_activeReaders.load(std::memory_order::acquire) == 0) {
             std::vector<SkipNode*> localQueue;
 
-            ZHLN_LOCK(_retireMutex) {
+            ZHLN::Lock(_retireMutex, [&] {
                 // Re-verify under lock to prevent race conditions with newly entering readers
                 if (_activeReaders.load(std::memory_order::acquire) == 0) {
                     // Instantly steal the items, resetting the master tracker in O(1) time
                     localQueue = std::move(_retireQueue);
                 }
-            }
+            });
 
             // Destroy the isolated batch safely outside the critical mutex zone
             for (auto* node: localQueue) {
