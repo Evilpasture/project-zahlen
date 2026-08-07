@@ -274,7 +274,7 @@ struct Components {
         float     aoPower           = 1.8f;
         float     giIntensity       = 1.2f;
         int       giSamples         = 8;
-        int       useLocalProbe     = 1;
+        int       useLocalProbe     = 0;
         float     vignetteIntensity = 1.10f;
         float     vignettePower     = 1.50f;
         int       enableSSR         = 1;
