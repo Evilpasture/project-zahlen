@@ -169,13 +169,7 @@ if(APPLE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion")
 endif()
 
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/render)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/threading)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/physics)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/ecs)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/gltf)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/alife)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/audio)
+
 
 set(ENGINE_SOURCES
     src/engine/AssertHandler.cpp
@@ -236,6 +230,7 @@ endif()
 if(APPLE)
     # Ensure CMake searches Homebrew's prefix for packages, headers, and libraries
     list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
+    link_directories(/opt/homebrew/lib)
 endif()
 
 # Find PkgConfig on both Linux and macOS
@@ -251,7 +246,20 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
     pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
     pkg_check_modules(SIMDJSON REQUIRED IMPORTED_TARGET simdjson)
+
+    # Ensure alias exists for consistent linking
+    if(TARGET PkgConfig::SIMDJSON AND NOT TARGET simdjson::simdjson)
+        add_library(simdjson::simdjson ALIAS PkgConfig::SIMDJSON)
+    endif()
 endif()
+
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/render)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/threading)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/physics)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/ecs)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/gltf)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/alife)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/audio)
 
 set(COMPILER_FLAGS_LIST "${CMAKE_CXX_FLAGS}")
 if(CMAKE_BUILD_TYPE)

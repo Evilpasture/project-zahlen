@@ -1,4 +1,3 @@
-# src/gltf/CMakeLists.txt
 add_library(zahlen_gltf STATIC
     GLTFImporter.cpp
     ${PROJECT_SOURCE_DIR}/extern/cgltf_impl.c
@@ -12,11 +11,17 @@ target_include_directories(zahlen_gltf PUBLIC
     ${PROJECT_SOURCE_DIR}/extern/stb
 )
 
+# Pull in PkgConfig/Homebrew simdjson include paths
+if(SIMDJSON_INCLUDE_DIRS)
+    target_include_directories(zahlen_gltf PRIVATE ${SIMDJSON_INCLUDE_DIRS})
+endif()
+
 target_link_libraries(zahlen_gltf PRIVATE
     zahlen_render
     zahlen_physics
     zahlen_threading
     Jolt
+    PkgConfig::SIMDJSON # <-- ADD THIS
 )
 
 if(NOT MSVC)
