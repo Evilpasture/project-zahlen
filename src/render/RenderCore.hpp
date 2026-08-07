@@ -236,6 +236,8 @@ struct DrawFrameDesc {
     const SemaphorePool&   presentSemaphores;
     VkSemaphore            stagingSemaphore = VK_NULL_HANDLE;
     uint64_t               stagingWaitValue = 0;
+    VkSemaphore            computeSemaphore = VK_NULL_HANDLE;
+    uint64_t               computeWaitValue = 0;
 };
 
 template <uint32_t N, bool WaitOnFence = true, typename Record, typename Rebuild>

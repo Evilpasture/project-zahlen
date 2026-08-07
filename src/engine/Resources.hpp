@@ -41,9 +41,13 @@ enum class ShaderID : uint8_t {
     ProceduralBakeComp,
     LtcMat,
     LtcAmp,
-    VolumetricInjection,
-    VolumetricScattering,
+    VolumetricClear,
+    VolumetricFogInject,
+    VolumetricLightInject,
     VolumetricIntegration,
+    VolumetricTemporal,
+    VolumetricInjection, // Legacy alias
+    VolumetricScattering, // Legacy alias
     ParticleUpdate,
     ParticleRender,
     Decal,
@@ -70,9 +74,11 @@ extern const ShaderPair bloom_threshold_shaders;
 extern const ShaderPair bloom_blur_shaders;
 extern const ShaderPair punctual_shadows_shaders;
 extern const ShaderPair lighting_nort_shaders;
-extern const ShaderPair volumetric_injection_shaders;
-extern const ShaderPair volumetric_scattering_shaders;
+extern const ShaderPair volumetric_clear_shaders;
+extern const ShaderPair volumetric_fog_inject_shaders;
+extern const ShaderPair volumetric_light_inject_shaders;
 extern const ShaderPair volumetric_integration_shaders;
+extern const ShaderPair volumetric_temporal_shaders;
 extern const ShaderPair particle_update_shaders;
 extern const ShaderPair particle_render_shaders;
 extern const ShaderPair decal_shaders;
@@ -128,9 +134,11 @@ struct ShaderMapping {
         {.id = ShaderID::ProceduralBakeComp, .pair = ShaderPair {.vertex = procedural_bake_comp, .fragment = {}}},
         {.id = ShaderID::LtcMat, .pair = ShaderPair {.vertex = ltc_mat, .fragment = {}}},
         {.id = ShaderID::LtcAmp, .pair = ShaderPair {.vertex = ltc_amp, .fragment = {}}},
-        {.id = ShaderID::VolumetricInjection, .pair = volumetric_injection_shaders},
-        {.id = ShaderID::VolumetricScattering, .pair = volumetric_scattering_shaders},
+        {.id = ShaderID::VolumetricClear, .pair = volumetric_clear_shaders},
+        {.id = ShaderID::VolumetricFogInject, .pair = volumetric_fog_inject_shaders},
+        {.id = ShaderID::VolumetricLightInject, .pair = volumetric_light_inject_shaders},
         {.id = ShaderID::VolumetricIntegration, .pair = volumetric_integration_shaders},
+        {.id = ShaderID::VolumetricTemporal, .pair = volumetric_temporal_shaders},
         ShaderMapping {.id = ShaderID::ParticleUpdate, .pair = particle_update_shaders},
         ShaderMapping {.id = ShaderID::ParticleRender, .pair = particle_render_shaders},
         ShaderMapping {.id = ShaderID::Decal, .pair = decal_shaders},

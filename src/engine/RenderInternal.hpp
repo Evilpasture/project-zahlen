@@ -195,12 +195,18 @@ using FXAALayout = Vk::DescriptorLayout<
     Vk::SamplerSlot<1>       // sampler
     >;
 
-using VolumetricInjectionLayout = Vk::DescriptorLayout<
-    Vk::StorageImageSlot<0>,                        // outVoxelMedia
-    Vk::UniformSlot<1, VK_SHADER_STAGE_COMPUTE_BIT> // frame
-    >;
+using VolumetricClearLayout = Vk::DescriptorLayout<
+    Vk::StorageImageSlot<0>, // outVoxelMedia
+    Vk::StorageImageSlot<1>  // outVoxelLight
+>;
 
-using VolumetricScatteringLayout = Vk::DescriptorLayout<
+using VolumetricFogInjectLayout = Vk::DescriptorLayout<
+    Vk::StorageImageSlot<0>,                               // outVoxelMedia
+    Vk::UniformSlot<1, VK_SHADER_STAGE_COMPUTE_BIT>,       // frame
+    Vk::StorageBufferSlot<2, VK_SHADER_STAGE_COMPUTE_BIT>  // fogVolumes
+>;
+
+using VolumetricLightInjectLayout = Vk::DescriptorLayout<
     Vk::SampledImageSlot<0, VK_SHADER_STAGE_COMPUTE_BIT>,  // inVoxelMedia
     Vk::StorageImageSlot<1>,                               // outVoxelLight
     Vk::UniformSlot<2, VK_SHADER_STAGE_COMPUTE_BIT>,       // frame
@@ -209,12 +215,20 @@ using VolumetricScatteringLayout = Vk::DescriptorLayout<
     Vk::StorageBufferSlot<5, VK_SHADER_STAGE_COMPUTE_BIT>, // clusterIndexList
     Vk::SampledImageSlot<6, VK_SHADER_STAGE_COMPUTE_BIT>,  // shadowMap
     Vk::SamplerSlot<7, VK_SHADER_STAGE_COMPUTE_BIT>        // shadowSampler
-    >;
+>;
 
 using VolumetricIntegrationLayout = Vk::DescriptorLayout<
     Vk::SampledImageSlot<0, VK_SHADER_STAGE_COMPUTE_BIT>, // inVoxelLight
     Vk::StorageImageSlot<1>                               // outVoxelIntegrated
-    >;
+>;
+
+using VolumetricTemporalLayout = Vk::DescriptorLayout<
+    Vk::SampledImageSlot<0, VK_SHADER_STAGE_COMPUTE_BIT>, // inVoxelIntegratedCurrent
+    Vk::SampledImageSlot<1, VK_SHADER_STAGE_COMPUTE_BIT>, // inVoxelIntegratedHistory
+    Vk::StorageImageSlot<2>,                               // outVoxelIntegratedResolved
+    Vk::UniformSlot<3, VK_SHADER_STAGE_COMPUTE_BIT>,       // frame
+    Vk::SamplerSlot<4, VK_SHADER_STAGE_COMPUTE_BIT>        // linearSampler
+>;
 
 using BlitLayout = Vk::DescriptorLayout<
     Vk::SampledImageSlot<0>,                         // texCurrent
@@ -400,14 +414,20 @@ struct BlitPass {
 struct PostProcessPass {
     static constexpr std::string_view name = "[GPU] PostProcess (GI)";
 };
-struct VolumetricInjectPass {
-    static constexpr std::string_view name = "[GPU] Volumetric Inject";
+struct VolumetricClearPass {
+    static constexpr std::string_view name = "[GPU] Volumetric Clear";
 };
-struct VolumetricScatterPass {
-    static constexpr std::string_view name = "[GPU] Volumetric Scatter";
+struct VolumetricFogInjectPass {
+    static constexpr std::string_view name = "[GPU] Volumetric Fog Inject";
+};
+struct VolumetricLightInjectPass {
+    static constexpr std::string_view name = "[GPU] Volumetric Light Inject";
 };
 struct VolumetricIntegratePass {
     static constexpr std::string_view name = "[GPU] Volumetric Integrate";
+};
+struct VolumetricTemporalPass {
+    static constexpr std::string_view name = "[GPU] Volumetric Temporal Resolve";
 };
 } // namespace Stages
 
@@ -427,9 +447,11 @@ using FrameProfiler = Profiler::GpuProfiler<
     Stages::BloomBlurHPass,
     Stages::BloomBlurVPass,
     Stages::BlitPass,
-    Stages::VolumetricInjectPass,
-    Stages::VolumetricScatterPass,
-    Stages::VolumetricIntegratePass>;
+    Stages::VolumetricClearPass,
+    Stages::VolumetricFogInjectPass,
+    Stages::VolumetricLightInjectPass,
+    Stages::VolumetricIntegratePass,
+    Stages::VolumetricTemporalPass>;
 
 struct NativeMesh {
     VkDevice                     device = VK_NULL_HANDLE;
@@ -581,6 +603,8 @@ using Res_Swapchain     = Vk::GraphImage<"Swapchain", VK_FORMAT_B8G8R8A8_SRGB, V
 using Res_VoxelMedia    = Vk::GraphImage<"VoxelMedia", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_VoxelLight    = Vk::GraphImage<"VoxelLight", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_VoxelInt      = Vk::GraphImage<"VoxelInt", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_VoxelHist     = Vk::GraphImage<"VoxelHist", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
+using Res_VoxelResolved = Vk::GraphImage<"VoxelResolved", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_TransNorm     = Vk::GraphImage<"TransNorm", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_TransDepth    = Vk::GraphImage<"TransDepth", VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT>;
 using Res_TransLighting = Vk::GraphImage<"TransLighting", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
@@ -648,6 +672,8 @@ struct RenderContext::Impl {
         Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelMedia;
         Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelLight;
         Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelIntegrated;
+        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelHistory;
+        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelResolved;
         Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          transNormalBuffer;
         Vk::RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>      transDepthBuffer;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     transLightingTarget;
@@ -673,6 +699,8 @@ struct RenderContext::Impl {
             Res_VoxelMedia    voxelMedia;
             Res_VoxelLight    voxelLight;
             Res_VoxelInt      voxelIntegrated;
+            Res_VoxelHist     voxelHistory;
+            Res_VoxelResolved voxelResolved;
             Res_TransNorm     transNormalBuffer;
             Res_TransDepth    transDepthBuffer;
             Res_TransLighting transLightingTarget;
@@ -789,9 +817,13 @@ struct RenderContext::Impl {
     Vk::ComputePass                                            skinningPass;
     Vk::ComputePass                                            proceduralBakePass;
     Vk::ComputePass                                            hangGpuPass;
-    Vk::DoubleBufferedComputePass<VolumetricInjectionLayout>   volumetricInjectionPass;
-    Vk::DoubleBufferedComputePass<VolumetricScatteringLayout>  volumetricScatteringPass;
+    Vk::DoubleBufferedComputePass<VolumetricClearLayout>       volumetricClearPass;
+    Vk::DoubleBufferedComputePass<VolumetricFogInjectLayout>   volumetricFogInjectPass;
+    Vk::DoubleBufferedComputePass<VolumetricLightInjectLayout> volumetricLightInjectPass;
     Vk::DoubleBufferedComputePass<VolumetricIntegrationLayout> volumetricIntegrationPass;
+    Vk::DoubleBufferedComputePass<VolumetricTemporalLayout>    volumetricTemporalPass;
+
+    ZHLN::DoubleBuffered<Vk::Buffer> fogVolumesBuffer;
 
     Vk::RenderTarget<VK_FORMAT_D32_SFLOAT> shadowMapPrev;
     ZHLN::Array<Vk::ImageView>             shadowCascadeViewsPrev;
