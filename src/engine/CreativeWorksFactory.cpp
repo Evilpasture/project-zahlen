@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <engine/system/AnimationSystem.hpp>
+#include <engine/system/ArticulationSystem.hpp>
 #include <engine/system/LightingSystem.hpp>
 #include <gltf/GLTFImporter.hpp>
 #include <stb_image.h>
@@ -593,18 +594,17 @@ void SetupPlayerRagdoll(RenderContext& /*rc*/, PhysicsContext& pc, ECS::Registry
         auto ragdollInstance = Physics::CreateSkeletalRagdoll(pc, joltSkel, parts);
         ragdollInstance->AddRef();
 
+        ArticulationSystem::BindSkeleton(jointOffset, *targetSkeleton);
+
         reg.Add(
             playerEntity, Components::RagdollComponent {
-                              .ragdollInstance   = ragdollInstance.GetPtr(),
-                              .state             = RagdollState::Inactive,
-                              .prevState         = RagdollState::Inactive,
-                              .isAddedToPhysics  = 0,
-                              .jointOffset       = jointOffset,
-                              .jointCount        = static_cast<uint32_t>(targetSkeleton->joints.size()),
-                              .skeleton          = targetSkeleton,
-                              .jointBlendWeights = {},
-                              .jointStiffness    = {},
-                              .jointBlendDecay   = {}
+                              .ragdollInstance  = ragdollInstance.GetPtr(),
+                              .skeletonAsset    = InvalidAssetID,
+                              .state            = RagdollState::Inactive,
+                              .prevState        = RagdollState::Inactive,
+                              .jointOffset      = jointOffset,
+                              .jointCount       = static_cast<uint32_t>(targetSkeleton->joints.size()),
+                              .isAddedToPhysics = false
                           }
         );
         Log("Skeletal Ragdoll successfully generated from Native Skeleton.");

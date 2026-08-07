@@ -103,7 +103,12 @@ ReplicatorType<vals...> Replicator {};
 template <typename T>
 struct TypeReflector {
     static consteval std::string_view name() {
-        return std::meta::identifier_of(std::meta::dealias(^^T));
+        constexpr auto info = std::meta::dealias(^^T);
+        if constexpr (std::meta::has_identifier(info)) {
+            return std::meta::identifier_of(info);
+        } else {
+            return "TemplateSpecialization";
+        }
     }
 };
 

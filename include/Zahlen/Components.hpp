@@ -25,7 +25,8 @@ enum class TextAlignment : uint8_t { Left = 0, Center = 1, Right = 2 };
 enum class TextVerticalAlignment : uint8_t { Top = 0, Center = 1, Bottom = 2 };
 enum class UIJustify : uint8_t { Start = 0, Center = 1, End = 2, SpaceBetween = 3, SpaceAround = 4 };
 
-enum class RagdollState : uint32_t { Inactive = 0, KeyframeMotor = 1, Limp = 2, PartialBlend = 3 };
+enum class RagdollState : uint8_t { Inactive, Kinematic, PartialBlend, Dynamic };
+
 enum class FlexDirection : uint8_t { Column = 0, ColumnReverse, Row, RowReverse };
 enum class FlexWrap : uint8_t { NoWrap = 0, Wrap, WrapReverse };
 enum class FlexJustify : uint8_t { FlexStart = 0, Center, FlexEnd, SpaceBetween, SpaceAround, SpaceEvenly };
@@ -168,58 +169,39 @@ struct Components {
         bool isSprinting   = false;
     };
 
+    struct RagdollHitReactionCommand {
+        uint32_t jointIndex = 0;
+        float    weight     = 0.8f;
+        float    stiffness  = 0.2f;
+        float    decayRate  = 2.0f;
+    };
+
+    struct RagdollImpulseCommand {
+        uint32_t  jointIndex = 0;
+        JPH::Vec3 impulse    = JPH::Vec3::sZero();
+    };
+
     struct RagdollComponent {
-        using enum RagdollState;
-        JPH::Ragdoll*   ragdollInstance  = nullptr;
-        RagdollState    state            = Inactive;
-        RagdollState    prevState        = Inactive;
-        uint32_t        isAddedToPhysics = 0;
-        uint32_t        jointOffset      = 0;
-        uint32_t        jointCount       = 0;
-        const Skeleton* skeleton         = nullptr;
+        JPH::Ref<JPH::Ragdoll> ragdollInstance = nullptr;
+        AssetID                skeletonAsset   = InvalidAssetID;
 
-        ZHLN::Array<float> jointBlendWeights;
-        ZHLN::Array<float> jointStiffness;
-        ZHLN::Array<float> jointBlendDecay;
+        RagdollState state     = RagdollState::Inactive;
+        RagdollState prevState = RagdollState::Inactive;
 
-        void EnsureJointCapacity(uint32_t count) {
-            if (jointBlendWeights.size() < count) {
-                jointBlendWeights.resize(count, 0.0f);
-                jointStiffness.resize(count, 1.0f);
-                jointBlendDecay.resize(count, 0.0f);
-            }
-        }
+        uint32_t jointOffset = 0;
+        uint32_t jointCount  = 0;
 
-        void ApplyHitReaction(uint32_t jointIdx, float weight = 0.8f, float stiffness = 0.2f, float decayRate = 2.0f) {
-            EnsureJointCapacity(jointCount);
-            if (jointIdx < jointCount) {
-                jointBlendWeights[jointIdx] = std::clamp(weight, 0.0f, 1.0f);
-                jointStiffness[jointIdx]    = std::clamp(stiffness, 0.0f, 1.0f);
-                jointBlendDecay[jointIdx]   = std::max(0.0f, decayRate);
-                state                       = PartialBlend;
-            }
-        }
-
-        void ApplyHitReactionRegion(std::span<const uint32_t> jointIndices, float weight = 0.8f, float stiffness = 0.2f, float decayRate = 2.0f) {
-            EnsureJointCapacity(jointCount);
-            for (uint32_t jIdx: jointIndices) {
-                if (jIdx < jointCount) {
-                    jointBlendWeights[jIdx] = std::clamp(weight, 0.0f, 1.0f);
-                    jointStiffness[jIdx]    = std::clamp(stiffness, 0.0f, 1.0f);
-                    jointBlendDecay[jIdx]   = std::max(0.0f, decayRate);
-                }
-            }
-            state = PartialBlend;
-        }
+        bool isAddedToPhysics = false;
 
         static void OnDestroy(RagdollComponent* r) noexcept {
             if (r->ragdollInstance != nullptr) {
-                r->ragdollInstance->Release();
-                r->ragdollInstance = nullptr;
+                if (r->isAddedToPhysics) {
+                    // Strictly unregister from Jolt Broadphase to prevent dangling pointer crashes
+                    r->ragdollInstance->RemoveFromPhysicsSystem();
+                    r->isAddedToPhysics = false;
+                }
+                r->ragdollInstance = nullptr; // Refcount gracefully drops
             }
-            r->jointBlendWeights.clear();
-            r->jointStiffness.clear();
-            r->jointBlendDecay.clear();
         }
     };
 

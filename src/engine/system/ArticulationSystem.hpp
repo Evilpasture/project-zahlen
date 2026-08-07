@@ -4,13 +4,32 @@
 #pragma once
 
 #include <Jolt/Jolt.h>
+#include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Entity.hpp>
+#include <array>
 
 namespace ZHLN {
 
 class Engine;
+struct Skeleton;
+
+// Cache-aligned SoA buffer for maximum evaluation throughput
+struct alignas(64) GlobalJointStateBuffer {
+    std::array<float, 8192>      jointBlendWeights;
+    std::array<float, 8192>      jointStiffness;
+    std::array<float, 8192>      jointBlendDecay;
+    std::array<JPH::Mat44, 8192> inverseBindMatrices;
+
+    void ResetJoints(uint32_t offset, uint32_t count) noexcept {
+        std::fill_n(jointBlendWeights.begin() + offset, count, 0.0f);
+        std::fill_n(jointStiffness.begin() + offset, count, 1.0f);
+        std::fill_n(jointBlendDecay.begin() + offset, count, 0.0f);
+    }
+};
+
+extern GlobalJointStateBuffer g_JointStates;
 
 class ZHLN_API ArticulationSystem {
   public:
@@ -20,25 +39,9 @@ class ZHLN_API ArticulationSystem {
     ArticulationSystem(const ArticulationSystem&)            = delete;
     ArticulationSystem& operator=(const ArticulationSystem&) = delete;
 
-    /**
-     * @brief Evaluates active motor forces, decays per-joint hit reaction weights,
-     * and performs per-joint SLERP/LERP pose blending before uploading matrices to the GPU.
-     */
     void Update(Engine& engine, float dt);
 
-    /**
-     * @brief High-level API to trigger an impulse-based hit reaction on a specific joint
-     * or joint region (e.g. getting shot in the shoulder).
-     */
-    static void ApplyHitImpulse(
-        Engine&          engine,
-        Entity           entity,
-        uint32_t         jointIdx,
-        const JPH::Vec3& impulse,
-        float            weight    = 0.8f,
-        float            stiffness = 0.2f,
-        float            decayRate = 2.0f
-    ) noexcept;
+    static void BindSkeleton(uint32_t jointOffset, const Skeleton& skeleton) noexcept;
 };
 
 } // namespace ZHLN

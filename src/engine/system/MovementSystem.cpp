@@ -5,10 +5,10 @@
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Log.hpp"
+#include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <cmath> // std::atan2
-#include <Zahlen/Threading/TaskSystem.hpp>
 
 namespace ZHLN::Tests {
 static void VerifyMovementStateConsistency(const ECS::Registry& reg) noexcept {
@@ -83,11 +83,11 @@ void MovementSystem(Engine& engine, float dt) {
                 continue;
             }
 
-            if (auto* ragComp = reg.Get<Components::RagdollComponent>(e)) {
-                if (ragComp->state == RagdollState::Limp || ragComp->state == RagdollState::KeyframeMotor) {
-                    continue;
+            ECS::Patch<Components::RagdollComponent>(reg, e, [&](auto& ragComp) {
+                if (ragComp.state == RagdollState::Dynamic || ragComp.state == RagdollState::Kinematic) {
+                    return;
                 }
-            }
+            });
 
             // Query Jolt ground state (thread-safe, read-only on distinct indices)
             bool onGround = Physics::IsCharacterOnGround(pc, phys->physicsHandle);
