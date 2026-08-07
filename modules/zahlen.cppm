@@ -239,11 +239,13 @@ using ZHLN::String64;
 using ZHLN::Trace;
 
 namespace Reflect {
+using ZHLN::Reflect::CustomFormatter;
 using ZHLN::Reflect::EnumToString;
 using ZHLN::Reflect::FieldCount;
 using ZHLN::Reflect::ForEachField;
 using ZHLN::Reflect::ForEachFieldWithName;
 using ZHLN::Reflect::StringToEnum;
+using ZHLN::Reflect::ToDebugString;
 using ZHLN::Reflect::TypeName;
 } // namespace Reflect
 
