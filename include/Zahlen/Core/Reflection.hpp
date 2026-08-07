@@ -78,12 +78,32 @@ using clang_meta_exc_base = ::clang_meta_compat::exception_base;
 
 #define exception clang_meta_exc_base
 
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
+
 #include_next <meta>
+
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 #undef exception
 
 #else
+
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
+
 #include_next <meta>
+
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+
 #endif
 
 namespace ZHLN::Reflect {

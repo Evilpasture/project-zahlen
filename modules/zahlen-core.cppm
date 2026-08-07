@@ -1,6 +1,25 @@
 module;
 
-// System & STL Headers in Global Module Fragment
+#include <Zahlen/Config.hpp>
+#include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Core/Atomic.hpp>
+#include <Zahlen/Core/ControlFlow.hpp>
+#include <Zahlen/Core/HashMap.hpp>
+#include <Zahlen/Core/Loop.hpp>
+#include <Zahlen/Core/MemoryPool.hpp>
+#include <Zahlen/Core/Pair.hpp>
+#include <Zahlen/Core/Platform.hpp>
+#include <Zahlen/Core/Prefetch.hpp>
+#include <Zahlen/Core/Print.hpp>
+#include <Zahlen/Core/Queue.hpp>
+#include <Zahlen/Core/RadixSort.hpp>
+#include <Zahlen/Core/Ranges.hpp>
+#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/SkipList.hpp>
+#include <Zahlen/Core/Span.hpp>
+#include <Zahlen/Core/String.hpp>
+#include <Zahlen/Error.hpp>
+#include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -27,28 +46,6 @@ module;
 #include <tuple>
 #include <type_traits>
 #include <utility>
-
-// Zahlen Core Headers
-#include <Zahlen/Config.hpp>
-#include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Core/Atomic.hpp>
-#include <Zahlen/Core/ControlFlow.hpp>
-#include <Zahlen/Core/HashMap.hpp>
-#include <Zahlen/Core/Loop.hpp>
-#include <Zahlen/Core/MemoryPool.hpp>
-#include <Zahlen/Core/Pair.hpp>
-#include <Zahlen/Core/Platform.hpp>
-#include <Zahlen/Core/Prefetch.hpp>
-#include <Zahlen/Core/Print.hpp>
-#include <Zahlen/Core/Queue.hpp>
-#include <Zahlen/Core/RadixSort.hpp>
-#include <Zahlen/Core/Ranges.hpp>
-#include <Zahlen/Core/Reflection.hpp>
-#include <Zahlen/Core/SkipList.hpp>
-#include <Zahlen/Core/Span.hpp>
-#include <Zahlen/Core/String.hpp>
-#include <Zahlen/Error.hpp>
-#include <Zahlen/Log.hpp>
 
 export module zahlen:core;
 
@@ -77,6 +74,10 @@ using ZHLN::Panic;
 using ZHLN::Print;
 using ZHLN::Println;
 using ZHLN::Trace;
+
+using ZHLN::GetLogLevel;
+using ZHLN::LogLevel;
+using ZHLN::SetLogLevel;
 
 namespace Reflect {
 using ZHLN::Reflect::EnumToString;
