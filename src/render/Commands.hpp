@@ -127,6 +127,7 @@ class CommandRing {
         if (_device != VK_NULL_HANDLE) {
             for (size_t i = 0; i < Capacity; ++i) {
                 if (_fences[i] != VK_NULL_HANDLE) {
+                    vkWaitForFences(_device, 1, &_fences[i], VK_TRUE, UINT64_MAX);
                     vkDestroyFence(_device, _fences[i], nullptr);
                     _fences[i] = VK_NULL_HANDLE;
                 }

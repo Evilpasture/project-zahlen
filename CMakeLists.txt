@@ -63,8 +63,60 @@ check_cxx_compiler_flag("-freflection" COMPILER_HAS_REFLECTION)
 if(COMPILER_HAS_REFLECTION)
     message(STATUS "C++26 Static Reflection supported via -freflection")
 else()
-    message(STATUS "C++26 Static Reflection not supported by current compiler. Using manual macro fallback.")
+    message(STATUS "C++26 Static Reflection not supported by current compiler. Using generated script for source code flattening.")
 endif()
+
+# --- PYTHON INTERPRETER SELECTION ---
+# Prioritize local virtual environment (.venv) if present
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.venv")
+    set(Python3_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.venv")
+    set(Python3_FIND_REGISTRY LAST)
+endif()
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(ZHLN_TRANSPILER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/tools/transpile_reflection.py")
+
+function(zahlen_transpile_sources OUT_SOURCES_VAR)
+    if(COMPILER_HAS_REFLECTION)
+        # Native support: Return sources untouched
+        set(${OUT_SOURCES_VAR} ${ARGN} PARENT_SCOPE)
+        return()
+    endif()
+
+    set(PROCESSED_SRCS "")
+    set(ORIG_SOURCE_DIRS "")
+
+    foreach(SRC IN LISTS ARGN)
+        get_filename_component(ABS_SRC "${SRC}" ABSOLUTE)
+        get_filename_component(ABS_DIR "${ABS_SRC}" DIRECTORY)
+        list(APPEND ORIG_SOURCE_DIRS "${ABS_DIR}")
+
+        file(RELATIVE_PATH REL_SRC "${CMAKE_SOURCE_DIR}" "${ABS_SRC}")
+        set(OUT_SRC "${CMAKE_BINARY_DIR}/transpiled/${REL_SRC}")
+        get_filename_component(OUT_DIR "${OUT_SRC}" DIRECTORY)
+
+        file(MAKE_DIRECTORY "${OUT_DIR}")
+
+        # At build time, run the Python transpiler using the compilation database
+        add_custom_command(
+            OUTPUT "${OUT_SRC}"
+            COMMAND Python3::Interpreter "${ZHLN_TRANSPILER_SCRIPT}"
+                    --input "${ABS_SRC}"
+                    --output "${OUT_SRC}"
+                    --compdb "${CMAKE_BINARY_DIR}"
+            DEPENDS "${ABS_SRC}" "${ZHLN_TRANSPILER_SCRIPT}"
+            COMMENT "Flattening Reflection in ${REL_SRC}..."
+            VERBATIM
+        )
+        list(APPEND PROCESSED_SRCS "${OUT_SRC}")
+    endforeach()
+
+    # Register original source directories so transpiled files in build/ can locate relative headers
+    list(REMOVE_DUPLICATES ORIG_SOURCE_DIRS)
+    include_directories(${ORIG_SOURCE_DIRS})
+
+    set(${OUT_SOURCES_VAR} ${PROCESSED_SRCS} PARENT_SCOPE)
+endfunction()
 
 execute_process(
     COMMAND ${CMAKE_CXX_COMPILER} -dumpmachine
@@ -171,7 +223,7 @@ endif()
 
 
 
-set(ENGINE_SOURCES
+set(RAW_ENGINE_SOURCES
     src/engine/AssertHandler.cpp
     src/engine/DefaultPreset.cpp
     src/engine/RenderFrame.cpp
@@ -284,6 +336,8 @@ endif()
 
 string(STRIP "${COMPILER_FLAGS_LIST}" COMPILER_FLAGS_LIST)
 string(REGEX REPLACE " +" " " COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST}")
+
+zahlen_transpile_sources(ENGINE_SOURCES ${RAW_ENGINE_SOURCES})
 
 add_library(zahlen_engine SHARED ${ENGINE_SOURCES})
 

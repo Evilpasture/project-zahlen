@@ -267,10 +267,21 @@ set(SHADER_CONSUMING_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/RenderProcedural.cpp"
 )
 
-set_source_files_properties(${SHADER_CONSUMING_FILES} PROPERTIES
+# Expand target files to include both original and transpiled source paths
+set(ALL_SHADER_CONSUMING_FILES "")
+foreach(SRC IN LISTS SHADER_CONSUMING_FILES)
+    get_filename_component(ABS_SRC "${SRC}" ABSOLUTE)
+    list(APPEND ALL_SHADER_CONSUMING_FILES "${ABS_SRC}")
+
+    file(RELATIVE_PATH REL_SRC "${CMAKE_SOURCE_DIR}" "${ABS_SRC}")
+    set(TRANS_SRC "${CMAKE_BINARY_DIR}/transpiled/${REL_SRC}")
+    list(APPEND ALL_SHADER_CONSUMING_FILES "${TRANS_SRC}")
+endforeach()
+
+set_source_files_properties(${ALL_SHADER_CONSUMING_FILES} PROPERTIES
     COMPILE_DEFINITIONS "${ALL_SHADER_DEFINITIONS}"
 )
 
-set_source_files_properties(${SHADER_CONSUMING_FILES} PROPERTIES
+set_source_files_properties(${ALL_SHADER_CONSUMING_FILES} PROPERTIES
     OBJECT_DEPENDS "${ALL_GENERATED_SPVS}"
 )

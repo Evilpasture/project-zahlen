@@ -28,7 +28,28 @@ while [[ "$#" -gt 0 ]]; do
                 COMPILER_CXX="clang++"
             fi
             ;;
-        --gcc)   COMPILER_CC="gcc";   COMPILER_CXX="g++" ;;
+        --gcc)
+            # On macOS, check for Homebrew GCC 16 binaries first; fallback to system gcc/g++
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                if [[ -x "/opt/homebrew/bin/g++-16" ]]; then
+                    COMPILER_CC="/opt/homebrew/bin/gcc-16"
+                    COMPILER_CXX="/opt/homebrew/bin/g++-16"
+                elif [[ -x "/usr/local/bin/g++-16" ]]; then
+                    COMPILER_CC="/usr/local/bin/gcc-16"
+                    COMPILER_CXX="/usr/local/bin/g++-16"
+                elif command -v gcc-16 &> /dev/null; then
+                    COMPILER_CC="gcc-16"
+                    COMPILER_CXX="g++-16"
+                else
+                    COMPILER_CC="gcc"
+                    COMPILER_CXX="g++"
+                fi
+            else
+                # Linux and other Unix-like systems retain default behavior
+                COMPILER_CC="gcc"
+                COMPILER_CXX="g++"
+            fi
+            ;;
         # Anything else is treated as a build flag
         *) BUILD_FLAGS+=("$1") ;;
     esac

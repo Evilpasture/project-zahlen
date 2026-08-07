@@ -26,7 +26,7 @@ constexpr uint32_t HashTypeName(std::string_view str) noexcept {
 
 template <typename E>
     requires std::is_enum_v<E>
-consteval const ErrorCategory* GetCategoryInstance() noexcept {
+inline const ErrorCategory* GetCategoryInstance() noexcept {
     static constexpr ErrorCategory cat = {.name = ZHLN::Reflect::TypeName<E>(), .to_string = [](uint32_t val) noexcept -> std::string_view {
                                               return ZHLN::Reflect::EnumToString(static_cast<E>(val));
                                           }};

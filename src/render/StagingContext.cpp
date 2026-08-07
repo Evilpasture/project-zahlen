@@ -18,6 +18,7 @@ StagingContext::StagingContext(Allocator& allocator, const Context& ctx): _alloc
 StagingContext::~StagingContext() {
     // Destructor automatically cleans up the fence
     if (_fence != VK_NULL_HANDLE) {
+        Wait();
         vkDestroyFence(_ctx->Device(), _fence, nullptr);
     }
 }
@@ -171,6 +172,7 @@ void StagingContext::ExecuteAsync() {
 
     // Destroy the previous fence if this context is being reused
     if (_fence != VK_NULL_HANDLE) {
+        Wait();
         vkDestroyFence(_ctx->Device(), _fence, nullptr);
         _fence = VK_NULL_HANDLE;
     }
