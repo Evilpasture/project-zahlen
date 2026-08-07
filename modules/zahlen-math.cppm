@@ -1,6 +1,5 @@
 module;
 
-// System / STL
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -31,7 +30,6 @@ module;
 #include <Jolt/Physics/PhysicsSystem.h>
 // clang-format on
 
-// Zahlen Math Subsystem Headers
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/IK.hpp>

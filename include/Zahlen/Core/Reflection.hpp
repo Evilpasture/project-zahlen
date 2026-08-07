@@ -175,6 +175,13 @@ constexpr void ChunkedFieldVisitor(T&& t, F&& f) {
         ChunkedFieldVisitor<T, F, Start + Step, Total>(std::forward<T>(t), std::forward<F>(f));
     }
 }
+
+template <std::size_t N, typename T>
+consteval std::meta::info GetFieldTypeInfo() {
+    constexpr auto members = std::define_static_array(std::meta::nonstatic_data_members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
+    static_assert(N < members.size(), "Index out of bounds.");
+    return std::meta::type_of(members[N]);
+}
 } // namespace detail
 
 template <std::ranges::range R>
@@ -390,12 +397,7 @@ consteval bool HasTag(std::string_view field_name) {
 }
 
 template <std::size_t N, typename T>
-using FieldType = typename[:[] {
-    static constexpr auto members =
-        std::define_static_array(std::meta::nonstatic_data_members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
-    static_assert(N < members.size(), "Index out of bounds.");
-    return std::meta::type_of(members[N]);
-}():];
+using FieldType = typename[:detail::GetFieldTypeInfo<N, T>():];
 
 template <typename T>
 consteval auto BaseClasses() {

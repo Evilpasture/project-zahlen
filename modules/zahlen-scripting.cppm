@@ -1,6 +1,17 @@
 module;
 
-// System / STL
+#include <Zahlen/Common.h>
+#include <Zahlen/Config.hpp>
+#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Entity.hpp>
+#include <Zahlen/Error.hpp>
+#include <Zahlen/JSON.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/ScriptBinder.hpp>
+#include <Zahlen/ScriptECSBridge.hpp>
+#include <Zahlen/Scripting.h>
+#include <Zahlen/Scripting.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <cmath>
 #include <cstdint>
 #include <expected>
@@ -14,22 +25,6 @@ module;
 #include <unordered_map>
 #include <variant>
 #include <vector>
-
-// Core & Engine Dependencies
-#include <Zahlen/Common.h>
-#include <Zahlen/Config.hpp>
-#include <Zahlen/Core/Reflection.hpp>
-#include <Zahlen/Entity.hpp>
-#include <Zahlen/Error.hpp>
-#include <Zahlen/Log.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-
-// Scripting Headers
-#include <Zahlen/JSON.hpp>
-#include <Zahlen/ScriptBinder.hpp>
-#include <Zahlen/ScriptECSBridge.hpp>
-#include <Zahlen/Scripting.h>
-#include <Zahlen/Scripting.hpp>
 
 export module zahlen:scripting;
 

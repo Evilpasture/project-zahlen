@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <cstdint>
 #include <Zahlen/Core/Atomic.hpp>
+#include <cstdint>
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
 #include <immintrin.h>
 #endif
@@ -37,7 +37,7 @@ class Mutex {
     ~Mutex()                   = default;
 
     [[gnu::flatten, gnu::hot, gnu::always_inline]]
-    void lock() noexcept {
+    inline void lock() noexcept {
         if constexpr (kIsDebugMutex) {
             CheckPreLock();
         }
@@ -53,7 +53,7 @@ class Mutex {
     }
 
     [[gnu::flatten, gnu::hot, gnu::always_inline]]
-    void unlock() noexcept {
+    inline void unlock() noexcept {
         if constexpr (kIsDebugMutex) {
             PreUnlock();
             ClearOwner();
@@ -67,7 +67,7 @@ class Mutex {
     }
 
     [[gnu::flatten, gnu::hot, gnu::always_inline]]
-    bool try_lock() noexcept {
+    inline bool try_lock() noexcept {
         if constexpr (kIsDebugMutex) {
             CheckPreLock();
         }

@@ -16,6 +16,8 @@
 
 namespace ZHLN {
 
+extern void ASSERTION_FAILED_AT_COMPILE_TIME();
+
 class Engine;
 void SetupSignalHandler();
 void CheckForCrashes(Engine* engine);
@@ -80,10 +82,7 @@ template <typename... Args>
 inline void Assert(bool condition, LogContext ctx, Args&&... args) {
     if consteval {
         if (!condition) {
-            []() {
-                extern void ASSERTION_FAILED_AT_COMPILE_TIME();
-                ASSERTION_FAILED_AT_COMPILE_TIME();
-            }();
+            ASSERTION_FAILED_AT_COMPILE_TIME();
         }
     }
 
@@ -100,10 +99,7 @@ inline void Assert(bool condition, LogContext ctx, Args&&... args) {
 inline void Assert(bool condition, std::source_location loc = std::source_location::current()) {
     if consteval {
         if (!condition) {
-            []() {
-                extern void ASSERTION_FAILED_AT_COMPILE_TIME();
-                ASSERTION_FAILED_AT_COMPILE_TIME();
-            }();
+            ASSERTION_FAILED_AT_COMPILE_TIME();
         }
     }
 

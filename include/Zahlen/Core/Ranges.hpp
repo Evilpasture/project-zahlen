@@ -534,6 +534,13 @@ struct FindIfAdapter {
     }
 };
 
+struct DefaultKeySelector {
+    template <typename Element>
+    constexpr decltype(auto) operator()(Element&& element) const noexcept {
+        return element.first;
+    }
+};
+
 template <typename Key, typename Factory, typename KeySelector>
 struct FindOrInsertAdapter {
     Key         key;
@@ -656,7 +663,7 @@ template <typename Pred>
 }
 
 // 8. FindOrInsert Overloads
-template <typename Key, typename Factory, typename KeySelector = decltype([](const auto& e) { return e.first; })>
+template <typename Key, typename Factory, typename KeySelector = DefaultKeySelector>
 [[nodiscard]] constexpr auto FindOrInsert(Key&& key, Factory&& factory, KeySelector&& key_selector = {}) {
     return FindOrInsertAdapter<std::decay_t<Key>, std::decay_t<Factory>, std::decay_t<KeySelector>> {
         std::forward<Key>(key), std::forward<Factory>(factory), std::forward<KeySelector>(key_selector)
