@@ -487,10 +487,6 @@ struct Components {
         uint32_t              maxParticles   = 65536;
         bool                  active         = true;
         bool                  attachToCamera = false;
-
-        BufferHandle gpuBuffer = BufferHandle::Invalid;
-
-        static void OnDestroy(ParticleEmitterComponent* p) noexcept;
     };
 
     struct MeshParticleEmitterComponent {

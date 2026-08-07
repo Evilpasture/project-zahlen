@@ -2,26 +2,28 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "EntityCommandBuffer.hpp"
-#include <unordered_map>
+#include <Zahlen/Core/HashMap.hpp>
 
 namespace ZHLN::ECS {
 
 void EntityCommandBuffer::Playback() {
-    std::unordered_map<uint32_t, Entity> tempToRealMap;
+    // Replace std::unordered_map with ZHLN::HashMap
+    ZHLN::HashMap<uint32_t, Entity> tempToRealMap;
 
     for (const auto& cmd: _commands) {
         Entity target = cmd.entity;
 
+        // Clean O(1) lookup using HashMap's Find pointer check
         if (target.generation == 0xFFFFFFFF) {
-            auto it = tempToRealMap.find(target.index);
-            if (it != tempToRealMap.end()) {
-                target = it->second;
+            if (const auto* realEntity = tempToRealMap.Find(target.index)) {
+                target = *realEntity;
             }
         }
 
         switch (cmd.type) {
             case CommandType::Create: {
-                tempToRealMap[cmd.entity.index] = _registry->Create();
+                // HashMap uses .Insert() instead of operator[]
+                tempToRealMap.Insert(cmd.entity.index, _registry->Create());
                 break;
             }
             case CommandType::Destroy: {

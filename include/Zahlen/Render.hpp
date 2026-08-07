@@ -5,6 +5,7 @@
 #include "Common.h"
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Core/Pair.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Types.hpp>
@@ -129,6 +130,9 @@ class ZHLN_API RenderContext {
 
     void     UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices, uint32_t count);
     uint32_t AllocateMorphDeltas(uint32_t count, const float* deltas);
+
+    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& GetTracked2DEmitters() noexcept;
+    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& GetTracked3DEmitters() noexcept;
 
     void         SetAAState(const AAState& state);
     RenderResult BuildMeshBLAS(Mesh& mesh) noexcept;

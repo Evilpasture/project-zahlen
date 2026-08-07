@@ -897,6 +897,9 @@ struct RenderContext::Impl {
     ZHLN::HashMap<uint64_t, BufferHandle> skinnedScratchMap;
     ZHLN::HashMap<uint64_t, BufferHandle> particleBufferMap;
 
+    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> tracked2DEmitters;
+    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> tracked3DEmitters;
+
     RenderQueues                       queues;
     ZHLN::Array<GPULight>              mappedLights;
     ZHLN::DoubleBuffered<BufferHandle> debugMeshHandles;

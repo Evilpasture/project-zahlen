@@ -98,6 +98,26 @@ void RenderContext::ClearGPUCaches() noexcept {
     _impl->skinnedScratchMap.Clear();
     _impl->particleBufferMap.ForEach([this](uint64_t /*key*/, BufferHandle handle) { DestroyBuffer(handle); });
     _impl->particleBufferMap.Clear();
+
+    // Destroy and clear tracked 2D particle buffers
+    for (const auto& pair: _impl->tracked2DEmitters) {
+        DestroyBuffer(pair.second);
+    }
+    _impl->tracked2DEmitters.clear();
+
+    // Destroy and clear tracked 3D particle buffers
+    for (const auto& pair: _impl->tracked3DEmitters) {
+        DestroyBuffer(pair.second);
+    }
+    _impl->tracked3DEmitters.clear();
+}
+
+ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& RenderContext::GetTracked2DEmitters() noexcept {
+    return _impl->tracked2DEmitters;
+}
+
+ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& RenderContext::GetTracked3DEmitters() noexcept {
+    return _impl->tracked3DEmitters;
 }
 
 // ============================================================================

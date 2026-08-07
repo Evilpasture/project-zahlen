@@ -7,14 +7,15 @@
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Core/ControlFlow.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
+#include <Zahlen/Core/Ranges.hpp> // <-- Added for ZHLN::Ranges
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
 #include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <miniaudio.h>
 #include <numbers>
-#include <Zahlen/Threading/Mutex.hpp>
 #include <type_traits>
 #include <vector>
 
@@ -564,82 +565,74 @@ void AudioContext::UpdateListener(const JPH::Vec3& position, const JPH::Vec3& di
     ma_engine_listener_set_direction(&_impl->engine, 0, direction.GetX(), direction.GetY(), direction.GetZ());
     ma_engine_listener_set_world_up(&_impl->engine, 0, up.GetX(), up.GetY(), up.GetZ());
 
+    using namespace ZHLN::Ranges;
+
     // Prune finished 3D one-shots
     ZHLN_LOCK(_impl->oneShotMutex) {
-        for (auto it = _impl->activeOneShots.begin(); it != _impl->activeOneShots.end();) {
-            ma_sound* sound = *it;
+        _impl->activeOneShots | EraseIf([&](ma_sound* sound) {
             if (ma_sound_at_end(sound) == MA_TRUE) {
                 ma_sound_uninit(sound);
                 _impl->soundPool.Destroy(sound);
-                it = _impl->activeOneShots.erase(it);
-            } else {
-                ++it;
+                return true;
             }
-        }
+            return false;
+        });
     }
 
     // Prune finished procedural beeps
     ZHLN_LOCK(_impl->beepMutex) {
-        for (auto it = _impl->activeBeeps.begin(); it != _impl->activeBeeps.end();) {
-            ProceduralBeep* beep = *it;
+        _impl->activeBeeps | EraseIf([&](ProceduralBeep* beep) {
             if (ma_sound_at_end(&beep->sound) == MA_TRUE) {
                 ma_sound_uninit(&beep->sound);
                 ma_waveform_uninit(&beep->waveform);
                 _impl->beepPool.Destroy(beep);
-                it = _impl->activeBeeps.erase(it);
-            } else {
-                ++it;
+                return true;
             }
-        }
+            return false;
+        });
     }
 
     // Prune finished noise bursts
     ZHLN_LOCK(_impl->burstMutex) {
-        for (auto it = _impl->activeBursts.begin(); it != _impl->activeBursts.end();) {
-            NoiseBurstData* burst = *it;
+        _impl->activeBursts | EraseIf([&](NoiseBurstData* burst) {
             if (ma_sound_at_end(&burst->sound) == MA_TRUE || burst->currentFrame >= burst->totalFrames) {
                 ma_sound_uninit(&burst->sound);
                 ma_noise_uninit(&burst->noise, nullptr);
                 ma_data_source_uninit(&burst->base);
                 _impl->burstPool.Destroy(burst);
-                it = _impl->activeBursts.erase(it);
-            } else {
-                ++it;
+                return true;
             }
-        }
+            return false;
+        });
     }
 
     // Prune finished tone sweeps
     ZHLN_LOCK(_impl->sweepMutex) {
-        for (auto it = _impl->activeSweeps.begin(); it != _impl->activeSweeps.end();) {
-            ToneSweepData* sweep = *it;
+        _impl->activeSweeps | EraseIf([&](ToneSweepData* sweep) {
             if (ma_sound_at_end(&sweep->sound) == MA_TRUE || sweep->currentFrame >= sweep->totalFrames) {
                 ma_sound_uninit(&sweep->sound);
                 ma_waveform_uninit(&sweep->waveform);
                 ma_data_source_uninit(&sweep->base);
                 _impl->sweepPool.Destroy(sweep);
-                it = _impl->activeSweeps.erase(it);
-            } else {
-                ++it;
+                return true;
             }
-        }
+            return false;
+        });
     }
 
     // Prune finished loop synths
     ZHLN_LOCK(_impl->loopSynthMutex) {
-        for (auto it = _impl->activeLoopSynths.begin(); it != _impl->activeLoopSynths.end();) {
-            LoopSynthData* synth = *it;
+        _impl->activeLoopSynths | EraseIf([&](LoopSynthData* synth) {
             if (ma_sound_at_end(&synth->sound) == MA_TRUE || synth->isFinished.load(std::memory_order::relaxed)) {
                 ma_sound_uninit(&synth->sound);
                 ma_waveform_uninit(&synth->waveform1);
                 ma_waveform_uninit(&synth->waveform2);
                 ma_data_source_uninit(&synth->base);
                 _impl->loopSynthPool.Destroy(synth);
-                it = _impl->activeLoopSynths.erase(it);
-            } else {
-                ++it;
+                return true;
             }
-        }
+            return false;
+        });
     }
 }
 
@@ -845,10 +838,8 @@ void AudioContext::DestroyLoopSynth(void* handle) {
     auto* synth = static_cast<LoopSynthData*>(handle);
 
     ZHLN_LOCK(_impl->loopSynthMutex) {
-        auto it = std::find(_impl->activeLoopSynths.begin(), _impl->activeLoopSynths.end(), synth);
-        if (it != _impl->activeLoopSynths.end()) {
-            _impl->activeLoopSynths.erase(it);
-        }
+        using namespace ZHLN::Ranges;
+        _impl->activeLoopSynths | EraseIf([&](LoopSynthData* s) { return s == synth; });
     }
 
     ma_sound_uninit(&synth->sound);

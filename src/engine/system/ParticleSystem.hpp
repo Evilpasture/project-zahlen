@@ -1,12 +1,7 @@
-// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
-// SPDX-License-Identifier: GPL-3.0-or-later
-
+// src/engine/system/ParticleSystem.hpp
 #pragma once
 
 #include <Zahlen/Common.h>
-#include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Core/Pair.hpp>
-#include <Zahlen/Types.hpp>
 
 namespace ZHLN {
 
@@ -29,10 +24,6 @@ class ZHLN_API ParticleSystem {
      *  - Submits emitter render commands to the RenderContext for GPU compute update & rendering.
      */
     void Update(Engine& engine, float dt);
-
-  private:
-    // The SYSTEM manages the GPU memory lifecycle, not the component.
-    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> _active3DEmitters;
 };
 
 } // namespace ZHLN
