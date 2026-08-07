@@ -104,12 +104,7 @@ class ZHLN_API RenderContext {
         uint32_t                vertexCount
     ) noexcept;
 
-    void DrawLine(
-        JPH::Vec3Arg start,
-        JPH::Vec3Arg end,
-        JPH::Vec4Arg colorStart = {1.0f, 1.0f, 1.0f, 1.0f},
-        JPH::Vec4Arg colorEnd   = {1.0f, 1.0f, 1.0f, 1.0f}
-    ) noexcept;
+    void DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) noexcept;
     void DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg color) noexcept {
         DrawLine(start, end, color, color);
     }
