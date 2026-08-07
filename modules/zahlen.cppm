@@ -81,6 +81,7 @@ module;
 #include <Jolt/Geometry/AABox.h>
 #include <Jolt/Math/DVec3.h>
 #include <Jolt/Math/Mat44.h>
+#include <Jolt/Math/Math.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Real.h>
 #include <Jolt/Math/Vec3.h>
@@ -201,10 +202,21 @@ export import :engine;
 
 export namespace JPH {
 using JPH::AABox;
+using JPH::BodyID;
+using JPH::Cos;
+using JPH::DegreesToRadians;
 using JPH::DVec3;
+using JPH::EMotionType;
 using JPH::Mat44;
+using JPH::ObjectLayer;
 using JPH::Quat;
+using JPH::RadiansToDegrees;
+using JPH::Ref;
 using JPH::RVec3;
+using JPH::Shape;
+using JPH::ShapeRefC;
+using JPH::Sin;
+using JPH::Tan;
 using JPH::Vec3;
 using JPH::Vec4;
 } // namespace JPH
@@ -244,6 +256,9 @@ using ZHLN::Reflect::EnumToString;
 using ZHLN::Reflect::FieldCount;
 using ZHLN::Reflect::ForEachField;
 using ZHLN::Reflect::ForEachFieldWithName;
+using ZHLN::Reflect::GetField;
+using ZHLN::Reflect::GetFieldByName;
+using ZHLN::Reflect::SetFieldByName;
 using ZHLN::Reflect::StringToEnum;
 using ZHLN::Reflect::ToDebugString;
 using ZHLN::Reflect::TypeName;
@@ -275,29 +290,51 @@ using ZHLN::TaskSystem::WakeUp;
 } // namespace TaskSystem
 
 // Math & Types
+using ZHLN::AAMode;
+using ZHLN::AAState;
 using ZHLN::AssetID;
 using ZHLN::Camera;
+using ZHLN::CSGModifier;
+using ZHLN::CSGOperation;
 using ZHLN::Extent2D;
+using ZHLN::FontAtlas;
+using ZHLN::FrameUniforms;
 using ZHLN::Frustum;
 using ZHLN::GameplayStatus;
+using ZHLN::GISettings;
+using ZHLN::GlyphMetric;
+using ZHLN::GPULight;
 using ZHLN::HashAssetID;
 using ZHLN::InstanceData;
 using ZHLN::InvalidAssetID;
 using ZHLN::InvalidMaterialID;
+using ZHLN::LightType;
 using ZHLN::MaterialID;
+using ZHLN::MeshParticleEmitterParams;
 using ZHLN::Offset2D;
+using ZHLN::ParticleAlignment;
+using ZHLN::ParticleEmitterParams;
 using ZHLN::ScissorRect;
+using ZHLN::UIBatch;
+using ZHLN::UIObjectConstants;
 using ZHLN::VertexAttributes;
 using ZHLN::VertexPosition;
 using ZHLN::VertexSkin;
 
 namespace Math {
+using ZHLN::Math::CalculateFrustumAABB;
 using ZHLN::Math::CreateLookAt;
 using ZHLN::Math::CreateOrtho;
+using ZHLN::Math::CreateOrthoMatrix;
 using ZHLN::Math::CreatePerspective;
 using ZHLN::Math::CreateTransform;
+using ZHLN::Math::EulerDegreesToQuat;
 using ZHLN::Math::EulerToQuat;
+using ZHLN::Math::PackColor;
+using ZHLN::Math::PackNormal;
+using ZHLN::Math::PackUV;
 using ZHLN::Math::QuatToEuler;
+using ZHLN::Math::QuatToEulerDegrees;
 } // namespace Math
 
 namespace IK {
@@ -334,20 +371,27 @@ using ZHLN::ECS::SparseSet;
 using ZHLN::PhysicsContext;
 
 namespace Physics {
+using ZHLN::Physics::AddImpulse;
 using ZHLN::Physics::CreateCharacter;
 using ZHLN::Physics::CreateMeshBody;
 using ZHLN::Physics::CreateMeshShape;
 using ZHLN::Physics::CreateRigidBody;
 using ZHLN::Physics::DestroyBody;
+using ZHLN::Physics::FrustumCull;
 using ZHLN::Physics::GetCharacterVelocity;
 using ZHLN::Physics::GetOrCreateShape;
 using ZHLN::Physics::IsCharacterOnGround;
+using ZHLN::Physics::OverlapAABB;
+using ZHLN::Physics::OverlapSphere;
 using ZHLN::Physics::Raycast;
 using ZHLN::Physics::RaycastAll;
 using ZHLN::Physics::RaycastResult;
 using ZHLN::Physics::SetCharacterPosition;
 using ZHLN::Physics::SetCharacterVelocity;
+using ZHLN::Physics::SetCollisionFilter;
 using ZHLN::Physics::SetLinearVelocity;
+using ZHLN::Physics::Shapecast;
+using ZHLN::Physics::ShapeCastResult;
 using ZHLN::Physics::ShapeType;
 } // namespace Physics
 
@@ -363,6 +407,8 @@ using ZHLN::RenderContext;
 
 namespace Renderer {
 using ZHLN::Renderer::Draw;
+using ZHLN::Renderer::DrawCSG;
+using ZHLN::Renderer::DrawDecal;
 using ZHLN::Renderer::SetFrameData;
 using ZHLN::Renderer::SetGISettings;
 using ZHLN::Renderer::SetLights;
