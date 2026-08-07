@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <Zahlen/Common.h>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
 #include <cstdlib>
@@ -47,6 +48,6 @@ struct EngineError {
     bool        silent = false;
 };
 
-std::expected<CommandLineOptions, Error> HandleCommandLine(std::span<char* const> args);
+ZHLN_API std::expected<CommandLineOptions, Error> HandleCommandLine(std::span<char* const> args);
 
 } // namespace ZHLN

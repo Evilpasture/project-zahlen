@@ -1,6 +1,6 @@
 module;
 
-// 1. System & OS Headers
+// 1. System / OS
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
 #include <emmintrin.h>
 #include <immintrin.h>
@@ -61,6 +61,7 @@ module;
 #include <variant>
 #include <vector>
 #include <version>
+
 #if defined(__cpp_impl_reflection) && !defined(__clang__)
 #include <meta>
 #endif
@@ -117,32 +118,7 @@ module;
 #include <Jolt/Skeleton/SkeletonPose.h>
 // clang-format on
 
-export module zahlen;
-
-export import :core;
-export import :threading;
-export import :math;
-export import :ecs;
-export import :physics;
-export import :render;
-export import :audio;
-export import :alife;
-export import :scripting;
-export import :engine;
-
-// Export Jolt Math types so consumers importing 'zahlen' can use them directly
-export namespace JPH {
-using JPH::AABox;
-using JPH::DVec3;
-using JPH::Mat44;
-using JPH::Quat;
-using JPH::RVec3;
-using JPH::Vec3;
-using JPH::Vec4;
-} // namespace JPH
-
-export {
-// 4. Zahlen Engine Core
+// 4. Zahlen Engine Headers
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Camera.hpp>
@@ -209,4 +185,297 @@ export {
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <Zahlen/render/RenderCode.hpp>
-}
+
+export module zahlen;
+
+export import :core;
+export import :threading;
+export import :math;
+export import :ecs;
+export import :physics;
+export import :render;
+export import :audio;
+export import :alife;
+export import :scripting;
+export import :engine;
+
+export namespace JPH {
+using JPH::AABox;
+using JPH::DVec3;
+using JPH::Mat44;
+using JPH::Quat;
+using JPH::RVec3;
+using JPH::Vec3;
+using JPH::Vec4;
+} // namespace JPH
+
+export namespace ZHLN {
+// Core
+using ZHLN::Array;
+using ZHLN::Assert;
+using ZHLN::Atomic;
+using ZHLN::DefaultAllocator;
+using ZHLN::Dump;
+using ZHLN::Error;
+using ZHLN::ErrorCategory;
+using ZHLN::FixedString;
+using ZHLN::Format;
+using ZHLN::GetLogLevel;
+using ZHLN::HashMap;
+using ZHLN::InternalWriteLog;
+using ZHLN::Log;
+using ZHLN::LogLevel;
+using ZHLN::ObjectPool;
+using ZHLN::Panic;
+using ZHLN::Print;
+using ZHLN::Println;
+using ZHLN::RestrictSpan;
+using ZHLN::SetLogLevel;
+using ZHLN::SkipList;
+using ZHLN::String128;
+using ZHLN::String256;
+using ZHLN::String32;
+using ZHLN::String64;
+using ZHLN::Trace;
+
+namespace Reflect {
+using ZHLN::Reflect::EnumToString;
+using ZHLN::Reflect::FieldCount;
+using ZHLN::Reflect::ForEachField;
+using ZHLN::Reflect::ForEachFieldWithName;
+using ZHLN::Reflect::StringToEnum;
+using ZHLN::Reflect::TypeName;
+} // namespace Reflect
+
+// Threading
+using ZHLN::Channel;
+using ZHLN::ConditionalVariable;
+using ZHLN::CPURelax;
+using ZHLN::Fiber;
+using ZHLN::FiberFunc;
+using ZHLN::GetCurrentFiber;
+using ZHLN::Mutex;
+using ZHLN::MutexGuard;
+using ZHLN::YieldFiber;
+
+namespace TaskSystem {
+using ZHLN::TaskSystem::Counter;
+using ZHLN::TaskSystem::Dispatch;
+using ZHLN::TaskSystem::GetWorkerCount;
+using ZHLN::TaskSystem::GetWorkerIndex;
+using ZHLN::TaskSystem::Init;
+using ZHLN::TaskSystem::ParallelFor;
+using ZHLN::TaskSystem::Shutdown;
+using ZHLN::TaskSystem::Task;
+using ZHLN::TaskSystem::TaskFn;
+using ZHLN::TaskSystem::Wait;
+using ZHLN::TaskSystem::WakeUp;
+} // namespace TaskSystem
+
+// Math & Types
+using ZHLN::AssetID;
+using ZHLN::Camera;
+using ZHLN::Extent2D;
+using ZHLN::Frustum;
+using ZHLN::GameplayStatus;
+using ZHLN::HashAssetID;
+using ZHLN::InstanceData;
+using ZHLN::InvalidAssetID;
+using ZHLN::InvalidMaterialID;
+using ZHLN::MaterialID;
+using ZHLN::Offset2D;
+using ZHLN::ScissorRect;
+using ZHLN::VertexAttributes;
+using ZHLN::VertexPosition;
+using ZHLN::VertexSkin;
+
+namespace Math {
+using ZHLN::Math::CreateLookAt;
+using ZHLN::Math::CreateOrtho;
+using ZHLN::Math::CreatePerspective;
+using ZHLN::Math::CreateTransform;
+using ZHLN::Math::EulerToQuat;
+using ZHLN::Math::QuatToEuler;
+} // namespace Math
+
+namespace IK {
+using ZHLN::IK::SolveTwoBoneIK;
+using ZHLN::IK::TwoBoneIKSolverInput;
+using ZHLN::IK::TwoBoneIKSolverOutput;
+} // namespace IK
+
+// ECS
+using ZHLN::BufferSync;
+using ZHLN::BufferView;
+using ZHLN::Components;
+using ZHLN::Entity;
+using ZHLN::FlexAlign;
+using ZHLN::FlexDirection;
+using ZHLN::FlexJustify;
+using ZHLN::FlexWrap;
+using ZHLN::NullEntity;
+using ZHLN::RagdollState;
+using ZHLN::StackDirection;
+using ZHLN::TextAlignment;
+using ZHLN::TextVerticalAlignment;
+using ZHLN::UIButton;
+using ZHLN::UIJustify;
+
+namespace ECS {
+using ZHLN::ECS::ComponentFamily;
+using ZHLN::ECS::Patch;
+using ZHLN::ECS::Registry;
+using ZHLN::ECS::SparseSet;
+} // namespace ECS
+
+// Physics
+using ZHLN::PhysicsContext;
+
+namespace Physics {
+using ZHLN::Physics::CreateCharacter;
+using ZHLN::Physics::CreateMeshBody;
+using ZHLN::Physics::CreateMeshShape;
+using ZHLN::Physics::CreateRigidBody;
+using ZHLN::Physics::DestroyBody;
+using ZHLN::Physics::GetCharacterVelocity;
+using ZHLN::Physics::GetOrCreateShape;
+using ZHLN::Physics::IsCharacterOnGround;
+using ZHLN::Physics::Raycast;
+using ZHLN::Physics::RaycastAll;
+using ZHLN::Physics::RaycastResult;
+using ZHLN::Physics::SetCharacterPosition;
+using ZHLN::Physics::SetCharacterVelocity;
+using ZHLN::Physics::SetLinearVelocity;
+using ZHLN::Physics::ShapeType;
+} // namespace Physics
+
+// Render
+using ZHLN::BufferHandle;
+using ZHLN::DrawFlags;
+using ZHLN::DrawParams;
+using ZHLN::Material;
+using ZHLN::Mesh;
+using ZHLN::PipelineDesc;
+using ZHLN::PipelineHandle;
+using ZHLN::RenderContext;
+
+namespace Renderer {
+using ZHLN::Renderer::Draw;
+using ZHLN::Renderer::SetFrameData;
+using ZHLN::Renderer::SetGISettings;
+using ZHLN::Renderer::SetLights;
+using ZHLN::Renderer::SetMatrices;
+} // namespace Renderer
+
+namespace GUI {
+using ZHLN::GUI::AppendTextVertices;
+using ZHLN::GUI::MeasureTextBounds;
+using ZHLN::GUI::TextBounds;
+} // namespace GUI
+
+// Audio
+using ZHLN::AudioConfig;
+using ZHLN::AudioContext;
+using ZHLN::AudioFilterType;
+using ZHLN::AudioNoiseType;
+using ZHLN::AudioSystem;
+using ZHLN::AudioWaveformType;
+
+// ALife
+namespace ALife {
+using ZHLN::ALife::Action;
+using ZHLN::ALife::AStarData;
+using ZHLN::ALife::END_OF_LIST;
+using ZHLN::ALife::Event;
+using ZHLN::ALife::EventType;
+using ZHLN::ALife::FactionDef;
+using ZHLN::ALife::FactionRegistry;
+using ZHLN::ALife::HeapNode;
+using ZHLN::ALife::INVALID_GRAPH_NODE;
+using ZHLN::ALife::LevelGraph;
+using ZHLN::ALife::MAX_PATH_LENGTH;
+using ZHLN::ALife::Node;
+using ZHLN::ALife::NodeType;
+using ZHLN::ALife::PathRequest;
+using ZHLN::ALife::PathWorkspace;
+using ZHLN::ALife::Plan;
+using ZHLN::ALife::PlanRequest;
+using ZHLN::ALife::SimConfig;
+using ZHLN::ALife::SimTuning;
+using ZHLN::ALife::Simulator;
+using ZHLN::ALife::SolvePlan;
+using ZHLN::ALife::SpatialGrid;
+using ZHLN::ALife::State;
+using ZHLN::ALife::TaskType;
+using ZHLN::ALife::WorldState;
+using ZHLN::ALife::WorldStateRegistry;
+} // namespace ALife
+
+// Scripting
+using ZHLN::BoxedObject;
+using ZHLN::JSONError;
+using ZHLN::OwnedObject;
+using ZHLN::ScriptArray;
+using ZHLN::ScriptBinder;
+using ZHLN::ScriptClassInfo;
+using ZHLN::ScriptECSBridge;
+using ZHLN::ScriptError;
+using ZHLN::ScriptMethod;
+using ZHLN::ScriptProperty;
+using ZHLN::ScriptRunner;
+using ZHLN::ScriptVal;
+
+namespace ReflectJSON {
+using ZHLN::ReflectJSON::Document;
+using ZHLN::ReflectJSON::GetJSONValue;
+using ZHLN::ReflectJSON::Parse;
+using ZHLN::ReflectJSON::ParseObject;
+using ZHLN::ReflectJSON::TryParse;
+using ZHLN::ReflectJSON::ValueReader;
+} // namespace ReflectJSON
+
+// Engine
+using ZHLN::CatalogEntry;
+using ZHLN::Clock;
+using ZHLN::ColorRGBA;
+using ZHLN::CommandLineError;
+using ZHLN::CommandLineOptions;
+using ZHLN::CPUProfiler;
+using ZHLN::CreativeWorkLoadRequest;
+using ZHLN::CreativeWorksManager;
+using ZHLN::DefaultPreset;
+using ZHLN::Engine;
+using ZHLN::EngineConfig;
+using ZHLN::FallbackReason;
+using ZHLN::GameConsole;
+using ZHLN::GameplayDriver;
+using ZHLN::HandleCommandLine;
+using ZHLN::InputContext;
+using ZHLN::KeyCode;
+using ZHLN::ModelNode;
+using ZHLN::ModelPart;
+using ZHLN::ModelPrefab;
+using ZHLN::MouseState;
+using ZHLN::PhysicsConfig;
+using ZHLN::ProfileScope;
+using ZHLN::RenderConfig;
+using ZHLN::ScopedTimer;
+using ZHLN::Window;
+
+namespace CreativeWorksFactory {
+using ZHLN::CreativeWorksFactory::CreateBasicMaterial;
+using ZHLN::CreativeWorksFactory::CreateBox;
+using ZHLN::CreativeWorksFactory::CreateFontAtlasTexture;
+using ZHLN::CreativeWorksFactory::CreatePlane;
+using ZHLN::CreativeWorksFactory::CreateTerrain;
+using ZHLN::CreativeWorksFactory::CreateTerrainFromData;
+using ZHLN::CreativeWorksFactory::CreateTetrahedron;
+using ZHLN::CreativeWorksFactory::InstantiatePrefab;
+using ZHLN::CreativeWorksFactory::LoadModelPrefab;
+using ZHLN::CreativeWorksFactory::LoadTexture;
+using ZHLN::CreativeWorksFactory::RebuildVulkanResources;
+using ZHLN::CreativeWorksFactory::SetupPlayerRagdoll;
+using ZHLN::CreativeWorksFactory::SpawnParams;
+using ZHLN::CreativeWorksFactory::TerrainType;
+} // namespace CreativeWorksFactory
+} // namespace ZHLN
