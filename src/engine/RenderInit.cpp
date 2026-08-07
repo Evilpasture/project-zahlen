@@ -285,7 +285,13 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
                 return RenderInitError::ParallelRecorderInitializationFailed;
             });
         })
-        .transform([&]() { deletionQueue.Init(2); });
+        .transform([&]() {
+            deletionQueue.Init(2);
+            auto fvb_res = CreateDoubleBuffered(allocator, sizeof(GPUVolumetricVolume) * 64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+            if (fvb_res) {
+                fogVolumesBuffer = std::move(*fvb_res);
+            }
+        });
 }
 
 namespace {
@@ -1243,18 +1249,31 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
     };
 
     auto buildVolumetrics = [&]() -> std::expected<void, Error> {
-        auto csInject = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricInjection).vertex);
-        if (!volumetricInjectionPass.Build(ctx.Device(), csInject)) {
+        auto csClear = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricClear).vertex);
+        if (!volumetricClearPass.Build(ctx.Device(), csClear)) {
             return std::unexpected(RenderInitError::PipelineCreationFailed);
         }
 
-        auto csScatter = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricScattering).vertex);
-        if (!volumetricScatteringPass.Build(ctx.Device(), csScatter)) {
+        VkPushConstantRange fogPush = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(VolumetricFogInjectPushConstants)};
+        auto csFogInject = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricFogInject).vertex);
+        if (!volumetricFogInjectPass.Build(ctx.Device(), csFogInject, &fogPush, 1)) {
+            return std::unexpected(RenderInitError::PipelineCreationFailed);
+        }
+
+        VkPushConstantRange lightPush = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(VolumetricLightInjectPushConstants)};
+        auto csLightInject = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricLightInject).vertex);
+        if (!volumetricLightInjectPass.Build(ctx.Device(), csLightInject, &lightPush, 1)) {
             return std::unexpected(RenderInitError::PipelineCreationFailed);
         }
 
         auto csIntegrate = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricIntegration).vertex);
         if (!volumetricIntegrationPass.Build(ctx.Device(), csIntegrate)) {
+            return std::unexpected(RenderInitError::PipelineCreationFailed);
+        }
+
+        VkPushConstantRange tempPush = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(VolumetricTemporalPushConstants)};
+        auto csTemporal = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricTemporal).vertex);
+        if (!volumetricTemporalPass.Build(ctx.Device(), csTemporal, &tempPush, 1)) {
             return std::unexpected(RenderInitError::PipelineCreationFailed);
         }
 
@@ -1309,7 +1328,7 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
         .and_then([&]() {
             return register_and_check(
                 "Volumetrics", buildVolumetrics,
-                {SHADER_VOLUMETRIC_INJECTION_CS_PATH, SHADER_VOLUMETRIC_SCATTERING_CS_PATH, SHADER_VOLUMETRIC_INTEGRATION_CS_PATH}
+                {SHADER_VOLUMETRIC_CLEAR_CS_PATH, SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH, SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH, SHADER_VOLUMETRIC_INTEGRATION_CS_PATH, SHADER_VOLUMETRIC_TEMPORAL_CS_PATH}
             );
         })
         .and_then([&]() {
@@ -1697,6 +1716,12 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
     graphResources.voxelIntegrated =
         Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 
+    graphResources.voxelHistory =
+        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+
+    graphResources.voxelResolved =
+        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+
     graphResources.bloomThresholdTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2);
     graphResources.bloomDown1           = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4);
     graphResources.bloomDown2           = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext8);
@@ -1763,7 +1788,11 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
             cmd, graphResources.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
         );
         std::array targets3D = {
-            graphResources.voxelMedia.image.Handle(), graphResources.voxelLight.image.Handle(), graphResources.voxelIntegrated.image.Handle()
+            graphResources.voxelMedia.image.Handle(),
+            graphResources.voxelLight.image.Handle(),
+            graphResources.voxelIntegrated.image.Handle(),
+            graphResources.voxelHistory.image.Handle(),
+            graphResources.voxelResolved.image.Handle()
         };
 
         for (auto* const img: targets3D) {

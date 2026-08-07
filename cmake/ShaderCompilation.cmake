@@ -167,16 +167,24 @@ add_shader_target(procedural_bake
     STAGES "${SHADER_SRC_DIR}/procedural_bake.hlsl|CSMain|cs_6_0|SHADER_PROCEDURAL_BAKE_CS_PATH"
 )
 
-add_shader_target(vol_inject_shader
-    STAGES "${SHADER_SRC_DIR}/volumetric_injection.hlsl|CSMain|cs_6_0|SHADER_VOLUMETRIC_INJECTION_CS_PATH"
+add_shader_target(vol_clear_shader
+    STAGES "${SHADER_SRC_DIR}/volumetric_clear.hlsl|CSMain|cs_6_0|SHADER_VOLUMETRIC_CLEAR_CS_PATH"
 )
 
-add_shader_target(vol_scatter_shader
-    STAGES "${SHADER_SRC_DIR}/volumetric_scattering.hlsl|CSMain|cs_6_0|SHADER_VOLUMETRIC_SCATTERING_CS_PATH"
+add_shader_target(vol_fog_inject_shader
+    STAGES "${SHADER_SRC_DIR}/volumetric_fog_inject.hlsl|CSMain|cs_6_0|SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH"
+)
+
+add_shader_target(vol_light_inject_shader
+    STAGES "${SHADER_SRC_DIR}/volumetric_light_inject.hlsl|CSMain|cs_6_0|SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH"
 )
 
 add_shader_target(vol_integrate_shader
     STAGES "${SHADER_SRC_DIR}/volumetric_integration.hlsl|CSMain|cs_6_0|SHADER_VOLUMETRIC_INTEGRATION_CS_PATH"
+)
+
+add_shader_target(vol_temporal_shader
+    STAGES "${SHADER_SRC_DIR}/volumetric_temporal.hlsl|CSMain|cs_6_0|SHADER_VOLUMETRIC_TEMPORAL_CS_PATH"
 )
 
 # --- GPU PARTICLE SHADERS ---

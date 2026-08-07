@@ -529,39 +529,68 @@ struct PassFactory {
         });
     }
 
-    [[nodiscard]] auto MakeVoxelInjectionPass() const noexcept {
-        return Vk::MakePass<"VoxelInject", Vk::ComputeWrite<Res_VoxelMedia>>([this](VkCommandBuffer c) noexcept {
-            Profiler::ScopedGpuProfile<Stages::VolumetricInjectPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
-            self.volumetricInjectionPass.WriteNext(
-                device, Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia), self.frameUniformBuffers[fIdx].Handle()
+    [[nodiscard]] auto MakeVolumetricClearPass() const noexcept {
+        return Vk::MakePass<"VolumetricClear", Vk::ComputeWrite<Res_VoxelMedia>, Vk::ComputeWrite<Res_VoxelLight>>([this](VkCommandBuffer c) noexcept {
+            Profiler::ScopedGpuProfile<Stages::VolumetricClearPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
+            self.volumetricClearPass.WriteNext(
+                device, Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia),
+                Vk::Assume<Vk::ComputeWrite<Res_VoxelLight>>(self.graphResources.voxelLight)
             );
-            self.volumetricInjectionPass.Dispatch(c, 160 / 8, (90 + 7) / 8, 64);
+            self.volumetricClearPass.Dispatch(c, 160 / 8, (90 + 7) / 8, 64);
         });
     }
 
-    [[nodiscard]] auto MakeVoxelScatteringPass() const noexcept {
-        return Vk::MakePass<"VoxelScatter", Vk::ComputeReadGeneral<Res_VoxelMedia>, Vk::ComputeWrite<Res_VoxelLight>, Vk::ComputeRead<Res_ShadowMap>>(
+    [[nodiscard]] auto MakeVolumetricFogInjectPass() const noexcept {
+        return Vk::MakePass<"VolumetricFogInject", Vk::ComputeWrite<Res_VoxelMedia>>([this](VkCommandBuffer c) noexcept {
+            Profiler::ScopedGpuProfile<Stages::VolumetricFogInjectPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
+            self.volumetricFogInjectPass.WriteNext(
+                device, Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia),
+                self.frameUniformBuffers[fIdx].Handle(), self.fogVolumesBuffer[fIdx].Handle()
+            );
+
+            VolumetricFogInjectPushConstants pc = {};
+            self.volumetricFogInjectPass.Dispatch(c, 160 / 8, (90 + 7) / 8, 64, pc);
+        });
+    }
+
+    [[nodiscard]] auto MakeVolumetricLightInjectPass() const noexcept {
+        return Vk::MakePass<"VolumetricLightInject", Vk::ComputeReadGeneral<Res_VoxelMedia>, Vk::ComputeWrite<Res_VoxelLight>, Vk::ComputeRead<Res_ShadowMap>>(
             [this](VkCommandBuffer c) noexcept {
-                Profiler::ScopedGpuProfile<Stages::VolumetricScatterPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
-                self.volumetricScatteringPass.WriteNext(
+                Profiler::ScopedGpuProfile<Stages::VolumetricLightInjectPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
+                self.volumetricLightInjectPass.WriteNext(
                     device, Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelMedia>>(self.graphResources.voxelMedia),
                     Vk::Assume<Vk::ComputeWrite<Res_VoxelLight>>(self.graphResources.voxelLight), self.frameUniformBuffers[fIdx].Handle(),
                     self.lightStorageBuffers[fIdx].Handle(), self.clusterGridBuffers[fIdx].Handle(), self.lightIndexListBuffers[fIdx].Handle(),
                     self.graphResources.shadowMap.view.Get(), self.shadowSampler.Get()
                 );
-                self.volumetricScatteringPass.Dispatch(c, 160 / 8, (90 + 7) / 8, 64);
+                VolumetricLightInjectPushConstants pc = {};
+                self.volumetricLightInjectPass.Dispatch(c, 160 / 8, (90 + 7) / 8, 64, pc);
             }
         );
     }
 
-    [[nodiscard]] auto MakeVoxelIntegrationPass() const noexcept {
-        return Vk::MakePass<"VoxelIntegrate", Vk::ComputeReadGeneral<Res_VoxelLight>, Vk::ComputeWrite<Res_VoxelInt>>([this](VkCommandBuffer c) noexcept {
+    [[nodiscard]] auto MakeVolumetricIntegrationPass() const noexcept {
+        return Vk::MakePass<"VolumetricIntegrate", Vk::ComputeReadGeneral<Res_VoxelLight>, Vk::ComputeWrite<Res_VoxelInt>>([this](VkCommandBuffer c) noexcept {
             Profiler::ScopedGpuProfile<Stages::VolumetricIntegratePass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
             self.volumetricIntegrationPass.WriteNext(
                 device, Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelLight>>(self.graphResources.voxelLight),
                 Vk::Assume<Vk::ComputeWrite<Res_VoxelInt>>(self.graphResources.voxelIntegrated)
             );
             self.volumetricIntegrationPass.Dispatch(c, 160 / 16, (90 + 8) / 9, 1);
+        });
+    }
+
+    [[nodiscard]] auto MakeVolumetricTemporalPass() const noexcept {
+        return Vk::MakePass<"VolumetricTemporal", Vk::ComputeReadGeneral<Res_VoxelInt>, Vk::ComputeReadGeneral<Res_VoxelHist>, Vk::ComputeWrite<Res_VoxelResolved>>([this](VkCommandBuffer c) noexcept {
+            Profiler::ScopedGpuProfile<Stages::VolumetricTemporalPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
+            self.volumetricTemporalPass.WriteNext(
+                device, Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelInt>>(self.graphResources.voxelIntegrated),
+                Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelHist>>(self.graphResources.voxelHistory),
+                Vk::Assume<Vk::ComputeWrite<Res_VoxelResolved>>(self.graphResources.voxelResolved),
+                self.frameUniformBuffers[fIdx].Handle(), self.defaultSampler.Get()
+            );
+            VolumetricTemporalPushConstants pc = {};
+            self.volumetricTemporalPass.Dispatch(c, 160 / 8, (90 + 7) / 8, 1, pc);
         });
     }
 
@@ -599,7 +628,7 @@ struct PassFactory {
     [[nodiscard]] auto MakeReflectionPass() const noexcept {
         return Vk::MakePass<
             "Reflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_Lighting>,
-            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelInt>, Vk::ColorWrite<Res_HdrSceneColor>>(
+            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ColorWrite<Res_HdrSceneColor>>(
             [this](auto& ctx) noexcept {
                 Profiler::ScopedGpuProfile<Stages::PostProcessPass, FrameProfiler> timer(ctx.Cmd(), fIdx, self.gpuProfiler);
                 self.reflectionPass.WriteNext(
@@ -608,7 +637,7 @@ struct PassFactory {
                     Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.pointSampler.Get(),
                     self.iblPayload.prefilteredView.Get(), GetTLAS(), self.frameUniformBuffers[fIdx].Handle(), self.iblPayload.brdfLutView.Get(),
                     self.clampSampler.Get(), Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
-                    Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelInt>>(self.graphResources.voxelIntegrated)
+                    Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved)
                 );
                 self.reflectionPass.ExecuteVariant(ctx.Cmd(), reflVariant, pc);
             }
@@ -628,7 +657,7 @@ struct PassFactory {
     [[nodiscard]] auto MakeTranslucentReflectionPass() const noexcept {
         return Vk::MakePass<
             "TransReflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_TransNorm>, Vk::ShaderRead<Res_TransDepth>, Vk::ShaderRead<Res_Lighting>,
-            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelInt>, Vk::ColorWrite<Res_TransLighting>>(
+            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ColorWrite<Res_TransLighting>>(
             [this](auto& ctx) noexcept {
                 Profiler::ScopedGpuProfile<Stages::TransReflection, FrameProfiler> timer(ctx.Cmd(), fIdx, self.gpuProfiler);
 
@@ -638,7 +667,7 @@ struct PassFactory {
                     Vk::Assume<Vk::ShaderRead<Res_TransNorm>>(self.graphResources.transNormalBuffer), self.pointSampler.Get(),
                     self.iblPayload.prefilteredView.Get(), GetTLAS(), self.frameUniformBuffers[fIdx].Handle(), self.iblPayload.brdfLutView.Get(),
                     self.clampSampler.Get(), Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
-                    Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelInt>>(self.graphResources.voxelIntegrated)
+                    Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved)
                 );
                 self.translucentReflectionPass.ExecuteVariant(ctx.Cmd(), reflVariant, pc);
             }
@@ -937,7 +966,7 @@ struct PassFactory {
 // --- Compute Graph Generator ---
 auto BuildComputeGraph(const PassFactory& factory) {
     return Vk::CompileTimeFrameGraph(
-        factory.MakeVoxelInjectionPass(), factory.MakeVoxelScatteringPass(), factory.MakeVoxelIntegrationPass(), factory.MakeParticleUpdatePass(),
+        factory.MakeVolumetricClearPass(), factory.MakeVolumetricFogInjectPass(), factory.MakeVolumetricLightInjectPass(), factory.MakeVolumetricIntegrationPass(), factory.MakeVolumetricTemporalPass(), factory.MakeParticleUpdatePass(),
         factory.MakeMeshParticleUpdatePass()
     );
 }
@@ -1320,6 +1349,7 @@ RenderResult RenderContext::EndFrame() noexcept {
 
         std::swap(_impl->graphResources.shadowMap, _impl->shadowMapPrev);
         std::swap(_impl->shadowCascadeViews, _impl->shadowCascadeViewsPrev);
+        std::swap(_impl->graphResources.voxelHistory, _impl->graphResources.voxelResolved);
     }
 
     if (res == ZHLN_FrameResult_Suboptimal) {

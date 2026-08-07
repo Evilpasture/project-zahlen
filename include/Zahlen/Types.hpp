@@ -125,6 +125,52 @@ struct ClusterVolume {
     uint32_t count;
 };
 
+struct alignas(16) GPUVolumetricVolume {
+    JPH::Mat44 invTransform;
+    JPH::Vec4  extentsAndType;  // xyz = extents, w = type (0=Box, 1=Sphere)
+    JPH::Vec4  colorAndDensity; // xyz = color, w = density
+    JPH::Vec4  emissiveAndAniso;// xyz = emissive, w = anisotropy
+};
+static_assert(sizeof(GPUVolumetricVolume) == 112);
+
+struct alignas(16) VolumetricFogInjectPushConstants {
+    float    density;
+    float    heightFalloff;
+    float    heightOffset;
+    float    anisotropy;
+
+    float    scatteringColor[3];
+    float    noiseScale;
+
+    float    absorptionColor[3];
+    float    noiseSpeed;
+
+    float    emissiveColor[3];
+    float    noiseIntensity;
+
+    uint32_t volumeCount;
+    uint32_t enableNoise;
+    uint32_t _pad0;
+    uint32_t _pad1;
+};
+static_assert(sizeof(VolumetricFogInjectPushConstants) == 80);
+
+struct alignas(16) VolumetricLightInjectPushConstants {
+    float    scatteringIntensity;
+    float    ambientIntensity;
+    float    phaseAnisotropy;
+    uint32_t enableShadows;
+};
+static_assert(sizeof(VolumetricLightInjectPushConstants) == 16);
+
+struct alignas(16) VolumetricTemporalPushConstants {
+    float    temporalWeight;
+    float    clampStrength;
+    uint32_t resetHistory;
+    uint32_t _pad;
+};
+static_assert(sizeof(VolumetricTemporalPushConstants) == 16);
+
 struct ObjectConstants {
     uint32_t instanceId;
     uint32_t isShadowPass;

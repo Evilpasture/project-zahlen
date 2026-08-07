@@ -539,6 +539,32 @@ struct Components {
             c->chains.clear();
         }
     };
+
+    enum class VolumetricVolumeType : uint32_t { Box = 0, Sphere = 1 };
+
+    struct VolumetricFogComponent {
+        float     density          = 0.02f;
+        float     heightFalloff    = 0.035f;
+        float     heightOffset     = 0.0f;
+        float     anisotropy       = 0.5f; // Henyey-Greenstein g [-0.9, 0.9]
+        JPH::Vec3 scatteringColor  = JPH::Vec3(0.91f, 0.95f, 1.0f);
+        JPH::Vec3 absorptionColor  = JPH::Vec3(0.015f, 0.015f, 0.015f);
+        JPH::Vec3 emissiveColor    = JPH::Vec3::sZero();
+        float     noiseScale       = 0.035f;
+        float     noiseSpeed       = 1.0f;
+        float     noiseIntensity   = 0.5f;
+        uint32_t  enableNoise      = 1;
+    };
+
+    struct VolumetricVolumeComponent {
+        VolumetricVolumeType type        = VolumetricVolumeType::Box;
+        JPH::Vec3            extents     = JPH::Vec3(5.0f, 5.0f, 5.0f);
+        float                density     = 0.1f;
+        JPH::Vec3            color       = JPH::Vec3(1.0f, 1.0f, 1.0f);
+        JPH::Vec3            emissive    = JPH::Vec3::sZero();
+        float                anisotropy  = 0.5f;
+        float                blendEdge   = 0.2f;
+    };
 };
 
 } // namespace ZHLN

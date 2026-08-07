@@ -166,20 +166,30 @@ constexpr uint8_t lighting_nort_ps_raw[] = {
 extern const ShaderPair lighting_nort_shaders {.vertex = lighting_nort_vs_raw, .fragment = lighting_nort_ps_raw};
 
 // --- Volumetric Compute Shaders ---
-constexpr uint8_t vol_inject_cs_raw[] = {
-#embed SHADER_VOLUMETRIC_INJECTION_CS_PATH
+constexpr uint8_t vol_clear_cs_raw[] = {
+#embed SHADER_VOLUMETRIC_CLEAR_CS_PATH
 };
-extern const ShaderPair volumetric_injection_shaders {.vertex = vol_inject_cs_raw, .fragment = {}};
+extern const ShaderPair volumetric_clear_shaders {.vertex = vol_clear_cs_raw, .fragment = {}};
 
-constexpr uint8_t vol_scatter_cs_raw[] = {
-#embed SHADER_VOLUMETRIC_SCATTERING_CS_PATH
+constexpr uint8_t vol_fog_inject_cs_raw[] = {
+#embed SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH
 };
-extern const ShaderPair volumetric_scattering_shaders {.vertex = vol_scatter_cs_raw, .fragment = {}};
+extern const ShaderPair volumetric_fog_inject_shaders {.vertex = vol_fog_inject_cs_raw, .fragment = {}};
+
+constexpr uint8_t vol_light_inject_cs_raw[] = {
+#embed SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH
+};
+extern const ShaderPair volumetric_light_inject_shaders {.vertex = vol_light_inject_cs_raw, .fragment = {}};
 
 constexpr uint8_t vol_integrate_cs_raw[] = {
 #embed SHADER_VOLUMETRIC_INTEGRATION_CS_PATH
 };
 extern const ShaderPair volumetric_integration_shaders {.vertex = vol_integrate_cs_raw, .fragment = {}};
+
+constexpr uint8_t vol_temporal_cs_raw[] = {
+#embed SHADER_VOLUMETRIC_TEMPORAL_CS_PATH
+};
+extern const ShaderPair volumetric_temporal_shaders {.vertex = vol_temporal_cs_raw, .fragment = {}};
 
 // --- Particle Shaders ---
 constexpr uint8_t particle_update_cs_raw[] = {
