@@ -544,8 +544,8 @@ struct PassFactory {
         return Vk::MakePass<"VolumetricFogInject", Vk::ComputeWrite<Res_VoxelMedia>>([this](VkCommandBuffer c) noexcept {
             Profiler::ScopedGpuProfile<Stages::VolumetricFogInjectPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
             self.volumetricFogInjectPass.WriteNext(
-                device, Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia),
-                self.frameUniformBuffers[fIdx].Handle(), self.fogVolumesBuffer[fIdx].Handle()
+                device, Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia), self.frameUniformBuffers[fIdx].Handle(),
+                self.fogVolumesBuffer[fIdx].Handle()
             );
 
             VolumetricFogInjectPushConstants pc = {};
@@ -581,17 +581,21 @@ struct PassFactory {
     }
 
     [[nodiscard]] auto MakeVolumetricTemporalPass() const noexcept {
-        return Vk::MakePass<"VolumetricTemporal", Vk::ComputeReadGeneral<Res_VoxelInt>, Vk::ComputeReadGeneral<Res_VoxelHist>, Vk::ComputeWrite<Res_VoxelResolved>>([this](VkCommandBuffer c) noexcept {
-            Profiler::ScopedGpuProfile<Stages::VolumetricTemporalPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
-            self.volumetricTemporalPass.WriteNext(
-                device, Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelInt>>(self.graphResources.voxelIntegrated),
-                Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelHist>>(self.graphResources.voxelHistory),
-                Vk::Assume<Vk::ComputeWrite<Res_VoxelResolved>>(self.graphResources.voxelResolved),
-                self.frameUniformBuffers[fIdx].Handle(), self.defaultSampler.Get()
-            );
-            VolumetricTemporalPushConstants pc = {};
-            self.volumetricTemporalPass.Dispatch(c, 160 / 8, (90 + 7) / 8, 1, pc);
-        });
+        return Vk::MakePass<
+            "VolumetricTemporal", Vk::ComputeReadGeneral<Res_VoxelInt>, Vk::ComputeReadGeneral<Res_VoxelHist>, Vk::ComputeWrite<Res_VoxelResolved>>(
+            [this](VkCommandBuffer c) noexcept {
+                Profiler::ScopedGpuProfile<Stages::VolumetricTemporalPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
+                self.volumetricTemporalPass.WriteNext(
+                    device, Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelInt>>(self.graphResources.voxelIntegrated),
+                    Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelHist>>(self.graphResources.voxelHistory),
+                    Vk::Assume<Vk::ComputeWrite<Res_VoxelResolved>>(self.graphResources.voxelResolved), self.frameUniformBuffers[fIdx].Handle(),
+                    self.defaultSampler.Get()
+                );
+                VolumetricTemporalPushConstants pc = {};
+
+                self.volumetricTemporalPass.Dispatch(c, 160 / 8, (90 + 7) / 8, 64, pc);
+            }
+        );
     }
 
     [[nodiscard]] auto MakeAmbientPass() const noexcept {
@@ -966,8 +970,8 @@ struct PassFactory {
 // --- Compute Graph Generator ---
 auto BuildComputeGraph(const PassFactory& factory) {
     return Vk::CompileTimeFrameGraph(
-        factory.MakeVolumetricClearPass(), factory.MakeVolumetricFogInjectPass(), factory.MakeVolumetricLightInjectPass(), factory.MakeVolumetricIntegrationPass(), factory.MakeVolumetricTemporalPass(), factory.MakeParticleUpdatePass(),
-        factory.MakeMeshParticleUpdatePass()
+        factory.MakeVolumetricClearPass(), factory.MakeVolumetricFogInjectPass(), factory.MakeVolumetricLightInjectPass(),
+        factory.MakeVolumetricIntegrationPass(), factory.MakeVolumetricTemporalPass(), factory.MakeParticleUpdatePass(), factory.MakeMeshParticleUpdatePass()
     );
 }
 
@@ -1292,7 +1296,9 @@ RenderResult RenderContext::EndFrame() noexcept {
              .pools             = _impl->pools,
              .presentSemaphores = _impl->presentation.presentSemaphores,
              .stagingSemaphore  = _impl->transferRingBuffer.GetSemaphore(),
-             .stagingWaitValue  = _impl->transferRingBuffer.GetCurrentValue()},
+             .stagingWaitValue  = _impl->transferRingBuffer.GetCurrentValue(),
+             .computeSemaphore  = _impl->sync[_impl->frame_index].compute_timeline,
+             .computeWaitValue  = computeSignalValue},
             _impl->frame_index,
             [this](VkCommandBuffer cmd, uint32_t image_index) {
                 _impl->current_cmd         = cmd;
