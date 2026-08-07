@@ -1,15 +1,18 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/threading/Channel.hpp
 #pragma once
 
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/ControlFlow.hpp>
-#include <queue>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
+#include <cstddef>
+#include <cstdlib>
+#include <new>
+#include <queue>
+#include <type_traits>
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <emmintrin.h>
@@ -26,21 +29,15 @@ class Channel {
     Channel(const Channel&)            = delete;
     Channel& operator=(const Channel&) = delete;
 
-    /**
-     * @brief Sends a message into the channel. If a fiber is suspended waiting,
-     * this writes directly to its stack and schedules it for immediate resumption.
-     */
     void Push(T&& msg) {
         ZHLN::Lock(_mutex, [&] {
             if (!_waiters.empty()) {
-                // Direct-pass optimization: bypass the queue entirely
                 Waiter waiter = _waiters.front();
                 _waiters.pop();
 
                 *waiter.outMsg = std::move(msg);
                 waiter.signaled->store(true, std::memory_order::release);
 
-                // Return the fiber to the task system queue
                 TaskSystem::WakeUp(waiter.fiber);
             } else {
                 _queue.push(std::move(msg));
@@ -53,14 +50,9 @@ class Channel {
         Push(std::move(copy));
     }
 
-    /**
-     * @brief Receives a message. If the channel is empty, suspends the calling
-     * fiber (yielding to the scheduler) until a writer pushes a message.
-     */
     T Pop() {
         Fiber* self = Fiber::GetCurrent();
 
-        // Fallback for raw OS threads / main thread (where we cannot yield)
         if ((self == nullptr) || self->isMain) {
             return PopBlocking();
         }
@@ -72,16 +64,16 @@ class Channel {
             if (!_queue.empty()) {
                 result = std::move(_queue.front());
                 _queue.pop();
-                return result;
+                return;
             }
 
-            // Queue is empty. Register the fiber as suspended.
-            // Safely passing pointers to 'result' and 'signaled' because
-            // the stack frame is preserved while this fiber is yielded.
             _waiters.push(Waiter {.fiber = self, .outMsg = &result, .signaled = &signaled});
         });
 
-        // Suspend the fiber back to the worker thread scheduler
+        if (!_queue.empty() && signaled.load(std::memory_order::acquire)) {
+            return result;
+        }
+
         while (!signaled.load(std::memory_order::acquire)) {
             Fiber::Yield();
         }
@@ -90,7 +82,7 @@ class Channel {
     }
 
     bool TryPop(T& outMsg) {
-        ZHLN::Lock(_mutex, [&] {
+        return ZHLN::Lock(_mutex, [&] {
             if (_queue.empty()) {
                 return false;
             }
@@ -101,9 +93,7 @@ class Channel {
     }
 
     size_t Size() const {
-        ZHLN::Lock(_mutex, [&] {
-            return _queue.size();
-        });
+        return ZHLN::Lock(_mutex, [&] { return _queue.size(); });
     }
 
   private:
@@ -115,14 +105,18 @@ class Channel {
 
     T PopBlocking() {
         for (;;) {
+            T    result;
+            bool popped = false;
             ZHLN::Lock(_mutex, [&] {
                 if (!_queue.empty()) {
-                    T result = std::move(_queue.front());
+                    result = std::move(_queue.front());
                     _queue.pop();
-                    return result;
+                    popped = true;
                 }
             });
-            // CPU relaxation for non-fiber thread spinning
+            if (popped) {
+                return result;
+            }
             CPURelax();
         }
     }

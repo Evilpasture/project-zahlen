@@ -1,21 +1,20 @@
-// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
-// SPDX-License-Identifier: GPL-3.0-or-later
-
+// include/Zahlen/alife/Types.hpp
 #pragma once
 
-#include <Zahlen/Entity.hpp>
-
-// Correct Jolt Includes for RVec3 / RVec3Arg
 #include <Jolt/Jolt.h>
 #include <Jolt/Math/DVec3.h>
 #include <Jolt/Math/Real.h>
 #include <Jolt/Math/Vec3.h>
+#include <Zahlen/Entity.hpp>
 #include <cstdint>
 
 namespace ZHLN::ALife {
-static constexpr uint32_t INVALID_GRAPH_NODE = 0xFFFFFFFF;
-static constexpr size_t   MAX_PATH_LENGTH    = 16;
-static constexpr uint32_t END_OF_LIST        = 0xFFFFFFFF;
+
+// Changed static constexpr -> inline constexpr for module export linkage
+inline constexpr uint32_t INVALID_GRAPH_NODE = 0xFFFFFFFF;
+inline constexpr size_t   MAX_PATH_LENGTH    = 16;
+inline constexpr uint32_t END_OF_LIST        = 0xFFFFFFFF;
+
 enum class State : uint8_t { Offline, Online, Dead };
 enum class TaskType : uint8_t { Idle = 0, GotoHub, Patrol, Hunt };
 enum class EventType : uint8_t { StateChange, Death, NodeReached };

@@ -5,8 +5,9 @@
 
 #include "CommandLine.hpp"
 #include "Config.hpp"
-#include <cstdio>
 #include <Zahlen/Core/Print.hpp>
+#include <Zahlen/Core/Reflection.hpp>
+#include <cstdio>
 #include <format>
 #include <source_location>
 #include <string>
@@ -183,9 +184,35 @@ void SmartDumpInternal(const T& var, std::string_view name, LogContext ctx) {
     }
 }
 
-#define ZHLN_DUMP(var)            ZHLN::SmartDumpInternal(var, #var, "Manual Dump")
-#define ZHLN_DUMP_EXT(var, label) ZHLN::SmartDumpInternal(var, #var, label)
-#define ZHLN_TRACE(var)           ZHLN::TraceStructInternal(var, #var, "Struct Reflection")
+/**
+ * @brief Dumps raw memory contents of a variable with automatic or custom label.
+ * Uses C++26 reflection to infer the type name when label is omitted.
+ *
+ * Usage:
+ *   ZHLN::Dump(myStruct);
+ *   ZHLN::Dump(myStruct, "Custom Label");
+ */
+template <typename T>
+void Dump(const T& var, std::string_view label = {}, std::source_location loc = std::source_location::current()) {
+    std::string_view name = label.empty() ? Reflect::TypeName<T>() : label;
+    LogContext       ctx(name, loc);
+    SmartDumpInternal(var, name, ctx);
+}
+
+/**
+ * @brief Reflects and prints structured fields of an object.
+ * Uses C++26 reflection to infer the type name when label is omitted.
+ *
+ * Usage:
+ *   ZHLN::Trace(myObject);
+ *   ZHLN::Trace(myObject, "Custom Label");
+ */
+template <typename T>
+void Trace(const T& var, std::string_view label = {}, std::source_location loc = std::source_location::current()) {
+    std::string_view name = label.empty() ? Reflect::TypeName<T>() : label;
+    LogContext       ctx(name, loc);
+    TraceStructInternal(var, name, ctx);
+}
 
 auto JoltTraceBridge(const char* inFMT, ...) noexcept -> void;
 auto JoltAssertBridge(const char* inExpression, const char* inMessage, const char* inFile, uint32_t inLine) noexcept -> bool;

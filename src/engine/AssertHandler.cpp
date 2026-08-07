@@ -17,7 +17,7 @@
 #include <cstring>             // For std::memcpy
 #include <Zahlen/Core/Platform.hpp> // This handles windows.h and includes unistd.h on Unix
 #include <Zahlen/Core/Print.hpp>
-#include <physics/PhysicsWorld.hpp> // Required to fully define PhysicsWorld for ZHLN_TRACE
+#include <physics/PhysicsWorld.hpp> // Required to fully define PhysicsWorld for ZHLN::Trace
 #include <print>                    // Restored for stable general-purpose printing
 #include <string>                   // For std::string
 #include <string_view>              // For std::string_view
@@ -503,7 +503,7 @@ static void PerformDiagnosticDump(int sig, void* addr, Engine* engine) {
     }
 
     if (engine != nullptr) {
-        ZHLN_TRACE(*engine);
+        ZHLN::Trace(*engine);
 
         auto& cam     = engine->GetCamera();
         auto  cam_hdr = ZHLN::Format("\n{}--- CAMERA DEEP STATE ---{}\n", Color::Cyan, Color::Reset);
@@ -529,10 +529,10 @@ static void PerformDiagnosticDump(int sig, void* addr, Engine* engine) {
             WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), plane_str.string_view());
         }
 
-        ZHLN_DUMP(cam.frustum);
+        ZHLN::Dump(cam.frustum);
 
         if (engine->GetPhysicsContext().GetImpl() != nullptr) {
-            ZHLN_TRACE(engine->GetPhysicsContext().GetWorld());
+            ZHLN::Trace(engine->GetPhysicsContext().GetWorld());
         }
     }
 
