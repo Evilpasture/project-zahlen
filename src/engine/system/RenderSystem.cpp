@@ -301,7 +301,7 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
     engine.GetCullingSystem().DrawDebugFrustum(engine);
 
     if (physicsDrawMode > 0) {
-        ZHLN_PROFILE_SCOPE("Physics Debug Extract & Upload");
+        ZHLN::ScopedTimer profTimer("Physics Debug Extract & Upload");
 
         static Material debugLineMat  = {.pipeline = PipelineHandle::Invalid};
         static Material debugSolidMat = {.pipeline = PipelineHandle::Invalid};

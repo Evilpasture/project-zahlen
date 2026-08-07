@@ -230,7 +230,7 @@ void RenderContext::Impl::DispatchSkinningPasses() {
         return;
     }
 
-    ZHLN_PROFILE_SCOPE("GPU Compute Skinning");
+    ZHLN::ScopedTimer profTimer("GPU Compute Skinning");
     auto* const cmd = current_cmd;
     skinningPass.Bind(cmd);
 
@@ -273,7 +273,7 @@ void RenderContext::Impl::DispatchSkinningPasses() {
     );
 
     if (rtCtx.Valid()) {
-        ZHLN_PROFILE_SCOPE("GPU Skinned BLAS Rebuilds");
+        ZHLN::ScopedTimer profTimer("GPU Skinned BLAS Rebuilds");
         for (const auto& drawCmd: queues.drawQueue) {
             if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
                 auto* scratchMesh = meshPool.Resolve(drawCmd.skinnedVertexBuffer).value_or(nullptr);
@@ -1230,7 +1230,7 @@ RenderResult RenderContext::EndFrame() noexcept {
     ZHLN_FrameResult res = ZHLN_FrameResult_Ok;
 
     {
-        ZHLN_PROFILE_SCOPE("Render (CPU Record)");
+        ZHLN::ScopedTimer profTimer("Render (CPU Record)");
         if (_impl->current_cmd == VK_NULL_HANDLE) {
             return std::unexpected(Error);
         }

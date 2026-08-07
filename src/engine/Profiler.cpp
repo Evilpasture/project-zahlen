@@ -38,7 +38,7 @@ static_assert(
     "ProfileDataInternal must remain a POD for SkipList compatibility"
 );
 
-static SkipList<std::string, ProfileDataInternal<100>, std::less<>> s_Metrics;
+SkipList<std::string, ProfileDataInternal<100>, std::less<>> s_Metrics;
 
 } // namespace
 
@@ -83,7 +83,7 @@ void CPUProfiler::IterateMetrics(MetricCallback callback, void* userData) noexce
     });
 }
 
-ScopedTimer::ScopedTimer(const char* n) noexcept: name(n) {
+ScopedTimer::ScopedTimer(const char* n, std::source_location loc) noexcept: name((n != nullptr && n[0] != '\0') ? n : loc.function_name()) {
     auto now = std::chrono::high_resolution_clock::now();
     start    = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
 }

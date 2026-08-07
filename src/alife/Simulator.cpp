@@ -47,7 +47,7 @@ void Simulator::BroadcastEvent(const Event& event) {
 // --- Main Simulation Loop ---
 
 void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
-    ZHLN_PROFILE_SCOPE("ALife Simulator Update");
+    ZHLN::ScopedTimer profTimer("ALife Simulator Update");
 
     // 1. Advance Game Time
     _gameTimeMS += static_cast<uint64_t>(dt * 1000.0f * _tuning.time_factor);

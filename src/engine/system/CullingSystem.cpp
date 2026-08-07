@@ -68,7 +68,7 @@ namespace ZHLN {
 
 template <bool UsePhysicsTransforms>
 void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow) {
-    ZHLN_PROFILE_SCOPE("Culling (ECS O(N))");
+    ZHLN::ScopedTimer profTimer("Culling (ECS O(N))");
     auto& cam = engine.GetCamera();
     auto& reg = engine.GetRegistry();
     auto& rc  = engine.GetRenderContext();

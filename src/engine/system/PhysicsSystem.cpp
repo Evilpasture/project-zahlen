@@ -22,7 +22,7 @@ void PhysicsSystem::Update(Engine& engine, float dt) noexcept {
     _accumulator = std::min(_accumulator, _targetDt * 4.0f);
 
     {
-        ZHLN_PROFILE_SCOPE("ECS System: Physics & Movement");
+        ZHLN::ScopedTimer profTimer("ECS System: Physics & Movement");
         while (_accumulator >= _targetDt) {
             // 1. Process movement inputs and steer physical character bodies
             MovementSystem(engine, _targetDt);

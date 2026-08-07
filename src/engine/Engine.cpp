@@ -667,22 +667,22 @@ GameplayStatus Engine::Tick(float dt, GameplayDriver driver) {
     switch (driver) {
         using enum GameplayDriver;
         case Cpp: {
-            ZHLN_PROFILE_SCOPE("ECS System: Native C++ Gameplay Update");
+            ZHLN::ScopedTimer profTimer("ECS System: Native C++ Gameplay Update");
             status = nativeModule.Update(this, dt);
             break;
         }
         case Fennel: {
-            ZHLN_PROFILE_SCOPE("ECS System: Script/Lua Update");
+            ZHLN::ScopedTimer profTimer("ECS System: Script/Lua Update");
             GetScriptRunner().CallUpdate(this, dt);
             break;
         }
         case Hybrid: {
             {
-                ZHLN_PROFILE_SCOPE("ECS System: Native C++ Gameplay Update");
+                ZHLN::ScopedTimer profTimer("ECS System: Native C++ Gameplay Update");
                 status = nativeModule.Update(this, dt);
             }
             {
-                ZHLN_PROFILE_SCOPE("ECS System: Script/Lua Update");
+                ZHLN::ScopedTimer profTimer("ECS System: Script/Lua Update");
                 GetScriptRunner().CallUpdate(this, dt);
             }
             break;
@@ -721,7 +721,7 @@ GameplayStatus Engine::Tick(float dt, GameplayDriver driver) {
 
     // 7. Motion Vectors & Transform History
     {
-        ZHLN_PROFILE_SCOPE("ECS System: Update Transform History");
+        ZHLN::ScopedTimer profTimer("ECS System: Update Transform History");
         static TransformSystem ts;
         ts.UpdateTransformHistory(GetRegistry());
     }

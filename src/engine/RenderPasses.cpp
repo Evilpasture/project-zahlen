@@ -73,7 +73,7 @@ void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept {
         return;
     }
 
-    ZHLN_PROFILE_SCOPE("GPU Stencil CSG Passes");
+    ZHLN::ScopedTimer profTimer("GPU Stencil CSG Passes");
 
     for (const auto& csgCmd: ctx.queues.csgDrawQueue) {
         VkClearAttachment clearAttachment = {

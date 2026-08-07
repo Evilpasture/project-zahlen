@@ -280,7 +280,7 @@ PhysicsContext::~PhysicsContext() {
 }
 
 void PhysicsContext::Step(float deltaTime) {
-    ZHLN_PROFILE_SCOPE("Physics (JPH)");
+    ZHLN::ScopedTimer profTimer("Physics (JPH)");
     auto& world = _impl->world;
 
     // --- 1. COMMAND FLUSH (Structural Phase) ---
